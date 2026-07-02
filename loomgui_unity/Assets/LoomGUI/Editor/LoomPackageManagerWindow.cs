@@ -93,7 +93,7 @@ namespace LoomGUI.Editor
             GUI.Box(dropRect, "拖入系统目录（含 .html + res）以智能识别建包…\npkgName = 目录名，htmlFiles = 顶层 *.html（不递归，排除 res）", EditorStyles.helpBox);
 
             // 处理拖放
-            if (dropRect.Contains(Event.current.mousePosition) && Event.current.type == EventType.DragPerform)
+            if (dropRect.Contains(Event.current.mousePosition) && Event.current.type == UnityEngine.EventType.DragPerform)
             {
                 DragAndDrop.AcceptDrag();
                 foreach (string path in DragAndDrop.paths)
@@ -106,7 +106,7 @@ namespace LoomGUI.Editor
                 Event.current.Use();
                 GUIUtility.ExitGUI(); // 重绘
             }
-            if (dropRect.Contains(Event.current.mousePosition) && Event.current.type == EventType.DragUpdated)
+            if (dropRect.Contains(Event.current.mousePosition) && Event.current.type == UnityEngine.EventType.DragUpdated)
             {
                 bool hasDir = false;
                 foreach (string p in DragAndDrop.paths)
@@ -259,7 +259,7 @@ namespace LoomGUI.Editor
                 // 嵌套子目录 html 手动补拖：单个 html 文件拖到本区域
                 Rect htmlDrop = GUILayoutUtility.GetRect(0, 20, GUILayout.ExpandWidth(true));
                 GUI.Box(htmlDrop, "  或拖单个 .html 文件到此补入（嵌套子目录的）", EditorStyles.miniLabel);
-                if (htmlDrop.Contains(Event.current.mousePosition) && Event.current.type == EventType.DragPerform)
+                if (htmlDrop.Contains(Event.current.mousePosition) && Event.current.type == UnityEngine.EventType.DragPerform)
                 {
                     DragAndDrop.AcceptDrag();
                     foreach (string p in DragAndDrop.paths)
@@ -277,7 +277,7 @@ namespace LoomGUI.Editor
                     }
                     Event.current.Use();
                 }
-                if (htmlDrop.Contains(Event.current.mousePosition) && Event.current.type == EventType.DragUpdated)
+                if (htmlDrop.Contains(Event.current.mousePosition) && Event.current.type == UnityEngine.EventType.DragUpdated)
                 {
                     bool ok = false;
                     foreach (string p in DragAndDrop.paths)

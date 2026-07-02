@@ -58,6 +58,10 @@ namespace LoomGUI
         // csbindgen 生成的 Native 用类型化指针 StageHandle*（非 IntPtr）；
         // 借出长度参数是 nuint*（非 ulong*）。故本类标 unsafe 并持 StageHandle*。
         StageHandle* _stage;
+        // v1.4-a: scene 由 driver.CreateRoot 建（Awake 不再自动建，见 Awake 注释）。ExecuteAlways 下
+        // LateUpdate 须 guard _sceneBuilt，否则 EditMode driver.Start 未跑、scene=None 时 tick →
+        // Rust tick_and_render .expect("load first") panic → cdylib abort 拖垮 Unity（打开场景即闪退）。
+        bool _sceneBuilt;
         MaterialManager _mm;
         MirrorPool _pool;
         NativeHostManager _nhm;
@@ -223,8 +227,11 @@ namespace LoomGUI
             if (_stage == null) return uint.MaxValue;
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");
             byte[] c = Encoding.UTF8.GetBytes(css ?? "");
+            uint id;
             fixed (byte* kp = k, cp = c)
-                return Native.loomgui_stage_create_root(_stage, kp, (nuint)k.Length, cp, (nuint)c.Length);
+                id = Native.loomgui_stage_create_root(_stage, kp, (nuint)k.Length, cp, (nuint)c.Length);
+            if (id != uint.MaxValue) _sceneBuilt = true;   // scene 建成，放行 LateUpdate tick
+            return id;
         }
 
         /// 建游离节点（不挂父）。需配合 AppendChild/InsertBefore 挂到树。
@@ -478,7 +485,9 @@ namespace LoomGUI
 
         void LateUpdate()
         {
-            if (_stage == null) return;
+            // scene 未建（EditMode driver.Start 未跑 / CreateRoot 前）不 tick——Rust 端 scene=None 时
+            // tick 会 panic（拖垮 Unity）。PlayMode driver.CreateRoot 成功置 _sceneBuilt=true 放行。
+            if (_stage == null || !_sceneBuilt) return;
 
             // 屏幕 resize 检测（editor 改 Game 视图尺寸 / player 改窗口）。
             if (Screen.width != _lastScreenW || Screen.height != _lastScreenH)
@@ -528,6 +537,10 @@ namespace LoomGUI
                 byte* evPtr = Native.loomgui_stage_borrow_events(_stage, &evLen);
                 _eventHandler.DispatchPending((System.IntPtr)evPtr, (int)evLen);
             }
+
+            // [DBG-HOVER] F1 dump 整树（layout/world_matrix），定位 hover 不命中（验完删）
+            if (Input.GetKeyDown(KeyCode.F1))
+                UnityEngine.Debug.Log("[DUMP] " + DumpScene());
         }
 
         void OnDestroy()

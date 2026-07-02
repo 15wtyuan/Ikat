@@ -271,15 +271,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5da9992d519057a4b88537a7a2c5f42d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: LoomGUI.Runtime::LoomGUI.LoomStage
-  _html: <div class="b"></div>
-  _css: .b{width:200px;height:100px;background-color:#ff0000;}
   _designSize: {x: 1080, y: 1920}
   _uiCamera: {fileID: 1921994607}
   _font: {fileID: 12800000, guid: 655d7802d41b4169a49e2d7670d2c405, type: 3}
   _fontFile: wqy-microhei.ttc
-  _usePackage: 1
-  _pkgFile: loom_showcase.pkg.bin
-  _stress500: 0
+  _spriteAtlases:
+  - {fileID: 4343727234628468602, guid: 085a7f97045138046ba8ac296bf3401d, type: 2}
   _showFps: 0
   _safeArea: 1
   _inputCollector: {fileID: 330585549}
@@ -308,16 +305,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: LoomGUI.Runtime::LoomGUI.LoomShowcaseDriver
   _stage: {fileID: 330585548}
-  _sectionY:
-  - 0
-  - 700
-  - 1500
-  - 2300
-  - 3000
-  - 3800
-  - 4500
-  - 5600
   _nativeModel: {fileID: 0}
+  _nativeScale: {x: 120, y: 120, z: 120}
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0

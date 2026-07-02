@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 842cf023436b21645aa39125b25d598f, type: 3}
+  m_Name: LoomPackageSettings
+  m_EditorClassIdentifier: LoomGUI.Editor::LoomGUI.Editor.LoomPackageSettings
+  resDirName: res
+  pkgOutputDir: Assets/StreamingAssets/
+  loomPkgExePath: ../target/release/loomgui_pkg.exe
+  packages:
+  - pkgName: showcase
+    sourceDir: Assets/LoomUI/showcase
+    htmlFiles:
+    - home.html
+    - mail.html
+    - page_controls.html
+    - page_dyntree.html
+    - page_image.html
+    - page_interact.html
+    - page_scroll.html
+    - page_text.html
+    - page_tween.html
+    - tips_toast.html

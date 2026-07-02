@@ -85,6 +85,8 @@ namespace LoomGUI
                 if (sp != null) { found = sp; break; }
             }
 
+            // [DBG-IMG] path→Sprite 查询诊断（验完删）
+            UnityEngine.Debug.Log($"[IMG] path='{path}' name='{spriteName}' atlases={_atlases.Count} found={(found != null ? found.name : "null")}");
             // 缓存（含 miss——避免每帧重复遍历 atlas 查同一条 miss path）。
             // miss 时缓存 MissingSprite（可能为 null，仍缓存避免重复查）。
             var result = found ?? _missingSprite;
