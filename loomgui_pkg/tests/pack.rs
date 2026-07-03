@@ -71,7 +71,7 @@ fn pack_multi_html_no_atlas() {
         &dir,
         "test",
         &["a.html".to_string(), "b.html".to_string()],
-        "res",
+        &dir.join("res"),
     )
     .expect("pack ok");
     assert!(!packed.pkg_bytes.is_empty(), "pkg_bytes 非空");
@@ -103,7 +103,7 @@ fn pack_path_normalization_in_manifest() {
         r#"<div class="c"><img src="res/icons/skin.png"></div>"#,
     )
     .unwrap();
-    let packed = pack(&dir, "test", &["c.html".to_string()], "res").expect("pack ok");
+    let packed = pack(&dir, "test", &["c.html".to_string()], &dir.join("res")).expect("pack ok");
     assert!(
         packed.asset_manifest.iter().any(|e| e.path == "icons/skin.png"),
         "归一化后 manifest 含 icons/skin.png，不含 res 前缀"
@@ -125,7 +125,7 @@ fn pack_path_normalization_in_manifest() {
 #[test]
 fn pack_single_html_roundtrips() {
     let dir = make_tmp_dir_with_html(&["scene"], &[]);
-    let packed = pack(&dir, "test", &["scene.html".to_string()], "res").expect("pack ok");
+    let packed = pack(&dir, "test", &["scene.html".to_string()], &dir.join("res")).expect("pack ok");
     assert!(!packed.pkg_bytes.is_empty());
     let pkg = read_package(&packed.pkg_bytes).expect("read ok");
     assert_eq!(pkg.components.len(), 1);
@@ -140,7 +140,7 @@ fn pack_single_html_roundtrips() {
 #[test]
 fn pack_missing_html_file_errors() {
     let dir = make_tmp_dir_with_html(&["a"], &[]);
-    let r = pack(&dir, "test", &["nope.html".to_string()], "res");
+    let r = pack(&dir, "test", &["nope.html".to_string()], &dir.join("res"));
     assert!(r.is_err(), "缺 HTML 文件应 Err");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -158,7 +158,7 @@ fn pack_reads_png_ihdr_dimensions_into_manifest() {
         r#"<div class="c"><img src="res/wide.png"></div>"#,
     )
     .unwrap();
-    let packed = pack(&dir, "test", &["c.html".to_string()], "res").expect("pack ok");
+    let packed = pack(&dir, "test", &["c.html".to_string()], &dir.join("res")).expect("pack ok");
     let entry = packed
         .asset_manifest
         .iter()
@@ -187,7 +187,7 @@ fn pack_non_png_returns_zero_dims() {
         r#"<div class="c"><img src="res/notpng.png"></div>"#,
     )
     .unwrap();
-    let packed = pack(&dir, "test", &["c.html".to_string()], "res").expect("pack ok");
+    let packed = pack(&dir, "test", &["c.html".to_string()], &dir.join("res")).expect("pack ok");
     let entry = packed
         .asset_manifest
         .iter()
@@ -206,7 +206,7 @@ fn pack_missing_png_file_returns_zero_dims() {
         r#"<div class="c"><img src="res/missing.png"></div>"#,
     )
     .unwrap();
-    let packed = pack(&dir, "test", &["c.html".to_string()], "res").expect("pack ok");
+    let packed = pack(&dir, "test", &["c.html".to_string()], &dir.join("res")).expect("pack ok");
     let entry = packed
         .asset_manifest
         .iter()
@@ -230,7 +230,7 @@ fn pack_reads_fixture_png_dimensions() {
         r#"<div class="c"><img src="res/a.png"><img src="res/b.png"></div>"#,
     )
     .unwrap();
-    let packed = pack(&dir, "test", &["c.html".to_string()], "res").expect("pack ok");
+    let packed = pack(&dir, "test", &["c.html".to_string()], &dir.join("res")).expect("pack ok");
     let a = packed.asset_manifest.iter().find(|e| e.path == "a.png").expect("a.png in manifest");
     let b = packed.asset_manifest.iter().find(|e| e.path == "b.png").expect("b.png in manifest");
     assert_eq!((a.w, a.h), (4, 4), "fixture a.png = 4×4");

@@ -1,6 +1,6 @@
-//! 极简 CLI（不引 clap）：loomgui_pkg <sourceDir> <pkgName> [--html <h1,h2,...>] [--res <name>] [-o <out.pkg.bin>]。
+//! 极简 CLI（不引 clap）：loomgui_pkg <sourceDir> <pkgName> [--html <h1,h2,...>] [--res-root <path>] [-o <out.pkg.bin>]。
 //! 不传 --html → 扫 sourceDir 顶层所有 .html（不递归，排除 res 目录）。
-//! --res 默认 res。-o 默认 <sourceDir>/<pkgName>.pkg.bin。
+//! --res-root 默认 <sourceDir>/res（向后兼容 res 在 sourceDir 下）。-o 默认 <sourceDir>/<pkgName>.pkg.bin。
 //! 产物只写 pkg.bin（不写 atlas.png——图集归 Unity，D8）。
 
 use std::env;
@@ -12,7 +12,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "usage: {} <sourceDir> <pkgName> [--html <h1,h2,...>] [--res <name>] [-o <out.pkg.bin>]",
+            "usage: {} <sourceDir> <pkgName> [--html <h1,h2,...>] [--res-root <path>] [-o <out.pkg.bin>]",
             args.first().map(String::as_str).unwrap_or("loomgui_pkg")
         );
         return ExitCode::from(2);
@@ -20,7 +20,7 @@ fn main() -> ExitCode {
     let source_dir = PathBuf::from(&args[1]);
     let pkg_name = &args[2];
     let mut html_list: Option<Vec<String>> = None;
-    let mut res_dir = String::from("res");
+    let mut res_root: Option<PathBuf> = None;
     let mut out_path: Option<String> = None;
     let mut i = 3;
     while i < args.len() {
@@ -35,8 +35,8 @@ fn main() -> ExitCode {
                 );
                 i += 2;
             }
-            "--res" => {
-                res_dir = args.get(i + 1).cloned().filter(|s| !s.is_empty()).unwrap_or(res_dir);
+            "--res-root" => {
+                res_root = Some(PathBuf::from(args.get(i + 1).cloned().unwrap_or_default()));
                 i += 2;
             }
             "-o" => {
@@ -50,10 +50,14 @@ fn main() -> ExitCode {
         }
     }
 
+    // --res-root 未传 → 默认 = source_dir.join("res")（向后兼容 res 在 sourceDir 下的场景）。
+    let res_root = res_root.unwrap_or_else(|| source_dir.join("res"));
+    let res_dir = res_root.file_name().and_then(|s| s.to_str()).unwrap_or("res");
+
     // 不传 --html → 扫 sourceDir 顶层所有 .html（不递归，排除 res 目录下的）。
     let html_files: Vec<String> = match html_list {
         Some(list) => list,
-        None => match scan_top_level_html(&source_dir, &res_dir) {
+        None => match scan_top_level_html(&source_dir, res_dir) {
             Ok(list) if !list.is_empty() => list,
             Ok(_) => {
                 eprintln!("no .html files found in {}", source_dir.display());
@@ -73,7 +77,7 @@ fn main() -> ExitCode {
             .into_owned()
     });
 
-    match loomgui_pkg::pack(&source_dir, pkg_name, &html_files, &res_dir) {
+    match loomgui_pkg::pack(&source_dir, pkg_name, &html_files, &res_root) {
         Ok(p) => {
             if let Err(e) = fs::write(&out, &p.pkg_bytes) {
                 eprintln!("write {out}: {e}");
