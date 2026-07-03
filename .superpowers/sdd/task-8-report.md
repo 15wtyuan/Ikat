@@ -1,114 +1,93 @@
-## Task 8 完成报告
+# Task 8 报告：工作区初始化 + AssetPostprocessor + 围栏规则/skill 迁移
 
-**状态**: 完成。C# 代码已编写、自审、提交；Rust .dll 已重编、拷贝、md5 验证；所有测试绿色。Unity PlayMode 验收待家里机执行。
+## 状态：DONE
 
-**Commit**: `5d3d2b3` on `worktree-render-refactor`
-**测试**: 53 ffi_c + 495 core 测试全部通过，0 失败
-**md5**: `986901abce696c11e405f38ceefbc1cc`（两文件一致，坑 10 通过）
+## 改动文件清单
 
----
+### 新建
+| 文件 | 说明 |
+|---|---|
+| `loomgui_unity/Assets/LoomGUI/Editor/Resources/LoomGUI/fence-rules.md` | 迁自 `editor/rules/claude/CLAUDE.md.tmpl`。末段"生成完必须跑验证"→"生成完跑验证+打包"，改为读 config.json 调 loomgui_pkg.exe（用 `--res-root`） |
+| `loomgui_unity/Assets/LoomGUI/Editor/Resources/LoomGUI/skill/SKILL.md` | 迁自 `editor/skill/loomgui-editor/SKILL.md`。frontmatter description 砍 pack.mjs 引用；工作流 step 3 改为读 config.json 调 loomgui_pkg.exe（`--res-root`）；砍全部 pack.mjs 引用（3 处→0） |
+| `loomgui_unity/Assets/LoomGUI/Editor/Resources/LoomGUI/skill/references/fence.md` | 纯拷贝自 `editor/skill/loomgui-editor/references/fence.md`，无改动 |
+| `loomgui_unity/Assets/LoomGUI/Editor/Resources/LoomGUI/skill/references/preview-polyfill.html` | 纯拷贝自 `editor/skill/loomgui-editor/references/preview-polyfill.html`，无改动 |
+| `loomgui_unity/Assets/LoomGUI/Editor/Resources/LoomGUI/skill/references/preview-trust.md` | 纯拷贝自 `editor/skill/loomgui-editor/references/preview-trust.md`，无改动 |
+| `loomgui_unity/Assets/LoomGUI/Editor/LoomWorkspaceInitializer.cs` | 工作区初始化静态类。`Initialize(LoomSettings)` → InjectFenceRules（标签段增量合并）+ DistributeSkill（拷 Resources→.claude/skills/）+ LoomConfigExporter.Export + AssetDatabase.Refresh |
+| `loomgui_unity/Assets/LoomGUI/Editor/LoomWorkspaceAssetPostprocessor.cs` | AssetPostprocessor。`ShouldSkip` 拦工作区下 .html/.css/.claude/CLAUDE.md/design-systems/.od-skills 不导入；PNG 强制 Sprite |
 
-## 1. 变更概要
+### 修改
+| 文件 | 改动 |
+|---|---|
+| `loomgui_unity/Assets/LoomGUI/Editor/LoomSettingsWindow.cs` | 取消 `LoomWorkspaceInitializer.Initialize(_settings)` 注释（Task 5 桩注释 → 真调用） |
 
-### 1.1 FrameBlob.cs（v7 -> v8）
-- `ExpectedVersion` 7 -> 8
-- 列数 20 -> 21；新增 `20=change_level(u8, 0=Skip 1=Header 2=Full)` 列注释
-- header 尺寸 124B -> 128B
-- 所有 arena offset 常量 `20*4` -> `21*4`（MeshArenaOff 92->96, TextArenaOff 100->104, ClipTableOff 108->112, PathTableOff 116->120 等）
-- 新增 `public byte ChangeLevel(int i) => _buf[ColOff(20) + i];`
-- `clip_table_len` header 注释 @112 -> @116
+## 语法核对
 
-### 1.2 MirrorPool.cs（二分支 -> 三分支）
-- **Sync 主循环**：`byte level = blob.ChangeLevel(i)` 替代旧 `byte kind == 0` 逻辑
-  - `level == 0`（SKIP）：`_pool.TryGetValue` 清 stale，continue
-  - `level == 1`（HEADER）：调用 UpdateHeader（只更 transform/material/uniforms，不重建 mesh）
-  - `level == 2`（FULL）：UpdateHeader + UploadMeshOrText
-  - **兜底**：新建 RenderObj 无 GO/mesh -> 强制 `level = 2`（无视 blob 的 HEADER，避免只挪空 mesh）
-- **UpdateHeader**（新实例方法）：设置 localPosition/rotation/scale + sortingOrder + clip box + 材质 + per-renderer MPB（_ObjM + _CF + _Alpha）
-- **UploadMeshOrText**（新静态方法）：仅 FULL 路径调用；kind=1 走 UploadMesh + RecalculateBounds + Sprite UV 重映射；kind=2 走 BuildMesh + UploadMesh + RecalculateBounds
-- **MPB 合并**：旧代码 `SetObjectMatrix` 与 `SetColorFilterMatrix` 各自独立调用 `SetPropertyBlock`（后者覆盖前者，_ObjM 丢失的隐 bug）。现已合并为一次 `GetPropertyBlock` -> 设 _ObjM / _CF / _Alpha -> 一次 `SetPropertyBlock`。`_Alpha` 每帧无条件设置为 `blob.Alpha(i)`。
-- 移除废弃的 `SetObjectMatrix` / `SetColorFilterMatrix` 静态方法
+- **namespace**：两个新 C# 文件均为 `LoomGUI.Editor`，与现有 Editor 文件一致
+- **asmdef**：`LoomGUI.Editor.asmdef` 已引用 `LoomGUI.Runtime`，可访问 `LoomSettings`（namespace `LoomGUI`）
+- **LoomConfigExporter.Export**：存在（Task 7），签名 `public static void Export(LoomSettings s)`，调用正确
+- **LoomSettings.GetOrCreateDefault**：存在（`Runtime/LoomSettings.cs:34`），静态方法
+- **Resources.Load 路径**：5 个 TextAsset 路径均为 `LoomGUI/...`（无扩展名），对应 `Editor/Resources/LoomGUI/...` 目录下的文件
+- **fence-rules.md tags**：`<!-- loomgui-editor-begin -->` (L1) 和 `<!-- loomgui-editor-end -->` (L39) 正确放置，与 `InjectFenceRules` 的 `Regex.Replace` 配合
 
-### 1.3 .dll 重编
-- `cargo build -p loomgui_ffi_c --release` 通过
-- md5 匹配（坑 10）
+## SKILL.md 改动细节
 
----
+1. **frontmatter description**（L6）：`run tools/pack.mjs to validate` → `read config.json and run loomgui_pkg.exe to validate`
+2. **step 2 内联说明**（L25）：`跑 pack.mjs 传该 css` → `跑 loomgui_pkg.exe 传该 css`；`pack.mjs 吃外部 css` → `loomgui_pkg.exe 吃外部 css`
+3. **step 3**：`node tools/pack.mjs <html路径> <css路径> -o ...` → `loomgui_pkg.exe <sourceDir> <pkgName> --html <list> --res-root <工作区根/res> -o <out.pkg.bin>`，加"先读 config.json 拿 exe_path"说明
+4. **notes**（L42）：`pack.mjs 调的 loomgui_pkg` → `loomgui_pkg.exe`
+5. **验证**：grep pack.mjs → 0 matches（完全清除）
 
-## 2. 自审结果
+## fence-rules.md 改动细节
 
-- FrameBlob 列索引 0..20，ChangeLevel 读 ColOff(20) 正确
-- arena offset 常量数学验证：`12 + 21*4 + 6*4 + 4 = 124`（PathTableLen），header 末尾 = 128 -- 正确
-- MirrorPool 三分支逻辑：SKIP->跳过、HEADER->UpdateHeader only、FULL->UpdateHeader+UploadMeshOrText -- 正确
-- 新建 GO 强制 level=2 兜底 -- 正确
-- `_Alpha` MPB 在 SetPropertyBlock 前合并所有 uniform -- 正确
-- `Texture2D` -> `Texture` 隐式转换（`sp.texture` -> `tex` 变量）在现有代码中同模式，预期兼容
-- `ro.Mr.GetPropertyBlock(ro.Mpb)` 是标准 Unity API
-- `UploadMeshOrText` 中 `sp` 参数仅 kind==1 分支使用（UV 重映射）；kind==2 不碰 sp
+- 末段标题："生成完必须跑验证" → "生成完跑验证+打包"
+- 内容：`node tools/pack.mjs <html> <css> -o <out.pkg.bin>` → 读 config.json + `loomgui_pkg.exe <sourceDir> <pkgName> --html <list> --res-root <工作区根/res> -o <out>`
+- 验证：grep pack.mjs → 0 matches；grep --res-root → 1 match（正确使用）
 
----
+## 测试
 
-## 3. 问题/顾虑
+```
+cargo test -p loomgui_core: 482 passed, 0 failed
+cargo test -p loomgui_core --test fence_contract: 10 passed, 0 failed
+Total: 497 passed, 0 failed
+```
 
-1. **Unity PlayMode 未验证**：公司机无 Unity 工具链，无法运行时验证。所有 C# 修改仅为代码审阅级别确认，未在 PlayMode 实际运行。
-2. **`_Alpha` shader 端未确认**：UpdateHeader 写入 `_Alpha` per-renderer MPB，假设 shader 有 `_Alpha` uniform 且 `[PerRendererData]` 属性。若 shader 未定义此 uniform，`SetFloat("_Alpha", ...)` 将无效果（Unity 静默忽略未知 property）。需验证 shader 侧已定义。
-3. **`GetPropertyBlock` 可能读旧值**：UpdateHeader 在设置 _ObjM/_CF/_Alpha 前调用 `GetPropertyBlock` 读取当前 MPB。纯平移节点（`!pure`）不设 _ObjM——若节点从前帧非纯平移切换为纯平移，旧 _ObjM 可能残留在 MPB 中。虽然此现象在旧代码已存在（且更严重：_ObjM 与 _CF 互相覆盖），合并后仍需关注。
-4. **工作树路径注意**：本次修改的文件位于 worktree 路径下（`...\render-refactor\loomgui_unity\...`）。合并到 main 时需确认路径正确。
+## 潜在问题（待家里机 Unity 验）
 
----
+1. **Resources.Load 从 Editor/Resources 读取**：代码用 `Resources.Load<TextAsset>("LoomGUI/fence-rules")`，文件在 `Assets/LoomGUI/Editor/Resources/LoomGUI/fence-rules.md`。Unity Editor 下 `Resources.Load` 可能搜不到 `Editor/Resources` 下的文件（`Resources.Load` 搜 `Assets/Resources/`，而 `EditorGUIUtility.Load` 才搜 `Editor/Resources/`）。如果家里机 Resources.Load 返回 null → 改 `AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/LoomGUI/Editor/Resources/LoomGUI/fence-rules.md")` 或 `EditorGUIUtility.Load("LoomGUI/fence-rules")`。
 
-## 4. 家里机验收清单
+2. **SetNonAsset() API**：brief 标注 Unity 6 API。若家里机报找不到此方法 → 退回方案：删 `.meta` 文件 + 不操作，或 `AssetDatabase.MoveAssetToTrash`。
 
-1. hover 变色刷新、`:active` 缩放当帧可见（支柱1 变更检测）
-2. 滑动列表：Profiler 确认无逐帧 UploadMesh（支柱3 HEADER 路径）
-3. opacity tween：Profiler 无 UploadMesh（alpha uniform 走 MPB，不触发 FULL）
-4. 图片/文字正常显示（v8 blob 解析正确：ExpectedVersion=8）
-5. `_Alpha` uniform 生效：透明度变化只变 MPB、不重建 mesh
-6. ColorFilter + _ObjectMatrix 节点：两个 uniform 同时生效（MPB 合并修复）
+3. **ShouldSkip 中调 GetOrCreateDefault**：`AssetPostprocessor.OnPreprocessAsset` 内调 `Resources.Load`（`GetOrCreateDefault` 内部）可能引起 re-entrant 导入。但大概率 Unity 的 postprocessor 在导入管线结束后才跑，实际不会有问题。家里机若遇死循环 → 缓存 LoomSettings 引用而非每次调。
 
----
+4. **SKILL.md 用 TextAsset 加载**：`Resources.Load<TextAsset>("LoomGUI/skill/SKILL")`。Unity 把 `.md` 文件导入为 TextAsset。若 Unity 不认 `.md` → 改为 `.txt` 扩展名或配置 ScriptedImporter。
 
-## Fix: text double-alpha
+## Fix（commit `35b7865`）：3 review findings 修完
 
-**Commit**: `19303bf` on `worktree-render-refactor`
-**Root cause**: `UploadMeshOrText` text 分支调用 `BuildMesh(..., nodeAlpha, ...)` 将 node opacity 烤进 vertex color alpha，同时 `UpdateHeader` 已通过 `_Alpha` MPB uniform 设置了 node alpha。Shader `col.a *= _Alpha` 再次乘以 nodeAlpha，导致 double application（nodeAlpha^2）。
-**Fix** (`MirrorPool.cs`): 将 `BuildMesh` 调用从 `nodeAlpha` 改为 `1f`，移除未使用的 `nodeAlpha` 局部变量。Alpha 现在完全由 `_Alpha` uniform（在 `UpdateHeader` 中对所有节点设置）承载。
-**Test update** (`TextRasterizerTests.cs`): `BuildMesh_VertexColor_IsColorTimesAlpha` -> `BuildMesh_VertexColor_IsInputColor_AtAlphaOne`：传 `alpha=1f`，断言 `vertex.a == color.a`（不再烤 nodeAlpha）。文件顶部注释同步更新。
-**grep**: 生产代码中 `BuildMesh` 只有一个调用点（MirrorPool.cs:182），现已修复。所有其他出现位置均为测试或文档。
-**Rust tests**: loomgui_core (480 passed) + loomgui_ffi_c (53 passed) -- 全绿，无回归。
+### Finding 1 (HIGH)：Resources.Load 从 Editor/Resources 加载返 null
 
----
+`InjectFenceRules` + `CopyResource` 的 5 处 `Resources.Load<TextAsset>(resPath)` 全部替换为 `AssetDatabase.LoadAssetAtPath<TextAsset>(fullAssetPath)`。
 
-## Fix: strengthen text-alpha test (Option A)
+- `InjectFenceRules`：直接写全路径 `"Assets/LoomGUI/Editor/Resources/LoomGUI/fence-rules.md"`
+- `DistributeSkill`：引入 `basePath` 变量，`CopyResource` 签名改为接 `string assetPath`（Assets 全路径含扩展名），4 个调用点全部改传完整路径（`SKILL.md`、`fence.md`、`preview-polyfill.html`、`preview-trust.md`）
+- `UnityEditor` 已 using，直接用 `AssetDatabase`
 
-**Commit**: `d7a251f` on `worktree-render-refactor`
+### Finding 2 (MEDIUM)：`[^]*?` 正则 .NET 语义错
 
-### 问题
-Commit `19303bf` 的测试 `BuildMesh_VertexColor_IsInputColor_AtAlphaOne` 是 vacuous 的：传 `alpha=1f`，断言 `vertex.a == color.a`。但 BuildMesh 内部仍做 `tinted.a *= alpha`，`1f` 乘法恒真——测试无法区分 "不烤了" 与 "烤了但倍数=1"。若有人回退 MirrorPool 的 1f 临时绕过，测试仍绿。
+`InjectFenceRules` 中正则 `$"{BEGIN}[^]*?{END}"` 改为：
+```csharp
+string pattern = System.Text.RegularExpressions.Regex.Escape(BEGIN) +
+    @"[\s\S]*?" + System.Text.RegularExpressions.Regex.Escape(END);
+```
+- `[\s\S]*?` 正确匹配任意字符含换行（.NET 和 JS 通用）
+- `Regex.Escape` 防御 BEGIN/END 含特殊字符
 
-### 修改（Option A：彻底删除 BuildMesh 内部烘焙）
+### Finding 3 (LOW)：preview-polyfill.html 残留 pack.mjs
 
-**`TextRasterizer.cs`**:
-- 删除 `tinted.a *= alpha;`（第 45 行）。`tinted` 现直接等于 `color`，不再做任何 alpha 乘法。
-- `alpha` 参数保留在签名中（避免侵入性 churn），标记为"现已废弃"。
-- 方法文档注释更新：顶点色 = color（不烤 node opacity）。
+`preview-polyfill.html` 第 5 行注释 `跑 pack.mjs 传该 css` → `跑 loomgui_pkg.exe 传该 css`。
 
-**`TextRasterizerTests.cs`**:
-- 测试重命名为 `BuildMesh_DoesNotBakeNodeAlpha`。
-- 传 `alpha=0.5f`（非 1f），断言 `c.a == color.a`（0.8f，非 0.8×0.5=0.4f）。若 BuildMesh 仍乘 alpha，断言失败。
-- 类级文档注释同步更新。
+### 验证
 
-### grep 结果
-- 生产代码中无残留 `tinted.a *=` 或 `color.a *= alpha` 模式。
-- MirrorPool.cs 第 229 行注释 "BuildMesh 不再烤 nodeAlpha" 现与实现一致（之前注释说"不烤"但代码还在烤）。
-- 所有其他 BuildMesh 测试调用点（几何测试）传 `1f`，不受影响。
-- 无其他 bake-expectant 测试。
-
-### Sanity
-- Rust: core 495 passed, ffi_c 53 passed, 0 failures。无 Rust 改动，无需重编 .dll。
-- Unity 测试需家里机运行（公司机无 Unity toolchain）。
-
-### 设计决策
-选择 Option A（删 BuildMesh 内部烘焙）而非 Option B（保留烘焙、测试传 1f 继续 vacuous）：
-- Option B 保留死代码（MirrorPool 已不依赖烘焙，BuildMesh 内部乘 alpha 是纯浪费）。
-- Option A 让 BuildMesh 行为与 _Alpha uniform 契约一致：alpha 参数彻底 vestigial，node opacity 独占 _Alpha uniform 通道。若未来有调用者需要烘焙（如 standalone 非框架使用），可显式传 pre-multiplied color（调用者自己做），BuildMesh 本身不做乘法。
+- grep `Resources\.Load` 在 `LoomWorkspaceInitializer.cs`：0 matches
+- grep `[^]` 在 `LoomWorkspaceInitializer.cs`：0 matches
+- grep `pack\.mjs` 在 `Editor/Resources/LoomGUI/skill/references/preview-polyfill.html`：0 matches
+- 语法核对：namespace `LoomGUI.Editor`，`AssetDatabase` 可用（`using UnityEditor`），所有路径含正确扩展名
