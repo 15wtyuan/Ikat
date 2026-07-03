@@ -71,3 +71,32 @@ $ grep -n 'SetContentSize\|ClearContentSizeOverride\|GetScrollPos\|GetNodeLayout
 
 - Unity 打开 `loomgui_unity/` → PlayMode 验证编译通过 + 无运行时异常。
 - 确认 `loomgui_ffi_c.dll` 已是最新（T5 产出），不然 5 个 API 调用会 DllNotFoundException/EntryPointNotFound。
+
+## Fix: _stage null guard
+
+**Commit**: `f07ce4d`
+
+### 问题
+
+T7 review 发现 5 个新 driver API 缺少 `if (_stage == null) return;` guard，与 LoomStage.cs 现有 20 处 guard 不一致。
+
+### 修改
+
+`loomgui_unity/Assets/LoomGUI/Runtime/LoomStage.cs` -- 5 个方法加 guard：
+
+- **SetContentSize**: expression-bodied → block + `if (_stage == null) return;`
+- **ClearContentSizeOverride**: expression-bodied → block + `if (_stage == null) return;`
+- **SetReuseKey**: expression-bodied → block + `if (_stage == null) return;`
+- **GetScrollPos**: 在 unsafe 块前加 `if (_stage == null) return default;`
+- **GetNodeLayoutRect**: 在 unsafe 块前加 `if (_stage == null) return default;`
+
+`return default;` 对值元组 `(float,float)` 返回 `(0,0)`，对 `(float,float,float,float)` 返回 `(0,0,0,0)` -- _stage null 时合理行为。
+
+### grep 确认
+
+```
+$ grep -c 'if (_stage == null) return' LoomStage.cs
+25
+```
+
+5 个方法各自有 guard，总共 25 处 `_stage == null` 检查，与现有 20 处 + 新增 5 处一致。
