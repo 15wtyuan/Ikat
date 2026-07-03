@@ -28,8 +28,8 @@ namespace LoomGUI
         public static void ResetStatic() => s_fontVersion = 0;
 
         /// 把 text_arena 给的 glyphs 烤成 glyph quad mesh（每 glyph 一个 quad：BL,TL,TR,BR）。
-        /// 顶点色 = color × alpha（node_alpha，四顶点同）。texture = font atlas（caller 设 material）。
-        /// program=1（text，与 Image 共用 LoomGUI/Unlit）由 caller 在 mm.Get 时指定。
+        /// 顶点色 = color（不烤 node opacity——alpha 参数现已废弃，node opacity 走 _Alpha uniform，T6/T8 剥离）。
+        /// texture = font atlas（caller 设 material）。program=1（text，与 Image 共用 LoomGUI/Unlit）由 caller 在 mm.Get 时指定。
         ///
         /// quad 数学（y-down GO-local，pen 已 GO-local（layout-rect 相对；节点绝对位在 local_x/local_y，pen 是相对节点原点的偏移，勿与 local_x/local_y 叠加），**不 re-base**）：
         ///   quad_left   = pen_x + info.minX
@@ -42,7 +42,7 @@ namespace LoomGUI
         {
             // 预扫：GetCharacterInfo 失败的 glyph 跳过（不在 atlas / 字体无此字）。先数有效 glyph 算容量。
             // 同时收集 codepoint 串 RequestCharactersInTexture 填 atlas（必先调，否则 GetCharacterInfo 恒 false）。
-            var tinted = color; tinted.a *= alpha;   // node_alpha 烤顶点色
+            var tinted = color; // alpha 参数现已废弃（node opacity 走 _Alpha uniform，T6/T8 剥离），保留签名兼容
 
             // 1. 收集 codepoints → RequestCharactersInTexture 填 atlas。
             var sb = new StringBuilder(glyphs.Length);

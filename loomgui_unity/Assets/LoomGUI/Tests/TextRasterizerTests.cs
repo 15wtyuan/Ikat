@@ -6,7 +6,7 @@ namespace LoomGUI.Tests
     /// TextRasterizer.BuildMesh 测试。锁 glyph quad 数学：
     ///   quad_left=pen_x+minX, quad_right=pen_x+maxX,
     ///   quad_top=pen_y−maxY, quad_bottom=pen_y−minY（y-down；maxY 基线上方→减）
-    /// 顶点序 BL,TL,TR,BR；索引每 quad 0,1,2,0,2,3；vertex color = 输入 color（alpha 参数现恒为 1f，node opacity 走 _Alpha uniform）。
+    /// 顶点序 BL,TL,TR,BR；索引每 quad 0,1,2,0,2,3；vertex color = 输入 color（alpha 参数现已废弃，node opacity 走 _Alpha uniform）。
     ///
     /// 预期值由 BuildMesh 内部用的同一 GetCharacterInfo 重新算出再比对，
     /// 故即使 DejaVu 不同版本的精确 minX/maxY 不同，只要 BuildMesh 数学正确即过。
@@ -126,17 +126,16 @@ namespace LoomGUI.Tests
             Assert.AreEqual(100f, m1.Verts[0].x - m0.Verts[0].x, 0.001f, "pen 平移 100 → BL.x 平移 100");
         }
 
-        /// BuildMesh alpha 参数现始终传 1f（node opacity 走 _Alpha uniform）；vertex.a == color.a（不烤 nodeAlpha）。
+        /// BuildMesh 不再烤 node alpha 进顶点色（T6/T8: alpha 走 _Alpha uniform）。
+        /// 传 alpha=0.5f，断言 vertex.a == color.a（非 color.a*0.5）——若 BuildMesh 仍乘 alpha 则失败。
         [Test]
-        public void BuildMesh_VertexColor_IsInputColor_AtAlphaOne()
+        public void BuildMesh_DoesNotBakeNodeAlpha()
         {
             var font = LoadDejaVu();
             var color = new Color(1f, 0.5f, 0.25f, 0.8f);
-            var mesh = TextRasterizer.BuildMesh(font, 24, color, 1f, new[] { new GlyphData(0x41, 0f, 0f) });
-
-            // alpha=1f → vertex color 就是输入 color（rgba 无改动）。
+            var mesh = TextRasterizer.BuildMesh(font, 24, color, 0.5f, new[] { new GlyphData(0x41, 0f, 0f) });
             foreach (var c in mesh.Colors)
-                Assert.AreEqual(color, c, "alpha=1f 时不烤 nodeAlpha（vertex.a == color.a）");
+                Assert.AreEqual(color.a, c.a, 0.001f, "BuildMesh 不得烤 nodeAlpha（vertex.a==color.a，非 color.a*alpha；alpha 走 _Alpha uniform）");
         }
 
         /// 多 glyph（"AB"）→ 2 quad = 8 verts / 12 idx，第二 quad 索引基 = 4。
