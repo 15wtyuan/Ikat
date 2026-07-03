@@ -274,9 +274,7 @@ MonoBehaviour:
   _designSize: {x: 1080, y: 1920}
   _uiCamera: {fileID: 1921994607}
   _font: {fileID: 12800000, guid: 655d7802d41b4169a49e2d7670d2c405, type: 3}
-  _fontFile: wqy-microhei.ttc
-  _spriteAtlases:
-  - {fileID: 4343727234628468602, guid: 085a7f97045138046ba8ac296bf3401d, type: 2}
+  _fontFile: DejaVuSans.ttf
   _showFps: 0
   _safeArea: 1
   _inputCollector: {fileID: 330585549}
