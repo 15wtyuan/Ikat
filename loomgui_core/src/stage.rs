@@ -8,7 +8,8 @@ use crate::input::{EventRecord, PointerEvent, PointerState};
 use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
-use crate::scene::node::{NodeId, Scene};
+use crate::scene::node::{NodeId, Rect, Scene};
+use crate::style::resolved::OverflowMode;
 use crate::style::dynamic::rematch_pseudo_classes;
 use crate::text::layout::Font;
 use std::sync::Arc;
@@ -171,6 +172,38 @@ impl Stage {
                 }
             }
         }
+    }
+
+    /// v1.4-b：driver 注入滚动容器 content_size（虚拟列表用）。覆盖子节点 AABB 自动算。
+    /// refresh_content_sizes 跳过此容器。node 无效/非滚动容器 → no-op（不 panic）。
+    pub fn set_content_size(&mut self, node: NodeId, w: f32, h: f32) {
+        if let Some(scene) = self.scene.as_mut() {
+            let n = scene.get(node);
+            let is_scroll = n
+                .map(|n| {
+                    n.style.overflow_x != OverflowMode::Visible
+                        || n.style.overflow_y != OverflowMode::Visible
+                })
+                .unwrap_or(false);
+            if !is_scroll {
+                return;
+            }
+            let st = scene.scroll.ensure(node);
+            st.content_size = (w, h);
+            st.content_size_overridden = true;
+            st.viewport_size = (0.0, 0.0); // refresh 会填
+            st.overlap = (0.0, 0.0); // refresh 会填
+        }
+    }
+
+    /// v1.4-b：读 scroll_pos。node 无效/非滚动容器 → None。
+    pub fn get_scroll_pos(&self, node: NodeId) -> Option<(f32, f32)> {
+        self.scene.as_ref()?.scroll.get(node).map(|s| s.scroll_pos)
+    }
+
+    /// v1.4-b：读节点 layout_rect（solve 产物）。driver 测 itemSize 用。node 无效 → None。
+    pub fn get_node_layout_rect(&self, node: NodeId) -> Option<Rect> {
+        self.scene.as_ref()?.get(node).map(|n| n.layout_rect)
     }
 
     /// 编程聚焦（照 fgui RequestFocus）。强制聚焦任意非 disabled 节点
