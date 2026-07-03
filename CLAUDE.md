@@ -76,14 +76,15 @@ HTML/CSS DSL → 打包器（构建期；复用核心 parse/style）
 
 **关键架构不变量**（违反 = 隐 bug）：
 - **`<div>` 永远是 flex 容器**（默认 `flex-direction: column`）。无浏览器 block/inline flow——只有 flex item 参与布局。行内混排（一元素内文本+元素+文本）是**编译期报错**，不降级。只有 `div`/`span`/`img`/`button` 标签；围栏外标签报错。
-- **transform（x/y/scale/rotation）是渲染/命中层，不进 taffy**——改它只置 `transform_dirty`（刷新命中几何），绝不触发 `solve`。`style_size`/flex 进 taffy → `layout_dirty` → solve。位置/缩放动画走 transform 所以廉价。
-- **所有布局帧末一致**：改属性只置 dirty；每帧一次 `solve`（vs fgui 立即推 DisplayObject）。
+- **transform（x/y/scale/rotation）是渲染/命中层，不进 taffy**——改它不触发 `solve`，只刷新命中几何 + world_matrix。`style_size`/flex 进 taffy → `solve`。位置/缩放动画走 transform 所以廉价。
+- **tick 时序 = 显式依赖拓扑**（坑 103 已修）：`process(hit 用上帧 world) → rematch_pseudo_classes → solve → refresh_content → compute_world_transforms → build`。rematch 在 solve/compute **前**——伪类改 taffy_style/transform/colors 三类当帧全生效。hit_test 用上帧 world（1 帧延迟，已认可）；scroll_pos 同帧进 world（compute 在 scroll 后）。
+- **所有布局帧末一致**：每帧一次 `solve`（vs fgui 立即推 DisplayObject）。
 - **命中几何** = `layout_rect` 经累计（含父链）transform 变换后的 AABB。事件路由本身在**业务侧**（C# `LoomEventHandler`），非核心——核心只做命中 + hover/active diff + 伪类 rematch。
 - **坐标系**：核心 = 左上原点、y 向下。核心代码无 `height-y` 翻转。y-flip 是**后端根 Stage 一次性变换**（Unity 根 GO scale (1,-1,1)；Godot flip = 单位矩阵，2D 本就 y 下）。
 - **代际 NodeId**：`NodeId(pub u32)`（高 20bit index + 低 12bit gen），FFI/C# 透明不透明句柄；`remove_node` gen++ 让旧句柄自动失效。内部用 `SlotMap<DefaultKey, Node>` 桥接（slotmap 的 64-bit key 装不下 u32，见 `scene/node.rs`）。
 - **单一动画时钟**：`TweenManager::update(dt)` 是唯一时钟。Controller/Gear/Transition 都不自驱——全往它提交/kill tween。ScrollPane 物理是**例外**（自维护 tween，绝不用 GTween——content 异步变化时 GTween 的固定 end 会跳变）。
 
-**FFI 契约**（§13.3）：每帧 Rust 产出一个 SOA 公共头（渲染节点公共字段，当前 18 列）+ 按类型分区的扁平 arena（mesh_arena、text_arena）。C# 在 tick 内原子拷贝（拷贝非 pin），Rust 下帧 reset。`Unchanged` payload 变体 = 本帧该节点不 dirty，不进 arena，后端不动其镜像。C# 用 `Span<byte>` + `BinaryPrimitives` 读——**禁 `Marshal.PtrToStructure`**（IL2CPP struct 对齐坑），**禁跨 FFI 裸指针**。IL2CPP：回调必须 `static` + `[MonoPInvokeCallback]`。**FFI 入口绝不 panic**：cdylib 里 `.expect`/`unwrap` 遇 None 会 non-unwinding abort 拖垮宿主进程（Unity 闪退）——scene=None 等状态优雅早返空帧，别 expect（坑 102）。
+**FFI 契约**（§13.3）：每帧 Rust 产出一个 SOA 公共头（渲染节点公共字段，当前 21 列，含 `change_level`）+ 按类型分区的扁平 arena（mesh_arena、text_arena）。C# 在 tick 内原子拷贝（拷贝非 pin），Rust 下帧 reset。**变更检测用双 hash**：`header_hash`（表头：world/alpha/sort/mask/color_tint/blend，廉价字段）+ `payload_hash`（几何：全量 verts/uvs/colors/glyph，**不采样**——采样会漏字段，坑 56/75/76/106）。两 hash 对比上帧 → `ChangeLevel { Skip=0, Header=1, Full=2 }`（`#[repr(u8)]`，blob 一字节列）：Skip=整节点不动；Header=只更 GO transform/材质/MPB，**不重建 mesh**（滑动/transform/opacity 动画走此，兑现"位置动画廉价"）；Full=重建 mesh。**arena 仅 Full 写**（Skip/Header mesh_off/len=0，省带宽）。**`NodePayload` 只剩 Mesh/Text**——"本帧没变"由 ChangeLevel::Skip 表达（正交轴），不再是 payload 变体。alpha 走 `_Alpha` shader uniform（per-renderer MPB），不烤进顶点色。C# 用 `Span<byte>` + `BinaryPrimitives` 读——**禁 `Marshal.PtrToStructure`**（IL2CPP struct 对齐坑），**禁跨 FFI 裸指针**。IL2CPP：回调必须 `static` + `[MonoPInvokeCallback]`。**FFI 入口绝不 panic**：cdylib 里 `.expect`/`unwrap` 遇 None 会 non-unwinding abort 拖垮宿主进程（Unity 闪退）——scene=None 等状态优雅早返空帧，别 expect（坑 102）。
 
 ## 围栏（Fence）——单一真相源
 
@@ -137,5 +138,6 @@ csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件�
 - 坑 10 stale .dll、坑 66 改 parse-time 必重打 pkg、坑 41/43 跨 crate 签名变更漏改
 - 坑 34 `#[repr(u8)]`、坑 35 csbindgen struct 手补镜像、坑 39 borrow_events out_len 是 count 非字节
 - 坑 57 围栏外标签硬挡/属性静默死 CSS、坑 94 l-container 假自定义元素
-- 坑 102 cdylib FFI 入口 panic 拖垮宿主、坑 103 tick 时序 rematch 在 compute/solve 后致伪类改 transform/布局属性丢（★v1 遗留待重构）
+- 坑 102 cdylib FFI 入口 panic 拖垮宿主、坑 103 tick 时序 rematch 在 compute/solve 后致伪类改 transform/布局属性丢（**已修**，tick 重排）、坑 106 payload_hash 位置-bake 致位置变误 Full（双 re-base 中间漏）
+- 坑 56/75/76/105 dirty hash 采样漏字段（**已根治**，双 hash 全量）、坑 107 剥离 uniform 漏改旧烘焙路径致双乘
 - 坑 54 fgui v2 非 v²、坑 79 shader tex×vcol 非 CSS 合成

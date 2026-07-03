@@ -671,12 +671,11 @@ bug1 小拖松手回原位；bug2 快速拖到顶/底"先露空白再突然回�
 **解决**：LoomStage 加 `_sceneBuilt` 字段，CreateRoot 成功置 true，LateUpdate 顶 `if (_stage==null || !_sceneBuilt) return`。
 **教训**：FFI 入口（跨 cdylib 边界）**绝不能 panic**——`.expect`/`unwrap` 遇 None 会 abort 拖垮宿主。scene=None 等状态要优雅早返空帧。`tick_and_render` 的 `.expect("load first")` 是隐患，应改防御性早返（C# guard 是治标，Rust 侧也该加防御）。改加载生命周期（如砍 Awake 自动建 scene）时 audit 所有 tick 路径的 scene 前置假设。
 
-### 坑 103：tick 时序 rematch 在 compute_world_transforms 之后 → :active transform 当帧丢（v1 遗留，v1.4-a showcase 放大）★未修
+### 坑 103：tick 时序 rematch 在 compute_world_transforms 之后 → :active transform 当帧丢（v1 遗留，v1.4-a showcase 放大）★已修
 **症状**：nav 按钮 `:active{transform:scale(0.96)}` 缩放「时好时坏」，快击偶有反馈。`:hover{background-color}` 变色能刷但 `:active` scale 常丢。
-**根因**：`tick_and_render` 顺序（stage.rs）= solve → process → scroll → **compute_world_transforms(456)** → **rematch_pseudo_classes(459)** → build(464)。rematch 把 `:active` 的 transform 写进 `node.style.transform`，但 compute 本帧已用**旧** transform 算完 world_matrix → build 读到无 scale 的 world → hash 不变 → emit Unchanged → scale 本帧不可见。此时序是 **v1d.3/v1d.5（d7e5118/462af5a）定的，v1 遗留 bug**，非 v1.4-a 引入——v1.4-a showcase 加了大量 nav 按钮伪类才暴露（此前按钮少没察觉）。**外部 AI 诊断误归因 v1.4-a（91e09fa/3ac7a92），git -S 证伪**。
-**附带更深问题（诊断漏）**：`rematch_pseudo_classes` 返回 `any_layout_dirty`（伪类改 taffy 布局属性如 border-width/width/padding 时 true），但 tick line 459 **忽略返回值** → `:hover{border:1px}` 改 border-width（进 taffy）当帧不重 solve，布局变化延迟/丢失。showcase nav `:hover` 恰好改 border。
-**解决方向**（待定，compact 后讨论）：compute 移到 rematch 之后修 transform 层；但 rematch 改 taffy 布局属性需重 solve（当前 solve 只在 tick 开头跑一次）——完整修复要重想 tick 时序（伪类改布局属性要不要当帧 solve）。诊断的"compute 挪 2 行"只修 transform，不修 layout_dirty 丢弃。
-**教训**：伪类 rematch 改的 style 跨三层——transform（compute 读）/ taffy_style（solve 读）/ colors（build 读）。tick 时序必须保证：rematch 在 compute + build 之前（渲染层生效），且 rematch 的 layout_dirty 要能触发重 solve（布局层生效）。当前架构 solve 在最前、rematch 在最后 + 丢 layout_dirty = 伪类改布局属性根本不生效。★是 CLAUDE.md「所有布局帧末一致」不变量与「伪类每帧 rematch」的时序冲突，需系统重构。
+**根因**：旧 `tick_and_render` 顺序 = solve → process → scroll → compute_world_transforms → rematch_pseudo_classes → build。rematch 把 `:active` transform 写进 `node.style.transform`，但 compute 本帧已用旧 transform 算完 world_matrix → build 读到无 scale world → 误判 Unchanged → scale 本帧不可见。v1d.3/v1d.5 定的时序，v1 遗留 bug；v1.4-a showcase 大量 nav 按钮伪类才暴露。
+**解决**（2026-07-03 渲染管线重构 T1）：tick 重排为 `process → rematch → solve → refresh → compute → build`——rematch 提到 solve/compute 前，伪类改 taffy_style/transform/colors 三类当帧全生效。删 `rematch_pseudo_classes` 的 `any_layout_dirty` 返回值（solve 每帧全量，无需 dirty 驱动）。
+**教训**：伪类 rematch 改的 style 跨三层——transform（compute 读）/ taffy_style（solve 读）/ colors（build 读）。tick 时序须保证 rematch 在三类消费者之前。「改属性只置 dirty + solve 在最前 + 丢 layout_dirty」是反模式——伪类改布局属性根本不生效。是「所有布局帧末一致」不变量与「伪类每帧 rematch」的时序冲突，已系统重构。
 
 ### 坑 104：SpriteResolver 缓存 miss 永久化 → atlas 后来 pack 好也不重查（v1.4-a T8）
 **症状**：图片白块。诊断主因是 atlas 空包（folder packable + m_PackedSprites 全空，Unity 6 folder packable 失效），但即使 pack 好，运行时可能仍白。
@@ -690,3 +689,21 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 2. **B4 文字乱**：诊断说「既有 bug 放大」→ **对**（`git log 7a01d77..HEAD -- TextRasterizer.cs text/layout.rs` 为空，v1.4-a 没碰 text 路径）。
 3. **B2 图白块**：诊断说 atlas 空包 → 即时病因对，但漏了 SpriteResolver 缓存 miss 永久化（坑 104）。
 **教训**：bug 归因（哪个改动引入）用 `git log -S/-G <关键代码>` + `git log <base>..HEAD -- <文件>` 直接证，别靠"最近改过这块"推论。有当次改动上下文的人比只读最终代码的诊断者更能准确归因——「这次引入 vs 既有放大」区分决定修复策略（既有 bug 放大 = 补既有短板，非回滚本次改动）。
+
+### 坑 105：dirty hash 采样漏字段——同一行文本首字+字数同则撞 hash（坑 56/75/76 一类，已根治）
+**症状**：文字内容变（`"hello"`→`"helps"`）但屏幕不更新；mesh 某字段变但 Unchanged。
+**根因**：旧 `node_hash` 为省 CPU 只采样部分字段——文字只 hash 首字 codepoint + glyph_count + 首字 x/y；mesh 只 hash verts[0]/[2] + uvs[0]/[2]。每加一个视觉字段（program/color_matrix/UV/圆角顶点）就漏一次，补一个采样点 + 一个回归测试，补丁累积。
+**解决**（2026-07-03 T2）：`payload_hash` 全量——所有 verts/uvs/colors/indices、所有 glyph codepoint+x+y 一律 `to_le_bytes().hash()`，不挑代表。删采样逻辑 + 一半"补漏字段"回归测试。
+**教训**：hash 采样是补丁累积区——「省几个字段的 hash 开销」换来「每加字段必漏一次」的反复 bug。几何 hash 要么全量要么别 hash。CPU 开销（几万次哈希 ≈ 几十微秒）远小于跨 FFI 传输/Unity 重建，不值得为它牺牲正确性。
+
+### 坑 106：payload_hash 位置-bake——pure-translation 顶点烤 world.tx，位置变误落 Full（双 re-base 中间漏）
+**症状**：滑动列表/transform 动画时，节点位置变（只该走 Header 廉价路径）却误判 Full，每帧重建 mesh。
+**根因**：纯平移节点 `build_render_nodes`（mod.rs:118）把 `Rect{x:wm[4],y:wm[5]...}` 位置烤进 quad verts；`blob.rs:110` 后续 re-base 减 `wm[4]/[5]` 还原成 local——**两个 re-base 互相抵消**，最终 blob arena 字节位置无关。但 `payload_hash` 在 mod.rs 之后、blob 之前算，看到的是**位置烤过的 verts** → 位置变 → payload_hash 变 → Full。spec §3.7「滑动天然 HEADER」的承诺在 hash 这层被打破。
+**解决**（2026-07-03 T4 fix）：`payload_hash` Mesh 臂算 verts 前先 re-base 到 local（pure-translation 减 `wm[4]/[5]`，非纯平移 verts 已 box-local 不减），与 blob 的 re-base 同逻辑。位置变 → header_hash（world_matrix）变、payload_hash 不变 → Header。
+**教训**：当存在「中间表示被烤入位置、下游再 re-base 还原」的双 re-base 模式时，**任何 hash/dirty 检测必须在 re-base 之后做**（即对最终 local 形态 hash），否则位置变化会穿透检测。hash 要对「真正发给后端的数据形态」算，不是对中间表示算。reviewer 在 T4 初版发现——单测"位置变→Header"是锁这个的关键。
+
+### 坑 107：剥离 uniform 漏改旧烘焙路径——alpha 双乘（text opacity 渲成平方）
+**症状**：`opacity:0.5` 的文字渲染成 0.25（平方），mesh 路径正常。
+**根因**：T6 把 alpha 从顶点色烘焙剥离到 `_Alpha` shader uniform——blob 不再 `c[3]*rn.alpha`，shader `col.a *= _Alpha`。但 C# `TextRasterizer.BuildMesh` 仍 `tinted.a *= alpha`（旧烘焙路径），且 `MirrorPool` 又设 `_Alpha=nodeAlpha` → text 顶点色烤一次 + uniform 再乘一次 = 双乘。mesh 路径 T6 已改对（UploadMesh 原样拷），**只有 text 路径漏改**（BuildMesh 是 C# 侧独立光栅化，不在 blob 链上）。
+**解决**（2026-07-03 T8 fix）：BuildMesh 删 `tinted.a *= alpha`（彻底，Option A），测试传 `alpha=0.5f` 断言 `vertex.a==color.a` 真锁契约（传 1f 是恒真无效测）。
+**教训**：剥离一个属性到新通道（uniform/MPB）时，**必须grep所有旧烘焙路径**——不是只改主链（blob），C# 侧独立光栅化（TextRasterizer）、merge_batch 等旁路都有自己的一份烘焙逻辑，漏一个就双乘/漏乘。测试要传非 trivial 值（0.5 不是 1）否则恒真无效。这类 bug 只在 Unity PlayMode 可见（公司机静态审 + cargo test 都测不到 C# 光栅化），静态 review 要把"所有烘焙点"列全逐一核查。
