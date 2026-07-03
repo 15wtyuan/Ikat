@@ -88,6 +88,74 @@ pub fn node_hash(rn: &RenderNode) -> u64 {
     }
 }
 
+/// 几何轴 hash：payload 全量（verts/uvs/colors/indices/image_path/program/color_matrix
+/// 或 font_size/color/全量 glyph）。不含 world_matrix/alpha/sort/mask（那是 header_hash）。
+/// 全量——不采样，根治漏字段类 bug（坑 56/75/76）。
+pub fn payload_hash(rn: &RenderNode) -> u64 {
+    let mut h = DefaultHasher::new();
+    match &rn.payload {
+        NodePayload::Unchanged => {
+            0u64.hash(&mut h);
+        } // 临时，T4 删除 Unchanged 变体后移除
+        NodePayload::Mesh {
+            verts,
+            uvs,
+            colors,
+            indices,
+            image_path,
+            program,
+            color_matrix,
+        } => {
+            1u8.hash(&mut h); // 判别
+            image_path.hash(&mut h);
+            program.hash(&mut h);
+            for &v in color_matrix.iter() {
+                v.to_le_bytes().hash(&mut h);
+            }
+            for v in verts {
+                v[0].to_le_bytes().hash(&mut h);
+                v[1].to_le_bytes().hash(&mut h);
+            }
+            for u in uvs {
+                u[0].to_le_bytes().hash(&mut h);
+                u[1].to_le_bytes().hash(&mut h);
+            }
+            for c in colors {
+                for &x in c.iter() {
+                    x.to_le_bytes().hash(&mut h);
+                }
+            }
+            for &ix in indices {
+                ix.hash(&mut h);
+            }
+        }
+        NodePayload::Text {
+            layout,
+            font_size,
+            color,
+            program,
+        } => {
+            2u8.hash(&mut h);
+            font_size.to_le_bytes().hash(&mut h);
+            program.hash(&mut h);
+            for &v in color.iter() {
+                v.to_le_bytes().hash(&mut h);
+            }
+            for line in &layout.lines {
+                for run in &line.runs {
+                    run.font_size.to_le_bytes().hash(&mut h);
+                    for g in &run.glyphs {
+                        g.codepoint.hash(&mut h);
+                        g.x.to_le_bytes().hash(&mut h);
+                        g.y.to_le_bytes().hash(&mut h);
+                    }
+                }
+            }
+        }
+    }
+    h.finish()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,5 +422,65 @@ mod tests {
         let a = rounded_rect_rn(&[(0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (4.0, 4.0)]);
         let b = rounded_rect_rn(&[(0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (5.0, 5.0)]);
         assert_ne!(node_hash(&a), node_hash(&b), "仅 BL r=4→5 hash 变");
+    }
+
+    // -----------------------------------------------------------------------
+    // payload_hash 测试（支柱2：几何全量，不采样）
+    // -----------------------------------------------------------------------
+
+    fn text_rn_content(font_size: f32, color: [f32; 4], cps: &[u32]) -> RenderNode {
+        let glyphs: Vec<Glyph> = cps
+            .iter()
+            .enumerate()
+            .map(|(i, &cp)| Glyph {
+                glyph_id: 1,
+                codepoint: cp,
+                x: i as f32 * 10.0,
+                y: 0.0,
+                bearing_x: 0.0,
+                bearing_y: 0.0,
+            })
+            .collect();
+        let layout = TextLayout {
+            text_width: 100.0,
+            text_height: 20.0,
+            lines: vec![Line {
+                y: 0.0,
+                height: 20.0,
+                baseline: 16.0,
+                width: 100.0,
+                runs: vec![GlyphRun { font_size, glyphs }],
+            }],
+        };
+        RenderNode {
+            node_id: 0,
+            parent_id: None,
+            visible: true,
+            alpha: 1.0,
+            grayed: false,
+            color_tint: [1.0; 4],
+            world_matrix: IDENTITY,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: 0,
+            payload: NodePayload::Text {
+                layout,
+                font_size,
+                color,
+                program: 1,
+            },
+        }
+    }
+
+    #[test]
+    fn payload_hash_full_text_no_collision() {
+        // "hello"→"helps"：首字 h/5 字/首字坐标同——旧采样 hash 撞。全量必变。
+        let a = text_rn_content(16.0, [1.0; 4], &[104, 101, 108, 108, 111]); // hello
+        let b = text_rn_content(16.0, [1.0; 4], &[104, 101, 108, 112, 115]); // helps
+        assert_ne!(
+            payload_hash(&a),
+            payload_hash(&b),
+            "全量 codepoint → hash 变"
+        );
     }
 }
