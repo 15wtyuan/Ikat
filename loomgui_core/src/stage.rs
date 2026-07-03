@@ -405,15 +405,16 @@ impl Stage {
         &self.last_events
     }
 
-    /// 每帧管线：
-    /// ①tween ②focus_request ③solve ④refresh_content_sizes
-    /// ⑤process（仲裁+拖拽跟手写 scroll_pos；hit_test 读上帧 world_transforms，1 帧延迟
-    ///   已认） ⑥scroll update（消费 pending_wheel + inertia/bounce advance）
-    /// ⑦process_keys ⑧compute_world_transforms（process/scroll 后：读 scroll_pos 同帧
-    ///   进 world matrix，零拖拽延迟） ⑨rematch_pseudo_classes ⑩build_render_nodes
+    /// 每帧管线（支柱1重排——rematch 提到 solve 前，伪类三类全当帧消费）：
+    /// ①tween ②focus_request ③process（仲裁+拖拽写 scroll_pos；hit_test 读上帧 world，1帧延迟已认）
+    /// ④scroll update ⑤process_keys ⑥rematch_pseudo_classes（提到 solve 前：改 layout/transform/colors
+    /// 三类，本帧 solve+compute 全消费）⑦solve（读 rematch 后 taffy_style）
+    /// ⑧refresh_content_sizes ⑨compute_world_transforms（读 rematch 后 transform+scroll_pos）
+    /// ⑩build_render_nodes
     ///
-    /// **compute_world_transforms 时机**：process/scroll 之后、render 之前，每帧 1 次
-    /// （不再"末尾 + 首帧 guard"）。scroll_pos 同帧进 world matrix（spec §9.3）。
+    /// **compute_world_transforms 时机**：rematch 之后、render 之前，每帧 1 次。
+    /// transform 改由 rematch 写 style.transform → compute 同帧读 → world 含缩放。
+    /// scroll_pos 同帧进 world matrix（spec §9.3）。
     /// **1 帧延迟语义**：hit_test 用上帧 world_transforms。首帧 world_transforms 为空，
     /// hit_test bounds guard 拦截（越界返 None → 未命中，零回归安全）。仲裁在 Down 未滚动前
     /// 不影响；clip 门控用 viewport 固定主导，不依赖每帧变换精度。
@@ -429,13 +430,7 @@ impl Stage {
         if let Some(req) = self.pending_focus_request.take() {
             crate::input::focus_node(scene, req, &mut out);
         }
-        // 1. solve（先解 layout_rect，hit_test 要用）
-        // D17：核心知图尺寸（打包期 PNG IHDR 静态，存 Stage.image_sizes）。solve 查尺寸表算
-        // Image intrinsic（三档：CSS > 真实像素 > 64×64）。不知图集（运行时纹理/UV 归 Unity）。
-        solve(scene, &self.font, self.root_size, &self.image_sizes);
-        // 2. content_size 填充（solve 后 content_size/viewport/overlap）
-        crate::scroll::refresh_content_sizes(scene);
-        // 3. process（仲裁 + 拖拽跟手写 scroll_pos）
+        // 1. process（仲裁 + 拖拽跟手写 scroll_pos）
         // hit_test 读上帧 world_transforms（1 帧延迟，已认）——首帧 world_transforms 为空，
         // hit_test bounds guard 拦截（越界返 None → 未命中，零回归安全）。
         // 借用冲突解：process 借 &mut scene + &input——scene 与 pending_input 都是 self 字段，
@@ -443,20 +438,26 @@ impl Stage {
         let input = std::mem::take(&mut self.pending_input);
         let mut ptr_out = self.pointer_state.process(scene, &input);
         out.append(&mut ptr_out);
-        // 4. scroll.update（消费 pending_wheel + 惯性/回弹 advance）
+        // 2. scroll.update（消费 pending_wheel + 惯性/回弹 advance）
         let wheels = std::mem::take(&mut self.pending_wheel);
         for w in &wheels {
             crate::scroll::apply_wheel_to_hit(scene, *w);
         }
         crate::scroll::advance_all(dt, scene);
-        // 5. 键盘事件（keydown/up + Tab 导航 + FocusIn/Out）
+        // 3. 键盘事件（keydown/up + Tab 导航 + FocusIn/Out）
         let keys = std::mem::take(&mut self.pending_keys);
         crate::input::process_keys(scene, &keys, &mut out);
-        // 6. compute_world_transforms（读 scroll_pos，offset 同帧生效）
-        crate::scene::transform::compute_world_transforms(scene);
         self.last_events = out;
-        // 7. 伪类重匹配（按新 hover/active/focused 改 Node.style——视觉变本帧 render 吃到）
+        // 4. 伪类重匹配（提到 solve 前：改 taffy_style/transform/colors，本帧全部消费）
         rematch_pseudo_classes(scene);
+        // 5. solve（读 rematch 后的 taffy_style → layout_rect）
+        // D17：核心知图尺寸（打包期 PNG IHDR 静态，存 Stage.image_sizes）。solve 查尺寸表算
+        // Image intrinsic（三档：CSS > 真实像素 > 64×64）。不知图集（运行时纹理/UV 归 Unity）。
+        solve(scene, &self.font, self.root_size, &self.image_sizes);
+        // 6. content_size 填充（solve 后 content_size/viewport/overlap）
+        crate::scroll::refresh_content_sizes(scene);
+        // 7. compute_world_transforms（读 rematch 后 transform + scroll_pos → world）
+        crate::scene::transform::compute_world_transforms(scene);
         // 8. 渲染（+ 合成 scrollbar）。传上帧 hash 基线，未变节点 emit Unchanged；
         //    返回新 hash 存 self.prev_node_hashes 供下帧比。
         // D17：build_render_nodes 查 Stage.image_sizes 算九宫格 UV（slice_px / src_px）。
@@ -881,6 +882,57 @@ mod tests {
         let content_id = scene.get(scene.roots[0]).unwrap().children[0];
         let (_x, y) = scene.world_transforms[content_id.index()].apply_point(0.0, 0.0);
         assert!(y != 0.0, "拖拽同帧进 world matrix：y={}", y);
+    }
+
+    /// 支柱1：rematch 提到 solve/compute 前 → :active{scale} 当帧 world 即含缩放。
+    /// 回归 B1：旧顺序 compute 在 rematch 前 → 当帧 world 无 scale（仍是 identity）。
+    /// 走包路径（load_package → instantiate），因为 dynamic_rules 由打包器提取进 scene。
+    #[test]
+    fn active_scale_visible_same_frame() {
+        let font_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/DejaVuSans.ttf"
+        );
+        let html = r#"<div id="b" class="btn">x</div>"#;
+        let css = ".btn{width:100px;height:100px;} .btn:active{transform:scale(0.5);}";
+        let (pkg_bytes, _) = pkg_bytes_from_inline(html, css);
+
+        let mut stage = Stage::new(font_path, (200.0, 200.0)).expect("stage");
+        stage.load_package("bag", &pkg_bytes).unwrap();
+        stage.ensure_scene();
+        let comp_root = stage.instantiate("bag", "scene").unwrap();
+        stage.scene.as_mut().unwrap().roots.push(comp_root);
+        // warmup tick：hit_test 读上帧 world_transforms（1 帧延迟，首帧空）
+        stage.tick_and_render();
+        // 找到 btn NodeId（comp_root 就是 .btn div）
+        let bid = {
+            let scene = stage.scene.as_ref().unwrap();
+            scene
+                .nodes
+                .values()
+                .find(|n| n.id_attr.as_deref() == Some("b"))
+                .unwrap()
+                .id
+        };
+        // Feed Down 事件触发 active 状态（PointerState::recompute_active 设置 active=true）
+        // 注意：warmup tick 已算 world_transforms，hit_test 可命中。
+        stage.set_input(&[crate::input::PointerEvent {
+            kind: crate::input::PointerKind::Down,
+            x: 50.0,
+            y: 50.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }]);
+        // 本帧 tick：process 设 active → rematch 应在 compute 前生效 → world m_a=0.5，非 identity(1.0)
+        stage.tick_and_render();
+        let scene = stage.scene.as_ref().unwrap();
+        let wm = scene.world_transforms[bid.index()];
+        assert!(
+            (wm[0] - 0.5).abs() < 1e-3,
+            "active scale 当帧进 world：m_a=0.5，实={}",
+            wm[0]
+        );
     }
 
     /// T4：compute_world_transforms 在 render 前每帧跑（不再"末尾+首帧 guard"）。

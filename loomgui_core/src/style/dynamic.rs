@@ -181,10 +181,8 @@ fn match_chain_with_state(
 /// 全量节点重匹配（仅动态规则子集）。每节点从 base_style 重起，
 /// 收集命中的动态规则（match_element_with_state），按 specificity 升序排
 /// （高 specificity 后 apply 胜出）→ apply_decl 叠加 → 写 Node.style。
-/// 返回是否有任何节点 layout 字段变（taffy_style + order）。solve 每帧全量，
-/// 返回值仅供观测/测试，不驱动 solve。
-pub fn rematch_pseudo_classes(scene: &mut Scene) -> bool {
-    let mut any_layout_dirty = false;
+/// solve 每帧全量，无需 dirty 驱动。
+pub fn rematch_pseudo_classes(scene: &mut Scene) {
     // 预提取 specificity 元组 + owned rule 副本（避免借 scene.dynamic_rules 跨 get_mut）。
     let rules_with_spec: Vec<(u32, u32, u32, DynamicRule)> = scene
         .dynamic_rules
@@ -218,16 +216,10 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) -> bool {
                 apply_decl(&mut new_style, &decl.prop, &decl.value);
             }
         }
-        // 对比 layout 字段（taffy_style + order）——taffy 0.5 Style 已 derive PartialEq
+        // 写 style
         let node = scene.get_mut(node_id).expect("live node");
-        let layout_changed =
-            new_style.taffy_style != node.style.taffy_style || new_style.order != node.style.order;
         node.style = new_style;
-        if layout_changed {
-            any_layout_dirty = true;
-        }
     }
-    any_layout_dirty
 }
 
 #[cfg(test)]
@@ -281,14 +273,13 @@ mod tests {
             .rules
             .push(rule(".btn:hover", "background-color", "#0000ff"));
         s.get_mut(bid).unwrap().hovered = true; // 模拟命中 diff 后状态
-        let changed = rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s);
         // background_color 是视觉字段，不触发 layout dirty
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
             Some([0.0, 0.0, 1.0, 1.0]),
             "hover → 蓝"
         );
-        assert!(!changed, "仅视觉变 → layout 不 dirty");
     }
 
     #[test]
@@ -327,8 +318,7 @@ mod tests {
             .rules
             .push(rule(".btn:hover", "width", "200px"));
         s.get_mut(bid).unwrap().hovered = true;
-        let changed = rematch_pseudo_classes(&mut s);
-        assert!(changed, "width 变 → layout dirty");
+        rematch_pseudo_classes(&mut s);
         // 验 style.taffy_style.size.width 被改
         use taffy::style::Dimension;
         assert!(matches!(
@@ -345,8 +335,7 @@ mod tests {
             .rules
             .push(rule(".btn:hover", "color", "#ff0000"));
         s.get_mut(bid).unwrap().hovered = true;
-        let changed = rematch_pseudo_classes(&mut s);
-        assert!(!changed, "color 是视觉字段 → 不 layout dirty");
+        rematch_pseudo_classes(&mut s);
         assert_eq!(s.get(bid).unwrap().style.color, [1.0, 0.0, 0.0, 1.0]);
     }
 
@@ -431,13 +420,12 @@ mod tests {
             .rules
             .push(rule(".btn:focus", "background-color", "#0000ff"));
         s.get_mut(bid).unwrap().focused = true;
-        let changed = rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
             Some([0.0, 0.0, 1.0, 1.0]),
             "focused → :focus 匹配 → 蓝"
         );
-        assert!(!changed, "background_color 视觉字段 → layout 不 dirty");
     }
 
     #[test]
@@ -500,13 +488,12 @@ mod tests {
             .rules
             .push(rule(".btn:hover", "background-image", "url(icons/home.png)"));
         s.get_mut(bid).unwrap().hovered = true;
-        let changed = rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_image.as_deref(),
             Some("icons/home.png"),
             "hover → background-image 生效"
         );
-        assert!(!changed, "background-image 视觉字段 → layout 不 dirty");
     }
 
     #[test]
@@ -518,13 +505,12 @@ mod tests {
             .rules
             .push(rule(".btn:hover", "background-size", "cover"));
         s.get_mut(bid).unwrap().hovered = true;
-        let changed = rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_size,
             crate::style::resolved::BackgroundSize::Cover,
             "hover → background-size:cover 生效"
         );
-        assert!(!changed, "background-size 视觉字段 → layout 不 dirty");
     }
 
     #[test]
@@ -536,13 +522,12 @@ mod tests {
             .rules
             .push(rule(".btn:hover", "border-radius", "8px"));
         s.get_mut(bid).unwrap().hovered = true;
-        let changed = rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s);
         // hover → border-radius:8px 生效（四角 h=v=Length(8)）
         let bc = &s.get(bid).unwrap().style.border_radius.corners;
         for c in bc {
             assert_eq!(c.h, taffy::style::LengthPercentage::Length(8.0), "hover → border-radius 水平 8px");
             assert_eq!(c.v, taffy::style::LengthPercentage::Length(8.0), "hover → border-radius 垂直 8px");
         }
-        assert!(!changed, "border-radius 视觉字段 → layout 不 dirty");
     }
 }
