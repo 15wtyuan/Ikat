@@ -226,8 +226,8 @@ namespace LoomGUI
                 if (needRebuild)
                 {
                     blob.ReadText(i, out int fontSize, out Color textColor, out GlyphData[] glyphs);
-                    float nodeAlpha = blob.Alpha(i);
-                    var seg = TextRasterizer.BuildMesh(font, fontSize, textColor, nodeAlpha, glyphs);
+                    // alpha 走 _Alpha uniform（T6 剥离），BuildMesh 不再烤 nodeAlpha（否则与 _Alpha 双乘）。
+                    var seg = TextRasterizer.BuildMesh(font, fontSize, textColor, 1f, glyphs);
                     UploadMesh(ro, seg);
                     ro.Mesh.RecalculateBounds();
                     ro.LastFontVersion = TextRasterizer.FontVersion;
