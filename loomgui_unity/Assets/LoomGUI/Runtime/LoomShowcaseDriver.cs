@@ -110,7 +110,7 @@ namespace LoomGUI
             string path = System.IO.Path.Combine(Application.streamingAssetsPath, fileName);
             if (!System.IO.File.Exists(path))
             {
-                Debug.LogError($"[Showcase] pkg.bin 不存在：{path}（用 LoomPackageManagerWindow 打包）");
+                Debug.LogError($"[Showcase] pkg.bin 不存在：{path}（用 LoomGUI > Settings 配置并打包）");
                 return null;
             }
             return System.IO.File.ReadAllBytes(path);
