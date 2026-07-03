@@ -39,7 +39,7 @@ namespace LoomGUI
 
         // showcase 包名（LoadPackage 用）+ pkg.bin 文件名（StreamingAssets 下）。
         const string ShowcasePkg = "showcase";
-        const string ShowcasePkgFile = "loom_showcase.pkg.bin";
+        const string ShowcasePkgFile = "showcase.pkg.bin";
 
         // === 按页 listener 注册表（§7.5）===
         // 当前页注册的 listener：nodeId → [(eventType, callback)]。切页前遍历逐个 RemoveListener。
@@ -124,7 +124,7 @@ namespace LoomGUI
             string path = System.IO.Path.Combine(Application.streamingAssetsPath, fileName);
             if (!System.IO.File.Exists(path))
             {
-                Debug.LogError($"[Showcase] pkg.bin 不存在：{path}（用 LoomPackageManagerWindow 打包）");
+                Debug.LogError($"[Showcase] pkg.bin 不存在：{path}（用 LoomGUI > Settings 配置并打包）");
                 return null;
             }
             return System.IO.File.ReadAllBytes(path);

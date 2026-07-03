@@ -66,8 +66,6 @@
 | `margin` | 1-4 值 px/%/auto | mapping.rs:331-340 | 【实证】 |
 | `border`/`border-width` | 简写只取宽度（color/style 丢） | mapping.rs:341-352 | 【实证·待测简写 color 丢弃】 |
 | `aspect-ratio` | number | mapping.rs:537-542 | 【实证】 |
-| `position` | `relative`（默认）/`absolute`（v1.4-b 脱离流）；`fixed`/`sticky` 静默忽略 | mapping.rs:557-558 | 【实证】 |
-| `top`/`right`/`bottom`/`left` | px/%（仅 position:absolute 时生效） | mapping.rs:557-558 | 【实证】 |
 
 ### 2.2 视觉属性
 
@@ -104,7 +102,7 @@
 | 属性 | 实际行为 | 标注 |
 |---|---|---|
 | `position:relative` | 靠 taffy 默认 Relative 生效，写不写一致（无 inset 偏移） | 【推断·待测】 |
-| `position:fixed/sticky` | 静默忽略，position 保持默认 Relative | 【实证】 |
+| `position:absolute/fixed/sticky` | 静默忽略，position 保持默认 Relative，**不脱离流** | 【实证】 |
 | `display:grid` | 非 none 落 Flex，grid 布局不生效 | 【实证】 |
 | `float` | 静默忽略 | 【实证】 |
 | `align-content` | 无 handler，静默忽略 | 【实证】 |
@@ -160,7 +158,7 @@
 
 `loomgui_core/tests/fence_contract.rs` 是围栏契约的可执行真相源。它显式枚举：
 - **支持项**：写进去断言生效（映射出非默认值 / 期望布局结果）。
-- **围栏外项**：写进去断言不改变布局 / 被忽略（如 `display:grid` 落 Flex、`float` 无效）。
+- **围栏外项**：写进去断言不改变布局 / 被忽略（如 `position:absolute` 不脱离流、`display:grid` 落 Flex、`float` 无效）。
 
 本 `fence.md` 是测试的人类可读副本。**两者不一致时测试赢**；文档过时仅是可读性问题，不致命。
 
@@ -224,6 +222,7 @@ open-design Chromium iframe 预览 ≠ taffy 渲染。AI 须分清：
 **不可信**（Chrome ≠ LoomGUI，别按预览调）：
 - **margin 控间距**：Chrome（block flow）折叠 margin、LoomGUI（flex）求和不折叠。**子项间距用 `gap`**，别用 margin。
 - **文本换行/像素级**：Chrome 文本引擎 vs LoomGUI（unicode-linebreak），换行点/塞文本宽度会偏。
+- **`position:absolute`**：Chrome 脱离流、LoomGUI 不脱离（围栏外静默忽略）。预览会骗 AI。
 - **`display:grid`**：Chrome 渲染 grid、LoomGUI 落 Flex。预览会骗 AI。
 - **`@media` 响应式**：Chrome 响应、LoomGUI 用参考分辨率缩放不响应 @media。
 

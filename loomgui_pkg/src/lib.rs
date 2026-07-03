@@ -184,7 +184,7 @@ fn serialize_children(el: &scraper::ElementRef, out: &mut String) {
 /// - `source_dir`：包源目录（html + res 所在）。
 /// - `pkg_name`：包名（当前未进 pkg.bin header，供 CLI 日志用；未来版本号/元数据可扩展）。
 /// - `html_files`：要打包的 HTML 文件名列表（相对 sourceDir，含 .html 扩展名）。
-/// - `res_dir`：资源目录名（默认 res，对应 spec D10；归一化 path 去此前缀）。
+/// - `res_root`：资源根目录路径（如 `Assets/LoomUI/res`；res 目录名从中推导，归一化 path 去此前缀）。
 ///
 /// 每 HTML 独立：抽 CSS → 剥 style/link → parse_html → parse_css → resolve_styles →
 /// build_scene → scene_to_template（归一化 src 进 manifest）→ 收 (组件名, nodes, dynamic_rules)。
@@ -193,8 +193,9 @@ pub fn pack(
     source_dir: &Path,
     _pkg_name: &str,
     html_files: &[String],
-    res_dir: &str,
+    res_root: &Path,
 ) -> Result<PackedPackage, String> {
+    let res_dir = res_root.file_name().and_then(|s| s.to_str()).unwrap_or("res");
     // owned 生命周期：nodes/dynamic 需在 write_package 借用时存活，故先全部收集进 owned Vec。
     let mut owned: Vec<(String, Vec<TemplateNode>, loomgui_core::style::dynamic::DynamicRuleTable)> =
         Vec::with_capacity(html_files.len());
@@ -225,9 +226,8 @@ pub fn pack(
     }
 
     // D17：对每个 manifest path 读 PNG IHDR 填真实尺寸 w/h。
-    // path 是相对 res_dir 的归一化路径（如 "icons/skin.png"），绝对路径 = source_dir/res_dir/path。
+    // path 是相对 res_dir 的归一化路径（如 "icons/skin.png"），绝对路径 = res_root/path。
     // 非 PNG / 读失败 → 0/0（核心 measure fallback 64×64）。
-    let res_root = source_dir.join(res_dir);
     for entry in &mut manifest {
         let abs = res_root.join(&entry.path);
         let (w, h) = read_png_size(&abs);

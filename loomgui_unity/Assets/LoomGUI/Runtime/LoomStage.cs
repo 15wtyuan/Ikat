@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 using System.Text;
 using LoomGUI.Bindings;
 using UnityEngine;
-using UnityEngine.U2D;   // SpriteAtlas（v1.4-a T8 path→Sprite 查询）
 
 namespace LoomGUI
 {
@@ -42,10 +41,8 @@ namespace LoomGUI
         // 须与 _font（Unity 光栅用）是同一份 ttf（跨平台一致性）。
         [SerializeField] string _fontFile = "DejaVuSans.ttf";
 
-        // v1.4-a T8：Sprite Atlas 接入。开发者建 SpriteAtlas asset（把 res/ 下 Sprite 划进去），
-        // Inspector 拖入此列表。LoomStage Awake 时注册进 SpriteResolver，MirrorPool 按 path 查 Sprite。
-        // 多图集：path 路由到对应 atlas 是 Unity 内部事（核心不感知）。
-        [SerializeField] List<SpriteAtlas> _spriteAtlases = new();
+        // 图集路由：Awake 时从全局 LoomSettings（Resources.Load 自动找）建 folder→atlas 映射。
+        // 不在 Inspector 手配（配置总会遗忘），配置资产由 LoomSettingsWindow 维护。
 
         // on-screen FPS 读数。stress500 已砍（v1.4-a 改包加载模型，原内联 html fixture 无加载路径；
         // stress 测试改用内存 pkg + instantiate）。本开关保留供 driver 手动开 FPS 显示。
@@ -382,11 +379,9 @@ namespace LoomGUI
             _pool = new MirrorPool();
             _nhm = new NativeHostManager(); _nhm.Init(transform);
 
-            // v1.4-a T8：path→Sprite 查询（替代 LoadAtlas/_texMap）。注册 Inspector 配的 SpriteAtlas。
-            // 开发者建 SpriteAtlas asset（res/ 下 Sprite 划进去），Inspector 拖入 _spriteAtlases。
-            // MirrorPool 按 blob path_idx→path→GetSprite 查 Sprite（懒查 + 缓存）。
+            // 图集路由：从全局 LoomSettings 建 folder→atlas 映射（Resources.Load 自动找，不手配）。
             _sprites = new SpriteResolver();
-            if (_spriteAtlases != null) _sprites.RegisterAtlases(_spriteAtlases);
+            _sprites.Init(LoomSettings.GetOrCreateDefault());
 
             EnsureFont();
             // Font.textureRebuilt 是静态事件：atlas 异步 rebuild 时 glyph UV 变。
@@ -586,8 +581,8 @@ namespace LoomGUI
             _pool?.Clear();
             _nhm?.Clear();
             _mm?.Clear();
-            // v1.4-a T8：SpriteResolver 是纯缓存（Dictionary + List<SpriteAtlas>），无 UnityEngine.Object
-            // 持有（SpriteAtlas/Sprite 由开发者 asset 持有，LoomStage 不销毁）。清缓存即可。
+            // SpriteResolver 是纯缓存（folder→atlas 映射来自 LoomSettings），无 UnityEngine.Object
+            // 持有（atlas 由 LoomSettings asset 持有，LoomStage 不销毁）。清缓存即可。
             _sprites?.Clear();
             // 归还 ArrayPool 租用的 _frameBuf。
             if (_frameBuf != null)

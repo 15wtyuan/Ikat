@@ -56,7 +56,7 @@ cp target/release/loomgui_ffi_c.dll loomgui_unity/Assets/Plugins/LoomGUI/loomgui
 
 ## 架构（大局——权威契约读 `docs/design/main-design.md`）
 
-Workspace 成员：`loomgui_core`、`loomgui_pkg`、`loomgui_ffi_c`（+ `loomgui_unity` Unity 工程、+ `editor/`、+ `samples/`）。
+Workspace 成员：`loomgui_core`、`loomgui_pkg`、`loomgui_ffi_c`（+ `loomgui_unity` Unity 工程）。
 
 **分层、单向数据流、引擎对象不进核心：**
 ```
@@ -90,7 +90,7 @@ HTML/CSS DSL → 打包器（构建期；复用核心 parse/style）
 
 LoomGUI 只支持 HTML/CSS 的**明确子集**，称"围栏"。这是项目漂移高发区。
 
-- **权威真相源 = `loomgui_core/tests/fence_contract.rs`**（可执行契约）。`docs/design/fence.md` 是人类可读副本；**不一致时测试赢**。`samples/CLAUDE.md` 带一份注入的围栏规则摘要给编辑器用。
+- **权威真相源 = `loomgui_core/tests/fence_contract.rs`**（可执行契约）。`docs/design/fence.md` 是人类可读副本；**不一致时测试赢**。编辑器用 `loomgui_unity/Assets/LoomUI/` 工作区 + `LoomGUI > Settings` 面板注入围栏规则。
 - **改围栏 = 改 `fence_contract.rs` 测试 + `fence.md`**，不改 `main-design.md` §3（那节只写哲学，避免漂移）。
 - **围栏门**：`cargo test -p loomgui_core fence_contract`——build .dll 前跑、改 `apply_decl`/`FENCE_TAGS`/选择器后跑。
 - 两类围栏外行为（均**测试锁定**，别靠 grep 推断）：围栏外标签 + 行内混排 → **编译期报错**（parse 失败、打包器拒收）。围栏外 CSS 属性（如 `position:absolute`、`clip-path`、`cursor`）→ **静默忽略**（`apply_decl` 返 `false`）。
@@ -102,7 +102,7 @@ LoomGUI 只支持 HTML/CSS 的**明确子集**，称"围栏"。这是项目漂�
 - **设计文档 vs 踩坑**：`docs/design/main-design.md`（设计契约/当前实现真相）、`docs/design/fence.md`（围栏）、`docs/roadmap/roadmap.md`（范围+机制草稿）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配，开工前读它查"具体怎么干 + 坑在哪"）、`docs/superpowers/specs|plans/`（历史 per-feature 记录）。
 - **Rust edition 2021**，依赖钉版本：`taffy 0.5`、`ttf-parser 0.20`、`cssparser 0.34`、`scraper 0.19`、`slotmap 1.1`、`csbindgen 1`。snapshot 测试用 `insta`。
 - `Cargo.lock` 入库（根级，尽管 `.gitignore` 有通用 `Cargo.lock` 行——它是被追踪的）。
-- `editor/` 是 v-other 编辑器工作流（open-design 壳 + `loomgui-editor` skill + 围栏规则注入）。`samples/` 是 v1-showcase 基线 + 动态树 demo（dyn-mail/leaderboard）+ 编辑器测试夹具。`samples/CLAUDE.md` 是编辑器生成的，gitignored。
+- 设计师工作区在 `loomgui_unity/Assets/LoomUI/`（showcase 打包源 + res 资源 + design-systems 组件库）。编辑器工作流用 `LoomGUI > Settings` 面板配置 + 初始化。
 - 用户只读中文——问答/选项/总结用中文；代码/commit 照旧英文。
 
 ## 调试技巧

@@ -1,102 +1,103 @@
-## Task 7 Report: LoomStage.cs 虚拟列表 driver API
+# Task 7 Report: config.json 导出 + exe 随插件发布
 
-**Status**: done
-**Commit**: `33e8aa5` (branch `worktree-v1.4b-absolute-virtual-list`)
+**Status**: Done
+**Commit**: `406e52a` on branch `worktree-workflow-atlas-rework`
 
-### 修改的文件
+---
 
-`loomgui_unity/Assets/LoomGUI/Runtime/LoomStage.cs` -- 在 `SetScrollPos`（line 126）后新增 25 行（5 个 public 方法）。
+## 改了什么
 
-### 5 个 driver API
-
-```csharp
-// v1.4-b：虚拟列表 driver API（转调 FFI，T5 生成）。
-public void SetContentSize(uint node, float w, float h)
-    => Native.loomgui_stage_set_content_size(_stage, node, w, h);
-
-public void ClearContentSizeOverride(uint node)
-    => Native.loomgui_stage_clear_content_size_override(_stage, node);
-
-public (float x, float y) GetScrollPos(uint node)
-{
-    float x = 0f, y = 0f;
-    unsafe { fixed (float* px = &x, py = &y) Native.loomgui_stage_get_scroll_pos(_stage, node, px, py); }
-    return (x, y);
-}
-
-public (float x, float y, float w, float h) GetNodeLayoutRect(uint node)
-{
-    float x = 0f, y = 0f, w = 0f, h = 0f;
-    unsafe { fixed (float* px = &x, py = &y, pw = &w, ph = &h)
-        Native.loomgui_stage_get_node_layout_rect(_stage, node, px, py, pw, ph); }
-    return (x, y, w, h);
-}
-
-public void SetReuseKey(uint node, uint key)
-    => Native.loomgui_stage_set_reuse_key(_stage, node, key);
-```
-
-### 5 个 P/Invoke 签名核对（LoomGUIBindings.cs）
-
-| LoomStage 方法 | 调的 P/Invoke | out 参数 |
+| 文件 | 操作 | 说明 |
 |---|---|---|
-| `SetContentSize` (L130) | `loomgui_stage_set_content_size(StageHandle*, uint, float, float)` | 无 |
-| `ClearContentSizeOverride` (L133) | `loomgui_stage_clear_content_size_override(StageHandle*, uint)` | 无 |
-| `GetScrollPos` (L138) | `loomgui_stage_get_scroll_pos(StageHandle*, uint, float*, float*)` | `float*` |
-| `GetNodeLayoutRect` (L146) | `loomgui_stage_get_node_layout_rect(StageHandle*, uint, float*, float*, float*, float*)` | `float*` x4 |
-| `SetReuseKey` (L151) | `loomgui_stage_set_reuse_key(StageHandle*, uint, uint)` | 无 |
+| `loomgui_unity/Assets/LoomGUI/Editor/LoomConfigExporter.cs` | 新建 | BuildJson + Export + RelativeFromWorkspace |
+| `loomgui_unity/Assets/LoomGUI/Tests/LoomConfigExporterTests.cs` | 新建 | Export_PathsRelativeToWorkspace 单测（1 个） |
+| `loomgui_unity/Assets/LoomGUI/Editor/LoomSettingsWindow.cs` | 修改 | 取消 `LoomConfigExporter.Export(_settings)` 桩注释（line 61） |
+| `loomgui_unity/Assets/LoomGUI/Editor/Tools/loomgui_pkg.exe` | 新建 | release build exe，1.3 MB |
 
-全部 5 个 P/Invoke 用 `float*` 非 `ref float`（与 brief 差异已纠正）。
-
-### grep 验证
+## cargo build
 
 ```
-$ grep -n 'SetContentSize\|ClearContentSizeOverride\|GetScrollPos\|GetNodeLayoutRect\|SetReuseKey' LoomStage.cs
-129:        public void SetContentSize(uint node, float w, float h)
-132:        public void ClearContentSizeOverride(uint node)
-135:        public (float x, float y) GetScrollPos(uint node)
-142:        public (float x, float y, float w, float h) GetNodeLayoutRect(uint node)
-150:        public void SetReuseKey(uint node, uint key)
+cargo build --release -p loomgui_pkg -> Finished `release` profile in 27.93s
 ```
 
-5 个方法全部在 LoomStage.cs 中，各自调正确的 `Native.loomgui_stage_*` P/Invoke。
-
-### concerns
-
-- 无 `_stage == null` guard（3 个 expression-bodied 方法直接透传 `_stage` 给 FFI）。依赖 Rust FFI 侧 null 守卫（坑 102 要求 FFI 入口不 panic）。如果 Rust 侧未对 null `StageHandle` 做防御，null _stage 时 SetContentSize/ClearContentSizeOverride/SetReuseKey 会传空指针进 FFI 导致 crash。建议后续在 Rust 侧确认这些 FFI 入口有 null 检查，或在 C# 侧补 guard。
-- `GetScrollPos` 与已有 `SetScrollPos` 方法名相邻但功能不同（读写分离），无命名冲突。
-- LoomStage.cs class 已标 `sealed unsafe class`，`fixed` 语句在 `unsafe { }` 块内语法正确。
-
-### 家里机待编译项
-
-- Unity 打开 `loomgui_unity/` → PlayMode 验证编译通过 + 无运行时异常。
-- 确认 `loomgui_ffi_c.dll` 已是最新（T5 产出），不然 5 个 API 调用会 DllNotFoundException/EntryPointNotFound。
-
-## Fix: _stage null guard
-
-**Commit**: `f07ce4d`
-
-### 问题
-
-T7 review 发现 5 个新 driver API 缺少 `if (_stage == null) return;` guard，与 LoomStage.cs 现有 20 处 guard 不一致。
-
-### 修改
-
-`loomgui_unity/Assets/LoomGUI/Runtime/LoomStage.cs` -- 5 个方法加 guard：
-
-- **SetContentSize**: expression-bodied → block + `if (_stage == null) return;`
-- **ClearContentSizeOverride**: expression-bodied → block + `if (_stage == null) return;`
-- **SetReuseKey**: expression-bodied → block + `if (_stage == null) return;`
-- **GetScrollPos**: 在 unsafe 块前加 `if (_stage == null) return default;`
-- **GetNodeLayoutRect**: 在 unsafe 块前加 `if (_stage == null) return default;`
-
-`return default;` 对值元组 `(float,float)` 返回 `(0,0)`，对 `(float,float,float,float)` 返回 `(0,0,0,0)` -- _stage null 时合理行为。
-
-### grep 确认
+## exe 拷贝确认
 
 ```
-$ grep -c 'if (_stage == null) return' LoomStage.cs
-25
+ls -l loomgui_unity/Assets/LoomGUI/Editor/Tools/loomgui_pkg.exe
+-rwxr-xr-x ... 1309696 Jul 3 18:21 loomgui_pkg.exe
 ```
 
-5 个方法各自有 guard，总共 25 处 `_stage == null` 检查，与现有 20 处 + 新增 5 处一致。
+## .gitignore 检查
+
+`.gitignore` 无 `.exe` 排除规则。`/**/*.dll` 规则只影响 `.dll`，不影响 `.exe`。exe 直接入库，无需白名单。
+
+## 语法核对
+
+代码按 brief 完整写入。`LoomConfigExporter` 在 `namespace LoomGUI.Editor`，引 `LoomSettings`（`namespace LoomGUI`，Runtime 层）。`BuildJson` 用 `RelativeFromWorkspace` 算相对路径，`Export` 写 `.claude/skills/loomgui-editor/config.json`。
+
+## 取消桩注释 grep
+
+```
+loomgui_unity/Assets/LoomGUI/Editor/LoomSettingsWindow.cs:61:
+    LoomConfigExporter.Export(_settings);
+```
+
+已取消注释，`// TODO Task 7` 行已移除。
+
+## fence_contract
+
+```
+cargo test -p loomgui_core --test fence_contract
+running 10 tests
+all 10 passed; 0 failed
+```
+
+## self-review
+
+- C# 代码照 brief 逐字写入，无 deviation。
+- `RelativeFromWorkspace` 用 `Uri.MakeRelativeUri`，Windows 路径转 Uri（`file://` 前缀 + 斜杠统一）正确。
+- `.exe` 的 `.meta` 未生成（本机无 Unity），Unity 首次打开项目会自动生成。不影响功能。
+- Unity 测试无法在本机跑（无 Unity），C# 编译由家里机 Unity 验证。代码结构与已有测试（LoomAtlasSyncTests.cs 等）一致。
+- 无 Rust 回归（fence_contract 10/10 通过，纯 C# 改动不触 Rust）。
+
+## Concerns
+
+1. **Unity 测试未跑** -- 本机无 Unity，C# 编不了。`Export_PathsRelativeToWorkspace` 依赖于 `ScriptableObject.CreateInstance`（Unity API）+ `Application.dataPath`，须 Unity Test Runner 里验证。代码逻辑与 brief 一致，但家里机验收是必需步骤。
+2. **exe 无 .meta** -- Unity 打开项目会自动生成 `.meta` 文件，届时需 commit。不影响运行。
+
+---
+
+## Fix: RelativeFromWorkspace trailing slash + test 断言修正
+
+**Commit**: `5e525e0`
+
+### 根因
+
+`RelativeFromWorkspace` 里 `Path.GetFullPath` 会剥末尾 `/`，导致 `MakeRelativeUri` 把 to 当文件而非目录：
+
+- `from` 已补 trailing slash：`.../Assets/LoomUI/`（目录语义正确）
+- `to` 原 `Assets/StreamingAssets/` 经 `Path.GetFullPath` 变成 `.../Assets/StreamingAssets`（无 trailing slash，被当文件）
+
+`MakeRelativeUri` 产 `../StreamingAssets`（无 trailing slash）。
+
+### 修复
+
+**LoomConfigExporter.cs**：`to` 补 trailing slash 的逻辑——在 `Path.GetFullPath` 之前记录 `targetDir` 是否以 `/` 或 `\` 结尾（`toIsDir`），之后若 `toIsDir && !to.EndsWith("/")` 则补 `/`。
+
+`exe_path` 的 to = `Assets/LoomGUI/Editor/Tools/loomgui_pkg.exe` 不以 `/` 结尾 → `toIsDir=false` → 不补 slash，产 `../LoomGUI/Editor/Tools/loomgui_pkg.exe`（文件，正确）。
+
+**LoomConfigExporterTests.cs**：`output_dir` 断言从 `../../StreamingAssets/` 改为 `../StreamingAssets/`。
+
+### 逻辑推演
+
+- `from` = `Assets/LoomUI/`（工作区根）
+- `to` = `Assets/StreamingAssets/`（pkgOutputDir）
+- 两者都在 `Assets/` 下，是兄弟目录
+- 相对路径 = `../`（上一级到 `Assets/`）+ `StreamingAssets/` = `../StreamingAssets/`
+- 1 级 `../`，非 2 级。brief 原断言 `../../StreamingAssets/` 是手工算错。
+
+### 语法核对
+
+- `targetDir.EndsWith("/")` / `targetDir.EndsWith("\\")` -- 读取参数原值（`Path.GetFullPath` 前），正确。
+- `toIsDir` 在 `Path.GetFullPath` 调用**前**赋值 -- 变量在作用域内，C# 顺序执行，不会用未初始化值。
+- `Uri.MakeRelativeUri` 接受 `file:///...` scheme URI -- Windows 路径转 URI 正确（`Path.GetFullPath` 产 `C:/...`，`new Uri(...)` 自动加 `file://`）。

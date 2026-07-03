@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.U2D;
@@ -5,93 +6,102 @@ using UnityEngine.U2D;
 namespace LoomGUI
 {
     /// <summary>
-    /// path → Sprite 查询（v1.4-a T8「核心不知图集」Unity 侧落地）。
+    /// path → Sprite 显式路由。核心不知图集，path 是归一化后的相对路径（如 "icons/home.png"）。
     ///
-    /// 核心只记图片相对 path（res 目录前缀归一化后的相对路径，如 "icons/skin.png"）；
-    /// 图集完全归 Unity（开发者建 SpriteAtlas asset，把 res/ 下的 Sprite 划进去）。
-    /// 本类维护 path→Sprite 缓存 + 已注册 SpriteAtlas 列表，懒查 SpriteAtlas.GetSprite。
-    ///
-    /// 查询策略（spec §5.3）：
-    ///   1. 缓存命中 → 直接返回。
-    ///   2. 缓存 miss → 遍历 registeredAtlases 调 GetSprite(name)。name 取 path 的
-    ///      文件名去扩展（"icons/skin.png" → "skin"）——Unity Sprite 命名规则：SpriteAtlas
-    ///      按 Sprite 资产名（不含目录/扩展）索引。命中则缓存 + 返回。
-    ///   3. 全 miss → fallback Sprite（missingSprite，紫色占位，不崩）。
-    ///
-    /// bg-image 同走此路径（background-image: url(icons/bg.png) 同样归一化 path）。
-    /// path 查不到 Sprite：Unity fallback，不崩；核心不报错（它不知图集存在）。
-    ///
-    /// SpriteAtlas 注入：LoomStage Inspector 配 List<SpriteAtlas>（开发者建 SpriteAtlas asset，
-    /// Inspector 拖入）。多图集：path 路由到对应 atlas 是 Unity 内部事（核心不感知）。
+    /// 路由：path 顶层子目录 → folder→atlas 映射表 → atlas.GetSprite(文件名去扩展)。
+    /// res 根图（无子目录）或子目录不在表 → 走 isDefault atlas。
+    /// miss 不缓存（修坑 104）——atlas 启动全加载，重查成本可控。
     /// </summary>
     public sealed class SpriteResolver
     {
+        readonly Dictionary<string, SpriteAtlas> _folderToAtlas = new();
         readonly Dictionary<string, Sprite> _cache = new();
-        readonly List<SpriteAtlas> _atlases = new();
+        SpriteAtlas _defaultAtlas;
         Sprite _missingSprite;
 
-        /// fallback Sprite（查不到 path 时返回）。为 null 时 GetSprite 返 null——
-        /// 调用方（MirrorPool）自会 fallback 到 Texture2D.whiteTexture。但 spec 要求"不崩"，
-        /// 故建议 LoomStage 注入一个紫色占位 Sprite；未注入则 null 透传，MirrorPool 走 fallback。
-        public Sprite MissingSprite
-        {
-            get => _missingSprite;
-            set => _missingSprite = value;
-        }
+        public Sprite MissingSprite { set => _missingSprite = value; }
+        public int AtlasCount => _folderToAtlas.Count;
+        /// 测试用：缓存条目数（miss 不增）。
+        public int CacheCount => _cache.Count;
 
-        /// 注册 SpriteAtlas（可多次调，追加进列表）。path 查询时遍历此列表。
-        public void RegisterAtlas(SpriteAtlas atlas)
+        /// 从 LoomSettings.atlasEntries 建 folder→atlas 映射表。
+        public void Init(LoomSettings settings)
         {
-            if (atlas != null && !_atlases.Contains(atlas))
-                _atlases.Add(atlas);
-        }
-
-        /// 批量注册。
-        public void RegisterAtlases(IEnumerable<SpriteAtlas> atlases)
-        {
-            if (atlases == null) return;
-            foreach (var a in atlases) RegisterAtlas(a);
-        }
-
-        /// 已注册 SpriteAtlas 数（调试/Inspector 显示用）。
-        public int AtlasCount => _atlases.Count;
-
-        /// 清缓存 + 清已注册 atlas（切场景/重载时调）。
-        public void Clear()
-        {
+            _folderToAtlas.Clear();
             _cache.Clear();
-            _atlases.Clear();
-            _missingSprite = null;
+            _defaultAtlas = null;
+            if (settings == null) return;
+            foreach (var entry in settings.atlasEntries)
+            {
+                if (entry == null || entry.atlas == null) continue;
+                if (entry.isDefault && _defaultAtlas == null) _defaultAtlas = entry.atlas;
+                foreach (var folder in entry.folders)
+                {
+                    if (string.IsNullOrEmpty(folder)) continue;
+                    // folder 是 Unity 路径如 Assets/LoomUI/res/icons → 子目录 key = 最末段 "icons"。
+                    string key = folder.TrimEnd('/', '\\');
+                    int sep = key.LastIndexOfAny(new[] { '/', '\\' });
+                    if (sep >= 0) key = key.Substring(sep + 1);
+                    if (!string.IsNullOrEmpty(key))
+                        _folderToAtlas[key] = entry.atlas;
+                }
+            }
         }
 
-        /// 仅清 path→Sprite 缓存（保留 atlas 注册）。SpriteAtlas 重建后调。
-        public void ClearCache() => _cache.Clear();
+        /// 测试用：直接注入映射表。
+        public void InitWithMap(Dictionary<string, SpriteAtlas> map, SpriteAtlas defaultAtlas)
+        {
+            _folderToAtlas.Clear();
+            _cache.Clear();
+            foreach (var kv in map) _folderToAtlas[kv.Key] = kv.Value;
+            _defaultAtlas = defaultAtlas;
+        }
 
-        /// path → Sprite 查询。
-        /// null/空 path → null（纯色无图）。查不到 → MissingSprite（亦可能为 null）。
         public Sprite GetSprite(string path)
         {
             if (string.IsNullOrEmpty(path)) return null;
             if (_cache.TryGetValue(path, out var cached)) return cached;
 
-            Sprite found = null;
-            // Sprite 命名规则：取文件名去扩展（"icons/skin.png" → "skin"）。
-            // Unity SpriteAtlas.GetSprite 按 Sprite 资产名（不含目录/扩展）索引。
             string spriteName = System.IO.Path.GetFileNameWithoutExtension(path);
-            foreach (var atlas in _atlases)
-            {
-                if (atlas == null) continue;
-                var sp = atlas.GetSprite(spriteName);
-                if (sp != null) { found = sp; break; }
-            }
+            SpriteAtlas atlas = ResolveAtlas(path);
+            Sprite found = atlas != null ? atlas.GetSprite(spriteName) : null;
 
-            // [DBG-IMG] path→Sprite 查询诊断（验完删）
-            UnityEngine.Debug.Log($"[IMG] path='{path}' name='{spriteName}' atlases={_atlases.Count} found={(found != null ? found.name : "null")}");
-            // 缓存（含 miss——避免每帧重复遍历 atlas 查同一条 miss path）。
-            // miss 时缓存 MissingSprite（可能为 null，仍缓存避免重复查）。
-            var result = found ?? _missingSprite;
-            _cache[path] = result;
-            return result;
+            if (found != null)
+            {
+                _cache[path] = found;   // 只缓存命中
+                return found;
+            }
+            // miss 不缓存（修坑 104）。
+            return _missingSprite;
+        }
+
+        /// path → atlas。顶层子目录查表；无子目录或 miss → default。
+        SpriteAtlas ResolveAtlas(string path)
+        {
+            string p = path.Replace('\\', '/');
+            int slash = p.IndexOf('/');
+            if (slash <= 0)
+            {
+                // 无子目录 → default
+                return _defaultAtlas ?? FirstAtlas();
+            }
+            string topDir = p.Substring(0, slash);
+            if (_folderToAtlas.TryGetValue(topDir, out var atlas)) return atlas;
+            return _defaultAtlas ?? FirstAtlas();
+        }
+
+        SpriteAtlas FirstAtlas()
+        {
+            foreach (var kv in _folderToAtlas) return kv.Value;
+            return null;
+        }
+
+        public void Clear()
+        {
+            _folderToAtlas.Clear();
+            _cache.Clear();
+            _defaultAtlas = null;
+            _missingSprite = null;
         }
     }
 }

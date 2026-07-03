@@ -1,12 +1,12 @@
 //! 诊断 §3.6 bg-image / §3.8 filter / §3.9 nineslice：
 //! dump rect / program / vcol / uv 区间 / color_matrix / verts，定位偏移、滤镜色差、slice 失真。
-//! pkg.bin 路径（load_package 读 StreamingAssets/loom_showcase.pkg.bin，验打包产物含 atlas UV）。
+//! pkg.bin 路径（load_package 读 StreamingAssets/showcase.pkg.bin，验打包产物含 atlas UV）。
 use loomgui_core::render::node::NodePayload;
 use loomgui_core::stage::Stage;
 
 fn main() {
     let font = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
-    let pkg_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../loomgui_unity/Assets/StreamingAssets/loom_showcase.pkg.bin");
+    let pkg_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin");
     let pkg = std::fs::read(pkg_path).expect("read pkg");
     let mut s = Stage::new(font, (1080.0, 1920.0)).expect("Stage::new");
     s.load_package("showcase", &pkg).expect("load_package");

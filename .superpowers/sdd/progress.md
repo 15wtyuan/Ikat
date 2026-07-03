@@ -1,21 +1,14 @@
-# v1.4-b SDD Progress Ledger
+# 工作流+图集重做 SDD Progress Ledger
 
-Plan: docs/superpowers/plans/2026-07-03-v1.4b-absolute-virtual-list.md
-Spec: docs/superpowers/specs/2026-07-03-v1.4b-absolute-virtual-list-design.md
-Worktree: .claude/worktrees/v1.4b-absolute-virtual-list (branch worktree-v1.4b-absolute-virtual-list)
-BASE=f223ad5
+Plan: docs/superpowers/plans/2026-07-03-workflow-atlas-rework.md
+Spec: docs/superpowers/specs/2026-07-03-workflow-atlas-rework-design.md
+Worktree: .claude/worktrees/workflow-atlas-rework (branch worktree-workflow-atlas-rework)
+BASE=be94766
 
 ## Tasks
-- T1: complete (commits f223ad5..64aaf29, review clean — Spec ✅ + Approved, 1 Minor 测试注释措辞) — absolute 围栏
-- T2: complete (commits 64aaf29..d0070fa, review clean — Spec ✅ + Approved, 1 Minor brief 措辞) — 文档 + tips overlay
-- T3: complete (commits d0070fa..a329c26, review clean — Spec ✅ + Approved, 1 Minor 测试模块位置) — reuse_key 字段
-- T4: complete (commits a329c26..e3921bd, review clean after fix — clear_content_size_override 补齐) — scroll 3 FFI 口子
-- T5: complete (commits e3921bd..57ce6ed, review clean — 5 FFI + blob v9 + .dll 入库导出确认) — FFI 入口 + blob v9
-- T6: complete (commits 57ce6ed..c34ac7e, review clean after fix — LastNodeId 复用更新) — FrameBlob + MirrorPool 双 dict
-- T7: in_progress — LoomStage driver API
-- T8: pending — driver 列表 demo
-- T9: pending — 文档校对
-
-## Notes
-- 本机做 T1-T7（Rust + C# 语法核对 + 重编 .dll）；T8 driver demo 实机验收 + T8/T9 部分需家里机。
-- 改 parse-time（T1 mapping.rs）必重打 pkg（坑 66）——T8 重打。
+- T1: complete (commits be94766..334cef4, review clean) — LoomSettings 配置类 + 删旧 LoomPackageSettings/LoomPackageManagerWindow + driver 日志修
+- T2: complete (commits 334cef4..9fbda05, review clean) — pack 加 res_root 参数 + CLI --res-root + 8 测试改 + res 迁 LoomUI 根. Minor 未修：--res-root 丢空值 filter（功能等价）/ res_dir 推导重复 lib+main（小 CLI 不值得提 helper）
+- T3: complete (commits 9fbda05..c8afb5a, review clean) — SpriteResolver 显式路由+miss不缓存+删DBG-IMG+3测试. Minor: 循环内 char[] 分配. ⚠️待家里机: 空 atlas.GetSprite 行为/MissingSprite set-only 无读方/ClearCache 移除. LoomStage 编译断点留 T4 修
+- T4: complete (commits c8afb5a..986082a, review clean) — LoomStage 砍 _spriteAtlases + using U2D, 改 Init(LoomSettings.GetOrCreateDefault()). 修 T3 编译断点. ⚠️待家里机: Unity 编译/PlayMode
+- T5: complete (commits 986082a..b699da5, review clean after fix) — LoomSettingsWindow 三 tab + LoomExePath + 3 桩注释. Fix: --res→--res-root 绝对路径 + Process stdout/stderr 死锁修. ⚠️待家里机: Unity 编译/PlayMode
+- T6: complete (commits b699da5..a6dcf52, review clean after fix) — LoomAtlasSync 同步 packables(修B2) + 2测试 + 取消T5桩. Fix: new SpriteAtlas→CreateInstance/ToAssetPath StartsWith/删scannedSprites/删SyncEntry settings参. ⚠️待家里机: Unity编译/SetPackables行为
