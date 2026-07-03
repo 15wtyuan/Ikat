@@ -24,7 +24,7 @@ v1 架构走通 + 桌面可演示（Win/Mac Mono）。已交付：渲染/文本/
 cargo build -p loomgui_core
 cargo test  -p loomgui_core
 
-# 打包器（HTML+CSS+资源 → .pkg.bin + 图集）
+# 打包器（HTML+CSS+资源 → .pkg.bin）
 cargo build -p loomgui_pkg
 
 # FFI（C ABI，csbindgen 生成 C# 绑定）
@@ -33,7 +33,7 @@ cargo build -p loomgui_ffi_c
 
 Unity 后端：用 Unity 6.5 打开 `loomgui_unity/`，PlayMode 加载 `.pkg.bin` 渲染。
 
-示例见 `samples/`（v1-showcase 基线 + dyn-mail/leaderboard 动态树 demo + editor 测试场）。
+示例见 `loomgui_unity/Assets/LoomUI/showcase/`（showcase 打包源）。
 
 ## 文档
 
@@ -45,11 +45,9 @@ Unity 后端：用 Unity 6.5 打开 `loomgui_unity/`，PlayMode 加载 `.pkg.bin
 | 目录 | 职责 |
 |---|---|
 | `loomgui_core/` | Rust 核心（解析/样式/布局/场景图/渲染状态/事件/动画/文本，引擎无关纯库） |
-| `loomgui_pkg/` | 打包器 CLI（HTML+CSS+资源 → `.pkg.bin` + 图集，复用 core 的 parse 层） |
+| `loomgui_pkg/` | 打包器 CLI（HTML+CSS+资源 → `.pkg.bin`，复用 core 的 parse 层） |
 | `loomgui_ffi_c/` | C ABI 导出（csbindgen，Rust ↔ C# P/Invoke） |
 | `loomgui_unity/` | Unity 6.5 URP 后端（GameObject 镜像 + DrawState 缓存 + 输入采集） |
-| `editor/` | v other 编辑器工作流模板（open-design 壳 + skill + 围栏规则注入） |
-| `samples/` | 示例 + editor 测试场（v1-showcase / dyn-mail / leaderboard / design-systems 夹具） |
 | `docs/` | 设计 / 路线 / 文档 |
 
 核心可编译为 WASM（给编辑器）和 C ABI（给引擎），同一份代码。参考实现：FairyGUI-unity（`temp/FairyGUI-unity/`，渲染/对象模型/动画的原理参考）。

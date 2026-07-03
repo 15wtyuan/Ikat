@@ -205,7 +205,7 @@
 
 | 消费者 | 位置 | 内容 |
 |---|---|---|
-| editor 围栏规则（注入设计师工作区） | `editor/rules/claude/CLAUDE.md.tmpl` + `editor/skill/loomgui-editor/references/fence.md` | 围栏清单 + 预览可信清单（roadmap §1.3） |
+| editor 围栏规则（注入设计师工作区） | Unity 插件 Editor Resources 注入（`LoomWorkspaceInitializer`） | 围栏清单 + 预览可信清单（roadmap §1.3） |
 | v1 范围冻结 | `docs/roadmap/roadmap.md` §1.2 | 引用 fence.md + 标注 v1 冻结子集 / v1.x 扩展 |
 | 设计契约 | `docs/design/main-design.md` | 引用 fence.md 为围栏权威源 |
 

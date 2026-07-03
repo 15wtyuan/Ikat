@@ -103,17 +103,13 @@ v1 还没有编辑器/WASM 渲染，用 **open-design Chromium 兜底**：围栏
 
 ## 3. v other — 编辑器工作流（独立并行，不阻塞主线）
 
-**壳 = open-design 桌面 app**（不自建；Apache-2.0；nexu-io；agent-driven 生成器；插件架构，不改源码）。不选 design.md（Google）：类别错配（token 字典非编辑器）。不自建壳：复用 open-design 省项目管理/对话/导出/部署基建。
+Unity 内 C# 实现。`LoomSettingsWindow`（`LoomGUI > Settings` 面板）提供工作区 tab：
+1. **工作区初始化**：`LoomWorkspaceInitializer` 在目标工作区生成 `config.json` + 注入围栏规则 + skill（从 `Editor Resources` 拷贝模板）。
+2. **config.json**：记录工作区根路径 + res 根 + 输出路径；AI harness（Claude Code 等）读取它定位 `loomgui_pkg.exe` + 打包参数。
+3. **open-design 导入**：初始化后的工作区直接用 `od project import <workspace>` 导入，AI 在 cwd 读 `CLAUDE.md` + `.claude/skills/` 自动工作。
+4. **打包 CLI**：`loomgui_pkg.exe`（落位 `Editor/Tools/`）做验证+打包，`--res-root` 指 res 绝对路径。AI 调它做围栏验证→自纠→产出 `.pkg.bin`。
 
-**机制**（调研确认）：`od project import <baseDir>` 导入目录为工作区 → daemon 把 project cwd = baseDir → open-design spawn harness（Claude Code 等）在该 cwd → harness 自动读 cwd 的 `CLAUDE.md` + `.claude/skills/`。
-
-**LoomGUI editor 层**（shell-agnostic，模板源 `editor/`，init 脚本注入设计师工作区）：
-1. **init 脚本**（`editor/init.mjs`，Node 单文件）：交互输工作区/输出/harness → 拷围栏规则 + skill 进目标工作区。CLAUDE.md 增量合并（标签包裹，不覆盖用户已有）。
-2. **围栏规则**（`editor/rules/<harness>/CLAUDE.md.tmpl`，三 harness：claude/opencode/codex）：围栏权威清单见 fence.md。AI 守围栏生成 HTML+CSS。
-3. **skill**（`editor/skill/loomgui-editor/`，封装 loomgui_pkg 不暴露）：教 AI 围栏生成 + 跑 `pack.mjs` 验证+打包（违规非零退出 AI 自纠，合规产出 pkg.bin）。**严 polyfill 固化**：SKILL 强制 head 内联 polyfill（防设计师漏抄预览塌）。
-4. **打包桥**：`loomgui_pkg` CLI（验证+打包合一）。
-
-**预览妥协**：open-design Chromium iframe ≠ taffy（字体度量/flex/margin 折叠/position:absolute 分歧）。skill 教"信围栏规则别信预览不可信项"（fence.md §6）；真实靠 Unity 验（家里机）。v2 WASM 跑核心做零偏差预览。
+**预览**：Unity PlayMode 加载 `.pkg.bin` 做真实渲染验收。v2 WASM 跑核心做零偏差预览。
 
 **围栏验证**（单一真相源）：`loomgui_core/tests/fence_contract.rs` 可执行围栏契约。`cargo test -p loomgui_core fence_contract` 是防漂移门。
 
