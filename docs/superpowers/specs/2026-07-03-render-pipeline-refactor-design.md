@@ -175,7 +175,7 @@ blob.rs:104-105 对纯平移节点把顶点 re-base 成局部坐标（减 tx/ty�
 |---|---|---|---|
 | world_matrix (m_a..m_ty) | header_hash | HEADER | scroll/transform 动画主力 |
 | visible | header_hash | HEADER | |
-| alpha (节点 opacity) | **payload_hash** | **FULL** | ⚠ 例外，见下：alpha 烤进顶点色，须重写 arena |
+| alpha (节点 opacity) | header_hash | HEADER | **本轮剥离**：从顶点色烘焙移到 `_Alpha` uniform，见 §4.1 |
 | sort_key | header_hash | HEADER | 由结构决定，通常伴随几何变 |
 | mask_context | header_hash | HEADER | |
 | color_tint | header_hash | HEADER | |
@@ -186,8 +186,28 @@ blob.rs:104-105 对纯平移节点把顶点 re-base 成局部坐标（减 tx/ty�
 | image_path | payload_hash | FULL | 换图触发 Sprite 查询 + UV 重映射 |
 | text font_size/color/全量 glyph | payload_hash | FULL | |
 
-**⚠ alpha 的例外（已知妥协，YAGNI）**：当前 alpha 被烤进顶点颜色（blob.rs:124 `c[3]*rn.alpha`）。这意味着 alpha 变会让 mesh_arena 字节变。但 payload_hash 是对 **RenderNode.payload**（core 层，烤 alpha 前）算的，不是对 blob arena 算——core 层 colors 不含 alpha 烘焙（那是 blob 阶段做的）。故 alpha 变 → header_hash 变（alpha 在表头列）→ HEADER。**但 blob arena 里的 colors 已烤 alpha → HEADER 不重写 arena → Unity 拿旧 alpha 的顶点色。**
-→ **决策**：alpha 归 payload_hash，alpha 变落 FULL（重写 arena 才能刷新烤进的 alpha）。牺牲 opacity 动画的廉价性换正确性。opacity 动画非主力（主力是 transform），可接受。**待定项 D1** 记录另一路（把 alpha 从顶点色剥离、改走 MPB/顶点色分离）——不在本轮做。
+### 4.1 alpha 剥离成 `_Alpha` uniform（本轮做）
+
+当前 alpha 被烤进顶点颜色（blob.rs:124 `c[3] * rn.alpha`）。这让 opacity 动画每帧都改 mesh_arena 字节 → 落 FULL（重传整个顶点缓冲），违背「位置/透明度动画廉价」。
+
+**剥离**：alpha 改走 MaterialPropertyBlock uniform，完全套用现成的 `_ObjM`/`_CF`/`_ClipBox` 模式（这套「表头走 uniform」机制已建好，alpha 只是补上漏网的一个）：
+
+- **shader**（LoomGUI-Unlit.shader）：Properties 加 `_Alpha ("Alpha", Float) = 1`；CBUFFER 声明 `float _Alpha`；frag 在 `CLIPPED` 之前加 `col.a *= _Alpha;`。
+- **blob**（blob.rs:124）：colors[].a 不再 `× rn.alpha`，直接写 `c[3]`。alpha 已在公共头 alpha 列传着（blob.rs:77）——**数据已在，只是 shader 之前没用它**。
+- **MirrorPool**：HEADER/FULL 都 `SetPropertyBlock(_Alpha)`（跟 `_ObjM` 同一 MPB）；alpha 归 header_hash → HEADER。
+
+效果：opacity 动画和 transform 动画一样廉价（一次 SetPropertyBlock，不碰 mesh）。消灭旧 spec 的 alpha「例外」，alpha 从此是干净的 HEADER。
+
+**⚠ 连带（记 §6 D2）**：merge_meshes 现在靠「alpha 已烤进 colors.a」来合并不同 alpha 的节点（一个 merged mesh 内不同段不同 alpha）。alpha 改走 uniform（per-renderer）后，**不同 alpha 的节点不能再合成一个 draw call** → merge 的 DrawState key 须加 alpha。
+
+### 4.2 颜色 rgb 不剥离（决策 + 理由）
+
+顶点色的 **rgb**（背景色/前景色）留在 mesh，`:hover{color}`/`:active{background-color}` 变色仍走 FULL。**不**把颜色也做成 uniform，理由：
+
+- 颜色变色是**伪类离散切换**（hover 进/出各一次），非每帧连续动画。opacity/transform 才是 tween 每帧连续跑的主力。为「点一下变一次色」加 uniform + shader 分支不值。
+- 颜色 rgb 牵连 sRGB→linear 转换（shader:94-95）+ BG_COMPOSITE 合成（vcol 当底色与图合成，shader:106-107）。剥离要在 C# 转 sRGB 或再改 shader，牵连远大于 alpha（alpha 线性、纯乘数，剥离干净）。
+
+> 记录此决策是为避免以后重复问「颜色为什么不也走 uniform」。答案：值不值 + 牵连大小，都判过了。
 
 ---
 
@@ -198,6 +218,7 @@ blob.rs:104-105 对纯平移节点把顶点 re-base 成局部坐标（减 tx/ty�
 | 1 tick 时序 | `cargo test -p loomgui_core`：新增测试——rematch 前置后 `:hover{width}` 当帧 layout_rect 变、`:active{scale}` 当帧 world 含 scale。离线可验。| 公司机 |
 | 2 全量 hash | `cargo test`：`"hello"→"helps"` hash 必变；删采样后旧回归测试转"全量必变"。离线可验。| 公司机 |
 | 3 变更级别 | blob round-trip 测试（change_level 列 + SKIP/HEADER 不写 arena）；C# 侧需 Unity PlayMode：滑动列表时 profiler 确认无 UploadMesh 调用、`:active` 缩放当帧可见、hover 变色刷新。| 家里机 |
+| §4.1 alpha uniform | Unity PlayMode：opacity tween 时 profiler 无 UploadMesh；不同 alpha 节点仍正确显示（验 merge DrawState key 加了 alpha）。| 家里机 |
 
 **闭环**：改 core/FFI 后重编 `.dll` + commit（坑 10）；本设计纯 runtime（tick/dirty/blob），改 .dll 即可，**不须重打 pkg**（base_style 未变，坑 66）；改 FFI 签名后 push 前查 dll 导出（坑 100）。
 
@@ -205,8 +226,10 @@ blob.rs:104-105 对纯平移节点把顶点 re-base 成局部坐标（减 tx/ty�
 
 ## 6. 待定项（实现前定稿）
 
-- **D1**（alpha 烘焙）：本轮 alpha → FULL（见 §4）。是否后续把 alpha 从顶点色剥离改走 MPB，让 opacity 动画走 HEADER——记 ledger，不在本轮。
-- **D2**（merge × 级别）：merge_meshes 把 N 节点合成 1 个 merged 节点，merged 的 node_id/hash 跨帧如何对齐？若 merged 节点每帧重算 → 恒 FULL（merge 场景本就有内容变才 merge？）。**需在实现 T? 前读 merge.rs 定**：merged 节点走 FULL（保守正确），non-merged 走三级；或 merge 仅对 FULL 节点触发。倾向前者（简单正确）。
+- **D1**（alpha 剥离）：本轮做——alpha 从顶点色移到 `_Alpha` uniform → HEADER（见 §4.1）。颜色 rgb 不剥离（§4.2）。
+- **D2**（merge × 级别 + merge × alpha）：两件事，实现前读 merge.rs 定死。
+  - merge × 级别：merge_meshes 把 N 节点合成 1 个 merged 节点，跨帧 hash 如何对齐？倾向 **merged 节点恒走 FULL**（保守正确），non-merged 走三级。
+  - merge × alpha：§4.1 剥离后，不同 alpha 的节点不能再合成一个 draw call → merge 的 DrawState key **须加 alpha**（否则不同 alpha 合并后 uniform 只能取一个值，视觉错）。
 - **D3**（结构变基线）：`prev_hashes.len() != n_nodes` → 全 FULL（现状 baselined=false 已如此）。两 hash 表都按此重置。
 
 ---
@@ -214,6 +237,6 @@ blob.rs:104-105 对纯平移节点把顶点 re-base 成局部坐标（减 tx/ty�
 ## 7. 不做（YAGNI）
 
 - 不加 `transform_dirty` flag（build 本就每帧重算 hash，不依赖 dirty flag）。
-- 不为 alpha 剥离顶点色烘焙（D1 记 ledger）。
+- 不为**颜色 rgb** 剥离顶点色（§4.2：离散切换非动画主力，且牵连 sRGB/BG_COMPOSITE）。alpha 剥离本轮做（§4.1）。
 - 不加"只 sort_key 变""只材质变"等更细级别（HEADER 已覆盖所有廉价表头变化，一档够）。
 - 不动 pkg.bin 格式（纯 runtime 重构）。
