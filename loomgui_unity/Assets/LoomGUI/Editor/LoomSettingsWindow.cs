@@ -127,8 +127,7 @@ namespace LoomGUI.Editor
             EditorGUILayout.Space(8);
             if (GUILayout.Button("同步全部图集 packables", GUILayout.Height(28)))
             {
-                // TODO Task 6 实现 LoomAtlasSync 后取消注释
-                // LoomAtlasSync.SyncAll(_settings);
+                LoomAtlasSync.SyncAll(_settings);
                 AppendLog("[atlas] 同步完成");
             }
         }
