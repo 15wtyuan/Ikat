@@ -182,7 +182,9 @@ namespace LoomGUI.Editor
             var sb = new StringBuilder();
             sb.Append('"').Append(absSrc).Append("\" ").Append(pkg.pkgName);
             if (pkg.htmlFiles.Count > 0) sb.Append(" --html ").Append(htmlArg);
-            sb.Append(" --res ").Append(_settings.resDirName);
+            // res 在工作区根下（不在 sourceDir 下），显式传 res-root 绝对路径。
+            string resRoot = ToAbs(Path.Combine(_settings.workspaceDir, _settings.resDirName));
+            sb.Append(" --res-root \"").Append(resRoot).Append("\"");
             sb.Append(" -o \"").Append(outPath).Append('"');
             try
             {
@@ -190,8 +192,10 @@ namespace LoomGUI.Editor
                 { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
                   StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
                 using var p = Process.Start(psi);
+                string stdout = p.StandardOutput.ReadToEnd();
                 string stderr = p.StandardError.ReadToEnd();
                 p.WaitForExit();
+                if (!string.IsNullOrEmpty(stdout)) AppendLog($"  stdout: {stdout.Trim()}");
                 AppendLog(p.ExitCode == 0 ? $"[pack] {pkg.pkgName}: OK" : $"[pack] {pkg.pkgName}: FAIL\n{stderr}");
             }
             catch (Exception ex) { AppendLog($"[pack] {pkg.pkgName}: {ex.Message}"); }

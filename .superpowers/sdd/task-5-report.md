@@ -1,55 +1,90 @@
-# Task 5 Report: 支柱3 FFI -- blob change_level 列 + SKIP/HEADER 不写 arena
+# Task 5 Report: LoomSettingsWindow 三 tab 面板
 
-## Status: PASS
-
-All 53 ffi tests pass, all 493 core tests pass. Zero regression.
+## Status: done
 
 ## Commit
 
-`35242f7` feat(ffi): 支柱3 blob v8 change_level 列 + SKIP/HEADER 不写 arena
+`dbf694d` -- `feat(unity): LoomSettingsWindow 三 tab 设置面板（替代 PackageManager）`
 
-## Changes
+## Files changed
 
-**File:** `loomgui_ffi_c/src/blob.rs`
+| File | Action |
+|---|---|
+| `loomgui_unity/Assets/LoomGUI/Editor/LoomSettingsWindow.cs` | **Created** (207 lines) |
+| `loomgui_unity/Assets/LoomGUI/Editor/LoomExePath.cs` | **Created** (16 lines) |
+| `loomgui_unity/Assets/LoomGUI/Editor/LoomPackageManagerWindow.cs` | Already deleted (Task 1, commit 334cef4) |
+| `loomgui_unity/Assets/LoomGUI/Editor/LoomPackageManagerWindow.cs.meta` | Already deleted (Task 1) |
 
-1. **VERSION 7 -> 8** -- bump version constant.
-2. **`change_level` column (21st column, u8)** -- added to `columns` array, `col_bufs`, `col_change_level` buffer; pushed `rn.change_level as u8` per node before the match.
-3. **Arena write gating** -- `let write_arena = matches!(rn.change_level, ChangeLevel::Full)`. Mesh/Text arms wrap arena writes in `if write_arena`; SKIP/HEADER set `col_mesh_off/len` (or `col_text_off/len`) to 0 without extending arena. Payload-kind, path_idx, program, color_matrix, and the public header columns are always written regardless of level.
-4. **Deleted `NodePayload::Unchanged` match arm** -- T4 removed the variant from core; now removed from blob builder.
-5. **TestView updated** -- `col_off: [usize; 21]`, parse loop `0..21`, new methods `change_level(i)` and `mesh_len_col(i)`.
-6. **All RenderNode test helpers** (mesh_node, mesh_node_with_path, mesh_node_with_program, mesh_node_tinted, mesh_node_raw, text_node) -- added `change_level: ChangeLevel::Full`.
-7. **Deleted `unchanged_node` helper** -- Unchanged variant no longer exists.
-8. **Updated all test assertions** -- version 7->8 assertions, hardcoded byte offsets (12+20*4=92 -> 12+21*4=96), replaced `unchanged_node` usage in `program_column_round_trips`, rewrote `blob_unchanged_kind_is_zero` as `blob_pure_mesh_kind_is_one`.
-9. **New test `change_level_column_round_trips`** -- TDD: verifies Skip=0/Header=1/Full=2 round-trip and arena gating (SKIP/HEADER mesh_len=0, FULL mesh_len>0).
+## 三处桩注释位置
 
-## Test Commands + Output
+| 位置 | 文件行 | TODO |
+|---|---|---|
+| LoomSettingsWindow.cs:62 | `OnGUI()` changed block | `// LoomConfigExporter.Export(_settings);` -- Task 7 |
+| LoomSettingsWindow.cs:78 | `DrawWorkspace()` init button | `// LoomWorkspaceInitializer.Initialize(_settings);` -- Task 8 |
+| LoomSettingsWindow.cs:131 | `DrawAtlas()` sync button | `// LoomAtlasSync.SyncAll(_settings);` -- Task 6 |
 
-```
-$ cargo test -p loomgui_ffi_c
-test result: ok. 53 passed; 0 failed; 0 ignored
+## 语法核对
 
-$ cargo test -p loomgui_core --features parse
-test result: ok. 478 unit + 10 doc + 3 integration + 2 snapshot = 493 total
-```
+- **namespace**: LoomSettingsWindow/LoomExePath 在 `LoomGUI.Editor`；LoomSettings/PackageEntry/AtlasEntry 在 `LoomGUI`。C# 子 namespace 可解析父 namespace 类型，无需 `using LoomGUI;`。
+- **asmdef 引用**: `LoomGUI.Editor.asmdef` 引用 `LoomGUI.Runtime`，能访问 LoomSettings 等 Runtime 类型。
+- **using 清单**: LoomSettingsWindow 有完整 using（System/Diagnostics/IO/Text/UnityEditor/UnityEngine）；LoomExePath 有 System.IO。
+- **未引用未实现类**: LoomConfigExporter、LoomAtlasSync、LoomWorkspaceInitializer 三处调用已注释。
 
-## TDD Evidence
+## fence_contract
 
-1. **Step 1 (write failing test)**: Added `change_level_column_round_trips` test + TestView helpers + col_off[21] before implementing blob builder changes.
-2. **Step 2 (confirm fail)**: `cargo build -p loomgui_ffi_c` failed -- `NodePayload::Unchanged` variant not found (E0599), `change_level` field missing in RenderNode constructors, VERSION still 7.
-3. **Step 3-4 (implement + fix all helpers)**: VERSION 8, change_level column, arena gating, delete Unchanged arm, fix all 6 test helpers, update all version/hardcoded-offset assertions.
-4. **Step 5 (confirm pass)**: All 53 ffi tests pass + 493 core regression pass.
-5. **Step 6 (commit)**: Single commit pushed.
+`cargo test -p loomgui_core --test fence_contract` -- **10 passed, 0 failed**。Rust 核心无回归。
 
-## Self-Review
+## 测试未跑说明
 
-- All 53 ffi tests pass; the TDD test `change_level_column_round_trips` verifies both column values and arena gating.
-- All 493 core tests pass; no regression from the T4 changes.
-- header_len auto-updates via `columns.len()`; TestView col_off/parse loop updated to 21.
-- All hardcoded byte offsets in header tests shifted by +4 (12+20*4=92 -> 12+21*4=96).
-- Import includes `ChangeLevel`; `matches!(rn.change_level, ChangeLevel::Full)` is the arena gate.
+本机无 Unity，C# 无法编译。依赖项：
+- 语法核对：done（grep 核对 enum/namespace/using/方法签名）
+- Unity 编译：需家里机 PlayMode 验收时 Unity 自动编译
+- .meta 文件：Unity 首次打开项目时自动生成（未手动创建，避免 GUID 冲突）
+
+## Self-review
+
+1. LoomSettingsWindow 完全按 brief 代码写入，三处调用已注释并标注 TODO Task 6/7/8。
+2. LoomExePath 完整实现，无外部依赖。
+3. 旧 LoomPackageManagerWindow 已在 Task 1 删除，无需重复操作。
+4. fence_contract 10/10 通过。
 
 ## Concerns
 
-1. **C# `FrameBlob.cs` expects v7** -- planned as T8. After this commit, the C# side will fail to parse the blob (version mismatch). No impact on Rust tests.
-2. **No separate `size_of` assertion needed** -- the change_level column is u8 (1 byte per node), part of the SOA column layout, not a `#[repr(C)]` struct crossing FFI. The blob format is self-describing via column offsets.
-3. **`program_column_round_trips` semantic change** -- the middle node changed from Unchanged (kind=0, program=0) to mesh_node (kind=1, program=0). The test still verifies program column round-trip correctly.
+无。代码按 brief 精确写入，三处桩注释清晰标注对应 task，Task 6/7/8 实现后取消注释即可。
+
+## Fix
+
+修复 review 两个 finding。
+
+### Finding 1: `--res` → `--res-root`
+
+**根因**: Task 2 把 CLI 从 `--res <name>` 改成了 `--res-root <path>`，但 `PackPackage` 仍传 `--res`，CLI 会报 `unknown arg` exit(2) 打包失败。
+
+**修法**: 删除 `sb.Append(" --res ").Append(_settings.resDirName);`，改为传 res-root 绝对路径：
+
+```csharp
+string resRoot = ToAbs(Path.Combine(_settings.workspaceDir, _settings.resDirName));
+sb.Append(" --res-root \"").Append(resRoot).Append("\"");
+```
+
+CLI 默认 `source_dir.join("res")` 在 res 不在 sourceDir 下时找不到（如 `showcase/res`），必须显式传工作区根下的 res 绝对路径。
+
+**验证**: `grep -n "res-root\|--res " LoomSettingsWindow.cs` 确认仅 `--res-root`，无残留 `--res `。
+
+### Finding 2: Process stdout/stderr 死锁
+
+**根因**: stdout 设了 `RedirectStandardOutput=true` 但从没读。大包 stdout 超 4KB 缓冲 → 进程写 stdout 阻塞 → C# 等 stderr EOF → 死锁。
+
+**修法**: 先读 stdout 再读 stderr，最后 WaitForExit：
+
+```csharp
+string stdout = p.StandardOutput.ReadToEnd();
+string stderr = p.StandardError.ReadToEnd();
+p.WaitForExit();
+if (!string.IsNullOrEmpty(stdout)) AppendLog($"  stdout: {stdout.Trim()}");
+AppendLog(p.ExitCode == 0 ? $"[pack] {pkg.pkgName}: OK" : $"[pack] {pkg.pkgName}: FAIL\n{stderr}");
+```
+
+### Commit
+
+`e299737` -- fix(unity): PackPackage --res → --res-root + stdout/stderr 死锁修复
