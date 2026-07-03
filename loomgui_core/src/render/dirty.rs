@@ -76,12 +76,13 @@ pub fn payload_hash(rn: &RenderNode) -> u64 {
     h.finish()
 }
 
-/// 表头轴 hash：world_matrix + visible + sort_key + mask_context + color_tint + blend。
-/// 廉价属性——变了 C# 只需改 GO transform / 材质，不碰 mesh。alpha 见 T7（剥离后加入）。
+/// 表头轴 hash：world_matrix + visible + alpha + sort_key + mask_context + color_tint + blend。
+/// 廉价属性——变了 C# 只需改 GO transform / 材质（SetPropertyBlock _Alpha），不碰 mesh。
 pub fn header_hash(rn: &RenderNode) -> u64 {
     let mut h = DefaultHasher::new();
     for &v in rn.world_matrix.iter() { v.to_le_bytes().hash(&mut h); }
     rn.visible.hash(&mut h);
+    rn.alpha.to_le_bytes().hash(&mut h);
     rn.sort_key.hash(&mut h);
     rn.mask_context.0.hash(&mut h);
     for &v in rn.color_tint.iter() { v.to_le_bytes().hash(&mut h); }
@@ -181,6 +182,21 @@ mod tests {
         let mut b = mesh_rn(Some("a.png"), 1.0, [1.0;4]);
         if let NodePayload::Mesh { verts, .. } = &mut b.payload { verts[0] = [9.0,9.0]; }
         assert_eq!(header_hash(&a), header_hash(&b), "几何变不影响 header_hash");
+    }
+
+    #[test]
+    fn header_hash_alpha_change() {
+        let a = mesh_rn(Some("a.png"), 1.0, [1.0;4]);
+        let b = mesh_rn(Some("a.png"), 0.5, [1.0;4]); // alpha 0.5
+        assert_ne!(header_hash(&a), header_hash(&b), "alpha 变 → header_hash 变（HEADER）");
+    }
+
+    #[test]
+    fn payload_hash_ignores_alpha() {
+        // alpha 归 header，payload_hash 不含 alpha（否则 alpha 变会误落 FULL）。
+        let a = mesh_rn(Some("a.png"), 1.0, [1.0;4]);
+        let b = mesh_rn(Some("a.png"), 0.5, [1.0;4]);
+        assert_eq!(payload_hash(&a), payload_hash(&b), "payload_hash 不含 alpha");
     }
 
     #[test]
