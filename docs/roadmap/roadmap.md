@@ -142,6 +142,8 @@ v1 还没有编辑器/WASM 渲染，用 **open-design Chromium 兜底**：围栏
 
 核心维护固定数量可视槽（item index → slot_id）：同 slot 这一帧 item5、下一帧 item6，**slot_id 稳定，NodeId 变**。后端 diff 按复用键复用渲染对象——`reuse_key = slot_id`（若非 None）否则 `node_id`。两身份正交：NodeId=逻辑身份（事件/命中），slot_id=渲染复用身份。**核心不变量（防花屏）**：slot 换内容时必发真实 payload 非 Unchanged。
 
+**v1.4-b 实现注（层 B'）**：核心不认识"列表"（无 NodeKind::List），列表=普通 div+slot 子节点。reuse_key 是核心传给后端的通用字段（每节点一个 u32，0=无复用）；"可视槽"由 driver 建（instantiate item + set_reuse_key）。核心加 3 个 FFI 口子（set_content_size / get_scroll_pos / get_node_layout_rect）让 driver 注入 content_size + 读 scroll_pos/layout_rect。不等高全 driver 侧（尺寸补偿），核心零额外改。
+
 ### 5.2 Shape mask + 两遍 DFS（v2）
 
 RenderNode payload 加 `Mask{shape_ref, mode: MaskMode}`，MaskMode{Write,Content,Erase}。遮罩是跨节点时序意图：核心 DFS 算嵌套深度填 `MaskContext`。两遍 DFS sort_key 规则（防批合越界）：Pass1 按 Write 最小/Content 居中分配；Pass2 `Erase.sort_key = max(子树 Content)+1`。批合重排约束在 `[Write+1, Erase-1]` 内。后端自选：Unity stencil / Godot canvas_group / 软件 alpha mask。soft clip（羽化）、paintingMode（离屏 RT）同期 v2。

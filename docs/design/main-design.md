@@ -509,8 +509,8 @@ stage.set_style(node, "background:#00f")?;                           // 改 base
 
 **NodeId 是代际不透明句柄**：对外 `u32`（FFI/C#/包格式零变化），内部含 generation。`remove_node` 后旧 NodeId 自动失效（generation++，再用时 no-op）——业务侧持有的旧句柄安全，无需手动清。删除是事件：核心联动清所有持 NodeId 的持久状态（anim/scroll/tween/focused_node），后端镜像池按 NodeId keying 自动跟进增删（stale-mark-sweep）。
 
-### 12.2 数据驱动的列表虚拟化
-建在 ScrollPane 上（**不暴露专用标签**——围栏只有 div/span/img/button，§3.1；宿主用 `create_node` 建 item 模板，核心做 slot 复用）。核心维护固定数量可视槽（item index → slot），后端按 slot 复用渲染对象（不销毁重建，零 GC）。两身份正交：NodeId=逻辑身份（事件/命中），slot=渲染复用身份。**slot 复用的核心不变量**（slot 换内容时必发真实 payload 非 Unchanged，防花屏）与 reuse_key 机制见 roadmap（机制草稿）。
+### 12.2 数据驱动的列表虚拟化（层 B'）
+**核心不认识"列表"**——列表是普通 div（overflow:scroll, position:relative）+ N 个 slot 子节点（position:absolute, 带 reuse_key）。核心只多管 `reuse_key: u32` 字段（传给后端复用 GO）+ 3 个 FFI 口子（set_content_size / get_scroll_pos / get_node_layout_rect）。driver 管所有列表逻辑：instantiate item 模板、测 itemSize、注入 content_size、算可见区间、slot 增删/改内容、不等高尺寸补偿。两身份正交：NodeId=逻辑身份（事件/命中），reuse_key=渲染复用身份（后端按它复用 GO，slot 换绑不销毁重建）。slot 换内容必发 Full（新 NodeId 无上帧 hash → ChangeLevel::Full）。不暴露专用标签（围栏只有 div/span/img/button）。
 
 ### 12.3 数据绑定
 命令式 API + 数据驱动列表为主。声明式绑定（`data-bind:text="user.name"`）后期加。挂在好的场景图上，后加不痛。
