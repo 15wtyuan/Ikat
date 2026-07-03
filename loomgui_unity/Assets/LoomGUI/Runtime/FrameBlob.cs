@@ -43,7 +43,7 @@ namespace LoomGUI
         //   18=program(u8, 0=img/无图 1=Text 2=Container+bg-image 3=filter无bg-image 4=filter+bg-image)  ← v5 新增
         //   19=color_matrix([f32;20], 80B)
         //   20=change_level(u8, 0=Skip 1=Header 2=Full)  ← v8 新增（支柱3）
-        //   21=reuse_key(u32, 0=无复用 >0=slot 复用键)  ← v9 新增（v1.4-b 绝对虚拟列表）
+        //   21=reuse_key(u32, 0=无复用 >0=slot 复用键)  ← v9 新增（绝对虚拟列表用）
         int ColOff(int idx) => (int)ReadU32(12 + idx * 4);
         /// v9：reuse_key（u32 列，ColOff(21) + i*4）。0=无复用（按 node_id），>0=按 reuse_key 复用 GO。
         public uint ReuseKey(int i) => ReadU32(ColOff(21) + i * 4);

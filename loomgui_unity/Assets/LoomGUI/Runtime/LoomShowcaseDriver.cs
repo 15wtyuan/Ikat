@@ -65,7 +65,7 @@ namespace LoomGUI
         // Coroutine 计时器句柄（防重复触发叠多个 toast）。
         Coroutine _tipsRoutine;
 
-        // === 虚拟列表演示（v1.4-b T8）===
+        // === 虚拟列表演示===
         bool _isListPage;
         VirtualListDriver _listDriverEqual;
         VirtualListDriver _listDriverVar;
@@ -443,7 +443,7 @@ namespace LoomGUI
             Debug.Log($"[Showcase] page_dyntree 订阅完成（anchor={_dynAnchor}）");
         }
 
-        // page_list（v1.4-b T8 虚拟列表）：back-home + 左右双列表（等高 + 不等高）。
+        // page_list（虚拟列表）：back-home + 左右双列表（等高 + 不等高）。
         void SubscribeList()
         {
             SubscribeBackHome();
@@ -456,7 +456,7 @@ namespace LoomGUI
             }
             _listDriverEqual = new VirtualListDriver(_stage, eq, 1000);
             // 不等高尺寸：正弦波 60~140px
-            // v1.4-b：本 demo 不等高用预定义 size（sin 波），size 已知无需 spec §2.8 实测补偿回路。
+            // 本 demo 不等高用预定义 size（sin 波），size 已知无需 spec §2.8 实测补偿回路。
             // 真实数据源（异步图片加载致 item 高度变）场景需补 MeasureAndUpdateSlot + SetScrollPos 补偿防跳动。
             float[] sizes = new float[200];
             for (int i = 0; i < 200; i++)
@@ -595,7 +595,7 @@ namespace LoomGUI
         static float[] Rgba(int r, int g, int b) => new float[] { r / 255f, g / 255f, b / 255f, 1f };
     }
 
-    // 虚拟列表 driver（v1.4-b T8）。
+    // 虚拟列表 driver。
     // 模型：slot = CreateNode div(position:absolute) + img + span title。
     // 每帧 get_scroll_pos 算可见区间 → diff slot 绑定 → create/remove/set_text。
     // 等高：_itemSize 单值 O(1)；不等高：_itemSizes[] 累加搜索。

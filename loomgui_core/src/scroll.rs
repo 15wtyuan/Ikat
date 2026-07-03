@@ -87,7 +87,7 @@ pub struct ScrollPaneState {
     pub tween_duration: (f32, f32),
     /// refresh 后若 content_size 变化置 true（供 scrollbar 复布局用）。
     pub content_size_dirty: bool,
-    /// v1.4-b：driver 注入 content_size 标记。true 时 refresh_content_sizes 跳过
+    /// driver 注入 content_size 标记。true 时 refresh_content_sizes 跳过
     /// （不覆盖子节点 AABB）。set_content_size 置 true；clear_content_size_override 置 false。
     pub content_size_overridden: bool,
 }
@@ -478,7 +478,7 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
         }
     }
     for (nid, kids, viewport) in work {
-        // v1.4-b：driver 注入 content_size 的容器（虚拟列表）跳过自动算。
+        // driver 注入 content_size 的容器（虚拟列表）跳过自动算。
         // 只更新 viewport（容器尺寸可能变）+ 重算 overlap（用已注入的 content_size），
         // 不覆盖 content_size、不遍历子节点 AABB。
         let overridden = scene.scroll.get(nid)
@@ -1267,9 +1267,9 @@ mod tests {
         );
     }
 
-    // ── v1.4-b content_size 注入测 ─────────────────────────────
+    // ── content_size 注入测 ─────────────────────────────
 
-    /// 建含单个 scroll 容器的 Stage（无子节点），供 v1.4-b 驱动注入测试用。
+    /// 建含单个 scroll 容器的 Stage（无子节点），供 驱动注入测试用。
     /// root 是 overflow_y=Scroll 的 Container，layout_rect (0,0,200,100)。
     fn build_scroll_stage() -> crate::stage::Stage {
         let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
@@ -1303,7 +1303,7 @@ mod tests {
 
     #[test]
     fn set_content_size_overrides_refresh() {
-        // v1.4-b：driver 注入 content_size 后，refresh_content_sizes 不覆盖。
+        // driver 注入 content_size 后，refresh_content_sizes 不覆盖。
         let mut stage = build_scroll_stage();
         let root_id =
             stage.scene.as_ref().unwrap().nodes.values().next().unwrap().id;
@@ -1363,7 +1363,7 @@ mod tests {
 
     #[test]
     fn clear_content_size_override_restores_auto() {
-        // v1.4-b：clear 后 refresh 恢复子节点 AABB 自动算。
+        // clear 后 refresh 恢复子节点 AABB 自动算。
         let mut stage = build_scroll_stage();
         let root_id =
             stage.scene.as_ref().unwrap().nodes.values().next().unwrap().id;

@@ -197,34 +197,34 @@ namespace LoomGUI.Bindings
         internal static extern void loomgui_stage_set_scroll_pos(StageHandle* h, uint node_id, float x, float y, byte animated);
 
         /// <summary>
-        ///  v1.4-b：driver 注入滚动容器 content_size（虚拟列表）。node 无效/非滚动容器 → no-op。
+        ///  driver 注入滚动容器 content_size（虚拟列表）。node 无效/非滚动容器 → no-op。
         ///  null 句柄 → no-op（不 panic）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_content_size", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void loomgui_stage_set_content_size(StageHandle* h, uint node_id, float w, float height);
 
         /// <summary>
-        ///  v1.4-b：清除 driver 注入的 content_size override（列表销毁/退回普通滚动时用）。
+        ///  清除 driver 注入的 content_size override（列表销毁/退回普通滚动时用）。
         ///  null 句柄/无效 node → no-op（不 panic）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_clear_content_size_override", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void loomgui_stage_clear_content_size_override(StageHandle* h, uint node_id);
 
         /// <summary>
-        ///  v1.4-b：读 scroll_pos。null 句柄/无效 node → out 填 0（不 panic）。
+        ///  读 scroll_pos。null 句柄/无效 node → out 填 0（不 panic）。
         ///  out_x/out_y 是 out 参数（C# 传 ref float）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_get_scroll_pos", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void loomgui_stage_get_scroll_pos(StageHandle* h, uint node_id, float* out_x, float* out_y);
 
         /// <summary>
-        ///  v1.4-b：读节点 layout_rect。null 句柄/无效 node → out 填 0（不 panic）。
+        ///  读节点 layout_rect。null 句柄/无效 node → out 填 0（不 panic）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_layout_rect", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void loomgui_stage_get_node_layout_rect(StageHandle* h, uint node_id, float* out_x, float* out_y, float* out_w, float* out_h);
 
         /// <summary>
-        ///  v1.4-b：设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
+        ///  设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_reuse_key", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void loomgui_stage_set_reuse_key(StageHandle* h, uint node_id, uint key);

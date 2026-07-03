@@ -35,7 +35,7 @@ namespace LoomGUI
 
     public sealed class MirrorPool
     {
-        // v1.4-b：双 dict keying。reuse_key>0 的 slot 节点按 reuse_key 复用 GO
+        // 双 dict keying。reuse_key>0 的 slot 节点按 reuse_key 复用 GO
         // （slot 换绑 item 时 NodeId 变但 reuse_key 不变 → GO 不销毁重建）；
         // reuse_key=0 的普通节点按 node_id keying（v1 行为不变）。
         readonly Dictionary<uint, RenderObj> _poolByNodeId = new();
@@ -73,7 +73,7 @@ namespace LoomGUI
                 byte kind = blob.PayloadKind(i);
                 byte level = blob.ChangeLevel(i);   // 0=Skip 1=Header 2=Full
                 uint id = blob.NodeId(i);
-                uint reuseKey = blob.ReuseKey(i);    // v1.4-b
+                uint reuseKey = blob.ReuseKey(i);    // 虚拟列表
                 uint poolKey = reuseKey != 0 ? reuseKey : id;
                 Dictionary<uint, RenderObj> pool = reuseKey != 0 ? _poolByReuse : _poolByNodeId;
 
@@ -108,7 +108,7 @@ namespace LoomGUI
                     pool[poolKey] = ro;
                     level = 2; // 强制 FULL
                 }
-                ro.LastNodeId = id; // v1.4-b：新建 + 复用均更新（slot 换绑时 node_id 变）
+                ro.LastNodeId = id; // 新建 + 复用均更新（slot 换绑时 node_id 变）
                 ro.Stale = false;
                 ro.IsText = kind == 2;
 

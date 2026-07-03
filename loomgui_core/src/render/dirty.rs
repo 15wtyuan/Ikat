@@ -62,6 +62,12 @@ pub fn payload_hash(rn: &RenderNode) -> u64 {
                 v.to_le_bytes().hash(&mut h);
             }
             for line in &layout.lines {
+                // P4：line 全量字段（y/height/baseline/width）——line-height 变化改 height，
+                // 不 hash 会漏（违反"全量不采样"承诺，坑 105 同类）。
+                line.y.to_le_bytes().hash(&mut h);
+                line.height.to_le_bytes().hash(&mut h);
+                line.baseline.to_le_bytes().hash(&mut h);
+                line.width.to_le_bytes().hash(&mut h);
                 for run in &line.runs {
                     run.font_size.to_le_bytes().hash(&mut h);
                     for g in &run.glyphs {
@@ -76,8 +82,10 @@ pub fn payload_hash(rn: &RenderNode) -> u64 {
     h.finish()
 }
 
-/// 表头轴 hash：world_matrix + visible + alpha + sort_key + mask_context + color_tint + blend。
+/// 表头轴 hash：world_matrix + visible + alpha + sort_key + mask_context + color_tint + blend + reuse_key。
 /// 廉价属性——变了 C# 只需改 GO transform / 材质（SetPropertyBlock _Alpha），不碰 mesh。
+/// P2：reuse_key 进 header_hash——同 NodeId 换 reuse_key 时（理论上 driver 不该这么用，
+/// 但 hash 该覆盖所有身份字段，避免漏）。
 pub fn header_hash(rn: &RenderNode) -> u64 {
     let mut h = DefaultHasher::new();
     for &v in rn.world_matrix.iter() { v.to_le_bytes().hash(&mut h); }
@@ -87,6 +95,7 @@ pub fn header_hash(rn: &RenderNode) -> u64 {
     rn.mask_context.0.hash(&mut h);
     for &v in rn.color_tint.iter() { v.to_le_bytes().hash(&mut h); }
     (match rn.blend { crate::render::node::BlendMode::Normal => 0u8 }).hash(&mut h);
+    rn.reuse_key.hash(&mut h);
     h.finish()
 }
 
@@ -210,5 +219,41 @@ mod tests {
             payload_hash(&b),
             "全量 codepoint → hash 变"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // P2/P4 补字段回归测试（reuse_key 进 header_hash；line 全量进 payload_hash）
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn header_hash_includes_reuse_key() {
+        // P2：reuse_key 变 → header_hash 变（身份字段进表头 hash）。
+        let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        let mut b = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        b.reuse_key = 7;
+        assert_ne!(header_hash(&a), header_hash(&b), "reuse_key 变 → header_hash 变");
+    }
+
+    #[test]
+    fn payload_hash_text_includes_line_height() {
+        // P4：line.height 变（line-height 改）→ payload_hash 变。全量不采样，line 字段必入 hash。
+        let a = text_rn_content(16.0, [1.0; 4], &[104, 101, 108]); // hel
+        let mut b = text_rn_content(16.0, [1.0; 4], &[104, 101, 108]);
+        if let NodePayload::Text { layout, .. } = &mut b.payload {
+            layout.lines[0].height = 30.0; // 改 line-height
+        }
+        assert_ne!(payload_hash(&a), payload_hash(&b), "line.height 变 → payload_hash 变");
+    }
+
+    #[test]
+    fn payload_hash_text_includes_line_baseline_y() {
+        // P4：line.baseline/y 变 → payload_hash 变（行位置变，quad 跟着变）。
+        let a = text_rn_content(16.0, [1.0; 4], &[104, 101, 108]);
+        let mut b = text_rn_content(16.0, [1.0; 4], &[104, 101, 108]);
+        if let NodePayload::Text { layout, .. } = &mut b.payload {
+            layout.lines[0].baseline = 20.0;
+            layout.lines[0].y = 4.0;
+        }
+        assert_ne!(payload_hash(&a), payload_hash(&b), "line.baseline/y 变 → payload_hash 变");
     }
 }

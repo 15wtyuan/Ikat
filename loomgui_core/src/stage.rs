@@ -174,7 +174,7 @@ impl Stage {
         }
     }
 
-    /// v1.4-b：driver 注入滚动容器 content_size（虚拟列表用）。覆盖子节点 AABB 自动算。
+    /// driver 注入滚动容器 content_size（虚拟列表用）。覆盖子节点 AABB 自动算。
     /// refresh_content_sizes 跳过此容器。node 无效/非滚动容器 → no-op（不 panic）。
     /// **中间态**：set 后至下次 refresh 前 viewport_size/overlap 为 (0,0)——
     /// driver 正常流程 set→tick→读，不要在 set 后同帧写 scroll_pos（会被 clamp 到 0）。
@@ -198,7 +198,7 @@ impl Stage {
         }
     }
 
-    /// v1.4-b：清除 driver 注入的 content_size override，让核心重回子节点 AABB 自动算。
+    /// 清除 driver 注入的 content_size override，让核心重回子节点 AABB 自动算。
     /// 列表销毁 / 退回普通滚动时调。node 无效/非滚动容器 → no-op（不 panic）。
     pub fn clear_content_size_override(&mut self, node: NodeId) {
         if let Some(scene) = self.scene.as_mut() {
@@ -208,12 +208,12 @@ impl Stage {
         }
     }
 
-    /// v1.4-b：读 scroll_pos。node 无效/非滚动容器 → None。
+    /// 读 scroll_pos。node 无效/非滚动容器 → None。
     pub fn get_scroll_pos(&self, node: NodeId) -> Option<(f32, f32)> {
         self.scene.as_ref()?.scroll.get(node).map(|s| s.scroll_pos)
     }
 
-    /// v1.4-b：读节点 layout_rect（solve 产物）。driver 测 itemSize 用。node 无效 → None。
+    /// 读节点 layout_rect（solve 产物）。driver 测 itemSize 用。node 无效 → None。
     pub fn get_node_layout_rect(&self, node: NodeId) -> Option<Rect> {
         self.scene.as_ref()?.get(node).map(|n| n.layout_rect)
     }
@@ -357,7 +357,7 @@ impl Stage {
         crate::scene::dynamic::set_style(self.scene.as_mut().ok_or("no scene")?, node, css)
     }
 
-    /// v1.4-b：设渲染复用键（虚拟列表 slot）。node 无效 → no-op。
+    /// 设渲染复用键（虚拟列表 slot）。node 无效 → no-op。
     pub fn set_reuse_key(&mut self, node: NodeId, key: u32) {
         if let Some(scene) = self.scene.as_mut() {
             crate::scene::dynamic::set_reuse_key(scene, node, key);
@@ -471,7 +471,12 @@ impl Stage {
     /// hit_test bounds guard 拦截（越界返 None → 未命中，零回归安全）。仲裁在 Down 未滚动前
     /// 不影响；clip 门控用 viewport 固定主导，不依赖每帧变换精度。
     pub fn tick_and_render(&mut self) -> FrameData {
-        let scene = self.scene.as_mut().expect("load first");
+        // 坑 102：FFI 入口绝不 panic。scene=None（load 前）早返空帧，不 expect
+        // （cdylib .expect 遇 None non-unwinding abort 拖垮宿主进程）。
+        let scene = match self.scene.as_mut() {
+            Some(s) => s,
+            None => return FrameData::default(),
+        };
         let mut out: Vec<EventRecord> = Vec::new();
         // tween 推进（写 scene.anim + 产 complete 事件进 out）。须在 solve/compute_world_transforms 前。
         let dt = self.pending_dt;
@@ -1727,7 +1732,7 @@ mod image_size_tests {
         assert_eq!(s.image_size("icons/x.png"), Some((50, 50)), "重 load 覆盖（新尺寸）");
     }
 
-    /// v1.4-b：reuse_key 是运行时字段（不进 pkg），driver 给 slot 节点设。
+    /// reuse_key 是运行时字段（不进 pkg），driver 给 slot 节点设。
     /// 0=无复用（默认），>0=按 reuse_key 复用 GO。
     #[test]
     fn set_reuse_key_sets_field() {
@@ -1743,7 +1748,7 @@ mod image_size_tests {
         assert_eq!(stage.scene.as_ref().unwrap().get(child).unwrap().reuse_key, 5);
     }
 
-    /// v1.4-b：set_reuse_key 对无效 node（已删/悬空）no-op，不 panic。
+    /// set_reuse_key 对无效 node（已删/悬空）no-op，不 panic。
     #[test]
     fn set_reuse_key_invalid_node_noop() {
         let mut stage = Stage::new_for_test();

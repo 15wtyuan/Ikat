@@ -241,7 +241,7 @@ pub fn set_style(scene: &mut Scene, node: NodeId, css: &str) -> Result<(), Strin
     Ok(())
 }
 
-/// v1.4-b：设渲染复用键（虚拟列表 slot 用）。node 无效 → no-op（不 panic）。
+/// 设渲染复用键（虚拟列表 slot 用）。node 无效 → no-op（不 panic）。
 pub fn set_reuse_key(scene: &mut Scene, node: NodeId, key: u32) {
     if let Some(n) = scene.get_mut(node) {
         n.reuse_key = key;

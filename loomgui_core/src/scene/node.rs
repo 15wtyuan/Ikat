@@ -115,7 +115,7 @@ pub struct Node {
     pub tabindex: Option<i32>,
     /// 当前是否聚焦（运行时，:focus 伪类源）。仅 focused_node 链上节点 true。
     pub focused: bool,
-    /// v1.4-b：渲染复用键。0=无复用（后端按 node_id keying）；>0=按 reuse_key 复用 GO
+    /// 渲染复用键。0=无复用（后端按 node_id keying）；>0=按 reuse_key 复用 GO
     /// （虚拟列表 slot 用：slot 换绑 item 时 NodeId 变但 reuse_key 不变 → 后端复用 GO）。
     /// 运行时字段（不进 pkg，打包期不存）。driver 设。
     pub reuse_key: u32,

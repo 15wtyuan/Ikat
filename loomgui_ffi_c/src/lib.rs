@@ -434,7 +434,7 @@ pub extern "C" fn loomgui_stage_set_scroll_pos(
     handle.stage.set_scroll_pos(NodeId(node_id), x, y, animated != 0);
 }
 
-/// v1.4-b：driver 注入滚动容器 content_size（虚拟列表）。node 无效/非滚动容器 → no-op。
+/// driver 注入滚动容器 content_size（虚拟列表）。node 无效/非滚动容器 → no-op。
 /// null 句柄 → no-op（不 panic）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_content_size(
@@ -445,7 +445,7 @@ pub extern "C" fn loomgui_stage_set_content_size(
     handle.stage.set_content_size(NodeId(node_id), w, height);
 }
 
-/// v1.4-b：清除 driver 注入的 content_size override（列表销毁/退回普通滚动时用）。
+/// 清除 driver 注入的 content_size override（列表销毁/退回普通滚动时用）。
 /// null 句柄/无效 node → no-op（不 panic）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_clear_content_size_override(
@@ -456,7 +456,7 @@ pub extern "C" fn loomgui_stage_clear_content_size_override(
     handle.stage.clear_content_size_override(NodeId(node_id));
 }
 
-/// v1.4-b：读 scroll_pos。null 句柄/无效 node → out 填 0（不 panic）。
+/// 读 scroll_pos。null 句柄/无效 node → out 填 0（不 panic）。
 /// out_x/out_y 是 out 参数（C# 传 ref float）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_scroll_pos(
@@ -470,7 +470,7 @@ pub extern "C" fn loomgui_stage_get_scroll_pos(
     if !out_y.is_null() { unsafe { *out_y = y; } }
 }
 
-/// v1.4-b：读节点 layout_rect。null 句柄/无效 node → out 填 0（不 panic）。
+/// 读节点 layout_rect。null 句柄/无效 node → out 填 0（不 panic）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_layout_rect(
     h: *const StageHandle, node_id: u32,
@@ -487,7 +487,7 @@ pub extern "C" fn loomgui_stage_get_node_layout_rect(
     if !out_h.is_null() { unsafe { *out_h = hh; } }
 }
 
-/// v1.4-b：设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
+/// 设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_reuse_key(
     h: *mut StageHandle, node_id: u32, key: u32,

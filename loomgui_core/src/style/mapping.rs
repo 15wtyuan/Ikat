@@ -556,7 +556,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "position" => {
-            // v1.4-b：absolute 围栏内（脱离流）；relative 显式；fixed/sticky 围栏外静默忽略。
+            // absolute 围栏内（脱离流）；relative 显式；fixed/sticky 围栏外静默忽略。
             match value.trim() {
                 "absolute" => { ts.position = taffy::style::Position::Absolute; true }
                 "relative" => { ts.position = taffy::style::Position::Relative; true }
@@ -564,7 +564,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             }
         }
         "top" | "right" | "bottom" | "left" => {
-            // v1.4-b：inset 四边。auto 保持默认（不写）；px 写 Length。
+            // inset 四边。auto 保持默认（不写）；px 写 Length。
             if let Some(px) = parse_px(value) {
                 let lp = taffy::style::LengthPercentageAuto::Length(px);
                 match prop {

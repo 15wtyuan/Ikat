@@ -122,7 +122,7 @@ namespace LoomGUI
             Native.loomgui_stage_set_scroll_pos(_stage, node, x, y, animated ? (byte)1 : (byte)0);
         }
 
-        // v1.4-b：虚拟列表 driver API（转调 FFI，T5 生成）。
+        // 虚拟列表 driver API（转调 FFI）。
         public void SetContentSize(uint node, float w, float h)
         {
             if (_stage == null) return;

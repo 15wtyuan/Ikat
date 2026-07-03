@@ -48,7 +48,7 @@ pub struct ClipEntry {
 ///
 /// `clips` 只含 mask_context>0 的层级；context==0（无 clip）永不入表。
 /// 由 `build_render_nodes` 产，`stage::tick_and_render` 透传，`blob::build_blob` 消费。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FrameData {
     pub nodes: Vec<RenderNode>,
     pub clips: Vec<ClipEntry>,
