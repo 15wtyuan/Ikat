@@ -125,6 +125,31 @@ namespace LoomGUI
             Native.loomgui_stage_set_scroll_pos(_stage, node, x, y, animated ? (byte)1 : (byte)0);
         }
 
+        // v1.4-b：虚拟列表 driver API（转调 FFI，T5 生成）。
+        public void SetContentSize(uint node, float w, float h)
+            => Native.loomgui_stage_set_content_size(_stage, node, w, h);
+
+        public void ClearContentSizeOverride(uint node)
+            => Native.loomgui_stage_clear_content_size_override(_stage, node);
+
+        public (float x, float y) GetScrollPos(uint node)
+        {
+            float x = 0f, y = 0f;
+            unsafe { fixed (float* px = &x, py = &y) Native.loomgui_stage_get_scroll_pos(_stage, node, px, py); }
+            return (x, y);
+        }
+
+        public (float x, float y, float w, float h) GetNodeLayoutRect(uint node)
+        {
+            float x = 0f, y = 0f, w = 0f, h = 0f;
+            unsafe { fixed (float* px = &x, py = &y, pw = &w, ph = &h)
+                Native.loomgui_stage_get_node_layout_rect(_stage, node, px, py, pw, ph); }
+            return (x, y, w, h);
+        }
+
+        public void SetReuseKey(uint node, uint key)
+            => Native.loomgui_stage_set_reuse_key(_stage, node, key);
+
         /// 绑定外部 GO 到 UI 节点（NativeHost-lite spec）。
         /// 每帧 Sync 时自动同步 TRS + visible + sortingOrder。
         public void BindNativeHost(uint nodeId, GameObject go) => _nhm.Bind(nodeId, go);
