@@ -30,8 +30,9 @@ namespace LoomGUI.Editor
         /// 注围栏规则到工作区 CLAUDE.md（标签段增量合并）。
         static void InjectFenceRules(string ws)
         {
-            var tmpl = Resources.Load<TextAsset>("LoomGUI/fence-rules");
-            if (tmpl == null) { Debug.LogError("[LoomGUI] fence-rules.md not found in Resources"); return; }
+            var tmpl = AssetDatabase.LoadAssetAtPath<TextAsset>(
+                "Assets/LoomGUI/Editor/Resources/LoomGUI/fence-rules.md");
+            if (tmpl == null) { Debug.LogError("[LoomGUI] fence-rules.md not found in Editor Resources"); return; }
             string content = tmpl.text;
             string tagged = content.Contains(BEGIN) ? content : $"{BEGIN}\n{content}\n{END}\n";
             string target = Path.Combine(ws, "CLAUDE.md");
@@ -42,8 +43,10 @@ namespace LoomGUI.Editor
                 File.WriteAllText(target, existing.TrimEnd('\n') + "\n\n" + tagged, Encoding.UTF8);
                 return;
             }
+            string pattern = System.Text.RegularExpressions.Regex.Escape(BEGIN) +
+                @"[\s\S]*?" + System.Text.RegularExpressions.Regex.Escape(END);
             string updated = System.Text.RegularExpressions.Regex.Replace(
-                existing, $"{BEGIN}[^]*?{END}", tagged.TrimEnd());
+                existing, pattern, tagged.TrimEnd());
             File.WriteAllText(target, updated, Encoding.UTF8);
         }
 
@@ -52,18 +55,19 @@ namespace LoomGUI.Editor
         {
             string dest = Path.Combine(ws, ".claude/skills/loomgui-editor");
             Directory.CreateDirectory(dest);
-            CopyResource("LoomGUI/skill/SKILL", Path.Combine(dest, "SKILL.md"));
+            string basePath = "Assets/LoomGUI/Editor/Resources/LoomGUI/skill";
+            CopyResource(Path.Combine(basePath, "SKILL.md"), Path.Combine(dest, "SKILL.md"));
             string refs = Path.Combine(dest, "references");
             Directory.CreateDirectory(refs);
-            CopyResource("LoomGUI/skill/references/fence", Path.Combine(refs, "fence.md"));
-            CopyResource("LoomGUI/skill/references/preview-polyfill", Path.Combine(refs, "preview-polyfill.html"));
-            CopyResource("LoomGUI/skill/references/preview-trust", Path.Combine(refs, "preview-trust.md"));
+            CopyResource(Path.Combine(basePath, "references/fence.md"), Path.Combine(refs, "fence.md"));
+            CopyResource(Path.Combine(basePath, "references/preview-polyfill.html"), Path.Combine(refs, "preview-polyfill.html"));
+            CopyResource(Path.Combine(basePath, "references/preview-trust.md"), Path.Combine(refs, "preview-trust.md"));
         }
 
-        static void CopyResource(string resPath, string destFile)
+        static void CopyResource(string assetPath, string destFile)
         {
-            var ta = Resources.Load<TextAsset>(resPath);
-            if (ta == null) { Debug.LogWarning($"[LoomGUI] resource not found: {resPath}"); return; }
+            var ta = AssetDatabase.LoadAssetAtPath<TextAsset>(assetPath);
+            if (ta == null) { Debug.LogWarning($"[LoomGUI] resource not found: {assetPath}"); return; }
             File.WriteAllText(destFile, ta.text, Encoding.UTF8);
         }
     }
