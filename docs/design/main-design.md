@@ -604,7 +604,7 @@ csbindgen 是为 Unity/IL2CPP 设计的主流绑定生成器（Cysharp MagicPhys
 **所有权**：Rust 核心拥有场景图 + 渲染状态（真相源）；后端拥有渲染对象镜像（派生缓存）。Rust 绝不创建/销毁引擎对象。
 - **每帧脏增量同步**：后端维护双 dict——`_poolByNodeId`（reuse_key=0 的普通节点）+ `_poolByReuse`（reuse_key>0 的 slot 节点）。每帧：(1) 两 dict 全标 stale；(2) 遍历 render_nodes，算复用键 `reuse_key != 0 ? reuse_key : node_id` 选 dict 查池——命中清 stale 并按 change_level 更新（Skip 跳过/Header 只更表头/Full 重建 mesh）、未命中新建；(3) 仍 stale 的销毁。**O(n) 每帧**，禁 O(n²)。静态 UI 每帧同步≈0。
 - 真正每帧开销是引擎自身遍历渲染对象做剔除/批合/提交——靠 DrawState 复用 + FairyBatching 缓解。纯 2D 重 UI 不够 → 升级 SRP 混合。
-- **回收**：节点 Dispose → 下帧不在渲染树 → 后端按复用键销毁镜像。（虚拟列表 slot 换绑 item 时 NodeId 变但 reuse_key 不变 → 同复用键命中现有 GO → 不销毁重建，只按 Full 重建 mesh。坑 109：reuse_key 绑稳定槽位 slotIdx 非 itemIndex，否则复用失效。）
+- **回收**：节点 Dispose → 下帧不在渲染树 → 后端按复用键销毁镜像。（虚拟列表 slot 换绑 item 时 NodeId 变但 reuse_key 不变 → 同复用键命中现有 GO → 不销毁重建，只按 Full 重建 mesh。坑 109：reuse_key 绑稳定槽位 slotIdx 非 itemIndex，否则复用失效。坑 112：reuse_key 是**场景级全局命名空间**——多虚拟列表同屏须用不相交段，否则两列表同 slotIdx 抢同一 GO、slot 背景互相覆盖。）
 - **无 double-free/use-after-free**：Rust 只持整数 id，从不解引用引擎对象。
 
 ---
