@@ -141,6 +141,5 @@ csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件�
 - 坑 34 `#[repr(u8)]`、坑 35 csbindgen struct 手补镜像、坑 39 borrow_events out_len 是 count 非字节
 - 坑 57 围栏外标签硬挡/属性静默死 CSS、坑 94 l-container 假自定义元素
 - 坑 102 cdylib FFI 入口 panic 拖垮宿主、坑 103 tick 时序 rematch 在 compute/solve 后致伪类改 transform/布局属性丢（**已修**，tick 重排）、坑 106 payload_hash 位置-bake 致位置变误 Full（双 re-base 中间漏）
-- 坑 56/75/76/105 dirty hash 采样漏字段（**已根治**，双 hash 全量——但每加字段必检覆盖，坑 105 补注：v1.4-b 又补 reuse_key/line 字段）、坑 107 剥离 uniform 漏改旧烘焙路径致双乘
-- 坑 109 虚拟列表 reuse_key 绑 itemIndex 致 GO 复用失效（绑稳定槽位 slotIdx 非 itemIndex）、坑 108 DrawState key 含 alpha 破批合（per-renderer uniform 单值约束，正确权衡非 bug）
+- 坑 56/75/76/105 dirty hash 采样漏字段（**已根治**，双 hash 全量）、坑 107 剥离 uniform 漏改旧烘焙路径致双乘
 - 坑 54 fgui v2 非 v²、坑 79 shader tex×vcol 非 CSS 合成
