@@ -458,10 +458,12 @@ namespace LoomGUI
             // 不等高尺寸：正弦波 60~140px
             // 本 demo 不等高用预定义 size（sin 波），size 已知无需 spec §2.8 实测补偿回路。
             // 真实数据源（异步图片加载致 item 高度变）场景需补 MeasureAndUpdateSlot + SetScrollPos 补偿防跳动。
+            // reuseBase=100000：双列表 reuse_key 独占段（等高用默认 0 段 1..N，不等高用 100000 段），
+            // 防 MirrorPool _poolByReuse 跨列表撞车（见 VirtualListDriver 注释）。
             float[] sizes = new float[200];
             for (int i = 0; i < 200; i++)
                 sizes[i] = 100f + 40f * Mathf.Sin(i * 0.3f);
-            _listDriverVar = new VirtualListDriver(_stage, vr, 200, variableHeight: true, sizes: sizes);
+            _listDriverVar = new VirtualListDriver(_stage, vr, 200, variableHeight: true, sizes: sizes, reuseBase: 100000u);
             _isListPage = true;
             Debug.Log("[Showcase] page_list 订阅完成（等高1000 + 不等高200 sin-height）");
         }
@@ -606,6 +608,7 @@ namespace LoomGUI
         readonly uint _listContainer;
         readonly uint _itemCount;
         readonly bool _variableHeight;
+        readonly uint _reuseBase;   // reuse_key 段基址（每列表独占，防多列表同屏撞车）
 
         // Equal-height
         float _itemSize;
@@ -625,12 +628,14 @@ namespace LoomGUI
         const uint MeasureReuseKey = 0;
 
         public VirtualListDriver(LoomStage stage, uint container, uint itemCount,
-            bool variableHeight = false, float[] sizes = null, float defaultItemSize = 80f)
+            bool variableHeight = false, float[] sizes = null, float defaultItemSize = 80f,
+            uint reuseBase = 0u)
         {
             _stage = stage;
             _listContainer = container;
             _itemCount = itemCount;
             _variableHeight = variableHeight;
+            _reuseBase = reuseBase;
 
             if (variableHeight && sizes != null && sizes.Length == itemCount)
             {
@@ -744,7 +749,12 @@ namespace LoomGUI
                     // 新建 slot（视口扩大或首次）。
                     var (root, title) = CreateItem(itemH, top);
                     _stage.AppendChild(_listContainer, root);
-                    _stage.SetReuseKey(root, (uint)slotIdx + 1);  // reuse_key = slotIdx+1（0 保留）
+                    // reuse_key = _reuseBase + slotIdx + 1。_reuseBase 每列表独占段：
+                    // page_list 双列表同屏，若两列表都用 slotIdx+1（都从 1 起），MirrorPool 的
+                    // _poolByReuse 是场景级单字典 → 两列表同 slotIdx 的 slot 抢同一个 GO（右列表覆盖左）。
+                    // 因仅 slot 容器背景带 reuse_key>0（icon/span 为 0 按 node_id 走），撞车精确发生在
+                    // 灰底背景：被顶掉的 slot 没了灰底（只剩 icon+文字）→ 灰底按槽位闪/缺 → 缝隙 + 一闪一闪。
+                    _stage.SetReuseKey(root, _reuseBase + (uint)slotIdx + 1);
                     _stage.SetText(title, GetItemTitle((uint)itemIndex));
                     _slots[slotIdx] = (root, title, itemIndex);
                 }
