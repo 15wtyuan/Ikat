@@ -94,7 +94,7 @@ v1 还没有编辑器/WASM 渲染，用 **open-design Chromium 兜底**：围栏
 | v1.2 | **border-radius（圆角 mesh）** | AI 必写 CSS；围栏外静默丢弃违背可预测性 | ✅ |
 | v1.3 | **ColorFilter + 九宫格 slice + profiling** | 色调统一 + disabled 灰化升级；UI 皮肤缩放不变形；draw call/GC/内存实机达标 | ✅ |
 | v1.3+ | **动态树重构（地基）** | v1 static-tree 撞墙（v1.4 列表/v1.5+ 全需运行时改树）。代际 NodeId + slotmap + 动态 API，非功能号 | ✅ 待家里机验 |
-| v1.4 | **虚拟化列表 + soft clip** | 背包/排行榜/邮件必备，v1 手搓 div+scroll 无 slot 复用。建在动态树之上 | 待开 |
+| v1.4 | **虚拟化列表 + position:absolute** | 背包/排行榜/邮件必备，v1 手搓 div+scroll 无 slot 复用。建在动态树之上。absolute 解 tips overlay/列表 slot 定位。soft clip（羽化）推 v2（§5.2） | 待开 |
 | v1.5 | **Controller / Gear / Transition** | 标签页/弹窗/过场/状态切换必备 | 待开 |
 | v1.6 | **富文本（inline layout）** | 聊天/物品描述必备。多样式/图文混排，复用 v1 文本测量。内部 NodeKind，不暴露标签 | 待开 |
 | v1.7 | **TextInput / IME（光标/选区/composing）** | 登录/搜索必备。IME 最重，可能需 rustybuzz | 待开 |
