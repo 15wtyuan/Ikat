@@ -42,11 +42,32 @@ Unity 插件装上后自动弹出（首次），或菜单 `LoomGUI > Settings`�
 | **包管理** | 包列表编辑 + 刷新 + 校验 + 一键打包（现 `LoomPackageManagerWindow` 整体并入） |
 | **图集** | 图集条目编辑（拖文件夹当 packables）+ 同步 + 校验 |
 
-### 2.3 配置存储
+### 2.3 配置存储（重写，全局一份）
 
-一份 `LoomPackageSettings` ScriptableObject（扩展现有，加图集字段 + 工作区字段）。`LoomPackageManagerWindow` 改名 `LoomSettingsWindow`，内部按 tab 分区。tab 间共享同一份 `_settings`——改工作区 tab 的 resDirName → 图集 tab 立刻反映。
+**重写，不留兼容**（开发阶段，不偷懒）。现有 `LoomPackageSettings`（Editor/ 下）+ `LoomPackageManagerWindow` 全部重写。
 
-### 2.4 loomgui_pkg.exe 供给
+新类 **`LoomSettings`**（ScriptableObject，`Assets/LoomGUI/Runtime/LoomSettings.cs`）——全局一份，**Editor 配置源 + 运行时配置资产同源**：
+
+```
+LoomSettings : ScriptableObject
+  - workspaceDir: string            // 工作区根，默认 "Assets/LoomUI/"
+  - resDirName: string              // 资源目录名，默认 "res"
+  - pkgOutputDir: string            // pkg.bin 输出目录，默认 "Assets/StreamingAssets/"
+  - packages: List<PackageEntry>    // 包列表（name/source/html）
+  - atlasEntries: List<AtlasEntry>  // 图集配置（见 §4.2）
+```
+
+资产文件放 `Assets/Resources/LoomGUI/LoomSettings.asset`（Resources/ 下，运行时 `Resources.Load` 可读，build 时进 player）。
+
+`PackageEntry`（重写）：`pkgName` + `sourceDir`（相对工作区根）+ `htmlFiles: List<string>`。
+
+Editor 面板 **`LoomSettingsWindow`**（替代 `LoomPackageManagerWindow`，`Assets/LoomGUI/Editor/LoomSettingsWindow.cs`），三 tab 分区，共享同一份 `LoomSettings` 资产——改工作区 tab 的 resDirName → 图集 tab 立刻反映。
+
+### 2.4 LoomStage 运行时自动取配置
+
+LoomStage **不再 Inspector 手配图集**（"配置总会遗忘"）。改为 Awake 时 `Resources.Load<LoomSettings>("LoomGUI/LoomSettings")` 自动找全局配置资产。砍 `_spriteAtlases: List<SpriteAtlas>` Inspector 字段。SpriteResolver 从 `LoomSettings.atlasEntries` 建路由表 + 注册图集。
+
+### 2.5 loomgui_pkg.exe 供给
 
 **随插件发布，固定路径，不暴露给用户。** exe 放 `Assets/LoomGUI/Editor/Tools/loomgui_pkg.exe`。本机改 loomgui_pkg 源码后手动 `cargo build --release -p loomgui_pkg` + 覆盖插件里那份。设置面板无 exe 路径 UI（删 `loomPkgExePath` 字段）。
 
@@ -66,7 +87,7 @@ Assets/LoomUI/
 │   ├── references/fence.md
 │   ├── references/preview-polyfill.html
 │   ├── references/preview-trust.md
-│   └── config.json                   ← 从 LoomPackageSettings 导出，AI 读此调 exe
+│   └── config.json                   ← 从 LoomSettings 导出，AI 读此调 exe
 ├── res/                              ← 全局唯一资源根（PNG 当 Sprite 导入）
 │   ├── icons/
 │   └── skin/
@@ -87,7 +108,7 @@ Assets/LoomUI/
 2. **分发 skill** → `Assets/LoomUI/.claude/skills/loomgui-editor/`。拷 SKILL.md + references（迁自 `editor/skill/loomgui-editor/`）。**砍 pack.mjs**——skill 改为教 AI 读 config.json 调 loomgui_pkg.exe 验证+打包。
 3. **写 config.json**（见 §3.4）。
 
-### 3.4 config.json（LoomPackageSettings 导出快照）
+### 3.4 config.json（LoomSettings 导出快照）
 
 路径：`Assets/LoomUI/.claude/skills/loomgui-editor/config.json`。**全相对工作区根**（可移植，换机器/换目录不炸）：
 
@@ -106,7 +127,7 @@ Assets/LoomUI/
 - `output_dir`：相对工作区根的 pkg.bin 输出目录（`Assets/LoomUI/` → `Assets/StreamingAssets/`，相对 `../../StreamingAssets/`）。
 - `packages`：包列表（name + source 相对工作区根 + html 文件名列表）。
 
-**自动同步**：面板改 LoomPackageSettings 任意字段（resDirName / outputDir / 包列表增删 / 图集配置）→ 自动重写 config.json（`EditorUtility.SetDirty` 后的持久化回调或显式 MarkDirty 钩子）。设计师改完面板，AI 立刻读到最新。
+**自动同步**：面板改 LoomSettings 任意字段（resDirName / outputDir / 包列表增删 / 图集配置）→ 自动重写 config.json（`EditorUtility.SetDirty` 后的持久化回调或显式 MarkDirty 钩子）。设计师改完面板，AI 立刻读到最新。
 
 ### 3.5 AI 工作流（open-design 里）
 
@@ -130,7 +151,15 @@ Assets/LoomUI/
 
 ### 4.2 图集配置（图集 tab）
 
-存 `LoomPackageSettings` 新字段 `atlasEntries: List<AtlasEntry>`：
+存 `LoomSettings.atlasEntries: List<AtlasEntry>`（重写）：
+
+```
+AtlasEntry
+  - atlasName: string            // 如 "LoomShowcaseAtlas"
+  - isDefault: bool              // res 根图（无子目录）兜底图集
+  - folders: List<string>        // Unity 相对路径，如 ["Assets/LoomUI/res/icons", "Assets/LoomUI/res/skin"]
+  - atlas: SpriteAtlas           // 运行时引用（图集 tab 同步时自动绑定/创建）
+```
 
 ```
 atlasEntries:
@@ -141,11 +170,11 @@ atlasEntries:
     folders: [Assets/LoomUI/res/items]
 ```
 
-拖文件夹当 packables。一图集可拖多文件夹（都映射到该图集）。两图集拖同一子目录 = 配置错误，校验报红禁止。
+拖文件夹当 packables。一图集可拖多文件夹（都映射到该图集）。两图集拖同一子目录 = 配置错误，校验报红禁止。`atlas` 引用由图集 tab 同步时自动绑定（不存在则创建 `.spriteatlas` 资产）。
 
 ### 4.3 path→Sprite 显式路由（SpriteResolver 重写）
 
-运行时从 atlasEntries 构建 `Dictionary<string 子目录, SpriteAtlas>` 映射表。查询：
+SpriteResolver Awake 时从 `LoomSettings.atlasEntries` 构建 `Dictionary<string 子目录, SpriteAtlas>` 映射表（遍历每个 entry 的 folders，取每个 folder 的最末段作为子目录 key，如 `Assets/LoomUI/res/icons` → key `icons` → 该 entry.atlas）。查询：
 
 1. path = `icons/home.png`
 2. 取 path **顶层子目录** `icons` → 查映射表 → 命中 LoomShowcaseAtlas
@@ -249,17 +278,21 @@ HTML <img src="res/icons/home.png">
 
 - **SpriteResolver 显式路由单测**：mock SpriteAtlas + atlasEntries，验 (a) path→atlas 顶层子目录路由正确；(b) res 根图走 isDefault；(c) miss 不永久缓存（首次 miss → 加载 sprite → 二次查命中）。
 - **atlas packables 同步单测**：mock folders + PNG 集合 + 现有 atlas packables，验增量增删正确。
-- **config.json 导出单测**：mock LoomPackageSettings，验导出的 config.json 字段全相对工作区根、内容正确。
+- **config.json 导出单测**：mock LoomSettings，验导出的 config.json 字段全相对工作区根、内容正确。
 - **fence_contract 不受影响**：纯 Unity 侧 + 打包器归一化（path 裁 res 前缀不变）改动，围栏契约无触碰。
 
 ---
 
 ## 8. 实现顺序（建议）
 
-1. **图集配置 + 显式路由 + 修坑 104 + 删诊断 log**（§4）——改 SpriteResolver + LoomPackageSettings 加 atlasEntries + 图集 tab UI。先闭环图集痛点。
-2. **res 提到 LoomUI 根**（§4.1）——迁移 `Assets/LoomUI/showcase/res/` → `Assets/LoomUI/res/`，改 showcase HTML 的 src 路径（`res/icons/...` 不变，因为归一化后都是 `icons/...`，但物理位置变了）。
-3. **LoomSettingsWindow 三 tab 架构**（§2）——PackageManager 并入 + 工作区 tab + 图集 tab。
-4. **工作区初始化 C#**（§3）——注围栏规则 + 分发 skill + 写 config.json + 自动同步 + AssetPostprocessor。
-5. **exe 随插件发布**（§2.4）——loomgui_pkg.exe 放 `Assets/LoomGUI/Editor/Tools/`，删 loomPkgExePath 配置。
-6. **samples/ editor/ 删 + 文档同步**（§5）。
-7. **重打 pkg.bin + build .dll + 家里机验收**。
+> 重写架构：`LoomSettings`（配置资产）是中枢，面板/运行时都依赖它。先建配置类 + 资产，再面板，再运行时接入，最后工作区初始化 + 删除旧目录。
+
+1. **`LoomSettings` 配置类 + 资产**（§2.3）——新建 `Runtime/LoomSettings.cs`（含 PackageEntry / AtlasEntry），建 `Resources/LoomGUI/LoomSettings.asset`。删旧 `LoomPackageSettings.cs` + `.asset`。
+2. **res 提到 LoomUI 根**（§4.1）——迁移 `Assets/LoomUI/showcase/res/` → `Assets/LoomUI/res/`。showcase HTML 的 `src="res/icons/..."` 不变（归一化后都是 `icons/...`）。
+3. **SpriteResolver 重写 + LoomStage 自动取配置**（§4.3 / §4.5 / §4.6 / §2.4）——SpriteResolver 据 atlasEntries 建路由表 + 显式路由 + miss 不缓存 + 删诊断 log；LoomStage 砍 `_spriteAtlases` Inspector 字段，改 `Resources.Load<LoomSettings>` 自动取配置。
+4. **图集 tab + 自动同步 packables + 校验**（§4.2 / §4.4 / §7.1）——图集 tab UI（拖文件夹）+ 同步 atlas packables（显式 Sprite 列表，修 B2）+ 校验。
+5. **`LoomSettingsWindow` 三 tab 架构**（§2）——工作区 tab + 包管理 tab（重写 PackageManager）+ 图集 tab，共享 LoomSettings。
+6. **工作区初始化 C#**（§3）——`LoomWorkspaceInitializer`（注围栏规则 + 分发 skill + 写 config.json + 自动同步）+ `LoomWorkspaceAssetPostprocessor`（拦非资源文件）。围栏规则/skill 内容迁进插件 Editor Resources。
+7. **exe 随插件发布**（§2.5）——loomgui_pkg.exe 放 `Assets/LoomGUI/Editor/Tools/`。
+8. **samples/ editor/ 删 + 文档同步**（§5）。
+9. **重打 pkg.bin + build .dll + 家里机验收**。
