@@ -5,8 +5,7 @@
 <title>tips_toast</title>
 <style>
 /* tips_toast 组件 CSS（D6 组件隔离）。
-   tips_layer 叠加层用：driver instantiate 后挂 tips_layer，定时 remove。
-   自身不定位（无 position:absolute，v1 限制）——由 tips_layer 容器决定位置。 */
+   tips_layer 容器已用 position:absolute 叠加（v1.4-b）；tips_toast 自身不定位，靠 tips_layer 容器布局。 */
 .toast{
   background-color:#252839;border:1px solid #5fb2c4;border-radius:8px;
   padding:20px 32px;gap:10px;align-items:center;

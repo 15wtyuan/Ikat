@@ -84,7 +84,7 @@
 
 - **围栏外标签**（如 `<video>`/`<input>`/`<b>`/`<section>`）+ **行内混排**：**编译期报错**（parse 期失败、打包器拒收，不降级）。"写什么得到什么"的口径。
 - **围栏外 CSS 属性**（如 `position:absolute`/`float`/`clip-path`/`cursor`/`font-style`）：**静默忽略**（`apply_decl` 返 `false`，字段不变，布局语义不变）。
-  - 易误判项：`position:relative` 靠 taffy 默认 `Position::Relative` 生效（**非显式映射，写不写行为一致，无 inset 偏移**）；`display:grid` 落 Flex；`position:absolute/fixed` **不脱离流**（保持默认 Relative）。
+  - 易误判项：`position:relative` 靠 taffy 默认 `Position::Relative` 生效（**非显式映射，写不写行为一致，无 inset 偏移**）；`display:grid` 落 Flex；v1.4-b 起 `position:absolute` **脱离流**（taffy Absolute + top/right/bottom/left inset）；`position:fixed/sticky` 仍静默忽略。
   - 这些"静默忽略"行为本身**被测试锁定**，不可靠推测——"搜索代码无 match"≠"不支持"，可能是底层默认（position:relative 教训）。
 
 > 围栏外标签/CSS/选择器的完整清单见 fence.md。
@@ -485,7 +485,7 @@ stage.is_pointer_on_ui() -> bool   // = 命中目标非空且非根
 游戏 UI 里可滚动容器远多于虚拟化长列表，移动端要惯性/回弹/分页/吸附。
 
 **模型**：Container 有"可滚动"模式（挂 ScrollPane，非新节点类型）。ScrollPane 持 `content`（子树）/`viewport`（可视矩形）/`scroll_type`(H/V/Both)/`scroll_pos`（偏移）。
-- taffy 算 content 总尺寸；视口 = Container measured_size；`scroll_pos` 是 content 根的 transform 偏移（不重布局，只平移）；视口裁剪 = Container clip_rect。
+- 核心拼直接子节点 layout_rect AABB（scroll.rs refresh_content_sizes）；v1.4-b 起 content_size_overridden 的容器跳过自动算（driver 注入）。视口 = Container measured_size；`scroll_pos` 是 content 根的 transform 偏移（不重布局，只平移）；视口裁剪 = Container clip_rect。
 - **惯性回弹物理**：**不走 GTween**（content 异步变化时 GTween 的固定 end 会跳变）。ScrollPane 自维护可变 target 的 tween，content size 变化时按状态补偿 start、不突变。tick 时机在 solve 后、process 后、compute_world_transforms 前（需 content_size + 拖拽事件驱动，满足"本帧 scroll 偏移进 transform 与命中"；drag+inertia+wheel 同帧进 world matrix，零拖拽延迟；process 的 hit_test 用上帧 world_transforms，1 帧差可接受）。**禁止 GTween 直接 tween `scroll_pos`**（API 层挡，避免双写）。
 - 能力：滚动类型、惯性+回弹、滚动条、鼠标滚轮。分页/吸附/下拉刷新、虚拟化列表后期（不暴露专用标签，§3.1）。
 

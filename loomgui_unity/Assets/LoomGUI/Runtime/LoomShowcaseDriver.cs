@@ -82,7 +82,7 @@ namespace LoomGUI
             // layer 骨架：root + ui_layer（主界面层）+ tips_layer（tips 层，在上）。
             _root = _stage.CreateRoot("div", "width:1080px;height:1920px;background-color:#1a1d2e;flex-direction:column");
             _uiLayer = _stage.CreateNode("div", "flex-grow:1");
-            _tipsLayer = _stage.CreateNode("div", "flex-direction:column;align-items:center;justify-content:flex-end;padding:40px;pointer-events:none");
+            _tipsLayer = _stage.CreateNode("div", "position:absolute;top:0;left:0;width:100%;height:100%;flex-direction:column;align-items:center;justify-content:flex-end;padding:40px;pointer-events:none");
             _stage.AppendChild(_root, _uiLayer);
             _stage.AppendChild(_root, _tipsLayer);
 
