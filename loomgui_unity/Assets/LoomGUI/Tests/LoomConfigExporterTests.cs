@@ -18,8 +18,8 @@ namespace LoomGUI.Tests
             string json = LoomGUI.Editor.LoomConfigExporter.BuildJson(s);
             // exe_path 相对工作区根：Assets/LoomUI/ → Assets/LoomGUI/Editor/Tools/ = ../LoomGUI/Editor/Tools/loomgui_pkg.exe
             StringAssert.Contains("\"exe_path\": \"../LoomGUI/Editor/Tools/loomgui_pkg.exe\"", json);
-            // output_dir 相对工作区根：Assets/LoomUI/ → Assets/StreamingAssets/ = ../../StreamingAssets/
-            StringAssert.Contains("\"output_dir\": \"../../StreamingAssets/\"", json);
+            // output_dir 相对工作区根：Assets/LoomUI/ → Assets/StreamingAssets/ = ../StreamingAssets/
+            StringAssert.Contains("\"output_dir\": \"../StreamingAssets/\"", json);
             StringAssert.Contains("\"res_dir\": \"res\"", json);
             StringAssert.Contains("\"name\": \"showcase\"", json);
             StringAssert.Contains("\"source\": \"showcase\"", json);

@@ -10,3 +10,5 @@ BASE=be94766
 - T2: complete (commits 334cef4..9fbda05, review clean) — pack 加 res_root 参数 + CLI --res-root + 8 测试改 + res 迁 LoomUI 根. Minor 未修：--res-root 丢空值 filter（功能等价）/ res_dir 推导重复 lib+main（小 CLI 不值得提 helper）
 - T3: complete (commits 9fbda05..c8afb5a, review clean) — SpriteResolver 显式路由+miss不缓存+删DBG-IMG+3测试. Minor: 循环内 char[] 分配. ⚠️待家里机: 空 atlas.GetSprite 行为/MissingSprite set-only 无读方/ClearCache 移除. LoomStage 编译断点留 T4 修
 - T4: complete (commits c8afb5a..986082a, review clean) — LoomStage 砍 _spriteAtlases + using U2D, 改 Init(LoomSettings.GetOrCreateDefault()). 修 T3 编译断点. ⚠️待家里机: Unity 编译/PlayMode
+- T5: complete (commits 986082a..b699da5, review clean after fix) — LoomSettingsWindow 三 tab + LoomExePath + 3 桩注释. Fix: --res→--res-root 绝对路径 + Process stdout/stderr 死锁修. ⚠️待家里机: Unity 编译/PlayMode
+- T6: complete (commits b699da5..a6dcf52, review clean after fix) — LoomAtlasSync 同步 packables(修B2) + 2测试 + 取消T5桩. Fix: new SpriteAtlas→CreateInstance/ToAssetPath StartsWith/删scannedSprites/删SyncEntry settings参. ⚠️待家里机: Unity编译/SetPackables行为

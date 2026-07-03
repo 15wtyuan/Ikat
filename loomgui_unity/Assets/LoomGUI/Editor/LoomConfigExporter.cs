@@ -61,8 +61,12 @@ namespace LoomGUI.Editor
             // 用 Uri.MakeRelativeUri 算相对路径。
             string projRoot = Directory.GetParent(Application.dataPath).FullName.Replace('\\', '/');
             string from = Path.GetFullPath(Path.Combine(projRoot, workspaceDir)).Replace('\\', '/');
+            // Path.GetFullPath 会剥 trailing slash。若原 targetDir 以 / 或 \ 结尾
+            // 说明 targetDir 是目录，须补回 trailing slash 让 MakeRelativeUri 语义正确。
+            bool toIsDir = targetDir.EndsWith("/") || targetDir.EndsWith("\\");
             string to = Path.GetFullPath(Path.Combine(projRoot, targetDir)).Replace('\\', '/');
             if (!from.EndsWith("/")) from += "/";
+            if (toIsDir && !to.EndsWith("/")) to += "/";
             var uriFrom = new System.Uri(from);
             var uriTo = new System.Uri(to);
             return System.Uri.UnescapeDataString(uriFrom.MakeRelativeUri(uriTo).ToString());
