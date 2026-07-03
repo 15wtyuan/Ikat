@@ -555,12 +555,16 @@ csbindgen 是为 Unity/IL2CPP 设计的主流绑定生成器（Cysharp MagicPhys
 **一块 SOA 公共头 + 多个按类型分区的 per-frame arena，C# tick 内拷完**：
 ```
 每帧 FFI 传：
-1. RenderNode 公共头 SOA（定长字段并行存储，当前 18 列 / blob v4）：
+1. RenderNode 公共头 SOA（定长字段并行存储，当前 22 列 / blob v9）：
    node_id, parent_id, visible, alpha, sort_key, mask_context,
    world_matrix(m_a,m_b,m_c,m_d,m_tx,m_ty — 6 列累计世界矩阵),
-   payload_kind, mesh_off, mesh_len, text_off, text_len, tex_id
-   —— (mesh_off,mesh_len)/(text_off,text_len) 定位 payload 在 arena 的哪段；payload_kind=Unchanged 时为空。
-   （tint×alpha 烤进顶点色、blend 走 material property、grayed 由 ColorFilter program 替代——均不占 SOA 列。）
+   payload_kind, mesh_off, mesh_len, text_off, text_len,
+   path_idx(v7：图片 path 表 1-based 索引，0=纯色无图；核心不知图集),
+   program(v5：shader 变体 0/1/2/3/4), color_matrix(v6：[f32;20] ColorFilter),
+   change_level(v8：u8，0=Skip 1=Header 2=Full；Skip/Header 不写 arena，mesh_off/len=0),
+   reuse_key(v9：u32，0=无复用按 node_id keying，>0=按 reuse_key 复用 GO，虚拟列表 slot 用)
+   —— (mesh_off,mesh_len)/(text_off,text_len) 定位 payload 在 arena 的哪段；change_level=Skip/Header 时为空（不写 arena，省带宽）。
+   （alpha 走 _Alpha shader uniform 不烤顶点色、blend 走 material property、grayed 由 ColorFilter program 替代——均不占 SOA 列。）
 2. 多个按类型分区的 per-frame arena（变长 payload，每种一个 arena）：
    mesh_arena   : 扁平 verts[f32]/uvs[f32]/colors[u32]/indices[u16] + count
    text_arena   : 扁平 glyphs[{codepoint,pen_x,pen_y}] + 节点级 font_size/color
@@ -569,7 +573,7 @@ csbindgen 是为 Unity/IL2CPP 设计的主流绑定生成器（Cysharp MagicPhys
 
 **坐标空间**：SOA world_matrix 与 clip rect 均为**绝对 design 坐标**（核心 layout 累加 parent origin）。后端不做逐节点 parent 累加——根 Stage transform 一次性映射 design→world（§7.1）。
 
-**内存所有权**：公共头 SOA + 各 arena 都是 Rust 侧 per-frame。**公共头 + 所有 arena 在 tick 返回前由 C# 原子拷贝到托管 buffer**（拷贝而非 pin）；tick 返回后 Rust 即可 reset，C# 后续只读自身拷贝。Rust 下帧开头 reset arena（复用零分配）。**"沿用上帧"**：不 dirty 节点 payload=Unchanged，不进 arena，后端不动该 node_id 的渲染对象。
+**内存所有权**：公共头 SOA + 各 arena 都是 Rust 侧 per-frame。**公共头 + 所有 arena 在 tick 返回前由 C# 原子拷贝到托管 buffer**（拷贝而非 pin）；tick 返回后 Rust 即可 reset，C# 后续只读自身拷贝。Rust 下帧开头 reset arena（复用零分配）。**"沿用上帧"**：change_level=Skip 整节点不动（后端保留 GO 不碰）；Header 只更表头（GO transform/材质/MPB _Alpha），不进 arena 不重建 mesh；Full 才写 arena 重建 mesh。变更检测用双 hash（header_hash 表头 + payload_hash 几何，全量不采样，坑 56/75/76/105）。
 
 **读取约定**：任何变长 payload 拍平成扁平 SOA，**禁止嵌套结构跨 FFI**。每变体 byte 布局定死（写进契约附录）。**C# 用 `Span<byte>` + `BinaryPrimitives` 读，禁用 `Marshal.PtrToStructure`**（IL2CPP struct 对齐坑）。**绝不跨 FFI 传裸指针**。
 
@@ -598,9 +602,9 @@ csbindgen 是为 Unity/IL2CPP 设计的主流绑定生成器（Cysharp MagicPhys
 
 ### 13.6 渲染对象镜像的生命周期与性能
 **所有权**：Rust 核心拥有场景图 + 渲染状态（真相源）；后端拥有渲染对象镜像（派生缓存）。Rust 绝不创建/销毁引擎对象。
-- **每帧脏增量同步**：后端维护 `Dictionary<NodeId, RenderObject>`。每帧：(1) 池中对象置 stale；(2) 遍历 render_nodes，按 node_id 查池——命中清 stale 并按 payload 更新/Unchanged 跳过、未命中新建；(3) 仍 stale 的销毁。**O(n) 每帧**，禁 O(n²)。静态 UI 每帧同步≈0。
+- **每帧脏增量同步**：后端维护双 dict——`_poolByNodeId`（reuse_key=0 的普通节点）+ `_poolByReuse`（reuse_key>0 的 slot 节点）。每帧：(1) 两 dict 全标 stale；(2) 遍历 render_nodes，算复用键 `reuse_key != 0 ? reuse_key : node_id` 选 dict 查池——命中清 stale 并按 change_level 更新（Skip 跳过/Header 只更表头/Full 重建 mesh）、未命中新建；(3) 仍 stale 的销毁。**O(n) 每帧**，禁 O(n²)。静态 UI 每帧同步≈0。
 - 真正每帧开销是引擎自身遍历渲染对象做剔除/批合/提交——靠 DrawState 复用 + FairyBatching 缓解。纯 2D 重 UI 不够 → 升级 SRP 混合。
-- **回收**：节点 Dispose → 下帧不在渲染树 → 后端按 node_id 销毁镜像（或核心发"已移除列表"立即清理）。（虚拟列表按 slot 复用，不销毁重建。）
+- **回收**：节点 Dispose → 下帧不在渲染树 → 后端按复用键销毁镜像。（虚拟列表 slot 换绑 item 时 NodeId 变但 reuse_key 不变 → 同复用键命中现有 GO → 不销毁重建，只按 Full 重建 mesh。坑 109：reuse_key 绑稳定槽位 slotIdx 非 itemIndex，否则复用失效。）
 - **无 double-free/use-after-free**：Rust 只持整数 id，从不解引用引擎对象。
 
 ---
