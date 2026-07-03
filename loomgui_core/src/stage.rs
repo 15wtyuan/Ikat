@@ -86,7 +86,7 @@ impl Stage {
         pkg.name = name.to_string(); // read_package 填空串，这里覆盖为真实包名
         // 把本包 manifest 的 path → (w,h) 合并进全局尺寸表。
         // 重复 load 同名包前，先清前次加载的包的 path 条目（避免 path 残留——虽然 path 全局唯一，
-        // 但若前次包有 path 而新包没有，旧条目会悬空）。简单实现：直接 extend 覆盖（同 path 后写赢）。
+        // 但若前次包有 path 而新包没有，条目会悬空）。简单实现：直接 extend 覆盖（同 path 后写赢）。
         for entry in &pkg.asset_manifest {
             self.image_sizes.insert(entry.path.clone(), (entry.w, entry.h));
         }
@@ -225,7 +225,7 @@ impl Stage {
     }
 
     /// 删节点（递归删子 + 联动清 anim/scroll/tween + slotmap remove）。
-    /// NodeId 此后失效（gen++）。无 scene / 已删节点 → no-op。
+    /// NodeId 此后失效（gen++）。无 scene / 失效节点 → no-op。
     /// spec §5.3：删节点联动清持久附属 map，防悬空 NodeId 残留。
     pub fn remove_node(&mut self, node: NodeId) {
         if let Some(scene) = self.scene.as_mut() {
@@ -314,9 +314,9 @@ impl Stage {
 
     /// 从包克隆一个组件进当前 scene，返回组件根 NodeId（孤立，parent=None，调用方 append_child 挂载）。
     ///
-    /// v1.4-a T5（spec §4.2/§4.4）：
+    /// spec §4.2/§4.4：
     /// 1. 查 `packages[pkg].components[component]`，clone 出 ComponentTemplate（避开 packages/scene 双借）。
-    /// 2. 遍历 template.nodes，按 parent_idx 序建 live Node（父先建于子），复用 v1.3+ 节点构造
+    /// 2. 遍历 template.nodes，按 parent_idx 序建 live Node（父先建于子），复用节点构造
     ///    （`create_node_from_template`：kind + baked style → base_style/style 初始 + clip_rect +
     ///    dirty_text + slotmap insert + id 回填），再填 classes/id_attr/draggable/tabindex。
     ///    按 parent_idx 串子树（append_child 语义：parent.children.push + child.parent=Some(parent)）。
@@ -382,7 +382,7 @@ impl Stage {
     }
 
     /// 测试 helper：建空 scene 的 Stage（不依赖 parse feature）。
-    /// 供 T6 动态建树 API 测试用——用 create_root/create_node 返回的 NodeId，不硬编码值。
+    /// 供动态建树 API 测试用——用 create_root/create_node 返回的 NodeId，不硬编码值。
     #[cfg(test)]
     pub fn new_for_test() -> Self {
         let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
@@ -451,7 +451,7 @@ impl Stage {
         // 4. 伪类重匹配（提到 solve 前：改 taffy_style/transform/colors，本帧全部消费）
         rematch_pseudo_classes(scene);
         // 5. solve（读 rematch 后的 taffy_style → layout_rect）
-        // D17：核心知图尺寸（打包期 PNG IHDR 静态，存 Stage.image_sizes）。solve 查尺寸表算
+        // 核心知图尺寸（打包期 PNG IHDR 静态，存 Stage.image_sizes）。solve 查尺寸表算
         // Image intrinsic（三档：CSS > 真实像素 > 64×64）。不知图集（运行时纹理/UV 归 Unity）。
         solve(scene, &self.font, self.root_size, &self.image_sizes);
         // 6. content_size 填充（solve 后 content_size/viewport/overlap）
@@ -460,8 +460,8 @@ impl Stage {
         crate::scene::transform::compute_world_transforms(scene);
         // 8. 渲染（+ 合成 scrollbar）。传上帧 hash 基线，未变节点 change_level=Skip；
         //    返回新 hash 存 self.prev_node_hashes 供下帧比。
-        // D17：build_render_nodes 查 Stage.image_sizes 算九宫格 UV（slice_px / src_px）。
-        // Image payload 带 path，UV 全图 (0,0)-(1,1)（无 atlas 子区），Unity 查 Sprite 拿真实 UV（T8）。
+        // build_render_nodes 查 Stage.image_sizes 算九宫格 UV（slice_px / src_px）。
+        // Image payload 带 path，UV 全图 (0,0)-(1,1)（无 atlas 子区），Unity 查 Sprite 拿真实 UV。
         let (frame, new_hashes) = build_render_nodes(scene, &self.font, &self.prev_node_hashes, &self.image_sizes);
         self.prev_node_hashes = new_hashes;
         frame
@@ -472,10 +472,10 @@ impl Stage {
         serde_json::to_string_pretty(&frame.nodes).unwrap()
     }
 
-    /// 测试专用：HTML+CSS 文本直接构 scene（v1.4-a 砍了 load_inline，此 helper 保留 parse 路径
-    /// 供 stage/render 集成测试用——这些测验证 parse→render 管线，不走 package/instantiate）。
-    /// 语义同旧 load_inline：parse_html → resolve_styles → build_scene → self.scene。
-    /// v1.4-a T4：textures/atlases 已砍（图集归 Unity），故不涉及纹理注册。
+    /// 测试专用：HTML+CSS 文本直接构 scene。保留 parse 路径供 stage/render 集成测试用
+    /// ——这些测验证 parse→render 管线，不走 package/instantiate。
+    /// 语义：parse_html → resolve_styles → build_scene → self.scene。
+    /// 不涉及纹理注册（图集归 Unity）。
     #[cfg(all(test, feature = "parse"))]
     pub fn load_inline_for_test(&mut self, html: &str, css: &str) -> Result<(), String> {
         let tree = crate::parse::dom::parse_html(html)?;
@@ -577,7 +577,7 @@ mod tests {
             gather_template_nodes(&tree, &styles, *root, None, &mut nodes);
         }
         // asset_manifest：扫所有 Image 节点的 src（已归一化路径——测试用 src 直接作 path）。
-        // D17：图尺寸测试 helper 无 PNG 文件 → w/h=0（核心 measure fallback 64×64）。
+        // 图尺寸测试 helper 无 PNG 文件 → w/h=0（核心 measure fallback 64×64）。
         // 真实尺寸由 loomgui_pkg 打包器读 PNG IHDR 填（见 pkg 测试）。
         let manifest: Vec<crate::asset::AssetEntry> = nodes
             .iter()
@@ -600,7 +600,7 @@ mod tests {
 
     /// 黄金等价（最强门）：inline 渲染 == 包渲染。
     ///
-    /// v1.4-a T5 改写（原 T4 暂 ignore）：load_package 进资源池不建 scene，包路径走
+    /// load_package 进资源池不建 scene，包路径走
     /// `load_package → instantiate("scene") → append_child → render`，与 inline 路径
     /// （load_inline_for_test → render）渲染输出逐字等价对比。证明 instantiate 克隆子树 +
     /// 挂载后几何/样式与 inline 同构（零回归）。
@@ -633,7 +633,7 @@ mod tests {
         assert_eq!(inline_json, pkg_json, "包路径渲染输出必须 == inline（instantiate 克隆子树等价）");
     }
 
-    /// v1.4-a T5 改写（原 T4 暂 ignore）：load_package → instantiate → :hover 重匹配验证。
+    /// load_package → instantiate → :hover 重匹配验证。
     /// 按钮 + :hover 规则打成包，instantiate 后 Move 到按钮 → RollOver + 伪类重匹配变蓝。
     #[cfg(feature = "parse")]
     #[test]
@@ -686,7 +686,7 @@ mod tests {
         );
     }
 
-    /// v1.4-a T5 改写（原 T4 暂 ignore）：load_package → instantiate → disabled 抑制 click。
+    /// load_package → instantiate → disabled 抑制 click。
     /// 按钮打成包，instantiate 后 set_node_disabled(true) → Down+Up 不产 Click。
     #[cfg(feature = "parse")]
     #[test]
@@ -770,7 +770,7 @@ mod tests {
         assert!(!s.is_pointer_on_ui(), "空 scene → false");
     }
 
-    /// load 时 scroll 表清空（防 reload 后旧容器 NodeId 悬空，同 tween clear）。
+    /// load 时 scroll 表清空（防 reload 后容器 NodeId 悬空，同 tween clear）。
     /// 塞 scroll_pos 后 reload → scroll 表为空（get 返 None）；重新 ensure 后归零。
     #[cfg(feature = "parse")]
     #[test]
@@ -786,7 +786,7 @@ mod tests {
         // reload → scroll 表应被清
         s.load_inline_for_test(html, css).unwrap();
         assert!(s.scene.as_ref().unwrap().scroll.get(root_id).is_none(),
-            "reload 后 scroll 表清空，旧 NodeId 槽不存在");
+            "reload 后 scroll 表清空，NodeId 槽不存在");
     }
 
     /// tween 经 Stage 公共 API 注册 → advance_time stash dt → tick update 写 anim + 产 complete。
@@ -831,10 +831,10 @@ mod tests {
         assert!(s.scene.as_ref().unwrap().anim.0.get(&rid).is_none(), "dt=0 不写 override（HashMap 无条目）");
     }
 
-    /// Critical-1 回归：tween 写 scene.anim（用 id.index()）→ render 读 anim.opacity
-    /// （AnimTable::get 现用 node.index()）→ frame.nodes[该节点].alpha 吃到 override。
-    /// 堵「tween 写入正确但 render 读取失败」盲区（旧 bug：AnimTable::get 用 node.0 as usize，
-    /// 打包 NodeId.0=4097 越界 → anim override 在渲染层丢失 → alpha 退回 CSS 默认 1.0）。
+    /// tween 写读对称回归：tween 写 scene.anim（用 id.index()）→ render 读 anim.opacity
+    /// （AnimTable::get 用 node.index()）→ frame.nodes[该节点].alpha 吃到 override。
+    /// 堵「tween 写入正确但 render 读取失败」盲区——确保写读 key 一致，
+    /// 越界 index 会让 anim override 在渲染层丢失 → alpha 退回 CSS 默认 1.0。
     #[test]
     fn tween_anim_override_visible_in_render_output() {
         let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
@@ -885,7 +885,7 @@ mod tests {
     }
 
     /// 支柱1：rematch 提到 solve/compute 前 → :active{scale} 当帧 world 即含缩放。
-    /// 回归 B1：旧顺序 compute 在 rematch 前 → 当帧 world 无 scale（仍是 identity）。
+    /// 若 compute 在 rematch 前 → 当帧 world 无 scale（仍是 identity）——本测钉住正确顺序。
     /// 走包路径（load_package → instantiate），因为 dynamic_rules 由打包器提取进 scene。
     #[test]
     fn active_scale_visible_same_frame() {
@@ -935,7 +935,7 @@ mod tests {
         );
     }
 
-    /// T4：compute_world_transforms 在 render 前每帧跑（不再"末尾+首帧 guard"）。
+    /// compute_world_transforms 在 render 前每帧跑（每帧一次，非末尾+首帧 guard）。
     /// tick 后 world_transforms 应非空——证明 compute 在 render 前执行过。
     #[cfg(feature = "parse")]
     #[test]
@@ -949,7 +949,7 @@ mod tests {
             "compute_world_transforms 在 render 前跑过");
     }
 
-    /// T4：hit_test 在 world_transforms 空/未对齐时不 panic（bounds guard 拦截）。
+    /// hit_test 在 world_transforms 空/未对齐时不 panic（bounds guard 拦截）。
     /// 结构变更帧新增节点本帧 world_transforms 未算 → 未命中（1 帧延迟语义），不越界 panic。
     #[test]
     fn hit_test_bounds_guard_no_panic_on_empty_worlds() {
@@ -971,10 +971,10 @@ mod tests {
         assert_eq!(hit, None, "world_transforms 空 → bounds guard 返 None（未命中，1 帧延迟语义）");
     }
 
-    /// T5：remove_node 后 tick_and_render 不 panic（容量化并行数组防越界）。
+    /// remove_node 后 tick_and_render 不 panic（容量化并行数组防越界）。
     /// 删中间节点产生 slotmap 间隙 → 高 idx live 节点 id.index() > nodes.len()。
     /// 若 world_transforms/taffy_ids/text_layouts 按存活数(len)分配 → 越界 panic。
-    /// T5 改按 capacity+1 分配 → 间隙安全。此测验证整条管线（solve+compute+render）不崩。
+    /// 按 capacity+1 分配 → 间隙安全。此测验证整条管线（solve+compute+render）不崩。
     #[cfg(feature = "parse")]
     #[test]
     fn remove_node_then_tick_does_not_panic_on_slot_gap() {
@@ -997,9 +997,9 @@ mod tests {
         s.remove_node(b_id);
         // tick + render：solve/compute_world_transforms/build_render_nodes 全跑，不应越界 panic
         s.tick_and_render();
-        // b 已删（旧 NodeId 失效），a/c 仍 live
+        // b 已失效（NodeId 失效），a/c 仍 live
         let scene = s.scene.as_ref().unwrap();
-        assert!(scene.get(b_id).is_none(), "b 删除后旧 NodeId 失效");
+        assert!(scene.get(b_id).is_none(), "b 删除后 NodeId 失效");
         assert!(scene.get(div_kids[0]).is_some(), "a 仍 live");
         assert!(scene.get(div_kids[2]).is_some(), "c 仍 live（高 idx，间隙后仍可索引）");
         // 再 tick 一帧确认稳定（world_transforms 已按新容量重算）
@@ -1007,7 +1007,7 @@ mod tests {
     }
 }
 
-/// T6 动态建树 API 测试（不依赖 parse feature——runtime API 可用性门）。
+/// 动态建树 API 测试（不依赖 parse feature——runtime API 可用性门）。
 /// 用 Stage::new_for_test() 建空 scene，用 create_root/create_node 返回的 NodeId，不硬编码值。
 #[cfg(test)]
 mod dynamic_tests {
@@ -1128,7 +1128,7 @@ mod dynamic_tests {
     }
 }
 
-/// T4 资源池测试：load_package 进 packages 字典不建 scene + 多包共存 + 同名替换。
+/// 资源池测试：load_package 进 packages 字典不建 scene + 多包共存 + 同名替换。
 /// 不依赖 parse feature——用内存 pkg（write_package）。
 #[cfg(test)]
 mod load_package_tests {
@@ -1196,7 +1196,7 @@ mod load_package_tests {
     }
 
     /// load_package 不碰 scene 的不变量：load 前 scene 有内容，load 后 scene 不变。
-    /// 验证 load_package 不清/不重建 scene（与旧 load_package 建 scene 语义对立）。
+    /// 验证 load_package 不清/不重建 scene（load_package 只进资源池，不建 scene）。
     #[test]
     fn load_package_does_not_touch_scene() {
         let mut s = Stage::new_for_test();
@@ -1214,7 +1214,7 @@ mod load_package_tests {
     }
 }
 
-/// T5 instantiate 测试：从包克隆组件子树进 scene + 伪类规则合并去重 + 多实例独立。
+/// instantiate 测试：从包克隆组件子树进 scene + 伪类规则合并去重 + 多实例独立。
 /// 不依赖 parse feature——用内存 PackageInput（write_package）。
 #[cfg(test)]
 mod instantiate_tests {
@@ -1367,7 +1367,7 @@ mod instantiate_tests {
         assert_eq!(after - before, 1, "同选择器规则去重，只加一份");
     }
 
-    /// 多实例 :hover 独立性（review Important-2）：同组件 instantiate 两次 → 仅 hover 实例1
+    /// 多实例 :hover 独立性：同组件 instantiate 两次 → 仅 hover 实例1
     /// 的按钮变蓝，实例2 按钮保持原色（无 rematch 串状态回归）。
     ///
     /// 设计契约（spec §4.4）：dynamic_rules 按 class 匹配、多实例共享；hit_test 返具体 NodeId →
@@ -1509,11 +1509,11 @@ mod instantiate_tests {
     }
 }
 
-/// D17 集成测试：打包期 PNG IHDR 尺寸 → load_package 建尺寸表 → measure 用真实尺寸。
+/// 集成测试：打包期 PNG IHDR 尺寸 → load_package 建尺寸表 → measure 用真实尺寸。
 /// 验证端到端链路：打包器填 AssetEntry.w/h → pkg.bin 存 → read_package 读 → Stage.image_sizes
 /// 建 → solve 查表算 Image intrinsic（三档：CSS > 真实像素 > 64×64）。
 #[cfg(test)]
-mod d17_image_size_tests {
+mod image_size_tests {
     use super::*;
     use crate::asset::{AssetEntry, PackageInput, TemplateNode};
     use crate::scene::NodeKind;
@@ -1555,7 +1555,7 @@ mod d17_image_size_tests {
         crate::asset::write_package(&input)
     }
 
-    /// D17 端到端：40×20 图打包进 pkg → load_package 建尺寸表 → instantiate → solve
+    /// 端到端：40×20 图打包进 pkg → load_package 建尺寸表 → instantiate → solve
     /// → Image measure 用真实 40×20（非 64×64 兜底）。
     #[test]
     fn load_package_builds_size_table_and_measure_uses_real_dims() {
@@ -1563,7 +1563,7 @@ mod d17_image_size_tests {
         let mut s = Stage::new_for_test();
         s.create_root("div", "width:300px;height:300px").unwrap();
         s.load_package("bag", &pkg_bytes).unwrap();
-        // D17：load_package 后 Stage.image_sizes 含 path → (w,h)
+        // load_package 后 Stage.image_sizes 含 path → (w,h)
         assert_eq!(s.image_size("icons/wide.png"), Some((40, 20)),
             "load_package 建尺寸表：path→(40,20)");
 
@@ -1580,7 +1580,7 @@ mod d17_image_size_tests {
         assert!((r.h - 20.0).abs() < 0.1, "measure 用真实 h=20（非 64 兜底），got {}", r.h);
     }
 
-    /// D17：pkg 的 AssetEntry w/h=0（非 PNG / 读失败）→ 尺寸表无有效条目 → measure fallback 64×64。
+    /// pkg 的 AssetEntry w/h=0（非 PNG / 读失败）→ 尺寸表无有效条目 → measure fallback 64×64。
     #[test]
     fn load_package_zero_dims_falls_back_to_64() {
         let pkg_bytes = make_pkg_with_image_size("icons/zero.png", 0, 0);
@@ -1601,7 +1601,7 @@ mod d17_image_size_tests {
         assert!((r.h - 64.0).abs() < 0.1, "w/h=0 → fallback h=64，got {}", r.h);
     }
 
-    /// D17：CSS 尺寸赢过真实像素（三档第一档）。
+    /// CSS 尺寸赢过真实像素（三档第一档）。
     /// 40×20 图 + CSS width:80px → w=80（CSS），height 等比 = 40（80×20/40，2:1 真实 aspect）。
     #[test]
     fn css_length_overrides_real_image_size() {
@@ -1651,7 +1651,7 @@ mod d17_image_size_tests {
         assert!((r.h - 40.0).abs() < 0.1, "height 等比=40（80×20/40 真实 2:1），got {}", r.h);
     }
 
-    /// D17：多包 load_package 合并尺寸表（path 全局唯一）。
+    /// 多包 load_package 合并尺寸表（path 全局唯一）。
     #[test]
     fn multi_package_merges_size_tables() {
         let pkg_a = make_pkg_with_image_size("icons/a.png", 10, 20);
@@ -1663,7 +1663,7 @@ mod d17_image_size_tests {
         assert_eq!(s.image_size("icons/b.png"), Some((30, 40)), "包 b 的 path 进表（多包合并）");
     }
 
-    /// D17：重复 load 同名包 → 新包尺寸覆盖旧包（path 全局唯一，后写赢）。
+    /// 重复 load 同名包 → 新包尺寸覆盖前包（path 全局唯一，后写赢）。
     #[test]
     fn reload_package_overwrites_size_entry() {
         let pkg_v1 = make_pkg_with_image_size("icons/x.png", 10, 10);

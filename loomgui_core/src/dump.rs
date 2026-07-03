@@ -39,7 +39,7 @@ pub fn dump_scene_json(scene: &Scene) -> String {
             &crate::transform::IDENTITY
         };
         // 诊断：附 anim.transform 是否 Some + opacity 值，定位 tween 是否真写进 anim。
-        // AnimTable.0 是 HashMap<NodeId, NodeAnim>（T3），经 get(NodeId) 读（is_empty 过滤）。
+        // AnimTable.0 是 HashMap<NodeId, NodeAnim>，经 get(NodeId) 读（is_empty 过滤）。
         let (anim_tr, anim_op) = match scene.anim.get(n.id) {
             Some(a) => (a.transform.is_some(), a.opacity),
             None => (false, None),

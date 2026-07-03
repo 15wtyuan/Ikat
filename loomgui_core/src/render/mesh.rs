@@ -59,7 +59,7 @@ pub fn rounded_rect(
     if w <= 0.0 || h <= 0.0 {
         return quad(rect, color, uv_min, uv_max);
     }
-    // 改进 1：CSS 按边缩放钳制（vs fgui per-corner min）。两邻角半径和不超过边长，等比缩放；
+    // CSS 按边缩放钳制（vs fgui per-corner min）。两邻角半径和不超过边长，等比缩放；
     // 只缩不放（min(1.0) 兜底）；防负 max(0.0)。
     let (tl, tr, br, bl) = (radii[0], radii[1], radii[2], radii[3]);
     let scale = 1.0_f32
@@ -89,7 +89,7 @@ pub fn rounded_rect(
     uvs.push([lerp(umin, umax, 0.5), lerp(vmin, vmax, 0.5)]);
     colors.push(color);
 
-    // 改进 2：角序 TL→TR→BR→BL（CSS 视觉序）。
+    // 角序 TL→TR→BR→BL（CSS 视觉序）。
     // 起始角 TL=π, TR=-π/2, BR=0, BL=π/2（逆时针 design y-down）。圆心 = 角顶点内缩 (rx,ry)。
     // 每角附矩形顶点 corner：直角分支（rx<=0||ry<=0）直接落矩形角，不靠圆心+方向
     // （否则 rx=0 ry>0 时 py=圆心.y+sin·ry 偏离角顶点，角附近镂空）。
@@ -210,17 +210,17 @@ pub fn nine_slice(
 /// - 圆角剪裁是**几何**的——弧外区域（rect 角的 `[0,r]² \ quarter-disc`）无 fragment，
 ///   不靠源图 alpha 伪造。即便源图角像素不透明，圆角仍正确呈现。
 ///
-/// ## 区域分解（修复 review Critical 1 覆盖间隙 + Important 2 几何圆角）
+/// ## 区域分解（覆盖弧与切片线之间角区 + 几何圆角）
 ///
 /// X 边界（去重排序后）`{0, r_l, slice_l, w-slice_r, w-r_r, w}`，Y 边界同理
 /// `{0, r_t, slice_t, h-slice_b, h-r_b, h}`——把 rect 切成至多 6×6 网格。每格分类：
 ///
 /// 1. **四分之一圆弧格**（角区 `[0,slice]²` 内的 `[0,r]²` 子格）：仅发三角扇覆盖
 ///    `[0,r]² ∩ quarter-disc`（弧内），弧外 `[0,r]² \ disc` **不发顶点**（圆角镂空）。
-///    无外角顶点、无边三角——修复 Important 2。
+///    无外角顶点、无边三角。
 /// 2. **角区 L 形格**（角区 `[0,slice]²` 内四分之一圆弧格之外的部分，即
 ///    `[r,slice]×[0,r]` / `[0,r]×[r,slice]` / `[r,slice]×[r,slice]`）：发 quad，UV 1:1
-///    映射源角像素（不拉伸）——填满弧与切片线之间的角区，修复 Critical 1 间隙。
+///    映射源角像素（不拉伸）——填满弧与切片线之间的角区。
 /// 3. **边带格**（角区与中心之间 `[slice, w-slice]` 或 `[slice, h-slice]` 段）：发 quad，
 ///    单轴拉伸 UV。
 /// 4. **中心格** `[slice,w-slice]×[slice,h-slice]`：发 quad，双轴拉伸 UV。
@@ -279,7 +279,7 @@ pub fn nine_slice_rounded(
     let mut indices: Vec<u32> = Vec::new();
 
     // rect 局部 px → UV，按 slice 分段（左角区 1:1 从左、中拉伸、右角区 1:1 从右钉 umax）。
-    // 修复：旧全局线性 umin+(px-rect.x)*sxf 在 rect.w>src_w 时右角区 UV 超 umax（采相邻图失真）。
+    // 分段映射：全局线性 umin+(px-rect.x)*sxf 在 rect.w>src_w 时右角区 UV 会超 umax（采相邻图失真）。
     let mid_span_x = (w - sl_l - sl_r).max(1e-6);
     let mid_span_y = (h - sl_t - sl_b).max(1e-6);
     let u_of = |px: f32| -> f32 {
@@ -579,7 +579,7 @@ mod tests {
 
     #[test]
     fn rounded_rect_clamps_oversized_radius() {
-        // 改进 1：r=40, 60×40 rect——四边约束取最紧：h/(tl.1+bl.1)=40/80=0.5 → scale=0.5 → r=20
+        // r=40, 60×40 rect——四边约束取最紧：h/(tl.1+bl.1)=40/80=0.5 → scale=0.5 → r=20
         // TL 圆心 = (20, 20)，最左弧点 x = 20-20 = 0（贴 rect 左边）
         let (v, _uvs, _col, _idx) = rounded_rect(
             &Rect { x: 0.0, y: 0.0, w: 60.0, h: 40.0 },
@@ -639,7 +639,7 @@ mod tests {
     fn rounded_rect_zero_h_radius_corner_at_rect_vertex() {
         // 混合椭圆角：TL/BR 水平半径 0（rx=0, ry=8）→ 直角，TR/BL 真弧（8,8）。
         // 直角分支须落在矩形顶点（TL=[0,0] / BR=[80,80]），
-        // 而非圆心+方向算出的 [0,8]/[80,72]（ry>0 让 py 偏移，原 bug）。
+        // 而非圆心+方向算出的 [0,8]/[80,72]（ry>0 时 py 偏离角顶点，会角附近镂空）。
         let (v, _, _, _) = rounded_rect(
             &Rect { x: 0.0, y: 0.0, w: 80.0, h: 80.0 },
             [1.0; 4],
@@ -737,7 +737,7 @@ mod tests {
     #[test]
     fn nine_slice_rounded_corner_uv_in_source_corner_region() {
         // 不变量：四角顶点 UV 落在源图角区（左上角区 = uv [0..0.2, 0..0.2]）
-        // 修复 Important 2 后：角区无外角顶点（(0,0) UV 顶点不再存在），弧扇顶点 UV
+        // 角区无外角顶点（无 (0,0) UV 顶点），弧扇顶点 UV
         // 落在源角区内（最接近角顶的弧点 = (r,0)/(0,r) → UV (0.1,0)/(0,0.1)）。
         let (_v, uvs, _col, _idx) = nine_slice_rounded(
             &Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 },
@@ -751,9 +751,9 @@ mod tests {
         let tl_uvs: Vec<[f32;2]> = uvs.iter().cloned().filter(|uv| uv[0] <= 0.21 && uv[1] <= 0.21).collect();
         assert!(!tl_uvs.is_empty(), "左上角区有顶点");
         // 弧扇顶点 UV 落在角区内（含接近角顶的弧点 (0.1,0)/(0,0.1)）。
-        // 不应有 (0,0) UV 外角顶点（Important 2 修复后该顶点已删）。
+        // 不应有 (0,0) UV 外角顶点（角区仅弧扇顶点）。
         let has_origin = tl_uvs.iter().any(|uv| uv[0].abs() < 1e-3 && uv[1].abs() < 1e-3);
-        assert!(!has_origin, "Important 2 修复：左上角不应有 (0,0) UV 外角顶点");
+        assert!(!has_origin, "左上角不应有 (0,0) UV 外角顶点");
         // 弧扇中心 (r,r)=(10,10) → UV (0.1, 0.1)，应在角区内
         let has_arc_center = tl_uvs.iter().any(|uv| (uv[0] - 0.1).abs() < 1e-3 && (uv[1] - 0.1).abs() < 1e-3);
         assert!(has_arc_center, "左上角弧扇中心 UV=(0.1,0.1) 存在");
@@ -761,7 +761,7 @@ mod tests {
 
     #[test]
     fn nine_slice_rounded_arc_cutout_geometric() {
-        // 修复 Critical 1 + Important 2 的覆盖测试：point-in-triangle 扫描网格采样点。
+        // 覆盖测试：point-in-triangle 扫描网格采样点。
         // rect 100×100，slice 20，radius 10，src 100×100。
         // 期望：圆弧外角点 (2,2)（在 [0,r]² 内但弧外，距圆心 (10,10)=√128≈11.3>10）**不被覆盖**；
         //      中心 (50,50) / 上边中点 (50,5) / 角区 L 形点 (15,5)（[r,slice]×[0,r]）被覆盖。
@@ -803,10 +803,10 @@ mod tests {
         assert!(covered(50.0, 50.0), "中心 (50,50) 被覆盖");
         // 上边中点 (50,5)：上边带（x 在 [slice,w-slice]，y 在 [0,slice]）必覆盖
         assert!(covered(50.0, 5.0), "上边中点 (50,5) 被覆盖");
-        // 角区 L 形点 (15,5)：在 [r,slice]×[0,r]（TL 角区 L 形右条），必覆盖（修复 Critical 1 间隙）
-        assert!(covered(15.0, 5.0), "角区 L 形点 (15,5) 被覆盖（修复 Critical 1 间隙）");
-        // 圆弧外角点 (2,2)：在 [0,r]² 内但弧外（距圆心 (10,10)=√128>10），**不应覆盖**（修复 Important 2 几何圆角）
-        assert!(!covered(2.0, 2.0), "圆弧外角点 (2,2) 不被覆盖（几何圆角镂空，修复 Important 2）");
+        // 角区 L 形点 (15,5)：在 [r,slice]×[0,r]（TL 角区 L 形右条），必覆盖
+        assert!(covered(15.0, 5.0), "角区 L 形点 (15,5) 被覆盖");
+        // 圆弧外角点 (2,2)：在 [0,r]² 内但弧外（距圆心 (10,10)=√128>10），**不应覆盖**（几何圆角镂空）
+        assert!(!covered(2.0, 2.0), "圆弧外角点 (2,2) 不被覆盖（几何圆角镂空）");
         // 圆弧内点 (5,5)：距圆心 (10,10)=√50≈7.07<10，应覆盖（弧扇内）
         assert!(covered(5.0, 5.0), "圆弧内点 (5,5) 被覆盖（弧扇内）");
     }

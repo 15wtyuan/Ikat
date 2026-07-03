@@ -5,10 +5,9 @@
 //! image_path；Text → measure_text 产 TextLayout）。sort_key / mask_context 由
 //! `batch::assign_sort_keys` 后处理。stage 层负责把 `Vec<RenderNode>` diff 成 draw list / JSON。
 //!
-//! v1.4-a T6：核心不知图集。Mesh payload 带 `image_path: Option<String>`（Image 节点 /
-//! bg-image 容器填 path，纯色容器 None）。render 不再查 textures/atlas——path 推给 Unity，
-//! Unity 按 path 查 Sprite Atlas 拿 Sprite（含 UV+Texture）。UV 始终全图 (0,0)-(1,1)
-//! （Unity Sprite 自带真实 UV；核心无子区概念）。
+//! 核心不知图集。Mesh payload 带 `image_path: Option<String>`（Image 节点 /
+//! bg-image 容器填 path，纯色容器 None）。path 推给 Unity，Unity 按 path 查 Sprite Atlas
+//! 拿 Sprite（含 UV+Texture）。UV 始终全图 (0,0)-(1,1)（Unity Sprite 自带真实 UV；核心无子区概念）。
 
 use serde::Serialize;
 
@@ -50,9 +49,9 @@ pub enum NodePayload {
         uvs: Vec<[f32; 2]>,
         colors: Vec<[f32; 4]>,
         indices: Vec<u32>,
-        image_path: Option<String>,  // v1.4-a T6：None=纯色，Some=图片 path（核心不知图集）
+        image_path: Option<String>,  // None=纯色，Some=图片 path（核心不知图集）
         program: u32,
-        color_matrix: [f32; 20],   // v1.3 ColorFilter 矩阵；program≠3/4 全零
+        color_matrix: [f32; 20],   // ColorFilter 矩阵；program≠3/4 全零
     },
     Text {
         layout: crate::text::layout::TextLayout,

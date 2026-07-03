@@ -9,7 +9,7 @@ using UnityEngine;
 namespace LoomGUI.Editor
 {
     /// <summary>
-    /// v1.4-a T9：Unity 包管理编辑器面板（spec §6.2）。
+    /// Unity 包管理编辑器面板（spec §6.2）。
     /// 菜单 LoomGUI > Package Manager 打开。
     ///
     /// 功能：

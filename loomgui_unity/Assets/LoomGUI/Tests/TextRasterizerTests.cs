@@ -192,7 +192,7 @@ namespace LoomGUI.Tests
             TextRasterizer.ResetStatic();
             Assert.AreEqual(0, TextRasterizer.FontVersion, "ResetStatic 幂等——已为 0 再调仍 0");
 
-            // 归零后 OnRebuilt 从 0 重新累加（基线已复位，不是继续旧计数）。
+            // 归零后 OnRebuilt 从 0 重新累加（基线已复位，计数从 0 起重新累加）。
             TextRasterizer.OnRebuilt(null);
             Assert.AreEqual(1, TextRasterizer.FontVersion, "归零后 OnRebuilt 从 1 重新计");
 

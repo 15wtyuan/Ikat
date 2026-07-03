@@ -7,7 +7,7 @@
 //!
 //! 最后调 `batch::assign_sort_keys` 填 sort_key + mask_context。
 //!
-//! v1.4-a D17：核心知图尺寸（打包期 PNG IHDR 静态，Stage 持 path→(w,h) 尺寸表）+ 不知图集
+//! 核心知图尺寸（打包期 PNG IHDR 静态，Stage 持 path→(w,h) 尺寸表）+ 不知图集
 //! （运行时纹理/UV 归 Unity）。build_render_nodes 接 `image_sizes: &ImageSizeTable` 查九宫格
 //! UV 的 src_w/src_h（slice_px / src_px）。Image/bg-image payload 带 path，UV 全图 (0,0)-(1,1)。
 
@@ -24,7 +24,7 @@ use node::*;
 
 use taffy::style::LengthPercentage;
 
-/// D17 辅助：查图尺寸表取 src_w/src_h（fallback 64×64）。
+/// 查图尺寸表取 src_w/src_h（fallback 64×64）。
 /// path 缺失或 w/h=0 → 64.0 兜底（核心不知图集，但知图尺寸）。
 fn src_size(image_sizes: &ImageSizeTable, path: &str) -> (f32, f32) {
     image_sizes
@@ -91,7 +91,7 @@ fn thumb_render_node(node_id: u32, rect: Rect, sort_key: u32) -> RenderNode {
 /// `font` 仅 Text 节点用（单字体）。clip 表由 `batch::assign_sort_keys` 算
 /// 祖先 clip 链交集后产出。
 ///
-/// **D17**：`image_sizes` = Stage 持有的 path→(w,h) 尺寸表。九宫格 UV 用此表算 src_w/src_h
+/// `image_sizes` = Stage 持有的 path→(w,h) 尺寸表。九宫格 UV 用此表算 src_w/src_h
 /// （slice_px / src_px）。path 缺失或 w/h=0 → 64×64 兜底。
 pub fn build_render_nodes(
     scene: &Scene,
@@ -106,7 +106,7 @@ pub fn build_render_nodes(
         .enumerate()
         .map(|(i, n)| (n.id, i))
         .collect();
-    // 直接构造真节点（不再预分配 Unchanged 占位）。change_level 先占位 Full，末尾统一定级。
+    // 直接逐节点构造真 RenderNode。change_level 先占 Full，末尾统一定级。
     let mut nodes: Vec<RenderNode> = Vec::new();
     for n in scene.nodes.values() {
         let anim = scene.anim.get(n.id);
@@ -276,7 +276,7 @@ pub fn build_render_nodes(
             }
         }
     }
-    // merge 后按 node_id 算双 hash → 定级别（D2/D3）
+    // merge 后按 node_id 算双 hash → 定级别
     let mut new_hashes = std::collections::HashMap::with_capacity(nodes.len());
     for rn in &mut nodes {
         let hh = crate::render::dirty::header_hash(rn);
@@ -335,12 +335,12 @@ mod tests {
         Font::from_path(&p).ok()
     }
 
-    /// D17 测试辅助：空图尺寸表（无 path → 全 64×64 兜底，同 T6 行为）。
+    /// 测试辅助：空图尺寸表（无 path → 全 64×64 兜底）。
     fn empty_sizes() -> ImageSizeTable {
         std::collections::HashMap::new()
     }
 
-    /// D17 测试辅助：建单条 path→(w,h) 尺寸表。
+    /// 测试辅助：建单条 path→(w,h) 尺寸表。
     fn sizes(path: &str, w: u32, h: u32) -> ImageSizeTable {
         let mut m = std::collections::HashMap::new();
         m.insert(path.to_string(), (w, h));
@@ -401,9 +401,8 @@ mod tests {
         assert_eq!(rns[0].world_matrix[5], 2.0);
     }
 
-    /// T6：Image RenderNode payload 带 path（核心不知图集/tex_id/UV）。
-    /// Image 节点 src="icons/skin.png" → Mesh payload image_path=Some("icons/skin.png")，
-    /// 无 texture 字段（编译错即说明改对）。
+    /// Image RenderNode payload 带 path（核心不知图集/UV）。
+    /// Image 节点 src="icons/skin.png" → Mesh payload image_path=Some("icons/skin.png")。
     #[test]
     fn image_render_node_carries_path_not_texid() {
         let mut a = Node::default();
@@ -422,7 +421,7 @@ mod tests {
         }
     }
 
-    /// T6：bg-image 同走 path。Container 设 background-image:url(icons/bg.png) →
+    /// bg-image 同走 path。Container 设 background-image:url(icons/bg.png) →
     /// Mesh payload image_path=Some("icons/bg.png")。
     #[test]
     fn bg_image_carries_path() {
@@ -442,7 +441,7 @@ mod tests {
         }
     }
 
-    /// T6：纯色 Container（无 bg-image）image_path=None。
+    /// 纯色 Container（无 bg-image）image_path=None。
     #[test]
     fn solid_container_image_path_is_none() {
         let mut scene = Scene::from_nodes(vec![container_node(
@@ -458,7 +457,7 @@ mod tests {
         }
     }
 
-    /// T6：Image payload 带 path + UV 全图 (0,0)-(1,1)（核心不知图集，无子区）。
+    /// Image payload 带 path + UV 全图 (0,0)-(1,1)（核心不知图集，无子区）。
     /// v-flip 仍保留（design y-down 配 Unity y-up）：TL=(0,1)，BR=(1,0)。
     #[test]
     fn build_image_carries_path_and_full_uv() {
@@ -483,7 +482,7 @@ mod tests {
 
     #[test]
     fn build_image_uv_is_full_region() {
-        // T6：核心不知图集 → UV 永远全图 (0,0)-(1,1)（v 翻转后 TL=(0,1), BR=(1,0)）。
+        // 核心不知图集 → UV 永远全图 (0,0)-(1,1)（v 翻转后 TL=(0,1), BR=(1,0)）。
         let mut a = Node::default();
         a.kind = NodeKind::Image { src: "logo.png".into() };
         a.layout_rect = Rect { x: 0.0, y: 0.0, w: 5.0, h: 5.0 };
@@ -626,9 +625,9 @@ mod tests {
         assert!(rns[1].sort_key < rns[2].sort_key);
     }
 
-    /// 端到端 merge：root(Container, tex_id=0) > [img A, img B]（同 tex_id=1、
+    /// 端到端 merge：root(Container, image_path=None) > [img A, img B]（同 image_path=Some、
     /// 同 mask_context、AABB 不相交）。reorder 让两 Image 相邻，merge 合两 Image 成 1 个 8-vert
-    /// merged mesh；root 是 Container(tex_id=0) 不同 DrawState → 不合。
+    /// merged mesh；root 是 Container(image_path=None) 不同 DrawState → 不合。
     /// 结果：FrameData 含恰好 1 个 8-vert Mesh payload（两 Image 合并）。
     #[test]
     fn build_merges_adjacent_same_drawstate_meshes() {
@@ -650,7 +649,7 @@ mod tests {
 
         crate::scene::transform::compute_world_transforms(&mut scene);
         let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
-        // root(Container, image_path=None) + 1 merged(Image image_path=Some("a.png")) = 2 节点（原 3）。
+        // root(Container, image_path=None) + 1 merged(Image image_path=Some("a.png")) = 2 节点（3 输入合并后）。
         let mesh_count = frame
             .nodes
             .iter()
@@ -776,7 +775,7 @@ mod tests {
 
     /// render 复用 layout 阶段 TextLayout，不重测。
     /// 验证：solve 填 scene.text_layouts，build_render_nodes 的 Text payload 行数
-    /// == text_layouts 行数（render 直接读，不再 measure_text）。
+    /// == text_layouts 行数（render 直接读，不重测）。
     #[test]
     fn render_text_payload_matches_layout_text_layout() {
         let font = match test_font() {
@@ -877,7 +876,7 @@ mod tests {
         let font = test_font().expect("font");
         crate::scene::transform::compute_world_transforms(&mut scene);
         let (_f1, _h1) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
-        // prev 有 hash 但 node_id 不在其中（模拟 reload 后旧 hash 表有不同节点）
+        // prev 有 hash 但 node_id 不在其中（模拟 reload：prev 表残留不同节点的 hash）
         let mut stale: std::collections::HashMap<u32, (u64, u64)> = std::collections::HashMap::new();
         stale.insert(999, (0, 0));
         let (f2, _) = build_render_nodes(&scene, &font, &stale, &empty_sizes());
@@ -885,14 +884,11 @@ mod tests {
             "prev 无本节点 → Full（防错位）");
     }
 
-    // T6: 删除 fit_uv_* 4 项 —— fit_uv 函数已删（核心不再算 cover/contain 子区 UV，
-    //     UV 永远全图 (0,0)-(1,1)，Unity Sprite 自带真实 UV）。
-
     // ── Container bg-image ────────────────────────────
 
     #[test]
     fn build_container_with_bg_image_carries_path() {
-        // T6：Container 设 background-image → Mesh image_path=Some(url)、program=2（CSS 合成）。
+        // Container 设 background-image → Mesh image_path=Some(url)、program=2（CSS 合成）。
         // UV 全图 (0,0)-(1,1) + v 翻转：TL=(0,1)。无底色 → 透明顶点色。
         let mut n = container_node(0, None, Rect { x: 0.0, y: 0.0, w: 200.0, h: 50.0 }, None);
         n.style.background_image = Some("a.png".into());
@@ -960,7 +956,7 @@ mod tests {
 
     #[test]
     fn build_container_bg_image_hit_sets_program_2() {
-        // T6：Container 设 background-image → image_path=Some(url) → program=2（CSS 合成）。
+        // Container 设 background-image → image_path=Some(url) → program=2（CSS 合成）。
         let mut n = container_node(0, None, Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 }, Some([0.0, 1.0, 0.0, 1.0]));
         n.style.background_image = Some("a.png".into());
         let mut scene = Scene::from_nodes(vec![n], vec![]);
@@ -994,7 +990,7 @@ mod tests {
 
     #[test]
     fn build_container_bg_image_sets_program_2() {
-        // T6：原"未注册"用例——path 现在总是直填（无注册概念）。
+        // path 直填：url 原样进 image_path。
         // Container 设 bg-image(任意 url) → image_path=Some(url)、program=2。
         let mut n = container_node(0, None, Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 }, Some([1.0, 0.0, 0.0, 1.0]));
         n.style.background_image = Some("missing.png".into());
@@ -1004,7 +1000,7 @@ mod tests {
         let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { program, image_path, .. } => {
-                assert_eq!(*image_path, Some("missing.png".to_string()), "path 直填（无注册概念）");
+                assert_eq!(*image_path, Some("missing.png".to_string()), "path 直填");
                 assert_eq!(*program, 2, "任意 bg-image url → program=2");
             }
             _ => panic!("expected Mesh"),
@@ -1013,7 +1009,7 @@ mod tests {
 
     #[test]
     fn build_image_node_keeps_program_0() {
-        // Image 节点 program=0（tex*vcol，图透明区透下层）——零改回归。
+        // Image 节点 program=0（tex*vcol，图透明区透下层）。
         let mut root = Node::default();
         root.kind = NodeKind::Container;
         root.layout_rect = Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
@@ -1028,11 +1024,11 @@ mod tests {
             .find(|n| matches!(&n.payload, NodePayload::Mesh { image_path, .. } if *image_path == Some("a.png".to_string())))
             .expect("img mesh");
         if let NodePayload::Mesh { program, .. } = &img_rn.payload {
-            assert_eq!(*program, 0, "Image → program=0（零改）");
+            assert_eq!(*program, 0, "Image → program=0");
         }
     }
 
-    // ── v1.3 color_filter → program=3 + nine_slice 分流 ──────────
+    // ── color_filter → program=3 + nine_slice 分流 ──────────
 
     #[test]
     fn build_container_with_filter_sets_program_3() {
@@ -1053,7 +1049,7 @@ mod tests {
     }
 
     /// Container + bg-image(命中) + filter → program=4（BG_COMPOSITE+COLOR_FILTER 双 keyword，spec §3.2）。
-    /// I1 回归：split program=3 → 3（filter 无 bg-image）/ 4（filter+bg-image 双 keyword）。
+    /// 回归：split program=3 → 3（filter 无 bg-image）/ 4（filter+bg-image 双 keyword）。
     /// program=4 由 MaterialManager.cs 同时 EnableKeyword COLOR_FILTER + BG_COMPOSITE，
     /// 让 shader 走 `tex.rgb*tex.a + vcol.rgb*(1-tex.a)`（CSS 合成）后再跑 COLOR_FILTER 后处理。
     #[test]
@@ -1079,7 +1075,7 @@ mod tests {
 
     #[test]
     fn build_container_with_slice_uses_nine_slice() {
-        // T6：Container + bg-image + border-image-slice → nine_slice mesh（16 顶点）
+        // Container + bg-image + border-image-slice → nine_slice mesh（16 顶点）
         let mut n = container_node(0, None, Rect { x: 0.0, y: 0.0, w: 80.0, h: 80.0 }, Some([1.0, 0.0, 0.0, 1.0]));
         n.style.background_image = Some("skin.png".into());
         n.style.background_size = BackgroundSize::Stretch;
@@ -1096,9 +1092,9 @@ mod tests {
         }
     }
 
-    /// D17：九宫格 UV 按真实图尺寸算 slice_px / src_px。
+    /// 九宫格 UV 按真实图尺寸算 slice_px / src_px。
     /// 80×80 图 + slice 10 → UV 切片线 = 10/80 = 0.125（非 64 兜底的 10/64≈0.156）。
-    /// T6 硬编码 src_w=src_h=64 → UV 错误；D17 修为查尺寸表算真实比例。
+    /// 尺寸表查真实比例，避免 fallback 64 导致 UV 偏移。
     #[test]
     fn build_container_with_slice_uv_proportional_to_real_image_size() {
         let mut n = container_node(0, None, Rect { x: 0.0, y: 0.0, w: 80.0, h: 80.0 }, Some([1.0, 0.0, 0.0, 1.0]));
@@ -1108,7 +1104,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![n], vec![]);
         crate::scene::transform::compute_world_transforms(&mut scene);
         let font = test_font().expect("need font");
-        // D17：尺寸表 skin.png=80×80 → UV 切片 = 10/80 = 0.125
+        // 尺寸表 skin.png=80×80 → UV 切片 = 10/80 = 0.125
         let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &sizes("skin.png", 80, 80));
         match &frame.nodes[0].payload {
             NodePayload::Mesh { uvs, verts, .. } => {
@@ -1127,7 +1123,7 @@ mod tests {
         }
     }
 
-    /// D17：九宫格 UV fallback 64×64（尺寸表无 path）—— 零回归验证。
+    /// 九宫格 UV fallback 64×64（尺寸表无 path）—— 回归验证。
     /// 64×64 兜底 + slice 10 → UV 切片 = 10/64 ≈ 0.15625。
     #[test]
     fn build_container_with_slice_uv_falls_back_to_64_when_no_size() {
@@ -1152,7 +1148,7 @@ mod tests {
 
     #[test]
     fn build_container_no_filter_keeps_program_0_or_2() {
-        // 零回归：无 filter → program 0（无图）/ 2（bg-image 命中）
+        // 无 filter → program 0（无图）/ 2（bg-image 命中）
         let mut scene = Scene::from_nodes(vec![container_node(0, None, Rect { x: 0.0, y: 0.0, w: 80.0, h: 80.0 }, Some([1.0, 0.0, 0.0, 1.0]))], vec![]);
         crate::scene::transform::compute_world_transforms(&mut scene);
         let font = test_font().expect("need font");
@@ -1164,7 +1160,7 @@ mod tests {
 
     #[test]
     fn build_container_bg_image_missing_url_carries_path() {
-        // T6：原"未注册 url → texture=0"用例。无注册概念后 url 直填 image_path=Some。
+        // url 直填 image_path=Some：url 原样进 payload。
         let mut n = container_node(0, None, Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 }, None);
         n.style.background_image = Some("missing.png".into());
         let mut scene = Scene::from_nodes(vec![n], vec![]);
@@ -1174,7 +1170,7 @@ mod tests {
         let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { image_path, program, .. } => {
-                assert_eq!(*image_path, Some("missing.png".to_string()), "url 直填 image_path（无注册概念）");
+                assert_eq!(*image_path, Some("missing.png".to_string()), "url 直填 image_path");
                 assert_eq!(*program, 2, "bg-image → program=2");
             }
             _ => panic!("expected Mesh"),
@@ -1183,7 +1179,7 @@ mod tests {
 
     #[test]
     fn build_container_no_bg_image_image_path_none() {
-        // T6：无 background-image → image_path=None（零回归）
+        // 无 background-image → image_path=None
         let mut scene = Scene::from_nodes(vec![container_node(0, None, Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }, Some([1.0, 0.0, 0.0, 1.0]))], vec![]);
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
@@ -1194,7 +1190,7 @@ mod tests {
         }
     }
 
-    // ── border-radius Tests (T5) ────────────────────────────
+    // ── border-radius Tests ────────────────────────────
 
     #[test]
     fn container_zero_radius_uses_quad() {
@@ -1261,7 +1257,7 @@ mod tests {
 
     #[test]
     fn container_bg_image_with_radius_uses_rounded_rect() {
-        // T6：bg-image + border-radius 共存：image_path=Some AND 走 rounded_rect（verts>4）
+        // bg-image + border-radius 共存：image_path=Some AND 走 rounded_rect（verts>4）
         let mut n = container_node(0, None, Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 }, Some([0.0, 1.0, 0.0, 1.0]));
         n.style.background_image = Some("a.png".into());
         n.style.background_size = BackgroundSize::Stretch;

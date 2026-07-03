@@ -29,7 +29,7 @@ namespace LoomGUI
         public readonly List<Color> CList = new();
         public readonly List<int> IList = new();
         // cached MaterialPropertyBlock for per-renderer uniforms (_ObjM, _CF, _Alpha).
-        // Lazy-init; now consolidated into single SetPropertyBlock per frame (支柱3).
+        // Lazy-init; consolidated into single SetPropertyBlock per frame (支柱3).
         public MaterialPropertyBlock Mpb;
     }
 
@@ -153,7 +153,7 @@ namespace LoomGUI
             Material mat;
             if (kind == 1)
             {
-                // program 来自 blob（v5 第 18 列）：0=img/无图 Container，2=Container+bg-image（CSS 合成，坑 79）。
+                // program 来自 blob（第 18 列）：0=img/无图 Container，2=Container+bg-image（CSS 合成，坑 79）。
                 mat = mm.Get((int)blob.Program(i), tex, maskCtx, !pure);
             }
             else // kind == 2 (Text)
@@ -167,7 +167,7 @@ namespace LoomGUI
             // 合并 per-renderer uniform（MPB 一次 SetPropertyBlock，避免 _ObjM/_CF/_Alpha 互相覆盖）。
             // _ObjM：非纯平移时传 scale/rotate 矩阵（纯平移 = shader 默认 identity，不设）。
             // _CF：ColorFilter（program 3/4）传 5 Vector；其他不设。
-            // _Alpha：每帧无条件设（支柱3 alpha 剥离顶点色，T6）。
+            // _Alpha：每帧无条件设（支柱3 alpha 剥离顶点色）。
             float alpha = blob.Alpha(i);
             bool hasFilter = kind == 1 && (blob.Program(i) == 3 || blob.Program(i) == 4);
 
@@ -184,7 +184,7 @@ namespace LoomGUI
                 ro.Mpb.SetVector("_ObjM2", objM.GetRow(2));
                 ro.Mpb.SetVector("_ObjM3", objM.GetRow(3));
             }
-            // v1.3 ColorFilter（program=3=filter 无图 / 4=filter+bg-image 双 keyword）：
+            // ColorFilter（program=3=filter 无图 / 4=filter+bg-image 双 keyword）：
             // 矩阵 20 float 拆 5 Vector MPB SetVector。漏 program=4 → cf-demo 滤镜不生效（全青色，验收坑）。
             if (hasFilter)
             {
@@ -212,7 +212,7 @@ namespace LoomGUI
                 UploadMesh(ro, seg);
                 ro.Mesh.RecalculateBounds();
                 ro.LastFontVersion = TextRasterizer.FontVersion;
-                // v1.4-a T8：按 path_idx 取 path → SpriteResolver.GetSprite → Sprite.texture + 打包 UV。
+                // 按 path_idx 取 path → SpriteResolver.GetSprite → Sprite.texture + 打包 UV。
                 //   path_idx=0（纯色无图）/ path 查不到 Sprite → 跳过 UV 重映射（blob mesh UV 已是全图 [0,1]；用 fallback whiteTexture）。
                 //   SpriteAtlas 把 Sprite 打进 atlas 子区 → 用 sprite.rect + texture 尺寸重映射 UV
                 //   到 atlas 子区（保 blob 的 v 翻转：blob TL.v=1 → atlas 顶 rv1）。
@@ -221,7 +221,7 @@ namespace LoomGUI
             }
             else // kind == 2 (Text)
             {
-                // font atlas rebuild 或首次 → 重 BuildMesh（glyph UV 变，旧 mesh 作废）。
+                // font atlas rebuild 或首次 → 重 BuildMesh（glyph UV 变，缓存 mesh 作废）。
                 bool needRebuild = fontDirty || ro.LastFontVersion != TextRasterizer.FontVersion;
                 if (needRebuild)
                 {
@@ -283,7 +283,7 @@ namespace LoomGUI
             ro.Mesh.SetTriangles(idx, 0);
         }
 
-        /// v1.4-a T8：把 mesh UV（blob 写全图 [0,1]，T6 后核心不知图集）重映射到 Sprite 在 atlas 内的子区。
+        /// 把 mesh UV（blob 写全图 [0,1]，核心不知图集）重映射到 Sprite 在 atlas 内的子区。
         /// SpriteAtlas 把 Sprite 打进 atlas 纹理子区 → 需用 sprite.rect + texture 尺寸算 packed UV。
         ///   packed_u = ru0 + blob_u*(ru1-ru0)；packed_v = rv0 + blob_v*(rv1-rv0)。
         /// blob UV 已 v 翻转（TL.v=1 → atlas 顶 rv1），线性重映射保翻转不二次翻转。

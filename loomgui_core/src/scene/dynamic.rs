@@ -1,16 +1,16 @@
-//! 动态树操作（T5+T6）：运行时删/建/改节点。
+//! 动态树操作：运行时删/建/改节点。
 //!
-//! T5 实现 `remove_node`（递归删子 + 联动清 anim/scroll/tween + slotmap remove）。
-//! T6 加动态建树/改树 API：`kind_from_tag` / `apply_css` / `create_node` / `create_root`
+//! `remove_node`（递归删子 + 联动清 anim/scroll/tween + slotmap remove）+
+//! 动态建树/改树 API：`kind_from_tag` / `apply_css` / `create_node` / `create_root`
 //! / `append_child` / `insert_before` / `remove_child`（摘除不删）/ `set_text` / `set_src` / `set_style`。
 //!
 //! **设计要点**（spec §5.3 + §7 + §8）：
 //! - 删节点联动清持久附属 map（anim/scroll remove + tween kill），防悬空 NodeId 残留
 //!   写幽灵槽（HashMap 对任意 NodeId 都能插条目，须显式 remove）。
 //! - 递归删子先 clone children 再递归（避免边迭代边改 slotmap 的借用冲突）。
-//! - slotmap remove 后旧 NodeId 失效（gen++，Scene::get 返 None），槽位可复用。
+//! - slotmap remove 后 NodeId 失效（gen++，Scene::get 返 None），槽位可复用。
 //! - 动态建树复用 `mapping::apply_decl`（runtime 可用，不依赖 parse feature）做 CSS 声明应用，
-//!   复用 dom.rs 围栏白名单语义做 tag→NodeKind（`kind_from_tag`，Task 7 提取复用）。
+//!   复用 dom.rs 围栏白名单语义做 tag→NodeKind（`kind_from_tag`）。
 //! - create_node 填 base_style（源）+ style=base_style.clone()（派生），下帧 rematch 从 base 起算。
 
 use crate::scene::node::{Node, NodeId, NodeKind, Rect, Scene};
@@ -102,7 +102,7 @@ pub fn create_root(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
     Ok(id)
 }
 
-/// 建节点（从已 bake 的 kind + base_style）：T5 instantiate 用。
+/// 建节点（从已 bake 的 kind + base_style）：instantiate 用。
 /// 与 `create_node` 同构的节点构造（clip_rect 派生 / dirty_text / slotmap insert / id 回填），
 /// 但跳过 CSS parse——style 已在 ComponentTemplate.nodes[i].style 烘焙好（打包期 resolve_styles 产物）。
 /// 直接用传入 style 作 base_style（源）+ style.clone() 作 style 初始（派生，下帧 rematch 从 base 起算）。
@@ -151,7 +151,7 @@ pub fn create_node_from_template(
 }
 
 /// 挂子：parent.children 末尾追加 + child.parent = Some(parent)。
-/// child 必须当前无父（先 remove_child 摘除旧父）。重复挂同一父子对幂等（已含则 no-op）。
+/// child 必须当前无父（先 remove_child 摘除当前父）。重复挂同一父子对幂等（已含则 no-op）。
 pub fn append_child(scene: &mut Scene, parent: NodeId, child: NodeId) -> Result<(), String> {
     // 先做存在性 + 无父检查（不可变借），drop 后再可变借写。
     {
@@ -160,7 +160,7 @@ pub fn append_child(scene: &mut Scene, parent: NodeId, child: NodeId) -> Result<
             return Ok(()); // 幂等：已挂同一父子对
         }
         if scene.get(child).and_then(|c| c.parent).is_some() {
-            return Err("child already has parent（先 remove_child 摘除旧父）".into());
+            return Err("child already has parent（先 remove_child 摘除当前父）".into());
         }
     }
     scene.get_mut(parent).unwrap().children.push(child);
@@ -180,7 +180,7 @@ pub fn insert_before(
         return append_child(scene, parent, child);
     }
     if scene.get(child).and_then(|c| c.parent).is_some() {
-        return Err("child already has parent（先 remove_child 摘除旧父）".into());
+        return Err("child already has parent（先 remove_child 摘除当前父）".into());
     }
     let p = scene.get_mut(parent).ok_or("parent not live")?;
     let pos = p
@@ -231,7 +231,7 @@ pub fn set_src(scene: &mut Scene, node: NodeId, src: &str) -> Result<(), String>
 }
 
 /// 改 base_style（apply_css）+ 标 dirty_mesh。
-/// 下帧 rematch_pseudo_classes 从 base_style 起算重算 style（T5 确认 rematch 已从 base 起算）。
+/// 下帧 rematch_pseudo_classes 从 base_style 起算重算 style。
 pub fn set_style(scene: &mut Scene, node: NodeId, css: &str) -> Result<(), String> {
     let n = scene.get_mut(node).ok_or("node not live")?;
     apply_css(&mut n.base_style, css);
@@ -241,7 +241,7 @@ pub fn set_style(scene: &mut Scene, node: NodeId, css: &str) -> Result<(), Strin
 
 /// 删节点：递归删子 → 从父/roots 摘除 → 联动清 anim/scroll/tween → slotmap remove。
 ///
-/// 旧 NodeId 此后失效（slotmap gen++，Scene::get 返 None）。子树递归删。
+/// NodeId 此后失效（slotmap gen++，Scene::get 返 None）。子树递归删。
 /// anim/scroll/tween 联动清（HashMap remove / tween kill），防悬空残留。
 /// 槽位可复用（slotmap remove 释放槽，下次 insert 复用 + gen++）。
 ///
@@ -278,8 +278,8 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
     // 3c. PointerState（Stage 层）的 down_node/hovered_chain/drag_target 等不在此清：
     //     消费点（input.rs）全有 scene.get None-check 兜底，悬空 NodeId 仅向已删节点发 stale 事件
     //     （RollOut/DRAG_MOVE），无 panic；强清需把 pointer_state 传进 remove_node（改签名），YAGNI。
-    // 4. slotmap remove（gen++，旧 NodeId 失效，槽位可复用）。
-    //    经 key_for(NodeId) 桥接到 DefaultKey（T2）。
+    // 4. slotmap remove（gen++，NodeId 失效，槽位可复用）。
+    //    经 key_for(NodeId) 桥接到 DefaultKey。
     scene.nodes.remove(scene.key_for(id));
 }
 
@@ -290,7 +290,7 @@ mod tests {
     use crate::style::resolved::ResolvedStyle;
     use crate::tween::{Ease, TweenProp};
 
-    /// 建 3 层树：root → child → grandchild。用 Scene::build（不依赖 T6 动态建树 API）。
+    /// 建 3 层树：root → child → grandchild。用 Scene::build（不依赖动态建树 API）。
     fn build_3level() -> (Scene, NodeId, NodeId, NodeId) {
         let entries: Vec<(
             Option<usize>,
@@ -328,8 +328,8 @@ mod tests {
         assert!(scene.anim.get(child).is_none(), "anim 清");
         assert!(scene.scroll.get(child).is_none(), "scroll 清");
         assert!(tweens.tweens.iter().all(|t| t.node != child || t.killed), "tween killed");
-        assert!(scene.get(child).is_none(), "slotmap removed（旧 NodeId 失效）");
-        // root 仍在，且 root.children 不再含 child
+        assert!(scene.get(child).is_none(), "slotmap removed（被删 NodeId 失效）");
+        // root 仍在，且 root.children 不含 child
         assert!(scene.get(root).is_some(), "root 未删");
         assert!(!scene.get(root).unwrap().children.contains(&child), "child 从父摘除");
     }
@@ -375,7 +375,7 @@ mod tests {
         assert!(scene.get(b).is_none(), "b 删");
         assert!(scene.get(bchild).is_none(), "bchild 递归删");
         assert!(scene.anim.get(bchild).is_none(), "bchild anim 清");
-        // root.children 不再含 b，但含 a/c
+        // root.children 不含 b，但含 a/c
         let new_kids = scene.get(root).unwrap().children.clone();
         assert!(!new_kids.contains(&b), "b 从父摘除");
         assert!(new_kids.contains(&a) && new_kids.contains(&c), "a/c 保留在父 children");
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn remove_node_clears_focused_node() {
-        // Minor-1：删焦点节点后 focused_node 应联动清（防 FOCUS_OUT 带 stale node_id）。
+        // 删焦点节点后 focused_node 应联动清（防 FOCUS_OUT 带 stale node_id）。
         let (mut scene, root, child, _grand) = build_3level();
         let mut tweens = TweenManager::new();
         scene.focused_node = Some(child);
@@ -427,23 +427,23 @@ mod tests {
 
     #[test]
     fn remove_node_slot_reuse_invalidates_old_nodeid() {
-        // 删后槽位可复用：旧 NodeId 失效（gen++），新 insert 复用槽位但 NodeId 不同。
+        // 删后槽位可复用：被删 NodeId 失效（gen++），新 insert 复用槽位但 NodeId 不同。
         let (mut scene, root, child, _grand) = build_3level();
         let mut tweens = TweenManager::new();
         let child_id_old = child;
         remove_node(&mut scene, &mut tweens, child);
-        assert!(scene.get(child_id_old).is_none(), "旧 NodeId 失效（gen++）");
+        assert!(scene.get(child_id_old).is_none(), "被删 NodeId 失效（gen++）");
         // 新 insert（复用槽位）
         let new_key = scene.nodes.insert(crate::scene::node::Node::default());
         let new_id = crate::scene::node::NodeId::from_key(new_key);
-        // 旧 child_id 与新 new_id 不同（gen 不同），旧 id 仍 None
-        assert!(scene.get(child_id_old).is_none(), "旧 NodeId 仍失效");
+        // child_id_old 与新 new_id 不同（gen 不同），被删 id 仍 None
+        assert!(scene.get(child_id_old).is_none(), "被删 NodeId 仍失效");
         assert!(scene.get(new_id).is_some(), "新 NodeId live");
         // root 仍在
         assert!(scene.get(root).is_some());
     }
 
-    // ---- T6 动态建树 API 单元测试（自由函数级，不依赖 Stage） ----
+    // ---- 动态建树 API 单元测试（自由函数级，不依赖 Stage） ----
 
     fn empty_scene() -> Scene {
         Scene {
@@ -469,7 +469,7 @@ mod tests {
     #[test]
     fn kind_from_tag_unknown_returns_err() {
         assert!(kind_from_tag("ul").is_err());
-        assert!(kind_from_tag("l-container").is_err());  // 砍出围栏，与 div 同映射冗余
+        assert!(kind_from_tag("l-container").is_err());  // 不在围栏白名单内，与 div 同映射冗余
         assert!(kind_from_tag("").is_err());
     }
 
@@ -537,7 +537,7 @@ mod tests {
 
     #[test]
     fn create_node_from_template_uses_baked_style() {
-        // T5 instantiate 复用的节点构造：传入已 bake 的 kind+style，跳过 CSS parse。
+        // instantiate 复用的节点构造：传入已 bake 的 kind+style，跳过 CSS parse。
         let mut scene = empty_scene();
         let mut style = ResolvedStyle::default();
         apply_css(&mut style, "width:100px;height:100px;overflow:hidden;background-color:#ff0000");

@@ -1,7 +1,7 @@
 //! 极简 CLI（不引 clap）：loomgui_pkg <sourceDir> <pkgName> [--html <h1,h2,...>] [--res <name>] [-o <out.pkg.bin>]。
 //! 不传 --html → 扫 sourceDir 顶层所有 .html（不递归，排除 res 目录）。
 //! --res 默认 res。-o 默认 <sourceDir>/<pkgName>.pkg.bin。
-//! 产物只写 pkg.bin（不写 atlas.png——图集归 Unity，D8）。
+//! 产物只写 pkg.bin（图集归 Unity）。
 
 use std::env;
 use std::fs;

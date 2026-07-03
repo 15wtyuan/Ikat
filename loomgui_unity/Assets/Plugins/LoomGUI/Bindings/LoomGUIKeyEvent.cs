@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace LoomGUI.Bindings
 {
-    /// v1d.2：手补 C# 镜像（csbindgen 不为 use-imported 的 Rust #[repr(C)] struct 生成 stub
+    /// 手补 C# 镜像（csbindgen 不为 use-imported 的 Rust #[repr(C)] struct 生成 stub
     /// ——只扫描 lib.rs 内 #[no_mangle] fn 签名，不追 use 路径；同 LoomGUIPointerEvent.cs 模式）。
     /// KeyEvent 被 loomgui_stage_set_key_input 签名引用但无 stub → 手动补。
     ///

@@ -13,7 +13,7 @@
 
 ## 当前状态
 
-v1 架构走通 + 桌面可演示（Win/Mac Mono）。已交付：渲染/文本/事件/布局/滚动/打包器/FFI/动态树（v1.3+ 代际 NodeId + 命令式 API）/ColorFilter/九宫格/圆角/background-image。
+v1 架构走通 + 桌面可演示（Win/Mac Mono）。已交付：渲染/文本/事件/布局/滚动/打包器/FFI/动态树（代际 NodeId + 命令式 API）/ColorFilter/九宫格/圆角/background-image。
 
 距上线 = v1.x 功能（列表/富文本/Controller/TextInput）+ 编辑器工作流（v other）+ v2 平台（移动/IL2CPP/Godot）。详见 [路线图](docs/roadmap/roadmap.md)。
 
@@ -24,7 +24,7 @@ v1 架构走通 + 桌面可演示（Win/Mac Mono）。已交付：渲染/文本/
 cargo build -p loomgui_core
 cargo test  -p loomgui_core
 
-# 打包器（HTML+CSS+资源 → .pkg.bin + 图集）
+# 打包器（HTML+CSS+资源 → .pkg.bin）
 cargo build -p loomgui_pkg
 
 # FFI（C ABI，csbindgen 生成 C# 绑定）
@@ -45,7 +45,7 @@ Unity 后端：用 Unity 6.5 打开 `loomgui_unity/`，PlayMode 加载 `.pkg.bin
 | 目录 | 职责 |
 |---|---|
 | `loomgui_core/` | Rust 核心（解析/样式/布局/场景图/渲染状态/事件/动画/文本，引擎无关纯库） |
-| `loomgui_pkg/` | 打包器 CLI（HTML+CSS+资源 → `.pkg.bin` + 图集，复用 core 的 parse 层） |
+| `loomgui_pkg/` | 打包器 CLI（HTML+CSS+资源 → `.pkg.bin`，复用 core 的 parse 层） |
 | `loomgui_ffi_c/` | C ABI 导出（csbindgen，Rust ↔ C# P/Invoke） |
 | `loomgui_unity/` | Unity 6.5 URP 后端（GameObject 镜像 + DrawState 缓存 + 输入采集） |
 | `editor/` | v other 编辑器工作流模板（open-design 壳 + skill + 围栏规则注入） |

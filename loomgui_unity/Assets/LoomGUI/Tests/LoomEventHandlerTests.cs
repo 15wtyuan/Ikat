@@ -257,7 +257,7 @@ namespace LoomGUI.Tests
             Native.loomgui_stage_free((StageHandle*)stage);
         }
 
-        /// Move 走 DirectDispatch（不再 BubbleRoute）：只命中节点收，不沿链。
+        /// Move 走 DirectDispatch（非 BubbleRoute）：只命中节点收，不沿链。
         /// 验：root>parent>child 场景，child Move → 只 child 收，parent/root 不收。
         [Test]
         public void Move_DirectDispatch_NoBubble()

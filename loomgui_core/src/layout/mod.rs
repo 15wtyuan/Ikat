@@ -20,7 +20,7 @@
 //! taffy 0.5.2 的 `Style` 无 `order`，不做 flex order 排序（render 层按 DOM 顺序 /
 //! layout 输出的 `Layout.order` 渲染）。
 //!
-//! v1.4-a D17：核心知图尺寸（打包期 PNG IHDR 静态，Stage 持 path→(w,h) 尺寸表）+ 不知图集
+//! 核心知图尺寸（打包期 PNG IHDR 静态，Stage 持 path→(w,h) 尺寸表）+ 不知图集
 //! （运行时纹理/UV 归 Unity）。solve 接 `image_sizes: &HashMap<String,(u32,u32)>` 查 Image intrinsic
 //! 尺寸（三档：CSS > 真实像素 > 64×64）。render payload 带 path，UV 全图 (0,0)-(1,1)。
 
@@ -30,7 +30,7 @@ use crate::text::layout::{measure_text, Font, TextLayout};
 use std::collections::HashMap;
 use taffy::prelude::*;
 
-/// D17 图尺寸表类型别名：归一化 path → (w, h) 像素（打包期 PNG IHDR 静态）。
+/// 图尺寸表类型别名：归一化 path → (w, h) 像素（打包期 PNG IHDR 静态）。
 /// `solve`/`build_render_nodes` 接 `&HashMap<String, (u32, u32)>` 查 Image intrinsic 尺寸。
 pub type ImageSizeTable = HashMap<String, (u32, u32)>;
 
@@ -74,7 +74,7 @@ enum MeasureContext {
 /// `root_size` 是根节点固定尺寸（viewport / surface 尺寸）。`font` 借用到
 /// `compute_layout_with_measure` 结束，闭包内解引用喂给 `measure_text`。
 ///
-/// **D17**：`image_sizes` = Stage 持有的 path→(w,h) 尺寸表（打包期 PNG IHDR 静态）。
+/// `image_sizes` = Stage 持有的 path→(w,h) 尺寸表（打包期 PNG IHDR 静态）。
 /// Image measure 查此表算 intrinsic 尺寸（三档：CSS > 真实像素 > 64×64）。
 /// path 缺失或 w/h=0 → fallback 64×64（核心不知图集，但知图尺寸）。
 pub fn solve(scene: &mut Scene, font: &Font, root_size: (f32, f32), image_sizes: &ImageSizeTable) {
@@ -85,7 +85,7 @@ pub fn solve(scene: &mut Scene, font: &Font, root_size: (f32, f32), image_sizes:
     }
     let mut taffy_tree: TaffyTree<MeasureContext> = TaffyTree::new();
     // scene NodeId → taffy NodeId 映射（按 NodeId.index() 索引，1 基故 capacity+1）。
-    // **容量而非存活数**（T5）：remove_node 后 slotmap idx 不变但存活数减——按 len 分配会越界。
+    // **容量而非存活数**：remove_node 后 slotmap idx 不变但存活数减——按 len 分配会越界。
     let mut taffy_ids: Vec<Option<taffy::NodeId>> = vec![None; scene.nodes.capacity() + 1];
 
     fn build(
@@ -126,7 +126,7 @@ pub fn solve(scene: &mut Scene, font: &Font, root_size: (f32, f32), image_sizes:
                 })
             }
             NodeKind::Image { src } => {
-                // D17：查 Stage 尺寸表算 intrinsic 尺寸（三档：CSS > 真实像素 > 64×64）。
+                // 查 Stage 尺寸表算 intrinsic 尺寸（三档：CSS > 真实像素 > 64×64）。
                 // path 缺失或 w/h=0 → fallback 64×64。核心不知图集（运行时纹理归 Unity）。
                 let s = &node.style.taffy_style;
                 let (iw, ih) = image_sizes
@@ -292,12 +292,12 @@ mod tests {
         Font::from_path(&p).ok()
     }
 
-    /// D17 测试辅助：空图尺寸表（无 path → 全 64×64 兜底）。
+    /// 测试辅助：空图尺寸表（无 path → 全 64×64 兜底）。
     fn empty_sizes() -> ImageSizeTable {
         HashMap::new()
     }
 
-    /// D17 测试辅助：建单条 path→(w,h) 尺寸表。
+    /// 测试辅助：建单条 path→(w,h) 尺寸表。
     fn sizes(path: &str, w: u32, h: u32) -> ImageSizeTable {
         let mut m = HashMap::new();
         m.insert(path.to_string(), (w, h));
@@ -375,8 +375,7 @@ mod tests {
         assert!((r.h - 50.0).abs() < 0.1, "CSS length 赢：h=50，got {}", r.h);
     }
 
-    /// D17 恢复：无 CSS 尺寸 → 用尺寸表真实像素（40×20）。
-    /// T6 曾把此测改 64×64 兜底（"核心不知图尺寸"误判）；D17 修正为核心知图尺寸。
+    /// 无 CSS 尺寸 → 用尺寸表真实像素（40×20）。
     #[test]
     fn image_measure_uses_real_dims_when_no_css() {
         // 无 CSS 尺寸 + 尺寸表有 x.png=40×20 → intrinsic = 40×20（真实像素）。
@@ -394,7 +393,7 @@ mod tests {
         assert!((r.h - 20.0).abs() < 0.1, "真实像素：h=20，got {}", r.h);
     }
 
-    /// D17：无 CSS + 尺寸表无 path / w,h=0 → 64×64 兜底（三档第三档）。
+    /// 无 CSS + 尺寸表无 path / w,h=0 → 64×64 兜底（三档第三档）。
     #[test]
     fn image_measure_uses_64_fallback_when_no_size_entry() {
         // 无 CSS + 尺寸表无 x.png → 64×64 兜底。
@@ -412,7 +411,7 @@ mod tests {
         assert!((r.h - 64.0).abs() < 0.1, "兜底：h=64，got {}", r.h);
     }
 
-    /// D17：尺寸表 w/h=0（非 PNG / 读失败）→ fallback 64×64。
+    /// 尺寸表 w/h=0（非 PNG / 读失败）→ fallback 64×64。
     #[test]
     fn image_measure_falls_back_to_64_when_zero_dims() {
         // 尺寸表 x.png=(0,0)（非 PNG 兜底）→ fallback 64×64。
@@ -430,8 +429,7 @@ mod tests {
         assert!((r.h - 64.0).abs() < 0.1, "w/h=0 → 兜底 h=64，got {}", r.h);
     }
 
-    /// D17 恢复：img style="width:80px" + 真实 40×20 → height 等比 = 40（80×20/40，2:1 aspect）。
-    /// T6 曾改断言 h=80（64×64 1:1 兜底）；D17 修正为真实 2:1 aspect。
+    /// img style="width:80px" + 真实 40×20 → height 等比 = 40（80×20/40，2:1 aspect）。
     #[test]
     fn image_measure_scales_height_to_width_aspect() {
         // img style="width:80px" intrinsic 40×20（真实，2:1）→ height 等比 = 40（80×20/40）。
@@ -450,7 +448,7 @@ mod tests {
         assert!((r.h - 40.0).abs() < 0.1, "h 等比=40（80×20/40，2:1 真实 aspect），got {}", r.h);
     }
 
-    /// D17 恢复：img style="height:60px" + 真实 40×20 → width 等比 = 120（60×40/20，2:1 aspect）。
+    /// img style="height:60px" + 真实 40×20 → width 等比 = 120（60×40/20，2:1 aspect）。
     #[test]
     fn image_measure_scales_width_to_height_aspect() {
         // 只设 height：style="height:60px" intrinsic 40×20（真实，2:1）→ width 等比 = 120（60×40/20）。

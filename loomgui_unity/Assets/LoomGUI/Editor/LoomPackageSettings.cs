@@ -6,7 +6,7 @@ using UnityEngine;
 namespace LoomGUI.Editor
 {
     /// <summary>
-    /// v1.4-a T9：包管理配置（工程内一份 ScriptableObject）。
+    /// 包管理配置（工程内一份 ScriptableObject）。
     /// 菜单 LoomGUI > Package Settings 创建，或 Package Manager 面板自动建。
     ///
     /// 字段（spec §6.1）：

@@ -3,8 +3,8 @@ use taffy::style::LengthPercentage;
 use taffy::style::Style as TaffyStyle;
 use taffy::FlexDirection;
 
-/// CSS overflow 轴模式（替旧 `overflow_hidden: bool`）。
-/// `#[repr(u8)]` 保证 FFI/序列化稳定，`Default = Visible` 零回归旧 `overflow_hidden=false`。
+/// CSS overflow 轴模式。
+/// `#[repr(u8)]` 保证 FFI/序列化稳定，`Default = Visible`。
 /// Scroll/Auto 的物理/手势由 scroll 模块实现；本 enum 仅承载语义值。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[repr(u8)]
@@ -16,7 +16,7 @@ pub enum OverflowMode {
     Auto = 3,
 }
 
-/// CSS background-size 三档（v1 围栏子集）。
+/// CSS background-size 三档（围栏子集）。
 /// `#[repr(u8)]` 保证序列化稳定；`Default = Stretch`（100% 语义，未设时拉伸填满，非 CSS auto）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[repr(u8)]
@@ -27,7 +27,7 @@ pub enum BackgroundSize {
     Contain = 2,  // 完整放入留白（scale=min，UV 外扩，子区外透明透出底色）
 }
 
-/// CSS border-radius 单角半径（v1.2）。
+/// CSS border-radius 单角半径。
 /// (h, v) = (水平, 垂直) 半径，存 CSS 原始值（px/%），渲染期 resolve 成像素。
 /// `/` 省略时 v = h（正圆角）。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -39,7 +39,7 @@ impl Default for CornerRadius {
     fn default() -> Self { Self { h: LengthPercentage::Length(0.0), v: LengthPercentage::Length(0.0) } }
 }
 
-/// CSS border-radius 四角半径（v1.2）。corners 序 [TL, TR, BR, BL]（CSS 1~4 值展开序）。
+/// CSS border-radius 四角半径。corners 序 [TL, TR, BR, BL]（CSS 1~4 值展开序）。
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct BorderRadius {
     pub corners: [CornerRadius; 4],
@@ -78,12 +78,12 @@ pub struct ResolvedStyle {
     pub background_image: Option<String>,
     /// CSS background-size 模式。默认 Stretch。
     pub background_size: BackgroundSize,
-    /// CSS border-radius 四角半径（v1.2）。默认全 0（直角）。
+    /// CSS border-radius 四角半径。默认全 0（直角）。
     pub border_radius: BorderRadius,
     pub border_color: Option<[f32; 4]>,
     pub border_width: f32,
     pub opacity: f32,
-    /// overflow 两轴模式（替 `overflow_hidden: bool`）。Default 双轴 Visible。
+    /// overflow 两轴模式。Default 双轴 Visible。
     pub overflow_x: OverflowMode,
     pub overflow_y: OverflowMode,
     pub color: [f32; 4],
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn border_radius_default_is_zero() {
         let s = ResolvedStyle::default();
-        // 默认四角全 Length(0)（直角，零回归）
+        // 默认四角全 Length(0)（直角）
         for c in &s.border_radius.corners {
             assert_eq!(c.h, LengthPercentage::Length(0.0), "默认水平半径 0");
             assert_eq!(c.v, LengthPercentage::Length(0.0), "默认垂直半径 0");
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn overflow_hidden_bincode_roundtrip() {
-        // 零回归：Hidden 经 bincode round-trip 不变（pkg 字段）
+        // Hidden 经 bincode round-trip 不变（pkg 字段）
         let mut s = ResolvedStyle::default();
         s.overflow_x = OverflowMode::Hidden;
         s.overflow_y = OverflowMode::Scroll;

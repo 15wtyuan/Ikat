@@ -110,8 +110,8 @@ fn parse_filter(value: &str) -> Option<[f32; 20]> {
                 if x >= 0.5 { color_filter::invert() } else { IDENTITY }
             }
             "sepia" => {
-                // v1.3 简化：sepia(1) = 棕褐 tint 预设（实现期补；先 fallback grayscale+Tint 近似）
-                // ponytail: sepia 完整 Tint 矩阵实现期补，先用 grayscale 占位（spec §9 风险）
+                // sepia(1) = 棕褐 tint 预设（完整 Tint 矩阵待补，先用 grayscale 占位，spec §9 风险）
+                // ponytail: sepia 完整 Tint 矩阵实现期补，先用 grayscale 占位
                 color_filter::grayscale()
             }
             _ => continue,
@@ -621,11 +621,11 @@ mod tests {
         assert!(apply_decl(&mut s, "width", "100px"));
         assert!(apply_decl(&mut s, "background-color", "#00ff00"));
         assert!(s.background_color == Some([0.0, 1.0, 0.0, 1.0]));
-        assert!(apply_decl(&mut s, "border-radius", "4px")); // v1.2 起解析（非装饰忽略）
+        assert!(apply_decl(&mut s, "border-radius", "4px")); // border-radius 被解析（非装饰忽略）
     }
     #[test]
     fn order_is_stored() {
-        // 合法值：存进 ResolvedStyle.order，不再静默丢弃
+        // 合法值：存进 ResolvedStyle.order
         let mut s = ResolvedStyle::default();
         assert!(apply_decl(&mut s, "order", "2"));
         assert_eq!(s.order, 2);
@@ -915,14 +915,14 @@ mod tests {
         assert!((m[0] - 0.3588).abs() < 1e-4, "m[0] = grayscale luma × brightness = 0.299×1.2");
     }
 
-    /// 多函数 filter 串联顺序与 CSS/fgui 一致（I2 回归）。
+    /// 多函数 filter 串联顺序与 CSS/fgui 一致（回归测试）。
     /// CSS `filter: A B` = 先 A 后 B → 组合矩阵 = B × A（B 在左，最靠近 color）。
     /// fgui ConcatValues: `_matrix = newPreset × _matrix`（新值左乘）。
     /// LoomGUI 应同：acc 从 IDENTITY 起，每步 `acc = concat(m, acc)`（新值在左）。
     ///
     /// 用 saturate(0.5) hue-rotate(90deg) —— 二者不可交换（已数学验证），可检出顺序反转。
     /// 正确（CSS）：先 saturate 后 hue-rotate → 组合 = H × S = `concat(hue_rotate(90), saturate(0.5))`。
-    /// 错误（I2 bug `concat(acc, m)`）：组合 = S × H = `concat(saturate(0.5), hue_rotate(90))`。
+    /// 错误（`concat(acc, m)`）：组合 = S × H = `concat(saturate(0.5), hue_rotate(90))`。
     #[test]
     fn apply_decl_filter_multi_function_concat_order_matches_css() {
         let mut s = ResolvedStyle::default();
@@ -932,7 +932,7 @@ mod tests {
         let sat = color_filter::saturate(0.5);
         let hue = color_filter::hue_rotate(90.0);
         let correct = color_filter::concat(&hue, &sat);   // CSS: H × S（hue-rotate 在左）
-        let reversed = color_filter::concat(&sat, &hue);  // I2 bug: S × H
+        let reversed = color_filter::concat(&sat, &hue);  // 错误顺序: S × H
 
         for i in 0..20 {
             assert!((got[i] - correct[i]).abs() < 1e-5,
