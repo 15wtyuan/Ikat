@@ -1,4 +1,4 @@
-//! T10 验证：读 loom_showcase.pkg.bin 回读，打印组件名 + manifest path/尺寸。
+//! T10 验证：读 showcase.pkg.bin 回读，打印组件名 + manifest path/尺寸。
 //! 用法：cargo run -p loomgui_core --example verify_showcase_pkg -- <path-to-pkg.bin>
 use loomgui_core::asset::read_package;
 use std::env;

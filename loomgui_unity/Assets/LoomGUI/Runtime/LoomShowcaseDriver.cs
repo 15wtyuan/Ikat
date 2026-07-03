@@ -39,7 +39,7 @@ namespace LoomGUI
 
         // showcase 包名（LoadPackage 用）+ pkg.bin 文件名（StreamingAssets 下）。
         const string ShowcasePkg = "showcase";
-        const string ShowcasePkgFile = "loom_showcase.pkg.bin";
+        const string ShowcasePkgFile = "showcase.pkg.bin";
 
         // === 按页 listener 注册表（§7.5）===
         // 当前页注册的 listener：nodeId → [(eventType, callback)]。切页前遍历逐个 RemoveListener。

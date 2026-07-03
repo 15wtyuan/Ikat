@@ -10,7 +10,7 @@ use loomgui_core::text::layout::measure_text;
 
 fn main() {
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/wqy-microhei.ttc");
-    let pkg_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../loomgui_unity/Assets/StreamingAssets/loom_showcase.pkg.bin");
+    let pkg_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin");
     let pkg = match std::fs::read(pkg_path) {
         Ok(b) => b,
         Err(e) => { eprintln!("read pkg: {}", e); return; }

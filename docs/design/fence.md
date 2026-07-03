@@ -173,7 +173,7 @@
 **新增围栏外禁令**（明确某属性不该写）：
 1. `fence_contract.rs` 加"围栏外静默忽略"断言（写进去 → 期望不改变布局）。
 2. 本 `fence.md` §2.4 补一行，标注【实证】。
-3. editor 的 CLAUDE.md.tmpl / fence.md 副本同步"禁写"清单。
+3. Unity 插件 Editor Resources 的 fence-rules.md 同步"禁写"清单（LoomWorkspaceInitializer 注入）。
 
 **改 arm 行为**：
 1. 测试 fail（行为变了）。
@@ -209,7 +209,7 @@
 | v1 范围冻结 | `docs/roadmap/roadmap.md` §1.2 | 引用 fence.md + 标注 v1 冻结子集 / v1.x 扩展 |
 | 设计契约 | `docs/design/main-design.md` | 引用 fence.md 为围栏权威源 |
 
-**同步规则**：改 fence.md → 检查三处消费者是否需同步。editor 的 CLAUDE.md.tmpl 是注入给设计师的，过时会让 AI 生成违规 UI，优先同步。
+**同步规则**：改 fence.md → 检查三处消费者是否需同步。Editor Resources 的 fence-rules.md 由 LoomWorkspaceInitializer 注入给设计师工作区，过时会让 AI 生成违规 UI，优先同步。
 
 ---
 

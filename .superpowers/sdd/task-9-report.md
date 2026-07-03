@@ -1,83 +1,119 @@
-# Task 9 报告：Unity 包管理编辑器面板
+# Task 9 报告：删 samples/editor + 文档同步 + 重打 pkg.bin + build .dll
 
-**状态**：已实现（本机无 Unity 工具链，C# 语法核对 + grep 验证；家里机编译验证）
-**Commit**：（待填）
+**Status**: completed
+**Commit**: `e128b72`（branch: `worktree-workflow-atlas-rework`）
 
-## 实现
+## 执行摘要
 
-### 文件（新建，全部在 `loomgui_unity/Assets/LoomGUI/Editor/`）
+完成工作流闭环收尾：删除已废弃的 `samples/` 和 `editor/` 目录，将 design-systems 组件库迁入 Unity Assets，同步所有文档引用，重打 showcase pkg.bin，确认 Rust 无回归。
 
-1. **`LoomPackageSettings.cs`** — ScriptableObject 配置资产。
-   - `LoomPackageSettings : ScriptableObject`：`resDirName`（默认 "res"）、`pkgOutputDir`（默认 "Assets/StreamingAssets/"）、`loomPkgExePath`（默认 "../target/release/loomgui_pkg.exe"）、`List<PackageEntry> packages`。
-   - `[CreateAssetMenu(menuName = "LoomGUI/Package Settings")]` 供菜单创建。
-   - `GetOrCreateDefault()` 静态方法：面板首次打开若无配置资产自动建到 `Assets/LoomGUI/Editor/LoomPackageSettings.asset`。
-   - `PackageEntry`：`pkgName` + `sourceDir`（Unity 工程相对路径）+ `List<string> htmlFiles`。
+## Step 1: 迁 design-systems 到 Unity 内
 
-2. **`LoomPackageManagerWindow.cs`** — EditorWindow 主面板（`[MenuItem("LoomGUI/Package Manager")]`）。
-   - **智能识别**：拖目录到顶部 DropZone → `pkgName=目录名` + 扫顶层 `*.html`（`SearchOption.TopDirectoryOnly`，排除 `res` 目录同名文件）→ 建 `PackageEntry`。sourceDir 转 Unity 工程相对路径存。
-   - **包列表编辑**：每包独立卡片，pkgName/sourceDir 可编辑，htmlFiles 可增删，嵌套子目录的 .html 可单独拖入补漏（拖区在每包卡片底部）。
-   - **刷新按钮**（每包）：重扫 sourceDir 顶层 .html，diff htmlFiles——新增加入、删除移除（用"无路径分隔符 + 不在新扫描集"判删除，区分顶层扫描文件 vs 手动加的子目录 html）、保留手动加的非顶层 html + 改过的 pkgName。
-   - **全局配置**：resDirName / pkgOutputDir / loomPkgExePath 三栏，改动走 `Undo.RecordObject` + `EditorUtility.SetDirty`。
-   - **一键打包**（每包 + 全部）：起 `loomgui_pkg.exe` 子进程，args = `"<sourceDir>" <pkgName> --html <h1,h2,...> --res <name> -o "<out>"`，redirect stdout/stderr，显示日志（exit code + rich text 红绿标记成败），打包后 `AssetDatabase.Refresh()`。
-   - **资源校验**（每包 + 全部）：读 pkg.bin 的 AssetManifest（调 `PkgManifestReader`），对每个 manifest path 校验 `sourceDir/res/<path>` 文件存在，缺失红字列出 + 汇总"缺 N/M 条"。
+```bash
+git mv samples/design-systems/loomgui loomgui_unity/Assets/LoomUI/design-systems
+```
 
-3. **`PkgManifestReader.cs`** — C# 读 pkg.bin 末尾 AssetManifest 的轻量解析器（不引 bincode）。
-   - 解析路径：Header(20B) → StringTable → ComponentTable → 逐节点跳过 NodeBlock（按每节点 `style_len` + class_count 跳）→ 跳 PerComponentDynamicRules（按 ComponentTable dynamic_len 之和跳）→ 读 AssetManifest（`entry_count + count×{path_idx, w, h}`），path_idx 查 StringTable 还原 path 字符串。
-   - 校验 magic (`0x474B504C`) + version (12)，错抛 `PkgManifestException`（面板显示红字）。
-   - 越界 / 截断防御：所有读都校验长度，越界抛异常不崩。
+迁入 3 个文件：`DESIGN.md`、`components.html`、`tokens.css`。历史保留。
 
-4. **`LoomGUI.Editor.asmdef`** — Editor 程序集定义。`includePlatforms: ["Editor"]`、`references: ["LoomGUI.Runtime"]`、`autoReferenced: true`。
+## Step 2: 删 samples/ + editor/
 
-### 关键决策
+```bash
+git rm -r samples/ editor/
+```
 
-**AssetManifest 读取（spec §6.2-4）**：选择了"C# 手解析 pkg.bin 末尾 manifest 段"而非"调 Rust 工具读"或"只扫 res/ 不读 pkg.bin"。
+删除 30 个文件：editor/（10 文件：init.mjs, init.test.mjs, rules/, skill/）+ samples/（20 文件：v1-showcase/, backpack/, dyn-mail/, ai-output/。design-systems/ 已在 Step 1 迁出）。
 
-- 为何不调 Rust 工具：多一个子进程依赖 + 需要一个专门的 manifest-dump CLI（T3 的 loomgui_pkg 只打包不 dump manifest），成本高。
-- 为何不只扫 res/ 磁盘：spec §6.2-4 明确"读 pkg.bin AssetManifest 校验 res 齐全"——manifest 是打包器归一化后的真实 path 列表（去重、去 res 前缀、正斜杠归一），直接扫 res/ 无法对应到 pkg.bin 里的 path（路径分隔符/前缀差异）。读 manifest 才能精确校验"pkg 引用的图都有对应文件"。
-- 解析复杂度：~140 行，只读 manifest 段不碰 bincode（ResolvedStyle/DynamicRuleTable 不解析），用 Header 里的 string_count/component_count + ComponentTable 里的 dynamic_len 跳过中间段。可行、最小可用。
+## Step 3-6: 文档同步
 
-**loomgui_pkg.exe 定位**：配置在 `LoomPackageSettings.loomPkgExePath`（默认 "../target/release/loomgui_pkg.exe"，工程根相对）。面板解析时若工程根相对则拼 `Application.dataPath/..` + 配置值；Windows 自动补 .exe 后缀。找不到 exe 时红字提示"请先 cargo build --release -p loomgui_pkg"。这样兼容本机/家里机不同 build 输出位置（用户改配置即可）。
+| 文件 | 改动 |
+|---|---|
+| `CLAUDE.md` L59, L93, L105 | Workspace 成员去 editor/samples；围栏分发改 LoomUI 工作区 + Settings 面板；加设计师工作区路径说明 |
+| `README.md` L28, L36, L48-52 | pkg 描述去 "+ 图集"；示例路径改 LoomUI/showcase；项目结构表删 editor/samples 行 |
+| `docs/roadmap/roadmap.md` 第 3 节 | 整段重写：open-design 壳描述 → Unity 内 C# 实现（LoomSettingsWindow + LoomWorkspaceInitializer + config.json + open-design import + loomgui_pkg.exe） |
+| `docs/design/fence.md` 第 5 节 | editor 消费者行改为 "Unity 插件 Editor Resources 注入（`LoomWorkspaceInitializer`）" |
 
-**路径处理**：sourceDir / pkgOutputDir 统一存 Unity 工程根相对路径（跨机器可移植）。打包时转绝对路径传 CLI；htmlFiles 存相对 sourceDir 的文件名（顶层）或相对路径（嵌套子目录补拖）。
+## Step 7: 重打 showcase pkg.bin
 
-## 自审
+命令（PowerShell）：
+```
+loomgui_pkg.exe "Assets/LoomUI/showcase" showcase \
+  --html home.html,mail.html,page_controls.html,page_dyntree.html,page_image.html,page_interact.html,page_scroll.html,page_text.html,page_tween.html,tips_toast.html \
+  --res-root "Assets/LoomUI/res" \
+  -o "Assets/StreamingAssets/showcase.pkg.bin"
+```
 
-### Unity Editor API 核对（grep 验证通过）
-- `EditorWindow` / `GetWindow<T>(focus, title, utility)` ✓
-- `[MenuItem("LoomGUI/Package Manager")]` ✓
-- `DragAndDrop.AcceptDrag()` / `DragAndDrop.paths` / `DragAndDrop.visualMode` / `DragAndDropVisualMode.Copy/Rejected` ✓
-- `Event.current.type == EventType.DragPerform/DragUpdated` ✓
-- `GUILayoutUtility.GetRect(width, height, GUILayoutOption[])` ✓
-- `EditorGUILayout.TextField/LabelField/Space/BeginScrollView/EndScrollView/BeginHorizontal/EndHorizontal/BeginVertical/EndVertical` ✓
-- `EditorGUI.BeginChangeCheck/EndChangeCheck` ✓
-- `Undo.RecordObject` ✓
-- `AssetDatabase.LoadAssetAtPath/CreateAsset/SaveAssets/Refresh` ✓
-- `EditorUtility.SetDirty` ✓
-- `EditorStyles.boldLabel/helpBox/label/miniLabel/wordWrappedMiniLabel` ✓（均为有效字段）
-- `GUI.Box` / `GUILayout.Button` ✓
-- `GUIUtility.ExitGUI()` ✓（删包/删 htmlFile 后重绘，已匹配 EndHorizontal 再 Exit 避免 layout 栈失衡）
-- `Selection.activeObject` ✓
-- `Process.Start(ProcessStartInfo)` + `RedirectStandardOutput/Error` + `UseShellExecute=false` ✓
-- `Application.dataPath` / `Application.platform` / `RuntimePlatform.WindowsEditor` ✓
+输出：`wrote showcase.pkg.bin (408342 bytes, 10 components, 4 manifest paths)` -- exit code 0。
 
-### C# 语法核对
-- 括号配平：三文件 open/close 全等（grep 计数验证）。
-- `using` 齐全：`UnityEditor`（AssetDatabase）、`UnityEngine`（ScriptableObject/Application）、`System.Diagnostics`（Process）、`System.IO`（File/Directory/Path）、`System.Text`（StringBuilder/Encoding）。
-- `Skip` 重载歧义消解：常量表达式显式 `(uint)` cast（`Skip((uint)(2+2))`）。
-- 删包/删 htmlFile 的 `ExitGUI` 前先 `EndHorizontal`，layout 栈平衡（`try/finally` 兜底 `EndVertical`）。
-- 可空 `Directory.GetParent` 全部走 `ProjectRootPath()` 助手（null fallback `Application.dataPath`）。
+## Step 8: build .dll
 
-## 家里机编译可能暴露的点（concerns）
+```bash
+cargo build -p loomgui_ffi_c --release   # Finished in 13.72s
+cp target/release/loomgui_ffi_c.dll loomgui_unity/Assets/Plugins/LoomGUI/loomgui_ffi_c.dll
+```
 
-1. **asmdef 引用**：`LoomGUI.Editor` references `LoomGUI.Runtime`——当前文件实际未用 Runtime 类型（LoomPackageSettings/PackageEntry/PkgManifestReader 都在 Editor 程序集）。引用留着是为将来面板扩展（如配 SpriteAtlas）。若编译报"未使用引用"警告（不会报错），可删 references。预期不报错。
-2. **`GetWindow<T>(bool focus, string title, bool utility)`** 重载签名：Unity 各版本一致，但若家里机 Unity 版本极旧可能签名微调。低概率。
-3. **`EditorStyles.wordWrappedMiniLabel`**：Unity 2019+ 有，家里机版本应有。若无该字段编译报错，换 `EditorStyles.wordWrappedLabel`。
-4. **`ProcessStartInfo.StandardErrorEncoding`**：Unity 2019+（.NET 4.x）有。低风险。
-5. **拖放区 `Event.current.Use()` + `GUIUtility.ExitGUI()`**：标准 IMGUI 模式，但 `ExitGUI` 抛 `ExitGUIException`——若家里机 Unity 版本对异常处理有差异可能行为不同。低风险（这是 Unity 官方推荐模式）。
-6. **`Path.GetFullPath` 跨平台**：Windows 反斜杠已处理（`Replace('\\', '/')`），macOS/Linux 家里机（若有）正斜杠天然兼容。
-7. **`PkgManifestReader` 解析正确性**：本机无法跑（无 Unity + 无 pkg.bin 样本）。逻辑对照 Rust `read_package` 逐段核对过（Header/StringTable/ComponentTable/NodeBlock skip/DynamicRules skip/AssetManifest），但家里机首次打包后校验才能验证。若 manifest 读偏（NodeBlock skip 长度算错），会抛 `PkgManifestException`（不崩，红字提示）——届时重核 skip 偏移即可。
+dll 大小：1886208 bytes，与 target 一致，无 stale。
 
-## 未做 / 留 TODO
+## Step 9: 围栏门
 
-- **编辑器单测**：spec 说"编辑器面板无单测基建"，未建。家里机手验。
-- **.meta 文件**：Unity 首次导入会自动生成 .meta（asmdef/cs）。本机不预生成（避免 GUID 冲突）。
+```bash
+cargo test -p loomgui_core --test fence_contract
+```
+
+**10 passed, 0 failed**。
+
+## Self-Review
+
+- design-systems 目录的 `.meta` 文件未生成（本机无 Unity），家里机 Unity 打开 Assets 会自动生成。届时需 add + commit 三个 .meta + 父目录 .meta。
+- 旧 `loom_showcase.pkg.bin` 未删 -- 未在 brief 中要求删，且已在 git 追踪中。如果家里机 Load 逻辑读的是 `showcase.pkg.bin`（新名），旧的可后续手动 `git rm`。
+- CLAUDE.md 只改了 editor/samples 相关描述，未动其它部分（架构/围栏/FFI/调试/API）。
+- Rust 源码未改动，`.dll` 重建仅为确认编译不过期 + 二进制一致性检查。
+
+## Concerns
+
+1. **`.meta` 缺失**：新迁的 `Assets/LoomUI/design-systems/` 下三个文件无对应 `.meta`。家里机 Unity 打开项目后会自动生成，需届时 add + commit。
+2. **旧 pkg.bin 残留**：`StreamingAssets/loom_showcase.pkg.bin`（旧名）仍在，后续可清理。
+3. **progress.md 有未暂存改动**：`.superpowers/sdd/progress.md` 被 task runner 修改但未 stage，不影响本 task 内容。
+
+## Fix: Task 9 review findings 修复
+
+**Status**: completed
+**Commit**: （见下）
+
+### Finding 1: `samples/` 空目录残留
+
+`samples/` 已 `git rm -r`，git 不再 tracking，但磁盘上残留空目录 `samples/design-systems/`。
+**修复**：`rm -rf samples/` 从磁盘彻底删除。git status 确认 samples/ 不再出现。
+
+### Finding 2: `docs/design/fence.md` §4 陈旧引用
+
+fence.md 有两处引用已删的 `editor/` 目录：
+
+| 行 | 旧文本 | 新文本 |
+|---|---|---|
+| 176 | `editor 的 CLAUDE.md.tmpl / fence.md 副本同步` | `Unity 插件 Editor Resources 的 fence-rules.md 同步（LoomWorkspaceInitializer 注入）` |
+| 212 | `editor 的 CLAUDE.md.tmpl 是注入给设计师的` | `Editor Resources 的 fence-rules.md 由 LoomWorkspaceInitializer 注入给设计师工作区` |
+
+§5 表格（第 208 行）已正确引用新机制，无需改动。
+grep 验证：改后 fence.md 中 `CLAUDE.md.tmpl` 和 `editor 的` 均为 0 匹配。
+
+### Finding 3: `loom_showcase.pkg.bin` stale 文件
+
+**grep 证据**：`LoomShowcaseDriver.cs:42` 加载 `"loom_showcase.pkg.bin"`（旧名）。
+`StreamingAssets/` 下两个文件并存：`loom_showcase.pkg.bin`（旧，git 追踪）+ `showcase.pkg.bin`（新，Task 9 重打）。
+
+**判断**：包名 `ShowcasePkg = "showcase"`，Task 9 有意改用 `showcase.pkg.bin`（新名）。改 driver 加载新名、删旧文件。
+
+**修复**：
+1. `LoomShowcaseDriver.cs:42`：`"loom_showcase.pkg.bin"` → `"showcase.pkg.bin"`
+2. `git rm loomgui_unity/Assets/StreamingAssets/loom_showcase.pkg.bin`（删除旧文件）
+3. 同步更新 5 个 Rust example 的硬编码路径：
+   - `dump_bg.rs`（注释 + 路径）
+   - `dump_img.rs`
+   - `dump_scroll.rs`
+   - `dump_text.rs`
+   - `verify_showcase_pkg.rs`（注释）
+4. grep 验证：`loomgui_core/` 和 `loomgui_unity/` 下 `loom_showcase.pkg.bin` 残量为 0。
+
+### 围栏门
+
+`cargo test -p loomgui_core --test fence_contract`：**10 passed, 0 failed**。无回归。
