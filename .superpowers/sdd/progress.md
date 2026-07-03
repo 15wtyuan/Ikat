@@ -11,8 +11,8 @@ BASE=f223ad5
 - T3: complete (commits d0070fa..a329c26, review clean — Spec ✅ + Approved, 1 Minor 测试模块位置) — reuse_key 字段
 - T4: complete (commits a329c26..e3921bd, review clean after fix — clear_content_size_override 补齐) — scroll 3 FFI 口子
 - T5: complete (commits e3921bd..57ce6ed, review clean — 5 FFI + blob v9 + .dll 入库导出确认) — FFI 入口 + blob v9
-- T6: in_progress — FrameBlob + MirrorPool 双 dict
-- T7: pending — LoomStage driver API
+- T6: complete (commits 57ce6ed..c34ac7e, review clean after fix — LastNodeId 复用更新) — FrameBlob + MirrorPool 双 dict
+- T7: in_progress — LoomStage driver API
 - T8: pending — driver 列表 demo
 - T9: pending — 文档校对
 
