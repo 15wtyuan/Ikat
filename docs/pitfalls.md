@@ -59,6 +59,9 @@
 - **MaterialPropertyBlock 覆盖范围**：只覆盖 material property（Properties 或 `UnityPerMaterial` CBUFFER 字段）；CBUFFER 外全局 uniform MPB **不覆盖**（坑 52，静默失效）。per-renderer uniform 必须进 CBUFFER。
 - **TransformObjectToWorld = mul(unity_ObjectToWorld, pos)**：GO 是 root 子时 = root_ObjectToWorld（含 root transform sf/-sf/sf+rootPos）。core 算 design world，shader 桥接 design→Unity world 用它（坑 51）。GO transform=identity 时仍 = root transform（继承父）。
 - **Time.unscaledDeltaTime 首帧 spike**：PlayMode 首帧可达数秒（加载延迟，实测 2.07s），tween/动画别在 Start 自动播（坑 53，瞬间 complete 写末值）。
+- **`Resources.Load` 不搜 `Editor/Resources/`**：`Resources.Load` 只搜任意目录下的 `Resources/` 子目录，但**排除 `Editor/` 下的 Resources**（那是 `EditorGUIUtility.Load` / `AssetDatabase.LoadAssetAtPath` 专用）。把资源放 `Assets/LoomGUI/Editor/Resources/LoomGUI/` 然后调 `Resources.Load<TextAsset>("LoomGUI/xxx")` → **返 null，功能静默失败**（InjectFenceRules/DistributeSkill 全挂）。Editor 下读 Editor/Resources 资产用 `AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/LoomGUI/Editor/Resources/LoomGUI/xxx.md")`（含扩展名全路径）。
+- **ScriptableObject 子类禁 `new`**：`SpriteAtlas` / 自定义 `ScriptableObject` 子类用 `new T()` 绕过 Unity 原生对象追踪 + 序列化，IL2CPP/特定版本静默失败或产损坏资产。用 `ScriptableObject.CreateInstance<T>()`。
+- **`Uri.MakeRelativeUri` 剥 trailing slash + 兄弟目录算错**：`Path.GetFullPath` 剥目录末尾 `/`，`MakeRelativeUri` 把无 trailing slash 的路径当文件 → 产 `../StreamingAssets`（无尾斜杠）。且兄弟目录（如 `Assets/LoomUI/` → `Assets/StreamingAssets/`）相对只 1 级 `../`，非手工算的 2 级。修：`GetFullPath` 前记 `targetDir.EndsWith("/")` → 后补 trailing slash；相对路径级数靠 MakeRelativeUri 算别手算。
 
 ### 1.7 taffy 0.5.2 serde + bincode 1.x（style/resolved.rs + asset/mod.rs，v1b.1）
 - taffy 0.5.2 有 **`serde` feature**：`Style`（style/mod.rs:189）及全部字段类型（geometry/dimension/flex/grid/alignment）都 `#[cfg_attr(feature="serde", derive(Serialize,Deserialize))]` + `#[serde(default)]`；`Style` 还派生 `PartialEq`。开 `taffy = { version="0.5", features=["serde"] }` 后，含 `taffy_style: taffy::style::Style` 的 `ResolvedStyle` 能整体 `#[derive(Serialize,Deserialize,PartialEq)]`。
@@ -729,5 +732,12 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **根因**：worktree 把这两个文件当 spec §2.1「[Ignore] 退役测试」删了（基于 v8 基线判断）。但 main 已被 workflow-atlas-rework 扩展——`MirrorPoolTests.cs` 加了 `MirrorPoolReuseKeyTests`（v9 22 列活测试）、`AtlasMirrorPoolTests.cs` 改名 `AtlasMirrorPoolPathTests`（活的非退役）。spec 的「退役」判断只在 worktree 基线版本成立，主分支演进后被删文件已被 HEAD 重新填充活内容。按 delete 解决 = 丢了 HEAD 的新内容。
 **解决**：从 `08e5582` 恢复 v9 测试类（`MirrorPoolReuseKeyTests` 22 列 colOff=132 与当前 FrameBlob `ExpectedVersion=9`/`ReuseKey=ColOff(21)` 一致），不恢复 v4 [Ignore] 退役类。`AtlasMirrorPoolTests` 恢复 + 清 v1.4-a T8 历史注释 + 改测试名 `MissingSprite`→`NoAtlas`。
 **教训**：merge modify/delete 冲突按 delete 解决前**必须核实 HEAD 改了什么**——worktree 删的文件不等于 HEAD 没扩展。`git show <HEAD>:<path>` 看一眼 HEAD 版本内容再决定 delete/modify。死代码清理 spec 的「退役」判断只在基线版本成立，merge 到已演进的 main 时每个被删文件都要重新核实是否被 HEAD 扩展。
+
+
+### 坑 111：plan 跨 task 改动不同步 — 后续 task 照搬 plan 旧代码与已改 API 不符
+**症状**：Spec A 执行中，Task 2 改了打包器 CLI（`--res` → `--res-root <path>`）。Task 5（LoomSettingsWindow 拼 CLI args）照搬 plan 原代码仍写 `--res`，与 Task 2 改后的 CLI 不匹配 → 打包功能 exit(2) 全挂。review 才发现。
+**根因**：plan 写时 Task 2 的改动还没发生，Task 5 代码基于旧 CLI。plan 是一次性写的快照，跨 task 的接口改动不会自动传播到后续 task 的代码块。
+**解决**：reviewer 跨 task 一致性检查（CLI flag / 字段名 / 签名跨层对齐）捕到，fix 改 `--res-root` + 显式传 res 绝对路径。
+**教训**：plan 里后续 task 照搬的代码块，执行时要核实它依赖的接口有没有被前置 task 改过——尤其 CLI flag、函数签名、字段名。SDD 的 task reviewer 要带「跨 task 一致性」lens（plan 自身不会自动同步）。同类：Task 2 res 提走后 `source_dir.join(res_dir)` 读 PNG 断（plan Task 2 低估了，执行中发现要加 res_root 参数）。
 
 
