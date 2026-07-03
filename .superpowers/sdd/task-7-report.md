@@ -69,7 +69,7 @@ all 10 passed; 0 failed
 
 ## Fix: RelativeFromWorkspace trailing slash + test 断言修正
 
-**Commit**: `(pending)`
+**Commit**: `5e525e0`
 
 ### 根因
 
