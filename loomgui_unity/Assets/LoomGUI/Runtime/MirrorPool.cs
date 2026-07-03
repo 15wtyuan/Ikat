@@ -18,8 +18,11 @@ namespace LoomGUI
         public bool Stale;
         public uint LastNodeId;       // 复用 GO 时校验
         public bool IsText;            // kind=2：font atlas rebuild 时需重光栅
-        // -1 哨兵：新建 RenderObj 的 text 节点首帧必 BuildMesh（即使 FontVersion==0）。
-        public int LastFontVersion = -1;
+        // text 缓存：上次 Full 时的 glyphs/fontSize/color。font atlas rebuild 时节点为 Skip/Header
+        // （blob 无 text 段），用此缓存重建取新 UV——否则 ReadText 读 text_len=0 占位越界 → count 垃圾 → OOM。
+        public GlyphData[] LastGlyphs;
+        public int LastFontSize;
+        public Color LastTextColor;
 
         // buffer 复用（500 节点静态压测 GC 缓解）：每 RenderObj 持可复用 List，
         // UploadMesh 每帧 Clear+fill 后用 Mesh.SetVertices(List) 等 overload 上传——
@@ -57,7 +60,8 @@ namespace LoomGUI
 
             // font atlas rebuild 检测：版本变 → 本帧所有 text 节点强制重 BuildMesh
             // （glyph UV 变，缓存 mesh 作废）。
-            bool fontDirty = _lastFontVersion != TextRasterizer.FontVersion;
+            int fontVersionAtStart = TextRasterizer.FontVersion;
+            bool fontDirty = _lastFontVersion != fontVersionAtStart;
 
             // ① 全标 stale（两个 dict）
             foreach (var kv in _poolByNodeId) kv.Value.Stale = true;
@@ -72,6 +76,10 @@ namespace LoomGUI
                 if (!blob.Visible(i)) continue;
                 byte kind = blob.PayloadKind(i);
                 byte level = blob.ChangeLevel(i);   // 0=Skip 1=Header 2=Full
+                // font atlas rebuild 时，所有 text 节点 UV 失效——含 Skip/Header（content 没变的静态
+                // text）也必须重建 mesh，否则旧 UV 指向新 atlas → 字符错乱（上下颠倒/碎片/错字）。
+                if (fontDirty && kind == 2 && level < 2)
+                    level = 2;
                 uint id = blob.NodeId(i);
                 uint reuseKey = blob.ReuseKey(i);    // 虚拟列表
                 uint poolKey = reuseKey != 0 ? reuseKey : id;
@@ -113,10 +121,14 @@ namespace LoomGUI
                 ro.IsText = kind == 2;
 
                 UpdateHeader(ro, blob, i, root, mm, kind, sp, tex, font);
-                if (level == 2) UploadMeshOrText(ro, blob, i, sp, font, fontDirty);
+                if (level == 2) UploadMeshOrText(ro, blob, i, sp, font);
             }
 
-            if (fontDirty) _lastFontVersion = TextRasterizer.FontVersion;
+            // 若 Sync 期间 atlas 又 rebuild（BuildMesh 的 RequestCharactersInTexture 触发，见 OnRebuilt 栈），
+            // FontVersion 已 > start → 不追 _lastFontVersion，下帧再 fontDirty 全重建——
+            // 否则 rebuild 前重建的 text 会永久用旧 UV（偶现「上下颠倒」的另一半根因）。
+            if (fontDirty && TextRasterizer.FontVersion == fontVersionAtStart)
+                _lastFontVersion = fontVersionAtStart;
 
             // ③ 余 stale 销毁（两个 dict）
             var dead1 = new List<uint>();
@@ -213,7 +225,7 @@ namespace LoomGUI
         /// 上传 mesh / 重建 text mesh（仅 FULL 路径调用）。
         /// mesh 顶点已由 Rust re-base 到节点本地空间，此处按 (x,y,0) 上传。
         static void UploadMeshOrText(RenderObj ro, FrameBlob blob, int i,
-                                     Sprite sp, Font font, bool fontDirty)
+                                     Sprite sp, Font font)
         {
             byte kind = blob.PayloadKind(i);
             if (kind == 1)
@@ -222,7 +234,6 @@ namespace LoomGUI
                 var seg = blob.ReadMesh(i);
                 UploadMesh(ro, seg);
                 ro.Mesh.RecalculateBounds();
-                ro.LastFontVersion = TextRasterizer.FontVersion;
                 // 按 path_idx 取 path → SpriteResolver.GetSprite → Sprite.texture + 打包 UV。
                 //   path_idx=0（纯色无图）/ path 查不到 Sprite → 跳过 UV 重映射（blob mesh UV 已是全图 [0,1]；用 fallback whiteTexture）。
                 //   SpriteAtlas 把 Sprite 打进 atlas 子区 → 用 sprite.rect + texture 尺寸重映射 UV
@@ -232,17 +243,26 @@ namespace LoomGUI
             }
             else // kind == 2 (Text)
             {
-                // font atlas rebuild 或首次 → 重 BuildMesh（glyph UV 变，缓存 mesh 作废）。
-                bool needRebuild = fontDirty || ro.LastFontVersion != TextRasterizer.FontVersion;
-                if (needRebuild)
+                // text 重建两路：
+                //  ① Full（blob 有 text 段，text_len>0）：ReadText 读 + 缓存进 ro（供下次 fontDirty 重建）。
+                //  ② fontDirty 提升的 Skip/Header（blob 无 text 段，text_len==0）：用 ro 上次 Full 缓存的
+                //     glyphs 重建取新 UV。否则 ReadText 读 text_len=0 占位 → p 指 text_arena 头 → count 是垃圾
+                //     （text_arena 全空时还越界读到 clip/path 表）→ new GlyphData[count] OOM。
+                int fontSize; Color textColor; GlyphData[] glyphs;
+                if (blob.TextLen(i) > 0u)
                 {
-                    blob.ReadText(i, out int fontSize, out Color textColor, out GlyphData[] glyphs);
-                    // node opacity 走 _Alpha uniform（不烤进顶点色，否则双乘）。
-                    var seg = TextRasterizer.BuildMesh(font, fontSize, textColor, glyphs);
-                    UploadMesh(ro, seg);
-                    ro.Mesh.RecalculateBounds();
-                    ro.LastFontVersion = TextRasterizer.FontVersion;
+                    blob.ReadText(i, out fontSize, out textColor, out glyphs);
+                    ro.LastGlyphs = glyphs; ro.LastFontSize = fontSize; ro.LastTextColor = textColor;
                 }
+                else
+                {
+                    glyphs = ro.LastGlyphs; fontSize = ro.LastFontSize; textColor = ro.LastTextColor;
+                    if (glyphs == null) return;   // 防御：从未 Full 过（首帧建 RenderObj 强制 Full，不触发）
+                }
+                // node opacity 走 _Alpha uniform（不烤进顶点色，否则双乘）。
+                var seg = TextRasterizer.BuildMesh(font, fontSize, textColor, glyphs);
+                UploadMesh(ro, seg);
+                ro.Mesh.RecalculateBounds();
             }
         }
 
