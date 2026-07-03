@@ -652,3 +652,41 @@ bug1 小拖松手回原位；bug2 快速拖到顶/底"先露空白再突然回�
 **根因**：spec §5.3 不变量"所有持久附属同步清"——focused_node 是持久状态（单一全局焦点），remove_node 应清但漏列。grip-dragging 的 `expect("live node")` 同类问题（拖滚动条时 remove 容器 panic）。
 **解决**：remove_node 加 `if scene.focused_node == Some(id) { scene.focused_node = None; }`。grip-dragging expect 改安全 match（None 清 scrolling_pane + grip_dragging + continue）。
 **教训**：删节点联动清要覆盖**所有**持有 NodeId 的持久状态——anim/scroll/tween/focused_node/input(down_targets/last_hovered_chain/touch_monitors)。新增持久状态时同步加 remove_node 联动。input 持有的 NodeId 用 OOB guard + 祖先回退兜底（v1 已有），但 focused_node 这种单一全局要主动清。
+
+### 坑 100：commit 了没重编的旧 .dll — 本地缓存掩盖，干净环境才暴露（v1.4-a T7）
+**症状**：v1.4-a push 后家里机 `git pull` + Unity 编译报 CS0117 `loomgui_stage_instantiate` 不存在 + CS1501 `load_package` 参数数不对。公司机本地一切正常。
+**根因**：T7 改 FFI 源码（load_package 加 name + 新增 instantiate），但 commit 进 git 的是**没重编的旧 dll**（`findstr` 查 dll 无 instantiate 导出）。公司机本地缓存的旧 dll + gitignored 的 bindings.cs 把问题盖住；家里机干净 pull 才暴露。csbindgen 的 `LoomGUIBindings.cs` gitignored（各机各 build 不跨机同步），bindings 由 build.rs 重新生成，但 dll 必须手动重编 + commit。
+**解决**：家里机 `cargo build -p loomgui_ffi_c --release` 重 build + cp dll（build.rs 自动重生成 bindings 落 Unity 目录）。
+**教训**：改 FFI 后 push 前必须 `cargo build -p loomgui_ffi_c --release` + cp dll + **实测 dll 导出**（`nm`/`findstr` 查新符号在），本地缓存的旧 dll 会骗过公司机。stale .dll 是坑 10 的老问题在跨机工作流下的新变体——公司机"能跑"不代表 dll 是新的。
+
+### 坑 101：C# using alias 解不了父命名空间同名类型遮蔽（v1.4-a T9）
+**症状**：`namespace LoomGUI.Editor` 里用 `EventType.DragPerform` 报 CS0117——解析到父 `LoomGUI.EventType`（runtime 事件枚举），遮蔽 `UnityEngine.EventType`。加 `using EventType = UnityEngine.EventType;` 无效。
+**根因**：C# 名称查找规则——当前 + 父命名空间的类型优先于 using alias。`LoomGUI.EventType` 在父命名空间，先命中，alias 排后面被遮蔽。
+**解决**：fully-qualify `UnityEngine.EventType.DragPerform/Updated`（不能靠 alias）。
+**教训**：项目自定义类型与 Unity 类型同名（EventType/Object 等）时，子命名空间引用 Unity 版必须 fully-qualify。using alias 对"父命名空间已有同名类型"无效。
+
+### 坑 102：cdylib FFI 入口 panic 拖垮宿主进程（v1.4-a 家里机验收 A3）
+**症状**：Unity 打开场景闪退。Editor.log：`panicked at stage.rs:421 'load first'` → `loomgui_stage_tick` → `non-unwinding panic. aborting` → Unity 进程崩。
+**根因**：LoomStage `[ExecuteAlways]` → EditMode 也跑 LateUpdate tick。v1.4-a 砍了 Awake 自动建 scene（改 driver.CreateRoot 建），但 LateUpdate 只 guard `_stage==null`（handle 在），没 guard scene 是否建成 → EditMode driver.Start 没跑、scene=None 时 tick → Rust `tick_and_render` 的 `.expect("load first")` panic → cdylib panic abort 拖垮 Unity。
+**解决**：LoomStage 加 `_sceneBuilt` 字段，CreateRoot 成功置 true，LateUpdate 顶 `if (_stage==null || !_sceneBuilt) return`。
+**教训**：FFI 入口（跨 cdylib 边界）**绝不能 panic**——`.expect`/`unwrap` 遇 None 会 abort 拖垮宿主。scene=None 等状态要优雅早返空帧。`tick_and_render` 的 `.expect("load first")` 是隐患，应改防御性早返（C# guard 是治标，Rust 侧也该加防御）。改加载生命周期（如砍 Awake 自动建 scene）时 audit 所有 tick 路径的 scene 前置假设。
+
+### 坑 103：tick 时序 rematch 在 compute_world_transforms 之后 → :active transform 当帧丢（v1 遗留，v1.4-a showcase 放大）★未修
+**症状**：nav 按钮 `:active{transform:scale(0.96)}` 缩放「时好时坏」，快击偶有反馈。`:hover{background-color}` 变色能刷但 `:active` scale 常丢。
+**根因**：`tick_and_render` 顺序（stage.rs）= solve → process → scroll → **compute_world_transforms(456)** → **rematch_pseudo_classes(459)** → build(464)。rematch 把 `:active` 的 transform 写进 `node.style.transform`，但 compute 本帧已用**旧** transform 算完 world_matrix → build 读到无 scale 的 world → hash 不变 → emit Unchanged → scale 本帧不可见。此时序是 **v1d.3/v1d.5（d7e5118/462af5a）定的，v1 遗留 bug**，非 v1.4-a 引入——v1.4-a showcase 加了大量 nav 按钮伪类才暴露（此前按钮少没察觉）。**外部 AI 诊断误归因 v1.4-a（91e09fa/3ac7a92），git -S 证伪**。
+**附带更深问题（诊断漏）**：`rematch_pseudo_classes` 返回 `any_layout_dirty`（伪类改 taffy 布局属性如 border-width/width/padding 时 true），但 tick line 459 **忽略返回值** → `:hover{border:1px}` 改 border-width（进 taffy）当帧不重 solve，布局变化延迟/丢失。showcase nav `:hover` 恰好改 border。
+**解决方向**（待定，compact 后讨论）：compute 移到 rematch 之后修 transform 层；但 rematch 改 taffy 布局属性需重 solve（当前 solve 只在 tick 开头跑一次）——完整修复要重想 tick 时序（伪类改布局属性要不要当帧 solve）。诊断的"compute 挪 2 行"只修 transform，不修 layout_dirty 丢弃。
+**教训**：伪类 rematch 改的 style 跨三层——transform（compute 读）/ taffy_style（solve 读）/ colors（build 读）。tick 时序必须保证：rematch 在 compute + build 之前（渲染层生效），且 rematch 的 layout_dirty 要能触发重 solve（布局层生效）。当前架构 solve 在最前、rematch 在最后 + 丢 layout_dirty = 伪类改布局属性根本不生效。★是 CLAUDE.md「所有布局帧末一致」不变量与「伪类每帧 rematch」的时序冲突，需系统重构。
+
+### 坑 104：SpriteResolver 缓存 miss 永久化 → atlas 后来 pack 好也不重查（v1.4-a T8）
+**症状**：图片白块。诊断主因是 atlas 空包（folder packable + m_PackedSprites 全空，Unity 6 folder packable 失效），但即使 pack 好，运行时可能仍白。
+**根因**：`SpriteResolver.GetSprite` 缓存 miss（`_cache[path] = found ?? _missingSprite`，line 92-93）——首次查 miss（atlas 未 pack/时机晚）→ null 被永久缓存 → 后续即使 atlas pack 好也不重查（除非 ClearCache）。与 atlas 空包正交，诊断没提。
+**解决**（待定）：miss 不缓存，或 atlas pack/注册变化时 ClearCache。atlas 空包本身是 Unity asset 设置问题（packables 改逐 Sprite + Pack Preview + Include in Build），家里机改 asset 可验主因。
+**教训**：查询缓存别缓存 miss（除非确定源不变）——运行时资源（atlas pack 时机、异步加载）可能后到，缓存 miss 会永久遮蔽。B2 双因：atlas 空包（即时病因，asset 设置）+ 缓存 miss 永久化（潜伏，代码）。
+
+### v1.4-a 验收诊断方法论（外部 AI 诊断的 3 处误判，本会话 git 历史核实纠正）
+v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这次 SDD 的完整改动上下文 + git -S/log 追溯」核实，纠正 3 处：
+1. **B1 :active 时序**：诊断归 v1.4-a 改动域 → 实为 v1d.3/v1d.5 **v1 遗留**（`git log -S compute_world_transforms` 证），showcase 多按钮才暴露。且诊断漏了 rematch layout_dirty 丢弃的更深问题（坑 103）。
+2. **B4 文字乱**：诊断说「既有 bug 放大」→ **对**（`git log 7a01d77..HEAD -- TextRasterizer.cs text/layout.rs` 为空，v1.4-a 没碰 text 路径）。
+3. **B2 图白块**：诊断说 atlas 空包 → 即时病因对，但漏了 SpriteResolver 缓存 miss 永久化（坑 104）。
+**教训**：bug 归因（哪个改动引入）用 `git log -S/-G <关键代码>` + `git log <base>..HEAD -- <文件>` 直接证，别靠"最近改过这块"推论。有当次改动上下文的人比只读最终代码的诊断者更能准确归因——「这次引入 vs 既有放大」区分决定修复策略（既有 bug 放大 = 补既有短板，非回滚本次改动）。

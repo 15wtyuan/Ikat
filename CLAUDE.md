@@ -50,6 +50,7 @@ cp target/release/loomgui_ffi_c.dll loomgui_unity/Assets/Plugins/LoomGUI/loomgui
 ```
 - **拷贝时 Unity 必须关着**（它锁 .dll）。
 - **stale .dll 诊断**：PlayMode 全不渲 + Console 干净 → `md5sum target/release/loomgui_ffi_c.dll loomgui_unity/Assets/Plugins/LoomGUI/loomgui_ffi_c.dll`；不等 = stale（Rust 改了 blob/ABI，.dll 没换）。
+- **改 FFI 签名后 push 前自查 dll 导出**：公司机本地缓存的旧 dll + gitignored bindings 会让公司机"能跑"却 commit 了旧 dll（坑 100）——改 FFI 后 `nm/findstr` 查新符号在 dll 里再 push，否则家里机干净 pull 编译炸。
 - 入库的 `.dll` + csbindgen 生成的 `LoomGUIBindings.cs` 在 `loomgui_unity/Assets/Plugins/LoomGUI/`（`**/Plugins/**/*.dll` 和 bindings .cs 是 gitignore 白名单例外；其余 native 产物一律忽略）。
 - Unity 6.5，URP。打开 `loomgui_unity/`，PlayMode 从 `StreamingAssets/` 加载 `.pkg.bin`。
 
@@ -82,7 +83,7 @@ HTML/CSS DSL → 打包器（构建期；复用核心 parse/style）
 - **代际 NodeId**：`NodeId(pub u32)`（高 20bit index + 低 12bit gen），FFI/C# 透明不透明句柄；`remove_node` gen++ 让旧句柄自动失效。内部用 `SlotMap<DefaultKey, Node>` 桥接（slotmap 的 64-bit key 装不下 u32，见 `scene/node.rs`）。
 - **单一动画时钟**：`TweenManager::update(dt)` 是唯一时钟。Controller/Gear/Transition 都不自驱——全往它提交/kill tween。ScrollPane 物理是**例外**（自维护 tween，绝不用 GTween——content 异步变化时 GTween 的固定 end 会跳变）。
 
-**FFI 契约**（§13.3）：每帧 Rust 产出一个 SOA 公共头（渲染节点公共字段，当前 18 列）+ 按类型分区的扁平 arena（mesh_arena、text_arena）。C# 在 tick 内原子拷贝（拷贝非 pin），Rust 下帧 reset。`Unchanged` payload 变体 = 本帧该节点不 dirty，不进 arena，后端不动其镜像。C# 用 `Span<byte>` + `BinaryPrimitives` 读——**禁 `Marshal.PtrToStructure`**（IL2CPP struct 对齐坑），**禁跨 FFI 裸指针**。IL2CPP：回调必须 `static` + `[MonoPInvokeCallback]`。
+**FFI 契约**（§13.3）：每帧 Rust 产出一个 SOA 公共头（渲染节点公共字段，当前 18 列）+ 按类型分区的扁平 arena（mesh_arena、text_arena）。C# 在 tick 内原子拷贝（拷贝非 pin），Rust 下帧 reset。`Unchanged` payload 变体 = 本帧该节点不 dirty，不进 arena，后端不动其镜像。C# 用 `Span<byte>` + `BinaryPrimitives` 读——**禁 `Marshal.PtrToStructure`**（IL2CPP struct 对齐坑），**禁跨 FFI 裸指针**。IL2CPP：回调必须 `static` + `[MonoPInvokeCallback]`。**FFI 入口绝不 panic**：cdylib 里 `.expect`/`unwrap` 遇 None 会 non-unwinding abort 拖垮宿主进程（Unity 闪退）——scene=None 等状态优雅早返空帧，别 expect（坑 102）。
 
 ## 围栏（Fence）——单一真相源
 
@@ -136,4 +137,5 @@ csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件�
 - 坑 10 stale .dll、坑 66 改 parse-time 必重打 pkg、坑 41/43 跨 crate 签名变更漏改
 - 坑 34 `#[repr(u8)]`、坑 35 csbindgen struct 手补镜像、坑 39 borrow_events out_len 是 count 非字节
 - 坑 57 围栏外标签硬挡/属性静默死 CSS、坑 94 l-container 假自定义元素
+- 坑 102 cdylib FFI 入口 panic 拖垮宿主、坑 103 tick 时序 rematch 在 compute/solve 后致伪类改 transform/布局属性丢（★v1 遗留待重构）
 - 坑 54 fgui v2 非 v²、坑 79 shader tex×vcol 非 CSS 合成
