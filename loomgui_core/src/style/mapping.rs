@@ -555,6 +555,41 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.transform = parse_transform(value);
             true
         }
+        "position" => {
+            // v1.4-b：absolute 围栏内（脱离流）；relative 显式；fixed/sticky 围栏外静默忽略。
+            match value.trim() {
+                "absolute" => { ts.position = taffy::style::Position::Absolute; true }
+                "relative" => { ts.position = taffy::style::Position::Relative; true }
+                _ => false,  // fixed/sticky/其他 → 围栏外
+            }
+        }
+        "top" | "right" | "bottom" | "left" => {
+            // v1.4-b：inset 四边。auto 保持默认（不写）；px 写 Length。
+            if let Some(px) = parse_px(value) {
+                let lp = taffy::style::LengthPercentageAuto::Length(px);
+                match prop {
+                    "top" => ts.inset.top = lp,
+                    "right" => ts.inset.right = lp,
+                    "bottom" => ts.inset.bottom = lp,
+                    "left" => ts.inset.left = lp,
+                    _ => unreachable!(),
+                }
+                true
+            } else if value.trim() == "auto" {
+                // auto 显式置回默认（覆盖之前的 px 值）
+                let lp = taffy::style::LengthPercentageAuto::Auto;
+                match prop {
+                    "top" => ts.inset.top = lp,
+                    "right" => ts.inset.right = lp,
+                    "bottom" => ts.inset.bottom = lp,
+                    "left" => ts.inset.left = lp,
+                    _ => unreachable!(),
+                }
+                true
+            } else {
+                false  // 非法值（% 等围栏外）静默忽略
+            }
+        }
         _ => false, // 装饰属性静默忽略
     }
 }
