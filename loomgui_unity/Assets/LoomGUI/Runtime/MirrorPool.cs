@@ -105,10 +105,10 @@ namespace LoomGUI
                 if (!pool.TryGetValue(poolKey, out var ro))
                 {
                     ro = NewRenderObj(root);
-                    ro.LastNodeId = id;
                     pool[poolKey] = ro;
                     level = 2; // 强制 FULL
                 }
+                ro.LastNodeId = id; // v1.4-b：新建 + 复用均更新（slot 换绑时 node_id 变）
                 ro.Stale = false;
                 ro.IsText = kind == 2;
 
