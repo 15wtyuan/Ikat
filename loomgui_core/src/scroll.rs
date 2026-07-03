@@ -95,8 +95,8 @@ pub struct ScrollPaneState {
 /// 每节点滚动状态表（`HashMap<NodeId, ScrollPaneState>`）。仅滚动容器 ensure 后有值。
 /// transient——不进 pkg（同 `anim` / `world_transforms`）。
 ///
-/// **T3 校准**：原 `Vec<Option<ScrollPaneState>>`（按 id.index() 索引）改 HashMap（同 AnimTable，
-/// 见 node.rs AnimTable doc：slotmap Key 是 unsafe trait + KeyData 64bit 与 NodeId 32bit 不匹配，
+/// 用 `HashMap<NodeId, ScrollPaneState>` 而非 `Vec<Option<...>>`（按 id.index() 索引），同 AnimTable
+/// （见 node.rs AnimTable doc：slotmap Key 是 unsafe trait + KeyData 64bit 与 NodeId 32bit 不匹配，
 /// NodeId 不能直接当 SecondaryMap Key）。
 #[derive(Debug, Clone, Default)]
 pub struct ScrollTable(pub std::collections::HashMap<NodeId, ScrollPaneState>);
@@ -738,7 +738,7 @@ mod tests {
 
     #[test]
     fn scrolltable_hashmap_get_mut_ensure_clear() {
-        // ScrollTable 用 HashMap<NodeId, ScrollPaneState>（T3）。NodeId 已 impl Hash+Eq，
+        // ScrollTable 用 HashMap<NodeId, ScrollPaneState>。NodeId 已 impl Hash+Eq，
         // 不依赖 slotmap 主表存不存在，故此单元测试可不经 Scene 直接造字面量 NodeId。
         let mk = |idx: u32| NodeId((idx << 12) | 1);
         let mut t = ScrollTable::default();
@@ -776,7 +776,7 @@ mod tests {
         let root0 = scroll_container_id(&s);
         refresh_content_sizes(&mut s);
         let st = s.scroll.get(root0).unwrap();
-        // 首次：原 default (0,0) → (40,80) → dirty true
+        // 首次：default (0,0) → (40,80) → dirty true
         assert!(st.content_size_dirty, "首次填入非零 content → dirty");
         // 再 refresh 一次（content 不变）→ dirty false
         refresh_content_sizes(&mut s);
@@ -921,7 +921,7 @@ mod tests {
     fn set_pos_snap_when_not_animated() {
         let mut st = ScrollPaneState::default();
         st.overlap = (0.0, 100.0);
-        st.tweening = 2; // 原有 tween 进行中
+        st.tweening = 2; // 已有 tween 进行中
         st.set_pos((0.0, 50.0), false);
         assert_eq!(st.scroll_pos.1, 50.0, "snap 直接到位");
         assert_eq!(st.tweening, 0, "animated=false tweening 归零");

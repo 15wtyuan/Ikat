@@ -70,9 +70,8 @@ pub extern "C" fn loomgui_stage_free(h: *mut StageHandle) {
 /// **parse-gated：**本函数走核心 HTML/CSS 解析路径，`--no-default-features` 关掉 parse 时不存在。
 /// 包加载路径走 `loomgui_stage_load_package`（常驻，不 gate）。
 ///
-/// v1.4-a T4：`Stage::load_inline` 已砍（D12）。本 FFI 暂保留（T7 决定是否砍/改），
-/// 内部直接调 parse_html + resolve_styles + build_scene（同旧 load_inline 逻辑）。
-/// textures/atlases 已砍，不涉及纹理注册。
+/// 内部直接调 parse_html + resolve_styles + build_scene。
+/// 不涉及纹理注册（核心不知图集）。
 #[cfg(feature = "parse")]
 #[no_mangle]
 pub extern "C" fn loomgui_stage_load_html(
@@ -96,7 +95,7 @@ pub extern "C" fn loomgui_stage_load_html(
         Ok(s) => s,
         Err(_) => return -1,
     };
-    // v1.4-a T4：load_inline 已砍，直接走 parse → resolve → build_scene。
+    // 直接走 parse → resolve → build_scene。
     let tree = match loomgui_core::parse::dom::parse_html(html) {
         Ok(t) => t,
         Err(_) => return -1,
@@ -121,7 +120,7 @@ pub extern "C" fn loomgui_stage_load_html(
 /// **常驻（不 gate）：**包格式是 runtime 的稳定入口，不依赖 parse feature——
 /// `--no-default-features` 构建的 .dll 仍有本函数（Unity 用 default 带 parse 的 dev .dll）。
 ///
-/// v1.4-a T7：FFI 签名加 name 参数（对齐 T4 `Stage::load_package(name, bytes)`）。
+/// FFI 签名带 name 参数（对齐 `Stage::load_package(name, bytes)`）。
 /// load_package 只进资源池不建 scene——Unity 侧需先 create_root 建 scene 再 instantiate 建内容。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_load_package(
@@ -147,7 +146,7 @@ pub extern "C" fn loomgui_stage_load_package(
 /// pkg/comp = UTF-8 字节（指针+len）。失败返 0xFFFF_FFFF（INVALID，同 create_root 失败语义）。
 /// scene 必须已存在（create_root 先建），否则 Err→sentinel。null 句柄 → sentinel。
 ///
-/// **常驻（不 gate）。**v1.4-a T7：包装 T5 `Stage::instantiate(pkg, comp)`（spec §4.2/§4.4）。
+/// **常驻（不 gate）。**包装 `Stage::instantiate(pkg, comp)`（spec §4.2/§4.4）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_instantiate(
     h: *mut StageHandle,
@@ -611,8 +610,8 @@ pub extern "C" fn loomgui_stage_clear_anim_prop(h: *mut StageHandle, node_id: u3
     }
 }
 
-// ===== T7 动态树 API FFI（§7.2）：create_root/create_node/append_child/insert_before/
-// remove_child/remove_node/set_text/set_src/set_style。转调 Stage 方法（T5/T6）。
+// ===== 动态树 API FFI（§7.2）：create_root/create_node/append_child/insert_before/
+// remove_child/remove_node/set_text/set_src/set_style。转调 Stage 方法。
 // 错误语义：create_root/create_node 返 u32 NodeId（0xFFFF_FFFF = 失败）；
 // 其余返 i32（0=ok，-1=err）。null 句柄 → 失败/sentinel（不 panic）。
 
@@ -718,7 +717,7 @@ pub extern "C" fn loomgui_stage_remove_child(h: *mut StageHandle, parent: u32, c
 }
 
 /// 删节点（递归删子 + 联动清 anim/scroll/tween + slotmap remove）。
-/// 旧 NodeId 此后失效（gen++）。无 scene / 已删节点 → no-op。返 0（恒成功，no-op 语义）。
+/// 该 NodeId 句柄此后失效（gen++）。无 scene / 越界 → no-op。返 0（恒成功，no-op 语义）。
 /// null 句柄 → 0（no-op，不 panic）。
 ///
 /// **常驻（不 gate）。**
@@ -795,7 +794,7 @@ mod tests {
     use std::ffi::CStr;
 
     #[test]
-    fn version_returns_c_string_v1d5() {
+    fn version_returns_c_string() {
         unsafe {
             let s = CStr::from_ptr(loomgui_version() as *const i8);
             assert_eq!(s.to_str().unwrap(), "v1e");
@@ -814,7 +813,7 @@ mod tests {
         let html = b"<div class=\"b\"></div>";
         let css = b".b{width:100px;height:50px;}";
         loomgui_stage_load_html(h, html.as_ptr(), html.len(), css.as_ptr(), css.len());
-        // 经 slotmap 分配的真实根 NodeId（v1.3+ 动态树：root_id 非 0，是 idx<<12|gen）。
+        // 经 slotmap 分配的真实根 NodeId（动态树：root_id 非 0，是 idx<<12|gen）。
         // 传 node_id=0 会因 scene.get(NodeId(0)) 悬空 → update 跳过 → 无 complete 事件。
         let root_id = unsafe { (*h).stage.scene.as_ref().unwrap().roots[0].0 };
         let start = [0.0f32; 4];
@@ -839,7 +838,7 @@ mod abi_tests {
     use super::*;
     use std::ffi::CString;
 
-    /// T7 FFI 测试辅助：手搓单组件 pkg（不走 parse），组件名由参数指定。
+    /// FFI 测试辅助：手搓单组件 pkg（不走 parse），组件名由参数指定。
     /// 组件 = 单 Container 根（无子）。返回 write_package 字节，可直接喂 load_package。
     fn make_test_pkg_bytes(component: &str) -> Vec<u8> {
         use loomgui_core::asset::{PackageInput, TemplateNode};
@@ -874,7 +873,7 @@ mod abi_tests {
         (c, len)
     }
 
-    /// T7 Step 1：load_package FFI 带 name 参数（对齐 T4 Stage::load_package(name, bytes)）。
+    /// load_package FFI 带 name 参数（对齐 Stage::load_package(name, bytes)）。
     #[test]
     fn load_package_ffi_takes_name() {
         let (fp, fplen) = font_path();
@@ -893,7 +892,7 @@ mod abi_tests {
         loomgui_stage_free(h);
     }
 
-    /// T7 Step 1：instantiate FFI 返有效 NodeId（非 INVALID 0xFFFF_FFFF）。
+    /// instantiate FFI 返有效 NodeId（非 INVALID 0xFFFF_FFFF）。
     /// 流程：create_root 建 scene → load_package("bag") → instantiate("bag","comp1") → NodeId。
     #[test]
     fn instantiate_ffi_returns_nodeid() {
@@ -949,7 +948,7 @@ mod abi_tests {
     }
 
     /// load_package FFI：手搓 pkg → load_package(name) → create_root → instantiate → append_child → tick → blob。
-    /// 与 load_html 路径解耦（parse feature off 时仍可用）。v1.4-a T7：改用 instantiate 建 scene 内容。
+    /// 与 load_html 路径解耦（parse feature off 时仍可用）。用 instantiate 建 scene 内容。
     #[test]
     fn load_package_builds_blob_from_package() {
         let (fp, fplen) = font_path();
@@ -1007,7 +1006,7 @@ mod abi_tests {
         let css = std::ffi::CString::new(r#".btn { width: 100px; height: 50px; }"#).unwrap();
         loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.as_bytes().len(), css.as_ptr() as *const u8, css.as_bytes().len());
         // warmup tick：compute_world_transforms 在 process/scroll 后跑，hit_test 读上帧 world_transforms
-        // （1 帧延迟语义，T4）。首帧 world_transforms 空 → 首帧 hit_test 全 None，故输入前先 warmup。
+        // （1 帧延迟语义）。首帧 world_transforms 空 → 首帧 hit_test 全 None，故输入前先 warmup。
         loomgui_stage_tick(h, 0.0);
         // set_input：Move 到按钮 (50,25)
         let ev = PointerEvent { kind: PointerKind::Move, x: 50.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 };
@@ -1045,7 +1044,7 @@ mod abi_tests {
 
     /// is_pointer_on_ui 契约：create_root 建空 scene（无子）→ 命中根 → false（根不算 UI）。
     /// 覆盖 is_pointer_on_ui 在无 parse feature 路径下也可用（create_root 常驻）。
-    /// v1.4-a T7：改用 create_root 建 scene（取代旧 load_package 建 scene 路径）。
+    /// 用 create_root 建 scene。
     #[test]
     fn is_pointer_on_ui_true_on_hit_false_on_miss() {
         let (fp, fplen) = font_path();
@@ -1081,7 +1080,7 @@ mod abi_tests {
         let html = std::ffi::CString::new(r#"<div class="root"><button class="btn">OK</button></div>"#).unwrap();
         let css = std::ffi::CString::new(r#".btn { width: 100px; height: 50px; }"#).unwrap();
         loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.as_bytes().len(), css.as_ptr() as *const u8, css.as_bytes().len());
-        // warmup tick：hit_test 读上帧 world_transforms（1 帧延迟，T4），输入前先 warmup。
+        // warmup tick：hit_test 读上帧 world_transforms（1 帧延迟），输入前先 warmup。
         loomgui_stage_tick(h, 0.0);
         // 触摸 touch_id=3 Down 在 btn (50,25)
         let ev = PointerEvent { kind: PointerKind::Down, x: 50.0, y: 25.0, button: 0, pad: [0, 0], touch_id: 3 };
@@ -1165,7 +1164,7 @@ mod abi_tests {
     }
 
     /// node_parent 契约：create_root + instantiate + append_child → child.parent==root；
-    /// root.parent==sentinel；OOB==sentinel。v1.4-a T7：改用 create_root + instantiate 路径。
+    /// root.parent==sentinel；OOB==sentinel。用 create_root + instantiate 路径。
     #[test]
     fn node_parent_returns_chain_and_sentinel() {
         let (fp, fplen) = font_path();
@@ -1188,7 +1187,7 @@ mod abi_tests {
 
     /// find_node_by_id round-trip：手搓包（组件含 id="ok" 节点）→ load_package → create_root →
     /// instantiate → append_child → find "ok" 返节点 NodeId；无匹配 → sentinel。
-    /// v1.4-a T7：改用 load_package + instantiate 路径（取代旧 load_package 建 scene）。
+    /// 用 load_package + instantiate 路径。
     #[test]
     fn find_node_by_id_round_trip() {
         use loomgui_core::asset::{PackageInput, TemplateNode};
@@ -1233,15 +1232,6 @@ mod abi_tests {
         };
         assert_eq!(miss, 0xFFFF_FFFF, "无匹配 → sentinel");
         loomgui_stage_free(h);
-    }
-
-    /// version 字符串 == "v1e"。
-    #[test]
-    fn version_is_v1d_5() {
-        let p = loomgui_version();
-        let len = (0..).take_while(|&i| unsafe { *p.add(i) != 0 }).count();
-        let s = std::str::from_utf8(unsafe { std::slice::from_raw_parts(p, len) }).unwrap();
-        assert_eq!(s, "v1e");
     }
 
     /// version 串 = "v1e"。
@@ -1309,7 +1299,7 @@ mod abi_tests {
         assert_eq!(loomgui_core::input::EVT_LONG_PRESS, 9);
         // Down@btn + Move dx=5>mouse阈值2 → DragStart
         // warmup tick：compute_world_transforms 在 process/scroll 后跑，hit_test 读上帧 world_transforms
-        // （1 帧延迟语义，T4）。首帧 world_transforms 空 → 首帧 hit_test 全 None，故输入前先 warmup。
+        // （1 帧延迟语义）。首帧 world_transforms 空 → 首帧 hit_test 全 None，故输入前先 warmup。
         loomgui_stage_tick(h, 0.0);
         loomgui_stage_set_input(h, [
             PointerEvent { kind: PointerKind::Down, x: 50.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 },
@@ -1334,7 +1324,7 @@ mod abi_tests {
         let html = b"<button class=\"btn\">OK</button>";
         let css = b".btn{width:100px;height:50px;}";
         loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.len(), css.as_ptr() as *const u8, css.len());
-        // warmup tick：hit_test 读上帧 world_transforms（1 帧延迟，T4），输入前先 warmup。
+        // warmup tick：hit_test 读上帧 world_transforms（1 帧延迟），输入前先 warmup。
         loomgui_stage_tick(h, 0.0);
         // frame1: Down@btn（tick dt=0）
         loomgui_stage_set_input(h, [PointerEvent { kind: PointerKind::Down, x: 50.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }].as_ptr(), 1);
@@ -1361,7 +1351,7 @@ mod abi_tests {
 
     /// EVT 常量值锁（12/13/14/15）。
     #[test]
-    fn evt_constants_v1d2() {
+    fn evt_constants() {
         assert_eq!(loomgui_core::input::EVT_KEY_DOWN, 12);
         assert_eq!(loomgui_core::input::EVT_KEY_UP, 13);
         assert_eq!(loomgui_core::input::EVT_FOCUS_IN, 14);
@@ -1380,7 +1370,7 @@ mod abi_tests {
         let html = b"<button class=\"btn\" tabindex=\"0\">OK</button>";
         let css = b".btn{width:100px;height:50px;}";
         loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.len(), css.as_ptr() as *const u8, css.len());
-        // warmup tick：hit_test 读上帧 world_transforms（1 帧延迟，T4），输入前先 warmup。
+        // warmup tick：hit_test 读上帧 world_transforms（1 帧延迟），输入前先 warmup。
         loomgui_stage_tick(h, 0.0);
         // click-to-focus：Down@btn → tick → 焦点 btn
         use loomgui_core::input::{PointerEvent, PointerKind};
@@ -1566,7 +1556,7 @@ mod abi_tests {
         let html = b"<div class=\"scroll\"></div>";
         let css = b".scroll{width:200px;height:100px;overflow:scroll;}";
         loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.len(), css.as_ptr() as *const u8, css.len());
-        // fill scroll state（load_inline 后需 refresh + 手动扩 overlap）
+        // fill scroll state（load_html 后需 refresh + 手动扩 overlap）
         let handle = unsafe { &mut *h };
         let root_id = handle.stage.scene.as_ref().unwrap().roots[0];
         loomgui_core::scroll::refresh_content_sizes(handle.stage.scene.as_mut().unwrap());
@@ -1589,8 +1579,8 @@ mod abi_tests {
         assert_eq!(std::mem::size_of::<loomgui_core::scroll::WheelEvent>(), 16);
     }
 
-    /// T7 动态树 API FFI round-trip——9 函数经 FFI 调用建/改/删节点。
-    /// create_root 自动建空 scene（ensure_scene），故不再需 load_package 预建 scene。
+    /// 动态树 API FFI round-trip——9 函数经 FFI 调用建/改/删节点。
+    /// create_root 自动建空 scene（ensure_scene），无需 load_package 预建 scene。
     /// 流程：create_root(div) → create_node(button/img/span) → append_child ×3 →
     ///       set_text/set_src/set_style 改属性 → insert_before 插序 →
     ///       remove_child 摘子 → remove_node 删根。每步断言返回值契约。

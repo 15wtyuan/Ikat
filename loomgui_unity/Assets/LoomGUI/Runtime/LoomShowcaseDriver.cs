@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace LoomGUI
 {
-    // showcase driver（v1.4-a T11 重写）：layer 骨架 + web 式多页导航 + 按页 listener 清 + tips 叠加。
+    // showcase driver：layer 骨架 + web 式多页导航 + 按页 listener 清 + tips 叠加。
     //
     // 模型（spec §7.3-7.5）：
     //   Start 建 root + ui_layer（主界面层）+ tips_layer（tips 层，在上）；
@@ -32,7 +32,7 @@ namespace LoomGUI
         uint _mailOverlay = uint.MaxValue;
 
         // NativeHost 绑定的 UI 节点 NodeId（page_controls 的 model-slot）。
-        // 离开 page_controls 时须 UnbindNativeHost 摘 wrapper GO，否则 _nhm._bindings 仍持旧 NodeId
+        // 离开 page_controls 时须 UnbindNativeHost 摘 wrapper GO，否则 _nhm._bindings 仍持被删 NodeId
         // （已 RemoveNode、gen++ 失效）→ Sync 查 blob 找不到 → wrapper 停在末位、GO 视觉残留。
         // uint.MaxValue = 当前页未绑 NativeHost。
         uint _nativeBoundNode = uint.MaxValue;
@@ -149,7 +149,7 @@ namespace LoomGUI
         {
             if (_currentPage != uint.MaxValue)
             {
-                // 若离开的页绑了 NativeHost，先 Unbind 摘 wrapper GO（RemoveNode 后旧 NodeId gen++ 失效，
+                // 若离开的页绑了 NativeHost，先 Unbind 摘 wrapper GO（RemoveNode 后被删 NodeId gen++ 失效，
                 // _nhm._bindings 残留 → Sync 查不到 → wrapper 卡末位、GO 视觉残留）。
                 if (_nativeBoundNode != uint.MaxValue)
                 {
@@ -194,7 +194,7 @@ namespace LoomGUI
         }
 
         // ClearPageListeners: 遍历当前页注册的 listener 逐个 RemoveListener（不用 EventHandler.Clear 粗清）。
-        // 切页前调（OpenPage 里 RemoveNode 之前）。RemoveNode 后旧 NodeId 失效，listener 成悬空条目——故须先清。
+        // 切页前调（OpenPage 里 RemoveNode 之前）。RemoveNode 后被删 NodeId 失效，listener 成悬空条目——故须先清。
         void ClearPageListeners()
         {
             foreach (var kv in _pageListeners)
@@ -207,7 +207,7 @@ namespace LoomGUI
         }
 
         // === 按页订阅（SubscribePage）===
-        // switch page → 调对应 SubscribeXxx（每页一组，复用旧 driver 的 lamp/tween/dyntree 逻辑）。
+        // switch page → 调对应 SubscribeXxx（每页一组，lamp/tween/dyntree 各自的订阅逻辑）。
         // 每订阅走 AddPageListener（记进注册表），切页时批量清。
         void SubscribePage(string page)
         {
@@ -250,7 +250,7 @@ namespace LoomGUI
         }
 
         // 各页通用：back-home 按钮 → OpenPage("home")。
-        // 所有 page_*.html 都有 id="back-home"（T10 复用语义 id）。
+        // 所有 page_*.html 都有 id="back-home"（语义 id 复用）。
         void SubscribeBackHome()
         {
             uint back = _stage.FindNodeById("back-home");
@@ -303,7 +303,7 @@ namespace LoomGUI
         }
 
         // page_interact（§4 灯阵）：back-home + 各交互元素事件 + disabled + 路由。
-        // 复用旧 driver 的 SubscribeLampEvents 逻辑，改用 AddPageListener（记进注册表）。
+        // 走 AddPageListener 记进注册表（切页时批量清）。
         void SubscribeInteract()
         {
             SubscribeBackHome();
@@ -360,7 +360,7 @@ namespace LoomGUI
         void OnRoutePe(EventContext ctx) { LightLamp("route", ++_routeCount); }
 
         // page_tween（§7 动效）：back-home + tween 播放/kill/clear + complete 回调 + kill-target 旋转。
-        // 复用旧 driver 的 SubscribeTweenDemos 逻辑，改用 AddPageListener。
+        // 走 AddPageListener 记进注册表。
         void SubscribeTween()
         {
             SubscribeBackHome();
@@ -426,7 +426,7 @@ namespace LoomGUI
         void OnClear(EventContext ctx) { _stage.ClearAnim(_stage.FindNodeById("kill-target")); }
 
         // page_dyntree（§3.10）：back-home + 建/删/批量/set_style + dyn-load-mail/showcase。
-        // 复用旧 driver 的 SubscribeDynamicTree 逻辑，改用 AddPageListener + dyn-load-* 改 instantiate/remove（非切包）。
+        // 走 AddPageListener 记进注册表；dyn-load-* 用 instantiate/remove（非切包）。
         void SubscribeDynTree()
         {
             SubscribeBackHome();
@@ -527,8 +527,8 @@ namespace LoomGUI
                 : "background:#2a2f45;width:120px;height:90px;border-radius:8px");
         }
 
-        // dyn-load-mail（T10 交接）：instantiate("showcase","mail") 挂 ui_layer（叠加，非切包）。
-        // mail 是 showcase 包内的组件（T10 合进），不需 LoadPackage 切包。
+        // dyn-load-mail：instantiate("showcase","mail") 挂 ui_layer（叠加，非切包）。
+        // mail 是 showcase 包内的组件，不需 LoadPackage 切包。
         void OnDynLoadMail(EventContext ctx)
         {
             if (_mailOverlay != uint.MaxValue)

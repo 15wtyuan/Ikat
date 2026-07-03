@@ -18,15 +18,15 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     let clips = &frame.clips;
     let n = nodes.len();
     // 列名 + 每元素字节数。v9：加 reuse_key 列（u32，第 22 列）。
-    //   path_idx 与原 tex_id 同占 4B，22 列（v9 加 reuse_key）——且语义改：从「贴图 id」改「path 表索引」。
-    //   v6：加 color_matrix 列（[f32;20]，80B，第 20 列）——v1.3 ColorFilter。
+    //   path_idx 占 4B（path 表 1-based 索引，0=纯色无图），22 列（v9 加 reuse_key）。
+    //   v6：加 color_matrix 列（[f32;20]，80B，第 20 列）——ColorFilter。
     let columns: &[(&str, usize)] = &[
         ("node_id", 4), ("parent_id", 4), ("visible", 1), ("alpha", 4),
         ("sort_key", 4), ("mask_context", 4),
         ("m_a", 4), ("m_b", 4), ("m_c", 4), ("m_d", 4), ("m_tx", 4), ("m_ty", 4),
         ("payload_kind", 1), ("mesh_off", 4), ("mesh_len", 4),
         ("text_off", 4), ("text_len", 4),
-        ("path_idx", 4),   // v7：原 tex_id → path_idx（path 表 1-based 索引，0=纯色）
+        ("path_idx", 4),   // v7：path 表 1-based 索引（0=纯色无图）
         ("program", 1),
         ("color_matrix", 80),   // [f32;20] × 4 字节，第 20 列
         ("change_level", 1),    // v8：帧级变更级别（u8，0=Skip 1=Header 2=Full），第 21 列
@@ -68,7 +68,7 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     let mut col_mesh_len = Vec::<u8>::new();
     let mut col_text_off = Vec::<u8>::new();
     let mut col_text_len = Vec::<u8>::new();
-    let mut col_path_idx = Vec::<u8>::new();   // v7：原 col_tex_id → col_path_idx
+    let mut col_path_idx = Vec::<u8>::new();   // v7：path_idx 列
     let mut col_program = Vec::<u8>::new();
     let mut col_color_matrix = Vec::<u8>::new();
     let mut col_change_level = Vec::<u8>::new();
@@ -194,7 +194,7 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
         ("m_tx",&col_mtx),("m_ty",&col_mty),
         ("payload_kind",&col_kind),("mesh_off",&col_mesh_off),("mesh_len",&col_mesh_len),
         ("text_off",&col_text_off),("text_len",&col_text_len),
-        ("path_idx",&col_path_idx),   // v7：原 tex_id → path_idx
+        ("path_idx",&col_path_idx),   // v7：path 表 1-based 索引
         ("program",&col_program),
         ("color_matrix",&col_color_matrix),
         ("change_level",&col_change_level),
@@ -298,7 +298,6 @@ mod tests {
             parent_id: parent,
             visible: true,
             alpha: 1.0,
-            grayed: false,
             color_tint: [1.0; 4],
             world_matrix: transform::from_translate(x, y),
             blend: BlendMode::Normal,
@@ -320,7 +319,7 @@ mod tests {
     }
 
     /// 同 mesh_node 但可指定 image_path（验 path_idx 列 round-trip）。
-    /// v7：取代 mesh_node_with_tex。path=None → idx=0；path=Some(p) → idx>0。
+    /// path=None → idx=0；path=Some(p) → idx>0。
     fn mesh_node_with_path(id: u32, path: Option<&str>) -> RenderNode {
         let mut n = mesh_node(id, None, 0.0, 0.0, 5.0, 5.0);
         if let NodePayload::Mesh { image_path, .. } = &mut n.payload {
@@ -338,7 +337,7 @@ mod tests {
         n
     }
 
-    /// 同 mesh_node 但可指定 color_tint / alpha / vertex colors（用于 alpha 不烘焙测试，T6 后 alpha 走 _Alpha uniform）。
+    /// 同 mesh_node 但可指定 color_tint / alpha / vertex colors（用于 alpha 不烘焙测试，alpha 走 _Alpha uniform）。
     fn mesh_node_tinted(
         id: u32,
         tint: [f32; 4],
@@ -350,7 +349,6 @@ mod tests {
             parent_id: None,
             visible: true,
             alpha,
-            grayed: false,
             color_tint: tint,
             world_matrix: transform::IDENTITY,
             blend: BlendMode::Normal,
@@ -375,7 +373,7 @@ mod tests {
         let n = verts.len();
         RenderNode {
             node_id: 0, parent_id: None, visible: true, alpha: 1.0,
-            grayed: false, color_tint: [1.0; 4],
+            color_tint: [1.0; 4],
             world_matrix: transform::from_translate(tx, ty),
             blend: BlendMode::Normal, mask_context: MaskContext(0), sort_key: 0,
             change_level: ChangeLevel::Full,
@@ -468,7 +466,7 @@ mod tests {
     /// 无 Text 节点时 text_arena 空（len=0），无 clip 时 clip 表仅 4B clip_count=0，
     /// 无 image_path 时 path table 仅 4B path_count=0。
     #[test]
-    fn blob_v4_header_has_text_and_clip_arena_fields() {
+    fn blob_header_has_text_and_clip_arena_fields() {
         let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
 
         // magic + version==9。
@@ -517,7 +515,7 @@ mod tests {
     /// TestView（C# FrameBlob 的 Rust 镜像）解析 v8 blob：21 列 + 三 arena 头读回正确，
     /// 且无 Text 节点的占位语义（text_off/text_len=0、text_arena_len=0、clip_count=0）成立。
     #[test]
-    fn test_view_parses_v4_layout_and_t1_placeholders() {
+    fn test_view_parses_layout_and_text_placeholders() {
         let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
         let view = TestView::parse(&blob);
         assert_eq!(view.text_off(0), 0, "text_off 占位 0");
@@ -612,7 +610,6 @@ mod tests {
             parent_id: None,
             visible: true,
             alpha: 1.0,
-            grayed: false,
             color_tint: [1.0; 4],
             world_matrix: transform::IDENTITY,
             blend: BlendMode::Normal,
@@ -744,7 +741,7 @@ mod tests {
         fn text_len(&self, i: usize) -> u32 {
             u32::from_le_bytes(self.buf[self.col_off[16] + i * 4..][0..4].try_into().unwrap())
         }
-        /// v7：第 18 列 path_idx（u32）。Mesh→path 表 1-based 索引（0=纯色无图），Text=0（Unchanged 变体已删，kind 只剩 1=Mesh/2=Text）。
+        /// v7：第 18 列 path_idx（u32）。Mesh→path 表 1-based 索引（0=纯色无图），Text=0（kind 只剩 1=Mesh/2=Text）。
         fn path_idx(&self, i: usize) -> u32 {
             u32::from_le_bytes(self.buf[self.col_off[17] + i * 4..][0..4].try_into().unwrap())
         }
@@ -913,7 +910,7 @@ mod tests {
                    (50.0, 50.0, 0.0, 0.0));
         // clip 表段长度 = 4(count) + 2×20(entry) = 44。
         assert_eq!(view.clip_table_len, 44, "clip_table_len = 4 + count×20");
-        // v7：clip_table 后跟 path_table（不再是 blob 末段）；path_table 才是末段。
+        // v7：path_table 紧跟 clip_table 之后，是 blob 末段。
         //   本测试 mesh 无 image_path → path_table 仅 4B（path_count=0）。
         assert_eq!(view.path_table_off, view.clip_table_off + view.clip_table_len as usize,
             "path_table 紧跟 clip_table");
@@ -934,7 +931,7 @@ mod tests {
 
     /// merged FrameData（transform=0、alpha=1、多 quad 拼接）经 build_blob，
     /// re-base 减 0 = 顶点保持绝对；alpha×1 = 不变。blob 列结构零改（spec §9 硬契约）。
-    /// merged 由 merge_meshes 产：transform/alpha 已置 (0, 1)。blob 不再烤 alpha（T6 剥离），
+    /// merged 由 merge_meshes 产：transform/alpha 已置 (0, 1)。blob 不烤 alpha（走 _Alpha uniform），
     /// merged.alpha 走 _Alpha uniform。v - transform(=0) → 顶点保持绝对。
     #[test]
     fn merged_mesh_blob_keeps_absolute_verts_and_no_double_alpha() {
@@ -944,7 +941,6 @@ mod tests {
             parent_id: None,
             visible: true,
             alpha: 1.0,
-            grayed: false,
             color_tint: [1.0; 4],
             world_matrix: transform::IDENTITY,
             blend: BlendMode::Normal,
@@ -998,12 +994,12 @@ mod tests {
             assert!((a - 1.0).abs() < 1e-6, "第一组 colors.a=1.0");
         }
     }
-    /// blob v4 world_matrix round-trip——纯平移 + 剪切节点均写入 6 矩阵列，
+    /// blob world_matrix round-trip——纯平移 + 剪切节点均写入 6 矩阵列，
     /// VERSION=9（v9：加 reuse_key 列），blob len > 100。
     #[test]
-    fn blob_v4_world_matrix_roundtrip() {
+    fn blob_world_matrix_roundtrip() {
         let mk = |wm: transform::Affine2| RenderNode {
-            node_id: 0, parent_id: None, visible: true, alpha: 1.0, grayed: false,
+            node_id: 0, parent_id: None, visible: true, alpha: 1.0,
             color_tint: [1.0; 4], world_matrix: wm, blend: BlendMode::Normal,
             mask_context: MaskContext(0), sort_key: 0,
             change_level: ChangeLevel::Full,
@@ -1054,7 +1050,7 @@ mod tests {
             RenderNode {
                 node_id: 1,
                 parent_id: None, visible: true, alpha: 1.0,
-                grayed: false, color_tint: [1.0; 4],
+                color_tint: [1.0; 4],
                 world_matrix: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
                 mask_context: MaskContext(0), sort_key: 0,
                 blend: BlendMode::Normal,
@@ -1106,7 +1102,7 @@ mod tests {
     fn blob_v9_round_trips_reuse_key() {
         let rn = RenderNode {
             node_id: 7, parent_id: None, visible: true, alpha: 1.0,
-            grayed: false, color_tint: [1.0; 4],
+            color_tint: [1.0; 4],
             world_matrix: transform::IDENTITY,
             blend: BlendMode::Normal, mask_context: MaskContext(0), sort_key: 0,
             change_level: ChangeLevel::Full,

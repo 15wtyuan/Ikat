@@ -11,7 +11,7 @@ use slotmap::{DefaultKey, Key, KeyData, SlotMap};
 
 /// 不透明节点句柄。对外 u32（FFI/C# 透明），内部 = 高 20 bit index + 低 12 bit generation。
 /// sentinel 0xFFFF_FFFF = INVALID。index 用于并行数组（anim/scroll/world_transforms）索引，
-/// gen 由 slotmap 校验悬空。详见 v1.3+ 动态树 spec §3。
+/// gen 由 slotmap 校验悬空。详见动态树 spec §3。
 ///
 /// **与 slotmap 的衔接**（spec §3.2 实现期校准结果）：
 /// slotmap 1.1.1 的 `new_key_type!` 生成的 Key 内部是 `KeyData { idx: u32, version: NonZeroU32 }`
@@ -26,7 +26,7 @@ use slotmap::{DefaultKey, Key, KeyData, SlotMap};
 pub struct NodeId(pub u32);
 
 impl NodeId {
-    /// 无效句柄 sentinel（同 v1 FFI None/0 约定）。
+    /// 无效句柄 sentinel（同 FFI None/0 约定）。
     pub const INVALID: NodeId = NodeId(0xFFFF_FFFF);
     pub fn is_valid(self) -> bool {
         self.0 != 0xFFFF_FFFF
@@ -64,7 +64,7 @@ pub enum NodeKind {
     #[default]
     Container,
     Text { content: String },
-    /// src 原样存（不加载），render 层映射到占位 tex_id。
+    /// src 原样存（不加载），render 层映射到 image_path（同 path 的图可合批）。
     /// src 取自元素的 `src` 属性（`<img src="...">`），不是文本内容。
     Image { src: String },
     Button,
@@ -173,14 +173,14 @@ impl NodeAnim {
 
 /// 每节点动画 override 表（HashMap<NodeId, NodeAnim>）。运行时态，不进 pkg（同 world_transforms）。
 ///
-/// **T3 校准**：brief 原定 `SecondaryMap<NodeId, NodeAnim>`，但 slotmap 1.1 的 `Key` 是
+/// **为何用 HashMap 而非 SecondaryMap**：slotmap 1.1 的 `Key` 是
 /// `unsafe` trait（依赖 `KeyData` 内部不变量，slotmap 强烈建议用 `new_key_type!` 而非手 impl）；
 /// 且 `KeyData` 内部是 `idx:u32 + version:NonZeroU32`（64 bit），与 NodeId 的 32 bit 应用句柄
 /// 布局不匹配——手 `unsafe impl Key` 要把 20/12 编码强行映射到 32/32，语义错位比 HashMap 危险。
-/// 故 `SecondaryMap<NodeId, _>` 不可行。T2 的 DefaultKey 桥接使 anim/scroll 的访问句柄是 NodeId，
+/// 故 `SecondaryMap<NodeId, _>` 不可行。DefaultKey 桥接使 anim/scroll 的访问句柄是 NodeId，
 /// 若用 `SecondaryMap<DefaultKey, _>` 则每次访问要 `NodeId::to_key()` 转换，且 SecondaryMap 不
 /// 自动跟踪主 SlotMap 的删除（删节点须手动 remove，否则残留）。改用 `HashMap<NodeId, NodeAnim>`：
-/// NodeId 已 derive Hash+Eq（T1），零 trait 限制、零转换、悬空安全（删节点联动 remove，否则
+/// NodeId 已 derive Hash+Eq，零 trait 限制、零转换、悬空安全（删节点联动 remove，否则
 /// 残留条目但 get 用 live NodeId 查不到）。查询 O(1) HashMap，u32 hash 快，节点数千量级可接受。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct AnimTable(pub std::collections::HashMap<NodeId, NodeAnim>);
@@ -219,7 +219,7 @@ impl AnimTable {
 #[derive(Debug, Clone)]
 pub struct Scene {
     pub roots: Vec<NodeId>,
-    /// 节点存储。Vec<Node> → SlotMap<DefaultKey, Node>（v1.3+ 动态树 spec §4.1）。
+    /// 节点存储。Vec<Node> → SlotMap<DefaultKey, Node>（动态树 spec §4.1）。
     /// 应用层用 NodeId(u32) 句柄（FFI/C# 透明），经 `Scene::key_for`/`NodeId::to_key` 桥接到 DefaultKey。
     pub nodes: SlotMap<DefaultKey, Node>,
     /// 运行时伪类重匹配规则表。默认空；包加载填，inline 路径空。
@@ -308,7 +308,7 @@ impl Scene {
             }
         }
         // text_layouts 随槽位容量对齐（None 占位，layout::solve 填实际 TextLayout）。
-        // **容量而非存活数**（T5）：按 id.index() 索引，remove_node 后 idx 不变但存活数减，
+        // **容量而非存活数**：按 id.index() 索引，remove_node 后 idx 不变但存活数减，
         // 按 len 分配会越界。capacity+1（1 基索引，idx 0 占位）。
         scene.text_layouts = vec![None; scene.nodes.capacity() + 1];
         scene
@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn node_id_from_key_to_key_roundtrip() {
-        // 验证 NodeId ↔ DefaultKey 桥接 roundtrip（version=1，T2 无删除）
+        // 验证 NodeId ↔ DefaultKey 桥接 roundtrip（version=1，无删除）
         let entries: Vec<(Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>)> = vec![
             (None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None),
         ];
@@ -667,8 +667,8 @@ mod tests {
         assert!(sc.get(sc.roots[0]).unwrap().clip_rect.is_none(), "双轴 Visible → 无 clip slot");
     }
 
-    /// AnimTable 用 HashMap<NodeId, NodeAnim>（T3）。测试一律用 slotmap 分配的真实 NodeId
-    /// + 生产路径写法（ensure(id)），不用字面量 NodeId(N) 撑表（reviewer Minor-3）。
+    /// AnimTable 用 HashMap<NodeId, NodeAnim>。测试一律用 slotmap 分配的真实 NodeId
+    /// + 生产路径写法（ensure(id)），不用字面量 NodeId(N) 撑表。
     fn anim_scene_one_node() -> (Scene, NodeId) {
         let sc = Scene::build(&[(None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None)]);
         let id = sc.roots[0];

@@ -8,9 +8,8 @@
 //! 不依赖系统字体（Linux CI 无 arial 会漂移）。DejaVu Sans 无 CJK glyph，
 //! 故 fixture 用 ASCII 文本；CJK 渲染需 CJK 字体策略，另测。
 //!
-//! v1.4-a T4：`Stage::load_inline` 已砍（D12）。本集成测验证 parse→render 管线，
-//! 用本地 helper `load_html_css` 直接调 parse_html + build_scene 构 scene（同旧 load_inline 逻辑）。
-//! textures/atlases 已砍，Image 走未注册 fallback（tex_id=0，T6 改 payload 带 path）。
+//! 本集成测验证 parse→render 管线，用本地 helper `load_html_css` 直接调
+//! parse_html + build_scene 构 scene。Image 走未注册 fallback（payload 带 path，无图集）。
 
 use loomgui_core::parse::css::parse_css;
 use loomgui_core::parse::dom::parse_html;
@@ -35,7 +34,7 @@ fn skip_if_no_font(font: &str) -> bool {
     false
 }
 
-/// v1.4-a T4 helper：HTML+CSS → scene（同旧 load_inline 逻辑，parse 路径保留供集成测）。
+/// helper：HTML+CSS → scene（直接调 parse 路径构 scene，供集成测）。
 fn load_html_css(stage: &mut Stage, html: &str, css: &str) {
     let tree = parse_html(html).unwrap();
     let sheet = parse_css(css).unwrap();
@@ -79,7 +78,7 @@ fn snapshot_cascade_inheritance() {
 
 /// `<img>` 渲染路径 snapshot（锁纹理路径输出）。
 /// img 有显式 CSS 尺寸 → measure 用声明值；此测只锁几何 + payload 形状
-/// （未注册 src 兜底 tex_id=0）。
+/// （未注册 src 走 fallback，payload 带 path 无图集）。
 #[cfg(feature = "parse")]
 #[test]
 fn snapshot_image_with_texture() {

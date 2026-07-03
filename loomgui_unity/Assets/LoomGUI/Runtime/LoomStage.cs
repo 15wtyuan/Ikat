@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using LoomGUI.Bindings;
 using UnityEngine;
+using UnityEngine.U2D;   // SpriteAtlas（path→Sprite 查询）
 
 namespace LoomGUI
 {
@@ -18,9 +19,9 @@ namespace LoomGUI
     /// 挂场景即跑：Awake 建 stage+pool+SpriteResolver+配置根/相机；LateUpdate 每帧
     /// tick→borrow→Marshal.Copy→FrameBlob→MirrorPool.Sync。
     ///
-    /// v1.4-a T8：包加载重构——Awake 不再自动 load 单包建 scene。业务 driver 调
+    /// 包加载模型：Awake 不自动 load 单包建 scene。业务 driver 调
     /// CreateRoot 建 scene → LoadPackage(name, bytes) 进资源池 → Instantiate(pkg, comp) 建内容。
-    /// 图片走 path→Sprite（Sprite Atlas），不再 LoadAtlas/_texMap/tex_id。
+    /// 图片走 path→Sprite（Sprite Atlas）。
     ///
     /// 设计坐标系：origin 左上、y-down，单位 design px（_designSize）。根 transform 一次做
     /// MatchWidthOrHeight 缩放 + y-flip（localScale=(sf,-sf,sf)）+ 平移到屏幕左上原点。
@@ -44,8 +45,7 @@ namespace LoomGUI
         // 图集路由：Awake 时从全局 LoomSettings（Resources.Load 自动找）建 folder→atlas 映射。
         // 不在 Inspector 手配（配置总会遗忘），配置资产由 LoomSettingsWindow 维护。
 
-        // on-screen FPS 读数。stress500 已砍（v1.4-a 改包加载模型，原内联 html fixture 无加载路径；
-        // stress 测试改用内存 pkg + instantiate）。本开关保留供 driver 手动开 FPS 显示。
+        // on-screen FPS 读数。本开关供 driver 手动开 FPS 显示。
         [SerializeField] bool _showFps;
 
         // safe-area 根 letterbox（默认 on）。on 时根 shrink-to-fit 到 Screen.safeArea，
@@ -55,14 +55,14 @@ namespace LoomGUI
         // csbindgen 生成的 Native 用类型化指针 StageHandle*（非 IntPtr）；
         // 借出长度参数是 nuint*（非 ulong*）。故本类标 unsafe 并持 StageHandle*。
         StageHandle* _stage;
-        // v1.4-a: scene 由 driver.CreateRoot 建（Awake 不再自动建，见 Awake 注释）。ExecuteAlways 下
+        // scene 由 driver.CreateRoot 建（Awake 不自动建，见 Awake 注释）。ExecuteAlways 下
         // LateUpdate 须 guard _sceneBuilt，否则 EditMode driver.Start 未跑、scene=None 时 tick →
         // Rust tick_and_render .expect("load first") panic → cdylib abort 拖垮 Unity（打开场景即闪退）。
         bool _sceneBuilt;
         MaterialManager _mm;
         MirrorPool _pool;
         NativeHostManager _nhm;
-        // v1.4-a T8：path → Sprite 查询（替代 _texMap）。MirrorPool 按 path_idx→path→GetSprite 查。
+        // path → Sprite 查询。MirrorPool 按 path_idx→path→GetSprite 查。
         SpriteResolver _sprites;
         // ArrayPool 租用（非 new）。Rent 返回 ≥len，只 copy/解析 len 字节。
         // OnDestroy 归还防泄漏。冷帧零 GC（ReadMesh per-node alloc 留观察，撞墙再上 List 复用）。
@@ -97,7 +97,7 @@ namespace LoomGUI
             return Native.loomgui_stage_is_pointer_on_ui(_stage);
         }
 
-        /// 按 CSS id 属性查节点（替代硬编码 build 序 id——auto Text 子会偏移序，不可靠）。
+        /// 按 CSS id 属性查节点（硬编码 build 序 id 不可靠——auto Text 子会偏移序）。
         /// 返 node_id；无匹配 / stage 未建 → uint.MaxValue（0xFFFF_FFFF）。
         public uint FindNodeById(string id)
         {
@@ -215,13 +215,13 @@ namespace LoomGUI
             Native.loomgui_stage_clear_anim_prop(_stage, nodeId, (uint)prop);
         }
 
-        // ===== v1.4-a T8 包加载 API（§4 load_package/instantiate）：转调 FFI（T7 csbindgen 生成）。
+        // ===== 包加载 API（§4 load_package/instantiate）：转调 FFI（csbindgen 生成）。
         // 包 = 资源池里的组件模板库；load_package 只进资源池不建 scene；instantiate 克隆子树进 scene。
         // 调用流程（业务 driver）：CreateRoot 建 scene → LoadPackage(name,bytes) 进资源池 →
         // Instantiate(pkg,comp) 建内容 → AppendChild 挂 layer。
 
         /// 加载包进 Stage 资源池（不建 scene）。多包共存（多次调，name 区分）。
-        /// name = 包名（UTF-8，对齐 T4 Stage::load_package(name, bytes)）；bytes = .pkg.bin 二进制。
+        /// name = 包名（UTF-8，对齐 Stage::load_package(name, bytes)）；bytes = .pkg.bin 二进制。
         /// 返 0=ok，-1=err（stage 未建 / native 解析失败）。包是 Rust-internal，C# 只透传 bytes（不解析）。
         public int LoadPackage(string name, byte[] bytes)
         {
@@ -247,7 +247,7 @@ namespace LoomGUI
                     _stage, pp, (nuint)pb.Length, cp, (nuint)cb.Length);
         }
 
-        // ===== 动态树 API 封装（§7.2）：转调 FFI（T7 csbindgen 生成 Native.loomgui_stage_*）。
+        // ===== 动态树 API 封装（§7.2）：转调 FFI（csbindgen 生成 Native.loomgui_stage_*）。
         // kind/css/text/src = UTF-8 字节（fixed 钉住 + 指针+len，同 FindNodeById 风格）。
         // create_root/create_node 返 uint NodeId（0xFFFF_FFFF = 失败）；其余返 int（0=ok，-1=err）。
         // 调用方：用返回的 NodeId 句柄，勿硬编码 0（slotmap idx 从 1 起 → 首节点 NodeId 非 0）。
@@ -301,7 +301,7 @@ namespace LoomGUI
         }
 
         /// 删节点（递归删子 + 联动清 anim/scroll/tween + slotmap remove）。
-        /// 旧 NodeId 此后失效（gen++）。返 0（恒成功，no-op 语义）。
+        /// 该 NodeId 此后失效（gen++）。返 0（恒成功，no-op 语义）。
         public int RemoveNode(uint node)
         {
             if (_stage == null) return 0;
@@ -339,7 +339,7 @@ namespace LoomGUI
         void Awake()
         {
             // ExecuteAlways：EditMode/Play 反复 Awake + domain reload 会让上一轮的 loom_node 镜像 GO
-            // （root 的子）成孤儿残留——旧 _pool 引用已丢、Clear 不到。开局先清 root 下所有 loom_node
+            // （root 的子）成孤儿残留——上一轮 _pool 引用已丢、Clear 不到。开局先清 root 下所有 loom_node
             // 子 GO，防累积泄漏。UI 相机是独立 GO（SetParent(null)），非 root 子，不受影响。
             for (int c = transform.childCount - 1; c >= 0; c--)
             {
@@ -366,7 +366,7 @@ namespace LoomGUI
             // _stage 创建后即 SetHandle（handler.node_parent FFI 需 StageHandle*）。
             _eventHandler.SetHandle((System.IntPtr)_stage);
 
-            // v1.4-a T8：不再自动 load 单包建 scene。业务 driver 调 CreateRoot 建 scene →
+            // 不自动 load 单包建 scene。业务 driver 调 CreateRoot 建 scene →
             // LoadPackage(name,bytes) 进资源池 → Instantiate(pkg,comp) 建内容。Awake 只建基础设施。
             var shader = Shader.Find("LoomGUI/Unlit");
             if (shader == null)
@@ -415,11 +415,6 @@ namespace LoomGUI
             Debug.LogError("[LoomStage] PlayMode/build 必须在 Inspector 指定 _font（DejaVuSans）");
 #endif
         }
-
-        // v1.4-a T8：砍 LoadHtml / LoadPackage()（private）/ LoadPackageFile / LoadAtlas /
-        // BuildStress500Fixture。包加载改走 public LoadPackage(name, bytes) + Instantiate（见上）。
-        // 图片走 path→Sprite（SpriteResolver），不再 LoadAtlas/_texMap/tex_id。
-        // stress500 fixture 随 inline 路径一起砍——stress 测试改用内存 pkg + instantiate（T11 driver）。
 
         /// <summary>
         /// on-screen FPS 读数（_showFps 为真时显示）。
@@ -568,10 +563,6 @@ namespace LoomGUI
                 byte* evPtr = Native.loomgui_stage_borrow_events(_stage, &evLen);
                 _eventHandler.DispatchPending((System.IntPtr)evPtr, (int)evLen);
             }
-
-            // [DBG-HOVER] F1 dump 整树（layout/world_matrix），定位 hover 不命中（验完删）
-            if (Input.GetKeyDown(KeyCode.F1))
-                UnityEngine.Debug.Log("[DUMP] " + DumpScene());
         }
 
         void OnDestroy()

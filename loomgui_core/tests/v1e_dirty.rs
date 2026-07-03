@@ -15,7 +15,7 @@ fn font_path() -> (String, usize) {
     (p, n)
 }
 
-/// helper：HTML+CSS → scene。
+/// HTML+CSS → scene（parse_html + build_scene）。
 fn load_html_css(stage: &mut Stage, html: &str, css: &str) {
     let tree = parse_html(html).unwrap();
     let sheet = parse_css(css).unwrap();

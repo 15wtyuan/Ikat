@@ -45,9 +45,8 @@ namespace LoomGUI.Bindings
         ///  **parse-gated：**本函数走核心 HTML/CSS 解析路径，`--no-default-features` 关掉 parse 时不存在。
         ///  包加载路径走 `loomgui_stage_load_package`（常驻，不 gate）。
         ///
-        ///  v1.4-a T4：`Stage::load_inline` 已砍（D12）。本 FFI 暂保留（T7 决定是否砍/改），
-        ///  内部直接调 parse_html + resolve_styles + build_scene（同旧 load_inline 逻辑）。
-        ///  textures/atlases 已砍，不涉及纹理注册。
+        ///  内部直接调 parse_html + resolve_styles + build_scene。
+        ///  不涉及纹理注册（核心不知图集）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_load_html", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_load_html(StageHandle* h, byte* html, nuint html_len, byte* css, nuint css_len);
@@ -59,7 +58,7 @@ namespace LoomGUI.Bindings
         ///  **常驻（不 gate）：**包格式是 runtime 的稳定入口，不依赖 parse feature——
         ///  `--no-default-features` 构建的 .dll 仍有本函数（Unity 用 default 带 parse 的 dev .dll）。
         ///
-        ///  v1.4-a T7：FFI 签名加 name 参数（对齐 T4 `Stage::load_package(name, bytes)`）。
+        ///  FFI 签名带 name 参数（对齐 `Stage::load_package(name, bytes)`）。
         ///  load_package 只进资源池不建 scene——Unity 侧需先 create_root 建 scene 再 instantiate 建内容。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_load_package", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -70,7 +69,7 @@ namespace LoomGUI.Bindings
         ///  pkg/comp = UTF-8 字节（指针+len）。失败返 0xFFFF_FFFF（INVALID，同 create_root 失败语义）。
         ///  scene 必须已存在（create_root 先建），否则 Err→sentinel。null 句柄 → sentinel。
         ///
-        ///  **常驻（不 gate）。**v1.4-a T7：包装 T5 `Stage::instantiate(pkg, comp)`（spec §4.2/§4.4）。
+        ///  **常驻（不 gate）。**包装 `Stage::instantiate(pkg, comp)`（spec §4.2/§4.4）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_instantiate", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern uint loomgui_stage_instantiate(StageHandle* h, byte* pkg, nuint pkg_len, byte* comp, nuint comp_len);
@@ -333,7 +332,7 @@ namespace LoomGUI.Bindings
 
         /// <summary>
         ///  删节点（递归删子 + 联动清 anim/scroll/tween + slotmap remove）。
-        ///  旧 NodeId 此后失效（gen++）。无 scene / 已删节点 → no-op。返 0（恒成功，no-op 语义）。
+        ///  该 NodeId 句柄此后失效（gen++）。无 scene / 越界 → no-op。返 0（恒成功，no-op 语义）。
         ///  null 句柄 → 0（no-op，不 panic）。
         ///
         ///  **常驻（不 gate）。**

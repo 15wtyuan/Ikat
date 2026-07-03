@@ -1,29 +1,26 @@
 //! 包格式（.pkg.bin，当前 version=12）：Rust-internal（packager 写、runtime 读，C# 不解析）。
 //!
-//! v1.4-a 多组件格式（推翻 v1 单树）：一个 pkg.bin = 多个具名组件（ComponentTable 切分）。
+//! 多组件格式：一个 pkg.bin = 多个具名组件（ComponentTable 切分）。
 //! 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponentDynamicRules +
 //!       AssetManifest。
-//!   - Header 砍 root_w/root_h（root_size 归 Stage）+ 砍 atlas 引用（图集归 Unity）。
+//!   - Header 不含 root_w/root_h（root_size 归 Stage）+ 不含 atlas 引用（图集归 Unity）。
 //!   - StringTable：组件名 / text content / img path / classes / id_attr 共用一张表（intern 去重）。
 //!   - ComponentTable：每组件 {name_idx, root_node_idx, node_count, dynamic_rules_blob_len}。
 //!   - NodeBlock：所有组件节点平铺，parent_idx 用 -1 表组件根（全局位置索引）。
 //!   - PerComponentDynamicRules：每组件 dynamic_rules 的 bincode blob（紧跟 ComponentTable 段）。
-//!   - AssetManifest：本包所有 img path + 图尺寸（D17：打包期 PNG IHDR 静态数据，核心 measure/
+//!   - AssetManifest：本包所有 img path + 图尺寸（打包期 PNG IHDR 静态数据，核心 measure/
 //!     九宫格 UV 用；Unity 校验 res 齐全 + Sprite 查询也用）。
 //! style 字段 = bincode(ResolvedStyle，已 bake)。img src 指向归一化 path 字符串（非 atlas sprite）。
 //!
-//! **v1.4-a T4 清理**：删 `AtlasSection`/`AtlasInfo`/`AtlasSprite`/`build_registry`（图集归 Unity，D8）。
-//! **v1.4-a T6 清理**：删 `asset/texture.rs`（`TextureRegistry`/`TexMeta`）——render/layout 不再查
-//! textures，Image payload 改带 path，核心彻底不知图集。
-//! **v1.4-a D17 修复**：AssetManifest 从 `Vec<String>` 改 `Vec<AssetEntry { path, w, h }>`——
-//! 核心知图尺寸（打包期 PNG IHDR 静态）+ 不知图集（运行时纹理/UV 归 Unity）。bump version 11→12。
+//! 核心不知图集（运行时纹理/UV 归 Unity）；AssetManifest 用 `Vec<AssetEntry { path, w, h }>`
+//! ——核心知图尺寸（打包期 PNG IHDR 静态）但不知图集。
 
 use crate::scene::NodeKind;
 use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 12; // v1.4-a D17：AssetManifest 改 path+w+h（PNG IHDR 尺寸），旧 v11 pkg 须重打
+pub const PKG_FORMAT_VERSION: u32 = 12; // AssetManifest 含 path+w+h（PNG IHDR 尺寸）
 pub(crate) const MIN_VERSION: u32 = 12;
 pub(crate) const MAX_VERSION: u32 = 12;
 const NULL_IDX: u16 = 0xFFFF;
@@ -33,9 +30,9 @@ const KIND_BUTTON: u8 = 1;
 const KIND_IMAGE: u8 = 2;
 const KIND_TEXT: u8 = 3;
 
-// ── v1.4-a 多组件包数据结构 ──────────────────────────────────────────────
+// ── 多组件包数据结构 ──────────────────────────────────────────────
 
-/// AssetManifest 条目：归一化 path + 打包期 PNG IHDR 读出的真实像素尺寸（D17）。
+/// AssetManifest 条目：归一化 path + 打包期 PNG IHDR 读出的真实像素尺寸。
 ///
 /// `w`/`h` = PNG 原始像素（非图集/纹理运行时尺寸）。非 PNG 或读失败 → 0（核心 measure/九宫格
 /// fallback 64×64）。核心 `Stage` 在 `load_package` 时建 `path → (w,h)` 查询表供 layout/render 用。
@@ -51,7 +48,7 @@ pub struct AssetEntry {
 pub struct Package {
     pub name: String,
     pub components: std::collections::HashMap<String, ComponentTemplate>,
-    /// 本包用到的所有 img path + 图尺寸（D17：打包期 PNG IHDR 静态，核心 measure/九宫格用）。
+    /// 本包用到的所有 img path + 图尺寸（打包期 PNG IHDR 静态，核心 measure/九宫格用）。
     pub asset_manifest: Vec<AssetEntry>,
 }
 
@@ -79,7 +76,7 @@ pub struct TemplateNode {
 /// write_package 的输入（打包器构造，已归一化：path 已相对、style 已 bake）。
 pub struct PackageInput<'a> {
     pub components: Vec<(&'a str, &'a [TemplateNode], &'a DynamicRuleTable)>,
-    /// 已去重归一化的 path + PNG IHDR 尺寸（D17：打包器读 PNG header 填，核心 measure/九宫格用）。
+    /// 已去重归一化的 path + PNG IHDR 尺寸（打包器读 PNG header 填，核心 measure/九宫格用）。
     pub asset_manifest: &'a [AssetEntry],
 }
 
@@ -152,19 +149,19 @@ pub fn extract_dynamic_rules(sheet: &crate::parse::css::StyleSheet) -> DynamicRu
     DynamicRuleTable { rules }
 }
 
-// ── v1.4-a 归一化（T2：path + CSS）──────────────────────────────────────────
+// ── 归一化（path + CSS）──────────────────────────────────────────
 //
-// 这两个是纯函数，T3 打包器扫 HTML 后调它们产归一化数据喂 write_package。
+// 这两个是纯函数，打包器扫 HTML 后调它们产归一化数据喂 write_package。
 // 都 parse-gated：消费 parse 后的产物（scraper 解析 HTML / 读 css 文件），runtime 无此输入。
 
 /// 归一化图片 src：去 res 目录前缀 + 统一正斜杠。
 ///
 /// 输入例：`res/icons/skin.png` / `./res/icons/skin.png` / `res\icons\skin.png` → `icons/skin.png`。
-/// `res_dir` 取自打包配置（默认 `res`，可配置，对应 spec D10）。
+/// `res_dir` 取自打包配置（默认 `res`，可配置）。
 /// 不在 `res_dir/` 路径段下 → None（调用方 warning，不入 manifest）。
 ///
 /// 边界检查：`res/` 必须是完整路径段，不误匹配 `pres/x`（前缀前字符须是 `/`、`.` 或串首）。
-/// spec §3.4（D8/D10）。
+/// spec §3.4。
 #[cfg(feature = "parse")]
 pub fn normalize_path(src: &str, res_dir: &str) -> Option<String> {
     let unified = src.replace('\\', "/"); // Win 反斜杠 → 正斜杠
@@ -191,13 +188,13 @@ pub fn normalize_path(src: &str, res_dir: &str) -> Option<String> {
 /// - `<style>` 内联（取 text content，可多处）
 /// - `<link rel="stylesheet" href="...">` 引用的 .css 文件内容（base_dir.join(href) 读）
 ///
-/// 行内 `style=""` 不抽——由 `resolve_styles` 直接 bake 进节点 style（spec §3.5 D6）。
+/// 行内 `style=""` 不抽——由 `resolve_styles` 直接 bake 进节点 style（spec §3.5）。
 /// `base_dir` = HTML 文件所在目录，用于解析 `<link href>` 的相对路径。
 ///
 /// **签名调整说明**：brief 伪写 `(tree: &DomTree, ...)`，但 `parse_html` 的围栏白名单
 /// （`FENCE_TAGS = div/span/img/button`）会拒绝 `<style>`/`<link>`，无法从已解析 ElementTree
 /// 取这俩节点。故直接吃原始 HTML 串、用 scraper 抽 `<style>`/`<link>`（与 dom.rs 同后端）。
-/// T3 打包器在调 `parse_html` 之前先调本函数抽 CSS（同一份 HTML 串两用）。
+/// 打包器在调 `parse_html` 之前先调本函数抽 CSS（同一份 HTML 串两用）。
 #[cfg(feature = "parse")]
 pub fn extract_component_css(html: &str, base_dir: &std::path::Path) -> String {
     use scraper::{Html, Selector};
@@ -235,14 +232,14 @@ pub fn extract_component_css(html: &str, base_dir: &std::path::Path) -> String {
                     parts.push(trimmed.to_string());
                 }
             }
-            // 读失败（文件缺失/编码错）→ 静默跳过（打包期 warning 由调用方补，T3 事）
+            // 读失败（文件缺失/编码错）→ 静默跳过（打包期 warning 由调用方补）
         }
     }
 
     parts.join("\n")
 }
 
-/// 序列化 PackageInput → .pkg.bin bytes（v1.4-a 多组件格式）。
+/// 序列化 PackageInput → .pkg.bin bytes（多组件格式）。
 ///
 /// 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponentDynamicRules
 ///       + AssetManifest。所有字符串（组件名 / text / img path / classes / id_attr）
@@ -263,7 +260,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     for (name, nodes, dynamic_rules) in &input.components {
         let name_idx = intern(name, &mut strings, &mut idx_of);
         let comp_base = global_node_offset;
-        // spec 约定 nodes[0]=组件根（parent=None)。debug_assert：write 输入由 T2/T3 控制，
+        // spec 约定 nodes[0]=组件根（parent=None)。debug_assert：write 输入由打包器控制，
         // 违反即打包器 bug（非运行时 malformed 输入），故 debug_assert 足够（release 不付代价）。
         if !nodes.is_empty() {
             debug_assert!(
@@ -304,7 +301,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         comp_records.push((name_idx, comp_base, node_count, dynamic_blob));
         global_node_offset += node_count;
     }
-    // intern asset_manifest path（供 AssetManifest 段引用 idx）+ 收 w/h（D17）。
+    // intern asset_manifest path（供 AssetManifest 段引用 idx）+ 收 w/h。
     let manifest_idx: Vec<(u16, u32, u32)> = input
         .asset_manifest
         .iter()
@@ -352,7 +349,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     for (_, _, _, dynamic_blob) in &comp_records {
         out.extend_from_slice(&dynamic_blob);
     }
-    // AssetManifest: entry_count(u32) + count × {path_idx(u16), w(u32), h(u32)}（D17：path + 图尺寸）
+    // AssetManifest: entry_count(u32) + count × {path_idx(u16), w(u32), h(u32)}（path + 图尺寸）
     out.extend_from_slice(&(manifest_idx.len() as u32).to_le_bytes());
     for &(pidx, w, h) in &manifest_idx {
         out.extend_from_slice(&pidx.to_le_bytes());
@@ -362,7 +359,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     out
 }
 
-/// 反序列化 .pkg.bin → Package（v1.4-a 多组件格式，含版本协商）。
+/// 反序列化 .pkg.bin → Package（多组件格式，含版本协商）。
 /// `Package.name` read 时填空串（read 不知包名），由 `Stage::load_package(name, ..)` 覆盖。
 pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
     let mut r = Reader::new(bytes);
@@ -474,7 +471,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         }
         components.insert(name.clone(), ComponentTemplate { name, nodes, dynamic_rules });
     }
-    // AssetManifest: entry_count(u32) + count × {path_idx(u16), w(u32), h(u32)}（D17：path + 图尺寸）
+    // AssetManifest: entry_count(u32) + count × {path_idx(u16), w(u32), h(u32)}（path + 图尺寸）
     let entry_count = r.u32("manifest_entry_count")? as usize;
     let mut asset_manifest: Vec<AssetEntry> = Vec::with_capacity(entry_count);
     for _ in 0..entry_count {
@@ -612,10 +609,10 @@ mod tests {
 
     #[test]
     fn old_version_pkg_rejected() {
-        // 手构一个旧 version 的 header -> read_package 报 TooOld
+        // 手构 version < MIN_VERSION 的 header -> read_package 报 TooOld
         let mut old = vec![];
         old.extend_from_slice(&PKG_MAGIC.to_le_bytes());
-        old.extend_from_slice(&(MIN_VERSION - 1).to_le_bytes()); // 旧 version
+        old.extend_from_slice(&(MIN_VERSION - 1).to_le_bytes()); // version 低于 MIN_VERSION
         assert!(matches!(read_package(&old), Err(PkgError::TooOld(_))));
     }
 
@@ -641,7 +638,7 @@ mod tests {
 
     #[test]
     fn header_is_20_bytes_no_root_size() {
-        // 新格式 header 20B（magic+version+flags+component_count+string_count），砍 root_w/root_h。
+        // header 20B（magic+version+flags+component_count+string_count），不含 root_w/root_h。
         let nodes = [tn(NodeKind::Container)];
         let rules = empty_rules();
         let input = PackageInput {
@@ -841,7 +838,7 @@ mod tests {
         ]);
     }
 
-    /// D17：图尺寸非对称（w≠h）通过 roundtrip 保留——measure 三档 + 九宫格 UV 依赖真实尺寸。
+    /// 图尺寸非对称（w≠h）通过 roundtrip 保留——measure 三档 + 九宫格 UV 依赖真实尺寸。
     /// 40×20 图 → manifest 存 w=40 h=20（非 0/0 兜底）。0/0 仍合法（非 PNG / 读失败 fallback）。
     #[test]
     fn asset_manifest_preserves_non_square_dims() {
@@ -970,7 +967,7 @@ mod tests {
     }
 
     /// Minor 4：write_package 对 nodes[0].parent_idx=Some 的输入触发 debug_assert（spec 约定 nodes[0]=组件根）。
-    /// write 输入由 T2/T3 控制，违反即打包器 bug；用 debug_assert（release 无代价）。
+    /// write 输入由打包器控制，违反即打包器 bug；用 debug_assert（release 无代价）。
     /// 测试用 #[should_panic] 验证 debug 构建下触发。
     #[test]
     #[should_panic(expected = "nodes[0] must be root")]
@@ -986,7 +983,7 @@ mod tests {
         let _ = write_package(&input);
     }
 
-    // —— T2: path 归一化 + CSS 归一化 ——
+    // —— path 归一化 + CSS 归一化 ——
 
     #[test]
     fn normalize_path_strips_res_prefix() {

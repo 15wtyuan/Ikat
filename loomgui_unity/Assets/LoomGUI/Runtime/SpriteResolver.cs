@@ -17,9 +17,7 @@ namespace LoomGUI
         readonly Dictionary<string, SpriteAtlas> _folderToAtlas = new();
         readonly Dictionary<string, Sprite> _cache = new();
         SpriteAtlas _defaultAtlas;
-        Sprite _missingSprite;
 
-        public Sprite MissingSprite { set => _missingSprite = value; }
         public int AtlasCount => _folderToAtlas.Count;
         /// 测试用：缓存条目数（miss 不增）。
         public int CacheCount => _cache.Count;
@@ -57,6 +55,8 @@ namespace LoomGUI
             _defaultAtlas = defaultAtlas;
         }
 
+        /// path → Sprite 查询。
+        /// null/空 path → null（纯色无图）。查不到 → null（调用方 fallback，不崩）。
         public Sprite GetSprite(string path)
         {
             if (string.IsNullOrEmpty(path)) return null;
@@ -71,8 +71,8 @@ namespace LoomGUI
                 _cache[path] = found;   // 只缓存命中
                 return found;
             }
-            // miss 不缓存（修坑 104）。
-            return _missingSprite;
+            // miss 不缓存（修坑 104）。查不到返 null，调用方 fallback。
+            return null;
         }
 
         /// path → atlas。顶层子目录查表；无子目录或 miss → default。
@@ -101,7 +101,6 @@ namespace LoomGUI
             _folderToAtlas.Clear();
             _cache.Clear();
             _defaultAtlas = null;
-            _missingSprite = null;
         }
     }
 }

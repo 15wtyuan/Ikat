@@ -7,7 +7,7 @@ use crate::transform::{self, Affine2};
 
 pub fn compute_world_transforms(scene: &mut Scene) {
     // worlds 1 基索引（id.index()，slotmap idx 1..=capacity），len = capacity+1，idx 0 占位。
-    // **容量而非存活数**（T5）：remove_node 后 slotmap 槽位可复用但 idx 不变——若按 nodes.len()
+    // **容量而非存活数**：remove_node 后 slotmap 槽位可复用但 idx 不变——若按 nodes.len()
     // （存活计数）分配，删后高 idx 的 live 节点会越界 panic。capacity ≥ 任何 live idx，故安全。
     // capacity 在 remove 后不缩（slotmap 保留槽供复用），故无需 shrink；insert 满时 slotmap
     // 自增 capacity，下次 compute 用新 capacity——每帧重算，始终对齐。
@@ -83,7 +83,7 @@ mod tests {
         n
     }
 
-    // 从 Vec<Node> 建 Scene（parent 字段推 edges）。替代旧 nodes: vec![...] 字面量。
+    // 从 Vec<Node> 建 Scene（parent 字段推 edges）。
     fn scene_with(nodes: Vec<Node>) -> Scene {
         let edges: Vec<(usize, usize)> = nodes
             .iter()

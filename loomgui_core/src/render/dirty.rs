@@ -97,11 +97,11 @@ mod tests {
     use crate::text::layout::{Glyph, GlyphRun, Line, TextLayout};
     use crate::transform::IDENTITY;
 
-    /// v1.4-a T6：texture 砍，mesh_rn 改带 image_path（None=纯色，Some=图 path）。
+    /// mesh_rn：构造带 image_path 的 Mesh RenderNode（None=纯色，Some=图 path）。
     fn mesh_rn(path: Option<&str>, alpha: f32, color0: [f32;4]) -> RenderNode {
         RenderNode {
             node_id: 0, parent_id: None, visible: true, alpha,
-            grayed: false, color_tint: [1.0;4],
+            color_tint: [1.0;4],
             world_matrix: IDENTITY, blend: BlendMode::Normal,
             mask_context: MaskContext(0), sort_key: 0,
             change_level: ChangeLevel::Full,
@@ -148,7 +148,6 @@ mod tests {
             parent_id: None,
             visible: true,
             alpha: 1.0,
-            grayed: false,
             color_tint: [1.0; 4],
             world_matrix: IDENTITY,
             blend: BlendMode::Normal,
@@ -203,7 +202,7 @@ mod tests {
 
     #[test]
     fn payload_hash_full_text_no_collision() {
-        // "hello"→"helps"：首字 h/5 字/首字坐标同——旧采样 hash 撞。全量必变。
+        // "hello"→"helps"：首字 h/5 字/首字坐标同——全量 hash 必变（采样才会漏判）。
         let a = text_rn_content(16.0, [1.0; 4], &[104, 101, 108, 108, 111]); // hello
         let b = text_rn_content(16.0, [1.0; 4], &[104, 101, 108, 112, 115]); // helps
         assert_ne!(

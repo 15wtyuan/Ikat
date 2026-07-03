@@ -1501,7 +1501,7 @@ mod tests {
             "不产 Click@root");
     }
 
-    /// per-axis 阈值（非 euclidean）：mouse 对角 (8,8)（euclidean 11.3>10 但 per-axis 8≤10）→ 仍 Click。
+    /// per-axis 阈值：mouse 对角 (8,8)→ dx=8,dy=8，均 ≤10 → 仍 Click（按轴判，不合计距离）。
     #[test]
     fn per_axis_threshold_mouse_diagonal_clicks() {
         let mut s = one_button_scene();
@@ -1511,7 +1511,7 @@ mod tests {
             PointerEvent { kind: PointerKind::Up, x: 58.0, y: 58.0, button: 0, pad: [0, 0], touch_id: -1 },
         ]);
         assert!(out.iter().any(|e| e.event_type == EVT_CLICK),
-            "per-axis (8,8) ≤10 → Click（旧 euclidean 11.3>10 会拒）");
+            "per-axis (8,8) 各轴 ≤10 → Click");
     }
 
     /// mouse 30px 漂移 → 无 Click（30>10）；touch 30px 漂移 → Click（30<50）。

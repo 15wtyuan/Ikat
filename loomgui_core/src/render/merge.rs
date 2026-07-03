@@ -7,8 +7,8 @@
 use crate::render::node::{NodePayload, RenderNode};
 
 /// DrawState 键（image_path, program, mask_context, alpha_bits）。program=0 Mesh 才参与合并。
-/// v1.4-a T6：texture 砍，改 image_path（同 path 的图可合批；None=纯色块可互合）。
-/// v1.4-a T9：加 alpha（to_bits 比较）——alpha 是 per-renderer uniform，不同 alpha 不能合批。
+/// 用 image_path（同 path 的图可合批；None=纯色块可互合）。
+/// 含 alpha（to_bits 比较）——alpha 是 per-renderer uniform，不同 alpha 不能合批。
 fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32)> {
     match &rn.payload {
         NodePayload::Mesh { image_path, program, .. }
@@ -40,7 +40,7 @@ pub fn merge_meshes(nodes: Vec<RenderNode>) -> Vec<RenderNode> {
         }
         let key = key.unwrap();
         // 收集连续同 key 的 Mesh。
-        // v1.4-a T6：key 含 Option<String>（非 Copy），用 ref 比较避免 move。
+        // key 含 Option<String>（非 Copy），用 ref 比较避免 move。
         let mut batch_idx: Vec<usize> = vec![idx];
         let mut j = i + 1;
         while j < order.len() && mesh_key(&nodes[order[j]]).as_ref() == Some(&key) {
@@ -71,7 +71,7 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
         if let NodePayload::Mesh { verts: v, uvs: u, colors: c, indices: ix, .. } = &nodes[bi].payload {
             verts.extend_from_slice(v);
             uvs.extend_from_slice(u);
-            // v1.4-a T9：alpha 不再烤进 colors（alpha 走 _Alpha uniform，单值 per-draw-call）。
+            // alpha 不烤进 colors（alpha 走 _Alpha uniform，单值 per-draw-call）。
             colors.extend_from_slice(c);
             for &ixv in ix {
                 indices.push(ixv + base);
@@ -83,8 +83,7 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
         node_id: anchor,
         parent_id: None,
         visible: true,
-        alpha: last.alpha, // v1.4-a T9：merged alpha=子 alpha（同 key 保证一致；走 _Alpha uniform）
-        grayed: false,
+        alpha: last.alpha, // merged alpha=子 alpha（同 key 保证一致；走 _Alpha uniform）
         color_tint: [1.0; 4],
         world_matrix: crate::transform::IDENTITY,
         blend: last.blend,
@@ -109,11 +108,11 @@ mod tests {
     use super::*;
     use crate::render::node::{BlendMode, ChangeLevel, MaskContext};
 
-    /// v1.4-a T6：texture 砍，mesh_node 改带 image_path（None=纯色，Some=图 path）。
+    /// mesh_node 带 image_path（None=纯色，Some=图 path）。
     fn mesh_node(id: u32, path: Option<&str>, sort_key: u32, alpha: f32, rect_off: f32) -> RenderNode {
         RenderNode {
             node_id: id, parent_id: None, visible: true, alpha,
-            grayed: false, color_tint: [1.0; 4],
+            color_tint: [1.0; 4],
             world_matrix: crate::transform::IDENTITY,
             blend: BlendMode::Normal, mask_context: MaskContext(0), sort_key,
             change_level: ChangeLevel::Full,
@@ -134,7 +133,7 @@ mod tests {
     #[test]
     fn two_same_drawstate_merge_into_one() {
         // A(a.png,sk0) B(a.png,sk1) 同 alpha=1.0 → 1 merged：8 verts / 12 indices。
-        // v1.4-a T9：colors.a 不再烤 alpha（走 _Alpha uniform）；merged.alpha = 子 alpha。
+        // colors.a 不烤 alpha（走 _Alpha uniform）；merged.alpha = 子 alpha。
         let nodes = vec![
             mesh_node(5, Some("a.png"), 0, 1.0, 0.0),
             mesh_node(3, Some("a.png"), 1, 1.0, 100.0), // 同 alpha
@@ -220,7 +219,7 @@ mod tests {
 
     #[test]
     fn same_alpha_still_merge_no_bake() {
-        // 同 alpha 仍合并；但 colors.a 不再烤 alpha（走 uniform）。
+        // 同 alpha 仍合并；但 colors.a 不烤 alpha（走 uniform）。
         let nodes = vec![
             mesh_node(1, Some("a.png"), 0, 0.5, 0.0),
             mesh_node(2, Some("a.png"), 1, 0.5, 100.0),

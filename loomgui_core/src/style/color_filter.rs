@@ -24,8 +24,7 @@ pub fn grayscale() -> [f32; 20] {
     m
 }
 
-/// brightness(n) = CSS 乘法 rgb×n（n=1 不变）。
-/// 旧实现照搬 fgui AdjustBrightness(n-1)（加法 offset），与 CSS filter 乘法语义不符 → 改乘法。
+/// brightness(n) = CSS 乘法 rgb×n（n=1 不变）。对角 n，offset 0。
 pub fn brightness(n: f32) -> [f32; 20] {
     let mut m = IDENTITY;
     m[0] = n; m[6] = n; m[12] = n;
@@ -153,7 +152,6 @@ mod tests {
     #[test]
     fn brightness_multiplies() {
         // CSS brightness(1.2) = rgb×1.2（乘法）：对角 1.2，offset 0。
-        // fgui AdjustBrightness 是加法 (n-1) → 与 CSS 不符，改乘法。
         let m = brightness(1.2);
         assert!((m[0] - 1.2).abs() < 1e-4, "brightness 对角=1.2");
         assert!((m[6] - 1.2).abs() < 1e-4);

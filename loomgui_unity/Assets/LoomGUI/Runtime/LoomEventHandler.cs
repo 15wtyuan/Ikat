@@ -128,7 +128,7 @@ namespace LoomGUI
         /// LoomStage 在 Awake/load 后调，传 (IntPtr)_stage。清 _parentCache（新 scene 的 parent 关系变了）。
         public void SetHandle(IntPtr handle) { _handle = handle; _parentCache.Clear(); }
 
-        /// 清所有 listener（切 pkg 重建 scene 后，旧 NodeId 全失效，listener 指向悬空节点）。
+        /// 清所有 listener（切 pkg 重建 scene 后，被删 NodeId 全失效，listener 指向悬空节点）。
         /// 业务 driver 切界面前调，避免 dict 堆积 + 重新 SubscribeAll 前干净态。
         public void Clear() { _listeners.Clear(); _parentCache.Clear(); }
 

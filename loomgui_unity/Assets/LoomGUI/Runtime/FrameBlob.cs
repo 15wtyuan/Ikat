@@ -26,7 +26,7 @@ namespace LoomGUI
 
         public FrameBlob(byte[] buf) { _buf = buf; }
 
-        /// magic==Magic && version==ExpectedVersion。MirrorPool.Sync 顶据此拒绝陈旧 blob。
+        /// magic==Magic && version==ExpectedVersion。MirrorPool.Sync 顶据此拒绝过期 blob。
         public bool IsValid => ReadU32(0) == Magic && ReadU32(4) == ExpectedVersion;
         public uint Version => ReadU32(4);
         public int NodeCount => (int)ReadU32(8);
@@ -36,10 +36,10 @@ namespace LoomGUI
         //   4=sort_key(u32) 5=mask_context(u32)
         //   6=m_a(f32) 7=m_b(f32) 8=m_c(f32) 9=m_d(f32) 10=m_tx(f32) 11=m_ty(f32)
         //   ↑ world matrix Affine2 6 列（m_a..m_ty）。
-        //   12=payload_kind(u8, 1=Mesh 2=Text；0 不再产生——变更级别由 change_level 列表达)
+        //   12=payload_kind(u8, 1=Mesh 2=Text；0 不产生——变更级别由 change_level 列表达)
         //   13=mesh_off(u32) 14=mesh_len(u32)
         //   15=text_off(u32) 16=text_len(u32)
-        //   17=path_idx(u32)  ← v7：原 tex_id → path_idx（path 表 1-based 索引，0=纯色无图）
+        //   17=path_idx(u32)  ← v7：path 表 1-based 索引，0=纯色无图
         //   18=program(u8, 0=img/无图 1=Text 2=Container+bg-image 3=filter无bg-image 4=filter+bg-image)  ← v5 新增
         //   19=color_matrix([f32;20], 80B)
         //   20=change_level(u8, 0=Skip 1=Header 2=Full)  ← v8 新增（支柱3）
@@ -80,7 +80,7 @@ namespace LoomGUI
         uint MeshLen(int i) => ReadU32(ColOff(14) + i * 4);
         public uint TextOff(int i) => ReadU32(ColOff(15) + i * 4);
         public uint TextLen(int i) => ReadU32(ColOff(16) + i * 4);
-        /// v7：第 18 列 path_idx（u32）。Mesh→path 表 1-based 索引（0=纯色无图），Text=0（Unchanged 变体已删，kind 只剩 1=Mesh/2=Text）。
+        /// v7：第 18 列 path_idx（u32）。Mesh→path 表 1-based 索引（0=纯色无图），Text=0（kind 只剩 1=Mesh/2=Text）。
         /// MirrorPool 读 path_idx → ReadPath(idx) 取 path → LoomStage.GetSprite(path) 查 Sprite。
         public uint PathIdx(int i) => ReadU32(ColOff(17) + i * 4);
         /// 节点 i 的 program（u8 列，ColOff(18) + i）。0=img/无图 Container，1=Text，2=Container+bg-image，3=filter无bg-image，4=filter+bg-image。

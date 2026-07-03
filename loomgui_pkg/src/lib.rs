@@ -1,11 +1,11 @@
 //! 打包器库：系统目录多 HTML → .pkg.bin（无 atlas）。
-//! v1.4-a：每个 HTML 独立 parse → resolve_styles → build_scene → 抽 TemplateNode；
+//! 每个 HTML 独立 parse → resolve_styles → build_scene → 抽 TemplateNode；
 //! img src / background-image url 归一化进 asset_manifest；CSS bake 进 style_blob。
-//! 砍 image crate / shelf_pack / atlas.png（图集归 Unity，D8）。
+//! 图集归 Unity，打包器不产 atlas。
 //!
-//! **D17（图尺寸）**：打包器对每个 manifest path 读 PNG IHDR（前 8 字节 magic + 13 字节 IHDR，
+//! **图尺寸**：打包器对每个 manifest path 读 PNG IHDR（前 8 字节 magic + 13 字节 IHDR，
 //! width/height big-endian u32 at offset 16/20）填 `AssetEntry { path, w, h }`。非 PNG 或读失败 →
-//! w/h=0（核心 measure fallback 64×64）。不引 image crate——PNG header 解析 ~30 行即可。
+//! w/h=0（核心 measure fallback 64×64）。PNG header 解析 ~30 行即可，无需完整 PNG 解码。
 
 use loomgui_core::asset::{AssetEntry, PackageInput, TemplateNode, extract_component_css, normalize_path};
 use loomgui_core::scene::NodeId;
@@ -13,8 +13,7 @@ use scraper::{Html, Selector as ScraperSelector};
 use std::path::Path;
 
 /// 打包产物：.pkg.bin bytes + asset_manifest（归一化 path + 图尺寸，供 Unity 校验 + 核心 measure/九宫格）。
-/// v1.4-a 砍 atlas_png/atlas_filename（图集归 Unity，D8）。
-/// D17：manifest 改 `Vec<AssetEntry>`（path + PNG IHDR 尺寸）。
+/// 图集归 Unity，打包器不产 atlas。manifest 是 `Vec<AssetEntry>`（path + PNG IHDR 尺寸）。
 #[derive(Debug)]
 pub struct PackedPackage {
     pub pkg_bytes: Vec<u8>,
@@ -27,7 +26,7 @@ pub struct PackedPackage {
 /// parent_idx = 父节点在 Vec 中的位置（None=组件根）。slotmap values() 对无删除的全新 map
 /// 按槽位序迭代 = 插入序 = build_scene 的 DFS 先序，故 parent 总在 child 前出现，位置索引稳定。
 ///
-/// **D17**：manifest 收 `AssetEntry { path, w:0, h:0 }`（此处只收 path，w/h 由 `pack` 后置
+/// **manifest 收 `AssetEntry { path, w:0, h:0 }`**（此处只收 path，w/h 由 `pack` 后置
 /// 读 PNG IHDR 填——scene_to_template 不知 res 目录绝对路径，只有归一化 path）。
 fn scene_to_template(
     scene: &loomgui_core::scene::Scene,
@@ -93,14 +92,14 @@ fn scene_to_template(
     nodes
 }
 
-/// 读 PNG IHDR chunk 取真实像素 width/height（D17）。
+/// 读 PNG IHDR chunk 取真实像素 width/height。
 ///
 /// PNG 布局：8 字节 magic (`\x89PNG\r\n\x1a\n`) + IHDR chunk（4 字节长度 + 4 字节 "IHDR" +
 /// 13 字节数据：width(4 BE) + height(4 BE) + bit_depth(1) + color_type(1) + ...）。
 /// width 在 offset 16，height 在 offset 20（big-endian u32）。
 ///
 /// 非 PNG（magic 不符）/ 文件过短 / 读失败 → `(0, 0)`（核心 measure fallback 64×64）。
-/// **不引 image crate**——PNG header 解析 ~30 行，无需完整 PNG 解码。
+/// PNG header 解析 ~30 行，无需完整 PNG 解码。
 fn read_png_size(path: &std::path::Path) -> (u32, u32) {
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
@@ -179,7 +178,7 @@ fn serialize_children(el: &scraper::ElementRef, out: &mut String) {
     }
 }
 
-/// 把系统目录下多个 HTML 打成 .pkg.bin（v1.4-a 多组件格式，无 atlas）。
+/// 把系统目录下多个 HTML 打成 .pkg.bin（多组件格式，无 atlas）。
 ///
 /// - `source_dir`：包源目录（html + res 所在）。
 /// - `pkg_name`：包名（当前未进 pkg.bin header，供 CLI 日志用；未来版本号/元数据可扩展）。
@@ -225,7 +224,7 @@ pub fn pack(
         owned.push((comp_name, nodes, dynamic));
     }
 
-    // D17：对每个 manifest path 读 PNG IHDR 填真实尺寸 w/h。
+    // 对每个 manifest path 读 PNG IHDR 填真实尺寸 w/h。
     // path 是相对 res_dir 的归一化路径（如 "icons/skin.png"），绝对路径 = res_root/path。
     // 非 PNG / 读失败 → 0/0（核心 measure fallback 64×64）。
     for entry in &mut manifest {
@@ -288,7 +287,7 @@ mod tests {
         let mut manifest: Vec<AssetEntry> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let nodes = scene_to_template(&scene, "res", &mut manifest, &mut seen);
-        // D17：scene_to_template 只收 path（w/h=0），w/h 由 pack 后置读 PNG IHDR 填
+        // scene_to_template 只收 path（w/h=0），w/h 由 pack 后置读 PNG IHDR 填
         assert_eq!(manifest, vec![AssetEntry { path: "icons/skin.png".into(), w: 0, h: 0 }], "归一化 path 进 manifest");
         // 节点 src 也被归一化
         match &nodes[1].kind {

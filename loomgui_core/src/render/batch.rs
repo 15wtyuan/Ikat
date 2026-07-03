@@ -38,7 +38,7 @@ fn is_mergeable_mesh(rn: &RenderNode) -> bool {
 
 /// 可合并 Mesh 的 DrawState = (image_path, mask_context)。
 /// （program 已由 is_mergeable_mesh 保证 0；blend 仅 Normal 不入 key。）
-/// v1.4-a T6：texture 字段砍，改用 image_path 做合并键（同 path 的图可合批）。
+/// image_path 作合并键（同 path 的图可合批）。
 /// 非 mergeable Mesh / Text → None。
 fn draw_state(rn: &RenderNode) -> Option<(Option<String>, u32)> {
     match &rn.payload {
@@ -80,7 +80,7 @@ fn reorder_unit(scene: &Scene, nodes: &[RenderNode], unit: &mut Vec<usize>) {
         for j in (0..i).rev() {
             let test = unit[j];
             let test_ds = draw_state(&nodes[test]).unwrap(); // 单元内必 mergeable
-            // v1.4-a T6：draw_state 含 Option<String>（非 Copy），用 ref 比较避免 move。
+            // draw_state 含 Option<String>（非 Copy），用 ref 比较避免 move。
             if last_ds.as_ref() != Some(&test_ds) {
                 last_ds = Some(test_ds.clone());
                 m = j + 1;
@@ -160,7 +160,7 @@ pub fn assign_sort_keys(
         };
         {
             // nodes 0 基位置：用 id_to_pos 映射（slotmap 删节点后有空洞，idx-1 ≠ 位置）。
-            // T5：remove_node 后 slotmap idx 不连续，须用 build_render_nodes 算的 id_to_pos。
+            // remove_node 后 slotmap idx 不连续，须用 build_render_nodes 算的 id_to_pos。
             let pos = *id_to_pos.get(&id).expect("live node 在 id_to_pos 中");
             let rn = &mut nodes[pos];
             rn.sort_key = *counter;
@@ -243,7 +243,6 @@ mod tests {
             parent_id: if i == 0 { None } else { Some(0) },
             visible: true,
             alpha: 1.0,
-            grayed: false,
             color_tint: [1.0; 4],
             world_matrix: crate::transform::IDENTITY,
             blend: BlendMode::Normal,
@@ -438,14 +437,13 @@ mod tests {
     // 已由上方 use 语句导入；以下测直接使用。
 
     /// 构造 program=0 Mesh RenderNode（给 reorder_unit 直接喂 unit 索引对应的 nodes）。
-    /// v1.4-a T6：texture 砍，改 image_path（None=纯色，Some=图片 path）。
+    /// image_path（None=纯色，Some=图片 path）。
     fn mesh_rn(path: Option<&str>, rect: Rect, mask: u32) -> RenderNode {
         RenderNode {
             node_id: 0,
             parent_id: None,
             visible: true,
             alpha: 1.0,
-            grayed: false,
             color_tint: [1.0; 4],
             world_matrix: crate::transform::IDENTITY,
             blend: BlendMode::Normal,

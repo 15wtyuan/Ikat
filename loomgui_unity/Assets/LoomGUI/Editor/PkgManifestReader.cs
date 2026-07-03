@@ -5,7 +5,7 @@ using System.Text;
 namespace LoomGUI.Editor
 {
     /// <summary>
-    /// v1.4-a T9：从 pkg.bin 末尾的 AssetManifest 段读出 (path, w, h) 列表，供 Package Manager 面板
+    /// 从 pkg.bin 末尾的 AssetManifest 段读出 (path, w, h) 列表，供 Package Manager 面板
     /// 校验"manifest 里的 path 在 Unity res 目录下都有对应资源"。
     ///
     /// pkg.bin 布局（loomgui_core/src/asset/mod.rs，version=12）：
@@ -56,7 +56,7 @@ namespace LoomGUI.Editor
             uint version = r.U32();
             if (version != PKG_VERSION)
             {
-                throw new PkgManifestException($"version 不匹配：{version}（期望 {PKG_VERSION}，旧包须重打）");
+                throw new PkgManifestException($"version 不匹配：{version}（期望 {PKG_VERSION}，须重打 pkg）");
             }
             uint flags = r.U32(); // 未用
             uint componentCount = r.U32();
