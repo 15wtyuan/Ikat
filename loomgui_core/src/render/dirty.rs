@@ -105,6 +105,7 @@ mod tests {
             world_matrix: IDENTITY, blend: BlendMode::Normal,
             mask_context: MaskContext(0), sort_key: 0,
             change_level: ChangeLevel::Full,
+            reuse_key: 0,
             payload: NodePayload::Mesh {
                 verts: vec![[0.0,0.0];4], uvs: vec![[0.0,0.0];4],
                 colors: vec![color0;4], indices: vec![0,1,2,0,2,3],
@@ -154,6 +155,7 @@ mod tests {
             mask_context: MaskContext(0),
             sort_key: 0,
             change_level: ChangeLevel::Full,
+            reuse_key: 0,
             payload: NodePayload::Text {
                 layout,
                 font_size,

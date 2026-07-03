@@ -27,6 +27,7 @@ expression: json
     "mask_context": 0,
     "sort_key": 0,
     "change_level": "Full",
+    "reuse_key": 0,
     "payload": {
       "Mesh": {
         "verts": [
@@ -150,6 +151,7 @@ expression: json
     "mask_context": 0,
     "sort_key": 1,
     "change_level": "Full",
+    "reuse_key": 0,
     "payload": {
       "Mesh": {
         "verts": [

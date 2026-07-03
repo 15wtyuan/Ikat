@@ -82,6 +82,7 @@ pub struct RenderNode {
     pub mask_context: MaskContext,
     pub sort_key: u32,
     pub change_level: ChangeLevel,
+    pub reuse_key: u32,
     pub payload: NodePayload,
 }
 
@@ -103,6 +104,7 @@ mod serde_smoke_tests {
             mask_context: MaskContext(2),
             sort_key: 5,
             change_level: ChangeLevel::Full,
+            reuse_key: 0,
             payload: NodePayload::Mesh {
                 verts: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
                 uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],

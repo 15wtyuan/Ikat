@@ -312,6 +312,13 @@ impl Stage {
         crate::scene::dynamic::set_style(self.scene.as_mut().ok_or("no scene")?, node, css)
     }
 
+    /// v1.4-b：设渲染复用键（虚拟列表 slot）。node 无效 → no-op。
+    pub fn set_reuse_key(&mut self, node: NodeId, key: u32) {
+        if let Some(scene) = self.scene.as_mut() {
+            crate::scene::dynamic::set_reuse_key(scene, node, key);
+        }
+    }
+
     /// 从包克隆一个组件进当前 scene，返回组件根 NodeId（孤立，parent=None，调用方 append_child 挂载）。
     ///
     /// v1.4-a T5（spec §4.2/§4.4）：
@@ -1673,5 +1680,32 @@ mod d17_image_size_tests {
         assert_eq!(s.image_size("icons/x.png"), Some((10, 10)), "首次 load");
         s.load_package("bag", &pkg_v2).unwrap();
         assert_eq!(s.image_size("icons/x.png"), Some((50, 50)), "重 load 覆盖（新尺寸）");
+    }
+
+    /// v1.4-b：reuse_key 是运行时字段（不进 pkg），driver 给 slot 节点设。
+    /// 0=无复用（默认），>0=按 reuse_key 复用 GO。
+    #[test]
+    fn set_reuse_key_sets_field() {
+        let mut stage = Stage::new_for_test();
+        let root = stage.create_root("div", "").unwrap();
+        let child = stage.create_node("div", "").unwrap();
+        stage.append_child(root, child).unwrap();
+        assert_eq!(
+            stage.scene.as_ref().unwrap().get(child).unwrap().reuse_key, 0,
+            "默认 0"
+        );
+        stage.set_reuse_key(child, 5);
+        assert_eq!(stage.scene.as_ref().unwrap().get(child).unwrap().reuse_key, 5);
+    }
+
+    /// v1.4-b：set_reuse_key 对无效 node（已删/悬空）no-op，不 panic。
+    #[test]
+    fn set_reuse_key_invalid_node_noop() {
+        let mut stage = Stage::new_for_test();
+        let root = stage.create_root("div", "").unwrap();
+        // NodeId(99999) 不存在 → no-op，不 panic。
+        stage.set_reuse_key(crate::scene::node::NodeId(99999), 42);
+        // create_root 成功即 no-op 未 panic。
+        assert!(root.0 > 0);
     }
 }
