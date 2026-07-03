@@ -33,7 +33,7 @@ pub fn merge_meshes(nodes: Vec<RenderNode>) -> Vec<RenderNode> {
         let idx = order[i];
         let key = mesh_key(&nodes[idx]);
         if key.is_none() {
-            // Text / Unchanged：原样。
+            // Text：原样。
             out.push(nodes[idx].clone());
             i += 1;
             continue;

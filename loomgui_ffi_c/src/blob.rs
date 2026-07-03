@@ -18,7 +18,7 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     let clips = &frame.clips;
     let n = nodes.len();
     // 列名 + 每元素字节数。v8：加 change_level 列（u8，第 21 列），SKIP/HEADER 不写 mesh/text arena。
-    //   path_idx 与原 tex_id 同占 4B，列数不变（20 列）——仅语义改：从「贴图 id」改「path 表索引」。
+    //   path_idx 与原 tex_id 同占 4B，21 列（v8 加 change_level）——且语义改：从「贴图 id」改「path 表索引」。
     //   v6：加 color_matrix 列（[f32;20]，80B，第 20 列）——v1.3 ColorFilter。
     let columns: &[(&str, usize)] = &[
         ("node_id", 4), ("parent_id", 4), ("visible", 1), ("alpha", 4),
@@ -31,9 +31,9 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
         ("color_matrix", 80),   // [f32;20] × 4 字节，第 20 列
         ("change_level", 1),    // v8：帧级变更级别（u8，0=Skip 1=Header 2=Full），第 21 列
     ];
-    let num_col_offsets = columns.len();          // 20
+    let num_col_offsets = columns.len();          // 21
     let header_len = 3 * 4                          // magic, version, node_count
-        + num_col_offsets * 4                       // 列 offset（20）
+        + num_col_offsets * 4                       // 列 offset（21）
         + 2 * 4                                     // mesh_arena off + len
         + 2 * 4                                     // text_arena off + len
         + 2 * 4                                     // clip_table off + len
@@ -333,7 +333,7 @@ mod tests {
         n
     }
 
-    /// 同 mesh_node 但可指定 color_tint / alpha / vertex colors（用于 §4.2b tint×alpha 烘焙测试）。
+    /// 同 mesh_node 但可指定 color_tint / alpha / vertex colors（用于 alpha 不烘焙测试，T6 后 alpha 走 _Alpha uniform）。
     fn mesh_node_tinted(
         id: u32,
         tint: [f32; 4],
@@ -507,7 +507,7 @@ mod tests {
         assert_eq!(path_table_off + path_table_len as usize, blob.len(), "path_table 应是 blob 末段");
     }
 
-    /// TestView（C# FrameBlob 的 Rust 镜像）解析 v6 blob 时：20 列 + 三 arena 头读回正确，
+    /// TestView（C# FrameBlob 的 Rust 镜像）解析 v8 blob：21 列 + 三 arena 头读回正确，
     /// 且无 Text 节点的占位语义（text_off/text_len=0、text_arena_len=0、clip_count=0）成立。
     #[test]
     fn test_view_parses_v4_layout_and_t1_placeholders() {
@@ -736,7 +736,7 @@ mod tests {
         fn text_len(&self, i: usize) -> u32 {
             u32::from_le_bytes(self.buf[self.col_off[16] + i * 4..][0..4].try_into().unwrap())
         }
-        /// v7：第 18 列 path_idx（u32）。Mesh→path 表 1-based 索引（0=纯色无图），Text/Unchanged=0。
+        /// v7：第 18 列 path_idx（u32）。Mesh→path 表 1-based 索引（0=纯色无图），Text=0（Unchanged 变体已删，kind 只剩 1=Mesh/2=Text）。
         fn path_idx(&self, i: usize) -> u32 {
             u32::from_le_bytes(self.buf[self.col_off[17] + i * 4..][0..4].try_into().unwrap())
         }
@@ -817,7 +817,7 @@ mod tests {
             let vy = f32::from_le_bytes(self.buf[p + 4..p + 8].try_into().unwrap());
             (vx, vy)
         }
-        /// 节点 i 的第 vi 个 mesh 顶点色的 alpha 分量（§4.2b：已 ×node.alpha 烤进）。
+        /// 节点 i 的第 vi 个 mesh 顶点色的 alpha 分量（alpha 剥离后为原始值，不乘节点 alpha，走 _Alpha uniform）。
         fn mesh_color_alpha(&self, i: usize, vi: usize) -> f32 {
             let (seg, vc) = self.mesh_seg(i);
             // seg+8 起 verts[vc×2] + uvs[vc×2] 各 vc*2*4 = vc*2*4*2，colors 起。
@@ -921,8 +921,8 @@ mod tests {
 
     /// merged FrameData（transform=0、alpha=1、多 quad 拼接）经 build_blob，
     /// re-base 减 0 = 顶点保持绝对；alpha×1 = 不变。blob 列结构零改（spec §9 硬契约）。
-    /// merged 由 merge_meshes 产：transform/alpha 已置 (0, 1)，colors.a 已 ×原 alpha 烤进。
-    /// blob 再做 `c[3] × rn.alpha(=1)` → 不二次烤；`v - transform(=0)` → 顶点保持绝对。
+    /// merged 由 merge_meshes 产：transform/alpha 已置 (0, 1)。blob 不再烤 alpha（T6 剥离），
+    /// merged.alpha 走 _Alpha uniform。v - transform(=0) → 顶点保持绝对。
     #[test]
     fn merged_mesh_blob_keeps_absolute_verts_and_no_double_alpha() {
         // 构造一个 merged 节点：8 verts（2 quad 拼接）、transform=0、alpha=1。

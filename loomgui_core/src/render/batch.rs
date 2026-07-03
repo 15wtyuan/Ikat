@@ -30,7 +30,7 @@ pub fn rect_intersect(a: Rect, b: Rect) -> Rect {
     Rect { x, y, w, h }
 }
 
-/// 是否可合并 Mesh（program=0 + 纯平移）。Text（program=1）/ Unchanged / 非纯平移不参与重排与合并。
+/// 是否可合并 Mesh（program=0 + 纯平移）。Text（program=1）/ 非纯平移不参与重排与合并。
 fn is_mergeable_mesh(rn: &RenderNode) -> bool {
     matches!(&rn.payload, NodePayload::Mesh { program, .. } if *program == 0)
         && crate::transform::is_pure_translation(&rn.world_matrix)
@@ -39,7 +39,7 @@ fn is_mergeable_mesh(rn: &RenderNode) -> bool {
 /// 可合并 Mesh 的 DrawState = (image_path, mask_context)。
 /// （program 已由 is_mergeable_mesh 保证 0；blend 仅 Normal 不入 key。）
 /// v1.4-a T6：texture 字段砍，改用 image_path 做合并键（同 path 的图可合批）。
-/// 非 mergeable Mesh / Text / Unchanged → None。
+/// 非 mergeable Mesh / Text → None。
 fn draw_state(rn: &RenderNode) -> Option<(Option<String>, u32)> {
     match &rn.payload {
         NodePayload::Mesh { image_path, program, .. } if *program == 0 => {
@@ -191,7 +191,7 @@ pub fn assign_sort_keys(
 
 /// AABB 保序重排：按 BatchingRoot（mask_context）分段，段内对 program=0
 /// Mesh 节点做 fgui 式稳定插入排序（同 DrawState + AABB 不相交才前移），重排后重赋
-/// sort_key。Text（program=1）/ Unchanged 作为 batch break，不重排。
+/// sort_key。Text（program=1）作为 batch break，不重排。
 ///
 /// 前置：`assign_sort_keys` 已赋 mask_context + DFS 序 sort_key + clip 表。
 /// 原地改写 `nodes[*].sort_key` 为重排后序。clips 表由 assign_sort_keys 产，不受影响。
@@ -223,7 +223,7 @@ pub fn reorder_for_batching(scene: &Scene, nodes: &mut [RenderNode]) {
             }
             i = j;
         } else {
-            // Text / Unchanged：break，不重排，顺序赋 sort_key。
+            // Text：break，不重排，顺序赋 sort_key。
             nodes[idx].sort_key = next_key;
             next_key += 1;
             i += 1;

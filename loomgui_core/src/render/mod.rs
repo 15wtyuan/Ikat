@@ -12,7 +12,7 @@
 //! UV 的 src_w/src_h（slice_px / src_px）。Image/bg-image payload 带 path，UV 全图 (0,0)-(1,1)。
 
 pub mod batch;
-pub mod dirty;   // dirty hash（逐节点 → u64，跨帧比决定 Unchanged emit）
+pub mod dirty;   // dirty hash（header_hash + payload_hash 双轴，跨帧比决定 ChangeLevel）
 pub mod merge;
 pub mod mesh;
 pub mod node;

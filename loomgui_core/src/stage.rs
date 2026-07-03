@@ -458,7 +458,7 @@ impl Stage {
         crate::scroll::refresh_content_sizes(scene);
         // 7. compute_world_transforms（读 rematch 后 transform + scroll_pos → world）
         crate::scene::transform::compute_world_transforms(scene);
-        // 8. 渲染（+ 合成 scrollbar）。传上帧 hash 基线，未变节点 emit Unchanged；
+        // 8. 渲染（+ 合成 scrollbar）。传上帧 hash 基线，未变节点 change_level=Skip；
         //    返回新 hash 存 self.prev_node_hashes 供下帧比。
         // D17：build_render_nodes 查 Stage.image_sizes 算九宫格 UV（slice_px / src_px）。
         // Image payload 带 path，UV 全图 (0,0)-(1,1)（无 atlas 子区），Unity 查 Sprite 拿真实 UV（T8）。
