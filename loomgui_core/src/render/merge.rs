@@ -6,14 +6,15 @@
 
 use crate::render::node::{NodePayload, RenderNode};
 
-/// DrawState 键（image_path, program, mask_context）。program=0 Mesh 才参与合并。
+/// DrawState 键（image_path, program, mask_context, alpha_bits）。program=0 Mesh 才参与合并。
 /// v1.4-a T6：texture 砍，改 image_path（同 path 的图可合批；None=纯色块可互合）。
-fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32)> {
+/// v1.4-a T9：加 alpha（to_bits 比较）——alpha 是 per-renderer uniform，不同 alpha 不能合批。
+fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32)> {
     match &rn.payload {
         NodePayload::Mesh { image_path, program, .. }
             if *program == 0 && crate::transform::is_pure_translation(&rn.world_matrix) =>
         {
-            Some((image_path.clone(), *program, rn.mask_context.0))
+            Some((image_path.clone(), *program, rn.mask_context.0, rn.alpha.to_bits()))
         }
         _ => None,
     }
@@ -68,15 +69,10 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
     let mut base: u32 = 0;
     for &bi in batch {
         if let NodePayload::Mesh { verts: v, uvs: u, colors: c, indices: ix, .. } = &nodes[bi].payload {
-            let alpha = nodes[bi].alpha;
             verts.extend_from_slice(v);
             uvs.extend_from_slice(u);
-            // colors：alpha 分量 ×= 节点 alpha（rgb 不动）；merged alpha=1 防 blob 二次烤。
-            for cc in c {
-                let mut col = *cc;
-                col[3] *= alpha;
-                colors.push(col);
-            }
+            // v1.4-a T9：alpha 不再烤进 colors（alpha 走 _Alpha uniform，单值 per-draw-call）。
+            colors.extend_from_slice(c);
             for &ixv in ix {
                 indices.push(ixv + base);
             }
@@ -87,7 +83,7 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
         node_id: anchor,
         parent_id: None,
         visible: true,
-        alpha: 1.0,
+        alpha: last.alpha, // v1.4-a T9：merged alpha=子 alpha（同 key 保证一致；走 _Alpha uniform）
         grayed: false,
         color_tint: [1.0; 4],
         world_matrix: crate::transform::IDENTITY,
@@ -135,10 +131,11 @@ mod tests {
 
     #[test]
     fn two_same_drawstate_merge_into_one() {
-        // A(a.png,sk0) B(a.png,sk1) → 1 merged：8 verts / 12 indices / colors alpha 烤制。
+        // A(a.png,sk0) B(a.png,sk1) 同 alpha=1.0 → 1 merged：8 verts / 12 indices。
+        // v1.4-a T9：colors.a 不再烤 alpha（走 _Alpha uniform）；merged.alpha = 子 alpha。
         let nodes = vec![
             mesh_node(5, Some("a.png"), 0, 1.0, 0.0),
-            mesh_node(3, Some("a.png"), 1, 0.5, 100.0), // alpha=0.5
+            mesh_node(3, Some("a.png"), 1, 1.0, 100.0), // 同 alpha
         ];
         let out = merge_meshes(nodes);
         assert_eq!(out.len(), 1, "2 同 DrawState → 1 merged");
@@ -147,20 +144,16 @@ mod tests {
                 assert_eq!(verts.len(), 8, "2×4 verts");
                 assert_eq!(indices.len(), 12, "2×6 indices");
                 assert_eq!(*image_path, Some("a.png".to_string()));
-                // 第二个节点（alpha=0.5）的 4 顶点 colors[4..8].a == 0.5。
-                for c in &colors[4..8] {
-                    assert!((c[3] - 0.5).abs() < 1e-6, "第二节点 alpha=0.5 烤进 colors.a");
-                }
-                // 第一个节点（alpha=1）colors[0..4].a == 1.0。
-                for c in &colors[0..4] {
-                    assert!((c[3] - 1.0).abs() < 1e-6);
+                // colors.a 不烤 alpha（原始 1.0）。
+                for c in colors {
+                    assert!((c[3] - 1.0).abs() < 1e-6, "colors.a 不烤 alpha（原始1.0）");
                 }
             }
             _ => panic!("expected Mesh"),
         }
         // 锚 node_id = min(5,3) = 3。
         assert_eq!(out[0].node_id, 3, "锚 = batch 内最小 node_id");
-        // merged world_matrix=IDENTITY / alpha=1。
+        // merged world_matrix=IDENTITY / alpha=1.0（子 alpha）。
         assert!(crate::transform::is_identity(&out[0].world_matrix));
         assert!((out[0].alpha - 1.0).abs() < 1e-6);
     }
@@ -210,5 +203,33 @@ mod tests {
         };
         let out = merge_meshes(vec![mesh, text]);
         assert_eq!(out.len(), 2, "Text 不参与合并");
+    }
+
+    #[test]
+    fn different_alpha_do_not_merge() {
+        // alpha 剥离后：不同 alpha 不能合一个 draw call（uniform 单值）。
+        let nodes = vec![
+            mesh_node(1, Some("a.png"), 0, 1.0, 0.0),
+            mesh_node(2, Some("a.png"), 1, 0.5, 100.0), // 不同 alpha
+        ];
+        let out = merge_meshes(nodes);
+        assert_eq!(out.len(), 2, "不同 alpha → 不合并");
+    }
+
+    #[test]
+    fn same_alpha_still_merge_no_bake() {
+        // 同 alpha 仍合并；但 colors.a 不再烤 alpha（走 uniform）。
+        let nodes = vec![
+            mesh_node(1, Some("a.png"), 0, 0.5, 0.0),
+            mesh_node(2, Some("a.png"), 1, 0.5, 100.0),
+        ];
+        let out = merge_meshes(nodes);
+        assert_eq!(out.len(), 1, "同 alpha 合并");
+        if let NodePayload::Mesh { colors, .. } = &out[0].payload {
+            for c in colors {
+                assert!((c[3] - 1.0).abs() < 1e-6, "colors.a 不烤 alpha（原始1.0）");
+            }
+        }
+        assert!((out[0].alpha - 0.5).abs() < 1e-6, "merged.alpha=子 alpha（走 uniform）");
     }
 }
