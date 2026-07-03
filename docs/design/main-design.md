@@ -449,6 +449,8 @@ stage.is_pointer_on_ui() -> bool   // = 命中目标非空且非根
 
 ## 11. 资源 / 包系统
 
+> **章节状态**：§11.3（图集）已对照实现重写。§11.2（包格式）/§11.4（引用计数）/§11.5（加载实例化）仍是早期设计草稿，与当前实现（pkg.bin 多组件格式 + `load_package` 进资源池 + `instantiate` 克隆子树，无 `loom://` URL / TextureView / create_object 三层）有差距，待核实重写。以代码（`loomgui_core/src/asset/`、`stage.rs`）+ `docs/superpowers/specs/2026-07-02-v1.4a-package-loading-design.md` 为准。
+
 ### 11.1 双格式
 - **编辑期/源**：HTML（结构）+ CSS（样式）+ 资源清单。
 - **发布产物**：编译成**单一二进制 blob**（`.pkg.bin`）。体积压到 XML/HTML 的 1/3~1/5、加载无需解析器、少分配。
@@ -462,9 +464,18 @@ stage.is_pointer_on_ui() -> bool   // = 命中目标非空且非根
 - 跨资源引用统一 URL（`loom://pkgName#resId`），存 id 不存内容。
 - **版本协商**：Header `formatVersion` + runtime 声明 `min/max_supported_version`。新 runtime 读旧包按 `formatVersion` 内联兼容（对齐 fgui `buffer.version >= N` 模式）；集中式迁移器链待多版本累积后再上。同 Stage 不允许混载不同 major version 包。
 
-### 11.3 图集
-散图 → 图集 → root TextureView + 子 TextureView（只存 UV）。`rotated`/`trim+originalSize+offset` 打包期记录、运行时还原。
-> **图集是刚需**（同图集的图才能批合，散图每张一个 draw call）。打包器内置图集打包（散图→大图 + AtlasSprite 表），算法用简单矩形打包（shelf/guillotine），够用即可。
+### 11.3 图集（归引擎，核心不知）
+**核心契约**：核心只持图片归一化 path（如 `icons/home.png`，裁 `res/` 前缀）+ 打包期 PNG IHDR 真实尺寸（存 pkg.bin AssetManifest）。**不知图集、不持纹理/UV/atlas 引用**——Image payload 带 `image_path: Option<String>`，UV 始终全图 `[0,1]`，path 推给后端。
+
+**图集归引擎后端**（Unity 首发）：图集是引擎原生概念（Unity `SpriteAtlas`），由后端管理。核心 payload 的 path 经 FFI（FrameBlob path_table + path_idx）传给 Unity，后端 `SpriteResolver` 据 path 路由到对应 `SpriteAtlas` 取 `Sprite`（含真实 packed UV + texture），重映射 blob 全图 UV 到 atlas 子区。
+
+**显式路由**（folder→atlas 映射）：path 顶层子目录 → 查映射表 → 命中 atlas → `atlas.GetSprite(文件名去扩展)`。映射表由全局配置资产（`LoomSettings.atlasEntries`，拖文件夹当 packables）构建。res 全局唯一（工作区根下），子目录全局不撞，文件名去扩展安全。res 根图（无子目录）走 `isDefault` 图集兜底。
+
+**配置中枢**：`LoomSettings`（ScriptableObject，Runtime/，全局一份 Editor+运行时同源）持有图集配置（atlasEntries）+ 包列表 + 工作区路径。Editor 面板编辑它，`LoomStage` 运行时 `Resources.Load` 自动取（不 Inspector 手配）。图集 packables 由面板同步（扫 folders 下 PNG → 显式 Sprite 列表 `SetPackables`，规避引擎 folder packable 失效）。
+
+> **为何图集归引擎不归核心**：图集打包/查询是引擎原生能力（Unity SpriteAtlas / Godot canvas），核心自建图集是重复造轮子 + 跨引擎不一致。核心只需 path + 尺寸（measure/九宫格用），纹理/UV/atlas 留给后端。批合仍保证（同图集的图同 texture → 可合批，后端 batch 按 texture 分组）。
+>
+> **path 身份**：path 是归一化相对路径（`icons/home.png`），全局唯一（res 全局唯一）。不靠文件名猜身份（旧版遍历 atlas 靠 `GetFileNameWithoutExtension` 猜，跨包撞名）——靠显式 folder→atlas 路由。
 
 ### 11.4 引用计数与生命周期
 - `TextureView` 自带 `ref_count`，子视图首引用连带 root。
