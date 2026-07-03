@@ -30,14 +30,14 @@ namespace LoomGUI.Editor
             if (settings == null) return;
             foreach (var entry in settings.atlasEntries)
             {
-                SyncEntry(settings, entry);
+                SyncEntry(entry);
             }
             EditorUtility.SetDirty(settings);
             AssetDatabase.SaveAssetIfDirty(settings);
         }
 
         /// 同步单个图集：确保 atlas 资产存在 + packables = folders 下所有 Sprite。
-        public static void SyncEntry(LoomSettings settings, AtlasEntry entry)
+        public static void SyncEntry(AtlasEntry entry)
         {
             if (entry == null || string.IsNullOrEmpty(entry.atlasName)) return;
 
@@ -48,13 +48,12 @@ namespace LoomGUI.Editor
                 entry.atlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(atlasPath);
                 if (entry.atlas == null)
                 {
-                    entry.atlas = new SpriteAtlas();
+                    entry.atlas = ScriptableObject.CreateInstance<SpriteAtlas>();
                     AssetDatabase.CreateAsset(entry.atlas, atlasPath);
                 }
             }
 
             // 扫 folders 下 PNG → Sprite 引用集合。
-            var scannedSprites = new HashSet<string>();
             var toAdd = new List<UnityEngine.Object>();
             foreach (var folder in entry.folders)
             {
@@ -71,7 +70,7 @@ namespace LoomGUI.Editor
                         importer.SaveAndReimport();
                     }
                     var sp = AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
-                    if (sp != null) { scannedSprites.Add(assetPath); toAdd.Add(sp); }
+                    if (sp != null) { toAdd.Add(sp); }
                 }
             }
 
@@ -89,7 +88,11 @@ namespace LoomGUI.Editor
         static string ToAssetPath(string abs)
         {
             string projRoot = Directory.GetParent(Application.dataPath).FullName.Replace('\\', '/');
-            return abs.Replace('\\', '/').Replace(projRoot + "/", "");
+            string normalized = abs.Replace('\\', '/');
+            string prefix = projRoot.EndsWith("/") ? projRoot : projRoot + "/";
+            if (normalized.StartsWith(prefix, System.StringComparison.OrdinalIgnoreCase))
+                return normalized.Substring(prefix.Length);
+            return normalized;
         }
     }
 }
