@@ -696,6 +696,9 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**（2026-07-03 T2）：`payload_hash` 全量——所有 verts/uvs/colors/indices、所有 glyph codepoint+x+y 一律 `to_le_bytes().hash()`，不挑代表。删采样逻辑 + 一半"补漏字段"回归测试。
 **教训**：hash 采样是补丁累积区——「省几个字段的 hash 开销」换来「每加字段必漏一次」的反复 bug。几何 hash 要么全量要么别 hash。CPU 开销（几万次哈希 ≈ 几十微秒）远小于跨 FFI 传输/Unity 重建，不值得为它牺牲正确性。
 
+**v1.4-b review 补漏**（2026-07-03）：T2"全量根治"仍漏两处——①`header_hash` 漏 `reuse_key`（身份字段，同 NodeId 换 reuse_key 不触发 Header）②`payload_hash` Text arm 漏 `line.y/height/baseline/width`（line-height 变只改 height，glyph pen 不动则撞 hash）。补字段 + 3 回归测试（header_hash_includes_reuse_key / payload_hash_text_includes_line_height / line_baseline_y）。教训延续：每加一个 RenderNode/Line 字段必检 dirty hash 是否覆盖，"全量"是动态契约不是一次性声明。
+
+
 ### 坑 106：payload_hash 位置-bake——pure-translation 顶点烤 world.tx，位置变误落 Full（双 re-base 中间漏）
 **症状**：滑动列表/transform 动画时，节点位置变（只该走 Header 廉价路径）却误判 Full，每帧重建 mesh。
 **根因**：纯平移节点 `build_render_nodes`（mod.rs:118）把 `Rect{x:wm[4],y:wm[5]...}` 位置烤进 quad verts；`blob.rs:110` 后续 re-base 减 `wm[4]/[5]` 还原成 local——**两个 re-base 互相抵消**，最终 blob arena 字节位置无关。但 `payload_hash` 在 mod.rs 之后、blob 之前算，看到的是**位置烤过的 verts** → 位置变 → payload_hash 变 → Full。spec §3.7「滑动天然 HEADER」的承诺在 hash 这层被打破。
@@ -707,3 +710,18 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **根因**：T6 把 alpha 从顶点色烘焙剥离到 `_Alpha` shader uniform——blob 不再 `c[3]*rn.alpha`，shader `col.a *= _Alpha`。但 C# `TextRasterizer.BuildMesh` 仍 `tinted.a *= alpha`（旧烘焙路径），且 `MirrorPool` 又设 `_Alpha=nodeAlpha` → text 顶点色烤一次 + uniform 再乘一次 = 双乘。mesh 路径 T6 已改对（UploadMesh 原样拷），**只有 text 路径漏改**（BuildMesh 是 C# 侧独立光栅化，不在 blob 链上）。
 **解决**（2026-07-03 T8 fix）：BuildMesh 删 `tinted.a *= alpha`（彻底，Option A），测试传 `alpha=0.5f` 断言 `vertex.a==color.a` 真锁契约（传 1f 是恒真无效测）。
 **教训**：剥离一个属性到新通道（uniform/MPB）时，**必须grep所有旧烘焙路径**——不是只改主链（blob），C# 侧独立光栅化（TextRasterizer）、merge_batch 等旁路都有自己的一份烘焙逻辑，漏一个就双乘/漏乘。测试要传非 trivial 值（0.5 不是 1）否则恒真无效。这类 bug 只在 Unity PlayMode 可见（公司机静态审 + cargo test 都测不到 C# 光栅化），静态 review 要把"所有烘焙点"列全逐一核查。
+
+### 坑 108：DrawState key 含 alpha.to_bits() → opacity 动画期间节点退出批合（设计权衡，非 bug）
+**症状**：opacity 动画的节点在动画期间 draw call 涨（退出批合），动画结束回 1.0 后重新合批。
+**根因**：渲染管线重构 T9 把 alpha 从顶点色烘焙剥离到 `_Alpha` per-renderer uniform（坑 107）。per-renderer uniform 是单值——同一 draw call 内所有顶点共享一个 `_Alpha`，**不同 alpha 的节点物理上不能合一个 draw call**（合了就只能用一个 alpha）。所以 `mesh_key`（merge.rs:12）必含 `alpha.to_bits()` 把 alpha 进 DrawState key，不同 alpha 的节点不合并。
+**性质**：正确权衡，非 bug。uniform 单值物理约束决定的——不是"alpha 不该进 key"，是"alpha 进了 uniform 就必进 key"。代价：opacity 动画期间动画节点退出批合，draw call 涨。兑现"opacity 走 Header 不重建 mesh"（alpha 变只改 MPB _Alpha，不重建 mesh），但牺牲合批。
+**教训**：剥离属性到 per-renderer uniform 时，该属性自动成为 DrawState key 的一部分（合批边界）——"省 mesh 重建"和"保合批"是 trade-off，per-renderer uniform 选前者。若 opacity 动画节点多到 draw call 成问题，考虑：①alpha 量化（0.1 步进，有限档位合批）；②或 alpha 不进 uniform 改回顶点色烘焙（但牺牲 Header 廉价路径）。当前 v1.x 不动，记性能特征待 Profiler 实测决定。
+
+### 坑 109：虚拟列表 reuse_key 绑 itemIndex → GO 复用完全失效（伪虚拟化）
+**症状**：虚拟列表滚动时 GameObject 持续销毁+重建，Profiler 见 GO/Mesh GC 峰值，快速滚动卡顿——reuse_key 机制名存实亡。
+**根因**：v1.4-b T8 driver 把 `reuse_key = itemIndex + 1`（绑数据 item 索引）。滚动时 item 进出可见区 → 新进入 item 的 itemIndex 不同于刚离开的 → reuse_key 不同 → MirrorPool `_poolByReuse` 永不命中 → 旧 GO stale 销毁 + 新 GO 新建。等于"每 item 一个独立 GO"，完全没复用。设计意图（a329c26 commit + MirrorPool 注释）是"slot 换绑 item 时 NodeId 变但 reuse_key 不变 → GO 复用"，实现完全相反。
+**双重失效**：MirrorPool EditMode 测试用"同 reuse_key、node_id 100→200"理想场景验证复用，但 driver 从不产生这种场景——测试绿但 bug 活着。
+**解决**（2026-07-03 P0-2 fix）：`reuse_key` 绑**槽位序号** slotIdx（视口内 0..visibleCount-1），非 itemIndex。`_slots` dict key 改 slotIdx。滚动时槽位稳定（slot 0 永远是视口第一个可见位），只换绑的 itemIndex 变（SetStyle 改 top/height + SetText 改内容），slotIdx 不变 → reuse_key 不变 → MirrorPool 命中 → 只重建 mesh 不销毁 GO。
+**教训**：reuse_key 是"渲染复用身份"，要绑**稳定的槽位**而非"数据身份"。fgui GList 范式（GList.cs:1975 `ii.obj = ii2.obj` 搬对象不销毁）就是槽位稳定 + 换绑数据。测试不能只验"同 reuse_key 能复用"（理想场景），要验"driver 实际产生的 reuse_key 序列"——否则测试和实际使用脱节，绿但不防 bug。
+
+

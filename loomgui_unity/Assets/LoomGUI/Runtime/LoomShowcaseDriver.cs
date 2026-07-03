@@ -617,8 +617,10 @@ namespace LoomGUI
         // Init: 0=need_measure, 1=measuring, 2=ready
         int _initStep;
 
-        // slotId(=itemIndex) → (root, title, idx)
-        readonly Dictionary<uint, (uint root, uint title, uint idx)> _slots = new();
+        // slotIdx（0..visibleCount-1，视口内固定槽位序号）→ (root, title, boundItemIndex)。
+        // P0-2 修：reuse_key 绑 slotIdx（非 itemIndex）——滚动时槽位稳定，只换绑的 itemIndex，
+        // reuse_key 不变 → MirrorPool _poolByReuse 命中 → GO 复用只重建 mesh（不销毁重建）。
+        readonly Dictionary<int, (uint root, uint title, int boundItemIndex)> _slots = new();
 
         const uint MeasureReuseKey = 0;
 
@@ -715,36 +717,57 @@ namespace LoomGUI
             }
             first = Mathf.Max(0, first);
             last = Mathf.Min((int)_itemCount - 1, last);
-            if (first > last) return;
+            if (first > last) { ClearAllSlots(); return; }
 
-            var visible = new HashSet<uint>();
-            for (int i = first; i <= last; i++) visible.Add((uint)i);
+            int visibleCount = last - first + 1;
 
-            var removeKeys = new List<uint>();
+            // 移除超出可见槽位数的多余 slot（视口缩小时）。
+            var removeKeys = new List<int>();
             foreach (var kv in _slots)
-                if (!visible.Contains(kv.Value.idx))
-                    removeKeys.Add(kv.Key);
+                if (kv.Key >= visibleCount) removeKeys.Add(kv.Key);
             foreach (var key in removeKeys)
             {
                 _stage.RemoveNode(_slots[key].root);
                 _slots.Remove(key);
             }
 
-            for (int idx = first; idx <= last; idx++)
+            // 每个可见槽位 slotIdx 0..visibleCount-1 绑定 itemIndex = first + slotIdx。
+            // slotIdx 稳定 → reuse_key 不变 → GO 复用。换绑时只改 top/height/text。
+            for (int slotIdx = 0; slotIdx < visibleCount; slotIdx++)
             {
-                uint itemIndex = (uint)idx;
-                uint slotId = itemIndex;
-                if (!_slots.ContainsKey(slotId))
+                int itemIndex = first + slotIdx;
+                float itemH = _variableHeight ? _itemSizes[itemIndex] : _itemSize;
+                float top = _variableHeight ? SumSizesUpTo(itemIndex) : itemIndex * _itemSize;
+
+                if (!_slots.ContainsKey(slotIdx))
                 {
-                    float itemH = _variableHeight ? _itemSizes[idx] : _itemSize;
-                    float top = _variableHeight ? SumSizesUpTo(idx) : itemIndex * _itemSize;
+                    // 新建 slot（视口扩大或首次）。
                     var (root, title) = CreateItem(itemH, top);
                     _stage.AppendChild(_listContainer, root);
-                    _stage.SetReuseKey(root, slotId + 1);
-                    _stage.SetText(title, GetItemTitle(itemIndex));
-                    _slots[slotId] = (root, title, itemIndex);
+                    _stage.SetReuseKey(root, (uint)slotIdx + 1);  // reuse_key = slotIdx+1（0 保留）
+                    _stage.SetText(title, GetItemTitle((uint)itemIndex));
+                    _slots[slotIdx] = (root, title, itemIndex);
+                }
+                else
+                {
+                    // 复用 slot：boundItemIndex 变 → 改 top/height（位置）+ text（内容）。
+                    // slotIdx 不变 → reuse_key 不变 → MirrorPool 命中现有 GO，只重建 mesh。
+                    var slot = _slots[slotIdx];
+                    if (slot.boundItemIndex != itemIndex)
+                    {
+                        _stage.SetStyle(slot.root,
+                            $"width:100%;height:{itemH}px;flex-direction:row;align-items:center;gap:12px;padding:0 16px;background-color:#252839;position:absolute;left:0;top:{top}px");
+                        _stage.SetText(slot.title, GetItemTitle((uint)itemIndex));
+                        _slots[slotIdx] = (slot.root, slot.title, itemIndex);
+                    }
                 }
             }
+        }
+
+        void ClearAllSlots()
+        {
+            foreach (var kv in _slots) _stage.RemoveNode(kv.Value.root);
+            _slots.Clear();
         }
 
         int FindFirstVisible(float sy)
