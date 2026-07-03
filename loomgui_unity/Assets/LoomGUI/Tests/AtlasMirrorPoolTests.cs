@@ -23,14 +23,13 @@ namespace LoomGUI.Tests
             Assert.IsNull(sp, "无 atlas 注册 → GetSprite 返 null（MissingSprite 默认 null）");
         }
 
-        /// SpriteResolver 注册 null atlas 不崩（防御）。
+        /// SpriteResolver Init(null) 不崩（防御）。
         [Test]
-        public void SpriteResolver_RegisterNullAtlas_DoesNotCrash()
+        public void SpriteResolver_InitNull_DoesNotCrash()
         {
             var resolver = new SpriteResolver();
-            resolver.RegisterAtlas(null);
-            resolver.RegisterAtlases(null);
-            Assert.AreEqual(0, resolver.AtlasCount, "null atlas 不入列表");
+            resolver.Init(null);
+            Assert.AreEqual(0, resolver.AtlasCount, "null settings → AtlasCount=0");
         }
     }
 }
