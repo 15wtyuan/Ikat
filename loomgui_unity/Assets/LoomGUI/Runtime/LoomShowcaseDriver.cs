@@ -240,7 +240,7 @@ namespace LoomGUI
             // nav-tips-demo → 弹 tips_toast 演示（tips_layer 叠加）。
             uint tipsBtn = _stage.FindNodeById("nav-tips-demo");
             AddPageListener(tipsBtn, EventType.Click, _ => ShowTips());
-            Debug.Log("[Showcase] home 订阅完成（7 nav + tips-demo）");
+            Debug.Log("[Showcase] home 订阅完成（8 nav + tips-demo）");
         }
 
         void AddNavListener(string navId, string targetPage)
@@ -456,6 +456,8 @@ namespace LoomGUI
             }
             _listDriverEqual = new VirtualListDriver(_stage, eq, 1000);
             // 不等高尺寸：正弦波 60~140px
+            // v1.4-b：本 demo 不等高用预定义 size（sin 波），size 已知无需 spec §2.8 实测补偿回路。
+            // 真实数据源（异步图片加载致 item 高度变）场景需补 MeasureAndUpdateSlot + SetScrollPos 补偿防跳动。
             float[] sizes = new float[200];
             for (int i = 0; i < 200; i++)
                 sizes[i] = 100f + 40f * Mathf.Sin(i * 0.3f);

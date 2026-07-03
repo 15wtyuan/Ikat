@@ -180,7 +180,7 @@ fn inset_four_sides() {
 fn inset_auto_keeps_default() {
     let mut s = ResolvedStyle::default();
     apply_decl(&mut s, "top", "10px");
-    apply_decl(&mut s, "top", "auto"); // auto 不写（保持默认 auto）
+    apply_decl(&mut s, "top", "auto"); // auto 显式置回默认 Auto（覆盖之前的 px 值）
     assert_eq!(s.taffy_style.inset.top, taffy::style::LengthPercentageAuto::Auto);
 }
 
