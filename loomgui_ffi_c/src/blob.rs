@@ -121,14 +121,11 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
                         mesh_arena.extend_from_slice(&u[1].to_le_bytes());
                     }
                     for c in colors {
-                        let o0 = c[0];
-                        let o1 = c[1];
-                        let o2 = c[2];
-                        let o3 = c[3] * rn.alpha;
-                        mesh_arena.extend_from_slice(&o0.to_le_bytes());
-                        mesh_arena.extend_from_slice(&o1.to_le_bytes());
-                        mesh_arena.extend_from_slice(&o2.to_le_bytes());
-                        mesh_arena.extend_from_slice(&o3.to_le_bytes());
+                        // alpha 剥离：colors 原样写，节点 alpha 走 _Alpha uniform（C# SetPropertyBlock）。
+                        mesh_arena.extend_from_slice(&c[0].to_le_bytes());
+                        mesh_arena.extend_from_slice(&c[1].to_le_bytes());
+                        mesh_arena.extend_from_slice(&c[2].to_le_bytes());
+                        mesh_arena.extend_from_slice(&c[3].to_le_bytes());
                     }
                     for ix in indices {
                         mesh_arena.extend_from_slice(&(*ix as u32).to_le_bytes());
@@ -551,7 +548,8 @@ mod tests {
     /// tint=[0.5,0.5,0.5,1.0]（应被忽略）alpha=0.5 bg=[1,0,0,1]
     /// → 首顶点色 = [1.0, 0.0, 0.0, 1.0×0.5] = [1.0, 0.0, 0.0, 0.5]（红，半透明）。
     #[test]
-    fn mesh_colors_bake_alpha_not_tint() {
+    fn mesh_colors_no_longer_bake_alpha() {
+        // alpha 剥离后：colors.a = 原始 bg.a（不乘节点 alpha）。节点 alpha 走 _Alpha uniform。
         let blob = build_blob(&frame(&[mesh_node_tinted(
             0,
             [0.5, 0.5, 0.5, 1.0],
@@ -561,12 +559,10 @@ mod tests {
         let view = TestView::parse(&blob);
         let colors = view.mesh_colors(0);
         assert_eq!(colors.len(), 4);
-        // 首顶点色 = background（rgb 不乘 color_tint），alpha × rn.opacity。
-        assert_eq!(colors[0], [1.0, 0.0, 0.0, 0.5]);
-        // alpha 列保留原 opacity 值。
+        assert_eq!(colors[0], [1.0, 0.0, 0.0, 1.0], "colors.a=原始1.0（alpha 0.5 不烤，走 uniform）");
+        // alpha 列仍保留 0.5（供 C# SetPropertyBlock _Alpha）。
         let alpha_o = view.col_off[3];
-        let alpha = f32::from_le_bytes(view.buf[alpha_o..alpha_o + 4].try_into().unwrap());
-        assert_eq!(alpha, 0.5);
+        assert_eq!(f32::from_le_bytes(view.buf[alpha_o..alpha_o+4].try_into().unwrap()), 0.5);
     }
 
     /// 构造一个 Text RenderNode：单行 glyphs，每 glyph 直接给 (codepoint, x, y)。
@@ -713,7 +709,7 @@ mod tests {
                 [vx, vy]
             }).collect()
         }
-        /// 读节点 i 的 mesh 顶点色（§4.2b：已 baked color_tint×alpha）。
+        /// 读节点 i 的 mesh 顶点色（alpha 剥离：不乘节点 alpha，alpha 走 _Alpha uniform）。
         fn mesh_colors(&self, i: usize) -> Vec<[f32; 4]> {
             let (seg, vc) = self.mesh_seg(i);
             let mut p = seg + 8;

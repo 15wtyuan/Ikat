@@ -23,6 +23,7 @@ Shader "LoomGUI/Unlit"
         _CF2 ("CF2", Vector) = (0,0,1,0)
         _CF3 ("CF3", Vector) = (0,0,0,1)
         _CFOff ("CFOff", Vector) = (0,0,0,0)
+        _Alpha ("Alpha", Float) = 1
     }
     SubShader
     {
@@ -60,6 +61,7 @@ Shader "LoomGUI/Unlit"
                 float4 _CF2;
                 float4 _CF3;
                 float4 _CFOff;
+                float _Alpha;
             CBUFFER_END
             TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
 
@@ -121,6 +123,8 @@ Shader "LoomGUI/Unlit"
                 cfs = (cfs <= 0.04045) ? cfs / 12.92 : pow(max((cfs + 0.055) / 1.055, 0.0), 2.4);
                 col.rgb = cfs;
                 #endif
+                // 节点 opacity（从顶点色剥离，per-renderer MPB）。alpha 剥离后 colors.a 不含节点 alpha。
+                col.a *= _Alpha;
                 #ifdef CLIPPED
                 float2 f = abs(i.clipPos);
                 col.a *= step(max(f.x, f.y), 1.0);
