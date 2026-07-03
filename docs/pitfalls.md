@@ -740,4 +740,22 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：reviewer 跨 task 一致性检查（CLI flag / 字段名 / 签名跨层对齐）捕到，fix 改 `--res-root` + 显式传 res 绝对路径。
 **教训**：plan 里后续 task 照搬的代码块，执行时要核实它依赖的接口有没有被前置 task 改过——尤其 CLI flag、函数签名、字段名。SDD 的 task reviewer 要带「跨 task 一致性」lens（plan 自身不会自动同步）。同类：Task 2 res 提走后 `source_dir.join(res_dir)` 读 PNG 断（plan Task 2 低估了，执行中发现要加 res_root 参数）。
 
+### 坑 112：多虚拟列表同屏 reuse_key 撞车 → slot 背景按槽位互相覆盖（灰底闪/缺）
+**症状**：page_list 两个虚拟列表（等高 + 不等高）同屏，拖动时 item 灰底（`#252839`）按 slot 闪现/消失，灰底缺失处露出深色轨道 `#1a1d2e` 像"缝隙"，整体一闪一闪。单列表测试无此问题——必须两列表同屏才暴露。
+**根因**：两个 `VirtualListDriver` 都用 `reuse_key = slotIdx+1`（都从 1 起）。MirrorPool `_poolByReuse` 是**场景级单字典**（`MirrorPool.cs:82-83`）——两列表同 slotIdx 的 slot 容器抢同一个 GO（DFS 序后者覆盖前者位置 + mesh）。关键：仅 slot 容器背景带 `reuse_key>0`（icon/span 为 0 → 按 node_id 走，唯一不撞），撞车**精确发生在灰底背景** → 被 另一列表同 slotIdx 顶掉的 slot 没了灰底（只剩 icon + 文字浮在深色轨道上）→ 灰底按 slot 闪/缺。
+**解决**（2026-07-04）：driver 加 `reuseBase` 偏移，等高用 0 段（1..N，行为不变），不等高挪到 100000 段——每列表独占 reuse_key 段，不相交。纯 C#，无 .dll 重编。
+**教训**：reuse_key 是**场景级全局命名空间**（非 per-container），多虚拟列表同屏必须用不相交的 reuse_key 段。与坑 109 同字段不同坑：109 是单列表内绑 itemIndex vs slotIdx；112 是跨列表命名空间撞车。单列表测试发现不了——多列表同屏是复用机制的必修验收场景。
+
+### 坑 113：动态字体 atlas rebuild 后 text mesh 漏重建 → 偶现上下颠倒/碎片
+**症状**：文字偶现上下颠倒/只显示一部分，随机但高频易触发（文字多/动态内容尤甚）；静态文字也中招，且错乱定住不恢复。
+**根因**：Unity 动态字体 atlas 在 `BuildMesh` 的 `RequestCharactersInTexture` **内部**异步 rebuild（atlas 被撑爆时），所有 glyph UV 变。MirrorPool 三分支只重建 `change_level==Full` 的 text；content 没变的静态 text 是 `Skip`，不进重建分支 → UV 指旧 atlas。且 rebuild 发生在 Sync 遍历**中途**，Sync 末 `_lastFontVersion` 又追上新版本号 → 下帧 `fontDirty=false` → 旧 UV **永久残留**（非闪一帧）。v1.4-a 的 B4 诊断（`plans/2026-07-03-v1.4a-acceptance-bugs-diagnosis.md`）早指出 + 给了方向，但**没沉淀进 pitfalls** → v1.4-b 重新踩、重新调试一轮。
+**解决**（2026-07-04）：① `fontDirty` 时把所有 text 节点（含 Skip/Header）提升 Full 重建；② `RenderObj` 缓存上次 Full 的 glyphs，`text_len==0`（Skip/Header，blob 不写 arena）走缓存重建取新 UV——**禁 ReadText**（text_arena 空读越界 → count 垃圾 → OOM）；③ Sync 末检测中途 rebuild（`FontVersion != start`）则**不追** `_lastFontVersion`，下帧再全重建。
+**教训**：偶现/时序 bug（依赖 Unity 内部事件 + 帧序）**光读代码定位不了**——必须运行时 log 取证（`OnRebuilt` 调用栈暴露 rebuild 在 `BuildMesh` 内触发是破案关键）。**诊断过但没沉淀 = 必重踩**——B4 要进 pitfalls 不能只留 plans。与坑 107 同为 text 渲染状态机坑，107 是 alpha 双乘、113 是 atlas rebuild 漏刷。
+
+### 坑 114：blob text 序列化 pen_y = line.y + line.baseline 多加行高（单行掩盖至 v1.4-b）
+**症状**：多行文字行距翻倍（行重叠/越往下越偏），单行正常。
+**根因**：`blob.rs` 序列化 glyph pen_y 用 `line.y + line.baseline`，但 `Line.baseline`（layout.rs:43）已是**绝对 y**（= line_y + baseline_offset），又叠 `line.y`（= line_y）→ 多一个行高。单行 line_y=0 掩盖。源头：v1a plan（`plans/2026-06-19-v1a-unity-render-phase2.md:231`）写错公式，实现照抄 3 个版本至 v1.4-b 才发现。
+**解决**：`pen_y = line.baseline`。补多行 blob 测试（原单行测试掩盖了 bug）。
+**教训**：plan/spec 的数学公式照抄进实现前核对字段语义（看 struct 注释 + 赋值处）——`baseline` 绝对还是相对要看定义。text 测试要覆盖 ≥2 行（单行掩盖多行 bug）。
+
 

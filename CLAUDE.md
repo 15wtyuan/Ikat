@@ -83,7 +83,7 @@ HTML/CSS DSL → 打包器（构建期；复用核心 parse/style）
 - **坐标系**：核心 = 左上原点、y 向下。核心代码无 `height-y` 翻转。y-flip 是**后端根 Stage 一次性变换**（Unity 根 GO scale (1,-1,1)；Godot flip = 单位矩阵，2D 本就 y 下）。
 - **代际 NodeId**：`NodeId(pub u32)`（高 20bit index + 低 12bit gen），FFI/C# 透明不透明句柄；`remove_node` gen++ 让旧句柄自动失效。内部用 `SlotMap<DefaultKey, Node>` 桥接（slotmap 的 64-bit key 装不下 u32，见 `scene/node.rs`）。
 - **单一动画时钟**：`TweenManager::update(dt)` 是唯一时钟。Controller/Gear/Transition 都不自驱——全往它提交/kill tween。ScrollPane 物理是**例外**（自维护 tween，绝不用 GTween——content 异步变化时 GTween 的固定 end 会跳变）。
-- **虚拟列表 = 层 B'（核心不认识"列表"）**（v1.4-b）：列表是普通 div（overflow:scroll + position:relative）+ N 个 slot 子节点（position:absolute + reuse_key）。核心只多管 `reuse_key: u32` 字段（传后端复用 GO）+ 3 个 FFI 口子（`set_content_size`/`get_scroll_pos`/`get_node_layout_rect`）。driver 管所有列表逻辑（slot 映射/可见区间/不等高补偿）。**reuse_key 绑稳定槽位 slotIdx（非数据 itemIndex）**——slot 换绑 item 时 NodeId 变但 reuse_key 不变 → MirrorPool 双 dict 复用 GO（坑 109）。不暴露 `<l-list>` 标签（围栏只有 div/span/img/button）。
+- **虚拟列表 = 层 B'（核心不认识"列表"）**（v1.4-b）：列表是普通 div（overflow:scroll + position:relative）+ N 个 slot 子节点（position:absolute + reuse_key）。核心只多管 `reuse_key: u32` 字段（传后端复用 GO）+ 3 个 FFI 口子（`set_content_size`/`get_scroll_pos`/`get_node_layout_rect`）。driver 管所有列表逻辑（slot 映射/可见区间/不等高补偿）。**reuse_key 绑稳定槽位 slotIdx（非数据 itemIndex）**——slot 换绑 item 时 NodeId 变但 reuse_key 不变 → MirrorPool 双 dict 复用 GO（坑 109）。**reuse_key 是场景级全局命名空间**——多虚拟列表同屏须用不相交 reuse_key 段，否则两列表同 slotIdx 抢同一 GO、slot 背景互相覆盖（坑 112）。不暴露 `<l-list>` 标签（围栏只有 div/span/img/button）。
 
 **FFI 契约**（§13.3）：每帧 Rust 产出一个 SOA 公共头（渲染节点公共字段，当前 22 列，含 `change_level` + `reuse_key`）+ 按类型分区的扁平 arena（mesh_arena、text_arena）。C# 在 tick 内原子拷贝（拷贝非 pin），Rust 下帧 reset。**变更检测用双 hash**：`header_hash`（表头：world/alpha/sort/mask/color_tint/blend/**reuse_key**，廉价字段）+ `payload_hash`（几何：全量 verts/uvs/colors/glyph/**line.y/height/baseline/width**，**不采样**——采样会漏字段，坑 56/75/76/106）。两 hash 对比上帧 → `ChangeLevel { Skip=0, Header=1, Full=2 }`（`#[repr(u8)]`，blob 一字节列）：Skip=整节点不动；Header=只更 GO transform/材质/MPB，**不重建 mesh**（滑动/transform/opacity 动画走此，兑现"位置动画廉价"）；Full=重建 mesh。**arena 仅 Full 写**（Skip/Header mesh_off/len=0，省带宽）。**`NodePayload` 只剩 Mesh/Text**——"本帧没变"由 ChangeLevel::Skip 表达（正交轴），不再是 payload 变体。alpha 走 `_Alpha` shader uniform（per-renderer MPB），不烤进顶点色。**`reuse_key`**（v1.4-b）：每节点 u32，0=无复用（后端按 node_id keying），>0=按 reuse_key 复用 GO（虚拟列表 slot：slot 换绑 item 时 NodeId 变但 reuse_key 不变 → 后端 MirrorPool 双 dict 复用 GO 不销毁）。C# 用 `Span<byte>` + `BinaryPrimitives` 读——**禁 `Marshal.PtrToStructure`**（IL2CPP struct 对齐坑），**禁跨 FFI 裸指针**。IL2CPP：回调必须 `static` + `[MonoPInvokeCallback]`。**FFI 入口绝不 panic**：cdylib 里 `.expect`/`unwrap` 遇 None 会 non-unwinding abort 拖垮宿主进程（Unity 闪退）——scene=None 等状态优雅早返空帧，别 expect（坑 102，tick_and_render 已修 match None→空 FrameData）。
 
@@ -118,6 +118,8 @@ LoomGUI 只支持 HTML/CSS 的**明确子集**，称"围栏"。这是项目漂�
 
 **跨层特性 PlayMode 报错**（拖不动/晃动/错位）先 example 实测 core 状态（overlap/scroll_pos/content_size）再改，避免盲改物理掩盖 layout 根因。dump 边界/状态取证，别靠"浮点边界/epsilon"症状层猜测。
 
+**偶现/时序 bug**（依赖 Unity 内部事件/帧序，如动态字体 atlas rebuild）光读代码定位不了——加诊断 log 运行时取证（调用栈暴露触发点是破案关键），别静态猜根因反复改（坑 113）。
+
 **改 parse-time 逻辑必重打 pkg**：`Node.base_style` 是打包期 `resolve_styles` 产物（不变）。改 cascade/mapping/parse 只重编 .dll 不够，须 `cargo run -p loomgui_pkg` 重打 pkg（html/css 未变也要）。纯 runtime（render/layout measure/scroll/anim）改 .dll 即可。
 
 csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件；新增/改 FFI struct 须同步镜像（坑 35）。
@@ -143,3 +145,4 @@ csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件�
 - 坑 102 cdylib FFI 入口 panic 拖垮宿主、坑 103 tick 时序 rematch 在 compute/solve 后致伪类改 transform/布局属性丢（**已修**，tick 重排）、坑 106 payload_hash 位置-bake 致位置变误 Full（双 re-base 中间漏）
 - 坑 56/75/76/105 dirty hash 采样漏字段（**已根治**，双 hash 全量）、坑 107 剥离 uniform 漏改旧烘焙路径致双乘
 - 坑 54 fgui v2 非 v²、坑 79 shader tex×vcol 非 CSS 合成
+- 坑 113 动态字体 atlas rebuild 漏刷 text（偶现上下颠倒，光读代码定位不了，必运行时 log 取证）、坑 114 blob pen_y 多加行高（单行掩盖，plan 公式照抄）
