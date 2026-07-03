@@ -92,6 +92,5 @@ fn payload_str(p: &NodePayload) -> String {
             )
         }
         NodePayload::Text { layout, .. } => format!("Text L{}", layout.lines.len()),
-        NodePayload::Unchanged => "Unchanged".into(),
     }
 }

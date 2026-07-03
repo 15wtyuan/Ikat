@@ -55,7 +55,6 @@ fn dump_frame(stage: &mut Stage, label: &str, focus: u32) {
                     format!("Mesh v{} c0({:.0},{:.0},{:.0},{:.0})", verts.len(), c0[0] * 255.0, c1(c0), c2(c0), c3(c0))
                 }
                 NodePayload::Text { layout, .. } => format!("Text L{}", layout.lines.len()),
-                NodePayload::Unchanged => "Unchanged".into(),
             };
             println!("  n{} wm=({:.2},{:.2},{:.2},{:.2},{:.0},{:.0}) {}", nid,
                 rn.world_matrix[0], rn.world_matrix[1], rn.world_matrix[2], rn.world_matrix[3],

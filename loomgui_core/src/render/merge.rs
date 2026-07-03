@@ -2,7 +2,7 @@
 //! 拼成单个 merged Mesh payload → 1 draw call。
 //!
 //! 前置：`batch::reorder_for_batching` 已把同 DrawState 不相交元素排到 sort_key 相邻。
-//! Text（program=1）/ 不同 DrawState / Unchanged 保持独立。
+//! Text（program=1）/ 不同 DrawState 保持独立。
 
 use crate::render::node::{NodePayload, RenderNode};
 
@@ -94,6 +94,7 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
         blend: last.blend,
         mask_context: last.mask_context,
         sort_key: last.sort_key,
+        change_level: crate::render::node::ChangeLevel::Full,
         payload: NodePayload::Mesh {
             verts, uvs, colors, indices,
             image_path: match &last.payload {
@@ -109,7 +110,7 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::node::{BlendMode, MaskContext};
+    use crate::render::node::{BlendMode, ChangeLevel, MaskContext};
 
     /// v1.4-a T6：texture 砍，mesh_node 改带 image_path（None=纯色，Some=图 path）。
     fn mesh_node(id: u32, path: Option<&str>, sort_key: u32, alpha: f32, rect_off: f32) -> RenderNode {
@@ -118,6 +119,7 @@ mod tests {
             grayed: false, color_tint: [1.0; 4],
             world_matrix: crate::transform::IDENTITY,
             blend: BlendMode::Normal, mask_context: MaskContext(0), sort_key,
+            change_level: ChangeLevel::Full,
             payload: NodePayload::Mesh {
                 verts: vec![[rect_off, 0.0], [rect_off + 10.0, 0.0],
                             [rect_off + 10.0, 10.0], [rect_off, 10.0]],

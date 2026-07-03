@@ -43,10 +43,10 @@ pub struct Stage {
     pub tweens: crate::tween::TweenManager,
     /// advance_time stash 的本帧 dt（tick_and_render 消费，喂 tweens.update）。
     pub pending_dt: f32,
-    /// 上帧每节点 dirty hash（NodeId 索引）。跨 tick 持续，供 build_render_nodes
-    /// 比较决定 emit Unchanged。transient 不进 pkg（Stage 字段非 Scene 字段）。
+    /// 上帧每节点 (header_hash, payload_hash)（node_id 键）。跨 tick 持续，供
+    /// build_render_nodes 比较定 ChangeLevel。transient 不进 pkg（Stage 字段非 Scene 字段）。
     /// reload/节点数变 → clear → 下帧全 dirty（无基线）。
-    pub prev_node_hashes: Vec<u64>,
+    pub prev_node_hashes: std::collections::HashMap<u32, (u64, u64)>,
 }
 
 impl Stage {
@@ -67,7 +67,7 @@ impl Stage {
             pending_focus_request: None,
             tweens: crate::tween::TweenManager::new(),
             pending_dt: 0.0,
-            prev_node_hashes: Vec::new(),
+            prev_node_hashes: std::collections::HashMap::new(),
         })
     }
 

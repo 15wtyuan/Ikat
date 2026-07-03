@@ -71,6 +71,7 @@ fn thumb_render_node(node_id: u32, rect: Rect, sort_key: u32) -> RenderNode {
         blend: BlendMode::Normal,
         mask_context: MaskContext(0),
         sort_key,
+        change_level: ChangeLevel::Full,
         payload: NodePayload::Mesh {
             verts: v,
             uvs: uvc,
@@ -95,71 +96,41 @@ fn thumb_render_node(node_id: u32, rect: Rect, sort_key: u32) -> RenderNode {
 pub fn build_render_nodes(
     scene: &Scene,
     font: &Font,
-    prev_hashes: &[u64],
+    prev: &std::collections::HashMap<u32, (u64, u64)>,
     image_sizes: &ImageSizeTable,
-) -> (FrameData, Vec<u64>) {
-    let n_nodes = scene.nodes.len();
-    // nodes/new_hashes 按 scene.nodes.values() 0 基顺序索引（FrameData 输出 0 基，
-    // 不改 FFI 契约）。NodeId → 0 基位置映射用 slotmap 插入序（= values() 顺序）。
+) -> (FrameData, std::collections::HashMap<u32, (u64, u64)>) {
+    // id_to_pos: NodeId → 0 基位置映射（batch assign_sort_keys 用，merge 前）。
     let id_to_pos: std::collections::HashMap<NodeId, usize> = scene
         .nodes
         .values()
         .enumerate()
         .map(|(i, n)| (n.id, i))
         .collect();
-    // 预分配 Unchanged 占位，逐个按 scene 节点覆写。
-    let mut nodes: Vec<RenderNode> = (0..n_nodes)
-        .map(|_| RenderNode {
-            node_id: 0,
-            parent_id: None,
-            visible: true,
-            alpha: 1.0,
-            grayed: false,
-            color_tint: [1.0; 4],
-            world_matrix: crate::transform::IDENTITY,
-            blend: BlendMode::Normal,
-            mask_context: MaskContext(0),
-            sort_key: 0,
-            payload: NodePayload::Unchanged,
-        })
-        .collect();
-    // 本帧每节点的新 hash（emit 后算）。
-    let mut new_hashes: Vec<u64> = vec![0; n_nodes];
-    let baselined = prev_hashes.len() == n_nodes;
-
+    // 直接构造真节点（不再预分配 Unchanged 占位）。change_level 先占位 Full，末尾统一定级。
+    let mut nodes: Vec<RenderNode> = Vec::new();
     for n in scene.nodes.values() {
-        let pos = id_to_pos[&n.id];
-        let rn = &mut nodes[pos];
         let anim = scene.anim.get(n.id);
-        rn.node_id = n.id.0 as u32;
-        rn.parent_id = n.parent.map(|p| p.0 as u32);
-        rn.alpha = anim.and_then(|a| a.opacity).unwrap_or(n.style.opacity);
-        rn.color_tint = anim.and_then(|a| a.text_color).unwrap_or(n.style.color);
-        // world_transforms 1 基索引（transform.rs 按 id.index() 填，capacity+1 长防 remove 间隙越界）。
-        // bounds guard（T5）：compute 前若结构变更致未对齐 → fallback IDENTITY（同 dump.rs/hit.rs）。
         let wm = scene
             .world_transforms
             .get(n.id.index())
             .copied()
             .unwrap_or(crate::transform::IDENTITY);
-        rn.world_matrix = wm;
-        rn.visible = true;
         let rect = if crate::transform::is_pure_translation(&wm) {
-            // scroll：world.tx 含 scroll offset（world = T(layout−scroll)）。
-            // rect 用 world.tx 位置 → quad 产 world 位置 vert → blob re-base 减 world.tx → 正好 top-local
-            // → MirrorPool GO at world.tx → 渲染 = world.tx = layout−scroll（scroll 跟随）。
-            // 无 scroll 时 world.tx=layout → 零回归。
             crate::scene::node::Rect { x: wm[4], y: wm[5], w: n.layout_rect.w, h: n.layout_rect.h }
         } else {
             crate::scene::node::Rect { x: 0.0, y: 0.0, w: n.layout_rect.w, h: n.layout_rect.h }
         };
         let rect = &rect;
-        match &n.kind {
+        let has_filter = n.style.color_filter.is_some();
+        let color_matrix = n.style.color_filter.unwrap_or([0.0; 20]);
+        let node_id = n.id.0 as u32;
+        let parent_id = n.parent.map(|p| p.0 as u32);
+        let alpha = anim.and_then(|a| a.opacity).unwrap_or(n.style.opacity);
+        let color_tint = anim.and_then(|a| a.text_color).unwrap_or(n.style.color);
+        let rn = match &n.kind {
             NodeKind::Container | NodeKind::Button => {
                 let color = anim.and_then(|a| a.bg_color)
                     .unwrap_or(n.style.background_color.unwrap_or([0.0, 0.0, 0.0, 0.0]));
-                // D17：核心知图尺寸。bg-image url 查尺寸表算 src_w/src_h（九宫格 UV + contain 几何缩放）。
-                // 无 bg-image 或尺寸表无 path → 64×64 兜底。UV 全图 (0,0)-(1,1)（Unity Sprite 自带真实 UV）。
                 let (image_path, src_w, src_h) = match &n.style.background_image {
                     Some(url) => {
                         let (sw, sh) = src_size(image_sizes, url);
@@ -170,7 +141,6 @@ pub fn build_render_nodes(
                 let has_image = image_path.is_some();
                 let u_min = [0.0, 0.0];
                 let u_max = [1.0, 1.0];
-                // border-radius resolve：CSS 原始值 → 像素（% 乘 rect 对应边）
                 let resolve = |lp: LengthPercentage, side: f32| -> f32 {
                     match lp {
                         LengthPercentage::Length(v) => v,
@@ -180,16 +150,13 @@ pub fn build_render_nodes(
                 let (rw, rh) = (rect.w, rect.h);
                 let bc = &n.style.border_radius.corners;
                 let radii = [
-                    (resolve(bc[0].h, rw), resolve(bc[0].v, rh)),  // TL
-                    (resolve(bc[1].h, rw), resolve(bc[1].v, rh)),  // TR
-                    (resolve(bc[2].h, rw), resolve(bc[2].v, rh)),  // BR
-                    (resolve(bc[3].h, rw), resolve(bc[3].v, rh)),  // BL
+                    (resolve(bc[0].h, rw), resolve(bc[0].v, rh)),
+                    (resolve(bc[1].h, rw), resolve(bc[1].v, rh)),
+                    (resolve(bc[2].h, rw), resolve(bc[2].v, rh)),
+                    (resolve(bc[3].h, rw), resolve(bc[3].v, rh)),
                 ];
                 let all_zero = radii.iter().all(|&(rx, ry)| rx <= 0.0 || ry <= 0.0);
-                // v 翻转（同 Image 分支：design y-down 配 Unity y-up；
-                // 交换 uv v 传给 mesh 函数，所有 mesh 函数同样处理）
                 let has_slice = n.style.border_image_slice.is_some();
-                // contain 缩 geometry（左上 CSS position 0% 0%）；slice+contain 不组合（showcase 无）。
                 let draw_rect = if !has_slice
                     && matches!(n.style.background_size, crate::style::resolved::BackgroundSize::Contain)
                 {
@@ -217,28 +184,24 @@ pub fn build_render_nodes(
                         [u_min[0], u_max[1]], [u_max[0], u_min[1]],
                     ),
                 };
-                // program：有 color_filter → 3 或 4（叠加 filter，mesh 几何不变）；
-                //   4=filter+bg-image（COLOR_FILTER+BG_COMPOSITE 双 keyword，spec §3.2 禁用皮肤按钮核心用例）；
-                //   3=filter 无 bg-image（COLOR_FILTER only，base tex*vcol）。
-                // 否则有 bg-image → 2（CSS 合成，坑 79）；否则 0（tex*vcol：无图白占位×bg-color=bg-color）。
-                let has_filter = n.style.color_filter.is_some();
                 let program = if has_filter {
-                    if has_image { 4u32 } else { 3u32 }   // 4=bg-image+filter 双 keyword, 3=filter only
+                    if has_image { 4u32 } else { 3u32 }
                 } else if has_image { 2u32 } else { 0u32 };
-                let color_matrix = n.style.color_filter.unwrap_or([0.0; 20]);
-                rn.payload = NodePayload::Mesh {
-                    verts: v, uvs: uvc, colors: col, indices: idx, image_path, program, color_matrix,
-                };
+                RenderNode {
+                    node_id, parent_id, visible: true, alpha, grayed: false,
+                    color_tint, world_matrix: wm, blend: BlendMode::Normal,
+                    mask_context: MaskContext(0), sort_key: 0,
+                    change_level: ChangeLevel::Full,
+                    payload: NodePayload::Mesh {
+                        verts: v, uvs: uvc, colors: col, indices: idx, image_path, program, color_matrix,
+                    },
+                }
             }
             NodeKind::Image { src } => {
-                // D17：核心知图尺寸。src 查尺寸表算 src_w/src_h（九宫格 UV slice_px / src_px）。
-                // 尺寸表无 path / w,h=0 → 64×64 兜底。UV 全图 (0,0)-(1,1)（Unity Sprite 自带真实 UV）。
                 let image_path = Some(src.clone());
                 let uv_min = [0.0, 0.0];
                 let uv_max = [1.0, 1.0];
                 let (src_w, src_h) = src_size(image_sizes, src);
-                // v 翻转：design y-down + LoomStage scale (sf,-sf,sf) 把 design 顶映到屏幕上；
-                // 所有 mesh 函数 TL→传入的umin/vmin，交换 v 后 TL→(umin, vmax)（texture 顶）。
                 let (v, uvc, col, idx) = match &n.style.border_image_slice {
                     Some(slice) => crate::render::mesh::nine_slice(
                         rect, [1.0; 4], slice, src_w, src_h,
@@ -249,16 +212,17 @@ pub fn build_render_nodes(
                         [uv_min[0], uv_max[1]], [uv_max[0], uv_min[1]],
                     ),
                 };
-                let has_filter = n.style.color_filter.is_some();
                 let program = if has_filter { 3u32 } else { 0u32 };
-                let color_matrix = n.style.color_filter.unwrap_or([0.0; 20]);
-                rn.payload = NodePayload::Mesh { verts: v, uvs: uvc, colors: col, indices: idx, image_path, program, color_matrix };
+                RenderNode {
+                    node_id, parent_id, visible: true, alpha, grayed: false,
+                    color_tint, world_matrix: wm, blend: BlendMode::Normal,
+                    mask_context: MaskContext(0), sort_key: 0,
+                    change_level: ChangeLevel::Full,
+                    payload: NodePayload::Mesh { verts: v, uvs: uvc, colors: col, indices: idx, image_path, program, color_matrix },
+                }
             }
             NodeKind::Text { content } => {
                 let s = &n.style;
-                // 复用 layout 阶段 TextLayout（taffy 选定 max_width 测），不重测：
-                // 用 rect.w（stretch 后整数宽）重测，短文本 intrinsic 亚像素超 available
-                // 会误判换行。fallback（text_layouts 空，如 test 未走 solve）：用 rect.w 测。
                 let mut layout = scene
                     .text_layouts
                     .get(n.id.index())
@@ -275,26 +239,26 @@ pub fn build_render_nodes(
                 if off_x != 0.0 || off_y != 0.0 {
                     bake_content_offset(&mut layout, off_x, off_y);
                 }
-                rn.payload = NodePayload::Text {
-                    layout, font_size: s.font_size,
-                    color: anim.and_then(|a| a.text_color).unwrap_or(s.color), program: 1,
-                };
+                RenderNode {
+                    node_id, parent_id, visible: true, alpha, grayed: false,
+                    color_tint, world_matrix: wm, blend: BlendMode::Normal,
+                    mask_context: MaskContext(0), sort_key: 0,
+                    change_level: ChangeLevel::Full,
+                    payload: NodePayload::Text {
+                        layout, font_size: s.font_size,
+                        color: anim.and_then(|a| a.text_color).unwrap_or(s.color), program: 1,
+                    },
+                }
             }
-        }
-        // 算本帧 hash，与上帧比。相等（且有基线）→ payload 改回 Unchanged。
-        let h = crate::render::dirty::node_hash(rn);
-        new_hashes[pos] = h;
-        if baselined && prev_hashes[pos] == h {
-            rn.payload = NodePayload::Unchanged;
-        }
+        };
+        nodes.push(rn);
     }
+    // batch / merge / thumb
     let clips = batch::assign_sort_keys(scene, &mut nodes, &id_to_pos);
-    // max_sort 在 reorder/merge 前算（内容 sort_key；scrollbar 用 max+1 排内容后）。
     let max_sort = nodes.iter().map(|n| n.sort_key).max().unwrap_or(0);
     batch::reorder_for_batching(scene, &mut nodes);
     let mut nodes = merge::merge_meshes(nodes);
-    // 合成 scrollbar thumb（merge 后追加——sentinel id = container|V/H_THUMB_FLAG 高位，
-    // batch.rs reorder 用 node 索引 scene.nodes，sentinel 越界；故不参与 batch，独立 quad 末尾追加）。
+    // 合成 scrollbar thumb
     for n in scene.nodes.values() {
         let nid = n.id;
         if let Some(s) = scene.scroll.get(nid) {
@@ -311,6 +275,21 @@ pub fn build_render_nodes(
                 }
             }
         }
+    }
+    // merge 后按 node_id 算双 hash → 定级别（D2/D3）
+    let mut new_hashes = std::collections::HashMap::with_capacity(nodes.len());
+    for rn in &mut nodes {
+        let hh = crate::render::dirty::header_hash(rn);
+        let ph = crate::render::dirty::payload_hash(rn);
+        rn.change_level = match prev.get(&rn.node_id) {
+            None => ChangeLevel::Full,
+            Some(&(prev_hh, prev_ph)) => {
+                if prev_ph != ph { ChangeLevel::Full }
+                else if prev_hh != hh { ChangeLevel::Header }
+                else { ChangeLevel::Skip }
+            }
+        };
+        new_hashes.insert(rn.node_id, (hh, ph));
     }
     (FrameData { nodes, clips }, new_hashes)
 }
@@ -395,7 +374,7 @@ mod tests {
         )], vec![]);
         let font = test_font().expect("need test font for build_render_nodes");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         let rns = &frame.nodes;
         assert_eq!(rns.len(), 1);
         match &rns[0].payload {
@@ -433,7 +412,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![a], vec![]);
         let font = test_font().expect("need test font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { image_path, .. } => {
                 assert_eq!(*image_path, Some("icons/skin.png".to_string()),
@@ -453,7 +432,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![n], vec![]);
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { image_path, .. } => {
                 assert_eq!(*image_path, Some("icons/bg.png".to_string()),
@@ -470,7 +449,7 @@ mod tests {
             0, None, Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }, Some([1.0, 0.0, 0.0, 1.0]))], vec![]);
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { image_path, .. } => {
                 assert!(image_path.is_none(), "纯色 Container image_path=None");
@@ -489,7 +468,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![a], vec![]);
         let font = test_font().expect("need test font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { image_path, uvs, program, .. } => {
                 assert_eq!(*image_path, Some("logo.png".to_string()), "Image payload 带 path=src");
@@ -511,7 +490,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![a], vec![]);
         let font = test_font().expect("need test font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { uvs, .. } => {
                 assert_eq!(uvs[0], [0.0, 1.0], "TL == (0,1)（v 翻转）");
@@ -545,7 +524,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![n], vec![]);
 
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         let rns = &frame.nodes;
         match &rns[0].payload {
             NodePayload::Text {
@@ -601,7 +580,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![n], vec![]);
 
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         let rns = &frame.nodes;
         match &rns[0].payload {
             NodePayload::Text { layout, .. } => {
@@ -639,7 +618,7 @@ mod tests {
 
         let font = test_font().expect("need test font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         let rns = &frame.nodes;
         // 3 个不同 mask_context → 不合并 → 保 3 节点；sort_key 经 reorder 重赋后仍单调。
         assert_eq!(rns.len(), 3, "3 个不同 mask_context → 不合并");
@@ -670,7 +649,7 @@ mod tests {
         let font = test_font().expect("need test font");
 
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         // root(Container, image_path=None) + 1 merged(Image image_path=Some("a.png")) = 2 节点（原 3）。
         let mesh_count = frame
             .nodes
@@ -709,7 +688,7 @@ mod tests {
 
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         assert!((frame.nodes[0].alpha - 0.25).abs() < 1e-5, "anim.opacity override → alpha=0.25");
         match &frame.nodes[0].payload {
             NodePayload::Mesh { colors, .. } => {
@@ -752,7 +731,7 @@ mod tests {
         crate::scene::transform::compute_world_transforms(&mut scene);
 
         let font = test_font().expect("need test font");
-        let (fd, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (fd, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         let thumbs: Vec<_> = fd
             .nodes
             .iter()
@@ -790,71 +769,12 @@ mod tests {
         crate::scene::transform::compute_world_transforms(&mut scene);
 
         let font = test_font().expect("need test font");
-        let (fd, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (fd, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         let has_thumb = fd
             .nodes
             .iter()
             .any(|n| n.node_id & (crate::scroll::V_THUMB_FLAG | crate::scroll::H_THUMB_FLAG) != 0);
         assert!(!has_thumb, "non-effective 容器无 thumb");
-    }
-
-    // ── dirty Unchanged emit ─────────────────────────
-
-    /// 首帧（prev_hashes 空）→ 全 emit Mesh，无 Unchanged。
-    #[test]
-    fn build_first_frame_all_emit_no_unchanged() {
-        let mut scene = Scene::from_nodes(vec![container_node(0, None, Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }, Some([1.0,0.0,0.0,1.0]))], vec![]);
-        let font = test_font().expect("need font");
-        crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _hashes) = build_render_nodes(&scene, &font, &[], &empty_sizes());
-        // 首帧无 Unchanged（全 Mesh）。
-        assert!(frame.nodes.iter().all(|n| !matches!(n.payload, NodePayload::Unchanged)),
-            "首帧 prev_hashes 空 → 全 emit");
-    }
-
-    /// 第二帧无变化 → 该节点 Unchanged。
-    #[test]
-    fn build_static_frame_emits_unchanged() {
-        let mut scene = Scene::from_nodes(vec![container_node(0, None, Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }, Some([1.0,0.0,0.0,1.0]))], vec![]);
-        let font = test_font().expect("need font");
-        crate::scene::transform::compute_world_transforms(&mut scene);
-        // 首帧拿 hash 基线。
-        let (_f1, hashes) = build_render_nodes(&scene, &font, &[], &empty_sizes());
-        // 第二帧无变化 → Unchanged。
-        let (f2, _) = build_render_nodes(&scene, &font, &hashes, &empty_sizes());
-        // f2 含 1 个 Unchanged（merge 后该节点 passthrough 仍 Unchanged）。
-        assert!(f2.nodes.iter().any(|n| matches!(n.payload, NodePayload::Unchanged)),
-            "静态帧未变节点 → Unchanged");
-    }
-
-    /// 第二帧 style 变（bg color）→ 该节点重 emit Mesh（非 Unchanged）。
-    #[test]
-    fn build_changed_frame_re_emits() {
-        let mut scene = Scene::from_nodes(vec![container_node(0, None, Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }, Some([1.0,0.0,0.0,1.0]))], vec![]);
-        let font = test_font().expect("need font");
-        crate::scene::transform::compute_world_transforms(&mut scene);
-        let (_f1, hashes) = build_render_nodes(&scene, &font, &[], &empty_sizes());
-        // 改 bg color。
-        let rid = scene.roots[0];
-        scene.get_mut(rid).unwrap().style.background_color = Some([0.0,1.0,0.0,1.0]);
-        let (f2, _) = build_render_nodes(&scene, &font, &hashes, &empty_sizes());
-        assert!(f2.nodes.iter().all(|n| !matches!(n.payload, NodePayload::Unchanged)),
-            "bg color 变 → 重 emit Mesh（colors[0] hash 不等）");
-    }
-
-    /// reload（节点数变，prev_hashes 长度不符）→ 全 emit（无基线）。
-    #[test]
-    fn build_reload_clears_baseline() {
-        let mut scene = Scene::from_nodes(vec![container_node(0, None, Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }, Some([1.0,0.0,0.0,1.0]))], vec![]);
-        let font = test_font().expect("need font");
-        crate::scene::transform::compute_world_transforms(&mut scene);
-        let (_f1, hashes) = build_render_nodes(&scene, &font, &[], &empty_sizes());
-        // prev_hashes 长度 > 节点数（模拟 reload 后旧 hash 表残留）→ 无基线 → 全 emit。
-        let mut stale = hashes.clone();
-        stale.push(999);
-        let (f2, _) = build_render_nodes(&scene, &font, &stale, &empty_sizes());
-        assert!(f2.nodes.iter().all(|n| !matches!(n.payload, NodePayload::Unchanged)),
-            "prev_hashes 长度不符 → 全 emit（防错位）");
     }
 
     /// render 复用 layout 阶段 TextLayout，不重测。
@@ -882,7 +802,7 @@ mod tests {
         assert!(scene.text_layouts[text_id.index()].is_some(), "solve 应为 Text 节点填 text_layouts");
         let layout_lines = scene.text_layouts[text_id.index()].as_ref().unwrap().lines.len();
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         let render_lines = match &frame.nodes[1].payload {
             NodePayload::Text { layout, .. } => layout.lines.len(),
             _ => panic!("expected Text payload"),
@@ -913,12 +833,54 @@ mod tests {
         let mut scene = Scene::build(&entries);
         crate::layout::solve(&mut scene, &font, (container_w, 100.0), &std::collections::HashMap::new());
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         let lines = match &frame.nodes[1].payload {
             NodePayload::Text { layout, .. } => layout.lines.len(),
             _ => panic!("expected Text payload"),
         };
         assert!(lines >= 2, "长文本 intrinsic={:.1} container={} 应换行，got {} 行", intrinsic, container_w, lines);
+    }
+
+    // ── change_level 三级测试 ─────────────────────────
+
+    #[test]
+    fn change_level_skip_header_full() {
+        use crate::render::node::ChangeLevel;
+        let mut scene = Scene::from_nodes(vec![container_node(
+            0, None, Rect { x:0.0,y:0.0,w:10.0,h:10.0 }, Some([1.0,0.0,0.0,1.0]))], vec![]);
+        let font = test_font().expect("font");
+        crate::scene::transform::compute_world_transforms(&mut scene);
+        // 首帧：无基线 → FULL
+        let (f1, h1) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
+        assert_eq!(f1.nodes[0].change_level, ChangeLevel::Full, "首帧 FULL");
+        // 第二帧不变 → SKIP
+        let (f2, h2) = build_render_nodes(&scene, &font, &h1, &empty_sizes());
+        assert_eq!(f2.nodes[0].change_level, ChangeLevel::Skip, "不变 → SKIP");
+        // 第三帧改 color（只影响 header_hash 的 color_tint）→ HEADER
+        scene.get_mut(scene.roots[0]).unwrap().style.color = [0.5, 0.5, 0.5, 1.0];
+        let (f3, h3) = build_render_nodes(&scene, &font, &h2, &empty_sizes());
+        assert_eq!(f3.nodes[0].change_level, ChangeLevel::Header, "color 变 → HEADER（payload 不变）");
+        // 第四帧改背景色 → FULL
+        scene.get_mut(scene.roots[0]).unwrap().style.background_color = Some([0.0,1.0,0.0,1.0]);
+        let (f4, _) = build_render_nodes(&scene, &font, &h3, &empty_sizes());
+        assert_eq!(f4.nodes[0].change_level, ChangeLevel::Full, "bg 变 → FULL");
+    }
+
+    /// reload（prev 非空但 node_id 不在其中）→ Full
+    #[test]
+    fn change_level_reload_all_full() {
+        use crate::render::node::ChangeLevel;
+        let mut scene = Scene::from_nodes(vec![container_node(
+            0, None, Rect { x:0.0,y:0.0,w:10.0,h:10.0 }, Some([1.0,0.0,0.0,1.0]))], vec![]);
+        let font = test_font().expect("font");
+        crate::scene::transform::compute_world_transforms(&mut scene);
+        let (_f1, _h1) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
+        // prev 有 hash 但 node_id 不在其中（模拟 reload 后旧 hash 表有不同节点）
+        let mut stale: std::collections::HashMap<u32, (u64, u64)> = std::collections::HashMap::new();
+        stale.insert(999, (0, 0));
+        let (f2, _) = build_render_nodes(&scene, &font, &stale, &empty_sizes());
+        assert_eq!(f2.nodes[0].change_level, ChangeLevel::Full,
+            "prev 无本节点 → Full（防错位）");
     }
 
     // T6: 删除 fit_uv_* 4 项 —— fit_uv 函数已删（核心不再算 cover/contain 子区 UV，
@@ -937,7 +899,7 @@ mod tests {
 
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { image_path, program, uvs, colors, .. } => {
                 assert_eq!(*image_path, Some("a.png".to_string()), "bg-image → image_path=url");
@@ -963,7 +925,7 @@ mod tests {
 
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         if let NodePayload::Mesh { verts, .. } = &frame.nodes[0].payload {
             let xmax = verts.iter().map(|v| v[0]).fold(f32::MIN, f32::max);
             assert!((xmax - 100.0).abs() < 1e-2, "contain 子矩形 xmax=100（src 64 兜底缩放宽，右留白），got {}", xmax);
@@ -980,7 +942,7 @@ mod tests {
 
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { image_path, colors, uvs, .. } => {
                 assert_eq!(*image_path, Some("a.png".to_string()), "bg-image → image_path=url");
@@ -1002,7 +964,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![n], vec![]);
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { program, image_path, .. } => {
                 assert_eq!(*image_path, Some("a.png".to_string()), "bg-image → image_path=Some");
@@ -1019,7 +981,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![n], vec![]);
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { program, .. } => {
                 assert_eq!(*program, 0, "无 bg-image → program=0");
@@ -1037,7 +999,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![n], vec![]);
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { program, image_path, .. } => {
                 assert_eq!(*image_path, Some("missing.png".to_string()), "path 直填（无注册概念）");
@@ -1059,7 +1021,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![root, img], vec![(0, 1)]);
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         let img_rn = frame.nodes.iter()
             .find(|n| matches!(&n.payload, NodePayload::Mesh { image_path, .. } if *image_path == Some("a.png".to_string())))
             .expect("img mesh");
@@ -1078,7 +1040,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![n], vec![]);
         crate::scene::transform::compute_world_transforms(&mut scene);
         let font = test_font().expect("need font");
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { program, color_matrix, .. } => {
                 assert_eq!(*program, 3, "filter → program=3");
@@ -1102,7 +1064,7 @@ mod tests {
 
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { program, image_path, color_matrix, .. } => {
                 assert_eq!(*image_path, Some("a.png".to_string()), "bg-image → image_path=Some");
@@ -1123,7 +1085,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![n], vec![]);
         crate::scene::transform::compute_world_transforms(&mut scene);
         let font = test_font().expect("need font");
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { verts, .. } => {
                 assert_eq!(verts.len(), 16, "slice → nine_slice 16 顶点");
@@ -1145,7 +1107,7 @@ mod tests {
         crate::scene::transform::compute_world_transforms(&mut scene);
         let font = test_font().expect("need font");
         // D17：尺寸表 skin.png=80×80 → UV 切片 = 10/80 = 0.125
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &sizes("skin.png", 80, 80));
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &sizes("skin.png", 80, 80));
         match &frame.nodes[0].payload {
             NodePayload::Mesh { uvs, verts, .. } => {
                 assert_eq!(verts.len(), 16, "nine_slice 16 顶点");
@@ -1175,7 +1137,7 @@ mod tests {
         crate::scene::transform::compute_world_transforms(&mut scene);
         let font = test_font().expect("need font");
         // 尺寸表无 skin.png → fallback 64×64 → UV 切片 = 10/64 ≈ 0.15625
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { uvs, .. } => {
                 let expected = 10.0 / 64.0;
@@ -1192,7 +1154,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![container_node(0, None, Rect { x: 0.0, y: 0.0, w: 80.0, h: 80.0 }, Some([1.0, 0.0, 0.0, 1.0]))], vec![]);
         crate::scene::transform::compute_world_transforms(&mut scene);
         let font = test_font().expect("need font");
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         if let NodePayload::Mesh { program, .. } = &frame.nodes[0].payload {
             assert_eq!(*program, 0, "无图无 filter → program=0");
         }
@@ -1207,7 +1169,7 @@ mod tests {
 
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { image_path, program, .. } => {
                 assert_eq!(*image_path, Some("missing.png".to_string()), "url 直填 image_path（无注册概念）");
@@ -1223,7 +1185,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![container_node(0, None, Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }, Some([1.0, 0.0, 0.0, 1.0]))], vec![]);
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { image_path, .. } => assert!(image_path.is_none(), "无图 Container image_path=None"),
             _ => panic!("expected Mesh"),
@@ -1238,7 +1200,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![container_node(0, None, Rect { x: 0.0, y: 0.0, w: 80.0, h: 80.0 }, Some([1.0, 0.0, 0.0, 1.0]))], vec![]);
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         let rn = &frame.nodes[0];
         match &rn.payload {
             NodePayload::Mesh { verts, .. } => {
@@ -1261,7 +1223,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![n], vec![]);
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         let rn = &frame.nodes[0];
         match &rn.payload {
             NodePayload::Mesh { verts, .. } => {
@@ -1285,7 +1247,7 @@ mod tests {
         let mut scene = Scene::from_nodes(vec![n], vec![]);
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         let rn = &frame.nodes[0];
         match &rn.payload {
             NodePayload::Mesh { verts, .. } => {
@@ -1311,7 +1273,7 @@ mod tests {
 
         let font = test_font().expect("need font");
         crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _) = build_render_nodes(&scene, &font, &[], &empty_sizes());
+        let (frame, _) = build_render_nodes(&scene, &font, &std::collections::HashMap::new(), &empty_sizes());
         match &frame.nodes[0].payload {
             NodePayload::Mesh { image_path, verts, .. } => {
                 assert_eq!(*image_path, Some("a.png".to_string()), "bg-image+radius: image_path=Some");

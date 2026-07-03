@@ -26,6 +26,7 @@ expression: json
     "blend": "Normal",
     "mask_context": 0,
     "sort_key": 0,
+    "change_level": "Full",
     "payload": {
       "Mesh": {
         "verts": [
@@ -148,6 +149,7 @@ expression: json
     "blend": "Normal",
     "mask_context": 0,
     "sort_key": 1,
+    "change_level": "Full",
     "payload": {
       "Mesh": {
         "verts": [

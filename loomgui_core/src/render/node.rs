@@ -26,9 +26,17 @@ pub enum BlendMode {
     Normal,
 }
 
+/// 帧级变更级别（与 payload_kind「是什么」正交，表示「这帧变了什么」）。
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ChangeLevel {
+    Skip = 0,   // 表头+几何均未变：C# 保留 GO，不碰
+    Header = 1, // 只表头变：C# 只改 GO transform/材质，不重建 mesh
+    Full = 2,   // 几何变：C# 重建 mesh
+}
+
 /// 节点渲染载荷。
 ///
-/// - `Unchanged`：脏标志未置（build_render_nodes 不产出，留作 stage 层 diff 结果）。
 /// - `Mesh`：quad 几何（背景色块 / 图片）。`image_path`=None 表示纯色（无贴图），
 ///   `Some(path)` 为 Image 节点 / bg-image 容器的归一化图片 path（核心不知图集，path 推给
 ///   Unity 查 Sprite）。UV 始终 (0,0)-(1,1)（Unity Sprite 自带真实 UV；核心无子区）。
@@ -37,7 +45,6 @@ pub enum BlendMode {
 /// - `Text`：measure_text 产 TextLayout + 颜色。`program`=1 = Text shader。
 #[derive(Debug, Clone, Serialize)]
 pub enum NodePayload {
-    Unchanged,
     Mesh {
         verts: Vec<[f32; 2]>,
         uvs: Vec<[f32; 2]>,
@@ -74,6 +81,7 @@ pub struct RenderNode {
     pub blend: BlendMode,
     pub mask_context: MaskContext,
     pub sort_key: u32,
+    pub change_level: ChangeLevel,
     pub payload: NodePayload,
 }
 
@@ -94,6 +102,7 @@ mod serde_smoke_tests {
             blend: BlendMode::Normal,
             mask_context: MaskContext(2),
             sort_key: 5,
+            change_level: ChangeLevel::Full,
             payload: NodePayload::Mesh {
                 verts: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
                 uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],

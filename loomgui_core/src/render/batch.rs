@@ -234,7 +234,7 @@ pub fn reorder_for_batching(scene: &Scene, nodes: &mut [RenderNode]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::node::{BlendMode, NodePayload};
+    use crate::render::node::{BlendMode, ChangeLevel, NodePayload};
     use crate::scene::node::*;
 
     fn placeholder_rn(i: usize) -> RenderNode {
@@ -249,7 +249,16 @@ mod tests {
             blend: BlendMode::Normal,
             mask_context: MaskContext(0),
             sort_key: 0,
-            payload: NodePayload::Unchanged,
+            change_level: ChangeLevel::Full,
+            payload: NodePayload::Mesh {
+                verts: vec![[0.0, 0.0]; 4],
+                uvs: vec![[0.0, 0.0]; 4],
+                colors: vec![[1.0; 4]; 4],
+                indices: vec![0, 1, 2, 0, 2, 3],
+                image_path: None,
+                program: 0,
+                color_matrix: [0.0; 20],
+            },
         }
     }
 
@@ -441,6 +450,7 @@ mod tests {
             blend: BlendMode::Normal,
             mask_context: MaskContext(mask),
             sort_key: 0,
+            change_level: ChangeLevel::Full,
             payload: NodePayload::Mesh {
                 verts: vec![[rect.x, rect.y], [rect.x + rect.w, rect.y],
                             [rect.x + rect.w, rect.y + rect.h], [rect.x, rect.y + rect.h]],
@@ -534,7 +544,7 @@ mod tests {
         let ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
         // rns 顺 = scene.nodes.values() 顺（root, a, t, b）
         let mut rns: Vec<RenderNode> = vec![
-            { let mut r = placeholder_rn(0); r.payload = NodePayload::Unchanged; r.mask_context = MaskContext(0); r.node_id = ids[0].0; r },
+            { let mut r = placeholder_rn(0); r.mask_context = MaskContext(0); r.node_id = ids[0].0; r },
             { let mut r = mesh_rn_into_rn(0, Some("a.png"), &scene); r.node_id = ids[1].0; r },
             { let mut r = text_rn(0); r.node_id = ids[2].0; r },
             { let mut r = mesh_rn_into_rn(0, Some("a.png"), &scene); r.node_id = ids[3].0; r },
