@@ -856,14 +856,19 @@ mod tests {
         // 第二帧不变 → SKIP
         let (f2, h2) = build_render_nodes(&scene, &font, &h1, &empty_sizes());
         assert_eq!(f2.nodes[0].change_level, ChangeLevel::Skip, "不变 → SKIP");
-        // 第三帧改 color（只影响 header_hash 的 color_tint）→ HEADER
-        scene.get_mut(scene.roots[0]).unwrap().style.color = [0.5, 0.5, 0.5, 1.0];
+        // 第三帧改位置（纯平移 → world_matrix 变，但 re-base 后 verts 不变 → payload_hash 不变）→ HEADER
+        scene.get_mut(scene.roots[0]).unwrap().layout_rect.x = 50.0;
+        crate::scene::transform::compute_world_transforms(&mut scene);
         let (f3, h3) = build_render_nodes(&scene, &font, &h2, &empty_sizes());
-        assert_eq!(f3.nodes[0].change_level, ChangeLevel::Header, "color 变 → HEADER（payload 不变）");
-        // 第四帧改背景色 → FULL
+        assert_eq!(f3.nodes[0].change_level, ChangeLevel::Header, "位置变（纯平移）→ HEADER（payload 不变）");
+        // 第四帧改 color（只影响 header_hash 的 color_tint）→ HEADER
+        scene.get_mut(scene.roots[0]).unwrap().style.color = [0.5, 0.5, 0.5, 1.0];
+        let (f4, h4) = build_render_nodes(&scene, &font, &h3, &empty_sizes());
+        assert_eq!(f4.nodes[0].change_level, ChangeLevel::Header, "color 变 → HEADER（payload 不变）");
+        // 第五帧改背景色 → FULL
         scene.get_mut(scene.roots[0]).unwrap().style.background_color = Some([0.0,1.0,0.0,1.0]);
-        let (f4, _) = build_render_nodes(&scene, &font, &h3, &empty_sizes());
-        assert_eq!(f4.nodes[0].change_level, ChangeLevel::Full, "bg 变 → FULL");
+        let (f5, _) = build_render_nodes(&scene, &font, &h4, &empty_sizes());
+        assert_eq!(f5.nodes[0].change_level, ChangeLevel::Full, "bg 变 → FULL");
     }
 
     /// reload（prev 非空但 node_id 不在其中）→ Full

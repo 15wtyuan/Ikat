@@ -26,9 +26,15 @@ pub fn payload_hash(rn: &RenderNode) -> u64 {
             for &v in color_matrix.iter() {
                 v.to_le_bytes().hash(&mut h);
             }
+            // re-base verts to local before hashing（同 blob.rs:104-111）。
+            // 纯平移节点 bake 了绝对世界坐标进 verts→减法得 local；
+            // 非纯平移节点已 box-local（Rect{x:0,y:0}）→不减。
+            // 这样位置变只改 world_matrix（进 header_hash），不改 payload_hash→Header。
+            let pure = crate::transform::is_pure_translation(&rn.world_matrix);
+            let (tx, ty) = if pure { (rn.world_matrix[4], rn.world_matrix[5]) } else { (0.0, 0.0) };
             for v in verts {
-                v[0].to_le_bytes().hash(&mut h);
-                v[1].to_le_bytes().hash(&mut h);
+                (v[0] - tx).to_le_bytes().hash(&mut h);
+                (v[1] - ty).to_le_bytes().hash(&mut h);
             }
             for u in uvs {
                 u[0].to_le_bytes().hash(&mut h);
