@@ -724,4 +724,10 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**（2026-07-03 P0-2 fix）：`reuse_key` 绑**槽位序号** slotIdx（视口内 0..visibleCount-1），非 itemIndex。`_slots` dict key 改 slotIdx。滚动时槽位稳定（slot 0 永远是视口第一个可见位），只换绑的 itemIndex 变（SetStyle 改 top/height + SetText 改内容），slotIdx 不变 → reuse_key 不变 → MirrorPool 命中 → 只重建 mesh 不销毁 GO。
 **教训**：reuse_key 是"渲染复用身份"，要绑**稳定的槽位**而非"数据身份"。fgui GList 范式（GList.cs:1975 `ii.obj = ii2.obj` 搬对象不销毁）就是槽位稳定 + 换绑数据。测试不能只验"同 reuse_key 能复用"（理想场景），要验"driver 实际产生的 reuse_key 序列"——否则测试和实际使用脱节，绿但不防 bug。
 
+### 坑 110：merge modify/delete 冲突按 delete 解决 → 误删 HEAD 扩展的活测试
+**症状**：deadcode-cleanup worktree merge 回 main（已含 workflow-atlas-rework v9）时，`MirrorPoolTests.cs` / `AtlasMirrorPoolTests.cs` 报 modify/delete 冲突（worktree 删 / HEAD 改）。按 delete 解决后 489 行 v9 验收测试（`MirrorPoolReuseKeyTests` T6 reuse_key GO 复用 + `AtlasMirrorPoolPathTests` SpriteResolver 冒烟）丢失，T6 核心 C# 侧零测试覆盖。
+**根因**：worktree 把这两个文件当 spec §2.1「[Ignore] 退役测试」删了（基于 v8 基线判断）。但 main 已被 workflow-atlas-rework 扩展——`MirrorPoolTests.cs` 加了 `MirrorPoolReuseKeyTests`（v9 22 列活测试）、`AtlasMirrorPoolTests.cs` 改名 `AtlasMirrorPoolPathTests`（活的非退役）。spec 的「退役」判断只在 worktree 基线版本成立，主分支演进后被删文件已被 HEAD 重新填充活内容。按 delete 解决 = 丢了 HEAD 的新内容。
+**解决**：从 `08e5582` 恢复 v9 测试类（`MirrorPoolReuseKeyTests` 22 列 colOff=132 与当前 FrameBlob `ExpectedVersion=9`/`ReuseKey=ColOff(21)` 一致），不恢复 v4 [Ignore] 退役类。`AtlasMirrorPoolTests` 恢复 + 清 v1.4-a T8 历史注释 + 改测试名 `MissingSprite`→`NoAtlas`。
+**教训**：merge modify/delete 冲突按 delete 解决前**必须核实 HEAD 改了什么**——worktree 删的文件不等于 HEAD 没扩展。`git show <HEAD>:<path>` 看一眼 HEAD 版本内容再决定 delete/modify。死代码清理 spec 的「退役」判断只在基线版本成立，merge 到已演进的 main 时每个被删文件都要重新核实是否被 HEAD 扩展。
+
 
