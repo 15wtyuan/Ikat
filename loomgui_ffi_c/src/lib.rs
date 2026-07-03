@@ -1172,15 +1172,6 @@ mod abi_tests {
         loomgui_stage_free(h);
     }
 
-    /// version 字符串 == "v1e"。
-    #[test]
-    fn version_is_v1d_5() {
-        let p = loomgui_version();
-        let len = (0..).take_while(|&i| unsafe { *p.add(i) != 0 }).count();
-        let s = std::str::from_utf8(unsafe { std::slice::from_raw_parts(p, len) }).unwrap();
-        assert_eq!(s, "v1e");
-    }
-
     /// version 串 = "v1e"。
     #[test]
     fn version_is_v1e() {

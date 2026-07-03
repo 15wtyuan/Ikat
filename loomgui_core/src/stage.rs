@@ -1,7 +1,7 @@
 //! Stage 层：串起 parse → style → scene → layout → render 的端到端入口。
 //!
-//! v1.4-a 资源池模型：`load_package(name, bytes)` 进 `packages` 字典不建 scene（D3）；
-//! scene 由 `create_root`/`create_node` 建（v1.3+ 动态树 API）。`tick_and_render` 跑
+//! 资源池模型：`load_package(name, bytes)` 进 `packages` 字典不建 scene；
+//! scene 由 `create_root`/`create_node` 建（动态树 API）。`tick_and_render` 跑
 //! solve + build_render_nodes。`render_json` serde 序列化产渲染 JSON。
 
 use crate::input::{EventRecord, PointerEvent, PointerState};
@@ -18,9 +18,9 @@ pub struct Stage {
     pub font: Arc<Font>,
     pub root_size: (f32, f32),
     /// 资源池：pkg_name → Package（多包共存）。load_package 填，instantiate 读。
-    /// v1.4-a：load_package 不建 scene，只填本字典（spec §4.1 D3）。
+    /// load_package 不建 scene，只填本字典。
     pub packages: std::collections::HashMap<String, crate::asset::Package>,
-    /// D17 图尺寸表：归一化 path → (w, h) 像素（打包期 PNG IHDR 静态数据）。
+    /// 图尺寸表：归一化 path → (w, h) 像素（打包期 PNG IHDR 静态数据）。
     /// `load_package` 时从所有包的 `asset_manifest` 合并填入（多包共存，path 全局唯一）。
     /// `solve`/`build_render_nodes` 查此表算 Image intrinsic 尺寸（measure 三档）+ 九宫格 UV。
     /// path 缺失或 w/h=0 → fallback 64×64（核心不知图集，但知图尺寸）。
@@ -73,20 +73,20 @@ impl Stage {
 
     /// 加载包进资源池（不碰 scene）。重复 load 同名包 = 替换。多包共存。
     ///
-    /// v1.4-a（spec §4.2 D3）：`load_package(name, bytes)` 解析 pkg.bin → Package，
-    /// 存进 `self.packages[name]`。**不建 scene**——加载与实例化解耦（fgui/Unity prefab 模型）。
-    /// scene 由 `create_root`/`create_node` 建；组件实例化由 `instantiate`（Task 5）做。
-    /// `root_size` 归 Stage（不从包来，D9）；图集归 Unity（核心不知图集，D8）。
+    /// `load_package(name, bytes)` 解析 pkg.bin → Package，存进 `self.packages[name]`。
+    /// **不建 scene**——加载与实例化解耦（fgui/Unity prefab 模型）。
+    /// scene 由 `create_root`/`create_node` 建；组件实例化由 `instantiate` 做。
+    /// `root_size` 归 Stage（不从包来）；图集归 Unity（核心不知图集）。
     ///
-    /// **D17（图尺寸）**：同步把本包 `asset_manifest` 的 `path → (w,h)` 合并进 `self.image_sizes`
+    /// **图尺寸**：同步把本包 `asset_manifest` 的 `path → (w,h)` 合并进 `self.image_sizes`
     /// （多包共存，path 全局唯一）。`solve`/`build_render_nodes` 查此表算 Image intrinsic +
-    /// 九宫格 UV。重复 load 同名包 → 旧包的 path 条目被新包覆盖（path 全局唯一，语义安全）。
+    /// 九宫格 UV。重复 load 同名包 → 前次加载的包的 path 条目被新包覆盖（path 全局唯一，语义安全）。
     pub fn load_package(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
         let mut pkg = crate::asset::read_package(bytes).map_err(|e| e.to_string())?;
         pkg.name = name.to_string(); // read_package 填空串，这里覆盖为真实包名
-        // D17：把本包 manifest 的 path → (w,h) 合并进全局尺寸表。
-        // 重复 load 同名包前，先清旧包的 path 条目（避免旧 path 残留——虽然 path 全局唯一，
-        // 但若旧包有 path 而新包没有，旧条目会悬空）。简单实现：直接 extend 覆盖（同 path 后写赢）。
+        // 把本包 manifest 的 path → (w,h) 合并进全局尺寸表。
+        // 重复 load 同名包前，先清前次加载的包的 path 条目（避免 path 残留——虽然 path 全局唯一，
+        // 但若前次包有 path 而新包没有，旧条目会悬空）。简单实现：直接 extend 覆盖（同 path 后写赢）。
         for entry in &pkg.asset_manifest {
             self.image_sizes.insert(entry.path.clone(), (entry.w, entry.h));
         }
@@ -94,7 +94,7 @@ impl Stage {
         Ok(())
     }
 
-    /// D17：查图尺寸（path → (w, h) 像素）。供 layout/render 用。
+    /// 查图尺寸（path → (w, h) 像素）。供 layout/render 用。
     /// path 缺失或 w/h=0 → None（调用方 fallback 64×64）。
     pub fn image_size(&self, path: &str) -> Option<(u32, u32)> {
         self.image_sizes.get(path).copied().filter(|(w, h)| *w != 0 && *h != 0)
@@ -225,7 +225,7 @@ impl Stage {
     }
 
     /// 删节点（递归删子 + 联动清 anim/scroll/tween + slotmap remove）。
-    /// 旧 NodeId 此后失效（gen++）。无 scene / 已删节点 → no-op。
+    /// NodeId 此后失效（gen++）。无 scene / 已删节点 → no-op。
     /// spec §5.3：删节点联动清持久附属 map，防悬空 NodeId 残留。
     pub fn remove_node(&mut self, node: NodeId) {
         if let Some(scene) = self.scene.as_mut() {
@@ -233,7 +233,7 @@ impl Stage {
         }
     }
 
-    // ---- T6 动态建树 API（转调 scene::dynamic） ----
+    // ---- 动态建树 API（转调 scene::dynamic） ----
 
     /// scene 不存在则建空骨架（首次 create_root/create_node 调用时初始化）。
     /// spec §4.2：scene 初始由 create_root 建（load_package 不建 scene）。

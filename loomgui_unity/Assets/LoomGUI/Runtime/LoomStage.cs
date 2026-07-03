@@ -537,10 +537,6 @@ namespace LoomGUI
                 byte* evPtr = Native.loomgui_stage_borrow_events(_stage, &evLen);
                 _eventHandler.DispatchPending((System.IntPtr)evPtr, (int)evLen);
             }
-
-            // [DBG-HOVER] F1 dump 整树（layout/world_matrix），定位 hover 不命中（验完删）
-            if (Input.GetKeyDown(KeyCode.F1))
-                UnityEngine.Debug.Log("[DUMP] " + DumpScene());
         }
 
         void OnDestroy()

@@ -6,7 +6,7 @@ namespace LoomGUI.Tests
     /// TextRasterizer.BuildMesh 测试。锁 glyph quad 数学：
     ///   quad_left=pen_x+minX, quad_right=pen_x+maxX,
     ///   quad_top=pen_y−maxY, quad_bottom=pen_y−minY（y-down；maxY 基线上方→减）
-    /// 顶点序 BL,TL,TR,BR；索引每 quad 0,1,2,0,2,3；vertex color = 输入 color（alpha 参数现已废弃，node opacity 走 _Alpha uniform）。
+    /// 顶点序 BL,TL,TR,BR；索引每 quad 0,1,2,0,2,3；vertex color = 输入 color（node opacity 走 _Alpha uniform，不进顶点色）。
     ///
     /// 预期值由 BuildMesh 内部用的同一 GetCharacterInfo 重新算出再比对，
     /// 故即使 DejaVu 不同版本的精确 minX/maxY 不同，只要 BuildMesh 数学正确即过。
@@ -47,7 +47,7 @@ namespace LoomGUI.Tests
             var font = LoadDejaVu();
             const int fontSize = 24;
             var glyphs = new[] { new GlyphData('A', 0f, 20f) };
-            var mesh = TextRasterizer.BuildMesh(font, fontSize, Color.white, 1f, glyphs);
+            var mesh = TextRasterizer.BuildMesh(font, fontSize, Color.white, glyphs);
 
             Assert.AreEqual(4, mesh.Verts.Length, "1 glyph = 4 verts（BL,TL,TR,BR）");
             Assert.AreEqual(6, mesh.Idx.Length, "1 quad = 6 idx（0,1,2,0,2,3）");
@@ -62,7 +62,7 @@ namespace LoomGUI.Tests
             var font = LoadCjkFont();
             const int fontSize = 24;
             var glyphs = new[] { new GlyphData('中', 0f, 20f) };
-            var mesh = TextRasterizer.BuildMesh(font, fontSize, Color.white, 1f, glyphs);
+            var mesh = TextRasterizer.BuildMesh(font, fontSize, Color.white, glyphs);
 
             Assert.AreEqual(4, mesh.Verts.Length, "CJK 1 glyph = 4 verts（BL,TL,TR,BR）");
             Assert.AreEqual(6, mesh.Idx.Length, "CJK 1 quad = 6 idx（0,1,2,0,2,3）");
@@ -77,7 +77,7 @@ namespace LoomGUI.Tests
             const int fontSize = 24;
             float penX = 0f, penY = 20f;
             var glyphs = new[] { new GlyphData('A', penX, penY) };
-            var mesh = TextRasterizer.BuildMesh(font, fontSize, Color.white, 1f, glyphs);
+            var mesh = TextRasterizer.BuildMesh(font, fontSize, Color.white, glyphs);
 
             // 重算期望（同 BuildMesh 内源）。
             font.RequestCharactersInTexture("A", fontSize, FontStyle.Normal);
@@ -115,8 +115,8 @@ namespace LoomGUI.Tests
             float expectedW = info.maxX - info.minX;
 
             // pen (0,0) vs (100,0)：宽度应同。
-            var m0 = TextRasterizer.BuildMesh(font, fontSize, Color.white, 1f, new[] { new GlyphData('A', 0f, 0f) });
-            var m1 = TextRasterizer.BuildMesh(font, fontSize, Color.white, 1f, new[] { new GlyphData('A', 100f, 0f) });
+            var m0 = TextRasterizer.BuildMesh(font, fontSize, Color.white, new[] { new GlyphData('A', 0f, 0f) });
+            var m1 = TextRasterizer.BuildMesh(font, fontSize, Color.white, new[] { new GlyphData('A', 100f, 0f) });
 
             float w0 = m0.Verts[2].x - m0.Verts[0].x;   // TR.x − BL.x
             float w1 = m1.Verts[2].x - m1.Verts[0].x;
@@ -126,16 +126,16 @@ namespace LoomGUI.Tests
             Assert.AreEqual(100f, m1.Verts[0].x - m0.Verts[0].x, 0.001f, "pen 平移 100 → BL.x 平移 100");
         }
 
-        /// BuildMesh 不再烤 node alpha 进顶点色（T6/T8: alpha 走 _Alpha uniform）。
-        /// 传 alpha=0.5f，断言 vertex.a == color.a（非 color.a*0.5）——若 BuildMesh 仍乘 alpha 则失败。
+        /// BuildMesh 不烤 node opacity 进顶点色（node opacity 走 _Alpha uniform）。
+        /// 断言 vertex.a == color.a——若 BuildMesh 乘了别的东西则失败。
         [Test]
         public void BuildMesh_DoesNotBakeNodeAlpha()
         {
             var font = LoadDejaVu();
             var color = new Color(1f, 0.5f, 0.25f, 0.8f);
-            var mesh = TextRasterizer.BuildMesh(font, 24, color, 0.5f, new[] { new GlyphData(0x41, 0f, 0f) });
+            var mesh = TextRasterizer.BuildMesh(font, 24, color, new[] { new GlyphData(0x41, 0f, 0f) });
             foreach (var c in mesh.Colors)
-                Assert.AreEqual(color.a, c.a, 0.001f, "BuildMesh 不得烤 nodeAlpha（vertex.a==color.a，非 color.a*alpha；alpha 走 _Alpha uniform）");
+                Assert.AreEqual(color.a, c.a, 0.001f, "BuildMesh 顶点色 = color 透传（vertex.a==color.a；node opacity 走 _Alpha uniform 不进顶点色）");
         }
 
         /// 多 glyph（"AB"）→ 2 quad = 8 verts / 12 idx，第二 quad 索引基 = 4。
@@ -144,7 +144,7 @@ namespace LoomGUI.Tests
         {
             var font = LoadDejaVu();
             var glyphs = new[] { new GlyphData('A', 0f, 20f), new GlyphData('B', 30f, 20f) };
-            var mesh = TextRasterizer.BuildMesh(font, 24, Color.white, 1f, glyphs);
+            var mesh = TextRasterizer.BuildMesh(font, 24, Color.white, glyphs);
 
             Assert.AreEqual(8, mesh.Verts.Length, "2 glyph = 8 verts");
             Assert.AreEqual(12, mesh.Idx.Length, "2 quad = 12 idx");

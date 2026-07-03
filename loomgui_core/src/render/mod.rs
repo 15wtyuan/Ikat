@@ -668,9 +668,6 @@ mod tests {
         assert!((merged.alpha - 1.0).abs() < 1e-6, "merged alpha=1 防 blob 二次烤");
     }
 
-    // T6: 删除 image_uv_flips_v_for_design_y_down —— 测的是已删的 atlas 子区 UV（0.25/0.75）行为；
-    //     全图 UV + v 翻转由 build_image_uv_is_full_region 覆盖。
-
     /// build_render_nodes 读 anim.opacity/bg_color override（replace-override）。
     /// CSS opacity=1.0、bg=红；anim opacity=0.25、bg=蓝 → alpha=0.25、Mesh colors=蓝。
     #[test]
