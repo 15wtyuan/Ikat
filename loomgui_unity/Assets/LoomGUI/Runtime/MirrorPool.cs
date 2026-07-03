@@ -8,7 +8,7 @@ namespace LoomGUI
     /// GO transform=identity + _ObjectMatrix uniform；sortingOrder=sort_key。
     /// parent_id 仍在 blob 列但渲染不用（事件系统再用）。
     /// Mesh 顶点已由 Rust re-base 到节点本地空间，此处按 (x,y,0) 上传。
-    /// 渲染 payload_kind=1（Mesh）+ 2（Text）；Unchanged(0) 跳过。
+    /// change_level 三分支：0=SKIP(保留GO) 1=HEADER(只更header,不重建mesh) 2=FULL(重建mesh/text)。
     sealed class RenderObj
     {
         public GameObject Go;
@@ -28,8 +28,8 @@ namespace LoomGUI
         public readonly List<Vector2> UvList = new();
         public readonly List<Color> CList = new();
         public readonly List<int> IList = new();
-        // cached MaterialPropertyBlock for per-renderer _ObjectMatrix.
-        // Lazy-init in non-pure-translation path; avoids shared material overwrite.
+        // cached MaterialPropertyBlock for per-renderer uniforms (_ObjM, _CF, _Alpha).
+        // Lazy-init; now consolidated into single SetPropertyBlock per frame (支柱3).
         public MaterialPropertyBlock Mpb;
     }
 
@@ -60,77 +60,28 @@ namespace LoomGUI
             // 本帧 clip 应用集清空（per-ctx-per-frame 一次性算 _ClipBox）。
             _clipsAppliedThisFrame.Clear();
 
-            // ② 遍历节点
+            // ② 遍历节点：v8 三分支 SKIP / HEADER / FULL
             int n = blob.NodeCount;
             for (int i = 0; i < n; i++)
             {
                 if (!blob.Visible(i)) continue;
                 byte kind = blob.PayloadKind(i);
-                // Unchanged(0) = 静态帧节点。dirty 保证此刻 world/alpha/sort/mask/payload
-                // 全不变 → 清 stale 保留上帧 GO、跳过上传。
-                if (kind == 0)
+                byte level = blob.ChangeLevel(i);   // 0=Skip 1=Header 2=Full
+                uint id = blob.NodeId(i);
+
+                // SKIP：本帧无变化，保留上帧 GO，清 stale。
+                if (level == 0)
                 {
-                    if (_pool.TryGetValue(blob.NodeId(i), out var unchangedRo))
-                        unchangedRo.Stale = false;
+                    if (_pool.TryGetValue(id, out var ro0)) ro0.Stale = false;
                     continue;
                 }
                 if (kind != 1 && kind != 2) continue;  // 未知 kind 防御跳过
 
-                uint id = blob.NodeId(i);
-                if (!_pool.TryGetValue(id, out var ro))
-                {
-                    ro = NewRenderObj(root);
-                    ro.LastNodeId = id;
-                    _pool[id] = ro;
-                }
-                ro.Stale = false;
-                ro.IsText = kind == 2;
-
-                // flatten：所有节点挂 root。
-                // pure 和非 pure 统一 GO localPosition=(Mtx,Mty)（world translate 进 GO transform）。
-                // 非纯平移的 scale/rotate 进 _ObjectMatrix（无 translate）。这样 renderer.bounds = GO.worldTransform ×
-                // Mesh.bounds 自动 world（culling 正确），不需 mutate Mesh.bounds 做 translate hack（mutate mesh 资产，
-                // 非 pure→pure 切回时 bounds 双 translate → frustum culling 误剔 → 字消失）。
-                ro.Go.transform.SetParent(root, false);
-                bool pure = blob.IsPureTranslation(i);
-                ro.Go.transform.localPosition = new Vector3(blob.Mtx(i), blob.Mty(i), 0f);
-                ro.Go.transform.localRotation = Quaternion.identity;
-                ro.Go.transform.localScale = Vector3.one;
-
-                ro.Mr.sortingOrder = (int)blob.SortKey(i);
-
-                uint maskCtx = blob.MaskContext(i);
-                float nodeAlpha = blob.Alpha(i);
-
-                // mc>0 节点本帧首次见 → 读 clip 表 design rect，转 world，算 _ClipBox，
-                // SetClipBox 到该 ctx 的 per-context Material。
-                // 必须在 mm.Get 之前调，使新建 Material 时即带 box；同 ctx 后续节点跳过（HashSet 去重）。
-                if (maskCtx > 0u && _clipsAppliedThisFrame.Add(maskCtx))
-                {
-                    if (blob.ClipRect(maskCtx, out float dx, out float dy, out float dw, out float dh))
-                    {
-                        Vector4 clipBox = ClipMath.ComputeClipBox(root, dx, dy, dw, dh);
-                        mm.SetClipBox(maskCtx, clipBox);
-                    }
-                    // ClipRect miss（表里无该 ctx）→ 不 SetClipBox；material 仍按 mc 建（CLIPPED variant
-                    // + 默认 _ClipBox=0,0,1,1 → 全保留，clip 无效但不崩；正常 flow 表必含所有 mc>0 ctx）。
-                }
-
+                // 解决图资源（mesh 用 path→Sprite；text 不须此段）
+                Sprite sp = null; Texture tex = fallback;
                 if (kind == 1)
                 {
-                    // mesh 上传（顶点已 re-base 到本地）。
-                    var seg = blob.ReadMesh(i);
-                    UploadMesh(ro, seg);
-                    ro.Mesh.RecalculateBounds();
-                    ro.LastFontVersion = TextRasterizer.FontVersion;
-                    // v1.4-a T8：按 path_idx 取 path → SpriteResolver.GetSprite → Sprite.texture + 打包 UV。
-                    //   path_idx=0（纯色无图）/ path 查不到 Sprite → fallback（whiteTexture）。
-                    //   blob mesh UV 是全图 [0,1]（T6 后核心不知图集，写全图 UV）；
-                    //   SpriteAtlas 把 Sprite 打进 atlas 子区 → 用 sprite.rect + texture 尺寸重映射 UV
-                    //   到 atlas 子区（保 blob 的 v 翻转：blob TL.v=1 → atlas 顶 rv1）。
                     uint pathIdx = blob.PathIdx(i);
-                    Sprite sp = null;
-                    Texture tex = fallback;
                     if (pathIdx != 0 && sprites != null)
                     {
                         string path = blob.ReadPath(pathIdx);
@@ -140,61 +91,21 @@ namespace LoomGUI
                             if (sp != null) tex = sp.texture;
                         }
                     }
-                    // Sprite 命中 → 把 mesh UV 重映射到 Sprite 在 atlas 内的子区（packed UV）。
-                    //   blob UV 全 [0,1]（T6）；Sprite.rect 是 atlas 内像素矩形（Unity y-up）。
-                    //   packed_u = ru0 + blob_u*(ru1-ru0)；packed_v = rv0 + blob_v*(rv1-rv0)。
-                    //   blob 的 v 已翻转（TL.v=1→atlas 顶 rv1），线性重映射保翻转。
-                    //   九宫格切片 mesh UV 同基于 [0,1] → 同公式正确（slice 比例由 Rust 算进 blob UV）。
-                    if (sp != null && sp.texture != null)
-                    {
-                        RemapMeshUvToSprite(ro, sp, sp.texture);
-                    }
-                    // program 来自 blob（v5 第 19 列）：0=img/无图 Container，2=Container+bg-image（CSS 合成，坑 79）。
-                    var mat = mm.Get((int)blob.Program(i), tex, maskCtx, !pure);
-                    if (!pure)
-                    {
-                        // _ObjectMatrix 只 scale/rotate（translate 进 GO localPosition，renderer.bounds 自动 world）。
-                        var m = Matrix4x4.identity;
-                        m[0, 0] = blob.Ma(i); m[0, 1] = blob.Mc(i);
-                        m[1, 0] = blob.Mb(i); m[1, 1] = blob.Md(i);
-                        SetObjectMatrix(ro, m);
-                    }
-                    // v1.3 ColorFilter（program=3=filter 无图 / 4=filter+bg-image 双 keyword）：
-                    // 矩阵 20 float 拆 5 Vector MPB SetVector。漏 program=4 → cf-demo 滤镜不生效（全青色，验收坑）。
-                    if (blob.Program(i) == 3 || blob.Program(i) == 4)
-                    {
-                        SetColorFilterMatrix(ro, blob.ColorMatrix(i));
-                    }
-                    ro.Mr.sharedMaterial = mat;
                 }
-                else  // kind == 2 (Text)
+
+                // 确保 RenderObj 存在；新建 GO 无 mesh → 强制 FULL（无视 blob 的 HEADER）
+                if (!_pool.TryGetValue(id, out var ro))
                 {
-                    // font atlas rebuild 或首次 → 重 BuildMesh（glyph UV 变，旧 mesh 作废）。
-                    bool needRebuild = fontDirty || ro.LastFontVersion != TextRasterizer.FontVersion;
-                    if (needRebuild)
-                    {
-                        blob.ReadText(i, out int fontSize, out Color textColor, out GlyphData[] glyphs);
-                        var seg = TextRasterizer.BuildMesh(font, fontSize, textColor, nodeAlpha, glyphs);
-                        UploadMesh(ro, seg);
-                        ro.Mesh.RecalculateBounds();
-                        ro.LastFontVersion = TextRasterizer.FontVersion;
-                    }
-                    // text program=1，texture=font atlas。font.material.mainTexture（atlas rebuild 后引用更新）。
-                    // font 可能为 null（caller 未注入）→ 跳材质以免 NRE；测试用 BuildMesh 直接验。
-                    if (font != null)
-                    {
-                        var tmat = mm.Get(program: 1, font.material.mainTexture, maskCtx, !pure);
-                        if (!pure)
-                        {
-                            // _ObjectMatrix 只 scale/rotate（translate 进 GO localPosition）。
-                            var m = Matrix4x4.identity;
-                            m[0, 0] = blob.Ma(i); m[0, 1] = blob.Mc(i);
-                            m[1, 0] = blob.Mb(i); m[1, 1] = blob.Md(i);
-                            SetObjectMatrix(ro, m);
-                        }
-                        ro.Mr.sharedMaterial = tmat;
-                    }
+                    ro = NewRenderObj(root);
+                    ro.LastNodeId = id;
+                    _pool[id] = ro;
+                    level = 2; // 强制 FULL
                 }
+                ro.Stale = false;
+                ro.IsText = kind == 2;
+
+                UpdateHeader(ro, blob, i, root, mm, kind, sp, tex, font);
+                if (level == 2) UploadMeshOrText(ro, blob, i, sp, font, fontDirty);
             }
 
             if (fontDirty) _lastFontVersion = TextRasterizer.FontVersion;
@@ -203,6 +114,125 @@ namespace LoomGUI
             var dead = new List<uint>();
             foreach (var kv in _pool) if (kv.Value.Stale) dead.Add(kv.Key);
             foreach (var id in dead) { TearDown(_pool[id]); _pool.Remove(id); }
+        }
+
+        /// 更新 GO header（position/rotation/scale + sortingOrder + clip + material + per-renderer uniforms）。
+        /// 无论 HEADER 还是 FULL 路径均调用；仅 SKIP 跳过。
+        void UpdateHeader(RenderObj ro, FrameBlob blob, int i, Transform root,
+                          MaterialManager mm, byte kind, Sprite sp, Texture tex, Font font)
+        {
+            // flatten：所有节点挂 root。
+            // pure 和非 pure 统一 GO localPosition=(Mtx,Mty)（world translate 进 GO transform）。
+            // 非纯平移的 scale/rotate 进 _ObjectMatrix（无 translate）。这样 renderer.bounds = GO.worldTransform ×
+            // Mesh.bounds 自动 world（culling 正确），不需 mutate Mesh.bounds 做 translate hack。
+            ro.Go.transform.SetParent(root, false);
+            bool pure = blob.IsPureTranslation(i);
+            ro.Go.transform.localPosition = new Vector3(blob.Mtx(i), blob.Mty(i), 0f);
+            ro.Go.transform.localRotation = Quaternion.identity;
+            ro.Go.transform.localScale = Vector3.one;
+
+            ro.Mr.sortingOrder = (int)blob.SortKey(i);
+
+            uint maskCtx = blob.MaskContext(i);
+
+            // mc>0 节点本帧首次见 → 读 clip 表 design rect，转 world，算 _ClipBox，
+            // SetClipBox 到该 ctx 的 per-context Material。
+            // 必须在 mm.Get 之前调，使新建 Material 时即带 box；同 ctx 后续节点跳过（HashSet 去重）。
+            if (maskCtx > 0u && _clipsAppliedThisFrame.Add(maskCtx))
+            {
+                if (blob.ClipRect(maskCtx, out float dx, out float dy, out float dw, out float dh))
+                {
+                    Vector4 clipBox = ClipMath.ComputeClipBox(root, dx, dy, dw, dh);
+                    mm.SetClipBox(maskCtx, clipBox);
+                }
+                // ClipRect miss（表里无该 ctx）→ 不 SetClipBox；material 仍按 mc 建（CLIPPED variant
+                // + 默认 _ClipBox=0,0,1,1 → 全保留，clip 无效但不崩；正常 flow 表必含所有 mc>0 ctx）。
+            }
+
+            // 材质：mesh 按 program+texture 选；text 用 font atlas。
+            Material mat;
+            if (kind == 1)
+            {
+                // program 来自 blob（v5 第 18 列）：0=img/无图 Container，2=Container+bg-image（CSS 合成，坑 79）。
+                mat = mm.Get((int)blob.Program(i), tex, maskCtx, !pure);
+            }
+            else // kind == 2 (Text)
+            {
+                // text program=1，texture=font atlas。font.material.mainTexture（atlas rebuild 后引用更新）。
+                // font 可能为 null（caller 未注入）→ 跳材质以免 NRE；测试用 BuildMesh 直接验。
+                mat = font != null ? mm.Get(program: 1, font.material.mainTexture, maskCtx, !pure) : null;
+            }
+            if (mat != null) ro.Mr.sharedMaterial = mat;
+
+            // 合并 per-renderer uniform（MPB 一次 SetPropertyBlock，避免 _ObjM/_CF/_Alpha 互相覆盖）。
+            // _ObjM：非纯平移时传 scale/rotate 矩阵（纯平移 = shader 默认 identity，不设）。
+            // _CF：ColorFilter（program 3/4）传 5 Vector；其他不设。
+            // _Alpha：每帧无条件设（支柱3 alpha 剥离顶点色，T6）。
+            float alpha = blob.Alpha(i);
+            bool hasFilter = kind == 1 && (blob.Program(i) == 3 || blob.Program(i) == 4);
+
+            ro.Mpb ??= new MaterialPropertyBlock();
+            ro.Mr.GetPropertyBlock(ro.Mpb);
+            if (!pure)
+            {
+                // _ObjectMatrix 只 scale/rotate（translate 进 GO localPosition，renderer.bounds 自动 world）。
+                var objM = Matrix4x4.identity;
+                objM[0, 0] = blob.Ma(i); objM[0, 1] = blob.Mc(i);
+                objM[1, 0] = blob.Mb(i); objM[1, 1] = blob.Md(i);
+                ro.Mpb.SetVector("_ObjM0", objM.GetRow(0));
+                ro.Mpb.SetVector("_ObjM1", objM.GetRow(1));
+                ro.Mpb.SetVector("_ObjM2", objM.GetRow(2));
+                ro.Mpb.SetVector("_ObjM3", objM.GetRow(3));
+            }
+            // v1.3 ColorFilter（program=3=filter 无图 / 4=filter+bg-image 双 keyword）：
+            // 矩阵 20 float 拆 5 Vector MPB SetVector。漏 program=4 → cf-demo 滤镜不生效（全青色，验收坑）。
+            if (hasFilter)
+            {
+                float[] cf = blob.ColorMatrix(i);
+                ro.Mpb.SetVector("_CF0", new Vector4(cf[0],  cf[1],  cf[2],  cf[3]));
+                ro.Mpb.SetVector("_CF1", new Vector4(cf[5],  cf[6],  cf[7],  cf[8]));
+                ro.Mpb.SetVector("_CF2", new Vector4(cf[10], cf[11], cf[12], cf[13]));
+                ro.Mpb.SetVector("_CF3", new Vector4(cf[15], cf[16], cf[17], cf[18]));
+                ro.Mpb.SetVector("_CFOff", new Vector4(cf[4], cf[9], cf[14], cf[19]));
+            }
+            ro.Mpb.SetFloat("_Alpha", alpha);
+            ro.Mr.SetPropertyBlock(ro.Mpb);
+        }
+
+        /// 上传 mesh / 重建 text mesh（仅 FULL 路径调用）。
+        /// mesh 顶点已由 Rust re-base 到节点本地空间，此处按 (x,y,0) 上传。
+        static void UploadMeshOrText(RenderObj ro, FrameBlob blob, int i,
+                                     Sprite sp, Font font, bool fontDirty)
+        {
+            byte kind = blob.PayloadKind(i);
+            if (kind == 1)
+            {
+                // mesh 上传（顶点已 re-base 到本地）。
+                var seg = blob.ReadMesh(i);
+                UploadMesh(ro, seg);
+                ro.Mesh.RecalculateBounds();
+                ro.LastFontVersion = TextRasterizer.FontVersion;
+                // v1.4-a T8：按 path_idx 取 path → SpriteResolver.GetSprite → Sprite.texture + 打包 UV。
+                //   path_idx=0（纯色无图）/ path 查不到 Sprite → 跳过 UV 重映射（blob mesh UV 已是全图 [0,1]；用 fallback whiteTexture）。
+                //   SpriteAtlas 把 Sprite 打进 atlas 子区 → 用 sprite.rect + texture 尺寸重映射 UV
+                //   到 atlas 子区（保 blob 的 v 翻转：blob TL.v=1 → atlas 顶 rv1）。
+                if (sp != null && sp.texture != null)
+                    RemapMeshUvToSprite(ro, sp, sp.texture);
+            }
+            else // kind == 2 (Text)
+            {
+                // font atlas rebuild 或首次 → 重 BuildMesh（glyph UV 变，旧 mesh 作废）。
+                bool needRebuild = fontDirty || ro.LastFontVersion != TextRasterizer.FontVersion;
+                if (needRebuild)
+                {
+                    blob.ReadText(i, out int fontSize, out Color textColor, out GlyphData[] glyphs);
+                    float nodeAlpha = blob.Alpha(i);
+                    var seg = TextRasterizer.BuildMesh(font, fontSize, textColor, nodeAlpha, glyphs);
+                    UploadMesh(ro, seg);
+                    ro.Mesh.RecalculateBounds();
+                    ro.LastFontVersion = TextRasterizer.FontVersion;
+                }
+            }
         }
 
         static RenderObj NewRenderObj(Transform root)
@@ -279,34 +309,6 @@ namespace LoomGUI
                 uvs[i] = new Vector2(ru0 + uvs[i].x * du, rv0 + uvs[i].y * dv);
             }
             ro.Mesh.SetUVs(0, uvs);
-        }
-
-        /// _ObjectMatrix 经 MPB 传 shader。SetMatrix 对 CBUFFER 内非 Properties 字段不生效（MPB 只覆盖
-        /// material property）→ 拆 4 Vector（Properties 对应）SetVector 覆盖，shader vert 重组 float4x4。
-        /// HLSL float4x4(v0..v3) 是 row-major 构造，故传 m.GetRow(0..3)（行），不是 GetColumn。
-        /// m 只含 scale/rotate（translate 进 GO localPosition=(Mtx,Mty)）。mul(objM, v).xy = (Ma·x+Mc·y, Mb·x+Md·y)；
-        /// worldPos = TransformObjectToWorld(designWorld) = root × GO × designWorld（GO.position 提供 translate）。
-        static void SetObjectMatrix(RenderObj ro, in Matrix4x4 m)
-        {
-            ro.Mpb ??= new MaterialPropertyBlock();
-            ro.Mpb.SetVector("_ObjM0", m.GetRow(0));
-            ro.Mpb.SetVector("_ObjM1", m.GetRow(1));
-            ro.Mpb.SetVector("_ObjM2", m.GetRow(2));
-            ro.Mpb.SetVector("_ObjM3", m.GetRow(3));
-            ro.Mr.SetPropertyBlock(ro.Mpb);
-        }
-
-        /// ColorFilter 矩阵（20 float）拆 5 Vector MPB SetVector：_CF0..3（矩阵行）+ _CFOff（offset）。
-        /// 照搬 fgui UpdateMatrix（MPB per-renderer 覆盖，不拆 Material）。
-        static void SetColorFilterMatrix(RenderObj ro, float[] m)
-        {
-            ro.Mpb ??= new MaterialPropertyBlock();
-            ro.Mpb.SetVector("_CF0", new Vector4(m[0],  m[1],  m[2],  m[3]));
-            ro.Mpb.SetVector("_CF1", new Vector4(m[5],  m[6],  m[7],  m[8]));
-            ro.Mpb.SetVector("_CF2", new Vector4(m[10], m[11], m[12], m[13]));
-            ro.Mpb.SetVector("_CF3", new Vector4(m[15], m[16], m[17], m[18]));
-            ro.Mpb.SetVector("_CFOff", new Vector4(m[4], m[9], m[14], m[19]));
-            ro.Mr.SetPropertyBlock(ro.Mpb);
         }
 
         public void Clear()

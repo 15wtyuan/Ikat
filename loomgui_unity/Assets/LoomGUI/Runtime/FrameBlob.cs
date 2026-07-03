@@ -6,21 +6,21 @@ namespace LoomGUI
 {
     /// 帧 blob 托管解析视图。解析 Rust build_blob 产出的 little-endian blob。
     ///
-    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v7）：
-    ///   header (124B): magic(u32 LE), version(u32)=7, node_count(u32),
-    ///                 20× col_offset(u32, byte offset from blob start),
+    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v8）：
+    ///   header (128B): magic(u32 LE), version(u32)=8, node_count(u32),
+    ///                 21× col_offset(u32, byte offset from blob start),
     ///                 mesh_arena_off(u32), mesh_arena_len(u32),
     ///                 text_arena_off(u32), text_arena_len(u32),
     ///                 clip_table_off(u32), clip_table_len(u32),
-    ///                 path_table_off(u32), path_table_len(u32)     ← v7 新增
-    ///   20 列 SOA（顺序见 ColOff 注释），随后 mesh_arena / text_arena / clip_table / path_table 段。
+    ///                 path_table_off(u32), path_table_len(u32)
+    ///   21 列 SOA（顺序见 ColOff 注释），随后 mesh_arena / text_arena / clip_table / path_table 段。
     /// C# on Windows 是 little-endian，BitConverter 直读无需 byte swap。
     public readonly struct FrameBlob
     {
         public const uint Magic = 0x4D4F4F4C;
         /// blob 版本。magic+version 校验在 IsValid。
-        /// v7：tex_id 列 → path_idx 列 + path string table arena（v1.4-a T6/T8「核心不知图集」）。
-        public const uint ExpectedVersion = 7;
+        /// v8：新增 change_level 列（支柱3 三分支 SKIP/HEADER/FULL）。
+        public const uint ExpectedVersion = 8;
 
         readonly byte[] _buf;
 
@@ -31,7 +31,7 @@ namespace LoomGUI
         public uint Version => ReadU32(4);
         public int NodeCount => (int)ReadU32(8);
 
-        // 列 offset 在 header[12 .. 12+20*4)。顺序同 Rust columns：
+        // 列 offset 在 header[12 .. 12+21*4)。顺序同 Rust columns：
         //   0=node_id(u32) 1=parent_id(i32,-1=none) 2=visible(u8) 3=alpha(f32)
         //   4=sort_key(u32) 5=mask_context(u32)
         //   6=m_a(f32) 7=m_b(f32) 8=m_c(f32) 9=m_d(f32) 10=m_tx(f32) 11=m_ty(f32)
@@ -42,19 +42,20 @@ namespace LoomGUI
         //   17=path_idx(u32)  ← v7：原 tex_id → path_idx（path 表 1-based 索引，0=纯色无图）
         //   18=program(u8, 0=img/无图 1=Text 2=Container+bg-image 3=filter无bg-image 4=filter+bg-image)  ← v5 新增
         //   19=color_matrix([f32;20], 80B)
+        //   20=change_level(u8, 0=Skip 1=Header 2=Full)  ← v8 新增（支柱3）
         int ColOff(int idx) => (int)ReadU32(12 + idx * 4);
-        // 四 arena header offset。20 列 col_offset 之后：mesh(2), text(2), clip(2), path(2) 各 off+len。
-        // mesh_arena_off @ 12+20*4 = 92；mesh_arena_len @ 96。
-        int MeshArenaOff => (int)ReadU32(12 + 20 * 4);
-        // text_arena_off @ 12+20*4+2*4 = 100；text_arena_len @ 104。
-        int TextArenaOff => (int)ReadU32(12 + 20 * 4 + 2 * 4);
-        int TextArenaLen => (int)ReadU32(12 + 20 * 4 + 2 * 4 + 4);
-        // clip_table_off @ 12+20*4+4*4 = 108；clip_table_len @ 112。
-        int ClipTableOff => (int)ReadU32(12 + 20 * 4 + 4 * 4);
-        int ClipTableLen => (int)ReadU32(12 + 20 * 4 + 4 * 4 + 4);
-        // v7：path_table_off @ 12+20*4+6*4 = 116；path_table_len @ 120。
-        int PathTableOff => (int)ReadU32(12 + 20 * 4 + 6 * 4);
-        int PathTableLen => (int)ReadU32(12 + 20 * 4 + 6 * 4 + 4);
+        // 四 arena header offset。21 列 col_offset 之后：mesh(2), text(2), clip(2), path(2) 各 off+len。
+        // mesh_arena_off @ 12+21*4 = 96；mesh_arena_len @ 100。
+        int MeshArenaOff => (int)ReadU32(12 + 21 * 4);
+        // text_arena_off @ 12+21*4+2*4 = 104；text_arena_len @ 108。
+        int TextArenaOff => (int)ReadU32(12 + 21 * 4 + 2 * 4);
+        int TextArenaLen => (int)ReadU32(12 + 21 * 4 + 2 * 4 + 4);
+        // clip_table_off @ 12+21*4+4*4 = 112；clip_table_len @ 116。
+        int ClipTableOff => (int)ReadU32(12 + 21 * 4 + 4 * 4);
+        int ClipTableLen => (int)ReadU32(12 + 21 * 4 + 4 * 4 + 4);
+        // v8：path_table_off @ 12+21*4+6*4 = 120；path_table_len @ 124。
+        int PathTableOff => (int)ReadU32(12 + 21 * 4 + 6 * 4);
+        int PathTableLen => (int)ReadU32(12 + 21 * 4 + 6 * 4 + 4);
 
         public uint NodeId(int i) => ReadU32(ColOff(0) + i * 4);
         public int ParentId(int i) => (int)ReadU32(ColOff(1) + i * 4);
@@ -70,6 +71,8 @@ namespace LoomGUI
         public float Mtx(int i) => ReadF32(ColOff(10) + i * 4);
         public float Mty(int i) => ReadF32(ColOff(11) + i * 4);
         public byte PayloadKind(int i) => _buf[ColOff(12) + i];
+        /// v8：change_level（u8 列，ColOff(20) + i）。0=Skip 1=Header 2=Full。MirrorPool 三分支用。
+        public byte ChangeLevel(int i) => _buf[ColOff(20) + i];
         uint MeshOff(int i) => ReadU32(ColOff(13) + i * 4);
         uint MeshLen(int i) => ReadU32(ColOff(14) + i * 4);
         public uint TextOff(int i) => ReadU32(ColOff(15) + i * 4);
@@ -126,7 +129,7 @@ namespace LoomGUI
 
         /// clip 表 entry 数（context>0 入表）。无 mask scene 恒为 0。
         /// clip 表段布局：clip_count(u32) + entries[count × {ctx,x,y,w,h}]。
-        /// clip_count(u32) 在 ClipTableOff 处；clip_table_len(header @112) 含 clip_count 本身。
+        /// clip_count(u32) 在 ClipTableOff 处；clip_table_len(header @116) 含 clip_count 本身。
         public int ClipCount => ClipTableLen >= 4 ? (int)ReadU32(ClipTableOff) : 0;
 
         /// 读某 clip context 的 design rect（绝对，y-down）。entry 布局：ctx,x,y,w,h 各 4B（20B/entry）。
