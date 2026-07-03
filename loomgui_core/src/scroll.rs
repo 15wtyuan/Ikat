@@ -1360,4 +1360,26 @@ mod tests {
         // 无效 node → None
         assert_eq!(stage.get_node_layout_rect(NodeId(0xFFFF_FFFF)), None);
     }
+
+    #[test]
+    fn clear_content_size_override_restores_auto() {
+        // v1.4-b：clear 后 refresh 恢复子节点 AABB 自动算。
+        let mut stage = build_scroll_stage();
+        let root_id =
+            stage.scene.as_ref().unwrap().nodes.values().next().unwrap().id;
+        stage.set_content_size(root_id, 0.0, 8000.0);
+        assert!(
+            stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap().content_size_overridden
+        );
+        stage.clear_content_size_override(root_id);
+        assert!(
+            !stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap().content_size_overridden
+        );
+        // refresh 后 content_size 回到子节点 AABB（build_scroll_stage 无子节点 → (0,0)）
+        crate::scroll::refresh_content_sizes(stage.scene.as_mut().unwrap());
+        let st = stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap();
+        assert!(!st.content_size_overridden, "clear 后不再 overridden");
+        // content_size 不再是注入的 8000（回到自动算的无子节点 AABB=0）
+        assert_ne!(st.content_size.1, 8000.0, "clear 后 content_size 回到自动算");
+    }
 }

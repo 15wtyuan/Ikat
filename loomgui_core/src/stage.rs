@@ -176,6 +176,8 @@ impl Stage {
 
     /// v1.4-b：driver 注入滚动容器 content_size（虚拟列表用）。覆盖子节点 AABB 自动算。
     /// refresh_content_sizes 跳过此容器。node 无效/非滚动容器 → no-op（不 panic）。
+    /// **中间态**：set 后至下次 refresh 前 viewport_size/overlap 为 (0,0)——
+    /// driver 正常流程 set→tick→读，不要在 set 后同帧写 scroll_pos（会被 clamp 到 0）。
     pub fn set_content_size(&mut self, node: NodeId, w: f32, h: f32) {
         if let Some(scene) = self.scene.as_mut() {
             let n = scene.get(node);
@@ -193,6 +195,16 @@ impl Stage {
             st.content_size_overridden = true;
             st.viewport_size = (0.0, 0.0); // refresh 会填
             st.overlap = (0.0, 0.0); // refresh 会填
+        }
+    }
+
+    /// v1.4-b：清除 driver 注入的 content_size override，让核心重回子节点 AABB 自动算。
+    /// 列表销毁 / 退回普通滚动时调。node 无效/非滚动容器 → no-op（不 panic）。
+    pub fn clear_content_size_override(&mut self, node: NodeId) {
+        if let Some(scene) = self.scene.as_mut() {
+            if let Some(st) = scene.scroll.get_mut(node) {
+                st.content_size_overridden = false;
+            }
         }
     }
 
