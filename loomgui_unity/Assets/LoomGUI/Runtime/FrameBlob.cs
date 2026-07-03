@@ -6,21 +6,21 @@ namespace LoomGUI
 {
     /// 帧 blob 托管解析视图。解析 Rust build_blob 产出的 little-endian blob。
     ///
-    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v8）：
-    ///   header (128B): magic(u32 LE), version(u32)=8, node_count(u32),
-    ///                 21× col_offset(u32, byte offset from blob start),
+    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v9）：
+    ///   header (132B): magic(u32 LE), version(u32)=9, node_count(u32),
+    ///                 22× col_offset(u32, byte offset from blob start),
     ///                 mesh_arena_off(u32), mesh_arena_len(u32),
     ///                 text_arena_off(u32), text_arena_len(u32),
     ///                 clip_table_off(u32), clip_table_len(u32),
     ///                 path_table_off(u32), path_table_len(u32)
-    ///   21 列 SOA（顺序见 ColOff 注释），随后 mesh_arena / text_arena / clip_table / path_table 段。
+    ///   22 列 SOA（顺序见 ColOff 注释），随后 mesh_arena / text_arena / clip_table / path_table 段。
     /// C# on Windows 是 little-endian，BitConverter 直读无需 byte swap。
     public readonly struct FrameBlob
     {
         public const uint Magic = 0x4D4F4F4C;
         /// blob 版本。magic+version 校验在 IsValid。
-        /// v8：新增 change_level 列（支柱3 三分支 SKIP/HEADER/FULL）。
-        public const uint ExpectedVersion = 8;
+        /// v9：加 reuse_key 列（第 22 列）。
+        public const uint ExpectedVersion = 9;
 
         readonly byte[] _buf;
 
@@ -31,7 +31,7 @@ namespace LoomGUI
         public uint Version => ReadU32(4);
         public int NodeCount => (int)ReadU32(8);
 
-        // 列 offset 在 header[12 .. 12+21*4)。顺序同 Rust columns：
+        // 列 offset 在 header[12 .. 12+22*4)。顺序同 Rust columns：
         //   0=node_id(u32) 1=parent_id(i32,-1=none) 2=visible(u8) 3=alpha(f32)
         //   4=sort_key(u32) 5=mask_context(u32)
         //   6=m_a(f32) 7=m_b(f32) 8=m_c(f32) 9=m_d(f32) 10=m_tx(f32) 11=m_ty(f32)
@@ -43,19 +43,22 @@ namespace LoomGUI
         //   18=program(u8, 0=img/无图 1=Text 2=Container+bg-image 3=filter无bg-image 4=filter+bg-image)  ← v5 新增
         //   19=color_matrix([f32;20], 80B)
         //   20=change_level(u8, 0=Skip 1=Header 2=Full)  ← v8 新增（支柱3）
+        //   21=reuse_key(u32, 0=无复用 >0=slot 复用键)  ← v9 新增（v1.4-b 绝对虚拟列表）
         int ColOff(int idx) => (int)ReadU32(12 + idx * 4);
-        // 四 arena header offset。21 列 col_offset 之后：mesh(2), text(2), clip(2), path(2) 各 off+len。
-        // mesh_arena_off @ 12+21*4 = 96；mesh_arena_len @ 100。
-        int MeshArenaOff => (int)ReadU32(12 + 21 * 4);
-        // text_arena_off @ 12+21*4+2*4 = 104；text_arena_len @ 108。
-        int TextArenaOff => (int)ReadU32(12 + 21 * 4 + 2 * 4);
-        int TextArenaLen => (int)ReadU32(12 + 21 * 4 + 2 * 4 + 4);
-        // clip_table_off @ 12+21*4+4*4 = 112；clip_table_len @ 116。
-        int ClipTableOff => (int)ReadU32(12 + 21 * 4 + 4 * 4);
-        int ClipTableLen => (int)ReadU32(12 + 21 * 4 + 4 * 4 + 4);
-        // v8：path_table_off @ 12+21*4+6*4 = 120；path_table_len @ 124。
-        int PathTableOff => (int)ReadU32(12 + 21 * 4 + 6 * 4);
-        int PathTableLen => (int)ReadU32(12 + 21 * 4 + 6 * 4 + 4);
+        /// v9：reuse_key（u32 列，ColOff(21) + i*4）。0=无复用（按 node_id），>0=按 reuse_key 复用 GO。
+        public uint ReuseKey(int i) => ReadU32(ColOff(21) + i * 4);
+        // 四 arena header offset。22 列 col_offset 之后：mesh(2), text(2), clip(2), path(2) 各 off+len。
+        // mesh_arena_off @ 12+22*4 = 100；mesh_arena_len @ 104。
+        int MeshArenaOff => (int)ReadU32(12 + 22 * 4);
+        // text_arena_off @ 12+22*4+2*4 = 108；text_arena_len @ 112。
+        int TextArenaOff => (int)ReadU32(12 + 22 * 4 + 2 * 4);
+        int TextArenaLen => (int)ReadU32(12 + 22 * 4 + 2 * 4 + 4);
+        // clip_table_off @ 12+22*4+4*4 = 116；clip_table_len @ 120。
+        int ClipTableOff => (int)ReadU32(12 + 22 * 4 + 4 * 4);
+        int ClipTableLen => (int)ReadU32(12 + 22 * 4 + 4 * 4 + 4);
+        // v8：path_table_off @ 12+22*4+6*4 = 124；path_table_len @ 128。
+        int PathTableOff => (int)ReadU32(12 + 22 * 4 + 6 * 4);
+        int PathTableLen => (int)ReadU32(12 + 22 * 4 + 6 * 4 + 4);
 
         public uint NodeId(int i) => ReadU32(ColOff(0) + i * 4);
         public int ParentId(int i) => (int)ReadU32(ColOff(1) + i * 4);
