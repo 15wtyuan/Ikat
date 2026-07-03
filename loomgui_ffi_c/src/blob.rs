@@ -163,7 +163,9 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
                     text_arena.extend_from_slice(&0u32.to_le_bytes()); // glyph_count 占位
                     let mut count = 0u32;
                     for line in &layout.lines {
-                        let pen_y = line.y + line.baseline;
+                        // pen_y = line.baseline（绝对 y，layout.rs:43 已含行偏移 line_y）。
+                        // 勿叠加 line.y（= line_y）——否则每行多一个行高，行距翻倍（多行才暴露）。
+                        let pen_y = line.baseline;
                         for run in &line.runs {
                             for g in &run.glyphs {
                                 text_arena.extend_from_slice(&g.codepoint.to_le_bytes());
@@ -656,12 +658,76 @@ mod tests {
         // pen_x 保留（content 偏移 0 + 原 x）。
         assert_eq!(glyphs[0].1, 0.0);
         assert_eq!(glyphs[1].1, 12.0);
-        // pen_y = line.y(0) + baseline(20) = 20.0（绝对，content 偏移 0 已烤）。
-        assert_eq!(glyphs[0].2, 20.0, "pen_y == line.y + line.baseline");
+        // pen_y = line.baseline = line.y(0) + baseline_off(20) = 20.0（绝对 y，content 偏移 0 已烤）。
+        assert_eq!(glyphs[0].2, 20.0, "pen_y == line.baseline（绝对，20）");
         assert_eq!(glyphs[1].2, 20.0, "同行同 pen_y");
 
         // 字节长度自洽：seg_len = 4(font) + 16(color) + 4(count) + 2×12(glyph) = 48。
         assert_eq!(view.text_len(0), 48, "seg_len: 4+16+4+24 = 48");
+    }
+
+    /// §4.1 多行 text：blob 序列化的 glyph pen_y 应 == line.baseline（绝对 y，已含行偏移）。
+    /// layout.rs:43 `Line.baseline` 注释明写「绝对 y」，赋值 = line_y + baseline_offset；
+    /// 故序列化时不应再叠加 line.y（= line_y），否则每行多一个行高 → 行距翻倍。
+    /// 单行 line_y=0 掩盖此 bug；多行从第 2 行起暴露（line1 pen_y 应 36，实得 56）。
+    /// C# TextRasterizer 用 pen_y 作 baseline 绝对位（quad_top = pen_y - maxY）。
+    #[test]
+    fn text_node_multiline_pen_y_is_absolute_baseline() {
+        let baseline_off = 16.0f32;
+        let line_h = 20.0f32;
+        let mk_line = |li: usize, cp: u32| Line {
+            y: li as f32 * line_h,
+            height: line_h,
+            baseline: li as f32 * line_h + baseline_off, // 绝对 y（layout.rs:43 语义）
+            width: 50.0,
+            runs: vec![GlyphRun {
+                font_size: 16.0,
+                glyphs: vec![Glyph {
+                    glyph_id: 1,
+                    codepoint: cp,
+                    x: 0.0,
+                    y: li as f32 * line_h, // glyph.y = 行顶（不含 baseline）
+                    bearing_x: 0.0,
+                    bearing_y: 0.0,
+                }],
+            }],
+        };
+        let layout = TextLayout {
+            text_width: 50.0,
+            text_height: 2.0 * line_h,
+            lines: vec![mk_line(0, b'A' as u32), mk_line(1, b'B' as u32)],
+        };
+        let node = RenderNode {
+            node_id: 0,
+            parent_id: None,
+            visible: true,
+            alpha: 1.0,
+            color_tint: [1.0; 4],
+            world_matrix: transform::IDENTITY,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: 0,
+            change_level: ChangeLevel::Full,
+            reuse_key: 0,
+            payload: NodePayload::Text {
+                layout,
+                font_size: 16.0,
+                color: [1.0; 4],
+                program: 1,
+            },
+        };
+        let blob = build_blob(&frame(&[node]));
+        let view = TestView::parse(&blob);
+        let (_fs, _c, glyphs) = view.read_text(0);
+        assert_eq!(glyphs.len(), 2, "2 行各 1 字 → 2 glyph");
+        // line0：pen_y 应 = baseline(16)。line.y(0)+baseline(16) 也=16 → 单行掩盖。
+        assert_eq!(glyphs[0].2, baseline_off, "line0 pen_y == 16");
+        // line1：pen_y 应 = line1.baseline(36)。当前 line.y(20)+baseline(36)=56 → 多一个行高。
+        assert_eq!(
+            glyphs[1].2,
+            line_h + baseline_off,
+            "line1 pen_y == line1.baseline(36)；当前叠加 line.y 得 56 → 行距翻倍"
+        );
     }
 
     // —— 测试用解析器（镜像 C# FrameBlob 逻辑，验 Rust 布局正确）——

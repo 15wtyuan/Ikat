@@ -7,7 +7,7 @@ namespace LoomGUI
     /// Text 光栅器：把 Rust（text_arena）给的 glyph 笔位 + Unity 动态字体 atlas 的
     /// glyph 像素 box/UV 烤成 glyph quad mesh。**Rust 是布局权威，Unity 是纯光栅器**——
     /// 笔位用 blob 的 (pen_x, pen_y)（Rust ttf 真 advance），**不**用 Unity `CharacterInfo.advance`；
-    /// 行高用 blob 的 pen_y（已含 line.y+baseline），**不**用 Unity `fontSize*1.25`（跨平台根）。
+    /// 行高用 blob 的 pen_y（= line.baseline 绝对 y），**不**用 Unity `fontSize*1.25`（跨平台根）。
     ///
     /// atlas rebuild 监听：动态字体 atlas 异步 rebuild 时 glyph UV 变。`Font.textureRebuilt`
     /// 是静态事件；本类持静态 `s_fontVersion`，`OnRebuilt` 自增。MirrorPool.Sync 比对版本号，

@@ -189,7 +189,7 @@ namespace LoomGUI
         ///   font_size:u32 | color:f32×4 | glyph_count:u32
         ///   | glyphs[count × { codepoint:u32, pen_x:f32, pen_y:f32 }]  (12B/glyph)
         /// pen_x/pen_y 已 GO-local（layout-rect 相对；节点绝对位在 world matrix m_tx/m_ty，pen 是相对节点原点的偏移，勿与 m_tx/m_ty 叠加）；
-        /// pen_y = line.y + line.baseline（同行同值）。Unity 不 re-base、不用 advance。
+        /// pen_y = line.baseline（绝对 y，layout.rs:43 已含行偏移 line_y；同行同值）。Unity 不 re-base、不用 advance。
         public void ReadText(int i, out int fontSize, out Color color, out GlyphData[] glyphs)
         {
             int p = TextArenaOff + (int)TextOff(i);
