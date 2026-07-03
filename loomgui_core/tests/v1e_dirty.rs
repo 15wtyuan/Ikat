@@ -1,7 +1,6 @@
 //! dirty 跟踪端到端：Stage 跨 tick 保持 hash 基线，静态帧产 Skip。
 //!
-//! v1.4-a T4：`Stage::load_inline` 已砍（D12）。本测用本地 helper `load_html_css`
-//! 直接调 parse_html + build_scene 构 scene（同旧 load_inline 逻辑）。
+//! 本测用本地 helper `load_html_css` 直接调 parse_html + build_scene 构 scene。
 
 use loomgui_core::parse::css::parse_css;
 use loomgui_core::parse::dom::parse_html;
@@ -16,7 +15,7 @@ fn font_path() -> (String, usize) {
     (p, n)
 }
 
-/// v1.4-a T4 helper：HTML+CSS → scene（同旧 load_inline 逻辑）。
+/// helper：HTML+CSS → scene。
 fn load_html_css(stage: &mut Stage, html: &str, css: &str) {
     let tree = parse_html(html).unwrap();
     let sheet = parse_css(css).unwrap();
