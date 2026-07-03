@@ -58,8 +58,7 @@ namespace LoomGUI.Editor
             {
                 EditorUtility.SetDirty(_settings);
                 AssetDatabase.SaveAssetIfDirty(_settings);
-                // TODO Task 7 实现 LoomConfigExporter 后取消注释
-                // LoomConfigExporter.Export(_settings);
+                LoomConfigExporter.Export(_settings);
             }
         }
 
