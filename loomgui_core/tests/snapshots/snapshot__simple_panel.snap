@@ -27,6 +27,7 @@ expression: json
     "mask_context": 0,
     "sort_key": 1,
     "change_level": "Full",
+    "reuse_key": 0,
     "payload": {
       "Mesh": {
         "verts": [
@@ -212,6 +213,7 @@ expression: json
     "mask_context": 0,
     "sort_key": 2,
     "change_level": "Full",
+    "reuse_key": 0,
     "payload": {
       "Text": {
         "layout": {
@@ -308,6 +310,7 @@ expression: json
     "mask_context": 0,
     "sort_key": 3,
     "change_level": "Full",
+    "reuse_key": 0,
     "payload": {
       "Mesh": {
         "verts": [
@@ -431,6 +434,7 @@ expression: json
     "mask_context": 0,
     "sort_key": 4,
     "change_level": "Full",
+    "reuse_key": 0,
     "payload": {
       "Text": {
         "layout": {

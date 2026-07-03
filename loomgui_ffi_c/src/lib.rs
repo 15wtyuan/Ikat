@@ -435,6 +435,69 @@ pub extern "C" fn loomgui_stage_set_scroll_pos(
     handle.stage.set_scroll_pos(NodeId(node_id), x, y, animated != 0);
 }
 
+/// v1.4-b：driver 注入滚动容器 content_size（虚拟列表）。node 无效/非滚动容器 → no-op。
+/// null 句柄 → no-op（不 panic）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_content_size(
+    h: *mut StageHandle, node_id: u32, w: f32, height: f32,
+) {
+    if h.is_null() { return; }
+    let handle = unsafe { &mut *h };
+    handle.stage.set_content_size(NodeId(node_id), w, height);
+}
+
+/// v1.4-b：清除 driver 注入的 content_size override（列表销毁/退回普通滚动时用）。
+/// null 句柄/无效 node → no-op（不 panic）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_clear_content_size_override(
+    h: *mut StageHandle, node_id: u32,
+) {
+    if h.is_null() { return; }
+    let handle = unsafe { &mut *h };
+    handle.stage.clear_content_size_override(NodeId(node_id));
+}
+
+/// v1.4-b：读 scroll_pos。null 句柄/无效 node → out 填 0（不 panic）。
+/// out_x/out_y 是 out 参数（C# 传 ref float）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_scroll_pos(
+    h: *const StageHandle, node_id: u32, out_x: *mut f32, out_y: *mut f32,
+) {
+    let (x, y) = if h.is_null() { (0.0, 0.0) } else {
+        let sh = unsafe { &*h };
+        sh.stage.get_scroll_pos(NodeId(node_id)).unwrap_or((0.0, 0.0))
+    };
+    if !out_x.is_null() { unsafe { *out_x = x; } }
+    if !out_y.is_null() { unsafe { *out_y = y; } }
+}
+
+/// v1.4-b：读节点 layout_rect。null 句柄/无效 node → out 填 0（不 panic）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_layout_rect(
+    h: *const StageHandle, node_id: u32,
+    out_x: *mut f32, out_y: *mut f32, out_w: *mut f32, out_h: *mut f32,
+) {
+    let r = if h.is_null() { None } else {
+        let sh = unsafe { &*h };
+        sh.stage.get_node_layout_rect(NodeId(node_id))
+    };
+    let (x, y, w, hh) = r.map(|r| (r.x, r.y, r.w, r.h)).unwrap_or((0.0, 0.0, 0.0, 0.0));
+    if !out_x.is_null() { unsafe { *out_x = x; } }
+    if !out_y.is_null() { unsafe { *out_y = y; } }
+    if !out_w.is_null() { unsafe { *out_w = w; } }
+    if !out_h.is_null() { unsafe { *out_h = hh; } }
+}
+
+/// v1.4-b：设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_reuse_key(
+    h: *mut StageHandle, node_id: u32, key: u32,
+) {
+    if h.is_null() { return; }
+    let handle = unsafe { &mut *h };
+    handle.stage.set_reuse_key(NodeId(node_id), key);
+}
+
 /// 编程聚焦节点（照 fgui RequestFocus）。强制聚焦任意非 disabled 节点
 /// （含 tabindex=None/-1）；disabled 拒；越界跳过。null 句柄 → no-op。
 ///

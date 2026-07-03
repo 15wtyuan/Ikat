@@ -8,7 +8,8 @@ use crate::input::{EventRecord, PointerEvent, PointerState};
 use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
-use crate::scene::node::{NodeId, Scene};
+use crate::scene::node::{NodeId, Rect, Scene};
+use crate::style::resolved::OverflowMode;
 use crate::style::dynamic::rematch_pseudo_classes;
 use crate::text::layout::Font;
 use std::sync::Arc;
@@ -173,6 +174,50 @@ impl Stage {
         }
     }
 
+    /// v1.4-b：driver 注入滚动容器 content_size（虚拟列表用）。覆盖子节点 AABB 自动算。
+    /// refresh_content_sizes 跳过此容器。node 无效/非滚动容器 → no-op（不 panic）。
+    /// **中间态**：set 后至下次 refresh 前 viewport_size/overlap 为 (0,0)——
+    /// driver 正常流程 set→tick→读，不要在 set 后同帧写 scroll_pos（会被 clamp 到 0）。
+    pub fn set_content_size(&mut self, node: NodeId, w: f32, h: f32) {
+        if let Some(scene) = self.scene.as_mut() {
+            let n = scene.get(node);
+            let is_scroll = n
+                .map(|n| {
+                    n.style.overflow_x != OverflowMode::Visible
+                        || n.style.overflow_y != OverflowMode::Visible
+                })
+                .unwrap_or(false);
+            if !is_scroll {
+                return;
+            }
+            let st = scene.scroll.ensure(node);
+            st.content_size = (w, h);
+            st.content_size_overridden = true;
+            st.viewport_size = (0.0, 0.0); // refresh 会填
+            st.overlap = (0.0, 0.0); // refresh 会填
+        }
+    }
+
+    /// v1.4-b：清除 driver 注入的 content_size override，让核心重回子节点 AABB 自动算。
+    /// 列表销毁 / 退回普通滚动时调。node 无效/非滚动容器 → no-op（不 panic）。
+    pub fn clear_content_size_override(&mut self, node: NodeId) {
+        if let Some(scene) = self.scene.as_mut() {
+            if let Some(st) = scene.scroll.get_mut(node) {
+                st.content_size_overridden = false;
+            }
+        }
+    }
+
+    /// v1.4-b：读 scroll_pos。node 无效/非滚动容器 → None。
+    pub fn get_scroll_pos(&self, node: NodeId) -> Option<(f32, f32)> {
+        self.scene.as_ref()?.scroll.get(node).map(|s| s.scroll_pos)
+    }
+
+    /// v1.4-b：读节点 layout_rect（solve 产物）。driver 测 itemSize 用。node 无效 → None。
+    pub fn get_node_layout_rect(&self, node: NodeId) -> Option<Rect> {
+        self.scene.as_ref()?.get(node).map(|n| n.layout_rect)
+    }
+
     /// 编程聚焦（照 fgui RequestFocus）。强制聚焦任意非 disabled 节点
     /// （含 tabindex=None/-1——request_focus 是编程 API，不查 tabindex）。
     /// disabled 拒 / 越界跳过。记 pending_focus_request，下 tick 最前消费（不直接写 last_events）。
@@ -310,6 +355,13 @@ impl Stage {
     /// 改 base_style（apply_css）+ 标 dirty_mesh。下帧 rematch 从 base 重算 style。
     pub fn set_style(&mut self, node: NodeId, css: &str) -> Result<(), String> {
         crate::scene::dynamic::set_style(self.scene.as_mut().ok_or("no scene")?, node, css)
+    }
+
+    /// v1.4-b：设渲染复用键（虚拟列表 slot）。node 无效 → no-op。
+    pub fn set_reuse_key(&mut self, node: NodeId, key: u32) {
+        if let Some(scene) = self.scene.as_mut() {
+            crate::scene::dynamic::set_reuse_key(scene, node, key);
+        }
     }
 
     /// 从包克隆一个组件进当前 scene，返回组件根 NodeId（孤立，parent=None，调用方 append_child 挂载）。
@@ -1673,5 +1725,32 @@ mod d17_image_size_tests {
         assert_eq!(s.image_size("icons/x.png"), Some((10, 10)), "首次 load");
         s.load_package("bag", &pkg_v2).unwrap();
         assert_eq!(s.image_size("icons/x.png"), Some((50, 50)), "重 load 覆盖（新尺寸）");
+    }
+
+    /// v1.4-b：reuse_key 是运行时字段（不进 pkg），driver 给 slot 节点设。
+    /// 0=无复用（默认），>0=按 reuse_key 复用 GO。
+    #[test]
+    fn set_reuse_key_sets_field() {
+        let mut stage = Stage::new_for_test();
+        let root = stage.create_root("div", "").unwrap();
+        let child = stage.create_node("div", "").unwrap();
+        stage.append_child(root, child).unwrap();
+        assert_eq!(
+            stage.scene.as_ref().unwrap().get(child).unwrap().reuse_key, 0,
+            "默认 0"
+        );
+        stage.set_reuse_key(child, 5);
+        assert_eq!(stage.scene.as_ref().unwrap().get(child).unwrap().reuse_key, 5);
+    }
+
+    /// v1.4-b：set_reuse_key 对无效 node（已删/悬空）no-op，不 panic。
+    #[test]
+    fn set_reuse_key_invalid_node_noop() {
+        let mut stage = Stage::new_for_test();
+        let root = stage.create_root("div", "").unwrap();
+        // NodeId(99999) 不存在 → no-op，不 panic。
+        stage.set_reuse_key(crate::scene::node::NodeId(99999), 42);
+        // create_root 成功即 no-op 未 panic。
+        assert!(root.0 > 0);
     }
 }

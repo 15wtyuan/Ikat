@@ -35,14 +35,18 @@ namespace LoomGUI
 
     public sealed class MirrorPool
     {
-        readonly Dictionary<uint, RenderObj> _pool = new();
+        // v1.4-b：双 dict keying。reuse_key>0 的 slot 节点按 reuse_key 复用 GO
+        // （slot 换绑 item 时 NodeId 变但 reuse_key 不变 → GO 不销毁重建）；
+        // reuse_key=0 的普通节点按 node_id keying（v1 行为不变）。
+        readonly Dictionary<uint, RenderObj> _poolByNodeId = new();
+        readonly Dictionary<uint, RenderObj> _poolByReuse = new();
         int _lastFontVersion = -1;     // -1 → 首帧必不等，强制建/光栅；之后追 TextRasterizer.FontVersion
         // 每 ctx 每帧首次算一次 _ClipBox 并 SetClipBox。
         // Sync 开头清空；clip 表 entry 少（few ctx），每帧开销可忽略。
         readonly HashSet<uint> _clipsAppliedThisFrame = new();
 
-        /// 当前镜像中的 GO 数量（=pool 中 node_id 数）。测试/调试用。
-        public int Count => _pool.Count;
+        /// 当前镜像中的 GO 数量（两 dict 之和）。测试/调试用。
+        public int Count => _poolByNodeId.Count + _poolByReuse.Count;
 
         public void Sync(FrameBlob blob, Transform root, MaterialManager mm,
                          SpriteResolver sprites, Texture fallback, Font font)
@@ -55,12 +59,13 @@ namespace LoomGUI
             // （glyph UV 变，缓存 mesh 作废）。
             bool fontDirty = _lastFontVersion != TextRasterizer.FontVersion;
 
-            // ① 全标 stale
-            foreach (var kv in _pool) kv.Value.Stale = true;
+            // ① 全标 stale（两个 dict）
+            foreach (var kv in _poolByNodeId) kv.Value.Stale = true;
+            foreach (var kv in _poolByReuse) kv.Value.Stale = true;
             // 本帧 clip 应用集清空（per-ctx-per-frame 一次性算 _ClipBox）。
             _clipsAppliedThisFrame.Clear();
 
-            // ② 遍历节点：v8 三分支 SKIP / HEADER / FULL
+            // ② 遍历节点：v8 三分支 SKIP / HEADER / FULL；v9 双 dict keying
             int n = blob.NodeCount;
             for (int i = 0; i < n; i++)
             {
@@ -68,11 +73,14 @@ namespace LoomGUI
                 byte kind = blob.PayloadKind(i);
                 byte level = blob.ChangeLevel(i);   // 0=Skip 1=Header 2=Full
                 uint id = blob.NodeId(i);
+                uint reuseKey = blob.ReuseKey(i);    // v1.4-b
+                uint poolKey = reuseKey != 0 ? reuseKey : id;
+                Dictionary<uint, RenderObj> pool = reuseKey != 0 ? _poolByReuse : _poolByNodeId;
 
                 // SKIP：本帧无变化，保留上帧 GO，清 stale。
                 if (level == 0)
                 {
-                    if (_pool.TryGetValue(id, out var ro0)) ro0.Stale = false;
+                    if (pool.TryGetValue(poolKey, out var ro0)) ro0.Stale = false;
                     continue;
                 }
                 if (kind != 1 && kind != 2) continue;  // 未知 kind 防御跳过
@@ -94,13 +102,13 @@ namespace LoomGUI
                 }
 
                 // 确保 RenderObj 存在；新建 GO 无 mesh → 强制 FULL（无视 blob 的 HEADER）
-                if (!_pool.TryGetValue(id, out var ro))
+                if (!pool.TryGetValue(poolKey, out var ro))
                 {
                     ro = NewRenderObj(root);
-                    ro.LastNodeId = id;
-                    _pool[id] = ro;
+                    pool[poolKey] = ro;
                     level = 2; // 强制 FULL
                 }
+                ro.LastNodeId = id; // v1.4-b：新建 + 复用均更新（slot 换绑时 node_id 变）
                 ro.Stale = false;
                 ro.IsText = kind == 2;
 
@@ -110,10 +118,13 @@ namespace LoomGUI
 
             if (fontDirty) _lastFontVersion = TextRasterizer.FontVersion;
 
-            // ③ 余 stale 销毁
-            var dead = new List<uint>();
-            foreach (var kv in _pool) if (kv.Value.Stale) dead.Add(kv.Key);
-            foreach (var id in dead) { TearDown(_pool[id]); _pool.Remove(id); }
+            // ③ 余 stale 销毁（两个 dict）
+            var dead1 = new List<uint>();
+            foreach (var kv in _poolByNodeId) if (kv.Value.Stale) dead1.Add(kv.Key);
+            foreach (var id in dead1) { TearDown(_poolByNodeId[id]); _poolByNodeId.Remove(id); }
+            var dead2 = new List<uint>();
+            foreach (var kv in _poolByReuse) if (kv.Value.Stale) dead2.Add(kv.Key);
+            foreach (var id in dead2) { TearDown(_poolByReuse[id]); _poolByReuse.Remove(id); }
         }
 
         /// 更新 GO header（position/rotation/scale + sortingOrder + clip + material + per-renderer uniforms）。
@@ -313,8 +324,10 @@ namespace LoomGUI
 
         public void Clear()
         {
-            foreach (var kv in _pool) TearDown(kv.Value);
-            _pool.Clear();
+            foreach (var kv in _poolByNodeId) TearDown(kv.Value);
+            _poolByNodeId.Clear();
+            foreach (var kv in _poolByReuse) TearDown(kv.Value);
+            _poolByReuse.Clear();
         }
 
         // Edit-mode-safe 销毁：LoomStage 挂 [ExecuteAlways]，Sync/Clear 会在 Edit mode 跑；

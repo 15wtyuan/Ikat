@@ -91,6 +91,7 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
         mask_context: last.mask_context,
         sort_key: last.sort_key,
         change_level: crate::render::node::ChangeLevel::Full,
+        reuse_key: 0,
         payload: NodePayload::Mesh {
             verts, uvs, colors, indices,
             image_path: match &last.payload {
@@ -116,6 +117,7 @@ mod tests {
             world_matrix: crate::transform::IDENTITY,
             blend: BlendMode::Normal, mask_context: MaskContext(0), sort_key,
             change_level: ChangeLevel::Full,
+            reuse_key: 0,
             payload: NodePayload::Mesh {
                 verts: vec![[rect_off, 0.0], [rect_off + 10.0, 0.0],
                             [rect_off + 10.0, 10.0], [rect_off, 10.0]],

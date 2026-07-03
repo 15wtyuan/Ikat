@@ -104,8 +104,7 @@ fn display_grid_falls_to_flex() {
 
 #[test]
 fn fence_out_props_return_false() {
-    let cases: [(&str, &str); 10] = [
-        ("position", "absolute"),
+    let cases: [(&str, &str); 9] = [
         ("float", "left"),
         ("align-content", "center"),
         ("cursor", "pointer"),
@@ -124,16 +123,65 @@ fn fence_out_props_return_false() {
 }
 
 #[test]
-fn position_absolute_does_not_break_flow() {
-    // position:absolute 写了不生效：apply_decl 返回 false，
-    // taffy_style.position 保持默认 Relative（不脱离流）。
-    // fence.md §0 纠正的"无 match ≠ 不支持"反例的核心锁定。
+fn position_absolute_breaks_flow() {
+    // v1.4-b：position:absolute 现在生效（围栏内）。apply_decl 返回 true，
+    // taffy_style.position = Absolute（脱离流），inset 写进 taffy_style.inset。
     let mut s = ResolvedStyle::default();
-    let before = s.taffy_style.position;
     let applied = apply_decl(&mut s, "position", "absolute");
-    assert!(!applied, "position:absolute 应返回 false（围栏外）");
-    assert_eq!(s.taffy_style.position, before,
-        "position 字段不变（保持默认 Relative，不脱离流）");
+    assert!(applied, "position:absolute 应返回 true（围栏内）");
+    assert_eq!(s.taffy_style.position, taffy::style::Position::Absolute,
+        "position:absolute → taffy Absolute（脱离流）");
+}
+
+#[test]
+fn position_relative_explicit() {
+    // relative 显式设（虽靠默认，但显式更清晰）。
+    let mut s = ResolvedStyle::default();
+    s.taffy_style.position = taffy::style::Position::Absolute; // 先改成非默认
+    assert!(apply_decl(&mut s, "position", "relative"));
+    assert_eq!(s.taffy_style.position, taffy::style::Position::Relative);
+}
+
+#[test]
+fn position_fixed_sticky_ignored() {
+    // fixed/sticky 围栏外（静默忽略，保持默认 Relative）。
+    for val in ["fixed", "sticky"] {
+        let mut s = ResolvedStyle::default();
+        assert!(!apply_decl(&mut s, "position", val),
+            "position:{val} 围栏外 → false");
+        assert_eq!(s.taffy_style.position, taffy::style::Position::Relative,
+            "position:{val} 不改默认 Relative");
+    }
+}
+
+#[test]
+fn inset_top_writes_taffy_inset() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "top", "10px"));
+    assert_eq!(s.taffy_style.inset.top, taffy::style::LengthPercentageAuto::Length(10.0));
+    // 未设的边保持 auto。
+    assert_eq!(s.taffy_style.inset.bottom, taffy::style::LengthPercentageAuto::Auto);
+}
+
+#[test]
+fn inset_four_sides() {
+    let mut s = ResolvedStyle::default();
+    apply_decl(&mut s, "top", "1px");
+    apply_decl(&mut s, "right", "2px");
+    apply_decl(&mut s, "bottom", "3px");
+    apply_decl(&mut s, "left", "4px");
+    assert_eq!(s.taffy_style.inset.top, taffy::style::LengthPercentageAuto::Length(1.0));
+    assert_eq!(s.taffy_style.inset.right, taffy::style::LengthPercentageAuto::Length(2.0));
+    assert_eq!(s.taffy_style.inset.bottom, taffy::style::LengthPercentageAuto::Length(3.0));
+    assert_eq!(s.taffy_style.inset.left, taffy::style::LengthPercentageAuto::Length(4.0));
+}
+
+#[test]
+fn inset_auto_keeps_default() {
+    let mut s = ResolvedStyle::default();
+    apply_decl(&mut s, "top", "10px");
+    apply_decl(&mut s, "top", "auto"); // auto 显式置回默认 Auto（覆盖之前的 px 值）
+    assert_eq!(s.taffy_style.inset.top, taffy::style::LengthPercentageAuto::Auto);
 }
 
 #[test]

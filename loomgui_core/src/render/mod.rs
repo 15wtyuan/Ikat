@@ -72,6 +72,7 @@ fn thumb_render_node(node_id: u32, rect: Rect, sort_key: u32) -> RenderNode {
         mask_context: MaskContext(0),
         sort_key,
         change_level: ChangeLevel::Full,
+        reuse_key: 0,
         payload: NodePayload::Mesh {
             verts: v,
             uvs: uvc,
@@ -192,6 +193,7 @@ pub fn build_render_nodes(
                     color_tint, world_matrix: wm, blend: BlendMode::Normal,
                     mask_context: MaskContext(0), sort_key: 0,
                     change_level: ChangeLevel::Full,
+                    reuse_key: n.reuse_key,
                     payload: NodePayload::Mesh {
                         verts: v, uvs: uvc, colors: col, indices: idx, image_path, program, color_matrix,
                     },
@@ -218,6 +220,7 @@ pub fn build_render_nodes(
                     color_tint, world_matrix: wm, blend: BlendMode::Normal,
                     mask_context: MaskContext(0), sort_key: 0,
                     change_level: ChangeLevel::Full,
+                    reuse_key: n.reuse_key,
                     payload: NodePayload::Mesh { verts: v, uvs: uvc, colors: col, indices: idx, image_path, program, color_matrix },
                 }
             }
@@ -244,6 +247,7 @@ pub fn build_render_nodes(
                     color_tint, world_matrix: wm, blend: BlendMode::Normal,
                     mask_context: MaskContext(0), sort_key: 0,
                     change_level: ChangeLevel::Full,
+                    reuse_key: n.reuse_key,
                     payload: NodePayload::Text {
                         layout, font_size: s.font_size,
                         color: anim.and_then(|a| a.text_color).unwrap_or(s.color), program: 1,

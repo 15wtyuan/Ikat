@@ -87,6 +87,9 @@ pub struct ScrollPaneState {
     pub tween_duration: (f32, f32),
     /// refresh 后若 content_size 变化置 true（供 scrollbar 复布局用）。
     pub content_size_dirty: bool,
+    /// v1.4-b：driver 注入 content_size 标记。true 时 refresh_content_sizes 跳过
+    /// （不覆盖子节点 AABB）。set_content_size 置 true；clear_content_size_override 置 false。
+    pub content_size_overridden: bool,
 }
 
 /// 每节点滚动状态表（`HashMap<NodeId, ScrollPaneState>`）。仅滚动容器 ensure 后有值。
@@ -475,6 +478,35 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
         }
     }
     for (nid, kids, viewport) in work {
+        // v1.4-b：driver 注入 content_size 的容器（虚拟列表）跳过自动算。
+        // 只更新 viewport（容器尺寸可能变）+ 重算 overlap（用已注入的 content_size），
+        // 不覆盖 content_size、不遍历子节点 AABB。
+        let overridden = scene.scroll.get(nid)
+            .map(|s| s.content_size_overridden)
+            .unwrap_or(false);
+        if overridden {
+            let st = scene.scroll.ensure(nid);
+            st.viewport_size = viewport;
+            let new_overlap = (
+                (st.content_size.0 - viewport.0).max(0.0),
+                (st.content_size.1 - viewport.1).max(0.0),
+            );
+            st.overlap = new_overlap;
+            // content_size 变化补偿（最小）：overridden 容器 content_size 未变，
+            // 但 overlap 可能因 viewport 变化而缩小 → scroll_pos 越界需 clamp。
+            if st.tweening != 0 {
+                let out_of_range = st.scroll_pos.0 < 0.0
+                    || st.scroll_pos.0 > new_overlap.0
+                    || st.scroll_pos.1 < 0.0
+                    || st.scroll_pos.1 > new_overlap.1;
+                if out_of_range {
+                    st.scroll_pos.0 = st.scroll_pos.0.clamp(0.0, new_overlap.0);
+                    st.scroll_pos.1 = st.scroll_pos.1.clamp(0.0, new_overlap.1);
+                    st.tweening = 0;
+                }
+            }
+            continue;
+        }
         // content_size = 直接子节点 layout_rect AABB。
         let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
         let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
@@ -1233,5 +1265,121 @@ mod tests {
             "pos 保持 100（不回原位/不弹），got {}",
             st.scroll_pos.1
         );
+    }
+
+    // ── v1.4-b content_size 注入测 ─────────────────────────────
+
+    /// 建含单个 scroll 容器的 Stage（无子节点），供 v1.4-b 驱动注入测试用。
+    /// root 是 overflow_y=Scroll 的 Container，layout_rect (0,0,200,100)。
+    fn build_scroll_stage() -> crate::stage::Stage {
+        let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+        let mut stage = crate::stage::Stage::new(font_path, (200.0, 200.0)).unwrap();
+        let mut scroll_style = ResolvedStyle::default();
+        scroll_style.overflow_y = OverflowMode::Scroll;
+        let entries: Vec<(
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
+        )> = vec![(
+            None,
+            NodeKind::Container,
+            scroll_style,
+            vec![],
+            None,
+            false,
+            None,
+        )];
+        let mut s = Scene::build(&entries);
+        let root0 = s.roots[0];
+        s.get_mut(root0).unwrap().layout_rect =
+            Rect { x: 0.0, y: 0.0, w: 200.0, h: 100.0 };
+        stage.scene = Some(s);
+        stage
+    }
+
+    #[test]
+    fn set_content_size_overrides_refresh() {
+        // v1.4-b：driver 注入 content_size 后，refresh_content_sizes 不覆盖。
+        let mut stage = build_scroll_stage();
+        let root_id =
+            stage.scene.as_ref().unwrap().nodes.values().next().unwrap().id;
+        // driver 注入 content_size
+        stage.set_content_size(root_id, 0.0, 8000.0);
+        let st = stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap();
+        assert_eq!(st.content_size, (0.0, 8000.0));
+        assert!(st.content_size_overridden, "注入后标 overridden");
+        // refresh 不覆盖
+        crate::scroll::refresh_content_sizes(stage.scene.as_mut().unwrap());
+        let st = stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap();
+        assert_eq!(
+            st.content_size,
+            (0.0, 8000.0),
+            "refresh 不覆盖已注入的 content_size"
+        );
+        // viewport/overlap 重算（viewport 更新，overlap 用注入的 content_size）
+        assert!(
+            (st.viewport_size.0 - 200.0).abs() < 1e-3
+                && (st.viewport_size.1 - 100.0).abs() < 1e-3,
+            "viewport 更新为 layout_rect 尺寸"
+        );
+        assert!(
+            (st.overlap.1 - 7900.0).abs() < 1e-3,
+            "overlap = content(8000) - viewport(100) = 7900"
+        );
+    }
+
+    #[test]
+    fn get_scroll_pos_reads_state() {
+        let mut stage = build_scroll_stage();
+        let root_id =
+            stage.scene.as_ref().unwrap().nodes.values().next().unwrap().id;
+        // 注入 content_size 造 overlap（override 容器 refresh 后才算 overlap）
+        stage.set_content_size(root_id, 0.0, 200.0);
+        crate::scroll::refresh_content_sizes(stage.scene.as_mut().unwrap());
+        // overlap.y = max(200-100, 0) = 100，scroll_pos 在界内
+        stage.set_scroll_pos(root_id, 0.0, 50.0, false);
+        assert_eq!(stage.get_scroll_pos(root_id), Some((0.0, 50.0)));
+        // 无效 node → None
+        assert_eq!(stage.get_scroll_pos(NodeId(0xFFFF_FFFF)), None);
+    }
+
+    #[test]
+    fn get_node_layout_rect_reads_solved() {
+        let stage = build_scroll_stage();
+        let root_id =
+            stage.scene.as_ref().unwrap().nodes.values().next().unwrap().id;
+        // build_scroll_stage 已手动设 layout_rect (0,0,200,100)
+        assert_eq!(
+            stage.get_node_layout_rect(root_id),
+            Some(Rect { x: 0.0, y: 0.0, w: 200.0, h: 100.0 })
+        );
+        // 无效 node → None
+        assert_eq!(stage.get_node_layout_rect(NodeId(0xFFFF_FFFF)), None);
+    }
+
+    #[test]
+    fn clear_content_size_override_restores_auto() {
+        // v1.4-b：clear 后 refresh 恢复子节点 AABB 自动算。
+        let mut stage = build_scroll_stage();
+        let root_id =
+            stage.scene.as_ref().unwrap().nodes.values().next().unwrap().id;
+        stage.set_content_size(root_id, 0.0, 8000.0);
+        assert!(
+            stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap().content_size_overridden
+        );
+        stage.clear_content_size_override(root_id);
+        assert!(
+            !stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap().content_size_overridden
+        );
+        // refresh 后 content_size 回到子节点 AABB（build_scroll_stage 无子节点 → (0,0)）
+        crate::scroll::refresh_content_sizes(stage.scene.as_mut().unwrap());
+        let st = stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap();
+        assert!(!st.content_size_overridden, "clear 后不再 overridden");
+        // content_size 不再是注入的 8000（回到自动算的无子节点 AABB=0）
+        assert_ne!(st.content_size.1, 8000.0, "clear 后 content_size 回到自动算");
     }
 }

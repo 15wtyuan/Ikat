@@ -84,7 +84,7 @@
 
 - **围栏外标签**（如 `<video>`/`<input>`/`<b>`/`<section>`）+ **行内混排**：**编译期报错**（parse 期失败、打包器拒收，不降级）。"写什么得到什么"的口径。
 - **围栏外 CSS 属性**（如 `position:absolute`/`float`/`clip-path`/`cursor`/`font-style`）：**静默忽略**（`apply_decl` 返 `false`，字段不变，布局语义不变）。
-  - 易误判项：`position:relative` 靠 taffy 默认 `Position::Relative` 生效（**非显式映射，写不写行为一致，无 inset 偏移**）；`display:grid` 落 Flex；`position:absolute/fixed` **不脱离流**（保持默认 Relative）。
+  - 易误判项：`position:relative` 靠 taffy 默认 `Position::Relative` 生效（**非显式映射，写不写行为一致，无 inset 偏移**）；`display:grid` 落 Flex；v1.4-b 起 `position:absolute` **脱离流**（taffy Absolute + top/right/bottom/left inset）；`position:fixed/sticky` 仍静默忽略。
   - 这些"静默忽略"行为本身**被测试锁定**，不可靠推测——"搜索代码无 match"≠"不支持"，可能是底层默认（position:relative 教训）。
 
 > 围栏外标签/CSS/选择器的完整清单见 fence.md。
@@ -485,7 +485,7 @@ stage.is_pointer_on_ui() -> bool   // = 命中目标非空且非根
 游戏 UI 里可滚动容器远多于虚拟化长列表，移动端要惯性/回弹/分页/吸附。
 
 **模型**：Container 有"可滚动"模式（挂 ScrollPane，非新节点类型）。ScrollPane 持 `content`（子树）/`viewport`（可视矩形）/`scroll_type`(H/V/Both)/`scroll_pos`（偏移）。
-- taffy 算 content 总尺寸；视口 = Container measured_size；`scroll_pos` 是 content 根的 transform 偏移（不重布局，只平移）；视口裁剪 = Container clip_rect。
+- 核心拼直接子节点 layout_rect AABB（scroll.rs refresh_content_sizes）；v1.4-b 起 content_size_overridden 的容器跳过自动算（driver 注入）。视口 = Container measured_size；`scroll_pos` 是 content 根的 transform 偏移（不重布局，只平移）；视口裁剪 = Container clip_rect。
 - **惯性回弹物理**：**不走 GTween**（content 异步变化时 GTween 的固定 end 会跳变）。ScrollPane 自维护可变 target 的 tween，content size 变化时按状态补偿 start、不突变。tick 时机在 solve 后、process 后、compute_world_transforms 前（需 content_size + 拖拽事件驱动，满足"本帧 scroll 偏移进 transform 与命中"；drag+inertia+wheel 同帧进 world matrix，零拖拽延迟；process 的 hit_test 用上帧 world_transforms，1 帧差可接受）。**禁止 GTween 直接 tween `scroll_pos`**（API 层挡，避免双写）。
 - 能力：滚动类型、惯性+回弹、滚动条、鼠标滚轮。分页/吸附/下拉刷新、虚拟化列表后期（不暴露专用标签，§3.1）。
 
@@ -509,8 +509,8 @@ stage.set_style(node, "background:#00f")?;                           // 改 base
 
 **NodeId 是代际不透明句柄**：对外 `u32`（FFI/C#/包格式零变化），内部含 generation。`remove_node` 后旧 NodeId 自动失效（generation++，再用时 no-op）——业务侧持有的旧句柄安全，无需手动清。删除是事件：核心联动清所有持 NodeId 的持久状态（anim/scroll/tween/focused_node），后端镜像池按 NodeId keying 自动跟进增删（stale-mark-sweep）。
 
-### 12.2 数据驱动的列表虚拟化
-建在 ScrollPane 上（**不暴露专用标签**——围栏只有 div/span/img/button，§3.1；宿主用 `create_node` 建 item 模板，核心做 slot 复用）。核心维护固定数量可视槽（item index → slot），后端按 slot 复用渲染对象（不销毁重建，零 GC）。两身份正交：NodeId=逻辑身份（事件/命中），slot=渲染复用身份。**slot 复用的核心不变量**（slot 换内容时必发真实 payload 非 Unchanged，防花屏）与 reuse_key 机制见 roadmap（机制草稿）。
+### 12.2 数据驱动的列表虚拟化（层 B'）
+**核心不认识"列表"**——列表是普通 div（overflow:scroll, position:relative）+ N 个 slot 子节点（position:absolute, 带 reuse_key）。核心只多管 `reuse_key: u32` 字段（传给后端复用 GO）+ 3 个 FFI 口子（set_content_size / get_scroll_pos / get_node_layout_rect）。driver 管所有列表逻辑：instantiate item 模板、测 itemSize、注入 content_size、算可见区间、slot 增删/改内容、不等高尺寸补偿。两身份正交：NodeId=逻辑身份（事件/命中），reuse_key=渲染复用身份（后端按它复用 GO，slot 换绑不销毁重建）。slot 换内容必发 Full（新 NodeId 无上帧 hash → ChangeLevel::Full）。不暴露专用标签（围栏只有 div/span/img/button）。
 
 ### 12.3 数据绑定
 命令式 API + 数据驱动列表为主。声明式绑定（`data-bind:text="user.name"`）后期加。挂在好的场景图上，后加不痛。

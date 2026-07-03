@@ -88,6 +88,7 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         draggable: false,
         tabindex: None,
         focused: false,
+        reuse_key: 0,
     };
     let key = scene.nodes.insert(node);
     let id = NodeId::from_key(key);
@@ -143,6 +144,7 @@ pub fn create_node_from_template(
         draggable: false,
         tabindex: None,
         focused: false,
+        reuse_key: 0,
     };
     let key = scene.nodes.insert(node);
     let id = NodeId::from_key(key);
@@ -237,6 +239,13 @@ pub fn set_style(scene: &mut Scene, node: NodeId, css: &str) -> Result<(), Strin
     apply_css(&mut n.base_style, css);
     n.dirty_mesh = true;
     Ok(())
+}
+
+/// v1.4-b：设渲染复用键（虚拟列表 slot 用）。node 无效 → no-op（不 panic）。
+pub fn set_reuse_key(scene: &mut Scene, node: NodeId, key: u32) {
+    if let Some(n) = scene.get_mut(node) {
+        n.reuse_key = key;
+    }
 }
 
 /// 删节点：递归删子 → 从父/roots 摘除 → 联动清 anim/scroll/tween → slotmap remove。

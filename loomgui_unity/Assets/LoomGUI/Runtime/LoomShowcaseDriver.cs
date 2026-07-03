@@ -65,10 +65,24 @@ namespace LoomGUI
         // Coroutine 计时器句柄（防重复触发叠多个 toast）。
         Coroutine _tipsRoutine;
 
+        // === 虚拟列表演示（v1.4-b T8）===
+        bool _isListPage;
+        VirtualListDriver _listDriverEqual;
+        VirtualListDriver _listDriverVar;
+
         void Awake()
         {
             if (_stage == null) _stage = GetComponent<LoomStage>();
             if (_stage == null) { Debug.LogError("[Showcase] 无 LoomStage"); return; }
+        }
+
+        // 虚拟列表每帧 SyncSlots。Update 在 LoomStage.LateUpdate(tick) 前跑，
+        // 本帧内 slot 增删吃进同帧 tick → solve → 渲染。
+        void Update()
+        {
+            if (!_isListPage) return;
+            _listDriverEqual?.SyncSlots();
+            _listDriverVar?.SyncSlots();
         }
 
         // #1a1d2e = .root 背景色（showcase 深蓝底）。主相机配同色，letterbox 与 root 无缝。
@@ -82,7 +96,7 @@ namespace LoomGUI
             // layer 骨架：root + ui_layer（主界面层）+ tips_layer（tips 层，在上）。
             _root = _stage.CreateRoot("div", "width:1080px;height:1920px;background-color:#1a1d2e;flex-direction:column");
             _uiLayer = _stage.CreateNode("div", "flex-grow:1");
-            _tipsLayer = _stage.CreateNode("div", "flex-direction:column;align-items:center;justify-content:flex-end;padding:40px;pointer-events:none");
+            _tipsLayer = _stage.CreateNode("div", "position:absolute;top:0;left:0;width:100%;height:100%;flex-direction:column;align-items:center;justify-content:flex-end;padding:40px;pointer-events:none");
             _stage.AppendChild(_root, _uiLayer);
             _stage.AppendChild(_root, _tipsLayer);
 
@@ -152,6 +166,10 @@ namespace LoomGUI
                 _stage.RemoveNode(_mailOverlay);
                 _mailOverlay = uint.MaxValue;
             }
+            // 离开列表页时清 driver（RemoveNode 递归清所有 slot，driver 下帧 Update 不跑）。
+            _isListPage = false;
+            _listDriverEqual = null;
+            _listDriverVar = null;
             uint node = _stage.Instantiate(ShowcasePkg, page);
             if (node == uint.MaxValue)
             {
@@ -203,6 +221,7 @@ namespace LoomGUI
                 case "page_tween": SubscribeTween(); break;
                 case "page_interact": SubscribeInteract(); break;
                 case "page_dyntree": SubscribeDynTree(); break;
+                case "page_list": SubscribeList(); break;
             }
         }
 
@@ -217,10 +236,11 @@ namespace LoomGUI
             AddNavListener("nav-tween", "page_tween");
             AddNavListener("nav-interact", "page_interact");
             AddNavListener("nav-dyntree", "page_dyntree");
+            AddNavListener("nav-list", "page_list");
             // nav-tips-demo → 弹 tips_toast 演示（tips_layer 叠加）。
             uint tipsBtn = _stage.FindNodeById("nav-tips-demo");
             AddPageListener(tipsBtn, EventType.Click, _ => ShowTips());
-            Debug.Log("[Showcase] home 订阅完成（7 nav + tips-demo）");
+            Debug.Log("[Showcase] home 订阅完成（8 nav + tips-demo）");
         }
 
         void AddNavListener(string navId, string targetPage)
@@ -423,6 +443,29 @@ namespace LoomGUI
             Debug.Log($"[Showcase] page_dyntree 订阅完成（anchor={_dynAnchor}）");
         }
 
+        // page_list（v1.4-b T8 虚拟列表）：back-home + 左右双列表（等高 + 不等高）。
+        void SubscribeList()
+        {
+            SubscribeBackHome();
+            uint eq = _stage.FindNodeById("list-equal");
+            uint vr = _stage.FindNodeById("list-variable");
+            if (eq == uint.MaxValue || vr == uint.MaxValue)
+            {
+                Debug.LogError("[Showcase] list containers not found (id 'list-equal'/'list-variable')");
+                return;
+            }
+            _listDriverEqual = new VirtualListDriver(_stage, eq, 1000);
+            // 不等高尺寸：正弦波 60~140px
+            // v1.4-b：本 demo 不等高用预定义 size（sin 波），size 已知无需 spec §2.8 实测补偿回路。
+            // 真实数据源（异步图片加载致 item 高度变）场景需补 MeasureAndUpdateSlot + SetScrollPos 补偿防跳动。
+            float[] sizes = new float[200];
+            for (int i = 0; i < 200; i++)
+                sizes[i] = 100f + 40f * Mathf.Sin(i * 0.3f);
+            _listDriverVar = new VirtualListDriver(_stage, vr, 200, variableHeight: true, sizes: sizes);
+            _isListPage = true;
+            Debug.Log("[Showcase] page_list 订阅完成（等高1000 + 不等高200 sin-height）");
+        }
+
         // 建 1 个 panel（panel+title+icon 子树）。返回 panel NodeId。
         uint CreateDynPanel()
         {
@@ -550,5 +593,187 @@ namespace LoomGUI
 
         // 0-255 RGB → 归一化 [0,1] RGBA float[4]（alpha=1）。Rust tween 直接写 anim 通道，须与 style 归一化一致。
         static float[] Rgba(int r, int g, int b) => new float[] { r / 255f, g / 255f, b / 255f, 1f };
+    }
+
+    // 虚拟列表 driver（v1.4-b T8）。
+    // 模型：slot = CreateNode div(position:absolute) + img + span title。
+    // 每帧 get_scroll_pos 算可见区间 → diff slot 绑定 → create/remove/set_text。
+    // 等高：_itemSize 单值 O(1)；不等高：_itemSizes[] 累加搜索。
+    // slot top = absolute 定位；SetReuseKey 让 MirrorPool 回收 GO。
+    sealed class VirtualListDriver
+    {
+        readonly LoomStage _stage;
+        readonly uint _listContainer;
+        readonly uint _itemCount;
+        readonly bool _variableHeight;
+
+        // Equal-height
+        float _itemSize;
+        uint _measureRoot;
+
+        // Variable-height
+        readonly float[] _itemSizes;
+
+        // Init: 0=need_measure, 1=measuring, 2=ready
+        int _initStep;
+
+        // slotId(=itemIndex) → (root, title, idx)
+        readonly Dictionary<uint, (uint root, uint title, uint idx)> _slots = new();
+
+        const uint MeasureReuseKey = 0;
+
+        public VirtualListDriver(LoomStage stage, uint container, uint itemCount,
+            bool variableHeight = false, float[] sizes = null, float defaultItemSize = 80f)
+        {
+            _stage = stage;
+            _listContainer = container;
+            _itemCount = itemCount;
+            _variableHeight = variableHeight;
+
+            if (variableHeight && sizes != null && sizes.Length == itemCount)
+            {
+                _itemSizes = sizes;
+                float total = 0f;
+                for (int i = 0; i < sizes.Length; i++) total += sizes[i];
+                _stage.SetContentSize(container, 0, total);
+                _initStep = 2;
+            }
+            else
+            {
+                _itemSize = defaultItemSize;
+                _initStep = 0;
+            }
+        }
+
+        (uint root, uint title) CreateItem(float height, float topY)
+        {
+            uint item = _stage.CreateNode("div",
+                $"width:100%;height:{height}px;flex-direction:row;align-items:center;gap:12px;padding:0 16px;background-color:#252839;position:absolute;left:0;top:{topY}px");
+            uint icon = _stage.CreateNode("img", "width:48px;height:48px");
+            _stage.AppendChild(item, icon);
+            _stage.SetSrc(icon, "icons/skin.png");
+            uint title = _stage.CreateNode("span", "color:#e0e0e0;font-size:20px");
+            _stage.AppendChild(item, title);
+            return (item, title);
+        }
+
+        string GetItemTitle(uint idx)
+        {
+            return _variableHeight
+                ? $"Item {idx}  ({_itemSizes[idx]:F0}px)"
+                : $"Item {idx}";
+        }
+
+        // 每帧调（driver.Update，LoomStage tick 前）：
+        // init 阶段测量 itemSize (两帧)；就绪后 diff slot 绑定。
+        public void SyncSlots()
+        {
+            if (_initStep == 0) { InitMeasure(); return; }
+            if (_initStep == 1) { FinishMeasure(); return; }
+            SyncSlotsReady();
+        }
+
+        void InitMeasure()
+        {
+            var (item, title) = CreateItem(80f, 0);
+            _measureRoot = item;
+            _stage.AppendChild(_listContainer, item);
+            _stage.SetReuseKey(item, MeasureReuseKey);
+            _stage.SetText(title, "Measuring...");
+            _initStep = 1;
+        }
+
+        void FinishMeasure()
+        {
+            var r = _stage.GetNodeLayoutRect(_measureRoot);
+            if (r.h > 0)
+            {
+                _itemSize = r.h;
+                _stage.SetContentSize(_listContainer, 0, _itemCount * _itemSize);
+                _stage.RemoveNode(_measureRoot);
+                _measureRoot = 0;
+                _initStep = 2;
+            }
+        }
+
+        void SyncSlotsReady()
+        {
+            var (sx, sy) = _stage.GetScrollPos(_listContainer);
+            var vp = _stage.GetNodeLayoutRect(_listContainer);
+            if (vp.h <= 0) return;
+
+            int first, last;
+            if (_variableHeight)
+            {
+                first = FindFirstVisible(sy);
+                last = FindLastVisible(sy + vp.h);
+            }
+            else
+            {
+                first = Mathf.FloorToInt(sy / _itemSize);
+                last = Mathf.FloorToInt((sy + vp.h) / _itemSize);
+            }
+            first = Mathf.Max(0, first);
+            last = Mathf.Min((int)_itemCount - 1, last);
+            if (first > last) return;
+
+            var visible = new HashSet<uint>();
+            for (int i = first; i <= last; i++) visible.Add((uint)i);
+
+            var removeKeys = new List<uint>();
+            foreach (var kv in _slots)
+                if (!visible.Contains(kv.Value.idx))
+                    removeKeys.Add(kv.Key);
+            foreach (var key in removeKeys)
+            {
+                _stage.RemoveNode(_slots[key].root);
+                _slots.Remove(key);
+            }
+
+            for (int idx = first; idx <= last; idx++)
+            {
+                uint itemIndex = (uint)idx;
+                uint slotId = itemIndex;
+                if (!_slots.ContainsKey(slotId))
+                {
+                    float itemH = _variableHeight ? _itemSizes[idx] : _itemSize;
+                    float top = _variableHeight ? SumSizesUpTo(idx) : itemIndex * _itemSize;
+                    var (root, title) = CreateItem(itemH, top);
+                    _stage.AppendChild(_listContainer, root);
+                    _stage.SetReuseKey(root, slotId + 1);
+                    _stage.SetText(title, GetItemTitle(itemIndex));
+                    _slots[slotId] = (root, title, itemIndex);
+                }
+            }
+        }
+
+        int FindFirstVisible(float sy)
+        {
+            float acc = 0f;
+            for (int i = 0; i < _itemCount; i++)
+            {
+                if (acc + _itemSizes[i] > sy) return i;
+                acc += _itemSizes[i];
+            }
+            return (int)_itemCount - 1;
+        }
+
+        int FindLastVisible(float bottom)
+        {
+            float acc = 0f;
+            for (int i = 0; i < _itemCount; i++)
+            {
+                acc += _itemSizes[i];
+                if (acc > bottom) return i;
+            }
+            return (int)_itemCount - 1;
+        }
+
+        float SumSizesUpTo(int idx)
+        {
+            float sum = 0f;
+            for (int i = 0; i < idx; i++) sum += _itemSizes[i];
+            return sum;
+        }
     }
 }
