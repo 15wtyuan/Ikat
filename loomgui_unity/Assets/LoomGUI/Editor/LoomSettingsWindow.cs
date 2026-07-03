@@ -73,8 +73,7 @@ namespace LoomGUI.Editor
             EditorGUILayout.Space(8);
             if (GUILayout.Button("初始化工作区（注入围栏规则 + skill + config.json）", GUILayout.Height(28)))
             {
-                // TODO Task 8 实现 LoomWorkspaceInitializer 后取消注释
-                // LoomWorkspaceInitializer.Initialize(_settings);
+                LoomWorkspaceInitializer.Initialize(_settings);
                 AppendLog("[init] 工作区初始化完成");
             }
         }
