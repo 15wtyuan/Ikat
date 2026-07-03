@@ -14,10 +14,10 @@ namespace LoomGUI.Tests
         public void Route_ByTopLevelSubdir()
         {
             var resolver = new SpriteResolver();
-            var atlasIcons = ScriptableObject.CreateInstance<SpriteAtlas>(); // 空 atlas
-            resolver.InitWithMap(new Dictionary<string, SpriteAtlas> { { "icons", atlasIcons } }, atlasIcons);
-            // atlasIcons 无 sprite → 返 missingSprite（null），但路由到 icons（不抛）。
-            // 验证：不遍历别的 atlas（无 NRE），miss 返 null。
+            // SpriteAtlas 非 ScriptableObject，EditMode 单测造不出实例（无公开构造/CreateInstance）。
+            // 测的是纯路由：folder key 命中即可，atlas value 用 null——ResolveAtlas 命中 "icons" 返 null →
+            // GetSprite 走 atlas==null 分支 → 不崩 + miss 返 null。
+            resolver.InitWithMap(new Dictionary<string, SpriteAtlas> { { "icons", null } }, null);
             Assert.IsNull(resolver.GetSprite("icons/home.png"));
         }
 
@@ -25,9 +25,9 @@ namespace LoomGUI.Tests
         public void Route_RootImage_FallsBackToDefault()
         {
             var resolver = new SpriteResolver();
-            var defaultAtlas = ScriptableObject.CreateInstance<SpriteAtlas>();
-            resolver.InitWithMap(new Dictionary<string, SpriteAtlas>(), defaultAtlas);
-            // path 无子目录 → 走 default atlas。
+            // default atlas 用 null（SpriteAtlas 造不出实例）。path 无子目录 → ResolveAtlas 走
+            // default 分支 = _defaultAtlas(=null) ?? FirstAtlas()(空 map → null) → 返 null → miss 不崩。
+            resolver.InitWithMap(new Dictionary<string, SpriteAtlas>(), null);
             Assert.IsNull(resolver.GetSprite("home.png"));
         }
 
@@ -35,8 +35,8 @@ namespace LoomGUI.Tests
         public void Miss_NotCached()
         {
             var resolver = new SpriteResolver();
-            var atlas = ScriptableObject.CreateInstance<SpriteAtlas>();
-            resolver.InitWithMap(new Dictionary<string, SpriteAtlas> { { "icons", atlas } }, atlas);
+            // atlas 用 null（SpriteAtlas 造不出实例，测的是 miss 不缓存逻辑，不需要真 atlas）。
+            resolver.InitWithMap(new Dictionary<string, SpriteAtlas> { { "icons", null } }, null);
             // 首次 miss。
             Assert.IsNull(resolver.GetSprite("icons/missing.png"));
             // 假装 atlas 后来 pack 好——但空 atlas.GetSprite 仍 miss。

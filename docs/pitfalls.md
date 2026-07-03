@@ -758,4 +758,33 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：`pen_y = line.baseline`。补多行 blob 测试（原单行测试掩盖了 bug）。
 **教训**：plan/spec 的数学公式照抄进实现前核对字段语义（看 struct 注释 + 赋值处）——`baseline` 绝对还是相对要看定义。text 测试要覆盖 ≥2 行（单行掩盖多行 bug）。
 
+### 坑 115：Unity 6 Sprite Atlas 自动建/pack 五连坑（V1 不 pack / V2 创建 / Packer Mode）
+**症状**：代码自动建的图集运行时 `atlas.GetSprite` 全 miss（`packed.spriteCount=0`），图片不显示；Editor inspect 看 packables 有 Sprite 但 packed sprites 空。
+**根因**（五坑串联，家里机踩五六轮）：
+1. `new SpriteAtlas()` + `AssetDatabase.CreateAsset` 存的是 **V1**（`isAtlasV2:0`、`m_Guid` 全零、`m_PackedSprites` 空）——V1 在 Unity 6 不 pack。
+2. `SpriteAtlasAsset.Load` 只认 V2（`.spriteatlasv2` 扩展名），对 V1 `.spriteatlas` 返 null。
+3. V2 创建正道：`new SpriteAtlasAsset()`（**不是** `new SpriteAtlas`，**不是** `ScriptableObject.CreateInstance`——`SpriteAtlasAsset` 继承 `Object` 不 `ScriptableObject`）+ `SpriteAtlasAsset.Save(saa, "x.spriteatlasv2")`（Venkify 官方法，[discussions.unity.com/t/949154](https://discussions.unity.com/t/how-do-you-create-atlas-v2-using-code/949154)）。
+4. V2 pack 须 **Project Settings > Editor > Sprite Packer > Mode = Always Enabled**——Disabled 时 `SaveAndReimport` 也不 pack。"Enabled for Builds" 只 build 时 pack，PlayMode 不 pack（仍 spriteCount=0）。
+5. `entry.atlas` 旧 V1 引用用 `if (entry.atlas == null)` 判断不会重绑——要**强制赋值**覆盖旧 V1 引用。
+**解决**（`LoomAtlasSync.cs` V2 全链路）：`EnsureAtlasAsset` 用 `new SpriteAtlasAsset()` + `Save(.spriteatlasv2)` 建，`SyncEntry` 用 `SpriteAtlasAsset.Load/Add/Remove/Save` + `importer.SaveAndReimport()` 触发 pack（joe_nk [discussions.unity.com/t/917311](https://discussions.unity.com/t/spriteatlasextensions-are-broken/917311) workaround），`entry.atlas` 强制绑 V2，`ResolveAtlasPath` 只认 `.spriteatlasv2`。Packer Mode 文档说明（非代码可控）。
+**教训**：Unity 6 Sprite Atlas **只用 V2**（`.spriteatlasv2` + `SpriteAtlasAsset` API），别碰 V1（`new SpriteAtlas`）。pack 非代码可控——Packer Mode 是前置（Disabled 时全 miss）。Agent 调研（理论"import auto-pack"）要实测兜底。SpriteAtlasExtensions（atlas.Add/Remove）/SerializedObject 在 V2 都 broken，只有 SpriteAtlasAsset 路径对。
+
+### 坑 116：Unity .md/.html 当 DefaultAsset 不是 TextAsset → LoadAssetAtPath<TextAsset> 返 null
+**症状**：初始化按钮点了显示「完成」，但 CLAUDE.md / skill 文件实际没写。
+**根因**：`AssetDatabase.LoadAssetAtPath<TextAsset>("x.md")` 返 null——Unity 把 .md/.html 导入成 `DefaultAsset` 不是 `TextAsset`，按 `<TextAsset>` 筛类型不匹配返 null，注入流程 `LogError + return`，但按钮回调还无条件显示「完成」掩盖了失败。
+**解决**：纯文本资源（fence-rules.md / SKILL.md / *.html 等）用 `File.ReadAllText(projRoot + assetPath)` 直读磁盘，不走 AssetDatabase 类型转换。`Initialize` 返回 `Result{ok,msg}`，按钮据实显示。
+**教训**：`LoadAssetAtPath<T>` 按 T 筛——Unity 把该文件导入成非 T 类型则返 null，不报错。给 AI/打包器用的纯文本（不须 Unity 当资产）一律 `File.ReadAllText` 直读最稳。
+
+### 坑 117：Unity 只忽略点开头文件 import——挡不住 CLAUDE.md / .html / .css
+**症状**：想挡工作区下非资源文件（CLAUDE.md / *.html / *.css）不被 Unity 导入，找不到 API。
+**根因**：Unity 硬规则——只忽略 `.` 开头文件/目录（`.claude` / `.git` 等不生成 .meta）。非点开头文件必 import 成 `DefaultAsset` + `.meta`，**无公开 API 阻止**（`OnPreprocessAsset` 不能 abort；`AssetImporter.SetNonAsset` 是幻觉 API；`.unityignore` 是社区未实现请求）。
+**解决**：接受现状——DefaultAsset 不进 build，打包器 `File.ReadAllText` 直读源文件，不影响运行时/AI 工作流。`.claude` 点开头自动忽略。spec §3.2「跳过导入」理想化，Unity API 无解。
+**教训**：挡 Unity 导入非点开头文件做不到——要么改名点开头（CLAUDE.md 固定不能改），要么移出 Assets/。工作区设计别依赖「挡导入」。
+
+### 坑 118：EditMode 测试硬编码 NodeId 全挂——generational NodeId 不顺序
+**症状**：`LoomEventHandlerTests` 硬编码 nodeId 0/1/2 全挂（事件路由链断）。
+**根因**：`NodeId(pub u32)` 是代际的（slotmap `idx<<12 | gen`，首节点 `(1<<12)|1=4097`，非 0）。`load_html` 的 NodeId 顺序依赖解析/插入序，不可预测。测试硬编码 0/1/2 与实际 NodeId 不符。
+**解决**：测试用 `loomgui_stage_create_root` + `create_node` + `append_child` 建 tree，拿真实 NodeId（root/parent/child 变量），事件路由测用这些变量非字面量。
+**教训**：FFI 句柄（NodeId 代际、reuse_key 等）是不透明/代际的，测试别硬编码字面量——用 create API 拿真实值。`load_html` 适合测样式/结构，不适合测 NodeId 身份。
+
 

@@ -5,45 +5,36 @@ using UnityEngine;
 namespace LoomGUI.Editor
 {
     /// <summary>
-    /// 拦工作区下非资源文件（.html/.css/.claude/CLAUDE.md/design-systems/.od-skills）不让 Unity 导入。
-    /// 这些是给 AI/open-design 用的纯文本，导入会生成多余 .meta + 尝试导入 .css。
-    /// PNG 正常导入为 Sprite（进 SpriteAtlas）。
+    /// 工作区 PNG 强制导入为 Sprite（进 SpriteAtlas）。
+    ///
+    /// 非资源文件（CLAUDE.md / .html / .css）挡不住导入——这是 Unity 硬规则：
+    ///   - Unity 只忽略**点开头**的文件/目录（.claude / .git 等，不生成 .meta）；
+    ///   - 非点开头文件（CLAUDE.md / *.html / *.css）必然 import 成 DefaultAsset + .meta，
+    ///     无公开 API 能阻止（OnPreprocessAsset 无法 abort；.unityignore 是社区未实现请求）。
+    ///   - 原 spec §3.2「跳过导入」理想化；AssetImporter.SetNonAsset() 是幻觉 API。
+    /// 决策（2026-07-04）：接受现状——DefaultAsset 不进 build，打包器 File.ReadAllText 直读源文件，
+    /// 不影响运行时/打包/AI 工作流。Project 窗口多几个资产图标是 Unity 固有代价。
     /// </summary>
     public sealed class LoomWorkspaceAssetPostprocessor : AssetPostprocessor
     {
-        static bool ShouldSkip(string assetPath)
-        {
-            // 工作区根从 LoomSettings 拿（运行时配置资产）。
-            var s = LoomSettings.GetOrCreateDefault();
-            if (s == null || string.IsNullOrEmpty(s.workspaceDir)) return false;
-            string ws = s.workspaceDir.Replace('\\', '/').TrimEnd('/') + "/";
-            string p = assetPath.Replace('\\', '/');
-            if (!p.StartsWith(ws)) return false;
-
-            string name = Path.GetFileName(p);
-            if (name == "CLAUDE.md") return true;
-            if (p.Contains("/.claude/")) return true;
-            if (p.Contains("/.od-skills/")) return true;
-            if (p.Contains("/design-systems/")) return true;
-            if (p.EndsWith(".html") || p.EndsWith(".css")) return true;
-            return false;
-        }
-
         void OnPreprocessAsset()
         {
-            if (ShouldSkip(assetPath))
-            {
-                // 跳过导入：让 Unity 不生成 importer / 不尝试解析。
-                var importer = assetImporter as AssetImporter;
-                if (importer != null) importer.SetNonAsset();  // Unity 6：标记为非资产不入库
-            }
-            // PNG 强制 Sprite 导入（进 SpriteAtlas）。
-            if (assetPath.EndsWith(".png"))
+            // 只管工作区下 PNG（避免改工程其他 PNG——3D 纹理/背景/插件贴图——的导入设置）。
+            string ws = LoomSettings.GetOrCreateDefault()?.workspaceDir;
+            if (string.IsNullOrEmpty(ws)) return;
+            string norm = assetPath.Replace('\\', '/');
+            if (!norm.StartsWith(ws.Replace('\\', '/'), System.StringComparison.OrdinalIgnoreCase)) return;
+
+            // PNG 强制 Sprite + 未压缩（pack 到 SpriteAtlas 不丢像素精度，避免压缩 source 警告）。
+            if (norm.EndsWith(".png"))
             {
                 var ti = assetImporter as TextureImporter;
-                if (ti != null && ti.textureType != TextureImporterType.Sprite)
+                if (ti != null)
                 {
-                    ti.textureType = TextureImporterType.Sprite;
+                    if (ti.textureType != TextureImporterType.Sprite)
+                        ti.textureType = TextureImporterType.Sprite;
+                    if (ti.textureCompression != TextureImporterCompression.None)
+                        ti.textureCompression = TextureImporterCompression.None;
                 }
             }
         }

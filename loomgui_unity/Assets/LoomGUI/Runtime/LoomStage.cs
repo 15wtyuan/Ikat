@@ -139,7 +139,8 @@ namespace LoomGUI
         {
             if (_stage == null) return default;
             float x = 0f, y = 0f;
-            unsafe { fixed (float* px = &x, py = &y) Native.loomgui_stage_get_scroll_pos(_stage, node, px, py); }
+            // 栈局部 unmanaged 直接 & 取址（CS0213：栈上已固定无需 fixed；C# unsafe 允许栈局部取址）。
+            unsafe { Native.loomgui_stage_get_scroll_pos(_stage, node, &x, &y); }
             return (x, y);
         }
 
@@ -147,8 +148,8 @@ namespace LoomGUI
         {
             if (_stage == null) return default;
             float x = 0f, y = 0f, w = 0f, h = 0f;
-            unsafe { fixed (float* px = &x, py = &y, pw = &w, ph = &h)
-                Native.loomgui_stage_get_node_layout_rect(_stage, node, px, py, pw, ph); }
+            // 栈局部 unmanaged 直接 & 取址（CS0213：栈上已固定无需 fixed；C# unsafe 允许栈局部取址）。
+            unsafe { Native.loomgui_stage_get_node_layout_rect(_stage, node, &x, &y, &w, &h); }
             return (x, y, w, h);
         }
 

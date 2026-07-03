@@ -3,6 +3,7 @@
     "rootNamespace": "LoomGUI.Tests",
     "references": [
         "LoomGUI.Runtime",
+        "LoomGUI.Editor",
         "LoomGUI.Bindings",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
