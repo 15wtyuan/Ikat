@@ -294,7 +294,6 @@ mod tests {
             parent_id: parent,
             visible: true,
             alpha: 1.0,
-            grayed: false,
             color_tint: [1.0; 4],
             world_matrix: transform::from_translate(x, y),
             blend: BlendMode::Normal,
@@ -345,7 +344,6 @@ mod tests {
             parent_id: None,
             visible: true,
             alpha,
-            grayed: false,
             color_tint: tint,
             world_matrix: transform::IDENTITY,
             blend: BlendMode::Normal,
@@ -369,7 +367,7 @@ mod tests {
         let n = verts.len();
         RenderNode {
             node_id: 0, parent_id: None, visible: true, alpha: 1.0,
-            grayed: false, color_tint: [1.0; 4],
+            color_tint: [1.0; 4],
             world_matrix: transform::from_translate(tx, ty),
             blend: BlendMode::Normal, mask_context: MaskContext(0), sort_key: 0,
             change_level: ChangeLevel::Full,
@@ -605,7 +603,6 @@ mod tests {
             parent_id: None,
             visible: true,
             alpha: 1.0,
-            grayed: false,
             color_tint: [1.0; 4],
             world_matrix: transform::IDENTITY,
             blend: BlendMode::Normal,
@@ -931,7 +928,6 @@ mod tests {
             parent_id: None,
             visible: true,
             alpha: 1.0,
-            grayed: false,
             color_tint: [1.0; 4],
             world_matrix: transform::IDENTITY,
             blend: BlendMode::Normal,
@@ -989,7 +985,7 @@ mod tests {
     #[test]
     fn blob_world_matrix_roundtrip() {
         let mk = |wm: transform::Affine2| RenderNode {
-            node_id: 0, parent_id: None, visible: true, alpha: 1.0, grayed: false,
+            node_id: 0, parent_id: None, visible: true, alpha: 1.0,
             color_tint: [1.0; 4], world_matrix: wm, blend: BlendMode::Normal,
             mask_context: MaskContext(0), sort_key: 0,
             change_level: ChangeLevel::Full,
@@ -1039,7 +1035,7 @@ mod tests {
             RenderNode {
                 node_id: 1,
                 parent_id: None, visible: true, alpha: 1.0,
-                grayed: false, color_tint: [1.0; 4],
+                color_tint: [1.0; 4],
                 world_matrix: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
                 mask_context: MaskContext(0), sort_key: 0,
                 blend: BlendMode::Normal,

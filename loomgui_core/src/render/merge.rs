@@ -84,7 +84,6 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
         parent_id: None,
         visible: true,
         alpha: last.alpha, // merged alpha=子 alpha（同 key 保证一致；走 _Alpha uniform）
-        grayed: false,
         color_tint: [1.0; 4],
         world_matrix: crate::transform::IDENTITY,
         blend: last.blend,
@@ -112,7 +111,7 @@ mod tests {
     fn mesh_node(id: u32, path: Option<&str>, sort_key: u32, alpha: f32, rect_off: f32) -> RenderNode {
         RenderNode {
             node_id: id, parent_id: None, visible: true, alpha,
-            grayed: false, color_tint: [1.0; 4],
+            color_tint: [1.0; 4],
             world_matrix: crate::transform::IDENTITY,
             blend: BlendMode::Normal, mask_context: MaskContext(0), sort_key,
             change_level: ChangeLevel::Full,

@@ -10,23 +10,20 @@ namespace LoomGUI.Tests
         // 路由测需 Stage handle + scene（root>parent>child）。
 
         // BuildStage 装载 root>parent>child（node_id: root=0,parent=1,child=2）。
-        // font_path 需真路径（DejaVuSans.ttf）——core stage_new 解析字体，null/0 会返 null。
-        // 需传 Application.streamingAssetsPath 或 Assets/LoomGUI/Fonts/DejaVuSans.ttf 的 UTF-8 字节。
+        // font_path 传 StreamingAssets 下 DejaVuSans.ttf 的绝对路径——core stage_new
+        // 用 Font::from_path 读该路径解析字体，路径无效会返 null。
         static (IntPtr stage, LoomEventHandler handler) BuildStage()
         {
-            // font_path 占位：未补真路径时 stage_new 会因 font 解析失败返 null。
-            // 补法：System.IO.Path.Combine(Application.streamingAssetsPath, "DejaVuSans.ttf")
-            //       byte[] fp = Encoding.UTF8.GetBytes(fontPath); fixed(byte* fpp=fp) stage = Native.loomgui_stage_new(fpp, (nuint)fp.Length, 200f, 200f);
-            byte[] fontPathBytes = null; // 占位：需补真路径
+            string fontPath = System.IO.Path.Combine(Application.streamingAssetsPath, "DejaVuSans.ttf");
+            byte[] fontPathBytes = System.Text.Encoding.UTF8.GetBytes(fontPath);
             StageHandle* stagePtr;
             fixed (byte* fp = fontPathBytes)
             {
-                stagePtr = Native.loomgui_stage_new(fp, (nuint)(fontPathBytes?.Length ?? 0), 200f, 200f);
+                stagePtr = Native.loomgui_stage_new(fp, (nuint)fontPathBytes.Length, 200f, 200f);
             }
-            // 若 stagePtr == null，说明 font_path 占位未补——补真路径后重试。
             // 注意：不能用 Assert.IsNotNull(stagePtr, ...) —— 指针装箱后恒非 null（boxed 0 也是对象），
             // 是 no-op；stagePtr 是 StageHandle*，用 != null 真比较。
-            Assert.IsTrue(stagePtr != null, "BuildStage: stage_new 返 null（font_path 占位未补？需填真路径）");
+            Assert.IsTrue(stagePtr != null, "BuildStage: stage_new 返 null（font_path 无效？检查 StreamingAssets/DejaVuSans.ttf）");
 
             string html = "<div class=\"root\"><div class=\"parent\"><div class=\"child\"></div></div></div>";
             string css = ".root{width:200px;height:200px;}.parent{width:100px;height:100px;}.child{width:50px;height:50px;}";

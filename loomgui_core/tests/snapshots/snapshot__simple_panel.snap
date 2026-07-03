@@ -8,7 +8,6 @@ expression: json
     "parent_id": null,
     "visible": true,
     "alpha": 1.0,
-    "grayed": false,
     "color_tint": [
       1.0,
       1.0,
@@ -193,7 +192,6 @@ expression: json
     "parent_id": 8193,
     "visible": true,
     "alpha": 1.0,
-    "grayed": false,
     "color_tint": [
       0.0,
       0.0,
@@ -289,7 +287,6 @@ expression: json
     "parent_id": 4097,
     "visible": true,
     "alpha": 1.0,
-    "grayed": false,
     "color_tint": [
       0.0,
       0.0,
@@ -412,7 +409,6 @@ expression: json
     "parent_id": 16385,
     "visible": true,
     "alpha": 1.0,
-    "grayed": false,
     "color_tint": [
       0.0,
       0.0,

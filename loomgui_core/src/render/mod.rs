@@ -65,7 +65,6 @@ fn thumb_render_node(node_id: u32, rect: Rect, sort_key: u32) -> RenderNode {
         parent_id: None,
         visible: true,
         alpha: 1.0,
-        grayed: false,
         color_tint: [1.0, 1.0, 1.0, 1.0],
         world_matrix: crate::transform::IDENTITY,
         blend: BlendMode::Normal,
@@ -188,7 +187,7 @@ pub fn build_render_nodes(
                     if has_image { 4u32 } else { 3u32 }
                 } else if has_image { 2u32 } else { 0u32 };
                 RenderNode {
-                    node_id, parent_id, visible: true, alpha, grayed: false,
+                    node_id, parent_id, visible: true, alpha,
                     color_tint, world_matrix: wm, blend: BlendMode::Normal,
                     mask_context: MaskContext(0), sort_key: 0,
                     change_level: ChangeLevel::Full,
@@ -214,7 +213,7 @@ pub fn build_render_nodes(
                 };
                 let program = if has_filter { 3u32 } else { 0u32 };
                 RenderNode {
-                    node_id, parent_id, visible: true, alpha, grayed: false,
+                    node_id, parent_id, visible: true, alpha,
                     color_tint, world_matrix: wm, blend: BlendMode::Normal,
                     mask_context: MaskContext(0), sort_key: 0,
                     change_level: ChangeLevel::Full,
@@ -240,7 +239,7 @@ pub fn build_render_nodes(
                     bake_content_offset(&mut layout, off_x, off_y);
                 }
                 RenderNode {
-                    node_id, parent_id, visible: true, alpha, grayed: false,
+                    node_id, parent_id, visible: true, alpha,
                     color_tint, world_matrix: wm, blend: BlendMode::Normal,
                     mask_context: MaskContext(0), sort_key: 0,
                     change_level: ChangeLevel::Full,

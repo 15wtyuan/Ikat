@@ -101,7 +101,7 @@ mod tests {
     fn mesh_rn(path: Option<&str>, alpha: f32, color0: [f32;4]) -> RenderNode {
         RenderNode {
             node_id: 0, parent_id: None, visible: true, alpha,
-            grayed: false, color_tint: [1.0;4],
+            color_tint: [1.0;4],
             world_matrix: IDENTITY, blend: BlendMode::Normal,
             mask_context: MaskContext(0), sort_key: 0,
             change_level: ChangeLevel::Full,
@@ -147,7 +147,6 @@ mod tests {
             parent_id: None,
             visible: true,
             alpha: 1.0,
-            grayed: false,
             color_tint: [1.0; 4],
             world_matrix: IDENTITY,
             blend: BlendMode::Normal,
