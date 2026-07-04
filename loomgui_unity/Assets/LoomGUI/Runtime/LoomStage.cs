@@ -34,7 +34,7 @@ namespace LoomGUI
         [SerializeField] Vector2 _designSize = new(1080, 1920);
         [SerializeField] Camera _uiCamera;
         // Unity 动态字体：与 Rust measure 的同一份 ttf（_fontFile）。必须 Inspector 指定（EnsureFont 校验）。
-        // 字体是项目设计资源（Assets/LoomUI/res/fonts/），非框架自带——框架不绑资源路径。
+        // 字体由接入方项目提供（Assets/ 下任意位置），框架不自带、不绑路径——editor 读 _font 源文件。
         [SerializeField] Font _font;
 
         // Stage 读取的 ttf 文件名（StreamingAssets 下，喂 Rust measure）。
@@ -350,11 +350,11 @@ namespace LoomGUI
             }
 
 #if UNITY_EDITOR
-            // editor：直接读 _font 源文件（LoomUI/res/fonts/X.ttf）——不绕 StreamingAssets，免手动 cp。
+            // editor：直接读 _font 源文件（_font 实际所在路径，框架不假设位置）——不绕 StreamingAssets，免手动 cp。
             // build 后 Font asset 打进包、不再是文件系统路径，走 #else 读 StreamingAssets 字节。
             if (_font == null)
             {
-                Debug.LogError("[LoomStage] 必须在 Inspector 指定 _font（字体在 Assets/LoomUI/res/fonts/）");
+                Debug.LogError("[LoomStage] 必须在 Inspector 指定 _font（字体由接入方项目提供）");
                 return;
             }
             var assetPath = UnityEditor.AssetDatabase.GetAssetPath(_font);
@@ -439,13 +439,13 @@ namespace LoomGUI
 
         /// <summary>
         /// 校验 Unity 动态 Font。必须由用户在 Inspector 指定 _font（_fontFile 由 OnValidate 自动同步）。
-        /// 框架不自带字体——字体是项目设计资源（Assets/LoomUI/res/fonts/）。
+        /// 框架不自带字体、不绑字体路径——字体由接入方项目提供，Inspector 指定 _font。
         /// SampleScene 已配；EditMode 测试不实例化 LoomStage，故无需 editor 兜底。
         /// </summary>
         void EnsureFont()
         {
             if (_font != null) return;
-            Debug.LogError("[LoomStage] 必须在 Inspector 指定 _font（字体在 Assets/LoomUI/res/fonts/）");
+            Debug.LogError("[LoomStage] 必须在 Inspector 指定 _font（字体由接入方项目提供）");
         }
 
         /// <summary>

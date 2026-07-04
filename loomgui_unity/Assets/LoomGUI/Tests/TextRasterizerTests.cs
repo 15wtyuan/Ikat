@@ -12,7 +12,7 @@ namespace LoomGUI.Tests
     /// 故即使 DejaVu 不同版本的精确 minX/maxY 不同，只要 BuildMesh 数学正确即过。
     public class TextRasterizerTests
     {
-        const string DejaVuPath = "Assets/LoomUI/res/fonts/DejaVuSans.ttf";
+        const string DejaVuPath = "Assets/Fonts/DejaVuSans.ttf";
 
         static Font LoadDejaVu()
         {
@@ -26,7 +26,7 @@ namespace LoomGUI.Tests
 #endif
         }
 
-        const string CjkPath = "Assets/LoomUI/res/fonts/wqy-microhei.ttc";
+        const string CjkPath = "Assets/Fonts/wqy-microhei.ttc";
 
         static Font LoadCjkFont()
         {
