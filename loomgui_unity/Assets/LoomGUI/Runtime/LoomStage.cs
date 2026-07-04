@@ -38,9 +38,9 @@ namespace LoomGUI
         [SerializeField] Font _font;
 
         // Stage 读取的 ttf 文件名（StreamingAssets 下，喂 Rust measure）。
-        // 默认 "DejaVuSans.ttf"；CJK sample 配 "wqy-microhei.ttc"。
-        // 须与 _font（Unity 光栅用）是同一份 ttf（跨平台一致性）。
-        [SerializeField] string _fontFile = "DejaVuSans.ttf";
+        // 自动同步：OnValidate 从 _font 源文件名推导（约定：_font 源文件名 == StreamingAssets 字体名）。
+        // 勿手改。须与 _font 是同一份 ttf（跨平台一致性）。
+        [SerializeField] string _fontFile;
 
         // 图集路由：Awake 时从全局 LoomSettings（Resources.Load 自动找）建 folder→atlas 映射。
         // 不在 Inspector 手配（配置总会遗忘），配置资产由 LoomSettingsWindow 维护。
@@ -349,9 +349,30 @@ namespace LoomGUI
                     DestroyImmediate(child.gameObject);
             }
 
-            // Stage::new 需字体路径（即使纯色块场景也要加载用于 measure）。
-            // Application.streamingAssetsPath：editor 与 player 都可用（editor 返回 Assets/StreamingAssets）。
+#if UNITY_EDITOR
+            // editor：直接读 _font 源文件（LoomUI/res/fonts/X.ttf）——不绕 StreamingAssets，免手动 cp。
+            // build 后 Font asset 打进包、不再是文件系统路径，走 #else 读 StreamingAssets 字节。
+            if (_font == null)
+            {
+                Debug.LogError("[LoomStage] 必须在 Inspector 指定 _font（字体在 Assets/LoomUI/res/fonts/）");
+                return;
+            }
+            var assetPath = UnityEditor.AssetDatabase.GetAssetPath(_font);
+            if (string.IsNullOrEmpty(assetPath))
+            {
+                Debug.LogError($"[LoomStage] _font（{_font.name}）取不到源文件路径");
+                return;
+            }
+            string fontPath = System.IO.Path.GetFullPath(assetPath);
+#else
+            // build：读 StreamingAssets 字节（_fontFile 由 editor OnValidate 同步；发布前 cp 字体到 StreamingAssets）。
+            if (string.IsNullOrEmpty(_fontFile))
+            {
+                Debug.LogError("[LoomStage] _fontFile 为空");
+                return;
+            }
             string fontPath = System.IO.Path.Combine(Application.streamingAssetsPath, _fontFile);
+#endif
             byte[] fpBytes = Encoding.UTF8.GetBytes(fontPath);
 
             fixed (byte* fp = fpBytes)
@@ -400,15 +421,31 @@ namespace LoomGUI
             if (_inputCollector == null) _inputCollector = GetComponent<LoomInputCollector>();
         }
 
+#if UNITY_EDITOR
         /// <summary>
-        /// 校验 Unity 动态 Font。必须由用户在 Inspector 指定 _font（与 _fontFile 同一份 ttf，
-        /// 跨平台一致）。框架不自带字体——字体是项目设计资源（Assets/LoomUI/res/fonts/）。
+        /// Inspector 改 _font 时自动同步 _fontFile（取 _font 源文件名）。
+        /// 约定：_font 源文件名 == StreamingAssets 字体名（同一份 ttf 两处同名）。
+        /// 用户只配 _font，_fontFile 自动填；保存场景后序列化，build/runtime 读。
+        /// </summary>
+        void OnValidate()
+        {
+            if (_font == null) return;
+            var path = UnityEditor.AssetDatabase.GetAssetPath(_font);
+            if (string.IsNullOrEmpty(path)) return;
+            var name = System.IO.Path.GetFileName(path);
+            if (name != _fontFile) _fontFile = name;
+        }
+#endif
+
+        /// <summary>
+        /// 校验 Unity 动态 Font。必须由用户在 Inspector 指定 _font（_fontFile 由 OnValidate 自动同步）。
+        /// 框架不自带字体——字体是项目设计资源（Assets/LoomUI/res/fonts/）。
         /// SampleScene 已配；EditMode 测试不实例化 LoomStage，故无需 editor 兜底。
         /// </summary>
         void EnsureFont()
         {
             if (_font != null) return;
-            Debug.LogError("[LoomStage] 必须在 Inspector 指定 _font（与 _fontFile 同一份 ttf；字体在 Assets/LoomUI/res/fonts/）");
+            Debug.LogError("[LoomStage] 必须在 Inspector 指定 _font（字体在 Assets/LoomUI/res/fonts/）");
         }
 
         /// <summary>
