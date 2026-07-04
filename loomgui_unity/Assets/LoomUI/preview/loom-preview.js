@@ -141,7 +141,59 @@
     page_scroll:   function () { wireBackHome(); },
     page_tween:    function () { wireBackHome(); /*Task9*/ },
     page_interact: function () { wireBackHome(); /*Task10*/ },
-    page_dyntree:  function () { wireBackHome(); /*Task8*/ },
+    page_dyntree:  function () {
+      wireBackHome();
+      var dynPanels = [];
+      var dynSeq = 0;
+      var dynStyleToggled = false;
+      var anchor = $('dyn-anchor');
+      // panel 视觉对齐 C# CreateDynPanel（深色卡 + span 标题 + img icon）。
+      function createPanel() {
+        dynSeq++;
+        var panel = document.createElement('div');
+        panel.style.cssText = 'width:120px;height:90px;background:#2a2f45;border-radius:8px;flex-direction:column;gap:4px;padding:6px';
+        var title = document.createElement('span');
+        title.style.cssText = 'font-size:14px;color:#e6e6e0';
+        title.textContent = 'item-' + dynSeq;
+        panel.appendChild(title);
+        var icon = document.createElement('img');
+        icon.src = 'res/icons/skin.png';
+        icon.style.cssText = 'width:40px;height:40px';
+        panel.appendChild(icon);
+        return panel;
+      }
+      bindClick('dyn-add', function () { if (anchor) { var p = createPanel(); anchor.appendChild(p); dynPanels.push(p); } });
+      bindClick('dyn-add20', function () {
+        if (!anchor) return;
+        var frag = document.createDocumentFragment();
+        for (var i = 0; i < 20; i++) { var p = createPanel(); frag.appendChild(p); dynPanels.push(p); }
+        anchor.appendChild(frag);
+      });
+      bindClick('dyn-del', function () {
+        var last = dynPanels.pop();
+        if (last && last.parentNode) last.parentNode.removeChild(last);
+      });
+      bindClick('dyn-clear', function () {
+        dynPanels.forEach(function (p) { if (p.parentNode) p.parentNode.removeChild(p); });
+        dynPanels = [];
+      });
+      bindClick('dyn-style', function () {
+        if (!dynPanels.length) return;
+        var last = dynPanels[dynPanels.length - 1];
+        dynStyleToggled = !dynStyleToggled;
+        last.style.cssText = dynStyleToggled
+          ? 'background:#c2605a;width:160px;height:70px;border-radius:16px;flex-direction:column;gap:4px;padding:6px'
+          : 'width:120px;height:90px;background:#2a2f45;border-radius:8px;flex-direction:column;gap:4px;padding:6px';
+      });
+      bindClick('dyn-load-mail', function () {
+        showMail();
+        var s = $('dyn-load-status'); if (s) s.textContent = '当前：mail';
+      });
+      bindClick('dyn-load-showcase', function () {
+        hideMail();
+        var s = $('dyn-load-status'); if (s) s.textContent = '当前：showcase';
+      });
+    },
     page_list:     function () {
       wireBackHome();
       // item 视觉对齐 C# VirtualListDriver.CreateItem（灰底 + icon + 标题）。
