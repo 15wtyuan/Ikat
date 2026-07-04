@@ -10,7 +10,7 @@ namespace LoomGUI
     ///
     /// 渲染顺序：
     ///   - GO + wrapper layer = LoomUILayer（UI 相机渲染）
-    ///   - GO material renderQueue=3000（Transparent，跟 UI 同队列）
+    ///   - GO（Mesh/SkinnedMesh/ParticleSystem Renderer）material renderQueue=3000（Transparent，跟 UI 同队列）
     ///   - GO sortingOrder = 节点 sort_key（UI 列表顺序）
 ///
     /// LoomGUI root localScale=(sf,-sf,sf) 在 transform 做 y-flip。
@@ -61,14 +61,16 @@ namespace LoomGUI
                 t.gameObject.layer = layer;
         }
 
-        /// MeshRenderer/SkinnedMeshRenderer material renderQueue=3000
+        /// MeshRenderer/SkinnedMeshRenderer/ParticleSystemRenderer material renderQueue=3000
         /// （Transparent，跟 UI 同队列，sortingOrder 跨 UI/GO 统一排序）。改 sharedMaterial（非 clone）。
         static void CacheRenderers(GameObject go)
         {
             foreach (var r in go.GetComponentsInChildren<Renderer>(true))
             {
                 if (r == null) continue;
-                if (r is MeshRenderer || r is SkinnedMeshRenderer)
+            // ParticleSystemRenderer 也纳入：粒子 material renderQueue 统一 3000（Transparent），
+            // 否则粒子与 UI mesh 队列不一致 → sortingOrder 跨 UI/GO 排序错乱。
+            if (r is MeshRenderer || r is SkinnedMeshRenderer || r is ParticleSystemRenderer)
                 {
                     foreach (var mat in r.sharedMaterials)
                     {
@@ -83,6 +85,10 @@ namespace LoomGUI
             if (_bindings.TryGetValue(nodeId, out var go))
             {
                 go.SetActive(false);
+                // Reparent user GO off wrapper before destroying wrapper.
+                // Unity Destroy 递归销毁子树——wrapper 的子（user GO）会被连带销毁，
+                // 破坏 caller 的"跨 Unbind 复用同一 GO"预期（如 driver 缓存 _characterInstance）。
+                go.transform.SetParent(_container.transform, false);
                 _bindings.Remove(nodeId);
             }
             if (_wrappers.TryGetValue(nodeId, out var wrapper))
