@@ -153,11 +153,21 @@ pub fn measure_text(
     // 集合，`face.tables().kern.as_ref()` → `table.subtables.into_iter()` 跳非水平/状态机子表，
     // `sub.glyphs_kerning(left, right) -> Option<i16>` 取值（注意返回 i16）。
     let kerning = |_left: ttf_parser::GlyphId, _right: ttf_parser::GlyphId| -> Option<i16> { None };
-    let advance = |gid: ttf_parser::GlyphId| -> f32 {
-        font.face
-            .glyph_hor_advance(gid)
-            .map(|v| to_px(v as f32))
-            .unwrap_or(0.0)
+    // advance：字体有此字形→读 ttf advance；缺字形（glyph_index 返 None，如 DejaVuSans 遇 CJK）
+    // → 兜底 font_size（坑 115 真根因）。
+    // 原走 .notdef(gid0) advance（DejaVu ≈0.6em），但 Unity 动态字体缺字 fallback 到系统 CJK 字体
+    // 渲染 1em 方块 quad。Rust pen_x 用 0.6em 间隔 < Unity 1em quad → 字距重叠 0.4em（实测「控件」
+    // @24pt 第二字 penX=14.4、Unity quad 宽 25、重叠 11.6px）。兜底 font_size 匹配 Unity fallback。
+    // wqy-microhei 本就有 CJK 字形→走 Some 分支，不受影响。
+    let advance = |gid_opt: Option<ttf_parser::GlyphId>| -> f32 {
+        match gid_opt {
+            Some(gid) => font
+                .face
+                .glyph_hor_advance(gid)
+                .map(|v| to_px(v as f32))
+                .unwrap_or(0.0),
+            None => font_size,
+        }
     };
 
     // 度量一段文本的宽度（含字距）。
@@ -165,13 +175,14 @@ pub fn measure_text(
         let mut pen = 0.0f32;
         let mut prev: Option<ttf_parser::GlyphId> = None;
         for ch in s.chars() {
-            let gid = font.face.glyph_index(ch).unwrap_or_default();
+            let gid_opt = font.face.glyph_index(ch);
+            let gid = gid_opt.unwrap_or_default();
             if let Some(p) = prev {
                 if let Some(k) = kerning(p, gid) {
                     pen += to_px(k as f32);
                 }
             }
-            pen += advance(gid) + letter_spacing;
+            pen += advance(gid_opt) + letter_spacing;
             prev = Some(gid);
         }
         pen
@@ -270,7 +281,8 @@ pub fn measure_text(
         let mut glyphs = Vec::with_capacity(text.chars().count());
         let mut prev: Option<ttf_parser::GlyphId> = None;
         for ch in text.chars() {
-            let gid = font.face.glyph_index(ch).unwrap_or_default();
+            let gid_opt = font.face.glyph_index(ch);
+            let gid = gid_opt.unwrap_or_default();
             if let Some(p) = prev {
                 if let Some(k) = kerning(p, gid) {
                     pen_x += to_px(k as f32);
@@ -290,7 +302,7 @@ pub fn measure_text(
                 bearing_x: bx,
                 bearing_y: by,
             });
-            pen_x += advance(gid) + letter_spacing;
+            pen_x += advance(gid_opt) + letter_spacing;
             prev = Some(gid);
         }
         out_lines.push(Line {
@@ -386,6 +398,29 @@ mod tests {
             (g[1].x - adv_a).abs() < 0.001,
             "V pen_x 应 == advance(A)={:.3}（kern 禁用），实={:.3}；若 kern 启用 V.x 会 ≈ {:.3}",
             adv_a, g[1].x, adv_a - 1.535,
+        );
+    }
+
+    /// 坑 115 真根因：字体缺字形（DejaVuSans 无 CJK）时 advance 兜底 font_size，而非 .notdef(0.6em)。
+    /// 否则 Rust pen_x 间隔 0.6em < Unity fallback 渲染的 1em CJK quad → 字距重叠。
+    /// DejaVuSans 缺「中」→ glyph_index 返 None → advance 兜底 24。第二字 pen_x 应 == 24（非 .notdef ≈14.4）。
+    #[test]
+    fn missing_glyph_advance_falls_back_to_font_size() {
+        let font = match test_font() {
+            Some(f) => f,
+            None => { eprintln!("skip: no test font"); return; }
+        };
+        // DejaVuSans 无 CJK「中」字形。
+        assert!(font.face.glyph_index('中').is_none(), "前置：DejaVuSans 应缺「中」字形");
+        let layout = measure_text("中中", 24.0, 0.0, 0.0, TextAlign::Left, false, None, &font);
+        let g = &layout.lines[0].runs[0].glyphs;
+        assert_eq!(g.len(), 2, "中中 = 2 glyph");
+        assert_eq!(g[0].x, 0.0, "首字 pen_x = 0");
+        // 缺字兜底：第二字 pen_x 应 == font_size(24)，而非 .notdef advance(≈14.4)。
+        assert!(
+            (g[1].x - 24.0).abs() < 0.001,
+            "缺 CJK 字形 advance 应兜底 font_size=24，实={:.3}（.notdef 会给 ≈14.4 → 与 Unity 1em quad 重叠）",
+            g[1].x,
         );
     }
 
