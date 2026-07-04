@@ -176,7 +176,7 @@ namespace LoomGUI
             Material mat;
             if (kind == 1)
             {
-                // program 来自 blob（第 18 列）：0=img/无图 Container，2=Container+bg-image（CSS 合成，坑 79）。
+                // program 来自 blob（第 18 列）：0=img/无图 Container，2=Container+bg-image（CSS 合成）。
                 mat = mm.Get((int)blob.Program(i), tex, maskCtx, !pure);
             }
             else // kind == 2 (Text)
@@ -234,12 +234,11 @@ namespace LoomGUI
                 var seg = blob.ReadMesh(i);
                 UploadMesh(ro, seg);
                 ro.Mesh.RecalculateBounds();
-                // 按 path_idx 取 path → SpriteResolver.GetSprite → Sprite.texture + 打包 UV。
-                //   path_idx=0（纯色无图）/ path 查不到 Sprite → 跳过 UV 重映射（blob mesh UV 已是全图 [0,1]；用 fallback whiteTexture）。
-                //   SpriteAtlas 把 Sprite 打进 atlas 子区 → 用 sprite.rect + texture 尺寸重映射 UV
-                //   到 atlas 子区（保 blob 的 v 翻转：blob TL.v=1 → atlas 顶 rv1）。
-                if (sp != null && sp.texture != null)
-                    RemapMeshUvToSprite(ro, sp, sp.texture);
+                // path → SpriteResolver.GetSprite → sp。sp=null（path_idx=0 纯色 / 查不到）则跳过重映射，
+                // mesh 沿用 blob 全图 UV [0,1] + fallback whiteTexture。
+                // sp 非空 → RemapMeshUvToSprite 把全图 UV 重映射到 sprite 在 atlas 的子区（用 sp.uv）。
+                if (sp != null)
+                    RemapMeshUvToSprite(ro, sp);
             }
             else // kind == 2 (Text)
             {
@@ -314,31 +313,30 @@ namespace LoomGUI
             ro.Mesh.SetTriangles(idx, 0);
         }
 
-        /// 把 mesh UV（blob 写全图 [0,1]，核心不知图集）重映射到 Sprite 在 atlas 内的子区。
-        /// SpriteAtlas 把 Sprite 打进 atlas 纹理子区 → 需用 sprite.rect + texture 尺寸算 packed UV。
-        ///   packed_u = ru0 + blob_u*(ru1-ru0)；packed_v = rv0 + blob_v*(rv1-rv0)。
-        /// blob UV 已 v 翻转（TL.v=1 → atlas 顶 rv1），线性重映射保翻转不二次翻转。
-        /// 九宫格切片同基于 [0,1] blob UV → 同公式（slice 比例由 Rust 算进 blob UV）。
-        ///
-        /// 直接改 ro.Mesh 的 UV（SetUVs 后 in-place 重写）——避免再 SetUVs 一次（Mesh 已持数据）。
-        /// 用 Mesh.GetUVs 读回 List，原地改，SetUVs 写回（比重建 List 省 alloc——但每帧 image 节点少，简单优先）。
-        static void RemapMeshUvToSprite(RenderObj ro, Sprite sp, Texture2D tex)
+        /// 把 mesh UV（core 产全图 [0,1]）重映射到 Sprite 在 atlas 内的子区。
+        /// 取 sp.uv 的 min/max 作为子区——sp.rect 在 GetSprite 返回的 clone 上是源图 rect，非 atlas 打包位置。
+        /// 前提：atlas packing 须 axis-aligned（见 LoomAtlasSync.EnsureAxisAlignedPacking），否则旋转打包下
+        /// sp.uv 的轴对齐包围盒会溢出邻居 sprite。
+        static void RemapMeshUvToSprite(RenderObj ro, Sprite sp)
         {
-            if (sp == null || tex == null) return;
-            float tw = tex.width;
-            float th = tex.height;
-            if (tw <= 0f || th <= 0f) return;
-            var r = sp.rect;
-            float ru0 = r.xMin / tw, ru1 = r.xMax / tw;
-            float rv0 = r.yMin / th, rv1 = r.yMax / th;
-            float du = ru1 - ru0, dv = rv1 - rv0;
-
+            if (sp == null) return;
+            // blob UV 已 v 翻转（TL.v=1），线性映射进子区保持翻转。
+            var suv = sp.uv;
+            if (suv == null || suv.Length == 0) return;
+            float minU = float.MaxValue, maxU = float.MinValue, minV = float.MaxValue, maxV = float.MinValue;
+            for (int i = 0; i < suv.Length; i++)
+            {
+                float u = suv[i].x, v = suv[i].y;
+                if (u < minU) minU = u; if (u > maxU) maxU = u;
+                if (v < minV) minV = v; if (v > maxV) maxV = v;
+            }
+            // 不内缩半纹素：padding 下 bilinear 边缘 fringe 几乎不可见，缩水代价不划算；
+            // 要防 bleed 开 atlas enableAlphaDilation（边缘像素复制进 padding）。
+            float du = maxU - minU, dv = maxV - minV;
             var uvs = new List<Vector2>();
             ro.Mesh.GetUVs(0, uvs);
             for (int i = 0; i < uvs.Count; i++)
-            {
-                uvs[i] = new Vector2(ru0 + uvs[i].x * du, rv0 + uvs[i].y * dv);
-            }
+                uvs[i] = new Vector2(minU + uvs[i].x * du, minV + uvs[i].y * dv);
             ro.Mesh.SetUVs(0, uvs);
         }
 

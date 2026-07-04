@@ -59,6 +59,7 @@ namespace LoomGUI.Editor
             if (rel != null && File.Exists(ToAbs(rel)))
             {
                 entry.atlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(rel);   // 强制绑 V2（覆盖旧 V1 引用）
+                EnsureAxisAlignedPacking(rel);   // 防 .meta 回退到默认的 rotation=1
                 return rel;
             }
             if (string.IsNullOrEmpty(workspaceDir)) return null;
@@ -67,14 +68,37 @@ namespace LoomGUI.Editor
             Directory.CreateDirectory(ToAbs(dir));
             rel = dir + "/" + entry.atlasName + ".spriteatlasv2";
 
-            // new SpriteAtlasAsset() + Save 建 V2（Venkify 法）；Refresh 触发 import 生成 SpriteAtlasImporter。
+            // 建 V2：new SpriteAtlasAsset() + Save，Refresh 触发 import 生成 SpriteAtlasImporter。
             var saa = new SpriteAtlasAsset();
             SpriteAtlasAsset.Save(saa, rel);
             AssetDatabase.Refresh();
+            EnsureAxisAlignedPacking(rel);   // V2 默认开 rotation/tightPacking，关掉
 
             entry.atlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(rel);
             Debug.Log($"[LoomAtlasSync] 自动创建 V2 图集：{rel}");
             return rel;
+        }
+
+        /// atlas sprite 间最小 padding（px）——防 bilinear 边缘 bleed。
+        const int MinAtlasPadding = 4;
+
+        /// 确保 atlas packing 为 axis-aligned（关 rotation/tightPacking，padding≥MinAtlasPadding）。
+        /// 运行时 UV remap 取 sp.uv 的轴对齐包围盒作子区，旋转打包会让包围盒溢出邻居 sprite。
+        /// 已是 axis-aligned 则跳过，不触发 reimport。
+        static void EnsureAxisAlignedPacking(string rel)
+        {
+            var importer = AssetImporter.GetAtPath(rel) as SpriteAtlasImporter;
+            if (importer == null) return;
+            var ps = importer.packingSettings;
+            if (ps.enableRotation || ps.enableTightPacking || ps.padding < MinAtlasPadding)
+            {
+                ps.enableRotation = false;
+                ps.enableTightPacking = false;
+                ps.padding = MinAtlasPadding;
+                importer.packingSettings = ps;
+                importer.SaveAndReimport();
+                Debug.Log($"[LoomAtlasSync] 修正 packing（axis-aligned）：{rel}");
+            }
         }
 
         /// 删除 entry 的自动生成图集（workspaceDir/atlas/ 下，.spriteatlasv2 优先，.spriteatlas 兼容）。
