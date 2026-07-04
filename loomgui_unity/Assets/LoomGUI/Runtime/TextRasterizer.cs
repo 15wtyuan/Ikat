@@ -110,8 +110,8 @@ namespace LoomGUI
             if (Application.isPlaying && s_diagCount < 10 && glyphs.Length > 1)
             {
                 s_diagCount++;
-                var sb = new StringBuilder();
-                sb.AppendLine($"[TEXTDIAG] #{s_diagCount} n={glyphs.Length} size={fontSize}");
+                var diag = new StringBuilder();
+                diag.AppendLine($"[TEXTDIAG] #{s_diagCount} n={glyphs.Length} size={fontSize}");
                 float prevRight = float.NegativeInfinity;
                 for (int i = 0; i < glyphs.Length && i < 12; i++)
                 {
@@ -121,10 +121,10 @@ namespace LoomGUI
                     float pl = glyphs[i].PenX + ci.minX;
                     float pr = glyphs[i].PenX + ci.maxX;
                     float ov = prevRight - pl;   // >0 = 与前字 quad 重叠
-                    sb.AppendLine($"  cp='{(char)cp}' penX={glyphs[i].PenX,7:F2} adv={ci.advance} quad=[{pl,7:F1},{pr,7:F1}] ov={ov,5:F1}");
+                    diag.AppendLine($"  cp='{(char)cp}' penX={glyphs[i].PenX,7:F2} adv={ci.advance} quad=[{pl,7:F1},{pr,7:F1}] ov={ov,5:F1}");
                     prevRight = pr;
                 }
-                Debug.Log(sb.ToString());
+                Debug.Log(diag.ToString());
             }
             return seg;
         }
