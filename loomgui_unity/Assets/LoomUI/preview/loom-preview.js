@@ -127,7 +127,15 @@
       wireNav();
       bindClick('nav-tips-demo', showTips);
     },
-    page_controls: function () { wireBackHome(); /*Task6*/ },
+    page_controls: function () {
+      wireBackHome();
+      var slot = $('model-slot');
+      if (slot) {
+        slot.style.justifyContent = 'center';
+        slot.style.alignItems = 'center';
+        slot.innerHTML = '<div style="color:#9aa0b4;font-size:12px;text-align:center;padding:8px">[NativeHost<br>外部 GO<br>预览不支持]</div>';
+      }
+    },
     page_text:     function () { wireBackHome(); },
     page_image:    function () { wireBackHome(); },
     page_scroll:   function () { wireBackHome(); },
