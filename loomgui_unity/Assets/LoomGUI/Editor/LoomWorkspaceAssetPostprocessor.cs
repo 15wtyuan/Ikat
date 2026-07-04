@@ -33,8 +33,8 @@ namespace LoomGUI.Editor
                 {
                     if (ti.textureType != TextureImporterType.Sprite)
                         ti.textureType = TextureImporterType.Sprite;
-                    if (ti.textureCompression != TextureImporterCompression.None)
-                        ti.textureCompression = TextureImporterCompression.None;
+                    if (ti.textureCompression != TextureImporterCompression.Uncompressed)
+                        ti.textureCompression = TextureImporterCompression.Uncompressed;
                 }
             }
         }
