@@ -139,7 +139,68 @@
     page_text:     function () { wireBackHome(); },
     page_image:    function () { wireBackHome(); },
     page_scroll:   function () { wireBackHome(); },
-    page_tween:    function () { wireBackHome(); /*Task9*/ },
+    page_tween:    function () {
+      wireBackHome();
+      // 注入 tween 动画样式：.play = 末态（CSS transition 驱动，不移植 ease 数学）。
+      var st = document.createElement('style');
+      st.textContent =
+        '#t-opacity,#t-translate,#t-scale,#t-rotate,#t-bgcolor,#t-textcolor,' +
+        '#ease-0,#ease-1,#ease-2,#d-0,#d-1,#d-2{transition:all .8s ease}' +
+        '#t-opacity.play{opacity:0}' +
+        '#t-translate.play{transform:translateX(40px)}' +
+        '#t-scale.play{transform:scale(1.4)}' +
+        '#t-rotate.play{transform:rotate(360deg)}' +
+        '#t-bgcolor.play{background-color:#6fa66c}' +
+        '#t-textcolor.play{color:#c2605a}' +
+        '#ease-0.play,#ease-1.play,#ease-2.play{transform:translateX(200px)}' +
+        '#d-0.play,#d-1.play,#d-2.play{opacity:1}' +
+        '#kill-target{animation:loom-spin 4s linear infinite}' +
+        '@keyframes loom-spin{to{transform:rotate(360deg)}}' +
+        '#kill-target.paused{animation-play-state:paused}' +
+        '#kill-target.cleared{animation:none;transform:none}';
+      document.head.appendChild(st);
+      // d-0/1/2 初始隐（delay 错峰从隐到显）。
+      ['d-0', 'd-1', 'd-2'].forEach(function (id) { var el = $(id); if (el) el.style.opacity = '0'; });
+      function tg(id) { var el = $(id); if (el) el.classList.toggle('play'); }
+      // 6 prop 同放（末态来自上面 .play 规则）。
+      bindClick('tween-play', function () {
+        ['t-opacity', 't-translate', 't-scale', 't-rotate', 't-bgcolor', 't-textcolor'].forEach(tg);
+      });
+      // 3 条近似 ease（QuadIn / CubicOut / BackInOut）。
+      bindClick('ease-play', function () {
+        var eases = ['cubic-bezier(.55,.085,.68,.53)', 'cubic-bezier(.215,.61,.355,1)', 'cubic-bezier(.68,-.55,.265,1.55)'];
+        ['ease-0', 'ease-1', 'ease-2'].forEach(function (id, i) {
+          var el = $(id);
+          if (el) { el.style.transition = 'transform 1s ' + eases[i]; el.classList.toggle('play'); }
+        });
+      });
+      // delay 错峰：递增 transition-delay。
+      bindClick('delay-play', function () {
+        ['d-0', 'd-1', 'd-2'].forEach(function (id, i) {
+          var el = $(id);
+          if (el) { el.style.transitionDelay = (i * 0.2) + 's'; el.classList.toggle('play'); }
+        });
+      });
+      // complete：t-opacity 动画结束后亮灯。
+      bindClick('complete-play', function () {
+        var el = $('t-opacity');
+        if (!el) return;
+        el.classList.toggle('play');
+        el.addEventListener('transitionend', function done() {
+          el.removeEventListener('transitionend', done);
+          pulseLamp('complete');
+        });
+      });
+      // kill 冻结当前角（pause）；clear 清动画回 CSS 初始。
+      bindClick('kill-btn', function () {
+        var el = $('kill-target');
+        if (el) { el.classList.add('paused'); el.classList.remove('cleared'); }
+      });
+      bindClick('clear-btn', function () {
+        var el = $('kill-target');
+        if (el) { el.classList.remove('paused'); el.classList.add('cleared'); }
+      });
+    },
     page_interact: function () { wireBackHome(); /*Task10*/ },
     page_dyntree:  function () {
       wireBackHome();
