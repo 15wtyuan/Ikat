@@ -157,7 +157,13 @@
     },
     page_text:     function () { wireBackHome(); },
     page_image:    function () { wireBackHome(); },
-    page_scroll:   function () { wireBackHome(); },
+    page_scroll:   function () {
+      wireBackHome();
+      var ps = $('page-scroll');
+      bindClick('scroll-top', function () { if (ps) ps.scrollTop = 0; });
+      bindClick('scroll-mid', function () { if (ps) ps.scrollTop = 600; });
+      bindClick('scroll-bottom', function () { if (ps) ps.scrollTop = 99999; });
+    },
     page_tween:    function () {
       wireBackHome();
       // 注入 tween 动画样式：.play = 末态（CSS transition 驱动，不移植 ease 数学）。

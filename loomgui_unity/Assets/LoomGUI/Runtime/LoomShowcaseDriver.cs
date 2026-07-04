@@ -308,7 +308,11 @@ namespace LoomGUI
         void SubscribeScroll()
         {
             SubscribeBackHome();
-            Debug.Log("[Showcase] page_scroll 订阅完成（back）");
+            uint pageScroll = _stage.FindNodeById("page-scroll");
+            AddPageListener(_stage.FindNodeById("scroll-top"), EventType.Click, _ => _stage.SetScrollPos(pageScroll, 0f, 0f));
+            AddPageListener(_stage.FindNodeById("scroll-mid"), EventType.Click, _ => _stage.SetScrollPos(pageScroll, 0f, 600f));
+            AddPageListener(_stage.FindNodeById("scroll-bottom"), EventType.Click, _ => _stage.SetScrollPos(pageScroll, 0f, 99999f));
+            Debug.Log("[Showcase] page_scroll 订阅完成（back + 3 SetScrollPos 按钮）");
         }
 
         // page_interact（§4 灯阵）：back-home + 各交互元素事件 + disabled + 路由。
