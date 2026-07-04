@@ -46,7 +46,9 @@ namespace LoomGUI
         readonly Dictionary<uint, List<(EventType type, EventCallback cb)>> _pageListeners = new();
 
         // === 灯阵计数（page_interact）===
-        int _clickCount, _hoverCount, _dragCount, _longCount, _keyCount, _routeCount;
+        int _clickCount, _hoverCount, _dragCount, _longCount, _keyCount;
+        int _routeOuterCount, _routeInnerCount, _routePeCount;
+        int _completeCount;
 
         // lamp 组当前已亮盏数（0..N 循环重置）。key=灯组 name。
         readonly Dictionary<string, int> _lampLit = new();
@@ -61,6 +63,7 @@ namespace LoomGUI
         // Ease 0..9 与 Rust tween::Ease 对齐（OnEasePlay 取子集对比）。六 prop 在 OnTweenPlay 逐个硬编码 PlayProp。
         static readonly Ease[] _allEase = { Ease.Linear, Ease.QuadIn, Ease.QuadOut, Ease.QuadInOut, Ease.CubicIn, Ease.CubicOut, Ease.CubicInOut, Ease.BackIn, Ease.BackOut, Ease.BackInOut };
         const uint TagComplete = 7;   // complete 回调用 tag
+        const uint TagKillSpin = 8;   // kill-target 持续旋转 loop 标识
 
         // === 动态树演示（page_dyntree §3.10）===
         // dyn-anchor 是 pkg 里的空容器；点击 dyn-add 运行时 create_node 建 panel+title+icon 挂到 anchor。
@@ -220,6 +223,11 @@ namespace LoomGUI
         // 每订阅走 AddPageListener（记进注册表），切页时批量清。
         void SubscribePage(string page)
         {
+            // 页面切换时清灯组状态 + 计数（页面 fresh instantiate，旧 _lampLit/计数会与视觉脱节）。
+            _lampLit.Clear();
+            _clickCount = _hoverCount = _dragCount = _longCount = _keyCount = 0;
+            _routeOuterCount = _routeInnerCount = _routePeCount = 0;
+            _completeCount = 0;
             switch (page)
             {
                 case "home": SubscribeHome(); break;
@@ -376,13 +384,13 @@ namespace LoomGUI
         void OnKeyHit(EventContext ctx) { LightLamp("key", ++_keyCount); }
 
         // 路由演示：inner StopPropagation → outer 不收。独立 lamp-route 反馈。
-        void OnRouteOuter(EventContext ctx) { LightLamp("outer", ++_routeCount); }
+        void OnRouteOuter(EventContext ctx) { LightLamp("outer", ++_routeOuterCount); }
         void OnRouteInner(EventContext ctx)
         {
             ctx.StopPropagation();
-            LightLamp("inner", ++_routeCount);
+            LightLamp("inner", ++_routeInnerCount);
         }
-        void OnRoutePeUnder(EventContext ctx) { LightLamp("pe", ++_routeCount); }
+        void OnRoutePeUnder(EventContext ctx) { LightLamp("pe", ++_routePeCount); }
 
         // page_tween（§7 动效）：back-home + tween 播放/kill/clear + complete 回调 + kill-target 旋转。
         // 走 AddPageListener 记进注册表。
@@ -397,14 +405,20 @@ namespace LoomGUI
             SubscribeLamp("clear-btn", EventType.Click, OnClear);
             // t-opacity 的 TweenComplete（core 完成时直派，ctx.clickCount=prop、ctx.touchId=tag）。
             SubscribeLamp("t-opacity", EventType.TweenComplete, OnTweenCompleteTag);
-            // kill-target：点"播放"才开始持续旋转（不再进页自动转——和预览对齐）。
+            // kill-target：点"播放"才开始持续旋转（loop 靠 TweenComplete 重启）。
             SubscribeLamp("play-kill-target", EventType.Click, OnPlayKillTarget);
-            Debug.Log("[Showcase] page_tween 订阅完成（play/ease/delay/complete/kill/clear + play-kill-target）");
+            SubscribeLamp("kill-target", EventType.TweenComplete, OnKillTargetLoop);
+            Debug.Log("[Showcase] page_tween 订阅完成（play/ease/delay/complete/kill/clear + play-kill-target loop）");
         }
 
         void OnPlayKillTarget(EventContext ctx)
         {
-            PlayProp("kill-target", TweenProp.Rotation, new float[] { 0f, 0, 0, 0 }, new float[] { 360f, 0, 0, 0 }, 4f, Ease.Linear, 0f, 0);
+            PlayProp("kill-target", TweenProp.Rotation, new float[] { 0f, 0, 0, 0 }, new float[] { 360f, 0, 0, 0 }, 4f, Ease.Linear, 0f, TagKillSpin);
+        }
+        void OnKillTargetLoop(EventContext ctx)
+        {
+            if (ctx.touchId == TagKillSpin)
+                PlayProp("kill-target", TweenProp.Rotation, new float[] { 0f, 0, 0, 0 }, new float[] { 360f, 0, 0, 0 }, 4f, Ease.Linear, 0f, TagKillSpin);
         }
 
         void PlayProp(string id, TweenProp prop, float[] s, float[] e, float dur, Ease ease, float delay, uint tag)
@@ -448,7 +462,7 @@ namespace LoomGUI
         }
         void OnTweenCompleteTag(EventContext ctx)
         {
-            if (ctx.touchId == TagComplete) LightLamp("complete", 1);
+            if (ctx.touchId == TagComplete) LightLamp("complete", ++_completeCount);
         }
 
         // kill 冻结当前角（停在末值）；clear 清所有 anim 回 CSS 初始。

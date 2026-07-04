@@ -117,7 +117,7 @@
             </div>
             <div style="position:relative;width:200px;height:50px">
               <div class="hit" id="route-pe-under" style="width:100%;height:100%">下层可点（route-pe-under）</div>
-              <div class="pe-none" style="position:absolute;inset:0">pointer-events:none（点我穿透到下层）</div>
+              <div class="pe-none" style="position:absolute;top:0;left:0;width:100%;height:100%">pointer-events:none（点我穿透到下层）</div>
             </div>
             <span class="card-x">点 inner → 只 lamp-inner 亮（StopPropagation 止冒泡，outer 不亮）；点 outer → lamp-outer 亮；点 pe-none 区块 → 穿透命中 route-pe-under → lamp-pe 亮。</span>
           </div>
