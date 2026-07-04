@@ -93,7 +93,7 @@
 LoomGUI/
 ├─ loomgui_unity_package/          ← UPM 包（可发布）
 │   ├─ package.json                com.loomgui.unity 0.1.0 MIT
-│   ├─ Runtime/  Editor/  Tests/  Shaders/  Fonts/
+│   ├─ Runtime/  Editor/  Tests/  Shaders/
 │   └─ Plugins/LoomGUI/            .dll + LoomGUIBindings.cs
 └─ loomgui_unity/                  ← demo 工程
     ├─ Assets/LoomUI/              showcase + res + atlas + design-systems
@@ -115,13 +115,21 @@ LoomGUI/
 | `LoomGUI/Runtime/` | `Runtime/` | 4 asmdef 之一（LoomGUI.Runtime.asmdef）随移 |
 | `LoomGUI/Editor/` | `Editor/` | LoomGUI.Editor.asmdef 随移 |
 | `LoomGUI/Tests/` | `Tests/` | LoomGUI.Tests.asmdef 随移；test-framework 作 optional dep |
-| `LoomGUI/Shaders/` `LoomGUI/Fonts/` | `Shaders/` `Fonts/` | 插件自有资源 |
+| `LoomGUI/Shaders/` | `Shaders/` | 插件自有 shader 资源 |
+| ~~`LoomGUI/Fonts/`~~ | （**不入包**） | 字体是项目设计资源，由 demo `LoomUI/res/fonts/` 供——插件不绑字体（见下「字体策略」） |
 | `Plugins/LoomGUI/`（.dll + bindings） | `Plugins/LoomGUI/` | .dll/.meta + LoomGUIBindings.cs/.meta + LoomGUI.Bindings.asmdef 随移 |
 
 **留在 demo（`loomgui_unity/Assets/`）：**
 - `LoomUI/`（showcase html + res + atlas + design-systems + `.claude` 编辑 skill）——demo 内容。
+- `LoomUI/res/fonts/`——字体是项目设计资源，由 demo 供（DejaVuSans / wqy-microhei / JetBrainsMono / LXGWWenKai / PressStart2P）。插件不绑字体路径。
 - `Scenes/SampleScene.unity`——demo 场景。
 - `Settings/`（URP 资产）、`StreamingAssets/`（.pkg.bin）、`Resources/`（若有 demo 专属）。
+
+**字体策略（决策 A：硬要求，无系统兜底）：**
+- 插件**不自带字体**、不绑字体资源路径——字体是接入方的项目设计资源，由 demo 侧 `Assets/LoomUI/res/fonts/` 提供（DejaVuSans / wqy-microhei / JetBrainsMono / LXGWWenKai / PressStart2P）。
+- 运行时契约：Inspector 必须**同时**指定 `_font`（Unity 动态字体）+ `_fontFile`（StreamingAssets 下的 ttf，喂 Rust measure），二者须为**同一份 ttf** 以保证 measure/光栅跨平台一致。
+- **未指定 → `EnsureFont()` 发 LogError**（现状代码已是此行为）。不做系统字体兜底——Rust measure 侧是引擎无关纯库，必须有 ttf 字节，OS/Unity 系统字体无法喂给它；两侧字体不一致会重现字距/度量错。
+- demo 的 `SampleScene` 已配 `_font`/`_fontFile`，作接入示例。
 
 **特殊处理：`LoomShowcaseDriver.cs`（812 行，Runtime 下）。** 这是 demo 驱动（驱动 showcase 场景），不是插件 API——移出包，放到 demo 的一个 demo-only asmdef（如 `LoomUI/Demo/LoomGUI.Demo.asmdef`）下。它引用 showcase 内容，不属可分发包。
 
@@ -188,3 +196,4 @@ LoomGUI/
 | CI 平台 | Win + Ubuntu | 公开仓库免费；Ubuntu 抓 Unix bug；macOS 待 Mac 成真目标 |
 | writing-plans | 跳过 | 用户偏好；本 spec「执行顺序与验证门」即计划 |
 | spec/plan 拆分 | 伞形 spec | 4 子项目独立但同属「整顿」，一份 spec 覆盖、独立 commit |
+| 字体策略 | 硬要求 `_font`+`_fontFile`，无系统兜底 | Rust measure 需 ttf 字节，OS 字体无法对应；硬要求保证 measure/光栅同源，避免字距错。插件不带字体，demo 供 |
