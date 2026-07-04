@@ -63,6 +63,7 @@ desktop.ini
 .claude/cache/
 .claude/state/
 .claude/projects/
+.claude/worktrees/
 
 # ===== open-design 调研 =====
 # open-design 源码（只读调研参考，不入库）
