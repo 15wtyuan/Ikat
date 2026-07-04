@@ -122,7 +122,11 @@
 
   // === page handlers（Task 5-10 填充，这里 stub 只调 wireBackHome） ===
   var pages = {
-    home:          function () { wireBackHome(); /*Task5*/ },
+    home:          function () {
+      wireBackHome();
+      wireNav();
+      bindClick('nav-tips-demo', showTips);
+    },
     page_controls: function () { wireBackHome(); /*Task6*/ },
     page_text:     function () { wireBackHome(); },
     page_image:    function () { wireBackHome(); },
