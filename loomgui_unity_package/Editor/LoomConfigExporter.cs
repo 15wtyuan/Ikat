@@ -13,9 +13,9 @@ namespace LoomGUI.Editor
         /// 纯逻辑：构建 config.json 字符串（可单测，不碰磁盘）。
         public static string BuildJson(LoomSettings s)
         {
-            // exe_path：工作区根 → Assets/LoomGUI/Editor/Tools/。两者都在 Assets/ 下。
-            // workspaceDir = Assets/LoomUI/ → 深度 2（Assets/, LoomUI/），回到 Assets/ 需 ../，再进 LoomGUI/...
-            string exeRel = RelativeFromWorkspace(s.workspaceDir, "Assets/LoomGUI/Editor/Tools/loomgui_pkg.exe");
+            // exe_path：工作区根 → Packages/com.loomgui.unity/Editor/Tools/（插件包内，Unity 虚拟化路径）。
+            // workspaceDir = Assets/LoomUI/（深度 2）；exe 在 Packages/ 下，需先回项目根（../../）再进包。
+            string exeRel = RelativeFromWorkspace(s.workspaceDir, "Packages/com.loomgui.unity/Editor/Tools/loomgui_pkg.exe");
             string outRel = RelativeFromWorkspace(s.workspaceDir, s.pkgOutputDir);
 
             var sb = new StringBuilder();
@@ -57,7 +57,7 @@ namespace LoomGUI.Editor
         /// 算 from（工作区根）→ to 的相对路径。两者都是 Unity 工程相对（Assets/...）。
         static string RelativeFromWorkspace(string workspaceDir, string targetDir)
         {
-            // 简化：工作区根 = Assets/LoomUI/（深度2）。targetDir 在 Assets/ 下。
+            // 简化：工作区根 = Assets/LoomUI/（深度2）。targetDir 可能是 Assets/ 下或 Packages/ 下（插件包内）。
             // 用 Uri.MakeRelativeUri 算相对路径。
             string projRoot = Directory.GetParent(Application.dataPath).FullName.Replace('\\', '/');
             string from = Path.GetFullPath(Path.Combine(projRoot, workspaceDir)).Replace('\\', '/');

@@ -16,8 +16,8 @@ namespace LoomGUI.Tests
             s.packages[0].htmlFiles.Add("home.html");
 
             string json = LoomGUI.Editor.LoomConfigExporter.BuildJson(s);
-            // exe_path 相对工作区根：Assets/LoomUI/ → Assets/LoomGUI/Editor/Tools/ = ../LoomGUI/Editor/Tools/loomgui_pkg.exe
-            StringAssert.Contains("\"exe_path\": \"../LoomGUI/Editor/Tools/loomgui_pkg.exe\"", json);
+            // exe_path 相对工作区根：Assets/LoomUI/ → Packages/com.loomgui.unity/Editor/Tools/ = ../../Packages/com.loomgui.unity/Editor/Tools/loomgui_pkg.exe
+            StringAssert.Contains("\"exe_path\": \"../../Packages/com.loomgui.unity/Editor/Tools/loomgui_pkg.exe\"", json);
             // output_dir 相对工作区根：Assets/LoomUI/ → Assets/StreamingAssets/ = ../StreamingAssets/
             StringAssert.Contains("\"output_dir\": \"../StreamingAssets/\"", json);
             StringAssert.Contains("\"res_dir\": \"res\"", json);

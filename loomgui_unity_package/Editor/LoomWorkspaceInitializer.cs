@@ -40,7 +40,7 @@ namespace LoomGUI.Editor
         /// 注围栏规则到工作区 CLAUDE.md（标签段增量合并）。返 null=成功，非 null=失败原因。
         static string InjectFenceRules(string projRoot, string ws)
         {
-            string tmplPath = Path.Combine(projRoot, "Assets/LoomGUI/Editor/Resources/LoomGUI/fence-rules.md");
+            string tmplPath = Path.Combine(projRoot, "Packages/com.loomgui.unity/Editor/Resources/LoomGUI/fence-rules.md");
             if (!File.Exists(tmplPath)) return $"围栏规则模板不存在：{tmplPath}";
             string content = File.ReadAllText(tmplPath);
             string tagged = content.Contains(BEGIN) ? content : $"{BEGIN}\n{content}\n{END}\n";
@@ -66,7 +66,7 @@ namespace LoomGUI.Editor
             string dest = Path.Combine(ws, ".claude/skills/loomgui-editor");
             Directory.CreateDirectory(dest);
             Directory.CreateDirectory(Path.Combine(dest, "references"));
-            string basePath = Path.Combine(projRoot, "Assets/LoomGUI/Editor/Resources/LoomGUI/skill");
+            string basePath = Path.Combine(projRoot, "Packages/com.loomgui.unity/Editor/Resources/LoomGUI/skill");
             string[] rels = { "SKILL.md", "references/fence.md",
                               "references/preview-polyfill.html", "references/preview-trust.md" };
             var missing = new System.Collections.Generic.List<string>();

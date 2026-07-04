@@ -46,12 +46,12 @@ cargo test -p loomgui_core --test snapshot -- <name>
 
 ```bash
 cargo build -p loomgui_ffi_c --release
-cp target/release/loomgui_ffi_c.dll loomgui_unity/Assets/Plugins/LoomGUI/loomgui_ffi_c.dll
+cp target/release/loomgui_ffi_c.dll loomgui_unity_package/Plugins/LoomGUI/loomgui_ffi_c.dll
 ```
 - **拷贝时 Unity 必须关着**（它锁 .dll）。
-- **stale .dll 诊断**：PlayMode 全不渲 + Console 干净 → `md5sum target/release/loomgui_ffi_c.dll loomgui_unity/Assets/Plugins/LoomGUI/loomgui_ffi_c.dll`；不等 = stale（Rust 改了 blob/ABI，.dll 没换）。
+- **stale .dll 诊断**：PlayMode 全不渲 + Console 干净 → `md5sum target/release/loomgui_ffi_c.dll loomgui_unity_package/Plugins/LoomGUI/loomgui_ffi_c.dll`；不等 = stale（Rust 改了 blob/ABI，.dll 没换）。
 - **改 FFI 签名后 push 前自查 dll 导出**：公司机本地缓存的旧 dll + gitignored bindings 会让公司机"能跑"却 commit 了旧 dll（坑 100）——改 FFI 后 `nm/findstr` 查新符号在 dll 里再 push，否则家里机干净 pull 编译炸。
-- 入库的 `.dll` + csbindgen 生成的 `LoomGUIBindings.cs` 在 `loomgui_unity/Assets/Plugins/LoomGUI/`（`**/Plugins/**/*.dll` 和 bindings .cs 是 gitignore 白名单例外；其余 native 产物一律忽略）。
+- 入库的 `.dll` + csbindgen 生成的 `LoomGUIBindings.cs` 在 `loomgui_unity_package/Plugins/LoomGUI/`（`**/Plugins/**/*.dll` 和 bindings .cs 是 gitignore 白名单例外；其余 native 产物一律忽略）。
 - Unity 6.5，URP。打开 `loomgui_unity/`，PlayMode 从 `StreamingAssets/` 加载 `.pkg.bin`。
 
 ## 架构（大局——权威契约读 `docs/design/main-design.md`）

@@ -10,7 +10,7 @@ namespace LoomGUI.Editor
         public static string Resolve()
         {
             string projRoot = Directory.GetParent(UnityEngine.Application.dataPath).FullName;
-            return Path.GetFullPath(Path.Combine(projRoot, "Assets/LoomGUI/Editor/Tools/loomgui_pkg.exe"));
+            return Path.GetFullPath(Path.Combine(projRoot, "Packages/com.loomgui.unity/Editor/Tools/loomgui_pkg.exe"));
         }
     }
 }
