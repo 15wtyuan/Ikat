@@ -295,6 +295,7 @@ impl Stage {
                 anim: Default::default(),
                 scroll: Default::default(),
                 text_layouts: Vec::new(),
+                node_sort_keys: Vec::new(),
             });
             self.prev_node_hashes.clear(); // 新 scene → 无基线，下帧全 dirty
         }
@@ -448,6 +449,7 @@ impl Stage {
             anim: Default::default(),
             scroll: Default::default(),
             text_layouts: Vec::new(),
+            node_sort_keys: Vec::new(),
         });
         s
     }
@@ -519,7 +521,8 @@ impl Stage {
         //    返回新 hash 存 self.prev_node_hashes 供下帧比。
         // build_render_nodes 查 Stage.image_sizes 算九宫格 UV（slice_px / src_px）。
         // Image payload 带 path，UV 全图 (0,0)-(1,1)（无 atlas 子区），Unity 查 Sprite 拿真实 UV。
-        let (frame, new_hashes) = build_render_nodes(scene, &self.font, &self.prev_node_hashes, &self.image_sizes);
+        let (frame, new_hashes, sort_keys) = build_render_nodes(scene, &self.font, &self.prev_node_hashes, &self.image_sizes);
+        scene.node_sort_keys = sort_keys;
         self.prev_node_hashes = new_hashes;
         frame
     }
@@ -821,6 +824,7 @@ mod tests {
             dynamic_rules: Default::default(),
             focused_node: None,
             world_transforms: Vec::new(), anim: Default::default(), scroll: Default::default(), text_layouts: Vec::new(),
+            node_sort_keys: Vec::new(),
         });
         s.set_input(&[crate::input::PointerEvent { kind: crate::input::PointerKind::Move, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
         s.tick_and_render();
