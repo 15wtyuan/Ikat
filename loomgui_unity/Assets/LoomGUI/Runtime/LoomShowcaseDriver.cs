@@ -331,7 +331,7 @@ namespace LoomGUI
             // 路由：outer/inner 均订阅 Click；inner 调 StopPropagation 止冒泡（outer 不触发）。
             SubscribeLamp("route-outer", EventType.Click, OnRouteOuter);
             SubscribeLamp("route-inner", EventType.Click, OnRouteInner);
-            SubscribeLamp("route-pe", EventType.Click, OnRoutePe);
+            SubscribeLamp("route-pe-under", EventType.Click, OnRoutePeUnder);
             Debug.Log("[Showcase] page_interact 灯阵订阅完成（click/hover/drag/longpress/key + route + disabled）");
         }
 
@@ -376,13 +376,13 @@ namespace LoomGUI
         void OnKeyHit(EventContext ctx) { LightLamp("key", ++_keyCount); }
 
         // 路由演示：inner StopPropagation → outer 不收。独立 lamp-route 反馈。
-        void OnRouteOuter(EventContext ctx) { LightLamp("route", ++_routeCount); }
+        void OnRouteOuter(EventContext ctx) { LightLamp("outer", ++_routeCount); }
         void OnRouteInner(EventContext ctx)
         {
             ctx.StopPropagation();
-            LightLamp("route", ++_routeCount);
+            LightLamp("inner", ++_routeCount);
         }
-        void OnRoutePe(EventContext ctx) { LightLamp("route", ++_routeCount); }
+        void OnRoutePeUnder(EventContext ctx) { LightLamp("pe", ++_routeCount); }
 
         // page_tween（§7 动效）：back-home + tween 播放/kill/clear + complete 回调 + kill-target 旋转。
         // 走 AddPageListener 记进注册表。

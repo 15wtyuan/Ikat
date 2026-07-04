@@ -256,10 +256,10 @@
       }
       // key（聚焦后按键）
       bind('hit-key', 'keydown', function () { lightNext('key'); });
-      // 路由：inner stopPropagation 止冒泡。
-      bind('route-outer', 'click', function () { lightNext('route'); });
-      bind('route-pe', 'click', function () { lightNext('route'); });
-      bind('route-inner', 'click', function (e) { e.stopPropagation(); lightNext('route'); });
+      // 路由：inner stopPropagation 止冒泡——点 inner 只 inner 亮，outer 不亮。
+      bind('route-outer', 'click', function () { lightNext('outer'); });
+      bind('route-pe-under', 'click', function () { lightNext('pe'); });
+      bind('route-inner', 'click', function (e) { e.stopPropagation(); lightNext('inner'); });
       // hit-disabled 不绑（HTML 已带 .disabled，视觉灰 + 不响应）
     },
     page_dyntree:  function () {

@@ -107,15 +107,19 @@
         <div class="card">
           <div class="card-h"><span class="card-t">4.7 路由 + pointer-events</span><span class="card-x">预期: bubble + StopProp + 属性设置</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
-            <div class="lamps" id="lamp-route">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div style="flex-direction:row;gap:16px;flex-wrap:wrap">
+              <div style="flex-direction:column;gap:4px"><div class="lamps"><div class="lamp" id="lamp-outer-0"></div><div class="lamp" id="lamp-outer-1"></div><div class="lamp" id="lamp-outer-2"></div></div><span class="card-x">outer <span id="count-outer">0</span></span></div>
+              <div style="flex-direction:column;gap:4px"><div class="lamps"><div class="lamp" id="lamp-inner-0"></div><div class="lamp" id="lamp-inner-1"></div><div class="lamp" id="lamp-inner-2"></div></div><span class="card-x">inner <span id="count-inner">0</span></span></div>
+              <div style="flex-direction:column;gap:4px"><div class="lamps"><div class="lamp" id="lamp-pe-0"></div><div class="lamp" id="lamp-pe-1"></div><div class="lamp" id="lamp-pe-2"></div></div><span class="card-x">pe <span id="count-pe">0</span></span></div>
             </div>
             <div class="outer-r" id="route-outer">
-              <div class="inner-r" id="route-inner">内（StopPropagation 止冒泡）</div>
+              <div class="inner-r" id="route-inner">点 inner（StopPropagation，outer 不亮）</div>
             </div>
-            <div class="hit" id="route-pe">可点（route-pe）</div>
-            <div class="pe-none">pointer-events:none 流内块（hit_test 跳过）</div>
-            <span class="card-x">pointer-events:none 节点 hit_test 跳过（点击穿透到下层）。v1 无 position:absolute 叠加，穿透叠加效果不可视，本卡演属性设置 + 路由 capture/bubble/StopPropagation。</span>
+            <div style="position:relative;width:200px;height:50px">
+              <div class="hit" id="route-pe-under" style="width:100%;height:100%">下层可点（route-pe-under）</div>
+              <div class="pe-none" style="position:absolute;inset:0">pointer-events:none（点我穿透到下层）</div>
+            </div>
+            <span class="card-x">点 inner → 只 lamp-inner 亮（StopPropagation 止冒泡，outer 不亮）；点 outer → lamp-outer 亮；点 pe-none 区块 → 穿透命中 route-pe-under → lamp-pe 亮。</span>
           </div>
         </div>
       </div>
