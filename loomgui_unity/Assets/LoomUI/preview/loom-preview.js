@@ -201,7 +201,35 @@
         if (el) { el.classList.remove('paused'); el.classList.add('cleared'); }
       });
     },
-    page_interact: function () { wireBackHome(); /*Task10*/ },
+    page_interact: function () {
+      wireBackHome();
+      // click / dblclick
+      bind('hit-click', 'click', function () { pulseLamp('click'); });
+      bind('hit-click', 'dblclick', function () { pulseLamp('click'); });
+      // hover（RollOver/Out）
+      bind('hit-hover', 'mouseenter', function () { pulseLamp('hover'); });
+      bind('hit-hover', 'mouseleave', function () { pulseLamp('hover'); });
+      // drag（HTML5 dragstart/drag）
+      bind('hit-drag', 'dragstart', function () { pulseLamp('drag'); });
+      bind('hit-drag', 'drag', function () { pulseLamp('drag'); });
+      // longpress（mousedown 起 1.5s timer）
+      var lpTimer = null;
+      var lp = $('hit-longpress');
+      if (lp) {
+        lp.addEventListener('mousedown', function () {
+          lpTimer = setTimeout(function () { pulseLamp('longpress'); }, 1500);
+        });
+        lp.addEventListener('mouseup', function () { if (lpTimer) clearTimeout(lpTimer); });
+        lp.addEventListener('mouseleave', function () { if (lpTimer) clearTimeout(lpTimer); });
+      }
+      // key（聚焦后按键）
+      bind('hit-key', 'keydown', function () { pulseLamp('key'); });
+      // 路由：inner stopPropagation 止冒泡。
+      bind('route-outer', 'click', function () { pulseLamp('route'); });
+      bind('route-pe', 'click', function () { pulseLamp('route'); });
+      bind('route-inner', 'click', function (e) { e.stopPropagation(); pulseLamp('route'); });
+      // hit-disabled 不绑（HTML 已带 .disabled，视觉灰 + 不响应）
+    },
     page_dyntree:  function () {
       wireBackHome();
       var dynPanels = [];
