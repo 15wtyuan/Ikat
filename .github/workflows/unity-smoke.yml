@@ -1,0 +1,15 @@
+name: Unity Smoke
+
+# 占位：Unity PlayMode 测试 via game-ci（https://game.ci）。本轮（② CI 工具链）未启用——
+# Rust 侧 CI 已在 rust-ci.yml 覆盖；Unity 侧需先配 license secret：
+#   UNITY_EMAIL / UNITY_PASSWORD / UNITY_SERIAL（见 game-ci getting-started）。
+# 配好后把 placeholder job 换成 game-ci/unity-test-runner action。
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Unity PlayMode CI 待启用（需 game-ci + license secret）"

@@ -1,0 +1,74 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: clippy (advisory)
+        # 当前 ~296 个历史 warning，主力是 field_reassign_with_default（测试 setup）
+        # 与 not_unsafe_ptr_arg_deref（FFI C-ABI ptr deref，固有）。advisory 跑、不挡 CI；
+        # 待 clippy 专项清理后收紧为 `-- -D warnings`。
+        run: cargo clippy --all-targets
+        continue-on-error: true
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test --workspace
+        run: cargo test --workspace
+      - name: feature-gate check (parse feature off)
+        # 不带 parse feature（scraper/cssparser）仍须全量编译——验证运行时配置不破。
+        run: cargo build --workspace --no-default-features --all-targets
+
+  dll-artifact:
+    name: Windows .dll artifact
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: build release .dll
+        run: cargo build -p loomgui_ffi_c --release
+      - name: upload .dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: loomgui_ffi_c-windows-x64
+          path: target/release/loomgui_ffi_c.dll
+          retention-days: 7

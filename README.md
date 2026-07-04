@@ -4,6 +4,7 @@
 >
 > **核心目的**：AI 驱动的界面拼装——HTML 作 DSL 让 AI 既能编辑（文本）又能预测渲染结果（AI 对 HTML/CSS 有强先验）。
 
+[![Rust CI](https://github.com/15wtyuan/LoomGUI/actions/workflows/rust-ci.yml/badge.svg)](https://github.com/15wtyuan/LoomGUI/actions/workflows/rust-ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Unity](https://img.shields.io/badge/Unity-6.5%20URP-black.svg)](https://unity.com)
 [![Rust](https://img.shields.io/badge/Rust-stable-orange.svg)](https://www.rust-lang.org)
