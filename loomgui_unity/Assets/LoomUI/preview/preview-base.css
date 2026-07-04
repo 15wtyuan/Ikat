@@ -16,3 +16,4 @@ body {
   padding: 24px;
 }
 .root { box-shadow: 0 0 0 1px #2a2f45, 0 8px 40px rgba(0, 0, 0, .6); }
+button { background: none; border: none; color: inherit; font: inherit; padding: 0; }

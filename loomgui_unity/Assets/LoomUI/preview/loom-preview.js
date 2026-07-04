@@ -68,13 +68,14 @@
   function bindClick(id, fn) { bind(id, 'click', fn); }
 
   // 导航：所有页 #back-home → home；home 的 #nav-* → 各页。
-  // <base href=".."> 锚到 LoomUI/，故 location.href 用 'showcase/xxx.html'。
+  // location.href 按【文档 URL】解析（不受 <base> 影响，base 只管 <img>/<link>/<script>）。
+  // 各页同在 showcase/，故用同目录相对名 'xxx.html'——带 'showcase/' 前缀会变 .../showcase/showcase/ 404。
   function wireBackHome() {
-    bindClick('back-home', function () { location.href = 'showcase/home.html'; });
+    bindClick('back-home', function () { location.href = 'home.html'; });
   }
   function wireNav() {
     Object.keys(NAV).forEach(function (navId) {
-      bindClick(navId, function () { location.href = 'showcase/' + NAV[navId] + '.html'; });
+      bindClick(navId, function () { location.href = NAV[navId] + '.html'; });
     });
   }
 
@@ -117,7 +118,8 @@
   // Chrome/Edge 支持 body.zoom；旧 Firefox 无效（降级不缩放，用户 Ctrl +-）。
   function applyFitScale() {
     var sf = Math.min(window.innerWidth / 1080, window.innerHeight / 1920);
-    if (sf > 0 && sf < 1) document.body.style.zoom = sf;
+    // sf>=1 时清空 zoom——否则小窗设了 zoom 后放大窗口，stale 缩放留痕。
+    document.body.style.zoom = (sf > 0 && sf < 1) ? sf : '';
   }
 
   // === page handlers（Task 5-10 填充，这里 stub 只调 wireBackHome） ===
