@@ -1,4 +1,4 @@
-use loomgui_core::asset::{read_package, AssetEntry, PKG_MAGIC};
+use loomgui_core::asset::{read_package, PKG_MAGIC};
 use loomgui_pkg::pack;
 use std::fs;
 use std::path::PathBuf;

@@ -119,7 +119,8 @@ mod tests {
                 },
             ),
             {
-                let c = node(
+                
+                node(
                     1,
                     Some(0),
                     Rect {
@@ -128,8 +129,7 @@ mod tests {
                         w: 10.0,
                         h: 10.0,
                     },
-                );
-                c
+                )
             },
         ]);
         let rid = root_id(&s);

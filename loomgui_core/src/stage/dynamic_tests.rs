@@ -98,7 +98,7 @@
         s.set_text(t, "hi").unwrap();
         let frame = s.tick_and_render();
         // span 节点应进 frame
-        assert!(frame.nodes.len() >= 1);
+        assert!(!frame.nodes.is_empty());
     }
 
     /// create_node 拒绝未知 tag。

@@ -610,7 +610,7 @@
         // 点 (96, 20) 在 thumb 内 → hit_test 应返 sentinel
         let hit = crate::hit::hit_test(&s, (96.0, 20.0));
         assert!(
-            hit.map_or(false, |id| id.0 & 0x6000_0000 != 0),
+            hit.is_some_and(|id| id.0 & 0x6000_0000 != 0),
             "thumb 命中应返 sentinel，got {:?}",
             hit
         );

@@ -110,7 +110,7 @@ impl ScrollTable {
     }
     /// 确保该节点有 scroll 槽并返回可变状态（缺则插 default）。
     pub fn ensure(&mut self, id: NodeId) -> &mut ScrollPaneState {
-        self.0.entry(id).or_insert_with(ScrollPaneState::default)
+        self.0.entry(id).or_default()
     }
     /// 删该节点 scroll 槽（remove_node 联动调，防悬空 NodeId 残留）。
     pub fn remove(&mut self, id: NodeId) {

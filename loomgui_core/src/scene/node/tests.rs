@@ -495,7 +495,7 @@
         );
         // clear_node 才真正 remove
         t.clear_node(id);
-        assert!(t.0.get(&id).is_none(), "clear_node 后 HashMap 无条目");
+        assert!(!t.0.contains_key(&id), "clear_node 后 HashMap 无条目");
     }
 
     #[test]

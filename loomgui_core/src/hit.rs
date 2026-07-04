@@ -384,7 +384,7 @@ mod tests {
         // thumb 内一点 → hit_test 应返 sentinel（含 V_THUMB_FLAG）
         let hit = hit_test(&s, (96.0, 25.0));
         assert!(hit.is_some(), "thumb 区 hit_test 命中");
-        let raw = hit.unwrap().0 as u32;
+        let raw = hit.unwrap().0;
         assert!(
             raw & crate::scroll::V_THUMB_FLAG != 0,
             "sentinel 含 V_THUMB_FLAG"

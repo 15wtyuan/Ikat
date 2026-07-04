@@ -7,10 +7,13 @@
 //! width/height big-endian u32 at offset 16/20）填 `AssetEntry { path, w, h }`。非 PNG 或读失败 →
 //! w/h=0（核心 measure fallback 64×64）。PNG header 解析 ~30 行即可，无需完整 PNG 解码。
 
+// type_complexity：打包器 build_scene 抽 TemplateNode 的返回类型天然是多层 Vec/HashMap 嵌套，
+// 拆 alias 跨函数引用反而更难读。
+#![allow(clippy::type_complexity)]
+
 use loomgui_core::asset::{
     extract_component_css, normalize_path, AssetEntry, PackageInput, TemplateNode,
-};
-use loomgui_core::scene::NodeId;
+};use loomgui_core::scene::NodeId;
 use scraper::{Html, Selector as ScraperSelector};
 use std::path::Path;
 

@@ -126,7 +126,7 @@ fn main() {
 
     let mut s = Stage::new(font, (200.0, 100.0)).unwrap();
     s.load_package("showcase", &pkg).unwrap();
-    let btn = s.find_node_by_id("b1").expect("b1").0 as u32;
+    let btn = s.find_node_by_id("b1").expect("b1").0;
     let r = s
         .scene
         .as_ref()

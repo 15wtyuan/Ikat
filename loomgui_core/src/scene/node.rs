@@ -196,7 +196,7 @@ impl AnimTable {
 
     /// 确保该节点有 anim 槽并返回可变引用（update 调）。
     pub fn ensure(&mut self, node: NodeId) -> &mut NodeAnim {
-        self.0.entry(node).or_insert_with(NodeAnim::default)
+        self.0.entry(node).or_default()
     }
 
     /// 清该节点所有通道（回 CSS）= remove。
@@ -429,8 +429,8 @@ fn gather_rec(
         Option<i32>,
     )>,
 ) -> usize {
-    let el = &tree.nodes[el_id.0 as usize];
-    let style = &styles[el_id.0 as usize];
+    let el = &tree.nodes[el_id.0];
+    let style = &styles[el_id.0];
     // tag→NodeKind 复用 runtime 的 `kind_from_tag`（dynamic.rs，不依赖 parse feature），
     // 消除两处 tag 白名单重复。parse 层已保证 tag 在围栏白名单内（div/span/img/button），
     // 故 kind_from_tag 在此必 Ok——Err 走 unreachable（parse/白名单契约破坏）。

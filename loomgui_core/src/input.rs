@@ -246,7 +246,7 @@ pub(crate) fn focus_node(scene: &mut Scene, new: Option<NodeId>, out: &mut Vec<E
             n.focused = false;
         }
         out.push(EventRecord {
-            node_id: o.0 as u32,
+            node_id: o.0,
             event_type: EVT_FOCUS_OUT,
             click_count: 0,
             pad: [0, 0],
@@ -260,7 +260,7 @@ pub(crate) fn focus_node(scene: &mut Scene, new: Option<NodeId>, out: &mut Vec<E
             node.focused = true;
         }
         out.push(EventRecord {
-            node_id: n.0 as u32,
+            node_id: n.0,
             event_type: EVT_FOCUS_IN,
             click_count: 0,
             pad: [0, 0],
@@ -309,7 +309,7 @@ pub(crate) fn build_tab_chain(scene: &Scene) -> Vec<NodeId> {
     positive
         .into_iter()
         .map(|(_, n)| n)
-        .chain(zero.into_iter())
+        .chain(zero)
         .collect()
 }
 
@@ -362,7 +362,7 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
         if let Some(n) = focused {
             let event_type = if ke.is_down { EVT_KEY_DOWN } else { EVT_KEY_UP };
             out.push(EventRecord {
-                node_id: n.0 as u32,
+                node_id: n.0,
                 event_type,
                 click_count: 0,
                 pad: [ke.modifiers, 0],       // pad[0]=modifiers
@@ -484,12 +484,12 @@ impl PointerState {
             let slot = &mut self.slots[i];
             if slot.is_down && !slot.longpress_fired && !slot.longpress_cancelled {
                 if let Some(n) = slot.down_node {
-                    if scene.get(n).map_or(false, |node| !node.disabled)
+                    if scene.get(n).is_some_and(|node| !node.disabled)
                         && time_s - slot.down_time >= LONGPRESS_TRIGGER
                     {
                         slot.longpress_fired = true;
                         out.push(EventRecord {
-                            node_id: n.0 as u32,
+                            node_id: n.0,
                             event_type: EVT_LONG_PRESS,
                             click_count: 0,
                             pad: [0, 0],
@@ -601,7 +601,7 @@ impl PointerState {
                                 slot.scroll_testing = false; // drag 赢 → 清 scroll（互斥）
                                 slot.scroll_candidate = None;
                                 out.push(EventRecord {
-                                    node_id: tgt.0 as u32,
+                                    node_id: tgt.0,
                                     event_type: EVT_DRAG_START,
                                     click_count: 0,
                                     pad: [0, 0],
@@ -615,7 +615,7 @@ impl PointerState {
                     if slot.dragging {
                         if let Some(tgt) = slot.drag_target {
                             out.push(EventRecord {
-                                node_id: tgt.0 as u32,
+                                node_id: tgt.0,
                                 event_type: EVT_DRAG_MOVE,
                                 click_count: 0,
                                 pad: [0, 0],
@@ -670,7 +670,7 @@ impl PointerState {
                     // Move 派发：有 monitor 产 Move@monitor，无 monitor 不产
                     for m in &slot.touch_monitors {
                         out.push(EventRecord {
-                            node_id: m.0 as u32,
+                            node_id: m.0,
                             event_type: EVT_MOVE,
                             click_count: 0,
                             pad: [0, 0],
@@ -709,7 +709,7 @@ impl PointerState {
                         .find(|&&n| {
                             scene
                                 .get(n)
-                                .map_or(false, |node| node.draggable && !node.disabled)
+                                .is_some_and(|node| node.draggable && !node.disabled)
                         })
                         .copied();
                     slot.drag_testing = slot.drag_target.is_some();
@@ -757,7 +757,7 @@ impl PointerState {
                         .down_targets
                         .iter()
                         .find(|&&n| {
-                            scene.get(n).map_or(false, |node| {
+                            scene.get(n).is_some_and(|node| {
                                 !node.disabled && matches!(node.tabindex, Some(t) if t >= 0)
                             })
                         })
@@ -766,9 +766,9 @@ impl PointerState {
                         focus_node(scene, Some(t), &mut out);
                     }
                     if let Some(n) = hit {
-                        if scene.get(n).map_or(false, |node| !node.disabled) {
+                        if scene.get(n).is_some_and(|node| !node.disabled) {
                             out.push(EventRecord {
-                                node_id: n.0 as u32,
+                                node_id: n.0,
                                 event_type: EVT_DOWN,
                                 click_count: 0,
                                 pad: [0, 0],
@@ -788,7 +788,7 @@ impl PointerState {
                     if slot.dragging {
                         if let Some(tgt) = slot.drag_target {
                             out.push(EventRecord {
-                                node_id: tgt.0 as u32,
+                                node_id: tgt.0,
                                 event_type: EVT_DRAG_END,
                                 click_count: 0,
                                 pad: [0, 0],
@@ -814,9 +814,9 @@ impl PointerState {
                     // grip_dragging 时 hit 为 sentinel（scene.nodes 越界），跳过 EVT_UP/EVT_CLICK（grip Up 不产这些事件）。
                     if !slot.grip_dragging {
                         if let Some(n) = hit {
-                            if scene.get(n).map_or(false, |node| !node.disabled) {
+                            if scene.get(n).is_some_and(|node| !node.disabled) {
                                 out.push(EventRecord {
-                                    node_id: n.0 as u32,
+                                    node_id: n.0,
                                     event_type: EVT_UP,
                                     click_count: 0,
                                     pad: [0, 0],
@@ -825,10 +825,10 @@ impl PointerState {
                                     y: ev.y,
                                 });
                                 if let Some(target) = Self::click_test(slot, scene, hit) {
-                                    if scene.get(target).map_or(false, |node| !node.disabled) {
+                                    if scene.get(target).is_some_and(|node| !node.disabled) {
                                         let count = Self::bump_click_count(slot, ev.button, time_s);
                                         out.push(EventRecord {
-                                            node_id: target.0 as u32,
+                                            node_id: target.0,
                                             event_type: EVT_CLICK,
                                             click_count: count,
                                             pad: [0, 0],
@@ -849,7 +849,7 @@ impl PointerState {
                     for m in &slot.touch_monitors {
                         if Some(*m) != hit {
                             out.push(EventRecord {
-                                node_id: m.0 as u32,
+                                node_id: m.0,
                                 event_type: EVT_UP,
                                 click_count: 0,
                                 pad: [0, 0],
@@ -950,7 +950,7 @@ impl PointerState {
         for n in &slot.last_hovered_chain {
             if !new_chain.contains(n) {
                 out.push(EventRecord {
-                    node_id: n.0 as u32,
+                    node_id: n.0,
                     event_type: EVT_ROLL_OUT,
                     click_count: 0,
                     pad: [0, 0],
@@ -963,7 +963,7 @@ impl PointerState {
         for n in &new_chain {
             if !slot.last_hovered_chain.contains(n) {
                 out.push(EventRecord {
-                    node_id: n.0 as u32,
+                    node_id: n.0,
                     event_type: EVT_ROLL_OVER,
                     click_count: 0,
                     pad: [0, 0],

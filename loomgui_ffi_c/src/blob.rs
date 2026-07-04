@@ -158,7 +158,7 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
                         mesh_arena.extend_from_slice(&c[3].to_le_bytes());
                     }
                     for ix in indices {
-                        mesh_arena.extend_from_slice(&(*ix as u32).to_le_bytes());
+                        mesh_arena.extend_from_slice(&(*ix).to_le_bytes());
                     }
                     let seg_len = mesh_arena.len() as u32 - seg_off;
                     col_mesh_off.extend_from_slice(&seg_off.to_le_bytes());

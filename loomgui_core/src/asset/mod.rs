@@ -371,7 +371,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     }
     // PerComponentDynamicRules: 每组件 dynamic_blob（紧跟 ComponentTable 序）
     for (_, _, _, dynamic_blob) in &comp_records {
-        out.extend_from_slice(&dynamic_blob);
+        out.extend_from_slice(dynamic_blob);
     }
     // AssetManifest: entry_count(u32) + count × {path_idx(u16), w(u32), h(u32)}（path + 图尺寸）
     out.extend_from_slice(&(manifest_idx.len() as u32).to_le_bytes());

@@ -313,7 +313,7 @@ mod tests {
         s.touchable = false;
         let bytes = bincode::serialize(&s).unwrap();
         let back: ResolvedStyle = bincode::deserialize(&bytes).unwrap();
-        assert_eq!(back.touchable, false);
+        assert!(!back.touchable);
         assert_eq!(back, s, "加字段后全字段 round-trip 仍相等");
     }
 

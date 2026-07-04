@@ -133,8 +133,8 @@ pub fn build_render_nodes(
         let rect = &rect;
         let has_filter = n.style.color_filter.is_some();
         let color_matrix = n.style.color_filter.unwrap_or([0.0; 20]);
-        let node_id = n.id.0 as u32;
-        let parent_id = n.parent.map(|p| p.0 as u32);
+        let node_id = n.id.0;
+        let parent_id = n.parent.map(|p| p.0);
         let alpha = anim.and_then(|a| a.opacity).unwrap_or(n.style.opacity);
         let color_tint = anim.and_then(|a| a.text_color).unwrap_or(n.style.color);
         let rn = match &n.kind {
@@ -357,13 +357,13 @@ pub fn build_render_nodes(
         if let Some(s) = scene.scroll.get(nid) {
             if crate::scroll::effective(n.style.overflow_y, s.content_size.1, s.viewport_size.1) {
                 if let Some(r) = crate::scroll::v_thumb_rect(scene, nid) {
-                    let thumb_id = nid.0 as u32 | crate::scroll::V_THUMB_FLAG;
+                    let thumb_id = nid.0 | crate::scroll::V_THUMB_FLAG;
                     nodes.push(thumb_render_node(thumb_id, r, max_sort + 1));
                 }
             }
             if crate::scroll::effective(n.style.overflow_x, s.content_size.0, s.viewport_size.0) {
                 if let Some(r) = crate::scroll::h_thumb_rect(scene, nid) {
-                    let thumb_id = nid.0 as u32 | crate::scroll::H_THUMB_FLAG;
+                    let thumb_id = nid.0 | crate::scroll::H_THUMB_FLAG;
                     nodes.push(thumb_render_node(thumb_id, r, max_sort + 1));
                 }
             }

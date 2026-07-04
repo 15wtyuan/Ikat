@@ -251,7 +251,7 @@ impl TweenManager {
             if tt >= t.duration {
                 t.killed = true;
                 out.push(EventRecord {
-                    node_id: t.node.0 as u32,
+                    node_id: t.node.0,
                     event_type: EVT_TWEEN_COMPLETE,
                     click_count: t.prop as u8, // 复用：prop 枚举值
                     pad: [0, 0],
@@ -470,7 +470,7 @@ mod tests {
         mgr.update(0.5, &mut s, &mut out); // elapsed 0.5 < delay 1 → 不写
                                            // delay 内未 apply → HashMap 无该 node 条目
         assert!(
-            s.anim.0.get(&nid).is_none(),
+            !s.anim.0.contains_key(&nid),
             "delay 内不写 override（HashMap 无条目）"
         );
         assert!(out.is_empty());

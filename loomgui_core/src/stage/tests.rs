@@ -393,7 +393,7 @@
         );
         s.tick_and_render(); // 无 advance_time → dt=0 → elapsed < delay → 不推进
         assert!(
-            s.scene.as_ref().unwrap().anim.0.get(&rid).is_none(),
+            !s.scene.as_ref().unwrap().anim.0.contains_key(&rid),
             "dt=0 不写 override（HashMap 无条目）"
         );
     }

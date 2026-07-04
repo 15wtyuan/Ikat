@@ -165,12 +165,11 @@ fn match_chain_with_state(
         Combinator::Descendant => {
             let mut cur = scene.get(start_node).and_then(|n| n.parent);
             while let Some(ancestor) = cur {
-                if compound_matches_with_state(target_comp, ancestor, scene) {
-                    if match_chain_with_state(comps, end_idx - 1, ancestor, scene) {
+                if compound_matches_with_state(target_comp, ancestor, scene)
+                    && match_chain_with_state(comps, end_idx - 1, ancestor, scene) {
                         return true;
                     }
                     // 此祖先匹配但更左链匹配不上 → 继续往上找
-                }
                 cur = scene.get(ancestor).and_then(|n| n.parent);
             }
             false

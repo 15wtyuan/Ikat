@@ -932,7 +932,7 @@
             h: 100.0,
         };
         // refresh 需要 content_size/viewport/overlap（set_pos 读 overlap 做 clamp）
-        loomgui_core::scroll::refresh_content_sizes(&mut stage.scene.as_mut().unwrap());
+        loomgui_core::scroll::refresh_content_sizes(stage.scene.as_mut().unwrap());
         // 手动改 overlap 到 200 让 scroll_pos 可测（无子 content=0,overlap=0 → set_pos 全 clamp 0）
         stage
             .scene

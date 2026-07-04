@@ -30,7 +30,7 @@ fn main() {
     let mut bad = 0;
     for n in &names {
         let c = &pkg.components[*n];
-        if c.nodes.first().map(|n| n.parent_idx).flatten().is_some() {
+        if c.nodes.first().and_then(|n| n.parent_idx).is_some() {
             println!("ERROR: component {} root has parent_idx != None", n);
             bad += 1;
         }

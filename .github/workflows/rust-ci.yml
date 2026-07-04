@@ -33,12 +33,10 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: clippy (advisory)
-        # 当前 ~296 个历史 warning，主力是 field_reassign_with_default（测试 setup）
-        # 与 not_unsafe_ptr_arg_deref（FFI C-ABI ptr deref，固有）。advisory 跑、不挡 CI；
-        # 待 clippy 专项清理后收紧为 `-- -D warnings`。
-        run: cargo clippy --all-targets
-        continue-on-error: true
+      - name: clippy (-D warnings)
+        # 历史 warning 已清零（advisory 收紧为严门禁）。可辩护的测试/FFI 模式 lint 在各 crate
+        # root 用 #![allow] 显式放行并注明理由；其余真错的已修。
+        run: cargo clippy --all-targets -- -D warnings
 
   test:
     name: test (${{ matrix.os }})

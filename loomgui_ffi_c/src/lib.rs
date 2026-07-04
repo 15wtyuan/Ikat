@@ -1,6 +1,20 @@
 //! FFI 导出层（§14.1 csbindgen）：extern "C" 薄包装，opaque Stage 句柄。
 //! 命名前缀 `loomgui_`，csbindgen 扫描本文件生成 C# 绑定。
 
+// FFI 边界固有，放行：not_unsafe_ptr_arg_deref（外部 raw ptr 解引用是 C ABI 常态）、
+// too_many_arguments（签名由 C# 调用方契约固定）、type_complexity（ptr+len 出参组合）、
+// unnecessary_cast（abi_tests 里 raw ptr 同型 cast，clippy --fix 对 raw ptr 保守不动）、
+// needless_range_loop（blob/tests 顶点/索引填装按 i 下标写，iterator 改写可读性反降）。
+// field_reassign_with_default：测试 setup（同 core）。
+#![allow(
+    clippy::not_unsafe_ptr_arg_deref,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::unnecessary_cast,
+    clippy::needless_range_loop,
+    clippy::field_reassign_with_default
+)]
+
 pub mod blob;
 
 use loomgui_core::input::{EventRecord, KeyEvent, PointerEvent};
@@ -326,7 +340,7 @@ pub extern "C" fn loomgui_node_parent(h: *const StageHandle, node_id: u32) -> u3
         Some(scene) => {
             // NodeId(u32) → slotmap lookup（代际安全）。无效/悬空 NodeId → sentinel。
             match scene.get(NodeId(node_id)) {
-                Some(n) => n.parent.map(|p| p.0 as u32).unwrap_or(ROOT_SENTINEL),
+                Some(n) => n.parent.map(|p| p.0).unwrap_or(ROOT_SENTINEL),
                 None => ROOT_SENTINEL,
             }
         }
@@ -355,7 +369,7 @@ pub extern "C" fn loomgui_stage_find_node_by_id(
         Err(_) => return NOT_FOUND,
     };
     match sh.stage.find_node_by_id(id_str) {
-        Some(nid) => nid.0 as u32,
+        Some(nid) => nid.0,
         None => NOT_FOUND,
     }
 }
@@ -592,7 +606,7 @@ pub extern "C" fn loomgui_stage_focused_node(h: *const StageHandle) -> u32 {
     }
     let sh = unsafe { &*h };
     match &sh.stage.scene {
-        Some(scene) => scene.focused_node.map(|n| n.0 as u32).unwrap_or(NONE),
+        Some(scene) => scene.focused_node.map(|n| n.0).unwrap_or(NONE),
         None => NONE,
     }
 }
@@ -644,10 +658,8 @@ pub extern "C" fn loomgui_stage_tween(
     let en = unsafe { std::slice::from_raw_parts(end, sz) };
     let mut s = [0.0f32; 4];
     let mut e = [0.0f32; 4];
-    for i in 0..sz {
-        s[i] = st[i];
-        e[i] = en[i];
-    }
+    s[..sz].copy_from_slice(st);
+    e[..sz].copy_from_slice(en);
     sh.stage
         .tween(NodeId(node_id), prop, s, e, ease, delay, duration, tag);
 }
