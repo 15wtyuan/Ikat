@@ -42,7 +42,11 @@ fn main() {
             Some(n) => n,
             None => {
                 // scrollbar thumb sentinel 等
-                println!("n{:>3} [sentinel/merged-anchor] {}", nid, payload_str(&rn.payload));
+                println!(
+                    "n{:>3} [sentinel/merged-anchor] {}",
+                    nid,
+                    payload_str(&rn.payload)
+                );
                 continue;
             }
         };
@@ -79,7 +83,12 @@ fn main() {
 
 fn payload_str(p: &NodePayload) -> String {
     match p {
-        NodePayload::Mesh { verts, colors, image_path, .. } => {
+        NodePayload::Mesh {
+            verts,
+            colors,
+            image_path,
+            ..
+        } => {
             let c0 = colors.first().copied().unwrap_or([0.0; 4]);
             format!(
                 "Mesh v{} path={:?} c0({:.0},{:.0},{:.0},{:.0})",

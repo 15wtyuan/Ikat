@@ -22,7 +22,9 @@ pub fn json_escape(s: &str) -> String {
 pub fn dump_scene_json(scene: &Scene) -> String {
     let mut s = String::from("[");
     for (i, n) in scene.nodes.values().enumerate() {
-        if i > 0 { s.push(','); }
+        if i > 0 {
+            s.push(',');
+        }
         let (tag, kind_str) = match &n.kind {
             NodeKind::Container => ("div", "Container"),
             NodeKind::Button => ("button", "Button"),
@@ -30,7 +32,12 @@ pub fn dump_scene_json(scene: &Scene) -> String {
             NodeKind::Image { src: _src } => ("img", "Image"),
         };
         let id = json_escape(n.id_attr.as_deref().unwrap_or(""));
-        let classes = n.classes.iter().map(|c| json_escape(c)).collect::<Vec<_>>().join(" ");
+        let classes = n
+            .classes
+            .iter()
+            .map(|c| json_escape(c))
+            .collect::<Vec<_>>()
+            .join(" ");
         // world_transforms / anim 按 slotmap idx 索引（idx 从 1 起，数组长 N+1）。
         // bounds guard：未对齐时 fallback IDENTITY / (false, None)。
         let wm = if n.id.index() < scene.world_transforms.len() {
@@ -44,7 +51,9 @@ pub fn dump_scene_json(scene: &Scene) -> String {
             Some(a) => (a.transform.is_some(), a.opacity),
             None => (false, None),
         };
-        let op_str = anim_op.map(|v| format!("{:.3}", v)).unwrap_or_else(|| "null".into());
+        let op_str = anim_op
+            .map(|v| format!("{:.3}", v))
+            .unwrap_or_else(|| "null".into());
         s.push_str(&format!(
             r#"{{"node_id":{},"parent":{},"tag":"{}","id":"{}","classes":"{}","kind":"{}","layout":{{"x":{},"y":{},"w":{},"h":{}}},"world_matrix":[{},{},{},{},{},{}],"anim_tr":{},"anim_op":{},"visible":{}}}"#,
             n.id.0, n.parent.map(|p| p.0.to_string()).unwrap_or("-1".into()),
@@ -69,7 +78,12 @@ mod tests {
         let mut n = Node::default();
         n.id_attr = Some("root".into());
         n.classes = vec!["main".into()];
-        n.layout_rect = Rect { x: 1.0, y: 2.0, w: 3.0, h: 4.0 };
+        n.layout_rect = Rect {
+            x: 1.0,
+            y: 2.0,
+            w: 3.0,
+            h: 4.0,
+        };
         // from_nodes 分配 slotmap id（首节点 = NodeId((1<<12)|1)）；world_transforms 空 → IDENTITY。
         let s = Scene::from_nodes(vec![n], vec![]);
         let json = dump_scene_json(&s);
@@ -78,7 +92,10 @@ mod tests {
         assert!(json.contains(r#""x":1"#), "含 layout.x");
         assert!(json.contains(r#""y":2"#), "含 layout.y");
         assert!(json.contains(r#""w":3"#), "含 layout.w");
-        assert!(json.contains(r#""world_matrix":[1,0,0,1,0,0]"#), "identity world_matrix");
+        assert!(
+            json.contains(r#""world_matrix":[1,0,0,1,0,0]"#),
+            "identity world_matrix"
+        );
     }
 
     #[test]
@@ -87,6 +104,10 @@ mod tests {
         n.id_attr = Some("a\"b".into());
         let s = Scene::from_nodes(vec![n], vec![]);
         let json = dump_scene_json(&s);
-        assert!(json.contains(r#""id":"a\"b""#), "id 中的引号被转义：{}", json);
+        assert!(
+            json.contains(r#""id":"a\"b""#),
+            "id 中的引号被转义：{}",
+            json
+        );
     }
 }

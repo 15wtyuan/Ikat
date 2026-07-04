@@ -52,7 +52,10 @@ fn main() -> ExitCode {
 
     // --res-root 未传 → 默认 = source_dir.join("res")（向后兼容 res 在 sourceDir 下的场景）。
     let res_root = res_root.unwrap_or_else(|| source_dir.join("res"));
-    let res_dir = res_root.file_name().and_then(|s| s.to_str()).unwrap_or("res");
+    let res_dir = res_root
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("res");
 
     // 不传 --html → 扫 sourceDir 顶层所有 .html（不递归，排除 res 目录下的）。
     let html_files: Vec<String> = match html_list {

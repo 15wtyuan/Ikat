@@ -3,10 +3,10 @@
 
 pub mod blob;
 
-use std::ffi::CString;
 use loomgui_core::input::{EventRecord, KeyEvent, PointerEvent};
 use loomgui_core::scene::NodeId;
 use loomgui_core::stage::Stage;
+use std::ffi::CString;
 
 /// 版本字符串（C null-terminated `b"v1e\0"`）。
 ///
@@ -24,7 +24,7 @@ pub extern "C" fn loomgui_version() -> *const u8 {
 pub struct StageHandle {
     stage: Stage,
     frame_blob: Vec<u8>, // borrow_frame 返回 &this[..]；tick 时被覆盖。
-    dump_blob: CString, // dump_scene 缓存（Rust 拥有）
+    dump_blob: CString,  // dump_scene 缓存（Rust 拥有）
 }
 
 /// 创建 Stage 句柄。`font_path` 为 UTF-8 字节（指针+len），失败返回 null。
@@ -134,7 +134,8 @@ pub extern "C" fn loomgui_stage_load_package(
         return -1;
     }
     let sh = unsafe { &mut *h };
-    let name = std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, name_len) }).unwrap_or("");
+    let name =
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, name_len) }).unwrap_or("");
     let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len) };
     match sh.stage.load_package(name, bytes) {
         Ok(()) => 0,
@@ -160,8 +161,10 @@ pub extern "C" fn loomgui_stage_instantiate(
         return INVALID;
     }
     let sh = unsafe { &mut *h };
-    let pkg = std::str::from_utf8(unsafe { std::slice::from_raw_parts(pkg, pkg_len) }).unwrap_or("");
-    let comp = std::str::from_utf8(unsafe { std::slice::from_raw_parts(comp, comp_len) }).unwrap_or("");
+    let pkg =
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(pkg, pkg_len) }).unwrap_or("");
+    let comp =
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(comp, comp_len) }).unwrap_or("");
     match sh.stage.instantiate(pkg, comp) {
         Ok(id) => id.0,
         Err(_) => INVALID,
@@ -211,7 +214,9 @@ pub extern "C" fn loomgui_stage_borrow_frame(
 /// dump 整树 JSON（调试）。返 Rust 拥有的 UTF-8 C 串 + len；下 tick 失效。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_dump_scene(h: *mut StageHandle, out_len: *mut usize) -> *const u8 {
-    if h.is_null() || out_len.is_null() { return std::ptr::null(); }
+    if h.is_null() || out_len.is_null() {
+        return std::ptr::null();
+    }
     let handle = unsafe { &mut *h };
     let json = match &handle.stage.scene {
         Some(scene) => loomgui_core::dump::dump_scene_json(scene),
@@ -219,7 +224,9 @@ pub extern "C" fn loomgui_stage_dump_scene(h: *mut StageHandle, out_len: *mut us
     };
     handle.dump_blob = CString::new(json).unwrap_or_else(|_| CString::new("[]").unwrap());
     let bytes = handle.dump_blob.as_bytes_with_nul();
-    unsafe { *out_len = bytes.len(); }
+    unsafe {
+        *out_len = bytes.len();
+    }
     handle.dump_blob.as_ptr() as *const u8
 }
 
@@ -358,8 +365,14 @@ pub extern "C" fn loomgui_stage_find_node_by_id(
 ///
 /// **常驻（不 gate）：**runtime 稳定入口。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_add_touch_monitor(h: *mut StageHandle, touch_id: i32, node_id: u32) {
-    if h.is_null() { return; }
+pub extern "C" fn loomgui_stage_add_touch_monitor(
+    h: *mut StageHandle,
+    touch_id: i32,
+    node_id: u32,
+) {
+    if h.is_null() {
+        return;
+    }
     let sh = unsafe { &mut *h };
     sh.stage.add_touch_monitor(touch_id, NodeId(node_id));
 }
@@ -369,7 +382,9 @@ pub extern "C" fn loomgui_stage_add_touch_monitor(h: *mut StageHandle, touch_id:
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_remove_touch_monitor(h: *mut StageHandle, node_id: u32) {
-    if h.is_null() { return; }
+    if h.is_null() {
+        return;
+    }
     let sh = unsafe { &mut *h };
     sh.stage.remove_touch_monitor(NodeId(node_id));
 }
@@ -389,8 +404,14 @@ pub extern "C" fn loomgui_stage_cancel_click(h: *mut StageHandle, touch_id: i32)
 ///
 /// **常驻（不 gate）：**输入是 runtime 稳定入口。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_key_input(h: *mut StageHandle, keys: *const KeyEvent, len: usize) {
-    if h.is_null() { return; }
+pub extern "C" fn loomgui_stage_set_key_input(
+    h: *mut StageHandle,
+    keys: *const KeyEvent,
+    len: usize,
+) {
+    if h.is_null() {
+        return;
+    }
     let sh = unsafe { &mut *h };
     if keys.is_null() || len == 0 {
         sh.stage.set_key_input(&[]);
@@ -410,7 +431,9 @@ pub extern "C" fn loomgui_stage_set_wheel_input(
     events: *const loomgui_core::scroll::WheelEvent,
     len: usize,
 ) {
-    if h.is_null() { return; }
+    if h.is_null() {
+        return;
+    }
     let sh = unsafe { &mut *h };
     if events.is_null() || len == 0 {
         return;
@@ -429,18 +452,27 @@ pub extern "C" fn loomgui_stage_set_scroll_pos(
     y: f32,
     animated: u8,
 ) {
-    if h.is_null() { return; }
+    if h.is_null() {
+        return;
+    }
     let handle = unsafe { &mut *h };
-    handle.stage.set_scroll_pos(NodeId(node_id), x, y, animated != 0);
+    handle
+        .stage
+        .set_scroll_pos(NodeId(node_id), x, y, animated != 0);
 }
 
 /// driver 注入滚动容器 content_size（虚拟列表）。node 无效/非滚动容器 → no-op。
 /// null 句柄 → no-op（不 panic）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_content_size(
-    h: *mut StageHandle, node_id: u32, w: f32, height: f32,
+    h: *mut StageHandle,
+    node_id: u32,
+    w: f32,
+    height: f32,
 ) {
-    if h.is_null() { return; }
+    if h.is_null() {
+        return;
+    }
     let handle = unsafe { &mut *h };
     handle.stage.set_content_size(NodeId(node_id), w, height);
 }
@@ -448,10 +480,10 @@ pub extern "C" fn loomgui_stage_set_content_size(
 /// 清除 driver 注入的 content_size override（列表销毁/退回普通滚动时用）。
 /// null 句柄/无效 node → no-op（不 panic）。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_clear_content_size_override(
-    h: *mut StageHandle, node_id: u32,
-) {
-    if h.is_null() { return; }
+pub extern "C" fn loomgui_stage_clear_content_size_override(h: *mut StageHandle, node_id: u32) {
+    if h.is_null() {
+        return;
+    }
     let handle = unsafe { &mut *h };
     handle.stage.clear_content_size_override(NodeId(node_id));
 }
@@ -460,39 +492,78 @@ pub extern "C" fn loomgui_stage_clear_content_size_override(
 /// out_x/out_y 是 out 参数（C# 传 ref float）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_scroll_pos(
-    h: *const StageHandle, node_id: u32, out_x: *mut f32, out_y: *mut f32,
+    h: *const StageHandle,
+    node_id: u32,
+    out_x: *mut f32,
+    out_y: *mut f32,
 ) {
-    let (x, y) = if h.is_null() { (0.0, 0.0) } else {
+    let (x, y) = if h.is_null() {
+        (0.0, 0.0)
+    } else {
         let sh = unsafe { &*h };
-        sh.stage.get_scroll_pos(NodeId(node_id)).unwrap_or((0.0, 0.0))
+        sh.stage
+            .get_scroll_pos(NodeId(node_id))
+            .unwrap_or((0.0, 0.0))
     };
-    if !out_x.is_null() { unsafe { *out_x = x; } }
-    if !out_y.is_null() { unsafe { *out_y = y; } }
+    if !out_x.is_null() {
+        unsafe {
+            *out_x = x;
+        }
+    }
+    if !out_y.is_null() {
+        unsafe {
+            *out_y = y;
+        }
+    }
 }
 
 /// 读节点 layout_rect。null 句柄/无效 node → out 填 0（不 panic）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_layout_rect(
-    h: *const StageHandle, node_id: u32,
-    out_x: *mut f32, out_y: *mut f32, out_w: *mut f32, out_h: *mut f32,
+    h: *const StageHandle,
+    node_id: u32,
+    out_x: *mut f32,
+    out_y: *mut f32,
+    out_w: *mut f32,
+    out_h: *mut f32,
 ) {
-    let r = if h.is_null() { None } else {
+    let r = if h.is_null() {
+        None
+    } else {
         let sh = unsafe { &*h };
         sh.stage.get_node_layout_rect(NodeId(node_id))
     };
-    let (x, y, w, hh) = r.map(|r| (r.x, r.y, r.w, r.h)).unwrap_or((0.0, 0.0, 0.0, 0.0));
-    if !out_x.is_null() { unsafe { *out_x = x; } }
-    if !out_y.is_null() { unsafe { *out_y = y; } }
-    if !out_w.is_null() { unsafe { *out_w = w; } }
-    if !out_h.is_null() { unsafe { *out_h = hh; } }
+    let (x, y, w, hh) = r
+        .map(|r| (r.x, r.y, r.w, r.h))
+        .unwrap_or((0.0, 0.0, 0.0, 0.0));
+    if !out_x.is_null() {
+        unsafe {
+            *out_x = x;
+        }
+    }
+    if !out_y.is_null() {
+        unsafe {
+            *out_y = y;
+        }
+    }
+    if !out_w.is_null() {
+        unsafe {
+            *out_w = w;
+        }
+    }
+    if !out_h.is_null() {
+        unsafe {
+            *out_h = hh;
+        }
+    }
 }
 
 /// 设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_reuse_key(
-    h: *mut StageHandle, node_id: u32, key: u32,
-) {
-    if h.is_null() { return; }
+pub extern "C" fn loomgui_stage_set_reuse_key(h: *mut StageHandle, node_id: u32, key: u32) {
+    if h.is_null() {
+        return;
+    }
     let handle = unsafe { &mut *h };
     handle.stage.set_reuse_key(NodeId(node_id), key);
 }
@@ -503,7 +574,9 @@ pub extern "C" fn loomgui_stage_set_reuse_key(
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_request_focus(h: *mut StageHandle, node_id: u32) {
-    if h.is_null() { return; }
+    if h.is_null() {
+        return;
+    }
     let sh = unsafe { &mut *h };
     sh.stage.request_focus(NodeId(node_id));
 }
@@ -514,7 +587,9 @@ pub extern "C" fn loomgui_stage_request_focus(h: *mut StageHandle, node_id: u32)
 #[no_mangle]
 pub extern "C" fn loomgui_stage_focused_node(h: *const StageHandle) -> u32 {
     const NONE: u32 = 0xFFFF_FFFF;
-    if h.is_null() { return NONE; }
+    if h.is_null() {
+        return NONE;
+    }
     let sh = unsafe { &*h };
     match &sh.stage.scene {
         Some(scene) => scene.focused_node.map(|n| n.0 as u32).unwrap_or(NONE),
@@ -573,7 +648,8 @@ pub extern "C" fn loomgui_stage_tween(
         s[i] = st[i];
         e[i] = en[i];
     }
-    sh.stage.tween(NodeId(node_id), prop, s, e, ease, delay, duration, tag);
+    sh.stage
+        .tween(NodeId(node_id), prop, s, e, ease, delay, duration, tag);
 }
 
 /// 停该节点该 prop 的 tween（override 保留末值）。
@@ -631,8 +707,10 @@ pub extern "C" fn loomgui_stage_create_root(
         return FAIL;
     }
     let sh = unsafe { &mut *h };
-    let kind = std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }).unwrap_or("");
-    let css = std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }).unwrap_or("");
+    let kind =
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }).unwrap_or("");
+    let css =
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }).unwrap_or("");
     match sh.stage.create_root(kind, css) {
         Ok(id) => id.0,
         Err(_) => FAIL,
@@ -656,8 +734,10 @@ pub extern "C" fn loomgui_stage_create_node(
         return FAIL;
     }
     let sh = unsafe { &mut *h };
-    let kind = std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }).unwrap_or("");
-    let css = std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }).unwrap_or("");
+    let kind =
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }).unwrap_or("");
+    let css =
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }).unwrap_or("");
     match sh.stage.create_node(kind, css) {
         Ok(id) => id.0,
         Err(_) => FAIL,
@@ -747,7 +827,10 @@ pub extern "C" fn loomgui_stage_set_text(
     }
     let sh = unsafe { &mut *h };
     let text = std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, len) }).unwrap_or("");
-    sh.stage.set_text(NodeId(node), text).map(|_| 0).unwrap_or(-1)
+    sh.stage
+        .set_text(NodeId(node), text)
+        .map(|_| 0)
+        .unwrap_or(-1)
 }
 
 /// 改 Image 节点 src + 标 dirty_mesh。src = UTF-8 字节。0=ok，-1=err。
@@ -785,7 +868,10 @@ pub extern "C" fn loomgui_stage_set_style(
     }
     let sh = unsafe { &mut *h };
     let css = std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, len) }).unwrap_or("");
-    sh.stage.set_style(NodeId(node), css).map(|_| 0).unwrap_or(-1)
+    sh.stage
+        .set_style(NodeId(node), css)
+        .map(|_| 0)
+        .unwrap_or(-1)
 }
 
 #[cfg(test)]
@@ -807,7 +893,10 @@ mod tests {
     #[cfg(feature = "parse")]
     #[test]
     fn stage_tween_complete_event_via_ffi() {
-        let fp = concat!(env!("CARGO_MANIFEST_DIR"), "/../loomgui_core/tests/fixtures/DejaVuSans.ttf");
+        let fp = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
+        );
         let fplen = fp.len();
         let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
         let html = b"<div class=\"b\"></div>";
@@ -824,9 +913,13 @@ mod tests {
         let mut len = 0usize;
         let p = loomgui_stage_borrow_events(h, &mut len);
         // len 是记录数（borrow_events out_len = events.len()）；直接切 typed slice。
-        let recs = unsafe { std::slice::from_raw_parts(p as *const loomgui_core::input::EventRecord, len) };
+        let recs = unsafe {
+            std::slice::from_raw_parts(p as *const loomgui_core::input::EventRecord, len)
+        };
         assert!(
-            recs.iter().any(|e| e.event_type == loomgui_core::input::EVT_TWEEN_COMPLETE && e.touch_id == 55),
+            recs.iter().any(
+                |e| e.event_type == loomgui_core::input::EVT_TWEEN_COMPLETE && e.touch_id == 55
+            ),
             "FFI tween 结束 → complete(tag=55)"
         );
         loomgui_stage_free(h);
@@ -881,13 +974,7 @@ mod abi_tests {
         assert!(!h.is_null());
         let pkg = make_test_pkg_bytes("comp1");
         let name = b"bag";
-        let r = loomgui_stage_load_package(
-            h,
-            name.as_ptr(),
-            name.len(),
-            pkg.as_ptr(),
-            pkg.len(),
-        );
+        let r = loomgui_stage_load_package(h, name.as_ptr(), name.len(), pkg.as_ptr(), pkg.len());
         assert_eq!(r, 0, "load_package 带 name ok");
         loomgui_stage_free(h);
     }
@@ -904,13 +991,7 @@ mod abi_tests {
         let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
         assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
         let pkg = make_test_pkg_bytes("comp1");
-        let lr = loomgui_stage_load_package(
-            h,
-            b"bag".as_ptr(),
-            3,
-            pkg.as_ptr(),
-            pkg.len(),
-        );
+        let lr = loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len());
         assert_eq!(lr, 0, "load_package ok");
         let id = loomgui_stage_instantiate(h, b"bag".as_ptr(), 3, b"comp1".as_ptr(), 5);
         assert_ne!(id, 0xFFFF_FFFF, "instantiate 返有效 NodeId");
@@ -965,7 +1046,11 @@ mod abi_tests {
         // instantiate 组件 → append_child 挂到根
         let comp = loomgui_stage_instantiate(h, b"bag".as_ptr(), 3, b"comp1".as_ptr(), 5);
         assert_ne!(comp, 0xFFFF_FFFF, "instantiate ok");
-        assert_eq!(loomgui_stage_append_child(h, root, comp), 0, "append_child ok");
+        assert_eq!(
+            loomgui_stage_append_child(h, root, comp),
+            0,
+            "append_child ok"
+        );
         // tick → blob
         loomgui_stage_tick(h, 0.0);
         let mut len = 0usize;
@@ -1002,14 +1087,29 @@ mod abi_tests {
         let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
         assert!(!h.is_null());
         // 装载一个按钮
-        let html = std::ffi::CString::new(r#"<div class="root"><button class="btn">OK</button></div>"#).unwrap();
+        let html =
+            std::ffi::CString::new(r#"<div class="root"><button class="btn">OK</button></div>"#)
+                .unwrap();
         let css = std::ffi::CString::new(r#".btn { width: 100px; height: 50px; }"#).unwrap();
-        loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.as_bytes().len(), css.as_ptr() as *const u8, css.as_bytes().len());
+        loomgui_stage_load_html(
+            h,
+            html.as_ptr() as *const u8,
+            html.as_bytes().len(),
+            css.as_ptr() as *const u8,
+            css.as_bytes().len(),
+        );
         // warmup tick：compute_world_transforms 在 process/scroll 后跑，hit_test 读上帧 world_transforms
         // （1 帧延迟语义）。首帧 world_transforms 空 → 首帧 hit_test 全 None，故输入前先 warmup。
         loomgui_stage_tick(h, 0.0);
         // set_input：Move 到按钮 (50,25)
-        let ev = PointerEvent { kind: PointerKind::Move, x: 50.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 };
+        let ev = PointerEvent {
+            kind: PointerKind::Move,
+            x: 50.0,
+            y: 25.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        };
         loomgui_stage_set_input(h, &ev, 1);
         loomgui_stage_tick(h, 0.0);
         let mut len = 0usize;
@@ -1056,7 +1156,10 @@ mod abi_tests {
         // warmup tick：hit_test 读上帧 world_transforms（1 帧延迟）
         loomgui_stage_tick(h, 0.0);
         // 空根 Container 无子 → hit_test 命中根 → 根不算 UI → false
-        assert!(!loomgui_stage_is_pointer_on_ui(h), "空根命中 → false（根不算 UI）");
+        assert!(
+            !loomgui_stage_is_pointer_on_ui(h),
+            "空根命中 → false（根不算 UI）"
+        );
         loomgui_stage_free(h);
     }
 
@@ -1065,9 +1168,17 @@ mod abi_tests {
     /// EventRecord 20B：node_id@0(4) + event_type@4(1) + pad@5(3) + touch_id@8(4) + x@12(4) + y@16(4)。
     #[test]
     fn pointer_event_event_record_sizeof() {
-        use loomgui_core::input::{PointerEvent, EventRecord};
-        assert_eq!(std::mem::size_of::<PointerEvent>(), 16, "PointerEvent 16B（PointerKind repr(u8)）");
-        assert_eq!(std::mem::size_of::<EventRecord>(), 20, "EventRecord 20B（touch_id@8）");
+        use loomgui_core::input::{EventRecord, PointerEvent};
+        assert_eq!(
+            std::mem::size_of::<PointerEvent>(),
+            16,
+            "PointerEvent 16B（PointerKind repr(u8)）"
+        );
+        assert_eq!(
+            std::mem::size_of::<EventRecord>(),
+            20,
+            "EventRecord 20B（touch_id@8）"
+        );
     }
 
     /// 借事件读 touch_id 字段（POD @8 偏移）。装载按钮 + 触摸 Down，验 touch_id 贯穿。
@@ -1077,13 +1188,28 @@ mod abi_tests {
         use loomgui_core::input::{PointerEvent, PointerKind, EVT_DOWN};
         let (fp, fplen) = font_path();
         let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
-        let html = std::ffi::CString::new(r#"<div class="root"><button class="btn">OK</button></div>"#).unwrap();
+        let html =
+            std::ffi::CString::new(r#"<div class="root"><button class="btn">OK</button></div>"#)
+                .unwrap();
         let css = std::ffi::CString::new(r#".btn { width: 100px; height: 50px; }"#).unwrap();
-        loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.as_bytes().len(), css.as_ptr() as *const u8, css.as_bytes().len());
+        loomgui_stage_load_html(
+            h,
+            html.as_ptr() as *const u8,
+            html.as_bytes().len(),
+            css.as_ptr() as *const u8,
+            css.as_bytes().len(),
+        );
         // warmup tick：hit_test 读上帧 world_transforms（1 帧延迟），输入前先 warmup。
         loomgui_stage_tick(h, 0.0);
         // 触摸 touch_id=3 Down 在 btn (50,25)
-        let ev = PointerEvent { kind: PointerKind::Down, x: 50.0, y: 25.0, button: 0, pad: [0, 0], touch_id: 3 };
+        let ev = PointerEvent {
+            kind: PointerKind::Down,
+            x: 50.0,
+            y: 25.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: 3,
+        };
         loomgui_stage_set_input(h, &ev, 1);
         loomgui_stage_tick(h, 0.0);
         let mut len = 0usize;
@@ -1096,7 +1222,12 @@ mod abi_tests {
         for i in 0..len {
             let off = i * rec_size;
             if bytes[off + 4] == EVT_DOWN {
-                let touch_id = i32::from_le_bytes([bytes[off + 8], bytes[off + 9], bytes[off + 10], bytes[off + 11]]);
+                let touch_id = i32::from_le_bytes([
+                    bytes[off + 8],
+                    bytes[off + 9],
+                    bytes[off + 10],
+                    bytes[off + 11],
+                ]);
                 assert_eq!(touch_id, 3, "Down 事件 touch_id=3");
                 found = true;
                 break;
@@ -1113,17 +1244,39 @@ mod abi_tests {
         use loomgui_core::input::{PointerEvent, PointerKind, EVT_MOVE};
         let (fp, fplen) = font_path();
         let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
-        let html = std::ffi::CString::new(r#"<div class="root"><button class="btn">OK</button></div>"#).unwrap();
+        let html =
+            std::ffi::CString::new(r#"<div class="root"><button class="btn">OK</button></div>"#)
+                .unwrap();
         let css = std::ffi::CString::new(r#".btn { width: 100px; height: 50px; }"#).unwrap();
-        loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.as_bytes().len(), css.as_ptr() as *const u8, css.as_bytes().len());
+        loomgui_stage_load_html(
+            h,
+            html.as_ptr() as *const u8,
+            html.as_bytes().len(),
+            css.as_ptr() as *const u8,
+            css.as_bytes().len(),
+        );
         // touch_id=1 Down 在 btn
-        let down = PointerEvent { kind: PointerKind::Down, x: 50.0, y: 25.0, button: 0, pad: [0, 0], touch_id: 1 };
+        let down = PointerEvent {
+            kind: PointerKind::Down,
+            x: 50.0,
+            y: 25.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: 1,
+        };
         loomgui_stage_set_input(h, &down, 1);
         loomgui_stage_tick(h, 0.0);
         // capture btn (node 1)——模拟 C# CaptureTouch 后调
         loomgui_stage_add_touch_monitor(h, 1, 1);
         // Move 移出 btn (150, 25 命中 root)——有 monitor 应产 Move@btn
-        let mv = PointerEvent { kind: PointerKind::Move, x: 150.0, y: 25.0, button: 0, pad: [0, 0], touch_id: 1 };
+        let mv = PointerEvent {
+            kind: PointerKind::Move,
+            x: 150.0,
+            y: 25.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: 1,
+        };
         loomgui_stage_set_input(h, &mv, 1);
         loomgui_stage_tick(h, 0.0);
         let mut len = 0usize;
@@ -1135,10 +1288,17 @@ mod abi_tests {
         for i in 0..len {
             let off = i * rec_size;
             let event_type = bytes[off + 4];
-            let node_id = u32::from_le_bytes([bytes[off], bytes[off + 1], bytes[off + 2], bytes[off + 3]]);
-            if event_type == EVT_MOVE && node_id == 1 { found_move_at_btn = true; break; }
+            let node_id =
+                u32::from_le_bytes([bytes[off], bytes[off + 1], bytes[off + 2], bytes[off + 3]]);
+            if event_type == EVT_MOVE && node_id == 1 {
+                found_move_at_btn = true;
+                break;
+            }
         }
-        assert!(found_move_at_btn, "capture 后 Move 移出仍产 Move@btn(node 1)");
+        assert!(
+            found_move_at_btn,
+            "capture 后 Move 移出仍产 Move@btn(node 1)"
+        );
         loomgui_stage_free(h);
     }
 
@@ -1153,13 +1313,17 @@ mod abi_tests {
         let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 100.0, 50.0);
         loomgui_stage_set_input(h, std::ptr::null(), 0); // null/len=0 应安全（清空 pending_input）
         loomgui_stage_set_node_disabled(h, 0, true); // 无 scene → no-op，不 panic
-        // 无 scene + 未 tick：is_pointer_on_ui 读 cur_hit=None → false，不 panic
+                                                     // 无 scene + 未 tick：is_pointer_on_ui 读 cur_hit=None → false，不 panic
         assert!(!loomgui_stage_is_pointer_on_ui(h));
         // borrow_events：未 tick → null + len=0
         let mut len = 1usize;
         let ptr = loomgui_stage_borrow_events(h, &mut len);
         assert!(ptr.is_null() && len == 0);
-        assert_eq!(loomgui_node_parent(h, 0), 0xFFFF_FFFF, "无 scene → sentinel，不 panic");
+        assert_eq!(
+            loomgui_node_parent(h, 0),
+            0xFFFF_FFFF,
+            "无 scene → sentinel，不 panic"
+        );
         loomgui_stage_free(h);
     }
 
@@ -1171,17 +1335,32 @@ mod abi_tests {
         let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
         assert!(!h.is_null());
         let pkg = make_test_pkg_bytes("comp1");
-        assert_eq!(loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len()), 0);
+        assert_eq!(
+            loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len()),
+            0
+        );
         let empty_css = b"";
         let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
         assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
         let comp = loomgui_stage_instantiate(h, b"bag".as_ptr(), 3, b"comp1".as_ptr(), 5);
         assert_ne!(comp, 0xFFFF_FFFF, "instantiate ok");
-        assert_eq!(loomgui_stage_append_child(h, root, comp), 0, "append_child ok");
+        assert_eq!(
+            loomgui_stage_append_child(h, root, comp),
+            0,
+            "append_child ok"
+        );
         // comp.parent == root；root.parent == sentinel；OOB == sentinel。
         assert_eq!(loomgui_node_parent(h, comp), root, "comp.parent == root");
-        assert_eq!(loomgui_node_parent(h, root), 0xFFFF_FFFF, "root 是顶层 → parent=sentinel");
-        assert_eq!(loomgui_node_parent(h, 0xFFFF_FFFF), 0xFFFF_FFFF, "OOB → sentinel");
+        assert_eq!(
+            loomgui_node_parent(h, root),
+            0xFFFF_FFFF,
+            "root 是顶层 → parent=sentinel"
+        );
+        assert_eq!(
+            loomgui_node_parent(h, 0xFFFF_FFFF),
+            0xFFFF_FFFF,
+            "OOB → sentinel"
+        );
         loomgui_stage_free(h);
     }
 
@@ -1211,13 +1390,20 @@ mod abi_tests {
             components: vec![("comp1", nodes.as_slice(), &rules)],
             asset_manifest: &[],
         });
-        assert_eq!(loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len()), 0);
+        assert_eq!(
+            loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len()),
+            0
+        );
         let empty_css = b"";
         let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
         assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
         let comp = loomgui_stage_instantiate(h, b"bag".as_ptr(), 3, b"comp1".as_ptr(), 5);
         assert_ne!(comp, 0xFFFF_FFFF, "instantiate ok");
-        assert_eq!(loomgui_stage_append_child(h, root, comp), 0, "append_child ok");
+        assert_eq!(
+            loomgui_stage_append_child(h, root, comp),
+            0,
+            "append_child ok"
+        );
         // find "ok" → comp（instantiate 把 id_attr 带到 live 节点）
         let ok_id = {
             let id = std::ffi::CString::new("ok").unwrap();
@@ -1248,7 +1434,11 @@ mod abi_tests {
     fn event_record_and_pointer_event_sizes_unchanged() {
         use loomgui_core::input::{EventRecord, PointerEvent, PointerKind};
         use std::mem::size_of;
-        assert_eq!(size_of::<EventRecord>(), 20, "EventRecord 20B（drag/longpress 复用 event_type）");
+        assert_eq!(
+            size_of::<EventRecord>(),
+            20,
+            "EventRecord 20B（drag/longpress 复用 event_type）"
+        );
         assert_eq!(size_of::<PointerEvent>(), 16, "PointerEvent 16B 不变");
         assert_eq!(PointerKind::Canceled as u8, 3, "Canceled=3");
     }
@@ -1263,20 +1453,55 @@ mod abi_tests {
         let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
         let html = b"<button class=\"btn\">OK</button>";
         let css = b".btn{width:100px;height:50px;}";
-        loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.len(), css.as_ptr() as *const u8, css.len());
+        loomgui_stage_load_html(
+            h,
+            html.as_ptr() as *const u8,
+            html.len(),
+            css.as_ptr() as *const u8,
+            css.len(),
+        );
         // frame1: Down@btn
-        loomgui_stage_set_input(h, [PointerEvent { kind: PointerKind::Down, x: 50.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }].as_ptr(), 1);
+        loomgui_stage_set_input(
+            h,
+            [PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }]
+            .as_ptr(),
+            1,
+        );
         loomgui_stage_tick(h, 0.0);
         // 取消（Down 后、Up 前）
         loomgui_stage_cancel_click(h, -1);
         // frame2: Up@btn → click_cancelled → 无 Click
-        loomgui_stage_set_input(h, [PointerEvent { kind: PointerKind::Up, x: 50.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }].as_ptr(), 1);
+        loomgui_stage_set_input(
+            h,
+            [PointerEvent {
+                kind: PointerKind::Up,
+                x: 50.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }]
+            .as_ptr(),
+            1,
+        );
         loomgui_stage_tick(h, 0.0);
         let mut len = 0usize;
         let p = loomgui_stage_borrow_events(h, &mut len);
         // borrow_events 的 out_len 是记录数（非字节；照 set_input_borrow_events_round_trip 契约 + FFI doc）
-        let recs = unsafe { std::slice::from_raw_parts(p as *const loomgui_core::input::EventRecord, len) };
-        assert!(!recs.iter().any(|e| e.event_type == EVT_CLICK), "cancel_click → 无 Click");
+        let recs = unsafe {
+            std::slice::from_raw_parts(p as *const loomgui_core::input::EventRecord, len)
+        };
+        assert!(
+            !recs.iter().any(|e| e.event_type == EVT_CLICK),
+            "cancel_click → 无 Click"
+        );
         assert!(recs.iter().any(|e| e.event_type == EVT_UP), "Up 仍发");
         loomgui_stage_free(h);
     }
@@ -1291,7 +1516,13 @@ mod abi_tests {
         assert!(!h.is_null());
         let html = b"<button class=\"btn\" draggable=\"true\">OK</button>";
         let css = b".btn{width:100px;height:50px;}";
-        loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.len(), css.as_ptr() as *const u8, css.len());
+        loomgui_stage_load_html(
+            h,
+            html.as_ptr() as *const u8,
+            html.len(),
+            css.as_ptr() as *const u8,
+            css.len(),
+        );
         // EVT 常量值
         assert_eq!(loomgui_core::input::EVT_DRAG_START, 6);
         assert_eq!(loomgui_core::input::EVT_DRAG_MOVE, 7);
@@ -1301,15 +1532,39 @@ mod abi_tests {
         // warmup tick：compute_world_transforms 在 process/scroll 后跑，hit_test 读上帧 world_transforms
         // （1 帧延迟语义）。首帧 world_transforms 空 → 首帧 hit_test 全 None，故输入前先 warmup。
         loomgui_stage_tick(h, 0.0);
-        loomgui_stage_set_input(h, [
-            PointerEvent { kind: PointerKind::Down, x: 50.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Move, x: 55.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 },
-        ].as_ptr(), 2);
+        loomgui_stage_set_input(
+            h,
+            [
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 50.0,
+                    y: 25.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Move,
+                    x: 55.0,
+                    y: 25.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+            ]
+            .as_ptr(),
+            2,
+        );
         loomgui_stage_tick(h, 0.0);
         let mut len = 0usize;
         let p = loomgui_stage_borrow_events(h, &mut len);
-        let recs = unsafe { std::slice::from_raw_parts(p as *const loomgui_core::input::EventRecord, len) };
-        assert!(recs.iter().any(|e| e.event_type == EVT_DRAG_START), "draggable btn Down+Move → DragStart");
+        let recs = unsafe {
+            std::slice::from_raw_parts(p as *const loomgui_core::input::EventRecord, len)
+        };
+        assert!(
+            recs.iter().any(|e| e.event_type == EVT_DRAG_START),
+            "draggable btn Down+Move → DragStart"
+        );
         loomgui_stage_free(h);
     }
 
@@ -1323,19 +1578,42 @@ mod abi_tests {
         assert!(!h.is_null());
         let html = b"<button class=\"btn\">OK</button>";
         let css = b".btn{width:100px;height:50px;}";
-        loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.len(), css.as_ptr() as *const u8, css.len());
+        loomgui_stage_load_html(
+            h,
+            html.as_ptr() as *const u8,
+            html.len(),
+            css.as_ptr() as *const u8,
+            css.len(),
+        );
         // warmup tick：hit_test 读上帧 world_transforms（1 帧延迟），输入前先 warmup。
         loomgui_stage_tick(h, 0.0);
         // frame1: Down@btn（tick dt=0）
-        loomgui_stage_set_input(h, [PointerEvent { kind: PointerKind::Down, x: 50.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }].as_ptr(), 1);
+        loomgui_stage_set_input(
+            h,
+            [PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }]
+            .as_ptr(),
+            1,
+        );
         loomgui_stage_tick(h, 0.0);
         // frame2: 空输入 + tick dt=1.5 → time_s 累积 1.5 → LongPress
         loomgui_stage_set_input(h, std::ptr::null(), 0);
         loomgui_stage_tick(h, 1.5);
         let mut len = 0usize;
         let p = loomgui_stage_borrow_events(h, &mut len);
-        let recs = unsafe { std::slice::from_raw_parts(p as *const loomgui_core::input::EventRecord, len) };
-        assert!(recs.iter().any(|e| e.event_type == EVT_LONG_PRESS), "按住 1.5s → LongPress");
+        let recs = unsafe {
+            std::slice::from_raw_parts(p as *const loomgui_core::input::EventRecord, len)
+        };
+        assert!(
+            recs.iter().any(|e| e.event_type == EVT_LONG_PRESS),
+            "按住 1.5s → LongPress"
+        );
         loomgui_stage_free(h);
     }
 
@@ -1369,20 +1647,53 @@ mod abi_tests {
         // btn tabindex=0 可聚焦
         let html = b"<button class=\"btn\" tabindex=\"0\">OK</button>";
         let css = b".btn{width:100px;height:50px;}";
-        loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.len(), css.as_ptr() as *const u8, css.len());
+        loomgui_stage_load_html(
+            h,
+            html.as_ptr() as *const u8,
+            html.len(),
+            css.as_ptr() as *const u8,
+            css.len(),
+        );
         // warmup tick：hit_test 读上帧 world_transforms（1 帧延迟），输入前先 warmup。
         loomgui_stage_tick(h, 0.0);
         // click-to-focus：Down@btn → tick → 焦点 btn
         use loomgui_core::input::{PointerEvent, PointerKind};
-        loomgui_stage_set_input(h, [PointerEvent { kind: PointerKind::Down, x: 50.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }].as_ptr(), 1);
+        loomgui_stage_set_input(
+            h,
+            [PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }]
+            .as_ptr(),
+            1,
+        );
         loomgui_stage_tick(h, 0.0);
         // 现在焦点应 btn。再 Enter keydown + tick
-        loomgui_stage_set_key_input(h, [KeyEvent { key_code: 13, modifiers: 0, is_down: true, pad: [0, 0] }].as_ptr(), 1);
+        loomgui_stage_set_key_input(
+            h,
+            [KeyEvent {
+                key_code: 13,
+                modifiers: 0,
+                is_down: true,
+                pad: [0, 0],
+            }]
+            .as_ptr(),
+            1,
+        );
         loomgui_stage_tick(h, 0.0);
         let mut len = 0usize;
         let p = loomgui_stage_borrow_events(h, &mut len);
-        let recs = unsafe { std::slice::from_raw_parts(p as *const loomgui_core::input::EventRecord, len) };
-        assert!(recs.iter().any(|e| e.event_type == EVT_KEY_DOWN), "聚焦 btn + Enter down → KeyDown@btn");
+        let recs = unsafe {
+            std::slice::from_raw_parts(p as *const loomgui_core::input::EventRecord, len)
+        };
+        assert!(
+            recs.iter().any(|e| e.event_type == EVT_KEY_DOWN),
+            "聚焦 btn + Enter down → KeyDown@btn"
+        );
         loomgui_stage_free(h);
     }
 
@@ -1395,15 +1706,39 @@ mod abi_tests {
         let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
         let html = b"<button class=\"a\" tabindex=\"0\">A</button><button class=\"b\" tabindex=\"0\">B</button>";
         let css = b"button{width:50px;height:30px;}";
-        loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.len(), css.as_ptr() as *const u8, css.len());
+        loomgui_stage_load_html(
+            h,
+            html.as_ptr() as *const u8,
+            html.len(),
+            css.as_ptr() as *const u8,
+            css.len(),
+        );
         // Tab → 焦点首个可聚焦（A，node 1）
-        loomgui_stage_set_key_input(h, [KeyEvent { key_code: KEY_TAB, modifiers: 0, is_down: true, pad: [0, 0] }].as_ptr(), 1);
+        loomgui_stage_set_key_input(
+            h,
+            [KeyEvent {
+                key_code: KEY_TAB,
+                modifiers: 0,
+                is_down: true,
+                pad: [0, 0],
+            }]
+            .as_ptr(),
+            1,
+        );
         loomgui_stage_tick(h, 0.0);
         let mut len = 0usize;
         let p = loomgui_stage_borrow_events(h, &mut len);
-        let recs = unsafe { std::slice::from_raw_parts(p as *const loomgui_core::input::EventRecord, len) };
-        assert!(recs.iter().any(|e| e.event_type == EVT_FOCUS_IN), "Tab → FocusIn");
-        assert!(recs.iter().all(|e| e.event_type != EVT_KEY_DOWN), "Tab 被消费，无 KeyDown");
+        let recs = unsafe {
+            std::slice::from_raw_parts(p as *const loomgui_core::input::EventRecord, len)
+        };
+        assert!(
+            recs.iter().any(|e| e.event_type == EVT_FOCUS_IN),
+            "Tab → FocusIn"
+        );
+        assert!(
+            recs.iter().all(|e| e.event_type != EVT_KEY_DOWN),
+            "Tab 被消费，无 KeyDown"
+        );
         // focused_node 读首个可聚焦（A）。parse 无合成根，两 button 各为 root；
         // DFS 先序：button.a→Text→button.b→Text；tabindex=0 进 zero 桶 → chain=[a,b]，Tab→a。
         // NodeId 由 slotmap 分配（首节点 idx=1, version=1 → u32 = (1<<12)|1 = 4097）。
@@ -1411,7 +1746,11 @@ mod abi_tests {
         assert_ne!(a_id, 0xFFFF_FFFF, "Tab → 有焦点");
         assert_ne!(a_id, 0, "NodeId 非零（slotmap idx 从 1 起）");
         // 验 a 是 button.a：node_parent 应为 sentinel（a 是 root）
-        assert_eq!(loomgui_node_parent(h, a_id), 0xFFFF_FFFF, "button.a 是 root → parent=sentinel");
+        assert_eq!(
+            loomgui_node_parent(h, a_id),
+            0xFFFF_FFFF,
+            "button.a 是 root → parent=sentinel"
+        );
         loomgui_stage_free(h);
     }
 
@@ -1424,12 +1763,23 @@ mod abi_tests {
         let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
         let html = b"<button id=\"ok\" tabindex=\"0\">OK</button>";
         let css = b"button{width:50px;height:30px;}";
-        loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.len(), css.as_ptr() as *const u8, css.len());
+        loomgui_stage_load_html(
+            h,
+            html.as_ptr() as *const u8,
+            html.len(),
+            css.as_ptr() as *const u8,
+            css.len(),
+        );
         let id = std::ffi::CString::new("ok").unwrap();
-        let ok_node = loomgui_stage_find_node_by_id(h, id.as_ptr() as *const u8, id.as_bytes().len());
+        let ok_node =
+            loomgui_stage_find_node_by_id(h, id.as_ptr() as *const u8, id.as_bytes().len());
         assert_ne!(ok_node, 0xFFFF_FFFF, "find ok");
         loomgui_stage_request_focus(h, ok_node);
-        assert_eq!(loomgui_stage_focused_node(h), 0xFFFF_FFFF, "request_focus 后未 tick → focused_node 仍 sentinel");
+        assert_eq!(
+            loomgui_stage_focused_node(h),
+            0xFFFF_FFFF,
+            "request_focus 后未 tick → focused_node 仍 sentinel"
+        );
         loomgui_stage_tick(h, 0.0);
         assert_eq!(loomgui_stage_focused_node(h), ok_node, "tick 后焦点 = ok");
         loomgui_stage_free(h);
@@ -1442,7 +1792,8 @@ mod abi_tests {
         let (fp, fplen) = font_path();
         let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
         assert!(!h.is_null());
-        let html = CString::new(r#"<div class="root"><button class="btn">OK</button></div>"#).unwrap();
+        let html =
+            CString::new(r#"<div class="root"><button class="btn">OK</button></div>"#).unwrap();
         let css = CString::new(r#".btn { width: 100px; height: 50px; }"#).unwrap();
         loomgui_stage_load_html(
             h,
@@ -1471,7 +1822,12 @@ mod abi_tests {
             env!("CARGO_MANIFEST_DIR")
         );
         let mut stage = Stage::new(&fp, (200.0, 100.0)).unwrap();
-        let evs = [loomgui_core::scroll::WheelEvent { x: 10.0, y: 20.0, delta_x: 0.0, delta_y: 1.0 }];
+        let evs = [loomgui_core::scroll::WheelEvent {
+            x: 10.0,
+            y: 20.0,
+            delta_x: 0.0,
+            delta_y: 1.0,
+        }];
         stage.set_wheel_input(&evs);
         assert_eq!(stage.pending_wheel.len(), 1);
     }
@@ -1487,17 +1843,35 @@ mod abi_tests {
         use loomgui_core::style::resolved::{OverflowMode, ResolvedStyle};
         let mut sty = ResolvedStyle::default();
         sty.overflow_y = OverflowMode::Scroll;
-        let entries = vec![
-            (None::<usize>, NodeKind::Container, sty, vec![], None::<String>, false, None::<i32>),
-        ];
+        let entries = vec![(
+            None::<usize>,
+            NodeKind::Container,
+            sty,
+            vec![],
+            None::<String>,
+            false,
+            None::<i32>,
+        )];
         stage.scene = Some(Scene::build(&entries));
         let scene = stage.scene.as_mut().unwrap();
         let root_id = scene.roots[0];
-        scene.get_mut(root_id).unwrap().layout_rect = loomgui_core::scene::node::Rect { x: 0.0, y: 0.0, w: 200.0, h: 100.0 };
+        scene.get_mut(root_id).unwrap().layout_rect = loomgui_core::scene::node::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 100.0,
+        };
         // refresh 需要 content_size/viewport/overlap（set_pos 读 overlap 做 clamp）
         loomgui_core::scroll::refresh_content_sizes(&mut stage.scene.as_mut().unwrap());
         // 手动改 overlap 到 200 让 scroll_pos 可测（无子 content=0,overlap=0 → set_pos 全 clamp 0）
-        stage.scene.as_mut().unwrap().scroll.get_mut(root_id).unwrap().overlap = (0.0, 200.0);
+        stage
+            .scene
+            .as_mut()
+            .unwrap()
+            .scroll
+            .get_mut(root_id)
+            .unwrap()
+            .overlap = (0.0, 200.0);
         stage
     }
 
@@ -1507,7 +1881,14 @@ mod abi_tests {
         let root_id = stage.scene.as_ref().unwrap().roots[0];
         stage.set_scroll_pos(root_id, 0.0, 50.0, false);
         assert_eq!(
-            stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap().scroll_pos,
+            stage
+                .scene
+                .as_ref()
+                .unwrap()
+                .scroll
+                .get(root_id)
+                .unwrap()
+                .scroll_pos,
             (0.0, 50.0)
         );
     }
@@ -1530,9 +1911,15 @@ mod abi_tests {
         let mut stage = Stage::new(&fp, (200.0, 100.0)).unwrap();
         use loomgui_core::scene::{NodeKind, Scene};
         use loomgui_core::style::resolved::ResolvedStyle;
-        let entries = vec![
-            (None::<usize>, NodeKind::Container, ResolvedStyle::default(), vec![], None::<String>, false, None::<i32>),
-        ];
+        let entries = vec![(
+            None::<usize>,
+            NodeKind::Container,
+            ResolvedStyle::default(),
+            vec![],
+            None::<String>,
+            false,
+            None::<i32>,
+        )];
         stage.scene = Some(Scene::build(&entries));
         let root_id = stage.scene.as_ref().unwrap().roots[0];
         // root 是 Container，overflow=Visible（默认）→ 非 scroll 容器 → set_scroll_pos no-op（不 panic）
@@ -1555,19 +1942,47 @@ mod abi_tests {
         let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
         let html = b"<div class=\"scroll\"></div>";
         let css = b".scroll{width:200px;height:100px;overflow:scroll;}";
-        loomgui_stage_load_html(h, html.as_ptr() as *const u8, html.len(), css.as_ptr() as *const u8, css.len());
+        loomgui_stage_load_html(
+            h,
+            html.as_ptr() as *const u8,
+            html.len(),
+            css.as_ptr() as *const u8,
+            css.len(),
+        );
         // fill scroll state（load_html 后需 refresh + 手动扩 overlap）
         let handle = unsafe { &mut *h };
         let root_id = handle.stage.scene.as_ref().unwrap().roots[0];
         loomgui_core::scroll::refresh_content_sizes(handle.stage.scene.as_mut().unwrap());
-        handle.stage.scene.as_mut().unwrap().scroll.get_mut(root_id).unwrap().overlap = (0.0, 200.0);
+        handle
+            .stage
+            .scene
+            .as_mut()
+            .unwrap()
+            .scroll
+            .get_mut(root_id)
+            .unwrap()
+            .overlap = (0.0, 200.0);
         // 调 FFI set_scroll_pos（animated=0 瞬移）——传 slotmap 分配的 NodeId.0（u32 打包值）
         loomgui_stage_set_scroll_pos(h, root_id.0, 0.0, 50.0, 0);
-        let st = handle.stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap();
+        let st = handle
+            .stage
+            .scene
+            .as_ref()
+            .unwrap()
+            .scroll
+            .get(root_id)
+            .unwrap();
         assert_eq!(st.scroll_pos, (0.0, 50.0), "FFI 调后 scroll_pos 更新");
         // animated=1 启 tween
         loomgui_stage_set_scroll_pos(h, root_id.0, 0.0, 80.0, 1);
-        let st = handle.stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap();
+        let st = handle
+            .stage
+            .scene
+            .as_ref()
+            .unwrap()
+            .scroll
+            .get(root_id)
+            .unwrap();
         assert_eq!(st.tweening, 1, "animated=1 启 tween");
         loomgui_stage_free(h);
     }
@@ -1606,16 +2021,40 @@ mod abi_tests {
         assert_eq!(loomgui_stage_append_child(h, root, span), 0, "append span");
         // set_text(span) / set_src(img) / set_style(btn)
         let txt = b"hello";
-        assert_eq!(loomgui_stage_set_text(h, span, txt.as_ptr(), txt.len()), 0, "set_text span ok");
+        assert_eq!(
+            loomgui_stage_set_text(h, span, txt.as_ptr(), txt.len()),
+            0,
+            "set_text span ok"
+        );
         let src = b"icon.png";
-        assert_eq!(loomgui_stage_set_src(h, img, src.as_ptr(), src.len()), 0, "set_src img ok");
+        assert_eq!(
+            loomgui_stage_set_src(h, img, src.as_ptr(), src.len()),
+            0,
+            "set_src img ok"
+        );
         let css = b"width:100px;height:50px;";
-        assert_eq!(loomgui_stage_set_style(h, btn, css.as_ptr(), css.len()), 0, "set_style btn ok");
+        assert_eq!(
+            loomgui_stage_set_style(h, btn, css.as_ptr(), css.len()),
+            0,
+            "set_style btn ok"
+        );
         // set_text 对非 Text 节点（img）应失败
-        assert_eq!(loomgui_stage_set_text(h, img, txt.as_ptr(), txt.len()), -1, "set_text on img → err");
+        assert_eq!(
+            loomgui_stage_set_text(h, img, txt.as_ptr(), txt.len()),
+            -1,
+            "set_text on img → err"
+        );
         // insert_before：在 btn 前插 img（先摘 img 再插）
-        assert_eq!(loomgui_stage_remove_child(h, root, img), 0, "remove img from root");
-        assert_eq!(loomgui_stage_insert_before(h, root, img, btn), 0, "insert img before btn");
+        assert_eq!(
+            loomgui_stage_remove_child(h, root, img),
+            0,
+            "remove img from root"
+        );
+        assert_eq!(
+            loomgui_stage_insert_before(h, root, img, btn),
+            0,
+            "insert img before btn"
+        );
         // remove_child 摘 span
         assert_eq!(loomgui_stage_remove_child(h, root, span), 0, "remove span");
         // remove_node 删根（递归删子）

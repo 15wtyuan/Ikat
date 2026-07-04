@@ -4,17 +4,27 @@ use loomgui_core::stage::Stage;
 
 fn main() {
     let font = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
-    let pkg_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin");
+    let pkg_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin"
+    );
     let pkg = match std::fs::read(pkg_path) {
         Ok(b) => b,
-        Err(e) => { eprintln!("read pkg {}: {}", pkg_path, e); return; }
+        Err(e) => {
+            eprintln!("read pkg {}: {}", pkg_path, e);
+            return;
+        }
     };
     let mut s = match Stage::new(font, (1080.0, 1920.0)) {
         Ok(s) => s,
-        Err(e) => { eprintln!("Stage::new: {}", e); return; }
+        Err(e) => {
+            eprintln!("Stage::new: {}", e);
+            return;
+        }
     };
     if let Err(e) = s.load_package("showcase", &pkg) {
-        eprintln!("load_package: {}", e); return;
+        eprintln!("load_package: {}", e);
+        return;
     }
     s.tick_and_render();
     let scene = s.scene.as_ref().unwrap();

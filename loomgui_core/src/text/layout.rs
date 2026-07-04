@@ -260,10 +260,7 @@ pub fn measure_text(
         lines.push((String::new(), 0.0));
     }
 
-    let text_width = lines
-        .iter()
-        .map(|(_, w)| *w)
-        .fold(0.0f32, f32::max);
+    let text_width = lines.iter().map(|(_, w)| *w).fold(0.0f32, f32::max);
     let text_height = lines.len() as f32 * line_h;
 
     // 生成 glyphs（绝对坐标，§9.2：已累加 advance + 已应用 align 偏移）。
@@ -308,10 +305,7 @@ pub fn measure_text(
             height: line_h,
             baseline: line_y + baseline,
             width: *lw,
-            runs: vec![GlyphRun {
-                font_size,
-                glyphs,
-            }],
+            runs: vec![GlyphRun { font_size, glyphs }],
         });
     }
 
@@ -329,14 +323,20 @@ mod tests {
 
     /// 测试字体：仓库内 DejaVuSans.ttf（跨平台一致），缺则跳过。
     fn test_font() -> Option<Font> {
-        let p = format!("{}/tests/fixtures/DejaVuSans.ttf", env!("CARGO_MANIFEST_DIR"));
+        let p = format!(
+            "{}/tests/fixtures/DejaVuSans.ttf",
+            env!("CARGO_MANIFEST_DIR")
+        );
         Font::from_path(&p).ok()
     }
 
     /// CJK 测试字体：仓库内 wqy-microhei.ttc（文泉驿微米黑），缺则跳过。
     /// .ttc 用 Face::parse(bytes, 0) 取 index 0 face。
     fn test_font_cjk() -> Option<Font> {
-        let p = format!("{}/tests/fixtures/wqy-microhei.ttc", env!("CARGO_MANIFEST_DIR"));
+        let p = format!(
+            "{}/tests/fixtures/wqy-microhei.ttc",
+            env!("CARGO_MANIFEST_DIR")
+        );
         Font::from_path(&p).ok()
     }
 
@@ -383,7 +383,10 @@ mod tests {
     fn kerning_disabled_av_pen_x_equals_advance() {
         let font = match test_font() {
             Some(f) => f,
-            None => { eprintln!("skip: no test font"); return; }
+            None => {
+                eprintln!("skip: no test font");
+                return;
+            }
         };
         let layout = measure_text("AV", 24.0, 0.0, 0.0, TextAlign::Left, false, None, &font);
         let g = &layout.lines[0].runs[0].glyphs;
@@ -396,7 +399,9 @@ mod tests {
         assert!(
             (g[1].x - adv_a).abs() < 0.001,
             "V pen_x 应 == advance(A)={:.3}（kern 禁用），实={:.3}；若 kern 启用 V.x 会 ≈ {:.3}",
-            adv_a, g[1].x, adv_a - 1.535,
+            adv_a,
+            g[1].x,
+            adv_a - 1.535,
         );
     }
 
@@ -407,10 +412,16 @@ mod tests {
     fn missing_glyph_advance_falls_back_to_font_size() {
         let font = match test_font() {
             Some(f) => f,
-            None => { eprintln!("skip: no test font"); return; }
+            None => {
+                eprintln!("skip: no test font");
+                return;
+            }
         };
         // DejaVuSans 无 CJK「中」字形。
-        assert!(font.face.glyph_index('中').is_none(), "前置：DejaVuSans 应缺「中」字形");
+        assert!(
+            font.face.glyph_index('中').is_none(),
+            "前置：DejaVuSans 应缺「中」字形"
+        );
         let layout = measure_text("中中", 24.0, 0.0, 0.0, TextAlign::Left, false, None, &font);
         let g = &layout.lines[0].runs[0].glyphs;
         assert_eq!(g.len(), 2, "中中 = 2 glyph");
@@ -475,11 +486,21 @@ mod tests {
     fn cjk_breaks_per_char_under_narrow_width() {
         let font = match test_font_cjk() {
             Some(f) => f,
-            None => { eprintln!("skip: no CJK test font"); return; }
+            None => {
+                eprintln!("skip: no CJK test font");
+                return;
+            }
         };
         // 8 个 CJK 字符，窄约束（每字 ~font_size 宽）→ 应逐字断 ≥2 行。
         let layout = measure_text(
-            "你好世界字体测试", 16.0, 0.0, 0.0, TextAlign::Left, false, Some(40.0), &font,
+            "你好世界字体测试",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            Some(40.0),
+            &font,
         );
         assert!(
             layout.lines.len() >= 2,
@@ -492,11 +513,21 @@ mod tests {
     fn cjk_ascii_mix_breaks_correctly() {
         let font = match test_font_cjk() {
             Some(f) => f,
-            None => { eprintln!("skip: no CJK test font"); return; }
+            None => {
+                eprintln!("skip: no CJK test font");
+                return;
+            }
         };
         // CJK + ASCII 混排，窄约束 → 多行；不 panic、不出空行。
         let layout = measure_text(
-            "Hello 世界 ABC 测试", 16.0, 0.0, 0.0, TextAlign::Left, false, Some(60.0), &font,
+            "Hello 世界 ABC 测试",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            Some(60.0),
+            &font,
         );
         assert!(layout.lines.len() >= 2, "混排窄约束应换行");
         // 每行至少有 glyph（无空行）。
@@ -508,10 +539,23 @@ mod tests {
 
     #[test]
     fn newline_is_mandatory_break() {
-        let font = match test_font() { Some(f) => f, None => { eprintln!("skip"); return; } };
+        let font = match test_font() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip");
+                return;
+            }
+        };
         // \n 应强制换行。
         let layout = measure_text(
-            "aaaa\nbbbb", 16.0, 0.0, 0.0, TextAlign::Left, false, None, &font,
+            "aaaa\nbbbb",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &font,
         );
         assert_eq!(layout.lines.len(), 2, "\\n 应强制换行成 2 行");
     }
@@ -520,20 +564,43 @@ mod tests {
     fn nowrap_keeps_cjk_single_line() {
         let font = match test_font_cjk() {
             Some(f) => f,
-            None => { eprintln!("skip: no CJK test font"); return; }
+            None => {
+                eprintln!("skip: no CJK test font");
+                return;
+            }
         };
         let layout = measure_text(
-            "你好世界字体测试", 16.0, 0.0, 0.0, TextAlign::Left, true, Some(10.0), &font,
+            "你好世界字体测试",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            true,
+            Some(10.0),
+            &font,
         );
         assert_eq!(layout.lines.len(), 1, "nowrap 强制单行（含 CJK）");
     }
 
     #[test]
     fn super_long_word_breaks_per_char() {
-        let font = match test_font() { Some(f) => f, None => { eprintln!("skip"); return; } };
+        let font = match test_font() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip");
+                return;
+            }
+        };
         // 无空格长 ASCII 串（超 max_w）→ 超长词边界：逐字断。
         let layout = measure_text(
-            "aaaaaaaaaaaaaaaaaaaa", 16.0, 0.0, 0.0, TextAlign::Left, false, Some(50.0), &font,
+            "aaaaaaaaaaaaaaaaaaaa",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            Some(50.0),
+            &font,
         );
         assert!(layout.lines.len() >= 2, "超长无空格串应逐字断 ≥2 行");
     }

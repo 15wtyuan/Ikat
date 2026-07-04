@@ -67,9 +67,8 @@ pub fn rounded_rect(
         .min(w / (bl.0 + br.0).max(1e-6))
         .min(h / (tl.1 + bl.1).max(1e-6))
         .min(h / (tr.1 + br.1).max(1e-6));
-    let scale_r = |r: (f32, f32)| -> (f32, f32) {
-        ((r.0 * scale).max(0.0), (r.1 * scale).max(0.0))
-    };
+    let scale_r =
+        |r: (f32, f32)| -> (f32, f32) { ((r.0 * scale).max(0.0), (r.1 * scale).max(0.0)) };
     let tl = scale_r(tl);
     let tr = scale_r(tr);
     let br = scale_r(br);
@@ -94,16 +93,43 @@ pub fn rounded_rect(
     // 每角附矩形顶点 corner：直角分支（rx<=0||ry<=0）直接落矩形角，不靠圆心+方向
     // （否则 rx=0 ry>0 时 py=圆心.y+sin·ry 偏离角顶点，角附近镂空）。
     let corners: [(f32, f32, [f32; 2], f32, [f32; 2]); 4] = [
-        (tl.0, tl.1, [rect.x + tl.0,         rect.y + tl.1],         std::f32::consts::PI,            [rect.x,     rect.y]),
-        (tr.0, tr.1, [rect.x + w - tr.0,     rect.y + tr.1],         -std::f32::consts::FRAC_PI_2,    [rect.x + w, rect.y]),
-        (br.0, br.1, [rect.x + w - br.0,     rect.y + h - br.1],     0.0,                             [rect.x + w, rect.y + h]),
-        (bl.0, bl.1, [rect.x + bl.0,         rect.y + h - bl.1],     std::f32::consts::FRAC_PI_2,     [rect.x,     rect.y + h]),
+        (
+            tl.0,
+            tl.1,
+            [rect.x + tl.0, rect.y + tl.1],
+            std::f32::consts::PI,
+            [rect.x, rect.y],
+        ),
+        (
+            tr.0,
+            tr.1,
+            [rect.x + w - tr.0, rect.y + tr.1],
+            -std::f32::consts::FRAC_PI_2,
+            [rect.x + w, rect.y],
+        ),
+        (
+            br.0,
+            br.1,
+            [rect.x + w - br.0, rect.y + h - br.1],
+            0.0,
+            [rect.x + w, rect.y + h],
+        ),
+        (
+            bl.0,
+            bl.1,
+            [rect.x + bl.0, rect.y + h - bl.1],
+            std::f32::consts::FRAC_PI_2,
+            [rect.x, rect.y + h],
+        ),
     ];
     for (rx, ry, center, start, corner) in corners {
         if rx <= 0.0 || ry <= 0.0 {
             // 直角：单顶点 = 该角矩形顶点（ry>0 时圆心+方向会偏移，故直接用 corner）。
             verts.push(corner);
-            uvs.push([lerp(umin, umax, (corner[0] - rect.x) / w), lerp(vmin, vmax, (corner[1] - rect.y) / h)]);
+            uvs.push([
+                lerp(umin, umax, (corner[0] - rect.x) / w),
+                lerp(vmin, vmax, (corner[1] - rect.y) / h),
+            ]);
             colors.push(color);
             continue;
         }
@@ -112,14 +138,17 @@ pub fn rounded_rect(
         let delta = std::f32::consts::FRAC_PI_2 / sides as f32;
         for j in 0..=sides {
             let a = if j == sides {
-                start + std::f32::consts::FRAC_PI_2  // 末段精度锁（照 fgui）
+                start + std::f32::consts::FRAC_PI_2 // 末段精度锁（照 fgui）
             } else {
                 start + delta * j as f32
             };
             let px = center[0] + a.cos() * rx;
             let py = center[1] + a.sin() * ry;
             verts.push([px, py]);
-            uvs.push([lerp(umin, umax, (px - rect.x) / w), lerp(vmin, vmax, (py - rect.y) / h)]);
+            uvs.push([
+                lerp(umin, umax, (px - rect.x) / w),
+                lerp(vmin, vmax, (py - rect.y) / h),
+            ]);
             colors.push(color);
         }
     }
@@ -173,8 +202,18 @@ pub fn nine_slice(
     let (umax, vmax) = (uv_max[0], uv_max[1]);
     let sx = (umax - umin) / src_w.max(1e-6);
     let sy = (vmax - vmin) / src_h.max(1e-6);
-    let tex_x = [umin, umin + slice.left * sx, umin + (src_w - slice.right) * sx, umax];
-    let tex_y = [vmin, vmin + slice.top * sy, vmin + (src_h - slice.bottom) * sy, vmax];
+    let tex_x = [
+        umin,
+        umin + slice.left * sx,
+        umin + (src_w - slice.right) * sx,
+        umax,
+    ];
+    let tex_y = [
+        vmin,
+        vmin + slice.top * sy,
+        vmin + (src_h - slice.bottom) * sy,
+        vmax,
+    ];
 
     let mut verts: Vec<[f32; 2]> = Vec::with_capacity(16);
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(16);
@@ -188,15 +227,12 @@ pub fn nine_slice(
     let colors = vec![color; 16];
     // TRIANGLES_9_GRID（照搬 fgui Image.cs:267）：9 quad，每 quad (BL,TL,TR)+(TR,BR,BL) = (a,b,c)+(c,d,a)
     let indices: Vec<u32> = vec![
-        4,0,1, 1,5,4,    // 行 0 列 0/1
-        5,1,2, 2,6,5,    // 行 0 列 1/2
-        6,2,3, 3,7,6,    // 行 0 列 2/3
-        8,4,5, 5,9,8,    // 行 1
-        9,5,6, 6,10,9,
-        10,6,7, 7,11,10,
-        12,8,9, 9,13,12, // 行 2
-        13,9,10, 10,14,13,
-        14,10,11, 11,15,14, // 行 3
+        4, 0, 1, 1, 5, 4, // 行 0 列 0/1
+        5, 1, 2, 2, 6, 5, // 行 0 列 1/2
+        6, 2, 3, 3, 7, 6, // 行 0 列 2/3
+        8, 4, 5, 5, 9, 8, // 行 1
+        9, 5, 6, 6, 10, 9, 10, 6, 7, 7, 11, 10, 12, 8, 9, 9, 13, 12, // 行 2
+        13, 9, 10, 10, 14, 13, 14, 10, 11, 11, 15, 14, // 行 3
     ];
     (verts, uvs, colors, indices)
 }
@@ -284,21 +320,30 @@ pub fn nine_slice_rounded(
     let mid_span_y = (h - sl_t - sl_b).max(1e-6);
     let u_of = |px: f32| -> f32 {
         let lx = px - rect.x;
-        if lx <= sl_l { umin + lx * sxf }
-        else if lx >= w - sl_r { umax - (w - lx) * sxf }
-        else { tx_l + (lx - sl_l) / mid_span_x * (tx_r - tx_l) }
+        if lx <= sl_l {
+            umin + lx * sxf
+        } else if lx >= w - sl_r {
+            umax - (w - lx) * sxf
+        } else {
+            tx_l + (lx - sl_l) / mid_span_x * (tx_r - tx_l)
+        }
     };
     let v_of = |py: f32| -> f32 {
         let ly = py - rect.y;
-        if ly <= sl_t { vmin + ly * syf }
-        else if ly >= h - sl_b { vmax - (h - ly) * syf }
-        else { ty_t + (ly - sl_t) / mid_span_y * (ty_b - ty_t) }
+        if ly <= sl_t {
+            vmin + ly * syf
+        } else if ly >= h - sl_b {
+            vmax - (h - ly) * syf
+        } else {
+            ty_t + (ly - sl_t) / mid_span_y * (ty_b - ty_t)
+        }
     };
     // push 一个 rect-space (px,py) 顶点，UV 按 slice 分段映射（角区 1:1，中间拉伸）。
     let push_rect_uv = |vs: &mut Vec<[f32; 2]>,
                         us: &mut Vec<[f32; 2]>,
                         cs: &mut Vec<[f32; 4]>,
-                        px: f32, py: f32| {
+                        px: f32,
+                        py: f32| {
         vs.push([px, py]);
         us.push([u_of(px), v_of(py)]);
         cs.push(color);
@@ -308,13 +353,27 @@ pub fn nine_slice_rounded(
                         us: &mut Vec<[f32; 2]>,
                         cs: &mut Vec<[f32; 4]>,
                         ix: &mut Vec<u32>,
-                        x0: f32, x1: f32, y0: f32, y1: f32,
-                        u0: f32, u1: f32, v0: f32, v1: f32| {
+                        x0: f32,
+                        x1: f32,
+                        y0: f32,
+                        y1: f32,
+                        u0: f32,
+                        u1: f32,
+                        v0: f32,
+                        v1: f32| {
         let base = vs.len() as u32;
-        vs.push([x0, y0]); us.push([u0, v0]); cs.push(color);
-        vs.push([x1, y0]); us.push([u1, v0]); cs.push(color);
-        vs.push([x1, y1]); us.push([u1, v1]); cs.push(color);
-        vs.push([x0, y1]); us.push([u0, v1]); cs.push(color);
+        vs.push([x0, y0]);
+        us.push([u0, v0]);
+        cs.push(color);
+        vs.push([x1, y0]);
+        us.push([u1, v0]);
+        cs.push(color);
+        vs.push([x1, y1]);
+        us.push([u1, v1]);
+        cs.push(color);
+        vs.push([x0, y1]);
+        us.push([u0, v1]);
+        cs.push(color);
         ix.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     };
 
@@ -322,8 +381,24 @@ pub fn nine_slice_rounded(
                        us: &mut Vec<[f32; 2]>,
                        cs: &mut Vec<[f32; 4]>,
                        ix: &mut Vec<u32>,
-                       x0: f32, x1: f32, y0: f32, y1: f32| {
-        push_quad_uv(vs, us, cs, ix, x0, x1, y0, y1, u_of(x0), u_of(x1), v_of(y0), v_of(y1));
+                       x0: f32,
+                       x1: f32,
+                       y0: f32,
+                       y1: f32| {
+        push_quad_uv(
+            vs,
+            us,
+            cs,
+            ix,
+            x0,
+            x1,
+            y0,
+            y1,
+            u_of(x0),
+            u_of(x1),
+            v_of(y0),
+            v_of(y1),
+        );
     };
 
     // ---- 四角：四分之一圆弧扇形（纯几何圆角）----
@@ -332,13 +407,33 @@ pub fn nine_slice_rounded(
     // corners: (rx, ry, center, start_angle)
     let arc_corners: [(f32, f32, [f32; 2], f32); 4] = [
         // TL: 圆心 (x + rx, y + ry)，start = π
-        (tl_r.0, tl_r.1, [rect.x + tl_r.0, rect.y + tl_r.1], std::f32::consts::PI),
+        (
+            tl_r.0,
+            tl_r.1,
+            [rect.x + tl_r.0, rect.y + tl_r.1],
+            std::f32::consts::PI,
+        ),
         // TR: 圆心 (x+w - rx, y + ry)，start = -π/2
-        (tr_r.0, tr_r.1, [rect.x + w - tr_r.0, rect.y + tr_r.1], -std::f32::consts::FRAC_PI_2),
+        (
+            tr_r.0,
+            tr_r.1,
+            [rect.x + w - tr_r.0, rect.y + tr_r.1],
+            -std::f32::consts::FRAC_PI_2,
+        ),
         // BR: 圆心 (x+w - rx, y+h - ry)，start = 0
-        (br_r.0, br_r.1, [rect.x + w - br_r.0, rect.y + h - br_r.1], 0.0),
+        (
+            br_r.0,
+            br_r.1,
+            [rect.x + w - br_r.0, rect.y + h - br_r.1],
+            0.0,
+        ),
         // BL: 圆心 (x + rx, y+h - ry)，start = π/2
-        (bl_r.0, bl_r.1, [rect.x + bl_r.0, rect.y + h - bl_r.1], std::f32::consts::FRAC_PI_2),
+        (
+            bl_r.0,
+            bl_r.1,
+            [rect.x + bl_r.0, rect.y + h - bl_r.1],
+            std::f32::consts::FRAC_PI_2,
+        ),
     ];
     for (rx, ry, center, start) in arc_corners {
         if rx <= 0.0 || ry <= 0.0 {
@@ -371,10 +466,22 @@ pub fn nine_slice_rounded(
     // L 形剩余（[r,slice]×[0,slice] ∪ [0,r]×[r,slice]）发 quad，UV 1:1 映射源角像素（不拉伸）。
     // r=0 时无镂空，整个角区 [0,slice]² 当 L 形（2 quad 合并覆盖）。每角用各自 r 精确处理。
     // 4 角各自的角区子矩形：
-    let tl_x0 = rect.x;          let tl_y0 = rect.y;          let tl_x1 = cx_l;     let tl_y1 = cy_t;
-    let tr_x0 = cx_r;            let tr_y0 = rect.y;          let tr_x1 = rect.x+w; let tr_y1 = cy_t;
-    let br_x0 = cx_r;            let br_y0 = cy_b;            let br_x1 = rect.x+w; let br_y1 = rect.y+h;
-    let bl_x0 = rect.x;          let bl_y0 = cy_b;            let bl_x1 = cx_l;     let bl_y1 = rect.y+h;
+    let tl_x0 = rect.x;
+    let tl_y0 = rect.y;
+    let tl_x1 = cx_l;
+    let tl_y1 = cy_t;
+    let tr_x0 = cx_r;
+    let tr_y0 = rect.y;
+    let tr_x1 = rect.x + w;
+    let tr_y1 = cy_t;
+    let br_x0 = cx_r;
+    let br_y0 = cy_b;
+    let br_x1 = rect.x + w;
+    let br_y1 = rect.y + h;
+    let bl_x0 = rect.x;
+    let bl_y0 = cy_b;
+    let bl_x1 = cx_l;
+    let bl_y1 = rect.y + h;
 
     // 单角 L 形分解：角区 [ax0,ax1]×[ay0,ay1]，圆角 r=(rx,ry) 在角顶（角顶方向由 corner 决定）。
     // L 形 = 3 个 quad：
@@ -396,12 +503,18 @@ pub fn nine_slice_rounded(
                          us: &mut Vec<[f32; 2]>,
                          cs: &mut Vec<[f32; 4]>,
                          ix: &mut Vec<u32>,
-                         ax0: f32, ay0: f32, ax1: f32, ay1: f32,
-                         rx: f32, ry: f32,
+                         ax0: f32,
+                         ay0: f32,
+                         ax1: f32,
+                         ay1: f32,
+                         rx: f32,
+                         ry: f32,
                          // 角顶方向：true = 朝 (ax0,ay0)（TL/BR 内缩 +rx,+ry / -rx,-ry 取决于角）
                          // 用 corner 标识：0=TL 1=TR 2=BR 3=BL
                          corner: usize| {
-        if ax1 - ax0 <= 1e-6 || ay1 - ay0 <= 1e-6 { return; }
+        if ax1 - ax0 <= 1e-6 || ay1 - ay0 <= 1e-6 {
+            return;
+        }
         // 镂空方块（角顶 [0,r]²）：按 corner 定方向
         // TL: 镂空 [ax0, ax0+rx]×[ay0, ay0+ry]
         // TR: 镂空 [ax1-rx, ax1]×[ay0, ay0+ry]
@@ -423,30 +536,98 @@ pub fn nine_slice_rounded(
         //   q_bottom = [ax0, hx1]×[hy1, ay1]  （左下，镂空下方）
         // 其他角对称。
         match corner {
-            0 => { // TL 镂空左上
-                if ax1 - hx1 > 1e-6 { corner_quad(vs, us, cs, ix, hx1, ax1, ay0, ay1); }
-                if hx1 - ax0 > 1e-6 && ay1 - hy1 > 1e-6 { corner_quad(vs, us, cs, ix, ax0, hx1, hy1, ay1); }
+            0 => {
+                // TL 镂空左上
+                if ax1 - hx1 > 1e-6 {
+                    corner_quad(vs, us, cs, ix, hx1, ax1, ay0, ay1);
+                }
+                if hx1 - ax0 > 1e-6 && ay1 - hy1 > 1e-6 {
+                    corner_quad(vs, us, cs, ix, ax0, hx1, hy1, ay1);
+                }
             }
-            1 => { // TR 镂空右上
-                if hx0 - ax0 > 1e-6 { corner_quad(vs, us, cs, ix, ax0, hx0, ay0, ay1); }
-                if ax1 - hx0 > 1e-6 && ay1 - hy1 > 1e-6 { corner_quad(vs, us, cs, ix, hx0, ax1, hy1, ay1); }
+            1 => {
+                // TR 镂空右上
+                if hx0 - ax0 > 1e-6 {
+                    corner_quad(vs, us, cs, ix, ax0, hx0, ay0, ay1);
+                }
+                if ax1 - hx0 > 1e-6 && ay1 - hy1 > 1e-6 {
+                    corner_quad(vs, us, cs, ix, hx0, ax1, hy1, ay1);
+                }
             }
-            2 => { // BR 镂空右下
-                if hx0 - ax0 > 1e-6 { corner_quad(vs, us, cs, ix, ax0, hx0, ay0, ay1); }
-                if ax1 - hx0 > 1e-6 && hy0 - ay0 > 1e-6 { corner_quad(vs, us, cs, ix, hx0, ax1, ay0, hy0); }
+            2 => {
+                // BR 镂空右下
+                if hx0 - ax0 > 1e-6 {
+                    corner_quad(vs, us, cs, ix, ax0, hx0, ay0, ay1);
+                }
+                if ax1 - hx0 > 1e-6 && hy0 - ay0 > 1e-6 {
+                    corner_quad(vs, us, cs, ix, hx0, ax1, ay0, hy0);
+                }
             }
-            3 => { // BL 镂空左下
-                if ax1 - hx1 > 1e-6 { corner_quad(vs, us, cs, ix, hx1, ax1, ay0, ay1); }
-                if hx1 - ax0 > 1e-6 && hy0 - ay0 > 1e-6 { corner_quad(vs, us, cs, ix, ax0, hx1, ay0, hy0); }
+            3 => {
+                // BL 镂空左下
+                if ax1 - hx1 > 1e-6 {
+                    corner_quad(vs, us, cs, ix, hx1, ax1, ay0, ay1);
+                }
+                if hx1 - ax0 > 1e-6 && hy0 - ay0 > 1e-6 {
+                    corner_quad(vs, us, cs, ix, ax0, hx1, ay0, hy0);
+                }
             }
             _ => unreachable!(),
         }
     };
 
-    emit_corner_l(&mut verts, &mut uvs, &mut colors, &mut indices, tl_x0, tl_y0, tl_x1, tl_y1, tl_r.0, tl_r.1, 0);
-    emit_corner_l(&mut verts, &mut uvs, &mut colors, &mut indices, tr_x0, tr_y0, tr_x1, tr_y1, tr_r.0, tr_r.1, 1);
-    emit_corner_l(&mut verts, &mut uvs, &mut colors, &mut indices, br_x0, br_y0, br_x1, br_y1, br_r.0, br_r.1, 2);
-    emit_corner_l(&mut verts, &mut uvs, &mut colors, &mut indices, bl_x0, bl_y0, bl_x1, bl_y1, bl_r.0, bl_r.1, 3);
+    emit_corner_l(
+        &mut verts,
+        &mut uvs,
+        &mut colors,
+        &mut indices,
+        tl_x0,
+        tl_y0,
+        tl_x1,
+        tl_y1,
+        tl_r.0,
+        tl_r.1,
+        0,
+    );
+    emit_corner_l(
+        &mut verts,
+        &mut uvs,
+        &mut colors,
+        &mut indices,
+        tr_x0,
+        tr_y0,
+        tr_x1,
+        tr_y1,
+        tr_r.0,
+        tr_r.1,
+        1,
+    );
+    emit_corner_l(
+        &mut verts,
+        &mut uvs,
+        &mut colors,
+        &mut indices,
+        br_x0,
+        br_y0,
+        br_x1,
+        br_y1,
+        br_r.0,
+        br_r.1,
+        2,
+    );
+    emit_corner_l(
+        &mut verts,
+        &mut uvs,
+        &mut colors,
+        &mut indices,
+        bl_x0,
+        bl_y0,
+        bl_x1,
+        bl_y1,
+        bl_r.0,
+        bl_r.1,
+        3,
+    );
 
     // ---- 边带 + 中心 quad ----
     // 上边带：x [cx_l, cx_r], y [rect.y, cy_t] —— 水平拉伸（UV x: tx_l..tx_r, v: ty_t 段 1:1）
@@ -456,18 +637,54 @@ pub fn nine_slice_rounded(
     if cx_r - cx_l > 1e-6 {
         // 上边带
         if cy_t - rect.y > 1e-6 {
-            push_quad_uv(&mut verts, &mut uvs, &mut colors, &mut indices,
-                cx_l, cx_r, rect.y, cy_t, tx_l, tx_r, vmin, ty_t);
+            push_quad_uv(
+                &mut verts,
+                &mut uvs,
+                &mut colors,
+                &mut indices,
+                cx_l,
+                cx_r,
+                rect.y,
+                cy_t,
+                tx_l,
+                tx_r,
+                vmin,
+                ty_t,
+            );
         }
         // 下边带
         if (rect.y + h) - cy_b > 1e-6 {
-            push_quad_uv(&mut verts, &mut uvs, &mut colors, &mut indices,
-                cx_l, cx_r, cy_b, rect.y + h, tx_l, tx_r, ty_b, vmax);
+            push_quad_uv(
+                &mut verts,
+                &mut uvs,
+                &mut colors,
+                &mut indices,
+                cx_l,
+                cx_r,
+                cy_b,
+                rect.y + h,
+                tx_l,
+                tx_r,
+                ty_b,
+                vmax,
+            );
         }
         // 中心
         if cy_b - cy_t > 1e-6 {
-            push_quad_uv(&mut verts, &mut uvs, &mut colors, &mut indices,
-                cx_l, cx_r, cy_t, cy_b, tx_l, tx_r, ty_t, ty_b);
+            push_quad_uv(
+                &mut verts,
+                &mut uvs,
+                &mut colors,
+                &mut indices,
+                cx_l,
+                cx_r,
+                cy_t,
+                cy_b,
+                tx_l,
+                tx_r,
+                ty_t,
+                ty_b,
+            );
         }
     }
     // 左右边带：y [cy_t, cy_b], x 角区段（含角弧段 [0,r] 与 L 段 [r,slice]）
@@ -476,13 +693,37 @@ pub fn nine_slice_rounded(
     if cy_b - cy_t > 1e-6 {
         // 左边带
         if cx_l - rect.x > 1e-6 {
-            push_quad_uv(&mut verts, &mut uvs, &mut colors, &mut indices,
-                rect.x, cx_l, cy_t, cy_b, umin, tx_l, ty_t, ty_b);
+            push_quad_uv(
+                &mut verts,
+                &mut uvs,
+                &mut colors,
+                &mut indices,
+                rect.x,
+                cx_l,
+                cy_t,
+                cy_b,
+                umin,
+                tx_l,
+                ty_t,
+                ty_b,
+            );
         }
         // 右边带
         if (rect.x + w) - cx_r > 1e-6 {
-            push_quad_uv(&mut verts, &mut uvs, &mut colors, &mut indices,
-                cx_r, rect.x + w, cy_t, cy_b, tx_r, umax, ty_t, ty_b);
+            push_quad_uv(
+                &mut verts,
+                &mut uvs,
+                &mut colors,
+                &mut indices,
+                cx_r,
+                rect.x + w,
+                cy_t,
+                cy_b,
+                tx_r,
+                umax,
+                ty_t,
+                ty_b,
+            );
         }
     }
 
@@ -496,12 +737,17 @@ mod tests {
 
     #[test]
     fn quad_four_verts_two_tris() {
-        let (v, _uvs, _col, i) = quad(&Rect {
-            x: 0.0,
-            y: 0.0,
-            w: 10.0,
-            h: 10.0,
-        }, [1.0; 4], [0.0, 0.0], [1.0, 1.0]);
+        let (v, _uvs, _col, i) = quad(
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 10.0,
+            },
+            [1.0; 4],
+            [0.0, 0.0],
+            [1.0, 1.0],
+        );
         assert_eq!(v.len(), 4);
         assert_eq!(i.len(), 6);
     }
@@ -556,10 +802,16 @@ mod tests {
     fn rounded_rect_zero_radius_acts_as_rect() {
         // 全 0 直角：仍是三角扇，但所有弧顶点退化为角顶点 → 中心+4 角 = 5 顶点
         let (v, _uvs, _col, idx) = rounded_rect(
-            &Rect { x: 0.0, y: 0.0, w: 80.0, h: 80.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 80.0,
+                h: 80.0,
+            },
             [1.0; 4],
             &[(0.0, 0.0); 4],
-            [0.0, 0.0], [1.0, 1.0],
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         assert_eq!(v.len(), 5, "全 0：中心 + 4 角顶点");
         assert_eq!(idx.len(), 12, "4 三角形 × 3 索引");
@@ -569,10 +821,16 @@ mod tests {
     fn rounded_rect_vertex_count_scales_with_radius() {
         // r=8, 80×80：sides = ceil(π·8/4)+1 = 8 → 每角 9 顶点(0..=8) × 4 角 + 1 中心 = 37
         let (v, _uvs, _col, _idx) = rounded_rect(
-            &Rect { x: 0.0, y: 0.0, w: 80.0, h: 80.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 80.0,
+                h: 80.0,
+            },
             [1.0; 4],
             &[(8.0, 8.0); 4],
-            [0.0, 0.0], [1.0, 1.0],
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         assert_eq!(v.len(), 37, "1 中心 + 4 角 × (8+1) 顶点");
     }
@@ -582,16 +840,30 @@ mod tests {
         // r=40, 60×40 rect——四边约束取最紧：h/(tl.1+bl.1)=40/80=0.5 → scale=0.5 → r=20
         // TL 圆心 = (20, 20)，最左弧点 x = 20-20 = 0（贴 rect 左边）
         let (v, _uvs, _col, _idx) = rounded_rect(
-            &Rect { x: 0.0, y: 0.0, w: 60.0, h: 40.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 60.0,
+                h: 40.0,
+            },
             [1.0; 4],
             &[(40.0, 40.0); 4],
-            [0.0, 0.0], [1.0, 1.0],
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         let xs: Vec<f32> = v.iter().map(|p| p[0]).collect();
         let min_x = xs.iter().cloned().fold(f32::INFINITY, f32::min);
-        assert!((min_x - 0.0).abs() < 1e-3, "钳制后最左顶点贴 rect.x=0，得 {}", min_x);
+        assert!(
+            (min_x - 0.0).abs() < 1e-3,
+            "钳制后最左顶点贴 rect.x=0，得 {}",
+            min_x
+        );
         let max_x = xs.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        assert!((max_x - 60.0).abs() < 1e-3, "最右顶点贴 rect.x+w=60，得 {}", max_x);
+        assert!(
+            (max_x - 60.0).abs() < 1e-3,
+            "最右顶点贴 rect.x+w=60，得 {}",
+            max_x
+        );
     }
 
     #[test]
@@ -599,24 +871,44 @@ mod tests {
         // 椭圆角 (20,10)：TL 圆心 (20,10)，弧顶点 = center + (cos·20, sin·10)
         // 起始角 TL=π：cos(π)=-1, sin(π)=0 → 首弧点 = (20-20, 10+0) = (0, 10)
         let (v, _uvs, _col, _idx) = rounded_rect(
-            &Rect { x: 0.0, y: 0.0, w: 80.0, h: 80.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 80.0,
+                h: 80.0,
+            },
             [1.0; 4],
             &[(20.0, 10.0); 4],
-            [0.0, 0.0], [1.0, 1.0],
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         // v[1] = 第一个弧顶点 = TL 角起始 (0, 10)
-        assert!((v[1][0] - 0.0).abs() < 1e-3, "TL 首弧点 x=0，得 {}", v[1][0]);
-        assert!((v[1][1] - 10.0).abs() < 1e-3, "TL 首弧点 y=10，得 {}", v[1][1]);
+        assert!(
+            (v[1][0] - 0.0).abs() < 1e-3,
+            "TL 首弧点 x=0，得 {}",
+            v[1][0]
+        );
+        assert!(
+            (v[1][1] - 10.0).abs() < 1e-3,
+            "TL 首弧点 y=10，得 {}",
+            v[1][1]
+        );
     }
 
     #[test]
     fn rounded_rect_uv_linear_mapping() {
         // rect=(0,0,80,80), uv=[0,0]-[1,1] → 中心顶点 UV=(0.5,0.5)
         let (_v, uvs, _col, _idx) = rounded_rect(
-            &Rect { x: 0.0, y: 0.0, w: 80.0, h: 80.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 80.0,
+                h: 80.0,
+            },
             [1.0; 4],
             &[(8.0, 8.0); 4],
-            [0.0, 0.0], [1.0, 1.0],
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         assert!((uvs[0][0] - 0.5).abs() < 1e-3, "中心 UV.x=0.5");
         assert!((uvs[0][1] - 0.5).abs() < 1e-3, "中心 UV.y=0.5");
@@ -626,10 +918,16 @@ mod tests {
     fn rounded_rect_degenerate_rect_falls_back_to_quad() {
         // w=0 退化 → 走 quad（4 顶点）
         let (v, _uvs, _col, idx) = rounded_rect(
-            &Rect { x: 0.0, y: 0.0, w: 0.0, h: 80.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 80.0,
+            },
             [1.0; 4],
             &[(8.0, 8.0); 4],
-            [0.0, 0.0], [1.0, 1.0],
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         assert_eq!(v.len(), 4, "退化走 quad");
         assert_eq!(idx.len(), 6);
@@ -641,25 +939,50 @@ mod tests {
         // 直角分支须落在矩形顶点（TL=[0,0] / BR=[80,80]），
         // 而非圆心+方向算出的 [0,8]/[80,72]（ry>0 时 py 偏离角顶点，会角附近镂空）。
         let (v, _, _, _) = rounded_rect(
-            &Rect { x: 0.0, y: 0.0, w: 80.0, h: 80.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 80.0,
+                h: 80.0,
+            },
             [1.0; 4],
             &[(0.0, 8.0), (8.0, 8.0), (0.0, 8.0), (8.0, 8.0)],
-            [0.0, 0.0], [1.0, 1.0],
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
-        let has = |x: f32, y: f32| v.iter().any(|p| (p[0] - x).abs() < 1e-4 && (p[1] - y).abs() < 1e-4);
+        let has = |x: f32, y: f32| {
+            v.iter()
+                .any(|p| (p[0] - x).abs() < 1e-4 && (p[1] - y).abs() < 1e-4)
+        };
         assert!(has(0.0, 0.0), "TL 直角顶点须落矩形角 [0,0]，verts={:?}", v);
-        assert!(has(80.0, 80.0), "BR 直角顶点须落矩形角 [80,80]，verts={:?}", v);
+        assert!(
+            has(80.0, 80.0),
+            "BR 直角顶点须落矩形角 [80,80]，verts={:?}",
+            v
+        );
     }
 
     #[test]
     fn nine_slice_16_verts_9_quads() {
         // 100×100 rect，slice 10 各边，源图 100×100 全图 uv 0..1
         let (v, _uvs, _col, idx) = nine_slice(
-            &Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
             [1.0; 4],
-            &SliceInsets { top: 10.0, right: 10.0, bottom: 10.0, left: 10.0 },
-            100.0, 100.0,  // 源图尺寸
-            [0.0, 0.0], [1.0, 1.0],
+            &SliceInsets {
+                top: 10.0,
+                right: 10.0,
+                bottom: 10.0,
+                left: 10.0,
+            },
+            100.0,
+            100.0, // 源图尺寸
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         assert_eq!(v.len(), 16, "4×4 顶点");
         assert_eq!(idx.len(), 9 * 6, "9 quad × 6 索引 = 54");
@@ -669,11 +992,23 @@ mod tests {
     fn nine_slice_corner_verts_at_slice_lines() {
         // rect 100×100，slice 10：gridX = [0, 10, 90, 100]，gridY = [0, 10, 90, 100]
         let (v, _, _, _) = nine_slice(
-            &Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
             [1.0; 4],
-            &SliceInsets { top: 10.0, right: 10.0, bottom: 10.0, left: 10.0 },
-            100.0, 100.0,
-            [0.0, 0.0], [1.0, 1.0],
+            &SliceInsets {
+                top: 10.0,
+                right: 10.0,
+                bottom: 10.0,
+                left: 10.0,
+            },
+            100.0,
+            100.0,
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         // 顶点行主序 4×4：v[0]=[0,0] v[3]=[100,0] v[12]=[0,100] v[15]=[100,100]
         // v[1]=[10,0]（左切片线） v[2]=[90,0]（右切片线）
@@ -690,27 +1025,55 @@ mod tests {
         // rect 10×10（比源图 100×100 - 切片 20 = 80 小）→ 四角重叠 clamp
         // fgui：contentRect.width < sourceW - gridRect.width 时 max(0,...) clamp
         let (v, _, _, _) = nine_slice(
-            &Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 10.0,
+            },
             [1.0; 4],
-            &SliceInsets { top: 10.0, right: 10.0, bottom: 10.0, left: 10.0 },
-            100.0, 100.0,
-            [0.0, 0.0], [1.0, 1.0],
+            &SliceInsets {
+                top: 10.0,
+                right: 10.0,
+                bottom: 10.0,
+                left: 10.0,
+            },
+            100.0,
+            100.0,
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         // clamp 后 grid_x = [0, 0+10.min(5)=5, (0+10-10).max(5)=5, 10] → 左切片线==右切片线==5，中心段折叠
         // 关键：左切片线不超 rect 右边（gridX[1] <= gridX[2]）
         let xs: Vec<f32> = (0..4).map(|c| v[c][0]).collect();
-        assert!(xs[1] <= xs[2] + 1e-3, "左切片线 <= 右切片线（clamp 防越界），xs={:?}", xs);
+        assert!(
+            xs[1] <= xs[2] + 1e-3,
+            "左切片线 <= 右切片线（clamp 防越界），xs={:?}",
+            xs
+        );
     }
 
     #[test]
     fn nine_slice_uv_proportional_to_slice() {
         // 源图 100×100，slice 10 → UV 切片线 = 0.1 / 0.9
         let (_, uvs, _, _) = nine_slice(
-            &Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
             [1.0; 4],
-            &SliceInsets { top: 10.0, right: 10.0, bottom: 10.0, left: 10.0 },
-            100.0, 100.0,
-            [0.0, 0.0], [1.0, 1.0],
+            &SliceInsets {
+                top: 10.0,
+                right: 10.0,
+                bottom: 10.0,
+                left: 10.0,
+            },
+            100.0,
+            100.0,
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         // uvs[1].x = 0.1（左切片线 UV）
         assert!((uvs[1][0] - 0.1).abs() < 1e-4, "左切片 UV=0.1");
@@ -721,12 +1084,24 @@ mod tests {
     fn nine_slice_rounded_produces_mesh() {
         // 100×100 rect，slice 20，radius 10，源图 100×100
         let (v, _uvs, _col, idx) = nine_slice_rounded(
-            &Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
             [1.0; 4],
-            &SliceInsets { top: 20.0, right: 20.0, bottom: 20.0, left: 20.0 },
+            &SliceInsets {
+                top: 20.0,
+                right: 20.0,
+                bottom: 20.0,
+                left: 20.0,
+            },
             &[(10.0, 10.0); 4],
-            100.0, 100.0,
-            [0.0, 0.0], [1.0, 1.0],
+            100.0,
+            100.0,
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         // 顶点数 > 16（四角圆角扇形比方角多顶点）
         assert!(v.len() > 16, "圆角四角扇形顶点数 > 16 方角，得 {}", v.len());
@@ -740,22 +1115,42 @@ mod tests {
         // 角区无外角顶点（无 (0,0) UV 顶点），弧扇顶点 UV
         // 落在源角区内（最接近角顶的弧点 = (r,0)/(0,r) → UV (0.1,0)/(0,0.1)）。
         let (_v, uvs, _col, _idx) = nine_slice_rounded(
-            &Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
             [1.0; 4],
-            &SliceInsets { top: 20.0, right: 20.0, bottom: 20.0, left: 20.0 },
+            &SliceInsets {
+                top: 20.0,
+                right: 20.0,
+                bottom: 20.0,
+                left: 20.0,
+            },
             &[(10.0, 10.0); 4],
-            100.0, 100.0,
-            [0.0, 0.0], [1.0, 1.0],
+            100.0,
+            100.0,
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         // 左上角区顶点 UV 应在 [0..0.2, 0..0.2]（slice 20 / src 100 = 0.2）
-        let tl_uvs: Vec<[f32;2]> = uvs.iter().cloned().filter(|uv| uv[0] <= 0.21 && uv[1] <= 0.21).collect();
+        let tl_uvs: Vec<[f32; 2]> = uvs
+            .iter()
+            .cloned()
+            .filter(|uv| uv[0] <= 0.21 && uv[1] <= 0.21)
+            .collect();
         assert!(!tl_uvs.is_empty(), "左上角区有顶点");
         // 弧扇顶点 UV 落在角区内（含接近角顶的弧点 (0.1,0)/(0,0.1)）。
         // 不应有 (0,0) UV 外角顶点（角区仅弧扇顶点）。
-        let has_origin = tl_uvs.iter().any(|uv| uv[0].abs() < 1e-3 && uv[1].abs() < 1e-3);
+        let has_origin = tl_uvs
+            .iter()
+            .any(|uv| uv[0].abs() < 1e-3 && uv[1].abs() < 1e-3);
         assert!(!has_origin, "左上角不应有 (0,0) UV 外角顶点");
         // 弧扇中心 (r,r)=(10,10) → UV (0.1, 0.1)，应在角区内
-        let has_arc_center = tl_uvs.iter().any(|uv| (uv[0] - 0.1).abs() < 1e-3 && (uv[1] - 0.1).abs() < 1e-3);
+        let has_arc_center = tl_uvs
+            .iter()
+            .any(|uv| (uv[0] - 0.1).abs() < 1e-3 && (uv[1] - 0.1).abs() < 1e-3);
         assert!(has_arc_center, "左上角弧扇中心 UV=(0.1,0.1) 存在");
     }
 
@@ -766,19 +1161,35 @@ mod tests {
         // 期望：圆弧外角点 (2,2)（在 [0,r]² 内但弧外，距圆心 (10,10)=√128≈11.3>10）**不被覆盖**；
         //      中心 (50,50) / 上边中点 (50,5) / 角区 L 形点 (15,5)（[r,slice]×[0,r]）被覆盖。
         let (verts, _uvs, _col, idx) = nine_slice_rounded(
-            &Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
             [1.0; 4],
-            &SliceInsets { top: 20.0, right: 20.0, bottom: 20.0, left: 20.0 },
+            &SliceInsets {
+                top: 20.0,
+                right: 20.0,
+                bottom: 20.0,
+                left: 20.0,
+            },
             &[(10.0, 10.0); 4],
-            100.0, 100.0,
-            [0.0, 0.0], [1.0, 1.0],
+            100.0,
+            100.0,
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         // 收集所有三角形（每 3 索引一个三角形）
         let tris: Vec<([f32; 2], [f32; 2], [f32; 2])> = idx
             .chunks(3)
             .filter_map(|c| {
                 if c.len() == 3 {
-                    Some((verts[c[0] as usize], verts[c[1] as usize], verts[c[2] as usize]))
+                    Some((
+                        verts[c[0] as usize],
+                        verts[c[1] as usize],
+                        verts[c[2] as usize],
+                    ))
                 } else {
                     None
                 }
@@ -796,7 +1207,8 @@ mod tests {
             !(neg && pos)
         };
         let covered = |px: f32, py: f32| -> bool {
-            tris.iter().any(|&(a, b, c)| point_in_tri([px, py], a, b, c))
+            tris.iter()
+                .any(|&(a, b, c)| point_in_tri([px, py], a, b, c))
         };
 
         // 中心点：必覆盖
@@ -806,7 +1218,10 @@ mod tests {
         // 角区 L 形点 (15,5)：在 [r,slice]×[0,r]（TL 角区 L 形右条），必覆盖
         assert!(covered(15.0, 5.0), "角区 L 形点 (15,5) 被覆盖");
         // 圆弧外角点 (2,2)：在 [0,r]² 内但弧外（距圆心 (10,10)=√128>10），**不应覆盖**（几何圆角镂空）
-        assert!(!covered(2.0, 2.0), "圆弧外角点 (2,2) 不被覆盖（几何圆角镂空）");
+        assert!(
+            !covered(2.0, 2.0),
+            "圆弧外角点 (2,2) 不被覆盖（几何圆角镂空）"
+        );
         // 圆弧内点 (5,5)：距圆心 (10,10)=√50≈7.07<10，应覆盖（弧扇内）
         assert!(covered(5.0, 5.0), "圆弧内点 (5,5) 被覆盖（弧扇内）");
     }
@@ -814,12 +1229,24 @@ mod tests {
     #[test]
     fn nine_slice_rounded_zero_radius_falls_back_to_nine_slice() {
         let (v, _, _, idx) = nine_slice_rounded(
-            &Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 },
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
             [1.0; 4],
-            &SliceInsets { top: 20.0, right: 20.0, bottom: 20.0, left: 20.0 },
+            &SliceInsets {
+                top: 20.0,
+                right: 20.0,
+                bottom: 20.0,
+                left: 20.0,
+            },
             &[(0.0, 0.0); 4],
-            100.0, 100.0,
-            [0.0, 0.0], [1.0, 1.0],
+            100.0,
+            100.0,
+            [0.0, 0.0],
+            [1.0, 1.0],
         );
         assert_eq!(v.len(), 16, "radius 0 退化为 nine_slice 16 顶点");
         assert_eq!(idx.len(), 54, "9 quad 索引");

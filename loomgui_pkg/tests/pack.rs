@@ -11,11 +11,7 @@ static TEST_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
 /// res_files 形如 `["res/x.png", "res/icons/skin.png"]` —— 相对 source_dir。
 fn make_tmp_dir_with_html(html_names: &[&str], res_files: &[&str]) -> PathBuf {
     let seq = TEST_DIR_SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "loomgui_pkg_t3_{}_{}",
-        std::process::id(),
-        seq
-    ));
+    let dir = std::env::temp_dir().join(format!("loomgui_pkg_t3_{}_{}", std::process::id(), seq));
     fs::create_dir_all(&dir).unwrap();
     for name in html_names {
         // 每个 HTML 一个 <div> 组件根（围栏内 tag），保证 parse_html 通过。
@@ -85,7 +81,10 @@ fn pack_multi_html_no_atlas() {
     );
     let pkg = read_package(&packed.pkg_bytes).expect("read ok");
     assert_eq!(pkg.components.len(), 2, "两 HTML → 两组件");
-    assert!(pkg.components.contains_key("a"), "组件名 a（文件名去 .html）");
+    assert!(
+        pkg.components.contains_key("a"),
+        "组件名 a（文件名去 .html）"
+    );
     assert!(pkg.components.contains_key("b"), "组件名 b");
     assert!(
         pkg.asset_manifest.iter().any(|e| e.path == "x.png"),
@@ -105,17 +104,25 @@ fn pack_path_normalization_in_manifest() {
     .unwrap();
     let packed = pack(&dir, "test", &["c.html".to_string()], &dir.join("res")).expect("pack ok");
     assert!(
-        packed.asset_manifest.iter().any(|e| e.path == "icons/skin.png"),
+        packed
+            .asset_manifest
+            .iter()
+            .any(|e| e.path == "icons/skin.png"),
         "归一化后 manifest 含 icons/skin.png，不含 res 前缀"
     );
     assert!(
-        !packed.asset_manifest.iter().any(|e| e.path.contains("res/")),
+        !packed
+            .asset_manifest
+            .iter()
+            .any(|e| e.path.contains("res/")),
         "manifest 不应含 res/ 前缀 path: {:?}",
         packed.asset_manifest
     );
     let pkg = read_package(&packed.pkg_bytes).expect("read ok");
     assert!(
-        pkg.asset_manifest.iter().any(|e| e.path == "icons/skin.png"),
+        pkg.asset_manifest
+            .iter()
+            .any(|e| e.path == "icons/skin.png"),
         "read_package 后 manifest 仍含归一化 path"
     );
     let _ = fs::remove_dir_all(&dir);
@@ -125,14 +132,17 @@ fn pack_path_normalization_in_manifest() {
 #[test]
 fn pack_single_html_roundtrips() {
     let dir = make_tmp_dir_with_html(&["scene"], &[]);
-    let packed = pack(&dir, "test", &["scene.html".to_string()], &dir.join("res")).expect("pack ok");
+    let packed =
+        pack(&dir, "test", &["scene.html".to_string()], &dir.join("res")).expect("pack ok");
     assert!(!packed.pkg_bytes.is_empty());
     let pkg = read_package(&packed.pkg_bytes).expect("read ok");
     assert_eq!(pkg.components.len(), 1);
     let comp = pkg.components.values().next().unwrap();
     assert!(!comp.nodes.is_empty());
-    let has_text = comp.nodes.iter().any(|n| matches!(&n.kind,
-        loomgui_core::scene::NodeKind::Text { content } if content == "hi"));
+    let has_text = comp.nodes.iter().any(|n| {
+        matches!(&n.kind,
+        loomgui_core::scene::NodeKind::Text { content } if content == "hi")
+    });
     assert!(has_text, "scene.html 的 span 文本 hi 应在节点树");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -231,8 +241,16 @@ fn pack_reads_fixture_png_dimensions() {
     )
     .unwrap();
     let packed = pack(&dir, "test", &["c.html".to_string()], &dir.join("res")).expect("pack ok");
-    let a = packed.asset_manifest.iter().find(|e| e.path == "a.png").expect("a.png in manifest");
-    let b = packed.asset_manifest.iter().find(|e| e.path == "b.png").expect("b.png in manifest");
+    let a = packed
+        .asset_manifest
+        .iter()
+        .find(|e| e.path == "a.png")
+        .expect("a.png in manifest");
+    let b = packed
+        .asset_manifest
+        .iter()
+        .find(|e| e.path == "b.png")
+        .expect("b.png in manifest");
     assert_eq!((a.w, a.h), (4, 4), "fixture a.png = 4×4");
     assert_eq!((b.w, b.h), (2, 2), "fixture b.png = 2×2");
     let _ = fs::remove_dir_all(&dir);

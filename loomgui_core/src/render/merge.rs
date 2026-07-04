@@ -11,11 +11,16 @@ use crate::render::node::{NodePayload, RenderNode};
 /// 含 alpha（to_bits 比较）——alpha 是 per-renderer uniform，不同 alpha 不能合批。
 fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32)> {
     match &rn.payload {
-        NodePayload::Mesh { image_path, program, .. }
-            if *program == 0 && crate::transform::is_pure_translation(&rn.world_matrix) =>
-        {
-            Some((image_path.clone(), *program, rn.mask_context.0, rn.alpha.to_bits()))
-        }
+        NodePayload::Mesh {
+            image_path,
+            program,
+            ..
+        } if *program == 0 && crate::transform::is_pure_translation(&rn.world_matrix) => Some((
+            image_path.clone(),
+            *program,
+            rn.mask_context.0,
+            rn.alpha.to_bits(),
+        )),
         _ => None,
     }
 }
@@ -68,7 +73,14 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
     let mut indices: Vec<u32> = Vec::new();
     let mut base: u32 = 0;
     for &bi in batch {
-        if let NodePayload::Mesh { verts: v, uvs: u, colors: c, indices: ix, .. } = &nodes[bi].payload {
+        if let NodePayload::Mesh {
+            verts: v,
+            uvs: u,
+            colors: c,
+            indices: ix,
+            ..
+        } = &nodes[bi].payload
+        {
             verts.extend_from_slice(v);
             uvs.extend_from_slice(u);
             // alpha 不烤进 colors（alpha 走 _Alpha uniform，单值 per-draw-call）。
@@ -92,7 +104,10 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
         change_level: crate::render::node::ChangeLevel::Full,
         reuse_key: 0,
         payload: NodePayload::Mesh {
-            verts, uvs, colors, indices,
+            verts,
+            uvs,
+            colors,
+            indices,
             image_path: match &last.payload {
                 NodePayload::Mesh { image_path, .. } => image_path.clone(),
                 _ => None,
@@ -109,17 +124,32 @@ mod tests {
     use crate::render::node::{BlendMode, ChangeLevel, MaskContext};
 
     /// mesh_node 带 image_path（None=纯色，Some=图 path）。
-    fn mesh_node(id: u32, path: Option<&str>, sort_key: u32, alpha: f32, rect_off: f32) -> RenderNode {
+    fn mesh_node(
+        id: u32,
+        path: Option<&str>,
+        sort_key: u32,
+        alpha: f32,
+        rect_off: f32,
+    ) -> RenderNode {
         RenderNode {
-            node_id: id, parent_id: None, visible: true, alpha,
+            node_id: id,
+            parent_id: None,
+            visible: true,
+            alpha,
             color_tint: [1.0; 4],
             world_matrix: crate::transform::IDENTITY,
-            blend: BlendMode::Normal, mask_context: MaskContext(0), sort_key,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key,
             change_level: ChangeLevel::Full,
             reuse_key: 0,
             payload: NodePayload::Mesh {
-                verts: vec![[rect_off, 0.0], [rect_off + 10.0, 0.0],
-                            [rect_off + 10.0, 10.0], [rect_off, 10.0]],
+                verts: vec![
+                    [rect_off, 0.0],
+                    [rect_off + 10.0, 0.0],
+                    [rect_off + 10.0, 10.0],
+                    [rect_off, 10.0],
+                ],
                 uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
                 colors: vec![[1.0, 1.0, 1.0, 1.0]; 4],
                 indices: vec![0, 1, 2, 0, 2, 3],
@@ -141,7 +171,13 @@ mod tests {
         let out = merge_meshes(nodes);
         assert_eq!(out.len(), 1, "2 同 DrawState → 1 merged");
         match &out[0].payload {
-            NodePayload::Mesh { verts, indices, colors, image_path, .. } => {
+            NodePayload::Mesh {
+                verts,
+                indices,
+                colors,
+                image_path,
+                ..
+            } => {
                 assert_eq!(verts.len(), 8, "2×4 verts");
                 assert_eq!(indices.len(), 12, "2×6 indices");
                 assert_eq!(*image_path, Some("a.png".to_string()));
@@ -171,14 +207,22 @@ mod tests {
         assert_eq!(out.len(), 1);
         if let NodePayload::Mesh { indices, .. } = &out[0].payload {
             // 第一组 [0,1,2,0,2,3]，第二组 +4 [4,5,6,4,6,7]，第三组 +8 [8,9,10,8,10,11]。
-            assert_eq!(indices, &vec![0u32,1,2,0,2,3, 4,5,6,4,6,7, 8,9,10,8,10,11]);
-        } else { panic!("expected Mesh"); }
+            assert_eq!(
+                indices,
+                &vec![0u32, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11]
+            );
+        } else {
+            panic!("expected Mesh");
+        }
     }
 
     #[test]
     fn different_drawstate_stay_separate() {
         // A(a.png) B(b.png) 同 mask_context 但 path 不同 → 不合并。
-        let nodes = vec![mesh_node(1, Some("a.png"), 0, 1.0, 0.0), mesh_node(2, Some("b.png"), 1, 1.0, 100.0)];
+        let nodes = vec![
+            mesh_node(1, Some("a.png"), 0, 1.0, 0.0),
+            mesh_node(2, Some("b.png"), 1, 1.0, 100.0),
+        ];
         let out = merge_meshes(nodes);
         assert_eq!(out.len(), 2, "不同 image_path → 各自独立");
     }
@@ -199,8 +243,14 @@ mod tests {
         let mesh = mesh_node(1, Some("a.png"), 0, 1.0, 0.0);
         let mut text = mesh_node(2, Some("a.png"), 1, 1.0, 100.0);
         text.payload = NodePayload::Text {
-            layout: crate::text::layout::TextLayout { text_width: 0.0, text_height: 0.0, lines: vec![] },
-            font_size: 16.0, color: [1.0; 4], program: 1,
+            layout: crate::text::layout::TextLayout {
+                text_width: 0.0,
+                text_height: 0.0,
+                lines: vec![],
+            },
+            font_size: 16.0,
+            color: [1.0; 4],
+            program: 1,
         };
         let out = merge_meshes(vec![mesh, text]);
         assert_eq!(out.len(), 2, "Text 不参与合并");
@@ -231,6 +281,9 @@ mod tests {
                 assert!((c[3] - 1.0).abs() < 1e-6, "colors.a 不烤 alpha（原始1.0）");
             }
         }
-        assert!((out[0].alpha - 0.5).abs() < 1e-6, "merged.alpha=子 alpha（走 uniform）");
+        assert!(
+            (out[0].alpha - 0.5).abs() < 1e-6,
+            "merged.alpha=子 alpha（走 uniform）"
+        );
     }
 }

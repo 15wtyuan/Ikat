@@ -26,7 +26,9 @@ pub fn kind_from_tag(tag: &str) -> Result<NodeKind, String> {
         "div" => Ok(NodeKind::Container),
         "button" => Ok(NodeKind::Button),
         "img" => Ok(NodeKind::Image { src: String::new() }),
-        "span" => Ok(NodeKind::Text { content: String::new() }),
+        "span" => Ok(NodeKind::Text {
+            content: String::new(),
+        }),
         other => Err(format!(
             "unknown kind tag: {}（围栏白名单：div/button/img/span）",
             other
@@ -310,9 +312,33 @@ mod tests {
             bool,
             Option<i32>,
         )> = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(0), NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(1), NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(1),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
         ];
         let scene = Scene::build(&entries);
         let root = scene.roots[0];
@@ -328,19 +354,35 @@ mod tests {
         // 给 child 灌 anim/scroll/tween
         scene.anim.ensure(child).opacity = Some(0.5);
         scene.scroll.ensure(child);
-        tweens.tween(child, TweenProp::Opacity,
-            [0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0],
-            Ease::Linear, 0.0, 1.0, 0);
+        tweens.tween(
+            child,
+            TweenProp::Opacity,
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            Ease::Linear,
+            0.0,
+            1.0,
+            0,
+        );
         // 删 child
         remove_node(&mut scene, &mut tweens, child);
         // 联动清
         assert!(scene.anim.get(child).is_none(), "anim 清");
         assert!(scene.scroll.get(child).is_none(), "scroll 清");
-        assert!(tweens.tweens.iter().all(|t| t.node != child || t.killed), "tween killed");
-        assert!(scene.get(child).is_none(), "slotmap removed（被删 NodeId 失效）");
+        assert!(
+            tweens.tweens.iter().all(|t| t.node != child || t.killed),
+            "tween killed"
+        );
+        assert!(
+            scene.get(child).is_none(),
+            "slotmap removed（被删 NodeId 失效）"
+        );
         // root 仍在，且 root.children 不含 child
         assert!(scene.get(root).is_some(), "root 未删");
-        assert!(!scene.get(root).unwrap().children.contains(&child), "child 从父摘除");
+        assert!(
+            !scene.get(root).unwrap().children.contains(&child),
+            "child 从父摘除"
+        );
     }
 
     #[test]
@@ -362,13 +404,59 @@ mod tests {
     fn remove_node_from_middle_clears_subtree_and_keeps_siblings() {
         // root → [a, b, c]；删 b → a/c 保留，b 子树（b → bchild）递归删。
         let entries: Vec<(
-            Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>,
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
         )> = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(0), NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(0), NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(0), NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(2), NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(2),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
         ];
         let mut scene = Scene::build(&entries);
         let mut tweens = TweenManager::new();
@@ -387,7 +475,10 @@ mod tests {
         // root.children 不含 b，但含 a/c
         let new_kids = scene.get(root).unwrap().children.clone();
         assert!(!new_kids.contains(&b), "b 从父摘除");
-        assert!(new_kids.contains(&a) && new_kids.contains(&c), "a/c 保留在父 children");
+        assert!(
+            new_kids.contains(&a) && new_kids.contains(&c),
+            "a/c 保留在父 children"
+        );
         assert_eq!(new_kids.len(), 2, "父 children 从 3 → 2");
     }
 
@@ -421,7 +512,11 @@ mod tests {
         let mut tweens = TweenManager::new();
         scene.focused_node = Some(root);
         remove_node(&mut scene, &mut tweens, child);
-        assert_eq!(scene.focused_node, Some(root), "删非焦点 → focused_node 不变");
+        assert_eq!(
+            scene.focused_node,
+            Some(root),
+            "删非焦点 → focused_node 不变"
+        );
     }
 
     #[test]
@@ -441,7 +536,10 @@ mod tests {
         let mut tweens = TweenManager::new();
         let child_id_old = child;
         remove_node(&mut scene, &mut tweens, child);
-        assert!(scene.get(child_id_old).is_none(), "被删 NodeId 失效（gen++）");
+        assert!(
+            scene.get(child_id_old).is_none(),
+            "被删 NodeId 失效（gen++）"
+        );
         // 新 insert（复用槽位）
         let new_key = scene.nodes.insert(crate::scene::node::Node::default());
         let new_id = crate::scene::node::NodeId::from_key(new_key);
@@ -471,14 +569,20 @@ mod tests {
     fn kind_from_tag_maps_fence_whitelist() {
         assert!(matches!(kind_from_tag("div").unwrap(), NodeKind::Container));
         assert!(matches!(kind_from_tag("button").unwrap(), NodeKind::Button));
-        assert!(matches!(kind_from_tag("img").unwrap(), NodeKind::Image { .. }));
-        assert!(matches!(kind_from_tag("span").unwrap(), NodeKind::Text { .. }));
+        assert!(matches!(
+            kind_from_tag("img").unwrap(),
+            NodeKind::Image { .. }
+        ));
+        assert!(matches!(
+            kind_from_tag("span").unwrap(),
+            NodeKind::Text { .. }
+        ));
     }
 
     #[test]
     fn kind_from_tag_unknown_returns_err() {
         assert!(kind_from_tag("ul").is_err());
-        assert!(kind_from_tag("l-container").is_err());  // 不在围栏白名单内，与 div 同映射冗余
+        assert!(kind_from_tag("l-container").is_err()); // 不在围栏白名单内，与 div 同映射冗余
         assert!(kind_from_tag("").is_err());
     }
 
@@ -509,7 +613,10 @@ mod tests {
         let mut s = ResolvedStyle::default();
         apply_css(&mut s, "unknown-prop:42px;width:100px");
         use taffy::style::Dimension;
-        assert!(matches!(s.taffy_style.size.width, Dimension::Length(100.0)), "known 声明生效");
+        assert!(
+            matches!(s.taffy_style.size.width, Dimension::Length(100.0)),
+            "known 声明生效"
+        );
     }
 
     #[test]
@@ -520,7 +627,10 @@ mod tests {
         assert_eq!(n.id, id, "id 回填");
         assert!(n.parent.is_none());
         use taffy::style::Dimension;
-        assert!(matches!(n.base_style.taffy_style.size.width, Dimension::Length(100.0)));
+        assert!(matches!(
+            n.base_style.taffy_style.size.width,
+            Dimension::Length(100.0)
+        ));
         // style 初始 = base_style.clone()
         assert_eq!(n.style, n.base_style);
         assert!(n.dirty_mesh, "新建节点 dirty_mesh=true");
@@ -539,9 +649,15 @@ mod tests {
     fn create_node_clip_rect_for_overflow_hidden() {
         let mut scene = empty_scene();
         let id = create_node(&mut scene, "div", "overflow:hidden").unwrap();
-        assert!(scene.get(id).unwrap().clip_rect.is_some(), "overflow:hidden → clip slot");
+        assert!(
+            scene.get(id).unwrap().clip_rect.is_some(),
+            "overflow:hidden → clip slot"
+        );
         let id2 = create_node(&mut scene, "div", "").unwrap();
-        assert!(scene.get(id2).unwrap().clip_rect.is_none(), "默认 Visible → 无 clip slot");
+        assert!(
+            scene.get(id2).unwrap().clip_rect.is_none(),
+            "默认 Visible → 无 clip slot"
+        );
     }
 
     #[test]
@@ -549,7 +665,10 @@ mod tests {
         // instantiate 复用的节点构造：传入已 bake 的 kind+style，跳过 CSS parse。
         let mut scene = empty_scene();
         let mut style = ResolvedStyle::default();
-        apply_css(&mut style, "width:100px;height:100px;overflow:hidden;background-color:#ff0000");
+        apply_css(
+            &mut style,
+            "width:100px;height:100px;overflow:hidden;background-color:#ff0000",
+        );
         let id = create_node_from_template(&mut scene, NodeKind::Container, style.clone());
         let n = scene.get(id).unwrap();
         assert_eq!(n.id, id, "id 回填");
@@ -557,7 +676,10 @@ mod tests {
         assert_eq!(n.base_style, style, "base_style = 传入 baked style");
         assert_eq!(n.style, n.base_style, "style 初始 = base_style.clone()");
         assert!(n.dirty_mesh, "新建节点 dirty_mesh=true");
-        assert!(n.clip_rect.is_some(), "overflow:hidden → clip slot（同 create_node）");
+        assert!(
+            n.clip_rect.is_some(),
+            "overflow:hidden → clip slot（同 create_node）"
+        );
     }
 
     #[test]
@@ -565,7 +687,9 @@ mod tests {
         let mut scene = empty_scene();
         let id = create_node_from_template(
             &mut scene,
-            NodeKind::Text { content: "hi".into() },
+            NodeKind::Text {
+                content: "hi".into(),
+            },
             ResolvedStyle::default(),
         );
         let n = scene.get(id).unwrap();
@@ -576,7 +700,8 @@ mod tests {
     #[test]
     fn create_node_from_template_id_is_live() {
         let mut scene = empty_scene();
-        let id = create_node_from_template(&mut scene, NodeKind::Container, ResolvedStyle::default());
+        let id =
+            create_node_from_template(&mut scene, NodeKind::Container, ResolvedStyle::default());
         assert!(scene.get(id).is_some(), "返回的 NodeId live");
         assert_ne!(id, NodeId::INVALID);
     }
@@ -670,7 +795,10 @@ mod tests {
         remove_child(&mut scene, root, child).unwrap();
         assert!(scene.get(root).unwrap().children.is_empty());
         assert!(scene.get(child).unwrap().parent.is_none(), "child 变孤立");
-        assert!(scene.get(child).is_some(), "child 仍存活（未删 slotmap 槽）");
+        assert!(
+            scene.get(child).is_some(),
+            "child 仍存活（未删 slotmap 槽）"
+        );
     }
 
     #[test]

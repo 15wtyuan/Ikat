@@ -162,7 +162,14 @@ pub fn solve(scene: &mut Scene, font: &Font, root_size: (f32, f32), image_sizes:
         tid
     }
 
-    let root_tid = build(scene, &mut taffy_tree, &mut taffy_ids, scene.roots[0], false, image_sizes);
+    let root_tid = build(
+        scene,
+        &mut taffy_tree,
+        &mut taffy_ids,
+        scene.roots[0],
+        false,
+        image_sizes,
+    );
 
     // taffy NodeId → scene NodeId 反查，供 measure 闭包按 taffy nid 把 TextLayout
     // 存进 scene 索引的 text_layouts。render 复用，消除 layout/render 双测量不一致。
@@ -204,7 +211,12 @@ pub fn solve(scene: &mut Scene, font: &Font, root_size: (f32, f32), image_sizes:
              -> Size<f32> {
                 match node_ctx {
                     None => Size::ZERO,
-                    Some(MeasureContext::Image { iw, ih, w_dim, h_dim }) => {
+                    Some(MeasureContext::Image {
+                        iw,
+                        ih,
+                        w_dim,
+                        h_dim,
+                    }) => {
                         let (iw, ih, wd, hd) = (*iw, *ih, *w_dim, *h_dim);
                         // width：known.width（Percent/fit 解析后，taffy 传）> css Length > 等比 height > intrinsic。
                         //   Percent width：taffy 第二次传 known.width=Some(解析宽)。
@@ -220,9 +232,19 @@ pub fn solve(scene: &mut Scene, font: &Font, root_size: (f32, f32), image_sizes:
                             (_, Some(v)) => v,
                             _ => w * ih / iw,
                         };
-                        Size { width: w, height: h }
+                        Size {
+                            width: w,
+                            height: h,
+                        }
                     }
-                    Some(MeasureContext::Text { content, font_size, line_height, letter_spacing, align, nowrap }) => {
+                    Some(MeasureContext::Text {
+                        content,
+                        font_size,
+                        line_height,
+                        letter_spacing,
+                        align,
+                        nowrap,
+                    }) => {
                         let layout = measure_text(
                             content,
                             *font_size,
@@ -243,7 +265,10 @@ pub fn solve(scene: &mut Scene, font: &Font, root_size: (f32, f32), image_sizes:
                                 *slot = Some(layout.clone());
                             }
                         }
-                        Size { width: layout.text_width, height: layout.text_height }
+                        Size {
+                            width: layout.text_width,
+                            height: layout.text_height,
+                        }
                     }
                 }
             },
@@ -288,7 +313,10 @@ mod tests {
     use crate::style::resolved::ResolvedStyle;
 
     fn font() -> Option<Font> {
-        let p = format!("{}/tests/fixtures/DejaVuSans.ttf", env!("CARGO_MANIFEST_DIR"));
+        let p = format!(
+            "{}/tests/fixtures/DejaVuSans.ttf",
+            env!("CARGO_MANIFEST_DIR")
+        );
         Font::from_path(&p).ok()
     }
 
@@ -309,12 +337,18 @@ mod tests {
         let html2 = r#"<div class="root"><div class="a"></div><div class="b"></div></div>"#;
         // div 默认 flex-direction: column（ResolvedStyle::default 落地）。
         // CSS 不写 flex-direction，子项也应垂直堆叠。
-        let css = r#".root { width: 200px; height: 200px; } .a { height: 50px; } .b { height: 30px; }"#;
+        let css =
+            r#".root { width: 200px; height: 200px; } .a { height: 50px; } .b { height: 30px; }"#;
         let tree = parse_html(html2).unwrap();
         let sheet = parse_css(css).unwrap();
         let styles = resolve_styles(&tree, &sheet);
         let mut scene = build_scene(&tree, &styles);
-        solve(&mut scene, &font().expect("test needs a font"), (200.0, 200.0), &empty_sizes());
+        solve(
+            &mut scene,
+            &font().expect("test needs a font"),
+            (200.0, 200.0),
+            &empty_sizes(),
+        );
         let root = scene.get(scene.roots[0]).unwrap();
         let a = scene.get(root.children[0]).unwrap();
         let b = scene.get(root.children[1]).unwrap();
@@ -333,7 +367,12 @@ mod tests {
         let sheet = parse_css(css).unwrap();
         let styles = resolve_styles(&tree, &sheet);
         let mut scene = build_scene(&tree, &styles);
-        solve(&mut scene, &font().expect("test needs a font"), (200.0, 200.0), &empty_sizes());
+        solve(
+            &mut scene,
+            &font().expect("test needs a font"),
+            (200.0, 200.0),
+            &empty_sizes(),
+        );
         let root = scene.get(scene.roots[0]).unwrap();
         let a = scene.get(root.children[0]).unwrap();
         let b = scene.get(root.children[1]).unwrap();
@@ -364,14 +403,41 @@ mod tests {
         img_style.taffy_style.size.width = Dimension::Length(100.0);
         img_style.taffy_style.size.height = Dimension::Length(50.0);
         let entries = [
-            (None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None),
-            (Some(0), NodeKind::Image { src: "x.png".into() }, img_style, Vec::new(), None, false, None),
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Image {
+                    src: "x.png".into(),
+                },
+                img_style,
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
         ];
         let mut scene = Scene::build(&entries);
-        solve(&mut scene, &font().expect("need font"), (300.0, 300.0), &sizes("x.png", 40, 20));
+        solve(
+            &mut scene,
+            &font().expect("need font"),
+            (300.0, 300.0),
+            &sizes("x.png", 40, 20),
+        );
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect; // Image 是 root 唯一子
-        assert!((r.w - 100.0).abs() < 0.1, "CSS length 赢：w=100，got {}", r.w);
+        assert!(
+            (r.w - 100.0).abs() < 0.1,
+            "CSS length 赢：w=100，got {}",
+            r.w
+        );
         assert!((r.h - 50.0).abs() < 0.1, "CSS length 赢：h=50，got {}", r.h);
     }
 
@@ -382,11 +448,34 @@ mod tests {
         let mut img_style = ResolvedStyle::default();
         img_style.taffy_style.align_self = Some(AlignSelf::FlexStart);
         let entries = [
-            (None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None),
-            (Some(0), NodeKind::Image { src: "x.png".into() }, img_style, Vec::new(), None, false, None),
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Image {
+                    src: "x.png".into(),
+                },
+                img_style,
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
         ];
         let mut scene = Scene::build(&entries);
-        solve(&mut scene, &font().expect("need font"), (300.0, 300.0), &sizes("x.png", 40, 20));
+        solve(
+            &mut scene,
+            &font().expect("need font"),
+            (300.0, 300.0),
+            &sizes("x.png", 40, 20),
+        );
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect; // Image 是 root 唯一子
         assert!((r.w - 40.0).abs() < 0.1, "真实像素：w=40，got {}", r.w);
@@ -400,11 +489,34 @@ mod tests {
         let mut img_style = ResolvedStyle::default();
         img_style.taffy_style.align_self = Some(AlignSelf::FlexStart);
         let entries = [
-            (None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None),
-            (Some(0), NodeKind::Image { src: "x.png".into() }, img_style, Vec::new(), None, false, None),
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Image {
+                    src: "x.png".into(),
+                },
+                img_style,
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
         ];
         let mut scene = Scene::build(&entries);
-        solve(&mut scene, &font().expect("need font"), (300.0, 300.0), &empty_sizes());
+        solve(
+            &mut scene,
+            &font().expect("need font"),
+            (300.0, 300.0),
+            &empty_sizes(),
+        );
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
         assert!((r.w - 64.0).abs() < 0.1, "兜底：w=64，got {}", r.w);
@@ -418,11 +530,34 @@ mod tests {
         let mut img_style = ResolvedStyle::default();
         img_style.taffy_style.align_self = Some(AlignSelf::FlexStart);
         let entries = [
-            (None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None),
-            (Some(0), NodeKind::Image { src: "x.png".into() }, img_style, Vec::new(), None, false, None),
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Image {
+                    src: "x.png".into(),
+                },
+                img_style,
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
         ];
         let mut scene = Scene::build(&entries);
-        solve(&mut scene, &font().expect("need font"), (300.0, 300.0), &sizes("x.png", 0, 0));
+        solve(
+            &mut scene,
+            &font().expect("need font"),
+            (300.0, 300.0),
+            &sizes("x.png", 0, 0),
+        );
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
         assert!((r.w - 64.0).abs() < 0.1, "w/h=0 → 兜底 w=64，got {}", r.w);
@@ -437,15 +572,42 @@ mod tests {
         img_style.taffy_style.size.width = Dimension::Length(80.0);
         img_style.taffy_style.align_self = Some(AlignSelf::FlexStart);
         let entries = [
-            (None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None),
-            (Some(0), NodeKind::Image { src: "x.png".into() }, img_style, Vec::new(), None, false, None),
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Image {
+                    src: "x.png".into(),
+                },
+                img_style,
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
         ];
         let mut scene = Scene::build(&entries);
-        solve(&mut scene, &font().expect("need font"), (300.0, 300.0), &sizes("x.png", 40, 20));
+        solve(
+            &mut scene,
+            &font().expect("need font"),
+            (300.0, 300.0),
+            &sizes("x.png", 40, 20),
+        );
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
         assert!((r.w - 80.0).abs() < 0.1, "w=80 (CSS)");
-        assert!((r.h - 40.0).abs() < 0.1, "h 等比=40（80×20/40，2:1 真实 aspect），got {}", r.h);
+        assert!(
+            (r.h - 40.0).abs() < 0.1,
+            "h 等比=40（80×20/40，2:1 真实 aspect），got {}",
+            r.h
+        );
     }
 
     /// img style="height:60px" + 真实 40×20 → width 等比 = 120（60×40/20，2:1 aspect）。
@@ -456,14 +618,41 @@ mod tests {
         img_style.taffy_style.size.height = Dimension::Length(60.0);
         img_style.taffy_style.align_self = Some(AlignSelf::FlexStart);
         let entries = [
-            (None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None),
-            (Some(0), NodeKind::Image { src: "x.png".into() }, img_style, Vec::new(), None, false, None),
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Image {
+                    src: "x.png".into(),
+                },
+                img_style,
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
         ];
         let mut scene = Scene::build(&entries);
-        solve(&mut scene, &font().expect("need font"), (300.0, 300.0), &sizes("x.png", 40, 20));
+        solve(
+            &mut scene,
+            &font().expect("need font"),
+            (300.0, 300.0),
+            &sizes("x.png", 40, 20),
+        );
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
         assert!((r.h - 60.0).abs() < 0.1, "h=60 (CSS)");
-        assert!((r.w - 120.0).abs() < 0.1, "w 等比=120（60×40/20，2:1 真实 aspect），got {}", r.w);
+        assert!(
+            (r.w - 120.0).abs() < 0.1,
+            "w 等比=120（60×40/20，2:1 真实 aspect），got {}",
+            r.w
+        );
     }
 }

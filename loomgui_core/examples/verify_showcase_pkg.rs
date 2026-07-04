@@ -4,7 +4,9 @@ use loomgui_core::asset::read_package;
 use std::env;
 
 fn main() {
-    let path = env::args().nth(1).expect("usage: verify_showcase_pkg <pkg.bin>");
+    let path = env::args()
+        .nth(1)
+        .expect("usage: verify_showcase_pkg <pkg.bin>");
     let bytes = std::fs::read(&path).expect("read pkg.bin");
     let pkg = read_package(&bytes).expect("read_package");
     println!("package name: {:?}", pkg.name);
@@ -13,7 +15,12 @@ fn main() {
     names.sort();
     for n in &names {
         let c = &pkg.components[*n];
-        println!("  - {:<20} nodes={:<4} dyn_rules={}", c.name, c.nodes.len(), c.dynamic_rules.rules.len());
+        println!(
+            "  - {:<20} nodes={:<4} dyn_rules={}",
+            c.name,
+            c.nodes.len(),
+            c.dynamic_rules.rules.len()
+        );
     }
     println!("asset_manifest ({} paths):", pkg.asset_manifest.len());
     for e in &pkg.asset_manifest {

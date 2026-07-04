@@ -1,7 +1,7 @@
 //! dirty hash：header_hash（表头） + payload_hash（几何），供 Stage 跨帧分轴比较定
 //! ChangeLevel。碰撞最坏 1 帧延迟，不破正确性。
 
-use crate::render::node::{RenderNode, NodePayload};
+use crate::render::node::{NodePayload, RenderNode};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
@@ -31,7 +31,11 @@ pub fn payload_hash(rn: &RenderNode) -> u64 {
             // 非纯平移节点已 box-local（Rect{x:0,y:0}）→不减。
             // 这样位置变只改 world_matrix（进 header_hash），不改 payload_hash→Header。
             let pure = crate::transform::is_pure_translation(&rn.world_matrix);
-            let (tx, ty) = if pure { (rn.world_matrix[4], rn.world_matrix[5]) } else { (0.0, 0.0) };
+            let (tx, ty) = if pure {
+                (rn.world_matrix[4], rn.world_matrix[5])
+            } else {
+                (0.0, 0.0)
+            };
             for v in verts {
                 (v[0] - tx).to_le_bytes().hash(&mut h);
                 (v[1] - ty).to_le_bytes().hash(&mut h);
@@ -88,13 +92,20 @@ pub fn payload_hash(rn: &RenderNode) -> u64 {
 /// 但 hash 该覆盖所有身份字段，避免漏）。
 pub fn header_hash(rn: &RenderNode) -> u64 {
     let mut h = DefaultHasher::new();
-    for &v in rn.world_matrix.iter() { v.to_le_bytes().hash(&mut h); }
+    for &v in rn.world_matrix.iter() {
+        v.to_le_bytes().hash(&mut h);
+    }
     rn.visible.hash(&mut h);
     rn.alpha.to_le_bytes().hash(&mut h);
     rn.sort_key.hash(&mut h);
     rn.mask_context.0.hash(&mut h);
-    for &v in rn.color_tint.iter() { v.to_le_bytes().hash(&mut h); }
-    (match rn.blend { crate::render::node::BlendMode::Normal => 0u8 }).hash(&mut h);
+    for &v in rn.color_tint.iter() {
+        v.to_le_bytes().hash(&mut h);
+    }
+    (match rn.blend {
+        crate::render::node::BlendMode::Normal => 0u8,
+    })
+    .hash(&mut h);
     rn.reuse_key.hash(&mut h);
     h.finish()
 }
@@ -102,23 +113,31 @@ pub fn header_hash(rn: &RenderNode) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::node::{BlendMode, MaskContext, NodePayload, RenderNode, ChangeLevel};
+    use crate::render::node::{BlendMode, ChangeLevel, MaskContext, NodePayload, RenderNode};
     use crate::text::layout::{Glyph, GlyphRun, Line, TextLayout};
     use crate::transform::IDENTITY;
 
     /// mesh_rn：构造带 image_path 的 Mesh RenderNode（None=纯色，Some=图 path）。
-    fn mesh_rn(path: Option<&str>, alpha: f32, color0: [f32;4]) -> RenderNode {
+    fn mesh_rn(path: Option<&str>, alpha: f32, color0: [f32; 4]) -> RenderNode {
         RenderNode {
-            node_id: 0, parent_id: None, visible: true, alpha,
-            color_tint: [1.0;4],
-            world_matrix: IDENTITY, blend: BlendMode::Normal,
-            mask_context: MaskContext(0), sort_key: 0,
+            node_id: 0,
+            parent_id: None,
+            visible: true,
+            alpha,
+            color_tint: [1.0; 4],
+            world_matrix: IDENTITY,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: 0,
             change_level: ChangeLevel::Full,
             reuse_key: 0,
             payload: NodePayload::Mesh {
-                verts: vec![[0.0,0.0];4], uvs: vec![[0.0,0.0];4],
-                colors: vec![color0;4], indices: vec![0,1,2,0,2,3],
-                image_path: path.map(|s| s.to_string()), program: 0,
+                verts: vec![[0.0, 0.0]; 4],
+                uvs: vec![[0.0, 0.0]; 4],
+                colors: vec![color0; 4],
+                indices: vec![0, 1, 2, 0, 2, 3],
+                image_path: path.map(|s| s.to_string()),
+                program: 0,
                 color_matrix: [0.0; 20],
             },
         }
@@ -179,34 +198,48 @@ mod tests {
 
     #[test]
     fn header_hash_world_matrix_change() {
-        let a = mesh_rn(Some("a.png"), 1.0, [1.0;4]);
-        let mut b = mesh_rn(Some("a.png"), 1.0, [1.0;4]);
-        b.world_matrix = [1.0,0.0,0.0,1.0,5.0,0.0]; // tx=5
-        assert_ne!(header_hash(&a), header_hash(&b), "world 变 → header_hash 变");
+        let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        let mut b = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        b.world_matrix = [1.0, 0.0, 0.0, 1.0, 5.0, 0.0]; // tx=5
+        assert_ne!(
+            header_hash(&a),
+            header_hash(&b),
+            "world 变 → header_hash 变"
+        );
     }
 
     #[test]
     fn header_hash_ignores_payload() {
         // 几何变、表头不变 → header_hash 相等（payload 归 payload_hash）。
-        let a = mesh_rn(Some("a.png"), 1.0, [1.0;4]);
-        let mut b = mesh_rn(Some("a.png"), 1.0, [1.0;4]);
-        if let NodePayload::Mesh { verts, .. } = &mut b.payload { verts[0] = [9.0,9.0]; }
+        let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        let mut b = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        if let NodePayload::Mesh { verts, .. } = &mut b.payload {
+            verts[0] = [9.0, 9.0];
+        }
         assert_eq!(header_hash(&a), header_hash(&b), "几何变不影响 header_hash");
     }
 
     #[test]
     fn header_hash_alpha_change() {
-        let a = mesh_rn(Some("a.png"), 1.0, [1.0;4]);
-        let b = mesh_rn(Some("a.png"), 0.5, [1.0;4]); // alpha 0.5
-        assert_ne!(header_hash(&a), header_hash(&b), "alpha 变 → header_hash 变（HEADER）");
+        let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        let b = mesh_rn(Some("a.png"), 0.5, [1.0; 4]); // alpha 0.5
+        assert_ne!(
+            header_hash(&a),
+            header_hash(&b),
+            "alpha 变 → header_hash 变（HEADER）"
+        );
     }
 
     #[test]
     fn payload_hash_ignores_alpha() {
         // alpha 归 header，payload_hash 不含 alpha（否则 alpha 变会误落 FULL）。
-        let a = mesh_rn(Some("a.png"), 1.0, [1.0;4]);
-        let b = mesh_rn(Some("a.png"), 0.5, [1.0;4]);
-        assert_eq!(payload_hash(&a), payload_hash(&b), "payload_hash 不含 alpha");
+        let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        let b = mesh_rn(Some("a.png"), 0.5, [1.0; 4]);
+        assert_eq!(
+            payload_hash(&a),
+            payload_hash(&b),
+            "payload_hash 不含 alpha"
+        );
     }
 
     #[test]
@@ -231,7 +264,11 @@ mod tests {
         let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
         let mut b = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
         b.reuse_key = 7;
-        assert_ne!(header_hash(&a), header_hash(&b), "reuse_key 变 → header_hash 变");
+        assert_ne!(
+            header_hash(&a),
+            header_hash(&b),
+            "reuse_key 变 → header_hash 变"
+        );
     }
 
     #[test]
@@ -242,7 +279,11 @@ mod tests {
         if let NodePayload::Text { layout, .. } = &mut b.payload {
             layout.lines[0].height = 30.0; // 改 line-height
         }
-        assert_ne!(payload_hash(&a), payload_hash(&b), "line.height 变 → payload_hash 变");
+        assert_ne!(
+            payload_hash(&a),
+            payload_hash(&b),
+            "line.height 变 → payload_hash 变"
+        );
     }
 
     #[test]
@@ -254,6 +295,10 @@ mod tests {
             layout.lines[0].baseline = 20.0;
             layout.lines[0].y = 4.0;
         }
-        assert_ne!(payload_hash(&a), payload_hash(&b), "line.baseline/y 变 → payload_hash 变");
+        assert_ne!(
+            payload_hash(&a),
+            payload_hash(&b),
+            "line.baseline/y 变 → payload_hash 变"
+        );
     }
 }

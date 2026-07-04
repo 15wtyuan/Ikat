@@ -9,8 +9,8 @@ use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
 use crate::scene::node::{NodeId, Rect, Scene};
-use crate::style::resolved::OverflowMode;
 use crate::style::dynamic::rematch_pseudo_classes;
+use crate::style::resolved::OverflowMode;
 use crate::text::layout::Font;
 use std::sync::Arc;
 
@@ -85,11 +85,12 @@ impl Stage {
     pub fn load_package(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
         let mut pkg = crate::asset::read_package(bytes).map_err(|e| e.to_string())?;
         pkg.name = name.to_string(); // read_package 填空串，这里覆盖为真实包名
-        // 把本包 manifest 的 path → (w,h) 合并进全局尺寸表。
-        // 重复 load 同名包前，先清前次加载的包的 path 条目（避免 path 残留——虽然 path 全局唯一，
-        // 但若前次包有 path 而新包没有，条目会悬空）。简单实现：直接 extend 覆盖（同 path 后写赢）。
+                                     // 把本包 manifest 的 path → (w,h) 合并进全局尺寸表。
+                                     // 重复 load 同名包前，先清前次加载的包的 path 条目（避免 path 残留——虽然 path 全局唯一，
+                                     // 但若前次包有 path 而新包没有，条目会悬空）。简单实现：直接 extend 覆盖（同 path 后写赢）。
         for entry in &pkg.asset_manifest {
-            self.image_sizes.insert(entry.path.clone(), (entry.w, entry.h));
+            self.image_sizes
+                .insert(entry.path.clone(), (entry.w, entry.h));
         }
         self.packages.insert(name.to_string(), pkg);
         Ok(())
@@ -98,7 +99,10 @@ impl Stage {
     /// 查图尺寸（path → (w, h) 像素）。供 layout/render 用。
     /// path 缺失或 w/h=0 → None（调用方 fallback 64×64）。
     pub fn image_size(&self, path: &str) -> Option<(u32, u32)> {
-        self.image_sizes.get(path).copied().filter(|(w, h)| *w != 0 && *h != 0)
+        self.image_sizes
+            .get(path)
+            .copied()
+            .filter(|(w, h)| *w != 0 && *h != 0)
     }
 
     /// 缓存本帧指针输入（tick 前调；覆盖式——每帧全量替换 pending_input）。
@@ -142,7 +146,7 @@ impl Stage {
     /// 累积时间（C# 传 Time.unscaledDeltaTime；双击窗口用）。
     pub fn advance_time(&mut self, dt: f32) {
         self.pointer_state.time_s += dt;
-        self.pending_dt = dt;   // stash 给 tick_and_render 喂 tweens.update
+        self.pending_dt = dt; // stash 给 tick_and_render 喂 tweens.update
     }
 
     /// 外部取消待 click（照 fgui CancelClick）。FFI cancel_click 转发。
@@ -241,13 +245,20 @@ impl Stage {
 
     /// 注册 tween。start/end 取前 value_size 个分量（prop 决定 size）。
     /// duration<=0 → update 首帧即结束并产 complete。无 scene / 越界 node → update 跳过（不报错）。
-    #[allow(clippy::too_many_arguments)]   // 参数与 C# FFI 签名 1:1 对齐（同 text/layout.rs 惯例）
+    #[allow(clippy::too_many_arguments)] // 参数与 C# FFI 签名 1:1 对齐（同 text/layout.rs 惯例）
     pub fn tween(
-        &mut self, node: NodeId, prop: crate::tween::TweenProp,
-        start: [f32; 4], end: [f32; 4],
-        ease: crate::tween::Ease, delay: f32, duration: f32, tag: u32,
+        &mut self,
+        node: NodeId,
+        prop: crate::tween::TweenProp,
+        start: [f32; 4],
+        end: [f32; 4],
+        ease: crate::tween::Ease,
+        delay: f32,
+        duration: f32,
+        tag: u32,
     ) {
-        self.tweens.tween(node, prop, start, end, ease, delay, duration, tag);
+        self.tweens
+            .tween(node, prop, start, end, ease, delay, duration, tag);
     }
 
     /// 停该节点该 prop 的 tween（override 保留末值）。
@@ -519,7 +530,8 @@ impl Stage {
         //    返回新 hash 存 self.prev_node_hashes 供下帧比。
         // build_render_nodes 查 Stage.image_sizes 算九宫格 UV（slice_px / src_px）。
         // Image payload 带 path，UV 全图 (0,0)-(1,1)（无 atlas 子区），Unity 查 Sprite 拿真实 UV。
-        let (frame, new_hashes) = build_render_nodes(scene, &self.font, &self.prev_node_hashes, &self.image_sizes);
+        let (frame, new_hashes) =
+            build_render_nodes(scene, &self.font, &self.prev_node_hashes, &self.image_sizes);
         self.prev_node_hashes = new_hashes;
         frame
     }
@@ -581,7 +593,11 @@ mod tests {
             }
             _ => {}
         }
-        let draggable = el.attrs.get("draggable").map(|v| v == "true").unwrap_or(false);
+        let draggable = el
+            .attrs
+            .get("draggable")
+            .map(|v| v == "true")
+            .unwrap_or(false);
         let tabindex = el.attrs.get("tabindex").and_then(|v| v.parse::<i32>().ok());
         let my_idx = out.len();
         out.push(TemplateNode {
@@ -606,7 +622,9 @@ mod tests {
                 ts.text_align = style.text_align;
                 ts.white_space_nowrap = style.white_space_nowrap;
                 out.push(TemplateNode {
-                    kind: NodeKind::Text { content: text.clone() },
+                    kind: NodeKind::Text {
+                        content: text.clone(),
+                    },
                     style: ts,
                     parent_idx: Some(my_idx),
                     classes: Vec::new(),
@@ -663,10 +681,7 @@ mod tests {
     /// 挂载后几何/样式与 inline 同构（零回归）。
     #[test]
     fn package_load_renders_identical_to_inline() {
-        let font_path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/DejaVuSans.ttf"
-        );
+        let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
         let html = r#"<div class="c"><span>hi</span><img src="logo.png"></div>"#;
         let css = ".c{width:200px;height:100px;overflow:hidden;background-color:#ff0000;}";
 
@@ -687,7 +702,10 @@ mod tests {
         s_pkg.scene.as_mut().unwrap().roots.push(comp_root);
         let pkg_json = s_pkg.render_json();
 
-        assert_eq!(inline_json, pkg_json, "包路径渲染输出必须 == inline（instantiate 克隆子树等价）");
+        assert_eq!(
+            inline_json, pkg_json,
+            "包路径渲染输出必须 == inline（instantiate 克隆子树等价）"
+        );
     }
 
     /// load_package → instantiate → :hover 重匹配验证。
@@ -713,9 +731,12 @@ mod tests {
         // btn = comp_root 的首个 button 子（gather_rec 把 <button>OK</button> 建成 Button + auto Text 子）
         let btn_id = {
             let sc = s.scene.as_ref().unwrap();
-            *sc.get(comp_root).unwrap().children.iter().find(|&&c| {
-                matches!(sc.get(c).unwrap().kind, NodeKind::Button)
-            }).unwrap()
+            *sc.get(comp_root)
+                .unwrap()
+                .children
+                .iter()
+                .find(|&&c| matches!(sc.get(c).unwrap().kind, NodeKind::Button))
+                .unwrap()
         };
         // Move 到按钮 (50,25)（按钮在 (0,0,100,50)）
         s.set_input(&[crate::input::PointerEvent {
@@ -729,7 +750,9 @@ mod tests {
         s.tick_and_render();
         let events = s.last_events();
         assert!(
-            events.iter().any(|e| e.event_type == crate::input::EVT_ROLL_OVER),
+            events
+                .iter()
+                .any(|e| e.event_type == crate::input::EVT_ROLL_OVER),
             "Move 到按钮 → RollOver"
         );
         assert!(s.is_pointer_on_ui(), "命中按钮 → is_pointer_on_ui=true");
@@ -761,9 +784,12 @@ mod tests {
         // btn = comp_root 的首个 Button 子
         let btn_id = {
             let sc = s.scene.as_ref().unwrap();
-            *sc.get(comp_root).unwrap().children.iter().find(|&&c| {
-                matches!(sc.get(c).unwrap().kind, NodeKind::Button)
-            }).unwrap()
+            *sc.get(comp_root)
+                .unwrap()
+                .children
+                .iter()
+                .find(|&&c| matches!(sc.get(c).unwrap().kind, NodeKind::Button))
+                .unwrap()
         };
         s.set_node_disabled(btn_id, true);
         // warmup tick（同 hover 测：hit_test 1 帧延迟，首帧 world_transforms 空）
@@ -804,7 +830,9 @@ mod tests {
         s.tick_and_render();
         let events = s.last_events();
         assert!(
-            !events.iter().any(|e| e.event_type == crate::input::EVT_CLICK),
+            !events
+                .iter()
+                .any(|e| e.event_type == crate::input::EVT_CLICK),
             "disabled → 不产 Click"
         );
     }
@@ -820,9 +848,19 @@ mod tests {
             nodes: slotmap::SlotMap::with_key(),
             dynamic_rules: Default::default(),
             focused_node: None,
-            world_transforms: Vec::new(), anim: Default::default(), scroll: Default::default(), text_layouts: Vec::new(),
+            world_transforms: Vec::new(),
+            anim: Default::default(),
+            scroll: Default::default(),
+            text_layouts: Vec::new(),
         });
-        s.set_input(&[crate::input::PointerEvent { kind: crate::input::PointerKind::Move, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        s.set_input(&[crate::input::PointerEvent {
+            kind: crate::input::PointerKind::Move,
+            x: 50.0,
+            y: 50.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }]);
         s.tick_and_render();
         assert!(!s.is_pointer_on_ui(), "空 scene → false");
     }
@@ -842,8 +880,10 @@ mod tests {
         s.scene.as_mut().unwrap().scroll.ensure(root_id).scroll_pos = (50.0, 50.0);
         // reload → scroll 表应被清
         s.load_inline_for_test(html, css).unwrap();
-        assert!(s.scene.as_ref().unwrap().scroll.get(root_id).is_none(),
-            "reload 后 scroll 表清空，NodeId 槽不存在");
+        assert!(
+            s.scene.as_ref().unwrap().scroll.get(root_id).is_none(),
+            "reload 后 scroll 表清空，NodeId 槽不存在"
+        );
     }
 
     /// tween 经 Stage 公共 API 注册 → advance_time stash dt → tick update 写 anim + 产 complete。
@@ -857,18 +897,41 @@ mod tests {
         s.load_inline_for_test(html, css).unwrap();
         let rid = s.scene.as_ref().unwrap().roots[0];
         // opacity 0→1，1s Linear，tag=99
-        s.tween(rid, crate::tween::TweenProp::Opacity,
-                [0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0],
-                crate::tween::Ease::Linear, 0.0, 1.0, 99);
+        s.tween(
+            rid,
+            crate::tween::TweenProp::Opacity,
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            crate::tween::Ease::Linear,
+            0.0,
+            1.0,
+            99,
+        );
         s.advance_time(0.5);
         s.tick_and_render();
-        let op = s.scene.as_ref().unwrap().anim.0.get(&rid).and_then(|a| a.opacity);
+        let op = s
+            .scene
+            .as_ref()
+            .unwrap()
+            .anim
+            .0
+            .get(&rid)
+            .and_then(|a| a.opacity);
         assert!((op.unwrap() - 0.5).abs() < 1e-4, "半程 opacity=0.5");
-        assert!(s.last_events().iter().all(|e| e.event_type != crate::input::EVT_TWEEN_COMPLETE), "未结束");
+        assert!(
+            s.last_events()
+                .iter()
+                .all(|e| e.event_type != crate::input::EVT_TWEEN_COMPLETE),
+            "未结束"
+        );
         s.advance_time(0.5);
         s.tick_and_render();
-        assert!(s.last_events().iter().any(|e| e.event_type == crate::input::EVT_TWEEN_COMPLETE
-            && e.touch_id == 99), "结束 → complete(tag=99)");
+        assert!(
+            s.last_events()
+                .iter()
+                .any(|e| e.event_type == crate::input::EVT_TWEEN_COMPLETE && e.touch_id == 99),
+            "结束 → complete(tag=99)"
+        );
     }
 
     /// 直接 tick_and_render()（不 advance_time）→ pending_dt=0。
@@ -878,14 +941,25 @@ mod tests {
     fn stage_tick_without_advance_time_is_zero_regression() {
         let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
         let mut s = Stage::new(font_path, (200.0, 100.0)).unwrap();
-        s.load_inline_for_test(r#"<div class="b"></div>"#, ".b{width:100px;height:50px;}").unwrap();
+        s.load_inline_for_test(r#"<div class="b"></div>"#, ".b{width:100px;height:50px;}")
+            .unwrap();
         let rid = s.scene.as_ref().unwrap().roots[0];
         // delay=1.0：dt=0 时 elapsed=0 < delay → 不 apply（若用 delay=0，update 会写 start 值）
-        s.tween(rid, crate::tween::TweenProp::Opacity,
-                [0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0],
-                crate::tween::Ease::Linear, 1.0, 1.0, 0);
-        s.tick_and_render();   // 无 advance_time → dt=0 → elapsed < delay → 不推进
-        assert!(s.scene.as_ref().unwrap().anim.0.get(&rid).is_none(), "dt=0 不写 override（HashMap 无条目）");
+        s.tween(
+            rid,
+            crate::tween::TweenProp::Opacity,
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            crate::tween::Ease::Linear,
+            1.0,
+            1.0,
+            0,
+        );
+        s.tick_and_render(); // 无 advance_time → dt=0 → elapsed < delay → 不推进
+        assert!(
+            s.scene.as_ref().unwrap().anim.0.get(&rid).is_none(),
+            "dt=0 不写 override（HashMap 无条目）"
+        );
     }
 
     /// tween 写读对称回归：tween 写 scene.anim（用 id.index()）→ render 读 anim.opacity
@@ -896,20 +970,30 @@ mod tests {
     fn tween_anim_override_visible_in_render_output() {
         let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
         let mut s = Stage::new(font_path, (200.0, 100.0)).unwrap();
-        s.load_inline_for_test(r#"<div class="b"></div>"#, ".b{width:100px;height:50px;}").unwrap();
+        s.load_inline_for_test(r#"<div class="b"></div>"#, ".b{width:100px;height:50px;}")
+            .unwrap();
         let rid = s.scene.as_ref().unwrap().roots[0];
         // tween opacity 0→0.5，delay=0、duration=1.0、Linear。
-        s.tween(rid, crate::tween::TweenProp::Opacity,
-                [0.0, 0.0, 0.0, 0.0], [0.5, 0.0, 0.0, 0.0],
-                crate::tween::Ease::Linear, 0.0, 1.0, 0);
+        s.tween(
+            rid,
+            crate::tween::TweenProp::Opacity,
+            [0.0, 0.0, 0.0, 0.0],
+            [0.5, 0.0, 0.0, 0.0],
+            crate::tween::Ease::Linear,
+            0.0,
+            1.0,
+            0,
+        );
         // 推进整段 duration → tt=1.0 → Linear 插值末值 0.5。
         s.advance_time(1.0);
         let frame = s.tick_and_render();
         // 唯一根节点 → frame.nodes[pos=0]。断言 render 输出吃到 anim override（alpha=0.5），
         // 不是只断言 anim 表内值——确保读写对称贯穿到渲染层。
-        assert!((frame.nodes[0].alpha - 0.5).abs() < 1e-5,
-                "tween anim.opacity override 应在 render 输出可见：alpha={}（期望 0.5）",
-                frame.nodes[0].alpha);
+        assert!(
+            (frame.nodes[0].alpha - 0.5).abs() < 1e-5,
+            "tween anim.opacity override 应在 render 输出可见：alpha={}（期望 0.5）",
+            frame.nodes[0].alpha
+        );
     }
 
     /// 拖拽滚动容器 → 同 tick world_transforms 已含 scroll_pos（零延迟）。
@@ -929,8 +1013,22 @@ mod tests {
         // feed 拖拽输入（mouse touch_id=-1，dy=20 > SCROLL_THRESHOLD_MOUSE=8）
         s.advance_time(0.016);
         s.set_input(&[
-            crate::input::PointerEvent { kind: crate::input::PointerKind::Down, x: 25.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 },
-            crate::input::PointerEvent { kind: crate::input::PointerKind::Move, x: 25.0, y: 45.0, button: 0, pad: [0, 0], touch_id: -1 },
+            crate::input::PointerEvent {
+                kind: crate::input::PointerKind::Down,
+                x: 25.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            },
+            crate::input::PointerEvent {
+                kind: crate::input::PointerKind::Move,
+                x: 25.0,
+                y: 45.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            },
         ]);
         s.tick_and_render();
         // 子节点 world.apply 反映 scroll_pos（非 0）
@@ -946,10 +1044,7 @@ mod tests {
     /// 走包路径（load_package → instantiate），因为 dynamic_rules 由打包器提取进 scene。
     #[test]
     fn active_scale_visible_same_frame() {
-        let font_path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/DejaVuSans.ttf"
-        );
+        let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
         let html = r#"<div id="b" class="btn">x</div>"#;
         let css = ".btn{width:100px;height:100px;} .btn:active{transform:scale(0.5);}";
         let (pkg_bytes, _) = pkg_bytes_from_inline(html, css);
@@ -999,11 +1094,14 @@ mod tests {
     fn tick_computes_world_transforms_before_render() {
         let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
         let mut s = Stage::new(font_path, (200.0, 200.0)).unwrap();
-        s.load_inline_for_test(r#"<div class="c"></div>"#, ".c{width:100px;height:50px;}").unwrap();
+        s.load_inline_for_test(r#"<div class="c"></div>"#, ".c{width:100px;height:50px;}")
+            .unwrap();
         s.tick_and_render();
         // tick 后 world_transforms 应非空（compute 在 render 前跑过）
-        assert!(!s.scene.as_ref().unwrap().world_transforms.is_empty(),
-            "compute_world_transforms 在 render 前跑过");
+        assert!(
+            !s.scene.as_ref().unwrap().world_transforms.is_empty(),
+            "compute_world_transforms 在 render 前跑过"
+        );
     }
 
     /// hit_test 在 world_transforms 空/未对齐时不 panic（bounds guard 拦截）。
@@ -1019,13 +1117,21 @@ mod tests {
         let mut root = Node::default();
         root.kind = NodeKind::Container;
         root.style = ResolvedStyle::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         root.touchable = true;
         let scene = Scene::from_nodes(vec![root], vec![]);
         s.scene = Some(scene);
         // world_transforms 空（未 compute）→ hit_test bounds guard 应拦截，不 panic，返 None
         let hit = crate::hit::hit_test(s.scene.as_ref().unwrap(), (50.0, 50.0));
-        assert_eq!(hit, None, "world_transforms 空 → bounds guard 返 None（未命中，1 帧延迟语义）");
+        assert_eq!(
+            hit, None,
+            "world_transforms 空 → bounds guard 返 None（未命中，1 帧延迟语义）"
+        );
     }
 
     /// remove_node 后 tick_and_render 不 panic（容量化并行数组防越界）。
@@ -1041,13 +1147,23 @@ mod tests {
         let css = ".root{width:200px;height:200px;} .a,.b,.c{width:50px;height:50px;}";
         let mut s = Stage::new(font_path, (200.0, 200.0)).unwrap();
         s.load_inline_for_test(html, css).unwrap();
-        s.tick_and_render();   // 首帧：建 world_transforms 基线
-        // 取 b 的 NodeId（root 的第 2 个 div 子——注意 root 的 Text 子不在这里，3 个 div 子直接挂 root）
+        s.tick_and_render(); // 首帧：建 world_transforms 基线
+                             // 取 b 的 NodeId（root 的第 2 个 div 子——注意 root 的 Text 子不在这里，3 个 div 子直接挂 root）
         let scene = s.scene.as_ref().unwrap();
         let root_id = scene.roots[0];
-        let div_kids: Vec<_> = scene.get(root_id).unwrap().children.iter()
-            .filter(|&&c| matches!(scene.get(c).unwrap().kind, crate::scene::node::NodeKind::Container))
-            .copied().collect();
+        let div_kids: Vec<_> = scene
+            .get(root_id)
+            .unwrap()
+            .children
+            .iter()
+            .filter(|&&c| {
+                matches!(
+                    scene.get(c).unwrap().kind,
+                    crate::scene::node::NodeKind::Container
+                )
+            })
+            .copied()
+            .collect();
         assert_eq!(div_kids.len(), 3, "3 个 div 子");
         let b_id = div_kids[1];
         // 删 b（中间子）→ slotmap 间隙
@@ -1058,7 +1174,10 @@ mod tests {
         let scene = s.scene.as_ref().unwrap();
         assert!(scene.get(b_id).is_none(), "b 删除后 NodeId 失效");
         assert!(scene.get(div_kids[0]).is_some(), "a 仍 live");
-        assert!(scene.get(div_kids[2]).is_some(), "c 仍 live（高 idx，间隙后仍可索引）");
+        assert!(
+            scene.get(div_kids[2]).is_some(),
+            "c 仍 live（高 idx，间隙后仍可索引）"
+        );
         // 再 tick 一帧确认稳定（world_transforms 已按新容量重算）
         s.tick_and_render();
     }
@@ -1109,7 +1228,14 @@ mod dynamic_tests {
         let mut s = Stage::new_for_test();
         let n = s.create_node("div", "").unwrap();
         s.set_style(n, "background-color:#ff0000").unwrap();
-        let bg = s.scene.as_ref().unwrap().get(n).unwrap().base_style.background_color;
+        let bg = s
+            .scene
+            .as_ref()
+            .unwrap()
+            .get(n)
+            .unwrap()
+            .base_style
+            .background_color;
         assert_eq!(bg, Some([1.0, 0.0, 0.0, 1.0]));
     }
 
@@ -1137,7 +1263,9 @@ mod dynamic_tests {
     fn dynamic_tree_tick_and_render_does_not_panic() {
         let mut s = Stage::new_for_test();
         let root = s.create_root("div", "width:200px;height:200px").unwrap();
-        let child = s.create_node("div", "width:100px;height:100px;background-color:#00ff00").unwrap();
+        let child = s
+            .create_node("div", "width:100px;height:100px;background-color:#00ff00")
+            .unwrap();
         s.append_child(root, child).unwrap();
         // 完整管线跑一遍：solve 建 taffy 树 + compute_world_transforms + render
         let frame = s.tick_and_render();
@@ -1317,7 +1445,8 @@ mod instantiate_tests {
     fn instantiate_clones_subtree_returns_orphan_root() {
         let mut s = Stage::new_for_test();
         s.create_root("div", "width:100px;height:100px").unwrap();
-        s.load_package("bag", &make_test_pkg_with_subtree()).unwrap();
+        s.load_package("bag", &make_test_pkg_with_subtree())
+            .unwrap();
         let root = s.instantiate("bag", "comp1").unwrap();
         let scene = s.scene.as_ref().unwrap();
         // 组件根 parent = None（孤立）
@@ -1325,7 +1454,11 @@ mod instantiate_tests {
         // comp1 含 root + child → 子树串好（root.children 含 child）
         assert_eq!(scene.get(root).unwrap().children.len(), 1, "root 有 1 子");
         let child = scene.get(root).unwrap().children[0];
-        assert_eq!(scene.get(child).unwrap().parent, Some(root), "child.parent=root");
+        assert_eq!(
+            scene.get(child).unwrap().parent,
+            Some(root),
+            "child.parent=root"
+        );
         // scene 节点数 = create_root 的 1 + 组件的 2 = 3
         assert_eq!(scene.nodes.len(), 3, "scene 多了组件的 2 节点");
     }
@@ -1334,7 +1467,8 @@ mod instantiate_tests {
     fn instantiate_multi_instance_independent() {
         let mut s = Stage::new_for_test();
         s.create_root("div", "").unwrap();
-        s.load_package("bag", &make_test_pkg_with_subtree()).unwrap();
+        s.load_package("bag", &make_test_pkg_with_subtree())
+            .unwrap();
         let i1 = s.instantiate("bag", "comp1").unwrap();
         let i2 = s.instantiate("bag", "comp1").unwrap();
         assert_ne!(i1, i2, "两实例不同 NodeId");
@@ -1369,7 +1503,8 @@ mod instantiate_tests {
             components: vec![("c1", &nodes, &rules)],
             asset_manifest: &[],
         };
-        s.load_package("bag", &crate::asset::write_package(&input)).unwrap();
+        s.load_package("bag", &crate::asset::write_package(&input))
+            .unwrap();
         assert!(s.instantiate("nope", "c1").is_err(), "包不存在");
         assert!(s.instantiate("bag", "nope").is_err(), "组件不存在");
     }
@@ -1380,7 +1515,8 @@ mod instantiate_tests {
         let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
         let mut s = Stage::new(font_path, (200.0, 200.0)).unwrap();
         // 不调 create_root，scene = None
-        s.load_package("bag", &make_test_pkg_with_subtree()).unwrap();
+        s.load_package("bag", &make_test_pkg_with_subtree())
+            .unwrap();
         assert!(s.instantiate("bag", "comp1").is_err(), "无 scene → Err");
     }
 
@@ -1416,7 +1552,8 @@ mod instantiate_tests {
         };
         let mut s = Stage::new_for_test();
         s.create_root("div", "").unwrap();
-        s.load_package("bag", &crate::asset::write_package(&input)).unwrap();
+        s.load_package("bag", &crate::asset::write_package(&input))
+            .unwrap();
         let before = s.scene.as_ref().unwrap().dynamic_rules.rules.len();
         s.instantiate("bag", "comp1").unwrap();
         s.instantiate("bag", "comp1").unwrap();
@@ -1454,7 +1591,10 @@ mod instantiate_tests {
         };
         // 组件根 = Container(div) 100x50；子 = Button.btn 100x50（base 灰底，hover 蓝）
         let mut btn_style = ResolvedStyle::default();
-        crate::scene::dynamic::apply_css(&mut btn_style, "width:100px;height:50px;background-color:#cccccc");
+        crate::scene::dynamic::apply_css(
+            &mut btn_style,
+            "width:100px;height:50px;background-color:#cccccc",
+        );
         let mut root_style = ResolvedStyle::default();
         crate::scene::dynamic::apply_css(&mut root_style, "width:100px;height:50px");
         let nodes = [
@@ -1486,7 +1626,8 @@ mod instantiate_tests {
         let mut s = Stage::new(font_path, (400.0, 200.0)).unwrap();
         // scene_root 作唯一布局根（solve 仅 roots[0] 下沉）；两实例 append_child 挂其下，块流纵向堆叠
         let scene_root = s.create_root("div", "width:400px;height:200px").unwrap();
-        s.load_package("bag", &crate::asset::write_package(&input)).unwrap();
+        s.load_package("bag", &crate::asset::write_package(&input))
+            .unwrap();
         let i1 = s.instantiate("bag", "comp1").unwrap();
         let i2 = s.instantiate("bag", "comp1").unwrap();
         s.append_child(scene_root, i1).unwrap();
@@ -1495,15 +1636,21 @@ mod instantiate_tests {
         // 取两实例各自的 btn NodeId（comp root 的首个 Button 子）
         let btn1 = {
             let sc = s.scene.as_ref().unwrap();
-            *sc.get(i1).unwrap().children.iter().find(|&&c| {
-                matches!(sc.get(c).unwrap().kind, NodeKind::Button)
-            }).unwrap()
+            *sc.get(i1)
+                .unwrap()
+                .children
+                .iter()
+                .find(|&&c| matches!(sc.get(c).unwrap().kind, NodeKind::Button))
+                .unwrap()
         };
         let btn2 = {
             let sc = s.scene.as_ref().unwrap();
-            *sc.get(i2).unwrap().children.iter().find(|&&c| {
-                matches!(sc.get(c).unwrap().kind, NodeKind::Button)
-            }).unwrap()
+            *sc.get(i2)
+                .unwrap()
+                .children
+                .iter()
+                .find(|&&c| matches!(sc.get(c).unwrap().kind, NodeKind::Button))
+                .unwrap()
         };
         assert_ne!(btn1, btn2, "两实例 btn NodeId 不同");
 
@@ -1604,7 +1751,11 @@ mod image_size_tests {
             },
         ];
         let rules = crate::style::dynamic::DynamicRuleTable::default();
-        let manifest = [AssetEntry { path: src.into(), w, h }];
+        let manifest = [AssetEntry {
+            path: src.into(),
+            w,
+            h,
+        }];
         let input = PackageInput {
             components: vec![("comp1", &nodes, &rules)],
             asset_manifest: &manifest,
@@ -1621,11 +1772,15 @@ mod image_size_tests {
         s.create_root("div", "width:300px;height:300px").unwrap();
         s.load_package("bag", &pkg_bytes).unwrap();
         // load_package 后 Stage.image_sizes 含 path → (w,h)
-        assert_eq!(s.image_size("icons/wide.png"), Some((40, 20)),
-            "load_package 建尺寸表：path→(40,20)");
+        assert_eq!(
+            s.image_size("icons/wide.png"),
+            Some((40, 20)),
+            "load_package 建尺寸表：path→(40,20)"
+        );
 
         let comp_root = s.instantiate("bag", "comp1").unwrap();
-        s.append_child(s.scene.as_ref().unwrap().roots[0], comp_root).unwrap();
+        s.append_child(s.scene.as_ref().unwrap().roots[0], comp_root)
+            .unwrap();
         s.tick_and_render();
 
         // Image 是 comp_root 的首个子（gather: root[0] + img[1]，img parent_idx=0）
@@ -1633,8 +1788,16 @@ mod image_size_tests {
         let img_id = scene.get(comp_root).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
         // 无 CSS 尺寸 → 用尺寸表真实像素 40×20（三档第二档）
-        assert!((r.w - 40.0).abs() < 0.1, "measure 用真实 w=40（非 64 兜底），got {}", r.w);
-        assert!((r.h - 20.0).abs() < 0.1, "measure 用真实 h=20（非 64 兜底），got {}", r.h);
+        assert!(
+            (r.w - 40.0).abs() < 0.1,
+            "measure 用真实 w=40（非 64 兜底），got {}",
+            r.w
+        );
+        assert!(
+            (r.h - 20.0).abs() < 0.1,
+            "measure 用真实 h=20（非 64 兜底），got {}",
+            r.h
+        );
     }
 
     /// pkg 的 AssetEntry w/h=0（非 PNG / 读失败）→ 尺寸表无有效条目 → measure fallback 64×64。
@@ -1645,17 +1808,30 @@ mod image_size_tests {
         s.create_root("div", "width:300px;height:300px").unwrap();
         s.load_package("bag", &pkg_bytes).unwrap();
         // w/h=0 → image_size 返 None（filter 掉 0/0）
-        assert_eq!(s.image_size("icons/zero.png"), None, "w/h=0 → None（fallback 64×64）");
+        assert_eq!(
+            s.image_size("icons/zero.png"),
+            None,
+            "w/h=0 → None（fallback 64×64）"
+        );
 
         let comp_root = s.instantiate("bag", "comp1").unwrap();
-        s.append_child(s.scene.as_ref().unwrap().roots[0], comp_root).unwrap();
+        s.append_child(s.scene.as_ref().unwrap().roots[0], comp_root)
+            .unwrap();
         s.tick_and_render();
 
         let scene = s.scene.as_ref().unwrap();
         let img_id = scene.get(comp_root).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
-        assert!((r.w - 64.0).abs() < 0.1, "w/h=0 → fallback w=64，got {}", r.w);
-        assert!((r.h - 64.0).abs() < 0.1, "w/h=0 → fallback h=64，got {}", r.h);
+        assert!(
+            (r.w - 64.0).abs() < 0.1,
+            "w/h=0 → fallback w=64，got {}",
+            r.w
+        );
+        assert!(
+            (r.h - 64.0).abs() < 0.1,
+            "w/h=0 → fallback h=64，got {}",
+            r.h
+        );
     }
 
     /// CSS 尺寸赢过真实像素（三档第一档）。
@@ -1676,7 +1852,9 @@ mod image_size_tests {
                 tabindex: None,
             },
             TemplateNode {
-                kind: NodeKind::Image { src: "icons/wide.png".into() },
+                kind: NodeKind::Image {
+                    src: "icons/wide.png".into(),
+                },
                 style: img_style,
                 parent_idx: Some(0),
                 classes: vec![],
@@ -1686,7 +1864,11 @@ mod image_size_tests {
             },
         ];
         let rules = crate::style::dynamic::DynamicRuleTable::default();
-        let manifest = [AssetEntry { path: "icons/wide.png".into(), w: 40, h: 20 }];
+        let manifest = [AssetEntry {
+            path: "icons/wide.png".into(),
+            w: 40,
+            h: 20,
+        }];
         let input = PackageInput {
             components: vec![("comp1", &nodes, &rules)],
             asset_manifest: &manifest,
@@ -1697,7 +1879,8 @@ mod image_size_tests {
         s.create_root("div", "width:300px;height:300px").unwrap();
         s.load_package("bag", &pkg_bytes).unwrap();
         let comp_root = s.instantiate("bag", "comp1").unwrap();
-        s.append_child(s.scene.as_ref().unwrap().roots[0], comp_root).unwrap();
+        s.append_child(s.scene.as_ref().unwrap().roots[0], comp_root)
+            .unwrap();
         s.tick_and_render();
 
         let scene = s.scene.as_ref().unwrap();
@@ -1705,7 +1888,11 @@ mod image_size_tests {
         let r = &scene.get(img_id).unwrap().layout_rect;
         // CSS width:80px 赢（三档第一档）；height 等比用真实 2:1 aspect = 80×20/40 = 40
         assert!((r.w - 80.0).abs() < 0.1, "CSS width 赢：w=80，got {}", r.w);
-        assert!((r.h - 40.0).abs() < 0.1, "height 等比=40（80×20/40 真实 2:1），got {}", r.h);
+        assert!(
+            (r.h - 40.0).abs() < 0.1,
+            "height 等比=40（80×20/40 真实 2:1），got {}",
+            r.h
+        );
     }
 
     /// 多包 load_package 合并尺寸表（path 全局唯一）。
@@ -1716,8 +1903,16 @@ mod image_size_tests {
         let mut s = Stage::new_for_test();
         s.load_package("a", &pkg_a).unwrap();
         s.load_package("b", &pkg_b).unwrap();
-        assert_eq!(s.image_size("icons/a.png"), Some((10, 20)), "包 a 的 path 进表");
-        assert_eq!(s.image_size("icons/b.png"), Some((30, 40)), "包 b 的 path 进表（多包合并）");
+        assert_eq!(
+            s.image_size("icons/a.png"),
+            Some((10, 20)),
+            "包 a 的 path 进表"
+        );
+        assert_eq!(
+            s.image_size("icons/b.png"),
+            Some((30, 40)),
+            "包 b 的 path 进表（多包合并）"
+        );
     }
 
     /// 重复 load 同名包 → 新包尺寸覆盖前包（path 全局唯一，后写赢）。
@@ -1729,7 +1924,11 @@ mod image_size_tests {
         s.load_package("bag", &pkg_v1).unwrap();
         assert_eq!(s.image_size("icons/x.png"), Some((10, 10)), "首次 load");
         s.load_package("bag", &pkg_v2).unwrap();
-        assert_eq!(s.image_size("icons/x.png"), Some((50, 50)), "重 load 覆盖（新尺寸）");
+        assert_eq!(
+            s.image_size("icons/x.png"),
+            Some((50, 50)),
+            "重 load 覆盖（新尺寸）"
+        );
     }
 
     /// reuse_key 是运行时字段（不进 pkg），driver 给 slot 节点设。
@@ -1741,11 +1940,15 @@ mod image_size_tests {
         let child = stage.create_node("div", "").unwrap();
         stage.append_child(root, child).unwrap();
         assert_eq!(
-            stage.scene.as_ref().unwrap().get(child).unwrap().reuse_key, 0,
+            stage.scene.as_ref().unwrap().get(child).unwrap().reuse_key,
+            0,
             "默认 0"
         );
         stage.set_reuse_key(child, 5);
-        assert_eq!(stage.scene.as_ref().unwrap().get(child).unwrap().reuse_key, 5);
+        assert_eq!(
+            stage.scene.as_ref().unwrap().get(child).unwrap().reuse_key,
+            5
+        );
     }
 
     /// set_reuse_key 对无效 node（已删/悬空）no-op，不 panic。

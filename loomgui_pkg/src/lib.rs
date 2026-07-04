@@ -7,7 +7,9 @@
 //! width/height big-endian u32 at offset 16/20）填 `AssetEntry { path, w, h }`。非 PNG 或读失败 →
 //! w/h=0（核心 measure fallback 64×64）。PNG header 解析 ~30 行即可，无需完整 PNG 解码。
 
-use loomgui_core::asset::{AssetEntry, PackageInput, TemplateNode, extract_component_css, normalize_path};
+use loomgui_core::asset::{
+    extract_component_css, normalize_path, AssetEntry, PackageInput, TemplateNode,
+};
 use loomgui_core::scene::NodeId;
 use scraper::{Html, Selector as ScraperSelector};
 use std::path::Path;
@@ -52,12 +54,18 @@ fn scene_to_template(
                 match normalize_path(src, res_dir) {
                     Some(norm) => {
                         if seen.insert(norm.clone()) {
-                            manifest.push(AssetEntry { path: norm.clone(), w: 0, h: 0 });
+                            manifest.push(AssetEntry {
+                                path: norm.clone(),
+                                w: 0,
+                                h: 0,
+                            });
                         }
                         *src = norm;
                     }
                     None => {
-                        eprintln!("warn: img src `{src}` 不在 res 目录 `{res_dir}` 下，跳过 manifest");
+                        eprintln!(
+                            "warn: img src `{src}` 不在 res 目录 `{res_dir}` 下，跳过 manifest"
+                        );
                     }
                 }
             }
@@ -69,7 +77,11 @@ fn scene_to_template(
                 match normalize_path(url, res_dir) {
                     Some(norm) => {
                         if seen.insert(norm.clone()) {
-                            manifest.push(AssetEntry { path: norm.clone(), w: 0, h: 0 });
+                            manifest.push(AssetEntry {
+                                path: norm.clone(),
+                                w: 0,
+                                h: 0,
+                            });
                         }
                         style.background_image = Some(norm);
                     }
@@ -194,10 +206,16 @@ pub fn pack(
     html_files: &[String],
     res_root: &Path,
 ) -> Result<PackedPackage, String> {
-    let res_dir = res_root.file_name().and_then(|s| s.to_str()).unwrap_or("res");
+    let res_dir = res_root
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("res");
     // owned 生命周期：nodes/dynamic 需在 write_package 借用时存活，故先全部收集进 owned Vec。
-    let mut owned: Vec<(String, Vec<TemplateNode>, loomgui_core::style::dynamic::DynamicRuleTable)> =
-        Vec::with_capacity(html_files.len());
+    let mut owned: Vec<(
+        String,
+        Vec<TemplateNode>,
+        loomgui_core::style::dynamic::DynamicRuleTable,
+    )> = Vec::with_capacity(html_files.len());
     let mut manifest: Vec<AssetEntry> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -217,10 +235,7 @@ pub fn pack(
         let styles = loomgui_core::style::cascade::resolve_styles(&tree, &sheet);
         let scene = loomgui_core::scene::build_scene(&tree, &styles);
         let nodes = scene_to_template(&scene, res_dir, &mut manifest, &mut seen);
-        let comp_name = hf
-            .strip_suffix(".html")
-            .unwrap_or(hf)
-            .to_string();
+        let comp_name = hf.strip_suffix(".html").unwrap_or(hf).to_string();
         owned.push((comp_name, nodes, dynamic));
     }
 
@@ -235,11 +250,14 @@ pub fn pack(
     }
 
     // 组 PackageInput（借用 owned）→ write_package。
-    let comp_refs: Vec<(&str, &[TemplateNode], &loomgui_core::style::dynamic::DynamicRuleTable)> =
-        owned
-            .iter()
-            .map(|(name, nodes, dyn_rules)| (name.as_str(), nodes.as_slice(), dyn_rules))
-            .collect();
+    let comp_refs: Vec<(
+        &str,
+        &[TemplateNode],
+        &loomgui_core::style::dynamic::DynamicRuleTable,
+    )> = owned
+        .iter()
+        .map(|(name, nodes, dyn_rules)| (name.as_str(), nodes.as_slice(), dyn_rules))
+        .collect();
     let input = PackageInput {
         components: comp_refs,
         asset_manifest: &manifest,
@@ -279,16 +297,50 @@ mod tests {
         // 手搓 scene：root + img 子（src="res/icons/skin.png"）
         use loomgui_core::scene::{NodeKind, Scene};
         use loomgui_core::style::resolved::ResolvedStyle;
-        let entries: Vec<(Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>)> = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(0), NodeKind::Image { src: "res/icons/skin.png".into() }, ResolvedStyle::default(), vec![], None, false, None),
+        let entries: Vec<(
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
+        )> = vec![
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Image {
+                    src: "res/icons/skin.png".into(),
+                },
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
         ];
         let scene = Scene::build(&entries);
         let mut manifest: Vec<AssetEntry> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let nodes = scene_to_template(&scene, "res", &mut manifest, &mut seen);
         // scene_to_template 只收 path（w/h=0），w/h 由 pack 后置读 PNG IHDR 填
-        assert_eq!(manifest, vec![AssetEntry { path: "icons/skin.png".into(), w: 0, h: 0 }], "归一化 path 进 manifest");
+        assert_eq!(
+            manifest,
+            vec![AssetEntry {
+                path: "icons/skin.png".into(),
+                w: 0,
+                h: 0
+            }],
+            "归一化 path 进 manifest"
+        );
         // 节点 src 也被归一化
         match &nodes[1].kind {
             NodeKind::Image { src } => assert_eq!(src, "icons/skin.png", "节点 src 归一化"),
@@ -301,10 +353,46 @@ mod tests {
         // 两 img 同 src → manifest 只入一次
         use loomgui_core::scene::{NodeKind, Scene};
         use loomgui_core::style::resolved::ResolvedStyle;
-        let entries: Vec<(Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>)> = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(0), NodeKind::Image { src: "res/a.png".into() }, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(0), NodeKind::Image { src: "res/a.png".into() }, ResolvedStyle::default(), vec![], None, false, None),
+        let entries: Vec<(
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
+        )> = vec![
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Image {
+                    src: "res/a.png".into(),
+                },
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Image {
+                    src: "res/a.png".into(),
+                },
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
         ];
         let scene = Scene::build(&entries);
         let mut manifest: Vec<AssetEntry> = Vec::new();
@@ -318,9 +406,35 @@ mod tests {
         // src 不在 res 下 → None → 不入 manifest（不 Err）
         use loomgui_core::scene::{NodeKind, Scene};
         use loomgui_core::style::resolved::ResolvedStyle;
-        let entries: Vec<(Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>)> = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(0), NodeKind::Image { src: "other/foo.png".into() }, ResolvedStyle::default(), vec![], None, false, None),
+        let entries: Vec<(
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
+        )> = vec![
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Image {
+                    src: "other/foo.png".into(),
+                },
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
         ];
         let scene = Scene::build(&entries);
         let mut manifest: Vec<AssetEntry> = Vec::new();
@@ -339,9 +453,35 @@ mod tests {
         // root(parent=None) + child(parent=root) → child parent_idx=Some(0)
         use loomgui_core::scene::{NodeKind, Scene};
         use loomgui_core::style::resolved::ResolvedStyle;
-        let entries: Vec<(Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>)> = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(0), NodeKind::Text { content: "hi".into() }, ResolvedStyle::default(), vec![], None, false, None),
+        let entries: Vec<(
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
+        )> = vec![
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Text {
+                    content: "hi".into(),
+                },
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
         ];
         let scene = Scene::build(&entries);
         let mut manifest: Vec<AssetEntry> = Vec::new();

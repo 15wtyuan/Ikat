@@ -83,10 +83,10 @@ pub fn parse_selector(raw: &str) -> Result<ParsedSelector, String> {
         let mut kind = 't'; // t=tag, .=class, #=id
         let mut cur = String::new();
         let push_token = |kind: char,
-                              val: &str,
-                              tag: &mut Option<String>,
-                              classes: &mut Vec<String>,
-                              id: &mut Option<String>| {
+                          val: &str,
+                          tag: &mut Option<String>,
+                          classes: &mut Vec<String>,
+                          id: &mut Option<String>| {
             if val.is_empty() {
                 return;
             }

@@ -209,6 +209,14 @@ mod tests {
         let styles = crate::style::cascade::resolve_styles(&tree, &sheet);
         let tr_id = tree.nodes[tree.roots[0].0].children[0];
         let bg = styles[tr_id.0].background_color.expect(".tr 应有 bg");
-        assert_eq!(bg, [0x5f as f32 / 255.0, 0xb2 as f32 / 255.0, 0xc4 as f32 / 255.0, 1.0]);
+        assert_eq!(
+            bg,
+            [
+                0x5f as f32 / 255.0,
+                0xb2 as f32 / 255.0,
+                0xc4 as f32 / 255.0,
+                1.0
+            ]
+        );
     }
 }

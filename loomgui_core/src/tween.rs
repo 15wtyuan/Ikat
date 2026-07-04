@@ -83,27 +83,57 @@ impl Ease {
         }
         match self {
             Ease::Linear => t / dur,
-            Ease::QuadIn => { let t = t / dur; t * t }
-            Ease::QuadOut => { let t = t / dur; -t * (t - 2.0) }
+            Ease::QuadIn => {
+                let t = t / dur;
+                t * t
+            }
+            Ease::QuadOut => {
+                let t = t / dur;
+                -t * (t - 2.0)
+            }
             Ease::QuadInOut => {
                 let t = t / (dur * 0.5);
-                if t < 1.0 { 0.5 * t * t }
-                else { let t = t - 1.0; -0.5 * (t * (t - 2.0) - 1.0) }
+                if t < 1.0 {
+                    0.5 * t * t
+                } else {
+                    let t = t - 1.0;
+                    -0.5 * (t * (t - 2.0) - 1.0)
+                }
             }
-            Ease::CubicIn => { let t = t / dur; t * t * t }
-            Ease::CubicOut => { let t = t / dur - 1.0; t * t * t + 1.0 }
+            Ease::CubicIn => {
+                let t = t / dur;
+                t * t * t
+            }
+            Ease::CubicOut => {
+                let t = t / dur - 1.0;
+                t * t * t + 1.0
+            }
             Ease::CubicInOut => {
                 let t = t / (dur * 0.5);
-                if t < 1.0 { 0.5 * t * t * t }
-                else { let t = t - 2.0; 0.5 * (t * t * t + 2.0) }
+                if t < 1.0 {
+                    0.5 * t * t * t
+                } else {
+                    let t = t - 2.0;
+                    0.5 * (t * t * t + 2.0)
+                }
             }
-            Ease::BackIn => { let t = t / dur; t * t * ((OVERSHOOT + 1.0) * t - OVERSHOOT) }
-            Ease::BackOut => { let t = t / dur - 1.0; t * t * ((OVERSHOOT + 1.0) * t + OVERSHOOT) + 1.0 }
+            Ease::BackIn => {
+                let t = t / dur;
+                t * t * ((OVERSHOOT + 1.0) * t - OVERSHOOT)
+            }
+            Ease::BackOut => {
+                let t = t / dur - 1.0;
+                t * t * ((OVERSHOOT + 1.0) * t + OVERSHOOT) + 1.0
+            }
             Ease::BackInOut => {
                 let s = OVERSHOOT * 1.525;
                 let t = t / (dur * 0.5);
-                if t < 1.0 { 0.5 * (t * t * ((s + 1.0) * t - s)) }
-                else { let t = t - 2.0; 0.5 * (t * t * ((s + 1.0) * t + s) + 2.0) }
+                if t < 1.0 {
+                    0.5 * (t * t * ((s + 1.0) * t - s))
+                } else {
+                    let t = t - 2.0;
+                    0.5 * (t * t * ((s + 1.0) * t + s) + 2.0)
+                }
             }
         }
     }
@@ -138,10 +168,14 @@ pub struct TweenManager {
 }
 
 impl TweenManager {
-    pub fn new() -> Self { Self { tweens: Vec::new() } }
+    pub fn new() -> Self {
+        Self { tweens: Vec::new() }
+    }
 
     /// 清空所有 tween（load 重建 scene 时调，防残留指向失效 node_id）。
-    pub fn clear(&mut self) { self.tweens.clear(); }
+    pub fn clear(&mut self) {
+        self.tweens.clear();
+    }
 
     /// 杀该节点所有 tween（remove_node 联动调）。标 killed，update 末尾 retain 清出。
     /// 与 `kill(node, prop)`（单 prop）不同——此杀该 node 全部 prop 的 tween。
@@ -155,14 +189,28 @@ impl TweenManager {
 
     /// 注册一个 tween。越界 node 由 update 跳过。
     pub fn tween(
-        &mut self, node: NodeId, prop: TweenProp,
-        start: [f32; 4], end: [f32; 4],
-        ease: Ease, delay: f32, duration: f32, tag: u32,
+        &mut self,
+        node: NodeId,
+        prop: TweenProp,
+        start: [f32; 4],
+        end: [f32; 4],
+        ease: Ease,
+        delay: f32,
+        duration: f32,
+        tag: u32,
     ) {
         self.tweens.push(Tween {
-            node, prop, start, end,
-            ease, delay, duration,
-            elapsed: 0.0, tag, started: false, killed: false,
+            node,
+            prop,
+            start,
+            end,
+            ease,
+            delay,
+            duration,
+            elapsed: 0.0,
+            tag,
+            started: false,
+            killed: false,
         });
     }
 
@@ -205,10 +253,11 @@ impl TweenManager {
                 out.push(EventRecord {
                     node_id: t.node.0 as u32,
                     event_type: EVT_TWEEN_COMPLETE,
-                    click_count: t.prop as u8,       // 复用：prop 枚举值
+                    click_count: t.prop as u8, // 复用：prop 枚举值
                     pad: [0, 0],
-                    touch_id: t.tag as i32,          // 复用：调用方 tag
-                    x: 0.0, y: 0.0,
+                    touch_id: t.tag as i32, // 复用：调用方 tag
+                    x: 0.0,
+                    y: 0.0,
                 });
             }
         }
@@ -218,7 +267,14 @@ impl TweenManager {
 
 /// 逐分量 lerp start→end 写入 anim 对应通道（n=已算的 normalized）。
 /// 经 AnimTable::ensure(node) 取可变 NodeAnim（HashMap entry，缺则插 default）。
-fn apply(anim: &mut AnimTable, node: NodeId, prop: TweenProp, start: [f32; 4], end: [f32; 4], n: f32) {
+fn apply(
+    anim: &mut AnimTable,
+    node: NodeId,
+    prop: TweenProp,
+    start: [f32; 4],
+    end: [f32; 4],
+    n: f32,
+) {
     let a = anim.ensure(node);
     let lerp = |i: usize| start[i] + (end[i] - start[i]) * n;
     match prop {
@@ -249,12 +305,23 @@ mod tests {
     fn ease_endpoints_are_0_and_1() {
         let dur = 1.0;
         for ease in [
-            Ease::Linear, Ease::QuadIn, Ease::QuadOut, Ease::QuadInOut,
-            Ease::CubicIn, Ease::CubicOut, Ease::CubicInOut,
-            Ease::BackIn, Ease::BackOut, Ease::BackInOut,
+            Ease::Linear,
+            Ease::QuadIn,
+            Ease::QuadOut,
+            Ease::QuadInOut,
+            Ease::CubicIn,
+            Ease::CubicOut,
+            Ease::CubicInOut,
+            Ease::BackIn,
+            Ease::BackOut,
+            Ease::BackInOut,
         ] {
             assert!((ease.evaluate(0.0, dur)).abs() < 1e-5, "{:?}@0 != 0", ease);
-            assert!((ease.evaluate(dur, dur) - 1.0).abs() < 1e-5, "{:?}@dur != 1", ease);
+            assert!(
+                (ease.evaluate(dur, dur) - 1.0).abs() < 1e-5,
+                "{:?}@dur != 1",
+                ease
+            );
         }
     }
 
@@ -269,7 +336,13 @@ mod tests {
         let lin = Ease::Linear.evaluate(0.5, 1.0);
         let cin = Ease::CubicIn.evaluate(0.5, 1.0);
         let cout = Ease::CubicOut.evaluate(0.5, 1.0);
-        assert!(cin < lin && lin < cout, "CubicIn({}) < Linear({}) < CubicOut({})", cin, lin, cout);
+        assert!(
+            cin < lin && lin < cout,
+            "CubicIn({}) < Linear({}) < CubicOut({})",
+            cin,
+            lin,
+            cout
+        );
         assert!((cin - 0.125).abs() < 1e-5);
         assert!((cout - 0.875).abs() < 1e-5);
     }
@@ -281,9 +354,15 @@ mod tests {
         for i in 0..100 {
             let t = i as f32 / 100.0;
             let v = Ease::BackOut.evaluate(t, 1.0);
-            if v > max_v { max_v = v; }
+            if v > max_v {
+                max_v = v;
+            }
         }
-        assert!(max_v > 1.0, "BackOut 中段须 >1（overshoot），实达 {}", max_v);
+        assert!(
+            max_v > 1.0,
+            "BackOut 中段须 >1（overshoot），实达 {}",
+            max_v
+        );
     }
 
     #[test]
@@ -295,14 +374,19 @@ mod tests {
 
     // ===== TweenManager 测 =====
 
-    use crate::scene::node::{Node, NodeKind, Rect};
     use crate::input::EVT_TWEEN_COMPLETE;
+    use crate::scene::node::{Node, NodeKind, Rect};
 
     fn one_node_scene() -> (Scene, NodeId) {
         // 返 (scene, node_id)——NodeId 由 slotmap 分配（首节点 idx=1, version=1）。
         let mut n = Node::default();
         n.kind = NodeKind::Container;
-        n.layout_rect = Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 };
+        n.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
         let scene = Scene::from_nodes(vec![n], vec![]);
         let id = scene.roots[0];
         (scene, id)
@@ -312,12 +396,23 @@ mod tests {
     fn update_writes_opacity_override_per_tick() {
         let (mut s, nid) = one_node_scene();
         let mut mgr = TweenManager::new();
-        mgr.tween(nid, TweenProp::Opacity, [0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0],
-                  Ease::Linear, 0.0, 1.0, 42);
+        mgr.tween(
+            nid,
+            TweenProp::Opacity,
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            Ease::Linear,
+            0.0,
+            1.0,
+            42,
+        );
         let mut out = Vec::new();
         // dt=0.5 → norm=0.5 → opacity=0.5
         mgr.update(0.5, &mut s, &mut out);
-        assert!((s.anim.0.get(&nid).unwrap().opacity.unwrap() - 0.5).abs() < 1e-5, "半程 opacity=0.5");
+        assert!(
+            (s.anim.0.get(&nid).unwrap().opacity.unwrap() - 0.5).abs() < 1e-5,
+            "半程 opacity=0.5"
+        );
         assert!(out.is_empty(), "未结束 → 无 complete 事件");
     }
 
@@ -325,17 +420,32 @@ mod tests {
     fn update_emits_complete_with_tag_and_prop() {
         let (mut s, nid) = one_node_scene();
         let mut mgr = TweenManager::new();
-        mgr.tween(nid, TweenProp::Scale, [1.0, 1.0, 0.0, 0.0], [2.0, 3.0, 0.0, 0.0],
-                  Ease::Linear, 0.0, 1.0, 7);
+        mgr.tween(
+            nid,
+            TweenProp::Scale,
+            [1.0, 1.0, 0.0, 0.0],
+            [2.0, 3.0, 0.0, 0.0],
+            Ease::Linear,
+            0.0,
+            1.0,
+            7,
+        );
         let mut out = Vec::new();
-        mgr.update(1.0, &mut s, &mut out);   // 恰好结束
+        mgr.update(1.0, &mut s, &mut out); // 恰好结束
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].event_type, EVT_TWEEN_COMPLETE);
-        assert_eq!(out[0].click_count, TweenProp::Scale as u8, "click_count 复用装 prop");
+        assert_eq!(
+            out[0].click_count,
+            TweenProp::Scale as u8,
+            "click_count 复用装 prop"
+        );
         assert_eq!(out[0].touch_id, 7, "touch_id 复用装 tag");
         // 末值 = scale(2,3)
         let m = s.anim.0.get(&nid).unwrap().transform.unwrap();
-        assert!((m[0] - 2.0).abs() < 1e-5 && (m[3] - 3.0).abs() < 1e-5, "末值 scale(2,3)");
+        assert!(
+            (m[0] - 2.0).abs() < 1e-5 && (m[3] - 3.0).abs() < 1e-5,
+            "末值 scale(2,3)"
+        );
         // 完成后 tween 移除
         let mut out2 = Vec::new();
         mgr.update(1.0, &mut s, &mut out2);
@@ -346,42 +456,76 @@ mod tests {
     fn update_delay_gates_apply() {
         let (mut s, nid) = one_node_scene();
         let mut mgr = TweenManager::new();
-        mgr.tween(nid, TweenProp::Opacity, [0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0],
-                  Ease::Linear, 1.0, 1.0, 0);  // delay=1
+        mgr.tween(
+            nid,
+            TweenProp::Opacity,
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            Ease::Linear,
+            1.0,
+            1.0,
+            0,
+        ); // delay=1
         let mut out = Vec::new();
-        mgr.update(0.5, &mut s, &mut out);   // elapsed 0.5 < delay 1 → 不写
-        // delay 内未 apply → HashMap 无该 node 条目
-        assert!(s.anim.0.get(&nid).is_none(), "delay 内不写 override（HashMap 无条目）");
+        mgr.update(0.5, &mut s, &mut out); // elapsed 0.5 < delay 1 → 不写
+                                           // delay 内未 apply → HashMap 无该 node 条目
+        assert!(
+            s.anim.0.get(&nid).is_none(),
+            "delay 内不写 override（HashMap 无条目）"
+        );
         assert!(out.is_empty());
-        mgr.update(1.0, &mut s, &mut out);   // elapsed 1.5，tt=0.5 → norm=0.5
-        assert!((s.anim.0.get(&nid).unwrap().opacity.unwrap() - 0.5).abs() < 1e-5, "越过 delay 后按 tt 插值");
+        mgr.update(1.0, &mut s, &mut out); // elapsed 1.5，tt=0.5 → norm=0.5
+        assert!(
+            (s.anim.0.get(&nid).unwrap().opacity.unwrap() - 0.5).abs() < 1e-5,
+            "越过 delay 后按 tt 插值"
+        );
     }
 
     #[test]
     fn kill_stops_update_keeps_override() {
         let (mut s, nid) = one_node_scene();
         let mut mgr = TweenManager::new();
-        mgr.tween(nid, TweenProp::Opacity, [0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0],
-                  Ease::Linear, 0.0, 1.0, 0);
+        mgr.tween(
+            nid,
+            TweenProp::Opacity,
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            Ease::Linear,
+            0.0,
+            1.0,
+            0,
+        );
         let mut out = Vec::new();
         mgr.update(0.3, &mut s, &mut out);
         let v = s.anim.0.get(&nid).unwrap().opacity.unwrap();
         mgr.kill(nid, TweenProp::Opacity);
-        mgr.update(0.5, &mut s, &mut out);   // kill 后不再推进
-        assert_eq!(s.anim.0.get(&nid).unwrap().opacity.unwrap(), v, "kill 后 override 保留末值不变");
+        mgr.update(0.5, &mut s, &mut out); // kill 后不再推进
+        assert_eq!(
+            s.anim.0.get(&nid).unwrap().opacity.unwrap(),
+            v,
+            "kill 后 override 保留末值不变"
+        );
         assert!(out.is_empty(), "kill 不产 complete");
     }
 
     #[test]
     fn update_skips_out_of_range_node() {
-        let (mut s, _nid) = one_node_scene();   // 仅 1 节点
+        let (mut s, _nid) = one_node_scene(); // 仅 1 节点
         let mut mgr = TweenManager::new();
         // 构造一个 index 越界的 NodeId：idx=99（远超 nodes.len()=1+1=2）
         let oob = NodeId((99u32 << 12) | 1);
-        mgr.tween(oob, TweenProp::Opacity, [0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0],
-                  Ease::Linear, 0.0, 1.0, 0);
+        mgr.tween(
+            oob,
+            TweenProp::Opacity,
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            Ease::Linear,
+            0.0,
+            1.0,
+            0,
+        );
         let mut out = Vec::new();
-        mgr.update(1.0, &mut s, &mut out);   // index 99 越界 → 跳过
+        mgr.update(1.0, &mut s, &mut out); // index 99 越界 → 跳过
         assert!(out.is_empty(), "越界 node 不产事件");
     }
 
@@ -393,29 +537,67 @@ mod tests {
         let other = {
             let mut n = Node::default();
             n.kind = NodeKind::Container;
-            n.layout_rect = Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 };
+            n.layout_rect = Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 10.0,
+            };
             let key = s.nodes.insert(n);
             NodeId::from_key(key)
         };
         let mut mgr = TweenManager::new();
-        mgr.tween(nid, TweenProp::Opacity,
-            [0.0,0.0,0.0,0.0], [1.0,0.0,0.0,0.0],
-            Ease::Linear, 0.0, 1.0, 0);
-        mgr.tween(nid, TweenProp::BgColor,
-            [0.0,0.0,0.0,0.0], [1.0,0.0,0.0,0.0],
-            Ease::Linear, 0.0, 1.0, 0);
-        mgr.tween(other, TweenProp::Opacity,
-            [0.0,0.0,0.0,0.0], [1.0,0.0,0.0,0.0],
-            Ease::Linear, 0.0, 1.0, 0);
+        mgr.tween(
+            nid,
+            TweenProp::Opacity,
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            Ease::Linear,
+            0.0,
+            1.0,
+            0,
+        );
+        mgr.tween(
+            nid,
+            TweenProp::BgColor,
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            Ease::Linear,
+            0.0,
+            1.0,
+            0,
+        );
+        mgr.tween(
+            other,
+            TweenProp::Opacity,
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            Ease::Linear,
+            0.0,
+            1.0,
+            0,
+        );
         mgr.kill_node(nid);
         // nid 的全 tween killed；other 的不被误杀
-        assert!(mgr.tweens.iter().all(|t| t.node != nid || t.killed), "kill_node 杀该 node 全 tween");
-        assert!(mgr.tweens.iter().any(|t| t.node == other && !t.killed), "其他 node tween 不被误杀");
+        assert!(
+            mgr.tweens.iter().all(|t| t.node != nid || t.killed),
+            "kill_node 杀该 node 全 tween"
+        );
+        assert!(
+            mgr.tweens.iter().any(|t| t.node == other && !t.killed),
+            "其他 node tween 不被误杀"
+        );
         // update 后 killed(nid) 的被 retain 清出；nid 不产 complete（被 kill 不推进）。
         // other 的 tween 会完成（dur=1.0,dt=1.0）→ 产 complete + 被 retain 清出。
         let mut out = Vec::new();
         mgr.update(1.0, &mut s, &mut out);
-        assert!(out.iter().all(|e| e.node_id != nid.0), "nid killed tween 不产 complete");
-        assert!(mgr.tweens.iter().all(|t| t.node != nid), "nid killed tween 被 retain 清出");
+        assert!(
+            out.iter().all(|e| e.node_id != nid.0),
+            "nid killed tween 不产 complete"
+        );
+        assert!(
+            mgr.tweens.iter().all(|t| t.node != nid),
+            "nid killed tween 被 retain 清出"
+        );
     }
 }

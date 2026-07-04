@@ -1,5 +1,7 @@
-use crate::style::resolved::{BackgroundSize, BorderRadius, CornerRadius, OverflowMode, ResolvedStyle, SliceInsets, TextAlign};
 use crate::style::color_filter::{self, IDENTITY};
+use crate::style::resolved::{
+    BackgroundSize, BorderRadius, CornerRadius, OverflowMode, ResolvedStyle, SliceInsets, TextAlign,
+};
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, LengthPercentage, LengthPercentageAuto};
 
@@ -48,13 +50,7 @@ pub fn parse_four(s: &str) -> [f32; 4] {
     let p = |i: usize| -> f32 {
         parts
             .get(i)
-            .and_then(|x| {
-                x.strip_suffix("px")
-                    .unwrap_or(x)
-                    .trim()
-                    .parse::<f32>()
-                    .ok()
-            })
+            .and_then(|x| x.strip_suffix("px").unwrap_or(x).trim().parse::<f32>().ok())
             .unwrap_or(0.0)
     };
     match parts.len() {
@@ -89,7 +85,7 @@ fn parse_filter(value: &str) -> Option<[f32; 20]> {
                 let arg = rest.trim_end_matches(')');
                 (n.trim(), arg.trim())
             }
-            None => continue,  // 无括号函数（罕见）跳过
+            None => continue, // 无括号函数（罕见）跳过
         };
         let m = match name {
             "grayscale" => {
@@ -102,12 +98,20 @@ fn parse_filter(value: &str) -> Option<[f32; 20]> {
             "saturate" => color_filter::saturate(parse_number(arg).unwrap_or(1.0)),
             "hue-rotate" => {
                 // 90deg → 90.0
-                let deg = arg.trim_end_matches("deg").trim().parse::<f32>().unwrap_or(0.0);
+                let deg = arg
+                    .trim_end_matches("deg")
+                    .trim()
+                    .parse::<f32>()
+                    .unwrap_or(0.0);
                 color_filter::hue_rotate(deg)
             }
             "invert" => {
                 let x = parse_number(arg).unwrap_or(1.0);
-                if x >= 0.5 { color_filter::invert() } else { IDENTITY }
+                if x >= 0.5 {
+                    color_filter::invert()
+                } else {
+                    IDENTITY
+                }
             }
             "sepia" => {
                 // sepia(1) = 棕褐 tint 预设（完整 Tint 矩阵待补，先用 grayscale 占位，spec §9 风险）
@@ -116,10 +120,14 @@ fn parse_filter(value: &str) -> Option<[f32; 20]> {
             }
             _ => continue,
         };
-        acc = color_filter::concat(&m, &acc);  // 新 preset 左乘（fgui ConcatValues: newPreset × _matrix）
+        acc = color_filter::concat(&m, &acc); // 新 preset 左乘（fgui ConcatValues: newPreset × _matrix）
         any = true;
     }
-    if any { Some(acc) } else { None }
+    if any {
+        Some(acc)
+    } else {
+        None
+    }
 }
 
 /// parse_number: 解析 "1" / "1.2" / "50%" → f32（% 暂存比例，渲染期 resolve）。
@@ -135,7 +143,8 @@ fn parse_number(s: &str) -> Option<f32> {
 /// 解析 border-image-slice 4 值（CSS 4 值缩写同 margin）。
 /// px 存像素，% 存比例（渲染期 resolve 乘源图边）。
 fn parse_slice(value: &str) -> Option<SliceInsets> {
-    let nums: Vec<f32> = value.split_whitespace()
+    let nums: Vec<f32> = value
+        .split_whitespace()
         .map(|tok| {
             if let Some(p) = tok.strip_suffix('%') {
                 p.parse::<f32>().ok().map(|v| v / 100.0)
@@ -151,7 +160,12 @@ fn parse_slice(value: &str) -> Option<SliceInsets> {
         4 => (nums[0], nums[1], nums[2], nums[3]),
         _ => return None,
     };
-    Some(SliceInsets { top: t, right: r, bottom: b, left: l })
+    Some(SliceInsets {
+        top: t,
+        right: r,
+        bottom: b,
+        left: l,
+    })
 }
 
 /// 解析 border-radius 1~4 值（每值 px 或 %）→ [LengthPercentage;4]（TL,TR,BR,BL）。
@@ -201,7 +215,9 @@ pub fn parse_url(value: &str) -> Option<String> {
     let inner = v.strip_prefix("url(")?.strip_suffix(")")?;
     let inner = inner.trim();
     let len = inner.len();
-    if len == 0 { return None; }
+    if len == 0 {
+        return None;
+    }
     // 去首尾配对引号
     let path = if len >= 2
         && ((inner.starts_with('"') && inner.ends_with('"'))
@@ -212,7 +228,11 @@ pub fn parse_url(value: &str) -> Option<String> {
         inner
     };
     let path = path.trim();
-    if path.is_empty() { None } else { Some(path.to_string()) }
+    if path.is_empty() {
+        None
+    } else {
+        Some(path.to_string())
+    }
 }
 
 use crate::style::resolved::LocalTransform;
@@ -238,19 +258,35 @@ fn iter_transform_funcs(s: &str) -> Vec<(&str, &str)> {
     let mut i = 0;
     while i < bytes.len() {
         // 跳空白
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() { i += 1; }
-        if i >= bytes.len() { break; }
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
         let name_start = i;
-        while i < bytes.len() && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'-') { i += 1; }
+        while i < bytes.len() && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'-') {
+            i += 1;
+        }
         let name = &s[name_start..i];
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() { i += 1; }
-        if i >= bytes.len() || bytes[i] != b'(' { break; }
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() || bytes[i] != b'(' {
+            break;
+        }
         i += 1; // skip '('
         let args_start = i;
-        while i < bytes.len() && bytes[i] != b')' { i += 1; }
+        while i < bytes.len() && bytes[i] != b')' {
+            i += 1;
+        }
         let args = &s[args_start..i];
-        if i < bytes.len() { i += 1; } // skip ')'
-        if !name.is_empty() { out.push((name, args)); }
+        if i < bytes.len() {
+            i += 1;
+        } // skip ')'
+        if !name.is_empty() {
+            out.push((name, args));
+        }
     }
     out
 }
@@ -272,7 +308,12 @@ fn func_to_matrix(name: &str, args: &str) -> Option<Affine2> {
         }
         "scale" => {
             let sx = parts.first().copied().unwrap_or("1").parse::<f32>().ok()?;
-            let sy = parts.get(1).copied().unwrap_or(&sx.to_string()).parse::<f32>().ok()?;
+            let sy = parts
+                .get(1)
+                .copied()
+                .unwrap_or(&sx.to_string())
+                .parse::<f32>()
+                .ok()?;
             Some(transform::from_scale(sx, sy))
         }
         _ => None, // skew/matrix3d/... 围栏外
@@ -354,7 +395,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             // 语法：<len>{1,4} [ / <len>{1,4} ]?  —— / 前水平半径，/ 后垂直半径（省略=同水平）
             let (h_group, v_group) = match value.split_once('/') {
                 Some((h, v)) => (h, v),
-                None => (value, value),  // 无 / → 垂直 = 水平（正圆角）
+                None => (value, value), // 无 / → 垂直 = 水平（正圆角）
             };
             let h = match parse_radius_group(h_group) {
                 Some(g) => g,
@@ -366,10 +407,10 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             };
             style.border_radius = BorderRadius {
                 corners: [
-                    CornerRadius { h: h[0], v: v[0] },  // TL
-                    CornerRadius { h: h[1], v: v[1] },  // TR
-                    CornerRadius { h: h[2], v: v[2] },  // BR
-                    CornerRadius { h: h[3], v: v[3] },  // BL
+                    CornerRadius { h: h[0], v: v[0] }, // TL
+                    CornerRadius { h: h[1], v: v[1] }, // TR
+                    CornerRadius { h: h[2], v: v[2] }, // BR
+                    CornerRadius { h: h[3], v: v[3] }, // BL
                 ],
             };
             true
@@ -437,7 +478,10 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         "border-image-slice" => {
             // 4 值上右下左（CSS 4 值缩写同 margin）；px 存像素，% 存比例（渲染期 resolve 乘源图边）
             match parse_slice(value) {
-                Some(ins) => { style.border_image_slice = Some(ins); true }
+                Some(ins) => {
+                    style.border_image_slice = Some(ins);
+                    true
+                }
                 None => false,
             }
         }
@@ -454,7 +498,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 "cover" => BackgroundSize::Cover,
                 "contain" => BackgroundSize::Contain,
                 "100%" => BackgroundSize::Stretch,
-                _ => return false,  // 围栏外值（auto/px/两值）静默忽略
+                _ => return false, // 围栏外值（auto/px/两值）静默忽略
             };
             true
         }
@@ -558,9 +602,15 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         "position" => {
             // absolute 围栏内（脱离流）；relative 显式；fixed/sticky 围栏外静默忽略。
             match value.trim() {
-                "absolute" => { ts.position = taffy::style::Position::Absolute; true }
-                "relative" => { ts.position = taffy::style::Position::Relative; true }
-                _ => false,  // fixed/sticky/其他 → 围栏外
+                "absolute" => {
+                    ts.position = taffy::style::Position::Absolute;
+                    true
+                }
+                "relative" => {
+                    ts.position = taffy::style::Position::Relative;
+                    true
+                }
+                _ => false, // fixed/sticky/其他 → 围栏外
             }
         }
         "top" | "right" | "bottom" | "left" => {
@@ -587,7 +637,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 }
                 true
             } else {
-                false  // 非法值（% 等围栏外）静默忽略
+                false // 非法值（% 等围栏外）静默忽略
             }
         }
         _ => false, // 装饰属性静默忽略
@@ -597,7 +647,9 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
 /// "10px" → 10.0；"10%" → None（拒 %）；"10" → 10.0（容错无单位）。
 fn parse_px(s: &str) -> Option<f32> {
     let s = s.trim();
-    if s.ends_with('%') { return None; }
+    if s.ends_with('%') {
+        return None;
+    }
     s.trim_end_matches("px").trim().parse::<f32>().ok()
 }
 
@@ -636,7 +688,10 @@ mod tests {
     #[test]
     fn parse_dimension_auto_is_auto_not_zero() {
         use taffy::style::Dimension;
-        assert!(matches!(parse_dimension("auto"), Dimension::Auto), "auto → Auto");
+        assert!(
+            matches!(parse_dimension("auto"), Dimension::Auto),
+            "auto → Auto"
+        );
         assert!(matches!(parse_dimension("80px"), Dimension::Length(80.0)));
         assert!(matches!(parse_dimension("50%"), Dimension::Percent(0.5)));
     }
@@ -706,7 +761,11 @@ mod tests {
             ("auto", OverflowMode::Auto),
         ] {
             let mut s = ResolvedStyle::default();
-            assert!(apply_decl(&mut s, "overflow", val), "overflow:{} 被识别", val);
+            assert!(
+                apply_decl(&mut s, "overflow", val),
+                "overflow:{} 被识别",
+                val
+            );
             assert_eq!(s.overflow_x, mode, "overflow:{} → x", val);
             assert_eq!(s.overflow_y, mode, "overflow:{} → y", val);
         }
@@ -719,7 +778,11 @@ mod tests {
         assert!(apply_decl(&mut s, "overflow", "hidden"));
         assert!(apply_decl(&mut s, "overflow-x", "auto"));
         assert_eq!(s.overflow_x, OverflowMode::Auto, "overflow-x longhand 覆盖");
-        assert_eq!(s.overflow_y, OverflowMode::Hidden, "overflow-y 保持 shorthand");
+        assert_eq!(
+            s.overflow_y,
+            OverflowMode::Hidden,
+            "overflow-y 保持 shorthand"
+        );
     }
 
     #[test]
@@ -760,7 +823,10 @@ mod tests {
         let t = parse_transform("rotate(90deg)");
         // 90° 旋转：(1,0) → (0,1)
         let (x, y) = t.matrix.apply_point(1.0, 0.0);
-        assert!(x.abs() < 1e-5 && (y - 1.0).abs() < 1e-5, "90deg rotate (1,0)→(0,1)");
+        assert!(
+            x.abs() < 1e-5 && (y - 1.0).abs() < 1e-5,
+            "90deg rotate (1,0)→(0,1)"
+        );
     }
 
     #[test]
@@ -774,7 +840,10 @@ mod tests {
     fn parse_scale_non_uniform_compose_with_rotate_is_skew() {
         // scale(2,1) rotate(45deg)：复合矩阵非纯平移（剪切）
         let t = parse_transform("scale(2, 1) rotate(45deg)");
-        assert!(!t.matrix.is_pure_translation(), "非均匀缩放∘旋转 = 剪切，非纯平移");
+        assert!(
+            !t.matrix.is_pure_translation(),
+            "非均匀缩放∘旋转 = 剪切，非纯平移"
+        );
     }
 
     #[test]
@@ -792,29 +861,57 @@ mod tests {
         let mut s = ResolvedStyle::default();
         let applied = super::apply_decl(&mut s, "transform", "rotate(45deg)");
         assert!(applied, "transform 被识别");
-        assert!(!s.transform.matrix.is_pure_translation(), "rotate 写进 style.transform");
+        assert!(
+            !s.transform.matrix.is_pure_translation(),
+            "rotate 写进 style.transform"
+        );
     }
 
     #[test]
     fn parse_url_extracts_path() {
         use super::parse_url;
-        assert_eq!(parse_url("url(icons/home.png)"), Some("icons/home.png".into()));
-        assert_eq!(parse_url("url(\"icons/home.png\")"), Some("icons/home.png".into()));
-        assert_eq!(parse_url("url('icons/home.png')"), Some("icons/home.png".into()));
-        assert_eq!(parse_url("url( icons/home.png )"), Some("icons/home.png".into()), "容忍空格");
+        assert_eq!(
+            parse_url("url(icons/home.png)"),
+            Some("icons/home.png".into())
+        );
+        assert_eq!(
+            parse_url("url(\"icons/home.png\")"),
+            Some("icons/home.png".into())
+        );
+        assert_eq!(
+            parse_url("url('icons/home.png')"),
+            Some("icons/home.png".into())
+        );
+        assert_eq!(
+            parse_url("url( icons/home.png )"),
+            Some("icons/home.png".into()),
+            "容忍空格"
+        );
         assert_eq!(parse_url("icons/home.png"), None, "非 url() 格式 → None");
         assert_eq!(parse_url("url()"), None, "空 url → None");
         assert_eq!(parse_url(""), None);
         // 自闭合引号回归测试：len < 2 被 len >= 2 guard 拦住，不应 panic
-        assert_eq!(parse_url("url(')"), Some("'".to_string()), "自闭合单引号不 panic");
-        assert_eq!(parse_url("url(\")"), Some("\"".to_string()), "自闭合双引号不 panic");
+        assert_eq!(
+            parse_url("url(')"),
+            Some("'".to_string()),
+            "自闭合单引号不 panic"
+        );
+        assert_eq!(
+            parse_url("url(\")"),
+            Some("\"".to_string()),
+            "自闭合双引号不 panic"
+        );
     }
 
     #[test]
     fn apply_background_image_sets_field() {
         use crate::style::resolved::BackgroundSize;
         let mut s = ResolvedStyle::default();
-        assert!(apply_decl(&mut s, "background-image", "url(icons/home.png)"));
+        assert!(apply_decl(
+            &mut s,
+            "background-image",
+            "url(icons/home.png)"
+        ));
         assert_eq!(s.background_image.as_deref(), Some("icons/home.png"));
         // 无图时默认 Stretch 不变
         assert_eq!(s.background_size, BackgroundSize::Stretch);
@@ -829,8 +926,16 @@ mod tests {
             ("100%", BackgroundSize::Stretch),
         ] {
             let mut s = ResolvedStyle::default();
-            assert!(apply_decl(&mut s, "background-size", val), "background-size:{} 被识别", val);
-            assert_eq!(s.background_size, mode, "background-size:{} → {:?}", val, mode);
+            assert!(
+                apply_decl(&mut s, "background-size", val),
+                "background-size:{} 被识别",
+                val
+            );
+            assert_eq!(
+                s.background_size, mode,
+                "background-size:{} → {:?}",
+                val, mode
+            );
         }
     }
 
@@ -840,8 +945,17 @@ mod tests {
         use crate::style::resolved::BackgroundSize;
         for val in ["auto", "50px", "100% 50%", "cover contain"] {
             let mut s = ResolvedStyle::default();
-            assert!(!apply_decl(&mut s, "background-size", val), "{} 围栏外 → false", val);
-            assert_eq!(s.background_size, BackgroundSize::Stretch, "{} 不改默认", val);
+            assert!(
+                !apply_decl(&mut s, "background-size", val),
+                "{} 围栏外 → false",
+                val
+            );
+            assert_eq!(
+                s.background_size,
+                BackgroundSize::Stretch,
+                "{} 不改默认",
+                val
+            );
         }
     }
 
@@ -855,7 +969,15 @@ mod tests {
     fn parse_radius_group_two_values() {
         let g = parse_radius_group("4px 12px").unwrap();
         // [v0, v1, v0, v1]（TL/BR=v0, TR/BL=v1）
-        assert_eq!(g, [parse_lp("4px"), parse_lp("12px"), parse_lp("4px"), parse_lp("12px")]);
+        assert_eq!(
+            g,
+            [
+                parse_lp("4px"),
+                parse_lp("12px"),
+                parse_lp("4px"),
+                parse_lp("12px")
+            ]
+        );
     }
 
     #[test]
@@ -870,7 +992,7 @@ mod tests {
         assert!(parse_radius_group("auto").is_none());
         assert!(parse_radius_group("inherit").is_none());
         assert!(parse_radius_group("initial").is_none());
-        assert!(parse_radius_group("8px auto").is_none());  // 混入 auto → 整组 None
+        assert!(parse_radius_group("8px auto").is_none()); // 混入 auto → 整组 None
     }
 
     #[test]
@@ -885,7 +1007,7 @@ mod tests {
         assert!(apply_decl(&mut s, "border-radius", "8px"));
         for c in &s.border_radius.corners {
             assert_eq!(c.h, parse_lp("8px"));
-            assert_eq!(c.v, parse_lp("8px"));  // 无 / → v = h
+            assert_eq!(c.v, parse_lp("8px")); // 无 / → v = h
         }
     }
 
@@ -947,7 +1069,10 @@ mod tests {
         // concat(grayscale, brightness(1.2))：brightness 改乘法（对角 1.2，无 offset）。
         // m[0] = grayscale luma(0.299) × 1.2 = 0.3588；m[4] offset = 0（两者都无 offset）。
         assert!(m[4].abs() < 1e-4, "brightness 乘法无 offset → m[4]=0");
-        assert!((m[0] - 0.3588).abs() < 1e-4, "m[0] = grayscale luma × brightness = 0.299×1.2");
+        assert!(
+            (m[0] - 0.3588).abs() < 1e-4,
+            "m[0] = grayscale luma × brightness = 0.299×1.2"
+        );
     }
 
     /// 多函数 filter 串联顺序与 CSS/fgui 一致（回归测试）。
@@ -961,21 +1086,31 @@ mod tests {
     #[test]
     fn apply_decl_filter_multi_function_concat_order_matches_css() {
         let mut s = ResolvedStyle::default();
-        assert!(apply_decl(&mut s, "filter", "saturate(0.5) hue-rotate(90deg)"));
+        assert!(apply_decl(
+            &mut s,
+            "filter",
+            "saturate(0.5) hue-rotate(90deg)"
+        ));
         let got = s.color_filter.expect("multi filter");
 
         let sat = color_filter::saturate(0.5);
         let hue = color_filter::hue_rotate(90.0);
-        let correct = color_filter::concat(&hue, &sat);   // CSS: H × S（hue-rotate 在左）
-        let reversed = color_filter::concat(&sat, &hue);  // 错误顺序: S × H
+        let correct = color_filter::concat(&hue, &sat); // CSS: H × S（hue-rotate 在左）
+        let reversed = color_filter::concat(&sat, &hue); // 错误顺序: S × H
 
         for i in 0..20 {
-            assert!((got[i] - correct[i]).abs() < 1e-5,
+            assert!(
+                (got[i] - correct[i]).abs() < 1e-5,
                 "[{}] 应 = concat(hue, saturate)（CSS/fgui 顺序，新值左乘），got={}, expected={}",
-                i, got[i], correct[i]);
+                i,
+                got[i],
+                correct[i]
+            );
         }
-        assert!((got[0] - reversed[0]).abs() > 1e-4 || (got[1] - reversed[1]).abs() > 1e-4,
-            "顺序敏感：与反转矩阵（concat(saturate, hue)）应不同");
+        assert!(
+            (got[0] - reversed[0]).abs() > 1e-4 || (got[1] - reversed[1]).abs() > 1e-4,
+            "顺序敏感：与反转矩阵（concat(saturate, hue)）应不同"
+        );
     }
 
     #[test]

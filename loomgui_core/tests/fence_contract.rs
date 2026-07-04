@@ -50,7 +50,10 @@ fn supported_layout_props_return_true() {
     ];
     for (prop, val) in cases {
         let mut s = ResolvedStyle::default();
-        assert!(apply_decl(&mut s, prop, val), "支持属性 {prop}:{val} 应返回 true");
+        assert!(
+            apply_decl(&mut s, prop, val),
+            "支持属性 {prop}:{val} 应返回 true"
+        );
     }
 }
 
@@ -75,7 +78,10 @@ fn supported_visual_props_return_true() {
     ];
     for (prop, val) in cases {
         let mut s = ResolvedStyle::default();
-        assert!(apply_decl(&mut s, prop, val), "支持属性 {prop}:{val} 应返回 true");
+        assert!(
+            apply_decl(&mut s, prop, val),
+            "支持属性 {prop}:{val} 应返回 true"
+        );
     }
 }
 
@@ -83,8 +89,10 @@ fn supported_visual_props_return_true() {
 fn background_size_rejects_two_values() {
     // background-size 只认 cover/contain/100%，拒两值如 "100% 50%"。
     let mut s = ResolvedStyle::default();
-    assert!(!apply_decl(&mut s, "background-size", "100% 50%"),
-        "background-size 两值应被拒（返回 false）");
+    assert!(
+        !apply_decl(&mut s, "background-size", "100% 50%"),
+        "background-size 两值应被拒（返回 false）"
+    );
 }
 
 #[test]
@@ -94,8 +102,11 @@ fn display_grid_falls_to_flex() {
     let mut s = ResolvedStyle::default();
     let ok = apply_decl(&mut s, "display", "grid");
     assert!(ok, "display:grid 走非 none 分支返回 true（落 Flex）");
-    assert_eq!(s.taffy_style.display, Display::Flex,
-        "display:grid 应落到 Flex（taffy 无 grid）");
+    assert_eq!(
+        s.taffy_style.display,
+        Display::Flex,
+        "display:grid 应落到 Flex（taffy 无 grid）"
+    );
 }
 
 // ── C. 围栏外属性静默忽略（apply_decl 返回 false，布局字段不变）─────
@@ -117,8 +128,10 @@ fn fence_out_props_return_false() {
     ];
     for (prop, val) in cases {
         let mut s = ResolvedStyle::default();
-        assert!(!apply_decl(&mut s, prop, val),
-            "围栏外属性 {prop}:{val} 应返回 false（静默忽略）");
+        assert!(
+            !apply_decl(&mut s, prop, val),
+            "围栏外属性 {prop}:{val} 应返回 false（静默忽略）"
+        );
     }
 }
 
@@ -129,8 +142,11 @@ fn position_absolute_breaks_flow() {
     let mut s = ResolvedStyle::default();
     let applied = apply_decl(&mut s, "position", "absolute");
     assert!(applied, "position:absolute 应返回 true（围栏内）");
-    assert_eq!(s.taffy_style.position, taffy::style::Position::Absolute,
-        "position:absolute → taffy Absolute（脱离流）");
+    assert_eq!(
+        s.taffy_style.position,
+        taffy::style::Position::Absolute,
+        "position:absolute → taffy Absolute（脱离流）"
+    );
 }
 
 #[test]
@@ -147,10 +163,15 @@ fn position_fixed_sticky_ignored() {
     // fixed/sticky 围栏外（静默忽略，保持默认 Relative）。
     for val in ["fixed", "sticky"] {
         let mut s = ResolvedStyle::default();
-        assert!(!apply_decl(&mut s, "position", val),
-            "position:{val} 围栏外 → false");
-        assert_eq!(s.taffy_style.position, taffy::style::Position::Relative,
-            "position:{val} 不改默认 Relative");
+        assert!(
+            !apply_decl(&mut s, "position", val),
+            "position:{val} 围栏外 → false"
+        );
+        assert_eq!(
+            s.taffy_style.position,
+            taffy::style::Position::Relative,
+            "position:{val} 不改默认 Relative"
+        );
     }
 }
 
@@ -158,9 +179,15 @@ fn position_fixed_sticky_ignored() {
 fn inset_top_writes_taffy_inset() {
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "top", "10px"));
-    assert_eq!(s.taffy_style.inset.top, taffy::style::LengthPercentageAuto::Length(10.0));
+    assert_eq!(
+        s.taffy_style.inset.top,
+        taffy::style::LengthPercentageAuto::Length(10.0)
+    );
     // 未设的边保持 auto。
-    assert_eq!(s.taffy_style.inset.bottom, taffy::style::LengthPercentageAuto::Auto);
+    assert_eq!(
+        s.taffy_style.inset.bottom,
+        taffy::style::LengthPercentageAuto::Auto
+    );
 }
 
 #[test]
@@ -170,10 +197,22 @@ fn inset_four_sides() {
     apply_decl(&mut s, "right", "2px");
     apply_decl(&mut s, "bottom", "3px");
     apply_decl(&mut s, "left", "4px");
-    assert_eq!(s.taffy_style.inset.top, taffy::style::LengthPercentageAuto::Length(1.0));
-    assert_eq!(s.taffy_style.inset.right, taffy::style::LengthPercentageAuto::Length(2.0));
-    assert_eq!(s.taffy_style.inset.bottom, taffy::style::LengthPercentageAuto::Length(3.0));
-    assert_eq!(s.taffy_style.inset.left, taffy::style::LengthPercentageAuto::Length(4.0));
+    assert_eq!(
+        s.taffy_style.inset.top,
+        taffy::style::LengthPercentageAuto::Length(1.0)
+    );
+    assert_eq!(
+        s.taffy_style.inset.right,
+        taffy::style::LengthPercentageAuto::Length(2.0)
+    );
+    assert_eq!(
+        s.taffy_style.inset.bottom,
+        taffy::style::LengthPercentageAuto::Length(3.0)
+    );
+    assert_eq!(
+        s.taffy_style.inset.left,
+        taffy::style::LengthPercentageAuto::Length(4.0)
+    );
 }
 
 #[test]
@@ -181,7 +220,10 @@ fn inset_auto_keeps_default() {
     let mut s = ResolvedStyle::default();
     apply_decl(&mut s, "top", "10px");
     apply_decl(&mut s, "top", "auto"); // auto 显式置回默认 Auto（覆盖之前的 px 值）
-    assert_eq!(s.taffy_style.inset.top, taffy::style::LengthPercentageAuto::Auto);
+    assert_eq!(
+        s.taffy_style.inset.top,
+        taffy::style::LengthPercentageAuto::Auto
+    );
 }
 
 #[test]
@@ -190,7 +232,10 @@ fn transform_skew_does_not_apply() {
     // apply_decl("transform",...) 返回 true（进 match arm），但 transform 字段无变化。
     let mut s1 = ResolvedStyle::default();
     let applied = apply_decl(&mut s1, "transform", "skew(10deg,5deg)");
-    assert!(applied, "skew 应进 transform arm 返回 true（no-op 但进 arm）");
+    assert!(
+        applied,
+        "skew 应进 transform arm 返回 true（no-op 但进 arm）"
+    );
     let s2 = ResolvedStyle::default();
     assert_eq!(s1.transform, s2.transform, "skew 不应改变 transform 字段");
 }
@@ -201,5 +246,8 @@ fn at_rule_media_skipped_by_parser() {
     let css = "@media (min-width: 600px) { .a { width: 100px; } }";
     let sheet = parse_css(css).expect("parse_css 不应 panic");
     // @media 块被跳过，sheet 里无 .a 规则。
-    assert!(sheet.rules.is_empty(), "@media 块应被跳过，规则不进 StyleSheet");
+    assert!(
+        sheet.rules.is_empty(),
+        "@media 块应被跳过，规则不进 StyleSheet"
+    );
 }

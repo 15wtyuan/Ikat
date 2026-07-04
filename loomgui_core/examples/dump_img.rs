@@ -7,25 +7,43 @@ use loomgui_core::scene::node::NodeKind;
 use loomgui_core::stage::Stage;
 
 fn main() {
-    let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/wqy-microhei.ttc");
-    let pkg_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin");
+    let font_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/wqy-microhei.ttc"
+    );
+    let pkg_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin"
+    );
     let pkg = match std::fs::read(pkg_path) {
         Ok(b) => b,
-        Err(e) => { eprintln!("read pkg: {}", e); return; }
+        Err(e) => {
+            eprintln!("read pkg: {}", e);
+            return;
+        }
     };
     let mut s = match Stage::new(font_path, (1080.0, 1920.0)) {
         Ok(s) => s,
-        Err(e) => { eprintln!("Stage::new: {}", e); return; }
+        Err(e) => {
+            eprintln!("Stage::new: {}", e);
+            return;
+        }
     };
     // v1.4-a T4：load_package(name, bytes) 进资源池不建 scene。
-    if let Err(e) = s.load_package("showcase", &pkg) { eprintln!("load_package: {}", e); return; }
+    if let Err(e) = s.load_package("showcase", &pkg) {
+        eprintln!("load_package: {}", e);
+        return;
+    }
     // v1.4-a T4：scene 未建（load_package 不建 scene）；从 packages 字典读组件模板节点。
     // T5 instantiate 后改回 scene 转储。
     println!("{:<22} {:<18} {:<16} {:<16}", "id", "src", "css.w", "css.h");
     for pkg in s.packages.values() {
         for comp in pkg.components.values() {
             for n in &comp.nodes {
-                let src = match &n.kind { NodeKind::Image { src } => src.clone(), _ => continue };
+                let src = match &n.kind {
+                    NodeKind::Image { src } => src.clone(),
+                    _ => continue,
+                };
                 let st = &n.style.taffy_style;
                 let css_w = format!("{:?}", st.size.width);
                 let css_h = format!("{:?}", st.size.height);

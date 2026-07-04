@@ -307,7 +307,11 @@ mod tests {
             .push(rule(".btn:disabled", "opacity", "0.5"));
         s.get_mut(bid).unwrap().disabled = true;
         rematch_pseudo_classes(&mut s);
-        assert_eq!(s.get(bid).unwrap().style.opacity, 0.5, "disabled → opacity 0.5");
+        assert_eq!(
+            s.get(bid).unwrap().style.opacity,
+            0.5,
+            "disabled → opacity 0.5"
+        );
     }
 
     #[test]
@@ -380,9 +384,7 @@ mod tests {
         // 打包器保证无伪类规则不进 dynamic_rules。此测断言 color 变红。
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn", "color", "#ff0000"));
+        s.dynamic_rules.rules.push(rule(".btn", "color", "#ff0000"));
         s.get_mut(bid).unwrap().hovered = true;
         rematch_pseudo_classes(&mut s);
         assert_eq!(s.get(bid).unwrap().style.color, [1.0, 0.0, 0.0, 1.0]);
@@ -484,9 +486,11 @@ mod tests {
         // background-image 是视觉字段（非 taffy_style/order）→ rematch 不 layout dirty
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn:hover", "background-image", "url(icons/home.png)"));
+        s.dynamic_rules.rules.push(rule(
+            ".btn:hover",
+            "background-image",
+            "url(icons/home.png)",
+        ));
         s.get_mut(bid).unwrap().hovered = true;
         rematch_pseudo_classes(&mut s);
         assert_eq!(
@@ -526,8 +530,16 @@ mod tests {
         // hover → border-radius:8px 生效（四角 h=v=Length(8)）
         let bc = &s.get(bid).unwrap().style.border_radius.corners;
         for c in bc {
-            assert_eq!(c.h, taffy::style::LengthPercentage::Length(8.0), "hover → border-radius 水平 8px");
-            assert_eq!(c.v, taffy::style::LengthPercentage::Length(8.0), "hover → border-radius 垂直 8px");
+            assert_eq!(
+                c.h,
+                taffy::style::LengthPercentage::Length(8.0),
+                "hover → border-radius 水平 8px"
+            );
+            assert_eq!(
+                c.v,
+                taffy::style::LengthPercentage::Length(8.0),
+                "hover → border-radius 垂直 8px"
+            );
         }
     }
 }

@@ -28,7 +28,9 @@ pub fn from_rotate(rad: f32) -> Affine2 {
 /// 矩阵乘 self ∘ other（先应用 other，再应用 self）。
 /// M = self, N = other → M·N（点先经 N 再经 M）。
 pub fn mul(self_m: &Affine2, other: &Affine2) -> Affine2 {
-    let (a1, b1, c1, d1, tx1, ty1) = (self_m[0], self_m[1], self_m[2], self_m[3], self_m[4], self_m[5]);
+    let (a1, b1, c1, d1, tx1, ty1) = (
+        self_m[0], self_m[1], self_m[2], self_m[3], self_m[4], self_m[5],
+    );
     let (a2, b2, c2, d2, tx2, ty2) = (other[0], other[1], other[2], other[3], other[4], other[5]);
     [
         a1 * a2 + c1 * b2,
@@ -42,10 +44,7 @@ pub fn mul(self_m: &Affine2, other: &Affine2) -> Affine2 {
 
 /// 矩阵 × 点。
 pub fn apply_point(m: &Affine2, x: f32, y: f32) -> (f32, f32) {
-    (
-        m[0] * x + m[2] * y + m[4],
-        m[1] * x + m[3] * y + m[5],
-    )
+    (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
 }
 
 /// 仿射逆（det≠0）。用伴随矩阵法。
@@ -84,11 +83,21 @@ pub trait Affine2Ext {
     fn is_pure_translation(self) -> bool;
 }
 impl Affine2Ext for Affine2 {
-    fn mul(self, other: Affine2) -> Affine2 { mul(&self, &other) }
-    fn apply_point(self, x: f32, y: f32) -> (f32, f32) { apply_point(&self, x, y) }
-    fn inverse(self) -> Affine2 { inverse(&self) }
-    fn is_identity(self) -> bool { is_identity(&self) }
-    fn is_pure_translation(self) -> bool { is_pure_translation(&self) }
+    fn mul(self, other: Affine2) -> Affine2 {
+        mul(&self, &other)
+    }
+    fn apply_point(self, x: f32, y: f32) -> (f32, f32) {
+        apply_point(&self, x, y)
+    }
+    fn inverse(self) -> Affine2 {
+        inverse(&self)
+    }
+    fn is_identity(self) -> bool {
+        is_identity(&self)
+    }
+    fn is_pure_translation(self) -> bool {
+        is_pure_translation(&self)
+    }
 }
 
 // 测试用：`use super::*` 导入 IDENTITY const + from_* fn + Affine2Ext trait；
@@ -158,6 +167,9 @@ mod tests {
         let (x, y) = skew.apply_point(1.0, 1.0);
         let inv = skew.inverse();
         let (bx, by) = inv.apply_point(x, y);
-        assert!((bx - 1.0).abs() < 1e-4 && (by - 1.0).abs() < 1e-4, "剪切矩阵可逆");
+        assert!(
+            (bx - 1.0).abs() < 1e-4 && (by - 1.0).abs() < 1e-4,
+            "剪切矩阵可逆"
+        );
     }
 }

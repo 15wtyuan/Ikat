@@ -12,7 +12,10 @@ use loomgui_core::stage::Stage;
 use loomgui_core::style::cascade::resolve_styles;
 
 fn font_path() -> (String, usize) {
-    let p = format!("{}/tests/fixtures/DejaVuSans.ttf", env!("CARGO_MANIFEST_DIR"));
+    let p = format!(
+        "{}/tests/fixtures/DejaVuSans.ttf",
+        env!("CARGO_MANIFEST_DIR")
+    );
     (p.clone(), p.len())
 }
 
@@ -106,7 +109,7 @@ fn bench_page_turn(c: &mut Criterion) {
                 load_html_css(&mut stage, &html_500_colorized(0), "").expect("load");
                 stage.advance_time(0.016);
                 let _ = stage.tick_and_render(); // 建基线
-                // 换页：reload 不同 color HTML（全节点 style 变）。
+                                                 // 换页：reload 不同 color HTML（全节点 style 变）。
                 load_html_css(&mut stage, &html_500_colorized(100), "").expect("reload");
                 stage.advance_time(0.016);
                 stage

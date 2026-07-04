@@ -110,11 +110,26 @@ mod tests {
     /// children 顺序 [a, b] → 等效序 b 顶层（后绘制）。
     fn overlap_scene() -> Scene {
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut a = Node::default();
-        a.layout_rect = Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
+        a.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
         let mut b = Node::default();
-        b.layout_rect = Rect { x: 50.0, y: 50.0, w: 100.0, h: 100.0 };
+        b.layout_rect = Rect {
+            x: 50.0,
+            y: 50.0,
+            w: 100.0,
+            h: 100.0,
+        };
         // edges: (0,1)=root→a, (0,2)=root→b；root parent=None 自动成 root。
         let s = Scene::from_nodes(vec![root, a, b], vec![(0, 1), (0, 2)]);
         // 返回前 node id 由 slotmap 分配（首节点 = NodeId((1<<12)|1)）。
@@ -174,7 +189,12 @@ mod tests {
         compute_world_transforms(&mut s);
         let (root, _a, b) = overlap_ids(&s);
         // root 加 clip_rect (0,0,80,80)——点 (90,90) 在 root AABB 但 clip 外
-        s.get_mut(root).unwrap().clip_rect = Some(Rect { x: 0.0, y: 0.0, w: 80.0, h: 80.0 });
+        s.get_mut(root).unwrap().clip_rect = Some(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 80.0,
+            h: 80.0,
+        });
         // 点 (90,90) 在 b 的 AABB (50,50,100,100) 但在 root clip 外 → 子树不命中
         assert_eq!(hit_test(&s, (90.0, 90.0)), None);
         // 点 (70,70) 在 clip 内 + 在 b 内 → 命中 b
@@ -200,7 +220,7 @@ mod tests {
         compute_world_transforms(&mut s);
         let (_root, _a, b) = overlap_ids(&s);
         s.get_mut(b).unwrap().disabled = true; // b disabled
-        // 点 (75,75) 在 b 内——b 仍命中（disabled 不跳过）
+                                               // 点 (75,75) 在 b 内——b 仍命中（disabled 不跳过）
         assert_eq!(hit_test(&s, (75.0, 75.0)), Some(b));
     }
 
@@ -218,17 +238,38 @@ mod tests {
         // 用 child box center 经 parent.world 变换得世界中心，命中应返 child。
         let child_wm = s.world_transforms[child_id.index()];
         let (cx, cy) = child_wm.apply_point(5.0, 5.0); // child 本地中心
-        assert_eq!(hit_test(&s, (cx, cy)), Some(child_id), "点在旋转后 child 上 → 命中 child");
+        assert_eq!(
+            hit_test(&s, (cx, cy)),
+            Some(child_id),
+            "点在旋转后 child 上 → 命中 child"
+        );
     }
 
     fn overlap_scene_rotated() -> Scene {
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut parent = Node::default();
-        parent.layout_rect = Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
-        parent.style.transform = LocalTransform { matrix: transform::from_rotate(std::f32::consts::FRAC_PI_2) };
+        parent.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        parent.style.transform = LocalTransform {
+            matrix: transform::from_rotate(std::f32::consts::FRAC_PI_2),
+        };
         let mut child = Node::default();
-        child.layout_rect = Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 };
+        child.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
         // edges: root→parent, parent→child
         Scene::from_nodes(vec![root, parent, child], vec![(0, 1), (1, 2)])
     }
@@ -248,18 +289,57 @@ mod tests {
             bool,
             Option<i32>,
         )> = vec![
-            (None, NodeKind::Container, scroll_style.clone(), vec![], None, false, None),
-            (Some(0), NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(0), NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
+            (
+                None,
+                NodeKind::Container,
+                scroll_style.clone(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
         ];
         let mut s = Scene::build(&entries);
         // build 按 entries 插入序分配 id：roots[0]=容器，其 children=[entry1, entry2]。
         let container_id = s.roots[0];
         let inner_id = s.get(container_id).unwrap().children[0];
         let content_id = s.get(container_id).unwrap().children[1];
-        s.get_mut(container_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
-        s.get_mut(inner_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 40.0, h: 40.0 };
-        s.get_mut(content_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 30.0, h: 200.0 }; // content_y=200 > viewport=100
+        s.get_mut(container_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        s.get_mut(inner_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 40.0,
+            h: 40.0,
+        };
+        s.get_mut(content_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 30.0,
+            h: 200.0,
+        }; // content_y=200 > viewport=100
         crate::scroll::refresh_content_sizes(&mut s);
         compute_world_transforms(&mut s);
         s
@@ -281,14 +361,20 @@ mod tests {
     fn hit_scrollbar_grip_returns_none_outside_thumb() {
         let s = scroll_scene_with_thumb();
         // 点在容器左上角 (10,10) 非 thumb 区
-        assert!(hit_scrollbar_grip(&s, (10.0, 10.0)).is_none(), "非 thumb 区 → None");
+        assert!(
+            hit_scrollbar_grip(&s, (10.0, 10.0)).is_none(),
+            "非 thumb 区 → None"
+        );
     }
 
     #[test]
     fn hit_scrollbar_grip_no_scroll_no_thumb() {
         let s = overlap_scene(); // 无 scroll 容器
         compute_world_transforms(&mut s.clone());
-        assert!(hit_scrollbar_grip(&s, (50.0, 50.0)).is_none(), "无 scroll 容器 → None");
+        assert!(
+            hit_scrollbar_grip(&s, (50.0, 50.0)).is_none(),
+            "无 scroll 容器 → None"
+        );
     }
 
     #[test]
@@ -299,8 +385,15 @@ mod tests {
         let hit = hit_test(&s, (96.0, 25.0));
         assert!(hit.is_some(), "thumb 区 hit_test 命中");
         let raw = hit.unwrap().0 as u32;
-        assert!(raw & crate::scroll::V_THUMB_FLAG != 0, "sentinel 含 V_THUMB_FLAG");
+        assert!(
+            raw & crate::scroll::V_THUMB_FLAG != 0,
+            "sentinel 含 V_THUMB_FLAG"
+        );
         // 去掉 flag 应得 container id（packed u32）
-        assert_eq!(raw & !crate::scroll::V_THUMB_FLAG, container_id.0, "flag off → container id");
+        assert_eq!(
+            raw & !crate::scroll::V_THUMB_FLAG,
+            container_id.0,
+            "flag off → container id"
+        );
     }
 }

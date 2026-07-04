@@ -4,13 +4,13 @@
 #[allow(unused_imports)] // BlendMode/MaskContext/NodePayload 仅测试 helper 经 super::* 用。
 use loomgui_core::render::node::{BlendMode, ChangeLevel, MaskContext, NodePayload, RenderNode};
 use loomgui_core::render::FrameData;
-use loomgui_core::transform;
 #[allow(unused_imports)] // Glyph/GlyphRun/Line/TextLayout 仅 text round-trip 测试 helper 用。
 use loomgui_core::text::layout::{Glyph, GlyphRun, Line, TextLayout};
+use loomgui_core::transform;
 
 /// magic = "LOOM" little-endian。
 const MAGIC: u32 = 0x4D4F4F4C;
-const VERSION: u32 = 9;   // v9：加 reuse_key 列（第 22 列）
+const VERSION: u32 = 9; // v9：加 reuse_key 列（第 22 列）
 
 /// 入口：FrameData（nodes + clip 表）→ blob 字节。
 pub fn build_blob(frame: &FrameData) -> Vec<u8> {
@@ -21,33 +21,45 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     //   path_idx 占 4B（path 表 1-based 索引，0=纯色无图），22 列（v9 加 reuse_key）。
     //   v6：加 color_matrix 列（[f32;20]，80B，第 20 列）——ColorFilter。
     let columns: &[(&str, usize)] = &[
-        ("node_id", 4), ("parent_id", 4), ("visible", 1), ("alpha", 4),
-        ("sort_key", 4), ("mask_context", 4),
-        ("m_a", 4), ("m_b", 4), ("m_c", 4), ("m_d", 4), ("m_tx", 4), ("m_ty", 4),
-        ("payload_kind", 1), ("mesh_off", 4), ("mesh_len", 4),
-        ("text_off", 4), ("text_len", 4),
-        ("path_idx", 4),   // v7：path 表 1-based 索引（0=纯色无图）
+        ("node_id", 4),
+        ("parent_id", 4),
+        ("visible", 1),
+        ("alpha", 4),
+        ("sort_key", 4),
+        ("mask_context", 4),
+        ("m_a", 4),
+        ("m_b", 4),
+        ("m_c", 4),
+        ("m_d", 4),
+        ("m_tx", 4),
+        ("m_ty", 4),
+        ("payload_kind", 1),
+        ("mesh_off", 4),
+        ("mesh_len", 4),
+        ("text_off", 4),
+        ("text_len", 4),
+        ("path_idx", 4), // v7：path 表 1-based 索引（0=纯色无图）
         ("program", 1),
-        ("color_matrix", 80),   // [f32;20] × 4 字节，第 20 列
-        ("change_level", 1),    // v8：帧级变更级别（u8，0=Skip 1=Header 2=Full），第 21 列
-        ("reuse_key", 4),       // v9：渲染复用键（虚拟列表 slot key），第 22 列
+        ("color_matrix", 80), // [f32;20] × 4 字节，第 20 列
+        ("change_level", 1),  // v8：帧级变更级别（u8，0=Skip 1=Header 2=Full），第 21 列
+        ("reuse_key", 4),     // v9：渲染复用键（虚拟列表 slot key），第 22 列
     ];
-    let num_col_offsets = columns.len();          // 22
+    let num_col_offsets = columns.len(); // 22
     let header_len = 3 * 4                          // magic, version, node_count
         + num_col_offsets * 4                       // 列 offset（21）
         + 2 * 4                                     // mesh_arena off + len
         + 2 * 4                                     // text_arena off + len
         + 2 * 4                                     // clip_table off + len
-        + 2 * 4;                                    // path_table off + len（v7 新增）
+        + 2 * 4; // path_table off + len（v7 新增）
 
     // 先把 mesh arena + text arena + per-node 列值算出来
     // （mesh/text arena 决定列值里的 mesh_off/len 与 text_off/len）。
     let mut mesh_arena: Vec<u8> = Vec::new();
-    let mut text_arena: Vec<u8> = Vec::new();   // Text 节点 layout（§4.1）
-    // v7：path string table arena——per-frame 归一化图片 path 表（§5.2）。
-    //   layout: path_count:u32 后跟 count × {path_len:u32, path_bytes:u8[path_len]}。
-    //   path_idx（列值）1-based 索引此表：idx=0=纯色无图，idx>0 = 第 idx 条 path。
-    //   build 期间用 path_index map 去重 intern（同 path 复用同一 idx，节省 arena）。
+    let mut text_arena: Vec<u8> = Vec::new(); // Text 节点 layout（§4.1）
+                                              // v7：path string table arena——per-frame 归一化图片 path 表（§5.2）。
+                                              //   layout: path_count:u32 后跟 count × {path_len:u32, path_bytes:u8[path_len]}。
+                                              //   path_idx（列值）1-based 索引此表：idx=0=纯色无图，idx>0 = 第 idx 条 path。
+                                              //   build 期间用 path_index map 去重 intern（同 path 复用同一 idx，节省 arena）。
     let mut path_table_buf: Vec<u8> = Vec::new();
     path_table_buf.extend_from_slice(&0u32.to_le_bytes()); // path_count 占位，build 末回填
     let mut path_index: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
@@ -68,7 +80,7 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     let mut col_mesh_len = Vec::<u8>::new();
     let mut col_text_off = Vec::<u8>::new();
     let mut col_text_len = Vec::<u8>::new();
-    let mut col_path_idx = Vec::<u8>::new();   // v7：path_idx 列
+    let mut col_path_idx = Vec::<u8>::new(); // v7：path_idx 列
     let mut col_program = Vec::<u8>::new();
     let mut col_color_matrix = Vec::<u8>::new();
     let mut col_change_level = Vec::<u8>::new();
@@ -76,7 +88,8 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
 
     for rn in nodes {
         col_node_id.extend_from_slice(&rn.node_id.to_le_bytes());
-        col_parent_id.extend_from_slice(&rn.parent_id.map(|p| p as i32).unwrap_or(-1).to_le_bytes());
+        col_parent_id
+            .extend_from_slice(&rn.parent_id.map(|p| p as i32).unwrap_or(-1).to_le_bytes());
         col_visible.push(rn.visible as u8);
         col_alpha.extend_from_slice(&rn.alpha.to_le_bytes());
         col_sort_key.extend_from_slice(&rn.sort_key.to_le_bytes());
@@ -96,7 +109,15 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
         let write_arena = matches!(rn.change_level, ChangeLevel::Full);
 
         match &rn.payload {
-            NodePayload::Mesh { verts, uvs, colors, indices, image_path, program, color_matrix } => {
+            NodePayload::Mesh {
+                verts,
+                uvs,
+                colors,
+                indices,
+                image_path,
+                program,
+                color_matrix,
+            } => {
                 col_kind.push(1);
                 // v7：把 image_path intern 进 path string table，写 1-based path_idx。
                 //   None（纯色）→ 0；Some(p) → p 在 path 表里的 1-based 索引。
@@ -106,12 +127,18 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
                 };
                 col_path_idx.extend_from_slice(&path_idx.to_le_bytes());
                 col_program.push(*program as u8);
-                for &v in color_matrix.iter() { col_color_matrix.extend_from_slice(&v.to_le_bytes()); }
+                for &v in color_matrix.iter() {
+                    col_color_matrix.extend_from_slice(&v.to_le_bytes());
+                }
                 if write_arena {
                     // v4：re-base 顶点两路径。纯平移 → 减 (tx,ty) 得本地；
                     // 非纯平移 → 顶点已 box 本地 → 不减。
                     let pure = transform::is_pure_translation(&rn.world_matrix);
-                    let (tx, ty) = if pure { (rn.world_matrix[4], rn.world_matrix[5]) } else { (0.0, 0.0) };
+                    let (tx, ty) = if pure {
+                        (rn.world_matrix[4], rn.world_matrix[5])
+                    } else {
+                        (0.0, 0.0)
+                    };
                     let seg_off = mesh_arena.len() as u32;
                     mesh_arena.extend_from_slice(&(verts.len() as u32).to_le_bytes());
                     mesh_arena.extend_from_slice(&(indices.len() as u32).to_le_bytes());
@@ -145,10 +172,17 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
                 col_text_off.extend_from_slice(&0u32.to_le_bytes());
                 col_text_len.extend_from_slice(&0u32.to_le_bytes());
             }
-            NodePayload::Text { layout, font_size, color, program } => {
+            NodePayload::Text {
+                layout,
+                font_size,
+                color,
+                program,
+            } => {
                 col_kind.push(2);
                 col_program.push(*program as u8);
-                for _ in 0..20 { col_color_matrix.extend_from_slice(&0f32.to_le_bytes()); }
+                for _ in 0..20 {
+                    col_color_matrix.extend_from_slice(&0f32.to_le_bytes());
+                }
                 col_path_idx.extend_from_slice(&0u32.to_le_bytes());
                 col_mesh_off.extend_from_slice(&0u32.to_le_bytes());
                 col_mesh_len.extend_from_slice(&0u32.to_le_bytes());
@@ -190,17 +224,28 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     }
 
     let col_bufs: Vec<(&str, &Vec<u8>)> = vec![
-        ("node_id",&col_node_id),("parent_id",&col_parent_id),("visible",&col_visible),
-        ("alpha",&col_alpha),("sort_key",&col_sort_key),("mask_context",&col_mask),
-        ("m_a",&col_ma),("m_b",&col_mb),("m_c",&col_mc),("m_d",&col_md),
-        ("m_tx",&col_mtx),("m_ty",&col_mty),
-        ("payload_kind",&col_kind),("mesh_off",&col_mesh_off),("mesh_len",&col_mesh_len),
-        ("text_off",&col_text_off),("text_len",&col_text_len),
-        ("path_idx",&col_path_idx),   // v7：path 表 1-based 索引
-        ("program",&col_program),
-        ("color_matrix",&col_color_matrix),
-        ("change_level",&col_change_level),
-        ("reuse_key",&col_reuse_key),
+        ("node_id", &col_node_id),
+        ("parent_id", &col_parent_id),
+        ("visible", &col_visible),
+        ("alpha", &col_alpha),
+        ("sort_key", &col_sort_key),
+        ("mask_context", &col_mask),
+        ("m_a", &col_ma),
+        ("m_b", &col_mb),
+        ("m_c", &col_mc),
+        ("m_d", &col_md),
+        ("m_tx", &col_mtx),
+        ("m_ty", &col_mty),
+        ("payload_kind", &col_kind),
+        ("mesh_off", &col_mesh_off),
+        ("mesh_len", &col_mesh_len),
+        ("text_off", &col_text_off),
+        ("text_len", &col_text_len),
+        ("path_idx", &col_path_idx), // v7：path 表 1-based 索引
+        ("program", &col_program),
+        ("color_matrix", &col_color_matrix),
+        ("change_level", &col_change_level),
+        ("reuse_key", &col_reuse_key),
     ];
 
     // 算各列 offset。
@@ -214,7 +259,7 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     let mesh_arena_off = off as u32;
     let mesh_arena_len = mesh_arena.len() as u32;
     let text_arena_off = mesh_arena_off + mesh_arena_len;
-    let text_arena_len = text_arena.len() as u32;   // Text 节点 layout 序列化进 text_arena
+    let text_arena_len = text_arena.len() as u32; // Text 节点 layout 序列化进 text_arena
     let clip_table_off = text_arena_off + text_arena_len;
     // clip 表 = clip_count:u32 + entries[count × {context_id:u32, x,y,w,h:f32}]（20B/entry）。
     // 只含 mask_context>0 的层级（context==0 = 无 clip，永不入表）。§4.4 / §4.1。
@@ -235,23 +280,27 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     let path_count = path_index.len() as u32;
     path_table_buf[0..4].copy_from_slice(&path_count.to_le_bytes());
     let path_table_off = clip_table_off + clip_table_len;
-    let path_table_len = path_table_buf.len() as u32;   // 4 + Σ(4 + path_len)；无 path 时 = 4（仅 count=0）
+    let path_table_len = path_table_buf.len() as u32; // 4 + Σ(4 + path_len)；无 path 时 = 4（仅 count=0）
 
     // 拼装。
     let mut out = Vec::new();
     out.extend_from_slice(&MAGIC.to_le_bytes());
     out.extend_from_slice(&VERSION.to_le_bytes());
     out.extend_from_slice(&(n as u32).to_le_bytes());
-    for o in &col_offsets { out.extend_from_slice(&o.to_le_bytes()); }
+    for o in &col_offsets {
+        out.extend_from_slice(&o.to_le_bytes());
+    }
     out.extend_from_slice(&mesh_arena_off.to_le_bytes());
     out.extend_from_slice(&mesh_arena_len.to_le_bytes());
     out.extend_from_slice(&text_arena_off.to_le_bytes());
     out.extend_from_slice(&text_arena_len.to_le_bytes());
     out.extend_from_slice(&clip_table_off.to_le_bytes());
     out.extend_from_slice(&clip_table_len.to_le_bytes());
-    out.extend_from_slice(&path_table_off.to_le_bytes());   // v7：path_table off + len
+    out.extend_from_slice(&path_table_off.to_le_bytes()); // v7：path_table off + len
     out.extend_from_slice(&path_table_len.to_le_bytes());
-    for (_name, buf) in &col_bufs { out.extend_from_slice(buf); }
+    for (_name, buf) in &col_bufs {
+        out.extend_from_slice(buf);
+    }
     out.extend_from_slice(&mesh_arena);
     out.extend_from_slice(&text_arena);
     // clip 表：clip_count + entries。
@@ -274,7 +323,7 @@ fn intern_path(
         return idx;
     }
     // 新 path：追加 {path_len, path_bytes}，分配下一 1-based idx。
-    let idx = (path_index.len() + 1) as u32;   // 1-based：首条 path → idx=1
+    let idx = (path_index.len() + 1) as u32; // 1-based：首条 path → idx=1
     let bytes = path.as_bytes();
     path_table_buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
     path_table_buf.extend_from_slice(bytes);
@@ -291,7 +340,10 @@ mod tests {
 
     /// 把 nodes 包成无 clip 的 FrameData（多数 blob 测试不需要 clip 表）。
     fn frame(nodes: &[RenderNode]) -> FrameData {
-        FrameData { nodes: nodes.to_vec(), clips: Vec::new() }
+        FrameData {
+            nodes: nodes.to_vec(),
+            clips: Vec::new(),
+        }
     }
 
     fn mesh_node(id: u32, parent: Option<u32>, x: f32, y: f32, w: f32, h: f32) -> RenderNode {
@@ -313,7 +365,7 @@ mod tests {
                 uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
                 colors: vec![[1.0; 4]; 4],
                 indices: vec![0, 1, 2, 0, 2, 3],
-                image_path: None,   // v7：纯色 mesh（无图）
+                image_path: None, // v7：纯色 mesh（无图）
                 program: 0,
                 color_matrix: [0.0; 20],
             },
@@ -340,12 +392,7 @@ mod tests {
     }
 
     /// 同 mesh_node 但可指定 color_tint / alpha / vertex colors（用于 alpha 不烘焙测试，alpha 走 _Alpha uniform）。
-    fn mesh_node_tinted(
-        id: u32,
-        tint: [f32; 4],
-        alpha: f32,
-        bg: [f32; 4],
-    ) -> RenderNode {
+    fn mesh_node_tinted(id: u32, tint: [f32; 4], alpha: f32, bg: [f32; 4]) -> RenderNode {
         RenderNode {
             node_id: id,
             parent_id: None,
@@ -363,7 +410,7 @@ mod tests {
                 uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
                 colors: vec![bg; 4],
                 indices: vec![0, 1, 2, 0, 2, 3],
-                image_path: None,   // v7：纯色 mesh（tint 测试不需图）
+                image_path: None, // v7：纯色 mesh（tint 测试不需图）
                 program: 0,
                 color_matrix: [0.0; 20],
             },
@@ -374,10 +421,15 @@ mod tests {
     fn mesh_node_raw(verts: Vec<[f32; 2]>, indices: Vec<u32>, tx: f32, ty: f32) -> RenderNode {
         let n = verts.len();
         RenderNode {
-            node_id: 0, parent_id: None, visible: true, alpha: 1.0,
+            node_id: 0,
+            parent_id: None,
+            visible: true,
+            alpha: 1.0,
             color_tint: [1.0; 4],
             world_matrix: transform::from_translate(tx, ty),
-            blend: BlendMode::Normal, mask_context: MaskContext(0), sort_key: 0,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: 0,
             change_level: ChangeLevel::Full,
             reuse_key: 0,
             payload: NodePayload::Mesh {
@@ -385,7 +437,7 @@ mod tests {
                 uvs: vec![[0.0, 0.0]; n],
                 colors: vec![[1.0; 4]; n],
                 indices,
-                image_path: None,   // v7：纯色 mesh
+                image_path: None, // v7：纯色 mesh
                 program: 0,
                 color_matrix: [0.0; 20],
             },
@@ -397,9 +449,19 @@ mod tests {
         // border-radius 产的 37 顶点圆角 mesh 经 build_blob 序列化 + TestView 反序列化：
         // vert_count / idx_count / 顶点坐标 re-base 全保真（验证变顶点 FFI 链）。
         use loomgui_core::scene::node::Rect;
-        let rect = Rect { x: 10.0, y: 20.0, w: 80.0, h: 80.0 };
+        let rect = Rect {
+            x: 10.0,
+            y: 20.0,
+            w: 80.0,
+            h: 80.0,
+        };
         let (verts, _uvs, _colors, indices) = loomgui_core::render::mesh::rounded_rect(
-            &rect, [1.0; 4], &[(8.0, 8.0); 4], [0.0, 0.0], [1.0, 1.0]);
+            &rect,
+            [1.0; 4],
+            &[(8.0, 8.0); 4],
+            [0.0, 0.0],
+            [1.0, 1.0],
+        );
         assert_eq!(verts.len(), 37, "r=8 80×80 → 37 顶点（/4 加密分段）");
         let ic = indices.len();
         let node = mesh_node_raw(verts, indices, 10.0, 20.0);
@@ -411,8 +473,12 @@ mod tests {
         assert_eq!(ic2 as usize, ic, "idx_count round-trip");
         // 中心顶点 v[0] = rect 中心 (50,60)，re-base 减 (tx=10,ty=20) → (40,40)。
         let (cx, cy) = view.mesh_vert(0, 0);
-        assert!((cx - 40.0).abs() < 1e-4 && (cy - 40.0).abs() < 1e-4,
-            "中心顶点 re-base (40,40)，得 ({},{})", cx, cy);
+        assert!(
+            (cx - 40.0).abs() < 1e-4 && (cy - 40.0).abs() < 1e-4,
+            "中心顶点 re-base (40,40)，得 ({},{})",
+            cx,
+            cy
+        );
     }
 
     #[test]
@@ -434,8 +500,8 @@ mod tests {
         // 三节点：Some(path) / None / Some(同 path)（验去重 → idx 复用）。
         let blob = build_blob(&frame(&[
             mesh_node_with_path(0, Some("icons/skin.png")),
-            mesh_node_with_path(1, None),                       // 纯色 → idx=0
-            mesh_node_with_path(2, Some("icons/skin.png")),    // 同 path → idx 复用
+            mesh_node_with_path(1, None), // 纯色 → idx=0
+            mesh_node_with_path(2, Some("icons/skin.png")), // 同 path → idx 复用
         ]));
         let view = TestView::parse(&blob);
         let idx0 = view.path_idx(0);
@@ -453,9 +519,9 @@ mod tests {
     #[test]
     fn program_column_round_trips() {
         let blob = build_blob(&frame(&[
-            mesh_node_with_program(0, 2),  // Container+bg-image 命中
-            mesh_node(1, None, 0.0, 0.0, 5.0, 5.0),   // 纯色 mesh program=0 占位
-            mesh_node_with_program(2, 0),  // 无图 Container / Image
+            mesh_node_with_program(0, 2),           // Container+bg-image 命中
+            mesh_node(1, None, 0.0, 0.0, 5.0, 5.0), // 纯色 mesh program=0 占位
+            mesh_node_with_program(2, 0),           // 无图 Container / Image
         ]));
         let view = TestView::parse(&blob);
         assert_eq!(view.version(), 9, "VERSION=9（v9：加 reuse_key 列）");
@@ -473,7 +539,11 @@ mod tests {
 
         // magic + version==9。
         assert_eq!(u32::from_le_bytes(blob[0..4].try_into().unwrap()), MAGIC);
-        assert_eq!(u32::from_le_bytes(blob[4..8].try_into().unwrap()), 9, "version=9");
+        assert_eq!(
+            u32::from_le_bytes(blob[4..8].try_into().unwrap()),
+            9,
+            "version=9"
+        );
 
         // 22 col offset @ [12 .. 12+22*4)。每 col_offset 非零且单调递增。
         let header_len = 12 + 22 * 4; // = 100
@@ -481,7 +551,13 @@ mod tests {
         for i in 0..22usize {
             let o = 12 + i * 4;
             let off = u32::from_le_bytes(blob[o..o + 4].try_into().unwrap()) as usize;
-            assert!(off >= prev, "col_offset[{}] 应 >= header_len({}), 实={}", i, prev, off);
+            assert!(
+                off >= prev,
+                "col_offset[{}] 应 >= header_len({}), 实={}",
+                i,
+                prev,
+                off
+            );
             prev = off;
         }
 
@@ -494,24 +570,48 @@ mod tests {
         let text_arena_off = u32::from_le_bytes(blob[108..112].try_into().unwrap()) as usize;
         let text_arena_len = u32::from_le_bytes(blob[112..116].try_into().unwrap());
         assert_eq!(text_arena_len, 0, "无 Text 节点：text_arena 暂空");
-        assert_eq!(text_arena_off, mesh_arena_off + mesh_arena_len, "text_arena 紧跟 mesh_arena");
+        assert_eq!(
+            text_arena_off,
+            mesh_arena_off + mesh_arena_len,
+            "text_arena 紧跟 mesh_arena"
+        );
 
         // clip_table header @ [116..124)：无 clip 时仅 4B clip_count=0（clip_table_len=4）。
         let clip_table_off = u32::from_le_bytes(blob[116..120].try_into().unwrap()) as usize;
         let clip_table_len = u32::from_le_bytes(blob[120..124].try_into().unwrap());
-        assert_eq!(clip_table_len, 4, "clip 表至少含 clip_count(u32)=0，故 len=4");
-        assert_eq!(clip_table_off, text_arena_off + text_arena_len as usize, "clip_table 紧跟 text_arena");
-        let clip_count = u32::from_le_bytes(blob[clip_table_off..clip_table_off + 4].try_into().unwrap());
+        assert_eq!(
+            clip_table_len, 4,
+            "clip 表至少含 clip_count(u32)=0，故 len=4"
+        );
+        assert_eq!(
+            clip_table_off,
+            text_arena_off + text_arena_len as usize,
+            "clip_table 紧跟 text_arena"
+        );
+        let clip_count =
+            u32::from_le_bytes(blob[clip_table_off..clip_table_off + 4].try_into().unwrap());
         assert_eq!(clip_count, 0, "clip_count=0");
 
         // v9 path_table header @ [124..132)：无 image_path 时仅 4B path_count=0（path_table_len=4）。
         let path_table_off = u32::from_le_bytes(blob[124..128].try_into().unwrap()) as usize;
         let path_table_len = u32::from_le_bytes(blob[128..132].try_into().unwrap());
-        assert_eq!(path_table_len, 4, "无 image_path：path table 仅 path_count=0，len=4");
-        assert_eq!(path_table_off, clip_table_off + clip_table_len as usize, "path_table 紧跟 clip_table");
-        let path_count = u32::from_le_bytes(blob[path_table_off..path_table_off + 4].try_into().unwrap());
+        assert_eq!(
+            path_table_len, 4,
+            "无 image_path：path table 仅 path_count=0，len=4"
+        );
+        assert_eq!(
+            path_table_off,
+            clip_table_off + clip_table_len as usize,
+            "path_table 紧跟 clip_table"
+        );
+        let path_count =
+            u32::from_le_bytes(blob[path_table_off..path_table_off + 4].try_into().unwrap());
         assert_eq!(path_count, 0, "path_count=0");
-        assert_eq!(path_table_off + path_table_len as usize, blob.len(), "path_table 应是 blob 末段");
+        assert_eq!(
+            path_table_off + path_table_len as usize,
+            blob.len(),
+            "path_table 应是 blob 末段"
+        );
     }
 
     /// TestView（C# FrameBlob 的 Rust 镜像）解析 v8 blob：21 列 + 三 arena 头读回正确，
@@ -523,8 +623,11 @@ mod tests {
         assert_eq!(view.text_off(0), 0, "text_off 占位 0");
         assert_eq!(view.text_len(0), 0, "text_len 占位 0");
         assert_eq!(view.text_arena_len(), 0, "text_arena 整段为空");
-        assert_eq!(view.text_arena_off(), view.mesh_arena_off + u32::from_le_bytes(
-            blob[104..108].try_into().unwrap()) as usize, "text_arena 紧跟 mesh_arena");
+        assert_eq!(
+            view.text_arena_off(),
+            view.mesh_arena_off + u32::from_le_bytes(blob[104..108].try_into().unwrap()) as usize,
+            "text_arena 紧跟 mesh_arena"
+        );
         assert_eq!(view.clip_count(), 0, "clip_count=0");
     }
 
@@ -537,8 +640,16 @@ mod tests {
         assert_eq!(verts[0], [0.0, 0.0]);
         assert_eq!(verts[2], [5.0, 5.0]);
         // m_tx/m_ty 列保留平移分量（10,20），供 GO 本地置放。
-        let mtx = f32::from_le_bytes(view.buf[view.col_off[10]..view.col_off[10]+4].try_into().unwrap());
-        let mty = f32::from_le_bytes(view.buf[view.col_off[11]..view.col_off[11]+4].try_into().unwrap());
+        let mtx = f32::from_le_bytes(
+            view.buf[view.col_off[10]..view.col_off[10] + 4]
+                .try_into()
+                .unwrap(),
+        );
+        let mty = f32::from_le_bytes(
+            view.buf[view.col_off[11]..view.col_off[11] + 4]
+                .try_into()
+                .unwrap(),
+        );
         assert_eq!(mtx, 10.0);
         assert_eq!(mty, 20.0);
     }
@@ -566,10 +677,17 @@ mod tests {
         let view = TestView::parse(&blob);
         let colors = view.mesh_colors(0);
         assert_eq!(colors.len(), 4);
-        assert_eq!(colors[0], [1.0, 0.0, 0.0, 1.0], "colors.a=原始1.0（alpha 0.5 不烤，走 uniform）");
+        assert_eq!(
+            colors[0],
+            [1.0, 0.0, 0.0, 1.0],
+            "colors.a=原始1.0（alpha 0.5 不烤，走 uniform）"
+        );
         // alpha 列仍保留 0.5（供 C# SetPropertyBlock _Alpha）。
         let alpha_o = view.col_off[3];
-        assert_eq!(f32::from_le_bytes(view.buf[alpha_o..alpha_o+4].try_into().unwrap()), 0.5);
+        assert_eq!(
+            f32::from_le_bytes(view.buf[alpha_o..alpha_o + 4].try_into().unwrap()),
+            0.5
+        );
     }
 
     /// 构造一个 Text RenderNode：单行 glyphs，每 glyph 直接给 (codepoint, x, y)。
@@ -646,7 +764,10 @@ mod tests {
 
         // header 契约：text_arena 非空、text_off/text_len 指向实段。
         assert!(view.text_arena_len() > 0, "text_arena 应非空");
-        assert!(view.text_off(0) > 0 || view.text_arena_len() > 0, "text_off 指向 arena 内");
+        assert!(
+            view.text_off(0) > 0 || view.text_arena_len() > 0,
+            "text_off 指向 arena 内"
+        );
         assert!(view.text_len(0) > 0, "text_len 应 > 0（非占位 0）");
 
         let (font_size, color, glyphs) = view.read_text(0);
@@ -744,8 +865,8 @@ mod tests {
         text_arena_len: u32,
         clip_table_off: usize,
         clip_table_len: u32,
-        path_table_off: usize,   // v7
-        path_table_len: u32,     // v7
+        path_table_off: usize, // v7
+        path_table_len: u32,   // v7
     }
     impl<'a> TestView<'a> {
         fn parse(buf: &'a [u8]) -> Self {
@@ -753,32 +874,53 @@ mod tests {
             let mut col_off = [0usize; 22];
             let mut h = 12;
             for i in 0..22 {
-                col_off[i] = u32::from_le_bytes(buf[h..h+4].try_into().unwrap()) as usize;
+                col_off[i] = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
                 h += 4;
             }
-            let mesh_arena_off = u32::from_le_bytes(buf[h..h+4].try_into().unwrap()) as usize; h += 4;
-            let _mesh_arena_len = u32::from_le_bytes(buf[h..h+4].try_into().unwrap()); h += 4;
-            let text_arena_off = u32::from_le_bytes(buf[h..h+4].try_into().unwrap()) as usize; h += 4;
-            let text_arena_len = u32::from_le_bytes(buf[h..h+4].try_into().unwrap()); h += 4;
-            let clip_table_off = u32::from_le_bytes(buf[h..h+4].try_into().unwrap()) as usize; h += 4;
-            let clip_table_len = u32::from_le_bytes(buf[h..h+4].try_into().unwrap()); h += 4;
-            let path_table_off = u32::from_le_bytes(buf[h..h+4].try_into().unwrap()) as usize; h += 4;
-            let path_table_len = u32::from_le_bytes(buf[h..h+4].try_into().unwrap());
-            TestView { buf, col_off, mesh_arena_off, text_arena_off, text_arena_len, clip_table_off, clip_table_len, path_table_off, path_table_len }
+            let mesh_arena_off = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
+            h += 4;
+            let _mesh_arena_len = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap());
+            h += 4;
+            let text_arena_off = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
+            h += 4;
+            let text_arena_len = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap());
+            h += 4;
+            let clip_table_off = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
+            h += 4;
+            let clip_table_len = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap());
+            h += 4;
+            let path_table_off = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
+            h += 4;
+            let path_table_len = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap());
+            TestView {
+                buf,
+                col_off,
+                mesh_arena_off,
+                text_arena_off,
+                text_arena_len,
+                clip_table_off,
+                clip_table_len,
+                path_table_off,
+                path_table_len,
+            }
         }
         fn parent_id(&self, i: usize) -> i32 {
             let o = self.col_off[1] + i * 4;
-            i32::from_le_bytes(self.buf[o..o+4].try_into().unwrap())
+            i32::from_le_bytes(self.buf[o..o + 4].try_into().unwrap())
         }
         /// 读节点 i 的 mesh 顶点（arena 段：vert_count, idx_count, verts[], uvs[], colors[], indices[]）。
         fn mesh_verts(&self, i: usize) -> Vec<[f32; 2]> {
             let (seg, vc) = self.mesh_seg(i);
             let mut p = seg + 8; // 跳 vert_count + idx_count，直接读 verts[]
-            (0..vc).map(|_| {
-                let vx = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
-                let vy = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
-                [vx, vy]
-            }).collect()
+            (0..vc)
+                .map(|_| {
+                    let vx = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                    let vy = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                    [vx, vy]
+                })
+                .collect()
         }
         /// 读节点 i 的 mesh 顶点色（alpha 剥离：不乘节点 alpha，alpha 走 _Alpha uniform）。
         fn mesh_colors(&self, i: usize) -> Vec<[f32; 4]> {
@@ -786,35 +928,61 @@ mod tests {
             let mut p = seg + 8;
             // verts + uvs 各 vc*2 f32。
             p += vc * 2 * 4 * 2;
-            (0..vc).map(|_| {
-                let r = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
-                let g = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
-                let b = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
-                let a = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
-                [r, g, b, a]
-            }).collect()
+            (0..vc)
+                .map(|_| {
+                    let r = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                    let g = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                    let b = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                    let a = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                    [r, g, b, a]
+                })
+                .collect()
         }
         /// 返回节点 i 的 mesh 段起始偏移 + vert_count。
         fn mesh_seg(&self, i: usize) -> (usize, usize) {
-            let seg = self.mesh_arena_off + u32::from_le_bytes(
-                self.buf[self.col_off[13] + i * 4..][0..4].try_into().unwrap()) as usize; // mesh_off
+            let seg = self.mesh_arena_off
+                + u32::from_le_bytes(
+                    self.buf[self.col_off[13] + i * 4..][0..4]
+                        .try_into()
+                        .unwrap(),
+                ) as usize; // mesh_off
             let vc = u32::from_le_bytes(self.buf[seg..seg + 4].try_into().unwrap()) as usize;
             (seg, vc)
         }
         fn text_off(&self, i: usize) -> u32 {
-            u32::from_le_bytes(self.buf[self.col_off[15] + i * 4..][0..4].try_into().unwrap())
+            u32::from_le_bytes(
+                self.buf[self.col_off[15] + i * 4..][0..4]
+                    .try_into()
+                    .unwrap(),
+            )
         }
         fn text_len(&self, i: usize) -> u32 {
-            u32::from_le_bytes(self.buf[self.col_off[16] + i * 4..][0..4].try_into().unwrap())
+            u32::from_le_bytes(
+                self.buf[self.col_off[16] + i * 4..][0..4]
+                    .try_into()
+                    .unwrap(),
+            )
         }
         /// v7：第 18 列 path_idx（u32）。Mesh→path 表 1-based 索引（0=纯色无图），Text=0（kind 只剩 1=Mesh/2=Text）。
         fn path_idx(&self, i: usize) -> u32 {
-            u32::from_le_bytes(self.buf[self.col_off[17] + i * 4..][0..4].try_into().unwrap())
+            u32::from_le_bytes(
+                self.buf[self.col_off[17] + i * 4..][0..4]
+                    .try_into()
+                    .unwrap(),
+            )
         }
         /// v7：path string table 的 path_count（path table 首 4B）。
         fn path_count(&self) -> u32 {
             if self.path_table_len >= 4 {
-                u32::from_le_bytes(self.buf[self.path_table_off..self.path_table_off + 4].try_into().unwrap())
+                u32::from_le_bytes(
+                    self.buf[self.path_table_off..self.path_table_off + 4]
+                        .try_into()
+                        .unwrap(),
+                )
             } else {
                 0
             }
@@ -823,11 +991,13 @@ mod tests {
         ///   idx=0 → None（纯色无图）；idx>0 → 读 path_table 内第 idx 条 length-prefixed UTF-8。
         ///   table layout：path_count:u32 后跟 count × {path_len:u32, path_bytes:u8[path_len]}。
         fn read_path(&self, idx: u32) -> Option<String> {
-            if idx == 0 { return None; }
+            if idx == 0 {
+                return None;
+            }
             let count = self.path_count();
             assert!(idx <= count, "path_idx {} 超出 path_count {}", idx, count);
             let mut p = self.path_table_off + 4; // 跳 path_count
-            // 顺序扫到第 idx 条（1-based）。
+                                                 // 顺序扫到第 idx 条（1-based）。
             for n in 1..=idx {
                 let len = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()) as usize;
                 p += 4;
@@ -848,7 +1018,8 @@ mod tests {
             let off = self.col_off[19] + i * 80;
             let mut m = [0.0; 20];
             for j in 0..20 {
-                m[j] = f32::from_le_bytes(self.buf[off + j*4..off + j*4 + 4].try_into().unwrap());
+                m[j] =
+                    f32::from_le_bytes(self.buf[off + j * 4..off + j * 4 + 4].try_into().unwrap());
             }
             m
         }
@@ -859,11 +1030,15 @@ mod tests {
         /// v9：第 22 列 reuse_key（u32，col_off[21] + i*4）。
         fn reuse_key(&self, i: usize) -> u32 {
             let o = self.col_off[21] + i * 4;
-            u32::from_le_bytes(self.buf[o..o+4].try_into().unwrap())
+            u32::from_le_bytes(self.buf[o..o + 4].try_into().unwrap())
         }
         /// v8：读 mesh_len 列（u32 @ col_off[14] + i*4），SKIP/HEADER 节点 =0。
         fn mesh_len_col(&self, i: usize) -> u32 {
-            u32::from_le_bytes(self.buf[self.col_off[14] + i * 4..][0..4].try_into().unwrap())
+            u32::from_le_bytes(
+                self.buf[self.col_off[14] + i * 4..][0..4]
+                    .try_into()
+                    .unwrap(),
+            )
         }
         /// blob VERSION（u32 @ offset 4）。
         fn version(&self) -> u32 {
@@ -902,8 +1077,12 @@ mod tests {
             let a_off = colors_off + vi * 16 + 12;
             f32::from_le_bytes(self.buf[a_off..a_off + 4].try_into().unwrap())
         }
-        fn text_arena_len(&self) -> u32 { self.text_arena_len }
-        fn text_arena_off(&self) -> usize { self.text_arena_off }
+        fn text_arena_len(&self) -> u32 {
+            self.text_arena_len
+        }
+        fn text_arena_off(&self) -> usize {
+            self.text_arena_off
+        }
 
         /// 读节点 i 的 text 段（§4.1 text_arena per-node layout）：
         /// `font_size:u32 | color:f32×4 | glyph_count:u32 | glyphs[count × {codepoint:u32, pen_x:f32, pen_y:f32}]`。
@@ -911,24 +1090,37 @@ mod tests {
         fn read_text(&self, i: usize) -> (u32, [f32; 4], Vec<(u32, f32, f32)>) {
             let seg = self.text_arena_off + self.text_off(i) as usize;
             let mut p = seg;
-            let font_size = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
-            let r = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
-            let g = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
-            let b = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
-            let a = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
-            let count = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()) as usize; p += 4;
+            let font_size = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+            p += 4;
+            let r = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+            p += 4;
+            let g = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+            p += 4;
+            let b = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+            p += 4;
+            let a = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+            p += 4;
+            let count = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()) as usize;
+            p += 4;
             let mut glyphs = Vec::with_capacity(count);
             for _ in 0..count {
-                let cp = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
-                let px = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
-                let py = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()); p += 4;
+                let cp = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                p += 4;
+                let px = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                p += 4;
+                let py = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                p += 4;
                 glyphs.push((cp, px, py));
             }
             (font_size, [r, g, b, a], glyphs)
         }
         fn clip_count(&self) -> u32 {
             if self.clip_table_len >= 4 {
-                u32::from_le_bytes(self.buf[self.clip_table_off..self.clip_table_off + 4].try_into().unwrap())
+                u32::from_le_bytes(
+                    self.buf[self.clip_table_off..self.clip_table_off + 4]
+                        .try_into()
+                        .unwrap(),
+                )
             } else {
                 0
             }
@@ -938,14 +1130,21 @@ mod tests {
         fn read_clips(&self) -> Vec<(u32, Rect)> {
             let count = self.clip_count() as usize;
             let mut p = self.clip_table_off + 4;
-            (0..count).map(|_| {
-                let cid = u32::from_le_bytes(self.buf[p..p+4].try_into().unwrap()); p += 4;
-                let x = f32::from_le_bytes(self.buf[p..p+4].try_into().unwrap()); p += 4;
-                let y = f32::from_le_bytes(self.buf[p..p+4].try_into().unwrap()); p += 4;
-                let w = f32::from_le_bytes(self.buf[p..p+4].try_into().unwrap()); p += 4;
-                let h = f32::from_le_bytes(self.buf[p..p+4].try_into().unwrap()); p += 4;
-                (cid, Rect { x, y, w, h })
-            }).collect()
+            (0..count)
+                .map(|_| {
+                    let cid = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                    let x = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                    let y = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                    let w = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                    let h = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                    (cid, Rect { x, y, w, h })
+                })
+                .collect()
         }
     }
 
@@ -958,8 +1157,24 @@ mod tests {
         let frame = FrameData {
             nodes: vec![node],
             clips: vec![
-                ClipEntry { context_id: 1, rect: Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 } },
-                ClipEntry { context_id: 2, rect: Rect { x: 50.0, y: 50.0, w: 0.0, h: 0.0 } },
+                ClipEntry {
+                    context_id: 1,
+                    rect: Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 100.0,
+                        h: 100.0,
+                    },
+                },
+                ClipEntry {
+                    context_id: 2,
+                    rect: Rect {
+                        x: 50.0,
+                        y: 50.0,
+                        w: 0.0,
+                        h: 0.0,
+                    },
+                },
             ],
         };
         let blob = build_blob(&frame);
@@ -968,21 +1183,34 @@ mod tests {
         let clips = view.read_clips();
         assert_eq!(clips.len(), 2);
         assert_eq!(clips[0].0, 1);
-        assert_eq!((clips[0].1.x, clips[0].1.y, clips[0].1.w, clips[0].1.h),
-                   (0.0, 0.0, 100.0, 100.0));
+        assert_eq!(
+            (clips[0].1.x, clips[0].1.y, clips[0].1.w, clips[0].1.h),
+            (0.0, 0.0, 100.0, 100.0)
+        );
         assert_eq!(clips[1].0, 2);
         // 零面积 disjoint 交集 round-trip（w/h=0）。
-        assert_eq!((clips[1].1.x, clips[1].1.y, clips[1].1.w, clips[1].1.h),
-                   (50.0, 50.0, 0.0, 0.0));
+        assert_eq!(
+            (clips[1].1.x, clips[1].1.y, clips[1].1.w, clips[1].1.h),
+            (50.0, 50.0, 0.0, 0.0)
+        );
         // clip 表段长度 = 4(count) + 2×20(entry) = 44。
         assert_eq!(view.clip_table_len, 44, "clip_table_len = 4 + count×20");
         // v7：path_table 紧跟 clip_table 之后，是 blob 末段。
         //   本测试 mesh 无 image_path → path_table 仅 4B（path_count=0）。
-        assert_eq!(view.path_table_off, view.clip_table_off + view.clip_table_len as usize,
-            "path_table 紧跟 clip_table");
-        assert_eq!(view.path_table_len, 4, "无 image_path：path_table 仅 path_count=0，len=4");
-        assert_eq!(view.path_table_off + view.path_table_len as usize, blob.len(),
-            "path_table 应是 blob 末段");
+        assert_eq!(
+            view.path_table_off,
+            view.clip_table_off + view.clip_table_len as usize,
+            "path_table 紧跟 clip_table"
+        );
+        assert_eq!(
+            view.path_table_len, 4,
+            "无 image_path：path_table 仅 path_count=0，len=4"
+        );
+        assert_eq!(
+            view.path_table_off + view.path_table_len as usize,
+            blob.len(),
+            "path_table 应是 blob 末段"
+        );
     }
 
     /// 空 clip 表（无 overflow:hidden）：clip_count=0，clip_table_len=4（仅 count 占位）。
@@ -991,7 +1219,10 @@ mod tests {
         let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
         let view = TestView::parse(&blob);
         assert_eq!(view.clip_count(), 0);
-        assert_eq!(view.clip_table_len, 4, "空 clip 表 len=4（仅 clip_count=0）");
+        assert_eq!(
+            view.clip_table_len, 4,
+            "空 clip 表 len=4（仅 clip_count=0）"
+        );
         assert_eq!(view.read_clips().len(), 0);
     }
 
@@ -1017,19 +1248,29 @@ mod tests {
             payload: NodePayload::Mesh {
                 // 顶点已是绝对 design 坐标（merge 不 re-base）；re-base 减 transform(0) = 不变。
                 verts: vec![
-                    [0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0],
-                    [100.0, 0.0], [110.0, 0.0], [110.0, 10.0], [100.0, 10.0],
+                    [0.0, 0.0],
+                    [10.0, 0.0],
+                    [10.0, 10.0],
+                    [0.0, 10.0],
+                    [100.0, 0.0],
+                    [110.0, 0.0],
+                    [110.0, 10.0],
+                    [100.0, 10.0],
                 ],
                 uvs: vec![[0.0, 0.0]; 8],
                 // 第二组 alpha 已烤 0.5（模拟 merge_batch 把第二节点 alpha=0.5 乘进 colors.a）。
                 colors: vec![
-                    [1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0],
-                    [1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0],
-                    [1.0, 1.0, 1.0, 0.5], [1.0, 1.0, 1.0, 0.5],
-                    [1.0, 1.0, 1.0, 0.5], [1.0, 1.0, 1.0, 0.5],
+                    [1.0, 1.0, 1.0, 1.0],
+                    [1.0, 1.0, 1.0, 1.0],
+                    [1.0, 1.0, 1.0, 1.0],
+                    [1.0, 1.0, 1.0, 1.0],
+                    [1.0, 1.0, 1.0, 0.5],
+                    [1.0, 1.0, 1.0, 0.5],
+                    [1.0, 1.0, 1.0, 0.5],
+                    [1.0, 1.0, 1.0, 0.5],
                 ],
                 indices: vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7],
-                image_path: Some("merged/atlas.png".into()),   // v7：merged 带图 → path_idx>0
+                image_path: Some("merged/atlas.png".into()), // v7：merged 带图 → path_idx>0
                 program: 0,
                 color_matrix: [0.0; 20],
             },
@@ -1065,25 +1306,41 @@ mod tests {
     #[test]
     fn blob_world_matrix_roundtrip() {
         let mk = |wm: transform::Affine2| RenderNode {
-            node_id: 0, parent_id: None, visible: true, alpha: 1.0,
-            color_tint: [1.0; 4], world_matrix: wm, blend: BlendMode::Normal,
-            mask_context: MaskContext(0), sort_key: 0,
+            node_id: 0,
+            parent_id: None,
+            visible: true,
+            alpha: 1.0,
+            color_tint: [1.0; 4],
+            world_matrix: wm,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: 0,
             change_level: ChangeLevel::Full,
             reuse_key: 0,
             payload: NodePayload::Mesh {
-                verts: vec![[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]],
-                uvs: vec![[0.0,0.0];4], colors: vec![[1.0;4];4], indices: vec![0,1,2,0,2,3],
-                image_path: None, program: 0,   // v7：纯色 mesh
+                verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                uvs: vec![[0.0, 0.0]; 4],
+                colors: vec![[1.0; 4]; 4],
+                indices: vec![0, 1, 2, 0, 2, 3],
+                image_path: None,
+                program: 0, // v7：纯色 mesh
                 color_matrix: [0.0; 20],
             },
         };
         // 纯平移节点
         let pure = mk(transform::from_translate(5.0, 7.0));
         // 剪切节点
-        let skew = mk(transform::from_scale(2.0,1.0).mul(transform::from_rotate(0.5)));
-        let blob = build_blob(&FrameData { nodes: vec![pure, skew], clips: vec![] });
+        let skew = mk(transform::from_scale(2.0, 1.0).mul(transform::from_rotate(0.5)));
+        let blob = build_blob(&FrameData {
+            nodes: vec![pure, skew],
+            clips: vec![],
+        });
         // version=9（v9：加 reuse_key 列）
-        assert_eq!(u32::from_le_bytes(blob[4..8].try_into().unwrap()), 9, "VERSION=9");
+        assert_eq!(
+            u32::from_le_bytes(blob[4..8].try_into().unwrap()),
+            9,
+            "VERSION=9"
+        );
         // 字节数合理（2 节点 × 22 列 + mesh arena + header）
         assert!(blob.len() > 100);
     }
@@ -1094,7 +1351,10 @@ mod tests {
     #[test]
     fn blob_pure_mesh_kind_is_one() {
         let rn = mesh_node(0, None, 0.0, 0.0, 1.0, 1.0);
-        let frame = FrameData { nodes: vec![rn], clips: vec![] };
+        let frame = FrameData {
+            nodes: vec![rn],
+            clips: vec![],
+        };
         let blob = build_blob(&frame);
         assert!(!blob.is_empty(), "纯色 mesh 节点 blob 非空");
         assert_eq!(&blob[0..4], &MAGIC.to_le_bytes(), "magic");
@@ -1102,42 +1362,56 @@ mod tests {
         assert_eq!(view.node_count(), 1, "单节点占 1 位");
         assert_eq!(view.payload_kind(0), 1, "纯色 mesh payload_kind==1 透传");
         assert_eq!(view.program(0), 0, "纯色 mesh program=0");
-        assert_eq!(u32::from_le_bytes(blob[4..8].try_into().unwrap()), 9, "VERSION=9");
+        assert_eq!(
+            u32::from_le_bytes(blob[4..8].try_into().unwrap()),
+            9,
+            "VERSION=9"
+        );
     }
 
     /// color_matrix 列（[f32;20]，第 20 列）：program=3/4 节点填矩阵，其余全零占位。VERSION=9。
     #[test]
     fn blob_color_matrix_column_round_trips() {
-        let matrix = [0.299, 0.587, 0.114, 0.0, 0.0,
-                      0.299, 0.587, 0.114, 0.0, 0.0,
-                      0.299, 0.587, 0.114, 0.0, 0.0,
-                      0.0,   0.0,   0.0,   1.0, 0.0];
-        let nodes = vec![
-            RenderNode {
-                node_id: 1,
-                parent_id: None, visible: true, alpha: 1.0,
-                color_tint: [1.0; 4],
-                world_matrix: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-                mask_context: MaskContext(0), sort_key: 0,
-                blend: BlendMode::Normal,
-                change_level: ChangeLevel::Full,
-                reuse_key: 0,
-                payload: NodePayload::Mesh {
-                    verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
-                    uvs: vec![[0.0, 0.0]; 4], colors: vec![[1.0; 4]; 4],
-                    indices: vec![0, 1, 2, 0, 2, 3], image_path: None,   // v7：纯色
-                    program: 3,   // ColorFilter
-                    color_matrix: matrix,
-                },
-            },
+        let matrix = [
+            0.299, 0.587, 0.114, 0.0, 0.0, 0.299, 0.587, 0.114, 0.0, 0.0, 0.299, 0.587, 0.114, 0.0,
+            0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
         ];
-        let blob = build_blob(&FrameData { nodes, clips: vec![] });
+        let nodes = vec![RenderNode {
+            node_id: 1,
+            parent_id: None,
+            visible: true,
+            alpha: 1.0,
+            color_tint: [1.0; 4],
+            world_matrix: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            mask_context: MaskContext(0),
+            sort_key: 0,
+            blend: BlendMode::Normal,
+            change_level: ChangeLevel::Full,
+            reuse_key: 0,
+            payload: NodePayload::Mesh {
+                verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                uvs: vec![[0.0, 0.0]; 4],
+                colors: vec![[1.0; 4]; 4],
+                indices: vec![0, 1, 2, 0, 2, 3],
+                image_path: None, // v7：纯色
+                program: 3,       // ColorFilter
+                color_matrix: matrix,
+            },
+        }];
+        let blob = build_blob(&FrameData {
+            nodes,
+            clips: vec![],
+        });
         let view = TestView::parse(&blob);
         assert_eq!(view.version(), 9, "VERSION=9（v9：加 reuse_key 列）");
         assert_eq!(view.program(0), 3, "program=3 round-trip");
         let m = view.color_matrix(0);
         for i in 0..20 {
-            assert!((m[i] - matrix[i]).abs() < 1e-5, "color_matrix[{}] round-trip", i);
+            assert!(
+                (m[i] - matrix[i]).abs() < 1e-5,
+                "color_matrix[{}] round-trip",
+                i
+            );
         }
     }
 
@@ -1167,16 +1441,25 @@ mod tests {
     #[test]
     fn blob_v9_round_trips_reuse_key() {
         let rn = RenderNode {
-            node_id: 7, parent_id: None, visible: true, alpha: 1.0,
+            node_id: 7,
+            parent_id: None,
+            visible: true,
+            alpha: 1.0,
             color_tint: [1.0; 4],
             world_matrix: transform::IDENTITY,
-            blend: BlendMode::Normal, mask_context: MaskContext(0), sort_key: 0,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: 0,
             change_level: ChangeLevel::Full,
-            reuse_key: 42,  // v9 新字段
+            reuse_key: 42, // v9 新字段
             payload: NodePayload::Mesh {
-                verts: vec![[0.0,0.0];4], uvs: vec![[0.0,0.0];4],
-                colors: vec![[1.0;4];4], indices: vec![0,1,2,0,2,3],
-                image_path: None, program: 0, color_matrix: [0.0;20],
+                verts: vec![[0.0, 0.0]; 4],
+                uvs: vec![[0.0, 0.0]; 4],
+                colors: vec![[1.0; 4]; 4],
+                indices: vec![0, 1, 2, 0, 2, 3],
+                image_path: None,
+                program: 0,
+                color_matrix: [0.0; 20],
             },
         };
         let blob = build_blob(&frame(&[rn]));

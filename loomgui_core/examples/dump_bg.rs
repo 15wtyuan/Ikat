@@ -6,7 +6,10 @@ use loomgui_core::stage::Stage;
 
 fn main() {
     let font = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
-    let pkg_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin");
+    let pkg_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin"
+    );
     let pkg = std::fs::read(pkg_path).expect("read pkg");
     let mut s = Stage::new(font, (1080.0, 1920.0)).expect("Stage::new");
     s.load_package("showcase", &pkg).expect("load_package");
@@ -21,7 +24,9 @@ fn main() {
             None => continue,
         };
         let is_img = matches!(n.kind, loomgui_core::scene::node::NodeKind::Image { .. });
-        if !is_img && !want.iter().any(|c| n.classes.iter().any(|cl| cl == c)) { continue; }
+        if !is_img && !want.iter().any(|c| n.classes.iter().any(|cl| cl == c)) {
+            continue;
+        }
         let r = n.layout_rect;
         let bg_img = n.style.background_image.as_deref().unwrap_or("-");
         let bg_size = match n.style.background_size {
@@ -33,10 +38,27 @@ fn main() {
         let has_slice = n.style.border_image_slice.is_some();
         println!(
             "\n=== n{} [{}] rect=({:.0},{:.0},{:.0},{:.0}) bg_img={} bg_size={} filter={} slice={}",
-            nid, n.classes.join(","), r.x, r.y, r.w, r.h, bg_img, bg_size, has_filter, has_slice
+            nid,
+            n.classes.join(","),
+            r.x,
+            r.y,
+            r.w,
+            r.h,
+            bg_img,
+            bg_size,
+            has_filter,
+            has_slice
         );
         match &rn.payload {
-            NodePayload::Mesh { verts, uvs, colors, image_path, program, color_matrix, .. } => {
+            NodePayload::Mesh {
+                verts,
+                uvs,
+                colors,
+                image_path,
+                program,
+                color_matrix,
+                ..
+            } => {
                 let c0 = colors.first().copied().unwrap_or([0.0; 4]);
                 let v0 = verts.first().copied().unwrap_or([0.0; 2]);
                 let (umin, umax, vmin, vmax) = uvs.iter().fold(
@@ -58,7 +80,9 @@ fn main() {
                 }
                 if verts.len() > 4 {
                     print!("  verts:");
-                    for v in verts.iter().take(24) { print!(" ({:.0},{:.0})", v[0], v[1]); }
+                    for v in verts.iter().take(24) {
+                        print!(" ({:.0},{:.0})", v[0], v[1]);
+                    }
                     println!();
                 }
             }

@@ -52,21 +52,42 @@ fn dump_frame(stage: &mut Stage, label: &str, focus: u32) {
             let pk = match &rn.payload {
                 NodePayload::Mesh { verts, colors, .. } => {
                     let c0 = colors.first().copied().unwrap_or([0.0; 4]);
-                    format!("Mesh v{} c0({:.0},{:.0},{:.0},{:.0})", verts.len(), c0[0] * 255.0, c1(c0), c2(c0), c3(c0))
+                    format!(
+                        "Mesh v{} c0({:.0},{:.0},{:.0},{:.0})",
+                        verts.len(),
+                        c0[0] * 255.0,
+                        c1(c0),
+                        c2(c0),
+                        c3(c0)
+                    )
                 }
                 NodePayload::Text { layout, .. } => format!("Text L{}", layout.lines.len()),
             };
-            println!("  n{} wm=({:.2},{:.2},{:.2},{:.2},{:.0},{:.0}) {}", nid,
-                rn.world_matrix[0], rn.world_matrix[1], rn.world_matrix[2], rn.world_matrix[3],
-                rn.world_matrix[4], rn.world_matrix[5], pk);
+            println!(
+                "  n{} wm=({:.2},{:.2},{:.2},{:.2},{:.0},{:.0}) {}",
+                nid,
+                rn.world_matrix[0],
+                rn.world_matrix[1],
+                rn.world_matrix[2],
+                rn.world_matrix[3],
+                rn.world_matrix[4],
+                rn.world_matrix[5],
+                pk
+            );
         }
     }
     let _ = scene;
 }
 
-fn c1(c: [f32; 4]) -> f32 { c[1] * 255.0 }
-fn c2(c: [f32; 4]) -> f32 { c[2] * 255.0 }
-fn c3(c: [f32; 4]) -> f32 { c[3] }
+fn c1(c: [f32; 4]) -> f32 {
+    c[1] * 255.0
+}
+fn c2(c: [f32; 4]) -> f32 {
+    c[2] * 255.0
+}
+fn c3(c: [f32; 4]) -> f32 {
+    c[3]
+}
 
 fn main() {
     let font = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
@@ -106,22 +127,52 @@ fn main() {
     let mut s = Stage::new(font, (200.0, 100.0)).unwrap();
     s.load_package("showcase", &pkg).unwrap();
     let btn = s.find_node_by_id("b1").expect("b1").0 as u32;
-    let r = s.scene.as_ref().unwrap().get(loomgui_core::scene::node::NodeId(btn)).expect("live node").layout_rect;
-    println!("btn={} rect=({:.0},{:.0},{:.0},{:.0})", btn, r.x, r.y, r.w, r.h);
+    let r = s
+        .scene
+        .as_ref()
+        .unwrap()
+        .get(loomgui_core::scene::node::NodeId(btn))
+        .expect("live node")
+        .layout_rect;
+    println!(
+        "btn={} rect=({:.0},{:.0},{:.0},{:.0})",
+        btn, r.x, r.y, r.w, r.h
+    );
 
     dump_frame(&mut s, "frame1 (首帧)", btn);
     dump(&s, "scene after frame1", btn);
 
     let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
-    s.set_input(&[PointerEvent { kind: PointerKind::Down, x: cx, y: cy, button: 0, pad: [0, 0], touch_id: -1 }]);
+    s.set_input(&[PointerEvent {
+        kind: PointerKind::Down,
+        x: cx,
+        y: cy,
+        button: 0,
+        pad: [0, 0],
+        touch_id: -1,
+    }]);
     dump_frame(&mut s, "frame2 (Down 本帧)", btn);
 
-    s.set_input(&[PointerEvent { kind: PointerKind::Down, x: cx, y: cy, button: 0, pad: [0, 0], touch_id: -1 }]);
+    s.set_input(&[PointerEvent {
+        kind: PointerKind::Down,
+        x: cx,
+        y: cy,
+        button: 0,
+        pad: [0, 0],
+        touch_id: -1,
+    }]);
     dump_frame(&mut s, "frame3 (Down 次帧 transform 进 world)", btn);
     dump(&s, "scene after frame3", btn);
 
     // 松手（Up）→ active 解除 → transform 回 identity → Text 切回 pure
-    s.set_input(&[PointerEvent { kind: PointerKind::Up, x: cx, y: cy, button: 0, pad: [0, 0], touch_id: -1 }]);
+    s.set_input(&[PointerEvent {
+        kind: PointerKind::Up,
+        x: cx,
+        y: cy,
+        button: 0,
+        pad: [0, 0],
+        touch_id: -1,
+    }]);
     dump_frame(&mut s, "frame4 (Up 当帧)", btn);
     s.set_input(&[]);
     dump_frame(&mut s, "frame5 (Up 次帧 transform 解除→pure)", btn);

@@ -8,26 +8,32 @@ const LUMA_B: f32 = 0.114;
 
 /// 单位矩阵（无 filter）。
 pub const IDENTITY: [f32; 20] = [
-    1.0, 0.0, 0.0, 0.0, 0.0,
-    0.0, 1.0, 0.0, 0.0, 0.0,
-    0.0, 0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 0.0, 1.0, 0.0,
+    1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+    0.0,
 ];
 
 /// grayscale(1) = AdjustSaturation(-1)。
 pub fn grayscale() -> [f32; 20] {
     // sat=0, invSat=1 → 行 r = (LUMA_r, LUMA_g, LUMA_b, 0, 0)
     let mut m = IDENTITY;
-    m[0] = LUMA_R; m[1] = LUMA_G; m[2] = LUMA_B;
-    m[5] = LUMA_R; m[6] = LUMA_G; m[7] = LUMA_B;
-    m[10] = LUMA_R; m[11] = LUMA_G; m[12] = LUMA_B;
+    m[0] = LUMA_R;
+    m[1] = LUMA_G;
+    m[2] = LUMA_B;
+    m[5] = LUMA_R;
+    m[6] = LUMA_G;
+    m[7] = LUMA_B;
+    m[10] = LUMA_R;
+    m[11] = LUMA_G;
+    m[12] = LUMA_B;
     m
 }
 
 /// brightness(n) = CSS 乘法 rgb×n（n=1 不变）。对角 n，offset 0。
 pub fn brightness(n: f32) -> [f32; 20] {
     let mut m = IDENTITY;
-    m[0] = n; m[6] = n; m[12] = n;
+    m[0] = n;
+    m[6] = n;
+    m[12] = n;
     m
 }
 
@@ -36,8 +42,12 @@ pub fn contrast(n: f32) -> [f32; 20] {
     let s = n;
     let o = 128.0 / 255.0 * (1.0 - s);
     let mut m = IDENTITY;
-    m[0] = s; m[6] = s; m[12] = s;
-    m[4] = o; m[9] = o; m[14] = o;
+    m[0] = s;
+    m[6] = s;
+    m[12] = s;
+    m[4] = o;
+    m[9] = o;
+    m[14] = o;
     m
 }
 
@@ -46,9 +56,15 @@ pub fn saturate(n: f32) -> [f32; 20] {
     let sat = n;
     let inv = 1.0 - sat;
     let mut m = IDENTITY;
-    m[0] = inv * LUMA_R + sat; m[1] = inv * LUMA_G;       m[2] = inv * LUMA_B;
-    m[5] = inv * LUMA_R;       m[6] = inv * LUMA_G + sat; m[7] = inv * LUMA_B;
-    m[10] = inv * LUMA_R;      m[11] = inv * LUMA_G;      m[12] = inv * LUMA_B + sat;
+    m[0] = inv * LUMA_R + sat;
+    m[1] = inv * LUMA_G;
+    m[2] = inv * LUMA_B;
+    m[5] = inv * LUMA_R;
+    m[6] = inv * LUMA_G + sat;
+    m[7] = inv * LUMA_B;
+    m[10] = inv * LUMA_R;
+    m[11] = inv * LUMA_G;
+    m[12] = inv * LUMA_B + sat;
     m
 }
 
@@ -73,8 +89,12 @@ pub fn hue_rotate(deg: f32) -> [f32; 20] {
 /// invert(1)。
 pub fn invert() -> [f32; 20] {
     let mut m = IDENTITY;
-    m[0] = -1.0; m[6] = -1.0; m[12] = -1.0;
-    m[4] = 1.0; m[9] = 1.0; m[14] = 1.0;
+    m[0] = -1.0;
+    m[6] = -1.0;
+    m[12] = -1.0;
+    m[4] = 1.0;
+    m[9] = 1.0;
+    m[14] = 1.0;
     m
 }
 
@@ -106,8 +126,12 @@ mod tests {
     fn identity_is_unit() {
         let m = IDENTITY;
         // 行主序：对角线 1，其余 0
-        assert_eq!(m[0], 1.0);  assert_eq!(m[6], 1.0);  assert_eq!(m[12], 1.0);  assert_eq!(m[18], 1.0);
-        assert_eq!(m[1], 0.0);  assert_eq!(m[4], 0.0);  // off-diag + offset 列
+        assert_eq!(m[0], 1.0);
+        assert_eq!(m[6], 1.0);
+        assert_eq!(m[12], 1.0);
+        assert_eq!(m[18], 1.0);
+        assert_eq!(m[1], 0.0);
+        assert_eq!(m[4], 0.0); // off-diag + offset 列
     }
 
     #[test]
@@ -127,9 +151,13 @@ mod tests {
     #[test]
     fn invert_negates_rgb() {
         let m = invert();
-        assert_eq!(m[0], -1.0);  assert_eq!(m[6], -1.0);  assert_eq!(m[12], -1.0);
-        assert_eq!(m[4], 1.0);   assert_eq!(m[9], 1.0);   assert_eq!(m[14], 1.0);  // offset +1
-        assert_eq!(m[18], 1.0);  // alpha 不变
+        assert_eq!(m[0], -1.0);
+        assert_eq!(m[6], -1.0);
+        assert_eq!(m[12], -1.0);
+        assert_eq!(m[4], 1.0);
+        assert_eq!(m[9], 1.0);
+        assert_eq!(m[14], 1.0); // offset +1
+        assert_eq!(m[18], 1.0); // alpha 不变
     }
 
     #[test]

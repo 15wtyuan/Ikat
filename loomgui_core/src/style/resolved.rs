@@ -22,9 +22,9 @@ pub enum OverflowMode {
 #[repr(u8)]
 pub enum BackgroundSize {
     #[default]
-    Stretch = 0,  // 100% / 未设：UV 0..1 拉伸填满
-    Cover = 1,    // 铺满裁剪（scale=max，UV 内收取子区中央）
-    Contain = 2,  // 完整放入留白（scale=min，UV 外扩，子区外透明透出底色）
+    Stretch = 0, // 100% / 未设：UV 0..1 拉伸填满
+    Cover = 1,   // 铺满裁剪（scale=max，UV 内收取子区中央）
+    Contain = 2, // 完整放入留白（scale=min，UV 外扩，子区外透明透出底色）
 }
 
 /// CSS border-radius 单角半径。
@@ -32,11 +32,16 @@ pub enum BackgroundSize {
 /// `/` 省略时 v = h（正圆角）。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CornerRadius {
-    pub h: LengthPercentage,  // 水平半径
-    pub v: LengthPercentage,  // 垂直半径
+    pub h: LengthPercentage, // 水平半径
+    pub v: LengthPercentage, // 垂直半径
 }
 impl Default for CornerRadius {
-    fn default() -> Self { Self { h: LengthPercentage::Length(0.0), v: LengthPercentage::Length(0.0) } }
+    fn default() -> Self {
+        Self {
+            h: LengthPercentage::Length(0.0),
+            v: LengthPercentage::Length(0.0),
+        }
+    }
 }
 
 /// CSS border-radius 四角半径。corners 序 [TL, TR, BR, BL]（CSS 1~4 值展开序）。
@@ -62,10 +67,16 @@ pub struct LocalTransform {
     pub matrix: crate::transform::Affine2,
 }
 impl Default for LocalTransform {
-    fn default() -> Self { Self { matrix: crate::transform::IDENTITY } }
+    fn default() -> Self {
+        Self {
+            matrix: crate::transform::IDENTITY,
+        }
+    }
 }
 impl LocalTransform {
-    pub fn is_identity(&self) -> bool { crate::transform::is_identity(&self.matrix) }
+    pub fn is_identity(&self) -> bool {
+        crate::transform::is_identity(&self.matrix)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -159,8 +170,16 @@ mod tests {
         let s = ResolvedStyle::default();
         assert_eq!(s.opacity, 1.0);
         assert_eq!(s.font_size, 16.0);
-        assert_eq!(s.overflow_x, OverflowMode::Visible, "overflow_x 默认 Visible");
-        assert_eq!(s.overflow_y, OverflowMode::Visible, "overflow_y 默认 Visible");
+        assert_eq!(
+            s.overflow_x,
+            OverflowMode::Visible,
+            "overflow_x 默认 Visible"
+        );
+        assert_eq!(
+            s.overflow_y,
+            OverflowMode::Visible,
+            "overflow_y 默认 Visible"
+        );
         // div 默认 flex-direction: column（taffy DEFAULT 是 row，必须显式覆盖）
         assert_eq!(s.taffy_style.flex_direction, taffy::FlexDirection::Column);
     }
@@ -190,10 +209,22 @@ mod tests {
         s.background_size = BackgroundSize::Cover;
         s.border_radius = BorderRadius {
             corners: [
-                CornerRadius { h: LengthPercentage::Length(12.0), v: LengthPercentage::Length(12.0) },
-                CornerRadius { h: LengthPercentage::Length(0.0), v: LengthPercentage::Length(0.0) },
-                CornerRadius { h: LengthPercentage::Percent(0.25), v: LengthPercentage::Percent(0.25) },
-                CornerRadius { h: LengthPercentage::Length(4.0), v: LengthPercentage::Length(2.0) },
+                CornerRadius {
+                    h: LengthPercentage::Length(12.0),
+                    v: LengthPercentage::Length(12.0),
+                },
+                CornerRadius {
+                    h: LengthPercentage::Length(0.0),
+                    v: LengthPercentage::Length(0.0),
+                },
+                CornerRadius {
+                    h: LengthPercentage::Percent(0.25),
+                    v: LengthPercentage::Percent(0.25),
+                },
+                CornerRadius {
+                    h: LengthPercentage::Length(4.0),
+                    v: LengthPercentage::Length(2.0),
+                },
             ],
         };
 
@@ -207,7 +238,11 @@ mod tests {
     fn background_image_size_default() {
         let s = ResolvedStyle::default();
         assert_eq!(s.background_image, None, "默认无背景图");
-        assert_eq!(s.background_size, BackgroundSize::Stretch, "默认 Stretch（100% 语义）");
+        assert_eq!(
+            s.background_size,
+            BackgroundSize::Stretch,
+            "默认 Stretch（100% 语义）"
+        );
     }
 
     #[test]
@@ -238,20 +273,38 @@ mod tests {
         // 非默认：TL=(8px,8px) 正圆角，TR=(10px,5px) 椭圆角
         s.border_radius = BorderRadius {
             corners: [
-                CornerRadius { h: LengthPercentage::Length(8.0), v: LengthPercentage::Length(8.0) },
-                CornerRadius { h: LengthPercentage::Length(10.0), v: LengthPercentage::Length(5.0) },
-                CornerRadius { h: LengthPercentage::Percent(0.5), v: LengthPercentage::Percent(0.5) },
-                CornerRadius { h: LengthPercentage::Length(0.0), v: LengthPercentage::Length(0.0) },
+                CornerRadius {
+                    h: LengthPercentage::Length(8.0),
+                    v: LengthPercentage::Length(8.0),
+                },
+                CornerRadius {
+                    h: LengthPercentage::Length(10.0),
+                    v: LengthPercentage::Length(5.0),
+                },
+                CornerRadius {
+                    h: LengthPercentage::Percent(0.5),
+                    v: LengthPercentage::Percent(0.5),
+                },
+                CornerRadius {
+                    h: LengthPercentage::Length(0.0),
+                    v: LengthPercentage::Length(0.0),
+                },
             ],
         };
         let bytes = bincode::serialize(&s).unwrap();
         let back: ResolvedStyle = bincode::deserialize(&bytes).unwrap();
-        assert_eq!(back.border_radius, s.border_radius, "border_radius 经 bincode round-trip 应相等");
+        assert_eq!(
+            back.border_radius, s.border_radius,
+            "border_radius 经 bincode round-trip 应相等"
+        );
     }
 
     #[test]
     fn default_touchable_is_true() {
-        assert!(ResolvedStyle::default().touchable, "touchable 默认 true（pointer-events:auto）");
+        assert!(
+            ResolvedStyle::default().touchable,
+            "touchable 默认 true（pointer-events:auto）"
+        );
     }
 
     #[test]
@@ -273,10 +326,15 @@ mod tests {
     #[test]
     fn resolved_style_transform_bincode_roundtrip() {
         let mut s = ResolvedStyle::default();
-        s.transform = LocalTransform { matrix: crate::transform::from_rotate(0.5) };
+        s.transform = LocalTransform {
+            matrix: crate::transform::from_rotate(0.5),
+        };
         let bytes = bincode::serialize(&s).expect("serialize");
         let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
-        assert_eq!(back.transform.matrix, s.transform.matrix, "transform 经 bincode round-trip");
+        assert_eq!(
+            back.transform.matrix, s.transform.matrix,
+            "transform 经 bincode round-trip"
+        );
     }
 
     #[test]
@@ -315,10 +373,10 @@ mod tests {
     fn color_filter_bincode_roundtrip() {
         let mut s = ResolvedStyle::default();
         // 非单位矩阵（grayscale 预设的前 4 值非默认）
-        s.color_filter = Some([0.299, 0.587, 0.114, 0.0, 0.0,
-                              0.299, 0.587, 0.114, 0.0, 0.0,
-                              0.299, 0.587, 0.114, 0.0, 0.0,
-                              0.0,   0.0,   0.0,   1.0, 0.0]);
+        s.color_filter = Some([
+            0.299, 0.587, 0.114, 0.0, 0.0, 0.299, 0.587, 0.114, 0.0, 0.0, 0.299, 0.587, 0.114, 0.0,
+            0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+        ]);
         let bytes = bincode::serialize(&s).expect("serialize");
         let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
         assert_eq!(back.color_filter, s.color_filter, "color_filter round-trip");
@@ -328,10 +386,18 @@ mod tests {
     #[test]
     fn border_image_slice_bincode_roundtrip() {
         let mut s = ResolvedStyle::default();
-        s.border_image_slice = Some(SliceInsets { top: 10.0, right: 10.0, bottom: 10.0, left: 10.0 });
+        s.border_image_slice = Some(SliceInsets {
+            top: 10.0,
+            right: 10.0,
+            bottom: 10.0,
+            left: 10.0,
+        });
         let bytes = bincode::serialize(&s).expect("serialize");
         let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
-        assert_eq!(back.border_image_slice, s.border_image_slice, "slice round-trip");
+        assert_eq!(
+            back.border_image_slice, s.border_image_slice,
+            "slice round-trip"
+        );
         assert_eq!(back, s, "加字段后全字段 round-trip 仍相等");
     }
 }

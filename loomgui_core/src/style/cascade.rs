@@ -7,7 +7,9 @@ use crate::style::resolved::ResolvedStyle;
 /// 给整棵树算每元素的 ResolvedStyle（继承在 resolve 期展开）。
 /// 索引与 ElementTree.nodes 一一对应。
 pub fn resolve_styles(tree: &ElementTree, sheet: &StyleSheet) -> Vec<ResolvedStyle> {
-    let mut out: Vec<ResolvedStyle> = (0..tree.nodes.len()).map(|_| ResolvedStyle::default()).collect();
+    let mut out: Vec<ResolvedStyle> = (0..tree.nodes.len())
+        .map(|_| ResolvedStyle::default())
+        .collect();
     // 根元素用默认；自顶向下，每元素从父继承白名单后再叠自己的命中规则。
     fn resolve_rec(
         tree: &ElementTree,
@@ -131,14 +133,23 @@ mod tests {
     fn inline_style_applies_background_color() {
         // 色块：<div class="sw" style="background-color:#1a1d2e"> —— 颜色靠 inline
         // （.sw class 只给 width/height；不解析 inline → bg 缺失 → 透明看不见）。
-        let html = r#"<div class="root"><div class="sw" style="background-color:#1a1d2e"></div></div>"#;
+        let html =
+            r#"<div class="root"><div class="sw" style="background-color:#1a1d2e"></div></div>"#;
         let css = r#".sw { width: 60px; height: 60px; }"#;
         let tree = parse_html(html).unwrap();
         let sheet = parse_css(css).unwrap();
         let styles = resolve_styles(&tree, &sheet);
         let sw_id = tree.nodes[tree.roots[0].0].children[0];
         let bg = styles[sw_id.0].background_color.expect(".sw inline bg");
-        assert_eq!(bg, [0x1a as f32 / 255.0, 0x1d as f32 / 255.0, 0x2e as f32 / 255.0, 1.0]);
+        assert_eq!(
+            bg,
+            [
+                0x1a as f32 / 255.0,
+                0x1d as f32 / 255.0,
+                0x2e as f32 / 255.0,
+                1.0
+            ]
+        );
     }
 
     #[test]
@@ -150,6 +161,10 @@ mod tests {
         let sheet = parse_css(css).unwrap();
         let styles = resolve_styles(&tree, &sheet);
         let id = tree.nodes[tree.roots[0].0].children[0];
-        assert_eq!(styles[id.0].color, [0.0, 1.0, 0.0, 1.0], "inline 绿胜 class 红");
+        assert_eq!(
+            styles[id.0].color,
+            [0.0, 1.0, 0.0, 1.0],
+            "inline 绿胜 class 红"
+        );
     }
 }

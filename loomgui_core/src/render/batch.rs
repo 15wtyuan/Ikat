@@ -9,8 +9,8 @@
 //!   当前没有贴图集 / 多 program，断无可断；留待后续）。
 
 use crate::render::node::{MaskContext, NodePayload, RenderNode};
-use crate::scene::node::{NodeId, Rect, Scene};
 use crate::render::ClipEntry;
+use crate::scene::node::{NodeId, Rect, Scene};
 
 /// AABB 交集：返回 intersected Rect；无重叠 → 零面积 `{x, y, w:0, h:0}`（x/y 取
 /// max-min 处的边界值，w/h=0）。永远返回 Rect（不是 None），方便 clip 表直填。
@@ -42,9 +42,11 @@ fn is_mergeable_mesh(rn: &RenderNode) -> bool {
 /// 非 mergeable Mesh / Text → None。
 fn draw_state(rn: &RenderNode) -> Option<(Option<String>, u32)> {
     match &rn.payload {
-        NodePayload::Mesh { image_path, program, .. } if *program == 0 => {
-            (image_path.clone(), rn.mask_context.0).into()
-        }
+        NodePayload::Mesh {
+            image_path,
+            program,
+            ..
+        } if *program == 0 => (image_path.clone(), rn.mask_context.0).into(),
         _ => None,
     }
 }
@@ -80,7 +82,7 @@ fn reorder_unit(scene: &Scene, nodes: &[RenderNode], unit: &mut Vec<usize>) {
         for j in (0..i).rev() {
             let test = unit[j];
             let test_ds = draw_state(&nodes[test]).unwrap(); // 单元内必 mergeable
-            // draw_state 含 Option<String>（非 Copy），用 ref 比较避免 move。
+                                                             // draw_state 含 Option<String>（非 Copy），用 ref 比较避免 move。
             if last_ds.as_ref() != Some(&test_ds) {
                 last_ds = Some(test_ds.clone());
                 m = j + 1;
@@ -153,7 +155,10 @@ pub fn assign_sort_keys(
                 Some(a) => rect_intersect(a, own_scrolled),
             };
             let ctx = *counter + 1;
-            clips.push(ClipEntry { context_id: ctx, rect: intersected });
+            clips.push(ClipEntry {
+                context_id: ctx,
+                rect: intersected,
+            });
             (MaskContext(ctx), Some(intersected))
         } else {
             (parent_mask, accumulated)
@@ -172,7 +177,10 @@ pub fn assign_sort_keys(
         // world 不含自己 scroll_pos），own 在 dfs 入口减 scroll_offset 转 world 空间后与之求交，
         // 即得 world 可见区。传子保持 intersected（已是 world 空间可见区）。
         let child_scroll_offset = if let Some(st) = scene.scroll.get(id) {
-            (scroll_offset.0 + st.scroll_pos.0, scroll_offset.1 + st.scroll_pos.1)
+            (
+                scroll_offset.0 + st.scroll_pos.0,
+                scroll_offset.1 + st.scroll_pos.1,
+            )
         } else {
             scroll_offset
         };
@@ -180,11 +188,31 @@ pub fn assign_sort_keys(
         // clone children 避免与 nodes 的 &mut 冲突借（scene 与 nodes 是独立借用）。
         let kids = node.children.clone();
         for c in kids {
-            dfs(scene, nodes, id_to_pos, c, counter, clips, mask, child_accumulated, child_scroll_offset);
+            dfs(
+                scene,
+                nodes,
+                id_to_pos,
+                c,
+                counter,
+                clips,
+                mask,
+                child_accumulated,
+                child_scroll_offset,
+            );
         }
     }
     for root in &scene.roots {
-        dfs(scene, nodes, id_to_pos, *root, &mut counter, &mut clips, MaskContext(0), None, (0.0, 0.0));
+        dfs(
+            scene,
+            nodes,
+            id_to_pos,
+            *root,
+            &mut counter,
+            &mut clips,
+            MaskContext(0),
+            None,
+            (0.0, 0.0),
+        );
     }
     clips
 }
@@ -265,7 +293,12 @@ mod tests {
     /// 测 helper：从 scene 构 id_to_pos 映射（同 build_render_nodes 的算法——values() 0 基位置）。
     /// 无间隙时等价 id.index()-1；有间隙时仍正确（remove_node 后用）。
     fn id_to_pos_map(scene: &Scene) -> std::collections::HashMap<NodeId, usize> {
-        scene.nodes.values().enumerate().map(|(i, n)| (n.id, i)).collect()
+        scene
+            .nodes
+            .values()
+            .enumerate()
+            .map(|(i, n)| (n.id, i))
+            .collect()
     }
 
     /// 构造 root > [a, b]，全部 Container 无 clip。
@@ -274,9 +307,24 @@ mod tests {
         let mut a = Node::default();
         let mut b = Node::default();
         // edges (0→1), (0→2) 由 from_nodes 设 parent/children；这里只设 layout_rect 等字段。
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
-        a.layout_rect = Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
-        b.layout_rect = Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+        };
+        a.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+        };
+        b.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+        };
         Scene::from_nodes(vec![root, a, b], vec![(0, 1), (0, 2)])
     }
 
@@ -346,11 +394,31 @@ mod tests {
         // _ClipBox（design 不含 scroll）错位 → scroll 时 CLIPPED 节点 clipPos 超界全裁
         // （showcase 3.6/3.7 bg-demo/br-demo 内容空根因）。
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
-        root.clip_rect = Some(Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 });
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
+        root.clip_rect = Some(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        });
         let mut child = Node::default();
-        child.layout_rect = Rect { x: 10.0, y: 10.0, w: 80.0, h: 80.0 };
-        child.clip_rect = Some(Rect { x: 10.0, y: 10.0, w: 80.0, h: 80.0 });
+        child.layout_rect = Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 80.0,
+            h: 80.0,
+        };
+        child.clip_rect = Some(Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 80.0,
+            h: 80.0,
+        });
         let mut scene = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
         let root_id = scene.roots[0];
         scene.scroll.ensure(root_id).scroll_pos = (0.0, 30.0);
@@ -359,17 +427,32 @@ mod tests {
         let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene));
 
         // root ctx(1)：容器自身 world 不含自己 scroll_pos（transform.rs 约定）→ clip rect 不减。
-        let root_ctx = clips.iter().find(|c| c.context_id == 1).expect("root clip ctx");
-        assert!((root_ctx.rect.y - 0.0).abs() < 1e-3, "root clip rect 不减自己 scroll_pos");
+        let root_ctx = clips
+            .iter()
+            .find(|c| c.context_id == 1)
+            .expect("root clip ctx");
+        assert!(
+            (root_ctx.rect.y - 0.0).abs() < 1e-3,
+            "root clip rect 不减自己 scroll_pos"
+        );
         // child ctx(2)：child world rect = (10,10-30,80,80) = (10,-20,80,80)（滚出 root viewport
         // 顶部）。可见区 = root viewport(0,0,200,200) ∩ child world(10,-20,80,80) = (10,0,80,60)。
         // clip rect 存 world 可见区（accumulated=viewport 不减 scroll；own 减 scroll_offset 转 world）。
-        let child_ctx = clips.iter().find(|c| c.context_id == 2).expect("child clip ctx");
+        let child_ctx = clips
+            .iter()
+            .find(|c| c.context_id == 2)
+            .expect("child clip ctx");
         assert!((child_ctx.rect.x - 10.0).abs() < 1e-3, "child clip x=10");
-        assert!((child_ctx.rect.y - 0.0).abs() < 1e-3,
-            "child clip y=0（world 可见区顶，被 root viewport 裁），得 {}", child_ctx.rect.y);
-        assert!((child_ctx.rect.h - 60.0).abs() < 1e-3,
-            "child clip h=60（80−滚出的 20），得 {}", child_ctx.rect.h);
+        assert!(
+            (child_ctx.rect.y - 0.0).abs() < 1e-3,
+            "child clip y=0（world 可见区顶，被 root viewport 裁），得 {}",
+            child_ctx.rect.y
+        );
+        assert!(
+            (child_ctx.rect.h - 60.0).abs() < 1e-3,
+            "child clip h=60（80−滚出的 20），得 {}",
+            child_ctx.rect.h
+        );
     }
 
     // —— 嵌套 clip 交集（rect mask）——
@@ -381,9 +464,19 @@ mod tests {
     #[test]
     fn nested_disjoint_clip_intersection_is_zero_area() {
         let mut outer = Node::default();
-        outer.clip_rect = Some(Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 });
+        outer.clip_rect = Some(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
         let mut inner = Node::default();
-        inner.clip_rect = Some(Rect { x: 200.0, y: 200.0, w: 50.0, h: 50.0 });
+        inner.clip_rect = Some(Rect {
+            x: 200.0,
+            y: 200.0,
+            w: 50.0,
+            h: 50.0,
+        });
         let leaf = Node::default();
         let scene = Scene::from_nodes(vec![outer, inner, leaf], vec![(0, 1), (1, 2)]);
 
@@ -396,18 +489,30 @@ mod tests {
         assert_eq!(rns[2].mask_context, MaskContext(2));
 
         // outer context(1) 的 clip rect == outer box 本身（无祖先 clip）。
-        let ctx1 = clips.iter().find(|c| c.context_id == 1).expect("ctx 1 in table");
-        assert_eq!((ctx1.rect.x, ctx1.rect.y, ctx1.rect.w, ctx1.rect.h),
-                   (0.0, 0.0, 100.0, 100.0));
+        let ctx1 = clips
+            .iter()
+            .find(|c| c.context_id == 1)
+            .expect("ctx 1 in table");
+        assert_eq!(
+            (ctx1.rect.x, ctx1.rect.y, ctx1.rect.w, ctx1.rect.h),
+            (0.0, 0.0, 100.0, 100.0)
+        );
 
         // inner context(2) 的 clip rect == outer ∩ inner = 零面积（不相交）。
-        let ctx2 = clips.iter().find(|c| c.context_id == 2).expect("ctx 2 in table");
+        let ctx2 = clips
+            .iter()
+            .find(|c| c.context_id == 2)
+            .expect("ctx 2 in table");
         assert_eq!(ctx2.rect.w, 0.0, "disjoint 交集 w=0");
         assert_eq!(ctx2.rect.h, 0.0, "disjoint 交集 h=0");
         // 关键断言：不是 [200,200,50,50]（只裁最内层会泄漏外层 disjoint clip）。
-        assert!(!(ctx2.rect.x == 200.0 && ctx2.rect.y == 200.0
-                  && ctx2.rect.w == 50.0 && ctx2.rect.h == 50.0),
-                "inner context rect 不应等于 inner box（只裁最内层会泄漏）");
+        assert!(
+            !(ctx2.rect.x == 200.0
+                && ctx2.rect.y == 200.0
+                && ctx2.rect.w == 50.0
+                && ctx2.rect.h == 50.0),
+            "inner context rect 不应等于 inner box（只裁最内层会泄漏）"
+        );
     }
 
     /// nested overlapping: outer [0,0,100,100] > inner [50,50,100,100]（重叠）> leaf。
@@ -415,21 +520,36 @@ mod tests {
     #[test]
     fn nested_overlapping_clip_intersection_is_overlap_rect() {
         let mut outer = Node::default();
-        outer.clip_rect = Some(Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 });
+        outer.clip_rect = Some(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
         let mut inner = Node::default();
-        inner.clip_rect = Some(Rect { x: 50.0, y: 50.0, w: 100.0, h: 100.0 });
+        inner.clip_rect = Some(Rect {
+            x: 50.0,
+            y: 50.0,
+            w: 100.0,
+            h: 100.0,
+        });
         let leaf = Node::default();
         let scene = Scene::from_nodes(vec![outer, inner, leaf], vec![(0, 1), (1, 2)]);
 
         let mut rns: Vec<RenderNode> = (0..3).map(placeholder_rn).collect();
         let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene));
 
-        let ctx2 = clips.iter().find(|c| c.context_id == 2).expect("ctx 2 in table");
+        let ctx2 = clips
+            .iter()
+            .find(|c| c.context_id == 2)
+            .expect("ctx 2 in table");
         // outer ∩ inner = [max(0,50), max(0,50)] .. [min(100,150), min(100,150)]
         //                = [50,50,50,50]
-        assert_eq!((ctx2.rect.x, ctx2.rect.y, ctx2.rect.w, ctx2.rect.h),
-                   (50.0, 50.0, 50.0, 50.0),
-                   "overlapping 交集 = [50,50,50,50]");
+        assert_eq!(
+            (ctx2.rect.x, ctx2.rect.y, ctx2.rect.w, ctx2.rect.h),
+            (50.0, 50.0, 50.0, 50.0),
+            "overlapping 交集 = [50,50,50,50]"
+        );
     }
 
     // —— AABB 保序重排（reorder_unit / reorder_for_batching）——
@@ -452,8 +572,12 @@ mod tests {
             change_level: ChangeLevel::Full,
             reuse_key: 0,
             payload: NodePayload::Mesh {
-                verts: vec![[rect.x, rect.y], [rect.x + rect.w, rect.y],
-                            [rect.x + rect.w, rect.y + rect.h], [rect.x, rect.y + rect.h]],
+                verts: vec![
+                    [rect.x, rect.y],
+                    [rect.x + rect.w, rect.y],
+                    [rect.x + rect.w, rect.y + rect.h],
+                    [rect.x, rect.y + rect.h],
+                ],
                 uvs: vec![[0.0, 0.0]; 4],
                 colors: vec![[1.0; 4]; 4],
                 indices: vec![0, 1, 2, 0, 2, 3],
@@ -468,15 +592,60 @@ mod tests {
     fn reorder_unit_same_drawstate_disjoint_gathers() {
         // [A(path a.png, x=0), B(path b.png, x=100), C(path a.png, x=200)] 全不相交 → C 前移到 A 旁。
         // reorder_unit 经 RenderNode.node_id 桥接回 scene NodeId 取 layout_rect。
-        let mut a = Node::default(); a.layout_rect = Rect{x:0.0,y:0.0,w:10.0,h:10.0};
-        let mut b = Node::default(); b.layout_rect = Rect{x:100.0,y:0.0,w:10.0,h:10.0};
-        let mut c = Node::default(); c.layout_rect = Rect{x:200.0,y:0.0,w:10.0,h:10.0};
+        let mut a = Node::default();
+        a.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
+        let mut b = Node::default();
+        b.layout_rect = Rect {
+            x: 100.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
+        let mut c = Node::default();
+        c.layout_rect = Rect {
+            x: 200.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
         let scene = Scene::from_nodes(vec![a.clone(), b.clone(), c.clone()], vec![]);
         let ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
         let mut nodes = vec![
-            mesh_rn(Some("a.png"), Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }, 0),
-            mesh_rn(Some("b.png"), Rect { x: 100.0, y: 0.0, w: 10.0, h: 10.0 }, 0),
-            mesh_rn(Some("a.png"), Rect { x: 200.0, y: 0.0, w: 10.0, h: 10.0 }, 0),
+            mesh_rn(
+                Some("a.png"),
+                Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 10.0,
+                    h: 10.0,
+                },
+                0,
+            ),
+            mesh_rn(
+                Some("b.png"),
+                Rect {
+                    x: 100.0,
+                    y: 0.0,
+                    w: 10.0,
+                    h: 10.0,
+                },
+                0,
+            ),
+            mesh_rn(
+                Some("a.png"),
+                Rect {
+                    x: 200.0,
+                    y: 0.0,
+                    w: 10.0,
+                    h: 10.0,
+                },
+                0,
+            ),
         ];
         nodes[0].node_id = ids[0].0;
         nodes[1].node_id = ids[1].0;
@@ -493,15 +662,60 @@ mod tests {
         // 但不越过 A（保 A→C 绘制序，防遮挡）。B(b.png) 被推后。
         // 注：fgui DoFairyBatching 语义非「相交=不动」，而是「向后扫到首个相交即停，
         // 但 k 已在相交前按同 material 聚拢点算出」——同 material 相交仍聚拢到紧邻。
-        let mut a = Node::default(); a.layout_rect = Rect{x:0.0,y:0.0,w:50.0,h:50.0};
-        let mut b = Node::default(); b.layout_rect = Rect{x:100.0,y:0.0,w:10.0,h:10.0};
-        let mut c = Node::default(); c.layout_rect = Rect{x:10.0,y:10.0,w:50.0,h:50.0};
+        let mut a = Node::default();
+        a.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
+        let mut b = Node::default();
+        b.layout_rect = Rect {
+            x: 100.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
+        let mut c = Node::default();
+        c.layout_rect = Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let scene = Scene::from_nodes(vec![a, b, c], vec![]);
         let ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
         let mut nodes = vec![
-            mesh_rn(Some("a.png"), Rect { x: 0.0, y: 0.0, w: 50.0, h: 50.0 }, 0),
-            mesh_rn(Some("b.png"), Rect { x: 100.0, y: 0.0, w: 10.0, h: 10.0 }, 0),
-            mesh_rn(Some("a.png"), Rect { x: 10.0, y: 10.0, w: 50.0, h: 50.0 }, 0), // 与 A 相交
+            mesh_rn(
+                Some("a.png"),
+                Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 50.0,
+                    h: 50.0,
+                },
+                0,
+            ),
+            mesh_rn(
+                Some("b.png"),
+                Rect {
+                    x: 100.0,
+                    y: 0.0,
+                    w: 10.0,
+                    h: 10.0,
+                },
+                0,
+            ),
+            mesh_rn(
+                Some("a.png"),
+                Rect {
+                    x: 10.0,
+                    y: 10.0,
+                    w: 50.0,
+                    h: 50.0,
+                },
+                0,
+            ), // 与 A 相交
         ];
         nodes[0].node_id = ids[0].0;
         nodes[1].node_id = ids[1].0;
@@ -509,12 +723,25 @@ mod tests {
         let mut unit = vec![0usize, 1, 2];
         reorder_unit(&scene, &nodes, &mut unit);
         // C 同 path a.png 聚拢到 A 旁（k=A 之后=1），不越 A（保 A→C 序）；B 被推后。
-        assert_eq!(unit, vec![0, 2, 1], "同 DrawState 相交 → 聚拢到紧邻，不越目标");
+        assert_eq!(
+            unit,
+            vec![0, 2, 1],
+            "同 DrawState 相交 → 聚拢到紧邻，不越目标"
+        );
     }
 
     /// helper：把 mesh_rn 包成 RenderNode 并设 node_id。
     fn mesh_rn_into_rn(id: usize, path: Option<&str>, _scene: &Scene) -> RenderNode {
-        let mut r = mesh_rn(path, Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }, 0);
+        let mut r = mesh_rn(
+            path,
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 10.0,
+            },
+            0,
+        );
         r.node_id = id as u32;
         r
     }
@@ -522,8 +749,14 @@ mod tests {
         let mut r = placeholder_rn(id);
         r.node_id = id as u32;
         r.payload = NodePayload::Text {
-            layout: crate::text::layout::TextLayout { text_width: 0.0, text_height: 0.0, lines: vec![] },
-            font_size: 16.0, color: [1.0; 4], program: 1,
+            layout: crate::text::layout::TextLayout {
+                text_width: 0.0,
+                text_height: 0.0,
+                lines: vec![],
+            },
+            font_size: 16.0,
+            color: [1.0; 4],
+            program: 1,
         };
         r
     }
@@ -533,30 +766,76 @@ mod tests {
         // root > [A(a.png), Text, B(a.png)]：AABB 全不相交。Text 断单元 →
         // A、B 分属两个单元，B 不能跨 Text 前移到 A 旁（保 Text 绘制序）。
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 300.0, h: 50.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 300.0,
+            h: 50.0,
+        };
         let mut a = Node::default();
-        a.layout_rect = Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 };
-        let mut t = Node::default(); t.kind = NodeKind::Text { content: "x".into() };
-        t.layout_rect = Rect { x: 100.0, y: 0.0, w: 10.0, h: 10.0 };
+        a.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
+        let mut t = Node::default();
+        t.kind = NodeKind::Text {
+            content: "x".into(),
+        };
+        t.layout_rect = Rect {
+            x: 100.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
         let mut b = Node::default();
-        b.layout_rect = Rect { x: 200.0, y: 0.0, w: 10.0, h: 10.0 };
+        b.layout_rect = Rect {
+            x: 200.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
         let scene = Scene::from_nodes(vec![root, a, t, b], vec![(0, 1), (0, 2), (0, 3)]);
         let ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
         // rns 顺 = scene.nodes.values() 顺（root, a, t, b）
         let mut rns: Vec<RenderNode> = vec![
-            { let mut r = placeholder_rn(0); r.mask_context = MaskContext(0); r.node_id = ids[0].0; r },
-            { let mut r = mesh_rn_into_rn(0, Some("a.png"), &scene); r.node_id = ids[1].0; r },
-            { let mut r = text_rn(0); r.node_id = ids[2].0; r },
-            { let mut r = mesh_rn_into_rn(0, Some("a.png"), &scene); r.node_id = ids[3].0; r },
+            {
+                let mut r = placeholder_rn(0);
+                r.mask_context = MaskContext(0);
+                r.node_id = ids[0].0;
+                r
+            },
+            {
+                let mut r = mesh_rn_into_rn(0, Some("a.png"), &scene);
+                r.node_id = ids[1].0;
+                r
+            },
+            {
+                let mut r = text_rn(0);
+                r.node_id = ids[2].0;
+                r
+            },
+            {
+                let mut r = mesh_rn_into_rn(0, Some("a.png"), &scene);
+                r.node_id = ids[3].0;
+                r
+            },
         ];
         // 先赋 DFS 序 sort_key（模拟 assign_sort_keys 输出）+ mask_context。
-        for (k, r) in rns.iter_mut().enumerate() { r.sort_key = k as u32; r.mask_context = MaskContext(0); }
+        for (k, r) in rns.iter_mut().enumerate() {
+            r.sort_key = k as u32;
+            r.mask_context = MaskContext(0);
+        }
 
         reorder_for_batching(&scene, &mut rns);
         // Text 必在 A 与 B 之间（保绘制序）。
         let sk = |id: u32| rns.iter().find(|r| r.node_id == id).unwrap().sort_key;
         assert!(sk(ids[1].0) < sk(ids[2].0), "A 在 Text 前");
-        assert!(sk(ids[2].0) < sk(ids[3].0), "Text 在 B 前（B 不跨 Text 前移）");
+        assert!(
+            sk(ids[2].0) < sk(ids[3].0),
+            "Text 在 B 前（B 不跨 Text 前移）"
+        );
     }
 
     #[test]
@@ -565,21 +844,54 @@ mod tests {
         // A(ctx0,a.png) B(ctx1,a.png) C(ctx0,a.png)：A、C 同 ctx0 但被 B(ctx1) 断开，
         // 且 AABB 不相交。C 不应跨 ctx 边界前移到 A 旁。
         let root = Node::default();
-        let mut n1 = Node::default(); n1.layout_rect = Rect{x:0.0,y:0.0,w:10.0,h:10.0};
-        let mut n2 = Node::default(); n2.layout_rect = Rect{x:100.0,y:0.0,w:10.0,h:10.0};
-        let mut n3 = Node::default(); n3.layout_rect = Rect{x:200.0,y:0.0,w:10.0,h:10.0};
+        let mut n1 = Node::default();
+        n1.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
+        let mut n2 = Node::default();
+        n2.layout_rect = Rect {
+            x: 100.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
+        let mut n3 = Node::default();
+        n3.layout_rect = Rect {
+            x: 200.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
         let scene = Scene::from_nodes(vec![root, n1, n2, n3], vec![(0, 1), (0, 2), (0, 3)]);
         let ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
         // rns 顺 = A, B, C（跳过 root，root 不参与 reorder 单元——这里测只放 3 个 mesh）。
         let mut rns: Vec<RenderNode> = vec![
-            { let mut r = mesh_rn_into_rn(0, Some("a.png"), &scene); r.node_id = ids[1].0; r },
-            { let mut r = mesh_rn_into_rn(0, Some("a.png"), &scene); r.node_id = ids[2].0; r },
-            { let mut r = mesh_rn_into_rn(0, Some("a.png"), &scene); r.node_id = ids[3].0; r },
+            {
+                let mut r = mesh_rn_into_rn(0, Some("a.png"), &scene);
+                r.node_id = ids[1].0;
+                r
+            },
+            {
+                let mut r = mesh_rn_into_rn(0, Some("a.png"), &scene);
+                r.node_id = ids[2].0;
+                r
+            },
+            {
+                let mut r = mesh_rn_into_rn(0, Some("a.png"), &scene);
+                r.node_id = ids[3].0;
+                r
+            },
         ];
         // sort_key = DFS 序；mask_context: 0→ctx0, 1→ctx1, 2→ctx0（模拟跨 clip 边界）。
-        rns[0].sort_key = 0; rns[0].mask_context = MaskContext(0);
-        rns[1].sort_key = 1; rns[1].mask_context = MaskContext(1);
-        rns[2].sort_key = 2; rns[2].mask_context = MaskContext(0);
+        rns[0].sort_key = 0;
+        rns[0].mask_context = MaskContext(0);
+        rns[1].sort_key = 1;
+        rns[1].mask_context = MaskContext(1);
+        rns[2].sort_key = 2;
+        rns[2].mask_context = MaskContext(0);
 
         reorder_for_batching(&scene, &mut rns);
         // C(ctx0) 不跨 B(ctx1) 前移：B 的 sort_key 仍在 A、C 之间或 A 前，但 C 不越 B。

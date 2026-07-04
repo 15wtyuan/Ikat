@@ -49,9 +49,9 @@ pub enum NodePayload {
         uvs: Vec<[f32; 2]>,
         colors: Vec<[f32; 4]>,
         indices: Vec<u32>,
-        image_path: Option<String>,  // None=纯色，Some=图片 path（核心不知图集）
+        image_path: Option<String>, // None=纯色，Some=图片 path（核心不知图集）
         program: u32,
-        color_matrix: [f32; 20],   // ColorFilter 矩阵；program≠3/4 全零
+        color_matrix: [f32; 20], // ColorFilter 矩阵；program≠3/4 全零
     },
     Text {
         layout: crate::text::layout::TextLayout,

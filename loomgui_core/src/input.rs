@@ -12,7 +12,7 @@ pub struct PointerEvent {
     pub kind: PointerKind,
     pub button: u8,
     pub pad: [u8; 2],
-    pub touch_id: i32,   // -1=鼠标主指 slots[0]；>=0=触摸 fingerId
+    pub touch_id: i32, // -1=鼠标主指 slots[0]；>=0=触摸 fingerId
     pub x: f32,
     pub y: f32,
 }
@@ -24,7 +24,7 @@ pub enum PointerKind {
     Down = 0,
     Up = 1,
     Move = 2,
-    Canceled = 3,   // 触摸 TouchPhase.Canceled（鼠标无）
+    Canceled = 3, // 触摸 TouchPhase.Canceled（鼠标无）
 }
 
 /// 键盘输入事件（FFI POD）。C# set_key_input 推一组；core process_keys 产 keydown/up EventRecord。
@@ -32,9 +32,9 @@ pub enum PointerKind {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct KeyEvent {
-    pub key_code: u32,   // KeyCode 枚举值（Unity KeyCode 转 u32；core 不解释语义，只透传 + Tab 判定）
-    pub modifiers: u8,   // bit0=shift / bit1=ctrl / bit2=alt
-    pub is_down: bool,   // true=按下→keydown；false=松开→keyup
+    pub key_code: u32, // KeyCode 枚举值（Unity KeyCode 转 u32；core 不解释语义，只透传 + Tab 判定）
+    pub modifiers: u8, // bit0=shift / bit1=ctrl / bit2=alt
+    pub is_down: bool, // true=按下→keydown；false=松开→keyup
     pub pad: [u8; 2],
 }
 
@@ -53,7 +53,7 @@ pub const KEY_TAB: u32 = 9;
 pub struct EventRecord {
     pub node_id: u32,
     pub event_type: u8,
-    pub click_count: u8,    // 1 或 2（仅 Click 有意义，其余=0）
+    pub click_count: u8, // 1 或 2（仅 Click 有意义，其余=0）
     pub pad: [u8; 2],
     pub touch_id: i32,
     pub x: f32,
@@ -76,28 +76,40 @@ pub const EVT_FOCUS_IN: u8 = 14;
 pub const EVT_FOCUS_OUT: u8 = 15;
 pub const EVT_TWEEN_COMPLETE: u8 = 16;
 
-const CLICK_THRESHOLD_MOUSE: f32 = 10.0;   // per-axis click 容忍（鼠标）
-const CLICK_THRESHOLD_TOUCH: f32 = 50.0;   // per-axis click 容忍（触摸）
-const DOUBLE_CLICK_TIME: f32 = 0.35;   // 双击窗口秒
-const MOVE_CANCEL_PX: f32 = 50.0;      // Move 硬编码取消阈值（per-axis，mouse+touch 通用）
-const DRAG_THRESHOLD_MOUSE: f32 = 2.0;    // drag 启动阈值（鼠标）
-const DRAG_THRESHOLD_TOUCH: f32 = 10.0;   // drag 启动阈值（触摸）
-const LONGPRESS_TRIGGER: f32 = 1.5;       // 长按触发秒
+const CLICK_THRESHOLD_MOUSE: f32 = 10.0; // per-axis click 容忍（鼠标）
+const CLICK_THRESHOLD_TOUCH: f32 = 50.0; // per-axis click 容忍（触摸）
+const DOUBLE_CLICK_TIME: f32 = 0.35; // 双击窗口秒
+const MOVE_CANCEL_PX: f32 = 50.0; // Move 硬编码取消阈值（per-axis，mouse+touch 通用）
+const DRAG_THRESHOLD_MOUSE: f32 = 2.0; // drag 启动阈值（鼠标）
+const DRAG_THRESHOLD_TOUCH: f32 = 10.0; // drag 启动阈值（触摸）
+const LONGPRESS_TRIGGER: f32 = 1.5; // 长按触发秒
 /// drag_follow 占位 dt（process 未收真实 dt，假定 60fps；非 60fps 速度计算有偏差）。
 const DRAG_FOLLOW_ASSUMED_DT: f32 = 0.016;
 
 fn click_threshold(touch_id: i32) -> f32 {
-    if touch_id == -1 { CLICK_THRESHOLD_MOUSE } else { CLICK_THRESHOLD_TOUCH }
+    if touch_id == -1 {
+        CLICK_THRESHOLD_MOUSE
+    } else {
+        CLICK_THRESHOLD_TOUCH
+    }
 }
 
 fn drag_threshold(touch_id: i32) -> f32 {
-    if touch_id == -1 { DRAG_THRESHOLD_MOUSE } else { DRAG_THRESHOLD_TOUCH }
+    if touch_id == -1 {
+        DRAG_THRESHOLD_MOUSE
+    } else {
+        DRAG_THRESHOLD_TOUCH
+    }
 }
 
 /// scroll 手势触发阈值（mouse 8 / touch 20）。
 /// 大于 drag 阈值（mouse 2 / touch 10）→ 两候选并存时 drag 通常先达。
 fn scroll_threshold(touch_id: i32) -> f32 {
-    if touch_id == -1 { SCROLL_THRESHOLD_MOUSE } else { SCROLL_THRESHOLD_TOUCH }
+    if touch_id == -1 {
+        SCROLL_THRESHOLD_MOUSE
+    } else {
+        SCROLL_THRESHOLD_TOUCH
+    }
 }
 
 /// 候选让出后沿 parent 找下一个 effective 滚动祖先。
@@ -125,33 +137,33 @@ fn next_effective_ancestor(scene: &Scene, pane: NodeId) -> Option<NodeId> {
 /// 单触摸槽状态。slots[0]=鼠标主指（touch_id=-1 常驻），slots[1..4]=触摸。
 #[derive(Debug, Clone)]
 pub struct TouchSlot {
-    pub touch_id: i32,                  // -1=鼠标主指/空闲触摸槽；>=0=触摸 fingerId
+    pub touch_id: i32, // -1=鼠标主指/空闲触摸槽；>=0=触摸 fingerId
     pub last_pos: (f32, f32),
     pub is_down: bool,
     pub down_node: Option<NodeId>,
     pub down_pos: (f32, f32),
-    pub last_hit: Option<NodeId>,       // 本帧命中（hover_diff + is_pointer_on_ui 用）
+    pub last_hit: Option<NodeId>, // 本帧命中（hover_diff + is_pointer_on_ui 用）
     pub last_hovered_chain: Vec<NodeId>,
-    pub touch_monitors: Vec<NodeId>,    // capture 的节点（Move/Up 派发用）
-    pub down_targets: Vec<NodeId>,      // Down 时填 [leaf, …祖先]
-    pub click_cancelled: bool,          // Move>50 / CancelClick / Canceled 置
-    pub last_click_time: f32,           // time_s（双击窗口）
-    pub last_click_pos: (f32, f32),     // 上次 Click 位置
-    pub last_click_button: u8,          // 上次 Click 键
-    pub click_count: u8,                // 1→2→1 循环
-    pub drag_testing: bool,            // Down 在 draggable 链上置 true
-    pub dragging: bool,                // DragStart 后置 true
-    pub drag_target: Option<NodeId>,   // down_targets 中最近 draggable（含 down_node）；None 无 drag
-    pub down_time: f32,                // Down 时=time_s（longpress 用）
-    pub longpress_fired: bool,         // 触发后置 true（本 press 不再发）
-    pub longpress_cancelled: bool,     // 位移>50px 置 true（本 press 不再发）
+    pub touch_monitors: Vec<NodeId>, // capture 的节点（Move/Up 派发用）
+    pub down_targets: Vec<NodeId>,   // Down 时填 [leaf, …祖先]
+    pub click_cancelled: bool,       // Move>50 / CancelClick / Canceled 置
+    pub last_click_time: f32,        // time_s（双击窗口）
+    pub last_click_pos: (f32, f32),  // 上次 Click 位置
+    pub last_click_button: u8,       // 上次 Click 键
+    pub click_count: u8,             // 1→2→1 循环
+    pub drag_testing: bool,          // Down 在 draggable 链上置 true
+    pub dragging: bool,              // DragStart 后置 true
+    pub drag_target: Option<NodeId>, // down_targets 中最近 draggable（含 down_node）；None 无 drag
+    pub down_time: f32,              // Down 时=time_s（longpress 用）
+    pub longpress_fired: bool,       // 触发后置 true（本 press 不再发）
+    pub longpress_cancelled: bool,   // 位移>50px 置 true（本 press 不再发）
     // scroll 手势仲裁（per-slot）。scroll-vs-drag 阈值赛跑 + 轴锁 + 嵌套让出提升。
-    pub scroll_candidate: Option<NodeId>,    // Down 沿 down_targets 找的最近 effective 滚动容器（待阈值判定）
-    pub scroll_testing: bool,                // Down 时候选存在 → true，达阈值/让出/Up 后清
-    pub scrolling_pane: Option<NodeId>,      // 已判定：本槽正滚动该容器
-    pub scroll_gesture: u8,                  // bit0=垂直手势（Y 位移） bit1=水平手势（X 位移）
-    pub grip_dragging: bool,                 // scrollbar grip 拖拽中（grip 不启 inertia）
-    pub scroll_down_pos: (f32, f32),         // Down 时刻 pos（scroll 阈值/跟手基准）
+    pub scroll_candidate: Option<NodeId>, // Down 沿 down_targets 找的最近 effective 滚动容器（待阈值判定）
+    pub scroll_testing: bool,             // Down 时候选存在 → true，达阈值/让出/Up 后清
+    pub scrolling_pane: Option<NodeId>,   // 已判定：本槽正滚动该容器
+    pub scroll_gesture: u8,               // bit0=垂直手势（Y 位移） bit1=水平手势（X 位移）
+    pub grip_dragging: bool,              // scrollbar grip 拖拽中（grip 不启 inertia）
+    pub scroll_down_pos: (f32, f32),      // Down 时刻 pos（scroll 阈值/跟手基准）
 }
 
 impl TouchSlot {
@@ -190,15 +202,15 @@ impl TouchSlot {
 /// 多指针状态机（固定 5 槽）。slots[0]=鼠标，slots[1..4]=触摸。
 pub struct PointerState {
     pub slots: Vec<TouchSlot>,
-    pub time_s: f32,   // 累积时间（Stage::advance_time 累加；双击窗口用）
+    pub time_s: f32, // 累积时间（Stage::advance_time 累加；双击窗口用）
 }
 
 impl Default for PointerState {
     fn default() -> Self {
         let mut slots = Vec::with_capacity(5);
-        slots.push(TouchSlot::new_slot());     // slot 0 = 鼠标主指
+        slots.push(TouchSlot::new_slot()); // slot 0 = 鼠标主指
         for _ in 0..4 {
-            slots.push(TouchSlot::new_slot());  // slot 1..4 = 触摸
+            slots.push(TouchSlot::new_slot()); // slot 1..4 = 触摸
         }
         Self { slots, time_s: 0.0 }
     }
@@ -261,7 +273,12 @@ pub(crate) fn focus_node(scene: &mut Scene, new: Option<NodeId>, out: &mut Vec<E
 }
 
 /// DFS 先序收集 tabindex>=0 且非 disabled 节点，分桶 positive(>0)/zero(==0)。
-fn dfs_collect(scene: &Scene, id: NodeId, positive: &mut Vec<(i32, NodeId)>, zero: &mut Vec<NodeId>) {
+fn dfs_collect(
+    scene: &Scene,
+    id: NodeId,
+    positive: &mut Vec<(i32, NodeId)>,
+    zero: &mut Vec<NodeId>,
+) {
     let n = match scene.get(id) {
         Some(n) => n,
         None => return,
@@ -289,7 +306,11 @@ pub(crate) fn build_tab_chain(scene: &Scene) -> Vec<NodeId> {
         dfs_collect(scene, *root, &mut positive, &mut zero);
     }
     positive.sort_by_key(|(t, _)| *t); // stable：同 tabindex 保 DFS 序
-    positive.into_iter().map(|(_, n)| n).chain(zero.into_iter()).collect()
+    positive
+        .into_iter()
+        .map(|(_, n)| n)
+        .chain(zero.into_iter())
+        .collect()
 }
 
 /// 从 current 焦点算 Tab/Shift+Tab 下一个焦点。空链 → None。
@@ -311,7 +332,11 @@ fn next_focus(chain: &[NodeId], current: Option<NodeId>, backward: bool) -> Opti
         }
         None => {
             // current 不在链 → forward 取链首，backward 取链尾
-            if backward { *chain.last().unwrap() } else { chain[0] }
+            if backward {
+                *chain.last().unwrap()
+            } else {
+                chain[0]
+            }
         }
     };
     Some(next)
@@ -340,8 +365,8 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                 node_id: n.0 as u32,
                 event_type,
                 click_count: 0,
-                pad: [ke.modifiers, 0],          // pad[0]=modifiers
-                touch_id: ke.key_code as i32,    // touch_id 复用装 key_code（u32 bit pattern → i32）
+                pad: [ke.modifiers, 0],       // pad[0]=modifiers
+                touch_id: ke.key_code as i32, // touch_id 复用装 key_code（u32 bit pattern → i32）
                 x: 0.0,
                 y: 0.0,
             });
@@ -375,8 +400,13 @@ impl PointerState {
     /// 加 touch monitor（去重）。touch_id 找槽（鼠标=-1→slot0）；找不到槽→no-op（Down 前调无效）。
     /// 仅加指定槽，不做 -1 广播。
     pub fn add_touch_monitor(&mut self, touch_id: i32, node: NodeId) {
-        let slot_idx = if touch_id == -1 { 0 } else {
-            match (1..self.slots.len()).find(|&i| self.slots[i].touch_id == touch_id) { Some(i) => i, None => return }
+        let slot_idx = if touch_id == -1 {
+            0
+        } else {
+            match (1..self.slots.len()).find(|&i| self.slots[i].touch_id == touch_id) {
+                Some(i) => i,
+                None => return,
+            }
         };
         let slot = &mut self.slots[slot_idx];
         if !slot.touch_monitors.contains(&node) {
@@ -395,7 +425,9 @@ impl PointerState {
     /// 外部取消待 click：置对应槽 click_cancelled。
     /// 触摸槽满 / 未找到 → no-op。下个 Up 的 click_test 见 cancelled → 不发 Click + reset。
     pub fn cancel_click(&mut self, touch_id: i32) {
-        let slot_idx = if touch_id == -1 { 0 } else {
+        let slot_idx = if touch_id == -1 {
+            0
+        } else {
             match (1..self.slots.len()).find(|&i| self.slots[i].touch_id == touch_id) {
                 Some(i) => i,
                 None => return,
@@ -430,9 +462,9 @@ impl PointerState {
     /// 消费本帧输入 → 产 EventRecord 序列。
     pub fn process(&mut self, scene: &mut Scene, events: &[PointerEvent]) -> Vec<EventRecord> {
         let mut out: Vec<EventRecord> = Vec::new();
-        let time_s = self.time_s;   // 本地化避免 &mut self 与 &mut slot 借用冲突
-        // stationary hover follow：本帧无事件的活跃槽刷新命中 + hover diff
-        // （静止光标下元素移动 → :hover 刷新）。
+        let time_s = self.time_s; // 本地化避免 &mut self 与 &mut slot 借用冲突
+                                  // stationary hover follow：本帧无事件的活跃槽刷新命中 + hover diff
+                                  // （静止光标下元素移动 → :hover 刷新）。
         let used_touch_ids: Vec<i32> = events.iter().map(|e| e.touch_id).collect();
         for i in 0..self.slots.len() {
             let active = i == 0 || self.slots[i].touch_id >= 0;
@@ -446,7 +478,9 @@ impl PointerState {
         // longpress 取消靠 Move 臂：Move 超过 MOVE_CANCEL_PX(50) 时置 longpress_cancelled。
         for i in 0..self.slots.len() {
             let active = i == 0 || self.slots[i].touch_id >= 0;
-            if !active { continue; }
+            if !active {
+                continue;
+            }
             let slot = &mut self.slots[i];
             if slot.is_down && !slot.longpress_fired && !slot.longpress_cancelled {
                 if let Some(n) = slot.down_node {
@@ -478,7 +512,7 @@ impl PointerState {
                 None => continue,
             };
             let slot = &mut self.slots[slot_idx];
-            let prev_pos = slot.last_pos;   // scroll 跟手 delta = new - prev
+            let prev_pos = slot.last_pos; // scroll 跟手 delta = new - prev
             slot.last_pos = (ev.x, ev.y);
             let hit = hit_test(scene, slot.last_pos);
             slot.last_hit = hit;
@@ -495,41 +529,58 @@ impl PointerState {
                         }
                     }
                     // scroll 阈值赛跑（drag/scroll 都未判定时）。scene 此处只读（查 effective）。
-                    if slot.is_down && slot.scroll_testing && slot.scrolling_pane.is_none() && !slot.dragging {
+                    if slot.is_down
+                        && slot.scroll_testing
+                        && slot.scrolling_pane.is_none()
+                        && !slot.dragging
+                    {
                         if let Some(pane_id) = slot.scroll_candidate {
                             if let Some(n) = scene.get(pane_id) {
                                 let (eff_x, eff_y) = match scene.scroll.get(pane_id) {
                                     Some(st) => (
-                                        effective(n.style.overflow_x, st.content_size.0, st.viewport_size.0),
-                                        effective(n.style.overflow_y, st.content_size.1, st.viewport_size.1),
+                                        effective(
+                                            n.style.overflow_x,
+                                            st.content_size.0,
+                                            st.viewport_size.0,
+                                        ),
+                                        effective(
+                                            n.style.overflow_y,
+                                            st.content_size.1,
+                                            st.viewport_size.1,
+                                        ),
                                     ),
                                     None => (false, false),
                                 };
                                 let dx = (slot.last_pos.0 - slot.scroll_down_pos.0).abs();
                                 let dy = (slot.last_pos.1 - slot.scroll_down_pos.1).abs();
-                                if eff_y && dy > 0.0 { slot.scroll_gesture |= 1; }
-                                if eff_x && dx > 0.0 { slot.scroll_gesture |= 2; }
+                                if eff_y && dy > 0.0 {
+                                    slot.scroll_gesture |= 1;
+                                }
+                                if eff_x && dx > 0.0 {
+                                    slot.scroll_gesture |= 2;
+                                }
                                 let thr = scroll_threshold(touch_id);
                                 if dx >= thr || dy >= thr {
                                     // 轴锁判定：V-only 容器遇水平更大手势让出；H-only 对称；Both 都跟。
                                     let lock_ok = if eff_x && eff_y {
                                         true
                                     } else if eff_y {
-                                        !(dx > dy)    // V-only：水平位移更大则让出
+                                        !(dx > dy) // V-only：水平位移更大则让出
                                     } else if eff_x {
-                                        !(dy > dx)    // H-only：垂直位移更大则让出
+                                        !(dy > dx) // H-only：垂直位移更大则让出
                                     } else {
                                         false
                                     };
                                     if lock_ok {
                                         slot.scrolling_pane = Some(pane_id);
-                                        slot.click_cancelled = true;   // scroll-start 取消 click（滚动非点击）
+                                        slot.click_cancelled = true; // scroll-start 取消 click（滚动非点击）
                                         slot.scroll_testing = false;
-                                        slot.drag_target = None;       // 抑制 drag（互斥：scroll 赢）
+                                        slot.drag_target = None; // 抑制 drag（互斥：scroll 赢）
                                         slot.drag_testing = false;
                                     } else {
                                         // 让出 → 提升到下一可滚祖先；无祖先可提升 → 停 scroll_testing
-                                        slot.scroll_candidate = next_effective_ancestor(scene, pane_id);
+                                        slot.scroll_candidate =
+                                            next_effective_ancestor(scene, pane_id);
                                         if slot.scroll_candidate.is_none() {
                                             slot.scroll_testing = false;
                                         }
@@ -546,8 +597,8 @@ impl PointerState {
                             let t = drag_threshold(touch_id);
                             if dx.abs() > t || dy.abs() > t {
                                 slot.dragging = true;
-                                slot.click_cancelled = true;   // drag 必取消 click
-                                slot.scroll_testing = false;    // drag 赢 → 清 scroll（互斥）
+                                slot.click_cancelled = true; // drag 必取消 click
+                                slot.scroll_testing = false; // drag 赢 → 清 scroll（互斥）
                                 slot.scroll_candidate = None;
                                 out.push(EventRecord {
                                     node_id: tgt.0 as u32,
@@ -597,14 +648,12 @@ impl PointerState {
                                 let min_thumb = crate::scroll::MIN_THUMB_SIZE;
                                 if slot.scroll_gesture & 1 != 0 {
                                     // 垂直 thumb
-                                    let perc =
-                                        ((pe.1 - lr.y) / (lr.h - min_thumb)).clamp(0.0, 1.0);
+                                    let perc = ((pe.1 - lr.y) / (lr.h - min_thumb)).clamp(0.0, 1.0);
                                     s.scroll_pos.1 = (perc * s.overlap.1).clamp(0.0, s.overlap.1);
                                 }
                                 if slot.scroll_gesture & 2 != 0 {
                                     // 水平 thumb
-                                    let perc =
-                                        ((pe.0 - lr.x) / (lr.w - min_thumb)).clamp(0.0, 1.0);
+                                    let perc = ((pe.0 - lr.x) / (lr.w - min_thumb)).clamp(0.0, 1.0);
                                     s.scroll_pos.0 = (perc * s.overlap.0).clamp(0.0, s.overlap.0);
                                 }
                             }
@@ -612,7 +661,8 @@ impl PointerState {
                             // 触屏拖动：手指位移 → scroll_pos 反向（下拖看上方 = scroll_pos 减），
                             // 与 apply_wheel 一致（wheel delta.y>0 → scroll_pos 减）。
                             // design y 向下（ScreenToDesign）→ 下拖 design delta.y>0 → scroll_pos 应减（反之方向反 + 越界回弹）。
-                            let scroll_delta = (prev_pos.0 - slot.last_pos.0, prev_pos.1 - slot.last_pos.1);
+                            let scroll_delta =
+                                (prev_pos.0 - slot.last_pos.0, prev_pos.1 - slot.last_pos.1);
                             s.drag_follow(scroll_delta, DRAG_FOLLOW_ASSUMED_DT);
                         }
                     }
@@ -646,15 +696,21 @@ impl PointerState {
                     slot.is_down = true;
                     slot.down_pos = (ev.x, ev.y);
                     slot.down_node = hit;
-                    slot.down_targets = ancestor_chain(scene, hit);   // [leaf,…祖先]
-                    slot.click_cancelled = false;                     // 新按下重置
-                    // drag/longpress 初始化
+                    slot.down_targets = ancestor_chain(scene, hit); // [leaf,…祖先]
+                    slot.click_cancelled = false; // 新按下重置
+                                                  // drag/longpress 初始化
                     slot.down_time = time_s;
                     slot.longpress_fired = false;
                     slot.longpress_cancelled = false;
                     // drag_target = down_targets 中最近 draggable（叶子优先，含 down_node）；disabled 跳过。
-                    slot.drag_target = slot.down_targets.iter()
-                        .find(|&&n| scene.get(n).map_or(false, |node| node.draggable && !node.disabled))
+                    slot.drag_target = slot
+                        .down_targets
+                        .iter()
+                        .find(|&&n| {
+                            scene
+                                .get(n)
+                                .map_or(false, |node| node.draggable && !node.disabled)
+                        })
                         .copied();
                     slot.drag_testing = slot.drag_target.is_some();
                     slot.dragging = false;
@@ -673,8 +729,16 @@ impl PointerState {
                             };
                             let (eff_x, eff_y) = match scene.scroll.get(id) {
                                 Some(st) => (
-                                    effective(n.style.overflow_x, st.content_size.0, st.viewport_size.0),
-                                    effective(n.style.overflow_y, st.content_size.1, st.viewport_size.1),
+                                    effective(
+                                        n.style.overflow_x,
+                                        st.content_size.0,
+                                        st.viewport_size.0,
+                                    ),
+                                    effective(
+                                        n.style.overflow_y,
+                                        st.content_size.1,
+                                        st.viewport_size.1,
+                                    ),
                                 ),
                                 None => (false, false),
                             };
@@ -689,9 +753,14 @@ impl PointerState {
                     // click-to-focus：pointer-down 命中 tabindex>=0 节点 → 聚焦（照 DOM）。
                     // 沿 down_targets（leaf 优先，同 drag_target 模式）找最近可聚焦非 disabled 节点。
                     // 不可聚焦/`-1` → 不夺焦（照 DOM：点空白不 blur）。
-                    let focus_target = slot.down_targets.iter()
-                        .find(|&&n| scene.get(n).map_or(false, |node| !node.disabled
-                            && matches!(node.tabindex, Some(t) if t >= 0)))
+                    let focus_target = slot
+                        .down_targets
+                        .iter()
+                        .find(|&&n| {
+                            scene.get(n).map_or(false, |node| {
+                                !node.disabled && matches!(node.tabindex, Some(t) if t >= 0)
+                            })
+                        })
                         .copied();
                     if let Some(t) = focus_target {
                         focus_node(scene, Some(t), &mut out);
@@ -713,7 +782,7 @@ impl PointerState {
                 }
                 PointerKind::Up | PointerKind::Canceled => {
                     if ev.kind == PointerKind::Canceled {
-                        slot.click_cancelled = true;   // Canceled 隐式 CancelClick（不发 Click + reset）
+                        slot.click_cancelled = true; // Canceled 隐式 CancelClick（不发 Click + reset）
                     }
                     // drag 中 Up/Canceled → DragEnd
                     if slot.dragging {
@@ -736,7 +805,7 @@ impl PointerState {
                         if let Some(pane) = scrolling_pane_up {
                             if !slot.grip_dragging {
                                 if let Some(s) = scene.scroll.get_mut(pane) {
-                                    s.begin_inertia(touch_id >= 0);   // is_touch
+                                    s.begin_inertia(touch_id >= 0); // is_touch
                                 }
                             }
                         }
@@ -801,7 +870,7 @@ impl PointerState {
                     slot.scrolling_pane = None;
                     slot.scroll_candidate = None;
                     slot.scroll_gesture = 0;
-                    slot.grip_dragging = false;   // grip Up 清（不惯性）
+                    slot.grip_dragging = false; // grip Up 清（不惯性）
                     Self::hover_diff_slot(slot, scene, &mut out);
                     if slot_idx > 0 {
                         slot.touch_id = -1; // 释放触摸槽（鼠标不释放）
@@ -856,7 +925,11 @@ impl PointerState {
             && (slot.last_pos.1 - slot.last_click_pos.1).abs() < t;
         let same_button = slot.last_click_button == button;
         let count = if within_time && within_pos && same_button {
-            if slot.click_count == 2 { 1 } else { slot.click_count + 1 }   // 1→2→1 循环
+            if slot.click_count == 2 {
+                1
+            } else {
+                slot.click_count + 1
+            } // 1→2→1 循环
         } else {
             1
         };
@@ -964,10 +1037,20 @@ mod tests {
     fn one_button_scene() -> Scene {
         // root + button(100x100 at 0,0)
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut btn = Node::default();
         btn.kind = NodeKind::Button;
-        btn.layout_rect = Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
+        btn.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
         let mut s = Scene::from_nodes(vec![root, btn], vec![(0, 1)]);
         compute_world_transforms(&mut s);
         s
@@ -977,13 +1060,30 @@ mod tests {
     /// 验 hover 祖先链：hover Text 区（命中 Text）→ Text + btn + root 祖先链都 hovered。
     fn button_with_text_child_scene() -> Scene {
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut btn = Node::default();
         btn.kind = NodeKind::Button;
-        btn.layout_rect = Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
+        btn.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
         let mut txt = Node::default();
-        txt.kind = NodeKind::Text { content: "btn".into() };
-        txt.layout_rect = Rect { x: 0.0, y: 0.0, w: 100.0, h: 20.0 }; // btn 上半段，touchable 默认 true 挡命中
+        txt.kind = NodeKind::Text {
+            content: "btn".into(),
+        };
+        txt.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 20.0,
+        }; // btn 上半段，touchable 默认 true 挡命中
         let mut s = Scene::from_nodes(vec![root, btn, txt], vec![(0, 1), (1, 2)]);
         compute_world_transforms(&mut s);
         s
@@ -1002,11 +1102,24 @@ mod tests {
         // Move 到 Text 区 (10,10)——命中 Text，不是 btn
         ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Move, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
         assert!(s.get(txt_id).unwrap().hovered, "Text 子（命中点）hovered");
-        assert!(s.get(btn_id).unwrap().hovered, "btn（Text 的祖先）也 hovered——祖先链");
-        assert!(s.get(root_id).unwrap().hovered, "root（btn 的祖先）也 hovered——祖先链");
+        assert!(
+            s.get(btn_id).unwrap().hovered,
+            "btn（Text 的祖先）也 hovered——祖先链"
+        );
+        assert!(
+            s.get(root_id).unwrap().hovered,
+            "root（btn 的祖先）也 hovered——祖先链"
+        );
     }
 
     #[test]
@@ -1019,14 +1132,31 @@ mod tests {
         let mut ps = PointerState::new();
         ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Down, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
         assert!(s.get(txt_id).unwrap().active, "Text 子（命中点）active");
-        assert!(s.get(btn_id).unwrap().active, "btn（Text 祖先）也 active——祖先链");
+        assert!(
+            s.get(btn_id).unwrap().active,
+            "btn（Text 祖先）也 active——祖先链"
+        );
         // up 后清所有 active
         ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Up, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
         assert!(!s.get(btn_id).unwrap().active, "up 后 btn active 清零");
         assert!(!s.get(txt_id).unwrap().active, "up 后 Text active 清零");
@@ -1038,9 +1168,30 @@ mod tests {
         let mut ps = PointerState::new();
         // Move 到按钮上（触发 RollOver）+ Down + Up（位移 < 10px）
         let evs = vec![
-            PointerEvent { kind: PointerKind::Move, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Up, x: 51.0, y: 51.0, button: 0, pad: [0, 0], touch_id: -1 },
+            PointerEvent {
+                kind: PointerKind::Move,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            },
+            PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            },
+            PointerEvent {
+                kind: PointerKind::Up,
+                x: 51.0,
+                y: 51.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            },
         ];
         let out = ps.process(&mut s, &evs);
         let types: Vec<u8> = out.iter().map(|e| e.event_type).collect();
@@ -1058,8 +1209,22 @@ mod tests {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
         let evs = vec![
-            PointerEvent { kind: PointerKind::Down, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Up, x: 80.0, y: 80.0, button: 0, pad: [0, 0], touch_id: -1 }, // 位移 ~99px
+            PointerEvent {
+                kind: PointerKind::Down,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            },
+            PointerEvent {
+                kind: PointerKind::Up,
+                x: 80.0,
+                y: 80.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }, // 位移 ~99px
         ];
         let out = ps.process(&mut s, &evs);
         let has_click = out.iter().any(|e| e.event_type == EVT_CLICK);
@@ -1073,11 +1238,28 @@ mod tests {
         s.get_mut(btn_id).unwrap().disabled = true;
         let mut ps = PointerState::new();
         let evs = vec![
-            PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Up, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
+            PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            },
+            PointerEvent {
+                kind: PointerKind::Up,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            },
         ];
         let out = ps.process(&mut s, &evs);
-        assert!(!s.get(btn_id).unwrap().active, "disabled 节点 down 不设 active");
+        assert!(
+            !s.get(btn_id).unwrap().active,
+            "disabled 节点 down 不设 active"
+        );
         let has_click = out.iter().any(|e| e.event_type == EVT_CLICK);
         assert!(!has_click, "disabled 节点不产 Click");
         let has_down = out.iter().any(|e| e.event_type == EVT_DOWN);
@@ -1096,10 +1278,23 @@ mod tests {
         let mut ps = PointerState::new();
         ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
-        assert!(!s.get(btn_id).unwrap().active, "按住 disabled btn 不应 active（active 抑制）");
-        assert!(!s.get(root_id).unwrap().active, "disabled 祖先 root 也不应 active");
+        assert!(
+            !s.get(btn_id).unwrap().active,
+            "按住 disabled btn 不应 active（active 抑制）"
+        );
+        assert!(
+            !s.get(root_id).unwrap().active,
+            "disabled 祖先 root 也不应 active"
+        );
     }
 
     #[test]
@@ -1113,10 +1308,20 @@ mod tests {
         let mut ps = PointerState::new();
         ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Down, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
         // (10,10) 命中 Text 子（Text @0,0,100,20 挡 btn 上半——hover_text_child_sets_ancestor_btn_hovered 已验）
-        assert!(!s.get(btn_id).unwrap().active, "按下 disabled btn 的 Text 子 → btn 不应 active（链遍历逐节点查 disabled）");
+        assert!(
+            !s.get(btn_id).unwrap().active,
+            "按下 disabled btn 的 Text 子 → btn 不应 active（链遍历逐节点查 disabled）"
+        );
     }
 
     #[test]
@@ -1127,16 +1332,33 @@ mod tests {
         // Move 到按钮 → RollOver
         let out1 = ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Move, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
-        assert!(out1.iter().any(|e| e.event_type == EVT_ROLL_OVER && e.node_id == btn_id.0));
+        assert!(out1
+            .iter()
+            .any(|e| e.event_type == EVT_ROLL_OVER && e.node_id == btn_id.0));
         // Move 移出按钮（150,150 在 root 非 button）→ RollOut(button) + RollOver(root)
         let out2 = ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Move, x: 150.0, y: 150.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 150.0,
+                y: 150.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
         assert!(
-            out2.iter().any(|e| e.event_type == EVT_ROLL_OUT && e.node_id == btn_id.0),
+            out2.iter()
+                .any(|e| e.event_type == EVT_ROLL_OUT && e.node_id == btn_id.0),
             "移出按钮 → RollOut(button)"
         );
     }
@@ -1149,7 +1371,14 @@ mod tests {
         // 先 Move 到按钮
         ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Move, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
         assert!(s.get(btn_id).unwrap().hovered);
         // 空事件——hover 应保持（无 RollOut）
@@ -1167,25 +1396,57 @@ mod tests {
         let mut ps = PointerState::new();
         // Move + Down 同帧——Move 的 RollOver 应在 Down 前
         let evs = vec![
-            PointerEvent { kind: PointerKind::Move, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
+            PointerEvent {
+                kind: PointerKind::Move,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            },
+            PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            },
         ];
         let out = ps.process(&mut s, &evs);
         // 找 RollOver 和 Down 的 index
         let ro_idx = out.iter().position(|e| e.event_type == EVT_ROLL_OVER);
         let down_idx = out.iter().position(|e| e.event_type == EVT_DOWN);
         assert!(ro_idx.is_some() && down_idx.is_some());
-        assert!(ro_idx.unwrap() < down_idx.unwrap(), "RollOver 在 Down 前（生成序）");
+        assert!(
+            ro_idx.unwrap() < down_idx.unwrap(),
+            "RollOver 在 Down 前（生成序）"
+        );
     }
 
     /// root + parent(100x100) + child(50x50 in parent)。验 hover 祖先链 diff。
     fn nested_scene() -> Scene {
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut parent = Node::default();
-        parent.layout_rect = Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
+        parent.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
         let mut child = Node::default();
-        child.layout_rect = Rect { x: 0.0, y: 0.0, w: 50.0, h: 50.0 };
+        child.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut s = Scene::from_nodes(vec![root, parent, child], vec![(0, 1), (1, 2)]);
         compute_world_transforms(&mut s);
         s
@@ -1200,32 +1461,105 @@ mod tests {
         let parent_id = s.get(root_id).unwrap().children[0];
         let child_id = s.get(parent_id).unwrap().children[0];
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 75.0, y: 75.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(!out.iter().any(|e| e.event_type == EVT_ROLL_OUT), "进子 → 不产任何 RollOut");
-        assert!(out.iter().any(|e| e.event_type == EVT_ROLL_OVER && e.node_id == child_id.0), "进子 → RollOver(child)");
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 75.0,
+                y: 75.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_ROLL_OUT),
+            "进子 → 不产任何 RollOut"
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_ROLL_OVER && e.node_id == child_id.0),
+            "进子 → RollOver(child)"
+        );
     }
 
     #[test]
     fn hover_between_siblings_old_chain_rollout() {
         // 兄弟 A/B：hover A → RollOver(A)+RollOver(root)；移到 B → RollOut(A)+RollOver(B)（root 共同不产）。
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut a = Node::default();
-        a.layout_rect = Rect { x: 0.0, y: 0.0, w: 50.0, h: 50.0 };
+        a.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut b = Node::default();
-        b.layout_rect = Rect { x: 100.0, y: 100.0, w: 50.0, h: 50.0 };
+        b.layout_rect = Rect {
+            x: 100.0,
+            y: 100.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut s = Scene::from_nodes(vec![root, a, b], vec![(0, 1), (0, 2)]);
         let root_id = s.roots[0];
         let a_id = s.get(root_id).unwrap().children[0];
         let b_id = s.get(root_id).unwrap().children[1];
         compute_world_transforms(&mut s);
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 25.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }]);  // 命中 A
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 125.0, y: 125.0, button: 0, pad: [0, 0], touch_id: -1 }]);  // 命中 B
-        assert!(out.iter().any(|e| e.event_type == EVT_ROLL_OUT && e.node_id == a_id.0), "移到 B → RollOut(A)");
-        assert!(out.iter().any(|e| e.event_type == EVT_ROLL_OVER && e.node_id == b_id.0), "移到 B → RollOver(B)");
-        assert!(!out.iter().any(|e| e.node_id == root_id.0), "root 共同祖先 → 不产事件");
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 25.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        ); // 命中 A
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 125.0,
+                y: 125.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        ); // 命中 B
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_ROLL_OUT && e.node_id == a_id.0),
+            "移到 B → RollOut(A)"
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_ROLL_OVER && e.node_id == b_id.0),
+            "移到 B → RollOver(B)"
+        );
+        assert!(
+            !out.iter().any(|e| e.node_id == root_id.0),
+            "root 共同祖先 → 不产事件"
+        );
     }
 
     #[test]
@@ -1233,10 +1567,33 @@ mod tests {
         // 同点 Move 两次 → 第二次无 hover 事件（链不变；Move 仍恒产，不抑制）。
         let mut s = nested_scene();
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(out.iter().all(|e| e.event_type != EVT_ROLL_OVER && e.event_type != EVT_ROLL_OUT),
-            "同点 Move → 无 hover 事件（Move 允许，hover diff 幂等）");
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            out.iter()
+                .all(|e| e.event_type != EVT_ROLL_OVER && e.event_type != EVT_ROLL_OUT),
+            "同点 Move → 无 hover 事件（Move 允许，hover diff 幂等）"
+        );
     }
 
     #[test]
@@ -1247,11 +1604,42 @@ mod tests {
         let parent_id = s.get(root_id).unwrap().children[0];
         let child_id = s.get(parent_id).unwrap().children[0];
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 300.0, y: 300.0, button: 0, pad: [0, 0], touch_id: -1 }]);  // 根外
-        assert!(out.iter().any(|e| e.event_type == EVT_ROLL_OUT && e.node_id == child_id.0), "移出 → RollOut(child)");
-        assert!(out.iter().any(|e| e.event_type == EVT_ROLL_OUT && e.node_id == parent_id.0), "移出 → RollOut(parent)");
-        assert!(!out.iter().any(|e| e.event_type == EVT_ROLL_OVER), "移出 → 无 RollOver");
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 300.0,
+                y: 300.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        ); // 根外
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_ROLL_OUT && e.node_id == child_id.0),
+            "移出 → RollOut(child)"
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_ROLL_OUT && e.node_id == parent_id.0),
+            "移出 → RollOut(parent)"
+        );
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_ROLL_OVER),
+            "移出 → 无 RollOver"
+        );
     }
 
     // ===== 多槽测试 =====
@@ -1261,12 +1649,32 @@ mod tests {
     fn mouse_uses_slot0_touch_id_neg1() {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
-        let out = ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Up, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-        ]);
+        let out = ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 50.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Up,
+                    x: 50.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+            ],
+        );
         assert!(out.iter().any(|e| e.event_type == EVT_DOWN), "鼠标 Down 产");
-        assert!(out.iter().any(|e| e.event_type == EVT_CLICK), "鼠标 Click 产");
+        assert!(
+            out.iter().any(|e| e.event_type == EVT_CLICK),
+            "鼠标 Click 产"
+        );
         assert!(out.iter().all(|e| e.touch_id == -1), "鼠标事件 touch_id=-1");
     }
 
@@ -1274,11 +1682,26 @@ mod tests {
     #[test]
     fn two_touches_independent_down_up() {
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut a = Node::default();
-        a.layout_rect = Rect { x: 0.0, y: 0.0, w: 50.0, h: 50.0 };
+        a.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut b = Node::default();
-        b.layout_rect = Rect { x: 100.0, y: 0.0, w: 50.0, h: 50.0 };
+        b.layout_rect = Rect {
+            x: 100.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut s = Scene::from_nodes(vec![root, a, b], vec![(0, 1), (0, 2)]);
         let root_id = s.roots[0];
         let a_id = s.get(root_id).unwrap().children[0];
@@ -1286,26 +1709,63 @@ mod tests {
         compute_world_transforms(&mut s);
         let mut ps = PointerState::new();
         // touch_id=1 Down 在 A，touch_id=2 Down 在 B（同帧）
-        let out = ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Down, x: 25.0, y: 25.0, button: 0, pad: [0, 0], touch_id: 1 },
-            PointerEvent { kind: PointerKind::Down, x: 125.0, y: 25.0, button: 0, pad: [0, 0], touch_id: 2 },
-        ]);
-        assert!(out.iter().any(|e| e.event_type == EVT_DOWN && e.node_id == a_id.0 && e.touch_id == 1), "touch1 Down@A");
-        assert!(out.iter().any(|e| e.event_type == EVT_DOWN && e.node_id == b_id.0 && e.touch_id == 2), "touch2 Down@B");
+        let out = ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 25.0,
+                    y: 25.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: 1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 125.0,
+                    y: 25.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: 2,
+                },
+            ],
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_DOWN && e.node_id == a_id.0 && e.touch_id == 1),
+            "touch1 Down@A"
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_DOWN && e.node_id == b_id.0 && e.touch_id == 2),
+            "touch2 Down@B"
+        );
     }
 
     /// 5 触摸 Down（slot1-4 满），第 5 指丢弃。
     #[test]
     fn touch_alloc_fourth_dropped() {
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut s = Scene::from_nodes(vec![root], vec![]);
         compute_world_transforms(&mut s);
         let mut ps = PointerState::new();
         // touch_id 1..5 全 Down（4 触摸槽 slot1-4，第 5 指应丢）
         let mut evs = Vec::new();
         for tid in 1..=5i32 {
-            evs.push(PointerEvent { kind: PointerKind::Down, x: 0.0, y: 0.0, button: 0, pad: [0, 0], touch_id: tid });
+            evs.push(PointerEvent {
+                kind: PointerKind::Down,
+                x: 0.0,
+                y: 0.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: tid,
+            });
         }
         let out = ps.process(&mut s, &evs);
         let down_count = out.iter().filter(|e| e.event_type == EVT_DOWN).count();
@@ -1317,9 +1777,32 @@ mod tests {
     fn touch_move_no_monitor_no_event() {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 }]);
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 51.0, y: 51.0, button: 0, pad: [0, 0], touch_id: 1 }]);
-        assert!(!out.iter().any(|e| e.event_type == EVT_MOVE), "无 monitor 触摸 Move 不产 Move 事件");
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 51.0,
+                y: 51.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_MOVE),
+            "无 monitor 触摸 Move 不产 Move 事件"
+        );
         assert!(out.iter().all(|e| e.event_type != EVT_MOVE), "无 Move 事件");
     }
 
@@ -1328,30 +1811,85 @@ mod tests {
     fn mouse_move_no_capture_no_event() {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 51.0, y: 51.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(!out.iter().any(|e| e.event_type == EVT_MOVE), "鼠标无 capture Move 不产");
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 51.0,
+                y: 51.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_MOVE),
+            "鼠标无 capture Move 不产"
+        );
     }
 
     /// hover 全局合并：两指命中不同元素 → 两元素都 hovered。
     #[test]
     fn hover_global_merge_two_fingers() {
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut a = Node::default();
-        a.layout_rect = Rect { x: 0.0, y: 0.0, w: 50.0, h: 50.0 };
+        a.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut b = Node::default();
-        b.layout_rect = Rect { x: 100.0, y: 0.0, w: 50.0, h: 50.0 };
+        b.layout_rect = Rect {
+            x: 100.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut s = Scene::from_nodes(vec![root, a, b], vec![(0, 1), (0, 2)]);
         let root_id = s.roots[0];
         let a_id = s.get(root_id).unwrap().children[0];
         let b_id = s.get(root_id).unwrap().children[1];
         compute_world_transforms(&mut s);
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Move, x: 25.0, y: 25.0, button: 0, pad: [0, 0], touch_id: 1 },  // 命中 A
-            PointerEvent { kind: PointerKind::Move, x: 125.0, y: 25.0, button: 0, pad: [0, 0], touch_id: 2 }, // 命中 B
-        ]);
+        ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Move,
+                    x: 25.0,
+                    y: 25.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: 1,
+                }, // 命中 A
+                PointerEvent {
+                    kind: PointerKind::Move,
+                    x: 125.0,
+                    y: 25.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: 2,
+                }, // 命中 B
+            ],
+        );
         assert!(s.get(a_id).unwrap().hovered, "A hovered（touch1 命中）");
         assert!(s.get(b_id).unwrap().hovered, "B hovered（touch2 命中）");
     }
@@ -1360,24 +1898,71 @@ mod tests {
     #[test]
     fn active_global_merge_two_fingers() {
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut a = Node::default();
-        a.kind = NodeKind::Button; a.layout_rect = Rect { x: 0.0, y: 0.0, w: 50.0, h: 50.0 };
+        a.kind = NodeKind::Button;
+        a.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut b = Node::default();
-        b.kind = NodeKind::Button; b.layout_rect = Rect { x: 100.0, y: 0.0, w: 50.0, h: 50.0 };
+        b.kind = NodeKind::Button;
+        b.layout_rect = Rect {
+            x: 100.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut s = Scene::from_nodes(vec![root, a, b], vec![(0, 1), (0, 2)]);
         let root_id = s.roots[0];
         let a_id = s.get(root_id).unwrap().children[0];
         let b_id = s.get(root_id).unwrap().children[1];
         compute_world_transforms(&mut s);
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Down, x: 25.0, y: 25.0, button: 0, pad: [0, 0], touch_id: 1 },
-            PointerEvent { kind: PointerKind::Down, x: 125.0, y: 25.0, button: 0, pad: [0, 0], touch_id: 2 },
-        ]);
-        assert!(s.get(a_id).unwrap().active && s.get(b_id).unwrap().active, "两指都按 → 两 btn active");
+        ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 25.0,
+                    y: 25.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: 1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 125.0,
+                    y: 25.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: 2,
+                },
+            ],
+        );
+        assert!(
+            s.get(a_id).unwrap().active && s.get(b_id).unwrap().active,
+            "两指都按 → 两 btn active"
+        );
         // 松 touch1
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 25.0, y: 25.0, button: 0, pad: [0, 0], touch_id: 1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 25.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
         assert!(!s.get(a_id).unwrap().active, "松 touch1 → A active 清");
         assert!(s.get(b_id).unwrap().active, "touch2 仍按 → B 仍 active");
     }
@@ -1386,23 +1971,63 @@ mod tests {
     #[test]
     fn rollover_per_touch_independent() {
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut a = Node::default();
-        a.layout_rect = Rect { x: 0.0, y: 0.0, w: 50.0, h: 50.0 };
+        a.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut b = Node::default();
-        b.layout_rect = Rect { x: 100.0, y: 0.0, w: 50.0, h: 50.0 };
+        b.layout_rect = Rect {
+            x: 100.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut s = Scene::from_nodes(vec![root, a, b], vec![(0, 1), (0, 2)]);
         let root_id = s.roots[0];
         let a_id = s.get(root_id).unwrap().children[0];
         let b_id = s.get(root_id).unwrap().children[1];
         compute_world_transforms(&mut s);
         let mut ps = PointerState::new();
-        let out = ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Move, x: 25.0, y: 25.0, button: 0, pad: [0, 0], touch_id: 1 },
-            PointerEvent { kind: PointerKind::Move, x: 125.0, y: 25.0, button: 0, pad: [0, 0], touch_id: 2 },
-        ]);
-        assert!(out.iter().any(|e| e.event_type == EVT_ROLL_OVER && e.node_id == a_id.0 && e.touch_id == 1), "touch1 RollOver@A");
-        assert!(out.iter().any(|e| e.event_type == EVT_ROLL_OVER && e.node_id == b_id.0 && e.touch_id == 2), "touch2 RollOver@B");
+        let out = ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Move,
+                    x: 25.0,
+                    y: 25.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: 1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Move,
+                    x: 125.0,
+                    y: 25.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: 2,
+                },
+            ],
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_ROLL_OVER && e.node_id == a_id.0 && e.touch_id == 1),
+            "touch1 RollOver@A"
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_ROLL_OVER && e.node_id == b_id.0 && e.touch_id == 2),
+            "touch2 RollOver@B"
+        );
     }
 
     /// is_pointer_on_ui 任一指命中。
@@ -1411,11 +2036,31 @@ mod tests {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
         // 鼠标在 UI 外 (150,150 命中 root 非 btn)，触摸在 btn 内
-        ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Move, x: 150.0, y: 150.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Move, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 },
-        ]);
-        assert!(ps.is_pointer_on_ui(&s), "触摸命中 btn → is_pointer_on_ui=true（任一指）");
+        ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Move,
+                    x: 150.0,
+                    y: 150.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Move,
+                    x: 50.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: 1,
+                },
+            ],
+        );
+        assert!(
+            ps.is_pointer_on_ui(&s),
+            "触摸命中 btn → is_pointer_on_ui=true（任一指）"
+        );
     }
 
     // ===== touch_monitors capture 测 =====
@@ -1427,13 +2072,36 @@ mod tests {
         let btn_id = s.get(s.roots[0]).unwrap().children[0];
         let mut ps = PointerState::new();
         // touch1 Down 在 btn
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
         // capture btn（模拟 C# CaptureTouch 后调 add_touch_monitor）
         ps.add_touch_monitor(1, btn_id);
         // Move 移出 btn 到 root 区 (150,150)——正常无 monitor 不产 Move，但有 monitor → Move@btn
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 150.0, y: 150.0, button: 0, pad: [0, 0], touch_id: 1 }]);
-        assert!(out.iter().any(|e| e.event_type == EVT_MOVE && e.node_id == btn_id.0 && e.touch_id == 1),
-            "capture 后 Move（即使移出 btn）产 Move@btn");
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 150.0,
+                y: 150.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_MOVE && e.node_id == btn_id.0 && e.touch_id == 1),
+            "capture 后 Move（即使移出 btn）产 Move@btn"
+        );
     }
 
     /// Up 后 monitor 清空，后续 Move 不产。
@@ -1442,14 +2110,57 @@ mod tests {
         let mut s = one_button_scene();
         let btn_id = s.get(s.roots[0]).unwrap().children[0];
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
         ps.add_touch_monitor(1, btn_id);
         // Up（清 monitor）
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
         // 注意：Up 释放了 slot1（touch_id 重置 -1）。重新 Down 再 Move 验无 monitor
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 2 }]);
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 51.0, y: 51.0, button: 0, pad: [0, 0], touch_id: 2 }]);
-        assert!(!out.iter().any(|e| e.event_type == EVT_MOVE), "Up 清 monitor 后 Move 不产");
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 2,
+            }],
+        );
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 51.0,
+                y: 51.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 2,
+            }],
+        );
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_MOVE),
+            "Up 清 monitor 后 Move 不产"
+        );
     }
 
     /// Up 时 monitor==hit 不重复产 Up。
@@ -1458,10 +2169,33 @@ mod tests {
         let mut s = one_button_scene();
         let btn_id = s.get(s.roots[0]).unwrap().children[0];
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 }]);
-        ps.add_touch_monitor(1, btn_id);   // monitor == btn
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 }]);
-        let up_btn = out.iter().filter(|e| e.event_type == EVT_UP && e.node_id == btn_id.0).count();
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
+        ps.add_touch_monitor(1, btn_id); // monitor == btn
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
+        let up_btn = out
+            .iter()
+            .filter(|e| e.event_type == EVT_UP && e.node_id == btn_id.0)
+            .count();
         assert_eq!(up_btn, 1, "monitor==hit → Up@btn 只产一次（去重）");
     }
 
@@ -1471,11 +2205,34 @@ mod tests {
         let mut s = one_button_scene();
         let btn_id = s.get(s.roots[0]).unwrap().children[0];
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
         ps.add_touch_monitor(1, btn_id);
-        ps.remove_touch_monitor(btn_id);   // 主动释放
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 150.0, y: 150.0, button: 0, pad: [0, 0], touch_id: 1 }]);
-        assert!(!out.iter().any(|e| e.event_type == EVT_MOVE), "remove 后 Move 不产给该 monitor");
+        ps.remove_touch_monitor(btn_id); // 主动释放
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 150.0,
+                y: 150.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_MOVE),
+            "remove 后 Move 不产给该 monitor"
+        );
     }
 
     // ===== click_test + per-axis 阈值 + down_targets =====
@@ -1484,21 +2241,47 @@ mod tests {
     /// Up → Click@btn（按下叶），Up 事件@root（当前 hit）。down_targets[0] 优先。
     #[test]
     fn click_target_is_down_leaf_not_current_hit() {
-        let mut s = one_button_scene();   // root(0,0,200,200) + btn(0,0,100,100)
+        let mut s = one_button_scene(); // root(0,0,200,200) + btn(0,0,100,100)
         let root_id = s.roots[0];
         let btn_id = s.get(root_id).unwrap().children[0];
         let mut ps = PointerState::new();
         // Down@(95,50)→btn；Up@(105,50)→root（105>100）。dx=10（mouse 阈值，|10|>10 false→不超）
-        let out = ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Down, x: 95.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Up, x: 105.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-        ]);
-        assert!(out.iter().any(|e| e.event_type == EVT_CLICK && e.node_id == btn_id.0),
-            "Click@btn（down_leaf），即使 Up 时命中已漂移到 root");
-        assert!(out.iter().any(|e| e.event_type == EVT_UP && e.node_id == root_id.0),
-            "Up@root（当前 hit）");
-        assert!(!out.iter().any(|e| e.event_type == EVT_CLICK && e.node_id == root_id.0),
-            "不产 Click@root");
+        let out = ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 95.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Up,
+                    x: 105.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+            ],
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_CLICK && e.node_id == btn_id.0),
+            "Click@btn（down_leaf），即使 Up 时命中已漂移到 root"
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_UP && e.node_id == root_id.0),
+            "Up@root（当前 hit）"
+        );
+        assert!(
+            !out.iter()
+                .any(|e| e.event_type == EVT_CLICK && e.node_id == root_id.0),
+            "不产 Click@root"
+        );
     }
 
     /// per-axis 阈值：mouse 对角 (8,8)→ dx=8,dy=8，均 ≤10 → 仍 Click（按轴判，不合计距离）。
@@ -1506,12 +2289,31 @@ mod tests {
     fn per_axis_threshold_mouse_diagonal_clicks() {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
-        let out = ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Up, x: 58.0, y: 58.0, button: 0, pad: [0, 0], touch_id: -1 },
-        ]);
-        assert!(out.iter().any(|e| e.event_type == EVT_CLICK),
-            "per-axis (8,8) 各轴 ≤10 → Click");
+        let out = ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 50.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Up,
+                    x: 58.0,
+                    y: 58.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+            ],
+        );
+        assert!(
+            out.iter().any(|e| e.event_type == EVT_CLICK),
+            "per-axis (8,8) 各轴 ≤10 → Click"
+        );
     }
 
     /// mouse 30px 漂移 → 无 Click（30>10）；touch 30px 漂移 → Click（30<50）。
@@ -1520,19 +2322,59 @@ mod tests {
         // mouse
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
-        let out_m = ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Down, x: 10.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Up, x: 40.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-        ]);
-        assert!(!out_m.iter().any(|e| e.event_type == EVT_CLICK), "mouse 30px >10 → 无 Click");
+        let out_m = ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 10.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Up,
+                    x: 40.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+            ],
+        );
+        assert!(
+            !out_m.iter().any(|e| e.event_type == EVT_CLICK),
+            "mouse 30px >10 → 无 Click"
+        );
         // touch
         let mut s2 = one_button_scene();
         let mut ps2 = PointerState::new();
-        let out_t = ps2.process(&mut s2, &[
-            PointerEvent { kind: PointerKind::Down, x: 10.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 },
-            PointerEvent { kind: PointerKind::Up, x: 40.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 },
-        ]);
-        assert!(out_t.iter().any(|e| e.event_type == EVT_CLICK), "touch 30px <50 → Click");
+        let out_t = ps2.process(
+            &mut s2,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 10.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: 1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Up,
+                    x: 40.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: 1,
+                },
+            ],
+        );
+        assert!(
+            out_t.iter().any(|e| e.event_type == EVT_CLICK),
+            "touch 30px <50 → Click"
+        );
     }
 
     /// down_leaf 销毁 → 沿当前 hit 祖先兜底。Down@child（scene1），scene2 移除 child，Up@root 区 → Click@root。
@@ -1540,24 +2382,62 @@ mod tests {
     fn down_leaf_destroyed_fallback_to_ancestor() {
         // scene1: root(0,0,200,200) + child(0,0,50,50)
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut child = Node::default();
-        child.layout_rect = Rect { x: 0.0, y: 0.0, w: 50.0, h: 50.0 };
+        child.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut s1 = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
         compute_world_transforms(&mut s1);
         let mut ps = PointerState::new();
         // Down@(25,25)→child；down_targets=[child,root]
-        ps.process(&mut s1, &[PointerEvent { kind: PointerKind::Down, x: 25.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s1,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 25.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         // scene2: 仅 root（child 移除）——child NodeId 在 s2 不存在（悬空）
         let mut root2 = Node::default();
-        root2.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root2.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut s2 = Scene::from_nodes(vec![root2], vec![]);
         compute_world_transforms(&mut s2);
         let root2_id = s2.roots[0];
-        let out = ps.process(&mut s2, &[PointerEvent { kind: PointerKind::Up, x: 25.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        let out = ps.process(
+            &mut s2,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 25.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         // click_test：down_targets[0]=child 悬空→走祖先；current_hit=root2 in down_targets → Click@root2
-        assert!(out.iter().any(|e| e.event_type == EVT_CLICK && e.node_id == root2_id.0),
-            "down_leaf 销毁 → Click@root（祖先兜底）");
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_CLICK && e.node_id == root2_id.0),
+            "down_leaf 销毁 → Click@root（祖先兜底）"
+        );
     }
 
     // ===== 双击 + Move 取消 =====
@@ -1568,14 +2448,62 @@ mod tests {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
         ps.time_s = 0.0;
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        let c1 = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        let count1 = c1.iter().find(|e| e.event_type == EVT_CLICK).map(|e| e.click_count).unwrap();
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        let c1 = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        let count1 = c1
+            .iter()
+            .find(|e| e.event_type == EVT_CLICK)
+            .map(|e| e.click_count)
+            .unwrap();
         assert_eq!(count1, 1, "首次 Click count=1");
         ps.time_s = 0.2;
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        let c2 = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        let count2 = c2.iter().find(|e| e.event_type == EVT_CLICK).map(|e| e.click_count).unwrap();
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        let c2 = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        let count2 = c2
+            .iter()
+            .find(|e| e.event_type == EVT_CLICK)
+            .map(|e| e.click_count)
+            .unwrap();
         assert_eq!(count2, 2, "350ms 内同位同键 → count=2");
     }
 
@@ -1585,12 +2513,56 @@ mod tests {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
         ps.time_s = 0.0;
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        ps.time_s = 0.4;   // >0.35
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        let c = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        let count = c.iter().find(|e| e.event_type == EVT_CLICK).map(|e| e.click_count).unwrap();
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        ps.time_s = 0.4; // >0.35
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        let c = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        let count = c
+            .iter()
+            .find(|e| e.event_type == EVT_CLICK)
+            .map(|e| e.click_count)
+            .unwrap();
         assert_eq!(count, 1, "超 350ms → count=1");
     }
 
@@ -1602,9 +2574,34 @@ mod tests {
         let mut counts = Vec::new();
         for i in 0..3 {
             ps.time_s = i as f32 * 0.2;
-            ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-            let c = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-            counts.push(c.iter().find(|e| e.event_type == EVT_CLICK).map(|e| e.click_count).unwrap());
+            ps.process(
+                &mut s,
+                &[PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 50.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                }],
+            );
+            let c = ps.process(
+                &mut s,
+                &[PointerEvent {
+                    kind: PointerKind::Up,
+                    x: 50.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                }],
+            );
+            counts.push(
+                c.iter()
+                    .find(|e| e.event_type == EVT_CLICK)
+                    .map(|e| e.click_count)
+                    .unwrap(),
+            );
         }
         assert_eq!(counts, vec![1, 2, 1], "1→2→1 循环");
     }
@@ -1614,10 +2611,43 @@ mod tests {
     fn move_exceeds_50_cancels_click() {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 10.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 70.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]); // dx=60>50
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 70.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(!out.iter().any(|e| e.event_type == EVT_CLICK), "Move>50 → 取消 click");
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 10.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 70.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        ); // dx=60>50
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 70.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_CLICK),
+            "Move>50 → 取消 click"
+        );
         assert!(out.iter().any(|e| e.event_type == EVT_UP), "Up 仍发");
     }
 
@@ -1628,10 +2658,36 @@ mod tests {
     fn canceled_emits_up_skips_click() {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Canceled, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(out.iter().any(|e| e.event_type == EVT_UP), "Canceled → Up 仍发");
-        assert!(!out.iter().any(|e| e.event_type == EVT_CLICK), "Canceled → 不发 Click");
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Canceled,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            out.iter().any(|e| e.event_type == EVT_UP),
+            "Canceled → Up 仍发"
+        );
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_CLICK),
+            "Canceled → 不发 Click"
+        );
     }
 
     /// cancel_click API：Down → cancel_click → Up → 无 Click。
@@ -1639,10 +2695,33 @@ mod tests {
     fn cancel_click_api_skips_click() {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        ps.cancel_click(-1);   // Down 后、Up 前取消
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(!out.iter().any(|e| e.event_type == EVT_CLICK), "cancel_click → 无 Click");
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        ps.cancel_click(-1); // Down 后、Up 前取消
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_CLICK),
+            "cancel_click → 无 Click"
+        );
         assert!(out.iter().any(|e| e.event_type == EVT_UP), "Up 仍发");
     }
 
@@ -1653,16 +2732,69 @@ mod tests {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
         ps.time_s = 1.0;
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);   // count1
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        ); // count1
         ps.time_s = 1.1;
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);   // count2
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        ); // count2
         assert_eq!(ps.slots[0].click_count, 2);
         ps.time_s = 1.2;
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Canceled, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Canceled,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         assert_eq!(ps.slots[0].click_count, 1, "Canceled reset click_count=1");
-        assert_eq!(ps.slots[0].last_click_time, 0.0, "Canceled reset last_click_time=0");
+        assert_eq!(
+            ps.slots[0].last_click_time, 0.0,
+            "Canceled reset last_click_time=0"
+        );
     }
 
     // ===== Stationary hover 跟随 =====
@@ -1671,24 +2803,49 @@ mod tests {
     /// Move@btn → hover btn；scene2 btn 移到 (150,150)，空事件 → re-hit-test (50,50)=root → RollOut(btn)。
     #[test]
     fn stationary_cursor_hover_follows_moved_element() {
-        let mut s1 = one_button_scene();   // root(0,0,200,200)+btn(0,0,100,100)
+        let mut s1 = one_button_scene(); // root(0,0,200,200)+btn(0,0,100,100)
         let s1_btn_id = s1.get(s1.roots[0]).unwrap().children[0];
         let mut ps = PointerState::new();
-        ps.process(&mut s1, &[PointerEvent { kind: PointerKind::Move, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s1,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         assert!(s1.get(s1_btn_id).unwrap().hovered, "Move@btn → btn hovered");
         // scene2：btn 移到 (150,150)——(50,50) 现仅 root
         let mut root2 = Node::default();
-        root2.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root2.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut btn2 = Node::default();
         btn2.kind = NodeKind::Button;
-        btn2.layout_rect = Rect { x: 150.0, y: 150.0, w: 100.0, h: 100.0 };
+        btn2.layout_rect = Rect {
+            x: 150.0,
+            y: 150.0,
+            w: 100.0,
+            h: 100.0,
+        };
         let mut s2 = Scene::from_nodes(vec![root2, btn2], vec![(0, 1)]);
         compute_world_transforms(&mut s2);
-        let out = ps.process(&mut s2, &[]);   // 空事件 → stationary follow
-        assert!(out.iter().any(|e| e.event_type == EVT_ROLL_OUT && e.node_id == s1_btn_id.0),
-            "btn 移走（静止光标）→ RollOut(btn)");
-        assert!(!out.iter().any(|e| e.event_type == EVT_ROLL_OVER),
-            "root 已 hovered → 无 RollOver");
+        let out = ps.process(&mut s2, &[]); // 空事件 → stationary follow
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_ROLL_OUT && e.node_id == s1_btn_id.0),
+            "btn 移走（静止光标）→ RollOut(btn)"
+        );
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_ROLL_OVER),
+            "root 已 hovered → 无 RollOver"
+        );
     }
 
     // ===== core drag 检测 =====
@@ -1696,11 +2853,21 @@ mod tests {
     /// root(0,0,200,200) + draggable btn(0,0,100,100)。
     fn one_draggable_button_scene() -> Scene {
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut btn = Node::default();
         btn.kind = NodeKind::Button;
         btn.draggable = true;
-        btn.layout_rect = Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
+        btn.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
         let mut s = Scene::from_nodes(vec![root, btn], vec![(0, 1)]);
         compute_world_transforms(&mut s);
         s
@@ -1712,16 +2879,53 @@ mod tests {
         let mut s = one_draggable_button_scene();
         let btn_id = s.get(s.roots[0]).unwrap().children[0];
         let mut ps = PointerState::new();
-        let out = ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Move, x: 55.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-        ]);
-        assert!(out.iter().any(|e| e.event_type == EVT_DRAG_START && e.node_id == btn_id.0),
-            "draggable btn Move>阈值 → DragStart@btn");
+        let out = ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 50.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Move,
+                    x: 55.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+            ],
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_DRAG_START && e.node_id == btn_id.0),
+            "draggable btn Move>阈值 → DragStart@btn"
+        );
         // 同帧 Up 应无 Click（drag-start 已置 click_cancelled）
-        let out2 = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 55.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(!out2.iter().any(|e| e.event_type == EVT_CLICK), "drag-start 取消 click");
-        assert!(out2.iter().any(|e| e.event_type == EVT_DRAG_END && e.node_id == btn_id.0), "Up → DragEnd@btn");
+        let out2 = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 55.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            !out2.iter().any(|e| e.event_type == EVT_CLICK),
+            "drag-start 取消 click"
+        );
+        assert!(
+            out2.iter()
+                .any(|e| e.event_type == EVT_DRAG_END && e.node_id == btn_id.0),
+            "Up → DragEnd@btn"
+        );
     }
 
     #[test]
@@ -1729,23 +2933,77 @@ mod tests {
         let mut s = one_draggable_button_scene();
         let btn_id = s.get(s.roots[0]).unwrap().children[0];
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 55.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]); // DragStart
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 60.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(out.iter().any(|e| e.event_type == EVT_DRAG_MOVE && e.node_id == btn_id.0), "drag 中 Move → DragMove@btn");
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 55.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        ); // DragStart
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 60.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_DRAG_MOVE && e.node_id == btn_id.0),
+            "drag 中 Move → DragMove@btn"
+        );
     }
 
     #[test]
     fn non_draggable_no_drag_events() {
         // 普通 btn（draggable=false）：Down+Move → 无 drag 事件（仅既有 MOVE/click 取消走原逻辑）
-        let mut s = one_button_scene();   // 既有 helper：btn 非 draggable
+        let mut s = one_button_scene(); // 既有 helper：btn 非 draggable
         let mut ps = PointerState::new();
-        let out = ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Move, x: 55.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-        ]);
-        assert!(!out.iter().any(|e| e.event_type == EVT_DRAG_START || e.event_type == EVT_DRAG_MOVE),
-            "非 draggable → 无 drag 事件");
+        let out = ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 50.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Move,
+                    x: 55.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+            ],
+        );
+        assert!(
+            !out.iter()
+                .any(|e| e.event_type == EVT_DRAG_START || e.event_type == EVT_DRAG_MOVE),
+            "非 draggable → 无 drag 事件"
+        );
     }
 
     #[test]
@@ -1753,54 +3011,186 @@ mod tests {
         // mouse: Move dx=2（=阈值，per-axis |2|>2 false）→ 不发 DragStart；dx=3 → 发。
         let mut s = one_draggable_button_scene();
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        let out1 = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 52.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(!out1.iter().any(|e| e.event_type == EVT_DRAG_START), "mouse dx=2（=阈值，per-axis 不超）→ 不发 DragStart");
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        let out1 = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 52.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            !out1.iter().any(|e| e.event_type == EVT_DRAG_START),
+            "mouse dx=2（=阈值，per-axis 不超）→ 不发 DragStart"
+        );
         // 重置场景验 dx=3
         let mut s2 = one_draggable_button_scene();
         let mut ps2 = PointerState::new();
-        ps2.process(&mut s2, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        let out2 = ps2.process(&mut s2, &[PointerEvent { kind: PointerKind::Move, x: 53.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(out2.iter().any(|e| e.event_type == EVT_DRAG_START), "mouse dx=3>2 → 发 DragStart");
+        ps2.process(
+            &mut s2,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        let out2 = ps2.process(
+            &mut s2,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 53.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            out2.iter().any(|e| e.event_type == EVT_DRAG_START),
+            "mouse dx=3>2 → 发 DragStart"
+        );
         // touch: dx=10（=阈值不超）不发；dx=11 发
         let mut s3 = one_draggable_button_scene();
         let mut ps3 = PointerState::new();
-        ps3.process(&mut s3, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 }]);
-        let out3 = ps3.process(&mut s3, &[PointerEvent { kind: PointerKind::Move, x: 60.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 }]);
-        assert!(!out3.iter().any(|e| e.event_type == EVT_DRAG_START), "touch dx=10（=阈值不超）→ 不发");
+        ps3.process(
+            &mut s3,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
+        let out3 = ps3.process(
+            &mut s3,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 60.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
+        assert!(
+            !out3.iter().any(|e| e.event_type == EVT_DRAG_START),
+            "touch dx=10（=阈值不超）→ 不发"
+        );
         let mut s4 = one_draggable_button_scene();
         let mut ps4 = PointerState::new();
-        ps4.process(&mut s4, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 }]);
-        let out4 = ps4.process(&mut s4, &[PointerEvent { kind: PointerKind::Move, x: 61.0, y: 50.0, button: 0, pad: [0, 0], touch_id: 1 }]);
-        assert!(out4.iter().any(|e| e.event_type == EVT_DRAG_START), "touch dx=11>10 → 发");
+        ps4.process(
+            &mut s4,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
+        let out4 = ps4.process(
+            &mut s4,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 61.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            }],
+        );
+        assert!(
+            out4.iter().any(|e| e.event_type == EVT_DRAG_START),
+            "touch dx=11>10 → 发"
+        );
     }
 
     #[test]
     fn drag_target_is_nearest_draggable_ancestor() {
         // root draggable，btn 非 draggable：Down@btn → drag_target=root（祖先），DragStart@root。
-        let mut s = one_button_scene();   // root+btn，均非 draggable
+        let mut s = one_button_scene(); // root+btn，均非 draggable
         let root_id = s.roots[0];
-        s.get_mut(root_id).unwrap().draggable = true;       // 仅 root draggable
+        s.get_mut(root_id).unwrap().draggable = true; // 仅 root draggable
         let mut ps = PointerState::new();
-        let out = ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },  // 命中 btn
-            PointerEvent { kind: PointerKind::Move, x: 55.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-        ]);
-        assert!(out.iter().any(|e| e.event_type == EVT_DRAG_START && e.node_id == root_id.0),
-            "down 叶 btn 非 draggable 但祖先 root draggable → DragStart@root");
+        let out = ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 50.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                }, // 命中 btn
+                PointerEvent {
+                    kind: PointerKind::Move,
+                    x: 55.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+            ],
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_DRAG_START && e.node_id == root_id.0),
+            "down 叶 btn 非 draggable 但祖先 root draggable → DragStart@root"
+        );
     }
 
     #[test]
     fn drag_disabled_node_no_drag() {
         let mut s = one_draggable_button_scene();
         let btn_id = s.get(s.roots[0]).unwrap().children[0];
-        s.get_mut(btn_id).unwrap().disabled = true;   // draggable 但 disabled
+        s.get_mut(btn_id).unwrap().disabled = true; // draggable 但 disabled
         let mut ps = PointerState::new();
-        let out = ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Move, x: 55.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-        ]);
-        assert!(!out.iter().any(|e| e.event_type == EVT_DRAG_START), "disabled draggable → 不发 drag");
+        let out = ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 50.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Move,
+                    x: 55.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+            ],
+        );
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_DRAG_START),
+            "disabled draggable → 不发 drag"
+        );
     }
 
     #[test]
@@ -1808,13 +3198,43 @@ mod tests {
         // draggable btn：Down+Move dx=1（<阈值2）+Up → 不发 drag，正常 Click（drag 不破坏 click 容忍）
         let mut s = one_draggable_button_scene();
         let mut ps = PointerState::new();
-        let out = ps.process(&mut s, &[
-            PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-            PointerEvent { kind: PointerKind::Move, x: 51.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },  // dx=1<2
-            PointerEvent { kind: PointerKind::Up, x: 51.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 },
-        ]);
-        assert!(!out.iter().any(|e| e.event_type == EVT_DRAG_START), "dx=1<阈值 → 不发 drag");
-        assert!(out.iter().any(|e| e.event_type == EVT_CLICK), "阈值内 → 正常 Click");
+        let out = ps.process(
+            &mut s,
+            &[
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 50.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+                PointerEvent {
+                    kind: PointerKind::Move,
+                    x: 51.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                }, // dx=1<2
+                PointerEvent {
+                    kind: PointerKind::Up,
+                    x: 51.0,
+                    y: 50.0,
+                    button: 0,
+                    pad: [0, 0],
+                    touch_id: -1,
+                },
+            ],
+        );
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_DRAG_START),
+            "dx=1<阈值 → 不发 drag"
+        );
+        assert!(
+            out.iter().any(|e| e.event_type == EVT_CLICK),
+            "阈值内 → 正常 Click"
+        );
     }
 
     #[test]
@@ -1822,10 +3242,44 @@ mod tests {
         let mut s = one_draggable_button_scene();
         let btn_id = s.get(s.roots[0]).unwrap().children[0];
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 55.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]); // DragStart
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Canceled, x: 55.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(out.iter().any(|e| e.event_type == EVT_DRAG_END && e.node_id == btn_id.0), "Canceled → DragEnd@btn");
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 55.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        ); // DragStart
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Canceled,
+                x: 55.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_DRAG_END && e.node_id == btn_id.0),
+            "Canceled → DragEnd@btn"
+        );
     }
 
     // ===== core longpress 检测 =====
@@ -1837,11 +3291,24 @@ mod tests {
         let btn_id = s.get(s.roots[0]).unwrap().children[0];
         let mut ps = PointerState::new();
         ps.time_s = 0.0;
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         ps.time_s = 1.5;
-        let out = ps.process(&mut s, &[]);   // 空事件 tick → longpress 检查
-        assert!(out.iter().any(|e| e.event_type == EVT_LONG_PRESS && e.node_id == btn_id.0),
-            "按住 1.5s 无 move → LongPress@btn");
+        let out = ps.process(&mut s, &[]); // 空事件 tick → longpress 检查
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_LONG_PRESS && e.node_id == btn_id.0),
+            "按住 1.5s 无 move → LongPress@btn"
+        );
     }
 
     #[test]
@@ -1849,10 +3316,23 @@ mod tests {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
         ps.time_s = 0.0;
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        ps.time_s = 1.0;   // <1.5
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        ps.time_s = 1.0; // <1.5
         let out = ps.process(&mut s, &[]);
-        assert!(!out.iter().any(|e| e.event_type == EVT_LONG_PRESS), "<1.5s → 不发 LongPress");
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_LONG_PRESS),
+            "<1.5s → 不发 LongPress"
+        );
     }
 
     #[test]
@@ -1860,12 +3340,35 @@ mod tests {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
         ps.time_s = 0.0;
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         // Move 60px → longpress_cancelled（与 click_cancelled 同处）
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 110.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 110.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         ps.time_s = 1.5;
         let out = ps.process(&mut s, &[]);
-        assert!(!out.iter().any(|e| e.event_type == EVT_LONG_PRESS), "Move>50 → longpress 取消");
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_LONG_PRESS),
+            "Move>50 → longpress 取消"
+        );
     }
 
     #[test]
@@ -1873,13 +3376,29 @@ mod tests {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
         ps.time_s = 0.0;
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         ps.time_s = 1.5;
         let out1 = ps.process(&mut s, &[]);
-        assert!(out1.iter().any(|e| e.event_type == EVT_LONG_PRESS), "1.5s → 发一次");
-        ps.time_s = 2.0;   // 继续 tick
+        assert!(
+            out1.iter().any(|e| e.event_type == EVT_LONG_PRESS),
+            "1.5s → 发一次"
+        );
+        ps.time_s = 2.0; // 继续 tick
         let out2 = ps.process(&mut s, &[]);
-        assert!(!out2.iter().any(|e| e.event_type == EVT_LONG_PRESS), "已 fired → 不再发");
+        assert!(
+            !out2.iter().any(|e| e.event_type == EVT_LONG_PRESS),
+            "已 fired → 不再发"
+        );
     }
 
     #[test]
@@ -1888,11 +3407,34 @@ mod tests {
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
         ps.time_s = 0.0;
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         ps.time_s = 1.5;
-        ps.process(&mut s, &[]);   // LongPress
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(out.iter().any(|e| e.event_type == EVT_CLICK), "LongPress 后 Up → Click 仍发（独立）");
+        ps.process(&mut s, &[]); // LongPress
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            out.iter().any(|e| e.event_type == EVT_CLICK),
+            "LongPress 后 Up → Click 仍发（独立）"
+        );
     }
 
     #[test]
@@ -1902,10 +3444,23 @@ mod tests {
         s.get_mut(btn_id).unwrap().disabled = true;
         let mut ps = PointerState::new();
         ps.time_s = 0.0;
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         ps.time_s = 1.5;
         let out = ps.process(&mut s, &[]);
-        assert!(!out.iter().any(|e| e.event_type == EVT_LONG_PRESS), "disabled → 不发 LongPress");
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_LONG_PRESS),
+            "disabled → 不发 LongPress"
+        );
     }
 
     // ===== 焦点 + 键盘 =====
@@ -1913,15 +3468,30 @@ mod tests {
     /// root + btnA(tabindex=0) + btnB(tabindex=0)，均 @ 各位可区分。
     fn two_focusable_scene() -> Scene {
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
         let mut a = Node::default();
         a.kind = NodeKind::Button;
         a.tabindex = Some(0);
-        a.layout_rect = Rect { x: 0.0, y: 0.0, w: 50.0, h: 50.0 };
+        a.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut b = Node::default();
         b.kind = NodeKind::Button;
         b.tabindex = Some(0);
-        b.layout_rect = Rect { x: 100.0, y: 0.0, w: 50.0, h: 50.0 };
+        b.layout_rect = Rect {
+            x: 100.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
         let mut s = Scene::from_nodes(vec![root, a, b], vec![(0, 1), (0, 2)]);
         compute_world_transforms(&mut s);
         s
@@ -1944,9 +3514,21 @@ mod tests {
         assert!(s.get(b_id).unwrap().focused, "B focused=true");
         assert_eq!(s.focused_node, Some(b_id));
         // out 含 [FocusIn@A, FocusOut@A, FocusIn@B]
-        assert!(out.iter().any(|e| e.event_type == EVT_FOCUS_IN && e.node_id == a_id.0), "FocusIn@A");
-        assert!(out.iter().any(|e| e.event_type == EVT_FOCUS_OUT && e.node_id == a_id.0), "FocusOut@A");
-        assert!(out.iter().any(|e| e.event_type == EVT_FOCUS_IN && e.node_id == b_id.0), "FocusIn@B");
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_FOCUS_IN && e.node_id == a_id.0),
+            "FocusIn@A"
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_FOCUS_OUT && e.node_id == a_id.0),
+            "FocusOut@A"
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_FOCUS_IN && e.node_id == b_id.0),
+            "FocusIn@B"
+        );
     }
 
     #[test]
@@ -1956,7 +3538,7 @@ mod tests {
         let mut out = Vec::new();
         focus_node(&mut s, Some(a_id), &mut out);
         let mut out2 = Vec::new();
-        focus_node(&mut s, Some(a_id), &mut out2);   // 同目标
+        focus_node(&mut s, Some(a_id), &mut out2); // 同目标
         assert!(out2.is_empty(), "同目标重复聚焦 → 不发事件");
     }
 
@@ -1966,21 +3548,36 @@ mod tests {
         let a_id = s.get(s.roots[0]).unwrap().children[0];
         let mut out = Vec::new();
         focus_node(&mut s, Some(a_id), &mut out);
-        focus_node(&mut s, None, &mut out);   // 清焦点
+        focus_node(&mut s, None, &mut out); // 清焦点
         assert_eq!(s.focused_node, None);
         assert!(!s.get(a_id).unwrap().focused);
-        assert!(out.iter().any(|e| e.event_type == EVT_FOCUS_OUT && e.node_id == a_id.0), "blur → FocusOut@A");
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_FOCUS_OUT && e.node_id == a_id.0),
+            "blur → FocusOut@A"
+        );
     }
 
     /// root + A(tabindex=2) + B(tabindex=1) + C(tabindex=0) + D(tabindex=-1) + E(无属性) + disabled F(tabindex=0)
     fn tab_chain_scene() -> Scene {
         let mut root = Node::default();
-        root.layout_rect = Rect { x: 0.0, y: 0.0, w: 400.0, h: 200.0 };
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 400.0,
+            h: 200.0,
+        };
         let mk = |ti: Option<i32>, disabled: bool, id: usize| {
             let mut n = Node::default();
             n.kind = NodeKind::Button;
-            n.tabindex = ti; n.disabled = disabled;
-            n.layout_rect = Rect { x: id as f32 * 50.0, y: 0.0, w: 40.0, h: 40.0 };
+            n.tabindex = ti;
+            n.disabled = disabled;
+            n.layout_rect = Rect {
+                x: id as f32 * 50.0,
+                y: 0.0,
+                w: 40.0,
+                h: 40.0,
+            };
             n
         };
         // root(0) + a(1,ti=2) + b(2,ti=1) + c(3,ti=0) + d(4,ti=-1) + e(5,None) + f(6,ti=0,disabled)
@@ -1989,7 +3586,7 @@ mod tests {
         let c = mk(Some(0), false, 3);
         let d = mk(Some(-1), false, 4);
         let e = mk(None, false, 5);
-        let f = mk(Some(0), true, 6);   // disabled
+        let f = mk(Some(0), true, 6); // disabled
         let mut s = Scene::from_nodes(
             vec![root, a, b, c, d, e, f],
             vec![(0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (0, 6)],
@@ -2009,7 +3606,11 @@ mod tests {
         let a_id = children[0]; // tabindex=2
         let b_id = children[1]; // tabindex=1
         let c_id = children[2]; // tabindex=0
-        assert_eq!(chain, vec![b_id, a_id, c_id], "链序：正整数升序(B=1,A=2)后接 0 组(C=0)");
+        assert_eq!(
+            chain,
+            vec![b_id, a_id, c_id],
+            "链序：正整数升序(B=1,A=2)后接 0 组(C=0)"
+        );
     }
 
     #[test]
@@ -2022,15 +3623,51 @@ mod tests {
         let c_id = children[2]; // tabindex=0
         let mut out = Vec::new();
         // 焦点 None → Tab → B（链首）
-        process_keys(&mut s, &[KeyEvent { key_code: KEY_TAB, modifiers: 0, is_down: true, pad: [0, 0] }], &mut out);
+        process_keys(
+            &mut s,
+            &[KeyEvent {
+                key_code: KEY_TAB,
+                modifiers: 0,
+                is_down: true,
+                pad: [0, 0],
+            }],
+            &mut out,
+        );
         assert_eq!(s.focused_node, Some(b_id), "首次 Tab → 链首 B");
         // Tab → A
-        process_keys(&mut s, &[KeyEvent { key_code: KEY_TAB, modifiers: 0, is_down: true, pad: [0, 0] }], &mut out);
+        process_keys(
+            &mut s,
+            &[KeyEvent {
+                key_code: KEY_TAB,
+                modifiers: 0,
+                is_down: true,
+                pad: [0, 0],
+            }],
+            &mut out,
+        );
         assert_eq!(s.focused_node, Some(a_id), "Tab → A");
         // Tab → C → Tab → wrap 回 B
-        process_keys(&mut s, &[KeyEvent { key_code: KEY_TAB, modifiers: 0, is_down: true, pad: [0, 0] }], &mut out);
+        process_keys(
+            &mut s,
+            &[KeyEvent {
+                key_code: KEY_TAB,
+                modifiers: 0,
+                is_down: true,
+                pad: [0, 0],
+            }],
+            &mut out,
+        );
         assert_eq!(s.focused_node, Some(c_id), "Tab → C");
-        process_keys(&mut s, &[KeyEvent { key_code: KEY_TAB, modifiers: 0, is_down: true, pad: [0, 0] }], &mut out);
+        process_keys(
+            &mut s,
+            &[KeyEvent {
+                key_code: KEY_TAB,
+                modifiers: 0,
+                is_down: true,
+                pad: [0, 0],
+            }],
+            &mut out,
+        );
         assert_eq!(s.focused_node, Some(b_id), "链尾 Tab → wrap 回链首 B");
     }
 
@@ -2044,22 +3681,67 @@ mod tests {
         let c_id = children[2]; // tabindex=0
         let mut out = Vec::new();
         // 焦点 None → Shift+Tab → 链尾 C
-        process_keys(&mut s, &[KeyEvent { key_code: KEY_TAB, modifiers: MOD_SHIFT, is_down: true, pad: [0, 0] }], &mut out);
+        process_keys(
+            &mut s,
+            &[KeyEvent {
+                key_code: KEY_TAB,
+                modifiers: MOD_SHIFT,
+                is_down: true,
+                pad: [0, 0],
+            }],
+            &mut out,
+        );
         assert_eq!(s.focused_node, Some(c_id), "Shift+Tab 从 None → 链尾 C");
-        process_keys(&mut s, &[KeyEvent { key_code: KEY_TAB, modifiers: MOD_SHIFT, is_down: true, pad: [0, 0] }], &mut out);
+        process_keys(
+            &mut s,
+            &[KeyEvent {
+                key_code: KEY_TAB,
+                modifiers: MOD_SHIFT,
+                is_down: true,
+                pad: [0, 0],
+            }],
+            &mut out,
+        );
         assert_eq!(s.focused_node, Some(a_id), "Shift+Tab → A");
-        process_keys(&mut s, &[KeyEvent { key_code: KEY_TAB, modifiers: MOD_SHIFT, is_down: true, pad: [0, 0] }], &mut out);
+        process_keys(
+            &mut s,
+            &[KeyEvent {
+                key_code: KEY_TAB,
+                modifiers: MOD_SHIFT,
+                is_down: true,
+                pad: [0, 0],
+            }],
+            &mut out,
+        );
         assert_eq!(s.focused_node, Some(b_id), "Shift+Tab → B");
-        process_keys(&mut s, &[KeyEvent { key_code: KEY_TAB, modifiers: MOD_SHIFT, is_down: true, pad: [0, 0] }], &mut out);
+        process_keys(
+            &mut s,
+            &[KeyEvent {
+                key_code: KEY_TAB,
+                modifiers: MOD_SHIFT,
+                is_down: true,
+                pad: [0, 0],
+            }],
+            &mut out,
+        );
         assert_eq!(s.focused_node, Some(c_id), "链首 Shift+Tab → wrap 回链尾 C");
     }
 
     #[test]
     fn tab_empty_chain_no_op() {
         // 无可聚焦节点 → Tab 无操作（不发 keydown，不改焦点）
-        let mut s = one_button_scene();   // btn 无 tabindex
+        let mut s = one_button_scene(); // btn 无 tabindex
         let mut out = Vec::new();
-        process_keys(&mut s, &[KeyEvent { key_code: KEY_TAB, modifiers: 0, is_down: true, pad: [0, 0] }], &mut out);
+        process_keys(
+            &mut s,
+            &[KeyEvent {
+                key_code: KEY_TAB,
+                modifiers: 0,
+                is_down: true,
+                pad: [0, 0],
+            }],
+            &mut out,
+        );
         assert_eq!(s.focused_node, None, "无可聚焦 → Tab 不改焦点");
         assert!(out.is_empty(), "空链 Tab → 无事件");
     }
@@ -2069,11 +3751,23 @@ mod tests {
         let mut s = two_focusable_scene();
         let a_id = s.get(s.roots[0]).unwrap().children[0];
         let mut out = Vec::new();
-        focus_node(&mut s, Some(a_id), &mut out);   // 聚焦 A
+        focus_node(&mut s, Some(a_id), &mut out); // 聚焦 A
         out.clear();
         // Enter keydown（KeyCode.Return=13，core 不解释，只透传）
-        process_keys(&mut s, &[KeyEvent { key_code: 13, modifiers: MOD_CTRL, is_down: true, pad: [0, 0] }], &mut out);
-        let kd = out.iter().find(|e| e.event_type == EVT_KEY_DOWN).expect("keydown");
+        process_keys(
+            &mut s,
+            &[KeyEvent {
+                key_code: 13,
+                modifiers: MOD_CTRL,
+                is_down: true,
+                pad: [0, 0],
+            }],
+            &mut out,
+        );
+        let kd = out
+            .iter()
+            .find(|e| e.event_type == EVT_KEY_DOWN)
+            .expect("keydown");
         assert_eq!(kd.node_id, a_id.0, "keydown@焦点 A");
         assert_eq!(kd.touch_id, 13, "key_code 复用 touch_id");
         assert_eq!(kd.pad[0], MOD_CTRL, "modifiers 复用 pad[0]");
@@ -2084,42 +3778,96 @@ mod tests {
         let mut s = two_focusable_scene();
         let mut out = Vec::new();
         // 无焦点 + keydown → 丢弃
-        process_keys(&mut s, &[KeyEvent { key_code: 13, modifiers: 0, is_down: true, pad: [0, 0] }], &mut out);
-        assert!(out.iter().all(|e| e.event_type != EVT_KEY_DOWN), "无焦点 keydown 丢弃");
+        process_keys(
+            &mut s,
+            &[KeyEvent {
+                key_code: 13,
+                modifiers: 0,
+                is_down: true,
+                pad: [0, 0],
+            }],
+            &mut out,
+        );
+        assert!(
+            out.iter().all(|e| e.event_type != EVT_KEY_DOWN),
+            "无焦点 keydown 丢弃"
+        );
     }
 
     #[test]
     fn tab_consumed_no_keydown() {
         let mut s = two_focusable_scene();
         let mut out = Vec::new();
-        process_keys(&mut s, &[KeyEvent { key_code: KEY_TAB, modifiers: 0, is_down: true, pad: [0, 0] }], &mut out);
-        assert!(out.iter().all(|e| e.event_type != EVT_KEY_DOWN), "Tab 被导航消费，不发 keydown");
-        assert!(out.iter().any(|e| e.event_type == EVT_FOCUS_IN), "Tab → FocusIn");
+        process_keys(
+            &mut s,
+            &[KeyEvent {
+                key_code: KEY_TAB,
+                modifiers: 0,
+                is_down: true,
+                pad: [0, 0],
+            }],
+            &mut out,
+        );
+        assert!(
+            out.iter().all(|e| e.event_type != EVT_KEY_DOWN),
+            "Tab 被导航消费，不发 keydown"
+        );
+        assert!(
+            out.iter().any(|e| e.event_type == EVT_FOCUS_IN),
+            "Tab → FocusIn"
+        );
     }
 
     #[test]
     fn click_to_focus_focusable_node() {
         // pointer-down 命中 tabindex=0 节点 → FocusIn@该节点
-        let mut s = two_focusable_scene();   // A@0,0,50,50 tabindex=0
+        let mut s = two_focusable_scene(); // A@0,0,50,50 tabindex=0
         let a_id = s.get(s.roots[0]).unwrap().children[0];
         let mut ps = PointerState::new();
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 25.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(out.iter().any(|e| e.event_type == EVT_FOCUS_IN && e.node_id == a_id.0), "down@A(tabindex=0) → FocusIn@A");
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 25.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_FOCUS_IN && e.node_id == a_id.0),
+            "down@A(tabindex=0) → FocusIn@A"
+        );
         assert_eq!(s.focused_node, Some(a_id));
     }
 
     #[test]
     fn click_non_focusable_no_blur() {
         // 焦点 A，pointer-down 不可聚焦节点（btn 无 tabindex）→ 不夺焦（不发 FocusOut）
-        let mut s = one_button_scene();   // btn 无 tabindex，root 无 tabindex
+        let mut s = one_button_scene(); // btn 无 tabindex，root 无 tabindex
         let root_id = s.roots[0];
         let mut ps = PointerState::new();
         // 先聚焦 root（编程模拟）——root 无 tabindex，但 focus_node 可强制（测 click-to-focus 不夺焦）
         let mut tmp = Vec::new();
         focus_node(&mut s, Some(root_id), &mut tmp);
         // down@btn（不可聚焦）→ 不应 FocusOut root
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(out.iter().all(|e| e.event_type != EVT_FOCUS_OUT), "down 不可聚焦节点 → 不夺焦（无 FocusOut）");
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            out.iter().all(|e| e.event_type != EVT_FOCUS_OUT),
+            "down 不可聚焦节点 → 不夺焦（无 FocusOut）"
+        );
         assert_eq!(s.focused_node, Some(root_id), "焦点保持 root");
     }
 
@@ -2128,10 +3876,23 @@ mod tests {
         // disabled 可聚焦节点 → pointer-down 不聚焦
         let mut s = two_focusable_scene();
         let a_id = s.get(s.roots[0]).unwrap().children[0];
-        s.get_mut(a_id).unwrap().disabled = true;   // A disabled（tabindex=0）
+        s.get_mut(a_id).unwrap().disabled = true; // A disabled（tabindex=0）
         let mut ps = PointerState::new();
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 25.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        assert!(out.iter().all(|e| e.event_type != EVT_FOCUS_IN), "disabled 可聚焦 → down 不聚焦");
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 25.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        assert!(
+            out.iter().all(|e| e.event_type != EVT_FOCUS_IN),
+            "disabled 可聚焦 → down 不聚焦"
+        );
         assert_eq!(s.focused_node, None);
     }
 
@@ -2142,23 +3903,68 @@ mod tests {
     fn v_scroll_scene() -> Scene {
         use crate::style::resolved::{OverflowMode, ResolvedStyle};
         let mut scroll_style = ResolvedStyle::default();
-        scroll_style.overflow_y = OverflowMode::Scroll;   // 仅垂直可滚
+        scroll_style.overflow_y = OverflowMode::Scroll; // 仅垂直可滚
         let entries: Vec<(
-            Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>,
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
         )> = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),       // 0 root
-            (Some(0), NodeKind::Container, scroll_style, vec![], None, false, None),                // 1 scroll 容器
-            (Some(1), NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),    // 2 content 子
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ), // 0 root
+            (
+                Some(0),
+                NodeKind::Container,
+                scroll_style,
+                vec![],
+                None,
+                false,
+                None,
+            ), // 1 scroll 容器
+            (
+                Some(1),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ), // 2 content 子
         ];
         let mut s = Scene::build(&entries);
         let root_id = s.roots[0];
         let scroll_id = s.get(root_id).unwrap().children[0];
         let content_id = s.get(scroll_id).unwrap().children[0];
-        s.get_mut(root_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
-        s.get_mut(scroll_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };   // viewport 100x100
-        s.get_mut(content_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 40.0, h: 200.0 };    // content 40x200 → overlap_y=100
-        // 模拟 layout solve 的 clip_rect 填充（overflow!=Visible 节点 build 时 Some(default)，
-        // layout/mod.rs:196 把它填成自身 border 框；测里手填等效值）。
+        s.get_mut(root_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
+        s.get_mut(scroll_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        }; // viewport 100x100
+        s.get_mut(content_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 40.0,
+            h: 200.0,
+        }; // content 40x200 → overlap_y=100
+           // 模拟 layout solve 的 clip_rect 填充（overflow!=Visible 节点 build 时 Some(default)，
+           // layout/mod.rs:196 把它填成自身 border 框；测里手填等效值）。
         for n in s.nodes.values_mut() {
             if n.clip_rect.is_some() {
                 n.clip_rect = Some(n.layout_rect);
@@ -2178,11 +3984,34 @@ mod tests {
         let scroll_id = s.get(s.roots[0]).unwrap().children[0];
         let mut ps = PointerState::new();
         // Down @(10,10) 命中 content 子，down_targets=[content,scroll,root]，候选沿链找最近 effective=scroll（容器）
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         // Move @(10,25) dy=15 > scroll 阈值 8（mouse）
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 10.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 10.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         let slot = &ps.slots[0];
-        assert!(slot.scrolling_pane == Some(scroll_id), "scroll 达阈值先 → scrolling_pane=容器");
+        assert!(
+            slot.scrolling_pane == Some(scroll_id),
+            "scroll 达阈值先 → scrolling_pane=容器"
+        );
         assert!(slot.click_cancelled, "scroll-start 取消 click");
     }
 
@@ -2191,11 +4020,34 @@ mod tests {
         // overflow_y=Scroll（仅垂直 effective）；水平位移更大（dx>dy）→ 让出，scrolling_pane 保持 None。
         let mut s = v_scroll_scene();
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         // Move @(30,15) dx=20 > scroll 阈值 8 且 dx > dy(5) → V-only 让出（lock_ok=false）
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 30.0, y: 15.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 30.0,
+                y: 15.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         let slot = &ps.slots[0];
-        assert!(slot.scrolling_pane.is_none(), "V-only 容器遇水平更大手势 → 让出（不滚）");
+        assert!(
+            slot.scrolling_pane.is_none(),
+            "V-only 容器遇水平更大手势 → 让出（不滚）"
+        );
     }
 
     #[test]
@@ -2207,22 +4059,80 @@ mod tests {
         let mut inner = ResolvedStyle::default();
         inner.overflow_y = OverflowMode::Scroll;
         let entries: Vec<(
-            Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>,
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
         )> = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),    // 0 root
-            (Some(0), NodeKind::Container, outer, vec![], None, false, None),                    // 1 外 scroll
-            (Some(1), NodeKind::Container, inner, vec![], None, false, None),                    // 2 内 scroll
-            (Some(2), NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None), // 3 内层 content
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ), // 0 root
+            (
+                Some(0),
+                NodeKind::Container,
+                outer,
+                vec![],
+                None,
+                false,
+                None,
+            ), // 1 外 scroll
+            (
+                Some(1),
+                NodeKind::Container,
+                inner,
+                vec![],
+                None,
+                false,
+                None,
+            ), // 2 内 scroll
+            (
+                Some(2),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ), // 3 内层 content
         ];
         let mut s = Scene::build(&entries);
         let root_id = s.roots[0];
         let outer_id = s.get(root_id).unwrap().children[0];
         let inner_id = s.get(outer_id).unwrap().children[0];
         let content_id = s.get(inner_id).unwrap().children[0];
-        s.get_mut(root_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 300.0, h: 300.0 };
-        s.get_mut(outer_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
-        s.get_mut(inner_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
-        s.get_mut(content_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 40.0, h: 200.0 };
+        s.get_mut(root_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 300.0,
+            h: 300.0,
+        };
+        s.get_mut(outer_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
+        s.get_mut(inner_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        s.get_mut(content_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 40.0,
+            h: 200.0,
+        };
         // 模拟 layout solve 的 clip_rect 填充（见 v_scroll_scene 注释）。
         for n in s.nodes.values_mut() {
             if n.clip_rect.is_some() {
@@ -2233,11 +4143,35 @@ mod tests {
         crate::scroll::refresh_content_sizes(&mut s);
         let mut ps = PointerState::new();
         // Down @(10,10) 命中 content 子，down_targets=[content,inner,outer,root]，候选=最近 effective=内层
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         // Move dy=15 > 8 → scroll 达阈值，V-only 且 dy>dx(0) → lock_ok → scrolling_pane=内层
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 10.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 10.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         let slot = &ps.slots[0];
-        assert_eq!(slot.scrolling_pane, Some(inner_id), "嵌套 Down 在内层 → scrolling_pane=内层（最近祖先优先）");
+        assert_eq!(
+            slot.scrolling_pane,
+            Some(inner_id),
+            "嵌套 Down 在内层 → scrolling_pane=内层（最近祖先优先）"
+        );
     }
 
     #[test]
@@ -2246,12 +4180,46 @@ mod tests {
         let mut s = v_scroll_scene();
         let scroll_id = s.get(s.roots[0]).unwrap().children[0];
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 10.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }]); // scroll 启动
-        // 再 Move @(10,35) → design 下拖 +10 → scroll_pos.y 减（看上方，触屏跟手；与 apply_wheel 一致）
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 10.0, y: 35.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 10.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        ); // scroll 启动
+           // 再 Move @(10,35) → design 下拖 +10 → scroll_pos.y 减（看上方，触屏跟手；与 apply_wheel 一致）
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 10.0,
+                y: 35.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         let st = s.scroll.get(scroll_id).unwrap();
-        assert!(st.scroll_pos.1 < 0.0, "下拖 design +y → scroll_pos.y 减（看上方），got {}", st.scroll_pos.1);
+        assert!(
+            st.scroll_pos.1 < 0.0,
+            "下拖 design +y → scroll_pos.y 减（看上方），got {}",
+            st.scroll_pos.1
+        );
     }
 
     #[test]
@@ -2260,10 +4228,50 @@ mod tests {
         let mut s = v_scroll_scene();
         let scroll_id = s.get(s.roots[0]).unwrap().children[0];
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 10.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }]); // scroll 启动
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 10.0, y: 35.0, button: 0, pad: [0, 0], touch_id: -1 }]); // 跟手攒速度
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Up, x: 10.0, y: 35.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 10.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        ); // scroll 启动
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 10.0,
+                y: 35.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        ); // 跟手攒速度
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 10.0,
+                y: 35.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         let slot = &ps.slots[0];
         assert!(slot.scrolling_pane.is_none(), "Up 后 scrolling_pane 清空");
         assert!(!slot.scroll_testing, "Up 后 scroll_testing=false");
@@ -2285,19 +4293,64 @@ mod tests {
         let mut scroll_style = ResolvedStyle::default();
         scroll_style.overflow_y = OverflowMode::Scroll;
         let entries: Vec<(
-            Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>,
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
         )> = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(0), NodeKind::Container, scroll_style, vec![], None, false, None),
-            (Some(1), NodeKind::Container, ResolvedStyle::default(), vec![], None, true, None), // 2 draggable content
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                scroll_style,
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(1),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                true,
+                None,
+            ), // 2 draggable content
         ];
         let mut s = Scene::build(&entries);
         let root_id = s.roots[0];
         let scroll_id = s.get(root_id).unwrap().children[0];
         let content_id = s.get(scroll_id).unwrap().children[0];
-        s.get_mut(root_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 200.0, h: 200.0 };
-        s.get_mut(scroll_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
-        s.get_mut(content_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 40.0, h: 200.0 };
+        s.get_mut(root_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
+        s.get_mut(scroll_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        s.get_mut(content_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 40.0,
+            h: 200.0,
+        };
         // 模拟 layout solve 的 clip_rect 填充（见 v_scroll_scene 注释）。
         for n in s.nodes.values_mut() {
             if n.clip_rect.is_some() {
@@ -2307,14 +4360,47 @@ mod tests {
         crate::scene::transform::compute_world_transforms(&mut s);
         crate::scroll::refresh_content_sizes(&mut s);
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         // Move dy=5（>drag 2，<scroll 8）→ drag 先达 DragStart + 清 scroll_testing
-        let out = ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 10.0, y: 15.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        let out = ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 10.0,
+                y: 15.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         let slot = &ps.slots[0];
-        assert!(out.iter().any(|e| e.event_type == EVT_DRAG_START && e.node_id == content_id.0), "draggable leaf Move>2 → DragStart");
-        assert!(!slot.scroll_testing, "drag 先达 → scroll_testing 清（互斥）");
-        assert!(slot.scroll_candidate.is_none(), "drag 先达 → scroll_candidate 清");
-        assert!(slot.scrolling_pane.is_none(), "drag 赢 → scrolling_pane 不设");
+        assert!(
+            out.iter()
+                .any(|e| e.event_type == EVT_DRAG_START && e.node_id == content_id.0),
+            "draggable leaf Move>2 → DragStart"
+        );
+        assert!(
+            !slot.scroll_testing,
+            "drag 先达 → scroll_testing 清（互斥）"
+        );
+        assert!(
+            slot.scroll_candidate.is_none(),
+            "drag 先达 → scroll_candidate 清"
+        );
+        assert!(
+            slot.scrolling_pane.is_none(),
+            "drag 赢 → scrolling_pane 不设"
+        );
     }
 
     #[test]
@@ -2322,12 +4408,41 @@ mod tests {
         // 普通 scene（无 scroll 容器）→ Down+Move 不设 scroll 字段（零回归保险）。
         let mut s = one_button_scene();
         let mut ps = PointerState::new();
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Down, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
-        ps.process(&mut s, &[PointerEvent { kind: PointerKind::Move, x: 50.0, y: 70.0, button: 0, pad: [0, 0], touch_id: -1 }]);
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
+        ps.process(
+            &mut s,
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 50.0,
+                y: 70.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
+        );
         let slot = &ps.slots[0];
-        assert!(slot.scroll_candidate.is_none(), "无 scroll 容器 → scroll_candidate=None");
-        assert!(!slot.scroll_testing, "无 scroll 容器 → scroll_testing=false");
-        assert!(slot.scrolling_pane.is_none(), "无 scroll 容器 → scrolling_pane=None");
+        assert!(
+            slot.scroll_candidate.is_none(),
+            "无 scroll 容器 → scroll_candidate=None"
+        );
+        assert!(
+            !slot.scroll_testing,
+            "无 scroll 容器 → scroll_testing=false"
+        );
+        assert!(
+            slot.scrolling_pane.is_none(),
+            "无 scroll 容器 → scrolling_pane=None"
+        );
     }
 
     // ── scrollbar grip 拖拽 ─────────────────────────────
@@ -2346,18 +4461,62 @@ mod tests {
             bool,
             Option<i32>,
         )> = vec![
-            (None, NodeKind::Container, scroll_style.clone(), vec![], None, false, None),
-            (Some(0), NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
-            (Some(0), NodeKind::Container, ResolvedStyle::default(), vec![], None, false, None),
+            (
+                None,
+                NodeKind::Container,
+                scroll_style.clone(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
         ];
         let mut s = Scene::build(&entries);
         let root_id = s.roots[0];
         let child0_id = s.get(root_id).unwrap().children[0];
         let child1_id = s.get(root_id).unwrap().children[1];
-        s.get_mut(root_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
-        s.get_mut(root_id).unwrap().clip_rect = Some(Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 });
-        s.get_mut(child0_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 40.0, h: 40.0 };
-        s.get_mut(child1_id).unwrap().layout_rect = Rect { x: 0.0, y: 0.0, w: 30.0, h: 200.0 }; // content_y=200 > viewport=100
+        s.get_mut(root_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        s.get_mut(root_id).unwrap().clip_rect = Some(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
+        s.get_mut(child0_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 40.0,
+            h: 40.0,
+        };
+        s.get_mut(child1_id).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 30.0,
+            h: 200.0,
+        }; // content_y=200 > viewport=100
         crate::scroll::refresh_content_sizes(&mut s);
         compute_world_transforms(&mut s);
         s
@@ -2372,15 +4531,28 @@ mod tests {
         // 点 thumb center (96, 25)
         let out = ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Down, x: 96.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 96.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
         let slot = &ps.slots[0];
         assert!(slot.grip_dragging, "thumb 命中 → grip_dragging=true");
         assert_eq!(slot.scrolling_pane, Some(root_id), "scrolling_pane=容器");
         assert!(slot.click_cancelled, "grip down 取消 click");
-        assert!(slot.scroll_gesture & 1 != 0, "垂直 thumb → scroll_gesture bit0");
+        assert!(
+            slot.scroll_gesture & 1 != 0,
+            "垂直 thumb → scroll_gesture bit0"
+        );
         // 不应发 EVT_DOWN（continue 跳过）
-        assert!(!out.iter().any(|e| e.event_type == EVT_DOWN), "grip down 不产 EVT_DOWN");
+        assert!(
+            !out.iter().any(|e| e.event_type == EVT_DOWN),
+            "grip down 不产 EVT_DOWN"
+        );
     }
 
     #[test]
@@ -2391,13 +4563,27 @@ mod tests {
         // Down on thumb (96, 25)
         ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Down, x: 96.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 96.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
         // Move thumb to y=75（track_h=100, min_thumb=20 → effective range=80；perc = (75-0)/80=0.9375）
         // overlap_y=100 → scroll_pos = 0.9375*100 = 93.75
         ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Move, x: 96.0, y: 75.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 96.0,
+                y: 75.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
         let st = s.scroll.get(root_id).unwrap();
         assert!(
@@ -2414,17 +4600,38 @@ mod tests {
         let mut ps = PointerState::new();
         ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Down, x: 96.0, y: 25.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 96.0,
+                y: 25.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
         // Move to build some velocity via... actually grip doesn't use drag_follow
         ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Move, x: 96.0, y: 75.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Move,
+                x: 96.0,
+                y: 75.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
         // Up — grip_dragging should clear, no inertia (tweening remains 0)
         ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Up, x: 96.0, y: 75.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Up,
+                x: 96.0,
+                y: 75.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
         let slot = &ps.slots[0];
         assert!(!slot.grip_dragging, "Up 后 grip_dragging 清");
@@ -2440,10 +4647,20 @@ mod tests {
         // Click on container area (10, 10) — not thumb
         let out = ps.process(
             &mut s,
-            &[PointerEvent { kind: PointerKind::Down, x: 10.0, y: 10.0, button: 0, pad: [0, 0], touch_id: -1 }],
+            &[PointerEvent {
+                kind: PointerKind::Down,
+                x: 10.0,
+                y: 10.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            }],
         );
         let slot = &ps.slots[0];
         assert!(!slot.grip_dragging, "非 thumb 区 → grip_dragging=false");
-        assert!(out.iter().any(|e| e.event_type == EVT_DOWN), "非 thumb Down 正常发 EVT_DOWN");
+        assert!(
+            out.iter().any(|e| e.event_type == EVT_DOWN),
+            "非 thumb Down 正常发 EVT_DOWN"
+        );
     }
 }

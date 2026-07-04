@@ -209,7 +209,10 @@ mod tests {
         assert!(input.is_err(), "<input> 应被围栏拒绝");
         // 嵌套里的围栏外 tag 同样拒绝（递归 build_element 一致执法）
         let nested = parse_html(r#"<div><b>bold</b></div>"#);
-        assert!(nested.is_err(), "<b> 应被围栏拒绝（用 l-rich 做内联格式化）");
+        assert!(
+            nested.is_err(),
+            "<b> 应被围栏拒绝（用 l-rich 做内联格式化）"
+        );
     }
 
     #[test]

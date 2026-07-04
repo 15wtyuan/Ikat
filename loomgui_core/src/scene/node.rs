@@ -63,10 +63,14 @@ impl NodeId {
 pub enum NodeKind {
     #[default]
     Container,
-    Text { content: String },
+    Text {
+        content: String,
+    },
     /// src 原样存（不加载），render 层映射到 image_path（同 path 的图可合批）。
     /// src 取自元素的 `src` 属性（`<img src="...">`），不是文本内容。
-    Image { src: String },
+    Image {
+        src: String,
+    },
     Button,
 }
 
@@ -248,20 +252,33 @@ impl Scene {
     ///
     /// **NodeId 由 slotmap 分配**：entries 第 i 个 → slotmap insert → NodeId（idx=i+1，version=1，
     /// 无删除时）。parent/children 用 entries 下标 → 经临时 ids 表映射到 NodeId。
-    pub fn build(entries: &[(Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>)]) -> Scene {
+    pub fn build(
+        entries: &[(
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
+        )],
+    ) -> Scene {
         let mut scene = Scene {
             roots: Vec::new(),
             nodes: SlotMap::with_key(),
             dynamic_rules: crate::style::dynamic::DynamicRuleTable::default(),
             focused_node: None,
-            world_transforms: Vec::new(), anim: Default::default(), scroll: Default::default(), text_layouts: Vec::new(),
+            world_transforms: Vec::new(),
+            anim: Default::default(),
+            scroll: Default::default(),
+            text_layouts: Vec::new(),
         };
         // 先 insert 所有节点，收集 slotmap 分配的 NodeId
         let mut ids: Vec<NodeId> = Vec::with_capacity(entries.len());
         for (_, kind, style, classes, id_attr, draggable, tabindex) in entries.iter() {
             let node = Node {
                 id: NodeId::INVALID, // 临时，insert 后回填
-                parent: None, // 下一轮填
+                parent: None,        // 下一轮填
                 kind: kind.clone(),
                 style: style.clone(),
                 base_style: style.clone(),
@@ -322,7 +339,10 @@ impl Scene {
             nodes: SlotMap::with_key(),
             dynamic_rules: crate::style::dynamic::DynamicRuleTable::default(),
             focused_node: None,
-            world_transforms: Vec::new(), anim: Default::default(), scroll: Default::default(), text_layouts: Vec::new(),
+            world_transforms: Vec::new(),
+            anim: Default::default(),
+            scroll: Default::default(),
+            text_layouts: Vec::new(),
         };
         let mut ids: Vec<NodeId> = Vec::with_capacity(nodes.len());
         for n in nodes {
@@ -378,7 +398,15 @@ impl Scene {
 /// `styles` 必须与 `tree.nodes` 同长且同序（由 `style::cascade::resolve_styles` 保证）。
 #[cfg(feature = "parse")]
 pub fn build_scene(tree: &ElementTree, styles: &[ResolvedStyle]) -> Scene {
-    let mut entries: Vec<(Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>)> = Vec::new();
+    let mut entries: Vec<(
+        Option<usize>,
+        NodeKind,
+        ResolvedStyle,
+        Vec<String>,
+        Option<String>,
+        bool,
+        Option<i32>,
+    )> = Vec::new();
     for root in &tree.roots {
         gather_rec(tree, styles, *root, None, &mut entries);
     }
@@ -391,7 +419,15 @@ fn gather_rec(
     styles: &[ResolvedStyle],
     el_id: ElementId,
     parent_idx: Option<usize>,
-    entries: &mut Vec<(Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>)>,
+    entries: &mut Vec<(
+        Option<usize>,
+        NodeKind,
+        ResolvedStyle,
+        Vec<String>,
+        Option<String>,
+        bool,
+        Option<i32>,
+    )>,
 ) -> usize {
     let el = &tree.nodes[el_id.0 as usize];
     let style = &styles[el_id.0 as usize];
@@ -401,11 +437,12 @@ fn gather_rec(
     // kind_from_tag 对 img/span 返空 src/content（动态建树语义）；parse 路径需从元素属性/文本回填。
     // img 的 src 从属性取（`<img src="...">`），不是元素文本；
     // span 的文本是其自身 content（Text 叶子，无子节点）。
-    let mut kind = crate::scene::dynamic::kind_from_tag(&el.tag)
-        .unwrap_or_else(|_| unreachable!(
+    let mut kind = crate::scene::dynamic::kind_from_tag(&el.tag).unwrap_or_else(|_| {
+        unreachable!(
             "parse 层白名单已挡围栏外 tag，scene 不应见到 <{}>；这是 parse/scene 契约破坏",
             el.tag
-        ));
+        )
+    });
     match &mut kind {
         NodeKind::Image { src } => {
             *src = el.attrs.get("src").cloned().unwrap_or_default();
@@ -417,12 +454,24 @@ fn gather_rec(
     }
     // draggable="true" → Node.draggable（HTML 原生属性）。
     // 非 "true" 一律 false（draggable="false"/缺省/任意值 → false，照 HTML truthy 语义简化）。
-    let draggable = el.attrs.get("draggable").map(|v| v == "true").unwrap_or(false);
+    let draggable = el
+        .attrs
+        .get("draggable")
+        .map(|v| v == "true")
+        .unwrap_or(false);
     // tabindex 属性 → Option<i32>。非数字 → None（照 DOM 容错：无效值忽略）。
     // 语义：None=不可聚焦；Some(-1)=仅编程；Some(0)=DOM 序；Some(N>0)=显式序。
     let tabindex = el.attrs.get("tabindex").and_then(|v| v.parse::<i32>().ok());
     let my_idx = entries.len();
-    entries.push((parent_idx, kind.clone(), style.clone(), el.classes.clone(), el.id.clone(), draggable, tabindex));
+    entries.push((
+        parent_idx,
+        kind.clone(),
+        style.clone(),
+        el.classes.clone(),
+        el.id.clone(),
+        draggable,
+        tabindex,
+    ));
 
     // Container/Button 的裸文本 → Text 子节点。文本子像无 class 的 <span>：
     // taffy_style 取 DEFAULT（由测量定尺寸），视觉/字体字段继承父值。
@@ -439,7 +488,17 @@ fn gather_rec(
             ts.letter_spacing = style.letter_spacing;
             ts.text_align = style.text_align;
             ts.white_space_nowrap = style.white_space_nowrap;
-            entries.push((Some(my_idx), NodeKind::Text { content: text.clone() }, ts, Vec::new(), None, false, None));
+            entries.push((
+                Some(my_idx),
+                NodeKind::Text {
+                    content: text.clone(),
+                },
+                ts,
+                Vec::new(),
+                None,
+                false,
+                None,
+            ));
         }
     }
 
@@ -471,14 +530,41 @@ mod tests {
 
     #[test]
     fn scene_nodes_is_slotmap_and_get_by_id() {
-        let entries: Vec<(Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>)> = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None),
-            (Some(0), NodeKind::Button, ResolvedStyle::default(), Vec::new(), None, false, None),
+        let entries: Vec<(
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
+        )> = vec![
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Button,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
         ];
         let mut scene = Scene::build(&entries);
         // slotmap get by NodeId
         let root_id = scene.roots[0];
-        assert!(scene.nodes.get(root_id.to_key()).is_some(), "live NodeId 可 get（经 to_key）");
+        assert!(
+            scene.nodes.get(root_id.to_key()).is_some(),
+            "live NodeId 可 get（经 to_key）"
+        );
         assert!(scene.get(root_id).is_some(), "Scene::get 桥接可用");
         // get_mut
         if let Some(n) = scene.get_mut(root_id) {
@@ -505,13 +591,30 @@ mod tests {
     #[test]
     fn node_id_from_key_to_key_roundtrip() {
         // 验证 NodeId ↔ DefaultKey 桥接 roundtrip（version=1，无删除）
-        let entries: Vec<(Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>)> = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None),
-        ];
+        let entries: Vec<(
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
+        )> = vec![(
+            None,
+            NodeKind::Container,
+            ResolvedStyle::default(),
+            Vec::new(),
+            None,
+            false,
+            None,
+        )];
         let scene = Scene::build(&entries);
         let id = scene.roots[0];
         // to_key 后 slotmap 能查到
-        assert!(scene.nodes.get(id.to_key()).is_some(), "to_key 重构的 key 能查到节点");
+        assert!(
+            scene.nodes.get(id.to_key()).is_some(),
+            "to_key 重构的 key 能查到节点"
+        );
         // index = slotmap idx = 1（slotmap free_head 从 1 起，idx 0 是 sentinel）
         assert_eq!(id.index(), 1, "首节点 slotmap idx=1");
         assert_eq!(id.gen(), 1, "version=1（无删除）");
@@ -546,14 +649,41 @@ mod tests {
 
     #[test]
     fn scene_build_6tuple_sets_draggable() {
-        let entries: Vec<(Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>)> = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None),
-            (Some(0), NodeKind::Button, ResolvedStyle::default(), Vec::new(), None, true, None),
+        let entries: Vec<(
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
+        )> = vec![
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Button,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                true,
+                None,
+            ),
         ];
         let scene = Scene::build(&entries);
         let root_id = scene.roots[0];
         let btn_id = scene.get(root_id).unwrap().children[0];
-        assert!(!scene.get(root_id).unwrap().draggable, "root draggable=false");
+        assert!(
+            !scene.get(root_id).unwrap().draggable,
+            "root draggable=false"
+        );
         assert!(scene.get(btn_id).unwrap().draggable, "btn draggable=true");
     }
 
@@ -564,7 +694,10 @@ mod tests {
             nodes: SlotMap::with_key(),
             dynamic_rules: Default::default(),
             focused_node: None,
-            world_transforms: Vec::new(), anim: Default::default(), scroll: Default::default(), text_layouts: Vec::new(),
+            world_transforms: Vec::new(),
+            anim: Default::default(),
+            scroll: Default::default(),
+            text_layouts: Vec::new(),
         };
         assert!(
             s.dynamic_rules.rules.is_empty(),
@@ -586,26 +719,73 @@ mod tests {
             nodes: SlotMap::with_key(),
             dynamic_rules: Default::default(),
             focused_node: None,
-            world_transforms: Vec::new(), anim: Default::default(), scroll: Default::default(), text_layouts: Vec::new(),
+            world_transforms: Vec::new(),
+            anim: Default::default(),
+            scroll: Default::default(),
+            text_layouts: Vec::new(),
         };
         assert_eq!(s.focused_node, None, "Scene 默认 focused_node=None");
     }
 
     #[test]
     fn scene_build_7tuple_sets_tabindex() {
-        let entries: Vec<(Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>)> = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None),
-            (Some(0), NodeKind::Button, ResolvedStyle::default(), Vec::new(), None, false, Some(0)),
-            (Some(0), NodeKind::Button, ResolvedStyle::default(), Vec::new(), None, false, Some(3)),
+        let entries: Vec<(
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
+        )> = vec![
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Button,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                Some(0),
+            ),
+            (
+                Some(0),
+                NodeKind::Button,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                Some(3),
+            ),
         ];
         let scene = Scene::build(&entries);
         let root_id = scene.roots[0];
         let kids = &scene.get(root_id).unwrap().children;
         let btn1 = kids[0];
         let btn2 = kids[1];
-        assert_eq!(scene.get(root_id).unwrap().tabindex, None, "root tabindex=None");
-        assert_eq!(scene.get(btn1).unwrap().tabindex, Some(0), "btn1 tabindex=Some(0)");
-        assert_eq!(scene.get(btn2).unwrap().tabindex, Some(3), "btn2 tabindex=Some(3)");
+        assert_eq!(
+            scene.get(root_id).unwrap().tabindex,
+            None,
+            "root tabindex=None"
+        );
+        assert_eq!(
+            scene.get(btn1).unwrap().tabindex,
+            Some(0),
+            "btn1 tabindex=Some(0)"
+        );
+        assert_eq!(
+            scene.get(btn2).unwrap().tabindex,
+            Some(3),
+            "btn2 tabindex=Some(3)"
+        );
         assert!(!scene.get(root_id).unwrap().focused, "focused 默认 false");
         assert_eq!(scene.focused_node, None, "build 后 focused_node=None");
     }
@@ -616,9 +796,35 @@ mod tests {
         // 不走 parse_html/build_scene——证明 Scene::build 独立于 parse（read_package 依赖此）。
         let root_style = ResolvedStyle::default();
         let text_style = ResolvedStyle::default();
-        let entries: Vec<(Option<usize>, NodeKind, ResolvedStyle, Vec<String>, Option<String>, bool, Option<i32>)> = vec![
-            (None, NodeKind::Container, root_style, Vec::new(), None, false, None),
-            (Some(0), NodeKind::Text { content: "hi".into() }, text_style, Vec::new(), None, false, None),
+        let entries: Vec<(
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
+        )> = vec![
+            (
+                None,
+                NodeKind::Container,
+                root_style,
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Text {
+                    content: "hi".into(),
+                },
+                text_style,
+                Vec::new(),
+                None,
+                false,
+                None,
+            ),
         ];
         let scene = Scene::build(&entries);
 
@@ -640,8 +846,12 @@ mod tests {
         let mut of = ResolvedStyle::default();
         of.overflow_x = OverflowMode::Hidden;
         of.overflow_y = OverflowMode::Hidden;
-        let scene2 = Scene::build(&[(None, NodeKind::Container, of, Vec::new(), None, false, None)]);
-        assert!(scene2.get(scene2.roots[0]).unwrap().clip_rect.is_some(), "overflow Hidden → clip slot");
+        let scene2 =
+            Scene::build(&[(None, NodeKind::Container, of, Vec::new(), None, false, None)]);
+        assert!(
+            scene2.get(scene2.roots[0]).unwrap().clip_rect.is_some(),
+            "overflow Hidden → clip slot"
+        );
     }
 
     #[test]
@@ -650,27 +860,54 @@ mod tests {
         for (x, y, desc) in [
             (OverflowMode::Scroll, OverflowMode::Scroll, "scroll 双轴"),
             (OverflowMode::Auto, OverflowMode::Auto, "auto 双轴"),
-            (OverflowMode::Scroll, OverflowMode::Visible, "仅 x 轴 scroll"),
+            (
+                OverflowMode::Scroll,
+                OverflowMode::Visible,
+                "仅 x 轴 scroll",
+            ),
             (OverflowMode::Visible, OverflowMode::Auto, "仅 y 轴 auto"),
         ] {
             let mut s = ResolvedStyle::default();
             s.overflow_x = x;
             s.overflow_y = y;
             let sc = Scene::build(&[(None, NodeKind::Container, s, Vec::new(), None, false, None)]);
-            assert!(sc.get(sc.roots[0]).unwrap().clip_rect.is_some(), "{} → clip slot", desc);
+            assert!(
+                sc.get(sc.roots[0]).unwrap().clip_rect.is_some(),
+                "{} → clip slot",
+                desc
+            );
         }
         // 双轴 Visible → 无 clip slot（对照）
         let mut vis = ResolvedStyle::default();
         vis.overflow_x = OverflowMode::Visible;
         vis.overflow_y = OverflowMode::Visible;
-        let sc = Scene::build(&[(None, NodeKind::Container, vis, Vec::new(), None, false, None)]);
-        assert!(sc.get(sc.roots[0]).unwrap().clip_rect.is_none(), "双轴 Visible → 无 clip slot");
+        let sc = Scene::build(&[(
+            None,
+            NodeKind::Container,
+            vis,
+            Vec::new(),
+            None,
+            false,
+            None,
+        )]);
+        assert!(
+            sc.get(sc.roots[0]).unwrap().clip_rect.is_none(),
+            "双轴 Visible → 无 clip slot"
+        );
     }
 
     /// AnimTable 用 HashMap<NodeId, NodeAnim>。测试一律用 slotmap 分配的真实 NodeId
     /// + 生产路径写法（ensure(id)），不用字面量 NodeId(N) 撑表。
     fn anim_scene_one_node() -> (Scene, NodeId) {
-        let sc = Scene::build(&[(None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None)]);
+        let sc = Scene::build(&[(
+            None,
+            NodeKind::Container,
+            ResolvedStyle::default(),
+            Vec::new(),
+            None,
+            false,
+            None,
+        )]);
         let id = sc.roots[0];
         (sc, id)
     }
@@ -687,15 +924,34 @@ mod tests {
         // 全默认的 NodeAnim（ensure 后未写任何通道）→ get 返 None（is_empty 过滤）
         let other = {
             let sc = Scene::build(&[
-                (None, NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None),
-                (Some(0), NodeKind::Container, ResolvedStyle::default(), Vec::new(), None, false, None),
+                (
+                    None,
+                    NodeKind::Container,
+                    ResolvedStyle::default(),
+                    Vec::new(),
+                    None,
+                    false,
+                    None,
+                ),
+                (
+                    Some(0),
+                    NodeKind::Container,
+                    ResolvedStyle::default(),
+                    Vec::new(),
+                    None,
+                    false,
+                    None,
+                ),
             ]);
             sc.roots[0]
         };
         // 注：other 是另一 scene 的 NodeId，此处仅验证 ensure 后未写 → get None
         let mut t2 = AnimTable::default();
         t2.ensure(other);
-        assert!(t2.get(other).is_none(), "ensure 后全 None → is_empty 过滤 → get None");
+        assert!(
+            t2.get(other).is_none(),
+            "ensure 后全 None → is_empty 过滤 → get None"
+        );
         // clear_node
         t.clear_node(id);
         assert!(t.get(id).is_none(), "clear_node 后 get 返 None");
@@ -725,7 +981,11 @@ mod tests {
         // 注：clear_prop 后断言用 t.0.get(&id)（绕过 get 的 is_empty 过滤），
         // 因逐通道清到全 None 时 get 会返 None，但条目本身仍在（clear_node 才 remove）。
         // macro：每次展开独立借用，避免闭包持借冲突 clear_prop 的 &mut。
-        macro_rules! raw { () => { t.0.get(&id).expect("条目存在（clear_prop 不 remove）") }; }
+        macro_rules! raw {
+            () => {
+                t.0.get(&id).expect("条目存在（clear_prop 不 remove）")
+            };
+        }
         t.clear_prop(id, crate::tween::TweenProp::Opacity);
         assert!(raw!().opacity.is_none(), "清 opacity");
         assert!(raw!().transform.is_some(), "opacity 清了，transform 保留");
@@ -743,7 +1003,10 @@ mod tests {
         t.clear_prop(id, crate::tween::TweenProp::TextColor);
         assert!(raw!().text_color.is_none(), "清 text_color");
         // 全清后 → is_empty → get None（条目仍在，但 get 过滤掉）
-        assert!(t.get(id).is_none(), "全通道清后 get 返 None（is_empty 过滤）");
+        assert!(
+            t.get(id).is_none(),
+            "全通道清后 get 返 None（is_empty 过滤）"
+        );
         // clear_node 才真正 remove
         t.clear_node(id);
         assert!(t.0.get(&id).is_none(), "clear_node 后 HashMap 无条目");
@@ -752,7 +1015,11 @@ mod tests {
     #[test]
     fn nodeanim_is_empty_default_true() {
         assert!(NodeAnim::default().is_empty());
-        assert!(!NodeAnim { opacity: Some(0.5), ..Default::default() }.is_empty());
+        assert!(!NodeAnim {
+            opacity: Some(0.5),
+            ..Default::default()
+        }
+        .is_empty());
     }
 }
 
@@ -783,15 +1050,49 @@ mod parse_tests {
         // 手搓 Scene（不走 parse）：root(id="root") + btn(id="btn") + Text 子(无 id)。
         // 验：精确匹配返 NodeId；无匹配/空 id → None。
         let entries = vec![
-            (None, NodeKind::Container, ResolvedStyle::default(), vec![], Some("root".to_string()), false, None),
-            (Some(0), NodeKind::Button, ResolvedStyle::default(), vec![], Some("btn".to_string()), false, None),
-            (Some(1), NodeKind::Text { content: "x".into() }, ResolvedStyle::default(), vec![], None, false, None),
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                Some("root".to_string()),
+                false,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Button,
+                ResolvedStyle::default(),
+                vec![],
+                Some("btn".to_string()),
+                false,
+                None,
+            ),
+            (
+                Some(1),
+                NodeKind::Text {
+                    content: "x".into(),
+                },
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+            ),
         ];
         let scene = Scene::build(&entries);
         let root_id = scene.roots[0];
         let btn_id = scene.get(root_id).unwrap().children[0];
-        assert_eq!(scene.find_by_id_attr("btn"), Some(btn_id), "find btn → btn node");
-        assert_eq!(scene.find_by_id_attr("root"), Some(root_id), "find root → root node");
+        assert_eq!(
+            scene.find_by_id_attr("btn"),
+            Some(btn_id),
+            "find btn → btn node"
+        );
+        assert_eq!(
+            scene.find_by_id_attr("root"),
+            Some(root_id),
+            "find root → root node"
+        );
         assert_eq!(scene.find_by_id_attr("missing"), None, "无匹配 → None");
         assert_eq!(scene.find_by_id_attr(""), None, "空 id → None");
     }
@@ -799,7 +1100,8 @@ mod parse_tests {
     #[test]
     fn builds_div_button_text_image() {
         // img 用属性 src（不是文本）；其它元素覆盖四种 NodeKind。
-        let html = r#"<div class="root"><button>OK</button><span>hi</span><img src="logo.png"></div>"#;
+        let html =
+            r#"<div class="root"><button>OK</button><span>hi</span><img src="logo.png"></div>"#;
         let css = ".root { width: 200px; }";
         let tree = parse_html(html).unwrap();
         let sheet = parse_css(css).unwrap();
@@ -944,7 +1246,11 @@ mod parse_tests {
         let root = scene.get(scene.roots[0]).unwrap();
         // btn 是 root 的子（root 的 Text 子"OK"另算——button 裸文本→Text 子）。
         // 找 button kind 的子：
-        let btn = scene.nodes.values().find(|n| matches!(n.kind, NodeKind::Button)).expect("btn");
+        let btn = scene
+            .nodes
+            .values()
+            .find(|n| matches!(n.kind, NodeKind::Button))
+            .expect("btn");
         assert!(btn.draggable, "draggable=\"true\" → Node.draggable=true");
         assert!(!root.draggable, "root 无 draggable 属性 → false");
     }
@@ -959,8 +1265,15 @@ mod parse_tests {
         let scene = build_scene(&tree, &styles);
         let root = scene.get(scene.roots[0]).unwrap();
         assert!(!root.draggable, "draggable=\"false\" → false");
-        let btn = scene.nodes.values().find(|n| matches!(n.kind, NodeKind::Button)).expect("btn");
-        assert!(!btn.draggable, "draggable=\"yes\"（非 true）→ false（truthy 仅认 true）");
+        let btn = scene
+            .nodes
+            .values()
+            .find(|n| matches!(n.kind, NodeKind::Button))
+            .expect("btn");
+        assert!(
+            !btn.draggable,
+            "draggable=\"yes\"（非 true）→ false（truthy 仅认 true）"
+        );
     }
 
     #[test]
@@ -971,7 +1284,11 @@ mod parse_tests {
         let sheet = parse_css(css).unwrap();
         let styles = resolve_styles(&tree, &sheet);
         let scene = build_scene(&tree, &styles);
-        let btns: Vec<_> = scene.nodes.values().filter(|n| matches!(n.kind, NodeKind::Button)).collect();
+        let btns: Vec<_> = scene
+            .nodes
+            .values()
+            .filter(|n| matches!(n.kind, NodeKind::Button))
+            .collect();
         assert_eq!(btns.len(), 5);
         assert_eq!(btns[0].tabindex, Some(0), "tabindex=\"0\" → Some(0)");
         assert_eq!(btns[1].tabindex, Some(3), "tabindex=\"3\" → Some(3)");
