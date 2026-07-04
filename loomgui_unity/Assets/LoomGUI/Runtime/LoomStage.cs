@@ -584,7 +584,7 @@ namespace LoomGUI
 
                 var blob = new FrameBlob(_frameBuf);
                 _pool.Sync(blob, transform, _mm, _sprites, Texture2D.whiteTexture, _font);
-                _nhm.Sync(blob);
+                _nhm.Sync(_stage);
             }
 
             // 事件派发（tick 后——borrow_events 读本帧 last_events，下 tick 失效）。

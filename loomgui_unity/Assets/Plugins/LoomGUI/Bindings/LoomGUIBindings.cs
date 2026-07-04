@@ -224,6 +224,27 @@ namespace LoomGUI.Bindings
         internal static extern void loomgui_stage_get_node_layout_rect(StageHandle* h, uint node_id, float* out_x, float* out_y, float* out_w, float* out_h);
 
         /// <summary>
+        ///  读节点 world transform（compute_world_transforms 产物）。null/无效 → 写 identity。
+        ///  out: a,b,c,d,tx,ty（6 个 f32，Affine2 列主序）。对齐 get_node_layout_rect 惯例
+        ///  （独立 *mut out + 无状态码 + null/无效写默认）。空 div（merge_meshes 后 RenderNode
+        ///  消失）仍可查——world_transforms 保留全节点（与 node_sort_keys 同）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_world_matrix", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_get_node_world_matrix(StageHandle* h, uint node_id, float* out_a, float* out_b, float* out_c, float* out_d, float* out_tx, float* out_ty);
+
+        /// <summary>
+        ///  读节点 sort_key（merge 前快照，DFS 序号）。null/无效 → 写 0。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_sort_key", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_get_node_sort_key(StageHandle* h, uint node_id, uint* @out);
+
+        /// <summary>
+        ///  读节点可见性（存在 + 非 display:none）。null/无效 → 写 0（false）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_visible", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_get_node_visible(StageHandle* h, uint node_id, byte* @out);
+
+        /// <summary>
         ///  设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_reuse_key", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]

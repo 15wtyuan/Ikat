@@ -7,6 +7,7 @@ use std::ffi::CString;
 use loomgui_core::input::{EventRecord, KeyEvent, PointerEvent};
 use loomgui_core::scene::NodeId;
 use loomgui_core::stage::Stage;
+use loomgui_core::transform;
 
 /// 版本字符串（C null-terminated `b"v1e\0"`）。
 ///
@@ -485,6 +486,52 @@ pub extern "C" fn loomgui_stage_get_node_layout_rect(
     if !out_y.is_null() { unsafe { *out_y = y; } }
     if !out_w.is_null() { unsafe { *out_w = w; } }
     if !out_h.is_null() { unsafe { *out_h = hh; } }
+}
+
+/// 读节点 world transform（compute_world_transforms 产物）。null/无效 → 写 identity。
+/// out: a,b,c,d,tx,ty（6 个 f32，Affine2 列主序）。对齐 get_node_layout_rect 惯例
+/// （独立 *mut out + 无状态码 + null/无效写默认）。空 div（merge_meshes 后 RenderNode
+/// 消失）仍可查——world_transforms 保留全节点（与 node_sort_keys 同）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_world_matrix(
+    h: *const StageHandle, node_id: u32,
+    out_a: *mut f32, out_b: *mut f32, out_c: *mut f32,
+    out_d: *mut f32, out_tx: *mut f32, out_ty: *mut f32,
+) {
+    let m = if h.is_null() { None } else {
+        let sh = unsafe { &*h };
+        sh.stage.get_node_world_matrix(NodeId(node_id))
+    }.unwrap_or(transform::IDENTITY); // [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+    if !out_a.is_null() { unsafe { *out_a = m[0]; } }
+    if !out_b.is_null() { unsafe { *out_b = m[1]; } }
+    if !out_c.is_null() { unsafe { *out_c = m[2]; } }
+    if !out_d.is_null() { unsafe { *out_d = m[3]; } }
+    if !out_tx.is_null() { unsafe { *out_tx = m[4]; } }
+    if !out_ty.is_null() { unsafe { *out_ty = m[5]; } }
+}
+
+/// 读节点 sort_key（merge 前快照，DFS 序号）。null/无效 → 写 0。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_sort_key(
+    h: *const StageHandle, node_id: u32, out: *mut u32,
+) {
+    let sk = if h.is_null() { None } else {
+        let sh = unsafe { &*h };
+        sh.stage.get_node_sort_key(NodeId(node_id))
+    }.unwrap_or(0);
+    if !out.is_null() { unsafe { *out = sk; } }
+}
+
+/// 读节点可见性（存在 + 非 display:none）。null/无效 → 写 0（false）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_visible(
+    h: *const StageHandle, node_id: u32, out: *mut u8,
+) {
+    let vis = if h.is_null() { false } else {
+        let sh = unsafe { &*h };
+        sh.stage.get_node_visible(NodeId(node_id))
+    };
+    if !out.is_null() { unsafe { *out = if vis { 1 } else { 0 }; } }
 }
 
 /// 设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。

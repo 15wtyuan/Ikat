@@ -218,6 +218,37 @@ impl Stage {
         self.scene.as_ref()?.get(node).map(|n| n.layout_rect)
     }
 
+    /// 读节点 world transform（compute_world_transforms 产物，全节点含空 div）。
+    /// NativeHost FFI 查询用——merge_meshes 后空 div slot 的 RenderNode 消失，
+    /// 但 world_transforms 保留全节点（与 node_sort_keys 同）。node 无效 / scene 未建 → None。
+    pub fn get_node_world_matrix(&self, node: NodeId) -> Option<crate::transform::Affine2> {
+        let scene = self.scene.as_ref()?;
+        scene.get(node)?; // gen 校验（slotmap 代际）；失效 → None
+        scene.world_transforms.get(node.index()).copied()
+    }
+
+    /// 读节点 sort_key（assign_sort_keys 在 merge_meshes 前的 DFS 序号快照）。
+    /// NativeHost FFI 查询用——merge 后空 div entry 消失，回 scene.node_sort_keys 兜底。
+    /// node 无效 / scene 未建 → None。
+    pub fn get_node_sort_key(&self, node: NodeId) -> Option<u32> {
+        let scene = self.scene.as_ref()?;
+        scene.get(node)?;
+        scene.node_sort_keys.get(node.index()).copied()
+    }
+
+    /// 节点可见性：节点存在 + 非 display:none。remove_node / scene 未建 / display:none → false。
+    /// NativeHost FFI 查询用。display 走 taffy::Display（ResolvedStyle.taffy_style.display）。
+    pub fn get_node_visible(&self, node: NodeId) -> bool {
+        let scene = match self.scene.as_ref() {
+            Some(s) => s,
+            None => return false,
+        };
+        match scene.get(node) {
+            None => false,
+            Some(n) => !matches!(n.style.taffy_style.display, taffy::Display::None),
+        }
+    }
+
     /// 编程聚焦（照 fgui RequestFocus）。强制聚焦任意非 disabled 节点
     /// （含 tabindex=None/-1——request_focus 是编程 API，不查 tabindex）。
     /// disabled 拒 / 越界跳过。记 pending_focus_request，下 tick 最前消费（不直接写 last_events）。
@@ -295,6 +326,7 @@ impl Stage {
                 anim: Default::default(),
                 scroll: Default::default(),
                 text_layouts: Vec::new(),
+                node_sort_keys: Vec::new(),
             });
             self.prev_node_hashes.clear(); // 新 scene → 无基线，下帧全 dirty
         }
@@ -448,6 +480,7 @@ impl Stage {
             anim: Default::default(),
             scroll: Default::default(),
             text_layouts: Vec::new(),
+            node_sort_keys: Vec::new(),
         });
         s
     }
@@ -519,7 +552,8 @@ impl Stage {
         //    返回新 hash 存 self.prev_node_hashes 供下帧比。
         // build_render_nodes 查 Stage.image_sizes 算九宫格 UV（slice_px / src_px）。
         // Image payload 带 path，UV 全图 (0,0)-(1,1)（无 atlas 子区），Unity 查 Sprite 拿真实 UV。
-        let (frame, new_hashes) = build_render_nodes(scene, &self.font, &self.prev_node_hashes, &self.image_sizes);
+        let (frame, new_hashes, sort_keys) = build_render_nodes(scene, &self.font, &self.prev_node_hashes, &self.image_sizes);
+        scene.node_sort_keys = sort_keys;
         self.prev_node_hashes = new_hashes;
         frame
     }
@@ -821,6 +855,7 @@ mod tests {
             dynamic_rules: Default::default(),
             focused_node: None,
             world_transforms: Vec::new(), anim: Default::default(), scroll: Default::default(), text_layouts: Vec::new(),
+            node_sort_keys: Vec::new(),
         });
         s.set_input(&[crate::input::PointerEvent { kind: crate::input::PointerKind::Move, x: 50.0, y: 50.0, button: 0, pad: [0, 0], touch_id: -1 }]);
         s.tick_and_render();
