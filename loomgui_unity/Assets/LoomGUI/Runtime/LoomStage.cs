@@ -33,8 +33,8 @@ namespace LoomGUI
     {
         [SerializeField] Vector2 _designSize = new(1080, 1920);
         [SerializeField] Camera _uiCamera;
-        // Unity 动态字体：与 Rust measure 的同一份 DejaVuSans.ttf（Assets/LoomGUI/Fonts/）。
-        // Inspector 指定为主路径；EditMode 测试 / 未配场景用 AssetDatabase 兜底（见 EnsureFont）。
+        // Unity 动态字体：与 Rust measure 的同一份 ttf（_fontFile）。必须 Inspector 指定（EnsureFont 校验）。
+        // 字体是项目设计资源（Assets/LoomUI/res/fonts/），非框架自带——框架不绑资源路径。
         [SerializeField] Font _font;
 
         // Stage 读取的 ttf 文件名（StreamingAssets 下，喂 Rust measure）。
@@ -401,20 +401,14 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 取 Unity 动态 Font。Inspector 指定优先；未配则 EditMode 用 AssetDatabase 兜底加载
-        /// Assets/LoomGUI/Fonts/DejaVuSans.ttf（PlayMode/build 必须由用户在 Inspector 指定——
-        /// AssetDatabase 仅 editor）。Font 须与 Rust measure 同一份 ttf（跨平台一致性根）。
+        /// 校验 Unity 动态 Font。必须由用户在 Inspector 指定 _font（与 _fontFile 同一份 ttf，
+        /// 跨平台一致）。框架不自带字体——字体是项目设计资源（Assets/LoomUI/res/fonts/）。
+        /// SampleScene 已配；EditMode 测试不实例化 LoomStage，故无需 editor 兜底。
         /// </summary>
         void EnsureFont()
         {
             if (_font != null) return;
-#if UNITY_EDITOR
-            _font = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Assets/LoomGUI/Fonts/DejaVuSans.ttf");
-            if (_font == null)
-                Debug.LogError("[LoomStage] 未在 Inspector 指定 _font，且 Assets/LoomGUI/Fonts/DejaVuSans.ttf 不可达");
-#else
-            Debug.LogError("[LoomStage] PlayMode/build 必须在 Inspector 指定 _font（DejaVuSans）");
-#endif
+            Debug.LogError("[LoomStage] 必须在 Inspector 指定 _font（与 _fontFile 同一份 ttf；字体在 Assets/LoomUI/res/fonts/）");
         }
 
         /// <summary>

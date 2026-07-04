@@ -185,7 +185,7 @@ namespace LoomGUI.Tests
     /// 已渲染 text 内容更新、字体没变 → 不重建 → 画面停在旧文字。
     public class MirrorPoolTextTests
     {
-        const string DejaVuPath = "Assets/LoomGUI/Fonts/DejaVuSans.ttf";
+        const string DejaVuPath = "Assets/LoomUI/res/fonts/DejaVuSans.ttf";
 
         /// 构造单节点 text blob（kind=2，v9 22 列 SOA + text_arena 段）。
         /// 镜像 OneNodeBlobV9（mesh）但 payload_kind=2、mesh_arena 空、text_arena 含 glyphs。
