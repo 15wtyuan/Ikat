@@ -31,6 +31,7 @@ MonoBehaviour:
     - page_text.html
     - page_tween.html
     - tips_toast.html
+    - page_nativehost.html
   atlasEntries:
   - atlasName: ShowcaseAtlas
     isDefault: 0

@@ -305,6 +305,14 @@ MonoBehaviour:
   _stage: {fileID: 330585548}
   _nativeModel: {fileID: 0}
   _nativeScale: {x: 120, y: 120, z: 120}
+  _characterPrefab: {fileID: 0}
+  _effectPrefab: {fileID: 0}
+  _characterScale: {x: 70, y: 70, z: 70}
+  _characterAnimator: {fileID: 0}
+  _animStates:
+  - Idle
+  - Walk
+  - Run
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0
