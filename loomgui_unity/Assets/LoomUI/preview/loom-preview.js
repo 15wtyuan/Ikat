@@ -142,7 +142,41 @@
     page_tween:    function () { wireBackHome(); /*Task9*/ },
     page_interact: function () { wireBackHome(); /*Task10*/ },
     page_dyntree:  function () { wireBackHome(); /*Task8*/ },
-    page_list:     function () { wireBackHome(); /*Task7*/ }
+    page_list:     function () {
+      wireBackHome();
+      // item 视觉对齐 C# VirtualListDriver.CreateItem（灰底 + icon + 标题）。
+      // icon 用 res/icons/skin.png（<base href=".."> 解析到 LoomUI/res/）。
+      function renderItem(height, title) {
+        var row = document.createElement('div');
+        row.style.cssText = 'width:100%;height:' + height + 'px;flex-direction:row;align-items:center;gap:12px;padding:0 16px;background-color:#252839';
+        var icon = document.createElement('img');
+        icon.src = 'res/icons/skin.png';
+        icon.style.cssText = 'width:48px;height:48px';
+        row.appendChild(icon);
+        var t = document.createElement('span');
+        t.style.cssText = 'color:#e0e0e0;font-size:20px';
+        t.textContent = title;
+        row.appendChild(t);
+        return row;
+      }
+      // equal：1000 个等高 80px。
+      var eq = $('list-equal');
+      if (eq) {
+        var f1 = document.createDocumentFragment();
+        for (var i = 0; i < 1000; i++) f1.appendChild(renderItem(80, 'Item ' + i));
+        eq.appendChild(f1);
+      }
+      // variable：200 个 sin 高（60~140px，抄 C# sizes[i]=100+40*sin(i*0.3)）。
+      var vr = $('list-variable');
+      if (vr) {
+        var f2 = document.createDocumentFragment();
+        for (var j = 0; j < 200; j++) {
+          var h = 100 + 40 * Math.sin(j * 0.3);
+          f2.appendChild(renderItem(h, 'Item ' + j + '  (' + Math.round(h) + 'px)'));
+        }
+        vr.appendChild(f2);
+      }
+    }
   };
 
   // === boot ===
