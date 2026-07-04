@@ -62,6 +62,11 @@
       '</div>'
   };
 
+  // 灯组数量（与 C# LampCount 对齐）。
+  var LAMP_COUNT = { click:6, hover:4, drag:4, key:8, complete:3, longpress:3, outer:3, inner:3, pe:3 };
+  // 各灯组当前已亮盏数（0..N 循环重置）。
+  var lampLit = {};
+
   // === shared helpers ===
   function $(id) { return document.getElementById(id); }
   function bind(id, type, fn) { var el = $(id); if (el) el.addEventListener(type, fn); }
@@ -110,13 +115,20 @@
   function showMail() { ensureOverlay('mail').innerHTML = TEMPLATES.mail; }
   function hideMail() { var ov = $('loom-overlay-mail'); if (ov) ov.innerHTML = ''; }
 
-  // 灯阵脉冲：lamp-{name} 容器 opacity 1→0.3→1（CSS transition，近似 C# LightLamp）。
-  function pulseLamp(name) {
-    var c = $('lamp-' + name);
-    if (!c) return;
-    c.style.transition = 'opacity .2s';
-    c.style.opacity = '0.3';
-    setTimeout(function () { c.style.opacity = '1'; }, 200);
+  // 点亮 lamp-{name}-{lit}（id-addressable）+ count-{name} 计数，全亮后循环重置。
+  // 与 C# LightLamp 对齐。
+  function lightNext(name) {
+    var n = LAMP_COUNT[name] || 3;
+    var lit = lampLit[name] || 0;
+    if (lit >= n) {
+      for (var i = 0; i < n; i++) { var e = $('lamp-' + name + '-' + i); if (e) e.style.backgroundColor = '#3a3f55'; }
+      lit = 0;
+    }
+    var lamp = $('lamp-' + name + '-' + lit);
+    if (lamp) lamp.style.backgroundColor = '#5fb2c4';
+    lampLit[name] = lit + 1;
+    var counter = $('count-' + name);
+    if (counter) counter.textContent = String((parseInt(counter.textContent, 10) || 0) + 1);
   }
 
   // fit-scale：镜像 engine letterbox（sf=min(vw/1080, vh/1920)）。
@@ -195,7 +207,7 @@
         el.classList.toggle('play');
         el.addEventListener('transitionend', function done() {
           el.removeEventListener('transitionend', done);
-          pulseLamp('complete');
+          lightNext('complete');
         });
       });
       // kill 冻结当前角（pause）；clear 清动画回 CSS 初始。
@@ -211,30 +223,30 @@
     page_interact: function () {
       wireBackHome();
       // click / dblclick
-      bind('hit-click', 'click', function () { pulseLamp('click'); });
-      bind('hit-click', 'dblclick', function () { pulseLamp('click'); });
+      bind('hit-click', 'click', function () { lightNext('click'); });
+      bind('hit-click', 'dblclick', function () { lightNext('click'); });
       // hover（RollOver/Out）
-      bind('hit-hover', 'mouseenter', function () { pulseLamp('hover'); });
-      bind('hit-hover', 'mouseleave', function () { pulseLamp('hover'); });
+      bind('hit-hover', 'mouseenter', function () { lightNext('hover'); });
+      bind('hit-hover', 'mouseleave', function () { lightNext('hover'); });
       // drag（HTML5 dragstart/drag）
-      bind('hit-drag', 'dragstart', function () { pulseLamp('drag'); });
-      bind('hit-drag', 'drag', function () { pulseLamp('drag'); });
+      bind('hit-drag', 'dragstart', function () { lightNext('drag'); });
+      bind('hit-drag', 'drag', function () { lightNext('drag'); });
       // longpress（mousedown 起 1.5s timer）
       var lpTimer = null;
       var lp = $('hit-longpress');
       if (lp) {
         lp.addEventListener('mousedown', function () {
-          lpTimer = setTimeout(function () { pulseLamp('longpress'); }, 1500);
+          lpTimer = setTimeout(function () { lightNext('longpress'); }, 1500);
         });
         lp.addEventListener('mouseup', function () { if (lpTimer) clearTimeout(lpTimer); });
         lp.addEventListener('mouseleave', function () { if (lpTimer) clearTimeout(lpTimer); });
       }
       // key（聚焦后按键）
-      bind('hit-key', 'keydown', function () { pulseLamp('key'); });
+      bind('hit-key', 'keydown', function () { lightNext('key'); });
       // 路由：inner stopPropagation 止冒泡。
-      bind('route-outer', 'click', function () { pulseLamp('route'); });
-      bind('route-pe', 'click', function () { pulseLamp('route'); });
-      bind('route-inner', 'click', function (e) { e.stopPropagation(); pulseLamp('route'); });
+      bind('route-outer', 'click', function () { lightNext('route'); });
+      bind('route-pe', 'click', function () { lightNext('route'); });
+      bind('route-inner', 'click', function (e) { e.stopPropagation(); lightNext('route'); });
       // hit-disabled 不绑（HTML 已带 .disabled，视觉灰 + 不响应）
     },
     page_dyntree:  function () {

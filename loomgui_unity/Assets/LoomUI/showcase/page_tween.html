@@ -79,9 +79,12 @@
           <div class="card-h"><span class="card-t">7.4 complete 回调</span><span class="card-x">预期: 动画结束亮灯（TweenComplete + tag）</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
             <div class="hit" id="complete-play">播放（结束后亮灯）</div>
-            <div class="lamps" id="lamp-complete">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div class="lamps">
+              <div class="lamp" id="lamp-complete-0"></div>
+              <div class="lamp" id="lamp-complete-1"></div>
+              <div class="lamp" id="lamp-complete-2"></div>
             </div>
+            <span class="card-x">已触发 <span id="count-complete">0</span> 次</span>
             <span class="card-x">t-opacity 跑完后 core 产 TweenComplete（tag=7），C# 识别 tag 亮 lamp-complete。</span>
           </div>
         </div>

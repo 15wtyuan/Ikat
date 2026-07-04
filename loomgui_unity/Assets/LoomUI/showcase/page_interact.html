@@ -49,18 +49,21 @@
           <div class="card-h"><span class="card-t">4.1 click + dblclick</span><span class="card-x">预期: 单击亮 1 下/双击亮 2 下（容器脉冲）</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
             <div class="hit" id="hit-click">点我（单击+双击）</div>
-            <div class="lamps" id="lamp-click">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div class="lamps">
+              <div class="lamp" id="lamp-click-0"></div><div class="lamp" id="lamp-click-1"></div><div class="lamp" id="lamp-click-2"></div>
+              <div class="lamp" id="lamp-click-3"></div><div class="lamp" id="lamp-click-4"></div><div class="lamp" id="lamp-click-5"></div>
             </div>
+            <span class="card-x">已触发 <span id="count-click">0</span> 次</span>
           </div>
         </div>
         <div class="card">
           <div class="card-h"><span class="card-t">4.2 hover / leave / active</span><span class="card-x">预期: 悬停变色 + 进入/离开亮灯</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
             <div class="hit" id="hit-hover">悬停我（RollOver/Out 亮灯）</div>
-            <div class="lamps" id="lamp-hover">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div class="lamps">
+              <div class="lamp" id="lamp-hover-0"></div><div class="lamp" id="lamp-hover-1"></div><div class="lamp" id="lamp-hover-2"></div><div class="lamp" id="lamp-hover-3"></div>
             </div>
+            <span class="card-x">已触发 <span id="count-hover">0</span> 次</span>
           </div>
         </div>
         <div class="card">
@@ -74,28 +77,31 @@
           <div class="card-h"><span class="card-t">4.4 drag</span><span class="card-x">预期: 拖动亮灯（DragMove）</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
             <div class="hit" draggable="true" id="hit-drag">拖我（draggable）</div>
-            <div class="lamps" id="lamp-drag">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div class="lamps">
+              <div class="lamp" id="lamp-drag-0"></div><div class="lamp" id="lamp-drag-1"></div><div class="lamp" id="lamp-drag-2"></div><div class="lamp" id="lamp-drag-3"></div>
             </div>
+            <span class="card-x">已触发 <span id="count-drag">0</span> 次</span>
           </div>
         </div>
         <div class="card">
           <div class="card-h"><span class="card-t">4.5 longpress</span><span class="card-x">预期: 长按 1.5s 亮灯</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
             <div class="hit" id="hit-longpress">长按 1.5s</div>
-            <div class="lamps" id="lamp-longpress">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div class="lamps">
+              <div class="lamp" id="lamp-longpress-0"></div><div class="lamp" id="lamp-longpress-1"></div><div class="lamp" id="lamp-longpress-2"></div>
             </div>
+            <span class="card-x">已触发 <span id="count-longpress">0</span> 次</span>
           </div>
         </div>
         <div class="card">
           <div class="card-h"><span class="card-t">4.6 focus + Tab + key</span><span class="card-x">预期: 聚焦后按键亮灯（KeyDown）</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
             <div class="hit" tabindex="1" id="hit-key">点聚焦后按键（tabindex）</div>
-            <div class="lamps" id="lamp-key">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div class="lamps">
+              <div class="lamp" id="lamp-key-0"></div><div class="lamp" id="lamp-key-1"></div><div class="lamp" id="lamp-key-2"></div><div class="lamp" id="lamp-key-3"></div>
+              <div class="lamp" id="lamp-key-4"></div><div class="lamp" id="lamp-key-5"></div><div class="lamp" id="lamp-key-6"></div><div class="lamp" id="lamp-key-7"></div>
             </div>
+            <span class="card-x">已触发 <span id="count-key">0</span> 次</span>
           </div>
         </div>
         <div class="card">

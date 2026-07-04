@@ -48,6 +48,15 @@ namespace LoomGUI
         // === 灯阵计数（page_interact）===
         int _clickCount, _hoverCount, _dragCount, _longCount, _keyCount, _routeCount;
 
+        // lamp 组当前已亮盏数（0..N 循环重置）。key=灯组 name。
+        readonly Dictionary<string, int> _lampLit = new();
+        static int LampCount(string name) => name switch {
+            "click" => 6, "hover" => 4, "drag" => 4, "key" => 8,
+            "complete" => 3, "longpress" => 3,
+            "outer" => 3, "inner" => 3, "pe" => 3,
+            _ => 3
+        };
+
         // === tween 演示（page_tween）===
         // Ease 0..9 与 Rust tween::Ease 对齐（OnEasePlay 取子集对比）。六 prop 在 OnTweenPlay 逐个硬编码 PlayProp。
         static readonly Ease[] _allEase = { Ease.Linear, Ease.QuadIn, Ease.QuadOut, Ease.QuadInOut, Ease.CubicIn, Ease.CubicOut, Ease.CubicInOut, Ease.BackIn, Ease.BackOut, Ease.BackInOut };
@@ -328,14 +337,26 @@ namespace LoomGUI
             AddPageListener(n, t, cb);
         }
 
-        // 点亮 lamp-{name} 容器：无 get_children API，改用整容器 opacity 脉冲指示触发。
-        void LightLamp(string name, int count)
+        // 点亮 lamp-{name}-{lit} 第 lit 盏（id-addressable）+ count-{name} 计数。
+        // 全亮后下一次触发先灭所有再重新从 0 点亮（循环）。count 显示累计触发次数。
+        void LightLamp(string name, int totalCount)
         {
-            uint container = _stage.FindNodeById("lamp-" + name);
-            if (container == uint.MaxValue) return;
-            _stage.Tween(container, TweenProp.Opacity,
-                new float[] { 1f, 0, 0, 0 }, new float[] { 0.3f, 0, 0, 0 },
-                0.2f, Ease.QuadOut, 0f, 0);
+            int n = LampCount(name);
+            if (!_lampLit.TryGetValue(name, out int lit)) lit = 0;
+            if (lit >= n)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    uint lamp = _stage.FindNodeById($"lamp-{name}-{i}");
+                    if (lamp != uint.MaxValue) _stage.SetStyle(lamp, "background-color:#3a3f55");
+                }
+                lit = 0;
+            }
+            uint node = _stage.FindNodeById($"lamp-{name}-{lit}");
+            if (node != uint.MaxValue) _stage.SetStyle(node, "background-color:#5fb2c4");
+            _lampLit[name] = lit + 1;
+            uint countNode = _stage.FindNodeById("count-" + name);
+            if (countNode != uint.MaxValue) _stage.SetText(countNode, totalCount.ToString());
         }
 
         // click + dblclick：双击额外多亮一盏（用 acc 色标记）。
