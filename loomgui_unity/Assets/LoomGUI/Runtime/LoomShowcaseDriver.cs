@@ -397,9 +397,14 @@ namespace LoomGUI
             SubscribeLamp("clear-btn", EventType.Click, OnClear);
             // t-opacity 的 TweenComplete（core 完成时直派，ctx.clickCount=prop、ctx.touchId=tag）。
             SubscribeLamp("t-opacity", EventType.TweenComplete, OnTweenCompleteTag);
-            // kill-target：启动即开始持续旋转（单次长 tween——loop 需 TweenComplete 重启，简化省略）。
+            // kill-target：点"播放"才开始持续旋转（不再进页自动转——和预览对齐）。
+            SubscribeLamp("play-kill-target", EventType.Click, OnPlayKillTarget);
+            Debug.Log("[Showcase] page_tween 订阅完成（play/ease/delay/complete/kill/clear + play-kill-target）");
+        }
+
+        void OnPlayKillTarget(EventContext ctx)
+        {
             PlayProp("kill-target", TweenProp.Rotation, new float[] { 0f, 0, 0, 0 }, new float[] { 360f, 0, 0, 0 }, 4f, Ease.Linear, 0f, 0);
-            Debug.Log("[Showcase] page_tween 订阅完成（play/ease/delay/complete/kill/clear + kill-target 旋转）");
         }
 
         void PlayProp(string id, TweenProp prop, float[] s, float[] e, float dur, Ease ease, float delay, uint tag)

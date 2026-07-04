@@ -179,7 +179,7 @@
         '#t-textcolor.play{color:#c2605a}' +
         '#ease-0.play,#ease-1.play,#ease-2.play{transform:translateX(200px)}' +
         '#d-0.play,#d-1.play,#d-2.play{opacity:1}' +
-        '#kill-target{animation:loom-spin 4s linear infinite}' +
+        '#kill-target.spinning{animation:loom-spin 4s linear infinite}' +
         '@keyframes loom-spin{to{transform:rotate(360deg)}}' +
         '#kill-target.paused{animation-play-state:paused}' +
         '#kill-target.cleared{animation:none;transform:none}';
@@ -199,11 +199,15 @@
           if (el) { el.style.transition = 'transform 1s ' + eases[i]; el.classList.toggle('play'); }
         });
       });
-      // delay 错峰：递增 transition-delay。
+      // delay 错峰：JS 直接控 opacity（不靠 CSS 类——inline style 优先级高于类选择器会卡死）。
+      var dState = false;
       bindClick('delay-play', function () {
+        dState = !dState;
         ['d-0', 'd-1', 'd-2'].forEach(function (id, i) {
           var el = $(id);
-          if (el) { el.style.transitionDelay = (i * 0.2) + 's'; el.classList.toggle('play'); }
+          if (!el) return;
+          el.style.transition = 'opacity .5s ease ' + (i * 0.2) + 's';
+          el.style.opacity = dState ? '1' : '0';
         });
       });
       // complete：t-opacity 动画结束后亮灯。
@@ -216,14 +220,17 @@
           lightNext('complete');
         });
       });
-      // kill 冻结当前角（pause）；clear 清动画回 CSS 初始。
+      bindClick('play-kill-target', function () {
+        var el = $('kill-target');
+        if (el) { el.classList.remove('cleared', 'paused'); el.classList.add('spinning'); el.textContent = '旋转中'; }
+      });
       bindClick('kill-btn', function () {
         var el = $('kill-target');
-        if (el) { el.classList.add('paused'); el.classList.remove('cleared'); }
+        if (el) { el.classList.add('paused'); }
       });
       bindClick('clear-btn', function () {
         var el = $('kill-target');
-        if (el) { el.classList.remove('paused'); el.classList.add('cleared'); }
+        if (el) { el.classList.remove('spinning', 'paused'); el.classList.add('cleared'); el.textContent = '未转'; }
       });
     },
     page_interact: function () {
