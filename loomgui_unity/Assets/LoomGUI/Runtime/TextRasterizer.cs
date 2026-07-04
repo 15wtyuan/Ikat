@@ -17,10 +17,6 @@ namespace LoomGUI
         // atlas rebuild 版本号。MirrorPool 记上次消费的版本；不等则 dirty 所有 text 节点。
         static int s_fontVersion;
 
-        // TEMP DIAG（坑 115 续）：禁 kern 验收仍重叠，打印实际渲染 pen_x + Unity quad 取证。
-        // 限 PlayMode 前 10 个 text 节点。取证后删。
-        static int s_diagCount;
-
         /// 当前 font atlas 版本。MirrorPool.Sync 据此判断是否需强制重光栅。
         public static int FontVersion => s_fontVersion;
 
@@ -102,30 +98,6 @@ namespace LoomGUI
                 seg.Colors[v] = cols[v];
             }
             for (int k = 0; k < idx.Count; k++) seg.Idx[k] = (uint)idx[k];
-
-            // TEMP DIAG（坑 115 续）：打印实际渲染的 pen_x + Unity CharacterInfo quad。
-            //   pen_x 不含 kern（V≈adv_A=16.4）→ .dll 生效 + 禁 kern 生效。
-            //   pen_x 含 kern（V≈15）→ stale .dll 或禁 kern 未生效。
-            //   quad 相邻重叠（ov>0）→ Unity quad 宽于 advance 是真正的重叠来源。
-            if (Application.isPlaying && s_diagCount < 10 && glyphs.Length > 1)
-            {
-                s_diagCount++;
-                var diag = new StringBuilder();
-                diag.AppendLine($"[TEXTDIAG] #{s_diagCount} n={glyphs.Length} size={fontSize}");
-                float prevRight = float.NegativeInfinity;
-                for (int i = 0; i < glyphs.Length && i < 12; i++)
-                {
-                    uint cp = glyphs[i].Codepoint;
-                    if (cp > 0xFFFF) continue;
-                    if (!font.GetCharacterInfo((char)cp, out var ci, fontSize, FontStyle.Normal)) continue;
-                    float pl = glyphs[i].PenX + ci.minX;
-                    float pr = glyphs[i].PenX + ci.maxX;
-                    float ov = prevRight - pl;   // >0 = 与前字 quad 重叠
-                    diag.AppendLine($"  cp='{(char)cp}' penX={glyphs[i].PenX,7:F2} adv={ci.advance} quad=[{pl,7:F1},{pr,7:F1}] ov={ov,5:F1}");
-                    prevRight = pr;
-                }
-                Debug.Log(diag.ToString());
-            }
             return seg;
         }
     }

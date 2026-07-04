@@ -140,21 +140,19 @@ pub fn measure_text(
     // 单位换算辅助：设计单位 → px。
     let to_px = |design: f32| -> f32 { design / units * font_size };
 
-    // 字距 + advance 度量。
-    //
-    // **kerning 已禁用**（坑 115）：Rust 按 ttf kern 表拉近 pen_x，但 Unity 动态字体光栅的
-    // glyph quad 带 atlas padding——实测 DejaVuSans @24pt：ttf A glyphWidth=16.03 / Unity
-    // CharacterInfo.maxX−minX=19（每边 ~1.5px padding）。kern 对（AV/Te/WA…）在 kern pen_x
-    // 下 Unity quad 重叠 4-5px、ink 重叠 1-2px → 用户看到"字距叠在一起"。
-    // 光栅器不 kern 且 quad 宽于 ttf bbox → 布局权威按 ttf 算的 kern 必拉过头。wqy-microhei
-    // 无 kern 表本就不受影响。未来换能正确 honor kern 的光栅器（quad==ttf bbox）再开。
+    // 字距（kerning）已禁用：Unity 动态字体光栅器不应用跨字 kerning，且其 glyph quad
+    // （CharacterInfo minX/maxX）含 atlas padding，宽于 ttf design bbox。Rust 按 ttf kern 表
+    // 拉近 pen_x 会让 Latin kern 对（AV/Te/WA…）在 Unity padded quad 下重叠（EditMode 实测
+    // AV @24pt quad 重叠 4px）。光栅器不 kern → 布局权威也不该 kern，否则拉过头。未来换能
+    // 正确 honor kern 的光栅器（quad==ttf bbox、支持 kern）再开。
+    // 注：CJK 字距重叠的真根因**不是 kern**，是缺字 advance 不匹配（坑 119），别混淆。
     //
     // ttf-parser 0.20 kern 读法（备查，重开时用）：Face 不直接暴露字距；kern 表是多个子表的
     // 集合，`face.tables().kern.as_ref()` → `table.subtables.into_iter()` 跳非水平/状态机子表，
     // `sub.glyphs_kerning(left, right) -> Option<i16>` 取值（注意返回 i16）。
     let kerning = |_left: ttf_parser::GlyphId, _right: ttf_parser::GlyphId| -> Option<i16> { None };
     // advance：字体有此字形→读 ttf advance；缺字形（glyph_index 返 None，如 DejaVuSans 遇 CJK）
-    // → 兜底 font_size（坑 115 真根因）。
+    // → 兜底 font_size（坑 119 真根因）。
     // 原走 .notdef(gid0) advance（DejaVu ≈0.6em），但 Unity 动态字体缺字 fallback 到系统 CJK 字体
     // 渲染 1em 方块 quad。Rust pen_x 用 0.6em 间隔 < Unity 1em quad → 字距重叠 0.4em（实测「控件」
     // @24pt 第二字 penX=14.4、Unity quad 宽 25、重叠 11.6px）。兜底 font_size 匹配 Unity fallback。
@@ -377,9 +375,10 @@ mod tests {
         assert!(layout.text_width > 0.0);
     }
 
-    /// 坑 115 回归：kerning 禁用——"AV" 的 V pen_x == advance('A')（无 kern 偏移）。
+    /// 锁 kerning 禁用："AV" 的 V pen_x == advance('A')（无 kern 偏移）。
     /// DejaVuSans 有 AV kern（≈ -1.5px @24pt）；若 kern 被重新启用，V.x = advance(A)+kern < advance(A) → 断言失败。
-    /// 锁"禁 kern"行为：光栅器（Unity）quad 带 atlas padding 不 honor kern，布局权威不能拉过头。
+    /// 禁 kern 是架构决策（光栅器不 honor kern，见 measure_text 注释），非 bug 修复——CJK 字距
+    /// 重叠真根因是缺字 advance（坑 119），与此测试无关。
     #[test]
     fn kerning_disabled_av_pen_x_equals_advance() {
         let font = match test_font() {
@@ -401,7 +400,7 @@ mod tests {
         );
     }
 
-    /// 坑 115 真根因：字体缺字形（DejaVuSans 无 CJK）时 advance 兜底 font_size，而非 .notdef(0.6em)。
+    /// 坑 119 真根因：字体缺字形（DejaVuSans 无 CJK）时 advance 兜底 font_size，而非 .notdef(0.6em)。
     /// 否则 Rust pen_x 间隔 0.6em < Unity fallback 渲染的 1em CJK quad → 字距重叠。
     /// DejaVuSans 缺「中」→ glyph_index 返 None → advance 兜底 24。第二字 pen_x 应 == 24（非 .notdef ≈14.4）。
     #[test]

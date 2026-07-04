@@ -145,4 +145,4 @@ csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件�
 - 坑 102 cdylib FFI 入口 panic 拖垮宿主、坑 103 tick 时序 rematch 在 compute/solve 后致伪类改 transform/布局属性丢（**已修**，tick 重排）、坑 106 payload_hash 位置-bake 致位置变误 Full（双 re-base 中间漏）
 - 坑 56/75/76/105 dirty hash 采样漏字段（**已根治**，双 hash 全量）、坑 107 剥离 uniform 漏改旧烘焙路径致双乘
 - 坑 54 fgui v2 非 v²、坑 79 shader tex×vcol 非 CSS 合成
-- 坑 113 动态字体 atlas rebuild 漏刷 text（偶现上下颠倒，光读代码定位不了，必运行时 log 取证）、坑 114 blob pen_y 多加行高（单行掩盖，plan 公式照抄）
+- 坑 113 动态字体 atlas rebuild 漏刷 text（偶现上下颠倒，光读代码定位不了，必运行时 log 取证）、坑 114 blob pen_y 多加行高（单行掩盖，plan 公式照抄）、坑 119 CJK 缺字 advance 不匹配（Rust .notdef 0.6em vs Unity fallback 1em → 字距重叠；多字符类字距问题先确认症状落 CJK/Latin/数字哪类，别假设）

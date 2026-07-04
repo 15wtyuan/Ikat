@@ -787,4 +787,10 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：测试用 `loomgui_stage_create_root` + `create_node` + `append_child` 建 tree，拿真实 NodeId（root/parent/child 变量），事件路由测用这些变量非字面量。
 **教训**：FFI 句柄（NodeId 代际、reuse_key 等）是不透明/代际的，测试别硬编码字面量——用 create API 拿真实值。`load_html` 适合测样式/结构，不适合测 NodeId 身份。
 
+### 坑 119：CJK 缺字 advance 不匹配 → 字距重叠（Rust .notdef 0.6em vs Unity fallback 1em）
+**症状**：用不含 CJK 的字体（DejaVuSans）渲染含 CJK 文本，CJK 字距重叠（pen_x 间隔 0.6em，字叠在一起）；wqy-microhei（有 CJK）正常；Latin 正常。禁 kern 无效（首轮误诊为 kern）。
+**根因**：Rust 测量字体缺 CJK 字形 → `glyph_index` 返 `None` → 走 `.notdef`(gid0) advance（DejaVu ≈0.6em）。但 Unity 动态字体缺字 **fallback 到系统 CJK 字体**渲染 1em 方块 quad。Rust pen_x 用 0.6em 间隔 < Unity 1em quad → 重叠 0.4em（PlayMode `[TEXTDIAG]` 实测「控件」@24pt：第二字 penX=14.4、Unity quad 宽 25、重叠 11.6px；Latin 正常因字体有字形）。Rust 单字体无 fallback（layout.rs「进程级单字体」），Unity 动态字体有 OS fallback——两边缺字处理不对称 → advance 不一致。
+**解决**（2026-07-04）：`advance` 闭包改接 `Option<GlyphId>`，缺字（`None`）兜底 `font_size`（CJK 方块 1em 假设）匹配 Unity fallback quad 宽度。回归测试 `missing_glyph_advance_falls_back_to_font_size`。wqy 有 CJK 走 `Some` 分支不受影响。
+**教训**：① **误诊**：首轮 EditMode DIAG 测 Latin kern 对（AV/Te quad 重叠），但用户看的是 CJK——症状对错了字符类型。多字体/多字符类字距问题**先确认症状落哪类字符**（CJK/Latin/数字），别假设。② Rust/Unity 字体处理不对称（Rust 单字体 vs Unity OS fallback）是缺字场景的系统性不匹配源——单字体架构下 Rust 缺字**必须兜底**，禁走 `.notdef`。③ **加坑前 grep 编号**——本坑 commit 初写「坑 115」撞了 Sprite Atlas 坑，pitfalls 实际到 118，本坑应是 119。
+
 
