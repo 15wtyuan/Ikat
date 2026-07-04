@@ -1,0 +1,18 @@
+/* LoomGUI 浏览器预览基础样式（preview-only——打包器只遍历 body，head 不进 pkg.bin）。
+   polyfill 对齐 LoomGUI 契约（main-design.md §3.1）：
+     - div 永远 flex column（Chromium 默认 div=block，会让 .grid/.header 的 flex-direction 失效）
+     - taffy border-box（Chromium 默认 content-box）
+     - body 无 8px 默认 margin
+   预览壳：深色底 + 居中 + .root 设备框。fit-scale（镜像 engine letterbox）由 loom-preview.js 的 body.zoom 做。 */
+div { display: flex; flex-direction: column; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #0e1018;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 100vh;
+  padding: 24px;
+}
+.root { box-shadow: 0 0 0 1px #2a2f45, 0 8px 40px rgba(0, 0, 0, .6); }
