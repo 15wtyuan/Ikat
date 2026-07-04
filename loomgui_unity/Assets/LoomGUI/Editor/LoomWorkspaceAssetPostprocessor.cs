@@ -20,7 +20,9 @@ namespace LoomGUI.Editor
         void OnPreprocessAsset()
         {
             // 只管工作区下 PNG（避免改工程其他 PNG——3D 纹理/背景/插件贴图——的导入设置）。
-            string ws = LoomSettings.GetOrCreateDefault()?.workspaceDir;
+            // GetDefault 只加载不建：OnPreprocessAsset 在 import 期跑，import 期禁 CreateAsset
+            // （GetOrCreateDefault 找不到会建→UnityException）。settings 没加载好就跳过。
+            string ws = LoomSettings.GetDefault()?.workspaceDir;
             if (string.IsNullOrEmpty(ws)) return;
             string norm = assetPath.Replace('\\', '/');
             if (!norm.StartsWith(ws.Replace('\\', '/'), System.StringComparison.OrdinalIgnoreCase)) return;

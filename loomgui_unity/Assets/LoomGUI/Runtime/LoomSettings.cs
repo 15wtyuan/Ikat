@@ -45,6 +45,9 @@ namespace LoomGUI
 #endif
             return existing;
         }
+
+        /// 只加载不建——import 流水线里 CreateAsset 被禁，用这个。找不到返 null，调用方容错跳过。
+        public static LoomSettings GetDefault() => Resources.Load<LoomSettings>(ResourcesPath);
     }
 
     /// 单个包配置。sourceDir 相对工作区根（如 "showcase"）。
