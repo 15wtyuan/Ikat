@@ -45,9 +45,9 @@
         <div class="card">
           <div class="card-h"><span class="card-t">5.1 overflow 模式</span><span class="card-x">预期: scroll/auto 能滚看完 8 行，hidden 截断</span></div>
           <div class="card-b">
-            <div class="mini" style="overflow:scroll"><div class="filler-text">第1行<br>第2行<br>第3行<br>第4行<br>第5行<br>第6行<br>第7行<br>第8行</div></div>
-            <div class="mini" style="overflow:auto"><div class="filler-text">第1行<br>第2行<br>第3行<br>第4行<br>第5行<br>第6行<br>第7行<br>第8行</div></div>
-            <div class="mini" style="overflow:hidden"><div class="filler-text">第1行<br>第2行<br>第3行<br>第4行<br>第5行<br>第6行<br>第7行<br>第8行</div></div>
+            <div class="mini" style="overflow:scroll"><div class="filler-text"><div>第1行</div><div>第2行</div><div>第3行</div><div>第4行</div><div>第5行</div><div>第6行</div><div>第7行</div><div>第8行</div></div></div>
+            <div class="mini" style="overflow:auto"><div class="filler-text"><div>第1行</div><div>第2行</div><div>第3行</div><div>第4行</div><div>第5行</div><div>第6行</div><div>第7行</div><div>第8行</div></div></div>
+            <div class="mini" style="overflow:hidden"><div class="filler-text"><div>第1行</div><div>第2行</div><div>第3行</div><div>第4行</div><div>第5行</div><div>第6行</div><div>第7行</div><div>第8行</div></div></div>
           </div>
         </div>
         <div class="card">
@@ -71,7 +71,7 @@
             <div class="mini" id="nested-scroll" style="overflow-y:scroll;height:200px">
               <div class="hscroll"><div class="hfiller">h1</div><div class="hfiller">h2</div><div class="hfiller">h3</div><div class="hfiller">h4</div></div>
               <div class="filler" draggable="true" style="height:60px">drag me</div>
-              <div class="filler-text">嵌套段 A<br>嵌套段 B<br>嵌套段 C<br>嵌套段 D</div>
+              <div class="filler-text"><div>嵌套段 A</div><div>嵌套段 B</div><div>嵌套段 C</div><div>嵌套段 D</div></div>
             </div>
             <span class="card-x">竖向拖=外层竖滚 / 横向拖=内层横滚 / 拖 drag me=item 跟动（C# OnDragHit，预览不演）。轴锁 + scroll-vs-drag 仲裁 Unity 限定。</span>
           </div>

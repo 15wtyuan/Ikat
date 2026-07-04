@@ -53,7 +53,7 @@
               <div class="lamp" id="lamp-click-0"></div><div class="lamp" id="lamp-click-1"></div><div class="lamp" id="lamp-click-2"></div>
               <div class="lamp" id="lamp-click-3"></div><div class="lamp" id="lamp-click-4"></div><div class="lamp" id="lamp-click-5"></div>
             </div>
-            <span class="card-x">已触发 <span id="count-click">0</span> 次</span>
+            <div style="flex-direction:row;gap:4px"><span class="card-x">已触发</span><span class="card-x" id="count-click">0</span><span class="card-x">次</span></div>
           </div>
         </div>
         <div class="card">
@@ -63,7 +63,7 @@
             <div class="lamps">
               <div class="lamp" id="lamp-hover-0"></div><div class="lamp" id="lamp-hover-1"></div><div class="lamp" id="lamp-hover-2"></div><div class="lamp" id="lamp-hover-3"></div>
             </div>
-            <span class="card-x">已触发 <span id="count-hover">0</span> 次</span>
+            <div style="flex-direction:row;gap:4px"><span class="card-x">已触发</span><span class="card-x" id="count-hover">0</span><span class="card-x">次</span></div>
           </div>
         </div>
         <div class="card">
@@ -80,7 +80,7 @@
             <div class="lamps">
               <div class="lamp" id="lamp-drag-0"></div><div class="lamp" id="lamp-drag-1"></div><div class="lamp" id="lamp-drag-2"></div><div class="lamp" id="lamp-drag-3"></div>
             </div>
-            <span class="card-x">已触发 <span id="count-drag">0</span> 次</span>
+            <div style="flex-direction:row;gap:4px"><span class="card-x">已触发</span><span class="card-x" id="count-drag">0</span><span class="card-x">次</span></div>
           </div>
         </div>
         <div class="card">
@@ -90,7 +90,7 @@
             <div class="lamps">
               <div class="lamp" id="lamp-longpress-0"></div><div class="lamp" id="lamp-longpress-1"></div><div class="lamp" id="lamp-longpress-2"></div>
             </div>
-            <span class="card-x">已触发 <span id="count-longpress">0</span> 次</span>
+            <div style="flex-direction:row;gap:4px"><span class="card-x">已触发</span><span class="card-x" id="count-longpress">0</span><span class="card-x">次</span></div>
           </div>
         </div>
         <div class="card">
@@ -101,16 +101,16 @@
               <div class="lamp" id="lamp-key-0"></div><div class="lamp" id="lamp-key-1"></div><div class="lamp" id="lamp-key-2"></div><div class="lamp" id="lamp-key-3"></div>
               <div class="lamp" id="lamp-key-4"></div><div class="lamp" id="lamp-key-5"></div><div class="lamp" id="lamp-key-6"></div><div class="lamp" id="lamp-key-7"></div>
             </div>
-            <span class="card-x">已触发 <span id="count-key">0</span> 次</span>
+            <div style="flex-direction:row;gap:4px"><span class="card-x">已触发</span><span class="card-x" id="count-key">0</span><span class="card-x">次</span></div>
           </div>
         </div>
         <div class="card">
           <div class="card-h"><span class="card-t">4.7 路由 + pointer-events</span><span class="card-x">预期: bubble + StopProp + 属性设置</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
             <div style="flex-direction:row;gap:16px;flex-wrap:wrap">
-              <div style="flex-direction:column;gap:4px"><div class="lamps"><div class="lamp" id="lamp-outer-0"></div><div class="lamp" id="lamp-outer-1"></div><div class="lamp" id="lamp-outer-2"></div></div><span class="card-x">outer <span id="count-outer">0</span></span></div>
-              <div style="flex-direction:column;gap:4px"><div class="lamps"><div class="lamp" id="lamp-inner-0"></div><div class="lamp" id="lamp-inner-1"></div><div class="lamp" id="lamp-inner-2"></div></div><span class="card-x">inner <span id="count-inner">0</span></span></div>
-              <div style="flex-direction:column;gap:4px"><div class="lamps"><div class="lamp" id="lamp-pe-0"></div><div class="lamp" id="lamp-pe-1"></div><div class="lamp" id="lamp-pe-2"></div></div><span class="card-x">pe <span id="count-pe">0</span></span></div>
+              <div style="flex-direction:column;gap:4px"><div class="lamps"><div class="lamp" id="lamp-outer-0"></div><div class="lamp" id="lamp-outer-1"></div><div class="lamp" id="lamp-outer-2"></div></div><div style="flex-direction:row;gap:4px"><span class="card-x">outer</span><span class="card-x" id="count-outer">0</span></div></div>
+              <div style="flex-direction:column;gap:4px"><div class="lamps"><div class="lamp" id="lamp-inner-0"></div><div class="lamp" id="lamp-inner-1"></div><div class="lamp" id="lamp-inner-2"></div></div><div style="flex-direction:row;gap:4px"><span class="card-x">inner</span><span class="card-x" id="count-inner">0</span></div></div>
+              <div style="flex-direction:column;gap:4px"><div class="lamps"><div class="lamp" id="lamp-pe-0"></div><div class="lamp" id="lamp-pe-1"></div><div class="lamp" id="lamp-pe-2"></div></div><div style="flex-direction:row;gap:4px"><span class="card-x">pe</span><span class="card-x" id="count-pe">0</span></div></div>
             </div>
             <div class="outer-r" id="route-outer">
               <div class="inner-r" id="route-inner">点 inner（StopPropagation，outer 不亮）</div>
