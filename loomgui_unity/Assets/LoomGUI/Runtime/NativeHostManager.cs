@@ -85,6 +85,10 @@ namespace LoomGUI
             if (_bindings.TryGetValue(nodeId, out var go))
             {
                 go.SetActive(false);
+                // Reparent user GO off wrapper before destroying wrapper.
+                // Unity Destroy 递归销毁子树——wrapper 的子（user GO）会被连带销毁，
+                // 破坏 caller 的"跨 Unbind 复用同一 GO"预期（如 driver 缓存 _characterInstance）。
+                go.transform.SetParent(_container.transform, false);
                 _bindings.Remove(nodeId);
             }
             if (_wrappers.TryGetValue(nodeId, out var wrapper))
