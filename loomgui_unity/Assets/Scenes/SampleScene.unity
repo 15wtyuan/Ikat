@@ -273,9 +273,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: LoomGUI.Runtime::LoomGUI.LoomStage
   _designSize: {x: 1080, y: 1920}
   _uiCamera: {fileID: 1921994607}
-  _font: {fileID: 12800000, guid: 655d7802d41b4169a49e2d7670d2c405, type: 3}
-  _fontFile: DejaVuSans.ttf
-  _showFps: 0
+  _font: {fileID: 12800000, guid: e7bd13a6a5226b34cb16c61227b8db56, type: 3}
+  _fontFile: wqy-microhei.ttc
+  _showFps: 1
   _safeArea: 1
   _inputCollector: {fileID: 330585549}
 --- !u!114 &330585549
