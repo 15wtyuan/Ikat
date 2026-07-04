@@ -10,7 +10,7 @@ namespace LoomGUI
     ///
     /// 路由：path 顶层子目录 → folder→atlas 映射表 → atlas.GetSprite(文件名去扩展)。
     /// res 根图（无子目录）或子目录不在表 → 走 isDefault atlas，未配 isDefault 走 FirstAtlas。
-    /// miss 不缓存（修坑 104）——atlas 启动全加载，重查成本可控。
+    /// miss 不缓存——atlas 启动全加载，重查成本可控。
     /// miss 时 Debug.LogWarning 一次（去重 _warned）：顶层子目录无映射 / 图集无此 sprite。
     /// </summary>
     public sealed class SpriteResolver
@@ -85,7 +85,7 @@ namespace LoomGUI
                 _warned.Remove(path);       // 命中清 warn（下次再 miss 会重 warn）
                 return found;
             }
-            // miss 不缓存（修坑 104）。warn 一次（去重，避免每帧刷屏）。
+            // miss 不缓存。warn 一次（去重，避免每帧刷屏）。
             if (_warned.Add(path))
             {
                 if (atlas == null)

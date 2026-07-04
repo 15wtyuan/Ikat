@@ -793,4 +793,18 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**（2026-07-04）：`advance` 闭包改接 `Option<GlyphId>`，缺字（`None`）兜底 `font_size`（CJK 方块 1em 假设）匹配 Unity fallback quad 宽度。回归测试 `missing_glyph_advance_falls_back_to_font_size`。wqy 有 CJK 走 `Some` 分支不受影响。
 **教训**：① **误诊**：首轮 EditMode DIAG 测 Latin kern 对（AV/Te quad 重叠），但用户看的是 CJK——症状对错了字符类型。多字体/多字符类字距问题**先确认症状落哪类字符**（CJK/Latin/数字），别假设。② Rust/Unity 字体处理不对称（Rust 单字体 vs Unity OS fallback）是缺字场景的系统性不匹配源——单字体架构下 Rust 缺字**必须兜底**，禁走 `.notdef`。③ **加坑前 grep 编号**——本坑 commit 初写「坑 115」撞了 Sprite Atlas 坑，pitfalls 实际到 118，本坑应是 119。
 
+### 坑 120：SpriteAtlas UV remap 两连坑——GetSprite clone 的 .rect 是源 rect + rotation 打包 AABB 溢出
+**症状**：PlayMode 图片整张错（所有图显示成同一块）→ 修后边缘渗邻居像素。
+**根因**：两个独立坑都在「取 sprite 的 atlas 子区 UV」这步（core 产 [0,1] blob UV + Unity remap 的契约本身没错）：
+① `SpriteAtlas.GetSprite(name)` 返回 clone，其 `.rect` 是**源图 rect**（0,0,w,h）非 atlas 打包位置——实测 home/eye/zap 三张 `.rect` 全 =(0,0,64x64)，原 remap `sp.rect / texture 尺寸` 算出同一 atlasUV → 全采样 atlas 同一区 → 整张错图。真实打包位置在 `sp.uv`（atlas 纹理坐标）。
+② atlas `enableRotation=1`（V2 默认）→ `sp.uv` min/max 取的是**轴对齐包围盒 AABB**，旋转打包的 AABB 比实际 sprite 大、溢出邻居区 → 边缘渗邻居像素。半纹素内缩（0.5px）对几 px 的 AABB 溢出无效（实测「一样没变」）。`enableTightPacking=1` 雪上加霜（裁透明边，rect 非整数）。
+**解决**（2026-07-04）：① `MirrorPool.RemapMeshUvToSprite` 弃 `sp.rect`，改读 `sp.uv` 取 min/max 当子区。② `LoomAtlasSync.EnsureAxisAlignedPacking`：建/同步 atlas 时强制 `enableRotation=false / enableTightPacking=false / padding≥4`（`SpriteAtlasImporter.packingSettings`，已 axis-aligned 则跳过不 reimport）。UI atlas 必须 axis-aligned 矩形排。（注：曾加半纹素内缩防 padding 边缘 fringe，后删——padding=4+无 mipmap 下 fringe 几乎不可见，缩水代价比 fringe 值不来；真需要开 `enableAlphaDilation` 才是正解。）
+**教训**：① Unity API 别信草稿/记忆——`Sprite.rect` 在 packed clone 上是源 rect，得 `grep` `Editor/Data/Managed/UnityEditor.xml` 查证（`sp.uv` 才是打包坐标）。② **旋转打包 + AABB 取子区天然不兼容**——任何「取 sprite 子区 UV」的实现要么关 rotation 要么处理 packingRotation。③ 取证式分层 debug：先 `[UVDBG]` 打 path→sprite→rect→tex 确认「错图」是 rect 全同（坑①），再打 mipmap/fmt + 对比 inset 前后渗量确认「边缘渗」既非 mipmap（mip=1）也非压缩而是 rotation AABB（坑②）。
+
+### 坑 121：AssetPostprocessor 在 import 期调 CreateAsset → UnityException（非确定性禁令）
+**症状**：点「同步此图集」报 `UnityException: Calls to "AssetDatabase.CreateAsset" are restricted during asset importing`。堆栈：`LoomWorkspaceAssetPostprocessor.OnPreprocessAsset → LoomSettings.GetOrCreateDefault → AssetDatabase.CreateAsset`。
+**根因**：`OnPreprocessAsset` 跑在 import 流水线里，import 期禁任何 mutating AssetDatabase API（CreateAsset/SaveAssets/DeleteAsset，防非确定性）。但它调 `GetOrCreateDefault()`，后者在 settings 资产 `Resources.Load` 返 null 时（编译后/批量重导瞬态，资产未加载好）走 `CreateAsset` → 崩。`SyncEntry` 末尾 `SaveAndReimport` 触发 import 激活此链。潜伏 bug，被 EnsureAxisAlignedPacking + 编译刷新逼出。
+**解决**（2026-07-04）：加 `LoomSettings.GetDefault()`（只 `Resources.Load` 不建），postprocessor 改用它——settings 没加载好就返 null 跳过，不再 CreateAsset。
+**教训**：**AssetPostprocessor / ScriptedImporter 跑在 import 流水线里，禁调 mutating AssetDatabase API**。要读配置走 load-only 路径，找不到就跳过。「找不到就建」的 helper（GetOrCreateDefault）不能在 import 期用。
+
 

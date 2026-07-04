@@ -106,6 +106,7 @@ LoomGUI 只支持 HTML/CSS 的**明确子集**，称"围栏"。这是项目漂�
 - `Cargo.lock` 入库（根级，尽管 `.gitignore` 有通用 `Cargo.lock` 行——它是被追踪的）。
 - 设计师工作区在 `loomgui_unity/Assets/LoomUI/`（showcase 打包源 + res 资源 + design-systems 组件库）。编辑器工作流用 `LoomGUI > Settings` 面板配置 + 初始化。
 - 用户只读中文——问答/选项/总结用中文；代码/commit 照旧英文。
+- **代码注释写上线品质**：自包含（不看其他文件就能懂）、精简（说 WHY，不复述代码机制）、**不引用内部编号或暗语**——`坑 120`、`Venkify 法`、`与某某 meta 对齐` 这类项目内指代外人看不懂。坑号只属于 `docs/pitfalls.md`，不进代码。
 
 ## 调试技巧
 
@@ -127,6 +128,8 @@ csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件�
 ## API 适配方法论
 
 **plan/草稿的 API 常与 crate 实际不符**——遇编译错按 crate 实际源码（`~/.cargo/registry/src/<crate>-<ver>/src/`）调，**勿硬改依赖版本**。具体 crate 差异见 `docs/pitfalls.md` §3。
+
+**Unity API 同理别信记忆/草稿**（坑 120 的 `Sprite.rect` 语义全程坑人）——查 `Editor/Data/Managed/UnityEditor.xml`（API XML 文档，含准确成员签名）：`grep -oE '<member name="[PMFIT]:[^"]*TypeName[^"]*"' UnityEditor.xml`。别猜属性/方法名。
 
 **FFI 边界 C-like enum 必须 `#[repr(uN)]`**（u8/u16/u32），否则判别 isize 跨平台不稳 + 撑大 struct（坑 34）。永远 `size_of::<T>()` 断言 ABI struct 尺寸，别信草稿。
 
