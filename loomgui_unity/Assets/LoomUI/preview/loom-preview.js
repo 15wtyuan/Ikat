@@ -68,14 +68,19 @@
   function bindClick(id, fn) { bind(id, 'click', fn); }
 
   // 导航：所有页 #back-home → home；home 的 #nav-* → 各页。
-  // location.href 按【文档 URL】解析（不受 <base> 影响，base 只管 <img>/<link>/<script>）。
-  // 各页同在 showcase/，故用同目录相对名 'xxx.html'——带 'showcase/' 前缀会变 .../showcase/showcase/ 404。
+  // 注意：给 location.href 赋【相对】URL 会按文档 base URL 解析（受 <base> 影响），易踩坑。
+  // 这里直接用 location.href（文档真实 URL，不受 <base> 影响）取当前目录拼【绝对】路径——
+  // 同目录跳转，与 <base> 行为彻底解耦。
+  function goPage(name) {
+    var dir = location.href.substring(0, location.href.lastIndexOf('/') + 1);
+    location.href = dir + name + '.html';
+  }
   function wireBackHome() {
-    bindClick('back-home', function () { location.href = 'home.html'; });
+    bindClick('back-home', function () { goPage('home'); });
   }
   function wireNav() {
     Object.keys(NAV).forEach(function (navId) {
-      bindClick(navId, function () { location.href = NAV[navId] + '.html'; });
+      bindClick(navId, function () { goPage(NAV[navId]); });
     });
   }
 
