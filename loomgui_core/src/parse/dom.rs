@@ -219,4 +219,24 @@ mod tests {
         let tree = parse_html(html).unwrap();
         assert_eq!(tree.roots.len(), 1);
     }
+
+    #[test]
+    fn ignores_head_when_parsing_body() {
+        // 浏览器预览往 showcase 页 head 塞 <base>/<link>/<script>/<style>（preview-only）。
+        // parse_html 只遍历 body（dom.rs:35 body_sel），head 整个不碰 → pkg.bin 不受影响。
+        // 本测试锁定该假设：head 里的围栏外 tag（base/link/script）不报错，body 树正确解析。
+        let html = r#"<!DOCTYPE html><html><head>
+            <meta charset="utf-8">
+            <base href="..">
+            <link rel="stylesheet" href="preview/preview-base.css">
+            <script src="preview/loom-preview.js"></script>
+            <style>.x{color:red}</style>
+            </head><body><div class="root">hi</div></body></html>"#;
+        let tree = parse_html(html).unwrap();
+        assert_eq!(tree.roots.len(), 1, "head 内容不应产生额外 root");
+        let root = &tree.nodes[tree.roots[0].0];
+        assert_eq!(root.tag, "div");
+        assert_eq!(root.classes, vec!["root"]);
+        assert_eq!(root.text.as_deref(), Some("hi"));
+    }
 }

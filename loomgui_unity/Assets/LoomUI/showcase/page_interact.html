@@ -2,6 +2,9 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
+<base href="..">
+<link rel="stylesheet" href="preview/preview-base.css">
+<script src="preview/loom-preview.js"></script>
 <title>交互页</title>
 <style>
 /* page_interact 组件 CSS（D6 组件隔离）——抽自旧 style.css 的 §4 + base */
@@ -46,18 +49,21 @@
           <div class="card-h"><span class="card-t">4.1 click + dblclick</span><span class="card-x">预期: 单击亮 1 下/双击亮 2 下（容器脉冲）</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
             <div class="hit" id="hit-click">点我（单击+双击）</div>
-            <div class="lamps" id="lamp-click">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div class="lamps">
+              <div class="lamp" id="lamp-click-0"></div><div class="lamp" id="lamp-click-1"></div><div class="lamp" id="lamp-click-2"></div>
+              <div class="lamp" id="lamp-click-3"></div><div class="lamp" id="lamp-click-4"></div><div class="lamp" id="lamp-click-5"></div>
             </div>
+            <div style="flex-direction:row;gap:4px"><span class="card-x">已触发</span><span class="card-x" id="count-click">0</span><span class="card-x">次</span></div>
           </div>
         </div>
         <div class="card">
           <div class="card-h"><span class="card-t">4.2 hover / leave / active</span><span class="card-x">预期: 悬停变色 + 进入/离开亮灯</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
             <div class="hit" id="hit-hover">悬停我（RollOver/Out 亮灯）</div>
-            <div class="lamps" id="lamp-hover">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div class="lamps">
+              <div class="lamp" id="lamp-hover-0"></div><div class="lamp" id="lamp-hover-1"></div><div class="lamp" id="lamp-hover-2"></div><div class="lamp" id="lamp-hover-3"></div>
             </div>
+            <div style="flex-direction:row;gap:4px"><span class="card-x">已触发</span><span class="card-x" id="count-hover">0</span><span class="card-x">次</span></div>
           </div>
         </div>
         <div class="card">
@@ -71,42 +77,49 @@
           <div class="card-h"><span class="card-t">4.4 drag</span><span class="card-x">预期: 拖动亮灯（DragMove）</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
             <div class="hit" draggable="true" id="hit-drag">拖我（draggable）</div>
-            <div class="lamps" id="lamp-drag">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div class="lamps">
+              <div class="lamp" id="lamp-drag-0"></div><div class="lamp" id="lamp-drag-1"></div><div class="lamp" id="lamp-drag-2"></div><div class="lamp" id="lamp-drag-3"></div>
             </div>
+            <div style="flex-direction:row;gap:4px"><span class="card-x">已触发</span><span class="card-x" id="count-drag">0</span><span class="card-x">次</span></div>
           </div>
         </div>
         <div class="card">
           <div class="card-h"><span class="card-t">4.5 longpress</span><span class="card-x">预期: 长按 1.5s 亮灯</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
             <div class="hit" id="hit-longpress">长按 1.5s</div>
-            <div class="lamps" id="lamp-longpress">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div class="lamps">
+              <div class="lamp" id="lamp-longpress-0"></div><div class="lamp" id="lamp-longpress-1"></div><div class="lamp" id="lamp-longpress-2"></div>
             </div>
+            <div style="flex-direction:row;gap:4px"><span class="card-x">已触发</span><span class="card-x" id="count-longpress">0</span><span class="card-x">次</span></div>
           </div>
         </div>
         <div class="card">
           <div class="card-h"><span class="card-t">4.6 focus + Tab + key</span><span class="card-x">预期: 聚焦后按键亮灯（KeyDown）</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
             <div class="hit" tabindex="1" id="hit-key">点聚焦后按键（tabindex）</div>
-            <div class="lamps" id="lamp-key">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div class="lamps">
+              <div class="lamp" id="lamp-key-0"></div><div class="lamp" id="lamp-key-1"></div><div class="lamp" id="lamp-key-2"></div><div class="lamp" id="lamp-key-3"></div>
+              <div class="lamp" id="lamp-key-4"></div><div class="lamp" id="lamp-key-5"></div><div class="lamp" id="lamp-key-6"></div><div class="lamp" id="lamp-key-7"></div>
             </div>
+            <div style="flex-direction:row;gap:4px"><span class="card-x">已触发</span><span class="card-x" id="count-key">0</span><span class="card-x">次</span></div>
           </div>
         </div>
         <div class="card">
           <div class="card-h"><span class="card-t">4.7 路由 + pointer-events</span><span class="card-x">预期: bubble + StopProp + 属性设置</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
-            <div class="lamps" id="lamp-route">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div style="flex-direction:row;gap:16px;flex-wrap:wrap">
+              <div style="flex-direction:column;gap:4px"><div class="lamps"><div class="lamp" id="lamp-outer-0"></div><div class="lamp" id="lamp-outer-1"></div><div class="lamp" id="lamp-outer-2"></div></div><div style="flex-direction:row;gap:4px"><span class="card-x">outer</span><span class="card-x" id="count-outer">0</span></div></div>
+              <div style="flex-direction:column;gap:4px"><div class="lamps"><div class="lamp" id="lamp-inner-0"></div><div class="lamp" id="lamp-inner-1"></div><div class="lamp" id="lamp-inner-2"></div></div><div style="flex-direction:row;gap:4px"><span class="card-x">inner</span><span class="card-x" id="count-inner">0</span></div></div>
+              <div style="flex-direction:column;gap:4px"><div class="lamps"><div class="lamp" id="lamp-pe-0"></div><div class="lamp" id="lamp-pe-1"></div><div class="lamp" id="lamp-pe-2"></div></div><div style="flex-direction:row;gap:4px"><span class="card-x">pe</span><span class="card-x" id="count-pe">0</span></div></div>
             </div>
             <div class="outer-r" id="route-outer">
-              <div class="inner-r" id="route-inner">内（StopPropagation 止冒泡）</div>
+              <div class="inner-r" id="route-inner">点 inner（StopPropagation，outer 不亮）</div>
             </div>
-            <div class="hit" id="route-pe">可点（route-pe）</div>
-            <div class="pe-none">pointer-events:none 流内块（hit_test 跳过）</div>
-            <span class="card-x">pointer-events:none 节点 hit_test 跳过（点击穿透到下层）。v1 无 position:absolute 叠加，穿透叠加效果不可视，本卡演属性设置 + 路由 capture/bubble/StopPropagation。</span>
+            <div style="position:relative;width:200px;height:50px">
+              <div class="hit" id="route-pe-under" style="width:100%;height:100%">下层可点（route-pe-under）</div>
+              <div class="pe-none" style="position:absolute;top:0;left:0;width:100%;height:100%">pointer-events:none（点我穿透到下层）</div>
+            </div>
+            <span class="card-x">点 inner → 只 lamp-inner 亮（StopPropagation 止冒泡，outer 不亮）；点 outer → lamp-outer 亮；点 pe-none 区块 → 穿透命中 route-pe-under → lamp-pe 亮。</span>
           </div>
         </div>
       </div>
