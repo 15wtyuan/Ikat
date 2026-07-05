@@ -16,17 +16,21 @@ namespace LoomGUI
     public unsafe class LoomShowcaseDriver : MonoBehaviour
     {
         [SerializeField] LoomStage _stage;
-        // 外部 GO 绑 model-slot（page_controls §1.6 NativeHost 演示；Inspector 拖 Cube 等）。
+        // page_controls §1.6 NativeHost 演示：Inspector 拖 prefab（driver Instantiate 缓存实例后绑，
+        // 不直接绑 prefab asset——Unity 禁改 prefab transform，Bind 也不该越界实例化）。
         [SerializeField] GameObject _nativeModel;
         // Cube 1m³ 在 UI design 空间天然小，设 scale 放大填 slot（NativeHost Sync 不动用户 GO scale）。
         [SerializeField] Vector3 _nativeScale = new Vector3(120, 120, 120);
+
+        // _nativeModel 的缓存实例（Instantiate 一次，跨页复用，Unbind 只 SetActive(false)）。
+        GameObject _nativeModelInstance;
 
         // === page_nativehost：3D 角色 + 粒子（NativeHost 压测）===
         [SerializeField] GameObject _characterPrefab;       // animatedman 角色 prefab（Inspector 拖）
         [SerializeField] GameObject _effectPrefab;          // Kenney Magic/Fire prefab（Inspector 拖）
         // ~1.7m fbx × 70 ≈ 120px 填 nh-stage 视觉区；PlayMode 微调。NativeHost Sync 不动用户 GO scale。
         [SerializeField] Vector3 _characterScale = new Vector3(70, 70, 70);
-        [SerializeField] Animator _characterAnimator;       // 角色 Animator（切 clip；可空）
+        [SerializeField] Animator _characterAnimator;       // 角色 Animator（留空则自动从实例 GetComponent 取；勿拖 prefab 的 Animator——那是模板非运行实例）
         [SerializeField] string[] _animStates = { "Idle", "Walk", "Run" };   // Animator state 名（按实际 clip 填；可空）
 
         // 角色 + 粒子 child 缓存实例：跨页存活只 Instantiate 一次。
@@ -279,15 +283,16 @@ namespace LoomGUI
             SubscribeBackHome();
             uint dbd = _stage.FindNodeById("btn-demo-disabled");
             if (dbd != uint.MaxValue) _stage.SetNodeDisabled(dbd, true);
-            // NativeHost：绑外部 GO 到 model-slot（每帧 Sync 自动同步 wrapper TRS）。
-            if (_nativeModel != null)
+            // NativeHost：Instantiate _nativeModel 缓存实例后绑 model-slot（每帧 Sync 自动同步 wrapper TRS）。
+            // 不直接绑 prefab asset——Bind 契约是场景实例（fgui GoWrapper 同款：caller 管实例化，框架只显示）。
+            EnsureNativeModelInstance();
+            if (_nativeModelInstance != null)
             {
                 uint slot = _stage.FindNodeById("model-slot");
                 if (slot != uint.MaxValue)
                 {
-                    _stage.BindNativeHost(slot, _nativeModel);
-                    _nativeModel.transform.localScale = _nativeScale;
-                    _nativeBoundNode = slot;   // 记下，离开页时 Unbind 摘 wrapper GO
+                    _stage.BindNativeHost(slot, _nativeModelInstance);
+                    _nativeBoundNode = slot;   // 记下，离开页时 OpenPage 的 Unbind 摘 wrapper GO
                 }
                 else
                 {
@@ -297,21 +302,32 @@ namespace LoomGUI
             Debug.Log("[Showcase] page_controls 订阅完成（back + disabled + NativeHost）");
         }
 
+        // _nativeModel 缓存实例（只 Instantiate 一次，跨页复用）。scale 在实例上设（非 prefab asset）。
+        void EnsureNativeModelInstance()
+        {
+            if (_nativeModelInstance != null) return;
+            if (_nativeModel == null)
+            {
+                Debug.LogError("[Showcase] _nativeModel 未配，page_controls NativeHost 不显示");
+                return;
+            }
+            _nativeModelInstance = Instantiate(_nativeModel);
+            _nativeModelInstance.transform.localScale = _nativeScale;
+            _nativeModelInstance.SetActive(false);
+        }
+
         // page_nativehost：back-home + 角色/粒子 NativeHost 绑定 + 放光效/切动画按钮。
         void SubscribeNativeHost()
         {
             SubscribeBackHome();
             EnsureCharacterInstance();
-            if (_characterInstance != null)
+            uint stage = _stage.FindNodeById("nh-stage");
+            if (_characterInstance != null && stage != uint.MaxValue)
             {
-                uint stage = _stage.FindNodeById("nh-stage");
-                if (stage != uint.MaxValue)
-                {
-                    _stage.BindNativeHost(stage, _characterInstance);
-                    _nativeBoundNode = stage;   // 记下，离开页时 OpenPage 的 Unbind 摘 wrapper GO
-                }
-                else Debug.LogError("[Showcase] page_nativehost: id 'nh-stage' 未找到，跳过 NativeHost 绑定");
+                _stage.BindNativeHost(stage, _characterInstance);
+                _nativeBoundNode = stage;   // 记下，离开页时 OpenPage 的 Unbind 摘 wrapper GO
             }
+            else if (stage == uint.MaxValue) Debug.LogError("[Showcase] page_nativehost: id 'nh-stage' 未找到（pkg 未含 page_nativehost.html？），跳过 NativeHost 绑定");
             SubscribeLamp("nh-effect", EventType.Click, OnNhEffect);
             SubscribeLamp("nh-anim", EventType.Click, OnNhAnim);
             Debug.Log("[Showcase] page_nativehost 订阅完成（角色+粒子 NativeHost + 按钮）");
@@ -330,6 +346,10 @@ namespace LoomGUI
             _characterInstance = Instantiate(_characterPrefab);
             _characterInstance.transform.localScale = _characterScale;
             _characterInstance.SetActive(false);
+            // Animator 从实例取（prefab 上的 Animator 是模板，对它 Play 无效/报错）。
+            // Inspector 留空自动取；若 caller 拖了场景实例的 Animator 则覆盖。
+            if (_characterAnimator == null)
+                _characterAnimator = _characterInstance.GetComponent<Animator>();
             if (_effectPrefab != null)
             {
                 // 粒子挂角色 child；局部位置由 prefab 自带 transform 决定。PlayMode 看偏了在 prefab 调。
@@ -342,19 +362,22 @@ namespace LoomGUI
         void OnNhEffect(EventContext ctx)
         {
             if (_characterInstance == null) return;
-            var ps = _characterInstance.GetComponentInChildren<ParticleSystem>();
-            if (ps == null) { Debug.LogWarning("[Showcase] 角色下无 ParticleSystem"); return; }
+            // includeInactive=true：粒子可能挂在被 SetActive(false) 的角色子树下。
+            var ps = _characterInstance.GetComponentInChildren<ParticleSystem>(true);
+            if (ps == null) { Debug.LogWarning("[Showcase] 角色下无 ParticleSystem（_effectPrefab 未配或 prefab 无 ParticleSystem 组件）"); return; }
             _effectOn = !_effectOn;
             if (_effectOn) { ps.gameObject.SetActive(true); ps.Play(); }
             else { ps.Stop(); ps.gameObject.SetActive(false); }
         }
 
-        // 循环切 Animator state（Idle/Walk/Run）。
+        // 循环切 Animator state（按 Inspector _animStates 填的 clip 名）。
         void OnNhAnim(EventContext ctx)
         {
             if (_characterAnimator == null || _animStates == null || _animStates.Length == 0) return;
             _animIdx = (_animIdx + 1) % _animStates.Length;
             _characterAnimator.Play(_animStates[_animIdx]);
+            // 注：若 Animator controller 没建对应 state，会报 "State could not be found"——
+            // 在 Unity Animator 窗口把 clip 拖进去建 state（state 名 = clip 名）。
         }
 
         // page_text：back-home（无其他交互元素，纯展示文本样式）。
