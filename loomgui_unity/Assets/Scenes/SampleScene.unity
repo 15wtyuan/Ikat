@@ -209,8 +209,8 @@ Transform:
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -540, y: 960, z: 0}
-  m_LocalScale: {x: 1, y: -1, z: 1}
+  m_LocalPosition: {x: -244.40625, y: 434.5, z: 0}
+  m_LocalScale: {x: 0.45260417, y: -0.45260417, z: 0.45260417}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -303,11 +303,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: LoomGUI.Runtime::LoomGUI.LoomShowcaseDriver
   _stage: {fileID: 330585548}
-  _nativeModel: {fileID: 0}
+  _nativeModel: {fileID: 8097087592796462330, guid: 64e6fe192753e404c83db2bdb60f0fd0, type: 3}
   _nativeScale: {x: 120, y: 120, z: 120}
-  _characterPrefab: {fileID: 0}
-  _effectPrefab: {fileID: 0}
-  _characterScale: {x: 70, y: 70, z: 70}
+  _characterPrefab: {fileID: 8097087592796462330, guid: 64e6fe192753e404c83db2bdb60f0fd0, type: 3}
+  _effectPrefab: {fileID: 1372040286346358, guid: 53ebac442b16db64f9177d0c749cbb06, type: 3}
+  _characterScale: {x: 120, y: 120, z: 120}
   _characterAnimator: {fileID: 0}
   _animStates:
   - Idle
@@ -586,7 +586,7 @@ Camera:
   far clip plane: 100
   field of view: 60
   orthographic: 1
-  orthographic size: 960
+  orthographic size: 434.5
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
