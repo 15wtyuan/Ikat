@@ -105,6 +105,7 @@
 |---|---|---|
 | `position:relative` | 靠 taffy 默认 Relative 生效，写不写一致（无 inset 偏移） | 【推断·待测】 |
 | `position:fixed/sticky` | 静默忽略，position 保持默认 Relative | 【实证】 |
+| `inset` shorthand | 围栏只映射 `top`/`right`/`bottom`/`left` 四个显式属性，`inset:0` 无 handler 静默丢（浏览器支持→预览看着对，Unity 不脱离流定位，典型"信围栏别信预览"） | 【实证】 |
 | `display:grid` | 非 none 落 Flex，grid 布局不生效 | 【实证】 |
 | `float` | 静默忽略 | 【实证】 |
 | `align-content` | 无 handler，静默忽略 | 【实证】 |

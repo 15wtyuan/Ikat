@@ -11,7 +11,8 @@
 - `flex-direction` / `flex-wrap` / `gap` / `row-gap` / `column-gap` / `justify-content` / `align-items` / `align-self` / `flex`(grow/shrink/basis) / `order` / `aspect-ratio`
 - `width/height/min/max`(px/%/auto) / `padding` / `margin` / `border-width`
 - **子项间距用 `gap`，别用 margin**（Chrome 折叠 margin、LoomGUI 求和不折叠）
-- 禁：`position:absolute/fixed/sticky`（写了不脱离流）、`float`、`align-content`
+- `position:absolute`（v1.4-b 起支持，脱离流，配 `top`/`right`/`bottom`/`left` 定位）；禁 `position:fixed/sticky`、`float`、`align-content`
+- 禁 `inset` shorthand（围栏外静默丢，用 `top`/`right`/`bottom`/`left` 四个显式属性）
 
 ## CSS 视觉
 - `background-color` / `background-image`(url) / `background-size`(cover/contain/100%，拒两值)
@@ -26,11 +27,11 @@
 - 伪类：`:hover` / `:active` / `:disabled` / `:focus`
 - 选择器：标签/类/id/后代/子代/分组。禁 `+`/`~`/`*`/属性选择器/`:nth-child`/`:not()`
 
-## position:relative
-靠 taffy 默认生效，写不写行为一致（无 inset 偏移）。可写可不写。
+## position:relative / absolute
+`relative` 靠 taffy 默认生效，写不写行为一致（无 inset 偏移）。`absolute`（v1.4-b）脱离流，配 `top`/`right`/`bottom`/`left` 定位。`fixed`/`sticky` 仍静默忽略。
 
 ## 预览可信清单
-信 flex/gap/color/px/background-image；**不信** margin 折叠/文本换行像素/position:absolute/display:grid/@media。口径"信围栏规则别信预览"。详见 references/preview-trust.md。
+信 flex/gap/color/px/background-image/position:absolute；**不信** margin 折叠/文本换行像素/display:grid/@media。口径"信围栏规则别信预览"。详见 references/preview-trust.md。
 
 ## 生成完跑验证+打包
 生成 HTML+CSS 后，读 `.claude/skills/loomgui-editor/config.json` 拿 exe_path + 配置，调

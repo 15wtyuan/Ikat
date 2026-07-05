@@ -16,7 +16,7 @@
 - 根 size setter 用 `Dimension::Length`（`Style.size` 是 `Size<Dimension>`）。
 - `Style` **无 `order` 字段**（CSS order 无法存 taffy；留 `ResolvedStyle.order` 待 v1 消费）。
 - **`Style.overflow: Point<Overflow>`**（taffy 0.5，Overflow=Visible/Clip/Hidden/Scroll）——CSS flex §4.5 automatic min-size：overflow≠Visible 的 flex item min-size=0（不被 content 撑开）。**必须显式设**（LoomGUI OverflowMode→taffy Overflow 同步），否则默认 Visible→min-size=min-content→scroll 容器被 content 撑开 overlap=0（坑 59）。构造 `taffy::geometry::Point { x, y }`。
-- **`Style::DEFAULT.position = Position::Relative`**（taffy 0.5 style/mod.rs:311）。LoomGUI 不映射 CSS `position`（apply_decl 无 position arm）→ 所有节点 position 永远是 taffy 默认 Relative。**`position:relative` 写不写行为一致**（无 inset 偏移）；**`position:absolute/fixed/sticky` 写了静默忽略、不脱离流**（围栏外，fence_contract `position_absolute_does_not_break_flow` 锁定）。教训（fence.md §0）：「搜索无 match ≠ 不支持」，可能是底层默认——核实属性须查依赖默认值 + 补测试，不能只 grep。
+- **`Style::DEFAULT.position = Position::Relative`**（taffy 0.5 style/mod.rs:311）。LoomGUI 不映射 CSS `position`（apply_decl 无 position arm）→ 所有节点 position 永远是 taffy 默认 Relative。**`position:relative` 写不写行为一致**（无 inset 偏移）。**v1.4-b 起 `position:absolute` 生效**（脱离流，配 `top`/`right`/`bottom`/`left`；`fixed`/`sticky` 仍静默忽略。`inset` shorthand 不在围栏——用四显式属性，别用 shortcut）。教训（fence.md §0）：「搜索无 match ≠ 不支持」，可能是底层默认——核实属性须查依赖默认值 + 补测试，不能只 grep。
 
 ### 1.2 ttf-parser 0.20（text/layout.rs）
 - **`glyph_hor_advance(GlyphId) -> Option<u16>`**（非 `glyph_advance_width`，返回 u16 非 i16）。
@@ -824,5 +824,25 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **根因**：Unity 把包内容虚拟化挂载在 `Packages/<package-name>/`，**不是 `Assets/`**。包移动后，引用包内资源的代码路径要从 `Assets/LoomGUI/...` 改 `Packages/com.loomgui.unity/...`。
 **解决**：包内 Editor 脚本所有硬编 `Assets/LoomGUI/` 路径改 `Packages/com.loomgui.unity/`（exe + Resources + skill 都如此）；相对路径算法不变（URI MakeRelative）。
 **教训**：UPM 包代码访问包内资源 = `Packages/<name>/`（Unity 虚拟挂载），非 `Assets/`。包一移动，grep 包内所有 `Assets/` 硬编路径同步改。本地包 manifest 引用同级包：`"file:../../<pkg-dir>"`（相对 `Packages/` 文件夹）。
+
+### 坑 125：showcase HTML 围栏外写法三连——`<br>` 非白名单 / 行内混排 / `inset` shorthand
+
+**症状**：showcase HTML 改了内容后打包器报错拒收（`parse_html` 行内混排 / `fence_tags_all_accepted` 拒 `<br>`），或 Unity 静默丢属性（`inset:0` 没反应但浏览器看着对）。
+
+**根因**：① `<br>` 不在围栏白名单（只有 div/span/img/button），围栏外标签一律报错。② `<span>文本 <span id="count">0</span> 文本</span>` = 行内混排（元素内文本+子元素），编译期报错。③ `inset` shorthand 围栏外——`apply_decl` 只映射 `top`/`right`/`bottom`/`left` 四个显式属性，`inset:0` 无 handler 静默丢（浏览器原生支持 → 预览看着对，Unity 不生效——典型"信围栏别信预览"）。
+
+**解决**：① 文本分段用 `<div>` 子节点（每个 div = 一行 flex item），不用 `<br>`。② 计数 label 改兄弟 span 在 flex-row div 内（每 span 纯文本，无嵌套混排）。③ `inset:0` 改 `top:0;left:0;width:100%;height:100%`（四个显式 fence 内属性）。
+
+**教训**：showcase HTML 也是 pkg 源，**守围栏**——别用 `<br>`（围栏外 tag）、别 span 套 span + 文本（行内混排）、别用 `inset` shorthand（围栏只认四个显式方向）。打包器是 fence gate：改了 HTML 必重打验证；浏览器支持不等于围栏支持（浏览器 mask Unity 的静默忽略 bug）。
+
+### 坑 126：`<base href>` 影响 `location.href` 相对赋值——showcase 预览导航 404
+
+**症状**：showcase 浏览器预览中 nav 跳转 404——`location.href = 'page_list.html'` 没跳 `showcase/page_list.html`，跳到 `LoomUI/page_list.html`。
+
+**根因**：HTML `<base href="..">` 不仅影响 `<img>`/`<link>`/`<script>` 的内容 URL 解析，**也影响 `location.href = 'relative'` 的相对赋值**——JS 对 location 赋相对 URL 时按文档 **baseURL**（受 `<base>` 控制）解析，而非文档地址栏 URL。`<base href="..">` 锚到 `LoomUI/`，故 `'page_list.html'` → `LoomUI/page_list.html`（404——文件在 `LoomUI/showcase/` 下）。
+
+**解决**：不从相对路径依赖 baseURL。用 `location.href` **getter**（返回文档真实 URL，不受 `<base>` 影响）取当前目录拼**绝对路径**：`var dir = location.href.substring(0, location.href.lastIndexOf('/') + 1); location.href = dir + name + '.html';`——与 `<base>` 行为彻底解耦。`<base>` 保留给 `<img>`/`<link>`/`<script>` 内容路径。
+
+**教训**：`<base>` 既影响内容属性（已知）也影响 **JS `location.href` 相对赋值**（按 baseURL 解析——易漏）。同目录跳转不想踩 base 歧义时用 `location.href` getter 取真实 URL 拼绝对路径。不要单靠资料推理——浏览器行为（`<base>` + location 赋值）须在目标环境实证验证。
 
 
