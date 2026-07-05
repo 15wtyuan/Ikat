@@ -807,4 +807,22 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**（2026-07-04）：加 `LoomSettings.GetDefault()`（只 `Resources.Load` 不建），postprocessor 改用它——settings 没加载好就返 null 跳过，不再 CreateAsset。
 **教训**：**AssetPostprocessor / ScriptedImporter 跑在 import 流水线里，禁调 mutating AssetDatabase API**。要读配置走 load-only 路径，找不到就跳过。「找不到就建」的 helper（GetOrCreateDefault）不能在 import 期用。
 
+### 坑 122：csbindgen build.rs 输出路径未跟随插件包移动 → 每次 build 重生 straggler
+**症状**：插件代码移入 UPM 包（`loomgui_unity_package/`）后，旧路径 `loomgui_unity/Assets/Plugins/LoomGUI/Bindings/LoomGUIBindings.cs` 每次 `cargo build` 都冒出来；git merge 清了又回。
+**根因**：`loomgui_ffi_c/build.rs` 的 `unity_bindings` 路径硬编旧位，每次 build 自动写盘（best-effort），merge 删 straggler 治标不治本。
+**解决**：build.rs 路径同步改包内 `../loomgui_unity_package/Plugins/LoomGUI/Bindings/`。
+**教训**：生成器（csbindgen/cbindgen/...）的输出路径是"产物归属"的一部分——移动产物位置时**同步改生成器输出路径**，否则每次构建在旧位重生 = 永久 straggler。删 straggler 前先问：是不是有生成器还写到这。
+
+### 坑 123：`git add <name>` 只加同名目录，不加 `<name>.rs` 文件（测试外提漏 commit）
+**症状**：把 `input.rs` 内嵌测试外提到 `input/tests.rs`，`git add loomgui_core/src/input` + commit，`cargo test` 全过——但 `input.rs` 本身的"测试已外提"修改**没进 commit**（HEAD 里 input.rs 还是带内嵌测试的旧版 + 孤儿 input/tests.rs）。
+**根因**：`git add <path>` 加 `input/` 目录（含 tests.rs）但**不加同级 `input.rs` 文件**（不同 path）。dir/file 同名时极易漏。
+**解决**：测试外提 commit 时**显式 `git add <name>.rs <name>/`**（文件 + 目录都列）；commit 后 `git diff --cached --name-status` 验 `M <name>.rs` + `A <name>/tests.rs` 都在。
+**教训**：`git add` 路径精确匹配——dir 不含同名 file。重构涉及"文件 + 同名子目录"（Rust `mod X;` 抽 `X.rs` + `X/`）时，add 后必验暂存集。
+
+### 坑 124：Unity UPM 包内代码引用包资源用 `Packages/<name>/...` 非 `Assets/...`
+**症状**：插件移入 `com.loomgui.unity` UPM 包后，Editor 脚本 `Path.Combine(projRoot, "Assets/LoomGUI/Editor/Tools/loomgui_pkg.exe")` 找不到 exe（路径空）。
+**根因**：Unity 把包内容虚拟化挂载在 `Packages/<package-name>/`，**不是 `Assets/`**。包移动后，引用包内资源的代码路径要从 `Assets/LoomGUI/...` 改 `Packages/com.loomgui.unity/...`。
+**解决**：包内 Editor 脚本所有硬编 `Assets/LoomGUI/` 路径改 `Packages/com.loomgui.unity/`（exe + Resources + skill 都如此）；相对路径算法不变（URI MakeRelative）。
+**教训**：UPM 包代码访问包内资源 = `Packages/<name>/`（Unity 虚拟挂载），非 `Assets/`。包一移动，grep 包内所有 `Assets/` 硬编路径同步改。本地包 manifest 引用同级包：`"file:../../<pkg-dir>"`（相对 `Packages/` 文件夹）。
+
 

@@ -40,6 +40,8 @@ cargo test -p loomgui_core --test snapshot -- <name>
 
 **基准测试**：`cargo bench -p loomgui_core`（criterion，`frame_emit`）。
 
+**CI 门禁**（`.github/workflows/rust-ci.yml`，push main / PR 触发）：fmt 严（`cargo fmt --all -- --check`）+ clippy 严（`cargo clippy --all-targets -- -D warnings`）+ Win/Ubuntu matrix test + feature-gate check（`--no-default-features --all-targets`）+ Windows `.dll` artifact（release build，7 天供家里机取）。**push 前本地跑 `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`**，否则 CI 红。clippy 各 crate root 有 `#![allow]` 放行可辩护的测试/FFI 模式 lint（`field_reassign_with_default` / `not_unsafe_ptr_arg_deref` / `too_many_arguments` 等，带理由注释），勿误清——新增可辩护模式 lint 在那里加。
+
 ### Rust → Unity .dll 闭环（Windows 本机是唯一的编码机）
 
 按记忆/工作流：本机负责 build `.dll` + commit + push；家里机只做 Unity PlayMode 验收。**任何** Rust 改动后必须重编 + commit `.dll`，否则家里机测不了。
@@ -149,3 +151,4 @@ csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件�
 - 坑 56/75/76/105 dirty hash 采样漏字段（**已根治**，双 hash 全量）、坑 107 剥离 uniform 漏改旧烘焙路径致双乘
 - 坑 54 fgui v2 非 v²、坑 79 shader tex×vcol 非 CSS 合成
 - 坑 113 动态字体 atlas rebuild 漏刷 text（偶现上下颠倒，光读代码定位不了，必运行时 log 取证）、坑 114 blob pen_y 多加行高（单行掩盖，plan 公式照抄）、坑 119 CJK 缺字 advance 不匹配（Rust .notdef 0.6em vs Unity fallback 1em → 字距重叠；多字符类字距问题先确认症状落 CJK/Latin/数字哪类，别假设）
+- 坑 122 生成器输出路径要随产物归属变（csbindgen build.rs 插件移包后路径未改 → 每次 build 重生 straggler）、坑 123 `git add <name>` 不含同名 `<name>.rs`（测试外提漏 commit 主文件，add 后必验暂存集）、坑 124 UPM 包代码引用包资源用 `Packages/<name>/` 非 `Assets/`
