@@ -10,9 +10,10 @@ fn main() {
         .generate_csharp_file(format!("{}/LoomGUIBindings.cs", out_dir))
         .expect("csbindgen csharp gen");
 
-    // 落到 Unity（best-effort：纯 Rust 构建时 Unity 目录可能不存在，故不 fail-the-build，
+    // 落到 Unity 包（best-effort：纯 Rust 构建时包目录可能不存在，故不 fail-the-build，
     // 但失败时发 cargo:warning 让用户能看到——不再静默吞错）。
-    let unity_bindings = "../loomgui_unity/Assets/Plugins/LoomGUI/Bindings/LoomGUIBindings.cs";
+    // 插件已移入 com.loomgui.unity UPM 包（loomgui_unity_package/）， bindings 随包走。
+    let unity_bindings = "../loomgui_unity_package/Plugins/LoomGUI/Bindings/LoomGUIBindings.cs";
     if let Err(e) = csbindgen::Builder::default()
         .input_extern_file("src/lib.rs")
         .csharp_dll_name("loomgui_ffi_c")
