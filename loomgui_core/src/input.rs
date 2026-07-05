@@ -306,11 +306,7 @@ pub(crate) fn build_tab_chain(scene: &Scene) -> Vec<NodeId> {
         dfs_collect(scene, *root, &mut positive, &mut zero);
     }
     positive.sort_by_key(|(t, _)| *t); // stable：同 tabindex 保 DFS 序
-    positive
-        .into_iter()
-        .map(|(_, n)| n)
-        .chain(zero)
-        .collect()
+    positive.into_iter().map(|(_, n)| n).chain(zero).collect()
 }
 
 /// 从 current 焦点算 Tab/Shift+Tab 下一个焦点。空链 → None。

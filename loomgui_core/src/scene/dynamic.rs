@@ -562,6 +562,7 @@ mod tests {
             anim: Default::default(),
             scroll: Default::default(),
             text_layouts: Vec::new(),
+            node_sort_keys: Vec::new(),
         }
     }
 

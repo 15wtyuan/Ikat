@@ -20,6 +20,7 @@ pub mod blob;
 use loomgui_core::input::{EventRecord, KeyEvent, PointerEvent};
 use loomgui_core::scene::NodeId;
 use loomgui_core::stage::Stage;
+use loomgui_core::transform;
 use std::ffi::CString;
 
 /// 版本字符串（C null-terminated `b"v1e\0"`）。
@@ -340,7 +341,7 @@ pub extern "C" fn loomgui_node_parent(h: *const StageHandle, node_id: u32) -> u3
         Some(scene) => {
             // NodeId(u32) → slotmap lookup（代际安全）。无效/悬空 NodeId → sentinel。
             match scene.get(NodeId(node_id)) {
-                Some(n) => n.parent.map(|p| p.0).unwrap_or(ROOT_SENTINEL),
+                Some(n) => n.parent.map(|p| p.0 as u32).unwrap_or(ROOT_SENTINEL),
                 None => ROOT_SENTINEL,
             }
         }
@@ -369,7 +370,7 @@ pub extern "C" fn loomgui_stage_find_node_by_id(
         Err(_) => return NOT_FOUND,
     };
     match sh.stage.find_node_by_id(id_str) {
-        Some(nid) => nid.0,
+        Some(nid) => nid.0 as u32,
         None => NOT_FOUND,
     }
 }
@@ -572,6 +573,101 @@ pub extern "C" fn loomgui_stage_get_node_layout_rect(
     }
 }
 
+/// 读节点 world transform（compute_world_transforms 产物）。null/无效 → 写 identity。
+/// out: a,b,c,d,tx,ty（6 个 f32，Affine2 列主序）。对齐 get_node_layout_rect 惯例
+/// （独立 *mut out + 无状态码 + null/无效写默认）。空 div（merge_meshes 后 RenderNode
+/// 消失）仍可查——world_transforms 保留全节点（与 node_sort_keys 同）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_world_matrix(
+    h: *const StageHandle,
+    node_id: u32,
+    out_a: *mut f32,
+    out_b: *mut f32,
+    out_c: *mut f32,
+    out_d: *mut f32,
+    out_tx: *mut f32,
+    out_ty: *mut f32,
+) {
+    let m = if h.is_null() {
+        None
+    } else {
+        let sh = unsafe { &*h };
+        sh.stage.get_node_world_matrix(NodeId(node_id))
+    }
+    .unwrap_or(transform::IDENTITY); // [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+    if !out_a.is_null() {
+        unsafe {
+            *out_a = m[0];
+        }
+    }
+    if !out_b.is_null() {
+        unsafe {
+            *out_b = m[1];
+        }
+    }
+    if !out_c.is_null() {
+        unsafe {
+            *out_c = m[2];
+        }
+    }
+    if !out_d.is_null() {
+        unsafe {
+            *out_d = m[3];
+        }
+    }
+    if !out_tx.is_null() {
+        unsafe {
+            *out_tx = m[4];
+        }
+    }
+    if !out_ty.is_null() {
+        unsafe {
+            *out_ty = m[5];
+        }
+    }
+}
+
+/// 读节点 sort_key（merge 前快照，DFS 序号）。null/无效 → 写 0。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_sort_key(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u32,
+) {
+    let sk = if h.is_null() {
+        None
+    } else {
+        let sh = unsafe { &*h };
+        sh.stage.get_node_sort_key(NodeId(node_id))
+    }
+    .unwrap_or(0);
+    if !out.is_null() {
+        unsafe {
+            *out = sk;
+        }
+    }
+}
+
+/// 读节点可见性（存在 + 非 display:none）。null/无效 → 写 0（false）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_visible(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+) {
+    let vis = if h.is_null() {
+        false
+    } else {
+        let sh = unsafe { &*h };
+        sh.stage.get_node_visible(NodeId(node_id))
+    };
+    if !out.is_null() {
+        unsafe {
+            *out = if vis { 1 } else { 0 };
+        }
+    }
+}
+
 /// 设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_reuse_key(h: *mut StageHandle, node_id: u32, key: u32) {
@@ -606,7 +702,7 @@ pub extern "C" fn loomgui_stage_focused_node(h: *const StageHandle) -> u32 {
     }
     let sh = unsafe { &*h };
     match &sh.stage.scene {
-        Some(scene) => scene.focused_node.map(|n| n.0).unwrap_or(NONE),
+        Some(scene) => scene.focused_node.map(|n| n.0 as u32).unwrap_or(NONE),
         None => NONE,
     }
 }

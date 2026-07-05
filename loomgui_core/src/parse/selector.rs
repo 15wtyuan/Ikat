@@ -124,9 +124,7 @@ pub fn parse_selector(raw: &str) -> Result<ParsedSelector, String> {
         let mut rest = text.as_str();
         while let Some(colon) = rest.find(':') {
             let after = &rest[colon + 1..];
-            let end = after
-                .find(['.', '#', ':'])
-                .unwrap_or(after.len());
+            let end = after.find(['.', '#', ':']).unwrap_or(after.len());
             let name = &after[..end];
             match name {
                 "hover" => pseudo_hover = true,
@@ -241,10 +239,11 @@ fn match_compound_chain(
             let mut cur = tree.nodes[start_el.0].parent;
             while let Some(ancestor) = cur {
                 if compound_matches(target_comp, &tree.nodes[ancestor.0])
-                    && match_compound_chain(comps, end_idx - 1, ancestor, tree) {
-                        return true;
-                    }
-                    // 此祖先匹配但更左的链匹配不上 → 继续往上找
+                    && match_compound_chain(comps, end_idx - 1, ancestor, tree)
+                {
+                    return true;
+                }
+                // 此祖先匹配但更左的链匹配不上 → 继续往上找
                 cur = tree.nodes[ancestor.0].parent;
             }
             false

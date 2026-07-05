@@ -121,6 +121,7 @@ pub fn assign_sort_keys(
     scene: &Scene,
     nodes: &mut [RenderNode],
     id_to_pos: &std::collections::HashMap<NodeId, usize>,
+    sort_keys: &mut [u32],
 ) -> Vec<ClipEntry> {
     let mut counter: u32 = 0;
     let mut clips: Vec<ClipEntry> = Vec::new();
@@ -128,6 +129,7 @@ pub fn assign_sort_keys(
         scene: &Scene,
         nodes: &mut [RenderNode],
         id_to_pos: &std::collections::HashMap<NodeId, usize>,
+        sort_keys: &mut [u32],
         id: NodeId,
         counter: &mut u32,
         clips: &mut Vec<ClipEntry>,
@@ -170,6 +172,7 @@ pub fn assign_sort_keys(
             let rn = &mut nodes[pos];
             rn.sort_key = *counter;
             rn.mask_context = mask;
+            sort_keys[id.index()] = *counter;
             *counter += 1;
         }
         // 子树 scroll_offset：本节点是 scroll 容器时子吃其 scroll_pos（transform.rs 同约定）。
@@ -192,6 +195,7 @@ pub fn assign_sort_keys(
                 scene,
                 nodes,
                 id_to_pos,
+                sort_keys,
                 c,
                 counter,
                 clips,
@@ -206,6 +210,7 @@ pub fn assign_sort_keys(
             scene,
             nodes,
             id_to_pos,
+            sort_keys,
             *root,
             &mut counter,
             &mut clips,
@@ -301,6 +306,11 @@ mod tests {
             .collect()
     }
 
+    /// 测 helper：建 sort_keys buffer（capacity+1，对齐生产路径 build_render_nodes 的扩容）。
+    fn sort_keys_buf(scene: &Scene) -> Vec<u32> {
+        vec![0u32; scene.nodes.capacity() + 1]
+    }
+
     /// 构造 root > [a, b]，全部 Container 无 clip。
     fn tree_root_two_kids() -> Scene {
         let mut root = Node::default();
@@ -332,7 +342,8 @@ mod tests {
     fn keys_monotonic() {
         let scene = tree_root_two_kids();
         let mut rns: Vec<RenderNode> = (0..3).map(placeholder_rn).collect();
-        assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene));
+        let mut sort_keys = sort_keys_buf(&scene);
+        assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
         // DFS 树序：root(0) → a(1) → b(2)
         assert!(rns[0].sort_key < rns[1].sort_key);
         assert!(rns[1].sort_key < rns[2].sort_key);
@@ -345,7 +356,8 @@ mod tests {
     fn no_clip_keeps_mask_zero() {
         let scene = tree_root_two_kids();
         let mut rns: Vec<RenderNode> = (0..3).map(placeholder_rn).collect();
-        assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene));
+        let mut sort_keys = sort_keys_buf(&scene);
+        assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
         for rn in &rns {
             assert_eq!(rn.mask_context, MaskContext(0), "无 clip 应保持 mask=0");
         }
@@ -360,7 +372,8 @@ mod tests {
         let scene = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
 
         let mut rns: Vec<RenderNode> = (0..2).map(placeholder_rn).collect();
-        assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene));
+        let mut sort_keys = sort_keys_buf(&scene);
+        assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
         // root 是首个分配（counter=0），clip → MaskContext(0+1)=1
         assert_eq!(rns[0].mask_context, MaskContext(1), "clip root 开层级 1");
         assert_eq!(rns[1].mask_context, MaskContext(1), "child 继承父层级");
@@ -377,7 +390,8 @@ mod tests {
         let scene = Scene::from_nodes(vec![root, mid, leaf], vec![(0, 1), (1, 2)]);
 
         let mut rns: Vec<RenderNode> = (0..3).map(placeholder_rn).collect();
-        let _clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene));
+        let mut sort_keys = sort_keys_buf(&scene);
+        let _clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
         // root: counter=0 → mask(1)
         // mid:  counter=1 → mask(2)
         // leaf: counter=2 → 继承 mid mask(2)
@@ -424,7 +438,8 @@ mod tests {
         scene.scroll.ensure(root_id).scroll_pos = (0.0, 30.0);
 
         let mut rns: Vec<RenderNode> = (0..2).map(placeholder_rn).collect();
-        let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene));
+        let mut sort_keys = sort_keys_buf(&scene);
+        let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
 
         // root ctx(1)：容器自身 world 不含自己 scroll_pos（transform.rs 约定）→ clip rect 不减。
         let root_ctx = clips
@@ -481,7 +496,8 @@ mod tests {
         let scene = Scene::from_nodes(vec![outer, inner, leaf], vec![(0, 1), (1, 2)]);
 
         let mut rns: Vec<RenderNode> = (0..3).map(placeholder_rn).collect();
-        let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene));
+        let mut sort_keys = sort_keys_buf(&scene);
+        let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
 
         // mask_context: outer=1, inner=2, leaf 继承 inner=2。
         assert_eq!(rns[0].mask_context, MaskContext(1));
@@ -537,7 +553,8 @@ mod tests {
         let scene = Scene::from_nodes(vec![outer, inner, leaf], vec![(0, 1), (1, 2)]);
 
         let mut rns: Vec<RenderNode> = (0..3).map(placeholder_rn).collect();
-        let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene));
+        let mut sort_keys = sort_keys_buf(&scene);
+        let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
 
         let ctx2 = clips
             .iter()

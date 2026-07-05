@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>NativeHost · 3D 角色 + 特效</title>
+<style>
+/* page_nativehost 组件 CSS（D6 隔离） */
+.root{width:1080px;height:1920px;background-color:#1a1d2e;}
+.header{background-color:#252839;border-bottom:2px solid #3a3f55;padding:20px;gap:14px;flex-direction:row;align-items:center;justify-content:space-between;}
+.title{color:#e0e0e0;font-size:32px;font-weight:700;}
+.back{background-color:#2d3148;border:1px solid #3a3f55;padding:10px 16px;color:#9aa0b4;font-size:18px;}
+.back:hover{background-color:#3a4258;color:#5fb2c4;border:1px solid #5fb2c4;}
+.back:active{transform:scale(0.96);}
+.content{flex-grow:1;flex-direction:column;gap:24px;padding:32px;align-items:center;}
+/* nh-stage：NativeHost 占位 div。角色 + 粒子 GO 由 driver BindNativeHost 挂此节点，
+   wrapper 每帧 Sync 跟随其 world rect。尺寸 = design 空间角色的可视区。 */
+.stage-wrap{background-color:#11131f;border:1px solid #3a3f55;border-radius:12px;padding:8px;}
+.nh-stage{width:600px;height:700px;}
+.controls{flex-direction:row;gap:20px;}
+.btn{background-color:#2d3148;border:1px solid #3a3f55;padding:16px 32px;color:#e0e0e0;font-size:22px;}
+.btn:hover{background-color:#3a4258;border:1px solid #5fb2c4;color:#5fb2c4;}
+.btn:active{transform:scale(0.96);background-color:#5fb2c4;color:#1a1d2e;}
+.hint{color:#9aa0b4;font-size:16px;}
+</style>
+</head>
+<body>
+<div class="root">
+  <div class="header">
+    <div class="title">NativeHost · 3D 角色 + 特效</div>
+    <div class="back" id="back-home">← 返回</div>
+  </div>
+  <div class="content">
+    <div class="stage-wrap">
+      <div id="nh-stage" class="nh-stage"></div>
+    </div>
+    <div class="controls">
+      <div class="btn" id="nh-effect">放光效</div>
+      <div class="btn" id="nh-anim">切动画</div>
+    </div>
+    <div class="hint">角色 SkinnedMesh + 粒子挂 nh-stage，跟随 transform / 显隐 / 排序</div>
+  </div>
+</div>
+</body>
+</html>

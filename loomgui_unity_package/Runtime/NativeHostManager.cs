@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using LoomGUI.Bindings;
 using UnityEngine;
 
 namespace LoomGUI
@@ -10,7 +11,7 @@ namespace LoomGUI
     ///
     /// 渲染顺序：
     ///   - GO + wrapper layer = LoomUILayer（UI 相机渲染）
-    ///   - GO material renderQueue=3000（Transparent，跟 UI 同队列）
+    ///   - GO（Mesh/SkinnedMesh/ParticleSystem Renderer）material renderQueue=3000（Transparent，跟 UI 同队列）
     ///   - GO sortingOrder = 节点 sort_key（UI 列表顺序）
 ///
     /// LoomGUI root localScale=(sf,-sf,sf) 在 transform 做 y-flip。
@@ -23,7 +24,6 @@ namespace LoomGUI
         private readonly Dictionary<uint, GameObject> _wrappers = new();   // node_id → wrapper GO（跟随 UI）
         private Transform _root;
         private GameObject _container;  // 挂 root、localScale (1,-1,1) 翻正 handedness
-        private readonly HashSet<uint> _seenThisFrame = new();
 
         public void Init(Transform root)
         {
@@ -61,14 +61,16 @@ namespace LoomGUI
                 t.gameObject.layer = layer;
         }
 
-        /// MeshRenderer/SkinnedMeshRenderer material renderQueue=3000
+        /// MeshRenderer/SkinnedMeshRenderer/ParticleSystemRenderer material renderQueue=3000
         /// （Transparent，跟 UI 同队列，sortingOrder 跨 UI/GO 统一排序）。改 sharedMaterial（非 clone）。
         static void CacheRenderers(GameObject go)
         {
             foreach (var r in go.GetComponentsInChildren<Renderer>(true))
             {
                 if (r == null) continue;
-                if (r is MeshRenderer || r is SkinnedMeshRenderer)
+            // ParticleSystemRenderer 也纳入：粒子 material renderQueue 统一 3000（Transparent），
+            // 否则粒子与 UI mesh 队列不一致 → sortingOrder 跨 UI/GO 排序错乱。
+            if (r is MeshRenderer || r is SkinnedMeshRenderer || r is ParticleSystemRenderer)
                 {
                     foreach (var mat in r.sharedMaterials)
                     {
@@ -83,6 +85,10 @@ namespace LoomGUI
             if (_bindings.TryGetValue(nodeId, out var go))
             {
                 go.SetActive(false);
+                // Reparent user GO off wrapper before destroying wrapper.
+                // Unity Destroy 递归销毁子树——wrapper 的子（user GO）会被连带销毁，
+                // 破坏 caller 的"跨 Unbind 复用同一 GO"预期（如 driver 缓存 _characterInstance）。
+                go.transform.SetParent(_container.transform, false);
                 _bindings.Remove(nodeId);
             }
             if (_wrappers.TryGetValue(nodeId, out var wrapper))
@@ -110,49 +116,53 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 每帧 MirrorPool.Sync 后调：同步 wrapper transform（跟随 UI 节点）+ GO sortingOrder + visible。
-        /// 用户 GO 自身 transform 不动（scale 放大等保留）。blob 中不存在 → SetActive(false)。
+        /// 每帧 MirrorPool.Sync 后调：遍历 _bindings，FFI 查每个 nodeId 的
+        /// world_matrix/sort_key/visible，设 wrapper TRS + GO sortingOrder + SetActive。
+        /// 用户 GO 自身 transform 不动。不再遍历 blob——空 div slot 被 merge_meshes
+        /// 吞后 RenderNode 消失，但 world_transforms/sort_keys/visible 保留全节点，
+        /// 故 FFI 查询仍可拿到（与 merge 解耦）。null/无效/RemoveNode/display:none → visible=0 → SetActive(false)。
         /// </summary>
-        public void Sync(FrameBlob blob)
+        public unsafe void Sync(StageHandle* stage)
         {
-            if (!blob.IsValid) return;
-            _seenThisFrame.Clear();
+            if (_bindings.Count == 0) return;
+            if (stage == null) return;
             float sf = Mathf.Abs(_root.localScale.y);  // root (sf,-sf,sf) → 取 |y|
 
-            for (int i = 0; i < blob.NodeCount; i++)
+            foreach (var kv in _bindings)
             {
-                uint id = blob.NodeId(i);
+                uint id = kv.Key;
+                var go = kv.Value;
+                if (go == null) continue;
+
+                // visible（含 RemoveNode / display:none / 无效 NodeId → 0）
+                byte vis = 0;
+                Native.loomgui_stage_get_node_visible(stage, id, &vis);
+                if (vis == 0) { if (go.activeSelf) go.SetActive(false); continue; }
+
+                // world_matrix：a,b,c,d,tx,ty（Affine2 列主序）
+                float a = 0, b = 0, c = 0, d = 0, tx = 0, ty = 0;
+                Native.loomgui_stage_get_node_world_matrix(stage, id, &a, &b, &c, &d, &tx, &ty);
+
                 if (!_wrappers.TryGetValue(id, out var wrapper) || wrapper == null) continue;
 
-                _seenThisFrame.Add(id);
-
                 // TRS 分解（剪切 case 降级）
-                float a = blob.Ma(i), b = blob.Mb(i), c = blob.Mc(i), d = blob.Md(i);
                 float rot = Mathf.Atan2(b, a) * Mathf.Rad2Deg;
                 float sx = Mathf.Sqrt(a * a + b * b);
                 float sy = Mathf.Sqrt(c * c + d * d);
                 // wrapper 挂 _container（localScale (1,-1,1)）。container.worldScale=(sf,sf,sf)。
-                // wrapper.localPosition (Mtx, -Mty, 0)：design y-down → local y 翻，container (1,-1,1) 再翻
-                //   → world y = rootPos.y - sf·Mty（与 UI mesh worldPos 一致）。
+                // wrapper.localPosition (tx, -ty, 0)：design y-down → local y 翻，container (1,-1,1) 再翻
+                //   → world y = rootPos.y - sf·ty（与 UI mesh worldPos 一致）。
                 // wrapper.localScale (sx, sy, 1/sf)：worldScale = (sx·sf, sy·sf, 1)（z 不压扁）。
-                wrapper.transform.localPosition = new Vector3(blob.Mtx(i), -blob.Mty(i), 0);
+                wrapper.transform.localPosition = new Vector3(tx, -ty, 0);
                 wrapper.transform.localRotation = Quaternion.Euler(0, 0, rot);
                 wrapper.transform.localScale = new Vector3(sx, sy, sf > 0.0001f ? 1.0f / sf : 1.0f);
 
                 // 用户 GO sortingOrder = 节点 sort_key
-                if (_bindings.TryGetValue(id, out var go) && go != null)
-                {
-                    foreach (var r in go.GetComponentsInChildren<Renderer>())
-                        if (r != null) r.sortingOrder = (int)blob.SortKey(i);
-                    if (!go.activeSelf) go.SetActive(true);
-                }
-            }
-
-            // blob 中不存在的绑定节点 → SetActive(false)（node 消失）
-            foreach (var kv in _bindings)
-            {
-                if (!_seenThisFrame.Contains(kv.Key) && kv.Value != null)
-                    kv.Value.SetActive(false);
+                uint sk = 0;
+                Native.loomgui_stage_get_node_sort_key(stage, id, &sk);
+                foreach (var r in go.GetComponentsInChildren<Renderer>())
+                    if (r != null) r.sortingOrder = (int)sk;
+                if (!go.activeSelf) go.SetActive(true);
             }
         }
     }

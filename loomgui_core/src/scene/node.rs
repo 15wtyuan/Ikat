@@ -232,6 +232,10 @@ pub struct Scene {
     pub focused_node: Option<NodeId>,
     /// 每节点累计世界矩阵（compute_world_transforms 填）。index = NodeId.index()。运行时态，不进 pkg。
     pub world_transforms: Vec<crate::transform::Affine2>,
+    /// 每节点 sort_key 快照（assign_sort_keys 填，merge 前的 DFS 序号）。index = NodeId.index()。
+    /// NativeHost FFI 查询用——merge_meshes 后空 div entry 消失，但 sort_keys 快照保留。
+    /// 运行时态，不进 pkg。
+    pub node_sort_keys: Vec<u32>,
     /// 每节点动画 override（TweenManager.update 填）。index = NodeId.index()。运行时态，不进 pkg。
     pub anim: AnimTable,
     /// 每节点滚动状态（refresh_content_sizes / scroll 物理填）。index = NodeId.index()。运行时态，不进 pkg。
@@ -272,6 +276,7 @@ impl Scene {
             anim: Default::default(),
             scroll: Default::default(),
             text_layouts: Vec::new(),
+            node_sort_keys: Vec::new(),
         };
         // 先 insert 所有节点，收集 slotmap 分配的 NodeId
         let mut ids: Vec<NodeId> = Vec::with_capacity(entries.len());
@@ -343,6 +348,7 @@ impl Scene {
             anim: Default::default(),
             scroll: Default::default(),
             text_layouts: Vec::new(),
+            node_sort_keys: Vec::new(),
         };
         let mut ids: Vec<NodeId> = Vec::with_capacity(nodes.len());
         for n in nodes {

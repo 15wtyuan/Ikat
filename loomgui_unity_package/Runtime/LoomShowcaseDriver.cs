@@ -21,6 +21,20 @@ namespace LoomGUI
         // Cube 1m³ 在 UI design 空间天然小，设 scale 放大填 slot（NativeHost Sync 不动用户 GO scale）。
         [SerializeField] Vector3 _nativeScale = new Vector3(120, 120, 120);
 
+        // === page_nativehost：3D 角色 + 粒子（NativeHost 压测）===
+        [SerializeField] GameObject _characterPrefab;       // animatedman 角色 prefab（Inspector 拖）
+        [SerializeField] GameObject _effectPrefab;          // Kenney Magic/Fire prefab（Inspector 拖）
+        // ~1.7m fbx × 70 ≈ 120px 填 nh-stage 视觉区；PlayMode 微调。NativeHost Sync 不动用户 GO scale。
+        [SerializeField] Vector3 _characterScale = new Vector3(70, 70, 70);
+        [SerializeField] Animator _characterAnimator;       // 角色 Animator（切 clip；可空）
+        [SerializeField] string[] _animStates = { "Idle", "Walk", "Run" };   // Animator state 名（按实际 clip 填；可空）
+
+        // 角色 + 粒子 child 缓存实例：跨页存活只 Instantiate 一次。
+        // 离开页 Unbind 只 SetActive(false) 不销毁 → 复用同一 GO，避免反复进出页堆积。
+        GameObject _characterInstance;
+        int _animIdx;
+        bool _effectOn = true;
+
         // layer 骨架 NodeId
         uint _root = uint.MaxValue;
         uint _uiLayer = uint.MaxValue;
@@ -222,6 +236,7 @@ namespace LoomGUI
                 case "page_interact": SubscribeInteract(); break;
                 case "page_dyntree": SubscribeDynTree(); break;
                 case "page_list": SubscribeList(); break;
+                case "page_nativehost": SubscribeNativeHost(); break;
             }
         }
 
@@ -237,6 +252,7 @@ namespace LoomGUI
             AddNavListener("nav-interact", "page_interact");
             AddNavListener("nav-dyntree", "page_dyntree");
             AddNavListener("nav-list", "page_list");
+            AddNavListener("nav-nativehost", "page_nativehost");
             // nav-tips-demo → 弹 tips_toast 演示（tips_layer 叠加）。
             uint tipsBtn = _stage.FindNodeById("nav-tips-demo");
             AddPageListener(tipsBtn, EventType.Click, _ => ShowTips());
@@ -279,6 +295,66 @@ namespace LoomGUI
                 }
             }
             Debug.Log("[Showcase] page_controls 订阅完成（back + disabled + NativeHost）");
+        }
+
+        // page_nativehost：back-home + 角色/粒子 NativeHost 绑定 + 放光效/切动画按钮。
+        void SubscribeNativeHost()
+        {
+            SubscribeBackHome();
+            EnsureCharacterInstance();
+            if (_characterInstance != null)
+            {
+                uint stage = _stage.FindNodeById("nh-stage");
+                if (stage != uint.MaxValue)
+                {
+                    _stage.BindNativeHost(stage, _characterInstance);
+                    _nativeBoundNode = stage;   // 记下，离开页时 OpenPage 的 Unbind 摘 wrapper GO
+                }
+                else Debug.LogError("[Showcase] page_nativehost: id 'nh-stage' 未找到，跳过 NativeHost 绑定");
+            }
+            SubscribeLamp("nh-effect", EventType.Click, OnNhEffect);
+            SubscribeLamp("nh-anim", EventType.Click, OnNhAnim);
+            Debug.Log("[Showcase] page_nativehost 订阅完成（角色+粒子 NativeHost + 按钮）");
+        }
+
+        // 角色 + 粒子 child 缓存实例（只建一次）。Instantiate 后立即 SetActive(false)：
+        // BindNativeHost 前角色默认 active 会显示在场景原点；藏起来等 wrapper Sync 重新 SetActive(true)。
+        void EnsureCharacterInstance()
+        {
+            if (_characterInstance != null) return;
+            if (_characterPrefab == null)
+            {
+                Debug.LogError("[Showcase] _characterPrefab 未配，page_nativehost 角色不显示");
+                return;
+            }
+            _characterInstance = Instantiate(_characterPrefab);
+            _characterInstance.transform.localScale = _characterScale;
+            _characterInstance.SetActive(false);
+            if (_effectPrefab != null)
+            {
+                // 粒子挂角色 child；局部位置由 prefab 自带 transform 决定。PlayMode 看偏了在 prefab 调。
+                Instantiate(_effectPrefab, _characterInstance.transform, false);
+            }
+            else Debug.LogWarning("[Showcase] _effectPrefab 未配，page_nativehost 无粒子");
+        }
+
+        // toggle 角色 child 下的粒子（SetActive + Play/Stop）。
+        void OnNhEffect(EventContext ctx)
+        {
+            if (_characterInstance == null) return;
+            var ps = _characterInstance.GetComponentInChildren<ParticleSystem>();
+            if (ps == null) { Debug.LogWarning("[Showcase] 角色下无 ParticleSystem"); return; }
+            _effectOn = !_effectOn;
+            if (_effectOn) { ps.gameObject.SetActive(true); ps.Play(); }
+            else { ps.Stop(); ps.gameObject.SetActive(false); }
+        }
+
+        // 循环切 Animator state（Idle/Walk/Run）。
+        void OnNhAnim(EventContext ctx)
+        {
+            if (_characterAnimator == null || _animStates == null || _animStates.Length == 0) return;
+            _animIdx = (_animIdx + 1) % _animStates.Length;
+            _characterAnimator.Play(_animStates[_animIdx]);
         }
 
         // page_text：back-home（无其他交互元素，纯展示文本样式）。

@@ -13,7 +13,8 @@
 
 use loomgui_core::asset::{
     extract_component_css, normalize_path, AssetEntry, PackageInput, TemplateNode,
-};use loomgui_core::scene::NodeId;
+};
+use loomgui_core::scene::NodeId;
 use scraper::{Html, Selector as ScraperSelector};
 use std::path::Path;
 

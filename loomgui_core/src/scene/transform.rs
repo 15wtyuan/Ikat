@@ -119,7 +119,6 @@ mod tests {
                 },
             ),
             {
-                
                 node(
                     1,
                     Some(0),

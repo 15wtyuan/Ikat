@@ -18,6 +18,9 @@ Cargo.lock
 *.unitypackage
 *.apk
 *.aab
+# 白名单：LoomUI 资源目录下入库的 unitypackage（如 Kenney 粒子包素材）需要追踪
+!loomgui_unity/Assets/LoomUI/res/**/*.unitypackage
+!loomgui_unity/Assets/LoomUI/res/**/*.unitypackage.meta
 *.unityproj
 *.sln
 *.slnx
@@ -63,6 +66,7 @@ desktop.ini
 .claude/cache/
 .claude/state/
 .claude/projects/
+.claude/worktrees/
 
 # ===== open-design 调研 =====
 # open-design 源码（只读调研参考，不入库）

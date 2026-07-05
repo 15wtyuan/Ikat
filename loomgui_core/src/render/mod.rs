@@ -98,7 +98,11 @@ pub fn build_render_nodes(
     font: &Font,
     prev: &std::collections::HashMap<u32, (u64, u64)>,
     image_sizes: &ImageSizeTable,
-) -> (FrameData, std::collections::HashMap<u32, (u64, u64)>) {
+) -> (
+    FrameData,
+    std::collections::HashMap<u32, (u64, u64)>,
+    Vec<u32>,
+) {
     // id_to_pos: NodeId → 0 基位置映射（batch assign_sort_keys 用，merge 前）。
     let id_to_pos: std::collections::HashMap<NodeId, usize> = scene
         .nodes
@@ -347,7 +351,12 @@ pub fn build_render_nodes(
         nodes.push(rn);
     }
     // batch / merge / thumb
-    let clips = batch::assign_sort_keys(scene, &mut nodes, &id_to_pos);
+    // sort_keys buffer：按 NodeId.index() 索引（capacity+1，对齐 world_transforms 扩容——
+    // slotmap 删后 idx 不变，按 capacity 不按 len）。assign_sort_keys 在 DFS 时填每个节点的
+    // pre-merge 序号；merge_meshes 后空 div 的 RenderNode entry 会被吃掉，但 sort_keys
+    // 快照保留供 NativeHost FFI 查询。
+    let mut sort_keys: Vec<u32> = vec![0u32; scene.nodes.capacity() + 1];
+    let clips = batch::assign_sort_keys(scene, &mut nodes, &id_to_pos, &mut sort_keys);
     let max_sort = nodes.iter().map(|n| n.sort_key).max().unwrap_or(0);
     batch::reorder_for_batching(scene, &mut nodes);
     let mut nodes = merge::merge_meshes(nodes);
@@ -388,7 +397,7 @@ pub fn build_render_nodes(
         };
         new_hashes.insert(rn.node_id, (hh, ph));
     }
-    (FrameData { nodes, clips }, new_hashes)
+    (FrameData { nodes, clips }, new_hashes, sort_keys)
 }
 
 /// 把 taffy `LengthPercentage` 解析为 px。
