@@ -1,5 +1,15 @@
 {
   "dependencies": {
+    "com.loomgui.unity": {
+      "version": "file:../../loomgui_unity_package",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.unity.2d.sprite": "1.0.0",
+        "com.unity.inputsystem": "1.19.0",
+        "com.unity.render-pipelines.universal": "17.5.0"
+      }
+    },
     "com.unity.2d.sprite": {
       "version": "1.0.0",
       "depth": 0,
