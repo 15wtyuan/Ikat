@@ -15,7 +15,8 @@
     'nav-tween': 'page_tween',
     'nav-interact': 'page_interact',
     'nav-dyntree': 'page_dyntree',
-    'nav-list': 'page_list'
+    'nav-list': 'page_list',
+    'nav-nativehost': 'page_nativehost'
   };
 
   // overlay 组件模板：<style> + markup 一起（宿主页没这些类的 CSS）。
@@ -352,14 +353,32 @@
     },
     page_nativehost: function () {
       wireBackHome();
-      // NativeHost 3D 角色 + 粒子挂 nh-stage（Unity BindNativeHost），浏览器无 3D 不复刻，占位提示。
+      // NativeHost 3D 角色 + 粒子挂 nh-stage（Unity BindNativeHost）——浏览器无 3D，
+      // 用占位 + 模拟反馈让预览能演示页面意图（真 3D 看 Unity PlayMode）。
       var stage = $('nh-stage');
       if (stage) {
         stage.style.justifyContent = 'center';
         stage.style.alignItems = 'center';
-        stage.innerHTML = '<div style="color:#9aa0b4;font-size:14px;text-align:center;padding:16px">[NativeHost 3D 角色 + 粒子<br>预览不支持<br>Unity PlayMode 查看]</div>';
+        stage.innerHTML =
+          '<div style="color:#9aa0b4;font-size:14px;text-align:center;padding:12px">[NativeHost 3D 角色 + 粒子<br>预览不支持 3D<br>Unity PlayMode 查看]</div>' +
+          '<div id="nh-anim-label" style="margin-top:12px;color:#5fb2c4;font-size:18px;font-weight:700">动画：Idle</div>' +
+          '<div id="nh-effect-fx" style="margin-top:16px;width:96px;height:96px;border-radius:50%;background:radial-gradient(circle,#5fb2c4,transparent);opacity:0;transition:opacity .3s"></div>';
       }
-      // nh-effect / nh-anim 控制 Unity 3D（放光效/切动画），预览无 3D 不复刻。
+      // nh-anim：切动画（预览模拟——循环 Idle/Walk/Run 标签；C# OnNhAnim 切 Animator state）。
+      var anims = ['Idle', 'Walk', 'Run'];
+      var animIdx = 0;
+      bindClick('nh-anim', function () {
+        animIdx = (animIdx + 1) % anims.length;
+        var label = $('nh-anim-label');
+        if (label) label.textContent = '动画：' + anims[animIdx];
+      });
+      // nh-effect：放光效（预览模拟——CSS 脉冲光圈；C# OnNhEffect Instantiate 粒子 prefab）。
+      bindClick('nh-effect', function () {
+        var fx = $('nh-effect-fx');
+        if (!fx) return;
+        fx.style.opacity = '1';
+        setTimeout(function () { fx.style.opacity = '0'; }, 600);
+      });
     }
   };
 
