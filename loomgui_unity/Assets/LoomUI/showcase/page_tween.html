@@ -2,6 +2,9 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
+<base href="..">
+<link rel="stylesheet" href="preview/preview-base.css">
+<script src="preview/loom-preview.js"></script>
 <title>动效页</title>
 <style>
 /* page_tween 组件 CSS（D6 组件隔离）——抽自旧 style.css 的 §7 + §4 hit/lamp + base */
@@ -76,16 +79,20 @@
           <div class="card-h"><span class="card-t">7.4 complete 回调</span><span class="card-x">预期: 动画结束亮灯（TweenComplete + tag）</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
             <div class="hit" id="complete-play">播放（结束后亮灯）</div>
-            <div class="lamps" id="lamp-complete">
-              <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+            <div class="lamps">
+              <div class="lamp" id="lamp-complete-0"></div>
+              <div class="lamp" id="lamp-complete-1"></div>
+              <div class="lamp" id="lamp-complete-2"></div>
             </div>
+            <div style="flex-direction:row;gap:4px"><span class="card-x">已触发</span><span class="card-x" id="count-complete">0</span><span class="card-x">次</span></div>
             <span class="card-x">t-opacity 跑完后 core 产 TweenComplete（tag=7），C# 识别 tag 亮 lamp-complete。</span>
           </div>
         </div>
         <div class="card">
           <div class="card-h"><span class="card-t">7.5 kill / clear</span><span class="card-x">预期: kill 停末值 / clear 回 CSS 初始</span></div>
           <div class="card-b" style="flex-direction:column;gap:8px;width:100%">
-            <div class="demo" id="kill-target">旋转中</div>
+            <div class="demo" id="kill-target">未转</div>
+            <div class="hit" id="play-kill-target">▶ 播放</div>
             <div class="hit" id="kill-btn">kill（停末值）</div>
             <div class="hit" id="clear-btn">clear（回 CSS）</div>
             <span class="card-x">kill-target 启动即持续旋转（单次长 tween）；kill 冻结当前角，clear 清所有 anim 回 CSS。</span>

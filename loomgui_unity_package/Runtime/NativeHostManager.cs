@@ -74,7 +74,12 @@ namespace LoomGUI
                 {
                     foreach (var mat in r.sharedMaterials)
                     {
-                        if (mat != null && mat.renderQueue != 3000) mat.renderQueue = 3000;
+                        if (mat == null) continue;
+                        if (mat.renderQueue != 3000) mat.renderQueue = 3000;
+                        // ZWrite Off：3D GO/粒子不写 depth，纯 sortingOrder 排序（同 UI shader ZWrite Off）。
+                        // 否则 3D GO（URP/Lit 默认 ZWrite On）在 Transparent 队列写 depth 扰乱 UI
+                        // （UI ZTest LEqual）→ depth fight，3D GO 被 UI 背景切。
+                        mat.SetInt("_ZWrite", 0);
                     }
                 }
             }

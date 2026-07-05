@@ -16,17 +16,29 @@ namespace LoomGUI
     public unsafe class LoomShowcaseDriver : MonoBehaviour
     {
         [SerializeField] LoomStage _stage;
-        // 外部 GO 绑 model-slot（page_controls §1.6 NativeHost 演示；Inspector 拖 Cube 等）。
+        // page_controls §1.6 NativeHost 演示：Inspector 拖 prefab（driver Instantiate 缓存实例后绑，
+        // 不直接绑 prefab asset——Unity 禁改 prefab transform，Bind 也不该越界实例化）。
         [SerializeField] GameObject _nativeModel;
         // Cube 1m³ 在 UI design 空间天然小，设 scale 放大填 slot（NativeHost Sync 不动用户 GO scale）。
         [SerializeField] Vector3 _nativeScale = new Vector3(120, 120, 120);
 
+        // _nativeModel 的缓存实例（Instantiate 一次，跨页复用，Unbind 只 SetActive(false)）。
+        GameObject _nativeModelInstance;
+
         // === page_nativehost：3D 角色 + 粒子（NativeHost 压测）===
         [SerializeField] GameObject _characterPrefab;       // animatedman 角色 prefab（Inspector 拖）
         [SerializeField] GameObject _effectPrefab;          // Kenney Magic/Fire prefab（Inspector 拖）
-        // ~1.7m fbx × 70 ≈ 120px 填 nh-stage 视觉区；PlayMode 微调。NativeHost Sync 不动用户 GO scale。
-        [SerializeField] Vector3 _characterScale = new Vector3(70, 70, 70);
-        [SerializeField] Animator _characterAnimator;       // 角色 Animator（切 clip；可空）
+        // 角色缩放：x/y 填 slot 视觉大小（~1.7m fbx × 70 ≈ 120px）；**z 用小值（如 1）**——
+        // 正交相机 z 缩放不影响视觉大小，只放大 depth 厚度，z 大了会超相机 near/far 被 clip。
+        [SerializeField] Vector3 _characterScale = new Vector3(70, 70, 1);
+        // 角色在 slot 的本地偏移（wrapper origin = slot 左上角；模型锚点通常是脚底/中心，
+        // 调此对齐：如脚底落 slot 底中 = (slot_w/2, -slot_h/2, 0)）。z 可推 3D GO depth。
+        [SerializeField] Vector3 _characterLocalOffset = new Vector3(0, 0, 0);
+        // 粒子缩放（独立于角色）：ParticleSystem startSize 是世界单位，不完全随父 GO scale 放大，
+        // 故角色 scale 不等比放大粒子——粒子需独立 _effectScale（如匹配角色 xy (120,120,120)）。
+        [SerializeField] Vector3 _effectScale = new Vector3(120, 120, 120);
+        [SerializeField] Vector3 _effectLocalOffset = new Vector3(0, 0, 0);
+        [SerializeField] Animator _characterAnimator;       // 角色 Animator（留空则自动从实例 GetComponent 取；勿拖 prefab 的 Animator——那是模板非运行实例）
         [SerializeField] string[] _animStates = { "Idle", "Walk", "Run" };   // Animator state 名（按实际 clip 填；可空）
 
         // 角色 + 粒子 child 缓存实例：跨页存活只 Instantiate 一次。
@@ -60,12 +72,24 @@ namespace LoomGUI
         readonly Dictionary<uint, List<(EventType type, EventCallback cb)>> _pageListeners = new();
 
         // === 灯阵计数（page_interact）===
-        int _clickCount, _hoverCount, _dragCount, _longCount, _keyCount, _routeCount;
+        int _clickCount, _hoverCount, _dragCount, _longCount, _keyCount;
+        int _routeOuterCount, _routeInnerCount, _routePeCount;
+        int _completeCount;
+
+        // lamp 组当前已亮盏数（0..N 循环重置）。key=灯组 name。
+        readonly Dictionary<string, int> _lampLit = new();
+        static int LampCount(string name) => name switch {
+            "click" => 6, "hover" => 4, "drag" => 4, "key" => 8,
+            "complete" => 3, "longpress" => 3,
+            "outer" => 3, "inner" => 3, "pe" => 3,
+            _ => 3
+        };
 
         // === tween 演示（page_tween）===
         // Ease 0..9 与 Rust tween::Ease 对齐（OnEasePlay 取子集对比）。六 prop 在 OnTweenPlay 逐个硬编码 PlayProp。
         static readonly Ease[] _allEase = { Ease.Linear, Ease.QuadIn, Ease.QuadOut, Ease.QuadInOut, Ease.CubicIn, Ease.CubicOut, Ease.CubicInOut, Ease.BackIn, Ease.BackOut, Ease.BackInOut };
         const uint TagComplete = 7;   // complete 回调用 tag
+        const uint TagKillSpin = 8;   // kill-target 持续旋转 loop 标识
 
         // === 动态树演示（page_dyntree §3.10）===
         // dyn-anchor 是 pkg 里的空容器；点击 dyn-add 运行时 create_node 建 panel+title+icon 挂到 anchor。
@@ -225,6 +249,11 @@ namespace LoomGUI
         // 每订阅走 AddPageListener（记进注册表），切页时批量清。
         void SubscribePage(string page)
         {
+            // 页面切换时清灯组状态 + 计数（页面 fresh instantiate，旧 _lampLit/计数会与视觉脱节）。
+            _lampLit.Clear();
+            _clickCount = _hoverCount = _dragCount = _longCount = _keyCount = 0;
+            _routeOuterCount = _routeInnerCount = _routePeCount = 0;
+            _completeCount = 0;
             switch (page)
             {
                 case "home": SubscribeHome(); break;
@@ -279,15 +308,16 @@ namespace LoomGUI
             SubscribeBackHome();
             uint dbd = _stage.FindNodeById("btn-demo-disabled");
             if (dbd != uint.MaxValue) _stage.SetNodeDisabled(dbd, true);
-            // NativeHost：绑外部 GO 到 model-slot（每帧 Sync 自动同步 wrapper TRS）。
-            if (_nativeModel != null)
+            // NativeHost：Instantiate _nativeModel 缓存实例后绑 model-slot（每帧 Sync 自动同步 wrapper TRS）。
+            // 不直接绑 prefab asset——Bind 契约是场景实例（fgui GoWrapper 同款：caller 管实例化，框架只显示）。
+            EnsureNativeModelInstance();
+            if (_nativeModelInstance != null)
             {
                 uint slot = _stage.FindNodeById("model-slot");
                 if (slot != uint.MaxValue)
                 {
-                    _stage.BindNativeHost(slot, _nativeModel);
-                    _nativeModel.transform.localScale = _nativeScale;
-                    _nativeBoundNode = slot;   // 记下，离开页时 Unbind 摘 wrapper GO
+                    _stage.BindNativeHost(slot, _nativeModelInstance);
+                    _nativeBoundNode = slot;   // 记下，离开页时 OpenPage 的 Unbind 摘 wrapper GO
                 }
                 else
                 {
@@ -297,21 +327,32 @@ namespace LoomGUI
             Debug.Log("[Showcase] page_controls 订阅完成（back + disabled + NativeHost）");
         }
 
+        // _nativeModel 缓存实例（只 Instantiate 一次，跨页复用）。scale 在实例上设（非 prefab asset）。
+        void EnsureNativeModelInstance()
+        {
+            if (_nativeModelInstance != null) return;
+            if (_nativeModel == null)
+            {
+                Debug.LogError("[Showcase] _nativeModel 未配，page_controls NativeHost 不显示");
+                return;
+            }
+            _nativeModelInstance = Instantiate(_nativeModel);
+            _nativeModelInstance.transform.localScale = _nativeScale;
+            _nativeModelInstance.SetActive(false);
+        }
+
         // page_nativehost：back-home + 角色/粒子 NativeHost 绑定 + 放光效/切动画按钮。
         void SubscribeNativeHost()
         {
             SubscribeBackHome();
             EnsureCharacterInstance();
-            if (_characterInstance != null)
+            uint stage = _stage.FindNodeById("nh-stage");
+            if (_characterInstance != null && stage != uint.MaxValue)
             {
-                uint stage = _stage.FindNodeById("nh-stage");
-                if (stage != uint.MaxValue)
-                {
-                    _stage.BindNativeHost(stage, _characterInstance);
-                    _nativeBoundNode = stage;   // 记下，离开页时 OpenPage 的 Unbind 摘 wrapper GO
-                }
-                else Debug.LogError("[Showcase] page_nativehost: id 'nh-stage' 未找到，跳过 NativeHost 绑定");
+                _stage.BindNativeHost(stage, _characterInstance);
+                _nativeBoundNode = stage;   // 记下，离开页时 OpenPage 的 Unbind 摘 wrapper GO
             }
+            else if (stage == uint.MaxValue) Debug.LogError("[Showcase] page_nativehost: id 'nh-stage' 未找到（pkg 未含 page_nativehost.html？），跳过 NativeHost 绑定");
             SubscribeLamp("nh-effect", EventType.Click, OnNhEffect);
             SubscribeLamp("nh-anim", EventType.Click, OnNhAnim);
             Debug.Log("[Showcase] page_nativehost 订阅完成（角色+粒子 NativeHost + 按钮）");
@@ -329,11 +370,18 @@ namespace LoomGUI
             }
             _characterInstance = Instantiate(_characterPrefab);
             _characterInstance.transform.localScale = _characterScale;
+            _characterInstance.transform.localPosition = _characterLocalOffset;
             _characterInstance.SetActive(false);
+            // Animator 从实例取（prefab 上的 Animator 是模板，对它 Play 无效/报错）。
+            // Inspector 留空自动取；若 caller 拖了场景实例的 Animator 则覆盖。
+            if (_characterAnimator == null)
+                _characterAnimator = _characterInstance.GetComponent<Animator>();
             if (_effectPrefab != null)
             {
-                // 粒子挂角色 child；局部位置由 prefab 自带 transform 决定。PlayMode 看偏了在 prefab 调。
-                Instantiate(_effectPrefab, _characterInstance.transform, false);
+                // 粒子挂角色 child；独立 scale（ParticleSystem startSize 不随父 scale 等比放大）+ offset。
+                var fx = Instantiate(_effectPrefab, _characterInstance.transform, false);
+                fx.transform.localScale = _effectScale;
+                fx.transform.localPosition = _effectLocalOffset;
             }
             else Debug.LogWarning("[Showcase] _effectPrefab 未配，page_nativehost 无粒子");
         }
@@ -342,19 +390,22 @@ namespace LoomGUI
         void OnNhEffect(EventContext ctx)
         {
             if (_characterInstance == null) return;
-            var ps = _characterInstance.GetComponentInChildren<ParticleSystem>();
-            if (ps == null) { Debug.LogWarning("[Showcase] 角色下无 ParticleSystem"); return; }
+            // includeInactive=true：粒子可能挂在被 SetActive(false) 的角色子树下。
+            var ps = _characterInstance.GetComponentInChildren<ParticleSystem>(true);
+            if (ps == null) { Debug.LogWarning("[Showcase] 角色下无 ParticleSystem（_effectPrefab 未配或 prefab 无 ParticleSystem 组件）"); return; }
             _effectOn = !_effectOn;
             if (_effectOn) { ps.gameObject.SetActive(true); ps.Play(); }
             else { ps.Stop(); ps.gameObject.SetActive(false); }
         }
 
-        // 循环切 Animator state（Idle/Walk/Run）。
+        // 循环切 Animator state（按 Inspector _animStates 填的 clip 名）。
         void OnNhAnim(EventContext ctx)
         {
             if (_characterAnimator == null || _animStates == null || _animStates.Length == 0) return;
             _animIdx = (_animIdx + 1) % _animStates.Length;
             _characterAnimator.Play(_animStates[_animIdx]);
+            // 注：若 Animator controller 没建对应 state，会报 "State could not be found"——
+            // 在 Unity Animator 窗口把 clip 拖进去建 state（state 名 = clip 名）。
         }
 
         // page_text：back-home（无其他交互元素，纯展示文本样式）。
@@ -375,7 +426,11 @@ namespace LoomGUI
         void SubscribeScroll()
         {
             SubscribeBackHome();
-            Debug.Log("[Showcase] page_scroll 订阅完成（back）");
+            uint pageScroll = _stage.FindNodeById("page-scroll");
+            AddPageListener(_stage.FindNodeById("scroll-top"), EventType.Click, _ => _stage.SetScrollPos(pageScroll, 0f, 0f));
+            AddPageListener(_stage.FindNodeById("scroll-mid"), EventType.Click, _ => _stage.SetScrollPos(pageScroll, 0f, 600f));
+            AddPageListener(_stage.FindNodeById("scroll-bottom"), EventType.Click, _ => _stage.SetScrollPos(pageScroll, 0f, 99999f));
+            Debug.Log("[Showcase] page_scroll 订阅完成（back + 3 SetScrollPos 按钮）");
         }
 
         // page_interact（§4 灯阵）：back-home + 各交互元素事件 + disabled + 路由。
@@ -394,7 +449,7 @@ namespace LoomGUI
             // 路由：outer/inner 均订阅 Click；inner 调 StopPropagation 止冒泡（outer 不触发）。
             SubscribeLamp("route-outer", EventType.Click, OnRouteOuter);
             SubscribeLamp("route-inner", EventType.Click, OnRouteInner);
-            SubscribeLamp("route-pe", EventType.Click, OnRoutePe);
+            SubscribeLamp("route-pe-under", EventType.Click, OnRoutePeUnder);
             Debug.Log("[Showcase] page_interact 灯阵订阅完成（click/hover/drag/longpress/key + route + disabled）");
         }
 
@@ -404,14 +459,26 @@ namespace LoomGUI
             AddPageListener(n, t, cb);
         }
 
-        // 点亮 lamp-{name} 容器：无 get_children API，改用整容器 opacity 脉冲指示触发。
-        void LightLamp(string name, int count)
+        // 点亮 lamp-{name}-{lit} 第 lit 盏（id-addressable）+ count-{name} 计数。
+        // 全亮后下一次触发先灭所有再重新从 0 点亮（循环）。count 显示累计触发次数。
+        void LightLamp(string name, int totalCount)
         {
-            uint container = _stage.FindNodeById("lamp-" + name);
-            if (container == uint.MaxValue) return;
-            _stage.Tween(container, TweenProp.Opacity,
-                new float[] { 1f, 0, 0, 0 }, new float[] { 0.3f, 0, 0, 0 },
-                0.2f, Ease.QuadOut, 0f, 0);
+            int n = LampCount(name);
+            if (!_lampLit.TryGetValue(name, out int lit)) lit = 0;
+            if (lit >= n)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    uint lamp = _stage.FindNodeById($"lamp-{name}-{i}");
+                    if (lamp != uint.MaxValue) _stage.SetStyle(lamp, "background-color:#3a3f55");
+                }
+                lit = 0;
+            }
+            uint node = _stage.FindNodeById($"lamp-{name}-{lit}");
+            if (node != uint.MaxValue) _stage.SetStyle(node, "background-color:#5fb2c4");
+            _lampLit[name] = lit + 1;
+            uint countNode = _stage.FindNodeById("count-" + name);
+            if (countNode != uint.MaxValue) _stage.SetText(countNode, totalCount.ToString());
         }
 
         // click + dblclick：双击额外多亮一盏（用 acc 色标记）。
@@ -427,13 +494,13 @@ namespace LoomGUI
         void OnKeyHit(EventContext ctx) { LightLamp("key", ++_keyCount); }
 
         // 路由演示：inner StopPropagation → outer 不收。独立 lamp-route 反馈。
-        void OnRouteOuter(EventContext ctx) { LightLamp("route", ++_routeCount); }
+        void OnRouteOuter(EventContext ctx) { LightLamp("outer", ++_routeOuterCount); }
         void OnRouteInner(EventContext ctx)
         {
             ctx.StopPropagation();
-            LightLamp("route", ++_routeCount);
+            LightLamp("inner", ++_routeInnerCount);
         }
-        void OnRoutePe(EventContext ctx) { LightLamp("route", ++_routeCount); }
+        void OnRoutePeUnder(EventContext ctx) { LightLamp("pe", ++_routePeCount); }
 
         // page_tween（§7 动效）：back-home + tween 播放/kill/clear + complete 回调 + kill-target 旋转。
         // 走 AddPageListener 记进注册表。
@@ -448,9 +515,20 @@ namespace LoomGUI
             SubscribeLamp("clear-btn", EventType.Click, OnClear);
             // t-opacity 的 TweenComplete（core 完成时直派，ctx.clickCount=prop、ctx.touchId=tag）。
             SubscribeLamp("t-opacity", EventType.TweenComplete, OnTweenCompleteTag);
-            // kill-target：启动即开始持续旋转（单次长 tween——loop 需 TweenComplete 重启，简化省略）。
-            PlayProp("kill-target", TweenProp.Rotation, new float[] { 0f, 0, 0, 0 }, new float[] { 360f, 0, 0, 0 }, 4f, Ease.Linear, 0f, 0);
-            Debug.Log("[Showcase] page_tween 订阅完成（play/ease/delay/complete/kill/clear + kill-target 旋转）");
+            // kill-target：点"播放"才开始持续旋转（loop 靠 TweenComplete 重启）。
+            SubscribeLamp("play-kill-target", EventType.Click, OnPlayKillTarget);
+            SubscribeLamp("kill-target", EventType.TweenComplete, OnKillTargetLoop);
+            Debug.Log("[Showcase] page_tween 订阅完成（play/ease/delay/complete/kill/clear + play-kill-target loop）");
+        }
+
+        void OnPlayKillTarget(EventContext ctx)
+        {
+            PlayProp("kill-target", TweenProp.Rotation, new float[] { 0f, 0, 0, 0 }, new float[] { 360f, 0, 0, 0 }, 4f, Ease.Linear, 0f, TagKillSpin);
+        }
+        void OnKillTargetLoop(EventContext ctx)
+        {
+            if (ctx.touchId == TagKillSpin)
+                PlayProp("kill-target", TweenProp.Rotation, new float[] { 0f, 0, 0, 0 }, new float[] { 360f, 0, 0, 0 }, 4f, Ease.Linear, 0f, TagKillSpin);
         }
 
         void PlayProp(string id, TweenProp prop, float[] s, float[] e, float dur, Ease ease, float delay, uint tag)
@@ -494,7 +572,7 @@ namespace LoomGUI
         }
         void OnTweenCompleteTag(EventContext ctx)
         {
-            if (ctx.touchId == TagComplete) LightLamp("complete", 1);
+            if (ctx.touchId == TagComplete) LightLamp("complete", ++_completeCount);
         }
 
         // kill 冻结当前角（停在末值）；clear 清所有 anim 回 CSS 初始。
