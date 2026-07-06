@@ -641,7 +641,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             }
         }
         "transition" => {
-            style.transition = Some(parse_transition(value));
+            style.transition = parse_transition(value);
             true
         }
         _ => false, // 装饰属性静默忽略
@@ -652,10 +652,14 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
 /// 简化解析：空格切 token。第 1 个 = 属性名（all/opacity/color/background-color）；
 /// 含 's' 的 = duration/delay（首遇 duration，次遇 delay）；
 /// 其余 = ease 关键字。缺省补默认（dur=0s, ease=Linear, delay=0s）。
-fn parse_transition(value: &str) -> crate::style::resolved::TransitionSpec {
+/// 空输入（无 token）返回 None，表示未声明 transition。
+fn parse_transition(value: &str) -> Option<crate::style::resolved::TransitionSpec> {
     use crate::style::resolved::TransitionSpec;
     use crate::tween::{Ease, TweenProp};
     let tokens: Vec<&str> = value.split_whitespace().collect();
+    if tokens.is_empty() {
+        return None;
+    }
     let mut prop = None;
     let mut duration = 0.0f32;
     let mut delay = 0.0f32;
@@ -688,12 +692,12 @@ fn parse_transition(value: &str) -> crate::style::resolved::TransitionSpec {
             };
         }
     }
-    TransitionSpec {
+    Some(TransitionSpec {
         prop,
         duration,
         ease,
         delay,
-    }
+    })
 }
 
 /// "10px" → 10.0；"10%" → None（拒 %）；"10" → 10.0（容错无单位）。
