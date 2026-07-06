@@ -3,6 +3,20 @@ use taffy::style::LengthPercentage;
 use taffy::style::Style as TaffyStyle;
 use taffy::FlexDirection;
 
+/// CSS transition 声明（单属性）。prop: None = all（任一通道变化触发）。
+/// 围栏先支持 opacity/color/background-color/all 映射到 TweenProp。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TransitionSpec {
+    /// None = all（动画任一变化的通道）
+    pub prop: Option<crate::tween::TweenProp>,
+    /// 动画时长（秒）
+    pub duration: f32,
+    /// easing 函数
+    pub ease: crate::tween::Ease,
+    /// 延迟（秒）
+    pub delay: f32,
+}
+
 /// CSS overflow 轴模式。
 /// `#[repr(u8)]` 保证 FFI/序列化稳定，`Default = Visible`。
 /// Scroll/Auto 的物理/手势由 scroll 模块实现；本 enum 仅承载语义值。
@@ -117,6 +131,8 @@ pub struct ResolvedStyle {
     pub color_filter: Option<[f32; 20]>,
     /// CSS border-image-slice 四边切片（源图像素）。None=无九宫格。
     pub border_image_slice: Option<SliceInsets>,
+    /// CSS transition 声明。None=未设（默认无过渡动画）。
+    pub transition: Option<TransitionSpec>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -158,6 +174,7 @@ impl Default for ResolvedStyle {
             transform: LocalTransform::default(),
             color_filter: None,
             border_image_slice: None,
+            transition: None,
         }
     }
 }
@@ -227,6 +244,12 @@ mod tests {
                 },
             ],
         };
+        s.transition = Some(TransitionSpec {
+            prop: Some(crate::tween::TweenProp::Opacity),
+            duration: 0.3,
+            ease: crate::tween::Ease::Linear,
+            delay: 0.0,
+        });
 
         let bytes = bincode::serialize(&s).expect("serialize");
         let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");

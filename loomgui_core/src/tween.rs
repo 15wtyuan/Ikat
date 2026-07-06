@@ -2,8 +2,10 @@
 //! 动 opacity / transform(translate·scale·rotate) / 颜色(bg·text)。
 //! replace-override：动画值覆盖 ResolvedStyle 读取点（None 退回 CSS）。
 
+use serde::{Deserialize, Serialize};
+
 /// 可动属性。u8 值与 FFI / C# enum 对齐。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum TweenProp {
     Opacity = 0,
@@ -39,7 +41,7 @@ pub fn prop_value_size(prop: TweenProp) -> u8 {
 }
 
 /// easing 子集（10 个）。u8 值与 FFI / C# enum 对齐。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Ease {
     Linear = 0,

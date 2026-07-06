@@ -640,7 +640,59 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 false // 非法值（% 等围栏外）静默忽略
             }
         }
+        "transition" => {
+            style.transition = Some(parse_transition(value));
+            true
+        }
         _ => false, // 装饰属性静默忽略
+    }
+}
+
+/// 解析 CSS `transition` 声明值 → TransitionSpec。
+/// 简化解析：空格切 token。第 1 个 = 属性名（all/opacity/color/background-color）；
+/// 含 's' 的 = duration/delay（首遇 duration，次遇 delay）；
+/// 其余 = ease 关键字。缺省补默认（dur=0s, ease=Linear, delay=0s）。
+fn parse_transition(value: &str) -> crate::style::resolved::TransitionSpec {
+    use crate::style::resolved::TransitionSpec;
+    use crate::tween::{Ease, TweenProp};
+    let tokens: Vec<&str> = value.split_whitespace().collect();
+    let mut prop = None;
+    let mut duration = 0.0f32;
+    let mut delay = 0.0f32;
+    let mut ease = Ease::Linear;
+    for t in tokens {
+        if t == "all" {
+            prop = None;
+        } else if t == "opacity" {
+            prop = Some(TweenProp::Opacity);
+        } else if t == "color" {
+            prop = Some(TweenProp::TextColor);
+        } else if t == "background-color" {
+            prop = Some(TweenProp::BgColor);
+        } else if t.ends_with('s') {
+            let n = t.trim_end_matches('s').parse::<f32>().unwrap_or(0.0);
+            if duration == 0.0 {
+                duration = n;
+            } else {
+                delay = n;
+            }
+        } else {
+            // ease 关键字（CSS 标准名 → 内 Ease 变体）
+            ease = match t {
+                "linear" => Ease::Linear,
+                "ease" => Ease::QuadOut,
+                "ease-in" => Ease::QuadIn,
+                "ease-out" => Ease::QuadOut,
+                "ease-in-out" => Ease::QuadInOut,
+                _ => Ease::Linear,
+            };
+        }
+    }
+    TransitionSpec {
+        prop,
+        duration,
+        ease,
+        delay,
     }
 }
 
