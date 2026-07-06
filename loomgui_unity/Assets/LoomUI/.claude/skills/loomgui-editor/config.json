@@ -1,5 +1,5 @@
 ﻿{
-  "exe_path": "../LoomGUI/Editor/Tools/loomgui_pkg.exe",
+  "exe_path": "../../../loomgui_unity_package/Editor/Tools/loomgui_pkg.exe",
   "res_dir": "res",
   "output_dir": "../StreamingAssets",
   "packages": [
