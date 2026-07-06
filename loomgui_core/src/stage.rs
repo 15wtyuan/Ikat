@@ -11,7 +11,7 @@ use crate::render::FrameData;
 use crate::scene::node::{ControllerChangedEvent, NodeId, Rect, Scene};
 use crate::style::dynamic::rematch_pseudo_classes;
 use crate::style::resolved::OverflowMode;
-use crate::text::layout::Font;
+use crate::text::layout::{Font, FontTable};
 use std::sync::Arc;
 
 /// transition 自动提交 tween 的 tag（rematch 检测通道变化 → drain kill 旧 + 提交新）。
@@ -665,7 +665,15 @@ impl Stage {
         // 5. solve（读 rematch 后的 taffy_style → layout_rect）
         // 核心知图尺寸（打包期 PNG IHDR 静态，存 Stage.image_sizes）。solve 查尺寸表算
         // Image intrinsic（三档：CSS > 真实像素 > 64×64）。不知图集（运行时纹理/UV 归 Unity）。
-        solve(scene, &self.font, self.root_size, &self.image_sizes);
+        // TODO A3: replace temporary FontTable with self.fonts
+        {
+            let mut temp_fonts = FontTable::new();
+            temp_fonts
+                .fonts
+                .insert("default".to_string(), self.font.clone());
+            temp_fonts.default_family = Some("default".to_string());
+            solve(scene, &temp_fonts, self.root_size, &self.image_sizes);
+        }
         // 6. content_size 填充（solve 后 content_size/viewport/overlap）
         crate::scroll::refresh_content_sizes(scene);
         // 7. compute_world_transforms（读 rematch 后 transform + scroll_pos → world）
@@ -674,8 +682,20 @@ impl Stage {
         //    返回新 hash 存 self.prev_node_hashes 供下帧比。
         // build_render_nodes 查 Stage.image_sizes 算九宫格 UV（slice_px / src_px）。
         // Image payload 带 path，UV 全图 (0,0)-(1,1)（无 atlas 子区），Unity 查 Sprite 拿真实 UV。
-        let (frame, new_hashes, sort_keys) =
-            build_render_nodes(scene, &self.font, &self.prev_node_hashes, &self.image_sizes);
+        // TODO A3: replace temporary FontTable with self.fonts
+        let (frame, new_hashes, sort_keys) = {
+            let mut temp_fonts = FontTable::new();
+            temp_fonts
+                .fonts
+                .insert("default".to_string(), self.font.clone());
+            temp_fonts.default_family = Some("default".to_string());
+            build_render_nodes(
+                scene,
+                &temp_fonts,
+                &self.prev_node_hashes,
+                &self.image_sizes,
+            )
+        };
         scene.node_sort_keys = sort_keys;
         self.prev_node_hashes = new_hashes;
         frame

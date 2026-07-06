@@ -4,15 +4,19 @@ use crate::style::resolved::{
     BackgroundSize, BorderRadius, CornerRadius, ResolvedStyle, TextAlign,
 };
 use crate::text::layout::measure_text;
+use crate::text::layout::FontTable;
 use taffy::style::{Dimension, LengthPercentage};
 
-/// 测试字体：仓库内 DejaVuSans.ttf（跨平台一致），缺则跳过。
-fn test_font() -> Option<Font> {
-    let p = format!(
+/// 测试字体表：仓库内 DejaVuSans.ttf（跨平台一致），缺则跳过。
+fn test_font_table() -> Option<FontTable> {
+    let path = format!(
         "{}/tests/fixtures/DejaVuSans.ttf",
         env!("CARGO_MANIFEST_DIR")
     );
-    Font::from_path(&p).ok()
+    let bytes = std::fs::read(&path).ok()?;
+    let mut ft = FontTable::new();
+    ft.register("DejaVu", bytes, true).ok()?;
+    Some(ft)
 }
 
 /// 测试辅助：空图尺寸表（无 path → 全 64×64 兜底）。
@@ -55,11 +59,11 @@ fn build_container_produces_mesh_quad() {
         )],
         vec![],
     );
-    let font = test_font().expect("need test font for build_render_nodes");
+    let fonts = test_font_table().expect("need test font for build_render_nodes");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -163,11 +167,11 @@ fn image_render_node_carries_path_not_texid() {
         h: 5.0,
     };
     let mut scene = Scene::from_nodes(vec![a], vec![]);
-    let font = test_font().expect("need test font");
+    let fonts = test_font_table().expect("need test font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -201,11 +205,11 @@ fn bg_image_carries_path() {
     n.style.background_image = Some("icons/bg.png".into());
     n.style.background_size = BackgroundSize::Stretch;
     let mut scene = Scene::from_nodes(vec![n], vec![]);
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -238,11 +242,11 @@ fn solid_container_image_path_is_none() {
         )],
         vec![],
     );
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -269,11 +273,11 @@ fn build_image_carries_path_and_full_uv() {
         h: 5.0,
     };
     let mut scene = Scene::from_nodes(vec![a], vec![]);
-    let font = test_font().expect("need test font");
+    let fonts = test_font_table().expect("need test font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -312,11 +316,11 @@ fn build_image_uv_is_full_region() {
         h: 5.0,
     };
     let mut scene = Scene::from_nodes(vec![a], vec![]);
-    let font = test_font().expect("need test font");
+    let fonts = test_font_table().expect("need test font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -331,7 +335,7 @@ fn build_image_uv_is_full_region() {
 
 #[test]
 fn build_text_produces_text_layout() {
-    let font = match test_font() {
+    let fonts = match test_font_table() {
         Some(f) => f,
         None => {
             eprintln!("skip: no test font");
@@ -355,7 +359,7 @@ fn build_text_produces_text_layout() {
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -380,7 +384,7 @@ fn build_text_produces_text_layout() {
 /// 设 padding=4px、border=2px → content 偏移 (6, 6)，每 glyph 的 (x,y) 应 +6。
 #[test]
 fn build_text_bakes_content_offset_into_glyph_pen() {
-    let font = match test_font() {
+    let fonts = match test_font_table() {
         Some(f) => f,
         None => {
             eprintln!("skip: no test font");
@@ -416,7 +420,7 @@ fn build_text_bakes_content_offset_into_glyph_pen() {
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -455,11 +459,11 @@ fn build_assigns_monotonic_keys() {
     scene.get_mut(mid_id).unwrap().clip_rect = Some(Rect::default()); // 开 mask_context=2
     scene.get_mut(leaf_id).unwrap().clip_rect = Some(Rect::default()); // 开 mask_context=3
 
-    let font = test_font().expect("need test font");
+    let fonts = test_font_table().expect("need test font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -509,12 +513,12 @@ fn build_merges_adjacent_same_drawstate_meshes() {
     };
     let mut scene = Scene::from_nodes(vec![root, a, b], vec![(0, 1), (0, 2)]);
 
-    let font = test_font().expect("need test font");
+    let fonts = test_font_table().expect("need test font");
 
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -564,11 +568,11 @@ fn build_reads_anim_opacity_and_bg_override() {
         a.bg_color = Some([0.0, 0.0, 1.0, 1.0]);
     }
 
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -663,10 +667,10 @@ fn effective_scroll_container_emits_thumb_node() {
     crate::scroll::refresh_content_sizes(&mut scene);
     crate::scene::transform::compute_world_transforms(&mut scene);
 
-    let font = test_font().expect("need test font");
+    let fonts = test_font_table().expect("need test font");
     let (fd, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -734,10 +738,10 @@ fn non_effective_container_no_thumb() {
     crate::scroll::refresh_content_sizes(&mut scene);
     crate::scene::transform::compute_world_transforms(&mut scene);
 
-    let font = test_font().expect("need test font");
+    let fonts = test_font_table().expect("need test font");
     let (fd, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -753,7 +757,7 @@ fn non_effective_container_no_thumb() {
 /// == text_layouts 行数（render 直接读，不重测）。
 #[test]
 fn render_text_payload_matches_layout_text_layout() {
-    let font = match test_font() {
+    let fonts = match test_font_table() {
         Some(f) => f,
         None => {
             eprintln!("skip: no test font");
@@ -793,7 +797,7 @@ fn render_text_payload_matches_layout_text_layout() {
     let mut scene = Scene::build(&entries);
     crate::layout::solve(
         &mut scene,
-        &font,
+        &fonts,
         (120.0, 100.0),
         &std::collections::HashMap::new(),
     );
@@ -810,7 +814,7 @@ fn render_text_payload_matches_layout_text_layout() {
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -827,7 +831,7 @@ fn render_text_payload_matches_layout_text_layout() {
 /// 长文本回归（intrinsic 远超 container）仍正确换行。
 #[test]
 fn render_long_text_still_wraps_with_layout_reuse() {
-    let font = match test_font() {
+    let fonts = match test_font_table() {
         Some(f) => f,
         None => {
             eprintln!("skip: no test font");
@@ -836,8 +840,17 @@ fn render_long_text_still_wraps_with_layout_reuse() {
     };
     let content = "The quick brown fox jumps over the lazy dog again and again";
     let fs = 16.0;
-    let intrinsic =
-        measure_text(content, fs, 0.0, 0.0, TextAlign::Left, false, None, &font).text_width;
+    let intrinsic = measure_text(
+        content,
+        fs,
+        0.0,
+        0.0,
+        TextAlign::Left,
+        false,
+        None,
+        fonts.select(None),
+    )
+    .text_width;
     let container_w = 100.0;
     assert!(
         intrinsic > container_w,
@@ -874,14 +887,14 @@ fn render_long_text_still_wraps_with_layout_reuse() {
     let mut scene = Scene::build(&entries);
     crate::layout::solve(
         &mut scene,
-        &font,
+        &fonts,
         (container_w, 100.0),
         &std::collections::HashMap::new(),
     );
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -917,23 +930,23 @@ fn change_level_skip_header_full() {
         )],
         vec![],
     );
-    let font = test_font().expect("font");
+    let fonts = test_font_table().expect("font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     // 首帧：无基线 → FULL
     let (f1, h1, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
     assert_eq!(f1.nodes[0].change_level, ChangeLevel::Full, "首帧 FULL");
     // 第二帧不变 → SKIP
-    let (f2, h2, _) = build_render_nodes(&scene, &font, &h1, &empty_sizes());
+    let (f2, h2, _) = build_render_nodes(&scene, &fonts, &h1, &empty_sizes());
     assert_eq!(f2.nodes[0].change_level, ChangeLevel::Skip, "不变 → SKIP");
     // 第三帧改位置（纯平移 → world_matrix 变，但 re-base 后 verts 不变 → payload_hash 不变）→ HEADER
     scene.get_mut(scene.roots[0]).unwrap().layout_rect.x = 50.0;
     crate::scene::transform::compute_world_transforms(&mut scene);
-    let (f3, h3, _) = build_render_nodes(&scene, &font, &h2, &empty_sizes());
+    let (f3, h3, _) = build_render_nodes(&scene, &fonts, &h2, &empty_sizes());
     assert_eq!(
         f3.nodes[0].change_level,
         ChangeLevel::Header,
@@ -941,7 +954,7 @@ fn change_level_skip_header_full() {
     );
     // 第四帧改 color（只影响 header_hash 的 color_tint）→ HEADER
     scene.get_mut(scene.roots[0]).unwrap().style.color = [0.5, 0.5, 0.5, 1.0];
-    let (f4, h4, _) = build_render_nodes(&scene, &font, &h3, &empty_sizes());
+    let (f4, h4, _) = build_render_nodes(&scene, &fonts, &h3, &empty_sizes());
     assert_eq!(
         f4.nodes[0].change_level,
         ChangeLevel::Header,
@@ -953,7 +966,7 @@ fn change_level_skip_header_full() {
         .unwrap()
         .style
         .background_color = Some([0.0, 1.0, 0.0, 1.0]);
-    let (f5, _, _) = build_render_nodes(&scene, &font, &h4, &empty_sizes());
+    let (f5, _, _) = build_render_nodes(&scene, &fonts, &h4, &empty_sizes());
     assert_eq!(f5.nodes[0].change_level, ChangeLevel::Full, "bg 变 → FULL");
 }
 
@@ -975,18 +988,18 @@ fn change_level_reload_all_full() {
         )],
         vec![],
     );
-    let font = test_font().expect("font");
+    let fonts = test_font_table().expect("font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (_f1, _h1, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
     // prev 有 hash 但 node_id 不在其中（模拟 reload：prev 表残留不同节点的 hash）
     let mut stale: std::collections::HashMap<u32, (u64, u64)> = std::collections::HashMap::new();
     stale.insert(999, (0, 0));
-    let (f2, _, _) = build_render_nodes(&scene, &font, &stale, &empty_sizes());
+    let (f2, _, _) = build_render_nodes(&scene, &fonts, &stale, &empty_sizes());
     assert_eq!(
         f2.nodes[0].change_level,
         ChangeLevel::Full,
@@ -1015,11 +1028,11 @@ fn build_container_with_bg_image_carries_path() {
     n.style.background_size = BackgroundSize::Cover;
     let mut scene = Scene::from_nodes(vec![n], vec![]);
 
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1070,11 +1083,11 @@ fn build_container_bg_image_contain_shrinks_geometry() {
     n.style.background_size = BackgroundSize::Contain;
     let mut scene = Scene::from_nodes(vec![n], vec![]);
 
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1108,11 +1121,11 @@ fn build_container_bg_image_coexists_with_bg_color() {
     n.style.background_size = BackgroundSize::Stretch;
     let mut scene = Scene::from_nodes(vec![n], vec![]);
 
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1158,11 +1171,11 @@ fn build_container_bg_image_hit_sets_program_2() {
     );
     n.style.background_image = Some("a.png".into());
     let mut scene = Scene::from_nodes(vec![n], vec![]);
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1198,11 +1211,11 @@ fn build_container_without_bg_image_keeps_program_0() {
         Some([1.0, 0.0, 0.0, 1.0]),
     );
     let mut scene = Scene::from_nodes(vec![n], vec![]);
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1231,11 +1244,11 @@ fn build_container_bg_image_sets_program_2() {
     );
     n.style.background_image = Some("missing.png".into());
     let mut scene = Scene::from_nodes(vec![n], vec![]);
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1274,11 +1287,11 @@ fn build_image_node_keeps_program_0() {
         h: 10.0,
     };
     let mut scene = Scene::from_nodes(vec![root, img], vec![(0, 1)]);
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1309,10 +1322,10 @@ fn build_container_with_filter_sets_program_3() {
     n.style.color_filter = Some(crate::style::color_filter::grayscale());
     let mut scene = Scene::from_nodes(vec![n], vec![]);
     crate::scene::transform::compute_world_transforms(&mut scene);
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1354,11 +1367,11 @@ fn build_container_with_bg_image_and_filter_sets_program_4() {
     n.style.color_filter = Some(crate::style::color_filter::grayscale());
     let mut scene = Scene::from_nodes(vec![n], vec![]);
 
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1411,10 +1424,10 @@ fn build_container_with_slice_uses_nine_slice() {
     });
     let mut scene = Scene::from_nodes(vec![n], vec![]);
     crate::scene::transform::compute_world_transforms(&mut scene);
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1452,11 +1465,11 @@ fn build_container_with_slice_uv_proportional_to_real_image_size() {
     });
     let mut scene = Scene::from_nodes(vec![n], vec![]);
     crate::scene::transform::compute_world_transforms(&mut scene);
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     // 尺寸表 skin.png=80×80 → UV 切片 = 10/80 = 0.125
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &sizes("skin.png", 80, 80),
     );
@@ -1508,11 +1521,11 @@ fn build_container_with_slice_uv_falls_back_to_64_when_no_size() {
     });
     let mut scene = Scene::from_nodes(vec![n], vec![]);
     crate::scene::transform::compute_world_transforms(&mut scene);
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     // 尺寸表无 skin.png → fallback 64×64 → UV 切片 = 10/64 ≈ 0.15625
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1548,10 +1561,10 @@ fn build_container_no_filter_keeps_program_0_or_2() {
         vec![],
     );
     crate::scene::transform::compute_world_transforms(&mut scene);
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1577,11 +1590,11 @@ fn build_container_bg_image_missing_url_carries_path() {
     n.style.background_image = Some("missing.png".into());
     let mut scene = Scene::from_nodes(vec![n], vec![]);
 
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1619,11 +1632,11 @@ fn build_container_no_bg_image_image_path_none() {
         )],
         vec![],
     );
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1654,11 +1667,11 @@ fn container_zero_radius_uses_quad() {
         )],
         vec![],
     );
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1697,11 +1710,11 @@ fn container_radius_uses_rounded_rect() {
         }; 4],
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1740,11 +1753,11 @@ fn container_radius_percent_resolved() {
         }; 4],
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
@@ -1785,11 +1798,11 @@ fn container_bg_image_with_radius_uses_rounded_rect() {
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);
 
-    let font = test_font().expect("need font");
+    let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );

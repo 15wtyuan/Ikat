@@ -19,7 +19,7 @@ pub mod node;
 
 use crate::layout::ImageSizeTable;
 use crate::scene::node::{NodeId, NodeKind, Rect, Scene};
-use crate::text::layout::{measure_text, Font};
+use crate::text::layout::{measure_text, FontTable};
 use node::*;
 
 use taffy::style::LengthPercentage;
@@ -114,14 +114,14 @@ fn thumb_render_node(node_id: u32, rect: Rect, sort_key: u32) -> RenderNode {
 ///
 /// 顺序与 `scene.nodes` 同序（node_id == scene 索引），便于 batch DFS 对齐。
 /// Text 节点调 `measure_text` 产 TextLayout；Container/Image 产 Mesh quad。
-/// `font` 仅 Text 节点用（单字体）。clip 表由 `batch::assign_sort_keys` 算
-/// 祖先 clip 链交集后产出。
+/// `fonts` 按节点 font_family 查字体（Text 节点 fallback 测量用）。clip 表由
+/// `batch::assign_sort_keys` 算祖先 clip 链交集后产出。
 ///
 /// `image_sizes` = Stage 持有的 path→(w,h) 尺寸表。九宫格 UV 用此表算 src_w/src_h
 /// （slice_px / src_px）。path 缺失或 w/h=0 → 64×64 兜底。
 pub fn build_render_nodes(
     scene: &Scene,
-    font: &Font,
+    fonts: &FontTable,
     prev: &std::collections::HashMap<u32, (u64, u64)>,
     image_sizes: &ImageSizeTable,
 ) -> (
@@ -331,6 +331,7 @@ pub fn build_render_nodes(
             }
             NodeKind::Text { content } => {
                 let s = &n.style;
+                let font = fonts.select(s.font_family.as_deref());
                 let mut layout = scene
                     .text_layouts
                     .get(n.id.index())

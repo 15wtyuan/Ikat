@@ -13,9 +13,9 @@
 //!   `Option<&mut NodeContext>` 分派到 Text/Image 测量。
 //!
 //! 测量是单个 `FnMut`（非 'static），生命周期与 `compute_layout_with_measure`
-//! 调用同界——闭包内借 `&font` 合法。每个叶子的文本参数（content/font_size 等）已
-//! owned 进 `NodeContext::Text`，font 不进 context 而走闭包借用。`solve` 签名
-//! 收 `font: &Font`（不破下游 stage 契约）。
+//! 调用同界——闭包内借 `fonts: &FontTable` 合法。每个叶子的文本参数（content/font_size +
+//! family 等）已 owned 进 `NodeContext::Text`（不含 Font 实例），font 在闭包内按 family
+//! 查 FontTable 取得。`solve` 签名收 `fonts: &FontTable`（不破下游 stage 契约）。
 //!
 //! taffy 0.5.2 的 `Style` 无 `order`，不做 flex order 排序（render 层按 DOM 顺序 /
 //! layout 输出的 `Layout.order` 渲染）。
@@ -26,7 +26,7 @@
 
 use crate::scene::node::{NodeId, NodeKind, Rect, Scene};
 use crate::style::resolved::{OverflowMode, TextAlign};
-use crate::text::layout::{measure_text, Font, TextLayout};
+use crate::text::layout::{measure_text, FontTable, TextLayout};
 use std::collections::HashMap;
 use taffy::prelude::*;
 
@@ -49,8 +49,8 @@ fn map_overflow(m: OverflowMode) -> taffy::style::Overflow {
 
 /// 叶子节点的测量上下文。Container/Button 无上下文（用 None 叶子或 new_with_children）。
 enum MeasureContext {
-    /// Text 叶子：存全部测量参数（content owned）+ 字体度量字段。
-    /// font *不* 进 context——font 在闭包借用层共享（见模块 doc）。
+    /// Text 叶子：存全部测量参数（content owned）+ 字体度量字段 + 字体族。
+    /// font 实例 *不* 进 context——调用方在测量闭包中按 family 查 FontTable 取 Font。
     Text {
         content: String,
         font_size: f32,
@@ -58,6 +58,8 @@ enum MeasureContext {
         letter_spacing: f32,
         align: TextAlign,
         nowrap: bool,
+        /// 节点的 font_family。None 表示用 FontTable 的 default。
+        family: Option<String>,
     },
     /// Image 叶子：intrinsic 像素 + css width/height 维度。闭包消费 taffy 的 known 解析
     /// Percent/fit（Percent width taffy 传 known.width=Some(解析宽)，闭包据此等比 height）。
@@ -71,13 +73,18 @@ enum MeasureContext {
 
 /// 就地 solve：建 taffy 树 → 注册测量上下文 → compute_layout → 回写 layout_rect/clip_rect。
 ///
-/// `root_size` 是根节点固定尺寸（viewport / surface 尺寸）。`font` 借用到
-/// `compute_layout_with_measure` 结束，闭包内解引用喂给 `measure_text`。
+/// `root_size` 是根节点固定尺寸（viewport / surface 尺寸）。`fonts` borrows
+/// FontTable 到 `compute_layout_with_measure` 结束，闭包内按 family 查字体喂给 `measure_text`。
 ///
 /// `image_sizes` = Stage 持有的 path→(w,h) 尺寸表（打包期 PNG IHDR 静态）。
 /// Image measure 查此表算 intrinsic 尺寸（三档：CSS > 真实像素 > 64×64）。
 /// path 缺失或 w/h=0 → fallback 64×64（核心不知图集，但知图尺寸）。
-pub fn solve(scene: &mut Scene, font: &Font, root_size: (f32, f32), image_sizes: &ImageSizeTable) {
+pub fn solve(
+    scene: &mut Scene,
+    fonts: &FontTable,
+    root_size: (f32, f32),
+    image_sizes: &ImageSizeTable,
+) {
     // 防御：空 roots（空 scene）无几何可 solve——直接返回，避免 roots[0] 越界 panic。
     // Stage 可能在 scene 未装内容时 tick（如测/边界），不应 panic。
     if scene.roots.is_empty() {
@@ -123,6 +130,7 @@ pub fn solve(scene: &mut Scene, font: &Font, root_size: (f32, f32), image_sizes:
                     letter_spacing: s.letter_spacing,
                     align: s.text_align,
                     nowrap: s.white_space_nowrap,
+                    family: s.font_family.clone(),
                 })
             }
             NodeKind::Image { src } => {
@@ -244,7 +252,9 @@ pub fn solve(scene: &mut Scene, font: &Font, root_size: (f32, f32), image_sizes:
                         letter_spacing,
                         align,
                         nowrap,
+                        family,
                     }) => {
+                        let font = fonts.select(family.as_deref());
                         let layout = measure_text(
                             content,
                             *font_size,
@@ -312,12 +322,15 @@ mod tests {
     use crate::style::cascade::resolve_styles;
     use crate::style::resolved::ResolvedStyle;
 
-    fn font() -> Option<Font> {
-        let p = format!(
+    fn font_table() -> Option<FontTable> {
+        let path = format!(
             "{}/tests/fixtures/DejaVuSans.ttf",
             env!("CARGO_MANIFEST_DIR")
         );
-        Font::from_path(&p).ok()
+        let bytes = std::fs::read(&path).ok()?;
+        let mut ft = FontTable::new();
+        ft.register("DejaVu", bytes, true).ok()?;
+        Some(ft)
     }
 
     /// 测试辅助：空图尺寸表（无 path → 全 64×64 兜底）。
@@ -343,12 +356,8 @@ mod tests {
         let sheet = parse_css(css).unwrap();
         let styles = resolve_styles(&tree, &sheet);
         let mut scene = build_scene(&tree, &styles);
-        solve(
-            &mut scene,
-            &font().expect("test needs a font"),
-            (200.0, 200.0),
-            &empty_sizes(),
-        );
+        let fonts = font_table().expect("test needs a font");
+        solve(&mut scene, &fonts, (200.0, 200.0), &empty_sizes());
         let root = scene.get(scene.roots[0]).unwrap();
         let a = scene.get(root.children[0]).unwrap();
         let b = scene.get(root.children[1]).unwrap();
@@ -367,12 +376,8 @@ mod tests {
         let sheet = parse_css(css).unwrap();
         let styles = resolve_styles(&tree, &sheet);
         let mut scene = build_scene(&tree, &styles);
-        solve(
-            &mut scene,
-            &font().expect("test needs a font"),
-            (200.0, 200.0),
-            &empty_sizes(),
-        );
+        let fonts = font_table().expect("test needs a font");
+        solve(&mut scene, &fonts, (200.0, 200.0), &empty_sizes());
         let root = scene.get(scene.roots[0]).unwrap();
         let a = scene.get(root.children[0]).unwrap();
         let b = scene.get(root.children[1]).unwrap();
@@ -427,12 +432,8 @@ mod tests {
             ),
         ];
         let mut scene = Scene::build(&entries);
-        solve(
-            &mut scene,
-            &font().expect("need font"),
-            (300.0, 300.0),
-            &sizes("x.png", 40, 20),
-        );
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (300.0, 300.0), &sizes("x.png", 40, 20));
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect; // Image 是 root 唯一子
         assert!(
@@ -474,12 +475,8 @@ mod tests {
             ),
         ];
         let mut scene = Scene::build(&entries);
-        solve(
-            &mut scene,
-            &font().expect("need font"),
-            (300.0, 300.0),
-            &sizes("x.png", 40, 20),
-        );
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (300.0, 300.0), &sizes("x.png", 40, 20));
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect; // Image 是 root 唯一子
         assert!((r.w - 40.0).abs() < 0.1, "真实像素：w=40，got {}", r.w);
@@ -517,12 +514,8 @@ mod tests {
             ),
         ];
         let mut scene = Scene::build(&entries);
-        solve(
-            &mut scene,
-            &font().expect("need font"),
-            (300.0, 300.0),
-            &empty_sizes(),
-        );
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (300.0, 300.0), &empty_sizes());
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
         assert!((r.w - 64.0).abs() < 0.1, "兜底：w=64，got {}", r.w);
@@ -560,12 +553,8 @@ mod tests {
             ),
         ];
         let mut scene = Scene::build(&entries);
-        solve(
-            &mut scene,
-            &font().expect("need font"),
-            (300.0, 300.0),
-            &sizes("x.png", 0, 0),
-        );
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (300.0, 300.0), &sizes("x.png", 0, 0));
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
         assert!((r.w - 64.0).abs() < 0.1, "w/h=0 → 兜底 w=64，got {}", r.w);
@@ -604,12 +593,8 @@ mod tests {
             ),
         ];
         let mut scene = Scene::build(&entries);
-        solve(
-            &mut scene,
-            &font().expect("need font"),
-            (300.0, 300.0),
-            &sizes("x.png", 40, 20),
-        );
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (300.0, 300.0), &sizes("x.png", 40, 20));
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
         assert!((r.w - 80.0).abs() < 0.1, "w=80 (CSS)");
@@ -652,12 +637,8 @@ mod tests {
             ),
         ];
         let mut scene = Scene::build(&entries);
-        solve(
-            &mut scene,
-            &font().expect("need font"),
-            (300.0, 300.0),
-            &sizes("x.png", 40, 20),
-        );
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (300.0, 300.0), &sizes("x.png", 40, 20));
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
         assert!((r.h - 60.0).abs() < 0.1, "h=60 (CSS)");
