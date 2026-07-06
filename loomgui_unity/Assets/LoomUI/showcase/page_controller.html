@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<base href="..">
+<link rel="stylesheet" href="preview/preview-base.css">
+<script src="preview/loom-preview.js"></script>
+<title>Controller · 标签页/嵌套/路径 A/B</title>
+<style>
+/* page_controller 组件 CSS（D6 隔离） */
+.root{width:1080px;height:1920px;background-color:#1a1d2e;}
+.header{background-color:#252839;border-bottom:2px solid #3a3f55;padding:20px;gap:14px;flex-direction:row;align-items:center;justify-content:space-between;}
+.title{color:#e0e0e0;font-size:32px;font-weight:700;}
+.back{background-color:#2d3148;border:1px solid #3a3f55;padding:10px 16px;color:#9aa0b4;font-size:18px;}
+.back:hover{background-color:#3a4258;color:#5fb2c4;border:1px solid #5fb2c4;}
+.back:active{transform:scale(0.96);}
+.scroll{flex-grow:1;overflow-y:scroll;}
+.content{gap:16px;padding:24px;}
+.sec{gap:16px;}
+.sec-h{color:#5fb2c4;font-size:28px;font-weight:700;border-bottom:1px solid #3a3f55;padding-bottom:8px;}
+.card{background-color:#252839;border:1px solid #3a3f55;padding:16px;gap:12px;}
+.card-h{flex-direction:row;justify-content:space-between;align-items:center;}
+.card-t{color:#e0e0e0;font-size:22px;font-weight:700;}
+.card-x{color:#9aa0b4;font-size:14px;}
+.card-b{flex-direction:column;gap:8px;width:100%;}
+
+/* === §1 标签页（criterion 1, 8）=== */
+/* tab 头按钮组 */
+.tabbar{flex-direction:row;gap:0;border-bottom:2px solid #3a3f55;}
+.tabbtn{background-color:#2d3148;border:1px solid #3a3f55;padding:14px 28px;color:#9aa0b4;font-size:20px;}
+.tabbtn:hover{background-color:#3a4258;color:#5fb2c4;}
+.tabbtn:active{transform:scale(0.96);}
+/* 选中态：用 [data-page] 属性选择器（criterion 1 CSS 路径）*/
+[data-controller="tab"][data-page="0"] .tabbtn-0,
+[data-controller="tab"][data-page="1"] .tabbtn-1,
+[data-controller="tab"][data-page="2"] .tabbtn-2{
+  background-color:#5fb2c4;color:#1a1d2e;border:1px solid #5fb2c4;
+}
+/* panel 容器 */
+.panels{flex-grow:1;padding:16px;}
+.panel{display:none;transition:opacity 0.3s ease-out;}
+/* 各 page 对应 panel 显隐（criterion 1 + 8 opacity 渐变）*/
+[data-controller="tab"][data-page="0"] .panel-0,
+[data-controller="tab"][data-page="1"] .panel-1,
+[data-controller="tab"][data-page="2"] .panel-2{display:flex;}
+.panel-h{color:#e0e0e0;font-size:24px;font-weight:700;}
+.panel-x{color:#9aa0b4;font-size:16px;}
+
+/* === §2 弹窗显隐（criterion 2）=== */
+.dialog-wrap{position:relative;width:100%;height:200px;border:1px dashed #3a3f55;}
+.dialog{
+  position:absolute;top:20px;left:20px;width:400px;height:120px;
+  background-color:#252839;border:1px solid #5fb2c4;padding:16px;gap:8px;
+  display:none;transition:opacity 0.3s ease-out;
+}
+[data-controller="dialog"][data-page="1"] .dialog{display:flex;}
+.dialog-title{color:#5fb2c4;font-size:20px;font-weight:700;}
+.dialog-body{color:#e0e0e0;font-size:16px;}
+.dlg-btn{background-color:#2d3148;border:1px solid #3a3f55;padding:10px 20px;color:#e0e0e0;font-size:16px;}
+.dlg-btn:hover{background-color:#3a4258;border:1px solid #5fb2c4;color:#5fb2c4;}
+.dlg-btn:active{transform:scale(0.96);}
+
+/* === §3 路 A src/text 切换（criteria 3, 4）=== */
+/* 一个图标 + 一段文案，由 driver 监听 on_changed → SetSrc/SetText 切 */
+.route-a{flex-direction:row;gap:16px;align-items:center;}
+.route-a-icon{width:64px;height:64px;}
+.route-a-text{color:#e0e0e0;font-size:20px;flex-grow:1;}
+.route-a-row{flex-direction:row;gap:8px;}
+.route-a-btn{background-color:#2d3148;border:1px solid #3a3f55;padding:10px 20px;color:#e0e0e0;font-size:16px;}
+.route-a-btn:hover{background-color:#3a4258;border:1px solid #5fb2c4;color:#5fb2c4;}
+.route-a-btn:active{transform:scale(0.96);}
+
+/* === §4 路 B 多元素兄弟显隐（criterion 5）=== */
+/* 纯 CSS [data-page] 控制多个 <img> 兄弟哪个显示 */
+.route-b{flex-direction:row;gap:16px;align-items:center;}
+.b-icon{width:64px;height:64px;display:none;}
+[data-controller="bicon"][data-page="0"] .b-icon-0{display:flex;}
+[data-controller="bicon"][data-page="1"] .b-icon-1{display:flex;}
+[data-controller="bicon"][data-page="2"] .b-icon-2{display:flex;}
+.b-label{color:#9aa0b4;font-size:16px;}
+.b-next{background-color:#2d3148;border:1px solid #3a3f55;padding:10px 20px;color:#e0e0e0;font-size:16px;}
+.b-next:hover{background-color:#3a4258;border:1px solid #5fb2c4;color:#5fb2c4;}
+.b-next:active{transform:scale(0.96);}
+
+/* === §5 嵌套 Controller（criterion 6）=== */
+/* 外层 tabs + 内层 sub-tabs：内层只管自己子树（CSS 就近原则）*/
+.nest-outer{gap:8px;}
+.nest-tabbar{flex-direction:row;gap:0;border-bottom:1px solid #3a3f55;}
+.nest-btn{background-color:#2d3148;border:1px solid #3a3f55;padding:10px 20px;color:#9aa0b4;font-size:16px;}
+.nest-btn:hover{background-color:#3a4258;color:#5fb2c4;}
+.nest-btn:active{transform:scale(0.96);}
+[data-controller="otab"][data-page="0"] .obtn-0,
+[data-controller="otab"][data-page="1"] .obtn-1{background-color:#5fb2c4;color:#1a1d2e;border:1px solid #5fb2c4;}
+.nest-panel{display:none;transition:opacity 0.3s ease-out;padding:8px;}
+[data-controller="otab"][data-page="0"] .opanel-0,
+[data-controller="otab"][data-page="1"] .opanel-1{display:flex;}
+/* 内层 sub-tabs（嵌套，就近原则）*/
+.sub-tabbar{flex-direction:row;gap:0;border-bottom:1px solid #3a3f55;}
+.sub-btn{background-color:#1a1d2e;border:1px solid #3a3f55;padding:8px 16px;color:#9aa0b4;font-size:14px;}
+.sub-btn:hover{background-color:#3a4258;color:#5fb2c4;}
+.sub-btn:active{transform:scale(0.96);}
+[data-controller="itab"][data-page="0"] .sbtn-0,
+[data-controller="itab"][data-page="1"] .sbtn-1{background-color:#6fa66c;color:#1a1d2e;border:1px solid #6fa66c;}
+.sub-panel{display:none;transition:opacity 0.3s ease-out;padding:6px;}
+[data-controller="itab"][data-page="0"] .spanel-0,
+[data-controller="itab"][data-page="1"] .spanel-1{display:flex;}
+.sub-text{color:#e0e0e0;font-size:14px;}
+
+/* === §6 :hover/:active 回归 + :hover 颜色 transition（criteria 7, 9）=== */
+.hover-demo{background-color:#2d3148;border:1px solid #3a3f55;padding:16px 24px;color:#e0e0e0;font-size:18px;transition:background-color 0.3s ease-out,color 0.3s ease-out;}
+.hover-demo:hover{background-color:#5fb2c4;color:#1a1d2e;}
+.hover-demo:active{transform:scale(0.96);}
+.hover-tip{color:#9aa0b4;font-size:14px;}
+
+/* === §7 切页中途再切（criterion 10）=== */
+.rapid-tip{color:#9aa0b4;font-size:14px;}
+</style>
+</head>
+<body>
+<div class="root">
+  <div class="header">
+    <div class="title">Controller · 标签页/嵌套/路径 A/B</div>
+    <div class="back" id="back-home">← 返回</div>
+  </div>
+  <div class="scroll" id="page-scroll">
+    <div class="content">
+
+      <!-- §1 标签页（criterion 1, 8）+ §7 中途再切（criterion 10）-->
+      <div class="sec">
+        <div class="sec-h">§1 标签页 · CSS [data-page] 切换</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">1.1 三页签</span><span class="card-x">预期: 点 tab 头切 panel，opacity 渐变</span></div>
+          <div class="card-b">
+            <!-- data-controller="tab" 挂载点；data-page="0" 初始选中页 0 -->
+            <div data-controller="tab" data-page="0" id="tab-root">
+              <div class="tabbar">
+                <div class="tabbtn tabbtn-0" id="tab-btn-0">页 1</div>
+                <div class="tabbtn tabbtn-1" id="tab-btn-1">页 2</div>
+                <div class="tabbtn tabbtn-2" id="tab-btn-2">页 3</div>
+              </div>
+              <div class="panels">
+                <div class="panel panel-0" style="gap:8px">
+                  <div class="panel-h">页面 1 · 概览</div>
+                  <div class="panel-x">这是第一页的内容。点其他 tab 头切换。</div>
+                </div>
+                <div class="panel panel-1" style="gap:8px">
+                  <div class="panel-h">页面 2 · 详情</div>
+                  <div class="panel-x">这是第二页的内容。panel 显隐由 CSS [data-page] 选择器驱动。</div>
+                </div>
+                <div class="panel panel-2" style="gap:8px">
+                  <div class="panel-h">页面 3 · 设置</div>
+                  <div class="panel-x">这是第三页的内容。快速连点不同 tab 头验证中途再切不跳变。</div>
+                </div>
+              </div>
+            </div>
+            <div class="rapid-tip">§10 验证：快速连点"页 1 / 页 3 / 页 2"，opacity 从当前值过渡到新目标，不跳变到末值再起。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- §2 弹窗显隐（criterion 2）-->
+      <div class="sec">
+        <div class="sec-h">§2 弹窗显隐 · Controller 切 page</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">2.1 弹窗开关</span><span class="card-x">预期: 点开关按钮，弹窗 display:flex/none 切换</span></div>
+          <div class="card-b">
+            <!-- data-controller="dialog" 挂载点；page 0=隐藏, 1=显示 -->
+            <div data-controller="dialog" data-page="0" id="dialog-root" style="gap:8px">
+              <div class="route-a-row">
+                <div class="dlg-btn" id="dlg-open">打开弹窗</div>
+                <div class="dlg-btn" id="dlg-close">关闭弹窗</div>
+              </div>
+              <div class="dialog-wrap">
+                <div class="dialog">
+                  <div class="dialog-title">提示</div>
+                  <div class="dialog-body">这是一个由 Controller 控制显隐的弹窗。</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- §3 路 A src/text 切换（criteria 3, 4）-->
+      <div class="sec">
+        <div class="sec-h">§3 路 A · driver 代码切 src/text</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">3.1 on_changed → SetSrc/SetText</span><span class="card-x">预期: 切 tab 时图标 + 文案同步换</span></div>
+          <div class="card-b">
+            <!-- 复用 §1 的 tab Controller：driver 订阅 tab-root 的 on_changed，
+                 按 new_index 调 SetSrc(route-a-icon) + SetText(route-a-text) -->
+            <div class="route-a">
+              <img class="route-a-icon" id="route-a-icon" src="res/icons/home.png">
+              <span class="route-a-text" id="route-a-text">当前页：1 · 概览</span>
+            </div>
+            <div class="route-a-row">
+              <div class="route-a-btn" id="route-a-0">切页 1</div>
+              <div class="route-a-btn" id="route-a-1">切页 2</div>
+              <div class="route-a-btn" id="route-a-2">切页 3</div>
+            </div>
+            <div class="card-x">点上面按钮 = driver 调 SetSelectedIndex(tabMount, n) → core 派 on_changed → driver 回调里 SetSrc/SetText。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- §4 路 B 多元素兄弟显隐（criterion 5）-->
+      <div class="sec">
+        <div class="sec-h">§4 路 B · 多元素兄弟纯 CSS 显隐</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">4.1 三图标兄弟</span><span class="card-x">预期: 点"下一个"切 Controller，对应图标显示</span></div>
+          <div class="card-b">
+            <!-- data-controller="bicon" 挂载点；三个 <img> 兄弟，CSS [data-page] 控制哪个 display:flex -->
+            <div data-controller="bicon" data-page="0" id="bicon-root" style="gap:12px">
+              <div class="route-b">
+                <img class="b-icon b-icon-0" src="res/icons/home.png">
+                <img class="b-icon b-icon-1" src="res/icons/eye.png">
+                <img class="b-icon b-icon-2" src="res/icons/zap.png">
+                <span class="b-label" id="bicon-label">图标 1/3</span>
+              </div>
+              <div class="b-next" id="bicon-next">下一个图标</div>
+            </div>
+            <div class="card-x">纯 DSL：三个 img 兄弟，CSS data-page 选择器控制哪个 b-icon-N 显隐。无 driver 代码。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- §5 嵌套 Controller（criterion 6）-->
+      <div class="sec">
+        <div class="sec-h">§5 嵌套 Controller · 外层 + 内层互不干扰</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">5.1 外层 tabs + 内层 sub-tabs</span><span class="card-x">预期: 内层只管自己子树，外层管不到内层</span></div>
+          <div class="card-b">
+            <!-- 外层 Controller data-controller="otab" -->
+            <div data-controller="otab" data-page="0" id="otab-root" class="nest-outer">
+              <div class="nest-tabbar">
+                <div class="nest-btn obtn-0" id="otab-btn-0">外 1</div>
+                <div class="nest-btn obtn-1" id="otab-btn-1">外 2</div>
+              </div>
+              <div class="opanel opanel-0" style="gap:8px">
+                <div class="panel-h" style="font-size:18px">外层页 1</div>
+                <!-- 内层 Controller data-controller="itab"（嵌套在外层页 1 内）-->
+                <div data-controller="itab" data-page="0" id="itab-root" style="gap:6px">
+                  <div class="sub-tabbar">
+                    <div class="sub-btn sbtn-0" id="itab-btn-0">子 A</div>
+                    <div class="sub-btn sbtn-1" id="itab-btn-1">子 B</div>
+                  </div>
+                  <div class="sub-panel spanel-0">
+                    <span class="sub-text">子页 A · 内层 Controller 管自己</span>
+                  </div>
+                  <div class="sub-panel spanel-1">
+                    <span class="sub-text">子页 B · 外层 tab 切换不影响内层</span>
+                  </div>
+                </div>
+              </div>
+              <div class="opanel opanel-1" style="gap:8px">
+                <div class="panel-h" style="font-size:18px">外层页 2</div>
+                <span class="sub-text">切到外层页 2，内层 sub-tabs 不在此页。</span>
+              </div>
+            </div>
+            <div class="card-x">内层 [data-page] 匹配器回溯找最近 data-controller 祖先 → 只查 itab 的 selected_index，不查 otab。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- §6 :hover/:active 回归 + :hover 颜色 transition（criteria 7, 9）-->
+      <div class="sec">
+        <div class="sec-h">§6 :hover/:active 回归 + 颜色 transition</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">6.1 hover 渐变色</span><span class="card-x">预期: 悬停背景色/文字色渐变；按压缩放</span></div>
+          <div class="card-b" style="align-items:flex-start">
+            <div class="hover-demo" id="hover-demo">悬停我（渐变色）</div>
+            <div class="hover-tip">§7 回归：属性选择器地基不破坏 :hover/:active。§9 新增：hover 时 background-color/color 0.3s 渐变。</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>
