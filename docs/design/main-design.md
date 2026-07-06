@@ -433,8 +433,8 @@ stage.is_pointer_on_ui() -> bool   // = 命中目标非空且非根
 - 特殊：`DelayedCall`、`Shake`、`SetPath`(贝塞尔)、`smoothStart`(吸收首帧大 dt)。
 - **prop_type 分层**（关键）：tween 写属性区分 "transform 属性"（x/y/scale/rotation，置 `transform_dirty`，不 solve）vs "layout 属性"（width/height/flex，置 `layout_dirty` 触发 solve）。位置/缩放动画走 transform 不触发 solve。
 
-### 10.2 Transition（时间线 = 编排器，不自驱）
-纯数据 `items: Vec<TransitionItem>`。`Play()` 把每个 item 翻译成 Tweener 提交 TweenManager。两点关键帧；多关键帧靠多 item 串行。嵌套 Transition 递归 + 完成回调递减父计数。
+### 10.2 Transition（时间线 = 编排器，不自驱）【拆 v1.5-b，本期未实现】
+纯数据 `items: Vec<TransitionItem>`。`Play()` 把每个 item 翻译成 Tweener 提交 TweenManager。两点关键帧；多关键帧靠多 item 串行。嵌套 Transition 递归 + 完成回调递减父计数。与 Controller 正交（不同层），可由 Controller.on_changed 触发。
 
 ### 10.3 Controller（状态机，纯状态）
 `Controller { selected_index, page_ids, ... }`。`set_selected_index` 改 index + 派发 onChanged + 置子树 style dirty（触发 §4.3 重匹配）+ 更新元素 `data-page` 属性。Controller 不直接改 UI 属性，全靠 CSS 属性选择器 + `transition` 实现页面切换效果（§3.5）。
