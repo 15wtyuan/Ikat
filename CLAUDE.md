@@ -119,6 +119,8 @@ LoomGUI 只支持 HTML/CSS 的**明确子集**，称"围栏"。这是项目漂�
 - `dump_scroll` — 滚动（overlap、scroll_pos、content_size）
 - `dump_render` — 渲染节点（rect、bg、UV）
 - `dump_sw` / `dump_bg` — 节点 base_style（验是否进 pkg）
+- `dump_nativehost_slot` — NativeHost FFI 查询（nh-stage 空 div 直查 world_transforms/sort_key，绕 merge blob）
+- `dump_controller` — v1.5 Controller（display 显隐 / color 继承 / selected_index / transition）
 
 **跨层特性 PlayMode 报错**（拖不动/晃动/错位）先 example 实测 core 状态（overlap/scroll_pos/content_size）再改，避免盲改物理掩盖 layout 根因。dump 边界/状态取证，别靠"浮点边界/epsilon"症状层猜测。
 

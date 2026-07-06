@@ -886,3 +886,53 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：driver `_characterScale` 改 Vector2（xy），z 由 driver 自动设 1（不暴露给用户填）。粒子 `_effectScale` 同。
 
 **教训**：orthographic 相机下 3D GO scale 的 z 分量该用小值（1）——z 缩放只增 depth 厚度（near/far clip 风险），不增视觉。别让用户填 z（陷阱）。
+
+### 坑 131：display:none 子树不剪 → 0 尺寸 Text 字形残留（"隐藏内容仍显示"）
+
+**症状**：`[data-page]` 切隐藏页（display:none）后，被隐藏的 Text 内容仍显示（堆屏幕左边）；panel/dialog/b-icon 全如此。
+
+**根因**：`build_render_nodes` 遍历所有节点无过滤。display:none 节点 taffy 不布局（layout_rect=0），但其 Text 后代仍产 RenderNode——Text 字形按自身 TextLayout 尺寸渲染（不靠节点 rect），0 尺寸也画出来。
+
+**解决**：build 前预计算 display:none 子树（`collect_display_none_subtree`），遍历 + batch DFS 跳过。id_to_pos 改 push 时记（剪枝后 nodes 与 scene.nodes 不等长，破坏 batch 旧契约"同长同序"）。
+
+**教训**：CSS `display:none` 整子树不渲染是语义不变量——core 产 RenderNode 必剪，不能靠"rect=0 引擎自然不画"（Text 例外）。改 build 遍历要检查 batch/id_to_pos 等假设"nodes 与 scene 同长同序"的下游。
+
+### 坑 132：runtime color 继承缺失 → 选中/hover 文字色不传子 Text
+
+**症状**：选中 tab / hover 按钮时 Container 背景变色了，但文字色没变（子 Text 保持灰）。
+
+**根因**：打包期 `resolve_rec` 把父 color 继承进子 base_style（静态），但 runtime `rematch_pseudo_classes` 逐节点从 base_style 重起**不读父**——父命中选中/hover 改 style.color，子 Text 的 base_style.color 是打包期旧父色，不跟随。
+
+**解决**：rematch 末尾按树序 `propagate_color_inheritance`：子若 `new.color == 父 base.color`（没声明没动态命中）则继承父 effective color（anim tween 当前值优先）。判据用 rematch 后的 new.color 不是 base.color（默认黑场景 base 都相等会误判）。
+
+**教训**：CSS color 是继承属性，"打包期展开"只够静态；runtime 父色 dynamic 变化（伪类/Controller）要补树序传播。判据"base==parent base"在默认值场景失效，改"new==parent base"。
+
+### 坑 133：transition 逗号多 spec 被 split_whitespace 吞（color spec 丢）
+
+**症状**：`transition:background-color 0.3s, color 0.3s` 只 BgColor 生效，color 瞬切没渐变。
+
+**根因**：`parse_transition` 用 `split_whitespace`，逗号附 token（`ease-out,color`）→ ease 分支吞，第二 spec 的 color 被当 prop 覆盖或丢。
+
+**解决**：`parse_transition` 外层 `split(',')` + 每段 `parse_one_transition`；`ResolvedStyle.transition` 从 `Option<TransitionSpec>` 改 `Vec<TransitionSpec>`，rematch emit 遍历 Vec。
+
+**教训**：CSS 多值属性逗号分隔（transition 等），解析要 split(',') 再每段，不能 split_whitespace 一把梭。
+
+### 坑 134：findstr 扫 PE 导出表不可靠 → 用 GetProcAddress 验 dll 导出（坑 100 增强）
+
+**症状**：改 FFI 后 `findstr /c:"symbol" file.dll` 查导出全 MISS（即使刚从当前源码编出的 dll）。
+
+**根因**：findstr 按文本行扫二进制，PE 导出表的 ASCII 符号名常被 findstr 行处理/编码吞——工具不可靠，非 dll 缺符号。
+
+**解决**：用 OS 加载器级查询：PowerShell `LoadLibraryEx(DONT_RESOLVE_DLL_REFERENCES)` + `GetProcAddress`（非 0 = 真导出）。或 `dumpbin /exports`（要 VS）。
+
+**教训**：坑 100 的"findstr/nm 查新符号"——findstr 不可靠，改 GetProcAddress（权威）。stale .dll 诊断不能靠 findstr 假阴性。
+
+### 坑 135：bump formatVersion 后重打 showcase 漏 → stale pkg 版本号（hexdump 验）
+
+**症状**：core `MIN_VERSION` bump 后，入库 `showcase.pkg.bin` 仍是旧版本号 → dump example `read_package: TooOld` panic；Unity PlayMode 加载也 TooOld。
+
+**根因**：bump 在一个 commit（改常量），showcase.pkg.bin 重打在另一 commit（worktree 可能用旧 pkg crate，或忘重打），入库 pkg 版本号字段是旧值。
+
+**解决**：`od -An -tx1 -N 8 showcase.pkg.bin` 看头——magic `4c 50 4b 47`("LPKG") 后 4 字节 u32 LE 版本号（13=`0d 00 00 00`）。不等 MIN_VERSION = stale，重打。
+
+**教训**：坑 66 的版本号维度——bump formatVersion 后入库 pkg.bin 版本号字段要 hexdump 核对（头 8 字节），不能只看文件大小变了就以为打了新版。

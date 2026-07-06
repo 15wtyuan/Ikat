@@ -111,7 +111,7 @@
   [data-controller="tab"][data-page="1"] .panel { opacity: 0.3; }
 </style>
 ```
-Controller 状态变化时，匹配器遇 `[data-page]` 回溯找最近 `data-controller` 祖先、查 registry 的 `selected_index`（不写回节点属性，§1.4），子树属性选择器匹配——cascade 天然生效（§4.3）。带过渡用标准 `transition: 0.3s ease`（映射 GTween）。
+Controller 状态变化时，匹配器遇 `[data-page]` 回溯找最近 `data-controller` 祖先、查 registry 的 `selected_index`（不写回节点属性，§1.4），子树属性选择器匹配——cascade 天然生效（§4.3）。带过渡用标准 `transition: 0.3s ease`（映射 TweenManager——每 spec 一条 tween，`TRANSITION_TAG` 标记；逗号分隔多 prop 如 `background-color 0.3s, color 0.3s` 各一条）。
 
 ---
 
@@ -128,12 +128,12 @@ Controller 状态变化时，匹配器遇 `[data-page]` 回溯找最近 `data-co
 3. **继承**（关键，不实现则 DSL 不可用）：白名单 inherited properties 默认从父继承——`color`、`font-size`、`font-family`、`font-weight`、`font-style`、`line-height`、`letter-spacing`、`white-space`、`text-align`、`visibility`。其余 non-inherited。
 4. **不支持 `!important`**：围栏来源少，`!important` 几乎没用武之地反增 cascade 复杂度，砍。全部 vanilla CSS，AI 训练数据海量。
 
-**打包期展开继承**：打包器在编译期就把继承展开成每节点的 `base_style` → 运行时零继承开销。这是打包器的核心价值。
+**打包期展开继承**：打包器在编译期就把静态继承展开进每节点 `base_style`（子未声明的继承属性拷父 base 值）。但 runtime 父色 dynamic 变化（伪类/Controller 选中改 color）打包期预测不到——`rematch_pseudo_classes` 末尾再按树序补一次 `propagate_color_inheritance`：子若 rematch 后 `new.color == 父 base.color`（没声明没动态命中）则继承父 effective color（含 tween 当前值，文字随父 transition 渐变）。
 
 ### 4.3 运行时状态匹配与样式 dirty 机制
 `:hover/:active/:disabled/:focus` 是运行时状态驱动的伪类，`[data-page]` 是运行时状态驱动的属性选择器（§3.5），匹配时查节点当前状态。机制（朴素）：
 - **极简匹配器查状态**：匹配时直接查节点状态（hover=输入命中、active/disabled=节点属性、`data-page`=Controller 当前页）。
-- **样式 dirty 档**：DirtyFlags 含 `style` 档（§5.3）。状态变化 → 标受影响子树 style dirty → 重跑 cascade（极简匹配器 + 合并 + 继承展开）→ 置 layout dirty。
+- **样式 dirty 档**：DirtyFlags 含 `style` 档（§5.3）。状态变化 → 标受影响子树 style dirty → 重跑 cascade（极简匹配器 + 合并；继承打包期已展开进 base_style，runtime 仅 color 需补树序传播，见 §4.2 打包期展开继承段）→ 置 layout dirty。
 - **朴素重算，不缓存**：节点少、选择器窄，全量重算几微秒，不做状态指纹缓存。
 
 ### 4.4 CSS 值 → taffy 映射层
@@ -437,7 +437,7 @@ stage.is_pointer_on_ui() -> bool   // = 命中目标非空且非根
 纯数据 `items: Vec<TransitionItem>`。`Play()` 把每个 item 翻译成 Tweener 提交 TweenManager。两点关键帧；多关键帧靠多 item 串行。嵌套 Transition 递归 + 完成回调递减父计数。与 Controller 正交（不同层），可由 Controller.on_changed 触发。
 
 ### 10.3 Controller（状态机，纯状态）
-`Controller { selected_index, page_ids, ... }`。`set_selected_index` 改 index + 派发 onChanged + 置子树 style dirty（触发 §4.3 重匹配）+ 更新元素 `data-page` 属性。Controller 不直接改 UI 属性，全靠 CSS 属性选择器 + `transition` 实现页面切换效果（§3.5）。
+`Controller { selected_index, page_ids, ... }`。`set_selected_index` 改 index + 派发 onChanged + 置子树 style dirty（触发 §4.3 重匹配）。**不写回节点 `data-page` 属性**——`[data-page]` 选择器匹配时查 registry `selected_index`（state query，§3.5）。Controller 不直接改 UI 属性，全靠 CSS 属性选择器 + `transition` 实现页面切换效果（§3.5）。
 
 ### 10.4 Gear（状态→属性映射）【砍——CSS 属性选择器 + 动态 API 取代】
 
@@ -625,8 +625,8 @@ csbindgen 是为 Unity/IL2CPP 设计的主流绑定生成器（Cysharp MagicPhys
      e. ScrollPane 物理 + 消费 wheel    ← 惯性/回弹（自维护 tween 不走 GTween，需 c 的 content_size + d 的拖拽事件）+ 滚轮
      f. process_keys                    ← keydown/up + Tab 导航（有焦点才发）
      g. compute_world_transforms        ← DFS 累计 world matrix（读 anim.transform override + 父 scroll_pos 偏移）
-     h. rematch_pseudo_classes          ← 全量重匹配 :hover/:active/:focus/:disabled 动态规则（从 base_style 起算，不缓存）
-     i. build_render_nodes              ← DFS：mesh/text dirty 重生成几何 + dirty hash 比 → Unchanged emit（静态帧≈0 upload）+ FairyBatching 重排 + 合成 scrollbar + 分配 sort_key
+     h. rematch_pseudo_classes          ← 全量重匹配 :hover/:active/:focus/:disabled + [data-page] 动态规则（从 base_style 起算，不缓存）+ 末尾 propagate_color_inheritance（runtime color 继承，§4.2）
+     i. build_render_nodes              ← 剪 display:none 子树 + DFS：mesh/text dirty 重生成几何 + dirty hash 比 → Unchanged emit（静态帧≈0 upload）+ FairyBatching 重排 + 合成 scrollbar + 分配 sort_key
      j. 输出 Vec<RenderNode>（按 sort_key）
   3. 后端消费 render_nodes → 同步镜像；borrow_events → 事件路由（capture+bubble，§9.2 业务侧）→ 业务回调 → 提交渲染
 ```
