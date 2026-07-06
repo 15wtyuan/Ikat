@@ -469,7 +469,7 @@ void Publish() {
 | bytes 文件名 | `{源文件名}.{ext}.bytes` | 与 familyName 解耦 |
 | sourceFileName 字段 | FontEntry 加，面板拖 asset 自动填 | 不存 Font 引用，靠文件名找 |
 | LoomAtlasSync 产物 | 改 Bundles/atlas/，PNG 源留 res/ | 只改产物位置 |
-| v1.5 接口预留 | **挂起**——写 plan 时确认 v1.5 进度再定 | Controller/Animator/Gear 是否进 LoomStage 待定 |
+| v1.5 接口 | **保住已落地的 Controller API**——v1.5 Controller + CSS transition 已全部落地（Rust registry + FFI `get_controller`/`set_selected_index`/`get_selected_index`/`borrow_controller_changed_events` + C# `LoomStage.GetController`/`SetSelectedIndex`/`GetSelectedIndex` + 事件派发）。本次 LoomStage 拆分时这些 API 原样搬进纯 class LoomStage，不丢不预留。v1.5-b Transition 时间线正交，不在本次范围 | v1.5 已做部分调研确认 |
 
 ---
 
@@ -487,4 +487,4 @@ void Publish() {
 - [x] measure 切口收敛到两处调用点 + 两个签名（solve/build_render_nodes）
 - [x] 打包器无 --fonts 参数（现状本就没有）
 - [x] SpriteResolver 改名字映射 + driver.LoadSpriteAtlas，不持 atlas 引用
-- [ ] 待实现时确认：Animator/Controller/Gear 等 v1.5+ feature 是否进 LoomStage（挂起，写 plan 时定）
+- [x] v1.5 Controller API（GetController/SetSelectedIndex/GetSelectedIndex + controller_changed 事件）保住，拆分时搬进纯 class LoomStage
