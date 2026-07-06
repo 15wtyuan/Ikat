@@ -78,6 +78,7 @@ pub struct Specificity(pub u32, pub u32, pub u32); // (id 数, class 数, tag �
 
 use crate::scene::node::{NodeId, Scene};
 use crate::style::mapping::apply_decl;
+use crate::style::resolved::{ResolvedStyle, TransitionSpec};
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct DynamicRuleTable {
@@ -291,6 +292,11 @@ fn match_chain_with_state(
 /// 收集命中的动态规则（match_element_with_state），按 specificity 升序排
 /// （高 specificity 后 apply 胜出）→ apply_decl 叠加 → 写 Node.style。
 /// solve 每帧全量，无需 dirty 驱动。
+///
+/// **transition 请求发射**：对已 cascade 过（cascaded_once=true）且声明了 transition 的节点，
+/// 比较旧/新级联值的可动画通道（BgColor/TextColor/Opacity）；变化则推入
+/// `scene.pending_transitions`，供 Stage tick drain 后 kill 旧 tween + 提交新 tween。
+/// 首次 cascade（cascaded_once=false）即时生效不产请求，并置 cascaded_once=true。
 pub fn rematch_pseudo_classes(scene: &mut Scene) {
     // 预提取 specificity 元组 + owned rule 副本（避免借 scene.dynamic_rules 跨 get_mut）。
     let rules_with_spec: Vec<(u32, u32, u32, DynamicRule)> = scene
@@ -309,6 +315,12 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
     // 收集所有 NodeId（slotmap 分配，不能手造 NodeId(i)）。
     let node_ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
     for node_id in node_ids {
+        // 捕获旧级联值 + cascaded_once + transition 声明（写新 style 前留快照）。
+        // transition 读自 base_style（打包期烘焙的静态声明，rematch 不改 base_style）。
+        let (old_style, cascaded_once, transition_decl) = {
+            let n = scene.get(node_id).expect("live node");
+            (n.style.clone(), n.cascaded_once, n.base_style.transition)
+        };
         // 从 base_style 重起
         let mut new_style = scene.get(node_id).expect("live node").base_style.clone();
         // 收集命中规则
@@ -325,10 +337,81 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
                 apply_decl(&mut new_style, &decl.prop, &decl.value);
             }
         }
-        // 写 style
+        // transition 检测：仅 cascaded_once 后（首次 cascade 即时生效不动画），
+        // 且声明了非零 duration 的 transition 时，比较可动画通道变化推请求。
+        if let Some(ts) = transition_decl {
+            if cascaded_once && ts.duration > 0.0 {
+                emit_transition_requests(scene, node_id, ts, &old_style, &new_style);
+            }
+        }
+        // 写 style + 标 cascaded_once
         let node = scene.get_mut(node_id).expect("live node");
         node.style = new_style;
+        node.cascaded_once = true;
     }
+}
+
+/// 比较旧/新级联值的可动画通道；变化的（且 transition 声明覆盖该通道）推入 pending_transitions。
+/// `ts.prop`=None 表 all（任一通道变化都触发）；Some(p) 仅触发该通道。
+/// start 取进行中 tween 的 override（mid-flight 连续，无 snap），无则取旧级联值。
+fn emit_transition_requests(
+    scene: &mut Scene,
+    node: NodeId,
+    ts: TransitionSpec,
+    old: &ResolvedStyle,
+    new: &ResolvedStyle,
+) {
+    use crate::tween::{TransitionRequest, TweenProp};
+    let wants = |p: TweenProp| ts.prop.is_none() || matches!(ts.prop, Some(q) if q == p);
+    let anim = scene.anim.get(node); // mid-flight override 作 start（无则 old cascade 值）
+                                     // background-color: Option<[f32;4]>（None 视作透明 [0,0,0,0]）
+    if wants(TweenProp::BgColor) {
+        let a = old.background_color.unwrap_or([0.0; 4]);
+        let b = new.background_color.unwrap_or([0.0; 4]);
+        if a != b {
+            let start = anim.and_then(|x| x.bg_color).unwrap_or(a);
+            scene.pending_transitions.push(TransitionRequest {
+                node,
+                prop: TweenProp::BgColor,
+                start,
+                end: b,
+                ease: ts.ease,
+                delay: ts.delay,
+                duration: ts.duration,
+            });
+        }
+    }
+    // text color: [f32;4]（color 字段，非 Option）
+    if wants(TweenProp::TextColor) {
+        let a = old.color;
+        let b = new.color;
+        if a != b {
+            let start = anim.and_then(|x| x.text_color).unwrap_or(a);
+            scene.pending_transitions.push(TransitionRequest {
+                node,
+                prop: TweenProp::TextColor,
+                start,
+                end: b,
+                ease: ts.ease,
+                delay: ts.delay,
+                duration: ts.duration,
+            });
+        }
+    }
+    // opacity: f32（标量，pack 进 [f32;4] 首分量）
+    if wants(TweenProp::Opacity) && (old.opacity - new.opacity).abs() > 1e-6 {
+        let start = anim.and_then(|x| x.opacity).unwrap_or(old.opacity);
+        scene.pending_transitions.push(TransitionRequest {
+            node,
+            prop: TweenProp::Opacity,
+            start: [start, 0.0, 0.0, 0.0],
+            end: [new.opacity, 0.0, 0.0, 0.0],
+            ease: ts.ease,
+            delay: ts.delay,
+            duration: ts.duration,
+        });
+    }
+    // translate/scale/rotation 需分解 transform 矩阵——围栏 transition 不支持 transform，此处不做。
 }
 
 #[cfg(test)]
@@ -337,6 +420,8 @@ mod tests {
     use crate::parse::css::Declaration;
     use crate::parse::selector::parse_selector;
     use crate::scene::node::{Node, NodeId, NodeKind, Rect, Scene};
+    use crate::style::resolved::TransitionSpec;
+    use crate::tween::{Ease, TweenProp};
 
     /// 构造 root + button(.btn) scene，button 在 (0,0,100,100)。
     fn btn_scene() -> Scene {
@@ -780,6 +865,62 @@ mod tests {
             s.get(child_id).unwrap().style.color,
             [0.0, 0.0, 0.0, 1.0],
             "inner controller page=1 → [data-page=\"0\"] 不匹配（nearest wins）"
+        );
+    }
+
+    // ── transition 请求发射测 ──
+
+    #[test]
+    fn rematch_emits_transition_request_on_change() {
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        s.get_mut(bid).unwrap().base_style.transition = Some(TransitionSpec {
+            prop: Some(TweenProp::BgColor),
+            duration: 0.3,
+            ease: Ease::Linear,
+            delay: 0.0,
+        });
+        s.get_mut(bid).unwrap().cascaded_once = true; // 已 warmup
+        s.dynamic_rules
+            .rules
+            .push(rule(".btn:hover", "background-color", "#0000ff"));
+        s.get_mut(bid).unwrap().hovered = true;
+        s.pending_transitions.clear();
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(
+            s.pending_transitions.len(),
+            1,
+            "bg changed + transition declared → 1 request"
+        );
+        let r = &s.pending_transitions[0];
+        assert!(matches!(r.prop, TweenProp::BgColor));
+    }
+
+    #[test]
+    fn first_cascade_no_transition() {
+        // cascaded_once=false → 首次 cascade 即时生效，不产 transition 请求
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        s.get_mut(bid).unwrap().base_style.transition = Some(TransitionSpec {
+            prop: Some(TweenProp::BgColor),
+            duration: 0.3,
+            ease: Ease::Linear,
+            delay: 0.0,
+        });
+        // cascaded_once 保持 false
+        s.dynamic_rules
+            .rules
+            .push(rule(".btn:hover", "background-color", "#0000ff"));
+        s.get_mut(bid).unwrap().hovered = true;
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(
+            s.pending_transitions.len(),
+            0,
+            "first cascade instant (no transition)"
+        );
+        assert!(
+            s.get(bid).unwrap().cascaded_once,
+            "首次 cascade 后 cascaded_once 置 true"
         );
     }
 }

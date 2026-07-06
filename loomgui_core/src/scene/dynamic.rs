@@ -92,6 +92,7 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         focused: false,
         reuse_key: 0,
         data_controller: None,
+        cascaded_once: false,
     };
     let key = scene.nodes.insert(node);
     let id = NodeId::from_key(key);
@@ -149,6 +150,7 @@ pub fn create_node_from_template(
         focused: false,
         reuse_key: 0,
         data_controller: None,
+        cascaded_once: false,
     };
     let key = scene.nodes.insert(node);
     let id = NodeId::from_key(key);

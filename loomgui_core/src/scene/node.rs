@@ -128,6 +128,10 @@ pub struct Node {
     /// 匹配器遇 [data-page] 时回溯找最近的 data_controller 祖先查其页。建树时从
     /// ElementData.attrs["data-controller"] 填（照 draggable/tabindex 先例）。
     pub data_controller: Option<String>,
+    /// 是否已 cascade 过至少一次。首次 rematch 置 true 且不产 transition 请求
+    /// （初始出现即时生效，不动画入场）。后续 rematch 检测可动画通道变化时
+    /// 据此门控是否推 transition 请求。
+    pub cascaded_once: bool,
 }
 
 impl Default for Node {
@@ -158,6 +162,7 @@ impl Default for Node {
             focused: false,
             reuse_key: 0,
             data_controller: None,
+            cascaded_once: false,
         }
     }
 }
@@ -352,6 +357,7 @@ impl Scene {
                 focused: false,
                 reuse_key: 0,
                 data_controller: data_controller.clone(),
+                cascaded_once: false,
             };
             let key = scene.nodes.insert(node);
             let id = NodeId::from_key(key);
