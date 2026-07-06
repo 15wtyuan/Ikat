@@ -20,8 +20,10 @@ fn main() {
         "pkg missing page_controller"
     );
 
-    let font = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
-    let mut s = Stage::new(font, (1080.0, 1920.0)).expect("Stage::new");
+    let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+    let mut s = Stage::new((1080.0, 1920.0)).expect("Stage::new");
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     s.load_package("showcase", &bytes).expect("load_package");
     let root = s
         .create_root(

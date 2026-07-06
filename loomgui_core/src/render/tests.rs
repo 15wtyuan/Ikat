@@ -134,11 +134,11 @@ fn build_skips_display_none_subtree() {
     };
     // from_nodes 用 edges (parent_idx, child_idx) 按 vec 位置建 parent 关系。
     let mut scene = Scene::from_nodes(vec![parent, child, grandchild], vec![(0, 1), (1, 2)]);
-    let font = test_font().expect("need test font for build_render_nodes");
+    let ft = test_font_table().expect("need test font for build_render_nodes");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
-        &font,
+        &ft,
         &std::collections::HashMap::new(),
         &empty_sizes(),
     );
