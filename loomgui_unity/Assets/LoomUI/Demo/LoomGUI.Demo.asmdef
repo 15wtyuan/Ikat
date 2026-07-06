@@ -1,0 +1,6 @@
+{
+    "name": "LoomGUI.Demo",
+    "references": [ "LoomGUI.Runtime" ],
+    "includePlatforms": [],
+    "excludePlatforms": []
+}

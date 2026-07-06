@@ -14,11 +14,14 @@ namespace LoomGUI
     //
     // 按页 listener 清（§7.5）：driver 维护当前页 listener 注册表，切页前批量 RemoveListener（不用 EventHandler.Clear 粗清）。
     //
-    // 注：LoomStage 已是纯 C# 类（非 MonoBehaviour）。本 driver 在 Awake 构造实例 + 注入字体/根；
-    // 完整的 LoomStageDriver 将统一此模式。本 showcase driver 是过渡形态。
+    // 注：本 driver 依赖 LoomStageDriver 提供 LoomStage 实例 + 生命周期管理（Awake/OnDestroy/Tick）。
+    // 字体/UI相机/设计分辨率/根变换等基础设施由 LoomStageDriver 统一管理，showcase 专用字段留在本类。
     public unsafe class LoomShowcaseDriver : MonoBehaviour
     {
-        // LoomStage 纯类实例（Awake 构造，非 SerializeField——Unity 不序列化非 Object 引用）。
+        // LoomStageDriver 宿主（Inspector 拖同 GO 或场景内任意 GO 上的 LoomStageDriver）。
+        // Awake 时从此取 LoomStage 引用；driver 负责 stage 的构造/销毁/Tick。
+        [SerializeField] LoomStageDriver _driver;
+        // LoomStage 纯类实例（从 _driver.Stage 缓存，非 SerializeField——Unity 不序列化非 Object 引用）。
         LoomStage _stage;
         // page_controls §1.6 NativeHost 演示：Inspector 拖 prefab（driver Instantiate 缓存实例后绑，
         // 不直接绑 prefab asset——Unity 禁改 prefab transform，Bind 也不该越界实例化）。
@@ -72,9 +75,8 @@ namespace LoomGUI
         // uint.MaxValue = 当前页未绑 NativeHost。
         uint _nativeBoundNode = uint.MaxValue;
 
-        // showcase 包名（LoadPackage 用）+ pkg.bin 文件名（StreamingAssets 下）。
+        // showcase 包名（LoadPackage 用）。
         const string ShowcasePkg = "showcase";
-        const string ShowcasePkgFile = "showcase.pkg.bin";
 
         // === 按页 listener 注册表（§7.5）===
         // 当前页注册的 listener：nodeId → [(eventType, callback)]。切页前遍历逐个 RemoveListener。
@@ -129,111 +131,21 @@ namespace LoomGUI
         VirtualListDriver _listDriverEqual;
         VirtualListDriver _listDriverVar;
 
-        // 字体（Inspector 指定）+ design 尺寸——Awake 构造 LoomStage 用。
-        [SerializeField] Font _font;
-        [SerializeField] Vector2 _designSize = new Vector2(1080, 1920);
-        [SerializeField] Camera _uiCamera;
-        [SerializeField] bool _safeArea = true;
-
         void Awake()
         {
-            if (_stage != null) return;
-            _stage = new LoomStage(_designSize);
-            _stage.UseSafeArea = _safeArea;
-            // 注册默认字体（Inspector 指定的 Font asset → 读源 ttf 字节喂 Rust 测量）。
-            if (_font != null)
+            // 从 LoomStageDriver 取 stage 引用（driver 负责构造/初始化/Tick/销毁）。
+            if (_driver == null) _driver = GetComponent<LoomStageDriver>();
+            if (_driver == null)
             {
-                byte[] fontBytes = LoadFontBytes(_font);
-                if (fontBytes != null)
-                {
-                    _stage.RegisterFont(_font.name, fontBytes, _font, isDefault: true);
-                    Font.textureRebuilt += _stage.OnFontRebuilt;
-                }
-                else
-                {
-                    Debug.LogError("[Showcase] 无法读取 _font 源字节——Rust 测量将用空字体");
-                }
+                Debug.LogError("[Showcase] 无 LoomStageDriver——请在 Inspector 指定或挂同 GO");
+                return;
             }
-            else
+            _stage = _driver.Stage;
+            if (_stage == null)
             {
-                Debug.LogError("[Showcase] _font 未配——文本不显示");
+                Debug.LogError("[Showcase] Driver.Stage 未建——LoomStageDriver.Awake 可能未跑");
+                return;
             }
-            _stage.InitSprites(LoomSettings.GetOrCreateDefault(), null);
-            _stage.SetNativeHostRoot(transform);
-            ConfigureTransforms();
-            gameObject.layer = 6; // LoomUILayer
-        }
-
-        // LoomStage 不再有 LateUpdate——本 driver 每帧驱动 tick。
-        void LateUpdate()
-        {
-            if (_stage == null) return;
-            _stage.Tick(Time.unscaledDeltaTime);
-        }
-
-        void OnDestroy()
-        {
-            if (_stage != null)
-            {
-                if (_font != null) Font.textureRebuilt -= _stage.OnFontRebuilt;
-                _stage.Dispose();
-                _stage = null;
-            }
-        }
-
-        // editor 读 _font 源文件字节（build 后须改读 StreamingAssets）。
-        byte[] LoadFontBytes(Font font)
-        {
-#if UNITY_EDITOR
-            var assetPath = UnityEditor.AssetDatabase.GetAssetPath(font);
-            if (string.IsNullOrEmpty(assetPath)) return null;
-            string full = System.IO.Path.GetFullPath(assetPath);
-            return System.IO.File.Exists(full) ? System.IO.File.ReadAllBytes(full) : null;
-#else
-            // build 后 Font asset 打进包，无文件系统路径——发布前须把字体 cp 到 StreamingAssets 改读。
-            string name = font != null ? font.name : "";
-            string p = System.IO.Path.Combine(Application.streamingAssetsPath, name + ".ttf");
-            return System.IO.File.Exists(p) ? System.IO.File.ReadAllBytes(p) : null;
-#endif
-        }
-
-        // design→screen 根变换（sf + rootPos）。MatchWidthOrHeight shrink-to-fit + y-flip。
-        void ConfigureTransforms()
-        {
-            float sw = Screen.width, sh = Screen.height;
-            Rect area = _safeArea ? Screen.safeArea : new Rect(0, 0, sw, sh);
-            if (area.width <= 0f || area.height <= 0f) area = new Rect(0, 0, sw, sh);
-            float dw = _designSize.x, dh = _designSize.y;
-            float sf = Mathf.Min(area.width / dw, area.height / dh);
-            float offX = area.x + (area.width - dw * sf) * 0.5f;
-            float offYTop = area.y + area.height;
-            transform.localScale = new Vector3(sf, -sf, sf);
-            transform.localPosition = new Vector3(offX - sw * 0.5f, offYTop - sh * 0.5f, 0f);
-            if (_uiCamera != null)
-            {
-                _uiCamera.orthographic = true;
-                _uiCamera.orthographicSize = sh / 2f;
-                _uiCamera.cullingMask = 1 << 6;
-                _uiCamera.clearFlags = CameraClearFlags.Depth;
-                _uiCamera.nearClipPlane = 0.1f;
-                _uiCamera.farClipPlane = 100f;
-                _uiCamera.transform.SetParent(null, false);
-                _uiCamera.transform.localPosition = new Vector3(0f, 0f, -10f);
-                _uiCamera.transform.localRotation = Quaternion.identity;
-            }
-        }
-
-        // 虚拟列表每帧 SyncSlots。Update 在 LoomStage.LateUpdate(tick) 前跑，
-        // 本帧内 slot 增删吃进同帧 tick → solve → 渲染。
-        void Update()
-        {
-            if (_isListPage)
-            {
-                _listDriverEqual?.SyncSlots();
-                _listDriverVar?.SyncSlots();
-            }
-            // 角色 anchor：nh-stage layout 完成后（rect.h>0）算 localPosition（首帧 layout 未算，下帧补）。
-            if (_characterInstance != null && !_anchorApplied) ApplyCharacterAnchor();
         }
 
         // #1a1d2e = .root 背景色（showcase 深蓝底）。主相机配同色，letterbox 与 root 无缝。
@@ -251,11 +163,11 @@ namespace LoomGUI
             _stage.AppendChild(_root, _uiLayer);
             _stage.AppendChild(_root, _tipsLayer);
 
-            // load showcase 包进资源池（不建 scene）。
-            byte[] pkgBytes = LoadPkgBytes(ShowcasePkgFile);
+            // load showcase 包进资源池（不建 scene）。通过 LoomStageDriver 的统一加载钩子读 pkg 字节。
+            byte[] pkgBytes = _driver.LoadPackageBytes(ShowcasePkg);
             if (pkgBytes == null)
             {
-                Debug.LogError($"[Showcase] 无法加载 {ShowcasePkgFile}——showcase 不显示");
+                Debug.LogError($"[Showcase] 无法加载 {ShowcasePkg}——showcase 不显示");
                 return;
             }
             int r = _stage.LoadPackage(ShowcasePkg, pkgBytes);
@@ -266,19 +178,6 @@ namespace LoomGUI
             }
 
             OpenPage("home");
-        }
-
-        // 从 StreamingAssets 读 pkg.bin 字节。editor/player 通用（Application.streamingAssetsPath）。
-        // Android 下 streamingAssetsPath 是 jar:file://... 需 UnityWebRequest；本 showcase 只跑 editor/standalone，File.ReadAllBytes 即可。
-        byte[] LoadPkgBytes(string fileName)
-        {
-            string path = System.IO.Path.Combine(Application.streamingAssetsPath, fileName);
-            if (!System.IO.File.Exists(path))
-            {
-                Debug.LogError($"[Showcase] pkg.bin 不存在：{path}（用 LoomGUI > Settings 配置并打包）");
-                return null;
-            }
-            return System.IO.File.ReadAllBytes(path);
         }
 
         // 主相机默认 Skybox；root shrink-to-fit + safeArea letterbox 后透出 → 整体灰蒙蒙。
@@ -1003,6 +902,19 @@ namespace LoomGUI
             _tipsRoutine = null;
         }
 
+        // 虚拟列表每帧 SyncSlots。Update 在 LoomStageDriver.LateUpdate(tick) 前跑，
+        // 本帧内 slot 增删吃进同帧 tick → solve → 渲染。
+        void Update()
+        {
+            if (_isListPage)
+            {
+                _listDriverEqual?.SyncSlots();
+                _listDriverVar?.SyncSlots();
+            }
+            // 角色 anchor：nh-stage layout 完成后（rect.h>0）算 localPosition（首帧 layout 未算，下帧补）。
+            if (_characterInstance != null && !_anchorApplied) ApplyCharacterAnchor();
+        }
+
         // 0-255 RGB → 归一化 [0,1] RGBA float[4]（alpha=1）。Rust tween 直接写 anim 通道，须与 style 归一化一致。
         static float[] Rgba(int r, int g, int b) => new float[] { r / 255f, g / 255f, b / 255f, 1f };
     }
@@ -1031,7 +943,7 @@ namespace LoomGUI
         int _initStep;
 
         // slotIdx（0..visibleCount-1，视口内固定槽位序号）→ (root, title, boundItemIndex)。
-        // P0-2 修：reuse_key 绑 slotIdx（非 itemIndex）——滚动时槽位稳定，只换绑的 itemIndex，
+        // reuse_key 绑 slotIdx（非 itemIndex）——滚动时槽位稳定，只换绑的 itemIndex，
         // reuse_key 不变 → MirrorPool _poolByReuse 命中 → GO 复用只重建 mesh（不销毁重建）。
         readonly Dictionary<int, (uint root, uint title, int boundItemIndex)> _slots = new();
 
