@@ -16,7 +16,10 @@ namespace LoomGUI.Editor
             // exe_path：工作区根 → Packages/com.loomgui.unity/Editor/Tools/（插件包内，Unity 虚拟化路径）。
             // workspaceDir = Assets/LoomUI/（深度 2）；exe 在 Packages/ 下，需先回项目根（../../）再进包。
             string exeRel = RelativeFromWorkspace(s.workspaceDir, "Packages/com.loomgui.unity/Editor/Tools/loomgui_pkg.exe");
-            string outRel = RelativeFromWorkspace(s.workspaceDir, s.pkgOutputDir);
+            // Trailing slash so MakeRelativeUri treats the target as a directory; pkg.bin
+            // artifacts now live under {pkgOutputDir}/ui/ (Bundles/ui/) — one publish root per
+            // output kind: atlas/, ui/, fonts/ side-by-side under Bundles/.
+            string outRel = RelativeFromWorkspace(s.workspaceDir, s.pkgOutputDir + "ui/");
 
             var sb = new StringBuilder();
             sb.Append("{\n");

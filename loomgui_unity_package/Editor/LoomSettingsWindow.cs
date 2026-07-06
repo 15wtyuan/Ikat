@@ -9,12 +9,13 @@ using UnityEngine;
 namespace LoomGUI.Editor
 {
     /// <summary>
-    /// LoomGUI 设置面板（三 tab：工作区 / 包管理 / 图集）。菜单 LoomGUI > Settings。
+    /// LoomGUI 设置面板（四 tab：工作区 / 包管理 / 图集 / 字体）。菜单 LoomGUI > Settings。
     /// 共享全局 LoomSettings 资产。改任意字段 → 自动同步 config.json（LoomConfigExporter）。
+    /// 底部「发布」= 一键 sync atlas + pack pkg + publish fonts + export config → Bundles/{atlas,ui,fonts}/。
     /// </summary>
     public sealed class LoomSettingsWindow : EditorWindow
     {
-        enum Tab { Workspace, Packages, Atlas }
+        enum Tab { Workspace, Packages, Atlas, Fonts }
         Tab _tab = Tab.Workspace;
         LoomSettings _settings;
         Vector2 _scroll;
@@ -33,7 +34,7 @@ namespace LoomGUI.Editor
         {
             if (_settings == null) _settings = LoomSettings.GetOrCreateDefault();
 
-            _tab = (Tab)GUILayout.SelectionGrid((int)_tab, new[] { "工作区", "包管理", "图集" }, 3, EditorStyles.toolbarButton);
+            _tab = (Tab)GUILayout.SelectionGrid((int)_tab, new[] { "工作区", "包管理", "图集", "字体" }, 4, EditorStyles.toolbarButton);
             EditorGUILayout.Space(8);
 
             EditorGUI.BeginChangeCheck();
@@ -43,12 +44,15 @@ namespace LoomGUI.Editor
                 case Tab.Workspace: DrawWorkspace(); break;
                 case Tab.Packages: DrawPackages(); break;
                 case Tab.Atlas: DrawAtlas(); break;
+                case Tab.Fonts: DrawFonts(); break;
             }
             EditorGUILayout.EndScrollView();
             bool changed = EditorGUI.EndChangeCheck();
 
             EditorGUILayout.Space(8);
             DrawLog();
+            // Publish 出现于所有 tab：单步按钮留作分步调试，发布做一键产出全部到 Bundles/。
+            DrawPublishButton();
 
             if (changed)
             {
@@ -268,6 +272,74 @@ namespace LoomGUI.Editor
             }
         }
 
+        // —— 字体 tab ——————————————————————————————————————————————
+        // FontEntry 只存 familyName + sourceFileName，不持 Font 引用——避免 Resources build 把
+        // Font asset 拖入。拖入时从 asset path 拆出文件名族名即丢弃 ref，发布时按 sourceFileName
+        // 在 AssetDatabase 重新定位源文件并拷贝两份（Font asset 给 AB、.bytes 给 Rust 测量）。
+        void DrawFonts()
+        {
+            EditorGUILayout.LabelField("字体列表（" + _settings.fonts.Count + "）——拖 Font asset 自动填", EditorStyles.boldLabel);
+            DrawFontDropZone();
+            for (int i = 0; i < _settings.fonts.Count; i++) DrawFontEntry(i);
+            if (GUILayout.Button("+ 手动添加", GUILayout.Width(120)))
+                _settings.fonts.Add(new FontEntry());
+            EditorGUILayout.Space(8);
+            // 始终保证恰好一个默认字体：发布时 driver 缺 familyName 回退到 isDefault 的那个。
+            if (_settings.fonts.Count > 0 && !_settings.fonts.Exists(f => f.isDefault))
+                _settings.fonts[0].isDefault = true;
+        }
+
+        void DrawFontDropZone()
+        {
+            Rect drop = GUILayoutUtility.GetRect(0, 48, GUILayout.ExpandWidth(true));
+            GUI.Box(drop, "拖 Font asset 到此\n自动填 sourceFileName + familyName（不持引用）", EditorStyles.helpBox);
+            if (!drop.Contains(Event.current.mousePosition)) return;
+            if (Event.current.type == UnityEngine.EventType.DragUpdated)
+            {
+                bool hasFont = false;
+                foreach (var o in DragAndDrop.objectReferences) if (o is Font) { hasFont = true; break; }
+                DragAndDrop.visualMode = hasFont ? DragAndDropVisualMode.Copy : DragAndDropVisualMode.Rejected;
+            }
+            if (Event.current.type == UnityEngine.EventType.DragPerform)
+            {
+                DragAndDrop.AcceptDrag();
+                foreach (var o in DragAndDrop.objectReferences)
+                {
+                    if (o is Font f)
+                    {
+                        string assetPath = AssetDatabase.GetAssetPath(f);
+                        string fileName = Path.GetFileName(assetPath);                  // NotoSansSC.ttc
+                        string family = Path.GetFileNameWithoutExtension(assetPath);   // NotoSansSC
+                        _settings.fonts.Add(new FontEntry
+                        {
+                            familyName = family,
+                            sourceFileName = fileName,
+                            isDefault = _settings.fonts.Count == 0
+                        });
+                    }
+                }
+                Event.current.Use();
+                SaveSettings();
+            }
+        }
+
+        void DrawFontEntry(int idx)
+        {
+            var e = _settings.fonts[idx];
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            e.familyName = EditorGUILayout.TextField("familyName (CSS)", e.familyName);
+            EditorGUILayout.LabelField("sourceFileName", e.sourceFileName);
+            e.isDefault = EditorGUILayout.Toggle("isDefault", e.isDefault);
+            if (GUILayout.Button("删除", GUILayout.Width(60)))
+            {
+                _settings.fonts.RemoveAt(idx);
+                SaveSettings();
+                GUIUtility.ExitGUI();
+                return;
+            }
+            EditorGUILayout.EndVertical();
+        }
+
         // —— 打包（复用 exe，固定路径）——————————————————————————————
         void PackAll() { for (int i = 0; i < _settings.packages.Count; i++) PackPackage(i); }
 
@@ -277,7 +349,8 @@ namespace LoomGUI.Editor
             string exe = LoomExePath.Resolve();
             if (!File.Exists(exe)) { AppendLog($"[pack] exe 不存在: {exe}"); return; }
             string absSrc = ToAbs(Path.Combine(_settings.workspaceDir, pkg.sourceDir));
-            string outPath = ToAbs(Path.Combine(_settings.pkgOutputDir, pkg.pkgName + ".pkg.bin"));
+            // pkg.bin 落 Bundles/ui/，与 atlas/、fonts/ 并列——发布根按产物类型分目录。
+            string outPath = ToAbs(Path.Combine(_settings.pkgOutputDir, "ui", pkg.pkgName + ".pkg.bin"));
             Directory.CreateDirectory(Path.GetDirectoryName(outPath));
             string htmlArg = pkg.htmlFiles.Count > 0 ? string.Join(",", pkg.htmlFiles) : "";
             var sb = new StringBuilder();
@@ -300,6 +373,74 @@ namespace LoomGUI.Editor
             }
             catch (Exception ex) { AppendLog($"[pack] {pkg.pkgName}: {ex.Message}"); }
             AssetDatabase.Refresh();
+        }
+
+        // —— 发布（一键产出全部到 Bundles/）——————————————————————————
+        // 单步按钮（同步图集 / 打包）留作分步调试；发布串起全部 4 步，任何一步抛异常只记日志不中断后续刷新。
+        void DrawPublishButton()
+        {
+            EditorGUILayout.Space(12);
+            if (GUILayout.Button("发布", GUILayout.Height(36))) Publish();
+        }
+
+        void Publish()
+        {
+            AppendLog("[发布] 开始...");
+            try
+            {
+                LoomAtlasSync.SyncAll(_settings);
+                AppendLog("[发布] Atlas: OK");
+                for (int i = 0; i < _settings.packages.Count; i++) PackPackage(i);
+                AppendLog("[发布] Pkg: OK");
+                PublishFonts();
+                LoomConfigExporter.Export(_settings);
+                AppendLog("[发布] Config: OK");
+            }
+            catch (Exception ex) { AppendLog($"[发布] FAIL: {ex.Message}"); }
+            AssetDatabase.Refresh();
+        }
+
+        // 字体源文件拷贝两份到 Bundles/fonts/：原文件名给 AssetBundle（Font asset），加 .bytes 后缀给 Rust 测量端读。
+        // 同一物理源文件双写避免运行时再转换——AB 加载拿 Font，Rust .bytes 拿原始 ttf/otf/ttc 字节。
+        void PublishFonts()
+        {
+            string fontsDir = ToAbs(Path.Combine(_settings.pkgOutputDir, "fonts"));
+            Directory.CreateDirectory(fontsDir);
+            int count = 0;
+            foreach (var entry in _settings.fonts)
+            {
+                if (string.IsNullOrEmpty(entry.sourceFileName)) continue;
+                string assetPath = FindFontAssetPath(entry.sourceFileName);
+                if (string.IsNullOrEmpty(assetPath))
+                {
+                    AppendLog($"[发布] 字体 {entry.sourceFileName} 找不到源 asset，跳过");
+                    continue;
+                }
+                string absSrc = Path.GetFullPath(assetPath);
+                File.Copy(absSrc, Path.Combine(fontsDir, entry.sourceFileName), overwrite: true);
+                File.Copy(absSrc, Path.Combine(fontsDir, entry.sourceFileName + ".bytes"), overwrite: true);
+                count++;
+            }
+            AppendLog($"[发布] Fonts: {count} → {fontsDir}");
+        }
+
+        // 按 sourceFileName 在 AssetDatabase 查 Font asset 路径。FindAssets 全库搜 GUID，再按文件名精确匹配过滤同名误匹配。
+        string FindFontAssetPath(string sourceFileName)
+        {
+            foreach (var g in AssetDatabase.FindAssets(sourceFileName + " t:Font"))
+            {
+                var p = AssetDatabase.GUIDToAssetPath(g);
+                if (Path.GetFileName(p) == sourceFileName) return p;
+            }
+            return null;
+        }
+
+        /// 标记配置脏 + 存盘 + 同步 config.json。拖拽/删除等即时操作完成后调。
+        void SaveSettings()
+        {
+            EditorUtility.SetDirty(_settings);
+            AssetDatabase.SaveAssetIfDirty(_settings);
+            LoomConfigExporter.Export(_settings);
         }
 
         // —— 工具 ————————————————————————————————————————————————————

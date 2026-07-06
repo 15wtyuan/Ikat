@@ -19,12 +19,24 @@ namespace LoomGUI.Tests
             string json = LoomGUI.Editor.LoomConfigExporter.BuildJson(s);
             // exe_path 相对工作区根：Assets/LoomUI/ → Packages/com.loomgui.unity/Editor/Tools/ = ../../Packages/com.loomgui.unity/Editor/Tools/loomgui_pkg.exe
             StringAssert.Contains("\"exe_path\": \"../../Packages/com.loomgui.unity/Editor/Tools/loomgui_pkg.exe\"", json);
-            // output_dir 相对工作区根：Assets/LoomUI/ → Assets/LoomGUI/Bundles/ = ../LoomGUI/Bundles/
-            StringAssert.Contains("\"output_dir\": \"../LoomGUI/Bundles/\"", json);
+            // output_dir 相对工作区根：Assets/LoomUI/ → Assets/LoomGUI/Bundles/ui/ = ../LoomGUI/Bundles/ui/
+            // pkg.bin 落 Bundles/ui/（发布分目录：atlas/、ui/、fonts/ 并列）。
+            StringAssert.Contains("\"output_dir\": \"../LoomGUI/Bundles/ui/\"", json);
             StringAssert.Contains("\"res_dir\": \"res\"", json);
             StringAssert.Contains("\"name\": \"showcase\"", json);
             StringAssert.Contains("\"source\": \"showcase\"", json);
             StringAssert.Contains("\"home.html\"", json);
+        }
+
+        [Test]
+        public void BuildJson_OutputDirIsUiSubdir()
+        {
+            var s = ScriptableObject.CreateInstance<LoomSettings>();
+            s.workspaceDir = "Assets/LoomUI/";
+            s.pkgOutputDir = "Assets/LoomGUI/Bundles/";
+            string json = LoomGUI.Editor.LoomConfigExporter.BuildJson(s);
+            // output_dir points at the ui/ subdir under the publish root (Bundles/ui/).
+            Assert.That(json, Does.Contain("Bundles/ui"), "output_dir must point to ui/ subdir");
         }
 
         [Test]
