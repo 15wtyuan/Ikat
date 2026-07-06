@@ -39,7 +39,7 @@ fn make_pkg_with_image_size(src: &str, w: u32, h: u32) -> Vec<u8> {
         h,
     }];
     let input = PackageInput {
-        components: vec![("comp1", &nodes, &rules)],
+        components: vec![("comp1", &nodes, &rules, &[])],
         asset_manifest: &manifest,
     };
     crate::asset::write_package(&input)
@@ -154,7 +154,7 @@ fn css_length_overrides_real_image_size() {
         h: 20,
     }];
     let input = PackageInput {
-        components: vec![("comp1", &nodes, &rules)],
+        components: vec![("comp1", &nodes, &rules, &[])],
         asset_manifest: &manifest,
     };
     let pkg_bytes = crate::asset::write_package(&input);

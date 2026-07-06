@@ -1,5 +1,5 @@
 use super::*;
-use crate::asset::{PackageInput, TemplateNode};
+use crate::asset::{ControllerEntry, PackageInput, TemplateNode};
 use crate::scene::NodeKind;
 use crate::style::resolved::ResolvedStyle;
 
@@ -32,7 +32,7 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("comp1", &nodes, &rules)],
+        components: vec![("comp1", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     crate::asset::write_package(&input)
@@ -98,7 +98,7 @@ fn instantiate_missing_pkg_or_comp_errors() {
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("c1", &nodes, &rules)],
+        components: vec![("c1", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     s.load_package("bag", &crate::asset::write_package(&input))
@@ -146,7 +146,7 @@ fn instantiate_merges_dynamic_rules_dedup() {
         data_controller: None,
     }];
     let input = PackageInput {
-        components: vec![("comp1", &nodes, &rules)],
+        components: vec![("comp1", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     let mut s = Stage::new_for_test();
@@ -219,7 +219,7 @@ fn instantiate_multi_instance_hover_independent() {
         },
     ];
     let input = PackageInput {
-        components: vec![("comp1", &nodes, &rules)],
+        components: vec![("comp1", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
 
@@ -310,5 +310,176 @@ fn instantiate_multi_instance_hover_independent() {
         sc.get(btn1).unwrap().style.background_color,
         sc.get(btn2).unwrap().style.background_color,
         "两实例 :hover 状态独立（btn1 蓝 / btn2 灰）"
+    );
+}
+
+/// instantiate 建 Controller registry：组件带 ControllerEntry（mount_node_idx=0 = 组件根，
+/// initial_selected_index=2），instantiate 后 scene.controllers 含 (根 NodeId → selected=2)。
+/// mount_node_idx 经 id_map 重映射成活 NodeId（非模板下标 0，而是 slotmap 分配的真实 NodeId）。
+#[test]
+fn instantiate_builds_controller_registry() {
+    let mut root = TemplateNode {
+        kind: NodeKind::Container,
+        style: ResolvedStyle::default(),
+        parent_idx: None,
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        data_controller: Some("tab".into()),
+    };
+    let mut child = TemplateNode {
+        kind: NodeKind::Container,
+        style: ResolvedStyle::default(),
+        parent_idx: Some(0),
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        data_controller: None,
+    };
+    let _ = &mut root; // 借用占位
+    let _ = &mut child;
+    let nodes = [root, child];
+    let rules = crate::style::dynamic::DynamicRuleTable::default();
+    let controllers = vec![ControllerEntry {
+        name: "tab".into(),
+        mount_node_idx: 0,
+        initial_selected_index: 2,
+    }];
+    let input = PackageInput {
+        components: vec![("comp1", &nodes, &rules, &controllers)],
+        asset_manifest: &[],
+    };
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("bag", &crate::asset::write_package(&input))
+        .unwrap();
+    let root_id = s.instantiate("bag", "comp1").unwrap();
+
+    // registry 含 mount_node_idx=0 重映射后的 NodeId（= 组件根 root_id），selected=2。
+    let scene = s.scene.as_ref().unwrap();
+    assert_eq!(
+        scene.controller_selected(root_id),
+        Some(2),
+        "instantiate 建 registry：根 NodeId → selected=2"
+    );
+}
+
+/// 多实例 Controller registry 独立：同组件 instantiate 两次 → 两实例各自的根 NodeId
+/// 在 registry 中有独立条目（不同 NodeId → 不覆盖），改一个不影响另一个。
+#[test]
+fn instantiate_multi_instance_controller_registry_independent() {
+    let mut root = TemplateNode {
+        kind: NodeKind::Container,
+        style: ResolvedStyle::default(),
+        parent_idx: None,
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        data_controller: Some("tab".into()),
+    };
+    let _ = &mut root;
+    let nodes = [root];
+    let rules = crate::style::dynamic::DynamicRuleTable::default();
+    let controllers = vec![ControllerEntry {
+        name: "tab".into(),
+        mount_node_idx: 0,
+        initial_selected_index: 1,
+    }];
+    let input = PackageInput {
+        components: vec![("comp1", &nodes, &rules, &controllers)],
+        asset_manifest: &[],
+    };
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("bag", &crate::asset::write_package(&input))
+        .unwrap();
+    let i1 = s.instantiate("bag", "comp1").unwrap();
+    let i2 = s.instantiate("bag", "comp1").unwrap();
+    assert_ne!(i1, i2, "两实例不同 NodeId");
+
+    // 两实例都有独立 registry 条目，初始 selected=1（来自 ControllerEntry）
+    {
+        let scene = s.scene.as_ref().unwrap();
+        assert_eq!(
+            scene.controller_selected(i1),
+            Some(1),
+            "i1 registry selected=1"
+        );
+        assert_eq!(
+            scene.controller_selected(i2),
+            Some(1),
+            "i2 registry selected=1"
+        );
+    }
+
+    // 改 i1 不影响 i2（独立条目，不同 NodeId key）
+    s.set_selected_index(i1, 3);
+    let scene = s.scene.as_ref().unwrap();
+    assert_eq!(scene.controller_selected(i1), Some(3), "i1 改后 selected=3");
+    assert_eq!(
+        scene.controller_selected(i2),
+        Some(1),
+        "i2 不受影响（独立 registry 条目）"
+    );
+}
+
+/// instantiate ControllerEntry 的 mount_node_idx 指向非根节点：mount 在子节点上，
+/// id_map 重映射后 registry key = 子节点的活 NodeId（非组件根）。
+#[test]
+fn instantiate_controller_mount_on_child_node() {
+    let root = TemplateNode {
+        kind: NodeKind::Container,
+        style: ResolvedStyle::default(),
+        parent_idx: None,
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        data_controller: None,
+    };
+    let child = TemplateNode {
+        kind: NodeKind::Container,
+        style: ResolvedStyle::default(),
+        parent_idx: Some(0),
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        data_controller: Some("panel".into()),
+    };
+    let nodes = [root, child];
+    let rules = crate::style::dynamic::DynamicRuleTable::default();
+    // mount_node_idx=1 = 子节点（组件内局部下标）
+    let controllers = vec![ControllerEntry {
+        name: "panel".into(),
+        mount_node_idx: 1,
+        initial_selected_index: 0,
+    }];
+    let input = PackageInput {
+        components: vec![("comp1", &nodes, &rules, &controllers)],
+        asset_manifest: &[],
+    };
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("bag", &crate::asset::write_package(&input))
+        .unwrap();
+    let root_id = s.instantiate("bag", "comp1").unwrap();
+
+    // 子节点 = root 的首个子
+    let scene = s.scene.as_ref().unwrap();
+    let child_id = scene.get(root_id).unwrap().children[0];
+    // registry key = child_id（非 root_id），selected=0
+    assert_eq!(
+        scene.controller_selected(child_id),
+        Some(0),
+        "mount 在子节点 → registry key=child_id"
+    );
+    assert_eq!(
+        scene.controller_selected(root_id),
+        None,
+        "根节点无 controller → registry 无条目"
     );
 }

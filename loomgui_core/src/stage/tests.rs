@@ -106,7 +106,7 @@ fn pkg_bytes_from_inline(html: &str, css: &str) -> (Vec<u8>, Vec<String>) {
         .collect();
     let manifest_paths: Vec<String> = manifest.iter().map(|e| e.path.clone()).collect();
     let input = PackageInput {
-        components: vec![("scene", nodes.as_slice(), &dynamic)],
+        components: vec![("scene", nodes.as_slice(), &dynamic, &[])],
         asset_manifest: &manifest,
     };
     (crate::asset::write_package(&input), manifest_paths)

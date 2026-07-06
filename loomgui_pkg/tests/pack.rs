@@ -255,3 +255,49 @@ fn pack_reads_fixture_png_dimensions() {
     assert_eq!((b.w, b.h), (2, 2), "fixture b.png = 2×2");
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// 打包器扫 data-controller + data-page → ControllerEntry 进 pkg。
+/// HTML `<div data-controller="tab" data-page="2">` → ControllerEntry { name: "tab",
+/// mount_node_idx: 0, initial_selected_index: 2 }。read_package 后 comp.controllers 含此条目。
+#[test]
+fn pack_scans_data_controller_and_data_page_into_controller_entry() {
+    let dir = make_tmp_dir_with_html(&["c"], &[]);
+    fs::write(
+        dir.join("c.html"),
+        r#"<div class="c" data-controller="tab" data-page="2"><span>hi</span></div>"#,
+    )
+    .unwrap();
+    let packed = pack(&dir, "test", &["c.html".to_string()], &dir.join("res")).expect("pack ok");
+    let pkg = read_package(&packed.pkg_bytes).expect("read ok");
+    let comp = &pkg.components["c"];
+    assert_eq!(
+        comp.controllers.len(),
+        1,
+        "一个 data-controller → 一个 ControllerEntry"
+    );
+    let c = &comp.controllers[0];
+    assert_eq!(c.name, "tab");
+    assert_eq!(c.mount_node_idx, 0, "mount = 组件根（节点 0）");
+    assert_eq!(c.initial_selected_index, 2, "data-page=\"2\" → initial=2");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// data-controller 无 data-page → initial_selected_index 默认 0。
+#[test]
+fn pack_data_controller_without_data_page_defaults_to_zero() {
+    let dir = make_tmp_dir_with_html(&["c"], &[]);
+    fs::write(
+        dir.join("c.html"),
+        r#"<div class="c" data-controller="tab"><span>hi</span></div>"#,
+    )
+    .unwrap();
+    let packed = pack(&dir, "test", &["c.html".to_string()], &dir.join("res")).expect("pack ok");
+    let pkg = read_package(&packed.pkg_bytes).expect("read ok");
+    let comp = &pkg.components["c"];
+    assert_eq!(comp.controllers.len(), 1);
+    assert_eq!(
+        comp.controllers[0].initial_selected_index, 0,
+        "无 data-page → 默认 0"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}

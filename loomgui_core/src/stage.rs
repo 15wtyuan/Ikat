@@ -521,6 +521,15 @@ impl Stage {
         }
         let root = root_id.ok_or("component has no root node (parent_idx=None missing)")?;
 
+        // 建 Controller registry：组件内 mount_node_idx → 活 NodeId（经 id_map）。
+        // set_controller_selected 懒注册（无条目时建），此处显式建条目写 initial_selected_index。
+        // 多实例独立：每次 instantiate 各自 id_map → 不同 NodeId → 独立 registry 条目。
+        for c in &template.controllers {
+            if let Some(&Some(mount_live)) = id_map.get(c.mount_node_idx as usize) {
+                scene.set_controller_selected(mount_live, c.initial_selected_index);
+            }
+        }
+
         // 伪类规则合并去重：相同选择器（ParsedSelector PartialEq）不重复加。
         // 规则按 class 匹配，多实例共享同一规则条目；hit_test 返具体 NodeId → 各实例独立命中。
         for rule in &template.dynamic_rules.rules {

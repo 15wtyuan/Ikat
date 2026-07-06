@@ -38,8 +38,8 @@ fn write_read_multi_component_roundtrip() {
     }];
     let input = PackageInput {
         components: vec![
-            ("comp1", comp1_nodes.as_slice(), &rules),
-            ("comp2", comp2_nodes.as_slice(), &rules),
+            ("comp1", comp1_nodes.as_slice(), &rules, &[]),
+            ("comp2", comp2_nodes.as_slice(), &rules, &[]),
         ],
         asset_manifest: &manifest,
     };
@@ -82,7 +82,7 @@ fn read_rejects_too_new_version() {
     let nodes = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     let mut bytes = write_package(&input);
@@ -96,7 +96,7 @@ fn header_is_20_bytes_no_root_size() {
     let nodes = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     let bytes = write_package(&input);
@@ -130,7 +130,7 @@ fn multi_component_parent_idx_is_component_local() {
     let comp_b = [root_b, child_b];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("a", &comp_a, &rules), ("b", &comp_b, &rules)],
+        components: vec![("a", &comp_a, &rules, &[]), ("b", &comp_b, &rules, &[])],
         asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -158,7 +158,7 @@ fn all_node_kinds_roundtrip() {
         h: 0,
     }];
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &manifest,
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -189,7 +189,7 @@ fn classes_id_attr_draggable_tabindex_roundtrip() {
     let nodes = [root, btn];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -216,7 +216,7 @@ fn data_controller_roundtrips_through_pkg() {
     let nodes = [root, child];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -232,6 +232,89 @@ fn data_controller_roundtrips_through_pkg() {
     );
 }
 
+/// ControllerSection 往返：单组件带 2 个 ControllerEntry（不同 name/mount/initial），
+/// write_package → read_package 后字段全保留。验 name 经 StringTable intern（去重）+
+/// mount_node_idx/initial_selected_index 定长小端读写对称。
+#[test]
+fn controller_section_roundtrips_through_pkg() {
+    let mut root = tn(NodeKind::Container);
+    root.data_controller = Some("tab".into());
+    let mut page1 = tn(NodeKind::Container);
+    page1.parent_idx = Some(0);
+    let mut page2 = tn(NodeKind::Container);
+    page2.parent_idx = Some(0);
+    let nodes = [root, page1, page2];
+    let rules = empty_rules();
+    let controllers = vec![
+        ControllerEntry {
+            name: "tab".into(),
+            mount_node_idx: 0,
+            initial_selected_index: 1,
+        },
+        ControllerEntry {
+            name: "sub".into(),
+            mount_node_idx: 2,
+            initial_selected_index: -1,
+        },
+    ];
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &controllers)],
+        asset_manifest: &[],
+    };
+    let pkg = read_package(&write_package(&input)).unwrap();
+    let cs = &pkg.components["c"].controllers;
+    assert_eq!(cs.len(), 2, "两 ControllerEntry 往返保留");
+    assert_eq!(cs[0].name, "tab");
+    assert_eq!(cs[0].mount_node_idx, 0);
+    assert_eq!(cs[0].initial_selected_index, 1);
+    assert_eq!(cs[1].name, "sub");
+    assert_eq!(cs[1].mount_node_idx, 2);
+    assert_eq!(cs[1].initial_selected_index, -1, "负 initial 往返保留");
+}
+
+/// ControllerSection 空组件（无 controller）往返：controller_count=0 段合法，
+/// read 后 controllers 为空 Vec（不 panic、不误读）。
+#[test]
+fn controller_section_empty_roundtrips() {
+    let nodes = [tn(NodeKind::Container)];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+        asset_manifest: &[],
+    };
+    let pkg = read_package(&write_package(&input)).unwrap();
+    assert!(
+        pkg.components["c"].controllers.is_empty(),
+        "无 controller → 空 Vec"
+    );
+}
+
+/// ControllerSection name 经 StringTable 去重：两组件 controller 同名 "tab" →
+/// StringTable 只存一份 "tab"，read 后两组件 controller.name 仍为 "tab"。
+#[test]
+fn controller_section_name_dedups_across_components() {
+    let mut root_a = tn(NodeKind::Container);
+    root_a.data_controller = Some("tab".into());
+    let mut root_b = tn(NodeKind::Container);
+    root_b.data_controller = Some("tab".into());
+    let comp_a = [root_a];
+    let comp_b = [root_b];
+    let rules = empty_rules();
+    let ctrl = vec![ControllerEntry {
+        name: "tab".into(),
+        mount_node_idx: 0,
+        initial_selected_index: 0,
+    }];
+    let input = PackageInput {
+        components: vec![("a", &comp_a, &rules, &ctrl), ("b", &comp_b, &rules, &ctrl)],
+        asset_manifest: &[],
+    };
+    let bytes = write_package(&input);
+    let pkg = read_package(&bytes).unwrap();
+    assert_eq!(pkg.components["a"].controllers[0].name, "tab");
+    assert_eq!(pkg.components["b"].controllers[0].name, "tab");
+}
+
 #[test]
 fn style_blob_roundtrips_baked_resolved_style() {
     let mut n = tn(NodeKind::Container);
@@ -239,7 +322,7 @@ fn style_blob_roundtrips_baked_resolved_style() {
     let nodes = [n];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -273,7 +356,7 @@ fn per_component_dynamic_rules_roundtrip() {
     let na = [tn(NodeKind::Container)];
     let nb = [tn(NodeKind::Container)];
     let input = PackageInput {
-        components: vec![("a", &na, &rules_a), ("b", &nb, &rules_b)],
+        components: vec![("a", &na, &rules_a, &[]), ("b", &nb, &rules_b, &[])],
         asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -298,7 +381,10 @@ fn stringtable_dedups_across_components() {
     let c2_nodes = [n2];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c1", &c1_nodes, &rules), ("c2", &c2_nodes, &rules)],
+        components: vec![
+            ("c1", &c1_nodes, &rules, &[]),
+            ("c2", &c2_nodes, &rules, &[]),
+        ],
         asset_manifest: &[],
     };
     let bytes = write_package(&input);
@@ -351,7 +437,7 @@ fn asset_manifest_multiple_paths_roundtrip() {
         },
     ];
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &manifest,
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -386,7 +472,7 @@ fn asset_manifest_preserves_non_square_dims() {
         h: 20,
     }];
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &manifest,
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -425,7 +511,7 @@ fn two_comp_pkg_bytes() -> Vec<u8> {
     let comp_b = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("a", &comp_a, &rules), ("b", &comp_b, &rules)],
+        components: vec![("a", &comp_a, &rules, &[]), ("b", &comp_b, &rules, &[])],
         asset_manifest: &[],
     };
     write_package(&input)
@@ -520,7 +606,7 @@ fn write_rejects_non_root_nodes_zero() {
     let nodes = [root];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     let _ = write_package(&input);
