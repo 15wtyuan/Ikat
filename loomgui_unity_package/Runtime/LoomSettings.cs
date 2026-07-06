@@ -67,7 +67,7 @@ namespace LoomGUI
         public PackageEntry(string pkgName, string sourceDir) { this.pkgName = pkgName; this.sourceDir = sourceDir; }
     }
 
-    /// 图集配置。folders 拖文件夹当 packables；atlas 运行时引用（图集 tab 同步时绑）。
+    /// 图集配置。folders 拖文件夹当 packables；atlas 运行时按 atlasName 加载（图集 tab 同步到 Bundles/atlas/，不持资产引用）。
     [Serializable]
     public sealed class AtlasEntry
     {
