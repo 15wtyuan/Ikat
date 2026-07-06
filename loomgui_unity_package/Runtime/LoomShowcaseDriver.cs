@@ -27,17 +27,17 @@ namespace LoomGUI
 
         // === page_nativehost：3D 角色 + 粒子（NativeHost 压测）===
         [SerializeField] GameObject _characterPrefab;       // animatedman 角色 prefab（Inspector 拖）
-        [SerializeField] GameObject _effectPrefab;          // Kenney Magic/Fire prefab（Inspector 拖）
-        // 角色缩放：x/y 填 slot 视觉大小（~1.7m fbx × 70 ≈ 120px）；**z 用小值（如 1）**——
-        // 正交相机 z 缩放不影响视觉大小，只放大 depth 厚度，z 大了会超相机 near/far 被 clip。
-        [SerializeField] Vector3 _characterScale = new Vector3(70, 70, 1);
-        // 角色在 slot 的本地偏移（wrapper origin = slot 左上角；模型锚点通常是脚底/中心，
-        // 调此对齐：如脚底落 slot 底中 = (slot_w/2, -slot_h/2, 0)）。z 可推 3D GO depth。
-        [SerializeField] Vector3 _characterLocalOffset = new Vector3(0, 0, 0);
-        // 粒子缩放（独立于角色）：ParticleSystem startSize 是世界单位，不完全随父 GO scale 放大，
-        // 故角色 scale 不等比放大粒子——粒子需独立 _effectScale（如匹配角色 xy (120,120,120)）。
-        [SerializeField] Vector3 _effectScale = new Vector3(120, 120, 120);
-        [SerializeField] Vector3 _effectLocalOffset = new Vector3(0, 0, 0);
+        [SerializeField] GameObject _effectPrefab;          // Kenney Magic/Fire prefab（Inspector 拖)
+        // 角色缩放（仅 xy——z 由 driver 固定 1：正交相机 z 缩放不影响视觉大小，只放大 depth 厚度，
+        // z 大了会超相机 near/far 被 near clip 切掉。故 z 不暴露给用户填）。
+        [SerializeField] Vector2 _characterScale = new Vector2(70, 70);
+        // 角色在 slot 的本地偏移（wrapper origin = slot 左上角；通常用 _characterAnchor 自动对齐，
+        // 此字段留作微调）。
+        [SerializeField] Vector2 _characterLocalOffset = new Vector2(0, 0);
+        // 粒子缩放（仅 xy，独立于角色）：ParticleSystem startSize 是世界单位，不完全随父 GO scale 放大，
+        // 故角色 scale 不等比放大粒子——粒子需独立 _effectScale。z 同角色由 driver 固定 1。
+        [SerializeField] Vector2 _effectScale = new Vector2(120, 120);
+        [SerializeField] Vector2 _effectLocalOffset = new Vector2(0, 0);
         [SerializeField] Animator _characterAnimator;       // 角色 Animator（留空则自动从实例 GetComponent 取；勿拖 prefab 的 Animator——那是模板非运行实例）
         [SerializeField] string[] _animStates = { "Idle", "Walk", "Run" };   // Animator state 名（按实际 clip 填；可空）
 
@@ -46,6 +46,11 @@ namespace LoomGUI
         GameObject _characterInstance;
         int _animIdx;
         bool _effectOn = true;
+        // 角色 anchor（0-1，相对 nh-stage layout rect）：(0.5,1)=底中（角色 fbx origin 通常脚底 →
+        // 脚底自动落 slot 底中）。driver 在 Update 查 nh-stage rect 自动算 localPosition，不用手填 offset。
+        [SerializeField] Vector2 _characterAnchor = new Vector2(0.5f, 1f);
+        uint _nhStageId = uint.MaxValue;
+        bool _anchorApplied;
 
         // layer 骨架 NodeId
         uint _root = uint.MaxValue;
@@ -118,9 +123,13 @@ namespace LoomGUI
         // 本帧内 slot 增删吃进同帧 tick → solve → 渲染。
         void Update()
         {
-            if (!_isListPage) return;
-            _listDriverEqual?.SyncSlots();
-            _listDriverVar?.SyncSlots();
+            if (_isListPage)
+            {
+                _listDriverEqual?.SyncSlots();
+                _listDriverVar?.SyncSlots();
+            }
+            // 角色 anchor：nh-stage layout 完成后（rect.h>0）算 localPosition（首帧 layout 未算，下帧补）。
+            if (_characterInstance != null && !_anchorApplied) ApplyCharacterAnchor();
         }
 
         // #1a1d2e = .root 背景色（showcase 深蓝底）。主相机配同色，letterbox 与 root 无缝。
@@ -347,6 +356,8 @@ namespace LoomGUI
             SubscribeBackHome();
             EnsureCharacterInstance();
             uint stage = _stage.FindNodeById("nh-stage");
+            _nhStageId = stage;
+            _anchorApplied = false;   // 每次进页 re-anchor（nh-stage 新 instantiate，rect 新算）
             if (_characterInstance != null && stage != uint.MaxValue)
             {
                 _stage.BindNativeHost(stage, _characterInstance);
@@ -369,8 +380,9 @@ namespace LoomGUI
                 return;
             }
             _characterInstance = Instantiate(_characterPrefab);
-            _characterInstance.transform.localScale = _characterScale;
-            _characterInstance.transform.localPosition = _characterLocalOffset;
+            // z 固定 1（正交相机 z 缩放只放 depth 厚度，放大了 near clip 切——z 不暴露给用户）
+            _characterInstance.transform.localScale = new Vector3(_characterScale.x, _characterScale.y, 1);
+            // localPosition 由 ApplyCharacterAnchor 算（anchor + _characterLocalOffset 微调），不在这里设。
             _characterInstance.SetActive(false);
             // Animator 从实例取（prefab 上的 Animator 是模板，对它 Play 无效/报错）。
             // Inspector 留空自动取；若 caller 拖了场景实例的 Animator 则覆盖。
@@ -380,10 +392,27 @@ namespace LoomGUI
             {
                 // 粒子挂角色 child；独立 scale（ParticleSystem startSize 不随父 scale 等比放大）+ offset。
                 var fx = Instantiate(_effectPrefab, _characterInstance.transform, false);
-                fx.transform.localScale = _effectScale;
-                fx.transform.localPosition = _effectLocalOffset;
+                fx.transform.localScale = new Vector3(_effectScale.x, _effectScale.y, 1);
+                fx.transform.localPosition = new Vector3(_effectLocalOffset.x, _effectLocalOffset.y, 0);
             }
             else Debug.LogWarning("[Showcase] _effectPrefab 未配，page_nativehost 无粒子");
+        }
+
+        // 查 nh-stage layout_rect + 按 _characterAnchor 算角色 localPosition（脚底对齐 slot 锚点）。
+        // wrapper origin = slot 左上（design）；character 在 wrapper 下，其 local y 反向 design y
+        // （_container y-flip——见 NativeHostManager.Sync 注释：wrapper.localPos.y = -Mty）。
+        // 故 offset = (anchor.x·w, -anchor.y·h) + _characterLocalOffset（Inspector 微调，默认 0）。
+        // 首帧 nh-stage layout 未算（rect.h=0）→ Update 下帧重试（首帧角色在 origin，1 帧闪可接受）。
+        void ApplyCharacterAnchor()
+        {
+            if (_nhStageId == uint.MaxValue) return;
+            var (_rx, _ry, w, h) = _stage.GetNodeLayoutRect(_nhStageId);
+            if (h <= 0) return;   // layout 未完成
+            _characterInstance.transform.localPosition = new Vector3(
+                _characterAnchor.x * w + _characterLocalOffset.x,
+                -_characterAnchor.y * h + _characterLocalOffset.y,
+                0);
+            _anchorApplied = true;
         }
 
         // toggle 角色 child 下的粒子（SetActive + Play/Stop）。

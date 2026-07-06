@@ -76,9 +76,13 @@ namespace LoomGUI
                     {
                         if (mat == null) continue;
                         if (mat.renderQueue != 3000) mat.renderQueue = 3000;
-                        // ZWrite Off：3D GO/粒子不写 depth，纯 sortingOrder 排序（同 UI shader ZWrite Off）。
-                        // 否则 3D GO（URP/Lit 默认 ZWrite On）在 Transparent 队列写 depth 扰乱 UI
-                        // （UI ZTest LEqual）→ depth fight，3D GO 被 UI 背景切。
+                        // URP/Lit 切 Transparent：_Surface=1 + keyword（缺 keyword 不生效，shader 用
+                        // _SURFACE_TYPE_TRANSPARENT variant 决定 Blend/队列）。默认 _Surface=0（Opaque）
+                        // 即使 renderQueue=3000，shader 仍 Opaque variant → 在 UI（Transparent）之前画，
+                        // 被 UI 覆盖看不到。
+                        mat.SetInt("_Surface", 1);
+                        mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                        // ZWrite Off：3D GO/粒子不写 depth（同 UI shader ZWrite Off），纯 sortingOrder 排序。
                         mat.SetInt("_ZWrite", 0);
                     }
                 }

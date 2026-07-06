@@ -106,6 +106,22 @@ fn main() {
     println!("  node_sort_keys[{}]={:?}", nh_id.index(), sk);
     println!("  期望：tx/ty 非零（slot 落在 nh-stage 框中部）+ sort_key>0（DFS 序号）");
 
+    // 3) page_nativehost 所有节点 sort_key + layout_rect + bg（看 3D GO sortingOrder 在排序中位置
+    //    vs stage-wrap 背景 / 按钮 / hint——决定 3D GO 是否被 UI 遮挡）。
+    println!("\n=== 3) page 所有节点 sort_key / layout / bg（sortingOrder 全貌）===");
+    let mut nodes: Vec<_> = scene.nodes.values().collect();
+    nodes.sort_by_key(|n| scene.node_sort_keys.get(n.id.index()).copied().unwrap_or(0));
+    for n in &nodes {
+        let sk = scene.node_sort_keys.get(n.id.index()).copied().unwrap_or(0);
+        let r = n.layout_rect;
+        let id = n.id_attr.clone().unwrap_or_else(|| format!("anon{}", n.id.0));
+        let bg = n.style.background_color.is_some();
+        println!(
+            "  sort_key={:>3} id={:<16} rect=({:>5.0},{:>5.0},{:>4.0},{:>4.0}) bg={}",
+            sk, id, r.x, r.y, r.w, r.h, bg
+        );
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // 结论
     // ──────────────────────────────────────────────────────────────────────
