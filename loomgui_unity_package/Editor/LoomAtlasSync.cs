@@ -12,7 +12,7 @@ namespace LoomGUI.Editor
     /// 图集 packables 同步：扫 atlasEntry.folders 下 PNG（递归）→ Sprite 列表，
     /// 用 Unity 6 Sprite Atlas V2 API（SpriteAtlasAsset.Load + Add/Remove + Save）替换 atlas packables。
     ///
-    /// Unity 6 V2 真相（Agent 调研 + Venkify 官方 discussions.unity.com/t/949154, /938750）：
+    /// Unity 6 V2 真相：
     ///   - V2 文件扩展名 .spriteatlasv2（V1 是 .spriteatlas）。SpriteAtlasAsset.Load 只认 V2。
     ///   - V2 创建：new SpriteAtlasAsset()（不是 new SpriteAtlas）+ Save(.spriteatlasv2) + Refresh。
     ///   - pack 须 Project Settings > Editor > Sprite Packer > Mode = Always Enabled。Disabled 时 packed.spriteCount=0，
@@ -40,9 +40,9 @@ namespace LoomGUI.Editor
             int okCount = 0, failCount = 0;
             foreach (var entry in settings.atlasEntries)
             {
-                string atlasRel = EnsureAtlasAsset(entry, settings.workspaceDir);
+                string atlasRel = EnsureAtlasAsset(entry, settings.pkgOutputDir);
                 if (atlasRel == null) { failCount++; continue; }
-                SyncEntry(entry);
+                SyncEntry(entry, settings);
                 okCount++;
             }
             EditorUtility.SetDirty(settings);
@@ -52,19 +52,19 @@ namespace LoomGUI.Editor
         }
 
         /// 确保 entry 的 V2 .spriteatlasv2 存在。返 Unity 相对路径或 null。
-        public static string EnsureAtlasAsset(AtlasEntry entry, string workspaceDir)
+        /// 输出根 pkgOutputDir（= Bundles/）—— atlas 落 {pkgOutputDir}/atlas/，与运行时 Resources/AB 加载路径一致。
+        public static string EnsureAtlasAsset(AtlasEntry entry, string pkgOutputDir)
         {
             if (entry == null || string.IsNullOrEmpty(entry.atlasName)) return null;
-            string rel = ResolveAtlasPath(entry);
+            string rel = ResolveAtlasPath(entry, pkgOutputDir);
             if (rel != null && File.Exists(ToAbs(rel)))
             {
-                // entry.atlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(rel);   // TODO B5: entry.atlas removed
                 EnsureAxisAlignedPacking(rel);   // 防 .meta 回退到默认的 rotation=1
                 return rel;
             }
-            if (string.IsNullOrEmpty(workspaceDir)) return null;
+            if (string.IsNullOrEmpty(pkgOutputDir)) return null;
 
-            string dir = (Path.Combine(workspaceDir, "atlas")).Replace('\\', '/');
+            string dir = (Path.Combine(pkgOutputDir, "atlas")).Replace('\\', '/');
             Directory.CreateDirectory(ToAbs(dir));
             rel = dir + "/" + entry.atlasName + ".spriteatlasv2";
 
@@ -74,7 +74,6 @@ namespace LoomGUI.Editor
             AssetDatabase.Refresh();
             EnsureAxisAlignedPacking(rel);   // V2 默认开 rotation/tightPacking，关掉
 
-            // entry.atlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(rel);   // TODO B5: entry.atlas removed
             Debug.Log($"[LoomAtlasSync] 自动创建 V2 图集：{rel}");
             return rel;
         }
@@ -101,24 +100,25 @@ namespace LoomGUI.Editor
             }
         }
 
-        /// 删除 entry 的自动生成图集（workspaceDir/atlas/ 下，.spriteatlasv2 优先，.spriteatlas 兼容）。
-        public static bool DeleteAutoAtlas(AtlasEntry entry, string workspaceDir)
+        /// 删除 entry 的自动生成图集（{pkgOutputDir}/atlas/ 下，.spriteatlasv2 优先，.spriteatlas 兼容）。
+        public static bool DeleteAutoAtlas(AtlasEntry entry, string pkgOutputDir)
         {
-            if (entry == null || string.IsNullOrEmpty(entry.atlasName) || string.IsNullOrEmpty(workspaceDir)) return false;
+            if (entry == null || string.IsNullOrEmpty(entry.atlasName) || string.IsNullOrEmpty(pkgOutputDir)) return false;
             foreach (var ext in new[] { ".spriteatlasv2", ".spriteatlas" })
             {
-                string rel = (Path.Combine(workspaceDir, "atlas", entry.atlasName + ext)).Replace('\\', '/');
+                string rel = (Path.Combine(pkgOutputDir, "atlas", entry.atlasName + ext)).Replace('\\', '/');
                 if (File.Exists(ToAbs(rel))) return AssetDatabase.DeleteAsset(rel);
             }
             return false;
         }
 
         /// 同步单个图集：扫 folders 下 PNG → Sprite → 替换 atlas packables（V2 API）。
-        public static void SyncEntry(AtlasEntry entry)
+        /// settings 提供 pkgOutputDir（atlas 落 Bundles/atlas/，ResolveAtlasPath 按名查）。
+        public static void SyncEntry(AtlasEntry entry, LoomSettings settings)
         {
-            if (entry == null || string.IsNullOrEmpty(entry.atlasName)) return;
+            if (entry == null || string.IsNullOrEmpty(entry.atlasName) || settings == null) return;
 
-            string atlasRel = ResolveAtlasPath(entry);
+            string atlasRel = ResolveAtlasPath(entry, settings.pkgOutputDir);
             if (atlasRel == null || !File.Exists(ToAbs(atlasRel)))
             {
                 Debug.LogError($"[LoomAtlasSync] V2 .spriteatlasv2 不存在：{entry.atlasName}");
@@ -163,21 +163,16 @@ namespace LoomGUI.Editor
             if (importer == null) { Debug.LogError($"[LoomAtlasSync] SpriteAtlasImporter 获取失败：{atlasRel}"); return; }
             importer.SaveAndReimport();
 
-            // entry.atlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(atlasRel);   // TODO B5: entry.atlas removed
             Debug.Log($"[LoomAtlasSync] {entry.atlasName}：{sprites.Count} Sprite 同步 → {atlasRel}");
         }
 
-        /// atlasEntry → V2 .spriteatlasv2 路径。按 atlasName 搜（entry.atlas 不再持有引用）。
-        static string ResolveAtlasPath(AtlasEntry entry)
+        /// atlasEntry → V2 .spriteatlasv2 路径。按 atlasName 在 {pkgOutputDir}/atlas/ 下定址（不持引用）。
+        /// 确定路径直接 File.Exists 查，避开 AssetDatabase.FindAssets 的全库扫描 + 同名误匹配。
+        static string ResolveAtlasPath(AtlasEntry entry, string pkgOutputDir)
         {
-            // TODO B5: rewire — entry.atlas field removed; resolve by atlasName only
-            string[] guids = AssetDatabase.FindAssets(entry.atlasName + " t:SpriteAtlas");
-            foreach (var g in guids)
-            {
-                string p = AssetDatabase.GUIDToAssetPath(g);
-                if (Path.GetFileName(p) == entry.atlasName + ".spriteatlasv2") return p;
-            }
-            return null;
+            if (entry == null || string.IsNullOrEmpty(entry.atlasName) || string.IsNullOrEmpty(pkgOutputDir)) return null;
+            string rel = (Path.Combine(pkgOutputDir, "atlas", entry.atlasName + ".spriteatlasv2")).Replace('\\', '/');
+            return File.Exists(ToAbs(rel)) ? rel : null;
         }
 
         static IEnumerable<string> EnumeratePngs(string folderUnityRel)

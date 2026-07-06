@@ -1,29 +1,60 @@
-# 工作流+图集重做 SDD Progress Ledger
+# Subagent-Driven Development Progress Ledger
 
-Plan: docs/superpowers/plans/2026-07-03-workflow-atlas-rework.md
-Spec: docs/superpowers/specs/2026-07-03-workflow-atlas-rework-design.md
-Worktree: .claude/worktrees/workflow-atlas-rework (branch worktree-workflow-atlas-rework)
-BASE=be94766
+Branch: worktree-stage-refactor-font-resource
+Plan: docs/superpowers/plans/2026-07-06-stage-refactor-font-resource.md
+
+Baseline (worktree HEAD before Task A1): 4c854b2
+Baseline tests: 564 passed, fmt clean, clippy clean.
 
 ## Tasks
-- T1: complete (commits be94766..334cef4, review clean) — LoomSettings 配置类 + 删旧 LoomPackageSettings/LoomPackageManagerWindow + driver 日志修
-- T2: complete (commits 334cef4..9fbda05, review clean) — pack 加 res_root 参数 + CLI --res-root + 8 测试改 + res 迁 LoomUI 根. Minor 未修：--res-root 丢空值 filter（功能等价）/ res_dir 推导重复 lib+main（小 CLI 不值得提 helper）
-- T3: complete (commits 9fbda05..c8afb5a, review clean) — SpriteResolver 显式路由+miss不缓存+删DBG-IMG+3测试. Minor: 循环内 char[] 分配. ⚠️待家里机: 空 atlas.GetSprite 行为/MissingSprite set-only 无读方/ClearCache 移除. LoomStage 编译断点留 T4 修
-- T4: complete (commits c8afb5a..986082a, review clean) — LoomStage 砍 _spriteAtlases + using U2D, 改 Init(LoomSettings.GetOrCreateDefault()). 修 T3 编译断点. ⚠️待家里机: Unity 编译/PlayMode
-- T5: complete (commits 986082a..b699da5, review clean after fix) — LoomSettingsWindow 三 tab + LoomExePath + 3 桩注释. Fix: --res→--res-root 绝对路径 + Process stdout/stderr 死锁修. ⚠️待家里机: Unity 编译/PlayMode
-- T6: complete (commits b699da5..a6dcf52, review clean after fix) — LoomAtlasSync 同步 packables(修B2) + 2测试 + 取消T5桩. Fix: new SpriteAtlas→CreateInstance/ToAssetPath StartsWith/删scannedSprites/删SyncEntry settings参. ⚠️待家里机: Unity编译/SetPackables行为
-
----
-
-## NativeHost FFI query (2026-07-05)
-Plan: docs/superpowers/plans/2026-07-05-nativehost-ffi-query.md
-Spec: docs/superpowers/specs/2026-07-05-nativehost-ffi-query-design.md
-Worktree: .claude/worktrees/nativehost-ffi-query (branch worktree-nativehost-ffi-query)
-BASE=9f4c162
-
-### Tasks
-- T1: complete (commits 9f4c162..b16b12c, review APPROVED) — Scene.node_sort_keys + assign_sort_keys DFS 填 + build_render_nodes 返回 + tick_and_render 存。2 新测试。515 tests pass
-- T2: complete (commits b16b12c..f60df88, review APPROVE) — Stage 3 getter (world_matrix/sort_key/visible) + 5 测。Display 路径 = taffy::Display::None via n.style.taffy_style.display（brief 假设错，implementer 修正）。520 tests pass
-- T3: complete (commits f60df88..216741c, review APPROVED) — FFI 3 extern + dll 重编 + nm/md5 验证 + Bindings.cs 重生成（路径 …/Bindings/）。3 文件同 commit。Affine2 列主序 + null/无效写默认。Concerns 给 T4：P/Invoke raw 指针 + Affine2→Unity Matrix4x4 列主序 + visible=0 skip
-- T4: complete (commits 216741c..de6f9c2, review APPROVE) — NativeHostManager.Sync 改 FFI 查询（遍历 _bindings，visible/world_matrix/sort_key）+ LoomStage 调用点。csbindgen raw 指针（非 ref，brief 假设错）+ Affine2 列主序未转置。Minor F1: FFI 在 _wrappers 检查前（Bind/Unbind 保证等价，不触发）
-- T5: complete (commit a7351d3) — dump_nativehost_slot example：nh-stage NOT IN frame.nodes（merge 吞）+ world_transforms tx=240 ty=123（slot 落 nh-stage 框）+ node_sort_keys=9（DFS 序）。直查 scene 验 FFI 通道独立于 merge。fence_contract 15/15 回归通过。Handoff 给用户明早 PlayMode 验收
+A1_BASE=4c854b2a9c589d58c9bb880b860a94ebbb4a105f
+- [x] Task A1: complete (commits 4c854b2..15a6e97, review clean — spec ✅, quality Approved)
+  - Minor findings (defer to final review): pub(crate) fields (brief test design), "Compute once" comment misleading (test helper)
+A2_BASE=15a6e97
+- [x] Task A2: complete (commits 15a6e97..4691986, review clean — spec ✅, quality Approved, 0 findings)
+  - Cross-task: stage.rs temp FontTable + TODO A3 markers (A3 replaces)
+A3_BASE=4691986
+- [x] Task A3: complete (commits 4691986..5d8eeeb, review clean — spec ✅, quality Approved, 0 findings)
+  - Cross-task: FFI loomgui_stage_new adapted internally (sig unchanged, reads font_path→register_font "DejaVu"); A4 replaces with real (w,h)+register_font port
+A4_BASE=5d8eeeb
+- [x] Task A4: complete (commits 5d8eeeb..76c1c34, review — spec ✅ w/ 1 minor gap, quality Approved)
+  - Minor findings (defer to final review): abi test delegates to helper not direct two-step call + "measures" name misleading; pre-existing CString::new("").unwrap() in FFI path (from brief, not introduced)
+  - dll rebuilt + committed (size 1924096→1930752), symbol loomgui_stage_register_font verified in binary
+=== Half A (Rust/FFI) COMPLETE ===
+B1_BASE=76c1c34
+- [x] Task B1: complete (commits 76c1c34..9675c94, review — spec ✅, quality Approved)
+  - Critical invariant CONFIRMED: zero UnityEngine.Object refs in LoomSettings.asset
+  - Minor findings (defer to final review): stale AtlasEntry doc comment (LoomSettings.cs:70), stale Window inline comment (B6 cleans)
+  - Stubs: SpriteResolver.Init (B4), LoomAtlasSync atlas writes (B5), Window atlas UI (B6) — TODO markers present
+  - Unity tests not run (no headless Unity) — B8 acceptance
+B2_BASE=9675c94
+- [x] Task B2: complete (commits 9675c94..7b086bb, review — spec ✅, quality Approved after fix)
+  - Fix: Tick(dt) reads _renderRoot (was dead field) + removed B3/B4 codename comments
+  - All 31 public APIs + v1.5 Controller dispatch carried verbatim
+  - Known gap (controller-owned): blob has no font_family → MirrorPool uses defaultFont; B2b fixes
+  - Tick signature note for B3: stage.Tick(dt) no transform param; Driver.Awake calls SetNativeHostRoot(transform)
+B2b_BASE=7b086bb
+- [x] Task B2b: complete (commits 7b086bb..91dd7f5, review — spec ✅, quality Approved)
+  - Blob text_arena now carries per-node font_family (len-prefixed UTF-8); MirrorPool selects Font asset per node
+  - payload_hash hashes family (family change → Full, closes Header-stale-font hole)
+  - dll rebuilt+committed (md5 verified); 650 Rust tests, fmt/clippy clean
+  - Multi-font now fully works (measure A1-A3 + raster B2b)
+  - Defer to B8: Unity PlayMode runtime validation
+B3_BASE=91dd7f5
+- [x] Task B3: complete (commits 91dd7f5..4b0f77c, review — spec ✅, quality Approved after fix)
+  - Fix: removed B8 codename + MonoBehaviour-时期 history ref + added WHY on UseSafeArea dual path
+  - 3 load hooks public virtual; RegisterFontsFromSettings protected virtual; ResetStatics re-added
+  - Tick(dt) no transform (B2 fix honored); SetNativeHostRoot in Awake before tick
+B4_BASE=4b0f77c
+- [x] Task B4: complete (commits 4b0f77c..f2291e6, review — spec ✅, quality Approved)
+  - SpriteResolver folder→atlasName + injected loader + _atlasCache; no serialized atlas refs
+  - Cross-task: LoomStage.InitSprites wired to forward loader (B2 left 1-arg, B4 made 2-arg)
+  - Minor (defer): null-atlas not cached (retry-on-miss); atlas-cache null-skip untested
+B5_BASE=f2291e6
+- [x] Task B5: complete (atlas sync → Bundles/atlas/, drop atlas ref writes)
+-  - LoomAtlasSync: EnsureAtlasAsset/SyncEntry/ResolveAtlasPath/DeleteAutoAtlas rethreaded to pkgOutputDir; atlas lands in {pkgOutputDir}/atlas/
+-  - ResolveAtlasPath now deterministic by-name (File.Exists), dropped AssetDatabase.FindAssets scan (avoids same-name false matches + full-asset-db sweep)
+-  - All entry.atlas = writes + TODO B5 markers removed (field gone since B1)
+-  - LoomSettingsWindow.DrawAtlasEntry: status by File.Exists at {pkgOutputDir}/atlas/{name}.spriteatlasv2; 3 call sites updated
+-  - 2 new tests: EnsureAtlasAsset_WritesToBundlesAtlas + AtlasEntry_HasNoSpriteAtlasField (Unity EditMode; not run from CLI → B8)
+-  - Codename/history-ref scrubbed from LoomAtlasSync header comment

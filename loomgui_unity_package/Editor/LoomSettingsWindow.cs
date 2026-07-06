@@ -187,7 +187,7 @@ namespace LoomGUI.Editor
         // —— 图集 tab ——————————————————————————————————————————————
         void DrawAtlas()
         {
-            EditorGUILayout.LabelField("图集配置（" + _settings.atlasEntries.Count + "）——同步时自动在 {工作区根}/atlas/ 建 .spriteatlasv2", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("图集配置（" + _settings.atlasEntries.Count + "）——同步时自动在 {pkgOutputDir}/atlas/ 建 .spriteatlasv2", EditorStyles.boldLabel);
             for (int i = 0; i < _settings.atlasEntries.Count; i++) DrawAtlasEntry(i);
             if (GUILayout.Button("+ 添加图集", GUILayout.Width(120)))
                 _settings.atlasEntries.Add(new AtlasEntry { atlasName = "NewAtlas" });
@@ -206,9 +206,9 @@ namespace LoomGUI.Editor
             var e = _settings.atlasEntries[idx];
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             e.atlasName = EditorGUILayout.TextField("图集名", e.atlasName);
-            // atlas 引用系统自动管理（同步时 EnsureAtlasAsset 自动建 .spriteatlasv2 + 绑引用），不暴露给用户。
-            // TODO B6: atlas status — entry.atlas field removed; rewrite to show atlasName-based status
-            EditorGUILayout.LabelField("状态", "待同步（Task B6）");
+            // 状态按 .spriteatlasv2 文件是否存在判定（AtlasEntry 不再持有 SpriteAtlas 引用）。
+            string atlasRel = Path.Combine(_settings.pkgOutputDir, "atlas", e.atlasName + ".spriteatlasv2").Replace('\\', '/');
+            EditorGUILayout.LabelField("状态", File.Exists(ToAbs(atlasRel)) ? "已同步" : "未同步");
             EditorGUILayout.LabelField("folders（拖文件夹到此）:");
             var dropRect = GUILayoutUtility.GetRect(0, 30, GUILayout.ExpandWidth(true));
             GUI.Box(dropRect, "  拖文件夹当 packables", EditorStyles.helpBox);
@@ -223,14 +223,14 @@ namespace LoomGUI.Editor
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("同步此图集", GUILayout.Width(100)))
             {
-                LoomAtlasSync.EnsureAtlasAsset(e, _settings.workspaceDir);
-                LoomAtlasSync.SyncEntry(e);
+                LoomAtlasSync.EnsureAtlasAsset(e, _settings.pkgOutputDir);
+                LoomAtlasSync.SyncEntry(e, _settings);
                 EditorUtility.SetDirty(_settings);
                 AssetDatabase.SaveAssetIfDirty(_settings);
             }
             if (GUILayout.Button("删除图集", GUILayout.Width(100)))
             {
-                bool deletedFile = LoomAtlasSync.DeleteAutoAtlas(e, _settings.workspaceDir);
+                bool deletedFile = LoomAtlasSync.DeleteAutoAtlas(e, _settings.pkgOutputDir);
                 _settings.atlasEntries.RemoveAt(idx);
                 EditorUtility.SetDirty(_settings);
                 AssetDatabase.SaveAssetIfDirty(_settings);
