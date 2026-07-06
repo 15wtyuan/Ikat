@@ -882,7 +882,10 @@ fn set_wheel_input_round_trip() {
         "{}/../loomgui_core/tests/fixtures/DejaVuSans.ttf",
         env!("CARGO_MANIFEST_DIR")
     );
-    let mut stage = Stage::new(&fp, (200.0, 100.0)).unwrap();
+    let mut stage = Stage::new((200.0, 100.0)).unwrap();
+    stage
+        .register_font("DejaVu", std::fs::read(&fp).unwrap(), true)
+        .unwrap();
     let evs = [loomgui_core::scroll::WheelEvent {
         x: 10.0,
         y: 20.0,
@@ -899,7 +902,10 @@ fn build_scroll_stage() -> Stage {
         "{}/../loomgui_core/tests/fixtures/DejaVuSans.ttf",
         env!("CARGO_MANIFEST_DIR")
     );
-    let mut stage = Stage::new(&fp, (200.0, 100.0)).unwrap();
+    let mut stage = Stage::new((200.0, 100.0)).unwrap();
+    stage
+        .register_font("DejaVu", std::fs::read(&fp).unwrap(), true)
+        .unwrap();
     use loomgui_core::scene::{NodeKind, Scene};
     use loomgui_core::style::resolved::{OverflowMode, ResolvedStyle};
     let mut sty = ResolvedStyle::default();
@@ -970,7 +976,10 @@ fn set_scroll_pos_non_container_no_op() {
         "{}/../loomgui_core/tests/fixtures/DejaVuSans.ttf",
         env!("CARGO_MANIFEST_DIR")
     );
-    let mut stage = Stage::new(&fp, (200.0, 100.0)).unwrap();
+    let mut stage = Stage::new((200.0, 100.0)).unwrap();
+    stage
+        .register_font("DejaVu", std::fs::read(&fp).unwrap(), true)
+        .unwrap();
     use loomgui_core::scene::{NodeKind, Scene};
     use loomgui_core::style::resolved::ResolvedStyle;
     let entries = vec![(

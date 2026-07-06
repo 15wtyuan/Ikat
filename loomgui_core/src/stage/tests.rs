@@ -125,7 +125,10 @@ fn package_load_renders_identical_to_inline() {
     let css = ".c{width:200px;height:100px;overflow:hidden;background-color:#ff0000;}";
 
     // inline 路径（test-only helper，保留 parse→scene 管线验证）
-    let mut s_inline = Stage::new(font_path, (200.0, 100.0)).unwrap();
+    let mut s_inline = Stage::new((200.0, 100.0)).unwrap();
+    s_inline
+        .register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     s_inline.load_inline_for_test(html, css).unwrap();
     let inline_json = s_inline.render_json();
 
@@ -133,7 +136,10 @@ fn package_load_renders_identical_to_inline() {
     // inline 路径把 .c div 作 scene 根；包路径 instantiate 返回孤立根，直接 push 进
     // scene.roots（同 create_root 语义），不套额外 stage_root——保证两路径节点树同构。
     let (pkg_bytes, _) = pkg_bytes_from_inline(html, css);
-    let mut s_pkg = Stage::new(font_path, (200.0, 100.0)).unwrap();
+    let mut s_pkg = Stage::new((200.0, 100.0)).unwrap();
+    s_pkg
+        .register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     s_pkg.load_package("bag", &pkg_bytes).unwrap();
     // ensure_scene（首次建空骨架）+ instantiate 返回孤立根 → push 进 scene.roots 作场景根
     s_pkg.ensure_scene();
@@ -157,7 +163,9 @@ fn set_input_hover_emits_rollover_and_rematch() {
     let css = r#".btn { width: 100px; height: 50px; background-color: #cccccc; } .btn:hover { background-color: #0000ff; }"#;
     let (pkg_bytes, _) = pkg_bytes_from_inline(html, css);
 
-    let mut s = Stage::new(font_path, (200.0, 100.0)).unwrap();
+    let mut s = Stage::new((200.0, 100.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     s.load_package("bag", &pkg_bytes).unwrap();
     // 包路径 instantiate 返回孤立根（div.root）→ push 进 scene.roots 作场景根（同 inline 语义）
     s.ensure_scene();
@@ -215,7 +223,9 @@ fn set_node_disabled_inhibits_click() {
     let css = r#".btn { width: 100px; height: 50px; }"#;
     let (pkg_bytes, _) = pkg_bytes_from_inline(html, css);
 
-    let mut s = Stage::new(font_path, (200.0, 100.0)).unwrap();
+    let mut s = Stage::new((200.0, 100.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     s.load_package("bag", &pkg_bytes).unwrap();
     s.ensure_scene();
     let comp_root = s.instantiate("bag", "scene").unwrap();
@@ -280,7 +290,9 @@ fn set_node_disabled_inhibits_click() {
 fn is_pointer_on_ui_false_when_miss() {
     // 空 scene / 命中根外 → false。手搓 Stage（不走 parse）
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
-    let mut s = Stage::new(font_path, (200.0, 100.0)).unwrap();
+    let mut s = Stage::new((200.0, 100.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     // 手搓空 scene（SlotMap::with_key()）
     s.scene = Some(crate::scene::node::Scene {
         roots: vec![],
@@ -316,7 +328,9 @@ fn load_clears_scroll_state() {
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
     let html = r#"<div class="c"></div>"#;
     let css = ".c{width:200px;height:100px;overflow:scroll;}";
-    let mut s = Stage::new(font_path, (200.0, 100.0)).unwrap();
+    let mut s = Stage::new((200.0, 100.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     s.load_inline_for_test(html, css).unwrap();
     let root_id = s.scene.as_ref().unwrap().roots[0];
     // 手动塞 scroll_pos，模拟上一会话残留
@@ -336,7 +350,9 @@ fn stage_tween_advances_opacity_and_emits_complete() {
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
     let html = r#"<div class="b"></div>"#;
     let css = ".b{width:100px;height:50px;}";
-    let mut s = Stage::new(font_path, (200.0, 100.0)).unwrap();
+    let mut s = Stage::new((200.0, 100.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     s.load_inline_for_test(html, css).unwrap();
     let rid = s.scene.as_ref().unwrap().roots[0];
     // opacity 0→1，1s Linear，tag=99
@@ -383,7 +399,9 @@ fn stage_tween_advances_opacity_and_emits_complete() {
 #[test]
 fn stage_tick_without_advance_time_is_zero_regression() {
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
-    let mut s = Stage::new(font_path, (200.0, 100.0)).unwrap();
+    let mut s = Stage::new((200.0, 100.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     s.load_inline_for_test(r#"<div class="b"></div>"#, ".b{width:100px;height:50px;}")
         .unwrap();
     let rid = s.scene.as_ref().unwrap().roots[0];
@@ -412,7 +430,9 @@ fn stage_tick_without_advance_time_is_zero_regression() {
 #[test]
 fn tween_anim_override_visible_in_render_output() {
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
-    let mut s = Stage::new(font_path, (200.0, 100.0)).unwrap();
+    let mut s = Stage::new((200.0, 100.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     s.load_inline_for_test(r#"<div class="b"></div>"#, ".b{width:100px;height:50px;}")
         .unwrap();
     let rid = s.scene.as_ref().unwrap().roots[0];
@@ -449,7 +469,9 @@ fn drag_follow_visible_same_frame_in_world_transforms() {
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
     let html = r#"<div class="scroll"><div class="content"></div></div>"#;
     let css = r#".scroll{width:200px;height:200px;overflow:scroll;} .content{width:50px;height:400px;flex-shrink:0;}"#;
-    let mut s = Stage::new(font_path, (200.0, 200.0)).unwrap();
+    let mut s = Stage::new((200.0, 200.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     s.load_inline_for_test(html, css).unwrap();
     // 首 tick 建立 layout + content_size/overlap
     s.tick_and_render();
@@ -492,7 +514,10 @@ fn active_scale_visible_same_frame() {
     let css = ".btn{width:100px;height:100px;} .btn:active{transform:scale(0.5);}";
     let (pkg_bytes, _) = pkg_bytes_from_inline(html, css);
 
-    let mut stage = Stage::new(font_path, (200.0, 200.0)).expect("stage");
+    let mut stage = Stage::new((200.0, 200.0)).expect("stage");
+    stage
+        .register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     stage.load_package("bag", &pkg_bytes).unwrap();
     stage.ensure_scene();
     let comp_root = stage.instantiate("bag", "scene").unwrap();
@@ -536,7 +561,9 @@ fn active_scale_visible_same_frame() {
 #[test]
 fn tick_computes_world_transforms_before_render() {
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
-    let mut s = Stage::new(font_path, (200.0, 200.0)).unwrap();
+    let mut s = Stage::new((200.0, 200.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     s.load_inline_for_test(r#"<div class="c"></div>"#, ".c{width:100px;height:50px;}")
         .unwrap();
     s.tick_and_render();
@@ -552,7 +579,9 @@ fn tick_computes_world_transforms_before_render() {
 #[test]
 fn hit_test_bounds_guard_no_panic_on_empty_worlds() {
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
-    let mut s = Stage::new(font_path, (200.0, 200.0)).unwrap();
+    let mut s = Stage::new((200.0, 200.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     // 手搓 scene：1 个 touchable 节点（root，覆盖点 50,50）但 world_transforms 空。
     // hit_subtree 走到 bounds guard（id.index() >= world_transforms.len()）→ 返 None，不 panic。
     use crate::scene::node::{Node, NodeKind, Rect, Scene};
@@ -588,7 +617,9 @@ fn remove_node_then_tick_does_not_panic_on_slot_gap() {
     // 4 节点：root + 3 子（a, b, c），删 b（中间）→ a/c 仍 live，c 在高 idx。
     let html = r#"<div class="root"><div class="a"></div><div class="b"></div><div class="c"></div></div>"#;
     let css = ".root{width:200px;height:200px;} .a,.b,.c{width:50px;height:50px;}";
-    let mut s = Stage::new(font_path, (200.0, 200.0)).unwrap();
+    let mut s = Stage::new((200.0, 200.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     s.load_inline_for_test(html, css).unwrap();
     s.tick_and_render(); // 首帧：建 world_transforms 基线
                          // 取 b 的 NodeId（root 的第 2 个 div 子——注意 root 的 Text 子不在这里，3 个 div 子直接挂 root）
@@ -803,7 +834,9 @@ fn transition_stage() -> (Stage, crate::scene::node::NodeId) {
                 .btn:hover { background-color: #ffffff; }
                 .btn { transition: background-color 0.3s linear; }"#;
     let (pkg_bytes, _) = pkg_bytes_from_inline(html, css);
-    let mut s = Stage::new(font_path, (200.0, 100.0)).unwrap();
+    let mut s = Stage::new((200.0, 100.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     s.load_package("bag", &pkg_bytes).unwrap();
     s.ensure_scene();
     let comp_root = s.instantiate("bag", "scene").unwrap();
@@ -819,4 +852,19 @@ fn transition_stage() -> (Stage, crate::scene::node::NodeId) {
             .unwrap()
     };
     (s, btn_id)
+}
+
+#[test]
+#[cfg(feature = "parse")]
+fn stage_register_font_sets_default_for_measure() {
+    let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+    let mut s = Stage::new((200.0, 200.0)).expect("stage");
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
+    let tree = crate::parse::dom::parse_html("<div>Hello</div>").unwrap();
+    let sheet = crate::parse::css::parse_css("").unwrap();
+    let styles = crate::style::cascade::resolve_styles(&tree, &sheet);
+    s.scene = Some(crate::scene::node::build_scene(&tree, &styles));
+    s.advance_time(0.016);
+    let _frame = s.tick_and_render(); // must not panic on "no default font"
 }

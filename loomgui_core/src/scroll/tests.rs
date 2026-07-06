@@ -901,7 +901,10 @@ fn in_bounds_low_velocity_stays_put() {
 /// root 是 overflow_y=Scroll 的 Container，layout_rect (0,0,200,100)。
 fn build_scroll_stage() -> crate::stage::Stage {
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
-    let mut stage = crate::stage::Stage::new(font_path, (200.0, 200.0)).unwrap();
+    let mut stage = crate::stage::Stage::new((200.0, 200.0)).unwrap();
+    stage
+        .register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     let mut scroll_style = ResolvedStyle::default();
     scroll_style.overflow_y = OverflowMode::Scroll;
     let entries: Vec<(

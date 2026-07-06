@@ -35,7 +35,10 @@ fn load_html_css(stage: &mut Stage, html: &str, css: &str) {
 #[test]
 fn stage_static_frame_produces_skip() {
     let (fp, _fplen) = font_path();
-    let mut stage = Stage::new(&fp, (200.0, 100.0)).expect("stage");
+    let mut stage = Stage::new((200.0, 100.0)).expect("stage");
+    stage
+        .register_font("DejaVu", std::fs::read(&fp).unwrap(), true)
+        .unwrap();
     let html = r#"<div style="width:50px;height:50px;background-color:#ff0000"></div>"#;
     load_html_css(&mut stage, html, "");
     stage.advance_time(0.016);
@@ -58,7 +61,10 @@ fn stage_static_frame_produces_skip() {
 #[test]
 fn stage_reload_all_full() {
     let (fp, _fplen) = font_path();
-    let mut stage = Stage::new(&fp, (200.0, 100.0)).expect("stage");
+    let mut stage = Stage::new((200.0, 100.0)).expect("stage");
+    stage
+        .register_font("DejaVu", std::fs::read(&fp).unwrap(), true)
+        .unwrap();
     load_html_css(
         &mut stage,
         r#"<div style="width:50px;height:50px;background-color:#ff0000"></div>"#,

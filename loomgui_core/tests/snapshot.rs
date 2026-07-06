@@ -56,7 +56,10 @@ fn snapshot_simple_panel() {
     // fixture 用 ASCII（DejaVuSans 无 CJK glyph）
     let html = r#"<div class="root"><div class="h">Title</div><button class="b">OK</button></div>"#;
     let css = r#".root { width: 300px; height: 200px; flex-direction: column; gap: 8px; } .h { height: 30px; } .b { width: 100px; height: 40px; }"#;
-    let mut stage = Stage::new(&font, (300.0, 200.0)).unwrap();
+    let mut stage = Stage::new((300.0, 200.0)).unwrap();
+    stage
+        .register_font("DejaVu", std::fs::read(&font).unwrap(), true)
+        .unwrap();
     load_html_css(&mut stage, html, css);
     let json = stage.render_json();
     insta::assert_snapshot!("simple_panel", json);
@@ -70,7 +73,10 @@ fn snapshot_cascade_inheritance() {
     }
     let html = r#"<div class="root"><span class="child">hi</span></div>"#;
     let css = r#".root { color: #ff0000; font-size: 20px; } .child { width: 50px; }"#;
-    let mut stage = Stage::new(&font, (300.0, 200.0)).unwrap();
+    let mut stage = Stage::new((300.0, 200.0)).unwrap();
+    stage
+        .register_font("DejaVu", std::fs::read(&font).unwrap(), true)
+        .unwrap();
     load_html_css(&mut stage, html, css);
     let json = stage.render_json();
     insta::assert_snapshot!("cascade_inheritance", json);
@@ -88,7 +94,10 @@ fn snapshot_image_with_texture() {
     }
     let html = r#"<div class="root"><img class="i" src="logo.png"></div>"#;
     let css = r#".root { width: 300px; height: 200px; } .i { width: 100px; height: 80px; }"#;
-    let mut stage = Stage::new(&font, (300.0, 200.0)).unwrap();
+    let mut stage = Stage::new((300.0, 200.0)).unwrap();
+    stage
+        .register_font("DejaVu", std::fs::read(&font).unwrap(), true)
+        .unwrap();
     load_html_css(&mut stage, html, css);
     let json = stage.render_json();
     insta::assert_snapshot!("image_with_texture", json);

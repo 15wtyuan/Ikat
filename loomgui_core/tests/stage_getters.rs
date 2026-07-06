@@ -36,7 +36,10 @@ fn load_html_css(stage: &mut Stage, html: &str, css: &str) {
 /// world_matrix 读 slot 位置：transform:translate(100px,200px) → wm[4]=100, wm[5]=200。
 #[test]
 fn get_node_world_matrix_returns_slot_position() {
-    let mut stage = Stage::new(&font_path(), (200.0, 200.0)).expect("stage");
+    let mut stage = Stage::new((200.0, 200.0)).expect("stage");
+    stage
+        .register_font("DejaVu", std::fs::read(font_path()).unwrap(), true)
+        .unwrap();
     let html =
         r#"<div id="n" style="width:50px;height:50px;transform:translate(100px,200px)"></div>"#;
     load_html_css(&mut stage, html, "");
@@ -63,7 +66,10 @@ fn get_node_world_matrix_returns_slot_position() {
 /// sort_key DFS 序：两兄弟 div（DOM 序 a 先 b 后）→ a.sort_key < b.sort_key。
 #[test]
 fn get_node_sort_key_returns_dfs_order() {
-    let mut stage = Stage::new(&font_path(), (200.0, 200.0)).expect("stage");
+    let mut stage = Stage::new((200.0, 200.0)).expect("stage");
+    stage
+        .register_font("DejaVu", std::fs::read(font_path()).unwrap(), true)
+        .unwrap();
     let html = r#"<div><div id="a" style="background-color:#ff0000"></div><div id="b" style="background-color:#00ff00"></div></div>"#;
     load_html_css(&mut stage, html, "");
     stage.advance_time(0.016);
@@ -83,7 +89,10 @@ fn get_node_sort_key_returns_dfs_order() {
 /// display:none → get_node_visible 返 false；同 scene 内正常节点返 true。
 #[test]
 fn get_node_visible_display_none_false() {
-    let mut stage = Stage::new(&font_path(), (200.0, 200.0)).expect("stage");
+    let mut stage = Stage::new((200.0, 200.0)).expect("stage");
+    stage
+        .register_font("DejaVu", std::fs::read(font_path()).unwrap(), true)
+        .unwrap();
     let html = r#"<div><div id="hidden" style="display:none"></div><div id="visible" style="background-color:#000"></div></div>"#;
     load_html_css(&mut stage, html, "");
     stage.advance_time(0.016);
@@ -104,7 +113,10 @@ fn get_node_visible_display_none_false() {
 /// 无效 NodeId（INVALID sentinel）→ 三个 getter 全 None/false，不 panic。
 #[test]
 fn get_node_invalid_returns_none() {
-    let mut stage = Stage::new(&font_path(), (200.0, 200.0)).expect("stage");
+    let mut stage = Stage::new((200.0, 200.0)).expect("stage");
+    stage
+        .register_font("DejaVu", std::fs::read(font_path()).unwrap(), true)
+        .unwrap();
     load_html_css(&mut stage, r#"<div id="n"></div>"#, "");
     stage.advance_time(0.016);
     stage.tick_and_render();
@@ -130,7 +142,7 @@ fn get_node_invalid_returns_none() {
 /// 覆盖 FFI 在 load_package 前（scene=None）查询的早返路径（坑 102）。
 #[test]
 fn get_node_no_scene_returns_none() {
-    let stage = Stage::new(&font_path(), (200.0, 200.0)).expect("stage");
+    let stage = Stage::new((200.0, 200.0)).expect("stage");
     // 不调 ensure_scene / create_root / load_html_css → scene = None。
     let n = NodeId(0x1_0001); // 合法形态的 NodeId（idx=1, gen=1），但 scene=None
     assert_eq!(stage.get_node_world_matrix(n), None, "scene=None → None");

@@ -15,13 +15,15 @@ fn main() {
             return;
         }
     };
-    let mut s = match Stage::new(font, (1080.0, 1920.0)) {
+    let mut s = match Stage::new((1080.0, 1920.0)) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Stage::new: {}", e);
             return;
         }
     };
+    s.register_font("DejaVu", std::fs::read(font).unwrap(), true)
+        .unwrap();
     if let Err(e) = s.load_package("showcase", &pkg) {
         eprintln!("load_package: {}", e);
         return;

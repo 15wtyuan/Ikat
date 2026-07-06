@@ -64,7 +64,10 @@ fn bench_static(c: &mut Criterion) {
         b.iter_batched(
             || {
                 // 每次迭代 fresh Stage，先 tick 1 次建基线。
-                let mut stage = Stage::new(&fp, (800.0, 600.0)).expect("stage");
+                let mut stage = Stage::new((800.0, 600.0)).expect("stage");
+                stage
+                    .register_font("DejaVu", std::fs::read(&fp).unwrap(), true)
+                    .unwrap();
                 load_html_css(&mut stage, &html_500(), "").expect("load");
                 stage.advance_time(0.016);
                 let _ = stage.tick_and_render(); // 建基线
@@ -86,7 +89,10 @@ fn bench_cold(c: &mut Criterion) {
     group.bench_function("cold_frame", |b| {
         b.iter_batched(
             || {
-                let mut stage = Stage::new(&fp, (800.0, 600.0)).expect("stage");
+                let mut stage = Stage::new((800.0, 600.0)).expect("stage");
+                stage
+                    .register_font("DejaVu", std::fs::read(&fp).unwrap(), true)
+                    .unwrap();
                 load_html_css(&mut stage, &html_500(), "").expect("load");
                 stage.advance_time(0.016);
                 stage
@@ -105,7 +111,10 @@ fn bench_page_turn(c: &mut Criterion) {
     group.bench_function("page_turn_frame", |b| {
         b.iter_batched(
             || {
-                let mut stage = Stage::new(&fp, (800.0, 600.0)).expect("stage");
+                let mut stage = Stage::new((800.0, 600.0)).expect("stage");
+                stage
+                    .register_font("DejaVu", std::fs::read(&fp).unwrap(), true)
+                    .unwrap();
                 load_html_css(&mut stage, &html_500_colorized(0), "").expect("load");
                 stage.advance_time(0.016);
                 let _ = stage.tick_and_render(); // 建基线

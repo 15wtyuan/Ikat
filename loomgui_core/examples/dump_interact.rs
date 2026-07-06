@@ -125,7 +125,9 @@ fn main() {
     };
     let pkg = write_package(&input);
 
-    let mut s = Stage::new(font, (200.0, 100.0)).unwrap();
+    let mut s = Stage::new((200.0, 100.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font).unwrap(), true)
+        .unwrap();
     s.load_package("showcase", &pkg).unwrap();
     let btn = s.find_node_by_id("b1").expect("b1").0;
     let r = s

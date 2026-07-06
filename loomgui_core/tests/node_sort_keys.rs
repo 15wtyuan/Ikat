@@ -37,7 +37,10 @@ fn load_html_css(stage: &mut Stage, html: &str, css: &str) {
 /// 空 div slot + 有 bg 兄弟：node_sort_keys 在 merge_meshes 后仍保留两节点 DFS 序号。
 #[test]
 fn node_sort_keys_filled_for_empty_div_slot() {
-    let mut stage = Stage::new(&font_path(), (200.0, 200.0)).expect("stage");
+    let mut stage = Stage::new((200.0, 200.0)).expect("stage");
+    stage
+        .register_font("DejaVu", std::fs::read(font_path()).unwrap(), true)
+        .unwrap();
     // root > [nh-stage(空 div), nh-effect(黑底)]。
     let html = r#"<div><div id="nh-stage"></div><div id="nh-effect" style="background-color:#000"></div></div>"#;
     load_html_css(&mut stage, html, "");
@@ -81,7 +84,10 @@ fn node_sort_keys_filled_for_empty_div_slot() {
 /// 用 root 单节点（不触发 merge）查证 buffer 写入与 RenderNode.sort_key 对齐。
 #[test]
 fn node_sort_keys_matches_render_node_sort_key_pre_merge() {
-    let mut stage = Stage::new(&font_path(), (200.0, 200.0)).expect("stage");
+    let mut stage = Stage::new((200.0, 200.0)).expect("stage");
+    stage
+        .register_font("DejaVu", std::fs::read(font_path()).unwrap(), true)
+        .unwrap();
     // 单 div 带 bg（避免空 div 走 merge）。
     let html = r#"<div id="only" style="background-color:#ff0000"></div>"#;
     load_html_css(&mut stage, html, "");

@@ -22,13 +22,15 @@ fn main() {
             return;
         }
     };
-    let mut s = match Stage::new(font_path, (1080.0, 1920.0)) {
+    let mut s = match Stage::new((1080.0, 1920.0)) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Stage::new: {}", e);
             return;
         }
     };
+    s.register_font("wqy-microhei", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     // v1.4-a T4：load_package(name, bytes) 进资源池不建 scene。
     if let Err(e) = s.load_package("showcase", &pkg) {
         eprintln!("load_package: {}", e);

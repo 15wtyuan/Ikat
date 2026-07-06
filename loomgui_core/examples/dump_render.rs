@@ -23,7 +23,9 @@ fn main() {
     );
     let html = std::fs::read_to_string(html_path).expect("read html");
     let css = std::fs::read_to_string(css_path).expect("read css");
-    let mut s = Stage::new(font, (1080.0, 1920.0)).expect("Stage::new");
+    let mut s = Stage::new((1080.0, 1920.0)).expect("Stage::new");
+    s.register_font("DejaVu", std::fs::read(font).unwrap(), true)
+        .unwrap();
     // v1.4-a：load_inline 已砍，直接走 parse → resolve → build_scene（同 load_inline 旧逻辑）。
     let tree = parse_html(&html).expect("parse_html");
     let sheet = parse_css(&css).expect("parse_css");

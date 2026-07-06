@@ -24,20 +24,22 @@ fn main() {
             return;
         }
     };
-    let mut s = match Stage::new(font_path, (1080.0, 1920.0)) {
+    let mut s = match Stage::new((1080.0, 1920.0)) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Stage::new({}): {}", font_path, e);
             return;
         }
     };
+    s.register_font("wqy-microhei", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     if let Err(e) = s.load_package("showcase", &pkg) {
         eprintln!("load_package: {}", e);
         return;
     }
     s.tick_and_render();
     let scene = s.scene.as_ref().unwrap();
-    let font = s.font.as_ref();
+    let font = s.fonts.select(None);
     println!("n_nodes={} font=wqy-microhei", scene.nodes.len());
     println!(
         "{:<22} {:>8} {:>9} {:>8} {:>8} {:>8}  content",

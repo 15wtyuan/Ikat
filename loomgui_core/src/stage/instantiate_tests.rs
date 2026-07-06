@@ -111,7 +111,9 @@ fn instantiate_missing_pkg_or_comp_errors() {
 fn instantiate_without_scene_errors() {
     // scene 必须已存在（create_root 建过），否则 Err
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
-    let mut s = Stage::new(font_path, (200.0, 200.0)).unwrap();
+    let mut s = Stage::new((200.0, 200.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     // 不调 create_root，scene = None
     s.load_package("bag", &make_test_pkg_with_subtree())
         .unwrap();
@@ -224,7 +226,9 @@ fn instantiate_multi_instance_hover_independent() {
     };
 
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
-    let mut s = Stage::new(font_path, (400.0, 200.0)).unwrap();
+    let mut s = Stage::new((400.0, 200.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
     // scene_root 作唯一布局根（solve 仅 roots[0] 下沉）；两实例 append_child 挂其下，块流纵向堆叠
     let scene_root = s.create_root("div", "width:400px;height:200px").unwrap();
     s.load_package("bag", &crate::asset::write_package(&input))

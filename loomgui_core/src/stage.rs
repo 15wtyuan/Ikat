@@ -11,8 +11,7 @@ use crate::render::FrameData;
 use crate::scene::node::{ControllerChangedEvent, NodeId, Rect, Scene};
 use crate::style::dynamic::rematch_pseudo_classes;
 use crate::style::resolved::OverflowMode;
-use crate::text::layout::{Font, FontTable};
-use std::sync::Arc;
+use crate::text::layout::FontTable;
 
 /// transition 自动提交 tween 的 tag（rematch 检测通道变化 → drain kill 旧 + 提交新）。
 /// 区分 driver 主动注册的 tween（caller-supplied u32 tag）——使 transition 完成事件可识别。
@@ -21,7 +20,7 @@ const TRANSITION_TAG: u32 = 0xFFFF_FFFE;
 
 pub struct Stage {
     pub scene: Option<Scene>,
-    pub font: Arc<Font>,
+    pub fonts: FontTable,
     pub root_size: (f32, f32),
     /// 资源池：pkg_name → Package（多包共存）。load_package 填，instantiate 读。
     /// load_package 不建 scene，只填本字典。
@@ -56,12 +55,10 @@ pub struct Stage {
 }
 
 impl Stage {
-    pub fn new(font_path: &str, root_size: (f32, f32)) -> Result<Self, String> {
-        // Font::from_path 返回 Result<_, String>，直接 ? 传播。
-        let font = Font::from_path(font_path)?;
+    pub fn new(root_size: (f32, f32)) -> Result<Self, String> {
         Ok(Stage {
             scene: None,
-            font: Arc::new(font),
+            fonts: FontTable::new(),
             root_size,
             packages: std::collections::HashMap::new(),
             image_sizes: std::collections::HashMap::new(),
@@ -75,6 +72,17 @@ impl Stage {
             pending_dt: 0.0,
             prev_node_hashes: std::collections::HashMap::new(),
         })
+    }
+
+    /// 注册字体进字体表。is_default=true 设为默认（measure 的 fallback）。
+    /// FFI 层在首次 tick 前必须注册至少一个 default 字体，否则 measure 时 select panic。
+    pub fn register_font(
+        &mut self,
+        family: &str,
+        bytes: Vec<u8>,
+        is_default: bool,
+    ) -> Result<(), String> {
+        self.fonts.register(family, bytes, is_default)
     }
 
     /// 加载包进资源池（不碰 scene）。重复 load 同名包 = 替换。多包共存。
@@ -555,7 +563,9 @@ impl Stage {
     #[cfg(test)]
     pub fn new_for_test() -> Self {
         let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
-        let mut s = Stage::new(font_path, (200.0, 200.0)).unwrap();
+        let mut s = Stage::new((200.0, 200.0)).unwrap();
+        s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+            .unwrap();
         s.scene = Some(crate::scene::node::Scene {
             roots: vec![],
             nodes: slotmap::SlotMap::with_key(),
@@ -665,15 +675,7 @@ impl Stage {
         // 5. solve（读 rematch 后的 taffy_style → layout_rect）
         // 核心知图尺寸（打包期 PNG IHDR 静态，存 Stage.image_sizes）。solve 查尺寸表算
         // Image intrinsic（三档：CSS > 真实像素 > 64×64）。不知图集（运行时纹理/UV 归 Unity）。
-        // TODO A3: replace temporary FontTable with self.fonts
-        {
-            let mut temp_fonts = FontTable::new();
-            temp_fonts
-                .fonts
-                .insert("default".to_string(), self.font.clone());
-            temp_fonts.default_family = Some("default".to_string());
-            solve(scene, &temp_fonts, self.root_size, &self.image_sizes);
-        }
+        solve(scene, &self.fonts, self.root_size, &self.image_sizes);
         // 6. content_size 填充（solve 后 content_size/viewport/overlap）
         crate::scroll::refresh_content_sizes(scene);
         // 7. compute_world_transforms（读 rematch 后 transform + scroll_pos → world）
@@ -682,20 +684,12 @@ impl Stage {
         //    返回新 hash 存 self.prev_node_hashes 供下帧比。
         // build_render_nodes 查 Stage.image_sizes 算九宫格 UV（slice_px / src_px）。
         // Image payload 带 path，UV 全图 (0,0)-(1,1)（无 atlas 子区），Unity 查 Sprite 拿真实 UV。
-        // TODO A3: replace temporary FontTable with self.fonts
-        let (frame, new_hashes, sort_keys) = {
-            let mut temp_fonts = FontTable::new();
-            temp_fonts
-                .fonts
-                .insert("default".to_string(), self.font.clone());
-            temp_fonts.default_family = Some("default".to_string());
-            build_render_nodes(
-                scene,
-                &temp_fonts,
-                &self.prev_node_hashes,
-                &self.image_sizes,
-            )
-        };
+        let (frame, new_hashes, sort_keys) = build_render_nodes(
+            scene,
+            &self.fonts,
+            &self.prev_node_hashes,
+            &self.image_sizes,
+        );
         scene.node_sort_keys = sort_keys;
         self.prev_node_hashes = new_hashes;
         frame

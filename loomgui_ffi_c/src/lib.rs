@@ -58,8 +58,17 @@ pub extern "C" fn loomgui_stage_new(
         Ok(s) => s,
         Err(_) => return std::ptr::null_mut(),
     };
-    let stage = match Stage::new(path, (w, h)) {
-        Ok(s) => s,
+    let stage = match Stage::new((w, h)) {
+        Ok(mut s) => {
+            let font_bytes = match std::fs::read(path) {
+                Ok(b) => b,
+                Err(_) => return std::ptr::null_mut(),
+            };
+            match s.register_font("DejaVu", font_bytes, true) {
+                Ok(()) => s,
+                Err(_) => return std::ptr::null_mut(),
+            }
+        }
         Err(_) => return std::ptr::null_mut(),
     };
     Box::into_raw(Box::new(StageHandle {
