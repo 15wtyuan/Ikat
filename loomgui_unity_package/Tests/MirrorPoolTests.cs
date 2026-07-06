@@ -379,7 +379,7 @@ namespace LoomGUI.Tests
             Assert.IsFalse(stage is UnityEngine.Component,
                 "LoomStage must be a pure class, not a MonoBehaviour/Component");
             // 无字体注册 + 无 renderRoot → tick 走空帧路径不崩（stage 句柄非空即 tick）。
-            stage.Tick(0.016f, renderRoot: null);
+            stage.Tick(0.016f);
             Assert.Pass("LoomStage 构造 + 空 tick 成功（pure class，无 MonoBehaviour 依赖）");
         }
     }

@@ -15,7 +15,7 @@ namespace LoomGUI
     // 按页 listener 清（§7.5）：driver 维护当前页 listener 注册表，切页前批量 RemoveListener（不用 EventHandler.Clear 粗清）。
     //
     // 注：LoomStage 已是纯 C# 类（非 MonoBehaviour）。本 driver 在 Awake 构造实例 + 注入字体/根；
-    // 完整的 LoomStageDriver（B3）将统一此模式。本 showcase driver 是过渡形态。
+    // 完整的 LoomStageDriver 将统一此模式。本 showcase driver 是过渡形态。
     public unsafe class LoomShowcaseDriver : MonoBehaviour
     {
         // LoomStage 纯类实例（Awake 构造，非 SerializeField——Unity 不序列化非 Object 引用）。
@@ -168,7 +168,7 @@ namespace LoomGUI
         void LateUpdate()
         {
             if (_stage == null) return;
-            _stage.Tick(Time.unscaledDeltaTime, transform);
+            _stage.Tick(Time.unscaledDeltaTime);
         }
 
         void OnDestroy()

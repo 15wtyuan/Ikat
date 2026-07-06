@@ -16,9 +16,9 @@ namespace LoomGUI
 
     /// <summary>
     /// 纯 C# Stage 门面：把 Rust Stage（tick→borrow_frame→blob）接到 Unity MirrorPool 渲染。
-    /// 本类不是 MonoBehaviour——它由 LoomStageDriver（B3）持有并驱动生命周期：
+    /// 本类不是 MonoBehaviour——它由 LoomStageDriver 持有并驱动生命周期：
     ///   driver.Awake → new LoomStage(designSize) + RegisterFont + InitSprites + SetNativeHostRoot
-    ///   driver.LateUpdate → stage.Tick(dt, driver.transform)
+    ///   driver.LateUpdate → stage.Tick(dt)
     ///   driver.OnDestroy → stage.Dispose()
     ///
     /// 所有引擎无关的 FFI 透传 API（CreateRoot/Tween/Controller/...）保持不变——它们只调
@@ -132,7 +132,7 @@ namespace LoomGUI
         {
             _sprites?.Init(settings);
             // loadAtlas 委托保留给后续 atlas 懒加载改造；当前 SpriteResolver.Init 走 LoomSettings 直配。
-            // 若 loadAtlas 非空，SpriteResolver 可在 miss 时回调——见 B4 atlas 重构。
+            // 若 loadAtlas 非空，SpriteResolver 可在 miss 时回调加载 atlas。
         }
 
         // ===== NativeHost 根注入（Driver 调）=====
@@ -152,11 +152,11 @@ namespace LoomGUI
 
         /// <summary>
         /// 每帧驱动：tick → borrow_frame → MirrorPool.Sync → NativeHost.Sync → 事件派发。
-        /// 替代旧 LateUpdate。renderRoot 通常 = driver.transform（MirrorPool 挂此 root 下）。
-        /// renderRoot=null 时跳过渲染（测试构造后无 root 也能 tick 不崩）。
+        /// 替代旧 LateUpdate。渲染根从 _renderRoot 读（SetNativeHostRoot 注入，Driver.Awake 调）。
+        /// _renderRoot=null 时跳过渲染（测试构造后无 root 也能 tick 不崩）。
         /// dt 用 unscaledDeltaTime（暂停不受影响）。
         /// </summary>
-        public void Tick(float dt, Transform renderRoot)
+        public void Tick(float dt)
         {
             if (_stage == null) return;
             Native.loomgui_stage_tick(_stage, dt);
@@ -164,7 +164,7 @@ namespace LoomGUI
             nuint lenRaw = 0;
             byte* ptr = Native.loomgui_stage_borrow_frame(_stage, &lenRaw);
             int len = (int)lenRaw;
-            if (ptr != null && len > 0 && renderRoot != null)
+            if (ptr != null && len > 0 && _renderRoot != null)
             {
                 if (_frameBuf == null || _frameBuf.Length < len)
                 {
@@ -174,7 +174,7 @@ namespace LoomGUI
                 Marshal.Copy((IntPtr)ptr, _frameBuf, 0, len);
                 var blob = new FrameBlob(_frameBuf);
                 // MirrorPool.Sync 读本实例 FontVersion（atlas rebuild 检测）+ 字体表（text 光栅）。
-                _pool.Sync(blob, renderRoot, _mm, _sprites, Texture2D.whiteTexture,
+                _pool.Sync(blob, _renderRoot, _mm, _sprites, Texture2D.whiteTexture,
                            _unityFonts, _defaultUnityFont, _fontVersion);
                 _nhm.Sync(_stage);
             }
