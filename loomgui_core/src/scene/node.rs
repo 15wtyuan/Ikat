@@ -287,7 +287,9 @@ impl Scene {
         };
         // 先 insert 所有节点，收集 slotmap 分配的 NodeId
         let mut ids: Vec<NodeId> = Vec::with_capacity(entries.len());
-        for (_, kind, style, classes, id_attr, draggable, tabindex, data_controller) in entries.iter() {
+        for (_, kind, style, classes, id_attr, draggable, tabindex, data_controller) in
+            entries.iter()
+        {
             let node = Node {
                 id: NodeId::INVALID, // 临时，insert 后回填
                 parent: None,        // 下一轮填

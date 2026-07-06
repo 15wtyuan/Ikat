@@ -349,7 +349,16 @@ fn scene_build_constructs_tree_without_parse() {
     let mut of = ResolvedStyle::default();
     of.overflow_x = OverflowMode::Hidden;
     of.overflow_y = OverflowMode::Hidden;
-    let scene2 = Scene::build(&[(None, NodeKind::Container, of, Vec::new(), None, false, None, None)]);
+    let scene2 = Scene::build(&[(
+        None,
+        NodeKind::Container,
+        of,
+        Vec::new(),
+        None,
+        false,
+        None,
+        None,
+    )]);
     assert!(
         scene2.get(scene2.roots[0]).unwrap().clip_rect.is_some(),
         "overflow Hidden → clip slot"
@@ -372,7 +381,16 @@ fn build_clip_rect_slot_for_scroll_auto_and_single_axis() {
         let mut s = ResolvedStyle::default();
         s.overflow_x = x;
         s.overflow_y = y;
-        let sc = Scene::build(&[(None, NodeKind::Container, s, Vec::new(), None, false, None, None)]);
+        let sc = Scene::build(&[(
+            None,
+            NodeKind::Container,
+            s,
+            Vec::new(),
+            None,
+            false,
+            None,
+            None,
+        )]);
         assert!(
             sc.get(sc.roots[0]).unwrap().clip_rect.is_some(),
             "{} → clip slot",

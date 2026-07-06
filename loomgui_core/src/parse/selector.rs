@@ -204,9 +204,7 @@ fn parse_attr_inner(inner: &str) -> crate::style::dynamic::AttrSelector {
         }
         let name = name_part.to_lowercase();
         let mut v = inner[eq_pos + 1..].trim();
-        if (v.starts_with('"') && v.ends_with('"'))
-            || (v.starts_with('\'') && v.ends_with('\''))
-        {
+        if (v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')) {
             v = &v[1..v.len() - 1];
         }
         AttrSelector {
@@ -601,10 +599,7 @@ mod tests {
         assert_eq!(c.classes, vec!["panel".to_string()]);
         assert_eq!(c.attrs.len(), 1);
         assert_eq!(c.attrs[0].name, "data-controller");
-        assert!(matches!(
-            c.attrs[0].op,
-            crate::style::dynamic::AttrOp::Eq
-        ));
+        assert!(matches!(c.attrs[0].op, crate::style::dynamic::AttrOp::Eq));
         assert_eq!(c.attrs[0].value.as_deref(), Some("tab"));
     }
 

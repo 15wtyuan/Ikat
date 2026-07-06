@@ -708,7 +708,16 @@ fn render_text_payload_matches_layout_text_layout() {
     let mut text_s = ResolvedStyle::default();
     text_s.font_size = fs;
     let entries = vec![
-        (None, NodeKind::Container, root_s, vec![], None, false, None, None),
+        (
+            None,
+            NodeKind::Container,
+            root_s,
+            vec![],
+            None,
+            false,
+            None,
+            None,
+        ),
         (
             Some(0),
             NodeKind::Text {
@@ -780,7 +789,16 @@ fn render_long_text_still_wraps_with_layout_reuse() {
     let mut text_s = ResolvedStyle::default();
     text_s.font_size = fs;
     let entries = vec![
-        (None, NodeKind::Container, root_s, vec![], None, false, None, None),
+        (
+            None,
+            NodeKind::Container,
+            root_s,
+            vec![],
+            None,
+            false,
+            None,
+            None,
+        ),
         (
             Some(0),
             NodeKind::Text {

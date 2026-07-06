@@ -275,7 +275,16 @@ fn empty_children_content_is_zero() {
     // 滚动容器无子 → content (0,0)
     let mut style = ResolvedStyle::default();
     style.overflow_y = OverflowMode::Scroll;
-    let entries = vec![(None, NodeKind::Container, style, vec![], None, false, None, None)];
+    let entries = vec![(
+        None,
+        NodeKind::Container,
+        style,
+        vec![],
+        None,
+        false,
+        None,
+        None,
+    )];
     let mut s = Scene::build(&entries);
     let root0 = s.roots[0];
     s.get_mut(root0).unwrap().layout_rect = Rect {
