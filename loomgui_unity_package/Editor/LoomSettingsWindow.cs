@@ -207,7 +207,8 @@ namespace LoomGUI.Editor
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             e.atlasName = EditorGUILayout.TextField("图集名", e.atlasName);
             // atlas 引用系统自动管理（同步时 EnsureAtlasAsset 自动建 .spriteatlasv2 + 绑引用），不暴露给用户。
-            EditorGUILayout.LabelField("状态", e.atlas != null ? "已同步" : "未同步");
+            // TODO B6: atlas status — entry.atlas field removed; rewrite to show atlasName-based status
+            EditorGUILayout.LabelField("状态", "待同步（Task B6）");
             EditorGUILayout.LabelField("folders（拖文件夹到此）:");
             var dropRect = GUILayoutUtility.GetRect(0, 30, GUILayout.ExpandWidth(true));
             GUI.Box(dropRect, "  拖文件夹当 packables", EditorStyles.helpBox);

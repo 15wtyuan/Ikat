@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.U2D;
+
 
 namespace LoomGUI
 {
@@ -19,7 +19,10 @@ namespace LoomGUI
         public string resDirName = "res";
 
         [Tooltip("pkg.bin 输出目录（Unity 工程相对路径）")]
-        public string pkgOutputDir = "Assets/StreamingAssets/";
+        public string pkgOutputDir = "Assets/LoomGUI/Bundles/";
+
+        [Tooltip("字体列表（familyName=CSS font-family；sourceFileName=driver 拼 .bytes 路径）")]
+        public List<FontEntry> fonts = new();
 
         [Tooltip("包列表")]
         public List<PackageEntry> packages = new();
@@ -73,7 +76,19 @@ namespace LoomGUI
         public bool isDefault;
         [Tooltip("packables 文件夹（Unity 相对路径）")]
         public List<string> folders = new();
-        [Tooltip("运行时图集引用（同步时自动绑）")]
-        public SpriteAtlas atlas;
+        // REMOVED: public SpriteAtlas atlas — would drag asset into Resources build.
+        // SpriteAtlas is now resolved by atlasName in the build pipeline, not stored as a serialized reference.
+    }
+
+    /// 字体配置。不持有 Font asset 引用（避免 Resources build 拖入资产）。
+    /// familyName 对应 CSS font-family；sourceFileName 让 driver 拼 .bytes 路径。
+    [Serializable]
+    public class FontEntry {
+        [Tooltip("CSS font-family 值。拖入时默认=源文件名去扩展，可手改")]
+        public string familyName;
+        [Tooltip("源文件名（如 NotoSansSC.ttc）。拖 asset 时自动填，driver 拼 .bytes 路径用")]
+        public string sourceFileName;
+        [Tooltip("默认回退字体")]
+        public bool isDefault;
     }
 }

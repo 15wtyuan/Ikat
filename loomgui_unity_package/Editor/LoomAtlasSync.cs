@@ -58,7 +58,7 @@ namespace LoomGUI.Editor
             string rel = ResolveAtlasPath(entry);
             if (rel != null && File.Exists(ToAbs(rel)))
             {
-                entry.atlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(rel);   // 强制绑 V2（覆盖旧 V1 引用）
+                // entry.atlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(rel);   // TODO B5: entry.atlas removed
                 EnsureAxisAlignedPacking(rel);   // 防 .meta 回退到默认的 rotation=1
                 return rel;
             }
@@ -74,7 +74,7 @@ namespace LoomGUI.Editor
             AssetDatabase.Refresh();
             EnsureAxisAlignedPacking(rel);   // V2 默认开 rotation/tightPacking，关掉
 
-            entry.atlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(rel);
+            // entry.atlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(rel);   // TODO B5: entry.atlas removed
             Debug.Log($"[LoomAtlasSync] 自动创建 V2 图集：{rel}");
             return rel;
         }
@@ -163,19 +163,14 @@ namespace LoomGUI.Editor
             if (importer == null) { Debug.LogError($"[LoomAtlasSync] SpriteAtlasImporter 获取失败：{atlasRel}"); return; }
             importer.SaveAndReimport();
 
-            entry.atlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(atlasRel);
+            // entry.atlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(atlasRel);   // TODO B5: entry.atlas removed
             Debug.Log($"[LoomAtlasSync] {entry.atlasName}：{sprites.Count} Sprite 同步 → {atlasRel}");
         }
 
-        /// atlasEntry → V2 .spriteatlasv2 路径。优先 entry.atlas 引用（须 .spriteatlasv2），否则按名搜 V2。
+        /// atlasEntry → V2 .spriteatlasv2 路径。按 atlasName 搜（entry.atlas 不再持有引用）。
         static string ResolveAtlasPath(AtlasEntry entry)
         {
-            if (entry.atlas != null)
-            {
-                string p = AssetDatabase.GetAssetPath(entry.atlas);
-                if (!string.IsNullOrEmpty(p) && p.EndsWith(".spriteatlasv2", System.StringComparison.OrdinalIgnoreCase))
-                    return p;
-            }
+            // TODO B5: rewire — entry.atlas field removed; resolve by atlasName only
             string[] guids = AssetDatabase.FindAssets(entry.atlasName + " t:SpriteAtlas");
             foreach (var g in guids)
             {

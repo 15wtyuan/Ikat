@@ -31,31 +31,7 @@ namespace LoomGUI
             _cache.Clear();
             _warned.Clear();
             _defaultAtlas = null;
-            if (settings == null)
-            {
-                Debug.LogWarning("[SpriteResolver] Init: settings 为 null（LoomSettings 未建 / 未进 Resources）");
-                return;
-            }
-            int entriesSkipped = 0;
-            foreach (var entry in settings.atlasEntries)
-            {
-                if (entry == null || entry.atlas == null) { entriesSkipped++; continue; }
-                // isDefault 不暴露（UI 隐藏）——res 根图/未命中子目录统一走 FirstAtlas 兜底（spec §4.3 边界）。
-                foreach (var folder in entry.folders)
-                {
-                    if (string.IsNullOrEmpty(folder)) continue;
-                    // folder 是 Unity 路径如 Assets/LoomUI/res/icons → 子目录 key = 最末段 "icons"。
-                    string key = folder.TrimEnd('/', '\\');
-                    int sep = key.LastIndexOfAny(new[] { '/', '\\' });
-                    if (sep >= 0) key = key.Substring(sep + 1);
-                    if (!string.IsNullOrEmpty(key))
-                        _folderToAtlas[key] = entry.atlas;
-                }
-            }
-            Debug.Log($"[SpriteResolver] Init: {_folderToAtlas.Count} folder→atlas 映射，{settings.atlasEntries.Count} entries" +
-                      (entriesSkipped > 0
-                          ? $"（{entriesSkipped} entry.atlas 为 null 跳过——Editor 未同步或运行时引用丢失）"
-                          : ""));
+            // Rewritten in Task B4 to folder->atlasName mapping + injected loader.
         }
 
         /// 测试用：直接注入映射表。
