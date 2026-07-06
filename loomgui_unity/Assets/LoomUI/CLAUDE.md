@@ -25,7 +25,7 @@
 
 ## 交互/选择器
 - 伪类：`:hover` / `:active` / `:disabled` / `:focus`
-- 选择器：标签/类/id/后代/子代/分组。禁 `+`/`~`/`*`/属性选择器/`:nth-child`/`:not()`
+- 选择器：标签/类/id/后代/子代/分组/属性选择器（`[attr]`/`[attr="val"]`，v1.5 起）。禁 `+`/`~`/`*`/`:nth-child`/`:not()`
 
 ## position:relative / absolute
 `relative` 靠 taffy 默认生效，写不写行为一致（无 inset 偏移）。`absolute`（v1.4-b）脱离流，配 `top`/`right`/`bottom`/`left` 定位。`fixed`/`sticky` 仍静默忽略。

@@ -546,6 +546,7 @@ fn effective_scroll_container_emits_thumb_node() {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -555,14 +556,6 @@ fn effective_scroll_container_emits_thumb_node() {
             None,
             false,
             None,
-        ),
-        (
-            Some(0),
-            NodeKind::Container,
-            ResolvedStyle::default(),
-            vec![],
-            None,
-            false,
             None,
         ),
         (
@@ -572,6 +565,17 @@ fn effective_scroll_container_emits_thumb_node() {
             vec![],
             None,
             false,
+            None,
+            None,
+        ),
+        (
+            Some(0),
+            NodeKind::Container,
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
             None,
         ),
     ];
@@ -640,6 +644,7 @@ fn non_effective_container_no_thumb() {
             None,
             false,
             None,
+            None,
         ),
         (
             Some(0),
@@ -648,6 +653,7 @@ fn non_effective_container_no_thumb() {
             vec![],
             None,
             false,
+            None,
             None,
         ),
     ];
@@ -702,7 +708,16 @@ fn render_text_payload_matches_layout_text_layout() {
     let mut text_s = ResolvedStyle::default();
     text_s.font_size = fs;
     let entries = vec![
-        (None, NodeKind::Container, root_s, vec![], None, false, None),
+        (
+            None,
+            NodeKind::Container,
+            root_s,
+            vec![],
+            None,
+            false,
+            None,
+            None,
+        ),
         (
             Some(0),
             NodeKind::Text {
@@ -712,6 +727,7 @@ fn render_text_payload_matches_layout_text_layout() {
             vec![],
             None,
             false,
+            None,
             None,
         ),
     ];
@@ -773,7 +789,16 @@ fn render_long_text_still_wraps_with_layout_reuse() {
     let mut text_s = ResolvedStyle::default();
     text_s.font_size = fs;
     let entries = vec![
-        (None, NodeKind::Container, root_s, vec![], None, false, None),
+        (
+            None,
+            NodeKind::Container,
+            root_s,
+            vec![],
+            None,
+            false,
+            None,
+            None,
+        ),
         (
             Some(0),
             NodeKind::Text {
@@ -783,6 +808,7 @@ fn render_long_text_still_wraps_with_layout_reuse() {
             vec![],
             None,
             false,
+            None,
             None,
         ),
     ];

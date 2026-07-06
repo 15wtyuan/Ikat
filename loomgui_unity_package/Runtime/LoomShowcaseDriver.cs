@@ -75,6 +75,8 @@ namespace LoomGUI
         // === 按页 listener 注册表（§7.5）===
         // 当前页注册的 listener：nodeId → [(eventType, callback)]。切页前遍历逐个 RemoveListener。
         readonly Dictionary<uint, List<(EventType type, EventCallback cb)>> _pageListeners = new();
+        // 当前页注册的 Controller 切页 listener：(mountNode, callback) 列表。切页前遍历逐个 RemoveControllerChangedListener。
+        readonly List<(uint mount, ControllerChangedCallback cb)> _controllerListeners = new();
 
         // === 灯阵计数（page_interact）===
         int _clickCount, _hoverCount, _dragCount, _longCount, _keyCount;
@@ -107,6 +109,16 @@ namespace LoomGUI
         // === tips 叠加演示 ===
         // Coroutine 计时器句柄（防重复触发叠多个 toast）。
         Coroutine _tipsRoutine;
+
+        // === Controller 演示（page_controller）===
+        // tab-root 的 Controller 挂载 NodeId（GetController 返回）。driver 缓存后用 handle 调 SetSelectedIndex。
+        uint _tabMount = uint.MaxValue;
+        uint _dialogMount = uint.MaxValue;
+        uint _biconMount = uint.MaxValue;
+        uint _otabMount = uint.MaxValue;
+        uint _itabMount = uint.MaxValue;
+        // bicon 当前页（路 B 演示：点"下一个"循环切 0→1→2→0）
+        int _biconIdx;
 
         // === 虚拟列表演示===
         bool _isListPage;
@@ -251,6 +263,12 @@ namespace LoomGUI
                     _stage.EventHandler.RemoveListener(node, type, cb);
             }
             _pageListeners.Clear();
+            // Controller 切页 listener 同理：切页前逐个摘（mount_node 即将被 RemoveNode gen++ 失效）。
+            foreach (var (mount, cb) in _controllerListeners)
+                _stage.EventHandler.RemoveControllerChangedListener(mount, cb);
+            _controllerListeners.Clear();
+            // 重置 Controller handle（下页 SubscribeController 重填）。
+            _tabMount = _dialogMount = _biconMount = _otabMount = _itabMount = uint.MaxValue;
         }
 
         // === 按页订阅（SubscribePage）===
@@ -275,6 +293,7 @@ namespace LoomGUI
                 case "page_dyntree": SubscribeDynTree(); break;
                 case "page_list": SubscribeList(); break;
                 case "page_nativehost": SubscribeNativeHost(); break;
+                case "page_controller": SubscribeController(); break;
             }
         }
 
@@ -291,10 +310,11 @@ namespace LoomGUI
             AddNavListener("nav-dyntree", "page_dyntree");
             AddNavListener("nav-list", "page_list");
             AddNavListener("nav-nativehost", "page_nativehost");
+            AddNavListener("nav-controller", "page_controller");
             // nav-tips-demo → 弹 tips_toast 演示（tips_layer 叠加）。
             uint tipsBtn = _stage.FindNodeById("nav-tips-demo");
             AddPageListener(tipsBtn, EventType.Click, _ => ShowTips());
-            Debug.Log("[Showcase] home 订阅完成（8 nav + tips-demo）");
+            Debug.Log("[Showcase] home 订阅完成（9 nav + tips-demo）");
         }
 
         void AddNavListener(string navId, string targetPage)
@@ -442,6 +462,121 @@ namespace LoomGUI
         {
             SubscribeBackHome();
             Debug.Log("[Showcase] page_text 订阅完成（back）");
+        }
+
+        // page_controller（v1.5 Controller 演示）：
+        // - tab Controller（§1）：点 tab 头 → SetSelectedIndex(tabMount, n)；CSS [data-page] 切 panel 显隐 + opacity transition。
+        // - dialog Controller（§2）：开关按钮 → SetSelectedIndex 控弹窗 display。
+        // - 路 A src/text（§3）：订阅 tab on_changed → SetSrc/SetText 按 new_index 切图标 + 文案。
+        // - 路 B 多元素兄弟（§4）：bicon Controller 点"下一个"循环切 page，CSS [data-page] 切三个 img 兄弟显隐。
+        // - 嵌套 Controller（§5）：外层 otab + 内层 itab，driver 各自 SetSelectedIndex，CSS 就近原则互不干扰。
+        // - :hover/:active + transition（§6）：纯 CSS，driver 不订阅（回归测试）。
+        void SubscribeController()
+        {
+            SubscribeBackHome();
+
+            // === §1 标签页 ===
+            // GetController 在子树内找 data-controller="tab" 的挂载点 → 返 NodeId（handle）。
+            // driver 缓存 handle，后续 SetSelectedIndex/订阅 on_changed 都用 handle（不再用全局 name）。
+            _tabMount = _stage.GetController(_currentPage, "tab");
+            if (_tabMount != uint.MaxValue)
+            {
+                // 订阅 on_changed（pull 模式：core 派事件 → LoomStage tick 后 DispatchControllerChanged → 回调）。
+                // 用 AddControllerChangedListener（mount_node 粒度，无 bubble）。
+                // 记进 _controllerListeners（切页前 ClearPageListeners 批量 RemoveControllerChangedListener）。
+                _stage.EventHandler.AddControllerChangedListener(_tabMount, OnTabChanged);
+                _controllerListeners.Add((_tabMount, OnTabChanged));
+            }
+            else
+            {
+                Debug.LogError("[Showcase] page_controller: GetController(tab) 未找到（pkg 未含 data-controller=\"tab\"？）");
+            }
+            // 三个 tab 头按钮 → SetSelectedIndex(handle, n)。
+            AddPageListener(_stage.FindNodeById("tab-btn-0"), EventType.Click, _ => SetTab(0));
+            AddPageListener(_stage.FindNodeById("tab-btn-1"), EventType.Click, _ => SetTab(1));
+            AddPageListener(_stage.FindNodeById("tab-btn-2"), EventType.Click, _ => SetTab(2));
+
+            // === §2 弹窗显隐 ===
+            // dialog Controller：page 0=隐藏, 1=显示。
+            _dialogMount = _stage.GetController(_currentPage, "dialog");
+            AddPageListener(_stage.FindNodeById("dlg-open"), EventType.Click, _ =>
+            {
+                if (_dialogMount != uint.MaxValue) _stage.SetSelectedIndex(_dialogMount, 1);
+            });
+            AddPageListener(_stage.FindNodeById("dlg-close"), EventType.Click, _ =>
+            {
+                if (_dialogMount != uint.MaxValue) _stage.SetSelectedIndex(_dialogMount, 0);
+            });
+
+            // === §3 路 A src/text ===
+            // 路径 A 按钮直接调 SetSelectedIndex(tabMount, n)（复用 §1 的 tab Controller）。
+            // on_changed 回调 OnTabChanged 里按 new_index 调 SetSrc/SetText。
+            AddPageListener(_stage.FindNodeById("route-a-0"), EventType.Click, _ => SetTab(0));
+            AddPageListener(_stage.FindNodeById("route-a-1"), EventType.Click, _ => SetTab(1));
+            AddPageListener(_stage.FindNodeById("route-a-2"), EventType.Click, _ => SetTab(2));
+
+            // === §4 路 B 多元素兄弟 ===
+            // bicon Controller：点"下一个"循环切 0→1→2→0。显隐全由 CSS [data-page] 处理，driver 只切 page。
+            _biconMount = _stage.GetController(_currentPage, "bicon");
+            _biconIdx = 0;
+            AddPageListener(_stage.FindNodeById("bicon-next"), EventType.Click, _ =>
+            {
+                if (_biconMount == uint.MaxValue) return;
+                _biconIdx = (_biconIdx + 1) % 3;
+                _stage.SetSelectedIndex(_biconMount, _biconIdx);
+                // bicon-label 不受 Controller 管（不在 [data-page] 选择器目标里），driver 手动更新计数。
+                uint lbl = _stage.FindNodeById("bicon-label");
+                if (lbl != uint.MaxValue) _stage.SetText(lbl, $"图标 {_biconIdx + 1}/3");
+            });
+
+            // === §5 嵌套 Controller ===
+            // 外层 otab + 内层 itab：各自 GetController + SetSelectedIndex。
+            // CSS [data-page] 就近原则：内层 [data-page] 回溯找最近 data-controller="itab" 祖先，
+            // 不查 otab → 内层切 page 不影响外层 panel 显隐。
+            _otabMount = _stage.GetController(_currentPage, "otab");
+            AddPageListener(_stage.FindNodeById("otab-btn-0"), EventType.Click, _ =>
+            {
+                if (_otabMount != uint.MaxValue) _stage.SetSelectedIndex(_otabMount, 0);
+            });
+            AddPageListener(_stage.FindNodeById("otab-btn-1"), EventType.Click, _ =>
+            {
+                if (_otabMount != uint.MaxValue) _stage.SetSelectedIndex(_otabMount, 1);
+            });
+            _itabMount = _stage.GetController(_currentPage, "itab");
+            AddPageListener(_stage.FindNodeById("itab-btn-0"), EventType.Click, _ =>
+            {
+                if (_itabMount != uint.MaxValue) _stage.SetSelectedIndex(_itabMount, 0);
+            });
+            AddPageListener(_stage.FindNodeById("itab-btn-1"), EventType.Click, _ =>
+            {
+                if (_itabMount != uint.MaxValue) _stage.SetSelectedIndex(_itabMount, 1);
+            });
+
+            Debug.Log($"[Showcase] page_controller 订阅完成（tab={_tabMount} dialog={_dialogMount} bicon={_biconMount} otab={_otabMount} itab={_itabMount}）");
+        }
+
+        // SetTab: 切 tab Controller 选中页。SetSelectedIndex 返 prev（不用），core 派 on_changed 下 tick 回调。
+        void SetTab(int n)
+        {
+            if (_tabMount != uint.MaxValue) _stage.SetSelectedIndex(_tabMount, n);
+        }
+
+        // OnTabChanged: §3 路 A src/text 切换。
+        // core 派 ControllerChangedEvent(mount_node, prev, new_index) → LoomStage tick 后 Dispatch → 此回调。
+        // 按 new_index 调 SetSrc/SetText 切图标 + 文案（CSS 表达不了 src/text，故走 driver 代码路径 A）。
+        void OnTabChanged(uint mountNode, int prev, int newIndex)
+        {
+            // 只响应 tab Controller（dialog/bicon/otab/itab 不走此回调——它们没 AddControllerChangedListener）。
+            if (mountNode != _tabMount) return;
+            // per-page 图标（路 A src 切换）。
+            string[] icons = { "icons/home.png", "icons/eye.png", "icons/zap.png" };
+            string[] texts = { "当前页：1 · 概览", "当前页：2 · 详情", "当前页：3 · 设置" };
+            int idx = newIndex;
+            if (idx < 0 || idx >= icons.Length) idx = 0;
+            uint iconNode = _stage.FindNodeById("route-a-icon");
+            if (iconNode != uint.MaxValue) _stage.SetSrc(iconNode, icons[idx]);
+            uint textNode = _stage.FindNodeById("route-a-text");
+            if (textNode != uint.MaxValue) _stage.SetText(textNode, texts[idx]);
         }
 
         // page_image：back-home（无其他交互元素，纯展示视觉样式）。

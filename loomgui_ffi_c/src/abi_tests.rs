@@ -15,10 +15,11 @@ fn make_test_pkg_bytes(component: &str) -> Vec<u8> {
         id_attr: None,
         draggable: false,
         tabindex: None,
+        data_controller: None,
     }];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![(component, nodes.as_slice(), &rules)],
+        components: vec![(component, nodes.as_slice(), &rules, &[])],
         asset_manifest: &[],
     };
     loomgui_core::asset::write_package(&input)
@@ -450,10 +451,11 @@ fn find_node_by_id_round_trip() {
         id_attr: Some("ok".to_string()),
         draggable: false,
         tabindex: None,
+        data_controller: None,
     }];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let pkg = loomgui_core::asset::write_package(&PackageInput {
-        components: vec![("comp1", nodes.as_slice(), &rules)],
+        components: vec![("comp1", nodes.as_slice(), &rules, &[])],
         asset_manifest: &[],
     });
     assert_eq!(
@@ -910,6 +912,7 @@ fn build_scroll_stage() -> Stage {
         None::<String>,
         false,
         None::<i32>,
+        None::<String>,
     )];
     stage.scene = Some(Scene::build(&entries));
     let scene = stage.scene.as_mut().unwrap();
@@ -978,6 +981,7 @@ fn set_scroll_pos_non_container_no_op() {
         None::<String>,
         false,
         None::<i32>,
+        None::<String>,
     )];
     stage.scene = Some(Scene::build(&entries));
     let root_id = stage.scene.as_ref().unwrap().roots[0];

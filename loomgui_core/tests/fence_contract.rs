@@ -1,12 +1,15 @@
 //! 围栏契约测试 = LoomGUI 围栏权威真相源（docs/design/fence.md 是人类副本）。
-//! 三类断言：
+//! 四类断言：
 //!   A. 元素围栏：围栏外标签报错（parse_html），白名单接受。
 //!   B. 支持属性：apply_decl 返回 true + ResolvedStyle 字段变化。
 //!   C. 围栏外属性：apply_decl 返回 false + 布局字段不变（静默忽略）。
+//!   D. 属性选择器围栏：parse_selector 接受 [attr]/[attr="val"]（Exists+Eq），
+//!      优先级 class 桶，围栏外操作符保守降级为 Exists。
 //! 改 apply_decl / FENCE_TAGS / selector 必须同步本测试 + fence.md。
 
 use loomgui_core::parse::css::parse_css;
 use loomgui_core::parse::dom::parse_html;
+use loomgui_core::parse::selector::parse_selector;
 use loomgui_core::style::mapping::apply_decl;
 use loomgui_core::style::resolved::ResolvedStyle;
 use taffy::Display;
@@ -75,6 +78,7 @@ fn supported_visual_props_return_true() {
         ("pointer-events", "none"),
         ("filter", "grayscale(1)"),
         ("border-image-slice", "10"),
+        ("transition", "opacity 0.3s ease 0s"),
     ];
     for (prop, val) in cases {
         let mut s = ResolvedStyle::default();
@@ -250,4 +254,137 @@ fn at_rule_media_skipped_by_parser() {
         sheet.rules.is_empty(),
         "@media 块应被跳过，规则不进 StyleSheet"
     );
+}
+
+#[test]
+fn transition_prop_parsed() {
+    // CSS transition 属性解析→TransitionSpec（prop:None=all, duration/delay/ease 各字段）
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "transition", "opacity 0.3s ease 0s"));
+    let ts = s.transition.expect("transition 已设置");
+    assert_eq!(ts.prop, Some(loomgui_core::tween::TweenProp::Opacity));
+    assert!((ts.duration - 0.3).abs() < 1e-5, "duration=0.3s");
+    assert_eq!(ts.ease, loomgui_core::tween::Ease::QuadOut);
+    assert!((ts.delay - 0.0).abs() < 1e-5, "delay=0s");
+}
+
+#[test]
+fn transition_all_and_color_parsed() {
+    // all→None；color→TextColor；background-color→BgColor。
+    for (val, expected_prop) in [
+        ("all 0.2s linear 0s", None),
+        (
+            "color 0.5s ease-in 0.1s",
+            Some(loomgui_core::tween::TweenProp::TextColor),
+        ),
+        (
+            "background-color 0.4s ease-out 0s",
+            Some(loomgui_core::tween::TweenProp::BgColor),
+        ),
+    ] {
+        let mut s = ResolvedStyle::default();
+        assert!(
+            apply_decl(&mut s, "transition", val),
+            "transition {val} 应返回 true"
+        );
+        let ts = s.transition.expect("transition 已设置");
+        assert_eq!(ts.prop, expected_prop, "prop mismatch for {val}");
+    }
+}
+
+#[test]
+fn transition_defaults_for_omitted_tokens() {
+    // 只写属性名 → duration=0, ease=Linear, delay=0 默认。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "transition", "opacity"));
+    let ts = s.transition.expect("transition 已设置");
+    assert_eq!(ts.prop, Some(loomgui_core::tween::TweenProp::Opacity));
+    assert!((ts.duration - 0.0).abs() < 1e-5, "缺 duration 默认 0");
+    assert_eq!(ts.ease, loomgui_core::tween::Ease::Linear);
+    assert!((ts.delay - 0.0).abs() < 1e-5, "缺 delay 默认 0");
+}
+
+// ── D. 属性选择器围栏 ──
+// 属性选择器 `[attr]` / `[attr="val"]` 已从围栏外升入围栏内（v1.5）。
+// 仅 Exists + Eq 两操作符；围栏外操作符（~=, ^= 等）保守降级为 Exists 且丢弃值。
+// 优先级在 class 桶（同 .class），非 tag 桶。
+
+#[test]
+fn parse_attr_selector_exists() {
+    // [attr] → Exists 操作符，value=None。
+    let s = parse_selector("[data-controller]").expect("应解析成功");
+    assert_eq!(s.compound.len(), 1);
+    assert_eq!(s.compound[0].attrs.len(), 1);
+    let a = &s.compound[0].attrs[0];
+    assert_eq!(a.name, "data-controller");
+    assert!(matches!(a.op, loomgui_core::style::dynamic::AttrOp::Exists));
+    assert!(a.value.is_none());
+}
+
+#[test]
+fn parse_attr_selector_eq() {
+    // [attr="val"] → Eq 操作符，value=字面值。
+    let s = parse_selector(r#"[data-page="1"]"#).expect("应解析成功");
+    let a = &s.compound[0].attrs[0];
+    assert_eq!(a.name, "data-page");
+    assert!(matches!(a.op, loomgui_core::style::dynamic::AttrOp::Eq));
+    assert_eq!(a.value.as_deref(), Some("1"));
+}
+
+#[test]
+fn attr_selector_specificity_class_bucket() {
+    // 属性选择器优先级 = class 桶 (0,1,0)，非 tag 桶 (0,0,1)。
+    let s = parse_selector("[data-controller]").expect("应解析成功");
+    assert_eq!(
+        s.specificity,
+        loomgui_core::style::dynamic::Specificity(0, 1, 0),
+        "[attr] specificity = (0,1,0)（class 桶）"
+    );
+}
+
+#[test]
+fn attr_selector_with_class_specificity_summed() {
+    // [data-page="1"].panel → (0,2,0)：attr + class 各贡献一个 class 桶。
+    let s = parse_selector(r#"[data-page="1"].panel"#).expect("应解析成功");
+    assert_eq!(
+        s.specificity,
+        loomgui_core::style::dynamic::Specificity(0, 2, 0)
+    );
+}
+
+#[test]
+fn parse_attr_combined_tag_class_attr() {
+    // div.panel[data-controller="tab"] → tag + class + attr 共存于同一 compound。
+    let s = parse_selector(r#"div.panel[data-controller="tab"]"#).expect("应解析成功");
+    let c = &s.compound[0];
+    assert_eq!(c.tag.as_deref(), Some("div"));
+    assert_eq!(c.classes, vec!["panel".to_string()]);
+    assert_eq!(c.attrs.len(), 1);
+    assert_eq!(c.attrs[0].name, "data-controller");
+    assert!(matches!(
+        c.attrs[0].op,
+        loomgui_core::style::dynamic::AttrOp::Eq
+    ));
+    assert_eq!(c.attrs[0].value.as_deref(), Some("tab"));
+}
+
+#[test]
+fn attr_selector_fence_out_op_degrades_to_exists() {
+    // 围栏外操作符（~=, ^= 等）→ 保守降级为 Exists：name 去操作符，value 丢弃。
+    // 不作解析错误（语义限定），属宽容降级。
+    let s = parse_selector(r#"[attr~="val"]"#).expect("应解析成功");
+    let a = &s.compound[0].attrs[0];
+    assert_eq!(a.name, "attr");
+    assert!(matches!(a.op, loomgui_core::style::dynamic::AttrOp::Exists));
+    assert!(a.value.is_none(), "围栏外操作符丢弃 value");
+}
+
+#[test]
+fn attr_selector_name_normalized_to_lowercase() {
+    // HTML 属性名大小写不敏感 → parse 内小写归一。
+    let s = parse_selector(r#"[DATA-CONTROLLER="Tab"]"#).expect("应解析成功");
+    let a = &s.compound[0].attrs[0];
+    assert_eq!(a.name, "data-controller");
+    assert_eq!(a.value.as_deref(), Some("Tab"));
+    // 值保留原样（大小写敏感），仅 name 归一。
 }

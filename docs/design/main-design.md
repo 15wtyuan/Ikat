@@ -111,7 +111,7 @@
   [data-controller="tab"][data-page="1"] .panel { opacity: 0.3; }
 </style>
 ```
-Controller 状态变化时，运行时把 `data-page` 写到挂载该 Controller 的元素上，子树用标准属性选择器匹配——cascade 天然生效（§4.3）。带过渡用 `-l-transition: 0.3s ease`（映射 GTween）。
+Controller 状态变化时，匹配器遇 `[data-page]` 回溯找最近 `data-controller` 祖先、查 registry 的 `selected_index`（不写回节点属性，§1.4），子树属性选择器匹配——cascade 天然生效（§4.3）。带过渡用标准 `transition: 0.3s ease`（映射 GTween）。
 
 ---
 
@@ -123,7 +123,7 @@ Controller 状态变化时，运行时把 `data-page` 写到挂载该 Controller
 - **选择器匹配**：**自写极简匹配器**（~100 行），覆盖围栏内的标签/类/id/后代/子代/伪类。不用 selectors crate——围栏选择器极窄，Servo 级通用引擎 + Element 适配器胶水是过度设计。
 
 ### 4.2 Cascade 子集（标准 CSS 子集，AI 可预测）
-1. **Specificity（标准 CSS tuple a-b-c）**：`inline > id > class > tag`，按元组 `(id数, class数, tag数)` 字典序比较。属性选择器（`[data-page]`）与伪类（`:hover`）同归 class 级（b）。元组大者胜；相同按出现顺序（后者覆盖前者）。与浏览器/AI 先验一致。
+1. **Specificity（标准 CSS tuple a-b-c）**：`inline > id > class > tag`，按元组 `(id数, class数, tag数)` 字典序比较。属性选择器（`[data-page]`）与伪类（`:hover`）同归 class 级（b）【实证】。元组大者胜；相同按出现顺序（后者覆盖前者）。与浏览器/AI 先验一致。
 2. **属性级合并**：多规则命中同一元素，逐 longhand 取最高优先级值。`flex` 简写按 MDN 展开（`flex:1`→grow=1,shrink=1,basis=0%），与单独 `flex-grow` 同优先级时按出现顺序。
 3. **继承**（关键，不实现则 DSL 不可用）：白名单 inherited properties 默认从父继承——`color`、`font-size`、`font-family`、`font-weight`、`font-style`、`line-height`、`letter-spacing`、`white-space`、`text-align`、`visibility`。其余 non-inherited。
 4. **不支持 `!important`**：围栏来源少，`!important` 几乎没用武之地反增 cascade 复杂度，砍。全部 vanilla CSS，AI 训练数据海量。
@@ -433,13 +433,16 @@ stage.is_pointer_on_ui() -> bool   // = 命中目标非空且非根
 - 特殊：`DelayedCall`、`Shake`、`SetPath`(贝塞尔)、`smoothStart`(吸收首帧大 dt)。
 - **prop_type 分层**（关键）：tween 写属性区分 "transform 属性"（x/y/scale/rotation，置 `transform_dirty`，不 solve）vs "layout 属性"（width/height/flex，置 `layout_dirty` 触发 solve）。位置/缩放动画走 transform 不触发 solve。
 
-### 10.2 Transition（时间线 = 编排器，不自驱）
-纯数据 `items: Vec<TransitionItem>`。`Play()` 把每个 item 翻译成 Tweener 提交 TweenManager。两点关键帧；多关键帧靠多 item 串行。嵌套 Transition 递归 + 完成回调递减父计数。
+### 10.2 Transition（时间线 = 编排器，不自驱）【拆 v1.5-b，本期未实现】
+纯数据 `items: Vec<TransitionItem>`。`Play()` 把每个 item 翻译成 Tweener 提交 TweenManager。两点关键帧；多关键帧靠多 item 串行。嵌套 Transition 递归 + 完成回调递减父计数。与 Controller 正交（不同层），可由 Controller.on_changed 触发。
 
 ### 10.3 Controller（状态机，纯状态）
-`Controller { selected_index, page_ids, ... }`。`set_selected_index` 改 index + 扇出 + 派发 onChanged + 置子树 style dirty（触发 §4.3 重匹配）。Controller 不直接改 UI 属性，全靠 Gear + 样式重算。
+`Controller { selected_index, page_ids, ... }`。`set_selected_index` 改 index + 派发 onChanged + 置子树 style dirty（触发 §4.3 重匹配）+ 更新元素 `data-page` 属性。Controller 不直接改 UI 属性，全靠 CSS 属性选择器 + `transition` 实现页面切换效果（§3.5）。
 
-### 10.4 Gear（状态→属性映射）
+### 10.4 Gear（状态→属性映射）【砍——CSS 属性选择器 + 动态 API 取代】
+
+> Gear 机制已砍。v1.5 Controller 的页面切换效果通过 CSS 属性选择器（`[data-page]`）匹配 + `transition` 动画实现，无需 Gear 中间层。状态→属性的映射直接由 cascade（§4.2）+ 动态 `set_style` API 完成，更简洁、AI 更可预测。
+
 每节点多个 Gear（Display/Xy/Size/Look/Color/FontSize...），存储 `HashMap<page_id, Value>`。`Apply` 查当前页值 → kill 旧 tween → 往 TweenManager 提交插值 tween，`on_update` 写回。reentrancy 守卫（同步同栈帧 set→write→clear，防 set_property→update_gear→UpdateState 回写污染）对齐 fgui `GearXY`。
 
 ### 10.5 Timers

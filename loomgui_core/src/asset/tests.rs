@@ -10,6 +10,7 @@ fn tn(kind: NodeKind) -> TemplateNode {
         id_attr: None,
         draggable: false,
         tabindex: None,
+        data_controller: None,
     }
 }
 
@@ -37,8 +38,8 @@ fn write_read_multi_component_roundtrip() {
     }];
     let input = PackageInput {
         components: vec![
-            ("comp1", comp1_nodes.as_slice(), &rules),
-            ("comp2", comp2_nodes.as_slice(), &rules),
+            ("comp1", comp1_nodes.as_slice(), &rules, &[]),
+            ("comp2", comp2_nodes.as_slice(), &rules, &[]),
         ],
         asset_manifest: &manifest,
     };
@@ -81,7 +82,7 @@ fn read_rejects_too_new_version() {
     let nodes = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     let mut bytes = write_package(&input);
@@ -95,7 +96,7 @@ fn header_is_20_bytes_no_root_size() {
     let nodes = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     let bytes = write_package(&input);
@@ -129,7 +130,7 @@ fn multi_component_parent_idx_is_component_local() {
     let comp_b = [root_b, child_b];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("a", &comp_a, &rules), ("b", &comp_b, &rules)],
+        components: vec![("a", &comp_a, &rules, &[]), ("b", &comp_b, &rules, &[])],
         asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -157,7 +158,7 @@ fn all_node_kinds_roundtrip() {
         h: 0,
     }];
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &manifest,
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -188,7 +189,7 @@ fn classes_id_attr_draggable_tabindex_roundtrip() {
     let nodes = [root, btn];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -201,6 +202,119 @@ fn classes_id_attr_draggable_tabindex_roundtrip() {
     assert_eq!(ns[1].tabindex, Some(3));
 }
 
+/// data_controller 字段经 write_package/read_package 往返保留（含 Some/None 两端）。
+/// 镜像 classes_id_attr_draggable_tabindex_roundtrip 的 Some/None 覆盖风格。
+#[test]
+fn data_controller_roundtrips_through_pkg() {
+    let mut root = tn(NodeKind::Container);
+    root.data_controller = Some("tab".into());
+    let mut child = tn(NodeKind::Text {
+        content: "hi".into(),
+    });
+    child.parent_idx = Some(0);
+    // child.data_controller 保持 None（验 None 端不误读成 Some）
+    let nodes = [root, child];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+        asset_manifest: &[],
+    };
+    let pkg = read_package(&write_package(&input)).unwrap();
+    let ns = &pkg.components["c"].nodes;
+    assert_eq!(
+        ns[0].data_controller.as_deref(),
+        Some("tab"),
+        "root data_controller 应往返保留"
+    );
+    assert!(
+        ns[1].data_controller.is_none(),
+        "child data_controller=None 应保持 None"
+    );
+}
+
+/// ControllerSection 往返：单组件带 2 个 ControllerEntry（不同 name/mount/initial），
+/// write_package → read_package 后字段全保留。验 name 经 StringTable intern（去重）+
+/// mount_node_idx/initial_selected_index 定长小端读写对称。
+#[test]
+fn controller_section_roundtrips_through_pkg() {
+    let mut root = tn(NodeKind::Container);
+    root.data_controller = Some("tab".into());
+    let mut page1 = tn(NodeKind::Container);
+    page1.parent_idx = Some(0);
+    let mut page2 = tn(NodeKind::Container);
+    page2.parent_idx = Some(0);
+    let nodes = [root, page1, page2];
+    let rules = empty_rules();
+    let controllers = vec![
+        ControllerEntry {
+            name: "tab".into(),
+            mount_node_idx: 0,
+            initial_selected_index: 1,
+        },
+        ControllerEntry {
+            name: "sub".into(),
+            mount_node_idx: 2,
+            initial_selected_index: -1,
+        },
+    ];
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &controllers)],
+        asset_manifest: &[],
+    };
+    let pkg = read_package(&write_package(&input)).unwrap();
+    let cs = &pkg.components["c"].controllers;
+    assert_eq!(cs.len(), 2, "两 ControllerEntry 往返保留");
+    assert_eq!(cs[0].name, "tab");
+    assert_eq!(cs[0].mount_node_idx, 0);
+    assert_eq!(cs[0].initial_selected_index, 1);
+    assert_eq!(cs[1].name, "sub");
+    assert_eq!(cs[1].mount_node_idx, 2);
+    assert_eq!(cs[1].initial_selected_index, -1, "负 initial 往返保留");
+}
+
+/// ControllerSection 空组件（无 controller）往返：controller_count=0 段合法，
+/// read 后 controllers 为空 Vec（不 panic、不误读）。
+#[test]
+fn controller_section_empty_roundtrips() {
+    let nodes = [tn(NodeKind::Container)];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+        asset_manifest: &[],
+    };
+    let pkg = read_package(&write_package(&input)).unwrap();
+    assert!(
+        pkg.components["c"].controllers.is_empty(),
+        "无 controller → 空 Vec"
+    );
+}
+
+/// ControllerSection name 经 StringTable 去重：两组件 controller 同名 "tab" →
+/// StringTable 只存一份 "tab"，read 后两组件 controller.name 仍为 "tab"。
+#[test]
+fn controller_section_name_dedups_across_components() {
+    let mut root_a = tn(NodeKind::Container);
+    root_a.data_controller = Some("tab".into());
+    let mut root_b = tn(NodeKind::Container);
+    root_b.data_controller = Some("tab".into());
+    let comp_a = [root_a];
+    let comp_b = [root_b];
+    let rules = empty_rules();
+    let ctrl = vec![ControllerEntry {
+        name: "tab".into(),
+        mount_node_idx: 0,
+        initial_selected_index: 0,
+    }];
+    let input = PackageInput {
+        components: vec![("a", &comp_a, &rules, &ctrl), ("b", &comp_b, &rules, &ctrl)],
+        asset_manifest: &[],
+    };
+    let bytes = write_package(&input);
+    let pkg = read_package(&bytes).unwrap();
+    assert_eq!(pkg.components["a"].controllers[0].name, "tab");
+    assert_eq!(pkg.components["b"].controllers[0].name, "tab");
+}
+
 #[test]
 fn style_blob_roundtrips_baked_resolved_style() {
     let mut n = tn(NodeKind::Container);
@@ -208,7 +322,7 @@ fn style_blob_roundtrips_baked_resolved_style() {
     let nodes = [n];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -242,7 +356,7 @@ fn per_component_dynamic_rules_roundtrip() {
     let na = [tn(NodeKind::Container)];
     let nb = [tn(NodeKind::Container)];
     let input = PackageInput {
-        components: vec![("a", &na, &rules_a), ("b", &nb, &rules_b)],
+        components: vec![("a", &na, &rules_a, &[]), ("b", &nb, &rules_b, &[])],
         asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -267,7 +381,10 @@ fn stringtable_dedups_across_components() {
     let c2_nodes = [n2];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c1", &c1_nodes, &rules), ("c2", &c2_nodes, &rules)],
+        components: vec![
+            ("c1", &c1_nodes, &rules, &[]),
+            ("c2", &c2_nodes, &rules, &[]),
+        ],
         asset_manifest: &[],
     };
     let bytes = write_package(&input);
@@ -320,7 +437,7 @@ fn asset_manifest_multiple_paths_roundtrip() {
         },
     ];
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &manifest,
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -355,7 +472,7 @@ fn asset_manifest_preserves_non_square_dims() {
         h: 20,
     }];
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &manifest,
     };
     let pkg = read_package(&write_package(&input)).unwrap();
@@ -394,7 +511,7 @@ fn two_comp_pkg_bytes() -> Vec<u8> {
     let comp_b = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("a", &comp_a, &rules), ("b", &comp_b, &rules)],
+        components: vec![("a", &comp_a, &rules, &[]), ("b", &comp_b, &rules, &[])],
         asset_manifest: &[],
     };
     write_package(&input)
@@ -429,8 +546,8 @@ fn read_rejects_cross_component_parent() {
     let ct_off = comp_table_offset(&bytes);
     let nodeblock_off = ct_off + 2 * 14; // 2 组件条目
                                          // 节点布局：parent_idx(4) + kind(1) + style_len(4) + style_blob + text_idx(2) + src_idx(2)
-                                         //   + class_count(2) + class_idx[] + id_idx(2) + flags(1) + tabindex(4)
-                                         //   固定部分 = 22B + style_blob_len + 2*class_count。所有节点用默认 style → style_len 相同。
+                                         //   + class_count(2) + class_idx[] + id_idx(2) + flags(1) + tabindex(4) + dc_idx(2)
+                                         //   固定部分 = 24B + style_blob_len + 2*class_count。所有节点用默认 style → style_len 相同。
     let style_len_0 = u32::from_le_bytes(
         bytes[nodeblock_off + 5..nodeblock_off + 9]
             .try_into()
@@ -442,7 +559,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node0_size = 22 + style_len_0 + 2 * class_count_0;
+    let node0_size = 24 + style_len_0 + 2 * class_count_0;
     let node1_off = nodeblock_off + node0_size;
     let style_len_1 =
         u32::from_le_bytes(bytes[node1_off + 5..node1_off + 9].try_into().unwrap()) as usize;
@@ -451,7 +568,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node1_size = 22 + style_len_1 + 2 * class_count_1;
+    let node1_size = 24 + style_len_1 + 2 * class_count_1;
     let node2_off = nodeblock_off + node0_size + node1_size;
     // 篡改节点 2（comp_b root）的 parent_idx 从 -1 → 0（< base=2，跨组件）
     let mut patched = bytes.clone();
@@ -489,7 +606,7 @@ fn write_rejects_non_root_nodes_zero() {
     let nodes = [root];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
         asset_manifest: &[],
     };
     let _ = write_package(&input);

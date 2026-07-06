@@ -454,3 +454,14 @@ fn apply_decl_border_image_slice_percent() {
     let sl = s.border_image_slice.expect("slice 设了");
     assert!((sl.top - 0.25).abs() < 1e-4, "25% 存 0.25，渲染期 resolve");
 }
+
+#[test]
+fn transition_empty_value_is_none() {
+    // apply_decl("transition", "") → style.transition = None（未声明 vs 默认值有不同语义）
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "transition", ""));
+    assert_eq!(
+        s.transition, None,
+        "空 transition 值 → None，不设为默认 spec"
+    );
+}

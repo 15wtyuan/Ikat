@@ -78,7 +78,7 @@ v1 还没有编辑器/WASM 渲染，用 **open-design Chromium 兜底**：围栏
 
 ### 1.6 v1 明确不做（推 v1.x/v2）
 
-富文本、软裁剪/形状遮罩(paintingMode)、Transition+Controller+Gear 编排、列表虚拟化、滚动分页/吸附/下拉刷新、IME 完整链路+软键盘、字体 fallback 链、完整 NativeHost、rustybuzz 复杂 shaping+BiDi、IL2CPP+移动端、grid、CSS transition。
+富文本、软裁剪/形状遮罩(paintingMode)、Transition 编排（拆 v1.5-b）、滚动分页/吸附/下拉刷新、IME 完整链路+软键盘、字体 fallback 链、完整 NativeHost、rustybuzz 复杂 shaping+BiDi、IL2CPP+移动端、grid。
 
 > 注：border-image-slice 九宫格（v1.3 已做）。v1d（滚动/键盘/transform/动画/safe-area）子轮已全交付，明细见 git history + docs/pitfalls.md。
 
@@ -94,8 +94,8 @@ v1 还没有编辑器/WASM 渲染，用 **open-design Chromium 兜底**：围栏
 | v1.2 | **border-radius（圆角 mesh）** | AI 必写 CSS；围栏外静默丢弃违背可预测性 | ✅ |
 | v1.3 | **ColorFilter + 九宫格 slice + profiling** | 色调统一 + disabled 灰化升级；UI 皮肤缩放不变形；draw call/GC/内存实机达标 | ✅ |
 | v1.3+ | **动态树重构（地基）** | v1 static-tree 撞墙（v1.4 列表/v1.5+ 全需运行时改树）。代际 NodeId + slotmap + 动态 API，非功能号 | ✅ 待家里机验 |
-| v1.4 | **虚拟化列表 + position:absolute** | 背包/排行榜/邮件必备，v1 手搓 div+scroll 无 slot 复用。建在动态树之上。absolute 解 tips overlay/列表 slot 定位。soft clip（羽化）推 v2（§5.2） | 待开 |
-| v1.5 | **Controller / Gear / Transition** | 标签页/弹窗/过场/状态切换必备 | 待开 |
+| v1.4 | **虚拟化列表 + position:absolute** | 背包/排行榜/邮件必备，v1 手搓 div+scroll 无 slot 复用。建在动态树之上。absolute 解 tips overlay/列表 slot 定位。soft clip（羽化）推 v2（§5.2） | 已交付 |
+| v1.5 | **Controller（纯 CSS 路径）+ transition 动画；Gear 砍；Transition 拆 v1.5-b** | 标签页/弹窗/过场/状态切换必备 | 进行中 |
 | v1.6 | **富文本（inline layout）** | 聊天/物品描述必备。多样式/图文混排，复用 v1 文本测量。内部 NodeKind，不暴露标签 | 待开 |
 | v1.7 | **TextInput / IME（光标/选区/composing）** | 登录/搜索必备。IME 最重，可能需 rustybuzz | 待开 |
 
@@ -148,11 +148,11 @@ RenderNode payload 加 `Mask{shape_ref, mode: MaskMode}`，MaskMode{Write,Conten
 
 v1d.3 已做 **NativeHost-lite**（div 占位 + 后端 `BindNativeHost` 跟随 world transform + 显隐 + 排序）。**v1.4-c 修隐藏漏洞**：空 div slot（被 `merge_meshes` 吞）不进 blob → Sync 查不到 → 改 FFI 按 nodeId 查 `world_matrix`/`sort_key`/`visible`（独立于 merge；core 加 `node_sort_keys` 快照，坑 127）。URP Transparent 三件套（`_Surface`+keyword+`ZWrite`）让 3D GO 进 UI 同队列（坑 129）。完整版仍加：尺寸 push（后端 push 给核心 `set_native_host_size`，核心缓存值在 MeasureFunc 返回——避免每帧回调风暴）、hit/clip/所有权/Godot 镜像。管线加 drain 步（set_input 后、tick 前，后端须完成本帧 size push）。
 
-### 5.4 Controller / Gear / Transition（v1.5）
+### 5.4 Controller / Transition（v1.5）【Gear 砍】
 
-**Controller**（状态机，纯状态）：`set_selected_index` 改 index + 扇出子节点 Gear + 派发 onChanged + 置子树 style dirty。DSL 用 `[data-page]` 属性选择器（design §4.5）。
-**Gear**（状态→属性映射）：每节点 `gears`，存储 `HashMap<page_id, Value>`。Apply 查当前页值 → kill 旧 tween → 提交插值 tween。reentrancy 守卫：`gear_locked` 同步同栈帧（set→write→clear），防 `set_property→update_gear→UpdateState` 回写污染。
-**Transition**（时间线=编排器，不自驱）：纯数据 `items: Vec<TransitionItem>`。Play 翻译成 Tweener 提交 TweenManager。倒放=逆序+start/end 互换+delay 镜像。
+**Controller**（状态机，纯状态）：`set_selected_index` 改 index + 更新元素 `data-page` 属性 + 派发 onChanged + 置子树 style dirty。页面切换效果通过 CSS 属性选择器（`[data-page]`）+ `transition` 动画实现，无需 Gear 中间层。
+**Gear**（已砍）：CSS 属性选择器 + 动态 `set_style` API 取代状态→属性映射。更简洁、AI 更可预测。
+**Transition**（时间线=编排器，不自驱）：拆 v1.5-b。纯数据 `items: Vec<TransitionItem>`。Play 翻译成 Tweener 提交 TweenManager。倒放=逆序+start/end 互换+delay 镜像。
 
 ### 5.5 文本：v1.x 字段与跨引擎归一化
 

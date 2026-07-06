@@ -12,7 +12,7 @@
 #![allow(clippy::type_complexity)]
 
 use loomgui_core::asset::{
-    extract_component_css, normalize_path, AssetEntry, PackageInput, TemplateNode,
+    extract_component_css, normalize_path, AssetEntry, ControllerEntry, PackageInput, TemplateNode,
 };
 use loomgui_core::scene::NodeId;
 use scraper::{Html, Selector as ScraperSelector};
@@ -34,12 +34,17 @@ pub struct PackedPackage {
 ///
 /// **manifest 收 `AssetEntry { path, w:0, h:0 }`**（此处只收 path，w/h 由 `pack` 后置
 /// 读 PNG IHDR 填——scene_to_template 不知 res 目录绝对路径，只有归一化 path）。
+///
+/// 同时扫 `Node.data_controller` 收 `ControllerEntry`：mount_node_idx = 节点在产物 Vec 中的
+/// 位置（同 parent_idx 约定），initial_selected_index 从 `controller_pages` 查（打包期扫
+/// `data-page` 属性得，key = controller name）。
 fn scene_to_template(
     scene: &loomgui_core::scene::Scene,
     res_dir: &str,
     manifest: &mut Vec<AssetEntry>,
     seen: &mut std::collections::HashSet<String>,
-) -> Vec<TemplateNode> {
+    controller_pages: &std::collections::HashMap<String, i32>,
+) -> (Vec<TemplateNode>, Vec<ControllerEntry>) {
     // NodeId → 在产物 Vec 中的位置（slotmap 插入序）。
     let pos_of: std::collections::HashMap<NodeId, usize> = scene
         .nodes
@@ -49,7 +54,8 @@ fn scene_to_template(
         .collect();
 
     let mut nodes: Vec<TemplateNode> = Vec::with_capacity(scene.nodes.len());
-    for n in scene.nodes.values() {
+    let mut controllers: Vec<ControllerEntry> = Vec::new();
+    for (i, n) in scene.nodes.values().enumerate() {
         // img src 归一化进 manifest（去重）。归一化后回写节点 src，让 write_package 的
         // StringTable 收归一化 path（非原 src）。
         let mut kind = n.kind.clone();
@@ -103,9 +109,41 @@ fn scene_to_template(
             id_attr: n.id_attr.clone(),
             draggable: n.draggable,
             tabindex: n.tabindex,
+            data_controller: n.data_controller.clone(),
         });
+        // data-controller="name" 的节点 → ControllerEntry。
+        // mount_node_idx = 节点在产物 Vec 中的位置（同 parent_idx 约定，组件内局部下标）。
+        // initial_selected_index 从 controller_pages 查（打包期扫 data-page 属性得），缺省 0。
+        if let Some(name) = &n.data_controller {
+            let initial = controller_pages.get(name).copied().unwrap_or(0);
+            controllers.push(ControllerEntry {
+                name: name.clone(),
+                mount_node_idx: i as u32,
+                initial_selected_index: initial,
+            });
+        }
     }
-    nodes
+    (nodes, controllers)
+}
+
+/// 扫 ElementTree 收 controller name → initial_selected_index 映射。
+/// 仅 data-controller 元素同时带 data-page 属性时记录其解析值（i32，缺省/非数字 → 0）。
+/// data-controller 无 data-page → 不进 map（scene_to_template 查不到时默认 0）。
+fn collect_controller_pages(
+    tree: &loomgui_core::parse::dom::ElementTree,
+) -> std::collections::HashMap<String, i32> {
+    let mut map = std::collections::HashMap::new();
+    for el in &tree.nodes {
+        if let Some(name) = el.attrs.get("data-controller") {
+            let initial = el
+                .attrs
+                .get("data-page")
+                .and_then(|v| v.parse::<i32>().ok())
+                .unwrap_or(0);
+            map.insert(name.clone(), initial);
+        }
+    }
+    map
 }
 
 /// 读 PNG IHDR chunk 取真实像素 width/height。
@@ -214,11 +252,12 @@ pub fn pack(
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("res");
-    // owned 生命周期：nodes/dynamic 需在 write_package 借用时存活，故先全部收集进 owned Vec。
+    // owned 生命周期：nodes/dynamic/controllers 需在 write_package 借用时存活，故先全部收集进 owned Vec。
     let mut owned: Vec<(
         String,
         Vec<TemplateNode>,
         loomgui_core::style::dynamic::DynamicRuleTable,
+        Vec<ControllerEntry>,
     )> = Vec::with_capacity(html_files.len());
     let mut manifest: Vec<AssetEntry> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -238,9 +277,12 @@ pub fn pack(
         let dynamic = loomgui_core::asset::extract_dynamic_rules(&sheet);
         let styles = loomgui_core::style::cascade::resolve_styles(&tree, &sheet);
         let scene = loomgui_core::scene::build_scene(&tree, &styles);
-        let nodes = scene_to_template(&scene, res_dir, &mut manifest, &mut seen);
+        // 扫 data-controller + data-page → controller name → initial page 映射。
+        let controller_pages = collect_controller_pages(&tree);
+        let (nodes, controllers) =
+            scene_to_template(&scene, res_dir, &mut manifest, &mut seen, &controller_pages);
         let comp_name = hf.strip_suffix(".html").unwrap_or(hf).to_string();
-        owned.push((comp_name, nodes, dynamic));
+        owned.push((comp_name, nodes, dynamic, controllers));
     }
 
     // 对每个 manifest path 读 PNG IHDR 填真实尺寸 w/h。
@@ -258,9 +300,12 @@ pub fn pack(
         &str,
         &[TemplateNode],
         &loomgui_core::style::dynamic::DynamicRuleTable,
+        &[ControllerEntry],
     )> = owned
         .iter()
-        .map(|(name, nodes, dyn_rules)| (name.as_str(), nodes.as_slice(), dyn_rules))
+        .map(|(name, nodes, dyn_rules, ctrls)| {
+            (name.as_str(), nodes.as_slice(), dyn_rules, ctrls.as_slice())
+        })
         .collect();
     let input = PackageInput {
         components: comp_refs,
@@ -309,6 +354,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
+            Option<String>,
         )> = vec![
             (
                 None,
@@ -317,6 +363,7 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
                 None,
             ),
             (
@@ -329,12 +376,15 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
             ),
         ];
         let scene = Scene::build(&entries);
         let mut manifest: Vec<AssetEntry> = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        let nodes = scene_to_template(&scene, "res", &mut manifest, &mut seen);
+        let controller_pages = std::collections::HashMap::new();
+        let (nodes, _controllers) =
+            scene_to_template(&scene, "res", &mut manifest, &mut seen, &controller_pages);
         // scene_to_template 只收 path（w/h=0），w/h 由 pack 后置读 PNG IHDR 填
         assert_eq!(
             manifest,
@@ -365,6 +415,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
+            Option<String>,
         )> = vec![
             (
                 None,
@@ -374,16 +425,6 @@ mod tests {
                 None,
                 false,
                 None,
-            ),
-            (
-                Some(0),
-                NodeKind::Image {
-                    src: "res/a.png".into(),
-                },
-                ResolvedStyle::default(),
-                vec![],
-                None,
-                false,
                 None,
             ),
             (
@@ -395,13 +436,27 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Image {
+                    src: "res/a.png".into(),
+                },
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
                 None,
             ),
         ];
         let scene = Scene::build(&entries);
         let mut manifest: Vec<AssetEntry> = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        let _ = scene_to_template(&scene, "res", &mut manifest, &mut seen);
+        let controller_pages = std::collections::HashMap::new();
+        let _ = scene_to_template(&scene, "res", &mut manifest, &mut seen, &controller_pages);
         assert_eq!(manifest.len(), 1, "同 src 去重只入一次");
     }
 
@@ -418,6 +473,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
+            Option<String>,
         )> = vec![
             (
                 None,
@@ -426,6 +482,7 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
                 None,
             ),
             (
@@ -438,12 +495,15 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
             ),
         ];
         let scene = Scene::build(&entries);
         let mut manifest: Vec<AssetEntry> = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        let nodes = scene_to_template(&scene, "res", &mut manifest, &mut seen);
+        let controller_pages = std::collections::HashMap::new();
+        let (nodes, _controllers) =
+            scene_to_template(&scene, "res", &mut manifest, &mut seen, &controller_pages);
         assert!(manifest.is_empty(), "res 外 src 不入 manifest");
         // 节点 src 保持原样（未归一化）
         match &nodes[1].kind {
@@ -465,6 +525,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
+            Option<String>,
         )> = vec![
             (
                 None,
@@ -473,6 +534,7 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
                 None,
             ),
             (
@@ -485,12 +547,15 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
             ),
         ];
         let scene = Scene::build(&entries);
         let mut manifest: Vec<AssetEntry> = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        let nodes = scene_to_template(&scene, "res", &mut manifest, &mut seen);
+        let controller_pages = std::collections::HashMap::new();
+        let (nodes, _controllers) =
+            scene_to_template(&scene, "res", &mut manifest, &mut seen, &controller_pages);
         assert_eq!(nodes[0].parent_idx, None, "root parent=None");
         assert_eq!(nodes[1].parent_idx, Some(0), "child parent_idx=Some(0)");
     }

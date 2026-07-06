@@ -2,8 +2,10 @@
 //! 动 opacity / transform(translate·scale·rotate) / 颜色(bg·text)。
 //! replace-override：动画值覆盖 ResolvedStyle 读取点（None 退回 CSS）。
 
+use serde::{Deserialize, Serialize};
+
 /// 可动属性。u8 值与 FFI / C# enum 对齐。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum TweenProp {
     Opacity = 0,
@@ -39,7 +41,7 @@ pub fn prop_value_size(prop: TweenProp) -> u8 {
 }
 
 /// easing 子集（10 个）。u8 值与 FFI / C# enum 对齐。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Ease {
     Linear = 0,
@@ -139,23 +141,37 @@ impl Ease {
     }
 }
 
+/// transition 请求（rematch 检测 data-page 通道变化时推入 Scene.pending_transitions；
+/// Stage tick drain 后 kill 旧 tween + 提交新 tween）。E 阶段补完整字段。
+#[derive(Debug, Clone, Copy)]
+pub struct TransitionRequest {
+    pub node: crate::scene::node::NodeId,
+    pub prop: TweenProp,
+    pub start: [f32; 4],
+    pub end: [f32; 4],
+    pub ease: Ease,
+    pub delay: f32,
+    pub duration: f32,
+}
+
 use crate::input::{EventRecord, EVT_TWEEN_COMPLETE};
 use crate::scene::node::{AnimTable, NodeId, Scene};
 use crate::transform::{self};
 
 /// 一个进行中的 tween（内部结构，TweenManager 内部 Vec 管理）。
-/// pub(crate)：测试断言 + Stage 联动查需读字段（killed/node）。
+/// pub(crate) 字段供测试断言（kill 后验全 killed、transition drain 验 start/end/tag）+
+/// Stage 联动查（killed/node）。
 #[derive(Debug, Clone)]
 pub(crate) struct Tween {
     pub(crate) node: NodeId,
-    prop: TweenProp,
-    start: [f32; 4],
-    end: [f32; 4],
+    pub(crate) prop: TweenProp,
+    pub(crate) start: [f32; 4],
+    pub(crate) end: [f32; 4],
     ease: Ease,
     delay: f32,
     duration: f32,
     elapsed: f32,
-    tag: u32,
+    pub(crate) tag: u32,
     started: bool,
     pub(crate) killed: bool,
 }

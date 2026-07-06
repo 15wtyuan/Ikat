@@ -35,6 +35,7 @@ fn gather_template_nodes(
         .map(|v| v == "true")
         .unwrap_or(false);
     let tabindex = el.attrs.get("tabindex").and_then(|v| v.parse::<i32>().ok());
+    let data_controller = el.attrs.get("data-controller").cloned();
     let my_idx = out.len();
     out.push(TemplateNode {
         kind: kind.clone(),
@@ -44,6 +45,7 @@ fn gather_template_nodes(
         id_attr: el.id.clone(),
         draggable,
         tabindex,
+        data_controller,
     });
     // Container/Button 的裸文本 → Text 子（同 gather_rec，继承字体/颜色字段）
     if matches!(kind, NodeKind::Container | NodeKind::Button) {
@@ -67,6 +69,7 @@ fn gather_template_nodes(
                 id_attr: None,
                 draggable: false,
                 tabindex: None,
+                data_controller: None,
             });
         }
     }
@@ -103,7 +106,7 @@ fn pkg_bytes_from_inline(html: &str, css: &str) -> (Vec<u8>, Vec<String>) {
         .collect();
     let manifest_paths: Vec<String> = manifest.iter().map(|e| e.path.clone()).collect();
     let input = PackageInput {
-        components: vec![("scene", nodes.as_slice(), &dynamic)],
+        components: vec![("scene", nodes.as_slice(), &dynamic, &[])],
         asset_manifest: &manifest,
     };
     (crate::asset::write_package(&input), manifest_paths)
@@ -289,6 +292,9 @@ fn is_pointer_on_ui_false_when_miss() {
         scroll: Default::default(),
         text_layouts: Vec::new(),
         node_sort_keys: Vec::new(),
+        controllers: Default::default(),
+        pending_controller_events: Vec::new(),
+        pending_transitions: Vec::new(),
     });
     s.set_input(&[crate::input::PointerEvent {
         kind: crate::input::PointerKind::Move,
@@ -617,4 +623,200 @@ fn remove_node_then_tick_does_not_panic_on_slot_gap() {
     );
     // 再 tick 一帧确认稳定（world_transforms 已按新容量重算）
     s.tick_and_render();
+}
+
+/// transition 请求 → Stage tick drain 后提交 tween。
+/// hover btn（base_style 声明 transition: background-color 0.3s linear）→
+/// warmup tick 置 cascaded_once=true → Move 到 btn → tick → rematch 检测 bg 变化推请求 →
+/// drain kill 旧 tween（无）+ 提交新 tween（BgColor 0→1, 0.3s）。
+/// 断言：Stage::tweens 有 1 个 active（非 killed）tween for (btn, BgColor)。
+#[cfg(feature = "parse")]
+#[test]
+fn transition_request_becomes_tween() {
+    let (mut s, btn_id) = transition_stage();
+    // warmup tick：置 cascaded_once=true（首次 cascade 即时生效不动画）+ 建 world_transforms
+    // 基线（hit_test 1 帧延迟语义，首帧 world 空 → 首帧 hit_test 全 None）。
+    s.tick_and_render();
+    // Move 到按钮 (50,25)（按钮在 (0,0,100,50)）→ hover 状态置位 → tick 后 rematch 检测
+    // bg 0→1 变化（cascaded_once=true）→ 推 transition 请求 → drain 提交 tween。
+    s.set_input(&[crate::input::PointerEvent {
+        kind: crate::input::PointerKind::Move,
+        x: 50.0,
+        y: 25.0,
+        button: 0,
+        pad: [0, 0],
+        touch_id: -1,
+    }]);
+    s.tick_and_render();
+    // 断言：Stage::tweens 有 1 个 active tween for (btn, BgColor)
+    let active: Vec<_> = s
+        .tweens
+        .tweens
+        .iter()
+        .filter(|t| {
+            !t.killed && t.node == btn_id && matches!(t.prop, crate::tween::TweenProp::BgColor)
+        })
+        .collect();
+    assert_eq!(
+        active.len(),
+        1,
+        "hover transition → 1 active BgColor tween for btn"
+    );
+    // tween 末值 = hover 白 [1,1,1,1]（#ffffff）
+    let t = active[0];
+    assert!(
+        (t.end[0] - 1.0).abs() < 1e-5 && (t.end[3] - 1.0).abs() < 1e-5,
+        "tween end = #ffffff"
+    );
+    // tag = TRANSITION_TAG（0xFFFF_FFFE，区分 driver 提交的 tag）
+    assert_eq!(t.tag, 0xFFFF_FFFE, "transition tween tag = TRANSITION_TAG");
+}
+
+/// transition 中段换向：kill 旧 tween + 从 mid-flight override 提交新 tween（无 snap）。
+/// hover → tween A（bg 0→1, 0.3s linear）。advance 0.1s → A mid-flight（bg≈0.33）。
+/// un-hover（Move 走）→ rematch 检测 bg 1→0 变化推请求（start=anim override≈0.33, end=0）→
+/// drain kill A（override 保留 0.33）+ 提交 B（start=0.33, end=0, 0.3s）。
+/// 断言：B 的 start ≈ 0.33（mid-flight 连续，无 snap 回 0）；anim.bg_color 在 resubmit 当帧 ≈ 0.33。
+#[cfg(feature = "parse")]
+#[test]
+fn mid_transition_rechange_kills_and_continues() {
+    let (mut s, btn_id) = transition_stage();
+    // warmup tick：置 cascaded_once=true + 建 world 基线
+    s.tick_and_render();
+    // 1) hover → tick → tween A 提交（bg 0→1, 0.3s linear）
+    s.set_input(&[crate::input::PointerEvent {
+        kind: crate::input::PointerKind::Move,
+        x: 50.0,
+        y: 25.0,
+        button: 0,
+        pad: [0, 0],
+        touch_id: -1,
+    }]);
+    s.advance_time(0.0); // hover 当帧 dt=0（tween 已注册但未推进）
+    s.tick_and_render();
+    // 2) advance 0.1s → tick → A 推进 0.1s（mid-flight，norm=0.333, bg≈0.333）
+    s.advance_time(0.1);
+    s.tick_and_render();
+    let mid_bg = s
+        .scene
+        .as_ref()
+        .unwrap()
+        .anim
+        .0
+        .get(&btn_id)
+        .and_then(|a| a.bg_color)
+        .map(|c| c[0])
+        .unwrap_or(0.0);
+    assert!(
+        (mid_bg - 0.3333).abs() < 0.02,
+        "A mid-flight bg≈0.333，实得 {:.4}",
+        mid_bg
+    );
+    // 3) un-hover（Move 走到按钮外）→ tick → rematch 检测 bg 变化推请求 →
+    //    drain kill A（override 保留 ≈0.333）+ 提交 B（start≈0.333, end=0）
+    s.set_input(&[crate::input::PointerEvent {
+        kind: crate::input::PointerKind::Move,
+        x: 150.0, // 按钮外
+        y: 75.0,
+        button: 0,
+        pad: [0, 0],
+        touch_id: -1,
+    }]);
+    s.advance_time(0.0); // resubmit 当帧 dt=0（仅 drain，不推进 B）
+    s.tick_and_render();
+    // 断言：B 已提交（1 active tween for (btn, BgColor)），且 B 的 start ≈ mid-flight 值
+    let active: Vec<_> = s
+        .tweens
+        .tweens
+        .iter()
+        .filter(|t| {
+            !t.killed && t.node == btn_id && matches!(t.prop, crate::tween::TweenProp::BgColor)
+        })
+        .collect();
+    assert_eq!(active.len(), 1, "drain 后仅 1 active tween（B；A 被 kill）");
+    let b = active[0];
+    assert!(
+        (b.start[0] - mid_bg).abs() < 0.02,
+        "B start = mid-flight override ({:.4})，无 snap 回 0；实得 {:.4}",
+        mid_bg,
+        b.start[0]
+    );
+    assert!(
+        (b.end[0] - 0.0).abs() < 1e-5,
+        "B end = base bg（0），实得 {:.4}",
+        b.end[0]
+    );
+    // anim.bg_color 当帧 ≈ mid_bg（kill 保留 override，新 tween dt=0 未推进 → 仍 mid-flight 值）
+    let resubmit_bg = s
+        .scene
+        .as_ref()
+        .unwrap()
+        .anim
+        .0
+        .get(&btn_id)
+        .and_then(|a| a.bg_color)
+        .map(|c| c[0])
+        .unwrap_or(0.0);
+    assert!(
+        (resubmit_bg - mid_bg).abs() < 0.02,
+        "resubmit 当帧 anim.bg_color ≈ mid-flight ({:.4})，无 snap；实得 {:.4}",
+        mid_bg,
+        resubmit_bg
+    );
+    // 4) A 被 kill（killed=true）。drain 在 tweens.update 之后跑（update 在 tick ①，drain 在 ⑥.5），
+    //    故 A 的 killed 条目本轮 retain 未清（retain 在 update 末尾跑）——下轮 update 才清出。
+    //    验：A 标 killed（不再 active），B 是唯一 active tween（已在 active.len()==1 断言）。
+    assert!(
+        s.tweens.tweens.iter().any(|t| t.node == btn_id && t.killed),
+        "A 标 killed（retain 清出延至下轮 update，本帧仍驻留但非 active）"
+    );
+    // 下轮 update（advance+tick）→ A 被 retain 清出 → 仅 B active
+    s.advance_time(0.0);
+    s.tick_and_render();
+    assert!(
+        !s.tweens.tweens.iter().any(|t| t.node == btn_id && t.killed),
+        "下轮 update 后 A 被 retain 清出（无 killed 残留）"
+    );
+    let active_after: Vec<_> = s
+        .tweens
+        .tweens
+        .iter()
+        .filter(|t| {
+            !t.killed && t.node == btn_id && matches!(t.prop, crate::tween::TweenProp::BgColor)
+        })
+        .collect();
+    assert_eq!(
+        active_after.len(),
+        1,
+        "下轮 update 后仅 B active（A 已清出）"
+    );
+}
+
+/// 共享脚手架：建 transition 测试用 Stage（包路径 load+instantiate，含 :hover 动态规则）。
+/// btn：100×50 在 (0,0)，base bg=#000000，:hover bg=#ffffff，transition: background-color 0.3s linear。
+/// 返回 (Stage, btn_id)。caller 须先 warmup tick（置 cascaded_once + 建 world 基线）。
+#[cfg(feature = "parse")]
+fn transition_stage() -> (Stage, crate::scene::node::NodeId) {
+    let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+    let html = r#"<div class="root"><button class="btn">OK</button></div>"#;
+    let css = r#".btn { width: 100px; height: 50px; background-color: #000000; }
+                .btn:hover { background-color: #ffffff; }
+                .btn { transition: background-color 0.3s linear; }"#;
+    let (pkg_bytes, _) = pkg_bytes_from_inline(html, css);
+    let mut s = Stage::new(font_path, (200.0, 100.0)).unwrap();
+    s.load_package("bag", &pkg_bytes).unwrap();
+    s.ensure_scene();
+    let comp_root = s.instantiate("bag", "scene").unwrap();
+    s.scene.as_mut().unwrap().roots.push(comp_root);
+    // btn = comp_root 的首个 Button 子（gather_rec 把 <button>OK</button> 建成 Button + auto Text 子）
+    let btn_id = {
+        let sc = s.scene.as_ref().unwrap();
+        *sc.get(comp_root)
+            .unwrap()
+            .children
+            .iter()
+            .find(|&&c| matches!(sc.get(c).unwrap().kind, NodeKind::Button))
+            .unwrap()
+    };
+    (s, btn_id)
 }

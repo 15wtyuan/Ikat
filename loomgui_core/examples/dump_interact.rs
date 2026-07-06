@@ -116,10 +116,11 @@ fn main() {
             id_attr: n.id_attr.clone(),
             draggable: n.draggable,
             tabindex: n.tabindex,
+            data_controller: n.data_controller.clone(),
         })
         .collect();
     let input = PackageInput {
-        components: vec![("scene", nodes.as_slice(), &dynamic)],
+        components: vec![("scene", nodes.as_slice(), &dynamic, &[])],
         asset_manifest: &[],
     };
     let pkg = write_package(&input);

@@ -24,6 +24,7 @@ fn scene_nodes_is_slotmap_and_get_by_id() {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -33,6 +34,7 @@ fn scene_nodes_is_slotmap_and_get_by_id() {
             None,
             false,
             None,
+            None,
         ),
         (
             Some(0),
@@ -41,6 +43,7 @@ fn scene_nodes_is_slotmap_and_get_by_id() {
             Vec::new(),
             None,
             false,
+            None,
             None,
         ),
     ];
@@ -85,6 +88,7 @@ fn node_id_from_key_to_key_roundtrip() {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![(
         None,
         NodeKind::Container,
@@ -92,6 +96,7 @@ fn node_id_from_key_to_key_roundtrip() {
         Vec::new(),
         None,
         false,
+        None,
         None,
     )];
     let scene = Scene::build(&entries);
@@ -143,6 +148,7 @@ fn scene_build_6tuple_sets_draggable() {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -152,6 +158,7 @@ fn scene_build_6tuple_sets_draggable() {
             None,
             false,
             None,
+            None,
         ),
         (
             Some(0),
@@ -160,6 +167,7 @@ fn scene_build_6tuple_sets_draggable() {
             Vec::new(),
             None,
             true,
+            None,
             None,
         ),
     ];
@@ -185,6 +193,9 @@ fn scene_default_has_empty_dynamic_rules() {
         scroll: Default::default(),
         text_layouts: Vec::new(),
         node_sort_keys: Vec::new(),
+        controllers: Default::default(),
+        pending_controller_events: Vec::new(),
+        pending_transitions: Vec::new(),
     };
     assert!(
         s.dynamic_rules.rules.is_empty(),
@@ -211,6 +222,9 @@ fn scene_default_focused_node_none() {
         scroll: Default::default(),
         text_layouts: Vec::new(),
         node_sort_keys: Vec::new(),
+        controllers: Default::default(),
+        pending_controller_events: Vec::new(),
+        pending_transitions: Vec::new(),
     };
     assert_eq!(s.focused_node, None, "Scene 默认 focused_node=None");
 }
@@ -225,6 +239,7 @@ fn scene_build_7tuple_sets_tabindex() {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -234,6 +249,7 @@ fn scene_build_7tuple_sets_tabindex() {
             None,
             false,
             None,
+            None,
         ),
         (
             Some(0),
@@ -243,6 +259,7 @@ fn scene_build_7tuple_sets_tabindex() {
             None,
             false,
             Some(0),
+            None,
         ),
         (
             Some(0),
@@ -252,6 +269,7 @@ fn scene_build_7tuple_sets_tabindex() {
             None,
             false,
             Some(3),
+            None,
         ),
     ];
     let scene = Scene::build(&entries);
@@ -292,6 +310,7 @@ fn scene_build_constructs_tree_without_parse() {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -300,6 +319,7 @@ fn scene_build_constructs_tree_without_parse() {
             Vec::new(),
             None,
             false,
+            None,
             None,
         ),
         (
@@ -311,6 +331,7 @@ fn scene_build_constructs_tree_without_parse() {
             Vec::new(),
             None,
             false,
+            None,
             None,
         ),
     ];
@@ -334,7 +355,16 @@ fn scene_build_constructs_tree_without_parse() {
     let mut of = ResolvedStyle::default();
     of.overflow_x = OverflowMode::Hidden;
     of.overflow_y = OverflowMode::Hidden;
-    let scene2 = Scene::build(&[(None, NodeKind::Container, of, Vec::new(), None, false, None)]);
+    let scene2 = Scene::build(&[(
+        None,
+        NodeKind::Container,
+        of,
+        Vec::new(),
+        None,
+        false,
+        None,
+        None,
+    )]);
     assert!(
         scene2.get(scene2.roots[0]).unwrap().clip_rect.is_some(),
         "overflow Hidden → clip slot"
@@ -357,7 +387,16 @@ fn build_clip_rect_slot_for_scroll_auto_and_single_axis() {
         let mut s = ResolvedStyle::default();
         s.overflow_x = x;
         s.overflow_y = y;
-        let sc = Scene::build(&[(None, NodeKind::Container, s, Vec::new(), None, false, None)]);
+        let sc = Scene::build(&[(
+            None,
+            NodeKind::Container,
+            s,
+            Vec::new(),
+            None,
+            false,
+            None,
+            None,
+        )]);
         assert!(
             sc.get(sc.roots[0]).unwrap().clip_rect.is_some(),
             "{} → clip slot",
@@ -376,6 +415,7 @@ fn build_clip_rect_slot_for_scroll_auto_and_single_axis() {
         None,
         false,
         None,
+        None,
     )]);
     assert!(
         sc.get(sc.roots[0]).unwrap().clip_rect.is_none(),
@@ -393,6 +433,7 @@ fn anim_scene_one_node() -> (Scene, NodeId) {
         Vec::new(),
         None,
         false,
+        None,
         None,
     )]);
     let id = sc.roots[0];
@@ -419,6 +460,7 @@ fn animtable_hashmap_get_ensure_clear() {
                 None,
                 false,
                 None,
+                None,
             ),
             (
                 Some(0),
@@ -427,6 +469,7 @@ fn animtable_hashmap_get_ensure_clear() {
                 Vec::new(),
                 None,
                 false,
+                None,
                 None,
             ),
         ]);
@@ -507,4 +550,67 @@ fn nodeanim_is_empty_default_true() {
         ..Default::default()
     }
     .is_empty());
+}
+
+#[test]
+fn controller_changed_event_abi_size() {
+    // #[repr(C)] 跨 FFI：u32 mount_node + i32 prev + i32 new = 12 字节。
+    // 断言 ABI 尺寸防 padding 漂移（C# 镜像须对齐）。
+    assert_eq!(
+        std::mem::size_of::<ControllerChangedEvent>(),
+        12,
+        "ControllerChangedEvent 须 12 字节（u32 + i32 + i32，repr(C) 无 padding）"
+    );
+}
+
+#[test]
+fn controller_default_selected_index_is_zero() {
+    // #[derive(Default)] → selected_index = 0（i32::default）。
+    // -1 语义仅由 set_controller_selected 的懒注册 or_insert 提供（无条目表）。
+    let c = Controller::default();
+    assert_eq!(c.selected_index, 0);
+}
+
+#[test]
+fn scene_controller_selected_set_get_roundtrip() {
+    // set_controller_selected 懒注册 + 返 prev；controller_selected 读回。
+    let entries: Vec<(
+        Option<usize>,
+        NodeKind,
+        ResolvedStyle,
+        Vec<String>,
+        Option<String>,
+        bool,
+        Option<i32>,
+        Option<String>,
+    )> = vec![(
+        None,
+        NodeKind::Container,
+        ResolvedStyle::default(),
+        Vec::new(),
+        None,
+        false,
+        None,
+        None,
+    )];
+    let mut scene = Scene::build(&entries);
+    let mount = scene.roots[0];
+
+    // 无条目 → None
+    assert_eq!(scene.controller_selected(mount), None);
+    // 首次 set → 懒建条目，返 prev=-1
+    let prev = scene.set_controller_selected(mount, 3);
+    assert_eq!(prev, -1);
+    assert_eq!(scene.controller_selected(mount), Some(3));
+    // 再 set → 返上次的 3
+    let prev = scene.set_controller_selected(mount, 0);
+    assert_eq!(prev, 3);
+    assert_eq!(scene.controller_selected(mount), Some(0));
+}
+
+/// ControllerChangedEvent ABI 尺寸 = 12B（mount_node:u32 + prev:i32 + new:i32，紧凑无 pad）。
+/// 跨 FFI 传递，C# 侧 [StructLayout(Sequential)] 同布局。
+#[test]
+fn controller_changed_event_size() {
+    assert_eq!(std::mem::size_of::<ControllerChangedEvent>(), 12);
 }

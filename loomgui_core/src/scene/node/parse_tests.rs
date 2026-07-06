@@ -30,6 +30,7 @@ fn find_by_id_attr_returns_node_and_none() {
             Some("root".to_string()),
             false,
             None,
+            None,
         ),
         (
             Some(0),
@@ -38,6 +39,7 @@ fn find_by_id_attr_returns_node_and_none() {
             vec![],
             Some("btn".to_string()),
             false,
+            None,
             None,
         ),
         (
@@ -49,6 +51,7 @@ fn find_by_id_attr_returns_node_and_none() {
             vec![],
             None,
             false,
+            None,
             None,
         ),
     ];
@@ -266,4 +269,18 @@ fn tabindex_attr_parsed() {
     assert_eq!(btns[2].tabindex, Some(-1), "tabindex=\"-1\" → Some(-1)");
     assert_eq!(btns[3].tabindex, None, "tabindex=\"abc\"（非数字）→ None");
     assert_eq!(btns[4].tabindex, None, "无 tabindex 属性 → None");
+}
+
+#[test]
+fn data_controller_attr_flows_to_node() {
+    let html = r#"<div data-controller="tab"><span>hi</span></div>"#;
+    let css = "";
+    let tree = parse_html(html).unwrap();
+    let sheet = parse_css(css).unwrap();
+    let styles = resolve_styles(&tree, &sheet);
+    let scene = build_scene(&tree, &styles);
+    // find the div (root)
+    let root = scene.roots[0];
+    let node = scene.get(root).unwrap();
+    assert_eq!(node.data_controller.as_deref(), Some("tab"));
 }

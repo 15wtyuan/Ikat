@@ -123,6 +123,15 @@ pub struct Node {
     /// （虚拟列表 slot 用：slot 换绑 item 时 NodeId 变但 reuse_key 不变 → 后端复用 GO）。
     /// 运行时字段（不进 pkg，打包期不存）。driver 设。
     pub reuse_key: u32,
+    /// HTML `data-controller="name"` 属性值。声明本节点为某 Controller 的挂载点
+    /// （子树归该 Controller 管）。运行时由 set_selected_index 改 selected_index，
+    /// 匹配器遇 [data-page] 时回溯找最近的 data_controller 祖先查其页。建树时从
+    /// ElementData.attrs["data-controller"] 填（照 draggable/tabindex 先例）。
+    pub data_controller: Option<String>,
+    /// 是否已 cascade 过至少一次。首次 rematch 置 true 且不产 transition 请求
+    /// （初始出现即时生效，不动画入场）。后续 rematch 检测可动画通道变化时
+    /// 据此门控是否推 transition 请求。
+    pub cascaded_once: bool,
 }
 
 impl Default for Node {
@@ -152,6 +161,8 @@ impl Default for Node {
             tabindex: None,
             focused: false,
             reuse_key: 0,
+            data_controller: None,
+            cascaded_once: false,
         }
     }
 }
@@ -220,6 +231,26 @@ impl AnimTable {
     }
 }
 
+/// Controller 状态机（挂载点 NodeId 作 HashMap key，不存对象里）。
+/// selected_index = -1 表无选中页（由 set_controller_selected 懒注册时写入；
+/// Default 为 0，但 registry 中不存在 Default 建的条目——条目只由 set_controller_selected 建）。
+/// 运行时由 Stage::set_selected_index 改，匹配器遇 [data-page] 时回溯找最近
+/// data_controller 祖先查此表定可见性（§1.4）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Controller {
+    pub selected_index: i32,
+}
+
+/// Controller 切页事件（borrow_controller_changed_events 出口，pull 模式）。
+/// mount_node = 挂载点 NodeId（句柄身份）。#[repr(C)] 跨 FFI；size_of 断言 ABI 尺寸。
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ControllerChangedEvent {
+    pub mount_node: u32,
+    pub prev: i32,
+    pub new: i32,
+}
+
 #[derive(Debug, Clone)]
 pub struct Scene {
     pub roots: Vec<NodeId>,
@@ -247,6 +278,16 @@ pub struct Scene {
     /// 不换行；长文本 → Some(available) 换行），render 若用 rect.w（stretch 后的 available 整数宽）
     /// 重测，短文本因 intrinsic 亚像素超 available 误判换行。故 render 复用 layout 结果，不重测。
     pub text_layouts: Vec<Option<crate::text::layout::TextLayout>>,
+    /// Controller 状态机 registry：挂载点 NodeId → Controller。load_package/instantiate 建，
+    /// driver 也可懒注册（set_controller_selected 首次写时建条目）。
+    /// 匹配器遇 [data-page] 时回溯找最近 data_controller 祖先查此表（§1.4）。
+    pub controllers: std::collections::HashMap<NodeId, Controller>,
+    /// 本帧 Controller 切页事件（set_selected_index 推入；borrow_controller_changed_events 读）。
+    /// pull 模式：FFI 每 tick 借出后清空。运行时态，不进 pkg。
+    pub pending_controller_events: Vec<ControllerChangedEvent>,
+    /// 本帧 transition 请求（rematch 检测 data-page 通道变化时推入；Stage tick drain 后
+    /// kill 旧 tween + 提交新 tween，见 Phase E）。运行时态，不进 pkg。
+    pub pending_transitions: Vec<crate::tween::TransitionRequest>,
 }
 
 impl Scene {
@@ -265,6 +306,7 @@ impl Scene {
             Option<String>,
             bool,
             Option<i32>,
+            Option<String>,
         )],
     ) -> Scene {
         let mut scene = Scene {
@@ -277,10 +319,15 @@ impl Scene {
             scroll: Default::default(),
             text_layouts: Vec::new(),
             node_sort_keys: Vec::new(),
+            controllers: Default::default(),
+            pending_controller_events: Vec::new(),
+            pending_transitions: Vec::new(),
         };
         // 先 insert 所有节点，收集 slotmap 分配的 NodeId
         let mut ids: Vec<NodeId> = Vec::with_capacity(entries.len());
-        for (_, kind, style, classes, id_attr, draggable, tabindex) in entries.iter() {
+        for (_, kind, style, classes, id_attr, draggable, tabindex, data_controller) in
+            entries.iter()
+        {
             let node = Node {
                 id: NodeId::INVALID, // 临时，insert 后回填
                 parent: None,        // 下一轮填
@@ -309,6 +356,8 @@ impl Scene {
                 tabindex: *tabindex,
                 focused: false,
                 reuse_key: 0,
+                data_controller: data_controller.clone(),
+                cascaded_once: false,
             };
             let key = scene.nodes.insert(node);
             let id = NodeId::from_key(key);
@@ -316,7 +365,7 @@ impl Scene {
             ids.push(id);
         }
         // 接 parent/children/roots（用 ids 映射 entries 下标 → NodeId）
-        for (i, (parent_idx, _, _, _, _, _, _)) in entries.iter().enumerate() {
+        for (i, (parent_idx, _, _, _, _, _, _, _)) in entries.iter().enumerate() {
             match parent_idx {
                 Some(p) => {
                     let child_id = ids[i];
@@ -349,6 +398,9 @@ impl Scene {
             scroll: Default::default(),
             text_layouts: Vec::new(),
             node_sort_keys: Vec::new(),
+            controllers: Default::default(),
+            pending_controller_events: Vec::new(),
+            pending_transitions: Vec::new(),
         };
         let mut ids: Vec<NodeId> = Vec::with_capacity(nodes.len());
         for n in nodes {
@@ -397,6 +449,23 @@ impl Scene {
             .find(|(_, n)| n.id_attr.as_deref() == Some(id))
             .map(|(_, n)| n.id)
     }
+
+    /// 设 Controller 的 selected_index。挂载点无注册 Controller 时自动建（懒注册，
+    /// 供测试 + instantiate 后 driver 覆盖初始页）。返 prev_index（无条目 → -1）。
+    pub fn set_controller_selected(&mut self, mount: NodeId, idx: i32) -> i32 {
+        let entry = self
+            .controllers
+            .entry(mount)
+            .or_insert(Controller { selected_index: -1 });
+        let prev = entry.selected_index;
+        entry.selected_index = idx;
+        prev
+    }
+
+    /// 读 Controller 的 selected_index。无条目 → None（调用方自定 -1 兜底语义）。
+    pub fn controller_selected(&self, mount: NodeId) -> Option<i32> {
+        self.controllers.get(&mount).map(|c| c.selected_index)
+    }
 }
 
 /// 从 ElementTree + ResolvedStyle 构建 Node 树（gather 后调 `Scene::build`）。
@@ -412,6 +481,7 @@ pub fn build_scene(tree: &ElementTree, styles: &[ResolvedStyle]) -> Scene {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = Vec::new();
     for root in &tree.roots {
         gather_rec(tree, styles, *root, None, &mut entries);
@@ -433,6 +503,7 @@ fn gather_rec(
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )>,
 ) -> usize {
     let el = &tree.nodes[el_id.0];
@@ -468,6 +539,9 @@ fn gather_rec(
     // tabindex 属性 → Option<i32>。非数字 → None（照 DOM 容错：无效值忽略）。
     // 语义：None=不可聚焦；Some(-1)=仅编程；Some(0)=DOM 序；Some(N>0)=显式序。
     let tabindex = el.attrs.get("tabindex").and_then(|v| v.parse::<i32>().ok());
+    // data-controller="name" → Node.data_controller（HTML 属性，照 draggable 先例）。
+    // 值原样存（不归一大小写——HTML 属性值大小写敏感，name 是 caller-defined）。
+    let data_controller = el.attrs.get("data-controller").cloned();
     let my_idx = entries.len();
     entries.push((
         parent_idx,
@@ -477,6 +551,7 @@ fn gather_rec(
         el.id.clone(),
         draggable,
         tabindex,
+        data_controller,
     ));
 
     // Container/Button 的裸文本 → Text 子节点。文本子像无 class 的 <span>：
@@ -503,6 +578,7 @@ fn gather_rec(
                 Vec::new(),
                 None,
                 false,
+                None,
                 None,
             ));
         }

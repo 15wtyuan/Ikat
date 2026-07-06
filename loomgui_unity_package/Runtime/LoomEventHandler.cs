@@ -46,11 +46,27 @@ namespace LoomGUI
         public float y;
     }
 
+    /// C# 镜像 Rust loomgui_core::scene::node::ControllerChangedEvent（#[repr(C)]）。
+    /// 字段序：mount_node:u32 @0 → prev:i32 @4 → new:i32 @8（sizeof=12，紧凑无 pad）。
+    /// 与 Rust ABI 一致（StructLayout.Sequential 默认 pack=0；u32+int+int 全 4 字节对齐）。
+    /// new 是 C# 保留字，字段名用 new_index。
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LoomControllerChangedEvent
+    {
+        public uint mount_node;
+        public int prev;
+        public int new_index;
+    }
+
     /// 事件路由阶段（Capture/Target/Bubble），对齐 DOM/W3C 模型 + fgui capture/bubble 双组。
     public enum Phase : byte { Capture = 0, Target = 1, Bubble = 2 }
 
     /// 业务回调签名（listener 收 EventContext 读命中/坐标/止冒泡）。对齐 fgui EventCallback1。
     public delegate void EventCallback(EventContext ctx);
+
+    /// Controller 切页回调签名（driver 订阅特定 mount_node，切页时收 prev/new_index）。
+    /// 对齐 EventCallback 但更轻量——无坐标/无路由，单节点直派。
+    public delegate void ControllerChangedCallback(uint mountNode, int prev, int newIndex);
 
     /// EventContext（照 fgui EventContext.cs，对象池复用）。
     public class EventContext
@@ -121,6 +137,8 @@ namespace LoomGUI
     {
         readonly System.Collections.Generic.Dictionary<uint, System.Collections.Generic.Dictionary<EventType, EventBridge>> _listeners = new();
         readonly System.Collections.Generic.Dictionary<uint, uint> _parentCache = new();   // node_parent 缓存
+        // Controller 切页回调表：mount_node → 回调多播。无 bubble（单节点直派）。
+        readonly System.Collections.Generic.Dictionary<uint, ControllerChangedCallback> _controllerChangedListeners = new();
         IntPtr _handle;   // node_parent FFI 用（LoomStage 初始化/load 后 SetHandle）
         uint? _captureNodeCap;   // capture 阶段调 CaptureTouch 的节点（消费即清）
         uint? _captureNodeBub;   // bubble 阶段调 CaptureTouch 的节点
@@ -130,12 +148,29 @@ namespace LoomGUI
 
         /// 清所有 listener（切 pkg 重建 scene 后，被删 NodeId 全失效，listener 指向悬空节点）。
         /// 业务 driver 切界面前调，避免 dict 堆积 + 重新 SubscribeAll 前干净态。
-        public void Clear() { _listeners.Clear(); _parentCache.Clear(); }
+        public void Clear() { _listeners.Clear(); _parentCache.Clear(); _controllerChangedListeners.Clear(); }
 
         public void AddListener(uint nodeId, EventType type, EventCallback cb) => GetBridge(nodeId, type).Add(cb);
         public void AddCapture(uint nodeId, EventType type, EventCallback cb) => GetBridge(nodeId, type).AddCapture(cb);
         public void RemoveListener(uint nodeId, EventType type, EventCallback cb) => TryGetBridge(nodeId, type)?.Remove(cb);
         public void RemoveCapture(uint nodeId, EventType type, EventCallback cb) => TryGetBridge(nodeId, type)?.RemoveCapture(cb);
+
+        /// 订阅 Controller 切页事件（mount_node 粒度）。driver 调：切页时收 prev/new_index。
+        public void AddControllerChangedListener(uint mountNode, ControllerChangedCallback cb)
+        {
+            _controllerChangedListeners.TryGetValue(mountNode, out var existing);
+            _controllerChangedListeners[mountNode] = (ControllerChangedCallback)
+                System.Delegate.Combine(existing, cb);
+        }
+        public void RemoveControllerChangedListener(uint mountNode, ControllerChangedCallback cb)
+        {
+            if (_controllerChangedListeners.TryGetValue(mountNode, out var existing))
+            {
+                var updated = (ControllerChangedCallback)System.Delegate.Remove(existing, cb);
+                if (updated == null) _controllerChangedListeners.Remove(mountNode);
+                else _controllerChangedListeners[mountNode] = updated;
+            }
+        }
 
         EventBridge GetBridge(uint nodeId, EventType type)
         {
@@ -194,6 +229,23 @@ namespace LoomGUI
                     case EventType.TweenComplete:
                         DirectDispatch(evt); break;
                 }
+            }
+        }
+
+        /// 读 LoomControllerChangedEvent[] buffer → 按 mount_node 直派回调（无 bubble）。
+        /// ptr = loomgui_stage_borrow_controller_changed_events 返回（LoomStage byte* → IntPtr 透传）。
+        /// count 是记录数（非字节）。与 DispatchPending 同窗口（tick 后、下 tick 前）。
+        ///
+        /// **Marshal.PtrToStructure**：桌面 Mono OK；IL2CPP 移动端对齐坑届时换 Span+BinaryPrimitives。
+        public void DispatchControllerChanged(System.IntPtr ptr, int count)
+        {
+            if (ptr == System.IntPtr.Zero || count <= 0) return;
+            int recSize = System.Runtime.InteropServices.Marshal.SizeOf<LoomControllerChangedEvent>();
+            for (int i = 0; i < count; i++)
+            {
+                var evt = System.Runtime.InteropServices.Marshal.PtrToStructure<LoomControllerChangedEvent>(ptr + i * recSize);
+                if (_controllerChangedListeners.TryGetValue(evt.mount_node, out var cb))
+                    cb?.Invoke(evt.mount_node, evt.prev, evt.new_index);
             }
         }
 

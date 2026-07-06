@@ -297,6 +297,99 @@ pub extern "C" fn loomgui_stage_borrow_events(
     events.as_ptr() as *const u8
 }
 
+/// 拉取本帧 Controller 切页事件（pull，同 borrow_events 语义）。
+/// 返 `pending_controller_events` 的 `as_ptr` + 写 len。null 句柄或无事件 → null + len=0。
+/// 指针下 tick 失效（tick start 清空 pending_controller_events）。
+///
+/// **out_len 是 COUNT 非字节**——C 侧按 `len * sizeof(ControllerChangedEvent)` 切片读。
+/// ControllerChangedEvent 是 `#[repr(C)]` POD（mount_node:u32 + prev:i32 + new:i32 = 12B）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_borrow_controller_changed_events(
+    h: *const StageHandle,
+    out_len: *mut usize,
+) -> *const u8 {
+    if h.is_null() {
+        if !out_len.is_null() {
+            unsafe { *out_len = 0 };
+        }
+        return std::ptr::null();
+    }
+    let sh = unsafe { &*h };
+    let events: &[loomgui_core::scene::node::ControllerChangedEvent] =
+        sh.stage.controller_changed_events();
+    if events.is_empty() {
+        if !out_len.is_null() {
+            unsafe { *out_len = 0 };
+        }
+        return std::ptr::null();
+    }
+    if !out_len.is_null() {
+        unsafe { *out_len = events.len() }; // COUNT 非字节
+    }
+    events.as_ptr() as *const u8
+}
+
+/// 在子树内找 data-controller="name" 的挂载点，返其 NodeId（u32）。
+/// subtree_root = 搜索起点 NodeId；name = UTF-8 字节（指针+len）。
+/// 无匹配 / null 句柄 / 非 UTF-8 name → 0xFFFF_FFFF（sentinel，同 find_node_by_id）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_controller(
+    h: *const StageHandle,
+    subtree_root: u32,
+    name: *const u8,
+    name_len: usize,
+) -> u32 {
+    const NOT_FOUND: u32 = 0xFFFF_FFFF;
+    if h.is_null() || name.is_null() {
+        return NOT_FOUND;
+    }
+    let sh = unsafe { &*h };
+    let bytes = unsafe { std::slice::from_raw_parts(name, name_len) };
+    let name = match std::str::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(_) => return NOT_FOUND,
+    };
+    sh.stage
+        .get_controller(NodeId(subtree_root), name)
+        .map(|n| n.0 as u32)
+        .unwrap_or(NOT_FOUND)
+}
+
+/// 切 Controller 页。无效 mount（无 scene / 节点不存在 / 未挂 data_controller）→ 静默返 -1。
+/// 返 prev（切前 selected_index）；首次 set（无条目）返 -1。null 句柄 → -1。
+/// prev != idx 时推一条 ControllerChangedEvent 进 pending 队列供 borrow 拉取。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_selected_index(
+    h: *mut StageHandle,
+    mount: u32,
+    idx: i32,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    sh.stage.set_selected_index(NodeId(mount), idx)
+}
+
+/// 读 Controller 当前选中页。无 scene / 无条目 / 无效 mount → -1。
+/// null 句柄 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_selected_index(h: *const StageHandle, mount: u32) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    sh.stage.get_selected_index(NodeId(mount))
+}
+
 /// UI 挡住时游戏不响应点击（§10.6）。= 任一活跃槽 last_hit 非空且非根（多指：鼠标 slot0 + 已分配触摸槽）。
 /// null 句柄 → false。
 ///

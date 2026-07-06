@@ -1,7 +1,7 @@
-//! 包格式（.pkg.bin，当前 version=12）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=13）：Rust-internal（packager 写、runtime 读，C# 不解析）。
 //!
 //! 多组件格式：一个 pkg.bin = 多个具名组件（ComponentTable 切分）。
-//! 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponentDynamicRules +
+//! 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponent(DynamicRules+Controllers) +
 //!       AssetManifest。
 //!   - Header 不含 root_w/root_h（root_size 归 Stage）+ 不含 atlas 引用（图集归 Unity）。
 //!   - StringTable：组件名 / text content / img path / classes / id_attr 共用一张表（intern 去重）。
@@ -20,9 +20,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 12; // AssetManifest 含 path+w+h（PNG IHDR 尺寸）
-pub(crate) const MIN_VERSION: u32 = 12;
-pub(crate) const MAX_VERSION: u32 = 12;
+pub const PKG_FORMAT_VERSION: u32 = 13; // TemplateNode.data_controller（Controller 挂载点声明）
+pub(crate) const MIN_VERSION: u32 = 13;
+pub(crate) const MAX_VERSION: u32 = 13;
 const NULL_IDX: u16 = 0xFFFF;
 
 const KIND_CONTAINER: u8 = 0;
@@ -58,6 +58,19 @@ pub struct ComponentTemplate {
     pub name: String,
     pub nodes: Vec<TemplateNode>,
     pub dynamic_rules: DynamicRuleTable,
+    /// Controller 元数据（打包期扫 data-controller + data-page 得）。
+    /// instantiate 时 mount_node_idx 经 id_map 重映射成活 NodeId，建 registry 条目。
+    pub controllers: Vec<ControllerEntry>,
+}
+
+/// 打包期 Controller 元数据。mount_node_idx 是组件内局部下标（同 TemplateNode.parent_idx），
+/// instantiate 时经 id_map 重映射成活 NodeId。initial_selected_index 来自 mount 元素的
+/// `data-page` 属性（缺省 0）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControllerEntry {
+    pub name: String,
+    pub mount_node_idx: u32,
+    pub initial_selected_index: i32,
 }
 
 /// 模板节点：序列化态（instantiate 时 build 成 live Node）。
@@ -71,11 +84,19 @@ pub struct TemplateNode {
     pub id_attr: Option<String>,
     pub draggable: bool,
     pub tabindex: Option<i32>,
+    /// HTML `data-controller="name"` 属性值（Controller 挂载点声明）。
+    /// instantiate 时填 live Node.data_controller；匹配器遇 `[data-page]` 回溯查此字段。
+    pub data_controller: Option<String>,
 }
 
 /// write_package 的输入（打包器构造，已归一化：path 已相对、style 已 bake）。
 pub struct PackageInput<'a> {
-    pub components: Vec<(&'a str, &'a [TemplateNode], &'a DynamicRuleTable)>,
+    pub components: Vec<(
+        &'a str,
+        &'a [TemplateNode],
+        &'a DynamicRuleTable,
+        &'a [ControllerEntry],
+    )>,
     /// 已去重归一化的 path + PNG IHDR 尺寸（打包器读 PNG header 填，核心 measure/九宫格用）。
     pub asset_manifest: &'a [AssetEntry],
 }
@@ -135,10 +156,13 @@ pub fn extract_dynamic_rules(sheet: &crate::parse::css::StyleSheet) -> DynamicRu
             Ok(s) => s,
             Err(_) => continue,
         };
-        let has_pseudo = sel
-            .compound
-            .iter()
-            .any(|c| c.pseudo_hover || c.pseudo_active || c.pseudo_disabled || c.pseudo_focus);
+        let has_pseudo = sel.compound.iter().any(|c| {
+            c.pseudo_hover
+                || c.pseudo_active
+                || c.pseudo_disabled
+                || c.pseudo_focus
+                || !c.attrs.is_empty()
+        });
         if has_pseudo {
             rules.push(DynamicRule {
                 selector: sel,
@@ -246,8 +270,8 @@ pub fn extract_component_css(html: &str, base_dir: &std::path::Path) -> String {
 
 /// 序列化 PackageInput → .pkg.bin bytes（多组件格式）。
 ///
-/// 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponentDynamicRules
-///       + AssetManifest。所有字符串（组件名 / text / img path / classes / id_attr）
+/// 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponent(DynamicRules+Controllers)
+///       + AssetManifest。所有字符串（组件名 / text / img path / classes / id_attr / controller name）
 ///       共用同一 StringTable（intern 去重）。`input` 须已归一化（path 相对、style bake）。
 pub fn write_package(input: &PackageInput) -> Vec<u8> {
     // 1. intern 全部字符串（组件名 + 每节点 text/src/classes/id_attr + asset_manifest path）。
@@ -259,10 +283,13 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     // 每组件：(name_idx, root_node_idx, node_count, dynamic_blob)
     // 全局 NodeBlock 由各组件节点顺次拼接，root_node_idx = 该组件首节点在全局的位置。
     let mut comp_records: Vec<(u16, u32, u32, Vec<u8>)> = Vec::with_capacity(component_count);
-    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex)
-    let mut node_records: Vec<(i32, u8, Vec<u8>, u16, u16, Vec<u16>, u16, u8, i32)> = Vec::new();
+    // 每组件：Vec<(name_idx, mount_node_idx, initial_selected_index)>（ControllerSection 用）
+    let mut ctrl_records: Vec<Vec<(u16, u32, i32)>> = Vec::with_capacity(component_count);
+    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, dc_idx)
+    let mut node_records: Vec<(i32, u8, Vec<u8>, u16, u16, Vec<u16>, u16, u8, i32, u16)> =
+        Vec::new();
     let mut global_node_offset: u32 = 0;
-    for (name, nodes, dynamic_rules) in &input.components {
+    for (name, nodes, dynamic_rules, controllers) in &input.components {
         let name_idx = intern(name, &mut strings, &mut idx_of);
         let comp_base = global_node_offset;
         // spec 约定 nodes[0]=组件根（parent=None)。debug_assert：write 输入由打包器控制，
@@ -303,6 +330,12 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 .as_ref()
                 .map(|id| intern(id, &mut strings, &mut idx_of))
                 .unwrap_or(NULL_IDX);
+            // data_controller：照 id_attr 同款 intern + NULL_IDX 哨兵（None=0xFFFF）。
+            let dc_idx = tn
+                .data_controller
+                .as_ref()
+                .map(|dc| intern(dc, &mut strings, &mut idx_of))
+                .unwrap_or(NULL_IDX);
             let flags: u8 = if tn.draggable { 0x01 } else { 0x00 };
             let tabindex = tn.tabindex.unwrap_or(i32::MIN);
             node_records.push((
@@ -315,12 +348,21 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 id_idx,
                 flags,
                 tabindex,
+                dc_idx,
             ));
         }
         let node_count = nodes.len() as u32;
         let dynamic_blob =
             bincode::serialize(dynamic_rules).expect("DynamicRuleTable serializable");
+        // ControllerSection：intern name + 收 (name_idx, mount_node_idx, initial_selected_index)。
+        // name 经 StringTable 去重（与组件名/text/classes 共表）。
+        let mut ctrls: Vec<(u16, u32, i32)> = Vec::with_capacity(controllers.len());
+        for c in controllers.iter() {
+            let name_idx = intern(&c.name, &mut strings, &mut idx_of);
+            ctrls.push((name_idx, c.mount_node_idx, c.initial_selected_index));
+        }
         comp_records.push((name_idx, comp_base, node_count, dynamic_blob));
+        ctrl_records.push(ctrls);
         global_node_offset += node_count;
     }
     // intern asset_manifest path（供 AssetManifest 段引用 idx）+ 收 w/h。
@@ -351,9 +393,19 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         out.extend_from_slice(&(dynamic_blob.len() as u32).to_le_bytes());
     }
     // NodeBlock: 每节点 {parent_idx(i32), kind_tag(u8), style_len(u32)+style_blob, text_idx(u16), src_idx(u16),
-    //   class_count(u16)+class_idx[], id_idx(u16), flags(u8), tabindex(i32)}
-    for (parent_idx, kind_tag, style_blob, text_idx, src_idx, class_idx, id_idx, flags, tabindex) in
-        &node_records
+    //   class_count(u16)+class_idx[], id_idx(u16), flags(u8), tabindex(i32), dc_idx(u16)}
+    for (
+        parent_idx,
+        kind_tag,
+        style_blob,
+        text_idx,
+        src_idx,
+        class_idx,
+        id_idx,
+        flags,
+        tabindex,
+        dc_idx,
+    ) in &node_records
     {
         out.extend_from_slice(&parent_idx.to_le_bytes());
         out.push(*kind_tag);
@@ -368,10 +420,19 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         out.extend_from_slice(&id_idx.to_le_bytes());
         out.push(*flags);
         out.extend_from_slice(&tabindex.to_le_bytes());
+        out.extend_from_slice(&dc_idx.to_le_bytes());
     }
-    // PerComponentDynamicRules: 每组件 dynamic_blob（紧跟 ComponentTable 序）
-    for (_, _, _, dynamic_blob) in &comp_records {
+    // PerComponentDynamicRules + PerComponentControllers：每组件 dynamic_blob 紧跟其
+    // ControllerSection（同 ComponentTable 顺序）。read 按同序逐组件读。
+    for ((_, _, _, dynamic_blob), ctrls) in comp_records.iter().zip(ctrl_records.iter()) {
         out.extend_from_slice(dynamic_blob);
+        // ControllerSection: controller_count(u32) + count × {name_idx(u16), mount_node_idx(u32), initial_selected_index(i32)}
+        out.extend_from_slice(&(ctrls.len() as u32).to_le_bytes());
+        for &(name_idx, mount_idx, initial) in ctrls {
+            out.extend_from_slice(&name_idx.to_le_bytes());
+            out.extend_from_slice(&mount_idx.to_le_bytes());
+            out.extend_from_slice(&initial.to_le_bytes());
+        }
     }
     // AssetManifest: entry_count(u32) + count × {path_idx(u16), w(u32), h(u32)}（path + 图尺寸）
     out.extend_from_slice(&(manifest_idx.len() as u32).to_le_bytes());
@@ -449,6 +510,13 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         } else {
             Some(tab_raw)
         };
+        // data_controller：照 id_attr 同款 NULL_IDX 哨兵读（None=0xFFFF）。
+        let dc_idx = r.u16("dc_idx")?;
+        let data_controller = if dc_idx == NULL_IDX {
+            None
+        } else {
+            Some(string_at(&strings, dc_idx)?)
+        };
         // 存盘 parent_idx 是 NodeBlock 全局位置（-1=组件根）；先存全局，待切分组件时减 base 转局部
         let parent_global = if pidx < 0 { None } else { Some(pidx as usize) };
         let kind = match kind_tag {
@@ -470,6 +538,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             id_attr,
             draggable,
             tabindex,
+            data_controller,
         });
     }
     // PerComponentDynamicRules: 每组件 dynamic_blob（按 ComponentTable 序）
@@ -497,6 +566,21 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         }
         let dynamic_rules: DynamicRuleTable =
             bincode::deserialize(r.take(*dynamic_len as usize, "comp_dynamic_blob")?)?;
+        // ControllerSection (per-component): controller_count(u32) + count × {name_idx(u16), mount_node_idx(u32), initial_selected_index(i32)}
+        // name_idx 引用 StringTable（intern 去重，同组件名/text/classes 共表）。
+        let ctrl_count = r.u32("controller_count")? as usize;
+        let mut controllers = Vec::with_capacity(ctrl_count);
+        for _ in 0..ctrl_count {
+            let name_idx = r.u16("controller_name_idx")?;
+            let mount_node_idx = r.u32("controller_mount_idx")?;
+            let initial_selected_index = r.i32("controller_initial_idx")?;
+            let name = string_at(&strings, name_idx)?;
+            controllers.push(ControllerEntry {
+                name,
+                mount_node_idx,
+                initial_selected_index,
+            });
+        }
         // 防御 malformed：同名组件 → DupComponent（避免静默覆盖丢数据）
         if components.contains_key(&name) {
             return Err(PkgError::DupComponent(name));
@@ -507,6 +591,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
                 name,
                 nodes,
                 dynamic_rules,
+                controllers,
             },
         );
     }
