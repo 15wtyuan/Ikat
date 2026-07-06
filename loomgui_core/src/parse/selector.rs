@@ -107,13 +107,25 @@ pub fn parse_selector(raw: &str) -> Result<ParsedSelector, String> {
                 // flush current token, then scan to ']'
                 push_token(kind, &cur, &mut tag, &mut classes, &mut id);
                 cur.clear();
-                let close = bytes[idx..]
-                    .iter()
-                    .position(|&b| b == b']')
-                    .expect("parse layer guarantees balanced [] (or we treat malformed as no-match)");
-                let inner = &text[idx + 1..idx + close];
+                // 从 idx+1 往后扫描到配对的 ']'，同时跟踪引号状态：
+                // ']' 在引号内不闭合括号。
+                let mut close = bytes[idx + 1..].len(); // 默认到末尾（无配对 ']' 时）
+                let mut in_single = false;
+                let mut in_double = false;
+                for (di, &byte) in bytes[idx + 1..].iter().enumerate() {
+                    match byte {
+                        b'\'' if !in_double => in_single = !in_single,
+                        b'"' if !in_single => in_double = !in_double,
+                        b']' if !in_single && !in_double => {
+                            close = di;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                let inner = &text[idx + 1..idx + 1 + close];
                 attrs.push(parse_attr_inner(inner));
-                idx += close + 1;
+                idx += close + 2;
                 continue;
             }
             if c == '.' || c == '#' || c == ':' {
@@ -174,13 +186,24 @@ pub fn parse_selector(raw: &str) -> Result<ParsedSelector, String> {
 }
 
 /// 解析 `[...]` 内部：`attr`、`attr="val"`、`attr='val'`。非相等形式（~= 等）围栏外，
-/// 返 Exists（保守降级；围栏外值静默忽略）。attr 名小写归一（HTML 大小写不敏感）。
+/// 保守降级为 Exists（值静默忽略）。attr 名小写归一（HTML 大小写不敏感）。
 fn parse_attr_inner(inner: &str) -> crate::style::dynamic::AttrSelector {
     use crate::style::dynamic::{AttrOp, AttrSelector};
     let inner = inner.trim();
-    if let Some((name, val)) = inner.split_once('=') {
-        let name = name.trim().to_lowercase();
-        let mut v = val.trim();
+    // 先找第一个 '='，检查它是否紧跟在围栏外操作符（~ ^ $ * |）后。
+    if let Some(eq_pos) = inner.find('=') {
+        let name_part = inner[..eq_pos].trim_end();
+        // 如果 '=' 前紧邻围栏外操作符 → 保守降级为 Exists，丢弃值。
+        if name_part.ends_with(&['~', '^', '$', '*', '|']) {
+            let clean_name = name_part[..name_part.len() - 1].trim_end().to_lowercase();
+            return AttrSelector {
+                name: clean_name,
+                op: AttrOp::Exists,
+                value: None,
+            };
+        }
+        let name = name_part.to_lowercase();
+        let mut v = inner[eq_pos + 1..].trim();
         if (v.starts_with('"') && v.ends_with('"'))
             || (v.starts_with('\'') && v.ends_with('\''))
         {
@@ -578,5 +601,30 @@ mod tests {
         assert_eq!(c.classes, vec!["panel".to_string()]);
         assert_eq!(c.attrs.len(), 1);
         assert_eq!(c.attrs[0].name, "data-controller");
+        assert!(matches!(
+            c.attrs[0].op,
+            crate::style::dynamic::AttrOp::Eq
+        ));
+        assert_eq!(c.attrs[0].value.as_deref(), Some("tab"));
+    }
+
+    #[test]
+    fn parse_attr_value_containing_bracket() {
+        // ']' 在引号内不闭合括号——值完整保留 "hello]world"。
+        let s = parse_selector(r#"[data-x="hello]world"]"#).unwrap();
+        let a = &s.compound[0].attrs[0];
+        assert_eq!(a.name, "data-x");
+        assert!(matches!(a.op, crate::style::dynamic::AttrOp::Eq));
+        assert_eq!(a.value.as_deref(), Some("hello]world"));
+    }
+
+    #[test]
+    fn parse_attr_fence_out_op_degrades_to_exists() {
+        // 围栏外操作符（~=）保守降级为 Exists：name 去掉操作符字符，value 丢弃。
+        let s = parse_selector(r#"[attr~="val"]"#).unwrap();
+        let a = &s.compound[0].attrs[0];
+        assert_eq!(a.name, "attr");
+        assert!(matches!(a.op, crate::style::dynamic::AttrOp::Exists));
+        assert!(a.value.is_none(), "围栏外 op 丢弃 value");
     }
 }
