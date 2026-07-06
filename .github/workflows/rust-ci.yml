@@ -70,3 +70,11 @@ jobs:
           name: loomgui_ffi_c-windows-x64
           path: target/release/loomgui_ffi_c.dll
           retention-days: 7
+      - name: build release exe (loomgui_pkg)
+        run: cargo build -p loomgui_pkg --release
+      - name: upload loomgui_pkg.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: loomgui_pkg-exe-${{ github.sha }}
+          path: target/release/loomgui_pkg.exe
+          retention-days: 7
