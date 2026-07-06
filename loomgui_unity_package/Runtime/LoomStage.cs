@@ -125,14 +125,14 @@ namespace LoomGUI
         // ===== Sprite 解析器初始化（Driver 调）=====
 
         /// <summary>
-        /// SpriteResolver 建名字映射 + 注入 atlas 加载委托。
-        /// Driver.Awake 后调（settings 来自 LoomSettings.GetOrCreateDefault，loadAtlas 由 Driver 提供懒加载）。
+        /// SpriteResolver 建名字映射 + 注入 atlas 懒加载委托。
+        /// Driver.Awake 后调（settings 来自 LoomSettings.GetOrCreateDefault，loadAtlas 由 Driver 提供）：
+        /// settings.atlasEntries → folder→atlasName 映射；GetSprite 命中时按需回调 loadAtlas(atlasName)
+        /// 拿 SpriteAtlas（Driver 决定走 Resources/AB/Addressables）。loadAtlas=null 则全 miss（调用方 fallback）。
         /// </summary>
         public void InitSprites(LoomSettings settings, System.Func<string, SpriteAtlas> loadAtlas)
         {
-            _sprites?.Init(settings);
-            // loadAtlas 委托保留给后续 atlas 懒加载改造；当前 SpriteResolver.Init 走 LoomSettings 直配。
-            // 若 loadAtlas 非空，SpriteResolver 可在 miss 时回调加载 atlas。
+            _sprites?.Init(settings, loadAtlas);
         }
 
         // ===== NativeHost 根注入（Driver 调）=====
@@ -475,8 +475,8 @@ namespace LoomGUI
             _pool?.Clear();
             _nhm?.Clear();
             _mm?.Clear();
-            // SpriteResolver 是纯缓存（folder→atlas 映射来自 LoomSettings），无 UnityEngine.Object
-            // 持有（atlas 由 LoomSettings asset 持有，LoomStage 不销毁）。清缓存即可。
+            // SpriteResolver 持 folder→atlasName 名字映射 + 运行时懒加载的 SpriteAtlas 缓存（Driver 钩子加载，
+            // 非序列化字段）。Clear 清两套缓存；LoomStage 不主动 Dispose SpriteAtlas（Driver/构建后端拥有其生命周期）。
             _sprites?.Clear();
             if (_frameBuf != null)
             {
