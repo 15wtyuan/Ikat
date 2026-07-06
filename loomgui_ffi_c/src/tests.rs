@@ -120,6 +120,88 @@ fn borrow_controller_changed_events_round_trip() {
     loomgui_stage_free(h);
 }
 
+// ===== get_controller / set_selected_index / get_selected_index FFI tests =====
+
+/// loomgui_stage_get_controller null 句柄 → sentinel（0xFFFF_FFFF，不 panic）。
+#[test]
+fn get_controller_null_handle() {
+    let name = b"tab";
+    let id = loomgui_stage_get_controller(std::ptr::null(), 0, name.as_ptr(), name.len());
+    assert_eq!(id, 0xFFFF_FFFF);
+}
+
+/// loomgui_stage_get_controller null name 指针 → sentinel。
+#[test]
+fn get_controller_null_name_ptr() {
+    let fp = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
+    );
+    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fp.len(), 200.0, 100.0);
+    assert!(!h.is_null());
+    let id = loomgui_stage_get_controller(h, 0, std::ptr::null(), 0);
+    assert_eq!(id, 0xFFFF_FFFF);
+    loomgui_stage_free(h);
+}
+
+/// loomgui_stage_set_selected_index null 句柄 → -1（不 panic）。
+#[test]
+fn set_selected_index_null_handle() {
+    let r = loomgui_stage_set_selected_index(std::ptr::null_mut(), 0, 0);
+    assert_eq!(r, -1);
+}
+
+/// loomgui_stage_get_selected_index null 句柄 → -1（不 panic）。
+#[test]
+fn get_selected_index_null_handle() {
+    let r = loomgui_stage_get_selected_index(std::ptr::null(), 0);
+    assert_eq!(r, -1);
+}
+
+/// Controller FFI round-trip：get_controller 定位挂载点 → set_selected_index 切页 →
+/// get_selected_index 读回。全程经 FFI（不直接调 Rust Stage）。
+#[test]
+fn controller_ffi_round_trip() {
+    let fp = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
+    );
+    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fp.len(), 200.0, 100.0);
+    assert!(!h.is_null());
+    let empty_css = b"";
+    // 建 root + mount 子节点
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF);
+    let mount = loomgui_stage_create_node(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
+    assert_ne!(mount, 0xFFFF_FFFF);
+    assert_eq!(loomgui_stage_append_child(h, root, mount), 0);
+    // 直接写 data_controller 字段（FFI 未暴露 data-controller 属性设置；instantiate 从模板填）
+    {
+        let sh = unsafe { &mut *h };
+        let scene = sh.stage.scene.as_mut().unwrap();
+        scene.get_mut(NodeId(mount)).unwrap().data_controller = Some("tab".to_string());
+    }
+    // get_controller 在子树内找
+    let name = b"tab";
+    let found = loomgui_stage_get_controller(h, root, name.as_ptr(), name.len());
+    assert_eq!(found, mount, "get_controller 应找到 mount 节点");
+    // 查不存在 controller name → sentinel
+    let no_match = loomgui_stage_get_controller(h, root, b"other".as_ptr(), 5);
+    assert_eq!(no_match, 0xFFFF_FFFF, "无匹配 → sentinel");
+    // 初始无条目 → get_selected_index 返 -1
+    let initial = loomgui_stage_get_selected_index(h, mount);
+    assert_eq!(initial, -1);
+    // 切到第 2 页
+    let prev = loomgui_stage_set_selected_index(h, mount, 2);
+    assert_eq!(prev, -1, "首次 set 返 prev=-1");
+    assert_eq!(loomgui_stage_get_selected_index(h, mount), 2);
+    // 再切到第 0 页
+    let prev2 = loomgui_stage_set_selected_index(h, mount, 0);
+    assert_eq!(prev2, 2);
+    assert_eq!(loomgui_stage_get_selected_index(h, mount), 0);
+    loomgui_stage_free(h);
+}
+
 /// borrow_controller_changed_events 在 tick 后清空（pull 模式：事件仅当帧可见）。
 /// set_selected_index 推事件 → tick → borrow 返空（tick start 清空）。
 #[test]

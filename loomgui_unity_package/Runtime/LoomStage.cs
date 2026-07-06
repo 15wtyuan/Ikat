@@ -114,6 +114,31 @@ namespace LoomGUI
             Native.loomgui_stage_set_node_disabled(_stage, nodeId, disabled);
         }
 
+        /// 在子树内找 data-controller="name" 的挂载点，返其 NodeId。
+        /// 无匹配 / stage 未建 → uint.MaxValue（0xFFFF_FFFF）。
+        public uint GetController(uint subtreeRoot, string name)
+        {
+            if (_stage == null) return uint.MaxValue;
+            byte[] nb = Encoding.UTF8.GetBytes(name ?? "");
+            fixed (byte* np = nb)
+                return Native.loomgui_stage_get_controller(_stage, subtreeRoot, np, (nuint)nb.Length);
+        }
+
+        /// 切 Controller 页。无效 mount（未挂 data-controller）→ 静默返 -1。
+        /// 返 prev（切前 selected_index）；首次 set（无条目）返 -1。
+        public int SetSelectedIndex(uint mount, int idx)
+        {
+            if (_stage == null) return -1;
+            return Native.loomgui_stage_set_selected_index(_stage, mount, idx);
+        }
+
+        /// 读 Controller 当前选中页。无条目 / 无效 mount → -1。
+        public int GetSelectedIndex(uint mount)
+        {
+            if (_stage == null) return -1;
+            return Native.loomgui_stage_get_selected_index(_stage, mount);
+        }
+
         /// 编程滚动到指定位置。非 scroll 容器 / 越界 node → no-op（不 panic）。
         /// animated: true → cubic-out 缓动；false → 瞬移。
         public void SetScrollPos(uint node, float x, float y, bool animated = true)
