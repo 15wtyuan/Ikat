@@ -79,10 +79,13 @@ pub fn parse_selector(raw: &str) -> Result<ParsedSelector, String> {
         let mut classes: Vec<String> = Vec::new();
         let mut id: Option<String> = None;
 
+        // Tokenize: tag/class/id via ./#/:, plus [attr] / [attr="val"] spans.
+        // CSS ident chars legal in attr name; = and quotes inside [] handled here.
         let bytes = text.as_bytes();
         let mut idx = 0;
-        let mut kind = 't'; // t=tag, .=class, #=id
+        let mut kind = 't';
         let mut cur = String::new();
+        let mut attrs: Vec<crate::style::dynamic::AttrSelector> = Vec::new();
         let push_token = |kind: char,
                           val: &str,
                           tag: &mut Option<String>,
@@ -100,6 +103,19 @@ pub fn parse_selector(raw: &str) -> Result<ParsedSelector, String> {
         };
         while idx < bytes.len() {
             let c = bytes[idx] as char;
+            if c == '[' {
+                // flush current token, then scan to ']'
+                push_token(kind, &cur, &mut tag, &mut classes, &mut id);
+                cur.clear();
+                let close = bytes[idx..]
+                    .iter()
+                    .position(|&b| b == b']')
+                    .expect("parse layer guarantees balanced [] (or we treat malformed as no-match)");
+                let inner = &text[idx + 1..idx + close];
+                attrs.push(parse_attr_inner(inner));
+                idx += close + 1;
+                continue;
+            }
             if c == '.' || c == '#' || c == ':' {
                 push_token(kind, &cur, &mut tag, &mut classes, &mut id);
                 cur.clear();
@@ -115,6 +131,7 @@ pub fn parse_selector(raw: &str) -> Result<ParsedSelector, String> {
             spec.0 += 1;
         }
         spec.1 += classes.len() as u32;
+        spec.1 += attrs.len() as u32; // 属性选择器归 class 桶（b）——兑现 fence §4.2
         if tag.is_some() {
             spec.2 += 1;
         }
@@ -145,7 +162,7 @@ pub fn parse_selector(raw: &str) -> Result<ParsedSelector, String> {
             pseudo_active,
             pseudo_disabled,
             pseudo_focus,
-            attrs: Vec::new(),
+            attrs,
         });
     }
 
@@ -154,6 +171,33 @@ pub fn parse_selector(raw: &str) -> Result<ParsedSelector, String> {
         compound,
         specificity: spec,
     })
+}
+
+/// 解析 `[...]` 内部：`attr`、`attr="val"`、`attr='val'`。非相等形式（~= 等）围栏外，
+/// 返 Exists（保守降级；围栏外值静默忽略）。attr 名小写归一（HTML 大小写不敏感）。
+fn parse_attr_inner(inner: &str) -> crate::style::dynamic::AttrSelector {
+    use crate::style::dynamic::{AttrOp, AttrSelector};
+    let inner = inner.trim();
+    if let Some((name, val)) = inner.split_once('=') {
+        let name = name.trim().to_lowercase();
+        let mut v = val.trim();
+        if (v.starts_with('"') && v.ends_with('"'))
+            || (v.starts_with('\'') && v.ends_with('\''))
+        {
+            v = &v[1..v.len() - 1];
+        }
+        AttrSelector {
+            name,
+            op: AttrOp::Eq,
+            value: Some(v.to_string()),
+        }
+    } else {
+        AttrSelector {
+            name: inner.to_lowercase(),
+            op: AttrOp::Exists,
+            value: None,
+        }
+    }
 }
 
 fn compound_matches(c: &Compound, el: &ElementData) -> bool {
@@ -495,5 +539,44 @@ mod tests {
             "div.a > span 不应命中（直接父非 div.a），div.a span 应命中"
         );
         assert_eq!(matched[0].selector_text, "div.a span");
+    }
+
+    #[test]
+    fn parse_attr_exists() {
+        let s = parse_selector("[data-controller]").unwrap();
+        assert_eq!(s.compound.len(), 1);
+        assert_eq!(s.compound[0].attrs.len(), 1);
+        let a = &s.compound[0].attrs[0];
+        assert_eq!(a.name, "data-controller");
+        assert!(matches!(a.op, crate::style::dynamic::AttrOp::Exists));
+        assert!(a.value.is_none());
+    }
+
+    #[test]
+    fn parse_attr_eq() {
+        let s = parse_selector(r#"[data-page="1"]"#).unwrap();
+        let a = &s.compound[0].attrs[0];
+        assert_eq!(a.name, "data-page");
+        assert!(matches!(a.op, crate::style::dynamic::AttrOp::Eq));
+        assert_eq!(a.value.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn attr_selector_counts_as_class_specificity() {
+        // [data-page="1"] .panel → two compounds. The attr is class-level (b bucket).
+        // .panel = (0,1,0); [data-page="1"] = (0,1,0). Whole selector = (0,2,0).
+        let s = parse_selector(r#"[data-page="1"] .panel"#).unwrap();
+        assert_eq!(s.specificity, crate::style::dynamic::Specificity(0, 2, 0));
+    }
+
+    #[test]
+    fn parse_attr_with_class_and_tag() {
+        // div.panel[data-controller="tab"] → tag + class + attr
+        let s = parse_selector(r#"div.panel[data-controller="tab"]"#).unwrap();
+        let c = &s.compound[0];
+        assert_eq!(c.tag.as_deref(), Some("div"));
+        assert_eq!(c.classes, vec!["panel".to_string()]);
+        assert_eq!(c.attrs.len(), 1);
+        assert_eq!(c.attrs[0].name, "data-controller");
     }
 }
