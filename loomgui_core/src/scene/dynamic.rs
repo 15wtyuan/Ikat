@@ -575,6 +575,9 @@ mod tests {
             scroll: Default::default(),
             text_layouts: Vec::new(),
             node_sort_keys: Vec::new(),
+            controllers: Default::default(),
+            pending_controller_events: Vec::new(),
+            pending_transitions: Vec::new(),
         }
     }
 

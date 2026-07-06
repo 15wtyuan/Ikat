@@ -292,6 +292,9 @@ fn is_pointer_on_ui_false_when_miss() {
         scroll: Default::default(),
         text_layouts: Vec::new(),
         node_sort_keys: Vec::new(),
+        controllers: Default::default(),
+        pending_controller_events: Vec::new(),
+        pending_transitions: Vec::new(),
     });
     s.set_input(&[crate::input::PointerEvent {
         kind: crate::input::PointerKind::Move,

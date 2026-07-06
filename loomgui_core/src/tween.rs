@@ -139,6 +139,19 @@ impl Ease {
     }
 }
 
+/// transition 请求（rematch 检测 data-page 通道变化时推入 Scene.pending_transitions；
+/// Stage tick drain 后 kill 旧 tween + 提交新 tween）。E 阶段补完整字段。
+#[derive(Debug, Clone, Copy)]
+pub struct TransitionRequest {
+    pub node: crate::scene::node::NodeId,
+    pub prop: TweenProp,
+    pub start: [f32; 4],
+    pub end: [f32; 4],
+    pub ease: Ease,
+    pub delay: f32,
+    pub duration: f32,
+}
+
 use crate::input::{EventRecord, EVT_TWEEN_COMPLETE};
 use crate::scene::node::{AnimTable, NodeId, Scene};
 use crate::transform::{self};

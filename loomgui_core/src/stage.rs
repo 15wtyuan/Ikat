@@ -8,7 +8,7 @@ use crate::input::{EventRecord, PointerEvent, PointerState};
 use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
-use crate::scene::node::{NodeId, Rect, Scene};
+use crate::scene::node::{ControllerChangedEvent, NodeId, Rect, Scene};
 use crate::style::dynamic::rematch_pseudo_classes;
 use crate::style::resolved::OverflowMode;
 use crate::text::layout::Font;
@@ -124,6 +124,62 @@ impl Stage {
     /// 供 FFI find_node_by_id：业务用 id 定位节点（注册 listener / 设 disabled）。
     pub fn find_node_by_id(&self, id: &str) -> Option<NodeId> {
         self.scene.as_ref().and_then(|s| s.find_by_id_attr(id))
+    }
+
+    /// 在 mount_subtree_root 的子树内找名为 name 的 Controller 挂载点 NodeId。
+    /// driver 先 instantiate 拿到组件根，再 get_controller(root, "tab") 取句柄。
+    /// DFS 遍历子树（含 mount_subtree_root 自身）找首个 data_controller == Some(name) 的节点。
+    /// 返 None = 子树内无 data-controller="name"。无 scene → None。
+    pub fn get_controller(&self, mount_subtree_root: NodeId, name: &str) -> Option<NodeId> {
+        let scene = self.scene.as_ref()?;
+        let mut found = None;
+        let mut stack = vec![mount_subtree_root];
+        while let Some(nid) = stack.pop() {
+            if let Some(n) = scene.get(nid) {
+                if n.data_controller.as_deref() == Some(name) {
+                    found = Some(nid);
+                    break;
+                }
+                stack.extend(n.children.iter().copied());
+            }
+        }
+        found
+    }
+
+    /// 切 Controller 页。无效 mount（无 scene / 节点不存在 / 未挂 data_controller）→ 静默
+    /// 返 -1（不 panic，照 FFI no-panic 约定）。prev != idx 时推一条 ControllerChangedEvent
+    /// 进 pending_controller_events 供 FFI borrow_controller_changed_events pull。
+    pub fn set_selected_index(&mut self, mount: NodeId, idx: i32) -> i32 {
+        let Some(scene) = self.scene.as_mut() else {
+            return -1;
+        };
+        // 校验 mount 确实挂了 controller（data_controller.is_some）——否则静默忽略。
+        if scene
+            .get(mount)
+            .and_then(|n| n.data_controller.as_ref())
+            .is_none()
+        {
+            return -1;
+        }
+        let prev = scene.set_controller_selected(mount, idx);
+        if prev != idx {
+            scene
+                .pending_controller_events
+                .push(ControllerChangedEvent {
+                    mount_node: mount.0,
+                    prev,
+                    new: idx,
+                });
+        }
+        prev
+    }
+
+    /// 读 Controller 当前选中页。无 scene / 无条目 → -1（调用方据 -1 判无 Controller）。
+    pub fn get_selected_index(&self, mount: NodeId) -> i32 {
+        self.scene
+            .as_ref()
+            .and_then(|s| s.controller_selected(mount))
+            .unwrap_or(-1)
     }
 
     /// UI 挡住时游戏不响应点击。委托 PointerState（任一活跃槽命中非根）。
@@ -338,6 +394,9 @@ impl Stage {
                 scroll: Default::default(),
                 text_layouts: Vec::new(),
                 node_sort_keys: Vec::new(),
+                controllers: Default::default(),
+                pending_controller_events: Vec::new(),
+                pending_transitions: Vec::new(),
             });
             self.prev_node_hashes.clear(); // 新 scene → 无基线，下帧全 dirty
         }
@@ -493,6 +552,9 @@ impl Stage {
             scroll: Default::default(),
             text_layouts: Vec::new(),
             node_sort_keys: Vec::new(),
+            controllers: Default::default(),
+            pending_controller_events: Vec::new(),
+            pending_transitions: Vec::new(),
         });
         s
     }
