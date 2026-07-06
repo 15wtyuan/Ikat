@@ -37,6 +37,8 @@
 
 **裸文本规则**：Container/Button 内裸文本自动生成 Text 子节点（scene/node.rs:304-316）。行内混排（元素内"文本+元素+文本"）报错（dom.rs:31 注释）。
 
+**`data-*` 状态属性**（v1.5）：`data-controller`/`data-page` 等标准 HTML `data-*` 属性，配合属性选择器 `[data-controller="tab"][data-page="0"]` 实现 Controller 多页状态切换。属性本身不映射 CSS 声明，仅作为选择器匹配目标。
+
 ---
 
 ## 2. CSS 属性围栏
@@ -98,6 +100,7 @@
 |---|---|---|---|---|
 | `filter` | grayscale/brightness/contrast/saturate/hue-rotate/invert/sepia（颜色矩阵，不认 blur/drop-shadow） | mapping.rs:432-436, color_filter.rs | v1.3 | 【实证·待测 blur 拒】 |
 | `border-image-slice` | 1-4 值 px/%（九宫格） | mapping.rs:437-443 | v1.3 | 【实证】 |
+| `transition` | `<property> <duration> <easing>`（标准 CSS，映射 GTween） | mapping.rs | v1.5 | 【实证】 |
 
 ### 2.4 围栏外 CSS 属性（写了不生效/静默忽略，必须测试锁定）
 
@@ -130,6 +133,8 @@
 | 标签 `div` | selector.rs:77-78 | 【实证】 |
 | 类 `.btn` | selector.rs:79,94-95 | 【实证】 |
 | ID `#main` | selector.rs:79,95-96 | 【实证】 |
+| 属性 `[attr]` | selector.rs:76-111（v1.5 新增解析 `[]`） | 【实证】 |
+| 属性值 `[attr="val"]` | 同上 | 【实证】 |
 | 后代 `div span` | selector.rs:18-60,238-253 | 【实证】 |
 | 子代 `div > span` | selector.rs:23-36,228-237 | 【实证】 |
 | 分组 `.a,.b` | css.rs:121-133（展开多 Rule） | 【实证】 |
@@ -149,7 +154,6 @@
 |---|---|---|
 | `:nth-child`/`:nth-of-type`/`:first-child` | selector.rs:136 `_ => {}` | 【推断·待测】 |
 | `:not()` | 同上 | 【推断·待测】 |
-| 属性选择器 `[attr]` | selector.rs:76-111 不解析 `[]` | 【推断·待测】 |
 | 通配符 `*` | 走 FENCE_TAGS 报错 | 【实证】 |
 | 相邻兄弟 `+` / 后续兄弟 `~` | selector.rs:21-60 不认 | 【推断·待测】 |
 
