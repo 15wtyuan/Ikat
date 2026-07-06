@@ -846,3 +846,43 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **教训**：`<base>` 既影响内容属性（已知）也影响 **JS `location.href` 相对赋值**（按 baseURL 解析——易漏）。同目录跳转不想踩 base 歧义时用 `location.href` getter 取真实 URL 拼绝对路径。不要单靠资料推理——浏览器行为（`<base>` + location 赋值）须在目标环境实证验证。
 
 
+
+### 坑 127：NativeHost 空 div slot 不进 blob——Sync 查不到（v1d.3 假设漏洞）
+
+**症状**：page_nativehost 角色挂 nh-stage（空 div slot），Bind 成功但角色永远隐藏（GO active=false）。
+
+**根因**：v1d.3 NativeHost-lite 假设后端能从 `frame.nodes`（blob）拿任意绑定节点 transform。但 blob 是**渲染列表**——空 div（无 bg/text/img）产的透明 Container mesh 被 `merge_meshes` 合并掉 → slot 不在 blob → Sync 遍历 blob 找不到 slot → wrapper 永不设置 → GO 永久 `SetActive(false)`。dump 验证：nh-stage NOT IN frame.nodes，但 `scene.world_transforms`/`node_sort_keys` 含它。
+
+**解决**：NativeHost Sync 走 FFI 按 nodeId 查（`get_node_world_matrix`/`sort_key`/`visible`，读 `world_transforms`/`node_sort_keys`——按节点 index 存全节点，独立于 merge）。不再遍历 blob。core 加 `node_sort_keys` 快照（assign_sort_keys merge 前填）。
+
+**教训**：blob 是渲染列表（受 merge 优化），**不是 transform 通道**。NativeHost 查询通道必须独立于 merge。
+
+### 坑 128：NativeHost Bind 直接绑 prefab asset 报错（caller 必须传场景实例）
+
+**症状**：Inspector 把 prefab asset 拖进 driver 字段，Bind 报 "Transform resides in a Prefab asset and cannot be set"。
+
+**根因**：`NativeHostManager.Bind` 对传入 GO 调 `SetParent`——但 prefab asset transform 不可改（Unity 禁）。Bind 契约是场景实例，caller 传 prefab asset 越界。
+
+**解决**：driver `EnsureXxxInstance` Instantiate prefab 成场景实例后绑（fgui `GoWrapper` 同款：caller 管实例化，框架只显示）。**Bind 内部不该 Instantiate**（生命周期归 caller）。
+
+**教训**：NativeHost Bind 契约 = 场景实例。caller（driver）管实例化 + 生命周期。框架不越界实例化（fgui `SetWrapTarget` 接收已有 GO，不 Instantiate）。
+
+### 坑 129：URP/Lit `_Surface=0`（Opaque）即使 renderQueue=3000 仍在 Opaque pass（坑 127 demo 验收）
+
+**症状**：NativeHost 3D GO 设 `renderQueue=3000`（Transparent）+ `ZWrite Off`，仍被 UI 覆盖看不到。
+
+**根因**：URP/Lit shader 用 keyword `_SURFACE_TYPE_TRANSPARENT`（Lit.shader:125）+ property `_Surface`（:48）决定 variant/队列。`_Surface=0`（Opaque 默认）即使 `renderQueue=3000`，shader 走 Opaque variant → 在 Transparent 之前画 → 被 UI（Transparent）覆盖。`renderQueue` 只设队列，`_Surface` 设 shader Blend/variant——两者要配套。
+
+**解决**：CacheRenderers 加 `mat.SetInt("_Surface",1)` + `mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT")` + ZWrite Off（三件套）。`_ZWrite` 也是 URP/Lit property（:56 `ZWrite[_ZWrite]`）。
+
+**教训**：URP material 切 Transparent 不只 `renderQueue`——要 `_Surface` + keyword 配套（缺 keyword 不生效）。**注**：character 仍看不到（另有根因，待续）——_Surface 三件套是必要（Opaque 异常）非充分。
+
+### 坑 130：orthographic 相机 3D GO scale z 大 → near clip（坑 127 demo 验收）
+
+**症状**：`_characterScale=(120,120,120)` → 角色看不到（bounds z Extents 254，超相机 near/far）。
+
+**根因**：orthographic 相机 z 缩放**不影响视觉大小**（只看 z=0 平面投影），只放大 depth 厚度。z=120 → 角色 z 厚度 ~254 → 超 near（0.1，z=-9.9）被切大部分。
+
+**解决**：driver `_characterScale` 改 Vector2（xy），z 由 driver 自动设 1（不暴露给用户填）。粒子 `_effectScale` 同。
+
+**教训**：orthographic 相机下 3D GO scale 的 z 分量该用小值（1）——z 缩放只增 depth 厚度（near/far clip 风险），不增视觉。别让用户填 z（陷阱）。

@@ -146,7 +146,7 @@ RenderNode payload 加 `Mask{shape_ref, mode: MaskMode}`，MaskMode{Write,Conten
 
 ### 5.3 NativeHost（v2）
 
-v1d.3 已做 **NativeHost-lite**（div 占位 + 后端 `BindNativeHost` 跟随 world transform + 显隐 + 排序，core 零改）。完整版加：尺寸 push（后端 push 给核心 `set_native_host_size`，核心缓存值在 MeasureFunc 返回——避免每帧回调风暴）、hit/clip/所有权/Godot 镜像。管线加 drain 步（set_input 后、tick 前，后端须完成本帧 size push）。
+v1d.3 已做 **NativeHost-lite**（div 占位 + 后端 `BindNativeHost` 跟随 world transform + 显隐 + 排序）。**v1.4-c 修隐藏漏洞**：空 div slot（被 `merge_meshes` 吞）不进 blob → Sync 查不到 → 改 FFI 按 nodeId 查 `world_matrix`/`sort_key`/`visible`（独立于 merge；core 加 `node_sort_keys` 快照，坑 127）。URP Transparent 三件套（`_Surface`+keyword+`ZWrite`）让 3D GO 进 UI 同队列（坑 129）。完整版仍加：尺寸 push（后端 push 给核心 `set_native_host_size`，核心缓存值在 MeasureFunc 返回——避免每帧回调风暴）、hit/clip/所有权/Godot 镜像。管线加 drain 步（set_input 后、tick 前，后端须完成本帧 size push）。
 
 ### 5.4 Controller / Gear / Transition（v1.5）
 
