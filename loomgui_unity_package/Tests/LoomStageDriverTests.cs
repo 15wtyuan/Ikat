@@ -5,7 +5,7 @@ namespace LoomGUI.Tests
 {
     /// <summary>
     /// LoomStageDriver EditMode 测试。Unity PlayMode/EditMode 测试无法从 CLI 跑（需 Unity 编辑器），
-    /// 本测试在 B8 验收时由 Unity Test Runner 执行。此处仅保证编译 + 逻辑正确。
+    /// 由 Unity Test Runner 在验收阶段执行。此处仅保证编译 + 逻辑正确。
     /// </summary>
     public class LoomStageDriverTests
     {

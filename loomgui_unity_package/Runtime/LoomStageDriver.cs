@@ -64,6 +64,7 @@ namespace LoomGUI
             }
 
             _stage = new LoomStage(_designSize);
+            // CollectWheel 是静态方法读 stage.UseSafeArea（须推进 stage）；Collect 直接收 _safeArea 作参。
             _stage.UseSafeArea = _safeArea;
 
             // 注入渲染根（NativeHostManager 建 container GO 挂此 root；MirrorPool 镜像 GO 也挂此 root）。
@@ -208,7 +209,7 @@ namespace LoomGUI
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics() { Native.loomgui_shutdown(); }
 
-        // ===== 以下三个方法从 LoomStage（MonoBehaviour 时期）原样搬迁 =====
+        // ===== 以下三个方法为 Unity 相机/transform 配置（design→screen shrink-to-fit + y-flip），逻辑等价于原 LoomStage 同名方法 =====
 
         /// <summary>
         /// 建/取 UI 相机。独立 GO（非根的子节点）——避免被根的 (sf,-sf,sf) scale 影响。
