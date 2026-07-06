@@ -42,33 +42,12 @@ pub struct StageHandle {
     dump_blob: CString,  // dump_scene 缓存（Rust 拥有）
 }
 
-/// 创建 Stage 句柄。`font_path` 为 UTF-8 字节（指针+len），失败返回 null。
+/// 创建 Stage 句柄（不收字体路径）。字体由 loomgui_stage_register_font 单独注册。
+/// 失败返回 null（当前 Stage::new 不返回 Err，保留 null 分支以保持对称）。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_new(
-    font_path: *const u8,
-    fp_len: usize,
-    w: f32,
-    h: f32,
-) -> *mut StageHandle {
-    if font_path.is_null() {
-        return std::ptr::null_mut();
-    }
-    let bytes = unsafe { std::slice::from_raw_parts(font_path, fp_len) };
-    let path = match std::str::from_utf8(bytes) {
-        Ok(s) => s,
-        Err(_) => return std::ptr::null_mut(),
-    };
+pub extern "C" fn loomgui_stage_new(w: f32, h: f32) -> *mut StageHandle {
     let stage = match Stage::new((w, h)) {
-        Ok(mut s) => {
-            let font_bytes = match std::fs::read(path) {
-                Ok(b) => b,
-                Err(_) => return std::ptr::null_mut(),
-            };
-            match s.register_font("DejaVu", font_bytes, true) {
-                Ok(()) => s,
-                Err(_) => return std::ptr::null_mut(),
-            }
-        }
+        Ok(s) => s,
         Err(_) => return std::ptr::null_mut(),
     };
     Box::into_raw(Box::new(StageHandle {
@@ -76,6 +55,33 @@ pub extern "C" fn loomgui_stage_new(
         frame_blob: Vec::new(),
         dump_blob: CString::new("").unwrap(),
     }))
+}
+
+/// 注册字体进 Stage 字体表。family = UTF-8 字符串（指针+len），bytes = ttf/ttc/otf 字节数据。
+/// is_default: 0=否，非 0=是（设定为默认 fallback 字体）。返回 0=成功，-1=错误（null 句柄/非 UTF-8 family/字体解析失败）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_register_font(
+    h: *mut StageHandle,
+    family: *const u8,
+    family_len: usize,
+    bytes: *const u8,
+    bytes_len: usize,
+    is_default: u8,
+) -> i32 {
+    if h.is_null() || family.is_null() || bytes.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let family =
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(family, family_len) }) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+    let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len) }.to_vec();
+    match sh.stage.register_font(family, bytes, is_default != 0) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
 }
 
 /// null-safe 释放 Stage 句柄。

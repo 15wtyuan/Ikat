@@ -1,6 +1,29 @@
 use super::*;
 use std::ffi::CStr;
 
+/// Helper: 通过 FFI 创建 Stage 并注册测试默认 DejaVu 字体。
+/// Panic 即测试失败（仅测试内部使用）。
+fn stage_new_with_dejavu(w: f32, h: f32) -> *mut StageHandle {
+    let h = loomgui_stage_new(w, h);
+    assert!(!h.is_null(), "stage_new must succeed");
+    let font_bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
+    ))
+    .expect("DejaVuSans.ttf fixture must exist");
+    let family = b"DejaVu";
+    let rc = loomgui_stage_register_font(
+        h,
+        family.as_ptr(),
+        family.len(),
+        font_bytes.as_ptr(),
+        font_bytes.len(),
+        1,
+    );
+    assert_eq!(rc, 0, "register_font DejaVu must return 0");
+    h
+}
+
 #[test]
 fn version_returns_c_string() {
     unsafe {
@@ -15,12 +38,7 @@ fn version_returns_c_string() {
 #[cfg(feature = "parse")]
 #[test]
 fn stage_tween_complete_event_via_ffi() {
-    let fp = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
-    );
-    let fplen = fp.len();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     let html = b"<div class=\"b\"></div>";
     let css = b".b{width:100px;height:50px;}";
     loomgui_stage_load_html(h, html.as_ptr(), html.len(), css.as_ptr(), css.len());
@@ -58,11 +76,7 @@ fn borrow_controller_changed_events_null_handle() {
 /// create_root 建空 scene（无 set_selected_index 调用）→ pending_controller_events 空。
 #[test]
 fn borrow_controller_changed_events_empty_when_no_events() {
-    let fp = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
-    );
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fp.len(), 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let empty_css = b"";
     loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
@@ -78,11 +92,7 @@ fn borrow_controller_changed_events_empty_when_no_events() {
 #[test]
 fn borrow_controller_changed_events_round_trip() {
     use loomgui_core::scene::node::ControllerChangedEvent;
-    let fp = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
-    );
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fp.len(), 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     // 建 root + mount 子节点，mount 挂 data-controller="tab"
     let empty_css = b"";
@@ -133,11 +143,7 @@ fn get_controller_null_handle() {
 /// loomgui_stage_get_controller null name 指针 → sentinel。
 #[test]
 fn get_controller_null_name_ptr() {
-    let fp = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
-    );
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fp.len(), 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let id = loomgui_stage_get_controller(h, 0, std::ptr::null(), 0);
     assert_eq!(id, 0xFFFF_FFFF);
@@ -162,11 +168,7 @@ fn get_selected_index_null_handle() {
 /// get_selected_index 读回。全程经 FFI（不直接调 Rust Stage）。
 #[test]
 fn controller_ffi_round_trip() {
-    let fp = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
-    );
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fp.len(), 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let empty_css = b"";
     // 建 root + mount 子节点
@@ -206,11 +208,7 @@ fn controller_ffi_round_trip() {
 /// set_selected_index 推事件 → tick → borrow 返空（tick start 清空）。
 #[test]
 fn borrow_controller_changed_events_cleared_after_tick() {
-    let fp = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
-    );
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fp.len(), 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let empty_css = b"";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);

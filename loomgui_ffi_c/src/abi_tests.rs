@@ -25,23 +25,33 @@ fn make_test_pkg_bytes(component: &str) -> Vec<u8> {
     loomgui_core::asset::write_package(&input)
 }
 
-/// 字体路径：CARGO_MANIFEST_DIR = loomgui_ffi_c/，字体在
-/// ../loomgui_core/tests/fixtures/DejaVuSans.ttf（仓库内测试字体）。
-fn font_path() -> (CString, usize) {
-    let p = format!(
-        "{}/../loomgui_core/tests/fixtures/DejaVuSans.ttf",
-        env!("CARGO_MANIFEST_DIR")
+/// Helper: 通过 FFI 创建 Stage 并注册测试默认 DejaVu 字体。
+/// Panic 即测试失败（仅测试内部使用）。
+fn stage_new_with_dejavu(w: f32, h: f32) -> *mut StageHandle {
+    let h = loomgui_stage_new(w, h);
+    assert!(!h.is_null(), "stage_new must succeed");
+    let font_bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
+    ))
+    .expect("DejaVuSans.ttf fixture must exist");
+    let family = b"DejaVu";
+    let rc = loomgui_stage_register_font(
+        h,
+        family.as_ptr(),
+        family.len(),
+        font_bytes.as_ptr(),
+        font_bytes.len(),
+        1,
     );
-    let c = CString::new(p).unwrap();
-    let len = c.as_bytes().len();
-    (c, len)
+    assert_eq!(rc, 0, "register_font DejaVu must return 0");
+    h
 }
 
 /// load_package FFI 带 name 参数（对齐 Stage::load_package(name, bytes)）。
 #[test]
 fn load_package_ffi_takes_name() {
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let pkg = make_test_pkg_bytes("comp1");
     let name = b"bag";
@@ -54,8 +64,7 @@ fn load_package_ffi_takes_name() {
 /// 流程：create_root 建 scene → load_package("bag") → instantiate("bag","comp1") → NodeId。
 #[test]
 fn instantiate_ffi_returns_nodeid() {
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     // create_root 建 scene（ensure_scene 自动建空骨架）。css 传空串（无 inline style）。
     let empty_css = b"";
@@ -72,8 +81,7 @@ fn instantiate_ffi_returns_nodeid() {
 #[cfg(feature = "parse")]
 #[test]
 fn full_ffi_roundtrip_builds_blob() {
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let html =
         CString::new(r#"<div style="width:100px;height:50px;background-color:#ff0000;"></div>"#)
@@ -102,8 +110,7 @@ fn full_ffi_roundtrip_builds_blob() {
 /// 与 load_html 路径解耦（parse feature off 时仍可用）。用 instantiate 建 scene 内容。
 #[test]
 fn load_package_builds_blob_from_package() {
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     // load_package 进资源池（不建 scene）
     let pkg = make_test_pkg_bytes("comp1");
@@ -137,8 +144,7 @@ fn load_package_builds_blob_from_package() {
 /// （空 Vec::as_ptr() 是非空悬挂哨兵，显式判空锁住"未 tick→null"契约）。
 #[test]
 fn borrow_frame_never_ticked_returns_null() {
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let mut len = 1usize; // 故意非 0，确认被覆写为 0
     let ptr = loomgui_stage_borrow_frame(h, &mut len);
@@ -153,8 +159,7 @@ fn borrow_frame_never_ticked_returns_null() {
 #[test]
 fn set_input_borrow_events_round_trip() {
     use loomgui_core::input::{PointerEvent, PointerKind, EVT_ROLL_OVER};
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     // 装载一个按钮
     let html = std::ffi::CString::new(r#"<div class="root"><button class="btn">OK</button></div>"#)
@@ -203,8 +208,7 @@ fn set_input_borrow_events_round_trip() {
 /// borrow_events 契约：未 tick / 空 last_events → null + len=0。
 #[test]
 fn borrow_events_null_before_tick() {
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     let mut len = 1usize;
     let ptr = loomgui_stage_borrow_events(h, &mut len);
     assert!(ptr.is_null() && len == 0, "未 tick → null+len=0");
@@ -216,8 +220,7 @@ fn borrow_events_null_before_tick() {
 /// 用 create_root 建 scene。
 #[test]
 fn is_pointer_on_ui_true_on_hit_false_on_miss() {
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let empty_css = b"";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
@@ -255,8 +258,7 @@ fn pointer_event_event_record_sizeof() {
 #[test]
 fn event_record_has_touch_id() {
     use loomgui_core::input::{PointerEvent, PointerKind, EVT_DOWN};
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     let html = std::ffi::CString::new(r#"<div class="root"><button class="btn">OK</button></div>"#)
         .unwrap();
     let css = std::ffi::CString::new(r#".btn { width: 100px; height: 50px; }"#).unwrap();
@@ -310,8 +312,7 @@ fn event_record_has_touch_id() {
 #[test]
 fn add_touch_monitor_round_trip() {
     use loomgui_core::input::{PointerEvent, PointerKind, EVT_MOVE};
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     let html = std::ffi::CString::new(r#"<div class="root"><button class="btn">OK</button></div>"#)
         .unwrap();
     let css = std::ffi::CString::new(r#".btn { width: 100px; height: 50px; }"#).unwrap();
@@ -376,8 +377,7 @@ fn add_touch_monitor_round_trip() {
 /// 行为验（含 set_input→tick→borrow_events/is_pointer_on_ui）在 parse-feature 测中覆盖。
 #[test]
 fn no_default_features_builds() {
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 100.0, 50.0);
+    let h = stage_new_with_dejavu(100.0, 50.0);
     loomgui_stage_set_input(h, std::ptr::null(), 0); // null/len=0 应安全（清空 pending_input）
     loomgui_stage_set_node_disabled(h, 0, true); // 无 scene → no-op，不 panic
                                                  // 无 scene + 未 tick：is_pointer_on_ui 读 cur_hit=None → false，不 panic
@@ -398,8 +398,7 @@ fn no_default_features_builds() {
 /// root.parent==sentinel；OOB==sentinel。用 create_root + instantiate 路径。
 #[test]
 fn node_parent_returns_chain_and_sentinel() {
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let pkg = make_test_pkg_bytes("comp1");
     assert_eq!(
@@ -439,8 +438,7 @@ fn find_node_by_id_round_trip() {
     use loomgui_core::asset::{PackageInput, TemplateNode};
     use loomgui_core::scene::NodeKind;
     use loomgui_core::style::resolved::ResolvedStyle;
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     // 手搓包：组件 "comp1" 含单 Container 节点 id="ok"
     let nodes = [TemplateNode {
@@ -517,8 +515,7 @@ fn event_record_and_pointer_event_sizes_unchanged() {
 #[test]
 fn cancel_click_skips_click_event() {
     use loomgui_core::input::{PointerEvent, PointerKind, EVT_CLICK, EVT_UP};
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     let html = b"<button class=\"btn\">OK</button>";
     let css = b".btn{width:100px;height:50px;}";
     loomgui_stage_load_html(
@@ -578,8 +575,7 @@ fn cancel_click_skips_click_event() {
 #[test]
 fn drag_start_round_trip() {
     use loomgui_core::input::{PointerEvent, PointerKind, EVT_DRAG_START};
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let html = b"<button class=\"btn\" draggable=\"true\">OK</button>";
     let css = b".btn{width:100px;height:50px;}";
@@ -639,8 +635,7 @@ fn drag_start_round_trip() {
 #[test]
 fn long_press_round_trip() {
     use loomgui_core::input::{PointerEvent, PointerKind, EVT_LONG_PRESS};
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let html = b"<button class=\"btn\">OK</button>";
     let css = b".btn{width:100px;height:50px;}";
@@ -706,8 +701,7 @@ fn evt_constants() {
 #[test]
 fn key_event_round_trip() {
     use loomgui_core::input::{KeyEvent, EVT_KEY_DOWN};
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     // btn tabindex=0 可聚焦
     let html = b"<button class=\"btn\" tabindex=\"0\">OK</button>";
@@ -766,8 +760,7 @@ fn key_event_round_trip() {
 #[test]
 fn tab_navigation_round_trip() {
     use loomgui_core::input::{KeyEvent, EVT_FOCUS_IN, EVT_KEY_DOWN, KEY_TAB};
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     let html = b"<button class=\"a\" tabindex=\"0\">A</button><button class=\"b\" tabindex=\"0\">B</button>";
     let css = b"button{width:50px;height:30px;}";
     loomgui_stage_load_html(
@@ -822,8 +815,7 @@ fn tab_navigation_round_trip() {
 #[cfg(feature = "parse")]
 #[test]
 fn request_focus_round_trip() {
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     let html = b"<button id=\"ok\" tabindex=\"0\">OK</button>";
     let css = b"button{width:50px;height:30px;}";
     loomgui_stage_load_html(
@@ -851,8 +843,7 @@ fn request_focus_round_trip() {
 #[cfg(feature = "parse")]
 #[test]
 fn dump_scene_returns_json_array() {
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let html = CString::new(r#"<div class="root"><button class="btn">OK</button></div>"#).unwrap();
     let css = CString::new(r#".btn { width: 100px; height: 50px; }"#).unwrap();
@@ -1010,8 +1001,7 @@ fn set_scroll_pos_oob_no_op() {
 #[cfg(feature = "parse")]
 #[test]
 fn ffi_set_scroll_pos_round_trip() {
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     let html = b"<div class=\"scroll\"></div>";
     let css = b".scroll{width:200px;height:100px;overflow:scroll;}";
     loomgui_stage_load_html(
@@ -1073,8 +1063,7 @@ fn wheel_event_is_16_bytes() {
 ///       remove_child 摘子 → remove_node 删根。每步断言返回值契约。
 #[test]
 fn dynamic_tree_api_ffi_round_trip() {
-    let (fp, fplen) = font_path();
-    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fplen, 200.0, 100.0);
+    let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let empty = b"";
     // create_root(div) 建 scene + 根
@@ -1132,4 +1121,13 @@ fn dynamic_tree_api_ffi_round_trip() {
     // remove_node 删根（递归删子）
     assert_eq!(loomgui_stage_remove_node(h, root), 0, "remove_node root");
     loomgui_stage_free(h);
+}
+
+/// loomgui_stage_new(w,h) 不注册任何字体；单独调 register_font 后再 measure。
+/// 验证新 FFI 签名分离：stage_new 不收字体路径，register_font 独立注册。
+#[test]
+fn stage_new_without_font_then_register_font_measures() {
+    let stage = stage_new_with_dejavu(200.0, 200.0);
+    assert!(!stage.is_null(), "stage_new must succeed without font path");
+    loomgui_stage_free(stage);
 }
