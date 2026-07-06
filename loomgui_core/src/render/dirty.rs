@@ -58,10 +58,14 @@ pub fn payload_hash(rn: &RenderNode) -> u64 {
             font_size,
             color,
             program,
+            family,
         } => {
             2u8.hash(&mut h);
             font_size.to_le_bytes().hash(&mut h);
             program.hash(&mut h);
+            // family 决定后端选哪个 Font asset 光栅——同 codepoint 不同 family 出不同 UV，
+            // 故 family 变必须 Full 重建 mesh，入 payload_hash。
+            family.hash(&mut h);
             for &v in color.iter() {
                 v.to_le_bytes().hash(&mut h);
             }
@@ -188,6 +192,7 @@ mod tests {
                 font_size,
                 color,
                 program: 1,
+                family: None,
             },
         }
     }

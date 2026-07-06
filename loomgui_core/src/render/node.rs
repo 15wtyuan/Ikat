@@ -58,6 +58,9 @@ pub enum NodePayload {
         font_size: f32,
         color: [f32; 4],
         program: u32,
+        /// CSS font-family（None=default）。后端凭此选 Unity Font asset 光栅；
+        /// 核心测量阶段已用它从 FontTable 选字体，这里透传给渲染侧统一。
+        family: Option<String>,
     },
 }
 

@@ -251,6 +251,7 @@ mod tests {
             font_size: 16.0,
             color: [1.0; 4],
             program: 1,
+            family: None,
         };
         let out = merge_meshes(vec![mesh, text]);
         assert_eq!(out.len(), 2, "Text 不参与合并");

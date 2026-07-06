@@ -407,6 +407,7 @@ fn text_node(
             font_size: font_size as f32,
             color,
             program: 1,
+            family: None,
         },
     }
 }
@@ -435,7 +436,8 @@ fn text_node_serializes_into_text_arena_round_trip() {
     );
     assert!(view.text_len(0) > 0, "text_len 应 > 0（非占位 0）");
 
-    let (font_size, color, glyphs) = view.read_text(0);
+    let (family, font_size, color, glyphs) = view.read_text(0);
+    assert_eq!(family, None, "family None → 读回 None（len=0 占位）");
     assert_eq!(font_size, 24, "font_size u32 round-trip");
     assert_eq!(color, [1.0, 0.0, 0.0, 1.0], "color f32×4 round-trip");
     assert_eq!(glyphs.len(), 2, "glyph_count == 2（AB）");
@@ -448,8 +450,8 @@ fn text_node_serializes_into_text_arena_round_trip() {
     assert_eq!(glyphs[0].2, 20.0, "pen_y == line.baseline（绝对，20）");
     assert_eq!(glyphs[1].2, 20.0, "同行同 pen_y");
 
-    // 字节长度自洽：seg_len = 4(font) + 16(color) + 4(count) + 2×12(glyph) = 48。
-    assert_eq!(view.text_len(0), 48, "seg_len: 4+16+4+24 = 48");
+    // 字节长度自洽：seg_len = 4(family_len) + 0(family) + 4(font) + 16(color) + 4(count) + 2×12(glyph) = 52。
+    assert_eq!(view.text_len(0), 52, "seg_len: 4+0+4+16+4+24 = 52");
 }
 
 /// §4.1 多行 text：blob 序列化的 glyph pen_y 应 == line.baseline（绝对 y，已含行偏移）。
@@ -500,11 +502,12 @@ fn text_node_multiline_pen_y_is_absolute_baseline() {
             font_size: 16.0,
             color: [1.0; 4],
             program: 1,
+            family: None,
         },
     };
     let blob = build_blob(&frame(&[node]));
     let view = TestView::parse(&blob);
-    let (_fs, _c, glyphs) = view.read_text(0);
+    let (_fam, _fs, _c, glyphs) = view.read_text(0);
     assert_eq!(glyphs.len(), 2, "2 行各 1 字 → 2 glyph");
     // line0：pen_y 应 = baseline(16)。line.y(0)+baseline(16) 也=16 → 单行掩盖。
     assert_eq!(glyphs[0].2, baseline_off, "line0 pen_y == 16");
@@ -749,11 +752,20 @@ impl<'a> TestView<'a> {
     }
 
     /// 读节点 i 的 text 段（§4.1 text_arena per-node layout）：
-    /// `font_size:u32 | color:f32×4 | glyph_count:u32 | glyphs[count × {codepoint:u32, pen_x:f32, pen_y:f32}]`。
-    /// 返回 (font_size, color, glyphs[(codepoint, pen_x, pen_y)])。
-    fn read_text(&self, i: usize) -> (u32, [f32; 4], Vec<(u32, f32, f32)>) {
+    /// `family_len:u32 | family_bytes[u8] | font_size:u32 | color:f32×4 | glyph_count:u32
+    ///   | glyphs[count × {codepoint:u32, pen_x:f32, pen_y:f32}]`。
+    /// 返回 (family, font_size, color, glyphs[(codepoint, pen_x, pen_y)])。
+    fn read_text(&self, i: usize) -> (Option<String>, u32, [f32; 4], Vec<(u32, f32, f32)>) {
         let seg = self.text_arena_off + self.text_off(i) as usize;
         let mut p = seg;
+        let fam_len = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()) as usize;
+        p += 4;
+        let family = if fam_len > 0 {
+            Some(String::from_utf8(self.buf[p..p + fam_len].to_vec()).unwrap())
+        } else {
+            None
+        };
+        p += fam_len;
         let font_size = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
         p += 4;
         let r = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
@@ -776,7 +788,7 @@ impl<'a> TestView<'a> {
             p += 4;
             glyphs.push((cp, px, py));
         }
-        (font_size, [r, g, b, a], glyphs)
+        (family, font_size, [r, g, b, a], glyphs)
     }
     fn clip_count(&self) -> u32 {
         if self.clip_table_len >= 4 {

@@ -18,11 +18,13 @@ namespace LoomGUI
         public bool Stale;
         public uint LastNodeId;       // 复用 GO 时校验
         public bool IsText;            // kind=2：font atlas rebuild 时需重光栅
-        // text 缓存：上次 Full 时的 glyphs/fontSize/color。font atlas rebuild 时节点为 Skip/Header
+        // text 缓存：上次 Full 时的 glyphs/fontSize/color/font。font atlas rebuild 时节点为 Skip/Header
         // （blob 无 text 段），用此缓存重建取新 UV——否则 ReadText 读 text_len=0 占位越界 → count 垃圾 → OOM。
+        // LastFont：Full 帧按 family 解析出的 Unity Font（Header 帧复用，避免 family 缺失时 fallback 错字体）。
         public GlyphData[] LastGlyphs;
         public int LastFontSize;
         public Color LastTextColor;
+        public Font LastFont;
 
         // buffer 复用（500 节点静态压测 GC 缓解）：每 RenderObj 持可复用 List，
         // UploadMesh 每帧 Clear+fill 后用 Mesh.SetVertices(List) 等 overload 上传——
@@ -57,8 +59,8 @@ namespace LoomGUI
         /// fontVersion: caller（LoomStage）持有的 atlas rebuild 版本号；与 _lastFontVersion 不等 →
         ///   本帧所有 text 节点强制重 BuildMesh（glyph UV 变，缓存 mesh 作废）。
         ///
-        /// per-node 字体选择：blob 当前不携带 font_family 字段（text 段只有 font_size/color/glyphs），
-        /// 故现阶段所有 text 节点用 defaultFont 光栅。unityFonts 表已接入但 per-node 查找待 blob 加 family 字段后启用。
+        /// per-node 字体选择：Full 帧（text arena 有段）从 blob 读 family → unityFonts 查 Font asset，
+        /// 缓存进 ro.LastFont；Header/Skip 帧（arena 无段）复用 ro.LastFont，保证材质 atlas 不掉回 default。
         /// </summary>
         public void Sync(FrameBlob blob, Transform root, MaterialManager mm,
                          SpriteResolver sprites, Texture fallback,
@@ -119,10 +121,6 @@ namespace LoomGUI
                     }
                 }
 
-                // 选 text 节点的光栅字体。blob 暂无 font_family 字段 → 统一用 defaultFont。
-                // blob 加 family 字段后改为：unityFonts.TryGetValue(blob.FontFamily(i), out var fa) ? fa : defaultFont。
-                Font nodeFont = (kind == 2) ? defaultFont : null;
-
                 // 确保 RenderObj 存在；新建 GO 无 mesh → 强制 FULL（无视 blob 的 HEADER）
                 if (!pool.TryGetValue(poolKey, out var ro))
                 {
@@ -133,6 +131,25 @@ namespace LoomGUI
                 ro.LastNodeId = id; // 新建 + 复用均更新（slot 换绑时 node_id 变）
                 ro.Stale = false;
                 ro.IsText = kind == 2;
+
+                // 选 text 节点的光栅字体。Full 帧（arena 有段）从 blob 读 family → unityFonts 查；
+                // Header/Skip 帧（arena 无段）复用 ro.LastFont，避免材质 atlas 掉回 default。
+                // ReadText 仅在 level==2 且 text_len>0 时调用一次（同调用取 family+fontSize+color+glyphs）。
+                Font nodeFont = null;
+                if (kind == 2)
+                {
+                    if (level == 2 && blob.TextLen(i) > 0u)
+                    {
+                        blob.ReadText(i, out string family, out int fs, out Color tc, out var gs);
+                        ro.LastGlyphs = gs; ro.LastFontSize = fs; ro.LastTextColor = tc;
+                        nodeFont = ResolveFont(family, unityFonts, defaultFont);
+                        ro.LastFont = nodeFont;
+                    }
+                    else
+                    {
+                        nodeFont = ro.LastFont ?? defaultFont;
+                    }
+                }
 
                 UpdateHeader(ro, blob, i, root, mm, kind, sp, tex, nodeFont);
                 if (level == 2) UploadMeshOrText(ro, blob, i, sp, nodeFont);
@@ -236,8 +253,20 @@ namespace LoomGUI
             ro.Mr.SetPropertyBlock(ro.Mpb);
         }
 
+        /// family → Unity Font asset。unityFonts 命中即用，否则 fallback defaultFont。
+        /// defaultFont 可能为 null（caller 未注入）——返回 null 由调用方跳材质以免 NRE。
+        static Font ResolveFont(string family, Dictionary<string, Font> unityFonts, Font defaultFont)
+        {
+            if (!string.IsNullOrEmpty(family) && unityFonts != null
+                && unityFonts.TryGetValue(family, out var fa) && fa != null)
+                return fa;
+            return defaultFont;
+        }
+
         /// 上传 mesh / 重建 text mesh（仅 FULL 路径调用）。
         /// mesh 顶点已由 Rust re-base 到节点本地空间，此处按 (x,y,0) 上传。
+        /// text 分支：text 段（family/fontSize/color/glyphs）已在 Sync 主循环读出并缓存进 ro，
+        /// 此处不再 ReadText（避免二次解析 arena）；font 由调用方按 family 解析后传入。
         static void UploadMeshOrText(RenderObj ro, FrameBlob blob, int i,
                                      Sprite sp, Font font)
         {
@@ -256,22 +285,13 @@ namespace LoomGUI
             }
             else // kind == 2 (Text)
             {
-                // text 重建两路：
-                //  ① Full（blob 有 text 段，text_len>0）：ReadText 读 + 缓存进 ro（供下次 fontDirty 重建）。
-                //  ② fontDirty 提升的 Skip/Header（blob 无 text 段，text_len==0）：用 ro 上次 Full 缓存的
-                //     glyphs 重建取新 UV。否则 ReadText 读 text_len=0 占位 → p 指 text_arena 头 → count 是垃圾
-                //     （text_arena 全空时还越界读到 clip/path 表）→ new GlyphData[count] OOM。
-                int fontSize; Color textColor; GlyphData[] glyphs;
-                if (blob.TextLen(i) > 0u)
-                {
-                    blob.ReadText(i, out fontSize, out textColor, out glyphs);
-                    ro.LastGlyphs = glyphs; ro.LastFontSize = fontSize; ro.LastTextColor = textColor;
-                }
-                else
-                {
-                    glyphs = ro.LastGlyphs; fontSize = ro.LastFontSize; textColor = ro.LastTextColor;
-                    if (glyphs == null) return;   // 防御：从未 Full 过（首帧建 RenderObj 强制 Full，不触发）
-                }
+                // text 重建取 ro 缓存的 glyphs/fontSize/color（Sync 主循环 Full 分支已读）。
+                // fontDirty 提升的 Skip/Header 走此分支时用上次 Full 缓存——glyphs 必非 null
+                // （首帧建 RenderObj 强制 Full，之后缓存始终在）。
+                GlyphData[] glyphs = ro.LastGlyphs;
+                int fontSize = ro.LastFontSize;
+                Color textColor = ro.LastTextColor;
+                if (glyphs == null) return;   // 防御：从未 Full 过（不应达此）
                 // node opacity 走 _Alpha uniform（不烤进顶点色，否则双乘）。
                 var seg = TextRasterizer.BuildMesh(font, fontSize, textColor, glyphs);
                 UploadMesh(ro, seg);

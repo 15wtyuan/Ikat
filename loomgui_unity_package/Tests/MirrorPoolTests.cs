@@ -202,8 +202,9 @@ namespace LoomGUI.Tests
             int[] elemSize = { 4,4,1,4,4,4,4,4,4,4,4,4,1,4,4,4,4,4,1,80,1,4 };
             for (int i = 0; i < 22; i++) { offs[i] = colOff; colOff += elemSize[i]; }
 
-            // text_arena 段：font_size:u32 | color:f32×4 | glyph_count:u32 | glyphs[count×{cp,px,py}]
+            // text_arena 段：family_len:u32 | family_bytes[] | font_size:u32 | color:f32×4 | glyph_count:u32 | glyphs[count×{cp,px,py}]
             var textArena = new List<byte>();
+            textArena.AddRange(System.BitConverter.GetBytes(0u));   // family_len=0（无 family → null）
             textArena.AddRange(System.BitConverter.GetBytes(24u));  // font_size
             textArena.AddRange(System.BitConverter.GetBytes(1f));   // r
             textArena.AddRange(System.BitConverter.GetBytes(1f));   // g

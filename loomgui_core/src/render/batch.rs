@@ -779,6 +779,7 @@ mod tests {
             font_size: 16.0,
             color: [1.0; 4],
             program: 1,
+            family: None,
         };
         r
     }

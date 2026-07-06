@@ -177,6 +177,7 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
                 font_size,
                 color,
                 program,
+                family,
             } => {
                 col_kind.push(2);
                 col_program.push(*program as u8);
@@ -189,6 +190,10 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
 
                 if write_arena {
                     let seg_off = text_arena.len() as u32;
+                    // family：length-prefixed UTF-8。None/空 → len=0（后端 fallback defaultFont）。
+                    let family_bytes = family.as_deref().unwrap_or("").as_bytes();
+                    text_arena.extend_from_slice(&(family_bytes.len() as u32).to_le_bytes());
+                    text_arena.extend_from_slice(family_bytes);
                     text_arena.extend_from_slice(&(*font_size as u32).to_le_bytes());
                     for &c in color {
                         text_arena.extend_from_slice(&c.to_le_bytes());

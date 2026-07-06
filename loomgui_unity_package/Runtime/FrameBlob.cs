@@ -184,15 +184,19 @@ namespace LoomGUI
             return seg;
         }
 
-        /// 读节点 i 的 text 段（仅 payload_kind==2 时调用）。镜像 Rust blob.rs::read_text。
+        /// 读节点 i 的 text 段（仅 payload_kind==2 时调用）。镜像 Rust blob.rs text_arena 段布局。
         /// per-node 段布局（little-endian）：
-        ///   font_size:u32 | color:f32×4 | glyph_count:u32
+        ///   family_len:u32 | family_bytes[family_len] | font_size:u32 | color:f32×4 | glyph_count:u32
         ///   | glyphs[count × { codepoint:u32, pen_x:f32, pen_y:f32 }]  (12B/glyph)
+        /// family：UTF-8 解码；len=0 → null（调用方 fallback defaultFont）。
         /// pen_x/pen_y 已 GO-local（layout-rect 相对；节点绝对位在 world matrix m_tx/m_ty，pen 是相对节点原点的偏移，勿与 m_tx/m_ty 叠加）；
         /// pen_y = line.baseline（绝对 y，layout.rs:43 已含行偏移 line_y；同行同值）。Unity 不 re-base、不用 advance。
-        public void ReadText(int i, out int fontSize, out Color color, out GlyphData[] glyphs)
+        public void ReadText(int i, out string family, out int fontSize, out Color color, out GlyphData[] glyphs)
         {
             int p = TextArenaOff + (int)TextOff(i);
+            int famLen = (int)ReadU32(p); p += 4;
+            family = famLen > 0 ? Encoding.UTF8.GetString(_buf, p, famLen) : null;
+            p += famLen;
             fontSize = (int)ReadU32(p); p += 4;
             float r = ReadF32(p); p += 4;
             float g = ReadF32(p); p += 4;

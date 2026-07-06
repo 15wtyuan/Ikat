@@ -373,6 +373,7 @@ pub fn build_render_nodes(
                         font_size: s.font_size,
                         color: anim.and_then(|a| a.text_color).unwrap_or(s.color),
                         program: 1,
+                        family: s.font_family.clone(),
                     },
                 }
             }
