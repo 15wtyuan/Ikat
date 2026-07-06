@@ -460,8 +460,20 @@ fn transition_empty_value_is_none() {
     // apply_decl("transition", "") → style.transition = None（未声明 vs 默认值有不同语义）
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "transition", ""));
-    assert_eq!(
-        s.transition, None,
-        "空 transition 值 → None，不设为默认 spec"
+    assert!(
+        s.transition.is_empty(),
+        "空 transition 值 → 空 Vec，不设为默认 spec"
     );
+}
+
+#[test]
+fn parse_transition_multiple_comma_specs() {
+    // CSS 逗号分隔多 spec：background-color 0.3s + color 0.3s → 两个 TransitionSpec。
+    // 之前 split_whitespace 不处理逗号，color spec 被 ease 分支吞掉（prop 被覆盖）。
+    let ts = parse_transition("background-color 0.3s ease-out, color 0.3s ease-out");
+    assert_eq!(ts.len(), 2, "逗号分隔两个 spec");
+    assert_eq!(ts[0].prop, Some(crate::tween::TweenProp::BgColor));
+    assert!((ts[0].duration - 0.3).abs() < 1e-3);
+    assert_eq!(ts[1].prop, Some(crate::tween::TweenProp::TextColor));
+    assert!((ts[1].duration - 0.3).abs() < 1e-3);
 }

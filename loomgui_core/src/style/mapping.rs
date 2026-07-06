@@ -648,15 +648,22 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
     }
 }
 
-/// 解析 CSS `transition` 声明值 → TransitionSpec。
-/// 简化解析：空格切 token。第 1 个 = 属性名（all/opacity/color/background-color）；
-/// 含 's' 的 = duration/delay（首遇 duration，次遇 delay）；
-/// 其余 = ease 关键字。缺省补默认（dur=0s, ease=Linear, delay=0s）。
-/// 空输入（无 token）返回 None，表示未声明 transition。
-fn parse_transition(value: &str) -> Option<crate::style::resolved::TransitionSpec> {
+/// 解析 CSS `transition` 声明值 → TransitionSpec 列表。
+///
+/// 逗号分隔多 spec（如 `background-color 0.3s, color 0.3s`）。每段由 `parse_one_transition`
+/// 解析。空输入返回空 Vec（未声明 transition）。
+fn parse_transition(value: &str) -> Vec<crate::style::resolved::TransitionSpec> {
+    value.split(',').filter_map(parse_one_transition).collect()
+}
+
+/// 解析单个 transition spec（逗号分隔的一段）。
+/// 空格切 token：第 1 个 = 属性名（all/opacity/color/background-color）；含 's' 的 =
+/// duration/delay（首遇 duration，次遇 delay）；其余 = ease 关键字。缺省补默认
+/// （dur=0s, ease=Linear, delay=0s）。空段返回 None（被 filter_map 丢弃）。
+fn parse_one_transition(part: &str) -> Option<crate::style::resolved::TransitionSpec> {
     use crate::style::resolved::TransitionSpec;
     use crate::tween::{Ease, TweenProp};
-    let tokens: Vec<&str> = value.split_whitespace().collect();
+    let tokens: Vec<&str> = part.split_whitespace().collect();
     if tokens.is_empty() {
         return None;
     }

@@ -89,6 +89,65 @@ fn build_container_produces_mesh_quad() {
     assert_eq!(rns[0].world_matrix[5], 2.0);
 }
 
+#[test]
+fn build_skips_display_none_subtree() {
+    // parent(flex,红底) → child(display:none,绿底) → grandchild(Text "hi")
+    // CSS 语义：display:none 整子树不渲染——Text 后代不该进 frame.nodes。
+    // 之前 bug：build 遍历所有节点无过滤，display:none 节点的 Text 后代虽 layout_rect=0
+    //   但仍产 Text RenderNode，Unity 渲染了字形（"内容堆在左边显示"根因）。
+    let parent = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        },
+        Some([1.0, 0.0, 0.0, 1.0]),
+    );
+    let mut child = container_node(
+        1,
+        Some(0),
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        },
+        Some([0.0, 1.0, 0.0, 1.0]),
+    );
+    child.style.taffy_style.display = taffy::Display::None;
+    let mut grandchild = Node::default();
+    grandchild.kind = NodeKind::Text {
+        content: "hi".into(),
+    };
+    grandchild.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 50.0,
+        h: 20.0,
+    };
+    // from_nodes 用 edges (parent_idx, child_idx) 按 vec 位置建 parent 关系。
+    let mut scene = Scene::from_nodes(vec![parent, child, grandchild], vec![(0, 1), (1, 2)]);
+    let font = test_font().expect("need test font for build_render_nodes");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &font,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+    );
+    let has_text = frame
+        .nodes
+        .iter()
+        .any(|rn| matches!(rn.payload, NodePayload::Text { .. }));
+    assert!(
+        !has_text,
+        "display:none 子树的 Text 后代不该进 frame.nodes（child 整子树剪掉）"
+    );
+}
+
 /// Image RenderNode payload 带 path（核心不知图集/UV）。
 /// Image 节点 src="icons/skin.png" → Mesh payload image_path=Some("icons/skin.png")。
 #[test]

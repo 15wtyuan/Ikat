@@ -34,6 +34,32 @@ fn src_size(image_sizes: &ImageSizeTable, path: &str) -> (f32, f32) {
         .unwrap_or((64.0, 64.0))
 }
 
+/// 收集所有 `display:none` 节点 + 其全部后代的 NodeId。
+///
+/// CSS 语义：`display:none` 整子树不渲染。`build_render_nodes` 遍历时跳过这些节点，
+/// 否则 display:none 节点的后代（layout_rect 已是 0 尺寸）仍会产出 RenderNode——
+/// 其中 Text 节点的字形会被引擎按自身尺寸渲染，造成"隐藏内容仍显示"。
+fn collect_display_none_subtree(scene: &Scene) -> std::collections::HashSet<NodeId> {
+    let mut pruned = std::collections::HashSet::new();
+    for root in scene.nodes.values() {
+        if !matches!(root.style.taffy_style.display, taffy::Display::None) {
+            continue;
+        }
+        let mut stack = vec![root.id];
+        while let Some(nid) = stack.pop() {
+            if !pruned.insert(nid) {
+                continue; // 已收（防环）
+            }
+            if let Some(node) = scene.get(nid) {
+                for c in &node.children {
+                    stack.push(*c);
+                }
+            }
+        }
+    }
+    pruned
+}
+
 /// clip 表条目：context_id（mask_context>0 的层级）→ 该层级的交集绝对 design rect。
 ///
 /// 由 `batch::assign_sort_keys` 在 DFS 时产；`context_id` 与 RenderNode 的
@@ -103,16 +129,18 @@ pub fn build_render_nodes(
     std::collections::HashMap<u32, (u64, u64)>,
     Vec<u32>,
 ) {
-    // id_to_pos: NodeId → 0 基位置映射（batch assign_sort_keys 用，merge 前）。
-    let id_to_pos: std::collections::HashMap<NodeId, usize> = scene
-        .nodes
-        .values()
-        .enumerate()
-        .map(|(i, n)| (n.id, i))
-        .collect();
+    // id_to_pos: NodeId → nodes vec 0 基位置。剪 display:none 子树后 nodes 与 scene.nodes
+    // 不等长，batch 按此映射索引 nodes；pruned 节点不入表（batch DFS 遇 id_to_pos 没有
+    // 的节点即跳过该子树）。
+    let mut id_to_pos: std::collections::HashMap<NodeId, usize> = std::collections::HashMap::new();
     // 直接逐节点构造真 RenderNode。change_level 先占 Full，末尾统一定级。
+    // 先剪 display:none 子树——display:none 节点 + 后代不产 RenderNode（CSS 语义）。
+    let pruned = collect_display_none_subtree(scene);
     let mut nodes: Vec<RenderNode> = Vec::new();
     for n in scene.nodes.values() {
+        if pruned.contains(&n.id) {
+            continue;
+        }
         let anim = scene.anim.get(n.id);
         let wm = scene
             .world_transforms
@@ -348,6 +376,7 @@ pub fn build_render_nodes(
                 }
             }
         };
+        id_to_pos.insert(n.id, nodes.len());
         nodes.push(rn);
     }
     // batch / merge / thumb

@@ -319,7 +319,11 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         // transition 读自 base_style（打包期烘焙的静态声明，rematch 不改 base_style）。
         let (old_style, cascaded_once, transition_decl) = {
             let n = scene.get(node_id).expect("live node");
-            (n.style.clone(), n.cascaded_once, n.base_style.transition)
+            (
+                n.style.clone(),
+                n.cascaded_once,
+                n.base_style.transition.clone(),
+            )
         };
         // 从 base_style 重起
         let mut new_style = scene.get(node_id).expect("live node").base_style.clone();
@@ -339,15 +343,58 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         }
         // transition 检测：仅 cascaded_once 后（首次 cascade 即时生效不动画），
         // 且声明了非零 duration 的 transition 时，比较可动画通道变化推请求。
-        if let Some(ts) = transition_decl {
+        for ts in &transition_decl {
             if cascaded_once && ts.duration > 0.0 {
-                emit_transition_requests(scene, node_id, ts, &old_style, &new_style);
+                emit_transition_requests(scene, node_id, *ts, &old_style, &new_style);
             }
         }
         // 写 style + 标 cascaded_once
         let node = scene.get_mut(node_id).expect("live node");
         node.style = new_style;
         node.cascaded_once = true;
+    }
+    // runtime color 继承：rematch 各节点独立重 cascade（从 base_style 重起，不读父），
+    // CSS color 是继承属性，父 runtime color 变化（选中/hover）要在此按树序补传播给子。
+    propagate_color_inheritance(scene);
+}
+
+/// runtime color 继承传播。
+///
+/// `rematch_pseudo_classes` 逐节点独立重 cascade，不读父 → 父 runtime color 变化不会
+/// 传给子。CSS `color` 是继承属性，故 rematch 后按树序 DFS 补一次：子若**未声明 color**
+/// （判据：子 rematch 后的 `style.color` == 父 `base_style.color`——子没声明 color 也没
+/// 动态命中改 color 时，new.color 从 base 重起等于打包期继承的父 base color），就把子的
+/// `style.color` 设为父的 effective color（anim tween 当前值优先，让文字随父 transition
+/// 渐变）。
+fn propagate_color_inheritance(scene: &mut Scene) {
+    let roots = scene.roots.clone();
+    for root in roots {
+        propagate_color_rec(scene, root, None);
+    }
+}
+
+fn propagate_color_rec(scene: &mut Scene, id: NodeId, parent: Option<([f32; 4], [f32; 4])>) {
+    let (my_base, my_style, my_anim_text, children) = {
+        let n = scene.get(id).expect("live node");
+        let anim_text = scene.anim.get(id).and_then(|a| a.text_color);
+        (
+            n.base_style.color,
+            n.style.color,
+            anim_text,
+            n.children.clone(),
+        )
+    };
+    let mut my_effective = my_anim_text.unwrap_or(my_style);
+    if let Some((parent_eff, parent_base)) = parent {
+        // color 来自继承（rematch 后 new.color == 父 base.color：既没声明 color 也没动态
+        // 命中改 color）且无 anim override → 继承父 effective color（随父 runtime 变）。
+        if my_style == parent_base && my_anim_text.is_none() {
+            scene.get_mut(id).expect("live node").style.color = parent_eff;
+            my_effective = parent_eff;
+        }
+    }
+    for c in children {
+        propagate_color_rec(scene, c, Some((my_effective, my_base)));
     }
 }
 
@@ -473,6 +520,57 @@ mod tests {
             s.get(bid).unwrap().style.background_color,
             Some([0.0, 0.0, 1.0, 1.0]),
             "hover → 蓝"
+        );
+    }
+
+    #[test]
+    fn child_text_inherits_parent_runtime_color() {
+        // root → parent(.par) → Text child。模拟打包期：parent base color=灰（.par 声明），
+        // child base color=灰（打包期继承 parent base）。.par:hover 命中改 parent color 深。
+        // CSS color 继承：child Text 无自己 color 声明 → runtime 该继承 parent runtime 深。
+        let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
+        let mut parent = Node::default();
+        parent.classes = vec!["par".to_string()];
+        parent.base_style.color = [0.6, 0.63, 0.71, 1.0]; // 灰（.par 声明）
+        parent.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        let mut child = Node::default();
+        child.kind = NodeKind::Text {
+            content: "hi".into(),
+        };
+        child.base_style.color = [0.6, 0.63, 0.71, 1.0]; // 灰（打包期继承 parent base）
+        child.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 20.0,
+        };
+        let mut s = Scene::from_nodes(vec![root, parent, child], vec![(0, 1), (1, 2)]);
+        s.dynamic_rules
+            .rules
+            .push(rule(".par:hover", "color", "#1a1d2e"));
+        let pid = s.get(s.roots[0]).unwrap().children[0];
+        s.get_mut(pid).unwrap().hovered = true;
+        rematch_pseudo_classes(&mut s);
+        let cid = s.get(pid).unwrap().children[0];
+        let c = s.get(cid).unwrap().style.color;
+        // #1a1d2e = (26,29,46)/255
+        assert!(
+            (c[0] - 26.0 / 255.0).abs() < 1e-3
+                && (c[1] - 29.0 / 255.0).abs() < 1e-3
+                && (c[2] - 46.0 / 255.0).abs() < 1e-3,
+            "child Text 该继承 parent hover color (#1a1d2e)，实际 {:?}",
+            c
         );
     }
 
@@ -874,12 +972,12 @@ mod tests {
     fn rematch_emits_transition_request_on_change() {
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.get_mut(bid).unwrap().base_style.transition = Some(TransitionSpec {
+        s.get_mut(bid).unwrap().base_style.transition = vec![TransitionSpec {
             prop: Some(TweenProp::BgColor),
             duration: 0.3,
             ease: Ease::Linear,
             delay: 0.0,
-        });
+        }];
         s.get_mut(bid).unwrap().cascaded_once = true; // 已 warmup
         s.dynamic_rules
             .rules
@@ -901,12 +999,12 @@ mod tests {
         // cascaded_once=false → 首次 cascade 即时生效，不产 transition 请求
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.get_mut(bid).unwrap().base_style.transition = Some(TransitionSpec {
+        s.get_mut(bid).unwrap().base_style.transition = vec![TransitionSpec {
             prop: Some(TweenProp::BgColor),
             duration: 0.3,
             ease: Ease::Linear,
             delay: 0.0,
-        });
+        }];
         // cascaded_once 保持 false
         s.dynamic_rules
             .rules

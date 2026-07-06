@@ -132,7 +132,7 @@ pub struct ResolvedStyle {
     /// CSS border-image-slice 四边切片（源图像素）。None=无九宫格。
     pub border_image_slice: Option<SliceInsets>,
     /// CSS transition 声明。None=未设（默认无过渡动画）。
-    pub transition: Option<TransitionSpec>,
+    pub transition: Vec<TransitionSpec>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -174,7 +174,7 @@ impl Default for ResolvedStyle {
             transform: LocalTransform::default(),
             color_filter: None,
             border_image_slice: None,
-            transition: None,
+            transition: Vec::new(),
         }
     }
 }
@@ -244,12 +244,12 @@ mod tests {
                 },
             ],
         };
-        s.transition = Some(TransitionSpec {
+        s.transition = vec![TransitionSpec {
             prop: Some(crate::tween::TweenProp::Opacity),
             duration: 0.3,
             ease: crate::tween::Ease::Linear,
             delay: 0.0,
-        });
+        }];
 
         let bytes = bincode::serialize(&s).expect("serialize");
         let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");

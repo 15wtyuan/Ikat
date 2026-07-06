@@ -109,8 +109,9 @@ fn reorder_unit(scene: &Scene, nodes: &[RenderNode], unit: &mut Vec<usize>) {
 /// 给所有 RenderNode 填 sort_key + mask_context，并产 clip 表（context_id → 祖先
 /// clip 链交集的绝对 design rect）。
 ///
-/// 单遍 DFS，按 scene.roots 起遍历，DFS 树序即绘制序。`nodes` 必须与 `scene.nodes`
-/// 同长且同序（由 `build_render_nodes` 保证）。返回的 `Vec<ClipEntry>` 含且仅含
+/// 单遍 DFS，按 scene.roots 起遍历，DFS 树序即绘制序。`nodes` 不含 display:none 子树
+/// （由 `build_render_nodes` 剪掉）；`id_to_pos` 只映射存活的 NodeId → nodes vec 位置，
+/// DFS 遇 `id_to_pos` 没有的节点（pruned）即跳过该子树。返回的 `Vec<ClipEntry>` 含且仅含
 /// mask_context>0 的层级（context==0 = 无 clip，不入表）。
 ///
 /// 交集语义：进入 overflow:hidden 节点（`clip_rect.is_some()`）时，把本节点 clip 与
@@ -137,6 +138,10 @@ pub fn assign_sort_keys(
         accumulated: Option<Rect>,
         scroll_offset: (f32, f32),
     ) {
+        // pruned（display:none 子树）节点不在 id_to_pos → 不 assign sort_key，不递归子树。
+        if !id_to_pos.contains_key(&id) {
+            return;
+        }
         let node = scene.get(id).expect("live node");
         // mask_context + clip 交集：本节点 clip_rect 非空 → 开新层级（计数器+1），
         // 算 own ∩ accumulated；否则继承父层级与 accumulated。

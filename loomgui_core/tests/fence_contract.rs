@@ -261,7 +261,7 @@ fn transition_prop_parsed() {
     // CSS transition 属性解析→TransitionSpec（prop:None=all, duration/delay/ease 各字段）
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "transition", "opacity 0.3s ease 0s"));
-    let ts = s.transition.expect("transition 已设置");
+    let ts = s.transition.first().expect("transition 已设置");
     assert_eq!(ts.prop, Some(loomgui_core::tween::TweenProp::Opacity));
     assert!((ts.duration - 0.3).abs() < 1e-5, "duration=0.3s");
     assert_eq!(ts.ease, loomgui_core::tween::Ease::QuadOut);
@@ -287,7 +287,7 @@ fn transition_all_and_color_parsed() {
             apply_decl(&mut s, "transition", val),
             "transition {val} 应返回 true"
         );
-        let ts = s.transition.expect("transition 已设置");
+        let ts = s.transition.first().expect("transition 已设置");
         assert_eq!(ts.prop, expected_prop, "prop mismatch for {val}");
     }
 }
@@ -297,7 +297,7 @@ fn transition_defaults_for_omitted_tokens() {
     // 只写属性名 → duration=0, ease=Linear, delay=0 默认。
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "transition", "opacity"));
-    let ts = s.transition.expect("transition 已设置");
+    let ts = s.transition.first().expect("transition 已设置");
     assert_eq!(ts.prop, Some(loomgui_core::tween::TweenProp::Opacity));
     assert!((ts.duration - 0.0).abs() < 1e-5, "缺 duration 默认 0");
     assert_eq!(ts.ease, loomgui_core::tween::Ease::Linear);
