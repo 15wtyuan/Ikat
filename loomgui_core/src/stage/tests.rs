@@ -35,6 +35,7 @@ fn gather_template_nodes(
         .map(|v| v == "true")
         .unwrap_or(false);
     let tabindex = el.attrs.get("tabindex").and_then(|v| v.parse::<i32>().ok());
+    let data_controller = el.attrs.get("data-controller").cloned();
     let my_idx = out.len();
     out.push(TemplateNode {
         kind: kind.clone(),
@@ -44,6 +45,7 @@ fn gather_template_nodes(
         id_attr: el.id.clone(),
         draggable,
         tabindex,
+        data_controller,
     });
     // Container/Button 的裸文本 → Text 子（同 gather_rec，继承字体/颜色字段）
     if matches!(kind, NodeKind::Container | NodeKind::Button) {
@@ -67,6 +69,7 @@ fn gather_template_nodes(
                 id_attr: None,
                 draggable: false,
                 tabindex: None,
+                data_controller: None,
             });
         }
     }

@@ -10,6 +10,7 @@ fn tn(kind: NodeKind) -> TemplateNode {
         id_attr: None,
         draggable: false,
         tabindex: None,
+        data_controller: None,
     }
 }
 
@@ -199,6 +200,36 @@ fn classes_id_attr_draggable_tabindex_roundtrip() {
     assert_eq!(ns[0].tabindex, None);
     assert!(ns[1].draggable, "btn draggable=true round-trip");
     assert_eq!(ns[1].tabindex, Some(3));
+}
+
+/// data_controller 字段经 write_package/read_package 往返保留（含 Some/None 两端）。
+/// 镜像 classes_id_attr_draggable_tabindex_roundtrip 的 Some/None 覆盖风格。
+#[test]
+fn data_controller_roundtrips_through_pkg() {
+    let mut root = tn(NodeKind::Container);
+    root.data_controller = Some("tab".into());
+    let mut child = tn(NodeKind::Text {
+        content: "hi".into(),
+    });
+    child.parent_idx = Some(0);
+    // child.data_controller 保持 None（验 None 端不误读成 Some）
+    let nodes = [root, child];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules)],
+        asset_manifest: &[],
+    };
+    let pkg = read_package(&write_package(&input)).unwrap();
+    let ns = &pkg.components["c"].nodes;
+    assert_eq!(
+        ns[0].data_controller.as_deref(),
+        Some("tab"),
+        "root data_controller 应往返保留"
+    );
+    assert!(
+        ns[1].data_controller.is_none(),
+        "child data_controller=None 应保持 None"
+    );
 }
 
 #[test]
@@ -429,8 +460,8 @@ fn read_rejects_cross_component_parent() {
     let ct_off = comp_table_offset(&bytes);
     let nodeblock_off = ct_off + 2 * 14; // 2 组件条目
                                          // 节点布局：parent_idx(4) + kind(1) + style_len(4) + style_blob + text_idx(2) + src_idx(2)
-                                         //   + class_count(2) + class_idx[] + id_idx(2) + flags(1) + tabindex(4)
-                                         //   固定部分 = 22B + style_blob_len + 2*class_count。所有节点用默认 style → style_len 相同。
+                                         //   + class_count(2) + class_idx[] + id_idx(2) + flags(1) + tabindex(4) + dc_idx(2)
+                                         //   固定部分 = 24B + style_blob_len + 2*class_count。所有节点用默认 style → style_len 相同。
     let style_len_0 = u32::from_le_bytes(
         bytes[nodeblock_off + 5..nodeblock_off + 9]
             .try_into()
@@ -442,7 +473,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node0_size = 22 + style_len_0 + 2 * class_count_0;
+    let node0_size = 24 + style_len_0 + 2 * class_count_0;
     let node1_off = nodeblock_off + node0_size;
     let style_len_1 =
         u32::from_le_bytes(bytes[node1_off + 5..node1_off + 9].try_into().unwrap()) as usize;
@@ -451,7 +482,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node1_size = 22 + style_len_1 + 2 * class_count_1;
+    let node1_size = 24 + style_len_1 + 2 * class_count_1;
     let node2_off = nodeblock_off + node0_size + node1_size;
     // 篡改节点 2（comp_b root）的 parent_idx 从 -1 → 0（< base=2，跨组件）
     let mut patched = bytes.clone();

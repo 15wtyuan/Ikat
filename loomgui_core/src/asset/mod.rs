@@ -1,4 +1,4 @@
-//! 包格式（.pkg.bin，当前 version=12）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=13）：Rust-internal（packager 写、runtime 读，C# 不解析）。
 //!
 //! 多组件格式：一个 pkg.bin = 多个具名组件（ComponentTable 切分）。
 //! 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponentDynamicRules +
@@ -20,9 +20,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 12; // AssetManifest 含 path+w+h（PNG IHDR 尺寸）
-pub(crate) const MIN_VERSION: u32 = 12;
-pub(crate) const MAX_VERSION: u32 = 12;
+pub const PKG_FORMAT_VERSION: u32 = 13; // TemplateNode.data_controller（Controller 挂载点声明）
+pub(crate) const MIN_VERSION: u32 = 13;
+pub(crate) const MAX_VERSION: u32 = 13;
 const NULL_IDX: u16 = 0xFFFF;
 
 const KIND_CONTAINER: u8 = 0;
@@ -71,6 +71,9 @@ pub struct TemplateNode {
     pub id_attr: Option<String>,
     pub draggable: bool,
     pub tabindex: Option<i32>,
+    /// HTML `data-controller="name"` 属性值（Controller 挂载点声明）。
+    /// instantiate 时填 live Node.data_controller；匹配器遇 `[data-page]` 回溯查此字段。
+    pub data_controller: Option<String>,
 }
 
 /// write_package 的输入（打包器构造，已归一化：path 已相对、style 已 bake）。
@@ -259,8 +262,9 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     // 每组件：(name_idx, root_node_idx, node_count, dynamic_blob)
     // 全局 NodeBlock 由各组件节点顺次拼接，root_node_idx = 该组件首节点在全局的位置。
     let mut comp_records: Vec<(u16, u32, u32, Vec<u8>)> = Vec::with_capacity(component_count);
-    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex)
-    let mut node_records: Vec<(i32, u8, Vec<u8>, u16, u16, Vec<u16>, u16, u8, i32)> = Vec::new();
+    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, dc_idx)
+    let mut node_records: Vec<(i32, u8, Vec<u8>, u16, u16, Vec<u16>, u16, u8, i32, u16)> =
+        Vec::new();
     let mut global_node_offset: u32 = 0;
     for (name, nodes, dynamic_rules) in &input.components {
         let name_idx = intern(name, &mut strings, &mut idx_of);
@@ -303,6 +307,12 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 .as_ref()
                 .map(|id| intern(id, &mut strings, &mut idx_of))
                 .unwrap_or(NULL_IDX);
+            // data_controller：照 id_attr 同款 intern + NULL_IDX 哨兵（None=0xFFFF）。
+            let dc_idx = tn
+                .data_controller
+                .as_ref()
+                .map(|dc| intern(dc, &mut strings, &mut idx_of))
+                .unwrap_or(NULL_IDX);
             let flags: u8 = if tn.draggable { 0x01 } else { 0x00 };
             let tabindex = tn.tabindex.unwrap_or(i32::MIN);
             node_records.push((
@@ -315,6 +325,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 id_idx,
                 flags,
                 tabindex,
+                dc_idx,
             ));
         }
         let node_count = nodes.len() as u32;
@@ -351,9 +362,19 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         out.extend_from_slice(&(dynamic_blob.len() as u32).to_le_bytes());
     }
     // NodeBlock: 每节点 {parent_idx(i32), kind_tag(u8), style_len(u32)+style_blob, text_idx(u16), src_idx(u16),
-    //   class_count(u16)+class_idx[], id_idx(u16), flags(u8), tabindex(i32)}
-    for (parent_idx, kind_tag, style_blob, text_idx, src_idx, class_idx, id_idx, flags, tabindex) in
-        &node_records
+    //   class_count(u16)+class_idx[], id_idx(u16), flags(u8), tabindex(i32), dc_idx(u16)}
+    for (
+        parent_idx,
+        kind_tag,
+        style_blob,
+        text_idx,
+        src_idx,
+        class_idx,
+        id_idx,
+        flags,
+        tabindex,
+        dc_idx,
+    ) in &node_records
     {
         out.extend_from_slice(&parent_idx.to_le_bytes());
         out.push(*kind_tag);
@@ -368,6 +389,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         out.extend_from_slice(&id_idx.to_le_bytes());
         out.push(*flags);
         out.extend_from_slice(&tabindex.to_le_bytes());
+        out.extend_from_slice(&dc_idx.to_le_bytes());
     }
     // PerComponentDynamicRules: 每组件 dynamic_blob（紧跟 ComponentTable 序）
     for (_, _, _, dynamic_blob) in &comp_records {
@@ -449,6 +471,13 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         } else {
             Some(tab_raw)
         };
+        // data_controller：照 id_attr 同款 NULL_IDX 哨兵读（None=0xFFFF）。
+        let dc_idx = r.u16("dc_idx")?;
+        let data_controller = if dc_idx == NULL_IDX {
+            None
+        } else {
+            Some(string_at(&strings, dc_idx)?)
+        };
         // 存盘 parent_idx 是 NodeBlock 全局位置（-1=组件根）；先存全局，待切分组件时减 base 转局部
         let parent_global = if pidx < 0 { None } else { Some(pidx as usize) };
         let kind = match kind_tag {
@@ -470,6 +499,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             id_attr,
             draggable,
             tabindex,
+            data_controller,
         });
     }
     // PerComponentDynamicRules: 每组件 dynamic_blob（按 ComponentTable 序）

@@ -17,6 +17,7 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             id_attr: None,
             draggable: false,
             tabindex: None,
+            data_controller: None,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -26,6 +27,7 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             id_attr: None,
             draggable: false,
             tabindex: None,
+            data_controller: None,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -92,6 +94,7 @@ fn instantiate_missing_pkg_or_comp_errors() {
         id_attr: None,
         draggable: false,
         tabindex: None,
+        data_controller: None,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -140,6 +143,7 @@ fn instantiate_merges_dynamic_rules_dedup() {
         id_attr: None,
         draggable: false,
         tabindex: None,
+        data_controller: None,
     }];
     let input = PackageInput {
         components: vec![("comp1", &nodes, &rules)],
@@ -201,6 +205,7 @@ fn instantiate_multi_instance_hover_independent() {
             id_attr: None,
             draggable: false,
             tabindex: None,
+            data_controller: None,
         },
         TemplateNode {
             kind: NodeKind::Button,
@@ -210,6 +215,7 @@ fn instantiate_multi_instance_hover_independent() {
             id_attr: None,
             draggable: false,
             tabindex: None,
+            data_controller: None,
         },
     ];
     let input = PackageInput {

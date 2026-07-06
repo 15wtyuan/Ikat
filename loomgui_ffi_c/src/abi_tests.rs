@@ -15,6 +15,7 @@ fn make_test_pkg_bytes(component: &str) -> Vec<u8> {
         id_attr: None,
         draggable: false,
         tabindex: None,
+        data_controller: None,
     }];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -450,6 +451,7 @@ fn find_node_by_id_round_trip() {
         id_attr: Some("ok".to_string()),
         draggable: false,
         tabindex: None,
+        data_controller: None,
     }];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let pkg = loomgui_core::asset::write_package(&PackageInput {

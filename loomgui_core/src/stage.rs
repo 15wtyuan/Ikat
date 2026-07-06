@@ -413,7 +413,7 @@ impl Stage {
     /// 1. 查 `packages[pkg].components[component]`，clone 出 ComponentTemplate（避开 packages/scene 双借）。
     /// 2. 遍历 template.nodes，按 parent_idx 序建 live Node（父先建于子），复用节点构造
     ///    （`create_node_from_template`：kind + baked style → base_style/style 初始 + clip_rect +
-    ///    dirty_text + slotmap insert + id 回填），再填 classes/id_attr/draggable/tabindex。
+    ///    dirty_text + slotmap insert + id 回填），再填 classes/id_attr/draggable/tabindex/data_controller。
     ///    按 parent_idx 串子树（append_child 语义：parent.children.push + child.parent=Some(parent)）。
     ///    根（parent_idx=None）不串父，记录返回。
     /// 3. 伪类规则合并去重：遍历 template.dynamic_rules，相同选择器（ParsedSelector.eq）不重复加进
@@ -442,12 +442,13 @@ impl Stage {
                 tn.kind.clone(),
                 tn.style.clone(),
             );
-            // 填 classes/id_attr/draggable/tabindex（create_node_from_template 不填这些，同 create_node）
+            // 填 classes/id_attr/draggable/tabindex/data_controller（create_node_from_template 不填这些，同 create_node）
             let n = scene.get_mut(node_id).unwrap();
             n.classes = tn.classes.clone();
             n.id_attr = tn.id_attr.clone();
             n.draggable = tn.draggable;
             n.tabindex = tn.tabindex;
+            n.data_controller = tn.data_controller.clone();
             id_map[i] = Some(node_id);
             // 按 parent_idx 串子树（根 parent_idx=None 不串）
             if let Some(pidx) = tn.parent_idx {

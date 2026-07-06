@@ -103,6 +103,7 @@ fn scene_to_template(
             id_attr: n.id_attr.clone(),
             draggable: n.draggable,
             tabindex: n.tabindex,
+            data_controller: n.data_controller.clone(),
         });
     }
     nodes
