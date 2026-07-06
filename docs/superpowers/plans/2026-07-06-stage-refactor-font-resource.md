@@ -123,7 +123,6 @@ fn font_table_select_returns_named_when_present() {
 #[test]
 fn font_table_register_is_default_sets_default() {
     let mut t = FontTable::new();
-    assert!(t.select(None)._err_is_no_default()); // helper: select on empty panics-or-returns sentinel
     t.register("DejaVu", font_bytes_dejavu(), true).unwrap();
     assert_eq!(t.default_family.as_deref(), Some("DejaVu"));
 }
@@ -142,7 +141,7 @@ fn ascent_dejavu_16() -> f32 {
 }
 ```
 
-For the empty-table case, `select` on a table with no default: return a `&Font` is impossible (no font to borrow). Decide: `select` returns `&Font` but **panics** if no default registered (FFI layer guarantees a default is registered before any tick that measures text). Document this precondition. Adjust the `err_is_no_default` test to expect panic via `#[should_panic]`:
+For the empty-table case, `select` on a table with no default: returning a `&Font` is impossible (no font to borrow). `select` returns `&Font` but **panics** if no default registered (FFI layer guarantees a default is registered before any tick that measures text). Document this precondition. Test the panic case with `#[should_panic]`:
 
 ```rust
 #[test]
@@ -152,8 +151,6 @@ fn font_table_select_panics_without_default() {
     t.select(None);
 }
 ```
-
-Remove the `err_is_no_default` helper — use `#[should_panic]` instead.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -882,7 +879,7 @@ git commit -m "feat(unity): LoomStage pure class — carries all APIs incl. v1.5
 
 **Interfaces:**
 - Consumes: `LoomStage` pure class (B2), `LoomSettings.fonts` (B1).
-- Produces: `public class LoomStageDriver : MonoBehaviour` with `[ExecuteAlways]`; `[SerializeField]` `_designSize`/`_uiCamera`/`_showFps`/`_safeArea`/`_inputCollector`; `public LoomStage Stage`; `protected virtual (byte[], Font) LoadFont(FontEntry)`; `protected virtual byte[] LoadPackageBytes(string name)`; `protected virtual SpriteAtlas LoadSpriteAtlas(string atlasName)`; `protected virtual void RegisterFontsFromSettings()`.
+- Produces: `public class LoomStageDriver : MonoBehaviour` with `[ExecuteAlways]`; `[SerializeField]` `_designSize`/`_uiCamera`/`_showFps`/`_safeArea`/`_inputCollector`; `public LoomStage Stage`; `public virtual (byte[], Font) LoadFont(FontEntry)`; `public virtual byte[] LoadPackageBytes(string name)`; `public virtual SpriteAtlas LoadSpriteAtlas(string atlasName)`; `protected virtual void RegisterFontsFromSettings()`. (Load hooks are `public` so cross-assembly consumers like LoomGUI.Demo can call them; `RegisterFontsFromSettings` is `protected` — internal orchestration, overridden only by subclasses.)
 
 - [ ] **Step 1: Write a failing test**
 
@@ -961,8 +958,8 @@ namespace LoomGUI
         }
 
         /// 默认直读 Bundles/fonts/{sourceFileName}.bytes + editor LoadAssetAtPath<Font>。
-        /// 项目覆写换 AB/Addressables。
-        protected virtual (byte[] bytes, Font unityFont) LoadFont(FontEntry entry) {
+        /// 项目覆写换 AB/Addressables。public 以便跨程序集（LoomGUI.Demo）调用。
+        public virtual (byte[] bytes, Font unityFont) LoadFont(FontEntry entry) {
             string dir = Path.Combine(Application.streamingAssetsPath, "..", "Assets/LoomGUI/Bundles/fonts");
             // editor: Bundles/ is under Assets/ — resolve via Application.dataPath
             string fontsDir = Path.Combine(Application.dataPath, "LoomGUI/Bundles/fonts");
@@ -981,13 +978,13 @@ namespace LoomGUI
         }
 
         /// 默认直读 Bundles/ui/{name}.pkg.bin。项目覆写换 AB/Addressables。
-        protected virtual byte[] LoadPackageBytes(string name) {
+        public virtual byte[] LoadPackageBytes(string name) {
             string path = Path.Combine(Application.dataPath, "LoomGUI/Bundles/ui", name + ".pkg.bin");
             return File.Exists(path) ? File.ReadAllBytes(path) : null;
         }
 
         /// 默认 editor LoadAssetAtPath；build 后返 null + 报错（项目须覆写）。
-        protected virtual SpriteAtlas LoadSpriteAtlas(string atlasName) {
+        public virtual SpriteAtlas LoadSpriteAtlas(string atlasName) {
 #if UNITY_EDITOR
             string path = "Assets/LoomGUI/Bundles/atlas/" + atlasName + ".spriteatlasv2";
             return UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.U2D.SpriteAtlas>(path);
@@ -1473,22 +1470,11 @@ void Awake() {
 }
 ```
 
-Replace `LoadPkgBytes` (currently reads `StreamingAssets/showcase.pkg.bin`):
+Replace `LoadPkgBytes` (currently reads `StreamingAssets/showcase.pkg.bin`). `LoadPackageBytes` is `public virtual` on Driver (declared in B3) — ShowcaseDriver calls it directly:
 ```csharp
-byte[] LoadPkgBytes(string pkgName) {
-    // Via driver's virtual hook (default reads Bundles/ui/{name}.pkg.bin)
-    return _driver.LoadPackageBytesProtected(pkgName);
-}
+byte[] LoadPkgBytes(string pkgName) => _driver.LoadPackageBytes(pkgName);
 ```
-
-`LoadPackageBytes` is `protected virtual` on Driver — ShowcaseDriver can't call it directly. Expose a `protected`-or-`internal` passthrough on Driver:
-```csharp
-// In LoomStageDriver:
-internal byte[] LoadPackageBytesProtected(string name) => LoadPackageBytes(name);
-```
-(ShowcaseDriver is in `LoomGUI.Demo` assembly, not the same assembly — `internal` won't cross assemblies. Either make `LoadPackageBytes` `public`, or add `[assembly: InternalsVisibleTo("LoomGUI.Demo")]`. Simplest: make `LoadPackageBytes` `public virtual` — it's already meant for project override, public is fine.)
-
-Change `LoadPackageBytes`/`LoadFont`/`LoadSpriteAtlas` to `public virtual` in B3's LoomStageDriver (adjust B3 if already committed — small follow-up edit).
+(No passthrough needed — B3 already declares LoadFont/LoadPackageBytes/LoadSpriteAtlas as `public virtual` so cross-assembly LoomGUI.Demo can call them.)
 
 - [ ] **Step 3: Verify Demo assembly compiles + ShowcaseDriver references resolve**
 
@@ -1609,11 +1595,11 @@ git commit -m "ci: upload loomgui_pkg.exe as Windows artifact (7-day retention)"
 - `Stage::new(root_size)` + `register_font(family, bytes, is_default)` — A3 + A4 consistent. ✓
 - `LoomStage.RegisterFont(family, bytes, unityFont, isDefault)` — B2 + B3 consistent. ✓
 - `MirrorPool.Sync(..., unityFonts, defaultFont, fontVersion)` — B2 Step 3 + Step 5 consistent. ✓
-- `LoadFont/LoadPackageBytes/LoadSpriteAtlas` — B3 `public virtual` (corrected in B7 Step 2 from `protected`), consumed by ShowcaseDriver B7. ✓ (If B3 committed as `protected`, B7 Step 2 makes them `public` — note this dependency.)
+- `LoadFont/LoadPackageBytes/LoadSpriteAtlas` — B3 `public virtual`, consumed by ShowcaseDriver B7 directly. ✓
 - `SpriteResolver.Init(settings, Func<string,SpriteAtlas>)` — B2 (InitSprites) + B4 consistent. ✓
 
 **Gaps found & fixed inline:**
-- B3 originally declared load hooks `protected virtual`; B7 (cross-assembly Demo) needs `public virtual`. Added note in B7 Step 2 to adjust. ✓
+- B3 load hooks declared `public virtual` directly (cross-assembly LoomGUI.Demo needs public; `RegisterFontsFromSettings` stays `protected` — internal orchestration only). ✓
 - B2 `NativeHostManager.Init(default)` placeholder — fixed by adding `SetNativeHostRoot(transform)` in B3 Step 4. ✓
 
 No remaining gaps.
