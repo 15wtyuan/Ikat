@@ -124,6 +124,8 @@ LoomGUI 只支持 HTML/CSS 的**明确子集**，称"围栏"。这是项目漂�
 
 **跨层特性 PlayMode 报错**（拖不动/晃动/错位）先 example 实测 core 状态（overlap/scroll_pos/content_size）再改，避免盲改物理掩盖 layout 根因。dump 边界/状态取证，别靠"浮点边界/epsilon"症状层猜测。
 
+**SDD per-task review 是代码质量门，不是集成正确性门**：v1.5 Controller 16 task 全 APPROVED + final review APPROVED，PlayMode 仍出 4 bug（坑 131-133：display:none 子树渲染 / runtime color 继承 / transition 逗号多 spec）。CSS 语义集成（display 子树剪枝、继承传播、多 spec 解析）只在 PlayMode 显现——单测验不了。SDD 后必跑 showcase PlayMode 逐项过，别只靠单测绿就 merge。
+
 **偶现/时序 bug**（依赖 Unity 内部事件/帧序，如动态字体 atlas rebuild）光读代码定位不了——加诊断 log 运行时取证（调用栈暴露触发点是破案关键），别静态猜根因反复改（坑 113）。
 
 **改 parse-time 逻辑必重打 pkg**：`Node.base_style` 是打包期 `resolve_styles` 产物（不变）。改 cascade/mapping/parse 只重编 .dll 不够，须 `cargo run -p loomgui_pkg` 重打 pkg（html/css 未变也要）。纯 runtime（render/layout measure/scroll/anim）改 .dll 即可。
@@ -154,4 +156,5 @@ csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件�
 - 坑 56/75/76/105 dirty hash 采样漏字段（**已根治**，双 hash 全量）、坑 107 剥离 uniform 漏改旧烘焙路径致双乘
 - 坑 54 fgui v2 非 v²、坑 79 shader tex×vcol 非 CSS 合成
 - 坑 113 动态字体 atlas rebuild 漏刷 text（偶现上下颠倒，光读代码定位不了，必运行时 log 取证）、坑 114 blob pen_y 多加行高（单行掩盖，plan 公式照抄）、坑 119 CJK 缺字 advance 不匹配（Rust .notdef 0.6em vs Unity fallback 1em → 字距重叠；多字符类字距问题先确认症状落 CJK/Latin/数字哪类，别假设）
+- 坑 131-133 CSS 语义集成 bug 逃过单测（display:none 子树不剪 / runtime color 继承缺失 / transition 逗号多 spec 被吞）——只在 PlayMode 显现，SDD 后必跑 showcase 验收
 - 坑 122 生成器输出路径要随产物归属变（csbindgen build.rs 插件移包后路径未改 → 每次 build 重生 straggler）、坑 123 `git add <name>` 不含同名 `<name>.rs`（测试外提漏 commit 主文件，add 后必验暂存集）、坑 124 UPM 包代码引用包资源用 `Packages/<name>/` 非 `Assets/`
