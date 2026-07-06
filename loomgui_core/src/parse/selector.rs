@@ -1,11 +1,12 @@
 use crate::parse::css::Rule;
 use crate::parse::dom::{ElementData, ElementId, ElementTree};
 
-// 选择器数据模型（ParsedSelector/Compound/Combinator/Specificity）+ compound_matches_node
-// 定义在常驻模块 `style::dynamic`（bincode 序列化进 .pkg.bin，runtime 不依赖 parse feature）。
-// 本 parse-gated 模块只提供解析器函数（string → 这些结构）+ ElementTree 版匹配。
+// 选择器数据模型（ParsedSelector/Compound/Combinator/Specificity/AttrOp/AttrSelector）
+// + compound_matches_node 定义在常驻模块 `style::dynamic`（bincode 序列化进 .pkg.bin，
+// runtime 不依赖 parse feature）。本 parse-gated 模块只提供解析器函数
+// （string → 这些结构）+ ElementTree 版匹配。
 pub use crate::style::dynamic::{
-    compound_matches_node, Combinator, Compound, ParsedSelector, Specificity,
+    compound_matches_node, AttrOp, AttrSelector, Combinator, Compound, ParsedSelector, Specificity,
 };
 
 /// 极简解析：按空格切 descendant，`>` 切 child；复合内 tag/.class/#id。
@@ -144,6 +145,7 @@ pub fn parse_selector(raw: &str) -> Result<ParsedSelector, String> {
             pseudo_active,
             pseudo_disabled,
             pseudo_focus,
+            attrs: Vec::new(),
         });
     }
 

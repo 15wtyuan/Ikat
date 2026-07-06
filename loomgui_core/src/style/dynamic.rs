@@ -42,12 +42,33 @@ pub struct Compound {
     pub pseudo_active: bool,
     pub pseudo_disabled: bool,
     pub pseudo_focus: bool,
+    /// 属性选择器（`[attr]` / `[attr="val"]`）。出现属性选择器即把规则划入动态规则表
+    /// （运行时按节点 attrs 匹配，静态 cascade 无法预判），由 compound_matches_node 匹配。
+    pub attrs: Vec<AttrSelector>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Combinator {
     Descendant,
     Child,
+}
+
+/// 属性选择器运算符（围栏子集：仅存在性 + 相等；不做 ~=, ^=, $=, *=）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AttrOp {
+    /// `[attr]` — 属性存在即匹配。
+    Exists,
+    /// `[attr="val"]` — 属性值字面相等。
+    Eq,
+}
+
+/// 单条属性选择器（如 `[data-page="1"]`）。name 用小写归一（HTML 属性名大小写不敏感）。
+/// value 仅 Eq 有意义；Exists 时为 None。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AttrSelector {
+    pub name: String,
+    pub op: AttrOp,
+    pub value: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -541,5 +562,22 @@ mod tests {
                 "hover → border-radius 垂直 8px"
             );
         }
+    }
+
+    #[test]
+    fn attr_selector_bincode_roundtrip() {
+        use crate::parse::selector::parse_selector;
+        let s = parse_selector(r#"[data-page="1"]"#).unwrap();
+        assert_eq!(s.compound.len(), 1);
+        assert_eq!(s.compound[0].attrs.len(), 1, "[data-page=\"1\"] → one attr");
+        let a = &s.compound[0].attrs[0];
+        assert_eq!(a.name, "data-page");
+        assert!(matches!(a.op, AttrOp::Eq));
+        assert_eq!(a.value.as_deref(), Some("1"));
+        // bincode roundtrip (pkg.bin dynamic blob is bincode)
+        let bytes = bincode::serialize(&s).unwrap();
+        let back: ParsedSelector = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(back.compound[0].attrs.len(), 1);
+        assert_eq!(back.compound[0].attrs[0].name, "data-page");
     }
 }
