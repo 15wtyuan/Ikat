@@ -229,6 +229,11 @@ fn compound_matches(c: &Compound, el: &ElementData) -> bool {
     if c.pseudo_hover || c.pseudo_active || c.pseudo_disabled || c.pseudo_focus {
         return false;
     }
+    // 属性选择器规则不参与 base cascade——运行时由 rematch_pseudo_classes +
+    // compound_matches_with_state 动态应用（同伪类）。base 只烤静态规则。
+    if !c.attrs.is_empty() {
+        return false;
+    }
     if let Some(t) = &c.tag {
         if el.tag != *t {
             return false;
@@ -621,5 +626,31 @@ mod tests {
         assert_eq!(a.name, "attr");
         assert!(matches!(a.op, crate::style::dynamic::AttrOp::Exists));
         assert!(a.value.is_none(), "围栏外 op 丢弃 value");
+    }
+
+    #[test]
+    fn compound_matches_rejects_attr_selectors() {
+        // Base cascade 不应匹配含属性选择器的 compound——
+        // 属性规则仅由 rematch_pseudo_classes 动态应用（同伪类）。
+        let c = crate::style::dynamic::Compound {
+            tag: Some("div".to_string()),
+            classes: vec![],
+            id: None,
+            combinator: crate::style::dynamic::Combinator::Descendant,
+            pseudo_hover: false,
+            pseudo_active: false,
+            pseudo_disabled: false,
+            pseudo_focus: false,
+            attrs: vec![crate::style::dynamic::AttrSelector {
+                name: "data-controller".to_string(),
+                op: crate::style::dynamic::AttrOp::Eq,
+                value: Some("tab".to_string()),
+            }],
+        };
+        let el = el("div", &[], None);
+        assert!(
+            !compound_matches(&c, &el),
+            "base cascade rejects attr selectors"
+        );
     }
 }

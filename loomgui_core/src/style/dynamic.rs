@@ -119,6 +119,29 @@ pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
             return false;
         }
     }
+    // 属性选择器匹配：当前仅 data-controller 存储在 Node 上（字面值匹配）。
+    // 其他属性（含 data-page——状态查询，待 C2 实现）节点不携带 → 不匹配。
+    for a in &c.attrs {
+        if a.name == "data-controller" {
+            let got = node.data_controller.as_deref();
+            match a.op {
+                AttrOp::Exists => {
+                    if got.is_none() {
+                        return false;
+                    }
+                }
+                AttrOp::Eq => {
+                    if got != a.value.as_deref() {
+                        return false;
+                    }
+                }
+            }
+        } else {
+            // 其他属性节点不携带字面值 → 此 compound 不匹配。
+            // data-page 等状态查询在 C2 由 compound_matches_with_state 顶层短路处理。
+            return false;
+        }
+    }
     true
 }
 
@@ -579,5 +602,37 @@ mod tests {
         let back: ParsedSelector = bincode::deserialize(&bytes).unwrap();
         assert_eq!(back.compound[0].attrs.len(), 1);
         assert_eq!(back.compound[0].attrs[0].name, "data-page");
+    }
+
+    #[test]
+    fn attr_selector_literal_matches_data_controller() {
+        // node with data_controller="tab" matches [data-controller="tab"]
+        let mut root = Node::default();
+        root.classes = vec!["root".to_string()];
+        root.data_controller = Some("tab".into());
+        let mut s = Scene::from_nodes(vec![root], vec![]);
+        let rid = s.roots[0];
+        s.dynamic_rules
+            .rules
+            .push(rule(r#"[data-controller="tab"]"#, "color", "#0000ff"));
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(s.get(rid).unwrap().style.color, [0.0, 0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn attr_selector_not_match_different_value() {
+        let mut root = Node::default();
+        root.data_controller = Some("tab".into());
+        let mut s = Scene::from_nodes(vec![root], vec![]);
+        let rid = s.roots[0];
+        s.dynamic_rules
+            .rules
+            .push(rule(r#"[data-controller="modal"]"#, "color", "#ff0000"));
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(
+            s.get(rid).unwrap().style.color,
+            [0.0, 0.0, 0.0, 1.0],
+            "different value → no match → base color"
+        );
     }
 }

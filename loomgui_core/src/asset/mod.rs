@@ -138,10 +138,13 @@ pub fn extract_dynamic_rules(sheet: &crate::parse::css::StyleSheet) -> DynamicRu
             Ok(s) => s,
             Err(_) => continue,
         };
-        let has_pseudo = sel
-            .compound
-            .iter()
-            .any(|c| c.pseudo_hover || c.pseudo_active || c.pseudo_disabled || c.pseudo_focus);
+        let has_pseudo = sel.compound.iter().any(|c| {
+            c.pseudo_hover
+                || c.pseudo_active
+                || c.pseudo_disabled
+                || c.pseudo_focus
+                || !c.attrs.is_empty()
+        });
         if has_pseudo {
             rules.push(DynamicRule {
                 selector: sel,
