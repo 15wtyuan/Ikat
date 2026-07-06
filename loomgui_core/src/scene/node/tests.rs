@@ -607,3 +607,10 @@ fn scene_controller_selected_set_get_roundtrip() {
     assert_eq!(prev, 3);
     assert_eq!(scene.controller_selected(mount), Some(0));
 }
+
+/// ControllerChangedEvent ABI 尺寸 = 12B（mount_node:u32 + prev:i32 + new:i32，紧凑无 pad）。
+/// 跨 FFI 传递，C# 侧 [StructLayout(Sequential)] 同布局。
+#[test]
+fn controller_changed_event_size() {
+    assert_eq!(std::mem::size_of::<ControllerChangedEvent>(), 12);
+}

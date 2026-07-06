@@ -44,3 +44,107 @@ fn stage_tween_complete_event_via_ffi() {
     );
     loomgui_stage_free(h);
 }
+
+/// borrow_controller_changed_events 契约：null 句柄 → null + out_len=0（不 panic）。
+#[test]
+fn borrow_controller_changed_events_null_handle() {
+    let mut len = 1usize; // 故意非 0，确认被覆写为 0
+    let ptr = loomgui_stage_borrow_controller_changed_events(std::ptr::null(), &mut len);
+    assert!(ptr.is_null(), "null 句柄 → null 指针");
+    assert_eq!(len, 0, "null 句柄 → out_len=0");
+}
+
+/// borrow_controller_changed_events 契约：无 scene / 无事件 → null + out_len=0。
+/// create_root 建空 scene（无 set_selected_index 调用）→ pending_controller_events 空。
+#[test]
+fn borrow_controller_changed_events_empty_when_no_events() {
+    let fp = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
+    );
+    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fp.len(), 200.0, 100.0);
+    assert!(!h.is_null());
+    let empty_css = b"";
+    loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
+    let mut len = 1usize;
+    let ptr = loomgui_stage_borrow_controller_changed_events(h, &mut len);
+    assert!(ptr.is_null(), "无事件 → null 指针");
+    assert_eq!(len, 0, "无事件 → out_len=0");
+    loomgui_stage_free(h);
+}
+
+/// borrow_controller_changed_events 端到端：建 mount → set_selected_index 推事件 →
+/// borrow 返 ptr + count（COUNT 非字节）。读 ControllerChangedEvent POD slice 验字段。
+#[test]
+fn borrow_controller_changed_events_round_trip() {
+    use loomgui_core::scene::node::ControllerChangedEvent;
+    let fp = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
+    );
+    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fp.len(), 200.0, 100.0);
+    assert!(!h.is_null());
+    // 建 root + mount 子节点，mount 挂 data-controller="tab"
+    let empty_css = b"";
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    let mount = loomgui_stage_create_node(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
+    assert_ne!(mount, 0xFFFF_FFFF, "create_node mount ok");
+    assert_eq!(
+        loomgui_stage_append_child(h, root, mount),
+        0,
+        "append_child ok"
+    );
+    // 直接写 data_controller 字段（FFI 未暴露 set_selected_index，模拟 instantiate 填字段）
+    {
+        let sh = unsafe { &mut *h };
+        let scene = sh.stage.scene.as_mut().unwrap();
+        scene.get_mut(NodeId(mount)).unwrap().data_controller = Some("tab".to_string());
+    }
+    // 调 Stage::set_selected_index 推 ControllerChangedEvent（prev=-1 → new=2）
+    {
+        let sh = unsafe { &mut *h };
+        let prev = sh.stage.set_selected_index(NodeId(mount), 2);
+        assert_eq!(prev, -1, "首次 set 返 prev=-1");
+    }
+    // borrow：out_len 是 COUNT（非字节）
+    let mut len = 0usize;
+    let ptr = loomgui_stage_borrow_controller_changed_events(h, &mut len);
+    assert!(!ptr.is_null(), "有事件 → 非空指针");
+    assert_eq!(len, 1, "out_len=1（COUNT，非字节）");
+    // 读 ControllerChangedEvent POD slice 验字段
+    let events = unsafe { std::slice::from_raw_parts(ptr as *const ControllerChangedEvent, len) };
+    assert_eq!(events[0].mount_node, mount, "mount_node = mount NodeId.0");
+    assert_eq!(events[0].prev, -1, "prev=-1（首次切页前无条目）");
+    assert_eq!(events[0].new, 2, "new=2");
+    loomgui_stage_free(h);
+}
+
+/// borrow_controller_changed_events 在 tick 后清空（pull 模式：事件仅当帧可见）。
+/// set_selected_index 推事件 → tick → borrow 返空（tick start 清空）。
+#[test]
+fn borrow_controller_changed_events_cleared_after_tick() {
+    let fp = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
+    );
+    let h = loomgui_stage_new(fp.as_ptr() as *const u8, fp.len(), 200.0, 100.0);
+    assert!(!h.is_null());
+    let empty_css = b"";
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
+    let mount = loomgui_stage_create_node(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
+    loomgui_stage_append_child(h, root, mount);
+    {
+        let sh = unsafe { &mut *h };
+        let scene = sh.stage.scene.as_mut().unwrap();
+        scene.get_mut(NodeId(mount)).unwrap().data_controller = Some("tab".to_string());
+        sh.stage.set_selected_index(NodeId(mount), 1);
+    }
+    // tick → tick start 清空 pending_controller_events
+    loomgui_stage_tick(h, 0.0);
+    let mut len = 1usize;
+    let ptr = loomgui_stage_borrow_controller_changed_events(h, &mut len);
+    assert!(ptr.is_null(), "tick 后事件清空 → null");
+    assert_eq!(len, 0, "tick 后 out_len=0");
+    loomgui_stage_free(h);
+}

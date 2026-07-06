@@ -573,6 +573,16 @@ impl Stage {
         &self.last_events
     }
 
+    /// 本帧 Controller 切页事件（set_selected_index 推入；FFI borrow_controller_changed_events 读）。
+    /// pull 模式：out_len 是 COUNT（非字节）。事件存活至下 tick start 清空——C# 在 tick 后、
+    /// 下 tick 前的窗口内读（同 last_events 语义窗口）。
+    pub fn controller_changed_events(&self) -> &[ControllerChangedEvent] {
+        self.scene
+            .as_ref()
+            .map(|s| s.pending_controller_events.as_slice())
+            .unwrap_or(&[])
+    }
+
     /// 每帧管线（支柱1重排——rematch 提到 solve 前，伪类三类全当帧消费）：
     /// ①tween ②focus_request ③process（仲裁+拖拽写 scroll_pos；hit_test 读上帧 world，1帧延迟已认）
     /// ④scroll update ⑤process_keys ⑥rematch_pseudo_classes（提到 solve 前：改 layout/transform/colors
@@ -593,6 +603,10 @@ impl Stage {
             Some(s) => s,
             None => return FrameData::default(),
         };
+        // 清上帧残留的 Controller 切页事件。事件由 set_selected_index（tick 外 C# 调）推入，
+        // C# 在上 tick 后、本 tick 前的窗口内已 borrow 读走。同 last_events 语义窗口
+        // （last_events 每帧末覆写；pending_controller_events 每帧首清空）。
+        scene.pending_controller_events.clear();
         let mut out: Vec<EventRecord> = Vec::new();
         // tween 推进（写 scene.anim + 产 complete 事件进 out）。须在 solve/compute_world_transforms 前。
         let dt = self.pending_dt;

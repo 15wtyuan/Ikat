@@ -113,6 +113,19 @@ namespace LoomGUI.Bindings
         internal static extern byte* loomgui_stage_borrow_events(StageHandle* h, nuint* out_len);
 
         /// <summary>
+        ///  拉取本帧 Controller 切页事件（pull，同 borrow_events 语义）。
+        ///  返 `pending_controller_events` 的 `as_ptr` + 写 len。null 句柄或无事件 → null + len=0。
+        ///  指针下 tick 失效（tick start 清空 pending_controller_events）。
+        ///
+        ///  **out_len 是 COUNT 非字节**——C 侧按 `len * sizeof(ControllerChangedEvent)` 切片读。
+        ///  ControllerChangedEvent 是 `#[repr(C)]` POD（mount_node:u32 + prev:i32 + new:i32 = 12B）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_borrow_controller_changed_events", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* loomgui_stage_borrow_controller_changed_events(StageHandle* h, nuint* out_len);
+
+        /// <summary>
         ///  UI 挡住时游戏不响应点击（§10.6）。= 任一活跃槽 last_hit 非空且非根（多指：鼠标 slot0 + 已分配触摸槽）。
         ///  null 句柄 → false。
         ///

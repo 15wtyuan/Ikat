@@ -594,6 +594,11 @@ namespace LoomGUI
                 nuint evLen = 0;
                 byte* evPtr = Native.loomgui_stage_borrow_events(_stage, &evLen);
                 _eventHandler.DispatchPending((System.IntPtr)evPtr, (int)evLen);
+
+                // Controller 切页事件（同窗口：tick 后、下 tick 前。out_len=COUNT 非字节）。
+                nuint ccLen = 0;
+                byte* ccPtr = Native.loomgui_stage_borrow_controller_changed_events(_stage, &ccLen);
+                _eventHandler.DispatchControllerChanged((System.IntPtr)ccPtr, (int)ccLen);
             }
         }
 

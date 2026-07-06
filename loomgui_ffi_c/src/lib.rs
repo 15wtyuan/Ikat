@@ -297,6 +297,40 @@ pub extern "C" fn loomgui_stage_borrow_events(
     events.as_ptr() as *const u8
 }
 
+/// 拉取本帧 Controller 切页事件（pull，同 borrow_events 语义）。
+/// 返 `pending_controller_events` 的 `as_ptr` + 写 len。null 句柄或无事件 → null + len=0。
+/// 指针下 tick 失效（tick start 清空 pending_controller_events）。
+///
+/// **out_len 是 COUNT 非字节**——C 侧按 `len * sizeof(ControllerChangedEvent)` 切片读。
+/// ControllerChangedEvent 是 `#[repr(C)]` POD（mount_node:u32 + prev:i32 + new:i32 = 12B）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_borrow_controller_changed_events(
+    h: *const StageHandle,
+    out_len: *mut usize,
+) -> *const u8 {
+    if h.is_null() {
+        if !out_len.is_null() {
+            unsafe { *out_len = 0 };
+        }
+        return std::ptr::null();
+    }
+    let sh = unsafe { &*h };
+    let events: &[loomgui_core::scene::node::ControllerChangedEvent] =
+        sh.stage.controller_changed_events();
+    if events.is_empty() {
+        if !out_len.is_null() {
+            unsafe { *out_len = 0 };
+        }
+        return std::ptr::null();
+    }
+    if !out_len.is_null() {
+        unsafe { *out_len = events.len() }; // COUNT 非字节
+    }
+    events.as_ptr() as *const u8
+}
+
 /// UI 挡住时游戏不响应点击（§10.6）。= 任一活跃槽 last_hit 非空且非根（多指：鼠标 slot0 + 已分配触摸槽）。
 /// null 句柄 → false。
 ///
