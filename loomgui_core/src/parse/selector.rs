@@ -194,7 +194,7 @@ fn parse_attr_inner(inner: &str) -> crate::style::dynamic::AttrSelector {
     if let Some(eq_pos) = inner.find('=') {
         let name_part = inner[..eq_pos].trim_end();
         // 如果 '=' 前紧邻围栏外操作符 → 保守降级为 Exists，丢弃值。
-        if name_part.ends_with(&['~', '^', '$', '*', '|']) {
+        if name_part.ends_with(['~', '^', '$', '*', '|']) {
             let clean_name = name_part[..name_part.len() - 1].trim_end().to_lowercase();
             return AttrSelector {
                 name: clean_name,
