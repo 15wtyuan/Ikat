@@ -28,10 +28,18 @@ namespace LoomGUI.Bindings
         internal static extern byte* loomgui_version();
 
         /// <summary>
-        ///  创建 Stage 句柄。`font_path` 为 UTF-8 字节（指针+len），失败返回 null。
+        ///  创建 Stage 句柄（不收字体路径）。字体由 loomgui_stage_register_font 单独注册。
+        ///  失败返回 null（当前 Stage::new 不返回 Err，保留 null 分支以保持对称）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_new", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern StageHandle* loomgui_stage_new(byte* font_path, nuint fp_len, float w, float h);
+        internal static extern StageHandle* loomgui_stage_new(float w, float h);
+
+        /// <summary>
+        ///  注册字体进 Stage 字体表。family = UTF-8 字符串（指针+len），bytes = ttf/ttc/otf 字节数据。
+        ///  is_default: 0=否，非 0=是（设定为默认 fallback 字体）。返回 0=成功，-1=错误（null 句柄/非 UTF-8 family/字体解析失败）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_register_font", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_register_font(StageHandle* h, byte* family, nuint family_len, byte* bytes, nuint bytes_len, byte is_default);
 
         /// <summary>
         ///  null-safe 释放 Stage 句柄。

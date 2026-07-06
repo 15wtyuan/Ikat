@@ -14,8 +14,8 @@ namespace LoomGUI
     [ExecuteAlways]
     public unsafe class LoomInputCollector : MonoBehaviour
     {
-        /// screen→design 映射，与 LoomStage.ComputeRootTransform 逐项逆（同一 sf 居中公式）。
-        /// 前向（design→screen，见 ComputeRootTransform 注释）：
+        /// screen→design 映射，与 LoomStageDriver.ConfigureTransforms 逐项逆（同一 sf 居中公式）。
+        /// 前向（design→screen，见 Driver 的根变换注释）：
         ///   screen.x = offX    + dx*sf     其中 offX = area.x + (area.width  - dw*sf)*0.5
         ///   screen.y = offYTop - dy*sf     其中 offYTop = area.y + area.height
         /// 逆：

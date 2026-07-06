@@ -43,7 +43,7 @@ namespace LoomGUI
         // reuse_key=0 的普通节点按 node_id keying（v1 行为不变）。
         readonly Dictionary<uint, RenderObj> _poolByNodeId = new();
         readonly Dictionary<uint, RenderObj> _poolByReuse = new();
-        int _lastFontVersion = -1;     // -1 → 首帧必不等，强制建/光栅；之后追 TextRasterizer.FontVersion
+        int _lastFontVersion = -1;     // -1 → 首帧必不等，强制建/光栅；之后追 caller 传入的 fontVersion
         // 每 ctx 每帧首次算一次 _ClipBox 并 SetClipBox。
         // Sync 开头清空；clip 表 entry 少（few ctx），每帧开销可忽略。
         readonly HashSet<uint> _clipsAppliedThisFrame = new();
@@ -51,8 +51,18 @@ namespace LoomGUI
         /// 当前镜像中的 GO 数量（两 dict 之和）。测试/调试用。
         public int Count => _poolByNodeId.Count + _poolByReuse.Count;
 
+        /// <summary>
+        /// 镜像 diff：遍历 blob 节点 → 建/更新/复用 GO。
+        /// unityFonts: family → Unity Font asset（光栅用）；defaultFont: 无匹配 family 时的 fallback。
+        /// fontVersion: caller（LoomStage）持有的 atlas rebuild 版本号；与 _lastFontVersion 不等 →
+        ///   本帧所有 text 节点强制重 BuildMesh（glyph UV 变，缓存 mesh 作废）。
+        ///
+        /// per-node 字体选择：blob 当前不携带 font_family 字段（text 段只有 font_size/color/glyphs），
+        /// 故现阶段所有 text 节点用 defaultFont 光栅。unityFonts 表已接入但 per-node 查找待 blob 加 family 字段后启用。
+        /// </summary>
         public void Sync(FrameBlob blob, Transform root, MaterialManager mm,
-                         SpriteResolver sprites, Texture fallback, Font font)
+                         SpriteResolver sprites, Texture fallback,
+                         Dictionary<string, Font> unityFonts, Font defaultFont, int fontVersion)
         {
             // 防御：陈旧/非当前 blob 直接早退（magic+version 校验）。不做清理——上一帧的 GO
             // 维持不动比误销毁更安全；调用方应自检 IsValid 再 Sync。
@@ -60,7 +70,7 @@ namespace LoomGUI
 
             // font atlas rebuild 检测：版本变 → 本帧所有 text 节点强制重 BuildMesh
             // （glyph UV 变，缓存 mesh 作废）。
-            int fontVersionAtStart = TextRasterizer.FontVersion;
+            int fontVersionAtStart = fontVersion;
             bool fontDirty = _lastFontVersion != fontVersionAtStart;
 
             // ① 全标 stale（两个 dict）
@@ -109,6 +119,10 @@ namespace LoomGUI
                     }
                 }
 
+                // 选 text 节点的光栅字体。blob 暂无 font_family 字段 → 统一用 defaultFont。
+                // blob 加 family 字段后改为：unityFonts.TryGetValue(blob.FontFamily(i), out var fa) ? fa : defaultFont。
+                Font nodeFont = (kind == 2) ? defaultFont : null;
+
                 // 确保 RenderObj 存在；新建 GO 无 mesh → 强制 FULL（无视 blob 的 HEADER）
                 if (!pool.TryGetValue(poolKey, out var ro))
                 {
@@ -120,14 +134,14 @@ namespace LoomGUI
                 ro.Stale = false;
                 ro.IsText = kind == 2;
 
-                UpdateHeader(ro, blob, i, root, mm, kind, sp, tex, font);
-                if (level == 2) UploadMeshOrText(ro, blob, i, sp, font);
+                UpdateHeader(ro, blob, i, root, mm, kind, sp, tex, nodeFont);
+                if (level == 2) UploadMeshOrText(ro, blob, i, sp, nodeFont);
             }
 
             // 若 Sync 期间 atlas 又 rebuild（BuildMesh 的 RequestCharactersInTexture 触发，见 OnRebuilt 栈），
-            // FontVersion 已 > start → 不追 _lastFontVersion，下帧再 fontDirty 全重建——
+            // fontVersion 已 > start → 不追 _lastFontVersion，下帧再 fontDirty 全重建——
             // 否则 rebuild 前重建的 text 会永久用旧 UV（偶现「上下颠倒」的另一半根因）。
-            if (fontDirty && TextRasterizer.FontVersion == fontVersionAtStart)
+            if (fontDirty && fontVersion == fontVersionAtStart)
                 _lastFontVersion = fontVersionAtStart;
 
             // ③ 余 stale 销毁（两个 dict）
@@ -348,7 +362,7 @@ namespace LoomGUI
             _poolByReuse.Clear();
         }
 
-        // Edit-mode-safe 销毁：LoomStage 挂 [ExecuteAlways]，Sync/Clear 会在 Edit mode 跑；
+        // Edit-mode-safe 销毁：Driver 可能挂 [ExecuteAlways]，Sync/Clear 会在 Edit mode 跑；
         // Object.Destroy 在 Edit mode 非法（须 DestroyImmediate）。
         static void TearDown(RenderObj ro)
         {

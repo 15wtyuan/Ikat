@@ -9,24 +9,12 @@ namespace LoomGUI
     /// 笔位用 blob 的 (pen_x, pen_y)（Rust ttf 真 advance），**不**用 Unity `CharacterInfo.advance`；
     /// 行高用 blob 的 pen_y（= line.baseline 绝对 y），**不**用 Unity `fontSize*1.25`（跨平台根）。
     ///
-    /// atlas rebuild 监听：动态字体 atlas 异步 rebuild 时 glyph UV 变。`Font.textureRebuilt`
-    /// 是静态事件；本类持静态 `s_fontVersion`，`OnRebuilt` 自增。MirrorPool.Sync 比对版本号，
-    /// 不等则强制所有 text 节点下帧重光栅。
+    /// atlas rebuild 监听：动态字体 atlas 异步 rebuild 时 glyph UV 变。版本号跟踪由 LoomStage
+    /// 实例持有（FontVersion + OnFontRebuilt），Driver.Awake 绑 Font.textureRebuilt → stage.OnFontRebuilt。
+    /// MirrorPool.Sync 接收 fontVersion 参数比对，不等则强制所有 text 节点下帧重光栅。
+    /// 本类不再持任何静态状态——caller（MirrorPool）传选中的 Font 实例。
     public static class TextRasterizer
     {
-        // atlas rebuild 版本号。MirrorPool 记上次消费的版本；不等则 dirty 所有 text 节点。
-        static int s_fontVersion;
-
-        /// 当前 font atlas 版本。MirrorPool.Sync 据此判断是否需强制重光栅。
-        public static int FontVersion => s_fontVersion;
-
-        /// `Font.textureRebuilt` 静态事件回调（LoomStage.Awake 注册）。任何字体 atlas rebuild
-        /// 触发自增 → 下帧 Sync 检测到版本变 → 重 RequestCharactersInTexture + 重取 UV。
-        public static void OnRebuilt(Font font) => s_fontVersion++;
-
-        /// Domain reload 保护：清静态版本号。SubsystemRegistration 调。
-        public static void ResetStatic() => s_fontVersion = 0;
-
         /// 把 text_arena 给的 glyphs 烤成 glyph quad mesh（每 glyph 一个 quad：BL,TL,TR,BR）。
         /// 顶点色 = color（不烤 node opacity——node opacity 走 _Alpha uniform，不进顶点色）。
         /// texture = font atlas（caller 设 material）。program=1（text，与 Image 共用 LoomGUI/Unlit）由 caller 在 mm.Get 时指定。

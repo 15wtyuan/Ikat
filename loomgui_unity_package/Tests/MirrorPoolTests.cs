@@ -124,13 +124,14 @@ namespace LoomGUI.Tests
 
             try
             {
+                var fonts = new Dictionary<string, Font>();
                 // 帧 1：node_id=100, reuse_key=5, Full → 建 GO
                 var blob1 = new FrameBlob(OneNodeBlobV9(
                     id: 100, x: 10f, y: 20f, w: 5f, h: 5f,
                     sortKey: 0, payloadKind: 1, changeLevel: 2, reuseKey: 5));
                 Assert.AreEqual(1, blob1.NodeCount, "blob1 NodeCount=1");
                 Assert.AreEqual(5u, blob1.ReuseKey(0), "blob1 reuse_key=5");
-                pool.Sync(blob1, root.transform, mm, null, fallback, null);
+                pool.Sync(blob1, root.transform, mm, null, fallback, fonts, null, fontVersion: 0);
 
                 Assert.AreEqual(1, pool.Count, "帧1: pool.Count=1");
                 Assert.AreEqual(1, root.transform.childCount, "帧1: 1 子 GO");
@@ -143,7 +144,7 @@ namespace LoomGUI.Tests
                 Assert.AreEqual(1, blob2.NodeCount, "blob2 NodeCount=1");
                 Assert.AreEqual(200u, blob2.NodeId(0), "blob2 node_id=200");
                 Assert.AreEqual(5u, blob2.ReuseKey(0), "blob2 reuse_key=5");
-                pool.Sync(blob2, root.transform, mm, null, fallback, null);
+                pool.Sync(blob2, root.transform, mm, null, fallback, fonts, null, fontVersion: 0);
 
                 // 复用验证
                 Assert.AreEqual(1, pool.Count, "帧2: pool.Count 仍=1（复用，非新建）");
@@ -272,23 +273,24 @@ namespace LoomGUI.Tests
             var mm = new MaterialManager(shader);
             var pool = new MirrorPool();
             var fallback = Texture2D.whiteTexture;
+            var fonts = new Dictionary<string, Font> { ["DejaVu"] = font };
 
             try
             {
                 // 帧1：1 字 'A'，Full → 建 GO + mesh 4 verts
                 var blob1 = new FrameBlob(OneTextBlobV9(new[] { new GlyphData((uint)'A', 0f, 20f) }));
-                pool.Sync(blob1, root.transform, mm, null, fallback, font);
+                pool.Sync(blob1, root.transform, mm, null, fallback, fonts, font, fontVersion: 0);
                 Assume.That(root.transform.childCount, Is.EqualTo(1), "帧1 建 1 GO");
                 var mesh1 = root.transform.GetChild(0).GetComponent<MeshFilter>().sharedMesh;
                 Assume.That(mesh1.vertexCount, Is.EqualTo(4), "帧1: 'A' 1 glyph = 4 verts");
 
-                // 关键：两次 Sync 间 FontVersion 不变（未触发 atlas rebuild）→ 原 bug 在此失效。
+                // 关键：两次 Sync 间 fontVersion 不变（未触发 atlas rebuild）→ 原 bug 在此失效。
                 // 帧2 content 变（A→AB），Rust 侧 payload_hash 全量采样 glyph → Full。
                 var blob2 = new FrameBlob(OneTextBlobV9(new[] {
                     new GlyphData((uint)'A', 0f, 20f),
                     new GlyphData((uint)'B', 30f, 20f),
                 }));
-                pool.Sync(blob2, root.transform, mm, null, fallback, font);
+                pool.Sync(blob2, root.transform, mm, null, fallback, fonts, font, fontVersion: 0);
 
                 var mesh2 = root.transform.GetChild(0).GetComponent<MeshFilter>().sharedMesh;
                 Assert.AreEqual(8, mesh2.vertexCount,
@@ -323,12 +325,13 @@ namespace LoomGUI.Tests
             var mm = new MaterialManager(shader);
             var pool = new MirrorPool();
             var fallback = Texture2D.whiteTexture;
+            var fonts = new Dictionary<string, Font> { ["DejaVu"] = font };
 
             try
             {
                 // 帧1：Full 'A' → 建 GO + ReadText 缓存进 ro + BuildMesh（4 verts）
                 var blob1 = new FrameBlob(OneTextBlobV9(new[] { new GlyphData((uint)'A', 0f, 20f) }));
-                pool.Sync(blob1, root.transform, mm, null, fallback, font);
+                pool.Sync(blob1, root.transform, mm, null, fallback, fonts, font, fontVersion: 0);
                 Assume.That(root.transform.childCount, Is.EqualTo(1), "帧1 建 1 GO");
                 var mf = root.transform.GetChild(0).GetComponent<MeshFilter>();
                 Assume.That(mf.sharedMesh.vertexCount, Is.EqualTo(4), "帧1: 'A' 1 glyph = 4 verts");
@@ -336,13 +339,11 @@ namespace LoomGUI.Tests
                 // 清空 mesh——若帧2 没真重建，vertexCount 会保持 0（区分「重建」与「保留旧 mesh」）
                 mf.sharedMesh.Clear();
 
-                // 模拟 atlas rebuild（OnRebuilt public static，EditMode 直接调，无需真撑爆 atlas）
-                TextRasterizer.OnRebuilt(font);
-
+                // 模拟 atlas rebuild：fontVersion 从 0 → 1（生产代码由 LoomStage.OnFontRebuilt 自增）。
                 // 帧2：同 'A' 但 Skip（changeLevel=0，text_len=0，blob 无 text 段）。
                 // fontDirty=true → Skip 提升为 Full → text_len==0 走缓存 → BuildMesh 重建取新 UV。
                 var blob2 = new FrameBlob(OneTextBlobV9(new[] { new GlyphData((uint)'A', 0f, 20f) }, changeLevel: 0));
-                pool.Sync(blob2, root.transform, mm, null, fallback, font);
+                pool.Sync(blob2, root.transform, mm, null, fallback, fonts, font, fontVersion: 1);
 
                 Assert.AreEqual(4, mf.sharedMesh.vertexCount,
                     "fontDirty + Skip text（text_len=0）→ 必须用缓存 glyphs 重建 mesh（vertexCount=4）；" +
@@ -353,11 +354,33 @@ namespace LoomGUI.Tests
                 pool.Clear();
                 mm.Clear();
                 Object.DestroyImmediate(root);
-                TextRasterizer.ResetStatic();   // 隔离：复位 FontVersion，避免污染其它测试
+                // 隔离：重置 MirrorPool 的 _lastFontVersion（反射），避免污染其它测试。
+                // 生产代码无静态状态可重置（FontVersion 已是 per-instance）。
+                var f = typeof(MirrorPool).GetField("_lastFontVersion",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (f != null) f.SetValue(pool, -1);
             }
 #else
             Assert.Inconclusive("EditMode-only（AssetDatabase）");
 #endif
+        }
+    }
+
+    /// LoomStage 纯 C# 类构造测试（B2）。
+    /// 锁：LoomStage 不再是 MonoBehaviour——new 构造可用、无 Unity 生命周期依赖；
+    /// 无字体注册时 Tick(null) 不崩（stage 句柄建好，borrow_frame 返空帧 → 跳渲染 → 事件派发空过）。
+    public class LoomStagePureClassTests
+    {
+        /// LoomStage 是纯 class（非 Component）：new 构造 + Tick(null) 不崩。
+        [Test]
+        public void LoomStage_ConstructsAsPureClass_WithoutMonoBehaviour()
+        {
+            using var stage = new LoomStage(new Vector2(1080, 1920));
+            Assert.IsFalse(stage is UnityEngine.Component,
+                "LoomStage must be a pure class, not a MonoBehaviour/Component");
+            // 无字体注册 + 无 renderRoot → tick 走空帧路径不崩（stage 句柄非空即 tick）。
+            stage.Tick(0.016f, renderRoot: null);
+            Assert.Pass("LoomStage 构造 + 空 tick 成功（pure class，无 MonoBehaviour 依赖）");
         }
     }
 }
