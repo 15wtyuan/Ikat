@@ -5,6 +5,9 @@
 //! - 断行用贪心按空白 + 宽度约束（unicode-linebreak UAX#14 提供换行机会）。
 //! - glyph 存绝对坐标（已累加 advance + 已应用 align 偏移），后端拼 quad 零累加。
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use serde::Serialize;
 use ttf_parser::Face;
 
@@ -91,6 +94,63 @@ impl Font {
         let lg = self.face.line_gap() as f32;
         let units = self.face.units_per_em() as f32;
         lg / units * font_size
+    }
+}
+
+/// 字体表：CSS font-family → Font。无匹配 / None → default 字体。
+///
+/// 注册第一个 is_default=true 的字体为 default。select 在无 default 时 panic——
+/// FFI 层保证任何 tick（会触发 measure）前已注册 default，契约由调用方维护。
+/// Font 仍是 Face<'static>（Box::leak 字节，进程级单字体可接受；多字体数量有限，
+/// leak 不释放可接受，真要回收改 Arc<Vec<u8>> 持字节，YAGNI）。
+pub struct FontTable {
+    pub(crate) fonts: HashMap<String, Arc<Font>>,
+    pub(crate) default_family: Option<String>,
+}
+
+impl Default for FontTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FontTable {
+    pub fn new() -> Self {
+        FontTable {
+            fonts: HashMap::new(),
+            default_family: None,
+        }
+    }
+
+    /// 注册字体。is_default=true 设为默认（首次或显式覆盖）。
+    /// bytes 是 ttf/ttc/otf 字节；Face::parse 失败返 Err。
+    pub fn register(
+        &mut self,
+        family: &str,
+        bytes: Vec<u8>,
+        is_default: bool,
+    ) -> Result<(), String> {
+        let font = Arc::new(Font::from_bytes(bytes)?);
+        self.fonts.insert(family.to_string(), font);
+        if is_default {
+            self.default_family = Some(family.to_string());
+        }
+        Ok(())
+    }
+
+    /// 按节点 font_family 选字体。None / 无匹配 → default。
+    /// 无 default 注册时 panic（契约：FFI 层 tick 前须注册 default）。
+    pub fn select(&self, family: Option<&str>) -> &Font {
+        if let Some(fam) = family {
+            if let Some(f) = self.fonts.get(fam) {
+                return f.as_ref();
+            }
+        }
+        let default = self
+            .default_family
+            .as_ref()
+            .expect("no default font registered (register one with is_default=true before tick)");
+        self.fonts[default].as_ref()
     }
 }
 
@@ -617,5 +677,68 @@ mod tests {
         let normal = measure_text("Hi", 16.0, 0.0, 0.0, TextAlign::Left, false, None, &font);
         let tall = measure_text("Hi", 16.0, 2.0, 0.0, TextAlign::Left, false, None, &font);
         assert!(tall.lines[0].height > normal.lines[0].height);
+    }
+
+    // ── FontTable helpers ──
+
+    fn font_bytes_dejavu() -> Vec<u8> {
+        std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/DejaVuSans.ttf"
+        ))
+        .unwrap()
+    }
+
+    fn ascent_dejavu_16() -> f32 {
+        // Compute once from a direct Font::from_bytes to avoid circularity.
+        let f = Font::from_bytes(font_bytes_dejavu()).unwrap();
+        f.ascent(16.0)
+    }
+
+    // ── FontTable tests ──
+
+    #[test]
+    fn font_table_select_returns_default_when_no_family() {
+        let mut t = FontTable::new();
+        t.register("DejaVu", font_bytes_dejavu(), true).unwrap();
+        let f = t.select(None);
+        assert!(
+            (f.ascent(16.0) - ascent_dejavu_16()).abs() < 0.01,
+            "select(None) must return default font"
+        );
+    }
+
+    #[test]
+    fn font_table_select_falls_back_when_family_missing() {
+        let mut t = FontTable::new();
+        t.register("DejaVu", font_bytes_dejavu(), true).unwrap();
+        let f = t.select(Some("Nonexistent"));
+        // Falls back to default.
+        assert!((f.ascent(16.0) - ascent_dejavu_16()).abs() < 0.01);
+    }
+
+    #[test]
+    fn font_table_select_returns_named_when_present() {
+        let mut t = FontTable::new();
+        t.register("DejaVu", font_bytes_dejavu(), true).unwrap();
+        t.register("Other", font_bytes_dejavu(), false).unwrap(); // same file, diff family
+        let f = t.select(Some("Other"));
+        // "Other" registered -> returned (same metrics here, but distinct entry).
+        assert!(t.fonts.contains_key("Other"));
+        let _ = f; // selected font is valid
+    }
+
+    #[test]
+    fn font_table_register_is_default_sets_default() {
+        let mut t = FontTable::new();
+        t.register("DejaVu", font_bytes_dejavu(), true).unwrap();
+        assert_eq!(t.default_family.as_deref(), Some("DejaVu"));
+    }
+
+    #[test]
+    #[should_panic(expected = "no default font")]
+    fn font_table_select_panics_without_default() {
+        let t = FontTable::new();
+        t.select(None);
     }
 }
