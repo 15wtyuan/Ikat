@@ -114,7 +114,10 @@ fn main() {
     for n in &nodes {
         let sk = scene.node_sort_keys.get(n.id.index()).copied().unwrap_or(0);
         let r = n.layout_rect;
-        let id = n.id_attr.clone().unwrap_or_else(|| format!("anon{}", n.id.0));
+        let id = n
+            .id_attr
+            .clone()
+            .unwrap_or_else(|| format!("anon{}", n.id.0));
         let bg = n.style.background_color.is_some();
         println!(
             "  sort_key={:>3} id={:<16} rect=({:>5.0},{:>5.0},{:>4.0},{:>4.0}) bg={}",
