@@ -411,6 +411,7 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
             ),
             (
                 Some(0),
@@ -421,6 +422,7 @@ mod tests {
                 Vec::new(),
                 None,
                 false,
+                None,
                 None,
             ),
         ];
@@ -456,6 +458,7 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
             ),
             (
                 Some(0),
@@ -466,6 +469,7 @@ mod tests {
                 Vec::new(),
                 None,
                 false,
+                None,
                 None,
             ),
         ];
@@ -497,6 +501,7 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
             ),
             (
                 Some(0),
@@ -507,6 +512,7 @@ mod tests {
                 Vec::new(),
                 None,
                 false,
+                None,
                 None,
             ),
         ];
@@ -538,6 +544,7 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
             ),
             (
                 Some(0),
@@ -548,6 +555,7 @@ mod tests {
                 Vec::new(),
                 None,
                 false,
+                None,
                 None,
             ),
         ];
@@ -580,6 +588,7 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
             ),
             (
                 Some(0),
@@ -590,6 +599,7 @@ mod tests {
                 Vec::new(),
                 None,
                 false,
+                None,
                 None,
             ),
         ];
@@ -626,6 +636,7 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
             ),
             (
                 Some(0),
@@ -636,6 +647,7 @@ mod tests {
                 Vec::new(),
                 None,
                 false,
+                None,
                 None,
             ),
         ];

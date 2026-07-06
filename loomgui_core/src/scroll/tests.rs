@@ -19,6 +19,7 @@ fn build_scroll_scene() -> Scene {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -28,14 +29,6 @@ fn build_scroll_scene() -> Scene {
             None,
             false,
             None,
-        ),
-        (
-            Some(0),
-            NodeKind::Container,
-            ResolvedStyle::default(),
-            vec![],
-            None,
-            false,
             None,
         ),
         (
@@ -46,6 +39,17 @@ fn build_scroll_scene() -> Scene {
             None,
             false,
             None,
+            None,
+        ),
+        (
+            Some(0),
+            NodeKind::Container,
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
+            None,
         ),
         (
             None,
@@ -54,6 +58,7 @@ fn build_scroll_scene() -> Scene {
             vec![],
             None,
             false,
+            None,
             None,
         ),
     ];
@@ -270,7 +275,7 @@ fn empty_children_content_is_zero() {
     // 滚动容器无子 → content (0,0)
     let mut style = ResolvedStyle::default();
     style.overflow_y = OverflowMode::Scroll;
-    let entries = vec![(None, NodeKind::Container, style, vec![], None, false, None)];
+    let entries = vec![(None, NodeKind::Container, style, vec![], None, false, None, None)];
     let mut s = Scene::build(&entries);
     let root0 = s.roots[0];
     s.get_mut(root0).unwrap().layout_rect = Rect {
@@ -898,6 +903,7 @@ fn build_scroll_stage() -> crate::stage::Stage {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![(
         None,
         NodeKind::Container,
@@ -905,6 +911,7 @@ fn build_scroll_stage() -> crate::stage::Stage {
         vec![],
         None,
         false,
+        None,
         None,
     )];
     let mut s = Scene::build(&entries);

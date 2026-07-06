@@ -24,6 +24,7 @@ fn scene_nodes_is_slotmap_and_get_by_id() {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -33,6 +34,7 @@ fn scene_nodes_is_slotmap_and_get_by_id() {
             None,
             false,
             None,
+            None,
         ),
         (
             Some(0),
@@ -41,6 +43,7 @@ fn scene_nodes_is_slotmap_and_get_by_id() {
             Vec::new(),
             None,
             false,
+            None,
             None,
         ),
     ];
@@ -85,6 +88,7 @@ fn node_id_from_key_to_key_roundtrip() {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![(
         None,
         NodeKind::Container,
@@ -92,6 +96,7 @@ fn node_id_from_key_to_key_roundtrip() {
         Vec::new(),
         None,
         false,
+        None,
         None,
     )];
     let scene = Scene::build(&entries);
@@ -143,6 +148,7 @@ fn scene_build_6tuple_sets_draggable() {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -152,6 +158,7 @@ fn scene_build_6tuple_sets_draggable() {
             None,
             false,
             None,
+            None,
         ),
         (
             Some(0),
@@ -160,6 +167,7 @@ fn scene_build_6tuple_sets_draggable() {
             Vec::new(),
             None,
             true,
+            None,
             None,
         ),
     ];
@@ -225,6 +233,7 @@ fn scene_build_7tuple_sets_tabindex() {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -234,6 +243,7 @@ fn scene_build_7tuple_sets_tabindex() {
             None,
             false,
             None,
+            None,
         ),
         (
             Some(0),
@@ -243,6 +253,7 @@ fn scene_build_7tuple_sets_tabindex() {
             None,
             false,
             Some(0),
+            None,
         ),
         (
             Some(0),
@@ -252,6 +263,7 @@ fn scene_build_7tuple_sets_tabindex() {
             None,
             false,
             Some(3),
+            None,
         ),
     ];
     let scene = Scene::build(&entries);
@@ -292,6 +304,7 @@ fn scene_build_constructs_tree_without_parse() {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -300,6 +313,7 @@ fn scene_build_constructs_tree_without_parse() {
             Vec::new(),
             None,
             false,
+            None,
             None,
         ),
         (
@@ -311,6 +325,7 @@ fn scene_build_constructs_tree_without_parse() {
             Vec::new(),
             None,
             false,
+            None,
             None,
         ),
     ];
@@ -334,7 +349,7 @@ fn scene_build_constructs_tree_without_parse() {
     let mut of = ResolvedStyle::default();
     of.overflow_x = OverflowMode::Hidden;
     of.overflow_y = OverflowMode::Hidden;
-    let scene2 = Scene::build(&[(None, NodeKind::Container, of, Vec::new(), None, false, None)]);
+    let scene2 = Scene::build(&[(None, NodeKind::Container, of, Vec::new(), None, false, None, None)]);
     assert!(
         scene2.get(scene2.roots[0]).unwrap().clip_rect.is_some(),
         "overflow Hidden → clip slot"
@@ -357,7 +372,7 @@ fn build_clip_rect_slot_for_scroll_auto_and_single_axis() {
         let mut s = ResolvedStyle::default();
         s.overflow_x = x;
         s.overflow_y = y;
-        let sc = Scene::build(&[(None, NodeKind::Container, s, Vec::new(), None, false, None)]);
+        let sc = Scene::build(&[(None, NodeKind::Container, s, Vec::new(), None, false, None, None)]);
         assert!(
             sc.get(sc.roots[0]).unwrap().clip_rect.is_some(),
             "{} → clip slot",
@@ -376,6 +391,7 @@ fn build_clip_rect_slot_for_scroll_auto_and_single_axis() {
         None,
         false,
         None,
+        None,
     )]);
     assert!(
         sc.get(sc.roots[0]).unwrap().clip_rect.is_none(),
@@ -393,6 +409,7 @@ fn anim_scene_one_node() -> (Scene, NodeId) {
         Vec::new(),
         None,
         false,
+        None,
         None,
     )]);
     let id = sc.roots[0];
@@ -419,6 +436,7 @@ fn animtable_hashmap_get_ensure_clear() {
                 None,
                 false,
                 None,
+                None,
             ),
             (
                 Some(0),
@@ -427,6 +445,7 @@ fn animtable_hashmap_get_ensure_clear() {
                 Vec::new(),
                 None,
                 false,
+                None,
                 None,
             ),
         ]);

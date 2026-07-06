@@ -309,6 +309,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
+            Option<String>,
         )> = vec![
             (
                 None,
@@ -317,6 +318,7 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
                 None,
             ),
             (
@@ -328,6 +330,7 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
                 None,
             ),
         ];
@@ -365,6 +368,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
+            Option<String>,
         )> = vec![
             (
                 None,
@@ -374,16 +378,6 @@ mod tests {
                 None,
                 false,
                 None,
-            ),
-            (
-                Some(0),
-                NodeKind::Image {
-                    src: "res/a.png".into(),
-                },
-                ResolvedStyle::default(),
-                vec![],
-                None,
-                false,
                 None,
             ),
             (
@@ -395,6 +389,19 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Image {
+                    src: "res/a.png".into(),
+                },
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
                 None,
             ),
         ];
@@ -418,6 +425,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
+            Option<String>,
         )> = vec![
             (
                 None,
@@ -426,6 +434,7 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
                 None,
             ),
             (
@@ -437,6 +446,7 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
                 None,
             ),
         ];
@@ -465,6 +475,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
+            Option<String>,
         )> = vec![
             (
                 None,
@@ -473,6 +484,7 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
                 None,
             ),
             (
@@ -484,6 +496,7 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
                 None,
             ),
         ];

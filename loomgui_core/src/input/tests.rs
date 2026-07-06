@@ -2880,6 +2880,7 @@ fn v_scroll_scene() -> Scene {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -2888,6 +2889,7 @@ fn v_scroll_scene() -> Scene {
             vec![],
             None,
             false,
+            None,
             None,
         ), // 0 root
         (
@@ -2898,6 +2900,7 @@ fn v_scroll_scene() -> Scene {
             None,
             false,
             None,
+            None,
         ), // 1 scroll 容器
         (
             Some(1),
@@ -2906,6 +2909,7 @@ fn v_scroll_scene() -> Scene {
             vec![],
             None,
             false,
+            None,
             None,
         ), // 2 content 子
     ];
@@ -3034,6 +3038,7 @@ fn nested_innermost_scroll_wins() {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -3042,6 +3047,7 @@ fn nested_innermost_scroll_wins() {
             vec![],
             None,
             false,
+            None,
             None,
         ), // 0 root
         (
@@ -3052,6 +3058,7 @@ fn nested_innermost_scroll_wins() {
             None,
             false,
             None,
+            None,
         ), // 1 外 scroll
         (
             Some(1),
@@ -3061,6 +3068,7 @@ fn nested_innermost_scroll_wins() {
             None,
             false,
             None,
+            None,
         ), // 2 内 scroll
         (
             Some(2),
@@ -3069,6 +3077,7 @@ fn nested_innermost_scroll_wins() {
             vec![],
             None,
             false,
+            None,
             None,
         ), // 3 内层 content
     ];
@@ -3268,6 +3277,7 @@ fn scroll_start_suppresses_drag() {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -3276,6 +3286,7 @@ fn scroll_start_suppresses_drag() {
             vec![],
             None,
             false,
+            None,
             None,
         ),
         (
@@ -3286,6 +3297,7 @@ fn scroll_start_suppresses_drag() {
             None,
             false,
             None,
+            None,
         ),
         (
             Some(1),
@@ -3294,6 +3306,7 @@ fn scroll_start_suppresses_drag() {
             vec![],
             None,
             true,
+            None,
             None,
         ), // 2 draggable content
     ];
@@ -3428,6 +3441,7 @@ fn grip_scroll_scene() -> Scene {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -3437,14 +3451,6 @@ fn grip_scroll_scene() -> Scene {
             None,
             false,
             None,
-        ),
-        (
-            Some(0),
-            NodeKind::Container,
-            ResolvedStyle::default(),
-            vec![],
-            None,
-            false,
             None,
         ),
         (
@@ -3454,6 +3460,17 @@ fn grip_scroll_scene() -> Scene {
             vec![],
             None,
             false,
+            None,
+            None,
+        ),
+        (
+            Some(0),
+            NodeKind::Container,
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
             None,
         ),
     ];

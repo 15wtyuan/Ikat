@@ -123,6 +123,11 @@ pub struct Node {
     /// （虚拟列表 slot 用：slot 换绑 item 时 NodeId 变但 reuse_key 不变 → 后端复用 GO）。
     /// 运行时字段（不进 pkg，打包期不存）。driver 设。
     pub reuse_key: u32,
+    /// HTML `data-controller="name"` 属性值。声明本节点为某 Controller 的挂载点
+    /// （子树归该 Controller 管）。运行时由 set_selected_index 改 selected_index，
+    /// 匹配器遇 [data-page] 时回溯找最近的 data_controller 祖先查其页。建树时从
+    /// ElementData.attrs["data-controller"] 填（照 draggable/tabindex 先例）。
+    pub data_controller: Option<String>,
 }
 
 impl Default for Node {
@@ -152,6 +157,7 @@ impl Default for Node {
             tabindex: None,
             focused: false,
             reuse_key: 0,
+            data_controller: None,
         }
     }
 }
@@ -265,6 +271,7 @@ impl Scene {
             Option<String>,
             bool,
             Option<i32>,
+            Option<String>,
         )],
     ) -> Scene {
         let mut scene = Scene {
@@ -280,7 +287,7 @@ impl Scene {
         };
         // 先 insert 所有节点，收集 slotmap 分配的 NodeId
         let mut ids: Vec<NodeId> = Vec::with_capacity(entries.len());
-        for (_, kind, style, classes, id_attr, draggable, tabindex) in entries.iter() {
+        for (_, kind, style, classes, id_attr, draggable, tabindex, data_controller) in entries.iter() {
             let node = Node {
                 id: NodeId::INVALID, // 临时，insert 后回填
                 parent: None,        // 下一轮填
@@ -309,6 +316,7 @@ impl Scene {
                 tabindex: *tabindex,
                 focused: false,
                 reuse_key: 0,
+                data_controller: data_controller.clone(),
             };
             let key = scene.nodes.insert(node);
             let id = NodeId::from_key(key);
@@ -316,7 +324,7 @@ impl Scene {
             ids.push(id);
         }
         // 接 parent/children/roots（用 ids 映射 entries 下标 → NodeId）
-        for (i, (parent_idx, _, _, _, _, _, _)) in entries.iter().enumerate() {
+        for (i, (parent_idx, _, _, _, _, _, _, _)) in entries.iter().enumerate() {
             match parent_idx {
                 Some(p) => {
                     let child_id = ids[i];
@@ -412,6 +420,7 @@ pub fn build_scene(tree: &ElementTree, styles: &[ResolvedStyle]) -> Scene {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )> = Vec::new();
     for root in &tree.roots {
         gather_rec(tree, styles, *root, None, &mut entries);
@@ -433,6 +442,7 @@ fn gather_rec(
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
     )>,
 ) -> usize {
     let el = &tree.nodes[el_id.0];
@@ -468,6 +478,9 @@ fn gather_rec(
     // tabindex 属性 → Option<i32>。非数字 → None（照 DOM 容错：无效值忽略）。
     // 语义：None=不可聚焦；Some(-1)=仅编程；Some(0)=DOM 序；Some(N>0)=显式序。
     let tabindex = el.attrs.get("tabindex").and_then(|v| v.parse::<i32>().ok());
+    // data-controller="name" → Node.data_controller（HTML 属性，照 draggable 先例）。
+    // 值原样存（不归一大小写——HTML 属性值大小写敏感，name 是 caller-defined）。
+    let data_controller = el.attrs.get("data-controller").cloned();
     let my_idx = entries.len();
     entries.push((
         parent_idx,
@@ -477,6 +490,7 @@ fn gather_rec(
         el.id.clone(),
         draggable,
         tabindex,
+        data_controller,
     ));
 
     // Container/Button 的裸文本 → Text 子节点。文本子像无 class 的 <span>：
@@ -503,6 +517,7 @@ fn gather_rec(
                 Vec::new(),
                 None,
                 false,
+                None,
                 None,
             ));
         }

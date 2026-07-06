@@ -91,6 +91,7 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         tabindex: None,
         focused: false,
         reuse_key: 0,
+        data_controller: None,
     };
     let key = scene.nodes.insert(node);
     let id = NodeId::from_key(key);
@@ -147,6 +148,7 @@ pub fn create_node_from_template(
         tabindex: None,
         focused: false,
         reuse_key: 0,
+        data_controller: None,
     };
     let key = scene.nodes.insert(node);
     let id = NodeId::from_key(key);
@@ -311,6 +313,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
+            Option<String>,
         )> = vec![
             (
                 None,
@@ -319,6 +322,7 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
                 None,
             ),
             (
@@ -329,6 +333,7 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
             ),
             (
                 Some(1),
@@ -337,6 +342,7 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
                 None,
             ),
         ];
@@ -411,6 +417,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
+            Option<String>,
         )> = vec![
             (
                 None,
@@ -420,14 +427,6 @@ mod tests {
                 None,
                 false,
                 None,
-            ),
-            (
-                Some(0),
-                NodeKind::Container,
-                ResolvedStyle::default(),
-                vec![],
-                None,
-                false,
                 None,
             ),
             (
@@ -438,6 +437,7 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
             ),
             (
                 Some(0),
@@ -446,6 +446,17 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
                 None,
             ),
             (
@@ -455,6 +466,7 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
                 None,
             ),
         ];
