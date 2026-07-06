@@ -159,18 +159,19 @@ use crate::scene::node::{AnimTable, NodeId, Scene};
 use crate::transform::{self};
 
 /// 一个进行中的 tween（内部结构，TweenManager 内部 Vec 管理）。
-/// pub(crate)：测试断言 + Stage 联动查需读字段（killed/node）。
+/// pub(crate) 字段供测试断言（kill 后验全 killed、transition drain 验 start/end/tag）+
+/// Stage 联动查（killed/node）。
 #[derive(Debug, Clone)]
 pub(crate) struct Tween {
     pub(crate) node: NodeId,
-    prop: TweenProp,
-    start: [f32; 4],
-    end: [f32; 4],
+    pub(crate) prop: TweenProp,
+    pub(crate) start: [f32; 4],
+    pub(crate) end: [f32; 4],
     ease: Ease,
     delay: f32,
     duration: f32,
     elapsed: f32,
-    tag: u32,
+    pub(crate) tag: u32,
     started: bool,
     pub(crate) killed: bool,
 }

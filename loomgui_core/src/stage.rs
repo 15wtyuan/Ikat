@@ -14,6 +14,11 @@ use crate::style::resolved::OverflowMode;
 use crate::text::layout::Font;
 use std::sync::Arc;
 
+/// transition 自动提交 tween 的 tag（rematch 检测通道变化 → drain kill 旧 + 提交新）。
+/// 区分 driver 主动注册的 tween（caller-supplied u32 tag）——使 transition 完成事件可识别。
+/// 选 0xFFFF_FFFE 哨兵（接近 u32 上限，避开常见 driver 小整数 tag）。
+const TRANSITION_TAG: u32 = 0xFFFF_FFFE;
+
 pub struct Stage {
     pub scene: Option<Scene>,
     pub font: Arc<Font>,
@@ -586,7 +591,8 @@ impl Stage {
     /// 每帧管线（支柱1重排——rematch 提到 solve 前，伪类三类全当帧消费）：
     /// ①tween ②focus_request ③process（仲裁+拖拽写 scroll_pos；hit_test 读上帧 world，1帧延迟已认）
     /// ④scroll update ⑤process_keys ⑥rematch_pseudo_classes（提到 solve 前：改 layout/transform/colors
-    /// 三类，本帧 solve+compute 全消费）⑦solve（读 rematch 后 taffy_style）
+    /// 三类，本帧 solve+compute 全消费）⑥.5 transition drain（rematch 产请求 → kill 旧 tween + 提交新）
+    /// ⑦solve（读 rematch 后 taffy_style）
     /// ⑧refresh_content_sizes ⑨compute_world_transforms（读 rematch 后 transform+scroll_pos）
     /// ⑩build_render_nodes
     ///
@@ -637,6 +643,25 @@ impl Stage {
         self.last_events = out;
         // 4. 伪类重匹配（提到 solve 前：改 taffy_style/transform/colors，本帧全部消费）
         rematch_pseudo_classes(scene);
+        // 4.5 transition drain：rematch 检测可动画通道变化时推入 scene.pending_transitions。
+        //     每个请求 kill 旧 (node,prop) tween（override 保留 mid-flight 末值，见 tween.rs kill）
+        //     + 提交新 tween（start = mid-flight override → 无闪烁）。切页 kill 语义。
+        //     借用：scene 经 self.scene.as_mut() 借；self.tweens 独立字段（同 tweens.update 访问形）。
+        let reqs: Vec<crate::tween::TransitionRequest> =
+            scene.pending_transitions.drain(..).collect();
+        for r in reqs {
+            self.tweens.kill(r.node, r.prop); // override 保留（mid-flight 值）
+            self.tweens.tween(
+                r.node,
+                r.prop,
+                r.start,
+                r.end,
+                r.ease,
+                r.delay,
+                r.duration,
+                TRANSITION_TAG,
+            );
+        }
         // 5. solve（读 rematch 后的 taffy_style → layout_rect）
         // 核心知图尺寸（打包期 PNG IHDR 静态，存 Stage.image_sizes）。solve 查尺寸表算
         // Image intrinsic（三档：CSS > 真实像素 > 64×64）。不知图集（运行时纹理/UV 归 Unity）。
