@@ -1,5 +1,5 @@
 //! 围栏契约测试 = LoomGUI 围栏权威真相源（docs/design/fence.md 是人类副本）。
-//! 三类断言：
+//! 四类断言：
 //!   A. 元素围栏：围栏外标签报错（parse_html），白名单接受。
 //!   B. 支持属性：apply_decl 返回 true + ResolvedStyle 字段变化。
 //!   C. 围栏外属性：apply_decl 返回 false + 布局字段不变（静默忽略）。
