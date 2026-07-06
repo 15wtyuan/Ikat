@@ -111,7 +111,7 @@
   [data-controller="tab"][data-page="1"] .panel { opacity: 0.3; }
 </style>
 ```
-Controller 状态变化时，运行时把 `data-page` 写到挂载该 Controller 的元素上，子树用标准属性选择器匹配——cascade 天然生效（§4.3）。带过渡用标准 `transition: 0.3s ease`（映射 GTween）。
+Controller 状态变化时，匹配器遇 `[data-page]` 回溯找最近 `data-controller` 祖先、查 registry 的 `selected_index`（不写回节点属性，§1.4），子树属性选择器匹配——cascade 天然生效（§4.3）。带过渡用标准 `transition: 0.3s ease`（映射 GTween）。
 
 ---
 
