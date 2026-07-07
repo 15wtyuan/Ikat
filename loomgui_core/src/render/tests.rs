@@ -451,13 +451,16 @@ fn build_text_bakes_content_offset_into_glyph_pen() {
     match &rns[0].payload {
         NodePayload::Mesh { verts, program, .. } => {
             assert_eq!(*program, 1, "text → program=1");
-            // v1.6：text 产 Mesh quad。AB = 2 glyph → 8 verts (2 × 4)。
-            // 验证 content offset 通过 check verts 位置：首 quad 的 pen_x 应含 offset。
+            // AB = 2 glyph → 8 verts (2 × 4)。
             assert_eq!(verts.len(), 8, "AB = 2 glyph × 4 verts = 8");
-            // First glyph 'A' should have pen_x = border_left + padding_left = 6.0
-            // Its BL vertex x = g.x + bearing_x, but we only verify verts exist and count is correct.
-            // The full content-offset verification is on the glyph level from TextLayout,
-            // which was already baked before build_text_mesh is called.
+            // 验证 content offset 已烤入 pen：首字形 BL 顶点的 x 应
+            // >= border_left + padding_left = 6.0（build_text_mesh 在
+            // 每 glyph 的 g.x 中已经是 content-box 相对坐标 + 偏移）。
+            assert!(
+                verts[0][0] >= 6.0,
+                "首 glyph BL x 应含 content offset (border+padding=6.0)，实 {}",
+                verts[0][0]
+            );
         }
         _ => panic!("expected Mesh payload"),
     }
@@ -923,6 +926,19 @@ fn render_long_text_still_wraps_with_layout_reuse() {
         (container_w, 100.0),
         &std::collections::HashMap::new(),
     );
+    // 验证 solve 填了 text_layouts 且确实换行为多行。
+    let text_id = scene.get(scene.roots[0]).unwrap().children[0];
+    let layout = scene.text_layouts[text_id.index()]
+        .as_ref()
+        .expect("solve 应为 Text 节点填 text_layouts");
+    assert!(
+        layout.lines.len() >= 2,
+        "长文本 intrinsic={:.1} container={} 应换行为多行，实 {} 行",
+        intrinsic,
+        container_w,
+        layout.lines.len()
+    );
+
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
@@ -1205,7 +1221,7 @@ fn build_container_bg_image_coexists_with_bg_color() {
     }
 }
 
-// ── program 号（坑 79 bg-image 合成）──────────────
+// ── program 号（CSS 合成 bg-image）──────────────
 
 #[test]
 fn build_container_bg_image_hit_sets_program_2() {
@@ -1893,9 +1909,9 @@ fn container_bg_image_with_radius_uses_rounded_rect() {
     }
 }
 
-// ── T8 review fixes: multi-page text sub-page tests ───────────────────
+// ── 多页 atlas 跨页拆分 text 子页测试 ───────────────────
 
-/// C1 回归：text 子页 reuse_key 必须为 0（不继承主节点），防止虚拟列表内多页覆盖。
+/// 回归：text 子页 reuse_key 必须为 0（不继承主节点），防止虚拟列表内多页覆盖。
 /// 构造带 reuse_key=7 的 text 节点，跑 build_render_nodes，验 primary 继承 reuse_key=7、
 /// 子页 reuse_key=0。
 #[test]
@@ -1946,7 +1962,7 @@ fn text_sub_pages_reuse_key_is_zero_not_inherited() {
     assert_eq!(primary.unwrap().reuse_key, 7, "primary 继承 reuse_key=7");
 }
 
-/// I1 回归：propagate_text_sub_page_sort_keys 累积偏移防 stale primary_sk。
+/// 回归：propagate_text_sub_page_sort_keys 累积偏移防 stale primary_sk。
 /// 构造两 text 节点各带子页，验 sort_key 单调无 tie。
 #[test]
 fn propagate_text_sub_page_sort_keys_cumulative_shift_no_ties() {
@@ -2029,7 +2045,7 @@ fn propagate_text_sub_page_sort_keys_cumulative_shift_no_ties() {
     assert_eq!(sks.len(), unique.len(), "sort_key 不得有 tie");
 }
 
-/// I2 哨兵：合成 node_id 硬上限文档。
+/// 哨兵：合成 node_id 硬上限文档。
 /// 验证 synth_text_node_id / is_text_sub_page / text_sub_primary_id / text_sub_page_idx
 /// 的编码/解码一致性。
 #[test]
@@ -2051,7 +2067,7 @@ fn synth_text_node_id_roundtrip() {
     assert!(!is_text_sub_page(high_index), "index=4095 仍不被误判");
 }
 
-/// I2 哨兵：index=4096 会与合成子页 bit 碰撞——验 is_text_sub_page 误判。
+/// 哨兵：index=4096 会与合成子页 bit 碰撞——验 is_text_sub_page 误判。
 #[test]
 fn node_index_4096_triggers_sub_page_collision() {
     // index=4096 → bits[31:12] = 0x00001 (bit 24 set) → bits[31:24]=1 → 子页误判

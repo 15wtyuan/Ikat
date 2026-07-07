@@ -7,7 +7,8 @@ use std::hash::{Hash, Hasher};
 
 /// 几何轴 hash：payload 全量（verts/uvs/colors/indices/image_path/program/color_matrix
 /// 或 font_size/color/全量 glyph）。不含 world_matrix/alpha/sort/mask（那是 header_hash）。
-/// 全量——不采样，根治漏字段类 bug（坑 56/75/76）。
+/// 全量——不采样。过去用采样 hash 造成几何变更漏检（缺帧/跳变），现改全量覆盖
+/// payload 所有字段，杜绝此类漏字段缺陷。
 pub fn payload_hash(rn: &RenderNode) -> u64 {
     let mut h = DefaultHasher::new();
     match &rn.payload {
@@ -59,8 +60,8 @@ pub fn payload_hash(rn: &RenderNode) -> u64 {
 
 /// 表头轴 hash：world_matrix + visible + alpha + sort_key + mask_context + color_tint + blend + reuse_key。
 /// 廉价属性——变了 C# 只需改 GO transform / 材质（SetPropertyBlock _Alpha），不碰 mesh。
-/// P2：reuse_key 进 header_hash——同 NodeId 换 reuse_key 时（理论上 driver 不该这么用，
-/// 但 hash 该覆盖所有身份字段，避免漏）。
+/// reuse_key 进 header_hash——同 NodeId 换 reuse_key 时需触发 Header 级变更刷新 GO
+/// 绑定（理论上 driver 不该这么用，但 hash 该覆盖所有身份字段，避免漏）。
 pub fn header_hash(rn: &RenderNode) -> u64 {
     let mut h = DefaultHasher::new();
     for &v in rn.world_matrix.iter() {
@@ -169,12 +170,13 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // P2 补字段回归测试（reuse_key 进 header_hash）
+    // reuse_key 进 header_hash 回归测试（身份字段进表头 hash，
+    // 同 NodeId 换 reuse_key 时 header_hash 应变化触发 Header 级变更）。
     // -----------------------------------------------------------------------
 
     #[test]
     fn header_hash_includes_reuse_key() {
-        // P2：reuse_key 变 → header_hash 变（身份字段进表头 hash）。
+        // reuse_key 变 → header_hash 变（身份字段进表头 hash）。
         let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
         let mut b = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
         b.reuse_key = 7;
