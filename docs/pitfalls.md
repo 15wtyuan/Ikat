@@ -938,3 +938,33 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：`od -An -tx1 -N 8 showcase.pkg.bin` 看头——magic `4c 50 4b 47`("LPKG") 后 4 字节 u32 LE 版本号（13=`0d 00 00 00`）。不等 MIN_VERSION = stale，重打。
 
 **教训**：坑 66 的版本号维度——bump formatVersion 后入库 pkg.bin 版本号字段要 hexdump 核对（头 8 字节），不能只看文件大小变了就以为打了新版。
+
+### 坑 136：text mesh 顶点缺 rect 偏移 + y 符号反（文字堆左上角 + 上下颠倒）
+
+**症状**：v1.6 font-to-core 首次 PlayMode，所有文字堆屏幕左上角且上下颠倒。
+
+**根因**：`build_text_mesh` 顶点用 pen 坐标（node-local 0..text_width），但 blob re-base 契约假设顶点在 parent/world 空间（`mesh::quad` 用 `rect.x/rect.y`）——re-base 减 (tx,ty)、后端 GO 加回，净值落 design 原点 (0,0)。且 `top = line.baseline + g.bearing_y` 符号反：`baseline` 是 y-down 绝对值，`bearing_y` 是 font y-up（顶到 baseline 正值），y-down 里字形顶在 baseline 上方应 `baseline - bearing_y`。
+
+**解决**：`build_text_mesh` 加 `rect` 参数，顶点加 `rect.x/rect.y`（对齐 Image quad 父空间约定）；`top = baseline - bearing_y - pad`、`bottom = top + px_h`；减 `GLYPH_PAD`（pub const）对齐位图原点（bearing 来自 bbox，px_w/h 含 pad）。
+
+**教训**：新增 mesh 顶点源要和 `mesh::quad` 同空间约定（rect.xy = 节点绝对位置，纯平移时 = wm[4],wm[5]）——否则 re-base 契约失配。font y-up 度量进 y-down 坐标系一律减（bearing/ascender）。commit 9db4550 留了"PlayMode 实测校准"注释就是没验就 merge——v1.6 文本几何要 PlayMode 过。
+
+### 坑 137：SyncFontAtlas 硬编码 f0 vs render f{font_id}（非默认字体全空白）
+
+**症状**：JetBrainsMono（首个注册）默认时英文显示；DejaVuSans 默认时所有字符不显示（空白）。
+
+**根因**：`font_id` 按注册顺序分配（`next_id` 0 递增），`is_default` 不影响它。`SyncFontAtlas`（LoomStage.cs）硬编码注册 `loomgui://font-atlas/f0/p{page}`，但 render 用实际 `font_id` 合成 `f{font_id}/p{page}`——默认字体非首注册时 font_id≠0，path 不匹配 → SpriteResolver miss → tex 回落 whiteTexture → 全空白。
+
+**解决**：core 的 `GlyphAtlas` 是 Stage 级单一共享实例（所有字体字形混在同一 page），path 里的 font_id 本就冗余。两边统一去掉 font_id：`loomgui://font-atlas/p{page}`（page 是唯一键）。
+
+**教训**：合成 path 的 key 要和后端注册 key 严格对齐——一边硬编码常量一边用动态 id 是定时炸弹。共享 atlas（多字体同页）路径不该含 font_id（font_id 只作 GlyphKey 区分槽位，不进 path）。对**未来 CJK fallback** 也成立：fallback 字形仍进同一共享 atlas，path 只需 page。
+
+### 坑 138：无轮廓字形误走 tofu（空格渲染成方块 + 位置偏下）
+
+**症状**：空格渲染成方块，位置偏下（在 baseline 下方而非行内）。
+
+**根因**：`rasterize_glyph` 对 `glyph_bounding_box` 返 None 的字形一律 `tofu_box`。空格 U+0020 有 glyph entry（gid>0、advance 正常）但无轮廓 → bbox None → 误走 tofu。且空格 `bearing_y=0`，tofu 框 `top = baseline - 0 - pad` → 从 baseline 往下 size_px → 位置偏下。
+
+**解决**：按 gid 区分——gid=0（真缺字 .notdef）保留 tofu（开发期占位）；gid>0 无轮廓（空格、nbsp、零宽空格等）返空 bitmap，`ensure` 早返空 rect（不分配/不标脏，避 `allocate(0,0)` panic），`build_text_mesh` 跳过 `px_w==0` 字形（advance 在 layout 已算，pen 已前进）。
+
+**教训**：无 bbox ≠ 缺字——空格等有 advance 无像素的字形不该画占位。tofu 只给真缺字（gid=0 .notdef，且字体连 .notdef 方框都没有时才兜底；字体自带 .notdef 方框走正常光栅）。光栅兜底要区分"缺字"（gid=0）与"无轮廓"（gid>0 bbox None）。
