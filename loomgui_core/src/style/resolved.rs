@@ -41,6 +41,20 @@ pub enum BackgroundSize {
     Contain = 2, // 完整放入留白（scale=min，UV 外扩，子区外透明透出底色）
 }
 
+/// LoomGUI display 旁路字段（与 taffy_style.display 解耦）。
+///
+/// 打包期 desugar 据此识别 `display:block` div（展开成 flex div + RichText 叶）。
+/// IR 层 block div 仍是 flex（taffy_style.display = Flex）——不用 taffy `Display::Block`，
+/// 那会触发 taffy block 布局语义，违反"div 永远 flex"不变量。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum DisplayMode {
+    #[default]
+    Flex = 0,
+    Block = 1,
+    None = 2,
+}
+
 /// CSS border-radius 单角半径。
 /// (h, v) = (水平, 垂直) 半径，存 CSS 原始值（px/%），渲染期 resolve 成像素。
 /// `/` 省略时 v = h（正圆角）。
@@ -97,6 +111,8 @@ impl LocalTransform {
 pub struct ResolvedStyle {
     /// taffy 布局字段（flex/padding/margin/size/min/max/gap/position 等）
     pub taffy_style: TaffyStyle,
+    /// CSS display 的 LoomGUI 旁路标记（与 taffy_style.display 解耦）。打包期 desugar 用。
+    pub display_mode: DisplayMode,
     /// 视觉字段（不进 taffy，渲染层消费）
     pub background_color: Option<[f32; 4]>, // rgba 0..1
     /// CSS background-image url 路径（已去 url() 包裹 + 引号），None = 无背景图。
@@ -152,6 +168,7 @@ impl Default for ResolvedStyle {
         taffy_style.flex_direction = FlexDirection::Column;
         Self {
             taffy_style,
+            display_mode: DisplayMode::Flex,
             background_color: None,
             background_image: None,
             background_size: BackgroundSize::Stretch,

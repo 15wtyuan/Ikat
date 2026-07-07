@@ -11,7 +11,7 @@ use loomgui_core::parse::css::parse_css;
 use loomgui_core::parse::dom::parse_html;
 use loomgui_core::parse::selector::parse_selector;
 use loomgui_core::style::mapping::apply_decl;
-use loomgui_core::style::resolved::ResolvedStyle;
+use loomgui_core::style::resolved::{DisplayMode, ResolvedStyle};
 use taffy::Display;
 
 // ── A. 元素围栏 ──────────────────────────────────────────────────
@@ -111,6 +111,38 @@ fn display_grid_falls_to_flex() {
         Display::Flex,
         "display:grid 应落到 Flex（taffy 无 grid）"
     );
+    assert_eq!(
+        s.display_mode,
+        DisplayMode::Flex,
+        "display:grid 走默认分支，display_mode=Flex"
+    );
+}
+
+#[test]
+fn display_block_sets_display_mode() {
+    // display:block 走 mapping 新分支：taffy 仍 Flex（守铁律），但设 display_mode=Block
+    // 供打包器 desugar 识别。
+    let mut s = ResolvedStyle::default();
+    let ok = apply_decl(&mut s, "display", "block");
+    assert!(ok, "display:block 是围栏内合法值，返回 true");
+    assert_eq!(
+        s.display_mode,
+        DisplayMode::Block,
+        "display:block 应设 display_mode=Block"
+    );
+    assert_eq!(
+        s.taffy_style.display,
+        Display::Flex,
+        "taffy 仍 Flex（不用 Display::Block）"
+    );
+}
+
+#[test]
+fn display_none_sets_both() {
+    let mut s = ResolvedStyle::default();
+    apply_decl(&mut s, "display", "none");
+    assert_eq!(s.display_mode, DisplayMode::None);
+    assert_eq!(s.taffy_style.display, Display::None);
 }
 
 // ── C. 围栏外属性静默忽略（apply_decl 返回 false，布局字段不变）─────

@@ -1,6 +1,7 @@
 use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
-    BackgroundSize, BorderRadius, CornerRadius, OverflowMode, ResolvedStyle, SliceInsets, TextAlign,
+    BackgroundSize, BorderRadius, CornerRadius, DisplayMode, OverflowMode, ResolvedStyle,
+    SliceInsets, TextAlign,
 };
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, LengthPercentage, LengthPercentageAuto};
@@ -464,10 +465,21 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "display" => {
-            ts.display = match value.trim() {
-                "none" => taffy::Display::None,
-                _ => taffy::Display::Flex,
-            };
+            match value.trim() {
+                "none" => {
+                    ts.display = taffy::Display::None;
+                    style.display_mode = DisplayMode::None;
+                }
+                "block" => {
+                    // block：taffy 仍 Flex（守铁律），仅旁路字段标记供打包器 desugar 识别。
+                    ts.display = taffy::Display::Flex;
+                    style.display_mode = DisplayMode::Block;
+                }
+                _ => {
+                    ts.display = taffy::Display::Flex;
+                    style.display_mode = DisplayMode::Flex;
+                }
+            }
             true
         }
         "filter" => {
