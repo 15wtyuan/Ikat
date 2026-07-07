@@ -78,58 +78,39 @@ namespace LoomGUI
             EnsureCamera();
             ConfigureTransforms();
 
-            // 动态字体 atlas 异步 rebuild 时 glyph UV 变——stage.OnFontRebuilt 自增版本号，
-            // MirrorPool.Sync 下帧检测到版本变 → 强制 text 节点重 RequestCharactersInTexture。
-            // 全局静态事件：必须 OnDestroy 解绑，否则泄漏跨场景/实例。
-            Font.textureRebuilt += _stage.OnFontRebuilt;
-
             gameObject.layer = LoomUILayer;
 
             if (_inputCollector == null) _inputCollector = GetComponent<LoomInputCollector>();
         }
 
         /// <summary>
-        /// 默认实现：遍历 <see cref="LoomSettings.fonts"/> → <see cref="LoadFont"/> → stage.RegisterFont。
+        /// 默认实现：遍历 <see cref="LoomSettings.fonts"/> → <see cref="LoadFontBytes"/> → stage.RegisterFont。
         /// 项目子类可覆写以改加载策略（如先批量预加载、异步加载、错误兜底）。
-        /// protected：内部编排钩子，外部不应直接调用（用 <see cref="LoadFont"/> 单个加载）。
+        /// protected：内部编排钩子，外部不应直接调用（用 <see cref="LoadFontBytes"/> 单个加载）。
         /// </summary>
         protected virtual void RegisterFontsFromSettings()
         {
             var settings = LoomSettings.GetOrCreateDefault();
             foreach (var entry in settings.fonts)
             {
-                var (bytes, unityFont) = LoadFont(entry);
-                if (bytes != null && unityFont != null)
-                    _stage.RegisterFont(entry.familyName, bytes, unityFont, entry.isDefault);
+                byte[] bytes = LoadFontBytes(entry);
+                if (bytes != null)
+                    _stage.RegisterFont(entry.familyName, bytes, entry.isDefault);
             }
         }
 
         /// <summary>
-        /// 默认直读 Assets/LoomGUI/Bundles/fonts/{sourceFileName}.bytes + editor LoadAssetAtPath&lt;Font&gt;。
-        /// 项目覆写换 AssetBundle/Addressables（build 后 Font asset 不在文件系统，须走 AB）。
-        /// public 以便跨程序集（如 LoomGUI.Demo）直接调用——非 protected，避免跨程序集访问限制。
-        /// 返 (bytes=null, unityFont=null) 表示加载失败，调用方（RegisterFontsFromSettings）跳过此 entry。
+        /// 默认直读 Assets/LoomGUI/Bundles/fonts/{sourceFileName}.bytes。
+        /// v10：不再加载 Unity Font asset——核心自产 atlas，后端只喂 Rust 字节。
+        /// 项目覆写换 AssetBundle/Addressables（build 后 Font asset 不在文件系统）。
+        /// public 以便跨程序集（如 LoomGUI.Demo）直接调用。
+        /// 返 null 表示加载失败，调用方（RegisterFontsFromSettings）跳过此 entry。
         /// </summary>
-        public virtual (byte[] bytes, Font unityFont) LoadFont(FontEntry entry)
+        public virtual byte[] LoadFontBytes(FontEntry entry)
         {
-            // Bundles/ 在 Assets/LoomGUI/ 下（LoomSettings.pkgOutputDir 默认值）。Application.dataPath = Assets/。
             string fontsDir = Path.Combine(Application.dataPath, "LoomGUI/Bundles/fonts");
             string bytesPath = Path.Combine(fontsDir, entry.sourceFileName + ".bytes");
-            byte[] bytes = File.Exists(bytesPath) ? File.ReadAllBytes(bytesPath) : null;
-#if UNITY_EDITOR
-            // editor：按 sourceFileName 找 Font asset（t:Font 过滤）。FindAssets 返 GUID 数组，取首个。
-            Font unityFont = null;
-            var guids = UnityEditor.AssetDatabase.FindAssets(entry.sourceFileName + " t:Font");
-            if (guids != null && guids.Length > 0)
-            {
-                var assetPath = UnityEditor.AssetDatabase.GUIDToAssetPath(guids[0]);
-                unityFont = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>(assetPath);
-            }
-#else
-            // build：Font asset 在包内无文件系统路径——项目须覆写本方法走 AB/Addressables。
-            Font unityFont = null;
-#endif
-            return (bytes, unityFont);
+            return File.Exists(bytesPath) ? File.ReadAllBytes(bytesPath) : null;
         }
 
         /// <summary>
@@ -193,10 +174,8 @@ namespace LoomGUI
 
         void OnDestroy()
         {
-            // 全局静态事件：Awake 注册过才解绑（Awake 失败早退则 _stage=null 跳过）。
             if (_stage != null)
             {
-                Font.textureRebuilt -= _stage.OnFontRebuilt;
                 _stage.Dispose();
                 _stage = null;
             }

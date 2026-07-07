@@ -6,21 +6,21 @@ namespace LoomGUI
 {
     /// 帧 blob 托管解析视图。解析 Rust build_blob 产出的 little-endian blob。
     ///
-    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v9）：
-    ///   header (132B): magic(u32 LE), version(u32)=9, node_count(u32),
-    ///                 22× col_offset(u32, byte offset from blob start),
+    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v10）：
+    ///   header (116B): magic(u32 LE), version(u32)=10, node_count(u32),
+    ///                 20× col_offset(u32, byte offset from blob start),
     ///                 mesh_arena_off(u32), mesh_arena_len(u32),
-    ///                 text_arena_off(u32), text_arena_len(u32),
     ///                 clip_table_off(u32), clip_table_len(u32),
     ///                 path_table_off(u32), path_table_len(u32)
-    ///   22 列 SOA（顺序见 ColOff 注释），随后 mesh_arena / text_arena / clip_table / path_table 段。
+    ///   20 列 SOA（顺序见 ColOff 注释），随后 mesh_arena / clip_table / path_table 段。
+    ///   v10：text_arena 已删（文本字形塌进 mesh_arena，核心自产 atlas），列 text_off/text_len 删除（22→20 列）。
     /// C# on Windows 是 little-endian，BitConverter 直读无需 byte swap。
     public readonly struct FrameBlob
     {
         public const uint Magic = 0x4D4F4F4C;
         /// blob 版本。magic+version 校验在 IsValid。
-        /// v9：加 reuse_key 列（第 22 列）。
-        public const uint ExpectedVersion = 9;
+        /// v10：删 text_arena + text_off/text_len 列（22→20），文本字形塌进 mesh_arena。
+        public const uint ExpectedVersion = 10;
 
         readonly byte[] _buf;
 
@@ -31,34 +31,29 @@ namespace LoomGUI
         public uint Version => ReadU32(4);
         public int NodeCount => (int)ReadU32(8);
 
-        // 列 offset 在 header[12 .. 12+22*4)。顺序同 Rust columns：
+        // 列 offset 在 header[12 .. 12+20*4)。顺序同 Rust columns：
         //   0=node_id(u32) 1=parent_id(i32,-1=none) 2=visible(u8) 3=alpha(f32)
         //   4=sort_key(u32) 5=mask_context(u32)
         //   6=m_a(f32) 7=m_b(f32) 8=m_c(f32) 9=m_d(f32) 10=m_tx(f32) 11=m_ty(f32)
         //   ↑ world matrix Affine2 6 列（m_a..m_ty）。
-        //   12=payload_kind(u8, 1=Mesh 2=Text；0 不产生——变更级别由 change_level 列表达)
+        //   12=payload_kind(u8, 1=Mesh；0 不产生——变更级别由 change_level 列表达)
         //   13=mesh_off(u32) 14=mesh_len(u32)
-        //   15=text_off(u32) 16=text_len(u32)
-        //   17=path_idx(u32)  ← v7：path 表 1-based 索引，0=纯色无图
-        //   18=program(u8, 0=img/无图 1=Text 2=Container+bg-image 3=filter无bg-image 4=filter+bg-image)  ← v5 新增
-        //   19=color_matrix([f32;20], 80B)
-        //   20=change_level(u8, 0=Skip 1=Header 2=Full)  ← v8 新增（支柱3）
-        //   21=reuse_key(u32, 0=无复用 >0=slot 复用键)  ← v9 新增（绝对虚拟列表用）
+        //   15=path_idx(u32)  ← v7：path 表 1-based 索引，0=纯色无图
+        //   16=program(u8, 0=img/无图 1=Text 2=Container+bg-image 3=filter无bg-image 4=filter+bg-image)
+        //   17=color_matrix([f32;20], 80B)
+        //   18=change_level(u8, 0=Skip 1=Header 2=Full)
+        //   19=reuse_key(u32, 0=无复用 >0=slot 复用键)
+        //   v10：删 text_off(u32)/text_len(u32) 列（原第 15-16 列），其后列统一前移 2。
         int ColOff(int idx) => (int)ReadU32(12 + idx * 4);
-        /// v9：reuse_key（u32 列，ColOff(21) + i*4）。0=无复用（按 node_id），>0=按 reuse_key 复用 GO。
-        public uint ReuseKey(int i) => ReadU32(ColOff(21) + i * 4);
-        // 四 arena header offset。22 列 col_offset 之后：mesh(2), text(2), clip(2), path(2) 各 off+len。
-        // mesh_arena_off @ 12+22*4 = 100；mesh_arena_len @ 104。
-        int MeshArenaOff => (int)ReadU32(12 + 22 * 4);
-        // text_arena_off @ 12+22*4+2*4 = 108；text_arena_len @ 112。
-        int TextArenaOff => (int)ReadU32(12 + 22 * 4 + 2 * 4);
-        int TextArenaLen => (int)ReadU32(12 + 22 * 4 + 2 * 4 + 4);
-        // clip_table_off @ 12+22*4+4*4 = 116；clip_table_len @ 120。
-        int ClipTableOff => (int)ReadU32(12 + 22 * 4 + 4 * 4);
-        int ClipTableLen => (int)ReadU32(12 + 22 * 4 + 4 * 4 + 4);
-        // v8：path_table_off @ 12+22*4+6*4 = 124；path_table_len @ 128。
-        int PathTableOff => (int)ReadU32(12 + 22 * 4 + 6 * 4);
-        int PathTableLen => (int)ReadU32(12 + 22 * 4 + 6 * 4 + 4);
+
+        // 三 arena header offset。20 列 col_offset 之后：mesh(2), clip(2), path(2) 各 off+len。
+        //   v10：text_arena 已删，arena header 由 8 项缩为 6 项。
+        int MeshArenaOff => (int)ReadU32(12 + 20 * 4);
+        int MeshArenaLen => (int)ReadU32(12 + 20 * 4 + 4);
+        int ClipTableOff => (int)ReadU32(12 + 20 * 4 + 2 * 4);
+        int ClipTableLen => (int)ReadU32(12 + 20 * 4 + 2 * 4 + 4);
+        int PathTableOff => (int)ReadU32(12 + 20 * 4 + 4 * 4);
+        int PathTableLen => (int)ReadU32(12 + 20 * 4 + 4 * 4 + 4);
 
         public uint NodeId(int i) => ReadU32(ColOff(0) + i * 4);
         public int ParentId(int i) => (int)ReadU32(ColOff(1) + i * 4);
@@ -74,28 +69,31 @@ namespace LoomGUI
         public float Mtx(int i) => ReadF32(ColOff(10) + i * 4);
         public float Mty(int i) => ReadF32(ColOff(11) + i * 4);
         public byte PayloadKind(int i) => _buf[ColOff(12) + i];
-        /// v8：change_level（u8 列，ColOff(20) + i）。0=Skip 1=Header 2=Full。MirrorPool 三分支用。
-        public byte ChangeLevel(int i) => _buf[ColOff(20) + i];
         uint MeshOff(int i) => ReadU32(ColOff(13) + i * 4);
         uint MeshLen(int i) => ReadU32(ColOff(14) + i * 4);
-        public uint TextOff(int i) => ReadU32(ColOff(15) + i * 4);
-        public uint TextLen(int i) => ReadU32(ColOff(16) + i * 4);
-        /// v7：第 18 列 path_idx（u32）。Mesh→path 表 1-based 索引（0=纯色无图），Text=0（kind 只剩 1=Mesh/2=Text）。
-        /// MirrorPool 读 path_idx → ReadPath(idx) 取 path → LoomStage.GetSprite(path) 查 Sprite。
-        public uint PathIdx(int i) => ReadU32(ColOff(17) + i * 4);
-        /// 节点 i 的 program（u8 列，ColOff(18) + i）。0=img/无图 Container，1=Text，2=Container+bg-image，3=filter无bg-image，4=filter+bg-image。
-        public byte Program(int i) => _buf[ColOff(18) + i];
+        /// v10：path_idx 前移至第 15 列（原第 17 列，删 text_off/text_len 后前移 2）。
+        /// Mesh→path 表 1-based 索引（0=纯色无图）。MirrorPool 读 path_idx → ReadPath(idx) 取 path → 查 Sprite。
+        public uint PathIdx(int i) => ReadU32(ColOff(15) + i * 4);
+        /// 节点 i 的 program（u8 列，ColOff(16) + i）。v10 前移至第 16 列（原第 18 列）。
+        /// 0=img/无图 Container，1=Text（文本现走 mesh 路径，核心产 atlas），2=Container+bg-image，3=filter无bg-image，4=filter+bg-image。
+        public byte Program(int i) => _buf[ColOff(16) + i];
 
-        /// 节点 i 的 color_matrix（[f32;20]，ColOff(19) + i*80）。program=3/4 节点填矩阵，其余全零。
+        /// 节点 i 的 color_matrix（[f32;20]，ColOff(17) + i*80）。v10 前移至第 17 列（原第 19 列）。
+        /// program=3/4 节点填矩阵，其余全零。
         /// 拆 5 个 Vector4 供 MPB SetVector：_CF0..3（矩阵行）+ _CFOff（offset）。
         public float[] ColorMatrix(int i) {
-            int off = ColOff(19) + i * 80;
+            int off = ColOff(17) + i * 80;
             float[] m = new float[20];
             for (int j = 0; j < 20; j++) {
                 m[j] = BitConverter.ToSingle(_buf, off + j * 4);
             }
             return m;
         }
+
+        /// v10：change_level 前移至第 18 列（原第 20 列）。0=Skip 1=Header 2=Full。MirrorPool 三分支用。
+        public byte ChangeLevel(int i) => _buf[ColOff(18) + i];
+        /// v10：reuse_key 前移至第 19 列（原第 21 列）。0=无复用（按 node_id），>0=按 reuse_key 复用 GO。
+        public uint ReuseKey(int i) => ReadU32(ColOff(19) + i * 4);
 
         /// 判断节点 i 是否为纯平移（identity 2×2 部分）—— epsilon 1e-6 对齐 Rust。
         public bool IsPureTranslation(int i) =>
@@ -132,7 +130,7 @@ namespace LoomGUI
 
         /// clip 表 entry 数（context>0 入表）。无 mask scene 恒为 0。
         /// clip 表段布局：clip_count(u32) + entries[count × {ctx,x,y,w,h}]。
-        /// clip_count(u32) 在 ClipTableOff 处；clip_table_len(header @116) 含 clip_count 本身。
+        /// clip_count(u32) 在 ClipTableOff 处；clip_table_len 含 clip_count 本身。
         public int ClipCount => ClipTableLen >= 4 ? (int)ReadU32(ClipTableOff) : 0;
 
         /// 读某 clip context 的 design rect（绝对，y-down）。entry 布局：ctx,x,y,w,h 各 4B（20B/entry）。
@@ -158,7 +156,7 @@ namespace LoomGUI
             return false;
         }
 
-        /// 读节点 i 的 mesh（仅 payload_kind==1 时调用）。
+        /// 读节点 i 的 mesh（仅 payload_kind==1 时调用）。v10：所有渲染节点（含 text）统一走 mesh_arena。
         /// mesh arena 段布局：vert_count(u32) idx_count(u32) verts[vc×2 f32] uvs[vc×2 f32]
         ///               colors[vc×4 f32] indices[idx_count u32]。
         /// 返回的 MeshSegment 持有 verts/uvs/colors/indices 数组的拷贝。
@@ -184,51 +182,8 @@ namespace LoomGUI
             return seg;
         }
 
-        /// 读节点 i 的 text 段（仅 payload_kind==2 时调用）。镜像 Rust blob.rs text_arena 段布局。
-        /// per-node 段布局（little-endian）：
-        ///   family_len:u32 | family_bytes[family_len] | font_size:u32 | color:f32×4 | glyph_count:u32
-        ///   | glyphs[count × { codepoint:u32, pen_x:f32, pen_y:f32 }]  (12B/glyph)
-        /// family：UTF-8 解码；len=0 → null（调用方 fallback defaultFont）。
-        /// pen_x/pen_y 已 GO-local（layout-rect 相对；节点绝对位在 world matrix m_tx/m_ty，pen 是相对节点原点的偏移，勿与 m_tx/m_ty 叠加）；
-        /// pen_y = line.baseline（绝对 y，layout.rs:43 已含行偏移 line_y；同行同值）。Unity 不 re-base、不用 advance。
-        public void ReadText(int i, out string family, out int fontSize, out Color color, out GlyphData[] glyphs)
-        {
-            int p = TextArenaOff + (int)TextOff(i);
-            int famLen = (int)ReadU32(p); p += 4;
-            family = famLen > 0 ? Encoding.UTF8.GetString(_buf, p, famLen) : null;
-            p += famLen;
-            fontSize = (int)ReadU32(p); p += 4;
-            float r = ReadF32(p); p += 4;
-            float g = ReadF32(p); p += 4;
-            float b = ReadF32(p); p += 4;
-            float a = ReadF32(p); p += 4;
-            color = new Color(r, g, b, a);
-            int count = (int)ReadU32(p); p += 4;
-            glyphs = new GlyphData[count];
-            for (int k = 0; k < count; k++)
-            {
-                uint cp = ReadU32(p); p += 4;
-                float px = ReadF32(p); p += 4;
-                float py = ReadF32(p); p += 4;
-                glyphs[k] = new GlyphData(cp, px, py);
-            }
-        }
-
         uint ReadU32(int o) => BitConverter.ToUInt32(_buf, o);
         float ReadF32(int o) => BitConverter.ToSingle(_buf, o);
-    }
-
-    /// 单 glyph 笔位（GO-local 绝对 design，y-down）。codepoint 为 Unicode 标量值（传 GetCharacterInfo
-    /// 前 cast char；BMP 外暂不支持）。
-    public readonly struct GlyphData
-    {
-        public readonly uint Codepoint;
-        public readonly float PenX;
-        public readonly float PenY;
-        public GlyphData(uint codepoint, float penX, float penY)
-        {
-            Codepoint = codepoint; PenX = penX; PenY = penY;
-        }
     }
 
     /// ReadMesh 返回的 mesh 数据拷贝。verts/uvs/colors 长度 == vertCount，Idx 长度 == idxCount。
