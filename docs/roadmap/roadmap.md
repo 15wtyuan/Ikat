@@ -105,8 +105,8 @@ LoomGUI 是 HTML/CSS 的**子集**，浏览器/open-design 这类外部编辑器
 
 | v1.x | 项 | why | 状态 |
 |---|---|---|---|
-| v1.6 | **核心自绘字体（地基）** | 推翻"文本 mesh 后端光栅化"例外：ttf-parser outline + ab_glyph 光栅 + etagere 图集（CJK 增量货架/多页/fallback）；FFI blob 升版带 UV + atlas 纹理通道；后端降为贴图上传、删 Unity 动态字体。**根治坑 113/119，重开 kerning，text 可合批，补齐跨引擎一致地基**。见 rmlui-research §1 | 待开 |
-| v1.7 | **富文本（inline layout / IFC）** | 聊天/物品描述必备。line box + fragment 树 + 拆行 + per-glyph 多色多字号（建在 v1.6 核心 atlas 顶点色上）+ 图文混排 + 超链接。含 baseline 精确化。内部 NodeKind，不暴露标签 | 待开 |
+| v1.6 | **核心自绘字体（地基）** | 推翻"文本 mesh 后端光栅化"例外：ttf-parser outline + ab_glyph 光栅 + etagere 图集（CJK 增量货架/多页）；FFI blob v10 带 atlas 纹理通道；后端降为贴图上传、删 Unity 动态字体。**根治坑 113/119，重开 kerning，text 可合批，补齐跨引擎一致地基**。见 rmlui-research §1。**fontdb fallback 链未做（推后）** | ✅ 代码合并（T1-T9，待家里机 PlayMode 验收） |
+| v1.7 | **富文本（简化 inline flow）** | 聊天/物品描述必备。**简化 inline flow（非完整 CSS IFC）+ `display:block` desugar**——AI 写 CSS 标准 HTML，打包器展开成 flex+rich 叶（保 div=flex 铁律）。per-run 多色多字号（建在 v1.6 atlas 顶点色）+ 行内图（含 emoji-图片）+ 超链接（fragment 矩形命中）+ 下划线删除线。measure/build 分离守纯 measure 不变量。字体效果推 v1.8、彩色字形 emoji 推 v1.8+。spec 见 `docs/superpowers/specs/2026-07-07-v1.7-rich-text-design.md` | 进行中（spec 定稿） |
 | v1.8 | **文字效果 + 装饰视觉** | 文字：下划线/删除线/阴影/渐变字体（纯几何）+ 描边/发光/blur（核心字形位图 CPU 后处理，v1.6 阶段 c）。装饰：**彩色边框（修 border_color 死字段）**/2 色顶点渐变/sepia 补全/圆角 SDF 裁剪/box-shadow 几何近似/九宫格退化按比例分+接缝取整。AI 必写 gradient/border。见 rmlui-research §2/§3 | 待开 |
 | v1.9 | **TextInput / IME（光标/选区/composing）** | 登录/搜索/聊天输入必备。IME 最重。建在 v1.6 精确 metric（kerning 已开）之上 | 待开 |
 | v1.10 | **动画 + 滚动手感增强** | **修单矩阵覆盖 bug**（2D 三通道 lerp）+ @keyframes 时间轴 + 补 ease（bounce/elastic/circular/sine…+统一 In/Out 推导）+ iteration/alternate + 颜色 linear 空间插值 + transition transform 通道补全 + 滚轮 smoothscroll + 触摸速度采样（含 scroll padding/content_size 补偿/drag 真实 dt）。见 rmlui-research §4 | 待开 |
