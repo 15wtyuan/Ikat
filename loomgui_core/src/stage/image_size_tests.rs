@@ -215,6 +215,33 @@ fn reload_package_overwrites_size_entry() {
     );
 }
 
+/// 重 load 同名包：旧包独有 path（新包没有）应从尺寸表清除（避免悬空残留）。
+/// 覆盖 load_package 替换同名包时先清前次包 manifest 条目的逻辑。
+#[test]
+fn reload_package_clears_obsolete_size_entries() {
+    let pkg_v1 = make_pkg_with_image_size("icons/old.png", 10, 20);
+    let pkg_v2 = make_pkg_with_image_size("icons/new.png", 30, 40);
+    let mut s = Stage::new_for_test();
+    s.load_package("bag", &pkg_v1).unwrap();
+    assert_eq!(
+        s.image_size("icons/old.png"),
+        Some((10, 20)),
+        "v1 的 path 进表"
+    );
+    // v2 manifest 只有 new.png（无 old.png）→ 替换后 old.png 应清除
+    s.load_package("bag", &pkg_v2).unwrap();
+    assert_eq!(
+        s.image_size("icons/old.png"),
+        None,
+        "v2 没有 old.png → 旧 path 清除（不悬空残留）"
+    );
+    assert_eq!(
+        s.image_size("icons/new.png"),
+        Some((30, 40)),
+        "v2 的 path 进表"
+    );
+}
+
 /// reuse_key 是运行时字段（不进 pkg），driver 给 slot 节点设。
 /// 0=无复用（默认），>0=按 reuse_key 复用 GO。
 #[test]

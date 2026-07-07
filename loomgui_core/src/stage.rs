@@ -94,13 +94,20 @@ impl Stage {
     ///
     /// **图尺寸**：同步把本包 `asset_manifest` 的 `path → (w,h)` 合并进 `self.image_sizes`
     /// （多包共存，path 全局唯一）。`solve`/`build_render_nodes` 查此表算 Image intrinsic +
-    /// 九宫格 UV。重复 load 同名包 → 前次加载的包的 path 条目被新包覆盖（path 全局唯一，语义安全）。
+    /// 九宫格 UV。重复 load 同名包 → 先清前次包的 path 条目再插新包（避免被移除的资源 path 悬空残留）。
     pub fn load_package(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
         let mut pkg = crate::asset::read_package(bytes).map_err(|e| e.to_string())?;
         pkg.name = name.to_string(); // read_package 填空串，这里覆盖为真实包名
-                                     // 把本包 manifest 的 path → (w,h) 合并进全局尺寸表。
-                                     // 重复 load 同名包前，先清前次加载的包的 path 条目（避免 path 残留——虽然 path 全局唯一，
-                                     // 但若前次包有 path 而新包没有，条目会悬空）。简单实现：直接 extend 覆盖（同 path 后写赢）。
+
+        // 替换同名包前，先清前次包的 image_sizes 条目：path 全局唯一，但若前次包有 path
+        // 而新包没有（资源被移除），不清则旧 path 悬空残留 → 后续引用拿到过期尺寸。
+        if let Some(old) = self.packages.get(name) {
+            let stale: Vec<String> = old.asset_manifest.iter().map(|e| e.path.clone()).collect();
+            for path in &stale {
+                self.image_sizes.remove(path);
+            }
+        }
+        // 把本包 manifest 的 path → (w,h) 合并进全局尺寸表（同 path 后写赢，跨包覆盖也安全）。
         for entry in &pkg.asset_manifest {
             self.image_sizes
                 .insert(entry.path.clone(), (entry.w, entry.h));

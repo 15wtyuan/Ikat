@@ -873,9 +873,11 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 
 **根因**：URP/Lit shader 用 keyword `_SURFACE_TYPE_TRANSPARENT`（Lit.shader:125）+ property `_Surface`（:48）决定 variant/队列。`_Surface=0`（Opaque 默认）即使 `renderQueue=3000`，shader 走 Opaque variant → 在 Transparent 之前画 → 被 UI（Transparent）覆盖。`renderQueue` 只设队列，`_Surface` 设 shader Blend/variant——两者要配套。
 
-**解决**：CacheRenderers 加 `mat.SetInt("_Surface",1)` + `mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT")` + ZWrite Off（三件套）。`_ZWrite` 也是 URP/Lit property（:56 `ZWrite[_ZWrite]`）。
+**解决**：URP/Lit 切 Transparent 三件套：`renderQueue=3000` + `SetInt("_Surface",1)` + `EnableKeyword("_SURFACE_TYPE_TRANSPARENT")` + `SetInt("_ZWrite",0)`。`_ZWrite` 也是 URP/Lit property（:56 `ZWrite[_ZWrite]`）。
 
-**教训**：URP material 切 Transparent 不只 `renderQueue`——要 `_Surface` + keyword 配套（缺 keyword 不生效）。**注**：character 仍看不到（另有根因，待续）——_Surface 三件套是必要（Opaque 异常）非充分。
+**教训**：URP material 切 Transparent 不只 `renderQueue`——要 `_Surface` + keyword 配套（缺 keyword 不生效）。
+
+**ownership 边界（v1.5 后）**：材质归 caller GO，框架不自动碰——早期 `CacheRenderers` 在 `Bind` 时直接改 `sharedMaterial`（污染资产 + 影响所有引用者），已废弃。现框架提供 `NativeHostManager.ConfigureTransparentMaterials(go)` / `UnconfigureTransparentMaterials(go)` 静态工具：前者 clone sharedMaterial + 设三件套 + 挂回 `renderer.material`（instance，不污染资产），clone name 追加 `" (LoomNH)"` 标记；后者据后缀销毁 clone。caller 在 `Instantiate` 后调 Configure、销毁 GO 前调 Unconfigure——clone 的 ownership 走 caller，框架不跟踪、`Bind` 不自动调。原因：clone 挂 user GO 的 renderer，框架销毁 clone 会破坏 caller 还在用的 GO（renderer.material 槽变 destroyed），材质不像 wrapper GO 能 reparent 隔离——必须随 user GO 归 caller。
 
 ### 坑 130：orthographic 相机 3D GO scale z 大 → near clip（坑 127 demo 验收）
 

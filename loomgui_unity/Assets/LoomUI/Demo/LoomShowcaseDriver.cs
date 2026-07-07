@@ -357,6 +357,8 @@ namespace LoomGUI
                 return;
             }
             _nativeModelInstance = Instantiate(_nativeModel);
+            // 配 NativeHost GO 材质为 URP Transparent（同 _characterInstance 路径，坑 129）。
+            NativeHostManager.ConfigureTransparentMaterials(_nativeModelInstance);
             _nativeModelInstance.transform.localScale = _nativeScale;
             _nativeModelInstance.SetActive(false);
         }
@@ -391,6 +393,10 @@ namespace LoomGUI
                 return;
             }
             _characterInstance = Instantiate(_characterPrefab);
+            // 配 NativeHost GO 材质为 URP Transparent（坑 129：clone sharedMaterial + _Surface/keyword/ZWrite）。
+            // 框架提供工具但 caller 调——材质 ownership 归 caller，框架不自动接管（Bind 不碰材质）。
+            // 角色子树含粒子（Instantiate 挂角色下），一次 Configure 遍历全配；OnDestroy 时 Unconfigure 销毁 clone。
+            NativeHostManager.ConfigureTransparentMaterials(_characterInstance);
             // z 固定 1（正交相机 z 缩放只放 depth 厚度，放大了 near clip 切——z 不暴露给用户）
             _characterInstance.transform.localScale = new Vector3(_characterScale.x, _characterScale.y, 1);
             // localPosition 由 ApplyCharacterAnchor 算（anchor + _characterLocalOffset 微调），不在这里设。
@@ -913,6 +919,16 @@ namespace LoomGUI
             }
             // 角色 anchor：nh-stage layout 完成后（rect.h>0）算 localPosition（首帧 layout 未算，下帧补）。
             if (_characterInstance != null && !_anchorApplied) ApplyCharacterAnchor();
+        }
+
+        // 销毁角色实例前，销毁 ConfigureTransparentMaterials clone 的材质（坑 129 配的 Transparent clone）。
+        // caller 管 clone ownership——框架提供 Unconfigure 工具但不自动调。
+        void OnDestroy()
+        {
+            if (_characterInstance != null)
+                NativeHostManager.UnconfigureTransparentMaterials(_characterInstance);
+            if (_nativeModelInstance != null)
+                NativeHostManager.UnconfigureTransparentMaterials(_nativeModelInstance);
         }
 
         // 0-255 RGB → 归一化 [0,1] RGBA float[4]（alpha=1）。Rust tween 直接写 anim 通道，须与 style 归一化一致。

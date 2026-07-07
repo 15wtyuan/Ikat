@@ -49,7 +49,8 @@ namespace LoomGUI
             // 用户 GO 挂 wrapper。
             go.transform.SetParent(wrapper.transform, false);
             SetLayerRecursive(go, _root.gameObject.layer);
-            CacheRenderers(go);
+            // 材质 Transparent 配置由 caller 显式调 ConfigureTransparentMaterials（不在此自动碰——
+            // 材质归 caller，框架不接管 GO 生命周期/派生资产 ownership）。
             _bindings[nodeId] = go;
             _wrappers[nodeId] = wrapper;
         }
@@ -61,29 +62,60 @@ namespace LoomGUI
                 t.gameObject.layer = layer;
         }
 
-        /// MeshRenderer/SkinnedMeshRenderer/ParticleSystemRenderer material renderQueue=3000
-        /// （Transparent，跟 UI 同队列，sortingOrder 跨 UI/GO 统一排序）。改 sharedMaterial（非 clone）。
-        static void CacheRenderers(GameObject go)
+        /// clone 标记：Configure 给 clone 材质 name 追加此后缀，Unconfigure 据此识别销毁。
+        const string CLONE_SUFFIX = " (LoomNH)";
+
+        /// 遍历 go 子树 Mesh/SkinnedMesh/Particle Renderer：clone sharedMaterial + 设 URP Transparent
+        /// （坑 129：renderQueue=3000 + _Surface=1 + _SURFACE_TYPE_TRANSPARENT keyword + _ZWrite=0），
+        /// 挂回 renderer.material（instance，不污染 sharedMaterial 资产）。clone 的 name 追加 CLONE_SUFFIX。
+        /// 幂等：renderer.material 已带后缀则跳过（重复调不叠加 clone）。caller 在 Instantiate 后调一次。
+        /// GO 须为 prefab 实例（caller 保证 sharedMaterial 是资产引用，clone 不影响其他实例）。
+        public static void ConfigureTransparentMaterials(GameObject go)
         {
+            if (go == null) return;
             foreach (var r in go.GetComponentsInChildren<Renderer>(true))
             {
                 if (r == null) continue;
-            // ParticleSystemRenderer 也纳入：粒子 material renderQueue 统一 3000（Transparent），
-            // 否则粒子与 UI mesh 队列不一致 → sortingOrder 跨 UI/GO 排序错乱。
-            if (r is MeshRenderer || r is SkinnedMeshRenderer || r is ParticleSystemRenderer)
+                // ParticleSystemRenderer 同纳入：粒子队列须与 UI 一致（3000），否则 sortingOrder 跨 UI/GO 错乱。
+                if (!(r is MeshRenderer || r is SkinnedMeshRenderer || r is ParticleSystemRenderer))
+                    continue;
+                var src = r.sharedMaterials;
+                if (src.Length == 0) continue;
+                // 幂等：首个 material 已带后缀 → 已配过，跳过（假设同 renderer 所有槽一起配）。
+                if (src[0] != null && src[0].name.EndsWith(CLONE_SUFFIX, System.StringComparison.Ordinal))
+                    continue;
+                var cloned = new Material[src.Length];
+                for (int i = 0; i < src.Length; i++)
                 {
-                    foreach (var mat in r.sharedMaterials)
+                    var m = src[i];
+                    if (m == null) { cloned[i] = null; continue; }
+                    var c = new Material(m) { name = m.name + CLONE_SUFFIX };
+                    c.renderQueue = 3000;
+                    c.SetInt("_Surface", 1);
+                    c.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                    c.SetInt("_ZWrite", 0);
+                    cloned[i] = c;
+                }
+                r.materials = cloned;  // 设 instance materials（clone 不污染 sharedMaterial 资产）
+            }
+        }
+
+        /// 遍历同一 go 子树，销毁 name 含 CLONE_SUFFIX 的 instance material（Configure 配的 clone）。
+        /// 与 Configure 对称，传同一 go。caller 在销毁 GO 前调一次（之后 GO 即销毁，不还原 sharedMaterial）。
+        public static void UnconfigureTransparentMaterials(GameObject go)
+        {
+            if (go == null) return;
+            foreach (var r in go.GetComponentsInChildren<Renderer>(true))
+            {
+                if (r == null) continue;
+                // 遍历 instance materials（r.materials getter 返回当前 instance，含 clone）。
+                foreach (var m in r.materials)
+                {
+                    if (m == null) continue;
+                    if (m.name.EndsWith(CLONE_SUFFIX, System.StringComparison.Ordinal))
                     {
-                        if (mat == null) continue;
-                        if (mat.renderQueue != 3000) mat.renderQueue = 3000;
-                        // URP/Lit 切 Transparent：_Surface=1 + keyword（缺 keyword 不生效，shader 用
-                        // _SURFACE_TYPE_TRANSPARENT variant 决定 Blend/队列）。默认 _Surface=0（Opaque）
-                        // 即使 renderQueue=3000，shader 仍 Opaque variant → 在 UI（Transparent）之前画，
-                        // 被 UI 覆盖看不到。
-                        mat.SetInt("_Surface", 1);
-                        mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-                        // ZWrite Off：3D GO/粒子不写 depth（同 UI shader ZWrite Off），纯 sortingOrder 排序。
-                        mat.SetInt("_ZWrite", 0);
+                        if (Application.isPlaying) Object.Destroy(m);
+                        else Object.DestroyImmediate(m);
                     }
                 }
             }
@@ -110,8 +142,16 @@ namespace LoomGUI
 
         public void Clear()
         {
+            // 销毁 wrapper 前先把 user GO reparent 出来（同 Unbind）——Destroy 递归销毁子树，
+            // 不 reparent 则 user GO（调用方跨页复用实例，如 driver 缓存 _characterInstance）被连带销毁。
             foreach (var kv in _bindings)
-                if (kv.Value != null) kv.Value.SetActive(false);
+            {
+                if (kv.Value != null)
+                {
+                    kv.Value.SetActive(false);
+                    kv.Value.transform.SetParent(_container.transform, false);
+                }
+            }
             _bindings.Clear();
             foreach (var kv in _wrappers)
             {
@@ -169,7 +209,9 @@ namespace LoomGUI
                 // 用户 GO sortingOrder = 节点 sort_key
                 uint sk = 0;
                 Native.loomgui_stage_get_node_sort_key(stage, id, &sk);
-                foreach (var r in go.GetComponentsInChildren<Renderer>())
+                // includeInactive=true：刚恢复显示那帧 go.activeSelf 仍为 false（下一行才 SetActive(true)），
+                // 不含 inactive 子节点则其 Renderer sortingOrder 漏更新一帧。
+                foreach (var r in go.GetComponentsInChildren<Renderer>(true))
                     if (r != null) r.sortingOrder = (int)sk;
                 if (!go.activeSelf) go.SetActive(true);
             }
