@@ -4,22 +4,20 @@
 #[allow(unused_imports)] // BlendMode/MaskContext/NodePayload 仅测试 helper 经 super::* 用。
 use loomgui_core::render::node::{BlendMode, ChangeLevel, MaskContext, NodePayload, RenderNode};
 use loomgui_core::render::FrameData;
-#[allow(unused_imports)] // Glyph/GlyphRun/Line/TextLayout 仅 text round-trip 测试 helper 用。
-use loomgui_core::text::layout::{Glyph, GlyphRun, Line, TextLayout};
 use loomgui_core::transform;
 
 /// magic = "LOOM" little-endian。
 const MAGIC: u32 = 0x4D4F4F4C;
-const VERSION: u32 = 9; // v9：加 reuse_key 列（第 22 列）
+const VERSION: u32 = 10; // v10：text 塌进 mesh_arena，删 text_off/text_len 列 + text_arena
 
 /// 入口：FrameData（nodes + clip 表）→ blob 字节。
 pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     let nodes = &frame.nodes;
     let clips = &frame.clips;
     let n = nodes.len();
-    // 列名 + 每元素字节数。v9：加 reuse_key 列（u32，第 22 列）。
-    //   path_idx 占 4B（path 表 1-based 索引，0=纯色无图），22 列（v9 加 reuse_key）。
-    //   v6：加 color_matrix 列（[f32;20]，80B，第 20 列）——ColorFilter。
+    // 列名 + 每元素字节数。v10：删 text_off/text_len 列（22→20 列），text 字形走 mesh_arena。
+    //   path_idx 占 4B（path 表 1-based 索引，0=纯色无图），20 列。
+    //   v6：加 color_matrix 列（[f32;20]，80B，原第 20 列→现第 17 列）——ColorFilter。
     let columns: &[(&str, usize)] = &[
         ("node_id", 4),
         ("parent_id", 4),
@@ -36,30 +34,26 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
         ("payload_kind", 1),
         ("mesh_off", 4),
         ("mesh_len", 4),
-        ("text_off", 4),
-        ("text_len", 4),
         ("path_idx", 4), // v7：path 表 1-based 索引（0=纯色无图）
         ("program", 1),
-        ("color_matrix", 80), // [f32;20] × 4 字节，第 20 列
-        ("change_level", 1),  // v8：帧级变更级别（u8，0=Skip 1=Header 2=Full），第 21 列
-        ("reuse_key", 4),     // v9：渲染复用键（虚拟列表 slot key），第 22 列
+        ("color_matrix", 80), // [f32;20] × 4 字节，现第 17 列
+        ("change_level", 1),  // v8：帧级变更级别（u8，0=Skip 1=Header 2=Full），现第 18 列
+        ("reuse_key", 4),     // v9：渲染复用键（虚拟列表 slot key），现第 19 列
     ];
-    let num_col_offsets = columns.len(); // 22
+    let num_col_offsets = columns.len(); // 20
     let header_len = 3 * 4                          // magic, version, node_count
-        + num_col_offsets * 4                       // 列 offset（21）
+        + num_col_offsets * 4                       // 列 offset（20）
         + 2 * 4                                     // mesh_arena off + len
-        + 2 * 4                                     // text_arena off + len
-        + 2 * 4                                     // clip_table off + len
+        + 2 * 4                                     // clip_table off + len（v10：text_arena 已删）
         + 2 * 4; // path_table off + len（v7 新增）
 
     // 先把 mesh arena + text arena + per-node 列值算出来
     // （mesh/text arena 决定列值里的 mesh_off/len 与 text_off/len）。
     let mut mesh_arena: Vec<u8> = Vec::new();
-    let mut text_arena: Vec<u8> = Vec::new(); // Text 节点 layout（§4.1）
-                                              // v7：path string table arena——per-frame 归一化图片 path 表（§5.2）。
-                                              //   layout: path_count:u32 后跟 count × {path_len:u32, path_bytes:u8[path_len]}。
-                                              //   path_idx（列值）1-based 索引此表：idx=0=纯色无图，idx>0 = 第 idx 条 path。
-                                              //   build 期间用 path_index map 去重 intern（同 path 复用同一 idx，节省 arena）。
+    // v7：path string table arena——per-frame 归一化图片 path 表（§5.2）。
+    //   layout: path_count:u32 后跟 count × {path_len:u32, path_bytes:u8[path_len]}。
+    //   path_idx（列值）1-based 索引此表：idx=0=纯色无图，idx>0 = 第 idx 条 path。
+    //   build 期间用 path_index map 去重 intern（同 path 复用同一 idx，节省 arena）。
     let mut path_table_buf: Vec<u8> = Vec::new();
     path_table_buf.extend_from_slice(&0u32.to_le_bytes()); // path_count 占位，build 末回填
     let mut path_index: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
@@ -78,8 +72,6 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     let mut col_kind = Vec::<u8>::new();
     let mut col_mesh_off = Vec::<u8>::new();
     let mut col_mesh_len = Vec::<u8>::new();
-    let mut col_text_off = Vec::<u8>::new();
-    let mut col_text_len = Vec::<u8>::new();
     let mut col_path_idx = Vec::<u8>::new(); // v7：path_idx 列
     let mut col_program = Vec::<u8>::new();
     let mut col_color_matrix = Vec::<u8>::new();
@@ -100,9 +92,6 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
         col_md.extend_from_slice(&rn.world_matrix[3].to_le_bytes());
         col_mtx.extend_from_slice(&rn.world_matrix[4].to_le_bytes());
         col_mty.extend_from_slice(&rn.world_matrix[5].to_le_bytes());
-
-        // text_off/text_len 每节点都写——Text 节点指向 text_arena 内实段，
-        // 其余节点占位 0（match 各 arm 内 push 进 col_text_off/len）。
 
         col_change_level.push(rn.change_level as u8);
         col_reuse_key.extend_from_slice(&rn.reuse_key.to_le_bytes());
@@ -168,62 +157,6 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
                     col_mesh_off.extend_from_slice(&0u32.to_le_bytes());
                     col_mesh_len.extend_from_slice(&0u32.to_le_bytes());
                 }
-                // Mesh 节点无 text 段：text_off/len 占位 0。
-                col_text_off.extend_from_slice(&0u32.to_le_bytes());
-                col_text_len.extend_from_slice(&0u32.to_le_bytes());
-            }
-            NodePayload::Text {
-                layout,
-                font_size,
-                color,
-                program,
-                family,
-            } => {
-                col_kind.push(2);
-                col_program.push(*program as u8);
-                for _ in 0..20 {
-                    col_color_matrix.extend_from_slice(&0f32.to_le_bytes());
-                }
-                col_path_idx.extend_from_slice(&0u32.to_le_bytes());
-                col_mesh_off.extend_from_slice(&0u32.to_le_bytes());
-                col_mesh_len.extend_from_slice(&0u32.to_le_bytes());
-
-                if write_arena {
-                    let seg_off = text_arena.len() as u32;
-                    // family：length-prefixed UTF-8。None/空 → len=0（后端 fallback defaultFont）。
-                    let family_bytes = family.as_deref().unwrap_or("").as_bytes();
-                    text_arena.extend_from_slice(&(family_bytes.len() as u32).to_le_bytes());
-                    text_arena.extend_from_slice(family_bytes);
-                    text_arena.extend_from_slice(&(*font_size as u32).to_le_bytes());
-                    for &c in color {
-                        text_arena.extend_from_slice(&c.to_le_bytes());
-                    }
-                    let glyphs_start = text_arena.len();
-                    text_arena.extend_from_slice(&0u32.to_le_bytes()); // glyph_count 占位
-                    let mut count = 0u32;
-                    for line in &layout.lines {
-                        // pen_y = line.baseline（绝对 y，layout.rs:43 已含行偏移 line_y）。
-                        // 勿叠加 line.y（= line_y）——否则每行多一个行高，行距翻倍（多行才暴露）。
-                        let pen_y = line.baseline;
-                        for run in &line.runs {
-                            for g in &run.glyphs {
-                                text_arena.extend_from_slice(&g.codepoint.to_le_bytes());
-                                text_arena.extend_from_slice(&g.x.to_le_bytes());
-                                text_arena.extend_from_slice(&pen_y.to_le_bytes());
-                                count += 1;
-                            }
-                        }
-                    }
-                    text_arena[glyphs_start..glyphs_start + 4]
-                        .copy_from_slice(&count.to_le_bytes());
-                    let seg_len = text_arena.len() as u32 - seg_off;
-                    col_text_off.extend_from_slice(&seg_off.to_le_bytes());
-                    col_text_len.extend_from_slice(&seg_len.to_le_bytes());
-                } else {
-                    // SKIP/HEADER：不写 text arena，off/len 占位 0。
-                    col_text_off.extend_from_slice(&0u32.to_le_bytes());
-                    col_text_len.extend_from_slice(&0u32.to_le_bytes());
-                }
             }
         }
     }
@@ -244,8 +177,6 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
         ("payload_kind", &col_kind),
         ("mesh_off", &col_mesh_off),
         ("mesh_len", &col_mesh_len),
-        ("text_off", &col_text_off),
-        ("text_len", &col_text_len),
         ("path_idx", &col_path_idx), // v7：path 表 1-based 索引
         ("program", &col_program),
         ("color_matrix", &col_color_matrix),
@@ -260,12 +191,11 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
         col_offsets.push(off as u32);
         off += buf.len();
     }
-    // 三 arena header offset。text_arena 紧跟 mesh_arena；无 clip 时 clip 表仅 clip_count(u32)=0。
+    // 两 arena header offset（v10：text_arena 已删）。无 clip 时 clip 表仅 clip_count(u32)=0。
+    // mesh_arena → clip_table → path_table（顺序布局）。
     let mesh_arena_off = off as u32;
     let mesh_arena_len = mesh_arena.len() as u32;
-    let text_arena_off = mesh_arena_off + mesh_arena_len;
-    let text_arena_len = text_arena.len() as u32; // Text 节点 layout 序列化进 text_arena
-    let clip_table_off = text_arena_off + text_arena_len;
+    let clip_table_off = mesh_arena_off + mesh_arena_len;
     // clip 表 = clip_count:u32 + entries[count × {context_id:u32, x,y,w,h:f32}]（20B/entry）。
     // 只含 mask_context>0 的层级（context==0 = 无 clip，永不入表）。§4.4 / §4.1。
     let clip_count: u32 = clips.len() as u32;
@@ -297,8 +227,6 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     }
     out.extend_from_slice(&mesh_arena_off.to_le_bytes());
     out.extend_from_slice(&mesh_arena_len.to_le_bytes());
-    out.extend_from_slice(&text_arena_off.to_le_bytes());
-    out.extend_from_slice(&text_arena_len.to_le_bytes());
     out.extend_from_slice(&clip_table_off.to_le_bytes());
     out.extend_from_slice(&clip_table_len.to_le_bytes());
     out.extend_from_slice(&path_table_off.to_le_bytes()); // v7：path_table off + len
@@ -307,7 +235,6 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
         out.extend_from_slice(buf);
     }
     out.extend_from_slice(&mesh_arena);
-    out.extend_from_slice(&text_arena);
     // clip 表：clip_count + entries。
     out.extend_from_slice(&clip_table_buf);
     // v7：path string table arena（blob 末段）。

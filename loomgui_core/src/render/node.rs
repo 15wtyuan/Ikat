@@ -36,12 +36,12 @@ pub enum ChangeLevel {
 
 /// 节点渲染载荷。
 ///
-/// - `Mesh`：quad 几何（背景色块 / 图片）。`image_path`=None 表示纯色（无贴图），
-///   `Some(path)` 为 Image 节点 / bg-image 容器的归一化图片 path（核心不知图集，path 推给
-///   Unity 查 Sprite）。UV 始终 (0,0)-(1,1)（Unity Sprite 自带真实 UV；核心无子区）。
-///   `program`=0 = 纯色/无图 Image shader，2=Container+bg-image 合成，3=filter 无 bg-image，
-///   4=filter+bg-image。
-/// - `Text`：measure_text 产 TextLayout + 颜色。`program`=1 = Text shader。
+/// - `Mesh`：quad 几何（背景色块 / 图片 / 文本字形）。`image_path`=None 表示纯色（无贴图），
+///   `Some(path)` 为 Image 节点 / bg-image 容器的归一化图片 path，或文本的合成 atlas path
+///   `loomgui://font-atlas/f<id>/p<n>`（核心不知图集，path 推给 Unity 查 Sprite/atlas）。
+///   UV 对于 Image/bg 始终 (0,0)-(1,1)（Unity Sprite 自带真实 UV；核心无子区）；
+///   对于 text 为 atlas 内的字形子区 UV。`program`=0 = 纯色/无图 Image shader，
+///   1 = Text shader，2 = Container+bg-image 合成，3 = filter 无 bg-image，4 = filter+bg-image。
 #[derive(Debug, Clone, Serialize)]
 pub enum NodePayload {
     Mesh {
@@ -49,18 +49,9 @@ pub enum NodePayload {
         uvs: Vec<[f32; 2]>,
         colors: Vec<[f32; 4]>,
         indices: Vec<u32>,
-        image_path: Option<String>, // None=纯色，Some=图片 path（核心不知图集）
+        image_path: Option<String>, // None=纯色，Some=图片 path 或合成 atlas path
         program: u32,
         color_matrix: [f32; 20], // ColorFilter 矩阵；program≠3/4 全零
-    },
-    Text {
-        layout: crate::text::layout::TextLayout,
-        font_size: f32,
-        color: [f32; 4],
-        program: u32,
-        /// CSS font-family（None=default）。后端凭此选 Unity Font asset 光栅；
-        /// 核心测量阶段已用它从 FontTable 选字体，这里透传给渲染侧统一。
-        family: Option<String>,
     },
 }
 

@@ -89,19 +89,23 @@ fn payload_str(p: &NodePayload) -> String {
             verts,
             colors,
             image_path,
+            program,
             ..
         } => {
-            let c0 = colors.first().copied().unwrap_or([0.0; 4]);
-            format!(
-                "Mesh v{} path={:?} c0({:.0},{:.0},{:.0},{:.0})",
-                verts.len(),
-                image_path,
-                c0[0] * 255.0,
-                c0[1] * 255.0,
-                c0[2] * 255.0,
-                c0[3]
-            )
+            if *program == 1 {
+                format!("Text g{} path={:?}", verts.len() / 4, image_path)
+            } else {
+                let c0 = colors.first().copied().unwrap_or([0.0; 4]);
+                format!(
+                    "Mesh v{} path={:?} c0({:.0},{:.0},{:.0},{:.0})",
+                    verts.len(),
+                    image_path,
+                    c0[0] * 255.0,
+                    c0[1] * 255.0,
+                    c0[2] * 255.0,
+                    c0[3]
+                )
+            }
         }
-        NodePayload::Text { layout, .. } => format!("Text L{}", layout.lines.len()),
     }
 }

@@ -88,7 +88,6 @@ fn main() {
                     println!();
                 }
             }
-            _ => println!("  (non-mesh)"),
         }
     }
 }

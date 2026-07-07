@@ -50,18 +50,26 @@ fn dump_frame(stage: &mut Stage, label: &str, focus: u32) {
         };
         if is_focus_or_child {
             let pk = match &rn.payload {
-                NodePayload::Mesh { verts, colors, .. } => {
-                    let c0 = colors.first().copied().unwrap_or([0.0; 4]);
-                    format!(
-                        "Mesh v{} c0({:.0},{:.0},{:.0},{:.0})",
-                        verts.len(),
-                        c0[0] * 255.0,
-                        c1(c0),
-                        c2(c0),
-                        c3(c0)
-                    )
+                NodePayload::Mesh {
+                    verts,
+                    colors,
+                    program,
+                    ..
+                } => {
+                    if *program == 1 {
+                        format!("Text g{}", verts.len() / 4)
+                    } else {
+                        let c0 = colors.first().copied().unwrap_or([0.0; 4]);
+                        format!(
+                            "Mesh v{} c0({:.0},{:.0},{:.0},{:.0})",
+                            verts.len(),
+                            c0[0] * 255.0,
+                            c1(c0),
+                            c2(c0),
+                            c3(c0)
+                        )
+                    }
                 }
-                NodePayload::Text { layout, .. } => format!("Text L{}", layout.lines.len()),
             };
             println!(
                 "  n{} wm=({:.2},{:.2},{:.2},{:.2},{:.0},{:.0}) {}",

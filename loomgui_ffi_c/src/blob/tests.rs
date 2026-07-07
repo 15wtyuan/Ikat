@@ -41,18 +41,16 @@ fn mesh_node(id: u32, parent: Option<u32>, x: f32, y: f32, w: f32, h: f32) -> Re
 /// path=None → idx=0；path=Some(p) → idx>0。
 fn mesh_node_with_path(id: u32, path: Option<&str>) -> RenderNode {
     let mut n = mesh_node(id, None, 0.0, 0.0, 5.0, 5.0);
-    if let NodePayload::Mesh { image_path, .. } = &mut n.payload {
-        *image_path = path.map(|s| s.to_string());
-    }
+    let NodePayload::Mesh { image_path, .. } = &mut n.payload;
+    *image_path = path.map(|s| s.to_string());
     n
 }
 
 /// 同 mesh_node 但可指定 program（验 program 列 round-trip；坑 79 bg-image 合成）。
 fn mesh_node_with_program(id: u32, program: u32) -> RenderNode {
     let mut n = mesh_node(id, None, 0.0, 0.0, 5.0, 5.0);
-    if let NodePayload::Mesh { program: p, .. } = &mut n.payload {
-        *p = program;
-    }
+    let NodePayload::Mesh { program: p, .. } = &mut n.payload;
+    *p = program;
     n
 }
 
@@ -152,7 +150,7 @@ fn build_blob_has_magic_and_count() {
     assert_eq!(&blob[0..4], &MAGIC.to_le_bytes());
     let v = u32::from_le_bytes(blob[4..8].try_into().unwrap());
     assert_eq!(v, VERSION);
-    assert_eq!(v, 9, "blob 版本应为 9（v9：加 reuse_key 列）");
+    assert_eq!(v, 10, "blob 版本应为 10（v10：text 塌进 mesh_arena）");
     let n = u32::from_le_bytes(blob[8..12].try_into().unwrap());
     assert_eq!(n, 1);
 }
@@ -189,31 +187,35 @@ fn program_column_round_trips() {
         mesh_node_with_program(2, 0),           // 无图 Container / Image
     ]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 9, "VERSION=9（v9：加 reuse_key 列）");
+    assert_eq!(
+        view.version(),
+        10,
+        "VERSION=10（v10：text 塌进 mesh_arena）"
+    );
     assert_eq!(view.program(0), 2, "Mesh program=2 round-trip");
     assert_eq!(view.program(1), 0, "Mesh program=0 占位");
     assert_eq!(view.program(2), 0, "Mesh program=0 round-trip");
 }
 
-/// §4.1 v9 header：22 col offset + mesh/text/clip/path 四 arena header。
-/// 无 Text 节点时 text_arena 空（len=0），无 clip 时 clip 表仅 4B clip_count=0，
+/// §4.1 v10 header：20 col offsets + mesh/clip/path 三 arena header。
+/// 无 clip 时 clip 表仅 4B clip_count=0，
 /// 无 image_path 时 path table 仅 4B path_count=0。
 #[test]
 fn blob_header_has_text_and_clip_arena_fields() {
     let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
 
-    // magic + version==9。
+    // magic + version==10。
     assert_eq!(u32::from_le_bytes(blob[0..4].try_into().unwrap()), MAGIC);
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        9,
-        "version=9"
+        10,
+        "version=10"
     );
 
-    // 22 col offset @ [12 .. 12+22*4)。每 col_offset 非零且单调递增。
-    let header_len = 12 + 22 * 4; // = 100
+    // 20 col offset @ [12 .. 12+20*4)。每 col_offset 非零且单调递增。
+    let header_len = 12 + 20 * 4; // = 92
     let mut prev = header_len;
-    for i in 0..22usize {
+    for i in 0..20usize {
         let o = 12 + i * 4;
         let off = u32::from_le_bytes(blob[o..o + 4].try_into().unwrap()) as usize;
         assert!(
@@ -226,40 +228,30 @@ fn blob_header_has_text_and_clip_arena_fields() {
         prev = off;
     }
 
-    // mesh_arena header @ [100..104)：off/len（mesh 节点有内容，len>0）。
-    let mesh_arena_off = u32::from_le_bytes(blob[100..104].try_into().unwrap()) as usize;
-    let mesh_arena_len = u32::from_le_bytes(blob[104..108].try_into().unwrap()) as usize;
+    // mesh_arena header @ [92..100)：off/len（mesh 节点有内容，len>0）。
+    let mesh_arena_off = u32::from_le_bytes(blob[92..96].try_into().unwrap()) as usize;
+    let mesh_arena_len = u32::from_le_bytes(blob[96..100].try_into().unwrap()) as usize;
     assert!(mesh_arena_len > 0, "单 mesh 节点：mesh_arena_len 应 > 0");
 
-    // text_arena header @ [108..116)：无 Text 节点时暂空（len=0）。
-    let text_arena_off = u32::from_le_bytes(blob[108..112].try_into().unwrap()) as usize;
-    let text_arena_len = u32::from_le_bytes(blob[112..116].try_into().unwrap());
-    assert_eq!(text_arena_len, 0, "无 Text 节点：text_arena 暂空");
-    assert_eq!(
-        text_arena_off,
-        mesh_arena_off + mesh_arena_len,
-        "text_arena 紧跟 mesh_arena"
-    );
-
-    // clip_table header @ [116..124)：无 clip 时仅 4B clip_count=0（clip_table_len=4）。
-    let clip_table_off = u32::from_le_bytes(blob[116..120].try_into().unwrap()) as usize;
-    let clip_table_len = u32::from_le_bytes(blob[120..124].try_into().unwrap());
+    // clip_table header @ [100..108)：v10 无 text_arena，clip 紧跟 mesh。无 clip 时仅 4B clip_count=0。
+    let clip_table_off = u32::from_le_bytes(blob[100..104].try_into().unwrap()) as usize;
+    let clip_table_len = u32::from_le_bytes(blob[104..108].try_into().unwrap());
     assert_eq!(
         clip_table_len, 4,
         "clip 表至少含 clip_count(u32)=0，故 len=4"
     );
     assert_eq!(
         clip_table_off,
-        text_arena_off + text_arena_len as usize,
-        "clip_table 紧跟 text_arena"
+        mesh_arena_off + mesh_arena_len,
+        "clip_table 紧跟 mesh_arena（无 text_arena）"
     );
     let clip_count =
         u32::from_le_bytes(blob[clip_table_off..clip_table_off + 4].try_into().unwrap());
     assert_eq!(clip_count, 0, "clip_count=0");
 
-    // v9 path_table header @ [124..132)：无 image_path 时仅 4B path_count=0（path_table_len=4）。
-    let path_table_off = u32::from_le_bytes(blob[124..128].try_into().unwrap()) as usize;
-    let path_table_len = u32::from_le_bytes(blob[128..132].try_into().unwrap());
+    // v10 path_table header @ [108..116)：无 image_path 时仅 4B path_count=0。
+    let path_table_off = u32::from_le_bytes(blob[108..112].try_into().unwrap()) as usize;
+    let path_table_len = u32::from_le_bytes(blob[112..116].try_into().unwrap());
     assert_eq!(
         path_table_len, 4,
         "无 image_path：path table 仅 path_count=0，len=4"
@@ -279,21 +271,16 @@ fn blob_header_has_text_and_clip_arena_fields() {
     );
 }
 
-/// TestView（C# FrameBlob 的 Rust 镜像）解析 v8 blob：21 列 + 三 arena 头读回正确，
-/// 且无 Text 节点的占位语义（text_off/text_len=0、text_arena_len=0、clip_count=0）成立。
+/// TestView 解析 v10 blob：20 列 + 两 arena 头（mesh→clip 链，无 text_arena）。
+/// clip_count=0 占位验证。
 #[test]
 fn test_view_parses_layout_and_text_placeholders() {
     let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.text_off(0), 0, "text_off 占位 0");
-    assert_eq!(view.text_len(0), 0, "text_len 占位 0");
-    assert_eq!(view.text_arena_len(), 0, "text_arena 整段为空");
-    assert_eq!(
-        view.text_arena_off(),
-        view.mesh_arena_off + u32::from_le_bytes(blob[104..108].try_into().unwrap()) as usize,
-        "text_arena 紧跟 mesh_arena"
-    );
     assert_eq!(view.clip_count(), 0, "clip_count=0");
+    assert_eq!(view.payload_kind(0), 1, "Mesh payload_kind=1");
+    // v10：mesh→clip 链直连（无 text_arena 中间）
+    assert_eq!(view.version(), 10, "VERSION=10");
 }
 
 #[test]
@@ -355,182 +342,17 @@ fn mesh_colors_no_longer_bake_alpha() {
     );
 }
 
-/// 构造一个 Text RenderNode：单行 glyphs，每 glyph 直接给 (codepoint, x, y)。
-/// baseline 取 line.y + 10.0（任意稳定值，验 round-trip 即可）。
-fn text_node(
-    id: u32,
-    font_size: u32,
-    color: [f32; 4],
-    glyphs: Vec<(u32, f32, f32)>,
-    baseline_off: f32,
-) -> RenderNode {
-    let line_y = 0.0f32;
-    let g: Vec<Glyph> = glyphs
-        .iter()
-        .map(|(cp, x, y)| Glyph {
-            glyph_id: 0,
-            codepoint: *cp,
-            x: *x,
-            y: *y,
-            bearing_x: 0.0,
-            bearing_y: 0.0,
-        })
-        .collect();
-    let layout = TextLayout {
-        text_width: 100.0,
-        text_height: 24.0,
-        lines: vec![Line {
-            y: line_y,
-            height: 24.0,
-            baseline: line_y + baseline_off,
-            width: 100.0,
-            runs: vec![GlyphRun {
-                font_size: font_size as f32,
-                glyphs: g,
-            }],
-        }],
-    };
-    RenderNode {
-        node_id: id,
-        parent_id: None,
-        visible: true,
-        alpha: 1.0,
-        color_tint: [1.0; 4],
-        world_matrix: transform::IDENTITY,
-        blend: BlendMode::Normal,
-        mask_context: MaskContext(0),
-        sort_key: id,
-        change_level: ChangeLevel::Full,
-        reuse_key: 0,
-        payload: NodePayload::Text {
-            layout,
-            font_size: font_size as f32,
-            color,
-            program: 1,
-            family: None,
-        },
-    }
-}
-
-/// §4.1/§4.3：Text 节点序列化进 text_arena round-trip。
-/// 构造 "AB"（codepoint 65/66），font_size=24，红色 → 读回 glyph_count==2、
-/// codepoint 正确、font_size==24、color 正确；pen_y == line.y + line.baseline。
-#[test]
-fn text_node_serializes_into_text_arena_round_trip() {
-    let node = text_node(
-        0,
-        24,
-        [1.0, 0.0, 0.0, 1.0], // 红
-        // (codepoint, pen_x, pen_y_intra_line). pen_y 序列化时应 = line.y + baseline。
-        vec![(b'A' as u32, 0.0, 0.0), (b'B' as u32, 12.0, 0.0)],
-        20.0, // baseline_off → line.baseline = 0.0 + 20.0 = 20.0
-    );
-    let blob = build_blob(&frame(&[node]));
-    let view = TestView::parse(&blob);
-
-    // header 契约：text_arena 非空、text_off/text_len 指向实段。
-    assert!(view.text_arena_len() > 0, "text_arena 应非空");
-    assert!(
-        view.text_off(0) > 0 || view.text_arena_len() > 0,
-        "text_off 指向 arena 内"
-    );
-    assert!(view.text_len(0) > 0, "text_len 应 > 0（非占位 0）");
-
-    let (family, font_size, color, glyphs) = view.read_text(0);
-    assert_eq!(family, None, "family None → 读回 None（len=0 占位）");
-    assert_eq!(font_size, 24, "font_size u32 round-trip");
-    assert_eq!(color, [1.0, 0.0, 0.0, 1.0], "color f32×4 round-trip");
-    assert_eq!(glyphs.len(), 2, "glyph_count == 2（AB）");
-    assert_eq!(glyphs[0].0, b'A' as u32, "首 glyph codepoint == 'A'(65)");
-    assert_eq!(glyphs[1].0, b'B' as u32, "次 glyph codepoint == 'B'(66)");
-    // pen_x 保留（content 偏移 0 + 原 x）。
-    assert_eq!(glyphs[0].1, 0.0);
-    assert_eq!(glyphs[1].1, 12.0);
-    // pen_y = line.baseline = line.y(0) + baseline_off(20) = 20.0（绝对 y，content 偏移 0 已烤）。
-    assert_eq!(glyphs[0].2, 20.0, "pen_y == line.baseline（绝对，20）");
-    assert_eq!(glyphs[1].2, 20.0, "同行同 pen_y");
-
-    // 字节长度自洽：seg_len = 4(family_len) + 0(family) + 4(font) + 16(color) + 4(count) + 2×12(glyph) = 52。
-    assert_eq!(view.text_len(0), 52, "seg_len: 4+0+4+16+4+24 = 52");
-}
-
-/// §4.1 多行 text：blob 序列化的 glyph pen_y 应 == line.baseline（绝对 y，已含行偏移）。
-/// layout.rs:43 `Line.baseline` 注释明写「绝对 y」，赋值 = line_y + baseline_offset；
-/// 故序列化时不应再叠加 line.y（= line_y），否则每行多一个行高 → 行距翻倍。
-/// 单行 line_y=0 掩盖此 bug；多行从第 2 行起暴露（line1 pen_y 应 36，实得 56）。
-/// C# TextRasterizer 用 pen_y 作 baseline 绝对位（quad_top = pen_y - maxY）。
-#[test]
-fn text_node_multiline_pen_y_is_absolute_baseline() {
-    let baseline_off = 16.0f32;
-    let line_h = 20.0f32;
-    let mk_line = |li: usize, cp: u32| Line {
-        y: li as f32 * line_h,
-        height: line_h,
-        baseline: li as f32 * line_h + baseline_off, // 绝对 y（layout.rs:43 语义）
-        width: 50.0,
-        runs: vec![GlyphRun {
-            font_size: 16.0,
-            glyphs: vec![Glyph {
-                glyph_id: 1,
-                codepoint: cp,
-                x: 0.0,
-                y: li as f32 * line_h, // glyph.y = 行顶（不含 baseline）
-                bearing_x: 0.0,
-                bearing_y: 0.0,
-            }],
-        }],
-    };
-    let layout = TextLayout {
-        text_width: 50.0,
-        text_height: 2.0 * line_h,
-        lines: vec![mk_line(0, b'A' as u32), mk_line(1, b'B' as u32)],
-    };
-    let node = RenderNode {
-        node_id: 0,
-        parent_id: None,
-        visible: true,
-        alpha: 1.0,
-        color_tint: [1.0; 4],
-        world_matrix: transform::IDENTITY,
-        blend: BlendMode::Normal,
-        mask_context: MaskContext(0),
-        sort_key: 0,
-        change_level: ChangeLevel::Full,
-        reuse_key: 0,
-        payload: NodePayload::Text {
-            layout,
-            font_size: 16.0,
-            color: [1.0; 4],
-            program: 1,
-            family: None,
-        },
-    };
-    let blob = build_blob(&frame(&[node]));
-    let view = TestView::parse(&blob);
-    let (_fam, _fs, _c, glyphs) = view.read_text(0);
-    assert_eq!(glyphs.len(), 2, "2 行各 1 字 → 2 glyph");
-    // line0：pen_y 应 = baseline(16)。line.y(0)+baseline(16) 也=16 → 单行掩盖。
-    assert_eq!(glyphs[0].2, baseline_off, "line0 pen_y == 16");
-    // line1：pen_y 应 = line1.baseline(36)。当前 line.y(20)+baseline(36)=56 → 多一个行高。
-    assert_eq!(
-        glyphs[1].2,
-        line_h + baseline_off,
-        "line1 pen_y == line1.baseline(36)；当前叠加 line.y 得 56 → 行距翻倍"
-    );
-}
-
-// —— 测试用解析器（镜像 C# FrameBlob 逻辑，验 Rust 布局正确）——
+/// mesh 顶点色 = background_color（
 // col_off 索引：0=node_id 1=parent_id 2=visible 3=alpha 4=sort_key
 //              5=mask_context 6=m_a 7=m_b 8=m_c 9=m_d 10=m_tx 11=m_ty
 //              12=payload_kind 13=mesh_off 14=mesh_len
-//              15=text_off 16=text_len 17=path_idx (v7) 18=program (v5) 19=color_matrix (v6)
-//              20=change_level (v8) 21=reuse_key (v9)
+//              15=path_idx (v7) 16=program (v5) 17=color_matrix (v6)
+//              18=change_level (v8) 19=reuse_key (v9)
+// v10：删 text_off/text_len，22→20 列。
 struct TestView<'a> {
     buf: &'a [u8],
-    col_off: [usize; 22],
+    col_off: [usize; 20],
     mesh_arena_off: usize,
-    text_arena_off: usize,
-    text_arena_len: u32,
     clip_table_off: usize,
     clip_table_len: u32,
     path_table_off: usize, // v7
@@ -539,9 +361,9 @@ struct TestView<'a> {
 impl<'a> TestView<'a> {
     fn parse(buf: &'a [u8]) -> Self {
         assert_eq!(&buf[0..4], &MAGIC.to_le_bytes());
-        let mut col_off = [0usize; 22];
+        let mut col_off = [0usize; 20];
         let mut h = 12;
-        for i in 0..22 {
+        for i in 0..20 {
             col_off[i] = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
             h += 4;
         }
@@ -549,10 +371,7 @@ impl<'a> TestView<'a> {
         h += 4;
         let _mesh_arena_len = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap());
         h += 4;
-        let text_arena_off = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
-        h += 4;
-        let text_arena_len = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap());
-        h += 4;
+        // v10：text_arena 已删 → 跳过
         let clip_table_off = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
         h += 4;
         let clip_table_len = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap());
@@ -564,8 +383,6 @@ impl<'a> TestView<'a> {
             buf,
             col_off,
             mesh_arena_off,
-            text_arena_off,
-            text_arena_len,
             clip_table_off,
             clip_table_len,
             path_table_off,
@@ -621,24 +438,10 @@ impl<'a> TestView<'a> {
         let vc = u32::from_le_bytes(self.buf[seg..seg + 4].try_into().unwrap()) as usize;
         (seg, vc)
     }
-    fn text_off(&self, i: usize) -> u32 {
-        u32::from_le_bytes(
-            self.buf[self.col_off[15] + i * 4..][0..4]
-                .try_into()
-                .unwrap(),
-        )
-    }
-    fn text_len(&self, i: usize) -> u32 {
-        u32::from_le_bytes(
-            self.buf[self.col_off[16] + i * 4..][0..4]
-                .try_into()
-                .unwrap(),
-        )
-    }
-    /// v7：第 18 列 path_idx（u32）。Mesh→path 表 1-based 索引（0=纯色无图），Text=0（kind 只剩 1=Mesh/2=Text）。
+    /// v7：第 15 列 path_idx（u32，v10 删 text_off/text_len 后从第 17→15）。Mesh→path 表 1-based 索引（0=纯色无图）。
     fn path_idx(&self, i: usize) -> u32 {
         u32::from_le_bytes(
-            self.buf[self.col_off[17] + i * 4..][0..4]
+            self.buf[self.col_off[15] + i * 4..][0..4]
                 .try_into()
                 .unwrap(),
         )
@@ -677,26 +480,26 @@ impl<'a> TestView<'a> {
         }
         None
     }
-    /// v5：第 19 列 program（u8）。0=img/无图 Container，1=Text，2=Container+bg-image，3=filter无bg-image，4=filter+bg-image。
+    /// v5：第 16 列 program（u8，v10 删 text_off/text_len 后从第 18→16）。0=img/无图 Container，1=Text，2=Container+bg-image，3=filter无bg-image，4=filter+bg-image。
     fn program(&self, i: usize) -> u8 {
-        self.buf[self.col_off[18] + i]
+        self.buf[self.col_off[16] + i]
     }
-    /// v6：第 20 列 color_matrix（[f32;20]，col_off[19] + i*80）。program≠3/4 全零。
+    /// v6：第 17 列 color_matrix（[f32;20]，col_off[17] + i*80）。program≠3/4 全零。
     fn color_matrix(&self, i: usize) -> [f32; 20] {
-        let off = self.col_off[19] + i * 80;
+        let off = self.col_off[17] + i * 80;
         let mut m = [0.0; 20];
         for j in 0..20 {
             m[j] = f32::from_le_bytes(self.buf[off + j * 4..off + j * 4 + 4].try_into().unwrap());
         }
         m
     }
-    /// v8：第 21 列 change_level（u8，col_off[20] + i）。
+    /// v8：第 18 列 change_level（u8，col_off[18] + i，v10 删 text_off/text_len 后从第 20→18）。
     fn change_level(&self, i: usize) -> u8 {
-        self.buf[self.col_off[20] + i]
+        self.buf[self.col_off[18] + i]
     }
-    /// v9：第 22 列 reuse_key（u32，col_off[21] + i*4）。
+    /// v9：第 19 列 reuse_key（u32，col_off[19] + i*4，v10 删 text_off/text_len 后从第 21→19）。
     fn reuse_key(&self, i: usize) -> u32 {
-        let o = self.col_off[21] + i * 4;
+        let o = self.col_off[19] + i * 4;
         u32::from_le_bytes(self.buf[o..o + 4].try_into().unwrap())
     }
     /// v8：读 mesh_len 列（u32 @ col_off[14] + i*4），SKIP/HEADER 节点 =0。
@@ -743,52 +546,6 @@ impl<'a> TestView<'a> {
         // 每色 f32×4 = 16B；第 vi 顶点的 alpha 在 colors_off + vi*16 + 12。
         let a_off = colors_off + vi * 16 + 12;
         f32::from_le_bytes(self.buf[a_off..a_off + 4].try_into().unwrap())
-    }
-    fn text_arena_len(&self) -> u32 {
-        self.text_arena_len
-    }
-    fn text_arena_off(&self) -> usize {
-        self.text_arena_off
-    }
-
-    /// 读节点 i 的 text 段（§4.1 text_arena per-node layout）：
-    /// `family_len:u32 | family_bytes[u8] | font_size:u32 | color:f32×4 | glyph_count:u32
-    ///   | glyphs[count × {codepoint:u32, pen_x:f32, pen_y:f32}]`。
-    /// 返回 (family, font_size, color, glyphs[(codepoint, pen_x, pen_y)])。
-    fn read_text(&self, i: usize) -> (Option<String>, u32, [f32; 4], Vec<(u32, f32, f32)>) {
-        let seg = self.text_arena_off + self.text_off(i) as usize;
-        let mut p = seg;
-        let fam_len = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()) as usize;
-        p += 4;
-        let family = if fam_len > 0 {
-            Some(String::from_utf8(self.buf[p..p + fam_len].to_vec()).unwrap())
-        } else {
-            None
-        };
-        p += fam_len;
-        let font_size = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
-        p += 4;
-        let r = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
-        p += 4;
-        let g = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
-        p += 4;
-        let b = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
-        p += 4;
-        let a = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
-        p += 4;
-        let count = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()) as usize;
-        p += 4;
-        let mut glyphs = Vec::with_capacity(count);
-        for _ in 0..count {
-            let cp = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
-            p += 4;
-            let px = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
-            p += 4;
-            let py = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
-            p += 4;
-            glyphs.push((cp, px, py));
-        }
-        (family, font_size, [r, g, b, a], glyphs)
     }
     fn clip_count(&self) -> u32 {
         if self.clip_table_len >= 4 {
@@ -1014,8 +771,8 @@ fn blob_world_matrix_roundtrip() {
     // version=9（v9：加 reuse_key 列）
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        9,
-        "VERSION=9"
+        10,
+        "VERSION=10"
     );
     // 字节数合理（2 节点 × 22 列 + mesh arena + header）
     assert!(blob.len() > 100);
@@ -1040,8 +797,8 @@ fn blob_pure_mesh_kind_is_one() {
     assert_eq!(view.program(0), 0, "纯色 mesh program=0");
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        9,
-        "VERSION=9"
+        10,
+        "VERSION=10"
     );
 }
 
@@ -1079,7 +836,11 @@ fn blob_color_matrix_column_round_trips() {
         clips: vec![],
     });
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 9, "VERSION=9（v9：加 reuse_key 列）");
+    assert_eq!(
+        view.version(),
+        10,
+        "VERSION=10（v10：text 塌进 mesh_arena）"
+    );
     assert_eq!(view.program(0), 3, "program=3 round-trip");
     let m = view.color_matrix(0);
     for i in 0..20 {
@@ -1103,7 +864,7 @@ fn change_level_column_round_trips() {
     full.change_level = ChangeLevel::Full;
     let blob = build_blob(&frame(&[skip, header, full]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 9, "VERSION=9");
+    assert_eq!(view.version(), 10, "VERSION=10");
     assert_eq!(view.change_level(0), 0, "Skip=0");
     assert_eq!(view.change_level(1), 1, "Header=1");
     assert_eq!(view.change_level(2), 2, "Full=2");
@@ -1140,6 +901,6 @@ fn blob_v9_round_trips_reuse_key() {
     };
     let blob = build_blob(&frame(&[rn]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 9, "blob VERSION=9");
+    assert_eq!(view.version(), 10, "blob VERSION=10");
     assert_eq!(view.reuse_key(0), 42, "reuse_key round-trip");
 }
