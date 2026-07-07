@@ -156,6 +156,7 @@ namespace LoomGUI
                 }
                 Marshal.Copy((IntPtr)ptr, _frameBuf, 0, len);
                 var blob = new FrameBlob(_frameBuf);
+                SyncFontAtlas();
                 // v10：不再传字体表（核心自产 atlas，后端不再光栅化文本）。
                 _pool.Sync(blob, _renderRoot, _mm, _sprites, Texture2D.whiteTexture);
                 _nhm.Sync(_stage);
@@ -171,6 +172,56 @@ namespace LoomGUI
             nuint ccLen = 0;
             byte* ccPtr = Native.loomgui_stage_borrow_controller_changed_events(_stage, &ccLen);
             _eventHandler.DispatchControllerChanged((System.IntPtr)ccPtr, (int)ccLen);
+        }
+
+        /// <summary>
+        /// 拉取核心字体 atlas 脏页 → 上传 R8 Texture2D → Sprite 包装 → 注册进 SpriteResolver。
+        /// tick 后 borrow_frame 已更新（本帧渲染节点包含 text Mesh image_path），
+        /// _pool.Sync 前注册 atlas Sprite 使 text 节点的 image_path 命中 GetSprite 缓存。
+        ///
+        /// 双调法取页数据：先探 buf_len=0 返所需字节数 → 分配 buf → 再调填 w/h/bytes。
+        /// Atlas 页面通常是 512×512=256KB，每页用独立 ArrayPool 缓冲区（不挤 _frameBuf）。
+        /// v1.6 单字体路径固定 f0（默认字体 font_id=0）；多字体 T8 再扩 key。
+        /// </summary>
+        unsafe void SyncFontAtlas()
+        {
+            // 探脏页（通常 ≤8 页；v1.6 单字体极少超 16）。
+            const int MAX_DIRTY = 16;
+            uint* dirtyPtr = stackalloc uint[MAX_DIRTY];
+            int n = (int)Native.loomgui_stage_font_atlas_dirty_pages(_stage, dirtyPtr, (nuint)MAX_DIRTY);
+            if (n <= 0) return;
+            if (n > MAX_DIRTY)
+            {
+                Debug.LogWarning($"[LoomStage] font atlas dirty pages ({n}) exceed MAX_DIRTY ({MAX_DIRTY}); skipping extras");
+                n = MAX_DIRTY;
+            }
+
+            for (int i = 0; i < n; i++)
+            {
+                uint page = dirtyPtr[i];
+                uint w = 0, h = 0;
+                // 探所需字节数（buf_len=0, out_buf=null → 返 needed 不写 w/h/pixels）。
+                int needed = (int)Native.loomgui_stage_font_atlas_page(_stage, page, &w, &h, null, (nuint)0);
+                if (needed <= 0) continue;
+
+                byte[] buf = ArrayPool<byte>.Shared.Rent(needed);
+                try
+                {
+                    fixed (byte* pBuf = buf)
+                    {
+                        int got = (int)Native.loomgui_stage_font_atlas_page(_stage, page, &w, &h, pBuf, (nuint)needed);
+                        if (got != needed) continue;
+                    }
+                    var tex = new Texture2D((int)w, (int)h, TextureFormat.R8, false);
+                    fixed (byte* p = buf) { tex.LoadRawTextureData((IntPtr)p, needed); }
+                    tex.Apply(false, true);
+                    // v1.6 单字体：默认字体 font_id=0（FontTable 首个注册），路径 f0 与 T3 render 合成 path 对齐。
+                    string path = $"loomgui://font-atlas/f0/p{page}";
+                    _sprites.RegisterFontAtlasPage(path, tex);
+                }
+                finally { ArrayPool<byte>.Shared.Return(buf); }
+            }
+            Native.loomgui_stage_font_atlas_clear_dirty(_stage);
         }
 
         // ===== 引擎无关 FFI 透传 API（保持不变）=====

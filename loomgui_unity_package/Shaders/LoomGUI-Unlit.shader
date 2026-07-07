@@ -97,8 +97,9 @@ Shader "LoomGUI/Unlit"
                 vcol.rgb = (sc <= 0.04045) ? sc / 12.92 : pow((sc + 0.055) / 1.055, 2.4);
                 half4 tex = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv);
                 #if defined(ALPHA_MASK)
-                // text（program:1）：font atlas 是 alpha-mask（glyph 在 alpha，rgb 黑）→ rgb 用 vcol，alpha = vcol.a * tex.a。
-                half4 col = half4(vcol.rgb, vcol.a * tex.a);
+                // text（program:1）：font atlas R8 覆盖在 .r 通道（R8 无 alpha，.a 恒 1），
+                // 纹理采样 .r 得字形覆盖，rgb 用顶点色，alpha = vcol.a * tex.r。
+                half4 col = half4(vcol.rgb, vcol.a * tex.r);
                 #elif defined(BG_COMPOSITE)
                 // Container+bg-image（program:2/4）：CSS background 合成 = 图(tex) over 底色(vcol)，结果直通配合 SrcAlpha blend。
                 // 旧 col.a=vcol.a：无 bg-color(vcol.a=0)时全透明丢图（验收 §3.6第4/§3.7/§3.9 图消失）。
