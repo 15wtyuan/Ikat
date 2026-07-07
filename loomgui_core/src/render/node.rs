@@ -38,7 +38,8 @@ pub enum ChangeLevel {
 ///
 /// - `Mesh`：quad 几何（背景色块 / 图片 / 文本字形）。`image_path`=None 表示纯色（无贴图），
 ///   `Some(path)` 为 Image 节点 / bg-image 容器的归一化图片 path，或文本的合成 atlas path
-///   `loomgui://font-atlas/f<id>/p<n>`（核心不知图集，path 推给 Unity 查 Sprite/atlas）。
+///   `loomgui://font-atlas/p<n>`（核心不知图集，path 推给 Unity 查 Sprite/atlas；
+///   atlas 是 Stage 级共享实例，path 只以 page 为键，不含 font_id）。
 ///   UV 对于 Image/bg 始终 (0,0)-(1,1)（Unity Sprite 自带真实 UV；核心无子区）；
 ///   对于 text 为 atlas 内的字形子区 UV。`program`=0 = 纯色/无图 Image shader，
 ///   1 = Text shader，2 = Container+bg-image 合成，3 = filter 无 bg-image，4 = filter+bg-image。

@@ -101,7 +101,7 @@ namespace LoomGUI
 
         /// <summary>
         /// 注册核心字体 atlas 页：Texture2D 包装成全区域 Sprite 进 _cache。
-        /// text Mesh 的 image_path="loomgui://font-atlas/f<id>/p<n>" 经 GetSprite 命中本缓存，
+        /// text Mesh 的 image_path="loomgui://font-atlas/p<n>" 经 GetSprite 命中本缓存，
         /// sp.texture 返 atlas Texture2D（MirrorPool 纹理 fetch 零改）。
         /// 同 path 再注册（脏页更新）会替换旧 Sprite（旧 Texture2D 由 GC 回收；atlas 页每帧重传是
         /// immutable 的——旧 tex 无其他持有者，GC 释放不阻塞渲染）。

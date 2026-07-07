@@ -20,7 +20,9 @@ const PAGE_SIZE: i32 = 4096;
 
 /// 字形位图四周的像素 padding。留 1px 余量避免抗锯齿边缘被 bitmap 边界裁断；
 /// 同时让相邻字形在 atlas 内不紧贴，减少采样串色。
-const GLYPH_PAD: i32 = 1;
+/// pub：build_text_mesh 算 quad 顶点时需据此把位图原点（bbox 外扩 pad）对齐——
+/// bearing 来自 bbox，而 px_w/px_h/UV 含 pad，定位须减 pad 才不偏 1px。
+pub const GLYPH_PAD: i32 = 1;
 
 /// 字形缓存键。size_px 进 key 即 per-size 分片。
 ///
@@ -102,6 +104,21 @@ impl GlyphAtlas {
             return *r;
         }
         let (pixels, gw, gh) = rasterize_glyph(face, key.glyph_id, key.size_px);
+        if gw == 0 || gh == 0 {
+            // 无轮廓字形（空格等）：不分配槽位、不 blit、不标脏。缓存空 rect 让后续
+            // 命中直接跳过；build_text_mesh 据 px_w/px_h==0 跳过 quad（advance 在 layout 已算）。
+            let empty = GlyphRect {
+                page: 0,
+                u0: 0.0,
+                v0: 0.0,
+                u1: 0.0,
+                v1: 0.0,
+                px_w: 0,
+                px_h: 0,
+            };
+            self.cache.insert(key, empty);
+            return empty;
+        }
         let alloc = self.allocate(gw, gh);
 
         // borrow：先把 page 索引拿出，避免与 self.pages 的可变借用冲突。
@@ -192,24 +209,28 @@ impl GlyphAtlas {
 ///    y-flip + pad 偏移，pen 在 builder 内追踪）。
 /// 3. for_each_pixel_2d 把 coverage 写到 R8。
 ///
-/// 缺字（gid0 空 outline / bbox None / size=0）→ 确定性 tofu 框，让缺失字形有
-/// 可见的占位而不是空白。advance 不在此管（advance 在 layout.rs，按字体度量算）。
+/// 光栅单字形 → R8 像素 + 宽高。advance 不在此管（advance 在 layout.rs，按字体度量算）。
+///
+/// 无轮廓 / 无效输入走 `empty_or_tofu`：区分**真缺字**（gid=0 .notdef，字体连缺字占位都没）
+/// 与**有 gid 但无轮廓的字形**（空格、零宽空格、各类 space —— 有 advance 占位无像素）。
+/// 前者画 tofu 框（开发期可见占位），后者返空 bitmap 不渲染——空格被画成方块就是把
+/// 这类无轮廓字形误走 tofu 的 bug。
 fn rasterize_glyph(face: &Face<'_>, gid: u16, size_px: u16) -> (Vec<u8>, u32, u32) {
     let units = face.units_per_em();
     if units == 0 || size_px == 0 {
-        return tofu_box(size_px);
+        return empty_or_tofu(gid, size_px);
     }
     let scale = size_px as f32 / units as f32;
     let bbox = match face.glyph_bounding_box(GlyphId(gid)) {
         Some(b) => b,
-        None => return tofu_box(size_px),
+        None => return empty_or_tofu(gid, size_px),
     };
 
     // bitmap 尺寸 = bbox × scale + 2*pad。ceil 避免右下抗锯齿被裁。
     let gw = ((bbox.x_max - bbox.x_min) as f32 * scale).ceil() as i32 + 2 * GLYPH_PAD;
     let gh = ((bbox.y_max - bbox.y_min) as f32 * scale).ceil() as i32 + 2 * GLYPH_PAD;
     if gw <= 0 || gh <= 0 || gw > PAGE_SIZE || gh > PAGE_SIZE {
-        return tofu_box(size_px);
+        return empty_or_tofu(gid, size_px);
     }
 
     let mut raster = Rasterizer::new(gw as usize, gh as usize);
@@ -230,7 +251,7 @@ fn rasterize_glyph(face: &Face<'_>, gid: u16, size_px: u16) -> (Vec<u8>, u32, u3
     // 不一致的边缘字体）。
     let _ = face.outline_glyph(GlyphId(gid), &mut builder);
     if builder.empty {
-        return tofu_box(size_px);
+        return empty_or_tofu(gid, size_px);
     }
 
     let mut px = vec![0u8; (gw * gh) as usize];
@@ -240,6 +261,16 @@ fn rasterize_glyph(face: &Face<'_>, gid: u16, size_px: u16) -> (Vec<u8>, u32, u3
         px[i] = (cov.clamp(0.0, 1.0) * 255.0) as u8;
     });
     (px, gw as u32, gh as u32)
+}
+
+/// 无轮廓 / 无效字形兜底：gid=0（真缺字 .notdef）→ tofu 框（可见占位）；
+/// gid>0 但无轮廓（空格等）→ 空 bitmap（不渲染，advance 在 layout 已算）。
+fn empty_or_tofu(gid: u16, size_px: u16) -> (Vec<u8>, u32, u32) {
+    if gid == 0 {
+        tofu_box(size_px)
+    } else {
+        (Vec::new(), 0, 0)
+    }
 }
 
 /// 确定性缺字 fallback：等比矩形框（上下左右 1px 边），让缺失字形可见。

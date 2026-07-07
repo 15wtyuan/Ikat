@@ -215,8 +215,10 @@ namespace LoomGUI
                     var tex = new Texture2D((int)w, (int)h, TextureFormat.R8, false);
                     fixed (byte* p = buf) { tex.LoadRawTextureData((IntPtr)p, needed); }
                     tex.Apply(false, true);
-                    // v1.6 单字体：默认字体 font_id=0（FontTable 首个注册），路径 f0 与 T3 render 合成 path 对齐。
-                    string path = $"loomgui://font-atlas/f0/p{page}";
+                    // atlas 是 Stage 级单一共享实例（所有字体字形混在同一 page），路径只以 page 为键——
+                    // 不含 font_id（font_id 只作 GlyphKey 区分字形槽位，不进 path）。与 render 侧
+                    // build_text_mesh 合成的 loomgui://font-atlas/p{n} 对齐。
+                    string path = $"loomgui://font-atlas/p{page}";
                     _sprites.RegisterFontAtlasPage(path, tex);
                 }
                 finally { ArrayPool<byte>.Shared.Return(buf); }

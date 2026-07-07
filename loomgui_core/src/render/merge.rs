@@ -246,23 +246,23 @@ mod tests {
     fn two_same_atlas_text_nodes_merge() {
         // v1.6：text 现产 Mesh(program=1)，同 atlas path 允合批。
         // 两 text 节点同 program=1 同 image_path → merge 成 1 个 8-vert Mesh。
-        let mut t1 = mesh_node(1, Some("loomgui://font-atlas/f0/p0"), 0, 1.0, 0.0);
+        let mut t1 = mesh_node(1, Some("loomgui://font-atlas/p0"), 0, 1.0, 0.0);
         t1.payload = NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
             uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             colors: vec![[1.0; 4]; 4],
             indices: vec![0, 1, 2, 0, 2, 3],
-            image_path: Some("loomgui://font-atlas/f0/p0".into()),
+            image_path: Some("loomgui://font-atlas/p0".into()),
             program: 1,
             color_matrix: [0.0; 20],
         };
-        let mut t2 = mesh_node(2, Some("loomgui://font-atlas/f0/p0"), 1, 1.0, 100.0);
+        let mut t2 = mesh_node(2, Some("loomgui://font-atlas/p0"), 1, 1.0, 100.0);
         t2.payload = NodePayload::Mesh {
             verts: vec![[100.0, 0.0], [110.0, 0.0], [110.0, 10.0], [100.0, 10.0]],
             uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             colors: vec![[1.0; 4]; 4],
             indices: vec![0, 1, 2, 0, 2, 3],
-            image_path: Some("loomgui://font-atlas/f0/p0".into()),
+            image_path: Some("loomgui://font-atlas/p0".into()),
             program: 1,
             color_matrix: [0.0; 20],
         };

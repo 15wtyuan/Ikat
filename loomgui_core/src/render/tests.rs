@@ -453,17 +453,140 @@ fn build_text_bakes_content_offset_into_glyph_pen() {
             assert_eq!(*program, 1, "text → program=1");
             // AB = 2 glyph → 8 verts (2 × 4)。
             assert_eq!(verts.len(), 8, "AB = 2 glyph × 4 verts = 8");
-            // 验证 content offset 已烤入 pen：首字形 BL 顶点的 x 应
-            // >= border_left + padding_left = 6.0（build_text_mesh 在
-            // 每 glyph 的 g.x 中已经是 content-box 相对坐标 + 偏移）。
+            // 验证 content offset 已烤入 pen：首字形 BL 顶点的 x 应 >= content offset
+            // (border+padding=6.0) 减 atlas pad——位图原点 = bbox 外扩 pad，build_text_mesh
+            // left = g.x + bearing_x - pad + rect.x。无 content offset 时此处 ~0 或负。
             assert!(
-                verts[0][0] >= 6.0,
-                "首 glyph BL x 应含 content offset (border+padding=6.0)，实 {}",
+                verts[0][0] >= 6.0 - crate::text::atlas::GLYPH_PAD as f32,
+                "首 glyph BL x 应含 content offset (border+padding=6.0，减 pad)，实 {}",
                 verts[0][0]
             );
         }
         _ => panic!("expected Mesh payload"),
     }
+}
+
+/// 文字 mesh 顶点必须在节点世界空间，且朝向正确（y-down：底 > 顶）。
+/// build_text_mesh 把 rect.x/rect.y 烤进顶点（对齐 Image quad 的父空间约定）——
+/// 否则 blob re-base 减 (tx,ty) 后净值落 design 原点，所有文字堆左上角。
+/// 且 top=baseline-bearing_y（font y-up 的 bearing 在 y-down 里要从 baseline 减）——
+/// 否则字形上下颠倒。节点放 (100,200)（root → wm 平移），顶点应落在 (100+,200+)。
+#[test]
+fn build_text_verts_in_world_space_and_upright() {
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "Hello".into(),
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.layout_rect = Rect {
+        x: 100.0,
+        y: 200.0,
+        w: 100.0,
+        h: 20.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    // root 节点：layout_rect 即 world translate → wm 平移 (100,200)。
+    let wm = scene.world_transforms[1];
+    assert!((wm[4] - 100.0).abs() < 1e-3 && (wm[5] - 200.0).abs() < 1e-3);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let text_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| matches!(&rn.payload, NodePayload::Mesh { program, .. } if *program == 1))
+        .expect("应有 text RenderNode");
+    let verts = match &text_rn.payload {
+        NodePayload::Mesh { verts, .. } => verts,
+        _ => unreachable!(),
+    };
+    assert!(!verts.is_empty(), "text 有字形 → verts 非空");
+    // ① 世界空间：每顶点 x>=90（节点 x=100）、y>=190（节点 y=200）。
+    //    修复前顶点在 pen 坐标（~0,0）→ 堆左上角，断言失败。
+    for v in verts {
+        assert!(v[0] >= 90.0, "vert x 应在节点世界空间 (>=90)，实 {}", v[0]);
+        assert!(
+            v[1] >= 190.0,
+            "vert y 应在节点世界空间 (>=190)，实 {}",
+            v[1]
+        );
+    }
+    // ② 朝向：每 glyph 4 顶点 (BL,BR,TR,TL)，y-down 下 BL.y（底）应 > TL.y（顶）。
+    //    修复前 top=baseline+bearing_y 符号反 → BL.y < TL.y（颠倒），断言失败。
+    for g in (0..verts.len()).step_by(4) {
+        let bl_y = verts[g][1]; // BL
+        let tl_y = verts[g + 3][1]; // TL
+        assert!(
+            bl_y > tl_y,
+            "glyph BL.y({}) 应 > TL.y({})（y-down 底>顶，否则上下颠倒）",
+            bl_y,
+            tl_y
+        );
+    }
+}
+
+/// 空格等无轮廓字形不该渲染成方块——rasterize_glyph 对 gid>0 无 bbox/空轮廓返空
+/// bitmap，build_text_mesh 跳过（不产 quad）。advance 在 layout 已算，pen 前进不受影响。
+#[test]
+fn build_text_skips_blank_glyphs_like_space() {
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "A B".into(),
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 20.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let text_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| matches!(&rn.payload, NodePayload::Mesh { program, .. } if *program == 1))
+        .expect("应有 text RenderNode");
+    let verts = match &text_rn.payload {
+        NodePayload::Mesh { verts, .. } => verts,
+        _ => unreachable!(),
+    };
+    // "A B" = 3 codepoints，但空格无轮廓 → 只 A、B 两字形产 quad = 8 verts。
+    // 修复前空格走 tofu → 3 quad = 12 verts。
+    assert_eq!(
+        verts.len(),
+        8,
+        "空格应跳过（无轮廓不产 quad），A B = 2 字形 × 4 = 8 verts，实 {}",
+        verts.len()
+    );
 }
 
 #[test]

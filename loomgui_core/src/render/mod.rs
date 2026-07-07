@@ -373,7 +373,7 @@ pub fn build_render_nodes(
                 let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
                 let font_id = fonts.font_id(s.font_family.as_deref());
                 let meshes =
-                    build_text_mesh(&layout, font_id, s.font_size, text_color, atlas, font);
+                    build_text_mesh(&layout, font_id, s.font_size, text_color, atlas, font, rect);
                 if meshes.is_empty() {
                     // 空文本 → 占位 Mesh（无顶点，image_path 用第 0 页兜底）。
                     id_to_pos.insert(n.id, nodes.len());
@@ -394,7 +394,7 @@ pub fn build_render_nodes(
                             uvs: vec![],
                             colors: vec![],
                             indices: vec![],
-                            image_path: Some(format!("loomgui://font-atlas/f{}/p0", font_id)),
+                            image_path: Some("loomgui://font-atlas/p0".into()),
                             program: 1,
                             color_matrix: [0.0; 20],
                         },
@@ -404,7 +404,7 @@ pub fn build_render_nodes(
                 // 首页（page 0）→ 主 RenderNode，用真 node_id。
                 {
                     let (page0, verts0, uvs0, colors0, indices0) = &meshes[0];
-                    let path0 = format!("loomgui://font-atlas/f{}/p{}", font_id, page0);
+                    let path0 = format!("loomgui://font-atlas/p{}", page0);
                     id_to_pos.insert(n.id, nodes.len());
                     nodes.push(RenderNode {
                         node_id,
@@ -432,7 +432,7 @@ pub fn build_render_nodes(
                 // 后续页 → 合成 node_id 的子 RenderNode。
                 for (pi, (page, verts, uvs, colors, indices)) in meshes[1..].iter().enumerate() {
                     let sub_id = synth_text_node_id(node_id, (pi + 1) as u32);
-                    let sub_path = format!("loomgui://font-atlas/f{}/p{}", font_id, page);
+                    let sub_path = format!("loomgui://font-atlas/p{}", page);
                     nodes.push(RenderNode {
                         node_id: sub_id,
                         parent_id,
@@ -643,12 +643,17 @@ fn bake_content_offset(layout: &mut crate::text::layout::TextLayout, off_x: f32,
 }
 
 /// 把 TextLayout 每字形展成 quad mesh：4 顶点 + 6 索引，UV 指向核心 atlas。
-/// 顶点 = pen 坐标 + glyph bbox（bearing）；颜色烤顶点色（alpha 不烤，走 _Alpha
+/// 顶点 = 节点世界空间（pen + bearing + rect.xy）；颜色烤顶点色（alpha 不烤，走 _Alpha
 /// uniform）。索引为 2-tri 扇（0-1-2, 0-2-3，与 mesh::quad 同序）。
 ///
-/// V-flip 方向：atlas v0=顶(v0)、v1=底(v1)；quad 底采样 atlas 底(v1)、
-/// 顶采样 atlas 顶(v0)。与现有 Image quad UV 翻转模式一致（quad BL→(u0,v1)、
-/// TR→(u1,v0)）。PlayMode 实测校准（如果 text 上下颠倒，翻转 UV v 方向）。
+/// 顶点空间：与 mesh::quad 一致用 rect.x/rect.y（纯平移时 = wm[4],wm[5] = 节点绝对位置）。
+/// blob re-base 减 (tx,ty)、后端 GO 加回 → 净值留在节点位置。不加 rect 则落 design 原点，
+/// 所有文字堆左上角。
+///
+/// V-flip 方向：atlas v0=顶、v1=底（光栅时 font y-up→bitmap y-down 翻转，v0 对应位图顶）。
+/// quad BL（屏幕底，y 更大）采样 atlas 底(v1)、TL（屏幕顶，y 更小）采样 atlas 顶(v0)。
+/// 与 Image quad UV 模式一致（BL→(u0,v1)、TR→(u1,v0)）。top=baseline-bearing_y：bearing_y
+/// 是 font y-up（顶到 baseline），y-down 坐标里字形顶在 baseline 上方 → 减（加则上下颠倒）。
 ///
 /// 返回按 atlas 页号分组的 mesh 列表。单字体单字号常见一页装下 → 一项（单 draw call）；
 /// 超 CJK 字符集才跨页 → 多项（每项独立 image_path = f<id>/p<page>）。
@@ -659,10 +664,14 @@ fn build_text_mesh(
     color: [f32; 4],
     atlas: &mut GlyphAtlas,
     font: &crate::text::layout::Font,
+    rect: &crate::scene::node::Rect,
 ) -> Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> {
     // 第一遍：收集字形并按 atlas 页号分组。
     let size_px = font_size.round().max(1.0) as u16;
     let face = &font.face;
+    // bearing 来自 glyph bbox，px_w/px_h/UV 含 pad：位图原点 = bbox 原点外扩 pad，
+    // left/top 减 pad 对齐位图，否则字形偏 1px。
+    let pad = crate::text::atlas::GLYPH_PAD as f32;
     let mut pages: std::collections::BTreeMap<u32, Vec<(f32, f32, f32, f32, f32, f32, f32, f32)>> =
         std::collections::BTreeMap::new();
     for line in &layout.lines {
@@ -675,10 +684,15 @@ fn build_text_mesh(
                     effect_sig: 0,
                 };
                 let r = atlas.ensure(face, key);
-                let left = g.x + g.bearing_x;
-                let top = line.baseline + g.bearing_y;
+                // 无轮廓字形（空格、零宽空格等）atlas 返空 rect → 不产 quad（advance 在
+                // layout 已算，pen 已前进，跳过不影响后续字形位置）。
+                if r.px_w == 0 || r.px_h == 0 {
+                    continue;
+                }
+                let left = g.x + g.bearing_x - pad + rect.x;
+                let top = line.baseline - g.bearing_y - pad + rect.y;
                 let right = left + r.px_w as f32;
-                let bottom = top - r.px_h as f32;
+                let bottom = top + r.px_h as f32;
                 // 存 (left, bottom, right, top, u0, v0, u1, v1)
                 pages
                     .entry(r.page)
