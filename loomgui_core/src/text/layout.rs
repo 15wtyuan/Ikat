@@ -103,9 +103,14 @@ impl Font {
 /// FFI 层保证任何 tick（会触发 measure）前已注册 default，契约由调用方维护。
 /// Font 仍是 Face<'static>（Box::leak 字节，进程级单字体可接受；多字体数量有限，
 /// leak 不释放可接受，真要回收改 Arc<Vec<u8>> 持字节，YAGNI）。
+///
+/// v1.6：family_to_id 为每个注册 family 分配稳定 u32 id，供 atlas key 和合成
+/// image_path 用。id 在 register 时分配，不随字体表增删变化。
 pub struct FontTable {
     pub(crate) fonts: HashMap<String, Arc<Font>>,
     pub(crate) default_family: Option<String>,
+    pub(crate) family_to_id: HashMap<String, u32>,
+    pub(crate) next_id: u32,
 }
 
 impl Default for FontTable {
@@ -119,6 +124,8 @@ impl FontTable {
         FontTable {
             fonts: HashMap::new(),
             default_family: None,
+            family_to_id: HashMap::new(),
+            next_id: 0,
         }
     }
 
@@ -135,6 +142,9 @@ impl FontTable {
         if is_default {
             self.default_family = Some(family.to_string());
         }
+        let id = self.next_id;
+        self.next_id += 1;
+        self.family_to_id.insert(family.to_string(), id);
         Ok(())
     }
 
@@ -151,6 +161,24 @@ impl FontTable {
             .as_ref()
             .expect("no default font registered (register one with is_default=true before tick)");
         self.fonts[default].as_ref()
+    }
+
+    /// 按 family 取稳定 font_id（atlas key + 合成 path 用）。
+    /// 无匹配 → default 的 id。
+    pub fn font_id(&self, family: Option<&str>) -> u32 {
+        if let Some(fam) = family {
+            if let Some(&id) = self.family_to_id.get(fam) {
+                return id;
+            }
+        }
+        let default = self
+            .default_family
+            .as_ref()
+            .expect("no default font registered");
+        *self
+            .family_to_id
+            .get(default)
+            .expect("default family 已注册必有 id")
     }
 }
 

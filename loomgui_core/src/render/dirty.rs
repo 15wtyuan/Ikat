@@ -53,39 +53,6 @@ pub fn payload_hash(rn: &RenderNode) -> u64 {
                 ix.hash(&mut h);
             }
         }
-        NodePayload::Text {
-            layout,
-            font_size,
-            color,
-            program,
-            family,
-        } => {
-            2u8.hash(&mut h);
-            font_size.to_le_bytes().hash(&mut h);
-            program.hash(&mut h);
-            // family 决定后端选哪个 Font asset 光栅——同 codepoint 不同 family 出不同 UV，
-            // 故 family 变必须 Full 重建 mesh，入 payload_hash。
-            family.hash(&mut h);
-            for &v in color.iter() {
-                v.to_le_bytes().hash(&mut h);
-            }
-            for line in &layout.lines {
-                // P4：line 全量字段（y/height/baseline/width）——line-height 变化改 height，
-                // 不 hash 会漏（违反"全量不采样"承诺，坑 105 同类）。
-                line.y.to_le_bytes().hash(&mut h);
-                line.height.to_le_bytes().hash(&mut h);
-                line.baseline.to_le_bytes().hash(&mut h);
-                line.width.to_le_bytes().hash(&mut h);
-                for run in &line.runs {
-                    run.font_size.to_le_bytes().hash(&mut h);
-                    for g in &run.glyphs {
-                        g.codepoint.hash(&mut h);
-                        g.x.to_le_bytes().hash(&mut h);
-                        g.y.to_le_bytes().hash(&mut h);
-                    }
-                }
-            }
-        }
     }
     h.finish()
 }
@@ -115,10 +82,10 @@ pub fn header_hash(rn: &RenderNode) -> u64 {
 }
 
 #[cfg(test)]
+#[allow(unreachable_patterns, irrefutable_let_patterns)]
 mod tests {
     use super::*;
     use crate::render::node::{BlendMode, ChangeLevel, MaskContext, NodePayload, RenderNode};
-    use crate::text::layout::{Glyph, GlyphRun, Line, TextLayout};
     use crate::transform::IDENTITY;
 
     /// mesh_rn：构造带 image_path 的 Mesh RenderNode（None=纯色，Some=图 path）。
@@ -150,52 +117,6 @@ mod tests {
     // -----------------------------------------------------------------------
     // payload_hash 测试（支柱2：几何全量，不采样）
     // -----------------------------------------------------------------------
-
-    fn text_rn_content(font_size: f32, color: [f32; 4], cps: &[u32]) -> RenderNode {
-        let glyphs: Vec<Glyph> = cps
-            .iter()
-            .enumerate()
-            .map(|(i, &cp)| Glyph {
-                glyph_id: 1,
-                codepoint: cp,
-                x: i as f32 * 10.0,
-                y: 0.0,
-                bearing_x: 0.0,
-                bearing_y: 0.0,
-            })
-            .collect();
-        let layout = TextLayout {
-            text_width: 100.0,
-            text_height: 20.0,
-            lines: vec![Line {
-                y: 0.0,
-                height: 20.0,
-                baseline: 16.0,
-                width: 100.0,
-                runs: vec![GlyphRun { font_size, glyphs }],
-            }],
-        };
-        RenderNode {
-            node_id: 0,
-            parent_id: None,
-            visible: true,
-            alpha: 1.0,
-            color_tint: [1.0; 4],
-            world_matrix: IDENTITY,
-            blend: BlendMode::Normal,
-            mask_context: MaskContext(0),
-            sort_key: 0,
-            change_level: ChangeLevel::Full,
-            reuse_key: 0,
-            payload: NodePayload::Text {
-                layout,
-                font_size,
-                color,
-                program: 1,
-                family: None,
-            },
-        }
-    }
 
     // -----------------------------------------------------------------------
     // header_hash 测试（支柱2：表头轴，与 payload_hash 正交）
@@ -247,20 +168,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn payload_hash_full_text_no_collision() {
-        // "hello"→"helps"：首字 h/5 字/首字坐标同——全量 hash 必变（采样才会漏判）。
-        let a = text_rn_content(16.0, [1.0; 4], &[104, 101, 108, 108, 111]); // hello
-        let b = text_rn_content(16.0, [1.0; 4], &[104, 101, 108, 112, 115]); // helps
-        assert_ne!(
-            payload_hash(&a),
-            payload_hash(&b),
-            "全量 codepoint → hash 变"
-        );
-    }
-
     // -----------------------------------------------------------------------
-    // P2/P4 补字段回归测试（reuse_key 进 header_hash；line 全量进 payload_hash）
+    // P2 补字段回归测试（reuse_key 进 header_hash）
     // -----------------------------------------------------------------------
 
     #[test]
@@ -273,37 +182,6 @@ mod tests {
             header_hash(&a),
             header_hash(&b),
             "reuse_key 变 → header_hash 变"
-        );
-    }
-
-    #[test]
-    fn payload_hash_text_includes_line_height() {
-        // P4：line.height 变（line-height 改）→ payload_hash 变。全量不采样，line 字段必入 hash。
-        let a = text_rn_content(16.0, [1.0; 4], &[104, 101, 108]); // hel
-        let mut b = text_rn_content(16.0, [1.0; 4], &[104, 101, 108]);
-        if let NodePayload::Text { layout, .. } = &mut b.payload {
-            layout.lines[0].height = 30.0; // 改 line-height
-        }
-        assert_ne!(
-            payload_hash(&a),
-            payload_hash(&b),
-            "line.height 变 → payload_hash 变"
-        );
-    }
-
-    #[test]
-    fn payload_hash_text_includes_line_baseline_y() {
-        // P4：line.baseline/y 变 → payload_hash 变（行位置变，quad 跟着变）。
-        let a = text_rn_content(16.0, [1.0; 4], &[104, 101, 108]);
-        let mut b = text_rn_content(16.0, [1.0; 4], &[104, 101, 108]);
-        if let NodePayload::Text { layout, .. } = &mut b.payload {
-            layout.lines[0].baseline = 20.0;
-            layout.lines[0].y = 4.0;
-        }
-        assert_ne!(
-            payload_hash(&a),
-            payload_hash(&b),
-            "line.baseline/y 变 → payload_hash 变"
         );
     }
 }

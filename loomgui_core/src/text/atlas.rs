@@ -34,7 +34,8 @@ pub struct GlyphKey {
     pub effect_sig: u64,
 }
 
-/// 字形在其所在页上的归一化 UV（[0..1]）。后端拼 quad 时直接采此 UV。
+/// 字形在其所在页上的归一化 UV（[0..1]）+ 光栅像素尺寸。
+/// px_w/px_h 供 build_text_mesh 算 quad 几何尺寸，不经 atlas 尺寸反推（直接来自光栅结果更可靠）。
 #[derive(Debug, Clone, Copy)]
 pub struct GlyphRect {
     pub page: u32,
@@ -42,6 +43,8 @@ pub struct GlyphRect {
     pub v0: f32,
     pub u1: f32,
     pub v1: f32,
+    pub px_w: u32,
+    pub px_h: u32,
 }
 
 /// 内部像素空间分配结果：页号 + 槽位左上角像素坐标。
@@ -126,6 +129,8 @@ impl GlyphAtlas {
             v0: px_y as f32 / height_f,
             u1: (px_x + gw as usize) as f32 / width_f,
             v1: (px_y + gh as usize) as f32 / height_f,
+            px_w: gw,
+            px_h: gh,
         };
         self.cache.insert(key, uv);
         uv

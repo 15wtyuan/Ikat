@@ -52,6 +52,9 @@ pub struct Stage {
     /// build_render_nodes 比较定 ChangeLevel。transient 不进 pkg（Stage 字段非 Scene 字段）。
     /// reload/节点数变 → clear → 下帧全 dirty（无基线）。
     pub prev_node_hashes: std::collections::HashMap<u32, (u64, u64)>,
+    /// 核心字形 atlas（v1.6 自绘字体）。render build 期 ensure 字形 UV，
+    /// FFI 拉 R8 脏页上传。Stage 持有（非 Scene——atlas 是渲染资源，生命周期跨 tick）。
+    pub glyph_atlas: crate::text::atlas::GlyphAtlas,
 }
 
 impl Stage {
@@ -71,6 +74,7 @@ impl Stage {
             tweens: crate::tween::TweenManager::new(),
             pending_dt: 0.0,
             prev_node_hashes: std::collections::HashMap::new(),
+            glyph_atlas: crate::text::atlas::GlyphAtlas::new(),
         })
     }
 
@@ -696,6 +700,7 @@ impl Stage {
             &self.fonts,
             &self.prev_node_hashes,
             &self.image_sizes,
+            &mut self.glyph_atlas,
         );
         scene.node_sort_keys = sort_keys;
         self.prev_node_hashes = new_hashes;

@@ -15,12 +15,16 @@ fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32)> {
             image_path,
             program,
             ..
-        } if *program == 0 && crate::transform::is_pure_translation(&rn.world_matrix) => Some((
-            image_path.clone(),
-            *program,
-            rn.mask_context.0,
-            rn.alpha.to_bits(),
-        )),
+        } if (*program == 0 || *program == 1)
+            && crate::transform::is_pure_translation(&rn.world_matrix) =>
+        {
+            Some((
+                image_path.clone(),
+                *program,
+                rn.mask_context.0,
+                rn.alpha.to_bits(),
+            ))
+        }
         _ => None,
     }
 }
@@ -73,13 +77,13 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
     let mut indices: Vec<u32> = Vec::new();
     let mut base: u32 = 0;
     for &bi in batch {
-        if let NodePayload::Mesh {
+        let NodePayload::Mesh {
             verts: v,
             uvs: u,
             colors: c,
             indices: ix,
             ..
-        } = &nodes[bi].payload
+        } = &nodes[bi].payload;
         {
             verts.extend_from_slice(v);
             uvs.extend_from_slice(u);
@@ -110,7 +114,6 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
             indices,
             image_path: match &last.payload {
                 NodePayload::Mesh { image_path, .. } => image_path.clone(),
-                _ => None,
             },
             program: 0,
             color_matrix: [0.0; 20],
@@ -119,6 +122,7 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
 }
 
 #[cfg(test)]
+#[allow(unreachable_patterns, irrefutable_let_patterns)]
 mod tests {
     use super::*;
     use crate::render::node::{BlendMode, ChangeLevel, MaskContext};
@@ -239,22 +243,37 @@ mod tests {
     }
 
     #[test]
-    fn text_node_stays_separate() {
-        let mesh = mesh_node(1, Some("a.png"), 0, 1.0, 0.0);
-        let mut text = mesh_node(2, Some("a.png"), 1, 1.0, 100.0);
-        text.payload = NodePayload::Text {
-            layout: crate::text::layout::TextLayout {
-                text_width: 0.0,
-                text_height: 0.0,
-                lines: vec![],
-            },
-            font_size: 16.0,
-            color: [1.0; 4],
+    fn two_same_atlas_text_nodes_merge() {
+        // v1.6：text 现产 Mesh(program=1)，同 atlas path 允合批。
+        // 两 text 节点同 program=1 同 image_path → merge 成 1 个 8-vert Mesh。
+        let mut t1 = mesh_node(1, Some("loomgui://font-atlas/f0/p0"), 0, 1.0, 0.0);
+        t1.payload = NodePayload::Mesh {
+            verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            colors: vec![[1.0; 4]; 4],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            image_path: Some("loomgui://font-atlas/f0/p0".into()),
             program: 1,
-            family: None,
+            color_matrix: [0.0; 20],
         };
-        let out = merge_meshes(vec![mesh, text]);
-        assert_eq!(out.len(), 2, "Text 不参与合并");
+        let mut t2 = mesh_node(2, Some("loomgui://font-atlas/f0/p0"), 1, 1.0, 100.0);
+        t2.payload = NodePayload::Mesh {
+            verts: vec![[100.0, 0.0], [110.0, 0.0], [110.0, 10.0], [100.0, 10.0]],
+            uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            colors: vec![[1.0; 4]; 4],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            image_path: Some("loomgui://font-atlas/f0/p0".into()),
+            program: 1,
+            color_matrix: [0.0; 20],
+        };
+        let out = merge_meshes(vec![t1, t2]);
+        assert_eq!(out.len(), 1, "两同 atlas text 节点 → 1 merged");
+        match &out[0].payload {
+            NodePayload::Mesh { verts, .. } => {
+                assert_eq!(verts.len(), 8, "2×4 verts");
+            }
+            _ => panic!("expected Mesh"),
+        }
     }
 
     #[test]

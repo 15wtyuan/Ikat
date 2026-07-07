@@ -19,6 +19,7 @@ pub mod node;
 
 use crate::layout::ImageSizeTable;
 use crate::scene::node::{NodeId, NodeKind, Rect, Scene};
+use crate::text::atlas::{GlyphAtlas, GlyphKey};
 use crate::text::layout::{measure_text, FontTable};
 use node::*;
 
@@ -124,6 +125,7 @@ pub fn build_render_nodes(
     fonts: &FontTable,
     prev: &std::collections::HashMap<u32, (u64, u64)>,
     image_sizes: &ImageSizeTable,
+    atlas: &mut GlyphAtlas,
 ) -> (
     FrameData,
     std::collections::HashMap<u32, (u64, u64)>,
@@ -356,6 +358,34 @@ pub fn build_render_nodes(
                 if off_x != 0.0 || off_y != 0.0 {
                     bake_content_offset(&mut layout, off_x, off_y);
                 }
+                let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
+                let font_id = fonts.font_id(s.font_family.as_deref());
+                let (verts, uvs, colors, indices) =
+                    build_text_mesh(&layout, font_id, s.font_size, text_color, atlas, font);
+                // v1.6：page 取首字形的 atlas 页号。单字体单字号场景所有字形同页；
+                // 跨页 split 由 Task 8 处理（按页拆多个 Mesh）。
+                let page = if layout.lines.is_empty() {
+                    0u32
+                } else {
+                    // peek first glyph to determine page for the synthetic path.
+                    // The actual page is determined inside build_text_mesh via atlas.ensure.
+                    // We re-ensure the first glyph to get its page (cached, no re-raster).
+                    let first_run = layout.lines[0].runs.first();
+                    let first_g = first_run.and_then(|r| r.glyphs.first());
+                    match first_g {
+                        Some(g) => {
+                            let key = GlyphKey {
+                                font_id,
+                                glyph_id: g.glyph_id,
+                                size_px: s.font_size.round().max(1.0) as u16,
+                                effect_sig: 0,
+                            };
+                            atlas.ensure(&font.face, key).page
+                        }
+                        None => 0,
+                    }
+                };
+                let synthetic_path = format!("loomgui://font-atlas/f{}/p{}", font_id, page);
                 RenderNode {
                     node_id,
                     parent_id,
@@ -368,12 +398,14 @@ pub fn build_render_nodes(
                     sort_key: 0,
                     change_level: ChangeLevel::Full,
                     reuse_key: n.reuse_key,
-                    payload: NodePayload::Text {
-                        layout,
-                        font_size: s.font_size,
-                        color: anim.and_then(|a| a.text_color).unwrap_or(s.color),
+                    payload: NodePayload::Mesh {
+                        verts,
+                        uvs,
+                        colors,
+                        indices,
+                        image_path: Some(synthetic_path),
                         program: 1,
-                        family: s.font_family.clone(),
+                        color_matrix: [0.0; 20],
                     },
                 }
             }
@@ -456,6 +488,62 @@ fn bake_content_offset(layout: &mut crate::text::layout::TextLayout, off_x: f32,
             }
         }
     }
+}
+
+/// 把 TextLayout 每字形展成 quad mesh：4 顶点 + 6 索引，UV 指向核心 atlas。
+/// 顶点 = pen 坐标 + glyph bbox（bearing）；颜色烤顶点色（alpha 不烤，走 _Alpha
+/// uniform）。索引为 2-tri 扇（0-1-2, 0-2-3，与 mesh::quad 同序）。
+///
+/// V-flip 方向：atlas v0=顶(v0)、v1=底(v1)；quad 底采样 atlas 底(v1)、
+/// 顶采样 atlas 顶(v0)。与现有 Image quad UV 翻转模式一致（quad BL→(u0,v1)、
+/// TR→(u1,v0)）。PlayMode 实测校准（如果 text 上下颠倒，翻转 UV v 方向）。
+fn build_text_mesh(
+    layout: &crate::text::layout::TextLayout,
+    font_id: u32,
+    font_size: f32,
+    color: [f32; 4],
+    atlas: &mut GlyphAtlas,
+    font: &crate::text::layout::Font,
+) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
+    let mut verts: Vec<[f32; 2]> = Vec::new();
+    let mut uvs: Vec<[f32; 2]> = Vec::new();
+    let mut colors: Vec<[f32; 4]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    let face = &font.face;
+    for line in &layout.lines {
+        for run in &line.runs {
+            for g in &run.glyphs {
+                let key = GlyphKey {
+                    font_id,
+                    glyph_id: g.glyph_id,
+                    size_px: font_size.round().max(1.0) as u16,
+                    effect_sig: 0,
+                };
+                let r = atlas.ensure(face, key);
+                // quad 坐标：pen(g.x, line.baseline) + bearing → 4 角。
+                // bearing_x 从 pen 左移（bbox x_min），bearing_y 从 baseline 上移（bbox y_max）。
+                let left = g.x + g.bearing_x;
+                let top = line.baseline + g.bearing_y;
+                let right = left + r.px_w as f32;
+                let bottom = top - r.px_h as f32;
+                let base = verts.len() as u32;
+                // 顶点序 BL,BR,TR,TL（与 mesh::quad 同序）。
+                verts.push([left, bottom]);
+                verts.push([right, bottom]);
+                verts.push([right, top]);
+                verts.push([left, top]);
+                // UV：BL→(u0,v1), BR→(u1,v1), TR→(u1,v0), TL→(u0,v0)。
+                // atlas v0=顶(y=0)，v1=底(y=h)；quad bottom 采样 atlas bottom=v1。
+                uvs.push([r.u0, r.v1]);
+                uvs.push([r.u1, r.v1]);
+                uvs.push([r.u1, r.v0]);
+                uvs.push([r.u0, r.v0]);
+                colors.extend(std::iter::repeat_n(color, 4));
+                indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            }
+        }
+    }
+    (verts, uvs, colors, indices)
 }
 
 #[cfg(test)]
