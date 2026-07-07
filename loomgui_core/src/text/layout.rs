@@ -200,22 +200,24 @@ pub fn measure_text(
     // 单位换算辅助：设计单位 → px。
     let to_px = |design: f32| -> f32 { design / units * font_size };
 
-    // 字距（kerning）已禁用：Unity 动态字体光栅器不应用跨字 kerning，且其 glyph quad
-    // （CharacterInfo minX/maxX）含 atlas padding，宽于 ttf design bbox。Rust 按 ttf kern 表
-    // 拉近 pen_x 会让 Latin kern 对（AV/Te/WA…）在 Unity padded quad 下重叠（EditMode 实测
-    // AV @24pt quad 重叠 4px）。光栅器不 kern → 布局权威也不该 kern，否则拉过头。未来换能
-    // 正确 honor kern 的光栅器（quad==ttf bbox、支持 kern）再开。
-    // 注：CJK 字距重叠的真根因**不是 kern**，是缺字 advance 不匹配（坑 119），别混淆。
-    //
-    // ttf-parser 0.20 kern 读法（备查，重开时用）：Face 不直接暴露字距；kern 表是多个子表的
-    // 集合，`face.tables().kern.as_ref()` → `table.subtables.into_iter()` 跳非水平/状态机子表，
-    // `sub.glyphs_kerning(left, right) -> Option<i16>` 取值（注意返回 i16）。
-    let kerning = |_left: ttf_parser::GlyphId, _right: ttf_parser::GlyphId| -> Option<i16> { None };
-    // advance：字体有此字形→读 ttf advance；缺字形（glyph_index 返 None，如 DejaVuSans 遇 CJK）
-    // → 兜底 font_size（坑 119 真根因）。
-    // 原走 .notdef(gid0) advance（DejaVu ≈0.6em），但 Unity 动态字体缺字 fallback 到系统 CJK 字体
-    // 渲染 1em 方块 quad。Rust pen_x 用 0.6em 间隔 < Unity 1em quad → 字距重叠 0.4em（实测「控件」
-    // @24pt 第二字 penX=14.4、Unity quad 宽 25、重叠 11.6px）。兜底 font_size 匹配 Unity fallback。
+    // kerning 重开：光栅化搬核心后 quad 是真实 ttf bbox，可安全 honor kern（spec §9）。
+    // ttf-parser 0.20：Face 不直接暴露字距；kern 表是多个子表的集合，
+    // `face.tables().kern.as_ref()` → 迭代 `table.subtables`，跳非水平/变量/状态机子表，
+    // `sub.glyphs_kerning(left, right) -> Option<i16>` 取值。
+    let kerning = |left: ttf_parser::GlyphId, right: ttf_parser::GlyphId| -> Option<i16> {
+        let kern = font.face.tables().kern.as_ref()?;
+        for sub in kern.subtables {
+            if !sub.horizontal || sub.variable || sub.has_state_machine {
+                continue;
+            }
+            if let Some(k) = sub.glyphs_kerning(left, right) {
+                return Some(k);
+            }
+        }
+        None
+    };
+    // advance：有字形→读 ttf advance；缺字形（glyph_index 返 None）→ 权威 .notdef(gid0)
+    // advance（确定性跨引擎一致）。gid0 advance 缺失时兜底 0.6em（TrueType 惯例）。
     // wqy-microhei 本就有 CJK 字形→走 Some 分支，不受影响。
     let advance = |gid_opt: Option<ttf_parser::GlyphId>| -> f32 {
         match gid_opt {
@@ -224,7 +226,11 @@ pub fn measure_text(
                 .glyph_hor_advance(gid)
                 .map(|v| to_px(v as f32))
                 .unwrap_or(0.0),
-            None => font_size,
+            None => font
+                .face
+                .glyph_hor_advance(ttf_parser::GlyphId(0))
+                .map(|v| to_px(v as f32))
+                .unwrap_or(to_px(units * 0.6)),
         }
     };
 
@@ -435,12 +441,11 @@ mod tests {
         assert!(layout.text_width > 0.0);
     }
 
-    /// 锁 kerning 禁用："AV" 的 V pen_x == advance('A')（无 kern 偏移）。
-    /// DejaVuSans 有 AV kern（≈ -1.5px @24pt）；若 kern 被重新启用，V.x = advance(A)+kern < advance(A) → 断言失败。
-    /// 禁 kern 是架构决策（光栅器不 honor kern，见 measure_text 注释），非 bug 修复——CJK 字距
-    /// 重叠真根因是缺字 advance（坑 119），与此测试无关。
+    /// 锁 kerning 重开：V pen_x = advance(A) + kern(A,V) < advance(A)
+    /// （DejaVuSans AV kern ≈ -1.5px @24pt）。光栅化搬核心后 quad 是真实 ttf bbox，
+    /// 可安全 honor kern（spec §9）。
     #[test]
-    fn kerning_disabled_av_pen_x_equals_advance() {
+    fn kerning_enabled_av_pen_x_includes_kern() {
         let font = match test_font() {
             Some(f) => f,
             None => {
@@ -451,25 +456,25 @@ mod tests {
         let layout = measure_text("AV", 24.0, 0.0, 0.0, TextAlign::Left, false, None, &font);
         let g = &layout.lines[0].runs[0].glyphs;
         assert_eq!(g.len(), 2, "AV = 2 glyph");
-        // 期望 V pen_x = advance('A')（kern 禁用，无偏移）。
         let gid_a = font.face.glyph_index('A').unwrap();
-        let units = font.face.units_per_em() as f32;
-        let adv_a = font.face.glyph_hor_advance(gid_a).unwrap() as f32 / units * 24.0;
+        let adv_a = font.face.glyph_hor_advance(gid_a).unwrap() as f32
+            / font.face.units_per_em() as f32
+            * 24.0;
         assert_eq!(g[0].x, 0.0, "A pen_x = 0（行首）");
+        // kern 重开：V.x 应 = adv_a + kern（kern < 0 → V.x < adv_a）。
         assert!(
-            (g[1].x - adv_a).abs() < 0.001,
-            "V pen_x 应 == advance(A)={:.3}（kern 禁用），实={:.3}；若 kern 启用 V.x 会 ≈ {:.3}",
-            adv_a,
+            g[1].x < adv_a,
+            "kern 应让 V.x={:.3} < advance(A)={:.3}",
             g[1].x,
-            adv_a - 1.535,
+            adv_a
         );
+        assert!(g[1].x > 0.0);
     }
 
-    /// 坑 119 真根因：字体缺字形（DejaVuSans 无 CJK）时 advance 兜底 font_size，而非 .notdef(0.6em)。
-    /// 否则 Rust pen_x 间隔 0.6em < Unity fallback 渲染的 1em CJK quad → 字距重叠。
-    /// DejaVuSans 缺「中」→ glyph_index 返 None → advance 兜底 24。第二字 pen_x 应 == 24（非 .notdef ≈14.4）。
+    /// 缺字（DejaVuSans 无 CJK「中」）→ advance 走字体 .notdef(gid0) advance，非 font_size 兜底。
+    /// 核心权威（spec §9）：缺字画 .notdef/tofu，advance 确定性，不再猜 Unity fallback 1em。
     #[test]
-    fn missing_glyph_advance_falls_back_to_font_size() {
+    fn missing_glyph_uses_notdef_advance() {
         let font = match test_font() {
             Some(f) => f,
             None => {
@@ -486,10 +491,16 @@ mod tests {
         let g = &layout.lines[0].runs[0].glyphs;
         assert_eq!(g.len(), 2, "中中 = 2 glyph");
         assert_eq!(g[0].x, 0.0, "首字 pen_x = 0");
-        // 缺字兜底：第二字 pen_x 应 == font_size(24)，而非 .notdef advance(≈14.4)。
+        // 第二字 advance = .notdef advance（读 gid0），确定性非 font_size(24)。
+        let notdef_adv = font
+            .face
+            .glyph_hor_advance(ttf_parser::GlyphId(0))
+            .map(|v| v as f32 / font.face.units_per_em() as f32 * 24.0)
+            .unwrap_or(0.0);
         assert!(
-            (g[1].x - 24.0).abs() < 0.001,
-            "缺 CJK 字形 advance 应兜底 font_size=24，实={:.3}（.notdef 会给 ≈14.4 → 与 Unity 1em quad 重叠）",
+            (g[1].x - notdef_adv).abs() < 0.5,
+            "缺字 advance 应=.notdef={:.3}，实={:.3}",
+            notdef_adv,
             g[1].x,
         );
     }
