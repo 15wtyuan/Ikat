@@ -4,15 +4,132 @@
 //!   ③ 自指模拟：       measure_text(content, Some(text_width①))
 //! flag：② 行数 ≠ ① 行数 → render 二次测量换行（回归现场）。
 //! 用 CJK 字体（showcase 含中文标题），与 Unity 实际字体族接近。
-use loomgui_core::scene::node::NodeKind;
-use loomgui_core::stage::Stage;
-use loomgui_core::text::layout::measure_text;
+
+use loomgui_core::text::atlas::{GlyphAtlas, GlyphKey};
+use loomgui_core::text::layout::{Font, FontTable};
 
 fn main() {
+    // ── v1.6：GlyphAtlas 独立验证（不依赖 pkg.bin）──
+    // 直接用测试字体文件构造 Font，独立 exercise atlas API，确保 atlas 模块自身健康。
     let font_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/wqy-microhei.ttc"
     );
+    let font = match Font::from_path(font_path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Font::from_path({}): {}", font_path, e);
+            return;
+        }
+    };
+    let face = &font.face;
+
+    // 构造字体表获取 font_id（atlas key 需要）
+    let mut fonts = FontTable::new();
+    fonts
+        .register("wqy-microhei", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
+    let font_id = fonts.font_id(None);
+    let mut atlas = GlyphAtlas::new();
+
+    // ensure 字形 'H' @ 32px
+    let gid_h = face.glyph_index('H').unwrap_or(ttf_parser::GlyphId(0));
+    let r = atlas.ensure(
+        face,
+        GlyphKey {
+            font_id,
+            glyph_id: gid_h.0,
+            size_px: 32,
+            effect_sig: 0,
+        },
+    );
+    println!("─── v1.6 GlyphAtlas 验证 ───");
+    println!(
+        "ensure 'H' @32px  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
+        r.page, r.u0, r.v0, r.u1, r.v1, r.px_w, r.px_h
+    );
+
+    // 脏页：首次 ensure 应标脏
+    let dirty = atlas.dirty_pages();
+    println!("dirty_pages: {:?}  (len={})", dirty, dirty.len());
+    assert!(!dirty.is_empty(), "ensure 后应有脏页");
+
+    // page 0 字节非空
+    let (bytes, w, h) = atlas.page_bytes(0);
+    println!(
+        "page0: {}x{}  {} bytes (R8, expected {})",
+        w, h, bytes.len(), w * h
+    );
+    assert!(w > 0 && h > 0, "page0 宽高应 >0");
+    assert_eq!(bytes.len() as u32, w * h, "R8 字节数 = w*h");
+
+    // .notdef (gid 0) ensure：缺字 tofu 路径
+    let missing = atlas.ensure(
+        face,
+        GlyphKey {
+            font_id,
+            glyph_id: 0,
+            size_px: 32,
+            effect_sig: 0,
+        },
+    );
+    println!(
+        ".notdef(gid0) @32px  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
+        missing.page, missing.u0, missing.v0, missing.u1, missing.v1, missing.px_w, missing.px_h
+    );
+    assert!(missing.px_w > 0 && missing.px_h > 0, ".notdef tofu 应有非零尺寸");
+
+    // 再次 dirty_pages：页 0 已存在（.notdef 可能挤到新页）
+    println!("dirty_pages after .notdef: {:?}", atlas.dirty_pages());
+
+    // page_bytes OOB 安全：大 page 号应返空切片不 panic
+    let (ob, ow, oh) = atlas.page_bytes(999);
+    assert_eq!((ob.len(), ow, oh), (0, 0, 0), "page_bytes OOB 安全返空");
+    println!("page_bytes(999) OOB: ({}, {}, {})  -- OK", ob.len(), ow, oh);
+
+    // 多字形 + 多 size 验证（确保不同 size 走不同槽位）
+    let r48 = atlas.ensure(
+        face,
+        GlyphKey {
+            font_id,
+            glyph_id: gid_h.0,
+            size_px: 48,
+            effect_sig: 0,
+        },
+    );
+    println!(
+        "ensure 'H' @48px  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
+        r48.page, r48.u0, r48.v0, r48.u1, r48.v1, r48.px_w, r48.px_h
+    );
+    assert!((r.u0, r.v0) != (r48.u0, r48.v0), "不同 size 走不同槽位");
+
+    // CJK 字形：确保中文字形能分配上（用于验证 CJK 字体路径）
+    let gid_cjk = face.glyph_index('中').unwrap_or(ttf_parser::GlyphId(0));
+    let r_cjk = atlas.ensure(
+        face,
+        GlyphKey {
+            font_id,
+            glyph_id: gid_cjk.0,
+            size_px: 32,
+            effect_sig: 0,
+        },
+    );
+    println!(
+        "ensure '中' @32px  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
+        r_cjk.page, r_cjk.u0, r_cjk.v0, r_cjk.u1, r_cjk.v1, r_cjk.px_w, r_cjk.px_h
+    );
+
+    println!("─── GlyphAtlas 验证通过 ───\n");
+
+    // ── 原有文本 dump（依赖 pkg.bin）──
+    run_text_dump(font_path);
+}
+
+fn run_text_dump(font_path: &str) {
+    use loomgui_core::scene::node::NodeKind;
+    use loomgui_core::stage::Stage;
+    use loomgui_core::text::layout::measure_text;
+
     let pkg_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin"
@@ -20,7 +137,7 @@ fn main() {
     let pkg = match std::fs::read(pkg_path) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("read pkg: {}", e);
+            eprintln!("skip text dump: read pkg: {}", e);
             return;
         }
     };
@@ -38,14 +155,19 @@ fn main() {
         return;
     }
     s.tick_and_render();
-    let scene = s.scene.as_ref().unwrap();
+    let scene = match s.scene.as_ref() {
+        Some(sc) => sc,
+        None => {
+            eprintln!("tick_and_render: scene is None (pkg may need rebuild after blob v10)");
+            return;
+        }
+    };
     let font = s.fonts.select(None);
     println!("n_nodes={} font=wqy-microhei", scene.nodes.len());
     println!(
         "{:<22} {:>8} {:>9} {:>8} {:>8} {:>8}  content",
         "id", "rect.w", "none.tw", "none.ln", "before", "after"
     );
-    // before = measure(rect.w).lines（用 rect.w 重测）；after = scene.text_layouts.lines（render 复用 layout 结果）。
     let mut flagged = 0;
     for n in scene.nodes.values() {
         let content = match &n.kind {
