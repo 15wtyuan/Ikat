@@ -1,18 +1,15 @@
 name: Unity Smoke
 
-# Unity EditMode Test Runner via game-ci (https://game.ci)。
+# Unity EditMode tests via game-ci/unity-builder (https://game.ci)。
 # 测试在 loomgui_unity_package/Tests/（EditMode [Test]，asmdef 仅 Editor 平台 + UNITY_INCLUDE_TESTS）。
 # 这些测试通过 P/Invoke 调 loomgui_ffi_c → 跑前必须先 build 当前 Rust 源码的 .dll 覆盖 Plugins
 # （否则测的是上次 commit 入库的旧 .dll）。
-# runner = windows-latest：FFI 产物是 Windows .dll（对齐项目"Windows 本机是唯一编码机"工作流），
-# 不需另建 Linux .so 链。
+# runner = windows-latest：FFI 产物是 Windows .dll。
 #
-# 前置（必做一次，CI 内无法完成）：Personal license 需 3 个 repo secret（game-ci v4 官方流程）：
-#   UNITY_LICENSE  = 本地 Unity Hub 激活后 C:\ProgramData\Unity\Unity_lic.ulf 的全文内容
+# 前置：在 repo Settings → Secrets → Actions 配两个 secret：
 #   UNITY_EMAIL    = Unity 账号邮箱
 #   UNITY_PASSWORD = Unity 账号密码
-# （.ulf 在任何激活过 Unity Personal 的机器上都有；license 不绑定版本/平台，本地拿一份即可。）
-# 配前此 workflow 会在 license 步报错——这是预期，不是 workflow bug。
+# （Personal license 自动在线激活，不需要 .ulf 文件）
 
 on:
   push:
@@ -52,13 +49,15 @@ jobs:
           restore-keys: unity-library-win-
 
       - id: tests
-        uses: game-ci/unity-test-runner@v4
+        uses: game-ci/unity-builder@v4
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
           projectPath: loomgui_unity
           unityVersion: 6000.5.0f1
+          targetPlatform: StandaloneWindows64
+          runTests: true
           testMode: EditMode
           githubToken: ${{ secrets.GITHUB_TOKEN }}
 
