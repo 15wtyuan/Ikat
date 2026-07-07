@@ -48,6 +48,10 @@ fn main() {
         "ensure 'H' @32px  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
         r.page, r.u0, r.v0, r.u1, r.v1, r.px_w, r.px_h
     );
+    // UV 必须在 [0,1] 归一化区间内（atlas 槽位子区域）。
+    assert!((0.0..=1.0).contains(&r.u0) && (0.0..=1.0).contains(&r.u1));
+    assert!((0.0..=1.0).contains(&r.v0) && (0.0..=1.0).contains(&r.v1));
+    assert!(r.px_w > 0 && r.px_h > 0, "字形像素尺寸应 >0");
 
     // 脏页：首次 ensure 应标脏
     let dirty = atlas.dirty_pages();
@@ -158,7 +162,7 @@ fn run_text_dump(font_path: &str) {
     let scene = match s.scene.as_ref() {
         Some(sc) => sc,
         None => {
-            eprintln!("tick_and_render: scene is None (pkg may need rebuild after blob v10)");
+            eprintln!("tick_and_render: scene is None (load_package only stores resources; example would need create_root/instantiate to build a scene before tick)");
             return;
         }
     };
