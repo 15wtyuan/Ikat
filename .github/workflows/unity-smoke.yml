@@ -1,15 +1,87 @@
 name: Unity Smoke
 
-# 占位：Unity PlayMode 测试 via game-ci（https://game.ci）。本轮（② CI 工具链）未启用——
-# Rust 侧 CI 已在 rust-ci.yml 覆盖；Unity 侧需先配 license secret：
-#   UNITY_EMAIL / UNITY_PASSWORD / UNITY_SERIAL（见 game-ci getting-started）。
-# 配好后把 placeholder job 换成 game-ci/unity-test-runner action。
+# Unity EditMode Test Runner via game-ci (https://game.ci)。
+# 测试在 loomgui_unity_package/Tests/（EditMode [Test]，asmdef 仅 Editor 平台 + UNITY_INCLUDE_TESTS）。
+# 这些测试通过 P/Invoke 调 loomgui_ffi_c → 跑前必须先 build 当前 Rust 源码的 .dll 覆盖 Plugins
+# （否则测的是上次 commit 入库的旧 .dll）。
+# runner = windows-latest：FFI 产物是 Windows .dll（对齐项目"Windows 本机是唯一编码机"工作流），
+# 不需另建 Linux .so 链。
+#
+# 前置（必做一次，CI 内无法完成）：Personal license 需 3 个 repo secret（game-ci v4 官方流程）：
+#   UNITY_LICENSE  = 本地 Unity Hub 激活后 C:\ProgramData\Unity\Unity_lic.ulf 的全文内容
+#   UNITY_EMAIL    = Unity 账号邮箱
+#   UNITY_PASSWORD = Unity 账号密码
+# （.ulf 在任何激活过 Unity Personal 的机器上都有；license 不绑定版本/平台，本地拿一份即可。）
+# 配前此 workflow 会在 license 步报错——这是预期，不是 workflow bug。
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
-  placeholder:
+  # ── 一次性 license 生成 job（拿到 .ulf 后删）────────────────────────────────
+  # 用途：在 CI 里生成 Unity manual-activation 请求文件（.alf），你下载后上传到
+  #   https://license.unity3d.com/manual 换取 .ulf，再把 .ulf 内容存成 UNITY_LICENSE secret。
+  # 拿到 license、test job 跑通后，整个 activation job 可删除。
+  activation:
+    name: Get Unity license (run once, then delete)
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Unity PlayMode CI 待启用（需 game-ci + license secret）"
+      - id: alf
+        uses: game-ci/unity-request-activation-file@v3
+        with:
+          unityVersion: 6000.5.0f1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unity-activation-file
+          path: ${{ steps.alf.outputs.filePath }}
+
+  editmode-tests:
+    name: Unity EditMode tests (Win)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: build FFI .dll (current Rust source)
+        run: cargo build -p loomgui_ffi_c --release
+
+      - name: stage .dll into package Plugins
+        shell: pwsh
+        run: |
+          Copy-Item target/release/loomgui_ffi_c.dll `
+            loomgui_unity_package/Plugins/LoomGUI/loomgui_ffi_c.dll -Force
+
+      - uses: actions/cache@v4
+        with:
+          path: loomgui_unity/Library
+          key: unity-library-win-${{ hashFiles('loomgui_unity/Packages/manifest.json', 'loomgui_unity/ProjectSettings/ProjectVersion.txt') }}
+          restore-keys: unity-library-win-
+
+      - id: tests
+        uses: game-ci/unity-test-runner@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: loomgui_unity
+          unityVersion: 6000.5.0f1
+          testMode: EditMode
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unity-test-results
+          path: ${{ steps.tests.outputs.artifactsPath }}
