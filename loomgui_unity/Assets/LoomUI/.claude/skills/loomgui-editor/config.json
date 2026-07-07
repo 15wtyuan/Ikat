@@ -1,8 +1,8 @@
 ﻿{
   "exe_path": "../../../loomgui_unity_package/Editor/Tools/loomgui_pkg.exe",
   "res_dir": "res",
-  "output_dir": "../StreamingAssets",
+  "output_dir": "../Bundlesui/",
   "packages": [
-    {"name": "showcase", "source": "showcase", "html": ["home.html", "list_item.html", "mail.html", "page_controls.html", "page_controller.html", "page_dyntree.html", "page_image.html", "page_interact.html", "page_list.html", "page_nativehost.html", "page_scroll.html", "page_text.html", "page_tween.html", "tips_toast.html"]}
+    {"name": "showcase", "source": "showcase", "html": ["home.html", "list_item.html", "mail.html", "page_controls.html", "page_dyntree.html", "page_image.html", "page_interact.html", "page_list.html", "page_scroll.html", "page_text.html", "page_tween.html", "tips_toast.html", "page_nativehost.html", "page_controller.html"]}
   ]
 }

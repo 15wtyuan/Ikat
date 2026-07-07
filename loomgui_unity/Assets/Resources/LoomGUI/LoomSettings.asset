@@ -14,7 +14,23 @@ MonoBehaviour:
   m_EditorClassIdentifier: LoomGUI.Runtime::LoomGUI.LoomSettings
   workspaceDir: Assets/LoomUI
   resDirName: res
-  pkgOutputDir: Assets/StreamingAssets
+  pkgOutputDir: Assets/Bundles
+  fonts:
+  - familyName: JetBrainsMono
+    sourceFileName: JetBrainsMono.ttf
+    isDefault: 0
+  - familyName: DejaVuSans
+    sourceFileName: DejaVuSans.ttf
+    isDefault: 1
+  - familyName: LXGWWenKai
+    sourceFileName: LXGWWenKai.ttf
+    isDefault: 0
+  - familyName: PressStart2P
+    sourceFileName: PressStart2P.ttf
+    isDefault: 0
+  - familyName: wqy-microhei
+    sourceFileName: wqy-microhei.ttc
+    isDefault: 0
   packages:
   - pkgName: showcase
     sourceDir: showcase
@@ -32,9 +48,9 @@ MonoBehaviour:
     - page_tween.html
     - tips_toast.html
     - page_nativehost.html
+    - page_controller.html
   atlasEntries:
   - atlasName: ShowcaseAtlas
     isDefault: 0
     folders:
     - Assets/LoomUI/res/icons
-    atlas: {fileID: 100100200, guid: 774861615e1c1454f991c0a5d9cbdf15, type: 3}

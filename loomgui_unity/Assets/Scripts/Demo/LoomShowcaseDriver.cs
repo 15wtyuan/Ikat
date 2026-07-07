@@ -140,12 +140,9 @@ namespace LoomGUI
                 Debug.LogError("[Showcase] 无 LoomStageDriver——请在 Inspector 指定或挂同 GO");
                 return;
             }
+            // _stage 试拿（可能 null：LoomStageDriver.Awake 与本 Awake 顺序不保证）；
+            // Start 兜底再拿——Start 在所有 Awake 后跑，driver.Stage 必已建。
             _stage = _driver.Stage;
-            if (_stage == null)
-            {
-                Debug.LogError("[Showcase] Driver.Stage 未建——LoomStageDriver.Awake 可能未跑");
-                return;
-            }
         }
 
         // #1a1d2e = .root 背景色（showcase 深蓝底）。主相机配同色，letterbox 与 root 无缝。
@@ -153,7 +150,12 @@ namespace LoomGUI
 
         void Start()
         {
-            if (_stage == null) return;
+            if (_stage == null && _driver != null) _stage = _driver.Stage;
+            if (_stage == null)
+            {
+                Debug.LogError("[Showcase] Driver.Stage 未建——LoomStageDriver.Awake 失败或未挂");
+                return;
+            }
             ConfigureCameraBackground();
 
             // layer 骨架：root + ui_layer（主界面层）+ tips_layer（tips 层，在上）。

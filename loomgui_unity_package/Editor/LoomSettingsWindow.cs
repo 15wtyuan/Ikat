@@ -400,8 +400,8 @@ namespace LoomGUI.Editor
             AssetDatabase.Refresh();
         }
 
-        // 字体源文件拷贝两份到 Bundles/fonts/：原文件名给 AssetBundle（Font asset），加 .bytes 后缀给 Rust 测量端读。
-        // 同一物理源文件双写避免运行时再转换——AB 加载拿 Font，Rust .bytes 拿原始 ttf/otf/ttc 字节。
+        // v1.6 font-to-core：核心自绘字体，后端只需原始 ttf/otf/ttc 字节喂 Rust。
+        // 只拷一份 .bytes 到 Bundles/fonts/——不再复制 Unity Font asset（核心自产 atlas，不靠引擎字体 API）。
         void PublishFonts()
         {
             string fontsDir = ToAbs(Path.Combine(_settings.pkgOutputDir, "fonts"));
@@ -413,25 +413,36 @@ namespace LoomGUI.Editor
                 string assetPath = FindFontAssetPath(entry.sourceFileName);
                 if (string.IsNullOrEmpty(assetPath))
                 {
-                    AppendLog($"[发布] 字体 {entry.sourceFileName} 找不到源 asset，跳过");
+                    AppendLog($"[发布] 字体 {entry.sourceFileName} 找不到源文件，跳过");
                     continue;
                 }
                 string absSrc = Path.GetFullPath(assetPath);
-                File.Copy(absSrc, Path.Combine(fontsDir, entry.sourceFileName), overwrite: true);
                 File.Copy(absSrc, Path.Combine(fontsDir, entry.sourceFileName + ".bytes"), overwrite: true);
                 count++;
+                AppendLog($"[发布] 字体 {entry.sourceFileName} → {entry.sourceFileName}.bytes");
             }
             AppendLog($"[发布] Fonts: {count} → {fontsDir}");
         }
 
-        // 按 sourceFileName 在 AssetDatabase 查 Font asset 路径。FindAssets 全库搜 GUID，再按文件名精确匹配过滤同名误匹配。
+        // 按 sourceFileName 在 AssetDatabase 查字体源文件路径。v1.6 后不限 asset 类型——
+        // .ttc/.ttf 可能以 Font 或 DefaultAsset 导入（甚至未导入），按文件名精确匹配过滤同名。
+        // 注意：FindAssets 搜索词是 asset 名字（不含扩展名），sourceFileName 带扩展名须先去掉再搜，
+        // 拿到路径后再用 GetFileName(p) == sourceFileName 精确匹配（带扩展名）防同名不同后缀误匹配。
         string FindFontAssetPath(string sourceFileName)
         {
-            foreach (var g in AssetDatabase.FindAssets(sourceFileName + " t:Font"))
+            string searchName = Path.GetFileNameWithoutExtension(sourceFileName);
+            var guids = AssetDatabase.FindAssets(searchName);
+            if (guids.Length == 0)
+            {
+                AppendLog($"[发布] FindAssets('{searchName}') 返回 0——文件不在 Assets/ 下或名字不符");
+                return null;
+            }
+            foreach (var g in guids)
             {
                 var p = AssetDatabase.GUIDToAssetPath(g);
                 if (Path.GetFileName(p) == sourceFileName) return p;
             }
+            AppendLog($"[发布] '{sourceFileName}' 有 {guids.Length} 个 GUID 但文件名无一精确匹配");
             return null;
         }
 

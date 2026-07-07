@@ -100,7 +100,7 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 默认直读 Assets/LoomGUI/Bundles/fonts/{sourceFileName}.bytes。
+        /// 默认直读 {pkgOutputDir}/fonts/{sourceFileName}.bytes。
         /// v10：不再加载 Unity Font asset——核心自产 atlas，后端只喂 Rust 字节。
         /// 项目覆写换 AssetBundle/Addressables（build 后 Font asset 不在文件系统）。
         /// public 以便跨程序集（如 LoomGUI.Demo）直接调用。
@@ -108,35 +108,44 @@ namespace LoomGUI
         /// </summary>
         public virtual byte[] LoadFontBytes(FontEntry entry)
         {
-            string fontsDir = Path.Combine(Application.dataPath, "LoomGUI/Bundles/fonts");
-            string bytesPath = Path.Combine(fontsDir, entry.sourceFileName + ".bytes");
+            string bytesPath = Path.Combine(BundlesSubDir("fonts"), entry.sourceFileName + ".bytes");
             return File.Exists(bytesPath) ? File.ReadAllBytes(bytesPath) : null;
         }
 
         /// <summary>
-        /// 默认直读 Assets/LoomGUI/Bundles/ui/{name}.pkg.bin。项目覆写换 AB/Addressables。
+        /// 默认直读 {pkgOutputDir}/ui/{name}.pkg.bin。项目覆写换 AB/Addressables。
         /// public 以便跨程序集调用。返 null = 文件不存在/读取失败。
         /// </summary>
         public virtual byte[] LoadPackageBytes(string name)
         {
-            string path = Path.Combine(Application.dataPath, "LoomGUI/Bundles/ui", name + ".pkg.bin");
+            string path = Path.Combine(BundlesSubDir("ui"), name + ".pkg.bin");
             return File.Exists(path) ? File.ReadAllBytes(path) : null;
         }
 
         /// <summary>
-        /// 默认 editor LoadAssetAtPath（spriteatlasv2）；build 后返 null + LogError——
+        /// 默认 editor LoadAssetAtPath（{pkgOutputDir}/atlas/*.spriteatlasv2）；build 后返 null + LogError——
         /// 项目须覆写本方法走 AB/Addressables（SpriteAtlas 是 editor 资产，build 时打進包）。
         /// public 以便跨程序集调用。
         /// </summary>
         public virtual SpriteAtlas LoadSpriteAtlas(string atlasName)
         {
 #if UNITY_EDITOR
-            string path = "Assets/LoomGUI/Bundles/atlas/" + atlasName + ".spriteatlasv2";
+            // LoadAssetAtPath 要 "Assets/..." 开头；pkgOutputDir 默认含 "Assets/" 前缀，直接拼即可。
+            string path = Path.Combine(LoomSettings.GetOrCreateDefault().pkgOutputDir, "atlas", atlasName + ".spriteatlasv2").Replace('\\', '/');
             return UnityEditor.AssetDatabase.LoadAssetAtPath<SpriteAtlas>(path);
 #else
             Debug.LogError("[LoomStageDriver] LoadSpriteAtlas must be overridden for builds (AB/Addressables).");
             return null;
 #endif
+        }
+
+        // 拼 Bundles 子目录绝对路径。pkgOutputDir 是相对工程根的 "Assets/Bundles" 形式；
+        // 去 "Assets/" 前缀后相对 Assets/，与 Application.dataPath（已含 .../Assets）拼成绝对路径。
+        static string BundlesSubDir(string sub)
+        {
+            string pkgDir = LoomSettings.GetOrCreateDefault().pkgOutputDir;
+            if (pkgDir.StartsWith("Assets/")) pkgDir = pkgDir.Substring("Assets/".Length);
+            return Path.Combine(Application.dataPath, pkgDir, sub);
         }
 
         void LateUpdate()
