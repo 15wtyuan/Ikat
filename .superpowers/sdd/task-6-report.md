@@ -1,99 +1,111 @@
-# Task 6 报告: FrameBlob v9 + MirrorPool 双 dict reuse_key 复用
+# Task 6 Report: Unity FrameBlob v10 mirror + delete text rasterization path
 
-## 状态: done
+## Status: DONE
 
-Commit: `645f45afa278f1b4080d5a83dfeb482eca4592ed`
+## Commit
+- **SHA**: `63237bd`
+- **Subject**: `refactor(unity): drop backend text rasterizer (v1.6 font-to-core)`
+- **Files**: 9 changed (127 insertions, 765 deletions, 4 deletions)
 
-## 改的文件 (3)
+## Blob v10 Column Layout (mirrored from `loomgui_ffi_c/src/blob.rs`)
 
-### 1. `loomgui_unity/Assets/LoomGUI/Runtime/FrameBlob.cs`
-- **ExpectedVersion** 8→9，注释改"v9：加 reuse_key 列（第 22 列）"
-- **header** 128B→132B，21列→22列
-- **列注释** 末尾加 `21=reuse_key(u32, 0=无复用 >0=slot 复用键)`
-- **ReuseKey reader**: `public uint ReuseKey(int i) => ReadU32(ColOff(21) + i * 4);`
-- **arena offset 8 处全部 `21*4`→`22*4`**: MeshArenaOff/TextArenaOff/TextArenaLen/ClipTableOff/ClipTableLen/PathTableOff/PathTableLen（注释中的行内偏移也更新）
+20 columns (was 22 in v9 -- text_off/text_len deleted), header 116B (was 132B).
 
-### 2. `loomgui_unity/Assets/LoomGUI/Runtime/MirrorPool.cs`
-- **_pool** 单 dict → **_poolByNodeId** + **_poolByReuse** 双 dict
-- **Count**: `_poolByNodeId.Count + _poolByReuse.Count`
-- **Sync 方法**: 
-  - stale 标记：两个 dict 全标 true
-  - 遍历节点：`poolKey = reuseKey != 0 ? reuseKey : id`；`pool = reuseKey != 0 ? _poolByReuse : _poolByNodeId`
-  - SKIP/HEADER/FULL 查找均按 poolKey + pool
-  - 新建 RenderObj 时写 `pool[poolKey] = ro`（非 `_pool[id]`）
-  - stale 清理：两个 dict 各自收集+销毁
-- **Clear**: 两个 dict 各自 TearDown+Clear
-- **图资源段** (path_idx→Sprite) 原逻辑完整保留
-- **UpdateHeader / UploadMeshOrText** 不变
+| Idx | Column | Size | Notes |
+|-----|--------|------|-------|
+| 0 | node_id | 4B | |
+| 1 | parent_id | 4B | |
+| 2 | visible | 1B | |
+| 3 | alpha | 4B | |
+| 4 | sort_key | 4B | |
+| 5 | mask_context | 4B | |
+| 6 | m_a | 4B | world matrix |
+| 7 | m_b | 4B | |
+| 8 | m_c | 4B | |
+| 9 | m_d | 4B | |
+| 10 | m_tx | 4B | |
+| 11 | m_ty | 4B | |
+| 12 | payload_kind | 1B | v10: only 1=Mesh |
+| 13 | mesh_off | 4B | |
+| 14 | mesh_len | 4B | |
+| 15 | path_idx | 4B | was col 17 in v9 |
+| 16 | program | 1B | was col 18 in v9 |
+| 17 | color_matrix | 80B | was col 19 in v9 |
+| 18 | change_level | 1B | was col 20 in v9 |
+| 19 | reuse_key | 4B | was col 21 in v9 |
 
-### 3. `loomgui_unity/Assets/LoomGUI/Tests/MirrorPoolTests.cs`
-- 新增 class `MirrorPoolReuseKeyTests`（独立于 Ignore 的 MirrorPoolTests）
-- 新增 helper `OneNodeBlobV9`: 构造 v9 1 节点 Mesh blob（22 列 SOA，含 program/color_matrix/change_level/reuse_key）
-- 新增 test `SlotReuseKeyRecyclesGoAcrossNodeChange`:
-  - 帧1: node_id=100, reuse_key=5 → 建 GO
-  - 帧2: node_id=200, reuse_key=5 → 复用同一 GO（ReferenceEquals）
-  - 反射验证 `_poolByReuse[5]` 的 LastNodeId==200
-  - 验证 position 已更新到帧2坐标 (30,40)
+Arena headers (after 20 col_offsets): mesh_arena (off @ 92, len @ 96), clip_table (off @ 100, len @ 104), path_table (off @ 108, len @ 112).
 
-## grep 验证
+## FrameBlob.cs Changes
+- `ExpectedVersion` 9 -> 10
+- Header comment updated: 132B -> 116B, 22 cols -> 20
+- Col count: 22 -> 20 in comment block
+- `ColOff` range: `12 .. 12+22*4` -> `12 .. 12+20*4`
+- Arena offset properties: deleted `TextArenaOff`/`TextArenaLen`; `ClipTableOff`/`PathTableOff` recalculated (all 8B earlier)
+- `TextOff(i)` / `TextLen(i)` -- deleted
+- `ReadText` + `GlyphData` struct -- deleted
+- `ChangeLevel(i)`: `ColOff(20)` -> `ColOff(18)`
+- `ReuseKey(i)`: `ColOff(21)` -> `ColOff(19)`
+- `PathIdx(i)`: `ColOff(17)` -> `ColOff(15)`
+- `Program(i)`: `ColOff(18)` -> `ColOff(16)`
+- `ColorMatrix(i)`: `ColOff(19)` -> `ColOff(17)`
 
-```
-FrameBlob.cs:
-  ExpectedVersion = 9           ✓
-  ReuseKey reader 在 line 49    ✓
-  22*4 8 处（全 arena offset）   ✓
-  21*4 残留 0                   ✓
+## TextRasterizer.cs Deletion
+- `git rm`'d `loomgui_unity_package/Runtime/TextRasterizer.cs` + `.meta`
+- `git rm`'d `loomgui_unity_package/Tests/TextRasterizerTests.cs` + `.meta`
 
-MirrorPool.cs:
-  _poolByNodeId + _poolByReuse  ✓
-  旧 _pool (不含 By) 残留 0     ✓
-  poolKey 4 处引用              ✓
-```
+## MirrorPool.cs Deletions
+- **RenderObj fields removed**: `IsText`, `LastGlyphs`, `LastFontSize`, `LastTextColor`, `LastFont`
+- **`_lastFontVersion` field** removed
+- **fontDirty logic** removed (~15 lines: fontVersionAtStart/fontDirty calc, force-All-on-dirty, mid-rebuild race guard)
+- **Text font selection branch** removed (~14 lines: ReadText call + ResolveFont cache)
+- **`IsText` assignment** removed (`ro.IsText = kind == 2`)
+- **`UploadMeshOrText` text path** removed (~15 lines: kind==2 branch with TextRasterizer.BuildMesh)
+- **`ResolveFont` static method** removed entirely
+- **`UpdateHeader` text material branch** removed (~7 lines: kind==2 material selection, font param)
+- **Sync signature**: 8 params -> 5 params (dropped unityFonts, defaultFont, fontVersion)
+- **`UpdateHeader` signature**: `Font font` param removed
+- **`UploadMeshOrText` signature**: `Font font` param removed; simplified to single mesh path
+- **`kind != 1 && kind != 2` guard** simplified to `kind != 1`
 
-## MirrorPool stale 逻辑审查
+## LoomStage.cs Deletions
+- `_unityFonts` dict + `_defaultUnityFont` field -- deleted
+- `_fontVersion` field + `FontVersion` property -- deleted
+- `OnFontRebuilt(Font)` method -- deleted
+- `RegisterFont`: `(string, byte[], Font, bool)` -> `(string, byte[], bool)`
+- `Tick` -> `_pool.Sync(blob, _renderRoot, _mm, _sprites, Texture2D.whiteTexture)` (no font args)
 
-**slot 换绑场景（核心路径）**:
-- 帧1: node_id=100, reuse_key=5 → poolKey=5, pool=_poolByReuse → _poolByReuse[5]=new GO
-- 帧2: node_id=200, reuse_key=5 → poolKey=5, pool=_poolByReuse → TryGetValue 命中 → Stale=false → GO 复用 ✓
-- 帧2 无 node_id=100（slot 换绑）→ _poolByReuse[5] 已清 stale → 不销毁 ✓
+## LoomStageDriver.cs Deletions
+- `Font.textureRebuilt +=/-=` subscription/unsubscription -- deleted
+- `LoadFont(FontEntry)` returning `(byte[], Font)` -> `LoadFontBytes(FontEntry)` returning `byte[]`
+- UnityEditor AssetDatabase.LoadAssetAtPath<Font> block -- deleted
+- `RegisterFontsFromSettings`: updated to use new method signatures
 
-**普通节点不变**: reuse_key=0 → poolKey=id, pool=_poolByNodeId → 行为同 v1 ✓
+## MirrorPoolTests.cs Changes
+- `OneNodeBlobV9` -> `OneNodeBlobV10`: 22 cols -> 20, header 132B -> 116B, no text_arena, column indices updated
+- Sync calls: old 8-arg -> new 5-arg signature
+- **MirrorPoolTextTests class entirely removed** (OneTextBlobV9 helper + 2 text-specific tests obsolete)
 
-**reuse_key 变更**: 旧 reuse_key 对应的 GO 在 _poolByReuse 中 stale → 销毁，新 reuse_key 建 GO。正确 ✓
+## Grep Self-Check Result
+Comprehensive grep for `TextRasterizer|OnFontRebuilt|_fontVersion|fontVersion|LastGlyphs|LastFont\b|IsText|_lastFontVersion|fontDirty|ReadText|GlyphData|text_arena|TextArena|kind == 2|unityFont|_unityFonts|_defaultUnityFont`:
+- 5 matches, all in doc comments documenting the v10 change -- **no dangling code references**.
 
-**无 concerns** — 双 dict stale 逻辑正确，slot 换绑走 poolKey 命中路径不销毁。
+Additional verification:
+- `\.LoadFont\(|\.RegisterFont\(.*Font` -> **empty** (no old signature callers)
 
-## 家里机待编译/验证项
+## Concerns
+1. **Unity compile + PlayMode NOT verified on this machine** -- home machine Task 9 gate. Established two-machine workflow.
+2. **`LoomStage.RegisterFont` signature change**: 4 params to 3 (dropped `Font unityFont`). External callers will get compile errors -- intentional.
+3. **`LoomStageDriver.LoadFont` -> `LoadFontBytes`**: renamed method. Subclass overrides will break -- intentional.
+4. **MirrorPool.Sync signature change**: 8 params to 5. Task 7 will extend this further for font atlas texture upload.
 
-1. **Unity 编译**：C# 语法（反射 IDictionary cast、BindingFlags 全限定名）需 Unity 编辑器编译验证
-2. **EditMode 测试**: `MirrorPoolReuseKeyTests.SlotReuseKeyRecyclesGoAcrossNodeChange` 跑通
-3. **PlayMode 验收**: 配合 Rust T5 产出的 v9 blob 端到端验证 slot 滚动复用
-4. **v4 旧测试仍 Ignore**: MirrorPoolTests/MirrorPoolFlattenTests 类级 `[Ignore]` 未动
-
-## 偏差
-
-无。严格按 brief Step 1-5 实现。
-
-## Fix: LastNodeId 复用时更新
-
-Commit: `94d3b5f`（在当前 branch 的顶部）
-
-### 问题
-T6 review 发现 1 Critical：`MirrorPool.cs` Sync 方法里 `ro.LastNodeId = id;` 在 `if (!pool.TryGetValue(...))` 块内，仅新建 GO 时赋值。slot 换绑（reuse_key 不变、node_id 变）复用 GO 时，LastNodeId 保持旧值。测试 `SlotReuseKeyRecyclesGoAcrossNodeChange` 断言复用后 LastNodeId==200 会 fail。
-
-### 修改
-`loomgui_unity/Assets/LoomGUI/Runtime/MirrorPool.cs` 第 108 行：
-- 把 `ro.LastNodeId = id;` 从 `if` 块内（原 108 行）移到 `if` 块外（新 111 行），`ro.Stale = false;` 之前。
-- 注释：`// v1.4-b：新建 + 复用均更新（slot 换绑时 node_id 变）`
-
-grep 确认：
-```
-MirrorPool.cs:
-  ro.LastNodeId = id; 在 line 111（if 块外）  ✓
-  ro.Stale = false; 在 line 112               ✓
-  残留 ro.LastNodeId = id 数: 1               ✓
-```
-
-### 家里机验证
-- 跑 `SlotReuseKeyRecyclesGoAcrossNodeChange` 测试，确认复用后 `_poolByReuse[5].LastNodeId == 200`。
-- 本机无 Unity，未跑测试。
+## Files Changed
+- `loomgui_unity_package/Runtime/FrameBlob.cs` -- v10 mirror
+- `loomgui_unity_package/Runtime/MirrorPool.cs` -- text path deletions
+- `loomgui_unity_package/Runtime/LoomStage.cs` -- fontVersion/unityFont deletions
+- `loomgui_unity_package/Runtime/LoomStageDriver.cs` -- textureRebuilt/LoadFont deletions
+- `loomgui_unity_package/Tests/MirrorPoolTests.cs` -- v10 alignment + text test removal
+- `loomgui_unity_package/Runtime/TextRasterizer.cs` -- **deleted**
+- `loomgui_unity_package/Runtime/TextRasterizer.cs.meta` -- **deleted**
+- `loomgui_unity_package/Tests/TextRasterizerTests.cs` -- **deleted**
+- `loomgui_unity_package/Tests/TextRasterizerTests.cs.meta` -- **deleted**

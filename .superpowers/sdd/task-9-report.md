@@ -1,119 +1,92 @@
-# Task 9 报告：删 samples/editor + 文档同步 + 重打 pkg.bin + build .dll
+# Task 9 报告：dump example 验证 + 家里机 PlayMode 全验收手交
 
-**Status**: completed
-**Commit**: `e128b72`（branch: `worktree-workflow-atlas-rework`）
+**Status**: DONE
+**Commit**: `03e463e`（branch: `feat/v1.6-font-to-core`）
 
-## 执行摘要
+## 1. dump_text 扩展
 
-完成工作流闭环收尾：删除已废弃的 `samples/` 和 `editor/` 目录，将 design-systems 组件库迁入 Unity Assets，同步所有文档引用，重打 showcase pkg.bin，确认 Rust 无回归。
+### 扩展内容
 
-## Step 1: 迁 design-systems 到 Unity 内
+在现有 `dump_text.rs`（原本验证文本换行诊断）基础上增加 v1.6 GlyphAtlas 独立验证段。验证段在当前文本 dump 前运行，**不依赖 pkg.bin**——直接用测试字体文件（`wqy-microhei.ttc`）构造 Font + GlyphAtlas，独立 exercise atlas API。
 
-```bash
-git mv samples/design-systems/loomgui loomgui_unity/Assets/LoomUI/design-systems
+验证项目：
+- **ensure 'H' @32px**：返回 page/UV/px_w/px_h
+- **dirty_pages**：ensure 后非空
+- **page_bytes(0)**：4096x4096 R8 字节 = 16,777,216
+- **.notdef (gid 0)**：tofu 路径确保返回非零尺寸
+- **多 size**：'H' @48px vs @32px 走不同槽位（不同 UV）
+- **CJK 字形**：'中' @32px 可分配
+- **page_bytes OOB**：大 page 号返空切片不 panic
+
+### 实际运行输出
+
+```
+─── v1.6 GlyphAtlas 验证 ───
+ensure 'H' @32px  page=0  uv=(0.0000,0.0000)-(0.0046,0.0061)  px=19x25
+dirty_pages: [0]  (len=1)
+page0: 4096x4096  16777216 bytes (R8, expected 16777216)
+.notdef(gid0) @32px  page=0  uv=(0.0046,0.0000)-(0.0085,0.0061)  px=16x25
+dirty_pages after .notdef: [0]
+page_bytes(999) OOB: (0, 0, 0)  -- OK
+ensure 'H' @48px  page=0  uv=(0.0000,0.0078)-(0.0066,0.0168)  px=27x37
+ensure '中' @32px  page=0  uv=(0.0085,0.0000)-(0.0154,0.0078)  px=28x32
+─── GlyphAtlas 验证通过 ───
 ```
 
-迁入 3 个文件：`DESIGN.md`、`components.html`、`tokens.css`。历史保留。
+所有 assertion 通过。UV 在 [0..1] 范围内，page_bytes 非空，dirty_pages 正确标记，多 size 分片正确，OOB 安全。
 
-## Step 2: 删 samples/ + editor/
+### 文本 dump 部分
 
-```bash
-git rm -r samples/ editor/
+pkg.bin 加载后 `tick_and_render` 返回 scene=None。这是预期行为：v1.6 的 blob v10 格式变化（NodePayload 删 Text 变体）导致旧 pkg.bin 不再兼容，需重建 pkg。这不影响 atlas 验证——atlas 段完全独立于 pkg。
+
+## 2. fence_contract 围栏门
+
+```
+running 25 tests
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured
 ```
 
-删除 30 个文件：editor/（10 文件：init.mjs, init.test.mjs, rules/, skill/）+ samples/（20 文件：v1-showcase/, backpack/, dyn-mail/, ai-output/。design-systems/ 已在 Step 1 迁出）。
+全部通过。
 
-## Step 3-6: 文档同步
+## 3. 全回归
 
-| 文件 | 改动 |
-|---|---|
-| `CLAUDE.md` L59, L93, L105 | Workspace 成员去 editor/samples；围栏分发改 LoomUI 工作区 + Settings 面板；加设计师工作区路径说明 |
-| `README.md` L28, L36, L48-52 | pkg 描述去 "+ 图集"；示例路径改 LoomUI/showcase；项目结构表删 editor/samples 行 |
-| `docs/roadmap/roadmap.md` 第 3 节 | 整段重写：open-design 壳描述 → Unity 内 C# 实现（LoomSettingsWindow + LoomWorkspaceInitializer + config.json + open-design import + loomgui_pkg.exe） |
-| `docs/design/fence.md` 第 5 节 | editor 消费者行改为 "Unity 插件 Editor Resources 注入（`LoomWorkspaceInitializer`）" |
-
-## Step 7: 重打 showcase pkg.bin
-
-命令（PowerShell）：
 ```
-loomgui_pkg.exe "Assets/LoomUI/showcase" showcase \
-  --html home.html,mail.html,page_controls.html,page_dyntree.html,page_image.html,page_interact.html,page_scroll.html,page_text.html,page_tween.html,tips_toast.html \
-  --res-root "Assets/LoomUI/res" \
-  -o "Assets/StreamingAssets/showcase.pkg.bin"
+543 + 25 + 2 + 3 + 5 + 2 + 62 + 6 + 10 = 658 passed, 0 failed
 ```
 
-输出：`wrote showcase.pkg.bin (408342 bytes, 10 components, 4 manifest paths)` -- exit code 0。
+全部通过。
 
-## Step 8: build .dll
+## 4. 文件变更 + Commit
 
-```bash
-cargo build -p loomgui_ffi_c --release   # Finished in 13.72s
-cp target/release/loomgui_ffi_c.dll loomgui_unity/Assets/Plugins/LoomGUI/loomgui_ffi_c.dll
+- **修改**：`loomgui_core/examples/dump_text.rs`（+128/-6 lines）
+
+```
+commit 03e463e
+diag(example): dump_text verifies GlyphAtlas ensure/UV/dirty-pages
 ```
 
-dll 大小：1886208 bytes，与 target 一致，无 stale。
+## 5. PlayMode 手交文档
 
-## Step 9: 围栏门
+路径：`F:/WorkSpace/projects/LoomGUI/.superpowers/sdd/v1.6-playmode-handoff.md`
 
-```bash
-cargo test -p loomgui_core --test fence_contract
-```
+覆盖内容：
+- 前置操作（pull + Unity focus 编译 + stale .dll 诊断）
+- 9 项 PlayMode 验收（ASCII/CJK/合批/tofu/多页/全功能回归/坑113/shader .r/V-flip）
+- 已知未验证项 + 症状->修复位置速查表
 
-**10 passed, 0 failed**。
+## 6. 自审
 
-## Self-Review
+- [x] Spec 覆盖：dump_text 覆盖 atlas ensure/UV/dirty/page_bytes/.notdef 所有关键 API 路径
+- [x] fence_contract：25/25 通过
+- [x] 全回归：658/658 通过
+- [x] 代码注释上线品质：自包含，无坑号暗语
+- [x] PlayMode 手交：完整清单，症状->修复位置映射清晰
+- [x] commits 仅含 `dump_text.rs` 变更
 
-- design-systems 目录的 `.meta` 文件未生成（本机无 Unity），家里机 Unity 打开 Assets 会自动生成。届时需 add + commit 三个 .meta + 父目录 .meta。
-- 旧 `loom_showcase.pkg.bin` 未删 -- 未在 brief 中要求删，且已在 git 追踪中。如果家里机 Load 逻辑读的是 `showcase.pkg.bin`（新名），旧的可后续手动 `git rm`。
-- CLAUDE.md 只改了 editor/samples 相关描述，未动其它部分（架构/围栏/FFI/调试/API）。
-- Rust 源码未改动，`.dll` 重建仅为确认编译不过期 + 二进制一致性检查。
+## 7. 顾虑
 
-## Concerns
-
-1. **`.meta` 缺失**：新迁的 `Assets/LoomUI/design-systems/` 下三个文件无对应 `.meta`。家里机 Unity 打开项目后会自动生成，需届时 add + commit。
-2. **旧 pkg.bin 残留**：`StreamingAssets/loom_showcase.pkg.bin`（旧名）仍在，后续可清理。
-3. **progress.md 有未暂存改动**：`.superpowers/sdd/progress.md` 被 task runner 修改但未 stage，不影响本 task 内容。
-
-## Fix: Task 9 review findings 修复
-
-**Status**: completed
-**Commit**: （见下）
-
-### Finding 1: `samples/` 空目录残留
-
-`samples/` 已 `git rm -r`，git 不再 tracking，但磁盘上残留空目录 `samples/design-systems/`。
-**修复**：`rm -rf samples/` 从磁盘彻底删除。git status 确认 samples/ 不再出现。
-
-### Finding 2: `docs/design/fence.md` §4 陈旧引用
-
-fence.md 有两处引用已删的 `editor/` 目录：
-
-| 行 | 旧文本 | 新文本 |
-|---|---|---|
-| 176 | `editor 的 CLAUDE.md.tmpl / fence.md 副本同步` | `Unity 插件 Editor Resources 的 fence-rules.md 同步（LoomWorkspaceInitializer 注入）` |
-| 212 | `editor 的 CLAUDE.md.tmpl 是注入给设计师的` | `Editor Resources 的 fence-rules.md 由 LoomWorkspaceInitializer 注入给设计师工作区` |
-
-§5 表格（第 208 行）已正确引用新机制，无需改动。
-grep 验证：改后 fence.md 中 `CLAUDE.md.tmpl` 和 `editor 的` 均为 0 匹配。
-
-### Finding 3: `loom_showcase.pkg.bin` stale 文件
-
-**grep 证据**：`LoomShowcaseDriver.cs:42` 加载 `"loom_showcase.pkg.bin"`（旧名）。
-`StreamingAssets/` 下两个文件并存：`loom_showcase.pkg.bin`（旧，git 追踪）+ `showcase.pkg.bin`（新，Task 9 重打）。
-
-**判断**：包名 `ShowcasePkg = "showcase"`，Task 9 有意改用 `showcase.pkg.bin`（新名）。改 driver 加载新名、删旧文件。
-
-**修复**：
-1. `LoomShowcaseDriver.cs:42`：`"loom_showcase.pkg.bin"` → `"showcase.pkg.bin"`
-2. `git rm loomgui_unity/Assets/StreamingAssets/loom_showcase.pkg.bin`（删除旧文件）
-3. 同步更新 5 个 Rust example 的硬编码路径：
-   - `dump_bg.rs`（注释 + 路径）
-   - `dump_img.rs`
-   - `dump_scroll.rs`
-   - `dump_text.rs`
-   - `verify_showcase_pkg.rs`（注释）
-4. grep 验证：`loomgui_core/` 和 `loomgui_unity/` 下 `loom_showcase.pkg.bin` 残量为 0。
-
-### 围栏门
-
-`cargo test -p loomgui_core --test fence_contract`：**10 passed, 0 failed**。无回归。
+1. **pkg.bin 需重建**：dump_text 的文本 dump 段因 blob v10 格式变化无法运行，需 `cargo run -p loomgui_pkg` 重建 showcase pkg.bin。atlas 验证段不受影响已全部通过。
+2. **V-flip 方向**：build_text_mesh UV 沿用 Image quad 惯例，但 text 的 y-up->y-down 翻转路径独立，PlayMode 需目视确认文字方向。
+3. **shader .r**：R8 TextureFormat 在 Unity 6.5 已支持，但 `tex2D` 采样 .r 返回值需 PlayMode 确认（非实心方块）。
+4. **多页 atlas**：公司机单页 4096^2 未触发溢出，多页路径由 `overflow_allocates_second_page` 单元测试覆盖，但 PlayMode 真实多页渲染未验证——需用大量 CJK 字形触发。
+5. **C# IL2CPP**：家里机 Editor 是 Mono（非 IL2CPP），`Span<byte>` / `BinaryPrimitives` 路径已单测覆盖，但真实 IL2CPP build 未验证（通常等出包阶段才测）。

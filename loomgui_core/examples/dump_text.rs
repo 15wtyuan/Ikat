@@ -62,7 +62,10 @@ fn main() {
     let (bytes, w, h) = atlas.page_bytes(0);
     println!(
         "page0: {}x{}  {} bytes (R8, expected {})",
-        w, h, bytes.len(), w * h
+        w,
+        h,
+        bytes.len(),
+        w * h
     );
     assert!(w > 0 && h > 0, "page0 宽高应 >0");
     assert_eq!(bytes.len() as u32, w * h, "R8 字节数 = w*h");
@@ -81,7 +84,10 @@ fn main() {
         ".notdef(gid0) @32px  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
         missing.page, missing.u0, missing.v0, missing.u1, missing.v1, missing.px_w, missing.px_h
     );
-    assert!(missing.px_w > 0 && missing.px_h > 0, ".notdef tofu 应有非零尺寸");
+    assert!(
+        missing.px_w > 0 && missing.px_h > 0,
+        ".notdef tofu 应有非零尺寸"
+    );
 
     // 再次 dirty_pages：页 0 已存在（.notdef 可能挤到新页）
     println!("dirty_pages after .notdef: {:?}", atlas.dirty_pages());
