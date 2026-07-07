@@ -1,93 +1,130 @@
-# Task 8 报告：工作区初始化 + AssetPostprocessor + 围栏规则/skill 迁移
+## Task 8 Report: Stage B -- multi-page atlas + cross-page mesh split
 
-## 状态：DONE
+### Status: DONE
 
-## 改动文件清单
+### Multi-page allocate (Step 1)
 
-### 新建
-| 文件 | 说明 |
-|---|---|
-| `loomgui_unity/Assets/LoomGUI/Editor/Resources/LoomGUI/fence-rules.md` | 迁自 `editor/rules/claude/CLAUDE.md.tmpl`。末段"生成完必须跑验证"→"生成完跑验证+打包"，改为读 config.json 调 loomgui_pkg.exe（用 `--res-root`） |
-| `loomgui_unity/Assets/LoomGUI/Editor/Resources/LoomGUI/skill/SKILL.md` | 迁自 `editor/skill/loomgui-editor/SKILL.md`。frontmatter description 砍 pack.mjs 引用；工作流 step 3 改为读 config.json 调 loomgui_pkg.exe（`--res-root`）；砍全部 pack.mjs 引用（3 处→0） |
-| `loomgui_unity/Assets/LoomGUI/Editor/Resources/LoomGUI/skill/references/fence.md` | 纯拷贝自 `editor/skill/loomgui-editor/references/fence.md`，无改动 |
-| `loomgui_unity/Assets/LoomGUI/Editor/Resources/LoomGUI/skill/references/preview-polyfill.html` | 纯拷贝自 `editor/skill/loomgui-editor/references/preview-polyfill.html`，无改动 |
-| `loomgui_unity/Assets/LoomGUI/Editor/Resources/LoomGUI/skill/references/preview-trust.md` | 纯拷贝自 `editor/skill/loomgui-editor/references/preview-trust.md`，无改动 |
-| `loomgui_unity/Assets/LoomGUI/Editor/LoomWorkspaceInitializer.cs` | 工作区初始化静态类。`Initialize(LoomSettings)` → InjectFenceRules（标签段增量合并）+ DistributeSkill（拷 Resources→.claude/skills/）+ LoomConfigExporter.Export + AssetDatabase.Refresh |
-| `loomgui_unity/Assets/LoomGUI/Editor/LoomWorkspaceAssetPostprocessor.cs` | AssetPostprocessor。`ShouldSkip` 拦工作区下 .html/.css/.claude/CLAUDE.md/design-systems/.od-skills 不导入；PNG 强制 Sprite |
+Already implemented by T1's `allocate` method: iterates existing etagere
+allocators, pushes a new `AtlasPage(4096^2)` on overflow. No code change
+needed -- built into T1 in anticipation of Stage B.
 
-### 修改
-| 文件 | 改动 |
-|---|---|
-| `loomgui_unity/Assets/LoomGUI/Editor/LoomSettingsWindow.cs` | 取消 `LoomWorkspaceInitializer.Initialize(_settings)` 注释（Task 5 桩注释 → 真调用） |
+### build_text_mesh return-type change (Step 2)
 
-## 语法核对
+Now returns `Vec<(u32 page, Vec<verts>, Vec<uvs>, Vec<colors>, Vec<indices>)>`.
+Two-pass: (1) collect glyphs grouped by atlas page into BTreeMap, (2) build
+independent mesh per page group. Single-font single-size text stays on one
+page -> one Vec entry -> one Mesh (unchanged from stage A). CJK spanning
+pages -> multiple Meshes (extra draw calls, acceptable escape valve).
 
-- **namespace**：两个新 C# 文件均为 `LoomGUI.Editor`，与现有 Editor 文件一致
-- **asmdef**：`LoomGUI.Editor.asmdef` 已引用 `LoomGUI.Runtime`，可访问 `LoomSettings`（namespace `LoomGUI`）
-- **LoomConfigExporter.Export**：存在（Task 7），签名 `public static void Export(LoomSettings s)`，调用正确
-- **LoomSettings.GetOrCreateDefault**：存在（`Runtime/LoomSettings.cs:34`），静态方法
-- **Resources.Load 路径**：5 个 TextAsset 路径均为 `LoomGUI/...`（无扩展名），对应 `Editor/Resources/LoomGUI/...` 目录下的文件
-- **fence-rules.md tags**：`<!-- loomgui-editor-begin -->` (L1) 和 `<!-- loomgui-editor-end -->` (L39) 正确放置，与 `InjectFenceRules` 的 `Regex.Replace` 配合
+### Multi-RenderNode identity decision
 
-## SKILL.md 改动细节
+Page 0 uses real `node_id`. Pages 1..N use synthetic id:
+`primary_id & 0x00FF_FFFF | ((page & 0xFF) << 24)`. Bits [31:24] reserve
+page sub-index. Real scene node indices from slotmap (< ~4096 in practice)
+never set these bits -> no collision. Each synthetic id gets independent
+change detection in dirty hash table. Backend MirrorPool sees distinct keys.
 
-1. **frontmatter description**（L6）：`run tools/pack.mjs to validate` → `read config.json and run loomgui_pkg.exe to validate`
-2. **step 2 内联说明**（L25）：`跑 pack.mjs 传该 css` → `跑 loomgui_pkg.exe 传该 css`；`pack.mjs 吃外部 css` → `loomgui_pkg.exe 吃外部 css`
-3. **step 3**：`node tools/pack.mjs <html路径> <css路径> -o ...` → `loomgui_pkg.exe <sourceDir> <pkgName> --html <list> --res-root <工作区根/res> -o <out.pkg.bin>`，加"先读 config.json 拿 exe_path"说明
-4. **notes**（L42）：`pack.mjs 调的 loomgui_pkg` → `loomgui_pkg.exe`
-5. **验证**：grep pack.mjs → 0 matches（完全清除）
+### Sort key propagation
 
-## fence-rules.md 改动细节
+`propagate_text_sub_page_sort_keys` added between `assign_sort_keys` and
+`reorder_for_batching`: shifts subsequent real-node sort_keys by sub-page
+count, then sets sub-page sort_key = primary.sort_key + page_idx, copies
+mask_context. Draw order stays monotonic.
 
-- 末段标题："生成完必须跑验证" → "生成完跑验证+打包"
-- 内容：`node tools/pack.mjs <html> <css> -o <out.pkg.bin>` → 读 config.json + `loomgui_pkg.exe <sourceDir> <pkgName> --html <list> --res-root <工作区根/res> -o <out>`
-- 验证：grep pack.mjs → 0 matches；grep --res-root → 1 match（正确使用）
+### Test results
 
-## 测试
+- overflow_allocates_second_page: PASS (alloc->fill page0, ensure->page1+dirty)
+- Full cargo test -p loomgui_core: **539/539 passed** (unchanged)
+- snapshot_simple_panel and cascade_inheritance: PASS (single-page ASCII unchanged)
+- cargo fmt: PASS
+- cargo clippy --all-targets -- -D warnings: PASS
+- cargo build -p loomgui_ffi_c --release: PASS (no FFI changes, no .dll commit)
+- Cargo.lock: unchanged
 
-```
-cargo test -p loomgui_core: 482 passed, 0 failed
-cargo test -p loomgui_core --test fence_contract: 10 passed, 0 failed
-Total: 497 passed, 0 failed
-```
+### Files changed
 
-## 潜在问题（待家里机 Unity 验）
+- `loomgui_core/src/text/atlas.rs` -- overflow_allocates_second_page test
+- `loomgui_core/src/render/mod.rs` -- build_text_mesh return type, Text branch
+  multi-page emission, synthetic node_id helpers, sort_key propagation
 
-1. **Resources.Load 从 Editor/Resources 读取**：代码用 `Resources.Load<TextAsset>("LoomGUI/fence-rules")`，文件在 `Assets/LoomGUI/Editor/Resources/LoomGUI/fence-rules.md`。Unity Editor 下 `Resources.Load` 可能搜不到 `Editor/Resources` 下的文件（`Resources.Load` 搜 `Assets/Resources/`，而 `EditorGUIUtility.Load` 才搜 `Editor/Resources/`）。如果家里机 Resources.Load 返回 null → 改 `AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/LoomGUI/Editor/Resources/LoomGUI/fence-rules.md")` 或 `EditorGUIUtility.Load("LoomGUI/fence-rules")`。
+### Commit
 
-2. **SetNonAsset() API**：brief 标注 Unity 6 API。若家里机报找不到此方法 → 退回方案：删 `.meta` 文件 + 不操作，或 `AssetDatabase.MoveAssetToTrash`。
+`b204d9c` feat(core,v1.6b): multi-page atlas + cross-page text mesh split
 
-3. **ShouldSkip 中调 GetOrCreateDefault**：`AssetPostprocessor.OnPreprocessAsset` 内调 `Resources.Load`（`GetOrCreateDefault` 内部）可能引起 re-entrant 导入。但大概率 Unity 的 postprocessor 在导入管线结束后才跑，实际不会有问题。家里机若遇死循环 → 缓存 LoomSettings 引用而非每次调。
+### Self-review concerns
 
-4. **SKILL.md 用 TextAsset 加载**：`Resources.Load<TextAsset>("LoomGUI/skill/SKILL")`。Unity 把 `.md` 文件导入为 TextAsset。若 Unity 不认 `.md` → 改为 `.txt` 扩展名或配置 ScriptedImporter。
+- Cross-page draw-call cost: each additional page = 1 extra draw call. CJK at
+  48px (~3000 glyphs per 4096^2 page) -> rarely triggers multi-page.
+- Synthetic id upper bound: 255 sub-pages = 4GB GPU memory, far beyond practical.
+  No collision risk.
+- merge_meshes text: different page path -> won't merge, correct behavior.
 
-## Fix（commit `35b7865`）：3 review findings 修完
+## Fixes (review round 1)
 
-### Finding 1 (HIGH)：Resources.Load 从 Editor/Resources 加载返 null
+Commit: `f177320` fix(core,v1.6b): T8 review findings -- reuse_key/sort_key/synth-id guard
 
-`InjectFenceRules` + `CopyResource` 的 5 处 `Resources.Load<TextAsset>(resPath)` 全部替换为 `AssetDatabase.LoadAssetAtPath<TextAsset>(fullAssetPath)`。
+### C1 -- `reuse_key` collision on text sub-pages (render/mod.rs:239)
 
-- `InjectFenceRules`：直接写全路径 `"Assets/LoomGUI/Editor/Resources/LoomGUI/fence-rules.md"`
-- `DistributeSkill`：引入 `basePath` 变量，`CopyResource` 签名改为接 `string assetPath`（Assets 全路径含扩展名），4 个调用点全部改传完整路径（`SKILL.md`、`fence.md`、`preview-polyfill.html`、`preview-trust.md`）
-- `UnityEditor` 已 using，直接用 `AssetDatabase`
+sub-pages had `reuse_key: n.reuse_key` inheriting from the scene text node.
+If the text node is in a virtual list slot (reuse_key = slotIdx > 0), all sub-pages
+share the same reuse_key. MirrorPool creates/updates ONE GameObject per unique
+reuse_key, so sub-page 1 overwrites primary page 0's mesh, sub-page 2 overwrites
+sub-page 1, etc. -- only the last sub-page's glyphs survive.
 
-### Finding 2 (MEDIUM)：`[^]*?` 正则 .NET 语义错
+**Fix:** sub-pages use `reuse_key: 0`. Each sub-page has a distinct synthetic
+node_id; reuse_key=0 means MirrorPool keys by node_id -- independent GameObjects
+per page, all render. When the slot rebinds, old synthetic node_ids disappear,
+GOs cleaned up normally.
 
-`InjectFenceRules` 中正则 `$"{BEGIN}[^]*?{END}"` 改为：
-```csharp
-string pattern = System.Text.RegularExpressions.Regex.Escape(BEGIN) +
-    @"[\s\S]*?" + System.Text.RegularExpressions.Regex.Escape(END);
-```
-- `[\s\S]*?` 正确匹配任意字符含换行（.NET 和 JS 通用）
-- `Regex.Escape` 防御 BEGIN/END 含特殊字符
+### I1 -- Stale `primary_sk` in propagate_text_sub_page_sort_keys (render/mod.rs:542-551)
 
-### Finding 3 (LOW)：preview-polyfill.html 残留 pack.mjs
+`shifts` captures primary sort_keys BEFORE any shifts. When the shift loop runs,
+`*primary_sk` in `rn.sort_key > *primary_sk` is stale -- doesn't reflect the
+primary's current sort_key after earlier iterations shifted it. Bug fires when
+2+ text nodes each have sub-pages: causes sort_key ties.
 
-`preview-polyfill.html` 第 5 行注释 `跑 pack.mjs 传该 css` → `跑 loomgui_pkg.exe 传该 css`。
+**Fix:** track cumulative shift. `adjusted_sk = primary_sk + cum_shift`,
+`cum_shift += n` after each iteration. Verified with manual trace: 2 text nodes
+(A sk=2 sub=2, B sk=3 sub=1, C sk=4) -- old code produced tie at sk=8,
+fixed code produces monotonic 2,3,4,5,6,7.
 
-### 验证
+### I2 -- Synthetic node_id collision risk unguarded (render/mod.rs:490-491)
 
-- grep `Resources\.Load` 在 `LoomWorkspaceInitializer.cs`：0 matches
-- grep `[^]` 在 `LoomWorkspaceInitializer.cs`：0 matches
-- grep `pack\.mjs` 在 `Editor/Resources/LoomGUI/skill/references/preview-polyfill.html`：0 matches
-- 语法核对：namespace `LoomGUI.Editor`，`AssetDatabase` 可用（`using UnityEditor`），所有路径含正确扩展名
+Real scene node index < 4096 was a soft assumption. If a real node's index >=
+4096, `is_text_sub_page` (bits[31:24] > 0) returns TRUE for REAL nodes,
+corrupting sort_keys in propagate_text_sub_page_sort_keys.
+
+**Fix:** added `debug_assert!` at the top of `build_render_nodes` that fires
+if any real scene node index >= 4096, with a clear message pointing at the
+synthetic-id limit. Also added `synth_text_node_id_roundtrip` and
+`node_index_4096_triggers_sub_page_collision` tests documenting the boundary.
+
+### I3 -- `id_to_pos` not updated for sub-page nodes (render/mod.rs:222-247)
+
+Sub-page RenderNodes pushed to `nodes` but NOT inserted into `id_to_pos`.
+Intentional (synthetic ids shouldn't map back to scene nodes), but a latent
+invariant break -- fragile without documentation.
+
+**Fix:** added comment at the sub-page push site explaining WHY sub-pages are
+intentionally excluded from `id_to_pos` (synthetic ids; render-only, not scene
+nodes; scrollbar/hash code iterates `nodes` not `id_to_pos`).
+
+### Tests added (for C1/I1/I2)
+
+- `text_sub_pages_reuse_key_is_zero_not_inherited` -- C1 regression: verifies
+  primary inherits reuse_key=7, any sub-pages get reuse_key=0.
+- `propagate_text_sub_page_sort_keys_cumulative_shift_no_ties` -- I1 regression:
+  constructs 2 text nodes with sub-pages, verifies monotonic sort_keys with
+  no ties (2,3,4,5,6,7).
+- `synth_text_node_id_roundtrip` -- I2 encoding roundtrip, verifies index=4095
+  is NOT misidentified as sub-page.
+- `node_index_4096_triggers_sub_page_collision` -- I2 boundary: verifies
+  index=4096 IS misidentified (proof of hard limit motivation).
+
+### Test summary
+
+- `cargo test -p loomgui_core`: **580/580 passed** (543+25+2+3+5+2 unit tests)
+- `cargo fmt --all -- --check`: PASS
+- `cargo clippy -p loomgui_core --all-targets -- -D warnings`: PASS
+- Snapshots unchanged (single-page ASCII text unaffected)
+- No FFI change, no .dll rebuild, no CI yml change

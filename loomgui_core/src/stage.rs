@@ -52,6 +52,9 @@ pub struct Stage {
     /// build_render_nodes 比较定 ChangeLevel。transient 不进 pkg（Stage 字段非 Scene 字段）。
     /// reload/节点数变 → clear → 下帧全 dirty（无基线）。
     pub prev_node_hashes: std::collections::HashMap<u32, (u64, u64)>,
+    /// 核心字形 atlas（v1.6 自绘字体）。render build 期 ensure 字形 UV，
+    /// FFI 拉 R8 脏页上传。Stage 持有（非 Scene——atlas 是渲染资源，生命周期跨 tick）。
+    pub glyph_atlas: crate::text::atlas::GlyphAtlas,
 }
 
 impl Stage {
@@ -71,6 +74,7 @@ impl Stage {
             tweens: crate::tween::TweenManager::new(),
             pending_dt: 0.0,
             prev_node_hashes: std::collections::HashMap::new(),
+            glyph_atlas: crate::text::atlas::GlyphAtlas::new(),
         })
     }
 
@@ -327,6 +331,39 @@ impl Stage {
             None => false,
             Some(n) => !matches!(n.style.taffy_style.display, taffy::Display::None),
         }
+    }
+
+    /// 拉脏页 page_idx 列表（写入 out，返实际数）。atlas 未用 / 无 scene → 0。
+    pub fn font_atlas_dirty_pages(&self, out: &mut [u32]) -> usize {
+        let dirty = self.glyph_atlas.dirty_pages();
+        let n = dirty.len().min(out.len());
+        out[..n].copy_from_slice(&dirty[..n]);
+        n
+    }
+
+    /// 读某页：尺寸 + R8 像素。buf_len 不够返所需大小（双调法），够则写 buf 返字节数。
+    /// 无此页 → 返 0（out_w/out_h 不写）。
+    pub fn font_atlas_page(
+        &self,
+        page: u32,
+        out_w: &mut u32,
+        out_h: &mut u32,
+        out: &mut [u8],
+    ) -> usize {
+        let (bytes, w, h) = self.glyph_atlas.page_bytes(page);
+        let needed = (w * h) as usize;
+        if out.len() < needed {
+            return needed; // 双调：caller 扩 buf 重调
+        }
+        out[..needed].copy_from_slice(bytes);
+        *out_w = w;
+        *out_h = h;
+        needed
+    }
+
+    /// 清脏页（backend 拉完调）。
+    pub fn font_atlas_clear_dirty(&mut self) {
+        self.glyph_atlas.clear_dirty();
     }
 
     /// 编程聚焦（照 fgui RequestFocus）。强制聚焦任意非 disabled 节点
@@ -696,6 +733,7 @@ impl Stage {
             &self.fonts,
             &self.prev_node_hashes,
             &self.image_sizes,
+            &mut self.glyph_atlas,
         );
         scene.node_sort_keys = sort_keys;
         self.prev_node_hashes = new_hashes;

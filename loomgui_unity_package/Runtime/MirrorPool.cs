@@ -8,7 +8,8 @@ namespace LoomGUI
     /// GO transform=identity + _ObjectMatrix uniform；sortingOrder=sort_key。
     /// parent_id 仍在 blob 列但渲染不用（事件系统再用）。
     /// Mesh 顶点已由 Rust re-base 到节点本地空间，此处按 (x,y,0) 上传。
-    /// change_level 三分支：0=SKIP(保留GO) 1=HEADER(只更header,不重建mesh) 2=FULL(重建mesh/text)。
+    /// change_level 三分支：0=SKIP(保留GO) 1=HEADER(只更header,不重建mesh) 2=FULL(重建mesh)。
+    /// v10：所有渲染节点统一走 mesh 路径（text 核心自产 atlas 产 Mesh，kind 只有 1=Mesh）。
     sealed class RenderObj
     {
         public GameObject Go;
@@ -17,14 +18,6 @@ namespace LoomGUI
         public Mesh Mesh;
         public bool Stale;
         public uint LastNodeId;       // 复用 GO 时校验
-        public bool IsText;            // kind=2：font atlas rebuild 时需重光栅
-        // text 缓存：上次 Full 时的 glyphs/fontSize/color/font。font atlas rebuild 时节点为 Skip/Header
-        // （blob 无 text 段），用此缓存重建取新 UV——否则 ReadText 读 text_len=0 占位越界 → count 垃圾 → OOM。
-        // LastFont：Full 帧按 family 解析出的 Unity Font（Header 帧复用，避免 family 缺失时 fallback 错字体）。
-        public GlyphData[] LastGlyphs;
-        public int LastFontSize;
-        public Color LastTextColor;
-        public Font LastFont;
 
         // buffer 复用（500 节点静态压测 GC 缓解）：每 RenderObj 持可复用 List，
         // UploadMesh 每帧 Clear+fill 后用 Mesh.SetVertices(List) 等 overload 上传——
@@ -34,7 +27,7 @@ namespace LoomGUI
         public readonly List<Color> CList = new();
         public readonly List<int> IList = new();
         // cached MaterialPropertyBlock for per-renderer uniforms (_ObjM, _CF, _Alpha).
-        // Lazy-init; consolidated into single SetPropertyBlock per frame (支柱3).
+        // Lazy-init; consolidated into single SetPropertyBlock per frame.
         public MaterialPropertyBlock Mpb;
     }
 
@@ -45,7 +38,6 @@ namespace LoomGUI
         // reuse_key=0 的普通节点按 node_id keying（v1 行为不变）。
         readonly Dictionary<uint, RenderObj> _poolByNodeId = new();
         readonly Dictionary<uint, RenderObj> _poolByReuse = new();
-        int _lastFontVersion = -1;     // -1 → 首帧必不等，强制建/光栅；之后追 caller 传入的 fontVersion
         // 每 ctx 每帧首次算一次 _ClipBox 并 SetClipBox。
         // Sync 开头清空；clip 表 entry 少（few ctx），每帧开销可忽略。
         readonly HashSet<uint> _clipsAppliedThisFrame = new();
@@ -55,25 +47,14 @@ namespace LoomGUI
 
         /// <summary>
         /// 镜像 diff：遍历 blob 节点 → 建/更新/复用 GO。
-        /// unityFonts: family → Unity Font asset（光栅用）；defaultFont: 无匹配 family 时的 fallback。
-        /// fontVersion: caller（LoomStage）持有的 atlas rebuild 版本号；与 _lastFontVersion 不等 →
-        ///   本帧所有 text 节点强制重 BuildMesh（glyph UV 变，缓存 mesh 作废）。
-        ///
-        /// per-node 字体选择：Full 帧（text arena 有段）从 blob 读 family → unityFonts 查 Font asset，
-        /// 缓存进 ro.LastFont；Header/Skip 帧（arena 无段）复用 ro.LastFont，保证材质 atlas 不掉回 default。
+        /// v10：所有节点统一走 mesh 路径（核心自绘字体产 Mesh，text 不再单分一道）。
         /// </summary>
         public void Sync(FrameBlob blob, Transform root, MaterialManager mm,
-                         SpriteResolver sprites, Texture fallback,
-                         Dictionary<string, Font> unityFonts, Font defaultFont, int fontVersion)
+                         SpriteResolver sprites, Texture fallback)
         {
             // 防御：陈旧/非当前 blob 直接早退（magic+version 校验）。不做清理——上一帧的 GO
             // 维持不动比误销毁更安全；调用方应自检 IsValid 再 Sync。
             if (!blob.IsValid) return;
-
-            // font atlas rebuild 检测：版本变 → 本帧所有 text 节点强制重 BuildMesh
-            // （glyph UV 变，缓存 mesh 作废）。
-            int fontVersionAtStart = fontVersion;
-            bool fontDirty = _lastFontVersion != fontVersionAtStart;
 
             // ① 全标 stale（两个 dict）
             foreach (var kv in _poolByNodeId) kv.Value.Stale = true;
@@ -88,10 +69,6 @@ namespace LoomGUI
                 if (!blob.Visible(i)) continue;
                 byte kind = blob.PayloadKind(i);
                 byte level = blob.ChangeLevel(i);   // 0=Skip 1=Header 2=Full
-                // font atlas rebuild 时，所有 text 节点 UV 失效——含 Skip/Header（content 没变的静态
-                // text）也必须重建 mesh，否则旧 UV 指向新 atlas → 字符错乱（上下颠倒/碎片/错字）。
-                if (fontDirty && kind == 2 && level < 2)
-                    level = 2;
                 uint id = blob.NodeId(i);
                 uint reuseKey = blob.ReuseKey(i);    // 虚拟列表
                 uint poolKey = reuseKey != 0 ? reuseKey : id;
@@ -103,21 +80,21 @@ namespace LoomGUI
                     if (pool.TryGetValue(poolKey, out var ro0)) ro0.Stale = false;
                     continue;
                 }
-                if (kind != 1 && kind != 2) continue;  // 未知 kind 防御跳过
+                // v10：kind 只有 1=Mesh（文本核心自产 atlas 走同路径）。
+                if (kind != 1) continue;
 
-                // 解决图资源（mesh 用 path→Sprite；text 不须此段）
+                // 解决图资源（path_idx → path → SpriteResolver.GetSprite）。
+                // 文本节点的 font-atlas path（loomgui://font-atlas/...）不在 SpriteResolver 命中——
+                // tex 回落 fallback whiteTexture，由 Task 7 的 SyncFontAtlas 换贴真实 atlas。
                 Sprite sp = null; Texture tex = fallback;
-                if (kind == 1)
+                uint pathIdx = blob.PathIdx(i);
+                if (pathIdx != 0 && sprites != null)
                 {
-                    uint pathIdx = blob.PathIdx(i);
-                    if (pathIdx != 0 && sprites != null)
+                    string path = blob.ReadPath(pathIdx);
+                    if (!string.IsNullOrEmpty(path))
                     {
-                        string path = blob.ReadPath(pathIdx);
-                        if (!string.IsNullOrEmpty(path))
-                        {
-                            sp = sprites.GetSprite(path);
-                            if (sp != null) tex = sp.texture;
-                        }
+                        sp = sprites.GetSprite(path);
+                        if (sp != null) tex = sp.texture;
                     }
                 }
 
@@ -130,36 +107,10 @@ namespace LoomGUI
                 }
                 ro.LastNodeId = id; // 新建 + 复用均更新（slot 换绑时 node_id 变）
                 ro.Stale = false;
-                ro.IsText = kind == 2;
 
-                // 选 text 节点的光栅字体。Full 帧（arena 有段）从 blob 读 family → unityFonts 查；
-                // Header/Skip 帧（arena 无段）复用 ro.LastFont，避免材质 atlas 掉回 default。
-                // ReadText 仅在 level==2 且 text_len>0 时调用一次（同调用取 family+fontSize+color+glyphs）。
-                Font nodeFont = null;
-                if (kind == 2)
-                {
-                    if (level == 2 && blob.TextLen(i) > 0u)
-                    {
-                        blob.ReadText(i, out string family, out int fs, out Color tc, out var gs);
-                        ro.LastGlyphs = gs; ro.LastFontSize = fs; ro.LastTextColor = tc;
-                        nodeFont = ResolveFont(family, unityFonts, defaultFont);
-                        ro.LastFont = nodeFont;
-                    }
-                    else
-                    {
-                        nodeFont = ro.LastFont ?? defaultFont;
-                    }
-                }
-
-                UpdateHeader(ro, blob, i, root, mm, kind, sp, tex, nodeFont);
-                if (level == 2) UploadMeshOrText(ro, blob, i, sp, nodeFont);
+                UpdateHeader(ro, blob, i, root, mm, kind, sp, tex);
+                if (level == 2) UploadMeshOrText(ro, blob, i, sp);
             }
-
-            // 若 Sync 期间 atlas 又 rebuild（BuildMesh 的 RequestCharactersInTexture 触发，见 OnRebuilt 栈），
-            // fontVersion 已 > start → 不追 _lastFontVersion，下帧再 fontDirty 全重建——
-            // 否则 rebuild 前重建的 text 会永久用旧 UV（偶现「上下颠倒」的另一半根因）。
-            if (fontDirty && fontVersion == fontVersionAtStart)
-                _lastFontVersion = fontVersionAtStart;
 
             // ③ 余 stale 销毁（两个 dict）
             var dead1 = new List<uint>();
@@ -172,8 +123,9 @@ namespace LoomGUI
 
         /// 更新 GO header（position/rotation/scale + sortingOrder + clip + material + per-renderer uniforms）。
         /// 无论 HEADER 还是 FULL 路径均调用；仅 SKIP 跳过。
+        /// v10：不再有 kind==2 text 单独材质路径——所有节点统一走 program+tex 选材。
         void UpdateHeader(RenderObj ro, FrameBlob blob, int i, Transform root,
-                          MaterialManager mm, byte kind, Sprite sp, Texture tex, Font font)
+                          MaterialManager mm, byte kind, Sprite sp, Texture tex)
         {
             // flatten：所有节点挂 root。
             // pure 和非 pure 统一 GO localPosition=(Mtx,Mty)（world translate 进 GO transform）。
@@ -203,27 +155,16 @@ namespace LoomGUI
                 // + 默认 _ClipBox=0,0,1,1 → 全保留，clip 无效但不崩；正常 flow 表必含所有 mc>0 ctx）。
             }
 
-            // 材质：mesh 按 program+texture 选；text 用 font atlas。
-            Material mat;
-            if (kind == 1)
-            {
-                // program 来自 blob（第 18 列）：0=img/无图 Container，2=Container+bg-image（CSS 合成）。
-                mat = mm.Get((int)blob.Program(i), tex, maskCtx, !pure);
-            }
-            else // kind == 2 (Text)
-            {
-                // text program=1，texture=font atlas。font.material.mainTexture（atlas rebuild 后引用更新）。
-                // font 可能为 null（caller 未注入）→ 跳材质以免 NRE；测试用 BuildMesh 直接验。
-                mat = font != null ? mm.Get(program: 1, font.material.mainTexture, maskCtx, !pure) : null;
-            }
+            // 材质：按 program+texture 选（包括 text 节点，program=1，tex 由 SyncFontAtlas 注入 font atlas）。
+            Material mat = mm.Get((int)blob.Program(i), tex, maskCtx, !pure);
             if (mat != null) ro.Mr.sharedMaterial = mat;
 
             // 合并 per-renderer uniform（MPB 一次 SetPropertyBlock，避免 _ObjM/_CF/_Alpha 互相覆盖）。
             // _ObjM：非纯平移时传 scale/rotate 矩阵（纯平移 = shader 默认 identity，不设）。
             // _CF：ColorFilter（program 3/4）传 5 Vector；其他不设。
-            // _Alpha：每帧无条件设（支柱3 alpha 剥离顶点色）。
+            // _Alpha：每帧无条件设（alpha 剥离顶点色）。
             float alpha = blob.Alpha(i);
-            bool hasFilter = kind == 1 && (blob.Program(i) == 3 || blob.Program(i) == 4);
+            bool hasFilter = blob.Program(i) == 3 || blob.Program(i) == 4;
 
             ro.Mpb ??= new MaterialPropertyBlock();
             ro.Mr.GetPropertyBlock(ro.Mpb);
@@ -239,7 +180,7 @@ namespace LoomGUI
                 ro.Mpb.SetVector("_ObjM3", objM.GetRow(3));
             }
             // ColorFilter（program=3=filter 无图 / 4=filter+bg-image 双 keyword）：
-            // 矩阵 20 float 拆 5 Vector MPB SetVector。漏 program=4 → cf-demo 滤镜不生效（全青色，验收坑）。
+            // 矩阵 20 float 拆 5 Vector MPB SetVector。
             if (hasFilter)
             {
                 float[] cf = blob.ColorMatrix(i);
@@ -253,50 +194,20 @@ namespace LoomGUI
             ro.Mr.SetPropertyBlock(ro.Mpb);
         }
 
-        /// family → Unity Font asset。unityFonts 命中即用，否则 fallback defaultFont。
-        /// defaultFont 可能为 null（caller 未注入）——返回 null 由调用方跳材质以免 NRE。
-        static Font ResolveFont(string family, Dictionary<string, Font> unityFonts, Font defaultFont)
-        {
-            if (!string.IsNullOrEmpty(family) && unityFonts != null
-                && unityFonts.TryGetValue(family, out var fa) && fa != null)
-                return fa;
-            return defaultFont;
-        }
-
-        /// 上传 mesh / 重建 text mesh（仅 FULL 路径调用）。
-        /// mesh 顶点已由 Rust re-base 到节点本地空间，此处按 (x,y,0) 上传。
-        /// text 分支：text 段（family/fontSize/color/glyphs）已在 Sync 主循环读出并缓存进 ro，
-        /// 此处不再 ReadText（避免二次解析 arena）；font 由调用方按 family 解析后传入。
+        /// 上传 mesh / 重建 mesh（仅 FULL 路径调用）。
+        /// v10：不再有 kind==2 text 分支——所有节点统一走 mesh 上传（核心自产 atlas，word mesh 已含字形 UV）。
         static void UploadMeshOrText(RenderObj ro, FrameBlob blob, int i,
-                                     Sprite sp, Font font)
+                                     Sprite sp)
         {
-            byte kind = blob.PayloadKind(i);
-            if (kind == 1)
-            {
-                // mesh 上传（顶点已 re-base 到本地）。
-                var seg = blob.ReadMesh(i);
-                UploadMesh(ro, seg);
-                ro.Mesh.RecalculateBounds();
-                // path → SpriteResolver.GetSprite → sp。sp=null（path_idx=0 纯色 / 查不到）则跳过重映射，
-                // mesh 沿用 blob 全图 UV [0,1] + fallback whiteTexture。
-                // sp 非空 → RemapMeshUvToSprite 把全图 UV 重映射到 sprite 在 atlas 的子区（用 sp.uv）。
-                if (sp != null)
-                    RemapMeshUvToSprite(ro, sp);
-            }
-            else // kind == 2 (Text)
-            {
-                // text 重建取 ro 缓存的 glyphs/fontSize/color（Sync 主循环 Full 分支已读）。
-                // fontDirty 提升的 Skip/Header 走此分支时用上次 Full 缓存——glyphs 必非 null
-                // （首帧建 RenderObj 强制 Full，之后缓存始终在）。
-                GlyphData[] glyphs = ro.LastGlyphs;
-                int fontSize = ro.LastFontSize;
-                Color textColor = ro.LastTextColor;
-                if (glyphs == null) return;   // 防御：从未 Full 过（不应达此）
-                // node opacity 走 _Alpha uniform（不烤进顶点色，否则双乘）。
-                var seg = TextRasterizer.BuildMesh(font, fontSize, textColor, glyphs);
-                UploadMesh(ro, seg);
-                ro.Mesh.RecalculateBounds();
-            }
+            // mesh 上传（顶点已 re-base 到本地）。
+            var seg = blob.ReadMesh(i);
+            UploadMesh(ro, seg);
+            ro.Mesh.RecalculateBounds();
+            // path → SpriteResolver.GetSprite → sp。sp=null（path_idx=0 纯色 / 查不到）则跳过重映射，
+            // mesh 沿用 blob 全图 UV [0,1] + fallback whiteTexture。
+            // sp 非空 → RemapMeshUvToSprite 把全图 UV 重映射到 sprite 在 atlas 的子区（用 sp.uv）。
+            if (sp != null)
+                RemapMeshUvToSprite(ro, sp);
         }
 
         static RenderObj NewRenderObj(Transform root)
@@ -317,7 +228,7 @@ namespace LoomGUI
         }
 
         /// buffer 复用：从 MeshSegment 填 ro 持有的可复用 List，再走 SetVertices(List) 等 overload。
-        /// List<T>.Clear() 保留 Capacity → warm-up 后每帧零数组 alloc。kind=1（mesh）与 kind=2（text BuildMesh 产出）同走此路径。
+        /// List<T>.Clear() 保留 Capacity → warm-up 后每帧零数组 alloc。
         /// 注意：SetVertices(List) 要求 list 长度 == 顶点数；Clear()+Add 精确填到 Verts.Length 即满足。
         static void UploadMesh(RenderObj ro, MeshSegment seg)
         {

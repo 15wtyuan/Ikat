@@ -1,11 +1,18 @@
+#![allow(unreachable_patterns, irrefutable_let_patterns)]
 use super::*;
 use crate::scene::node::*;
 use crate::style::resolved::{
     BackgroundSize, BorderRadius, CornerRadius, ResolvedStyle, TextAlign,
 };
+use crate::text::atlas::GlyphAtlas;
 use crate::text::layout::measure_text;
 use crate::text::layout::FontTable;
 use taffy::style::{Dimension, LengthPercentage};
+
+/// 测试 glyph atlas（空，不注册真实字体时 atlas 为空壳——ensure 需 face 参数才分配）。
+fn test_glyph_atlas() -> GlyphAtlas {
+    GlyphAtlas::new()
+}
 
 /// 测试字体表：仓库内 DejaVuSans.ttf（跨平台一致），缺则跳过。
 fn test_font_table() -> Option<FontTable> {
@@ -66,6 +73,7 @@ fn build_container_produces_mesh_quad() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     let rns = &frame.nodes;
     assert_eq!(rns.len(), 1);
@@ -141,11 +149,12 @@ fn build_skips_display_none_subtree() {
         &ft,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     let has_text = frame
         .nodes
         .iter()
-        .any(|rn| matches!(rn.payload, NodePayload::Text { .. }));
+        .any(|rn| matches!(rn.payload, NodePayload::Mesh { program: 1, .. }));
     assert!(
         !has_text,
         "display:none 子树的 Text 后代不该进 frame.nodes（child 整子树剪掉）"
@@ -174,6 +183,7 @@ fn image_render_node_carries_path_not_texid() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh { image_path, .. } => {
@@ -212,6 +222,7 @@ fn bg_image_carries_path() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh { image_path, .. } => {
@@ -249,6 +260,7 @@ fn solid_container_image_path_is_none() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh { image_path, .. } => {
@@ -280,6 +292,7 @@ fn build_image_carries_path_and_full_uv() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh {
@@ -323,6 +336,7 @@ fn build_image_uv_is_full_region() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh { uvs, .. } => {
@@ -362,20 +376,28 @@ fn build_text_produces_text_layout() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     let rns = &frame.nodes;
     match &rns[0].payload {
-        NodePayload::Text {
-            layout,
-            font_size,
+        NodePayload::Mesh {
+            verts,
+            uvs,
             program,
+            image_path,
             ..
         } => {
-            assert_eq!(*font_size, 16.0);
-            assert_eq!(*program, 1);
-            assert!(!layout.lines.is_empty());
+            assert_eq!(*program, 1, "text → program=1");
+            assert!(
+                image_path
+                    .as_ref()
+                    .is_some_and(|p| p.starts_with("loomgui://font-atlas/")),
+                "text image_path = synthetic atlas path"
+            );
+            assert!(!verts.is_empty(), "text 有字形 → verts 非空");
+            assert!(!uvs.is_empty(), "text 有 UV");
         }
-        _ => panic!("expected Text payload"),
+        _ => panic!("expected Mesh payload for text"),
     }
 }
 
@@ -423,23 +445,24 @@ fn build_text_bakes_content_offset_into_glyph_pen() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     let rns = &frame.nodes;
     match &rns[0].payload {
-        NodePayload::Text { layout, .. } => {
-            let g = &layout.lines[0].runs[0].glyphs;
-            assert_eq!(g.len(), 2, "AB = 2 glyphs");
-            // 每 glyph 的 y 原 = line.y(0)，+content offset(6) = 6.0。
-            assert_eq!(g[0].y, 6.0, "pen_y 烤 content 偏移 (border+padding top=6)");
-            assert_eq!(g[1].y, 6.0);
-            // 首 glyph x 原 = 0（Left align），+6 = 6.0；次 glyph x 应 > 6（advance）。
-            assert_eq!(g[0].x, 6.0, "首 glyph pen_x = align 偏移0 + content 偏移6");
-            assert!(g[1].x > 6.0, "次 glyph pen_x > 6（含 advance + 偏移）");
-            // codepoint 也顺带验。
-            assert_eq!(g[0].codepoint, b'A' as u32);
-            assert_eq!(g[1].codepoint, b'B' as u32);
+        NodePayload::Mesh { verts, program, .. } => {
+            assert_eq!(*program, 1, "text → program=1");
+            // AB = 2 glyph → 8 verts (2 × 4)。
+            assert_eq!(verts.len(), 8, "AB = 2 glyph × 4 verts = 8");
+            // 验证 content offset 已烤入 pen：首字形 BL 顶点的 x 应
+            // >= border_left + padding_left = 6.0（build_text_mesh 在
+            // 每 glyph 的 g.x 中已经是 content-box 相对坐标 + 偏移）。
+            assert!(
+                verts[0][0] >= 6.0,
+                "首 glyph BL x 应含 content offset (border+padding=6.0)，实 {}",
+                verts[0][0]
+            );
         }
-        _ => panic!("expected Text payload"),
+        _ => panic!("expected Mesh payload"),
     }
 }
 
@@ -466,6 +489,7 @@ fn build_assigns_monotonic_keys() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     let rns = &frame.nodes;
     // 3 个不同 mask_context → 不合并 → 保 3 节点；sort_key 经 reorder 重赋后仍单调。
@@ -521,6 +545,7 @@ fn build_merges_adjacent_same_drawstate_meshes() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     // root(Container, image_path=None) + 1 merged(Image image_path=Some("a.png")) = 2 节点（3 输入合并后）。
     let mesh_count = frame
@@ -575,6 +600,7 @@ fn build_reads_anim_opacity_and_bg_override() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     assert!(
         (frame.nodes[0].alpha - 0.25).abs() < 1e-5,
@@ -673,6 +699,7 @@ fn effective_scroll_container_emits_thumb_node() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     let thumbs: Vec<_> = fd
         .nodes
@@ -744,6 +771,7 @@ fn non_effective_container_no_thumb() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     let has_thumb = fd
         .nodes
@@ -817,14 +845,21 @@ fn render_text_payload_matches_layout_text_layout() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
-    let render_lines = match &frame.nodes[1].payload {
-        NodePayload::Text { layout, .. } => layout.lines.len(),
-        _ => panic!("expected Text payload"),
+    let render_verts = match &frame.nodes[1].payload {
+        NodePayload::Mesh { verts, program, .. } => {
+            assert_eq!(*program, 1, "text → program=1");
+            verts.len()
+        }
+        _ => panic!("expected Mesh payload"),
     };
-    assert_eq!(
-        render_lines, layout_lines,
-        "render 应复用 layout TextLayout（行数一致，不重测）"
+    let expected_min_verts = layout_lines * 4; // at least 1 glyph per line → 4 verts each
+    assert!(
+        render_verts >= expected_min_verts,
+        "render 应复用 layout TextLayout（至少 {} verts，实 {}）",
+        expected_min_verts,
+        render_verts
     );
 }
 
@@ -891,23 +926,41 @@ fn render_long_text_still_wraps_with_layout_reuse() {
         (container_w, 100.0),
         &std::collections::HashMap::new(),
     );
+    // 验证 solve 填了 text_layouts 且确实换行为多行。
+    let text_id = scene.get(scene.roots[0]).unwrap().children[0];
+    let layout = scene.text_layouts[text_id.index()]
+        .as_ref()
+        .expect("solve 应为 Text 节点填 text_layouts");
+    assert!(
+        layout.lines.len() >= 2,
+        "长文本 intrinsic={:.1} container={} 应换行为多行，实 {} 行",
+        intrinsic,
+        container_w,
+        layout.lines.len()
+    );
+
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
         &scene,
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
-    let lines = match &frame.nodes[1].payload {
-        NodePayload::Text { layout, .. } => layout.lines.len(),
-        _ => panic!("expected Text payload"),
+    let verts = match &frame.nodes[1].payload {
+        NodePayload::Mesh { verts, program, .. } => {
+            assert_eq!(*program, 1, "text → program=1");
+            verts.len()
+        }
+        _ => panic!("expected Mesh payload"),
     };
+    let glyph_count = verts / 4;
     assert!(
-        lines >= 2,
-        "长文本 intrinsic={:.1} container={} 应换行，got {} 行",
+        glyph_count >= 2,
+        "长文本 intrinsic={:.1} container={} 应含多字形，got {} glyphs",
         intrinsic,
         container_w,
-        lines
+        glyph_count
     );
 }
 
@@ -938,15 +991,18 @@ fn change_level_skip_header_full() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     assert_eq!(f1.nodes[0].change_level, ChangeLevel::Full, "首帧 FULL");
     // 第二帧不变 → SKIP
-    let (f2, h2, _) = build_render_nodes(&scene, &fonts, &h1, &empty_sizes());
+    let (f2, h2, _) =
+        build_render_nodes(&scene, &fonts, &h1, &empty_sizes(), &mut test_glyph_atlas());
     assert_eq!(f2.nodes[0].change_level, ChangeLevel::Skip, "不变 → SKIP");
     // 第三帧改位置（纯平移 → world_matrix 变，但 re-base 后 verts 不变 → payload_hash 不变）→ HEADER
     scene.get_mut(scene.roots[0]).unwrap().layout_rect.x = 50.0;
     crate::scene::transform::compute_world_transforms(&mut scene);
-    let (f3, h3, _) = build_render_nodes(&scene, &fonts, &h2, &empty_sizes());
+    let (f3, h3, _) =
+        build_render_nodes(&scene, &fonts, &h2, &empty_sizes(), &mut test_glyph_atlas());
     assert_eq!(
         f3.nodes[0].change_level,
         ChangeLevel::Header,
@@ -954,7 +1010,8 @@ fn change_level_skip_header_full() {
     );
     // 第四帧改 color（只影响 header_hash 的 color_tint）→ HEADER
     scene.get_mut(scene.roots[0]).unwrap().style.color = [0.5, 0.5, 0.5, 1.0];
-    let (f4, h4, _) = build_render_nodes(&scene, &fonts, &h3, &empty_sizes());
+    let (f4, h4, _) =
+        build_render_nodes(&scene, &fonts, &h3, &empty_sizes(), &mut test_glyph_atlas());
     assert_eq!(
         f4.nodes[0].change_level,
         ChangeLevel::Header,
@@ -966,7 +1023,8 @@ fn change_level_skip_header_full() {
         .unwrap()
         .style
         .background_color = Some([0.0, 1.0, 0.0, 1.0]);
-    let (f5, _, _) = build_render_nodes(&scene, &fonts, &h4, &empty_sizes());
+    let (f5, _, _) =
+        build_render_nodes(&scene, &fonts, &h4, &empty_sizes(), &mut test_glyph_atlas());
     assert_eq!(f5.nodes[0].change_level, ChangeLevel::Full, "bg 变 → FULL");
 }
 
@@ -995,11 +1053,18 @@ fn change_level_reload_all_full() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     // prev 有 hash 但 node_id 不在其中（模拟 reload：prev 表残留不同节点的 hash）
     let mut stale: std::collections::HashMap<u32, (u64, u64)> = std::collections::HashMap::new();
     stale.insert(999, (0, 0));
-    let (f2, _, _) = build_render_nodes(&scene, &fonts, &stale, &empty_sizes());
+    let (f2, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &stale,
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
     assert_eq!(
         f2.nodes[0].change_level,
         ChangeLevel::Full,
@@ -1035,6 +1100,7 @@ fn build_container_with_bg_image_carries_path() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh {
@@ -1090,6 +1156,7 @@ fn build_container_bg_image_contain_shrinks_geometry() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     if let NodePayload::Mesh { verts, .. } = &frame.nodes[0].payload {
         let xmax = verts.iter().map(|v| v[0]).fold(f32::MIN, f32::max);
@@ -1128,6 +1195,7 @@ fn build_container_bg_image_coexists_with_bg_color() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh {
@@ -1153,7 +1221,7 @@ fn build_container_bg_image_coexists_with_bg_color() {
     }
 }
 
-// ── program 号（坑 79 bg-image 合成）──────────────
+// ── program 号（CSS 合成 bg-image）──────────────
 
 #[test]
 fn build_container_bg_image_hit_sets_program_2() {
@@ -1178,6 +1246,7 @@ fn build_container_bg_image_hit_sets_program_2() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh {
@@ -1218,6 +1287,7 @@ fn build_container_without_bg_image_keeps_program_0() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh { program, .. } => {
@@ -1251,6 +1321,7 @@ fn build_container_bg_image_sets_program_2() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh {
@@ -1294,6 +1365,7 @@ fn build_image_node_keeps_program_0() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     let img_rn = frame.nodes.iter()
             .find(|n| matches!(&n.payload, NodePayload::Mesh { image_path, .. } if *image_path == Some("a.png".to_string())))
@@ -1328,6 +1400,7 @@ fn build_container_with_filter_sets_program_3() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh {
@@ -1374,6 +1447,7 @@ fn build_container_with_bg_image_and_filter_sets_program_4() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh {
@@ -1430,6 +1504,7 @@ fn build_container_with_slice_uses_nine_slice() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh { verts, .. } => {
@@ -1472,6 +1547,7 @@ fn build_container_with_slice_uv_proportional_to_real_image_size() {
         &fonts,
         &std::collections::HashMap::new(),
         &sizes("skin.png", 80, 80),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh { uvs, verts, .. } => {
@@ -1528,6 +1604,7 @@ fn build_container_with_slice_uv_falls_back_to_64_when_no_size() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh { uvs, .. } => {
@@ -1567,6 +1644,7 @@ fn build_container_no_filter_keeps_program_0_or_2() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     if let NodePayload::Mesh { program, .. } = &frame.nodes[0].payload {
         assert_eq!(*program, 0, "无图无 filter → program=0");
@@ -1597,6 +1675,7 @@ fn build_container_bg_image_missing_url_carries_path() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh {
@@ -1639,6 +1718,7 @@ fn build_container_no_bg_image_image_path_none() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh { image_path, .. } => {
@@ -1674,6 +1754,7 @@ fn container_zero_radius_uses_quad() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     let rn = &frame.nodes[0];
     match &rn.payload {
@@ -1717,6 +1798,7 @@ fn container_radius_uses_rounded_rect() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     let rn = &frame.nodes[0];
     match &rn.payload {
@@ -1760,6 +1842,7 @@ fn container_radius_percent_resolved() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     let rn = &frame.nodes[0];
     match &rn.payload {
@@ -1805,6 +1888,7 @@ fn container_bg_image_with_radius_uses_rounded_rect() {
         &fonts,
         &std::collections::HashMap::new(),
         &empty_sizes(),
+        &mut test_glyph_atlas(),
     );
     match &frame.nodes[0].payload {
         NodePayload::Mesh {
@@ -1823,4 +1907,173 @@ fn container_bg_image_with_radius_uses_rounded_rect() {
         }
         _ => panic!("expected Mesh"),
     }
+}
+
+// ── 多页 atlas 跨页拆分 text 子页测试 ───────────────────
+
+/// 回归：text 子页 reuse_key 必须为 0（不继承主节点），防止虚拟列表内多页覆盖。
+/// 构造带 reuse_key=7 的 text 节点，跑 build_render_nodes，验 primary 继承 reuse_key=7、
+/// 子页 reuse_key=0。
+#[test]
+fn text_sub_pages_reuse_key_is_zero_not_inherited() {
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "Hello".into(),
+    };
+    n.reuse_key = 7; // 模拟虚拟列表 slot
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 20.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    for rn in &frame.nodes {
+        if is_text_sub_page(rn.node_id) {
+            assert_eq!(
+                rn.reuse_key, 0,
+                "子页 reuse_key 必须为 0（不继承主节点），得 {}",
+                rn.reuse_key
+            );
+        }
+    }
+    // primary 节点验证：应存在一个非子页 text mesh 且 reuse_key=7
+    let primary = frame.nodes.iter().find(|rn| {
+        !is_text_sub_page(rn.node_id) && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+    });
+    assert!(primary.is_some(), "应存在 primary text RenderNode");
+    assert_eq!(primary.unwrap().reuse_key, 7, "primary 继承 reuse_key=7");
+}
+
+/// 回归：propagate_text_sub_page_sort_keys 累积偏移防 stale primary_sk。
+/// 构造两 text 节点各带子页，验 sort_key 单调无 tie。
+#[test]
+fn propagate_text_sub_page_sort_keys_cumulative_shift_no_ties() {
+    use crate::render::node::{BlendMode, ChangeLevel, MaskContext, NodePayload, RenderNode};
+
+    // 构造 nodes vec：A(primary, sk=2), A_sub1(synth, sk=0), A_sub2(synth, sk=0),
+    //                  B(primary, sk=3), B_sub1(synth, sk=0), C(real, sk=4)
+    let a_id = 0u32;
+    let b_id = 1u32;
+    let c_id = 2u32;
+    let a_sub1 = synth_text_node_id(a_id, 1);
+    let a_sub2 = synth_text_node_id(a_id, 2);
+    let b_sub1 = synth_text_node_id(b_id, 1);
+
+    let empty_mesh = NodePayload::Mesh {
+        verts: vec![],
+        uvs: vec![],
+        colors: vec![],
+        indices: vec![],
+        image_path: None,
+        program: 0,
+        color_matrix: [0.0; 20],
+    };
+
+    let mk_rn = |node_id: u32, sort_key: u32| RenderNode {
+        node_id,
+        parent_id: None,
+        visible: true,
+        alpha: 1.0,
+        color_tint: [1.0; 4],
+        world_matrix: crate::transform::IDENTITY,
+        blend: BlendMode::Normal,
+        mask_context: MaskContext(0),
+        sort_key,
+        change_level: ChangeLevel::Full,
+        reuse_key: 0,
+        payload: empty_mesh.clone(),
+    };
+
+    let mut nodes = vec![
+        mk_rn(a_id, 2),
+        mk_rn(a_sub1, 0),
+        mk_rn(a_sub2, 0),
+        mk_rn(b_id, 3),
+        mk_rn(b_sub1, 0),
+        mk_rn(c_id, 4),
+    ];
+
+    // id_to_pos：真节点映射（不含合成子页）
+    let mut id_to_pos: std::collections::HashMap<NodeId, usize> = std::collections::HashMap::new();
+    id_to_pos.insert(NodeId(a_id), 0);
+    id_to_pos.insert(NodeId(b_id), 3);
+    id_to_pos.insert(NodeId(c_id), 5);
+
+    propagate_text_sub_page_sort_keys(&mut nodes, &id_to_pos);
+
+    // 预期：
+    //   cum=0, adj=2: B(3→5), C(4→6). cum=2
+    //   cum=2, adj=3+2=5: C(6→7). cum=3
+    //   After shift: A=2, B=5, C=7
+    //   Sub-pages: A_sub1=A.sk+1=3, A_sub2=4, B_sub1=B.sk+1=6
+    //   Final: A=2, A_sub1=3, A_sub2=4, B=5, B_sub1=6, C=7
+
+    let find = |nid: u32| nodes.iter().find(|n| n.node_id == nid).unwrap().sort_key;
+    assert_eq!(find(a_id), 2, "A primary");
+    assert_eq!(find(a_sub1), 3, "A sub 1");
+    assert_eq!(find(a_sub2), 4, "A sub 2");
+    assert_eq!(find(b_id), 5, "B primary");
+    assert_eq!(find(b_sub1), 6, "B sub 1");
+    assert_eq!(find(c_id), 7, "C");
+
+    // 验无 tie
+    let mut sks: Vec<u32> = nodes.iter().map(|n| n.sort_key).collect();
+    sks.sort();
+    let unique: Vec<u32> = {
+        let mut u = sks.clone();
+        u.dedup();
+        u
+    };
+    assert_eq!(sks.len(), unique.len(), "sort_key 不得有 tie");
+}
+
+/// 哨兵：合成 node_id 硬上限文档。
+/// 验证 synth_text_node_id / is_text_sub_page / text_sub_primary_id / text_sub_page_idx
+/// 的编码/解码一致性。
+#[test]
+fn synth_text_node_id_roundtrip() {
+    let primary = 0x0000_0123u32;
+    let sub = synth_text_node_id(primary, 5);
+    assert!(is_text_sub_page(sub));
+    assert!(!is_text_sub_page(primary));
+    assert_eq!(text_sub_primary_id(sub), primary & 0x00FF_FFFF);
+    assert_eq!(text_sub_page_idx(sub), 5);
+
+    // 边界：page=255（最大子页号）
+    let max_sub = synth_text_node_id(0, 255);
+    assert_eq!(text_sub_page_idx(max_sub), 255);
+    assert!(is_text_sub_page(max_sub));
+
+    // 真实 node index=4095（bits[23:12]=4095）不应被误判为子页
+    let high_index = (4095u32 << 12) | 1; // index=4095, gen=1
+    assert!(!is_text_sub_page(high_index), "index=4095 仍不被误判");
+}
+
+/// 哨兵：index=4096 会与合成子页 bit 碰撞——验 is_text_sub_page 误判。
+#[test]
+fn node_index_4096_triggers_sub_page_collision() {
+    // index=4096 → bits[31:12] = 0x00001 (bit 24 set) → bits[31:24]=1 → 子页误判
+    let collision_id = 4096u32 << 12;
+    assert!(
+        is_text_sub_page(collision_id),
+        "index=4096 → bits[31:24]=1 → 误判为子页（证明硬上限哨兵的动机）"
+    );
 }

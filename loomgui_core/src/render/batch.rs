@@ -770,16 +770,15 @@ mod tests {
     fn text_rn(id: usize) -> RenderNode {
         let mut r = placeholder_rn(id);
         r.node_id = id as u32;
-        r.payload = NodePayload::Text {
-            layout: crate::text::layout::TextLayout {
-                text_width: 0.0,
-                text_height: 0.0,
-                lines: vec![],
-            },
-            font_size: 16.0,
-            color: [1.0; 4],
+        // v1.6：text 现产 Mesh(program=1, image_path=合成 atlas path)。
+        r.payload = NodePayload::Mesh {
+            verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            colors: vec![[1.0; 4]; 4],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            image_path: Some("loomgui://font-atlas/f0/p0".into()),
             program: 1,
-            family: None,
+            color_matrix: [0.0; 20],
         };
         r
     }

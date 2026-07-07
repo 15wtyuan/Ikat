@@ -36,13 +36,8 @@ namespace LoomGUI
         MirrorPool _pool;
         NativeHostManager _nhm;
         SpriteResolver _sprites;
-        // family → Unity 动态字体（光栅用）。与 Rust 端 FontTable 对称：Rust 用 ttf 字节测量，
-        // Unity 用同一份 Font asset 光栅。RegisterFont 双写：bytes 喂 Rust，unityFont 进此表。
-        readonly Dictionary<string, Font> _unityFonts = new();
-        Font _defaultUnityFont;
-        // per-stage atlas rebuild 版本号。Driver.Awake 绑 Font.textureRebuilt += stage.OnFontRebuilt，
-        // rebuild 时自增 → MirrorPool.Sync 检测到版本变 → 强制 text 节点重光栅取新 UV。
-        int _fontVersion;
+        // v10：字体光栅化已迁入核心——核心用 ttf-parser 自绘字形产 atlas + mesh，Unity 后端不再持 Unity Font asset。
+        // RegisterFont 只喂 Rust 字节（核心端测量），后端不存 Unity Font 表。
         // ArrayPool 租用（非 new）。Rent 返回 ≥len，只 copy/解析 len 字节。
         // Dispose 归还防泄漏。冷帧零 GC（ReadMesh per-node alloc 留观察，撞墙再上 List 复用）。
         byte[] _frameBuf;
@@ -55,8 +50,8 @@ namespace LoomGUI
 
         /// <summary>
         /// 建 Stage 句柄 + 基础设施（MaterialManager/MirrorPool/NativeHostManager/SpriteResolver）。
-        /// 不在此注册字体——Driver.Awake 后调 RegisterFont 注入字体（bytes 喂 Rust 测量，unityFont 进光栅表）。
-        /// 不在此绑 Font.textureRebuilt——Driver.Awake 绑 stage.OnFontRebuilt（全局静态事件，Driver.OnDestroy 解绑）。
+        /// 不在此注册字体——Driver.Awake 后调 RegisterFont 注入字体（bytes 喂 Rust 核心端测量+自绘）。
+        /// v10：不再绑 Font.textureRebuilt——核心自产 atlas，无异步 Unity font atlas rebuild。
         /// designSize 默认 (1080,1920)；零向量退回默认（避免除零）。
         /// </summary>
         public LoomStage(Vector2 designSize = default)
@@ -78,9 +73,6 @@ namespace LoomGUI
         /// stage.EventHandler.AddListener(nodeId, EventType.Click, OnBtnClick)。
         public LoomEventHandler EventHandler => _eventHandler;
 
-        /// per-stage atlas rebuild 版本。MirrorPool.Sync 据此判断是否需强制重光栅。
-        public int FontVersion => _fontVersion;
-
         /// 暴露给 LoomInputCollector.CollectWheel + demo 等内部消费者。
         internal System.IntPtr StagePtr => (System.IntPtr)_stage;
         public Vector2 DesignSize => _designSize;
@@ -96,11 +88,12 @@ namespace LoomGUI
         // ===== 字体注册（A4 multi-font FFI）=====
 
         /// <summary>
-        /// 注册字体进 Stage。bytes 喂 Rust（ttf-parser 测量），unityFont 存本实例表（Unity 光栅）。
-        /// family = 字体族名（CSS font-family 匹配键）；isDefault=true 设为 Rust FontTable + Unity 表的默认 fallback。
+        /// 注册字体进 Stage。bytes 喂 Rust（核心端 ttf-parser 测量 + 自绘字形产 atlas）。
+        /// family = 字体族名（CSS font-family 匹配键）；isDefault=true 设为 Rust FontTable 默认 fallback。
+        /// v10：不再双写 Unity Font asset——核心自产 atlas，后端不再光栅化文本。
         /// Driver.Awake 后调此方法注入项目字体（可多次调注册多字体）。
         /// </summary>
-        public void RegisterFont(string family, byte[] bytes, Font unityFont, bool isDefault)
+        public void RegisterFont(string family, byte[] bytes, bool isDefault)
         {
             if (_stage == null) return;
             byte[] fb = Encoding.UTF8.GetBytes(family ?? "");
@@ -110,17 +103,7 @@ namespace LoomGUI
                     _stage, fp, (nuint)fb.Length, bp, (nuint)(bytes?.Length ?? 0),
                     isDefault ? (byte)1 : (byte)0);
             }
-            if (!string.IsNullOrEmpty(family)) _unityFonts[family] = unityFont;
-            if (isDefault) _defaultUnityFont = unityFont;
         }
-
-        /// <summary>
-        /// Font.textureRebuilt 回调（Driver.Awake 绑：Font.textureRebuilt += stage.OnFontRebuilt）。
-        /// 动态字体 atlas 异步 rebuild 时 glyph UV 变——自增版本号，MirrorPool.Sync 下帧检测到版本
-        /// 变 → 强制所有 text 节点重 RequestCharactersInTexture + 重取 UV。
-        /// Driver.OnDestroy 解绑（全局静态事件，泄漏会跨场景/实例）。
-        /// </summary>
-        public void OnFontRebuilt(Font font) => _fontVersion++;
 
         // ===== Sprite 解析器初始化（Driver 调）=====
 
@@ -173,9 +156,9 @@ namespace LoomGUI
                 }
                 Marshal.Copy((IntPtr)ptr, _frameBuf, 0, len);
                 var blob = new FrameBlob(_frameBuf);
-                // MirrorPool.Sync 读本实例 FontVersion（atlas rebuild 检测）+ 字体表（text 光栅）。
-                _pool.Sync(blob, _renderRoot, _mm, _sprites, Texture2D.whiteTexture,
-                           _unityFonts, _defaultUnityFont, _fontVersion);
+                SyncFontAtlas();
+                // v10：不再传字体表（核心自产 atlas，后端不再光栅化文本）。
+                _pool.Sync(blob, _renderRoot, _mm, _sprites, Texture2D.whiteTexture);
                 _nhm.Sync(_stage);
             }
 
@@ -189,6 +172,56 @@ namespace LoomGUI
             nuint ccLen = 0;
             byte* ccPtr = Native.loomgui_stage_borrow_controller_changed_events(_stage, &ccLen);
             _eventHandler.DispatchControllerChanged((System.IntPtr)ccPtr, (int)ccLen);
+        }
+
+        /// <summary>
+        /// 拉取核心字体 atlas 脏页 → 上传 R8 Texture2D → Sprite 包装 → 注册进 SpriteResolver。
+        /// tick 后 borrow_frame 已更新（本帧渲染节点包含 text Mesh image_path），
+        /// _pool.Sync 前注册 atlas Sprite 使 text 节点的 image_path 命中 GetSprite 缓存。
+        ///
+        /// 双调法取页数据：先探 buf_len=0 返所需字节数 → 分配 buf → 再调填 w/h/bytes。
+        /// Atlas 页面通常是 512×512=256KB，每页用独立 ArrayPool 缓冲区（不挤 _frameBuf）。
+        /// v1.6 单字体路径固定 f0（默认字体 font_id=0）；多字体 T8 再扩 key。
+        /// </summary>
+        unsafe void SyncFontAtlas()
+        {
+            // 探脏页（通常 ≤8 页；v1.6 单字体极少超 16）。
+            const int MAX_DIRTY = 16;
+            uint* dirtyPtr = stackalloc uint[MAX_DIRTY];
+            int n = (int)Native.loomgui_stage_font_atlas_dirty_pages(_stage, dirtyPtr, (nuint)MAX_DIRTY);
+            if (n <= 0) return;
+            if (n > MAX_DIRTY)
+            {
+                Debug.LogWarning($"[LoomStage] font atlas dirty pages ({n}) exceed MAX_DIRTY ({MAX_DIRTY}); skipping extras");
+                n = MAX_DIRTY;
+            }
+
+            for (int i = 0; i < n; i++)
+            {
+                uint page = dirtyPtr[i];
+                uint w = 0, h = 0;
+                // 探所需字节数（buf_len=0, out_buf=null → 返 needed 不写 w/h/pixels）。
+                int needed = (int)Native.loomgui_stage_font_atlas_page(_stage, page, &w, &h, null, (nuint)0);
+                if (needed <= 0) continue;
+
+                byte[] buf = ArrayPool<byte>.Shared.Rent(needed);
+                try
+                {
+                    fixed (byte* pBuf = buf)
+                    {
+                        int got = (int)Native.loomgui_stage_font_atlas_page(_stage, page, &w, &h, pBuf, (nuint)needed);
+                        if (got != needed) continue;
+                    }
+                    var tex = new Texture2D((int)w, (int)h, TextureFormat.R8, false);
+                    fixed (byte* p = buf) { tex.LoadRawTextureData((IntPtr)p, needed); }
+                    tex.Apply(false, true);
+                    // v1.6 单字体：默认字体 font_id=0（FontTable 首个注册），路径 f0 与 T3 render 合成 path 对齐。
+                    string path = $"loomgui://font-atlas/f0/p{page}";
+                    _sprites.RegisterFontAtlasPage(path, tex);
+                }
+                finally { ArrayPool<byte>.Shared.Return(buf); }
+            }
+            Native.loomgui_stage_font_atlas_clear_dirty(_stage);
         }
 
         // ===== 引擎无关 FFI 透传 API（保持不变）=====
@@ -468,7 +501,6 @@ namespace LoomGUI
         /// <summary>
         /// 释放 Stage 持有的 Unity 资源（MirrorPool GO/Mesh + NativeHost wrapper + MaterialManager +
         /// ArrayPool buffer）+ Rust Stage 句柄。Driver.OnDestroy 调；本类非 MonoBehaviour 故无 OnDestroy。
-        /// Font.textureRebuilt 解绑由 Driver 负责（Driver.Awake 绑的，Driver.OnDestroy 解）。
         /// </summary>
         public void Dispose()
         {

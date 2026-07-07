@@ -36,6 +36,11 @@ Cargo.lock
 sysinfo.txt
 crashlytics-build.properties
 
+# ===== dotnet tests =====
+tests/dotnet/bin/
+tests/dotnet/obj/
+!tests/dotnet/*.csproj
+
 # ===== Rust↔Unity 产物 =====
 # csbindgen 生成的 C# 绑定（由 Rust 侧生成，不入库）
 **/LoomGUI*Bindings*.cs
