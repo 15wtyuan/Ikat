@@ -1892,3 +1892,172 @@ fn container_bg_image_with_radius_uses_rounded_rect() {
         _ => panic!("expected Mesh"),
     }
 }
+
+// ── T8 review fixes: multi-page text sub-page tests ───────────────────
+
+/// C1 回归：text 子页 reuse_key 必须为 0（不继承主节点），防止虚拟列表内多页覆盖。
+/// 构造带 reuse_key=7 的 text 节点，跑 build_render_nodes，验 primary 继承 reuse_key=7、
+/// 子页 reuse_key=0。
+#[test]
+fn text_sub_pages_reuse_key_is_zero_not_inherited() {
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "Hello".into(),
+    };
+    n.reuse_key = 7; // 模拟虚拟列表 slot
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 20.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    for rn in &frame.nodes {
+        if is_text_sub_page(rn.node_id) {
+            assert_eq!(
+                rn.reuse_key, 0,
+                "子页 reuse_key 必须为 0（不继承主节点），得 {}",
+                rn.reuse_key
+            );
+        }
+    }
+    // primary 节点验证：应存在一个非子页 text mesh 且 reuse_key=7
+    let primary = frame.nodes.iter().find(|rn| {
+        !is_text_sub_page(rn.node_id) && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+    });
+    assert!(primary.is_some(), "应存在 primary text RenderNode");
+    assert_eq!(primary.unwrap().reuse_key, 7, "primary 继承 reuse_key=7");
+}
+
+/// I1 回归：propagate_text_sub_page_sort_keys 累积偏移防 stale primary_sk。
+/// 构造两 text 节点各带子页，验 sort_key 单调无 tie。
+#[test]
+fn propagate_text_sub_page_sort_keys_cumulative_shift_no_ties() {
+    use crate::render::node::{BlendMode, ChangeLevel, MaskContext, NodePayload, RenderNode};
+
+    // 构造 nodes vec：A(primary, sk=2), A_sub1(synth, sk=0), A_sub2(synth, sk=0),
+    //                  B(primary, sk=3), B_sub1(synth, sk=0), C(real, sk=4)
+    let a_id = 0u32;
+    let b_id = 1u32;
+    let c_id = 2u32;
+    let a_sub1 = synth_text_node_id(a_id, 1);
+    let a_sub2 = synth_text_node_id(a_id, 2);
+    let b_sub1 = synth_text_node_id(b_id, 1);
+
+    let empty_mesh = NodePayload::Mesh {
+        verts: vec![],
+        uvs: vec![],
+        colors: vec![],
+        indices: vec![],
+        image_path: None,
+        program: 0,
+        color_matrix: [0.0; 20],
+    };
+
+    let mk_rn = |node_id: u32, sort_key: u32| RenderNode {
+        node_id,
+        parent_id: None,
+        visible: true,
+        alpha: 1.0,
+        color_tint: [1.0; 4],
+        world_matrix: crate::transform::IDENTITY,
+        blend: BlendMode::Normal,
+        mask_context: MaskContext(0),
+        sort_key,
+        change_level: ChangeLevel::Full,
+        reuse_key: 0,
+        payload: empty_mesh.clone(),
+    };
+
+    let mut nodes = vec![
+        mk_rn(a_id, 2),
+        mk_rn(a_sub1, 0),
+        mk_rn(a_sub2, 0),
+        mk_rn(b_id, 3),
+        mk_rn(b_sub1, 0),
+        mk_rn(c_id, 4),
+    ];
+
+    // id_to_pos：真节点映射（不含合成子页）
+    let mut id_to_pos: std::collections::HashMap<NodeId, usize> = std::collections::HashMap::new();
+    id_to_pos.insert(NodeId(a_id), 0);
+    id_to_pos.insert(NodeId(b_id), 3);
+    id_to_pos.insert(NodeId(c_id), 5);
+
+    propagate_text_sub_page_sort_keys(&mut nodes, &id_to_pos);
+
+    // 预期：
+    //   cum=0, adj=2: B(3→5), C(4→6). cum=2
+    //   cum=2, adj=3+2=5: C(6→7). cum=3
+    //   After shift: A=2, B=5, C=7
+    //   Sub-pages: A_sub1=A.sk+1=3, A_sub2=4, B_sub1=B.sk+1=6
+    //   Final: A=2, A_sub1=3, A_sub2=4, B=5, B_sub1=6, C=7
+
+    let find = |nid: u32| nodes.iter().find(|n| n.node_id == nid).unwrap().sort_key;
+    assert_eq!(find(a_id), 2, "A primary");
+    assert_eq!(find(a_sub1), 3, "A sub 1");
+    assert_eq!(find(a_sub2), 4, "A sub 2");
+    assert_eq!(find(b_id), 5, "B primary");
+    assert_eq!(find(b_sub1), 6, "B sub 1");
+    assert_eq!(find(c_id), 7, "C");
+
+    // 验无 tie
+    let mut sks: Vec<u32> = nodes.iter().map(|n| n.sort_key).collect();
+    sks.sort();
+    let unique: Vec<u32> = {
+        let mut u = sks.clone();
+        u.dedup();
+        u
+    };
+    assert_eq!(sks.len(), unique.len(), "sort_key 不得有 tie");
+}
+
+/// I2 哨兵：合成 node_id 硬上限文档。
+/// 验证 synth_text_node_id / is_text_sub_page / text_sub_primary_id / text_sub_page_idx
+/// 的编码/解码一致性。
+#[test]
+fn synth_text_node_id_roundtrip() {
+    let primary = 0x0000_0123u32;
+    let sub = synth_text_node_id(primary, 5);
+    assert!(is_text_sub_page(sub));
+    assert!(!is_text_sub_page(primary));
+    assert_eq!(text_sub_primary_id(sub), primary & 0x00FF_FFFF);
+    assert_eq!(text_sub_page_idx(sub), 5);
+
+    // 边界：page=255（最大子页号）
+    let max_sub = synth_text_node_id(0, 255);
+    assert_eq!(text_sub_page_idx(max_sub), 255);
+    assert!(is_text_sub_page(max_sub));
+
+    // 真实 node index=4095（bits[23:12]=4095）不应被误判为子页
+    let high_index = (4095u32 << 12) | 1; // index=4095, gen=1
+    assert!(!is_text_sub_page(high_index), "index=4095 仍不被误判");
+}
+
+/// I2 哨兵：index=4096 会与合成子页 bit 碰撞——验 is_text_sub_page 误判。
+#[test]
+fn node_index_4096_triggers_sub_page_collision() {
+    // index=4096 → bits[31:12] = 0x00001 (bit 24 set) → bits[31:24]=1 → 子页误判
+    let collision_id = 4096u32 << 12;
+    assert!(
+        is_text_sub_page(collision_id),
+        "index=4096 → bits[31:24]=1 → 误判为子页（证明硬上限哨兵的动机）"
+    );
+}

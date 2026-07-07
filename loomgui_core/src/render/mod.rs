@@ -135,6 +135,15 @@ pub fn build_render_nodes(
     // 不等长，batch 按此映射索引 nodes；pruned 节点不入表（batch DFS 遇 id_to_pos 没有
     // 的节点即跳过该子树）。
     let mut id_to_pos: std::collections::HashMap<NodeId, usize> = std::collections::HashMap::new();
+    // 合成 node_id 方案依赖真实节点 index < 4096（bits [31:12] 全零时 bits [31:24] = 0，
+    // 不与子页的 page 编码冲突）。真实场景节点超 4096 时合成 id 会与真节点 id 碰撞。
+    // 硬上限：build 时如果任何真节点 index >= 4096，debug 构建 panic，release 继续
+    // （此时 is_text_sub_page 可能误判真节点为子页，sort_key 乱序）。
+    debug_assert!(
+        scene.nodes.values().all(|n| (n.id.0 >> 12) < 4096),
+        "node index >= 4096: synthetic text sub-page id scheme hard limit exceeded. \
+         See synth_text_node_id / is_text_sub_page in render/mod.rs."
+    );
     // 直接逐节点构造真 RenderNode。change_level 先占 Full，末尾统一定级。
     // 先剪 display:none 子树——display:none 节点 + 后代不产 RenderNode（CSS 语义）。
     let pruned = collect_display_none_subtree(scene);
@@ -435,7 +444,11 @@ pub fn build_render_nodes(
                         mask_context: MaskContext(0),
                         sort_key: 0,
                         change_level: ChangeLevel::Full,
-                        reuse_key: n.reuse_key,
+                        // 子页用 reuse_key=0（不继承主节点）：每个子页有独立的合成 node_id，
+                        // reuse_key=0 时 MirrorPool 按 node_id keying → 独立的 GO，不互相覆盖。
+                        // 若继承 reuse_key>0（如在虚拟列表 slot 内），所有子页共享同一 reuse_key
+                        // → MirrorPool 只保留最后一个子页的 mesh，其余页字形丢失。
+                        reuse_key: 0,
                         payload: NodePayload::Mesh {
                             verts: verts.clone(),
                             uvs: uvs.clone(),
@@ -447,6 +460,10 @@ pub fn build_render_nodes(
                         },
                     });
                 }
+                // 注意：子页 RenderNode 的合成 node_id 是有意**不**加入 id_to_pos 的。
+                // assign_sort_keys / scrollbar thumb / NativeHost 查询均针对真 scene 节点；
+                // 合成 id 是纯渲染产物，不应反向映射到 scene node。子页的 sort_key/mask_context
+                // 由 propagate_text_sub_page_sort_keys 单独传播。
                 continue; // 直接推完，跳过末尾的 id_to_pos / push。
             }
         };
@@ -563,13 +580,19 @@ fn propagate_text_sub_page_sort_keys(
         })
         .collect();
     shifts.sort_by_key(|&(sk, _)| sk);
-    // 后移后续真节点 sort_key。
+    // 后移后续真节点 sort_key。使用累积偏移避免 stale primary_sk：shifts 中的
+    // primary_sk 是排序前采集的快照；当存在多个带子页的 text 节点时，先处理的节点
+    // 已把后续节点（含后面的 text 节点）的 sort_key 向后推，此时再用原始 primary_sk
+    // 比较会误判区间，造成 sort_key tie。
+    let mut cum_shift: u32 = 0;
     for (primary_sk, n) in &shifts {
+        let adjusted_sk = *primary_sk + cum_shift;
+        cum_shift += *n;
         for rn in nodes.iter_mut() {
             if is_text_sub_page(rn.node_id) {
                 continue;
             }
-            if rn.sort_key > *primary_sk {
+            if rn.sort_key > adjusted_sk {
                 rn.sort_key += n;
             }
         }
