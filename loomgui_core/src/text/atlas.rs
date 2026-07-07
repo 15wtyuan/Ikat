@@ -453,4 +453,34 @@ mod tests {
         assert!(w > 0 && h > 0, "页尺寸 > 0");
         assert_eq!(bytes.len(), (w * h) as usize, "R8 字节数 = w*h");
     }
+
+    #[test]
+    fn overflow_allocates_second_page() {
+        // 用 allocate 直接填满页 0（1024² 块），然后 ensure 必须分配在页 1
+        // → 证明多页溢出 + dirty 标记通路完整。
+        let mut a = GlyphAtlas::new();
+        // 往页 0 分 1024×1024 块直到溢出 → 页 1 被 push
+        for _ in 0..50 {
+            let r = a.allocate(1024, 1024);
+            if r.page != 0 {
+                break;
+            }
+        }
+        assert_eq!(a.pages.len(), 2, "allocate 溢出开了页 1");
+        // 清 allocate 的脏标记（allocate 不标脏，这里防御），
+        // 然后 ensure 一个字形：页 0 满 → 分配在页 1。
+        a.clear_dirty();
+        let f = dejavu_face();
+        let gid = f.glyph_index('A').unwrap();
+        let k = GlyphKey {
+            font_id: 0,
+            glyph_id: gid.0,
+            size_px: 32,
+            effect_sig: 0,
+        };
+        let r = a.ensure(&f, k);
+        assert_eq!(r.page, 1, "页 0 满 → ensure 返 page=1");
+        let dirty = a.dirty_pages();
+        assert!(dirty.contains(&1), "新字形所在页标脏（page=1）");
+    }
 }

@@ -332,6 +332,9 @@ pub fn build_render_nodes(
                 }
             }
             NodeKind::Text { content } => {
+                // Text 节点单独处理：build_text_mesh 可能按 atlas 页号拆成多 Mesh，
+                // 对应推多个 RenderNode（primary 用真 node_id，子页用合成 id）。
+                // 避免 match arm 返回单个 RenderNode 的限制，在此处直接 push。
                 let s = &n.style;
                 let font = fonts.select(s.font_family.as_deref());
                 let mut layout = scene
@@ -360,54 +363,91 @@ pub fn build_render_nodes(
                 }
                 let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
                 let font_id = fonts.font_id(s.font_family.as_deref());
-                let (verts, uvs, colors, indices) =
+                let meshes =
                     build_text_mesh(&layout, font_id, s.font_size, text_color, atlas, font);
-                // v1.6：page 取首字形的 atlas 页号。单字体单字号场景所有字形同页；
-                // 跨页 split 由 Task 8 处理（按页拆多个 Mesh）。
-                let page = if layout.lines.is_empty() {
-                    0u32
-                } else {
-                    // peek first glyph to determine page for the synthetic path.
-                    // The actual page is determined inside build_text_mesh via atlas.ensure.
-                    // We re-ensure the first glyph to get its page (cached, no re-raster).
-                    let first_run = layout.lines[0].runs.first();
-                    let first_g = first_run.and_then(|r| r.glyphs.first());
-                    match first_g {
-                        Some(g) => {
-                            let key = GlyphKey {
-                                font_id,
-                                glyph_id: g.glyph_id,
-                                size_px: s.font_size.round().max(1.0) as u16,
-                                effect_sig: 0,
-                            };
-                            atlas.ensure(&font.face, key).page
-                        }
-                        None => 0,
-                    }
-                };
-                let synthetic_path = format!("loomgui://font-atlas/f{}/p{}", font_id, page);
-                RenderNode {
-                    node_id,
-                    parent_id,
-                    visible: true,
-                    alpha,
-                    color_tint,
-                    world_matrix: wm,
-                    blend: BlendMode::Normal,
-                    mask_context: MaskContext(0),
-                    sort_key: 0,
-                    change_level: ChangeLevel::Full,
-                    reuse_key: n.reuse_key,
-                    payload: NodePayload::Mesh {
-                        verts,
-                        uvs,
-                        colors,
-                        indices,
-                        image_path: Some(synthetic_path),
-                        program: 1,
-                        color_matrix: [0.0; 20],
-                    },
+                if meshes.is_empty() {
+                    // 空文本 → 占位 Mesh（无顶点，image_path 用第 0 页兜底）。
+                    id_to_pos.insert(n.id, nodes.len());
+                    nodes.push(RenderNode {
+                        node_id,
+                        parent_id,
+                        visible: true,
+                        alpha,
+                        color_tint,
+                        world_matrix: wm,
+                        blend: BlendMode::Normal,
+                        mask_context: MaskContext(0),
+                        sort_key: 0,
+                        change_level: ChangeLevel::Full,
+                        reuse_key: n.reuse_key,
+                        payload: NodePayload::Mesh {
+                            verts: vec![],
+                            uvs: vec![],
+                            colors: vec![],
+                            indices: vec![],
+                            image_path: Some(format!("loomgui://font-atlas/f{}/p0", font_id)),
+                            program: 1,
+                            color_matrix: [0.0; 20],
+                        },
+                    });
+                    continue;
                 }
+                // 首页（page 0）→ 主 RenderNode，用真 node_id。
+                {
+                    let (page0, verts0, uvs0, colors0, indices0) = &meshes[0];
+                    let path0 = format!("loomgui://font-atlas/f{}/p{}", font_id, page0);
+                    id_to_pos.insert(n.id, nodes.len());
+                    nodes.push(RenderNode {
+                        node_id,
+                        parent_id,
+                        visible: true,
+                        alpha,
+                        color_tint,
+                        world_matrix: wm,
+                        blend: BlendMode::Normal,
+                        mask_context: MaskContext(0),
+                        sort_key: 0,
+                        change_level: ChangeLevel::Full,
+                        reuse_key: n.reuse_key,
+                        payload: NodePayload::Mesh {
+                            verts: verts0.clone(),
+                            uvs: uvs0.clone(),
+                            colors: colors0.clone(),
+                            indices: indices0.clone(),
+                            image_path: Some(path0),
+                            program: 1,
+                            color_matrix: [0.0; 20],
+                        },
+                    });
+                }
+                // 后续页 → 合成 node_id 的子 RenderNode。
+                for (pi, (page, verts, uvs, colors, indices)) in meshes[1..].iter().enumerate() {
+                    let sub_id = synth_text_node_id(node_id, (pi + 1) as u32);
+                    let sub_path = format!("loomgui://font-atlas/f{}/p{}", font_id, page);
+                    nodes.push(RenderNode {
+                        node_id: sub_id,
+                        parent_id,
+                        visible: true,
+                        alpha,
+                        color_tint,
+                        world_matrix: wm,
+                        blend: BlendMode::Normal,
+                        mask_context: MaskContext(0),
+                        sort_key: 0,
+                        change_level: ChangeLevel::Full,
+                        reuse_key: n.reuse_key,
+                        payload: NodePayload::Mesh {
+                            verts: verts.clone(),
+                            uvs: uvs.clone(),
+                            colors: colors.clone(),
+                            indices: indices.clone(),
+                            image_path: Some(sub_path),
+                            program: 1,
+                            color_matrix: [0.0; 20],
+                        },
+                    });
+                }
+                continue; // 直接推完，跳过末尾的 id_to_pos / push。
             }
         };
         id_to_pos.insert(n.id, nodes.len());
@@ -420,6 +460,10 @@ pub fn build_render_nodes(
     // 快照保留供 NativeHost FFI 查询。
     let mut sort_keys: Vec<u32> = vec![0u32; scene.nodes.capacity() + 1];
     let clips = batch::assign_sort_keys(scene, &mut nodes, &id_to_pos, &mut sort_keys);
+    // 跨页 text 子页 sort_key 传播：assign_sort_keys 只认识真 scene 节点（经 id_to_pos 映射），
+    // 不认识合成子页。此处把子页 sort_key 设为 primary.sort_key + page_idx，并把后续真节点
+    // 的 sort_key 后移子页个数，保持单调连续。
+    propagate_text_sub_page_sort_keys(&mut nodes, &id_to_pos);
     let max_sort = nodes.iter().map(|n| n.sort_key).max().unwrap_or(0);
     batch::reorder_for_batching(scene, &mut nodes);
     let mut nodes = merge::merge_meshes(nodes);
@@ -463,6 +507,91 @@ pub fn build_render_nodes(
     (FrameData { nodes, clips }, new_hashes, sort_keys)
 }
 
+/// 合成 node_id：为跨页 text 子页生成区别于主节点的 id。
+/// 编码：bits [31:24] = 子页号（1..255），bits [23:0] = primary_id 的低 24 位。
+/// 真实场景 node index < 2^12 时 bits [23:12] 均为零，不会与其它 scene 节点碰撞。
+fn synth_text_node_id(primary_id: u32, sub_page: u32) -> u32 {
+    (primary_id & 0x00FF_FFFF) | ((sub_page & 0xFF) << 24)
+}
+
+/// 判断 node_id 是否为跨页 text 子页（bits [31:24] 非零）。
+fn is_text_sub_page(node_id: u32) -> bool {
+    (node_id >> 24) > 0
+}
+
+/// 提取跨页 text 子页对应的主节点 id。
+fn text_sub_primary_id(node_id: u32) -> u32 {
+    node_id & 0x00FF_FFFF
+}
+
+/// 提取跨页 text 子页的页号（1 基）。
+fn text_sub_page_idx(node_id: u32) -> u32 {
+    node_id >> 24
+}
+
+/// 跨页 text 子页 sort_key 传播 + 后续真节点 sort_key 后移。
+///
+/// assign_sort_keys 只给 `id_to_pos` 中的真 scene 节点赋 sort_key；合成子页保持 0。
+/// 此函数：
+/// 1. 统计每对 (primary_sort_key, num_sub_pages)
+/// 2. 后续真节点 sort_key 后移 num_sub_pages
+/// 3. 子页 sort_key = primary.sort_key + page_idx, mask_context = primary.mask_context
+///
+/// 步骤 2 保证子页 sort_key 嵌入 primary 与下一个真节点之间，保持单调连续。
+fn propagate_text_sub_page_sort_keys(
+    nodes: &mut [RenderNode],
+    id_to_pos: &std::collections::HashMap<NodeId, usize>,
+) {
+    // 统计：真 node_id 为 key 的 primary text 节点及其子页数。
+    let mut sub_counts: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    for rn in nodes.iter() {
+        if is_text_sub_page(rn.node_id) {
+            let primary = text_sub_primary_id(rn.node_id);
+            *sub_counts.entry(primary).or_default() += 1;
+        }
+    }
+    if sub_counts.is_empty() {
+        return;
+    }
+    // 按 primary sort_key 排序（从小到大），保证 shift 按序累积。
+    let mut shifts: Vec<(u32, u32)> = sub_counts
+        .iter()
+        .filter_map(|(&primary, &count)| {
+            id_to_pos
+                .get(&NodeId(primary))
+                .map(|&pos| (nodes[pos].sort_key, count))
+        })
+        .collect();
+    shifts.sort_by_key(|&(sk, _)| sk);
+    // 后移后续真节点 sort_key。
+    for (primary_sk, n) in &shifts {
+        for rn in nodes.iter_mut() {
+            if is_text_sub_page(rn.node_id) {
+                continue;
+            }
+            if rn.sort_key > *primary_sk {
+                rn.sort_key += n;
+            }
+        }
+    }
+    // 传播子页 sort_key + mask_context。
+    for &primary in sub_counts.keys() {
+        let pos = match id_to_pos.get(&NodeId(primary)) {
+            Some(&p) => p,
+            None => continue,
+        };
+        let primary_sk = nodes[pos].sort_key;
+        let primary_mask = nodes[pos].mask_context;
+        for rn in nodes.iter_mut() {
+            if text_sub_primary_id(rn.node_id) == primary && is_text_sub_page(rn.node_id) {
+                let page = text_sub_page_idx(rn.node_id);
+                rn.sort_key = primary_sk + page;
+                rn.mask_context = primary_mask;
+            }
+        }
+    }
+}
+
 /// 把 taffy `LengthPercentage` 解析为 px。
 ///
 /// - `Length(v)` → v。
@@ -497,6 +626,9 @@ fn bake_content_offset(layout: &mut crate::text::layout::TextLayout, off_x: f32,
 /// V-flip 方向：atlas v0=顶(v0)、v1=底(v1)；quad 底采样 atlas 底(v1)、
 /// 顶采样 atlas 顶(v0)。与现有 Image quad UV 翻转模式一致（quad BL→(u0,v1)、
 /// TR→(u1,v0)）。PlayMode 实测校准（如果 text 上下颠倒，翻转 UV v 方向）。
+///
+/// 返回按 atlas 页号分组的 mesh 列表。单字体单字号常见一页装下 → 一项（单 draw call）；
+/// 超 CJK 字符集才跨页 → 多项（每项独立 image_path = f<id>/p<page>）。
 fn build_text_mesh(
     layout: &crate::text::layout::TextLayout,
     font_id: u32,
@@ -504,28 +636,43 @@ fn build_text_mesh(
     color: [f32; 4],
     atlas: &mut GlyphAtlas,
     font: &crate::text::layout::Font,
-) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
-    let mut verts: Vec<[f32; 2]> = Vec::new();
-    let mut uvs: Vec<[f32; 2]> = Vec::new();
-    let mut colors: Vec<[f32; 4]> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
+) -> Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> {
+    // 第一遍：收集字形并按 atlas 页号分组。
+    let size_px = font_size.round().max(1.0) as u16;
     let face = &font.face;
+    let mut pages: std::collections::BTreeMap<u32, Vec<(f32, f32, f32, f32, f32, f32, f32, f32)>> =
+        std::collections::BTreeMap::new();
     for line in &layout.lines {
         for run in &line.runs {
             for g in &run.glyphs {
                 let key = GlyphKey {
                     font_id,
                     glyph_id: g.glyph_id,
-                    size_px: font_size.round().max(1.0) as u16,
+                    size_px,
                     effect_sig: 0,
                 };
                 let r = atlas.ensure(face, key);
-                // quad 坐标：pen(g.x, line.baseline) + bearing → 4 角。
-                // bearing_x 从 pen 左移（bbox x_min），bearing_y 从 baseline 上移（bbox y_max）。
                 let left = g.x + g.bearing_x;
                 let top = line.baseline + g.bearing_y;
                 let right = left + r.px_w as f32;
                 let bottom = top - r.px_h as f32;
+                // 存 (left, bottom, right, top, u0, v0, u1, v1)
+                pages
+                    .entry(r.page)
+                    .or_default()
+                    .push((left, bottom, right, top, r.u0, r.v0, r.u1, r.v1));
+            }
+        }
+    }
+    // 第二遍：每组独立建 mesh。
+    pages
+        .into_iter()
+        .map(|(page, glyphs)| {
+            let mut verts: Vec<[f32; 2]> = Vec::with_capacity(glyphs.len() * 4);
+            let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(glyphs.len() * 4);
+            let mut colors: Vec<[f32; 4]> = Vec::with_capacity(glyphs.len() * 4);
+            let mut indices: Vec<u32> = Vec::with_capacity(glyphs.len() * 6);
+            for (left, bottom, right, top, u0, v0, u1, v1) in glyphs {
                 let base = verts.len() as u32;
                 // 顶点序 BL,BR,TR,TL（与 mesh::quad 同序）。
                 verts.push([left, bottom]);
@@ -533,17 +680,16 @@ fn build_text_mesh(
                 verts.push([right, top]);
                 verts.push([left, top]);
                 // UV：BL→(u0,v1), BR→(u1,v1), TR→(u1,v0), TL→(u0,v0)。
-                // atlas v0=顶(y=0)，v1=底(y=h)；quad bottom 采样 atlas bottom=v1。
-                uvs.push([r.u0, r.v1]);
-                uvs.push([r.u1, r.v1]);
-                uvs.push([r.u1, r.v0]);
-                uvs.push([r.u0, r.v0]);
+                uvs.push([u0, v1]);
+                uvs.push([u1, v1]);
+                uvs.push([u1, v0]);
+                uvs.push([u0, v0]);
                 colors.extend(std::iter::repeat_n(color, 4));
                 indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
             }
-        }
-    }
-    (verts, uvs, colors, indices)
+            (page, verts, uvs, colors, indices)
+        })
+        .collect()
 }
 
 #[cfg(test)]
