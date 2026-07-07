@@ -776,6 +776,77 @@ pub extern "C" fn loomgui_stage_get_node_visible(
     }
 }
 
+// ===== font atlas FFI（v1.6 自绘字体 pull 模型） =====
+
+/// 拉脏页 page_idx 列表（写入 out，返实际数）。null 句柄 / null out → 返 0。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_font_atlas_dirty_pages(
+    h: *const StageHandle,
+    out: *mut u32,
+    max: usize,
+) -> usize {
+    if h.is_null() || out.is_null() {
+        return 0;
+    }
+    let sh = unsafe { &*h };
+    let buf = unsafe { std::slice::from_raw_parts_mut(out, max) };
+    sh.stage.font_atlas_dirty_pages(buf)
+}
+
+/// 读某页 R8 像素 + 尺寸。buf_len 不够返所需大小（双调法：先传小 buf 探大小）。
+/// 无此页 / null 句柄 / null out_buf → 返 0。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_font_atlas_page(
+    h: *const StageHandle,
+    page: u32,
+    out_w: *mut u32,
+    out_h: *mut u32,
+    out_buf: *mut u8,
+    buf_len: usize,
+) -> usize {
+    if h.is_null() {
+        return 0;
+    }
+    let sh = unsafe { &*h };
+    // 先探所需大小（传空 buf，不碰 out_buf 指针）
+    let (mut w, mut hgt) = (0u32, 0u32);
+    let needed = sh.stage.font_atlas_page(page, &mut w, &mut hgt, &mut []);
+    if buf_len < needed {
+        return needed; // 双调：caller 扩 buf 重调
+    }
+    if needed == 0 {
+        return 0; // 空页 / 越界 page
+    }
+    // buf_len >= needed > 0：out_buf 必非 null（caller 保证），否则 slice 构造 UB。
+    // 安全侧加防御检查。
+    if out_buf.is_null() {
+        return 0;
+    }
+    let buf = unsafe { std::slice::from_raw_parts_mut(out_buf, buf_len) };
+    let n = sh.stage.font_atlas_page(page, &mut w, &mut hgt, buf);
+    if !out_w.is_null() {
+        unsafe {
+            *out_w = w;
+        }
+    }
+    if !out_h.is_null() {
+        unsafe {
+            *out_h = hgt;
+        }
+    }
+    n
+}
+
+/// 清脏页（backend 拉完后调）。null 句柄 → no-op。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_font_atlas_clear_dirty(h: *mut StageHandle) {
+    if h.is_null() {
+        return;
+    }
+    let sh = unsafe { &mut *h };
+    sh.stage.font_atlas_clear_dirty();
+}
+
 /// 设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_reuse_key(h: *mut StageHandle, node_id: u32, key: u32) {

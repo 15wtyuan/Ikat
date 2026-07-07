@@ -295,6 +295,25 @@ namespace LoomGUI.Bindings
         internal static extern void loomgui_stage_get_node_visible(StageHandle* h, uint node_id, byte* @out);
 
         /// <summary>
+        ///  拉脏页 page_idx 列表（写入 out，返实际数）。null 句柄 / null out → 返 0。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_font_atlas_dirty_pages", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern nuint loomgui_stage_font_atlas_dirty_pages(StageHandle* h, uint* @out, nuint max);
+
+        /// <summary>
+        ///  读某页 R8 像素 + 尺寸。buf_len 不够返所需大小（双调法：先传小 buf 探大小）。
+        ///  无此页 / null 句柄 / null out_buf → 返 0。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_font_atlas_page", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern nuint loomgui_stage_font_atlas_page(StageHandle* h, uint page, uint* out_w, uint* out_h, byte* out_buf, nuint buf_len);
+
+        /// <summary>
+        ///  清脏页（backend 拉完后调）。null 句柄 → no-op。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_font_atlas_clear_dirty", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_font_atlas_clear_dirty(StageHandle* h);
+
+        /// <summary>
         ///  设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_reuse_key", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]

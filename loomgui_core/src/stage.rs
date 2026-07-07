@@ -333,6 +333,39 @@ impl Stage {
         }
     }
 
+    /// 拉脏页 page_idx 列表（写入 out，返实际数）。atlas 未用 / 无 scene → 0。
+    pub fn font_atlas_dirty_pages(&self, out: &mut [u32]) -> usize {
+        let dirty = self.glyph_atlas.dirty_pages();
+        let n = dirty.len().min(out.len());
+        out[..n].copy_from_slice(&dirty[..n]);
+        n
+    }
+
+    /// 读某页：尺寸 + R8 像素。buf_len 不够返所需大小（双调法），够则写 buf 返字节数。
+    /// 无此页 → 返 0（out_w/out_h 不写）。
+    pub fn font_atlas_page(
+        &self,
+        page: u32,
+        out_w: &mut u32,
+        out_h: &mut u32,
+        out: &mut [u8],
+    ) -> usize {
+        let (bytes, w, h) = self.glyph_atlas.page_bytes(page);
+        let needed = (w * h) as usize;
+        if out.len() < needed {
+            return needed; // 双调：caller 扩 buf 重调
+        }
+        out[..needed].copy_from_slice(bytes);
+        *out_w = w;
+        *out_h = h;
+        needed
+    }
+
+    /// 清脏页（backend 拉完调）。
+    pub fn font_atlas_clear_dirty(&mut self) {
+        self.glyph_atlas.clear_dirty();
+    }
+
     /// 编程聚焦（照 fgui RequestFocus）。强制聚焦任意非 disabled 节点
     /// （含 tabindex=None/-1——request_focus 是编程 API，不查 tabindex）。
     /// disabled 拒 / 越界跳过。记 pending_focus_request，下 tick 最前消费（不直接写 last_events）。

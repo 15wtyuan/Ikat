@@ -147,9 +147,12 @@ impl GlyphAtlas {
     }
 
     /// 取某页的 R8 像素 + 宽高，供后端上传纹理。
+    /// page 越界返空切片（`(&[], 0, 0)`），保证 FFI 不 panic（FFI 入门 page 不可信）。
     pub fn page_bytes(&self, page: u32) -> (&[u8], u32, u32) {
-        let p = &self.pages[page as usize];
-        (&p.pixels, p.width, p.height)
+        match self.pages.get(page as usize) {
+            Some(p) => (&p.pixels, p.width, p.height),
+            None => (&[], 0, 0),
+        }
     }
 
     /// 在已存在页中找第一个能容下 w×h 的；都不够就新开一页。返回槽位的像素原点。
