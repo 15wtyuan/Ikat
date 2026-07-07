@@ -25,23 +25,6 @@ permissions:
   contents: read
 
 jobs:
-  # ── 一次性 license 生成 job（拿到 .ulf 后删）────────────────────────────────
-  # 用途：在 CI 里生成 Unity manual-activation 请求文件（.alf），你下载后上传到
-  #   https://license.unity3d.com/manual 换取 .ulf，再把 .ulf 内容存成 UNITY_LICENSE secret。
-  # 拿到 license、test job 跑通后，整个 activation job 可删除。
-  activation:
-    name: Get Unity license (run once, then delete)
-    runs-on: ubuntu-latest
-    steps:
-      - id: alf
-        uses: game-ci/unity-request-activation-file@v3
-        with:
-          unityVersion: 6000.5.0f1
-      - uses: actions/upload-artifact@v4
-        with:
-          name: unity-activation-file
-          path: ${{ steps.alf.outputs.filePath }}
-
   editmode-tests:
     name: Unity EditMode tests (Win)
     runs-on: windows-latest

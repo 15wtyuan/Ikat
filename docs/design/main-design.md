@@ -55,7 +55,7 @@
 ```
 
 ### 2.2 关键边界
-- **Rust 核心**：解析、样式、布局、场景图、事件、动画、几何生成、渲染状态计算、批合重排、裁剪/顺序。产出 `Vec<RenderNode>` + 命中结果 + 事件。**不持任何引擎对象、不碰 GPU。**
+- **Rust 核心**：解析、样式、布局、场景图、事件、动画、几何生成、渲染状态计算、批合重排、裁剪/顺序。产出 `Vec<RenderNode>` + 命中结果 + 事件。**不持任何引擎对象、不碰 GPU。** 非文本几何在核心生成；**文本 mesh 当前是例外**（核心只产 TextLayout，后端光栅化），**计划 v1.6 推翻**（核心自绘字体产 UV+atlas，后端降为贴图上传，见 §8.1 前瞻）。
 - **引擎后端**：输入采集、渲染树→原生渲染对象镜像、mesh 上传、DrawState 缓存与提交、资源加载代理。
 - **不跨越的**：核心不知道 GameObject/CanvasItem；后端不解析 DSL、不算布局、不生成几何。
 
@@ -345,6 +345,8 @@ enum NodePayload {
 
 ## 8. 文本（ttf-parser + unicode-linebreak，测量在核心）
 
+> **v1.6 架构演进前瞻**：本节描述**当前实现**（测量在核心、光栅化在后端）。v1.6 计划把光栅化也搬进核心（ttf-parser outline + ab_glyph 光栅 + etagere 图集，核心产 UV + atlas 纹理，后端降为贴图上传），补齐"引擎无关纯核心"最后破例——根治坑 113/119、重开 kerning、text 可参与合批、跨引擎文本一致（接 Godot 不必重写光栅化）。决策/选型/代价见 `docs/roadmap/rmlui-research.md` §1。改前本节仍是真相。
+
 ### 8.1 测量与渲染分离（一致性根基）
 - **Rust 核心拥有测量 + 断行**（确定性，跨引擎一致）：ttf-parser 取真实度量（`hhea`/`os2` ascent/descent/line-gap，**不照搬 fgui `fontSize*1.25` 估算**）+ unicode-linebreak（换行机会，CJK 逐字）。
 - **文本 mesh 在后端生成**：核心产 TextLayout，后端用引擎字体 API 光栅化产 UV、按 TextLayout 位置拼 quad mesh。
@@ -366,6 +368,8 @@ struct Glyph { glyph_id, codepoint, x, y, bearing_x, bearing_y }   // 绝对坐�
 - **垂直度量**：`Line.height`/`baseline` 由核心按 CSS 语义算（`line-height` 生效并烤进 `Line.height`，对齐 Chrome）；后端只按 `line.y`/`line.baseline` 摆字形，**不得自己再套 line-height**。
 
 **跨 FFI 时 SOA 三表化**（§13.3）：`glyphs_soa[]`（每项=glyph_id/x/y/bearing_x/bearing_y）、`runs_soa[]`（每 run=glyph 起止+font_id+font_size+format）、`lines_soa[]`（每行=run 起止+y/height/baseline/width）。Text payload 带六个 u32 指向三表切片。富文本内联对象加第 4 张 `objects_soa[]`。
+
+> **实测勘误（当前实现 ≠ 上述设计）**：上面的三表 SOA + bearing + `objects_soa` 是**设计目标形态**，当前实现**尚未达到**。实际 blob 每字形只序列化 `{codepoint, x, pen_y}`（`loomgui_ffi_c/src/blob.rs:209-214`），无 bearing（由 Unity `CharacterInfo` 提供）、无三表分离、无 inline_objects（富文本 v1.7 未做）。差距源于"光栅化在后端"——bearing/UV 都是后端从 Unity 字体 API 取。**v1.6 字体搬进核心后**，text_arena 将带 per-glyph UV+quad（或直接走 mesh_arena），届时向本设计形态收敛，blob 升版。
 
 ### 8.3 测量的可重入性
 auto-size/shrink 反复测。`measure(known_dimensions)` 必须廉价、无副作用、可被 taffy 反复调用。测量与渲染用**同一套字体度量**（同一 ttf）。
@@ -432,6 +436,8 @@ stage.is_pointer_on_ui() -> bool   // = 命中目标非空且非根
 - 缓动：Linear/Sine/.../Elastic/Back/Bounce 的 In/Out/InOut + Custom，`EaseManager` 纯函数（Penner 方程）。
 - 特殊：`DelayedCall`、`Shake`、`SetPath`(贝塞尔)、`smoothStart`(吸收首帧大 dt)。
 - **prop_type 分层**（关键）：tween 写属性区分 "transform 属性"（x/y/scale/rotation，置 `transform_dirty`，不 solve）vs "layout 属性"（width/height/flex，置 `layout_dirty` 触发 solve）。位置/缩放动画走 transform 不触发 solve。
+
+> **实测勘误（当前实现 ≠ 上述设计）**：本节是设计目标。当前实现只有 10 个 ease（Linear+Quad/Cubic/Back 三族，`tween.rs:46-57`）、无 repeat/yoyo/SetPath、单段 start→end、仅 on_complete 事件。且有**单矩阵覆盖 bug**：`NodeAnim.transform` 是单个 `Option<Affine2>`，translate/scale/rotation 三通道共用，多通道并行时后写覆盖前写致丢失（`tween.rs:298-300`，单通道动画无此问题）。**v1.10 动画增强**向本设计收敛：补 ease（bounce/elastic/circular/sine…+统一 In/Out 推导）+ @keyframes 时间轴 + iteration/alternate + 颜色 linear 空间插值 + 修覆盖 bug（2D 三通道各自 lerp）。见 `docs/roadmap/rmlui-research.md` §4。
 
 ### 10.2 Transition（时间线 = 编排器，不自驱）【拆 v1.5-b，本期未实现】
 纯数据 `items: Vec<TransitionItem>`。`Play()` 把每个 item 翻译成 Tweener 提交 TweenManager。两点关键帧；多关键帧靠多 item 串行。嵌套 Transition 递归 + 完成回调递减父计数。与 Controller 正交（不同层），可由 Controller.on_changed 触发。

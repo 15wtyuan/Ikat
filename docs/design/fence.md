@@ -102,6 +102,12 @@
 | `border-image-slice` | 1-4 值 px/%（九宫格） | mapping.rs:437-443 | v1.3 | 【实证】 |
 | `transition` | `<property> <duration> <easing>`（标准 CSS，映射 GTween） | mapping.rs | v1.5 | 【实证】 |
 
+> **⚠️ 已解析但渲染不生效/坏掉（v1.8 修，见 `docs/roadmap/rmlui-research.md` §2.3/§3.5/§6）**：上表这几项 parse 层接受，但当前渲染层不兑现——AI 依此预测会错：
+> - **`border-color`/`border`/`border-width`**：`border-width` 只进 taffy 占布局，`border-color` render 层**零引用**，**当前根本不画描边**。v1.8 彩色边框补描边渲染。
+> - **`border-image-slice: %`**：`%` 值被存成比例（`25%`→`0.25`）但渲染当像素用，九宫格坍缩；**px 值正常**。v1.8 修 resolve。
+> - **`filter: sepia`**：退化成 grayscale（色相错），其余 filter 函数正常。v1.8 补棕褐矩阵。
+> - **`transition`**：仅 opacity/color/background-color 生效，**不支持 transform 通道**，`ease` 简化为 QuadOut（无 cubic-bezier）。v1.10 补 transform 通道。
+
 ### 2.4 围栏外 CSS 属性（写了不生效/静默忽略，必须测试锁定）
 
 | 属性 | 实际行为 | 标注 |
@@ -224,7 +230,7 @@
 
 open-design Chromium iframe 预览 ≠ taffy 渲染。AI 须分清：
 
-**可信**（Chrome ≈ LoomGUI）：flex 轴/方向、显式 `display:flex`、`gap` 间距、颜色、opacity、border、图片、px 尺寸、`background-image`/`background-size`（标准 CSS，Chrome 原生）。
+**可信**（Chrome ≈ LoomGUI）：flex 轴/方向、显式 `display:flex`、`gap` 间距、颜色、opacity、图片、px 尺寸、`background-image`/`background-size`、`border-radius`（标准 CSS，Chrome 原生）。**注：`border`/`border-color` 预览有边框但 LoomGUI 当前不画描边（v1.8 前不可信），见 §2.2 勘误。**
 
 **不可信**（Chrome ≠ LoomGUI，别按预览调）：
 - **margin 控间距**：Chrome（block flow）折叠 margin、LoomGUI（flex）求和不折叠。**子项间距用 `gap`**，别用 margin。

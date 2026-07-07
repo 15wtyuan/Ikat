@@ -72,7 +72,7 @@ HTML/CSS DSL → 打包器（构建期；复用核心 parse/style）
 ```
 
 **关键边界**（别跨越）：
-- **Rust 核心**拥有：parse、style、layout、场景图、事件、动画、几何生成、批合、裁剪/顺序。产出 `Vec<RenderNode>` + 命中结果 + 事件。**不持任何引擎对象、不碰 GPU。** 非文本几何在核心生成；**文本 mesh 是例外**——核心只产 `TextLayout`，后端光栅化（动态字形 UV 只有引擎字体 API 才有）。
+- **Rust 核心**拥有：parse、style、layout、场景图、事件、动画、几何生成、批合、裁剪/顺序。产出 `Vec<RenderNode>` + 命中结果 + 事件。**不持任何引擎对象、不碰 GPU。** 非文本几何在核心生成；**文本 mesh 当前是例外**——核心只产 `TextLayout`，后端光栅化（当年理由：动态字形 UV 只有引擎字体 API 才有）。**此例外计划在 v1.6 推翻**：核心自绘字体（ttf-parser outline + ab_glyph 光栅 + etagere 图集），产 UV + atlas，后端降为贴图上传——那时文本 mesh 不再是例外、text 可参与合批、根治坑 113/119。决策与代价见 `docs/roadmap/rmlui-research.md` §1。改前此处仍是真相。
 - **引擎后端**拥有：输入采集、渲染树→原生镜像、mesh 上传、DrawState 缓存+提交、资源加载代理。**不解析 DSL、不算布局、不生成几何。**
 - 核心不知 GameObject/CanvasItem；后端不知 DSL/taffy/几何。
 
