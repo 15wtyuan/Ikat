@@ -60,5 +60,50 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: unity-test-results
+          name: unity-editmode-results
+          path: ${{ steps.tests.outputs.artifactsPath }}
+
+  playmode-tests:
+    name: Unity PlayMode tests (Win)
+    runs-on: windows-latest
+    if: false  # 和 editmode 一起启用
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: build FFI .dll (current Rust source)
+        run: cargo build -p loomgui_ffi_c --release
+
+      - name: stage .dll into package Plugins
+        shell: pwsh
+        run: |
+          Copy-Item target/release/loomgui_ffi_c.dll `
+            loomgui_unity_package/Plugins/LoomGUI/loomgui_ffi_c.dll -Force
+          git add loomgui_unity_package/Plugins/LoomGUI/loomgui_ffi_c.dll
+          git add loomgui_unity_package/Plugins/LoomGUI/Bindings/LoomGUIBindings.cs
+
+      - uses: actions/cache@v4
+        with:
+          path: loomgui_unity/Library
+          key: unity-library-win-play-${{ hashFiles('loomgui_unity/Packages/manifest.json', 'loomgui_unity/ProjectSettings/ProjectVersion.txt') }}
+          restore-keys: unity-library-win-play-
+
+      - id: tests
+        uses: game-ci/unity-test-runner@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        with:
+          projectPath: loomgui_unity
+          unityVersion: 6000.5.0f1
+          testMode: PlayMode
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unity-playmode-results
           path: ${{ steps.tests.outputs.artifactsPath }}

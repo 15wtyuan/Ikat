@@ -78,3 +78,14 @@ jobs:
           name: loomgui_pkg-exe-${{ github.sha }}
           path: target/release/loomgui_pkg.exe
           retention-days: 7
+
+  dotnet-test:
+    name: dotnet test (tests/dotnet)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: dotnet test
+        run: dotnet test tests/dotnet/LoomGUI.Tests.Core.csproj
