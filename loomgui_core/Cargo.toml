@@ -36,3 +36,8 @@ parse = ["dep:scraper", "dep:cssparser"]
 [[test]]
 name = "snapshot"
 required-features = ["parse"]
+
+# dump_showcase_text 用 parse_html/parse_css，无 parse feature 不可编译。
+[[example]]
+name = "dump_showcase_text"
+required-features = ["parse"]

@@ -51,7 +51,8 @@ namespace LoomGUI.Editor
 
             EditorGUILayout.Space(8);
             DrawLog();
-            // Publish 出现于所有 tab：单步按钮留作分步调试，发布做一键产出全部到 Bundles/。
+            // 发布出现于所有 tab：一键 sync atlas + pack pkg + publish fonts + export config → Bundles/{atlas,ui,fonts}/。
+            // 每包「打包」/每图集「同步此图集」留作单项迭代；整体产出走发布。
             DrawPublishButton();
 
             if (changed)
@@ -90,8 +91,6 @@ namespace LoomGUI.Editor
             for (int i = 0; i < _settings.packages.Count; i++) DrawPackageEntry(i);
             if (GUILayout.Button("+ 手动添加空包", GUILayout.Width(120)))
                 _settings.packages.Add(new PackageEntry("new_pkg", ""));
-            EditorGUILayout.Space(8);
-            if (GUILayout.Button("一键打包全部", GUILayout.Height(28))) PackAll();
         }
 
         void DrawPackageDropZone()
@@ -195,14 +194,6 @@ namespace LoomGUI.Editor
             for (int i = 0; i < _settings.atlasEntries.Count; i++) DrawAtlasEntry(i);
             if (GUILayout.Button("+ 添加图集", GUILayout.Width(120)))
                 _settings.atlasEntries.Add(new AtlasEntry { atlasName = "NewAtlas" });
-            EditorGUILayout.Space(8);
-            if (GUILayout.Button("同步全部图集 packables（自动建缺失的）", GUILayout.Height(28)))
-            {
-                LoomAtlasSync.SyncAll(_settings);
-                AppendLog("[atlas] 同步完成（详情看 Console）");
-                EditorUtility.SetDirty(_settings);
-                AssetDatabase.SaveAssetIfDirty(_settings);
-            }
         }
 
         void DrawAtlasEntry(int idx)
@@ -329,7 +320,20 @@ namespace LoomGUI.Editor
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             e.familyName = EditorGUILayout.TextField("familyName (CSS)", e.familyName);
             EditorGUILayout.LabelField("sourceFileName", e.sourceFileName);
-            e.isDefault = EditorGUILayout.Toggle("isDefault", e.isDefault);
+            // isDefault 单选（radio 语义）：勾选此项为默认 → 清掉其余所有 isDefault。
+            // 不允许取消唯一默认（至少保留一个，兑现 DrawFonts 末尾的不变量）。
+            EditorGUI.BeginChangeCheck();
+            bool newDefault = EditorGUILayout.Toggle("默认字体", e.isDefault);
+            if (EditorGUI.EndChangeCheck() && newDefault && !e.isDefault)
+            {
+                for (int j = 0; j < _settings.fonts.Count; j++)
+                    _settings.fonts[j].isDefault = (j == idx);
+                SaveSettings();
+            }
+            // isFallback：是否纳入全局回退链。可多选（回退链是有序列表）。
+            EditorGUI.BeginChangeCheck();
+            e.isFallback = EditorGUILayout.Toggle("回退字体", e.isFallback);
+            if (EditorGUI.EndChangeCheck()) SaveSettings();
             if (GUILayout.Button("删除", GUILayout.Width(60)))
             {
                 _settings.fonts.RemoveAt(idx);
@@ -341,7 +345,6 @@ namespace LoomGUI.Editor
         }
 
         // —— 打包（复用 exe，固定路径）——————————————————————————————
-        void PackAll() { for (int i = 0; i < _settings.packages.Count; i++) PackPackage(i); }
 
         void PackPackage(int idx)
         {

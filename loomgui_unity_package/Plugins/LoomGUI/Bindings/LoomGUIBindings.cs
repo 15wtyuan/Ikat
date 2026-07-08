@@ -42,6 +42,15 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_register_font(StageHandle* h, byte* family, nuint family_len, byte* bytes, nuint bytes_len, byte is_default);
 
         /// <summary>
+        ///  设全局字体回退链。text = UTF-8 字符串，family 名以 `\n` 分隔（如 "wqy-microhei\nLXGWWenKai"）。
+        ///  空/全空白 = 清空回退（退回单字体）。未 register 的 family 静默跳过。返回 0=成功，-1=错误。
+        ///  主字体缺字时按序 probe 回退链，首个含该字的补上（RmlUi fallback 模型）。
+        ///  source-agnostic：后端把系统字体 register 进来后，其 family 名同样填这里即可。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_fallback_families", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_fallback_families(StageHandle* h, byte* text, nuint text_len);
+
+        /// <summary>
         ///  null-safe 释放 Stage 句柄。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
