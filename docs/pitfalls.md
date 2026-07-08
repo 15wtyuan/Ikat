@@ -968,3 +968,17 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：按 gid 区分——gid=0（真缺字 .notdef）保留 tofu（开发期占位）；gid>0 无轮廓（空格、nbsp、零宽空格等）返空 bitmap，`ensure` 早返空 rect（不分配/不标脏，避 `allocate(0,0)` panic），`build_text_mesh` 跳过 `px_w==0` 字形（advance 在 layout 已算，pen 已前进）。
 
 **教训**：无 bbox ≠ 缺字——空格等有 advance 无像素的字形不该画占位。tofu 只给真缺字（gid=0 .notdef，且字体连 .notdef 方框都没有时才兜底；字体自带 .notdef 方框走正常光栅）。光栅兜底要区分"缺字"（gid=0）与"无轮廓"（gid>0 bbox None）。
+
+### 坑 139：RichText 行内图合成 id 触发 reorder panic（Unity 闪退）
+
+**症状**：PlayMode 进含行内图（`<img>` in `<div style="display:block">`）的富文本页，Unity 直接闪退（无 Console 报错，进程消失）。
+
+**根因**：RichText build（`render/mod.rs` 行内图 arm）给行内图 image mesh 设 `node_id = synth_text_node_id(...)`（合成 id，不在 scene）+ `program: 0`（mergeable）。batch 的 `reorder_for_batching` → `reorder_unit` 对 mergeable mesh 用 `aabb_of` 反查 `scene.get(NodeId).expect("live node")` 取 layout_rect 算 AABB 重叠——合成 id 不在 scene → `scene.get` 返 None → `.expect` panic。cdylib panic 不能 unwind → abort → 拖垮 Unity 宿主进程（坑 102 实例）。text 跨页子页也用 synth id 但 `program: 1`（不 mergeable）→ 不进 reorder → 不崩；**只有行内图（program:0 mergeable + synth id）触发**。render 单测漏：单 RichText 节点 n<2，`reorder_unit` 提前 return 不触 aabb_of。
+
+**解决**：`batch.rs` 的 `aabb_of` 对 `scene.get` 返 None 零面积兜底（`.unwrap_or(Rect{0,0,0,0})`），不 panic。行内图位置已由 build 期 mesh verts 固定，reorder 只按 draw_state（image_path）归批，零面积 AABB 让它不参与重叠判断（本就无 scene layout_rect）。
+
+**教训**：
+- 渲染管线（build/reorder/merge）绝不能 panic——任何 `.expect`/`unwrap` 遇合成 id / 临时产物 / 边界都可能 non-unwinding abort 拖垮宿主。用 `unwrap_or` 兜底。
+- 合成 id（`synth_text_node_id`：text 跨页子页 / 行内图）是有意不进 scene 的纯渲染产物，任何"反查 scene"的逻辑（reorder AABB / sort_key / NativeHost 查询）都要对它兜底。
+- 单测要覆盖**多节点 reorder**（n≥2 才进 `reorder_unit`），单节点测不到 aabb_of 路径。
+- PlayMode 闪退先查 project-relative `loomgui_unity/Logs/Editor.log` 末尾的 panic 栈——比读代码猜快得多。
