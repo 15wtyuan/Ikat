@@ -8,7 +8,7 @@ use crate::input::{EventRecord, PointerEvent, PointerState};
 use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
-use crate::scene::node::{ControllerChangedEvent, NodeId, Rect, Scene};
+use crate::scene::node::{ControllerChangedEvent, NodeId, NodeKind, Rect, Scene};
 use crate::style::dynamic::rematch_pseudo_classes;
 use crate::style::resolved::OverflowMode;
 use crate::text::layout::FontTable;
@@ -309,6 +309,48 @@ impl Stage {
         let scene = self.scene.as_ref()?;
         scene.get(node)?; // gen 校验（slotmap 代际）；失效 → None
         scene.world_transforms.get(node.index()).copied()
+    }
+
+    /// 查 (world_x, world_y) 落在 RichText 节点哪个链接上 → link_id（0=无/越界/非 RichText）。
+    ///
+    /// pull 模式：Unity Click 命中节点级 AABB 后调本函数细分到 fragment。独立于 hit_test，
+    /// 不改 EventRecord ABI。复用 get_node_world_matrix 的 world_transforms 通路（merge blob
+    /// 吞空 div 但 world_transforms 保留全节点）反变换世界点到节点本地坐标，再扫描该节点的
+    /// rich_fragments（本地坐标矩形）做 rect.contains。
+    pub fn rich_link_at(&self, node: NodeId, world_x: f32, world_y: f32) -> u32 {
+        let scene = match self.scene.as_ref() {
+            Some(s) => s,
+            None => return 0,
+        };
+        // 取节点 world_matrix 反变换到本地坐标（fragment 矩形存本地坐标）。
+        let n = match scene.get(node) {
+            Some(n) => n,
+            None => return 0,
+        };
+        if !matches!(n.kind, NodeKind::RichText { .. }) {
+            return 0;
+        }
+        let wm = scene
+            .world_transforms
+            .get(node.index())
+            .copied()
+            .unwrap_or(crate::transform::IDENTITY);
+        let inv = crate::transform::inverse(&wm);
+        let (lx, ly) = crate::transform::apply_point(&inv, world_x, world_y);
+        let frags = match scene
+            .rich_fragments
+            .get(node.index())
+            .and_then(|f| f.as_ref())
+        {
+            Some(f) => f,
+            None => return 0,
+        };
+        for fr in frags {
+            if lx >= fr.x && lx <= fr.x + fr.w && ly >= fr.y && ly <= fr.y + fr.h {
+                return fr.link_id;
+            }
+        }
+        0
     }
 
     /// 读节点 sort_key（assign_sort_keys 在 merge_meshes 前的 DFS 序号快照）。

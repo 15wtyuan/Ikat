@@ -447,6 +447,14 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_set_rich_text(StageHandle* h, uint node, byte* markup_ptr, nuint markup_len);
 
         /// <summary>
+        ///  查 (x,y) 落在 RichText 节点哪个链接上 → link_id（0=无链接/越界/非 RichText/null 句柄）。
+        ///  pull 模式（独立于 hit_test，不改 EventRecord ABI）。x/y 是 design（世界）坐标，core 内部
+        ///  反变换到节点本地后扫 rich_fragments 矩形。Unity Click 分支命中节点级 AABB 后调本函数细分。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_rich_link_at", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern uint loomgui_stage_rich_link_at(StageHandle* h, uint node_id, float x, float y);
+
+        /// <summary>
         ///  改 Image 节点 src + 标 dirty_mesh。src = UTF-8 字节。0=ok，-1=err。
         ///  非 Image 节点 → -1。null 句柄 → -1。
         ///

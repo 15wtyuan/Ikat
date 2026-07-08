@@ -1141,6 +1141,23 @@ pub extern "C" fn loomgui_stage_set_rich_text(
         .unwrap_or(-1)
 }
 
+/// 查 (x,y) 落在 RichText 节点哪个链接上 → link_id（0=无链接/越界/非 RichText/null 句柄）。
+/// pull 模式（独立于 hit_test，不改 EventRecord ABI）。x/y 是 design（世界）坐标，core 内部
+/// 反变换到节点本地后扫 rich_fragments 矩形。Unity Click 分支命中节点级 AABB 后调本函数细分。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_rich_link_at(
+    h: *const StageHandle,
+    node_id: u32,
+    x: f32,
+    y: f32,
+) -> u32 {
+    if h.is_null() {
+        return 0;
+    }
+    let sh = unsafe { &*h };
+    sh.stage.rich_link_at(NodeId(node_id), x, y)
+}
+
 /// 改 Image 节点 src + 标 dirty_mesh。src = UTF-8 字节。0=ok，-1=err。
 /// 非 Image 节点 → -1。null 句柄 → -1。
 ///

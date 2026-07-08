@@ -139,6 +139,9 @@ namespace LoomGUI
         readonly System.Collections.Generic.Dictionary<uint, uint> _parentCache = new();   // node_parent 缓存
         // Controller 切页回调表：mount_node → 回调多播。无 bubble（单节点直派）。
         readonly System.Collections.Generic.Dictionary<uint, ControllerChangedCallback> _controllerChangedListeners = new();
+        // v1.7 富文本超链接回调表：link_id → 回调。link_id 是 1-based 文档序（业务按 markup
+        // 里 <a> 出现顺序维护 link_id→href 映射）。Click 命中 fragment 后直派，无 bubble。
+        readonly System.Collections.Generic.Dictionary<uint, System.Action<uint>> _linkListeners = new();
         IntPtr _handle;   // node_parent FFI 用（LoomStage 初始化/load 后 SetHandle）
         uint? _captureNodeCap;   // capture 阶段调 CaptureTouch 的节点（消费即清）
         uint? _captureNodeBub;   // bubble 阶段调 CaptureTouch 的节点
@@ -148,7 +151,7 @@ namespace LoomGUI
 
         /// 清所有 listener（切 pkg 重建 scene 后，被删 NodeId 全失效，listener 指向悬空节点）。
         /// 业务 driver 切界面前调，避免 dict 堆积 + 重新 SubscribeAll 前干净态。
-        public void Clear() { _listeners.Clear(); _parentCache.Clear(); _controllerChangedListeners.Clear(); }
+        public void Clear() { _listeners.Clear(); _parentCache.Clear(); _controllerChangedListeners.Clear(); _linkListeners.Clear(); }
 
         public void AddListener(uint nodeId, EventType type, EventCallback cb) => GetBridge(nodeId, type).Add(cb);
         public void AddCapture(uint nodeId, EventType type, EventCallback cb) => GetBridge(nodeId, type).AddCapture(cb);
@@ -170,6 +173,15 @@ namespace LoomGUI
                 if (updated == null) _controllerChangedListeners.Remove(mountNode);
                 else _controllerChangedListeners[mountNode] = updated;
             }
+        }
+
+        /// 订阅富文本超链接点击（link_id 粒度）。link_id 是 1-based 文档序——业务按 markup
+        /// 里 <a> 出现顺序维护 link_id→href 映射，core 不存 href。Click 命中 fragment 后直派。
+        public void AddLinkClickListener(uint linkId, System.Action<uint> cb) => _linkListeners[linkId] = cb;
+        public void RemoveLinkClickListener(uint linkId) => _linkListeners.Remove(linkId);
+        void DispatchLinkClick(LoomEvent evt, uint linkId)
+        {
+            if (_linkListeners.TryGetValue(linkId, out var cb)) cb.Invoke(linkId);
         }
 
         EventBridge GetBridge(uint nodeId, EventType type)
@@ -206,7 +218,14 @@ namespace LoomGUI
                             Native.loomgui_stage_add_touch_monitor((StageHandle*)_handle, evt.touch_id, _captureNodeBub.Value);
                         break;
                     case EventType.Up:
+                        BubbleRoute(evt); break;
                     case EventType.Click:
+                        // v1.7 富文本超链接命中（pull FFI，复用 evt.x/evt.y design 坐标）。
+                        // 命中节点级 AABB 后调 core 细分到 fragment：>0 走链接直派，否则原 bubble。
+                        {
+                            uint linkId = Native.loomgui_stage_rich_link_at((StageHandle*)_handle, evt.nodeId, evt.x, evt.y);
+                            if (linkId != 0) { DispatchLinkClick(evt, linkId); break; }
+                        }
                         BubbleRoute(evt); break;
                     // drag + longpress 走 BubbleRoute（core 算好 node_id，bubble 让祖先接）
                     case EventType.DragStart:
