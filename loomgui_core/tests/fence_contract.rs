@@ -78,6 +78,8 @@ fn supported_visual_props_return_true() {
         ("pointer-events", "none"),
         ("filter", "grayscale(1)"),
         ("border-image-slice", "10"),
+        ("border-color", "#ff0000"),
+        ("border-width", "2px"),
         ("transition", "opacity 0.3s ease 0s"),
     ];
     for (prop, val) in cases {

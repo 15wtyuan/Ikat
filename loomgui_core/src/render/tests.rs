@@ -102,6 +102,103 @@ fn build_container_produces_mesh_quad() {
 }
 
 #[test]
+fn build_container_with_border_emits_border_node() {
+    // border_color + border_width 激活：无背景图的 Container 把边框环形 mesh 拼进背景
+    // quad 同一 payload（同 program=0，单 draw call）。背景蓝、边框红两色共存于顶点色。
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        },
+        Some([0.0, 0.0, 1.0, 1.0]), // 蓝底
+    );
+    n.style.border_color = Some([1.0, 0.0, 0.0, 1.0]); // 红边
+    n.style.border_width = 4.0;
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let fonts = test_font_table().expect("need test font for build_render_nodes");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let rns = &frame.nodes;
+    // 单节点（背景 + 边框拼在同一 Mesh payload）。
+    let mesh = rns
+        .iter()
+        .find(|rn| matches!(&rn.payload, NodePayload::Mesh { verts, .. } if !verts.is_empty()))
+        .expect("至少一个 Mesh 节点");
+    let NodePayload::Mesh {
+        verts,
+        indices,
+        colors,
+        program,
+        ..
+    } = &mesh.payload
+    else {
+        unreachable!()
+    };
+    // 背景 4 顶点 + 边框 8 顶点 = 12（拼在同一 payload，单 draw call）。
+    assert_eq!(
+        verts.len(),
+        12,
+        "背景 4 + 边框 8 = 12 顶点，得 {}",
+        verts.len()
+    );
+    assert_eq!(
+        indices.len(),
+        6 + 24,
+        "背景 6 + 边框 24 = 30 索引，得 {}",
+        indices.len()
+    );
+    assert_eq!(*program, 0u32, "纯色背景 + 边框同走 program=0");
+    assert!(colors.contains(&[1.0, 0.0, 0.0, 1.0]), "边框红色顶点存在");
+    assert!(colors.contains(&[0.0, 0.0, 1.0, 1.0]), "背景蓝色顶点存在");
+}
+
+#[test]
+fn build_container_without_border_no_border_node() {
+    // border_color 缺省（None）→ 不发边框节点。回归保护：dead field 激活不应影响无边框节点。
+    let n = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        },
+        Some([1.0; 4]),
+    );
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let fonts = test_font_table().expect("need test font for build_render_nodes");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // 单 Container 单节点（merge 后仍 1 节点，4 顶点）。
+    let total_verts: usize = frame
+        .nodes
+        .iter()
+        .filter_map(|rn| match &rn.payload {
+            NodePayload::Mesh { verts, .. } => Some(verts.len()),
+            _ => None,
+        })
+        .sum();
+    assert_eq!(total_verts, 4, "无边框 → 仅背景 4 顶点（无边框额外顶点）");
+}
+
+#[test]
 fn build_skips_display_none_subtree() {
     // parent(flex,红底) → child(display:none,绿底) → grandchild(Text "hi")
     // CSS 语义：display:none 整子树不渲染——Text 后代不该进 frame.nodes。

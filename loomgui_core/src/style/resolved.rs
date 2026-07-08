@@ -78,6 +78,24 @@ pub struct BorderRadius {
     pub corners: [CornerRadius; 4],
 }
 
+impl BorderRadius {
+    /// 解析四角为像素半径对 `(h, v)`，序 [TL, TR, BR, BL]（与 `mesh::rounded_rect` /
+    /// `border::border_ring` 同约定）。百分比按 `(w, h)`（rect 宽/高）解析——水平半径
+    /// 按宽、垂直半径按高（CSS border-radius 百分比语义）。
+    pub fn as_corners(&self, w: f32, h: f32) -> [(f32, f32); 4] {
+        let r = |lp: LengthPercentage, side: f32| match lp {
+            LengthPercentage::Length(v) => v,
+            LengthPercentage::Percent(p) => side * p,
+        };
+        [
+            (r(self.corners[0].h, w), r(self.corners[0].v, h)),
+            (r(self.corners[1].h, w), r(self.corners[1].v, h)),
+            (r(self.corners[2].h, w), r(self.corners[2].v, h)),
+            (r(self.corners[3].h, w), r(self.corners[3].v, h)),
+        ]
+    }
+}
+
 /// CSS border-image-slice 四边切片量（源图像素）。top/right/bottom/left。
 /// None = 无九宫格切片；Some = 四条切片线距各边距离。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -199,6 +217,24 @@ impl Default for ResolvedStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn as_corners_resolves_length_and_percent() {
+        // TL=10px（正圆角），TR=50%（水平按宽 200→100，垂直按高 100→50）。
+        let mut br = BorderRadius::default();
+        br.corners[0] = CornerRadius {
+            h: LengthPercentage::Length(10.0),
+            v: LengthPercentage::Length(10.0),
+        };
+        br.corners[1] = CornerRadius {
+            h: LengthPercentage::Percent(0.5),
+            v: LengthPercentage::Percent(0.5),
+        };
+        let c = br.as_corners(200.0, 100.0);
+        assert_eq!(c[0], (10.0, 10.0), "TL px 不变");
+        assert_eq!(c[1], (100.0, 50.0), "TR 50% → h=200×0.5=100, v=100×0.5=50");
+        assert_eq!(c[2], (0.0, 0.0), "BR 默认 0");
+    }
+
     #[test]
     fn default_is_sane() {
         let s = ResolvedStyle::default();

@@ -12,6 +12,7 @@
 //! UV 的 src_w/src_h（slice_px / src_px）。Image/bg-image payload 带 path，UV 全图 (0,0)-(1,1)。
 
 pub mod batch;
+pub mod border; // 彩色边框环形 mesh（激活 border_color 死字段）
 pub mod dirty; // dirty hash（header_hash + payload_hash 双轴，跨帧比决定 ChangeLevel）
 pub mod merge;
 pub mod mesh;
@@ -228,7 +229,7 @@ pub fn build_render_nodes(
                 } else {
                     *rect
                 };
-                let (v, uvc, col, idx) = match (has_slice, all_zero) {
+                let (mut v, mut uvc, mut col, mut idx) = match (has_slice, all_zero) {
                     (false, true) => crate::render::mesh::quad(
                         &draw_rect,
                         color,
@@ -262,6 +263,31 @@ pub fn build_render_nodes(
                         [u_max[0], u_min[1]],
                     ),
                 };
+                // 彩色边框激活（v1.8 修 border_color 死字段）。无背景图时把边框环形 mesh
+                // 拼进同一 payload：纯色 Container 背景与边框同走 program=0（白 1×1 纹理 ×
+                // 顶点色），单 draw call，边框三角序在背景之后——重叠的边框环区边框覆盖背景，
+                // 内部仅背景，视觉正确。filter（program=3）也走此路：filter 应作用于整元素含边框。
+                // ponytail: 有背景图（program=2/4）时边框需独立 draw call（边框纯色 vs 背景采样
+                // 图），本 task 不做——留待 border + bg-image 共存场景单独处理。
+                if !has_image {
+                    if let Some(border_col) = n.style.border_color {
+                        if n.style.border_width > 0.0 {
+                            let br = crate::render::border::border_ring(
+                                rect,
+                                &radii,
+                                n.style.border_width,
+                                border_col,
+                            );
+                            if !br.3.is_empty() {
+                                let base = v.len() as u32;
+                                v.extend_from_slice(&br.0);
+                                uvc.extend_from_slice(&br.1);
+                                col.extend_from_slice(&br.2);
+                                idx.extend(br.3.iter().map(|i| i + base));
+                            }
+                        }
+                    }
+                }
                 let program = if has_filter {
                     if has_image {
                         4u32
