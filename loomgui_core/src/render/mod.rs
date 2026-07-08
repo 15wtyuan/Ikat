@@ -26,6 +26,26 @@ use node::*;
 
 use taffy::style::LengthPercentage;
 
+/// 把 2 色线性渐变映射到 quad 4 角顶点色（顶点序 TL, TR, BR, BL）。
+///
+/// GPU 顶点色光栅插值在 4 角间线性过渡——将 2 色 (a, b) 按方向放到对应的"起点/终点"角，
+/// 整个 quad 内即呈现线性渐变。映射严格遵循 CSS `to <dir>` 语义：a 是渐变起点色，b 是终点色。
+///
+/// - ToRight: 左 a 右 b → [TL=a, TR=b, BR=b, BL=a]
+/// - ToLeft:  右 a 左 b → [TL=b, TR=a, BR=a, BL=b]
+/// - ToTop:   下 a 上 b → [TL=b, TR=b, BR=a, BL=a]
+/// - ToBottom:上 a 下 b → [TL=a, TR=a, BR=b, BL=b]
+fn gradient_corner_colors(g: crate::style::resolved::Gradient2) -> [[f32; 4]; 4] {
+    let (a, b) = (g.color_a, g.color_b);
+    use crate::style::resolved::GradientDir as G;
+    match g.dir {
+        G::ToRight => [a, b, b, a],
+        G::ToLeft => [b, a, a, b],
+        G::ToTop => [b, b, a, a],
+        G::ToBottom => [a, a, b, b],
+    }
+}
+
 /// 查图尺寸表取 src_w/src_h（fallback 64×64）。
 /// path 缺失或 w/h=0 → 64.0 兜底（核心不知图集，但知图尺寸）。
 fn src_size(image_sizes: &ImageSizeTable, path: &str) -> (f32, f32) {
@@ -202,6 +222,11 @@ pub fn build_render_nodes(
                 let radii = n.style.border_radius.as_corners(rw, rh);
                 let all_zero = radii.iter().all(|&(rx, ry)| rx <= 0.0 || ry <= 0.0);
                 let has_slice = n.style.border_image_slice.is_some();
+                // 渐变背景仅在没有背景图（互斥）、没有九宫格切片、直角 quad 时启用——
+                // quad_gradient 是 4 角独立色 quad，GPU 顶点色插值得 2 色线性渐变。
+                // 与圆角 / 切片共存需 gradient + rounded_rect/slice 混合 mesh，留待后续 task。
+                let use_gradient =
+                    !has_image && !has_slice && all_zero && n.style.background_gradient.is_some();
                 let draw_rect = if !has_slice
                     && matches!(
                         n.style.background_size,
@@ -217,39 +242,49 @@ pub fn build_render_nodes(
                 } else {
                     *rect
                 };
-                let (mut v, mut uvc, mut col, mut idx) = match (has_slice, all_zero) {
-                    (false, true) => crate::render::mesh::quad(
+                let (mut v, mut uvc, mut col, mut idx) = if use_gradient {
+                    let g = n.style.background_gradient.expect("use_gradient 已校验");
+                    crate::render::mesh::quad_gradient(
                         &draw_rect,
-                        color,
+                        gradient_corner_colors(g),
                         [u_min[0], u_max[1]],
                         [u_max[0], u_min[1]],
-                    ),
-                    (false, false) => crate::render::mesh::rounded_rect(
-                        &draw_rect,
-                        color,
-                        &radii,
-                        [u_min[0], u_max[1]],
-                        [u_max[0], u_min[1]],
-                    ),
-                    (true, true) => crate::render::mesh::nine_slice(
-                        rect,
-                        color,
-                        n.style.border_image_slice.as_ref().unwrap(),
-                        src_w,
-                        src_h,
-                        [u_min[0], u_max[1]],
-                        [u_max[0], u_min[1]],
-                    ),
-                    (true, false) => crate::render::mesh::nine_slice_rounded(
-                        rect,
-                        color,
-                        n.style.border_image_slice.as_ref().unwrap(),
-                        &radii,
-                        src_w,
-                        src_h,
-                        [u_min[0], u_max[1]],
-                        [u_max[0], u_min[1]],
-                    ),
+                    )
+                } else {
+                    match (has_slice, all_zero) {
+                        (false, true) => crate::render::mesh::quad(
+                            &draw_rect,
+                            color,
+                            [u_min[0], u_max[1]],
+                            [u_max[0], u_min[1]],
+                        ),
+                        (false, false) => crate::render::mesh::rounded_rect(
+                            &draw_rect,
+                            color,
+                            &radii,
+                            [u_min[0], u_max[1]],
+                            [u_max[0], u_min[1]],
+                        ),
+                        (true, true) => crate::render::mesh::nine_slice(
+                            rect,
+                            color,
+                            n.style.border_image_slice.as_ref().unwrap(),
+                            src_w,
+                            src_h,
+                            [u_min[0], u_max[1]],
+                            [u_max[0], u_min[1]],
+                        ),
+                        (true, false) => crate::render::mesh::nine_slice_rounded(
+                            rect,
+                            color,
+                            n.style.border_image_slice.as_ref().unwrap(),
+                            &radii,
+                            src_w,
+                            src_h,
+                            [u_min[0], u_max[1]],
+                            [u_max[0], u_min[1]],
+                        ),
+                    }
                 };
                 // 彩色边框激活（v1.8 修 border_color 死字段）。无背景图时把边框环形 mesh
                 // 拼进同一 payload：纯色 Container 背景与边框同走 program=0（白 1×1 纹理 ×

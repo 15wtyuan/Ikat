@@ -41,6 +41,27 @@ pub enum BackgroundSize {
     Contain = 2, // 完整放入留白（scale=min，UV 外扩，子区外透明透出底色）
 }
 
+/// 2 色线性渐变方向。围栏仅支持 4 正向（to right/left/top/bottom）；
+/// 多 stop / 斜角度（45deg 等）由 mapping 静默忽略（apply_decl 返 false），与现有围栏外 CSS 语义一致。
+/// `#[repr(u8)]` 保证 FFI/序列化稳定（与 BackgroundSize/OverflowMode 同模式）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum GradientDir {
+    ToRight = 0,
+    ToLeft = 1,
+    ToTop = 2,
+    ToBottom = 3,
+}
+
+/// 2 色线性渐变（背景填充）。color_a 是首 stop（渐变起点），color_b 是末 stop（终点）；
+/// 起点/终点由 `dir` 决定（to right → 左为 a 右为 b，与 CSS 语义一致）。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Gradient2 {
+    pub color_a: [f32; 4],
+    pub color_b: [f32; 4],
+    pub dir: GradientDir,
+}
+
 /// LoomGUI display 旁路字段（与 taffy_style.display 解耦）。
 ///
 /// 打包期 desugar 据此识别 `display:block` div（展开成 flex div + RichText 叶）。
@@ -137,6 +158,9 @@ pub struct ResolvedStyle {
     pub background_image: Option<String>,
     /// CSS background-size 模式。默认 Stretch。
     pub background_size: BackgroundSize,
+    /// CSS `background: linear-gradient(...)` 2 色渐变（4 正向）。None=纯色背景。
+    /// 渐变与 background_image 互斥渲染（gradient 走 quad_gradient 顶点色插值，无纹理采样）。
+    pub background_gradient: Option<Gradient2>,
     /// CSS border-radius 四角半径。默认全 0（直角）。
     pub border_radius: BorderRadius,
     pub border_color: Option<[f32; 4]>,
@@ -190,6 +214,7 @@ impl Default for ResolvedStyle {
             background_color: None,
             background_image: None,
             background_size: BackgroundSize::Stretch,
+            background_gradient: None,
             border_radius: BorderRadius::default(),
             border_color: None,
             border_width: 0.0,
@@ -475,5 +500,44 @@ mod tests {
             "slice round-trip"
         );
         assert_eq!(back, s, "加字段后全字段 round-trip 仍相等");
+    }
+
+    #[test]
+    fn background_gradient_default_is_none() {
+        assert!(
+            ResolvedStyle::default().background_gradient.is_none(),
+            "默认无渐变"
+        );
+    }
+
+    #[test]
+    fn background_gradient_bincode_roundtrip() {
+        // 4 方向 × 2 色经 bincode round-trip 等值（pkg 字段，序列化稳定）。
+        for dir in [
+            GradientDir::ToRight,
+            GradientDir::ToLeft,
+            GradientDir::ToTop,
+            GradientDir::ToBottom,
+        ] {
+            let mut s = ResolvedStyle::default();
+            s.background_gradient = Some(Gradient2 {
+                color_a: [0.1, 0.2, 0.3, 0.4],
+                color_b: [0.5, 0.6, 0.7, 0.8],
+                dir,
+            });
+            let bytes = bincode::serialize(&s).expect("serialize");
+            let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
+            assert_eq!(
+                back.background_gradient, s.background_gradient,
+                "dir={dir:?} round-trip"
+            );
+            assert_eq!(back, s, "全字段 round-trip 仍相等");
+        }
+    }
+
+    #[test]
+    fn gradient_dir_is_one_byte() {
+        // FFI / 序列化稳定不变量：#[repr(u8)] enum 占 1 字节。
+        assert_eq!(std::mem::size_of::<GradientDir>(), 1);
     }
 }

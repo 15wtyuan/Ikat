@@ -39,6 +39,36 @@ pub fn quad(
     (verts, uvs, colors, indices)
 }
 
+/// 生成 4 角独立色 quad 的 verts/uvs/colors/indices（SOA 四表，与 `quad` 同形）。
+///
+/// - 顶点序、UV、索引与 `quad` 完全一致（TL → TR → BR → BL，CCW）。
+/// - 唯一区别：`colors` 是 4 角独立色（per-vertex），GPU 顶点色插值出 2 色线性渐变。
+///   `quad` 是 4 顶点同色（单色块）。
+///
+/// 用于 `background: linear-gradient(...)`：render 期按 `GradientDir` 把 2 色 (a, b)
+/// 映射成 4 角色（如 ToRight → [a,b,b,a]，左 a 右 b），传入本函数产 mesh。
+/// program=0（顶点色 × 白 1×1 纹理）即出渐变——无需 gradient shader。
+#[allow(clippy::type_complexity)]
+pub fn quad_gradient(
+    rect: &Rect,
+    colors: [[f32; 4]; 4],
+    uv_min: [f32; 2],
+    uv_max: [f32; 2],
+) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
+    let verts = vec![
+        [rect.x, rect.y],
+        [rect.x + rect.w, rect.y],
+        [rect.x + rect.w, rect.y + rect.h],
+        [rect.x, rect.y + rect.h],
+    ];
+    let (umin, vmin) = (uv_min[0], uv_min[1]);
+    let (umax, vmax) = (uv_max[0], uv_max[1]);
+    let uvs = vec![[umin, vmin], [umax, vmin], [umax, vmax], [umin, vmax]];
+    let colors = colors.to_vec();
+    let indices = vec![0, 1, 2, 0, 2, 3];
+    (verts, uvs, colors, indices)
+}
+
 /// 生成圆角矩形的 verts/uvs/colors/indices（SOA 四表，与 quad 同形）。
 ///
 /// - 三角扇：中心点 + 4 角圆弧顶点，三角形 (0, i, i+1) 连接，末尾回 1 闭合。
@@ -1250,5 +1280,42 @@ mod tests {
         );
         assert_eq!(v.len(), 16, "radius 0 退化为 nine_slice 16 顶点");
         assert_eq!(idx.len(), 54, "9 quad 索引");
+    }
+
+    #[test]
+    fn quad_gradient_four_corner_colors() {
+        // 4 角独立色：顶点序与 quad 同（TL, TR, BR, BL），每角色独立。
+        let r = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
+        let cols = [
+            [1.0, 0.0, 0.0, 1.0], // TL 红
+            [0.0, 1.0, 0.0, 1.0], // TR 绿
+            [0.0, 0.0, 1.0, 1.0], // BR 蓝
+            [1.0, 1.0, 0.0, 1.0], // BL 黄
+        ];
+        let (verts, _uvs, colors, idx) = quad_gradient(&r, cols, [0.0, 0.0], [1.0, 1.0]);
+        assert_eq!(verts.len(), 4, "4 顶点");
+        assert_eq!(colors, cols.to_vec(), "四角独立色按顶点序回放");
+        assert_eq!(idx, vec![0, 1, 2, 0, 2, 3], "两三角形与 quad 同");
+    }
+
+    #[test]
+    fn quad_gradient_verts_match_quad() {
+        // 顶点位置 / UV 应与 quad 一致（同 4 角几何），仅颜色表不同。
+        let r = Rect {
+            x: 5.0,
+            y: 6.0,
+            w: 20.0,
+            h: 30.0,
+        };
+        let cols = [[0.5; 4]; 4];
+        let (gv, guvs, _, _) = quad_gradient(&r, cols, [0.25, 0.5], [0.75, 1.0]);
+        let (qv, quvs, _, _) = quad(&r, [0.5; 4], [0.25, 0.5], [0.75, 1.0]);
+        assert_eq!(gv, qv, "顶点位置与 quad 同");
+        assert_eq!(guvs, quvs, "UV 与 quad 同");
     }
 }

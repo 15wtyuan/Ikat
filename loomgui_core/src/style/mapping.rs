@@ -1,7 +1,7 @@
 use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
-    BackgroundSize, BorderRadius, CornerRadius, DisplayMode, OverflowMode, ResolvedStyle,
-    SliceInsets, TextAlign,
+    BackgroundSize, BorderRadius, CornerRadius, DisplayMode, Gradient2, GradientDir, OverflowMode,
+    ResolvedStyle, SliceInsets, TextAlign,
 };
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, LengthPercentage, LengthPercentageAuto};
@@ -234,6 +234,43 @@ pub fn parse_url(value: &str) -> Option<String> {
     } else {
         Some(path.to_string())
     }
+}
+
+/// 解析 `linear-gradient(...)` 内部串（已去外层 `linear-gradient(` `)`）。
+///
+/// 围栏子集：方向仅 `to right/left/top/bottom` 4 正向 + 恰好 2 色 stop（用 `parse_color`，
+/// 即 6 位 hex）。多 stop / 斜角度（`45deg` 等）/未知方向/不可解析色 → 返 `false`
+/// （apply_decl 静默忽略，与 clip-path 等围栏外 CSS 同模式——CSS 合法但 LoomGUI 不支持该形态，
+/// 渲染时不绘渐变，AI 不可预测性弱于报错）。
+///
+/// 形如：`"to right, #ff0000, #0000ff"` → `Gradient2 { a=red, b=blue, dir=ToRight }`。
+fn parse_linear_gradient_2(style: &mut ResolvedStyle, inner: &str) -> bool {
+    let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
+    // 至少 3 段：方向 + 2 色。多于 3 段（多 stop）拒收。
+    if parts.len() != 3 {
+        return false;
+    }
+    let dir = match parts[0] {
+        "to right" => GradientDir::ToRight,
+        "to left" => GradientDir::ToLeft,
+        "to top" => GradientDir::ToTop,
+        "to bottom" => GradientDir::ToBottom,
+        _ => return false, // 斜角度 / 未知方向 → 围栏外
+    };
+    let color_a = match parse_color(parts[1]) {
+        Some(c) => c,
+        None => return false,
+    };
+    let color_b = match parse_color(parts[2]) {
+        Some(c) => c,
+        None => return false,
+    };
+    style.background_gradient = Some(Gradient2 {
+        color_a,
+        color_b,
+        dir,
+    });
+    true
 }
 
 use crate::style::resolved::LocalTransform;
@@ -502,8 +539,30 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "background-image" => {
+            // `background-image: linear-gradient(...)` 走 2 色渐变；否则走现有 url() 解析。
+            // 渐变与 url() 互斥（gradient 走 quad_gradient 顶点色，无纹理采样）。
+            let v = value.trim();
+            if let Some(rest) = v
+                .strip_prefix("linear-gradient(")
+                .and_then(|s| s.strip_suffix(')'))
+            {
+                return parse_linear_gradient_2(style, rest);
+            }
             style.background_image = parse_url(value);
             style.background_image.is_some()
+        }
+        "background" => {
+            // `background` shorthand：仅识别 `linear-gradient(...)` 形态。
+            // 其他 shorthand 值（纯色、url()）围栏不支持——纯色须写 `background-color`，
+            // 图片须写 `background-image`。围栏外值静默返 false（与 clip-path 等同模式）。
+            let v = value.trim();
+            if let Some(rest) = v
+                .strip_prefix("linear-gradient(")
+                .and_then(|s| s.strip_suffix(')'))
+            {
+                return parse_linear_gradient_2(style, rest);
+            }
+            false
         }
         "background-size" => {
             style.background_size = match value.trim() {

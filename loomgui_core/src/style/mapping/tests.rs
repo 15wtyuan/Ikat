@@ -477,3 +477,108 @@ fn parse_transition_multiple_comma_specs() {
     assert_eq!(ts[1].prop, Some(crate::tween::TweenProp::TextColor));
     assert!((ts[1].duration - 0.3).abs() < 1e-3);
 }
+
+#[test]
+fn background_linear_gradient_2_stops_four_dirs() {
+    // 4 正向 × 2 色 → 返 true 且 background_gradient 已设。
+    for (val, expected_dir) in [
+        ("to right", GradientDir::ToRight),
+        ("to left", GradientDir::ToLeft),
+        ("to top", GradientDir::ToTop),
+        ("to bottom", GradientDir::ToBottom),
+    ] {
+        let mut s = ResolvedStyle::default();
+        let decl = format!("linear-gradient({val}, #ff0000, #0000ff)");
+        assert!(
+            apply_decl(&mut s, "background", &decl),
+            "background: {decl} 应返回 true"
+        );
+        let g = s.background_gradient.expect("gradient 已设");
+        assert_eq!(g.dir, expected_dir, "方向匹配 {val}");
+        assert_eq!(g.color_a, [1.0, 0.0, 0.0, 1.0], "color_a=红 (#ff0000)");
+        assert_eq!(g.color_b, [0.0, 0.0, 1.0, 1.0], "color_b=蓝 (#0000ff)");
+    }
+}
+
+#[test]
+fn background_image_linear_gradient_also_accepted() {
+    // `background-image: linear-gradient(...)` 走同一解析路径（与 background 等价）。
+    let mut s = ResolvedStyle::default();
+    assert!(
+        apply_decl(
+            &mut s,
+            "background-image",
+            "linear-gradient(to top, #00ff00, #000000)"
+        ),
+        "background-image: linear-gradient 应被接受"
+    );
+    let g = s.background_gradient.expect("gradient 已设");
+    assert_eq!(g.dir, GradientDir::ToTop);
+    assert_eq!(g.color_a, [0.0, 1.0, 0.0, 1.0]);
+}
+
+#[test]
+fn background_linear_gradient_multi_stop_rejected() {
+    // >2 色 stop → 静默忽略（返 false），不设 gradient。
+    let mut s = ResolvedStyle::default();
+    assert!(
+        !apply_decl(
+            &mut s,
+            "background",
+            "linear-gradient(to right, #ff0000, #00ff00, #0000ff)"
+        ),
+        "3 色 stop 围栏外 → false"
+    );
+    assert!(s.background_gradient.is_none(), "多 stop 不设 gradient");
+}
+
+#[test]
+fn background_linear_gradient_diagonal_angle_rejected() {
+    // 斜角度（45deg 等）→ 静默忽略（返 false）。
+    let mut s = ResolvedStyle::default();
+    assert!(
+        !apply_decl(
+            &mut s,
+            "background",
+            "linear-gradient(45deg, #ff0000, #0000ff)"
+        ),
+        "斜角度围栏外 → false"
+    );
+    assert!(s.background_gradient.is_none(), "斜角度不设 gradient");
+}
+
+#[test]
+fn background_linear_gradient_named_color_rejected() {
+    // parse_color 仅认 6 位 hex；命名色（red/blue）→ 解析失败 → 整体返 false。
+    let mut s = ResolvedStyle::default();
+    assert!(
+        !apply_decl(&mut s, "background", "linear-gradient(to right, red, blue)"),
+        "命名色围栏外（仅 #rrggbb）→ false"
+    );
+    assert!(s.background_gradient.is_none());
+}
+
+#[test]
+fn background_linear_gradient_one_stop_rejected() {
+    // 仅 1 色 stop → 段数 < 3 → 拒收。
+    let mut s = ResolvedStyle::default();
+    assert!(
+        !apply_decl(&mut s, "background", "linear-gradient(to right, #ff0000)"),
+        "1 色 stop 围栏外 → false"
+    );
+    assert!(s.background_gradient.is_none());
+}
+
+#[test]
+fn background_other_shorthand_values_ignored() {
+    // `background: red` 等 shorthand 值不在围栏内（纯色须写 background-color）→ false。
+    let mut s = ResolvedStyle::default();
+    assert!(!apply_decl(&mut s, "background", "red"));
+    assert!(!apply_decl(&mut s, "background", "url(a.png)"));
+    assert!(s.background_gradient.is_none());
+    assert!(s.background_image.is_none());
+    assert!(
+        s.background_color.is_none(),
+        "background shorthand 不影响 background_color"
+    );
+}

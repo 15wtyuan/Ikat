@@ -11,7 +11,7 @@ use loomgui_core::parse::css::parse_css;
 use loomgui_core::parse::dom::parse_html;
 use loomgui_core::parse::selector::parse_selector;
 use loomgui_core::style::mapping::apply_decl;
-use loomgui_core::style::resolved::{DisplayMode, ResolvedStyle};
+use loomgui_core::style::resolved::{DisplayMode, GradientDir, ResolvedStyle};
 use taffy::Display;
 
 // ── A. 元素围栏 ──────────────────────────────────────────────────
@@ -81,6 +81,7 @@ fn supported_visual_props_return_true() {
         ("border-color", "#ff0000"),
         ("border-width", "2px"),
         ("transition", "opacity 0.3s ease 0s"),
+        ("background", "linear-gradient(to right, #ff0000, #0000ff)"),
     ];
     for (prop, val) in cases {
         let mut s = ResolvedStyle::default();
@@ -99,6 +100,57 @@ fn background_size_rejects_two_values() {
         !apply_decl(&mut s, "background-size", "100% 50%"),
         "background-size 两值应被拒（返回 false）"
     );
+}
+
+#[test]
+fn background_linear_gradient_2_stops_accepted() {
+    // 围栏内：`background: linear-gradient(to <dir>, #hex, #hex)` 2 色 4 正向。
+    // apply_decl 返 true，background_gradient 字段被设。
+    let mut s = ResolvedStyle::default();
+    assert!(
+        apply_decl(
+            &mut s,
+            "background",
+            "linear-gradient(to bottom, #00ff00, #ffffff)"
+        ),
+        "2 色 4 正向 linear-gradient 应被接受"
+    );
+    let g = s
+        .background_gradient
+        .expect("gradient 字段已设（apply_decl 返 true）");
+    assert_eq!(g.dir, GradientDir::ToBottom);
+    assert_eq!(g.color_a, [0.0, 1.0, 0.0, 1.0]);
+    assert_eq!(g.color_b, [1.0, 1.0, 1.0, 1.0]);
+}
+
+#[test]
+fn background_linear_gradient_unsupported_forms_silently_ignored() {
+    // 围栏外形态：多 stop、斜角度、未知方向 → apply_decl 返 false（静默忽略，与
+    // clip-path/cursor 等同模式）。AI 写了不报错，但不渲染渐变。
+    let cases = [
+        // 多 stop（>2 色）
+        "linear-gradient(to right, #ff0000, #00ff00, #0000ff)",
+        // 斜角度
+        "linear-gradient(45deg, #ff0000, #0000ff)",
+        "linear-gradient(135deg, #ff0000, #0000ff)",
+        // 未知方向（to top right 等复合方向围栏外）
+        "linear-gradient(to top right, #ff0000, #0000ff)",
+        // 不足 2 色
+        "linear-gradient(to right, #ff0000)",
+        // 命名色（parse_color 仅认 6 位 hex）
+        "linear-gradient(to right, red, blue)",
+    ];
+    for val in cases {
+        let mut s = ResolvedStyle::default();
+        assert!(
+            !apply_decl(&mut s, "background", val),
+            "围栏外形态 {{background: {val}}} 应返 false（静默忽略）"
+        );
+        assert!(
+            s.background_gradient.is_none(),
+            "围栏外形态 {{background: {val}}} 不应设 gradient 字段"
+        );
+    }
 }
 
 #[test]
