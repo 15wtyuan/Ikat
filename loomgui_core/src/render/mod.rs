@@ -374,103 +374,62 @@ pub fn build_render_nodes(
                 if off_x != 0.0 || off_y != 0.0 {
                     bake_content_offset(&mut layout, off_x, off_y);
                 }
-                let meshes =
-                    build_text_mesh(&layout, font_id, s.font_size, text_color, atlas, font);
-                if meshes.is_empty() {
-                    // 空文本 → 占位 Mesh（无顶点，image_path 用第 0 页兜底）。
-                    id_to_pos.insert(n.id, nodes.len());
-                    nodes.push(RenderNode {
-                        node_id,
-                        parent_id,
-                        visible: true,
-                        alpha,
-                        color_tint,
-                        world_matrix: wm,
-                        blend: BlendMode::Normal,
-                        mask_context: MaskContext(0),
-                        sort_key: 0,
-                        change_level: ChangeLevel::Full,
-                        reuse_key: n.reuse_key,
-                        payload: NodePayload::Mesh {
-                            verts: vec![],
-                            uvs: vec![],
-                            colors: vec![],
-                            indices: vec![],
-                            image_path: Some(format!("loomgui://font-atlas/f{}/p0", font_id)),
-                            program: 1,
-                            color_matrix: [0.0; 20],
-                        },
-                    });
-                    continue;
-                }
-                // 首页（page 0）→ 主 RenderNode，用真 node_id。
-                {
-                    let (page0, verts0, uvs0, colors0, indices0) = &meshes[0];
-                    let path0 = format!("loomgui://font-atlas/f{}/p{}", font_id, page0);
-                    id_to_pos.insert(n.id, nodes.len());
-                    nodes.push(RenderNode {
-                        node_id,
-                        parent_id,
-                        visible: true,
-                        alpha,
-                        color_tint,
-                        world_matrix: wm,
-                        blend: BlendMode::Normal,
-                        mask_context: MaskContext(0),
-                        sort_key: 0,
-                        change_level: ChangeLevel::Full,
-                        reuse_key: n.reuse_key,
-                        payload: NodePayload::Mesh {
-                            verts: verts0.clone(),
-                            uvs: uvs0.clone(),
-                            colors: colors0.clone(),
-                            indices: indices0.clone(),
-                            image_path: Some(path0),
-                            program: 1,
-                            color_matrix: [0.0; 20],
-                        },
-                    });
-                }
-                // 后续页 → 合成 node_id 的子 RenderNode。
-                for (pi, (page, verts, uvs, colors, indices)) in meshes[1..].iter().enumerate() {
-                    let sub_id = synth_text_node_id(node_id, (pi + 1) as u32);
-                    let sub_path = format!("loomgui://font-atlas/f{}/p{}", font_id, page);
-                    nodes.push(RenderNode {
-                        node_id: sub_id,
-                        parent_id,
-                        visible: true,
-                        alpha,
-                        color_tint,
-                        world_matrix: wm,
-                        blend: BlendMode::Normal,
-                        mask_context: MaskContext(0),
-                        sort_key: 0,
-                        change_level: ChangeLevel::Full,
-                        // 子页用 reuse_key=0（不继承主节点）：每个子页有独立的合成 node_id，
-                        // reuse_key=0 时 MirrorPool 按 node_id keying → 独立的 GO，不互相覆盖。
-                        // 若继承 reuse_key>0（如在虚拟列表 slot 内），所有子页共享同一 reuse_key
-                        // → MirrorPool 只保留最后一个子页的 mesh，其余页字形丢失。
-                        reuse_key: 0,
-                        payload: NodePayload::Mesh {
-                            verts: verts.clone(),
-                            uvs: uvs.clone(),
-                            colors: colors.clone(),
-                            indices: indices.clone(),
-                            image_path: Some(sub_path),
-                            program: 1,
-                            color_matrix: [0.0; 20],
-                        },
-                    });
-                }
-                // 注意：子页 RenderNode 的合成 node_id 是有意**不**加入 id_to_pos 的。
-                // assign_sort_keys / scrollbar thumb / NativeHost 查询均针对真 scene 节点；
-                // 合成 id 是纯渲染产物，不应反向映射到 scene node。子页的 sort_key/mask_context
-                // 由 propagate_text_sub_page_sort_keys 单独传播。
+                let meshes = build_text_mesh(&layout, atlas, font, font_id);
+                push_text_meshes(
+                    &mut nodes,
+                    &mut id_to_pos,
+                    meshes,
+                    n,
+                    node_id,
+                    parent_id,
+                    alpha,
+                    color_tint,
+                    wm,
+                    font_id,
+                );
                 continue; // 直接推完，跳过末尾的 id_to_pos / push。
             }
-            NodeKind::RichText { .. } => {
-                // T5 填实：build rich mesh（per-run color/font/size，断行 + 装饰线 quad）。
-                // 占位跳过——本 task 只立数据模型，未接线 inline flow。
+            NodeKind::RichText { runs } => {
+                // RichText 与 Text 同走 build_text_mesh（per-run 样式从 GlyphRun 读）。
+                // MVP 单字体：所有 run 共用节点 font_family 选的 face + default_font_id；
+                // 合成 bold（双绘 +1px）/italic（quad 顶边右偏）在 build 期几何化。
+                let s = &n.style;
+                let font = fonts.select(s.font_family.as_deref());
+                let default_font_id = fonts.font_id(s.font_family.as_deref());
+                let mut layout = scene
+                    .text_layouts
+                    .get(n.id.index())
+                    .cloned()
+                    .flatten()
+                    .unwrap_or_else(|| {
+                        crate::text::layout::measure_rich_text(
+                            runs,
+                            Some(rect.w),
+                            s.line_height,
+                            font,
+                            default_font_id,
+                        )
+                    });
+                let off_x =
+                    resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
+                let off_y =
+                    resolve_lp(s.taffy_style.border.top) + resolve_lp(s.taffy_style.padding.top);
+                if off_x != 0.0 || off_y != 0.0 {
+                    bake_content_offset(&mut layout, off_x, off_y);
+                }
+                let meshes = build_text_mesh(&layout, atlas, font, default_font_id);
+                push_text_meshes(
+                    &mut nodes,
+                    &mut id_to_pos,
+                    meshes,
+                    n,
+                    node_id,
+                    parent_id,
+                    alpha,
+                    color_tint,
+                    wm,
+                    default_font_id,
+                );
                 continue;
             }
         };
@@ -650,8 +609,13 @@ fn bake_content_offset(layout: &mut crate::text::layout::TextLayout, off_x: f32,
 }
 
 /// 把 TextLayout 每字形展成 quad mesh：4 顶点 + 6 索引，UV 指向核心 atlas。
-/// 顶点 = pen 坐标 + glyph bbox（bearing）；颜色烤顶点色（alpha 不烤，走 _Alpha
-/// uniform）。索引为 2-tri 扇（0-1-2, 0-2-3，与 mesh::quad 同序）。
+/// 顶点 = pen 坐标 + glyph bbox（bearing）；per-run 颜色烤顶点色（alpha 不烤，走
+/// _Alpha uniform）。索引为 2-tri 扇（0-1-2, 0-2-3，与 mesh::quad 同序）。
+///
+/// per-run 样式（color/font_id/font_size/weight/style）从 `GlyphRun` 读——plain text
+/// 是单 run（整段同色），rich text 多 run 各自带色。合成 bold/italic 在此期几何化：
+/// - bold：双绘（+1px x 偏移重画一遍），无字体变体。
+/// - italic：quad 顶边右偏 0.3×字形高（skew），底边不动。
 ///
 /// V-flip 方向：atlas v0=顶(v0)、v1=底(v1)；quad 底采样 atlas 底(v1)、
 /// 顶采样 atlas 顶(v0)。与现有 Image quad UV 翻转模式一致（quad BL→(u0,v1)、
@@ -659,67 +623,185 @@ fn bake_content_offset(layout: &mut crate::text::layout::TextLayout, off_x: f32,
 ///
 /// 返回按 atlas 页号分组的 mesh 列表。单字体单字号常见一页装下 → 一项（单 draw call）；
 /// 超 CJK 字符集才跨页 → 多项（每项独立 image_path = f<id>/p<page>）。
+///
+/// `default_font_id`：节点 font_family 对应的 font_id（atlas key + 合成 image_path 用）。
+/// MVP 单字体：所有 run 共用此 face，`GlyphRun.font_id` 字段保留给将来多 family，本函数不读它。
 fn build_text_mesh(
     layout: &crate::text::layout::TextLayout,
-    font_id: u32,
-    font_size: f32,
-    color: [f32; 4],
     atlas: &mut GlyphAtlas,
     font: &crate::text::layout::Font,
+    default_font_id: u32,
 ) -> Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> {
-    // 第一遍：收集字形并按 atlas 页号分组。
-    let size_px = font_size.round().max(1.0) as u16;
+    use std::collections::BTreeMap;
     let face = &font.face;
-    let mut pages: std::collections::BTreeMap<u32, Vec<(f32, f32, f32, f32, f32, f32, f32, f32)>> =
-        std::collections::BTreeMap::new();
+    // 按 atlas 页号分组：每页独立 mesh。存 per-glyph 展开所需全部数据（含 per-run 色/样式）。
+    let mut pages: BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> =
+        BTreeMap::new();
     for line in &layout.lines {
         for run in &line.runs {
+            let size_px = run.font_size.round().max(1.0) as u16;
+            let italic_skew = if matches!(run.style, crate::text::rich::RichStyle::Italic) {
+                0.3
+            } else {
+                0.0
+            };
+            // 合成 bold：双绘（offset 0 + offset +1px），模拟加粗，无字体变体。
+            let bold_offsets: &[f32] = if matches!(run.weight, crate::text::rich::RichWeight::Bold)
+            {
+                &[0.0, 1.0]
+            } else {
+                &[0.0]
+            };
             for g in &run.glyphs {
                 let key = GlyphKey {
-                    font_id,
+                    font_id: default_font_id,
                     glyph_id: g.glyph_id,
                     size_px,
                     effect_sig: 0,
                 };
                 let r = atlas.ensure(face, key);
-                let left = g.x + g.bearing_x;
-                let top = line.baseline + g.bearing_y;
-                let right = left + r.px_w as f32;
-                let bottom = top - r.px_h as f32;
-                // 存 (left, bottom, right, top, u0, v0, u1, v1)
-                pages
+                // 合成 italic：quad 顶边右偏（skew × 字形高），底边不动。
+                let skew_top = italic_skew * r.px_h as f32;
+                let p = pages
                     .entry(r.page)
-                    .or_default()
-                    .push((left, bottom, right, top, r.u0, r.v0, r.u1, r.v1));
+                    .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                for &boff in bold_offsets {
+                    let left = g.x + g.bearing_x + boff;
+                    let top = line.baseline + g.bearing_y;
+                    let right = left + r.px_w as f32;
+                    let bottom = top - r.px_h as f32;
+                    let base = p.0.len() as u32;
+                    // 顶点序 BL, BR, TR, TL（与 mesh::quad 同序）。
+                    p.0.push([left, bottom]);
+                    p.0.push([right, bottom]);
+                    p.0.push([right + skew_top, top]);
+                    p.0.push([left + skew_top, top]);
+                    // UV：BL→(u0,v1), BR→(u1,v1), TR→(u1,v0), TL→(u0,v0)。
+                    p.1.push([r.u0, r.v1]);
+                    p.1.push([r.u1, r.v1]);
+                    p.1.push([r.u1, r.v0]);
+                    p.1.push([r.u0, r.v0]);
+                    for _ in 0..4 {
+                        p.2.push(run.color);
+                    }
+                    p.3.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+                }
             }
         }
     }
-    // 第二遍：每组独立建 mesh。
     pages
         .into_iter()
-        .map(|(page, glyphs)| {
-            let mut verts: Vec<[f32; 2]> = Vec::with_capacity(glyphs.len() * 4);
-            let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(glyphs.len() * 4);
-            let mut colors: Vec<[f32; 4]> = Vec::with_capacity(glyphs.len() * 4);
-            let mut indices: Vec<u32> = Vec::with_capacity(glyphs.len() * 6);
-            for (left, bottom, right, top, u0, v0, u1, v1) in glyphs {
-                let base = verts.len() as u32;
-                // 顶点序 BL,BR,TR,TL（与 mesh::quad 同序）。
-                verts.push([left, bottom]);
-                verts.push([right, bottom]);
-                verts.push([right, top]);
-                verts.push([left, top]);
-                // UV：BL→(u0,v1), BR→(u1,v1), TR→(u1,v0), TL→(u0,v0)。
-                uvs.push([u0, v1]);
-                uvs.push([u1, v1]);
-                uvs.push([u1, v0]);
-                uvs.push([u0, v0]);
-                colors.extend(std::iter::repeat_n(color, 4));
-                indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-            }
-            (page, verts, uvs, colors, indices)
-        })
+        .map(|(pg, (v, u, c, i))| (pg, v, u, c, i))
         .collect()
+}
+
+/// 把 `build_text_mesh` 产出的多页 mesh 列表推入 `nodes`，复用 Text/RichText 共同的
+/// 跨页子页机制：首页（page 0）用真 node_id，后续页用 `synth_text_node_id` 合成 id。
+/// 子页 reuse_key=0（独立 GO，不继承主节点——见 synth_text_node_id 注释）。
+///
+/// 抽成 helper 让 Text arm 与 RichText arm 共用，避免复制粘贴 push 逻辑。
+fn push_text_meshes(
+    nodes: &mut Vec<RenderNode>,
+    id_to_pos: &mut std::collections::HashMap<NodeId, usize>,
+    meshes: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
+    n: &crate::scene::node::Node,
+    node_id: u32,
+    parent_id: Option<u32>,
+    alpha: f32,
+    color_tint: [f32; 4],
+    wm: [f32; 6],
+    font_id: u32,
+) {
+    if meshes.is_empty() {
+        // 空文本 → 占位 Mesh（无顶点，image_path 用第 0 页兜底）。
+        id_to_pos.insert(n.id, nodes.len());
+        nodes.push(RenderNode {
+            node_id,
+            parent_id,
+            visible: true,
+            alpha,
+            color_tint,
+            world_matrix: wm,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: 0,
+            change_level: ChangeLevel::Full,
+            reuse_key: n.reuse_key,
+            payload: NodePayload::Mesh {
+                verts: vec![],
+                uvs: vec![],
+                colors: vec![],
+                indices: vec![],
+                image_path: Some(format!("loomgui://font-atlas/f{}/p0", font_id)),
+                program: 1,
+                color_matrix: [0.0; 20],
+            },
+        });
+        return;
+    }
+    // 首页（page 0）→ 主 RenderNode，用真 node_id。
+    {
+        let (page0, verts0, uvs0, colors0, indices0) = &meshes[0];
+        let path0 = format!("loomgui://font-atlas/f{}/p{}", font_id, page0);
+        id_to_pos.insert(n.id, nodes.len());
+        nodes.push(RenderNode {
+            node_id,
+            parent_id,
+            visible: true,
+            alpha,
+            color_tint,
+            world_matrix: wm,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: 0,
+            change_level: ChangeLevel::Full,
+            reuse_key: n.reuse_key,
+            payload: NodePayload::Mesh {
+                verts: verts0.clone(),
+                uvs: uvs0.clone(),
+                colors: colors0.clone(),
+                indices: indices0.clone(),
+                image_path: Some(path0),
+                program: 1,
+                color_matrix: [0.0; 20],
+            },
+        });
+    }
+    // 后续页 → 合成 node_id 的子 RenderNode。
+    for (pi, (page, verts, uvs, colors, indices)) in meshes[1..].iter().enumerate() {
+        let sub_id = synth_text_node_id(node_id, (pi + 1) as u32);
+        let sub_path = format!("loomgui://font-atlas/f{}/p{}", font_id, page);
+        nodes.push(RenderNode {
+            node_id: sub_id,
+            parent_id,
+            visible: true,
+            alpha,
+            color_tint,
+            world_matrix: wm,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: 0,
+            change_level: ChangeLevel::Full,
+            // 子页用 reuse_key=0（不继承主节点）：每个子页有独立的合成 node_id，
+            // reuse_key=0 时 MirrorPool 按 node_id keying → 独立的 GO，不互相覆盖。
+            // 若继承 reuse_key>0（如在虚拟列表 slot 内），所有子页共享同一 reuse_key
+            // → MirrorPool 只保留最后一个子页的 mesh，其余页字形丢失。
+            reuse_key: 0,
+            payload: NodePayload::Mesh {
+                verts: verts.clone(),
+                uvs: uvs.clone(),
+                colors: colors.clone(),
+                indices: indices.clone(),
+                image_path: Some(sub_path),
+                program: 1,
+                color_matrix: [0.0; 20],
+            },
+        });
+    }
+    // 注意：子页 RenderNode 的合成 node_id 是有意**不**加入 id_to_pos 的。
+    // assign_sort_keys / scrollbar thumb / NativeHost 查询均针对真 scene 节点；
+    // 合成 id 是纯渲染产物，不应反向映射到 scene node。子页的 sort_key/mask_context
+    // 由 propagate_text_sub_page_sort_keys 单独传播。
 }
 
 #[cfg(test)]

@@ -2079,3 +2079,193 @@ fn node_index_4096_triggers_sub_page_collision() {
         "index=4096 → bits[31:24]=1 → 误判为子页（证明硬上限哨兵的动机）"
     );
 }
+
+// ── RichText build arm 测试（v1.7）──
+
+/// RichText 节点产 Mesh{ program:1, loomgui:// image_path }，per-run 色烤顶点色。
+/// 两 run（红 + 蓝）→ 同一 mesh 的顶点色应分两段（前 N 顶点红、后 N 顶点蓝）。
+#[test]
+fn rich_text_node_emits_mesh_with_per_vertex_color() {
+    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::RichText {
+        runs: vec![
+            RichRun {
+                kind: RichKind::Text { text: "AB".into() },
+                color: [1.0, 0.0, 0.0, 1.0], // 红
+                font_id: 0,
+                size_px: 16,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            },
+            RichRun {
+                kind: RichKind::Text { text: "CD".into() },
+                color: [0.0, 0.0, 1.0, 1.0], // 蓝
+                font_id: 0,
+                size_px: 16,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            },
+        ],
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // 取 primary RichText mesh（program=1，非子页）。
+    let rn = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("应存在 primary RichText RenderNode");
+    match &rn.payload {
+        NodePayload::Mesh {
+            verts,
+            colors,
+            program,
+            image_path,
+            ..
+        } => {
+            assert_eq!(*program, 1, "rich text → program=1");
+            assert!(
+                image_path
+                    .as_ref()
+                    .is_some_and(|p| p.starts_with("loomgui://font-atlas/")),
+                "rich image_path = synthetic atlas path（与 Text 同形）"
+            );
+            // 4 字形 × 4 顶点 = 16（bold 不双绘：weight=Normal）。
+            assert_eq!(verts.len(), 16, "ABCD = 4 glyph × 4 verts = 16");
+            assert_eq!(colors.len(), 16, "colors 与 verts 等长");
+            // 前 8 顶点红（AB），后 8 顶点蓝（CD）。
+            for c in &colors[..8] {
+                assert_eq!(*c, [1.0, 0.0, 0.0, 1.0], "AB 段顶点色应红");
+            }
+            for c in &colors[8..] {
+                assert_eq!(*c, [0.0, 0.0, 1.0, 1.0], "CD 段顶点色应蓝");
+            }
+        }
+        _ => panic!("expected Mesh payload for rich text"),
+    }
+}
+
+/// 两同字体 RichText span → merge 后应合并 draw call（program=1 已在合批白名单）。
+/// 验 RichText 与 Text 同走 atlas path 合批路径，不因 per-run 色破坏合批。
+#[test]
+fn two_rich_nodes_same_atlas_merge() {
+    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    // root 容器（无图，program=0）+ 两 RichText 子（同 font_id=0、同 page0 atlas path）。
+    let root = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 300.0,
+            h: 50.0,
+        },
+        None,
+    );
+    let mk_rich = |id: usize, parent: usize, x: f32| {
+        let mut n = Node::default();
+        n.id = NodeId(id as u32);
+        n.parent = Some(NodeId(parent as u32));
+        n.kind = NodeKind::RichText {
+            runs: vec![RichRun {
+                kind: RichKind::Text { text: "AB".into() },
+                color: [1.0, 1.0, 1.0, 1.0],
+                font_id: 0,
+                size_px: 16,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            }],
+        };
+        n.style.font_size = 16.0;
+        n.layout_rect = Rect {
+            x,
+            y: 0.0,
+            w: 100.0,
+            h: 20.0,
+        };
+        n
+    };
+    let a = mk_rich(1, 0, 0.0);
+    let b = mk_rich(2, 0, 100.0);
+    let mut scene = Scene::from_nodes(vec![root, a, b], vec![(0, 1), (0, 2)]);
+
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // 两 RichText 同 atlas path（loomgui://font-atlas/f0/p0）→ merge 成 1 个 mesh。
+    // root 是 Container(image_path=None) 不同 DrawState → 不合。
+    // merge 后 program 归 0（merge 统一 program 字段），故按 image_path 过滤而非 program。
+    // 合并 mesh 应含两 RichText 的 8 顶点（2×2 字形 × 4）= 16 顶点。
+    let rich_meshes: Vec<_> = frame
+        .nodes
+        .iter()
+        .filter(|rn| {
+            matches!(
+                &rn.payload,
+                NodePayload::Mesh {
+                    image_path: Some(p),
+                    ..
+                } if p.starts_with("loomgui://font-atlas/")
+            )
+        })
+        .collect();
+    assert_eq!(
+        rich_meshes.len(),
+        1,
+        "两同 atlas RichText → 1 个合并 mesh，实 {}",
+        rich_meshes.len()
+    );
+    if let NodePayload::Mesh { verts, .. } = &rich_meshes[0].payload {
+        assert_eq!(
+            verts.len(),
+            16,
+            "两 RichText 各 2 字形 × 4 顶点 = 16（合并后），实 {}",
+            verts.len()
+        );
+    }
+}
