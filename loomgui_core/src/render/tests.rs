@@ -2362,9 +2362,12 @@ fn rich_image_emits_mesh_with_image_path_and_program_0() {
                     Some("emoji/cool.png".to_string()),
                     "image_path = src"
                 );
-                // UV 全图 + v-flip：TL=(0,1), BR=(1,0)（与 Image/Container bg-image 同约定）。
+                // UV v-flip 与 mesh::quad Image arm 相同约定：
+                //   TL→(0,1), TR→(1,1), BR→(1,0), BL→(0,0)。
                 assert_eq!(uvs[0], [0.0, 1.0], "TL UV (v-flipped)");
+                assert_eq!(uvs[1], [1.0, 1.0], "TR UV (v-flipped)");
                 assert_eq!(uvs[2], [1.0, 0.0], "BR UV (v-flipped)");
+                assert_eq!(uvs[3], [0.0, 0.0], "BL UV (v-flipped)");
             }
             _ => panic!("expected Mesh"),
         }

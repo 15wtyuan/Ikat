@@ -442,10 +442,10 @@ pub fn build_render_nodes(
                     let (ix, iy) = (img.x + off_x, img.y + off_y);
                     let payload = NodePayload::Mesh {
                         verts: vec![
-                            [ix, iy + img.h],         // TL (top-left in design y-down)
-                            [ix + img.w, iy + img.h], // TR
-                            [ix + img.w, iy],         // BR
-                            [ix, iy],                 // BL
+                            [ix, iy],                 // TL (top-left, smallest y in design y-down)
+                            [ix + img.w, iy],         // TR
+                            [ix + img.w, iy + img.h], // BR
+                            [ix, iy + img.h],         // BL
                         ],
                         uvs: vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
                         colors: vec![[1.0, 1.0, 1.0, 1.0]; 4],
