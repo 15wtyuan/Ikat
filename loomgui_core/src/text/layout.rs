@@ -26,6 +26,9 @@ pub struct Glyph {
     pub bearing_x: f32,
     /// pen 位 → 字形 quad 左上的 y 偏移（来自 glyph bbox y_max，顶到 baseline）。
     pub bearing_y: f32,
+    /// 字形 advance（布局期水平推进量，用于 text-decoration 装饰线等需要
+    /// 知道 run 总宽的场景）。
+    pub advance: f32,
 }
 
 /// 单 run：一组连续字形 + 该 run 的完整样式。统一 plain 与 rich 走同一条
@@ -433,6 +436,7 @@ pub fn measure_text(
                 y: line_y,
                 bearing_x: bx,
                 bearing_y: by,
+                advance: advance(gid_opt),
             });
             pen_x += advance(gid_opt) + letter_spacing;
             prev = Some(gid);
@@ -646,6 +650,7 @@ pub fn measure_rich_text(
                             y: 0.0, // 行内相对（build 加 baseline）。
                             bearing_x: bx,
                             bearing_y: by,
+                            advance: glyph_advance(&font.face, gid_opt, r.size_px as f32),
                         });
                         pen_x += glyph_advance(&font.face, gid_opt, r.size_px as f32);
                         prev_gid = Some(gid);

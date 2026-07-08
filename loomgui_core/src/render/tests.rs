@@ -2373,3 +2373,154 @@ fn rich_image_emits_mesh_with_image_path_and_program_0() {
         }
     }
 }
+
+/// RichText run 带 underline → build 后 mesh 含 4 顶点装饰 quad，色 = run.color。
+#[test]
+fn rich_deco_underline_adds_quad() {
+    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::RichText {
+        runs: vec![RichRun {
+            kind: RichKind::Text { text: "AB".into() },
+            color: [1.0, 0.0, 0.0, 1.0], // 红
+            font_id: 0,
+            size_px: 16,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco {
+                underline: true,
+                strike: false,
+            },
+            link_id: None,
+        }],
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let rn = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("应存在 primary RichText RenderNode");
+    match &rn.payload {
+        NodePayload::Mesh { verts, colors, .. } => {
+            // AB = 2 字形 × 4 顶点 + underline deco quad 4 顶点 = 12 顶点
+            assert_eq!(
+                verts.len(),
+                12,
+                "2 glyph × 4 + underline 4 = 12 verts，实 {}",
+                verts.len()
+            );
+            assert_eq!(colors.len(), verts.len(), "colors 与 verts 等长");
+            // 前 8 顶点是字形色（红），后 4 顶点是装饰线色（红，同 run.color）。
+            // 所有顶点色都应 = run.color（红）。
+            for c in colors.iter() {
+                assert_eq!(*c, [1.0, 0.0, 0.0, 1.0], "装饰线色 = run.color 红");
+            }
+        }
+        _ => panic!("expected Mesh payload"),
+    }
+}
+
+/// RichText run 带 strike → build 后 mesh 含装饰线 quad（厚度 ≥ 1px），色 = run.color。
+#[test]
+fn rich_deco_strike_adds_quad() {
+    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::RichText {
+        runs: vec![RichRun {
+            kind: RichKind::Text { text: "CD".into() },
+            color: [0.0, 0.0, 1.0, 1.0], // 蓝
+            font_id: 0,
+            size_px: 16,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco {
+                underline: false,
+                strike: true,
+            },
+            link_id: None,
+        }],
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let rn = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("应存在 primary RichText RenderNode");
+    match &rn.payload {
+        NodePayload::Mesh { verts, colors, .. } => {
+            // CD = 2 字形 × 4 顶点 + strike deco quad 4 顶点 = 12 顶点
+            assert!(verts.len() > 8, "应含装饰线顶点（>8），实 {}", verts.len());
+            // 所有顶点色 = run.color（蓝）。
+            for c in colors.iter() {
+                assert_eq!(*c, [0.0, 0.0, 1.0, 1.0], "装饰线色 = run.color 蓝");
+            }
+        }
+        _ => panic!("expected Mesh payload"),
+    }
+}
+
+/// `ensure_solid` 首次调分配 1×1 白像素，二次命中返同 UV（缓存不重复分配）。
+#[test]
+fn ensure_solid_hit_returns_same_uv() {
+    let mut atlas = test_glyph_atlas();
+    let r1 = atlas.ensure_solid();
+    let r2 = atlas.ensure_solid();
+    assert_eq!(r1.page, r2.page);
+    assert_eq!((r1.u0, r1.v0, r1.u1, r1.v1), (r2.u0, r2.v0, r2.u1, r2.v1));
+    assert_eq!(r1.px_w, 1);
+    assert_eq!(r1.px_h, 1);
+}

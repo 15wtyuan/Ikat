@@ -694,7 +694,13 @@ fn build_text_mesh(
             } else {
                 &[0.0]
             };
+            let mut run_x_start: Option<f32> = None;
+            let mut run_w = 0.0f32;
             for g in &run.glyphs {
+                if run_x_start.is_none() {
+                    run_x_start = Some(g.x);
+                }
+                run_w += g.advance;
                 let key = GlyphKey {
                     font_id: default_font_id,
                     glyph_id: g.glyph_id,
@@ -728,6 +734,67 @@ fn build_text_mesh(
                     }
                     p.3.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
                 }
+            }
+            // 装饰线（下划线 / 删除线）：纯色 quad，用 atlas 唯一白像素 × per-vertex
+            // color = run.color（atlas .r × vertex color 即纯色，无需改 shader）。
+            if run.deco.underline || run.deco.strike {
+                if let Some(x0) = run_x_start {
+                    let solid = atlas.ensure_solid();
+                    let units = face.units_per_em().max(1) as f32;
+                    let scale = run.font_size / units;
+                    let thickness = (face
+                        .underline_metrics()
+                        .map(|m| m.thickness as f32 * scale)
+                        .unwrap_or(1.0))
+                    .max(1.0);
+                    // underline 偏移：从字体 underline_metrics.position（y-up 下负值）
+                    // 加到 baseline 得到 design y-down 下"高于基线"的坐标；
+                    // 经 Unity root-stage y-flip 后，屏幕上看就是基线下方。
+                    // strike 偏移：baseline 上方 0.25×font_size（视觉贯穿字形中段）。
+                    let deco_offsets: [Option<f32>; 2] = [
+                        run.deco.underline.then_some(
+                            line.baseline
+                                + face
+                                    .underline_metrics()
+                                    .map(|m| m.position as f32 * scale)
+                                    .unwrap_or(run.font_size * 0.1),
+                        ),
+                        run.deco
+                            .strike
+                            .then_some(line.baseline - run.font_size * 0.25),
+                    ];
+                    let x1 = x0 + run_w;
+                    for y_opt in deco_offsets.iter().flatten() {
+                        let y_top = *y_opt;
+                        let y_bot = y_top + thickness;
+                        let entry = pages
+                            .entry(solid.page)
+                            .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                        let base = entry.0.len() as u32;
+                        // 顶点序：BL, BR, TR, TL（与字形 quad 同序，CCW winding）。
+                        entry.0.push([x0, y_bot]);
+                        entry.0.push([x1, y_bot]);
+                        entry.0.push([x1, y_top]);
+                        entry.0.push([x0, y_top]);
+                        // UV：BL→(u0,v1), BR→(u1,v1), TR→(u1,v0), TL→(u0,v0)
+                        //（白像素 atlas 各 UV 值等价，方向匹配即可）。
+                        entry.1.push([solid.u0, solid.v1]);
+                        entry.1.push([solid.u1, solid.v1]);
+                        entry.1.push([solid.u1, solid.v0]);
+                        entry.1.push([solid.u0, solid.v0]);
+                        for _ in 0..4 {
+                            entry.2.push(run.color);
+                        }
+                        entry.3.extend_from_slice(&[
+                            base,
+                            base + 1,
+                            base + 2,
+                            base,
+                            base + 2,
+                            base + 3,
+                        ]);
+                    }
+                } // if let Some(x0)
             }
         }
     }
