@@ -2360,7 +2360,7 @@ fn two_rich_nodes_same_atlas_merge() {
         &empty_sizes(),
         &mut test_glyph_atlas(),
     );
-    // 两 RichText 同 atlas path（loomgui://font-atlas/f0/p0）→ merge 成 1 个 mesh。
+    // 两 RichText 同 atlas path（loomgui://font-atlas/p0）→ merge 成 1 个 mesh。
     // root 是 Container(image_path=None) 不同 DrawState → 不合。
     // merge 后 program 归 0（merge 统一 program 字段），故按 image_path 过滤而非 program。
     // 合并 mesh 应含两 RichText 的 8 顶点（2×2 字形 × 4）= 16 顶点。
