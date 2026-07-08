@@ -198,20 +198,8 @@ pub fn build_render_nodes(
                 let has_image = image_path.is_some();
                 let u_min = [0.0, 0.0];
                 let u_max = [1.0, 1.0];
-                let resolve = |lp: LengthPercentage, side: f32| -> f32 {
-                    match lp {
-                        LengthPercentage::Length(v) => v,
-                        LengthPercentage::Percent(p) => side * p,
-                    }
-                };
                 let (rw, rh) = (rect.w, rect.h);
-                let bc = &n.style.border_radius.corners;
-                let radii = [
-                    (resolve(bc[0].h, rw), resolve(bc[0].v, rh)),
-                    (resolve(bc[1].h, rw), resolve(bc[1].v, rh)),
-                    (resolve(bc[2].h, rw), resolve(bc[2].v, rh)),
-                    (resolve(bc[3].h, rw), resolve(bc[3].v, rh)),
-                ];
+                let radii = n.style.border_radius.as_corners(rw, rh);
                 let all_zero = radii.iter().all(|&(rx, ry)| rx <= 0.0 || ry <= 0.0);
                 let has_slice = n.style.border_image_slice.is_some();
                 let draw_rect = if !has_slice
