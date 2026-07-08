@@ -34,7 +34,7 @@ triggers:
    - **非零退出 = 围栏违规**（loomgui_pkg 报错）。读 stderr，自纠 HTML/CSS 后重跑。
    - **零退出 = 合规**，.pkg.bin + atlas.png 已产出到指定目录。
 
-4. **报告**：向设计师报告产出路径（.pkg.bin + atlas.png），说明 Unity 加载方式（StreamingAssets/ 下，LoomStage 自动加载）。
+4. **报告**：向设计师报告产出路径（.pkg.bin + atlas.png），说明 Unity 加载方式（Bundles/ui/ 下，LoomStageDriver.LoadPackageBytes 自动加载）。
 
 ## 注意
 

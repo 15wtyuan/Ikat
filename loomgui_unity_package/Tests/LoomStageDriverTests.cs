@@ -12,7 +12,7 @@ namespace LoomGUI.Tests
         /// <summary>
         /// Driver.Awake 必须构造 LoomStage 实例（Stage 属性非 null）。
         /// 验 Awake 序列：new LoomStage + SetNativeHostRoot + InitSprites + RegisterFontsFromSettings
-        /// + EnsureCamera + ConfigureTransforms + 绑 Font.textureRebuilt 均不抛异常。
+        /// + EnsureCamera + ConfigureTransforms 均不抛异常。
         /// </summary>
         [Test]
         public void LoomStageDriver_AwakeBuildsStageAndRegistersFonts()
@@ -26,7 +26,7 @@ namespace LoomGUI.Tests
             }
             finally
             {
-                // OnDestroy 解绑 Font.textureRebuilt + Dispose stage（释放 native handle）。
+                // OnDestroy Dispose stage（释放 native handle）。
                 Object.DestroyImmediate(go);
                 // EnsureCamera 自建独立 GO（非 root 子），DestroyImmediate(go) 不连带——手动清。
                 var cam = GameObject.Find("LoomUICamera");

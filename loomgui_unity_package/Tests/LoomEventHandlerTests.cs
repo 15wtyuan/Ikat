@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using LoomGUI.Bindings;
@@ -16,16 +17,21 @@ namespace LoomGUI.Tests
         // 事件路由测只靠 parent 链，不靠 layout，css 传空。
         static (IntPtr stage, LoomEventHandler handler, uint root, uint parent, uint child) BuildStage()
         {
-            string fontPath = System.IO.Path.Combine(Application.streamingAssetsPath, "DejaVuSans.ttf");
-            byte[] fontPathBytes = System.Text.Encoding.UTF8.GetBytes(fontPath);
-            StageHandle* stagePtr;
-            fixed (byte* fp = fontPathBytes)
+            // 字体走 Bundles/fonts/（v1.6 font-to-core 后核心自产 atlas，只需 ttf 字节；
+            // stage_new 不再收 font_path，字体经 register_font 单独注入）。
+            string bytesPath = System.IO.Path.Combine(Application.dataPath, "Bundles/fonts/DejaVuSans.ttf.bytes");
+            byte[] fontBytes = File.Exists(bytesPath)
+                ? File.ReadAllBytes(bytesPath)
+                : throw new System.IO.FileNotFoundException("测试字体缺失", bytesPath);
+            StageHandle* stagePtr = Native.loomgui_stage_new(200f, 200f);
+            Assert.IsTrue(stagePtr != null, "BuildStage: stage_new 返 null");
+            byte[] familyBytes = System.Text.Encoding.UTF8.GetBytes("DejaVu");
+            fixed (byte* fam = familyBytes, fb = fontBytes)
             {
-                stagePtr = Native.loomgui_stage_new(fp, (nuint)fontPathBytes.Length, 200f, 200f);
+                int rc = Native.loomgui_stage_register_font(
+                    stagePtr, fam, (nuint)familyBytes.Length, fb, (nuint)fontBytes.Length, 1);
+                Assert.AreEqual(0, rc, "BuildStage: register_font 失败（.bytes 损坏？）");
             }
-            // 注意：不能用 Assert.IsNotNull(stagePtr, ...) —— 指针装箱后恒非 null（boxed 0 也是对象），
-            // 是 no-op；stagePtr 是 StageHandle*，用 != null 真比较。
-            Assert.IsTrue(stagePtr != null, "BuildStage: stage_new 返 null（font_path 无效？检查 StreamingAssets/DejaVuSans.ttf）");
 
             uint root = CreateRoot(stagePtr, "div", "");
             uint parent = CreateNode(stagePtr, "div", "");

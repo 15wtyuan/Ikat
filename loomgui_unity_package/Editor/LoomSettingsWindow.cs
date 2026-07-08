@@ -274,8 +274,8 @@ namespace LoomGUI.Editor
 
         // —— 字体 tab ——————————————————————————————————————————————
         // FontEntry 只存 familyName + sourceFileName，不持 Font 引用——避免 Resources build 把
-        // Font asset 拖入。拖入时从 asset path 拆出文件名族名即丢弃 ref，发布时按 sourceFileName
-        // 在 AssetDatabase 重新定位源文件并拷贝两份（Font asset 给 AB、.bytes 给 Rust 测量）。
+        // Font asset 拖入。拖入时从 asset path 拆出文件名族名即丢弃 ref。发布时按 sourceFileName
+        // 在 AssetDatabase 重新定位源文件，拷一份 .bytes 到 Bundles/fonts/（核心自产 atlas，不需 Unity Font asset）。
         void DrawFonts()
         {
             EditorGUILayout.LabelField("字体列表（" + _settings.fonts.Count + "）——拖 Font asset 自动填", EditorStyles.boldLabel);
