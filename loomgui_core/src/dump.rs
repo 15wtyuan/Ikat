@@ -1,5 +1,6 @@
 //! 整树 JSON dump（调试用）。
 use crate::scene::node::{NodeKind, Scene};
+use crate::text::rich::RichKind;
 
 /// JSON 字符串转义：处理 `"` → `\"`、`\` → `\\`、控制字符 → `\uXXXX`。
 pub fn json_escape(s: &str) -> String {
@@ -25,11 +26,29 @@ pub fn dump_scene_json(scene: &Scene) -> String {
         if i > 0 {
             s.push(',');
         }
-        let (tag, kind_str) = match &n.kind {
-            NodeKind::Container => ("div", "Container"),
-            NodeKind::Button => ("button", "Button"),
-            NodeKind::Text { .. } => ("span", "Text"),
-            NodeKind::Image { src: _src } => ("img", "Image"),
+        // kind_str 用 String（RichText 需动态格式化 runs 数 + 首段摘要）。
+        let (tag, kind_str): (&'static str, String) = match &n.kind {
+            NodeKind::Container => ("div", "Container".into()),
+            NodeKind::Button => ("button", "Button".into()),
+            NodeKind::Text { .. } => ("span", "Text".into()),
+            NodeKind::Image { src: _src } => ("img", "Image".into()),
+            NodeKind::RichText { runs } => {
+                let first = runs.first().map(|r| match &r.kind {
+                    RichKind::Text { text } => {
+                        let snippet: String = text.chars().take(12).collect();
+                        format!("Text(\"{}\")", snippet)
+                    }
+                    RichKind::Image { src, .. } => format!("Image(\"{}\")", src),
+                });
+                (
+                    "span",
+                    format!(
+                        "RichText(runs={},first={})",
+                        runs.len(),
+                        first.unwrap_or_default()
+                    ),
+                )
+            }
         };
         let id = json_escape(n.id_attr.as_deref().unwrap_or(""));
         let classes = n

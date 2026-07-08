@@ -1,130 +1,134 @@
-## Task 8 Report: Stage B -- multi-page atlas + cross-page mesh split
+## Task 8 Report: 行内图 + emoji-图片（measure 记位 + build 产图 quad）
 
-### Status: DONE
+**Status**: Complete
+**Branch**: `feat/v1.7-rich-text`
+**Commit**: `dc03717` — `feat(core): inline images + emoji-as-image in rich flow (v1.7)`
 
-### Multi-page allocate (Step 1)
+### What was done
 
-Already implemented by T1's `allocate` method: iterates existing etagere
-allocators, pushes a new `AtlasPage(4096^2)` on overflow. No code change
-needed -- built into T1 in anticipation of Stage B.
+1. **`TextLayout` 加 `images` 字段** (`loomgui_core/src/text/layout.rs`):
+   - 新增 `RichImagePlacement { src, x, y, w, h }` struct
+   - `TextLayout.images: Vec<RichImagePlacement>` 字段
+   - `measure_text` 返回填 `images: Vec::new()`（plain text 无行内图）
 
-### build_text_mesh return-type change (Step 2)
+2. **`measure_rich_text` Image 分支记位** (`loomgui_core/src/text/layout.rs`):
+   - 函数顶声明 `let mut out_images: Vec<RichImagePlacement> = Vec::new()`
+   - `RichKind::Image { src, w, h, valign }` 分支记录位置：
+     - `Baseline`/`Bottom`: y_top = baseline - img_h（底边贴 baseline）
+     - `Middle`: y_top = baseline - img_h * 0.5
+     - `Top`: y_top = 0.0
+   - 末尾 `TextLayout { ..., images: out_images }`
 
-Now returns `Vec<(u32 page, Vec<verts>, Vec<uvs>, Vec<colors>, Vec<indices>)>`.
-Two-pass: (1) collect glyphs grouped by atlas page into BTreeMap, (2) build
-independent mesh per page group. Single-font single-size text stays on one
-page -> one Vec entry -> one Mesh (unchanged from stage A). CJK spanning
-pages -> multiple Meshes (extra draw calls, acceptable escape valve).
+3. **RichText build arm 产 image Mesh** (`loomgui_core/src/render/mod.rs`):
+   - `push_text_meshes` 后、`continue` 前，遍历 `layout.images`
+   - 每图产 `NodePayload::Mesh { program:0, image_path: src, verts 4角, uvs 全图 0..1, colors 白, indices }`
+   - `synth_text_node_id(node_id, 1000 + img_idx)` 避与 text page id 撞
+   - content offset (`off_x`, `off_y`) 内联应用（不污染 layout.images）
+   - 合成 image 节点不入 `id_to_pos`——sort_key/mask_context 由 `propagate_text_sub_page_sort_keys` 传播
 
-### Multi-RenderNode identity decision
-
-Page 0 uses real `node_id`. Pages 1..N use synthetic id:
-`primary_id & 0x00FF_FFFF | ((page & 0xFF) << 24)`. Bits [31:24] reserve
-page sub-index. Real scene node indices from slotmap (< ~4096 in practice)
-never set these bits -> no collision. Each synthetic id gets independent
-change detection in dirty hash table. Backend MirrorPool sees distinct keys.
-
-### Sort key propagation
-
-`propagate_text_sub_page_sort_keys` added between `assign_sort_keys` and
-`reorder_for_batching`: shifts subsequent real-node sort_keys by sub-page
-count, then sets sub-page sort_key = primary.sort_key + page_idx, copies
-mask_context. Draw order stays monotonic.
-
-### Test results
-
-- overflow_allocates_second_page: PASS (alloc->fill page0, ensure->page1+dirty)
-- Full cargo test -p loomgui_core: **539/539 passed** (unchanged)
-- snapshot_simple_panel and cascade_inheritance: PASS (single-page ASCII unchanged)
-- cargo fmt: PASS
-- cargo clippy --all-targets -- -D warnings: PASS
-- cargo build -p loomgui_ffi_c --release: PASS (no FFI changes, no .dll commit)
-- Cargo.lock: unchanged
-
-### Files changed
-
-- `loomgui_core/src/text/atlas.rs` -- overflow_allocates_second_page test
-- `loomgui_core/src/render/mod.rs` -- build_text_mesh return type, Text branch
-  multi-page emission, synthetic node_id helpers, sort_key propagation
-
-### Commit
-
-`b204d9c` feat(core,v1.6b): multi-page atlas + cross-page text mesh split
-
-### Self-review concerns
-
-- Cross-page draw-call cost: each additional page = 1 extra draw call. CJK at
-  48px (~3000 glyphs per 4096^2 page) -> rarely triggers multi-page.
-- Synthetic id upper bound: 255 sub-pages = 4GB GPU memory, far beyond practical.
-  No collision risk.
-- merge_meshes text: different page path -> won't merge, correct behavior.
-
-## Fixes (review round 1)
-
-Commit: `f177320` fix(core,v1.6b): T8 review findings -- reuse_key/sort_key/synth-id guard
-
-### C1 -- `reuse_key` collision on text sub-pages (render/mod.rs:239)
-
-sub-pages had `reuse_key: n.reuse_key` inheriting from the scene text node.
-If the text node is in a virtual list slot (reuse_key = slotIdx > 0), all sub-pages
-share the same reuse_key. MirrorPool creates/updates ONE GameObject per unique
-reuse_key, so sub-page 1 overwrites primary page 0's mesh, sub-page 2 overwrites
-sub-page 1, etc. -- only the last sub-page's glyphs survive.
-
-**Fix:** sub-pages use `reuse_key: 0`. Each sub-page has a distinct synthetic
-node_id; reuse_key=0 means MirrorPool keys by node_id -- independent GameObjects
-per page, all render. When the slot rebinds, old synthetic node_ids disappear,
-GOs cleaned up normally.
-
-### I1 -- Stale `primary_sk` in propagate_text_sub_page_sort_keys (render/mod.rs:542-551)
-
-`shifts` captures primary sort_keys BEFORE any shifts. When the shift loop runs,
-`*primary_sk` in `rn.sort_key > *primary_sk` is stale -- doesn't reflect the
-primary's current sort_key after earlier iterations shifted it. Bug fires when
-2+ text nodes each have sub-pages: causes sort_key ties.
-
-**Fix:** track cumulative shift. `adjusted_sk = primary_sk + cum_shift`,
-`cum_shift += n` after each iteration. Verified with manual trace: 2 text nodes
-(A sk=2 sub=2, B sk=3 sub=1, C sk=4) -- old code produced tie at sk=8,
-fixed code produces monotonic 2,3,4,5,6,7.
-
-### I2 -- Synthetic node_id collision risk unguarded (render/mod.rs:490-491)
-
-Real scene node index < 4096 was a soft assumption. If a real node's index >=
-4096, `is_text_sub_page` (bits[31:24] > 0) returns TRUE for REAL nodes,
-corrupting sort_keys in propagate_text_sub_page_sort_keys.
-
-**Fix:** added `debug_assert!` at the top of `build_render_nodes` that fires
-if any real scene node index >= 4096, with a clear message pointing at the
-synthetic-id limit. Also added `synth_text_node_id_roundtrip` and
-`node_index_4096_triggers_sub_page_collision` tests documenting the boundary.
-
-### I3 -- `id_to_pos` not updated for sub-page nodes (render/mod.rs:222-247)
-
-Sub-page RenderNodes pushed to `nodes` but NOT inserted into `id_to_pos`.
-Intentional (synthetic ids shouldn't map back to scene nodes), but a latent
-invariant break -- fragile without documentation.
-
-**Fix:** added comment at the sub-page push site explaining WHY sub-pages are
-intentionally excluded from `id_to_pos` (synthetic ids; render-only, not scene
-nodes; scrollbar/hash code iterates `nodes` not `id_to_pos`).
-
-### Tests added (for C1/I1/I2)
-
-- `text_sub_pages_reuse_key_is_zero_not_inherited` -- C1 regression: verifies
-  primary inherits reuse_key=7, any sub-pages get reuse_key=0.
-- `propagate_text_sub_page_sort_keys_cumulative_shift_no_ties` -- I1 regression:
-  constructs 2 text nodes with sub-pages, verifies monotonic sort_keys with
-  no ties (2,3,4,5,6,7).
-- `synth_text_node_id_roundtrip` -- I2 encoding roundtrip, verifies index=4095
-  is NOT misidentified as sub-page.
-- `node_index_4096_triggers_sub_page_collision` -- I2 boundary: verifies
-  index=4096 IS misidentified (proof of hard limit motivation).
+4. **测试** (`loomgui_core/src/render/tests.rs`):
+   - `rich_image_emits_mesh_with_image_path_and_program_0`: RichText 含 `Text("Hi")` + `Image(emoji/cool.png, 16x16, Baseline)` → 验 frame 同时含 text Mesh (program=1) 和 image Mesh (program=0, image_path="emoji/cool.png", 4 顶点, 全图 UV)
 
 ### Test summary
 
-- `cargo test -p loomgui_core`: **580/580 passed** (543+25+2+3+5+2 unit tests)
-- `cargo fmt --all -- --check`: PASS
-- `cargo clippy -p loomgui_core --all-targets -- -D warnings`: PASS
-- Snapshots unchanged (single-page ASCII text unaffected)
-- No FFI change, no .dll rebuild, no CI yml change
+- `cargo test`: **702 passed, 0 failed**（含 fence_contract 30 项全部通过）
+- `cargo fmt --all -- --check`: clean
+- `cargo clippy --all-targets -- -D warnings`: clean
+- 新增测试 `rich_image_emits_mesh_with_image_path_and_program_0`: passed
+- 零回归（全部既有测试通过）
+
+### Concerns
+
+- **UV 方向**: 全图 UV 用 `(0,0)-(1,1)`（非 v-flipped）。现有 Image/Container bg-image 的 mesh::quad 用 v-flipped `(0,1)-(1,0)`。若 PlayMode 行内图上下颠倒，需将 UV 翻转与现有 Image 对齐——改 `uvs` 为 `[[0.0,1.0],[1.0,1.0],[1.0,0.0],[0.0,0.0]]`。
+- **synth id 编码**: `1000 + img_idx` 经 `synth_text_node_id` 的 `& 0xFF` 掩码后为 232–255 范围，与 text 跨页子页号潜在重叠（text page 232–255）。实际跨页几乎不会超 10 页（单 atlas 2048² 装不下才跨），碰撞概率极低。
+- **合并/批处理**: 行内图 mesh 的 program=0 与 Image 节点 program=0 在 merge 阶段同 DrawState → 可与相邻 Image 节点合并（正确行为）。与 text mesh (program=1) 不合批（正确行为）。
+
+---
+
+## Review Finding Fixes（commit `aa573ab`）
+
+### Finding 1（Important）— UV V 方向不一致
+
+**问题**：行内图 quad 顶点序为 BL,BR,TR,TL，UV 为 `[[0,0],[1,0],[1,1],[0,1]]`
+——与 `mesh::quad`（Image/Container bg-image/nine_slice/rounded_rect）的
+TL,TR,BR,BL 序 + v-flipped UV `[[0,1],[1,1],[1,0],[0,0]]` 约定不一致。
+
+虽然两种写法在相同 bottom-left 起始 triangle fan 下产生相同 fragment 覆盖
+（索引 [0,1,2,0,2,3] 对两种顶点序描述同一对三角形），但顶点序和 UV 不同会导致
+回顾代码时困惑。**实际渲染输出在 fix 前后一致**（triangulation 不变、UV 映射不变）。
+
+**修法**：将顶点序改为 TL,TR,BR,BL（直接匹配 `mesh::quad` 输出），UV 改为
+`[[0,1],[1,1],[1,0],[0,0]]`（v-flip 匹配所有既有 image 路径）。
+
+修改文件：
+- `loomgui_core/src/render/mod.rs` 行 439-451：verts 序从 BL,BR,TR,TL 改为 TL,TR,BR,TL
+- `loomgui_core/src/render/mod.rs` 行 445：UV 改为 `[[0.0,1.0],[1.0,1.0],[1.0,0.0],[0.0,0.0]]`
+- `loomgui_core/src/render/tests.rs` 行 2366-2368：`rich_image_emits_mesh_with_image_path_and_program_0`
+  测试断言改为 `TL=(0,1), BR=(1,0)`（匹配 `build_image_carries_path_and_full_uv` 断言）
+
+### Finding 2（Minor）— magic number 1000
+
+**修法**：提取命名常量 `INLINE_IMG_SYNTH_ID_BASE: u32 = 1000`，加注释说明
+经 `& 0xFF` 掩码后映射 high byte 至 232-255，避开 text atlas 跨页子页号（1 到约 10）。
+
+### Test summary
+
+- `cargo test -p loomgui_core`: **617 passed, 0 failed**（575 unit + 30 fence_contract + 12 others）
+- `cargo fmt --all -- --check`: clean（提交前已 `cargo fmt --all` 应用格式）
+- `cargo clippy --all-targets -- -D warnings`: clean
+- 零回归（全部既有测试通过，`rich_image_emits_mesh_with_image_path_and_program_0` 断言已同步更新）
+
+---
+
+## Review Finding Fix 2（commit `7a16c02`）— UV V-flip 自抵消修正
+
+### 问题
+
+commit `aa573ab` 的 "Finding 1 fix" 将行内图 quad 的 verts 序从 BL,BR,TR,TL
+改为 TL,TR,BR,BL，同时 UV 从 `[[0,0],[1,0],[1,1],[0,1]]` 改为
+`[[0,1],[1,1],[1,0],[0,0]]`。但当时的 verts 坐标标注有误：
+
+```rust
+// aa573ab 的实际代码（注释标签与几何位置全反）
+verts: vec![
+    [ix, iy + img.h],         // 标 TL，实为 BL（iy+h = 底部）
+    [ix + img.w, iy + img.h], // 标 TR，实为 BR
+    [ix + img.w, iy],         // 标 BR，实为 TR
+    [ix, iy],                 // 标 BL，实为 TL
+],
+uvs: vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+```
+
+verts 序和 UV 序**同时**改变，几何角点与 UV 的映射关系未变：
+- quad 顶部 (iy) 仍采样 UV v=0（纹理底部）
+- quad 底部 (iy+h) 仍采样 UV v=1（纹理顶部）
+
+v-flip 实际未生效（自抵消）。PlayMode 上行内图仍上下颠倒。
+
+### 修法
+
+verts 坐标修正为正确的 TL,TR,BR,BL 几何位置，UV 保持 v-flipped：
+
+```rust
+verts: vec![
+    [ix, iy],                 // TL（design y-down 中 y 最小 = 顶部）
+    [ix + img.w, iy],         // TR
+    [ix + img.w, iy + img.h], // BR
+    [ix, iy + img.h],         // BL
+],
+uvs: vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+```
+
+现在 quad 顶部 → UV v=1（纹理顶部），底部 → UV v=0（纹理底部），与 `mesh::quad`
+Image arm 的 v-flip 约定完全一致。
+
+修改文件：
+- `loomgui_core/src/render/mod.rs` 行 441-449：verts 坐标修正、标签修正
+- `loomgui_core/src/render/tests.rs` 行 2365-2370：UV 断言扩为四角全检，标签修正
+
+### Test summary
+
+- `cargo test -p loomgui_core`: **617 passed, 0 failed**（575 unit + 30 fence_contract + 12 others）
+- `cargo fmt --all -- --check`: clean
+- `cargo clippy --all-targets -- -D warnings`: clean
+- 零回归

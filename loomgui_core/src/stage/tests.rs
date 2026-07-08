@@ -303,6 +303,7 @@ fn is_pointer_on_ui_false_when_miss() {
         anim: Default::default(),
         scroll: Default::default(),
         text_layouts: Vec::new(),
+        rich_fragments: Vec::new(),
         node_sort_keys: Vec::new(),
         controllers: Default::default(),
         pending_controller_events: Vec::new(),
@@ -867,4 +868,45 @@ fn stage_register_font_sets_default_for_measure() {
     s.scene = Some(crate::scene::node::build_scene(&tree, &styles));
     s.advance_time(0.016);
     let _frame = s.tick_and_render(); // must not panic on "no default font"
+}
+
+/// tick_and_render 每帧写回 rich_fragments 时清空本帧无 fragments 的 slot。
+/// 若只写不清（bug），上一帧有链接、本帧 set_rich_text 删了链接的节点会保留 stale fragments，
+/// rich_link_at 读到已删 link_id。
+#[test]
+#[cfg(feature = "parse")]
+fn tick_and_render_clears_stale_rich_fragments() {
+    use crate::text::rich::RichFragment;
+    let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+    // 最小有效场景：display:block div → load_inline_for_test 不跑 desugar 故仍是 Container。
+    // 测试聚焦 writeback 清空逻辑，不依赖 build 产 fragments 的完整链路。
+    let html = r#"<div style="display:block;width:100px;height:20px">text</div>"#;
+    let css = "";
+    let mut s = Stage::new((200.0, 100.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
+    s.load_inline_for_test(html, css).unwrap();
+    let root = s.scene.as_ref().unwrap().roots[0];
+    // 首帧 tick 建 taffy / world_transforms 基线
+    s.tick_and_render();
+    // 注入 stale fragments——模拟上一帧 build 产了 fragments 且已写回 rich_fragments
+    {
+        let sc = s.scene.as_mut().unwrap();
+        let idx = root.index();
+        sc.rich_fragments = vec![None; sc.nodes.capacity() + 1];
+        sc.rich_fragments[idx] = Some(vec![RichFragment {
+            x: 10.0,
+            y: 5.0,
+            w: 50.0,
+            h: 20.0,
+            link_id: 99,
+        }]);
+    }
+    // 本帧该节点不产 fragments（Container 无 link run）→ writeback 应清空 slot
+    s.tick_and_render();
+    let sc = s.scene.as_ref().unwrap();
+    assert!(
+        sc.rich_fragments[root.index()].is_none(),
+        "tick_and_render 应清空本帧无 fragments 的 slot（stale fragments 残留）"
+    );
 }

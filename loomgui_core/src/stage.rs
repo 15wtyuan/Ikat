@@ -8,7 +8,7 @@ use crate::input::{EventRecord, PointerEvent, PointerState};
 use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
-use crate::scene::node::{ControllerChangedEvent, NodeId, Rect, Scene};
+use crate::scene::node::{ControllerChangedEvent, NodeId, NodeKind, Rect, Scene};
 use crate::style::dynamic::rematch_pseudo_classes;
 use crate::style::resolved::OverflowMode;
 use crate::text::layout::FontTable;
@@ -311,6 +311,48 @@ impl Stage {
         scene.world_transforms.get(node.index()).copied()
     }
 
+    /// 查 (world_x, world_y) 落在 RichText 节点哪个链接上 → link_id（0=无/越界/非 RichText）。
+    ///
+    /// pull 模式：Unity Click 命中节点级 AABB 后调本函数细分到 fragment。独立于 hit_test，
+    /// 不改 EventRecord ABI。复用 get_node_world_matrix 的 world_transforms 通路（merge blob
+    /// 吞空 div 但 world_transforms 保留全节点）反变换世界点到节点本地坐标，再扫描该节点的
+    /// rich_fragments（本地坐标矩形）做 rect.contains。
+    pub fn rich_link_at(&self, node: NodeId, world_x: f32, world_y: f32) -> u32 {
+        let scene = match self.scene.as_ref() {
+            Some(s) => s,
+            None => return 0,
+        };
+        // 取节点 world_matrix 反变换到本地坐标（fragment 矩形存本地坐标）。
+        let n = match scene.get(node) {
+            Some(n) => n,
+            None => return 0,
+        };
+        if !matches!(n.kind, NodeKind::RichText { .. }) {
+            return 0;
+        }
+        let wm = scene
+            .world_transforms
+            .get(node.index())
+            .copied()
+            .unwrap_or(crate::transform::IDENTITY);
+        let inv = crate::transform::inverse(&wm);
+        let (lx, ly) = crate::transform::apply_point(&inv, world_x, world_y);
+        let frags = match scene
+            .rich_fragments
+            .get(node.index())
+            .and_then(|f| f.as_ref())
+        {
+            Some(f) => f,
+            None => return 0,
+        };
+        for fr in frags {
+            if lx >= fr.x && lx <= fr.x + fr.w && ly >= fr.y && ly <= fr.y + fr.h {
+                return fr.link_id;
+            }
+        }
+        0
+    }
+
     /// 读节点 sort_key（assign_sort_keys 在 merge_meshes 前的 DFS 序号快照）。
     /// NativeHost FFI 查询用——merge 后空 div entry 消失，回 scene.node_sort_keys 兜底。
     /// node 无效 / scene 未建 → None。
@@ -450,6 +492,7 @@ impl Stage {
                 anim: Default::default(),
                 scroll: Default::default(),
                 text_layouts: Vec::new(),
+                rich_fragments: Vec::new(),
                 node_sort_keys: Vec::new(),
                 controllers: Default::default(),
                 pending_controller_events: Vec::new(),
@@ -504,6 +547,11 @@ impl Stage {
     /// 改 Text 节点 content + 标 dirty_text。
     pub fn set_text(&mut self, node: NodeId, text: &str) -> Result<(), String> {
         crate::scene::dynamic::set_text(self.scene.as_mut().ok_or("no scene")?, node, text)
+    }
+
+    /// 改 RichText 节点的 markup（runtime 解析 → runs + dirty）。
+    pub fn set_rich_text(&mut self, node: NodeId, markup: &str) -> Result<(), String> {
+        crate::scene::dynamic::set_rich_text(self.scene.as_mut().ok_or("no scene")?, node, markup)
     }
 
     /// 改 Image 节点 src + 标 dirty_mesh。
@@ -619,6 +667,7 @@ impl Stage {
             anim: Default::default(),
             scroll: Default::default(),
             text_layouts: Vec::new(),
+            rich_fragments: Vec::new(),
             node_sort_keys: Vec::new(),
             controllers: Default::default(),
             pending_controller_events: Vec::new(),
@@ -728,7 +777,7 @@ impl Stage {
         //    返回新 hash 存 self.prev_node_hashes 供下帧比。
         // build_render_nodes 查 Stage.image_sizes 算九宫格 UV（slice_px / src_px）。
         // Image payload 带 path，UV 全图 (0,0)-(1,1)（无 atlas 子区），Unity 查 Sprite 拿真实 UV。
-        let (frame, new_hashes, sort_keys) = build_render_nodes(
+        let (frame, new_hashes, sort_keys, rich_fragments) = build_render_nodes(
             scene,
             &self.fonts,
             &self.prev_node_hashes,
@@ -737,6 +786,22 @@ impl Stage {
         );
         scene.node_sort_keys = sort_keys;
         self.prev_node_hashes = new_hashes;
+        // 写回 rich_fragments：resize 对齐 slotmap capacity（remove_node 后 idx 不变），
+        // 再按 node_id 索引入表。
+        scene
+            .rich_fragments
+            .resize_with(scene.nodes.capacity() + 1, || None);
+        // 每帧先清空所有 slot，再写入本帧有 fragments 的 slot。
+        // resize_with 只填充新增 slot，已有的 stale slot 不变——若不主动清空，
+        // 上一帧有链接、本帧 set_rich_text 删了链接的节点会保留 stale fragments，
+        // rich_link_at 读到已删 link_id。
+        scene.rich_fragments.fill(None);
+        for (node_id_u32, frags) in &rich_fragments {
+            let idx = crate::scene::node::NodeId(*node_id_u32).index();
+            if let Some(slot) = scene.rich_fragments.get_mut(idx) {
+                *slot = Some(std::mem::take(&mut frags.clone()));
+            }
+        }
         frame
     }
 

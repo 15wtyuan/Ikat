@@ -172,6 +172,38 @@ impl GlyphAtlas {
         }
     }
 
+    /// 取一个 1×1 白像素槽（装饰线 / 纯色填充用）。首次调用分配并填 255，其后命中
+    /// 缓存。用 sentinel key（font_id=u32::MAX, glyph_id=u16::MAX, size_px=1,
+    /// effect_sig=u64::MAX）避与真字形键空间碰撞。
+    pub fn ensure_solid(&mut self) -> GlyphRect {
+        let key = GlyphKey {
+            font_id: u32::MAX,
+            glyph_id: u16::MAX,
+            size_px: 1,
+            effect_sig: u64::MAX,
+        };
+        if let Some(r) = self.cache.get(&key) {
+            return *r;
+        }
+        let alloc = self.allocate(1, 1);
+        let page = &mut self.pages[alloc.page as usize];
+        page.pixels[alloc.px_y as usize * page.width as usize + alloc.px_x as usize] = 255;
+        if !self.dirty.contains(&alloc.page) {
+            self.dirty.push(alloc.page);
+        }
+        let uv = GlyphRect {
+            page: alloc.page,
+            u0: alloc.px_x as f32 / page.width as f32,
+            v0: alloc.px_y as f32 / page.height as f32,
+            u1: (alloc.px_x + 1) as f32 / page.width as f32,
+            v1: (alloc.px_y + 1) as f32 / page.height as f32,
+            px_w: 1,
+            px_h: 1,
+        };
+        self.cache.insert(key, uv);
+        uv
+    }
+
     /// 在已存在页中找第一个能容下 w×h 的；都不够就新开一页。返回槽位的像素原点。
     /// 多页是溢出兜底：单页 4096² 装满后追加第二页，调用方不感知页上限。
     fn allocate(&mut self, gw: u32, gh: u32) -> AllocRect {

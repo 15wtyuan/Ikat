@@ -60,6 +60,21 @@ enum MeasureContext {
         nowrap: bool,
         /// 节点的 font_family。None 表示用 FontTable 的 default。
         family: Option<String>,
+        /// 节点 style.color（plain text 整段同色；进 GlyphRun.color 供 build per-vertex）。
+        color: [f32; 4],
+    },
+    /// RichText 叶子（v1.7）：inline flow 封装在 measure_rich_text。
+    /// runs owned（parse 期产的扁平 run 流，含 per-run 样式）。
+    /// `align`/`nowrap` 暂未传入 measure_rich_text（T4 边界：rich 不支持对齐/nowrap），
+    /// 保留字段供后续 task 接线，构造时已填但当前不读。
+    #[allow(dead_code)]
+    RichText {
+        runs: Vec<crate::text::rich::RichRun>,
+        line_height: f32,
+        align: TextAlign,
+        nowrap: bool,
+        /// 节点的 font_family。None 表示用 FontTable 的 default。
+        family: Option<String>,
     },
     /// Image 叶子：intrinsic 像素 + css width/height 维度。闭包消费 taffy 的 known 解析
     /// Percent/fit（Percent width taffy 传 known.width=Some(解析宽)，闭包据此等比 height）。
@@ -128,6 +143,17 @@ pub fn solve(
                     font_size: s.font_size,
                     line_height: s.line_height,
                     letter_spacing: s.letter_spacing,
+                    align: s.text_align,
+                    nowrap: s.white_space_nowrap,
+                    family: s.font_family.clone(),
+                    color: s.color,
+                })
+            }
+            NodeKind::RichText { runs } => {
+                let s = &node.style;
+                Some(MeasureContext::RichText {
+                    runs: runs.clone(),
+                    line_height: s.line_height,
                     align: s.text_align,
                     nowrap: s.white_space_nowrap,
                     family: s.font_family.clone(),
@@ -253,8 +279,10 @@ pub fn solve(
                         align,
                         nowrap,
                         family,
+                        color,
                     }) => {
                         let font = fonts.select(family.as_deref());
+                        let font_id = fonts.font_id(family.as_deref());
                         let layout = measure_text(
                             content,
                             *font_size,
@@ -264,11 +292,43 @@ pub fn solve(
                             *nowrap,
                             known.width,
                             font,
+                            font_id,
+                            *color,
                         );
                         // 存 TextLayout 供 render 复用。Some（available 测量）优先——
                         // 短文本 taffy 只传 None（max-content ≤ available，不换行），长文本传
                         // Some(available)（换行）。一旦存了 Some，后续 None 不覆盖（taffy 末尾
                         // 可能补测 None）。
+                        if let Some(sid) = taffy_to_scene.get(&nid) {
+                            let slot = &mut text_layouts[sid.index()];
+                            if slot.is_none() || known.width.is_some() {
+                                *slot = Some(layout.clone());
+                            }
+                        }
+                        Size {
+                            width: layout.text_width,
+                            height: layout.text_height,
+                        }
+                    }
+                    Some(MeasureContext::RichText {
+                        runs,
+                        line_height,
+                        family,
+                        ..
+                    }) => {
+                        // RichText 走 measure_rich_text（简化 inline flow）。
+                        // MVP 单字体：所有 run 共用 family 选的 face + default_font_id；
+                        // run.font_id 字段保留给将来多 family，此处不用。
+                        let font = fonts.select(family.as_deref());
+                        let font_id = fonts.font_id(family.as_deref());
+                        let layout = crate::text::layout::measure_rich_text(
+                            runs,
+                            known.width,
+                            *line_height,
+                            font,
+                            font_id,
+                        );
+                        // 存 TextLayout 供 render 复用（同 Text 的 Some 优先策略）。
                         if let Some(sid) = taffy_to_scene.get(&nid) {
                             let slot = &mut text_layouts[sid.index()];
                             if slot.is_none() || known.width.is_some() {

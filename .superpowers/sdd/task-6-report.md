@@ -1,111 +1,82 @@
-# Task 6 Report: Unity FrameBlob v10 mirror + delete text rasterization path
+# Task 6 报告：display:block desugar → RichText 叶 + dom 保序 + fence
 
-## Status: DONE
+## 状态
+
+DONE
 
 ## Commit
-- **SHA**: `63237bd`
-- **Subject**: `refactor(unity): drop backend text rasterizer (v1.6 font-to-core)`
-- **Files**: 9 changed (127 insertions, 765 deletions, 4 deletions)
 
-## Blob v10 Column Layout (mirrored from `loomgui_ffi_c/src/blob.rs`)
+`f7fb625` — `feat(pkg): display:block desugar -> RichText leaf + fence (v1.7)`
 
-20 columns (was 22 in v9 -- text_off/text_len deleted), header 116B (was 132B).
+## 测试摘要
 
-| Idx | Column | Size | Notes |
-|-----|--------|------|-------|
-| 0 | node_id | 4B | |
-| 1 | parent_id | 4B | |
-| 2 | visible | 1B | |
-| 3 | alpha | 4B | |
-| 4 | sort_key | 4B | |
-| 5 | mask_context | 4B | |
-| 6 | m_a | 4B | world matrix |
-| 7 | m_b | 4B | |
-| 8 | m_c | 4B | |
-| 9 | m_d | 4B | |
-| 10 | m_tx | 4B | |
-| 11 | m_ty | 4B | |
-| 12 | payload_kind | 1B | v10: only 1=Mesh |
-| 13 | mesh_off | 4B | |
-| 14 | mesh_len | 4B | |
-| 15 | path_idx | 4B | was col 17 in v9 |
-| 16 | program | 1B | was col 18 in v9 |
-| 17 | color_matrix | 80B | was col 19 in v9 |
-| 18 | change_level | 1B | was col 20 in v9 |
-| 19 | reuse_key | 4B | was col 21 in v9 |
+`cargo test`（workspace，含 default features）：701 passed / 0 failed。
+- `loomgui_core` lib: 574 passed
+- `fence_contract`: 30 passed（含 3 新 block-div 围栏测试）
+- `loomgui_pkg` pack 集成测: 17 passed（含 7 新 desugar 测试）
+- 其余集成测（snapshot/node_sort_keys/stage_getters/v1e_dirty）全绿
 
-Arena headers (after 20 col_offsets): mesh_arena (off @ 92, len @ 96), clip_table (off @ 100, len @ 104), path_table (off @ 108, len @ 112).
+`cargo fmt --all -- --check` clean；`cargo clippy --all-targets -- -D warnings` clean。
 
-## FrameBlob.cs Changes
-- `ExpectedVersion` 9 -> 10
-- Header comment updated: 132B -> 116B, 22 cols -> 20
-- Col count: 22 -> 20 in comment block
-- `ColOff` range: `12 .. 12+22*4` -> `12 .. 12+20*4`
-- Arena offset properties: deleted `TextArenaOff`/`TextArenaLen`; `ClipTableOff`/`PathTableOff` recalculated (all 8B earlier)
-- `TextOff(i)` / `TextLen(i)` -- deleted
-- `ReadText` + `GlyphData` struct -- deleted
-- `ChangeLevel(i)`: `ColOff(20)` -> `ColOff(18)`
-- `ReuseKey(i)`: `ColOff(21)` -> `ColOff(19)`
-- `PathIdx(i)`: `ColOff(17)` -> `ColOff(15)`
-- `Program(i)`: `ColOff(18)` -> `ColOff(16)`
-- `ColorMatrix(i)`: `ColOff(19)` -> `ColOff(17)`
+## 改动摘要
 
-## TextRasterizer.cs Deletion
-- `git rm`'d `loomgui_unity_package/Runtime/TextRasterizer.cs` + `.meta`
-- `git rm`'d `loomgui_unity_package/Tests/TextRasterizerTests.cs` + `.meta`
+### 1. `loomgui_core/src/parse/dom.rs` — ElementData 加字段 + block div 捕获
 
-## MirrorPool.cs Deletions
-- **RenderObj fields removed**: `IsText`, `LastGlyphs`, `LastFontSize`, `LastTextColor`, `LastFont`
-- **`_lastFontVersion` field** removed
-- **fontDirty logic** removed (~15 lines: fontVersionAtStart/fontDirty calc, force-All-on-dirty, mid-rebuild race guard)
-- **Text font selection branch** removed (~14 lines: ReadText call + ResolveFont cache)
-- **`IsText` assignment** removed (`ro.IsText = kind == 2`)
-- **`UploadMeshOrText` text path** removed (~15 lines: kind==2 branch with TextRasterizer.BuildMesh)
-- **`ResolveFont` static method** removed entirely
-- **`UpdateHeader` text material branch** removed (~7 lines: kind==2 material selection, font param)
-- **Sync signature**: 8 params -> 5 params (dropped unityFonts, defaultFont, fontVersion)
-- **`UpdateHeader` signature**: `Font font` param removed
-- **`UploadMeshOrText` signature**: `Font font` param removed; simplified to single mesh path
-- **`kind != 1 && kind != 2` guard** simplified to `kind != 1`
+- `ElementData` 加 `raw_rich: Option<String>`（parse 期捕获 inline display:block div 的 inner HTML 原文）+ `rich_runs: Option<Vec<RichRun>>`（desugar 期填）。
+- `build_element`：tag=div 且 inline style attr 含 `display:block` → `el_node.inner_html()` 捕获原文到 `raw_rich`，early-return 不递归子元素（绕 FENCE_TAGS 让 b/i/span/a 进 raw，不被围栏挡）。
+- 新增 `is_inline_display_block(attrs)` helper：去所有空白后查子串 `display:block`，容忍 `display: block` / `display :block` 等变体。
+- flex div（默认）行内混排仍报错（铁律不变）；错误信息更新指向 `<div style="display:block">` 作富文本入口。
+- 3 新 dom 单测：block div 捕获 raw_rich 不递归 / 空白变体容忍 / class-based display:block 不触发（MVP 限定）。
 
-## LoomStage.cs Deletions
-- `_unityFonts` dict + `_defaultUnityFont` field -- deleted
-- `_fontVersion` field + `FontVersion` property -- deleted
-- `OnFontRebuilt(Font)` method -- deleted
-- `RegisterFont`: `(string, byte[], Font, bool)` -> `(string, byte[], bool)`
-- `Tick` -> `_pool.Sync(blob, _renderRoot, _mm, _sprites, Texture2D.whiteTexture)` (no font args)
+### 2. `loomgui_pkg/src/lib.rs` — desugar_block_divs 函数 + 调用点
 
-## LoomStageDriver.cs Deletions
-- `Font.textureRebuilt +=/-=` subscription/unsubscription -- deleted
-- `LoadFont(FontEntry)` returning `(byte[], Font)` -> `LoadFontBytes(FontEntry)` returning `byte[]`
-- UnityEditor AssetDatabase.LoadAssetAtPath<Font> block -- deleted
-- `RegisterFontsFromSettings`: updated to use new method signatures
+- `pack()` 内 `resolve_styles` 后、`build_scene` 前插 `desugar_block_divs(tree, styles)?`。
+- `pub fn desugar_block_divs(tree, styles) -> Result<(ElementTree, Vec<ResolvedStyle>), String>`：
+  - 遍历 `tree.nodes`，对 `raw_rich` 非空元素：
+    1. 守护栏（spec §4.2）：block div 拒 flex 属性（justify-content/align-items/gap 非默认 → Err）。
+    2. base 样式从 ResolvedStyle 转 RichBaseStyle（color/font_size；weight/deco MVP 用默认——bold 走 `<b>`、underline 走 `<u>`，避免 base 已粗时 `<b>` 重复加粗语义混乱）。
+    3. `parse_rich_markup(raw, base, 0)` → runs，存进 `ElementData.rich_runs`。
+  - `(tree, styles)` 同长同序不变量保持：只填 `rich_runs`，不增删节点、不改 styles 顺序。
+- `check_no_flex_props(s)`：justify_content.is_some() / align_items.is_some() / gap != default → Err。
+- desugar_block_divs 设 `pub` 供 `loomgui_pkg/tests/pack.rs` 集成测直接调（免走完整 pack 的文件目录）。
 
-## MirrorPoolTests.cs Changes
-- `OneNodeBlobV9` -> `OneNodeBlobV10`: 22 cols -> 20, header 132B -> 116B, no text_arena, column indices updated
-- Sync calls: old 8-arg -> new 5-arg signature
-- **MirrorPoolTextTests class entirely removed** (OneTextBlobV9 helper + 2 text-specific tests obsolete)
+### 3. `loomgui_core/src/scene/node.rs` — build_scene 产 RichText
 
-## Grep Self-Check Result
-Comprehensive grep for `TextRasterizer|OnFontRebuilt|_fontVersion|fontVersion|LastGlyphs|LastFont\b|IsText|_lastFontVersion|fontDirty|ReadText|GlyphData|text_arena|TextArena|kind == 2|unityFont|_unityFonts|_defaultUnityFont`:
-- 5 matches, all in doc comments documenting the v10 change -- **no dangling code references**.
+- `gather_rec`：`kind_from_tag` 后，若 `el.rich_runs` Some → 覆盖 kind 为 `NodeKind::RichText { runs }`。
+- block div 原 kind_from_tag("div")=Container 被覆盖成 RichText 叶。raw_rich 的 div 无子元素（parse 期 early-return），故 Container 的 children/text 逻辑不触发。
 
-Additional verification:
-- `\.LoadFont\(|\.RegisterFont\(.*Font` -> **empty** (no old signature callers)
+### 4. `loomgui_core/src/parse/selector.rs` — 测试 helper 补字段
+
+- `el()` test helper 补 `raw_rich: None, rich_runs: None`。
+
+### 5. `loomgui_core/tests/fence_contract.rs` — 围栏契约 E 节
+
+- 3 新测试（parse 级）：
+  - `block_div_captures_raw_rich_bypassing_fence_tags`：block div 接受 b/i（raw_rich 捕获，不递归）。
+  - `flex_div_inline_mix_still_rejected`：默认 flex div 文本+元素混排仍报错（铁律不变）。
+  - `class_based_display_block_still_blocked_at_parse`：MVP 限定——class 规则的 display:block 不触发 rich（parse 期未 cascade class）。
+
+### 6. `loomgui_pkg/tests/pack.rs` — desugar 集成测
+
+- 7 新测试（desugar 级，调 `desugar_block_divs` 直接验）：
+  - `desugar_block_div_produces_rich_runs`：raw_rich → runs 含 bold + link。
+  - `desugar_block_div_then_build_scene_emits_richtext_kind`：端到端 desugar + build_scene → 根节点 kind = RichText。
+  - `desugar_block_div_rejects_justify_content` / `_align_items` / `_gap`：block div 拒 flex 属性。
+  - `desugar_block_div_accepts_non_flex_props`：color/font-size/width 等非 flex 属性不报错。
+  - `desugar_flex_div_unaffected`：普通 flex div raw_rich/rich_runs 均 None。
+
+## 设计决策
+
+1. **MVP 限定：仅 inline `display:block` 触发**——parse 期未 cascade class 规则，无法知 class→display:block。class-based 须两遍 parse 或延迟子解析，留 follow-up。`is_inline_display_block` 只查 inline style attr 字符串。
+
+2. **base weight/deco 用默认**——避免 base 已粗时 `<b>` 重复加粗语义混乱。bold/underline 全由 `<b>`/`<u>` 标签驱动，base 只贡献 color/font_size。caller 在 block div 上写 `font-weight:bold` 会被静默忽略（base weight 硬编码 Normal）。
+
+3. **desugar 不改 styles 顺序/长度**——`(tree, styles)` 同长同序不变量保持。block div 的 taffy_style 仍 Flex（layout 照常），desugar 只填 ElementData.rich_runs。build_scene 据 rich_runs 覆盖 kind。
+
+4. **check_no_flex_props 用 ResolvedStyle::default() 比对**——taffy 不是 loomgui_pkg 直接依赖，不能在 fn 签名里写 taffy 类型。改为函数内取 `ResolvedStyle::default().taffy_style` 比对 gap。justify_content/align_items 是 Option，is_some() 判（默认 None）。
 
 ## Concerns
-1. **Unity compile + PlayMode NOT verified on this machine** -- home machine Task 9 gate. Established two-machine workflow.
-2. **`LoomStage.RegisterFont` signature change**: 4 params to 3 (dropped `Font unityFont`). External callers will get compile errors -- intentional.
-3. **`LoomStageDriver.LoadFont` -> `LoadFontBytes`**: renamed method. Subclass overrides will break -- intentional.
-4. **MirrorPool.Sync signature change**: 8 params to 5. Task 7 will extend this further for font atlas texture upload.
 
-## Files Changed
-- `loomgui_unity_package/Runtime/FrameBlob.cs` -- v10 mirror
-- `loomgui_unity_package/Runtime/MirrorPool.cs` -- text path deletions
-- `loomgui_unity_package/Runtime/LoomStage.cs` -- fontVersion/unityFont deletions
-- `loomgui_unity_package/Runtime/LoomStageDriver.cs` -- textureRebuilt/LoadFont deletions
-- `loomgui_unity_package/Tests/MirrorPoolTests.cs` -- v10 alignment + text test removal
-- `loomgui_unity_package/Runtime/TextRasterizer.cs` -- **deleted**
-- `loomgui_unity_package/Runtime/TextRasterizer.cs.meta` -- **deleted**
-- `loomgui_unity_package/Tests/TextRasterizerTests.cs` -- **deleted**
-- `loomgui_unity_package/Tests/TextRasterizerTests.cs.meta` -- **deleted**
+- **pre-existing feature-gate check failure**：`cargo build -p loomgui_core --no-default-features --all-targets` 在 baseline（commit ccd3748，本 task 改动前）即失败（asset/tests.rs 引用 parse-feature 门控的 extract_component_css）。非本 task 引入，未修复。CI 的 feature-gate 检查可能用不同口径（如只 build lib 不 build tests）。
+- **class-based display:block 是 follow-up**：MVP 只支持 inline `display:block`。AI 若写 `<div class="rich">...</div>` + `.rich{display:block}` 不会触发 rich 转换（b 等围栏外 tag 会被挡）。follow-up 需两遍 parse 或 parse 延迟子解析。
+- **base font-weight 静默忽略**：block div 上写 `font-weight:bold` 不会让 base 粗（desugar 的 RichBaseStyle.weight 硬编码 Normal）。caller 须用 `<b>` 标签驱动粗体。fence.md 应补一条说明。

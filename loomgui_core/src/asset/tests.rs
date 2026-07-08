@@ -177,6 +177,158 @@ fn all_node_kinds_roundtrip() {
     );
 }
 
+/// RichText 节点经 write_package → read_package 往返：runs 整段 bincode 进 RichRunsArena，
+/// NodeBlock 的 rich_off 指向 arena 偏移，read 按 offset 取 blob 反序列化还原 Vec<RichRun>。
+#[test]
+fn rich_text_roundtrips_through_pkg() {
+    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichVAlign, RichWeight};
+    let root = tn(NodeKind::Container);
+    let mut rich = tn(NodeKind::RichText {
+        runs: vec![
+            RichRun {
+                kind: RichKind::Text {
+                    text: "red ".into(),
+                },
+                color: [1.0, 0.0, 0.0, 1.0],
+                font_id: 0,
+                size_px: 16,
+                weight: RichWeight::Normal,
+                style: RichStyle::Italic,
+                deco: RichDeco {
+                    underline: true,
+                    strike: false,
+                },
+                link_id: None,
+            },
+            RichRun {
+                kind: RichKind::Text {
+                    text: "link".into(),
+                },
+                color: [0.0, 0.0, 1.0, 1.0],
+                font_id: 1,
+                size_px: 18,
+                weight: RichWeight::Bold,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: Some(42),
+            },
+            RichRun {
+                kind: RichKind::Image {
+                    src: "icons/emote.png".into(),
+                    w: 16.0,
+                    h: 16.0,
+                    valign: RichVAlign::Bottom,
+                },
+                color: [1.0; 4],
+                font_id: 0,
+                size_px: 16,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            },
+        ],
+    });
+    rich.parent_idx = Some(0);
+    // 旁配一个非 RichText 节点，验 rich_off 哨兵（NULL_RICH_OFF）不影响其他 kind。
+    let mut txt = tn(NodeKind::Text {
+        content: "plain".into(),
+    });
+    txt.parent_idx = Some(0);
+    let nodes = [root, rich, txt];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+        asset_manifest: &[],
+    };
+    let pkg = read_package(&write_package(&input)).unwrap();
+    let ns = &pkg.components["c"].nodes;
+    assert!(matches!(ns[0].kind, NodeKind::Container));
+    assert!(matches!(&ns[2].kind, NodeKind::Text { content } if content == "plain"));
+    let runs_back = match &ns[1].kind {
+        NodeKind::RichText { runs } => runs,
+        _ => panic!("expected RichText, got {:?}", ns[1].kind),
+    };
+    assert_eq!(runs_back.len(), 3, "三段 runs 往返");
+    // run 0：red italic underline
+    match &runs_back[0].kind {
+        RichKind::Text { text } => assert_eq!(text, "red "),
+        other => panic!("run 0 expected Text, got {other:?}"),
+    }
+    assert_eq!(runs_back[0].color, [1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(runs_back[0].size_px, 16);
+    assert_eq!(runs_back[0].style, RichStyle::Italic);
+    assert!(runs_back[0].deco.underline);
+    // run 1：blue bold link
+    assert_eq!(runs_back[1].color, [0.0, 0.0, 1.0, 1.0]);
+    assert_eq!(runs_back[1].font_id, 1);
+    assert_eq!(runs_back[1].weight, RichWeight::Bold);
+    assert_eq!(runs_back[1].link_id, Some(42));
+    // run 2：inline image
+    match &runs_back[2].kind {
+        RichKind::Image { src, w, h, valign } => {
+            assert_eq!(src, "icons/emote.png");
+            assert_eq!(*w, 16.0);
+            assert_eq!(*h, 16.0);
+            assert_eq!(*valign, RichVAlign::Bottom);
+        }
+        other => panic!("run 2 expected Image, got {other:?}"),
+    }
+}
+
+/// 多个 RichText 节点共享同一 RichRunsArena：各自的 rich_off 独立，无串扰。
+/// 验证 arena 拼接 + 偏移列读取的正确性（两节点 runs 长度不同时偏移不串）。
+#[test]
+fn multiple_rich_text_nodes_share_arena() {
+    use crate::text::rich::{RichKind, RichRun};
+    let root = tn(NodeKind::Container);
+    let mut r1 = tn(NodeKind::RichText {
+        runs: vec![RichRun::text("aaa", [1.0; 4], 0, 12)],
+    });
+    r1.parent_idx = Some(0);
+    let mut r2 = tn(NodeKind::RichText {
+        runs: vec![
+            RichRun::text("bbbb", [1.0; 4], 0, 14),
+            RichRun {
+                kind: RichKind::Text { text: "cc".into() },
+                color: [0.0, 1.0, 0.0, 1.0],
+                font_id: 2,
+                size_px: 14,
+                ..RichRun::text("", [0.0; 4], 0, 0)
+            },
+        ],
+    });
+    r2.parent_idx = Some(0);
+    let nodes = [root, r1, r2];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+        asset_manifest: &[],
+    };
+    let pkg = read_package(&write_package(&input)).unwrap();
+    let ns = &pkg.components["c"].nodes;
+    let r1_runs = match &ns[1].kind {
+        NodeKind::RichText { runs } => runs,
+        _ => panic!("ns[1] should be RichText"),
+    };
+    let r2_runs = match &ns[2].kind {
+        NodeKind::RichText { runs } => runs,
+        _ => panic!("ns[2] should be RichText"),
+    };
+    assert_eq!(r1_runs.len(), 1);
+    assert_eq!(r2_runs.len(), 2);
+    // 验偏移不串：r1[0] 文本应是 "aaa" 而非 r2 的内容。
+    match &r1_runs[0].kind {
+        RichKind::Text { text } => assert_eq!(text, "aaa"),
+        _ => panic!("expected Text"),
+    }
+    match &r2_runs[1].kind {
+        RichKind::Text { text } => assert_eq!(text, "cc"),
+        _ => panic!("expected Text"),
+    }
+    assert_eq!(r2_runs[1].font_id, 2);
+}
+
 #[test]
 fn classes_id_attr_draggable_tabindex_roundtrip() {
     let mut root = tn(NodeKind::Container);
@@ -542,12 +694,15 @@ fn read_rejects_oob_component_slice() {
 fn read_rejects_cross_component_parent() {
     let bytes = two_comp_pkg_bytes();
     // 找 comp_b 的 root 节点在 NodeBlock 中的 parent_idx 字段位置。
-    // NodeBlock 紧跟 ComponentTable（2 条目 × 14B = 28B）。
+    // 布局：ComponentTable(2 条目 × 14B = 28B) + RichRunsArena(arena_len_u32 + bytes) + NodeBlock。
     let ct_off = comp_table_offset(&bytes);
-    let nodeblock_off = ct_off + 2 * 14; // 2 组件条目
-                                         // 节点布局：parent_idx(4) + kind(1) + style_len(4) + style_blob + text_idx(2) + src_idx(2)
-                                         //   + class_count(2) + class_idx[] + id_idx(2) + flags(1) + tabindex(4) + dc_idx(2)
-                                         //   固定部分 = 24B + style_blob_len + 2*class_count。所有节点用默认 style → style_len 相同。
+    let arena_len_off = ct_off + 2 * 14;
+    let arena_len =
+        u32::from_le_bytes(bytes[arena_len_off..arena_len_off + 4].try_into().unwrap()) as usize;
+    let nodeblock_off = arena_len_off + 4 + arena_len;
+    // 节点布局：parent_idx(4) + kind(1) + style_len(4) + style_blob + text_idx(2) + src_idx(2)
+    //   + class_count(2) + class_idx[] + id_idx(2) + flags(1) + tabindex(4) + dc_idx(2) + rich_off(4)
+    //   固定部分 = 28B + style_blob_len + 2*class_count。所有节点用默认 style → style_len 相同。
     let style_len_0 = u32::from_le_bytes(
         bytes[nodeblock_off + 5..nodeblock_off + 9]
             .try_into()
@@ -559,7 +714,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node0_size = 24 + style_len_0 + 2 * class_count_0;
+    let node0_size = 28 + style_len_0 + 2 * class_count_0;
     let node1_off = nodeblock_off + node0_size;
     let style_len_1 =
         u32::from_le_bytes(bytes[node1_off + 5..node1_off + 9].try_into().unwrap()) as usize;
@@ -568,7 +723,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node1_size = 24 + style_len_1 + 2 * class_count_1;
+    let node1_size = 28 + style_len_1 + 2 * class_count_1;
     let node2_off = nodeblock_off + node0_size + node1_size;
     // 篡改节点 2（comp_b root）的 parent_idx 从 -1 → 0（< base=2，跨组件）
     let mut patched = bytes.clone();

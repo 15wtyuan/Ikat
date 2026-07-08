@@ -195,6 +195,8 @@ fn run_text_dump(font_path: &str) {
             st.white_space_nowrap,
             None,
             font,
+            s.fonts.font_id(st.font_family.as_deref()),
+            st.color,
         );
         let before = measure_text(
             &content,
@@ -205,6 +207,8 @@ fn run_text_dump(font_path: &str) {
             st.white_space_nowrap,
             Some(rect_w),
             font,
+            s.fonts.font_id(st.font_family.as_deref()),
+            st.color,
         )
         .lines
         .len();

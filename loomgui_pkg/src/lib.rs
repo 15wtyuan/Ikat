@@ -232,6 +232,77 @@ fn serialize_children(el: &scraper::ElementRef, out: &mut String) {
     }
 }
 
+/// v1.7 desugar：inline `display:block` div 的 raw_rich → parse_rich_markup → runs。
+///
+/// 在 `resolve_styles` 后、`build_scene` 前调。对每个 raw_rich 非空的元素：
+/// 1. 守护栏（spec §4.2）：block div 拒 flex 属性（justify-content/align-items/gap）——
+///    block div 是富文本叶而非 flex 容器，写这些属性无意义且 AI 不可预测。
+/// 2. base 样式从 ResolvedStyle 转 RichBaseStyle（color/font_size/weight/style/deco）。
+/// 3. parse_rich_markup(raw, base, 0) → runs，存进 ElementData.rich_runs。
+/// 4. build_scene 据 rich_runs 产 NodeKind::RichText。
+///
+/// `(tree, styles)` 同长同序不变量保持：desugar 只填 ElementData.rich_runs，
+/// 不增删节点、不改 styles 顺序（block div 的 taffy_style 仍 Flex，layout 照常）。
+pub fn desugar_block_divs(
+    mut tree: loomgui_core::parse::dom::ElementTree,
+    styles: Vec<loomgui_core::style::resolved::ResolvedStyle>,
+) -> Result<
+    (
+        loomgui_core::parse::dom::ElementTree,
+        Vec<loomgui_core::style::resolved::ResolvedStyle>,
+    ),
+    String,
+> {
+    use loomgui_core::style::resolved::DisplayMode;
+    use loomgui_core::text::rich::{
+        parse_rich_markup, RichBaseStyle, RichDeco, RichStyle, RichWeight,
+    };
+    for (idx, data) in tree.nodes.iter_mut().enumerate() {
+        let Some(raw) = data.raw_rich.as_ref() else {
+            continue;
+        };
+        let s = &styles[idx];
+        // raw_rich 只在 inline display:block div 上设；display_mode 必 Block。
+        // 守护栏：block div 拒 flex 属性（写了报错，不静默吞——AI 可预测性）。
+        if s.display_mode == DisplayMode::Block {
+            check_no_flex_props(s).map_err(|e| format!("元素 <{}>: {e}", data.tag))?;
+        }
+        // base 样式：从 ResolvedStyle 转 RichBaseStyle。weight/deco MVP 用默认
+        // （bold 走 <b>、underline 走 <u>，base 不带——避免 base 已粗时 <b> 重复加粗语义混乱）。
+        let base = RichBaseStyle {
+            color: s.color,
+            font_size: s.font_size,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+        };
+        let runs = parse_rich_markup(raw, base, 0)?;
+        data.rich_runs = Some(runs);
+    }
+    Ok((tree, styles))
+}
+
+/// block div 的 flex 属性护栏（spec §4.2）：justify-content/align-items/gap 非默认 → Err。
+/// block div 是富文本叶，写 flex 属性无意义（inline flow 不走 taffy flex 排列）。
+fn check_no_flex_props(s: &loomgui_core::style::resolved::ResolvedStyle) -> Result<(), String> {
+    let ts = &s.taffy_style;
+    let default = loomgui_core::style::resolved::ResolvedStyle::default().taffy_style;
+    if ts.justify_content.is_some() {
+        return Err(
+            "display:block 不支持 justify-content（block div 是富文本叶，非 flex 容器）".into(),
+        );
+    }
+    if ts.align_items.is_some() {
+        return Err(
+            "display:block 不支持 align-items（block div 是富文本叶，非 flex 容器）".into(),
+        );
+    }
+    if ts.gap != default.gap {
+        return Err("display:block 不支持 gap（block div 是富文本叶，非 flex 容器）".into());
+    }
+    Ok(())
+}
+
 /// 把系统目录下多个 HTML 打成 .pkg.bin（多组件格式，无 atlas）。
 ///
 /// - `source_dir`：包源目录（html + res 所在）。
@@ -276,6 +347,8 @@ pub fn pack(
             .map_err(|e| format!("parse_css {hf}: {e}"))?;
         let dynamic = loomgui_core::asset::extract_dynamic_rules(&sheet);
         let styles = loomgui_core::style::cascade::resolve_styles(&tree, &sheet);
+        let (tree, styles) = desugar_block_divs(tree, styles)
+            .map_err(|e| format!("desugar_block_divs {hf}: {e}"))?;
         let scene = loomgui_core::scene::build_scene(&tree, &styles);
         // 扫 data-controller + data-page → controller name → initial page 映射。
         let controller_pages = collect_controller_pages(&tree);

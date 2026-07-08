@@ -11,7 +11,7 @@ use loomgui_core::parse::css::parse_css;
 use loomgui_core::parse::dom::parse_html;
 use loomgui_core::parse::selector::parse_selector;
 use loomgui_core::style::mapping::apply_decl;
-use loomgui_core::style::resolved::ResolvedStyle;
+use loomgui_core::style::resolved::{DisplayMode, ResolvedStyle};
 use taffy::Display;
 
 // ── A. 元素围栏 ──────────────────────────────────────────────────
@@ -111,6 +111,38 @@ fn display_grid_falls_to_flex() {
         Display::Flex,
         "display:grid 应落到 Flex（taffy 无 grid）"
     );
+    assert_eq!(
+        s.display_mode,
+        DisplayMode::Flex,
+        "display:grid 走默认分支，display_mode=Flex"
+    );
+}
+
+#[test]
+fn display_block_sets_display_mode() {
+    // display:block 走 mapping 新分支：taffy 仍 Flex（守铁律），但设 display_mode=Block
+    // 供打包器 desugar 识别。
+    let mut s = ResolvedStyle::default();
+    let ok = apply_decl(&mut s, "display", "block");
+    assert!(ok, "display:block 是围栏内合法值，返回 true");
+    assert_eq!(
+        s.display_mode,
+        DisplayMode::Block,
+        "display:block 应设 display_mode=Block"
+    );
+    assert_eq!(
+        s.taffy_style.display,
+        Display::Flex,
+        "taffy 仍 Flex（不用 Display::Block）"
+    );
+}
+
+#[test]
+fn display_none_sets_both() {
+    let mut s = ResolvedStyle::default();
+    apply_decl(&mut s, "display", "none");
+    assert_eq!(s.display_mode, DisplayMode::None);
+    assert_eq!(s.taffy_style.display, Display::None);
 }
 
 // ── C. 围栏外属性静默忽略（apply_decl 返回 false，布局字段不变）─────
@@ -387,4 +419,42 @@ fn attr_selector_name_normalized_to_lowercase() {
     assert_eq!(a.name, "data-controller");
     assert_eq!(a.value.as_deref(), Some("Tab"));
     // 值保留原样（大小写敏感），仅 name 归一。
+}
+
+// ── E. v1.7 display:block div 围栏 ──
+// inline `display:block` div 是富文本叶入口：parse 期捕获 inner HTML 原文（raw_rich），
+// 不递归子元素（绕 FENCE_TAGS 让 b/i/span/a 进 raw）。flex div（默认）仍报行内混排错。
+
+#[test]
+fn block_div_captures_raw_rich_bypassing_fence_tags() {
+    // inline display:block div → b/i/a 等围栏外 tag 不报错（raw_rich 原文保留）。
+    // 普通	flex div 遇 b 会报错（围栏白名单），block div 绕过。
+    let html = r#"<div style="display:block">a <b>b</b> <i>c</i></div>"#;
+    let tree = parse_html(html).expect("block div 应接受 b/i（raw_rich 捕获，不递归）");
+    let div = &tree.nodes[tree.roots[0].0];
+    assert!(div.raw_rich.is_some(), "block div 捕获 raw_rich");
+    assert!(div.children.is_empty(), "block div 不递归子元素");
+}
+
+#[test]
+fn flex_div_inline_mix_still_rejected() {
+    // 默认 flex div（无 display:block）遇文本+元素混排 → 编译期报错（铁律不变）。
+    // block div 是唯一例外（走 raw_rich 路径）。
+    let html = r#"<div>a <span>b</span></div>"#;
+    assert!(
+        parse_html(html).is_err(),
+        "flex div 行内混排仍报错（只有 display:block div 走 rich 路径）"
+    );
+}
+
+#[test]
+fn class_based_display_block_still_blocked_at_parse() {
+    // MVP 限定：class 规则的 display:block 不触发 rich（parse 期未 cascade class）。
+    // class=rich 的 div 走普通 flex 路径，b 是围栏外 tag → 报错。
+    // follow-up（两遍 parse）才能让 class-based display:block 触发 rich 转换。
+    let html = r#"<div class="rich">a <b>b</b></div>"#;
+    assert!(
+        parse_html(html).is_err(),
+        "class-based display:block MVP 不触发 rich，b 被围栏挡"
+    );
 }
