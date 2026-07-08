@@ -15,6 +15,13 @@ pub struct ElementData {
     pub text: Option<String>,
     pub children: Vec<ElementId>,
     pub parent: Option<ElementId>,
+    /// v1.7：inline `display:block` div 的 inner HTML 原文（parse 期捕获，不经子元素解析）。
+    /// desugar 期 parse_rich_markup → runs 写入 `rich_runs`。None=普通元素。
+    /// 仅当 style attr 含 `display:block` 且 tag=div 时填——绕过 FENCE_TAGS 让 b/i/span/a 进 raw。
+    pub raw_rich: Option<String>,
+    /// desugar 期填：raw_rich 经 parse_rich_markup 的产物。build_scene 据此产 NodeKind::RichText。
+    /// None=普通元素（非 block div 或 desugar 未跑）。
+    pub rich_runs: Option<Vec<crate::text::rich::RichRun>>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +84,27 @@ fn build_element(
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
 
+    // v1.7：inline `display:block` div → 富文本叶。捕获 inner HTML 原文（含 b/i/span/a 等未解析
+    // 标签），不递归子元素（避 FENCE_TAGS 挡 b/i）。class-based display:block 不触发（MVP 限定：
+    // parse 期未 cascade，无法知 class→display:block；须内联写）。raw_rich 交打包器 desugar 期
+    // parse_rich_markup → runs。
+    if tag == "div" && is_inline_display_block(&attrs) {
+        let raw = el_node.inner_html();
+        let idx = tree.nodes.len();
+        tree.nodes.push(ElementData {
+            tag,
+            classes,
+            id: id_attr,
+            attrs,
+            text: None,
+            children: Vec::new(),
+            parent,
+            raw_rich: Some(raw),
+            rich_runs: None,
+        });
+        return Ok(ElementId(idx));
+    }
+
     // 收集直接文本子节点；若同时有文本子节点和元素子节点 → 行内混排报错
     let mut text_parts: Vec<String> = Vec::new();
     let mut element_children: Vec<scraper::ElementRef> = Vec::new();
@@ -103,7 +131,7 @@ fn build_element(
     // 容器（div 等）允许 element 子无 text；混排报错。
     if has_text && has_elements {
         return Err(format!(
-            "行内混排不支持（div 只装 flex item）：元素 <{}> 同时含文本与子元素，改用单个文本或 l-rich",
+            "行内混排不支持（div 默认 flex 只装 flex item）：元素 <{}> 同时含文本与子元素；富文本用 <div style=\"display:block\">",
             tag
         ));
     }
@@ -123,6 +151,8 @@ fn build_element(
         text,
         children: Vec::new(),
         parent,
+        raw_rich: None,
+        rich_runs: None,
     });
     let my_id = ElementId(idx);
 
@@ -133,6 +163,18 @@ fn build_element(
     }
     tree.nodes[idx].children = children_ids;
     Ok(my_id)
+}
+
+/// 检测元素的 inline style attr 是否含 `display:block`（MVP 限定：仅内联声明触发 rich 转换）。
+/// 容忍空白变体（`display: block`/`display :block`/`display:block`），不做完整 CSS 解析——
+/// 打包器 desugar 期 resolve_styles 才 cascade class 规则，parse 期只见 inline attr。
+fn is_inline_display_block(attrs: &HashMap<String, String>) -> bool {
+    let Some(s) = attrs.get("style") else {
+        return false;
+    };
+    // 去所有空白后查子串 "display:block"。容忍 `display : block` / `display:block ;` 等。
+    let compact: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    compact.contains("display:block")
 }
 
 #[cfg(test)]
@@ -211,7 +253,52 @@ mod tests {
         let nested = parse_html(r#"<div><b>bold</b></div>"#);
         assert!(
             nested.is_err(),
-            "<b> 应被围栏拒绝（用 l-rich 做内联格式化）"
+            "<b> 应被围栏拒绝（富文本用 <div style=\"display:block\">）"
+        );
+    }
+
+    #[test]
+    fn block_div_captures_raw_rich_without_recursing() {
+        // inline display:block div → 捕获 inner HTML 原文到 raw_rich，不递归子元素。
+        // b/i/a 等围栏外 tag 不进 FENCE_TAGS 检查（绕过），原文保留供 desugar 期 parse_rich_markup。
+        let html = r#"<div style="display:block">a <b>b</b> <a href="x">c</a></div>"#;
+        let tree = parse_html(html).unwrap();
+        assert_eq!(tree.roots.len(), 1);
+        let div = &tree.nodes[tree.roots[0].0];
+        assert_eq!(div.tag, "div");
+        assert!(div.children.is_empty(), "block div 不递归子元素");
+        let raw = div.raw_rich.as_ref().expect("raw_rich 已捕获");
+        assert!(raw.contains("<b>b</b>"), "raw_rich 含 b 标签原文: {raw}");
+        assert!(
+            raw.contains(r#"<a href="x">c</a>"#),
+            "raw_rich 含 a 标签原文: {raw}"
+        );
+        assert!(
+            div.rich_runs.is_none(),
+            "rich_runs 由 desugar 期填，parse 期 None"
+        );
+    }
+
+    #[test]
+    fn block_div_tolerates_whitespace_in_display_decl() {
+        // `display: block`（冒号后空格）/ `display :block` 等变体都触发 rich 转换。
+        for style in ["display:block", "display: block", "display :block"] {
+            let html = format!(r#"<div style="{style}">x</div>"#);
+            let tree = parse_html(&html).unwrap_or_else(|e| panic!("parse {style}: {e}"));
+            let div = &tree.nodes[tree.roots[0].0];
+            assert!(div.raw_rich.is_some(), "style=\"{style}\" 应触发 rich 转换");
+        }
+    }
+
+    #[test]
+    fn class_based_display_block_does_not_trigger_rich_at_parse() {
+        // MVP 限定：class 规则里的 display:block 不触发（parse 期未 cascade class）。
+        // 只内联 style attr 触发。class-based 是 follow-up（需两遍 parse）。
+        let html = r#"<div class="rich">a <b>b</b></div>"#;
+        // class=rich 的 div 走普通 flex 路径 → b 是围栏外 tag → 报错。
+        assert!(
+            parse_html(html).is_err(),
+            "class-based display:block 不触发 rich，b 被围栏挡"
         );
     }
 

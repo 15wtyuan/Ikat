@@ -381,6 +381,8 @@ mod tests {
             text: None,
             children: Vec::new(),
             parent: None,
+            raw_rich: None,
+            rich_runs: None,
         }
     }
 

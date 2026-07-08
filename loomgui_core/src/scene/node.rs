@@ -533,6 +533,12 @@ fn gather_rec(
         }
         _ => {}
     }
+    // v1.7：block div 的 rich_runs（desugar 期填）→ 覆盖 kind 为 RichText 叶。
+    // block div 原 kind_from_tag("div")=Container，这里被 rich_runs 覆盖成 RichText。
+    // raw_rich 的 div 无子元素（parse 期 early-return 不递归），故 Container 的 children 逻辑不触发。
+    if let Some(runs) = el.rich_runs.clone() {
+        kind = NodeKind::RichText { runs };
+    }
     // draggable="true" → Node.draggable（HTML 原生属性）。
     // 非 "true" 一律 false（draggable="false"/缺省/任意值 → false，照 HTML truthy 语义简化）。
     let draggable = el

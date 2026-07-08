@@ -301,3 +301,102 @@ fn pack_data_controller_without_data_page_defaults_to_zero() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+// ── v1.7 display:block desugar → RichText 叶 ──
+
+/// 构造小 ElementTree + styles 调 desugar_block_divs，验 block div 的 raw_rich → runs。
+/// 不走完整 pack（免文件目录），直接测 desugar 单元。
+fn desugar_html(
+    html: &str,
+) -> Result<
+    (
+        loomgui_core::parse::dom::ElementTree,
+        Vec<loomgui_core::style::resolved::ResolvedStyle>,
+    ),
+    String,
+> {
+    let tree = loomgui_core::parse::dom::parse_html(html)?;
+    let sheet = loomgui_core::parse::css::parse_css("")?;
+    let styles = loomgui_core::style::cascade::resolve_styles(&tree, &sheet);
+    loomgui_pkg::desugar_block_divs(tree, styles)
+}
+
+#[test]
+fn desugar_block_div_produces_rich_runs() {
+    // block div 的 raw_rich（含 b/a）经 desugar → rich_runs 非空，runs 含 bold + link。
+    let html = r#"<div style="display:block">a <b>b</b> <a href="x">c</a></div>"#;
+    let (tree, _styles) = desugar_html(html).expect("desugar ok");
+    let div = &tree.nodes[tree.roots[0].0];
+    let runs = div.rich_runs.as_ref().expect("desugar 填了 rich_runs");
+    assert!(!runs.is_empty(), "rich_runs 非空");
+    // 至少一个 bold run（<b>b</b>）
+    assert!(
+        runs.iter()
+            .any(|r| { matches!(r.weight, loomgui_core::text::rich::RichWeight::Bold) }),
+        "runs 含 bold"
+    );
+    // 至少一个 link run（<a>）
+    assert!(runs.iter().any(|r| r.link_id.is_some()), "runs 含 link");
+}
+
+#[test]
+fn desugar_block_div_then_build_scene_emits_richtext_kind() {
+    // 端到端：desugar → build_scene → 验根节点 kind = RichText。
+    use loomgui_core::scene::NodeKind;
+    let html = r#"<div style="display:block">hello <b>world</b></div>"#;
+    let (tree, styles) = desugar_html(html).expect("desugar ok");
+    let scene = loomgui_core::scene::build_scene(&tree, &styles);
+    let root_id = scene.roots[0];
+    let root = scene.get(root_id).unwrap();
+    assert!(
+        matches!(root.kind, NodeKind::RichText { .. }),
+        "block div 经 desugar + build_scene 产 RichText 叶，非 Container"
+    );
+}
+
+#[test]
+fn desugar_block_div_rejects_justify_content() {
+    // block div + justify-content → desugar 报错（spec §4.2 护栏）。
+    let html = r#"<div style="display:block; justify-content:center">a <b>b</b></div>"#;
+    let result = desugar_html(html);
+    assert!(result.is_err(), "block div 拒 justify-content");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("justify-content"),
+        "错误信息提及 justify-content: {err}"
+    );
+}
+
+#[test]
+fn desugar_block_div_rejects_align_items() {
+    let html = r#"<div style="display:block; align-items:center">a <b>b</b></div>"#;
+    let result = desugar_html(html);
+    assert!(result.is_err(), "block div 拒 align-items");
+}
+
+#[test]
+fn desugar_block_div_rejects_gap() {
+    let html = r#"<div style="display:block; gap:10px">a <b>b</b></div>"#;
+    let result = desugar_html(html);
+    assert!(result.is_err(), "block div 拒 gap");
+}
+
+#[test]
+fn desugar_block_div_accepts_non_flex_props() {
+    // block div + 非 flex 属性（color/font-size/width）→ 不报错（这些是富文本叶的合法样式）。
+    let html = r#"<div style="display:block; color:#ff0000; font-size:20px; width:200px">a <b>b</b></div>"#;
+    let (tree, _styles) = desugar_html(html).expect("非 flex 属性不应被拒");
+    let div = &tree.nodes[tree.roots[0].0];
+    assert!(div.rich_runs.is_some(), "rich_runs 仍填");
+}
+
+#[test]
+fn desugar_flex_div_unaffected() {
+    // 普通 flex div（无 display:block）→ raw_rich None，desugar 不动它。
+    let html = r#"<div><span>hi</span></div>"#;
+    let (tree, _styles) = desugar_html(html).expect("desugar ok");
+    for el in &tree.nodes {
+        assert!(el.raw_rich.is_none(), "flex div 无 raw_rich");
+        assert!(el.rich_runs.is_none(), "flex div 无 rich_runs");
+    }
+}
