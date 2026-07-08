@@ -84,6 +84,36 @@ pub extern "C" fn loomgui_stage_register_font(
     }
 }
 
+/// 设全局字体回退链。text = UTF-8 字符串，family 名以 `\n` 分隔（如 "wqy-microhei\nLXGWWenKai"）。
+/// 空/全空白 = 清空回退（退回单字体）。未 register 的 family 静默跳过。返回 0=成功，-1=错误。
+/// 主字体缺字时按序 probe 回退链，首个含该字的补上（RmlUi fallback 模型）。
+/// source-agnostic：后端把系统字体 register 进来后，其 family 名同样填这里即可。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_fallback_families(
+    h: *mut StageHandle,
+    text: *const u8,
+    text_len: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let families: Vec<String> = if text.is_null() || text_len == 0 {
+        Vec::new()
+    } else {
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, text_len) }) {
+            Ok(s) => s
+                .split('\n')
+                .map(|f| f.trim().to_string())
+                .filter(|f| !f.is_empty())
+                .collect(),
+            Err(_) => return -1,
+        }
+    };
+    sh.stage.set_fallback_families(&families);
+    0
+}
+
 /// null-safe 释放 Stage 句柄。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_free(h: *mut StageHandle) {

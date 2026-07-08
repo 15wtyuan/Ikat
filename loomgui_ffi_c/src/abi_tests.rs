@@ -1131,3 +1131,35 @@ fn stage_new_without_font_then_register_font_measures() {
     assert!(!stage.is_null(), "stage_new must succeed without font path");
     loomgui_stage_free(stage);
 }
+
+/// set_fallback_families FFI：注册 DejaVu(默认) + wqy(回退)，设回退链，验证返回 0。
+/// 端到端回退渲染（中文显出来）留 PlayMode；此测试只锁 FFI 入口不 panic + 返 0 +
+/// 未注册 family 静默跳过（FontTable::set_fallback_families 契约）。
+#[test]
+fn set_fallback_families_ffi_returns_zero() {
+    let stage = stage_new_with_dejavu(200.0, 200.0);
+    // 注册 wqy 作回退字体（非默认）。
+    let wqy_bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../loomgui_core/tests/fixtures/wqy-microhei.ttc"
+    ))
+    .expect("wqy-microhei.ttc fixture must exist");
+    let wqy = b"wqy-microhei";
+    let rc = loomgui_stage_register_font(
+        stage,
+        wqy.as_ptr(),
+        wqy.len(),
+        wqy_bytes.as_ptr(),
+        wqy_bytes.len(),
+        0,
+    );
+    assert_eq!(rc, 0, "register_font wqy must return 0");
+    // 设回退链：wqy-microhei + 一个未注册的 family（应静默跳过，不报错）。
+    let text = "wqy-microhei\nNotRegistered";
+    let rc = loomgui_stage_set_fallback_families(stage, text.as_ptr(), text.len());
+    assert_eq!(rc, 0, "set_fallback_families must return 0");
+    // 清空回退（空文本）也应返 0。
+    let rc = loomgui_stage_set_fallback_families(stage, std::ptr::null(), 0);
+    assert_eq!(rc, 0, "set_fallback_families(null,0) 清空回退返 0");
+    loomgui_stage_free(stage);
+}

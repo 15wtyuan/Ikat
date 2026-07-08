@@ -1006,8 +1006,7 @@ fn render_long_text_still_wraps_with_layout_reuse() {
         TextAlign::Left,
         false,
         None,
-        fonts.select(None),
-        0,
+        &fonts.stack_for(None),
         [1.0, 1.0, 1.0, 1.0],
     )
     .text_width;
@@ -2679,7 +2678,6 @@ fn rich_fragment_cross_line_link_splits_rects() {
     let mut scene = Scene::from_nodes(vec![n], vec![]);
     let nid = scene.roots[0]; // from_nodes 覆盖 id，从 scene 取实值
                               // 预填 text_layout（窄宽度 layout）
-    let font = ft.select(None);
     let layout = crate::text::layout::measure_rich_text(
         &match &scene.get(nid).unwrap().kind {
             NodeKind::RichText { runs } => runs.clone(),
@@ -2687,8 +2685,7 @@ fn rich_fragment_cross_line_link_splits_rects() {
         },
         Some(50.0),
         0.0,
-        font,
-        0,
+        &ft.stack_for(None),
     );
     scene.text_layouts[nid.index()] = Some(layout);
     scene.rich_fragments = vec![None; scene.nodes.capacity() + 1];

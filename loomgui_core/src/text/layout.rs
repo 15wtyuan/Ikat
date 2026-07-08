@@ -15,6 +15,11 @@ use ttf_parser::Face;
 #[derive(Debug, Clone, Serialize)]
 pub struct Glyph {
     pub glyph_id: u16,
+    /// 该字形实际来源字体的稳定 id（atlas key 用）。
+    /// 主字体有此字→主字体 id；否则走回退链，首个有此字的字体 id；全无→主字体 id（画 replacement）。
+    /// build 期 `build_text_mesh` 按此 id 取 face 光栅 + 拼 GlyphKey——run 级 `GlyphRun.font_id`
+    /// 仍是主字体 id（run 样式归属），per-glyph font_id 才是字形真实来源。
+    pub font_id: u32,
     /// Unicode 码点：Unity `Font.GetCharacterInfo(char)` 按码点查（非 ttf glyph_id）。
     /// `measure_text` 遍历 `content.chars()` 时 `c as u32` 填入。
     pub codepoint: u32,
@@ -140,6 +145,10 @@ pub struct FontTable {
     pub(crate) default_family: Option<String>,
     pub(crate) family_to_id: HashMap<String, u32>,
     pub(crate) next_id: u32,
+    /// 全局回退链（有序 family 名）。shaping 时主字体缺字按序 probe，首个有此字的补上。
+    /// source-agnostic：这里只存 family 名，不问字体来源（bundled / 后端喂的系统字体都一样）。
+    /// 由 `set_fallback_families` 单独设，与 `register` 解耦——避免改 register 签名连锁改调用点。
+    pub(crate) fallback_families: Vec<String>,
 }
 
 impl Default for FontTable {
@@ -155,6 +164,7 @@ impl FontTable {
             default_family: None,
             family_to_id: HashMap::new(),
             next_id: 0,
+            fallback_families: Vec::new(),
         }
     }
 
@@ -175,6 +185,17 @@ impl FontTable {
         self.next_id += 1;
         self.family_to_id.insert(family.to_string(), id);
         Ok(())
+    }
+
+    /// 设全局回退链。families 须已 register（未注册的跳过并记忽略——防拼写错引 panic）。
+    /// 重复 family 去重。空切片 = 清空回退（退回单字体行为）。
+    pub fn set_fallback_families(&mut self, families: &[String]) {
+        self.fallback_families.clear();
+        for f in families {
+            if self.fonts.contains_key(f) && !self.fallback_families.contains(f) {
+                self.fallback_families.push(f.clone());
+            }
+        }
     }
 
     /// 按节点 font_family 选字体。None / 无匹配 → default。
@@ -208,6 +229,72 @@ impl FontTable {
             .family_to_id
             .get(default)
             .expect("default family 已注册必有 id")
+    }
+
+    /// 按 font_id 取字体（build 期 per-glyph 按 `Glyph.font_id` 取 face 光栅用）。
+    /// 几个字体线性扫可接受；找不到（不应发生——id 来自 register）回落 default。
+    pub fn font_by_id(&self, id: u32) -> &Font {
+        for (fam, fid) in &self.family_to_id {
+            if *fid == id {
+                return self.fonts[fam].as_ref();
+            }
+        }
+        self.select(None)
+    }
+
+    /// 为某主 family 构造 shaping 用的 FontStack（主字体 + 回退链 slice）。
+    /// 调用方持 `fonts` 借用期间 stack 有效。
+    pub fn stack_for(&self, family: Option<&str>) -> FontStack<'_> {
+        FontStack {
+            primary: self.select(family),
+            primary_id: self.font_id(family),
+            fallbacks: self
+                .fallback_families
+                .iter()
+                .filter_map(|fam| {
+                    self.fonts
+                        .get(fam)
+                        .map(|f| (f.as_ref(), *self.family_to_id.get(fam).unwrap()))
+                })
+                .collect(),
+        }
+    }
+}
+
+/// shaping 用的字体栈：主字体 + 有序回退链。per-glyph 按 `pick(ch)` 选字体。
+///
+/// 照 RmlUi `FontFaceHandleDefault::GetOrAppendGlyph` 模型：主字体没的字遍历回退链，
+/// 首个有此字的用之；全无返主字体（caller 画 .notdef/replacement）。行度量走主字体，
+/// per-glyph advance/kerning/bbox 走提供方字体（RmlUi 同款）。
+///
+/// `pick` 返回的 `&Font` 借用自构造时的 `FontTable`，生命周期与 stack 绑定。
+pub struct FontStack<'a> {
+    pub primary: &'a Font,
+    pub primary_id: u32,
+    pub fallbacks: Vec<(&'a Font, u32)>,
+}
+
+impl<'a> FontStack<'a> {
+    /// 单字体栈（无回退）。测试 + 未配回退时用。
+    pub fn single(font: &'a Font, id: u32) -> Self {
+        FontStack {
+            primary: font,
+            primary_id: id,
+            fallbacks: Vec::new(),
+        }
+    }
+
+    /// 选含 ch 的字体：主字体优先，否则遍历回退链首个命中；全无返主字体（画 replacement）。
+    pub fn pick(&self, ch: char) -> (&'a Font, u32) {
+        if self.primary.face.glyph_index(ch).is_some() {
+            return (self.primary, self.primary_id);
+        }
+        for (f, id) in &self.fallbacks {
+            if f.face.glyph_index(ch).is_some() {
+                return (*f, *id);
+            }
+        }
+        (self.primary, self.primary_id)
     }
 }
 
@@ -274,14 +361,14 @@ pub fn measure_text(
     align: crate::style::resolved::TextAlign,
     nowrap: bool,
     max_width: Option<f32>,
-    font: &Font,
-    font_id: u32,
+    stack: &FontStack<'_>,
     color: [f32; 4],
 ) -> TextLayout {
+    // 行度量走主字体（RmlUi 模型：line height/ascent/descent 由主 face 定，per-glyph 才看回退）。
+    let font = stack.primary;
     let ascent = font.ascent(font_size);
     let descent = font.descent(font_size); // 负
     let line_gap = font.line_gap(font_size);
-    let units = font.face.units_per_em() as f32;
 
     // Line.height：line-height 生效则烤进 height（后端不重套，§9.1）；
     // 否则用字体自然行高（ascent - descent + line_gap）。
@@ -297,31 +384,25 @@ pub fn measure_text(
         ascent
     };
 
-    // 单位换算辅助：设计单位 → px。
-    let to_px = |design: f32| -> f32 { design / units * font_size };
-
-    // kerning / advance 复用 module-level helper（measure_rich_text 也用，避免复制粘贴）。
-    let kerning = |left: ttf_parser::GlyphId, right: ttf_parser::GlyphId| -> Option<i16> {
-        kerning_value(&font.face, left, right)
-    };
-    let advance = |gid_opt: Option<ttf_parser::GlyphId>| -> f32 {
-        glyph_advance(&font.face, gid_opt, font_size)
-    };
-
-    // 度量一段文本的宽度（含字距）。
+    // 度量一段文本的宽度（含字距）。per-char 按 stack 选字体——回退字形的 advance
+    // 用其来源字体算，否则行宽估错导致断行位置偏。
+    // kerning 仅相邻同字体才查（跨字体无 kern 表可言）。
     let measure_width = |s: &str| -> f32 {
         let mut pen = 0.0f32;
-        let mut prev: Option<ttf_parser::GlyphId> = None;
+        let mut prev: Option<(ttf_parser::GlyphId, &Font)> = None;
         for ch in s.chars() {
-            let gid_opt = font.face.glyph_index(ch);
+            let (f, _) = stack.pick(ch);
+            let gid_opt = f.face.glyph_index(ch);
             let gid = gid_opt.unwrap_or_default();
-            if let Some(p) = prev {
-                if let Some(k) = kerning(p, gid) {
-                    pen += to_px(k as f32);
+            if let Some((p, pf)) = prev {
+                if std::ptr::eq(pf, f) {
+                    if let Some(k) = kerning_value(&f.face, p, gid) {
+                        pen += k as f32 / f.face.units_per_em() as f32 * font_size;
+                    }
                 }
             }
-            pen += advance(gid_opt) + letter_spacing;
-            prev = Some(gid);
+            pen += glyph_advance(&f.face, gid_opt, font_size) + letter_spacing;
+            prev = Some((gid, f));
         }
         pen
     };
@@ -414,32 +495,45 @@ pub fn measure_text(
         };
         let mut pen_x = x_offset;
         let mut glyphs = Vec::with_capacity(text.chars().count());
-        let mut prev: Option<ttf_parser::GlyphId> = None;
+        let mut prev: Option<(ttf_parser::GlyphId, &Font)> = None;
         for ch in text.chars() {
-            let gid_opt = font.face.glyph_index(ch);
+            let (f, fid) = stack.pick(ch);
+            let gid_opt = f.face.glyph_index(ch);
             let gid = gid_opt.unwrap_or_default();
-            if let Some(p) = prev {
-                if let Some(k) = kerning(p, gid) {
-                    pen_x += to_px(k as f32);
+            // kerning 仅相邻同字体才查（跨字体无 kern 表）。
+            if let Some((p, pf)) = prev {
+                if std::ptr::eq(pf, f) {
+                    if let Some(k) = kerning_value(&f.face, p, gid) {
+                        pen_x += k as f32 / f.face.units_per_em() as f32 * font_size;
+                    }
                 }
             }
             // bearing 来自 glyph bbox：x_min → bearing_x，y_max → bearing_y（顶到 baseline）。
-            let (bx, by) = font
+            // 用提供方字体的 units 换算（回退字形来自别的 face）。
+            let funits = f.face.units_per_em() as f32;
+            let (bx, by) = f
                 .face
                 .glyph_bounding_box(gid)
-                .map(|b| (to_px(b.x_min as f32), to_px(b.y_max as f32)))
+                .map(|b| {
+                    (
+                        b.x_min as f32 / funits * font_size,
+                        b.y_max as f32 / funits * font_size,
+                    )
+                })
                 .unwrap_or((0.0, 0.0));
+            let adv = glyph_advance(&f.face, gid_opt, font_size);
             glyphs.push(Glyph {
                 glyph_id: gid.0,
+                font_id: fid,
                 codepoint: ch as u32,
                 x: pen_x,
                 y: line_y,
                 bearing_x: bx,
                 bearing_y: by,
-                advance: advance(gid_opt),
+                advance: adv,
             });
-            pen_x += advance(gid_opt) + letter_spacing;
-            prev = Some(gid);
+            pen_x += adv + letter_spacing;
+            prev = Some((gid, f));
         }
         out_lines.push(Line {
             y: line_y,
@@ -448,7 +542,7 @@ pub fn measure_text(
             width: *lw,
             runs: vec![GlyphRun {
                 font_size,
-                font_id,
+                font_id: stack.primary_id,
                 color,
                 weight: crate::text::rich::RichWeight::Normal,
                 style: crate::text::rich::RichStyle::Normal,
@@ -483,10 +577,20 @@ pub fn measure_rich_text(
     runs: &[crate::text::rich::RichRun],
     max_width: Option<f32>,
     base_line_height: f32,
-    font: &Font,
-    default_font_id: u32,
+    stack: &FontStack<'_>,
 ) -> TextLayout {
-    let units = font.face.units_per_em().max(1) as f32;
+    let font = stack.primary;
+
+    // per-char 按 stack 选字体的 advance 和（token 宽度用）。回退字形 advance 用来源字体算。
+    let stack_str_advance = |s: &str, size_px: f32| -> f32 {
+        let mut pen = 0.0f32;
+        for ch in s.chars() {
+            let (f, _) = stack.pick(ch);
+            let gid = f.face.glyph_index(ch);
+            pen += glyph_advance(&f.face, gid, size_px);
+        }
+        pen
+    };
 
     let mut out_images: Vec<RichImagePlacement> = Vec::new();
 
@@ -511,7 +615,6 @@ pub fn measure_rich_text(
                     });
                     continue;
                 }
-                let scale = r.size_px as f32 / units;
                 // 空白分词：按空格切词，词间不补空格 token（简化：HTML 空白折叠后词间单空格
                 // 已并入词尾/词首，measure 宽度差异可忽略；MVP 不追求像素级空格精度）。
                 for word in text.split(' ') {
@@ -529,7 +632,7 @@ pub fn measure_rich_text(
                                 None => word.len(),
                             };
                             let slice = &word[byte_off..next_byte_off];
-                            let w = char_advance(&font.face, slice.chars().next().unwrap(), scale);
+                            let w = stack_str_advance(slice, r.size_px as f32);
                             tokens.push(Tok {
                                 text: slice,
                                 run_idx: ri,
@@ -539,7 +642,7 @@ pub fn measure_rich_text(
                             cur = next;
                         }
                     } else {
-                        let w = str_advance(&font.face, word, scale);
+                        let w = stack_str_advance(word, r.size_px as f32);
                         tokens.push(Tok {
                             text: word,
                             run_idx: ri,
@@ -618,47 +721,54 @@ pub fn measure_rich_text(
         // 按 token 顺序生成 GlyphRun（同 run 相邻 token 合并 glyphs 进同一 run）。
         let mut runs_out: Vec<GlyphRun> = Vec::new();
         let mut pen_x = 0.0f32;
-        let mut prev_gid: Option<ttf_parser::GlyphId> = None;
+        let mut prev: Option<(ttf_parser::GlyphId, &Font)> = None;
         for &ti in line_toks {
             let r = &runs[tokens[ti].run_idx];
             match &r.kind {
                 crate::text::rich::RichKind::Text { .. } => {
                     let mut glyphs: Vec<Glyph> = Vec::new();
                     for ch in tokens[ti].text.chars() {
-                        let gid_opt = font.face.glyph_index(ch);
+                        let (f, fid) = stack.pick(ch);
+                        let gid_opt = f.face.glyph_index(ch);
                         let gid = gid_opt.unwrap_or_default();
-                        // kern（跨 token 也算——prev_gid 是行内前一个字形）。
-                        if let Some(p) = prev_gid {
-                            if let Some(k) = kerning_value(&font.face, p, gid) {
-                                pen_x += k as f32 / units * r.size_px as f32;
+                        // kern（跨 token 也算——prev 是行内前一个字形）；仅相邻同字体才查。
+                        if let Some((p, pf)) = prev {
+                            if std::ptr::eq(pf, f) {
+                                if let Some(k) = kerning_value(&f.face, p, gid) {
+                                    pen_x +=
+                                        k as f32 / f.face.units_per_em() as f32 * r.size_px as f32;
+                                }
                             }
                         }
-                        let (bx, by) = font
+                        let funits = f.face.units_per_em() as f32;
+                        let (bx, by) = f
                             .face
                             .glyph_bounding_box(gid)
                             .map(|b| {
                                 (
-                                    b.x_min as f32 / units * r.size_px as f32,
-                                    b.y_max as f32 / units * r.size_px as f32,
+                                    b.x_min as f32 / funits * r.size_px as f32,
+                                    b.y_max as f32 / funits * r.size_px as f32,
                                 )
                             })
                             .unwrap_or((0.0, 0.0));
+                        let adv = glyph_advance(&f.face, gid_opt, r.size_px as f32);
                         glyphs.push(Glyph {
                             glyph_id: gid.0,
+                            font_id: fid,
                             codepoint: ch as u32,
                             x: pen_x,
                             y: 0.0, // 行内相对（build 加 baseline）。
                             bearing_x: bx,
                             bearing_y: by,
-                            advance: glyph_advance(&font.face, gid_opt, r.size_px as f32),
+                            advance: adv,
                         });
-                        pen_x += glyph_advance(&font.face, gid_opt, r.size_px as f32);
-                        prev_gid = Some(gid);
+                        pen_x += adv;
+                        prev = Some((gid, f));
                     }
                     // 同 run 相邻 token 合并（per-run 样式一致）；否则新 run。
                     let merged = runs_out.last_mut().filter(|gr: &&mut GlyphRun| {
                         gr.font_size == r.size_px as f32
-                            && gr.font_id == default_font_id
+                            && gr.font_id == stack.primary_id
                             && gr.color == r.color
                             && gr.weight == r.weight
                             && gr.style == r.style
@@ -670,7 +780,7 @@ pub fn measure_rich_text(
                     } else {
                         runs_out.push(GlyphRun {
                             font_size: r.size_px as f32,
-                            font_id: default_font_id,
+                            font_id: stack.primary_id,
                             color: r.color,
                             weight: r.weight,
                             style: r.style,
@@ -729,33 +839,6 @@ fn is_cjk(ch: char) -> bool {
         || (0x3000..=0x303F).contains(&c) // CJK 标点
         || (0xFF00..=0xFFEF).contains(&c) // 全角
         || (0x3040..=0x30FF).contains(&c) // 假名
-}
-
-/// 单字 advance（px，已按 scale 缩放）。复用 glyph_advance 的缺字兜底逻辑。
-fn char_advance(face: &Face<'_>, ch: char, scale: f32) -> f32 {
-    let gid_opt = face.glyph_index(ch);
-    let font_size = scale * face.units_per_em() as f32;
-    glyph_advance(face, gid_opt, font_size)
-}
-
-/// 字符串 advance（px，已按 scale 缩放，含字距）。
-fn str_advance(face: &Face<'_>, s: &str, scale: f32) -> f32 {
-    let units = face.units_per_em() as f32;
-    let font_size = scale * units;
-    let mut pen = 0.0f32;
-    let mut prev: Option<ttf_parser::GlyphId> = None;
-    for ch in s.chars() {
-        let gid_opt = face.glyph_index(ch);
-        let gid = gid_opt.unwrap_or_default();
-        if let Some(p) = prev {
-            if let Some(k) = kerning_value(face, p, gid) {
-                pen += k as f32 / units * font_size;
-            }
-        }
-        pen += glyph_advance(face, gid_opt, font_size);
-        prev = Some(gid);
-    }
-    pen
 }
 
 /// strut 行高（搬 RmlUi GetStrut：line_height > 0 用倍数，否则自然行高 ascent-descent+gap）。
@@ -827,8 +910,7 @@ mod tests {
             TextAlign::Left,
             false,
             None,
-            &font,
-            0,
+            &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
         );
         assert_eq!(layout.lines.len(), 1);
@@ -858,8 +940,7 @@ mod tests {
             TextAlign::Left,
             false,
             None,
-            &font,
-            0,
+            &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
         );
         let g = &layout.lines[0].runs[0].glyphs;
@@ -903,8 +984,7 @@ mod tests {
             TextAlign::Left,
             false,
             None,
-            &font,
-            0,
+            &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
         );
         let g = &layout.lines[0].runs[0].glyphs;
@@ -941,8 +1021,7 @@ mod tests {
             TextAlign::Left,
             false,
             Some(50.0),
-            &font,
-            0,
+            &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
         );
         assert!(
@@ -969,8 +1048,7 @@ mod tests {
             TextAlign::Left,
             true,
             Some(10.0),
-            &font,
-            0,
+            &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
         );
         assert_eq!(layout.lines.len(), 1);
@@ -994,8 +1072,7 @@ mod tests {
             TextAlign::Left,
             false,
             Some(40.0),
-            &font,
-            0,
+            &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
         );
         assert!(
@@ -1023,8 +1100,7 @@ mod tests {
             TextAlign::Left,
             false,
             Some(60.0),
-            &font,
-            0,
+            &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
         );
         assert!(layout.lines.len() >= 2, "混排窄约束应换行");
@@ -1053,8 +1129,7 @@ mod tests {
             TextAlign::Left,
             false,
             None,
-            &font,
-            0,
+            &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
         );
         assert_eq!(layout.lines.len(), 2, "\\n 应强制换行成 2 行");
@@ -1077,8 +1152,7 @@ mod tests {
             TextAlign::Left,
             true,
             Some(10.0),
-            &font,
-            0,
+            &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
         );
         assert_eq!(layout.lines.len(), 1, "nowrap 强制单行（含 CJK）");
@@ -1102,8 +1176,7 @@ mod tests {
             TextAlign::Left,
             false,
             Some(50.0),
-            &font,
-            0,
+            &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
         );
         assert!(layout.lines.len() >= 2, "超长无空格串应逐字断 ≥2 行");
@@ -1126,8 +1199,7 @@ mod tests {
             TextAlign::Left,
             false,
             None,
-            &font,
-            0,
+            &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
         );
         let tall = measure_text(
@@ -1138,8 +1210,7 @@ mod tests {
             TextAlign::Left,
             false,
             None,
-            &font,
-            0,
+            &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
         );
         assert!(tall.lines[0].height > normal.lines[0].height);
@@ -1246,7 +1317,7 @@ mod tests {
                 link_id: None,
             },
         ];
-        let lay = measure_rich_text(&runs, Some(1000.0), 1.2, &font, 0);
+        let lay = measure_rich_text(&runs, Some(1000.0), 1.2, &FontStack::single(&font, 0));
         // 一行，两个 run，各带自己的色。
         assert_eq!(lay.lines.len(), 1, "宽约束下单行");
         assert_eq!(lay.lines[0].runs.len(), 2, "两个 run 各自独立");
@@ -1277,7 +1348,7 @@ mod tests {
             link_id: None,
         }];
         // 窄宽度强制换行（拉丁按词）。
-        let lay = measure_rich_text(&runs, Some(30.0), 1.2, &font, 0);
+        let lay = measure_rich_text(&runs, Some(30.0), 1.2, &FontStack::single(&font, 0));
         assert!(
             lay.lines.len() > 1,
             "窄宽度应换行，实际 {} 行",
@@ -1308,7 +1379,7 @@ mod tests {
             link_id: None,
         }];
         // 极窄宽度 → CJK 每字独占一行（4 字 ≥ 4 行）。
-        let lay = measure_rich_text(&runs, Some(10.0), 1.2, &font, 0);
+        let lay = measure_rich_text(&runs, Some(10.0), 1.2, &FontStack::single(&font, 0));
         assert!(
             lay.lines.len() >= 4,
             "CJK 逐字断行应 ≥4 行（窄宽），实际 {}",
@@ -1362,7 +1433,7 @@ mod tests {
                 link_id: None,
             },
         ];
-        let lay = measure_rich_text(&runs, Some(1000.0), 1.2, &font, 0);
+        let lay = measure_rich_text(&runs, Some(1000.0), 1.2, &FontStack::single(&font, 0));
         assert_eq!(lay.lines.len(), 2, "\\n 应强制换行成 2 行");
     }
 
@@ -1391,7 +1462,7 @@ mod tests {
             },
             link_id: Some(3),
         }];
-        let lay = measure_rich_text(&runs, Some(1000.0), 1.2, &font, 7);
+        let lay = measure_rich_text(&runs, Some(1000.0), 1.2, &FontStack::single(&font, 7));
         assert_eq!(lay.lines.len(), 1);
         let r = &lay.lines[0].runs[0];
         assert_eq!(r.weight, RichWeight::Bold);
@@ -1400,5 +1471,86 @@ mod tests {
         assert_eq!(r.link_id, Some(3));
         assert_eq!(r.font_id, 7);
         assert_eq!(r.color, [0.0, 1.0, 0.0, 1.0]);
+    }
+
+    /// 字体回退：主字体（DejaVu，无中文）缺字时，回退链首个含该字的字体（wqy）补上。
+    /// 验证：①中文 glyph 的 font_id = 回退字体 id（非主字体 id）；
+    ///       ②回退字形 glyph_id 非 0（非 .notdef）；③ASCII 仍用主字体 id。
+    /// 照 RmlUi GetOrAppendGlyph fallback 模型。
+    #[test]
+    fn fallback_picks_cjk_font_for_missing_glyph() {
+        let primary = match test_font() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip: no DejaVu test font");
+                return;
+            }
+        };
+        let cjk = match test_font_cjk() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip: no CJK test font");
+                return;
+            }
+        };
+        // 主字体 DejaVu 不含「中」。
+        assert!(
+            primary.face.glyph_index('中').is_none(),
+            "DejaVu 不应含 CJK（前提）"
+        );
+        let stack = FontStack {
+            primary: &primary,
+            primary_id: 0,
+            fallbacks: vec![(&cjk, 1)],
+        };
+        let lay = measure_text(
+            "A中",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &stack,
+            [1.0; 4],
+        );
+        let glyphs: Vec<&Glyph> = lay
+            .lines
+            .iter()
+            .flat_map(|l| l.runs.iter().flat_map(|r| r.glyphs.iter()))
+            .collect();
+        assert_eq!(glyphs.len(), 2, "A + 中 = 2 字形");
+        // 'A' 在主字体 → font_id=0。
+        assert_eq!(glyphs[0].codepoint, 'A' as u32);
+        assert_eq!(glyphs[0].font_id, 0, "ASCII 用主字体 id");
+        assert_ne!(glyphs[0].glyph_id, 0, "A 非 .notdef");
+        // '中' 走回退 → font_id=1（wqy），glyph_id 非 0（真有字，非 .notdef 方框）。
+        assert_eq!(glyphs[1].codepoint, '中' as u32);
+        assert_eq!(glyphs[1].font_id, 1, "中文用回退字体 id");
+        assert_ne!(glyphs[1].glyph_id, 0, "中 走回退应得真字形，非 .notdef");
+    }
+
+    /// 无回退时：主字体缺字 → .notdef（glyph_id=0），font_id 仍主字体。退化行为锁定。
+    #[test]
+    fn no_fallback_missing_glyph_becomes_notdef() {
+        let primary = match test_font() {
+            Some(f) => f,
+            None => return,
+        };
+        let stack = FontStack::single(&primary, 0);
+        let lay = measure_text(
+            "中",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &stack,
+            [1.0; 4],
+        );
+        let g = &lay.lines[0].runs[0].glyphs[0];
+        assert_eq!(g.font_id, 0, "无回退→font_id 仍主字体");
+        assert_eq!(g.glyph_id, 0, "无回退→.notdef（gid0）");
     }
 }

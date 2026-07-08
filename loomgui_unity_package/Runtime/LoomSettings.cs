@@ -88,7 +88,9 @@ namespace LoomGUI
         public string familyName;
         [Tooltip("源文件名（如 NotoSansSC.ttc）。拖 asset 时自动填，driver 拼 .bytes 路径用")]
         public string sourceFileName;
-        [Tooltip("默认回退字体")]
+        [Tooltip("默认回退字体（measure 时 primary font-family 无匹配/为空用此）。全局唯一")]
         public bool isDefault;
+        [Tooltip("是否纳入全局回退链：主字体缺字时按序 probe 这些字体补。多个 isFallback 按列表序")]
+        public bool isFallback;
     }
 }

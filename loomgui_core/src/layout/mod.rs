@@ -281,8 +281,7 @@ pub fn solve(
                         family,
                         color,
                     }) => {
-                        let font = fonts.select(family.as_deref());
-                        let font_id = fonts.font_id(family.as_deref());
+                        let stack = fonts.stack_for(family.as_deref());
                         let layout = measure_text(
                             content,
                             *font_size,
@@ -291,8 +290,7 @@ pub fn solve(
                             *align,
                             *nowrap,
                             known.width,
-                            font,
-                            font_id,
+                            &stack,
                             *color,
                         );
                         // 存 TextLayout 供 render 复用。Some（available 测量）优先——
@@ -317,16 +315,13 @@ pub fn solve(
                         ..
                     }) => {
                         // RichText 走 measure_rich_text（简化 inline flow）。
-                        // MVP 单字体：所有 run 共用 family 选的 face + default_font_id；
-                        // run.font_id 字段保留给将来多 family，此处不用。
-                        let font = fonts.select(family.as_deref());
-                        let font_id = fonts.font_id(family.as_deref());
+                        // 回退走 FontStack（per-glyph 选字体）；run.font_id 仍是主字体 id。
+                        let stack = fonts.stack_for(family.as_deref());
                         let layout = crate::text::layout::measure_rich_text(
                             runs,
                             known.width,
                             *line_height,
-                            font,
-                            font_id,
+                            &stack,
                         );
                         // 存 TextLayout 供 render 复用（同 Text 的 Some 优先策略）。
                         if let Some(sid) = taffy_to_scene.get(&nid) {

@@ -347,9 +347,8 @@ pub fn build_render_nodes(
                 // 对应推多个 RenderNode（primary 用真 node_id，子页用合成 id）。
                 // 避免 match arm 返回单个 RenderNode 的限制，在此处直接 push。
                 let s = &n.style;
-                let font = fonts.select(s.font_family.as_deref());
+                let stack = fonts.stack_for(s.font_family.as_deref());
                 let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
-                let font_id = fonts.font_id(s.font_family.as_deref());
                 let mut layout = scene
                     .text_layouts
                     .get(n.id.index())
@@ -364,8 +363,7 @@ pub fn build_render_nodes(
                             s.text_align,
                             s.white_space_nowrap,
                             Some(rect.w),
-                            font,
-                            font_id,
+                            &stack,
                             text_color,
                         )
                     });
@@ -376,7 +374,7 @@ pub fn build_render_nodes(
                 if off_x != 0.0 || off_y != 0.0 {
                     bake_content_offset(&mut layout, off_x, off_y);
                 }
-                let meshes = build_text_mesh(&layout, atlas, font, font_id, rect);
+                let meshes = build_text_mesh(&layout, atlas, fonts, rect);
                 push_text_meshes(
                     &mut nodes,
                     &mut id_to_pos,
@@ -395,8 +393,7 @@ pub fn build_render_nodes(
                 // MVP 单字体：所有 run 共用节点 font_family 选的 face + default_font_id；
                 // 合成 bold（双绘 +1px）/italic（quad 顶边右偏）在 build 期几何化。
                 let s = &n.style;
-                let font = fonts.select(s.font_family.as_deref());
-                let default_font_id = fonts.font_id(s.font_family.as_deref());
+                let stack = fonts.stack_for(s.font_family.as_deref());
                 let mut layout = scene
                     .text_layouts
                     .get(n.id.index())
@@ -407,8 +404,7 @@ pub fn build_render_nodes(
                             runs,
                             Some(rect.w),
                             s.line_height,
-                            font,
-                            default_font_id,
+                            &stack,
                         )
                     });
                 let off_x =
@@ -449,7 +445,7 @@ pub fn build_render_nodes(
                         rich_fragments.push((node_id, frags));
                     }
                 }
-                let meshes = build_text_mesh(&layout, atlas, font, default_font_id, rect);
+                let meshes = build_text_mesh(&layout, atlas, fonts, rect);
                 push_text_meshes(
                     &mut nodes,
                     &mut id_to_pos,
@@ -707,17 +703,15 @@ fn bake_content_offset(layout: &mut crate::text::layout::TextLayout, off_x: f32,
 /// 返回按 atlas 页号分组的 mesh 列表。单字体单字号常见一页装下 → 一项（单 draw call）；
 /// 超 CJK 字符集才跨页 → 多项（每项独立 image_path = loomgui://font-atlas/p{page}）。
 ///
-/// `default_font_id`：节点 font_family 对应的 font_id（atlas key 用）。
-/// MVP 单字体：所有 run 共用此 face，`GlyphRun.font_id` 字段保留给将来多 family，本函数不读它。
+/// per-glyph 按 `Glyph.font_id` 取 face 光栅（回退字形来自别的 face，必须按字形自己的
+/// font_id 取 face + 拼 GlyphKey，否则用错 face 光栅出错字）。装饰线度量走 run 主字体。
 fn build_text_mesh(
     layout: &crate::text::layout::TextLayout,
     atlas: &mut GlyphAtlas,
-    font: &crate::text::layout::Font,
-    default_font_id: u32,
+    fonts: &crate::text::layout::FontTable,
     rect: &crate::scene::node::Rect,
 ) -> Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> {
     use std::collections::BTreeMap;
-    let face = &font.face;
     // bearing 来自 glyph bbox，px_w/px_h/UV 含 pad：位图原点 = bbox 原点外扩 pad，
     // left/top 减 pad 对齐位图，否则字形偏 1px。
     let pad = crate::text::atlas::GLYPH_PAD as f32;
@@ -747,11 +741,12 @@ fn build_text_mesh(
                 }
                 run_w += g.advance;
                 let key = GlyphKey {
-                    font_id: default_font_id,
+                    font_id: g.font_id,
                     glyph_id: g.glyph_id,
                     size_px,
                     effect_sig: 0,
                 };
+                let face = &fonts.font_by_id(g.font_id).face;
                 let r = atlas.ensure(face, key);
                 // 无轮廓字形（空格、零宽空格等）atlas 返空 rect → 不产 quad（advance 在
                 // layout 已算，pen 已前进，跳过不影响后续字形位置）。
@@ -787,9 +782,11 @@ fn build_text_mesh(
             }
             // 装饰线（下划线 / 删除线）：纯色 quad，用 atlas 唯一白像素 × per-vertex
             // color = run.color（atlas .r × vertex color 即纯色，无需改 shader）。
+            // 度量走 run 主字体（run 级样式，非 per-glyph 回退）。
             if run.deco.underline || run.deco.strike {
                 if let Some(x0) = run_x_start {
                     let solid = atlas.ensure_solid();
+                    let face = &fonts.font_by_id(run.font_id).face;
                     let units = face.units_per_em().max(1) as f32;
                     let scale = run.font_size / units;
                     let thickness = (face

@@ -172,7 +172,6 @@ fn run_text_dump(font_path: &str) {
             return;
         }
     };
-    let font = s.fonts.select(None);
     println!("n_nodes={} font=wqy-microhei", scene.nodes.len());
     println!(
         "{:<22} {:>8} {:>9} {:>8} {:>8} {:>8}  content",
@@ -194,8 +193,7 @@ fn run_text_dump(font_path: &str) {
             st.text_align,
             st.white_space_nowrap,
             None,
-            font,
-            s.fonts.font_id(st.font_family.as_deref()),
+            &s.fonts.stack_for(st.font_family.as_deref()),
             st.color,
         );
         let before = measure_text(
@@ -206,8 +204,7 @@ fn run_text_dump(font_path: &str) {
             st.text_align,
             st.white_space_nowrap,
             Some(rect_w),
-            font,
-            s.fonts.font_id(st.font_family.as_deref()),
+            &s.fonts.stack_for(st.font_family.as_deref()),
             st.color,
         )
         .lines

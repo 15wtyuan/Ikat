@@ -91,12 +91,19 @@ namespace LoomGUI
         protected virtual void RegisterFontsFromSettings()
         {
             var settings = LoomSettings.GetOrCreateDefault();
+            var fallbacks = new System.Collections.Generic.List<string>();
             foreach (var entry in settings.fonts)
             {
                 byte[] bytes = LoadFontBytes(entry);
                 if (bytes != null)
                     _stage.RegisterFont(entry.familyName, bytes, entry.isDefault);
+                // 收集 isFallback 的 family（即使 bytes 加载失败也登记——Rust 端跳过未注册的）。
+                if (entry.isFallback && !string.IsNullOrEmpty(entry.familyName))
+                    fallbacks.Add(entry.familyName);
             }
+            // 所有字体注册完再设回退链（family 须已 register）。
+            if (fallbacks.Count > 0)
+                _stage.SetFallbackFamilies(fallbacks);
         }
 
         /// <summary>

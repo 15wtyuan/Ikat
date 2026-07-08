@@ -89,6 +89,14 @@ impl Stage {
         self.fonts.register(family, bytes, is_default)
     }
 
+    /// 设全局字体回退链。families 须已 register（未注册的 FontTable 内部跳过）。
+    /// 主字体缺字时按序 probe 这些 family，首个含该字的补上（RmlUi fallback 模型）。
+    /// 空切片清空回退（退回单字体）。source-agnostic：只收 family 名，后端把系统字体
+    /// register 进来后照样能用——核心不问字体来源。
+    pub fn set_fallback_families(&mut self, families: &[String]) {
+        self.fonts.set_fallback_families(families);
+    }
+
     /// 加载包进资源池（不碰 scene）。重复 load 同名包 = 替换。多包共存。
     ///
     /// `load_package(name, bytes)` 解析 pkg.bin → Package，存进 `self.packages[name]`。

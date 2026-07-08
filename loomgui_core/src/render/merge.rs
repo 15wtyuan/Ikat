@@ -115,7 +115,11 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
             image_path: match &last.payload {
                 NodePayload::Mesh { image_path, .. } => image_path.clone(),
             },
-            program: 0,
+            // 继承模板 program：text（program=1）合批后必须仍 program=1，否则 Unity 用
+            // image shader 渲染 atlas R8 → 字形 quad 填满顶点色成实心方块。program=0 通用 mesh 同理继承。
+            program: match &last.payload {
+                NodePayload::Mesh { program, .. } => *program,
+            },
             color_matrix: [0.0; 20],
         },
     }
@@ -271,6 +275,51 @@ mod tests {
         match &out[0].payload {
             NodePayload::Mesh { verts, .. } => {
                 assert_eq!(verts.len(), 8, "2×4 verts");
+            }
+            _ => panic!("expected Mesh"),
+        }
+    }
+
+    /// merged text mesh 必须保留 program=1（不能硬写 0）。
+    /// mesh_key 含 program → 同 batch 的 text 全是 program=1，merged 应继承。
+    /// 若 merged program=0：Unity 用 image shader 渲染 atlas R8 纹理 → 整个字形 quad
+    /// 填满顶点色 = 实心方块（字看不清）。core 侧根因。
+    #[test]
+    fn merged_text_mesh_preserves_program_one() {
+        let mut t1 = mesh_node(1, Some("loomgui://font-atlas/p0"), 0, 1.0, 0.0);
+        t1.payload = NodePayload::Mesh {
+            verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            colors: vec![[1.0; 4]; 4],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            image_path: Some("loomgui://font-atlas/p0".into()),
+            program: 1,
+            color_matrix: [0.0; 20],
+        };
+        let mut t2 = mesh_node(2, Some("loomgui://font-atlas/p0"), 1, 1.0, 100.0);
+        t2.payload = NodePayload::Mesh {
+            verts: vec![[100.0, 0.0], [110.0, 0.0], [110.0, 10.0], [100.0, 10.0]],
+            uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            colors: vec![[1.0; 4]; 4],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            image_path: Some("loomgui://font-atlas/p0".into()),
+            program: 1,
+            color_matrix: [0.0; 20],
+        };
+        let out = merge_meshes(vec![t1, t2]);
+        assert_eq!(out.len(), 1, "两同 atlas text 节点 → 1 merged");
+        match &out[0].payload {
+            NodePayload::Mesh {
+                program,
+                image_path,
+                ..
+            } => {
+                assert_eq!(*program, 1, "merged text 必须保留 program=1（text shader）");
+                assert_eq!(
+                    *image_path,
+                    Some("loomgui://font-atlas/p0".to_string()),
+                    "merged text 保留 atlas path"
+                );
             }
             _ => panic!("expected Mesh"),
         }

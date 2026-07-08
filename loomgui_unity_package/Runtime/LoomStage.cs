@@ -105,6 +105,21 @@ namespace LoomGUI
             }
         }
 
+        /// 设全局字体回退链。families 中主字体缺字时按序 probe，首个含该字的补上（RmlUi fallback 模型）。
+        /// 空列表/null 清空回退。须在所有 RegisterFont 之后调（family 须已注册，未注册的 Rust 端静默跳过）。
+        /// source-agnostic：后端把系统字体 RegisterFont 进来后，其 family 名同样填这里即可。
+        /// </summary>
+        public void SetFallbackFamilies(System.Collections.Generic.IEnumerable<string> families)
+        {
+            if (_stage == null) return;
+            string text = families == null ? "" : string.Join("\n", families);
+            byte[] tb = Encoding.UTF8.GetBytes(text);
+            fixed (byte* tp = tb)
+            {
+                Native.loomgui_stage_set_fallback_families(_stage, tp, (nuint)tb.Length);
+            }
+        }
+
         // ===== Sprite 解析器初始化（Driver 调）=====
 
         /// <summary>

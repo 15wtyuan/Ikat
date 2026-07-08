@@ -6,7 +6,7 @@
 //!
 //! 用 DejaVuSans（仓库内 fixture，跨平台一致）。
 
-use loomgui_core::text::layout::measure_rich_text;
+use loomgui_core::text::layout::{measure_rich_text, FontStack};
 use loomgui_core::text::rich::{parse_rich_markup, RichBaseStyle, RichDeco, RichStyle, RichWeight};
 
 fn main() {
@@ -36,7 +36,7 @@ fn main() {
         );
     }
 
-    let lay = measure_rich_text(&runs, Some(400.0), 1.2, &font, 0);
+    let lay = measure_rich_text(&runs, Some(400.0), 1.2, &FontStack::single(&font, 0));
     println!(
         "\nlayout: lines={} 宽×高 = {:.1}×{:.1}",
         lay.lines.len(),
