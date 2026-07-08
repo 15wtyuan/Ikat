@@ -2362,9 +2362,9 @@ fn rich_image_emits_mesh_with_image_path_and_program_0() {
                     Some("emoji/cool.png".to_string()),
                     "image_path = src"
                 );
-                // UV 全图
-                assert_eq!(uvs[0], [0.0, 0.0], "TL UV");
-                assert_eq!(uvs[2], [1.0, 1.0], "BR UV");
+                // UV 全图 + v-flip：TL=(0,1), BR=(1,0)（与 Image/Container bg-image 同约定）。
+                assert_eq!(uvs[0], [0.0, 1.0], "TL UV (v-flipped)");
+                assert_eq!(uvs[2], [1.0, 0.0], "BR UV (v-flipped)");
             }
             _ => panic!("expected Mesh"),
         }

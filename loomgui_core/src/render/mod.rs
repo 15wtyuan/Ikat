@@ -432,17 +432,22 @@ pub fn build_render_nodes(
                 );
                 // 行内图：每个 image 一个 Mesh（program=0 image shader，image_path=src）。
                 // 走现有 image 路径（SpriteResolver 命中图集），Unity 零改。
-                // UV 全图 0..1（MVP：无 sprite 子区）。
+                // 顶点序、UV 与 mesh::quad 同：TL, TR, BR, BL；v-flip（design y-down
+                // 配 Unity root-stage y-flip → UV 方向与现有 Image/Container bg-image 一致）。
+                // 全图 UV（MVP：无 sprite 子区）。
+                // synth id 高字节偏移避开 text 子页号（1..~10）：1000 + img_idx 经 & 0xFF
+                // 掩码后落在 232-255，不与 text atlas 跨页子页号重叠。
+                const INLINE_IMG_SYNTH_ID_BASE: u32 = 1000;
                 for (img_idx, img) in layout.images.iter().enumerate() {
                     let (ix, iy) = (img.x + off_x, img.y + off_y);
                     let payload = NodePayload::Mesh {
                         verts: vec![
-                            [ix, iy],
-                            [ix + img.w, iy],
-                            [ix + img.w, iy + img.h],
-                            [ix, iy + img.h],
+                            [ix, iy + img.h],         // TL (top-left in design y-down)
+                            [ix + img.w, iy + img.h], // TR
+                            [ix + img.w, iy],         // BR
+                            [ix, iy],                 // BL
                         ],
-                        uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                        uvs: vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
                         colors: vec![[1.0, 1.0, 1.0, 1.0]; 4],
                         indices: vec![0, 1, 2, 0, 2, 3],
                         image_path: Some(img.src.clone()),
@@ -450,7 +455,10 @@ pub fn build_render_nodes(
                         color_matrix: [0.0; 20],
                     };
                     nodes.push(RenderNode {
-                        node_id: synth_text_node_id(node_id, 1000 + img_idx as u32),
+                        node_id: synth_text_node_id(
+                            node_id,
+                            INLINE_IMG_SYNTH_ID_BASE + img_idx as u32,
+                        ),
                         parent_id,
                         visible: true,
                         alpha,
