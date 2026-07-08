@@ -77,3 +77,58 @@ TL,TR,BR,BL 序 + v-flipped UV `[[0,1],[1,1],[1,0],[0,0]]` 约定不一致。
 - `cargo fmt --all -- --check`: clean（提交前已 `cargo fmt --all` 应用格式）
 - `cargo clippy --all-targets -- -D warnings`: clean
 - 零回归（全部既有测试通过，`rich_image_emits_mesh_with_image_path_and_program_0` 断言已同步更新）
+
+---
+
+## Review Finding Fix 2（commit `7a16c02`）— UV V-flip 自抵消修正
+
+### 问题
+
+commit `aa573ab` 的 "Finding 1 fix" 将行内图 quad 的 verts 序从 BL,BR,TR,TL
+改为 TL,TR,BR,BL，同时 UV 从 `[[0,0],[1,0],[1,1],[0,1]]` 改为
+`[[0,1],[1,1],[1,0],[0,0]]`。但当时的 verts 坐标标注有误：
+
+```rust
+// aa573ab 的实际代码（注释标签与几何位置全反）
+verts: vec![
+    [ix, iy + img.h],         // 标 TL，实为 BL（iy+h = 底部）
+    [ix + img.w, iy + img.h], // 标 TR，实为 BR
+    [ix + img.w, iy],         // 标 BR，实为 TR
+    [ix, iy],                 // 标 BL，实为 TL
+],
+uvs: vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+```
+
+verts 序和 UV 序**同时**改变，几何角点与 UV 的映射关系未变：
+- quad 顶部 (iy) 仍采样 UV v=0（纹理底部）
+- quad 底部 (iy+h) 仍采样 UV v=1（纹理顶部）
+
+v-flip 实际未生效（自抵消）。PlayMode 上行内图仍上下颠倒。
+
+### 修法
+
+verts 坐标修正为正确的 TL,TR,BR,BL 几何位置，UV 保持 v-flipped：
+
+```rust
+verts: vec![
+    [ix, iy],                 // TL（design y-down 中 y 最小 = 顶部）
+    [ix + img.w, iy],         // TR
+    [ix + img.w, iy + img.h], // BR
+    [ix, iy + img.h],         // BL
+],
+uvs: vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+```
+
+现在 quad 顶部 → UV v=1（纹理顶部），底部 → UV v=0（纹理底部），与 `mesh::quad`
+Image arm 的 v-flip 约定完全一致。
+
+修改文件：
+- `loomgui_core/src/render/mod.rs` 行 441-449：verts 坐标修正、标签修正
+- `loomgui_core/src/render/tests.rs` 行 2365-2370：UV 断言扩为四角全检，标签修正
+
+### Test summary
+
+- `cargo test -p loomgui_core`: **617 passed, 0 failed**（575 unit + 30 fence_contract + 12 others）
+- `cargo fmt --all -- --check`: clean
+- `cargo clippy --all-targets -- -D warnings`: clean
+- 零回归
