@@ -84,6 +84,16 @@ impl RichRun {
     }
 }
 
+/// 超链接命中矩形（节点本地坐标）。跨行链接拆多个 rect（首行尾/中行整行/末行头）。
+#[derive(Debug, Clone)]
+pub struct RichFragment {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub link_id: u32,
+}
+
 /// 富文本 base 样式（caller 从节点 ResolvedStyle 转换来）。
 #[derive(Debug, Clone, Copy)]
 pub struct RichBaseStyle {

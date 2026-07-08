@@ -282,6 +282,9 @@ pub struct Scene {
     /// 不换行；长文本 → Some(available) 换行），render 若用 rect.w（stretch 后的 available 整数宽）
     /// 重测，短文本因 intrinsic 亚像素超 available 误判换行。故 render 复用 layout 结果，不重测。
     pub text_layouts: Vec<Option<crate::text::layout::TextLayout>>,
+    /// v1.7：富文本链接 fragment 矩形（per-node，按 NodeId.index 索引）。与 text_layouts 同序。
+    /// build 产出，tick_and_render 写回，供 rich_link_at 命中查询。
+    pub rich_fragments: Vec<Option<Vec<crate::text::rich::RichFragment>>>,
     /// Controller 状态机 registry：挂载点 NodeId → Controller。load_package/instantiate 建，
     /// driver 也可懒注册（set_controller_selected 首次写时建条目）。
     /// 匹配器遇 [data-page] 时回溯找最近 data_controller 祖先查此表（§1.4）。
@@ -322,6 +325,7 @@ impl Scene {
             anim: Default::default(),
             scroll: Default::default(),
             text_layouts: Vec::new(),
+            rich_fragments: Vec::new(),
             node_sort_keys: Vec::new(),
             controllers: Default::default(),
             pending_controller_events: Vec::new(),
@@ -382,10 +386,11 @@ impl Scene {
                 None => scene.roots.push(ids[i]),
             }
         }
-        // text_layouts 随槽位容量对齐（None 占位，layout::solve 填实际 TextLayout）。
+        // text_layouts / rich_fragments 随槽位容量对齐（None 占位，layout::solve / render::build 填）。
         // **容量而非存活数**：按 id.index() 索引，remove_node 后 idx 不变但存活数减，
         // 按 len 分配会越界。capacity+1（1 基索引，idx 0 占位）。
         scene.text_layouts = vec![None; scene.nodes.capacity() + 1];
+        scene.rich_fragments = vec![None; scene.nodes.capacity() + 1];
         scene
     }
 
@@ -401,6 +406,7 @@ impl Scene {
             anim: Default::default(),
             scroll: Default::default(),
             text_layouts: Vec::new(),
+            rich_fragments: Vec::new(),
             node_sort_keys: Vec::new(),
             controllers: Default::default(),
             pending_controller_events: Vec::new(),
@@ -428,6 +434,7 @@ impl Scene {
             }
         }
         scene.text_layouts = vec![None; scene.nodes.capacity() + 1];
+        scene.rich_fragments = vec![None; scene.nodes.capacity() + 1];
         scene
     }
 

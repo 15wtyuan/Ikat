@@ -450,6 +450,7 @@ impl Stage {
                 anim: Default::default(),
                 scroll: Default::default(),
                 text_layouts: Vec::new(),
+                rich_fragments: Vec::new(),
                 node_sort_keys: Vec::new(),
                 controllers: Default::default(),
                 pending_controller_events: Vec::new(),
@@ -624,6 +625,7 @@ impl Stage {
             anim: Default::default(),
             scroll: Default::default(),
             text_layouts: Vec::new(),
+            rich_fragments: Vec::new(),
             node_sort_keys: Vec::new(),
             controllers: Default::default(),
             pending_controller_events: Vec::new(),
@@ -733,7 +735,7 @@ impl Stage {
         //    返回新 hash 存 self.prev_node_hashes 供下帧比。
         // build_render_nodes 查 Stage.image_sizes 算九宫格 UV（slice_px / src_px）。
         // Image payload 带 path，UV 全图 (0,0)-(1,1)（无 atlas 子区），Unity 查 Sprite 拿真实 UV。
-        let (frame, new_hashes, sort_keys) = build_render_nodes(
+        let (frame, new_hashes, sort_keys, rich_fragments) = build_render_nodes(
             scene,
             &self.fonts,
             &self.prev_node_hashes,
@@ -742,6 +744,17 @@ impl Stage {
         );
         scene.node_sort_keys = sort_keys;
         self.prev_node_hashes = new_hashes;
+        // 写回 rich_fragments：resize 对齐 slotmap capacity（remove_node 后 idx 不变），
+        // 再按 node_id 索引入表。
+        scene
+            .rich_fragments
+            .resize_with(scene.nodes.capacity() + 1, || None);
+        for (node_id_u32, frags) in &rich_fragments {
+            let idx = crate::scene::node::NodeId(*node_id_u32).index();
+            if let Some(slot) = scene.rich_fragments.get_mut(idx) {
+                *slot = Some(std::mem::take(&mut frags.clone()));
+            }
+        }
         frame
     }
 

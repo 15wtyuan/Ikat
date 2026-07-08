@@ -130,6 +130,7 @@ pub fn build_render_nodes(
     FrameData,
     std::collections::HashMap<u32, (u64, u64)>,
     Vec<u32>,
+    Vec<(u32, Vec<crate::text::rich::RichFragment>)>,
 ) {
     // id_to_pos: NodeId → nodes vec 0 基位置。剪 display:none 子树后 nodes 与 scene.nodes
     // 不等长，batch 按此映射索引 nodes；pruned 节点不入表（batch DFS 遇 id_to_pos 没有
@@ -148,6 +149,7 @@ pub fn build_render_nodes(
     // 先剪 display:none 子树——display:none 节点 + 后代不产 RenderNode（CSS 语义）。
     let pruned = collect_display_none_subtree(scene);
     let mut nodes: Vec<RenderNode> = Vec::new();
+    let mut rich_fragments: Vec<(u32, Vec<crate::text::rich::RichFragment>)> = Vec::new();
     for n in scene.nodes.values() {
         if pruned.contains(&n.id) {
             continue;
@@ -417,6 +419,37 @@ pub fn build_render_nodes(
                 if off_x != 0.0 || off_y != 0.0 {
                     bake_content_offset(&mut layout, off_x, off_y);
                 }
+                // 收集链接 fragment 矩形（富文本 <a> 命中查询）。跨行链接自然拆多 rect——
+                // 每行同 link_id 各一个（fgui GetLinesShape 范式）。glyph x/y 已含 off_x/off_y。
+                {
+                    let mut frags: Vec<crate::text::rich::RichFragment> = Vec::new();
+                    for line in &layout.lines {
+                        for run in &line.runs {
+                            if let Some(lid) = run.link_id {
+                                if run.glyphs.is_empty() {
+                                    continue;
+                                }
+                                let x_start =
+                                    run.glyphs.iter().map(|g| g.x).fold(f32::INFINITY, f32::min);
+                                let x_end = run
+                                    .glyphs
+                                    .last()
+                                    .map(|g| g.x + g.advance)
+                                    .unwrap_or(x_start);
+                                frags.push(crate::text::rich::RichFragment {
+                                    x: x_start,
+                                    y: line.y + off_y,
+                                    w: (x_end - x_start).max(0.0),
+                                    h: line.height,
+                                    link_id: lid,
+                                });
+                            }
+                        }
+                    }
+                    if !frags.is_empty() {
+                        rich_fragments.push((node_id, frags));
+                    }
+                }
                 let meshes = build_text_mesh(&layout, atlas, font, default_font_id);
                 push_text_meshes(
                     &mut nodes,
@@ -529,7 +562,12 @@ pub fn build_render_nodes(
         };
         new_hashes.insert(rn.node_id, (hh, ph));
     }
-    (FrameData { nodes, clips }, new_hashes, sort_keys)
+    (
+        FrameData { nodes, clips },
+        new_hashes,
+        sort_keys,
+        rich_fragments,
+    )
 }
 
 /// 合成 node_id：为跨页 text 子页生成区别于主节点的 id。
