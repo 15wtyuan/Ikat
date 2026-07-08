@@ -791,6 +791,11 @@ impl Stage {
         scene
             .rich_fragments
             .resize_with(scene.nodes.capacity() + 1, || None);
+        // 每帧先清空所有 slot，再写入本帧有 fragments 的 slot。
+        // resize_with 只填充新增 slot，已有的 stale slot 不变——若不主动清空，
+        // 上一帧有链接、本帧 set_rich_text 删了链接的节点会保留 stale fragments，
+        // rich_link_at 读到已删 link_id。
+        scene.rich_fragments.fill(None);
         for (node_id_u32, frags) in &rich_fragments {
             let idx = crate::scene::node::NodeId(*node_id_u32).index();
             if let Some(slot) = scene.rich_fragments.get_mut(idx) {
