@@ -262,6 +262,13 @@ namespace LoomGUI
             _controllerListeners.Clear();
             // 重置 Controller handle（下页 SubscribeController 重填）。
             _tabMount = _dialogMount = _biconMount = _otabMount = _itabMount = uint.MaxValue;
+            // rich link listener：切页前摘（link_id 全局命名空间，残留会误触发）+ 重置 rich handle。
+            if (_richLinkId != 0)
+            {
+                _stage.EventHandler.RemoveLinkClickListener(_richLinkId);
+                _richLinkId = 0;
+            }
+            _richDynamicNode = _richLogNode = uint.MaxValue;
         }
 
         // === 按页订阅（SubscribePage）===
@@ -287,6 +294,7 @@ namespace LoomGUI
                 case "page_list": SubscribeList(); break;
                 case "page_nativehost": SubscribeNativeHost(); break;
                 case "page_controller": SubscribeController(); break;
+                case "page_richtext": SubscribeRichText(); break;
             }
         }
 
@@ -304,6 +312,7 @@ namespace LoomGUI
             AddNavListener("nav-list", "page_list");
             AddNavListener("nav-nativehost", "page_nativehost");
             AddNavListener("nav-controller", "page_controller");
+            AddNavListener("nav-richtext", "page_richtext");
             // nav-tips-demo → 弹 tips_toast 演示（tips_layer 叠加）。
             uint tipsBtn = _stage.FindNodeById("nav-tips-demo");
             AddPageListener(tipsBtn, EventType.Click, _ => ShowTips());
@@ -461,6 +470,50 @@ namespace LoomGUI
         {
             SubscribeBackHome();
             Debug.Log("[Showcase] page_text 订阅完成（back）");
+        }
+
+        // === page_richtext（v1.7 富文本）===
+        // rich-swap 轮换 SetRichText 预设（每套展示不同富文本特性）；<a> 命中走 link click → rich-log 日志。
+        uint _richDynamicNode = uint.MaxValue;
+        uint _richLogNode = uint.MaxValue;
+        uint _richLinkId = 0;            // 已注册 link listener 的 link_id（切页 ClearPageListeners 清）
+        int _richPresetIdx = 0;
+        static readonly string[] _richPresets = new string[] {
+            "预设 A：<span style=\"color:#ffd700;font-weight:bold\">金色粗体</span> + <img src=\"res/icons/zap.png\" width=\"22\" height=\"22\" vertical-align=\"middle\"/> 行内图 + <a href=\"swap://a\">链接 A</a>",
+            "预设 B：<u>下划线</u> · <s>删除线</s> · <b>粗</b> · <i>斜</i> · <span style=\"color:#5fb2c4;font-size:16px\">小字青</span>",
+            "预设 C：CJK 中英混排 LoomGUI v1.7 rich inline flow，<br/>强制换行后第二行，<a href=\"swap://c\">链接 C</a>"
+        };
+
+        // page_richtext：back-home + rich-swap 换内容（set_rich_text）+ 链接点击（onClickLink）。
+        // 预设每套只含 1 个 <a>（link_id=1），稳定订阅 link_id=1；初始 markup 的 <a> 也是 link_id=1。
+        void SubscribeRichText()
+        {
+            SubscribeBackHome();
+            _richDynamicNode = _stage.FindNodeById("rich-dynamic");
+            _richLogNode = _stage.FindNodeById("rich-log");
+            _richPresetIdx = 0;
+
+            // rich-swap → 轮换预设内容（set_rich_text 运行时换富文本）。
+            AddPageListener(_stage.FindNodeById("rich-swap"), EventType.Click, _ =>
+            {
+                if (_richDynamicNode == uint.MaxValue) return;
+                _richPresetIdx = (_richPresetIdx + 1) % _richPresets.Length;
+                _stage.SetRichText(_richDynamicNode, _richPresets[_richPresetIdx]);
+            });
+
+            // 链接点击：rich-dynamic 内 <a> 命中 → core pull rich_link_at → DispatchLinkClick(1) → OnRichLink。
+            _richLinkId = 1;
+            _stage.EventHandler.AddLinkClickListener(_richLinkId, OnRichLink);
+
+            Debug.Log("[Showcase] page_richtext 订阅完成（swap set_rich_text + link click）");
+        }
+
+        // OnRichLink：<a> 命中回调。把命中的 link_id 写进 rich-log（演示 onClickLink 通路）。
+        // 注：<a> 的 href 没存进 RichRun（只 link_id），故日志显示 link_id 而非 href。
+        void OnRichLink(uint linkId)
+        {
+            if (_richLogNode == uint.MaxValue) return;
+            _stage.SetRichText(_richLogNode, $"链接点击日志：命中 link_id={linkId}");
         }
 
         // page_controller（v1.5 Controller 演示）：

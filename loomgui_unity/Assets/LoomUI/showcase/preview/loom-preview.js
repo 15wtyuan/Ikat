@@ -16,7 +16,8 @@
     'nav-interact': 'page_interact',
     'nav-dyntree': 'page_dyntree',
     'nav-list': 'page_list',
-    'nav-nativehost': 'page_nativehost'
+    'nav-nativehost': 'page_nativehost',
+    'nav-richtext': 'page_richtext'
   };
 
   // overlay 组件模板：<style> + markup 一起（宿主页没这些类的 CSS）。
@@ -378,6 +379,34 @@
         if (!fx) return;
         fx.style.opacity = '1';
         setTimeout(function () { fx.style.opacity = '0'; }, 600);
+      });
+    },
+    // page_richtext（v1.7 富文本）：预览用 innerHTML 模拟 set_rich_text + a.onclick 模拟 onClickLink。
+    // 真渲染看 Unity PlayMode（display:block 走 LoomGUI rich 叶，非 Chrome block flow）。
+    page_richtext: function () {
+      wireBackHome();
+      var presets = [
+        '预设 A：<span style="color:#ffd700;font-weight:bold">金色粗体</span> + <img src="res/icons/zap.png" width="20" height="20" style="vertical-align:middle"/> 行内图 + <a href="swap://a">链接 A</a>',
+        '预设 B：<u>下划线</u> · <s>删除线</s> · <b>粗</b> · <i>斜</i> · <span style="color:#5fb2c4;font-size:16px">小字青</span>',
+        '预设 C：CJK 中英混排 LoomGUI v1.7 rich inline flow，<br/>强制换行后第二行，<a href="swap://c">链接 C</a>'
+      ];
+      var idx = 0;
+      var dyn = $('rich-dynamic');
+      var log = $('rich-log');
+      function bindLinks() {
+        if (!dyn) return;
+        var links = dyn.querySelectorAll('a');
+        for (var i = 0; i < links.length; i++) {
+          links[i].onclick = function (e) {
+            e.preventDefault();
+            if (log) log.textContent = '链接点击日志：' + (this.getAttribute('href') || '(无 href)');
+          };
+        }
+      }
+      bindLinks();
+      bindClick('rich-swap', function () {
+        idx = (idx + 1) % presets.length;
+        if (dyn) { dyn.innerHTML = presets[idx]; bindLinks(); }
       });
     }
   };
