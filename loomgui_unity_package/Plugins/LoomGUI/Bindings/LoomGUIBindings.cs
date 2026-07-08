@@ -440,6 +440,13 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_set_text(StageHandle* h, uint node, byte* text, nuint len);
 
         /// <summary>
+        ///  改 RichText 节点的 markup + 标 dirty_text。markup = UTF-8 字节（指针+len）。
+        ///  0=ok，-1=err（非 RichText / 解析失败 / null 句柄）。**常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_rich_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_rich_text(StageHandle* h, uint node, byte* markup_ptr, nuint markup_len);
+
+        /// <summary>
         ///  改 Image 节点 src + 标 dirty_mesh。src = UTF-8 字节。0=ok，-1=err。
         ///  非 Image 节点 → -1。null 句柄 → -1。
         ///

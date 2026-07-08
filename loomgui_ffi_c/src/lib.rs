@@ -1120,6 +1120,27 @@ pub extern "C" fn loomgui_stage_set_text(
         .unwrap_or(-1)
 }
 
+/// 改 RichText 节点的 markup + 标 dirty_text。markup = UTF-8 字节（指针+len）。
+/// 0=ok，-1=err（非 RichText / 解析失败 / null 句柄）。**常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_rich_text(
+    h: *mut StageHandle,
+    node: u32,
+    markup_ptr: *const u8,
+    markup_len: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let markup = std::str::from_utf8(unsafe { std::slice::from_raw_parts(markup_ptr, markup_len) })
+        .unwrap_or("");
+    sh.stage
+        .set_rich_text(NodeId(node), markup)
+        .map(|_| 0)
+        .unwrap_or(-1)
+}
+
 /// 改 Image 节点 src + 标 dirty_mesh。src = UTF-8 字节。0=ok，-1=err。
 /// 非 Image 节点 → -1。null 句柄 → -1。
 ///

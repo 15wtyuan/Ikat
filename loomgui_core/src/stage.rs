@@ -506,6 +506,11 @@ impl Stage {
         crate::scene::dynamic::set_text(self.scene.as_mut().ok_or("no scene")?, node, text)
     }
 
+    /// 改 RichText 节点的 markup（runtime 解析 → runs + dirty）。
+    pub fn set_rich_text(&mut self, node: NodeId, markup: &str) -> Result<(), String> {
+        crate::scene::dynamic::set_rich_text(self.scene.as_mut().ok_or("no scene")?, node, markup)
+    }
+
     /// 改 Image 节点 src + 标 dirty_mesh。
     pub fn set_src(&mut self, node: NodeId, src: &str) -> Result<(), String> {
         crate::scene::dynamic::set_src(self.scene.as_mut().ok_or("no scene")?, node, src)
