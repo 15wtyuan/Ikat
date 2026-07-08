@@ -430,6 +430,40 @@ pub fn build_render_nodes(
                     wm,
                     default_font_id,
                 );
+                // 行内图：每个 image 一个 Mesh（program=0 image shader，image_path=src）。
+                // 走现有 image 路径（SpriteResolver 命中图集），Unity 零改。
+                // UV 全图 0..1（MVP：无 sprite 子区）。
+                for (img_idx, img) in layout.images.iter().enumerate() {
+                    let (ix, iy) = (img.x + off_x, img.y + off_y);
+                    let payload = NodePayload::Mesh {
+                        verts: vec![
+                            [ix, iy],
+                            [ix + img.w, iy],
+                            [ix + img.w, iy + img.h],
+                            [ix, iy + img.h],
+                        ],
+                        uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                        colors: vec![[1.0, 1.0, 1.0, 1.0]; 4],
+                        indices: vec![0, 1, 2, 0, 2, 3],
+                        image_path: Some(img.src.clone()),
+                        program: 0,
+                        color_matrix: [0.0; 20],
+                    };
+                    nodes.push(RenderNode {
+                        node_id: synth_text_node_id(node_id, 1000 + img_idx as u32),
+                        parent_id,
+                        visible: true,
+                        alpha,
+                        color_tint,
+                        world_matrix: wm,
+                        blend: BlendMode::Normal,
+                        mask_context: MaskContext(0),
+                        sort_key: 0,
+                        change_level: ChangeLevel::Full,
+                        reuse_key: 0,
+                        payload,
+                    });
+                }
                 continue;
             }
         };

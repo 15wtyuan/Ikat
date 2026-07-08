@@ -2269,3 +2269,104 @@ fn two_rich_nodes_same_atlas_merge() {
         );
     }
 }
+
+/// RichText 含行内图 → frame 同时产 text Mesh（program=1）+ image Mesh（program=0, image_path=src）。
+/// 验证 measure_rich_text 记录 Image run 位置 + build 产 image quad 端到端。
+#[test]
+fn rich_image_emits_mesh_with_image_path_and_program_0() {
+    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichVAlign, RichWeight};
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::RichText {
+        runs: vec![
+            RichRun {
+                kind: RichKind::Text { text: "Hi".into() },
+                color: [1.0, 1.0, 1.0, 1.0],
+                font_id: 0,
+                size_px: 16,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            },
+            RichRun {
+                kind: RichKind::Image {
+                    src: "emoji/cool.png".into(),
+                    w: 16.0,
+                    h: 16.0,
+                    valign: RichVAlign::Baseline,
+                },
+                color: [1.0, 1.0, 1.0, 1.0],
+                font_id: 0,
+                size_px: 16,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            },
+        ],
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // 应同时存在 text Mesh（program=1）和 image Mesh（program=0）
+    let has_text = frame
+        .nodes
+        .iter()
+        .any(|rn| matches!(&rn.payload, NodePayload::Mesh { program: 1, .. }));
+    let image_node = frame.nodes.iter().find(|rn| {
+        matches!(&rn.payload, NodePayload::Mesh { program: 0, image_path: Some(p), .. } if p == "emoji/cool.png")
+    });
+    assert!(has_text, "应存在 text Mesh（program=1）");
+    assert!(
+        image_node.is_some(),
+        "应存在 image Mesh（program=0, image_path=src）"
+    );
+    // image Mesh 应有 4 顶点、6 索引、全图 UV
+    if let Some(rn) = image_node {
+        match &rn.payload {
+            NodePayload::Mesh {
+                verts,
+                uvs,
+                indices,
+                image_path,
+                program,
+                ..
+            } => {
+                assert_eq!(verts.len(), 4, "image quad = 4 顶点");
+                assert_eq!(indices.len(), 6, "2 三角形 = 6 索引");
+                assert_eq!(*program, 0, "image → program=0");
+                assert_eq!(
+                    *image_path,
+                    Some("emoji/cool.png".to_string()),
+                    "image_path = src"
+                );
+                // UV 全图
+                assert_eq!(uvs[0], [0.0, 0.0], "TL UV");
+                assert_eq!(uvs[2], [1.0, 1.0], "BR UV");
+            }
+            _ => panic!("expected Mesh"),
+        }
+    }
+}

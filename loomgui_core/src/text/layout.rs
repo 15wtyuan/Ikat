@@ -61,12 +61,26 @@ pub struct Line {
     pub runs: Vec<GlyphRun>,
 }
 
+/// 行内图位置（measure 期记，build 期产 image quad）。
+#[derive(Debug, Clone, Serialize)]
+pub struct RichImagePlacement {
+    pub src: String,
+    /// 左上角 x（content 相对坐标，align 后）。
+    pub x: f32,
+    /// 左上角 y（content 相对坐标，valign 后）。
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
 /// 文本布局结果（SOA 三表：lines/runs/glyphs）。
 #[derive(Debug, Clone, Serialize)]
 pub struct TextLayout {
     pub text_width: f32,
     pub text_height: f32,
     pub lines: Vec<Line>,
+    /// 行内图位置（measure_rich_text 填充，measure_text 为空）。
+    pub images: Vec<RichImagePlacement>,
 }
 
 /// 封装一个 ttf 字体（进程级单字体，无 fallback）。
@@ -445,6 +459,7 @@ pub fn measure_text(
         text_width,
         text_height,
         lines: out_lines,
+        images: Vec::new(),
     }
 }
 
@@ -468,6 +483,8 @@ pub fn measure_rich_text(
     default_font_id: u32,
 ) -> TextLayout {
     let units = font.face.units_per_em().max(1) as f32;
+
+    let mut out_images: Vec<RichImagePlacement> = Vec::new();
 
     // 1. 扁平 token 流（token = 子串 + 所属 run 索引 + 宽度 + 是否强制换行）。
     //    CJK 逐字、Latin 逐词（空白分词）。用 char_indices 取字节范围切片（非 unsafe）。
@@ -658,9 +675,24 @@ pub fn measure_rich_text(
                         });
                     }
                 }
-                crate::text::rich::RichKind::Image { w, .. } => {
-                    // 图占位：无 glyph（build 期另产 image quad）；占宽。
-                    pen_x += w;
+                crate::text::rich::RichKind::Image { src, w, h, valign } => {
+                    let img_h = *h;
+                    let img_w = *w;
+                    // baseline 对齐：默认底边贴 baseline；middle 居中；top 顶贴行顶。
+                    let y_top = match valign {
+                        crate::text::rich::RichVAlign::Middle => baseline - img_h * 0.5,
+                        crate::text::rich::RichVAlign::Top => 0.0,
+                        crate::text::rich::RichVAlign::Bottom => baseline - img_h,
+                        _ => baseline - img_h, // Baseline 默认底边贴
+                    };
+                    out_images.push(RichImagePlacement {
+                        src: src.clone(),
+                        x: pen_x,
+                        y: y_top,
+                        w: img_w,
+                        h: img_h,
+                    });
+                    pen_x += img_w;
                 }
             }
         }
@@ -681,6 +713,7 @@ pub fn measure_rich_text(
         text_width,
         text_height,
         lines: out_lines,
+        images: out_images,
     }
 }
 
