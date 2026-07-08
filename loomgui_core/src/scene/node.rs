@@ -66,6 +66,10 @@ pub enum NodeKind {
     Text {
         content: String,
     },
+    /// v1.7 富文本叶子：inline flow 封装在 measure/build。
+    RichText {
+        runs: Vec<crate::text::rich::RichRun>,
+    },
     /// src 原样存（不加载），render 层映射到 image_path（同 path 的图可合批）。
     /// src 取自元素的 `src` 属性（`<img src="...">`），不是文本内容。
     Image {
@@ -345,7 +349,7 @@ impl Scene {
                 },
                 children: Vec::new(),
                 dirty_mesh: true,
-                dirty_text: matches!(kind, NodeKind::Text { .. }),
+                dirty_text: matches!(kind, NodeKind::Text { .. } | NodeKind::RichText { .. }),
                 classes: classes.clone(),
                 id_attr: id_attr.clone(),
                 touchable: style.touchable,

@@ -466,6 +466,11 @@ pub fn build_render_nodes(
                 // 由 propagate_text_sub_page_sort_keys 单独传播。
                 continue; // 直接推完，跳过末尾的 id_to_pos / push。
             }
+            NodeKind::RichText { .. } => {
+                // T5 填实：build rich mesh（per-run color/font/size，断行 + 装饰线 quad）。
+                // 占位跳过——本 task 只立数据模型，未接线 inline flow。
+                continue;
+            }
         };
         id_to_pos.insert(n.id, nodes.len());
         nodes.push(rn);

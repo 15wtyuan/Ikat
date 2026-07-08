@@ -2,3 +2,4 @@
 
 pub mod atlas;
 pub mod layout;
+pub mod rich;
