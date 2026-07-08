@@ -60,6 +60,8 @@ enum MeasureContext {
         nowrap: bool,
         /// 节点的 font_family。None 表示用 FontTable 的 default。
         family: Option<String>,
+        /// 节点 style.color（plain text 整段同色；进 GlyphRun.color 供 build per-vertex）。
+        color: [f32; 4],
     },
     /// Image 叶子：intrinsic 像素 + css width/height 维度。闭包消费 taffy 的 known 解析
     /// Percent/fit（Percent width taffy 传 known.width=Some(解析宽)，闭包据此等比 height）。
@@ -131,6 +133,7 @@ pub fn solve(
                     align: s.text_align,
                     nowrap: s.white_space_nowrap,
                     family: s.font_family.clone(),
+                    color: s.color,
                 })
             }
             NodeKind::Image { src } => {
@@ -253,8 +256,10 @@ pub fn solve(
                         align,
                         nowrap,
                         family,
+                        color,
                     }) => {
                         let font = fonts.select(family.as_deref());
+                        let font_id = fonts.font_id(family.as_deref());
                         let layout = measure_text(
                             content,
                             *font_size,
@@ -264,6 +269,8 @@ pub fn solve(
                             *nowrap,
                             known.width,
                             font,
+                            font_id,
+                            *color,
                         );
                         // 存 TextLayout 供 render 复用。Some（available 测量）优先——
                         // 短文本 taffy 只传 None（max-content ≤ available，不换行），长文本传

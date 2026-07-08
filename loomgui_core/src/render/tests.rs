@@ -884,6 +884,8 @@ fn render_long_text_still_wraps_with_layout_reuse() {
         false,
         None,
         fonts.select(None),
+        0,
+        [1.0, 1.0, 1.0, 1.0],
     )
     .text_width;
     let container_w = 100.0;

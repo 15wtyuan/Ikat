@@ -28,10 +28,22 @@ pub struct Glyph {
     pub bearing_y: f32,
 }
 
-/// 单 run：一组连续字形。单字体单 run，glyphs 直接内联。
+/// 单 run：一组连续字形 + 该 run 的完整样式。统一 plain 与 rich 走同一条
+/// measure→build 链：plain text = 单 run（默认色/Normal 样式），rich text = 多 run。
 #[derive(Debug, Clone, Serialize)]
 pub struct GlyphRun {
     pub font_size: f32,
+    /// 字体 id（atlas key + image_path 合成用）。MVP 单字体：所有 run 填
+    /// default_font_id，build 期 build_text_mesh 仍按外传 font_id 取 face；
+    /// 此字段为 T5+ per-run 字体（多 family）预留。
+    pub font_id: u32,
+    /// per-run 颜色（plain 整段同色；rich 每 run 各自色）。build 期 per-vertex。
+    pub color: [f32; 4],
+    pub weight: crate::text::rich::RichWeight,
+    pub style: crate::text::rich::RichStyle,
+    pub deco: crate::text::rich::RichDeco,
+    /// 链接 id（`<a>` 内的 run）。None=非链接。命中查 fragment 矩形用。
+    pub link_id: Option<u32>,
     pub glyphs: Vec<Glyph>,
 }
 
@@ -182,6 +194,47 @@ impl FontTable {
     }
 }
 
+/// 字距（kerning）：返设计单位 i16（未转 px）。caller 按自身 font_size 缩放。
+///
+/// ttf-parser 0.20：Face 不直接暴露 kern；kern 表是多个子表的集合，
+/// `face.tables().kern.as_ref()` → 迭代 `table.subtables`，跳非水平/变量/状态机子表，
+/// `sub.glyphs_kerning(left, right) -> Option<i16>` 取值。首个命中即返。
+fn kerning_value(
+    face: &Face<'_>,
+    left: ttf_parser::GlyphId,
+    right: ttf_parser::GlyphId,
+) -> Option<i16> {
+    let kern = face.tables().kern.as_ref()?;
+    for sub in kern.subtables {
+        if !sub.horizontal || sub.variable || sub.has_state_machine {
+            continue;
+        }
+        if let Some(k) = sub.glyphs_kerning(left, right) {
+            return Some(k);
+        }
+    }
+    None
+}
+
+/// 字形 advance（px，已按 font_size 缩放）。
+///
+/// 有字形→读 ttf advance；缺字形（glyph_index 返 None）→ 权威 .notdef(gid0)
+/// advance（确定性跨引擎一致）。gid0 advance 缺失时兜底 0.6em（TrueType 惯例）。
+fn glyph_advance(face: &Face<'_>, gid_opt: Option<ttf_parser::GlyphId>, font_size: f32) -> f32 {
+    let units = face.units_per_em() as f32;
+    let to_px = |design: f32| -> f32 { design / units * font_size };
+    match gid_opt {
+        Some(gid) => face
+            .glyph_hor_advance(gid)
+            .map(|v| to_px(v as f32))
+            .unwrap_or(0.0),
+        None => face
+            .glyph_hor_advance(ttf_parser::GlyphId(0))
+            .map(|v| to_px(v as f32))
+            .unwrap_or(to_px(units * 0.6)),
+    }
+}
+
 /// 测量并布局文本。
 ///
 /// - `line_height`：倍数，`0.0` = normal（= ascent - descent + line_gap）。
@@ -205,6 +258,8 @@ pub fn measure_text(
     nowrap: bool,
     max_width: Option<f32>,
     font: &Font,
+    font_id: u32,
+    color: [f32; 4],
 ) -> TextLayout {
     let ascent = font.ascent(font_size);
     let descent = font.descent(font_size); // 负
@@ -228,38 +283,12 @@ pub fn measure_text(
     // 单位换算辅助：设计单位 → px。
     let to_px = |design: f32| -> f32 { design / units * font_size };
 
-    // kerning 重开：光栅化搬核心后 quad 是真实 ttf bbox，可安全 honor kern（spec §9）。
-    // ttf-parser 0.20：Face 不直接暴露字距；kern 表是多个子表的集合，
-    // `face.tables().kern.as_ref()` → 迭代 `table.subtables`，跳非水平/变量/状态机子表，
-    // `sub.glyphs_kerning(left, right) -> Option<i16>` 取值。
+    // kerning / advance 复用 module-level helper（measure_rich_text 也用，避免复制粘贴）。
     let kerning = |left: ttf_parser::GlyphId, right: ttf_parser::GlyphId| -> Option<i16> {
-        let kern = font.face.tables().kern.as_ref()?;
-        for sub in kern.subtables {
-            if !sub.horizontal || sub.variable || sub.has_state_machine {
-                continue;
-            }
-            if let Some(k) = sub.glyphs_kerning(left, right) {
-                return Some(k);
-            }
-        }
-        None
+        kerning_value(&font.face, left, right)
     };
-    // advance：有字形→读 ttf advance；缺字形（glyph_index 返 None）→ 权威 .notdef(gid0)
-    // advance（确定性跨引擎一致）。gid0 advance 缺失时兜底 0.6em（TrueType 惯例）。
-    // wqy-microhei 本就有 CJK 字形→走 Some 分支，不受影响。
     let advance = |gid_opt: Option<ttf_parser::GlyphId>| -> f32 {
-        match gid_opt {
-            Some(gid) => font
-                .face
-                .glyph_hor_advance(gid)
-                .map(|v| to_px(v as f32))
-                .unwrap_or(0.0),
-            None => font
-                .face
-                .glyph_hor_advance(ttf_parser::GlyphId(0))
-                .map(|v| to_px(v as f32))
-                .unwrap_or(to_px(units * 0.6)),
-        }
+        glyph_advance(&font.face, gid_opt, font_size)
     };
 
     // 度量一段文本的宽度（含字距）。
@@ -399,7 +428,16 @@ pub fn measure_text(
             height: line_h,
             baseline: line_y + baseline,
             width: *lw,
-            runs: vec![GlyphRun { font_size, glyphs }],
+            runs: vec![GlyphRun {
+                font_size,
+                font_id,
+                color,
+                weight: crate::text::rich::RichWeight::Normal,
+                style: crate::text::rich::RichStyle::Normal,
+                deco: crate::text::rich::RichDeco::default(),
+                link_id: None,
+                glyphs,
+            }],
         });
     }
 
@@ -410,10 +448,292 @@ pub fn measure_text(
     }
 }
 
+/// 简化 inline flow measure：runs + 可选宽度 → TextLayout（per-run 样式进 GlyphRun）。
+///
+/// 算法（搬 fgui BuildLines2 + RmlUi GetStrut/DetermineVerticalPositioning）：
+/// 1. 扁平 token 流：每 run 的 text 切成 token（CJK 逐字 / Latin 逐词），token 携 run 样式。
+/// 2. 贪心断行：token 累加超 max_width → 开新行；`\n` 强制换行。
+/// 3. 每行 baseline = 该行 max 字号的 ascent；行高 = strut（line_height 倍数或自然行高）。
+/// 4. 定位：pen x 累加 advance + kern；glyph y = 0（行内相对，build 加 baseline）。
+///
+/// 纯函数：不光栅、不读 atlas（atlas ensure 在 build 期）。可被 taffy 反复调。
+///
+/// MVP 单字体：所有 run 共用传入的 `font`（节点 font_family 选的）+ `default_font_id`；
+/// `GlyphRun.font_id` 填 `default_font_id`（run.font_id 字段保留但不用于选 face）。
+pub fn measure_rich_text(
+    runs: &[crate::text::rich::RichRun],
+    max_width: Option<f32>,
+    base_line_height: f32,
+    font: &Font,
+    default_font_id: u32,
+) -> TextLayout {
+    let units = font.face.units_per_em().max(1) as f32;
+
+    // 1. 扁平 token 流（token = 子串 + 所属 run 索引 + 宽度 + 是否强制换行）。
+    //    CJK 逐字、Latin 逐词（空白分词）。用 char_indices 取字节范围切片（非 unsafe）。
+    struct Tok<'a> {
+        text: &'a str,
+        run_idx: usize,
+        w: f32,
+        is_break: bool,
+    }
+    let mut tokens: Vec<Tok> = Vec::new();
+    for (ri, r) in runs.iter().enumerate() {
+        match &r.kind {
+            crate::text::rich::RichKind::Text { text } => {
+                if text == "\n" {
+                    tokens.push(Tok {
+                        text: "\n",
+                        run_idx: ri,
+                        w: 0.0,
+                        is_break: true,
+                    });
+                    continue;
+                }
+                let scale = r.size_px as f32 / units;
+                // 空白分词：按空格切词，词间不补空格 token（简化：HTML 空白折叠后词间单空格
+                // 已并入词尾/词首，measure 宽度差异可忽略；MVP 不追求像素级空格精度）。
+                for word in text.split(' ') {
+                    if word.is_empty() {
+                        continue;
+                    }
+                    if word.chars().any(is_cjk) {
+                        // CJK 拆单字：每字一 token，按 char_indices 取字节范围切片。
+                        let mut indices = word.char_indices();
+                        let mut cur = indices.next();
+                        while let Some((byte_off, _ch)) = cur {
+                            let next = indices.next();
+                            let next_byte_off = match next {
+                                Some((nbo, _)) => nbo,
+                                None => word.len(),
+                            };
+                            let slice = &word[byte_off..next_byte_off];
+                            let w = char_advance(&font.face, slice.chars().next().unwrap(), scale);
+                            tokens.push(Tok {
+                                text: slice,
+                                run_idx: ri,
+                                w,
+                                is_break: false,
+                            });
+                            cur = next;
+                        }
+                    } else {
+                        let w = str_advance(&font.face, word, scale);
+                        tokens.push(Tok {
+                            text: word,
+                            run_idx: ri,
+                            w,
+                            is_break: false,
+                        });
+                    }
+                }
+            }
+            crate::text::rich::RichKind::Image { w, .. } => {
+                tokens.push(Tok {
+                    text: "",
+                    run_idx: ri,
+                    w: *w,
+                    is_break: false,
+                });
+            }
+        }
+    }
+
+    // 2. 贪心断行：token 累加超 max_width → 开新行；is_break（\n）强制换行。
+    //    首个 token 不论宽度都入行（防零宽 token 死循环）。
+    let mut lines: Vec<Vec<usize>> = vec![Vec::new()];
+    let mut cur_w = 0.0f32;
+    for (ti, tok) in tokens.iter().enumerate() {
+        if tok.is_break {
+            lines.push(Vec::new());
+            cur_w = 0.0;
+            continue;
+        }
+        let fits =
+            max_width.is_none_or(|mw| cur_w + tok.w <= mw || lines.last().unwrap().is_empty());
+        if !fits {
+            lines.push(Vec::new());
+            cur_w = 0.0;
+        }
+        lines.last_mut().unwrap().push(ti);
+        cur_w += tok.w;
+    }
+
+    // 3+4. 每行 baseline/高度 + 字形定位（pen x 累加 advance + kern）。
+    let mut out_lines: Vec<Line> = Vec::new();
+    let mut y = 0.0f32;
+    for line_toks in &lines {
+        // 该行 max 字号决定 baseline/strut。
+        let line_size = line_toks
+            .iter()
+            .map(|&ti| runs[tokens[ti].run_idx].size_px as f32)
+            .fold(0.0f32, f32::max)
+            .max(1.0);
+        let line_ascent = font.ascent(line_size);
+        let line_descent = font.descent(line_size); // 负
+        let line_gap = font.line_gap(line_size);
+        let h = strut_height(
+            base_line_height,
+            line_size,
+            line_ascent,
+            line_descent,
+            line_gap,
+        );
+        let baseline = line_ascent; // 行顶到 baseline。
+
+        if line_toks.is_empty() {
+            // 空行（如 <br><br> 间）仍占行高。
+            out_lines.push(Line {
+                y,
+                height: h,
+                baseline: y + baseline,
+                width: 0.0,
+                runs: Vec::new(),
+            });
+            y += h;
+            continue;
+        }
+
+        // 按 token 顺序生成 GlyphRun（同 run 相邻 token 合并 glyphs 进同一 run）。
+        let mut runs_out: Vec<GlyphRun> = Vec::new();
+        let mut pen_x = 0.0f32;
+        let mut prev_gid: Option<ttf_parser::GlyphId> = None;
+        for &ti in line_toks {
+            let r = &runs[tokens[ti].run_idx];
+            match &r.kind {
+                crate::text::rich::RichKind::Text { .. } => {
+                    let mut glyphs: Vec<Glyph> = Vec::new();
+                    for ch in tokens[ti].text.chars() {
+                        let gid_opt = font.face.glyph_index(ch);
+                        let gid = gid_opt.unwrap_or_default();
+                        // kern（跨 token 也算——prev_gid 是行内前一个字形）。
+                        if let Some(p) = prev_gid {
+                            if let Some(k) = kerning_value(&font.face, p, gid) {
+                                pen_x += k as f32 / units * r.size_px as f32;
+                            }
+                        }
+                        let (bx, by) = font
+                            .face
+                            .glyph_bounding_box(gid)
+                            .map(|b| {
+                                (
+                                    b.x_min as f32 / units * r.size_px as f32,
+                                    b.y_max as f32 / units * r.size_px as f32,
+                                )
+                            })
+                            .unwrap_or((0.0, 0.0));
+                        glyphs.push(Glyph {
+                            glyph_id: gid.0,
+                            codepoint: ch as u32,
+                            x: pen_x,
+                            y: 0.0, // 行内相对（build 加 baseline）。
+                            bearing_x: bx,
+                            bearing_y: by,
+                        });
+                        pen_x += glyph_advance(&font.face, gid_opt, r.size_px as f32);
+                        prev_gid = Some(gid);
+                    }
+                    // 同 run 相邻 token 合并（per-run 样式一致）；否则新 run。
+                    let merged = runs_out.last_mut().filter(|gr: &&mut GlyphRun| {
+                        gr.font_size == r.size_px as f32
+                            && gr.font_id == default_font_id
+                            && gr.color == r.color
+                            && gr.weight == r.weight
+                            && gr.style == r.style
+                            && gr.deco == r.deco
+                            && gr.link_id == r.link_id
+                    });
+                    if let Some(gr) = merged {
+                        gr.glyphs.extend(glyphs);
+                    } else {
+                        runs_out.push(GlyphRun {
+                            font_size: r.size_px as f32,
+                            font_id: default_font_id,
+                            color: r.color,
+                            weight: r.weight,
+                            style: r.style,
+                            deco: r.deco,
+                            link_id: r.link_id,
+                            glyphs,
+                        });
+                    }
+                }
+                crate::text::rich::RichKind::Image { w, .. } => {
+                    // 图占位：无 glyph（build 期另产 image quad）；占宽。
+                    pen_x += w;
+                }
+            }
+        }
+        let width = pen_x;
+        out_lines.push(Line {
+            y,
+            height: h,
+            baseline: y + baseline,
+            width,
+            runs: runs_out,
+        });
+        y += h;
+    }
+
+    let text_width = out_lines.iter().map(|l| l.width).fold(0.0f32, f32::max);
+    let text_height = y;
+    TextLayout {
+        text_width,
+        text_height,
+        lines: out_lines,
+    }
+}
+
+/// CJK 判定（简化：常见 CJK 区间）。断行用——CJK 每字可换行。
+fn is_cjk(ch: char) -> bool {
+    let c = ch as u32;
+    (0x4E00..=0x9FFF).contains(&c) // CJK 统一
+        || (0x3000..=0x303F).contains(&c) // CJK 标点
+        || (0xFF00..=0xFFEF).contains(&c) // 全角
+        || (0x3040..=0x30FF).contains(&c) // 假名
+}
+
+/// 单字 advance（px，已按 scale 缩放）。复用 glyph_advance 的缺字兜底逻辑。
+fn char_advance(face: &Face<'_>, ch: char, scale: f32) -> f32 {
+    let gid_opt = face.glyph_index(ch);
+    let font_size = scale * face.units_per_em() as f32;
+    glyph_advance(face, gid_opt, font_size)
+}
+
+/// 字符串 advance（px，已按 scale 缩放，含字距）。
+fn str_advance(face: &Face<'_>, s: &str, scale: f32) -> f32 {
+    let units = face.units_per_em() as f32;
+    let font_size = scale * units;
+    let mut pen = 0.0f32;
+    let mut prev: Option<ttf_parser::GlyphId> = None;
+    for ch in s.chars() {
+        let gid_opt = face.glyph_index(ch);
+        let gid = gid_opt.unwrap_or_default();
+        if let Some(p) = prev {
+            if let Some(k) = kerning_value(face, p, gid) {
+                pen += k as f32 / units * font_size;
+            }
+        }
+        pen += glyph_advance(face, gid_opt, font_size);
+        prev = Some(gid);
+    }
+    pen
+}
+
+/// strut 行高（搬 RmlUi GetStrut：line_height > 0 用倍数，否则自然行高 ascent-descent+gap）。
+fn strut_height(line_height: f32, size: f32, ascent: f32, descent: f32, line_gap: f32) -> f32 {
+    if line_height > 0.0 {
+        size * line_height
+    } else {
+        ascent - descent + line_gap
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::style::resolved::TextAlign;
+    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
 
     /// 测试字体：仓库内 DejaVuSans.ttf（跨平台一致），缺则跳过。
     fn test_font() -> Option<Font> {
@@ -461,7 +781,18 @@ mod tests {
                 return;
             }
         };
-        let layout = measure_text("Hello", 16.0, 0.0, 0.0, TextAlign::Left, false, None, &font);
+        let layout = measure_text(
+            "Hello",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &font,
+            0,
+            [1.0, 1.0, 1.0, 1.0],
+        );
         assert_eq!(layout.lines.len(), 1);
         assert!(!layout.lines[0].runs.is_empty());
         // Hello = 5 字形
@@ -481,7 +812,18 @@ mod tests {
                 return;
             }
         };
-        let layout = measure_text("AV", 24.0, 0.0, 0.0, TextAlign::Left, false, None, &font);
+        let layout = measure_text(
+            "AV",
+            24.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &font,
+            0,
+            [1.0, 1.0, 1.0, 1.0],
+        );
         let g = &layout.lines[0].runs[0].glyphs;
         assert_eq!(g.len(), 2, "AV = 2 glyph");
         let gid_a = font.face.glyph_index('A').unwrap();
@@ -515,7 +857,18 @@ mod tests {
             font.face.glyph_index('中').is_none(),
             "前置：DejaVuSans 应缺「中」字形"
         );
-        let layout = measure_text("中中", 24.0, 0.0, 0.0, TextAlign::Left, false, None, &font);
+        let layout = measure_text(
+            "中中",
+            24.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &font,
+            0,
+            [1.0, 1.0, 1.0, 1.0],
+        );
         let g = &layout.lines[0].runs[0].glyphs;
         assert_eq!(g.len(), 2, "中中 = 2 glyph");
         assert_eq!(g[0].x, 0.0, "首字 pen_x = 0");
@@ -551,6 +904,8 @@ mod tests {
             false,
             Some(50.0),
             &font,
+            0,
+            [1.0, 1.0, 1.0, 1.0],
         );
         assert!(
             layout.lines.len() >= 2,
@@ -577,6 +932,8 @@ mod tests {
             true,
             Some(10.0),
             &font,
+            0,
+            [1.0, 1.0, 1.0, 1.0],
         );
         assert_eq!(layout.lines.len(), 1);
     }
@@ -600,6 +957,8 @@ mod tests {
             false,
             Some(40.0),
             &font,
+            0,
+            [1.0, 1.0, 1.0, 1.0],
         );
         assert!(
             layout.lines.len() >= 2,
@@ -627,6 +986,8 @@ mod tests {
             false,
             Some(60.0),
             &font,
+            0,
+            [1.0, 1.0, 1.0, 1.0],
         );
         assert!(layout.lines.len() >= 2, "混排窄约束应换行");
         // 每行至少有 glyph（无空行）。
@@ -655,6 +1016,8 @@ mod tests {
             false,
             None,
             &font,
+            0,
+            [1.0, 1.0, 1.0, 1.0],
         );
         assert_eq!(layout.lines.len(), 2, "\\n 应强制换行成 2 行");
     }
@@ -677,6 +1040,8 @@ mod tests {
             true,
             Some(10.0),
             &font,
+            0,
+            [1.0, 1.0, 1.0, 1.0],
         );
         assert_eq!(layout.lines.len(), 1, "nowrap 强制单行（含 CJK）");
     }
@@ -700,6 +1065,8 @@ mod tests {
             false,
             Some(50.0),
             &font,
+            0,
+            [1.0, 1.0, 1.0, 1.0],
         );
         assert!(layout.lines.len() >= 2, "超长无空格串应逐字断 ≥2 行");
     }
@@ -713,8 +1080,30 @@ mod tests {
                 return;
             }
         };
-        let normal = measure_text("Hi", 16.0, 0.0, 0.0, TextAlign::Left, false, None, &font);
-        let tall = measure_text("Hi", 16.0, 2.0, 0.0, TextAlign::Left, false, None, &font);
+        let normal = measure_text(
+            "Hi",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &font,
+            0,
+            [1.0, 1.0, 1.0, 1.0],
+        );
+        let tall = measure_text(
+            "Hi",
+            16.0,
+            2.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &font,
+            0,
+            [1.0, 1.0, 1.0, 1.0],
+        );
         assert!(tall.lines[0].height > normal.lines[0].height);
     }
 
@@ -779,5 +1168,199 @@ mod tests {
     fn font_table_select_panics_without_default() {
         let t = FontTable::new();
         t.select(None);
+    }
+
+    // ── measure_rich_text tests（v1.7）──
+
+    /// 两个不同色的 run 在一行内，各自 GlyphRun 携带自己的色（per-run color）。
+    #[test]
+    fn rich_multi_color_two_runs() {
+        let font = match test_font() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip: no test font");
+                return;
+            }
+        };
+        let runs = vec![
+            RichRun {
+                kind: RichKind::Text {
+                    text: "red ".into(),
+                },
+                color: [1.0, 0.0, 0.0, 1.0],
+                font_id: 0,
+                size_px: 24,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            },
+            RichRun {
+                kind: RichKind::Text {
+                    text: "blue".into(),
+                },
+                color: [0.0, 0.0, 1.0, 1.0],
+                font_id: 0,
+                size_px: 24,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            },
+        ];
+        let lay = measure_rich_text(&runs, Some(1000.0), 1.2, &font, 0);
+        // 一行，两个 run，各带自己的色。
+        assert_eq!(lay.lines.len(), 1, "宽约束下单行");
+        assert_eq!(lay.lines[0].runs.len(), 2, "两个 run 各自独立");
+        assert_eq!(lay.lines[0].runs[0].color, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(lay.lines[0].runs[1].color, [0.0, 0.0, 1.0, 1.0]);
+    }
+
+    /// 窄宽度强制换行（拉丁按词）。多个词 → 多行。
+    #[test]
+    fn rich_wraps_on_max_width() {
+        let font = match test_font() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip: no test font");
+                return;
+            }
+        };
+        let runs = vec![RichRun {
+            kind: RichKind::Text {
+                text: "aaaa bbbb cccc".into(),
+            },
+            color: [1.0, 1.0, 1.0, 1.0],
+            font_id: 0,
+            size_px: 24,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+            link_id: None,
+        }];
+        // 窄宽度强制换行（拉丁按词）。
+        let lay = measure_rich_text(&runs, Some(30.0), 1.2, &font, 0);
+        assert!(
+            lay.lines.len() > 1,
+            "窄宽度应换行，实际 {} 行",
+            lay.lines.len()
+        );
+    }
+
+    /// CJK 逐字断行：窄宽度下每字一行（用 CJK 字体，否则缺字走 .notdef advance）。
+    #[test]
+    fn rich_cjk_breaks_per_char() {
+        let font = match test_font_cjk() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip: no CJK test font (wqy-microhei.ttc)");
+                return;
+            }
+        };
+        let runs = vec![RichRun {
+            kind: RichKind::Text {
+                text: "你好世界".into(),
+            },
+            color: [1.0, 1.0, 1.0, 1.0],
+            font_id: 0,
+            size_px: 24,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+            link_id: None,
+        }];
+        // 极窄宽度 → CJK 每字独占一行（4 字 ≥ 4 行）。
+        let lay = measure_rich_text(&runs, Some(10.0), 1.2, &font, 0);
+        assert!(
+            lay.lines.len() >= 4,
+            "CJK 逐字断行应 ≥4 行（窄宽），实际 {}",
+            lay.lines.len()
+        );
+    }
+
+    /// `\n` 强制换行：两段文本 + 中间 `\n` → 2 行。
+    #[test]
+    fn rich_newline_forces_break() {
+        let font = match test_font() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip: no test font");
+                return;
+            }
+        };
+        let runs = vec![
+            RichRun {
+                kind: RichKind::Text {
+                    text: "aaaa".into(),
+                },
+                color: [1.0, 1.0, 1.0, 1.0],
+                font_id: 0,
+                size_px: 24,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            },
+            RichRun {
+                kind: RichKind::Text { text: "\n".into() },
+                color: [1.0, 1.0, 1.0, 1.0],
+                font_id: 0,
+                size_px: 24,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            },
+            RichRun {
+                kind: RichKind::Text {
+                    text: "bbbb".into(),
+                },
+                color: [1.0, 1.0, 1.0, 1.0],
+                font_id: 0,
+                size_px: 24,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            },
+        ];
+        let lay = measure_rich_text(&runs, Some(1000.0), 1.2, &font, 0);
+        assert_eq!(lay.lines.len(), 2, "\\n 应强制换行成 2 行");
+    }
+
+    /// per-run 样式（weight/style/deco/link_id）透传进 GlyphRun。
+    #[test]
+    fn rich_run_style_propagates_to_glyph_run() {
+        let font = match test_font() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip: no test font");
+                return;
+            }
+        };
+        let runs = vec![RichRun {
+            kind: RichKind::Text {
+                text: "link".into(),
+            },
+            color: [0.0, 1.0, 0.0, 1.0],
+            font_id: 7,
+            size_px: 18,
+            weight: RichWeight::Bold,
+            style: RichStyle::Italic,
+            deco: RichDeco {
+                underline: true,
+                strike: false,
+            },
+            link_id: Some(3),
+        }];
+        let lay = measure_rich_text(&runs, Some(1000.0), 1.2, &font, 7);
+        assert_eq!(lay.lines.len(), 1);
+        let r = &lay.lines[0].runs[0];
+        assert_eq!(r.weight, RichWeight::Bold);
+        assert_eq!(r.style, RichStyle::Italic);
+        assert!(r.deco.underline);
+        assert_eq!(r.link_id, Some(3));
+        assert_eq!(r.font_id, 7);
+        assert_eq!(r.color, [0.0, 1.0, 0.0, 1.0]);
     }
 }

@@ -346,6 +346,8 @@ pub fn build_render_nodes(
                 // 避免 match arm 返回单个 RenderNode 的限制，在此处直接 push。
                 let s = &n.style;
                 let font = fonts.select(s.font_family.as_deref());
+                let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
+                let font_id = fonts.font_id(s.font_family.as_deref());
                 let mut layout = scene
                     .text_layouts
                     .get(n.id.index())
@@ -361,6 +363,8 @@ pub fn build_render_nodes(
                             s.white_space_nowrap,
                             Some(rect.w),
                             font,
+                            font_id,
+                            text_color,
                         )
                     });
                 let off_x =
@@ -370,8 +374,6 @@ pub fn build_render_nodes(
                 if off_x != 0.0 || off_y != 0.0 {
                     bake_content_offset(&mut layout, off_x, off_y);
                 }
-                let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
-                let font_id = fonts.font_id(s.font_family.as_deref());
                 let meshes =
                     build_text_mesh(&layout, font_id, s.font_size, text_color, atlas, font);
                 if meshes.is_empty() {
