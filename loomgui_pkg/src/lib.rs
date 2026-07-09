@@ -232,7 +232,10 @@ fn serialize_children(el: &scraper::ElementRef, out: &mut String) {
     for child in el.children() {
         match child.value() {
             scraper::node::Node::Text(t) => {
-                out.push_str(&t.text);
+                // t.text 是 scraper 解码后的文本（源码 `&lt;i&gt;` → `<i>`）。裸写回会让二次
+                // parse_html 把解码出的 `<` 当标签起点 → 误判为元素子节点（行内混排假报错）。
+                // 须重新转义 `&` `<` `>`，保证 round-trip 语义一致。
+                escape_text_into(&t.text, out);
             }
             scraper::node::Node::Element(e) => {
                 // 跳过 style/link（CSS 已由 extract_component_css 抽走）。
@@ -246,7 +249,7 @@ fn serialize_children(el: &scraper::ElementRef, out: &mut String) {
                         out.push(' ');
                         out.push_str(k);
                         out.push_str("=\"");
-                        out.push_str(v);
+                        escape_attr_into(v, out);
                         out.push('"');
                     }
                     out.push('>');
@@ -257,6 +260,32 @@ fn serialize_children(el: &scraper::ElementRef, out: &mut String) {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+/// 文本节点转义：`&` 先（避二次转义）、`<`、`>`。scraper 已把实体解码成裸字符，
+/// 序列化回 HTML 必须重新转义，否则二次解析把 `<` 当标签起点（行内混排假报错）。
+fn escape_text_into(s: &str, out: &mut String) {
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(c),
+        }
+    }
+}
+
+/// 属性值转义：`&` 先、`"`（双引号包裹内须转义）、`<`/`>`（一并转义求稳）。
+fn escape_attr_into(s: &str, out: &mut String) {
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(c),
         }
     }
 }
@@ -441,6 +470,21 @@ mod tests {
         let html = r#"<div><img src="res/x.png"></div>"#;
         let stripped = strip_style_and_link(html);
         assert!(stripped.contains("res/x.png"), "img src 保留");
+    }
+
+    #[test]
+    fn strip_style_and_link_escapes_entities_in_text() {
+        // 回归：scraper 把 `&lt;i&gt;` 解码成文本 "<i>"。序列化回 HTML 时若裸写，
+        // 二次 parse_html 会把 "<i>" 当标签 → span 误判含元素子节点 → 行内混排假报错。
+        // 文本节点须重新转义 `<` `>` `&`，保证 round-trip 语义一致。
+        let html = r#"<div><span>a &lt;i&gt; c</span></div>"#;
+        let stripped = strip_style_and_link(html);
+        assert!(stripped.contains("&lt;i&gt;"), "文本实体保留: {stripped}");
+        assert!(!stripped.contains("<i>"), "未裸写解码出的标签: {stripped}");
+        assert!(
+            loomgui_core::parse::dom::parse_html(&stripped).is_ok(),
+            "二次 parse_html 成功（实体文本不被误判为元素）: {stripped}"
+        );
     }
 
     #[test]

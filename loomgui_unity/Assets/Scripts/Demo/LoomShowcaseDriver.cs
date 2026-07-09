@@ -294,7 +294,6 @@ namespace LoomGUI
                 case "page_list": SubscribeList(); break;
                 case "page_nativehost": SubscribeNativeHost(); break;
                 case "page_controller": SubscribeController(); break;
-                case "page_richtext": SubscribeRichText(); break;
             }
         }
 
@@ -312,7 +311,6 @@ namespace LoomGUI
             AddNavListener("nav-list", "page_list");
             AddNavListener("nav-nativehost", "page_nativehost");
             AddNavListener("nav-controller", "page_controller");
-            AddNavListener("nav-richtext", "page_richtext");
             // nav-tips-demo → 弹 tips_toast 演示（tips_layer 叠加）。
             uint tipsBtn = _stage.FindNodeById("nav-tips-demo");
             AddPageListener(tipsBtn, EventType.Click, _ => ShowTips());
@@ -465,15 +463,9 @@ namespace LoomGUI
             // 在 Unity Animator 窗口把 clip 拖进去建 state（state 名 = clip 名）。
         }
 
-        // page_text：back-home（无其他交互元素，纯展示文本样式）。
-        void SubscribeText()
-        {
-            SubscribeBackHome();
-            Debug.Log("[Showcase] page_text 订阅完成（back）");
-        }
-
-        // === page_richtext（v1.7 富文本）===
-        // rich-swap 轮换 SetRichText 预设（每套展示不同富文本特性）；<a> 命中走 link click → rich-log 日志。
+        // === 统一文本页 page_text（§A 排版 + §B 富文本 v1.7 + §C 特效 v1.8）===
+        // 富文本段：rich-swap 轮换 SetRichText 预设（每套展示不同富文本特性）；
+        // <a> 命中走 link click → rich-log 日志。
         uint _richDynamicNode = uint.MaxValue;
         uint _richLogNode = uint.MaxValue;
         uint _richLinkId = 0;            // 已注册 link listener 的 link_id（切页 ClearPageListeners 清）
@@ -484,9 +476,9 @@ namespace LoomGUI
             "预设 C：CJK 中英混排 LoomGUI v1.7 rich inline flow，<br/>强制换行后第二行，<a href=\"swap://c\">链接 C</a>"
         };
 
-        // page_richtext：back-home + rich-swap 换内容（set_rich_text）+ 链接点击（onClickLink）。
+        // page_text：back-home + 富文本 rich-swap 换内容（set_rich_text）+ 链接点击（onClickLink）。
         // 预设每套只含 1 个 <a>（link_id=1），稳定订阅 link_id=1；初始 markup 的 <a> 也是 link_id=1。
-        void SubscribeRichText()
+        void SubscribeText()
         {
             SubscribeBackHome();
             _richDynamicNode = _stage.FindNodeById("rich-dynamic");
@@ -505,7 +497,7 @@ namespace LoomGUI
             _richLinkId = 1;
             _stage.EventHandler.AddLinkClickListener(_richLinkId, OnRichLink);
 
-            Debug.Log("[Showcase] page_richtext 订阅完成（swap set_rich_text + link click）");
+            Debug.Log("[Showcase] page_text 订阅完成（back + rich swap + link click）");
         }
 
         // OnRichLink：<a> 命中回调。把命中的 link_id 写进 rich-log（演示 onClickLink 通路）。

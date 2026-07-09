@@ -16,8 +16,7 @@
     'nav-interact': 'page_interact',
     'nav-dyntree': 'page_dyntree',
     'nav-list': 'page_list',
-    'nav-nativehost': 'page_nativehost',
-    'nav-richtext': 'page_richtext'
+    'nav-nativehost': 'page_nativehost'
   };
 
   // overlay 组件模板：<style> + markup 一起（宿主页没这些类的 CSS）。
@@ -157,7 +156,49 @@
         slot.innerHTML = '<div style="color:#9aa0b4;font-size:12px;text-align:center;padding:8px">[NativeHost<br>外部 GO<br>预览不支持]</div>';
       }
     },
-    page_text:     function () { wireBackHome(); },
+    // page_text：统一文本 showcase（§A 排版 + §B 富文本 v1.7 + §C 特效 v1.8）。
+    // 富文本段用 Chromium 原生 inline flow（display:block div 的 inline style 覆盖
+    // preview-base.css 的 div=flex）。两处对齐 LoomGUI 渲染差异：
+    //  1. <a> 继承色 + 无下划线（LoomGUI 的 a 无默认蓝/下划线；Chromium 默认蓝下划线会骗人）
+    //  2. img[vertical-align] HTML attr → CSS（LoomGUI 认 HTML attr，Chromium 只认 CSS）
+    // v1.8 文本特效（text-shadow/-webkit-text-stroke/渐变字）是标准 CSS，Chromium 原生 ≈ Unity；
+    // font-effect 为 LoomGUI 私有 CSS，Chromium 不识别（字呈纯色，Unity 可见）。
+    page_text:     function () {
+      wireBackHome();
+      var st = document.createElement('style');
+      st.textContent = '.rt a,.rt-tight a{color:inherit;text-decoration:none}' +
+        '.rt a:hover,.rt-tight a:hover{color:#5fb2c4;text-decoration:underline}';
+      document.head.appendChild(st);
+      // img vertical-align HTML attr → CSS style（Chromium 不认 HTML attr，转成 style 才生效）。
+      var imgs = document.querySelectorAll('.rt img[vertical-align],.rt-tight img[vertical-align]');
+      for (var i = 0; i < imgs.length; i++) {
+        var va = imgs[i].getAttribute('vertical-align');
+        if (va) imgs[i].style.verticalAlign = va;
+      }
+      var presets = [
+        '预设 A：<span style="color:#ffd700;font-weight:bold">金色粗体</span> + <img src="res/icons/zap.png" width="20" height="20" style="vertical-align:middle"/> 行内图 + <a href="swap://a">链接 A</a>',
+        '预设 B：<u>下划线</u> · <s>删除线</s> · <b>粗</b> · <i>斜</i> · <span style="color:#5fb2c4;font-size:16px">小字青</span>',
+        '预设 C：CJK 中英混排 LoomGUI v1.7 rich inline flow，<br/>强制换行后第二行，<a href="swap://c">链接 C</a>'
+      ];
+      var idx = 0;
+      var dyn = $('rich-dynamic');
+      var log = $('rich-log');
+      function bindLinks() {
+        if (!dyn) return;
+        var links = dyn.querySelectorAll('a');
+        for (var i = 0; i < links.length; i++) {
+          links[i].onclick = function (e) {
+            e.preventDefault();
+            if (log) log.textContent = '链接点击日志：' + (this.getAttribute('href') || '(无 href)');
+          };
+        }
+      }
+      bindLinks();
+      bindClick('rich-swap', function () {
+        idx = (idx + 1) % presets.length;
+        if (dyn) { dyn.innerHTML = presets[idx]; bindLinks(); }
+      });
+    },
     page_image:    function () { wireBackHome(); },
     page_scroll:   function () {
       wireBackHome();
@@ -381,50 +422,6 @@
         setTimeout(function () { fx.style.opacity = '0'; }, 600);
       });
     },
-    // page_richtext（v1.7 富文本）：预览用 Chromium 原生 inline flow（display:block div 的
-    // inline style 覆盖 preview-base.css 的 div=flex）。加两段逻辑对齐 LoomGUI 渲染差异：
-    //  1. <a> 继承色 + 无下划线（LoomGUI 的 a 无默认蓝/下划线，色走 run 继承；Chromium 默认蓝下划线会骗人）
-    //  2. img[vertical-align] HTML attr → CSS（LoomGUI 认 HTML attr，Chromium 只认 CSS；不转则 §4 三图都 baseline）
-    // 颜色/字号/粗斜/装饰线/图/链接结构可信；换行点/行高/baseline LoomGUI 简化 inline flow 有差异，仅大致参考。
-    page_richtext: function () {
-      wireBackHome();
-      var st = document.createElement('style');
-      st.textContent = '.rt a,.rt-tight a{color:inherit;text-decoration:none}' +
-        '.rt a:hover,.rt-tight a:hover{color:#5fb2c4;text-decoration:underline}';
-      document.head.appendChild(st);
-      // img vertical-align HTML attr → CSS style（Chromium 不认 HTML attr，转成 style 才生效）。
-      function applyImgValign() {
-        var imgs = document.querySelectorAll('.rt img[vertical-align],.rt-tight img[vertical-align]');
-        for (var i = 0; i < imgs.length; i++) {
-          var va = imgs[i].getAttribute('vertical-align');
-          if (va) imgs[i].style.verticalAlign = va;
-        }
-      }
-      applyImgValign();
-      var presets = [
-        '预设 A：<span style="color:#ffd700;font-weight:bold">金色粗体</span> + <img src="res/icons/zap.png" width="20" height="20" style="vertical-align:middle"/> 行内图 + <a href="swap://a">链接 A</a>',
-        '预设 B：<u>下划线</u> · <s>删除线</s> · <b>粗</b> · <i>斜</i> · <span style="color:#5fb2c4;font-size:16px">小字青</span>',
-        '预设 C：CJK 中英混排 LoomGUI v1.7 rich inline flow，<br/>强制换行后第二行，<a href="swap://c">链接 C</a>'
-      ];
-      var idx = 0;
-      var dyn = $('rich-dynamic');
-      var log = $('rich-log');
-      function bindLinks() {
-        if (!dyn) return;
-        var links = dyn.querySelectorAll('a');
-        for (var i = 0; i < links.length; i++) {
-          links[i].onclick = function (e) {
-            e.preventDefault();
-            if (log) log.textContent = '链接点击日志：' + (this.getAttribute('href') || '(无 href)');
-          };
-        }
-      }
-      bindLinks();
-      bindClick('rich-swap', function () {
-        idx = (idx + 1) % presets.length;
-        if (dyn) { dyn.innerHTML = presets[idx]; bindLinks(); }
-      });
-    }
   };
 
   // === boot ===
