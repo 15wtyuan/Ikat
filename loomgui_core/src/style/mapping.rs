@@ -114,11 +114,7 @@ fn parse_filter(value: &str) -> Option<[f32; 20]> {
                     IDENTITY
                 }
             }
-            "sepia" => {
-                // sepia(1) = 棕褐 tint 预设（完整 Tint 矩阵待补，先用 grayscale 占位，spec §9 风险）
-                // ponytail: sepia 完整 Tint 矩阵实现期补，先用 grayscale 占位
-                color_filter::grayscale()
-            }
+            "sepia" => color_filter::sepia(),
             _ => continue,
         };
         acc = color_filter::concat(&m, &acc); // 新 preset 左乘（fgui ConcatValues: newPreset × _matrix）

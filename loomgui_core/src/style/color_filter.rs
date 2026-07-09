@@ -28,6 +28,24 @@ pub fn grayscale() -> [f32; 20] {
     m
 }
 
+/// sepia(1) = 标准棕褐 tint（W3C 滤镜矩阵）。
+pub fn sepia() -> [f32; 20] {
+    let mut m = IDENTITY;
+    // R' = 0.393R + 0.769G + 0.189B
+    m[0] = 0.393;
+    m[1] = 0.769;
+    m[2] = 0.189;
+    // G' = 0.349R + 0.686G + 0.168B
+    m[5] = 0.349;
+    m[6] = 0.686;
+    m[7] = 0.168;
+    // B' = 0.272R + 0.534G + 0.131B
+    m[10] = 0.272;
+    m[11] = 0.534;
+    m[12] = 0.131;
+    m
+}
+
 /// brightness(n) = CSS 乘法 rgb×n（n=1 不变）。对角 n，offset 0。
 pub fn brightness(n: f32) -> [f32; 20] {
     let mut m = IDENTITY;
@@ -185,5 +203,16 @@ mod tests {
         assert!((m[6] - 1.2).abs() < 1e-4);
         assert!((m[12] - 1.2).abs() < 1e-4);
         assert!(m[4].abs() < 1e-4, "brightness offset=0");
+    }
+
+    #[test]
+    fn sepia_matrix_is_not_grayscale() {
+        let s = sepia();
+        let g = grayscale();
+        assert_ne!(s, g, "sepia 不能再退化成 grayscale");
+        // 标准 sepia 矩阵关键值：R 行 [0.393, 0.769, 0.189]
+        assert!((s[0] - 0.393).abs() < 1e-3, "sepia R 行 c0 ≈ 0.393");
+        assert!((s[1] - 0.769).abs() < 1e-3);
+        assert!((s[2] - 0.189).abs() < 1e-3);
     }
 }
