@@ -26,9 +26,9 @@ use node::*;
 
 use taffy::style::LengthPercentage;
 
-/// 合成 node_id 标志位：box-shadow 独立 RenderNode（node_id | BOX_SHADOW_FLAG）。
+/// 合成 node_id 标志位：box-shadow / text-shadow Back layer 独立 RenderNode。
 /// 0x1000_0000（bit 28），不与 V_THUMB_FLAG（0x4000_0000）、H_THUMB_FLAG（0x2000_0000）、
-/// 跨页 text 子页（bits [31:24]）冲突。
+/// 跨页 text 子页（bits [31:24]，实际值 1..~10）冲突。Back layer sort_key < primary（先绘 = 下层）。
 pub(crate) const BOX_SHADOW_FLAG: u32 = 0x1000_0000;
 
 /// 把 2 色线性渐变映射到 quad 4 角顶点色（顶点序 TL, TR, BR, BL）。
@@ -474,7 +474,7 @@ pub fn build_render_nodes(
                 if off_x != 0.0 || off_y != 0.0 {
                     bake_content_offset(&mut layout, off_x, off_y);
                 }
-                let meshes = build_text_mesh(&layout, atlas, fonts, rect);
+                let meshes = build_text_mesh(&layout, atlas, fonts, rect, &n.style.text_effects);
                 push_text_meshes(
                     &mut nodes,
                     &mut id_to_pos,
@@ -485,6 +485,7 @@ pub fn build_render_nodes(
                     alpha,
                     color_tint,
                     wm,
+                    &mut shadow_pairs,
                 );
                 continue; // 直接推完，跳过末尾的 id_to_pos / push。
             }
@@ -545,7 +546,7 @@ pub fn build_render_nodes(
                         rich_fragments.push((node_id, frags));
                     }
                 }
-                let meshes = build_text_mesh(&layout, atlas, fonts, rect);
+                let meshes = build_text_mesh(&layout, atlas, fonts, rect, &n.style.text_effects);
                 push_text_meshes(
                     &mut nodes,
                     &mut id_to_pos,
@@ -556,6 +557,7 @@ pub fn build_render_nodes(
                     alpha,
                     color_tint,
                     wm,
+                    &mut shadow_pairs,
                 );
                 // 行内图：每个 image 一个 Mesh（program=0 image shader，image_path=src）。
                 // 走现有 image 路径（SpriteResolver 命中图集），Unity 零改。
@@ -720,9 +722,12 @@ fn synth_text_node_id(primary_id: u32, sub_page: u32) -> u32 {
     (primary_id & 0x00FF_FFFF) | ((sub_page & 0xFF) << 24)
 }
 
-/// 判断 node_id 是否为跨页 text 子页（bits [31:24] 非零）。
+/// 判断 node_id 是否为跨页 text 子页（bits [31:24] 非零，且非 shadow Back layer 节点）。
+/// shadow Back layer（box-shadow / text-shadow）用 BOX_SHADOW_FLAG（bit 28）标记，
+/// sort_key 由 propagate_box_shadow_sort_keys 传播，不走子页传播——须从此排除，
+/// 否则 propagate_text_sub_page_sort_keys 会把 shadow 节点误计为子页并错移 sort_key。
 fn is_text_sub_page(node_id: u32) -> bool {
-    (node_id >> 24) > 0
+    (node_id & BOX_SHADOW_FLAG) == 0 && (node_id >> 24) > 0
 }
 
 /// 提取跨页 text 子页对应的主节点 id。
@@ -889,6 +894,22 @@ fn bake_content_offset(layout: &mut crate::text::layout::TextLayout, off_x: f32,
     }
 }
 
+/// `build_text_mesh` 产物：base 字形 mesh（按 atlas 页分组）+ shadow Back layer mesh。
+///
+/// Back layer = 所有 text-shadow effect 的字形 quad（offset 已烤进顶点，color = shadow.color），
+/// 在 base 之前绘制（sort_key 更小 = 在下层）。多 shadow 叠加时按声明顺序入列——
+/// 先声明者先绘（落在更下层），与 CSS `text-shadow` 叠加语义一致。
+///
+/// shadow mesh 与 base 同走 program=1（atlas alpha × vertex color），不另开 shader。
+/// atlas 按 effect_sig 分槽：shadow 字形经 blur 后处理，与 raw 字形不混槽。
+struct TextMeshes {
+    /// base 字形（effect_sig=0），按 atlas 页分组。首页用真 node_id，余页用跨页子页合成 id。
+    base: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
+    /// shadow Back layer（每个 shadow effect 一组，已含 offset + shadow color）。
+    /// 每项 = (atlas 页号, verts, uvs, colors, indices)；call site 据此推 Back layer RenderNode。
+    shadow_back: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
+}
+
 /// 把 TextLayout 每字形展成 quad mesh：4 顶点 + 6 索引，UV 指向核心 atlas。
 /// 顶点 = 节点世界空间（pen + bearing + rect.xy）；per-run 颜色烤顶点色（alpha 不烤，走
 /// _Alpha uniform）。索引为 2-tri 扇（0-1-2, 0-2-3，与 mesh::quad 同序）。
@@ -912,18 +933,47 @@ fn bake_content_offset(layout: &mut crate::text::layout::TextLayout, off_x: f32,
 ///
 /// per-glyph 按 `Glyph.font_id` 取 face 光栅（回退字形来自别的 face，必须按字形自己的
 /// font_id 取 face + 拼 GlyphKey，否则用错 face 光栅出错字）。装饰线度量走 run 主字体。
+///
+/// `text_effects`：节点的文字效果（INHERITED，来自 ResolvedStyle）。Shadow effect 产
+/// Back layer mesh——每个 shadow 用独立 effect_sig 注册到 atlas（blur 后处理分槽），
+/// 顶点偏移 (ox, oy)、顶点色 = shadow.color，在 base 之前绘制。其它 effect 类型（Stroke/
+/// Glow/Blur）由后续 task 接入，本 task 只处理 Shadow。
 fn build_text_mesh(
     layout: &crate::text::layout::TextLayout,
     atlas: &mut GlyphAtlas,
     fonts: &crate::text::layout::FontTable,
     rect: &crate::scene::node::Rect,
-) -> Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> {
+    text_effects: &[crate::text::font_effect::FontEffect],
+) -> TextMeshes {
+    use crate::text::font_effect::FontEffect;
     use std::collections::BTreeMap;
     // bearing 来自 glyph bbox，px_w/px_h/UV 含 pad：位图原点 = bbox 原点外扩 pad，
     // left/top 减 pad 对齐位图，否则字形偏 1px。
     let pad = crate::text::atlas::GLYPH_PAD as f32;
-    // 按 atlas 页号分组：每页独立 mesh。存 per-glyph 展开所需全部数据（含 per-run 色/样式）。
-    let mut pages: BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> =
+    // Back layer：先算每个 shadow effect 的 sig 并注册到 atlas，遍历字形时按 sig 取
+    // 后处理过的 atlas 槽（blur 后），顶点偏移 (ox, oy)、色 = shadow.color。
+    let shadow_patterns: Vec<(u64, f32, f32, [f32; 4])> = text_effects
+        .iter()
+        .filter_map(|e| match e {
+            FontEffect::Shadow {
+                ox,
+                oy,
+                blur: _,
+                color,
+            } => {
+                let sig = crate::text::font_effect::effect_sig(&[*e]);
+                atlas.register_effect(sig, *e);
+                Some((sig, *ox, *oy, *color))
+            }
+            _ => None,
+        })
+        .collect();
+    // 每个 shadow pattern 一组按 atlas 页分组的 mesh（最终 flatten 成 shadow_back）。
+    let mut shadow_pages: Vec<
+        BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
+    > = shadow_patterns.iter().map(|_| BTreeMap::new()).collect();
+    // base 字形：effect_sig=0（v1.6 既有路径，不过后处理）。
+    let mut base_pages: BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> =
         BTreeMap::new();
     for line in &layout.lines {
         for run in &line.runs {
@@ -947,44 +997,86 @@ fn build_text_mesh(
                     run_x_start = Some(g.x);
                 }
                 run_w += g.advance;
-                let key = GlyphKey {
+                let face = &fonts.font_by_id(g.font_id).face;
+                // base 字形（effect_sig=0）。
+                let base_key = GlyphKey {
                     font_id: g.font_id,
                     glyph_id: g.glyph_id,
                     size_px,
                     effect_sig: 0,
                 };
-                let face = &fonts.font_by_id(g.font_id).face;
-                let r = atlas.ensure(face, key);
+                let r = atlas.ensure(face, base_key);
                 // 无轮廓字形（空格、零宽空格等）atlas 返空 rect → 不产 quad（advance 在
                 // layout 已算，pen 已前进，跳过不影响后续字形位置）。
-                if r.px_w == 0 || r.px_h == 0 {
-                    continue;
-                }
-                // 合成 italic：quad 顶边右偏（skew × 字形高），底边不动。
-                let skew_top = italic_skew * r.px_h as f32;
-                let p = pages
-                    .entry(r.page)
-                    .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
-                for &boff in bold_offsets {
-                    let left = g.x + g.bearing_x - pad + boff + rect.x;
-                    let top = line.baseline - g.bearing_y - pad + rect.y;
-                    let right = left + r.px_w as f32;
-                    let bottom = top + r.px_h as f32;
-                    let base = p.0.len() as u32;
-                    // 顶点序 BL, BR, TR, TL（与 mesh::quad 同序）。
-                    p.0.push([left, bottom]);
-                    p.0.push([right, bottom]);
-                    p.0.push([right + skew_top, top]);
-                    p.0.push([left + skew_top, top]);
-                    // UV：BL→(u0,v1), BR→(u1,v1), TR→(u1,v0), TL→(u0,v0)。
-                    p.1.push([r.u0, r.v1]);
-                    p.1.push([r.u1, r.v1]);
-                    p.1.push([r.u1, r.v0]);
-                    p.1.push([r.u0, r.v0]);
-                    for _ in 0..4 {
-                        p.2.push(run.color);
+                if r.px_w != 0 && r.px_h != 0 {
+                    // 合成 italic：quad 顶边右偏（skew × 字形高），底边不动。
+                    let skew_top = italic_skew * r.px_h as f32;
+                    let p = base_pages
+                        .entry(r.page)
+                        .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                    for &boff in bold_offsets {
+                        let left = g.x + g.bearing_x - pad + boff + rect.x;
+                        let top = line.baseline - g.bearing_y - pad + rect.y;
+                        let right = left + r.px_w as f32;
+                        let bottom = top + r.px_h as f32;
+                        let base = p.0.len() as u32;
+                        // 顶点序 BL, BR, TR, TL（与 mesh::quad 同序）。
+                        p.0.push([left, bottom]);
+                        p.0.push([right, bottom]);
+                        p.0.push([right + skew_top, top]);
+                        p.0.push([left + skew_top, top]);
+                        // UV：BL→(u0,v1), BR→(u1,v1), TR→(u1,v0), TL→(u0,v0)。
+                        p.1.push([r.u0, r.v1]);
+                        p.1.push([r.u1, r.v1]);
+                        p.1.push([r.u1, r.v0]);
+                        p.1.push([r.u0, r.v0]);
+                        for _ in 0..4 {
+                            p.2.push(run.color);
+                        }
+                        p.3.extend_from_slice(&[
+                            base,
+                            base + 1,
+                            base + 2,
+                            base,
+                            base + 2,
+                            base + 3,
+                        ]);
                     }
-                    p.3.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+                }
+                // shadow Back layer：每个 shadow pattern 用各自 sig 的 atlas 槽（blur 后处理），
+                // 顶点偏移 (ox, oy)，色 = shadow.color。bold/italic 不作用于 shadow（shadow 是
+                // 投影，非字形本身——合成加粗/斜体的投影不增加视觉价值，且避免 quad 翻倍）。
+                for (pi, (sig, sox, soy, scolor)) in shadow_patterns.iter().enumerate() {
+                    let shadow_key = GlyphKey {
+                        font_id: g.font_id,
+                        glyph_id: g.glyph_id,
+                        size_px,
+                        effect_sig: *sig,
+                    };
+                    let sr = atlas.ensure(face, shadow_key);
+                    if sr.px_w == 0 || sr.px_h == 0 {
+                        continue;
+                    }
+                    let sp = shadow_pages[pi]
+                        .entry(sr.page)
+                        .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                    let left = g.x + g.bearing_x - pad + sox + rect.x;
+                    let top = line.baseline - g.bearing_y - pad + soy + rect.y;
+                    let right = left + sr.px_w as f32;
+                    let bottom = top + sr.px_h as f32;
+                    let base = sp.0.len() as u32;
+                    sp.0.push([left, bottom]);
+                    sp.0.push([right, bottom]);
+                    sp.0.push([right, top]);
+                    sp.0.push([left, top]);
+                    sp.1.push([sr.u0, sr.v1]);
+                    sp.1.push([sr.u1, sr.v1]);
+                    sp.1.push([sr.u1, sr.v0]);
+                    sp.1.push([sr.u0, sr.v0]);
+                    for _ in 0..4 {
+                        sp.2.push(*scolor);
+                    }
+                    sp.3.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
                 }
             }
             // 装饰线（下划线 / 删除线）：纯色 quad，用 atlas 唯一白像素 × per-vertex
@@ -1021,7 +1113,7 @@ fn build_text_mesh(
                     for y_opt in deco_offsets.iter().flatten() {
                         let y_top = *y_opt + rect.y;
                         let y_bot = y_top + thickness;
-                        let entry = pages
+                        let entry = base_pages
                             .entry(solid.page)
                             .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
                         let base = entry.0.len() as u32;
@@ -1052,31 +1144,83 @@ fn build_text_mesh(
             }
         }
     }
-    pages
+    let base = base_pages
         .into_iter()
         .map(|(pg, (v, u, c, i))| (pg, v, u, c, i))
-        .collect()
+        .collect();
+    let shadow_back = shadow_pages
+        .into_iter()
+        .flat_map(|m| m.into_iter().map(|(pg, (v, u, c, i))| (pg, v, u, c, i)))
+        .collect();
+    TextMeshes { base, shadow_back }
 }
 
-/// 把 `build_text_mesh` 产出的多页 mesh 列表推入 `nodes`，复用 Text/RichText 共同的
-/// 跨页子页机制：首页（page 0）用真 node_id，后续页用 `synth_text_node_id` 合成 id。
-/// 子页 reuse_key=0（独立 GO，不继承主节点——见 synth_text_node_id 注释）。
+/// 把 `build_text_mesh` 产出的 base + shadow Back layer mesh 推入 `nodes`。
 ///
-/// 抽成 helper 让 Text arm 与 RichText arm 共用，避免复制粘贴 push 逻辑。
-/// atlas path 用 `loomgui://font-atlas/p{page}`（无 font_id——GlyphAtlas 是共享单实例，
-/// 所有字体字形混页；font_id 在 path 冗余且非默认字体让 tex 回落 whiteTexture）。
+/// base 字形走跨页子页机制：首页（page 0）用真 node_id，后续页用 `synth_text_node_id` 合成 id。
+/// shadow Back layer 每项独立 RenderNode，合成 id = `node_id | TEXT_SHADOW_BACK_FLAG`（多 shadow
+/// 叠加时同 flag 下按 atlas 页号区分，用 `synth_text_node_id` 在 flag 之上再编码页号——但
+/// Back layer 多页罕见，单页为常态）。shadow 节点 sort_key 由 `propagate_box_shadow_sort_keys`
+/// 调整为 primary.sort_key - 1（在 base 之前绘制 = 在下层）。
+///
+/// `shadow_pairs`：追加 (primary_node_id, shadow_back_node_id) 对，供 sort_key 传播用。
+/// 复用 box-shadow 的 sort_key 传播机制——Back layer 语义一致（sort_key 更小 = 先绘 = 下层）。
+///
+/// atlas path 用 `loomgui://font-atlas/p{page}`（与 base 同形，shadow 字形在 atlas 内按
+/// effect_sig 分槽，同页号混存——page 只代表物理纹理页，不区分 base/shadow）。
 fn push_text_meshes(
     nodes: &mut Vec<RenderNode>,
     id_to_pos: &mut std::collections::HashMap<NodeId, usize>,
-    meshes: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
+    meshes: TextMeshes,
     n: &crate::scene::node::Node,
     node_id: u32,
     parent_id: Option<u32>,
     alpha: f32,
     color_tint: [f32; 4],
     wm: [f32; 6],
+    shadow_pairs: &mut Vec<(u32, u32)>,
 ) {
-    if meshes.is_empty() {
+    let TextMeshes { base, shadow_back } = meshes;
+    // shadow Back layer：在 base 之前 push（nodes vec 顺序上 shadow 在前，base 在后）。
+    // sort_key 初始 0，由 propagate_box_shadow_sort_keys 后调为 primary.sort_key - 1。
+    // 多 shadow pattern 按 build_text_mesh 产出的顺序入列（声明序），同 pattern 多页
+    // 用 synth_text_node_id 编码页号（sub_page 字段），flag 用 TEXT_SHADOW_BACK_FLAG 标记。
+    for (si, (page, verts, uvs, colors, indices)) in shadow_back.iter().enumerate() {
+        if verts.is_empty() {
+            continue;
+        }
+        // 合成 id：复用 BOX_SHADOW_FLAG（bit 28）标记 Back layer 节点，shadow 序号放
+        // bits [26:24]（16 + si，避开 0 = 无 flag）。is_text_sub_page 据 BOX_SHADOW_FLAG
+        // 排除这些节点，propagate_box_shadow_sort_keys 据 shadow_pairs 传播 sort_key。
+        // 多 shadow 同节点时 si=0,1,2... 各得唯一 id（16,17,18...），不与真子页（1..10）冲突。
+        let synth_sub = (BOX_SHADOW_FLAG >> 24) + (si as u32);
+        let shadow_id = synth_text_node_id(node_id, synth_sub);
+        let path = format!("loomgui://font-atlas/p{}", page);
+        shadow_pairs.push((node_id, shadow_id));
+        nodes.push(RenderNode {
+            node_id: shadow_id,
+            parent_id,
+            visible: true,
+            alpha,
+            color_tint,
+            world_matrix: wm,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: 0, // propagate_box_shadow_sort_keys 后调
+            change_level: ChangeLevel::Full,
+            reuse_key: 0, // Back layer 独立 GO，不继承主节点 reuse_key
+            payload: NodePayload::Mesh {
+                verts: verts.clone(),
+                uvs: uvs.clone(),
+                colors: colors.clone(),
+                indices: indices.clone(),
+                image_path: Some(path),
+                program: 1,
+                color_matrix: [0.0; 20],
+            },
+        });
+    }
+    if base.is_empty() {
         // 空文本 → 占位 Mesh（无顶点，image_path 用第 0 页兜底）。
         id_to_pos.insert(n.id, nodes.len());
         nodes.push(RenderNode {
@@ -1105,7 +1249,7 @@ fn push_text_meshes(
     }
     // 首页（page 0）→ 主 RenderNode，用真 node_id。
     {
-        let (page0, verts0, uvs0, colors0, indices0) = &meshes[0];
+        let (page0, verts0, uvs0, colors0, indices0) = &base[0];
         let path0 = format!("loomgui://font-atlas/p{}", page0);
         id_to_pos.insert(n.id, nodes.len());
         nodes.push(RenderNode {
@@ -1132,7 +1276,7 @@ fn push_text_meshes(
         });
     }
     // 后续页 → 合成 node_id 的子 RenderNode。
-    for (pi, (page, verts, uvs, colors, indices)) in meshes[1..].iter().enumerate() {
+    for (pi, (page, verts, uvs, colors, indices)) in base[1..].iter().enumerate() {
         let sub_id = synth_text_node_id(node_id, (pi + 1) as u32);
         let sub_path = format!("loomgui://font-atlas/p{}", page);
         nodes.push(RenderNode {
@@ -1162,10 +1306,11 @@ fn push_text_meshes(
             },
         });
     }
-    // 注意：子页 RenderNode 的合成 node_id 是有意**不**加入 id_to_pos 的。
+    // 注意：子页 / shadow back RenderNode 的合成 node_id 是有意**不**加入 id_to_pos 的。
     // assign_sort_keys / scrollbar thumb / NativeHost 查询均针对真 scene 节点；
     // 合成 id 是纯渲染产物，不应反向映射到 scene node。子页的 sort_key/mask_context
-    // 由 propagate_text_sub_page_sort_keys 单独传播。
+    // 由 propagate_text_sub_page_sort_keys 单独传播；shadow back 由 propagate_box_shadow_sort_keys
+    // 传播（shadow_pairs 已在上方 push）。
 }
 
 #[cfg(test)]

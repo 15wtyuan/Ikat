@@ -479,6 +479,161 @@ fn parse_transition_multiple_comma_specs() {
 }
 
 #[test]
+fn text_shadow_single_with_blur() {
+    // `text-shadow: 2px 2px 4px #000000` → 单 Shadow{ox:2, oy:2, blur:4, color:black}
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "text-shadow", "2px 2px 4px #000000"));
+    assert_eq!(s.text_effects.len(), 1, "单阴影 → 1 effect");
+    match s.text_effects[0] {
+        crate::text::font_effect::FontEffect::Shadow {
+            ox,
+            oy,
+            blur,
+            color,
+        } => {
+            assert!((ox - 2.0).abs() < 1e-4, "ox=2");
+            assert!((oy - 2.0).abs() < 1e-4, "oy=2");
+            assert!((blur - 4.0).abs() < 1e-4, "blur=4");
+            assert_eq!(color, [0.0, 0.0, 0.0, 1.0], "color=#000000 → black");
+        }
+        _ => panic!("expected Shadow effect"),
+    }
+}
+
+#[test]
+fn text_shadow_without_blur() {
+    // blur 省略 → 默认 0（硬边投影，位图 = clone）。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "text-shadow", "3px 1px #ff0000"));
+    assert_eq!(s.text_effects.len(), 1);
+    match s.text_effects[0] {
+        crate::text::font_effect::FontEffect::Shadow {
+            ox,
+            oy,
+            blur,
+            color,
+            ..
+        } => {
+            assert!((ox - 3.0).abs() < 1e-4);
+            assert!((oy - 1.0).abs() < 1e-4);
+            assert!((blur - 0.0).abs() < 1e-4, "blur 省略 → 0");
+            assert_eq!(color, [1.0, 0.0, 0.0, 1.0]);
+        }
+        _ => panic!("expected Shadow"),
+    }
+}
+
+#[test]
+fn text_shadow_multiple_comma_separated() {
+    // CSS 逗号分隔多阴影 → 多 Shadow effect（序：前→后，先绘前者在更下层）。
+    let mut s = ResolvedStyle::default();
+    assert!(
+        apply_decl(
+            &mut s,
+            "text-shadow",
+            "1px 1px 2px #ff0000, 3px 3px #0000ff"
+        ),
+        "合法多阴影应返 true"
+    );
+    assert_eq!(s.text_effects.len(), 2, "两段逗号 → 2 effect");
+    // 第一段：红 shadow blur=2
+    match s.text_effects[0] {
+        crate::text::font_effect::FontEffect::Shadow { color, blur, .. } => {
+            assert_eq!(color, [1.0, 0.0, 0.0, 1.0], "第一段红");
+            assert!((blur - 2.0).abs() < 1e-4);
+        }
+        _ => panic!("第一段应为 Shadow"),
+    }
+    // 第二段：蓝 shadow blur=0
+    match s.text_effects[1] {
+        crate::text::font_effect::FontEffect::Shadow { color, blur, .. } => {
+            assert_eq!(color, [0.0, 0.0, 1.0, 1.0], "第二段蓝");
+            assert!((blur - 0.0).abs() < 1e-4, "第二段无 blur → 0");
+        }
+        _ => panic!("第二段应为 Shadow"),
+    }
+}
+
+#[test]
+fn text_shadow_bare_numbers_no_px() {
+    // CSS 允许裸数字（无 px 后缀），与 box-shadow 一致接受。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "text-shadow", "2 2 4 #000000"));
+    assert_eq!(s.text_effects.len(), 1);
+    match s.text_effects[0] {
+        crate::text::font_effect::FontEffect::Shadow { ox, oy, blur, .. } => {
+            assert!((ox - 2.0).abs() < 1e-4);
+            assert!((oy - 2.0).abs() < 1e-4);
+            assert!((blur - 4.0).abs() < 1e-4);
+        }
+        _ => panic!("expected Shadow"),
+    }
+}
+
+#[test]
+fn text_shadow_named_color_rejected() {
+    // parse_color 仅认 #rrggbb 6 位 hex，命名色（red）静默返 false。
+    // CSS 一条声明全有或全无 → 非法色整条忽略。
+    let mut s = ResolvedStyle::default();
+    assert!(
+        !apply_decl(&mut s, "text-shadow", "2px 2px red"),
+        "命名色 → 整条声明返 false（parse_color 不认命名色）"
+    );
+    assert!(s.text_effects.is_empty(), "非法声明不污染 text_effects");
+}
+
+#[test]
+fn text_shadow_missing_color_uses_default_black() {
+    // 缺 color 段（仅 ox oy）→ color 默认黑（CSS 规范：未设 color 继承 currentColor，
+    // 但围栏不追 currentColor 继承，降级为黑以保可见）。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "text-shadow", "2px 2px"));
+    assert_eq!(s.text_effects.len(), 1);
+    match s.text_effects[0] {
+        crate::text::font_effect::FontEffect::Shadow { color, .. } => {
+            assert_eq!(color, [0.0, 0.0, 0.0, 1.0], "缺 color → 默认黑");
+        }
+        _ => panic!("expected Shadow"),
+    }
+}
+
+#[test]
+fn text_shadow_empty_value_rejected() {
+    // 空值 → 返 false，不污染 text_effects（与 transition 空 Vec 语义不同：
+    // text-shadow 空 = 未声明，非"清零既有阴影"）。
+    let mut s = ResolvedStyle::default();
+    assert!(!apply_decl(&mut s, "text-shadow", ""));
+    assert!(s.text_effects.is_empty());
+}
+
+#[test]
+fn text_shadow_inherits_to_child() {
+    // text-shadow 是 CSS INHERITED 属性 → 父声明作用于子。
+    // 验 cascade.rs 继承白名单含 text_effects。
+    use crate::parse::css::parse_css;
+    use crate::parse::dom::parse_html;
+    let html = r#"<div class="root"><span class="child">hi</span></div>"#;
+    let css = r#".root { text-shadow: 2px 2px 4px #ff0000; }"#;
+    let tree = parse_html(html).unwrap();
+    let sheet = parse_css(css).unwrap();
+    let styles = crate::style::cascade::resolve_styles(&tree, &sheet);
+    let root_id = tree.roots[0];
+    assert_eq!(styles[root_id.0].text_effects.len(), 1, "root 有 1 shadow");
+    let child_id = tree.nodes[root_id.0].children[0];
+    assert_eq!(
+        styles[child_id.0].text_effects.len(),
+        1,
+        "子继承 text-shadow（INHERITED）"
+    );
+    match styles[child_id.0].text_effects[0] {
+        crate::text::font_effect::FontEffect::Shadow { ox, .. } => {
+            assert!((ox - 2.0).abs() < 1e-4, "继承值正确");
+        }
+        _ => panic!("child 应继承 Shadow"),
+    }
+}
+
+#[test]
 fn background_linear_gradient_2_stops_four_dirs() {
     // 4 正向 × 2 色 → 返 true 且 background_gradient 已设。
     for (val, expected_dir) in [

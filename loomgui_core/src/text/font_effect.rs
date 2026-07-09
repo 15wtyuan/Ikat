@@ -13,7 +13,8 @@
 //! atlas 规避其全量重建纹理的缺陷——effect 字形走同一条增量 allocate 路径，旧槽不 repack。
 
 /// 单个文字效果配置。Copy：参数全为值类型，atlas effect 表按值存。
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Serialize/Deserialize：text_effects 挂在 ResolvedStyle 上随 pkg.bin 序列化。
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum FontEffect {
     /// 阴影：build 期偏移 quad + 高斯 blur。位图层只 blur（offset 不进位图）。
     Shadow {

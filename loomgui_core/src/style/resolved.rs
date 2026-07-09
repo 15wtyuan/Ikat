@@ -193,6 +193,10 @@ pub struct ResolvedStyle {
     pub box_shadow: Option<BoxShadow>,
     /// CSS transition 声明。None=未设（默认无过渡动画）。
     pub transition: Vec<TransitionSpec>,
+    /// 文字效果（text-shadow / -webkit-text-stroke / font-effect 等）。
+    /// CSS INHERITED 属性：父元素声明则作用于所有后代文字，故挂 style 而非 per-run。
+    /// build 期按 effect 类型分 Back/Front 层注入字形渲染。空 = 无效果。
+    pub text_effects: Vec<crate::text::font_effect::FontEffect>,
 }
 
 /// box-shadow 几何近似（无 blur，真实 blur 推 v1.14+ 离屏 RT）。
@@ -248,6 +252,7 @@ impl Default for ResolvedStyle {
             border_image_slice: None,
             box_shadow: None,
             transition: Vec::new(),
+            text_effects: Vec::new(),
         }
     }
 }
@@ -340,6 +345,12 @@ mod tests {
             duration: 0.3,
             ease: crate::tween::Ease::Linear,
             delay: 0.0,
+        }];
+        s.text_effects = vec![crate::text::font_effect::FontEffect::Shadow {
+            ox: 2.0,
+            oy: 2.0,
+            blur: 4.0,
+            color: [0.0, 0.0, 0.0, 1.0],
         }];
 
         let bytes = bincode::serialize(&s).expect("serialize");

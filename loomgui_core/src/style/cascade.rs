@@ -29,6 +29,7 @@ pub fn resolve_styles(tree: &ElementTree, sheet: &StyleSheet) -> Vec<ResolvedSty
             style.letter_spacing = p.letter_spacing;
             style.text_align = p.text_align;
             style.white_space_nowrap = p.white_space_nowrap;
+            style.text_effects = p.text_effects.clone();
         }
 
         let el = &tree.nodes[id.0];

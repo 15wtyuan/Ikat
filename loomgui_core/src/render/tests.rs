@@ -2278,10 +2278,19 @@ fn synth_text_node_id_roundtrip() {
     assert_eq!(text_sub_primary_id(sub), primary & 0x00FF_FFFF);
     assert_eq!(text_sub_page_idx(sub), 5);
 
-    // 边界：page=255（最大子页号）
-    let max_sub = synth_text_node_id(0, 255);
-    assert_eq!(text_sub_page_idx(max_sub), 255);
+    // 边界：page=15（不与 BOX_SHADOW_FLAG bit 28 冲突的最大子页号）。
+    // page>=16 会设置 bit 28（BOX_SHADOW_FLAG），is_text_sub_page 据此排除 shadow 节点——
+    // 故 sub_page 编码实际可用范围是 1..15（atlas 跨页远不到此上限）。
+    let max_sub = synth_text_node_id(0, 15);
+    assert_eq!(text_sub_page_idx(max_sub), 15);
     assert!(is_text_sub_page(max_sub));
+
+    // page=16 设置 BOX_SHADOW_FLAG → is_text_sub_page 返 false（shadow 节点语义）。
+    let shadow_like = synth_text_node_id(0, 16);
+    assert!(
+        !is_text_sub_page(shadow_like),
+        "page=16 触发 BOX_SHADOW_FLAG"
+    );
 
     // 真实 node index=4095（bits[23:12]=4095）不应被误判为子页
     let high_index = (4095u32 << 12) | 1; // index=4095, gen=1
@@ -3020,4 +3029,256 @@ fn build_container_slice_percent_resolves_in_render() {
         }
         _ => panic!("expected Mesh"),
     }
+}
+
+// ── text-shadow Back layer（v1.8 Task 8）──
+
+#[test]
+fn text_shadow_emits_back_layer_quad_with_offset() {
+    use crate::text::font_effect::FontEffect;
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "A".into(),
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.style.text_effects = vec![FontEffect::Shadow {
+        ox: 3.0,
+        oy: 3.0,
+        blur: 0.0,
+        color: [0.0, 0.0, 0.0, 1.0],
+    }];
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let shadow_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| (rn.node_id & super::BOX_SHADOW_FLAG) != 0)
+        .expect("shadow back RenderNode");
+    let primary_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && (rn.node_id & super::BOX_SHADOW_FLAG) == 0
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("primary text RenderNode");
+    assert!(
+        shadow_rn.sort_key < primary_rn.sort_key,
+        "shadow sort_key {} < primary {}",
+        shadow_rn.sort_key,
+        primary_rn.sort_key
+    );
+    match &shadow_rn.payload {
+        NodePayload::Mesh {
+            verts,
+            colors,
+            program,
+            ..
+        } => {
+            assert_eq!(*program, 1);
+            assert!(!verts.is_empty());
+            for c in colors {
+                assert_eq!(*c, [0.0, 0.0, 0.0, 1.0], "shadow color");
+            }
+            if let NodePayload::Mesh {
+                verts: primary_verts,
+                ..
+            } = &primary_rn.payload
+            {
+                let pv = primary_verts[0];
+                let sv = verts[0];
+                assert!(
+                    (sv[0] - (pv[0] + 3.0)).abs() < 1e-3,
+                    "shadow x offset: {} vs {}",
+                    sv[0],
+                    pv[0] + 3.0
+                );
+                assert!(
+                    (sv[1] - (pv[1] + 3.0)).abs() < 1e-3,
+                    "shadow y offset: {} vs {}",
+                    sv[1],
+                    pv[1] + 3.0
+                );
+            }
+        }
+        _ => panic!("expected Mesh"),
+    }
+}
+
+#[test]
+fn text_shadow_no_blur_same_glyph_size() {
+    use crate::text::font_effect::FontEffect;
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "B".into(),
+    };
+    n.style.font_size = 20.0;
+    n.style.text_effects = vec![FontEffect::Shadow {
+        ox: 2.0,
+        oy: 2.0,
+        blur: 0.0,
+        color: [1.0, 0.0, 0.0, 1.0],
+    }];
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let mut atlas = test_glyph_atlas();
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut atlas,
+    );
+    let shadow_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| (rn.node_id & super::BOX_SHADOW_FLAG) != 0)
+        .expect("shadow back");
+    let primary_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && (rn.node_id & super::BOX_SHADOW_FLAG) == 0
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("primary");
+    if let (NodePayload::Mesh { verts: sv, .. }, NodePayload::Mesh { verts: pv, .. }) =
+        (&shadow_rn.payload, &primary_rn.payload)
+    {
+        assert_eq!(sv.len(), pv.len(), "blur=0 same vert count");
+    }
+}
+
+#[test]
+fn text_shadow_multiple_shadows_emit_multiple_back_layers() {
+    use crate::text::font_effect::FontEffect;
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "C".into(),
+    };
+    n.style.font_size = 16.0;
+    n.style.text_effects = vec![
+        FontEffect::Shadow {
+            ox: 1.0,
+            oy: 1.0,
+            blur: 0.0,
+            color: [1.0, 0.0, 0.0, 1.0],
+        },
+        FontEffect::Shadow {
+            ox: 2.0,
+            oy: 2.0,
+            blur: 0.0,
+            color: [0.0, 0.0, 1.0, 1.0],
+        },
+    ];
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let shadow_nodes: Vec<_> = frame
+        .nodes
+        .iter()
+        .filter(|rn| (rn.node_id & super::BOX_SHADOW_FLAG) != 0)
+        .collect();
+    assert_eq!(shadow_nodes.len(), 2, "2 shadows -> 2 back nodes");
+    let c0 = match &shadow_nodes[0].payload {
+        NodePayload::Mesh { colors, .. } => colors[0],
+        _ => panic!("expected Mesh"),
+    };
+    let c1 = match &shadow_nodes[1].payload {
+        NodePayload::Mesh { colors, .. } => colors[0],
+        _ => panic!("expected Mesh"),
+    };
+    assert_eq!(c0, [1.0, 0.0, 0.0, 1.0], "first shadow red");
+    assert_eq!(c1, [0.0, 0.0, 1.0, 1.0], "second shadow blue");
+}
+
+#[test]
+fn text_without_shadow_emits_no_back_layer() {
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "D".into(),
+    };
+    n.style.font_size = 16.0;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let has_shadow = frame
+        .nodes
+        .iter()
+        .any(|rn| (rn.node_id & super::BOX_SHADOW_FLAG) != 0);
+    assert!(!has_shadow, "no text-shadow -> no back layer");
 }

@@ -751,6 +751,18 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.transition = parse_transition(value);
             true
         }
+        "text-shadow" => {
+            // CSS text-shadow: ox oy [blur] color，逗号分隔多阴影。
+            // 每段 → FontEffect::Shadow{ox, oy, blur, color}，叠进 text_effects（INHERITED）。
+            // blur 可省（默认 0 = 硬边投影）；color 必须可解析（parse_color 仅认 #rrggbb 6 位 hex）。
+            // 任一段非法 → 整条声明静默忽略（返 false，与围栏外 CSS 同模式）。
+            let shadows = parse_text_shadow(value);
+            if shadows.is_empty() {
+                return false;
+            }
+            style.text_effects = shadows;
+            true
+        }
         _ => false, // 装饰属性静默忽略
     }
 }
@@ -811,6 +823,48 @@ fn parse_one_transition(part: &str) -> Option<crate::style::resolved::Transition
         duration,
         ease,
         delay,
+    })
+}
+
+/// 解析 CSS `text-shadow` 声明值 → FontEffect::Shadow 列表。
+///
+/// 逗号分隔多阴影；每段形如 `ox oy [blur] color`（CSS 标准语法）。blur 可省（默认 0），
+/// color 必须是 `#rrggbb` 6 位 hex（parse_color 限制，命名色静默拒）。任一段非法 →
+/// 返回空 Vec（apply_decl 据此返 false，整条声明静默忽略——CSS 一条声明全有或全无语义）。
+fn parse_text_shadow(value: &str) -> Vec<crate::text::font_effect::FontEffect> {
+    value.split(',').filter_map(parse_one_text_shadow).collect()
+}
+
+/// 解析单条 text-shadow spec（逗号分隔的一段）。
+/// `2px 2px 4px #000` → Shadow{ox:2, oy:2, blur:4, color:black}；
+/// `2px 2px #000` → blur=0（硬边投影）。
+/// color 省略 → 默认黑（CSS currentColor 围栏不追，降级为黑保可见）；
+/// color 存在但不可解析（命名色等）→ None（整条声明非法，CSS 全有或全无）。
+fn parse_one_text_shadow(spec: &str) -> Option<crate::text::font_effect::FontEffect> {
+    use crate::text::font_effect::FontEffect;
+    let parts: Vec<&str> = spec.split_whitespace().collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let ox = parse_number(parts[0].trim_end_matches("px"))?;
+    let oy = parse_number(parts[1].trim_end_matches("px"))?;
+    // 第 3 段可能是 blur（数值）或 color；blur 省略时 color 在索引 2。
+    let (blur, color_idx) =
+        if parts.len() >= 3 && parts[2].trim_end_matches("px").parse::<f32>().is_ok() {
+            (parse_number(parts[2].trim_end_matches("px"))?, 3)
+        } else {
+            (0.0, 2)
+        };
+    // color 缺省（索引越界）→ 默认黑；color 存在但解析失败 → 整段非法。
+    let color = match parts.get(color_idx).copied() {
+        None => [0.0, 0.0, 0.0, 1.0],
+        Some(c) => parse_color(c)?,
+    };
+    Some(FontEffect::Shadow {
+        ox,
+        oy,
+        blur,
+        color,
     })
 }
 
