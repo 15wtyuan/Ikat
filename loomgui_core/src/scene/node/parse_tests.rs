@@ -210,6 +210,25 @@ fn text_child_inherits_parent_text_fields_resets_size() {
 }
 
 #[test]
+fn text_child_inherits_parent_text_effects() {
+    // 裸文本子节点应继承父 text_effects——scene/node.rs 用 default() 重建 ts 时
+    // 曾漏搬 text_effects，致 <div style="text-shadow:...">裸文本</div> 的特效全失效
+    // （text_effects 留在父 div 上，实际渲染的 Text 子节点拿到空 Vec）。
+    let html = r#"<div class="fx">字</div>"#;
+    let css = r#".fx { text-shadow: 2px 2px #000; }"#;
+    let tree = parse_html(html).unwrap();
+    let sheet = parse_css(css).unwrap();
+    let styles = resolve_styles(&tree, &sheet);
+    let scene = build_scene(&tree, &styles);
+    let root = scene.get(scene.roots[0]).unwrap();
+    let child = scene.get(root.children[0]).unwrap();
+    assert!(
+        !child.style.text_effects.is_empty(),
+        "裸文本子节点应继承父 text_effects（text-shadow/stroke/glow/blur 须透传到 Text 子节点）"
+    );
+}
+
+#[test]
 fn draggable_attr_true_sets_node_draggable() {
     let html = r#"<div><button draggable="true">OK</button></div>"#;
     let css = "";

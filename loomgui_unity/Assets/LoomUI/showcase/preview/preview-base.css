@@ -4,10 +4,19 @@
      - taffy border-box（Chromium 默认 content-box）
      - body 无 8px 默认 margin
    预览壳：深色底 + 居中 + .root 设备框。fit-scale（镜像 engine letterbox）由 loom-preview.js 的 body.zoom 做。 */
+
+/* 预览字体对齐 Unity 默认字体（LXGW WenKai），方便对比 preview 与 Unity 渲染差异。
+   preview-only——preview-base.css 经 <link> 加载，打包器 strip style/link，不进 pkg.bin。 */
+@font-face {
+  font-family: 'LXGW WenKai';
+  src: url('../../res/fonts/LXGWWenKai.ttf') format('truetype');
+  font-display: block;
+}
 div { display: flex; flex-direction: column; }
 * { box-sizing: border-box; }
 body {
   margin: 0;
+  font-family: 'LXGW WenKai', sans-serif;
   background: #0e1018;
   display: flex;
   justify-content: center;

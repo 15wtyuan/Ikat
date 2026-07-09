@@ -3509,6 +3509,67 @@ fn build_container_slice_percent_resolves_in_render() {
     }
 }
 
+// ── gradient text 整体渐变（background-clip:text）──
+
+#[test]
+fn gradient_text_spans_whole_text_not_per_glyph() {
+    use crate::render::node::NodePayload;
+    use crate::style::resolved::{Gradient2, GradientDir};
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "AB".into(),
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.style.background_clip_text = true;
+    n.style.background_gradient = Some(Gradient2 {
+        color_a: [1.0, 0.0, 0.0, 1.0], // 红（左端）
+        color_b: [0.0, 1.0, 0.0, 1.0], // 绿（右端）
+        dir: GradientDir::ToRight,
+    });
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let text_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| matches!(&rn.payload, NodePayload::Mesh { program, .. } if *program == 1))
+        .expect("gradient text 应产出 program=1 base mesh");
+    let colors = match &text_rn.payload {
+        NodePayload::Mesh { colors, .. } => colors,
+        _ => unreachable!(),
+    };
+    assert!(colors.len() >= 8, "两字应有 ≥8 顶点，实际 {}", colors.len());
+    // 整体渐变：右侧字(B)的左角色应比左侧字(A)更偏 b(绿)。
+    // bug（每字独立 a→b）：两字左角色都=a(红)，G 分量差=0。
+    let a_left_g = colors[0][1];
+    let b_left_g = colors[4][1];
+    assert!(
+        b_left_g - a_left_g > 0.2,
+        "整体渐变下右侧字左角色应更偏绿（G 差={:.2}）；每字独立渐变时两字左角色都=a，差=0",
+        b_left_g - a_left_g
+    );
+}
+
 // ── text-shadow Back layer（v1.8 Task 8）──
 
 #[test]

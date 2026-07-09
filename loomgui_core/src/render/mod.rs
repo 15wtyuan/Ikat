@@ -56,6 +56,57 @@ fn gradient_corner_colors(g: crate::style::resolved::Gradient2) -> [[f32; 4]; 4]
     }
 }
 
+/// gradient text（background-clip:text）每字 quad 的 4 角色：按字在文本块的位置插值
+/// color_a→color_b，使整段文字作为一个整体渐变——而非每字独立 a→b（否则 N 字 = N 个
+/// 小渐变，每字各自从首色到末色）。水平方向跨行宽（每行各自 a→b），垂直跨文本块高。
+/// 返回 [BL, BR, TR, TL]（quad 顶点序，与 base 字形 push 顺序一致）。
+fn gradient_glyph_colors(
+    g: &crate::style::resolved::Gradient2,
+    glyph_x: f32,
+    glyph_advance: f32,
+    line_width: f32,
+    line_y: f32,
+    line_height: f32,
+    text_height: f32,
+) -> [[f32; 4]; 4] {
+    let a = g.color_a;
+    let b = g.color_b;
+    let lerp = |t: f32| {
+        let t = t.clamp(0.0, 1.0);
+        [
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+            a[3] + (b[3] - a[3]) * t,
+        ]
+    };
+    let lw = line_width.max(1.0);
+    let th = text_height.max(1.0);
+    let x_l = glyph_x / lw;
+    let x_r = (glyph_x + glyph_advance) / lw;
+    let y_t = line_y / th;
+    let y_b = (line_y + line_height) / th;
+    use crate::style::resolved::GradientDir as G;
+    match g.dir {
+        G::ToRight => {
+            let (cl, cr) = (lerp(x_l), lerp(x_r));
+            [cl, cr, cr, cl]
+        }
+        G::ToLeft => {
+            let (cl, cr) = (lerp(1.0 - x_l), lerp(1.0 - x_r));
+            [cl, cr, cr, cl]
+        }
+        G::ToBottom => {
+            let (ct, cb) = (lerp(y_t), lerp(y_b));
+            [cb, cb, ct, ct]
+        }
+        G::ToTop => {
+            let (ct, cb) = (lerp(1.0 - y_t), lerp(1.0 - y_b));
+            [cb, cb, ct, ct]
+        }
+    }
+}
+
 /// 查图尺寸表取 src_w/src_h（fallback 64×64）。
 /// path 缺失或 w/h=0 → 64.0 兜底（核心不知图集，但知图尺寸）。
 fn src_size(image_sizes: &ImageSizeTable, path: &str) -> (f32, f32) {
@@ -1225,13 +1276,19 @@ fn build_text_mesh(
                         p.1.push([r.u1, r.v1]);
                         p.1.push([r.u1, r.v0]);
                         p.1.push([r.u0, r.v0]);
-                        // 顶点色：渐变字 + gradient → gradient_corner_colors；否则 run.color。
-                        // 渐变字顶点序映射：quad 顶点 = [BL, BR, TR, TL]；
-                        // gradient_corner_colors 返 [TL, TR, BR, BL] → 重排为 [BL, BR, TR, TL]。
+                        // 顶点色：渐变字（background-clip:text）按字在文本块的位置插值
+                        // color_a→color_b，整段作为一个整体渐变；否则 run.color。
                         let quad_colors: [[f32; 4]; 4] = if background_clip_text {
-                            if let Some(ref g) = background_gradient {
-                                let gc = gradient_corner_colors(*g);
-                                [gc[3], gc[2], gc[1], gc[0]]
+                            if let Some(grad) = background_gradient {
+                                gradient_glyph_colors(
+                                    &grad,
+                                    g.x,
+                                    g.advance,
+                                    line.width,
+                                    line.y,
+                                    line.height,
+                                    layout.text_height,
+                                )
                             } else {
                                 [run.color; 4]
                             }
@@ -1268,8 +1325,11 @@ fn build_text_mesh(
                     let sp = shadow_pages[pi]
                         .entry(sr.page)
                         .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
-                    let left = g.x + g.bearing_x - pad + sox + rect.x;
-                    let top = line.baseline - g.bearing_y - pad + soy + rect.y;
+                    // shadow blur 扩边界后位图更大；origin 向左上移 expand 让 halo 居中包住
+                    // 字形（否则扩出的 halo 偏向右下）。expand = (effect 位图 - base 位图)/2。
+                    let expand = (sr.px_w as f32 - r.px_w as f32) / 2.0;
+                    let left = g.x + g.bearing_x - pad + sox + rect.x - expand;
+                    let top = line.baseline - g.bearing_y - pad + soy + rect.y - expand;
                     let right = left + sr.px_w as f32;
                     let bottom = top + sr.px_h as f32;
                     let base = sp.0.len() as u32;
@@ -1303,10 +1363,11 @@ fn build_text_mesh(
                     let gp = glow_pages[pi]
                         .entry(gr.page)
                         .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
-                    // 居中无偏移：glow 字形与 base 同位置（通过 dilate+blur 扩大后居中摆放，
-                    // 顶点坐标从 bearing 起不加偏移量）。
-                    let left = g.x + g.bearing_x - pad + rect.x;
-                    let top = line.baseline - g.bearing_y - pad + rect.y;
+                    // glow 居中无偏移：dilate+blur 扩边界后位图更大，origin 向左上移 expand
+                    // 让晕开的光居中包住字形。
+                    let expand = (gr.px_w as f32 - r.px_w as f32) / 2.0;
+                    let left = g.x + g.bearing_x - pad + rect.x - expand;
+                    let top = line.baseline - g.bearing_y - pad + rect.y - expand;
                     let right = left + gr.px_w as f32;
                     let bottom = top + gr.px_h as f32;
                     let base = gp.0.len() as u32;
@@ -1340,9 +1401,11 @@ fn build_text_mesh(
                     let sp = stroke_pages[pi]
                         .entry(sr.page)
                         .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
-                    // Stroke 同位置（无偏移），但 atlas 槽可能因 erode 扩边界而更大。
-                    let left = g.x + g.bearing_x - pad + rect.x;
-                    let top = line.baseline - g.bearing_y - pad + rect.y;
+                    // Stroke 同位置（无偏移）；erode 扩边界后位图更大，origin 向左上移 expand
+                    // 让描边环对齐字形边缘。
+                    let expand = (sr.px_w as f32 - r.px_w as f32) / 2.0;
+                    let left = g.x + g.bearing_x - pad + rect.x - expand;
+                    let top = line.baseline - g.bearing_y - pad + rect.y - expand;
                     let right = left + sr.px_w as f32;
                     let bottom = top + sr.px_h as f32;
                     let base = sp.0.len() as u32;
@@ -1376,9 +1439,11 @@ fn build_text_mesh(
                     let bp = blur_pages[pi]
                         .entry(br.page)
                         .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
-                    // Blur 同位置（无偏移），atlas 槽与 base 同尺寸（gaussian_blur 不扩边界）。
-                    let left = g.x + g.bearing_x - pad + rect.x;
-                    let top = line.baseline - g.bearing_y - pad + rect.y;
+                    // Blur 同位置（无偏移）；pad 扩边界后位图更大，origin 向左上移 expand
+                    // 让模糊晕居中包住字形。
+                    let expand = (br.px_w as f32 - r.px_w as f32) / 2.0;
+                    let left = g.x + g.bearing_x - pad + rect.x - expand;
+                    let top = line.baseline - g.bearing_y - pad + rect.y - expand;
                     let right = left + br.px_w as f32;
                     let bottom = top + br.px_h as f32;
                     let base = bp.0.len() as u32;

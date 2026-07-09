@@ -88,6 +88,26 @@ pub fn erode(p: &[u8], w: u32, h: u32, radius: f32) -> (Vec<u8>, u32, u32) {
     convolve(p, w, h, radius, false)
 }
 
+/// 描边环 = 原字形 - erode（内缩）：原亮区里被 erode 吃掉的边缘 r 宽像素 = 描边
+/// （CSS -webkit-text-stroke 描边在字形边缘内侧）。erode 扩边界 ceil(radius)，原 p 在
+/// eroded 位图的 (r, r) offset；环写在同尺寸（扩边界）位图，build 期填描边色。
+fn stroke_ring(p: &[u8], w: u32, h: u32, radius: f32) -> (Vec<u8>, u32, u32) {
+    let r = radius.ceil() as i32;
+    if r <= 0 {
+        return (p.to_vec(), w, h);
+    }
+    let (eroded, ew, eh) = erode(p, w, h, radius);
+    let mut ring = vec![0u8; (ew * eh) as usize];
+    for y in 0..h as i32 {
+        for x in 0..w as i32 {
+            let orig = p[(y as u32 * w + x as u32) as usize];
+            let ero = eroded[((y + r) as u32 * ew + (x + r) as u32) as usize];
+            ring[((y + r) as u32 * ew + (x + r) as u32) as usize] = orig.saturating_sub(ero);
+        }
+    }
+    (ring, ew, eh)
+}
+
 /// 圆形核形态学卷积：dilation=true 取邻域 max（亮区扩张），false 取 min（亮区内缩）。
 /// 输出画布每边扩 `ceil(radius)` 像素，使原边界外的卷积结果有落点（dilate 亮边、
 /// erode 后的边界环都在扩出区可见）。圆形核：dx²+dy² <= radius²。
@@ -177,31 +197,56 @@ pub fn gaussian_blur(p: &[u8], w: u32, h: u32, sigma: f32) -> Vec<u8> {
     out
 }
 
+/// 位图四周外扩 `pad` 像素填 0。blur 前 pad，让高斯 halo 落在扩出区而不被原 bbox 边界
+/// 截断（gaussian_blur 同尺寸不扩，否则柔光投影/glow 的光会硬切在字形 quad 内）。
+fn pad_bitmap(p: &[u8], w: u32, h: u32, pad: u32) -> (Vec<u8>, u32, u32) {
+    if pad == 0 {
+        return (p.to_vec(), w, h);
+    }
+    let nw = w + 2 * pad;
+    let nh = h + 2 * pad;
+    let mut out = vec![0u8; (nw * nh) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            out[((y + pad) * nw + x + pad) as usize] = p[(y * w + x) as usize];
+        }
+    }
+    (out, nw, nh)
+}
+
+/// blur 需要的外扩像素（3σ 截断，与 gaussian_blur 一致）。
+fn blur_pad(sigma: f32) -> u32 {
+    (sigma * 3.0).ceil().max(0.0) as u32
+}
+
 /// 对单字形 R8 位图应用一个 effect，返回后处理位图（可能扩边界）。
 /// 颜色不在此处理（位图只存 alpha），颜色由 build 期 vertex color 提供。
-/// - Shadow：blur>0 时高斯模糊（offset 在 build 期偏移 quad，位图只 blur）；blur=0 原样。
-/// - Stroke：erode（内侧吃字，画布扩边界——描边色填边界环，build 期用之）。
-/// - Glow：dilate 膨胀亮边 + 高斯 blur 晕开。
-/// - Blur：高斯 blur（同尺寸）。
+/// - Shadow：blur>0 时 pad 外扩 + 高斯模糊（扩边界容纳 halo，offset 在 build 期偏移 quad）；blur=0 原样。
+/// - Stroke：描边环 = 原字形 - erode（内侧吃字，边缘 r 宽环；扩边界）。
+/// - Glow：dilate 膨胀亮边 + pad 外扩 + 高斯 blur 晕开。
+/// - Blur：pad 外扩 + 高斯 blur（扩边界容纳 halo）。
 pub fn apply_effect(p: &[u8], w: u32, h: u32, effect: &FontEffect) -> (Vec<u8>, u32, u32) {
     match effect {
         FontEffect::Shadow { blur, .. } => {
             if *blur > 0.0 {
                 let sigma = *blur / 2.0;
-                (gaussian_blur(p, w, h, sigma), w, h)
+                let (pp, pw, ph) = pad_bitmap(p, w, h, blur_pad(sigma));
+                (gaussian_blur(&pp, pw, ph, sigma), pw, ph)
             } else {
                 (p.to_vec(), w, h)
             }
         }
-        FontEffect::Stroke { w: sw, .. } => erode(p, w, h, *sw),
+        FontEffect::Stroke { w: sw, .. } => stroke_ring(p, w, h, *sw),
         FontEffect::Glow { w: gw, .. } => {
             let (d, dw, dh) = dilate(p, w, h, *gw);
             let sigma = *gw / 2.0;
-            (gaussian_blur(&d, dw, dh, sigma), dw, dh)
+            let (pp, pw, ph) = pad_bitmap(&d, dw, dh, blur_pad(sigma));
+            (gaussian_blur(&pp, pw, ph, sigma), pw, ph)
         }
         FontEffect::Blur { w: bw } => {
             let sigma = *bw / 2.0;
-            (gaussian_blur(p, w, h, sigma), w, h)
+            let (pp, pw, ph) = pad_bitmap(p, w, h, blur_pad(sigma));
+            (gaussian_blur(&pp, pw, ph, sigma), pw, ph)
         }
     }
 }
@@ -354,7 +399,7 @@ mod tests {
     #[test]
     fn apply_effect_shadow_with_blur_same_size() {
         let px = vec![255u8; 16];
-        let (out, w, h) = apply_effect(
+        let (_out, w, h) = apply_effect(
             &px,
             4,
             4,
@@ -365,8 +410,10 @@ mod tests {
                 color: [1.; 4],
             },
         );
-        assert_eq!((w, h), (4, 4), "shadow 不扩边界");
-        assert_eq!(out.len(), 16);
+        assert!(
+            w > 4 && h > 4,
+            "shadow blur 应扩边界容纳 halo（光不被切在 quad 内），实际 {w}×{h}"
+        );
     }
 
     #[test]
@@ -387,9 +434,32 @@ mod tests {
     }
 
     #[test]
+    fn stroke_emits_hollow_ring_not_solid_erode() {
+        // 实心 3×3 亮块，Stroke 描边应是空心环（中心透明、边缘描边色），不是 erode 的
+        // 内缩实心块（中心还亮）。CSS -webkit-text-stroke 描边在字形边缘内侧 r 宽。
+        let px = vec![255u8; 9]; // 3×3 实心
+        let (out, w, h) = apply_effect(
+            &px,
+            3,
+            3,
+            &FontEffect::Stroke {
+                w: 1.0,
+                color: [1.; 4],
+            },
+        );
+        assert_eq!((w, h), (5, 5), "erode 扩边界 ceil(1)=1 → 5×5");
+        // 原 3×3 中心 (1,1) → 扩边界位图 (2,2)。描边环中心透明（填色在 fill 之下）。
+        let center = out[(2 * h as i32 + 2) as usize];
+        assert_eq!(center, 0, "描边环中心应透明（非内缩实心块），实际 {center}");
+        // 边缘环（原 3×3 角 (0,0) → 位图 (1,1)）应亮（描边）。
+        let edge = out[(h as i32 + 1) as usize];
+        assert_eq!(edge, 255, "描边环边缘应亮，实际 {edge}");
+    }
+
+    #[test]
     fn apply_effect_glow_expands() {
         let px = vec![255u8; 9];
-        let (out, w, h) = apply_effect(
+        let (_out, w, h) = apply_effect(
             &px,
             3,
             3,
@@ -398,16 +468,28 @@ mod tests {
                 color: [1.; 4],
             },
         );
-        // dilate 扩 2*ceil(1)=2 → 5×5，blur 不扩边界 → 5×5
-        assert_eq!((w, h), (5, 5));
-        assert_eq!(out.len(), 25);
+        // dilate 扩 2*ceil(1)=2 → 5×5，blur 再 pad 扩边界 → > 5×5
+        assert!(
+            w > 5 && h > 5,
+            "glow 的 blur 应扩边界容纳 halo，实际 {w}×{h}"
+        );
     }
 
     #[test]
     fn apply_effect_blur_same_size() {
         let px = vec![255u8; 9];
-        let (out, w, h) = apply_effect(&px, 3, 3, &FontEffect::Blur { w: 2.0 });
-        assert_eq!((w, h), (3, 3));
-        assert_eq!(out.len(), 9);
+        let (_out, w, h) = apply_effect(&px, 3, 3, &FontEffect::Blur { w: 2.0 });
+        assert!(w > 3 && h > 3, "blur 应扩边界容纳 halo，实际 {w}×{h}");
+    }
+
+    #[test]
+    fn blur_halo_extends_past_original_bounds() {
+        // 单亮像素 blur 后 halo 应扩出原边界——否则柔光投影的光被切在 quad 内。
+        let mut px = vec![0u8; 25]; // 5×5
+        px[12] = 255; // 中心亮像素
+        let (out, w, _h) = apply_effect(&px, 5, 5, &FontEffect::Blur { w: 4.0 });
+        assert!(w > 5, "blur 应扩边界 ow={w}");
+        let halo = out.iter().filter(|&&v| v > 0).count();
+        assert!(halo > 1, "blur halo 应扩散到多像素，实际 {halo} 个非零");
     }
 }

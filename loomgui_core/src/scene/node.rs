@@ -558,6 +558,10 @@ fn gather_rec(
             ts.letter_spacing = style.letter_spacing;
             ts.text_align = style.text_align;
             ts.white_space_nowrap = style.white_space_nowrap;
+            // text_effects（text-shadow/-webkit-text-stroke/font-effect:glow|blur）须随其他
+            // 文本字段一起透传：`<div style="text-shadow:...">裸文本</div>` 的特效声明在 div，
+            // 实际渲染的是这个 Text 子节点，漏搬则特效层 mesh 不产出。
+            ts.text_effects = style.text_effects.clone();
             entries.push((
                 Some(my_idx),
                 NodeKind::Text {
