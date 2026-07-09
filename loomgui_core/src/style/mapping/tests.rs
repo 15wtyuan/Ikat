@@ -474,6 +474,59 @@ fn apply_decl_border_image_slice_percent() {
     assert!((sl.top - 0.25).abs() < 1e-4, "25% 存 0.25，渲染期 resolve");
 }
 
+/// `border` 简写 `<width> <style>? <color>?`（CSS 标准、AI 强先验）须解析 width + color，
+/// 否则 `border:1px solid #3a3f55` 只取 width、color 丢 → border_color=None → 渲染不画边框。
+/// 四边同值（简写语义）。
+#[test]
+fn apply_border_shorthand_sets_width_and_color() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "border", "1px solid #3a3f55"));
+    assert_eq!(s.border_width, 1.0, "border 简写 width");
+    let c = s.border_color.expect("border 简写须解析 color");
+    assert_eq!(c[0], 0x3a as f32 / 255.0);
+    assert_eq!(c[1], 0x3f as f32 / 255.0);
+    assert_eq!(c[2], 0x55 as f32 / 255.0);
+    assert_eq!(c[3], 1.0);
+    let ts = &s.taffy_style.border;
+    assert!(matches!(ts.top, LengthPercentage::Length(1.0)), "四边同宽");
+    assert!(matches!(ts.right, LengthPercentage::Length(1.0)));
+    assert!(matches!(ts.bottom, LengthPercentage::Length(1.0)));
+    assert!(matches!(ts.left, LengthPercentage::Length(1.0)));
+}
+
+/// border 简写 width/style/color 任意序；省 color 时只设 width。
+#[test]
+fn apply_border_shorthand_token_order_and_optional_color() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "border", "2px"));
+    assert_eq!(s.border_width, 2.0);
+    assert!(
+        s.border_color.is_none(),
+        "无 color token → 不设 border_color"
+    );
+
+    // color 在前、width 在后（CSS 简写任意序）
+    let mut s2 = ResolvedStyle::default();
+    assert!(apply_decl(&mut s2, "border", "#ff0000 3px solid"));
+    assert_eq!(s2.border_width, 3.0);
+    let c = s2.border_color.expect("color 在前也解析");
+    assert_eq!(c, [1.0, 0.0, 0.0, 1.0]);
+}
+
+/// `border-width` 属性（非简写）只设 width，不碰 border_color。
+#[test]
+fn apply_border_width_property_leaves_color_untouched() {
+    let mut s = ResolvedStyle::default();
+    s.border_color = Some([0.5; 4]);
+    assert!(apply_decl(&mut s, "border-width", "4px"));
+    assert_eq!(s.border_width, 4.0);
+    assert_eq!(
+        s.border_color,
+        Some([0.5; 4]),
+        "border-width 不覆盖 border_color"
+    );
+}
+
 #[test]
 fn transition_empty_value_is_none() {
     // apply_decl("transition", "") → style.transition = None（未声明 vs 默认值有不同语义）

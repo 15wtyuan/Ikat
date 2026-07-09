@@ -36,6 +36,14 @@ pub(crate) const BOX_SHADOW_FLAG: u32 = 0x1000_0000;
 /// BOX_SHADOW_FLAG（bit 28），不冲突。Front layer sort_key > primary（后绘 = 上层）。
 pub(crate) const TEXT_STROKE_FRONT_FLAG: u32 = 0x8000_0000;
 
+/// 富文本行内图（inline `<img>`）合成 node_id 子页基址。每个行内图一个独立 RenderNode
+/// （image shader + image_path=src），须叠在 primary 的所有文字层之上：sort_key 由
+/// `propagate_inline_image_sort_keys` 设为 primary 文字层 max + img_idx + 1。
+/// synth_text_node_id 编码后 high byte = (1000 + idx) & 0xFF = 232..=255，不与跨页子页
+/// （1..=15）撞；与 stroke front（128+）high byte 数值区间相交，但两者都靠各自的
+/// `*_pairs` 显式配对传播 sort_key、不凭 high byte 判别，故不冲突。
+pub(crate) const INLINE_IMG_SYNTH_ID_BASE: u32 = 1000;
+
 /// 把 2 色线性渐变映射到 quad 4 角顶点色（顶点序 TL, TR, BR, BL）。
 ///
 /// GPU 顶点色光栅插值在 4 角间线性过渡——将 2 色 (a, b) 按方向放到对应的"起点/终点"角，
@@ -263,6 +271,8 @@ pub fn build_render_nodes(
     let mut shadow_pairs: Vec<(u32, u32)> = Vec::new();
     // text-stroke Front layer RenderNode 追踪：(主节点 node_id, stroke 合成 node_id)。
     let mut stroke_pairs: Vec<(u32, u32)> = Vec::new();
+    // 富文本行内图 RenderNode 追踪：(主节点 node_id, 行内图合成 node_id)。
+    let mut inline_image_pairs: Vec<(u32, u32)> = Vec::new();
     for n in scene.nodes.values() {
         if pruned.contains(&n.id) {
             continue;
@@ -507,6 +517,15 @@ pub fn build_render_nodes(
                 let s = &n.style;
                 let stack = fonts.stack_for(s.font_family.as_deref());
                 let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
+                let off_left =
+                    resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
+                let off_right = resolve_lp(s.taffy_style.border.right)
+                    + resolve_lp(s.taffy_style.padding.right);
+                let off_top =
+                    resolve_lp(s.taffy_style.border.top) + resolve_lp(s.taffy_style.padding.top);
+                // max_width 用 content width（rect.w - 左右 border/padding），文字在 content area
+                // 内断行 + 对齐，不溢出 box（修复前传 rect.w → 文字吃到 padding、右对齐/换行超框）。
+                let content_w = (rect.w - off_left - off_right).max(0.0);
                 let mut layout = scene
                     .text_layouts
                     .get(n.id.index())
@@ -520,17 +539,13 @@ pub fn build_render_nodes(
                             s.letter_spacing,
                             s.text_align,
                             s.white_space_nowrap,
-                            Some(rect.w),
+                            Some(content_w),
                             &stack,
                             text_color,
                         )
                     });
-                let off_x =
-                    resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
-                let off_y =
-                    resolve_lp(s.taffy_style.border.top) + resolve_lp(s.taffy_style.padding.top);
-                if off_x != 0.0 || off_y != 0.0 {
-                    bake_content_offset(&mut layout, off_x, off_y);
+                if off_left != 0.0 || off_top != 0.0 {
+                    bake_content_offset(&mut layout, off_left, off_top);
                 }
                 let meshes = build_text_mesh(
                     &layout,
@@ -564,6 +579,14 @@ pub fn build_render_nodes(
                 // 合成 bold（双绘 +1px）/italic（quad 顶边右偏）在 build 期几何化。
                 let s = &n.style;
                 let stack = fonts.stack_for(s.font_family.as_deref());
+                let off_left =
+                    resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
+                let off_right = resolve_lp(s.taffy_style.border.right)
+                    + resolve_lp(s.taffy_style.padding.right);
+                let off_top =
+                    resolve_lp(s.taffy_style.border.top) + resolve_lp(s.taffy_style.padding.top);
+                // max_width 用 content width（同 Text arm）：富文本在 content area 内断行 + 对齐。
+                let content_w = (rect.w - off_left - off_right).max(0.0);
                 let mut layout = scene
                     .text_layouts
                     .get(n.id.index())
@@ -572,21 +595,17 @@ pub fn build_render_nodes(
                     .unwrap_or_else(|| {
                         crate::text::layout::measure_rich_text(
                             runs,
-                            Some(rect.w),
+                            Some(content_w),
                             s.line_height,
                             s.text_align,
                             &stack,
                         )
                     });
-                let off_x =
-                    resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
-                let off_y =
-                    resolve_lp(s.taffy_style.border.top) + resolve_lp(s.taffy_style.padding.top);
-                if off_x != 0.0 || off_y != 0.0 {
-                    bake_content_offset(&mut layout, off_x, off_y);
+                if off_left != 0.0 || off_top != 0.0 {
+                    bake_content_offset(&mut layout, off_left, off_top);
                 }
                 // 收集链接 fragment 矩形（富文本 <a> 命中查询）。跨行链接自然拆多 rect——
-                // 每行同 link_id 各一个（fgui GetLinesShape 范式）。glyph x/y 已含 off_x/off_y。
+                // 每行同 link_id 各一个（fgui GetLinesShape 范式）。glyph x/y 已含 off_left/off_top。
                 {
                     let mut frags: Vec<crate::text::rich::RichFragment> = Vec::new();
                     for line in &layout.lines {
@@ -604,7 +623,7 @@ pub fn build_render_nodes(
                                     .unwrap_or(x_start);
                                 frags.push(crate::text::rich::RichFragment {
                                     x: x_start,
-                                    y: line.y + off_y,
+                                    y: line.y + off_top,
                                     w: (x_end - x_start).max(0.0),
                                     h: line.height,
                                     link_id: lid,
@@ -685,11 +704,11 @@ pub fn build_render_nodes(
                 // 顶点序、UV 与 mesh::quad 同：TL, TR, BR, BL；v-flip（design y-down
                 // 配 Unity root-stage y-flip → UV 方向与现有 Image/Container bg-image 一致）。
                 // 全图 UV（MVP：无 sprite 子区）。
-                // synth id 高字节偏移避开 text 子页号（1..~10）：1000 + img_idx 经 & 0xFF
-                // 掩码后落在 232-255，不与 text atlas 跨页子页号重叠。
-                const INLINE_IMG_SYNTH_ID_BASE: u32 = 1000;
                 for (img_idx, img) in layout.images.iter().enumerate() {
-                    let (ix, iy) = (img.x + off_x + rect.x, img.y + off_y + rect.y);
+                    let img_node_id =
+                        synth_text_node_id(node_id, INLINE_IMG_SYNTH_ID_BASE + img_idx as u32);
+                    inline_image_pairs.push((node_id, img_node_id));
+                    let (ix, iy) = (img.x + off_left + rect.x, img.y + off_top + rect.y);
                     let payload = NodePayload::Mesh {
                         verts: vec![
                             [ix, iy],                 // TL (top-left, smallest y in design y-down)
@@ -705,10 +724,7 @@ pub fn build_render_nodes(
                         color_matrix: [0.0; 20],
                     };
                     nodes.push(RenderNode {
-                        node_id: synth_text_node_id(
-                            node_id,
-                            INLINE_IMG_SYNTH_ID_BASE + img_idx as u32,
-                        ),
+                        node_id: img_node_id,
                         parent_id,
                         visible: true,
                         alpha,
@@ -716,7 +732,7 @@ pub fn build_render_nodes(
                         world_matrix: wm,
                         blend: BlendMode::Normal,
                         mask_context: MaskContext(0),
-                        sort_key: 0,
+                        sort_key: 0, // propagate_inline_image_sort_keys 后调
                         change_level: ChangeLevel::Full,
                         reuse_key: 0,
                         payload,
@@ -789,6 +805,7 @@ pub fn build_render_nodes(
     propagate_text_sub_page_sort_keys(&mut nodes, &id_to_pos);
     propagate_box_shadow_sort_keys(&mut nodes, &shadow_pairs);
     propagate_text_stroke_sort_keys(&mut nodes, &stroke_pairs);
+    propagate_inline_image_sort_keys(&mut nodes, &inline_image_pairs);
     let max_sort = nodes.iter().map(|n| n.sort_key).max().unwrap_or(0);
     batch::reorder_for_batching(scene, &mut nodes);
     let mut nodes = merge::merge_meshes(nodes);
@@ -976,6 +993,59 @@ fn propagate_text_stroke_sort_keys(nodes: &mut [RenderNode], strokes: &[(u32, u3
             let main_sk = nodes[main_pos].sort_key;
             let n_sub = sub_counts.get(&main_id).copied().unwrap_or(0);
             nodes[stroke_pos].sort_key = main_sk + n_sub + 1;
+        }
+    }
+}
+
+/// 富文本行内图合成节点 sort_key 传播：每个行内图叠在 primary 的所有文字层
+/// （base 子页 + shadow Back + stroke Front）之上。
+///
+/// assign_sort_keys 只给 `id_to_pos` 中的真 scene 节点赋 sort_key；行内图是合成节点
+/// （INLINE_IMG_SYNTH_ID_BASE 子页），不在场景树中，初始 sort_key=0，会被所有真节点
+/// 盖住（行内图"消失"在底色之下）。此函数把行内图 sort_key 设为该 primary 已有最大
+/// sort_key + img_idx + 1，并把后续真节点后移行内图个数，保持单调连续。
+///
+/// 须在 propagate_text_sub_page / box_shadow / text_stroke 之后调用——读取它们产出
+/// 的最终 sort_key 作为 base。处理多 primary 时按 base DESC，避免累积偏移污染。
+fn propagate_inline_image_sort_keys(nodes: &mut [RenderNode], images: &[(u32, u32)]) {
+    if images.is_empty() {
+        return;
+    }
+    // 按 primary 分组行内图（保持声明顺序 = 文本流顺序）。
+    let mut groups: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    for &(_main, img_id) in images {
+        let primary = img_id & 0x00FF_FFFF;
+        groups.entry(primary).or_default().push(img_id);
+    }
+    // base = 该 primary 及其所有合成子节点（子页/shadow/stroke；行内图自身此刻 sk=0）的 max sort_key。
+    let mut entries: Vec<(u32, Vec<u32>)> = groups
+        .into_iter()
+        .map(|(primary, imgs)| {
+            let base = nodes
+                .iter()
+                .filter(|n| (n.node_id & 0x00FF_FFFF) == primary)
+                .map(|n| n.sort_key)
+                .max()
+                .unwrap_or(0);
+            (base, imgs)
+        })
+        .collect();
+    // 按 base DESC：大 base 先处理，其后续节点后移不影响小 base 的原始值。
+    entries.sort_by_key(|(base, _)| std::cmp::Reverse(*base));
+    for (base, imgs) in &entries {
+        let count = imgs.len() as u32;
+        let img_set: std::collections::HashSet<u32> = imgs.iter().copied().collect();
+        // 后移：sort_key > base 的非本组节点 += count（给行内图腾出 base+1..base+count）。
+        for rn in nodes.iter_mut() {
+            if !img_set.contains(&rn.node_id) && rn.sort_key > *base {
+                rn.sort_key += count;
+            }
+        }
+        // 行内图 sort_key = base + 1 + img_idx（文本流顺序递增）。
+        for (i, &img_id) in imgs.iter().enumerate() {
+            if let Some(pos) = nodes.iter().position(|n| n.node_id == img_id) {
+                nodes[pos].sort_key = base + 1 + i as u32;
+            }
         }
     }
 }

@@ -162,6 +162,51 @@ fn build_container_with_border_emits_border_node() {
     assert!(colors.contains(&[0.0, 0.0, 1.0, 1.0]), "背景蓝色顶点存在");
 }
 
+/// CSS `border` 简写（`<width> <style>? <color>?`）经 apply_decl → border_color + border_width
+/// → render border_ring。端到端验简写解析 color 后边框环确实渲染（修复前简写只取 width、
+/// color 丢 → border_color=None → 不画，html 预览有边框而 Unity 无）。
+#[test]
+fn border_shorthand_renders_border_ring() {
+    use crate::style::mapping::apply_decl;
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        },
+        Some([0.0, 0.0, 0.0, 1.0]),
+    );
+    assert!(apply_decl(&mut n.style, "border", "2px solid #5fb2c4"));
+    let expected = n.style.border_color.expect("简写解析 color");
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let mesh = frame
+        .nodes
+        .iter()
+        .find(|rn| matches!(&rn.payload, NodePayload::Mesh { verts, .. } if !verts.is_empty()))
+        .expect("Mesh 节点");
+    let NodePayload::Mesh { verts, colors, .. } = &mesh.payload else {
+        unreachable!()
+    };
+    // 背景 4 + 边框 8 = 12 顶点（border_ring 激活；修复前仅背景 4）。
+    assert_eq!(verts.len(), 12, "简写 border 激活 border_ring：背景4+边框8");
+    assert!(
+        colors.contains(&expected),
+        "边框色顶点存在（简写 color 进渲染）"
+    );
+}
+
 #[test]
 fn build_container_without_border_no_border_node() {
     // border_color 缺省（None）→ 不发边框节点。回归保护：dead field 激活不应影响无边框节点。
@@ -2266,6 +2311,78 @@ fn propagate_text_sub_page_sort_keys_cumulative_shift_no_ties() {
     assert_eq!(sks.len(), unique.len(), "sort_key 不得有 tie");
 }
 
+/// 行内图合成节点 sort_key 须叠在 primary 的所有文字层之上，否则 sort_key=0 → 画在
+/// 最底层被底色/文字盖住（行内图"消失"在底图之下）。构造 A(primary) + A_sub1(子页) +
+/// A_img(行内图 sk=0) + B(后续真节点)，验 A_img sort_key = base+1，B 后移，无 tie。
+#[test]
+fn propagate_inline_image_sort_keys_stacks_above_text_layers() {
+    use crate::render::node::{BlendMode, ChangeLevel, MaskContext, NodePayload, RenderNode};
+
+    let a_id = 0u32;
+    let b_id = 1u32;
+    let a_sub1 = synth_text_node_id(a_id, 1);
+    let a_img = synth_text_node_id(a_id, INLINE_IMG_SYNTH_ID_BASE);
+
+    let empty_mesh = NodePayload::Mesh {
+        verts: vec![],
+        uvs: vec![],
+        colors: vec![],
+        indices: vec![],
+        image_path: None,
+        program: 0,
+        color_matrix: [0.0; 20],
+    };
+    let mk_rn = |node_id: u32, sort_key: u32| RenderNode {
+        node_id,
+        parent_id: None,
+        visible: true,
+        alpha: 1.0,
+        color_tint: [1.0; 4],
+        world_matrix: crate::transform::IDENTITY,
+        blend: BlendMode::Normal,
+        mask_context: MaskContext(0),
+        sort_key,
+        change_level: ChangeLevel::Full,
+        reuse_key: 0,
+        payload: empty_mesh.clone(),
+    };
+
+    // A primary=2, A_sub1=3（子页已 propagate），A_img=0（行内图待 propagate），B=4（后续真节点）。
+    let mut nodes = vec![
+        mk_rn(a_id, 2),
+        mk_rn(a_sub1, 3),
+        mk_rn(a_img, 0),
+        mk_rn(b_id, 4),
+    ];
+    let images = vec![(a_id, a_img)];
+
+    propagate_inline_image_sort_keys(&mut nodes, &images);
+
+    let find = |nid: u32| nodes.iter().find(|n| n.node_id == nid).unwrap().sort_key;
+    assert_eq!(find(a_id), 2, "A primary 不变");
+    assert_eq!(find(a_sub1), 3, "A 子页不变");
+    let a_img_sk = find(a_img);
+    assert!(
+        a_img_sk > find(a_sub1),
+        "行内图叠在子页之上 ({} > {})",
+        a_img_sk,
+        find(a_sub1)
+    );
+    assert!(
+        find(b_id) > a_img_sk,
+        "后续真节点后移到行内图之上 ({} > {})",
+        find(b_id),
+        a_img_sk
+    );
+
+    // 无 tie。
+    let mut sks: Vec<u32> = nodes.iter().map(|n| n.sort_key).collect();
+    sks.sort();
+    let mut unique = sks.clone();
+    unique.dedup();
+    assert_eq!(sks.len(), unique.len(), "sort_key 不得有 tie");
+}
+
 /// 哨兵：合成 node_id 硬上限文档。
 /// 验证 synth_text_node_id / is_text_sub_page / text_sub_primary_id / text_sub_page_idx
 /// 的编码/解码一致性。
@@ -2490,6 +2607,103 @@ fn rich_text_node_emits_bg_quad_when_bg_color_set() {
     );
 }
 
+/// 行内图（RichText 内 inline `<img>`）RenderNode 须叠在 bg + 文字之上，否则 sort_key=0
+/// 被底色盖住（行内图"消失"在底图之下）。端到端验：渲染后行内图 sort_key > bg 且 > text。
+#[test]
+fn rich_text_inline_image_sorts_above_bg_and_text() {
+    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichVAlign, RichWeight};
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mk_run = |kind: RichKind| RichRun {
+        kind,
+        color: [1.0, 1.0, 1.0, 1.0],
+        font_id: 0,
+        size_px: 16,
+        weight: RichWeight::Normal,
+        style: RichStyle::Normal,
+        deco: RichDeco::default(),
+        link_id: None,
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::RichText {
+        runs: vec![
+            mk_run(RichKind::Text { text: "x".into() }),
+            mk_run(RichKind::Image {
+                src: "icons/zap.png".into(),
+                w: 22.0,
+                h: 22.0,
+                valign: RichVAlign::Baseline,
+            }),
+        ],
+    };
+    n.style.background_color = Some([0.1, 0.1, 0.1, 1.0]); // 带 bg → 触发 bg quad
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 40.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // 行内图 RenderNode：image_path = 源 src（非 loomgui:// font-atlas）。
+    let img = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            matches!(&rn.payload, NodePayload::Mesh { image_path: Some(p), .. } if p == "icons/zap.png")
+        })
+        .expect("行内图 RenderNode 应存在");
+    assert!(
+        img.sort_key > 0,
+        "行内图 sort_key > 0（修复前=0 → 被底图盖住）"
+    );
+    // bg quad（program 0，无 image_path）与 text（program 1，font-atlas path）都应在行内图之下。
+    let bg = frame.nodes.iter().find(|rn| {
+        !is_text_sub_page(rn.node_id)
+            && matches!(
+                &rn.payload,
+                NodePayload::Mesh {
+                    program: 0,
+                    image_path: None,
+                    ..
+                }
+            )
+    });
+    let text = frame.nodes.iter().find(|rn| {
+        matches!(&rn.payload, NodePayload::Mesh { program: 1, image_path: Some(p), .. } if p.starts_with("loomgui://"))
+    });
+    if let Some(bg) = bg {
+        assert!(
+            img.sort_key > bg.sort_key,
+            "行内图在 bg 之上 ({} > {})",
+            img.sort_key,
+            bg.sort_key
+        );
+    }
+    if let Some(text) = text {
+        assert!(
+            img.sort_key > text.sort_key,
+            "行内图在 text 之上 ({} > {})",
+            img.sort_key,
+            text.sort_key
+        );
+    }
+}
+
 /// 两同字体 RichText span → merge 后应合并 draw call（program=1 已在合批白名单）。
 /// 验 RichText 与 Text 同走 atlas path 合批路径，不因 per-run 色破坏合批。
 #[test]
@@ -2654,6 +2868,85 @@ fn rich_text_padding_offsets_glyphs_vertically() {
         (diff - 14.0).abs() < 1.5,
         "padding top 14 须偏移字形 14px（diff={}，期望≈14）",
         diff
+    );
+}
+
+/// text-align:right + padding：末字（最右顶点）不得超 box 右边。修复前 max_width=rect.w
+/// → 右对齐 offset 基准含 padding → 末字溢出 box 右 padding（B9 "右对齐超框" 症状）。
+/// 修复后 max_width=content width → 右对齐在 content area 内、末字 ≤ box right。
+#[test]
+fn rich_text_right_align_does_not_overflow_box_with_padding() {
+    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
+    use taffy::style::LengthPercentage;
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::RichText {
+        runs: vec![RichRun {
+            kind: RichKind::Text {
+                text: "右对齐".into(),
+            },
+            color: [1.0; 4],
+            font_id: 0,
+            size_px: 20,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+            link_id: None,
+        }],
+    };
+    n.style.font_size = 20.0;
+    n.style.text_align = TextAlign::Right;
+    // 四向 padding 14 → content_w = rect.w - 28
+    n.style.taffy_style.padding.top = LengthPercentage::Length(14.0);
+    n.style.taffy_style.padding.bottom = LengthPercentage::Length(14.0);
+    n.style.taffy_style.padding.left = LengthPercentage::Length(14.0);
+    n.style.taffy_style.padding.right = LengthPercentage::Length(14.0);
+    n.layout_rect = Rect {
+        x: 100.0,
+        y: 50.0,
+        w: 120.0,
+        h: 60.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let box_right = 100.0 + 120.0; // rect.x + rect.w
+    let content_right = box_right - 14.0; // 减 padding.right
+    let mut max_x = f32::NEG_INFINITY;
+    for rn in &frame.nodes {
+        if let NodePayload::Mesh { verts, program, .. } = &rn.payload {
+            if *program == 1 {
+                for v in verts {
+                    if v[0] > max_x {
+                        max_x = v[0];
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        max_x <= box_right + 0.5,
+        "右对齐末字不得超 box 右边（max_x={:.1} > box_right={:.1}）",
+        max_x,
+        box_right
+    );
+    assert!(
+        max_x > content_right - 2.0,
+        "右对齐末字应贴 content right（max_x={:.1}，content_right={:.1}）",
+        max_x,
+        content_right
     );
 }
 

@@ -16,7 +16,7 @@
 
 ## CSS 视觉
 - `background-color` / `background-image`(url) / `background-size`(cover/contain/100%，拒两值)
-- `border-radius` / `border`(简写只取宽度) / `border-color` / `opacity`
+- `border-radius` / `border`(简写 `<width> <style>? <color>?`，解析 width+color) / `border-color` / `border-width` / `opacity`
 - `overflow` / `overflow-x` / `overflow-y`
 - `color` / `font-size`(px) / `font-family` / `font-weight` / `text-align` / `line-height` / `letter-spacing` / `white-space:nowrap`
 - `transform`(translate/rotate/scale，禁 skew/matrix) / `pointer-events`

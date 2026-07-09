@@ -488,9 +488,14 @@ pub fn measure_text(
     let mut out_lines = Vec::with_capacity(lines.len());
     for (li, (text, lw)) in lines.iter().enumerate() {
         let line_y = li as f32 * line_h;
+        // align 基准 = 容器宽（max_width），与 measure_rich_text 一致：单行短文本也偏移到
+        // 容器内居中/右（浏览器语义）。此前基准 = text_width（最宽行）→ 单行 offset 0、
+        // 永远左对齐（text-align:center 失效）。max_width=None（nowrap/无容器）fallback
+        // text_width → offset 0。
+        let container_w = max_width.unwrap_or(text_width);
         let x_offset = match align {
-            crate::style::resolved::TextAlign::Center => (text_width - lw) / 2.0,
-            crate::style::resolved::TextAlign::Right => text_width - lw,
+            crate::style::resolved::TextAlign::Center => ((container_w - lw) / 2.0).max(0.0),
+            crate::style::resolved::TextAlign::Right => (container_w - lw).max(0.0),
             crate::style::resolved::TextAlign::Left => 0.0,
         };
         let mut pen_x = x_offset;
@@ -961,6 +966,57 @@ mod tests {
         // Hello = 5 字形
         assert_eq!(layout.lines[0].runs[0].glyphs.len(), 5);
         assert!(layout.text_width > 0.0);
+    }
+
+    /// 单行短文本 + max_width（容器）→ center/right 在容器内偏移（浏览器语义）。
+    /// 修复前 align 基准 = text_width（最宽行 = 单行）→ offset 0 → 单行永远左对齐
+    /// （A6/B8 "text-align:center 却左对齐" 症状）。
+    #[test]
+    fn measure_text_aligns_single_line_within_container() {
+        let font = match test_font() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip: no test font");
+                return;
+            }
+        };
+        // "Hello" 宽远小于容器 200 → center 居中：首字 x ≈ (200 - text_w)/2 >> 0
+        let layout = measure_text(
+            "Hello",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Center,
+            false,
+            Some(200.0),
+            &FontStack::single(&font, 0),
+            [1.0; 4],
+        );
+        let first_x = layout.lines[0].runs[0].glyphs[0].x;
+        assert!(
+            first_x > 10.0,
+            "center 单行在容器内偏移（首字 x={:.1} > 10）",
+            first_x
+        );
+
+        let layout_r = measure_text(
+            "Hello",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Right,
+            false,
+            Some(200.0),
+            &FontStack::single(&font, 0),
+            [1.0; 4],
+        );
+        let glyphs = &layout_r.lines[0].runs[0].glyphs;
+        let last_x = glyphs.last().unwrap().x;
+        assert!(
+            last_x > 100.0,
+            "right 单行靠容器右（末字 x={:.1} > 100）",
+            last_x
+        );
     }
 
     /// 锁 kerning 重开：V pen_x = advance(A) + kern(A,V) < advance(A)

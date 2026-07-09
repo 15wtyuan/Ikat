@@ -425,7 +425,43 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             };
             true
         }
-        "border" | "border-width" => {
+        "border" => {
+            // CSS 简写：border: <width> <style>? <color>?（三件任意序，style 围栏外忽略）。
+            // 四边同值（简写语义）。width 取首个 px token，color 取首个可解析颜色 token。
+            // 此前简写只取 width、丢 color → border_color=None → 渲染不画边框，与 AI 对标准
+            // CSS 的强先验不符（html 预览有边框、Unity 无）。现解析 color 令二者一致。
+            let mut w: Option<f32> = None;
+            let mut color: Option<[f32; 4]> = None;
+            for tok in value.split_whitespace() {
+                if color.is_none() {
+                    if let Some(c) = parse_color(tok) {
+                        color = Some(c);
+                        continue;
+                    }
+                }
+                if w.is_none() {
+                    if let Some(px) = tok
+                        .strip_suffix("px")
+                        .and_then(|s| s.trim().parse::<f32>().ok())
+                    {
+                        w = Some(px);
+                    }
+                }
+            }
+            let w = w.unwrap_or(0.0);
+            ts.border = Rect {
+                left: LengthPercentage::Length(w),
+                right: LengthPercentage::Length(w),
+                top: LengthPercentage::Length(w),
+                bottom: LengthPercentage::Length(w),
+            };
+            style.border_width = w;
+            if let Some(c) = color {
+                style.border_color = Some(c);
+            }
+            true
+        }
+        "border-width" => {
             let [t, r, b, l] = parse_four(value);
             ts.border = Rect {
                 left: LengthPercentage::Length(l),

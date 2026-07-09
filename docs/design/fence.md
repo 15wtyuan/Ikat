@@ -66,7 +66,7 @@
 | `max-width`/`max-height` | px/% | mapping.rs:313-320 | 【实证】 |
 | `padding` | 1-4 值 px（仅 px） | mapping.rs:321-330 | 【实证】 |
 | `margin` | 1-4 值 px/%/auto | mapping.rs:331-340 | 【实证】 |
-| `border`/`border-width` | 简写：宽度进 taffy + 视觉 `border_width` 渲染描边（四边同宽），color 取 `border-color`；border-style 仅 `solid`（dashed/dotted/double 静默忽略） | mapping.rs:416-426 | 【实证】 |
+| `border`（简写）/`border-width` | `border` 简写 `<width> <style>? <color>?`（三件任意序，style 围栏外忽略）：width 进 taffy 四边同宽 + 视觉 `border_width`，color 进 `border_color`（等同 `border-color` 单属性）。`border-width` 单属性只设 width、不碰 color | mapping.rs `apply_decl` | 【实证】 |
 | `aspect-ratio` | number | mapping.rs:537-542 | 【实证】 |
 | `position` | `relative`（默认）/`absolute`（v1.4-b 脱离流）；`fixed`/`sticky` 静默忽略 | mapping.rs:557-558 | 【实证】 |
 | `top`/`right`/`bottom`/`left` | px/%（仅 position:absolute 时生效） | mapping.rs:557-558 | 【实证】 |

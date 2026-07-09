@@ -78,6 +78,7 @@ fn supported_visual_props_return_true() {
         ("pointer-events", "none"),
         ("filter", "grayscale(1)"),
         ("border-image-slice", "10"),
+        ("border", "1px solid #3a3f55"),
         ("border-color", "#ff0000"),
         ("border-width", "2px"),
         ("box-shadow", "2px 2px #000000"),
@@ -95,6 +96,19 @@ fn supported_visual_props_return_true() {
             "支持属性 {prop}:{val} 应返回 true"
         );
     }
+}
+
+/// `border` 简写（CSS 标准 `<width> <style>? <color>?`）须解析 width + color——
+/// AI 对边框的强先验写法；只取 width 会让 html 预览有边框、Unity 无（不可预测）。
+#[test]
+fn border_shorthand_parses_width_and_color() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "border", "1px solid #3a3f55"));
+    assert_eq!(s.border_width, 1.0);
+    assert!(
+        s.border_color.is_some(),
+        "border 简写 color 须解析（不止 border-color 单属性）"
+    );
 }
 
 #[test]
