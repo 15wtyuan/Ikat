@@ -16,7 +16,7 @@
 - 根 size setter 用 `Dimension::Length`（`Style.size` 是 `Size<Dimension>`）。
 - `Style` **无 `order` 字段**（CSS order 无法存 taffy；留 `ResolvedStyle.order` 待 v1 消费）。
 - **`Style.overflow: Point<Overflow>`**（taffy 0.5，Overflow=Visible/Clip/Hidden/Scroll）——CSS flex §4.5 automatic min-size：overflow≠Visible 的 flex item min-size=0（不被 content 撑开）。**必须显式设**（LoomGUI OverflowMode→taffy Overflow 同步），否则默认 Visible→min-size=min-content→scroll 容器被 content 撑开 overlap=0（坑 59）。构造 `taffy::geometry::Point { x, y }`。
-- **`Style::DEFAULT.position = Position::Relative`**（taffy 0.5 style/mod.rs:311）。LoomGUI 不映射 CSS `position`（apply_decl 无 position arm）→ 所有节点 position 永远是 taffy 默认 Relative。**`position:relative` 写不写行为一致**（无 inset 偏移）。**v1.4-b 起 `position:absolute` 生效**（脱离流，配 `top`/`right`/`bottom`/`left`；`fixed`/`sticky` 仍静默忽略。`inset` shorthand 不在围栏——用四显式属性，别用 shortcut）。教训（fence.md §0）：「搜索无 match ≠ 不支持」，可能是底层默认——核实属性须查依赖默认值 + 补测试，不能只 grep。
+- **`Style::DEFAULT.position = Position::Relative`**（taffy 0.5 style/mod.rs:311）。**v1.4-b 起 `position:relative` 已纳入显式映射**（`apply_decl` 接受 `relative`/`absolute` 返回 true，`fence_contract.rs` 测试证明）。`position:absolute` 生效（脱离流，配 `top`/`right`/`bottom`/`left`；`fixed`/`sticky` 仍静默忽略。`inset` shorthand 不在围栏——用四显式属性，别用 shortcut）。`position:relative` 不设 inset 时与 taffy 默认行为一致（无偏移）。
 
 ### 1.2 ttf-parser 0.20（text/layout.rs）
 - **`glyph_hor_advance(GlyphId) -> Option<u16>`**（非 `glyph_advance_width`，返回 u16 非 i16）。
@@ -968,3 +968,77 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：按 gid 区分——gid=0（真缺字 .notdef）保留 tofu（开发期占位）；gid>0 无轮廓（空格、nbsp、零宽空格等）返空 bitmap，`ensure` 早返空 rect（不分配/不标脏，避 `allocate(0,0)` panic），`build_text_mesh` 跳过 `px_w==0` 字形（advance 在 layout 已算，pen 已前进）。
 
 **教训**：无 bbox ≠ 缺字——空格等有 advance 无像素的字形不该画占位。tofu 只给真缺字（gid=0 .notdef，且字体连 .notdef 方框都没有时才兜底；字体自带 .notdef 方框走正常光栅）。光栅兜底要区分"缺字"（gid=0）与"无轮廓"（gid>0 bbox None）。
+
+### 坑 139：RichText 行内图合成 id 触发 reorder panic（Unity 闪退）
+
+**症状**：PlayMode 进含行内图（`<img>` in `<div style="display:block">`）的富文本页，Unity 直接闪退（无 Console 报错，进程消失）。
+
+**根因**：RichText build（`render/mod.rs` 行内图 arm）给行内图 image mesh 设 `node_id = synth_text_node_id(...)`（合成 id，不在 scene）+ `program: 0`（mergeable）。batch 的 `reorder_for_batching` → `reorder_unit` 对 mergeable mesh 用 `aabb_of` 反查 `scene.get(NodeId).expect("live node")` 取 layout_rect 算 AABB 重叠——合成 id 不在 scene → `scene.get` 返 None → `.expect` panic。cdylib panic 不能 unwind → abort → 拖垮 Unity 宿主进程（坑 102 实例）。text 跨页子页也用 synth id 但 `program: 1`（不 mergeable）→ 不进 reorder → 不崩；**只有行内图（program:0 mergeable + synth id）触发**。render 单测漏：单 RichText 节点 n<2，`reorder_unit` 提前 return 不触 aabb_of。
+
+**解决**：`batch.rs` 的 `aabb_of` 对 `scene.get` 返 None 零面积兜底（`.unwrap_or(Rect{0,0,0,0})`），不 panic。行内图位置已由 build 期 mesh verts 固定，reorder 只按 draw_state（image_path）归批，零面积 AABB 让它不参与重叠判断（本就无 scene layout_rect）。
+
+**教训**：
+- 渲染管线（build/reorder/merge）绝不能 panic——任何 `.expect`/`unwrap` 遇合成 id / 临时产物 / 边界都可能 non-unwinding abort 拖垮宿主。用 `unwrap_or` 兜底。
+- 合成 id（`synth_text_node_id`：text 跨页子页 / 行内图）是有意不进 scene 的纯渲染产物，任何"反查 scene"的逻辑（reorder AABB / sort_key / NativeHost 查询）都要对它兜底。
+- 单测要覆盖**多节点 reorder**（n≥2 才进 `reorder_unit`），单节点测不到 aabb_of 路径。
+- PlayMode 闪退先查 project-relative `loomgui_unity/Logs/Editor.log` 末尾的 panic 栈——比读代码猜快得多。
+
+### 坑 140：parse_color 不支持 3 位 hex（#RGB）
+
+**症状**：`<span style="color:#888">`（3 位 hex）不生效，run 回退 base 色；6 位 hex 正常。失效的全是 3 位（#888/#3f6/#aaa），6 位（#ffd700/#5fb2c4）正常——按 hex 位数定位。
+
+**根因**：`style::mapping::parse_color` 只认 `len()==6`，3 位返 None → `apply_inline_style` 跳过 → run 用 base 色。单测只测 6 位，PlayMode 才现（坑 131-133 类）。
+
+**解决**：加 `len()==3` 分支，每数字重复（`#rgb→#rrggbb`，digit×17：0→0、f→255）。
+
+**教训**：CSS 颜色子集要覆盖常见简写。单测别只测一种形式——按"失效的全是 X 特征"快速定位。
+
+### 坑 141：RichText 叶漏画背景 quad
+
+**症状**：`<div style="display:block" class="rt">`（.rt 有 background-color）Unity 无底色，文字直接叠父容器。
+
+**根因**：desugar 把 block div 覆盖成 `NodeKind::RichText`，但 Container arm（`render/mod.rs:186`）的 bg quad 逻辑不覆盖 RichText arm（`:391` 直接产 text mesh 跳过 bg）。block div 盒属性留在 style，但叶没画 bg。
+
+**解决**：RichText arm 在 push_text_meshes 前产 bg quad（`n.style.background_color`，program 0/3）。z 序：bg 占真 node_id（DFS sort_key S），text 首页改用 synth 子页 1（propagate 给 S+1）→ bg 下层。无 bg-color 时 text 用真 node_id（原行为不变，现有测试不破）。
+
+**教训**：desugar 覆盖 kind 时，原 kind 渲染逻辑（bg）不自动迁移——叶要自画。z 序靠 id_to_pos + synth 子页机制。单测验 text 没验 bg（PlayMode 才见底色缺）。
+
+### 坑 142：underline 偏移方向反（偏上）
+
+**症状**：富文本下划线偏上（跑到字形里），删除线略偏下。
+
+**根因**：`build_text_mesh` underline `line.baseline + position×scale`，`underline_metrics.position` 是 y-up 负值（基线下方），design y-down 加负 → baseline 上方（字形里）。注释误以为"经 Unity y-flip 后变下方"——design 内就该下方，与 flip 无关。
+
+**解决**：改 `line.baseline - position×scale`（减负=加=baseline 下方）。strike 0.25→0.3em（略上移）。
+
+**教训**：y 偏移明确 design y-down 语义（下方=y 更大=减 y-up 负值）。别靠后端 y-flip 掩盖 design 方向错。坑 136（text mesh y 符号反）同类。
+
+### 坑 143：行内图 verts 缺 rect 偏移（跑原点）
+
+**症状**：富文本行内图不显示（跑 design 原点，屏外）。
+
+**根因**：RichText arm 行内图 verts `ix=img.x+off_x`（缺 `rect.x`），字形 `left=g.x+...+rect.x` 加了。单测 rect=(0,0) 巧合过（坑 131-133 类）。
+
+**解决**：行内图 `ix=img.x+off_x+rect.x`，`iy=img.y+off_y+rect.y`。加位置测试（rect≠0 验 min_x>=rect.x）。
+
+**教训**：mesh verts 世界坐标都要加 rect.x/y（blob re-base 减、后端加回）。位置单测用 rect≠0——rect=0 掩盖位置 bug。
+
+### 坑 144：bake_content_offset 只烤 glyphs 不烤 line.baseline → 文字缺 padding top
+
+**症状**：富文本/文本文字顶到盒顶（无 padding top），html 文字在 padding 内（视觉居中），Unity 上对齐。行内图加了 off_y、文字没加 → 行内图比文字低 padding（偏下）。框架层（所有 Text/RichText，正是"所有文本没考虑好"的怀疑）。
+
+**根因**：`bake_content_offset` 只烤 `glyphs.x/y`，但字形 top=`line.baseline-bearing+rect.y` 走 `line.baseline`（不读 g.y）→ y padding 丢。x 走 g.x（含 off_x）对，y 走 line.baseline（不含 off_y）错——x/y 不对称。
+
+**解决**：bake 也烤 `line.y`+`line.baseline`（+off_y）。行内图世界 y=`line.y+y_top`（layout 存世界 y，含 line.y）。fragments y 用 line.y（已含 off_y，去掉旧 +off_y）。
+
+**教训**：layout 偏移要烤全（glyphs+line.y/baseline+images），别只 glyphs——字形 top 走 line.baseline 不走 g.y。padding top 偏移是框架层（Text+RichText 共享 bake）。行内图偏下 + 文字垂直对齐同根因——别当两个 bug。
+
+### 坑 145：measure_rich_text split(' ') 丢空格 → 无空格 + 断行错
+
+**症状**："fragment 矩形" 渲染成 "fragment矩形"（无空格），断行点与 html 不一致（html 空格后断，Unity CJK 后断，导致超界）。
+
+**根因**：`measure_rich_text` 用 `text.split(' ')`，词间空格不补 token（注释说 MVP 丢空格"精度可忽略"）。空格 advance 丢 → 无空格 + 断行点错（空格是词边界）。
+
+**解决**：split 后词间补空格 token（advance=space advance；空格无轮廓不画，但占宽 + 词边界断行）。HTML 空白折叠（连续空格→单，split 空 part 跳过）。
+
+**教训**：空格不是"可忽略精度"——占宽 + 断行边界，丢了两都错。MVP 简化别砍关键语义。框架层（rich 文本空格；plain measure_text 若不同需对齐）。

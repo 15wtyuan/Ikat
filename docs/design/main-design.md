@@ -4,7 +4,7 @@
 >
 > **核心动机**：AI 驱动的界面拼装。HTML 作 DSL，让 AI 既能编辑（文本）又能预测渲染结果（AI 对 HTML/CSS 有强先验）。**DSL 决策的首要判据 = AI 读 HTML 能否正确预测渲染出的 UI**——背离浏览器语义的 divergence 须谨慎评估。
 >
-> **设计原则**：① 核心是引擎无关纯库（可单测）；② 渲染树契约描述**渲染意图**而非引擎机制（后端自选 stencil/Material/canvas_item）；③ 参考 FairyGUI 的成熟机制；④ 围栏只暴露标准 HTML 标签；⑤ 单 tick 入口、内部有序分步。
+> **设计原则**：① 核心是引擎无关纯库（可单测）；② 渲染树契约描述**渲染意图**而非引擎机制（后端自选 stencil/Material/canvas_item）；③ 围栏只暴露标准 HTML 标签；④ 单 tick 入口、内部有序分步。
 
 ---
 
@@ -83,7 +83,7 @@
 
 - **围栏外标签**（如 `<video>`/`<input>`/`<b>`/`<section>`）+ **行内混排**：**编译期报错**（parse 期失败、打包器拒收，不降级）。"写什么得到什么"的口径。
 - **围栏外 CSS 属性**（如 `position:absolute`/`float`/`clip-path`/`cursor`/`font-style`）：**静默忽略**（`apply_decl` 返 `false`，字段不变，布局语义不变）。
-  - 易误判项：`position:relative` 靠 taffy 默认 `Position::Relative` 生效（**非显式映射，写不写行为一致，无 inset 偏移**）；`display:grid` 落 Flex；v1.4-b 起 `position:absolute` **脱离流**（taffy Absolute + top/right/bottom/left inset）；`position:fixed/sticky` 仍静默忽略。
+  - 易误判项：`position:relative` **v1.4-b 起已纳入显式映射**（`apply_decl` 接受 `relative`/`absolute` 返回 true）；`display:grid` 落 Flex；`position:absolute` **脱离流**（taffy Absolute + inset）；`position:fixed/sticky` 仍静默忽略。
   - 这些"静默忽略"行为本身**被测试锁定**，不可靠推测——"搜索代码无 match"≠"不支持"，可能是底层默认（position:relative 教训）。
 
 > 围栏外标签/CSS/选择器的完整清单见 fence.md。
@@ -162,45 +162,56 @@ cssparser 给 Token，落到 taffy 强类型 style + 渲染属性。映射规则
 
 ### 5.2 Node 类型层级
 
+核心只有 `NodeKind` 枚举（`scene/node.rs`），不是类继承体系——无子类型多态，行为差异靠 match 分支：
+
+```rust
+pub enum NodeKind {
+    #[default]
+    Container,                      // flex 容器，持有 children，可挂 ScrollPane
+    Text { content: String },       // 纯文本叶子
+    RichText { runs: Vec<RichRun> }, // 富文本叶子（内联 <b>/<i>/<u>/<s> + 行内图）
+    Image { src: String },          // 图片叶子（普通/九宫格/平铺）
+    Button,                         // 可响应 :hover/:active/:disabled 的交互容器
+}
 ```
-Node (基类: 变换/尺寸/可见/touchable/事件/sortingOrder)
-├── Container        (唯一持有 children，可裁剪/遮罩，批合边界候选；可挂 ScrollPane)
-│   ├── Button       (状态: up/down/over/disabled)
-│   ├── List         (虚拟化滚动列表，建在 ScrollPane 上)
-│   ├── ComboBox / Slider / ProgressBar / Tree
-├── Image            (贴图 quad: 普通/九宫格/平铺/填充)
-├── Text             (纯文本)
-├── RichText / TextInput / Loader / MovieClip / Graph
-└── NativeHost       (原生宿主，参与布局/裁剪)
-```
-约束：只有 Container 能拥有 children；叶子不带 children 数组。RichText/TextInput/List 等是内部 NodeKind，**不暴露为 HTML 标签**（§3.1）。
+约束：Container 和 Button 持有 children（flex 容器）；Text/Image/RichText 为叶子不带 children。
+
+> **文档历史**：本栏曾列 List、ComboBox、Slider、ProgressBar、Tree、TextInput、Loader、MovieClip、Graph、NativeHost 等"类型"。它们**从未实现为 NodeKind 变体**——有的是运行时行为叠加（List = div+overflow:scroll+reuse_key），有的在规划中，有的已砍。以 `scene/node.rs` 的 `NodeKind` enum 为准。
 
 ### 5.3 Node 核心数据结构
+
 ```rust
-struct Node {
-    id: NodeId,                 // 代际句柄（§12.1）：删节点后旧 id 自动失效
-    parent: Option<NodeId>,
-    transform: Transform2D,     // x/y/rotation/scale_x/scale_y/pivot（渲染/命中层，不进 taffy）
-    style_size: SizeStyle,      // 用户声明值 (width/height/min/max/flex_basis)（进 taffy）
-    measured_size: (f32, f32),  // taffy solve 后写入（只读）
-    layout_rect: Rect,          // 父坐标系最终矩形（只读，不含 transform）
-    alpha: f32, visible: bool, touchable: bool, grayed: bool,
-    color_tint: Color,
-    base_style: ResolvedStyle,  // CSS 子集解析产物（源：build/动态 set_style 写）
-    style: ResolvedStyle,       // 派生：每帧 rematch 从 base_style 起算 + 叠伪类（§4.5）
-    dirty: DirtyFlags,          // style/mesh/text/layout/batching/outline/transform
-    // listeners 在业务侧（C# LoomEventHandler），非核心 Node 字段（§9.2 路由降级业务侧）
-    children: Option<Vec<NodeId>>,           // 仅 Container
-    sorting_order: i32,                      // 绘制优先级（与 children 顺序共同决定等效绘制序，§9.1）
-    clip_rect: Option<Rect>,                 // 矩形裁剪
-    // gears/gear_locked/controller（Controller/Gear 机制，§10.3/§10.4）
+pub struct Node {
+    pub id: NodeId,                    // 代际句柄（高 20bit index + 低 12bit gen）
+    pub parent: Option<NodeId>,
+    pub kind: NodeKind,                // 节点类型（Container/Text/RichText/Image/Button）
+    pub style: ResolvedStyle,          // 运行时 rematch 覆写值（每帧从 base_style 起算）
+    pub taffy_id: Option<taffy::NodeId>, // layout 层映射
+    pub layout_rect: Rect,             // taffy solve 后写入（父坐标系）
+    pub clip_rect: Option<Rect>,       // overflow:hidden 裁剪矩形
+    pub children: Vec<NodeId>,         // 子节点列表（Container/Button）
+    pub dirty_mesh: bool,              // 几何脏标记
+    pub dirty_text: bool,              // 文本布局脏标记
+    pub base_style: ResolvedStyle,      // 打包期 resolve_styles 产物（不变，rematch 基线）
+    pub classes: Vec<String>,          // 运行时 class 列表
+    pub id_attr: Option<String>,       // 运行时 id
+    pub touchable: bool,               // pointer-events: auto/none
+    pub hovered: bool,                 // 当前帧命中状态
+    pub active: bool,                  // 指针按下且命中
+    pub disabled: bool,                // set_node_disabled 设
+    pub draggable: bool,               // draggable="true"
+    pub tabindex: Option<i32>,         // 焦点序（None=不可聚焦）
+    pub focused: bool,                 // :focus 伪类源
+    pub reuse_key: u32,                // 渲染复用键（0=无复用；>0=虚拟列表 slot 复用 GO）
+    pub data_controller: Option<String>, // HTML data-controller 属性
+    pub cascaded_once: bool,           // 是否已 cascade 过（控制初始 transition 不入场）
 }
 ```
 
 **关键分层**（命中/动画/布局一致性的根基）：
-- `transform`（x/y/scale/rotation）是**渲染/命中层**偏移，**不进 taffy**，改 transform 只置 `transform_dirty`（命中+渲染刷新，不 solve）。
-- `style_size`/flex 才进 taffy，改了置 `layout_dirty` 触发 solve。
-- 命中几何 = `layout_rect` 经**累计 transform（含父链）**变换后的 AABB。
+- `ResolvedStyle.transform`（x/y/scale/rotation）是**渲染/命中层**偏移，**不进 taffy**。改 transform 不触发 solve，只刷新命中几何 + world_matrix。
+- `ResolvedStyle` 的 size/flex/padding/margin/border 才进 taffy，改了需 solve。
+- 命中几何 = `layout_rect` 经**累计 world_matrix（含父链 transform）**变换后的 AABB。
 
 ### 5.4 尺寸模型 → flexbox 映射
 | LoomGUI/CSS | taffy |
@@ -223,7 +234,7 @@ struct Node {
   → 产出 RenderNode → 后端同步镜像
   → Dispose：从父移除、释放纹理引用(refcount)、清事件/tween、后端销毁镜像对象
 ```
-**与 fgui 关键区别**：fgui 改属性立即推 DisplayObject（无 layout pass）。LoomGUI 改属性只置 dirty，每帧统一 solve。**所有布局都是帧末一致**。
+LoomGUI 改属性只置 dirty，每帧统一 solve。**所有布局都是帧末一致**。
 
 ---
 
@@ -236,7 +247,7 @@ struct Node {
 taffy 对"尺寸取决于内容"的节点回调 `MeasureFunc(known_dimensions) -> measured_size`：
 - **文本**：调文本测量子模块（§8），给定约束宽返回 `(text_width, text_height)`。必须廉价、无副作用（auto-size/shrink 反复调用）。
 - **图片**：原始像素尺寸或声明尺寸。
-- **RichText 内联对象**：在测量回调内部 query 每个 img/input 的 (w,h) 参与断行（不经 taffy）。**内联对象纯 intrinsic 尺寸**——(w,h) 来自声明 px 或纹理像素，不得用 `%`/`flex`（否则测量回调死循环），带 `%`/`flex` 是编译期错误。异步纹理加载不触发重布局。
+- **RichText 内联对象**：v1.7 走 `display:block` div desugar（见 fence §2.5）——parse 期捕获 inner HTML，desugar 期 `parse_rich_markup` → runs（含 `Image` run），`measure_rich_text` 算 inline flow（行内图作为 run 参与，**非测量回调 query**）。**内联对象纯 intrinsic 尺寸**——(w,h) 来自声明 px，不得用 `%`/`flex`。
 
 ### 6.3 响应式与异形屏
 - **resize**：屏幕尺寸变 → 根 taffy 节点 size 变 → 整树 solve。
@@ -346,15 +357,7 @@ enum NodePayload {
 
 > **v1.6 架构演进前瞻**：本节描述**当前实现**（测量在核心、光栅化在后端）。v1.6 计划把光栅化也搬进核心（ttf-parser outline + ab_glyph 光栅 + etagere 图集，核心产 UV + atlas 纹理，后端降为贴图上传），补齐"引擎无关纯核心"最后破例——根治坑 113/119、重开 kerning、text 可参与合批、跨引擎文本一致（接 Godot 不必重写光栅化）。决策/选型/代价见 `docs/roadmap/rmlui-research.md` §1。改前本节仍是真相。
 
-### 8.1 测量与渲染分离（一致性根基）
-- **Rust 核心拥有测量 + 断行**（确定性，跨引擎一致）：ttf-parser 取真实度量（`hhea`/`os2` ascent/descent/line-gap，**不照搬 fgui `fontSize*1.25` 估算**）+ unicode-linebreak（换行机会，CJK 逐字）。
-- **文本 mesh 在后端生成**：核心产 TextLayout，后端用引擎字体 API 光栅化产 UV、按 TextLayout 位置拼 quad mesh。
-- **advance/断行/box 尺寸一律以 Rust 为准**（跨引擎一致），仅字形 UV/光栅化在引擎侧。
-- **字体资产契约**：包内声明**逻辑字体名 + 度量源 ttf**，核心用此 ttf 算度量；**各后端用同一 ttf 光栅化**（Unity 加载进字体系统、Godot 加载进 DynamicFont）。font_id 是逻辑 id。
-- **换行/white-space 原则**：`white-space:normal/nowrap` 生效，换行以核心（unicode-linebreak，CJK 逐字）为准。对齐 Chrome 行为是目标（含 CJK 行首/行尾标点约束），具体 kinsoku 配置实现期对照 Chrome 调，本文不钉死算法。
-- 复杂 shaping（rustybuzz 连字/合字）+ BiDi（unicode-bidi, RTL）+ 字体 fallback 链：当前砍（亚洲/国内首发）。简化代价（CJK+emoji→tofu、组合符号→错位、RTL 不支持）+ 跨引擎归一化契约升级（Godot 接入时定 advance/metric 权威、关 hinting）见 roadmap（机制草稿）。
-
-### 8.2 TextLayout 产物（SOA 三表，跨 FFI）
+### 8.1 TextLayout 产物（SOA 三表，跨 FFI）
 ```rust
 struct TextLayout { text_width: f32, text_height: f32, lines: Vec<Line> }
 struct Line { y, height, baseline, width, runs: Vec<GlyphRun>, inline_objects: Vec<(x,y,w,h,obj_id)> }
@@ -368,12 +371,12 @@ struct Glyph { glyph_id, codepoint, x, y, bearing_x, bearing_y }   // 绝对坐�
 
 **跨 FFI 时 SOA 三表化**（§13.3）：`glyphs_soa[]`（每项=glyph_id/x/y/bearing_x/bearing_y）、`runs_soa[]`（每 run=glyph 起止+font_id+font_size+format）、`lines_soa[]`（每行=run 起止+y/height/baseline/width）。Text payload 带六个 u32 指向三表切片。富文本内联对象加第 4 张 `objects_soa[]`。
 
-> **实测勘误（当前实现 ≠ 上述设计）**：上面的三表 SOA + bearing + `objects_soa` 是**设计目标形态**，当前实现**尚未达到**。实际 blob 每字形只序列化 `{codepoint, x, pen_y}`（`loomgui_ffi_c/src/blob.rs:209-214`），无 bearing（由 Unity `CharacterInfo` 提供）、无三表分离、无 inline_objects（富文本 v1.7 未做）。差距源于"光栅化在后端"——bearing/UV 都是后端从 Unity 字体 API 取。**v1.6 字体搬进核心后**，text_arena 将带 per-glyph UV+quad（或直接走 mesh_arena），届时向本设计形态收敛，blob 升版。
+> **实测勘误（v1.6 后实现 ≠ 上述早期设计）**：上面的三表 SOA + `objects_soa` 是**早期设想，未采用**。**v1.6 字体搬进核心后**，text/rich 走 `mesh_arena`——核心产 per-glyph quad（verts/uvs/colors/indices）+ `image_path=loomgui://font-atlas/p{page}`（program=1），后端 GO 镜像 mesh + SyncFontAtlas 注入 atlas texture。bearing/UV **全核心产**（ttf-parser + ab_glyph 光栅 + etagere atlas），不再依赖后端字体 API。v1.7 rich text 同走 `build_text_mesh`（per-run color/size/weight/style + 行内图 image_path + 装饰线 quad）。**blob 列结构**（§13.3）是 SOA 公共头 + mesh_arena/text_arena，非三表分离。
 
-### 8.3 测量的可重入性
+### 8.2 测量的可重入性
 auto-size/shrink 反复测。`measure(known_dimensions)` 必须廉价、无副作用、可被 taffy 反复调用。测量与渲染用**同一套字体度量**（同一 ttf）。
 
-### 8.4 字体资产
+### 8.3 字体资产
 - **位图字体**进包（字形 atlas + 字形表/UV）。
 - **动态字体**不进包，运行时全局注册或从引擎字体资源加载（必须用包声明的同一 ttf）。核心定义 `Font` trait。
 
@@ -438,8 +441,11 @@ stage.is_pointer_on_ui() -> bool   // = 命中目标非空且非根
 
 > **实测勘误（当前实现 ≠ 上述设计）**：本节是设计目标。当前实现只有 10 个 ease（Linear+Quad/Cubic/Back 三族，`tween.rs:46-57`）、无 repeat/yoyo/SetPath、单段 start→end、仅 on_complete 事件。且有**单矩阵覆盖 bug**：`NodeAnim.transform` 是单个 `Option<Affine2>`，translate/scale/rotation 三通道共用，多通道并行时后写覆盖前写致丢失（`tween.rs:298-300`，单通道动画无此问题）。**v1.10 动画增强**向本设计收敛：补 ease（bounce/elastic/circular/sine…+统一 In/Out 推导）+ @keyframes 时间轴 + iteration/alternate + 颜色 linear 空间插值 + 修覆盖 bug（2D 三通道各自 lerp）。见 `docs/roadmap/rmlui-research.md` §4。
 
-### 10.2 Transition（时间线 = 编排器，不自驱）【拆 v1.5-b，本期未实现】
-纯数据 `items: Vec<TransitionItem>`。`Play()` 把每个 item 翻译成 Tweener 提交 TweenManager。两点关键帧；多关键帧靠多 item 串行。嵌套 Transition 递归 + 完成回调递减父计数。与 Controller 正交（不同层），可由 Controller.on_changed 触发。
+### 10.2 Transition（时间线 = 编排器，不自驱）
+
+> **v1.5 已实现**：Transition 由 Controller.on_changed 触发，每个 spec（含逗号分隔多 prop）生成一条 tween 提交 TweenManager。`TRANSITION_TAG` 标记防重复提交。
+
+纯数据 `items: Vec<TransitionItem>`。`Play()` 把每个 item 翻译成 Tweener 提交 TweenManager。两点关键帧；多关键帧靠多 item 串行。嵌套 Transition 递归 + 完成回调递减父计数。与 Controller 正交，由 Controller.on_changed 触发。
 
 ### 10.3 Controller（状态机，纯状态）
 `Controller { selected_index, page_ids, ... }`。`set_selected_index` 改 index + 派发 onChanged + 置子树 style dirty（触发 §4.3 重匹配）。**不写回节点 `data-page` 属性**——`[data-page]` 选择器匹配时查 registry `selected_index`（state query，§3.5）。Controller 不直接改 UI 属性，全靠 CSS 属性选择器 + `transition` 实现页面切换效果（§3.5）。
@@ -563,20 +569,17 @@ csbindgen 是为 Unity/IL2CPP 设计的主流绑定生成器（Cysharp MagicPhys
 **一块 SOA 公共头 + 多个按类型分区的 per-frame arena，C# tick 内拷完**：
 ```
 每帧 FFI 传：
-1. RenderNode 公共头 SOA（定长字段并行存储，当前 22 列 / blob v9）：
+1. RenderNode 公共头 SOA（定长字段并行存储，当前 20 列 / blob v10）：
    node_id, parent_id, visible, alpha, sort_key, mask_context,
    world_matrix(m_a,m_b,m_c,m_d,m_tx,m_ty — 6 列累计世界矩阵),
-   payload_kind, mesh_off, mesh_len, text_off, text_len,
+   payload_kind, mesh_off, mesh_len,
    path_idx(v7：图片 path 表 1-based 索引，0=纯色无图；核心不知图集),
    program(v5：shader 变体 0/1/2/3/4), color_matrix(v6：[f32;20] ColorFilter),
    change_level(v8：u8，0=Skip 1=Header 2=Full；Skip/Header 不写 arena，mesh_off/len=0),
    reuse_key(v9：u32，0=无复用按 node_id keying，>0=按 reuse_key 复用 GO，虚拟列表 slot 用)
-   —— (mesh_off,mesh_len)/(text_off,text_len) 定位 payload 在 arena 的哪段；change_level=Skip/Header 时为空（不写 arena，省带宽）。
+   —— (mesh_off,mesh_len) 定位 payload 在 mesh_arena 的哪段；change_level=Skip/Header 时为空（不写 arena，省带宽）。v10 删 text_off/text_len 列 + text_arena，text 节点同走 mesh_arena。
    （alpha 走 _Alpha shader uniform 不烤顶点色、blend 走 material property、grayed 由 ColorFilter program 替代——均不占 SOA 列。）
-2. 多个按类型分区的 per-frame arena（变长 payload，每种一个 arena）：
-   mesh_arena   : 扁平 verts[f32]/uvs[f32]/colors[u32]/indices[u16] + count
-   text_arena   : 扁平 glyphs[{codepoint,pen_x,pen_y}] + 节点级 font_size/color
-   —— 每种 arena 一种结构，C# 按 payload_kind 选解析器。
+2. mesh_arena（扁平 verts[f32]/uvs[f32]/colors[u32]/indices[u16] + count）—— text 节点 per-glyph quad 同走此 arena，无单独的 text_arena。
 ```
 
 **坐标空间**：SOA world_matrix 与 clip rect 均为**绝对 design 坐标**（核心 layout 累加 parent origin）。后端不做逐节点 parent 累加——根 Stage transform 一次性映射 design→world（§7.1）。
@@ -622,24 +625,27 @@ csbindgen 是为 Unity/IL2CPP 设计的主流绑定生成器（Cysharp MagicPhys
 ```
 引擎 update:
   1. set_input()                       ← 后端采集指针/键/触摸/IME，扁平数组注入
-  2. stage.tick(dt) — 内部固定顺序：
-     a. TweenManager.update(dt)        ← GTween 推进；tweener 回调写 anim override（置 transform_dirty/layout_dirty）
-     b. 消费 pending_focus_request      ← request_focus/blur 记此，下 tick 最前消费（避免 tick 覆盖丢事件）
-     c. layout dirty → taffy solve      ← 算 measured_size/layout_rect + content_size（ScrollPane 用）
-     d. process 指针输入                ← 多槽命中(world_to_local) + 拖拽/滚动仲裁 + Down/Up/Click + click-to-focus；事件回调改布局延下帧
-     e. ScrollPane 物理 + 消费 wheel    ← 惯性/回弹（自维护 tween 不走 GTween，需 c 的 content_size + d 的拖拽事件）+ 滚轮
-     f. process_keys                    ← keydown/up + Tab 导航（有焦点才发）
-     g. compute_world_transforms        ← DFS 累计 world matrix（读 anim.transform override + 父 scroll_pos 偏移）
-     h. rematch_pseudo_classes          ← 全量重匹配 :hover/:active/:focus/:disabled + [data-page] 动态规则（从 base_style 起算，不缓存）+ 末尾 propagate_color_inheritance（runtime color 继承，§4.2）
-     i. build_render_nodes              ← 剪 display:none 子树 + DFS：mesh/text dirty 重生成几何 + dirty hash 比 → Unchanged emit（静态帧≈0 upload）+ FairyBatching 重排 + 合成 scrollbar + 分配 sort_key
-     j. 输出 Vec<RenderNode>（按 sort_key）
-  3. 后端消费 render_nodes → 同步镜像；borrow_events → 事件路由（capture+bubble，§9.2 业务侧）→ 业务回调 → 提交渲染
+  2. stage.tick(dt) — 内部固定顺序（参见 stage.rs tick_and_render）：
+     a. TweenManager.update(dt)        ← 唯一动画时钟推进；tweener 回调写 anim override
+     b. 消费 pending_focus_request      ← request_focus/blur 记此，下 tick 最前消费
+     c. process 指针输入                ← 多槽命中测试（用上帧 world）+ 拖拽/滚动/点击仲裁
+     d. scroll.update + 消费 wheel       ← 惯性/回弹物理（自维护 tween，不走 GTween）
+     e. process_keys                    ← keydown/up + Tab 导航
+     f. rematch_pseudo_classes          ← 全量重匹配 :hover/:active/:focus/:disabled + [data-page] 动态规则（从 base_style 起算）+ propagate_color_inheritance
+     g. transition drain                ← 消费 transition 请求，提交 tween 到 TweenManager
+     h. layout dirty → taffy solve      ← 算 layout_rect + content_size（rematch 改布局属性当帧生效）
+     i. refresh_content_sizes           ← ScrollPane content_size 刷新
+     j. compute_world_transforms        ← DFS 累计 world matrix（读 anim override + scroll_pos 偏移）
+     k. build_render_nodes              ← 剪 display:none 子树 + dirty hash 比 → ChangeLevel + 批合重排 + 合成 scrollbar + 分配 sort_key
+     l. 输出 Vec<RenderNode>（按 sort_key）
+  3. 后端消费 render_nodes → 同步镜像；borrow_events → 事件路由（capture+bubble，§9.2）→ 业务回调
 ```
 
 **关键**：
-- **事件回调里改的布局属性延迟到下帧 solve**——不在当前帧重 solve（避免"布局→事件→布局"反馈环）。事件触发的布局变化只置 dirty。
-- **命中语义**：本帧输入在 (2d) 命中测试用 (2c) 本帧刚 solve 的布局——即**输入命中当前帧布局**。代价：事件回调内改的布局延下帧 solve，故同帧内事件回调移动的节点不影响本帧后续命中（缓存到下帧 tick 开始有效）。有意如此，避免反馈环。
-- transform 改动不触发 solve（仅 transform_dirty，g 阶段刷新命中几何）。动画改 transform 每帧廉价；改 layout style 才 solve。
+- **rematch 在 solve 和 compute 之前**——伪类改 taffy_style/transform/colors 三类当帧全部生效（坑 103 已修，架构不变量）。
+- **hit_test 用上帧 world_transforms**（1 帧延迟，已认可）；scroll_pos 同帧进 world（compute 在 scroll 后，无延迟）。
+- 事件回调里改的布局属性**延迟到下帧 rematch+solve**（不在当前帧重 solve，避免反馈环）。
+- transform 动画不改布局，不触发 solve，每帧廉价。
 
 ---
 

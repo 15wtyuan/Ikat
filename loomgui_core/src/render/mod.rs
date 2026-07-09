@@ -496,10 +496,12 @@ pub fn build_render_nodes(
                     meshes,
                     n,
                     node_id,
+                    node_id,
                     parent_id,
                     alpha,
                     color_tint,
                     wm,
+                    true,
                     &mut shadow_pairs,
                     &mut stroke_pairs,
                 );
@@ -571,16 +573,58 @@ pub fn build_render_nodes(
                     n.style.background_gradient,
                     n.style.background_clip_text,
                 );
+                // 背景 quad：block div 带 background-color（如 .rt 底色）——RichText 叶须自画
+                // bg（Container arm 的 bg 逻辑不覆盖 RichText 叶）。bg 占真 node_id（进 id_to_pos
+                // 拿 DFS sort_key S），text 首页改用子页 1（propagate 给 S+1）→ bg 在 text 下层。
+                // 无 bg-color（透明）则跳过：text 用真 node_id（原行为，子页机制零介入）。
+                let bg_opt = anim.and_then(|a| a.bg_color).or(n.style.background_color);
+                let has_rich_bg = matches!(bg_opt, Some(c) if c[3] > 0.0);
+                if has_rich_bg {
+                    let bg = bg_opt.unwrap();
+                    let (bv, buv, bcol, bidx) =
+                        crate::render::mesh::quad(rect, bg, [0.0, 1.0], [1.0, 0.0]);
+                    let bg_program = if has_filter { 3u32 } else { 0u32 };
+                    id_to_pos.insert(n.id, nodes.len());
+                    nodes.push(RenderNode {
+                        node_id,
+                        parent_id,
+                        visible: true,
+                        alpha,
+                        color_tint,
+                        world_matrix: wm,
+                        blend: BlendMode::Normal,
+                        mask_context: MaskContext(0),
+                        sort_key: 0,
+                        change_level: ChangeLevel::Full,
+                        reuse_key: n.reuse_key,
+                        payload: NodePayload::Mesh {
+                            verts: bv,
+                            uvs: buv,
+                            colors: bcol,
+                            indices: bidx,
+                            image_path: None,
+                            program: bg_program,
+                            color_matrix,
+                        },
+                    });
+                }
+                let text_primary_id = if has_rich_bg {
+                    synth_text_node_id(node_id, 1)
+                } else {
+                    node_id
+                };
                 push_text_meshes(
                     &mut nodes,
                     &mut id_to_pos,
                     meshes,
                     n,
                     node_id,
+                    text_primary_id,
                     parent_id,
                     alpha,
                     color_tint,
                     wm,
+                    !has_rich_bg,
                     &mut shadow_pairs,
                     &mut stroke_pairs,
                 );
@@ -593,7 +637,7 @@ pub fn build_render_nodes(
                 // 掩码后落在 232-255，不与 text atlas 跨页子页号重叠。
                 const INLINE_IMG_SYNTH_ID_BASE: u32 = 1000;
                 for (img_idx, img) in layout.images.iter().enumerate() {
-                    let (ix, iy) = (img.x + off_x, img.y + off_y);
+                    let (ix, iy) = (img.x + off_x + rect.x, img.y + off_y + rect.y);
                     let payload = NodePayload::Mesh {
                         verts: vec![
                             [ix, iy],                 // TL (top-left, smallest y in design y-down)
@@ -971,6 +1015,12 @@ fn resolve_lp(lp: LengthPercentage) -> f32 {
 /// layout 是刚由 measure_text 产的 owned 值，直接 mutate。
 fn bake_content_offset(layout: &mut crate::text::layout::TextLayout, off_x: f32, off_y: f32) {
     for line in &mut layout.lines {
+        // line.y/baseline 也烤 off_y：字形 top = line.baseline - bearing + rect.y 走 line.baseline
+        // （不走 g.y），不烤则文字缺 padding/border top（顶到盒顶，非 padding 内）。
+        // 行内图世界 y = line.y + y_top 也依赖 line.y 含 off_y。装饰线（underline/strike/overline）
+        // 也走 line.baseline / line.y，同理依赖此处烘焙。
+        line.y += off_y;
+        line.baseline += off_y;
         for run in &mut line.runs {
             for g in &mut run.glyphs {
                 g.x += off_x;
@@ -1362,11 +1412,12 @@ fn build_text_mesh(
                     let deco_thick = run.deco.thickness.unwrap_or(font_thickness);
                     let x1 = x0 + run_w;
                     // 各线 y 坐标（node-local y-down）：
-                    // underline = baseline + font underline offset（字体度量）
+                    // underline = baseline - font underline position（字体度量）。position 是 y-up
+                    // 负值（基线下方），design y-down 下"基线下方"= y 更大 = baseline - position（减负=加）。
                     // line-through = baseline 上方 0.25×font_size（贯穿字形中段）
                     // overline = line 顶边紧靠行顶
                     let underline_y = line.baseline
-                        + face
+                        - face
                             .underline_metrics()
                             .map(|m| m.position as f32 * scale)
                             .unwrap_or(run.font_size * 0.1);
@@ -1611,10 +1662,12 @@ fn push_text_meshes(
     meshes: TextMeshes,
     n: &crate::scene::node::Node,
     node_id: u32,
+    text_primary_id: u32,
     parent_id: Option<u32>,
     alpha: f32,
     color_tint: [f32; 4],
     wm: [f32; 6],
+    register_id_map: bool,
     shadow_pairs: &mut Vec<(u32, u32)>,
     stroke_pairs: &mut Vec<(u32, u32)>,
 ) {
@@ -1661,9 +1714,11 @@ fn push_text_meshes(
     }
     if base.is_empty() {
         // 空文本 → 占位 Mesh（无顶点，image_path 用第 0 页兜底）。
-        id_to_pos.insert(n.id, nodes.len());
+        if register_id_map {
+            id_to_pos.insert(n.id, nodes.len());
+        }
         nodes.push(RenderNode {
-            node_id,
+            node_id: text_primary_id,
             parent_id,
             visible: true,
             alpha,
@@ -1686,13 +1741,16 @@ fn push_text_meshes(
         });
         return;
     }
-    // 首页（page 0）→ 主 RenderNode，用真 node_id。
+    // 首页（page 0）→ 主 RenderNode。has_rich_bg 时用子页 1 id（bg quad 已占真 node_id），
+    // 否则用真 node_id。id_to_pos 仅 register_id_map 时登记（bg quad 已登记则跳过）。
     {
         let (page0, verts0, uvs0, colors0, indices0) = &base[0];
         let path0 = format!("loomgui://font-atlas/p{}", page0);
-        id_to_pos.insert(n.id, nodes.len());
+        if register_id_map {
+            id_to_pos.insert(n.id, nodes.len());
+        }
         nodes.push(RenderNode {
-            node_id,
+            node_id: text_primary_id,
             parent_id,
             visible: true,
             alpha,

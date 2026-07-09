@@ -49,11 +49,11 @@
 
 | 属性 | 值约束 | 出处 | 标注 |
 |---|---|---|---|
-| `display` | `none`/其他→Flex（无 grid） | mapping.rs:425-431 | 【实证】 |
+| `display` | `none`/其他→Flex（无 grid）；**inline `display:block` div → v1.7 富文本叶 desugar（§2.5，走 dom.rs 非 apply_decl）** | mapping.rs:425-431 + dom.rs | 【实证】 |
 | `flex-direction` | row/row-reverse/column/column-reverse | mapping.rs:385-393 | 【实证】 |
 | `flex-wrap` | wrap/nowrap | mapping.rs:394-400 | 【实证】 |
 | `gap` | 四值展开取前两 | mapping.rs:377-384 | 【实证】 |
-| `row-gap`/`column-gap` | gap longhand | （mapping.rs:377 同字段） | 【推断·待测】 |
+| `row-gap`/`column-gap` | gap longhand | （apply_decl 无 match arm，落入 `_ => false`） | ❌ 不支持（仅 `gap` 简写） |
 | `justify-content` | flex-start/center/flex-end/space-between/space-around/space-evenly | mapping.rs:401-404 | 【实证】 |
 | `align-items` | flex-start/center/flex-end/stretch/baseline | mapping.rs:405-408 | 【实证】 |
 | `align-self` | 同 align-items 值 | mapping.rs:409-412 | 【实证】 |
@@ -62,7 +62,7 @@
 | `flex-basis` | dimension | mapping.rs:421-424 | 【实证】 |
 | `order` | integer | mapping.rs:543-549 | 【实证】 |
 | `width`/`height` | px/%/auto | mapping.rs:297-304 | 【实证】 |
-| `min-width`/`min-height` | px/% | mapping.rs:305-312 | 【实证】 |
+| `min-width`/`min-height` | px/%/auto | mapping.rs:305-312 | 【实证】 |
 | `max-width`/`max-height` | px/% | mapping.rs:313-320 | 【实证】 |
 | `padding` | 1-4 值 px（仅 px） | mapping.rs:321-330 | 【实证】 |
 | `margin` | 1-4 值 px/%/auto | mapping.rs:331-340 | 【实证】 |
@@ -81,7 +81,7 @@
 | `border-color` | #rrggbb hex（v1.8 起渲染彩色边框环，不再零引用） | mapping.rs:572-574 | 【实证】 |
 | `border-radius` | px/% 1-4 值 + `/` 垂直值 | mapping.rs:353-376 | 【实证】 |
 | `opacity` | 0-1 | mapping.rs:465-473 | 【实证】 |
-| `overflow` | visible/hidden/scroll/auto（双轴同设） | mapping.rs:474-481 | 【实证】 |
+| `overflow` | visible/hidden/scroll/auto（双轴同设。无效值如 `bogus` 不改变字段但仍返回 true——属性名被识别） | mapping.rs:474-481 | 【实证】 |
 | `overflow-x`/`overflow-y` | longhand | mapping.rs:482-494 | 【实证】 |
 | `color` | #rrggbb hex | mapping.rs:495-500 | 【实证】 |
 | `font-size` | px（拒 %） | mapping.rs:501-504 | 【实证】 |
@@ -115,10 +115,11 @@
 
 | 属性 | 实际行为 | 标注 |
 |---|---|---|
-| `position:relative` | 靠 taffy 默认 Relative 生效，写不写一致（无 inset 偏移） | 【推断·待测】 |
+| `position:relative` | v1.4-b 起已纳入显式映射（`apply_decl` 接受 `relative` 返回 true） | 【实证】 |
 | `position:fixed/sticky` | 静默忽略，position 保持默认 Relative | 【实证】 |
 | `inset` shorthand | 围栏只映射 `top`/`right`/`bottom`/`left` 四个显式属性，`inset:0` 无 handler 静默丢（浏览器支持→预览看着对，Unity 不脱离流定位，典型"信围栏别信预览"） | 【实证】 |
 | `display:grid` | 非 none 落 Flex，grid 布局不生效 | 【实证】 |
+| | ⚠️ AI 陷阱：浏览器 Chromium 预览 → grid 生效；打包无报错（apply_decl 返 true）→ Unity 为 Flex。三地结果各异，AI 按"预览截图"匹配 RenderNode 会错位。 | |
 | `float` | 静默忽略 | 【实证】 |
 | `align-content` | 无 handler，静默忽略 | 【实证】 |
 | `cursor` | 静默忽略 | 【实证】 |
@@ -131,6 +132,18 @@
 | `border-style`（dashed/dotted） | 简写只取宽度，style 丢 | 【实证】 |
 | `text-decoration`（CSS 规则形式 `.cls { ... }`） | 仅 inline style（`<span style="text-decoration:underline">`）生效，CSS 规则形式静默忽略（解析在 rich.rs apply_inline_style，非 mapping.rs apply_decl） | 【实证】 |
 | `@media` | AtRuleParser 拒（parse/css.rs:58-63） | 【实证】 |
+
+### 2.5 v1.7 富文本围栏（display:block desugar）
+
+**触发**：`<div style="display:block">inline 内容</div>`——inline style 含 `display:block` 且 tag=div，parse 期（`dom.rs:is_inline_display_block`）捕获 inner HTML 原文，desugar 期 `parse_rich_markup`→runs，build_scene 覆盖 kind 为 `NodeKind::RichText`。**class 的 display:block 不触发**（MVP：parse 期未 cascade，只认 inline style）。
+
+**富内容标记子集**（`text/rich.rs:parse_rich_markup`，block div 内 / 动态 `set_rich_text` 串）：`b`/`strong`(粗)、`i`/`em`(斜)、`u`(下划)、`s`/`del`/`strike`(删)、`span`(内联样式容器，**唯一解析 style attr**)、`a`(链接，link_id=1-based 文档序，**href 不存**，业务侧挂 onClickLink)、`img`(行内图，src/width/height/vertical-align)、`br`(换行)。嵌套栈式 cascade。未知/未闭合/围栏外标记 → Err（静态打包拒 + 动态 set_rich_text 返 -1）。
+
+**span 内联样式子集**（`apply_inline_style`）：`color`/`font-size`/`font-weight`/`font-style`/`text-decoration`。颜色支持 `#rrggbb` + `#rgb`（3 位展开，坑 140，parse_color 统一）。未识别属性静默忽略。**`b/i/u/s` 不解析 style attr**（只 span）。
+
+**block div 盒属性**（bg/border/padding/text-align/overflow）留 flex div；文本属性（color/font-*/line-height/text-decoration）级联进 rich 叶 base_style。desugar 拒收 block div 上的 flex 属性。
+
+**【实证】**：`fence_contract.rs`（`block_div_captures_raw_rich` / `class_based_display_block_does_not_trigger_rich_at_parse` / `rejects_fence_out_element`）。
 
 ---
 

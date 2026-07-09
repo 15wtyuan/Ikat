@@ -494,6 +494,15 @@ namespace LoomGUI
                 return Native.loomgui_stage_set_text(_stage, node, tp, (nuint)t.Length);
         }
 
+        /// 改 RichText 节点 markup（runtime 解析 → runs + 标 dirty_text）。非 RichText / 解析失败 → -1。0=ok，-1=err。
+        public int SetRichText(uint node, string markup)
+        {
+            if (_stage == null) return -1;
+            byte[] m = Encoding.UTF8.GetBytes(markup ?? "");
+            fixed (byte* mp = m)
+                return Native.loomgui_stage_set_rich_text(_stage, node, mp, (nuint)m.Length);
+        }
+
         /// 改 Image 节点 src + 标 dirty_mesh。非 Image 节点 → -1。返 0=ok，-1=err。
         public int SetSrc(uint node, string src)
         {

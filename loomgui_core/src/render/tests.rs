@@ -2404,6 +2404,92 @@ fn rich_text_node_emits_mesh_with_per_vertex_color() {
     }
 }
 
+/// RichText 叶带 background-color（如 .rt 底色）→ 须自画 bg quad（Container arm 不覆盖
+/// RichText 叶）。bg 占真 node_id（DFS sort_key S），text 首页改用子页 1（propagate 给
+/// S+1）→ bg 在 text 下层。无 bg-color 时 text 用真 node_id（原行为不变）。
+#[test]
+fn rich_text_node_emits_bg_quad_when_bg_color_set() {
+    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::RichText {
+        runs: vec![RichRun {
+            kind: RichKind::Text { text: "AB".into() },
+            color: [1.0, 1.0, 1.0, 1.0],
+            font_id: 0,
+            size_px: 16,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+            link_id: None,
+        }],
+    };
+    n.style.background_color = Some([0.102, 0.114, 0.18, 1.0]); // ~#1a1d2e
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // bg quad：program 0，真 node_id（非子页），4 verts，顶点色 = background-color。
+    let bg = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && matches!(&rn.payload, NodePayload::Mesh { program: 0, .. })
+        })
+        .expect("RichText 带 bg-color 应产 bg quad（program 0，真 node_id，非子页）");
+    match &bg.payload {
+        NodePayload::Mesh {
+            verts,
+            colors,
+            program,
+            image_path,
+            ..
+        } => {
+            assert_eq!(*program, 0, "bg quad program=0");
+            assert_eq!(verts.len(), 4, "bg quad 4 verts");
+            assert_eq!(
+                colors[0],
+                [0.102, 0.114, 0.18, 1.0],
+                "bg 顶点色 = background-color"
+            );
+            assert!(image_path.is_none(), "纯色 bg 无 image_path");
+        }
+        _ => panic!("expected Mesh payload for bg quad"),
+    }
+    // text mesh 仍存在（program 1），且画在 bg 之上（sort_key 更大）。
+    let text = frame
+        .nodes
+        .iter()
+        .find(|rn| matches!(&rn.payload, NodePayload::Mesh { program: 1, .. }))
+        .expect("text mesh 应存在");
+    assert!(
+        text.sort_key > bg.sort_key,
+        "text 画在 bg 之上（sort_key {} > {}）",
+        text.sort_key,
+        bg.sort_key
+    );
+}
+
 /// 两同字体 RichText span → merge 后应合并 draw call（program=1 已在合批白名单）。
 /// 验 RichText 与 Text 同走 atlas path 合批路径，不因 per-run 色破坏合批。
 #[test]
@@ -2494,6 +2580,158 @@ fn two_rich_nodes_same_atlas_merge() {
             16,
             "两 RichText 各 2 字形 × 4 顶点 = 16（合并后），实 {}",
             verts.len()
+        );
+    }
+}
+
+/// padding top 须偏移字形 y（bake 烤 line.baseline），否则文字顶到盒顶而非 padding 内。
+/// 框架层 bug：bake 旧版只烤 glyphs.x/y，字形 top 走 line.baseline（不含 off_y）→ y padding 丢。
+/// 行内图偏下（比文字低 padding）+ 文字垂直上对齐（html 居中）同根因。
+#[test]
+fn rich_text_padding_offsets_glyphs_vertically() {
+    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
+    use taffy::style::LengthPercentage;
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mk = |pad_top: f32| {
+        let mut n = Node::default();
+        n.kind = NodeKind::RichText {
+            runs: vec![RichRun {
+                kind: RichKind::Text { text: "A".into() },
+                color: [1.0, 1.0, 1.0, 1.0],
+                font_id: 0,
+                size_px: 16,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            }],
+        };
+        n.style.font_size = 16.0;
+        n.style.text_align = TextAlign::Left;
+        n.style.taffy_style.padding.top = LengthPercentage::Length(pad_top);
+        n.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 60.0,
+        };
+        n
+    };
+    let build_min_y = |n: Node| {
+        let mut scene = Scene::from_nodes(vec![n], vec![]);
+        crate::scene::transform::compute_world_transforms(&mut scene);
+        let (frame, _, _, _) = build_render_nodes(
+            &scene,
+            &fonts,
+            &std::collections::HashMap::new(),
+            &empty_sizes(),
+            &mut test_glyph_atlas(),
+        );
+        let mut min_y = f32::INFINITY;
+        for rn in &frame.nodes {
+            if let NodePayload::Mesh { verts, program, .. } = &rn.payload {
+                if *program == 1 {
+                    for v in verts {
+                        if v[1] < min_y {
+                            min_y = v[1];
+                        }
+                    }
+                }
+            }
+        }
+        min_y
+    };
+    let top_no_pad = build_min_y(mk(0.0));
+    let top_pad14 = build_min_y(mk(14.0));
+    let diff = top_pad14 - top_no_pad;
+    assert!(
+        (diff - 14.0).abs() < 1.5,
+        "padding top 14 须偏移字形 14px（diff={}，期望≈14）",
+        diff
+    );
+}
+
+/// 行内图 verts 须加节点 rect.x/y（同字形），否则跑到 design 原点。
+/// 旧版 ix=img.x+off_x（缺 rect），单测 rect=0 巧合过，PlayMode rect≠0 才显现（图消失/错位）。
+#[test]
+fn rich_image_positioned_at_node_rect() {
+    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichVAlign, RichWeight};
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::RichText {
+        runs: vec![RichRun {
+            kind: RichKind::Image {
+                src: "res/icons/zap.png".into(),
+                w: 20.0,
+                h: 20.0,
+                valign: RichVAlign::Baseline,
+            },
+            color: [1.0, 1.0, 1.0, 1.0],
+            font_id: 0,
+            size_px: 16,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+            link_id: None,
+        }],
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.layout_rect = Rect {
+        x: 100.0,
+        y: 50.0,
+        w: 200.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // image mesh（program 0，image_path 含 zap）。
+    let img_mesh = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            matches!(
+                &rn.payload,
+                NodePayload::Mesh {
+                    program: 0,
+                    image_path: Some(p),
+                    ..
+                } if p.contains("zap")
+            )
+        })
+        .expect("行内图 mesh 应存在");
+    if let NodePayload::Mesh { verts, .. } = &img_mesh.payload {
+        let min_x = verts.iter().map(|v| v[0]).fold(f32::INFINITY, f32::min);
+        let min_y = verts.iter().map(|v| v[1]).fold(f32::INFINITY, f32::min);
+        // 行内图在节点 rect(100,50)处：x 含 rect.x（>=100），y 含 rect.y（>0，不跑负原点）。
+        assert!(
+            min_x >= 100.0,
+            "行内图 x 须含节点 rect.x（>=100，不跑原点），实 {}",
+            min_x
+        );
+        assert!(
+            min_y > 0.0,
+            "行内图 y 须含节点 rect.y（>0，不跑原点），实 {}",
+            min_y
         );
     }
 }

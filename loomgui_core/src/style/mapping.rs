@@ -200,6 +200,18 @@ pub fn parse_color(s: &str) -> Option<[f32; 4]> {
         let g = u8::from_str_radix(&s[2..4], 16).ok()?;
         let b = u8::from_str_radix(&s[4..6], 16).ok()?;
         Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0])
+    } else if s.len() == 3 {
+        // CSS 3 位 hex：每数字重复（#rgb → #rrggbb，如 #888 = #888888）。
+        // digit d → d*17（d*16+d）：0→0、f→255，与 6 位展开一致。
+        let r = u8::from_str_radix(&s[0..1], 16).ok()?;
+        let g = u8::from_str_radix(&s[1..2], 16).ok()?;
+        let b = u8::from_str_radix(&s[2..3], 16).ok()?;
+        Some([
+            (r * 17) as f32 / 255.0,
+            (g * 17) as f32 / 255.0,
+            (b * 17) as f32 / 255.0,
+            1.0,
+        ])
     } else {
         None
     }

@@ -615,9 +615,11 @@ pub fn measure_rich_text(
                     });
                     continue;
                 }
-                // 空白分词：按空格切词，词间不补空格 token（简化：HTML 空白折叠后词间单空格
-                // 已并入词尾/词首，measure 宽度差异可忽略；MVP 不追求像素级空格精度）。
-                for word in text.split(' ') {
+                // 空白分词：按空格切词，词间补空格 token（占 advance；空格无轮廓不画，但占宽 +
+                // 词边界断行）。旧版 split 丢空格 → "a b" 渲染成 "ab" + 断行点错。
+                // HTML 空白折叠：连续空格 → 单空格（split 产空 part 跳过，词间补单空格）。
+                let parts: Vec<&str> = text.split(' ').collect();
+                for (pi, word) in parts.iter().enumerate() {
                     if word.is_empty() {
                         continue;
                     }
@@ -647,6 +649,16 @@ pub fn measure_rich_text(
                             text: word,
                             run_idx: ri,
                             w,
+                            is_break: false,
+                        });
+                    }
+                    // 词间补空格 token（下一 part 非空时）：占 advance，断行可在空格后。
+                    if pi < parts.len() - 1 && !parts[pi + 1].is_empty() {
+                        let sp_w = stack_str_advance(" ", r.size_px as f32);
+                        tokens.push(Tok {
+                            text: " ",
+                            run_idx: ri,
+                            w: sp_w,
                             is_break: false,
                         });
                     }
@@ -803,7 +815,7 @@ pub fn measure_rich_text(
                     out_images.push(RichImagePlacement {
                         src: src.clone(),
                         x: pen_x,
-                        y: y_top,
+                        y: y + y_top,
                         w: img_w,
                         h: img_h,
                     });
