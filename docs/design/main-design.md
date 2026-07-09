@@ -4,7 +4,7 @@
 >
 > **核心动机**：AI 驱动的界面拼装。HTML 作 DSL，让 AI 既能编辑（文本）又能预测渲染结果（AI 对 HTML/CSS 有强先验）。**DSL 决策的首要判据 = AI 读 HTML 能否正确预测渲染出的 UI**——背离浏览器语义的 divergence 须谨慎评估。
 >
-> **设计原则**：① 核心是引擎无关纯库（可单测）；② 渲染树契约描述**渲染意图**而非引擎机制（后端自选 stencil/Material/canvas_item）；③ 参考 FairyGUI 的成熟机制；④ 围栏只暴露标准 HTML 标签；⑤ 单 tick 入口、内部有序分步。
+> **设计原则**：① 核心是引擎无关纯库（可单测）；② 渲染树契约描述**渲染意图**而非引擎机制（后端自选 stencil/Material/canvas_item）；③ 围栏只暴露标准 HTML 标签；④ 单 tick 入口、内部有序分步。
 
 ---
 
@@ -234,7 +234,7 @@ pub struct Node {
   → 产出 RenderNode → 后端同步镜像
   → Dispose：从父移除、释放纹理引用(refcount)、清事件/tween、后端销毁镜像对象
 ```
-**与 fgui 关键区别**：fgui 改属性立即推 DisplayObject（无 layout pass）。LoomGUI 改属性只置 dirty，每帧统一 solve。**所有布局都是帧末一致**。
+LoomGUI 改属性只置 dirty，每帧统一 solve。**所有布局都是帧末一致**。
 
 ---
 
@@ -357,17 +357,7 @@ enum NodePayload {
 
 > **v1.6 架构演进前瞻**：本节描述**当前实现**（测量在核心、光栅化在后端）。v1.6 计划把光栅化也搬进核心（ttf-parser outline + ab_glyph 光栅 + etagere 图集，核心产 UV + atlas 纹理，后端降为贴图上传），补齐"引擎无关纯核心"最后破例——根治坑 113/119、重开 kerning、text 可参与合批、跨引擎文本一致（接 Godot 不必重写光栅化）。决策/选型/代价见 `docs/roadmap/rmlui-research.md` §1。改前本节仍是真相。
 
-### 8.1 测量与渲染分离（一致性根基）**[V1.6 已作废——见下方勘误]**
-
-> **§8.1-8.2 全文记述 v1.6 前的"测量在核心、光栅化在后端"旧架构。v1.6 已将字体光栅化搬进核心（ttf-parser outline + ab_glyph 光栅 + etagere 图集），文本 mesh 不再是在后端生成——核心产 per-glyph quad（含 UV + atlas 纹理），后端降为贴图上传。旧"文本 mesh 例外"已消除，text 可参与合批。以 §8.2 末尾勘误 + `text/atlas.rs` 代码为准。**
-- **Rust 核心拥有测量 + 断行**（确定性，跨引擎一致）：ttf-parser 取真实度量（`hhea`/`os2` ascent/descent/line-gap，**不照搬 fgui `fontSize*1.25` 估算**）+ unicode-linebreak（换行机会，CJK 逐字）。
-- **文本 mesh 在后端生成**：核心产 TextLayout，后端用引擎字体 API 光栅化产 UV、按 TextLayout 位置拼 quad mesh。
-- **advance/断行/box 尺寸一律以 Rust 为准**（跨引擎一致），仅字形 UV/光栅化在引擎侧。
-- **字体资产契约**：包内声明**逻辑字体名 + 度量源 ttf**，核心用此 ttf 算度量；**各后端用同一 ttf 光栅化**（Unity 加载进字体系统、Godot 加载进 DynamicFont）。font_id 是逻辑 id。
-- **换行/white-space 原则**：`white-space:normal/nowrap` 生效，换行以核心（unicode-linebreak，CJK 逐字）为准。对齐 Chrome 行为是目标（含 CJK 行首/行尾标点约束），具体 kinsoku 配置实现期对照 Chrome 调，本文不钉死算法。
-- 复杂 shaping（rustybuzz 连字/合字）+ BiDi（unicode-bidi, RTL）+ 字体 fallback 链：当前砍（亚洲/国内首发）。简化代价（CJK+emoji→tofu、组合符号→错位、RTL 不支持）+ 跨引擎归一化契约升级（Godot 接入时定 advance/metric 权威、关 hinting）见 roadmap（机制草稿）。
-
-### 8.2 TextLayout 产物（SOA 三表，跨 FFI）
+### 8.1 TextLayout 产物（SOA 三表，跨 FFI）
 ```rust
 struct TextLayout { text_width: f32, text_height: f32, lines: Vec<Line> }
 struct Line { y, height, baseline, width, runs: Vec<GlyphRun>, inline_objects: Vec<(x,y,w,h,obj_id)> }
@@ -383,10 +373,10 @@ struct Glyph { glyph_id, codepoint, x, y, bearing_x, bearing_y }   // 绝对坐�
 
 > **实测勘误（v1.6 后实现 ≠ 上述早期设计）**：上面的三表 SOA + `objects_soa` 是**早期设想，未采用**。**v1.6 字体搬进核心后**，text/rich 走 `mesh_arena`——核心产 per-glyph quad（verts/uvs/colors/indices）+ `image_path=loomgui://font-atlas/p{page}`（program=1），后端 GO 镜像 mesh + SyncFontAtlas 注入 atlas texture。bearing/UV **全核心产**（ttf-parser + ab_glyph 光栅 + etagere atlas），不再依赖后端字体 API。v1.7 rich text 同走 `build_text_mesh`（per-run color/size/weight/style + 行内图 image_path + 装饰线 quad）。**blob 列结构**（§13.3）是 SOA 公共头 + mesh_arena/text_arena，非三表分离。
 
-### 8.3 测量的可重入性
+### 8.2 测量的可重入性
 auto-size/shrink 反复测。`measure(known_dimensions)` 必须廉价、无副作用、可被 taffy 反复调用。测量与渲染用**同一套字体度量**（同一 ttf）。
 
-### 8.4 字体资产
+### 8.3 字体资产
 - **位图字体**进包（字形 atlas + 字形表/UV）。
 - **动态字体**不进包，运行时全局注册或从引擎字体资源加载（必须用包声明的同一 ttf）。核心定义 `Font` trait。
 
