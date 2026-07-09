@@ -763,6 +763,28 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.text_effects = shadows;
             true
         }
+        "-webkit-text-stroke" => {
+            // CSS -webkit-text-stroke: w color（标准 CSS，fact-standard）。
+            // → FontEffect::Stroke{w, color}，叠进 text_effects（INHERITED）。
+            // 内侧吃字（erode），Front layer（描边在文字上方绘制）。
+            // color 必须可解析（parse_color 仅认 #rrggbb 6 位 hex，命名色静默拒）。
+            let parts: Vec<&str> = value.split_whitespace().collect();
+            if parts.len() < 2 {
+                return false;
+            }
+            let w = match parse_number(parts[0].trim_end_matches("px")) {
+                Some(v) => v,
+                None => return false,
+            };
+            let color = match parse_color(parts[1]) {
+                Some(c) => c,
+                None => return false,
+            };
+            style
+                .text_effects
+                .push(crate::text::font_effect::FontEffect::Stroke { w, color });
+            true
+        }
         _ => false, // 装饰属性静默忽略
     }
 }

@@ -11,9 +11,10 @@ use crate::render::node::{NodePayload, RenderNode};
 /// 含 alpha（to_bits 比较）——alpha 是 per-renderer uniform，不同 alpha 不能合批。
 /// box-shadow / text-shadow Back layer 合成节点不参与合并（合成 node_id 无对应 scene 节点，
 /// 且 Back layer 须保持独立 GO 以便 sort_key 单独调控）。
+/// text-stroke Front layer 同样不参与合并（独立 GO，Front layer sort_key 单独调控）。
 fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32)> {
-    if rn.node_id & crate::render::BOX_SHADOW_FLAG != 0 {
-        return None; // 合成阴影节点不合批
+    if rn.node_id & (crate::render::BOX_SHADOW_FLAG | crate::render::TEXT_STROKE_FRONT_FLAG) != 0 {
+        return None; // 合成 Back/Front layer 节点不合批
     }
     match &rn.payload {
         NodePayload::Mesh {

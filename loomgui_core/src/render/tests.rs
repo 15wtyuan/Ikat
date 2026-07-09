@@ -3282,3 +3282,221 @@ fn text_without_shadow_emits_no_back_layer() {
         .any(|rn| (rn.node_id & super::BOX_SHADOW_FLAG) != 0);
     assert!(!has_shadow, "no text-shadow -> no back layer");
 }
+
+// ── -webkit-text-stroke Front layer（v1.8 Task 9）──
+
+#[test]
+fn text_stroke_emits_front_layer_quad_same_position() {
+    use crate::text::font_effect::FontEffect;
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "A".into(),
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.style.text_effects = vec![FontEffect::Stroke {
+        w: 2.0,
+        color: [1.0, 0.0, 0.0, 1.0],
+    }];
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // Find stroke Front layer: has TEXT_STROKE_FRONT_FLAG (bit 27) set
+    let stroke_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) != 0)
+        .expect("stroke Front RenderNode");
+    let primary_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && (rn.node_id & super::BOX_SHADOW_FLAG) == 0
+                && (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) == 0
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("primary text RenderNode");
+    assert!(
+        stroke_rn.sort_key > primary_rn.sort_key,
+        "stroke Front sort_key {} > primary {}",
+        stroke_rn.sort_key,
+        primary_rn.sort_key
+    );
+    match &stroke_rn.payload {
+        NodePayload::Mesh {
+            verts,
+            colors,
+            program,
+            ..
+        } => {
+            assert_eq!(*program, 1);
+            assert!(!verts.is_empty());
+            for c in colors {
+                assert_eq!(*c, [1.0, 0.0, 0.0, 1.0], "stroke color");
+            }
+            // Stroke Front layer has same position as base glyph (no offset).
+            if let NodePayload::Mesh {
+                verts: primary_verts,
+                ..
+            } = &primary_rn.payload
+            {
+                let pv = primary_verts[0];
+                let sv = verts[0];
+                // Stroke uses eroded glyph with expanded canvas, so positions may differ
+                // by the pad expansion. Just verify it's in the ballpark (no offset applied).
+                assert!(
+                    (sv[1] - pv[1]).abs() <= 5.0,
+                    "stroke no y-offset: sv[1]={}, pv[1]={}",
+                    sv[1],
+                    pv[1]
+                );
+            }
+        }
+        _ => panic!("expected Mesh"),
+    }
+}
+
+#[test]
+fn text_stroke_and_shadow_both_emit() {
+    use crate::text::font_effect::FontEffect;
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "B".into(),
+    };
+    n.style.font_size = 16.0;
+    n.style.text_effects = vec![
+        FontEffect::Shadow {
+            ox: 2.0,
+            oy: 2.0,
+            blur: 0.0,
+            color: [0.0, 0.0, 0.0, 1.0],
+        },
+        FontEffect::Stroke {
+            w: 2.0,
+            color: [1.0, 0.0, 0.0, 1.0],
+        },
+    ];
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let shadow_count = frame
+        .nodes
+        .iter()
+        .filter(|rn| (rn.node_id & super::BOX_SHADOW_FLAG) != 0)
+        .count();
+    let stroke_count = frame
+        .nodes
+        .iter()
+        .filter(|rn| (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) != 0)
+        .count();
+    assert_eq!(shadow_count, 1, "1 shadow Back layer");
+    assert_eq!(stroke_count, 1, "1 stroke Front layer");
+    // Verify ordering: shadow Back < primary < stroke Front
+    let primary = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && (rn.node_id & super::BOX_SHADOW_FLAG) == 0
+                && (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) == 0
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("primary");
+    let shadow = frame
+        .nodes
+        .iter()
+        .find(|rn| (rn.node_id & super::BOX_SHADOW_FLAG) != 0)
+        .expect("shadow");
+    let stroke = frame
+        .nodes
+        .iter()
+        .find(|rn| (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) != 0)
+        .expect("stroke");
+    assert!(
+        shadow.sort_key < primary.sort_key,
+        "shadow {} < primary {}",
+        shadow.sort_key,
+        primary.sort_key
+    );
+    assert!(
+        primary.sort_key < stroke.sort_key,
+        "primary {} < stroke {}",
+        primary.sort_key,
+        stroke.sort_key
+    );
+}
+
+#[test]
+fn text_without_stroke_emits_no_front_layer() {
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "D".into(),
+    };
+    n.style.font_size = 16.0;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let has_stroke = frame
+        .nodes
+        .iter()
+        .any(|rn| (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) != 0);
+    assert!(!has_stroke, "no -webkit-text-stroke -> no Front layer");
+}
