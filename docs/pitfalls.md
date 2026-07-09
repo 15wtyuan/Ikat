@@ -16,7 +16,7 @@
 - 根 size setter 用 `Dimension::Length`（`Style.size` 是 `Size<Dimension>`）。
 - `Style` **无 `order` 字段**（CSS order 无法存 taffy；留 `ResolvedStyle.order` 待 v1 消费）。
 - **`Style.overflow: Point<Overflow>`**（taffy 0.5，Overflow=Visible/Clip/Hidden/Scroll）——CSS flex §4.5 automatic min-size：overflow≠Visible 的 flex item min-size=0（不被 content 撑开）。**必须显式设**（LoomGUI OverflowMode→taffy Overflow 同步），否则默认 Visible→min-size=min-content→scroll 容器被 content 撑开 overlap=0（坑 59）。构造 `taffy::geometry::Point { x, y }`。
-- **`Style::DEFAULT.position = Position::Relative`**（taffy 0.5 style/mod.rs:311）。LoomGUI 不映射 CSS `position`（apply_decl 无 position arm）→ 所有节点 position 永远是 taffy 默认 Relative。**`position:relative` 写不写行为一致**（无 inset 偏移）。**v1.4-b 起 `position:absolute` 生效**（脱离流，配 `top`/`right`/`bottom`/`left`；`fixed`/`sticky` 仍静默忽略。`inset` shorthand 不在围栏——用四显式属性，别用 shortcut）。教训（fence.md §0）：「搜索无 match ≠ 不支持」，可能是底层默认——核实属性须查依赖默认值 + 补测试，不能只 grep。
+- **`Style::DEFAULT.position = Position::Relative`**（taffy 0.5 style/mod.rs:311）。**v1.4-b 起 `position:relative` 已纳入显式映射**（`apply_decl` 接受 `relative`/`absolute` 返回 true，`fence_contract.rs` 测试证明）。`position:absolute` 生效（脱离流，配 `top`/`right`/`bottom`/`left`；`fixed`/`sticky` 仍静默忽略。`inset` shorthand 不在围栏——用四显式属性，别用 shortcut）。`position:relative` 不设 inset 时与 taffy 默认行为一致（无偏移）。
 
 ### 1.2 ttf-parser 0.20（text/layout.rs）
 - **`glyph_hor_advance(GlyphId) -> Option<u16>`**（非 `glyph_advance_width`，返回 u16 非 i16）。
