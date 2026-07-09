@@ -846,7 +846,10 @@ fn build_text_mesh(
                     // underline 偏移：underline_metrics.position 是 y-up 负值（基线下方），
                     // design y-down 下"基线下方"= y 更大 = baseline - position（减负=加）。
                     // 旧版用 + position（加负）→ 跑到 baseline 上方（字形里）= 偏上 bug。
-                    // strike 偏移：baseline 上方 0.3×font_size（贯穿字形中段，略高于 x-height 中点）。
+                    // strike 偏移：baseline 上方 0.3×font_size。
+                    // 用 0.3×font_size 近似 0.5×x_height：ttf-parser 0.20 难直接取 x_height
+                    // （OS/2 表的 sxHeight 可选且暴露有限），font_size ≈ 2×x_height，
+                    // 0.3×font_size ≈ 0.6×x_height，略高于 x_height 中点，贯穿字形中段。
                     let deco_offsets: [Option<f32>; 2] = [
                         run.deco.underline.then_some(
                             line.baseline
