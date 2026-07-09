@@ -83,6 +83,7 @@ fn supported_visual_props_return_true() {
         ("box-shadow", "2px 2px #000000"),
         ("transition", "opacity 0.3s ease 0s"),
         ("text-shadow", "2px 2px 4px #000000"),
+        ("-webkit-text-stroke", "2px #000000"),
         ("background", "linear-gradient(to right, #ff0000, #0000ff)"),
     ];
     for (prop, val) in cases {

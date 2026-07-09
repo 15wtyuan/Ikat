@@ -809,22 +809,30 @@ fn propagate_box_shadow_sort_keys(
     }
 }
 
-/// text-stroke Front layer sort_key 调整：stroke 节点排在主节点之后（Front layer = 后绘 = 上层）。
+/// text-stroke Front layer sort_key 调整：stroke 节点排在所有子页之后（Front layer = 后绘 = 上层）。
 ///
 /// assign_sort_keys 只给 id_to_pos 中的真 scene 节点赋 sort_key；
 /// stroke 合成节点不在场景树中，初始 sort_key=0。此函数将其调整到
-/// primary.sort_key + 1，保证 stroke 在主节点文字之上渲染。
+/// primary.sort_key + num_sub_pages + 1，保证 stroke 在所有子页 base glyph 之上渲染。
 ///
-/// 调用须在 propagate_box_shadow_sort_keys **之后**——主节点 sort_key 可能已被 shadow
-/// 传播移位，stroke 此时读到的 primary_sk 才是最终基节点 sort_key。
+/// 调用须在 propagate_text_sub_page_sort_keys + propagate_box_shadow_sort_keys **之后**——
+/// 需先拿到最终子页 sort_key 布局，再在子页上方插入 stroke。
 ///
 /// 处理多个 stroke 节点时从最大 sort_key 开始（降序），避免累积偏移后的 stale 值。
 fn propagate_text_stroke_sort_keys(nodes: &mut [RenderNode], strokes: &[(u32, u32)]) {
     if strokes.is_empty() {
         return;
     }
-    // 构建 (primary_sort_key, primary_id, stroke_id) 三元组，按 primary_sk DESC。
-    let mut triples: Vec<(u32, u32, u32)> = strokes
+    // 每个 primary 的子页数（用于计算 stroke 插入点 = primary_sk + n_sub + 1）。
+    let mut sub_counts: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    for rn in nodes.iter() {
+        if is_text_sub_page(rn.node_id) {
+            let primary = text_sub_primary_id(rn.node_id);
+            *sub_counts.entry(primary).or_default() += 1;
+        }
+    }
+    // 构建 (primary_sort_key, primary_id, stroke_id, num_sub_pages) 四元组，按 primary_sk DESC。
+    let mut triples: Vec<(u32, u32, u32, u32)> = strokes
         .iter()
         .map(|&(main_id, stroke_id)| {
             let main_sk = nodes
@@ -832,27 +840,30 @@ fn propagate_text_stroke_sort_keys(nodes: &mut [RenderNode], strokes: &[(u32, u3
                 .find(|n| n.node_id == main_id)
                 .map(|n| n.sort_key)
                 .unwrap_or(0);
-            (main_sk, main_id, stroke_id)
+            let n_sub = sub_counts.get(&main_id).copied().unwrap_or(0);
+            (main_sk, main_id, stroke_id, n_sub)
         })
         .collect();
-    triples.sort_by_key(|&(sk, _, _)| std::cmp::Reverse(sk));
-    // Front 层移位：所有 sort_key > primary_sk 且非本 stroke 的节点 +1。
-    // 主节点 own sort_key 不位移（base 保持在 primary_sk），stroke 填入 primary_sk + 1。
-    for &(main_sk, _main_id, stroke_id) in &triples {
+    triples.sort_by_key(|&(sk, _, _, _)| std::cmp::Reverse(sk));
+    // Front 层移位：所有 sort_key > primary_sk + num_sub_pages 且非本 stroke 的节点 +1。
+    // 子页位于 primary_sk+1..primary_sk+num_sub_pages，不位移——stroke 插在它们之上。
+    for &(main_sk, _main_id, stroke_id, n_sub) in &triples {
+        let threshold = main_sk + n_sub;
         for rn in nodes.iter_mut() {
-            if rn.node_id != stroke_id && rn.sort_key > main_sk {
+            if rn.node_id != stroke_id && rn.sort_key > threshold {
                 rn.sort_key += 1;
             }
         }
     }
-    // 设 stroke sort_key = main_sk + 1。
+    // 设 stroke sort_key = primary_sk + num_sub_pages + 1（在所有子页上方）。
     for &(main_id, stroke_id) in strokes {
         if let (Some(main_pos), Some(stroke_pos)) = (
             nodes.iter().position(|n| n.node_id == main_id),
             nodes.iter().position(|n| n.node_id == stroke_id),
         ) {
             let main_sk = nodes[main_pos].sort_key;
-            nodes[stroke_pos].sort_key = main_sk + 1;
+            let n_sub = sub_counts.get(&main_id).copied().unwrap_or(0);
+            nodes[stroke_pos].sort_key = main_sk + n_sub + 1;
         }
     }
 }
