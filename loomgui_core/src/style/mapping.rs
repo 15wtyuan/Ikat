@@ -760,7 +760,12 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             if shadows.is_empty() {
                 return false;
             }
-            style.text_effects = shadows;
+            // text-shadow replaces only its own Shadow effects, composing with
+            // font-effect / stroke (different properties compose, not wipe each other).
+            style
+                .text_effects
+                .retain(|e| !matches!(e, crate::text::font_effect::FontEffect::Shadow { .. }));
+            style.text_effects.extend(shadows);
             true
         }
         "-webkit-text-stroke" => {
@@ -916,14 +921,22 @@ fn parse_font_effect(s: &str) -> Option<crate::text::font_effect::FontEffect> {
     let s = s.trim();
     if let Some(args) = s.strip_prefix("glow(").and_then(|x| x.strip_suffix(")")) {
         let parts: Vec<&str> = args.split_whitespace().collect();
-        let w = parse_number(parts.first()?.trim_end_matches("px"))?;
+        let w_raw = parts.first()?;
+        if w_raw.contains('%') {
+            return None; // font-effect width is px only, % meaningless
+        }
+        let w = parse_number(w_raw.trim_end_matches("px"))?;
         let color = parts
             .get(1)
             .and_then(|c| parse_color(c))
             .unwrap_or([1.0, 1.0, 1.0, 1.0]);
         Some(FontEffect::Glow { w, color })
     } else if let Some(args) = s.strip_prefix("blur(").and_then(|x| x.strip_suffix(")")) {
-        let w = parse_number(args.trim().trim_end_matches("px"))?;
+        let w_raw = args.trim();
+        if w_raw.contains('%') {
+            return None; // font-effect width is px only, % meaningless
+        }
+        let w = parse_number(w_raw.trim_end_matches("px"))?;
         Some(FontEffect::Blur { w })
     } else {
         None // 未知 type → None，apply_decl 不 push

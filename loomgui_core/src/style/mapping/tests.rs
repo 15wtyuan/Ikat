@@ -913,8 +913,8 @@ fn font_effect_unknown_type_ignored() {
 #[test]
 fn font_effect_glow_with_later_shadow_and_stroke() {
     // font-effect glow + text-shadow + -webkit-text-stroke 可共存（累积进 text_effects）。
-    // 注意：text-shadow 会 **替换** text_effects（CSS 属性语义），故须先声明 text-shadow，
-    // 再 font-effect / stroke（push 模式）。
+    // text-shadow 使用 retain+extend（仅替换自身 Shadow，保留其他属性 effect），
+    // 故声明顺序不影响最终组成。
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "text-shadow", "2px 2px #000000"));
     assert!(apply_decl(&mut s, "-webkit-text-stroke", "1px #ff0000"));
@@ -936,6 +936,48 @@ fn font_effect_glow_with_later_shadow_and_stroke() {
         s.text_effects[2],
         crate::text::font_effect::FontEffect::Glow { .. }
     ));
+}
+
+#[test]
+fn font_effect_glow_before_shadow_retains_both() {
+    // font-effect glow 声明在 text-shadow 之前 → glow 不会被 text-shadow 清洗。
+    // text-shadow 用 retain+extend（仅替换 Shadow，保留 Glow/Stroke）。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "font-effect", "glow(3px #ee9900)"));
+    assert!(apply_decl(&mut s, "text-shadow", "2px 2px #000000"));
+    assert_eq!(
+        s.text_effects.len(),
+        2,
+        "glow (first) + shadow (later) = 2 effects"
+    );
+    // glow 先声明，shadow 后 retain+extend → glow 在前 shadow 在后
+    assert!(matches!(
+        s.text_effects[0],
+        crate::text::font_effect::FontEffect::Glow { .. }
+    ));
+    assert!(matches!(
+        s.text_effects[1],
+        crate::text::font_effect::FontEffect::Shadow { .. }
+    ));
+}
+
+#[test]
+fn font_effect_percent_rejected() {
+    // % 在 font-effect width 中静默忽略（宽是 px 半径，% 无意义）。
+    let mut s = ResolvedStyle::default();
+    assert!(
+        !apply_decl(&mut s, "font-effect", "glow(50% #fff)"),
+        "glow(50% #fff) → 拒（% 非法）"
+    );
+    assert!(
+        s.text_effects.is_empty(),
+        "glow % reject 不污染 text_effects"
+    );
+    assert!(
+        !apply_decl(&mut s, "font-effect", "blur(50%)"),
+        "blur(50%) → 拒（% 非法）"
+    );
+    assert!(s.text_effects.is_empty());
 }
 
 #[test]

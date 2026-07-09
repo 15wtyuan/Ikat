@@ -1353,9 +1353,7 @@ fn build_text_mesh(
                     si += 1;
                 }
             }
-            FontEffect::Glow { .. }
-                if gi < glow_back.len() =>
-            {
+            FontEffect::Glow { .. } if gi < glow_back.len() => {
                 back_layers.push(glow_back[gi].clone());
                 gi += 1;
             }
@@ -1373,19 +1371,18 @@ fn build_text_mesh(
     }
 }
 
-/// 把 `build_text_mesh` 产出的 base + shadow Back layer mesh 推入 `nodes`。
+/// 把 `build_text_mesh` 产出的 base + Back layer meshes 推入 `nodes`。
 ///
 /// base 字形走跨页子页机制：首页（page 0）用真 node_id，后续页用 `synth_text_node_id` 合成 id。
-/// shadow Back layer 每项独立 RenderNode，合成 id = `node_id | TEXT_SHADOW_BACK_FLAG`（多 shadow
-/// 叠加时同 flag 下按 atlas 页号区分，用 `synth_text_node_id` 在 flag 之上再编码页号——但
-/// Back layer 多页罕见，单页为常态）。shadow 节点 sort_key 由 `propagate_box_shadow_sort_keys`
-/// 调整为 primary.sort_key - 1（在 base 之前绘制 = 在下层）。
+/// Back layer（shadow/glow）每项独立 RenderNode，合成 id = `BOX_SHADOW_FLAG`（bit 28）+ si 偏移
+/// （多 Back effect 时通过 synth_sub 编码序号区分）。Back layer 节点 sort_key 由
+/// `propagate_box_shadow_sort_keys` 调整为 primary.sort_key - 1（在 base 之前绘制 = 在下层）。
 ///
-/// `shadow_pairs`：追加 (primary_node_id, shadow_back_node_id) 对，供 sort_key 传播用。
+/// `shadow_pairs`：追加 (primary_node_id, back_layer_node_id) 对，供 sort_key 传播用。
 /// 复用 box-shadow 的 sort_key 传播机制——Back layer 语义一致（sort_key 更小 = 先绘 = 下层）。
 ///
-/// atlas path 用 `loomgui://font-atlas/p{page}`（与 base 同形，shadow 字形在 atlas 内按
-/// effect_sig 分槽，同页号混存——page 只代表物理纹理页，不区分 base/shadow）。
+/// atlas path 用 `loomgui://font-atlas/p{page}`（与 base 同形，effect 字形在 atlas 内按
+/// effect_sig 分槽，同页号混存——page 只代表物理纹理页，不区分 base/effect）。
 fn push_text_meshes(
     nodes: &mut Vec<RenderNode>,
     id_to_pos: &mut std::collections::HashMap<NodeId, usize>,
