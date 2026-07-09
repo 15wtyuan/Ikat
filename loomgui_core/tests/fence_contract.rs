@@ -610,6 +610,19 @@ fn color_transparent_sets_alpha_zero() {
 }
 
 #[test]
+fn color_rgba_zero_alpha_treated_as_transparent() {
+    // AI 常把 rgba(0,0,0,0) 与 transparent 混用；两者都应判透明，
+    // 否则渐变字三件套里 color:rgba(0,0,0,0) 静默退化为不透明黑（AI 可预测性破坏）。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "color", "rgba(0,0,0,0)"));
+    assert_eq!(s.color, [0.0, 0.0, 0.0, 0.0], "rgba(0,0,0,0) → alpha=0");
+    // 带空格变体同样透明。
+    let mut s2 = ResolvedStyle::default();
+    assert!(apply_decl(&mut s2, "color", "rgba(0, 0, 0, 0)"));
+    assert_eq!(s2.color, [0.0, 0.0, 0.0, 0.0], "rgba(0, 0, 0, 0) → alpha=0");
+}
+
+#[test]
 fn gradient_text_three_piece_combo_fields_set() {
     // 三件套齐全：background:linear-gradient + background-clip:text + color:transparent。
     // 三个 apply_decl 均返 true，各字段正确设值。

@@ -604,7 +604,11 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "color" => {
-            if value.trim() == "transparent" {
+            // transparent 关键字 + rgba(0,0,0,0)（AI 常与 transparent 混用）都判透明。
+            // parse_color 仅认 #rrggbb hex，rgba 走不到——此处显式拦截避免渐变字三件套
+            // 里 color:rgba(0,0,0,0) 静默退化为不透明黑（AI 可预测性破坏）。
+            let norm = value.trim().replace(' ', "").to_lowercase();
+            if norm == "transparent" || norm == "rgba(0,0,0,0)" {
                 style.color = [0.0, 0.0, 0.0, 0.0];
             } else if let Some(c) = parse_color(value) {
                 style.color = c;
