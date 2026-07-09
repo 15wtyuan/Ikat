@@ -687,6 +687,15 @@ fn intern(
     if let Some(&i) = idx_of.get(s) {
         return i;
     }
+    // u16 索引 + NULL_IDX(0xFFFF) 哨兵：真实索引只能 0..65534。下一个串的索引
+    // 若 = NULL_IDX 会读回空串、若回绕到 0 会撞首串——均静默 corrupt。打包期直接 panic。
+    if strings.len() >= NULL_IDX as usize {
+        panic!(
+            "string table overflow: StringTable holds {} distinct strings (u16 index, \
+             NULL_IDX=0xFFFF reserved); component/text/src/class/id/manifest share this table",
+            strings.len()
+        );
+    }
     let i = strings.len() as u16;
     strings.push(s.to_string());
     idx_of.insert(s.to_string(), i);

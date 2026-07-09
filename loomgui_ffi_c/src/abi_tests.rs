@@ -154,6 +154,97 @@ fn borrow_frame_never_ticked_returns_null() {
     loomgui_stage_free(h);
 }
 
+// ── NativeHost / 虚拟列表查询通道 FFI 边界安全（no-panic 契约）──────────────
+// characterization 测试：当前实现已正确处理 null/无效输入，测绿锁住防回归
+// （未来若误删 null check → UB/panic，此处兜住）。
+
+#[test]
+fn get_node_world_matrix_null_handle_and_null_outs_are_safe() {
+    // null handle + 全 null out：不 crash、不写
+    loomgui_stage_get_node_world_matrix(
+        std::ptr::null(),
+        0,
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+    );
+    // null handle + 一个有效 out：应写 identity[0]=1.0
+    let mut a = 0.0f32;
+    loomgui_stage_get_node_world_matrix(
+        std::ptr::null(),
+        0,
+        &mut a,
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+    );
+    assert_eq!(a, 1.0, "null handle → out_a = identity[0] = 1.0");
+}
+
+#[test]
+fn get_node_world_matrix_invalid_node_returns_identity() {
+    let h = stage_new_with_dejavu(200.0, 200.0);
+    let (mut a, mut b, mut c, mut d, mut tx, mut ty) =
+        (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    loomgui_stage_get_node_world_matrix(
+        h,
+        0xFFFF_FFFF,
+        &mut a,
+        &mut b,
+        &mut c,
+        &mut d,
+        &mut tx,
+        &mut ty,
+    );
+    assert_eq!(
+        [a, b, c, d, tx, ty],
+        [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        "无效 NodeId → identity（不 panic）"
+    );
+    loomgui_stage_free(h);
+}
+
+#[test]
+fn get_node_world_matrix_valid_node_returns_finite_matrix() {
+    let h = stage_new_with_dejavu(200.0, 200.0);
+    let empty = b"";
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty.as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    loomgui_stage_tick(h, 0.0); // compute_world_transforms
+    let (mut a, mut b, mut c, mut d, mut tx, mut ty) =
+        (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    loomgui_stage_get_node_world_matrix(h, root, &mut a, &mut b, &mut c, &mut d, &mut tx, &mut ty);
+    assert!(
+        [a, b, c, d, tx, ty].iter().all(|&v| v.is_finite()),
+        "有效节点须返有限矩阵（无 NaN/Inf），got {:?}",
+        [a, b, c, d, tx, ty]
+    );
+    loomgui_stage_free(h);
+}
+
+#[test]
+fn set_content_size_null_handle_and_invalid_node_are_safe() {
+    loomgui_stage_set_content_size(std::ptr::null_mut(), 0, 100.0, 200.0);
+    let h = stage_new_with_dejavu(200.0, 200.0);
+    loomgui_stage_set_content_size(h, 0xFFFF_FFFF, 100.0, 200.0);
+    loomgui_stage_set_content_size(h, 999, 100.0, 200.0);
+    loomgui_stage_free(h);
+}
+
+#[test]
+fn set_reuse_key_null_handle_and_invalid_node_are_safe() {
+    loomgui_stage_set_reuse_key(std::ptr::null_mut(), 0, 5);
+    let h = stage_new_with_dejavu(200.0, 200.0);
+    loomgui_stage_set_reuse_key(h, 0xFFFF_FFFF, 5);
+    loomgui_stage_set_reuse_key(h, 999, 5);
+    loomgui_stage_free(h);
+}
+
 /// set_input → tick → borrow_events：装载按钮 + Move 到 (50,25) 应产 RollOver。
 /// 读 EventRecord[] POD slice，扫 event_type 字段（repr(C) 手解，避免 Marshal）。
 #[cfg(feature = "parse")]

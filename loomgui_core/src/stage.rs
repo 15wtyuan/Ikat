@@ -491,21 +491,7 @@ impl Stage {
     /// （如黄金等价测试需 instantiate 后把孤立根 push 进 scene.roots，不套额外 stage_root）。
     pub(crate) fn ensure_scene(&mut self) {
         if self.scene.is_none() {
-            self.scene = Some(crate::scene::node::Scene {
-                roots: vec![],
-                nodes: slotmap::SlotMap::with_key(),
-                dynamic_rules: Default::default(),
-                focused_node: None,
-                world_transforms: Vec::new(),
-                anim: Default::default(),
-                scroll: Default::default(),
-                text_layouts: Vec::new(),
-                rich_fragments: Vec::new(),
-                node_sort_keys: Vec::new(),
-                controllers: Default::default(),
-                pending_controller_events: Vec::new(),
-                pending_transitions: Vec::new(),
-            });
+            self.scene = Some(crate::scene::node::Scene::default());
             self.prev_node_hashes.clear(); // 新 scene → 无基线，下帧全 dirty
         }
     }
@@ -666,21 +652,7 @@ impl Stage {
         let mut s = Stage::new((200.0, 200.0)).unwrap();
         s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
             .unwrap();
-        s.scene = Some(crate::scene::node::Scene {
-            roots: vec![],
-            nodes: slotmap::SlotMap::with_key(),
-            dynamic_rules: Default::default(),
-            focused_node: None,
-            world_transforms: Vec::new(),
-            anim: Default::default(),
-            scroll: Default::default(),
-            text_layouts: Vec::new(),
-            rich_fragments: Vec::new(),
-            node_sort_keys: Vec::new(),
-            controllers: Default::default(),
-            pending_controller_events: Vec::new(),
-            pending_transitions: Vec::new(),
-        });
+        s.scene = Some(crate::scene::node::Scene::default());
         s
     }
 

@@ -255,7 +255,7 @@ pub struct ControllerChangedEvent {
     pub new: i32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Scene {
     pub roots: Vec<NodeId>,
     /// 节点存储。Vec<Node> → SlotMap<DefaultKey, Node>（动态树 spec §4.1）。
@@ -316,21 +316,7 @@ impl Scene {
             Option<String>,
         )],
     ) -> Scene {
-        let mut scene = Scene {
-            roots: Vec::new(),
-            nodes: SlotMap::with_key(),
-            dynamic_rules: crate::style::dynamic::DynamicRuleTable::default(),
-            focused_node: None,
-            world_transforms: Vec::new(),
-            anim: Default::default(),
-            scroll: Default::default(),
-            text_layouts: Vec::new(),
-            rich_fragments: Vec::new(),
-            node_sort_keys: Vec::new(),
-            controllers: Default::default(),
-            pending_controller_events: Vec::new(),
-            pending_transitions: Vec::new(),
-        };
+        let mut scene = Scene::default();
         // 先 insert 所有节点，收集 slotmap 分配的 NodeId
         let mut ids: Vec<NodeId> = Vec::with_capacity(entries.len());
         for (_, kind, style, classes, id_attr, draggable, tabindex, data_controller) in
@@ -397,21 +383,7 @@ impl Scene {
     /// test helper：从节点列表 + (parent_idx, child_idx) 边建 Scene。替代 70+ 字面量。
     /// roots = 无 parent 的节点（按插入序）。
     pub fn from_nodes(nodes: Vec<Node>, edges: Vec<(usize, usize)>) -> Scene {
-        let mut scene = Scene {
-            roots: Vec::new(),
-            nodes: SlotMap::with_key(),
-            dynamic_rules: crate::style::dynamic::DynamicRuleTable::default(),
-            focused_node: None,
-            world_transforms: Vec::new(),
-            anim: Default::default(),
-            scroll: Default::default(),
-            text_layouts: Vec::new(),
-            rich_fragments: Vec::new(),
-            node_sort_keys: Vec::new(),
-            controllers: Default::default(),
-            pending_controller_events: Vec::new(),
-            pending_transitions: Vec::new(),
-        };
+        let mut scene = Scene::default();
         let mut ids: Vec<NodeId> = Vec::with_capacity(nodes.len());
         for n in nodes {
             let key = scene.nodes.insert(n);

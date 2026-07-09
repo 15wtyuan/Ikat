@@ -183,21 +183,7 @@ fn scene_build_6tuple_sets_draggable() {
 
 #[test]
 fn scene_default_has_empty_dynamic_rules() {
-    let s = Scene {
-        roots: vec![],
-        nodes: SlotMap::with_key(),
-        dynamic_rules: Default::default(),
-        focused_node: None,
-        world_transforms: Vec::new(),
-        anim: Default::default(),
-        scroll: Default::default(),
-        text_layouts: Vec::new(),
-        rich_fragments: Vec::new(),
-        node_sort_keys: Vec::new(),
-        controllers: Default::default(),
-        pending_controller_events: Vec::new(),
-        pending_transitions: Vec::new(),
-    };
+    let s = Scene::default();
     assert!(
         s.dynamic_rules.rules.is_empty(),
         "Scene 默认 dynamic_rules 空"
@@ -213,21 +199,7 @@ fn node_has_tabindex_focused_defaults() {
 
 #[test]
 fn scene_default_focused_node_none() {
-    let s = Scene {
-        roots: vec![],
-        nodes: SlotMap::with_key(),
-        dynamic_rules: Default::default(),
-        focused_node: None,
-        world_transforms: Vec::new(),
-        anim: Default::default(),
-        scroll: Default::default(),
-        text_layouts: Vec::new(),
-        rich_fragments: Vec::new(),
-        node_sort_keys: Vec::new(),
-        controllers: Default::default(),
-        pending_controller_events: Vec::new(),
-        pending_transitions: Vec::new(),
-    };
+    let s = Scene::default();
     assert_eq!(s.focused_node, None, "Scene 默认 focused_node=None");
 }
 

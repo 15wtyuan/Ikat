@@ -294,21 +294,7 @@ fn is_pointer_on_ui_false_when_miss() {
     s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
         .unwrap();
     // 手搓空 scene（SlotMap::with_key()）
-    s.scene = Some(crate::scene::node::Scene {
-        roots: vec![],
-        nodes: slotmap::SlotMap::with_key(),
-        dynamic_rules: Default::default(),
-        focused_node: None,
-        world_transforms: Vec::new(),
-        anim: Default::default(),
-        scroll: Default::default(),
-        text_layouts: Vec::new(),
-        rich_fragments: Vec::new(),
-        node_sort_keys: Vec::new(),
-        controllers: Default::default(),
-        pending_controller_events: Vec::new(),
-        pending_transitions: Vec::new(),
-    });
+    s.scene = Some(crate::scene::node::Scene::default());
     s.set_input(&[crate::input::PointerEvent {
         kind: crate::input::PointerKind::Move,
         x: 50.0,

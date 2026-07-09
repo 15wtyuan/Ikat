@@ -47,10 +47,14 @@ pub fn apply_point(m: &Affine2, x: f32, y: f32) -> (f32, f32) {
     (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
 }
 
-/// 仿射逆（det≠0）。用伴随矩阵法。
+/// 仿射逆。det≈0（奇异，如 scale(0,*) 动画过零）降级返 IDENTITY——避免 1/det=Inf→NaN
+/// 污染调用方（hit_test/rich_link_at 把屏幕点逆投本地 box 比较）；零尺寸节点自然 miss。
 pub fn inverse(m: &Affine2) -> Affine2 {
     let (a, b, c, d, tx, ty) = (m[0], m[1], m[2], m[3], m[4], m[5]);
     let det = a * d - b * c;
+    if det.abs() < 1e-12 {
+        return IDENTITY;
+    }
     let inv_det = 1.0 / det;
     // 线性部分逆 = 1/det · [[d,-c],[-b,a]]；平移部分 = -inv_lin · (tx,ty)
     let inv_a = d * inv_det;
@@ -171,5 +175,18 @@ mod tests {
             (bx - 1.0).abs() < 1e-4 && (by - 1.0).abs() < 1e-4,
             "剪切矩阵可逆"
         );
+    }
+
+    #[test]
+    fn inverse_of_singular_matrix_is_finite() {
+        // scale(0,0) det=0 → 不可逆。原 1/det=Inf→NaN 会污染 hit_test 本地坐标比较；
+        // 须降级返 IDENTITY（有限），让调用方自然 miss（零尺寸节点本不该命中）。
+        let m = from_scale(0.0, 0.0);
+        let inv = inverse(&m);
+        assert!(
+            inv.iter().all(|&v| v.is_finite()),
+            "奇异矩阵逆须有限（降级 IDENTITY），got {inv:?}"
+        );
+        assert_eq!(inv, IDENTITY, "奇异矩阵逆降级为 IDENTITY");
     }
 }

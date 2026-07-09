@@ -20,6 +20,28 @@ fn empty_rules() -> DynamicRuleTable {
 }
 
 #[test]
+#[should_panic(expected = "string table overflow")]
+fn write_package_panics_when_string_table_exhausted() {
+    // StringTable 用 u16 索引 + NULL_IDX(0xFFFF) 哨兵，最多 65535 个不同串。
+    // 超过则索引撞 NULL_IDX（读回空串）/ 回绕到 0（撞首串）——原为静默数据损坏。
+    // write_package 须在打包期就 panic，不产坏包。
+    let manifest: Vec<AssetEntry> = (0..65536u32)
+        .map(|i| AssetEntry {
+            path: i.to_string(),
+            w: 1,
+            h: 1,
+        })
+        .collect();
+    let nodes = vec![tn(NodeKind::Container)];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", nodes.as_slice(), &rules, &[])],
+        asset_manifest: &manifest,
+    };
+    let _ = write_package(&input);
+}
+
+#[test]
 fn write_read_multi_component_roundtrip() {
     // 两组件：comp1 = root(parent=None) + child；comp2 单节点
     let mut tn_root = tn(NodeKind::Container);

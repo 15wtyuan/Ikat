@@ -23,22 +23,22 @@ namespace LoomGUI.Editor
 
             var sb = new StringBuilder();
             sb.Append("{\n");
-            sb.Append($"  \"exe_path\": \"{exeRel}\",\n");
-            sb.Append($"  \"res_dir\": \"{s.resDirName}\",\n");
-            sb.Append($"  \"output_dir\": \"{outRel}\",\n");
+            sb.Append($"  \"exe_path\": \"{LoomJsonEscape.Escape(exeRel)}\",\n");
+            sb.Append($"  \"res_dir\": \"{LoomJsonEscape.Escape(s.resDirName)}\",\n");
+            sb.Append($"  \"output_dir\": \"{LoomJsonEscape.Escape(outRel)}\",\n");
             sb.Append("  \"packages\": [");
             for (int i = 0; i < s.packages.Count; i++)
             {
                 var p = s.packages[i];
                 if (i > 0) sb.Append(",");
                 sb.Append("\n    {");
-                sb.Append($"\"name\": \"{p.pkgName}\", ");
-                sb.Append($"\"source\": \"{p.sourceDir}\", ");
+                sb.Append($"\"name\": \"{LoomJsonEscape.Escape(p.pkgName)}\", ");
+                sb.Append($"\"source\": \"{LoomJsonEscape.Escape(p.sourceDir)}\", ");
                 sb.Append("\"html\": [");
                 for (int j = 0; j < p.htmlFiles.Count; j++)
                 {
                     if (j > 0) sb.Append(", ");
-                    sb.Append($"\"{p.htmlFiles[j]}\"");
+                    sb.Append($"\"{LoomJsonEscape.Escape(p.htmlFiles[j])}\"");
                 }
                 sb.Append("]}");
             }

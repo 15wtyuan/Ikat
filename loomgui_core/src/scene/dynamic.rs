@@ -304,10 +304,13 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
         }
         None => scene.roots.retain(|&r| r != id),
     }
-    // 3. 联动清持久附属 map（anim/scroll HashMap remove + tween kill）。
+    // 3. 联动清持久附属 map（anim/scroll/controllers HashMap remove + tween kill）。
     scene.anim.clear_node(id);
     scene.scroll.remove(id);
+    scene.controllers.remove(&id);
     tweens.kill_node(id);
+    // pending_controller_events / pending_transitions 不清：每帧首由 Stage drain/clear
+    // （stage.rs），瞬态，非持久泄漏；消费方对悬空 NodeId 有 None-check 兜底。
     // 3b. focused_node 联动清：删焦点节点后 focused_node 不应悬空（否则 FOCUS_OUT 带 stale node_id）。
     //     全局单一焦点，== Some(id) 检查对每个被删节点都做（递归删子时若子是焦点同样清）。
     if scene.focused_node == Some(id) {
@@ -429,6 +432,41 @@ mod tests {
         assert!(scene.get(grand).is_none(), "孙递归删");
         assert!(scene.anim.get(grand).is_none(), "孙 anim 联动清");
         assert!(scene.roots.is_empty(), "roots 摘除");
+    }
+
+    #[test]
+    fn remove_node_clears_controller_mount() {
+        let (mut scene, _root, child, _grand) = build_3level();
+        let mut tweens = TweenManager::new();
+        // child 懒注册成 controller 挂载点（set_controller_selected 建条目）
+        assert_eq!(
+            scene.set_controller_selected(child, 2),
+            -1,
+            "新建条目 prev=-1"
+        );
+        assert!(
+            scene.controllers.contains_key(&child),
+            "前置：controller 已注册"
+        );
+        remove_node(&mut scene, &mut tweens, child);
+        assert!(
+            !scene.controllers.contains_key(&child),
+            "remove_node 必须清 controller 挂载条目（原持久泄漏）"
+        );
+    }
+
+    #[test]
+    fn remove_node_recurses_clears_descendant_controller() {
+        let (mut scene, root, child, _grand) = build_3level();
+        let mut tweens = TweenManager::new();
+        // child 挂 controller；删 root 应递归把 child 的 controller 条目也清掉
+        assert_eq!(scene.set_controller_selected(child, 1), -1);
+        assert!(scene.controllers.contains_key(&child));
+        remove_node(&mut scene, &mut tweens, root);
+        assert!(
+            !scene.controllers.contains_key(&child),
+            "递归删子时子树的 controller 条目也须清"
+        );
     }
 
     #[test]
@@ -590,21 +628,7 @@ mod tests {
     // ---- 动态建树 API 单元测试（自由函数级，不依赖 Stage） ----
 
     fn empty_scene() -> Scene {
-        Scene {
-            roots: Vec::new(),
-            nodes: slotmap::SlotMap::with_key(),
-            dynamic_rules: Default::default(),
-            focused_node: None,
-            world_transforms: Vec::new(),
-            anim: Default::default(),
-            scroll: Default::default(),
-            text_layouts: Vec::new(),
-            rich_fragments: Vec::new(),
-            node_sort_keys: Vec::new(),
-            controllers: Default::default(),
-            pending_controller_events: Vec::new(),
-            pending_transitions: Vec::new(),
-        }
+        Scene::default()
     }
 
     #[test]
