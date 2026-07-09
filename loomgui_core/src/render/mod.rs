@@ -61,6 +61,26 @@ fn src_size(image_sizes: &ImageSizeTable, path: &str) -> (f32, f32) {
         .unwrap_or((64.0, 64.0))
 }
 
+/// 九宫格 slice % resolve：值在 (0, 1) 认为是比例（如 25% → 0.25），乘以源图尺寸
+/// 转为像素；值 >= 1 认为是已解析的像素值，保持不变。
+///
+/// 边界区分依据：合法像素切片最小为 1px，故 (0, 1) 区间与像素值无歧义。
+/// parse_slice 在解析期把 `25%` 存为 0.25，渲染期必须经此函数 resolve 为像素，
+/// 否则 0.25 会被当 0.25px 使用，导致九宫格坍缩。
+pub fn resolve_slice_percent(
+    s: &crate::style::resolved::SliceInsets,
+    src_w: f32,
+    src_h: f32,
+) -> crate::style::resolved::SliceInsets {
+    let r = |v: f32, src: f32| if v > 0.0 && v < 1.0 { v * src } else { v };
+    crate::style::resolved::SliceInsets {
+        top: r(s.top, src_h),
+        bottom: r(s.bottom, src_h),
+        left: r(s.left, src_w),
+        right: r(s.right, src_w),
+    }
+}
+
 /// 收集所有 `display:none` 节点 + 其全部后代的 NodeId。
 ///
 /// CSS 语义：`display:none` 整子树不渲染。`build_render_nodes` 遍历时跳过这些节点，
@@ -279,25 +299,39 @@ pub fn build_render_nodes(
                             [u_min[0], u_max[1]],
                             [u_max[0], u_min[1]],
                         ),
-                        (true, true) => crate::render::mesh::nine_slice(
-                            rect,
-                            color,
-                            n.style.border_image_slice.as_ref().unwrap(),
-                            src_w,
-                            src_h,
-                            [u_min[0], u_max[1]],
-                            [u_max[0], u_min[1]],
-                        ),
-                        (true, false) => crate::render::mesh::nine_slice_rounded(
-                            rect,
-                            color,
-                            n.style.border_image_slice.as_ref().unwrap(),
-                            &radii,
-                            src_w,
-                            src_h,
-                            [u_min[0], u_max[1]],
-                            [u_max[0], u_min[1]],
-                        ),
+                        (true, true) => {
+                            let resolved_slice = resolve_slice_percent(
+                                n.style.border_image_slice.as_ref().unwrap(),
+                                src_w,
+                                src_h,
+                            );
+                            crate::render::mesh::nine_slice(
+                                rect,
+                                color,
+                                &resolved_slice,
+                                src_w,
+                                src_h,
+                                [u_min[0], u_max[1]],
+                                [u_max[0], u_min[1]],
+                            )
+                        }
+                        (true, false) => {
+                            let resolved_slice = resolve_slice_percent(
+                                n.style.border_image_slice.as_ref().unwrap(),
+                                src_w,
+                                src_h,
+                            );
+                            crate::render::mesh::nine_slice_rounded(
+                                rect,
+                                color,
+                                &resolved_slice,
+                                &radii,
+                                src_w,
+                                src_h,
+                                [u_min[0], u_max[1]],
+                                [u_max[0], u_min[1]],
+                            )
+                        }
                     }
                 };
                 // 彩色边框激活（v1.8 修 border_color 死字段）。无背景图时把边框环形 mesh
@@ -365,15 +399,18 @@ pub fn build_render_nodes(
                 let uv_max = [1.0, 1.0];
                 let (src_w, src_h) = src_size(image_sizes, src);
                 let (v, uvc, col, idx) = match &n.style.border_image_slice {
-                    Some(slice) => crate::render::mesh::nine_slice(
-                        rect,
-                        [1.0; 4],
-                        slice,
-                        src_w,
-                        src_h,
-                        [uv_min[0], uv_max[1]],
-                        [uv_max[0], uv_min[1]],
-                    ),
+                    Some(slice) => {
+                        let resolved = resolve_slice_percent(slice, src_w, src_h);
+                        crate::render::mesh::nine_slice(
+                            rect,
+                            [1.0; 4],
+                            &resolved,
+                            src_w,
+                            src_h,
+                            [uv_min[0], uv_max[1]],
+                            [uv_max[0], uv_min[1]],
+                        )
+                    }
                     None => crate::render::mesh::quad(
                         rect,
                         [1.0, 1.0, 1.0, 1.0],

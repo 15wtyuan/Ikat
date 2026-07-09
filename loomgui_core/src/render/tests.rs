@@ -2924,3 +2924,100 @@ fn box_shadow_emits_node_with_offset_and_sort_key() {
         "阴影顶点色应为半透明黑"
     );
 }
+
+// ── resolve_slice_percent ───────────────────────────
+
+#[test]
+fn nine_slice_percent_resolves_to_pixels() {
+    // slice 25%，src 100×100 → 应 resolve 成 25px，非 0.25px
+    let mut slice = crate::style::resolved::SliceInsets {
+        top: 0.25,
+        right: 0.25,
+        bottom: 0.25,
+        left: 0.25,
+    };
+    let src_w = 100.0;
+    let src_h = 100.0;
+    let resolved = resolve_slice_percent(&slice, src_w, src_h);
+    // 25% × 100 = 25px
+    assert!(
+        (resolved.left - 25.0).abs() < 1e-3,
+        "% resolve 成像素，got {}",
+        resolved.left
+    );
+    assert!((resolved.top - 25.0).abs() < 1e-3, "top % resolve 成像素");
+    // 像素值不小于 1 → 不 resolve
+    slice.left = 10.0;
+    let r2 = resolve_slice_percent(&slice, src_w, src_h);
+    assert!(
+        (r2.left - 10.0).abs() < 1e-3,
+        "像素值 10 不动，got {}",
+        r2.left
+    );
+    // 混合：left=25% 存 0.25（resolve），right=20px（不动）
+    slice.left = 0.25;
+    slice.right = 20.0;
+    let r3 = resolve_slice_percent(&slice, src_w, src_h);
+    assert!((r3.left - 25.0).abs() < 1e-3, "left % → 25px");
+    assert!((r3.right - 20.0).abs() < 1e-3, "right px → 20px 不动");
+}
+
+/// 端到端：Container + bg-image + border-image-slice:25% → render 期 % resolve 成像素
+/// → nine_slice 16 顶点（非 quad 退化）。旧 bug：% 存 0.25 被当 0.25px 用，
+/// 源图 80×80 时 slice=0.25px → grid_x[1]=0.25,grid_y[1]=0.25 → 几乎全图拉伸，
+/// 16 顶点仍在但视觉坍缩；resolve 后 slice=20px → 正确九宫格。
+#[test]
+fn build_container_slice_percent_resolves_in_render() {
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 80.0,
+            h: 80.0,
+        },
+        Some([1.0, 0.0, 0.0, 1.0]),
+    );
+    n.style.background_image = Some("skin.png".into());
+    n.style.background_size = BackgroundSize::Stretch;
+    // 25% 存为 0.25 → render 期应 resolve 为 80×0.25=20px
+    n.style.border_image_slice = Some(crate::style::resolved::SliceInsets {
+        top: 0.25,
+        right: 0.25,
+        bottom: 0.25,
+        left: 0.25,
+    });
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let fonts = test_font_table().expect("need font");
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &sizes("skin.png", 80, 80),
+        &mut test_glyph_atlas(),
+    );
+    match &frame.nodes[0].payload {
+        NodePayload::Mesh { verts, uvs, .. } => {
+            // 16 顶点 = 九宫格（非 quad 退化为 4 顶点）
+            assert_eq!(verts.len(), 16, "% resolve 后 nine_slice 16 顶点");
+            // 验证 UV 切片线在 20/80=0.25 而非 0.25/80≈0.003
+            // 源图 80×80，resolve 后 slice=20px
+            // sx = 1.0/80 = 0.0125
+            // UV left = 20*0.0125 = 0.25
+            assert!(
+                (uvs[1][0] - 0.25).abs() < 1e-3,
+                "resolve 后 UV 左切片 = 0.25（非 0.003），实 {}",
+                uvs[1][0]
+            );
+            // UV right = (80-20)*0.0125 = 0.75
+            assert!(
+                (uvs[2][0] - 0.75).abs() < 1e-3,
+                "resolve 后 UV 右切片 = 0.75，实 {}",
+                uvs[2][0]
+            );
+        }
+        _ => panic!("expected Mesh"),
+    }
+}

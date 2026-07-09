@@ -198,7 +198,11 @@ pub fn rounded_rect(
 /// - slice = 源图像素切片量（已 resolve，% 已乘源图边）。
 /// - src_w/src_h = 源图像素尺寸（算 UV 切片比例）。
 /// - 四角不缩放、四边单轴拉伸、中心双轴拉伸。
-/// - clamp：rect 比源图小时四角重叠；`slice.left.min(w*0.5)` 防左切片过半，`.max(grid_x[1])` 防右切片线越过左切片线（clamp 策略等效 fgui SliceFill 防四角越界，实现用 `min(w*0.5)` + `.max()`）。
+/// - clamp：rect 比源图小时四角重叠；按 slice 比例分配可视宽度（非 50/50 强分），
+///   左切片线不超过右切片线（clamp 策略等效 fgui SliceFill 防四角越界）。
+/// - UV 切片线与 grid 使用相同的 clamped 值（非原始 slice），确保几何 clamp 时 UV 同步
+///   （修正几何 clamp 而 UV 不 clamp 导致的角区纹理比例失真）。
+/// - 接缝取整：内部切片线四舍五入到最近像素，消除子像素错位裂缝。
 /// - UV 由 uv_min/uv_max 指定（atlas 子区），按切片像素比例切。v 翻转由调用点交换 uv v 处理。
 #[allow(clippy::type_complexity)]
 pub fn nine_slice(
@@ -214,34 +218,66 @@ pub fn nine_slice(
     if w <= 0.0 || h <= 0.0 {
         return quad(rect, color, uv_min, uv_max);
     }
-    // gridX/Y：rect 坐标 4 值（左、左+sliceL、右-sliceR、右），clamp 防四角越界
-    let grid_x = [
-        rect.x,
-        rect.x + slice.left.min(w * 0.5),
-        (rect.x + w - slice.right).max(rect.x + slice.left.min(w * 0.5)),
-        rect.x + w,
-    ];
-    let grid_y = [
-        rect.y,
-        rect.y + slice.top.min(h * 0.5),
-        (rect.y + h - slice.bottom).max(rect.y + slice.top.min(h * 0.5)),
-        rect.y + h,
-    ];
-    // UV 切片线：按 slice 像素 / src 尺寸 比例
+    // gridX/Y：rect 坐标 4 值（左、左+sliceL、右-sliceR、右）。
+    // 接缝取整防裂缝（四舍五入到最近像素，消除子像素错位线）。
+    // 正常情况：切片不重叠时使用像素精确的切片值。
+    // 重叠情况（vis rect < slice 总和）：按 slice 比例分配可视空间（非旧 50/50 强分），
+    // left 窄 right 宽 → 窄边拿少、宽边拿多（参考 fgui NinePatch.cpp:84-95）。
+    let proposed_left = slice.left;
+    let proposed_right = w - slice.right;
+    let (grid_x, clamp_x) = if proposed_left <= proposed_right {
+        // Normal: slices fit within rect, use pixel-precise values
+        let left_line = (rect.x + slice.left).round();
+        let right_line = (rect.x + w - slice.right).round();
+        let gx = [rect.x, left_line, right_line, rect.x + w];
+        let cx = (slice.left, slice.right);
+        (gx, cx)
+    } else {
+        // Overlap: proportional split to prevent corners from crossing
+        let total_x = (slice.left + slice.right).max(1e-6);
+        let split_left = slice.left / total_x * w;
+        let split_x = rect.x + split_left;
+        let gx = [rect.x, split_x.round(), split_x.round(), rect.x + w];
+        // clamped UV uses the proportional split values (derived from grid positions)
+        let cleft = split_left;
+        let cright = w - split_left;
+        (gx, (cleft, cright))
+    };
+    let proposed_top = slice.top;
+    let proposed_bottom = h - slice.bottom;
+    let (grid_y, clamp_y) = if proposed_top <= proposed_bottom {
+        let top_line = (rect.y + slice.top).round();
+        let bottom_line = (rect.y + h - slice.bottom).round();
+        let gy = [rect.y, top_line, bottom_line, rect.y + h];
+        let cy = (slice.top, slice.bottom);
+        (gy, cy)
+    } else {
+        let total_y = (slice.top + slice.bottom).max(1e-6);
+        let split_top = slice.top / total_y * h;
+        let split_y = rect.y + split_top;
+        let gy = [rect.y, split_y.round(), split_y.round(), rect.y + h];
+        let ctop = split_top;
+        let cbottom = h - split_top;
+        (gy, (ctop, cbottom))
+    };
+    // UV 切片线：使用与 grid 相同的 clamped 值（非原始 slice 像素）。
+    // 当几何因 vis rect 不足而 clamp 时，UV 也必须同步 clamp，否则角区纹理比例失真。
     let (umin, vmin) = (uv_min[0], uv_min[1]);
     let (umax, vmax) = (uv_max[0], uv_max[1]);
+    let (clamped_left, clamped_right) = clamp_x;
+    let (clamped_top, clamped_bottom) = clamp_y;
     let sx = (umax - umin) / src_w.max(1e-6);
     let sy = (vmax - vmin) / src_h.max(1e-6);
     let tex_x = [
         umin,
-        umin + slice.left * sx,
-        umin + (src_w - slice.right) * sx,
+        umin + clamped_left * sx,
+        umin + (src_w - clamped_right) * sx,
         umax,
     ];
     let tex_y = [
         vmin,
-        vmin + slice.top * sy,
-        vmin + (src_h - slice.bottom) * sy,
+        vmin + clamped_top * sy,
+        vmin + (src_h - clamped_bottom) * sy,
         vmax,
     ];
 
@@ -1280,6 +1316,157 @@ mod tests {
         );
         assert_eq!(v.len(), 16, "radius 0 退化为 nine_slice 16 顶点");
         assert_eq!(idx.len(), 54, "9 quad 索引");
+    }
+
+    #[test]
+    fn nine_slice_proportional_split_not_50_50() {
+        // rect 10×10, slice left=10 right=30 (total=40 > w=10)。
+        // 旧：slice.left.min(w*0.5)=10.min(5)=5 → 50/50。
+        // 新 proportion: left=10/40=0.25, right=30/40=0.75。
+        // split_left = 0.25*10 = 2.5; right = 10-0.75*10 = 2.5。
+        let (v, _, _, _) = nine_slice(
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 10.0,
+            },
+            [1.0; 4],
+            &SliceInsets {
+                top: 10.0,
+                right: 30.0,
+                bottom: 10.0,
+                left: 10.0,
+            },
+            100.0,
+            100.0,
+            [0.0, 0.0],
+            [1.0, 1.0],
+        );
+        let xs: Vec<f32> = (0..4).map(|c| v[c][0]).collect();
+        // proportion: left gets 10/(10+30)*10=2.5，right gets 30/40*10=7.5
+        // old 50/50 would give both=5. round(2.5)=3.
+        assert!(
+            (xs[1] - 2.5).abs() <= 0.5,
+            "左切片线≈2.5（10:30 比例分，非旧 5），实 xs={:?}",
+            xs
+        );
+        assert!(
+            xs[1] <= xs[2] + 1e-3,
+            "左切片线 <= 右切片线（clamp 防越界），xs={:?}",
+            xs
+        );
+    }
+
+    #[test]
+    fn nine_slice_proportional_split_unequal() {
+        // rect 80×80, slice left=20 right=80 (total=100 > w=80)。
+        // 比例：left=20/100=0.2, right=80/100=0.8。
+        // split_left=0.2*80=16, right edge=80-0.8*80=16。
+        let (v, _uvs, _, _) = nine_slice(
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 80.0,
+                h: 80.0,
+            },
+            [1.0; 4],
+            &SliceInsets {
+                top: 20.0,
+                right: 80.0,
+                bottom: 20.0,
+                left: 20.0,
+            },
+            200.0,
+            200.0,
+            [0.0, 0.0],
+            [1.0, 1.0],
+        );
+        // 顶点行主序：v[c] = (grid_x[c], grid_y[0])，c=1 是左切片线
+        assert!(
+            (v[1][0] - 16.0).abs() < 0.5,
+            "左切片线≈16（非旧 20.min(40)=20），实 {}",
+            v[1][0]
+        );
+        // 中心段折叠：grid_x[1]==grid_x[2]
+        assert!(
+            (v[1][0] - v[2][0]).abs() < 0.5,
+            "左右切片线约等（重叠比例分致中心折叠）"
+        );
+    }
+
+    #[test]
+    fn nine_slice_uv_syncs_with_clamped_geometry() {
+        // rect 10×10（远小于 slice 左右各 10），触发几何 clamp 后左切片线约=5。
+        // UV 必须用相同的 clamped 值，不能保留原始 slice 10。
+        let (_v, uvs, _, _) = nine_slice(
+            &Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 10.0,
+            },
+            [1.0; 4],
+            &SliceInsets {
+                top: 10.0,
+                right: 10.0,
+                bottom: 10.0,
+                left: 10.0,
+            },
+            100.0,
+            100.0,
+            [0.0, 0.0],
+            [1.0, 1.0],
+        );
+        // 几何：total=20, split_left=10/20*10=5. clamp: 5.min(5)=5 → grid_x[1]=5
+        // UV clamped_left = grid_x[1] - rect.x = 5
+        // sx = 1.0/100 = 0.01; UV left slice = 5*0.01 = 0.05
+        // 旧代码用原始 slice.left=10 → 10*0.01=0.1 → UV 比几何大一倍，角区纹理失真
+        // 同行主序：uvs[1] = [tex_x[1], tex_y[0]] = [0.05, 0]
+        assert!(
+            (uvs[1][0] - 0.05).abs() < 1e-3,
+            "clamped UV 左切片 = 0.05（非旧 0.1），实 {}",
+            uvs[1][0]
+        );
+    }
+
+    #[test]
+    fn nine_slice_seam_rounded_to_integer() {
+        // 网格线四舍五入到像素整数，防子像素错位裂缝。
+        // rect x=10.3, w=50, slice 13 each → 左切片线未经 round 为 23.3，round 后 23。
+        // rect y=10.7, h=50 → 顶切片线未经 round 为 23.7，round 后 24。
+        let (v, _, _, _) = nine_slice(
+            &Rect {
+                x: 10.3,
+                y: 10.7,
+                w: 50.0,
+                h: 50.0,
+            },
+            [1.0; 4],
+            &SliceInsets {
+                top: 13.0,
+                right: 13.0,
+                bottom: 13.0,
+                left: 13.0,
+            },
+            100.0,
+            100.0,
+            [0.0, 0.0],
+            [1.0, 1.0],
+        );
+        // 正常路径：grid_x[1] = (10.3 + 13.0).round() = 23.3.round() = 23
+        assert!(
+            (v[1][0] - 23.0).abs() < 1e-3,
+            "左切片线 `round` 后为整数 23（非 23.3），实 {}",
+            v[1][0]
+        );
+        // grid_y[1] = (10.7 + 13.0).round() = 23.7.round() = 24
+        // v[4] = (grid_x[0], grid_y[1]) = (10.3, 24)
+        assert!(
+            (v[4][1] - 24.0).abs() < 1e-3,
+            "顶切片线 `round` 后为整数 24（非 23.7），实 {}",
+            v[4][1]
+        );
     }
 
     #[test]
