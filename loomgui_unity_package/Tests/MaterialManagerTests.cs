@@ -10,8 +10,8 @@ namespace LoomGUI.Tests
         {
             var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
             var white = Texture2D.whiteTexture;
-            var a = mm.Get(program: 0, white, maskContext: 0, false);
-            var b = mm.Get(program: 0, white, maskContext: 0, false);
+            var a = mm.Get(program: 0, white, maskContext: 0, false, false);
+            var b = mm.Get(program: 0, white, maskContext: 0, false, false);
             Assert.AreSame(a, b);
         }
 
@@ -20,8 +20,8 @@ namespace LoomGUI.Tests
         {
             var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
             var white = Texture2D.whiteTexture;
-            var a = mm.Get(0, white, 0, false);
-            var b = mm.Get(0, white, 1, false);
+            var a = mm.Get(0, white, 0, false, false);
+            var b = mm.Get(0, white, 1, false, false);
             Assert.AreNotSame(a, b);
         }
 
@@ -31,8 +31,8 @@ namespace LoomGUI.Tests
         {
             var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
             var white = Texture2D.whiteTexture;
-            var m0 = mm.Get(0, white, 0, false);
-            var m1 = mm.Get(0, white, 1, false);
+            var m0 = mm.Get(0, white, 0, false, false);
+            var m1 = mm.Get(0, white, 1, false, false);
             Assert.IsFalse(m0.IsKeywordEnabled("CLIPPED"), "ctx=0: 不裁剪，无 CLIPPED keyword");
             Assert.IsTrue(m1.IsKeywordEnabled("CLIPPED"), "ctx>0: 启用 CLIPPED variant");
         }
@@ -43,7 +43,7 @@ namespace LoomGUI.Tests
         {
             var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
             var white = Texture2D.whiteTexture;
-            var m = mm.Get(0, white, 7, false);   // 建 ctx=7 material
+            var m = mm.Get(0, white, 7, false, false);   // 建 ctx=7 material
             var box = new Vector4(-1.5f, 2.5f, 0.01f, 0.02f);
             mm.SetClipBox(7, box);
             Assert.AreEqual(box, m.GetVector("_ClipBox"), "SetClipBox 应刷新已缓存 material 的 _ClipBox");
@@ -57,9 +57,37 @@ namespace LoomGUI.Tests
             var white = Texture2D.whiteTexture;
             var box = new Vector4(-2f, 2f, 0.01f, 0.01f);
             mm.SetClipBox(3, box);          // dict 先写
-            var m = mm.Get(0, white, 3, false);    // 建材质时应读取 dict
+            var m = mm.Get(0, white, 3, false, false);    // 建材质时应读取 dict
             Assert.AreEqual(box, m.GetVector("_ClipBox"), "首帧：SetClipBox 先于 Get，Get 建材质时带 box");
             Assert.IsTrue(m.IsKeywordEnabled("CLIPPED"));
+        }
+
+        /// rounded=true 启 CLIPPED_ROUNDED 变体（SDF），rounded=false 启 CLIPPED（AABB）。
+        /// 同 ctx 不同 rounded 各持独立 Material（互斥变体，不共用）。
+        [Test]
+        public void RoundedFlag_SelectsCorrectKeyword()
+        {
+            var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
+            var white = Texture2D.whiteTexture;
+            var mRect = mm.Get(0, white, 5, false, false);   // 直角 clip
+            var mRound = mm.Get(0, white, 5, false, true);   // 圆角 clip
+            Assert.IsTrue(mRect.IsKeywordEnabled("CLIPPED"), "rounded=false → CLIPPED");
+            Assert.IsFalse(mRect.IsKeywordEnabled("CLIPPED_ROUNDED"), "rounded=false 不启 CLIPPED_ROUNDED");
+            Assert.IsTrue(mRound.IsKeywordEnabled("CLIPPED_ROUNDED"), "rounded=true → CLIPPED_ROUNDED");
+            Assert.IsFalse(mRound.IsKeywordEnabled("CLIPPED"), "rounded=true 不启 CLIPPED（互斥）");
+            Assert.AreNotSame(mRect, mRound, "同 ctx 不同 rounded 各持独立 Material");
+        }
+
+        /// SetCornerRadius 后该 ctx 的 rounded material 的 _CornerRadius 被刷新。
+        [Test]
+        public void SetCornerRadius_UpdatesCachedMaterialFloat()
+        {
+            var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
+            var white = Texture2D.whiteTexture;
+            var m = mm.Get(0, white, 9, false, true);   // 建 ctx=9 rounded material
+            mm.SetCornerRadius(9, 0.25f);
+            Assert.AreEqual(0.25f, m.GetFloat("_CornerRadius"), 0.0001f,
+                "SetCornerRadius 应刷新已缓存 rounded material 的 _CornerRadius");
         }
     }
 }

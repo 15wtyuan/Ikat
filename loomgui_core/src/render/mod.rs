@@ -91,10 +91,17 @@ fn collect_display_none_subtree(scene: &Scene) -> std::collections::HashSet<Node
 ///
 /// 由 `batch::assign_sort_keys` 在 DFS 时产；`context_id` 与 RenderNode 的
 /// `mask_context.0` 对齐（被该 clip 约束的节点引用同一 id）。
+///
+/// `radii` = 圆角裁剪的四角半径对 `(h, v)`，序 [TL, TR, BR, BL]（与
+/// `BorderRadius::as_corners` 同约定）。`None` = 直角裁剪（AABB step）；
+/// `Some` = 圆角 SDF 裁剪（shader CLIPPED_ROUNDED 变体）。仅当 clipper 节点
+/// 自身 `border_radius` 非全零时填 `Some`——祖先链的圆角不传播到子层级的 clip
+/// （每层 clip 只反映该层 clipper 的形状）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClipEntry {
     pub context_id: u32,
     pub rect: Rect,
+    pub radii: Option<[(f32, f32); 4]>,
 }
 
 /// 一帧渲染数据：节点 + clip 表（FFI blob 同帧 emit）。

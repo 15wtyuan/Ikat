@@ -164,9 +164,24 @@ pub fn assign_sort_keys(
                 Some(a) => rect_intersect(a, own_scrolled),
             };
             let ctx = *counter + 1;
+            // 圆角裁剪：clipper 节点自身 border_radius 非全零时，把四角半径随 clip entry
+            // 透传到后端（shader CLIPPED_ROUNDED 变体走 SDF）。半径按 clipper 自身 box
+            // 尺寸解析（own.w/own.h，不受 scroll/ancestor 交集影响）——交集后 rect 可能更小，
+            // SDF 用交集 rect 的 half-size 归一化，半径按 design px 传，在 shader 端归一化。
+            // 全零半径 → None（直角 AABB clip，走 CLIPPED 变体，零开销）。
+            let radii = {
+                let r = node.style.border_radius.as_corners(own.w, own.h);
+                let all_zero = r.iter().all(|&(rx, ry)| rx <= 0.0 || ry <= 0.0);
+                if all_zero {
+                    None
+                } else {
+                    Some(r)
+                }
+            };
             clips.push(ClipEntry {
                 context_id: ctx,
                 rect: intersected,
+                radii,
             });
             (MaskContext(ctx), Some(intersected))
         } else {
@@ -384,6 +399,80 @@ mod tests {
         // root 是首个分配（counter=0），clip → MaskContext(0+1)=1
         assert_eq!(rns[0].mask_context, MaskContext(1), "clip root 开层级 1");
         assert_eq!(rns[1].mask_context, MaskContext(1), "child 继承父层级");
+    }
+
+    /// clipper 节点 border_radius 全零 → ClipEntry.radii=None（直角 AABB clip）。
+    #[test]
+    fn clip_node_zero_radius_yields_none_radii() {
+        use crate::style::resolved::BorderRadius;
+        let mut root = Node::default();
+        root.clip_rect = Some(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
+        root.style.border_radius = BorderRadius::default(); // 全零
+        let scene = Scene::from_nodes(vec![root], vec![]);
+        let mut rns: Vec<RenderNode> = (0..1).map(placeholder_rn).collect();
+        let mut sort_keys = sort_keys_buf(&scene);
+        let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
+        assert_eq!(clips.len(), 1);
+        assert!(clips[0].radii.is_none(), "全零 border_radius → radii=None");
+    }
+
+    /// clipper 节点 border_radius 非零 → ClipEntry.radii=Some，四角值按 clipper box
+    /// 尺寸解析（as_corners(w,h)）。验 TL/TR/BR/BL 序 + 像素值保真。
+    #[test]
+    fn clip_node_nonzero_radius_carries_radii() {
+        use crate::style::resolved::{BorderRadius, CornerRadius};
+        use taffy::style::LengthPercentage;
+        let mut root = Node::default();
+        root.clip_rect = Some(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 100.0,
+        });
+        // 四角不同半径（TL=10,15 TR=20,25 BR=30,35 BL=40,45）验序 + 各角独立。
+        root.style.border_radius = BorderRadius {
+            corners: [
+                CornerRadius {
+                    h: LengthPercentage::Length(10.0),
+                    v: LengthPercentage::Length(15.0),
+                },
+                CornerRadius {
+                    h: LengthPercentage::Length(20.0),
+                    v: LengthPercentage::Length(25.0),
+                },
+                CornerRadius {
+                    h: LengthPercentage::Length(30.0),
+                    v: LengthPercentage::Length(35.0),
+                },
+                CornerRadius {
+                    h: LengthPercentage::Length(40.0),
+                    v: LengthPercentage::Length(45.0),
+                },
+            ],
+        };
+        let scene = Scene::from_nodes(vec![root], vec![]);
+        let mut rns: Vec<RenderNode> = (0..1).map(placeholder_rn).collect();
+        let mut sort_keys = sort_keys_buf(&scene);
+        let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
+        assert_eq!(clips.len(), 1);
+        let r = clips[0].radii.expect("非零 border_radius → radii=Some");
+        let expected = [(10.0, 15.0), (20.0, 25.0), (30.0, 35.0), (40.0, 45.0)];
+        for i in 0..4 {
+            assert!(
+                (r[i].0 - expected[i].0).abs() < 1e-5 && (r[i].1 - expected[i].1).abs() < 1e-5,
+                "corner[{}] 期望 ({},{}) 得 ({},{})",
+                i,
+                expected[i].0,
+                expected[i].1,
+                r[i].0,
+                r[i].1
+            );
+        }
     }
 
     #[test]

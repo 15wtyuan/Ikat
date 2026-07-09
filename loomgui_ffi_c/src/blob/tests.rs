@@ -558,9 +558,10 @@ impl<'a> TestView<'a> {
             0
         }
     }
-    /// 读 clip 表 entries：Vec<(context_id, Rect)>（§4.1 / §4.4）。
-    /// layout: clip_count:u32 后跟 count × {context_id:u32, x,y,w,h:f32}（20B/entry）。
-    fn read_clips(&self) -> Vec<(u32, Rect)> {
+    /// 读 clip 表 entries：Vec<(context_id, Rect, Option<[(f32,f32);4]>)>（§4.1 / §4.4）。
+    /// layout: clip_count:u32 后跟 count × {context_id:u32, x,y,w,h:f32, radii: 4×(rx,ry):f32}（52B/entry）。
+    /// radii 全零 → None（直角 clip）；非全零 → Some（圆角 SDF clip）。
+    fn read_clips(&self) -> Vec<(u32, Rect, Option<[(f32, f32); 4]>)> {
         let count = self.clip_count() as usize;
         let mut p = self.clip_table_off + 4;
         (0..count)
@@ -575,7 +576,17 @@ impl<'a> TestView<'a> {
                 p += 4;
                 let h = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
                 p += 4;
-                (cid, Rect { x, y, w, h })
+                let mut radii = [(0.0f32, 0.0f32); 4];
+                for corner in radii.iter_mut() {
+                    let rx = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                    let ry = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                    *corner = (rx, ry);
+                }
+                let all_zero = radii.iter().all(|&(rx, ry)| rx == 0.0 && ry == 0.0);
+                let radii_opt = if all_zero { None } else { Some(radii) };
+                (cid, Rect { x, y, w, h }, radii_opt)
             })
             .collect()
     }
@@ -598,6 +609,7 @@ fn clip_table_round_trip_with_entries() {
                     w: 100.0,
                     h: 100.0,
                 },
+                radii: None,
             },
             ClipEntry {
                 context_id: 2,
@@ -607,6 +619,7 @@ fn clip_table_round_trip_with_entries() {
                     w: 0.0,
                     h: 0.0,
                 },
+                radii: None,
             },
         ],
     };
@@ -626,8 +639,11 @@ fn clip_table_round_trip_with_entries() {
         (clips[1].1.x, clips[1].1.y, clips[1].1.w, clips[1].1.h),
         (50.0, 50.0, 0.0, 0.0)
     );
-    // clip 表段长度 = 4(count) + 2×20(entry) = 44。
-    assert_eq!(view.clip_table_len, 44, "clip_table_len = 4 + count×20");
+    // radii=None → 序列化为全零 32B，读回仍 None（直角 clip）。
+    assert!(clips[0].2.is_none(), "radii=None round-trip 为 None");
+    assert!(clips[1].2.is_none(), "radii=None round-trip 为 None");
+    // clip 表段长度 = 4(count) + 2×52(entry: ctx+rect 20B + radii 32B) = 108。
+    assert_eq!(view.clip_table_len, 108, "clip_table_len = 4 + count×52");
     // v7：path_table 紧跟 clip_table 之后，是 blob 末段。
     //   本测试 mesh 无 image_path → path_table 仅 4B（path_count=0）。
     assert_eq!(
@@ -657,6 +673,56 @@ fn empty_clip_table_round_trip() {
         "空 clip 表 len=4（仅 clip_count=0）"
     );
     assert_eq!(view.read_clips().len(), 0);
+}
+
+/// 圆角 clip entry round-trip：radii=Some([(rx,ry);4]) 序列化为 32B（4×(rx,ry)），
+/// 读回值保真。验四角独立 (rx,ry) 对均正确透传（TL,TR,BR,BL 序）。
+#[test]
+fn clip_table_radii_round_trip() {
+    let node = mesh_node(0, None, 0.0, 0.0, 1.0, 1.0);
+    let radii = [
+        (10.0, 12.0), // TL
+        (20.0, 22.0), // TR
+        (30.0, 32.0), // BR
+        (40.0, 42.0), // BL
+    ];
+    let frame = FrameData {
+        nodes: vec![node],
+        clips: vec![ClipEntry {
+            context_id: 1,
+            rect: Rect {
+                x: 5.0,
+                y: 6.0,
+                w: 100.0,
+                h: 80.0,
+            },
+            radii: Some(radii),
+        }],
+    };
+    let blob = build_blob(&frame);
+    let view = TestView::parse(&blob);
+    assert_eq!(view.clip_count(), 1);
+    // entry 52B：clip_table_len = 4 + 1×52 = 56。
+    assert_eq!(view.clip_table_len, 56, "圆角 clip entry 52B");
+    let clips = view.read_clips();
+    assert_eq!(clips.len(), 1);
+    assert_eq!(clips[0].0, 1);
+    assert_eq!(
+        (clips[0].1.x, clips[0].1.y, clips[0].1.w, clips[0].1.h),
+        (5.0, 6.0, 100.0, 80.0)
+    );
+    let r = clips[0].2.expect("radii 应 Some");
+    for i in 0..4 {
+        assert!(
+            (r[i].0 - radii[i].0).abs() < 1e-5 && (r[i].1 - radii[i].1).abs() < 1e-5,
+            "corner[{}] round-trip: 期望 ({},{})，得 ({},{})",
+            i,
+            radii[i].0,
+            radii[i].1,
+            r[i].0,
+            r[i].1
+        );
+    }
 }
 
 /// merged FrameData（transform=0、alpha=1、多 quad 拼接）经 build_blob，

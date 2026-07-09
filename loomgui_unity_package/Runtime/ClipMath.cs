@@ -37,5 +37,29 @@ namespace LoomGUI
             if (hw == 0f || hh == 0f) return SafeBlank;
             return new Vector4(-cx / hw, -cy / hh, 1f / hw, 1f / hh);
         }
+
+        /// 把 design-space 圆角半径归一化到 shader clipPos 空间（|x|,|y|<=1 在内）。
+        ///
+        /// shader SDF 在 clipPos 归一化空间计算（clipPos = worldPos * _ClipBox.zw + _ClipBox.xy，
+        /// 区域内 |clipPos|<=1）。design 半径 r_design 须除以 half_size 转归一化：
+        ///   r_norm = r_design / half_size。
+        /// 非方形 rect（hw≠hh）下 SDF 的 q=abs(clipPos)-1+r 在两轴归一化不同——取 min(hw,hh)
+        /// 归一化让 SDF 圆角保持圆形（非椭圆），视觉最接近 CSS border-radius。
+        /// 与 ComputeClipBox 同根 transform 重新算 half_size（_ClipBox.zw = 1/hw, 1/hh 可用，
+        /// 但 hw/hh 经 root scale 后是 world 单位；design 半径也是 design 单位，须同经
+        /// TransformPoint 转 world 再除——此处重算避免 _ClipBox 是 SafeBlank 时除零）。
+        public static float NormalizeCornerRadius(Transform root,
+            float designX, float designY, float designW, float designH, float designRadius)
+        {
+            if (designRadius <= 0f) return 0f;
+            Vector3 wTL = root.TransformPoint(new Vector3(designX, designY, 0f));
+            Vector3 wBR = root.TransformPoint(new Vector3(designX + designW, designY + designH, 0f));
+            float hw = Mathf.Abs(wBR.x - wTL.x) * 0.5f;
+            float hh = Mathf.Abs(wBR.y - wTL.y) * 0.5f;
+            float minHalf = Mathf.Min(hw, hh);
+            if (minHalf <= 0f) return 0f;
+            // design→world 经 root scale（sf）；半径同 scale，故用 world half 归一化。
+            return designRadius / minHalf;
+        }
     }
 }

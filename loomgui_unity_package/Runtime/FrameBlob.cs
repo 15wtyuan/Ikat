@@ -133,10 +133,13 @@ namespace LoomGUI
         /// clip_count(u32) 在 ClipTableOff 处；clip_table_len 含 clip_count 本身。
         public int ClipCount => ClipTableLen >= 4 ? (int)ReadU32(ClipTableOff) : 0;
 
-        /// 读某 clip context 的 design rect（绝对，y-down）。entry 布局：ctx,x,y,w,h 各 4B（20B/entry）。
+        /// 读某 clip context 的 design rect（绝对，y-down）+ 四角圆角半径。
+        /// entry 布局：ctx,x,y,w,h 各 4B + radii 4×(rx,ry) 8×f32 = 52B/entry。
         /// mask_context==0 永不入表（无裁剪）；未找到 ctx → found=false（调用方跳过 SetClipBox）。
-        /// 镜像 Rust blob.rs::read_clips。线性扫描（few entries，O(n) 足够）。
-        public bool ClipRect(uint ctx, out float x, out float y, out float w, out float h)
+        /// radii 全零 → cornerRadius=0（调用方走 CLIPPED 直角变体）；非全零 → 走 CLIPPED_ROUNDED SDF。
+        /// 镜像 Rust blob.rs clip 表序列化。线性扫描（few entries，O(n) 足够）。
+        public bool ClipRect(uint ctx, out float x, out float y, out float w, out float h,
+                             out float cornerRadius)
         {
             int count = ClipCount;
             int p = ClipTableOff + 4;   // 跳过 clip_count
@@ -148,11 +151,22 @@ namespace LoomGUI
                     y = ReadF32(p + 8);
                     w = ReadF32(p + 12);
                     h = ReadF32(p + 16);
+                    // MVP 统一半径：取四角 (rx,ry) 的最小值（非均匀 SDF 留后续）。
+                    // 四角半径在圆角矩形 SDF 中需统一 r——取 min 保证四角都不超目标半径，
+                    // 视觉上小半径角精确、大半径角偏小（保守，不溢出 clip 边界）。
+                    float tlx = ReadF32(p + 20), tly = ReadF32(p + 24);
+                    float trx = ReadF32(p + 28), try_ = ReadF32(p + 32);
+                    float brx = ReadF32(p + 36), bry = ReadF32(p + 40);
+                    float blx = ReadF32(p + 44), bly = ReadF32(p + 48);
+                    float minRx = Mathf.Min(Mathf.Min(tlx, trx), Mathf.Min(brx, blx));
+                    float minRy = Mathf.Min(Mathf.Min(tly, try_), Mathf.Min(bry, bly));
+                    cornerRadius = Mathf.Min(minRx, minRy);
                     return true;
                 }
-                p += 20;
+                p += 52; // 52B/entry（ctx+rect 20B + radii 32B）
             }
             x = y = w = h = 0f;
+            cornerRadius = 0f;
             return false;
         }
 

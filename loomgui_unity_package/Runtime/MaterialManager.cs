@@ -4,19 +4,23 @@ using UnityEngine;
 namespace LoomGUI
 {
     /// DrawState 缓存。
-    /// key = (program, texture, mask_context)。同 key 复用 Material 实例。
-    /// tint×alpha 走顶点色（不在 key 里）；clip_box 进 mask_context 专属 Material 的 _ClipBox uniform。
+    /// key = (program, texture, mask_context, rounded)。同 key 复用 Material 实例。
+    /// tint×alpha 走顶点色（不在 key 里）；clip_box + corner_radius 进 mask_context 专属 Material 的 uniform。
+    /// 圆角 clip（cornerRadius>0）与直角 clip（cornerRadius==0）是互斥变体——CLIPPED_ROUNDED
+    /// 走 SDF，CLIPPED 走 AABB step，两者都是 clip 实现不叠加。rounded 进 key 让两者各持独立 Material。
     public sealed class MaterialManager
     {
         readonly Shader _shader;
         readonly Dictionary<Key, Material> _cache = new();
         readonly Dictionary<uint, Vector4> _clipBoxByCtx = new();
+        // per-ctx 归一化圆角半径（shader _CornerRadius.x）。0=直角（CLIPPED），>0=圆角（CLIPPED_ROUNDED）。
+        readonly Dictionary<uint, float> _cornerRadiusByCtx = new();
 
         public MaterialManager(Shader shader) { _shader = shader; }
 
-        public Material Get(int program, Texture texture, uint maskContext, bool matrixFlag)
+        public Material Get(int program, Texture texture, uint maskContext, bool matrixFlag, bool rounded)
         {
-            var key = new Key(program, texture, maskContext, matrixFlag);
+            var key = new Key(program, texture, maskContext, matrixFlag, rounded);
             if (!_cache.TryGetValue(key, out var mat))
             {
                 mat = new Material(_shader);
@@ -25,13 +29,16 @@ namespace LoomGUI
                 mat.SetFloat("_DstFactor", 10f);  // OneMinusSrcAlpha
                 if (maskContext > 0u)
                 {
-                    // ctx>0 → CLIPPED 变体（multi_compile _ CLIPPED，shader 端 discard）。
+                    // ctx>0 → clip 变体。rounded=true 启 CLIPPED_ROUNDED（SDF），否则 CLIPPED（AABB step）。
                     // mask_context 进 key，每 ctx 独立 Material 实例，keyword 设该实例。
-                    mat.EnableKeyword("CLIPPED");
-                    // 首帧路径：MirrorPool 先 SetClipBox（box 进 _clipBoxByCtx）再 Get；
-                    // 新建 Material 时从此 dict 读 box。后续帧材质已缓存，SetClipBox 的 SetVector 分支刷新。
+                    if (rounded) mat.EnableKeyword("CLIPPED_ROUNDED");
+                    else mat.EnableKeyword("CLIPPED");
+                    // 首帧路径：MirrorPool 先 SetClipBox/SetCornerRadius 再 Get；
+                    // 新建 Material 时从此 dict 读。后续帧材质已缓存，Set 的 SetVector 分支刷新。
                     if (_clipBoxByCtx.TryGetValue(maskContext, out var cb))
                         mat.SetVector("_ClipBox", cb);
+                    if (rounded && _cornerRadiusByCtx.TryGetValue(maskContext, out var cr))
+                        mat.SetFloat("_CornerRadius", cr);
                 }
                 if (matrixFlag) mat.EnableKeyword("OBJECT_MATRIX");
                 if (program == 1) mat.EnableKeyword("ALPHA_MASK");   // text: font atlas 是 alpha-mask（rgb 黑，glyph 在 alpha）
@@ -54,6 +61,18 @@ namespace LoomGUI
                 if (kv.Key.Ctx == maskContext) kv.Value.SetVector("_ClipBox", clipBox);
         }
 
+        /// 注册某 mask_context 的归一化圆角半径（shader _CornerRadius）。
+        /// radius>0 → CLIPPED_ROUNDED 变体（SDF）；radius==0 → CLIPPED 变体（AABB）。
+        /// 调用方（MirrorPool）按 ClipRect 读出的 cornerRadius 是否 >0 决定调不调此方法；
+        /// 不调 = 保持 0 = 直角。同 SetClipBox 双路覆盖（dict + 已缓存实例）。
+        public void SetCornerRadius(uint maskContext, float normalizedRadius)
+        {
+            _cornerRadiusByCtx[maskContext] = normalizedRadius;
+            foreach (var kv in _cache)
+                if (kv.Key.Ctx == maskContext && kv.Key.Rounded)
+                    kv.Value.SetFloat("_CornerRadius", normalizedRadius);
+        }
+
         public void Clear()
         {
             foreach (var kv in _cache)
@@ -62,6 +81,8 @@ namespace LoomGUI
                 else Object.DestroyImmediate(kv.Value);   // [ExecuteAlways] 编辑器预览走 Edit mode
             }
             _cache.Clear();
+            _clipBoxByCtx.Clear();
+            _cornerRadiusByCtx.Clear();
         }
 
         // key 持 Texture 引用（Unity 对象同一性），避开 Unity 6.5 废弃的 GetInstanceID/GetEntityId/EntityId。
@@ -72,14 +93,17 @@ namespace LoomGUI
             readonly Texture _tex;
             readonly uint _ctx;
             readonly bool _matrix;
-            public Key(int p, Texture t, uint c, bool m) { _program = p; _tex = t; _ctx = c; _matrix = m; }
-            public uint Ctx => _ctx;   // SetClipBox 按 ctx 反查已缓存 material（独立于 program/tex）。
-            public override int GetHashCode() => System.HashCode.Combine(_program, _tex, (int)_ctx, _matrix);
+            readonly bool _rounded;   // CLIPPED_ROUNDED vs CLIPPED（圆角 clip 与直角 clip 互斥变体）
+            public Key(int p, Texture t, uint c, bool m, bool r) { _program = p; _tex = t; _ctx = c; _matrix = m; _rounded = r; }
+            public uint Ctx => _ctx;   // SetClipBox/SetCornerRadius 按 ctx 反查已缓存 material。
+            public bool Rounded => _rounded;
+            public override int GetHashCode() => System.HashCode.Combine(_program, _tex, (int)_ctx, _matrix, _rounded);
             public override bool Equals(object o) => o is Key k
                 && k._program == _program
                 && k._tex == _tex
                 && k._ctx == _ctx
-                && k._matrix == _matrix;
+                && k._matrix == _matrix
+                && k._rounded == _rounded;
         }
     }
 }

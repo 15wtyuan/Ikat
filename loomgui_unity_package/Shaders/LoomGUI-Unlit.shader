@@ -24,6 +24,7 @@ Shader "LoomGUI/Unlit"
         _CF3 ("CF3", Vector) = (0,0,0,1)
         _CFOff ("CFOff", Vector) = (0,0,0,0)
         _Alpha ("Alpha", Float) = 1
+        _CornerRadius ("CornerRadius", Float) = 0
     }
     SubShader
     {
@@ -38,6 +39,7 @@ Shader "LoomGUI/Unlit"
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile _ CLIPPED
+            #pragma multi_compile _ CLIPPED_ROUNDED
             #pragma multi_compile _ OBJECT_MATRIX
             #pragma multi_compile _ ALPHA_MASK
             #pragma multi_compile _ BG_COMPOSITE
@@ -62,6 +64,7 @@ Shader "LoomGUI/Unlit"
                 float4 _CF3;
                 float4 _CFOff;
                 float _Alpha;
+                float _CornerRadius;   // 归一化圆角半径（design_radius / min_half_size），CLIPPED_ROUNDED 用
             CBUFFER_END
             TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
 
@@ -83,7 +86,7 @@ Shader "LoomGUI/Unlit"
                 float2 clipWorldXY = worldPos.xy;
                 o.color = v.color;
                 o.uv = TRANSFORM_TEX(v.uv, _MainTex);
-#if defined(CLIPPED)
+#if defined(CLIPPED) || defined(CLIPPED_ROUNDED)
                 o.clipPos = clipWorldXY * _ClipBox.zw + _ClipBox.xy;
 #endif
                 return o;
@@ -126,7 +129,15 @@ Shader "LoomGUI/Unlit"
                 #endif
                 // 节点 opacity（从顶点色剥离，per-renderer MPB）。alpha 剥离后 colors.a 不含节点 alpha。
                 col.a *= _Alpha;
-                #ifdef CLIPPED
+                #ifdef CLIPPED_ROUNDED
+                // 圆角矩形 SDF 裁剪：clipPos 在 _ClipBox 归一化空间（|x|,|y|<=1 在直角矩形内）。
+                // rounded-box SDF：q = abs(p) - half + r（half=1 归一化），sdf = length(max(q,0)) + min(max(q.x,q.y),0) - r。
+                // sdf<0 内，>0 外。smoothstep 抗锯齿（1px 过渡带，与 clipPos 归一化空间分辨率匹配）。
+                float r = _CornerRadius;
+                float2 q = abs(i.clipPos) - 1.0 + r;
+                float sdf = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+                col.a *= smoothstep(1.0, 0.0, sdf);
+                #elif defined(CLIPPED)
                 float2 f = abs(i.clipPos);
                 col.a *= step(max(f.x, f.y), 1.0);
                 #endif

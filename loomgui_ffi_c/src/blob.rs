@@ -196,10 +196,12 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     let mesh_arena_off = off as u32;
     let mesh_arena_len = mesh_arena.len() as u32;
     let clip_table_off = mesh_arena_off + mesh_arena_len;
-    // clip 表 = clip_count:u32 + entries[count × {context_id:u32, x,y,w,h:f32}]（20B/entry）。
+    // clip 表 = clip_count:u32 + entries[count × {context_id:u32, x,y,w,h:f32, radii: 4×(rx,ry):f32}]。
+    // radii 段恒写 32B（8×f32）：有圆角时为四角 (rx,ry) 对，无圆角时全零（C# 侧据全零判 CLIPPED vs CLIPPED_ROUNDED）。
     // 只含 mask_context>0 的层级（context==0 = 无 clip，永不入表）。§4.4 / §4.1。
+    const CLIP_ENTRY_SIZE: u32 = 52; // 20B(ctx+rect) + 32B(4×(rx,ry))
     let clip_count: u32 = clips.len() as u32;
-    let clip_table_len: u32 = 4 + clip_count * 20;
+    let clip_table_len: u32 = 4 + clip_count * CLIP_ENTRY_SIZE;
     let mut clip_table_buf: Vec<u8> = Vec::with_capacity(clip_table_len as usize);
     clip_table_buf.extend_from_slice(&clip_count.to_le_bytes());
     for c in clips {
@@ -208,6 +210,12 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
         clip_table_buf.extend_from_slice(&c.rect.y.to_le_bytes());
         clip_table_buf.extend_from_slice(&c.rect.w.to_le_bytes());
         clip_table_buf.extend_from_slice(&c.rect.h.to_le_bytes());
+        // 四角半径 [TL, TR, BR, BL] 各 (rx, ry)。None → 全零（C# 判 CLIPPED）。
+        let r = c.radii.unwrap_or([(0.0, 0.0); 4]);
+        for &(rx, ry) in r.iter() {
+            clip_table_buf.extend_from_slice(&rx.to_le_bytes());
+            clip_table_buf.extend_from_slice(&ry.to_le_bytes());
+        }
     }
 
     // v7：path string table arena 紧跟 clip_table 末段（稳定布局，文档化于 §5.2）。
