@@ -785,6 +785,19 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 .push(crate::text::font_effect::FontEffect::Stroke { w, color });
             true
         }
+        "font-effect" => {
+            // LoomGUI 私有 CSS：font-effect: glow(w color), blur(w)（逗号分隔多 effect）。
+            // glow = dilate + gaussian_blur Back layer（发光晕开），无偏移（居中）。
+            // blur = gaussian_blur（可分离高斯两 pass）。
+            // 未知 type（非 glow/blur）→ parse_font_effect 返 None → 不 push（静默忽略）。
+            let prev_len = style.text_effects.len();
+            for spec in value.split(',') {
+                if let Some(eff) = parse_font_effect(spec.trim()) {
+                    style.text_effects.push(eff);
+                }
+            }
+            style.text_effects.len() > prev_len
+        }
         _ => false, // 装饰属性静默忽略
     }
 }
@@ -891,6 +904,30 @@ fn parse_one_text_shadow(spec: &str) -> Option<crate::text::font_effect::FontEff
         blur,
         color,
     })
+}
+
+/// 解析单个 LoomGUI 私有 font-effect：`glow(w color)` / `blur(w)`。
+///
+/// - `glow`：dilate 膨胀 + gaussian_blur 晕开，Back layer（居中），颜色可选（默认白）。
+/// - `blur`：可分离高斯两 pass。
+/// - 未知 type → None（apply_decl 静默跳过）。
+fn parse_font_effect(s: &str) -> Option<crate::text::font_effect::FontEffect> {
+    use crate::text::font_effect::FontEffect;
+    let s = s.trim();
+    if let Some(args) = s.strip_prefix("glow(").and_then(|x| x.strip_suffix(")")) {
+        let parts: Vec<&str> = args.split_whitespace().collect();
+        let w = parse_number(parts.first()?.trim_end_matches("px"))?;
+        let color = parts
+            .get(1)
+            .and_then(|c| parse_color(c))
+            .unwrap_or([1.0, 1.0, 1.0, 1.0]);
+        Some(FontEffect::Glow { w, color })
+    } else if let Some(args) = s.strip_prefix("blur(").and_then(|x| x.strip_suffix(")")) {
+        let w = parse_number(args.trim().trim_end_matches("px"))?;
+        Some(FontEffect::Blur { w })
+    } else {
+        None // 未知 type → None，apply_decl 不 push
+    }
 }
 
 /// "10px" → 10.0；"10%" → None（拒 %）；"10" → 10.0（容错无单位）。

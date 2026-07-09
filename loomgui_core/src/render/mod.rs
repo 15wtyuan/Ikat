@@ -964,20 +964,23 @@ fn bake_content_offset(layout: &mut crate::text::layout::TextLayout, off_x: f32,
     }
 }
 
-/// `build_text_mesh` 产物：base 字形 mesh（按 atlas 页分组）+ shadow Back layer mesh。
+/// `build_text_mesh` 产物：base 字形 mesh（按 atlas 页分组）+ Back/Front layer mesh。
 ///
-/// Back layer = 所有 text-shadow effect 的字形 quad（offset 已烤进顶点，color = shadow.color），
-/// 在 base 之前绘制（sort_key 更小 = 在下层）。多 shadow 叠加时按声明顺序入列——
-/// 先声明者先绘（落在更下层），与 CSS `text-shadow` 叠加语义一致。
+/// Back layer = 所有 Back 层效果（text-shadow + font-effect:glow）的字形 quad，
+/// 在 base 之前绘制（sort_key 更小 = 在下层）。多 effect 叠加时按声明顺序入列——
+/// 先声明者先绘（落在更下层）。
 ///
-/// shadow mesh 与 base 同走 program=1（atlas alpha × vertex color），不另开 shader。
-/// atlas 按 effect_sig 分槽：shadow 字形经 blur 后处理，与 raw 字形不混槽。
+/// shadow mesh 偏移 (ox, oy)；glow mesh 居中无偏移——两者均复用 BOX_SHADOW_FLAG +
+/// propagate_box_shadow_sort_keys 机制。
+///
+/// atlas 按 effect_sig 分槽：back layer 字形经 blur/dilate 后处理，与 raw 字形不混槽。
 struct TextMeshes {
     /// base 字形（effect_sig=0），按 atlas 页分组。首页用真 node_id，余页用跨页子页合成 id。
     base: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
-    /// shadow Back layer（每个 shadow effect 一组，已含 offset + shadow color）。
-    /// 每项 = (atlas 页号, verts, uvs, colors, indices)；call site 据此推 Back layer RenderNode。
-    shadow_back: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
+    /// Back layers（text-shadow + font-effect:glow），按 text_effects 声明顺序入列——
+    /// 先声明者在 nodes vec 中更靠前（先绘 = 更下层）。每项 = (atlas 页号, verts, uvs, colors, indices)。
+    /// 复用 BOX_SHADOW_FLAG + propagate_box_shadow_sort_keys 机制。
+    back_layers: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
     /// stroke Front layer（每个 Stroke effect 一组，erode 后处理字形，同位置，描边色）。
     /// 每项 = (atlas 页号, verts, uvs, colors, indices)；call site 据此推 Front layer RenderNode。
     stroke_front: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
@@ -1045,6 +1048,22 @@ fn build_text_mesh(
     let mut shadow_pages: Vec<
         BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
     > = shadow_patterns.iter().map(|_| BTreeMap::new()).collect();
+    // Glow Back layer：dilate + gaussian_blur，居中无偏移（与 shadow 不同）。
+    // 复用 BOX_SHADOW_FLAG + propagate_box_shadow_sort_keys 机制（Back layer 语义一致）。
+    let glow_patterns: Vec<(u64, [f32; 4])> = text_effects
+        .iter()
+        .filter_map(|e| match e {
+            FontEffect::Glow { w: _, color } => {
+                let sig = crate::text::font_effect::effect_sig(&[*e]);
+                atlas.register_effect(sig, *e);
+                Some((sig, *color))
+            }
+            _ => None,
+        })
+        .collect();
+    let mut glow_pages: Vec<
+        BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
+    > = glow_patterns.iter().map(|_| BTreeMap::new()).collect();
     // Stroke Front layer：每个 Stroke effect 的 sig 注册到 atlas（erode 后处理），
     // glyph quad 同位置（无偏移），顶点色 = stroke.color。bold/italic 不作用于 stroke。
     let stroke_patterns: Vec<(u64, [f32; 4])> = text_effects
@@ -1168,6 +1187,43 @@ fn build_text_mesh(
                     }
                     sp.3.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
                 }
+                // Glow Back layer：每个 glow pattern 用各自 sig 的 atlas 槽（dilate+blur 后处理），
+                // 居中无偏移（glow 是发光晕开，不是投影），色 = glow.color。
+                // bold/italic 不作用于 glow（不增加视觉价值，与 shadow 同理）。
+                for (pi, (sig, gcolor)) in glow_patterns.iter().enumerate() {
+                    let glow_key = GlyphKey {
+                        font_id: g.font_id,
+                        glyph_id: g.glyph_id,
+                        size_px,
+                        effect_sig: *sig,
+                    };
+                    let gr = atlas.ensure(face, glow_key);
+                    if gr.px_w == 0 || gr.px_h == 0 {
+                        continue;
+                    }
+                    let gp = glow_pages[pi]
+                        .entry(gr.page)
+                        .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                    // 居中无偏移：glow 字形与 base 同位置（通过 dilate+blur 扩大后居中摆放，
+                    // 顶点坐标从 bearing 起不加偏移量）。
+                    let left = g.x + g.bearing_x - pad + rect.x;
+                    let top = line.baseline - g.bearing_y - pad + rect.y;
+                    let right = left + gr.px_w as f32;
+                    let bottom = top + gr.px_h as f32;
+                    let base = gp.0.len() as u32;
+                    gp.0.push([left, bottom]);
+                    gp.0.push([right, bottom]);
+                    gp.0.push([right, top]);
+                    gp.0.push([left, top]);
+                    gp.1.push([gr.u0, gr.v1]);
+                    gp.1.push([gr.u1, gr.v1]);
+                    gp.1.push([gr.u1, gr.v0]);
+                    gp.1.push([gr.u0, gr.v0]);
+                    for _ in 0..4 {
+                        gp.2.push(*gcolor);
+                    }
+                    gp.3.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+                }
                 // stroke Front layer：每个 Stroke effect 用各自 sig 的 atlas 槽（erode 后处理），
                 // 顶点同位置（无偏移——stroke 是字形描边，与基字形重合），
                 // 顶点色 = stroke.color。bold/italic 不作用于 stroke（不增加视觉价值）。
@@ -1274,17 +1330,45 @@ fn build_text_mesh(
         .into_iter()
         .map(|(pg, (v, u, c, i))| (pg, v, u, c, i))
         .collect();
-    let shadow_back = shadow_pages
+    let shadow_back: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> =
+        shadow_pages
+            .into_iter()
+            .flat_map(|m| m.into_iter().map(|(pg, (v, u, c, i))| (pg, v, u, c, i)))
+            .collect();
+    let glow_back: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> = glow_pages
         .into_iter()
         .flat_map(|m| m.into_iter().map(|(pg, (v, u, c, i))| (pg, v, u, c, i)))
         .collect();
+    // 按 text_effects 声明顺序合并 shadow + glow Back layers；
+    // 先声明者在 back_layers 中更靠前 → 在 nodes vec 中更靠前 → 先绘（更下层）。
+    let mut back_layers: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> =
+        Vec::new();
+    let mut si = 0usize;
+    let mut gi = 0usize;
+    for e in text_effects {
+        match e {
+            FontEffect::Shadow { .. } => {
+                if si < shadow_back.len() {
+                    back_layers.push(shadow_back[si].clone());
+                    si += 1;
+                }
+            }
+            FontEffect::Glow { .. }
+                if gi < glow_back.len() =>
+            {
+                back_layers.push(glow_back[gi].clone());
+                gi += 1;
+            }
+            _ => {}
+        }
+    }
     let stroke_front = stroke_pages
         .into_iter()
         .flat_map(|m| m.into_iter().map(|(pg, (v, u, c, i))| (pg, v, u, c, i)))
         .collect();
     TextMeshes {
         base,
-        shadow_back,
+        back_layers,
         stroke_front,
     }
 }
@@ -1317,27 +1401,24 @@ fn push_text_meshes(
 ) {
     let TextMeshes {
         base,
-        shadow_back,
+        back_layers,
         stroke_front,
     } = meshes;
-    // shadow Back layer：在 base 之前 push（nodes vec 顺序上 shadow 在前，base 在后）。
+    // Back layers：按 text_effects 声明顺序推入 nodes vec（先声明先绘 = 更下层）。
     // sort_key 初始 0，由 propagate_box_shadow_sort_keys 后调为 primary.sort_key - 1。
-    // 多 shadow pattern 按 build_text_mesh 产出的顺序入列（声明序），同 pattern 多页
-    // 用 synth_text_node_id 编码页号（sub_page 字段），flag 用 TEXT_SHADOW_BACK_FLAG 标记。
-    for (si, (page, verts, uvs, colors, indices)) in shadow_back.iter().enumerate() {
+    // 每个 Back layer（shadow/glow）用 BOX_SHADOW_FLAG + 序号编码独立合成 id。
+    // 多 Back effect 同主节点时各得唯一 id（通过 synth_sub 偏移区分）。
+    for (si, (page, verts, uvs, colors, indices)) in back_layers.iter().enumerate() {
         if verts.is_empty() {
             continue;
         }
-        // 合成 id：复用 BOX_SHADOW_FLAG（bit 28）标记 Back layer 节点，shadow 序号放
-        // bits [26:24]（16 + si，避开 0 = 无 flag）。is_text_sub_page 据 BOX_SHADOW_FLAG
-        // 排除这些节点，propagate_box_shadow_sort_keys 据 shadow_pairs 传播 sort_key。
-        // 多 shadow 同节点时 si=0,1,2... 各得唯一 id（16,17,18...），不与真子页（1..10）冲突。
+        // 合成 id：BOX_SHADOW_FLAG（bit 28）+ si 偏移，不与真子页（1..15）冲突。
         let synth_sub = (BOX_SHADOW_FLAG >> 24) + (si as u32);
-        let shadow_id = synth_text_node_id(node_id, synth_sub);
+        let back_id = synth_text_node_id(node_id, synth_sub);
         let path = format!("loomgui://font-atlas/p{}", page);
-        shadow_pairs.push((node_id, shadow_id));
+        shadow_pairs.push((node_id, back_id));
         nodes.push(RenderNode {
-            node_id: shadow_id,
+            node_id: back_id,
             parent_id,
             visible: true,
             alpha,

@@ -3578,3 +3578,238 @@ fn text_without_stroke_emits_no_front_layer() {
         .any(|rn| (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) != 0);
     assert!(!has_stroke, "no -webkit-text-stroke -> no Front layer");
 }
+
+// ── font-effect:glow Back layer（v1.8 Task 10）──
+
+#[test]
+fn font_effect_glow_emits_back_layer_quad_no_offset() {
+    use crate::text::font_effect::FontEffect;
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "A".into(),
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.style.text_effects = vec![FontEffect::Glow {
+        w: 2.0,
+        color: [1.0, 0.5, 0.0, 1.0],
+    }];
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // glow 是 Back layer，复用 BOX_SHADOW_FLAG 标记。
+    let glow_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| (rn.node_id & super::BOX_SHADOW_FLAG) != 0)
+        .expect("glow Back RenderNode");
+    let primary_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && (rn.node_id & super::BOX_SHADOW_FLAG) == 0
+                && (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) == 0
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("primary text RenderNode");
+    assert!(
+        glow_rn.sort_key < primary_rn.sort_key,
+        "glow sort_key {} < primary {}",
+        glow_rn.sort_key,
+        primary_rn.sort_key
+    );
+    match &glow_rn.payload {
+        NodePayload::Mesh {
+            verts,
+            colors,
+            program,
+            ..
+        } => {
+            assert_eq!(*program, 1);
+            assert!(!verts.is_empty());
+            for c in colors {
+                assert_eq!(*c, [1.0, 0.5, 0.0, 1.0], "glow color = orange");
+            }
+        }
+        _ => panic!("expected Mesh"),
+    }
+}
+
+#[test]
+fn font_effect_glow_and_shadow_both_emit_back_layers() {
+    use crate::text::font_effect::FontEffect;
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "B".into(),
+    };
+    n.style.font_size = 16.0;
+    n.style.text_effects = vec![
+        FontEffect::Glow {
+            w: 2.0,
+            color: [1.0, 0.5, 0.0, 1.0],
+        },
+        FontEffect::Shadow {
+            ox: 2.0,
+            oy: 2.0,
+            blur: 0.0,
+            color: [0.0, 0.0, 0.0, 1.0],
+        },
+    ];
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let back_nodes: Vec<_> = frame
+        .nodes
+        .iter()
+        .filter(|rn| (rn.node_id & super::BOX_SHADOW_FLAG) != 0)
+        .collect();
+    assert_eq!(back_nodes.len(), 2, "glow + shadow = 2 Back layer nodes");
+    // 主节点 sort_key 应大于两个 Back layer nodes。
+    let primary = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && (rn.node_id & super::BOX_SHADOW_FLAG) == 0
+                && (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) == 0
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("primary");
+    for bn in &back_nodes {
+        assert!(
+            bn.sort_key < primary.sort_key,
+            "back node sort_key {} < primary {}",
+            bn.sort_key,
+            primary.sort_key
+        );
+    }
+    // 第一 Back 节点（glow 先声明）的色应为橘色。
+    if let NodePayload::Mesh { colors, .. } = &back_nodes[0].payload {
+        assert_eq!(colors[0], [1.0, 0.5, 0.0, 1.0], "glow orange first");
+    }
+    // 第二 Back 节点（shadow）的色应为黑。
+    if let NodePayload::Mesh { colors, .. } = &back_nodes[1].payload {
+        assert_eq!(colors[0], [0.0, 0.0, 0.0, 1.0], "shadow black second");
+    }
+}
+
+#[test]
+fn font_effect_glow_with_shadow_and_stroke_all_emit() {
+    use crate::text::font_effect::FontEffect;
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "C".into(),
+    };
+    n.style.font_size = 16.0;
+    n.style.text_effects = vec![
+        FontEffect::Glow {
+            w: 2.0,
+            color: [1.0, 0.5, 0.0, 1.0],
+        },
+        FontEffect::Shadow {
+            ox: 2.0,
+            oy: 2.0,
+            blur: 0.0,
+            color: [0.0, 0.0, 0.0, 1.0],
+        },
+        FontEffect::Stroke {
+            w: 2.0,
+            color: [1.0, 0.0, 0.0, 1.0],
+        },
+    ];
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let back_count = frame
+        .nodes
+        .iter()
+        .filter(|rn| (rn.node_id & super::BOX_SHADOW_FLAG) != 0)
+        .count();
+    let stroke_count = frame
+        .nodes
+        .iter()
+        .filter(|rn| (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) != 0)
+        .count();
+    assert_eq!(back_count, 2, "glow + shadow = 2 Back layers");
+    assert_eq!(stroke_count, 1, "1 stroke Front layer");
+    // 验序：Back < primary < Front
+    let primary = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && (rn.node_id & super::BOX_SHADOW_FLAG) == 0
+                && (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) == 0
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("primary");
+    let front = frame
+        .nodes
+        .iter()
+        .find(|rn| (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) != 0)
+        .expect("stroke Front");
+    assert!(
+        primary.sort_key < front.sort_key,
+        "primary {} < Front {}",
+        primary.sort_key,
+        front.sort_key
+    );
+}

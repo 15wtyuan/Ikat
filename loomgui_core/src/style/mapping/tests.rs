@@ -832,3 +832,123 @@ fn text_stroke_and_shadow_can_coexist() {
         crate::text::font_effect::FontEffect::Stroke { .. }
     ));
 }
+
+// ── font-effect (v1.8 Task 10/11) ──
+
+#[test]
+fn font_effect_glow_with_color() {
+    // `font-effect: glow(3px #ee9900)` → Glow{w:3, color:#ee9900}
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "font-effect", "glow(3px #ee9900)"));
+    assert_eq!(s.text_effects.len(), 1, "单 glow → 1 effect");
+    match s.text_effects[0] {
+        crate::text::font_effect::FontEffect::Glow { w, color } => {
+            assert!((w - 3.0).abs() < 1e-4, "w=3");
+            assert_eq!(color, [0xee as f32 / 255.0, 0x99 as f32 / 255.0, 0.0, 1.0]);
+        }
+        _ => panic!("expected Glow effect"),
+    }
+}
+
+#[test]
+fn font_effect_glow_without_color_defaults_white() {
+    // color 可省 → 默认白。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "font-effect", "glow(2px)"));
+    assert_eq!(s.text_effects.len(), 1);
+    match s.text_effects[0] {
+        crate::text::font_effect::FontEffect::Glow { w, color } => {
+            assert!((w - 2.0).abs() < 1e-4);
+            assert_eq!(color, [1.0, 1.0, 1.0, 1.0], "缺 color → 默认白");
+        }
+        _ => panic!("expected Glow"),
+    }
+}
+
+#[test]
+fn font_effect_blur() {
+    // `font-effect: blur(2px)` → Blur{w:2}
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "font-effect", "blur(2px)"));
+    assert_eq!(s.text_effects.len(), 1);
+    match s.text_effects[0] {
+        crate::text::font_effect::FontEffect::Blur { w } => {
+            assert!((w - 2.0).abs() < 1e-4, "w=2");
+        }
+        _ => panic!("expected Blur effect"),
+    }
+}
+
+#[test]
+fn font_effect_comma_multiple() {
+    // 逗号分隔多 effect：glow + blur。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(
+        &mut s,
+        "font-effect",
+        "glow(3px #ee9900), blur(2px)"
+    ));
+    assert_eq!(s.text_effects.len(), 2, "两段逗号 → 2 effect");
+    assert!(matches!(
+        s.text_effects[0],
+        crate::text::font_effect::FontEffect::Glow { .. }
+    ));
+    assert!(matches!(
+        s.text_effects[1],
+        crate::text::font_effect::FontEffect::Blur { .. }
+    ));
+}
+
+#[test]
+fn font_effect_unknown_type_ignored() {
+    // 未知 type（非 glow/blur）→ 静默忽略，不推入 text_effects。
+    let mut s = ResolvedStyle::default();
+    assert!(
+        !apply_decl(&mut s, "font-effect", "unknown(3px #ee9900)"),
+        "未知 type → 返 false（无有效 effect 入列）"
+    );
+    assert!(s.text_effects.is_empty(), "未知 type 不污染 text_effects");
+}
+
+#[test]
+fn font_effect_glow_with_later_shadow_and_stroke() {
+    // font-effect glow + text-shadow + -webkit-text-stroke 可共存（累积进 text_effects）。
+    // 注意：text-shadow 会 **替换** text_effects（CSS 属性语义），故须先声明 text-shadow，
+    // 再 font-effect / stroke（push 模式）。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "text-shadow", "2px 2px #000000"));
+    assert!(apply_decl(&mut s, "-webkit-text-stroke", "1px #ff0000"));
+    assert!(apply_decl(&mut s, "font-effect", "glow(3px #ee9900)"));
+    assert_eq!(
+        s.text_effects.len(),
+        3,
+        "shadow + stroke + glow = 3 effects"
+    );
+    assert!(matches!(
+        s.text_effects[0],
+        crate::text::font_effect::FontEffect::Shadow { .. }
+    ));
+    assert!(matches!(
+        s.text_effects[1],
+        crate::text::font_effect::FontEffect::Stroke { .. }
+    ));
+    assert!(matches!(
+        s.text_effects[2],
+        crate::text::font_effect::FontEffect::Glow { .. }
+    ));
+}
+
+#[test]
+fn font_effect_bare_number_no_px() {
+    // 裸数字（无 px 后缀）也应接受（与 text-shadow / box-shadow 一致）。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "font-effect", "glow(3 #ff0000)"));
+    assert_eq!(s.text_effects.len(), 1);
+    match s.text_effects[0] {
+        crate::text::font_effect::FontEffect::Glow { w, color } => {
+            assert!((w - 3.0).abs() < 1e-4);
+            assert_eq!(color, [1.0, 0.0, 0.0, 1.0]);
+        }
+        _ => panic!("expected Glow"),
+    }
+}
