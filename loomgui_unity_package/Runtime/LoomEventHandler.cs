@@ -224,6 +224,8 @@ namespace LoomGUI
                         // 命中节点级 AABB 后调 core 细分到 fragment：>0 走链接直派，否则原 bubble。
                         {
                             uint linkId = Native.loomgui_stage_rich_link_at((StageHandle*)_handle, evt.nodeId, evt.x, evt.y);
+                            // 诊断：点击命中的 rich_link_id（0=未命中链接/非富文本）。验收定位"点击不了"。
+                            UnityEngine.Debug.Log($"[LoomGUI] Click node={evt.nodeId} @({evt.x},{evt.y}) rich_link_id={linkId}");
                             if (linkId != 0) { DispatchLinkClick(evt, linkId); break; }
                         }
                         BubbleRoute(evt); break;

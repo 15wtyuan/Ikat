@@ -28,6 +28,25 @@ fn color_hex() {
     assert_eq!(c, [1.0, 0.0, 0.0, 1.0]);
 }
 #[test]
+fn color_hex_short_expands() {
+    // CSS 3 位 hex：每数字重复（#888 = #888888，#3f6 = #33ff66）
+    assert_eq!(
+        parse_color("#888").unwrap(),
+        parse_color("#888888").unwrap()
+    );
+    assert_eq!(parse_color("#fff").unwrap(), [1.0, 1.0, 1.0, 1.0]);
+    assert_eq!(parse_color("#000").unwrap(), [0.0, 0.0, 0.0, 1.0]);
+    assert_eq!(
+        parse_color("#3f6").unwrap(),
+        [
+            0x33 as f32 / 255.0,
+            0xff as f32 / 255.0,
+            0x66 as f32 / 255.0,
+            1.0
+        ]
+    );
+}
+#[test]
 fn apply_width_and_bg() {
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "width", "100px"));

@@ -122,6 +122,23 @@
         </div>
       </div>
 
+      <div class="sec">
+        <div class="sec-h">§10 边界 · 无底色 / 对齐 / span 嵌套</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">无底色</span><span class="card-x">无 bg-color 不画 bg quad</span></div>
+          <div style="display:block;color:#e0e0e0;font-size:20px;line-height:1.6">这段富文本无 background-color（验证无底色时不画 bg quad，文字直接叠在 card 底色上）。</div>
+        </div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">text-align</span><span class="card-x">left / center / right</span></div>
+          <div class="rt" style="display:block;text-align:center"><span style="color:#5fb2c4">居中</span>对齐的富文本</div>
+          <div class="rt" style="display:block;text-align:right">右对齐的富文本</div>
+        </div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">span 嵌套</span><span class="card-x">栈式 cascade · 内层继承外层</span></div>
+          <div class="rt" style="display:block">普通 <span style="color:#ffd700">金色 <span style="font-size:26px">大字</span> 回归</span> 普通</div>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>

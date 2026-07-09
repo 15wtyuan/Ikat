@@ -982,3 +982,63 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 - 合成 id（`synth_text_node_id`：text 跨页子页 / 行内图）是有意不进 scene 的纯渲染产物，任何"反查 scene"的逻辑（reorder AABB / sort_key / NativeHost 查询）都要对它兜底。
 - 单测要覆盖**多节点 reorder**（n≥2 才进 `reorder_unit`），单节点测不到 aabb_of 路径。
 - PlayMode 闪退先查 project-relative `loomgui_unity/Logs/Editor.log` 末尾的 panic 栈——比读代码猜快得多。
+
+### 坑 140：parse_color 不支持 3 位 hex（#RGB）
+
+**症状**：`<span style="color:#888">`（3 位 hex）不生效，run 回退 base 色；6 位 hex 正常。失效的全是 3 位（#888/#3f6/#aaa），6 位（#ffd700/#5fb2c4）正常——按 hex 位数定位。
+
+**根因**：`style::mapping::parse_color` 只认 `len()==6`，3 位返 None → `apply_inline_style` 跳过 → run 用 base 色。单测只测 6 位，PlayMode 才现（坑 131-133 类）。
+
+**解决**：加 `len()==3` 分支，每数字重复（`#rgb→#rrggbb`，digit×17：0→0、f→255）。
+
+**教训**：CSS 颜色子集要覆盖常见简写。单测别只测一种形式——按"失效的全是 X 特征"快速定位。
+
+### 坑 141：RichText 叶漏画背景 quad
+
+**症状**：`<div style="display:block" class="rt">`（.rt 有 background-color）Unity 无底色，文字直接叠父容器。
+
+**根因**：desugar 把 block div 覆盖成 `NodeKind::RichText`，但 Container arm（`render/mod.rs:186`）的 bg quad 逻辑不覆盖 RichText arm（`:391` 直接产 text mesh 跳过 bg）。block div 盒属性留在 style，但叶没画 bg。
+
+**解决**：RichText arm 在 push_text_meshes 前产 bg quad（`n.style.background_color`，program 0/3）。z 序：bg 占真 node_id（DFS sort_key S），text 首页改用 synth 子页 1（propagate 给 S+1）→ bg 下层。无 bg-color 时 text 用真 node_id（原行为不变，现有测试不破）。
+
+**教训**：desugar 覆盖 kind 时，原 kind 渲染逻辑（bg）不自动迁移——叶要自画。z 序靠 id_to_pos + synth 子页机制。单测验 text 没验 bg（PlayMode 才见底色缺）。
+
+### 坑 142：underline 偏移方向反（偏上）
+
+**症状**：富文本下划线偏上（跑到字形里），删除线略偏下。
+
+**根因**：`build_text_mesh` underline `line.baseline + position×scale`，`underline_metrics.position` 是 y-up 负值（基线下方），design y-down 加负 → baseline 上方（字形里）。注释误以为"经 Unity y-flip 后变下方"——design 内就该下方，与 flip 无关。
+
+**解决**：改 `line.baseline - position×scale`（减负=加=baseline 下方）。strike 0.25→0.3em（略上移）。
+
+**教训**：y 偏移明确 design y-down 语义（下方=y 更大=减 y-up 负值）。别靠后端 y-flip 掩盖 design 方向错。坑 136（text mesh y 符号反）同类。
+
+### 坑 143：行内图 verts 缺 rect 偏移（跑原点）
+
+**症状**：富文本行内图不显示（跑 design 原点，屏外）。
+
+**根因**：RichText arm 行内图 verts `ix=img.x+off_x`（缺 `rect.x`），字形 `left=g.x+...+rect.x` 加了。单测 rect=(0,0) 巧合过（坑 131-133 类）。
+
+**解决**：行内图 `ix=img.x+off_x+rect.x`，`iy=img.y+off_y+rect.y`。加位置测试（rect≠0 验 min_x>=rect.x）。
+
+**教训**：mesh verts 世界坐标都要加 rect.x/y（blob re-base 减、后端加回）。位置单测用 rect≠0——rect=0 掩盖位置 bug。
+
+### 坑 144：bake_content_offset 只烤 glyphs 不烤 line.baseline → 文字缺 padding top
+
+**症状**：富文本/文本文字顶到盒顶（无 padding top），html 文字在 padding 内（视觉居中），Unity 上对齐。行内图加了 off_y、文字没加 → 行内图比文字低 padding（偏下）。框架层（所有 Text/RichText，正是"所有文本没考虑好"的怀疑）。
+
+**根因**：`bake_content_offset` 只烤 `glyphs.x/y`，但字形 top=`line.baseline-bearing+rect.y` 走 `line.baseline`（不读 g.y）→ y padding 丢。x 走 g.x（含 off_x）对，y 走 line.baseline（不含 off_y）错——x/y 不对称。
+
+**解决**：bake 也烤 `line.y`+`line.baseline`（+off_y）。行内图世界 y=`line.y+y_top`（layout 存世界 y，含 line.y）。fragments y 用 line.y（已含 off_y，去掉旧 +off_y）。
+
+**教训**：layout 偏移要烤全（glyphs+line.y/baseline+images），别只 glyphs——字形 top 走 line.baseline 不走 g.y。padding top 偏移是框架层（Text+RichText 共享 bake）。行内图偏下 + 文字垂直对齐同根因——别当两个 bug。
+
+### 坑 145：measure_rich_text split(' ') 丢空格 → 无空格 + 断行错
+
+**症状**："fragment 矩形" 渲染成 "fragment矩形"（无空格），断行点与 html 不一致（html 空格后断，Unity CJK 后断，导致超界）。
+
+**根因**：`measure_rich_text` 用 `text.split(' ')`，词间空格不补 token（注释说 MVP 丢空格"精度可忽略"）。空格 advance 丢 → 无空格 + 断行点错（空格是词边界）。
+
+**解决**：split 后词间补空格 token（advance=space advance；空格无轮廓不画，但占宽 + 词边界断行）。HTML 空白折叠（连续空格→单，split 空 part 跳过）。
+
+**教训**：空格不是"可忽略精度"——占宽 + 断行边界，丢了两都错。MVP 简化别砍关键语义。框架层（rich 文本空格；plain measure_text 若不同需对齐）。
