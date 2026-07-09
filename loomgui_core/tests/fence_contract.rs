@@ -85,6 +85,8 @@ fn supported_visual_props_return_true() {
         ("text-shadow", "2px 2px 4px #000000"),
         ("-webkit-text-stroke", "2px #000000"),
         ("background", "linear-gradient(to right, #ff0000, #0000ff)"),
+        ("-webkit-background-clip", "text"),
+        ("background-clip", "text"),
     ];
     for (prop, val) in cases {
         let mut s = ResolvedStyle::default();
@@ -555,4 +557,71 @@ fn box_shadow_default_is_none() {
         ResolvedStyle::default().box_shadow.is_none(),
         "默认无 box_shadow"
     );
+}
+
+// ── F. v1.8 渐变字（background-clip:text）────────────────────────
+
+#[test]
+fn background_clip_text_sets_field() {
+    // background-clip:text 设 background_clip_text=true。
+    for prop in ["-webkit-background-clip", "background-clip"] {
+        let mut s = ResolvedStyle::default();
+        assert!(apply_decl(&mut s, prop, "text"), "{prop}:text 应返回 true");
+        assert!(
+            s.background_clip_text,
+            "{prop}:text → background_clip_text=true"
+        );
+    }
+}
+
+#[test]
+fn background_clip_text_other_values_false() {
+    // background-clip 非 "text" 值 → background_clip_text=false。
+    for val in ["border-box", "padding-box", "content-box"] {
+        let mut s = ResolvedStyle::default();
+        assert!(
+            apply_decl(&mut s, "background-clip", val),
+            "background-clip:{val} 应返回 true（识别的 CSS 属性）"
+        );
+        assert!(
+            !s.background_clip_text,
+            "background-clip:{val} 不设 text 模式 → false"
+        );
+    }
+}
+
+#[test]
+fn background_clip_text_default_is_false() {
+    assert!(
+        !ResolvedStyle::default().background_clip_text,
+        "默认 background_clip_text=false"
+    );
+}
+
+#[test]
+fn color_transparent_sets_alpha_zero() {
+    // color:transparent → rgba(0,0,0,0)，渐变字三件套推荐之一。
+    let mut s = ResolvedStyle::default();
+    assert!(
+        apply_decl(&mut s, "color", "transparent"),
+        "color:transparent 应返回 true"
+    );
+    assert_eq!(s.color, [0.0, 0.0, 0.0, 0.0], "transparent → alpha=0");
+}
+
+#[test]
+fn gradient_text_three_piece_combo_fields_set() {
+    // 三件套齐全：background:linear-gradient + background-clip:text + color:transparent。
+    // 三个 apply_decl 均返 true，各字段正确设值。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(
+        &mut s,
+        "background",
+        "linear-gradient(to right, #ff0000, #0000ff)"
+    ));
+    assert!(apply_decl(&mut s, "background-clip", "text"));
+    assert!(apply_decl(&mut s, "color", "transparent"));
+    assert!(s.background_gradient.is_some());
+    assert!(s.background_clip_text);
+    assert_eq!(s.color, [0.0, 0.0, 0.0, 0.0]);
 }

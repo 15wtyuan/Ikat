@@ -161,6 +161,11 @@ pub struct ResolvedStyle {
     /// CSS `background: linear-gradient(...)` 2 色渐变（4 正向）。None=纯色背景。
     /// 渐变与 background_image 互斥渲染（gradient 走 quad_gradient 顶点色插值，无纹理采样）。
     pub background_gradient: Option<Gradient2>,
+    /// CSS `background-clip: text` / `-webkit-background-clip: text`。
+    /// 三件套文案（background:linear-gradient + background-clip:text + color:transparent 推荐）
+    /// 触发渐变字形渲染：字形 quad 顶点色用 gradient 4 角色（替代 run.color）。
+    /// 缺 gradient 时静默回退普通文本（无渐变）。默认 false（不裁剪到 text）。
+    pub background_clip_text: bool,
     /// CSS border-radius 四角半径。默认全 0（直角）。
     pub border_radius: BorderRadius,
     pub border_color: Option<[f32; 4]>,
@@ -231,6 +236,7 @@ impl Default for ResolvedStyle {
             background_image: None,
             background_size: BackgroundSize::Stretch,
             background_gradient: None,
+            background_clip_text: false,
             border_radius: BorderRadius::default(),
             border_color: None,
             border_width: 0.0,
@@ -563,5 +569,28 @@ mod tests {
     fn gradient_dir_is_one_byte() {
         // FFI / 序列化稳定不变量：#[repr(u8)] enum 占 1 字节。
         assert_eq!(std::mem::size_of::<GradientDir>(), 1);
+    }
+
+    #[test]
+    fn background_clip_text_default_is_false() {
+        assert!(
+            !ResolvedStyle::default().background_clip_text,
+            "默认 background_clip_text = false"
+        );
+    }
+
+    #[test]
+    fn background_clip_text_bincode_roundtrip() {
+        for v in [false, true] {
+            let mut s = ResolvedStyle::default();
+            s.background_clip_text = v;
+            let bytes = bincode::serialize(&s).expect("serialize");
+            let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
+            assert_eq!(
+                back.background_clip_text, v,
+                "background_clip_text round-trip {v}"
+            );
+            assert_eq!(back, s, "全字段 round-trip 仍相等 ({v})");
+        }
     }
 }

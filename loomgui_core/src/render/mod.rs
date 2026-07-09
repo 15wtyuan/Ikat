@@ -481,7 +481,15 @@ pub fn build_render_nodes(
                 if off_x != 0.0 || off_y != 0.0 {
                     bake_content_offset(&mut layout, off_x, off_y);
                 }
-                let meshes = build_text_mesh(&layout, atlas, fonts, rect, &n.style.text_effects);
+                let meshes = build_text_mesh(
+                    &layout,
+                    atlas,
+                    fonts,
+                    rect,
+                    &n.style.text_effects,
+                    n.style.background_gradient,
+                    n.style.background_clip_text,
+                );
                 push_text_meshes(
                     &mut nodes,
                     &mut id_to_pos,
@@ -554,7 +562,15 @@ pub fn build_render_nodes(
                         rich_fragments.push((node_id, frags));
                     }
                 }
-                let meshes = build_text_mesh(&layout, atlas, fonts, rect, &n.style.text_effects);
+                let meshes = build_text_mesh(
+                    &layout,
+                    atlas,
+                    fonts,
+                    rect,
+                    &n.style.text_effects,
+                    n.style.background_gradient,
+                    n.style.background_clip_text,
+                );
                 push_text_meshes(
                     &mut nodes,
                     &mut id_to_pos,
@@ -1021,6 +1037,8 @@ fn build_text_mesh(
     fonts: &crate::text::layout::FontTable,
     rect: &crate::scene::node::Rect,
     text_effects: &[crate::text::font_effect::FontEffect],
+    background_gradient: Option<crate::style::resolved::Gradient2>,
+    background_clip_text: bool,
 ) -> TextMeshes {
     use crate::text::font_effect::FontEffect;
     use std::collections::BTreeMap;
@@ -1156,8 +1174,21 @@ fn build_text_mesh(
                         p.1.push([r.u1, r.v1]);
                         p.1.push([r.u1, r.v0]);
                         p.1.push([r.u0, r.v0]);
-                        for _ in 0..4 {
-                            p.2.push(run.color);
+                        // 顶点色：渐变字 + gradient → gradient_corner_colors；否则 run.color。
+                        // 渐变字顶点序映射：quad 顶点 = [BL, BR, TR, TL]；
+                        // gradient_corner_colors 返 [TL, TR, BR, BL] → 重排为 [BL, BR, TR, TL]。
+                        let quad_colors: [[f32; 4]; 4] = if background_clip_text {
+                            if let Some(ref g) = background_gradient {
+                                let gc = gradient_corner_colors(*g);
+                                [gc[3], gc[2], gc[1], gc[0]]
+                            } else {
+                                [run.color; 4]
+                            }
+                        } else {
+                            [run.color; 4]
+                        };
+                        for c in &quad_colors {
+                            p.2.push(*c);
                         }
                         p.3.extend_from_slice(&[
                             base,

@@ -604,7 +604,9 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "color" => {
-            if let Some(c) = parse_color(value) {
+            if value.trim() == "transparent" {
+                style.color = [0.0, 0.0, 0.0, 0.0];
+            } else if let Some(c) = parse_color(value) {
                 style.color = c;
             }
             true
@@ -766,6 +768,14 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 .text_effects
                 .retain(|e| !matches!(e, crate::text::font_effect::FontEffect::Shadow { .. }));
             style.text_effects.extend(shadows);
+            true
+        }
+        "-webkit-background-clip" | "background-clip" => {
+            // 渐变字三件套之一：background-clip:text 将背景渐变裁剪到文字形状。
+            // 与 background: linear-gradient + color:transparent（推荐）组合触发
+            // per-glyph vertex gradient（build_text_mesh 内 gradient_corner_colors）。
+            // 残缺（有 clip 无 gradient）静默回退普通文本，不报错。
+            style.background_clip_text = value.trim() == "text";
             true
         }
         "-webkit-text-stroke" => {
