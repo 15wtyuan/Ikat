@@ -75,11 +75,15 @@ impl AtlasPage {
     }
 }
 
-/// 字形 atlas：page 列表 + 键→UV 缓存 + 脏页号集合。
+/// 字形 atlas：page 列表 + 键→UV 缓存 + 脏页号集合 + effect 配置表。
 pub struct GlyphAtlas {
     pages: Vec<AtlasPage>,
     cache: HashMap<GlyphKey, GlyphRect>,
     dirty: Vec<u32>,
+    /// effect_sig → FontEffect 配置表。由外部（DSL 层）`register_effect` 写入；
+    /// `ensure` 遇 effect_sig≠0 的 key 时按此查表做位图后处理。Task 7 只提供机制，
+    /// DSL→注册的接线在后续 task。
+    effects: HashMap<u64, crate::text::font_effect::FontEffect>,
 }
 
 impl Default for GlyphAtlas {
@@ -94,7 +98,15 @@ impl GlyphAtlas {
             pages: Vec::new(),
             cache: HashMap::new(),
             dirty: Vec::new(),
+            effects: HashMap::new(),
         }
+    }
+
+    /// 注册一个 effect 配置。后续 `ensure` 遇到 `effect_sig` 匹配的 GlyphKey 时对
+    /// 位图做 dilate/erode/blur 后处理。sig 应由 `font_effect::effect_sig` 预算好；
+    /// 同 sig 重复注册覆盖旧值（effect 配置变更走新 sig，不就地改）。
+    pub fn register_effect(&mut self, sig: u64, effect: crate::text::font_effect::FontEffect) {
+        self.effects.insert(sig, effect);
     }
 
     /// 光栅 + 分配 + blit 一个字形，返回其 UV。同 key 二次调用走缓存（命中既不光栅
@@ -119,6 +131,26 @@ impl GlyphAtlas {
             self.cache.insert(key, empty);
             return empty;
         }
+        // v1.8 FontEffect 后处理：effect_sig≠0 且非 sentinel key 时，按注册的 effect
+        // 对 R8 位图做 dilate/erode/blur。表里没注册（None）→ 当 raw 字形处理（容错，
+        // 避免未接线时字形消失）。effect_sig=0（v1.6 既有路径）直接跳过本块。
+        let (pixels, gw, gh) = if key.effect_sig != 0 && key.font_id != u32::MAX {
+            match self.effects.get(&key.effect_sig) {
+                Some(eff) => {
+                    let (p2, w2, h2) = crate::text::font_effect::apply_effect(&pixels, gw, gh, eff);
+                    // 防御：effect 扩边界后超单页边长则放弃后处理（allocate 对超 4096²
+                    // 的请求会 panic，FFI 邻近不能 panic）。正常 DSL 范围（radius≤几十 px）不触发。
+                    if w2 <= PAGE_SIZE as u32 && h2 <= PAGE_SIZE as u32 {
+                        (p2, w2, h2)
+                    } else {
+                        (pixels, gw, gh)
+                    }
+                }
+                None => (pixels, gw, gh),
+            }
+        } else {
+            (pixels, gw, gh)
+        };
         let alloc = self.allocate(gw, gh);
 
         // borrow：先把 page 索引拿出，避免与 self.pages 的可变借用冲突。
@@ -545,5 +577,96 @@ mod tests {
         assert_eq!(r.page, 1, "页 0 满 → ensure 返 page=1");
         let dirty = a.dirty_pages();
         assert!(dirty.contains(&1), "新字形所在页标脏（page=1）");
+    }
+
+    #[test]
+    fn ensure_applies_registered_effect() {
+        use crate::text::font_effect::{effect_sig, FontEffect};
+        let mut a = GlyphAtlas::new();
+        let f = dejavu_face();
+        let gid = f.glyph_index('A').unwrap();
+        // raw 基线尺寸
+        let raw = a.ensure(
+            &f,
+            GlyphKey {
+                font_id: 0,
+                glyph_id: gid.0,
+                size_px: 32,
+                effect_sig: 0,
+            },
+        );
+        // 注册 stroke（erode 扩边界 2*ceil(w)）
+        let eff = FontEffect::Stroke {
+            w: 2.0,
+            color: [1.0, 0.0, 0.0, 1.0],
+        };
+        let sig = effect_sig(&[eff]);
+        a.register_effect(sig, eff);
+        let stroked = a.ensure(
+            &f,
+            GlyphKey {
+                font_id: 0,
+                glyph_id: gid.0,
+                size_px: 32,
+                effect_sig: sig,
+            },
+        );
+        assert!(stroked.px_w > raw.px_w, "stroke 后处理扩边界（w）");
+        assert!(stroked.px_h > raw.px_h, "stroke 后处理扩边界（h）");
+        // erode 扩 2*ceil(2)=4px 每边
+        assert_eq!(stroked.px_w - raw.px_w, 4, "erode 扩 2*ceil(radius)");
+        assert_eq!(stroked.px_h - raw.px_h, 4);
+        // 不同 effect_sig → 不同槽
+        assert!(
+            (stroked.u0, stroked.v0) != (raw.u0, raw.v0),
+            "不同 effect_sig 分槽"
+        );
+    }
+
+    #[test]
+    fn ensure_skips_effect_when_unregistered() {
+        // effect_sig≠0 但未注册 → 用 raw 位图（容错：不 panic、不空）
+        let mut a = GlyphAtlas::new();
+        let f = dejavu_face();
+        let gid = f.glyph_index('A').unwrap();
+        let r = a.ensure(
+            &f,
+            GlyphKey {
+                font_id: 0,
+                glyph_id: gid.0,
+                size_px: 32,
+                effect_sig: 12345,
+            },
+        );
+        assert!(r.px_w > 0 && r.px_h > 0, "未注册 effect 仍渲 raw 字形");
+    }
+
+    #[test]
+    fn ensure_effect_sig_zero_skips_postprocess() {
+        // effect_sig=0 → 即使 effect 表非空也不后处理（v1.6 既有路径不变）。
+        use crate::text::font_effect::{effect_sig, FontEffect};
+        let mut with_effect = GlyphAtlas::new();
+        let mut bare = GlyphAtlas::new();
+        let f = dejavu_face();
+        let gid = f.glyph_index('A').unwrap();
+        // with_effect 注册了一个 stroke 但 glyph key 用 sig=0 → 不应触发后处理。
+        let eff = FontEffect::Stroke {
+            w: 5.0,
+            color: [1.; 4],
+        };
+        with_effect.register_effect(effect_sig(&[eff]), eff);
+        let k = GlyphKey {
+            font_id: 0,
+            glyph_id: gid.0,
+            size_px: 32,
+            effect_sig: 0,
+        };
+        let r_with = with_effect.ensure(&f, k);
+        let r_bare = bare.ensure(&f, k);
+        assert_eq!(
+            (r_with.px_w, r_with.px_h),
+            (r_bare.px_w, r_bare.px_h),
+            "sig=0 不过后处理（与裸 atlas 同尺寸）"
+        );
     }
 }
