@@ -101,6 +101,35 @@ fn scene_to_template(
                 }
             }
         }
+        // RichText 行内图 src 归一化进 manifest（去重）。行内图嵌在 NodeKind::RichText 的
+        // runs → RichKind::Image，顶层只 match NodeKind::Image 不会下钻——不归一化则 src 保持
+        // "res/icons/x.png"（SpriteResolver 顶层子目录="res" 无 folder→atlas 映射 → 默认图集
+        // miss → 白方块），且不入 manifest（Unity 不打包进 atlas）。归一化后回写 run.src。
+        if let loomgui_core::scene::NodeKind::RichText { runs } = &mut kind {
+            for r in runs.iter_mut() {
+                if let loomgui_core::text::rich::RichKind::Image { src, .. } = &mut r.kind {
+                    if !src.is_empty() {
+                        match normalize_path(src, res_dir) {
+                            Some(norm) => {
+                                if seen.insert(norm.clone()) {
+                                    manifest.push(AssetEntry {
+                                        path: norm.clone(),
+                                        w: 0,
+                                        h: 0,
+                                    });
+                                }
+                                *src = norm;
+                            }
+                            None => {
+                                eprintln!(
+                                    "warn: rich img src `{src}` 不在 res 目录 `{res_dir}` 下，跳过 manifest"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
         nodes.push(TemplateNode {
             kind,
             style,
@@ -472,6 +501,73 @@ mod tests {
         match &nodes[1].kind {
             NodeKind::Image { src } => assert_eq!(src, "icons/skin.png", "节点 src 归一化"),
             other => panic!("expected Image, got {other:?}"),
+        }
+    }
+
+    /// RichText 行内图 src 也要归一化进 manifest + 回写 run.src（白方块 bug：嵌在
+    /// NodeKind::RichText 的 Image run 顶层 match 不下钻）。
+    #[test]
+    fn scene_to_template_normalizes_rich_inline_image_src() {
+        use loomgui_core::scene::{NodeKind, Scene};
+        use loomgui_core::style::resolved::ResolvedStyle;
+        use loomgui_core::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
+        let runs = vec![RichRun {
+            kind: RichKind::Image {
+                src: "res/icons/zap.png".into(),
+                w: 22.0,
+                h: 22.0,
+                valign: loomgui_core::text::rich::RichVAlign::Middle,
+            },
+            color: [1.0; 4],
+            font_id: 0,
+            size_px: 20,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+            link_id: None,
+        }];
+        let entries: Vec<(
+            Option<usize>,
+            NodeKind,
+            ResolvedStyle,
+            Vec<String>,
+            Option<String>,
+            bool,
+            Option<i32>,
+            Option<String>,
+        )> = vec![(
+            None,
+            NodeKind::RichText { runs },
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
+            None,
+        )];
+        let scene = Scene::build(&entries);
+        let mut manifest: Vec<AssetEntry> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let controller_pages = std::collections::HashMap::new();
+        let (nodes, _controllers) =
+            scene_to_template(&scene, "res", &mut manifest, &mut seen, &controller_pages);
+        assert_eq!(
+            manifest,
+            vec![AssetEntry {
+                path: "icons/zap.png".into(),
+                w: 0,
+                h: 0
+            }],
+            "行内图归一化 path 进 manifest"
+        );
+        match &nodes[0].kind {
+            NodeKind::RichText { runs } => match &runs[0].kind {
+                RichKind::Image { src, .. } => {
+                    assert_eq!(src, "icons/zap.png", "run.src 归一化")
+                }
+                _ => panic!("expected Image run"),
+            },
+            other => panic!("expected RichText, got {other:?}"),
         }
     }
 

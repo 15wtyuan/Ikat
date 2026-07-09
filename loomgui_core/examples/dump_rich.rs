@@ -36,7 +36,13 @@ fn main() {
         );
     }
 
-    let lay = measure_rich_text(&runs, Some(400.0), 1.2, &FontStack::single(&font, 0));
+    let lay = measure_rich_text(
+        &runs,
+        Some(400.0),
+        1.2,
+        loomgui_core::style::resolved::TextAlign::Left,
+        &FontStack::single(&font, 0),
+    );
     println!(
         "\nlayout: lines={} 宽×高 = {:.1}×{:.1}",
         lay.lines.len(),

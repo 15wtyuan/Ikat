@@ -523,6 +523,7 @@ pub fn build_render_nodes(
                             runs,
                             Some(rect.w),
                             s.line_height,
+                            s.text_align,
                             &stack,
                         )
                     });

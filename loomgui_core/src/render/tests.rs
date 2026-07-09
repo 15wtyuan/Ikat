@@ -3268,6 +3268,7 @@ fn rich_fragment_cross_line_link_splits_rects() {
         },
         Some(50.0),
         0.0,
+        crate::style::resolved::TextAlign::Left,
         &ft.stack_for(None),
     );
     scene.text_layouts[nid.index()] = Some(layout);

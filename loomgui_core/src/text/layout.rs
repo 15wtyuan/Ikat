@@ -571,12 +571,17 @@ pub fn measure_text(
 ///
 /// 纯函数：不光栅、不读 atlas（atlas ensure 在 build 期）。可被 taffy 反复调。
 ///
+/// `align`：text-align，每行整体在容器（`max_width`）内偏移——render 期传 `rect.w` 作
+/// `max_width`，故单行短文本也能居中/右对齐到盒边（浏览器语义）。`max_width`=None（不换行）
+/// 时无容器可对齐，偏移 0。行宽 > 容器（超长 token）不左溢（dx 钳 0）。
+///
 /// MVP 单字体：所有 run 共用传入的 `font`（节点 font_family 选的）+ `default_font_id`；
 /// `GlyphRun.font_id` 填 `default_font_id`（run.font_id 字段保留但不用于选 face）。
 pub fn measure_rich_text(
     runs: &[crate::text::rich::RichRun],
     max_width: Option<f32>,
     base_line_height: f32,
+    align: crate::style::resolved::TextAlign,
     stack: &FontStack<'_>,
 ) -> TextLayout {
     let font = stack.primary;
@@ -734,6 +739,8 @@ pub fn measure_rich_text(
         let mut runs_out: Vec<GlyphRun> = Vec::new();
         let mut pen_x = 0.0f32;
         let mut prev: Option<(ttf_parser::GlyphId, &Font)> = None;
+        // 记本行 image 起点：text-align 偏移时连同 image 一起平移（image 无行号，靠区间定位）。
+        let img_start = out_images.len();
         for &ti in line_toks {
             let r = &runs[tokens[ti].run_idx];
             match &r.kind {
@@ -824,6 +831,28 @@ pub fn measure_rich_text(
             }
         }
         let width = pen_x;
+        // text-align：本行整体在容器（max_width）内偏移，glyph + image 同 dx。
+        // 容器 = max_width（render 传 rect.w）。行宽 > 容器 → dx 钳 0（不左溢）。
+        // max_width=None（不换行）无容器 → 不偏移。
+        let dx = match align {
+            crate::style::resolved::TextAlign::Left => 0.0,
+            crate::style::resolved::TextAlign::Center => {
+                max_width.map_or(0.0, |mw| ((mw - width) / 2.0).max(0.0))
+            }
+            crate::style::resolved::TextAlign::Right => {
+                max_width.map_or(0.0, |mw| (mw - width).max(0.0))
+            }
+        };
+        if dx != 0.0 {
+            for run in &mut runs_out {
+                for g in &mut run.glyphs {
+                    g.x += dx;
+                }
+            }
+            for img in &mut out_images[img_start..] {
+                img.x += dx;
+            }
+        }
         out_lines.push(Line {
             y,
             height: h,
@@ -1331,7 +1360,13 @@ mod tests {
                 link_id: None,
             },
         ];
-        let lay = measure_rich_text(&runs, Some(1000.0), 1.2, &FontStack::single(&font, 0));
+        let lay = measure_rich_text(
+            &runs,
+            Some(1000.0),
+            1.2,
+            TextAlign::Left,
+            &FontStack::single(&font, 0),
+        );
         // 一行，两个 run，各带自己的色。
         assert_eq!(lay.lines.len(), 1, "宽约束下单行");
         assert_eq!(lay.lines[0].runs.len(), 2, "两个 run 各自独立");
@@ -1362,7 +1397,13 @@ mod tests {
             link_id: None,
         }];
         // 窄宽度强制换行（拉丁按词）。
-        let lay = measure_rich_text(&runs, Some(30.0), 1.2, &FontStack::single(&font, 0));
+        let lay = measure_rich_text(
+            &runs,
+            Some(30.0),
+            1.2,
+            TextAlign::Left,
+            &FontStack::single(&font, 0),
+        );
         assert!(
             lay.lines.len() > 1,
             "窄宽度应换行，实际 {} 行",
@@ -1393,7 +1434,13 @@ mod tests {
             link_id: None,
         }];
         // 极窄宽度 → CJK 每字独占一行（4 字 ≥ 4 行）。
-        let lay = measure_rich_text(&runs, Some(10.0), 1.2, &FontStack::single(&font, 0));
+        let lay = measure_rich_text(
+            &runs,
+            Some(10.0),
+            1.2,
+            TextAlign::Left,
+            &FontStack::single(&font, 0),
+        );
         assert!(
             lay.lines.len() >= 4,
             "CJK 逐字断行应 ≥4 行（窄宽），实际 {}",
@@ -1447,7 +1494,13 @@ mod tests {
                 link_id: None,
             },
         ];
-        let lay = measure_rich_text(&runs, Some(1000.0), 1.2, &FontStack::single(&font, 0));
+        let lay = measure_rich_text(
+            &runs,
+            Some(1000.0),
+            1.2,
+            TextAlign::Left,
+            &FontStack::single(&font, 0),
+        );
         assert_eq!(lay.lines.len(), 2, "\\n 应强制换行成 2 行");
     }
 
@@ -1478,7 +1531,13 @@ mod tests {
             },
             link_id: Some(3),
         }];
-        let lay = measure_rich_text(&runs, Some(1000.0), 1.2, &FontStack::single(&font, 7));
+        let lay = measure_rich_text(
+            &runs,
+            Some(1000.0),
+            1.2,
+            TextAlign::Left,
+            &FontStack::single(&font, 7),
+        );
         assert_eq!(lay.lines.len(), 1);
         let r = &lay.lines[0].runs[0];
         assert_eq!(r.weight, RichWeight::Bold);
@@ -1487,6 +1546,46 @@ mod tests {
         assert_eq!(r.link_id, Some(3));
         assert_eq!(r.font_id, 7);
         assert_eq!(r.color, [0.0, 1.0, 0.0, 1.0]);
+    }
+
+    /// text-align：center/right 把行整体在容器（max_width）内偏移；left 不偏。
+    /// 单行短文本也偏（render 期 max_width=rect.w）——浏览器语义，非仅多行生效。
+    #[test]
+    fn rich_text_align_offsets_line_within_container() {
+        let font = match test_font() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip: no test font");
+                return;
+            }
+        };
+        let runs = vec![RichRun {
+            kind: RichKind::Text { text: "Hi".into() },
+            color: [1.0, 1.0, 1.0, 1.0],
+            font_id: 0,
+            size_px: 24,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+            link_id: None,
+        }];
+        let stack = FontStack::single(&font, 0);
+        // 容器远宽于文本（1000 vs ~20px）→ center/right 应把字形推到右侧。
+        let left = measure_rich_text(&runs, Some(1000.0), 1.2, TextAlign::Left, &stack);
+        let center = measure_rich_text(&runs, Some(1000.0), 1.2, TextAlign::Center, &stack);
+        let right = measure_rich_text(&runs, Some(1000.0), 1.2, TextAlign::Right, &stack);
+        let first_x = |lay: &TextLayout| lay.lines[0].runs[0].glyphs[0].x;
+        let w = left.lines[0].width;
+        assert!(first_x(&left) == 0.0, "left 首字 x=0");
+        assert!(
+            (first_x(&center) - (1000.0 - w) / 2.0).abs() < 0.5,
+            "center 首字 x≈(容器-行宽)/2"
+        );
+        assert!(
+            (first_x(&right) - (1000.0 - w)).abs() < 0.5,
+            "right 首字 x≈容器-行宽"
+        );
+        assert!(first_x(&right) > first_x(&center), "right 比 center 更靠右");
     }
 
     /// 字体回退：主字体（DejaVu，无中文）缺字时，回退链首个含该字的字体（wqy）补上。

@@ -65,8 +65,7 @@ enum MeasureContext {
     },
     /// RichText 叶子（v1.7）：inline flow 封装在 measure_rich_text。
     /// runs owned（parse 期产的扁平 run 流，含 per-run 样式）。
-    /// `align`/`nowrap` 暂未传入 measure_rich_text（T4 边界：rich 不支持对齐/nowrap），
-    /// 保留字段供后续 task 接线，构造时已填但当前不读。
+    /// `align` 传入 measure_rich_text（每行容器内偏移）；`nowrap` 暂未接线（rich 不支持）。
     #[allow(dead_code)]
     RichText {
         runs: Vec<crate::text::rich::RichRun>,
@@ -311,6 +310,7 @@ pub fn solve(
                     Some(MeasureContext::RichText {
                         runs,
                         line_height,
+                        align,
                         family,
                         ..
                     }) => {
@@ -321,6 +321,7 @@ pub fn solve(
                             runs,
                             known.width,
                             *line_height,
+                            *align,
                             &stack,
                         );
                         // 存 TextLayout 供 render 复用（同 Text 的 Some 优先策略）。
