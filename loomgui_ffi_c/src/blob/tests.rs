@@ -178,7 +178,7 @@ fn path_idx_column_round_trips() {
 }
 
 /// program 列（u8，第 19 列，v5）：Mesh program=2（Container+bg-image 合成）/ 纯色 mesh program=0。
-/// round-trip。VERSION=9（v9：加 reuse_key 列）。
+/// round-trip。VERSION=10（v10：20 列，text 塌进 mesh_arena）。
 #[test]
 fn program_column_round_trips() {
     let blob = build_blob(&frame(&[
@@ -801,7 +801,7 @@ fn merged_mesh_blob_keeps_absolute_verts_and_no_double_alpha() {
     }
 }
 /// blob world_matrix round-trip——纯平移 + 剪切节点均写入 6 矩阵列，
-/// VERSION=9（v9：加 reuse_key 列），blob len > 100。
+/// VERSION=10（v10：20 列，text 塌进 mesh_arena），blob len > 100。
 #[test]
 fn blob_world_matrix_roundtrip() {
     let mk = |wm: transform::Affine2| RenderNode {
@@ -834,19 +834,19 @@ fn blob_world_matrix_roundtrip() {
         nodes: vec![pure, skew],
         clips: vec![],
     });
-    // version=9（v9：加 reuse_key 列）
+    // version=10（v10：20 列，text 塌进 mesh_arena）
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
         10,
         "VERSION=10"
     );
-    // 字节数合理（2 节点 × 22 列 + mesh arena + header）
+    // 字节数合理（2 节点 × 20 列 + mesh arena + header）
     assert!(blob.len() > 100);
 }
 
 /// 纯色 mesh 节点经 build_blob → payload_kind==1 透传。
 /// C# 侧 MirrorPool.cs:71 `kind!=1&&!=2 continue` 跳过 kind≠1/2；
-/// VERSION=9（v9：加 reuse_key 列）。
+/// VERSION=10（v10：20 列，text 塌进 mesh_arena）。
 #[test]
 fn blob_pure_mesh_kind_is_one() {
     let rn = mesh_node(0, None, 0.0, 0.0, 1.0, 1.0);
@@ -868,7 +868,7 @@ fn blob_pure_mesh_kind_is_one() {
     );
 }
 
-/// color_matrix 列（[f32;20]，第 20 列）：program=3/4 节点填矩阵，其余全零占位。VERSION=9。
+/// color_matrix 列（[f32;20]，第 18 列 0-indexed）：program=3/4 节点填矩阵，其余全零占位。VERSION=10。
 #[test]
 fn blob_color_matrix_column_round_trips() {
     let matrix = [
@@ -940,7 +940,7 @@ fn change_level_column_round_trips() {
     assert!(view.mesh_len_col(2) > 0, "Full 写 arena");
 }
 
-/// v9：reuse_key 列（第 22 列）round-trip。
+/// v10：reuse_key 列（第 19 列，0-indexed；v10 删 text_off/text_len 后从第 21→19）round-trip。
 #[test]
 fn blob_v9_round_trips_reuse_key() {
     let rn = RenderNode {
