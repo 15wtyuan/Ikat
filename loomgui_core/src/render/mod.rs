@@ -12,7 +12,7 @@
 //! UV 的 src_w/src_h（slice_px / src_px）。Image/bg-image payload 带 path，UV 全图 (0,0)-(1,1)。
 
 pub mod batch;
-pub mod border; // 彩色边框环形 mesh（激活 border_color 死字段）
+pub mod border; // 彩色边框环形 mesh + box-shadow 外扩 quad
 pub mod dirty; // dirty hash（header_hash + payload_hash 双轴，跨帧比决定 ChangeLevel）
 pub mod merge;
 pub mod mesh;
@@ -25,6 +25,11 @@ use crate::text::layout::{measure_text, FontTable};
 use node::*;
 
 use taffy::style::LengthPercentage;
+
+/// 合成 node_id 标志位：box-shadow 独立 RenderNode（node_id | BOX_SHADOW_FLAG）。
+/// 0x1000_0000（bit 28），不与 V_THUMB_FLAG（0x4000_0000）、H_THUMB_FLAG（0x2000_0000）、
+/// 跨页 text 子页（bits [31:24]）冲突。
+const BOX_SHADOW_FLAG: u32 = 0x1000_0000;
 
 /// 把 2 色线性渐变映射到 quad 4 角顶点色（顶点序 TL, TR, BR, BL）。
 ///
@@ -171,6 +176,8 @@ pub fn build_render_nodes(
     let pruned = collect_display_none_subtree(scene);
     let mut nodes: Vec<RenderNode> = Vec::new();
     let mut rich_fragments: Vec<(u32, Vec<crate::text::rich::RichFragment>)> = Vec::new();
+    // box-shadow 独立 RenderNode 追踪：(主节点 node_id, 阴影合成 node_id)。
+    let mut shadow_pairs: Vec<(u32, u32)> = Vec::new();
     for n in scene.nodes.values() {
         if pruned.contains(&n.id) {
             continue;
@@ -551,6 +558,48 @@ pub fn build_render_nodes(
                 continue;
             }
         };
+        // box-shadow：独立 RenderNode 画在节点下层（sort_key 更小 = 先绘 = 在下）。
+        // 阴影节点不入 id_to_pos（不在场景树中），sort_key 在 assign_sort_keys 后
+        // 由 propagate_box_shadow_sort_keys 调整为主节点 sort_key（主节点后移一位）。
+        if let Some(shadow) = n.style.box_shadow.as_ref() {
+            if matches!(n.kind, NodeKind::Container | NodeKind::Button) {
+                let rw = rect.w;
+                let rh = rect.h;
+                let radii = n.style.border_radius.as_corners(rw, rh);
+                let (v, uvc, col, idx) = crate::render::border::box_shadow_quad(
+                    rect,
+                    &radii,
+                    shadow.spread,
+                    shadow.color,
+                );
+                if !v.is_empty() {
+                    let sid = node_id | BOX_SHADOW_FLAG;
+                    shadow_pairs.push((node_id, sid));
+                    nodes.push(RenderNode {
+                        node_id: sid,
+                        parent_id,
+                        visible: true,
+                        alpha,
+                        color_tint,
+                        world_matrix: wm,
+                        blend: BlendMode::Normal,
+                        mask_context: MaskContext(0),
+                        sort_key: 0, // assign_sort_keys 后重调
+                        change_level: ChangeLevel::Full,
+                        reuse_key: 0,
+                        payload: NodePayload::Mesh {
+                            verts: v,
+                            uvs: uvc,
+                            colors: col,
+                            indices: idx,
+                            image_path: None,
+                            program: 0,
+                            color_matrix: [0.0; 20],
+                        },
+                    });
+                }
+            }
+        }
         id_to_pos.insert(n.id, nodes.len());
         nodes.push(rn);
     }
@@ -565,6 +614,7 @@ pub fn build_render_nodes(
     // 不认识合成子页。此处把子页 sort_key 设为 primary.sort_key + page_idx，并把后续真节点
     // 的 sort_key 后移子页个数，保持单调连续。
     propagate_text_sub_page_sort_keys(&mut nodes, &id_to_pos);
+    propagate_box_shadow_sort_keys(&mut nodes, &shadow_pairs);
     let max_sort = nodes.iter().map(|n| n.sort_key).max().unwrap_or(0);
     batch::reorder_for_batching(scene, &mut nodes);
     let mut nodes = merge::merge_meshes(nodes);
@@ -633,6 +683,64 @@ fn text_sub_primary_id(node_id: u32) -> u32 {
 /// 提取跨页 text 子页的页号（1 基）。
 fn text_sub_page_idx(node_id: u32) -> u32 {
     node_id >> 24
+}
+
+/// box-shadow 合成节点 sort_key 调整：阴影节点继承主节点 sort_key，
+/// 主节点及后续节点后移一位（阴影在背景层之下 = sort_key 更小 = 先绘）。
+///
+/// assign_sort_keys 只给 id_to_pos 中的真 scene 节点赋 sort_key；
+/// box-shadow 合成节点不在场景树中，初始 sort_key=0。此函数将其调整到
+/// 主节点 sort_key 位置，保证阴影在主节点背景之前渲染。
+///
+/// 处理多个阴影节点时从最大 sort_key 开始（降序），避免累积偏移后的 stale 值。
+fn propagate_box_shadow_sort_keys(
+    nodes: &mut [RenderNode],
+    shadows: &[(u32, u32)], // (main_node_id, shadow_node_id)
+) {
+    if shadows.is_empty() {
+        return;
+    }
+    // 构建 (main_sort_key_on_entry, main_id, shadow_id) 三元组。
+    // 按 main_sort_key DESC 处理，避免先处理大 key 的移位影响后续小 key 比较。
+    let mut triples: Vec<(u32, u32, u32)> = shadows
+        .iter()
+        .map(|&(main_id, shadow_id)| {
+            // 在 nodes 中查找主节点 sort_key（shadow 在 nodes 中排在主节点之前，
+            // 且主节点已由 assign_sort_keys 赋过值）。
+            let main_sk = nodes
+                .iter()
+                .find(|n| n.node_id == main_id)
+                .map(|n| n.sort_key)
+                .unwrap_or(0);
+            (main_sk, main_id, shadow_id)
+        })
+        .collect();
+    triples.sort_by_key(|&(sk, _, _)| std::cmp::Reverse(sk)); // descending
+    for &(main_sk, _main_id, shadow_id) in &triples {
+        // 移位：所有 sort_key >= main_sk 且非本阴影的节点 +1。
+        // 降序遍历保证大 sort_key 区域的移位不会污染小 key 的原始值。
+        for rn in nodes.iter_mut() {
+            if rn.node_id != shadow_id && rn.sort_key >= main_sk {
+                rn.sort_key += 1;
+            }
+        }
+    }
+    // 设阴影 sort_key = 主节点原始 sort_key。
+    // 上述降序移位后主节点已后移 +1（每个经过它的阴影对其移了一次），
+    // 阴影节点初始 sort_key=0。
+    // 后处理：对每个 shadow，找它的主节点（现在 sort_key = 原始 + 经过的阴影数），
+    // 设为 主_sk - 1。
+    for &(main_id, shadow_id) in shadows {
+        if let (Some(main_pos), Some(shadow_pos)) = (
+            nodes.iter().position(|n| n.node_id == main_id),
+            nodes.iter().position(|n| n.node_id == shadow_id),
+        ) {
+            let main_sk = nodes[main_pos].sort_key;
+            if main_sk > 0 {
+                nodes[shadow_pos].sort_key = main_sk - 1;
+            }
+        }
+    }
 }
 
 /// 跨页 text 子页 sort_key 传播 + 后续真节点 sort_key 后移。

@@ -1,7 +1,7 @@
 use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
-    BackgroundSize, BorderRadius, CornerRadius, DisplayMode, Gradient2, GradientDir, OverflowMode,
-    ResolvedStyle, SliceInsets, TextAlign,
+    BackgroundSize, BorderRadius, BoxShadow, CornerRadius, DisplayMode, Gradient2, GradientDir,
+    OverflowMode, ResolvedStyle, SliceInsets, TextAlign,
 };
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, LengthPercentage, LengthPercentageAuto};
@@ -710,6 +710,38 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             } else {
                 false // 非法值（% 等围栏外）静默忽略
             }
+        }
+        "box-shadow" => {
+            // "2px 2px 4px #000000" → ox oy [blur] color；blur 静默忽略。
+            // MVP spread=0（硬边投影），PlayMode 调参后定。
+            let parts: Vec<&str> = value.split_whitespace().collect();
+            if parts.len() < 3 {
+                return false;
+            }
+            // parse_number 不剥 "px" 后缀，此处手动剥。
+            let ox = parse_number(parts[0].trim_end_matches("px")).unwrap_or(0.0);
+            let oy = parse_number(parts[1].trim_end_matches("px")).unwrap_or(0.0);
+            // 第 3 段可能是 blur（数值）或 color；若是数值则 color 在第 4 段。
+            let color_idx = if parts[2].trim_end_matches("px").parse::<f32>().is_ok() {
+                if parts.len() > 3 {
+                    3
+                } else {
+                    return false;
+                }
+            } else {
+                2
+            };
+            let color = parts
+                .get(color_idx)
+                .and_then(|s| parse_color(s))
+                .unwrap_or([0.0, 0.0, 0.0, 0.3]);
+            style.box_shadow = Some(BoxShadow {
+                ox,
+                oy,
+                spread: 0.0,
+                color,
+            });
+            true
         }
         "transition" => {
             style.transition = parse_transition(value);

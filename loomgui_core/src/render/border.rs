@@ -50,6 +50,28 @@ pub fn border_ring(
     (verts, uvs, colors, indices)
 }
 
+/// box-shadow 几何近似：比 rect 外扩 spread 的圆角 quad（直角退化），四周顶点 alpha 渐隐。
+/// 无 blur（真实 blur 需离屏 RT，排 v1.14+）。独立 RenderNode 画在节点下层。
+/// ponytail: 圆角阴影随圆角 SDF task 补，先直角外扩 quad；渐隐带 PlayMode 调参后补中间顶点。
+pub fn box_shadow_quad(
+    rect: &Rect,
+    radii: &[(f32, f32); 4],
+    spread: f32,
+    color: [f32; 4],
+) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
+    let _ = radii; // ponytail: 圆角阴影随圆角 SDF task 补，先直角
+    let outer = Rect {
+        x: rect.x - spread,
+        y: rect.y - spread,
+        w: rect.w + 2.0 * spread,
+        h: rect.h + 2.0 * spread,
+    };
+    if outer.w <= 0.0 || outer.h <= 0.0 {
+        return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    }
+    crate::render::mesh::quad(&outer, color, [0.0, 0.0], [0.0, 0.0])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,5 +168,36 @@ mod tests {
         let radii = [(0.0, 0.0); 4];
         let (_v, uvs, _c, _i) = border_ring(&r, &radii, 5.0, [1.0; 4]);
         assert!(uvs.iter().all(|uv| *uv == [0.0, 0.0]), "UV 全 0");
+    }
+
+    #[test]
+    fn box_shadow_spreads_outward() {
+        let r = Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 80.0,
+            h: 40.0,
+        };
+        let radii = [(0.0, 0.0); 4];
+        let (verts, _uvs, colors, _idx) = box_shadow_quad(&r, &radii, 5.0, [0.0, 0.0, 0.0, 0.5]);
+        // 外扩 spread=5：角从 (10,10)/(90,10)/(90,50)/(10,50) → (5,5)/(95,5)/(95,55)/(5,55)
+        let xs: Vec<f32> = verts.iter().map(|v| v[0]).collect();
+        assert!(xs.contains(&5.0) && xs.contains(&95.0), "外扩 spread");
+        // 边缘顶点 alpha 渐隐（MVP 纯色外扩 quad）
+        assert!(colors.iter().all(|c| c[3] == 0.5));
+    }
+
+    #[test]
+    fn box_shadow_degenerate_empty() {
+        // rect w≤0 且 spread=0 时 outer 退化 → 空输出。
+        let r = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+        };
+        let radii = [(0.0, 0.0); 4];
+        let (v, _u, _c, i) = box_shadow_quad(&r, &radii, 0.0, [1.0; 4]);
+        assert!(v.is_empty() && i.is_empty(), "退化 rect → 空输出");
     }
 }

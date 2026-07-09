@@ -189,8 +189,20 @@ pub struct ResolvedStyle {
     pub color_filter: Option<[f32; 20]>,
     /// CSS border-image-slice 四边切片（源图像素）。None=无九宫格。
     pub border_image_slice: Option<SliceInsets>,
+    /// CSS box-shadow 几何近似（无 blur）。独立 RenderNode 画在节点下层。None=无投影。
+    pub box_shadow: Option<BoxShadow>,
     /// CSS transition 声明。None=未设（默认无过渡动画）。
     pub transition: Vec<TransitionSpec>,
+}
+
+/// box-shadow 几何近似（无 blur，真实 blur 推 v1.14+ 离屏 RT）。
+/// MVP 用 spread=0（偏移+颜色硬边投影）；圆角阴影随圆角 SDF task 补。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BoxShadow {
+    pub ox: f32,
+    pub oy: f32,
+    pub spread: f32,
+    pub color: [f32; 4],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -234,6 +246,7 @@ impl Default for ResolvedStyle {
             transform: LocalTransform::default(),
             color_filter: None,
             border_image_slice: None,
+            box_shadow: None,
             transition: Vec::new(),
         }
     }

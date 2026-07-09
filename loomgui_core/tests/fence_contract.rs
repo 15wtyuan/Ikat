@@ -80,6 +80,7 @@ fn supported_visual_props_return_true() {
         ("border-image-slice", "10"),
         ("border-color", "#ff0000"),
         ("border-width", "2px"),
+        ("box-shadow", "2px 2px #000000"),
         ("transition", "opacity 0.3s ease 0s"),
         ("background", "linear-gradient(to right, #ff0000, #0000ff)"),
     ];
@@ -510,5 +511,46 @@ fn class_based_display_block_still_blocked_at_parse() {
     assert!(
         parse_html(html).is_err(),
         "class-based display:block MVP 不触发 rich，b 被围栏挡"
+    );
+}
+
+#[test]
+fn box_shadow_2px_2px_black_sets_field() {
+    // `box-shadow: 2px 2px #000000` → box_shadow.is_some()
+    let mut s = ResolvedStyle::default();
+    assert!(
+        apply_decl(&mut s, "box-shadow", "2px 2px #000000"),
+        "box-shadow 声明应被 accept"
+    );
+    let bs = s.box_shadow.expect("box_shadow 字段已设");
+    assert_eq!(bs.ox, 2.0, "ox=2px");
+    assert_eq!(bs.oy, 2.0, "oy=2px");
+    assert_eq!(bs.spread, 0.0, "MVP spread=0");
+    assert_eq!(
+        bs.color,
+        [0.0, 0.0, 0.0, 1.0],
+        "color=#000000 → rgba(0,0,0,1)"
+    );
+}
+
+#[test]
+fn box_shadow_with_blur_still_sets_field() {
+    // `box-shadow: 2px 2px 4px #ff0000` → blur 静默忽略，ox/oy/color 仍设。
+    let mut s = ResolvedStyle::default();
+    assert!(
+        apply_decl(&mut s, "box-shadow", "2px 2px 4px #ff0000"),
+        "含 blur 的 box-shadow 应被接受"
+    );
+    let bs = s.box_shadow.expect("字段已设");
+    assert_eq!(bs.ox, 2.0);
+    assert_eq!(bs.oy, 2.0);
+    assert_eq!(bs.color, [1.0, 0.0, 0.0, 1.0]);
+}
+
+#[test]
+fn box_shadow_default_is_none() {
+    assert!(
+        ResolvedStyle::default().box_shadow.is_none(),
+        "默认无 box_shadow"
     );
 }
