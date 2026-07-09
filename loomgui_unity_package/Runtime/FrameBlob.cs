@@ -129,7 +129,7 @@ namespace LoomGUI
         }
 
         /// clip 表 entry 数（context>0 入表）。无 mask scene 恒为 0。
-        /// clip 表段布局：clip_count(u32) + entries[count × {ctx,x,y,w,h}]。
+        /// clip 表段布局：clip_count(u32) + entries[count × {ctx,x,y,w,h + 4×(rx,ry) 各 f32} = 52B/entry]。
         /// clip_count(u32) 在 ClipTableOff 处；clip_table_len 含 clip_count 本身。
         public int ClipCount => ClipTableLen >= 4 ? (int)ReadU32(ClipTableOff) : 0;
 

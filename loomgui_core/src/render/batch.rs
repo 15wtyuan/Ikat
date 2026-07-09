@@ -171,7 +171,7 @@ pub fn assign_sort_keys(
             // 全零半径 → None（直角 AABB clip，走 CLIPPED 变体，零开销）。
             let radii = {
                 let r = node.style.border_radius.as_corners(own.w, own.h);
-                let all_zero = r.iter().all(|&(rx, ry)| rx <= 0.0 || ry <= 0.0);
+                let all_zero = r.iter().all(|&(rx, ry)| rx <= 0.0 && ry <= 0.0);
                 if all_zero {
                     None
                 } else {

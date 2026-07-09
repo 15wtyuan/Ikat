@@ -136,7 +136,7 @@ Shader "LoomGUI/Unlit"
                 float r = _CornerRadius;
                 float2 q = abs(i.clipPos) - 1.0 + r;
                 float sdf = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
-                col.a *= smoothstep(1.0, 0.0, sdf);
+                col.a *= 1.0 - smoothstep(0.0, 1.0, sdf);
                 #elif defined(CLIPPED)
                 float2 f = abs(i.clipPos);
                 col.a *= step(max(f.x, f.y), 1.0);

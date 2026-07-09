@@ -158,7 +158,7 @@ namespace LoomGUI
                     if (cornerRadius > 0f)
                     {
                         // 归一化半径（design px → shader clipPos 空间）+ 启 CLIPPED_ROUNDED 变体。
-                        float normR = ClipMath.NormalizeCornerRadius(root, dx, dy, dw, dh, cornerRadius);
+                        float normR = ClipMath.NormalizeCornerRadius(dw, dh, cornerRadius);
                         mm.SetCornerRadius(maskCtx, normR);
                         rounded = true;
                         _roundedCtxsThisFrame.Add(maskCtx);
