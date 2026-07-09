@@ -308,7 +308,7 @@ mod tests {
         // 构造一个各字段都非默认的 ResolvedStyle（覆盖 taffy 字段 + 视觉字段）。
         let mut s = ResolvedStyle::default();
         s.taffy_style.flex_direction = taffy::FlexDirection::Row;
-        s.taffy_style.padding = taffy::geometry::Rect::length(7.0);
+        s.taffy_style.padding = taffy::geometry::Rect::length(7.0_f32);
         s.background_color = Some([0.1, 0.2, 0.3, 0.4]);
         s.border_color = Some([0.5, 0.6, 0.7, 0.8]);
         s.border_width = 3.0;
