@@ -50,9 +50,12 @@ pub fn border_ring(
     (verts, uvs, colors, indices)
 }
 
-/// box-shadow 几何近似：比 rect 外扩 spread 的圆角 quad（直角退化），四周顶点 alpha 渐隐。
+/// box-shadow 几何近似：比 rect 外扩 spread 的圆角 quad（直角退化）。
 /// 无 blur（真实 blur 需离屏 RT，排 v1.14+）。独立 RenderNode 画在节点下层。
-/// ponytail: 圆角阴影随圆角 SDF task 补，先直角外扩 quad；渐隐带 PlayMode 调参后补中间顶点。
+/// ponytail: 圆角阴影随圆角 SDF task 补，先直角外扩 quad。
+/// ponytail: 软边 alpha 衰减未实现 — 当前产纯色 quad（mesh::quad 4 顶点同色），
+///   无边缘 alpha falloff。升级路径：外 rect + inset vertex ring 带 alpha falloff →
+///   v1.14+ 离屏 RT。
 pub fn box_shadow_quad(
     rect: &Rect,
     radii: &[(f32, f32); 4],
@@ -172,6 +175,7 @@ mod tests {
 
     #[test]
     fn box_shadow_spreads_outward() {
+        // spread 生效：ox/oy 偏移由 caller 负责（offset rect 后再传 box_shadow_quad）。
         let r = Rect {
             x: 10.0,
             y: 10.0,

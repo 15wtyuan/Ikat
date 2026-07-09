@@ -30,10 +30,12 @@ pub fn rect_intersect(a: Rect, b: Rect) -> Rect {
     Rect { x, y, w, h }
 }
 
-/// 是否可合并 Mesh（program=0 + 纯平移）。Text（program=1）/ 非纯平移不参与重排与合并。
+/// 是否可合并 Mesh（program=0 + 纯平移 + 非 box-shadow 合成节点）。
+/// Text（program=1）/ 非纯平移 / box-shadow 合成节点不参与重排与合并。
 fn is_mergeable_mesh(rn: &RenderNode) -> bool {
     matches!(&rn.payload, NodePayload::Mesh { program, .. } if *program == 0)
         && crate::transform::is_pure_translation(&rn.world_matrix)
+        && (rn.node_id & crate::render::BOX_SHADOW_FLAG == 0)
 }
 
 /// 可合并 Mesh 的 DrawState = (image_path, mask_context)。

@@ -6,10 +6,14 @@
 
 use crate::render::node::{NodePayload, RenderNode};
 
-/// DrawState 键（image_path, program, mask_context, alpha_bits）。program=0 Mesh 才参与合并。
+/// DrawState 键（image_path, program, mask_context, alpha_bits）。program=0/1 Mesh 才参与合并。
 /// 用 image_path（同 path 的图可合批；None=纯色块可互合）。
 /// 含 alpha（to_bits 比较）——alpha 是 per-renderer uniform，不同 alpha 不能合批。
+/// box-shadow 合成节点不参与合并（合成 node_id 无对应 scene 节点）。
 fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32)> {
+    if rn.node_id & crate::render::BOX_SHADOW_FLAG != 0 {
+        return None; // 合成阴影节点不合批
+    }
     match &rn.payload {
         NodePayload::Mesh {
             image_path,

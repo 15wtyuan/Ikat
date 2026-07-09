@@ -712,8 +712,8 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             }
         }
         "box-shadow" => {
-            // "2px 2px 4px #000000" → ox oy [blur] color；blur 静默忽略。
-            // MVP spread=0（硬边投影），PlayMode 调参后定。
+            // CSS: ox oy [blur] [spread] color。blur 静默忽略，spread 解析。
+            // ponytail: blur 静默忽略（真实 blur 需离屏 RT，排 v1.14+）。
             let parts: Vec<&str> = value.split_whitespace().collect();
             if parts.len() < 3 {
                 return false;
@@ -721,16 +721,24 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             // parse_number 不剥 "px" 后缀，此处手动剥。
             let ox = parse_number(parts[0].trim_end_matches("px")).unwrap_or(0.0);
             let oy = parse_number(parts[1].trim_end_matches("px")).unwrap_or(0.0);
-            // 第 3 段可能是 blur（数值）或 color；若是数值则 color 在第 4 段。
-            let color_idx = if parts[2].trim_end_matches("px").parse::<f32>().is_ok() {
-                if parts.len() > 3 {
-                    3
-                } else {
+            // 第 3 段可能是 blur（数值）或 color；若是数值且后一段也数值则分别为 blur+spread。
+            let mut color_idx = 2;
+            let mut spread_val = 0.0f32;
+            if parts[2].trim_end_matches("px").parse::<f32>().is_ok() {
+                if parts.len() < 4 {
                     return false;
                 }
-            } else {
-                2
-            };
+                if parts[3].trim_end_matches("px").parse::<f32>().is_ok() {
+                    // parts[3] is spread
+                    spread_val = parse_number(parts[3].trim_end_matches("px")).unwrap_or(0.0);
+                    color_idx = 4;
+                    if parts.len() < 5 {
+                        return false;
+                    }
+                } else {
+                    color_idx = 3;
+                }
+            }
             let color = parts
                 .get(color_idx)
                 .and_then(|s| parse_color(s))
@@ -738,7 +746,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.box_shadow = Some(BoxShadow {
                 ox,
                 oy,
-                spread: 0.0,
+                spread: spread_val,
                 color,
             });
             true

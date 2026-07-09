@@ -2,7 +2,7 @@
 use super::*;
 use crate::scene::node::*;
 use crate::style::resolved::{
-    BackgroundSize, BorderRadius, CornerRadius, ResolvedStyle, TextAlign,
+    BackgroundSize, BorderRadius, BoxShadow, CornerRadius, ResolvedStyle, TextAlign,
 };
 use crate::text::atlas::GlyphAtlas;
 use crate::text::layout::measure_text;
@@ -2815,4 +2815,112 @@ fn rich_fragment_cross_line_link_splits_rects() {
         assert!(f.w > 0.0, "fragment w 应 > 0，实际 {:.1}", f.w);
         assert!(f.h > 0.0, "fragment h 应 > 0，实际 {:.1}", f.h);
     }
+}
+
+// ── box-shadow 集成测试 ───────────────────────────
+
+/// box-shadow:2px 3px #000000 → 阴影节点 node_id = main_id|BOX_SHADOW_FLAG、
+/// sort_key < main sort_key、阴影 verts x 偏移 ox=2、y 偏移 oy=3。
+#[test]
+fn box_shadow_emits_node_with_offset_and_sort_key() {
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 10.0,
+            y: 20.0,
+            w: 100.0,
+            h: 50.0,
+        },
+        Some([1.0, 0.0, 0.0, 1.0]),
+    );
+    n.style.box_shadow = Some(BoxShadow {
+        ox: 2.0,
+        oy: 3.0,
+        spread: 0.0,
+        color: [0.0, 0.0, 0.0, 0.5],
+    });
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // 应有两个 RenderNode：主节点（Container bg）+ 阴影节点。
+    assert!(
+        frame.nodes.len() >= 2,
+        "box-shadow 应产独立 RenderNode，共 {} 节点",
+        frame.nodes.len()
+    );
+
+    let shadow_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| rn.node_id & BOX_SHADOW_FLAG != 0)
+        .expect("应存在 box-shadow RenderNode（node_id 带 BOX_SHADOW_FLAG）");
+    let main_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| rn.node_id & BOX_SHADOW_FLAG == 0)
+        .expect("应存在主节点 RenderNode");
+
+    // 阴影 node_id = main_id | BOX_SHADOW_FLAG
+    assert_eq!(
+        shadow_rn.node_id,
+        main_rn.node_id | BOX_SHADOW_FLAG,
+        "阴影 node_id = main_id | BOX_SHADOW_FLAG"
+    );
+
+    // 阴影 sort_key < main sort_key（阴影绘在主节点之下）
+    assert!(
+        shadow_rn.sort_key < main_rn.sort_key,
+        "阴影 sort_key({}) < main sort_key({})",
+        shadow_rn.sort_key,
+        main_rn.sort_key
+    );
+
+    // 阴影 verts 偏移 ox=2, oy=3（相对主节点 bg quad）
+    let shadow_verts = match &shadow_rn.payload {
+        NodePayload::Mesh { verts, .. } => verts,
+        _ => panic!("阴影节点应为 Mesh"),
+    };
+    let main_verts = match &main_rn.payload {
+        NodePayload::Mesh { verts, .. } => verts,
+        _ => panic!("主节点应为 Mesh"),
+    };
+
+    // 主节点 bg quad x_min = rect.x = 10.0
+    let main_x_min = main_verts.iter().map(|v| v[0]).fold(f32::MAX, f32::min);
+    // 阴影 quad x_min = shadow_rect.x - spread = (10+2) - 0 = 12.0
+    let shadow_x_min = shadow_verts.iter().map(|v| v[0]).fold(f32::MAX, f32::min);
+    assert!(
+        (shadow_x_min - (main_x_min + 2.0)).abs() < 1e-3,
+        "阴影 x_min({}) = main x_min({}) + ox(2.0)",
+        shadow_x_min,
+        main_x_min
+    );
+
+    let main_y_min = main_verts.iter().map(|v| v[1]).fold(f32::MAX, f32::min);
+    let shadow_y_min = shadow_verts.iter().map(|v| v[1]).fold(f32::MAX, f32::min);
+    assert!(
+        (shadow_y_min - (main_y_min + 3.0)).abs() < 1e-3,
+        "阴影 y_min({}) = main y_min({}) + oy(3.0)",
+        shadow_y_min,
+        main_y_min
+    );
+
+    // 阴影颜色正确
+    let colors = match &shadow_rn.payload {
+        NodePayload::Mesh { colors, .. } => colors,
+        _ => unreachable!(),
+    };
+    assert!(
+        colors.iter().all(|c| *c == [0.0, 0.0, 0.0, 0.5]),
+        "阴影顶点色应为半透明黑"
+    );
 }

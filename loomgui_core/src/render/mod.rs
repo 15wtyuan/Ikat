@@ -29,7 +29,7 @@ use taffy::style::LengthPercentage;
 /// 合成 node_id 标志位：box-shadow 独立 RenderNode（node_id | BOX_SHADOW_FLAG）。
 /// 0x1000_0000（bit 28），不与 V_THUMB_FLAG（0x4000_0000）、H_THUMB_FLAG（0x2000_0000）、
 /// 跨页 text 子页（bits [31:24]）冲突。
-const BOX_SHADOW_FLAG: u32 = 0x1000_0000;
+pub(crate) const BOX_SHADOW_FLAG: u32 = 0x1000_0000;
 
 /// 把 2 色线性渐变映射到 quad 4 角顶点色（顶点序 TL, TR, BR, BL）。
 ///
@@ -566,8 +566,14 @@ pub fn build_render_nodes(
                 let rw = rect.w;
                 let rh = rect.h;
                 let radii = n.style.border_radius.as_corners(rw, rh);
+                let shadow_rect = Rect {
+                    x: rect.x + shadow.ox,
+                    y: rect.y + shadow.oy,
+                    w: rect.w,
+                    h: rect.h,
+                };
                 let (v, uvc, col, idx) = crate::render::border::box_shadow_quad(
-                    rect,
+                    &shadow_rect,
                     &radii,
                     shadow.spread,
                     shadow.color,
