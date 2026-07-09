@@ -854,7 +854,9 @@ fn strut_height(line_height: f32, size: f32, ascent: f32, descent: f32, line_gap
 mod tests {
     use super::*;
     use crate::style::resolved::TextAlign;
-    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
+    use crate::text::rich::{
+        RichDeco, RichKind, RichRun, RichStyle, RichWeight, TextDecoLines, TextDecoStyle,
+    };
 
     /// 测试字体：仓库内 DejaVuSans.ttf（跨平台一致），缺则跳过。
     fn test_font() -> Option<Font> {
@@ -1457,8 +1459,10 @@ mod tests {
             weight: RichWeight::Bold,
             style: RichStyle::Italic,
             deco: RichDeco {
-                underline: true,
-                strike: false,
+                lines: TextDecoLines::UNDERLINE,
+                style: TextDecoStyle::Solid,
+                color: None,
+                thickness: None,
             },
             link_id: Some(3),
         }];
@@ -1467,7 +1471,7 @@ mod tests {
         let r = &lay.lines[0].runs[0];
         assert_eq!(r.weight, RichWeight::Bold);
         assert_eq!(r.style, RichStyle::Italic);
-        assert!(r.deco.underline);
+        assert!(r.deco.lines.underline());
         assert_eq!(r.link_id, Some(3));
         assert_eq!(r.font_id, 7);
         assert_eq!(r.color, [0.0, 1.0, 0.0, 1.0]);

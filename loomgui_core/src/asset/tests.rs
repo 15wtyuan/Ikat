@@ -181,7 +181,10 @@ fn all_node_kinds_roundtrip() {
 /// NodeBlock 的 rich_off 指向 arena 偏移，read 按 offset 取 blob 反序列化还原 Vec<RichRun>。
 #[test]
 fn rich_text_roundtrips_through_pkg() {
-    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichVAlign, RichWeight};
+    use crate::text::rich::{
+        RichDeco, RichKind, RichRun, RichStyle, RichVAlign, RichWeight, TextDecoLines,
+        TextDecoStyle,
+    };
     let root = tn(NodeKind::Container);
     let mut rich = tn(NodeKind::RichText {
         runs: vec![
@@ -195,8 +198,10 @@ fn rich_text_roundtrips_through_pkg() {
                 weight: RichWeight::Normal,
                 style: RichStyle::Italic,
                 deco: RichDeco {
-                    underline: true,
-                    strike: false,
+                    lines: TextDecoLines::UNDERLINE,
+                    style: TextDecoStyle::Solid,
+                    color: None,
+                    thickness: None,
                 },
                 link_id: None,
             },
@@ -258,7 +263,7 @@ fn rich_text_roundtrips_through_pkg() {
     assert_eq!(runs_back[0].color, [1.0, 0.0, 0.0, 1.0]);
     assert_eq!(runs_back[0].size_px, 16);
     assert_eq!(runs_back[0].style, RichStyle::Italic);
-    assert!(runs_back[0].deco.underline);
+    assert!(runs_back[0].deco.lines.underline());
     // run 1：blue bold link
     assert_eq!(runs_back[1].color, [0.0, 0.0, 1.0, 1.0]);
     assert_eq!(runs_back[1].font_id, 1);

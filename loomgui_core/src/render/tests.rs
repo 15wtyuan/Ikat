@@ -2605,7 +2605,9 @@ fn rich_image_emits_mesh_with_image_path_and_program_0() {
 /// RichText run 带 underline → build 后 mesh 含 4 顶点装饰 quad，色 = run.color。
 #[test]
 fn rich_deco_underline_adds_quad() {
-    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
+    use crate::text::rich::{
+        RichDeco, RichKind, RichRun, RichStyle, RichWeight, TextDecoLines, TextDecoStyle,
+    };
     let fonts = match test_font_table() {
         Some(f) => f,
         None => {
@@ -2623,8 +2625,10 @@ fn rich_deco_underline_adds_quad() {
             weight: RichWeight::Normal,
             style: RichStyle::Normal,
             deco: RichDeco {
-                underline: true,
-                strike: false,
+                lines: TextDecoLines::UNDERLINE,
+                style: TextDecoStyle::Solid,
+                color: None,
+                thickness: None,
             },
             link_id: None,
         }],
@@ -2678,7 +2682,9 @@ fn rich_deco_underline_adds_quad() {
 /// RichText run 带 strike → build 后 mesh 含装饰线 quad（厚度 ≥ 1px），色 = run.color。
 #[test]
 fn rich_deco_strike_adds_quad() {
-    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
+    use crate::text::rich::{
+        RichDeco, RichKind, RichRun, RichStyle, RichWeight, TextDecoLines, TextDecoStyle,
+    };
     let fonts = match test_font_table() {
         Some(f) => f,
         None => {
@@ -2696,8 +2702,10 @@ fn rich_deco_strike_adds_quad() {
             weight: RichWeight::Normal,
             style: RichStyle::Normal,
             deco: RichDeco {
-                underline: false,
-                strike: true,
+                lines: TextDecoLines::LINE_THROUGH,
+                style: TextDecoStyle::Solid,
+                color: None,
+                thickness: None,
             },
             link_id: None,
         }],
@@ -2735,6 +2743,237 @@ fn rich_deco_strike_adds_quad() {
             // 所有顶点色 = run.color（蓝）。
             for c in colors.iter() {
                 assert_eq!(*c, [0.0, 0.0, 1.0, 1.0], "装饰线色 = run.color 蓝");
+            }
+        }
+        _ => panic!("expected Mesh payload"),
+    }
+}
+
+/// RichText dashed 装饰线 → 因分段 quad 数 > solid 单 quad，顶点数更多。
+#[test]
+fn rich_deco_dashed_produces_more_verts_than_solid() {
+    use crate::text::rich::{
+        RichDeco, RichKind, RichRun, RichStyle, RichWeight, TextDecoLines, TextDecoStyle,
+    };
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    for (style, label) in [
+        (TextDecoStyle::Solid, "solid"),
+        (TextDecoStyle::Dashed, "dashed"),
+        (TextDecoStyle::Dotted, "dotted"),
+    ] {
+        let mut n = Node::default();
+        n.kind = NodeKind::RichText {
+            runs: vec![RichRun {
+                kind: RichKind::Text {
+                    text: "ABCDEFGHIJKLMNOP".into(),
+                },
+                color: [1.0; 4],
+                font_id: 0,
+                size_px: 16,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco {
+                    lines: TextDecoLines::UNDERLINE,
+                    style,
+                    color: None,
+                    thickness: None,
+                },
+                link_id: None,
+            }],
+        };
+        n.style.font_size = 16.0;
+        n.style.text_align = TextAlign::Left;
+        n.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 400.0,
+            h: 30.0,
+        };
+        let mut scene = Scene::from_nodes(vec![n], vec![]);
+        crate::scene::transform::compute_world_transforms(&mut scene);
+        let (frame, _, _, _) = build_render_nodes(
+            &scene,
+            &fonts,
+            &std::collections::HashMap::new(),
+            &empty_sizes(),
+            &mut test_glyph_atlas(),
+        );
+        let rn = frame
+            .nodes
+            .iter()
+            .find(|rn| {
+                !is_text_sub_page(rn.node_id)
+                    && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+            })
+            .expect("should exist primary RichText RenderNode");
+        match &rn.payload {
+            NodePayload::Mesh { verts, .. } => {
+                match label {
+                    "solid" => {
+                        // solid: glyphs + 1 quad (4 verts) for deco
+                        let glyph_verts = verts.len() - 4;
+                        assert!(glyph_verts > 0, "{label}: should have glyph vertices");
+                    }
+                    "dashed" | "dotted" => {
+                        // dashed/dotted: segments → >4 deco verts
+                        assert!(
+                            verts.len() > 20,
+                            "{label}: expected >20 verts (segmented), got {}",
+                            verts.len()
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            _ => panic!("{label}: expected Mesh payload"),
+        }
+    }
+}
+
+/// RichText double 装饰线 → 两条 quad（8 顶点），比 solid 单 quad（4 顶点）多。
+#[test]
+fn rich_deco_double_produces_two_quads() {
+    use crate::text::rich::{
+        RichDeco, RichKind, RichRun, RichStyle, RichWeight, TextDecoLines, TextDecoStyle,
+    };
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::RichText {
+        runs: vec![RichRun {
+            kind: RichKind::Text { text: "AB".into() },
+            color: [1.0; 4],
+            font_id: 0,
+            size_px: 16,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco {
+                lines: TextDecoLines::UNDERLINE,
+                style: TextDecoStyle::Double,
+                color: None,
+                thickness: None,
+            },
+            link_id: None,
+        }],
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let rn = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("should exist primary RichText RenderNode");
+    match &rn.payload {
+        NodePayload::Mesh { verts, .. } => {
+            // 2 glyph × 4 = 8 + double deco 2×4 = 8 = 16 verts
+            assert_eq!(
+                verts.len(),
+                16,
+                "2 glyph × 4 + double (2 quads × 4) = 16 verts, got {}",
+                verts.len()
+            );
+        }
+        _ => panic!("expected Mesh payload"),
+    }
+}
+
+/// RichText 装饰线独立色：deco.color 覆盖 run.color。
+#[test]
+fn rich_deco_independent_color_overrides_run_color() {
+    use crate::text::rich::{
+        RichDeco, RichKind, RichRun, RichStyle, RichWeight, TextDecoLines, TextDecoStyle,
+    };
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::RichText {
+        runs: vec![RichRun {
+            kind: RichKind::Text { text: "AB".into() },
+            color: [1.0, 1.0, 1.0, 1.0], // run.color = 白
+            font_id: 0,
+            size_px: 16,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco {
+                lines: TextDecoLines::UNDERLINE,
+                style: TextDecoStyle::Solid,
+                color: Some([1.0, 0.0, 0.0, 1.0]), // deco.color = 红（独立于 run.color）
+                thickness: None,
+            },
+            link_id: None,
+        }],
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let rn = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("should exist primary RichText RenderNode");
+    match &rn.payload {
+        NodePayload::Mesh { verts, colors, .. } => {
+            // glyphs 色 = 白，deco quad 色 = 红
+            // 2 glyph × 4 = 8 glyph verts (白) + 4 deco verts (红) = 12 verts
+            assert_eq!(verts.len(), 12, "2 glyph × 4 + underline 4 = 12");
+            // 前 8 顶点（字形）色 = 白
+            for c in &colors[0..8] {
+                assert_eq!(*c, [1.0, 1.0, 1.0, 1.0], "glyph color = white");
+            }
+            // 后 4 顶点（装饰线）色 = 红
+            for c in &colors[8..] {
+                assert_eq!(*c, [1.0, 0.0, 0.0, 1.0], "deco color = red (independent)");
             }
         }
         _ => panic!("expected Mesh payload"),

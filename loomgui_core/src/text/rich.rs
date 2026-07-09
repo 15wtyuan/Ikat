@@ -22,11 +22,44 @@ pub enum RichStyle {
     Italic = 1,
 }
 
-/// 装饰线（下划线/删除线，build 期纯 quad）。
+/// 装饰线位标记（可组合：underline | line-through | overline）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[repr(transparent)]
+pub struct TextDecoLines(pub u8);
+impl TextDecoLines {
+    pub const NONE: Self = Self(0);
+    pub const UNDERLINE: Self = Self(1);
+    pub const LINE_THROUGH: Self = Self(2);
+    pub const OVERLINE: Self = Self(4);
+    pub fn underline(self) -> bool {
+        self.0 & 1 != 0
+    }
+    pub fn strike(self) -> bool {
+        self.0 & 2 != 0
+    }
+    pub fn overline(self) -> bool {
+        self.0 & 4 != 0
+    }
+}
+
+/// 装饰线样式（CSS text-decoration-style）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
+pub enum TextDecoStyle {
+    #[default]
+    Solid = 0,
+    Dashed = 1,
+    Dotted = 2,
+    Double = 3,
+}
+
+/// 装饰线（v1.8：CSS3 text-decoration shorthand）。
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct RichDeco {
-    pub underline: bool,
-    pub strike: bool,
+    pub lines: TextDecoLines,
+    pub style: TextDecoStyle,
+    pub color: Option<[f32; 4]>,
+    pub thickness: Option<f32>,
 }
 
 /// 行内图垂直对齐（简化：baseline 默认底边贴基线）。
@@ -193,12 +226,12 @@ pub fn parse_rich_markup(
                     }
                     "u" => {
                         let mut e = cur;
-                        e.deco.underline = true;
+                        e.deco.lines.0 |= TextDecoLines::UNDERLINE.0;
                         push_open(&mut stack, &mut tag_stack, e, name);
                     }
                     "s" | "del" | "strike" => {
                         let mut e = cur;
-                        e.deco.strike = true;
+                        e.deco.lines.0 |= TextDecoLines::LINE_THROUGH.0;
                         push_open(&mut stack, &mut tag_stack, e, name);
                     }
                     "span" => {
@@ -383,12 +416,28 @@ fn apply_inline_style(eff: &mut Eff, style_attr: &str) {
                 _ => {}
             },
             "text-decoration" => {
-                if val.contains("underline") {
-                    eff.deco.underline = true;
+                // CSS3 shorthand: "underline dashed red 2px"（line style color thickness 任意序）
+                let mut deco = RichDeco::default();
+                for tok in val.split_whitespace() {
+                    match tok {
+                        "underline" => deco.lines.0 |= TextDecoLines::UNDERLINE.0,
+                        "line-through" => deco.lines.0 |= TextDecoLines::LINE_THROUGH.0,
+                        "overline" => deco.lines.0 |= TextDecoLines::OVERLINE.0,
+                        "dashed" => deco.style = TextDecoStyle::Dashed,
+                        "dotted" => deco.style = TextDecoStyle::Dotted,
+                        "double" => deco.style = TextDecoStyle::Double,
+                        "solid" => deco.style = TextDecoStyle::Solid,
+                        "none" => deco.lines = TextDecoLines::NONE,
+                        _ => {
+                            if let Some(c) = crate::style::mapping::parse_color(tok) {
+                                deco.color = Some(c);
+                            } else if let Ok(t) = tok.trim_end_matches("px").parse::<f32>() {
+                                deco.thickness = Some(t);
+                            }
+                        }
+                    }
                 }
-                if val.contains("line-through") {
-                    eff.deco.strike = true;
-                }
+                eff.deco = deco;
             }
             _ => {} // unsupported inline prop 忽略
         }
@@ -425,8 +474,10 @@ mod tests {
             weight: RichWeight::Bold,
             style: RichStyle::Italic,
             deco: RichDeco {
-                underline: true,
-                strike: false,
+                lines: TextDecoLines::UNDERLINE,
+                style: TextDecoStyle::Solid,
+                color: None,
+                thickness: None,
             },
             link_id: Some(7),
         };
@@ -631,8 +682,8 @@ mod tests {
         let runs = parse_rich_markup("<i>a</i><u>b</u><s>c</s>", base(), 0).unwrap();
         assert_eq!(runs.len(), 3);
         assert_eq!(runs[0].style, RichStyle::Italic);
-        assert!(runs[1].deco.underline);
-        assert!(runs[2].deco.strike);
+        assert!(runs[1].deco.lines.underline());
+        assert!(runs[2].deco.lines.strike());
     }
 
     /// 别名标签（strong/em/del/strike）映射到同一样式。
@@ -647,7 +698,122 @@ mod tests {
         assert_eq!(runs.len(), 4);
         assert_eq!(runs[0].weight, RichWeight::Bold);
         assert_eq!(runs[1].style, RichStyle::Italic);
-        assert!(runs[2].deco.strike);
-        assert!(runs[3].deco.strike);
+        assert!(runs[2].deco.lines.strike());
+        assert!(runs[3].deco.lines.strike());
+    }
+
+    /// text-decoration shorthand 解析 underline / line-through / overline 关键字。
+    #[test]
+    fn parse_text_decoration_lines() {
+        for (val, exp_ul, exp_st, exp_ol) in [
+            ("underline", true, false, false),
+            ("line-through", false, true, false),
+            ("overline", false, false, true),
+            ("underline line-through", true, true, false),
+            ("underline overline line-through", true, true, true),
+            ("none", false, false, false),
+        ] {
+            let mut eff = Eff {
+                color: [1.0; 4],
+                size_px: 16,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            };
+            apply_inline_style(&mut eff, &format!("text-decoration:{val}"));
+            assert_eq!(eff.deco.lines.underline(), exp_ul, "underline in '{val}'");
+            assert_eq!(eff.deco.lines.strike(), exp_st, "line-through in '{val}'");
+            assert_eq!(eff.deco.lines.overline(), exp_ol, "overline in '{val}'");
+        }
+    }
+
+    /// text-decoration shorthand 解析 style 关键字（solid/dashed/dotted/double）。
+    #[test]
+    fn parse_text_decoration_style() {
+        for (val, exp_style) in [
+            ("solid", TextDecoStyle::Solid),
+            ("dashed", TextDecoStyle::Dashed),
+            ("dotted", TextDecoStyle::Dotted),
+            ("double", TextDecoStyle::Double),
+        ] {
+            let mut eff = Eff {
+                color: [1.0; 4],
+                size_px: 16,
+                weight: RichWeight::Normal,
+                style: RichStyle::Normal,
+                deco: RichDeco::default(),
+                link_id: None,
+            };
+            apply_inline_style(&mut eff, &format!("text-decoration:underline {val}"));
+            assert_eq!(eff.deco.style, exp_style, "style in '{val}'");
+        }
+    }
+
+    /// text-decoration shorthand 解析独立色（parse_color）。
+    #[test]
+    fn parse_text_decoration_color() {
+        let mut eff = Eff {
+            color: [1.0; 4],
+            size_px: 16,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+            link_id: None,
+        };
+        apply_inline_style(&mut eff, "text-decoration:underline #ff0000");
+        assert!(eff.deco.lines.underline());
+        assert_eq!(eff.deco.color, Some([1.0, 0.0, 0.0, 1.0]));
+    }
+
+    /// text-decoration shorthand 解析独立粗细（number+px）。
+    #[test]
+    fn parse_text_decoration_thickness() {
+        let mut eff = Eff {
+            color: [1.0; 4],
+            size_px: 16,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+            link_id: None,
+        };
+        apply_inline_style(&mut eff, "text-decoration:underline 3px");
+        assert_eq!(eff.deco.thickness, Some(3.0));
+    }
+
+    /// text-decoration shorthand 全关键字（line + style + color + thickness 任意序）。
+    #[test]
+    fn parse_text_decoration_shorthand_full() {
+        let mut eff = Eff {
+            color: [1.0; 4],
+            size_px: 16,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+            link_id: None,
+        };
+        apply_inline_style(&mut eff, "text-decoration:underline dashed #00ff00 2px");
+        assert!(eff.deco.lines.underline());
+        assert_eq!(eff.deco.style, TextDecoStyle::Dashed);
+        assert_eq!(eff.deco.color, Some([0.0, 1.0, 0.0, 1.0]));
+        assert_eq!(eff.deco.thickness, Some(2.0));
+    }
+
+    /// text-decoration shorthand "none" 清除所有装饰线。
+    #[test]
+    fn parse_text_decoration_none_clears_lines() {
+        let mut eff = Eff {
+            color: [1.0; 4],
+            size_px: 16,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco {
+                lines: TextDecoLines::UNDERLINE,
+                ..RichDeco::default()
+            },
+            link_id: None,
+        };
+        apply_inline_style(&mut eff, "text-decoration:none");
+        assert_eq!(eff.deco.lines.0, 0);
     }
 }

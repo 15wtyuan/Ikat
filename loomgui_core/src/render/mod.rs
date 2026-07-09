@@ -1345,66 +1345,113 @@ fn build_text_mesh(
                     bp.3.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
                 }
             }
-            // 装饰线（下划线 / 删除线）：纯色 quad，用 atlas 唯一白像素 × per-vertex
-            // color = run.color（atlas .r × vertex color 即纯色，无需改 shader）。
-            // 度量走 run 主字体（run 级样式，非 per-glyph 回退）。
-            if run.deco.underline || run.deco.strike {
+            // 装饰线（v1.8：underline/line-through/overline + solid/dashed/dotted/double + 独立色/粗细）。
+            // 纯色 quad，用 atlas 唯一白像素 × per-vertex color = run 色。
+            if run.deco.lines.0 != 0 {
                 if let Some(x0) = run_x_start {
                     let solid = atlas.ensure_solid();
                     let face = &fonts.font_by_id(run.font_id).face;
                     let units = face.units_per_em().max(1) as f32;
                     let scale = run.font_size / units;
-                    let thickness = (face
+                    let font_thickness = (face
                         .underline_metrics()
                         .map(|m| m.thickness as f32 * scale)
                         .unwrap_or(1.0))
                     .max(1.0);
-                    // underline 偏移：从字体 underline_metrics.position（y-up 下负值）
-                    // 加到 baseline 得到 design y-down 下"高于基线"的坐标；
-                    // 经 Unity root-stage y-flip 后，屏幕上看就是基线下方。
-                    // strike 偏移：baseline 上方 0.25×font_size（视觉贯穿字形中段）。
-                    let deco_offsets: [Option<f32>; 2] = [
-                        run.deco.underline.then_some(
-                            line.baseline
-                                + face
-                                    .underline_metrics()
-                                    .map(|m| m.position as f32 * scale)
-                                    .unwrap_or(run.font_size * 0.1),
-                        ),
-                        run.deco
-                            .strike
-                            .then_some(line.baseline - run.font_size * 0.25),
-                    ];
+                    let deco_color = run.deco.color.unwrap_or(run.color);
+                    let deco_thick = run.deco.thickness.unwrap_or(font_thickness);
                     let x1 = x0 + run_w;
-                    for y_opt in deco_offsets.iter().flatten() {
-                        let y_top = *y_opt + rect.y;
-                        let y_bot = y_top + thickness;
-                        let entry = base_pages
-                            .entry(solid.page)
-                            .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
-                        let base = entry.0.len() as u32;
-                        // 顶点序：BL, BR, TR, TL（与字形 quad 同序，CCW winding）。
-                        entry.0.push([x0 + rect.x, y_bot]);
-                        entry.0.push([x1 + rect.x, y_bot]);
-                        entry.0.push([x1 + rect.x, y_top]);
-                        entry.0.push([x0 + rect.x, y_top]);
-                        // UV：BL→(u0,v1), BR→(u1,v1), TR→(u1,v0), TL→(u0,v0)
-                        //（白像素 atlas 各 UV 值等价，方向匹配即可）。
-                        entry.1.push([solid.u0, solid.v1]);
-                        entry.1.push([solid.u1, solid.v1]);
-                        entry.1.push([solid.u1, solid.v0]);
-                        entry.1.push([solid.u0, solid.v0]);
-                        for _ in 0..4 {
-                            entry.2.push(run.color);
+                    // 各线 y 坐标（node-local y-down）：
+                    // underline = baseline + font underline offset（字体度量）
+                    // line-through = baseline 上方 0.25×font_size（贯穿字形中段）
+                    // overline = line 顶边紧靠行顶
+                    let underline_y = line.baseline
+                        + face
+                            .underline_metrics()
+                            .map(|m| m.position as f32 * scale)
+                            .unwrap_or(run.font_size * 0.1);
+                    let strike_y = line.baseline - run.font_size * 0.25;
+                    let overline_y = line.y + deco_thick * 0.5;
+                    let line_infos: [(f32, bool); 3] = [
+                        (underline_y, run.deco.lines.underline()),
+                        (strike_y, run.deco.lines.strike()),
+                        (overline_y, run.deco.lines.overline()),
+                    ];
+                    for (line_y, enabled) in line_infos {
+                        if !enabled {
+                            continue;
                         }
-                        entry.3.extend_from_slice(&[
-                            base,
-                            base + 1,
-                            base + 2,
-                            base,
-                            base + 2,
-                            base + 3,
-                        ]);
+                        match run.deco.style {
+                            crate::text::rich::TextDecoStyle::Solid => {
+                                emit_deco_quad(
+                                    x0,
+                                    x1,
+                                    rect.x,
+                                    rect.y,
+                                    line_y,
+                                    deco_thick,
+                                    deco_color,
+                                    &solid,
+                                    &mut base_pages,
+                                );
+                            }
+                            crate::text::rich::TextDecoStyle::Dashed => {
+                                emit_deco_segments(
+                                    x0,
+                                    x1,
+                                    rect.x,
+                                    rect.y,
+                                    line_y,
+                                    deco_thick,
+                                    deco_color,
+                                    6.0,
+                                    3.0,
+                                    &solid,
+                                    &mut base_pages,
+                                );
+                            }
+                            crate::text::rich::TextDecoStyle::Dotted => {
+                                emit_deco_segments(
+                                    x0,
+                                    x1,
+                                    rect.x,
+                                    rect.y,
+                                    line_y,
+                                    deco_thick,
+                                    deco_color,
+                                    2.0,
+                                    2.0,
+                                    &solid,
+                                    &mut base_pages,
+                                );
+                            }
+                            crate::text::rich::TextDecoStyle::Double => {
+                                let offset = deco_thick * 0.6;
+                                let half_thick = deco_thick * 0.4;
+                                emit_deco_quad(
+                                    x0,
+                                    x1,
+                                    rect.x,
+                                    rect.y,
+                                    line_y - offset,
+                                    half_thick,
+                                    deco_color,
+                                    &solid,
+                                    &mut base_pages,
+                                );
+                                emit_deco_quad(
+                                    x0,
+                                    x1,
+                                    rect.x,
+                                    rect.y,
+                                    line_y + offset,
+                                    half_thick,
+                                    deco_color,
+                                    &solid,
+                                    &mut base_pages,
+                                );
+                            }
+                        }
                     }
                 } // if let Some(x0)
             }
@@ -1477,6 +1524,72 @@ fn build_text_mesh(
         base,
         back_layers,
         front_layers,
+    }
+}
+
+/// 单条实心装饰线 quad：全宽矩形，色 per-vertex。
+fn emit_deco_quad(
+    x0: f32,
+    x1: f32,
+    rx: f32,
+    ry: f32,
+    line_y: f32,
+    thick: f32,
+    color: [f32; 4],
+    solid: &crate::text::atlas::GlyphRect,
+    pages: &mut std::collections::BTreeMap<
+        u32,
+        (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>),
+    >,
+) {
+    let y_top = line_y + ry;
+    let y_bot = y_top + thick;
+    let entry = pages
+        .entry(solid.page)
+        .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+    let base = entry.0.len() as u32;
+    entry.0.push([x0 + rx, y_bot]);
+    entry.0.push([x1 + rx, y_bot]);
+    entry.0.push([x1 + rx, y_top]);
+    entry.0.push([x0 + rx, y_top]);
+    entry.1.push([solid.u0, solid.v1]);
+    entry.1.push([solid.u1, solid.v1]);
+    entry.1.push([solid.u1, solid.v0]);
+    entry.1.push([solid.u0, solid.v0]);
+    for _ in 0..4 {
+        entry.2.push(color);
+    }
+    entry
+        .3
+        .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+/// 分段装饰线（dashed / dotted）：沿 x 分段画 quad，段长 + 间隔循环。
+fn emit_deco_segments(
+    x_start: f32,
+    x_end: f32,
+    rx: f32,
+    ry: f32,
+    line_y: f32,
+    thick: f32,
+    color: [f32; 4],
+    seg_len: f32,
+    gap_len: f32,
+    solid: &crate::text::atlas::GlyphRect,
+    pages: &mut std::collections::BTreeMap<
+        u32,
+        (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>),
+    >,
+) {
+    let step = seg_len + gap_len;
+    let mut x = x_start;
+    while x < x_end {
+        let seg_end = (x + seg_len).min(x_end);
+        let seg_w = seg_end - x;
+        if seg_w > 0.0 {
+            emit_deco_quad(x, seg_end, rx, ry, line_y, thick, color, solid, pages);
+        }
+        x += step;
     }
 }
 
