@@ -236,7 +236,7 @@ struct Node {
 taffy 对"尺寸取决于内容"的节点回调 `MeasureFunc(known_dimensions) -> measured_size`：
 - **文本**：调文本测量子模块（§8），给定约束宽返回 `(text_width, text_height)`。必须廉价、无副作用（auto-size/shrink 反复调用）。
 - **图片**：原始像素尺寸或声明尺寸。
-- **RichText 内联对象**：在测量回调内部 query 每个 img/input 的 (w,h) 参与断行（不经 taffy）。**内联对象纯 intrinsic 尺寸**——(w,h) 来自声明 px 或纹理像素，不得用 `%`/`flex`（否则测量回调死循环），带 `%`/`flex` 是编译期错误。异步纹理加载不触发重布局。
+- **RichText 内联对象**：v1.7 走 `display:block` div desugar（见 fence §2.5）——parse 期捕获 inner HTML，desugar 期 `parse_rich_markup` → runs（含 `Image` run），`measure_rich_text` 算 inline flow（行内图作为 run 参与，**非测量回调 query**）。**内联对象纯 intrinsic 尺寸**——(w,h) 来自声明 px，不得用 `%`/`flex`。
 
 ### 6.3 响应式与异形屏
 - **resize**：屏幕尺寸变 → 根 taffy 节点 size 变 → 整树 solve。
@@ -368,7 +368,7 @@ struct Glyph { glyph_id, codepoint, x, y, bearing_x, bearing_y }   // 绝对坐�
 
 **跨 FFI 时 SOA 三表化**（§13.3）：`glyphs_soa[]`（每项=glyph_id/x/y/bearing_x/bearing_y）、`runs_soa[]`（每 run=glyph 起止+font_id+font_size+format）、`lines_soa[]`（每行=run 起止+y/height/baseline/width）。Text payload 带六个 u32 指向三表切片。富文本内联对象加第 4 张 `objects_soa[]`。
 
-> **实测勘误（当前实现 ≠ 上述设计）**：上面的三表 SOA + bearing + `objects_soa` 是**设计目标形态**，当前实现**尚未达到**。实际 blob 每字形只序列化 `{codepoint, x, pen_y}`（`loomgui_ffi_c/src/blob.rs:209-214`），无 bearing（由 Unity `CharacterInfo` 提供）、无三表分离、无 inline_objects（富文本 v1.7 未做）。差距源于"光栅化在后端"——bearing/UV 都是后端从 Unity 字体 API 取。**v1.6 字体搬进核心后**，text_arena 将带 per-glyph UV+quad（或直接走 mesh_arena），届时向本设计形态收敛，blob 升版。
+> **实测勘误（v1.6 后实现 ≠ 上述早期设计）**：上面的三表 SOA + `objects_soa` 是**早期设想，未采用**。**v1.6 字体搬进核心后**，text/rich 走 `mesh_arena`——核心产 per-glyph quad（verts/uvs/colors/indices）+ `image_path=loomgui://font-atlas/p{page}`（program=1），后端 GO 镜像 mesh + SyncFontAtlas 注入 atlas texture。bearing/UV **全核心产**（ttf-parser + ab_glyph 光栅 + etagere atlas），不再依赖后端字体 API。v1.7 rich text 同走 `build_text_mesh`（per-run color/size/weight/style + 行内图 image_path + 装饰线 quad）。**blob 列结构**（§13.3）是 SOA 公共头 + mesh_arena/text_arena，非三表分离。
 
 ### 8.3 测量的可重入性
 auto-size/shrink 反复测。`measure(known_dimensions)` 必须廉价、无副作用、可被 taffy 反复调用。测量与渲染用**同一套字体度量**（同一 ttf）。
