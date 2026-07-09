@@ -849,12 +849,15 @@ fn parse_one_text_shadow(spec: &str) -> Option<crate::text::font_effect::FontEff
     let ox = parse_number(parts[0].trim_end_matches("px"))?;
     let oy = parse_number(parts[1].trim_end_matches("px"))?;
     // 第 3 段可能是 blur（数值）或 color；blur 省略时 color 在索引 2。
-    let (blur, color_idx) =
-        if parts.len() >= 3 && parts[2].trim_end_matches("px").parse::<f32>().is_ok() {
-            (parse_number(parts[2].trim_end_matches("px"))?, 3)
-        } else {
-            (0.0, 2)
-        };
+    // 检查与取值同用 parse_number（一致：均剥 "px" + 拒 '%'，避免检查用 f32::parse 而取值
+    // 用 parse_number 的双路径不一致）。
+    let (blur, color_idx) = match parts
+        .get(2)
+        .and_then(|s| parse_number(s.trim_end_matches("px")))
+    {
+        Some(b) => (b, 3),
+        None => (0.0, 2),
+    };
     // color 缺省（索引越界）→ 默认黑；color 存在但解析失败 → 整段非法。
     let color = match parts.get(color_idx).copied() {
         None => [0.0, 0.0, 0.0, 1.0],
