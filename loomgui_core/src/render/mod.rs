@@ -981,9 +981,10 @@ struct TextMeshes {
     /// 先声明者在 nodes vec 中更靠前（先绘 = 更下层）。每项 = (atlas 页号, verts, uvs, colors, indices)。
     /// 复用 BOX_SHADOW_FLAG + propagate_box_shadow_sort_keys 机制。
     back_layers: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
-    /// stroke Front layer（每个 Stroke effect 一组，erode 后处理字形，同位置，描边色）。
+    /// Front layers（text-stroke + font-effect:blur），按 text_effects 声明顺序入列。
     /// 每项 = (atlas 页号, verts, uvs, colors, indices)；call site 据此推 Front layer RenderNode。
-    stroke_front: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
+    /// 复用 TEXT_STROKE_FRONT_FLAG + propagate_text_stroke_sort_keys 机制。
+    front_layers: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
 }
 
 /// 把 TextLayout 每字形展成 quad mesh：4 顶点 + 6 索引，UV 指向核心 atlas。
@@ -1077,10 +1078,26 @@ fn build_text_mesh(
             _ => None,
         })
         .collect();
-    // 每个 stroke pattern 一组按 atlas 页分组的 mesh（最终 flatten 成 stroke_front）。
+    // 每个 stroke pattern 一组按 atlas 页分组的 mesh（最终 flatten 成 Front layer）。
     let mut stroke_pages: Vec<
         BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
     > = stroke_patterns.iter().map(|_| BTreeMap::new()).collect();
+    // Blur Front layer：每个 Blur effect 的 sig 注册到 atlas（gaussian_blur 后处理），
+    // glyph quad 同位置（无偏移），顶点色 = run.color（blur 无自有颜色——它是字形自身的模糊）。
+    let blur_patterns: Vec<(u64,)> = text_effects
+        .iter()
+        .filter_map(|e| match e {
+            FontEffect::Blur { w: _ } => {
+                let sig = crate::text::font_effect::effect_sig(&[*e]);
+                atlas.register_effect(sig, *e);
+                Some((sig,))
+            }
+            _ => None,
+        })
+        .collect();
+    let mut blur_pages: Vec<
+        BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
+    > = blur_patterns.iter().map(|_| BTreeMap::new()).collect();
     // base 字形：effect_sig=0（v1.6 既有路径，不过后处理）。
     let mut base_pages: BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> =
         BTreeMap::new();
@@ -1260,6 +1277,42 @@ fn build_text_mesh(
                     }
                     sp.3.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
                 }
+                // Blur Front layer：每个 Blur effect 用各自 sig 的 atlas 槽（gaussian_blur 后处理），
+                // 顶点同位置（无偏移——blur 是字形自身的模糊，非偏移投影），
+                // 顶点色 = run.color（blur 无自有颜色）。bold/italic 不作用于 blur。
+                for (pi, (sig,)) in blur_patterns.iter().enumerate() {
+                    let blur_key = GlyphKey {
+                        font_id: g.font_id,
+                        glyph_id: g.glyph_id,
+                        size_px,
+                        effect_sig: *sig,
+                    };
+                    let br = atlas.ensure(face, blur_key);
+                    if br.px_w == 0 || br.px_h == 0 {
+                        continue;
+                    }
+                    let bp = blur_pages[pi]
+                        .entry(br.page)
+                        .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                    // Blur 同位置（无偏移），atlas 槽与 base 同尺寸（gaussian_blur 不扩边界）。
+                    let left = g.x + g.bearing_x - pad + rect.x;
+                    let top = line.baseline - g.bearing_y - pad + rect.y;
+                    let right = left + br.px_w as f32;
+                    let bottom = top + br.px_h as f32;
+                    let base = bp.0.len() as u32;
+                    bp.0.push([left, bottom]);
+                    bp.0.push([right, bottom]);
+                    bp.0.push([right, top]);
+                    bp.0.push([left, top]);
+                    bp.1.push([br.u0, br.v1]);
+                    bp.1.push([br.u1, br.v1]);
+                    bp.1.push([br.u1, br.v0]);
+                    bp.1.push([br.u0, br.v0]);
+                    for _ in 0..4 {
+                        bp.2.push(run.color);
+                    }
+                    bp.3.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+                }
             }
             // 装饰线（下划线 / 删除线）：纯色 quad，用 atlas 唯一白像素 × per-vertex
             // color = run.color（atlas .r × vertex color 即纯色，无需改 shader）。
@@ -1360,14 +1413,39 @@ fn build_text_mesh(
             _ => {}
         }
     }
-    let stroke_front = stroke_pages
+    let stroke_flat: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> =
+        stroke_pages
+            .into_iter()
+            .flat_map(|m| m.into_iter().map(|(pg, (v, u, c, i))| (pg, v, u, c, i)))
+            .collect();
+    let blur_flat: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> = blur_pages
         .into_iter()
         .flat_map(|m| m.into_iter().map(|(pg, (v, u, c, i))| (pg, v, u, c, i)))
         .collect();
+    // 按 text_effects 声明顺序合并 stroke + blur Front layers；
+    // 先声明者在 front_layers 中更靠前 → sort_key 更小 → 先绘（在下）。
+    // 两者均复用 TEXT_STROKE_FRONT_FLAG（bit 31）合成 id + propagate 机制。
+    let mut front_layers: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> =
+        Vec::new();
+    let mut sti = 0usize;
+    let mut bi = 0usize;
+    for e in text_effects {
+        match e {
+            FontEffect::Stroke { .. } if sti < stroke_flat.len() => {
+                front_layers.push(stroke_flat[sti].clone());
+                sti += 1;
+            }
+            FontEffect::Blur { .. } if bi < blur_flat.len() => {
+                front_layers.push(blur_flat[bi].clone());
+                bi += 1;
+            }
+            _ => {}
+        }
+    }
     TextMeshes {
         base,
         back_layers,
-        stroke_front,
+        front_layers,
     }
 }
 
@@ -1399,7 +1477,7 @@ fn push_text_meshes(
     let TextMeshes {
         base,
         back_layers,
-        stroke_front,
+        front_layers,
     } = meshes;
     // Back layers：按 text_effects 声明顺序推入 nodes vec（先声明先绘 = 更下层）。
     // sort_key 初始 0，由 propagate_box_shadow_sort_keys 后调为 primary.sort_key - 1。
@@ -1523,22 +1601,22 @@ fn push_text_meshes(
             },
         });
     }
-    // stroke Front layer：在 base 之后 push（nodes vec 顺序上 stroke 在 base 之后）。
-    // sort_key 初始 0，由 propagate_text_stroke_sort_keys 后调为 primary.sort_key + 1。
-    // 多 stroke pattern 按 build_text_mesh 产出的顺序入列（声明序），同 pattern 多页
+    // Front layers（stroke + blur）：在 base 之后 push（nodes vec 顺序上 Front 层在 base 之后）。
+    // sort_key 初始 0，由 propagate_text_stroke_sort_keys 后调为 primary.sort_key + n_sub + 1。
+    // 多 Front pattern 按 text_effects 声明顺序入列（front_layers 已按此序），同 pattern 多页
     // 用 synth_text_node_id 编码页号，flag 用 TEXT_STROKE_FRONT_FLAG 标记。
-    for (si, (page, verts, uvs, colors, indices)) in stroke_front.iter().enumerate() {
+    for (si, (page, verts, uvs, colors, indices)) in front_layers.iter().enumerate() {
         if verts.is_empty() {
             continue;
         }
         // 合成 id：TEXT_STROKE_FRONT_FLAG（bit 31）经 synth_text_node_id 编码
         // 为 high byte = 128+si，远高于子页 1-15 和 shadow 16+范围。
         let synth_sub = (TEXT_STROKE_FRONT_FLAG >> 24) + (si as u32);
-        let stroke_id = synth_text_node_id(node_id, synth_sub);
+        let front_id = synth_text_node_id(node_id, synth_sub);
         let path = format!("loomgui://font-atlas/p{}", page);
-        stroke_pairs.push((node_id, stroke_id));
+        stroke_pairs.push((node_id, front_id));
         nodes.push(RenderNode {
-            node_id: stroke_id,
+            node_id: front_id,
             parent_id,
             visible: true,
             alpha,

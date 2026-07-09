@@ -3813,3 +3813,174 @@ fn font_effect_glow_with_shadow_and_stroke_all_emit() {
         front.sort_key
     );
 }
+
+// ── font-effect:blur Front layer（v1.8 Task 11）──
+
+/// Blur 是 Front layer（在 base 之后绘制）。无自有颜色——使用 run.color（字形自身的颜色）。
+/// Front layer sort_key > primary，与 stroke 共享 TEXT_STROKE_FRONT_FLAG 编码。
+#[test]
+fn font_effect_blur_emits_front_layer_quad_with_run_color() {
+    use crate::text::font_effect::FontEffect;
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "A".into(),
+    };
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.style.text_effects = vec![FontEffect::Blur { w: 2.0 }];
+    n.style.color = [0.2, 0.4, 0.6, 1.0]; // run.color
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // Blur is Front layer, uses TEXT_STROKE_FRONT_FLAG (bit 31).
+    let blur_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) != 0)
+        .expect("blur Front RenderNode");
+    let primary_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && (rn.node_id & super::BOX_SHADOW_FLAG) == 0
+                && (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) == 0
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("primary text RenderNode");
+    assert!(
+        blur_rn.sort_key > primary_rn.sort_key,
+        "blur Front sort_key {} > primary {}",
+        blur_rn.sort_key,
+        primary_rn.sort_key
+    );
+    match &blur_rn.payload {
+        NodePayload::Mesh {
+            verts,
+            colors,
+            program,
+            ..
+        } => {
+            assert_eq!(*program, 1);
+            assert!(!verts.is_empty());
+            // Blur has no own color — uses run.color (the glyph itself blurred).
+            for c in colors {
+                assert_eq!(*c, [0.2, 0.4, 0.6, 1.0], "blur uses run.color");
+            }
+            // Blur Front layer has same position as base glyph (no offset).
+            if let NodePayload::Mesh {
+                verts: primary_verts,
+                ..
+            } = &primary_rn.payload
+            {
+                let pv = primary_verts[0];
+                let bv = verts[0];
+                assert!(
+                    (bv[1] - pv[1]).abs() <= 5.0,
+                    "blur no y-offset: bv[1]={}, pv[1]={}",
+                    bv[1],
+                    pv[1]
+                );
+            }
+        }
+        _ => panic!("expected Mesh"),
+    }
+}
+
+/// blur + stroke 共存：两者均为 Front layer，按声明顺序入列。
+/// blur 使用 run.color（无自有颜色），stroke 使用自身的 stroke.color。
+#[test]
+fn font_effect_blur_and_stroke_both_emit_front_layers() {
+    use crate::text::font_effect::FontEffect;
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "B".into(),
+    };
+    n.style.font_size = 16.0;
+    n.style.text_effects = vec![
+        FontEffect::Blur { w: 2.0 },
+        FontEffect::Stroke {
+            w: 2.0,
+            color: [1.0, 0.0, 0.0, 1.0],
+        },
+    ];
+    n.style.color = [0.1, 0.3, 0.5, 1.0]; // run.color
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let front_count = frame
+        .nodes
+        .iter()
+        .filter(|rn| (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) != 0)
+        .count();
+    assert_eq!(front_count, 2, "blur + stroke = 2 Front layers");
+    let primary = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            !is_text_sub_page(rn.node_id)
+                && (rn.node_id & super::BOX_SHADOW_FLAG) == 0
+                && (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) == 0
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
+        })
+        .expect("primary");
+    let front_nodes: Vec<_> = frame
+        .nodes
+        .iter()
+        .filter(|rn| (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) != 0)
+        .collect();
+    for fn_rn in &front_nodes {
+        assert!(
+            fn_rn.sort_key > primary.sort_key,
+            "Front layer sort_key {} > primary {}",
+            fn_rn.sort_key,
+            primary.sort_key
+        );
+    }
+    // blur 先声明 → 第一 Front 节点颜色 = run.color。
+    if let NodePayload::Mesh { colors, .. } = &front_nodes[0].payload {
+        assert_eq!(colors[0], [0.1, 0.3, 0.5, 1.0], "blur uses run.color first");
+    }
+    // stroke 第二 → 颜色 = stroke.color 红色。
+    if let NodePayload::Mesh { colors, .. } = &front_nodes[1].payload {
+        assert_eq!(colors[0], [1.0, 0.0, 0.0, 1.0], "stroke red second");
+    }
+}
