@@ -82,3 +82,6 @@ samples/CLAUDE.md
 samples/.claude/
 samples/*/*.artifact.json
 samples/.od-skills
+
+# superpowers SDD scratch (briefs/reports/review diffs — session-local, not source)
+.superpowers/
