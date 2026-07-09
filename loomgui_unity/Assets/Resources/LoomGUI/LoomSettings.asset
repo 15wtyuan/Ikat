@@ -18,19 +18,24 @@ MonoBehaviour:
   fonts:
   - familyName: JetBrainsMono
     sourceFileName: JetBrainsMono.ttf
-    isDefault: 0
+    isDefault: 1
+    isFallback: 0
   - familyName: DejaVuSans
     sourceFileName: DejaVuSans.ttf
-    isDefault: 1
+    isDefault: 0
+    isFallback: 0
   - familyName: LXGWWenKai
     sourceFileName: LXGWWenKai.ttf
     isDefault: 0
+    isFallback: 1
   - familyName: PressStart2P
     sourceFileName: PressStart2P.ttf
     isDefault: 0
+    isFallback: 0
   - familyName: wqy-microhei
     sourceFileName: wqy-microhei.ttc
     isDefault: 0
+    isFallback: 0
   packages:
   - pkgName: showcase
     sourceDir: showcase

@@ -65,9 +65,17 @@ fn reorder_unit(scene: &Scene, nodes: &[RenderNode], unit: &mut Vec<usize>) {
         return;
     }
     // nodes 0 基位置 → scene NodeId（经 RenderNode.node_id 桥接）→ scene.get 取 layout_rect。
+    // 合成 id（行内图 image mesh / text 跨页子页）不在 scene：零面积兜底，不参与
+    // AABB 重叠判断，也绝不 panic（.expect 会 non-unwinding abort 拖垮宿主进程）。
+    // 行内图位置已由 build 期 mesh verts 固定，reorder 只按 draw_state（image_path）归批。
     let aabb_of = |pos: usize| -> Rect {
         let nid = NodeId(nodes[pos].node_id);
-        scene.get(nid).expect("live node").layout_rect
+        scene.get(nid).map(|n| n.layout_rect).unwrap_or(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+        })
     };
     for i in 1..n {
         let cur = unit[i];

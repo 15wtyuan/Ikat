@@ -49,7 +49,7 @@
 
 | 属性 | 值约束 | 出处 | 标注 |
 |---|---|---|---|
-| `display` | `none`/其他→Flex（无 grid） | mapping.rs:425-431 | 【实证】 |
+| `display` | `none`/其他→Flex（无 grid）；**inline `display:block` div → v1.7 富文本叶 desugar（§2.5，走 dom.rs 非 apply_decl）** | mapping.rs:425-431 + dom.rs | 【实证】 |
 | `flex-direction` | row/row-reverse/column/column-reverse | mapping.rs:385-393 | 【实证】 |
 | `flex-wrap` | wrap/nowrap | mapping.rs:394-400 | 【实证】 |
 | `gap` | 四值展开取前两 | mapping.rs:377-384 | 【实证】 |
@@ -127,6 +127,18 @@
 | `font-style` | 无 handler，静默忽略 | 【实证】 |
 | `border-style`（dashed/dotted） | 简写只取宽度，style 丢 | 【实证】 |
 | `@media` | AtRuleParser 拒（parse/css.rs:58-63） | 【实证】 |
+
+### 2.5 v1.7 富文本围栏（display:block desugar）
+
+**触发**：`<div style="display:block">inline 内容</div>`——inline style 含 `display:block` 且 tag=div，parse 期（`dom.rs:is_inline_display_block`）捕获 inner HTML 原文，desugar 期 `parse_rich_markup`→runs，build_scene 覆盖 kind 为 `NodeKind::RichText`。**class 的 display:block 不触发**（MVP：parse 期未 cascade，只认 inline style）。
+
+**富内容标记子集**（`text/rich.rs:parse_rich_markup`，block div 内 / 动态 `set_rich_text` 串）：`b`/`strong`(粗)、`i`/`em`(斜)、`u`(下划)、`s`/`del`/`strike`(删)、`span`(内联样式容器，**唯一解析 style attr**)、`a`(链接，link_id=1-based 文档序，**href 不存**，业务侧挂 onClickLink)、`img`(行内图，src/width/height/vertical-align)、`br`(换行)。嵌套栈式 cascade。未知/未闭合/围栏外标记 → Err（静态打包拒 + 动态 set_rich_text 返 -1）。
+
+**span 内联样式子集**（`apply_inline_style`）：`color`/`font-size`/`font-weight`/`font-style`/`text-decoration`。颜色支持 `#rrggbb` + `#rgb`（3 位展开，坑 140，parse_color 统一）。未识别属性静默忽略。**`b/i/u/s` 不解析 style attr**（只 span）。
+
+**block div 盒属性**（bg/border/padding/text-align/overflow）留 flex div；文本属性（color/font-*/line-height/text-decoration）级联进 rich 叶 base_style。desugar 拒收 block div 上的 flex 属性。
+
+**【实证】**：`fence_contract.rs`（`block_div_captures_raw_rich` / `class_based_display_block_does_not_trigger_rich_at_parse` / `rejects_fence_out_element`）。
 
 ---
 

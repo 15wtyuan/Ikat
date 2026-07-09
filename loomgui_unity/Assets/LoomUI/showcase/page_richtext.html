@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<base href="..">
+<link rel="stylesheet" href="showcase/preview/preview-base.css">
+<script src="showcase/preview/loom-preview.js"></script>
+<title>富文本 · v1.7</title>
+<style>
+/* page_richtext 组件 CSS（D6 组件隔离）—— v1.7 富文本 showcase。
+   富文本叶 = <div style="display:block">inline 标记</div>（display:block 必须 inline 写，
+   class 的 display:block MVP 不触发 rich）。.rt 只设盒/文本通用样式，display 由 inline 触发。 */
+.root{width:1080px;height:1920px;background-color:#1a1d2e;}
+.header{background-color:#252839;border-bottom:2px solid #3a3f55;padding:20px;gap:14px;flex-direction:row;align-items:center;justify-content:space-between;}
+.title{color:#e0e0e0;font-size:32px;font-weight:700;}
+.back{background-color:#2d3148;border:1px solid #3a3f55;padding:10px 16px;color:#9aa0b4;font-size:18px;}
+.back:hover{background-color:#3a4258;color:#5fb2c4;border:1px solid #5fb2c4;}
+.back:active{transform:scale(0.96);}
+.scroll{flex-grow:1;overflow-y:scroll;}
+.content{gap:16px;padding:24px;}
+.sec{gap:16px;}
+.sec-h{color:#5fb2c4;font-size:28px;font-weight:700;border-bottom:1px solid #3a3f55;padding-bottom:8px;}
+.card{background-color:#252839;border:1px solid #3a3f55;padding:16px;gap:12px;}
+.card-h{flex-direction:row;justify-content:space-between;align-items:center;}
+.card-t{color:#e0e0e0;font-size:22px;font-weight:700;}
+.card-x{color:#9aa0b4;font-size:14px;}
+/* 富文本块通用样式（不含 display —— display:block 由 inline style 触发，MVP 限制） */
+.rt{background-color:#1a1d2e;padding:14px;color:#e0e0e0;font-size:20px;line-height:1.6;}
+.rt-tight{background-color:#1a1d2e;padding:14px;color:#e0e0e0;font-size:20px;line-height:1.4;}
+.swap-btn{background-color:#2d3148;border:1px solid #5fb2c4;padding:10px 16px;color:#5fb2c4;font-size:18px;}
+.swap-btn:hover{background-color:#3a4258;}
+.swap-btn:active{transform:scale(0.96);}
+</style>
+</head>
+<body>
+<div class="root">
+  <div class="header">
+    <div class="title">富文本 · v1.7</div>
+    <div class="back" id="back-home">← 返回</div>
+  </div>
+  <div class="scroll" id="page-scroll">
+    <div class="content">
+
+      <div class="sec">
+        <div class="sec-h">§1 多色多字号 · 聊天卡片</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">系统播报</span><span class="card-x">per-run color/size</span></div>
+          <div class="rt" style="display:block"><span style="color:#ffd700;font-weight:bold">大神</span><span style="color:#888;font-size:14px">[武林盟]</span> 击杀了 <span style="color:#5fb2c4;font-weight:bold">世界 BOSS</span>，全服震动！</div>
+        </div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">获得物品</span><span class="card-x">行内图 + 超链接</span></div>
+          <div class="rt" style="display:block">获得 <img src="res/icons/zap.png" width="22" height="22" vertical-align="middle"/> <a href="item://sword">烈焰之剑</a> x1！</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h">§2 粗体 / 斜体 / 嵌套 flatten</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">字体样式</span><span class="card-x">b/i + 栈式 cascade</span></div>
+          <div class="rt" style="display:block">普通文本 · <b>粗体</b> · <i>斜体</i> · <b>粗中含<i>粗斜</i>嵌套</b> · <span style="font-weight:bold;font-style:italic">span 粗斜</span></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h">§3 下划线 / 删除线</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">装饰线</span><span class="card-x">u / s / text-decoration</span></div>
+          <div class="rt" style="display:block"><u>下划线文本</u> · <s>删除线文本</s> · <span style="text-decoration:underline line-through">下划兼删除</span> · <del>del 标签</del></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h">§4 行内图 · vertical-align</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">图标对齐</span><span class="card-x">baseline / middle / top</span></div>
+          <div class="rt" style="display:block">底基线 <img src="res/icons/zap.png" width="24" height="24"/> · 居中 <img src="res/icons/zap.png" width="24" height="24" vertical-align="middle"/> · 顶部 <img src="res/icons/zap.png" width="24" height="24" vertical-align="top"/></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h">§5 超链接 · 跨行命中</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">可点击链接</span><span class="card-x">a href · fragment 拆段</span></div>
+          <div class="rt" style="display:block">点击 <a href="page://home">返回首页</a> 或 <a href="item://sword">查看烈焰之剑</a>。跨行长链接测试：<a href="long://demo">这是一个故意写得很长的超链接用来验证跨行时 fragment 矩形是否被正确拆分成多段命中区域</a>。</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h">§6 CJK 中英混排</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">富文本内断行</span><span class="card-x">CJK 逐字 + Latin 逐词</span></div>
+          <div class="rt" style="display:block">LoomGUI v1.7 富文本支持 mixed 中英混排 line breaking，CJK 逐字断行、ASCII 按词断行。这段文字 mixed 了 English words 和中文汉字，并且包含 <span style="color:#5fb2c4">彩色 run</span> 与 <b>粗体 run</b>，验证富文本 inline flow 在同一段落内对两种字符类别采用不同的断行策略。</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h">§7 br 强制换行</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">硬换行</span><span class="card-x">br 强制换行标签</span></div>
+          <div class="rt-tight" style="display:block">第一行文本<br/>第二行文本<br/>第三行文本 · 同一段内的强制换行</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h">§8 物品 tooltip（综合）</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">传说装备</span><span class="card-x">多色属性 + 粗斜 + 链接</span></div>
+          <div class="rt" style="display:block;text-align:center"><span style="color:#ffd700;font-size:26px;font-weight:bold">【传说】烈焰之剑</span></div>
+          <div class="rt" style="display:block">攻击 <span style="color:#3f6;font-weight:bold">+120</span>　防御 <span style="color:#3f6;font-weight:bold">+50</span>　暴击 <span style="color:#3f6;font-weight:bold">+15%</span></div>
+          <div class="rt" style="display:block"><span style="color:#aaa;font-style:italic">"传闻此剑蕴含烈焰之力，唯有勇者方能驾驭……"</span></div>
+          <div class="rt" style="display:block"><a href="detail://sword">查看详情</a></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h">§9 动态富文本</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">运行时换内容</span><span class="card-x">set_rich_text + onClickLink</span></div>
+          <button class="swap-btn" id="rich-swap">换内容 →</button>
+          <div class="rt" style="display:block" id="rich-dynamic">初始内容：点击"换内容"按钮切换预设段落，或点此 <a href="swap://link-1">链接</a> 触发 onClickLink。</div>
+          <div class="rt-tight" id="rich-log" style="display:block;color:#5fb2c4;font-size:14px">链接点击日志：（点上方链接）</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h">§10 边界 · 无底色 / 对齐 / span 嵌套</div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">无底色</span><span class="card-x">无 bg-color 不画 bg quad</span></div>
+          <div style="display:block;color:#e0e0e0;font-size:20px;line-height:1.6">这段富文本无 background-color（验证无底色时不画 bg quad，文字直接叠在 card 底色上）。</div>
+        </div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">text-align</span><span class="card-x">left / center / right</span></div>
+          <div class="rt" style="display:block;text-align:center"><span style="color:#5fb2c4">居中</span>对齐的富文本</div>
+          <div class="rt" style="display:block;text-align:right">右对齐的富文本</div>
+        </div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">span 嵌套</span><span class="card-x">栈式 cascade · 内层继承外层</span></div>
+          <div class="rt" style="display:block">普通 <span style="color:#ffd700">金色 <span style="font-size:26px">大字</span> 回归</span> 普通</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

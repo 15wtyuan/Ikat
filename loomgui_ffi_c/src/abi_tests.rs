@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(feature = "parse")]
 use std::ffi::CString;
 
 /// FFI 测试辅助：手搓单组件 pkg（不走 parse），组件名由参数指定。
