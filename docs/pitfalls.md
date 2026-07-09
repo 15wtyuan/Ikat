@@ -1042,3 +1042,22 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：split 后词间补空格 token（advance=space advance；空格无轮廓不画，但占宽 + 词边界断行）。HTML 空白折叠（连续空格→单，split 空 part 跳过）。
 
 **教训**：空格不是"可忽略精度"——占宽 + 断行边界，丢了两都错。MVP 简化别砍关键语义。框架层（rich 文本空格；plain measure_text 若不同需对齐）。
+
+### 坑 146：富文本两个 PlayMode 集成 bug（行内图白方块 + text-align 失效）
+
+**症状**（v1.7 rich text showcase，PlayMode 才现，单测全绿）：
+1. 行内 `<img>` 渲染成白色方块（图没出来）。
+2. `text-align:center/right` 都显示成左对齐。
+
+**根因**：
+1. `scene_to_template`（打包期）只对 `NodeKind::Image` + `background-image` 调 `normalize_path`（剥 `res/` 前缀 + 入 manifest）；**行内图嵌在 `NodeKind::RichText { runs } → RichKind::Image`，顶层 match 不下钻**。src 保持 `res/icons/zap.png` → 运行时 `SpriteResolver.TopDir="res"` 无 folder→atlas 映射 → 默认图集 miss → `GetSprite` 返 null → 白方块（且不入 manifest，Unity 根本没打包进 atlas）。
+2. `measure_rich_text` 签名没有 `align` 参数——`MeasureContext::RichText.align` 在构造时已填，但 measure 闭包调用处用 `..` 把它吞掉了（注释写"T4 边界：rich 不支持对齐"）。glyph/image 永远 `pen_x=0`，无对齐偏移。
+
+**解决**：
+1. `scene_to_template` 加 `NodeKind::RichText` 分支：遍历 runs，对 `RichKind::Image` 的 src 同样 `normalize_path` + 入 manifest + 回写。
+2. `measure_rich_text` 加 `align` 参数，每行（glyph + 同行 image）按容器宽（`max_width`，render 传 `rect.w`）整体偏移；`max_width=None`（不换行）或行宽>容器时不偏。render 调用处传 `s.text_align`。
+
+**教训**：
+- **打包期对每种"带 src 的节点"都要走 normalize + manifest**——`NodeKind::Image` 是顶层，`RichKind::Image` 嵌在 RichText runs 里。新增任何携带图片路径的 NodeKind/Run 都须在 `scene_to_template` 补归一化，否则运行时路径不匹配 → 白方块/缺图。顶层 match 不会自动下钻嵌套结构的子字段。
+- **"已填字段但调用处没读"是隐蔽 bug 源**——`MeasureContext::RichText.align` 构造时赋值却用 `..` 吞掉，单测不覆盖（单测直接调 measure_rich_text 不经 MeasureContext）。富文本对齐只在 PlayMode（经完整 measure 闭包）才显现。坑 131-133 同类：单测绿 ≠ 集成对。
+- **text-align 语义**：要对齐到盒边（rect.w），须在 render 期（知 rect.w）应用，measure 期用 available width 近似——stretch 布局下二者相等。plain `measure_text` 目前对齐基准是 text_width（最宽行），单行短文本同样不生效；rich 修法（对齐 rect.w）比 plain 更对，plain 可后补。
