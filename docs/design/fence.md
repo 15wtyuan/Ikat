@@ -66,7 +66,7 @@
 | `max-width`/`max-height` | px/% | mapping.rs:313-320 | 【实证】 |
 | `padding` | 1-4 值 px（仅 px） | mapping.rs:321-330 | 【实证】 |
 | `margin` | 1-4 值 px/%/auto | mapping.rs:331-340 | 【实证】 |
-| `border`/`border-width` | 简写只取宽度（color/style 丢） | mapping.rs:341-352 | 【实证·待测简写 color 丢弃】 |
+| `border`/`border-width` | 简写：宽度进 taffy + 视觉 `border_width` 渲染描边（四边同宽），color 取 `border-color`；border-style 仅 `solid`（dashed/dotted/double 静默忽略） | mapping.rs:416-426 | 【实证】 |
 | `aspect-ratio` | number | mapping.rs:537-542 | 【实证】 |
 | `position` | `relative`（默认）/`absolute`（v1.4-b 脱离流）；`fixed`/`sticky` 静默忽略 | mapping.rs:557-558 | 【实证】 |
 | `top`/`right`/`bottom`/`left` | px/%（仅 position:absolute 时生效） | mapping.rs:557-558 | 【实证】 |
@@ -78,7 +78,7 @@
 | `background-color` | #rrggbb hex | mapping.rs:444-447 | 【实证】 |
 | `background-image` | url("path") | mapping.rs:448-452 | 【实证】 |
 | `background-size` | 仅 cover/contain/100%（拒两值如 `100% 50%`） | mapping.rs:453-460 | 【实证】 |
-| `border-color` | #rrggbb hex | mapping.rs:461-464 | 【实证】 |
+| `border-color` | #rrggbb hex（v1.8 起渲染彩色边框环，不再零引用） | mapping.rs:572-574 | 【实证】 |
 | `border-radius` | px/% 1-4 值 + `/` 垂直值 | mapping.rs:353-376 | 【实证】 |
 | `opacity` | 0-1 | mapping.rs:465-473 | 【实证】 |
 | `overflow` | visible/hidden/scroll/auto（双轴同设） | mapping.rs:474-481 | 【实证】 |
@@ -98,15 +98,18 @@
 
 | 属性 | 值约束 | 出处 | v1.x 版本 | 标注 |
 |---|---|---|---|---|
-| `filter` | grayscale/brightness/contrast/saturate/hue-rotate/invert/sepia（颜色矩阵，不认 blur/drop-shadow） | mapping.rs:432-436, color_filter.rs | v1.3 | 【实证·待测 blur 拒】 |
-| `border-image-slice` | 1-4 值 px/%（九宫格） | mapping.rs:437-443 | v1.3 | 【实证】 |
+| `filter` | grayscale/brightness/contrast/saturate/hue-rotate/invert/sepia（颜色矩阵，不认 blur/drop-shadow）。sepia v1.8 修：现为正确棕褐矩阵（非 grayscale 占位） | mapping.rs:518-521, color_filter.rs | v1.3→v1.8 | 【实证】 |
+| `border-image-slice` | 1-4 值 px/%（九宫格）。v1.8 修：`%` 值现正确 resolve（乘源图边比例），不再坍缩为像素 | mapping.rs:523-529 | v1.3→v1.8 | 【实证】 |
 | `transition` | `<property> <duration> <easing>`（标准 CSS，映射 GTween） | mapping.rs | v1.5 | 【实证】 |
-
-> **⚠️ 已解析但渲染不生效/坏掉（v1.8 修，见 `docs/roadmap/rmlui-research.md` §2.3/§3.5/§6）**：上表这几项 parse 层接受，但当前渲染层不兑现——AI 依此预测会错：
-> - **`border-color`/`border`/`border-width`**：`border-width` 只进 taffy 占布局，`border-color` render 层**零引用**，**当前根本不画描边**。v1.8 彩色边框补描边渲染。
-> - **`border-image-slice: %`**：`%` 值被存成比例（`25%`→`0.25`）但渲染当像素用，九宫格坍缩；**px 值正常**。v1.8 修 resolve。
-> - **`filter: sepia`**：退化成 grayscale（色相错），其余 filter 函数正常。v1.8 补棕褐矩阵。
-> - **`transition`**：仅 opacity/color/background-color 生效，**不支持 transform 通道**，`ease` 简化为 QuadOut（无 cubic-bezier）。v1.10 补 transform 通道。
+| `border-color` | #rrggbb hex（v1.8 起边框环渲染，见 §2.2） | mapping.rs:572-574 | v1.3→v1.8 | 【实证】 |
+| `background` | `linear-gradient(to <dir>, #hex, #hex)` 2 色 4 正向（to right/left/top/bottom）。多 stop（>2 色）、斜角度、命名色静默忽略 | mapping.rs:550-562 | v1.8 | 【实证】 |
+| `box-shadow` | `ox oy [blur] [spread] color`；blur 静默忽略（几何近似，真模糊推 v1.14+），spread MVP=0 | mapping.rs:738-758 | v1.8 | 【实证】 |
+| `overflow:hidden` + `border-radius` | 圆角裁剪 SDF shader 变体（CLIPPED_ROUNDED），v1.8 新增 | mapping.rs（overflow 已有 arm） | v1.8 | 【实证】 |
+| `text-shadow` | `ox oy [blur] color`，逗号分隔多个。blur 可省（默认 0 = 硬边）。color 仅 #rrggbb（命名色静默拒，整条声明无效） | mapping.rs:760-775 | v1.8 | 【实证】 |
+| `-webkit-text-stroke` | `width color`（px + #rrggbb），内侧吃字 erode，Front layer 在字形上方绘 | mapping.rs:785-805 | v1.8 | 【实证】 |
+| `font-effect` | **LoomGUI 私有 CSS**：`glow(w color), blur(w)`（逗号分隔）。glow=dilate+高斯晕开（Back layer），blur=可分离高斯两 pass。w 仅 px，% 静默忽略 | mapping.rs:807-816 | v1.8 | 【实证】 |
+| `background-clip` / `-webkit-background-clip` | `text` 触发渐变字形（与 `background:linear-gradient` + `color:transparent` 三件套组合）。非 text 值静默忽略（不设 text 模式） | mapping.rs:777-783 | v1.8 | 【实证】 |
+| `text-decoration` | **仅 inline style 生效**：CSS3 shorthand `line style color thickness`（underline/line-through/overline + solid/dashed/dotted/double + color + px 粗细）。`<span style="text-decoration:underline">` 有效；CSS 规则形式（`.cls { text-decoration:underline }`）**静默忽略**（解析在 rich.rs 的 apply_inline_style，非 mapping.rs 的 apply_decl）。见 §2.4 围栏外项 | rich.rs:418-421 | v1.8 | 【实证】 |
 
 ### 2.4 围栏外 CSS 属性（写了不生效/静默忽略，必须测试锁定）
 
@@ -126,6 +129,7 @@
 | `transform: skew()/matrix()` | 显式跳过（mapping.rs:278） | 【实证】 |
 | `font-style` | 无 handler，静默忽略 | 【实证】 |
 | `border-style`（dashed/dotted） | 简写只取宽度，style 丢 | 【实证】 |
+| `text-decoration`（CSS 规则形式 `.cls { ... }`） | 仅 inline style（`<span style="text-decoration:underline">`）生效，CSS 规则形式静默忽略（解析在 rich.rs apply_inline_style，非 mapping.rs apply_decl） | 【实证】 |
 | `@media` | AtRuleParser 拒（parse/css.rs:58-63） | 【实证】 |
 
 ---
@@ -230,7 +234,7 @@
 
 open-design Chromium iframe 预览 ≠ taffy 渲染。AI 须分清：
 
-**可信**（Chrome ≈ LoomGUI）：flex 轴/方向、显式 `display:flex`、`gap` 间距、颜色、opacity、图片、px 尺寸、`background-image`/`background-size`、`border-radius`（标准 CSS，Chrome 原生）。**注：`border`/`border-color` 预览有边框但 LoomGUI 当前不画描边（v1.8 前不可信），见 §2.2 勘误。**
+**可信**（Chrome ≈ LoomGUI）：flex 轴/方向、显式 `display:flex`、`gap` 间距、颜色、opacity、图片、px 尺寸、`background-image`/`background-size`、`border-radius`（标准 CSS，Chrome 原生）。**`border`/`border-color` v1.8 起预览可信**（彩色边框环已渲染）。
 
 **不可信**（Chrome ≠ LoomGUI，别按预览调）：
 - **margin 控间距**：Chrome（block flow）折叠 margin、LoomGUI（flex）求和不折叠。**子项间距用 `gap`**，别用 margin。
