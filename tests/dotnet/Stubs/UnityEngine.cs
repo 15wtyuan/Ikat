@@ -19,5 +19,6 @@ namespace UnityEngine
     public static class Mathf
     {
         public static float Abs(float f) => System.Math.Abs(f);
+        public static float Min(float a, float b) => System.Math.Min(a, b);
     }
 }

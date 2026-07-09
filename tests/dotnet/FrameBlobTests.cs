@@ -190,23 +190,31 @@ namespace LoomGUI.Tests.Core
         {
             var clipTable = new List<byte>();
             clipTable.AddRange(U32(2));  // clip_count = 2
+            // 每条目 52B：ctx(4) + rect x/y/w/h(16) + 8 角半径 tl/tr/br/bl 各 xy(32)。
             clipTable.AddRange(U32(5));  // ctx=5
             clipTable.AddRange(F32(10f)); clipTable.AddRange(F32(20f));
             clipTable.AddRange(F32(100f)); clipTable.AddRange(F32(200f));
+            clipTable.AddRange(F32(8f)); clipTable.AddRange(F32(8f));   // tl
+            clipTable.AddRange(F32(4f)); clipTable.AddRange(F32(4f));   // tr
+            clipTable.AddRange(F32(6f)); clipTable.AddRange(F32(6f));   // br
+            clipTable.AddRange(F32(2f)); clipTable.AddRange(F32(2f));   // bl
             clipTable.AddRange(U32(8));  // ctx=8
             clipTable.AddRange(F32(1f)); clipTable.AddRange(F32(2f));
             clipTable.AddRange(F32(3f)); clipTable.AddRange(F32(4f));
+            for (int i = 0; i < 8; i++) clipTable.AddRange(F32(0f));    // 全 0 半径
 
             var blob = new FrameBlob(V10Header(0, new byte[20][], clipTable: clipTable.ToArray()));
             Assert.Equal(2, blob.ClipCount);
 
-            Assert.True(blob.ClipRect(5, out float x, out float y, out float w, out float h));
+            Assert.True(blob.ClipRect(5, out float x, out float y, out float w, out float h, out float r));
             Assert.Equal(10f, x);
             Assert.Equal(20f, y);
             Assert.Equal(100f, w);
             Assert.Equal(200f, h);
+            // 统一半径 = min(各角 rx/ry) = min(8,4,6,2) = 2。
+            Assert.Equal(2f, r);
 
-            Assert.True(blob.ClipRect(8, out x, out y, out w, out h));
+            Assert.True(blob.ClipRect(8, out x, out y, out w, out h, out r));
             Assert.Equal(1f, x);
             Assert.Equal(2f, y);
             Assert.Equal(3f, w);
@@ -222,7 +230,7 @@ namespace LoomGUI.Tests.Core
             clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(0f));
 
             var blob = new FrameBlob(V10Header(0, new byte[20][], clipTable: clipTable.ToArray()));
-            Assert.False(blob.ClipRect(99, out _, out _, out _, out _));
+            Assert.False(blob.ClipRect(99, out _, out _, out _, out _, out _));
         }
 
         [Fact]
