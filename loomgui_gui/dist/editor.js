@@ -167,10 +167,11 @@
       var delBtn = el("button", "btn-danger-sm", "删除");
       delBtn.addEventListener("click", (function (idx) {
         return function () {
+          var pkgName = ws.packages[idx].name;
           ws.packages.splice(idx, 1);
-          delete autoHtmlCache[ws.packages[idx] ? ws.packages[idx].name : ""];
-          saveIfLoaded();
+          delete autoHtmlCache[pkgName];
           renderPackages();
+          saveIfLoaded();
         };
       })(i));
       nameRow.appendChild(delBtn);
@@ -190,9 +191,9 @@
         rm.addEventListener("click", (function (idx, dirIdx) {
           return function () {
             ws.packages[idx].dirs.splice(dirIdx, 1);
-            saveIfLoaded();
             refreshAutoScans();
             renderPackages();
+            saveIfLoaded();
           };
         })(i, di));
         tag.appendChild(rm);
@@ -252,8 +253,8 @@
           rm.addEventListener("click", (function (idx, htmlIdx) {
             return function () {
               ws.packages[idx].html.splice(htmlIdx, 1);
-              saveIfLoaded();
               renderPackages();
+              saveIfLoaded();
             };
           })(i, hi));
           tag.appendChild(rm);
@@ -341,8 +342,8 @@
       delBtn.addEventListener("click", (function (idx) {
         return function () {
           ws.atlases.splice(idx, 1);
-          saveIfLoaded();
           renderAtlases();
+          saveIfLoaded();
         };
       })(i));
       nameRow.appendChild(delBtn);
@@ -385,8 +386,8 @@
         rm.addEventListener("click", (function (idx, dirIdx) {
           return function () {
             ws.atlases[idx].dirs.splice(dirIdx, 1);
-            saveIfLoaded();
             renderAtlases();
+            saveIfLoaded();
           };
         })(i, di));
         tag.appendChild(rm);
@@ -471,8 +472,8 @@
       delBtn.addEventListener("click", (function (idx) {
         return function () {
           ws.fonts.splice(idx, 1);
-          saveIfLoaded();
           renderFonts();
+          saveIfLoaded();
         };
       })(i));
       famRow.appendChild(delBtn);
