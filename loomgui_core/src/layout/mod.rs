@@ -48,6 +48,14 @@ fn map_overflow(m: OverflowMode) -> taffy::style::Overflow {
 }
 
 /// 叶子节点的测量上下文。Container/Button 无上下文（用 None 叶子或 new_with_children）。
+/// taffy LengthPercentage → f32（固定尺寸节点 Percent 罕见，按 0 处理）。
+fn lp(v: taffy::style::LengthPercentage) -> f32 {
+    match v {
+        taffy::style::LengthPercentage::Length(x) => x,
+        _ => 0.0,
+    }
+}
+
 enum MeasureContext {
     /// Text 叶子：存全部测量参数（content owned）+ 字体度量字段 + 字体族。
     /// font 实例 *不* 进 context——调用方在测量闭包中按 family 查 FontTable 取 Font。
@@ -62,6 +70,9 @@ enum MeasureContext {
         family: Option<String>,
         /// 节点 style.color（plain text 整段同色；进 GlyphRun.color 供 build per-vertex）。
         color: [f32; 4],
+        /// 水平 padding+border 总 inset（左+右）。taffy 传 known.width = 节点 border-box 宽；
+        /// 文字须在 content area（known - inset）内换行 + 对齐，否则吃到 padding 超框。
+        h_inset: f32,
     },
     /// RichText 叶子（v1.7）：inline flow 封装在 measure_rich_text。
     /// runs owned（parse 期产的扁平 run 流，含 per-run 样式）。
@@ -74,6 +85,8 @@ enum MeasureContext {
         nowrap: bool,
         /// 节点的 font_family。None 表示用 FontTable 的 default。
         family: Option<String>,
+        /// 水平 padding+border 总 inset（左+右）。同 Text：文字在 content area 内换行/对齐。
+        h_inset: f32,
     },
     /// Image 叶子：intrinsic 像素 + css width/height 维度。闭包消费 taffy 的 known 解析
     /// Percent/fit（Percent width taffy 传 known.width=Some(解析宽)，闭包据此等比 height）。
@@ -146,6 +159,10 @@ pub fn solve(
                     nowrap: s.white_space_nowrap,
                     family: s.font_family.clone(),
                     color: s.color,
+                    h_inset: lp(s.taffy_style.padding.left)
+                        + lp(s.taffy_style.padding.right)
+                        + lp(s.taffy_style.border.left)
+                        + lp(s.taffy_style.border.right),
                 })
             }
             NodeKind::RichText { runs } => {
@@ -156,6 +173,10 @@ pub fn solve(
                     align: s.text_align,
                     nowrap: s.white_space_nowrap,
                     family: s.font_family.clone(),
+                    h_inset: lp(s.taffy_style.padding.left)
+                        + lp(s.taffy_style.padding.right)
+                        + lp(s.taffy_style.border.left)
+                        + lp(s.taffy_style.border.right),
                 })
             }
             NodeKind::Image { src } => {
@@ -176,6 +197,15 @@ pub fn solve(
             }
             _ => None,
         };
+        // RichText 叶（display:block div）模拟 CSS block width:auto = fill parent：
+        // taffy 0.5 flex item 的 cross stretch = max(measure, container)（只 fill 不 shrink），
+        // 长文本（max-content > parent）会撑超 parent 宽 → 超框。设 width=100% 让 box=parent
+        // content、measure 据此换行。仅 auto 时设（保留显式 width）。
+        if matches!(node.kind, NodeKind::RichText { .. })
+            && matches!(style.size.width, taffy::style::Dimension::Auto)
+        {
+            style.size.width = taffy::style::Dimension::Percent(1.0);
+        }
 
         // 递归子节点（先建子，再建父以便 new_with_children）。
         let children_ids: Vec<taffy::NodeId> = node
@@ -185,6 +215,13 @@ pub fn solve(
             .collect();
 
         let tid = if let Some(mctx) = ctx {
+            // measure leaf 默认 min-size:auto（taffy 0.5 把 measure(None) 的 max-content 当
+            // min-content）→ flex-shrink 被 min 阻止，max-content 超 available 的长文本不收缩
+            // → 超框。设 min=0 让 flex-shrink 生效（文本收缩到容器宽并换行）。
+            style.min_size = taffy::geometry::Size {
+                width: taffy::style::Dimension::Length(0.0),
+                height: taffy::style::Dimension::Length(0.0),
+            };
             // 叶子：装测量上下文。children 应为空（Text/Image 是叶子）。
             tree.new_leaf_with_context(style, mctx).unwrap()
         } else {
@@ -279,8 +316,12 @@ pub fn solve(
                         nowrap,
                         family,
                         color,
+                        h_inset,
                     }) => {
                         let stack = fonts.stack_for(family.as_deref());
+                        // taffy 传 known.width = 节点 border-box 宽（含 padding/border）；
+                        // 文字在 content area（known - h_inset）内换行 + 对齐，否则吃到 padding 超框。
+                        let mw = known.width.map(|w| (w - *h_inset).max(0.0));
                         let layout = measure_text(
                             content,
                             *font_size,
@@ -288,7 +329,7 @@ pub fn solve(
                             *letter_spacing,
                             *align,
                             *nowrap,
-                            known.width,
+                            mw,
                             &stack,
                             *color,
                         );
@@ -312,14 +353,17 @@ pub fn solve(
                         line_height,
                         align,
                         family,
+                        h_inset,
                         ..
                     }) => {
                         // RichText 走 measure_rich_text（简化 inline flow）。
                         // 回退走 FontStack（per-glyph 选字体）；run.font_id 仍是主字体 id。
                         let stack = fonts.stack_for(family.as_deref());
+                        // 同 Text：content area = known.width（border-box）- h_inset。
+                        let mw = known.width.map(|w| (w - *h_inset).max(0.0));
                         let layout = crate::text::layout::measure_rich_text(
                             runs,
-                            known.width,
+                            mw,
                             *line_height,
                             *align,
                             &stack,

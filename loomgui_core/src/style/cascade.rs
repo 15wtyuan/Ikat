@@ -33,6 +33,11 @@ pub fn resolve_styles(tree: &ElementTree, sheet: &StyleSheet) -> Vec<ResolvedSty
         }
 
         let el = &tree.nodes[id.0];
+        // CSS user-agent：button 默认 text-align:center（按钮文字居中）。LoomGUI 无 UA
+        // stylesheet，此处补——在父继承之后、CSS rules 之前，故用户 CSS 仍可覆盖。
+        if el.tag == "button" {
+            style.text_align = crate::style::resolved::TextAlign::Center;
+        }
         let rules = match_element(el, tree, &sheet.rules);
         // CSS cascade：低 specificity 先 apply，高 specificity 后 apply（覆盖）；
         // 同 specificity 按源码顺序（后写的覆盖）。match_element 返回的是
@@ -108,6 +113,36 @@ mod tests {
         let id = tree.roots[0];
         // #x 胜（id specificity 最高）
         assert_eq!(styles[id.0].color, [0.0, 1.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn button_defaults_to_text_align_center() {
+        // CSS user-agent：button 文字默认居中（LoomGUI 无 UA stylesheet，显式补）。
+        // 修复前 button 继承父/default Left → 按钮文字左对齐（与 html 预览不一致）。
+        use crate::style::resolved::TextAlign;
+        let html = r#"<div class="root"><button class="b">OK</button></div>"#;
+        let css = r#".root { flex-direction: column; } .b { width: 100px; }"#;
+        let tree = parse_html(html).unwrap();
+        let sheet = parse_css(css).unwrap();
+        let styles = resolve_styles(&tree, &sheet);
+        let btn_id = tree.nodes[tree.roots[0].0].children[0];
+        assert_eq!(
+            styles[btn_id.0].text_align,
+            TextAlign::Center,
+            "button 默认 text-align:center（CSS UA 语义）"
+        );
+
+        // 用户 CSS text-align 可覆盖 button 默认 center。
+        let css2 = r#".root { flex-direction: column; } .b { width: 100px; text-align: left; }"#;
+        let tree2 = parse_html(html).unwrap();
+        let sheet2 = parse_css(css2).unwrap();
+        let styles2 = resolve_styles(&tree2, &sheet2);
+        let btn_id2 = tree2.nodes[tree2.roots[0].0].children[0];
+        assert_eq!(
+            styles2[btn_id2.0].text_align,
+            TextAlign::Left,
+            "用户 CSS text-align 覆盖 button 默认 center"
+        );
     }
 
     #[test]

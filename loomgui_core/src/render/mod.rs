@@ -1557,7 +1557,11 @@ fn build_text_mesh(
                             .underline_metrics()
                             .map(|m| m.position as f32 * scale)
                             .unwrap_or(run.font_size * 0.1);
-                    let strike_y = line.baseline - run.font_size * 0.25;
+                    let strike_y = line.baseline
+                        - face
+                            .strikeout_metrics()
+                            .map(|m| m.position as f32 * scale)
+                            .unwrap_or(run.font_size * 0.3);
                     let overline_y = line.y + deco_thick * 0.5;
                     let line_infos: [(f32, bool); 3] = [
                         (underline_y, run.deco.lines.underline()),
