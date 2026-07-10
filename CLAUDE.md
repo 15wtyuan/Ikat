@@ -20,10 +20,9 @@ cargo build -p loomgui_pkg
 cargo test  -p loomgui_pkg
 # 运行：cargo run -p loomgui_pkg -- build <workspace-dir>    （loom-pkg build <workspace>）
 
-# 独立打包器 GUI（Tauri 桌面应用）
-cargo build -p loomgui_gui
-# 开发运行（需要 Tauri CLI）：cargo tauri dev
-# 打包出品：cargo tauri build
+# 独立打包器 GUI（Tauri 桌面应用；出 exe 见下方「GUI 打包器 exe 闭环」段，勿用 cargo build）
+cargo tauri dev                  # 开发热重载（需 tauri-cli）
+cargo tauri build --no-bundle    # 出 exe（cargo build --release 不 embed 前端 → localhost 白屏 exe）
 
 # FFI（C ABI；csbindgen 在 build.rs 里重新生成 C# 绑定）
 cargo build -p loomgui_ffi_c
@@ -61,6 +60,20 @@ cp target/release/loomgui_ffi_c.dll loomgui_unity_package/Plugins/LoomGUI/loomgu
 - 入库的 `.dll` + csbindgen 生成的 `LoomGUIBindings.cs` 在 `loomgui_unity_package/Plugins/LoomGUI/`（`**/Plugins/**/*.dll` 和 bindings .cs 是 gitignore 白名单例外；其余 native 产物一律忽略）。
 
 **图集自绘**：v1.8 起图集由打包器自绘（`loom-pkg build` 或 GUI 产 `atlas/*.png`+`atlas/*.atlas.json`），Unity 不再打 `SpriteAtlas`。运行时尺寸由 `atlas.json` + FFI `set_image_sizes` 注入，不再靠 Unity 导入管线。
+
+### GUI 打包器 exe 闭环（loomgui_gui，Tauri 2）
+
+GUI 是 Tauri 2 桌面 app，产物 `loomgui_unity_package/Editor/Tools/loomgui_gui.exe`（Unity `LoomGUI > Open Packer` 拉起）。任何 GUI 改动（Rust `src/` 或前端 `dist/`）后必须重出 exe + 拷贝 + 入库：
+
+```bash
+npm install -g @tauri-apps/cli                 # 一次性装 tauri-cli（prebuilt，比 cargo install 快得多）
+(cd loomgui_gui && tauri build --no-bundle)    # 出 exe（必须 tauri CLI！--no-bundle 跳 NSIS/MSI installer）
+cp target/release/loomgui_gui.exe loomgui_unity_package/Editor/Tools/loomgui_gui.exe
+```
+- **拷贝时 Unity / 旧 GUI 进程必须关着**（锁 exe，报 `Device or resource busy`）。
+- 入库 exe + `.meta`（`Editor/Tools/` 下，gitignore 白名单例外，同 .dll）。
+- **路径定位**：`LoomOpenPacker.cs` 用 `PackageInfo.FindForAssetPath("Packages/com.loomgui.unity/package.json").resolvedPath` 取包真实磁盘根——`com.loomgui.unity` 是 manifest.json 里 `file:` 外部本地包，`Packages/com.loomgui.unity` 是虚拟挂载、非真实 FS 路径，`System.IO.File` 探不到。
+- **前端手写 dist（无 npm 构建）**，靠 `app.withGlobalTauri:true` 注入 `window.__TAURI__`（tauri.conf.json）；缩略图靠 `app.security.assetProtocol` + Cargo `tauri` feature `protocol-asset`。
 
 ## 架构（大局——权威契约读 `docs/design/main-design.md`）
 

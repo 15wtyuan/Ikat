@@ -1107,3 +1107,31 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 - **AI 可预测性 = CSS 语义对齐**——AI 按 CSS 训练，期望不同属性组合。赋值清空让"声明序"影响结果，AI 无法预测。reviewer 抓这类"语义不一致"比抓 bug 更重要（项目首要判据是 AI 可预测性）。
 - **新属性接共享字段时要审既有属性的写入语义**——Task 8 text-shadow 先建 text_effects 用赋值，Task 9/10 加属性用 push，不一致在 Task 10 review 才抓出（pre-existing bug 加剧）。加属性时 grep 共享字段的既有写入，统一语义。
 
+### 坑 150：`cargo build --release` 不 embed Tauri 前端 → localhost 白屏 exe（v1.8 GUI）
+
+**症状**：`loomgui_gui.exe` 能打开但 WebView 显示「localhost 拒绝连接」（ERR_CONNECTION_REFUSED）。
+**根因**：`cargo build -p loomgui_gui --release` 只编 Rust，不把 `dist/` 前端 embed 进二进制；运行时 WebView 回退到 devUrl（`http://localhost:1420`），dev server 没跑就连不上。前端资源 embed 是 tauri CLI 在 build 阶段做的，不是 cargo。
+**解决**：出 exe 必须 `cargo tauri build`（或 `--no-bundle` 跳 installer）。
+**教训**：Tauri 出品走 tauri-cli，`cargo build` 只够 check/dev。判据：exe 没增 ~40KB（dist 压缩大小）、grep 不到前端字符串（start-screen 等）= 没 embed。
+
+### 坑 151：Tauri 2 command invoke 名 = Rust 函数名，`#[tauri::command(name=...)]` 不生效（v1.8 GUI）
+
+**症状**：前端 `invoke("save_workspace")` 报 `Command save_workspace not found`，配置改了存不下、返回再进全没。
+**根因**：commands.rs 里 `#[tauri::command(name = "save_workspace")] pub fn save_workspace_cmd(...)` 想把 invoke 名覆盖成 `save_workspace`，但 Tauri 2 的 `generate_handler!` 用函数路径名注册 invoke 名，`name` 属性不改 invoke 名。前端调 `save_workspace` 找不到（实际注册的是 `save_workspace_cmd`）。
+**解决**：函数直接命名 `save_workspace`（与 import 的同名 fn 用 `use ... as write_workspace` 避开冲突），invoke 名 = 函数名。
+**教训**：Tauri 2 invoke 名 = 注册时的函数名。别用 `name` 属性别名；与 import 冲突用 `use ... as`。诊断：command not found 先查函数名 vs invoke 名是否一致。
+
+### 坑 152：手写 Tauri 前端少开四配置 → 白屏/无 API/黑窗/无缩略图（v1.8 GUI）
+
+**症状**：① 前端 `window.__TAURI__ not available`；② release exe 带控制台黑窗；③ devtools F12 打不开；④ `<img>` 加载本地 png 缩略图失败。
+**根因**：四个独立配置缺一不同症状——① 缺 `app.withGlobalTauri:true`（手写 dist 不走 npm import，必须靠它注入 `window.__TAURI__`）；② 缺 `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`；③ 缺 Cargo `tauri` feature `devtools`；④ 缺 `app.security.assetProtocol` + Cargo feature `protocol-asset`。
+**解决**：四配置全开（见 CLAUDE.md「GUI 打包器 exe 闭环」段）。
+**教训**：Tauri 2「手写前端 + release exe」默认极简，要逐个开 withGlobalTauri / windows_subsystem / devtools / assetProtocol。按症状对照缺哪个。
+
+### 坑 153：`onDragDropEvent` 每次 setup 叠注册 → 拖入重复建项 1→2→3（v1.8 GUI）
+
+**症状**：第一次拖入建 1 个包，第二次 2 个，第三次 3 个。
+**根因**：`renderMain`（每次 open workspace）调 `setupDragDrop` → `webview.onDragDropEvent(handler)`，每次注册新 handler、不 unlisten 旧的。N 次进 editor = N 个 handler，drop 触发 N 次 build。
+**解决**：`editorInited` flag，setup*（tabs/dragDrop/log/build）只在首次 renderMain 注册一次；handler 闭包读模块级 `ws`/`wsPath`（renderMain 每次更新最新），不需重注册。
+**教训**：Tauri 事件 listener 累积不自动去重；renderMain 这类可重入入口里的 setup 要 flag 守护，listener 闭包读最新状态而非重新绑。诊断：操作次数递增失效 = listener 累积。
+
