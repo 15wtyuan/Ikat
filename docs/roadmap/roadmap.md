@@ -55,7 +55,7 @@ LoomGUI 是 HTML/CSS 的**子集**，浏览器/open-design 这类外部编辑器
 
 | # | 任务 |
 |---|---|
-| G1 | 打包器 `loomgui_pkg` |
+| G1 | 打包器 `loomgui_pkg`（v1.8+ 图集改 Rust 自绘，见 §3） |
 | G2 | Stage MonoBehaviour 驱动（唯一 tick 入口） |
 | G3 | 根 Stage 挂 Unity（Camera/GameObject + 根 y-flip） |
 | G4 | 输入采集→扁平事件→FFI 注入（新旧输入系统 + IME character） |
