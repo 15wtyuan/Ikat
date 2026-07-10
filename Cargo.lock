@@ -625,6 +625,7 @@ dependencies = [
 name = "loomgui_pkg"
 version = "0.1.0"
 dependencies = [
+ "etagere",
  "image",
  "loomgui_core",
  "scraper",

@@ -121,3 +121,64 @@ fn build_fails_when_referenced_image_not_in_any_atlas() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn build_e2e_explicit_html_list_first_dir_wins() {
+    let tmp = std::env::temp_dir().join("loom_build_explicit_html_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    std::fs::create_dir_all(tmp.join("ui")).unwrap();
+    std::fs::create_dir_all(tmp.join("ui2")).unwrap();
+    std::fs::create_dir_all(tmp.join("assets")).unwrap();
+
+    write_workspace_json(
+        &tmp,
+        r#"[{ "name": "showcase", "dirs": ["ui", "ui2"], "html": ["main.html"] }]"#,
+        r#"[{ "name": "ui", "default": true, "dirs": ["assets"] }]"#,
+        r#"[]"#,
+    );
+
+    // Both ui/ and ui2/ contain main.html; first dir (ui/) wins.
+    let html1 = r#"<div>first</div>"#;
+    let html2 = r#"<div>second</div>"#;
+    std::fs::write(tmp.join("ui/main.html"), html1).unwrap();
+    std::fs::write(tmp.join("ui2/main.html"), html2).unwrap();
+
+    let result = build(&tmp);
+    assert!(
+        result.is_ok(),
+        "build should succeed with explicit html list"
+    );
+    let report = result.unwrap();
+    assert!(report.packages.contains(&"showcase".to_string()));
+
+    // The pkg.bin should be produced.
+    let pkg_path = tmp.join("output/ui/showcase.pkg.bin");
+    assert!(pkg_path.exists(), "showcase.pkg.bin exists");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn build_fails_when_explicit_html_not_found() {
+    let tmp = std::env::temp_dir().join("loom_build_explicit_html_missing_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    std::fs::create_dir_all(tmp.join("ui")).unwrap();
+    std::fs::create_dir_all(tmp.join("assets")).unwrap();
+
+    write_workspace_json(
+        &tmp,
+        r#"[{ "name": "showcase", "dirs": ["ui"], "html": ["nonexistent.html"] }]"#,
+        r#"[{ "name": "ui", "default": true, "dirs": ["assets"] }]"#,
+        r#"[]"#,
+    );
+
+    let result = build(&tmp);
+    assert!(
+        result.is_err(),
+        "build should fail when explicit html file does not exist in any dir"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

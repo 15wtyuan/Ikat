@@ -152,15 +152,17 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
                 let basename = Path::new(&f.file)
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .unwrap_or(&f.file);
-                RuntimeFont {
+                    .ok_or_else(|| {
+                        format!("invalid font file path in runtime manifest: {}", f.file)
+                    })?;
+                Ok(RuntimeFont {
                     family: f.family.clone(),
                     file: format!("{}.bytes", basename),
                     default: f.default,
                     fallback: f.fallback,
-                }
+                })
             })
-            .collect(),
+            .collect::<Result<Vec<_>, String>>()?,
     };
     let runtime_path = output_dir.join(RUNTIME_FILE);
     let runtime_text = serde_json::to_string_pretty(&runtime)
