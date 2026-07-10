@@ -3,6 +3,7 @@
 //! 见 spec §5。本模块的子模块 pack 做实际打包，本文件只定义清单格式。
 
 pub mod collect;
+pub mod pack;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
