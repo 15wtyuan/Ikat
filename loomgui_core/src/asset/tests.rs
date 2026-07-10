@@ -19,24 +19,32 @@ fn empty_rules() -> DynamicRuleTable {
     DynamicRuleTable { rules: vec![] }
 }
 
+/// 测试 StringTable 溢出 panic：intern 函数在 string 数达到 u16 上限时 panic（不产坏包）。
+/// 通过写入大量唯一 content 的 Text 节点填充 StringTable。
 #[test]
 #[should_panic(expected = "string table overflow")]
 fn write_package_panics_when_string_table_exhausted() {
     // StringTable 用 u16 索引 + NULL_IDX(0xFFFF) 哨兵，最多 65535 个不同串。
     // 超过则索引撞 NULL_IDX（读回空串）/ 回绕到 0（撞首串）——原为静默数据损坏。
     // write_package 须在打包期就 panic，不产坏包。
-    let manifest: Vec<AssetEntry> = (0..65536u32)
-        .map(|i| AssetEntry {
-            path: i.to_string(),
-            w: 1,
-            h: 1,
-        })
-        .collect();
-    let nodes = vec![tn(NodeKind::Container)];
+    let mut nodes = vec![tn(NodeKind::Container)];
+    for i in 0..65536u32 {
+        nodes.push(TemplateNode {
+            kind: NodeKind::Text {
+                content: i.to_string(),
+            },
+            style: ResolvedStyle::default(),
+            parent_idx: Some(0),
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            data_controller: None,
+        });
+    }
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![("c", nodes.as_slice(), &rules, &[])],
-        asset_manifest: &manifest,
     };
     let _ = write_package(&input);
 }
@@ -53,17 +61,11 @@ fn write_read_multi_component_roundtrip() {
     let comp1_nodes = vec![tn_root, tn_child];
     let comp2_nodes = vec![tn(NodeKind::Container)];
     let rules = empty_rules();
-    let manifest = [AssetEntry {
-        path: "icons/skin.png".into(),
-        w: 64,
-        h: 32,
-    }];
     let input = PackageInput {
         components: vec![
             ("comp1", comp1_nodes.as_slice(), &rules, &[]),
             ("comp2", comp2_nodes.as_slice(), &rules, &[]),
         ],
-        asset_manifest: &manifest,
     };
     let bytes = write_package(&input);
     let pkg = read_package(&bytes).expect("read ok");
@@ -72,14 +74,6 @@ fn write_read_multi_component_roundtrip() {
     assert!(
         pkg.components["comp1"].nodes[1].parent_idx == Some(0),
         "child parent=root"
-    );
-    assert_eq!(
-        pkg.asset_manifest,
-        vec![AssetEntry {
-            path: "icons/skin.png".into(),
-            w: 64,
-            h: 32
-        }]
     );
 }
 
@@ -105,7 +99,6 @@ fn read_rejects_too_new_version() {
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![("c", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     let mut bytes = write_package(&input);
     bytes[4..8].copy_from_slice(&(MAX_VERSION + 1).to_le_bytes());
@@ -119,7 +112,6 @@ fn header_is_20_bytes_no_root_size() {
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![("c", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     let bytes = write_package(&input);
     let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
@@ -153,7 +145,6 @@ fn multi_component_parent_idx_is_component_local() {
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![("a", &comp_a, &rules, &[]), ("b", &comp_b, &rules, &[])],
-        asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     assert_eq!(pkg.components["a"].nodes[1].parent_idx, Some(0));
@@ -174,14 +165,8 @@ fn all_node_kinds_roundtrip() {
     txt.parent_idx = Some(0);
     let nodes = [tn(NodeKind::Container), tn(NodeKind::Button), img, txt];
     let rules = empty_rules();
-    let manifest = [AssetEntry {
-        path: "icons/a.png".into(),
-        w: 0,
-        h: 0,
-    }];
     let input = PackageInput {
         components: vec![("c", &nodes, &rules, &[])],
-        asset_manifest: &manifest,
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     let ns = &pkg.components["c"].nodes;
@@ -189,14 +174,6 @@ fn all_node_kinds_roundtrip() {
     assert!(matches!(ns[1].kind, NodeKind::Button));
     assert!(matches!(&ns[2].kind, NodeKind::Image { src } if src == "icons/a.png"));
     assert!(matches!(&ns[3].kind, NodeKind::Text { content } if content == "hello"));
-    assert_eq!(
-        pkg.asset_manifest,
-        vec![AssetEntry {
-            path: "icons/a.png".into(),
-            w: 0,
-            h: 0
-        }]
-    );
 }
 
 /// RichText 节点经 write_package → read_package 往返：runs 整段 bincode 进 RichRunsArena，
@@ -266,7 +243,6 @@ fn rich_text_roundtrips_through_pkg() {
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![("c", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     let ns = &pkg.components["c"].nodes;
@@ -330,7 +306,6 @@ fn multiple_rich_text_nodes_share_arena() {
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![("c", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     let ns = &pkg.components["c"].nodes;
@@ -369,7 +344,6 @@ fn classes_id_attr_draggable_tabindex_roundtrip() {
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![("c", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     let ns = &pkg.components["c"].nodes;
@@ -396,7 +370,6 @@ fn data_controller_roundtrips_through_pkg() {
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![("c", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     let ns = &pkg.components["c"].nodes;
@@ -438,7 +411,6 @@ fn controller_section_roundtrips_through_pkg() {
     ];
     let input = PackageInput {
         components: vec![("c", &nodes, &rules, &controllers)],
-        asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     let cs = &pkg.components["c"].controllers;
@@ -459,7 +431,6 @@ fn controller_section_empty_roundtrips() {
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![("c", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     assert!(
@@ -486,7 +457,6 @@ fn controller_section_name_dedups_across_components() {
     }];
     let input = PackageInput {
         components: vec![("a", &comp_a, &rules, &ctrl), ("b", &comp_b, &rules, &ctrl)],
-        asset_manifest: &[],
     };
     let bytes = write_package(&input);
     let pkg = read_package(&bytes).unwrap();
@@ -502,7 +472,6 @@ fn style_blob_roundtrips_baked_resolved_style() {
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![("c", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     let n2 = &pkg.components["c"].nodes[0];
@@ -536,7 +505,6 @@ fn per_component_dynamic_rules_roundtrip() {
     let nb = [tn(NodeKind::Container)];
     let input = PackageInput {
         components: vec![("a", &na, &rules_a, &[]), ("b", &nb, &rules_b, &[])],
-        asset_manifest: &[],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     assert_eq!(pkg.components["a"].dynamic_rules.rules.len(), 1);
@@ -564,7 +532,6 @@ fn stringtable_dedups_across_components() {
             ("c1", &c1_nodes, &rules, &[]),
             ("c2", &c2_nodes, &rules, &[]),
         ],
-        asset_manifest: &[],
     };
     let bytes = write_package(&input);
     let sc = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
@@ -581,85 +548,11 @@ fn stringtable_dedups_across_components() {
 #[test]
 fn empty_package_roundtrips() {
     let rules = empty_rules();
-    let input = PackageInput {
-        components: vec![],
-        asset_manifest: &[],
-    };
+    let input = PackageInput { components: vec![] };
     let _ = &rules; // 占位保持 lifetime 分析简单
     let pkg = read_package(&write_package(&input)).unwrap();
     assert_eq!(pkg.components.len(), 0);
-    assert!(pkg.asset_manifest.is_empty());
     assert_eq!(pkg.name, "");
-}
-
-#[test]
-fn asset_manifest_multiple_paths_roundtrip() {
-    let nodes = [
-        tn(NodeKind::Image {
-            src: "a/x.png".into(),
-        }),
-        tn(NodeKind::Image {
-            src: "b/y.png".into(),
-        }),
-    ];
-    let rules = empty_rules();
-    let manifest = [
-        AssetEntry {
-            path: "a/x.png".into(),
-            w: 40,
-            h: 20,
-        },
-        AssetEntry {
-            path: "b/y.png".into(),
-            w: 128,
-            h: 128,
-        },
-    ];
-    let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
-        asset_manifest: &manifest,
-    };
-    let pkg = read_package(&write_package(&input)).unwrap();
-    assert_eq!(
-        pkg.asset_manifest,
-        vec![
-            AssetEntry {
-                path: "a/x.png".into(),
-                w: 40,
-                h: 20
-            },
-            AssetEntry {
-                path: "b/y.png".into(),
-                w: 128,
-                h: 128
-            },
-        ]
-    );
-}
-
-/// 图尺寸非对称（w≠h）通过 roundtrip 保留——measure 三档 + 九宫格 UV 依赖真实尺寸。
-/// 40×20 图 → manifest 存 w=40 h=20（非 0/0 兜底）。0/0 仍合法（非 PNG / 读失败 fallback）。
-#[test]
-fn asset_manifest_preserves_non_square_dims() {
-    let nodes = [tn(NodeKind::Image {
-        src: "wide.png".into(),
-    })];
-    let rules = empty_rules();
-    let manifest = [AssetEntry {
-        path: "wide.png".into(),
-        w: 40,
-        h: 20,
-    }];
-    let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
-        asset_manifest: &manifest,
-    };
-    let pkg = read_package(&write_package(&input)).unwrap();
-    assert_eq!(pkg.asset_manifest.len(), 1);
-    let e = &pkg.asset_manifest[0];
-    assert_eq!(e.path, "wide.png");
-    assert_eq!(e.w, 40, "w 保留 40（非 0 兜底）");
-    assert_eq!(e.h, 20, "h 保留 20（非 0 兜底）");
 }
 
 // —— 防御 malformed ComponentTable 测试（review fix）——
@@ -691,7 +584,6 @@ fn two_comp_pkg_bytes() -> Vec<u8> {
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![("a", &comp_a, &rules, &[]), ("b", &comp_b, &rules, &[])],
-        asset_manifest: &[],
     };
     write_package(&input)
 }
@@ -789,7 +681,6 @@ fn write_rejects_non_root_nodes_zero() {
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![("c", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     let _ = write_package(&input);
 }

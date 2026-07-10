@@ -19,7 +19,6 @@ fn make_test_pkg(_comp_name: &str) -> Vec<u8> {
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
         components: vec![(_comp_name, &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     crate::asset::write_package(&input)
 }

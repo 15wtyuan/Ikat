@@ -33,7 +33,6 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
         components: vec![("comp1", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     crate::asset::write_package(&input)
 }
@@ -99,7 +98,6 @@ fn instantiate_missing_pkg_or_comp_errors() {
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
         components: vec![("c1", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     s.load_package("bag", &crate::asset::write_package(&input))
         .unwrap();
@@ -140,7 +138,6 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
         components: vec![("c1", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     s.load_package("bag", &crate::asset::write_package(&input))
         .unwrap();
@@ -193,7 +190,6 @@ fn instantiate_merges_dynamic_rules_dedup() {
     }];
     let input = PackageInput {
         components: vec![("comp1", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
     let mut s = Stage::new_for_test();
     s.create_root("div", "").unwrap();
@@ -266,7 +262,6 @@ fn instantiate_multi_instance_hover_independent() {
     ];
     let input = PackageInput {
         components: vec![("comp1", &nodes, &rules, &[])],
-        asset_manifest: &[],
     };
 
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
@@ -397,7 +392,6 @@ fn instantiate_builds_controller_registry() {
     }];
     let input = PackageInput {
         components: vec![("comp1", &nodes, &rules, &controllers)],
-        asset_manifest: &[],
     };
     let mut s = Stage::new_for_test();
     s.create_root("div", "").unwrap();
@@ -438,7 +432,6 @@ fn instantiate_multi_instance_controller_registry_independent() {
     }];
     let input = PackageInput {
         components: vec![("comp1", &nodes, &rules, &controllers)],
-        asset_manifest: &[],
     };
     let mut s = Stage::new_for_test();
     s.create_root("div", "").unwrap();
@@ -508,7 +501,6 @@ fn instantiate_controller_mount_on_child_node() {
     }];
     let input = PackageInput {
         components: vec![("comp1", &nodes, &rules, &controllers)],
-        asset_manifest: &[],
     };
     let mut s = Stage::new_for_test();
     s.create_root("div", "").unwrap();

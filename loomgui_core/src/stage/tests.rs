@@ -79,8 +79,8 @@ fn gather_template_nodes(
 }
 
 /// 测试辅助：把 inline HTML+CSS 打成一个名为 "scene" 的单组件包 bytes。
-/// 返回 (pkg_bytes, asset_manifest)。dynamic_rules 从 CSS 抽（含 :hover 等伪类的规则）。
-fn pkg_bytes_from_inline(html: &str, css: &str) -> (Vec<u8>, Vec<String>) {
+/// dynamic_rules 从 CSS 抽（含 :hover 等伪类的规则）。
+fn pkg_bytes_from_inline(html: &str, css: &str) -> Vec<u8> {
     let tree = crate::parse::dom::parse_html(html).unwrap();
     let sheet = crate::parse::css::parse_css(css).unwrap();
     let styles = crate::style::cascade::resolve_styles(&tree, &sheet);
@@ -90,26 +90,10 @@ fn pkg_bytes_from_inline(html: &str, css: &str) -> (Vec<u8>, Vec<String>) {
     for root in &tree.roots {
         gather_template_nodes(&tree, &styles, *root, None, &mut nodes);
     }
-    // asset_manifest：扫所有 Image 节点的 src（已归一化路径——测试用 src 直接作 path）。
-    // 图尺寸测试 helper 无 PNG 文件 → w/h=0（核心 measure fallback 64×64）。
-    // 真实尺寸由 loomgui_pkg 打包器读 PNG IHDR 填（见 pkg 测试）。
-    let manifest: Vec<crate::asset::AssetEntry> = nodes
-        .iter()
-        .filter_map(|tn| match &tn.kind {
-            NodeKind::Image { src } if !src.is_empty() => Some(crate::asset::AssetEntry {
-                path: src.clone(),
-                w: 0,
-                h: 0,
-            }),
-            _ => None,
-        })
-        .collect();
-    let manifest_paths: Vec<String> = manifest.iter().map(|e| e.path.clone()).collect();
     let input = PackageInput {
         components: vec![("scene", nodes.as_slice(), &dynamic, &[])],
-        asset_manifest: &manifest,
     };
-    (crate::asset::write_package(&input), manifest_paths)
+    crate::asset::write_package(&input)
 }
 
 /// 黄金等价（最强门）：inline 渲染 == 包渲染。
@@ -135,7 +119,7 @@ fn package_load_renders_identical_to_inline() {
     // 包路径：load_package → instantiate("scene") → 挂为 scene 根 → render。
     // inline 路径把 .c div 作 scene 根；包路径 instantiate 返回孤立根，直接 push 进
     // scene.roots（同 create_root 语义），不套额外 stage_root——保证两路径节点树同构。
-    let (pkg_bytes, _) = pkg_bytes_from_inline(html, css);
+    let pkg_bytes = pkg_bytes_from_inline(html, css);
     let mut s_pkg = Stage::new((200.0, 100.0)).unwrap();
     s_pkg
         .register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
@@ -161,7 +145,7 @@ fn set_input_hover_emits_rollover_and_rematch() {
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
     let html = r#"<div class="root"><button class="btn">OK</button></div>"#;
     let css = r#".btn { width: 100px; height: 50px; background-color: #cccccc; } .btn:hover { background-color: #0000ff; }"#;
-    let (pkg_bytes, _) = pkg_bytes_from_inline(html, css);
+    let pkg_bytes = pkg_bytes_from_inline(html, css);
 
     let mut s = Stage::new((200.0, 100.0)).unwrap();
     s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
@@ -221,7 +205,7 @@ fn set_node_disabled_inhibits_click() {
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
     let html = r#"<div class="root"><button class="btn">OK</button></div>"#;
     let css = r#".btn { width: 100px; height: 50px; }"#;
-    let (pkg_bytes, _) = pkg_bytes_from_inline(html, css);
+    let pkg_bytes = pkg_bytes_from_inline(html, css);
 
     let mut s = Stage::new((200.0, 100.0)).unwrap();
     s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
@@ -499,7 +483,7 @@ fn active_scale_visible_same_frame() {
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
     let html = r#"<div id="b" class="btn">x</div>"#;
     let css = ".btn{width:100px;height:100px;} .btn:active{transform:scale(0.5);}";
-    let (pkg_bytes, _) = pkg_bytes_from_inline(html, css);
+    let pkg_bytes = pkg_bytes_from_inline(html, css);
 
     let mut stage = Stage::new((200.0, 200.0)).expect("stage");
     stage
@@ -820,7 +804,7 @@ fn transition_stage() -> (Stage, crate::scene::node::NodeId) {
     let css = r#".btn { width: 100px; height: 50px; background-color: #000000; }
                 .btn:hover { background-color: #ffffff; }
                 .btn { transition: background-color 0.3s linear; }"#;
-    let (pkg_bytes, _) = pkg_bytes_from_inline(html, css);
+    let pkg_bytes = pkg_bytes_from_inline(html, css);
     let mut s = Stage::new((200.0, 100.0)).unwrap();
     s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
         .unwrap();

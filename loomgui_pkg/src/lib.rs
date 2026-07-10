@@ -352,7 +352,6 @@ pub fn pack(
     }
 
     // 组 PackageInput（借用 owned）→ write_package。
-    // asset_manifest 传空切片：Task 10 将删除 PackageInput.asset_manifest 字段。
     let comp_refs: Vec<(
         &str,
         &[TemplateNode],
@@ -366,7 +365,6 @@ pub fn pack(
         .collect();
     let input = PackageInput {
         components: comp_refs,
-        asset_manifest: &[],
     };
     let pkg_bytes = loomgui_core::asset::write_package(&input);
 

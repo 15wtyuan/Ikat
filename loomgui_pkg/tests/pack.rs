@@ -65,7 +65,7 @@ fn pack_multi_html_collects_referenced_sprites() {
         "组件名 a（文件名去 .html）"
     );
     assert!(pkg.components.contains_key("b"), "组件名 b");
-    // pkg.bin 内 asset_manifest 段已空（Task 10 删段）
+    // pkg.bin 内 asset_manifest 段已删除（Task 10），图尺寸改走 atlas.json
     let _ = fs::remove_dir_all(&dir);
 }
 
