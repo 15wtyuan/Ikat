@@ -355,16 +355,13 @@ namespace LoomGUI.Editor
             // pkg.bin 落 Bundles/ui/，与 atlas/、fonts/ 并列——发布根按产物类型分目录。
             string outPath = ToAbs(Path.Combine(_settings.pkgOutputDir, "ui", pkg.pkgName + ".pkg.bin"));
             Directory.CreateDirectory(Path.GetDirectoryName(outPath));
-            string htmlArg = pkg.htmlFiles.Count > 0 ? string.Join(",", pkg.htmlFiles) : "";
-            var sb = new StringBuilder();
-            sb.Append('"').Append(absSrc).Append("\" ").Append(pkg.pkgName);
-            if (pkg.htmlFiles.Count > 0) sb.Append(" --html ").Append(htmlArg);
+            // 命令行参数转义抽到 LoomPackArgs.Build（纯逻辑，可单测）：
+            // 文件名/包名含空格或引号须加引号转义，否则 Windows 断参、exe 调崩。
             string resRoot = ToAbs(Path.Combine(_settings.workspaceDir, _settings.resDirName));
-            sb.Append(" --res-root \"").Append(resRoot).Append("\"");
-            sb.Append(" -o \"").Append(outPath).Append('"');
+            string args = LoomPackArgs.Build(absSrc, pkg.pkgName, pkg.htmlFiles, resRoot, outPath);
             try
             {
-                var psi = new ProcessStartInfo(exe, sb.ToString())
+                var psi = new ProcessStartInfo(exe, args)
                 { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
                   StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
                 using var p = Process.Start(psi);

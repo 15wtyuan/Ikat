@@ -19,8 +19,76 @@ fn parse_dimension_auto_is_auto_not_zero() {
 }
 #[test]
 fn four_value_expand() {
-    assert_eq!(parse_four("4px"), [4.0, 4.0, 4.0, 4.0]);
-    assert_eq!(parse_four("4px 8px"), [4.0, 8.0, 4.0, 8.0]);
+    assert_eq!(parse_four("4px").unwrap(), [4.0, 4.0, 4.0, 4.0]);
+    assert_eq!(parse_four("4px 8px").unwrap(), [4.0, 8.0, 4.0, 8.0]);
+}
+
+/// padding/border-width/gap 围栏为 px-only：非 px（%/em/rem）应让 apply_decl 返 false
+/// （围栏外静默忽略），不能静默落 0 还返 true——AI 写 `padding:10%` 期望间距在。
+#[test]
+fn parse_four_rejects_non_px_units() {
+    assert_eq!(parse_four("10%"), None, "padding % 不支持");
+    assert_eq!(parse_four("1em"), None, "padding em 不支持");
+    assert_eq!(parse_four("1rem"), None, "padding rem 不支持");
+    assert_eq!(parse_four("auto"), None, "padding auto 不支持");
+    // px 与裸数字仍接受（不回归）
+    assert_eq!(parse_four("4px").unwrap(), [4.0; 4]);
+    assert_eq!(parse_four("4").unwrap(), [4.0; 4]);
+}
+
+#[test]
+fn apply_decl_padding_rejects_percent_and_em() {
+    let mut s = ResolvedStyle::default();
+    assert!(!apply_decl(&mut s, "padding", "10%"), "padding % → false");
+    let mut s2 = ResolvedStyle::default();
+    assert!(!apply_decl(&mut s2, "padding", "1em"), "padding em → false");
+    let mut s3 = ResolvedStyle::default();
+    assert!(
+        !apply_decl(&mut s3, "border-width", "10%"),
+        "border-width % → false"
+    );
+    let mut s4 = ResolvedStyle::default();
+    assert!(!apply_decl(&mut s4, "gap", "10%"), "gap % → false");
+    // px 仍生效（不回归）
+    let mut s5 = ResolvedStyle::default();
+    assert!(apply_decl(&mut s5, "padding", "4px"));
+    assert!(matches!(
+        s5.taffy_style.padding.top,
+        LengthPercentage::Length(4.0)
+    ));
+}
+
+/// margin 围栏 px/%/auto：须真正解析 % 与 auto（之前 parse_four 静默落 0 还返 true，
+/// margin:0 auto 居中被吞）。fence 承诺了 %/auto，兑现它。
+#[test]
+fn apply_decl_margin_supports_percent_and_auto() {
+    use taffy::style::LengthPercentageAuto;
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "margin", "10%"));
+    assert!(
+        matches!(s.taffy_style.margin.top, LengthPercentageAuto::Percent(v) if (v - 0.1).abs() < 1e-6),
+        "margin 10% → Percent(0.1)"
+    );
+    let mut s2 = ResolvedStyle::default();
+    assert!(apply_decl(&mut s2, "margin", "auto"));
+    assert!(
+        matches!(s2.taffy_style.margin.top, LengthPercentageAuto::Auto),
+        "margin auto → Auto"
+    );
+    // margin:0 auto → top/bottom Length(0)，left/right Auto（居中模式）
+    let mut s3 = ResolvedStyle::default();
+    assert!(apply_decl(&mut s3, "margin", "0 auto"));
+    assert!(matches!(
+        s3.taffy_style.margin.top,
+        LengthPercentageAuto::Length(0.0)
+    ));
+    assert!(matches!(
+        s3.taffy_style.margin.right,
+        LengthPercentageAuto::Auto
+    ));
+    // em/rem 仍不支持（fence 未列）
+    let mut s4 = ResolvedStyle::default();
+    assert!(!apply_decl(&mut s4, "margin", "1em"), "margin em → false");
 }
 #[test]
 fn color_hex() {

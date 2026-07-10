@@ -108,6 +108,50 @@ fn instantiate_missing_pkg_or_comp_errors() {
 }
 
 #[test]
+fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
+    // 坑102 no-panic 契约：FFI 可达的 instantiate 不能因 corrupt pkg panic。
+    // parent_idx 越界前向引用（child 引用不存在的 node 2）违反"parent_idx < i 且 < len"不变量——
+    // 当前实现 `id_map[pidx]`（pidx 越界）会 index-out-of-bounds panic，必须改成返 Err。
+    // node[0]=root（write_package 的 debug_assert 只查 node[0]，node[1] 的 corrupt parent_idx 透传）。
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    let nodes = [
+        TemplateNode {
+            kind: NodeKind::Container,
+            style: ResolvedStyle::default(),
+            parent_idx: None,
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            data_controller: None,
+        },
+        TemplateNode {
+            kind: NodeKind::Container,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(2), // 越界前向引用（只有 2 节点，index 0/1）
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            data_controller: None,
+        },
+    ];
+    let rules = crate::style::dynamic::DynamicRuleTable::default();
+    let input = PackageInput {
+        components: vec![("c1", &nodes, &rules, &[])],
+        asset_manifest: &[],
+    };
+    s.load_package("bag", &crate::asset::write_package(&input))
+        .unwrap();
+    let result = s.instantiate("bag", "c1");
+    assert!(
+        result.is_err(),
+        "corrupt parent_idx（前向引用）应返 Err 不能 panic，实际: {result:?}"
+    );
+}
+
+#[test]
 fn instantiate_without_scene_errors() {
     // scene 必须已存在（create_root 建过），否则 Err
     let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");

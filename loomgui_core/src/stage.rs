@@ -594,6 +594,17 @@ impl Stage {
         // id_map[模板 idx] = live NodeId（slotmap 分配）。
         let mut id_map: Vec<Option<NodeId>> = vec![None; template.nodes.len()];
         let mut root_id: Option<NodeId> = None;
+        // no-panic 契约：parent_idx 来自 pkg.bin（运行时读，可能 corrupt），不能信任"父先于子"。
+        // pidx >= i 同时覆盖前向引用（父排在子后）与越界（pidx >= len，因 i < len）→ Err，不 panic。
+        for (i, tn) in template.nodes.iter().enumerate() {
+            if let Some(pidx) = tn.parent_idx {
+                if pidx >= i {
+                    return Err(format!(
+                        "corrupt package: node {i} parent_idx {pidx} not yet built (parent must precede child)"
+                    ));
+                }
+            }
+        }
         for (i, tn) in template.nodes.iter().enumerate() {
             let node_id = crate::scene::dynamic::create_node_from_template(
                 scene,

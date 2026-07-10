@@ -46,27 +46,59 @@ pub fn parse_dimension(s: &str) -> Dimension {
 }
 
 /// 1~4 值展开四向（top right bottom left）
-pub fn parse_four(s: &str) -> [f32; 4] {
+/// 解析 1~4 值 px（含裸数字）→ [t,r,b,l]。任一 token 非 px（%/em/rem/auto/keyword）→ None。
+/// px-only 属性（padding/border-width/gap）用它：非 px 让 apply_decl 返 false（围栏外静默忽略），
+/// 不能静默落 0 还返 true——AI 写 `padding:10%` 期望间距在。
+pub fn parse_four(s: &str) -> Option<[f32; 4]> {
     let parts: Vec<&str> = s.split_whitespace().collect();
-    let p = |i: usize| -> f32 {
+    let p = |i: usize| -> Option<f32> {
         parts
             .get(i)
             .and_then(|x| x.strip_suffix("px").unwrap_or(x).trim().parse::<f32>().ok())
-            .unwrap_or(0.0)
     };
-    match parts.len() {
+    Some(match parts.len() {
         1 => {
-            let v = p(0);
+            let v = p(0)?;
             [v, v, v, v]
         }
-        2 => {
-            let v = p(0);
-            let h = p(1);
-            [v, h, v, h]
+        2 => [p(0)?, p(1)?, p(0)?, p(1)?],
+        3 => [p(0)?, p(1)?, p(2)?, p(1)?],
+        _ => [p(0)?, p(1)?, p(2)?, p(3)?],
+    })
+}
+
+/// margin 围栏 px/%/auto → [t,r,b,l]。任一 token 非 px/%/auto（em/rem/keyword）→ None。
+/// 兑现 fence 承诺：`margin:10%` → Percent，`margin:auto` → Auto（居中），
+/// `margin:0 auto` → top/bottom Length(0)、left/right Auto。
+fn parse_margin_four(s: &str) -> Option<[LengthPercentageAuto; 4]> {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    let p = |i: usize| -> Option<LengthPercentageAuto> {
+        let x = parts.get(i)?.trim();
+        if x == "auto" {
+            return Some(LengthPercentageAuto::Auto);
         }
-        3 => [p(0), p(1), p(2), p(1)],
-        _ => [p(0), p(1), p(2), p(3)],
-    }
+        if let Some(pct) = x.strip_suffix('%') {
+            return Some(LengthPercentageAuto::Percent(
+                pct.parse::<f32>().ok()? / 100.0,
+            ));
+        }
+        let px = x
+            .strip_suffix("px")
+            .unwrap_or(x)
+            .trim()
+            .parse::<f32>()
+            .ok()?;
+        Some(LengthPercentageAuto::Length(px))
+    };
+    Some(match parts.len() {
+        1 => {
+            let v = p(0)?;
+            [v, v, v, v]
+        }
+        2 => [p(0)?, p(1)?, p(0)?, p(1)?],
+        3 => [p(0)?, p(1)?, p(2)?, p(1)?],
+        _ => [p(0)?, p(1)?, p(2)?, p(3)?],
+    })
 }
 
 /// 解析 CSS filter 函数链 → 4×5 矩阵（None=filter:none 或空）。
@@ -406,7 +438,10 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "padding" => {
-            let [t, r, b, l] = parse_four(value);
+            let [t, r, b, l] = match parse_four(value) {
+                Some(v) => v,
+                None => return false,
+            };
             ts.padding = Rect {
                 left: LengthPercentage::Length(l),
                 right: LengthPercentage::Length(r),
@@ -416,12 +451,15 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "margin" => {
-            let [t, r, b, l] = parse_four(value);
+            let [t, r, b, l] = match parse_margin_four(value) {
+                Some(v) => v,
+                None => return false,
+            };
             ts.margin = Rect {
-                left: LengthPercentageAuto::Length(l),
-                right: LengthPercentageAuto::Length(r),
-                top: LengthPercentageAuto::Length(t),
-                bottom: LengthPercentageAuto::Length(b),
+                left: l,
+                right: r,
+                top: t,
+                bottom: b,
             };
             true
         }
@@ -462,7 +500,10 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "border-width" => {
-            let [t, r, b, l] = parse_four(value);
+            let [t, r, b, l] = match parse_four(value) {
+                Some(v) => v,
+                None => return false,
+            };
             ts.border = Rect {
                 left: LengthPercentage::Length(l),
                 right: LengthPercentage::Length(r),
@@ -498,7 +539,10 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "gap" => {
-            let f = parse_four(value);
+            let f = match parse_four(value) {
+                Some(v) => v,
+                None => return false,
+            };
             ts.gap = Size {
                 width: LengthPercentage::Length(f[1]),
                 height: LengthPercentage::Length(f[0]),
