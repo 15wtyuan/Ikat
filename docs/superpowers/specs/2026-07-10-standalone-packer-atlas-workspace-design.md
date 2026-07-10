@@ -159,15 +159,18 @@ pkg crate 新模块。产 `<name>.png`（多页时 `<name>.png`/`<name>.1.png`�
 
 **九宫格不进 atlas.json**：九宫格边（CSS `border-image-slice`）是 per-element 属性，烤进 `Node.base_style`（pkg.bin）。同一张图在不同元素上可有不同 slice。运行时用 CSS slice + `orig` + `uv` 算九宫格（后端已有这套）。
 
-**尺寸真相源单一化到 atlas.json**：
+**尺寸真相源 = atlas.json（全图），彻底脱离包**：
 - 已核实：图尺寸是**运行期** `solve` 时消费（`ImageSizeTable = HashMap<String,(u32,u32)>`，Image measure 三档 CSS > 真实像素 > 64×64），**打包期 `build_scene` 不需要尺寸**。
-- 现在这张表从 pkg.bin 的 `asset_manifest`（`AssetEntry{path,w,h}`）建。改为从 atlas.json 的 `orig` 建。
-- **pkg.bin 的 `asset_manifest` w/h 删除**（`read_png_size` 相关移除或保留仅供图集打包内部用）。
+- **为什么不能用 pkg.bin 当尺寸源**：运行时动态图标（道具 icon 等）不写在任何 html 里，是运行时 `set_src` 进去的。pkg.bin 的 manifest 只收 html 静态引用的图，永远缺这些动态图标的尺寸 → 用 pkg.bin 当源则动态图标全 fallback 64×64 渲染错。atlas.json 含图集里**全部**图（含未被 html 引用的），是唯一完整来源。
+- **pkg.bin 的 `asset_manifest` 段整个删除**（格式版本 v12 → v13 + 迁移器；同步删 `PkgManifestReader`、`read_png_size`、`PackageInput.asset_manifest`、`Package.asset_manifest`、`Stage.load_package` 里的自建尺寸逻辑）。项目早期，做干净不留冗余段。
+- **core 新增批量入口** `Stage::set_image_sizes(&[(String, u32, u32)])` + FFI `loomgui_stage_set_image_sizes(...)`（批量单次，非逐条——上万张图逐条跨 FFI 太慢）。
+- **规模无风险**：尺寸表是元数据（每条 ~48B，1 万张 ~500KB HashMap，启动一次性全灌，O(1) 查）。真正的内存压力在 atlas.png 纹理页，那是**按页懒加载**（现状 `_atlasCache` 已如此），用到哪页加载哪页，与本设计无关。
 
-**所有被 img 引用的图必须进某 atlas**，否则打包器报错（无缺口，保证尺寸表完整）：
-- 引用了但没进任何 atlas 且无 `default` → 报错（列出无归属的 key）。
+**交叉验证只做单向**（关键——别反向）：
+- **验**：html 静态引用的图必须能在某 atlas 找到；找不到且无 `default` → 报错（列出无归属 key）。
+- **不验**：atlas 里的图不要求都被 html 引用（道具图标就是运行时才用，反向要求会把它们全判为无用报错）。
 - 一张图被多个 atlas 覆盖 → 报错（列出冲突）。
-- 「超大图单独一张不适合拼合」的场景：atlas 支持 `standalone` 模式（每图独立成页、不拼合，`uv=[0,1]`），照样有 atlas.json 条目，尺寸不缺口。
+- 「超大图单独一张不适合拼合」：atlas 支持 `standalone` 模式（每图独立成页、不拼合，`uv=[0,1]`），照样有 atlas.json 条目。
 
 ## 6. 运行时消费改造（Unity 后端）
 
@@ -193,11 +196,11 @@ pkg crate 新模块。产 `<name>.png`（多页时 `<name>.png`/`<name>.1.png`�
 
 **6.3 atlas.png 当普通 Texture2D**：完全脱离 Unity Sprite/SpriteAtlas 系统。Godot/UE 后端同样是「加载纹理 + 查 UV 表」，一套逻辑跨后端。
 
-**6.4 `image_sizes` 表来源**：从 atlas.json 的 `orig` 建（第 5 节），不再从 pkg.bin。
+**6.4 `image_sizes` 表来源**：后端启动时读所有 atlas.json → 合并成一个扁平数组 → **一次性** `loomgui_stage_set_image_sizes` 灌进 core（在首帧 solve 前，启动加载阶段天然满足）。不再从 pkg.bin（manifest 段已删）。
 
 **6.5 加载路径**：atlas.png / .pkg.bin / .bytes / runtime.json 都在产物目录。沿用现有 driver 钩子模式，把 `LoadSpriteAtlas` 换成 `LoadTexture` + `LoadTextFile`（Resources / StreamingAssets / AB 由 driver 决定）。
 
-**6.6 废弃**：`LoomSettings` SO、`LoomAtlasSync`（Unity 图集同步整个删）、`LoomConfigExporter`、`LoomWorkspaceInitializer`、`PkgManifestReader` 里读 w/h 的部分。
+**6.6 废弃**：`LoomSettings` SO、`LoomAtlasSync`（Unity 图集同步整个删）、`LoomConfigExporter`、`LoomWorkspaceInitializer`、`PkgManifestReader`（整个删——manifest 段已从 pkg.bin 移除）。
 
 ## 7. Tauri GUI 壳
 
@@ -254,11 +257,12 @@ loomgui_gui/           (新 crate, Tauri app, 依赖 loomgui_pkg)
 ## 10. 分阶段实现（一份 spec 盖全）
 
 1. **阶段一 Rust 引擎层**：`workspace.json` 读写 + atlas 打包 + `build` 编排 + `runtime.json` + 零参 CLI。产物能出。
-2. **阶段二 运行时消费**：Unity `SpriteResolver` 重写 + 废 `LoomSettings` + `image_sizes` 改源。闭环：CLI 打包 → PlayMode 渲染。
+2. **阶段二 运行时消费**：pkg.bin 删 manifest 段（v12→v13）+ core `set_image_sizes` FFI + Unity `SpriteResolver` 重写 + 废 `LoomSettings`。闭环：CLI 打包 → PlayMode 渲染。
 3. **阶段三 Tauri GUI**：GUI 壳 + 拖拽 + 最近工作区。
 4. **阶段四 Unity 拆除**：删旧编辑器脚本，留「Open Packer」MenuItem。
+5. **阶段五 文档更新防漂移**：main-design / CLAUDE.md / 工作区 skill / roadmap / 记忆全部同步（见 §11）。
 
-阶段一二先拿到「命令行能打包 + 能渲染」的闭环；三四是易用性外壳。
+阶段一二先拿到「命令行能打包 + 能渲染」的闭环；三四是易用性外壳；五收口防漂移。
 
 ## 11. Roadmap 落位 + 文档更新（防漂移）
 
