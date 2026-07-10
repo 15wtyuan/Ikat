@@ -27,17 +27,50 @@
       </footer>
     </div>
 
-    <!-- Main Editor Screen (stub for T20) -->
+    <!-- Main Editor Screen -->
     <div id="main-screen" class="screen hidden">
       <header class="main-header">
         <button id="btn-back" class="btn btn-ghost">&larr; 返回</button>
         <h1>LoomGUI Packer</h1>
         <span id="main-path" class="main-path"></span>
+        <button id="btn-build" class="btn btn-primary btn-build">打包</button>
       </header>
-      <div id="main-placeholder" class="main-placeholder">
-        <p>工作区已打开</p>
-        <pre id="main-info"></pre>
-        <p class="hint">编辑器界面将在后续版本中实现 (T20)</p>
+      <div id="editor-scroll" class="editor-scroll">
+
+        <!-- 1. Workspace -->
+        <section class="editor-section" id="section-ws">
+          <h2 class="section-title">工作区</h2>
+          <div class="section-body" id="section-ws-body"></div>
+        </section>
+
+        <!-- 2. Packages -->
+        <section class="editor-section" id="section-pkg">
+          <h2 class="section-title">包</h2>
+          <div class="section-body" id="section-pkg-body"></div>
+        </section>
+
+        <!-- 3. Atlases -->
+        <section class="editor-section" id="section-atlas">
+          <h2 class="section-title">图集</h2>
+          <div class="section-body" id="section-atlas-body"></div>
+        </section>
+
+        <!-- 4. Fonts -->
+        <section class="editor-section" id="section-font">
+          <h2 class="section-title">字体</h2>
+          <div class="section-body" id="section-font-body"></div>
+        </section>
+
+        <!-- Build Log -->
+        <section class="editor-section" id="section-build-log">
+          <h2 class="section-title">打包日志</h2>
+          <div class="section-body">
+            <div id="build-log" class="build-log">
+              <p class="empty-msg">点击右上角「打包」按钮开始构建</p>
+            </div>
+          </div>
+        </section>
+
       </div>
     </div>
 
@@ -61,6 +94,7 @@
       </div>
     </div>
 
+    <script src="editor.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

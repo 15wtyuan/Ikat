@@ -33,7 +33,7 @@ pub fn create_workspace(path: String) -> Result<Workspace, String> {
     Ok(ws)
 }
 
-#[tauri::command]
+#[tauri::command(name = "save_workspace")]
 pub fn save_workspace_cmd(path: String, ws: Workspace) -> Result<(), String> {
     save_workspace(Path::new(&path), &ws)
 }

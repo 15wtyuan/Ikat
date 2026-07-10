@@ -164,18 +164,9 @@
 
     $("main-path").textContent = path;
 
-    var info = JSON.stringify(
-      {
-        version: ws.version,
-        output_dir: ws.output_dir,
-        packages: ws.packages ? ws.packages.length : 0,
-        atlases: ws.atlases ? ws.atlases.length : 0,
-        fonts: ws.fonts ? ws.fonts.length : 0,
-      },
-      null,
-      2
-    );
-    $("main-info").textContent = info;
+    if (window.LoomGUIEditor) {
+      window.LoomGUIEditor.renderMain(ws, path);
+    }
   }
 
   // ── Event bindings ──
