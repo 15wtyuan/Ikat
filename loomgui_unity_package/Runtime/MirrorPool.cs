@@ -87,17 +87,18 @@ namespace LoomGUI
                 if (kind != 1) continue;
 
                 // 解决图资源（path_idx → path → SpriteResolver.GetSprite）。
-                // 文本节点的 font-atlas path（loomgui://font-atlas/...）不在 SpriteResolver 命中——
-                // tex 回落 fallback whiteTexture，由 Task 7 的 SyncFontAtlas 换贴真实 atlas。
-                Sprite sp = null; Texture tex = fallback;
+                // 文本节点的 font-atlas path（loomgui://font-atlas/...）由 RegisterFontAtlasPage 注册
+                // 进 SpriteResolver，GetSprite 命中返 SpriteLookup——tex 回落 fallback whiteTexture，
+                // 由 SyncFontAtlas 换贴真实 atlas。
+                SpriteLookup look = default; Texture tex = fallback;
                 uint pathIdx = blob.PathIdx(i);
                 if (pathIdx != 0 && sprites != null)
                 {
                     string path = blob.ReadPath(pathIdx);
                     if (!string.IsNullOrEmpty(path))
                     {
-                        sp = sprites.GetSprite(path);
-                        if (sp != null) tex = sp.texture;
+                        look = sprites.GetSprite(path);
+                        if (look.found) tex = look.tex;
                     }
                 }
 
@@ -111,8 +112,8 @@ namespace LoomGUI
                 ro.LastNodeId = id; // 新建 + 复用均更新（slot 换绑时 node_id 变）
                 ro.Stale = false;
 
-                UpdateHeader(ro, blob, i, root, mm, kind, sp, tex);
-                if (level == 2) UploadMeshOrText(ro, blob, i, sp);
+                UpdateHeader(ro, blob, i, root, mm, kind, look, tex);
+                if (level == 2) UploadMeshOrText(ro, blob, i, look);
             }
 
             // ③ 余 stale 销毁（两个 dict）
@@ -128,7 +129,7 @@ namespace LoomGUI
         /// 无论 HEADER 还是 FULL 路径均调用；仅 SKIP 跳过。
         /// v10：不再有 kind==2 text 单独材质路径——所有节点统一走 program+tex 选材。
         void UpdateHeader(RenderObj ro, FrameBlob blob, int i, Transform root,
-                          MaterialManager mm, byte kind, Sprite sp, Texture tex)
+                          MaterialManager mm, byte kind, SpriteLookup look, Texture tex)
         {
             // flatten：所有节点挂 root。
             // pure 和非 pure 统一 GO localPosition=(Mtx,Mty)（world translate 进 GO transform）。
@@ -215,17 +216,17 @@ namespace LoomGUI
         /// 上传 mesh / 重建 mesh（仅 FULL 路径调用）。
         /// v10：不再有 kind==2 text 分支——所有节点统一走 mesh 上传（核心自产 atlas，word mesh 已含字形 UV）。
         static void UploadMeshOrText(RenderObj ro, FrameBlob blob, int i,
-                                     Sprite sp)
+                                     SpriteLookup look)
         {
             // mesh 上传（顶点已 re-base 到本地）。
             var seg = blob.ReadMesh(i);
             UploadMesh(ro, seg);
             ro.Mesh.RecalculateBounds();
-            // path → SpriteResolver.GetSprite → sp。sp=null（path_idx=0 纯色 / 查不到）则跳过重映射，
+            // path → SpriteResolver.GetSprite → look。look.found=false（path_idx=0 纯色 / 查不到）则跳过重映射，
             // mesh 沿用 blob 全图 UV [0,1] + fallback whiteTexture。
-            // sp 非空 → RemapMeshUvToSprite 把全图 UV 重映射到 sprite 在 atlas 的子区（用 sp.uv）。
-            if (sp != null)
-                RemapMeshUvToSprite(ro, sp);
+            // look.found → RemapMeshUvToSprite 把全图 UV 重映射到 sprite 在 atlas 的子区（用 look.uvRect）。
+            if (look.found)
+                RemapMeshUvToSprite(ro, look.uvRect);
         }
 
         static RenderObj NewRenderObj(Transform root)
@@ -276,25 +277,15 @@ namespace LoomGUI
             ro.Mesh.SetTriangles(idx, 0);
         }
 
-        /// 把 mesh UV（core 产全图 [0,1]）重映射到 Sprite 在 atlas 内的子区。
-        /// 取 sp.uv 的 min/max 作为子区——sp.rect 在 GetSprite 返回的 clone 上是源图 rect，非 atlas 打包位置。
-        /// 前提：atlas packing 须 axis-aligned（见 LoomAtlasSync.EnsureAxisAlignedPacking），否则旋转打包下
-        /// sp.uv 的轴对齐包围盒会溢出邻居 sprite。
-        static void RemapMeshUvToSprite(RenderObj ro, Sprite sp)
+        /// 把 mesh UV（core 产全图 [0,1]）重映射到 sprite 在 atlas 内的子区。
+        /// uvRect 是 UV 表中算好的子区 [u0,v0,u1,v1]——Unity Rect 形式 (x=u0, y=v0, w=u1-u0, h=v1-v0)。
+        /// 不内缩半纹素：padding 下 bilinear 边缘 fringe 几乎不可见，缩水代价不划算；
+        /// 要防 bleed 开 atlas enableAlphaDilation（边缘像素复制进 padding）。
+        static void RemapMeshUvToSprite(RenderObj ro, Rect uvRect)
         {
-            if (sp == null) return;
             // blob UV 已 v 翻转（TL.v=1），线性映射进子区保持翻转。
-            var suv = sp.uv;
-            if (suv == null || suv.Length == 0) return;
-            float minU = float.MaxValue, maxU = float.MinValue, minV = float.MaxValue, maxV = float.MinValue;
-            for (int i = 0; i < suv.Length; i++)
-            {
-                float u = suv[i].x, v = suv[i].y;
-                if (u < minU) minU = u; if (u > maxU) maxU = u;
-                if (v < minV) minV = v; if (v > maxV) maxV = v;
-            }
-            // 不内缩半纹素：padding 下 bilinear 边缘 fringe 几乎不可见，缩水代价不划算；
-            // 要防 bleed 开 atlas enableAlphaDilation（边缘像素复制进 padding）。
+            float minU = uvRect.xMin, maxU = uvRect.xMax;
+            float minV = uvRect.yMin, maxV = uvRect.yMax;
             float du = maxU - minU, dv = maxV - minV;
             var uvs = new List<Vector2>();
             ro.Mesh.GetUVs(0, uvs);

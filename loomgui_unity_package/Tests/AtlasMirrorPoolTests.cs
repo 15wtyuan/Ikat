@@ -1,30 +1,38 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
 namespace LoomGUI.Tests
 {
-    /// SpriteResolver path→Sprite 查询冒烟测试（不依赖 blob，纯 path→Sprite 逻辑）。
-    ///
-    /// 图集路由：path 顶层子目录 → folder→atlas 映射（LoomSettings 配）→ atlas.GetSprite(文件名去扩展)。
-    /// 同 atlas 多 sprite 共享 texture 由 SpriteAtlas 保证；子区 UV 由 MirrorPool.RemapMeshUvToSprite 算。
+    /// <summary>
+    /// SpriteResolver basic lookup smoke tests (self-drawn atlas, no Unity SpriteAtlas).
+    /// Pure path → SpriteLookup logic; no FrameBlob dependency.
+    /// </summary>
     public class AtlasMirrorPoolPathTests
     {
-        /// 无 atlas 注册 → GetSprite 返 null（fallback 路径，调用方走 Texture2D.whiteTexture，不崩）。
+        /// <summary>
+        /// No atlases registered → GetSprite returns found=false (caller fallback to whiteTexture, no crash).
+        /// </summary>
         [Test]
-        public void SpriteResolver_NoAtlas_ReturnsNull()
+        public void SpriteResolver_NoAtlas_ReturnsNotFound()
         {
             var resolver = new SpriteResolver();
-            var sp = resolver.GetSprite("icons/skin.png");
-            Assert.IsNull(sp, "无 atlas 注册 → GetSprite 返 null");
+            resolver.Init(null, null);
+            var look = resolver.GetSprite("icons/skin.png");
+            Assert.IsFalse(look.found, "no atlases → found=false");
         }
 
-        /// SpriteResolver Init(null) 不崩（防御）。loadAtlas 传 null——ResolveAtlas 永远返 null，GetSprite 走 fallback。
+        /// <summary>
+        /// Init with null atlases does not crash (defensive).
+        /// </summary>
         [Test]
         public void SpriteResolver_InitNull_DoesNotCrash()
         {
             var resolver = new SpriteResolver();
             resolver.Init(null, null);
-            Assert.AreEqual(0, resolver.AtlasCount, "null settings → AtlasCount=0");
+            // no exception = pass
+            var look = resolver.GetSprite("icons/skin.png");
+            Assert.IsFalse(look.found);
         }
     }
 }

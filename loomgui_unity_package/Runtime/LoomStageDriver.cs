@@ -1,7 +1,7 @@
+using System.Collections.Generic;
 using System.IO;
 using LoomGUI.Bindings;
 using UnityEngine;
-using UnityEngine.U2D;
 
 namespace LoomGUI
 {
@@ -9,7 +9,7 @@ namespace LoomGUI
     /// LoomStage 的 Unity 生命周期宿主。持纯 C# <see cref="LoomStage"/> 实例，在 Awake 构造 + 注入
     /// 字体/根 transform + 配 UI 相机/根变换；LateUpdate 每帧驱动 stage.Tick(dt) + 输入采集。
     ///
-    /// 三个 public virtual 加载钩子（LoadFont/LoadPackageBytes/LoadSpriteAtlas）默认直读
+    /// 三个 public virtual 加载钩子（LoadFont/LoadPackageBytes）默认直读
     /// Assets/LoomGUI/Bundles/ 目录——仅 editor 可用。项目继承覆写以换 AssetBundle/Addressables 加载。
     /// 加载钩子是 public（非 protected）以便跨程序集的 demo/项目 driver 直接调用。
     ///
@@ -72,7 +72,9 @@ namespace LoomGUI
             _stage.SetNativeHostRoot(transform);
 
             var settings = LoomSettings.GetOrCreateDefault();
-            _stage.InitSprites(settings, atlasName => LoadSpriteAtlas(atlasName));
+            // Build atlas manifests from loom.runtime.json + *.atlas.json (standalone packer output).
+            // loadPage reads page PNGs from {pkgDir}/atlas/. T15 will wire AB/Addressables override.
+            _stage.InitSprites(BuildAtlasManifests(settings), LoadAtlasPage);
             RegisterFontsFromSettings();
 
             EnsureCamera();
@@ -129,21 +131,80 @@ namespace LoomGUI
             return File.Exists(path) ? File.ReadAllBytes(path) : null;
         }
 
+        // ===== Self-drawn atlas bridge (T14: T15 will override for AB/Addressables) =====
+
         /// <summary>
-        /// 默认 editor LoadAssetAtPath（{pkgOutputDir}/atlas/*.spriteatlasv2）；build 后返 null + LogError——
-        /// 项目须覆写本方法走 AB/Addressables（SpriteAtlas 是 editor 资产，build 时打進包）。
-        /// public 以便跨程序集调用。
+        /// Build AtlasManifest list from loom.runtime.json's atlas list.
+        /// Reads {pkgDir}/loom.runtime.json → parse → for each atlas name read {pkgDir}/atlas/{name}.atlas.json.
+        /// Returns empty list if loom.runtime.json is missing or parsing fails.
         /// </summary>
-        public virtual SpriteAtlas LoadSpriteAtlas(string atlasName)
+        static List<AtlasManifest> BuildAtlasManifests(LoomSettings settings)
         {
-#if UNITY_EDITOR
-            // LoadAssetAtPath 要 "Assets/..." 开头；pkgOutputDir 默认含 "Assets/" 前缀，直接拼即可。
-            string path = Path.Combine(LoomSettings.GetOrCreateDefault().pkgOutputDir, "atlas", atlasName + ".spriteatlasv2").Replace('\\', '/');
-            return UnityEditor.AssetDatabase.LoadAssetAtPath<SpriteAtlas>(path);
-#else
-            Debug.LogError("[LoomStageDriver] LoadSpriteAtlas must be overridden for builds (AB/Addressables).");
+            var result = new List<AtlasManifest>();
+            if (settings == null) return result;
+
+            string pkgDir = settings.pkgOutputDir;
+            string runtimePath = Path.Combine(pkgDir, "loom.runtime.json");
+            if (!File.Exists(runtimePath)) return result;
+
+            RuntimeManifest runtime;
+            try { runtime = RuntimeManifest.ParseRuntime(File.ReadAllText(runtimePath)); }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[LoomStageDriver] Failed to parse loom.runtime.json: {e.Message}");
+                return result;
+            }
+
+            foreach (var atlasName in runtime.atlases)
+            {
+                string jsonPath = Path.Combine(pkgDir, "atlas", atlasName + ".atlas.json");
+                if (!File.Exists(jsonPath))
+                {
+                    Debug.LogWarning($"[LoomStageDriver] atlas.json not found: {jsonPath}");
+                    continue;
+                }
+                try { result.Add(AtlasManifest.ParseAtlas(File.ReadAllText(jsonPath))); }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning($"[LoomStageDriver] Failed to parse {jsonPath}: {e.Message}");
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Load an atlas page PNG from {pkgDir}/atlas/{pageFileName}.
+        /// Editor only — reads from file system. T15 will override for AB/Addressables.
+        /// Returns null if the file doesn't exist or load fails.
+        /// </summary>
+        static Texture2D LoadAtlasPage(string pageFileName)
+        {
+            string pkgDir = LoomSettings.GetOrCreateDefault().pkgOutputDir;
+            string path = Path.Combine(pkgDir, "atlas", pageFileName);
+            if (!File.Exists(path)) return null;
+            try
+            {
+                var tex = new Texture2D(2, 2);
+                tex.LoadImage(File.ReadAllBytes(path));
+                return tex;
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[LoomStageDriver] Failed to load atlas page {path}: {e.Message}");
+                return null;
+            }
+        }
+
+        // deprecated — kept for source compatibility with subclasses that override it.
+        // T15 will remove this and replace with a BuildAtlasManifests / LoadAtlasPage override pattern.
+        /// <summary>
+        /// Deprecated. With standalone packer, loading happens via BuildAtlasManifests + LoadAtlasPage.
+        /// Kept virtual for backward source compatibility; T15 will remove.
+        /// </summary>
+        public virtual object LoadSpriteAtlas(string atlasName)
+        {
+            Debug.LogWarning("[LoomStageDriver] LoadSpriteAtlas is deprecated — atlas loading is now via BuildAtlasManifests + LoadAtlasPage. T15 will remove.");
             return null;
-#endif
         }
 
         // 拼 Bundles 子目录绝对路径。pkgOutputDir 是相对工程根的 "Assets/Bundles" 形式；
