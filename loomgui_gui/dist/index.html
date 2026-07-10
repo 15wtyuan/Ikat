@@ -1,10 +1,66 @@
 <!doctype html>
-<html>
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LoomGUI Packer</title>
+    <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <h1>LoomGUI Packer</h1>
+    <!-- Start Screen -->
+    <div id="start-screen" class="screen">
+      <header class="start-header">
+        <h1>LoomGUI Packer</h1>
+        <p class="subtitle">HTML/CSS 游戏 UI 打包工具</p>
+      </header>
+
+      <section class="recent-section">
+        <h2>最近工作区</h2>
+        <div id="recent-list" class="recent-list">
+          <p class="empty-msg">暂无最近使用的工作区</p>
+        </div>
+      </section>
+
+      <footer class="start-actions">
+        <button id="btn-new" class="btn btn-primary">新建工作区</button>
+        <button id="btn-open" class="btn btn-secondary">打开工作区</button>
+      </footer>
+    </div>
+
+    <!-- Main Editor Screen (stub for T20) -->
+    <div id="main-screen" class="screen hidden">
+      <header class="main-header">
+        <button id="btn-back" class="btn btn-ghost">&larr; 返回</button>
+        <h1>LoomGUI Packer</h1>
+        <span id="main-path" class="main-path"></span>
+      </header>
+      <div id="main-placeholder" class="main-placeholder">
+        <p>工作区已打开</p>
+        <pre id="main-info"></pre>
+        <p class="hint">编辑器界面将在后续版本中实现 (T20)</p>
+      </div>
+    </div>
+
+    <!-- Path Input Modal -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+      <div class="modal">
+        <h3 id="modal-title">选择工作区目录</h3>
+        <p class="modal-desc">请输入或粘贴工作区目录的绝对路径：</p>
+        <input
+          id="modal-input"
+          type="text"
+          class="modal-input"
+          placeholder="例如: C:\Users\me\my-loomgui-project"
+          autofocus
+        />
+        <div id="modal-error" class="modal-error hidden"></div>
+        <div class="modal-actions">
+          <button id="modal-cancel" class="btn btn-secondary">取消</button>
+          <button id="modal-confirm" class="btn btn-primary">确认</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
   </body>
 </html>
