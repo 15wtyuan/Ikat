@@ -2,6 +2,8 @@
 //! 图集独立于包；sprite_key = 图相对工作区根路径（全局唯一）。
 //! 见 spec §5。本模块的子模块 pack 做实际打包，本文件只定义清单格式。
 
+pub mod collect;
+
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

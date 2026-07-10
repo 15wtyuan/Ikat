@@ -8,3 +8,4 @@ loomgui_core = { path = "../loomgui_core", features = ["parse"] }
 scraper = "0.19"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
