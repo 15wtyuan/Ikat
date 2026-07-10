@@ -1,6 +1,8 @@
 //! Build orchestration: wire packages + atlases + fonts → output_dir.
 //! Single entry point `build()` called by CLI (Task 9) and GUI (Task 18).
 
+use serde::Serialize;
+
 use crate::atlas::collect::collect_pngs;
 use crate::atlas::pack::pack_atlas;
 use crate::atlas::validate::assign_and_validate;
@@ -9,7 +11,7 @@ use crate::workspace::load_workspace;
 use std::path::Path;
 
 /// Build report: what was produced.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BuildReport {
     pub packages: Vec<String>,
     pub atlases: Vec<String>,
