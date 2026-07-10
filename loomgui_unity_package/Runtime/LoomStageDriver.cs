@@ -195,18 +195,6 @@ namespace LoomGUI
             }
         }
 
-        // deprecated — kept for source compatibility with subclasses that override it.
-        // T15 will remove this and replace with a BuildAtlasManifests / LoadAtlasPage override pattern.
-        /// <summary>
-        /// Deprecated. With standalone packer, loading happens via BuildAtlasManifests + LoadAtlasPage.
-        /// Kept virtual for backward source compatibility; T15 will remove.
-        /// </summary>
-        public virtual object LoadSpriteAtlas(string atlasName)
-        {
-            Debug.LogWarning("[LoomStageDriver] LoadSpriteAtlas is deprecated — atlas loading is now via BuildAtlasManifests + LoadAtlasPage. T15 will remove.");
-            return null;
-        }
-
         // 拼 Bundles 子目录绝对路径。pkgOutputDir 是相对工程根的 "Assets/Bundles" 形式；
         // 去 "Assets/" 前缀后相对 Assets/，与 Application.dataPath（已含 .../Assets）拼成绝对路径。
         static string BundlesSubDir(string sub)

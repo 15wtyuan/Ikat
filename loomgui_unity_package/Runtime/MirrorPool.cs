@@ -277,20 +277,18 @@ namespace LoomGUI
             ro.Mesh.SetTriangles(idx, 0);
         }
 
-        /// 把 mesh UV（core 产全图 [0,1]）重映射到 sprite 在 atlas 内的子区。
-        /// uvRect 是 UV 表中算好的子区 [u0,v0,u1,v1]——Unity Rect 形式 (x=u0, y=v0, w=u1-u0, h=v1-v0)。
-        /// 不内缩半纹素：padding 下 bilinear 边缘 fringe 几乎不可见，缩水代价不划算；
-        /// 要防 bleed 开 atlas enableAlphaDilation（边缘像素复制进 padding）。
+        /// 把 mesh UV（core 产 [0,1] 全图 UV）线性映射到 sprite 在 atlas 页内的子区。
+        /// uvRect 是打包器算好的 atlas 子区——Unity Rect (x=u0, y=v0, w=u1-u0, h=v1-v0)。
+        /// 不内缩半纹素：padding 下 bilinear 边缘 fringe 几乎不可见；开 atlas enableAlphaDilation（边缘像素复制进 padding）防 bleed。
         static void RemapMeshUvToSprite(RenderObj ro, Rect uvRect)
         {
-            // blob UV 已 v 翻转（TL.v=1），线性映射进子区保持翻转。
-            float minU = uvRect.xMin, maxU = uvRect.xMax;
-            float minV = uvRect.yMin, maxV = uvRect.yMax;
-            float du = maxU - minU, dv = maxV - minV;
-            var uvs = new List<Vector2>();
-            ro.Mesh.GetUVs(0, uvs);
+            // blob UV v 已翻转（TL.v=1），线性映射进子区保持翻转。
+            // 直接改 ro.UvList（UploadMesh 已填），不复 alloc 新 List。
+            var uvs = ro.UvList;
             for (int i = 0; i < uvs.Count; i++)
-                uvs[i] = new Vector2(minU + uvs[i].x * du, minV + uvs[i].y * dv);
+                uvs[i] = new Vector2(
+                    uvRect.x + uvs[i].x * uvRect.width,
+                    uvRect.y + uvs[i].y * uvRect.height);
             ro.Mesh.SetUVs(0, uvs);
         }
 
