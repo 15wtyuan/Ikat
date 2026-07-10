@@ -1134,3 +1134,90 @@ fn font_effect_bare_number_no_px() {
         _ => panic!("expected Glow"),
     }
 }
+
+// ── filter: invert 比例插值（非阈值二分） ──
+
+/// invert(0.3) 应是 30% 反相（矩阵非单位、非全反相），
+/// 而非旧实现的阈值二分（x<0.5 → IDENTITY）。
+#[test]
+fn filter_invert_partial_produces_non_identity_matrix() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "filter", "invert(0.3)"));
+    let m = s.color_filter.expect("invert(0.3) 设了 color_filter");
+
+    // 反相矩阵格式：[1-2x, 0, 0, 0, x] / [0, 1-2x, 0, 0, x] / [0, 0, 1-2x, 0, x] / [0,0,0,1,0]
+    let x = 0.3;
+    let expected_diag = 1.0 - 2.0 * x; // 0.4
+    assert!(
+        (m[0] - expected_diag).abs() < 1e-5,
+        "invert(0.3) diag 应 = 1-2x = 0.4, got {}",
+        m[0]
+    );
+    assert!((m[4] - x).abs() < 1e-5, "invert(0.3) offset 应 = x = 0.3");
+    // 不是全反相（全反相 diag=-1, offset=1）
+    assert!(m[0] > 0.0, "invert(0.3) 不是全反相（全反相 diag=-1.0）");
+    // 不是单位矩阵
+    assert!(m[0] != 1.0 || m[4] != 0.0, "invert(0.3) 不是单位矩阵");
+}
+
+/// invert(1) → 全反相（回归守卫）
+#[test]
+fn filter_invert_full_produces_full_invert() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "filter", "invert(1)"));
+    let m = s.color_filter.expect("invert(1) 设了 color_filter");
+
+    assert_eq!(m[0], -1.0, "全反相 diag r = -1");
+    assert_eq!(m[6], -1.0, "全反相 diag g = -1");
+    assert_eq!(m[12], -1.0, "全反相 diag b = -1");
+    assert_eq!(m[4], 1.0, "全反相 offset = 1");
+}
+
+/// invert(0) → 单位矩阵（无效果）
+#[test]
+fn filter_invert_zero_is_identity() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "filter", "invert(0)"));
+    let m = s.color_filter.expect("invert(0) 设了 color_filter");
+
+    assert_eq!(m[0], 1.0, "diag = 1");
+    assert_eq!(m[4], 0.0, "offset = 0");
+    // 全阵 = IDENTITY
+    assert_eq!(&m, &color_filter::IDENTITY, "invert(0) = IDENTITY");
+}
+
+// ── letter-spacing 拒收 em/rem（围栏 px-only，不静默落零） ──
+
+#[test]
+fn letter_spacing_em_is_rejected() {
+    let mut s = ResolvedStyle::default();
+    s.letter_spacing = 5.0; // 预设非零，验不被覆盖
+    assert!(
+        !apply_decl(&mut s, "letter-spacing", "0.1em"),
+        "letter-spacing:0.1em → false（em 围栏外）"
+    );
+    assert_eq!(s.letter_spacing, 5.0, "拒收时不污染既有 letter_spacing");
+}
+
+#[test]
+fn letter_spacing_rem_is_rejected() {
+    let mut s = ResolvedStyle::default();
+    assert!(
+        !apply_decl(&mut s, "letter-spacing", "1rem"),
+        "letter-spacing:1rem → false"
+    );
+    assert_eq!(s.letter_spacing, 0.0, "拒收时保持默认 0");
+}
+
+#[test]
+fn letter_spacing_px_is_accepted() {
+    let mut s = ResolvedStyle::default();
+    assert!(
+        apply_decl(&mut s, "letter-spacing", "2px"),
+        "letter-spacing:2px → true"
+    );
+    assert!(
+        (s.letter_spacing - 2.0).abs() < 1e-5,
+        "letter-spacing = 2.0"
+    );
+}

@@ -80,7 +80,8 @@ pub struct ScrollPaneState {
     /// 惯性速度（px/s）。advance 写。
     pub velocity: (f32, f32),
     /// 0=无补间，1=set_pos 补间，2=惯性+回弹补间。advance 写。
-    pub tweening: u8,
+    /// [ax0, ax1]：每轴独立 tweening 状态，避免单轴 bounce 误标全容器。
+    pub tweening: [u8; 2],
     pub tween_start: (f32, f32),
     pub tween_change: (f32, f32),
     pub tween_time: (f32, f32),
@@ -122,8 +123,17 @@ impl ScrollTable {
 }
 
 /// 物理方法。per-axis 用 ax 0/1 分支，自维护可变 target tween
-/// （不走 GTween）。tweening：0=无，1=set_pos/wheel，2=inertia/bounce。
+/// （不走 GTween）。tweening[ax]：0=无，1=set_pos/wheel，2=inertia/bounce。
 impl ScrollPaneState {
+    /// 两轴 tweening 全零（无 tween）。
+    pub fn tweening_idle(&self) -> bool {
+        self.tweening[0] == 0 && self.tweening[1] == 0
+    }
+    /// 任一轴 tweening 非零。
+    pub fn tweening_any(&self) -> bool {
+        self.tweening[0] != 0 || self.tweening[1] != 0
+    }
+
     /// 拖拽跟手：scroll_pos += delta（越界 PULL_RATIO 打折）+ 记速度（exp 平滑）。
     pub fn drag_follow(&mut self, delta: (f32, f32), dt: f32) {
         // 速度记录（指数平滑：v += (Δ/dt - v) * smooth）
@@ -169,7 +179,7 @@ impl ScrollPaneState {
                 self.scroll_pos.1 = np;
             }
         }
-        self.tweening = 0; // 拖拽中无 tween
+        self.tweening = [0, 0]; // 拖拽中无 tween
     }
 
     /// Up 后松手物理（启 tween→tweening=2，否则 0）。is_touch 选阈值。
@@ -188,7 +198,7 @@ impl ScrollPaneState {
         } else {
             INERTIA_THRESH_PC
         };
-        let mut any = false;
+        self.tweening = [0, 0];
         for ax in 0..2u8 {
             let v = if ax == 0 {
                 self.velocity.0
@@ -222,7 +232,7 @@ impl ScrollPaneState {
                     self.tween_duration.1 = TWEEN_TIME_DEFAULT;
                     self.tween_time.1 = 0.0;
                 }
-                any = true;
+                self.tweening[ax as usize] = 2;
                 continue;
             }
             // 分支 3：界内低速或无 overlap → 停（ratio=0 不 inertia）
@@ -251,12 +261,12 @@ impl ScrollPaneState {
                 self.tween_duration.1 = dur;
                 self.tween_time.1 = 0.0;
             }
-            any = true;
+            self.tweening[ax as usize] = 2;
         }
-        self.tweening = if any { 2 } else { 0 };
     }
 
     /// 回弹 tween（越界 > BOUNCE_THRESHOLD 才启，否则 snap 由 advance done 处理）。
+    /// 每轴独立设置 tweening[ax]=2，不误标另一轴。
     pub fn begin_bounce(&mut self) {
         for ax in 0..2u8 {
             let cur = if ax == 0 {
@@ -293,8 +303,8 @@ impl ScrollPaneState {
                 self.tween_duration.1 = TWEEN_TIME_DEFAULT;
                 self.tween_time.1 = 0.0;
             }
+            self.tweening[ax as usize] = 2;
         }
-        self.tweening = 2;
     }
 
     /// 推进 tween（tweening≠0）。
@@ -302,7 +312,7 @@ impl ScrollPaneState {
     /// inertia 完成 change==0 时仍越界）即截断当前 tween，启回弹 tween（弹性过冲回弹）。
     /// 两轴 tween_change 都归零 → done（clamp[0,overlap] + tweening=0）。
     pub fn advance(&mut self, dt: f32) {
-        if self.tweening == 0 {
+        if self.tweening[0] == 0 && self.tweening[1] == 0 {
             return;
         }
         for ax in 0..2u8 {
@@ -362,7 +372,7 @@ impl ScrollPaneState {
             // 运行时越界截断（仅 tweening==2）。
             // 越顶（pos<0）：inertia 往顶（cc<0）冲过 0 超 20px，或完成（cc==0）时仍越顶 → 回弹到 0。
             // 越底（pos>ov）：对称。→ 弹性过冲回弹（不冲远空白再突然 snap）。
-            if self.tweening == 2 {
+            if self.tweening[ax as usize] == 2 {
                 let cc = if ax == 0 {
                     self.tween_change.0
                 } else {
@@ -396,12 +406,13 @@ impl ScrollPaneState {
         if self.tween_change.0 == 0.0 && self.tween_change.1 == 0.0 {
             self.scroll_pos.0 = self.scroll_pos.0.clamp(0.0, self.overlap.0);
             self.scroll_pos.1 = self.scroll_pos.1.clamp(0.0, self.overlap.1);
-            self.tweening = 0;
+            self.tweening = [0, 0];
         }
     }
 
     /// 滚轮：target = (cur - delta*SCROLL_STEP).clamp[0,overlap]，启 tweening=1。
     /// delta.y > 0 = 上滚（看上方）→ scroll_pos.y 减少。
+    /// 仅对 delta≠0 的轴设 tweening[ax]=1。
     pub fn apply_wheel(&mut self, delta: (f32, f32)) {
         for ax in 0..2u8 {
             let d = if ax == 0 { delta.0 } else { delta.1 };
@@ -431,8 +442,8 @@ impl ScrollPaneState {
                 self.tween_duration.1 = TWEEN_TIME_DEFAULT;
                 self.tween_time.1 = 0.0;
             }
+            self.tweening[ax as usize] = 1;
         }
-        self.tweening = 1;
     }
 
     /// 编程滚动。animated=false 直接 snap+clamp+tweening=0；true 启 tweening=1。
@@ -442,7 +453,7 @@ impl ScrollPaneState {
                 target.0.clamp(0.0, self.overlap.0),
                 target.1.clamp(0.0, self.overlap.1),
             );
-            self.tweening = 0;
+            self.tweening = [0, 0];
             return;
         }
         for ax in 0..2u8 {
@@ -467,8 +478,8 @@ impl ScrollPaneState {
                 self.tween_duration.1 = TWEEN_TIME_DEFAULT;
                 self.tween_time.1 = 0.0;
             }
+            self.tweening[ax as usize] = 1;
         }
-        self.tweening = 1;
     }
 }
 
@@ -567,10 +578,13 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
                 (st.content_size.0 - viewport.0).max(0.0),
                 (st.content_size.1 - viewport.1).max(0.0),
             );
+            let old_overlap = st.overlap;
             st.overlap = new_overlap;
             // content_size 变化补偿（最小）：overridden 容器 content_size 未变，
             // 但 overlap 可能因 viewport 变化而缩小 → scroll_pos 越界需 clamp。
-            if st.tweening != 0 {
+            // 仅 overlap 变时才 clamp（drag 拖出界的 rubber-banding 不 clamp）。
+            // 越界时若正在跑 tween 则取消（快照到新边界）。
+            if new_overlap != old_overlap {
                 let out_of_range = st.scroll_pos.0 < 0.0
                     || st.scroll_pos.0 > new_overlap.0
                     || st.scroll_pos.1 < 0.0
@@ -578,7 +592,7 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
                 if out_of_range {
                     st.scroll_pos.0 = st.scroll_pos.0.clamp(0.0, new_overlap.0);
                     st.scroll_pos.1 = st.scroll_pos.1.clamp(0.0, new_overlap.1);
-                    st.tweening = 0;
+                    st.tweening = [0, 0];
                 }
             }
             continue;
@@ -606,11 +620,13 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
             (content.0 - viewport.0).max(0.0),
             (content.1 - viewport.1).max(0.0),
         );
+        let old_overlap = st.overlap;
         st.overlap = new_overlap;
         // content_size 变化补偿（最小）：geometry 变了，若 scroll_pos 跑出新
         // [0, overlap] 范围，直接 clamp 并取消正在跑的 tween。
+        // 仅 overlap 变时才 clamp（drag 拖出界的 rubber-banding 不 clamp）。
         // 完整补偿（按比例缩短 tween_change/tween_duration）defer——简化为 snap。
-        if st.content_size_dirty && st.tweening != 0 {
+        if new_overlap != old_overlap {
             let out_of_range = st.scroll_pos.0 < 0.0
                 || st.scroll_pos.0 > new_overlap.0
                 || st.scroll_pos.1 < 0.0
@@ -618,7 +634,7 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
             if out_of_range {
                 st.scroll_pos.0 = st.scroll_pos.0.clamp(0.0, new_overlap.0);
                 st.scroll_pos.1 = st.scroll_pos.1.clamp(0.0, new_overlap.1);
-                st.tweening = 0;
+                st.tweening = [0, 0];
             }
         }
     }
@@ -669,12 +685,12 @@ pub fn apply_wheel_to_hit(scene: &mut Scene, w: WheelEvent) {
     }
 }
 
-/// tick 推进所有活跃 scroll tween（tweening≠0）。
-/// 遍历 scene.scroll（HashMap values_mut），每个 st 若 tweening≠0 调 st.advance(dt)。
-/// tweening=0 的拖拽中/静止容器不 advance。
+/// tick 推进所有活跃 scroll tween（tweening[ax]≠0）。
+/// 遍历 scene.scroll（HashMap values_mut），每个 st 若任一轴 tweening≠0 调 st.advance(dt)。
+/// tweening 全零的拖拽中/静止容器不 advance。
 pub fn advance_all(dt: f32, scene: &mut Scene) {
     for st in scene.scroll.0.values_mut() {
-        if st.tweening != 0 {
+        if st.tweening[0] != 0 || st.tweening[1] != 0 {
             st.advance(dt);
         }
     }

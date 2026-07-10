@@ -3622,7 +3622,7 @@ fn grip_up_clears_state_and_no_inertia() {
     assert!(!slot.grip_dragging, "Up 后 grip_dragging 清");
     assert!(slot.scrolling_pane.is_none(), "Up 后 scrolling_pane 清");
     let st = s.scroll.get(root_id).unwrap();
-    assert_eq!(st.tweening, 0, "grip up 不启惯性 tweening=0");
+    assert!(st.tweening_idle(), "grip up 不启惯性 tweening=0");
 }
 
 #[test]

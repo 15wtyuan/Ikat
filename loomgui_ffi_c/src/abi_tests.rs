@@ -1324,3 +1324,28 @@ fn set_image_sizes_null_path_skipped() {
     );
     loomgui_stage_free(h);
 }
+/// Non-UTF-8 bytes in an FFI string entry point must be detected and return an
+/// error code instead of silently defaulting to "" and proceeding as if valid.
+/// Uses load_package as the representative entry point; the fix pattern
+/// applies to all 11 unwrap_or("") sites (see lib.rs from_utf8 grep).
+#[test]
+fn non_utf8_entry_returns_error() {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    assert!(!h.is_null());
+    let pkg = make_test_pkg_bytes("comp1");
+    // Non-UTF-8 name bytes (0xFF 0xFE is invalid UTF-8).
+    let bad_name: &[u8] = &[0xFF, 0xFE];
+    let r = loomgui_stage_load_package(
+        h,
+        bad_name.as_ptr(),
+        bad_name.len(),
+        pkg.as_ptr(),
+        pkg.len(),
+    );
+    // Must return non-zero error (currently returns 0 = success with "").
+    assert_ne!(
+        r, 0,
+        "non-UTF-8 name must return error, not success with empty string"
+    );
+    loomgui_stage_free(h);
+}

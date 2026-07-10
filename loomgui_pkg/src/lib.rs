@@ -268,11 +268,19 @@ pub fn desugar_block_divs(
     Ok((tree, styles))
 }
 
-/// block div 的 flex 属性护栏（spec §4.2）：justify-content/align-items/gap 非默认 → Err。
+/// block div 的 flex 属性护栏（spec §4.2）：flex-direction/flex-wrap/justify-content/align-items/gap 非默认 → Err。
 /// block div 是富文本叶，写 flex 属性无意义（inline flow 不走 taffy flex 排列）。
 fn check_no_flex_props(s: &loomgui_core::style::resolved::ResolvedStyle) -> Result<(), String> {
     let ts = &s.taffy_style;
     let default = loomgui_core::style::resolved::ResolvedStyle::default().taffy_style;
+    if ts.flex_direction != default.flex_direction {
+        return Err(
+            "display:block 不支持 flex-direction（block div 是富文本叶，非 flex 容器）".into(),
+        );
+    }
+    if ts.flex_wrap != default.flex_wrap {
+        return Err("display:block 不支持 flex-wrap（block div 是富文本叶，非 flex 容器）".into());
+    }
     if ts.justify_content.is_some() {
         return Err(
             "display:block 不支持 justify-content（block div 是富文本叶，非 flex 容器）".into(),

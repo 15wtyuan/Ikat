@@ -455,7 +455,24 @@ fn parse_entity(s: &str) -> Option<(String, usize)> {
         "&nbsp;" | "&#160;" => " ",
         "&quot;" => "\"",
         "&apos;" => "'",
-        _ => return None,
+        _ => {
+            // Try numeric: &#NNN; (decimal) or &#xNNN; (hex)
+            if ent.starts_with("&#") && ent.len() > 3 {
+                let inner = &ent[2..ent.len() - 1]; // between &# and ;
+                let cp = if let Some(hex) =
+                    inner.strip_prefix('x').or_else(|| inner.strip_prefix('X'))
+                {
+                    u32::from_str_radix(hex, 16).ok()?
+                } else if !inner.is_empty() {
+                    inner.parse::<u32>().ok()?
+                } else {
+                    return None; // empty body like &#; or &#x;
+                };
+                let ch = char::from_u32(cp)?;
+                return Some((ch.to_string(), ent.len()));
+            }
+            return None;
+        }
     };
     Some((mapped.into(), ent.len()))
 }
@@ -651,6 +668,97 @@ mod tests {
         assert!(matches!(
             &runs[0].kind,
             RichKind::Text { text } if text.contains('&')
+        ));
+    }
+
+    // ── parse_entity unit tests (numeric entity decoding) ──
+
+    #[test]
+    fn entity_named_lt() {
+        assert_eq!(parse_entity("&lt;"), Some(("<".to_string(), 4)));
+    }
+
+    #[test]
+    fn entity_named_gt() {
+        assert_eq!(parse_entity("&gt;"), Some((">".to_string(), 4)));
+    }
+
+    #[test]
+    fn entity_named_amp() {
+        assert_eq!(parse_entity("&amp;"), Some(("&".to_string(), 5)));
+    }
+
+    #[test]
+    fn entity_named_nbsp() {
+        assert_eq!(parse_entity("&nbsp;"), Some((" ".to_string(), 6)));
+    }
+
+    #[test]
+    fn entity_decimal_60() {
+        assert_eq!(parse_entity("&#60;"), Some(("<".to_string(), 5)));
+    }
+
+    #[test]
+    fn entity_hex_3c() {
+        assert_eq!(parse_entity("&#x3C;"), Some(("<".to_string(), 6)));
+    }
+
+    #[test]
+    fn entity_hex_a9() {
+        assert_eq!(parse_entity("&#xA9;"), Some(("\u{a9}".to_string(), 6)));
+    }
+
+    #[test]
+    fn entity_unknown_named() {
+        assert_eq!(parse_entity("&unknown;"), None);
+    }
+
+    #[test]
+    fn entity_empty_decimal() {
+        assert_eq!(parse_entity("&#;"), None);
+    }
+
+    #[test]
+    fn entity_empty_hex() {
+        assert_eq!(parse_entity("&#x;"), None);
+    }
+
+    #[test]
+    fn entity_overflow_decimal() {
+        assert_eq!(parse_entity("&#999999999;"), None);
+    }
+
+    #[test]
+    fn entity_uppercase_hex_x() {
+        assert_eq!(parse_entity("&#X3C;"), Some(("<".to_string(), 6)));
+    }
+
+    // ── integration: numeric entities in markup ──
+
+    #[test]
+    fn parse_numeric_entity_in_markup() {
+        let runs = parse_rich_markup("a&#60;b", base(), 0).unwrap();
+        assert!(matches!(
+            &runs[0].kind,
+            RichKind::Text { text } if text == "a<b"
+        ));
+    }
+
+    #[test]
+    fn parse_hex_entity_in_markup() {
+        let runs = parse_rich_markup("&#x3C;start&#x3E;", base(), 0).unwrap();
+        assert!(matches!(
+            &runs[0].kind,
+            RichKind::Text { text } if text == "<start>"
+        ));
+    }
+
+    #[test]
+    fn parse_mixed_named_and_numeric_entities() {
+        let runs = parse_rich_markup("&lt;&#60;&#x3C;", base(), 0).unwrap();
+        assert!(matches!(
+            &runs[0].kind,
+            RichKind::Text { text } if text == "<<<"
         ));
     }
 

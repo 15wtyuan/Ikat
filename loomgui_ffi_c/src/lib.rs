@@ -194,8 +194,10 @@ pub extern "C" fn loomgui_stage_load_package(
         return -1;
     }
     let sh = unsafe { &mut *h };
-    let name =
-        std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, name_len) }).unwrap_or("");
+    let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, name_len) }) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
     let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len) };
     match sh.stage.load_package(name, bytes) {
         Ok(()) => 0,
@@ -221,10 +223,14 @@ pub extern "C" fn loomgui_stage_instantiate(
         return INVALID;
     }
     let sh = unsafe { &mut *h };
-    let pkg =
-        std::str::from_utf8(unsafe { std::slice::from_raw_parts(pkg, pkg_len) }).unwrap_or("");
-    let comp =
-        std::str::from_utf8(unsafe { std::slice::from_raw_parts(comp, comp_len) }).unwrap_or("");
+    let pkg = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(pkg, pkg_len) }) {
+        Ok(s) => s,
+        Err(_) => return INVALID,
+    };
+    let comp = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(comp, comp_len) }) {
+        Ok(s) => s,
+        Err(_) => return INVALID,
+    };
     match sh.stage.instantiate(pkg, comp) {
         Ok(id) => id.0,
         Err(_) => INVALID,
@@ -1055,10 +1061,14 @@ pub extern "C" fn loomgui_stage_create_root(
         return FAIL;
     }
     let sh = unsafe { &mut *h };
-    let kind =
-        std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }).unwrap_or("");
-    let css =
-        std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }).unwrap_or("");
+    let kind = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }) {
+        Ok(s) => s,
+        Err(_) => return FAIL,
+    };
+    let css = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }) {
+        Ok(s) => s,
+        Err(_) => return FAIL,
+    };
     match sh.stage.create_root(kind, css) {
         Ok(id) => id.0,
         Err(_) => FAIL,
@@ -1082,10 +1092,14 @@ pub extern "C" fn loomgui_stage_create_node(
         return FAIL;
     }
     let sh = unsafe { &mut *h };
-    let kind =
-        std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }).unwrap_or("");
-    let css =
-        std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }).unwrap_or("");
+    let kind = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }) {
+        Ok(s) => s,
+        Err(_) => return FAIL,
+    };
+    let css = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }) {
+        Ok(s) => s,
+        Err(_) => return FAIL,
+    };
     match sh.stage.create_node(kind, css) {
         Ok(id) => id.0,
         Err(_) => FAIL,
@@ -1174,7 +1188,10 @@ pub extern "C" fn loomgui_stage_set_text(
         return -1;
     }
     let sh = unsafe { &mut *h };
-    let text = std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, len) }).unwrap_or("");
+    let text = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, len) }) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
     sh.stage
         .set_text(NodeId(node), text)
         .map(|_| 0)
@@ -1194,8 +1211,11 @@ pub extern "C" fn loomgui_stage_set_rich_text(
         return -1;
     }
     let sh = unsafe { &mut *h };
-    let markup = std::str::from_utf8(unsafe { std::slice::from_raw_parts(markup_ptr, markup_len) })
-        .unwrap_or("");
+    let markup =
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(markup_ptr, markup_len) }) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
     sh.stage
         .set_rich_text(NodeId(node), markup)
         .map(|_| 0)
@@ -1234,7 +1254,10 @@ pub extern "C" fn loomgui_stage_set_src(
         return -1;
     }
     let sh = unsafe { &mut *h };
-    let src = std::str::from_utf8(unsafe { std::slice::from_raw_parts(src, len) }).unwrap_or("");
+    let src = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(src, len) }) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
     sh.stage.set_src(NodeId(node), src).map(|_| 0).unwrap_or(-1)
 }
 
@@ -1253,7 +1276,10 @@ pub extern "C" fn loomgui_stage_set_style(
         return -1;
     }
     let sh = unsafe { &mut *h };
-    let css = std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, len) }).unwrap_or("");
+    let css = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, len) }) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
     sh.stage
         .set_style(NodeId(node), css)
         .map(|_| 0)

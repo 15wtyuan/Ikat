@@ -5,14 +5,24 @@
 //! Text（program=1）/ 不同 DrawState 保持独立。
 
 use crate::render::node::{NodePayload, RenderNode};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
-/// DrawState 键（image_path, program, mask_context, alpha_bits）。program=0/1 Mesh 才参与合并。
-/// 用 image_path（同 path 的图可合批；None=纯色块可互合）。
-/// 含 alpha（to_bits 比较）——alpha 是 per-renderer uniform，不同 alpha 不能合批。
-/// box-shadow / text-shadow Back layer 合成节点不参与合并（合成 node_id 无对应 scene 节点，
-/// 且 Back layer 须保持独立 GO 以便 sort_key 单独调控）。
-/// text-stroke Front layer 同样不参与合并（独立 GO，Front layer sort_key 单独调控）。
-fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32)> {
+/// Hash a [f32; 20] color matrix to a u64 for mesh_key comparison.
+/// Floats are hashed via their IEEE 754 bit patterns so that NaN == NaN and -0 == 0
+/// don't accidentally split batches.
+fn hash_color_matrix(m: &[f32; 20]) -> u64 {
+    let mut h = DefaultHasher::new();
+    for &v in m.iter() {
+        v.to_bits().hash(&mut h);
+    }
+    h.finish()
+}
+
+/// DrawState 键（image_path, program, mask_context, alpha_bits, color_matrix_hash）。
+/// program=0/1 Mesh 才参与合并。含 color_matrix 哈希——不同 color filter（如 grayscale vs sepia）
+/// 不能合批，否则 filter 数据在 merge_batch 中被清零丢失。
+fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32, u64)> {
     if rn.node_id & (crate::render::BOX_SHADOW_FLAG | crate::render::TEXT_STROKE_FRONT_FLAG) != 0 {
         return None; // 合成 Back/Front layer 节点不合批
     }
@@ -20,6 +30,7 @@ fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32)> {
         NodePayload::Mesh {
             image_path,
             program,
+            color_matrix,
             ..
         } if (*program == 0 || *program == 1)
             && crate::transform::is_pure_translation(&rn.world_matrix) =>
@@ -29,6 +40,7 @@ fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32)> {
                 *program,
                 rn.mask_context.0,
                 rn.alpha.to_bits(),
+                hash_color_matrix(color_matrix),
             ))
         }
         _ => None,
@@ -126,7 +138,9 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
             program: match &last.payload {
                 NodePayload::Mesh { program, .. } => *program,
             },
-            color_matrix: [0.0; 20],
+            color_matrix: match &last.payload {
+                NodePayload::Mesh { color_matrix, .. } => *color_matrix,
+            },
         },
     }
 }
@@ -360,5 +374,107 @@ mod tests {
             (out[0].alpha - 0.5).abs() < 1e-6,
             "merged.alpha=子 alpha（走 uniform）"
         );
+    }
+
+    /// Bug: mesh_key previously omitted color_matrix, so nodes with different
+    /// color filters (grayscale vs sepia) got the same key and were merged,
+    /// silently dropping the filter data (merge_batch hardcoded [0;20]).
+    #[test]
+    fn different_color_matrix_yields_different_mesh_key() {
+        let grayscale = [
+            0.299, 0.587, 0.114, 0.0, 0.0, 0.299, 0.587, 0.114, 0.0, 0.0, 0.299, 0.587, 0.114, 0.0,
+            0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+        ];
+        let sepia = [
+            0.393, 0.769, 0.189, 0.0, 0.0, 0.349, 0.686, 0.168, 0.0, 0.0, 0.272, 0.534, 0.131, 0.0,
+            0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+        ];
+
+        let make_node = |id: u32, cm: [f32; 20]| RenderNode {
+            node_id: id,
+            parent_id: None,
+            visible: true,
+            alpha: 1.0,
+            color_tint: [1.0; 4],
+            world_matrix: crate::transform::IDENTITY,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: id,
+            change_level: ChangeLevel::Full,
+            reuse_key: 0,
+            payload: NodePayload::Mesh {
+                verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                colors: vec![[1.0; 4]; 4],
+                indices: vec![0, 1, 2, 0, 2, 3],
+                image_path: Some("a.png".into()),
+                program: 0,
+                color_matrix: cm,
+            },
+        };
+
+        let n1 = make_node(1, grayscale);
+        let n2 = make_node(2, sepia);
+        let k1 = mesh_key(&n1);
+        let k2 = mesh_key(&n2);
+        assert_ne!(k1, k2, "不同 color_matrix → 不同 mesh_key，不合并");
+    }
+
+    /// Regression: same color_matrix (even non-zero) → same mesh_key → still mergeable.
+    /// The merged batch must preserve the inherited color_matrix, not zero it out.
+    #[test]
+    fn same_color_matrix_still_merges_and_preserves_filter() {
+        let grayscale = [
+            0.299, 0.587, 0.114, 0.0, 0.0, 0.299, 0.587, 0.114, 0.0, 0.0, 0.299, 0.587, 0.114, 0.0,
+            0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+        ];
+
+        let make_node = |id: u32, sk: u32| RenderNode {
+            node_id: id,
+            parent_id: None,
+            visible: true,
+            alpha: 1.0,
+            color_tint: [1.0; 4],
+            world_matrix: crate::transform::IDENTITY,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: sk,
+            change_level: ChangeLevel::Full,
+            reuse_key: 0,
+            payload: NodePayload::Mesh {
+                verts: vec![
+                    [sk as f32 * 50.0, 0.0],
+                    [sk as f32 * 50.0 + 10.0, 0.0],
+                    [sk as f32 * 50.0 + 10.0, 10.0],
+                    [sk as f32 * 50.0, 10.0],
+                ],
+                uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                colors: vec![[1.0; 4]; 4],
+                indices: vec![0, 1, 2, 0, 2, 3],
+                image_path: Some("a.png".into()),
+                program: 0,
+                color_matrix: grayscale,
+            },
+        };
+
+        let nodes = vec![make_node(1, 0), make_node(2, 1)];
+        let out = merge_meshes(nodes);
+        assert_eq!(out.len(), 1, "同 color_matrix 仍可合并");
+
+        // merged batch must inherit the non-zero color_matrix, not zero it out.
+        match &out[0].payload {
+            NodePayload::Mesh {
+                color_matrix,
+                verts,
+                ..
+            } => {
+                assert_eq!(
+                    color_matrix, &grayscale,
+                    "merged 保留继承的 color_matrix，不清零"
+                );
+                assert_eq!(verts.len(), 8, "2×4 verts 合并");
+            }
+            _ => panic!("expected Mesh"),
+        }
     }
 }

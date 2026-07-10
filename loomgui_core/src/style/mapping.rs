@@ -139,12 +139,17 @@ fn parse_filter(value: &str) -> Option<[f32; 20]> {
                 color_filter::hue_rotate(deg)
             }
             "invert" => {
-                let x = parse_number(arg).unwrap_or(1.0);
-                if x >= 0.5 {
-                    color_filter::invert()
-                } else {
-                    IDENTITY
-                }
+                let x = parse_number(arg).unwrap_or(1.0).clamp(0.0, 1.0);
+                // CSS invert(amount) = lerp from identity toward full invert by x.
+                // Full invert: diag = -1, offset = 1. Lerp: diag = 1-2x, offset = x.
+                let mut m = IDENTITY;
+                m[0] = 1.0 - 2.0 * x;
+                m[6] = 1.0 - 2.0 * x;
+                m[12] = 1.0 - 2.0 * x;
+                m[4] = x;
+                m[9] = x;
+                m[14] = x;
+                m
             }
             "sepia" => color_filter::sepia(),
             _ => continue,
@@ -736,7 +741,10 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "letter-spacing" => {
-            style.letter_spacing = parse_px(value).unwrap_or(0.0);
+            let Some(v) = parse_px(value) else {
+                return false;
+            };
+            style.letter_spacing = v;
             true
         }
         "white-space" => {

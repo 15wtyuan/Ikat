@@ -263,3 +263,26 @@ fn desugar_flex_div_unaffected() {
         assert!(el.rich_runs.is_none(), "flex div 无 rich_runs");
     }
 }
+
+#[test]
+fn desugar_block_div_rejects_flex_direction() {
+    // block div + flex-direction: row（非默认 Column）→ 应拒收。
+    let html = r#"<div style="display:block; flex-direction:row">a <b>b</b></div>"#;
+    let result = desugar_html(html);
+    assert!(result.is_err(), "block div 拒 flex-direction");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("flex-direction"),
+        "错误信息提及 flex-direction: {err}"
+    );
+}
+
+#[test]
+fn desugar_block_div_rejects_flex_wrap() {
+    // block div + flex-wrap: wrap（非默认 NoWrap）→ 应拒收。
+    let html = r#"<div style="display:block; flex-wrap:wrap">a <b>b</b></div>"#;
+    let result = desugar_html(html);
+    assert!(result.is_err(), "block div 拒 flex-wrap");
+    let err = result.unwrap_err();
+    assert!(err.contains("flex-wrap"), "错误信息提及 flex-wrap: {err}");
+}

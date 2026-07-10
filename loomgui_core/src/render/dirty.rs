@@ -79,6 +79,7 @@ pub fn header_hash(rn: &RenderNode) -> u64 {
     })
     .hash(&mut h);
     rn.reuse_key.hash(&mut h);
+    rn.parent_id.hash(&mut h);
     h.finish()
 }
 
@@ -184,6 +185,20 @@ mod tests {
             header_hash(&a),
             header_hash(&b),
             "reuse_key 变 → header_hash 变"
+        );
+    }
+
+    #[test]
+    fn header_hash_includes_parent_id() {
+        // parent_id 变 → header_hash 变。同 node_id 换父时须触发 Header 变更，
+        // C# MirrorPool 才能 re-parent GameObject（否则 ChangeLevel::Skip 不动）。
+        let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        let mut b = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        b.parent_id = Some(42);
+        assert_ne!(
+            header_hash(&a),
+            header_hash(&b),
+            "parent_id 变 → header_hash 变"
         );
     }
 }

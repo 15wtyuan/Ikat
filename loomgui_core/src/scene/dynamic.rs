@@ -52,6 +52,19 @@ pub fn apply_css(style: &mut ResolvedStyle, css: &str) {
     }
 }
 
+/// slotmap insert 后若 capacity 增长，resize parallel arrays 对齐新容量。
+/// parallel arrays（text_layouts / rich_fragments）按 NodeId.index() 索引，
+/// 必须至少为 capacity+1（1 基索引，idx 0 占位），否则索引越界 panic。
+fn resize_parallel_arrays(scene: &mut Scene) {
+    let need = scene.nodes.capacity() + 1;
+    if scene.text_layouts.len() < need {
+        scene.text_layouts.resize(need, None);
+    }
+    if scene.rich_fragments.len() < need {
+        scene.rich_fragments.resize(need, None);
+    }
+}
+
 /// 建节点：kind_from_tag + apply_css 填 base_style + slotmap insert + 回填 node.id。
 /// base_style = apply_css 结果（源），style 初始 = base_style.clone()（派生，下帧 rematch 从 base 起算）。
 /// clip_rect 按 overflow_x/y（非 Visible）派生 Some(占位)（值由 layout/render 填）。
@@ -95,6 +108,7 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         cascaded_once: false,
     };
     let key = scene.nodes.insert(node);
+    resize_parallel_arrays(scene);
     let id = NodeId::from_key(key);
     scene.nodes.get_mut(key).unwrap().id = id; // 回填
     Ok(id)
@@ -153,6 +167,7 @@ pub fn create_node_from_template(
         cascaded_once: false,
     };
     let key = scene.nodes.insert(node);
+    resize_parallel_arrays(scene);
     let id = NodeId::from_key(key);
     scene.nodes.get_mut(key).unwrap().id = id; // 回填
     id
@@ -939,5 +954,72 @@ mod tests {
         assert_eq!(scene.get(root).unwrap().children, vec![c1]);
         assert_eq!(scene.get(c1).unwrap().children, vec![c2]);
         assert_eq!(scene.get(c2).unwrap().parent, Some(c1));
+    }
+
+    #[test]
+    fn create_node_resizes_parallel_arrays_on_slotmap_expansion() {
+        // 动态 create_node 后 parallel arrays (text_layouts / rich_fragments)
+        // 必须对齐 slotmap capacity，否则后续按 NodeId.index() 访问会越界 panic。
+        let mut scene = empty_scene();
+        // 创建大量节点确保触发 slotmap 容量增长（初始 capacity 较小）。
+        let mut ids = Vec::new();
+        for _ in 0..64 {
+            let id = create_node(&mut scene, "div", "").unwrap();
+            // 每个新 NodeId 的 index 应在 parallel arrays 范围内
+            assert!(
+                id.index() < scene.text_layouts.len(),
+                "text_layouts must cover node index {} (len {})",
+                id.index(),
+                scene.text_layouts.len()
+            );
+            assert!(
+                id.index() < scene.rich_fragments.len(),
+                "rich_fragments must cover node index {} (len {})",
+                id.index(),
+                scene.rich_fragments.len()
+            );
+            ids.push(id);
+        }
+        // 最终 arrays 至少为 capacity+1（1 基索引，idx 0 占位）
+        let cap = scene.nodes.capacity();
+        assert!(
+            scene.text_layouts.len() > cap,
+            "text_layouts len {} > capacity {}",
+            scene.text_layouts.len(),
+            cap
+        );
+        assert!(
+            scene.rich_fragments.len() > cap,
+            "rich_fragments len {} > capacity {}",
+            scene.rich_fragments.len(),
+            cap
+        );
+    }
+
+    #[test]
+    fn create_node_from_template_resizes_parallel_arrays_on_slotmap_expansion() {
+        let mut scene = empty_scene();
+        for _ in 0..64 {
+            let id = create_node_from_template(
+                &mut scene,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+            );
+            assert!(
+                id.index() < scene.text_layouts.len(),
+                "text_layouts must cover node index {} (len {})",
+                id.index(),
+                scene.text_layouts.len()
+            );
+            assert!(
+                id.index() < scene.rich_fragments.len(),
+                "rich_fragments must cover node index {} (len {})",
+                id.index(),
+                scene.rich_fragments.len()
+            );
+        }
+        let cap = scene.nodes.capacity();
+        assert!(scene.text_layouts.len() > cap);
+        assert!(scene.rich_fragments.len() > cap);
     }
 }

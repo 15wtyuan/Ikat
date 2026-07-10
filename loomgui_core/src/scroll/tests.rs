@@ -376,7 +376,7 @@ fn inertia_advances_toward_target_then_settles() {
                              // 1.74s @16ms ≈ 109 步，150 步覆盖 ~2.4s > dur
     for _ in 0..150 {
         st.advance(0.016);
-        if st.tweening == 0 {
+        if st.tweening_idle() {
             break;
         }
     }
@@ -385,7 +385,7 @@ fn inertia_advances_toward_target_then_settles() {
         "惯性产生了位移，got {}",
         st.scroll_pos.1
     );
-    assert_eq!(st.tweening, 0, "tween 完成归零");
+    assert!(st.tweening_idle(), "tween 完成归零");
 }
 
 #[test]
@@ -396,7 +396,7 @@ fn bounce_returns_to_boundary() {
     st.begin_bounce();
     for _ in 0..60 {
         st.advance(0.016);
-        if st.tweening == 0 {
+        if st.tweening_idle() {
             break;
         }
     }
@@ -414,8 +414,8 @@ fn wheel_steps_and_clamps() {
     st.apply_wheel((0.0, 1.0)); // delta_y=1 上滚 → scroll 减
                                 // 上滚 = scroll_pos.y 减少；clamp 后启 tween
     assert!(
-        st.tweening != 0 || st.scroll_pos.1 == 0.0,
-        "wheel 启 tween 或 clamp 到 0，tweening={}, pos={}",
+        st.tweening_any() || st.scroll_pos.1 == 0.0,
+        "wheel 启 tween 或 clamp 到 0，tweening={:?}, pos={}",
         st.tweening,
         st.scroll_pos.1
     );
@@ -425,10 +425,10 @@ fn wheel_steps_and_clamps() {
 fn set_pos_snap_when_not_animated() {
     let mut st = ScrollPaneState::default();
     st.overlap = (0.0, 100.0);
-    st.tweening = 2; // 已有 tween 进行中
+    st.tweening = [0, 2]; // 已有 tween 进行中（y轴）
     st.set_pos((0.0, 50.0), false);
     assert_eq!(st.scroll_pos.1, 50.0, "snap 直接到位");
-    assert_eq!(st.tweening, 0, "animated=false tweening 归零");
+    assert!(st.tweening_idle(), "animated=false tweening 归零");
 }
 
 #[test]
@@ -437,7 +437,7 @@ fn set_pos_animated_starts_tween() {
     st.overlap = (0.0, 100.0);
     st.scroll_pos = (0.0, 10.0);
     st.set_pos((0.0, 50.0), true);
-    assert_eq!(st.tweening, 1, "animated=true 启 tweening=1");
+    assert_eq!(st.tweening[1], 1, "animated=true 启 tweening=1");
     assert_eq!(st.tween_start.1, 10.0, "tween_start = 当前 pos");
     assert_eq!(st.tween_change.1, 40.0, "tween_change = target - start");
     assert_eq!(st.tween_duration.1, TWEEN_TIME_DEFAULT);
@@ -479,8 +479,8 @@ fn content_size_change_clamps_running_tween() {
     refresh_content_sizes(&mut s);
     let st = s.scroll.get_mut(root0).unwrap();
     st.scroll_pos = (0.0, 80.0);
-    st.tweening = 1; // 模拟 tween 进行中
-                     // 缩 content：子 2 高度 200→100 → content_y=100，viewport=100 → overlap_y=0
+    st.tweening = [0, 1]; // 模拟 tween 进行中（y轴）
+                          // 缩 content：子 2 高度 200→100 → content_y=100，viewport=100 → overlap_y=0
     s.get_mut(c1).unwrap().layout_rect = Rect {
         x: 0.0,
         y: 0.0,
@@ -491,7 +491,7 @@ fn content_size_change_clamps_running_tween() {
     let st2 = s.scroll.get(root0).unwrap();
     assert_eq!(st2.overlap.1, 0.0, "content 缩后 overlap=0");
     assert_eq!(st2.scroll_pos.1, 0.0, "越界 pos 被 clamp 到新 overlap");
-    assert_eq!(st2.tweening, 0, "content 变化时 tween 取消");
+    assert!(st2.tweening_idle(), "content 变化时 tween 取消");
 }
 
 #[test]
@@ -515,7 +515,7 @@ fn content_size_change_in_range_keeps_tween() {
     refresh_content_sizes(&mut s);
     let st = s.scroll.get_mut(root0).unwrap();
     st.scroll_pos = (0.0, 10.0);
-    st.tweening = 1;
+    st.tweening = [0, 1];
     // content 略缩但 pos=10 仍在 [0, overlap]（新 overlap 仍 ≥ 10）
     s.get_mut(c1).unwrap().layout_rect = Rect {
         x: 0.0,
@@ -525,7 +525,7 @@ fn content_size_change_in_range_keeps_tween() {
     };
     refresh_content_sizes(&mut s);
     let st2 = s.scroll.get(root0).unwrap();
-    assert_eq!(st2.tweening, 1, "pos 在范围内不打断 tween");
+    assert_eq!(st2.tweening[1], 1, "pos 在范围内不打断 tween");
 }
 
 // ── apply_wheel_to_hit ─────────────────────────────────────────────
@@ -566,7 +566,7 @@ fn apply_wheel_to_hit_scrolls_nearest_effective_ancestor() {
             "content 超出 viewport，overlap_y={}",
             st.overlap.1
         );
-        assert_eq!(st.tweening, 0, "初始 tweening=0");
+        assert!(st.tweening_idle(), "初始 tweening=0");
     }
 
     // hit 容器内一点 (10,10) → hit_test 命中子节点 1 → parent 遍历到节点 0
@@ -583,8 +583,8 @@ fn apply_wheel_to_hit_scrolls_nearest_effective_ancestor() {
 
     let st = s.scroll.get(root0).unwrap();
     assert!(
-        st.tweening != 0,
-        "wheel 触发滚动 tween，tweening={}",
+        st.tweening_any(),
+        "wheel 触发滚动 tween，tweening={:?}",
         st.tweening
     );
 }
@@ -618,7 +618,7 @@ fn apply_wheel_to_hit_on_thumb_decodes_sentinel() {
     // 核实 scroll state
     let st = s.scroll.get(root0).unwrap();
     assert!(st.overlap.1 > 0.0, "overlap needed for thumb");
-    assert_eq!(st.tweening, 0);
+    assert!(st.tweening_idle());
 
     // v_thumb_rect: x=92, y=0, w=8, h=40（100*(100/250)=40）
     // 点 (96, 20) 在 thumb 内 → hit_test 应返 sentinel
@@ -642,8 +642,8 @@ fn apply_wheel_to_hit_on_thumb_decodes_sentinel() {
 
     let st = s.scroll.get(root0).unwrap();
     assert!(
-        st.tweening != 0,
-        "thumb wheel 应触发滚动，tweening={}",
+        st.tweening_any(),
+        "thumb wheel 应触发滚动，tweening={:?}",
         st.tweening
     );
 }
@@ -770,7 +770,7 @@ fn inertia_quad_ratio_damps_low_velocity() {
     st.scroll_pos = (0.0, 500.0);
     st.velocity = (0.0, 625.0); // 刚过 PC 阈值 500
     st.begin_inertia(false);
-    assert_eq!(st.tweening, 2, "ratio>0 启 inertia");
+    assert_eq!(st.tweening[1], 2, "ratio>0 启 inertia");
     assert!(
         st.tween_change.1.abs() < 10.0,
         "二次 ratio 削弱：|change|<10（≈5px），got {}",
@@ -793,7 +793,7 @@ fn inertia_overshoot_then_bounce_back_to_boundary() {
     for _ in 0..300 {
         st.advance(0.016);
         max_pos = max_pos.max(st.scroll_pos.1);
-        if st.tweening == 0 {
+        if st.tweening_idle() {
             settled = true;
             break;
         }
@@ -822,7 +822,7 @@ fn over_bounds_small_release_bounces_smoothly_not_snap() {
     st.scroll_pos = (0.0, -5.0);
     st.velocity = (0.0, -100.0);
     st.begin_inertia(false);
-    assert_eq!(st.tweening, 2, "越界松手启 bounce tween");
+    assert_eq!(st.tweening[1], 2, "越界松手启 bounce tween");
     assert!(
         (st.tween_change.1 - 5.0).abs() < 1e-2,
         "bounce change = 0-(-5) = +5，got {}",
@@ -837,7 +837,7 @@ fn over_bounds_small_release_bounces_smoothly_not_snap() {
     );
     for _ in 0..60 {
         st.advance(0.016);
-        if st.tweening == 0 {
+        if st.tweening_idle() {
             break;
         }
     }
@@ -865,7 +865,7 @@ fn over_bounds_fast_velocity_bounces_not_overshoot() {
             "越界松手不冲空白（>=-30），got {}",
             st.scroll_pos.1
         );
-        if st.tweening == 0 {
+        if st.tweening_idle() {
             break;
         }
     }
@@ -886,7 +886,7 @@ fn in_bounds_low_velocity_stays_put() {
     st.scroll_pos = (0.0, 100.0); // 界内中间
     st.velocity = (0.0, 100.0); // <500 阈值
     st.begin_inertia(false);
-    assert_eq!(st.tweening, 0, "界内 velocity 不足 → 不启 tween（停）");
+    assert!(st.tweening_idle(), "界内 velocity 不足 → 不启 tween（停）");
     st.advance(0.016);
     assert!(
         (st.scroll_pos.1 - 100.0).abs() < 1e-4,
@@ -1067,4 +1067,96 @@ fn clear_content_size_override_restores_auto() {
         st.content_size.1, 8000.0,
         "clear 后 content_size 回到自动算"
     );
+}
+
+// ── Bug 2: refresh_content_sizes clamp when tweening==0 ──────────
+/// idle 容器（tweening=0）viewport 缩导致 scroll_pos 越界：
+/// refresh_content_sizes 应始终 clamp，不只 tweening≠0 时。
+#[test]
+fn refresh_clamps_idle_out_of_range_pos() {
+    let mut s = build_scroll_scene();
+    let root0 = scroll_container_id(&s);
+    let (c0, c1) = child_ids(&s);
+    // 造 content > viewport: child2 height 200 → content_y=200, viewport=100 → overlap_y=100
+    s.get_mut(c0).unwrap().layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 40.0,
+        h: 40.0,
+    };
+    s.get_mut(c1).unwrap().layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 30.0,
+        h: 200.0,
+    };
+    refresh_content_sizes(&mut s);
+    let st = s.scroll.get_mut(root0).unwrap();
+    st.scroll_pos = (0.0, 80.0); // 在 overlap=100 内
+    st.tweening = [0, 0]; // idle: 无 tween
+                          // 缩 content: child2 200→100 → content_y=100, viewport=100 → overlap_y=0
+    s.get_mut(c1).unwrap().layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 30.0,
+        h: 100.0,
+    };
+    refresh_content_sizes(&mut s);
+    let st2 = s.scroll.get(root0).unwrap();
+    assert_eq!(st2.overlap.1, 0.0, "content 缩后 overlap=0");
+    assert_eq!(st2.scroll_pos.1, 0.0, "idle 时越界 pos 也该被 clamp");
+}
+
+/// overridden content_size 路径（driver 注入）：
+/// viewport 缩导致 overlap 缩，idle 容器 scroll_pos 越界也应 clamp。
+#[test]
+fn refresh_clamps_idle_overridden_out_of_range_pos() {
+    let mut stage = build_scroll_stage();
+    let root_id = stage
+        .scene
+        .as_ref()
+        .unwrap()
+        .nodes
+        .values()
+        .next()
+        .unwrap()
+        .id;
+    // driver 注入 content_size=8000 → overlap_y = 8000-100 = 7900
+    stage.set_content_size(root_id, 0.0, 8000.0);
+    crate::scroll::refresh_content_sizes(stage.scene.as_mut().unwrap());
+    let st = stage
+        .scene
+        .as_mut()
+        .unwrap()
+        .scroll
+        .get_mut(root_id)
+        .unwrap();
+    st.scroll_pos = (0.0, 5000.0); // 在 overlap=7900 内
+    st.tweening = [0, 0]; // idle
+                          // viewport 变大 (layout_rect h 100→400)：overlap=8000-400=7600, pos=5000 仍在界内
+    stage
+        .scene
+        .as_mut()
+        .unwrap()
+        .get_mut(root_id)
+        .unwrap()
+        .layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 400.0,
+    };
+    refresh_content_sizes(stage.scene.as_mut().unwrap());
+    let st2 = stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap();
+    assert_eq!(st2.overlap.1, 7600.0, "viewport 变大 → overlap 缩");
+    assert_eq!(st2.scroll_pos.1, 5000.0, "pos 仍在界内不 clamp");
+    // 缩 content_size → overlap 缩到 3600，pos=5000 越界
+    stage.set_content_size(root_id, 0.0, 4000.0); // content=4000, viewport=400 → overlap=3600
+    refresh_content_sizes(stage.scene.as_mut().unwrap());
+    let st3 = stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap();
+    assert_eq!(
+        st3.scroll_pos.1, 3600.0,
+        "idle overridden 容器越界 pos 应被 clamp"
+    );
+    assert_eq!(st3.overlap.1, 3600.0);
 }
