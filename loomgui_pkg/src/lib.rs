@@ -11,6 +11,7 @@
 // 拆 alias 跨函数引用反而更难读。
 #![allow(clippy::type_complexity)]
 
+pub mod atlas;
 pub mod resolve;
 pub mod workspace;
 
