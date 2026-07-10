@@ -44,7 +44,7 @@ These are the key rules. The authoritative source is `loomgui_core/tests/fence_c
 Only: `div`, `span` (+ raw text), `img`, `button`. Other tags (video, input, p, ul, etc.) cause a **parse error** — the build fails.
 
 ### CSS layout (supported)
-- `display: flex` | `none` — **no grid** (silently ignored, preview will deceive you)
+- `display: flex` | `none` | `block` — **no grid** (grid maps to flex — renders as flex, not actual grid layout; don't use it)
 - `flex-direction`, `flex-wrap`, `gap` / `row-gap` / `column-gap`
 - `justify-content`, `align-items`, `align-self`, `flex` (grow/shrink/basis), `order`
 - `aspect-ratio`

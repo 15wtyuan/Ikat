@@ -39,7 +39,7 @@ All paths are relative to the workspace root and use forward slashes.
 |---|---|---|
 | `name` | string | Package name (produces `{name}.pkg.bin`) |
 | `dirs` | string[] | Directories to collect `.html` files from (relative to workspace root) |
-| `html` | string[] | **Three-state field**: empty `[]` = auto-scan (the packer scans `dirs` top-level `.html` files automatically); non-empty = explicit mode (build only these files, manual edit locks) |
+| `html` | string[] | Empty `[]` = auto-scan (packer scans `dirs` top-level `.html` files); non-empty = explicit mode (build only these listed files). Set back to `[]` to restore auto-scan. |
 
 ### `atlases[]`
 
