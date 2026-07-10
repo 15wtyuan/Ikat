@@ -11,6 +11,8 @@
 // 拆 alias 跨函数引用反而更难读。
 #![allow(clippy::type_complexity)]
 
+pub mod workspace;
+
 use loomgui_core::asset::{
     extract_component_css, normalize_path, AssetEntry, ControllerEntry, PackageInput, TemplateNode,
 };

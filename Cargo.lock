@@ -568,6 +568,8 @@ version = "0.1.0"
 dependencies = [
  "loomgui_core",
  "scraper",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
