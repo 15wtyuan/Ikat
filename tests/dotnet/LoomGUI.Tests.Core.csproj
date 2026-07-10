@@ -15,9 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\..\loomgui_unity_package\Editor\PkgManifestReader.cs" Link="Src\PkgManifestReader.cs" />
-    <Compile Include="..\..\loomgui_unity_package\Editor\LoomJsonEscape.cs" Link="Src\LoomJsonEscape.cs" />
-    <Compile Include="..\..\loomgui_unity_package\Editor\LoomPackArgs.cs" Link="Src\LoomPackArgs.cs" />
+
     <Compile Include="..\..\loomgui_unity_package\Runtime\FrameBlob.cs" Link="Src\FrameBlob.cs" />
   </ItemGroup>
 
