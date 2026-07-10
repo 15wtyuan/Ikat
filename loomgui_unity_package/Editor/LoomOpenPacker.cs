@@ -12,20 +12,28 @@ namespace LoomGUI.Editor
         public static void Open()
         {
             string exe = ResolveExe();
-            if (!File.Exists(exe))
+            if (string.IsNullOrEmpty(exe) || !File.Exists(exe))
             {
-                UnityEngine.Debug.LogError($"[LoomGUI] 打包器 GUI 未找到：{exe}。请先构建 loomgui_gui 或在设置里配置路径。");
+                UnityEngine.Debug.LogError(
+                    $"[LoomGUI] 打包器 GUI 未找到：{(string.IsNullOrEmpty(exe) ? "<com.loomgui.unity 包未正确安装>" : exe)}\n" +
+                    "请先构建并把 exe 放进包的 Editor/Tools/：\n" +
+                    "  cargo build -p loomgui_gui --release\n" +
+                    "  拷 target/release/loomgui_gui.exe → loomgui_unity_package/Editor/Tools/");
                 return;
             }
             Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
         }
 
-        /// 按平台定位 GUI 可执行文件。约定放插件包 Editor/Tools/ 下。
+        /// 定位 GUI 可执行文件。
+        /// com.loomgui.unity 是 manifest.json 里的外部 file: 本地包，Unity 对它只做虚拟挂载——
+        /// Packages/com.loomgui.unity 不是真实文件系统路径，System.IO 探不到。必须用 PackageInfo
+        /// 取包的真实磁盘根 (resolvedPath)，再拼 Editor/Tools。
         static string ResolveExe()
         {
-            string toolsDir = Path.Combine(
-                Path.GetDirectoryName(Application.dataPath) ?? ".",
-                "Packages/com.loomgui.unity/Editor/Tools");
+            var pkg = UnityEditor.PackageManager.PackageInfo.FindForAssetPath("Packages/com.loomgui.unity/package.json");
+            if (pkg == null)
+                return "";
+            string toolsDir = Path.Combine(pkg.resolvedPath, "Editor/Tools");
 #if UNITY_EDITOR_WIN
             return Path.Combine(toolsDir, "loomgui_gui.exe");
 #elif UNITY_EDITOR_OSX

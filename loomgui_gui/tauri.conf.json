@@ -9,8 +9,16 @@
     "beforeBuildCommand": ""
   },
   "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    },
     "windows": [
       {
+        "label": "main",
         "title": "LoomGUI Packer",
         "width": 800,
         "height": 600

@@ -11,7 +11,6 @@
     <div id="start-screen" class="screen">
       <header class="start-header">
         <h1>LoomGUI Packer</h1>
-        <p class="subtitle">HTML/CSS 游戏 UI 打包工具</p>
       </header>
 
       <section class="recent-section">
@@ -33,63 +32,44 @@
         <button id="btn-back" class="btn btn-ghost">&larr; 返回</button>
         <h1>LoomGUI Packer</h1>
         <span id="main-path" class="main-path"></span>
-        <button id="btn-build" class="btn btn-primary btn-build">打包</button>
+        <div class="header-actions">
+          <button id="btn-log" class="btn btn-ghost">日志</button>
+          <button id="btn-build" class="btn btn-primary">打包</button>
+        </div>
       </header>
-      <div id="editor-scroll" class="editor-scroll">
 
-        <!-- 1. Workspace -->
-        <section class="editor-section" id="section-ws">
-          <h2 class="section-title">工作区</h2>
-          <div class="section-body" id="section-ws-body"></div>
+      <nav class="tabs">
+        <button class="tab active" data-tab="general">通用</button>
+        <button class="tab" data-tab="packages">包</button>
+        <button class="tab" data-tab="atlases">图集</button>
+        <button class="tab" data-tab="fonts">字体</button>
+      </nav>
+
+      <div class="tab-panels">
+        <section class="tab-panel active" id="panel-general">
+          <div class="section-body" id="section-general-body"></div>
         </section>
-
-        <!-- 2. Packages -->
-        <section class="editor-section" id="section-pkg">
-          <h2 class="section-title">包</h2>
+        <section class="tab-panel" id="panel-packages">
           <div class="section-body" id="section-pkg-body"></div>
         </section>
-
-        <!-- 3. Atlases -->
-        <section class="editor-section" id="section-atlas">
-          <h2 class="section-title">图集</h2>
+        <section class="tab-panel" id="panel-atlases">
           <div class="section-body" id="section-atlas-body"></div>
         </section>
-
-        <!-- 4. Fonts -->
-        <section class="editor-section" id="section-font">
-          <h2 class="section-title">字体</h2>
+        <section class="tab-panel" id="panel-fonts">
           <div class="section-body" id="section-font-body"></div>
         </section>
-
-        <!-- Build Log -->
-        <section class="editor-section" id="section-build-log">
-          <h2 class="section-title">打包日志</h2>
-          <div class="section-body">
-            <div id="build-log" class="build-log">
-              <p class="empty-msg">点击右上角「打包」按钮开始构建</p>
-            </div>
-          </div>
-        </section>
-
       </div>
     </div>
 
-    <!-- Path Input Modal -->
-    <div id="modal-overlay" class="modal-overlay hidden">
-      <div class="modal">
-        <h3 id="modal-title">选择工作区目录</h3>
-        <p class="modal-desc">请输入或粘贴工作区目录的绝对路径：</p>
-        <input
-          id="modal-input"
-          type="text"
-          class="modal-input"
-          placeholder="例如: C:\Users\me\my-loomgui-project"
-          autofocus
-        />
-        <div id="modal-error" class="modal-error hidden"></div>
-        <div class="modal-actions">
-          <button id="modal-cancel" class="btn btn-secondary">取消</button>
-          <button id="modal-confirm" class="btn btn-primary">确认</button>
+    <!-- Build Log Modal -->
+    <div id="log-overlay" class="modal-overlay hidden">
+      <div class="modal log-modal">
+        <div class="modal-header">
+          <h3>打包日志</h3>
+          <button id="btn-log-close" class="btn btn-ghost btn-close">&times;</button>
+        </div>
+        <div id="build-log" class="build-log">
+          <p class="empty-msg">点击「打包」开始构建</p>
         </div>
       </div>
     </div>

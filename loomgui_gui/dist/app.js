@@ -1,6 +1,5 @@
 // LoomGUI Packer — frontend (plain JS, Tauri 2)
-// Task 19: start screen (recent workspaces + new/open)
-// Dialog: text-input fallback (tauri-plugin-dialog not wired — T20 can upgrade)
+// Start screen: recent workspaces + new/open via native directory picker.
 
 (function () {
   "use strict";
@@ -24,18 +23,19 @@
   var btnOpen     = $("btn-open");
   var btnBack     = $("btn-back");
 
-  // Modal
-  var modalOverlay  = $("modal-overlay");
-  var modalTitle    = $("modal-title");
-  var modalInput    = $("modal-input");
-  var modalError    = $("modal-error");
-  var modalCancel   = $("modal-cancel");
-  var modalConfirm  = $("modal-confirm");
-  var modalAction   = null; // "new" or "open"
-
   // ── State ──
   var currentWorkspace = null;
   var currentPath = null;
+
+  // ── Native directory picker (tauri-plugin-dialog) ──
+  // 走 plugin command（不依赖 npm JS 包）。directory + 单选 → string | null。
+  function pickDirectory(title) {
+    return invoke("plugin:dialog|open", {
+      options: { directory: true, multiple: false, title: title || "选择工作区目录" },
+    }).then(function (result) {
+      return result || null;
+    });
+  }
 
   // ── Start screen: load recent workspaces ──
   function loadRecent() {
@@ -72,7 +72,6 @@
       pathEl.className = "recent-card-path";
       pathEl.textContent = p;
 
-      // Extract last component as display name
       var name = p.replace(/[\\/]$/, "").split(/[\\/]/).pop() || p;
       var nameEl = document.createElement("div");
       nameEl.className = "recent-card-name";
@@ -88,52 +87,6 @@
 
   function showEmpty(msg) {
     recentList.innerHTML = '<p class="empty-msg">' + msg + "</p>";
-  }
-
-  // ── Modal ──
-  function showModal(action) {
-    modalAction = action;
-    if (action === "new") {
-      modalTitle.textContent = "新建工作区";
-      modalConfirm.textContent = "创建";
-    } else {
-      modalTitle.textContent = "打开工作区";
-      modalConfirm.textContent = "打开";
-    }
-    modalInput.value = "";
-    modalError.classList.add("hidden");
-    modalOverlay.classList.remove("hidden");
-    modalInput.focus();
-  }
-
-  function hideModal() {
-    modalOverlay.classList.add("hidden");
-    modalAction = null;
-  }
-
-  function confirmModal() {
-    var path = modalInput.value.trim();
-    if (!path) {
-      modalError.textContent = "请输入工作区目录路径";
-      modalError.classList.remove("hidden");
-      return;
-    }
-    modalError.classList.add("hidden");
-
-    if (modalAction === "new") {
-      invoke("create_workspace", { path: path })
-        .then(function (ws) {
-          hideModal();
-          renderMain(ws, path);
-        })
-        .catch(function (err) {
-          modalError.textContent = "创建失败: " + err;
-          modalError.classList.remove("hidden");
-        });
-    } else {
-      openWorkspace(path);
-      hideModal();
-    }
   }
 
   // ── Workspace actions ──
@@ -170,19 +123,27 @@
   }
 
   // ── Event bindings ──
-  btnNew.addEventListener("click", function () { showModal("new"); });
-  btnOpen.addEventListener("click", function () { showModal("open"); });
-  btnBack.addEventListener("click", showStart);
-  modalCancel.addEventListener("click", hideModal);
-  modalConfirm.addEventListener("click", confirmModal);
-
-  // Keyboard: Enter to confirm, Escape to cancel
-  modalInput.addEventListener("keydown", function (e) {
-    if (e.key === "Enter") confirmModal();
-    if (e.key === "Escape") hideModal();
+  btnNew.addEventListener("click", async function () {
+    var path = await pickDirectory("选择新建工作区的目录");
+    if (!path) return;
+    invoke("create_workspace", { path: path })
+      .then(function (ws) {
+        renderMain(ws, path);
+      })
+      .catch(function (err) {
+        alert("创建失败: " + err);
+      });
   });
-  modalOverlay.addEventListener("click", function (e) {
-    if (e.target === modalOverlay) hideModal();
+
+  btnOpen.addEventListener("click", async function () {
+    var path = await pickDirectory("选择要打开的工作区目录");
+    if (!path) return;
+    openWorkspace(path);
+  });
+
+  btnBack.addEventListener("click", function () {
+    if (window.LoomGUIEditor && window.LoomGUIEditor.flushSave) window.LoomGUIEditor.flushSave();
+    showStart();
   });
 
   // ── Init ──
