@@ -27,8 +27,19 @@ pub fn create_workspace(path: String) -> Result<Workspace, String> {
         atlases: vec![],
         fonts: vec![],
     };
-    fs::create_dir_all(Path::new(&path)).map_err(|e| format!("create dir: {e}"))?;
-    save_workspace(Path::new(&path), &ws).map_err(|e| format!("save workspace: {e}"))?;
+    let root = Path::new(&path);
+    fs::create_dir_all(root).map_err(|e| format!("create dir: {e}"))?;
+    save_workspace(root, &ws).map_err(|e| format!("save workspace: {e}"))?;
+
+    // Inject workspace CLAUDE.md and loomgui-editor skill from templates.
+    let claude_md = include_str!("../templates/workspace-CLAUDE.md");
+    fs::write(root.join("CLAUDE.md"), claude_md).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+
+    let skill_dir = root.join(".claude").join("skills").join("loomgui-editor");
+    fs::create_dir_all(&skill_dir).map_err(|e| format!("create skill dir: {e}"))?;
+    let skill_md = include_str!("../templates/skill/SKILL.md");
+    fs::write(skill_dir.join("SKILL.md"), skill_md).map_err(|e| format!("write SKILL.md: {e}"))?;
+
     recent::push_recent(&path);
     Ok(ws)
 }
