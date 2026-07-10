@@ -1,7 +1,7 @@
-//! 打包器库：系统目录多 HTML → .pkg.bin（无 atlas）。
+//! 打包器库：工作区多 HTML → .pkg.bin（图集由 atlas 模块自绘，独立产 atlas.png + atlas.json）。
 //! 每个 HTML 独立 parse → resolve_styles → build_scene → 抽 TemplateNode；
 //! img src / background-image url 相对 html 文件解析成 workspace-root-relative sprite_key；
-//! CSS bake 进 style_blob。图集归 Unity，打包器不产 atlas。
+//! CSS bake 进 style_blob。build 模块编排 pack + atlas + fonts + runtime.json 全量产出。
 
 // type_complexity：打包器 build_scene 抽 TemplateNode 的返回类型天然是多层 Vec/HashMap 嵌套，
 // 拆 alias 跨函数引用反而更难读。
@@ -19,7 +19,7 @@ use scraper::{Html, Selector as ScraperSelector};
 use std::path::Path;
 
 /// 打包产物：.pkg.bin bytes + referenced_sprites（本包所有 img/bg/rich-img 引用到的
-/// sprite_key，去重，workspace-root-relative。图集归 Unity，打包器不产 atlas。）
+/// sprite_key，去重，workspace-root-relative。供 build 交叉验证「引用的图都在某 atlas」。）
 #[derive(Debug)]
 pub struct PackedPackage {
     pub pkg_bytes: Vec<u8>,

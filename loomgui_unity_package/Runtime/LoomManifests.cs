@@ -298,15 +298,24 @@ namespace LoomGUI
             return int.Parse(_json.Substring(start, _pos - start), CultureInfo.InvariantCulture);
         }
 
-        /// <summary>Read a JSON number as float.</summary>
+        /// <summary>Read a JSON number as float (handles sign, decimal, scientific notation).</summary>
         private float ReadFloat()
         {
             SkipWS();
             int start = _pos;
-            if (_pos < _json.Length && _json[_pos] == '-')
+            if (_pos < _json.Length && (_json[_pos] == '-' || _json[_pos] == '+'))
                 _pos++;
             while (_pos < _json.Length && (char.IsDigit(_json[_pos]) || _json[_pos] == '.'))
                 _pos++;
+            // exponent: e/E + optional sign + digits
+            if (_pos < _json.Length && (_json[_pos] == 'e' || _json[_pos] == 'E'))
+            {
+                _pos++;
+                if (_pos < _json.Length && (_json[_pos] == '-' || _json[_pos] == '+'))
+                    _pos++;
+                while (_pos < _json.Length && char.IsDigit(_json[_pos]))
+                    _pos++;
+            }
             if (_pos == start)
                 throw Fail("expected number");
             return float.Parse(

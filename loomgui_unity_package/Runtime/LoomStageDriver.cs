@@ -257,13 +257,13 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// Load font file bytes from {productRoot}/fonts/{sourceFileName}.bytes.
-        /// Override for AB/Addressables (builds).
-        /// Returns null on failure.
+        /// Load font file bytes from {productRoot}/fonts/{fontFile}.
+        /// `fontFile` is the runtime.json `file` value (already includes `.bytes`, e.g. "NotoSansSC.ttc.bytes").
+        /// Override for AB/Addressables (builds). Returns null on failure.
         /// </summary>
-        public virtual byte[] LoadFontBytes(string sourceFileName)
+        public virtual byte[] LoadFontBytes(string fontFile)
         {
-            string bytesPath = Path.Combine(GetProductRoot(), "fonts", sourceFileName + ".bytes");
+            string bytesPath = Path.Combine(GetProductRoot(), "fonts", fontFile);
             return File.Exists(bytesPath) ? File.ReadAllBytes(bytesPath) : null;
         }
 
