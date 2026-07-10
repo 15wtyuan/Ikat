@@ -817,9 +817,16 @@ pub fn measure_rich_text(
                 crate::text::rich::RichKind::Image { src, w, h, valign } => {
                     let img_h = *h;
                     let img_w = *w;
-                    // baseline 对齐：默认底边贴 baseline；middle 居中；top 顶贴行顶。
+                    // vertical-align：默认(Baseline)底边贴 baseline；middle 图中线对齐
+                    // baseline + half x-height（小写字母中线，CSS middle 语义，非 baseline 本身——
+                    // 贴 baseline 会令图相对文字偏下）；top 顶贴行顶；bottom 底贴行底。
+                    let xh = font
+                        .face
+                        .x_height()
+                        .map(|x| x as f32 / font.face.units_per_em() as f32 * line_size)
+                        .unwrap_or(line_size * 0.5);
                     let y_top = match valign {
-                        crate::text::rich::RichVAlign::Middle => baseline - img_h * 0.5,
+                        crate::text::rich::RichVAlign::Middle => baseline - xh * 0.5 - img_h * 0.5,
                         crate::text::rich::RichVAlign::Top => 0.0,
                         crate::text::rich::RichVAlign::Bottom => baseline - img_h,
                         _ => baseline - img_h, // Baseline 默认底边贴

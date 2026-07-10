@@ -148,6 +148,39 @@ fn main() {
             parent.layout_rect.x, box_right, xmin, xmax, over,
         );
     }
+
+    println!("\n=== 行内图 RenderNode（相对父 layout 原点）===");
+    for rn in &frame.nodes {
+        let NodePayload::Mesh {
+            verts, image_path, ..
+        } = &rn.payload;
+        let Some(p) = image_path.as_deref() else {
+            continue;
+        };
+        if p.starts_with("loomgui://font-atlas") {
+            continue;
+        }
+        let ys: Vec<f32> = verts.iter().map(|v| v[1]).collect();
+        let xs: Vec<f32> = verts.iter().map(|v| v[0]).collect();
+        let ymin = ys.iter().copied().fold(f32::MAX, f32::min);
+        let ymax = ys.iter().copied().fold(f32::MIN, f32::max);
+        let xmin = xs.iter().copied().fold(f32::MAX, f32::min);
+        let xmax = xs.iter().copied().fold(f32::MIN, f32::max);
+        let primary = rn.node_id & 0x00FF_FFFF;
+        let py = scene
+            .get(NodeId(primary))
+            .map(|n| n.layout_rect.y)
+            .unwrap_or(0.0);
+        println!(
+            "  path={} sort_key={} w={:.0} h={:.0} rel_top={:.1} rel_bottom={:.1}",
+            p,
+            rn.sort_key,
+            xmax - xmin,
+            ymax - ymin,
+            ymin - py,
+            ymax - py,
+        );
+    }
 }
 
 fn extract_style(html: &str) -> String {
