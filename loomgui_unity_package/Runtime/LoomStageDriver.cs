@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using LoomGUI.Bindings;
 using UnityEngine;
 
@@ -9,9 +11,11 @@ namespace LoomGUI
     /// LoomStage 的 Unity 生命周期宿主。持纯 C# <see cref="LoomStage"/> 实例，在 Awake 构造 + 注入
     /// 字体/根 transform + 配 UI 相机/根变换；LateUpdate 每帧驱动 stage.Tick(dt) + 输入采集。
     ///
-    /// 三个 public virtual 加载钩子（LoadFont/LoadPackageBytes）默认直读
-    /// Assets/LoomGUI/Bundles/ 目录——仅 editor 可用。项目继承覆写以换 AssetBundle/Addressables 加载。
-    /// 加载钩子是 public（非 protected）以便跨程序集的 demo/项目 driver 直接调用。
+    /// 启动流程（v1.8）：读 loom.runtime.json → 加载包 → 加载 atlas.json → set_image_sizes →
+    /// SpriteResolver.Init → 注册字体 → 正常 tick。不再依赖 LoomSettings ScriptableObject。
+    ///
+    /// 三个 public virtual 加载钩子（LoadTextFile/LoadBytes/LoadTexture）默认直读文件系统，
+    /// 以 <see cref="_productRoot"/> 为基目录。项目继承覆写以换 AssetBundle/Addressables 加载。
     ///
     /// 设计坐标系：origin 左上、y-down（design px，<see cref="_designSize"/>）。根 transform 一次性
     /// 做 MatchWidthOrHeight shrink-to-fit 缩放 + y-flip（localScale=(sf,-sf,sf)）+ 平移到屏幕左上原点。
@@ -36,6 +40,9 @@ namespace LoomGUI
         [Tooltip("输入采集器（通常与本 Driver 同 GO）。留空时 Awake GetComponent 兜底。")]
         [SerializeField] LoomInputCollector _inputCollector;
 
+        [Tooltip("产物根目录（含 loom.runtime.json + ui/ + atlas/ + fonts/）。空 = StreamingAssets。")]
+        [SerializeField] string _productRoot = "";
+
         LoomStage _stage;
         int _lastScreenW = -1, _lastScreenH = -1;
 
@@ -52,6 +59,91 @@ namespace LoomGUI
         internal Vector2 DesignSize => _designSize;
         internal bool UseSafeArea => _safeArea;
 
+        // ===== Virtual loading hooks (override for AB/Addressables) =====
+
+        /// <summary>
+        /// Load a text file relative to the product root.
+        /// Default: File.ReadAllText from {productRoot}/{relPath}. Override for AB/Addressables.
+        /// Returns null on failure.
+        /// </summary>
+        public virtual string LoadTextFile(string relPath)
+        {
+            string root = GetProductRoot();
+            if (string.IsNullOrEmpty(root)) return null;
+            string path = Path.Combine(root, relPath);
+            return File.Exists(path) ? File.ReadAllText(path) : null;
+        }
+
+        /// <summary>
+        /// Load binary data relative to the product root.
+        /// Default: File.ReadAllBytes from {productRoot}/{relPath}. Override for AB/Addressables.
+        /// Returns null on failure.
+        /// </summary>
+        public virtual byte[] LoadBytes(string relPath)
+        {
+            string root = GetProductRoot();
+            if (string.IsNullOrEmpty(root)) return null;
+            string path = Path.Combine(root, relPath);
+            return File.Exists(path) ? File.ReadAllBytes(path) : null;
+        }
+
+        /// <summary>
+        /// Load a texture (PNG) relative to the product root.
+        /// Default: File.ReadAllBytes + Texture2D.LoadImage from {productRoot}/{relPath}.
+        /// Override for AB/Addressables. Returns null on failure.
+        /// </summary>
+        public virtual Texture2D LoadTexture(string relPath)
+        {
+            string root = GetProductRoot();
+            if (string.IsNullOrEmpty(root)) return null;
+            string path = Path.Combine(root, relPath);
+            if (!File.Exists(path)) return null;
+            try
+            {
+                var tex = new Texture2D(2, 2);
+                tex.LoadImage(File.ReadAllBytes(path));
+                return tex;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[LoomStageDriver] Failed to load texture {path}: {e.Message}");
+                return null;
+            }
+        }
+
+        string GetProductRoot()
+        {
+            if (!string.IsNullOrEmpty(_productRoot))
+                return _productRoot;
+            return Application.streamingAssetsPath;
+        }
+
+        // ===== Pure logic: merge atlas sprites into (key, width, height) list =====
+
+        /// <summary>
+        /// Merge all atlas manifests' sprite entries into a deduplicated list of (key, width, height).
+        /// Pure function — testable without Unity runtime.
+        /// Deduplication: first occurrence wins (atlases ordered by manifest list order).
+        /// </summary>
+        public static List<(string key, uint w, uint h)> MergeSpriteSizes(List<AtlasManifest> atlases)
+        {
+            var result = new List<(string, uint, uint)>();
+            if (atlases == null) return result;
+            var seen = new HashSet<string>();
+            foreach (var atlas in atlases)
+            {
+                if (atlas?.sprites == null) continue;
+                foreach (var kv in atlas.sprites)
+                {
+                    if (!seen.Add(kv.Key)) continue;
+                    var orig = kv.Value.orig;
+                    if (orig == null || orig.Length < 2) continue;
+                    result.Add((kv.Key, (uint)orig[0], (uint)orig[1]));
+                }
+            }
+            return result;
+        }
+
         void Awake()
         {
             // ExecuteAlways：EditMode/Play 反复 Awake + domain reload 会让上一轮的 loom_node 镜像 GO
@@ -64,18 +156,74 @@ namespace LoomGUI
             }
 
             _stage = new LoomStage(_designSize);
-            // CollectWheel 是静态方法读 stage.UseSafeArea（须推进 stage）；Collect 直接收 _safeArea 作参。
             _stage.UseSafeArea = _safeArea;
 
             // 注入渲染根（NativeHostManager 建 container GO 挂此 root；MirrorPool 镜像 GO 也挂此 root）。
             // 必须在 Tick 前调——Tick 读 _renderRoot，未注入则跳过渲染（空帧）。
             _stage.SetNativeHostRoot(transform);
 
-            var settings = LoomSettings.GetOrCreateDefault();
-            // Build atlas manifests from loom.runtime.json + *.atlas.json (standalone packer output).
-            // loadPage reads page PNGs from {pkgDir}/atlas/. T15 will wire AB/Addressables override.
-            _stage.InitSprites(BuildAtlasManifests(settings), LoadAtlasPage);
-            RegisterFontsFromSettings();
+            // ── Bootstrap from loom.runtime.json ──
+            // 1. Load runtime manifest
+            RuntimeManifest runtime = null;
+            string runtimeJson = LoadTextFile("loom.runtime.json");
+            if (!string.IsNullOrEmpty(runtimeJson))
+            {
+                try { runtime = RuntimeManifest.ParseRuntime(runtimeJson); }
+                catch (Exception e) { Debug.LogWarning($"[LoomStageDriver] Failed to parse loom.runtime.json: {e.Message}"); }
+            }
+
+            if (runtime != null)
+            {
+                // 2. Load packages
+                foreach (var pkgName in runtime.packages)
+                {
+                    byte[] bytes = LoadPackageBytes(pkgName);
+                    if (bytes != null)
+                        _stage.LoadPackage(pkgName, bytes);
+                    else
+                        Debug.LogWarning($"[LoomStageDriver] Package not found: ui/{pkgName}.pkg.bin");
+                }
+
+                // 3. Load atlas manifests
+                var atlasManifests = new List<AtlasManifest>();
+                foreach (var atlasName in runtime.atlases)
+                {
+                    string atlasJson = LoadTextFile($"atlas/{atlasName}.atlas.json");
+                    if (string.IsNullOrEmpty(atlasJson))
+                    {
+                        Debug.LogWarning($"[LoomStageDriver] atlas.json not found: atlas/{atlasName}.atlas.json");
+                        continue;
+                    }
+                    try { atlasManifests.Add(AtlasManifest.ParseAtlas(atlasJson)); }
+                    catch (Exception e) { Debug.LogWarning($"[LoomStageDriver] Failed to parse atlas/{atlasName}.atlas.json: {e.Message}"); }
+                }
+
+                // 4. Push image sizes to Rust core (one FFI call, before first tick)
+                if (atlasManifests.Count > 0)
+                {
+                    var sizes = MergeSpriteSizes(atlasManifests);
+                    if (sizes.Count > 0)
+                    {
+                        int n = sizes.Count;
+                        var paths = new string[n];
+                        var ws = new uint[n];
+                        var hs = new uint[n];
+                        for (int i = 0; i < n; i++)
+                        {
+                            paths[i] = sizes[i].key;
+                            ws[i] = sizes[i].w;
+                            hs[i] = sizes[i].h;
+                        }
+                        _stage.SetImageSizes(paths, ws, hs);
+                    }
+                }
+
+                // 5. Init SpriteResolver with atlas manifests + lazy page loader
+                _stage.InitSprites(atlasManifests, pageName => LoadTexture($"atlas/{pageName}"));
+
+                // 6. Register fonts from runtime manifest
+                RegisterFontsFromManifest(runtime);
+            }
 
             EnsureCamera();
             ConfigureTransforms();
@@ -85,123 +233,48 @@ namespace LoomGUI
             if (_inputCollector == null) _inputCollector = GetComponent<LoomInputCollector>();
         }
 
+        // ===== Font registration (from runtime.json, not LoomSettings) =====
+
         /// <summary>
-        /// 默认实现：遍历 <see cref="LoomSettings.fonts"/> → <see cref="LoadFontBytes"/> → stage.RegisterFont。
-        /// 项目子类可覆写以改加载策略（如先批量预加载、异步加载、错误兜底）。
-        /// protected：内部编排钩子，外部不应直接调用（用 <see cref="LoadFontBytes"/> 单个加载）。
+        /// Register fonts from the runtime manifest's font list.
+        /// Overridable for custom loading strategies.
         /// </summary>
-        protected virtual void RegisterFontsFromSettings()
+        protected virtual void RegisterFontsFromManifest(RuntimeManifest runtime)
         {
-            var settings = LoomSettings.GetOrCreateDefault();
-            var fallbacks = new System.Collections.Generic.List<string>();
-            foreach (var entry in settings.fonts)
+            if (runtime?.fonts == null) return;
+            var fallbacks = new List<string>();
+            foreach (var rf in runtime.fonts)
             {
-                byte[] bytes = LoadFontBytes(entry);
+                if (string.IsNullOrEmpty(rf.family) || string.IsNullOrEmpty(rf.file)) continue;
+                byte[] bytes = LoadFontBytes(rf.file);
                 if (bytes != null)
-                    _stage.RegisterFont(entry.familyName, bytes, entry.isDefault);
-                // 收集 isFallback 的 family（即使 bytes 加载失败也登记——Rust 端跳过未注册的）。
-                if (entry.isFallback && !string.IsNullOrEmpty(entry.familyName))
-                    fallbacks.Add(entry.familyName);
+                    _stage.RegisterFont(rf.family, bytes, rf.@default);
+                // Collect fallback families (registered or not — Rust side skips unregistered).
+                if (rf.fallback)
+                    fallbacks.Add(rf.family);
             }
-            // 所有字体注册完再设回退链（family 须已 register）。
             if (fallbacks.Count > 0)
                 _stage.SetFallbackFamilies(fallbacks);
         }
 
         /// <summary>
-        /// 默认直读 {pkgOutputDir}/fonts/{sourceFileName}.bytes。
-        /// v10：不再加载 Unity Font asset——核心自产 atlas，后端只喂 Rust 字节。
-        /// 项目覆写换 AssetBundle/Addressables（build 后 Font asset 不在文件系统）。
-        /// public 以便跨程序集（如 LoomGUI.Demo）直接调用。
-        /// 返 null 表示加载失败，调用方（RegisterFontsFromSettings）跳过此 entry。
+        /// Load font file bytes from {productRoot}/fonts/{sourceFileName}.bytes.
+        /// Override for AB/Addressables (builds).
+        /// Returns null on failure.
         /// </summary>
-        public virtual byte[] LoadFontBytes(FontEntry entry)
+        public virtual byte[] LoadFontBytes(string sourceFileName)
         {
-            string bytesPath = Path.Combine(BundlesSubDir("fonts"), entry.sourceFileName + ".bytes");
+            string bytesPath = Path.Combine(GetProductRoot(), "fonts", sourceFileName + ".bytes");
             return File.Exists(bytesPath) ? File.ReadAllBytes(bytesPath) : null;
         }
 
         /// <summary>
-        /// 默认直读 {pkgOutputDir}/ui/{name}.pkg.bin。项目覆写换 AB/Addressables。
-        /// public 以便跨程序集调用。返 null = 文件不存在/读取失败。
+        /// Default: load .pkg.bin from {productRoot}/ui/{name}.pkg.bin.
+        /// Override for AB/Addressables. Returns null on failure.
         /// </summary>
         public virtual byte[] LoadPackageBytes(string name)
         {
-            string path = Path.Combine(BundlesSubDir("ui"), name + ".pkg.bin");
-            return File.Exists(path) ? File.ReadAllBytes(path) : null;
-        }
-
-        // ===== Self-drawn atlas bridge (T14: T15 will override for AB/Addressables) =====
-
-        /// <summary>
-        /// Build AtlasManifest list from loom.runtime.json's atlas list.
-        /// Reads {pkgDir}/loom.runtime.json → parse → for each atlas name read {pkgDir}/atlas/{name}.atlas.json.
-        /// Returns empty list if loom.runtime.json is missing or parsing fails.
-        /// </summary>
-        static List<AtlasManifest> BuildAtlasManifests(LoomSettings settings)
-        {
-            var result = new List<AtlasManifest>();
-            if (settings == null) return result;
-
-            string pkgDir = settings.pkgOutputDir;
-            string runtimePath = Path.Combine(pkgDir, "loom.runtime.json");
-            if (!File.Exists(runtimePath)) return result;
-
-            RuntimeManifest runtime;
-            try { runtime = RuntimeManifest.ParseRuntime(File.ReadAllText(runtimePath)); }
-            catch (System.Exception e)
-            {
-                Debug.LogWarning($"[LoomStageDriver] Failed to parse loom.runtime.json: {e.Message}");
-                return result;
-            }
-
-            foreach (var atlasName in runtime.atlases)
-            {
-                string jsonPath = Path.Combine(pkgDir, "atlas", atlasName + ".atlas.json");
-                if (!File.Exists(jsonPath))
-                {
-                    Debug.LogWarning($"[LoomStageDriver] atlas.json not found: {jsonPath}");
-                    continue;
-                }
-                try { result.Add(AtlasManifest.ParseAtlas(File.ReadAllText(jsonPath))); }
-                catch (System.Exception e)
-                {
-                    Debug.LogWarning($"[LoomStageDriver] Failed to parse {jsonPath}: {e.Message}");
-                }
-            }
-            return result;
-        }
-
-        /// <summary>
-        /// Load an atlas page PNG from {pkgDir}/atlas/{pageFileName}.
-        /// Editor only — reads from file system. T15 will override for AB/Addressables.
-        /// Returns null if the file doesn't exist or load fails.
-        /// </summary>
-        static Texture2D LoadAtlasPage(string pageFileName)
-        {
-            string pkgDir = LoomSettings.GetOrCreateDefault().pkgOutputDir;
-            string path = Path.Combine(pkgDir, "atlas", pageFileName);
-            if (!File.Exists(path)) return null;
-            try
-            {
-                var tex = new Texture2D(2, 2);
-                tex.LoadImage(File.ReadAllBytes(path));
-                return tex;
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogWarning($"[LoomStageDriver] Failed to load atlas page {path}: {e.Message}");
-                return null;
-            }
-        }
-
-        // 拼 Bundles 子目录绝对路径。pkgOutputDir 是相对工程根的 "Assets/Bundles" 形式；
-        // 去 "Assets/" 前缀后相对 Assets/，与 Application.dataPath（已含 .../Assets）拼成绝对路径。
-        static string BundlesSubDir(string sub)
-        {
-            string pkgDir = LoomSettings.GetOrCreateDefault().pkgOutputDir;
-            if (pkgDir.StartsWith("Assets/")) pkgDir = pkgDir.Substring("Assets/".Length);
-            return Path.Combine(Application.dataPath, pkgDir, sub);
+            return LoadBytes($"ui/{name}.pkg.bin");
         }
 
         void LateUpdate()
@@ -270,7 +343,7 @@ namespace LoomGUI
                 // 缺失则跳过（用户可手挂）。
                 try
                 {
-                    var t = System.Type.GetType("UnityEngine.Rendering.Universal.UniversalAdditionalCameraData, Unity.RenderPipelines.Universal.Runtime");
+                    var t = Type.GetType("UnityEngine.Rendering.Universal.UniversalAdditionalCameraData, Unity.RenderPipelines.Universal.Runtime");
                     if (t != null && _uiCamera.GetComponent(t) == null)
                         _uiCamera.gameObject.AddComponent(t);
                 }

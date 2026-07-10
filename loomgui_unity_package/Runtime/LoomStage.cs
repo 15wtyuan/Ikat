@@ -132,6 +132,37 @@ namespace LoomGUI
             _sprites?.Init(atlases, loadPage);
         }
 
+        /// <summary>
+        /// Set image sizes for all known sprites before first tick.
+        /// Merged atlas sprites → (key, width, height) arrays → one FFI call.
+        /// Call after loading all atlas.json manifests and before first Tick().
+        /// </summary>
+        public void SetImageSizes(string[] paths, uint[] ws, uint[] hs)
+        {
+            if (_stage == null || paths == null || paths.Length == 0) return;
+            int n = paths.Length;
+            var pathPtrs = new IntPtr[n];
+            for (int i = 0; i < n; i++)
+                pathPtrs[i] = Marshal.StringToHGlobalAnsi(paths[i] ?? "");
+            try
+            {
+                unsafe
+                {
+                    fixed (IntPtr* pp = pathPtrs)
+                    fixed (uint* wp = ws)
+                    fixed (uint* hp = hs)
+                    {
+                        Native.loomgui_stage_set_image_sizes(_stage, (byte**)pp, wp, hp, (nuint)n);
+                    }
+                }
+            }
+            finally
+            {
+                for (int i = 0; i < n; i++)
+                    Marshal.FreeHGlobal(pathPtrs[i]);
+            }
+        }
+
         // ===== NativeHost 根注入（Driver 调）=====
 
         /// <summary>
