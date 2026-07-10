@@ -76,7 +76,6 @@ mod tests {
 
         let cfg = AtlasCfg {
             name: "ui".into(),
-            default: false,
             standalone: false,
             dirs: vec!["assets".into()],
             max_size: 2048,

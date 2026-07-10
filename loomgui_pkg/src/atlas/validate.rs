@@ -16,7 +16,7 @@ pub fn assign_and_validate(
         match owners.len() {
             0 => {
                 return Err(format!(
-                    "图 `{key}` 被引用但不在任何 atlas；把它所在目录加进某 atlas.dirs，或设一个 default atlas"
+                    "图 `{key}` 被引用但不在任何 atlas；把它所在目录加进某 atlas.dirs"
                 ))
             }
             1 => {}

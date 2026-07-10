@@ -31,8 +31,6 @@ pub struct PackageCfg {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AtlasCfg {
     pub name: String,
-    #[serde(default)]
-    pub default: bool,
     /// 每图独立成页不拼合（超大图用）。
     #[serde(default)]
     pub standalone: bool,
@@ -94,7 +92,6 @@ mod tests {
         assert!(ws.packages[0].html.is_empty(), "html 空 = 自动态");
         assert_eq!(ws.atlases[0].max_size, 2048, "max_size 缺省默认 2048");
         assert_eq!(ws.atlases[0].padding, 4, "padding 缺省默认 4");
-        assert!(ws.atlases[0].default);
         assert_eq!(ws.fonts[0].family, "NotoSansSC");
     }
 
@@ -110,7 +107,6 @@ mod tests {
             }],
             atlases: vec![AtlasCfg {
                 name: "ui".into(),
-                default: false,
                 standalone: false,
                 dirs: vec!["assets".into()],
                 max_size: 1024,

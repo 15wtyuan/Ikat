@@ -139,7 +139,6 @@ mod tests {
     fn cfg(max: u32, standalone: bool) -> AtlasCfg {
         AtlasCfg {
             name: "ui".into(),
-            default: false,
             standalone,
             dirs: vec![],
             max_size: max,
