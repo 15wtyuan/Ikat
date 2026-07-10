@@ -463,7 +463,7 @@ stage.is_pointer_on_ui() -> bool   // = 命中目标非空且非根
 
 ## 11. 资源 / 包系统
 
-> **章节状态**：§11.3（图集）已对照实现重写。§11.2（包格式）/§11.4（引用计数）/§11.5（加载实例化）仍是早期设计草稿，与当前实现（pkg.bin 多组件格式 + `load_package` 进资源池 + `instantiate` 克隆子树，无 `loom://` URL / TextureView / create_object 三层）有差距，待核实重写。以代码（`loomgui_core/src/asset/`、`stage.rs`）+ `docs/superpowers/specs/2026-07-02-v1.4a-package-loading-design.md` 为准。
+> **章节状态**：§11.3（图集）已对照 v1.8+ 架构重写（Rust 自绘 atlas.png+atlas.json）。§11.2（包格式）/§11.4（引用计数）/§11.5（加载实例化）仍是早期设计草稿，与当前实现（pkg.bin 多组件格式 + `load_package` 进资源池 + `instantiate` 克隆子树，无 `loom://` URL / TextureView / create_object 三层）有差距，待核实重写。以代码（`loomgui_core/src/asset/`、`stage.rs`）+ `docs/superpowers/specs/2026-07-02-v1.4a-package-loading-design.md` 为准。
 
 ### 11.1 双格式
 - **编辑期/源**：HTML（结构）+ CSS（样式）+ 资源清单。
@@ -478,18 +478,21 @@ stage.is_pointer_on_ui() -> bool   // = 命中目标非空且非根
 - 跨资源引用统一 URL（`loom://pkgName#resId`），存 id 不存内容。
 - **版本协商**：Header `formatVersion` + runtime 声明 `min/max_supported_version`。新 runtime 读旧包按 `formatVersion` 内联兼容（对齐 fgui `buffer.version >= N` 模式）；集中式迁移器链待多版本累积后再上。同 Stage 不允许混载不同 major version 包。
 
-### 11.3 图集（归引擎，核心不知）
-**核心契约**：核心只持图片归一化 path（如 `icons/home.png`，裁 `res/` 前缀）+ 打包期 PNG IHDR 真实尺寸（存 pkg.bin AssetManifest）。**不知图集、不持纹理/UV/atlas 引用**——Image payload 带 `image_path: Option<String>`，UV 始终全图 `[0,1]`，path 推给后端。
+### 11.3 图集（Rust 自绘，打包器产出）
 
-**图集归引擎后端**（Unity 首发）：图集是引擎原生概念（Unity `SpriteAtlas`），由后端管理。核心 payload 的 path 经 FFI（FrameBlob path_table + path_idx）传给 Unity，后端 `SpriteResolver` 据 path 路由到对应 `SpriteAtlas` 取 `Sprite`（含真实 packed UV + texture），重映射 blob 全图 UV 到 atlas 子区。
+**v1.8+ 架构**：图集不再依赖 Unity `SpriteAtlas`，由打包器 `loomgui_pkg` 自绘产出 `atlas.png` + `atlas.json`。工作区是完全独立的磁盘目录（根下 `loom.workspace.json` 标识），不放在 Unity `Assets/` 内。
 
-**显式路由**（folder→atlas 映射）：path 顶层子目录 → 查映射表 → 命中 atlas → `atlas.GetSprite(文件名去扩展)`。映射表由全局配置资产（`LoomSettings.atlasEntries`，拖文件夹当 packables）构建。res 全局唯一（工作区根下），子目录全局不撞，文件名去扩展安全。res 根图（无子目录）走 `isDefault` 图集兜底。
+**核心契约**：核心只持图片归一化 `sprite_key`（图片路径相对工作区根）+ 图片原始像素尺寸。尺寸不再从 pkg.bin manifest 读，而是由驱动加载 atlas.json 后通过 `Stage::set_image_sizes`（FFI `loomgui_stage_set_image_sizes`）推入核心。核心 payload 的 `image_path` 经 FFI path_table 传给后端；后端 `SpriteResolver` 据 atlas.json 的 UV 字典 + `Texture2D` 取子区 UV（不再查 Unity `SpriteAtlas`），重映射 blob 全图 UV 到 atlas 子区。
 
-**配置中枢**：`LoomSettings`（ScriptableObject，Runtime/，全局一份 Editor+运行时同源）持有图集配置（atlasEntries）+ 包列表 + 工作区路径。Editor 面板编辑它，`LoomStage` 运行时 `Resources.Load` 自动取（不 Inspector 手配）。图集 packables 由面板同步（扫 folders 下 PNG → 显式 Sprite 列表 `SetPackables`，规避引擎 folder packable 失效）。
+**运行时 Bootstrap**：驱动（Unity `LoomStage`）启动时读 `loom.runtime.json`（声明包/图集/字体列表）→ 加载各 `.pkg.bin` + 图集 `atlas.png` + `atlas.json` → 解析 atlas.json 中每张图的 `orig` 尺寸，推入核心 `set_image_sizes` → 初始化 `SpriteResolver`（注入 `Texture2D` + UV 字典作 sprite_key→子区 UV 表，无 folder→atlas 路由）。
 
-> **为何图集归引擎不归核心**：图集打包/查询是引擎原生能力（Unity SpriteAtlas / Godot canvas），核心自建图集是重复造轮子 + 跨引擎不一致。核心只需 path + 尺寸（measure/九宫格用），纹理/UV/atlas 留给后端。批合仍保证（同图集的图同 texture → 可合批，后端 batch 按 texture 分组）。
+**打包器自绘流程**：`loomgui_pkg` 构建期扫所有图片资源、shelf-pack 合成 atlas.png、写 atlas.json（每 sprite 含 UV 矩形 + 原始 `orig` 像素尺寸）。img src 相对 HTML 文件路径；打包器归一化后 sprite_key = 图片路径相对工作区根。
+
+**独立工作区**：工作区是任意磁盘目录，`loom.workspace.json` 在根目录标识。`loomgui_gui`（Tauri 桌面 GUI）替代原 Unity `LoomSettingsWindow` 做配置管理——Editor 面板从 Unity 中移除，端到端独立于引擎。
+
+> **为何图集归打包器不归引擎**：原方案交 Unity `SpriteAtlas` 绑死 Unity 编辑器（Godot 后端须重造图集系统），且 Unity SpriteAtlas V1/V2 API 破碎。Rust 自绘 atlas.png + atlas.json = 跨引擎一致、一次打包多后端可用。核心仍需尺寸（measure/九宫格用），但不需知 UV——UV 查表在后端 SpriteResolver 侧。
 >
-> **path 身份**：path 是归一化相对路径（`icons/home.png`），全局唯一（res 全局唯一）。不靠文件名猜身份（旧版遍历 atlas 靠 `GetFileNameWithoutExtension` 猜，跨包撞名）——靠显式 folder→atlas 路由。
+> **sprite_key 身份**：sprite_key 是图片路径相对工作区根的归一化形式（如 `res/icons/home.png`）。atlas.json 是直接键值映射（sprite_key → UV + orig），无需 folder→atlas 路由层。
 
 ### 11.4 引用计数与生命周期
 - `TextureView` 自带 `ref_count`，子视图首引用连带 root。
@@ -591,6 +594,8 @@ csbindgen 是为 Unity/IL2CPP 设计的主流绑定生成器（Cysharp MagicPhys
 **C# buffer 大小策略**：每帧 payload 大小变（静态帧≈只 header、冷帧/换页帧满载），用 `ArrayPool<byte>.Shared.Rent(本帧实际大小)` 池化租用，用完 `Return`——零 GC、无 worst case 常驻。预算：单帧 FFI 拷贝 + arena 解析 ≤ 2ms @ 500 节点全 dirty。
 
 **其它跨边界数据**：Stage 句柄（C# 持 opaque `IntPtr`）；输入事件（扁平数组）；回调（static + MonoPInvokeCallback）；纹理（核心只认 TexId，C# 上传后注册 id↔Texture2D）。
+
+> **v1.8 契约扩展**（细节见 `docs/superpowers/specs/2026-07-08-v1.8-text-effects-decoration-design.md` + fence.md）：① clip 表 entry 20B→52B（加四角 radii，圆角 SDF 裁剪走 shader `CLIPPED_ROUNDED` 变体，`_ClipBox` SDF 替 AABB step；corner-radius 经 `ClipMath` 按 design 半径/design half-size 归一化，sf 抵消）。② 文字效果：`GlyphKey.effect_sig`（v1.6 预留 u64）启用，atlas `register_effect(sig, FontEffect)` + `ensure` 内 `rasterize_glyph` 后做 dilate/erode/gaussian_blur 后处理（Shadow=blur+offset / Stroke=erode 内侧 / Glow=dilate+blur / Blur=blur），按 Back/Front layer 叠放（`[Back:shadow/glow]→base→[Front:stroke/blur]`，合成靠绘制顺序 + sort_key 传播）。③ DSL 混合：标准 CSS（text-shadow/-webkit-text-stroke/text-decoration/linear-gradient/border/box-shadow/sepia）+ 私有 `font-effect:glow()/blur()`（标准 CSS 表达不了）。text_effects 是 ResolvedStyle 继承字段。`text-decoration` 当前仅 inline style 生效（CSS 规则形式推后，见 roadmap §2.7）。
 
 > FFI 传的是**完整渲染树**（SOA+arena，含全部状态），不是"只传 NodeId"。Rust 不持/不解引用任何 Unity 对象，跨 FFI 只传整数 id + 数据 buffer。
 

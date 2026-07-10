@@ -1,50 +1,52 @@
-//! 打包器库：系统目录多 HTML → .pkg.bin（无 atlas）。
+//! 打包器库：工作区多 HTML → .pkg.bin（图集由 atlas 模块自绘，独立产 atlas.png + atlas.json）。
 //! 每个 HTML 独立 parse → resolve_styles → build_scene → 抽 TemplateNode；
-//! img src / background-image url 归一化进 asset_manifest；CSS bake 进 style_blob。
-//! 图集归 Unity，打包器不产 atlas。
-//!
-//! **图尺寸**：打包器对每个 manifest path 读 PNG IHDR（前 8 字节 magic + 13 字节 IHDR，
-//! width/height big-endian u32 at offset 16/20）填 `AssetEntry { path, w, h }`。非 PNG 或读失败 →
-//! w/h=0（核心 measure fallback 64×64）。PNG header 解析 ~30 行即可，无需完整 PNG 解码。
+//! img src / background-image url 相对 html 文件解析成 workspace-root-relative sprite_key；
+//! CSS bake 进 style_blob。build 模块编排 pack + atlas + fonts + runtime.json 全量产出。
 
 // type_complexity：打包器 build_scene 抽 TemplateNode 的返回类型天然是多层 Vec/HashMap 嵌套，
 // 拆 alias 跨函数引用反而更难读。
 #![allow(clippy::type_complexity)]
 
-use loomgui_core::asset::{
-    extract_component_css, normalize_path, AssetEntry, ControllerEntry, PackageInput, TemplateNode,
-};
+pub mod atlas;
+pub mod build;
+pub mod resolve;
+pub mod runtime;
+pub mod workspace;
+
+use loomgui_core::asset::{extract_component_css, ControllerEntry, PackageInput, TemplateNode};
 use loomgui_core::scene::NodeId;
 use scraper::{Html, Selector as ScraperSelector};
 use std::path::Path;
 
-/// 打包产物：.pkg.bin bytes + asset_manifest（归一化 path + 图尺寸，供 Unity 校验 + 核心 measure/九宫格）。
-/// 图集归 Unity，打包器不产 atlas。manifest 是 `Vec<AssetEntry>`（path + PNG IHDR 尺寸）。
+/// 打包产物：.pkg.bin bytes + referenced_sprites（本包所有 img/bg/rich-img 引用到的
+/// sprite_key，去重，workspace-root-relative。供 build 交叉验证「引用的图都在某 atlas」。）
 #[derive(Debug)]
 pub struct PackedPackage {
     pub pkg_bytes: Vec<u8>,
-    pub asset_manifest: Vec<AssetEntry>,
+    /// 本包所有 img/bg/rich-img 引用到的 sprite_key（去重），供 build 交叉验证。
+    pub referenced_sprites: Vec<String>,
 }
 
 /// 把单 scene 转 Vec<TemplateNode>（按 slotmap 插入序 = DFS 先序），同时把 img src +
-/// background-image url 归一化收进 manifest（去重）。None（src 不在 res 下）→ warning 不入 manifest。
+/// background-image url + rich 行内图 src 经 `resolve_img_src` 解析成 workspace-root-relative
+/// sprite_key，去重收进 `referenced`，并回写 src。
+///
+/// 解析失败（越出 workspace root）→ Err（引用根外的图是错误，不静默跳过）。
 ///
 /// parent_idx = 父节点在 Vec 中的位置（None=组件根）。slotmap values() 对无删除的全新 map
 /// 按槽位序迭代 = 插入序 = build_scene 的 DFS 先序，故 parent 总在 child 前出现，位置索引稳定。
-///
-/// **manifest 收 `AssetEntry { path, w:0, h:0 }`**（此处只收 path，w/h 由 `pack` 后置
-/// 读 PNG IHDR 填——scene_to_template 不知 res 目录绝对路径，只有归一化 path）。
 ///
 /// 同时扫 `Node.data_controller` 收 `ControllerEntry`：mount_node_idx = 节点在产物 Vec 中的
 /// 位置（同 parent_idx 约定），initial_selected_index 从 `controller_pages` 查（打包期扫
 /// `data-page` 属性得，key = controller name）。
 fn scene_to_template(
     scene: &loomgui_core::scene::Scene,
-    res_dir: &str,
-    manifest: &mut Vec<AssetEntry>,
+    workspace_root: &Path,
+    html_file: &Path,
+    referenced: &mut Vec<String>,
     seen: &mut std::collections::HashSet<String>,
     controller_pages: &std::collections::HashMap<String, i32>,
-) -> (Vec<TemplateNode>, Vec<ControllerEntry>) {
+) -> Result<(Vec<TemplateNode>, Vec<ControllerEntry>), String> {
     // NodeId → 在产物 Vec 中的位置（slotmap 插入序）。
     let pos_of: std::collections::HashMap<NodeId, usize> = scene
         .nodes
@@ -56,76 +58,38 @@ fn scene_to_template(
     let mut nodes: Vec<TemplateNode> = Vec::with_capacity(scene.nodes.len());
     let mut controllers: Vec<ControllerEntry> = Vec::new();
     for (i, n) in scene.nodes.values().enumerate() {
-        // img src 归一化进 manifest（去重）。归一化后回写节点 src，让 write_package 的
-        // StringTable 收归一化 path（非原 src）。
+        // img src 解析成 sprite_key（去重）。回写节点 src。
         let mut kind = n.kind.clone();
         if let loomgui_core::scene::NodeKind::Image { src } = &mut kind {
             if !src.is_empty() {
-                match normalize_path(src, res_dir) {
-                    Some(norm) => {
-                        if seen.insert(norm.clone()) {
-                            manifest.push(AssetEntry {
-                                path: norm.clone(),
-                                w: 0,
-                                h: 0,
-                            });
-                        }
-                        *src = norm;
-                    }
-                    None => {
-                        eprintln!(
-                            "warn: img src `{src}` 不在 res 目录 `{res_dir}` 下，跳过 manifest"
-                        );
-                    }
+                let key = crate::resolve::resolve_img_src(workspace_root, html_file, src)?;
+                if seen.insert(key.clone()) {
+                    referenced.push(key.clone());
                 }
+                *src = key;
             }
         }
-        // background-image url 同样归一化进 manifest（去重；与 img src 同 url 只入一次）。
+        // background-image url 同样解析成 sprite_key（去重；与 img src 同 url 只入一次）。
         let mut style = n.style.clone();
         if let Some(url) = &style.background_image {
             if !url.is_empty() {
-                match normalize_path(url, res_dir) {
-                    Some(norm) => {
-                        if seen.insert(norm.clone()) {
-                            manifest.push(AssetEntry {
-                                path: norm.clone(),
-                                w: 0,
-                                h: 0,
-                            });
-                        }
-                        style.background_image = Some(norm);
-                    }
-                    None => {
-                        eprintln!("warn: background-image url `{url}` 不在 res 目录 `{res_dir}` 下，跳过 manifest");
-                    }
+                let key = crate::resolve::resolve_img_src(workspace_root, html_file, url)?;
+                if seen.insert(key.clone()) {
+                    referenced.push(key.clone());
                 }
+                style.background_image = Some(key);
             }
         }
-        // RichText 行内图 src 归一化进 manifest（去重）。行内图嵌在 NodeKind::RichText 的
-        // runs → RichKind::Image，顶层只 match NodeKind::Image 不会下钻——不归一化则 src 保持
-        // "res/icons/x.png"（SpriteResolver 顶层子目录="res" 无 folder→atlas 映射 → 默认图集
-        // miss → 白方块），且不入 manifest（Unity 不打包进 atlas）。归一化后回写 run.src。
+        // RichText 行内图 src 解析成 sprite_key（去重）。
         if let loomgui_core::scene::NodeKind::RichText { runs } = &mut kind {
             for r in runs.iter_mut() {
                 if let loomgui_core::text::rich::RichKind::Image { src, .. } = &mut r.kind {
                     if !src.is_empty() {
-                        match normalize_path(src, res_dir) {
-                            Some(norm) => {
-                                if seen.insert(norm.clone()) {
-                                    manifest.push(AssetEntry {
-                                        path: norm.clone(),
-                                        w: 0,
-                                        h: 0,
-                                    });
-                                }
-                                *src = norm;
-                            }
-                            None => {
-                                eprintln!(
-                                    "warn: rich img src `{src}` 不在 res 目录 `{res_dir}` 下，跳过 manifest"
-                                );
-                            }
+                        let key = crate::resolve::resolve_img_src(workspace_root, html_file, src)?;
+                        if seen.insert(key.clone()) {
+                            referenced.push(key.clone());
                         }
+                        *src = key;
                     }
                 }
             }
@@ -141,8 +105,6 @@ fn scene_to_template(
             data_controller: n.data_controller.clone(),
         });
         // data-controller="name" 的节点 → ControllerEntry。
-        // mount_node_idx = 节点在产物 Vec 中的位置（同 parent_idx 约定，组件内局部下标）。
-        // initial_selected_index 从 controller_pages 查（打包期扫 data-page 属性得），缺省 0。
         if let Some(name) = &n.data_controller {
             let initial = controller_pages.get(name).copied().unwrap_or(0);
             controllers.push(ControllerEntry {
@@ -152,7 +114,7 @@ fn scene_to_template(
             });
         }
     }
-    (nodes, controllers)
+    Ok((nodes, controllers))
 }
 
 /// 扫 ElementTree 收 controller name → initial_selected_index 映射。
@@ -173,40 +135,6 @@ fn collect_controller_pages(
         }
     }
     map
-}
-
-/// 读 PNG IHDR chunk 取真实像素 width/height。
-///
-/// PNG 布局：8 字节 magic (`\x89PNG\r\n\x1a\n`) + IHDR chunk（4 字节长度 + 4 字节 "IHDR" +
-/// 13 字节数据：width(4 BE) + height(4 BE) + bit_depth(1) + color_type(1) + ...）。
-/// width 在 offset 16，height 在 offset 20（big-endian u32）。
-///
-/// 非 PNG（magic 不符）/ 文件过短 / 读失败 → `(0, 0)`（核心 measure fallback 64×64）。
-/// PNG header 解析 ~30 行，无需完整 PNG 解码。
-fn read_png_size(path: &std::path::Path) -> (u32, u32) {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("warn: read png `{}` failed: {e}", path.display());
-            return (0, 0);
-        }
-    };
-    // PNG magic: \x89 P N G \r \n \x1a \n
-    const PNG_MAGIC: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
-    if bytes.len() < 24 || bytes[..8] != PNG_MAGIC {
-        // 非 PNG（或过短）→ 0/0（核心 fallback 64×64）
-        return (0, 0);
-    }
-    // IHDR chunk：offset 8 = length(4 BE) + "IHDR"(4) + data(width(4 BE) + height(4 BE) + ...)
-    // width at offset 16, height at offset 20（big-endian u32）。
-    let chunk_type = &bytes[12..16];
-    if chunk_type != b"IHDR" {
-        eprintln!("warn: `{}` first chunk not IHDR", path.display());
-        return (0, 0);
-    }
-    let w = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
-    let h = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
-    (w, h)
 }
 
 /// 从 HTML 串剥掉所有 `<style>...</style>` 和 `<link ...>` 元素（含内容），返回干净 HTML。
@@ -361,26 +289,22 @@ fn check_no_flex_props(s: &loomgui_core::style::resolved::ResolvedStyle) -> Resu
     Ok(())
 }
 
-/// 把系统目录下多个 HTML 打成 .pkg.bin（多组件格式，无 atlas）。
+/// 把工作区根下多个 HTML 打成 .pkg.bin（多组件格式，无 atlas）。
 ///
-/// - `source_dir`：包源目录（html + res 所在）。
-/// - `pkg_name`：包名（当前未进 pkg.bin header，供 CLI 日志用；未来版本号/元数据可扩展）。
-/// - `html_files`：要打包的 HTML 文件名列表（相对 sourceDir，含 .html 扩展名）。
-/// - `res_root`：资源根目录路径（如 `Assets/LoomUI/res`；res 目录名从中推导，归一化 path 去此前缀）。
+/// - `workspace_root`：工作区根目录（绝对路径）。img src 相对 html 文件解析成
+///   workspace-root-relative sprite_key。
+/// - `_name`：包名（当前未进 pkg.bin header，供 CLI 日志用；未来版本号/元数据可扩展）。
+/// - `html_files`：[(workspace-root-relative html 路径, html 绝对路径)]。
+///   组件名 = 相对路径的 file_stem。
 ///
 /// 每 HTML 独立：抽 CSS → 剥 style/link → parse_html → parse_css → resolve_styles →
-/// build_scene → scene_to_template（归一化 src 进 manifest）→ 收 (组件名, nodes, dynamic_rules)。
-/// 组件名 = 文件名去 .html。最后 write_package 产 pkg_bytes。
+/// build_scene → scene_to_template（解析 img src 成 sprite_key）→ 收 (组件名, nodes, dynamic_rules)。
+/// 最后 write_package 产 pkg_bytes。
 pub fn pack(
-    source_dir: &Path,
-    _pkg_name: &str,
-    html_files: &[String],
-    res_root: &Path,
+    workspace_root: &Path,
+    _name: &str,
+    html_files: &[(String, std::path::PathBuf)],
 ) -> Result<PackedPackage, String> {
-    let res_dir = res_root
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("res");
     // owned 生命周期：nodes/dynamic/controllers 需在 write_package 借用时存活，故先全部收集进 owned Vec。
     let mut owned: Vec<(
         String,
@@ -388,42 +312,43 @@ pub fn pack(
         loomgui_core::style::dynamic::DynamicRuleTable,
         Vec<ControllerEntry>,
     )> = Vec::with_capacity(html_files.len());
-    let mut manifest: Vec<AssetEntry> = Vec::new();
+    let mut referenced: Vec<String> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for hf in html_files {
-        let html_path = source_dir.join(hf);
-        let html = std::fs::read_to_string(&html_path)
-            .map_err(|e| format!("read {}: {e}", html_path.display()))?;
+    for (rel_path, abs_path) in html_files {
+        let html = std::fs::read_to_string(abs_path)
+            .map_err(|e| format!("read {}: {e}", abs_path.display()))?;
         // 1. 抽 CSS（<style> + <link>）—— parse_html 前调（围栏白名单挡 style/link）。
-        let css = extract_component_css(&html, source_dir);
+        // extract_component_css 的 base_dir 用 html 文件所在目录（解析 <link href> 相对路径）。
+        let html_dir = abs_path.parent().unwrap_or(workspace_root);
+        let css = extract_component_css(&html, html_dir);
         // 2. 剥 style/link 后再 parse_html（否则围栏报错）。
         let stripped = strip_style_and_link(&html);
         let tree = loomgui_core::parse::dom::parse_html(&stripped)
-            .map_err(|e| format!("parse_html {hf}: {e}"))?;
+            .map_err(|e| format!("parse_html {rel_path}: {e}"))?;
         let sheet = loomgui_core::parse::css::parse_css(&css)
-            .map_err(|e| format!("parse_css {hf}: {e}"))?;
+            .map_err(|e| format!("parse_css {rel_path}: {e}"))?;
         let dynamic = loomgui_core::asset::extract_dynamic_rules(&sheet);
         let styles = loomgui_core::style::cascade::resolve_styles(&tree, &sheet);
         let (tree, styles) = desugar_block_divs(tree, styles)
-            .map_err(|e| format!("desugar_block_divs {hf}: {e}"))?;
+            .map_err(|e| format!("desugar_block_divs {rel_path}: {e}"))?;
         let scene = loomgui_core::scene::build_scene(&tree, &styles);
         // 扫 data-controller + data-page → controller name → initial page 映射。
         let controller_pages = collect_controller_pages(&tree);
-        let (nodes, controllers) =
-            scene_to_template(&scene, res_dir, &mut manifest, &mut seen, &controller_pages);
-        let comp_name = hf.strip_suffix(".html").unwrap_or(hf).to_string();
+        let (nodes, controllers) = scene_to_template(
+            &scene,
+            workspace_root,
+            abs_path,
+            &mut referenced,
+            &mut seen,
+            &controller_pages,
+        )?;
+        let comp_name = std::path::Path::new(rel_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(rel_path)
+            .to_string();
         owned.push((comp_name, nodes, dynamic, controllers));
-    }
-
-    // 对每个 manifest path 读 PNG IHDR 填真实尺寸 w/h。
-    // path 是相对 res_dir 的归一化路径（如 "icons/skin.png"），绝对路径 = res_root/path。
-    // 非 PNG / 读失败 → 0/0（核心 measure fallback 64×64）。
-    for entry in &mut manifest {
-        let abs = res_root.join(&entry.path);
-        let (w, h) = read_png_size(&abs);
-        entry.w = w;
-        entry.h = h;
     }
 
     // 组 PackageInput（借用 owned）→ write_package。
@@ -440,19 +365,29 @@ pub fn pack(
         .collect();
     let input = PackageInput {
         components: comp_refs,
-        asset_manifest: &manifest,
     };
     let pkg_bytes = loomgui_core::asset::write_package(&input);
 
     Ok(PackedPackage {
         pkg_bytes,
-        asset_manifest: manifest,
+        referenced_sprites: referenced,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    /// 构造测试用的 workspace_root 和 html 文件路径。
+    /// 约定：workspace_root = /ws（Unix）或 C:\ws（Windows），html 在 ui/showcase/ 下。
+    fn ws_root() -> PathBuf {
+        PathBuf::from(if cfg!(windows) { r"C:\ws" } else { "/ws" })
+    }
+
+    fn html_path() -> PathBuf {
+        ws_root().join("ui").join("showcase").join("main.html")
+    }
 
     #[test]
     fn strip_style_and_link_removes_style_and_link_elements() {
@@ -488,8 +423,9 @@ mod tests {
     }
 
     #[test]
-    fn scene_to_template_normalizes_img_src_and_collects_manifest() {
-        // 手搓 scene：root + img 子（src="res/icons/skin.png"）
+    fn scene_to_template_resolves_img_src_to_sprite_key() {
+        // 手搓 scene：root + img 子（src="home.png"，相对 html 文件的目录 ui/showcase/）
+        // resolved → "ui/showcase/home.png"
         use loomgui_core::scene::{NodeKind, Scene};
         use loomgui_core::style::resolved::ResolvedStyle;
         let entries: Vec<(
@@ -515,7 +451,7 @@ mod tests {
             (
                 Some(0),
                 NodeKind::Image {
-                    src: "res/icons/skin.png".into(),
+                    src: "home.png".into(),
                 },
                 ResolvedStyle::default(),
                 vec![],
@@ -526,38 +462,41 @@ mod tests {
             ),
         ];
         let scene = Scene::build(&entries);
-        let mut manifest: Vec<AssetEntry> = Vec::new();
+        let mut referenced: Vec<String> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let controller_pages = std::collections::HashMap::new();
-        let (nodes, _controllers) =
-            scene_to_template(&scene, "res", &mut manifest, &mut seen, &controller_pages);
-        // scene_to_template 只收 path（w/h=0），w/h 由 pack 后置读 PNG IHDR 填
+        let (nodes, _controllers) = scene_to_template(
+            &scene,
+            &ws_root(),
+            &html_path(),
+            &mut referenced,
+            &mut seen,
+            &controller_pages,
+        )
+        .expect("scene_to_template ok");
         assert_eq!(
-            manifest,
-            vec![AssetEntry {
-                path: "icons/skin.png".into(),
-                w: 0,
-                h: 0
-            }],
-            "归一化 path 进 manifest"
+            referenced,
+            vec!["ui/showcase/home.png".to_string()],
+            "sprite_key 进 referenced"
         );
-        // 节点 src 也被归一化
+        // 节点 src 被回写为 sprite_key
         match &nodes[1].kind {
-            NodeKind::Image { src } => assert_eq!(src, "icons/skin.png", "节点 src 归一化"),
+            NodeKind::Image { src } => {
+                assert_eq!(src, "ui/showcase/home.png", "节点 src 回写为 sprite_key")
+            }
             other => panic!("expected Image, got {other:?}"),
         }
     }
 
-    /// RichText 行内图 src 也要归一化进 manifest + 回写 run.src（白方块 bug：嵌在
-    /// NodeKind::RichText 的 Image run 顶层 match 不下钻）。
+    /// RichText 行内图 src 也要解析成 sprite_key + referenced 收集 + 回写 run.src。
     #[test]
-    fn scene_to_template_normalizes_rich_inline_image_src() {
+    fn scene_to_template_resolves_rich_inline_image_src() {
         use loomgui_core::scene::{NodeKind, Scene};
         use loomgui_core::style::resolved::ResolvedStyle;
         use loomgui_core::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
         let runs = vec![RichRun {
             kind: RichKind::Image {
-                src: "res/icons/zap.png".into(),
+                src: "zap.png".into(),
                 w: 22.0,
                 h: 22.0,
                 valign: loomgui_core::text::rich::RichVAlign::Middle,
@@ -590,24 +529,27 @@ mod tests {
             None,
         )];
         let scene = Scene::build(&entries);
-        let mut manifest: Vec<AssetEntry> = Vec::new();
+        let mut referenced: Vec<String> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let controller_pages = std::collections::HashMap::new();
-        let (nodes, _controllers) =
-            scene_to_template(&scene, "res", &mut manifest, &mut seen, &controller_pages);
+        let (nodes, _controllers) = scene_to_template(
+            &scene,
+            &ws_root(),
+            &html_path(),
+            &mut referenced,
+            &mut seen,
+            &controller_pages,
+        )
+        .expect("scene_to_template ok");
         assert_eq!(
-            manifest,
-            vec![AssetEntry {
-                path: "icons/zap.png".into(),
-                w: 0,
-                h: 0
-            }],
-            "行内图归一化 path 进 manifest"
+            referenced,
+            vec!["ui/showcase/zap.png".to_string()],
+            "行内图 sprite_key 进 referenced"
         );
         match &nodes[0].kind {
             NodeKind::RichText { runs } => match &runs[0].kind {
                 RichKind::Image { src, .. } => {
-                    assert_eq!(src, "icons/zap.png", "run.src 归一化")
+                    assert_eq!(src, "ui/showcase/zap.png", "run.src 回写为 sprite_key")
                 }
                 _ => panic!("expected Image run"),
             },
@@ -617,7 +559,7 @@ mod tests {
 
     #[test]
     fn scene_to_template_dedups_same_src_across_nodes() {
-        // 两 img 同 src → manifest 只入一次
+        // 两 img 同 src → referenced 只入一次
         use loomgui_core::scene::{NodeKind, Scene};
         use loomgui_core::style::resolved::ResolvedStyle;
         let entries: Vec<(
@@ -643,7 +585,7 @@ mod tests {
             (
                 Some(0),
                 NodeKind::Image {
-                    src: "res/a.png".into(),
+                    src: "a.png".into(),
                 },
                 ResolvedStyle::default(),
                 vec![],
@@ -655,7 +597,7 @@ mod tests {
             (
                 Some(0),
                 NodeKind::Image {
-                    src: "res/a.png".into(),
+                    src: "a.png".into(),
                 },
                 ResolvedStyle::default(),
                 vec![],
@@ -666,16 +608,24 @@ mod tests {
             ),
         ];
         let scene = Scene::build(&entries);
-        let mut manifest: Vec<AssetEntry> = Vec::new();
+        let mut referenced: Vec<String> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let controller_pages = std::collections::HashMap::new();
-        let _ = scene_to_template(&scene, "res", &mut manifest, &mut seen, &controller_pages);
-        assert_eq!(manifest.len(), 1, "同 src 去重只入一次");
+        let _ = scene_to_template(
+            &scene,
+            &ws_root(),
+            &html_path(),
+            &mut referenced,
+            &mut seen,
+            &controller_pages,
+        )
+        .expect("scene_to_template ok");
+        assert_eq!(referenced.len(), 1, "同 src 去重只入一次");
     }
 
     #[test]
-    fn scene_to_template_skips_src_outside_res_with_warning() {
-        // src 不在 res 下 → None → 不入 manifest（不 Err）
+    fn scene_to_template_errors_on_src_outside_workspace_root() {
+        // src 越出 workspace root → Err（不再 warn 静默跳过）
         use loomgui_core::scene::{NodeKind, Scene};
         use loomgui_core::style::resolved::ResolvedStyle;
         let entries: Vec<(
@@ -701,7 +651,7 @@ mod tests {
             (
                 Some(0),
                 NodeKind::Image {
-                    src: "other/foo.png".into(),
+                    src: "../outside.png".into(),
                 },
                 ResolvedStyle::default(),
                 vec![],
@@ -712,17 +662,24 @@ mod tests {
             ),
         ];
         let scene = Scene::build(&entries);
-        let mut manifest: Vec<AssetEntry> = Vec::new();
+        let mut referenced: Vec<String> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let controller_pages = std::collections::HashMap::new();
-        let (nodes, _controllers) =
-            scene_to_template(&scene, "res", &mut manifest, &mut seen, &controller_pages);
-        assert!(manifest.is_empty(), "res 外 src 不入 manifest");
-        // 节点 src 保持原样（未归一化）
-        match &nodes[1].kind {
-            NodeKind::Image { src } => assert_eq!(src, "other/foo.png", "未归一化的 src 保持原样"),
-            other => panic!("expected Image, got {other:?}"),
-        }
+        // html 在 ws root 下，../outside.png 越出根
+        let html_at_root = ws_root().join("main.html");
+        let result = scene_to_template(
+            &scene,
+            &ws_root(),
+            &html_at_root,
+            &mut referenced,
+            &mut seen,
+            &controller_pages,
+        );
+        assert!(result.is_err(), "越出 workspace root 应 Err");
+        assert!(
+            result.unwrap_err().contains("escapes workspace root"),
+            "错误信息提及 escapes"
+        );
     }
 
     #[test]
@@ -764,11 +721,18 @@ mod tests {
             ),
         ];
         let scene = Scene::build(&entries);
-        let mut manifest: Vec<AssetEntry> = Vec::new();
+        let mut referenced: Vec<String> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let controller_pages = std::collections::HashMap::new();
-        let (nodes, _controllers) =
-            scene_to_template(&scene, "res", &mut manifest, &mut seen, &controller_pages);
+        let (nodes, _controllers) = scene_to_template(
+            &scene,
+            &ws_root(),
+            &html_path(),
+            &mut referenced,
+            &mut seen,
+            &controller_pages,
+        )
+        .expect("scene_to_template ok");
         assert_eq!(nodes[0].parent_idx, None, "root parent=None");
         assert_eq!(nodes[1].parent_idx, Some(0), "child parent_idx=Some(0)");
     }

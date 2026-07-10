@@ -1,8 +1,8 @@
-//! 包格式（.pkg.bin，当前 version=14）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=15）：Rust-internal（packager 写、runtime 读，C# 不解析）。
 //!
 //! 多组件格式：一个 pkg.bin = 多个具名组件（ComponentTable 切分）。
 //! 布局：Header(20B) + StringTable + ComponentTable + RichRunsArena + NodeBlock +
-//!       PerComponent(DynamicRules+Controllers) + AssetManifest。
+//!       PerComponent(DynamicRules+Controllers)。
 //!   - Header 不含 root_w/root_h（root_size 归 Stage）+ 不含 atlas 引用（图集归 Unity）。
 //!   - StringTable：组件名 / text content / img path / classes / id_attr 共用一张表（intern 去重）。
 //!   - ComponentTable：每组件 {name_idx, root_node_idx, node_count, dynamic_rules_blob_len}。
@@ -10,21 +10,19 @@
 //!     的 rich_off 字段指向此 arena 的字节偏移（NULL_RICH_OFF=0xFFFF_FFFF=无 runs）。
 //!   - NodeBlock：所有组件节点平铺，parent_idx 用 -1 表组件根（全局位置索引）。
 //!   - PerComponentDynamicRules：每组件 dynamic_rules 的 bincode blob（紧跟 ComponentTable 段）。
-//!   - AssetManifest：本包所有 img path + 图尺寸（打包期 PNG IHDR 静态数据，核心 measure/
-//!     九宫格 UV 用；Unity 校验 res 齐全 + Sprite 查询也用）。
 //! style 字段 = bincode(ResolvedStyle，已 bake)。img src 指向归一化 path 字符串（非 atlas sprite）。
 //!
-//! 核心不知图集（运行时纹理/UV 归 Unity）；AssetManifest 用 `Vec<AssetEntry { path, w, h }>`
-//! ——核心知图尺寸（打包期 PNG IHDR 静态）但不知图集。
+//! 核心不知图集（运行时纹理/UV 归 Unity）。图尺寸由 Stage.set_image_sizes 在运行时灌入
+//! （来自 atlas.json），不再进 pkg.bin。
 
 use crate::scene::NodeKind;
 use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 14; // v14：NodeKind::RichText 变体（富文本 runs 序列化）
-pub(crate) const MIN_VERSION: u32 = 14;
-pub(crate) const MAX_VERSION: u32 = 14;
+pub const PKG_FORMAT_VERSION: u32 = 15; // v15：删 AssetManifest 段，图尺寸改走 atlas.json + set_image_sizes
+pub(crate) const MIN_VERSION: u32 = 15;
+pub(crate) const MAX_VERSION: u32 = 15;
 const NULL_IDX: u16 = 0xFFFF;
 /// NodeBlock 中 rich_off 字段的"无 runs"哨兵。非 RichText 节点写此值。
 const NULL_RICH_OFF: u32 = 0xFFFF_FFFF;
@@ -37,24 +35,11 @@ const KIND_RICHTEXT: u8 = 4;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────
 
-/// AssetManifest 条目：归一化 path + 打包期 PNG IHDR 读出的真实像素尺寸。
-///
-/// `w`/`h` = PNG 原始像素（非图集/纹理运行时尺寸）。非 PNG 或读失败 → 0（核心 measure/九宫格
-/// fallback 64×64）。核心 `Stage` 在 `load_package` 时建 `path → (w,h)` 查询表供 layout/render 用。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssetEntry {
-    pub path: String,
-    pub w: u32,
-    pub h: u32,
-}
-
 /// 一个已加载的包（资源池条目）。`name` read 时填空串，由 `Stage::load_package(name, ..)` 覆盖。
 #[derive(Debug, Clone)]
 pub struct Package {
     pub name: String,
     pub components: std::collections::HashMap<String, ComponentTemplate>,
-    /// 本包用到的所有 img path + 图尺寸（打包期 PNG IHDR 静态，核心 measure/九宫格用）。
-    pub asset_manifest: Vec<AssetEntry>,
 }
 
 /// 一个组件的模板（instantiate 的克隆源）。
@@ -102,8 +87,6 @@ pub struct PackageInput<'a> {
         &'a DynamicRuleTable,
         &'a [ControllerEntry],
     )>,
-    /// 已去重归一化的 path + PNG IHDR 尺寸（打包器读 PNG header 填，核心 measure/九宫格用）。
-    pub asset_manifest: &'a [AssetEntry],
 }
 
 #[derive(Debug)]
@@ -275,11 +258,11 @@ pub fn extract_component_css(html: &str, base_dir: &std::path::Path) -> String {
 
 /// 序列化 PackageInput → .pkg.bin bytes（多组件格式）。
 ///
-/// 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponent(DynamicRules+Controllers)
-///       + AssetManifest。所有字符串（组件名 / text / img path / classes / id_attr / controller name）
-///       共用同一 StringTable（intern 去重）。`input` 须已归一化（path 相对、style bake）。
+/// 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponent(DynamicRules+Controllers)。
+/// 所有字符串（组件名 / text / img path / classes / id_attr / controller name）
+/// 共用同一 StringTable（intern 去重）。`input` 须已归一化（path 相对、style bake）。
 pub fn write_package(input: &PackageInput) -> Vec<u8> {
-    // 1. intern 全部字符串（组件名 + 每节点 text/src/classes/id_attr + asset_manifest path）。
+    // 1. intern 全部字符串（组件名 + 每节点 text/src/classes/id_attr）。
     //    所有 intern 必须在写 header(string_count) 之前完成。
     let mut strings: Vec<String> = Vec::new();
     let mut idx_of: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
@@ -386,12 +369,6 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         ctrl_records.push(ctrls);
         global_node_offset += node_count;
     }
-    // intern asset_manifest path（供 AssetManifest 段引用 idx）+ 收 w/h。
-    let manifest_idx: Vec<(u16, u32, u32)> = input
-        .asset_manifest
-        .iter()
-        .map(|e| (intern(&e.path, &mut strings, &mut idx_of), e.w, e.h))
-        .collect();
 
     let mut out: Vec<u8> = Vec::new();
     // Header (20B): magic + version + flags + component_count + string_count
@@ -460,13 +437,6 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
             out.extend_from_slice(&mount_idx.to_le_bytes());
             out.extend_from_slice(&initial.to_le_bytes());
         }
-    }
-    // AssetManifest: entry_count(u32) + count × {path_idx(u16), w(u32), h(u32)}（path + 图尺寸）
-    out.extend_from_slice(&(manifest_idx.len() as u32).to_le_bytes());
-    for &(pidx, w, h) in &manifest_idx {
-        out.extend_from_slice(&pidx.to_le_bytes());
-        out.extend_from_slice(&w.to_le_bytes());
-        out.extend_from_slice(&h.to_le_bytes());
     }
     out
 }
@@ -648,23 +618,9 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             },
         );
     }
-    // AssetManifest: entry_count(u32) + count × {path_idx(u16), w(u32), h(u32)}（path + 图尺寸）
-    let entry_count = r.u32("manifest_entry_count")? as usize;
-    let mut asset_manifest: Vec<AssetEntry> = Vec::with_capacity(entry_count);
-    for _ in 0..entry_count {
-        let pidx = r.u16("manifest_path_idx")?;
-        let w = r.u32("manifest_w")?;
-        let h = r.u32("manifest_h")?;
-        asset_manifest.push(AssetEntry {
-            path: string_at(&strings, pidx)?,
-            w,
-            h,
-        });
-    }
     Ok(Package {
         name: String::new(),
         components,
-        asset_manifest,
     })
 }
 

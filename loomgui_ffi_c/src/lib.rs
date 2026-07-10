@@ -595,6 +595,37 @@ pub extern "C" fn loomgui_stage_set_wheel_input(
     sh.stage.set_wheel_input(evs);
 }
 
+/// driver 启动时把所有 atlas.json 合并出的图尺寸批量灌入（一次调用，非逐条）。
+/// paths_ptr: count 个 C 字符串指针；ws/hs: count 个 u32。任一为 null 或 count=0 → no-op。
+/// 首帧 solve 前调（启动加载阶段）。FFI 入口不 panic。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_image_sizes(
+    h: *mut StageHandle,
+    paths_ptr: *const *const std::os::raw::c_char,
+    ws: *const u32,
+    hs: *const u32,
+    count: usize,
+) {
+    if h.is_null() || paths_ptr.is_null() || ws.is_null() || hs.is_null() || count == 0 {
+        return;
+    }
+    let handle = unsafe { &mut *h };
+    let paths = unsafe { std::slice::from_raw_parts(paths_ptr, count) };
+    let ws = unsafe { std::slice::from_raw_parts(ws, count) };
+    let hs = unsafe { std::slice::from_raw_parts(hs, count) };
+    let mut sizes: Vec<(String, u32, u32)> = Vec::with_capacity(count);
+    for i in 0..count {
+        if paths[i].is_null() {
+            continue;
+        }
+        let cstr = unsafe { std::ffi::CStr::from_ptr(paths[i]) };
+        if let Ok(s) = cstr.to_str() {
+            sizes.push((s.to_string(), ws[i], hs[i]));
+        }
+    }
+    handle.stage.set_image_sizes(&sizes);
+}
+
 /// 编程滚动到指定位置。非 scroll 容器 / 越界 node → no-op（不 panic）。
 /// animated: u8（0=瞬移 1=缓动 cubic-out）。null 句柄 → no-op。
 #[no_mangle]

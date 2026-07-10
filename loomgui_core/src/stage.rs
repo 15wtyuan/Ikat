@@ -25,8 +25,8 @@ pub struct Stage {
     /// 资源池：pkg_name → Package（多包共存）。load_package 填，instantiate 读。
     /// load_package 不建 scene，只填本字典。
     pub packages: std::collections::HashMap<String, crate::asset::Package>,
-    /// 图尺寸表：归一化 path → (w, h) 像素（打包期 PNG IHDR 静态数据）。
-    /// `load_package` 时从所有包的 `asset_manifest` 合并填入（多包共存，path 全局唯一）。
+    /// 图尺寸表：归一化 path → (w, h) 像素。
+    /// 运行时由 `set_image_sizes` 灌入（来自 atlas.json，含真实图尺寸）。
     /// `solve`/`build_render_nodes` 查此表算 Image intrinsic 尺寸（measure 三档）+ 九宫格 UV。
     /// path 缺失或 w/h=0 → fallback 64×64（核心不知图集，但知图尺寸）。
     pub image_sizes: std::collections::HashMap<String, (u32, u32)>,
@@ -104,26 +104,11 @@ impl Stage {
     /// scene 由 `create_root`/`create_node` 建；组件实例化由 `instantiate` 做。
     /// `root_size` 归 Stage（不从包来）；图集归 Unity（核心不知图集）。
     ///
-    /// **图尺寸**：同步把本包 `asset_manifest` 的 `path → (w,h)` 合并进 `self.image_sizes`
-    /// （多包共存，path 全局唯一）。`solve`/`build_render_nodes` 查此表算 Image intrinsic +
-    /// 九宫格 UV。重复 load 同名包 → 先清前次包的 path 条目再插新包（避免被移除的资源 path 悬空残留）。
+    /// **图尺寸**：由 `set_image_sizes` 在运行时灌入（来自 atlas.json），不再从包 manifest 自建。
     pub fn load_package(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
         let mut pkg = crate::asset::read_package(bytes).map_err(|e| e.to_string())?;
         pkg.name = name.to_string(); // read_package 填空串，这里覆盖为真实包名
 
-        // 替换同名包前，先清前次包的 image_sizes 条目：path 全局唯一，但若前次包有 path
-        // 而新包没有（资源被移除），不清则旧 path 悬空残留 → 后续引用拿到过期尺寸。
-        if let Some(old) = self.packages.get(name) {
-            let stale: Vec<String> = old.asset_manifest.iter().map(|e| e.path.clone()).collect();
-            for path in &stale {
-                self.image_sizes.remove(path);
-            }
-        }
-        // 把本包 manifest 的 path → (w,h) 合并进全局尺寸表（同 path 后写赢，跨包覆盖也安全）。
-        for entry in &pkg.asset_manifest {
-            self.image_sizes
-                .insert(entry.path.clone(), (entry.w, entry.h));
-        }
         self.packages.insert(name.to_string(), pkg);
         Ok(())
     }
@@ -135,6 +120,14 @@ impl Stage {
             .get(path)
             .copied()
             .filter(|(w, h)| *w != 0 && *h != 0)
+    }
+
+    /// 批量灌图尺寸（后端读所有 atlas.json 合并后一次性推入；见 spec §6.4）。
+    /// 覆盖式合并：同 path 后写赢。上万条也是 O(n) HashMap 插入，启动一次调用。
+    pub fn set_image_sizes(&mut self, sizes: &[(String, u32, u32)]) {
+        for (path, w, h) in sizes {
+            self.image_sizes.insert(path.clone(), (*w, *h));
+        }
     }
 
     /// 缓存本帧指针输入（tick 前调；覆盖式——每帧全量替换 pending_input）。
@@ -838,8 +831,7 @@ mod load_package_tests;
 #[cfg(test)]
 mod instantiate_tests;
 
-/// 集成测试：打包期 PNG IHDR 尺寸 → load_package 建尺寸表 → measure 用真实尺寸。
-/// 验证端到端链路：打包器填 AssetEntry.w/h → pkg.bin 存 → read_package 读 → Stage.image_sizes
-/// 建 → solve 查表算 Image intrinsic（三档：CSS > 真实像素 > 64×64）。
+/// 集成测试：运行时灌入 image_sizes → solve 用真实尺寸。
+/// 验证端到端链路：set_image_sizes 灌入 (w,h) → solve 查表算 Image intrinsic（三档：CSS > 真实像素 > 64×64）。
 #[cfg(test)]
 mod image_size_tests;

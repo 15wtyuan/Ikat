@@ -177,6 +177,170 @@ namespace LoomGUI.Tests
         }
     }
 
+    /// MirrorPool UV 线性映射测试：core 产 [0,1] UV → sprite 在 atlas 页内的子区 uvRect。
+    /// 验 RemapMeshUvToSprite 把 [0,1] 全图 UV 正确映射到 sprite 的 atlas 子区。
+    public class MirrorPoolUvRemapTests
+    {
+        /// 构造含 path 表条目的 v10 1 节点 Mesh blob。
+        static byte[] OneNodeBlobWithPath(uint id, string path, uint pathIdx,
+            float x, float y, float w, float h)
+        {
+            var b = new List<byte>();
+            b.AddRange(System.BitConverter.GetBytes(0x4D4F4F4Cu)); // magic
+            b.AddRange(System.BitConverter.GetBytes(10u));          // version
+            b.AddRange(System.BitConverter.GetBytes(1u));           // node_count
+
+            int colOff = 116;
+            int[] offs = new int[20];
+            int[] elemSize = { 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4 };
+            for (int i = 0; i < 20; i++) { offs[i] = colOff; colOff += elemSize[i]; }
+            int arenaOff = colOff;
+
+            // mesh arena: 4 verts, 6 idx, UV [0,1] 全图
+            var arena = new List<byte>();
+            arena.AddRange(System.BitConverter.GetBytes(4));  // vert_count
+            arena.AddRange(System.BitConverter.GetBytes(6));  // idx_count
+            AppV(arena, 0f, 0f); AppV(arena, w, 0f); AppV(arena, w, h); AppV(arena, 0f, h);
+            AppV(arena, 0f, 0f); AppV(arena, 1f, 0f); AppV(arena, 1f, 1f); AppV(arena, 0f, 1f);
+            for (int v = 0; v < 4; v++)
+            {
+                arena.AddRange(System.BitConverter.GetBytes(1f));
+                arena.AddRange(System.BitConverter.GetBytes(1f));
+                arena.AddRange(System.BitConverter.GetBytes(1f));
+                arena.AddRange(System.BitConverter.GetBytes(1f));
+            }
+            arena.AddRange(System.BitConverter.GetBytes(0u));
+            arena.AddRange(System.BitConverter.GetBytes(1u));
+            arena.AddRange(System.BitConverter.GetBytes(2u));
+            arena.AddRange(System.BitConverter.GetBytes(0u));
+            arena.AddRange(System.BitConverter.GetBytes(2u));
+            arena.AddRange(System.BitConverter.GetBytes(3u));
+            int arenaLen = arena.Count;
+
+            // 构建 path 表
+            byte[] pathBytes = System.Text.Encoding.UTF8.GetBytes(path);
+            int pathTableLen = 4 + 4 + pathBytes.Length; // path_count:u32 + path_len:u32 + bytes
+
+            // arena headers
+            foreach (var o in offs) b.AddRange(System.BitConverter.GetBytes(o));
+            b.AddRange(System.BitConverter.GetBytes(arenaOff));
+            b.AddRange(System.BitConverter.GetBytes(arenaLen));
+            int clipOff = arenaOff + arenaLen;
+            b.AddRange(System.BitConverter.GetBytes(clipOff));
+            b.AddRange(System.BitConverter.GetBytes(4u)); // clip_count only
+            int pathOff = clipOff + 4;
+            b.AddRange(System.BitConverter.GetBytes(pathOff));
+            b.AddRange(System.BitConverter.GetBytes((uint)pathTableLen));
+
+            // column data
+            b.AddRange(System.BitConverter.GetBytes(id));          // col 0: node_id
+            b.AddRange(System.BitConverter.GetBytes(-1));          // col 1: parent_id
+            b.Add(1);                                              // col 2: visible
+            b.AddRange(System.BitConverter.GetBytes(1f));          // col 3: alpha
+            b.AddRange(System.BitConverter.GetBytes(0u));          // col 4: sort_key
+            b.AddRange(System.BitConverter.GetBytes(0u));          // col 5: mask_context
+            b.AddRange(System.BitConverter.GetBytes(1f));          // col 6-11: identity 2x2 + translate
+            b.AddRange(System.BitConverter.GetBytes(0f));
+            b.AddRange(System.BitConverter.GetBytes(0f));
+            b.AddRange(System.BitConverter.GetBytes(1f));
+            b.AddRange(System.BitConverter.GetBytes(x));
+            b.AddRange(System.BitConverter.GetBytes(y));
+            b.Add(1);                                              // col 12: payload_kind=Mesh
+            b.AddRange(System.BitConverter.GetBytes(0u));          // col 13: mesh_off
+            b.AddRange(System.BitConverter.GetBytes((uint)arenaLen)); // col 14: mesh_len
+            b.AddRange(System.BitConverter.GetBytes(pathIdx));     // col 15: path_idx
+            b.Add(0);                                              // col 16: program=0 (img/Container)
+            for (int j = 0; j < 20; j++) b.AddRange(System.BitConverter.GetBytes(0f));
+            b.Add((byte)2);                                        // col 18: change_level=FULL
+            b.AddRange(System.BitConverter.GetBytes(0u));          // col 19: reuse_key=0
+
+            b.AddRange(arena);
+            b.AddRange(System.BitConverter.GetBytes(0u));          // clip_count=0
+            // path table
+            b.AddRange(System.BitConverter.GetBytes(1u));          // path_count=1
+            b.AddRange(System.BitConverter.GetBytes((uint)pathBytes.Length)); // path_len
+            b.AddRange(pathBytes);                                 // path_bytes
+            return b.ToArray();
+
+            static void AppV(List<byte> a, float vx, float vy) {
+                a.AddRange(System.BitConverter.GetBytes(vx));
+                a.AddRange(System.BitConverter.GetBytes(vy));
+            }
+        }
+
+        /// core 产 [0,1] 全图 UV → 线性映射到 sprite 的 atlas 子区 (uvRect)。
+        /// 断言：映射后 UV 落在 uvRect 内。
+        [Test]
+        public void RemapMeshUvMapsCoreUnitUvIntoSpriteSubRect()
+        {
+            var root = new GameObject("root");
+            var shader = Shader.Find("LoomGUI/Unlit");
+            var mm = new MaterialManager(shader);
+            var pool = new MirrorPool();
+
+            // 构造 SpriteResolver：一个 atlas，一个 sprite "sprites/test" 在子区 (0.2, 0.3, 0.1, 0.15)
+            // uvRect = (x=0.2, y=0.3, w=0.1, h=0.15) 即 UV 子区 [0.2,0.3]..[0.3,0.45]
+            Rect knownUvRect = new Rect(0.2f, 0.3f, 0.1f, 0.15f);
+            var tex = new Texture2D(64, 64);
+            var atlas = new AtlasManifest();
+            atlas.pages.Add("test.png");
+            atlas.sprites["sprites/test"] = new SpriteEntry {
+                page = 0,
+                uv = new float[] { knownUvRect.xMin, knownUvRect.yMin,
+                                   knownUvRect.xMax, knownUvRect.yMax },
+                orig = new int[] { 32, 32 }
+            };
+            var sprites = new SpriteResolver();
+            sprites.Init(new List<AtlasManifest> { atlas }, fileName => tex);
+
+            try
+            {
+                var blob = new FrameBlob(OneNodeBlobWithPath(
+                    id: 100, path: "sprites/test", pathIdx: 1u,
+                    x: 10f, y: 20f, w: 32f, h: 32f));
+                Assert.AreEqual(1, blob.NodeCount, "NodeCount=1");
+                Assert.AreEqual(1u, blob.PathIdx(0), "path_idx=1");
+                Assert.AreEqual("sprites/test", blob.ReadPath(1u), "path resolves");
+
+                pool.Sync(blob, root.transform, mm, sprites, Texture2D.whiteTexture);
+
+                Assert.AreEqual(1, root.transform.childCount, "1 child GO");
+                var mf = root.transform.GetChild(0).GetComponent<MeshFilter>();
+                Assert.IsNotNull(mf, "MeshFilter present");
+
+                var uvs = new List<Vector2>();
+                mf.sharedMesh.GetUVs(0, uvs);
+                Assert.AreEqual(4, uvs.Count, "4 verts");
+
+                // 每个映射后 UV 必须落在 uvRect 子区内
+                for (int i = 0; i < uvs.Count; i++)
+                {
+                    Assert.GreaterOrEqual(uvs[i].x, knownUvRect.xMin - 1e-5f,
+                        $"vert[{i}].x >= {knownUvRect.xMin}");
+                    Assert.LessOrEqual(uvs[i].x, knownUvRect.xMax + 1e-5f,
+                        $"vert[{i}].x <= {knownUvRect.xMax}");
+                    Assert.GreaterOrEqual(uvs[i].y, knownUvRect.yMin - 1e-5f,
+                        $"vert[{i}].y >= {knownUvRect.yMin}");
+                    Assert.LessOrEqual(uvs[i].y, knownUvRect.yMax + 1e-5f,
+                        $"vert[{i}].y <= {knownUvRect.yMax}");
+                }
+
+                // 核心 [0,0] → (uvRect.x, uvRect.y)，[1,1] → (uvRect.xMax, uvRect.yMax)
+                Assert.AreEqual(knownUvRect.xMin, uvs[0].x, 1e-5f, "tl.u");
+                Assert.AreEqual(knownUvRect.yMin, uvs[0].y, 1e-5f, "tl.v");
+                Assert.AreEqual(knownUvRect.xMax, uvs[2].x, 1e-5f, "br.u");
+                Assert.AreEqual(knownUvRect.yMax, uvs[2].y, 1e-5f, "br.v");
+            }
+            finally
+            {
+                pool.Clear();
+                mm.Clear();
+                Object.DestroyImmediate(root);
+                Object.DestroyImmediate(tex);
+            }
+        }
+    }
+
     /// LoomStage 纯 C# 类构造测试（B2）。
     /// 锁：LoomStage 不再是 MonoBehaviour——new 构造可用、无 Unity 生命周期依赖；
     /// 无字体注册时 Tick(null) 不崩（stage 句柄建好，borrow_frame 返空帧 → 跳渲染 → 事件派发空过）。

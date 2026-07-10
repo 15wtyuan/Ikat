@@ -1,139 +1,213 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.U2D;
 
 namespace LoomGUI.Tests
 {
     /// <summary>
-    /// SpriteResolver 名字路由 + 懒加载委托 + atlas 缓存 测试。
-    ///
-    /// 纯逻辑 EditMode 测：SpriteAtlas.GetSprite 需要真实导入的打包图集（EditMode 造不出可读 sprite），
-    /// 所以这里只验"路由 + 缓存"——folder→atlasName 解析、loadAtlas 委托按 atlasName 调一次后缓存、
-    /// default 回退。Sprite 实际命中由 PlayMode 验收（真实图集）。
-    /// 哨兵 SpriteAtlas 用 new SpriteAtlas()（空图集，GetSprite 返 null，但对象非空 → 会进 _atlasCache，
-    /// 用来证明 atlas 缓存生效）。
+    /// SpriteResolver test for self-drawn atlas (atlas.png + atlas.json) lookup.
+    /// Pure logic EditMode tests: construct AtlasManifests + a fake loadPage → Init → GetSprite asserts.
+    /// No Unity SpriteAtlas/Sprite dependency.
     /// </summary>
     public class SpriteResolverTests
     {
+        /// <summary>
+        /// Construct two AtlasManifests with known sprite entries → Init → GetSprite verifies
+        /// found flag, uvRect, origW, origH. Also verifies that loadPage is called lazily and
+        /// cached (second GetSprite for same atlas page does not re-invoke loadPage).
+        /// </summary>
         [Test]
-        public void Init_BuildsFolderToAtlasNameMapping_FromSettings()
+        public void Init_WithTwoAtlases_GetSpriteReturnsCorrectLookup()
         {
             var resolver = new SpriteResolver();
-            var settings = ScriptableObject.CreateInstance<LoomSettings>();
-            settings.atlasEntries.Add(new AtlasEntry
+
+            // Atlas 0: one page "ui.png", one sprite
+            var atlas0 = new AtlasManifest();
+            atlas0.pages.Add("ui.png");
+            atlas0.sprites["icons/home"] = new SpriteEntry
             {
-                atlasName = "ui_atlas",
-                folders = new List<string> { "Assets/LoomUI/res/ui" }   // 末段 "ui" 作 key
-            });
+                page = 0,
+                uv   = new float[] { 0.1f, 0.2f, 0.5f, 0.6f },
+                orig = new int[] { 128, 128 }
+            };
+
+            // Atlas 1: one page "icons.png", two sprites
+            var atlas1 = new AtlasManifest();
+            atlas1.pages.Add("icons.png");
+            atlas1.sprites["icons/star"] = new SpriteEntry
+            {
+                page = 0,
+                uv   = new float[] { 0.0f, 0.0f, 0.25f, 0.25f },
+                orig = new int[] { 64, 64 }
+            };
+            atlas1.sprites["icons/gear"] = new SpriteEntry
+            {
+                page = 0,
+                uv   = new float[] { 0.5f, 0.5f, 1.0f, 1.0f },
+                orig = new int[] { 32, 48 }
+            };
 
             int loadCount = 0;
-            string receivedName = null;
-            resolver.Init(settings, name => { loadCount++; receivedName = name; return null; });
+            string loadedFile = null;
+            var fakeTex = new Texture2D(512, 512);
 
-            // path 顶层 "ui" → atlasName "ui_atlas" → 委托被调一次。
-            resolver.GetSprite("ui/btn.png");
-            Assert.AreEqual(1, loadCount, "folder→atlasName 命中应调 loadAtlas");
-            Assert.AreEqual("ui_atlas", receivedName);
+            resolver.Init(
+                new List<AtlasManifest> { atlas0, atlas1 },
+                name => { loadCount++; loadedFile = name; return fakeTex; });
 
-            ScriptableObject.DestroyImmediate(settings);
+            // First lookup: triggers lazy load
+            var r0 = resolver.GetSprite("icons/home");
+            Assert.IsTrue(r0.found, "icons/home should be found");
+            Assert.AreEqual(fakeTex, r0.tex, "texture should be the fake page tex");
+            Assert.AreEqual(0.1f, r0.uvRect.x, "u0");
+            Assert.AreEqual(0.2f, r0.uvRect.y, "v0");
+            Assert.AreEqual(0.4f, r0.uvRect.width, "u1-u0");
+            Assert.AreEqual(0.4f, r0.uvRect.height, "v1-v0");
+            Assert.AreEqual(128, r0.origW);
+            Assert.AreEqual(128, r0.origH);
+            Assert.AreEqual(1, loadCount, "first lookup triggers lazy load");
+            Assert.AreEqual("ui.png", loadedFile);
+
+            // Second lookup in same atlas: page cached, loadPage not re-invoked
+            loadedFile = null;
+            var r1 = resolver.GetSprite("icons/home");
+            Assert.IsTrue(r1.found);
+            Assert.AreEqual(0, loadCount - 1, "same page should hit cache, not re-load");
+
+            // Different atlas
+            var r2 = resolver.GetSprite("icons/star");
+            Assert.IsTrue(r2.found);
+            Assert.AreEqual(fakeTex, r2.tex);
+            Assert.AreEqual(0.0f, r2.uvRect.x);
+            Assert.AreEqual(0.0f, r2.uvRect.y);
+            Assert.AreEqual(0.25f, r2.uvRect.width);
+            Assert.AreEqual(0.25f, r2.uvRect.height);
+            Assert.AreEqual(64, r2.origW);
+            Assert.AreEqual(64, r2.origH);
+
+            // Same atlas (atlas 1), different sprite — page already loaded, no new load call
+            int countBefore = loadCount;
+            var r3 = resolver.GetSprite("icons/gear");
+            Assert.IsTrue(r3.found);
+            Assert.AreEqual(0.5f, r3.uvRect.x);
+            Assert.AreEqual(0.5f, r3.uvRect.y);
+            Assert.AreEqual(0.5f, r3.uvRect.width);
+            Assert.AreEqual(0.5f, r3.uvRect.height);
+            Assert.AreEqual(32, r3.origW);
+            Assert.AreEqual(48, r3.origH);
+            Assert.AreEqual(countBefore, loadCount, "same atlas page hit cache");
+
+            Object.DestroyImmediate(fakeTex);
         }
 
         [Test]
-        public void GetSprite_CachesAtlas_LoaderRunsOncePerAtlasName()
+        public void GetSprite_MissingKey_ReturnsNotFound()
         {
             var resolver = new SpriteResolver();
-            int loadCount = 0;
-            // 映射两个 folder 到同一 atlasName，验证同 atlasName 只加载一次。
-            // 非空哨兵 SpriteAtlas → 进 _atlasCache（null 不进缓存，测不出缓存命中）。
-            resolver.InitWithMap(
-                new Dictionary<string, string> { { "icons", "icons_atlas" }, { "flags", "icons_atlas" } },
-                name => { loadCount++; return new SpriteAtlas(); },
-                null);
+            var atlas = new AtlasManifest();
+            atlas.pages.Add("ui.png");
+            atlas.sprites["icons/home"] = new SpriteEntry
+            {
+                page = 0,
+                uv   = new float[] { 0, 0, 1, 1 },
+                orig = new int[] { 64, 64 }
+            };
+            resolver.Init(new List<AtlasManifest> { atlas }, _ => Texture2D.whiteTexture);
 
-            // 同一 atlasName 下查多个 sprite + 多个 folder：atlas 应只加载一次。
-            resolver.GetSprite("icons/home.png");
-            resolver.GetSprite("icons/back.png");
-            resolver.GetSprite("flags/cn.png");
-            Assert.AreEqual(1, loadCount, "同 atlasName 多次 GetSprite 应命中 atlas 缓存，loader 只调一次");
+            var r = resolver.GetSprite("icons/missing");
+            Assert.IsFalse(r.found, "missing key should return found=false");
         }
 
         [Test]
-        public void GetSprite_ResRootPath_FallsBackToDefaultAtlasName()
-        {
-            var resolver = new SpriteResolver();
-            string receivedName = "untouched";
-            resolver.InitWithMap(
-                new Dictionary<string, string> { { "icons", "icons_atlas" } },
-                name => { receivedName = name; return null; },
-                "default_atlas");
-
-            // path 无子目录 → TopDir=null → default atlasName。
-            resolver.GetSprite("logo.png");
-            Assert.AreEqual("default_atlas", receivedName, "res 根图应走 default atlasName");
-        }
-
-        [Test]
-        public void GetSprite_UnknownSubdir_FallsBackToDefaultAtlasName()
-        {
-            var resolver = new SpriteResolver();
-            string receivedName = "untouched";
-            resolver.InitWithMap(
-                new Dictionary<string, string> { { "icons", "icons_atlas" } },
-                name => { receivedName = name; return null; },
-                "default_atlas");
-
-            // 顶层子目录不在表 → default。
-            resolver.GetSprite("unknown_thing/x.png");
-            Assert.AreEqual("default_atlas", receivedName);
-        }
-
-        [Test]
-        public void GetSprite_NoMappingNoDefault_LoaderNeverCalled()
-        {
-            var resolver = new SpriteResolver();
-            int loadCount = 0;
-            resolver.InitWithMap(
-                new Dictionary<string, string>(),
-                name => { loadCount++; return null; },
-                null);   // 无 default
-
-            // 无映射 + 无 default → atlasName=null → ResolveAtlas 早返 null，loadAtlas 不应被调。
-            Assert.IsNull(resolver.GetSprite("icons/home.png"));
-            Assert.AreEqual(0, loadCount, "atlasName=null 时不应回调 loader");
-        }
-
-        [Test]
-        public void GetSprite_NullOrEmptyPath_ReturnsNull()
-        {
-            var resolver = new SpriteResolver();
-            resolver.InitWithMap(new Dictionary<string, string> { { "icons", "a" } }, _ => null, null);
-            Assert.IsNull(resolver.GetSprite(null));
-            Assert.IsNull(resolver.GetSprite(""));
-        }
-
-        [Test]
-        public void Init_NullSettings_DoesNotCrash()
+        public void GetSprite_NullOrEmptyKey_ReturnsNotFound()
         {
             var resolver = new SpriteResolver();
             resolver.Init(null, null);
-            Assert.AreEqual(0, resolver.AtlasCount);
-            // null settings + null loader → GetSprite 安全返 null。
-            Assert.IsNull(resolver.GetSprite("icons/x.png"));
+
+            var r0 = resolver.GetSprite(null);
+            Assert.IsFalse(r0.found, "null key → found=false");
+
+            var r1 = resolver.GetSprite("");
+            Assert.IsFalse(r1.found, "empty key → found=false");
         }
 
         [Test]
-        public void Miss_NotCachedInSpriteCache()
+        public void Init_NullAtlases_DoesNotCrash()
         {
             var resolver = new SpriteResolver();
-            resolver.InitWithMap(
-                new Dictionary<string, string> { { "icons", "icons_atlas" } },
-                _ => null,   // atlas=null → ResolveAtlas 返 null → GetSprite miss
-                null);
+            resolver.Init(null, null);
+            // no exception = pass
+            var r = resolver.GetSprite("anything");
+            Assert.IsFalse(r.found, "no atlases → all miss");
+        }
 
-            Assert.IsNull(resolver.GetSprite("icons/missing.png"));
-            // miss 不进 Sprite 缓存（与 atlas 缓存区分）。
-            Assert.AreEqual(0, resolver.CacheCount, "Sprite miss 不应进 _cache");
+        [Test]
+        public void RegisterFontAtlasPage_GetSpriteHitsBeforeSpriteTable()
+        {
+            var resolver = new SpriteResolver();
+            // Register a sprite table entry AND a font atlas page with the same key.
+            var atlas = new AtlasManifest();
+            atlas.pages.Add("ui.png");
+            atlas.sprites["loomgui://font-atlas/p0"] = new SpriteEntry
+            {
+                page = 0,
+                uv   = new float[] { 0, 0, 1, 1 },
+                orig = new int[] { 64, 64 }
+            };
+
+            var pageTex = new Texture2D(512, 512);
+            int loadCount = 0;
+            resolver.Init(new List<AtlasManifest> { atlas }, _ => { loadCount++; return pageTex; });
+
+            // Register font atlas page with same key
+            var fontTex = new Texture2D(256, 256);
+            resolver.RegisterFontAtlasPage("loomgui://font-atlas/p0", fontTex);
+
+            // GetSprite should return the font atlas entry (priority), not the sprite table entry
+            var r = resolver.GetSprite("loomgui://font-atlas/p0");
+            Assert.IsTrue(r.found, "font atlas page should be found");
+            Assert.AreEqual(fontTex, r.tex, "font atlas tex takes priority over sprite table");
+            Assert.AreEqual(0, r.uvRect.x, "font atlas is full-region");
+            Assert.AreEqual(0, r.uvRect.y);
+            Assert.AreEqual(1, r.uvRect.width);
+            Assert.AreEqual(1, r.uvRect.height);
+            Assert.AreEqual(256, r.origW);
+            Assert.AreEqual(256, r.origH);
+
+            Object.DestroyImmediate(pageTex);
+            Object.DestroyImmediate(fontTex);
+        }
+
+        [Test]
+        public void RegisterFontAtlasPage_ReRegisterSamePath_ReplacesEntry()
+        {
+            var resolver = new SpriteResolver();
+            resolver.Init(null, null);
+
+            var tex1 = new Texture2D(256, 256);
+            var tex2 = new Texture2D(512, 512);
+            resolver.RegisterFontAtlasPage("loomgui://font-atlas/p0", tex1);
+            resolver.RegisterFontAtlasPage("loomgui://font-atlas/p0", tex2);
+
+            var r = resolver.GetSprite("loomgui://font-atlas/p0");
+            Assert.IsTrue(r.found);
+            Assert.AreEqual(tex2, r.tex, "re-register replaces old entry");
+            Assert.AreEqual(512, r.origW);
+            Assert.AreEqual(512, r.origH);
+
+            Object.DestroyImmediate(tex1);
+            Object.DestroyImmediate(tex2);
+        }
+
+        [Test]
+        public void RegisterFontAtlasPage_NullTexture_DoesNotCrash()
+        {
+            var resolver = new SpriteResolver();
+            resolver.Init(null, null);
+            resolver.RegisterFontAtlasPage("loomgui://font-atlas/p0", null);
+            // no exception = pass
+            var r = resolver.GetSprite("loomgui://font-atlas/p0");
+            Assert.IsFalse(r.found, "null tex not registered");
         }
     }
 }

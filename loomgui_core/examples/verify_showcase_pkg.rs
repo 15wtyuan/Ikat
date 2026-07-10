@@ -22,10 +22,6 @@ fn main() {
             c.dynamic_rules.rules.len()
         );
     }
-    println!("asset_manifest ({} paths):", pkg.asset_manifest.len());
-    for e in &pkg.asset_manifest {
-        println!("  - {:<24} {}x{}", e.path, e.w, e.h);
-    }
     // 校验根节点 parent_idx=None
     let mut bad = 0;
     for n in &names {

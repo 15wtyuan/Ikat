@@ -249,6 +249,14 @@ namespace LoomGUI.Bindings
         internal static extern void loomgui_stage_set_wheel_input(StageHandle* h, WheelEvent* events, nuint len);
 
         /// <summary>
+        ///  driver 启动时把所有 atlas.json 合并出的图尺寸批量灌入（一次调用，非逐条）。
+        ///  paths_ptr: count 个 C 字符串指针；ws/hs: count 个 u32。任一为 null 或 count=0 → no-op。
+        ///  首帧 solve 前调（启动加载阶段）。FFI 入口不 panic。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_image_sizes", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_set_image_sizes(StageHandle* h, byte** paths_ptr, uint* ws, uint* hs, nuint count);
+
+        /// <summary>
         ///  编程滚动到指定位置。非 scroll 容器 / 越界 node → no-op（不 panic）。
         ///  animated: u8（0=瞬移 1=缓动 cubic-out）。null 句柄 → no-op。
         /// </summary>

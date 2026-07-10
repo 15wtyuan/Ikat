@@ -1,21 +1,23 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
 namespace LoomGUI.Tests
 {
     /// <summary>
-    /// LoomStageDriver EditMode 测试。Unity PlayMode/EditMode 测试无法从 CLI 跑（需 Unity 编辑器），
-    /// 由 Unity Test Runner 在验收阶段执行。此处仅保证编译 + 逻辑正确。
+    /// LoomStageDriver EditMode tests. Unity PlayMode/EditMode tests cannot run from CLI
+    /// (require Unity Editor), executed via Unity Test Runner during acceptance.
+    /// Here we verify compilation + pure-logic correctness.
     /// </summary>
     public class LoomStageDriverTests
     {
         /// <summary>
-        /// Driver.Awake 必须构造 LoomStage 实例（Stage 属性非 null）。
-        /// 验 Awake 序列：new LoomStage + SetNativeHostRoot + InitSprites + RegisterFontsFromSettings
-        /// + EnsureCamera + ConfigureTransforms 均不抛异常。
+        /// Driver.Awake must construct LoomStage instance (Stage property non-null).
+        /// Verifies Awake sequence: new LoomStage + SetNativeHostRoot + bootstrap from
+        /// runtime.json + EnsureCamera + ConfigureTransforms all run without exception.
         /// </summary>
         [Test]
-        public void LoomStageDriver_AwakeBuildsStageAndRegistersFonts()
+        public void LoomStageDriver_AwakeBuildsStage()
         {
             var go = new GameObject("driver_test");
             try
@@ -26,12 +28,86 @@ namespace LoomGUI.Tests
             }
             finally
             {
-                // OnDestroy Dispose stage（释放 native handle）。
+                // OnDestroy disposes stage (releases native handle).
                 Object.DestroyImmediate(go);
-                // EnsureCamera 自建独立 GO（非 root 子），DestroyImmediate(go) 不连带——手动清。
+                // EnsureCamera creates independent GO (not child of root), DestroyImmediate(go)
+                // does not clean it up — manual cleanup.
                 var cam = GameObject.Find("LoomUICamera");
                 if (cam != null) Object.DestroyImmediate(cam);
             }
+        }
+
+        [Test]
+        public void MergeSpriteSizes_NullInput_ReturnsEmpty()
+        {
+            var result = LoomStageDriver.MergeSpriteSizes(null);
+            Assert.IsNotNull(result);
+            Assert.AreEqual(0, result.Count);
+        }
+
+        [Test]
+        public void MergeSpriteSizes_EmptyList_ReturnsEmpty()
+        {
+            var result = LoomStageDriver.MergeSpriteSizes(new List<AtlasManifest>());
+            Assert.IsNotNull(result);
+            Assert.AreEqual(0, result.Count);
+        }
+
+        [Test]
+        public void MergeSpriteSizes_SingleAtlas_ReturnsSprites()
+        {
+            var atlas = new AtlasManifest();
+            atlas.sprites["res/icons/home.png"] = new SpriteEntry { page = 0, uv = new[] { 0f, 0f, 0.5f, 0.5f }, orig = new[] { 64, 64 } };
+            atlas.sprites["res/icons/gear.png"] = new SpriteEntry { page = 0, uv = new[] { 0.5f, 0f, 1f, 0.5f }, orig = new[] { 32, 32 } };
+
+            var result = LoomStageDriver.MergeSpriteSizes(new List<AtlasManifest> { atlas });
+            Assert.AreEqual(2, result.Count);
+
+            Assert.AreEqual("res/icons/home.png", result[0].key);
+            Assert.AreEqual(64u, result[0].w);
+            Assert.AreEqual(64u, result[0].h);
+
+            Assert.AreEqual("res/icons/gear.png", result[1].key);
+            Assert.AreEqual(32u, result[1].w);
+            Assert.AreEqual(32u, result[1].h);
+        }
+
+        [Test]
+        public void MergeSpriteSizes_DuplicateKeys_FirstWins()
+        {
+            var atlas1 = new AtlasManifest();
+            atlas1.sprites["res/a.png"] = new SpriteEntry { orig = new[] { 100, 200 } };
+
+            var atlas2 = new AtlasManifest();
+            atlas2.sprites["res/a.png"] = new SpriteEntry { orig = new[] { 999, 999 } }; // duplicate — should be ignored
+            atlas2.sprites["res/b.png"] = new SpriteEntry { orig = new[] { 50, 50 } };
+
+            var result = LoomStageDriver.MergeSpriteSizes(new List<AtlasManifest> { atlas1, atlas2 });
+            Assert.AreEqual(2, result.Count);
+            Assert.AreEqual(100u, result[0].w); // first wins
+            Assert.AreEqual(50u, result[1].w);
+        }
+
+        [Test]
+        public void MergeSpriteSizes_NullOrig_Skipped()
+        {
+            var atlas = new AtlasManifest();
+            atlas.sprites["res/valid.png"] = new SpriteEntry { orig = new[] { 64, 64 } };
+            atlas.sprites["res/bad.png"] = new SpriteEntry { orig = null };
+
+            var result = LoomStageDriver.MergeSpriteSizes(new List<AtlasManifest> { atlas });
+            Assert.AreEqual(1, result.Count);
+            Assert.AreEqual("res/valid.png", result[0].key);
+        }
+
+        [Test]
+        public void MergeSpriteSizes_NullSpritesDict_Handled()
+        {
+            var atlas = new AtlasManifest();
+            // sprites dict is null by default
+            var result = LoomStageDriver.MergeSpriteSizes(new List<AtlasManifest> { atlas });
+            Assert.IsNotNull(result);
+            Assert.AreEqual(0, result.Count);
         }
     }
 }

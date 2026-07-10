@@ -21,7 +21,6 @@ fn make_test_pkg_bytes(component: &str) -> Vec<u8> {
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
         components: vec![(component, nodes.as_slice(), &rules, &[])],
-        asset_manifest: &[],
     };
     loomgui_core::asset::write_package(&input)
 }
@@ -546,7 +545,6 @@ fn find_node_by_id_round_trip() {
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let pkg = loomgui_core::asset::write_package(&PackageInput {
         components: vec![("comp1", nodes.as_slice(), &rules, &[])],
-        asset_manifest: &[],
     });
     assert_eq!(
         loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len()),
@@ -1254,4 +1252,75 @@ fn set_fallback_families_ffi_returns_zero() {
     let rc = loomgui_stage_set_fallback_families(stage, std::ptr::null(), 0);
     assert_eq!(rc, 0, "set_fallback_families(null,0) 清空回退返 0");
     loomgui_stage_free(stage);
+}
+
+/// set_image_sizes FFI：CString 数组 + w/h 数组 → 调 FFI → 验 image_sizes HashMap 落地。
+#[test]
+fn set_image_sizes_ffi_round_trip() {
+    let h = stage_new_with_dejavu(200.0, 200.0);
+    // 准备两条路径 + w/h
+    let p1 = std::ffi::CString::new("atlas/icon.png").unwrap();
+    let p2 = std::ffi::CString::new("atlas/bg.jpg").unwrap();
+    let paths: [*const std::os::raw::c_char; 2] = [p1.as_ptr(), p2.as_ptr()];
+    let ws: [u32; 2] = [64, 128];
+    let hs: [u32; 2] = [64, 256];
+    loomgui_stage_set_image_sizes(h, paths.as_ptr(), ws.as_ptr(), hs.as_ptr(), 2);
+    // 通过 handle 直接读 stage.image_sizes 验落地
+    let handle = unsafe { &*h };
+    assert_eq!(
+        handle.stage.image_sizes.get("atlas/icon.png"),
+        Some(&(64, 64))
+    );
+    assert_eq!(
+        handle.stage.image_sizes.get("atlas/bg.jpg"),
+        Some(&(128, 256))
+    );
+    loomgui_stage_free(h);
+}
+
+/// null handle → no-op（不 panic）。
+#[test]
+fn set_image_sizes_null_handle_no_op() {
+    let p = std::ffi::CString::new("x.png").unwrap();
+    let paths: [*const std::os::raw::c_char; 1] = [p.as_ptr()];
+    let ws = [10u32];
+    let hs = [20u32];
+    loomgui_stage_set_image_sizes(
+        std::ptr::null_mut(),
+        paths.as_ptr(),
+        ws.as_ptr(),
+        hs.as_ptr(),
+        1,
+    );
+    // 不 panic 即通过
+}
+
+/// count=0 → no-op（不 panic）。
+#[test]
+fn set_image_sizes_zero_count_no_op() {
+    let h = stage_new_with_dejavu(200.0, 200.0);
+    loomgui_stage_set_image_sizes(h, std::ptr::null(), std::ptr::null(), std::ptr::null(), 0);
+    // verify image_sizes 仍为空
+    let handle = unsafe { &*h };
+    assert!(handle.stage.image_sizes.is_empty());
+    loomgui_stage_free(h);
+}
+
+/// null paths[i] → skip that entry（不 panic，其余照常落地）。
+#[test]
+fn set_image_sizes_null_path_skipped() {
+    let h = stage_new_with_dejavu(200.0, 200.0);
+    let p = std::ffi::CString::new("atlas/icon.png").unwrap();
+    let paths: [*const std::os::raw::c_char; 2] = [std::ptr::null(), p.as_ptr()];
+    let ws: [u32; 2] = [10, 64];
+    let hs: [u32; 2] = [20, 64];
+    loomgui_stage_set_image_sizes(h, paths.as_ptr(), ws.as_ptr(), hs.as_ptr(), 2);
+    let handle = unsafe { &*h };
+    // null entry skipped; second entry landed
+    assert_eq!(handle.stage.image_sizes.len(), 1);
+    assert_eq!(
+        handle.stage.image_sizes.get("atlas/icon.png"),
+        Some(&(64, 64))
+    );
+    loomgui_stage_free(h);
 }

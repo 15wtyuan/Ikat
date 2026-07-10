@@ -256,7 +256,7 @@ LoomGUI 当前：4 围栏标签 + 4 内部 NodeKind（`scene/node.rs:62-75` Cont
 - **动效**：fgui Transition 16 action + 31 ease + repeat/yoyo/path/回调。LoomGUI 差异化路径是 **CSS transition+@keyframes** 而非 fgui 编排对象——AI 更可预测，**别照搬 Transition 对象模型**。补 elastic/bounce ease + @keyframes（v1.10）即可，path 动画罕用。
 - **文本**：富文本+输入是真刚需（v1.7/v1.9）。stroke/shadow 上线常用（v1.8）。**BMFont 可不做**（动态字体+SDF 已主流，LoomGUI 走 Unity 光栅化更省）。RTL/shaping 有意砍（亚洲首发）。
 - **特效**：fgui 真滤镜也只有 Blur+Color 两个（drop-shadow/glow 是文本顶点生成）。LoomGUI ColorFilter 已对齐。blur/mask/blend 推后期正确（PNG 皮肤能补大部分）。
-- **资源**：音效/异步/多语言是运营期能力（后期）。图集交 Unity 是合理简化。**LoomGUI 无任何音频概念**（grep 零命中）。
+- **资源**：音效/异步/多语言是运营期能力（后期）。**v1.8+ 图集已改为 Rust 自绘**（atlas.png+atlas.json，loomgui_pkg 产出），不再交 Unity。**LoomGUI 无任何音频概念**（grep 零命中）。
 - **交互**：Window/Popup/DragDrop 都在 driver 层（C#）做，不进核心。**背包拖放(DragDrop 跨对象+drop 目标)优先级高于 window 管理**。
 
 ### 5.3 规划里可能遗漏、建议纳入
@@ -276,7 +276,7 @@ LoomGUI 当前：4 围栏标签 + 4 内部 NodeKind（`scene/node.rs:62-75` Cont
 | Transition 编排对象 | CSS transition+@keyframes | 文本 DSL 一致性 |
 | RTL/BiDi/复杂 shaping | 砍（亚洲首发） | — |
 | skew/matrix transform | 围栏静默忽略 | AI 少写、破可预测性 |
-| 图集打包 | 交 Unity SpriteAtlas | 不重复造轮子 |
+| 图集打包 | Rust 自绘 (atlas.png+atlas.json，loomgui_pkg) | 跨引擎一致、绕开 Unity SpriteAtlas 复杂度 |
 
 ### 5.5 RmlUi 独有、fgui 也缺、对 AI-DSL 有价值的
 

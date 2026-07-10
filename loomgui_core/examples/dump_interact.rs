@@ -129,7 +129,6 @@ fn main() {
         .collect();
     let input = PackageInput {
         components: vec![("scene", nodes.as_slice(), &dynamic, &[])],
-        asset_manifest: &[],
     };
     let pkg = write_package(&input);
 

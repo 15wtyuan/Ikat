@@ -15,9 +15,15 @@ LoomGUI = 跨引擎游戏 UI 框架。HTML/CSS 子集作 DSL，taffy flexbox 布
 cargo build -p loomgui_core
 cargo test  -p loomgui_core
 
-# 打包器 CLI（HTML+CSS+资源 → .pkg.bin + 图集；复用核心 parse 层）
+# 打包器 CLI（HTML+CSS+资源 → .pkg.bin + 自绘图集 + fonts；二进制名 loom-pkg，复用核心 parse 层）
 cargo build -p loomgui_pkg
 cargo test  -p loomgui_pkg
+# 运行：cargo run -p loomgui_pkg -- build <workspace-dir>    （loom-pkg build <workspace>）
+
+# 独立打包器 GUI（Tauri 桌面应用）
+cargo build -p loomgui_gui
+# 开发运行（需要 Tauri CLI）：cargo tauri dev
+# 打包出品：cargo tauri build
 
 # FFI（C ABI；csbindgen 在 build.rs 里重新生成 C# 绑定）
 cargo build -p loomgui_ffi_c
@@ -54,6 +60,8 @@ cp target/release/loomgui_ffi_c.dll loomgui_unity_package/Plugins/LoomGUI/loomgu
 - **stale .dll 诊断**：PlayMode 全不渲 + Console 干净 → `md5sum target/release/loomgui_ffi_c.dll loomgui_unity_package/Plugins/LoomGUI/loomgui_ffi_c.dll`；不等 = stale（Rust 改了 blob/ABI，.dll 没换）。
 - 入库的 `.dll` + csbindgen 生成的 `LoomGUIBindings.cs` 在 `loomgui_unity_package/Plugins/LoomGUI/`（`**/Plugins/**/*.dll` 和 bindings .cs 是 gitignore 白名单例外；其余 native 产物一律忽略）。
 
+**图集自绘**：v1.8 起图集由打包器自绘（`loom-pkg build` 或 GUI 产 `atlas/*.png`+`atlas/*.atlas.json`），Unity 不再打 `SpriteAtlas`。运行时尺寸由 `atlas.json` + FFI `set_image_sizes` 注入，不再靠 Unity 导入管线。
+
 ## 架构（大局——权威契约读 `docs/design/main-design.md`）
 
 **分层、单向数据流、引擎对象不进核心：**
@@ -89,7 +97,7 @@ HTML/CSS DSL → 打包器（构建期；复用核心 parse/style）
 
 LoomGUI 只支持 HTML/CSS 的**明确子集**，称"围栏"。这是项目漂移高发区。
 
-- **权威真相源 = `loomgui_core/tests/fence_contract.rs`**（可执行契约）。`docs/design/fence.md` 是人类可读副本；**不一致时测试赢**。编辑器用 `loomgui_unity/Assets/LoomUI/` 工作区 + `LoomGUI > Settings` 面板注入围栏规则。
+- **权威真相源 = `loomgui_core/tests/fence_contract.rs`**（可执行契约）。`docs/design/fence.md` 是人类可读副本；**不一致时测试赢**。围栏规则通过独立工作区（standalone workspace directory + `loom.workspace.json`）注入，打包器 `loom-pkg build` 校验。
 - **改围栏 = 改 `fence_contract.rs` 测试 + `fence.md`**，不改 `main-design.md` §3（那节只写哲学，避免漂移）。
 - **围栏门**：`cargo test -p loomgui_core fence_contract`——build .dll 前跑、改 `apply_decl`/`FENCE_TAGS`/选择器后跑。
 - 两类围栏外行为（均**测试锁定**，别靠 grep 推断）：围栏外标签 + 行内混排 → **编译期报错**（parse 失败、打包器拒收）。围栏外 CSS 属性（如 `clip-path`、`cursor`）→ **静默忽略**（`apply_decl` 返 `false`）。
@@ -102,13 +110,19 @@ LoomGUI 只支持 HTML/CSS 的**明确子集**，称"围栏"。这是项目漂�
 - **设计文档 vs 踩坑**：`docs/design/main-design.md`（设计契约/当前实现真相）、`docs/design/fence.md`（围栏）、`docs/roadmap/roadmap.md`（范围+机制草稿）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配，开工前读它查"具体怎么干 + 坑在哪"）。
 - **Rust edition 2021**，依赖钉版本：`taffy 0.5`、`ttf-parser 0.20`、`cssparser 0.34`、`scraper 0.19`、`slotmap 1.1`、`csbindgen 1`。snapshot 测试用 `insta`。
 - `Cargo.lock` 入库（根级，尽管 `.gitignore` 有通用 `Cargo.lock` 行——它是被追踪的）。
-- 设计师工作区在 `loomgui_unity/Assets/LoomUI/`（showcase 打包源 + res 资源 + design-systems 组件库）。编辑器工作流用 `LoomGUI > Settings` 面板配置 + 初始化。
+- 设计师工作区是独立磁盘目录（含 `loom.workspace.json`、HTML/CSS 源文件、res 资源、design-systems 组件库）。打包用独立打包器 GUI（Tauri `loomgui_gui`）或 CLI `loom-pkg build <workspace>`。v1.8 起不再使用 `LoomGUI > Settings` 面板（该面板及相关 Unity Editor 脚本已移除，仅保留 `LoomOpenPacker.cs` 菜单项启动 GUI）。运行时引导由 `loom.runtime.json` 统管（声明包/图集/字体），不再依赖 Unity `LoomSettings` ScriptableObject。
 - 用户只读中文——问答/选项/总结用中文；代码/commit 照旧英文。
 - **代码注释写上线品质**：自包含（不看其他文件就能懂）、精简（说 WHY，不复述代码机制）、**不引用内部编号或暗语**——`坑 120`、`Venkify 法`、`与某某 meta 对齐` 这类项目内指代外人看不懂。坑号只属于 `docs/pitfalls.md`，不进代码。
 - **防文档漂移**（遵循 fence_contract 模式——文档的断言必须有测试护着）：
   1. **文档写定性、不写具体数字**。数字（列数、字段数、枚举变体数）只放代码注释或测试里——数字最容易漂移，文档里写"渲染公共字段"而非"20 列"
   2. **关键 claim 加可执行测试**。FFI struct 尺寸：`assert_eq!(size_of::<BlobHeader>(), N)`。NodeKind 变体数：命名字段计数。tick 步骤顺序：读源码验证。写进 fence_contract 或新测试
   3. **改代码后搜 docs/ 里是否引用了改动的 struct/函数/列数**——`git diff` 扫一遍改动的名字，grep docs/ 确认没提到过期的数字或签名。低级但有效
+
+### v1.8+ 独立打包器 + 自绘图集 + 工作区重构
+
+v1.8 起工作流脱离 Unity 编辑器依赖。工作区 = 独立磁盘目录（`loom.workspace.json`），打包器 = 自绘（CLI `loom-pkg build <workspace>` + GUI `loomgui_gui`），图集 = Rust 自绘（etagere shelf pack → `atlas/*.png` + `atlas/*.atlas.json`），运行时引导 = `loom.runtime.json`。pkg.bin 格式 v14→v15（AssetManifest section 移除，尺寸走 atlas.json + FFI `set_image_sizes`）。完整设计见 `docs/superpowers/specs/2026-07-10-standalone-packer-atlas-workspace-design.md`。
+
+移除的 Unity Editor 脚本：`LoomSettingsWindow`、`LoomAtlasSync`、`LoomConfigExporter`、`LoomWorkspaceInitializer`、`PkgManifestReader`、`LoomExePath`、`LoomJsonEscape`、`LoomPackArgs`、`LoomWorkspaceAssetPostprocessor`。移除的 ScriptableObject：`LoomSettings`。仅保留 `LoomOpenPacker.cs`（MenuItem 启动 Tauri GUI）。
 
 ## 调试技巧
 
@@ -124,6 +138,11 @@ LoomGUI 只支持 HTML/CSS 的**明确子集**，称"围栏"。这是项目漂�
 **跨层特性 PlayMode 报错**（拖不动/晃动/错位）先 example 实测 core 状态（overlap/scroll_pos/content_size）再改，避免盲改物理掩盖 layout 根因。dump 边界/状态取证，别靠"浮点边界/epsilon"症状层猜测。
 
 **SDD per-task review 是代码质量门，不是集成正确性门**：v1.5 Controller 16 task 全 APPROVED + final review APPROVED，PlayMode 仍出 4 bug（坑 131-133：display:none 子树渲染 / runtime color 继承 / transition 逗号多 spec）。CSS 语义集成（display 子树剪枝、继承传播、多 spec 解析）只在 PlayMode 显现——单测验不了。SDD 后必跑 showcase PlayMode 逐项过，别只靠单测绿就 merge。
+
+**SDD long-running worktree 要防 main 漂移**（坑 147）：worktree 串行做多 task 期间，main 可能被别的会话推进（v1.7 PlayMode fixes 等）。merge 回 main 时非快进，两边改同一核心函数签名（如 `build_text_mesh`/`push_text_meshes`）会整段冲突。解法：**反向 merge**（`git merge main` 进 feature 分支，在 feature 分支解冲突——有 feature 上下文，main 不动直到 fast-forward），**合超集签名**（两边参数都收，如 `register_id_map` + `shadow_pairs`），把对方分支的非签名修复逐个移植进 feature 代码路径，用对方分支的测试当合并验收标准（测试绿 = 合并正确）。worktree 开长任务前先确认 main 是否会动。
+
+**subagent 撞 API 限流被 kill 不回滚代码**（坑 148）：subagent-driven SDD 期间 implementer 撞 5 小时上限被 kill 后，先 `git status` + `cargo build` + `cargo test` 核实代码完整度（kill 不回滚已写代码，常是"代码完整但没收尾"），别假设白干或完成。限流背景下的收尾（fmt/clippy/补单测/commit/report）走 controller 工具调用（Bash/Edit 不耗 Agent API，能绕限流），别再派 subagent（会再撞限流）。日志最后一句常提示断点时在做什么。
+
 
 **偶现/时序 bug**（依赖 Unity 内部事件/帧序，如动态字体 atlas rebuild）光读代码定位不了——加诊断 log 运行时取证（调用栈暴露触发点是破案关键），别静态猜根因反复改（坑 113）。
 

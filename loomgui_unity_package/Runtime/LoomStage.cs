@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 using System.Text;
 using LoomGUI.Bindings;
 using UnityEngine;
-using UnityEngine.U2D;   // SpriteAtlas（path→Sprite 查询）
 
 namespace LoomGUI
 {
@@ -123,14 +122,45 @@ namespace LoomGUI
         // ===== Sprite 解析器初始化（Driver 调）=====
 
         /// <summary>
-        /// SpriteResolver 建名字映射 + 注入 atlas 懒加载委托。
-        /// Driver.Awake 后调（settings 来自 LoomSettings.GetOrCreateDefault，loadAtlas 由 Driver 提供）：
-        /// settings.atlasEntries → folder→atlasName 映射；GetSprite 命中时按需回调 loadAtlas(atlasName)
-        /// 拿 SpriteAtlas（Driver 决定走 Resources/AB/Addressables）。loadAtlas=null 则全 miss（调用方 fallback）。
+        /// SpriteResolver 初始化：传入所有 atlas manifest + 页纹理懒加载委托。
+        /// Driver.Awake 后调：ParseAtlas 解析每个 atlas.json → AtlasManifest，传入 Init。
+        /// loadPage(pageFileName) 按需加载页 PNG（Driver 决定走 Resources/AB/Addressables）。
+        /// loadPage=null 则 GetSprite 全 miss（调用方 fallback）。
         /// </summary>
-        public void InitSprites(LoomSettings settings, System.Func<string, SpriteAtlas> loadAtlas)
+        public void InitSprites(List<AtlasManifest> atlases, System.Func<string, Texture2D> loadPage)
         {
-            _sprites?.Init(settings, loadAtlas);
+            _sprites?.Init(atlases, loadPage);
+        }
+
+        /// <summary>
+        /// Set image sizes for all known sprites before first tick.
+        /// Merged atlas sprites → (key, width, height) arrays → one FFI call.
+        /// Call after loading all atlas.json manifests and before first Tick().
+        /// </summary>
+        public void SetImageSizes(string[] paths, uint[] ws, uint[] hs)
+        {
+            if (_stage == null || paths == null || paths.Length == 0) return;
+            int n = paths.Length;
+            var pathPtrs = new IntPtr[n];
+            for (int i = 0; i < n; i++)
+                pathPtrs[i] = Marshal.StringToHGlobalAnsi(paths[i] ?? "");
+            try
+            {
+                unsafe
+                {
+                    fixed (IntPtr* pp = pathPtrs)
+                    fixed (uint* wp = ws)
+                    fixed (uint* hp = hs)
+                    {
+                        Native.loomgui_stage_set_image_sizes(_stage, (byte**)pp, wp, hp, (nuint)n);
+                    }
+                }
+            }
+            finally
+            {
+                for (int i = 0; i < n; i++)
+                    Marshal.FreeHGlobal(pathPtrs[i]);
+            }
         }
 
         // ===== NativeHost 根注入（Driver 调）=====
@@ -533,8 +563,8 @@ namespace LoomGUI
             _pool?.Clear();
             _nhm?.Clear();
             _mm?.Clear();
-            // SpriteResolver 持 folder→atlasName 名字映射 + 运行时懒加载的 SpriteAtlas 缓存（Driver 钩子加载，
-            // 非序列化字段）。Clear 清两套缓存；LoomStage 不主动 Dispose SpriteAtlas（Driver/构建后端拥有其生命周期）。
+            // SpriteResolver 持 merged sprite 表 + 页纹理缓存（lazy-loaded via loadPage 委托）。
+            // Clear 清所有缓存；LoomStage 不主动 Dispose 页纹理（Driver/构建后端拥有其生命周期）。
             _sprites?.Clear();
             if (_frameBuf != null)
             {

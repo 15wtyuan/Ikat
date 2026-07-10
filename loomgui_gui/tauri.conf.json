@@ -1,0 +1,35 @@
+{
+  "productName": "LoomGUI Packer",
+  "version": "0.1.0",
+  "identifier": "com.loomgui.packer",
+  "build": {
+    "frontendDist": "dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LoomGUI Packer",
+        "width": 800,
+        "height": 600
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.ico"],
+    "category": "DeveloperTool",
+    "shortDescription": "LoomGUI packer — HTML/CSS workspace builder",
+    "longDescription": "Standalone GUI tool for the LoomGUI cross-engine game UI framework. Import HTML/CSS workspaces, configure packaging options, and produce optimized .pkg.bin bundles with texture atlases.",
+    "publisher": "LoomGUI",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    }
+  }
+}
