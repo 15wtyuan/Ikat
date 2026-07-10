@@ -8,7 +8,9 @@
 #![allow(clippy::type_complexity)]
 
 pub mod atlas;
+pub mod build;
 pub mod resolve;
+pub mod runtime;
 pub mod workspace;
 
 use loomgui_core::asset::{extract_component_css, ControllerEntry, PackageInput, TemplateNode};
