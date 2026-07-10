@@ -1061,3 +1061,45 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 - **打包期对每种"带 src 的节点"都要走 normalize + manifest**——`NodeKind::Image` 是顶层，`RichKind::Image` 嵌在 RichText runs 里。新增任何携带图片路径的 NodeKind/Run 都须在 `scene_to_template` 补归一化，否则运行时路径不匹配 → 白方块/缺图。顶层 match 不会自动下钻嵌套结构的子字段。
 - **"已填字段但调用处没读"是隐蔽 bug 源**——`MeasureContext::RichText.align` 构造时赋值却用 `..` 吞掉，单测不覆盖（单测直接调 measure_rich_text 不经 MeasureContext）。富文本对齐只在 PlayMode（经完整 measure 闭包）才显现。坑 131-133 同类：单测绿 ≠ 集成对。
 - **text-align 语义**：要对齐到盒边（rect.w），须在 render 期（知 rect.w）应用，measure 期用 available width 近似——stretch 布局下二者相等。plain `measure_text` 目前对齐基准是 text_width（最宽行），单行短文本同样不生效；rich 修法（对齐 rect.w）比 plain 更对，plain 可后补。
+
+### 坑 147：long-running worktree 期间 main 前进 → merge 非快进 + 签名冲突（v1.8 SDD）
+
+**症状**：v1.8 13 task 用 worktree 串行做（worktree 从 `1252f0b` 派生），做完 merge 回 main 时不是 fast-forward——main 已前进 9 个 commit（v1.7 PlayMode fixes `8155e95` + showcase + fence doc sync）。`render/mod.rs` 的 `build_text_mesh`/`push_text_meshes` 两边都改了**同一签名**（main 改 `push_text_meshes` 加 `register_id_map: bool`；v1.8 改加 `shadow_pairs`/`stroke_pairs` + `TextMeshes` 返回类型），git 无法自动合并，整段函数体标冲突。
+
+**根因**：worktree 长时间运行（13 task × review），期间 main 被别的会话推进。两边独立改了同一核心函数签名，git merge 只能标冲突让人解。
+
+**解决**：反向 merge（`git merge main` 进 worktree 分支，在 worktree 解冲突——有完整 v1.8 上下文）。以 v1.8 超集签名为基准（`push_text_meshes` 同时收 `register_id_map` + `text_primary_id` + `shadow_pairs` + `stroke_pairs`），把 main 的 4 个修复点逐个移植进 v1.8 代码路径：① has_rich_bg 背景逻辑 + text_primary_id 子页 1；② underline offset `- position`（坑 142）；③ `bake_content_offset` 也烤 `line.y`/`line.baseline`（坑 144）；④ 行内图 verts 加 `rect.x`/`rect.y`（坑 143）。3 个 main 的 v1.7 测试（`rich_text_node_emits_bg_quad` / `rich_text_padding_offsets` / `rich_image_positioned_at_node_rect`）是合并验收标准——移植完应全绿。解完 fast-forward main。
+
+**教训**：
+- **worktree 长任务前先确认 main 是否会动**——若 main 可能被推进，merge 时必有冲突。本机串行工作流下 main 由本会话/别的会话推进都可能。
+- **签名冲突要合超集，不是二选一**——两边改同一函数时，合并签名收两边的参数（main 的 bool + v1.8 的 pairs），函数体取超集逻辑 + 移植对方的非签名修复（offset/bake/rect 偏移等）。别丢任一边的修复。
+- **用对方分支的测试当合并验收标准**——main 的 v1.7 测试失败点精确指向要移植的修复，测试绿 = 合并正确（单测能抓签名/逻辑合并错；PlayMode 集成 bug 仍抓不住，坑 131-133）。
+- **反向 merge（main 进 feature 分支）比正向（feature 进 main）安全**——冲突在 feature 分支解（有 feature 上下文），main 不动直到 fast-forward，解错也不污染 main。
+
+### 坑 148：subagent 撞 API 限流中断 → 代码完整但没收尾（v1.8 SDD）
+
+**症状**：subagent-driven SDD 期间，implementer subagent 撞账户 5 小时 API 上限被 kill。日志显示断点时**代码已写完 + 全测试套件已跑通**，但没 commit / 没写 report / 没跑完 fmt+clippy。controller 拿到的是"代码完整但未提交"状态。
+
+**根因**：subagent 的收尾步骤（fmt→clippy→commit→report）是限流后未跑的部分。subagent 被 kill 不回滚已写的代码，留下半成品工作区。
+
+**解决**：controller 核实状态后补收尾——① `git status` 看代码是否写完（新文件 + 改文件都在）；② `cargo build` + `cargo test` 确认代码完整能跑（implementer 断点前跑通的测试应仍绿）；③ 跑 `cargo fmt`（implementer 常没跑，有格式 diff）+ `cargo clippy`；④ 补缺失的单测（日志常显示断点时正想加的测试，如 `as_corners`）；⑤ commit + 写 report（controller 基于实际 diff 补写，注明 implementer 限流断点 + controller 收尾）。然后正常派 reviewer。
+
+**教训**：
+- **subagent kill 不回滚代码**——撞限流/超时被 kill 后，先 `git status` + `build` + `test` 核实代码完整度，别假设白干或假设完成。日志最后一句常提示断点时在做什么（"add a unit test for X" = 正加测试）。
+- **限流背景下的收尾走 controller 工具调用（Bash/Edit），不派 subagent**——Bash/Edit 不耗 Agent API，能绕限流。确定性的收尾（fmt/clippy/单测/commit/report）controller 直接做比再派 subagent（会再撞限流）快且稳。
+- **implementer report 注明限流断点**——controller 补写的 report 写清"implementer 限流断在 X，controller 补 Y"，让 reviewer 知道证据链（TDD RED/GREEN 可能没记录）。
+- **别假设完成**——subagent 报"running tests"被 kill ≠ 测试过，要自己跑确认。
+
+### 坑 149：text-shadow 赋值清空 text_effects → 与其他文字效果属性不组合（v1.8 review 抓）
+
+**症状**：v1.8 Task 8 让 `text-shadow` 用 `style.text_effects = shadows`（赋值），Task 9/10 让 `-webkit-text-stroke`/`font-effect` 用 `.push()`（追加）。混用时声明序敏感：`font-effect:glow(...); text-shadow:...;` → glow 被 text-shadow 赋值清空丢失（违反 CSS 语义——不同属性应组合）。
+
+**根因**：text-shadow 的赋值语义是 v1.7 单属性思维（text-shadow 重声明应覆盖旧 shadow），但 v1.8 加了 stroke/glow 共享 `text_effects` vec 后，赋值会误杀其他属性的 effect。CSS cascade：同属性后声明覆盖，不同属性组合。text-shadow 和 font-effect 是不同属性，应组合。
+
+**解决**：text-shadow 改 `retain(|e| !matches!(e, FontEffect::Shadow{..}))` + `extend(shadows)`——只替换自己的 Shadow 变体，保留 Stroke/Glow/Blur。加反向声明序测试（`font-effect` 先 `text-shadow` 后，两者都在）。
+
+**教训**：
+- **多属性共享一个 vec 时，每个属性只管自己的变体**——赋值（`=`）清空整 vec 会误杀别的属性；用 `retain(非自己变体) + extend` 隔离。判据：CSS 里这两个是 same property（覆盖）还是 different property（组合）。
+- **AI 可预测性 = CSS 语义对齐**——AI 按 CSS 训练，期望不同属性组合。赋值清空让"声明序"影响结果，AI 无法预测。reviewer 抓这类"语义不一致"比抓 bug 更重要（项目首要判据是 AI 可预测性）。
+- **新属性接共享字段时要审既有属性的写入语义**——Task 8 text-shadow 先建 text_effects 用赋值，Task 9/10 加属性用 push，不一致在 Task 10 review 才抓出（pre-existing bug 加剧）。加属性时 grep 共享字段的既有写入，统一语义。
+

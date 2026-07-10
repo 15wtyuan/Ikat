@@ -125,6 +125,11 @@ LoomGUI 只支持 HTML/CSS 的**明确子集**，称"围栏"。这是项目漂�
 
 **SDD per-task review 是代码质量门，不是集成正确性门**：v1.5 Controller 16 task 全 APPROVED + final review APPROVED，PlayMode 仍出 4 bug（坑 131-133：display:none 子树渲染 / runtime color 继承 / transition 逗号多 spec）。CSS 语义集成（display 子树剪枝、继承传播、多 spec 解析）只在 PlayMode 显现——单测验不了。SDD 后必跑 showcase PlayMode 逐项过，别只靠单测绿就 merge。
 
+**SDD long-running worktree 要防 main 漂移**（坑 147）：worktree 串行做多 task 期间，main 可能被别的会话推进（v1.7 PlayMode fixes 等）。merge 回 main 时非快进，两边改同一核心函数签名（如 `build_text_mesh`/`push_text_meshes`）会整段冲突。解法：**反向 merge**（`git merge main` 进 feature 分支，在 feature 分支解冲突——有 feature 上下文，main 不动直到 fast-forward），**合超集签名**（两边参数都收，如 `register_id_map` + `shadow_pairs`），把对方分支的非签名修复逐个移植进 feature 代码路径，用对方分支的测试当合并验收标准（测试绿 = 合并正确）。worktree 开长任务前先确认 main 是否会动。
+
+**subagent 撞 API 限流被 kill 不回滚代码**（坑 148）：subagent-driven SDD 期间 implementer 撞 5 小时上限被 kill 后，先 `git status` + `cargo build` + `cargo test` 核实代码完整度（kill 不回滚已写代码，常是"代码完整但没收尾"），别假设白干或完成。限流背景下的收尾（fmt/clippy/补单测/commit/report）走 controller 工具调用（Bash/Edit 不耗 Agent API，能绕限流），别再派 subagent（会再撞限流）。日志最后一句常提示断点时在做什么。
+
+
 **偶现/时序 bug**（依赖 Unity 内部事件/帧序，如动态字体 atlas rebuild）光读代码定位不了——加诊断 log 运行时取证（调用栈暴露触发点是破案关键），别静态猜根因反复改（坑 113）。
 
 **改 parse-time 逻辑必重打 pkg**：`Node.base_style` 是打包期 `resolve_styles` 产物（不变）。改 cascade/mapping/parse 只重编 .dll 不够，须 `cargo run -p loomgui_pkg` 重打 pkg（html/css 未变也要）。纯 runtime（render/layout measure/scroll/anim）改 .dll 即可。
