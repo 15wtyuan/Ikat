@@ -3,6 +3,10 @@ name = "loomgui_pkg"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "loom-pkg"
+path = "src/main.rs"
+
 [dependencies]
 loomgui_core = { path = "../loomgui_core", features = ["parse"] }
 scraper = "0.19"
