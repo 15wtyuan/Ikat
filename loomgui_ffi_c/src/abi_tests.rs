@@ -1048,7 +1048,11 @@ fn set_scroll_pos_animated_starts_tween() {
     let root_id = stage.scene.as_ref().unwrap().roots[0];
     stage.set_scroll_pos(root_id, 0.0, 80.0, true);
     let st = stage.scene.as_ref().unwrap().scroll.get(root_id).unwrap();
-    assert_eq!(st.tweening, 1, "animated=true 启 tweening=1");
+    assert!(
+        st.tweening_any(),
+        "animated=true 启 tween（tweening={:?}）",
+        st.tweening
+    );
 }
 
 #[test]
@@ -1135,7 +1139,11 @@ fn ffi_set_scroll_pos_round_trip() {
         .scroll
         .get(root_id)
         .unwrap();
-    assert_eq!(st.tweening, 1, "animated=1 启 tween");
+    assert!(
+        st.tweening_any(),
+        "animated=1 启 tween（tweening={:?}）",
+        st.tweening
+    );
     loomgui_stage_free(h);
 }
 
