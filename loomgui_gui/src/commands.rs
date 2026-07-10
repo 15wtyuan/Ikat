@@ -47,7 +47,8 @@ pub fn scan_html(pkg_dir: String) -> Result<Vec<String>, String> {
         let entry = entry.map_err(|e| format!("entry error: {e}"))?;
         let name = entry.file_name();
         let fname = name.to_string_lossy();
-        if fname.ends_with(".html") {
+        let is_file = entry.file_type().map(|ft| ft.is_file()).unwrap_or(false);
+        if is_file && fname.ends_with(".html") {
             htmls.push(fname.to_string());
         }
     }
