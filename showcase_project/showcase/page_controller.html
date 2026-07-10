@@ -2,9 +2,8 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<base href="..">
-<link rel="stylesheet" href="showcase/preview/preview-base.css">
-<script src="showcase/preview/loom-preview.js"></script>
+<link rel="stylesheet" href="preview/preview-base.css">
+<script src="preview/loom-preview.js"></script>
 <title>Controller · 标签页/嵌套/路径 A/B</title>
 <style>
 /* page_controller 组件 CSS（D6 隔离） */
@@ -190,7 +189,7 @@
             <!-- 复用 §1 的 tab Controller：driver 订阅 tab-root 的 on_changed，
                  按 new_index 调 SetSrc(route-a-icon) + SetText(route-a-text) -->
             <div class="route-a">
-              <img class="route-a-icon" id="route-a-icon" src="res/icons/home.png">
+              <img class="route-a-icon" id="route-a-icon" src="../res/icons/home.png">
               <span class="route-a-text" id="route-a-text">当前页：1 · 概览</span>
             </div>
             <div class="route-a-row">
@@ -212,9 +211,9 @@
             <!-- data-controller="bicon" 挂载点；三个 <img> 兄弟，CSS [data-page] 控制哪个 display:flex -->
             <div data-controller="bicon" data-page="0" id="bicon-root" style="gap:12px">
               <div class="route-b">
-                <img class="b-icon b-icon-0" src="res/icons/home.png">
-                <img class="b-icon b-icon-1" src="res/icons/eye.png">
-                <img class="b-icon b-icon-2" src="res/icons/zap.png">
+                <img class="b-icon b-icon-0" src="../res/icons/home.png">
+                <img class="b-icon b-icon-1" src="../res/icons/eye.png">
+                <img class="b-icon b-icon-2" src="../res/icons/zap.png">
                 <span class="b-label" id="bicon-label">图标 1/3</span>
               </div>
               <div class="b-next" id="bicon-next">下一个图标</div>

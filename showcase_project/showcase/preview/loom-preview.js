@@ -176,7 +176,7 @@
         if (va) imgs[i].style.verticalAlign = va;
       }
       var presets = [
-        '预设 A：<span style="color:#ffd700;font-weight:bold">金色粗体</span> + <img src="res/icons/zap.png" width="20" height="20" style="vertical-align:middle"/> 行内图 + <a href="swap://a">链接 A</a>',
+        '预设 A：<span style="color:#ffd700;font-weight:bold">金色粗体</span> + <img src="../res/icons/zap.png" width="20" height="20" style="vertical-align:middle"/> 行内图 + <a href="swap://a">链接 A</a>',
         '预设 B：<u>下划线</u> · <s>删除线</s> · <b>粗</b> · <i>斜</i> · <span style="color:#5fb2c4;font-size:16px">小字青</span>',
         '预设 C：CJK 中英混排 LoomGUI v1.7 rich inline flow，<br/>强制换行后第二行，<a href="swap://c">链接 C</a>'
       ];
@@ -321,7 +321,7 @@
         title.textContent = 'item-' + dynSeq;
         panel.appendChild(title);
         var icon = document.createElement('img');
-        icon.src = 'res/icons/skin.png';
+        icon.src = '../res/icons/skin.png';
         icon.style.cssText = 'width:40px;height:40px';
         panel.appendChild(icon);
         return panel;
@@ -361,12 +361,12 @@
     page_list:     function () {
       wireBackHome();
       // item 视觉对齐 C# VirtualListDriver.CreateItem（灰底 + icon + 标题）。
-      // icon 用 res/icons/skin.png（<base href=".."> 解析到 LoomUI/res/）。
+      // icon 用 ../res/icons/skin.png（<base href=".."> 解析到 LoomUI/res/）。
       function renderItem(height, title) {
         var row = document.createElement('div');
         row.style.cssText = 'width:100%;height:' + height + 'px;flex-direction:row;align-items:center;gap:12px;padding:0 16px;background-color:#252839';
         var icon = document.createElement('img');
-        icon.src = 'res/icons/skin.png';
+        icon.src = '../res/icons/skin.png';
         icon.style.cssText = 'width:48px;height:48px';
         row.appendChild(icon);
         var t = document.createElement('span');

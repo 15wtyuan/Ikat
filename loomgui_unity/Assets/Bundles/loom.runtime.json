@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "packages": [
+    "showcase"
+  ],
+  "atlases": [
+    "icons"
+  ],
+  "fonts": [
+    {
+      "family": "LXGWWenKai",
+      "file": "LXGWWenKai.ttf.bytes",
+      "default": true,
+      "fallback": false
+    },
+    {
+      "family": "wqy-microhei",
+      "file": "wqy-microhei.ttc.bytes",
+      "default": false,
+      "fallback": true
+    },
+    {
+      "family": "PressStart2P",
+      "file": "PressStart2P.ttf.bytes",
+      "default": false,
+      "fallback": false
+    },
+    {
+      "family": "DejaVuSans",
+      "file": "DejaVuSans.ttf.bytes",
+      "default": false,
+      "fallback": false
+    },
+    {
+      "family": "JetBrainsMono",
+      "file": "JetBrainsMono.ttf.bytes",
+      "default": false,
+      "fallback": false
+    }
+  ]
+}
