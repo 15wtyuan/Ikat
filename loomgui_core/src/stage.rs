@@ -122,6 +122,14 @@ impl Stage {
             .filter(|(w, h)| *w != 0 && *h != 0)
     }
 
+    /// 批量灌图尺寸（后端读所有 atlas.json 合并后一次性推入；见 spec §6.4）。
+    /// 覆盖式合并：同 path 后写赢。上万条也是 O(n) HashMap 插入，启动一次调用。
+    pub fn set_image_sizes(&mut self, sizes: &[(String, u32, u32)]) {
+        for (path, w, h) in sizes {
+            self.image_sizes.insert(path.clone(), (*w, *h));
+        }
+    }
+
     /// 缓存本帧指针输入（tick 前调；覆盖式——每帧全量替换 pending_input）。
     pub fn set_input(&mut self, events: &[PointerEvent]) {
         self.pending_input.clear();

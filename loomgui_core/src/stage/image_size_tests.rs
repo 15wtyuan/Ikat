@@ -202,6 +202,35 @@ fn reload_package_with_new_sizes() {
     );
 }
 
+/// set_image_sizes 批量覆盖式合并：同 path 后写赢；w/h=0 也存（image_size 的 filter 挡）。
+#[test]
+fn set_image_sizes_batch_merges() {
+    let mut stage = Stage::new((200.0, 200.0)).unwrap();
+    stage.set_image_sizes(&[
+        ("icons/a.png".to_string(), 32, 32),
+        ("icons/b.png".to_string(), 64, 48),
+    ]);
+    assert_eq!(stage.image_size("icons/a.png"), Some((32, 32)));
+    assert_eq!(stage.image_size("icons/b.png"), Some((64, 48)));
+    // 后写赢
+    stage.set_image_sizes(&[("icons/a.png".to_string(), 100, 100)]);
+    assert_eq!(stage.image_size("icons/a.png"), Some((100, 100)));
+}
+
+/// w/h=0 条目存入但 image_size 挡回 None（filter w/h=0 → fallback 64×64）。
+#[test]
+fn set_image_sizes_zero_dim_is_stored_but_filtered() {
+    let mut stage = Stage::new((200.0, 200.0)).unwrap();
+    stage.set_image_sizes(&[("icons/zero.png".to_string(), 0, 0)]);
+    assert_eq!(
+        stage.image_size("icons/zero.png"),
+        None,
+        "w/h=0 filter -> None"
+    );
+    // 但 HashMap 里有它
+    assert!(stage.image_sizes.contains_key("icons/zero.png"));
+}
+
 /// reuse_key 是运行时字段（不进 pkg），driver 给 slot 节点设。
 /// 0=无复用（默认），>0=按 reuse_key 复用 GO。
 #[test]
