@@ -159,7 +159,9 @@ LoomGUI 是 HTML/CSS 的**子集**，浏览器/open-design 这类外部编辑器
 
 ## 3. v other — 编辑器工作流（独立并行，不阻塞主线）
 
-Unity 内 C# 实现。`LoomSettingsWindow`（`LoomGUI > Settings` 面板）提供工作区 tab：
+**v1.8+ 独立工作区**：`loomgui_gui`（Tauri 桌面 GUI）替代原 Unity `LoomSettingsWindow`——工作区不再放在 Unity `Assets/` 内。图集由打包器 `loomgui_pkg` 自绘产 `atlas.png` + `atlas.json`，不再依赖 Unity `SpriteAtlas`。运行时引导由 `loom.runtime.json` 统管（声明包/图集/字体）。原 `LoomSettingsWindow` / `LoomAtlasSync` / `LoomConfigExporter` / `LoomWorkspaceInitializer` 在 v1.8+ 废弃。详见 `docs/superpowers/specs/2026-07-10-standalone-packer-atlas-workspace-design.md`。
+
+**原设计（v1.4-a ~ v1.7，已废弃）**：Unity 内 C# 实现。`LoomSettingsWindow`（`LoomGUI > Settings` 面板）提供工作区 tab：
 1. **工作区初始化**：`LoomWorkspaceInitializer` 在目标工作区生成 `config.json` + 注入围栏规则 + skill（从 `Editor Resources` 拷贝模板）。
 2. **config.json**：记录工作区根路径 + res 根 + 输出路径；AI harness（Claude Code 等）读取它定位 `loomgui_pkg.exe` + 打包参数。
 3. **open-design 导入**：初始化后的工作区直接用 `od project import <workspace>` 导入，AI 在 cwd 读 `CLAUDE.md` + `.claude/skills/` 自动工作。
@@ -204,7 +206,7 @@ v1d.3 已做 **NativeHost-lite**（div 占位 + 后端 `BindNativeHost` 跟随 w
 
 ### 5.6 包格式：v1.x 演进项
 
-集中式迁移器链（多版本累积后）；`nextPos` 长度前缀 forward-compat（v2 加字段）；branches（多语言）/highResolution（1x/2x/3x）；scaleLevel（MatchWidth/MatchHeight）。v1 当前 formatVersion 8（详见 docs/pitfalls.md §1 包格式）。
+集中式迁移器链（多版本累积后）；`nextPos` 长度前缀 forward-compat（v2 加字段）；branches（多语言）/highResolution（1x/2x/3x）；scaleLevel（MatchWidth/MatchHeight）。formatVersion 当前值见 `loomgui_core/src/asset/mod.rs` 的 `PKG_FORMAT_VERSION`。
 
 ### 5.7 契约版本化（待第二个契约版本时定）
 

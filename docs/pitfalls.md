@@ -97,6 +97,10 @@
 
 ## 2. 踩坑记录
 
+> **v1.8+ 架构变更（2026-07-10）**：以下坑号涉及的 Unity `SpriteAtlas` / `LoomSettings` / `LoomSettingsWindow` / `LoomAtlasSync` / `SpriteResolver` folder→atlas 路由体系已在 v1.8+ 中被取代——图集改为打包器 `loomgui_pkg` Rust 自绘产出 `atlas.png` + `atlas.json`，工作区改为独立磁盘目录（`loom.workspace.json`），`LoomSettings` ScriptableObject 删除，运行时引导由 `loom.runtime.json` 接管，`SpriteResolver` 改为 `Texture2D` + atlas.json UV 字典直查。受影响的坑号包括但不限于：坑 104（SpriteResolver 缓存 miss）、坑 115（Unity 6 SpriteAtlas V1/V2 五连坑）、坑 120（SpriteAtlas UV remap）、坑 121（AssetPostprocessor CreateAsset）、坑 104 中 `LoomAtlasSync` 的 pack 机制、坑 111 中 `LoomSettingsWindow` CLI 参数。这些仍是真实的踩坑历史（教训不因架构变而失效），但系统组件本身已被取代——遇到相关代码时请参考新架构 spec `docs/superpowers/specs/2026-07-10-standalone-packer-atlas-workspace-design.md`，勿按旧系统修复。
+>
+> 坑 63 中 font atlas alpha-mask 的教训对核心自绘字体仍部分适用（atlas 仍是 alpha-mask），但实现路径已变（字体 atlas 由核心 etagere 管理）。
+
 ### 坑 1：taffy 0.5 `MeasureFunc::Boxed` 不存在（API 详见 §1.1）
 brief 写 `MeasureFunc::Boxed` 编译失败 → 0.5.2 改 `TaffyTree<NodeContext>` + `compute_layout_with_measure` FnMut（`Arc<Font>` carry 作废，FnMut 借用合法）。**教训**：brief API 草稿是起点非权威，按编译器 + crate 实际版本调。
 
