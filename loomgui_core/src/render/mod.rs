@@ -1256,20 +1256,25 @@ fn build_text_mesh(
                 // 无轮廓字形（空格、零宽空格等）atlas 返空 rect → 不产 quad（advance 在
                 // layout 已算，pen 已前进，跳过不影响后续字形位置）。
                 if r.px_w != 0 && r.px_h != 0 {
-                    // 合成 italic：quad 顶边右偏（skew × 字形高），底边不动。
-                    let skew_top = italic_skew * r.px_h as f32;
                     let p = base_pages
                         .entry(r.page)
                         .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                    // SDF：atlas bitmap 固定按 SOURCE_SIZE 光栅，所有 target size 共享同一份 SDF。
+                    // quad 按 target/SOURCE 缩放到目标字号；pad(=SPREAD) 是 source 空间随 quad 同比
+                    // 缩放；bearing 来自 layout 已是 target 维度，不再乘 scale。
+                    let scale = run.font_size / crate::text::atlas::SOURCE_SIZE as f32;
+                    let pad_scaled = pad * scale;
                     for &boff in bold_offsets {
                         // pixel snap：原点 round 到整数 design px。flex 居中（align/justify
                         // center）把文字块原点算成亚像素浮点，字形光栅是整数像素，后端 Bilinear
                         // 在亚像素位置混合整个字形 → 模糊。sf=1（按设计分辨率渲染）时整数 design
                         // px = 屏幕像素整数，Bilinear 退化为 Point 采样，字形清晰。
-                        let left = (g.x + g.bearing_x - pad + boff + rect.x).round();
-                        let top = (line.baseline - g.bearing_y - pad + rect.y).round();
-                        let right = left + r.px_w as f32;
-                        let bottom = top + r.px_h as f32;
+                        let left = (g.x + g.bearing_x - pad_scaled + boff + rect.x).round();
+                        let top = (line.baseline - g.bearing_y - pad_scaled + rect.y).round();
+                        let right = left + r.px_w as f32 * scale;
+                        let bottom = top + r.px_h as f32 * scale;
+                        // 合成 italic：quad 顶边右偏（skew × 字形高），底边不动。
+                        let skew_top = italic_skew * r.px_h as f32 * scale;
                         let base = p.0.len() as u32;
                         // 顶点序 BL, BR, TR, TL（与 mesh::quad 同序）。
                         p.0.push([left, bottom]);

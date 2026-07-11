@@ -6,7 +6,7 @@ use crate::style::resolved::{
 };
 use crate::text::atlas::GlyphAtlas;
 use crate::text::layout::measure_text;
-use crate::text::layout::FontTable;
+use crate::text::layout::{FontTable, TextLayout};
 use taffy::style::{Dimension, LengthPercentage};
 
 /// 测试 glyph atlas（空，不注册真实字体时 atlas 为空壳——ensure 需 face 参数才分配）。
@@ -741,6 +741,10 @@ fn build_text_verts_in_world_space_and_upright() {
 /// 光栅是整数像素——后端 Bilinear 在亚像素位置双线性混合整个字形 → 模糊。build_text_mesh
 /// 须把每字形 quad 原点 round 到整数 design px：sf=1（按设计分辨率渲染）时即屏幕像素整数，
 /// Bilinear 退化为 Point 采样，字形清晰。
+///
+/// SDF 后契约缩小为只 snap 原点（left/top）：atlas bitmap 固定按 SOURCE_SIZE 光栅，quad 按
+/// target/SOURCE 缩放后右下角 = 原点 + r.px_w/h * scale，scale 非 1 时常为小数。原点 snap
+/// 已让字形 bitmap 落整数像素（消除模糊），quad 尺寸的小数由 SDF shader 平滑处理。
 #[test]
 fn build_text_snaps_quad_to_integer_pixel() {
     let fonts = match test_font_table() {
@@ -781,20 +785,91 @@ fn build_text_snaps_quad_to_integer_pixel() {
         _ => unreachable!(),
     };
     assert!(!verts.is_empty(), "Hello 有字形 → verts 非空");
+    // 每字形 4 顶点序：BL, BR, TR, TL。SDF 后只保证原点（left=BL/TL.x、top=TR/TL.y）整数对齐。
     for (i, v) in verts.iter().enumerate() {
-        assert!(
-            v[0].fract() == 0.0,
-            "vert[{}].x 须整数像素对齐（pixel snap），实 {}",
-            i,
-            v[0]
-        );
-        assert!(
-            v[1].fract() == 0.0,
-            "vert[{}].y 须整数像素对齐（pixel snap），实 {}",
-            i,
-            v[1]
-        );
+        let pos = i % 4;
+        if matches!(pos, 0 | 3) {
+            // BL/TL.x = left（原点 x）
+            assert!(
+                v[0].fract() == 0.0,
+                "vert[{}].x (left) 须整数像素对齐（pixel snap），实 {}",
+                i,
+                v[0]
+            );
+        }
+        if matches!(pos, 2 | 3) {
+            // TR/TL.y = top（原点 y）
+            assert!(
+                v[1].fract() == 0.0,
+                "vert[{}].y (top) 须整数像素对齐（pixel snap），实 {}",
+                i,
+                v[1]
+            );
+        }
     }
+}
+
+/// build_text_mesh 输入 fixture：单字 'A' 在指定 font_size 下的 layout + 字体表 + 零 rect。
+/// atlas 由 caller 各自构造（mut 借用不能从 fixture 返回后再 borrow layout/fonts）。
+fn build_text_fixture(font_size: f32) -> (FontTable, TextLayout, Rect) {
+    let fonts = test_font_table().expect("need test font");
+    let layout = measure_text(
+        "A",
+        font_size,
+        0.0,
+        0.0,
+        TextAlign::Left,
+        false,
+        None,
+        &fonts.stack_for(None),
+        [1.0, 1.0, 1.0, 1.0],
+    );
+    let rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 0.0,
+        h: 0.0,
+    };
+    (fonts, layout, rect)
+}
+
+/// 取 base 首字形 quad 宽度（BL.x 与 BR.x 之差绝对值）。顶点序 BL, BR, TR, TL。
+fn quad_width(meshes: &TextMeshes) -> f32 {
+    let (_, verts, _, _, _) = meshes.base.first().expect("至少一页 base mesh");
+    assert!(!verts.is_empty(), "base mesh 含至少一字形");
+    (verts[1][0] - verts[0][0]).abs()
+}
+
+/// SDF：atlas 固定按 SOURCE_SIZE(48) 光栅，build_text_mesh 按 target/SOURCE 缩放 quad。
+/// target=48（=SOURCE）→ quad 宽 ≈ atlas bitmap 宽；target=24（=SOURCE/2）→ 宽减半。
+#[test]
+fn build_text_quad_scales_by_target_over_source() {
+    let (fonts48, layout48, rect48) = build_text_fixture(48.0);
+    let m48 = build_text_mesh(
+        &layout48,
+        &mut test_glyph_atlas(),
+        &fonts48,
+        &rect48,
+        &[],
+        None,
+        false,
+    );
+    let (fonts24, layout24, rect24) = build_text_fixture(24.0);
+    let m24 = build_text_mesh(
+        &layout24,
+        &mut test_glyph_atlas(),
+        &fonts24,
+        &rect24,
+        &[],
+        None,
+        false,
+    );
+    let w48 = quad_width(&m48);
+    let w24 = quad_width(&m24);
+    assert!(
+        (w48 - 2.0 * w24).abs() < 1.0,
+        "target 减半 → quad 宽度减半，w48={w48} w24={w24}"
+    );
 }
 
 /// 空格等无轮廓字形不该渲染成方块——rasterize_glyph 对 gid>0 无 bbox/空轮廓返空
@@ -2992,7 +3067,6 @@ fn rich_text_padding_offsets_glyphs_vertically() {
 /// → 右对齐 offset 基准含 padding → 末字溢出 box 右 padding（B9 "右对齐超框" 症状）。
 /// 修复后 max_width=content width → 右对齐在 content area 内、末字 ≤ box right。
 #[test]
-#[ignore = "SDF Task 2 中间态：rasterize_glyph 固定 SOURCE_SIZE 光栅后 px_w 变大，build_text_mesh quad 尚未按 target/SOURCE_SIZE 缩放（Task 4）→ 末字超 box。Task 4 quad 缩放后去掉 ignore。"]
 fn rich_text_right_align_does_not_overflow_box_with_padding() {
     use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
     use taffy::style::LengthPercentage;
