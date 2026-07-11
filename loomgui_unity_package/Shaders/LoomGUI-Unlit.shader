@@ -25,6 +25,8 @@ Shader "LoomGUI/Unlit"
         _CFOff ("CFOff", Vector) = (0,0,0,0)
         _Alpha ("Alpha", Float) = 1
         _CornerRadius ("CornerRadius", Float) = 0
+        _FaceDilate("Face Dilate", Range(-1,1)) = 0.15   // 调厚治"字细"：正值向内推 threshold 增粗
+        _GradientScale("Gradient Scale", Float) = 13     // = SPREAD(12)+1，distance→屏幕换算（对标 TMP _GradientScale=atlasPadding+1）
     }
     SubShader
     {
@@ -65,8 +67,13 @@ Shader "LoomGUI/Unlit"
                 float4 _CFOff;
                 float _Alpha;
                 float _CornerRadius;   // 归一化圆角半径（design_radius / min_half_size），CLIPPED_ROUNDED 用
+                float _FaceDilate;
+                float _GradientScale;
             CBUFFER_END
             TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
+            // Unity 按 {TextureName}_TexelSize 名字约定自动填充（.xy=1/wh, .zw=wh）；须显式声明才能在 HLSL 引用。
+            // 不放 UnityPerMaterial CBUFFER：引擎按纹理（非 material）填充，SRP batcher 不要求入 CBUFFER。
+            float4 _MainTex_TexelSize;
 
             Vary vert(Attr v) {
                 Vary o;
@@ -100,9 +107,20 @@ Shader "LoomGUI/Unlit"
                 vcol.rgb = (sc <= 0.04045) ? sc / 12.92 : pow((sc + 0.055) / 1.055, 2.4);
                 half4 tex = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv);
                 #if defined(ALPHA_MASK)
-                // text（program:1）：font atlas R8 覆盖在 .r 通道（R8 无 alpha，.a 恒 1），
-                // 纹理采样 .r 得字形覆盖，rgb 用顶点色，alpha = vcol.a * tex.r。
-                half4 col = half4(vcol.rgb, vcol.a * tex.r);
+                // SDF：tex.r 是 encoded distance（中心 0.5、inside>0.5）。
+                // 屏幕空间 scale：ddx/ddy 自适应屏幕像素密度，任意尺寸/缩放锐利（对标 TMP SSD.cginc:95）。
+                float2 uvDx = ddx(i.uv);
+                float2 uvDy = ddy(i.uv);
+                float pxSize = rsqrt(abs(uvDx.x * uvDy.y - uvDx.y * uvDy.x));
+                float scale = pxSize * (1.3333 * _GradientScale) / _MainTex_TexelSize.z;
+                // raw 0-1 距离重建：d 直接用 tex.r（中心 0.5、inside>0.5），不预解码到像素单位。
+                // scale 已含 _GradientScale 补偿编码斜率（对标 TMP param.y = 1.3333*_GradientScale/...）；
+                // 若此处再把 d 乘 (_GradientScale-1) 解码，编码斜率会被计入两次 → AA 过渡带 ~13× 过窄（过锐、锯齿）。
+                // 正值 _FaceDilate 把 threshold 压到 0.5 以下 → 同一 d 更易跨过 → 字形增粗。
+                float d = tex.r;
+                float threshold = 0.5 - _FaceDilate * 0.5;
+                float faceAlpha = saturate((d - threshold) * scale + 0.5);
+                half4 col = half4(vcol.rgb, vcol.a * faceAlpha);
                 #elif defined(BG_COMPOSITE)
                 // Container+bg-image（program:2/4）：CSS background 合成 = 图(tex) over 底色(vcol)，结果直通配合 SrcAlpha blend。
                 // 旧 col.a=vcol.a：无 bg-color(vcol.a=0)时全透明丢图（验收 §3.6第4/§3.7/§3.9 图消失）。
