@@ -302,6 +302,47 @@ mod tests {
     }
 
     #[test]
+    fn border_ring_asymmetric_winding_consistent_ccw() {
+        // 非对称宽度四边全发：每边 2 三角 = 8 三角。每三角形有符号面积须全同号
+        // （一致 CCW winding），否则后端 back-face cull 会漏绘某条带。
+        fn signed_area(verts: &[[f32; 2]], a: u32, b: u32, c: u32) -> f32 {
+            let pa = verts[a as usize];
+            let pb = verts[b as usize];
+            let pc = verts[c as usize];
+            0.5 * ((pb[0] - pa[0]) * (pc[1] - pa[1]) - (pc[0] - pa[0]) * (pb[1] - pa[1]))
+        }
+        let r = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        };
+        let radii = [(0.0, 0.0); 4];
+        let widths = BorderWidths {
+            top: 2.0,
+            right: 3.0,
+            bottom: 4.0,
+            left: 5.0,
+        };
+        let (verts, _u, _c, idx) = border_ring(&r, &radii, widths, [1.0; 4]);
+        assert_eq!(idx.len() % 3, 0, "索引数是 3 的倍数");
+        let mut signs = Vec::new();
+        for tri in (0..idx.len()).step_by(3) {
+            let area = signed_area(&verts, idx[tri], idx[tri + 1], idx[tri + 2]);
+            if area.abs() > 1e-6 {
+                signs.push(area.signum());
+            }
+        }
+        assert!(!signs.is_empty(), "非对称宽度应有非退化三角形");
+        let first = signs[0];
+        assert!(
+            signs.iter().all(|&s| s == first),
+            "所有非退化三角形有符号面积同号（一致 winding），got signs={:?}",
+            signs
+        );
+    }
+
+    #[test]
     fn border_ring_opposite_sides_exceed_width_clamped() {
         // left+right > rw → per-axis 比例缩（CSS 语义）。left=80,right=40,rw=100 → scale=100/120
         let r = Rect {

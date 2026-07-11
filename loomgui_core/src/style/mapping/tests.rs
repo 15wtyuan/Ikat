@@ -603,6 +603,27 @@ fn apply_border_longhand_width_leaves_color_untouched() {
     );
 }
 
+/// `border-width` 四值 `<t> <r> <b> <l>` 必须分别落到 `ts.border` 四边——旧实现曾把四值
+/// 坍缩成 top 一边。单元级锁定四边独立赋值（既有 `apply_border_longhand_width_leaves_color_untouched`
+/// 只断言 top，无法检出 right/bottom/left 丢失）。
+#[test]
+fn apply_border_width_four_values_sets_all_four_sides() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "border-width", "1px 2px 3px 4px"));
+    let ts = &s.taffy_style.border;
+    assert!(matches!(ts.top, LengthPercentage::Length(1.0)), "top=1");
+    assert!(matches!(ts.right, LengthPercentage::Length(2.0)), "right=2");
+    assert!(
+        matches!(ts.bottom, LengthPercentage::Length(3.0)),
+        "bottom=3"
+    );
+    assert!(matches!(ts.left, LengthPercentage::Length(4.0)), "left=4");
+    assert!(
+        s.border_color.is_none(),
+        "border-width 只设 width，不碰 border_color"
+    );
+}
+
 #[test]
 fn transition_empty_value_is_none() {
     // apply_decl("transition", "") → style.transition = None（未声明 vs 默认值有不同语义）

@@ -207,6 +207,63 @@ fn border_shorthand_renders_border_ring() {
     );
 }
 
+/// `border-bottom` 单边 longhand 端到端：apply_decl 设 ts.border.bottom + border_color →
+/// build_render_nodes → border_ring 只发底边一条带的几何（2 三角 = 6 索引），其余三边不发。
+/// 背景仍占 4 顶点 / 6 索引，故总 verts=4+8=12、indices=6+6=12。
+#[test]
+fn border_bottom_longhand_renders_single_edge() {
+    use crate::style::mapping::apply_decl;
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        },
+        Some([0.0, 0.0, 0.0, 1.0]),
+    );
+    assert!(apply_decl(
+        &mut n.style,
+        "border-bottom",
+        "1px solid #ff0000"
+    ));
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let mesh = frame
+        .nodes
+        .iter()
+        .find(|rn| matches!(&rn.payload, NodePayload::Mesh { verts, .. } if !verts.is_empty()))
+        .expect("Mesh 节点");
+    let NodePayload::Mesh {
+        verts,
+        indices,
+        colors,
+        ..
+    } = &mesh.payload
+    else {
+        unreachable!()
+    };
+    // 背景 4 + 边框 8（border_ring 顶点固定 8，零宽边顶点仍在但不发三角）。
+    assert_eq!(verts.len(), 12, "背景4 + 边框8 = 12 顶点");
+    // 背景 6 + 底边 2 三角 × 3 索引 = 6；其他三边零宽不发 → indices=12（若四边全发会 = 30）。
+    assert_eq!(
+        indices.len(),
+        12,
+        "只底边 1 edge × 6 索引 + 背景 6 = 12，全四边发 = 30（排除）"
+    );
+    assert!(colors.contains(&[1.0, 0.0, 0.0, 1.0]), "边框红色顶点存在");
+}
+
 #[test]
 fn build_container_without_border_no_border_node() {
     // border_color 缺省（None）→ 不发边框节点。回归保护：dead field 激活不应影响无边框节点。
