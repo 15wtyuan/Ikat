@@ -166,7 +166,7 @@ float face = saturate((d - (0.5 - _FaceDilate*0.5)) * scale + 0.5);  // _FaceDil
 ## 5. 分阶段
 
 - **Phase 1**（完整覆盖 showcase，零回归）：光栅 SDF + `GlyphKey` 简化 + quad 缩放 + shader base（`_FaceDilate`）+ outline + underlay（含多重 N≤3）。公司 Rust 改 + .dll / 家里 PlayMode 验收。
-- **Phase 2**：glow / 纯字形 blur + 多重 shadow 收尾 + SOURCE/SPREAD 精调。
+- **Phase 2**（按需，不阻塞）：glow / 纯字形 blur（showcase 无）+ SOURCE/SPREAD 精调（若 Phase 1 验收需）。多重 shadow 已在 Phase 1 完成，Phase 2 不再涉及。
 - pixel snap（已做未 commit）在 SDF 后仍需要，保留。
 
 ## 6. 风险
