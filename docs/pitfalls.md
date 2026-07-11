@@ -1135,3 +1135,24 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：`editorInited` flag，setup*（tabs/dragDrop/log/build）只在首次 renderMain 注册一次；handler 闭包读模块级 `ws`/`wsPath`（renderMain 每次更新最新），不需重注册。
 **教训**：Tauri 事件 listener 累积不自动去重；renderMain 这类可重入入口里的 setup 要 flag 守护，listener 闭包读最新状态而非重新绑。诊断：操作次数递增失效 = listener 累积。
 
+### 坑 154：worktree baseRef 默认 fresh 丢本地未 push commit（双机 + worktree）
+
+**症状**：EnterWorktree / `git worktree add` 创建的 worktree 缺最近本地 commit（showcase 迁移、最新 pkg 格式等不在），基于过期 origin。
+**根因**：worktree.baseRef 默认 `fresh`（从 `origin/<default>` branch）；双机工作流本地常领先 origin（公司机未 push 的 commit），fresh 把它们丢了。
+**解决**：创建前查 `git status -sb` 的 ahead 数或 `git log origin/main..HEAD`；领先则用 `git worktree add <path> -b <branch>` 显式基于本地 HEAD（不走 fresh origin）。
+**教训**：双机 repo 用 worktree 前必查 origin 漂移；本地领先 origin 时 worktree 必须基于本地 HEAD，否则基于过期 origin 丢工作。
+
+### 坑 155：git merge tracked 构建产物（pkg.bin/dll）binary 冲突
+
+**症状**：merge feature branch 报 `CONFLICT (content): showcase.pkg.bin / loomgui_ffi_c.dll`（binary，git 不能 auto merge）。
+**根因**：dll/pkg.bin 是 tracked binary，main 与 feature 两侧都重编/重打（字节异），git 无文本行级合 binary。
+**解决**：`git checkout --ours <binary>` 解 conflict + merge commit，**立即基于 merged 代码重编重打**覆盖（选哪边都不对——都不含对方代码），`git commit --amend` 把新产物并进 merge commit。
+**教训**：tracked 构建产物 merge 冲突，选边只解 git conflict；产物必须基于 merged 代码重产，别直接选一边 commit（会缺对方代码的编译结果）。
+
+### 坑 156：Windows pkg build 产物 CRLF 行尾 noise 污染 commit
+
+**症状**：pkg build 后 `loom.runtime.json`/`icons.atlas.json`/`LoomGUIBindings.cs` git 显 M，但 `git diff` 空（content 无变）。
+**根因**：Rust 写文件用 LF，HEAD 是 CRLF（Windows git autocrlf 转换），git 检测行尾变显 M；diff 空因 content 同。
+**解决**：`git checkout <noise files>` 恢复 HEAD 行尾，只 commit 真变化（pkg.bin/dll）。commit 前 `git diff --stat` 验：stat 只列真 binary 变（尺寸变），行尾 noise 不列。
+**教训**：Windows 上 pkg build / cargo build 重产 tracked 文本产物（json/cs）常见行尾 noise；`git diff --stat` 区分真变化（binary 列尺寸变）vs 行尾 noise（stat 空），checkout 恢复 noise 别 commit。
+

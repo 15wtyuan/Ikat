@@ -438,8 +438,8 @@ fn parse_border_value(value: &str) -> Option<(f32, Option<[f32; 4]>)> {
     Some((w?, color))
 }
 
-/// CSS border 四边（用于单边 longhand）。
-enum BorderSide {
+/// CSS 盒模型四边（border/padding 单边 longhand 共用）。
+enum Side {
     Top,
     Right,
     Bottom,
@@ -447,20 +447,38 @@ enum BorderSide {
 }
 
 /// border-top/right/bottom/left 单边 longhand：设 ts.border 对应边 + border_color，不动其他三边。
-fn apply_border_side(style: &mut ResolvedStyle, side: BorderSide, value: &str) -> bool {
+fn apply_border_side(style: &mut ResolvedStyle, side: Side, value: &str) -> bool {
     let Some((w, color)) = parse_border_value(value) else {
         return false;
     };
     let lp = LengthPercentage::Length(w);
     let ts = &mut style.taffy_style;
     match side {
-        BorderSide::Top => ts.border.top = lp,
-        BorderSide::Right => ts.border.right = lp,
-        BorderSide::Bottom => ts.border.bottom = lp,
-        BorderSide::Left => ts.border.left = lp,
+        Side::Top => ts.border.top = lp,
+        Side::Right => ts.border.right = lp,
+        Side::Bottom => ts.border.bottom = lp,
+        Side::Left => ts.border.left = lp,
     }
     if let Some(c) = color {
         style.border_color = Some(c);
+    }
+    true
+}
+
+/// padding-top/right/bottom/left 单边 longhand：设 ts.padding 对应边，不动其他三边。
+/// px-only（同 padding 简写）：复用 parse_four 的 px 解析，单 longhand 取首值；非 px → false。
+fn apply_padding_side(style: &mut ResolvedStyle, side: Side, value: &str) -> bool {
+    let [v, _, _, _] = match parse_four(value) {
+        Some(f) => f,
+        None => return false,
+    };
+    let lp = LengthPercentage::Length(v);
+    let ts = &mut style.taffy_style;
+    match side {
+        Side::Top => ts.padding.top = lp,
+        Side::Right => ts.padding.right = lp,
+        Side::Bottom => ts.padding.bottom = lp,
+        Side::Left => ts.padding.left = lp,
     }
     true
 }
@@ -506,6 +524,10 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             };
             true
         }
+        "padding-top" => apply_padding_side(style, Side::Top, value),
+        "padding-right" => apply_padding_side(style, Side::Right, value),
+        "padding-bottom" => apply_padding_side(style, Side::Bottom, value),
+        "padding-left" => apply_padding_side(style, Side::Left, value),
         "margin" => {
             let [t, r, b, l] = match parse_margin_four(value) {
                 Some(v) => v,
@@ -536,10 +558,10 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             }
             true
         }
-        "border-top" => apply_border_side(style, BorderSide::Top, value),
-        "border-right" => apply_border_side(style, BorderSide::Right, value),
-        "border-bottom" => apply_border_side(style, BorderSide::Bottom, value),
-        "border-left" => apply_border_side(style, BorderSide::Left, value),
+        "border-top" => apply_border_side(style, Side::Top, value),
+        "border-right" => apply_border_side(style, Side::Right, value),
+        "border-bottom" => apply_border_side(style, Side::Bottom, value),
+        "border-left" => apply_border_side(style, Side::Left, value),
         "border-width" => {
             let [t, r, b, l] = match parse_four(value) {
                 Some(v) => v,
