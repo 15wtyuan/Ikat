@@ -1221,3 +1221,59 @@ fn letter_spacing_px_is_accepted() {
         "letter-spacing = 2.0"
     );
 }
+
+/// border-top/right/bottom/left 单边 longhand：设 ts.border 对应边 + border_color，不动其他三边。
+#[test]
+fn apply_border_side_longhands_set_one_side_only() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "border-bottom", "1px solid #3a3f55"));
+    let ts = &s.taffy_style.border;
+    assert!(
+        matches!(ts.bottom, LengthPercentage::Length(1.0)),
+        "bottom 设了"
+    );
+    assert!(
+        matches!(ts.top, LengthPercentage::Length(0.0)),
+        "top 不动（默认 0）"
+    );
+    assert!(matches!(ts.left, LengthPercentage::Length(0.0)));
+    assert!(matches!(ts.right, LengthPercentage::Length(0.0)));
+    let c = s.border_color.expect("单边 color 解析");
+    assert_eq!(c[0], 0x3a as f32 / 255.0);
+
+    // 累积：再设 top，bottom 仍在
+    assert!(apply_decl(&mut s, "border-top", "4px solid #e0e0e0"));
+    assert!(matches!(
+        s.taffy_style.border.top,
+        LengthPercentage::Length(4.0)
+    ));
+    assert!(
+        matches!(s.taffy_style.border.bottom, LengthPercentage::Length(1.0)),
+        "bottom 不被覆盖"
+    );
+}
+
+#[test]
+fn apply_border_side_longhand_rejects_non_px() {
+    // 非 px width → 整条 false（围栏外静默忽略），不碰任何字段
+    let mut s = ResolvedStyle::default();
+    assert!(!apply_decl(&mut s, "border-bottom", "1em solid red"));
+    assert!(
+        matches!(s.taffy_style.border.bottom, LengthPercentage::Length(0.0)),
+        "失败不设值"
+    );
+    assert!(s.border_color.is_none(), "失败不设 color");
+}
+
+#[test]
+fn apply_border_side_longhand_optional_color() {
+    // border-bottom:1px（无 color）→ 设宽度，不碰 border_color
+    let mut s = ResolvedStyle::default();
+    s.border_color = Some([0.5; 4]);
+    assert!(apply_decl(&mut s, "border-bottom", "1px"));
+    assert!(matches!(
+        s.taffy_style.border.bottom,
+        LengthPercentage::Length(1.0)
+    ));
+    assert_eq!(s.border_color, Some([0.5; 4]), "无 color token 不覆盖");
+}

@@ -414,6 +414,57 @@ fn parse_overflow(value: &str) -> Option<OverflowMode> {
     }
 }
 
+/// 解析 border 宽度+颜色声明：`<width> <style>? <color>?`（CSS 简写语义，style 围栏外忽略）。
+/// width 取首个 px token，color 取首个可解析颜色 token。width 缺失 → None（整条无效）。
+fn parse_border_width_color(value: &str) -> Option<(f32, Option<[f32; 4]>)> {
+    let mut w: Option<f32> = None;
+    let mut color: Option<[f32; 4]> = None;
+    for tok in value.split_whitespace() {
+        if color.is_none() {
+            if let Some(c) = parse_color(tok) {
+                color = Some(c);
+                continue;
+            }
+        }
+        if w.is_none() {
+            if let Some(px) = tok
+                .strip_suffix("px")
+                .and_then(|s| s.trim().parse::<f32>().ok())
+            {
+                w = Some(px);
+            }
+        }
+    }
+    Some((w?, color))
+}
+
+/// CSS border 四边（用于单边 longhand）。
+enum BorderSide {
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
+/// border-top/right/bottom/left 单边 longhand：设 ts.border 对应边 + border_color，不动其他三边。
+fn apply_border_side(style: &mut ResolvedStyle, side: BorderSide, value: &str) -> bool {
+    let Some((w, color)) = parse_border_width_color(value) else {
+        return false;
+    };
+    let lp = LengthPercentage::Length(w);
+    let ts = &mut style.taffy_style;
+    match side {
+        BorderSide::Top => ts.border.top = lp,
+        BorderSide::Right => ts.border.right = lp,
+        BorderSide::Bottom => ts.border.bottom = lp,
+        BorderSide::Left => ts.border.left = lp,
+    }
+    if let Some(c) = color {
+        style.border_color = Some(c);
+    }
+    true
+}
+
 /// 把一条 declaration 应用到 style（覆盖对应字段）。返回是否被识别。
 pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
     let ts = &mut style.taffy_style;
@@ -469,34 +520,16 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "border" => {
-            // CSS 简写：border: <width> <style>? <color>?（三件任意序，style 围栏外忽略）。
-            // 四边同值（简写语义）。width 取首个 px token，color 取首个可解析颜色 token。
-            // 此前简写只取 width、丢 color → border_color=None → 渲染不画边框，与 AI 对标准
-            // CSS 的强先验不符（html 预览有边框、Unity 无）。现解析 color 令二者一致。
-            let mut w: Option<f32> = None;
-            let mut color: Option<[f32; 4]> = None;
-            for tok in value.split_whitespace() {
-                if color.is_none() {
-                    if let Some(c) = parse_color(tok) {
-                        color = Some(c);
-                        continue;
-                    }
-                }
-                if w.is_none() {
-                    if let Some(px) = tok
-                        .strip_suffix("px")
-                        .and_then(|s| s.trim().parse::<f32>().ok())
-                    {
-                        w = Some(px);
-                    }
-                }
-            }
-            let w = w.unwrap_or(0.0);
+            // CSS 简写：四边同值。width + color 共用 parse_border_width_color。
+            let Some((w, color)) = parse_border_width_color(value) else {
+                return false;
+            };
+            let lp = LengthPercentage::Length(w);
             ts.border = Rect {
-                left: LengthPercentage::Length(w),
-                right: LengthPercentage::Length(w),
-                top: LengthPercentage::Length(w),
-                bottom: LengthPercentage::Length(w),
+                left: lp,
+                right: lp,
+                top: lp,
+                bottom: lp,
             };
             style.border_width = w;
             if let Some(c) = color {
@@ -504,6 +537,10 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             }
             true
         }
+        "border-top" => apply_border_side(style, BorderSide::Top, value),
+        "border-right" => apply_border_side(style, BorderSide::Right, value),
+        "border-bottom" => apply_border_side(style, BorderSide::Bottom, value),
+        "border-left" => apply_border_side(style, BorderSide::Left, value),
         "border-width" => {
             let [t, r, b, l] = match parse_four(value) {
                 Some(v) => v,
