@@ -595,6 +595,8 @@ csbindgen 是为 Unity/IL2CPP 设计的主流绑定生成器（Cysharp MagicPhys
 
 **其它跨边界数据**：Stage 句柄（C# 持 opaque `IntPtr`）；输入事件（扁平数组）；回调（static + MonoPInvokeCallback）；纹理（核心只认 TexId，C# 上传后注册 id↔Texture2D）。
 
+> **⚠️ SDF 改造后部分废弃**（Plan 1 base SDF，2026-07）：下文 ② 的 `GlyphKey.effect_sig` / `register_effect` / bitmap dilate/erode/gaussian_blur 后处理 / Back-Front layer 叠放机制已移除——单一 SDF 后 atlas 存 distance，effect 改走 shader uniform（Plan 2 恢复 outline/underlay/glow/blur 时重写本段）。① clip 圆角 SDF 裁剪不受影响。
+>
 > **v1.8 契约扩展**（细节见 `docs/superpowers/specs/2026-07-08-v1.8-text-effects-decoration-design.md` + fence.md）：① clip 表 entry 20B→52B（加四角 radii，圆角 SDF 裁剪走 shader `CLIPPED_ROUNDED` 变体，`_ClipBox` SDF 替 AABB step；corner-radius 经 `ClipMath` 按 design 半径/design half-size 归一化，sf 抵消）。② 文字效果：`GlyphKey.effect_sig`（v1.6 预留 u64）启用，atlas `register_effect(sig, FontEffect)` + `ensure` 内 `rasterize_glyph` 后做 dilate/erode/gaussian_blur 后处理（Shadow=blur+offset / Stroke=erode 内侧 / Glow=dilate+blur / Blur=blur），按 Back/Front layer 叠放（`[Back:shadow/glow]→base→[Front:stroke/blur]`，合成靠绘制顺序 + sort_key 传播）。③ DSL 混合：标准 CSS（text-shadow/-webkit-text-stroke/text-decoration/linear-gradient/border/box-shadow/sepia）+ 私有 `font-effect:glow()/blur()`（标准 CSS 表达不了）。text_effects 是 ResolvedStyle 继承字段。`text-decoration` 当前仅 inline style 生效（CSS 规则形式推后，见 roadmap §2.7）。
 
 > FFI 传的是**完整渲染树**（SOA+arena，含全部状态），不是"只传 NodeId"。Rust 不持/不解引用任何 Unity 对象，跨 FFI 只传整数 id + 数据 buffer。
