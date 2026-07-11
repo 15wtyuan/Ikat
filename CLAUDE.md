@@ -39,7 +39,7 @@ cargo build --no-default-features --all-targets   # 按 crate，或 workspace �
 
 **跑单个测试 / 围栏门**：
 ```bash
-cargo test -p loomgui_core fence_contract   # ← 围栏契约门（见下）
+cargo test -p loomgui_core --test fence_contract   # ← 围栏契约门（见下）
 cargo test -p loomgui_core --test snapshot -- <name>
 ```
 
@@ -112,7 +112,7 @@ LoomGUI 只支持 HTML/CSS 的**明确子集**，称"围栏"。这是项目漂�
 
 - **权威真相源 = `loomgui_core/tests/fence_contract.rs`**（可执行契约）。`docs/design/fence.md` 是人类可读副本；**不一致时测试赢**。围栏规则通过独立工作区（standalone workspace directory + `loom.workspace.json`）注入，打包器 `loom-pkg build` 校验。
 - **改围栏 = 改 `fence_contract.rs` 测试 + `fence.md`**，不改 `main-design.md` §3（那节只写哲学，避免漂移）。
-- **围栏门**：`cargo test -p loomgui_core fence_contract`——build .dll 前跑、改 `apply_decl`/`FENCE_TAGS`/选择器后跑。
+- **围栏门**：`cargo test -p loomgui_core --test fence_contract`——build .dll 前跑、改 `apply_decl`/`FENCE_TAGS`/选择器后跑。
 - 两类围栏外行为（均**测试锁定**，别靠 grep 推断）：围栏外标签 + 行内混排 → **编译期报错**（parse 失败、打包器拒收）。围栏外 CSS 属性（如 `clip-path`、`cursor`）→ **静默忽略**（`apply_decl` 返 `false`）。
   - `position:relative` 教训："grep 无 match" ≠ "不支持"——可能是依赖默认值（taffy `Style::DEFAULT.position = Relative`）。声明支持前先核实依赖默认值 + 补测试。
   - `position:absolute`（v1.4-b 起围栏内）：`absolute`/`relative` 生效（taffy Absolute + inset），`fixed`/`sticky` 仍静默忽略。layout/render/hit 零改（taffy solve 自动）。
