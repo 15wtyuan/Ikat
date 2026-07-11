@@ -39,7 +39,7 @@ namespace LoomGUI
         [Tooltip("输入采集器（通常与本 Driver 同 GO）。留空时 Awake GetComponent 兜底。")]
         [SerializeField] LoomInputCollector _inputCollector;
 
-        [Tooltip("产物根目录（含 loom.runtime.json + ui/ + atlas/ + fonts/）。空 = StreamingAssets。")]
+        [Tooltip("产物根目录（含 loom.runtime.json + ui/ + atlas/ + fonts/）。空 = Assets/Bundles（打包器输出，editor 用）；built player 该路径不存在，须显式设此字段（如指向 StreamingAssets 拷贝）。")]
         [SerializeField] string _productRoot = "";
 
         LoomStage _stage;
@@ -114,7 +114,9 @@ namespace LoomGUI
         {
             if (!string.IsNullOrEmpty(_productRoot))
                 return _productRoot;
-            return Application.streamingAssetsPath;
+            // 默认 = 工程的 Assets/Bundles（打包器输出目录，editor 用）。与重构前 LoomSettings.pkgOutputDir
+            // 行为一致。built player 里该路径不存在——发行时显式设 _productRoot（如 StreamingAssets 拷贝）。
+            return Path.Combine(Application.dataPath, "Bundles");
         }
 
         // ===== Pure logic: merge atlas sprites into (key, width, height) list =====
