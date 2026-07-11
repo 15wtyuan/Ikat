@@ -117,7 +117,7 @@ fn build_container_with_border_emits_border_node() {
         Some([0.0, 0.0, 1.0, 1.0]), // 蓝底
     );
     n.style.border_color = Some([1.0, 0.0, 0.0, 1.0]); // 红边
-    n.style.border_width = 4.0;
+    n.style.taffy_style.border = taffy::geometry::Rect::length(4.0_f32);
     let mut scene = Scene::from_nodes(vec![n], vec![]);
     let fonts = test_font_table().expect("need test font for build_render_nodes");
     crate::scene::transform::compute_world_transforms(&mut scene);

@@ -4,44 +4,84 @@
 
 use crate::scene::node::Rect;
 
-/// 生成彩色边框 mesh：外轮廓（rect + radii）减内轮廓（向内缩 width）的环形三角带。
+/// 四边 border 宽度（像素，已 resolve）。命名防 parse_four 的 [t,r,b,l] 索引错位。
+/// 仅作 border_ring 参数，不序列化、不进 ResolvedStyle。
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct BorderWidths {
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+    pub left: f32,
+}
+
+impl BorderWidths {
+    /// 四边同值（均匀环，等价旧 border_ring 行为）。
+    pub const fn all(v: f32) -> Self {
+        Self {
+            top: v,
+            right: v,
+            bottom: v,
+            left: v,
+        }
+    }
+}
+
+/// 生成彩色边框 mesh：外轮廓（rect 4 角）减内轮廓（四边各自向内缩）的环形三角带。
 ///
-/// - radii = [TL, TR, BR, BL]，每角 (h, v) 像素半径（与 mesh::rounded_rect 同约定）。
-/// - width > 0 才生成；width ≤ 0 或 rect 退化 → 返空四表。
-/// - 返 SOA 四表 (verts, uvs, colors, indices)，与 mesh::quad 同形，uvs 全 0（纯色，
-///   不采样纹理）。
+/// - 非均匀宽度：每边梯形带宽 = 该边 widths；角是邻接梯形重叠区，不需额外几何。
+/// - per-axis 比例钳制（CSS 浏览器语义）：对边和超过 rect 尺寸时等比缩，防内轮廓交叉。
+/// - per-edge 跳零宽：width=0 的边不发三角（顶点仍 8 个——零宽邻边的内角被相邻非零边引用）。
+/// - radii 遇 border-radius 当前直角退化（圆角留待 SDF task）。
+/// - 返 SOA 四表（verts/uvs/colors/indices），uvs 全 0（纯色不采样）。
 pub fn border_ring(
     rect: &Rect,
     radii: &[(f32, f32); 4],
-    width: f32,
+    widths: BorderWidths,
     color: [f32; 4],
 ) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
-    if width <= 0.0 || rect.w <= 0.0 || rect.h <= 0.0 {
+    let _ = radii; // 直角退化；圆角 SDF task 再处理
+    let (x, y, rw, rh) = (rect.x, rect.y, rect.w, rect.h);
+    if rw <= 0.0 || rh <= 0.0 {
         return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     }
-    // 钳到短边一半，防内轮廓交叉（width > 短边/2 时内轮廓翻转产生负面积）。
-    let w = width.min(rect.w * 0.5).min(rect.h * 0.5);
-    let (x, y, rw, rh) = (rect.x, rect.y, rect.w, rect.h);
-    // ponytail: 圆角边框分段留 Task 5 圆角 SDF 一起补；此处有 radius 时按直角退化。
-    // 升级路径：外/内轮廓各走 rounded_rect 圆弧顶点，环形带连两轮廓。
-    let _ = radii;
-
-    // 外轮廓 4 角（TL, TR, BR, BL），内轮廓 4 角（同序缩进 w）。
+    if widths.top <= 0.0 && widths.right <= 0.0 && widths.bottom <= 0.0 && widths.left <= 0.0 {
+        return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    }
+    // per-axis 比例钳制：对边和 > 尺寸 → 等比缩（只缩不放）
+    let (mut t, mut r, mut b, mut l) = (widths.top, widths.right, widths.bottom, widths.left);
+    let xsum = l + r;
+    if xsum > rw && xsum > 0.0 {
+        let s = rw / xsum;
+        l *= s;
+        r *= s;
+    }
+    let ysum = t + b;
+    if ysum > rh && ysum > 0.0 {
+        let s = rh / ysum;
+        t *= s;
+        b *= s;
+    }
+    // 外轮廓 4 角（TL,TR,BR,BL），内轮廓按四边独立缩进
     let outer = [[x, y], [x + rw, y], [x + rw, y + rh], [x, y + rh]];
     let inner = [
-        [x + w, y + w],
-        [x + rw - w, y + w],
-        [x + rw - w, y + rh - w],
-        [x + w, y + rh - w],
+        [x + l, y + t],
+        [x + rw - r, y + t],
+        [x + rw - r, y + rh - b],
+        [x + l, y + rh - b],
     ];
     let mut verts = Vec::with_capacity(8);
     verts.extend_from_slice(&outer);
     verts.extend_from_slice(&inner);
-    let uvs = vec![[0.0, 0.0]; 8]; // 纯色，不采样纹理
+    let uvs = vec![[0.0, 0.0]; 8];
     let colors = vec![color; 8];
-    // 每边 2 三角连 outer[i]/outer[i+1]/inner[i+1]/inner[i]（环形带）。
+    // 每边 2 三角；width>0 才发（顶点固定 8）。序 [top, right, bottom, left] 与
+    // outer/inner 的 TL,TR,BR,BL 角序对齐：边 i 连角 i 与下一角 (i+1)%4。
+    let widths_arr = [t, r, b, l];
     let mut indices = Vec::with_capacity(24);
-    for i in 0..4 {
+    for (i, &w) in widths_arr.iter().enumerate() {
+        if w <= 0.0 {
+            continue;
+        }
         let ni = (i + 1) % 4;
         let (oi, oni) = (i as u32, ni as u32);
         let (ii, ini) = ((i + 4) as u32, (ni + 4) as u32);
@@ -88,7 +128,7 @@ mod tests {
             h: 50.0,
         };
         let radii = [(0.0, 0.0); 4];
-        let (v, _u, _c, i) = border_ring(&r, &radii, 0.0, [1.0; 4]);
+        let (v, _u, _c, i) = border_ring(&r, &radii, BorderWidths::default(), [1.0; 4]);
         assert!(v.is_empty() && i.is_empty(), "width=0 不生成边框");
     }
 
@@ -103,7 +143,8 @@ mod tests {
             h: 50.0,
         };
         let radii = [(0.0, 0.0); 4];
-        let (verts, _uvs, colors, indices) = border_ring(&r, &radii, 5.0, [1.0, 0.0, 0.0, 1.0]);
+        let (verts, _uvs, colors, indices) =
+            border_ring(&r, &radii, BorderWidths::all(5.0), [1.0, 0.0, 0.0, 1.0]);
         assert_eq!(verts.len(), 8, "直角矩形 4 外 + 4 内角 = 8 顶点");
         assert_eq!(indices.len(), 24, "4 边 × 2 三角 × 3 索引 = 24");
         assert!(
@@ -122,7 +163,7 @@ mod tests {
             h: 50.0,
         };
         let radii = [(0.0, 0.0); 4];
-        let (verts, _u, _c, _i) = border_ring(&r, &radii, 5.0, [1.0; 4]);
+        let (verts, _u, _c, _i) = border_ring(&r, &radii, BorderWidths::all(5.0), [1.0; 4]);
         let xs: Vec<f32> = verts.iter().map(|v| v[0]).collect();
         assert!(xs.contains(&5.0) && xs.contains(&95.0), "内轮廓 x 缩进 5");
     }
@@ -137,14 +178,14 @@ mod tests {
             h: 50.0,
         };
         let radii = [(0.0, 0.0); 4];
-        let (v, _u, _c, i) = border_ring(&r, &radii, 5.0, [1.0; 4]);
+        let (v, _u, _c, i) = border_ring(&r, &radii, BorderWidths::all(5.0), [1.0; 4]);
         assert!(v.is_empty() && i.is_empty(), "退化 rect 不生成边框");
     }
 
     #[test]
-    fn border_ring_width_clamped_to_half_rect() {
-        // width > rect 短边一半时钳到一半，防内轮廓交叉（100×50，width=200 → 钳到 25）。
-        // 内轮廓 x = [25, 75]，y = [25, 25]（h=50 → 内轮廓高 0，但仍发 8 顶点不交叉）。
+    fn border_ring_width_clamped_per_axis() {
+        // 四边同值超尺寸：100×50 rect，all(200) → x 方向 left+right=400>100 缩到 50+50，
+        // y 方向 top+bottom=400>50 缩到 25+25。内轮廓不交叉、不越界。
         let r = Rect {
             x: 0.0,
             y: 0.0,
@@ -152,11 +193,14 @@ mod tests {
             h: 50.0,
         };
         let radii = [(0.0, 0.0); 4];
-        let (verts, _u, _c, _i) = border_ring(&r, &radii, 200.0, [1.0; 4]);
-        // 内轮廓 x 含 25/75（钳后 w=25），不含负数或越界值。
+        let (verts, _u, _c, _i) = border_ring(&r, &radii, BorderWidths::all(200.0), [1.0; 4]);
         let xs: Vec<f32> = verts.iter().map(|v| v[0]).collect();
-        assert!(xs.contains(&25.0), "width 钳到 25 → 内轮廓 x=25");
-        assert!(xs.contains(&75.0), "内轮廓 x=75");
+        let ys: Vec<f32> = verts.iter().map(|v| v[1]).collect();
+        assert!(xs.contains(&50.0), "x 钳后 left=right=50 → inner x=50");
+        assert!(ys.contains(&25.0), "y 钳后 top=bottom=25 → inner y=25");
+        assert!(verts
+            .iter()
+            .all(|v| { (0.0..=100.0).contains(&v[0]) && (0.0..=50.0).contains(&v[1]) }));
     }
 
     #[test]
@@ -169,7 +213,7 @@ mod tests {
             h: 50.0,
         };
         let radii = [(0.0, 0.0); 4];
-        let (_v, uvs, _c, _i) = border_ring(&r, &radii, 5.0, [1.0; 4]);
+        let (_v, uvs, _c, _i) = border_ring(&r, &radii, BorderWidths::all(5.0), [1.0; 4]);
         assert!(uvs.iter().all(|uv| *uv == [0.0, 0.0]), "UV 全 0");
     }
 
@@ -203,5 +247,87 @@ mod tests {
         let radii = [(0.0, 0.0); 4];
         let (v, _u, _c, i) = box_shadow_quad(&r, &radii, 0.0, [1.0; 4]);
         assert!(v.is_empty() && i.is_empty(), "退化 rect → 空输出");
+    }
+
+    #[test]
+    fn border_ring_single_side_bottom_only() {
+        // border-bottom:1px：只底边有宽 → 只发底边 2 三角 = 6 索引；顶点固定 8（4 未引用）。
+        let r = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        };
+        let radii = [(0.0, 0.0); 4];
+        let widths = BorderWidths {
+            top: 0.0,
+            right: 0.0,
+            bottom: 1.0,
+            left: 0.0,
+        };
+        let (verts, _u, _c, idx) = border_ring(&r, &radii, widths, [1.0; 4]);
+        assert_eq!(verts.len(), 8, "顶点固定 8");
+        assert_eq!(idx.len(), 6, "只底边 2 三角 = 6 索引，得 {}", idx.len());
+    }
+
+    #[test]
+    fn border_ring_asymmetric_four_sides() {
+        // 四边各自宽度：内角 = (left, top) / (rw-right, top) / (rw-right, rh-bottom) / (left, rh-bottom)
+        let r = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        };
+        let radii = [(0.0, 0.0); 4];
+        let widths = BorderWidths {
+            top: 2.0,
+            right: 3.0,
+            bottom: 4.0,
+            left: 5.0,
+        };
+        let (verts, _u, _c, idx) = border_ring(&r, &radii, widths, [1.0; 4]);
+        let xs: Vec<f32> = verts.iter().map(|v| v[0]).collect();
+        let ys: Vec<f32> = verts.iter().map(|v| v[1]).collect();
+        // inner TL = (5, 2), inner TR = (97, 2), inner BR = (97, 46), inner BL = (5, 46)
+        assert!(
+            xs.contains(&5.0) && xs.contains(&97.0),
+            "内轮廓 x = left/right 缩进"
+        );
+        assert!(
+            ys.contains(&2.0) && ys.contains(&46.0),
+            "内轮廓 y = top/bottom 缩进"
+        );
+        assert_eq!(idx.len(), 24, "四边全 >0 → 24 索引");
+    }
+
+    #[test]
+    fn border_ring_opposite_sides_exceed_width_clamped() {
+        // left+right > rw → per-axis 比例缩（CSS 语义）。left=80,right=40,rw=100 → scale=100/120
+        let r = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        };
+        let radii = [(0.0, 0.0); 4];
+        let widths = BorderWidths {
+            top: 0.0,
+            right: 40.0,
+            bottom: 0.0,
+            left: 80.0,
+        };
+        let (verts, _u, _c, _idx) = border_ring(&r, &radii, widths, [1.0; 4]);
+        // 钳后 left≈66.67, right≈33.33；inner TL.x = x+left ≈ 66.67, inner TR.x = x+rw-right ≈ 66.67
+        // → inner 宽 ≈ 0（塌缩），但不交叉（无负坐标越界）
+        let xs: Vec<f32> = verts.iter().map(|v| v[0]).collect();
+        assert!(
+            xs.iter().all(|&x| (0.0..=100.0).contains(&x)),
+            "钳制后坐标不越界"
+        );
+        assert!(
+            (xs.iter().cloned().fold(f32::MAX, f32::min) - 0.0).abs() < 1e-3,
+            "外轮廓 x=0 仍在"
+        );
     }
 }

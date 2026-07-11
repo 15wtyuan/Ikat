@@ -410,12 +410,20 @@ pub fn build_render_nodes(
                 // 图），本 task 不做——留待 border + bg-image 共存场景单独处理。
                 if !has_image {
                     if let Some(border_col) = n.style.border_color {
-                        if n.style.border_width > 0.0 {
+                        let bw = &n.style.taffy_style.border;
+                        let widths = crate::render::border::BorderWidths {
+                            top: resolve_lp(bw.top),
+                            right: resolve_lp(bw.right),
+                            bottom: resolve_lp(bw.bottom),
+                            left: resolve_lp(bw.left),
+                        };
+                        if widths.top > 0.0
+                            || widths.right > 0.0
+                            || widths.bottom > 0.0
+                            || widths.left > 0.0
+                        {
                             let br = crate::render::border::border_ring(
-                                rect,
-                                &radii,
-                                n.style.border_width,
-                                border_col,
+                                rect, &radii, widths, border_col,
                             );
                             if !br.3.is_empty() {
                                 let base = v.len() as u32;
