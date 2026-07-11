@@ -215,13 +215,11 @@ pub fn solve(
             .collect();
 
         let tid = if let Some(mctx) = ctx {
-            // measure leaf 默认 min-size:auto（taffy 0.5 把 measure(None) 的 max-content 当
-            // min-content）→ flex-shrink 被 min 阻止，max-content 超 available 的长文本不收缩
-            // → 超框。设 min=0 让 flex-shrink 生效（文本收缩到容器宽并换行）。
-            style.min_size = taffy::geometry::Size {
-                width: taffy::style::Dimension::Length(0.0),
-                height: taffy::style::Dimension::Length(0.0),
-            };
+            // min-width=0 让 flex-shrink 生效：taffy 默认 min-size:auto 会把 measure(None) 的
+            // max-content 当 min-content，阻止 shrink → 长文本不收缩、超框。设 0 放开宽度。
+            // 只设宽度：文本不纵向 shrink，min-height=0 无收益却有副作用——让 flex column 父
+            // 容器主轴尺寸算大（按钮等容器被撑高、底图下沿往下拉），所以 height 保留 Auto。
+            style.min_size.width = taffy::style::Dimension::Length(0.0);
             // 叶子：装测量上下文。children 应为空（Text/Image 是叶子）。
             tree.new_leaf_with_context(style, mctx).unwrap()
         } else {

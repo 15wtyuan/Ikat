@@ -1331,8 +1331,12 @@ fn build_text_mesh(
                         .entry(r.page)
                         .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
                     for &boff in bold_offsets {
-                        let left = g.x + g.bearing_x - pad + boff + rect.x;
-                        let top = line.baseline - g.bearing_y - pad + rect.y;
+                        // pixel snap：原点 round 到整数 design px。flex 居中（align/justify
+                        // center）把文字块原点算成亚像素浮点，字形光栅是整数像素，后端 Bilinear
+                        // 在亚像素位置混合整个字形 → 模糊。sf=1（按设计分辨率渲染）时整数 design
+                        // px = 屏幕像素整数，Bilinear 退化为 Point 采样，字形清晰。
+                        let left = (g.x + g.bearing_x - pad + boff + rect.x).round();
+                        let top = (line.baseline - g.bearing_y - pad + rect.y).round();
                         let right = left + r.px_w as f32;
                         let bottom = top + r.px_h as f32;
                         let base = p.0.len() as u32;
@@ -1398,8 +1402,9 @@ fn build_text_mesh(
                     // shadow blur 扩边界后位图更大；origin 向左上移 expand 让 halo 居中包住
                     // 字形（否则扩出的 halo 偏向右下）。expand = (effect 位图 - base 位图)/2。
                     let expand = (sr.px_w as f32 - r.px_w as f32) / 2.0;
-                    let left = g.x + g.bearing_x - pad + sox + rect.x - expand;
-                    let top = line.baseline - g.bearing_y - pad + soy + rect.y - expand;
+                    // pixel snap：投影偏移 (sox,soy) + expand 后仍对齐整数像素（同 base quad）。
+                    let left = (g.x + g.bearing_x - pad + sox + rect.x - expand).round();
+                    let top = (line.baseline - g.bearing_y - pad + soy + rect.y - expand).round();
                     let right = left + sr.px_w as f32;
                     let bottom = top + sr.px_h as f32;
                     let base = sp.0.len() as u32;
@@ -1436,8 +1441,8 @@ fn build_text_mesh(
                     // glow 居中无偏移：dilate+blur 扩边界后位图更大，origin 向左上移 expand
                     // 让晕开的光居中包住字形。
                     let expand = (gr.px_w as f32 - r.px_w as f32) / 2.0;
-                    let left = g.x + g.bearing_x - pad + rect.x - expand;
-                    let top = line.baseline - g.bearing_y - pad + rect.y - expand;
+                    let left = (g.x + g.bearing_x - pad + rect.x - expand).round();
+                    let top = (line.baseline - g.bearing_y - pad + rect.y - expand).round();
                     let right = left + gr.px_w as f32;
                     let bottom = top + gr.px_h as f32;
                     let base = gp.0.len() as u32;
@@ -1474,8 +1479,8 @@ fn build_text_mesh(
                     // Stroke 同位置（无偏移）；erode 扩边界后位图更大，origin 向左上移 expand
                     // 让描边环对齐字形边缘。
                     let expand = (sr.px_w as f32 - r.px_w as f32) / 2.0;
-                    let left = g.x + g.bearing_x - pad + rect.x - expand;
-                    let top = line.baseline - g.bearing_y - pad + rect.y - expand;
+                    let left = (g.x + g.bearing_x - pad + rect.x - expand).round();
+                    let top = (line.baseline - g.bearing_y - pad + rect.y - expand).round();
                     let right = left + sr.px_w as f32;
                     let bottom = top + sr.px_h as f32;
                     let base = sp.0.len() as u32;
@@ -1512,8 +1517,8 @@ fn build_text_mesh(
                     // Blur 同位置（无偏移）；pad 扩边界后位图更大，origin 向左上移 expand
                     // 让模糊晕居中包住字形。
                     let expand = (br.px_w as f32 - r.px_w as f32) / 2.0;
-                    let left = g.x + g.bearing_x - pad + rect.x - expand;
-                    let top = line.baseline - g.bearing_y - pad + rect.y - expand;
+                    let left = (g.x + g.bearing_x - pad + rect.x - expand).round();
+                    let top = (line.baseline - g.bearing_y - pad + rect.y - expand).round();
                     let right = left + br.px_w as f32;
                     let bottom = top + br.px_h as f32;
                     let base = bp.0.len() as u32;
