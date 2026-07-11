@@ -22,7 +22,7 @@ pub fn open_workspace(path: String) -> Result<Workspace, String> {
 pub fn create_workspace(path: String) -> Result<Workspace, String> {
     let ws = Workspace {
         version: 1,
-        output_dir: "../dist".into(),
+        output_dir: String::new(),
         packages: vec![],
         atlases: vec![],
         fonts: vec![],

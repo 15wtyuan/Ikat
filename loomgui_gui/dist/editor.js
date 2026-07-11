@@ -78,7 +78,7 @@
     });
     return {
       version: ws.version || 1,
-      output_dir: ($("ws-output-dir") ? $("ws-output-dir").value.trim() : "") || "../dist",
+      output_dir: $("ws-output-dir") ? $("ws-output-dir").value.trim() : "",
       packages: packages,
       atlases: atlases,
       fonts: fonts,
@@ -127,7 +127,7 @@
     // 输出目录：[label][input][+拖入][打开]
     var row = el("div", "form-row");
     row.appendChild(el("span", "form-label", "输出目录"));
-    var inp = inputEl("text", ws.output_dir || "../dist", "form-input", "例如 ../loomgui_unity/Assets/Bundles");
+    var inp = inputEl("text", ws.output_dir || "", "form-input", "例如 ../loomgui_unity/Assets/Bundles");
     inp.id = "ws-output-dir";
     inp.addEventListener("input", function () { saveIfLoaded(); });
     inp.addEventListener("keydown", function (e) { if (e.key === "Enter") inp.blur(); });
@@ -610,9 +610,14 @@
   function setupBuild() {
     $("btn-build").addEventListener("click", function () {
       var logDiv = $("build-log");
-      logDiv.innerHTML = '<p style="color:#808090">构建中...</p>';
       var currentWs = collectWorkspace();
+      if (!currentWs.output_dir || !currentWs.output_dir.trim()) {
+        logDiv.innerHTML = '<p class="log-err">未配置输出目录</p>';
+        alert("请先在【常规】页配置「输出目录」(output_dir)，再打包。");
+        return;
+      }
       ws = currentWs;
+      logDiv.innerHTML = '<p style="color:#808090">构建中...</p>';
       invoke("save_workspace", { path: wsPath, ws: currentWs })
         .then(function () { return invoke("run_build", { path: wsPath }); })
         .then(function (report) {
@@ -661,7 +666,7 @@
 
   // ── Entry point (called from app.js) ──
   function renderMain(_ws, _path) {
-    ws = _ws || { version: 1, output_dir: "../dist", packages: [], atlases: [], fonts: [] };
+    ws = _ws || { version: 1, output_dir: "", packages: [], atlases: [], fonts: [] };
     wsPath = _path;
     if (!ws.packages) ws.packages = [];
     if (!ws.atlases) ws.atlases = [];

@@ -30,6 +30,9 @@ pub struct BuildReport {
 /// 6. write loom.runtime.json → return BuildReport
 pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
     let ws = load_workspace(workspace_root)?;
+    if ws.output_dir.trim().is_empty() {
+        return Err("output_dir 未配置：请在工作区「常规」页设置导出目录后再打包".into());
+    }
     let output_dir = workspace_root.join(&ws.output_dir);
 
     let ui_dir = output_dir.join("ui");
