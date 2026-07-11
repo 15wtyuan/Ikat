@@ -18,11 +18,19 @@ use ttf_parser::{Face, GlyphId, OutlineBuilder};
 /// 溢出策略时仍以此为单页上限。
 const PAGE_SIZE: i32 = 4096;
 
-/// 字形位图四周的像素 padding。留 1px 余量避免抗锯齿边缘被 bitmap 边界裁断；
-/// 同时让相邻字形在 atlas 内不紧贴，减少采样串色。
+/// SDF source 光栅尺寸（design px）。所有 target size 共享一份此尺寸的 SDF，
+/// 运行时 quad 按 target/SOURCE_SIZE 缩放。TMP 中档值，CJK 笔画清晰、放大 72+ 仍锐利。
+pub const SOURCE_SIZE: u16 = 48;
+/// SDF spread：atlas 里每像素存 ±SPREAD 范围的 signed distance。
+/// SDF 硬约束 = spread 须 ≥ 最大 effect 宽度（spread 之外 distance 饱和、effect 硬切）。
+/// 12 覆盖 showcase text-shadow blur 12px。字形 bitmap 四周各扩 SPREAD px。
+pub const SPREAD: i32 = 12;
+
+/// 字形位图四周的像素 padding。SDF 模式下 = SPREAD：bitmap 四周各扩 SPREAD px
+/// 容纳距离场（spread 之外 distance 饱和到 0/255）；同时让相邻字形在 atlas 内不紧贴。
 /// pub：build_text_mesh 算 quad 顶点时需据此把位图原点（bbox 外扩 pad）对齐——
-/// bearing 来自 bbox，而 px_w/px_h/UV 含 pad，定位须减 pad 才不偏 1px。
-pub const GLYPH_PAD: i32 = 1;
+/// bearing 来自 bbox，而 px_w/px_h/UV 含 pad，定位须减 pad 才不偏。
+pub const GLYPH_PAD: i32 = SPREAD;
 
 /// 字形缓存键。size_px 进 key 即 per-size 分片。
 ///
@@ -267,19 +275,23 @@ impl GlyphAtlas {
     }
 }
 
-/// 光栅单字形 → R8 像素 + 宽高。流程：
-/// 1. 读 glyph bbox（设计单位），按 size_px/units_per_em 缩放定 bitmap 尺寸。
-/// 2. ttf OutlineBuilder 收集轮廓，转发到 ab_glyph_rasterizer（坐标已 scale +
+/// 光栅单字形 → SDF distance（R8）+ 宽高。流程：
+/// 1. 固定 `SOURCE_SIZE` 光栅（入参 `_size_px` 不再用，保留签名待 Task 3 随 GlyphKey 一起删）。
+/// 2. 读 glyph bbox（设计单位），按 SOURCE_SIZE/units_per_em 缩放定 bitmap 尺寸。
+/// 3. ttf OutlineBuilder 收集轮廓，转发到 ab_glyph_rasterizer（坐标已 scale +
 ///    y-flip + pad 偏移，pen 在 builder 内追踪）。
-/// 3. for_each_pixel_2d 把 coverage 写到 R8。
+/// 4. coverage 二值化（threshold 0.5）→ 8SSEDT signed distance → R8 编码。
 ///
-/// 光栅单字形 → R8 像素 + 宽高。advance 不在此管（advance 在 layout.rs，按字体度量算）。
+/// 像素语义：center≈128、字形内 >128、字形外 <128（distance 越大渐变越烈，超出 ±SPREAD 饱和）。
+/// advance 不在此管（advance 在 layout.rs，按字体度量算）。
 ///
 /// 无轮廓 / 无效输入走 `empty_or_tofu`：区分**真缺字**（gid=0 .notdef，字体连缺字占位都没）
 /// 与**有 gid 但无轮廓的字形**（空格、零宽空格、各类 space —— 有 advance 占位无像素）。
 /// 前者画 tofu 框（开发期可见占位），后者返空 bitmap 不渲染——空格被画成方块就是把
 /// 这类无轮廓字形误走 tofu 的 bug。
-fn rasterize_glyph(face: &Face<'_>, gid: u16, size_px: u16) -> (Vec<u8>, u32, u32) {
+fn rasterize_glyph(face: &Face<'_>, gid: u16, _size_px: u16) -> (Vec<u8>, u32, u32) {
+    // SDF：固定 SOURCE_SIZE 光栅（入参 size_px 不再用，保留签名待 Task 3 随 GlyphKey 一起删）。
+    let size_px = SOURCE_SIZE;
     let units = face.units_per_em();
     if units == 0 || size_px == 0 {
         return empty_or_tofu(gid, size_px);
@@ -289,14 +301,14 @@ fn rasterize_glyph(face: &Face<'_>, gid: u16, size_px: u16) -> (Vec<u8>, u32, u3
         Some(b) => b,
         None => return empty_or_tofu(gid, size_px),
     };
-
-    // bitmap 尺寸 = bbox × scale + 2*pad。ceil 避免右下抗锯齿被裁。
+    // bitmap = bbox(source) + 2*SPREAD（SPREAD 是 SDF spread，也是 atlas padding）。
     let gw = ((bbox.x_max - bbox.x_min) as f32 * scale).ceil() as i32 + 2 * GLYPH_PAD;
     let gh = ((bbox.y_max - bbox.y_min) as f32 * scale).ceil() as i32 + 2 * GLYPH_PAD;
     if gw <= 0 || gh <= 0 || gw > PAGE_SIZE || gh > PAGE_SIZE {
         return empty_or_tofu(gid, size_px);
     }
 
+    // 先光栅出 coverage（复用 ab_glyph Rasterizer + OutlineToRaster）。
     let mut raster = Rasterizer::new(gw as usize, gh as usize);
     let mut builder = OutlineToRaster {
         raster: &mut raster,
@@ -318,12 +330,17 @@ fn rasterize_glyph(face: &Face<'_>, gid: u16, size_px: u16) -> (Vec<u8>, u32, u3
         return empty_or_tofu(gid, size_px);
     }
 
-    let mut px = vec![0u8; (gw * gh) as usize];
-    raster.for_each_pixel_2d(|x, y, cov| {
+    // coverage → 二值 mask（threshold 0.5）→ 8SSEDT signed distance → R8 编码。
+    let mut mask = vec![0u8; (gw * gh) as usize];
+    raster.for_each_pixel_2d(|x, y, c| {
         let i = (y as usize) * (gw as usize) + (x as usize);
-        // coverage 可能因累加器轻微越界（浮点），钳到 [0,255]。
-        px[i] = (cov.clamp(0.0, 1.0) * 255.0) as u8;
+        mask[i] = if c > 0.5 { 1 } else { 0 };
     });
+    let sdf = crate::text::sdf::signed_distance_field(&mask, gw as u32, gh as u32);
+    let px: Vec<u8> = sdf
+        .iter()
+        .map(|&d| crate::text::sdf::encode_distance(d, SPREAD as u32))
+        .collect();
     (px, gw as u32, gh as u32)
 }
 
@@ -474,8 +491,8 @@ mod tests {
     }
 
     #[test]
-    fn different_size_different_slot() {
-        // per-size：同字形不同 px 占不同槽（UV 不同）
+    fn different_size_no_longer_shards_atlas() {
+        // SDF：单一字形槽，size 不进 key（Task 3 正式去 size_px；本 task 已固定 SOURCE 光栅）。
         let mut a = GlyphAtlas::new();
         let f = dejavu_face();
         let gid = f.glyph_index('A').unwrap();
@@ -497,7 +514,38 @@ mod tests {
                 effect_sig: 0,
             },
         );
-        assert!((r32.u0, r32.v0) != (r48.u0, r48.v0), "不同 size 不同槽位");
+        // size_px 仍进 key（Task 3 才删）→ 仍分槽，但 bitmap 内容相同（同 SOURCE 光栅）。
+        assert_eq!(
+            (r32.px_w, r32.px_h),
+            (r48.px_w, r48.px_h),
+            "SDF 固定 SOURCE 光栅，bitmap 维度不随 size 变"
+        );
+    }
+
+    /// SDF 光栅：输出像素语义是 distance（中心≈128、字形内 >128、外 <128），非 coverage。
+    #[test]
+    fn rasterize_glyph_outputs_sdf_distance() {
+        let mut a = GlyphAtlas::new();
+        let f = dejavu_face();
+        let gid = f.glyph_index('A').unwrap();
+        let r = a.ensure(
+            &f,
+            GlyphKey {
+                font_id: 0,
+                glyph_id: gid.0,
+                size_px: 0,
+                effect_sig: 0,
+            },
+        );
+        assert!(r.px_w > 0 && r.px_h > 0, "字形有轮廓");
+        let (bytes, w, h) = a.page_bytes(0);
+        // 找一个 inside 像素（>128）和一个 outside 像素（<128）证明 distance 语义。
+        // 字形必然产生 >128（字形内）与 <128（字形外）两种值。
+        let has_inside = bytes.iter().any(|&b| b > 140);
+        let has_outside = bytes.iter().any(|&b| b < 100);
+        assert!(has_inside, "SDF 应有 inside 像素（>140）");
+        assert!(has_outside, "SDF 应有 outside 像素（<100）");
+        let _ = (w, h);
     }
 
     #[test]

@@ -88,3 +88,4 @@ loomgui_gui/gen/
 
 # superpowers SDD scratch (briefs/reports/review diffs — session-local, not source)
 .superpowers/
+*.snap.new
