@@ -20,9 +20,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 15; // v15：删 AssetManifest 段，图尺寸改走 atlas.json + set_image_sizes
-pub(crate) const MIN_VERSION: u32 = 15;
-pub(crate) const MAX_VERSION: u32 = 15;
+pub const PKG_FORMAT_VERSION: u32 = 16; // v16：删单值 border width 字段（render 改读 ts.border 四边，bincode 布局变）
+pub(crate) const MIN_VERSION: u32 = 16;
+pub(crate) const MAX_VERSION: u32 = 16;
 const NULL_IDX: u16 = 0xFFFF;
 /// NodeBlock 中 rich_off 字段的"无 runs"哨兵。非 RichText 节点写此值。
 const NULL_RICH_OFF: u32 = 0xFFFF_FFFF;

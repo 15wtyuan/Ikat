@@ -416,7 +416,7 @@ fn parse_overflow(value: &str) -> Option<OverflowMode> {
 
 /// 解析 border 宽度+颜色声明：`<width> <style>? <color>?`（CSS 简写语义，style 围栏外忽略）。
 /// width 取首个 px token，color 取首个可解析颜色 token。width 缺失 → None（整条无效）。
-fn parse_border_width_color(value: &str) -> Option<(f32, Option<[f32; 4]>)> {
+fn parse_border_value(value: &str) -> Option<(f32, Option<[f32; 4]>)> {
     let mut w: Option<f32> = None;
     let mut color: Option<[f32; 4]> = None;
     for tok in value.split_whitespace() {
@@ -448,7 +448,7 @@ enum BorderSide {
 
 /// border-top/right/bottom/left 单边 longhand：设 ts.border 对应边 + border_color，不动其他三边。
 fn apply_border_side(style: &mut ResolvedStyle, side: BorderSide, value: &str) -> bool {
-    let Some((w, color)) = parse_border_width_color(value) else {
+    let Some((w, color)) = parse_border_value(value) else {
         return false;
     };
     let lp = LengthPercentage::Length(w);
@@ -520,8 +520,8 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "border" => {
-            // CSS 简写：四边同值。width + color 共用 parse_border_width_color。
-            let Some((w, color)) = parse_border_width_color(value) else {
+            // CSS 简写：四边同值。width + color 共用 parse_border_value。
+            let Some((w, color)) = parse_border_value(value) else {
                 return false;
             };
             let lp = LengthPercentage::Length(w);
@@ -531,7 +531,6 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 top: lp,
                 bottom: lp,
             };
-            style.border_width = w;
             if let Some(c) = color {
                 style.border_color = Some(c);
             }
@@ -552,8 +551,6 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 top: LengthPercentage::Length(t),
                 bottom: LengthPercentage::Length(b),
             };
-            // 同时填视觉 border_width（取 top 作为单值，渲染描边用）
-            style.border_width = t;
             true
         }
         "border-radius" => {

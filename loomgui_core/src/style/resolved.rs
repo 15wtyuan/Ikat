@@ -169,7 +169,6 @@ pub struct ResolvedStyle {
     /// CSS border-radius 四角半径。默认全 0（直角）。
     pub border_radius: BorderRadius,
     pub border_color: Option<[f32; 4]>,
-    pub border_width: f32,
     pub opacity: f32,
     /// overflow 两轴模式。Default 双轴 Visible。
     pub overflow_x: OverflowMode,
@@ -239,7 +238,6 @@ impl Default for ResolvedStyle {
             background_clip_text: false,
             border_radius: BorderRadius::default(),
             border_color: None,
-            border_width: 0.0,
             opacity: 1.0,
             overflow_x: OverflowMode::Visible,
             overflow_y: OverflowMode::Visible,
@@ -311,7 +309,6 @@ mod tests {
         s.taffy_style.padding = taffy::geometry::Rect::length(7.0_f32);
         s.background_color = Some([0.1, 0.2, 0.3, 0.4]);
         s.border_color = Some([0.5, 0.6, 0.7, 0.8]);
-        s.border_width = 3.0;
         s.opacity = 0.5;
         s.overflow_x = OverflowMode::Hidden;
         s.overflow_y = OverflowMode::Hidden;

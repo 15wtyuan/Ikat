@@ -12,6 +12,7 @@ use loomgui_core::parse::dom::parse_html;
 use loomgui_core::parse::selector::parse_selector;
 use loomgui_core::style::mapping::apply_decl;
 use loomgui_core::style::resolved::{DisplayMode, GradientDir, ResolvedStyle};
+use taffy::style::LengthPercentage;
 use taffy::Display;
 
 // ── A. 元素围栏 ──────────────────────────────────────────────────
@@ -118,7 +119,10 @@ fn supported_visual_props_return_true() {
 fn border_shorthand_parses_width_and_color() {
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "border", "1px solid #3a3f55"));
-    assert_eq!(s.border_width, 1.0);
+    assert!(
+        matches!(s.taffy_style.border.top, LengthPercentage::Length(1.0)),
+        "border 简写四边同宽 1px"
+    );
     assert!(
         s.border_color.is_some(),
         "border 简写 color 须解析（不止 border-color 单属性）"

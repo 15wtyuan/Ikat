@@ -103,7 +103,7 @@ fn build_container_produces_mesh_quad() {
 
 #[test]
 fn build_container_with_border_emits_border_node() {
-    // border_color + border_width 激活：无背景图的 Container 把边框环形 mesh 拼进背景
+    // border_color + ts.border 激活：无背景图的 Container 把边框环形 mesh 拼进背景
     // quad 同一 payload（同 program=0，单 draw call）。背景蓝、边框红两色共存于顶点色。
     let mut n = container_node(
         0,
@@ -162,7 +162,7 @@ fn build_container_with_border_emits_border_node() {
     assert!(colors.contains(&[0.0, 0.0, 1.0, 1.0]), "背景蓝色顶点存在");
 }
 
-/// CSS `border` 简写（`<width> <style>? <color>?`）经 apply_decl → border_color + border_width
+/// CSS `border` 简写（`<width> <style>? <color>?`）经 apply_decl → border_color + ts.border
 /// → render border_ring。端到端验简写解析 color 后边框环确实渲染（修复前简写只取 width、
 /// color 丢 → border_color=None → 不画，html 预览有边框而 Unity 无）。
 #[test]
