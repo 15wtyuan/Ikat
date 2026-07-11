@@ -4,3 +4,4 @@ pub mod atlas;
 pub mod font_effect;
 pub mod layout;
 pub mod rich;
+pub mod sdf;
