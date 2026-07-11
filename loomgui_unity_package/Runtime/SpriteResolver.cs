@@ -76,7 +76,9 @@ namespace LoomGUI
                     var uv = entry.uv;
                     if (uv == null || uv.Length < 4) continue;
                     if (entry.orig == null || entry.orig.Length < 2) continue;
-                    var uvRect = new Rect(uv[0], uv[1], uv[2] - uv[0], uv[3] - uv[1]);
+                    // atlas.json 的 uv 是像素左上原点（v0=顶，打包器按 image crate 约定算）；
+                    // Unity 纹理采样 v=0 在底，故翻转 v：y = 1 - v1（atlas 底对应 Unity 底）。
+                    var uvRect = new Rect(uv[0], 1f - uv[3], uv[2] - uv[0], uv[3] - uv[1]);
                     _sprites[kv.Key] = (atlasIdx, entry.page, uvRect, entry.orig[0], entry.orig[1]);
                 }
             }

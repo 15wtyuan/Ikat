@@ -737,6 +737,66 @@ fn build_text_verts_in_world_space_and_upright() {
     }
 }
 
+/// flex 居中（align/justify center）把文字块原点算成亚像素浮点（如 24.75），而字形
+/// 光栅是整数像素——后端 Bilinear 在亚像素位置双线性混合整个字形 → 模糊。build_text_mesh
+/// 须把每字形 quad 原点 round 到整数 design px：sf=1（按设计分辨率渲染）时即屏幕像素整数，
+/// Bilinear 退化为 Point 采样，字形清晰。
+#[test]
+fn build_text_snaps_quad_to_integer_pixel() {
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut n = Node::default();
+    n.kind = NodeKind::Text {
+        content: "Hello".into(),
+    };
+    n.style.font_size = 16.0;
+    // 模拟 flex 居中算出的亚像素原点（80×60 容器内文字居中 → 非整数起点）。
+    n.layout_rect = Rect {
+        x: 24.75,
+        y: 40.5,
+        w: 100.0,
+        h: 20.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let text_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| matches!(&rn.payload, NodePayload::Mesh { program: 1, .. }))
+        .expect("应有 text RenderNode");
+    let verts = match &text_rn.payload {
+        NodePayload::Mesh { verts, .. } => verts,
+        _ => unreachable!(),
+    };
+    assert!(!verts.is_empty(), "Hello 有字形 → verts 非空");
+    for (i, v) in verts.iter().enumerate() {
+        assert!(
+            v[0].fract() == 0.0,
+            "vert[{}].x 须整数像素对齐（pixel snap），实 {}",
+            i,
+            v[0]
+        );
+        assert!(
+            v[1].fract() == 0.0,
+            "vert[{}].y 须整数像素对齐（pixel snap），实 {}",
+            i,
+            v[1]
+        );
+    }
+}
+
 /// 空格等无轮廓字形不该渲染成方块——rasterize_glyph 对 gid>0 无 bbox/空轮廓返空
 /// bitmap，build_text_mesh 跳过（不产 quad）。advance 在 layout 已算，pen 前进不受影响。
 #[test]

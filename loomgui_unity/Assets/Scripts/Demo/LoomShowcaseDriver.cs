@@ -613,7 +613,7 @@ namespace LoomGUI
             // 只响应 tab Controller（dialog/bicon/otab/itab 不走此回调——它们没 AddControllerChangedListener）。
             if (mountNode != _tabMount) return;
             // per-page 图标（路 A src 切换）。
-            string[] icons = { "icons/home.png", "icons/eye.png", "icons/zap.png" };
+            string[] icons = { "res/icons/home.png", "res/icons/eye.png", "res/icons/zap.png" };
             string[] texts = { "当前页：1 · 概览", "当前页：2 · 详情", "当前页：3 · 设置" };
             int idx = newIndex;
             if (idx < 0 || idx >= icons.Length) idx = 0;
@@ -843,7 +843,7 @@ namespace LoomGUI
             _stage.SetText(title, "item-" + _dynSeq);
             uint icon = _stage.CreateNode("img", "width:40px;height:40px");
             _stage.AppendChild(panel, icon);
-            _stage.SetSrc(icon, "icons/skin.png");
+            _stage.SetSrc(icon, "res/icons/skin.png");
             return panel;
         }
 
@@ -1043,7 +1043,7 @@ namespace LoomGUI
                 $"width:100%;height:{height}px;flex-direction:row;align-items:center;gap:12px;padding:0 16px;background-color:#252839;position:absolute;left:0;top:{topY}px");
             uint icon = _stage.CreateNode("img", "width:48px;height:48px");
             _stage.AppendChild(item, icon);
-            _stage.SetSrc(icon, "icons/skin.png");
+            _stage.SetSrc(icon, "res/icons/skin.png");
             uint title = _stage.CreateNode("span", "color:#e0e0e0;font-size:20px");
             _stage.AppendChild(item, title);
             return (item, title);
