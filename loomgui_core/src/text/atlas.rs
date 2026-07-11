@@ -1,12 +1,12 @@
 //! 字形 atlas：核心自绘字体的字形位图缓存 + 货架分配。
 //!
-//! 单物理 etagere 实例（每页一个），多页溢出。key=(font_id, glyph_id, size_px,
-//! effect_sig)，size 进 key 即 per-size 分片（不在 size 间共享位图）。etagere 增量
-//! allocate 不 repack → 旧字形 UV 永不变（每帧上传只动新分配槽，旧槽原地不动），
+//! 单物理 etagere 实例（每页一个），多页溢出。key=(font_id, glyph_id)——单一 SDF：
+//! 所有 target size 共享同一份固定 SOURCE_SIZE 光栅的 SDF，size 不进 key。etagere
+//! 增量 allocate 不 repack → 旧字形 UV 永不变（每帧上传只动新分配槽，旧槽原地不动），
 //! 后端按 page_bytes + dirty_pages 增量上传即可。
 //!
 //! measure_text（layout.rs）保持纯函数不读本结构；atlas 为 Stage 持有，渲染 build
-//! 期查询（后续 task 接入，本 task 只提供独立模块 + 内联测试）。
+//! 期查询。
 
 use std::collections::HashMap;
 
@@ -32,16 +32,11 @@ pub const SPREAD: i32 = 12;
 /// bearing 来自 bbox，而 px_w/px_h/UV 含 pad，定位须减 pad 才不偏。
 pub const GLYPH_PAD: i32 = SPREAD;
 
-/// 字形缓存键。size_px 进 key 即 per-size 分片。
-///
-/// `effect_sig` 为 v1.8 FontEffect 预留（v1.6 恒 0）。现在就占用键空间，避免后续
-/// 引入效果指纹时把已分配槽位的键含义改掉、整批字形 UV 失效。
+/// 字形缓存键。单一 SDF：所有 size 共享一份 source SDF，size 不进 key。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GlyphKey {
     pub font_id: u32,
     pub glyph_id: u16,
-    pub size_px: u16,
-    pub effect_sig: u64,
 }
 
 /// 字形在其所在页上的归一化 UV（[0..1]）+ 光栅像素尺寸。
@@ -83,15 +78,11 @@ impl AtlasPage {
     }
 }
 
-/// 字形 atlas：page 列表 + 键→UV 缓存 + 脏页号集合 + effect 配置表。
+/// 字形 atlas：page 列表 + 键→UV 缓存 + 脏页号集合。
 pub struct GlyphAtlas {
     pages: Vec<AtlasPage>,
     cache: HashMap<GlyphKey, GlyphRect>,
     dirty: Vec<u32>,
-    /// effect_sig → FontEffect 配置表。由外部（DSL 层）`register_effect` 写入；
-    /// `ensure` 遇 effect_sig≠0 的 key 时按此查表做位图后处理。Task 7 只提供机制，
-    /// DSL→注册的接线在后续 task。
-    effects: HashMap<u64, crate::text::font_effect::FontEffect>,
 }
 
 impl Default for GlyphAtlas {
@@ -106,15 +97,7 @@ impl GlyphAtlas {
             pages: Vec::new(),
             cache: HashMap::new(),
             dirty: Vec::new(),
-            effects: HashMap::new(),
         }
-    }
-
-    /// 注册一个 effect 配置。后续 `ensure` 遇到 `effect_sig` 匹配的 GlyphKey 时对
-    /// 位图做 dilate/erode/blur 后处理。sig 应由 `font_effect::effect_sig` 预算好；
-    /// 同 sig 重复注册覆盖旧值（effect 配置变更走新 sig，不就地改）。
-    pub fn register_effect(&mut self, sig: u64, effect: crate::text::font_effect::FontEffect) {
-        self.effects.insert(sig, effect);
     }
 
     /// 光栅 + 分配 + blit 一个字形，返回其 UV。同 key 二次调用走缓存（命中既不光栅
@@ -123,7 +106,7 @@ impl GlyphAtlas {
         if let Some(r) = self.cache.get(&key) {
             return *r;
         }
-        let (pixels, gw, gh) = rasterize_glyph(face, key.glyph_id, key.size_px);
+        let (pixels, gw, gh) = rasterize_glyph(face, key.glyph_id);
         if gw == 0 || gh == 0 {
             // 无轮廓字形（空格等）：不分配槽位、不 blit、不标脏。缓存空 rect 让后续
             // 命中直接跳过；build_text_mesh 据 px_w/px_h==0 跳过 quad（advance 在 layout 已算）。
@@ -139,26 +122,6 @@ impl GlyphAtlas {
             self.cache.insert(key, empty);
             return empty;
         }
-        // v1.8 FontEffect 后处理：effect_sig≠0 且非 sentinel key 时，按注册的 effect
-        // 对 R8 位图做 dilate/erode/blur。表里没注册（None）→ 当 raw 字形处理（容错，
-        // 避免未接线时字形消失）。effect_sig=0（v1.6 既有路径）直接跳过本块。
-        let (pixels, gw, gh) = if key.effect_sig != 0 && key.font_id != u32::MAX {
-            match self.effects.get(&key.effect_sig) {
-                Some(eff) => {
-                    let (p2, w2, h2) = crate::text::font_effect::apply_effect(&pixels, gw, gh, eff);
-                    // 防御：effect 扩边界后超单页边长则放弃后处理（allocate 对超 4096²
-                    // 的请求会 panic，FFI 邻近不能 panic）。正常 DSL 范围（radius≤几十 px）不触发。
-                    if w2 <= PAGE_SIZE as u32 && h2 <= PAGE_SIZE as u32 {
-                        (p2, w2, h2)
-                    } else {
-                        (pixels, gw, gh)
-                    }
-                }
-                None => (pixels, gw, gh),
-            }
-        } else {
-            (pixels, gw, gh)
-        };
         let alloc = self.allocate(gw, gh);
 
         // borrow：先把 page 索引拿出，避免与 self.pages 的可变借用冲突。
@@ -213,14 +176,11 @@ impl GlyphAtlas {
     }
 
     /// 取一个 1×1 白像素槽（装饰线 / 纯色填充用）。首次调用分配并填 255，其后命中
-    /// 缓存。用 sentinel key（font_id=u32::MAX, glyph_id=u16::MAX, size_px=1,
-    /// effect_sig=u64::MAX）避与真字形键空间碰撞。
+    /// 缓存。用 sentinel key（font_id=u32::MAX, glyph_id=u16::MAX）避与真字形键空间碰撞。
     pub fn ensure_solid(&mut self) -> GlyphRect {
         let key = GlyphKey {
             font_id: u32::MAX,
             glyph_id: u16::MAX,
-            size_px: 1,
-            effect_sig: u64::MAX,
         };
         if let Some(r) = self.cache.get(&key) {
             return *r;
@@ -276,7 +236,7 @@ impl GlyphAtlas {
 }
 
 /// 光栅单字形 → SDF distance（R8）+ 宽高。流程：
-/// 1. 固定 `SOURCE_SIZE` 光栅（入参 `_size_px` 不再用，保留签名待 Task 3 随 GlyphKey 一起删）。
+/// 1. 固定 `SOURCE_SIZE` 光栅（单一 SDF，所有 target size 共享）。
 /// 2. 读 glyph bbox（设计单位），按 SOURCE_SIZE/units_per_em 缩放定 bitmap 尺寸。
 /// 3. ttf OutlineBuilder 收集轮廓，转发到 ab_glyph_rasterizer（坐标已 scale +
 ///    y-flip + pad 偏移，pen 在 builder 内追踪）。
@@ -289,8 +249,8 @@ impl GlyphAtlas {
 /// 与**有 gid 但无轮廓的字形**（空格、零宽空格、各类 space —— 有 advance 占位无像素）。
 /// 前者画 tofu 框（开发期可见占位），后者返空 bitmap 不渲染——空格被画成方块就是把
 /// 这类无轮廓字形误走 tofu 的 bug。
-fn rasterize_glyph(face: &Face<'_>, gid: u16, _size_px: u16) -> (Vec<u8>, u32, u32) {
-    // SDF：固定 SOURCE_SIZE 光栅（入参 size_px 不再用，保留签名待 Task 3 随 GlyphKey 一起删）。
+fn rasterize_glyph(face: &Face<'_>, gid: u16) -> (Vec<u8>, u32, u32) {
+    // SDF：固定 SOURCE_SIZE 光栅（单一 SDF，所有 target size 共享此源）。
     let size_px = SOURCE_SIZE;
     let units = face.units_per_em();
     if units == 0 || size_px == 0 {
@@ -470,6 +430,29 @@ mod tests {
     }
 
     #[test]
+    fn glyph_key_no_size_no_effect() {
+        // 单一 SDF：GlyphKey 只 (font_id, glyph_id)。同字形不同 size 返同 UV（共享 SDF 槽）。
+        let mut a = GlyphAtlas::new();
+        let f = dejavu_face();
+        let gid = f.glyph_index('A').unwrap();
+        let r1 = a.ensure(
+            &f,
+            GlyphKey {
+                font_id: 0,
+                glyph_id: gid.0,
+            },
+        );
+        let r2 = a.ensure(
+            &f,
+            GlyphKey {
+                font_id: 0,
+                glyph_id: gid.0,
+            },
+        );
+        assert_eq!((r1.u0, r1.v0, r1.u1, r1.v1), (r2.u0, r2.v0, r2.u1, r2.v1));
+    }
+
+    #[test]
     fn ensure_then_hit_returns_same_uv() {
         let mut a = GlyphAtlas::new();
         let f = dejavu_face();
@@ -477,8 +460,6 @@ mod tests {
         let k = GlyphKey {
             font_id: 0,
             glyph_id: gid.0,
-            size_px: 32,
-            effect_sig: 0,
         };
         let r1 = a.ensure(&f, k);
         let r2 = a.ensure(&f, k);
@@ -487,38 +468,6 @@ mod tests {
             (r1.u0, r1.v0, r1.u1, r1.v1),
             (r2.u0, r2.v0, r2.u1, r2.v1),
             "命中返同 UV"
-        );
-    }
-
-    #[test]
-    fn different_size_no_longer_shards_atlas() {
-        // SDF：单一字形槽，size 不进 key（Task 3 正式去 size_px；本 task 已固定 SOURCE 光栅）。
-        let mut a = GlyphAtlas::new();
-        let f = dejavu_face();
-        let gid = f.glyph_index('A').unwrap();
-        let r32 = a.ensure(
-            &f,
-            GlyphKey {
-                font_id: 0,
-                glyph_id: gid.0,
-                size_px: 32,
-                effect_sig: 0,
-            },
-        );
-        let r48 = a.ensure(
-            &f,
-            GlyphKey {
-                font_id: 0,
-                glyph_id: gid.0,
-                size_px: 48,
-                effect_sig: 0,
-            },
-        );
-        // size_px 仍进 key（Task 3 才删）→ 仍分槽，但 bitmap 内容相同（同 SOURCE 光栅）。
-        assert_eq!(
-            (r32.px_w, r32.px_h),
-            (r48.px_w, r48.px_h),
-            "SDF 固定 SOURCE 光栅，bitmap 维度不随 size 变"
         );
     }
 
@@ -533,8 +482,6 @@ mod tests {
             GlyphKey {
                 font_id: 0,
                 glyph_id: gid.0,
-                size_px: 0,
-                effect_sig: 0,
             },
         );
         assert!(r.px_w > 0 && r.px_h > 0, "字形有轮廓");
@@ -558,8 +505,6 @@ mod tests {
             GlyphKey {
                 font_id: 0,
                 glyph_id: gid.0,
-                size_px: 32,
-                effect_sig: 0,
             },
         );
         assert!(!a.dirty_pages().is_empty(), "新字形标脏页");
@@ -571,8 +516,6 @@ mod tests {
             GlyphKey {
                 font_id: 0,
                 glyph_id: gid.0,
-                size_px: 32,
-                effect_sig: 0,
             },
         );
         assert!(a.dirty_pages().is_empty(), "命中不标脏");
@@ -588,8 +531,6 @@ mod tests {
             GlyphKey {
                 font_id: 0,
                 glyph_id: gid.0,
-                size_px: 32,
-                effect_sig: 0,
             },
         );
         let (bytes, w, h) = a.page_bytes(0);
@@ -618,103 +559,10 @@ mod tests {
         let k = GlyphKey {
             font_id: 0,
             glyph_id: gid.0,
-            size_px: 32,
-            effect_sig: 0,
         };
         let r = a.ensure(&f, k);
         assert_eq!(r.page, 1, "页 0 满 → ensure 返 page=1");
         let dirty = a.dirty_pages();
         assert!(dirty.contains(&1), "新字形所在页标脏（page=1）");
-    }
-
-    #[test]
-    fn ensure_applies_registered_effect() {
-        use crate::text::font_effect::{effect_sig, FontEffect};
-        let mut a = GlyphAtlas::new();
-        let f = dejavu_face();
-        let gid = f.glyph_index('A').unwrap();
-        // raw 基线尺寸
-        let raw = a.ensure(
-            &f,
-            GlyphKey {
-                font_id: 0,
-                glyph_id: gid.0,
-                size_px: 32,
-                effect_sig: 0,
-            },
-        );
-        // 注册 stroke（erode 扩边界 2*ceil(w)）
-        let eff = FontEffect::Stroke {
-            w: 2.0,
-            color: [1.0, 0.0, 0.0, 1.0],
-        };
-        let sig = effect_sig(&[eff]);
-        a.register_effect(sig, eff);
-        let stroked = a.ensure(
-            &f,
-            GlyphKey {
-                font_id: 0,
-                glyph_id: gid.0,
-                size_px: 32,
-                effect_sig: sig,
-            },
-        );
-        assert!(stroked.px_w > raw.px_w, "stroke 后处理扩边界（w）");
-        assert!(stroked.px_h > raw.px_h, "stroke 后处理扩边界（h）");
-        // erode 扩 2*ceil(2)=4px 每边
-        assert_eq!(stroked.px_w - raw.px_w, 4, "erode 扩 2*ceil(radius)");
-        assert_eq!(stroked.px_h - raw.px_h, 4);
-        // 不同 effect_sig → 不同槽
-        assert!(
-            (stroked.u0, stroked.v0) != (raw.u0, raw.v0),
-            "不同 effect_sig 分槽"
-        );
-    }
-
-    #[test]
-    fn ensure_skips_effect_when_unregistered() {
-        // effect_sig≠0 但未注册 → 用 raw 位图（容错：不 panic、不空）
-        let mut a = GlyphAtlas::new();
-        let f = dejavu_face();
-        let gid = f.glyph_index('A').unwrap();
-        let r = a.ensure(
-            &f,
-            GlyphKey {
-                font_id: 0,
-                glyph_id: gid.0,
-                size_px: 32,
-                effect_sig: 12345,
-            },
-        );
-        assert!(r.px_w > 0 && r.px_h > 0, "未注册 effect 仍渲 raw 字形");
-    }
-
-    #[test]
-    fn ensure_effect_sig_zero_skips_postprocess() {
-        // effect_sig=0 → 即使 effect 表非空也不后处理（v1.6 既有路径不变）。
-        use crate::text::font_effect::{effect_sig, FontEffect};
-        let mut with_effect = GlyphAtlas::new();
-        let mut bare = GlyphAtlas::new();
-        let f = dejavu_face();
-        let gid = f.glyph_index('A').unwrap();
-        // with_effect 注册了一个 stroke 但 glyph key 用 sig=0 → 不应触发后处理。
-        let eff = FontEffect::Stroke {
-            w: 5.0,
-            color: [1.; 4],
-        };
-        with_effect.register_effect(effect_sig(&[eff]), eff);
-        let k = GlyphKey {
-            font_id: 0,
-            glyph_id: gid.0,
-            size_px: 32,
-            effect_sig: 0,
-        };
-        let r_with = with_effect.ensure(&f, k);
-        let r_bare = bare.ensure(&f, k);
-        assert_eq!(
-            (r_with.px_w, r_with.px_h),
-            (r_bare.px_w, r_bare.px_h),
-            "sig=0 不过后处理（与裸 atlas 同尺寸）"
-        );
     }
 }

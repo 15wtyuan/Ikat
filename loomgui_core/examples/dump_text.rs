@@ -32,20 +32,18 @@ fn main() {
     let font_id = fonts.font_id(None);
     let mut atlas = GlyphAtlas::new();
 
-    // ensure 字形 'H' @ 32px
+    // ensure 字形 'H'（单一 SDF：key 只 font_id+glyph_id，size 不进 key）
     let gid_h = face.glyph_index('H').unwrap_or(ttf_parser::GlyphId(0));
     let r = atlas.ensure(
         face,
         GlyphKey {
             font_id,
             glyph_id: gid_h.0,
-            size_px: 32,
-            effect_sig: 0,
         },
     );
     println!("─── v1.6 GlyphAtlas 验证 ───");
     println!(
-        "ensure 'H' @32px  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
+        "ensure 'H'  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
         r.page, r.u0, r.v0, r.u1, r.v1, r.px_w, r.px_h
     );
     // UV 必须在 [0,1] 归一化区间内（atlas 槽位子区域）。
@@ -76,12 +74,10 @@ fn main() {
         GlyphKey {
             font_id,
             glyph_id: 0,
-            size_px: 32,
-            effect_sig: 0,
         },
     );
     println!(
-        ".notdef(gid0) @32px  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
+        ".notdef(gid0)  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
         missing.page, missing.u0, missing.v0, missing.u1, missing.v1, missing.px_w, missing.px_h
     );
     assert!(
@@ -97,21 +93,19 @@ fn main() {
     assert_eq!((ob.len(), ow, oh), (0, 0, 0), "page_bytes OOB 安全返空");
     println!("page_bytes(999) OOB: ({}, {}, {})  -- OK", ob.len(), ow, oh);
 
-    // 多字形 + 多 size 验证（确保不同 size 走不同槽位）
+    // 二次 ensure 同字形：SDF 单槽共享，必须命中同一 UV
     let r48 = atlas.ensure(
         face,
         GlyphKey {
             font_id,
             glyph_id: gid_h.0,
-            size_px: 48,
-            effect_sig: 0,
         },
     );
     println!(
-        "ensure 'H' @48px  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
+        "ensure 'H' (二次)  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
         r48.page, r48.u0, r48.v0, r48.u1, r48.v1, r48.px_w, r48.px_h
     );
-    assert!((r.u0, r.v0) != (r48.u0, r48.v0), "不同 size 走不同槽位");
+    assert_eq!((r.u0, r.v0), (r48.u0, r48.v0), "SDF 单槽：同字形命中同 UV");
 
     // CJK 字形：确保中文字形能分配上（用于验证 CJK 字体路径）
     let gid_cjk = face.glyph_index('中').unwrap_or(ttf_parser::GlyphId(0));
@@ -120,12 +114,10 @@ fn main() {
         GlyphKey {
             font_id,
             glyph_id: gid_cjk.0,
-            size_px: 32,
-            effect_sig: 0,
         },
     );
     println!(
-        "ensure '中' @32px  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
+        "ensure '中'  page={}  uv=({:.4},{:.4})-({:.4},{:.4})  px={}x{}",
         r_cjk.page, r_cjk.u0, r_cjk.v0, r_cjk.u1, r_cjk.v1, r_cjk.px_w, r_cjk.px_h
     );
 

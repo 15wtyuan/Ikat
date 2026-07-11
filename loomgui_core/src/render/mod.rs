@@ -1207,101 +1207,27 @@ struct TextMeshes {
 /// per-glyph 按 `Glyph.font_id` 取 face 光栅（回退字形来自别的 face，必须按字形自己的
 /// font_id 取 face + 拼 GlyphKey，否则用错 face 光栅出错字）。装饰线度量走 run 主字体。
 ///
-/// `text_effects`：节点的文字效果（INHERITED，来自 ResolvedStyle）。Shadow effect 产
-/// Back layer mesh——每个 shadow 用独立 effect_sig 注册到 atlas（blur 后处理分槽），
-/// 顶点偏移 (ox, oy)、顶点色 = shadow.color，在 base 之前绘制。其它 effect 类型（Stroke/
-/// Glow/Blur）由后续 task 接入，本 task 只处理 Shadow。
+/// `text_effects`：节点的文字效果配置（INHERITED，来自 ResolvedStyle）。SDF 改造后文字
+/// 效果改由 shader uniform 实现（不再做位图后处理），uniform 打包由后续接入；本函数目前
+/// 不消费此参数，保留入参以为 uniform 打包预留 call site。
 fn build_text_mesh(
     layout: &crate::text::layout::TextLayout,
     atlas: &mut GlyphAtlas,
     fonts: &crate::text::layout::FontTable,
     rect: &crate::scene::node::Rect,
-    text_effects: &[crate::text::font_effect::FontEffect],
+    _text_effects: &[crate::text::font_effect::FontEffect],
     background_gradient: Option<crate::style::resolved::Gradient2>,
     background_clip_text: bool,
 ) -> TextMeshes {
-    use crate::text::font_effect::FontEffect;
     use std::collections::BTreeMap;
     // bearing 来自 glyph bbox，px_w/px_h/UV 含 pad：位图原点 = bbox 原点外扩 pad，
     // left/top 减 pad 对齐位图，否则字形偏 1px。
     let pad = crate::text::atlas::GLYPH_PAD as f32;
-    // Back layer：先算每个 shadow effect 的 sig 并注册到 atlas，遍历字形时按 sig 取
-    // 后处理过的 atlas 槽（blur 后），顶点偏移 (ox, oy)、色 = shadow.color。
-    let shadow_patterns: Vec<(u64, f32, f32, [f32; 4])> = text_effects
-        .iter()
-        .filter_map(|e| match e {
-            FontEffect::Shadow {
-                ox,
-                oy,
-                blur: _,
-                color,
-            } => {
-                let sig = crate::text::font_effect::effect_sig(&[*e]);
-                atlas.register_effect(sig, *e);
-                Some((sig, *ox, *oy, *color))
-            }
-            _ => None,
-        })
-        .collect();
-    // 每个 shadow pattern 一组按 atlas 页分组的 mesh（最终 flatten 成 shadow_back）。
-    let mut shadow_pages: Vec<
-        BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
-    > = shadow_patterns.iter().map(|_| BTreeMap::new()).collect();
-    // Glow Back layer：dilate + gaussian_blur，居中无偏移（与 shadow 不同）。
-    // 复用 BOX_SHADOW_FLAG + propagate_box_shadow_sort_keys 机制（Back layer 语义一致）。
-    let glow_patterns: Vec<(u64, [f32; 4])> = text_effects
-        .iter()
-        .filter_map(|e| match e {
-            FontEffect::Glow { w: _, color } => {
-                let sig = crate::text::font_effect::effect_sig(&[*e]);
-                atlas.register_effect(sig, *e);
-                Some((sig, *color))
-            }
-            _ => None,
-        })
-        .collect();
-    let mut glow_pages: Vec<
-        BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
-    > = glow_patterns.iter().map(|_| BTreeMap::new()).collect();
-    // Stroke Front layer：每个 Stroke effect 的 sig 注册到 atlas（erode 后处理），
-    // glyph quad 同位置（无偏移），顶点色 = stroke.color。bold/italic 不作用于 stroke。
-    let stroke_patterns: Vec<(u64, [f32; 4])> = text_effects
-        .iter()
-        .filter_map(|e| match e {
-            FontEffect::Stroke { w: _, color } => {
-                let sig = crate::text::font_effect::effect_sig(&[*e]);
-                atlas.register_effect(sig, *e);
-                Some((sig, *color))
-            }
-            _ => None,
-        })
-        .collect();
-    // 每个 stroke pattern 一组按 atlas 页分组的 mesh（最终 flatten 成 Front layer）。
-    let mut stroke_pages: Vec<
-        BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
-    > = stroke_patterns.iter().map(|_| BTreeMap::new()).collect();
-    // Blur Front layer：每个 Blur effect 的 sig 注册到 atlas（gaussian_blur 后处理），
-    // glyph quad 同位置（无偏移），顶点色 = run.color（blur 无自有颜色——它是字形自身的模糊）。
-    let blur_patterns: Vec<(u64,)> = text_effects
-        .iter()
-        .filter_map(|e| match e {
-            FontEffect::Blur { w: _ } => {
-                let sig = crate::text::font_effect::effect_sig(&[*e]);
-                atlas.register_effect(sig, *e);
-                Some((sig,))
-            }
-            _ => None,
-        })
-        .collect();
-    let mut blur_pages: Vec<
-        BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
-    > = blur_patterns.iter().map(|_| BTreeMap::new()).collect();
-    // base 字形：effect_sig=0（v1.6 既有路径，不过后处理）。
+    // base 字形 mesh（按 atlas 页分组）。
     let mut base_pages: BTreeMap<u32, (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> =
         BTreeMap::new();
     for line in &layout.lines {
         for run in &line.runs {
-            let size_px = run.font_size.round().max(1.0) as u16;
             let italic_skew = if matches!(run.style, crate::text::rich::RichStyle::Italic) {
                 0.3
             } else {
@@ -1322,12 +1248,9 @@ fn build_text_mesh(
                 }
                 run_w += g.advance;
                 let face = &fonts.font_by_id(g.font_id).face;
-                // base 字形（effect_sig=0）。
                 let base_key = GlyphKey {
                     font_id: g.font_id,
                     glyph_id: g.glyph_id,
-                    size_px,
-                    effect_sig: 0,
                 };
                 let r = atlas.ensure(face, base_key);
                 // 无轮廓字形（空格、零宽空格等）atlas 返空 rect → 不产 quad（advance 在
@@ -1389,159 +1312,6 @@ fn build_text_mesh(
                             base + 3,
                         ]);
                     }
-                }
-                // shadow Back layer：每个 shadow pattern 用各自 sig 的 atlas 槽（blur 后处理），
-                // 顶点偏移 (ox, oy)，色 = shadow.color。bold/italic 不作用于 shadow（shadow 是
-                // 投影，非字形本身——合成加粗/斜体的投影不增加视觉价值，且避免 quad 翻倍）。
-                for (pi, (sig, sox, soy, scolor)) in shadow_patterns.iter().enumerate() {
-                    let shadow_key = GlyphKey {
-                        font_id: g.font_id,
-                        glyph_id: g.glyph_id,
-                        size_px,
-                        effect_sig: *sig,
-                    };
-                    let sr = atlas.ensure(face, shadow_key);
-                    if sr.px_w == 0 || sr.px_h == 0 {
-                        continue;
-                    }
-                    let sp = shadow_pages[pi]
-                        .entry(sr.page)
-                        .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
-                    // shadow blur 扩边界后位图更大；origin 向左上移 expand 让 halo 居中包住
-                    // 字形（否则扩出的 halo 偏向右下）。expand = (effect 位图 - base 位图)/2。
-                    let expand = (sr.px_w as f32 - r.px_w as f32) / 2.0;
-                    // pixel snap：投影偏移 (sox,soy) + expand 后仍对齐整数像素（同 base quad）。
-                    let left = (g.x + g.bearing_x - pad + sox + rect.x - expand).round();
-                    let top = (line.baseline - g.bearing_y - pad + soy + rect.y - expand).round();
-                    let right = left + sr.px_w as f32;
-                    let bottom = top + sr.px_h as f32;
-                    let base = sp.0.len() as u32;
-                    sp.0.push([left, bottom]);
-                    sp.0.push([right, bottom]);
-                    sp.0.push([right, top]);
-                    sp.0.push([left, top]);
-                    sp.1.push([sr.u0, sr.v1]);
-                    sp.1.push([sr.u1, sr.v1]);
-                    sp.1.push([sr.u1, sr.v0]);
-                    sp.1.push([sr.u0, sr.v0]);
-                    for _ in 0..4 {
-                        sp.2.push(*scolor);
-                    }
-                    sp.3.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-                }
-                // Glow Back layer：每个 glow pattern 用各自 sig 的 atlas 槽（dilate+blur 后处理），
-                // 居中无偏移（glow 是发光晕开，不是投影），色 = glow.color。
-                // bold/italic 不作用于 glow（不增加视觉价值，与 shadow 同理）。
-                for (pi, (sig, gcolor)) in glow_patterns.iter().enumerate() {
-                    let glow_key = GlyphKey {
-                        font_id: g.font_id,
-                        glyph_id: g.glyph_id,
-                        size_px,
-                        effect_sig: *sig,
-                    };
-                    let gr = atlas.ensure(face, glow_key);
-                    if gr.px_w == 0 || gr.px_h == 0 {
-                        continue;
-                    }
-                    let gp = glow_pages[pi]
-                        .entry(gr.page)
-                        .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
-                    // glow 居中无偏移：dilate+blur 扩边界后位图更大，origin 向左上移 expand
-                    // 让晕开的光居中包住字形。
-                    let expand = (gr.px_w as f32 - r.px_w as f32) / 2.0;
-                    let left = (g.x + g.bearing_x - pad + rect.x - expand).round();
-                    let top = (line.baseline - g.bearing_y - pad + rect.y - expand).round();
-                    let right = left + gr.px_w as f32;
-                    let bottom = top + gr.px_h as f32;
-                    let base = gp.0.len() as u32;
-                    gp.0.push([left, bottom]);
-                    gp.0.push([right, bottom]);
-                    gp.0.push([right, top]);
-                    gp.0.push([left, top]);
-                    gp.1.push([gr.u0, gr.v1]);
-                    gp.1.push([gr.u1, gr.v1]);
-                    gp.1.push([gr.u1, gr.v0]);
-                    gp.1.push([gr.u0, gr.v0]);
-                    for _ in 0..4 {
-                        gp.2.push(*gcolor);
-                    }
-                    gp.3.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-                }
-                // stroke Front layer：每个 Stroke effect 用各自 sig 的 atlas 槽（erode 后处理），
-                // 顶点同位置（无偏移——stroke 是字形描边，与基字形重合），
-                // 顶点色 = stroke.color。bold/italic 不作用于 stroke（不增加视觉价值）。
-                for (pi, (sig, sc)) in stroke_patterns.iter().enumerate() {
-                    let stroke_key = GlyphKey {
-                        font_id: g.font_id,
-                        glyph_id: g.glyph_id,
-                        size_px,
-                        effect_sig: *sig,
-                    };
-                    let sr = atlas.ensure(face, stroke_key);
-                    if sr.px_w == 0 || sr.px_h == 0 {
-                        continue;
-                    }
-                    let sp = stroke_pages[pi]
-                        .entry(sr.page)
-                        .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
-                    // Stroke 同位置（无偏移）；erode 扩边界后位图更大，origin 向左上移 expand
-                    // 让描边环对齐字形边缘。
-                    let expand = (sr.px_w as f32 - r.px_w as f32) / 2.0;
-                    let left = (g.x + g.bearing_x - pad + rect.x - expand).round();
-                    let top = (line.baseline - g.bearing_y - pad + rect.y - expand).round();
-                    let right = left + sr.px_w as f32;
-                    let bottom = top + sr.px_h as f32;
-                    let base = sp.0.len() as u32;
-                    sp.0.push([left, bottom]);
-                    sp.0.push([right, bottom]);
-                    sp.0.push([right, top]);
-                    sp.0.push([left, top]);
-                    sp.1.push([sr.u0, sr.v1]);
-                    sp.1.push([sr.u1, sr.v1]);
-                    sp.1.push([sr.u1, sr.v0]);
-                    sp.1.push([sr.u0, sr.v0]);
-                    for _ in 0..4 {
-                        sp.2.push(*sc);
-                    }
-                    sp.3.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-                }
-                // Blur Front layer：每个 Blur effect 用各自 sig 的 atlas 槽（gaussian_blur 后处理），
-                // 顶点同位置（无偏移——blur 是字形自身的模糊，非偏移投影），
-                // 顶点色 = run.color（blur 无自有颜色）。bold/italic 不作用于 blur。
-                for (pi, (sig,)) in blur_patterns.iter().enumerate() {
-                    let blur_key = GlyphKey {
-                        font_id: g.font_id,
-                        glyph_id: g.glyph_id,
-                        size_px,
-                        effect_sig: *sig,
-                    };
-                    let br = atlas.ensure(face, blur_key);
-                    if br.px_w == 0 || br.px_h == 0 {
-                        continue;
-                    }
-                    let bp = blur_pages[pi]
-                        .entry(br.page)
-                        .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
-                    // Blur 同位置（无偏移）；pad 扩边界后位图更大，origin 向左上移 expand
-                    // 让模糊晕居中包住字形。
-                    let expand = (br.px_w as f32 - r.px_w as f32) / 2.0;
-                    let left = (g.x + g.bearing_x - pad + rect.x - expand).round();
-                    let top = (line.baseline - g.bearing_y - pad + rect.y - expand).round();
-                    let right = left + br.px_w as f32;
-                    let bottom = top + br.px_h as f32;
-                    let base = bp.0.len() as u32;
-                    bp.0.push([left, bottom]);
-                    bp.0.push([right, bottom]);
-                    bp.0.push([right, top]);
-                    bp.0.push([left, top]);
-                    bp.1.push([br.u0, br.v1]);
-                    bp.1.push([br.u1, br.v1]);
-                    bp.1.push([br.u1, br.v0]);
-                    bp.1.push([br.u0, br.v0]);
-                    for _ in 0..4 {
-                        bp.2.push(run.color);
-                    }
-                    bp.3.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
                 }
             }
             // 装饰线（v1.8：underline/line-through/overline + solid/dashed/dotted/double + 独立色/粗细）。
@@ -1665,69 +1435,10 @@ fn build_text_mesh(
         .into_iter()
         .map(|(pg, (v, u, c, i))| (pg, v, u, c, i))
         .collect();
-    let shadow_back: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> =
-        shadow_pages
-            .into_iter()
-            .flat_map(|m| m.into_iter().map(|(pg, (v, u, c, i))| (pg, v, u, c, i)))
-            .collect();
-    let glow_back: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> = glow_pages
-        .into_iter()
-        .flat_map(|m| m.into_iter().map(|(pg, (v, u, c, i))| (pg, v, u, c, i)))
-        .collect();
-    // 按 text_effects 声明顺序合并 shadow + glow Back layers；
-    // 先声明者在 back_layers 中更靠前 → 在 nodes vec 中更靠前 → 先绘（更下层）。
-    let mut back_layers: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> =
-        Vec::new();
-    let mut si = 0usize;
-    let mut gi = 0usize;
-    for e in text_effects {
-        match e {
-            FontEffect::Shadow { .. } => {
-                if si < shadow_back.len() {
-                    back_layers.push(shadow_back[si].clone());
-                    si += 1;
-                }
-            }
-            FontEffect::Glow { .. } if gi < glow_back.len() => {
-                back_layers.push(glow_back[gi].clone());
-                gi += 1;
-            }
-            _ => {}
-        }
-    }
-    let stroke_flat: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> =
-        stroke_pages
-            .into_iter()
-            .flat_map(|m| m.into_iter().map(|(pg, (v, u, c, i))| (pg, v, u, c, i)))
-            .collect();
-    let blur_flat: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> = blur_pages
-        .into_iter()
-        .flat_map(|m| m.into_iter().map(|(pg, (v, u, c, i))| (pg, v, u, c, i)))
-        .collect();
-    // 按 text_effects 声明顺序合并 stroke + blur Front layers；
-    // 先声明者在 front_layers 中更靠前 → sort_key 更小 → 先绘（在下）。
-    // 两者均复用 TEXT_STROKE_FRONT_FLAG（bit 31）合成 id + propagate 机制。
-    let mut front_layers: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)> =
-        Vec::new();
-    let mut sti = 0usize;
-    let mut bi = 0usize;
-    for e in text_effects {
-        match e {
-            FontEffect::Stroke { .. } if sti < stroke_flat.len() => {
-                front_layers.push(stroke_flat[sti].clone());
-                sti += 1;
-            }
-            FontEffect::Blur { .. } if bi < blur_flat.len() => {
-                front_layers.push(blur_flat[bi].clone());
-                bi += 1;
-            }
-            _ => {}
-        }
-    }
     TextMeshes {
         base,
-        back_layers,
-        front_layers,
+        back_layers: Vec::new(),
+        front_layers: Vec::new(),
     }
 }
 
