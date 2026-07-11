@@ -65,6 +65,7 @@
 | `min-width`/`min-height` | px/%/auto | mapping.rs:305-312 | 【实证】 |
 | `max-width`/`max-height` | px/% | mapping.rs:313-320 | 【实证】 |
 | `padding` | 1-4 值 px（仅 px） | mapping.rs:321-330 | 【实证】 |
+| `padding-top`/`padding-right`/`padding-bottom`/`padding-left` | 单边 longhand 1 值 px（仅 px）：设 `ts.padding` 对应边，不动其他三边。多单边声明累积 | mapping.rs `apply_padding_side` | 【实证】 |
 | `margin` | 1-4 值 px/%/auto | mapping.rs:331-340 | 【实证】 |
 | `border`（简写）/`border-width` | `border` 简写 `<width> <style>? <color>?`（三件任意序，style 围栏外忽略）：width 进 `ts.border` 四边同宽（渲染读此四边画边框环），color 进 `border_color`（等同 `border-color` 单属性）。`border-width` 单属性 1-4 值只设 `ts.border` 四边 width、不碰 color | mapping.rs `apply_decl` | 【实证】 |
 | `border-top`/`border-right`/`border-bottom`/`border-left` | 单边 longhand `<width> <style>? <color>?`：设 `ts.border` 对应边 + `border_color`（四边共享单色），不动其他三边。多单边声明累积 | mapping.rs `apply_border_side` | 【实证】 |
