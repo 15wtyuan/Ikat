@@ -26,7 +26,6 @@ SDF（Signed Distance Field）在**屏幕空间重建边缘**：atlas 存"到字
 
 - **MSDF（多通道）**：CJK 圆滑曲线用不上其锐角优势 + cdylib 不引 C++ 依赖。
 - **R16 atlas**：R8 精度对 SDF 充分（TMP 同为 8bit/通道）；大字 banding 出现再升。
-- **glow / 纯字形 blur**：Phase 2（showcase 无）。
 - **per-size SDF 分片**：被单一 SDF 取代（单一 SDF 已含缩放容差）。
 
 ## 2. 关键决策（brainstorming 定稿，含理由）
@@ -63,7 +62,8 @@ distance 量化 8bit。TMP atlas 为 RGBA32（distance 在其一通道），同�
   - `Stroke`（`-webkit-text-stroke`）→ outline（face ± width 环形 + 描边色）
   - `Shadow`（`text-shadow`）→ underlay（偏移 uv 重采样 d + dilate + softness；blur 半径 → softness）
   - **多重 shadow**（逗号 ×N）→ shader 内 N 次重采样叠加（N ≤ 3，per-renderer uniform 数组）
-  - `Glow` / `Blur` → Phase 2（showcase 无）
+  - `Glow`（`font-effect:glow`）→ glow（face 外 distance power 衰减 + glow 色，参照 TMP 完整 `TMP_SDF.shader`）
+  - `Blur`（`font-effect:blur`）→ face softness 加大近似（SDF 无整字高斯 blur，TMP 亦无；与 v1.8 bitmap 高斯 blur 偏硬，showcase 无此效果）
 
 ### 2.5 参数：SOURCE_SIZE = 48 / SPREAD = 12
 
@@ -145,7 +145,8 @@ float face = saturate((d - (0.5 - _FaceDilate*0.5)) * scale + 0.5);  // _FaceDil
 - `build_text_mesh` 把节点 `text_effects` 打包成 per-renderer uniform（MPB），不再为每个 effect 注册 `effect_sig` + atlas 分槽 + 独立 mesh layer（shadow_back / stroke_front 等 layer 机制废弃）。
 - `text-shadow`（多值逗号）→ 多组 underlay uniform（N≤3）。
 - `-webkit-text-stroke` → outline uniform。
-- `font-effect: glow / blur` → Phase 2（解析保留，渲染忽略 + log 警告）。
+- `font-effect: glow` → glow uniform（face 外 distance power 衰减 + glow 色）。
+- `font-effect: blur` → face softness 加大近似（SDF 模型固有限制，无整字高斯 blur）。
 
 ### 3.7 FFI / 后端
 
@@ -163,10 +164,13 @@ float face = saturate((d - (0.5 - _FaceDilate*0.5)) * scale + 0.5);  // _FaceDil
 - **fence_contract 不受影响**（不改围栏标签/属性集）。
 - 改代码后搜 `docs/` 是否引用了改动的 struct/字段（防漂移，CLAUDE.md）。
 
-## 5. 分阶段
+## 5. 交付范围（一次性迁移 v1.8 全部文字能力）
 
-- **Phase 1**（完整覆盖 showcase，零回归）：光栅 SDF + `GlyphKey` 简化 + quad 缩放 + shader base（`_FaceDilate`）+ outline + underlay（含多重 N≤3）。公司 Rust 改 + .dll / 家里 PlayMode 验收。
-- **Phase 2**（按需，不阻塞）：glow / 纯字形 blur（showcase 无）+ SOURCE/SPREAD 精调（若 Phase 1 验收需）。多重 shadow 已在 Phase 1 完成，Phase 2 不再涉及。
+SDF 改造**不分功能 Phase**——v1.8 已交付的文字效果（`roadmap.md:110`：Shadow/Stroke/Glow/Blur + 渐变字 + 装饰线）一次性迁移到 SDF，**不退化、不推后**。理由：单一 SDF 后 atlas 存 distance，bitmap 后处理路径必然废，Glow/Blur 不能沿用旧路径也不能降级——必须随 SDF 一起搬 shader。实施按 task 拆（writing-plans，每步失败测试）：
+
+- 光栅 SDF（8SSEDT）→ `GlyphKey` 简化 → quad 缩放 → shader base（`_FaceDilate`）→ outline（Stroke）→ underlay（Shadow，多重 N≤3）→ glow（Glow）→ blur 近似（Blur）→ 重编 .dll → 家里 PlayMode 验收。
+- 渐变字（`background-clip:text`，per-vertex 两色）与装饰线（underline/strike，独立 mesh）不受 SDF 影响，自动保留。
+- SOURCE/SPREAD（48/12）随验收精调。
 - pixel snap（已做未 commit）在 SDF 后仍需要，保留。
 
 ## 6. 风险
@@ -175,7 +179,7 @@ float face = saturate((d - (0.5 - _FaceDilate*0.5)) * scale + 0.5);  // _FaceDil
 - **多重 shadow MPB 打包**：uniform 数组在 Unity MPB 麻烦，N 限 ≤3，可能需拆多个 SetVector。
 - **ddx/ddy URP 可用性**：标准 HLSL 导数，低风险。
 - **SDF 编码/解码约定一致**：atlas 编码（`0.5 + d/(2*SPREAD)`）↔ shader 解码 ↔ quad scale（target/SOURCE）三处须对齐，错一则位移/厚度/锐利度全错。
-- **effect 搬 shader 后视觉对齐**：softness 替高斯 blur（shadow blur 12 → underlay softness），与 HTML 柔光投影可能有可感差异，验收时对齐。
+- **effect 搬 shader 后视觉对齐**：①shadow blur → underlay softness（shadow blur 12 → softness）；②Blur → face softness 近似（SDF 无整字高斯 blur，比 v1.8 bitmap 高斯 blur 偏硬）。两者与 HTML 有可感差异，验收时对齐，必要时 softness 系数精调。
 - **两机工作流**：公司改 Rust + 重编 .dll，家里 Unity PlayMode 验收视觉（[[two-machine-workflow]]）。
 
 ## 附录 A：TMP SDF 取证（`temp/com.unity.textmeshpro/`）
