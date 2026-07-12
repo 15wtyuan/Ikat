@@ -148,7 +148,7 @@ Shader "LoomGUI/Unlit"
                 // underlay×3（偏移 uv 重采 d，over 合成画 face 下）
                 #define UNDERLAY_PASS(idx) \
                     if (_UnderlayColor##idx.a > 0.001) { \
-                        float du = tex2D(_MainTex, i.uv + _UnderlayOffset##idx.xy * _MainTex_TexelSize.xy).r; \
+                        float du = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv + _UnderlayOffset##idx.xy * _MainTex_TexelSize.xy).r; \
                         float ls = scale / (1.0 + _UnderlaySoftness##idx * scale); \
                         float um = saturate((du - threshold) * ls + 0.5); \
                         float ua = _UnderlayColor##idx.a * um; \
