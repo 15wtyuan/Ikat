@@ -23,8 +23,8 @@ fn hash_color_matrix(m: &[f32; 20]) -> u64 {
 /// program=0/1 Mesh 才参与合并。含 color_matrix 哈希——不同 color filter（如 grayscale vs sepia）
 /// 不能合批，否则 filter 数据在 merge_batch 中被清零丢失。
 fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32, u64)> {
-    if rn.node_id & (crate::render::BOX_SHADOW_FLAG | crate::render::TEXT_STROKE_FRONT_FLAG) != 0 {
-        return None; // 合成 Back/Front layer 节点不合批
+    if rn.node_id & crate::render::BOX_SHADOW_FLAG != 0 {
+        return None; // div box-shadow 合成节点不合批
     }
     match &rn.payload {
         NodePayload::Mesh {
@@ -125,6 +125,7 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
         sort_key: last.sort_key,
         change_level: crate::render::node::ChangeLevel::Full,
         reuse_key: 0,
+        effect: crate::render::node::EffectBlock::default(),
         payload: NodePayload::Mesh {
             verts,
             uvs,
@@ -171,6 +172,7 @@ mod tests {
             sort_key,
             change_level: ChangeLevel::Full,
             reuse_key: 0,
+            effect: crate::render::node::EffectBlock::default(),
             payload: NodePayload::Mesh {
                 verts: vec![
                     [rect_off, 0.0],
@@ -402,6 +404,7 @@ mod tests {
             sort_key: id,
             change_level: ChangeLevel::Full,
             reuse_key: 0,
+            effect: crate::render::node::EffectBlock::default(),
             payload: NodePayload::Mesh {
                 verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
                 uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
@@ -441,6 +444,7 @@ mod tests {
             sort_key: sk,
             change_level: ChangeLevel::Full,
             reuse_key: 0,
+            effect: crate::render::node::EffectBlock::default(),
             payload: NodePayload::Mesh {
                 verts: vec![
                     [sk as f32 * 50.0, 0.0],

@@ -2457,6 +2457,7 @@ fn propagate_text_sub_page_sort_keys_cumulative_shift_no_ties() {
         sort_key,
         change_level: ChangeLevel::Full,
         reuse_key: 0,
+        effect: crate::render::node::EffectBlock::default(),
         payload: empty_mesh.clone(),
     };
 
@@ -2536,6 +2537,7 @@ fn propagate_inline_image_sort_keys_stacks_above_text_layers() {
         sort_key,
         change_level: ChangeLevel::Full,
         reuse_key: 0,
+        effect: crate::render::node::EffectBlock::default(),
         payload: empty_mesh.clone(),
     };
 
@@ -4055,120 +4057,6 @@ fn gradient_text_spans_whole_text_not_per_glyph() {
     );
 }
 
-/// 多页 text + stroke：stroke sort_key 必须 > 所有子页 base sort_key。
-/// 回归：propagate_text_stroke_sort_keys 原来的 primary_sk+1 会在多页时被子页遮盖。
-#[test]
-fn text_stroke_sort_key_above_sub_pages() {
-    // 模拟 propagate_text_sub_page_sort_keys 之后的状态：
-    // primary=100(sk=5), sub1(101, sk=6), sub2(102, sk=7), other_real=200(sk=9)
-    // stroke 节点 sk=0，待 propagate_text_stroke_sort_keys 调整。
-    let primary_id: u32 = 100;
-    let sub1_id = synth_text_node_id(primary_id, 1);
-    let sub2_id = synth_text_node_id(primary_id, 2);
-    let stroke_id = synth_text_node_id(primary_id, 128); // TEXT_STROKE_FRONT_FLAG >> 24 = 128
-    let other_id: u32 = 200;
-
-    let empty_mesh = crate::render::node::NodePayload::Mesh {
-        verts: vec![],
-        uvs: vec![],
-        colors: vec![],
-        indices: vec![],
-        image_path: None,
-        program: 0,
-        color_matrix: [0.0; 20],
-    };
-
-    let mk_rn = |node_id: u32, sort_key: u32| crate::render::node::RenderNode {
-        node_id,
-        parent_id: None,
-        visible: true,
-        alpha: 1.0,
-        color_tint: [1.0; 4],
-        world_matrix: crate::transform::IDENTITY,
-        blend: crate::render::node::BlendMode::Normal,
-        mask_context: crate::render::node::MaskContext(0),
-        sort_key,
-        change_level: crate::render::node::ChangeLevel::Full,
-        reuse_key: 0,
-        payload: empty_mesh.clone(),
-    };
-
-    let mut nodes = vec![
-        mk_rn(primary_id, 5),
-        mk_rn(sub1_id, 6),
-        mk_rn(sub2_id, 7),
-        mk_rn(stroke_id, 0), // 初始 0，由 propagate 设置
-        mk_rn(other_id, 9),
-    ];
-
-    let strokes = vec![(primary_id, stroke_id)];
-    super::propagate_text_stroke_sort_keys(&mut nodes, &strokes);
-
-    let find = |nid: u32| nodes.iter().find(|n| n.node_id == nid).unwrap().sort_key;
-    let primary_sk = find(primary_id);
-    let sub1_sk = find(sub1_id);
-    let sub2_sk = find(sub2_id);
-    let stroke_sk = find(stroke_id);
-    let other_sk = find(other_id);
-
-    // stroke 在上（最高 sort_key = 后绘）
-    assert!(stroke_sk > sub1_sk, "stroke {stroke_sk} > sub1 {sub1_sk}");
-    assert!(stroke_sk > sub2_sk, "stroke {stroke_sk} > sub2 {sub2_sk}");
-    // 子页同页序保持
-    assert!(sub1_sk < sub2_sk, "sub1 {sub1_sk} < sub2 {sub2_sk}");
-    assert!(
-        primary_sk < sub1_sk,
-        "primary {primary_sk} < sub1 {sub1_sk}"
-    );
-    // 其他节点在 stroke 之后（被 threshold 位移 +1 推开）
-    assert!(
-        other_sk > stroke_sk,
-        "other {other_sk} > stroke {stroke_sk}"
-    );
-    // 无 tie
-    let mut sks: Vec<u32> = nodes.iter().map(|n| n.sort_key).collect();
-    sks.sort();
-    let mut dedup = sks.clone();
-    dedup.dedup();
-    assert_eq!(sks.len(), dedup.len(), "sort_key 不得有 tie");
-}
-
-#[test]
-fn text_without_stroke_emits_no_front_layer() {
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    let mut n = Node::default();
-    n.kind = NodeKind::Text {
-        content: "D".into(),
-    };
-    n.style.font_size = 16.0;
-    n.layout_rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        w: 100.0,
-        h: 30.0,
-    };
-    let mut scene = Scene::from_nodes(vec![n], vec![]);
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    let has_stroke = frame
-        .nodes
-        .iter()
-        .any(|rn| (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) != 0);
-    assert!(!has_stroke, "no -webkit-text-stroke -> no Front layer");
-}
-
 /// effect 打包：FontEffect → EffectBlock 槽位映射。
 /// Shadow→underlay（多重 ≤3，超 3 丢）、Stroke→outline、Glow→glow、Blur→blur。
 #[test]
@@ -4276,4 +4164,33 @@ fn effect_block_to_bytes_stable() {
     // 同 effect 同 bytes（稳定性，供 dirty hash）
     let eb2 = EffectBlock::default();
     assert_eq!(eb.to_bytes(), eb2.to_bytes());
+}
+
+/// build_text_mesh 把节点 text_effects 打包进 TextMeshes.effect（同一文字节点所有页
+/// 共享一份 effect 配置），base 字形 mesh 仍正常产出（SDF 后 effect 改由 shader
+/// uniform 实现，build_text_mesh 不再产出 back/front layer mesh）。
+#[test]
+fn build_text_packs_effects_into_meshes() {
+    use crate::text::font_effect::FontEffect;
+    let (fonts, layout, rect) = build_text_fixture(48.0);
+    let effects = vec![FontEffect::Shadow {
+        ox: 3.0,
+        oy: 3.0,
+        blur: 0.0,
+        color: [0., 0., 0., 1.],
+    }];
+    let m = build_text_mesh(
+        &layout,
+        &mut test_glyph_atlas(),
+        &fonts,
+        &rect,
+        &effects,
+        None,
+        false,
+    );
+    // effect 进了 TextMeshes.effect（shadow → underlay[0]）
+    assert_eq!(m.effect.underlay[0].offset_x, 3.0);
+    assert_eq!(m.effect.underlay[0].offset_y, 3.0);
+    // base 非空（字形 quad 仍产出）
+    assert!(!m.base.is_empty(), "base 字形 mesh 仍产出");
 }

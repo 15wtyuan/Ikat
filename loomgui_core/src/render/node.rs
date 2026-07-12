@@ -138,6 +138,10 @@ pub struct RenderNode {
     pub sort_key: u32,
     pub change_level: ChangeLevel,
     pub reuse_key: u32,
+    /// 文字效果参数（SDF effect：outline / underlay×3 / glow / blur）。非文字节点 = default
+    /// （全 0 → shader 纯 face）。进 FFI effect_block 列 + header_hash（effect 变 = Header 级，
+    /// C# 只更 MPB uniform，不重建 mesh）。
+    pub effect: EffectBlock,
     pub payload: NodePayload,
 }
 
@@ -159,6 +163,7 @@ mod serde_smoke_tests {
             sort_key: 5,
             change_level: ChangeLevel::Full,
             reuse_key: 0,
+            effect: EffectBlock::default(),
             payload: NodePayload::Mesh {
                 verts: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
                 uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],

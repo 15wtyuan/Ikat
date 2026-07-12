@@ -26,22 +26,20 @@ use node::*;
 
 use taffy::style::LengthPercentage;
 
-/// 合成 node_id 标志位：box-shadow / text-shadow Back layer 独立 RenderNode。
+/// 合成 node_id 标志位：div box-shadow 独立 RenderNode（独立 draw call 画在主节点下层）。
 /// 0x1000_0000（bit 28），不与 V_THUMB_FLAG（0x4000_0000）、H_THUMB_FLAG（0x2000_0000）、
 /// 跨页 text 子页（bits [31:24]，实际值 1..~10）冲突。Back layer sort_key < primary（先绘 = 下层）。
+///
+/// 仅 div box-shadow 使用——文字效果（shadow/stroke/glow/blur）SDF 改造后改由 shader
+/// uniform 实现，不再产 back/front layer 合成节点。
 pub(crate) const BOX_SHADOW_FLAG: u32 = 0x1000_0000;
 
-/// text-stroke Front layer 合成 node_id 标志位。
-/// 0x8000_0000（bit 31），远高于跨页 text 子页（bits [31:24] 值 1..15）和
-/// BOX_SHADOW_FLAG（bit 28），不冲突。Front layer sort_key > primary（后绘 = 上层）。
-pub(crate) const TEXT_STROKE_FRONT_FLAG: u32 = 0x8000_0000;
-
 /// 富文本行内图（inline `<img>`）合成 node_id 子页基址。每个行内图一个独立 RenderNode
-/// （image shader + image_path=src），须叠在 primary 的所有文字层之上：sort_key 由
+/// （image shader + image_path=src），须叠在 primary 文字层之上：sort_key 由
 /// `propagate_inline_image_sort_keys` 设为 primary 文字层 max + img_idx + 1。
 /// synth_text_node_id 编码后 high byte = (1000 + idx) & 0xFF = 232..=255，不与跨页子页
-/// （1..=15）撞；与 stroke front（128+）high byte 数值区间相交，但两者都靠各自的
-/// `*_pairs` 显式配对传播 sort_key、不凭 high byte 判别，故不冲突。
+/// （1..=15）或 BOX_SHADOW_FLAG（high byte 16）撞——靠 `inline_image_pairs` 显式配对
+/// 传播 sort_key，不凭 high byte 判别。
 pub(crate) const INLINE_IMG_SYNTH_ID_BASE: u32 = 1000;
 
 /// 把 2 色线性渐变映射到 quad 4 角顶点色（顶点序 TL, TR, BR, BL）。
@@ -216,6 +214,7 @@ fn thumb_render_node(node_id: u32, rect: Rect, sort_key: u32) -> RenderNode {
         sort_key,
         change_level: ChangeLevel::Full,
         reuse_key: 0,
+        effect: EffectBlock::default(),
         payload: NodePayload::Mesh {
             verts: v,
             uvs: uvc,
@@ -269,8 +268,6 @@ pub fn build_render_nodes(
     let mut rich_fragments: Vec<(u32, Vec<crate::text::rich::RichFragment>)> = Vec::new();
     // box-shadow 独立 RenderNode 追踪：(主节点 node_id, 阴影合成 node_id)。
     let mut shadow_pairs: Vec<(u32, u32)> = Vec::new();
-    // text-stroke Front layer RenderNode 追踪：(主节点 node_id, stroke 合成 node_id)。
-    let mut stroke_pairs: Vec<(u32, u32)> = Vec::new();
     // 富文本行内图 RenderNode 追踪：(主节点 node_id, 行内图合成 node_id)。
     let mut inline_image_pairs: Vec<(u32, u32)> = Vec::new();
     for n in scene.nodes.values() {
@@ -458,6 +455,7 @@ pub fn build_render_nodes(
                     sort_key: 0,
                     change_level: ChangeLevel::Full,
                     reuse_key: n.reuse_key,
+                    effect: EffectBlock::default(),
                     payload: NodePayload::Mesh {
                         verts: v,
                         uvs: uvc,
@@ -507,6 +505,7 @@ pub fn build_render_nodes(
                     sort_key: 0,
                     change_level: ChangeLevel::Full,
                     reuse_key: n.reuse_key,
+                    effect: EffectBlock::default(),
                     payload: NodePayload::Mesh {
                         verts: v,
                         uvs: uvc,
@@ -576,8 +575,6 @@ pub fn build_render_nodes(
                     color_tint,
                     wm,
                     true,
-                    &mut shadow_pairs,
-                    &mut stroke_pairs,
                 );
                 continue; // 直接推完，跳过末尾的 id_to_pos / push。
             }
@@ -676,6 +673,7 @@ pub fn build_render_nodes(
                         sort_key: 0,
                         change_level: ChangeLevel::Full,
                         reuse_key: n.reuse_key,
+                        effect: EffectBlock::default(),
                         payload: NodePayload::Mesh {
                             verts: bv,
                             uvs: buv,
@@ -704,8 +702,6 @@ pub fn build_render_nodes(
                     color_tint,
                     wm,
                     !has_rich_bg,
-                    &mut shadow_pairs,
-                    &mut stroke_pairs,
                 );
                 // 行内图：每个 image 一个 Mesh（program=0 image shader，image_path=src）。
                 // 走现有 image 路径（SpriteResolver 命中图集），Unity 零改。
@@ -743,6 +739,7 @@ pub fn build_render_nodes(
                         sort_key: 0, // propagate_inline_image_sort_keys 后调
                         change_level: ChangeLevel::Full,
                         reuse_key: 0,
+                        effect: EffectBlock::default(),
                         payload,
                     });
                 }
@@ -784,6 +781,7 @@ pub fn build_render_nodes(
                         sort_key: 0, // assign_sort_keys 后重调
                         change_level: ChangeLevel::Full,
                         reuse_key: 0,
+                        effect: EffectBlock::default(),
                         payload: NodePayload::Mesh {
                             verts: v,
                             uvs: uvc,
@@ -812,7 +810,6 @@ pub fn build_render_nodes(
     // 的 sort_key 后移子页个数，保持单调连续。
     propagate_text_sub_page_sort_keys(&mut nodes, &id_to_pos);
     propagate_box_shadow_sort_keys(&mut nodes, &shadow_pairs);
-    propagate_text_stroke_sort_keys(&mut nodes, &stroke_pairs);
     propagate_inline_image_sort_keys(&mut nodes, &inline_image_pairs);
     let max_sort = nodes.iter().map(|n| n.sort_key).max().unwrap_or(0);
     batch::reorder_for_batching(scene, &mut nodes);
@@ -870,9 +867,8 @@ fn synth_text_node_id(primary_id: u32, sub_page: u32) -> u32 {
 }
 
 /// 判断 node_id 是否为跨页 text 子页（high byte 在 1..=15，即 bits [31:24] 值 1-15）。
-/// BOX_SHADOW_FLAG（bit 28，对应 high byte >= 16）和 TEXT_STROKE_FRONT_FLAG（bit 31，
-/// 对应 high byte >= 128）均不在此范围——各自的 propagate 函数单独传播 sort_key，
-/// 不走子页传播。
+/// BOX_SHADOW_FLAG（bit 28，对应 high byte >= 16）和 INLINE_IMG_SYNTH_ID_BASE（high byte
+/// = 232..=255）均不在此范围——各自的 propagate 函数单独传播 sort_key，不走子页传播。
 fn is_text_sub_page(node_id: u32) -> bool {
     let page = (node_id >> 24) as u8;
     (1..=15).contains(&page)
@@ -946,75 +942,16 @@ fn propagate_box_shadow_sort_keys(
     }
 }
 
-/// text-stroke Front layer sort_key 调整：stroke 节点排在所有子页之后（Front layer = 后绘 = 上层）。
-///
-/// assign_sort_keys 只给 id_to_pos 中的真 scene 节点赋 sort_key；
-/// stroke 合成节点不在场景树中，初始 sort_key=0。此函数将其调整到
-/// primary.sort_key + num_sub_pages + 1，保证 stroke 在所有子页 base glyph 之上渲染。
-///
-/// 调用须在 propagate_text_sub_page_sort_keys + propagate_box_shadow_sort_keys **之后**——
-/// 需先拿到最终子页 sort_key 布局，再在子页上方插入 stroke。
-///
-/// 处理多个 stroke 节点时从最大 sort_key 开始（降序），避免累积偏移后的 stale 值。
-fn propagate_text_stroke_sort_keys(nodes: &mut [RenderNode], strokes: &[(u32, u32)]) {
-    if strokes.is_empty() {
-        return;
-    }
-    // 每个 primary 的子页数（用于计算 stroke 插入点 = primary_sk + n_sub + 1）。
-    let mut sub_counts: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
-    for rn in nodes.iter() {
-        if is_text_sub_page(rn.node_id) {
-            let primary = text_sub_primary_id(rn.node_id);
-            *sub_counts.entry(primary).or_default() += 1;
-        }
-    }
-    // 构建 (primary_sort_key, primary_id, stroke_id, num_sub_pages) 四元组，按 primary_sk DESC。
-    let mut triples: Vec<(u32, u32, u32, u32)> = strokes
-        .iter()
-        .map(|&(main_id, stroke_id)| {
-            let main_sk = nodes
-                .iter()
-                .find(|n| n.node_id == main_id)
-                .map(|n| n.sort_key)
-                .unwrap_or(0);
-            let n_sub = sub_counts.get(&main_id).copied().unwrap_or(0);
-            (main_sk, main_id, stroke_id, n_sub)
-        })
-        .collect();
-    triples.sort_by_key(|&(sk, _, _, _)| std::cmp::Reverse(sk));
-    // Front 层移位：所有 sort_key > primary_sk + num_sub_pages 且非本 stroke 的节点 +1。
-    // 子页位于 primary_sk+1..primary_sk+num_sub_pages，不位移——stroke 插在它们之上。
-    for &(main_sk, _main_id, stroke_id, n_sub) in &triples {
-        let threshold = main_sk + n_sub;
-        for rn in nodes.iter_mut() {
-            if rn.node_id != stroke_id && rn.sort_key > threshold {
-                rn.sort_key += 1;
-            }
-        }
-    }
-    // 设 stroke sort_key = primary_sk + num_sub_pages + 1（在所有子页上方）。
-    for &(main_id, stroke_id) in strokes {
-        if let (Some(main_pos), Some(stroke_pos)) = (
-            nodes.iter().position(|n| n.node_id == main_id),
-            nodes.iter().position(|n| n.node_id == stroke_id),
-        ) {
-            let main_sk = nodes[main_pos].sort_key;
-            let n_sub = sub_counts.get(&main_id).copied().unwrap_or(0);
-            nodes[stroke_pos].sort_key = main_sk + n_sub + 1;
-        }
-    }
-}
-
 /// 富文本行内图合成节点 sort_key 传播：每个行内图叠在 primary 的所有文字层
-/// （base 子页 + shadow Back + stroke Front）之上。
+/// （base 子页 + div box-shadow back layer）之上。
 ///
 /// assign_sort_keys 只给 `id_to_pos` 中的真 scene 节点赋 sort_key；行内图是合成节点
 /// （INLINE_IMG_SYNTH_ID_BASE 子页），不在场景树中，初始 sort_key=0，会被所有真节点
 /// 盖住（行内图"消失"在底色之下）。此函数把行内图 sort_key 设为该 primary 已有最大
 /// sort_key + img_idx + 1，并把后续真节点后移行内图个数，保持单调连续。
 ///
-/// 须在 propagate_text_sub_page / box_shadow / text_stroke 之后调用——读取它们产出
-/// 的最终 sort_key 作为 base。处理多 primary 时按 base DESC，避免累积偏移污染。
+/// 须在 propagate_text_sub_page / box_shadow 之后调用——读取它们产出的最终 sort_key 作为 base。
+/// 处理多 primary 时按 base DESC，避免累积偏移污染。
 fn propagate_inline_image_sort_keys(nodes: &mut [RenderNode], images: &[(u32, u32)]) {
     if images.is_empty() {
         return;
@@ -1160,34 +1097,24 @@ fn bake_content_offset(layout: &mut crate::text::layout::TextLayout, off_x: f32,
     }
 }
 
-/// `build_text_mesh` 产物：base 字形 mesh（按 atlas 页分组）+ Back/Front layer mesh。
+/// `build_text_mesh` 产物：base 字形 mesh（按 atlas 页分组）+ effect 参数块。
 ///
-/// Back layer = 所有 Back 层效果（text-shadow + font-effect:glow）的字形 quad，
-/// 在 base 之前绘制（sort_key 更小 = 在下层）。多 effect 叠加时按声明顺序入列——
-/// 先声明者先绘（落在更下层）。
-///
-/// shadow mesh 偏移 (ox, oy)；glow mesh 居中无偏移——两者均复用 BOX_SHADOW_FLAG +
-/// propagate_box_shadow_sort_keys 机制。
-///
-/// atlas 按 effect_sig 分槽：back layer 字形经 blur/dilate 后处理，与 raw 字形不混槽。
+/// SDF 改造后文字效果（shadow/stroke/glow/blur）改由 shader uniform 实现，build_text_mesh
+/// 只产 base 字形 mesh；effect 参数由 `pack_effects(text_effects)` 打包成定长 `EffectBlock`，
+/// `push_text_meshes` 塞进每个 base/子页/占位 RenderNode.effect，shader 据此在 fragment
+/// 阶段重建 outline/underlay/glow/blur。同一文字节点所有页共享同一 effect 配置。
 struct TextMeshes {
-    /// base 字形（effect_sig=0），按 atlas 页分组。首页用真 node_id，余页用跨页子页合成 id。
+    /// base 字形，按 atlas 页分组。首页用真 node_id，余页用跨页子页合成 id。
     base: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
-    /// Back layers（text-shadow + font-effect:glow），按 text_effects 声明顺序入列——
-    /// 先声明者在 nodes vec 中更靠前（先绘 = 更下层）。每项 = (atlas 页号, verts, uvs, colors, indices)。
-    /// 复用 BOX_SHADOW_FLAG + propagate_box_shadow_sort_keys 机制。
-    back_layers: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
-    /// Front layers（text-stroke + font-effect:blur），按 text_effects 声明顺序入列。
-    /// 每项 = (atlas 页号, verts, uvs, colors, indices)；call site 据此推 Front layer RenderNode。
-    /// 复用 TEXT_STROKE_FRONT_FLAG + propagate_text_stroke_sort_keys 机制。
-    front_layers: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
+    /// 节点 text_effects 打包成的 effect 块（build_text_mesh 期算一次，push_text_meshes
+    /// 塞进 base/子页/占位 RenderNode.effect）。同一文字节点所有页共享同一 effect 配置。
+    effect: EffectBlock,
 }
 
 /// 把节点 text_effects 打包成定长 EffectBlock（供 build_text_mesh → RenderNode.effect）。
 /// 映射：Shadow→underlay 槽（多重 ≤3，超 3 丢弃；shadow blur→softness、ox/oy→offset）、
 /// Stroke→outline（CSS 单值，后到覆盖）、Glow→glow（w→power，起点值，验收精调）、Blur→blur。
 /// 同类型多值：shadow 抢 underlay 空槽；stroke/glow/blur 后到覆盖先到。
-#[allow(dead_code)] // 下一步接入 build_text_mesh（消费 text_effects 入参）时成为首个非测试 call site。
 pub(crate) fn pack_effects(effects: &[crate::text::font_effect::FontEffect]) -> EffectBlock {
     use crate::text::font_effect::FontEffect;
     let mut eb = EffectBlock::default();
@@ -1251,19 +1178,21 @@ pub(crate) fn pack_effects(effects: &[crate::text::font_effect::FontEffect]) -> 
 /// per-glyph 按 `Glyph.font_id` 取 face 光栅（回退字形来自别的 face，必须按字形自己的
 /// font_id 取 face + 拼 GlyphKey，否则用错 face 光栅出错字）。装饰线度量走 run 主字体。
 ///
-/// `text_effects`：节点的文字效果配置（INHERITED，来自 ResolvedStyle）。SDF 改造后文字
-/// 效果改由 shader uniform 实现（不再做位图后处理），uniform 打包由后续接入；本函数目前
-/// 不消费此参数，保留入参以为 uniform 打包预留 call site。
+/// `text_effects`：节点的文字效果配置（INHERITED，来自 ResolvedStyle）。SDF 改造后
+/// 由 `pack_effects` 打包成定长 `EffectBlock`，随 base mesh 一并返回；push_text_meshes
+/// 把它塞进 base/子页/占位 RenderNode.effect，shader 据此在 fragment 阶段重建效果。
 fn build_text_mesh(
     layout: &crate::text::layout::TextLayout,
     atlas: &mut GlyphAtlas,
     fonts: &crate::text::layout::FontTable,
     rect: &crate::scene::node::Rect,
-    _text_effects: &[crate::text::font_effect::FontEffect],
+    text_effects: &[crate::text::font_effect::FontEffect],
     background_gradient: Option<crate::style::resolved::Gradient2>,
     background_clip_text: bool,
 ) -> TextMeshes {
     use std::collections::BTreeMap;
+    // effect 一次打包，base/子页/占位共享——shader 据此 uniform 重建 outline/underlay/glow/blur。
+    let effect = pack_effects(text_effects);
     // bearing 来自 glyph bbox，px_w/px_h/UV 含 pad：位图原点 = bbox 原点外扩 pad，
     // left/top 减 pad 对齐位图，否则字形偏 1px。
     let pad = crate::text::atlas::GLYPH_PAD as f32;
@@ -1484,11 +1413,7 @@ fn build_text_mesh(
         .into_iter()
         .map(|(pg, (v, u, c, i))| (pg, v, u, c, i))
         .collect();
-    TextMeshes {
-        base,
-        back_layers: Vec::new(),
-        front_layers: Vec::new(),
-    }
+    TextMeshes { base, effect }
 }
 
 /// 单条实心装饰线 quad：全宽矩形，色 per-vertex。
@@ -1557,18 +1482,12 @@ fn emit_deco_segments(
     }
 }
 
-/// 把 `build_text_mesh` 产出的 base + Back layer meshes 推入 `nodes`。
+/// 把 `build_text_mesh` 产出的 base + effect 推入 `nodes`。
 ///
 /// base 字形走跨页子页机制：首页（page 0）用真 node_id，后续页用 `synth_text_node_id` 合成 id。
-/// Back layer（shadow/glow）每项独立 RenderNode，合成 id = `BOX_SHADOW_FLAG`（bit 28）+ si 偏移
-/// （多 Back effect 时通过 synth_sub 编码序号区分）。Back layer 节点 sort_key 由
-/// `propagate_box_shadow_sort_keys` 调整为 primary.sort_key - 1（在 base 之前绘制 = 在下层）。
-///
-/// `shadow_pairs`：追加 (primary_node_id, back_layer_node_id) 对，供 sort_key 传播用。
-/// 复用 box-shadow 的 sort_key 传播机制——Back layer 语义一致（sort_key 更小 = 先绘 = 下层）。
-///
-/// atlas path 用 `loomgui://font-atlas/p{page}`（与 base 同形，effect 字形在 atlas 内按
-/// effect_sig 分槽，同页号混存——page 只代表物理纹理页，不区分 base/effect）。
+/// SDF 改造后文字效果（shadow/stroke/glow/blur）改由 shader uniform 实现——`meshes.effect`
+/// 直接塞进 base/子页/占位 RenderNode.effect，不再产 back/front layer 合成节点（原 BOX_SHADOW_FLAG
+/// + TEXT_STROKE_FRONT_FLAG 双层机制全废；BOX_SHADOW_FLAG 留给 div box-shadow 单独使用）。
 fn push_text_meshes(
     nodes: &mut Vec<RenderNode>,
     id_to_pos: &mut std::collections::HashMap<NodeId, usize>,
@@ -1581,50 +1500,8 @@ fn push_text_meshes(
     color_tint: [f32; 4],
     wm: [f32; 6],
     register_id_map: bool,
-    shadow_pairs: &mut Vec<(u32, u32)>,
-    stroke_pairs: &mut Vec<(u32, u32)>,
 ) {
-    let TextMeshes {
-        base,
-        back_layers,
-        front_layers,
-    } = meshes;
-    // Back layers：按 text_effects 声明顺序推入 nodes vec（先声明先绘 = 更下层）。
-    // sort_key 初始 0，由 propagate_box_shadow_sort_keys 后调为 primary.sort_key - 1。
-    // 每个 Back layer（shadow/glow）用 BOX_SHADOW_FLAG + 序号编码独立合成 id。
-    // 多 Back effect 同主节点时各得唯一 id（通过 synth_sub 偏移区分）。
-    for (si, (page, verts, uvs, colors, indices)) in back_layers.iter().enumerate() {
-        if verts.is_empty() {
-            continue;
-        }
-        // 合成 id：BOX_SHADOW_FLAG（bit 28）+ si 偏移，不与真子页（1..15）冲突。
-        let synth_sub = (BOX_SHADOW_FLAG >> 24) + (si as u32);
-        let back_id = synth_text_node_id(node_id, synth_sub);
-        let path = format!("loomgui://font-atlas/p{}", page);
-        shadow_pairs.push((node_id, back_id));
-        nodes.push(RenderNode {
-            node_id: back_id,
-            parent_id,
-            visible: true,
-            alpha,
-            color_tint,
-            world_matrix: wm,
-            blend: BlendMode::Normal,
-            mask_context: MaskContext(0),
-            sort_key: 0, // propagate_box_shadow_sort_keys 后调
-            change_level: ChangeLevel::Full,
-            reuse_key: 0, // Back layer 独立 GO，不继承主节点 reuse_key
-            payload: NodePayload::Mesh {
-                verts: verts.clone(),
-                uvs: uvs.clone(),
-                colors: colors.clone(),
-                indices: indices.clone(),
-                image_path: Some(path),
-                program: 1,
-                color_matrix: [0.0; 20],
-            },
-        });
-    }
+    let TextMeshes { base, effect } = meshes;
     if base.is_empty() {
         // 空文本 → 占位 Mesh（无顶点，image_path 用第 0 页兜底）。
         if register_id_map {
@@ -1642,6 +1519,7 @@ fn push_text_meshes(
             sort_key: 0,
             change_level: ChangeLevel::Full,
             reuse_key: n.reuse_key,
+            effect,
             payload: NodePayload::Mesh {
                 verts: vec![],
                 uvs: vec![],
@@ -1674,6 +1552,7 @@ fn push_text_meshes(
             sort_key: 0,
             change_level: ChangeLevel::Full,
             reuse_key: n.reuse_key,
+            effect,
             payload: NodePayload::Mesh {
                 verts: verts0.clone(),
                 uvs: uvs0.clone(),
@@ -1705,6 +1584,8 @@ fn push_text_meshes(
             // 若继承 reuse_key>0（如在虚拟列表 slot 内），所有子页共享同一 reuse_key
             // → MirrorPool 只保留最后一个子页的 mesh，其余页字形丢失。
             reuse_key: 0,
+            // 同一文字节点所有页共享同一 effect 配置：fragment shader 按页独立重建效果。
+            effect,
             payload: NodePayload::Mesh {
                 verts: verts.clone(),
                 uvs: uvs.clone(),
@@ -1716,49 +1597,10 @@ fn push_text_meshes(
             },
         });
     }
-    // Front layers（stroke + blur）：在 base 之后 push（nodes vec 顺序上 Front 层在 base 之后）。
-    // sort_key 初始 0，由 propagate_text_stroke_sort_keys 后调为 primary.sort_key + n_sub + 1。
-    // 多 Front pattern 按 text_effects 声明顺序入列（front_layers 已按此序），同 pattern 多页
-    // 用 synth_text_node_id 编码页号，flag 用 TEXT_STROKE_FRONT_FLAG 标记。
-    for (si, (page, verts, uvs, colors, indices)) in front_layers.iter().enumerate() {
-        if verts.is_empty() {
-            continue;
-        }
-        // 合成 id：TEXT_STROKE_FRONT_FLAG（bit 31）经 synth_text_node_id 编码
-        // 为 high byte = 128+si，远高于子页 1-15 和 shadow 16+范围。
-        let synth_sub = (TEXT_STROKE_FRONT_FLAG >> 24) + (si as u32);
-        let front_id = synth_text_node_id(node_id, synth_sub);
-        let path = format!("loomgui://font-atlas/p{}", page);
-        stroke_pairs.push((node_id, front_id));
-        nodes.push(RenderNode {
-            node_id: front_id,
-            parent_id,
-            visible: true,
-            alpha,
-            color_tint,
-            world_matrix: wm,
-            blend: BlendMode::Normal,
-            mask_context: MaskContext(0),
-            sort_key: 0, // propagate_text_stroke_sort_keys 后调
-            change_level: ChangeLevel::Full,
-            reuse_key: 0, // Front layer 独立 GO，不继承主节点 reuse_key
-            payload: NodePayload::Mesh {
-                verts: verts.clone(),
-                uvs: uvs.clone(),
-                colors: colors.clone(),
-                indices: indices.clone(),
-                image_path: Some(path),
-                program: 1,
-                color_matrix: [0.0; 20],
-            },
-        });
-    }
-    // 注意：子页 / shadow back / stroke front RenderNode 的合成 node_id 是有意**不**加入 id_to_pos 的。
+    // 注意：子页 RenderNode 的合成 node_id 是有意**不**加入 id_to_pos 的。
     // assign_sort_keys / scrollbar thumb / NativeHost 查询均针对真 scene 节点；
     // 合成 id 是纯渲染产物，不应反向映射到 scene node。子页的 sort_key/mask_context
-    // 由 propagate_text_sub_page_sort_keys 单独传播；shadow back 由 propagate_box_shadow_sort_keys
-    // 传播（shadow_pairs 已在上方 push）；stroke front 由 propagate_text_stroke_sort_keys
-    // 传播（stroke_pairs 已在上方 push）。
+    // 由 propagate_text_sub_page_sort_keys 单独传播。
 }
 
 #[cfg(test)]

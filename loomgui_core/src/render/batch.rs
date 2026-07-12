@@ -313,6 +313,7 @@ mod tests {
             sort_key: 0,
             change_level: ChangeLevel::Full,
             reuse_key: 0,
+            effect: crate::render::node::EffectBlock::default(),
             payload: NodePayload::Mesh {
                 verts: vec![[0.0, 0.0]; 4],
                 uvs: vec![[0.0, 0.0]; 4],
@@ -692,6 +693,7 @@ mod tests {
             sort_key: 0,
             change_level: ChangeLevel::Full,
             reuse_key: 0,
+            effect: crate::render::node::EffectBlock::default(),
             payload: NodePayload::Mesh {
                 verts: vec![
                     [rect.x, rect.y],

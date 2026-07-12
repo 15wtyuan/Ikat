@@ -1,8 +1,11 @@
 //! 帧 blob 构建器：FrameData → 拍平 SOA blob（§4.1）。
 //! mesh 顶点 re-base 到节点本地空间（render 侧是父坐标系，减 transform.x/y）。
 
-#[allow(unused_imports)] // BlendMode/MaskContext/NodePayload 仅测试 helper 经 super::* 用。
-use loomgui_core::render::node::{BlendMode, ChangeLevel, MaskContext, NodePayload, RenderNode};
+#[allow(unused_imports)]
+// BlendMode/MaskContext/NodePayload/EffectBlock 仅测试 helper 经 super::* 用。
+use loomgui_core::render::node::{
+    BlendMode, ChangeLevel, EffectBlock, MaskContext, NodePayload, RenderNode,
+};
 use loomgui_core::render::FrameData;
 use loomgui_core::transform;
 

@@ -24,6 +24,7 @@ fn mesh_node(id: u32, parent: Option<u32>, x: f32, y: f32, w: f32, h: f32) -> Re
         sort_key: id,
         change_level: ChangeLevel::Full,
         reuse_key: 0,
+        effect: EffectBlock::default(),
         payload: NodePayload::Mesh {
             // 父坐标系顶点：(x,y)(x+w,y)(x+w,y+h)(x,y+h)
             verts: vec![[x, y], [x + w, y], [x + w, y + h], [x, y + h]],
@@ -68,6 +69,7 @@ fn mesh_node_tinted(id: u32, tint: [f32; 4], alpha: f32, bg: [f32; 4]) -> Render
         sort_key: id,
         change_level: ChangeLevel::Full,
         reuse_key: 0,
+        effect: EffectBlock::default(),
         payload: NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
@@ -95,6 +97,7 @@ fn mesh_node_raw(verts: Vec<[f32; 2]>, indices: Vec<u32>, tx: f32, ty: f32) -> R
         sort_key: 0,
         change_level: ChangeLevel::Full,
         reuse_key: 0,
+        effect: EffectBlock::default(),
         payload: NodePayload::Mesh {
             verts,
             uvs: vec![[0.0, 0.0]; n],
@@ -744,6 +747,7 @@ fn merged_mesh_blob_keeps_absolute_verts_and_no_double_alpha() {
         sort_key: 0,
         change_level: ChangeLevel::Full,
         reuse_key: 0,
+        effect: EffectBlock::default(),
         payload: NodePayload::Mesh {
             // 顶点已是绝对 design 坐标（merge 不 re-base）；re-base 减 transform(0) = 不变。
             verts: vec![
@@ -816,6 +820,7 @@ fn blob_world_matrix_roundtrip() {
         sort_key: 0,
         change_level: ChangeLevel::Full,
         reuse_key: 0,
+        effect: EffectBlock::default(),
         payload: NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
             uvs: vec![[0.0, 0.0]; 4],
@@ -887,6 +892,7 @@ fn blob_color_matrix_column_round_trips() {
         blend: BlendMode::Normal,
         change_level: ChangeLevel::Full,
         reuse_key: 0,
+        effect: EffectBlock::default(),
         payload: NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
             uvs: vec![[0.0, 0.0]; 4],
@@ -955,6 +961,7 @@ fn blob_v9_round_trips_reuse_key() {
         sort_key: 0,
         change_level: ChangeLevel::Full,
         reuse_key: 42, // v9 新字段
+        effect: EffectBlock::default(),
         payload: NodePayload::Mesh {
             verts: vec![[0.0, 0.0]; 4],
             uvs: vec![[0.0, 0.0]; 4],
