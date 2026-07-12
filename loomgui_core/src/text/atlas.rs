@@ -182,8 +182,12 @@ impl GlyphAtlas {
         }
     }
 
-    /// 取一个 1×1 白像素槽（装饰线 / 纯色填充用）。首次调用分配并填 255，其后命中
+    /// 取一个纯色填充槽（装饰线 / 实心 quad 用）。首次调用分配 3×3 全 255 块，其后命中
     /// 缓存。用 sentinel key（font_id=u32::MAX, glyph_id=u16::MAX）避与真字形键空间碰撞。
+    /// 返回中心 texel 的 UV rect。装饰线 quad 把这 1 texel 拉伸覆盖整条线宽——若只 1×1，
+    /// Bilinear 采样在单 texel UV 范围内会渐变到相邻 texel（可能是空位 / SDF 距离值），
+    /// 把 255 稀释成 <threshold → 覆盖度被吃（细线变淡、dotted 小段直接消失、宽线端部不全）。
+    /// 3×3 保证中心 texel 四邻也是 255，Bilinear 恒采到纯 solid。
     pub fn ensure_solid(&mut self) -> GlyphRect {
         let key = GlyphKey {
             font_id: u32::MAX,
@@ -192,18 +196,26 @@ impl GlyphAtlas {
         if let Some(r) = self.cache.get(&key) {
             return *r;
         }
-        let alloc = self.allocate(1, 1);
+        let alloc = self.allocate(3, 3);
         let page = &mut self.pages[alloc.page as usize];
-        page.pixels[alloc.px_y as usize * page.width as usize + alloc.px_x as usize] = 255;
+        let pw = page.width as usize;
+        for dy in 0..3 {
+            for dx in 0..3 {
+                page.pixels[(alloc.px_y as usize + dy) * pw + alloc.px_x as usize + dx] = 255;
+            }
+        }
         if !self.dirty.contains(&alloc.page) {
             self.dirty.push(alloc.page);
         }
+        // 中心 texel = (px_x+1, px_y+1)（3×3 正中，四邻皆 255）。
+        let cx = alloc.px_x + 1;
+        let cy = alloc.px_y + 1;
         let uv = GlyphRect {
             page: alloc.page,
-            u0: alloc.px_x as f32 / page.width as f32,
-            v0: alloc.px_y as f32 / page.height as f32,
-            u1: (alloc.px_x + 1) as f32 / page.width as f32,
-            v1: (alloc.px_y + 1) as f32 / page.height as f32,
+            u0: cx as f32 / page.width as f32,
+            v0: cy as f32 / page.height as f32,
+            u1: (cx + 1) as f32 / page.width as f32,
+            v1: (cy + 1) as f32 / page.height as f32,
             px_w: 1,
             px_h: 1,
         };
