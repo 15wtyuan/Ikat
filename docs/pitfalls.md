@@ -1163,3 +1163,10 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：`LoomStage.cs SyncFontAtlas` 改 `new Texture2D(w, h, TextureFormat.R8, false, true)`（linear=true），sample 直读 raw byte（distance 不被 sRGB 解码）。shader `_FaceDilate` 从 0.15 改回 0（之前调厚是补偿 sRGB 压低，linear 后不需要）。
 **教训**：①存 distance/coverage/mask 等非颜色数据的 texture 必须 `linear=true`（对标 TMP font atlas 也是 linear），否则 GPU sRGB 采样会扭曲数据。②诊断 SDF sample 问题时直接量化 sample 到的 d 值（shader `step(阈值, tex.r)` 着色）比反复猜 shader 数学高效——`d=0.1~0.35` 正好是 `0.59 sRGB→Linear` 的特征值，是 sRGB 解码铁证。③"采样值系统性偏低"先想 sRGB 解码，别先怀疑 UV/数学。
 
+### 坑 158：pkg 格式 bump 后 stale 打包器 GUI exe → LoadPackage rc=-1（双机/版本错配）
+
+**症状**：PlayMode 报 `[Showcase] LoadPackage(showcase) 失败 rc=-1`，Console 无其他错。换字体/改 HTML 重打后触发，但字体本身正常。
+**根因**：`read_package` 版本协商——pkg.bin 头 version < `MIN_VERSION` → `PkgError::TooOld` → `Stage::load_package` Err → FFI rc=-1。pkg 格式 bump（如 v15→v16，删 border_width 改 bincode 布局）后，**入库的打包器 GUI exe（`Editor/Tools/loomgui_gui.exe`）若没重出**，它静态链入旧 core 的 `PKG_FORMAT_VERSION`，产的 pkg.bin 是旧版本，被新 .dll（认新 `MAX_VERSION`）拒。字体/CSS 改动是噪音——字体不进 pkg.bin（打包器只 copy 不解析），换字体只是触发重打 + 跑 PlayMode 才暴露早已存在的 stale 产物。
+**解决**：①读 pkg.bin 头第 5-8 字节（LE u32）= version，对比 `loomgui_core/src/asset/mod.rs` 的 `PKG_FORMAT_VERSION`/`MIN_VERSION`，PowerShell：`[BitConverter]::ToUInt32([IO.File]::ReadAllBytes(".../showcase.pkg.bin"), 4)`，不等即 stale。②重出 GUI exe：`(cd loomgui_gui && tauri build --no-bundle)` → cp 到 `Editor/Tools/loomgui_gui.exe`（见 CLAUDE.md「GUI 打包器 exe 闭环」），再用新 exe 重打 pkg.bin。
+**教训**：pkg 格式版本是 runtime（.dll 读）+ packer（GUI exe 写）的双向契约。bump 版本时**三个产物必须同步刷新 + commit**：.dll（runtime 读）、GUI exe（打包器写）、pkg.bin（已发布产物）。漏一个就 rc=-1 或渲染错——同 stale .dll（坑 102 同类）。诊断 rc=-1 第一步永远是读 pkg.bin version 字段对比 core 常量，别猜字体/资源；core 改 `PKG_FORMAT_VERSION` 或 `ResolvedStyle` bincode 布局后，exe + .dll + pkg.bin 三者都要重产。
+
