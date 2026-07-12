@@ -1156,3 +1156,10 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：`git checkout <noise files>` 恢复 HEAD 行尾，只 commit 真变化（pkg.bin/dll）。commit 前 `git diff --stat` 验：stat 只列真 binary 变（尺寸变），行尾 noise 不列。
 **教训**：Windows 上 pkg build / cargo build 重产 tracked 文本产物（json/cs）常见行尾 noise；`git diff --stat` 区分真变化（binary 列尺寸变）vs 行尾 noise（stat 空），checkout 恢复 noise 别 commit。
 
+### 坑 157：font atlas R8 texture 默认 sRGB 采样 → SDF distance 被硬件解码压低 → 字全消失（SDF 字体改造）
+
+**症状**：SDF 字体改造（8SSEDT + rasterize SDF + shader SDF 重建）后 showcase 所有字体透明消失（不是粉色 error shader，Console 干净）。core atlas SDF 数据健康（inside>140）、emit UV 字形子区、blob 序列化、shader SDF 数学（对标 `TMP_SDF_SSD.cginc`）全验证过正确，字就是不出。
+**根因**：font atlas 用 `new Texture2D(w, h, TextureFormat.R8, false)` 创建，**第 5 参 `linear` 默认 false（sRGB）**。R8 存 SDF distance（inside≈151/255=0.59），GPU 采样时**硬件自动 sRGB→Linear 解码**：0.59 sRGB → 0.30 Linear。shader `faceAlpha = saturate((d - threshold)*scale + 0.5)`，d 被压到 0.30 < threshold 0.425 → faceAlpha=0 → 字全透明。
+**解决**：`LoomStage.cs SyncFontAtlas` 改 `new Texture2D(w, h, TextureFormat.R8, false, true)`（linear=true），sample 直读 raw byte（distance 不被 sRGB 解码）。shader `_FaceDilate` 从 0.15 改回 0（之前调厚是补偿 sRGB 压低，linear 后不需要）。
+**教训**：①存 distance/coverage/mask 等非颜色数据的 texture 必须 `linear=true`（对标 TMP font atlas 也是 linear），否则 GPU sRGB 采样会扭曲数据。②诊断 SDF sample 问题时直接量化 sample 到的 d 值（shader `step(阈值, tex.r)` 着色）比反复猜 shader 数学高效——`d=0.1~0.35` 正好是 `0.59 sRGB→Linear` 的特征值，是 sRGB 解码铁证。③"采样值系统性偏低"先想 sRGB 解码，别先怀疑 UV/数学。
+

@@ -257,7 +257,9 @@ namespace LoomGUI
                         int got = (int)Native.loomgui_stage_font_atlas_page(_stage, page, &w, &h, pBuf, (nuint)needed);
                         if (got != needed) continue;
                     }
-                    var tex = new Texture2D((int)w, (int)h, TextureFormat.R8, false);
+                    // R8 必须用 linear=true：distance 存在 .r，默认 sRGB 采样会被硬件 sRGB→Linear 解码
+                    // 把 d 压低（inside 0.59→0.30）→ faceAlpha 算成 0 → 字消失。linear=true 直读 raw byte。
+                    var tex = new Texture2D((int)w, (int)h, TextureFormat.R8, false, true);
                     fixed (byte* p = buf) { tex.LoadRawTextureData((IntPtr)p, needed); }
                     tex.Apply(false, true);
                     // atlas 是 Stage 级单一共享实例（所有字体字形混在同一 page），路径只以 page 为键——

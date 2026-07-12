@@ -25,7 +25,7 @@ Shader "LoomGUI/Unlit"
         _CFOff ("CFOff", Vector) = (0,0,0,0)
         _Alpha ("Alpha", Float) = 1
         _CornerRadius ("CornerRadius", Float) = 0
-        _FaceDilate("Face Dilate", Range(-1,1)) = 0.15   // 调厚治"字细"：正值向内推 threshold 增粗
+        _FaceDilate("Face Dilate", Range(-1,1)) = 0   // 0=标准字形边缘（threshold=0.5）；正值增粗，负值变细
         _GradientScale("Gradient Scale", Float) = 13     // = SPREAD(12)+1，distance→屏幕换算（对标 TMP _GradientScale=atlasPadding+1）
     }
     SubShader
