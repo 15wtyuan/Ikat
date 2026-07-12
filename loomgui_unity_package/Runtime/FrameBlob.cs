@@ -6,21 +6,23 @@ namespace LoomGUI
 {
     /// 帧 blob 托管解析视图。解析 Rust build_blob 产出的 little-endian blob。
     ///
-    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v10）：
-    ///   header (116B): magic(u32 LE), version(u32)=10, node_count(u32),
-    ///                 20× col_offset(u32, byte offset from blob start),
+    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v11）：
+    ///   header (120B): magic(u32 LE), version(u32)=11, node_count(u32),
+    ///                 21× col_offset(u32, byte offset from blob start),
     ///                 mesh_arena_off(u32), mesh_arena_len(u32),
     ///                 clip_table_off(u32), clip_table_len(u32),
     ///                 path_table_off(u32), path_table_len(u32)
-    ///   20 列 SOA（顺序见 ColOff 注释），随后 mesh_arena / clip_table / path_table 段。
+    ///   21 列 SOA（顺序见 ColOff 注释），随后 mesh_arena / clip_table / path_table 段。
     ///   v10：text_arena 已删（文本字形塌进 mesh_arena，核心自产 atlas），列 text_off/text_len 删除（22→20 列）。
+    ///   v11：加 effect_block 列（[f32;32]=128B，per-text-node SDF effect 参数），列数 20→21。
     /// C# on Windows 是 little-endian，BitConverter 直读无需 byte swap。
     public readonly struct FrameBlob
     {
         public const uint Magic = 0x4D4F4F4C;
         /// blob 版本。magic+version 校验在 IsValid。
         /// v10：删 text_arena + text_off/text_len 列（22→20），文本字形塌进 mesh_arena。
-        public const uint ExpectedVersion = 10;
+        /// v11：加 effect_block 列（SDF effect 参数，照 color_matrix 先例），列数 20→21。
+        public const uint ExpectedVersion = 11;
 
         readonly byte[] _buf;
 
@@ -31,7 +33,7 @@ namespace LoomGUI
         public uint Version => ReadU32(4);
         public int NodeCount => (int)ReadU32(8);
 
-        // 列 offset 在 header[12 .. 12+20*4)。顺序同 Rust columns：
+        // 列 offset 在 header[12 .. 12+21*4)。顺序同 Rust columns：
         //   0=node_id(u32) 1=parent_id(i32,-1=none) 2=visible(u8) 3=alpha(f32)
         //   4=sort_key(u32) 5=mask_context(u32)
         //   6=m_a(f32) 7=m_b(f32) 8=m_c(f32) 9=m_d(f32) 10=m_tx(f32) 11=m_ty(f32)
@@ -43,17 +45,20 @@ namespace LoomGUI
         //   17=color_matrix([f32;20], 80B)
         //   18=change_level(u8, 0=Skip 1=Header 2=Full)
         //   19=reuse_key(u32, 0=无复用 >0=slot 复用键)
+        //   20=effect_block([f32;32], 128B)  ← v11：SDF 文字效果参数（outline/underlay×3/glow/blur）
         //   v10：删 text_off(u32)/text_len(u32) 列（原第 15-16 列），其后列统一前移 2。
+        //   v11：加 effect_block 列（新第 20 列，不动 v10 前移结果）。
         int ColOff(int idx) => (int)ReadU32(12 + idx * 4);
 
-        // 三 arena header offset。20 列 col_offset 之后：mesh(2), clip(2), path(2) 各 off+len。
+        // 三 arena header offset。21 列 col_offset 之后：mesh(2), clip(2), path(2) 各 off+len。
         //   v10：text_arena 已删，arena header 由 8 项缩为 6 项。
-        int MeshArenaOff => (int)ReadU32(12 + 20 * 4);
-        int MeshArenaLen => (int)ReadU32(12 + 20 * 4 + 4);
-        int ClipTableOff => (int)ReadU32(12 + 20 * 4 + 2 * 4);
-        int ClipTableLen => (int)ReadU32(12 + 20 * 4 + 2 * 4 + 4);
-        int PathTableOff => (int)ReadU32(12 + 20 * 4 + 4 * 4);
-        int PathTableLen => (int)ReadU32(12 + 20 * 4 + 4 * 4 + 4);
+        //   v11：col_offset 段扩到 21 项，arena header 起点 12+20*4 → 12+21*4（移后 4 字节）。
+        int MeshArenaOff => (int)ReadU32(12 + 21 * 4);
+        int MeshArenaLen => (int)ReadU32(12 + 21 * 4 + 4);
+        int ClipTableOff => (int)ReadU32(12 + 21 * 4 + 2 * 4);
+        int ClipTableLen => (int)ReadU32(12 + 21 * 4 + 2 * 4 + 4);
+        int PathTableOff => (int)ReadU32(12 + 21 * 4 + 4 * 4);
+        int PathTableLen => (int)ReadU32(12 + 21 * 4 + 4 * 4 + 4);
 
         public uint NodeId(int i) => ReadU32(ColOff(0) + i * 4);
         public int ParentId(int i) => (int)ReadU32(ColOff(1) + i * 4);
@@ -88,6 +93,21 @@ namespace LoomGUI
                 m[j] = BitConverter.ToSingle(_buf, off + j * 4);
             }
             return m;
+        }
+
+        /// v11：effect_block 列（第 21 列，index 20）。32 × f32 = 128B/节点。
+        /// flatten 顺序（镜像 Rust EffectBlock::to_bytes）：
+        ///   eb[0]=outline_width  eb[1..5]=outline_color(RGBA)
+        ///   underlay[3] 各 7 f32：[offset_x, offset_y, softness, color(RGBA)]，起点 [5]/[12]/[19]
+        ///   eb[26]=glow_power  eb[27..31]=glow_color(RGBA)  eb[31]=blur_width
+        /// 非 text 节点 default 全 0 = 无 effect（MirrorPool 仅 program==1 时读此 → MPB）。
+        public float[] EffectBlock(int i) {
+            int off = ColOff(20) + i * 128;
+            float[] eb = new float[32];
+            for (int j = 0; j < 32; j++) {
+                eb[j] = BitConverter.ToSingle(_buf, off + j * 4);
+            }
+            return eb;
         }
 
         /// v10：change_level 前移至第 18 列（原第 20 列）。0=Skip 1=Header 2=Full。MirrorPool 三分支用。

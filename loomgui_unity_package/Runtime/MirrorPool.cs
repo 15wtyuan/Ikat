@@ -209,6 +209,26 @@ namespace LoomGUI
                 ro.Mpb.SetVector("_CF3", new Vector4(cf[15], cf[16], cf[17], cf[18]));
                 ro.Mpb.SetVector("_CFOff", new Vector4(cf[4], cf[9], cf[14], cf[19]));
             }
+            // SDF 文字效果（program=1 ALPHA_MASK）：读 effect_block 列 → per-renderer MPB。
+            // 非 text 节点不设（material 默认全 0 = 纯 face）。effect 参数变化经
+            // header_hash 走 ChangeLevel::Header（不重建 mesh，仅刷新 MPB）。
+            // _UnderlayOffset 是 float4（shader 取 .xy 做像素偏移，.zw 兜 0）。
+            if (blob.Program(i) == 1)
+            {
+                float[] eb = blob.EffectBlock(i);
+                ro.Mpb.SetFloat("_OutlineWidth", eb[0]);
+                ro.Mpb.SetVector("_OutlineColor", new Vector4(eb[1], eb[2], eb[3], eb[4]));
+                for (int s = 0; s < 3; s++)
+                {
+                    int b = 5 + s * 7; // underlay 槽起点：[5]/[12]/[19]
+                    ro.Mpb.SetVector("_UnderlayOffset" + s, new Vector4(eb[b], eb[b + 1], 0, 0));
+                    ro.Mpb.SetFloat("_UnderlaySoftness" + s, eb[b + 2]);
+                    ro.Mpb.SetVector("_UnderlayColor" + s, new Vector4(eb[b + 3], eb[b + 4], eb[b + 5], eb[b + 6]));
+                }
+                ro.Mpb.SetFloat("_GlowPower", eb[26]);
+                ro.Mpb.SetVector("_GlowColor", new Vector4(eb[27], eb[28], eb[29], eb[30]));
+                ro.Mpb.SetFloat("_BlurWidth", eb[31]);
+            }
             ro.Mpb.SetFloat("_Alpha", alpha);
             ro.Mr.SetPropertyBlock(ro.Mpb);
         }
