@@ -344,7 +344,7 @@ fn mesh_colors_no_longer_bake_alpha() {
 // col_off 索引：0=node_id 1=parent_id 2=visible 3=alpha 4=sort_key
 //              5=mask_context 6=m_a 7=m_b 8=m_c 9=m_d 10=m_tx 11=m_ty
 //              12=payload_kind 13=mesh_off 14=mesh_len
-//              15=path_idx (v7) 16=program (v5) 17=colorMatrix (v6)
+//              15=path_idx (v7) 16=program (v5) 17=color_matrix (v6)
 //              18=change_level (v8) 19=reuse_key (v9) 20=effect_block (v11)
 // v11：加 effect_block 列（20→21）。
 struct TestView<'a> {
