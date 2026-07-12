@@ -126,6 +126,7 @@ LoomGUI 只支持 HTML/CSS 的**明确子集**，称"围栏"。这是项目漂�
 - 设计师工作区是独立磁盘目录（含 `loom.workspace.json`、HTML/CSS 源文件、res 资源、design-systems 组件库）。打包用独立打包器 GUI（Tauri `loomgui_gui`）或 CLI `loom-pkg build <workspace>`。v1.8 起不再使用 `LoomGUI > Settings` 面板（该面板及相关 Unity Editor 脚本已移除，仅保留 `LoomOpenPacker.cs` 菜单项启动 GUI）。运行时引导由 `loom.runtime.json` 统管（声明包/图集/字体），不再依赖 Unity `LoomSettings` ScriptableObject。
 - 用户只读中文——问答/选项/总结用中文；代码/commit 照旧英文。
 - **代码注释写上线品质**：自包含（不看其他文件就能懂）、精简（说 WHY，不复述代码机制）、**不引用内部编号或暗语**——`坑 120`、`Venkify 法`、`与某某 meta 对齐` 这类项目内指代外人看不懂。坑号只属于 `docs/pitfalls.md`，不进代码。
+- **修根因，别贴补偿参数**：产物字段在某层被硬编码/丢失（如 plain text run 的 `weight` 在 `measure_text` 恒 Normal → `font-weight:700` 失效），去源头修（让该层从 style 透传正确值），**别在下游加参数补偿**（如给 `build_text_mesh` 加 `node_weight` 与 `run.weight` OR）——那会留下根因 + 造双真相源，是补丁代码（bug 7：先贴 `node_weight` 旁路，后被要求源头重构）。判据：新参数只为绕过某上游硬编码/默认值而存在 = 补丁信号，去修上游。
 - **防文档漂移**（遵循 fence_contract 模式——文档的断言必须有测试护着）：
   1. **文档写定性、不写具体数字**。数字（列数、字段数、枚举变体数）只放代码注释或测试里——数字最容易漂移，文档里写"渲染公共字段"而非"20 列"
   2. **关键 claim 加可执行测试**。FFI struct 尺寸：`assert_eq!(size_of::<BlobHeader>(), N)`。NodeKind 变体数：命名字段计数。tick 步骤顺序：读源码验证。写进 fence_contract 或新测试

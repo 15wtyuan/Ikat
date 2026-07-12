@@ -1170,3 +1170,17 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：①读 pkg.bin 头第 5-8 字节（LE u32）= version，对比 `loomgui_core/src/asset/mod.rs` 的 `PKG_FORMAT_VERSION`/`MIN_VERSION`，PowerShell：`[BitConverter]::ToUInt32([IO.File]::ReadAllBytes(".../showcase.pkg.bin"), 4)`，不等即 stale。②重出 GUI exe：`(cd loomgui_gui && tauri build --no-bundle)` → cp 到 `Editor/Tools/loomgui_gui.exe`（见 CLAUDE.md「GUI 打包器 exe 闭环」），再用新 exe 重打 pkg.bin。
 **教训**：pkg 格式版本是 runtime（.dll 读）+ packer（GUI exe 写）的双向契约。bump 版本时**三个产物必须同步刷新 + commit**：.dll（runtime 读）、GUI exe（打包器写）、pkg.bin（已发布产物）。漏一个就 rc=-1 或渲染错——同 stale .dll（坑 102 同类）。诊断 rc=-1 第一步永远是读 pkg.bin version 字段对比 core 常量，别猜字体/资源；core 改 `PKG_FORMAT_VERSION` 或 `ResolvedStyle` bincode 布局后，exe + .dll + pkg.bin 三者都要重产。
 
+### 坑 159：SDF 文字效果数学量纲——effect 宽度用 screen-px edge，CSS px 直进 d-space 爆 saturate（SDF 文字效果）
+
+**症状**：SDF 文字效果（shadow/stroke/glow/blur）渲染全错——阴影方向反到左上、柔光/glow/blur 铺满整个 text quad 成半透方块、描边无效果（整个字填描边色盖掉字色）。
+**根因**：shader fragment 把 effect 参数（CSS px）直接混进 SDF d-space 数学。①underlay offset 用 `uv + offset*texelSize`（符号反 + 量纲错）；②blur/softness 用 `scale/(1+param*scale)` 把 scale 压到 ~0.5 → mask≈0.5 铺满 quad；③outline 把 `_OutlineWidth`(px) 直接加进 d（1 d 单位≈2×SPREAD=24px）→ outer/inner 双 saturate；④glow 用 `1-face`（远离字形 face→0 → gm→1 满 quad 不衰减）。
+**解决**：统一以 `edge=(d-0.5)*scale`（screen-px 量纲的有符号边缘距离，+=内侧）为基准，所有 effect 宽度与之同量纲——blur/softness 用 `edge/param` 做 transition 宽度（不塌）、outline 是 edge 外侧 halfW 宽环（不填 glyph）、glow `outDist/glowExt` 只外侧衰减到 0（不铺满）。shadow offset 用屏幕导数转 UV：`uv - (ox*ddx + oy*ddy)`（符号 + 量纲 + y-flip 自适配）。
+**教训**：SDF shader 里 effect 参数（CSS px）不能直接混进 d-space（[0,1] encoded distance，1 单位≈2×SPREAD px）——量纲差几十倍会 saturate 或塌 mask。用 `edge=(d-0.5)*scale`（screen-px）统一量纲，对标 `TMP_SDF_SSD.cginc`。
+
+### 坑 160：`ensure_solid` 1×1 像素 + Bilinear → 装饰线覆盖度被稀释/缺失（v1.8 装饰线）
+
+**症状**：v1.8 装饰线（underline/strike/double + dashed/dotted）渲染异常——细线变淡、宽线端部"覆盖不到全部文字"（看着短）、dotted 小段直接消失（红色点状删除无线）。偶现（概率高）。
+**根因**：装饰线 quad 把 `ensure_solid()` 分配的 **1×1 白像素 UV rect 拉伸覆盖整条线宽/分段**。Bilinear 在单 texel UV 范围内会从该 texel(255) 渐变到相邻 texel（空位或 SDF 距离值），把采样值稀释到 SDF threshold 以下 → 覆盖度不足；dotted 2px 小段尤甚（整段被吃）。相邻 texel 是谁取决于 atlas 分配序 → 偶现。core 几何全宽正确（`dump_rich_showcase` 跑完整 desugar 管线取证），bug 纯在采样。
+**解决**：`ensure_solid()` 分配 3×3 全 255 块、返回中心 texel UV rect——中心 texel 四邻也 solid，Bilinear 恒采纯 255，覆盖度可靠。
+**教训**：用 atlas 单 texel 做纯色填充 quad 时，Bilinear 会在该 texel UV 边界混入邻居——拉伸覆盖大区域/小段的 quad（如装饰线）尤其受影响。给 solid 槽留四邻（3×3 块）。装饰线渲染异常先 `dump_rich_showcase`（core example 不跑 desugar 看不到 RichText）dump 几何排除 core，再查采样层。
+
