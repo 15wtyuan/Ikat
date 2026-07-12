@@ -137,20 +137,28 @@ Shader "LoomGUI/Unlit"
                 float pxSize = rsqrt(abs(uvDx.x * uvDy.y - uvDx.y * uvDy.x));
                 float scale = pxSize * (1.3333 * _GradientScale) / _MainTex_TexelSize.z;
                 float d = tex.r;
-                float threshold = 0.5 - _FaceDilate * 0.5;
-                // blur 近似：软化 face 过渡带（SDF 无整字高斯 blur，偏硬，验收接受）。
-                if (_BlurWidth > 0.001) scale /= 1.0 + _BlurWidth * scale;
-                float face = saturate((d - threshold) * scale + 0.5);
+                // 字形边缘有符号距离（screen-px 量纲，+=内侧、-=外侧）。所有 effect 宽度与之
+                // 同量纲——避免 mask 塌成常数把整个 quad 铺成半透方块。_FaceDilate 正值外推边缘（增粗）。
+                float edge = (d - 0.5) * scale + _FaceDilate * 0.5 * scale;
 
-                // 单 pass 合成（对标 TMP_SDF_SSD.cginc）：underlay 画 face 下 → face → outline 覆盖边缘 → glow 晕 face 外。
+                // FACE：blur>0 时按 _BlurWidth 软化过渡带（SDF 近似整字高斯 blur，偏硬，验收接受）。
+                // blur 旧式 `scale/=1+blur*scale` 会把 scale 压到 ~0.5 → face≈0.5 铺满 quad（方块底）；
+                // 改为 edge/blur 做 transition 宽度，blur=0 时退化回 1px AA。
+                float faceSoft = max(_BlurWidth, 1.0);
+                float face = saturate(edge / faceSoft + 0.5);
+
                 float3 rgb = vcol.rgb;
                 float a = face * vcol.a;
-                // underlay×3（偏移 uv 重采 d，over 合成画 face 下）
+                // underlay×3（shadow：偏移重采 + softness=blur 软化，over 合成画 face 下）。
+                // CSS ox=右、oy=下；用屏幕导数把像素偏移转 UV（自动适配 y-flip/缩放，量纲正确）；
+                // shadow 应落 +offset 方向 → 在 i.uv - offUv 处采样（旧代码 + 号致方向反到左上）。
                 #define UNDERLAY_PASS(idx) \
                     if (_UnderlayColor##idx.a > 0.001) { \
-                        float du = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv + _UnderlayOffset##idx.xy * _MainTex_TexelSize.xy).r; \
-                        float ls = scale / (1.0 + _UnderlaySoftness##idx * scale); \
-                        float um = saturate((du - threshold) * ls + 0.5); \
+                        float2 offUv = _UnderlayOffset##idx.x * uvDx + _UnderlayOffset##idx.y * uvDy; \
+                        float dd = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv - offUv).r; \
+                        float de = (dd - 0.5) * scale + _FaceDilate * 0.5 * scale; \
+                        float usoft = max(_UnderlaySoftness##idx, 1.0); \
+                        float um = saturate(de / usoft + 0.5); \
                         float ua = _UnderlayColor##idx.a * um; \
                         rgb = lerp(rgb, _UnderlayColor##idx.rgb, ua * (1.0 - a)); \
                         a += ua * (1.0 - a); \
@@ -159,16 +167,23 @@ Shader "LoomGUI/Unlit"
                 UNDERLAY_PASS(1)
                 UNDERLAY_PASS(2)
                 #undef UNDERLAY_PASS
-                // outline（face ± width 环形）
+                // outline（stroke：edge 外侧 halfW 宽环，over 合成画 face 下——face 覆盖内侧半环，
+                // 外侧半环露出描边色）。旧代码把 _OutlineWidth(px) 直接加进 d（1 d 单位≈24px）→
+                // outer/inner 双 saturate → 整个 glyph 填描边色盖掉字色，看不出描边。
                 if (_OutlineWidth > 0.001) {
-                    float outer = saturate((d - threshold + _OutlineWidth) * scale + 0.5);
-                    float inner = saturate((d - threshold - _OutlineWidth) * scale + 0.5);
-                    rgb = lerp(rgb, _OutlineColor.rgb, saturate((outer - inner) * _OutlineColor.a));
+                    float halfW = _OutlineWidth * 0.5;
+                    float om = saturate(edge + halfW + 0.5) - saturate(edge + 0.5);
+                    float oa = om * _OutlineColor.a;
+                    rgb = lerp(rgb, _OutlineColor.rgb, oa * (1.0 - a));
+                    a += oa * (1.0 - a);
                 }
-                // glow（face 外 distance power 衰减）
+                // glow（edge 外晕开，_GlowPower=晕开半径 px，曲线衰减）。旧 `gm=1-face` 远离字形处
+                // face→0 → gm→1 → glow 满 quad；改 outDist 仅取外侧距离，到 glowExt 衰减到 0。
                 if (_GlowColor.a > 0.001) {
-                    float gm = 1.0 - saturate((d - threshold) * scale + 0.5);
-                    float ga = pow(gm, _GlowPower) * _GlowColor.a;
+                    float outDist = max(-edge, 0.0);
+                    float glowExt = max(_GlowPower, 1.0);
+                    float gm = pow(saturate(1.0 - outDist / glowExt), 2.0);
+                    float ga = gm * _GlowColor.a;
                     rgb = lerp(rgb, _GlowColor.rgb, ga * (1.0 - a));
                     a += ga * (1.0 - a);
                 }
