@@ -25,14 +25,14 @@
     {
       "family": "LXGWWenKai",
       "file": "res/fonts/LXGWWenKai.ttf",
-      "default": false,
-      "fallback": true
+      "default": true,
+      "fallback": false
     },
     {
       "family": "wqy-microhei",
       "file": "res/fonts/wqy-microhei.ttc",
-      "default": true,
-      "fallback": false
+      "default": false,
+      "fallback": true
     },
     {
       "family": "PressStart2P",
