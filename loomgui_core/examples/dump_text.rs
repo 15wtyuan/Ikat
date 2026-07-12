@@ -187,6 +187,7 @@ fn run_text_dump(font_path: &str) {
             None,
             &s.fonts.stack_for(st.font_family.as_deref()),
             st.color,
+            loomgui_core::text::rich::weight_from_font_weight(st.font_weight),
         );
         let before = measure_text(
             &content,
@@ -198,6 +199,7 @@ fn run_text_dump(font_path: &str) {
             Some(rect_w),
             &s.fonts.stack_for(st.font_family.as_deref()),
             st.color,
+            loomgui_core::text::rich::weight_from_font_weight(st.font_weight),
         )
         .lines
         .len();

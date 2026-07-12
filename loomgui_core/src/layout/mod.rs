@@ -70,6 +70,8 @@ enum MeasureContext {
         family: Option<String>,
         /// 节点 style.color（plain text 整段同色；进 GlyphRun.color 供 build per-vertex）。
         color: [f32; 4],
+        /// 节点 style.font_weight（≥700 → Bold，经 weight_from_font_weight 转 RichWeight 进 GlyphRun.weight）。
+        font_weight: u16,
         /// 水平 padding+border 总 inset（左+右）。taffy 传 known.width = 节点 border-box 宽；
         /// 文字须在 content area（known - inset）内换行 + 对齐，否则吃到 padding 超框。
         h_inset: f32,
@@ -159,6 +161,7 @@ pub fn solve(
                     nowrap: s.white_space_nowrap,
                     family: s.font_family.clone(),
                     color: s.color,
+                    font_weight: s.font_weight,
                     h_inset: lp(s.taffy_style.padding.left)
                         + lp(s.taffy_style.padding.right)
                         + lp(s.taffy_style.border.left)
@@ -314,6 +317,7 @@ pub fn solve(
                         nowrap,
                         family,
                         color,
+                        font_weight,
                         h_inset,
                     }) => {
                         let stack = fonts.stack_for(family.as_deref());
@@ -330,6 +334,7 @@ pub fn solve(
                             mw,
                             &stack,
                             *color,
+                            crate::text::rich::weight_from_font_weight(*font_weight),
                         );
                         // 存 TextLayout 供 render 复用。Some（available 测量）优先——
                         // 短文本 taffy 只传 None（max-content ≤ available，不换行），长文本传

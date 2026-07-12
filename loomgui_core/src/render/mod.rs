@@ -549,6 +549,7 @@ pub fn build_render_nodes(
                             Some(content_w),
                             &stack,
                             text_color,
+                            crate::text::rich::weight_from_font_weight(s.font_weight),
                         )
                     });
                 if off_left != 0.0 || off_top != 0.0 {
@@ -562,7 +563,6 @@ pub fn build_render_nodes(
                     &n.style.text_effects,
                     n.style.background_gradient,
                     n.style.background_clip_text,
-                    crate::text::rich::weight_from_font_weight(n.style.font_weight),
                 );
                 push_text_meshes(
                     &mut nodes,
@@ -649,7 +649,6 @@ pub fn build_render_nodes(
                     &n.style.text_effects,
                     n.style.background_gradient,
                     n.style.background_clip_text,
-                    crate::text::rich::weight_from_font_weight(n.style.font_weight),
                 );
                 // 背景 quad：block div 带 background-color（如 .rt 底色）——RichText 叶须自画
                 // bg（Container arm 的 bg 逻辑不覆盖 RichText 叶）。bg 占真 node_id（进 id_to_pos
@@ -1191,7 +1190,6 @@ fn build_text_mesh(
     text_effects: &[crate::text::font_effect::FontEffect],
     background_gradient: Option<crate::style::resolved::Gradient2>,
     background_clip_text: bool,
-    node_weight: crate::text::rich::RichWeight,
 ) -> TextMeshes {
     use std::collections::BTreeMap;
     // effect 一次打包，base/子页/占位共享——shader 据此 uniform 重建 outline/underlay/glow/blur。
@@ -1210,11 +1208,9 @@ fn build_text_mesh(
                 0.0
             };
             // 合成 bold：双绘（offset 0 + offset +1px），模拟加粗，无字体变体。
-            // run.weight：rich text per-run 带的粗体（<b>/inline font-weight:bold）。
-            // node_weight：节点 CSS font-weight（≥700）→ plain text 唯一来源（measure_text
-            //   不传 weight，run.weight 恒 Normal）；rich text 节点级 font-weight 也经此生效。
+            // run.weight 在 layout 期就带正确值——plain text 经 measure_text 从 style.font_weight
+            // 转（weight_from_font_weight），rich text 经 measure_rich_text 从 base+inline 带。
             let bold_offsets: &[f32] = if matches!(run.weight, crate::text::rich::RichWeight::Bold)
-                || matches!(node_weight, crate::text::rich::RichWeight::Bold)
             {
                 &[0.0, 1.0]
             } else {

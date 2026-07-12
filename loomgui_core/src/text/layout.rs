@@ -363,6 +363,7 @@ pub fn measure_text(
     max_width: Option<f32>,
     stack: &FontStack<'_>,
     color: [f32; 4],
+    weight: crate::text::rich::RichWeight,
 ) -> TextLayout {
     // 行度量走主字体（RmlUi 模型：line height/ascent/descent 由主 face 定，per-glyph 才看回退）。
     let font = stack.primary;
@@ -549,7 +550,7 @@ pub fn measure_text(
                 font_size,
                 font_id: stack.primary_id,
                 color,
-                weight: crate::text::rich::RichWeight::Normal,
+                weight,
                 style: crate::text::rich::RichStyle::Normal,
                 deco: crate::text::rich::RichDeco::default(),
                 link_id: None,
@@ -967,6 +968,7 @@ mod tests {
             None,
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
         );
         assert_eq!(layout.lines.len(), 1);
         assert!(!layout.lines[0].runs.is_empty());
@@ -998,6 +1000,7 @@ mod tests {
             Some(200.0),
             &FontStack::single(&font, 0),
             [1.0; 4],
+            crate::text::rich::RichWeight::Normal,
         );
         let first_x = layout.lines[0].runs[0].glyphs[0].x;
         assert!(
@@ -1016,6 +1019,7 @@ mod tests {
             Some(200.0),
             &FontStack::single(&font, 0),
             [1.0; 4],
+            crate::text::rich::RichWeight::Normal,
         );
         let glyphs = &layout_r.lines[0].runs[0].glyphs;
         let last_x = glyphs.last().unwrap().x;
@@ -1048,6 +1052,7 @@ mod tests {
             None,
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
         );
         let g = &layout.lines[0].runs[0].glyphs;
         assert_eq!(g.len(), 2, "AV = 2 glyph");
@@ -1092,6 +1097,7 @@ mod tests {
             None,
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
         );
         let g = &layout.lines[0].runs[0].glyphs;
         assert_eq!(g.len(), 2, "中中 = 2 glyph");
@@ -1129,6 +1135,7 @@ mod tests {
             Some(50.0),
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
         );
         assert!(
             layout.lines.len() >= 2,
@@ -1156,6 +1163,7 @@ mod tests {
             Some(10.0),
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
         );
         assert_eq!(layout.lines.len(), 1);
     }
@@ -1180,6 +1188,7 @@ mod tests {
             Some(40.0),
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
         );
         assert!(
             layout.lines.len() >= 2,
@@ -1208,6 +1217,7 @@ mod tests {
             Some(60.0),
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
         );
         assert!(layout.lines.len() >= 2, "混排窄约束应换行");
         // 每行至少有 glyph（无空行）。
@@ -1237,6 +1247,7 @@ mod tests {
             None,
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
         );
         assert_eq!(layout.lines.len(), 2, "\\n 应强制换行成 2 行");
     }
@@ -1260,6 +1271,7 @@ mod tests {
             Some(10.0),
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
         );
         assert_eq!(layout.lines.len(), 1, "nowrap 强制单行（含 CJK）");
     }
@@ -1284,6 +1296,7 @@ mod tests {
             Some(50.0),
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
         );
         assert!(layout.lines.len() >= 2, "超长无空格串应逐字断 ≥2 行");
     }
@@ -1307,6 +1320,7 @@ mod tests {
             None,
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
         );
         let tall = measure_text(
             "Hi",
@@ -1318,6 +1332,7 @@ mod tests {
             None,
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
         );
         assert!(tall.lines[0].height > normal.lines[0].height);
     }
@@ -1691,6 +1706,7 @@ mod tests {
             None,
             &stack,
             [1.0; 4],
+            crate::text::rich::RichWeight::Normal,
         );
         let glyphs: Vec<&Glyph> = lay
             .lines
@@ -1726,6 +1742,7 @@ mod tests {
             None,
             &stack,
             [1.0; 4],
+            crate::text::rich::RichWeight::Normal,
         );
         let g = &lay.lines[0].runs[0].glyphs[0];
         assert_eq!(g.font_id, 0, "无回退→font_id 仍主字体");

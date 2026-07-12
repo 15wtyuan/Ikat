@@ -823,6 +823,7 @@ fn build_text_fixture(font_size: f32) -> (FontTable, TextLayout, Rect) {
         None,
         &fonts.stack_for(None),
         [1.0, 1.0, 1.0, 1.0],
+        crate::text::rich::RichWeight::Normal,
     );
     let rect = Rect {
         x: 0.0,
@@ -853,7 +854,6 @@ fn build_text_quad_scales_by_target_over_source() {
         &[],
         None,
         false,
-        crate::text::rich::RichWeight::Normal,
     );
     let (fonts24, layout24, rect24) = build_text_fixture(24.0);
     let m24 = build_text_mesh(
@@ -864,7 +864,6 @@ fn build_text_quad_scales_by_target_over_source() {
         &[],
         None,
         false,
-        crate::text::rich::RichWeight::Normal,
     );
     let w48 = quad_width(&m48);
     let w24 = quad_width(&m24);
@@ -874,32 +873,62 @@ fn build_text_quad_scales_by_target_over_source() {
     );
 }
 
-/// node_weight=Bold → build_text_mesh 双绘（offset 0 + 1px）→ 顶点翻倍。
-/// plain text 的 weight 不经 measure_text（恒 Normal），全靠 node_weight 参数带上
-/// （`<span style="font-weight:700">` 这类 Text 节点的 bold 唯一来源）。
+/// measure_text 的 weight 参数 → GlyphRun.weight → build_text_mesh 双绘（顶点翻倍）。
+/// 这是 plain text 节点 CSS font-weight:700 生效的根因路径：measure_text 从 style.font_weight
+/// 经 weight_from_font_weight 转 weight，run 创建时带上（不再硬编码 Normal）；build_text_mesh
+/// 只读 run.weight。rich text 走 measure_rich_text 自带 per-run weight，同管道。
 #[test]
-fn build_text_node_weight_bold_double_draws() {
-    let (fonts, layout, rect) = build_text_fixture(48.0);
-    let page_verts = |m: &TextMeshes| m.base.first().map(|p| p.1.len()).unwrap_or(0);
-    let m_normal = build_text_mesh(
-        &layout,
-        &mut test_glyph_atlas(),
-        &fonts,
-        &rect,
-        &[],
-        None,
+fn measure_text_weight_bold_double_draws() {
+    let fonts = test_font_table().expect("need test font");
+    let stack = fonts.stack_for(None);
+    let rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 0.0,
+        h: 0.0,
+    };
+    let layout_normal = measure_text(
+        "A",
+        48.0,
+        0.0,
+        0.0,
+        TextAlign::Left,
         false,
+        None,
+        &stack,
+        [1.0; 4],
         crate::text::rich::RichWeight::Normal,
     );
-    let m_bold = build_text_mesh(
-        &layout,
+    let layout_bold = measure_text(
+        "A",
+        48.0,
+        0.0,
+        0.0,
+        TextAlign::Left,
+        false,
+        None,
+        &stack,
+        [1.0; 4],
+        crate::text::rich::RichWeight::Bold,
+    );
+    let page_verts = |m: &TextMeshes| m.base.first().map(|p| p.1.len()).unwrap_or(0);
+    let m_normal = build_text_mesh(
+        &layout_normal,
         &mut test_glyph_atlas(),
         &fonts,
         &rect,
         &[],
         None,
         false,
-        crate::text::rich::RichWeight::Bold,
+    );
+    let m_bold = build_text_mesh(
+        &layout_bold,
+        &mut test_glyph_atlas(),
+        &fonts,
+        &rect,
+        &[],
+        None,
+        false,
     );
     assert_eq!(page_verts(&m_normal), 4, "1 glyph × 4 verts (normal)");
     assert_eq!(page_verts(&m_bold), 8, "bold 双绘 → 8 verts");
@@ -1375,6 +1404,7 @@ fn render_long_text_still_wraps_with_layout_reuse() {
         None,
         &fonts.stack_for(None),
         [1.0, 1.0, 1.0, 1.0],
+        crate::text::rich::RichWeight::Normal,
     )
     .text_width;
     let container_w = 100.0;
@@ -4220,7 +4250,6 @@ fn build_text_packs_effects_into_meshes() {
         &effects,
         None,
         false,
-        crate::text::rich::RichWeight::Normal,
     );
     // effect 进了 TextMeshes.effect（shadow → underlay[0]）
     assert_eq!(m.effect.underlay[0].offset_x, 3.0);
