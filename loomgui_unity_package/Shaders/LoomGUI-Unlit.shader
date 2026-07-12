@@ -27,6 +27,21 @@ Shader "LoomGUI/Unlit"
         _CornerRadius ("CornerRadius", Float) = 0
         _FaceDilate("Face Dilate", Range(-1,1)) = 0   // 0=标准字形边缘（threshold=0.5）；正值增粗，负值变细
         _GradientScale("Gradient Scale", Float) = 13     // = SPREAD(12)+1，distance→屏幕换算（对标 TMP _GradientScale=atlasPadding+1）
+        // SDF 文字效果（per-renderer MPB，program=1 ALPHA_MASK 用；参数=0 = 该 effect 不启用）。
+        _OutlineWidth("Outline Width", Float) = 0
+        _OutlineColor("Outline Color", Color) = (0,0,0,0)
+        _UnderlayOffset0("Underlay0 Offset", Vector) = (0,0,0,0)   // xy=像素偏移
+        _UnderlaySoftness0("Underlay0 Softness", Float) = 0
+        _UnderlayColor0("Underlay0 Color", Color) = (0,0,0,0)
+        _UnderlayOffset1("Underlay1 Offset", Vector) = (0,0,0,0)
+        _UnderlaySoftness1("Underlay1 Softness", Float) = 0
+        _UnderlayColor1("Underlay1 Color", Color) = (0,0,0,0)
+        _UnderlayOffset2("Underlay2 Offset", Vector) = (0,0,0,0)
+        _UnderlaySoftness2("Underlay2 Softness", Float) = 0
+        _UnderlayColor2("Underlay2 Color", Color) = (0,0,0,0)
+        _GlowPower("Glow Power", Float) = 0
+        _GlowColor("Glow Color", Color) = (0,0,0,0)
+        _BlurWidth("Blur Width", Float) = 0
     }
     SubShader
     {
@@ -69,6 +84,15 @@ Shader "LoomGUI/Unlit"
                 float _CornerRadius;   // 归一化圆角半径（design_radius / min_half_size），CLIPPED_ROUNDED 用
                 float _FaceDilate;
                 float _GradientScale;
+                // SDF 文字效果 uniforms（Properties 对应，MPB per-renderer 覆盖；参数=0 = 该 effect 不启用）。
+                float _OutlineWidth;
+                half4 _OutlineColor;
+                float4 _UnderlayOffset0; float _UnderlaySoftness0; half4 _UnderlayColor0;
+                float4 _UnderlayOffset1; float _UnderlaySoftness1; half4 _UnderlayColor1;
+                float4 _UnderlayOffset2; float _UnderlaySoftness2; half4 _UnderlayColor2;
+                float _GlowPower;
+                half4 _GlowColor;
+                float _BlurWidth;
             CBUFFER_END
             TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
             // Unity 按 {TextureName}_TexelSize 名字约定自动填充（.xy=1/wh, .zw=wh）；须显式声明才能在 HLSL 引用。
@@ -108,19 +132,47 @@ Shader "LoomGUI/Unlit"
                 half4 tex = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv);
                 #if defined(ALPHA_MASK)
                 // SDF：tex.r 是 encoded distance（中心 0.5、inside>0.5）。
-                // 屏幕空间 scale：ddx/ddy 自适应屏幕像素密度，任意尺寸/缩放锐利（对标 TMP SSD.cginc:95）。
                 float2 uvDx = ddx(i.uv);
                 float2 uvDy = ddy(i.uv);
                 float pxSize = rsqrt(abs(uvDx.x * uvDy.y - uvDx.y * uvDy.x));
                 float scale = pxSize * (1.3333 * _GradientScale) / _MainTex_TexelSize.z;
-                // raw 0-1 距离重建：d 直接用 tex.r（中心 0.5、inside>0.5），不预解码到像素单位。
-                // scale 已含 _GradientScale 补偿编码斜率（对标 TMP param.y = 1.3333*_GradientScale/...）；
-                // 若此处再把 d 乘 (_GradientScale-1) 解码，编码斜率会被计入两次 → AA 过渡带 ~13× 过窄（过锐、锯齿）。
-                // 正值 _FaceDilate 把 threshold 压到 0.5 以下 → 同一 d 更易跨过 → 字形增粗。
                 float d = tex.r;
                 float threshold = 0.5 - _FaceDilate * 0.5;
-                float faceAlpha = saturate((d - threshold) * scale + 0.5);
-                half4 col = half4(vcol.rgb, vcol.a * faceAlpha);
+                // blur 近似：软化 face 过渡带（SDF 无整字高斯 blur，偏硬，验收接受）。
+                if (_BlurWidth > 0.001) scale /= 1.0 + _BlurWidth * scale;
+                float face = saturate((d - threshold) * scale + 0.5);
+
+                // 单 pass 合成（对标 TMP_SDF_SSD.cginc）：underlay 画 face 下 → face → outline 覆盖边缘 → glow 晕 face 外。
+                float3 rgb = vcol.rgb;
+                float a = face * vcol.a;
+                // underlay×3（偏移 uv 重采 d，over 合成画 face 下）
+                #define UNDERLAY_PASS(idx) \
+                    if (_UnderlayColor##idx.a > 0.001) { \
+                        float du = tex2D(_MainTex, i.uv + _UnderlayOffset##idx.xy * _MainTex_TexelSize.xy).r; \
+                        float ls = scale / (1.0 + _UnderlaySoftness##idx * scale); \
+                        float um = saturate((du - threshold) * ls + 0.5); \
+                        float ua = _UnderlayColor##idx.a * um; \
+                        rgb = lerp(rgb, _UnderlayColor##idx.rgb, ua * (1.0 - a)); \
+                        a += ua * (1.0 - a); \
+                    }
+                UNDERLAY_PASS(0)
+                UNDERLAY_PASS(1)
+                UNDERLAY_PASS(2)
+                #undef UNDERLAY_PASS
+                // outline（face ± width 环形）
+                if (_OutlineWidth > 0.001) {
+                    float outer = saturate((d - threshold + _OutlineWidth) * scale + 0.5);
+                    float inner = saturate((d - threshold - _OutlineWidth) * scale + 0.5);
+                    rgb = lerp(rgb, _OutlineColor.rgb, saturate((outer - inner) * _OutlineColor.a));
+                }
+                // glow（face 外 distance power 衰减）
+                if (_GlowColor.a > 0.001) {
+                    float gm = 1.0 - saturate((d - threshold) * scale + 0.5);
+                    float ga = pow(gm, _GlowPower) * _GlowColor.a;
+                    rgb = lerp(rgb, _GlowColor.rgb, ga * (1.0 - a));
+                    a += ga * (1.0 - a);
+                }
+                half4 col = half4(rgb, a);
                 #elif defined(BG_COMPOSITE)
                 // Container+bg-image（program:2/4）：CSS background 合成 = 图(tex) over 底色(vcol)，结果直通配合 SrcAlpha blend。
                 // 旧 col.a=vcol.a：无 bg-color(vcol.a=0)时全透明丢图（验收 §3.6第4/§3.7/§3.9 图消失）。
