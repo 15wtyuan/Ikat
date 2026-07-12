@@ -11,16 +11,17 @@ use loomgui_core::transform;
 
 /// magic = "LOOM" little-endian。
 const MAGIC: u32 = 0x4D4F4F4C;
-const VERSION: u32 = 10; // v10：text 塌进 mesh_arena，删 text_off/text_len 列 + text_arena
+const VERSION: u32 = 11; // v11：加 effect_block 列（SDF effect 参数，照 color_matrix 先例），列数 20→21
 
 /// 入口：FrameData（nodes + clip 表）→ blob 字节。
 pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     let nodes = &frame.nodes;
     let clips = &frame.clips;
     let n = nodes.len();
-    // 列名 + 每元素字节数。v10：删 text_off/text_len 列（22→20 列），text 字形走 mesh_arena。
-    //   path_idx 占 4B（path 表 1-based 索引，0=纯色无图），20 列。
+    // 列名 + 每元素字节数。v11：加 effect_block 列（128B = EffectBlock::SIZE），21 列。
+    //   path_idx 占 4B（path 表 1-based 索引，0=纯色无图）。
     //   v6：加 color_matrix 列（[f32;20]，80B，原第 20 列→现第 17 列）——ColorFilter。
+    //   v11：加 effect_block 列（[u8;128]，per-text-node SDF effect 参数块，照 color_matrix 先例）。
     let columns: &[(&str, usize)] = &[
         ("node_id", 4),
         ("parent_id", 4),
@@ -39,19 +40,20 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
         ("mesh_len", 4),
         ("path_idx", 4), // v7：path 表 1-based 索引（0=纯色无图）
         ("program", 1),
-        ("color_matrix", 80), // [f32;20] × 4 字节，现第 17 列
-        ("change_level", 1),  // v8：帧级变更级别（u8，0=Skip 1=Header 2=Full），现第 18 列
-        ("reuse_key", 4),     // v9：渲染复用键（虚拟列表 slot key），现第 19 列
+        ("color_matrix", 80),  // [f32;20] × 4 字节，现第 17 列
+        ("change_level", 1),   // v8：帧级变更级别（u8，0=Skip 1=Header 2=Full），现第 18 列
+        ("reuse_key", 4),      // v9：渲染复用键（虚拟列表 slot key），现第 19 列
+        ("effect_block", 128), // v11：SDF effect 参数块（EffectBlock::SIZE，照 color_matrix 先例）
     ];
-    let num_col_offsets = columns.len(); // 20
+    let num_col_offsets = columns.len(); // 21
     let header_len = 3 * 4                          // magic, version, node_count
-        + num_col_offsets * 4                       // 列 offset（20）
+        + num_col_offsets * 4                       // 列 offset（21）
         + 2 * 4                                     // mesh_arena off + len
-        + 2 * 4                                     // clip_table off + len（v10：text_arena 已删）
+        + 2 * 4                                     // clip_table off + len
         + 2 * 4; // path_table off + len（v7 新增）
 
-    // 先把 mesh arena + text arena + per-node 列值算出来
-    // （mesh/text arena 决定列值里的 mesh_off/len 与 text_off/len）。
+    // 先把 mesh arena + path table + per-node 列值算出来
+    // （mesh arena 决定列值里的 mesh_off/len）。
     let mut mesh_arena: Vec<u8> = Vec::new();
     // v7：path string table arena——per-frame 归一化图片 path 表（§5.2）。
     //   layout: path_count:u32 后跟 count × {path_len:u32, path_bytes:u8[path_len]}。
@@ -80,6 +82,7 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     let mut col_color_matrix = Vec::<u8>::new();
     let mut col_change_level = Vec::<u8>::new();
     let mut col_reuse_key = Vec::<u8>::new();
+    let mut col_effect_block = Vec::<u8>::new();
 
     for rn in nodes {
         col_node_id.extend_from_slice(&rn.node_id.to_le_bytes());
@@ -98,6 +101,9 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
 
         col_change_level.push(rn.change_level as u8);
         col_reuse_key.extend_from_slice(&rn.reuse_key.to_le_bytes());
+        // v11：effect_block per-node（EffectBlock::SIZE=128B）。非文字节点 default = 全 0，
+        // 文字节点有 outline/underlay/glow/blur 参数。照 color_matrix 写出模式（不区分 program）。
+        col_effect_block.extend_from_slice(&rn.effect.to_bytes());
         let write_arena = matches!(rn.change_level, ChangeLevel::Full);
 
         match &rn.payload {
@@ -185,6 +191,7 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
         ("color_matrix", &col_color_matrix),
         ("change_level", &col_change_level),
         ("reuse_key", &col_reuse_key),
+        ("effect_block", &col_effect_block), // v11：effect 参数列
     ];
 
     // 算各列 offset。

@@ -58,10 +58,13 @@ pub fn payload_hash(rn: &RenderNode) -> u64 {
     h.finish()
 }
 
-/// 表头轴 hash：world_matrix + visible + alpha + sort_key + mask_context + color_tint + blend + reuse_key。
-/// 廉价属性——变了 C# 只需改 GO transform / 材质（SetPropertyBlock _Alpha），不碰 mesh。
+/// 表头轴 hash：world_matrix + visible + alpha + sort_key + mask_context + color_tint + blend +
+/// reuse_key + parent_id + effect。廉价属性——变了 C# 只需改 GO transform / 材质
+/// （SetPropertyBlock _Alpha / SDF effect uniforms），不碰 mesh。
 /// reuse_key 进 header_hash——同 NodeId 换 reuse_key 时需触发 Header 级变更刷新 GO
 /// 绑定（理论上 driver 不该这么用，但 hash 该覆盖所有身份字段，避免漏）。
+/// effect 进 header_hash——SDF effect 参数（outline/underlay/glow/blur）变只更 MPB uniform，
+/// 不重建几何（effect 是渲染层属性，非 mesh 几何）。
 pub fn header_hash(rn: &RenderNode) -> u64 {
     let mut h = DefaultHasher::new();
     for &v in rn.world_matrix.iter() {
@@ -80,6 +83,7 @@ pub fn header_hash(rn: &RenderNode) -> u64 {
     .hash(&mut h);
     rn.reuse_key.hash(&mut h);
     rn.parent_id.hash(&mut h);
+    rn.effect.to_bytes().hash(&mut h); // SDF effect 参数：变 → Header 级（只更 MPB uniform）
     h.finish()
 }
 
@@ -200,6 +204,35 @@ mod tests {
             header_hash(&a),
             header_hash(&b),
             "parent_id 变 → header_hash 变"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // effect 进 header_hash（SDF effect 参数变 = Header 级，只更 MPB uniform，
+    // 不重建 mesh）。payload_hash 不采样 effect（effect 非几何）。
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn header_hash_includes_effect() {
+        let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        let mut b = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        b.effect.outline_width = 2.0; // SDF effect 参数变
+        assert_ne!(
+            header_hash(&a),
+            header_hash(&b),
+            "effect 变 → header_hash 变（HEADER 级，只更 MPB）"
+        );
+    }
+
+    #[test]
+    fn payload_hash_ignores_effect() {
+        let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        let mut b = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        b.effect.outline_width = 2.0;
+        assert_eq!(
+            payload_hash(&a),
+            payload_hash(&b),
+            "effect 不进 payload_hash（非几何，effect 归 header 轴）"
         );
     }
 }

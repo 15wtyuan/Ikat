@@ -10,6 +10,7 @@
 use loomgui_core::parse::css::parse_css;
 use loomgui_core::parse::dom::parse_html;
 use loomgui_core::parse::selector::parse_selector;
+use loomgui_core::render::node::EffectBlock;
 use loomgui_core::style::mapping::apply_decl;
 use loomgui_core::style::resolved::{DisplayMode, GradientDir, ResolvedStyle};
 use taffy::style::LengthPercentage;
@@ -677,4 +678,25 @@ fn gradient_text_three_piece_combo_fields_set() {
     assert!(s.background_gradient.is_some());
     assert!(s.background_clip_text);
     assert_eq!(s.color, [0.0, 0.0, 0.0, 0.0]);
+}
+
+// ── E. FFI blob 契约锚（Rust 侧不变量） ───────────────────────────
+// blob 列布局 / VERSION 常量自身住在 loomgui_ffi_c（不能被 loomgui_core 反向依赖），
+// 这里锁定 Rust 侧的契约锚——FFI effect_block 列宽 = EffectBlock::SIZE。
+// 改 EffectBlock 字段顺序/数量 → 必须同步本测试 + 重编 .dll + C# FrameBlob 镜像。
+
+#[test]
+fn effect_block_size_anchors_ffi_v11_column() {
+    // EffectBlock::SIZE 是 FFI blob v11 effect_block 列的列宽（128B = 32 × f32）。
+    // 改字段必须 bump FFI VERSION + 同步 C# 镜像 + 本断言。
+    assert_eq!(
+        EffectBlock::SIZE,
+        128,
+        "EffectBlock::SIZE = 128（FFI v11 effect_block 列宽契约）"
+    );
+    assert_eq!(
+        EffectBlock::SIZE % 4,
+        0,
+        "SIZE 必须是 4 的倍数（f32 对齐，供 effect_block_f32 索引读取）"
+    );
 }

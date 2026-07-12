@@ -153,7 +153,7 @@ fn build_blob_has_magic_and_count() {
     assert_eq!(&blob[0..4], &MAGIC.to_le_bytes());
     let v = u32::from_le_bytes(blob[4..8].try_into().unwrap());
     assert_eq!(v, VERSION);
-    assert_eq!(v, 10, "blob 版本应为 10（v10：text 塌进 mesh_arena）");
+    assert_eq!(v, 11, "blob 版本应为 11（v11：加 effect_block 列）");
     let n = u32::from_le_bytes(blob[8..12].try_into().unwrap());
     assert_eq!(n, 1);
 }
@@ -181,7 +181,7 @@ fn path_idx_column_round_trips() {
 }
 
 /// program 列（u8，第 19 列，v5）：Mesh program=2（Container+bg-image 合成）/ 纯色 mesh program=0。
-/// round-trip。VERSION=10（v10：20 列，text 塌进 mesh_arena）。
+/// round-trip。VERSION=11（v11：21 列，加 effect_block）。
 #[test]
 fn program_column_round_trips() {
     let blob = build_blob(&frame(&[
@@ -190,35 +190,31 @@ fn program_column_round_trips() {
         mesh_node_with_program(2, 0),           // 无图 Container / Image
     ]));
     let view = TestView::parse(&blob);
-    assert_eq!(
-        view.version(),
-        10,
-        "VERSION=10（v10：text 塌进 mesh_arena）"
-    );
+    assert_eq!(view.version(), 11, "VERSION=11（v11：加 effect_block 列）");
     assert_eq!(view.program(0), 2, "Mesh program=2 round-trip");
     assert_eq!(view.program(1), 0, "Mesh program=0 占位");
     assert_eq!(view.program(2), 0, "Mesh program=0 round-trip");
 }
 
-/// §4.1 v10 header：20 col offsets + mesh/clip/path 三 arena header。
+/// §4.1 v11 header：21 col offsets + mesh/clip/path 三 arena header。
 /// 无 clip 时 clip 表仅 4B clip_count=0，
 /// 无 image_path 时 path table 仅 4B path_count=0。
 #[test]
 fn blob_header_has_text_and_clip_arena_fields() {
     let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
 
-    // magic + version==10。
+    // magic + version==11。
     assert_eq!(u32::from_le_bytes(blob[0..4].try_into().unwrap()), MAGIC);
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        10,
-        "version=10"
+        11,
+        "version=11"
     );
 
-    // 20 col offset @ [12 .. 12+20*4)。每 col_offset 非零且单调递增。
-    let header_len = 12 + 20 * 4; // = 92
+    // 21 col offset @ [12 .. 12+21*4)。每 col_offset 非零且单调递增。
+    let header_len = 12 + 21 * 4; // = 96
     let mut prev = header_len;
-    for i in 0..20usize {
+    for i in 0..21usize {
         let o = 12 + i * 4;
         let off = u32::from_le_bytes(blob[o..o + 4].try_into().unwrap()) as usize;
         assert!(
@@ -231,14 +227,14 @@ fn blob_header_has_text_and_clip_arena_fields() {
         prev = off;
     }
 
-    // mesh_arena header @ [92..100)：off/len（mesh 节点有内容，len>0）。
-    let mesh_arena_off = u32::from_le_bytes(blob[92..96].try_into().unwrap()) as usize;
-    let mesh_arena_len = u32::from_le_bytes(blob[96..100].try_into().unwrap()) as usize;
+    // mesh_arena header @ [96..104)：off/len（mesh 节点有内容，len>0）。
+    let mesh_arena_off = u32::from_le_bytes(blob[96..100].try_into().unwrap()) as usize;
+    let mesh_arena_len = u32::from_le_bytes(blob[100..104].try_into().unwrap()) as usize;
     assert!(mesh_arena_len > 0, "单 mesh 节点：mesh_arena_len 应 > 0");
 
-    // clip_table header @ [100..108)：v10 无 text_arena，clip 紧跟 mesh。无 clip 时仅 4B clip_count=0。
-    let clip_table_off = u32::from_le_bytes(blob[100..104].try_into().unwrap()) as usize;
-    let clip_table_len = u32::from_le_bytes(blob[104..108].try_into().unwrap());
+    // clip_table header @ [104..112)：clip 紧跟 mesh。无 clip 时仅 4B clip_count=0。
+    let clip_table_off = u32::from_le_bytes(blob[104..108].try_into().unwrap()) as usize;
+    let clip_table_len = u32::from_le_bytes(blob[108..112].try_into().unwrap());
     assert_eq!(
         clip_table_len, 4,
         "clip 表至少含 clip_count(u32)=0，故 len=4"
@@ -246,15 +242,15 @@ fn blob_header_has_text_and_clip_arena_fields() {
     assert_eq!(
         clip_table_off,
         mesh_arena_off + mesh_arena_len,
-        "clip_table 紧跟 mesh_arena（无 text_arena）"
+        "clip_table 紧跟 mesh_arena"
     );
     let clip_count =
         u32::from_le_bytes(blob[clip_table_off..clip_table_off + 4].try_into().unwrap());
     assert_eq!(clip_count, 0, "clip_count=0");
 
-    // v10 path_table header @ [108..116)：无 image_path 时仅 4B path_count=0。
-    let path_table_off = u32::from_le_bytes(blob[108..112].try_into().unwrap()) as usize;
-    let path_table_len = u32::from_le_bytes(blob[112..116].try_into().unwrap());
+    // v11 path_table header @ [112..120)：无 image_path 时仅 4B path_count=0。
+    let path_table_off = u32::from_le_bytes(blob[112..116].try_into().unwrap()) as usize;
+    let path_table_len = u32::from_le_bytes(blob[116..120].try_into().unwrap());
     assert_eq!(
         path_table_len, 4,
         "无 image_path：path table 仅 path_count=0，len=4"
@@ -274,7 +270,7 @@ fn blob_header_has_text_and_clip_arena_fields() {
     );
 }
 
-/// TestView 解析 v10 blob：20 列 + 两 arena 头（mesh→clip 链，无 text_arena）。
+/// TestView 解析 v11 blob：21 列 + 两 arena 头（mesh→clip 链）。
 /// clip_count=0 占位验证。
 #[test]
 fn test_view_parses_layout_and_text_placeholders() {
@@ -282,8 +278,7 @@ fn test_view_parses_layout_and_text_placeholders() {
     let view = TestView::parse(&blob);
     assert_eq!(view.clip_count(), 0, "clip_count=0");
     assert_eq!(view.payload_kind(0), 1, "Mesh payload_kind=1");
-    // v10：mesh→clip 链直连（无 text_arena 中间）
-    assert_eq!(view.version(), 10, "VERSION=10");
+    assert_eq!(view.version(), 11, "VERSION=11");
 }
 
 #[test]
@@ -349,12 +344,12 @@ fn mesh_colors_no_longer_bake_alpha() {
 // col_off 索引：0=node_id 1=parent_id 2=visible 3=alpha 4=sort_key
 //              5=mask_context 6=m_a 7=m_b 8=m_c 9=m_d 10=m_tx 11=m_ty
 //              12=payload_kind 13=mesh_off 14=mesh_len
-//              15=path_idx (v7) 16=program (v5) 17=color_matrix (v6)
-//              18=change_level (v8) 19=reuse_key (v9)
-// v10：删 text_off/text_len，22→20 列。
+//              15=path_idx (v7) 16=program (v5) 17=colorMatrix (v6)
+//              18=change_level (v8) 19=reuse_key (v9) 20=effect_block (v11)
+// v11：加 effect_block 列（20→21）。
 struct TestView<'a> {
     buf: &'a [u8],
-    col_off: [usize; 20],
+    col_off: [usize; 21],
     mesh_arena_off: usize,
     clip_table_off: usize,
     clip_table_len: u32,
@@ -364,9 +359,9 @@ struct TestView<'a> {
 impl<'a> TestView<'a> {
     fn parse(buf: &'a [u8]) -> Self {
         assert_eq!(&buf[0..4], &MAGIC.to_le_bytes());
-        let mut col_off = [0usize; 20];
+        let mut col_off = [0usize; 21];
         let mut h = 12;
-        for i in 0..20 {
+        for i in 0..21 {
             col_off[i] = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
             h += 4;
         }
@@ -504,6 +499,13 @@ impl<'a> TestView<'a> {
     fn reuse_key(&self, i: usize) -> u32 {
         let o = self.col_off[19] + i * 4;
         u32::from_le_bytes(self.buf[o..o + 4].try_into().unwrap())
+    }
+    /// v11：第 20 列 effect_block（[u8;128]，col_off[20] + i*128）。读节点 i 第 j 个 f32
+    /// （小端）。字段顺序见 EffectBlock::to_bytes：outline_width / outline_color[4] /
+    /// underlay[3]×{ox,oy,softness,color[4]} / glow_power / glow_color[4] / blur_width。
+    fn effect_block_f32(&self, i: usize, j: usize) -> f32 {
+        let off = self.col_off[20] + i * EffectBlock::SIZE + j * 4;
+        f32::from_le_bytes(self.buf[off..off + 4].try_into().unwrap())
     }
     /// v8：读 mesh_len 列（u32 @ col_off[14] + i*4），SKIP/HEADER 节点 =0。
     fn mesh_len_col(&self, i: usize) -> u32 {
@@ -805,7 +807,7 @@ fn merged_mesh_blob_keeps_absolute_verts_and_no_double_alpha() {
     }
 }
 /// blob world_matrix round-trip——纯平移 + 剪切节点均写入 6 矩阵列，
-/// VERSION=10（v10：20 列，text 塌进 mesh_arena），blob len > 100。
+/// VERSION=11（v11：21 列，加 effect_block），blob len > 100。
 #[test]
 fn blob_world_matrix_roundtrip() {
     let mk = |wm: transform::Affine2| RenderNode {
@@ -839,19 +841,19 @@ fn blob_world_matrix_roundtrip() {
         nodes: vec![pure, skew],
         clips: vec![],
     });
-    // version=10（v10：20 列，text 塌进 mesh_arena）
+    // version=11（v11：21 列，加 effect_block）
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        10,
-        "VERSION=10"
+        11,
+        "VERSION=11"
     );
-    // 字节数合理（2 节点 × 20 列 + mesh arena + header）
+    // 字节数合理（2 节点 × 21 列 + mesh arena + header）
     assert!(blob.len() > 100);
 }
 
 /// 纯色 mesh 节点经 build_blob → payload_kind==1 透传。
 /// C# 侧 MirrorPool.cs:71 `kind!=1&&!=2 continue` 跳过 kind≠1/2；
-/// VERSION=10（v10：20 列，text 塌进 mesh_arena）。
+/// VERSION=11（v11：21 列，加 effect_block）。
 #[test]
 fn blob_pure_mesh_kind_is_one() {
     let rn = mesh_node(0, None, 0.0, 0.0, 1.0, 1.0);
@@ -868,12 +870,12 @@ fn blob_pure_mesh_kind_is_one() {
     assert_eq!(view.program(0), 0, "纯色 mesh program=0");
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        10,
-        "VERSION=10"
+        11,
+        "VERSION=11"
     );
 }
 
-/// color_matrix 列（[f32;20]，第 18 列 0-indexed）：program=3/4 节点填矩阵，其余全零占位。VERSION=10。
+/// color_matrix 列（[f32;20]，第 18 列 0-indexed）：program=3/4 节点填矩阵，其余全零占位。VERSION=11。
 #[test]
 fn blob_color_matrix_column_round_trips() {
     let matrix = [
@@ -908,11 +910,7 @@ fn blob_color_matrix_column_round_trips() {
         clips: vec![],
     });
     let view = TestView::parse(&blob);
-    assert_eq!(
-        view.version(),
-        10,
-        "VERSION=10（v10：text 塌进 mesh_arena）"
-    );
+    assert_eq!(view.version(), 11, "VERSION=11（v11：加 effect_block 列）");
     assert_eq!(view.program(0), 3, "program=3 round-trip");
     let m = view.color_matrix(0);
     for i in 0..20 {
@@ -936,7 +934,7 @@ fn change_level_column_round_trips() {
     full.change_level = ChangeLevel::Full;
     let blob = build_blob(&frame(&[skip, header, full]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 10, "VERSION=10");
+    assert_eq!(view.version(), 11, "VERSION=11");
     assert_eq!(view.change_level(0), 0, "Skip=0");
     assert_eq!(view.change_level(1), 1, "Header=1");
     assert_eq!(view.change_level(2), 2, "Full=2");
@@ -974,6 +972,92 @@ fn blob_v9_round_trips_reuse_key() {
     };
     let blob = build_blob(&frame(&[rn]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 10, "blob VERSION=10");
+    assert_eq!(view.version(), 11, "blob VERSION=11");
     assert_eq!(view.reuse_key(0), 42, "reuse_key round-trip");
+}
+
+/// v11：effect_block 列（第 21 列 / index 20，128B = EffectBlock::SIZE）round-trip。
+/// 非文字节点（EffectBlock::default()）写全 0；文字节点 effect 字段 round-trip 保真。
+/// 照 color_matrix 列先例（per-node 定长 struct 列）。
+#[test]
+fn blob_writes_effect_block_column() {
+    // 节点 0：默认 effect（全 0）；节点 1：outline_width=2.0 + glow_power=0.5。
+    let mut effect = EffectBlock::default();
+    effect.outline_width = 2.0;
+    effect.glow_power = 0.5;
+    let mut node_with_effect = mesh_node(0, None, 0.0, 0.0, 5.0, 5.0);
+    node_with_effect.effect = effect;
+    let plain_node = mesh_node(1, None, 0.0, 0.0, 5.0, 5.0);
+
+    let blob = build_blob(&frame(&[plain_node, node_with_effect]));
+    let view = TestView::parse(&blob);
+
+    // 节点 0（默认 effect）：outline_width = 0.0（首个 f32）。
+    assert_eq!(
+        view.effect_block_f32(0, 0),
+        0.0,
+        "默认 effect：outline_width=0"
+    );
+    // 节点 1：outline_width = 2.0（effect_block 首个 f32）。
+    assert_eq!(
+        view.effect_block_f32(1, 0),
+        2.0,
+        "effect outline_width=2.0 round-trip"
+    );
+    // outline_width 后跟 outline_color[4]：默认全 0 → f32 索引 1..4 全 0。
+    for j in 1..5 {
+        assert_eq!(
+            view.effect_block_f32(1, j),
+            0.0,
+            "outline_color 默认全 0（f32 idx {}）",
+            j
+        );
+    }
+    // glow_power 位于 f32 idx = 1(outline_width) + 4(outline_color) + 3*7(underlay[3]) = 26。
+    // underlay 单 slot = offset_x + offset_y + softness + color[4] = 7 f32；3 slot = 21 f32。
+    assert_eq!(
+        view.effect_block_f32(1, 26),
+        0.5,
+        "effect glow_power=0.5 round-trip（f32 idx 26）"
+    );
+    // 节点 0 整块 effect_block 全 0（默认 effect）。
+    for j in 0..(EffectBlock::SIZE / 4) {
+        assert_eq!(
+            view.effect_block_f32(0, j),
+            0.0,
+            "默认 effect 全 0（f32 idx {}）",
+            j
+        );
+    }
+}
+
+/// v11：blob SOA 列数 = 21（加 effect_block 列）。读 header 的 col_offset 表长度断言。
+/// header layout：magic(4)+version(4)+node_count(4) + N×col_offset(4) + 3 arena pair。
+/// mesh_arena_off 字段位于 header offset `12 + N*4`。对 N=21 → offset 96；N=20 → 92。
+#[test]
+fn blob_column_count_is_21() {
+    let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
+    assert_eq!(
+        u32::from_le_bytes(blob[4..8].try_into().unwrap()),
+        11,
+        "VERSION=11（v11：加 effect_block 列）"
+    );
+    // mesh_arena_off 字段位置 = 12 + N*4。N=21 → offset 96（读出一个 >= header_len 的值）。
+    // 反推列数 N = (mesh_arena_off_field_position - 12) / 4 = (96 - 12) / 4 = 21。
+    let mesh_arena_off_field_at = 12 + 21 * 4;
+    assert_eq!(
+        mesh_arena_off_field_at, 96,
+        "v11 header：N=21 列 → mesh_arena_off @ 96"
+    );
+    let mesh_arena_off = u32::from_le_bytes(
+        blob[mesh_arena_off_field_at..mesh_arena_off_field_at + 4]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    // mesh_arena_off 必须 >= header_len（12 + 21*4 + 3*8 = 120），证明 21 列都正确布局。
+    assert!(
+        mesh_arena_off >= 12 + 21 * 4 + 24,
+        "21 列布局后 mesh_arena_off({}) >= header_len(120)",
+        mesh_arena_off
+    );
 }
