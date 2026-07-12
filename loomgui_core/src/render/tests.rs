@@ -853,6 +853,7 @@ fn build_text_quad_scales_by_target_over_source() {
         &[],
         None,
         false,
+        crate::text::rich::RichWeight::Normal,
     );
     let (fonts24, layout24, rect24) = build_text_fixture(24.0);
     let m24 = build_text_mesh(
@@ -863,6 +864,7 @@ fn build_text_quad_scales_by_target_over_source() {
         &[],
         None,
         false,
+        crate::text::rich::RichWeight::Normal,
     );
     let w48 = quad_width(&m48);
     let w24 = quad_width(&m24);
@@ -870,6 +872,37 @@ fn build_text_quad_scales_by_target_over_source() {
         (w48 - 2.0 * w24).abs() < 1.0,
         "target 减半 → quad 宽度减半，w48={w48} w24={w24}"
     );
+}
+
+/// node_weight=Bold → build_text_mesh 双绘（offset 0 + 1px）→ 顶点翻倍。
+/// plain text 的 weight 不经 measure_text（恒 Normal），全靠 node_weight 参数带上
+/// （`<span style="font-weight:700">` 这类 Text 节点的 bold 唯一来源）。
+#[test]
+fn build_text_node_weight_bold_double_draws() {
+    let (fonts, layout, rect) = build_text_fixture(48.0);
+    let page_verts = |m: &TextMeshes| m.base.first().map(|p| p.1.len()).unwrap_or(0);
+    let m_normal = build_text_mesh(
+        &layout,
+        &mut test_glyph_atlas(),
+        &fonts,
+        &rect,
+        &[],
+        None,
+        false,
+        crate::text::rich::RichWeight::Normal,
+    );
+    let m_bold = build_text_mesh(
+        &layout,
+        &mut test_glyph_atlas(),
+        &fonts,
+        &rect,
+        &[],
+        None,
+        false,
+        crate::text::rich::RichWeight::Bold,
+    );
+    assert_eq!(page_verts(&m_normal), 4, "1 glyph × 4 verts (normal)");
+    assert_eq!(page_verts(&m_bold), 8, "bold 双绘 → 8 verts");
 }
 
 /// 空格等无轮廓字形不该渲染成方块——rasterize_glyph 对 gid>0 无 bbox/空轮廓返空
@@ -4187,6 +4220,7 @@ fn build_text_packs_effects_into_meshes() {
         &effects,
         None,
         false,
+        crate::text::rich::RichWeight::Normal,
     );
     // effect 进了 TextMeshes.effect（shadow → underlay[0]）
     assert_eq!(m.effect.underlay[0].offset_x, 3.0);

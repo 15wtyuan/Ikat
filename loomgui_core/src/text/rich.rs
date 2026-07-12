@@ -13,6 +13,17 @@ pub enum RichWeight {
     Bold = 1,
 }
 
+/// CSS `font-weight` 数值 → RichWeight。≥700 → Bold（对标下方 apply_inline_style 的
+/// "700".."900" 映射）；<700 → Normal。plain text 节点的 style.font_weight 经此转成 weight，
+/// 供 build_text_mesh 合成 bold（rich text 的 weight 由 parse_rich_markup per-run 带）。
+pub fn weight_from_font_weight(w: u16) -> RichWeight {
+    if w >= 700 {
+        RichWeight::Bold
+    } else {
+        RichWeight::Normal
+    }
+}
+
 /// 斜体。MVP 合成（build 期 quad skew）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
