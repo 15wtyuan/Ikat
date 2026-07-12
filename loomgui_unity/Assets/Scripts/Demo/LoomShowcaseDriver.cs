@@ -314,7 +314,7 @@ namespace LoomGUI
             // nav-tips-demo → 弹 tips_toast 演示（tips_layer 叠加）。
             uint tipsBtn = _stage.FindNodeById("nav-tips-demo");
             AddPageListener(tipsBtn, EventType.Click, _ => ShowTips());
-            Debug.Log("[Showcase] home 订阅完成（9 nav + tips-demo）");
+            Debug.Log("[Showcase] home 订阅完成（10 nav + tips-demo）");
         }
 
         void AddNavListener(string navId, string targetPage)

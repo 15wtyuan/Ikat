@@ -331,17 +331,16 @@ struct RenderNode {
 }
 
 enum NodePayload {
-    Unchanged,                                                 // 本帧不传，后端沿用上帧
-    Mesh    { mesh_ref, texture, alpha_tex, program, flags },  // 非文本自绘（九宫格在 mesh 里）
-    Text    { layout_ref, font, program, flags },              // 文本：后端据 TextLayout 生成 mesh
-    // Mask { shape_ref, mode } / PaintTarget { rt_id } / NativeHost —— 见 roadmap
+    Mesh { verts, uvs, colors, indices, image_path, program, color_matrix },
+    // v10：文本塌进 mesh_arena，Text 变体已删；"本帧没变"由 ChangeLevel::Skip 表达，
+    // Unchanged 变体已删。Mask / PaintTarget / NativeHost —— 见 roadmap。
 }
 ```
 
 **关键约定**：
 - **九宫格**：核心九宫格 MeshFactory 生成 16 顶点 mesh，作为普通 Mesh payload。
-- **Unchanged**：不 dirty 的节点用此变体，不进 arena；后端见 Unchanged → 不动该 **node_id** 的渲染对象。Unchanged 是独立变体（非 dirty_bits 位），enum 只留真实 payload 类型。
-- **Text 节点的 text dirty**（防静默陈旧文本）：DirtyFlags 含独立 `text` 位。Text 节点发 `Text` 变体当且仅当 `text_dirty || mesh_dirty`——**box 尺寸不变不算 Unchanged**（"10"→"09" 同宽仍必发 `Text` 重光栅化）。`set_text`/font 变化置 `text_dirty`（级联 layout_dirty+mesh_dirty）。
+- **本帧没变**：不再用 NodePayload 变体表达——改由 `ChangeLevel::Skip`（dirty/变更检测机制）表示整节点不动，payload 不传、后端沿用上帧渲染对象。enum 只留真实 payload 类型（当前仅 Mesh）。
+- **文本节点的 text 变化**（防静默陈旧文本）：v10 起文本塌进 mesh_arena（同 `Mesh` 变体），Text 变体已删。text 变化经 `payload_hash` 采样全量 verts/uvs/colors/glyph 检测——"10"→"09" 同宽仍触发 Full 重建（不采样会漏，见 pitfalls）。`set_text`/font 变化置 mesh_dirty。
 - **NodeTransform**：本地变换 + pivot 偏移。（加 `VertexMatrix` 支持透视/世界空间 UI。）
 
 后端每帧：diff `render_nodes` 与镜像池（按 node_id 增删复用）→ 同步对应 payload（Mesh 上传 mesh、Text 据 layout 生成 mesh）→ 设 transform/排序/遮罩/blend。

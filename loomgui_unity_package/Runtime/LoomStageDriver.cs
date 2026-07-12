@@ -11,7 +11,7 @@ namespace LoomGUI
     /// 字体/根 transform + 配 UI 相机/根变换；LateUpdate 每帧驱动 stage.Tick(dt) + 输入采集。
     ///
     /// 启动流程（v1.8）：读 loom.runtime.json → 加载包 → 加载 atlas.json → set_image_sizes →
-    /// SpriteResolver.Init → 注册字体 → 正常 tick。不再依赖 LoomSettings ScriptableObject。
+    /// SpriteResolver.Init → 注册字体 → 正常 tick。不再依赖 ScriptableObject 配置（改读 loom.runtime.json）。
     ///
     /// 三个 public virtual 加载钩子（LoadTextFile/LoadBytes/LoadTexture）默认直读文件系统，
     /// 以 <see cref="_productRoot"/> 为基目录。项目继承覆写以换 AssetBundle/Addressables 加载。
@@ -114,9 +114,14 @@ namespace LoomGUI
         {
             if (!string.IsNullOrEmpty(_productRoot))
                 return _productRoot;
-            // 默认 = 工程的 Assets/Bundles（打包器输出目录，editor 用）。与重构前 LoomSettings.pkgOutputDir
-            // 行为一致。built player 里该路径不存在——发行时显式设 _productRoot（如 StreamingAssets 拷贝）。
+#if UNITY_EDITOR
+            // editor：直读打包器输出（Assets/Bundles），showcase 演示零配置。
             return Path.Combine(Application.dataPath, "Bundles");
+#else
+            // player：Unity 标准资源位置（发行前把 Bundles 内容拷进 StreamingAssets）。
+            // dataPath/Bundles 在 built player 不存在，走 streamingAssetsPath 避免 silent 空白屏。
+            return Application.streamingAssetsPath;
+#endif
         }
 
         // ===== Pure logic: merge atlas sprites into (key, width, height) list =====
@@ -234,7 +239,7 @@ namespace LoomGUI
             if (_inputCollector == null) _inputCollector = GetComponent<LoomInputCollector>();
         }
 
-        // ===== Font registration (from runtime.json, not LoomSettings) =====
+        // ===== Font registration (from runtime.json) =====
 
         /// <summary>
         /// Register fonts from the runtime manifest's font list.
