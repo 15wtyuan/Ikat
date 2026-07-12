@@ -36,7 +36,7 @@ pub const GLYPH_PAD: i32 = SPREAD;
 /// 8SSEDT → 下采样 SDF 回 1x，把 zero-crossing 精度提升 N 倍，消除放大时斜边的
 /// 位图锯齿波浪。关键 = EDT 必须在 hi-res 跑（zero-crossing 才是 hi-res 精度）；
 /// 仅光栅超采样无用——ab_glyph coverage 本就是精确面积覆盖率，1x 二值化丢的是
-/// 像素分辨率而非 coverage 精度。对标 TextMeshPro 的 SDF16 档（16x oversampling）。
+/// 像素分辨率而非 coverage 精度。对标 TextMeshPro 的 SDF16 档（每边 4× 子像素 = 16× 总子像素）。
 const OVERSAMPLE: u32 = 4;
 
 /// 字形缓存键。单一 SDF：所有 size 共享一份 source SDF，size 不进 key。
@@ -280,7 +280,11 @@ fn rasterize_glyph(face: &Face<'_>, gid: u16) -> (Vec<u8>, u32, u32) {
     // 超采样无用（ab_glyph coverage 本就是精确面积覆盖率）。
     let n = {
         let base = OVERSAMPLE.max(1) as usize;
-        // 单字形 bitmap 异常大时降级，防 hi-res 光栅爆内存（正常 48pt 字 gw<200）。
+        // 单字形 hi-res 光栅爆内存时降级（hi-res 单边像素上限 = gw*OVERSAMPLE）。
+        // 与 SOURCE_SIZE(48)/OVERSAMPLE(4) 耦合：48pt CJK 字形 bbox ~50px → hi-res ~200px，
+        // 远低于 2048 不触发；升 SOURCE_SIZE（96→~400px，192→超 2048）会触发降级，把
+        // OVERSAMPLE 从 4 压回 1 → 放大字形重现象素锯齿波浪（OVERSAMPLE 专为消除它而设）。
+        // 改 SOURCE_SIZE/OVERSAMPLE 须同步重评此阈值。
         const CAP_EDGE: usize = 2048;
         if (gw as usize) * base <= CAP_EDGE && (gh as usize) * base <= CAP_EDGE {
             base

@@ -1,4 +1,4 @@
-//! 包格式（.pkg.bin，当前 version=15）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=16）：Rust-internal（packager 写、runtime 读，C# 不解析）。
 //!
 //! 多组件格式：一个 pkg.bin = 多个具名组件（ComponentTable 切分）。
 //! 布局：Header(20B) + StringTable + ComponentTable + RichRunsArena + NodeBlock +

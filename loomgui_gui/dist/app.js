@@ -23,10 +23,6 @@
   var btnOpen     = $("btn-open");
   var btnBack     = $("btn-back");
 
-  // ── State ──
-  var currentWorkspace = null;
-  var currentPath = null;
-
   // ── Native directory picker (tauri-plugin-dialog) ──
   // 走 plugin command（不依赖 npm JS 包）。directory + 单选 → string | null。
   function pickDirectory(title) {
@@ -104,14 +100,10 @@
   function showStart() {
     startScreen.classList.remove("hidden");
     mainScreen.classList.add("hidden");
-    currentWorkspace = null;
-    currentPath = null;
     loadRecent();
   }
 
   function renderMain(ws, path) {
-    currentWorkspace = ws;
-    currentPath = path;
     startScreen.classList.add("hidden");
     mainScreen.classList.remove("hidden");
 
