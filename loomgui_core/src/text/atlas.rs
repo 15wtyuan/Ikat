@@ -32,6 +32,13 @@ pub const SPREAD: i32 = 12;
 /// bearing 来自 bbox，而 px_w/px_h/UV 含 pad，定位须减 pad 才不偏。
 pub const GLYPH_PAD: i32 = SPREAD;
 
+/// SDF 超采样倍数（每边）。hi-res(×N) 光栅 coverage → hi-res 二值 mask → hi-res
+/// 8SSEDT → 下采样 SDF 回 1x，把 zero-crossing 精度提升 N 倍，消除放大时斜边的
+/// 位图锯齿波浪。关键 = EDT 必须在 hi-res 跑（zero-crossing 才是 hi-res 精度）；
+/// 仅光栅超采样无用——ab_glyph coverage 本就是精确面积覆盖率，1x 二值化丢的是
+/// 像素分辨率而非 coverage 精度。对标 TextMeshPro 的 SDF16 档（16x oversampling）。
+const OVERSAMPLE: u32 = 4;
+
 /// 字形缓存键。单一 SDF：所有 size 共享一份 source SDF，size 不进 key。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GlyphKey {
@@ -268,15 +275,31 @@ fn rasterize_glyph(face: &Face<'_>, gid: u16) -> (Vec<u8>, u32, u32) {
         return empty_or_tofu(gid, size_px);
     }
 
-    // 先光栅出 coverage（复用 ab_glyph Rasterizer + OutlineToRaster）。
-    let mut raster = Rasterizer::new(gw as usize, gh as usize);
+    // SDF 超采样：hi-res(×N) 光栅 coverage → hi-res 二值 mask → hi-res 8SSEDT →
+    // 下采样 SDF 回 1x。EDT 在 hi-res 跑，zero-crossing 精度才是 hi-res；仅光栅
+    // 超采样无用（ab_glyph coverage 本就是精确面积覆盖率）。
+    let n = {
+        let base = OVERSAMPLE.max(1) as usize;
+        // 单字形 bitmap 异常大时降级，防 hi-res 光栅爆内存（正常 48pt 字 gw<200）。
+        const CAP_EDGE: usize = 2048;
+        if (gw as usize) * base <= CAP_EDGE && (gh as usize) * base <= CAP_EDGE {
+            base
+        } else {
+            (CAP_EDGE / gw.max(gh) as usize).max(1).min(base)
+        }
+    };
+    let hi_gw = gw as usize * n;
+    let hi_gh = gh as usize * n;
+
+    let mut raster = Rasterizer::new(hi_gw, hi_gh);
     let mut builder = OutlineToRaster {
         raster: &mut raster,
-        scale,
+        // 字体设计坐标 → hi-px：scale 与 padding 都放大 n 倍（光栅在 hi-res 空间）。
+        scale: scale * n as f32,
         origin_x: bbox.x_min as f32,
         // font y-up, bitmap y-down：用 y_max 做原点翻转。
         origin_y: bbox.y_max as f32,
-        offset_px: GLYPH_PAD as f32,
+        offset_px: GLYPH_PAD as f32 * n as f32,
         pen: Point::default(),
         start: Point::default(),
         has_contour: false,
@@ -290,13 +313,32 @@ fn rasterize_glyph(face: &Face<'_>, gid: u16) -> (Vec<u8>, u32, u32) {
         return empty_or_tofu(gid, size_px);
     }
 
-    // coverage → 二值 mask（threshold 0.5）→ 8SSEDT signed distance → R8 编码。
-    let mut mask = vec![0u8; (gw * gh) as usize];
+    // hi-res coverage → hi-res 二值 mask（threshold 0.5）→ hi-res signed distance。
+    // 距离单位 = hi-px（hi-res 像素）。
+    let mut hi_mask = vec![0u8; hi_gw * hi_gh];
     raster.for_each_pixel_2d(|x, y, c| {
-        let i = (y as usize) * (gw as usize) + (x as usize);
-        mask[i] = if c > 0.5 { 1 } else { 0 };
+        let i = (y as usize) * hi_gw + (x as usize);
+        hi_mask[i] = if c > 0.5 { 1 } else { 0 };
     });
-    let sdf = crate::text::sdf::signed_distance_field(&mask, gw as u32, gh as u32);
+    let hi_sdf = crate::text::sdf::signed_distance_field(&hi_mask, hi_gw as u32, hi_gh as u32);
+
+    // 下采样 hi-res SDF → 1x：每像素取 n×n hi 像素距离的 box 平均（低通，平滑锯齿），
+    // 再 ÷n 把距离单位从 hi-px 转回 1x px（n hi-px = 1 1x-px）。SPREAD 按 1x px 不变。
+    let gw_us = gw as usize;
+    let gh_us = gh as usize;
+    let mut sdf = vec![0.0f32; gw_us * gh_us];
+    for y in 0..gh_us {
+        for x in 0..gw_us {
+            let mut sum = 0.0f32;
+            for sy in 0..n {
+                for sx in 0..n {
+                    sum += hi_sdf[(y * n + sy) * hi_gw + (x * n + sx)];
+                }
+            }
+            sdf[y * gw_us + x] = sum / (n * n) as f32 / n as f32;
+        }
+    }
+
     let px: Vec<u8> = sdf
         .iter()
         .map(|&d| crate::text::sdf::encode_distance(d, SPREAD as u32))
