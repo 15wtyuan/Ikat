@@ -27,6 +27,58 @@ expression: json
     "sort_key": 0,
     "change_level": "Full",
     "reuse_key": 0,
+    "effect": {
+      "outline_width": 0.0,
+      "outline_color": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "underlay": [
+        {
+          "offset_x": 0.0,
+          "offset_y": 0.0,
+          "softness": 0.0,
+          "color": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "offset_x": 0.0,
+          "offset_y": 0.0,
+          "softness": 0.0,
+          "color": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "offset_x": 0.0,
+          "offset_y": 0.0,
+          "softness": 0.0,
+          "color": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "glow_power": 0.0,
+      "glow_color": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "blur_width": 0.0
+    },
     "payload": {
       "Mesh": {
         "verts": [
@@ -150,6 +202,58 @@ expression: json
     "sort_key": 1,
     "change_level": "Full",
     "reuse_key": 0,
+    "effect": {
+      "outline_width": 0.0,
+      "outline_color": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "underlay": [
+        {
+          "offset_x": 0.0,
+          "offset_y": 0.0,
+          "softness": 0.0,
+          "color": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "offset_x": 0.0,
+          "offset_y": 0.0,
+          "softness": 0.0,
+          "color": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "offset_x": 0.0,
+          "offset_y": 0.0,
+          "softness": 0.0,
+          "color": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "glow_power": 0.0,
+      "glow_color": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "blur_width": 0.0
+    },
     "payload": {
       "Mesh": {
         "verts": [
