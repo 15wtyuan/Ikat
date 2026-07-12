@@ -10,14 +10,14 @@
     {
       "family": "LXGWWenKai",
       "file": "LXGWWenKai.ttf.bytes",
-      "default": true,
-      "fallback": false
+      "default": false,
+      "fallback": true
     },
     {
       "family": "wqy-microhei",
       "file": "wqy-microhei.ttc.bytes",
-      "default": false,
-      "fallback": true
+      "default": true,
+      "fallback": false
     },
     {
       "family": "PressStart2P",
