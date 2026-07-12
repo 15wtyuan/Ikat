@@ -1183,6 +1183,50 @@ struct TextMeshes {
     front_layers: Vec<(u32, Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>)>,
 }
 
+/// 把节点 text_effects 打包成定长 EffectBlock（供 build_text_mesh → RenderNode.effect）。
+/// 映射：Shadow→underlay 槽（多重 ≤3，超 3 丢弃；shadow blur→softness、ox/oy→offset）、
+/// Stroke→outline（CSS 单值，后到覆盖）、Glow→glow（w→power，起点值，验收精调）、Blur→blur。
+/// 同类型多值：shadow 抢 underlay 空槽；stroke/glow/blur 后到覆盖先到。
+#[allow(dead_code)] // 下一步接入 build_text_mesh（消费 text_effects 入参）时成为首个非测试 call site。
+pub(crate) fn pack_effects(effects: &[crate::text::font_effect::FontEffect]) -> EffectBlock {
+    use crate::text::font_effect::FontEffect;
+    let mut eb = EffectBlock::default();
+    let mut underlay_idx = 0usize;
+    for e in effects {
+        match e {
+            FontEffect::Shadow {
+                ox,
+                oy,
+                blur,
+                color,
+            } => {
+                if underlay_idx < eb.underlay.len() {
+                    eb.underlay[underlay_idx] = UnderlaySlot {
+                        offset_x: *ox,
+                        offset_y: *oy,
+                        softness: *blur,
+                        color: *color,
+                    };
+                    underlay_idx += 1;
+                }
+                // 超 3 个 shadow：静默丢弃（CSS text-shadow 多重尾部，FFI 邻近不 panic）。
+            }
+            FontEffect::Stroke { w, color } => {
+                eb.outline_width = *w;
+                eb.outline_color = *color;
+            }
+            FontEffect::Glow { w, color } => {
+                eb.glow_power = *w;
+                eb.glow_color = *color;
+            }
+            FontEffect::Blur { w } => {
+                eb.blur_width = *w;
+            }
+        }
+    }
+    eb
+}
+
 /// 把 TextLayout 每字形展成 quad mesh：4 顶点 + 6 索引，UV 指向核心 atlas。
 /// 顶点 = 节点世界空间（pen + bearing + rect.xy）；per-run 颜色烤顶点色（alpha 不烤，走
 /// _Alpha uniform）。索引为 2-tri 扇（0-1-2, 0-2-3，与 mesh::quad 同序）。

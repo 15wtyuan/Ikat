@@ -56,6 +56,68 @@ pub enum NodePayload {
     },
 }
 
+/// 单个 underlay（shadow）槽：偏移采样 distance + softness（shadow blur 近似）+ 色。
+/// color.a=0 → 该槽未启用（shader 据此跳过，effect 无 flags，参数隐含启用）。
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct UnderlaySlot {
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub softness: f32,
+    pub color: [f32; 4],
+}
+
+/// 文字效果参数块（per-text-node）。定长，序列化进 FFI SOA 的 effect_block 列（照
+/// color_matrix 先例）。无 flags：effect 启用由参数隐含（outline_width>0 /
+/// underlay.color.a>0 / glow_color.a>0 / blur_width>0）。Default 全 0 = 无 effect。
+///
+/// 槽位对标 TextMeshPro（_Outline*/_Underlay*/_Glow*）；多重 shadow 扩展为 underlay[3]
+/// （TMP underlay 单槽）。blur 是 LoomGUI 私有近似（TMP 无整字高斯 blur）。
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct EffectBlock {
+    pub outline_width: f32,
+    pub outline_color: [f32; 4],
+    pub underlay: [UnderlaySlot; 3],
+    pub glow_power: f32,
+    pub glow_color: [f32; 4],
+    pub blur_width: f32,
+}
+
+impl EffectBlock {
+    /// 序列化定长（32 × f32 = 128 字节，小端）。字段顺序固定，FFI blob 写出与 C# 解析、
+    /// dirty hash 共用此方法（DRY）。字段顺序 = outline / underlay[3] / glow / blur。
+    pub const SIZE: usize = 128;
+
+    pub fn to_bytes(&self) -> [u8; Self::SIZE] {
+        let mut buf = [0u8; Self::SIZE];
+        let mut o = 0usize;
+        macro_rules! wf {
+            ($v:expr) => {
+                buf[o..o + 4].copy_from_slice(&($v).to_le_bytes());
+                o += 4;
+            };
+        }
+        wf!(self.outline_width);
+        for &c in &self.outline_color {
+            wf!(c);
+        }
+        for slot in &self.underlay {
+            wf!(slot.offset_x);
+            wf!(slot.offset_y);
+            wf!(slot.softness);
+            for &c in &slot.color {
+                wf!(c);
+            }
+        }
+        wf!(self.glow_power);
+        for &c in &self.glow_color {
+            wf!(c);
+        }
+        wf!(self.blur_width);
+        debug_assert_eq!(o, Self::SIZE, "EffectBlock 字段顺序/数量与 SIZE 不符");
+        buf
+    }
+}
+
 /// 渲染节点（draw list 的最小单元）。
 ///
 /// 字段映射 Node → 渲染语义：

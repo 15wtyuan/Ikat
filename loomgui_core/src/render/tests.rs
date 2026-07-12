@@ -4168,3 +4168,112 @@ fn text_without_stroke_emits_no_front_layer() {
         .any(|rn| (rn.node_id & super::TEXT_STROKE_FRONT_FLAG) != 0);
     assert!(!has_stroke, "no -webkit-text-stroke -> no Front layer");
 }
+
+/// effect 打包：FontEffect → EffectBlock 槽位映射。
+/// Shadow→underlay（多重 ≤3，超 3 丢）、Stroke→outline、Glow→glow、Blur→blur。
+#[test]
+fn pack_effects_maps_to_slots() {
+    use crate::render::node::UnderlaySlot;
+    use crate::text::font_effect::FontEffect;
+    let effects = vec![
+        FontEffect::Shadow {
+            ox: 3.0,
+            oy: 0.0,
+            blur: 0.0,
+            color: [0., 0., 0., 1.],
+        },
+        FontEffect::Stroke {
+            w: 2.0,
+            color: [0., 0., 0., 1.],
+        },
+        FontEffect::Glow {
+            w: 4.0,
+            color: [0.37, 0.70, 0.77, 1.],
+        },
+        FontEffect::Blur { w: 2.0 },
+    ];
+    let eb = crate::render::pack_effects(&effects);
+    // outline
+    assert_eq!(eb.outline_width, 2.0);
+    assert_eq!(eb.outline_color, [0., 0., 0., 1.]);
+    // underlay[0] = 第一个 shadow
+    assert_eq!(
+        eb.underlay[0],
+        UnderlaySlot {
+            offset_x: 3.0,
+            offset_y: 0.0,
+            softness: 0.0,
+            color: [0., 0., 0., 1.]
+        }
+    );
+    // underlay[1]/[2] 未填 = default（color.a=0 → shader 不启用）
+    assert_eq!(eb.underlay[1].color[3], 0.0);
+    assert_eq!(eb.underlay[2].color[3], 0.0);
+    // glow / blur
+    assert_eq!(eb.glow_power, 4.0);
+    assert_eq!(eb.glow_color, [0.37, 0.70, 0.77, 1.]);
+    assert_eq!(eb.blur_width, 2.0);
+}
+
+/// 多重 shadow：前 3 个填 underlay[0..3]，第 4 个丢弃（不 panic）。
+#[test]
+fn pack_effects_caps_shadows_at_three() {
+    use crate::text::font_effect::FontEffect;
+    let effects = vec![
+        FontEffect::Shadow {
+            ox: 2.0,
+            oy: 2.0,
+            blur: 0.0,
+            color: [0., 0., 0., 1.],
+        },
+        FontEffect::Shadow {
+            ox: 4.0,
+            oy: 4.0,
+            blur: 0.0,
+            color: [0., 0., 0., 1.],
+        },
+        FontEffect::Shadow {
+            ox: 6.0,
+            oy: 6.0,
+            blur: 0.0,
+            color: [0., 0., 0., 1.],
+        },
+        FontEffect::Shadow {
+            ox: 8.0,
+            oy: 8.0,
+            blur: 0.0,
+            color: [0., 0., 0., 1.],
+        }, // 超出，丢
+    ];
+    let eb = crate::render::pack_effects(&effects);
+    assert_eq!(eb.underlay[0].offset_x, 2.0);
+    assert_eq!(eb.underlay[1].offset_x, 4.0);
+    assert_eq!(eb.underlay[2].offset_x, 6.0);
+    // 没有 underlay[3]（只 3 槽）；第 4 个 shadow 被吞，不 panic 即可。
+}
+
+/// EffectBlock 默认 = 无 effect（全 0：outline_width=0 / color.a=0 / blur_width=0）。
+#[test]
+fn effect_block_default_is_no_effect() {
+    use crate::render::node::EffectBlock;
+    let eb = EffectBlock::default();
+    assert_eq!(eb.outline_width, 0.0);
+    assert_eq!(eb.outline_color[3], 0.0);
+    assert_eq!(eb.underlay[0].color[3], 0.0);
+    assert_eq!(eb.glow_color[3], 0.0);
+    assert_eq!(eb.blur_width, 0.0);
+}
+
+/// to_bytes 往返：固定 128B，同 EffectBlock 产出同 bytes。
+#[test]
+fn effect_block_to_bytes_stable() {
+    use crate::render::node::EffectBlock;
+    let eb = EffectBlock::default();
+    let bytes = eb.to_bytes();
+    assert_eq!(bytes.len(), 128, "EffectBlock 序列化定长 128B");
+    // 全 0 effect → 全 0 bytes
+    assert!(bytes.iter().all(|&b| b == 0));
+    // 同 effect 同 bytes（稳定性，供 dirty hash）
+    let eb2 = EffectBlock::default();
+    assert_eq!(eb.to_bytes(), eb2.to_bytes());
+}
