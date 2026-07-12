@@ -299,29 +299,17 @@ git commit -m "feat(render): add EffectBlock struct + pack_effects (FontEffect -
         assert!(!m.base.is_empty(), "base 字形 mesh 仍产出");
     }
 
-    /// 清旧 layer：build_text_mesh 不再产 back/front_layers（即使有 shadow/stroke effect）。
-    #[test]
-    fn build_text_no_longer_emits_effect_layers() {
-        use crate::text::font_effect::FontEffect;
-        let (atlas, layout, rect) = build_text_fixture(48.0);
-        let mut atlas = atlas;
-        // 声明 shadow + stroke（旧路径会产 back + front layer mesh）
-        let effects = vec![
-            FontEffect::Shadow { ox: 2.0, oy: 2.0, blur: 0.0, color: [0., 0., 0., 1.] },
-            FontEffect::Stroke { w: 2.0, color: [0., 0., 0., 1.] },
-        ];
-        let m = build_text_mesh(&layout, &mut atlas, &fonts(), &rect, &effects, None, false);
-        assert!(m.back_layers.is_empty(), "back_layers 已废（effect 改 shader）");
-        assert!(m.front_layers.is_empty(), "front_layers 已废（effect 改 shader）");
-    }
+    // 清旧 layer 不单独写 build_text_mesh 级测试：Task 2 Step 5 删 TextMeshes.back_layers/
+    // front_layers 字段 = 编译保证 build_text_mesh 无法产 layer mesh。Step 10 全测试 + Task 6
+    // snapshot 更新确认无文字 back/front layer RenderNode 残留。
 ```
 
 （`build_text_fixture` / `fonts()` 是 `render/tests.rs` 现有 helper——参照 `build_text_snaps_quad_to_integer_pixel`（Plan 1 加）的构造模式。若该测试未抽 helper，本 task 顺手抽一个 `build_text_fixture(font_size) -> (GlyphAtlas, TextLayout, Rect)` 供两条测试复用。）
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cargo test -p loomgui_core build_text_packs_effects build_text_no_longer`
-Expected: 编译失败（`TextMeshes.effect` 字段不存在；`build_text_mesh` 的 `_text_effects` 未消费 → `back_layers`/`front_layers` 仍被旧逻辑填，断言失败）。
+Run: `cargo test -p loomgui_core build_text_packs_effects`
+Expected: 编译失败（`TextMeshes.effect` 字段不存在）。
 
 - [ ] **Step 3: `RenderNode` 加 effect 字段（node.rs）**
 
@@ -645,9 +633,9 @@ shader fragment 从只算 face 改为单 pass 合成 face + outline + underlay×
 ```hlsl
                 float _OutlineWidth;
                 half4 _OutlineColor;
-                float2 _UnderlayOffset0; float _UnderlaySoftness0; half4 _UnderlayColor0;
-                float2 _UnderlayOffset1; float _UnderlaySoftness1; half4 _UnderlayColor1;
-                float2 _UnderlayOffset2; float _UnderlaySoftness2; half4 _UnderlayColor2;
+                float4 _UnderlayOffset0; float _UnderlaySoftness0; half4 _UnderlayColor0;
+                float4 _UnderlayOffset1; float _UnderlaySoftness1; half4 _UnderlayColor1;
+                float4 _UnderlayOffset2; float _UnderlaySoftness2; half4 _UnderlayColor2;
                 float _GlowPower;
                 half4 _GlowColor;
                 float _BlurWidth;
@@ -676,7 +664,7 @@ shader fragment 从只算 face 改为单 pass 合成 face + outline + underlay×
                 // underlay×3（偏移 uv 重采 d，over 合成画 face 下）
                 #define UNDERLAY_PASS(idx) \
                     if (_UnderlayColor##idx.a > 0.001) { \
-                        float du = tex2D(_MainTex, i.uv + _UnderlayOffset##idx / _MainTex_TexelSize.xy).r; \
+                        float du = tex2D(_MainTex, i.uv + _UnderlayOffset##idx.xy * _MainTex_TexelSize.xy).r; \
                         float ls = scale / (1.0 + _UnderlaySoftness##idx * scale); \
                         float um = saturate((du - threshold) * ls + 0.5); \
                         float ua = _UnderlayColor##idx.a * um; \
@@ -703,7 +691,7 @@ shader fragment 从只算 face 改为单 pass 合成 face + outline + underlay×
                 half4 col = half4(rgb, a);
 ```
 
-（`_UnderlayOffset##idx / _MainTex_TexelSize.xy`：像素偏移转 uv 偏移。`_MainTex_TexelSize.xy` = 1/atlasSize。）
+（`_UnderlayOffset##idx.xy * _MainTex_TexelSize.xy`：像素偏移(.xy) × texelSize.xy(=1/atlasSize) = uv 偏移；对标 TMP_SDF_SSD.cginc:80-81。）
 
 - [ ] **Step 3: 本地验证**
 
