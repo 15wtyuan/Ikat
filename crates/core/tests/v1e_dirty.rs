@@ -2,39 +2,14 @@
 //!
 //! 本测用本地 helper `load_html_css` 直接调 parse_html + build_scene 构 scene。
 
-use loomgui_core::parse::css::parse_css;
-use loomgui_core::parse::dom::parse_html;
+mod common;
+use common::*;
 use loomgui_core::render::node::ChangeLevel;
-use loomgui_core::scene::node::build_scene;
-use loomgui_core::stage::Stage;
-use loomgui_core::style::cascade::resolve_styles;
-
-fn font_path() -> (String, usize) {
-    let p = format!(
-        "{}/tests/fixtures/DejaVuSans.ttf",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    let n = p.len();
-    (p, n)
-}
-
-/// HTML+CSS → scene（parse_html + build_scene）。
-fn load_html_css(stage: &mut Stage, html: &str, css: &str) {
-    let tree = parse_html(html).unwrap();
-    let sheet = parse_css(css).unwrap();
-    let styles = resolve_styles(&tree, &sheet);
-    stage.tweens.clear();
-    if let Some(scene) = stage.scene.as_mut() {
-        scene.scroll.clear();
-    }
-    stage.prev_node_hashes.clear();
-    stage.scene = Some(build_scene(&tree, &styles));
-}
 
 /// Stage 跨帧 dirty：首帧全 Full，第二帧静态 → Skip。
 #[test]
 fn stage_static_frame_produces_skip() {
-    let (fp, _fplen) = font_path();
+    let fp = common::font_path();
     let mut stage = Stage::new((200.0, 100.0)).expect("stage");
     stage
         .register_font("DejaVu", std::fs::read(&fp).unwrap(), true)
@@ -60,7 +35,7 @@ fn stage_static_frame_produces_skip() {
 /// reload 清 hash 基线：load 后首帧又全 Full。
 #[test]
 fn stage_reload_all_full() {
-    let (fp, _fplen) = font_path();
+    let fp = common::font_path();
     let mut stage = Stage::new((200.0, 100.0)).expect("stage");
     stage
         .register_font("DejaVu", std::fs::read(&fp).unwrap(), true)

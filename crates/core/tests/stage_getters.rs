@@ -7,31 +7,9 @@
 //!
 //! 无效 NodeId（含 gen 失效 / INVALID sentinel）→ None/false，不 panic（坑 102）。
 
-use loomgui_core::parse::css::parse_css;
-use loomgui_core::parse::dom::parse_html;
-use loomgui_core::scene::node::{build_scene, NodeId};
-use loomgui_core::stage::Stage;
-use loomgui_core::style::cascade::resolve_styles;
-
-fn font_path() -> String {
-    format!(
-        "{}/tests/fixtures/DejaVuSans.ttf",
-        env!("CARGO_MANIFEST_DIR")
-    )
-}
-
-/// HTML+CSS → scene（parse_html + build_scene），复用 node_sort_keys.rs 的 load 模式。
-fn load_html_css(stage: &mut Stage, html: &str, css: &str) {
-    let tree = parse_html(html).unwrap();
-    let sheet = parse_css(css).unwrap();
-    let styles = resolve_styles(&tree, &sheet);
-    stage.tweens.clear();
-    if let Some(scene) = stage.scene.as_mut() {
-        scene.scroll.clear();
-    }
-    stage.prev_node_hashes.clear();
-    stage.scene = Some(build_scene(&tree, &styles));
-}
+mod common;
+use common::*;
+use loomgui_core::scene::node::NodeId;
 
 /// world_matrix 读 slot 位置：transform:translate(100px,200px) → wm[4]=100, wm[5]=200。
 #[test]

@@ -11,45 +11,12 @@
 //! 本集成测验证 parse→render 管线，用本地 helper `load_html_css` 直接调
 //! parse_html + build_scene 构 scene。Image 走未注册 fallback（payload 带 path，无图集）。
 
-use loomgui_core::parse::css::parse_css;
-use loomgui_core::parse::dom::parse_html;
-use loomgui_core::scene::node::build_scene;
-use loomgui_core::stage::Stage;
-use loomgui_core::style::cascade::resolve_styles;
-
-/// 测试字体：仓库内 DejaVuSans.ttf，跨平台一致。
-fn test_font_path() -> String {
-    format!(
-        "{}/tests/fixtures/DejaVuSans.ttf",
-        env!("CARGO_MANIFEST_DIR")
-    )
-}
-
-/// 缺字体时 skip（return，不算失败）。
-fn skip_if_no_font(font: &str) -> bool {
-    if std::fs::read(font).is_err() {
-        eprintln!("skip: no font at {}", font);
-        return true;
-    }
-    false
-}
-
-/// helper：HTML+CSS → scene（直接调 parse 路径构 scene，供集成测）。
-fn load_html_css(stage: &mut Stage, html: &str, css: &str) {
-    let tree = parse_html(html).unwrap();
-    let sheet = parse_css(css).unwrap();
-    let styles = resolve_styles(&tree, &sheet);
-    stage.tweens.clear();
-    if let Some(scene) = stage.scene.as_mut() {
-        scene.scroll.clear();
-    }
-    stage.prev_node_hashes.clear();
-    stage.scene = Some(build_scene(&tree, &styles));
-}
+mod common;
+use common::*;
 
 #[test]
 fn snapshot_simple_panel() {
-    let font = test_font_path();
+    let font = font_path();
     if skip_if_no_font(&font) {
         return;
     }
@@ -67,7 +34,7 @@ fn snapshot_simple_panel() {
 
 #[test]
 fn snapshot_cascade_inheritance() {
-    let font = test_font_path();
+    let font = font_path();
     if skip_if_no_font(&font) {
         return;
     }
@@ -88,7 +55,7 @@ fn snapshot_cascade_inheritance() {
 #[cfg(feature = "parse")]
 #[test]
 fn snapshot_image_with_texture() {
-    let font = test_font_path();
+    let font = font_path();
     if skip_if_no_font(&font) {
         return;
     }

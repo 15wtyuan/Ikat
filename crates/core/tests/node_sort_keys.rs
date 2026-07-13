@@ -8,31 +8,8 @@
 //! 参考 NativeHost FFI 查询口子设计：Task 2/3 读 node_sort_keys 给空 div slot
 //! 兜底 sort 信息（merge 后查不到 RenderNode.sort_key，回 scene.node_sort_keys）。
 
-use loomgui_core::parse::css::parse_css;
-use loomgui_core::parse::dom::parse_html;
-use loomgui_core::scene::node::build_scene;
-use loomgui_core::stage::Stage;
-use loomgui_core::style::cascade::resolve_styles;
-
-fn font_path() -> String {
-    format!(
-        "{}/tests/fixtures/DejaVuSans.ttf",
-        env!("CARGO_MANIFEST_DIR")
-    )
-}
-
-/// HTML+CSS → scene（parse_html + build_scene），复用 v1e_dirty 的 load 模式。
-fn load_html_css(stage: &mut Stage, html: &str, css: &str) {
-    let tree = parse_html(html).unwrap();
-    let sheet = parse_css(css).unwrap();
-    let styles = resolve_styles(&tree, &sheet);
-    stage.tweens.clear();
-    if let Some(scene) = stage.scene.as_mut() {
-        scene.scroll.clear();
-    }
-    stage.prev_node_hashes.clear();
-    stage.scene = Some(build_scene(&tree, &styles));
-}
+mod common;
+use common::*;
 
 /// 空 div slot + 有 bg 兄弟：node_sort_keys 在 merge_meshes 后仍保留两节点 DFS 序号。
 #[test]
