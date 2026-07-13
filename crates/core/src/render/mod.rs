@@ -42,6 +42,13 @@ pub(crate) const BOX_SHADOW_FLAG: u32 = 0x1000_0000;
 /// 传播 sort_key，不凭 high byte 判别。
 pub(crate) const INLINE_IMG_SYNTH_ID_BASE: u32 = 1000;
 
+/// Font-atlas image_path for a given page index. Consumed verbatim by the
+/// Unity backend's SpriteResolver. This string format is an ABI-level contract
+/// across the FFI boundary — changing it here requires changing the C# side too.
+pub(crate) fn font_atlas_path(page: usize) -> String {
+    format!("loomgui://font-atlas/p{page}")
+}
+
 /// 把 2 色线性渐变映射到 quad 4 角顶点色（顶点序 TL, TR, BR, BL）。
 ///
 /// GPU 顶点色光栅插值在 4 角间线性过渡——将 2 色 (a, b) 按方向放到对应的"起点/终点"角，
@@ -1528,7 +1535,7 @@ fn push_text_meshes(
                 uvs: vec![],
                 colors: vec![],
                 indices: vec![],
-                image_path: Some("loomgui://font-atlas/p0".into()),
+                image_path: Some(font_atlas_path(0)),
                 program: 1,
                 color_matrix: [0.0; 20],
             },
@@ -1539,7 +1546,7 @@ fn push_text_meshes(
     // 否则用真 node_id。id_to_pos 仅 register_id_map 时登记（bg quad 已登记则跳过）。
     {
         let (page0, verts0, uvs0, colors0, indices0) = &base[0];
-        let path0 = format!("loomgui://font-atlas/p{}", page0);
+        let path0 = font_atlas_path(*page0 as usize);
         if register_id_map {
             id_to_pos.insert(n.id, nodes.len());
         }
@@ -1570,7 +1577,7 @@ fn push_text_meshes(
     // 后续页 → 合成 node_id 的子 RenderNode。
     for (pi, (page, verts, uvs, colors, indices)) in base[1..].iter().enumerate() {
         let sub_id = synth_text_node_id(node_id, (pi + 1) as u32);
-        let sub_path = format!("loomgui://font-atlas/p{}", page);
+        let sub_path = font_atlas_path(*page as usize);
         nodes.push(RenderNode {
             node_id: sub_id,
             parent_id,

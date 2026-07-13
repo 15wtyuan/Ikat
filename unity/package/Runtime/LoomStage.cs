@@ -265,7 +265,7 @@ namespace LoomGUI
                     // atlas 是 Stage 级单一共享实例（所有字体字形混在同一 page），路径只以 page 为键——
                     // 不含 font_id（font_id 只作 GlyphKey 区分字形槽位，不进 path）。与 render 侧
                     // build_text_mesh 合成的 loomgui://font-atlas/p{n} 对齐。
-                    string path = $"loomgui://font-atlas/p{page}";
+                    string path = FontAtlasPath.Format(page);
                     _sprites.RegisterFontAtlasPage(path, tex);
                 }
                 finally { ArrayPool<byte>.Shared.Return(buf); }

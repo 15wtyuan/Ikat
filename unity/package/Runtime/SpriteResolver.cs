@@ -25,9 +25,18 @@ namespace LoomGUI
     ///
     /// All atlases are merged into one global sprite table at Init. Page textures are
     /// lazy-loaded via the loadPage delegate. Font atlas pages are registered separately
-    /// and take priority in GetSprite lookup.
+   /// and take priority in GetSprite lookup.
+   /// </summary>
+    /// <summary>
+    /// Font-atlas image_path construction. Must match Rust render::font_atlas_path
+    /// (image_path field in blob). Changing the format here requires changing both sides.
     /// </summary>
-    public sealed class SpriteResolver
+    public static class FontAtlasPath
+    {
+        public static string Format(int page) => $"loomgui://font-atlas/p{page}";
+    }
+
+   public sealed class SpriteResolver
     {
         // Merged sprite table: sprite_key → (atlasIdx, page, uvRect, origW, origH).
         Dictionary<string, (int atlasIdx, int page, Rect uvRect, int origW, int origH)> _sprites;
