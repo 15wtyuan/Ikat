@@ -98,6 +98,6 @@ The packer reports actionable build errors:
 
 ## Fence (supported HTML/CSS subset)
 
-LoomGUI only supports a specific subset of HTML/CSS called the "fence". The authoritative source is in the LoomGUI repository (`loomgui_core/tests/fence_contract.rs`). The loomgui-editor skill (`.claude/skills/loomgui-editor/SKILL.md`) summarizes the key fence rules.
+LoomGUI only supports a specific subset of HTML/CSS called the "fence". The authoritative source is in the LoomGUI repository (`crates/core/tests/fence_contract.rs`). The loomgui-editor skill (`.claude/skills/loomgui-editor/SKILL.md`) summarizes the key fence rules.
 
 **Critical rule**: fence-violating tags cause a parse error (build fails). Fence-violating CSS properties are silently ignored (they don't affect rendering, which means your preview may look different from the real output).

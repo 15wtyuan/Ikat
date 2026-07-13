@@ -37,14 +37,16 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item target/release/loomgui_ffi_c.dll `
-            loomgui_unity_package/Plugins/LoomGUI/loomgui_ffi_c.dll -Force
-          git add loomgui_unity_package/Plugins/LoomGUI/loomgui_ffi_c.dll
-          git add loomgui_unity_package/Plugins/LoomGUI/Bindings/LoomGUIBindings.cs
+            unity/package/Plugins/LoomGUI/loomgui_ffi_c.dll -Force
+          git add unity/package/Plugins/LoomGUI/loomgui_ffi_c.dll
+          git add unity/package/Plugins/LoomGUI/Bindings/LoomGUIBindings.cs
+      - name: sync bindings via xtask
+        run: cargo run -p xtask -- sync-bindings
 
       - uses: actions/cache@v4
         with:
-          path: loomgui_unity/Library
-          key: unity-library-win-${{ hashFiles('loomgui_unity/Packages/manifest.json', 'loomgui_unity/ProjectSettings/ProjectVersion.txt') }}
+          path: unity/showcase-unity/Library
+          key: unity-library-win-${{ hashFiles('unity/showcase-unity/Packages/manifest.json', 'unity/showcase-unity/ProjectSettings/ProjectVersion.txt') }}
           restore-keys: unity-library-win-
 
       - id: tests
@@ -52,7 +54,7 @@ jobs:
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
         with:
-          projectPath: loomgui_unity
+          projectPath: unity/showcase-unity
           unityVersion: 6000.5.0f1
           testMode: EditMode
           githubToken: ${{ secrets.GITHUB_TOKEN }}
@@ -82,14 +84,16 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item target/release/loomgui_ffi_c.dll `
-            loomgui_unity_package/Plugins/LoomGUI/loomgui_ffi_c.dll -Force
-          git add loomgui_unity_package/Plugins/LoomGUI/loomgui_ffi_c.dll
-          git add loomgui_unity_package/Plugins/LoomGUI/Bindings/LoomGUIBindings.cs
+            unity/package/Plugins/LoomGUI/loomgui_ffi_c.dll -Force
+          git add unity/package/Plugins/LoomGUI/loomgui_ffi_c.dll
+          git add unity/package/Plugins/LoomGUI/Bindings/LoomGUIBindings.cs
+      - name: sync bindings via xtask
+        run: cargo run -p xtask -- sync-bindings
 
       - uses: actions/cache@v4
         with:
-          path: loomgui_unity/Library
-          key: unity-library-win-play-${{ hashFiles('loomgui_unity/Packages/manifest.json', 'loomgui_unity/ProjectSettings/ProjectVersion.txt') }}
+          path: unity/showcase-unity/Library
+          key: unity-library-win-play-${{ hashFiles('unity/showcase-unity/Packages/manifest.json', 'unity/showcase-unity/ProjectSettings/ProjectVersion.txt') }}
           restore-keys: unity-library-win-play-
 
       - id: tests
@@ -97,7 +101,7 @@ jobs:
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
         with:
-          projectPath: loomgui_unity
+          projectPath: unity/showcase-unity
           unityVersion: 6000.5.0f1
           testMode: PlayMode
           githubToken: ${{ secrets.GITHUB_TOKEN }}

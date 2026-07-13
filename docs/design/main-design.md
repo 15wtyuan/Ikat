@@ -63,7 +63,7 @@
 
 ## 3. HTML/CSS 围栏
 
-> LoomGUI 只支持 HTML/CSS 的一个明确子集，称"围栏"。**围栏属性权威清单 = `fence.md`**（其真相源是可执行测试 `loomgui_core/tests/fence_contract.rs`，不一致时测试赢）。本节只写设计哲学与原则，不重复属性表——重复维护即漂移根源。改围栏属性改 fence.md + 测试，不改本节。
+> LoomGUI 只支持 HTML/CSS 的一个明确子集，称"围栏"。**围栏属性权威清单 = `fence.md`**（其真相源是可执行测试 `crates/core/tests/fence_contract.rs`，不一致时测试赢）。本节只写设计哲学与原则，不重复属性表——重复维护即漂移根源。改围栏属性改 fence.md + 测试，不改本节。
 
 ### 3.1 设计哲学：标准标签 + AI 可预测性
 
@@ -98,7 +98,7 @@
 ### 3.4 围栏治理机制（防漂移）
 
 围栏是反复漂移的高发区（实现走得前、文档没跟），靠可执行契约兜底：
-- **单一真相源 = `loomgui_core/tests/fence_contract.rs`**：三类断言——A 元素围栏（白名单接受 / 围栏外报错）、B 支持属性（`apply_decl` 返 true）、C 围栏外静默忽略（返 false + 字段不变）。fence.md 是人类可读副本，不一致时测试赢。
+- **单一真相源 = `crates/core/tests/fence_contract.rs`**：三类断言——A 元素围栏（白名单接受 / 围栏外报错）、B 支持属性（`apply_decl` 返 true）、C 围栏外静默忽略（返 false + 字段不变）。fence.md 是人类可读副本，不一致时测试赢。
 - **防漂移门**：`cargo test -p loomgui_core fence_contract`——build .dll 前、改 `apply_decl`/`FENCE_TAGS`/selector 后必跑。
 - **核实方法论**：改围栏前查依赖默认值（taffy `Style::DEFAULT`）+ 补测试，不靠 grep 推断。
 
@@ -462,7 +462,7 @@ stage.is_pointer_on_ui() -> bool   // = 命中目标非空且非根
 
 ## 11. 资源 / 包系统
 
-> **章节状态**：§11.3（图集）已对照 v1.8+ 架构重写（Rust 自绘 atlas.png+atlas.json）。§11.2（包格式）/§11.4（引用计数）/§11.5（加载实例化）仍是早期设计草稿，与当前实现（pkg.bin 多组件格式 + `load_package` 进资源池 + `instantiate` 克隆子树，无 `loom://` URL / TextureView / create_object 三层）有差距，待核实重写。以代码（`loomgui_core/src/asset/`、`stage.rs`）+ `docs/superpowers/specs/2026-07-02-v1.4a-package-loading-design.md` 为准。
+> **章节状态**：§11.3（图集）已对照 v1.8+ 架构重写（Rust 自绘 atlas.png+atlas.json）。§11.2（包格式）/§11.4（引用计数）/§11.5（加载实例化）仍是早期设计草稿，与当前实现（pkg.bin 多组件格式 + `load_package` 进资源池 + `instantiate` 克隆子树，无 `loom://` URL / TextureView / create_object 三层）有差距，待核实重写。以代码（`crates/core/src/asset/`、`stage.rs`）+ `docs/superpowers/specs/2026-07-02-v1.4a-package-loading-design.md` 为准。
 
 ### 11.1 双格式
 - **编辑期/源**：HTML（结构）+ CSS（样式）+ 资源清单。

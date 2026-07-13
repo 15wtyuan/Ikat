@@ -19,8 +19,8 @@ Cargo.lock
 *.apk
 *.aab
 # 白名单：LoomUI 资源目录下入库的 unitypackage（如 Kenney 粒子包素材）需要追踪
-!loomgui_unity/Assets/LoomUI/res/**/*.unitypackage
-!loomgui_unity/Assets/LoomUI/res/**/*.unitypackage.meta
+!unity/showcase-unity/Assets/LoomUI/res/**/*.unitypackage
+!unity/showcase-unity/Assets/LoomUI/res/**/*.unitypackage.meta
 *.unityproj
 *.sln
 *.slnx

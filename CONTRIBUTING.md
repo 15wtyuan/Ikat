@@ -10,7 +10,7 @@
   cargo test -p loomgui_core fence_contract   # 围栏契约门
   cargo build -p loomgui_ffi_c --release      # 编 .dll
   ```
-- **Unity 6.5（URP）**：打开 `loomgui_unity/`，PlayMode 从 `StreamingAssets/` 加载 `.pkg.bin`。
+- **Unity 6.5（URP）**：打开 `unity/showcase-unity/`，PlayMode 从 `StreamingAssets/` 加载 `.pkg.bin`。
 
 详见 [CLAUDE.md](CLAUDE.md) 的「构建/测试命令」「Rust → Unity .dll 闭环」。
 
@@ -47,7 +47,7 @@ test:        测试
 ## 设计文档
 
 - 设计契约：[`docs/design/main-design.md`](docs/design/main-design.md)
-- 围栏权威：[`docs/design/fence.md`](docs/design/fence.md)（不一致时 [`fence_contract.rs`](loomgui_core/tests/fence_contract.rs) 测试赢）
+- 围栏权威：[`docs/design/fence.md`](docs/design/fence.md)（不一致时 [`fence_contract.rs`](crates/core/tests/fence_contract.rs) 测试赢）
 - 踩坑库：[`docs/pitfalls.md`](docs/pitfalls.md)（开工前查）
 - 路线图：[`docs/roadmap/roadmap.md`](docs/roadmap/roadmap.md)
 

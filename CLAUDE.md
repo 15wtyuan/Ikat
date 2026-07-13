@@ -53,22 +53,23 @@ cargo test -p loomgui_core --test snapshot -- <name>
 
 ```bash
 cargo build -p loomgui_ffi_c --release
-cp target/release/loomgui_ffi_c.dll loomgui_unity_package/Plugins/LoomGUI/loomgui_ffi_c.dll
+cp target/release/loomgui_ffi_c.dll unity/package/Plugins/LoomGUI/loomgui_ffi_c.dll
 ```
 - **拷贝时 Unity 必须关着**（它锁 .dll）。
-- **stale .dll 诊断**：PlayMode 全不渲 + Console 干净 → `md5sum target/release/loomgui_ffi_c.dll loomgui_unity_package/Plugins/LoomGUI/loomgui_ffi_c.dll`；不等 = stale（Rust 改了 blob/ABI，.dll 没换）。
-- 入库的 `.dll` + csbindgen 生成的 `LoomGUIBindings.cs` 在 `loomgui_unity_package/Plugins/LoomGUI/`（`**/Plugins/**/*.dll` 和 bindings .cs 是 gitignore 白名单例外；其余 native 产物一律忽略）。
+- **stale .dll 诊断**：PlayMode 全不渲 + Console 干净 → `md5sum target/release/loomgui_ffi_c.dll unity/package/Plugins/LoomGUI/loomgui_ffi_c.dll`；不等 = stale（Rust 改了 blob/ABI，.dll 没换）。
+- 入库的 `.dll` + csbindgen 生成的 `LoomGUIBindings.cs` 在 `unity/package/Plugins/LoomGUI/`（`**/Plugins/**/*.dll` 和 bindings .cs 是 gitignore 白名单例外；其余 native 产物一律忽略）。
+- **同步 C# 绑定**：build.rs 不再自动写 Unity 绑定。构建后运行 `cargo run -p xtask -- sync-bindings`，将 csbindgen 生成的 `LoomGUIBindings.cs` 同步到 `unity/package/Plugins/LoomGUI/Bindings/`。
 
 **图集自绘**：v1.8 起图集由打包器自绘（`loom-pkg build` 或 GUI 产 `atlas/*.png`+`atlas/*.atlas.json`），Unity 不再打 `SpriteAtlas`。运行时尺寸由 `atlas.json` + FFI `set_image_sizes` 注入，不再靠 Unity 导入管线。
 
 ### GUI 打包器 exe 闭环（loomgui_gui，Tauri 2）
 
-GUI 是 Tauri 2 桌面 app，产物 `loomgui_unity_package/Editor/Tools/loomgui_gui.exe`（Unity `LoomGUI > Open Packer` 拉起）。任何 GUI 改动（Rust `src/` 或前端 `dist/`）后必须重出 exe + 拷贝 + 入库：
+GUI 是 Tauri 2 桌面 app，产物 `unity/package/Editor/Tools/loomgui_gui.exe`（Unity `LoomGUI > Open Packer` 拉起）。任何 GUI 改动（Rust `src/` 或前端 `dist/`）后必须重出 exe + 拷贝 + 入库：
 
 ```bash
 npm install -g @tauri-apps/cli                 # 一次性装 tauri-cli（prebuilt，比 cargo install 快得多）
-(cd loomgui_gui && tauri build --no-bundle)    # 出 exe（必须 tauri CLI！--no-bundle 跳 NSIS/MSI installer）
-cp target/release/loomgui_gui.exe loomgui_unity_package/Editor/Tools/loomgui_gui.exe
+(cd crates/packer/gui/src-tauri && tauri build --no-bundle)    # 出 exe（必须 tauri CLI！--no-bundle 跳 NSIS/MSI installer）
+cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 ```
 - **拷贝时 Unity / 旧 GUI 进程必须关着**（锁 exe，报 `Device or resource busy`）。
 - 入库 exe + `.meta`（`Editor/Tools/` 下，gitignore 白名单例外，同 .dll）。
@@ -110,7 +111,7 @@ HTML/CSS DSL → 打包器（构建期；复用核心 parse/style）
 
 LoomGUI 只支持 HTML/CSS 的**明确子集**，称"围栏"。这是项目漂移高发区。
 
-- **权威真相源 = `loomgui_core/tests/fence_contract.rs`**（可执行契约）。`docs/design/fence.md` 是人类可读副本；**不一致时测试赢**。围栏规则通过独立工作区（standalone workspace directory + `loom.workspace.json`）注入，打包器 `loom-pkg build` 校验。
+- **权威真相源 = `crates/core/tests/fence_contract.rs`**（可执行契约）。`docs/design/fence.md` 是人类可读副本；**不一致时测试赢**。围栏规则通过独立工作区（standalone workspace directory + `loom.workspace.json`）注入，打包器 `loom-pkg build` 校验。
 - **改围栏 = 改 `fence_contract.rs` 测试 + `fence.md`**，不改 `main-design.md` §3（那节只写哲学，避免漂移）。
 - **围栏门**：`cargo test -p loomgui_core --test fence_contract`——build .dll 前跑、改 `apply_decl`/`FENCE_TAGS`/选择器后跑。
 - 两类围栏外行为（均**测试锁定**，别靠 grep 推断）：围栏外标签 + 行内混排 → **编译期报错**（parse 失败、打包器拒收）。围栏外 CSS 属性（如 `clip-path`、`cursor`）→ **静默忽略**（`apply_decl` 返 `false`）。

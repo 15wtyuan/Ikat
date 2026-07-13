@@ -16,7 +16,7 @@
 
   <ItemGroup>
 
-    <Compile Include="..\..\loomgui_unity_package\Runtime\FrameBlob.cs" Link="Src\FrameBlob.cs" />
+    <Compile Include="..\..\unity\package\Runtime\FrameBlob.cs" Link="Src\FrameBlob.cs" />
   </ItemGroup>
 
 </Project>

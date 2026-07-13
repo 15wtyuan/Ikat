@@ -39,7 +39,7 @@
 
 ### 1.2 v1 围栏冻结子集
 
-> **权威清单 = `docs/design/fence.md`**（真相源 `loomgui_core/tests/fence_contract.rs`）。本节只标 v1 冻结口径，不重复属性表。
+> **权威清单 = `docs/design/fence.md`**（真相源 `crates/core/tests/fence_contract.rs`）。本节只标 v1 冻结口径，不重复属性表。
 
 - **元素**：`div`(Container) / `span`+裸文本(Text) / `img`(Image) / `button`(Button)。围栏外标签报错（不降级）。**v1.x 设计层也不用 `<l-list>`/`<l-rich>`**——虚拟列表/富文本由代码层做，围栏不暴露，AI 不知道就不会写（design §4.1）。
 - **CSS**：布局（flex 全家）+ 视觉（含 v1.x 已实现 `background-image`/`background-size`/`border-radius`/`filter`/`border-image-slice`）+ `transform`/`overflow(+x/y)`/`pointer-events`。值约束 + 围栏外静默忽略项见 fence.md §2。
@@ -169,7 +169,7 @@ LoomGUI 是 HTML/CSS 的**子集**，浏览器/open-design 这类外部编辑器
 
 **预览**：Unity PlayMode 加载 `.pkg.bin` 做真实渲染验收。日常设计预览用外部编辑器（open-design/Chromium，见 §1.3）——LoomGUI 是 HTML/CSS 子集，外部管线天然能渲染，不自建 WASM 预览。
 
-**围栏验证**（单一真相源）：`loomgui_core/tests/fence_contract.rs` 可执行围栏契约。`cargo test -p loomgui_core fence_contract` 是防漂移门。
+**围栏验证**（单一真相源）：`crates/core/tests/fence_contract.rs` 可执行围栏契约。`cargo test -p loomgui_core fence_contract` 是防漂移门。
 
 ---
 
@@ -206,7 +206,7 @@ v1d.3 已做 **NativeHost-lite**（div 占位 + 后端 `BindNativeHost` 跟随 w
 
 ### 5.6 包格式：v1.x 演进项
 
-集中式迁移器链（多版本累积后）；`nextPos` 长度前缀 forward-compat（v2 加字段）；branches（多语言）/highResolution（1x/2x/3x）；scaleLevel（MatchWidth/MatchHeight）。formatVersion 当前值见 `loomgui_core/src/asset/mod.rs` 的 `PKG_FORMAT_VERSION`。
+集中式迁移器链（多版本累积后）；`nextPos` 长度前缀 forward-compat（v2 加字段）；branches（多语言）/highResolution（1x/2x/3x）；scaleLevel（MatchWidth/MatchHeight）。formatVersion 当前值见 `crates/core/src/asset/mod.rs` 的 `PKG_FORMAT_VERSION`。
 
 ### 5.7 契约版本化（待第二个契约版本时定）
 

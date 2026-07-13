@@ -46,9 +46,9 @@ cargo build -p loomgui_pkg
 cargo build -p loomgui_ffi_c
 ```
 
-Unity 后端：用 Unity 6.5 打开 `loomgui_unity/`，PlayMode 加载 `.pkg.bin` 渲染。
+Unity 后端：用 Unity 6.5 打开 `unity/showcase-unity/`，PlayMode 加载 `.pkg.bin` 渲染。
 
-示例见 `loomgui_unity/Assets/LoomUI/showcase/`（showcase 打包源）。
+示例见 `unity/showcase-unity/Assets/LoomUI/showcase/`（showcase 打包源）。
 
 ## 文档
 
@@ -59,11 +59,11 @@ Unity 后端：用 Unity 6.5 打开 `loomgui_unity/`，PlayMode 加载 `.pkg.bin
 
 | 目录 | 职责 |
 |---|---|
-| `loomgui_core/` | Rust 核心（解析/样式/布局/场景图/渲染状态/事件/动画/文本，引擎无关纯库） |
-| `loomgui_pkg/` | 打包器 CLI（HTML+CSS+资源 → `.pkg.bin`，复用 core 的 parse 层） |
-| `loomgui_ffi_c/` | C ABI 导出（csbindgen，Rust ↔ C# P/Invoke） |
-| `loomgui_unity_package/` | Unity UPM 包 `com.loomgui.unity`（Runtime/Editor/Tests/Shaders + Plugins/.dll + bindings） |
-| `loomgui_unity/` | Unity 6.5 URP demo 工程（showcase + 设计区 + res 字体，`file:../` 引用插件包） |
+| `crates/core/` | Rust 核心（解析/样式/布局/场景图/渲染状态/事件/动画/文本，引擎无关纯库） |
+| `crates/packer/pkg/` | 打包器 CLI（HTML+CSS+资源 → `.pkg.bin`，复用 core 的 parse 层） |
+| `crates/ffi/` | C ABI 导出（csbindgen，Rust ↔ C# P/Invoke） |
+| `unity/package/` | Unity UPM 包 `com.loomgui.unity`（Runtime/Editor/Tests/Shaders + Plugins/.dll + bindings） |
+| `unity/showcase-unity/` | Unity 6.5 URP demo 工程（showcase + 设计区 + res 字体，`file:../` 引用插件包） |
 | `docs/` | 设计 / 路线 / 文档 |
 
 核心可编译为 WASM（给编辑器）和 C ABI（给引擎），同一份代码。参考实现：FairyGUI-unity（`temp/FairyGUI-unity/`，渲染/对象模型/动画的原理参考）。

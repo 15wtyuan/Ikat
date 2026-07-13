@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "output_dir": "../loomgui_unity/Assets/Bundles",
+  "output_dir": "../../unity/showcase-unity/Assets/Bundles",
   "packages": [
     {
       "name": "showcase",

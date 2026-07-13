@@ -38,7 +38,7 @@ Generate fence-compliant game UI (HTML+CSS) for LoomGUI, validated and packed vi
 
 ## Fence rules (hard constraints)
 
-These are the key rules. The authoritative source is `loomgui_core/tests/fence_contract.rs` in the LoomGUI repository.
+These are the key rules. The authoritative source is `crates/core/tests/fence_contract.rs` in the LoomGUI repository.
 
 ### Element whitelist
 Only: `div`, `span` (+ raw text), `img`, `button`. Other tags (video, input, p, ul, etc.) cause a **parse error** — the build fails.

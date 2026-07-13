@@ -30,11 +30,11 @@
 ### 1.1 当前文本管线真相（file:line）
 
 核心侧**只做测量+布局，不产任何像素/UV/几何**：
-- `measure_text`（`loomgui_core/src/text/layout.rs:171-377`）：`ttf-parser 0.20` 取度量 + `unicode-linebreak` 断行（CJK 逐字），产 `TextLayout`（`layout.rs:52-58`）= lines[→runs[→glyphs{glyph_id,codepoint,x,y,bearing}]]。字形坐标是绝对 pen 坐标（已累加 advance + align），后端零累加。
+- `measure_text`（`crates/core/src/text/layout.rs:171-377`）：`ttf-parser 0.20` 取度量 + `unicode-linebreak` 断行（CJK 逐字），产 `TextLayout`（`layout.rs:52-58`）= lines[→runs[→glyphs{glyph_id,codepoint,x,y,bearing}]]。字形坐标是绝对 pen 坐标（已累加 advance + align），后端零累加。
 - 进程级单字体、无 fallback（`layout.rs:60-65,100-109`）。依赖仅 `ttf-parser=0.20` + `unicode-linebreak=0.1`（`Cargo.toml:10-11`）。打包器完全不碰字体。
-- FFI blob 每字形只序列化 3 字段 `{codepoint,x,pen_y}`（`loomgui_ffi_c/src/blob.rs:209-214`）——**没有 UV、没有几何**。Text 合批时永远独立不合并（`render/merge.rs:5,41`）。
+- FFI blob 每字形只序列化 3 字段 `{codepoint,x,pen_y}`（`crates/ffi/src/blob.rs:209-214`）——**没有 UV、没有几何**。Text 合批时永远独立不合并（`render/merge.rs:5,41`）。
 
-**Unity 后端才是光栅化器**（`loomgui_unity_package/Runtime/TextRasterizer.cs`）：
+**Unity 后端才是光栅化器**（`unity/package/Runtime/TextRasterizer.cs`）：
 - `font.RequestCharactersInTexture`（`:43`）填 Unity 动态字体 atlas，`GetCharacterInfo`（`:55`）取像素 box + UV。**UV 100% 来自 Unity，Rust 不产 UV**。
 - atlas rebuild 应对：`Font.textureRebuilt` 事件 → `_fontVersion++`（`LoomStage.cs:118-123`）→ `MirrorPool.Sync` 强制所有 text 重光栅（`MirrorPool.cs:91-94`），且处理"Sync 中途 rebuild"（`:158-162`）——这是坑 113 的修复补丁。
 

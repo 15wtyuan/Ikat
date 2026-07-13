@@ -1,6 +1,6 @@
 # LoomGUI 围栏（Fence）权威清单
 
-> **单一真相源**：`loomgui_core/tests/fence_contract.rs`（可执行围栏契约测试）。本文档为人类可读副本，**以测试为准**。文档与测试不一致时，测试赢。
+> **单一真相源**：`crates/core/tests/fence_contract.rs`（可执行围栏契约测试）。本文档为人类可读副本，**以测试为准**。文档与测试不一致时，测试赢。
 >
 > **维护规则**：见 §4。改代码加/改围栏属性 → 必须同步改 `fence_contract.rs` 测试 → 同步本文档副本。CI/本机 build 前跑 `cargo test -p loomgui_core fence_contract` 是围栏契约的门。
 >
@@ -188,7 +188,7 @@
 
 ### 4.1 单一真相源
 
-`loomgui_core/tests/fence_contract.rs` 是围栏契约的可执行真相源。它显式枚举：
+`crates/core/tests/fence_contract.rs` 是围栏契约的可执行真相源。它显式枚举：
 - **支持项**：写进去断言生效（映射出非默认值 / 期望布局结果）。
 - **围栏外项**：写进去断言不改变布局 / 被忽略（如 `display:grid` 落 Flex、`float` 无效）。
 
