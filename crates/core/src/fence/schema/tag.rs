@@ -1,1 +1,7 @@
-// R1 implementation — filled in by subsequent tasks.
+#![cfg(feature = "parse")]
+
+/// Forward declaration — full enum body defined in Task 4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticKind {
+    Placeholder,
+}
