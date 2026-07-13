@@ -1,13 +1,13 @@
 # LoomGUI 文档
 
-跨引擎游戏 UI 框架。Rust 核心 + 多引擎后端（Unity 首发），HTML/CSS 子集 DSL，taffy flexbox，自绘渲染。
+跨引擎游戏 UI 框架。Rust 核心 + 多引擎后端（Unity 首发），HTML/CSS 子集 DSL，自绘渲染。
 
 ## 文档结构
 
 | 目录 | 内容 | 何时读 |
 |---|---|---|
 | [`design/`](design/) | [主设计](design/main-design.md)（项目设计真相源）+ [围栏权威](design/fence.md) | 理解"设计成什么样、怎么实现" |
-| [`roadmap/`](roadmap/) | [路线图](roadmap/roadmap.md)——v1 已交付 + v1.x/v other/v2 路线 + 机制草稿 | 理解"做了什么、接下来做什么、defer 了什么" |
+| [`roadmap/`](roadmap/) | [路线图](roadmap/roadmap.md)——路线 + 机制草稿 | 理解"做了什么、接下来做什么、defer 了什么" |
 | [`pitfalls.md`](pitfalls.md) | 踩坑全库 + 依赖 API 适配 | 开工前查"具体怎么干 + 坑在哪" |
 
 ## 入口
