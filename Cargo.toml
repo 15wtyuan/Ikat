@@ -4,5 +4,6 @@ members = [
     "crates/ffi",
     "crates/packer/pkg",
     "crates/packer/gui/src-tauri",
+    "crates/xtask",
 ]
 resolver = "2"
