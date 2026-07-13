@@ -8,7 +8,7 @@ fn stage_new_with_dejavu(w: f32, h: f32) -> *mut StageHandle {
     assert!(!h.is_null(), "stage_new must succeed");
     let font_bytes = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
+        "/../core/tests/fixtures/DejaVuSans.ttf"
     ))
     .expect("DejaVuSans.ttf fixture must exist");
     let family = b"DejaVu";

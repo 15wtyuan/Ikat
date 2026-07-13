@@ -11,17 +11,17 @@ use loomgui_pkg::atlas::AtlasManifest;
 fn main() {
     let manifest = env!("CARGO_MANIFEST_DIR"); // loomgui_pkg
     let pkg_path = format!(
-        "{}/../loomgui_unity/Assets/Bundles/ui/showcase.pkg.bin",
+        "{}/../../../loomgui_unity/Assets/Bundles/ui/showcase.pkg.bin",
         manifest
     );
     let atlas_path = format!(
-        "{}/../loomgui_unity/Assets/Bundles/atlas/icons.atlas.json",
+        "{}/../../../loomgui_unity/Assets/Bundles/atlas/icons.atlas.json",
         manifest
     );
 
     let pkg_bytes = std::fs::read(&pkg_path).expect("read showcase.pkg.bin");
     let atlas_json = std::fs::read_to_string(&atlas_path).expect("read icons.atlas.json");
-    let font_path = format!("{}/../showcase_project/res/fonts/LXGWWenKai.ttf", manifest);
+    let font_path = format!("{}/../../../showcase_project/res/fonts/LXGWWenKai.ttf", manifest);
 
     let mut stage = Stage::new((1080.0, 1920.0)).expect("Stage::new");
     stage

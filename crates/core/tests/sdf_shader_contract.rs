@@ -26,7 +26,7 @@ fn parse_gradient_scale_default(shader_src: &str) -> Option<i64> {
 #[test]
 fn shader_gradient_scale_matches_spread_plus_one() {
     let shader_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
+        .join("../..")
         .join("loomgui_unity_package")
         .join("Shaders")
         .join("LoomGUI-Unlit.shader");

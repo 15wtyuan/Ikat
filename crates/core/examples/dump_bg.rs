@@ -8,7 +8,7 @@ fn main() {
     let font = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
     let pkg_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin"
+        "/../../loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin"
     );
     let pkg = std::fs::read(pkg_path).expect("read pkg");
     let mut s = Stage::new((1080.0, 1920.0)).expect("Stage::new");

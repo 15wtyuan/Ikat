@@ -32,7 +32,7 @@ fn stage_new_with_dejavu(w: f32, h: f32) -> *mut StageHandle {
     assert!(!h.is_null(), "stage_new must succeed");
     let font_bytes = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../loomgui_core/tests/fixtures/DejaVuSans.ttf"
+        "/../core/tests/fixtures/DejaVuSans.ttf"
     ))
     .expect("DejaVuSans.ttf fixture must exist");
     let family = b"DejaVu";
@@ -960,7 +960,7 @@ fn dump_scene_returns_json_array() {
 #[test]
 fn set_wheel_input_round_trip() {
     let fp = format!(
-        "{}/../loomgui_core/tests/fixtures/DejaVuSans.ttf",
+        "{}/../core/tests/fixtures/DejaVuSans.ttf",
         env!("CARGO_MANIFEST_DIR")
     );
     let mut stage = Stage::new((200.0, 100.0)).unwrap();
@@ -980,7 +980,7 @@ fn set_wheel_input_round_trip() {
 /// helper：构造带 overflow:scroll 容器的 Stage（无子；手动填 layout_rect + scroll state）。
 fn build_scroll_stage() -> Stage {
     let fp = format!(
-        "{}/../loomgui_core/tests/fixtures/DejaVuSans.ttf",
+        "{}/../core/tests/fixtures/DejaVuSans.ttf",
         env!("CARGO_MANIFEST_DIR")
     );
     let mut stage = Stage::new((200.0, 100.0)).unwrap();
@@ -1058,7 +1058,7 @@ fn set_scroll_pos_animated_starts_tween() {
 #[test]
 fn set_scroll_pos_non_container_no_op() {
     let fp = format!(
-        "{}/../loomgui_core/tests/fixtures/DejaVuSans.ttf",
+        "{}/../core/tests/fixtures/DejaVuSans.ttf",
         env!("CARGO_MANIFEST_DIR")
     );
     let mut stage = Stage::new((200.0, 100.0)).unwrap();
@@ -1239,7 +1239,7 @@ fn set_fallback_families_ffi_returns_zero() {
     // 注册 wqy 作回退字体（非默认）。
     let wqy_bytes = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../loomgui_core/tests/fixtures/wqy-microhei.ttc"
+        "/../core/tests/fixtures/wqy-microhei.ttc"
     ))
     .expect("wqy-microhei.ttc fixture must exist");
     let wqy = b"wqy-microhei";

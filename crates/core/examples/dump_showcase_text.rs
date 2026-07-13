@@ -17,9 +17,9 @@ use loomgui_core::style::cascade::resolve_styles;
 
 fn main() {
     let manifest = env!("CARGO_MANIFEST_DIR");
-    let html_path = format!("{}/../showcase_project/showcase/home.html", manifest);
+    let html_path = format!("{}/../../showcase_project/showcase/home.html", manifest);
     let base_css_path = format!(
-        "{}/../showcase_project/showcase/preview/preview-base.css",
+        "{}/../../showcase_project/showcase/preview/preview-base.css",
         manifest
     );
     let font_path = format!("{}/tests/fixtures/LXGWWenKai.ttf", manifest);

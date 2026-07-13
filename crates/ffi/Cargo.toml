@@ -11,7 +11,7 @@ default = ["parse"]
 parse = ["loomgui_core/parse"]
 
 [dependencies]
-loomgui_core = { path = "../loomgui_core", default-features = false }
+loomgui_core = { path = "../core", default-features = false }
 
 [build-dependencies]
 csbindgen = "1"

@@ -19,14 +19,14 @@ fn box_of(verts: &[[f32; 2]]) -> (f32, f32, f32, f32) {
 fn main() {
     let manifest = env!("CARGO_MANIFEST_DIR");
     let pkg_path = format!(
-        "{}/../loomgui_unity/Assets/Bundles/ui/showcase.pkg.bin",
+        "{}/../../../loomgui_unity/Assets/Bundles/ui/showcase.pkg.bin",
         manifest
     );
     let atlas_path = format!(
-        "{}/../loomgui_unity/Assets/Bundles/atlas/icons.atlas.json",
+        "{}/../../../loomgui_unity/Assets/Bundles/atlas/icons.atlas.json",
         manifest
     );
-    let font_path = format!("{}/../showcase_project/res/fonts/LXGWWenKai.ttf", manifest);
+    let font_path = format!("{}/../../../showcase_project/res/fonts/LXGWWenKai.ttf", manifest);
 
     let pkg_bytes = std::fs::read(&pkg_path).expect("read showcase.pkg.bin");
     let atlas_json = std::fs::read_to_string(&atlas_path).expect("read icons.atlas.json");
