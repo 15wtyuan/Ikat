@@ -36,24 +36,33 @@ jobs:
       - name: clippy (-D warnings)
         # 历史 warning 已清零（advisory 收紧为严门禁）。可辩护的测试/FFI 模式 lint 在各 crate
         # root 用 #![allow] 显式放行并注明理由；其余真错的已修。
-        run: cargo clippy --all-targets -- -D warnings
+        # loomgui_gui (Tauri 2) 在 Linux 经 pkg-config 拉 webkit2gtk/glib 系统库；它是
+        # Windows-only 交付物（出 exe 供 Unity），Linux 不构建——clippy 门排除之（Windows 走
+        # WebView2 无系统库依赖，test matrix 的 windows 腿仍全量编译覆盖）。
+        run: cargo clippy --all-targets --workspace --exclude loomgui_gui -- -D warnings
 
   test:
     name: test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          # loomgui_gui (Tauri 2) 在 Linux 需 webkit2gtk/glib 系统库（pkg-config），是 Windows-only
+          # 交付物，Linux CI 不构建。Windows 用 WebView2 无系统库依赖，保留全 workspace 编译覆盖。
+          - os: ubuntu-latest
+            cargo-exclude: '--exclude loomgui_gui'
+          - os: windows-latest
+            cargo-exclude: ''
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: cargo test --workspace
-        run: cargo test --workspace
+        run: cargo test --workspace ${{ matrix.cargo-exclude }}
       - name: feature-gate check (parse feature off)
         # 不带 parse feature（scraper/cssparser）仍须全量编译——验证运行时配置不破。
-        run: cargo build --workspace --no-default-features --all-targets
+        run: cargo build --workspace --no-default-features --all-targets ${{ matrix.cargo-exclude }}
 
   dll-artifact:
     name: Windows .dll artifact
@@ -70,13 +79,13 @@ jobs:
           name: loomgui_ffi_c-windows-x64
           path: target/release/loomgui_ffi_c.dll
           retention-days: 7
-      - name: build release exe (loomgui_pkg)
+      - name: build release exe (loomgui_pkg, bin=loom-pkg)
         run: cargo build -p loomgui_pkg --release
-      - name: upload loomgui_pkg.exe
+      - name: upload loom-pkg.exe
         uses: actions/upload-artifact@v4
         with:
-          name: loomgui_pkg-exe-${{ github.sha }}
-          path: target/release/loomgui_pkg.exe
+          name: loom-pkg-exe-${{ github.sha }}
+          path: target/release/loom-pkg.exe
           retention-days: 7
 
   dotnet-test:
