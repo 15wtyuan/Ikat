@@ -1,1 +1,400 @@
-// R1 implementation — filled in by subsequent tasks.
+#![cfg(feature = "parse")]
+
+use crate::fence::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
+use crate::fence::ir::{IrAttribute, IrElement, IrNodeId, IrTree, Span};
+use crate::fence::schema::tag::{find_tag, is_shell_tag};
+use html5gum::emitters::callback::{Callback, CallbackEmitter, CallbackEvent};
+use html5gum::{Span as GumSpan, Tokenizer};
+
+/// Token produced by our html5gum callback -- consumed by the tree builder.
+pub enum IrToken {
+    StartTag {
+        name: String,
+        attributes: Vec<IrAttribute>,
+        self_closing: bool,
+        span: Span,
+    },
+    EndTag {
+        name: String,
+        span: Span,
+    },
+    String {
+        text: String,
+        span: Span,
+    },
+    Comment {
+        text: String,
+        span: Span,
+    },
+    Error {
+        message: String,
+        span: Span,
+    },
+}
+
+// == html5gum callback ==
+
+struct PendingTag {
+    name: String,
+    attributes: Vec<IrAttribute>,
+    start_span: Span,
+}
+
+#[derive(Default)]
+struct IrCallback {
+    pending_tag: Option<PendingTag>,
+    current_attr: Option<(String, String, usize)>,
+}
+
+impl Callback<IrToken, usize> for IrCallback {
+    fn handle_event(&mut self, event: CallbackEvent<'_>, span: GumSpan<usize>) -> Option<IrToken> {
+        let s = Span {
+            start: span.start,
+            end: span.end,
+        };
+        match event {
+            CallbackEvent::OpenStartTag { name } => {
+                self.pending_tag = Some(PendingTag {
+                    name: String::from_utf8_lossy(name).into_owned(),
+                    attributes: Vec::new(),
+                    start_span: s,
+                });
+                None
+            }
+            CallbackEvent::AttributeName { name } => {
+                // Flush the previous attribute into the pending tag
+                if let Some((pname, pval, pstart)) = self.current_attr.take() {
+                    if let Some(tag) = &mut self.pending_tag {
+                        tag.attributes.push(IrAttribute {
+                            name: pname,
+                            value: pval,
+                            span: Span {
+                                start: pstart,
+                                end: span.start,
+                            },
+                        });
+                    }
+                }
+                self.current_attr = Some((
+                    String::from_utf8_lossy(name).into_owned(),
+                    String::new(),
+                    span.start,
+                ));
+                None
+            }
+            CallbackEvent::AttributeValue { value } => {
+                if let Some((_, val, _)) = &mut self.current_attr {
+                    *val = String::from_utf8_lossy(value).into_owned();
+                }
+                None
+            }
+            CallbackEvent::CloseStartTag { self_closing } => {
+                if let Some((name, value, name_start)) = self.current_attr.take() {
+                    if let Some(tag) = &mut self.pending_tag {
+                        tag.attributes.push(IrAttribute {
+                            name,
+                            value,
+                            span: Span {
+                                start: name_start,
+                                end: span.end,
+                            },
+                        });
+                    }
+                }
+                let mut tag = self.pending_tag.take()?;
+                tag.name.make_ascii_lowercase();
+                Some(IrToken::StartTag {
+                    name: tag.name,
+                    attributes: tag.attributes,
+                    self_closing,
+                    span: Span {
+                        start: tag.start_span.start,
+                        end: span.end,
+                    },
+                })
+            }
+            CallbackEvent::EndTag { name } => {
+                let mut name = String::from_utf8_lossy(name).into_owned();
+                name.make_ascii_lowercase();
+                Some(IrToken::EndTag { name, span: s })
+            }
+            CallbackEvent::String { value } => Some(IrToken::String {
+                text: String::from_utf8_lossy(value).into_owned(),
+                span: s,
+            }),
+            CallbackEvent::Comment { value } => Some(IrToken::Comment {
+                text: String::from_utf8_lossy(value).into_owned(),
+                span: s,
+            }),
+            CallbackEvent::Doctype { .. } => None,
+            CallbackEvent::Error(error) => Some(IrToken::Error {
+                message: error.as_str().to_string(),
+                span: s,
+            }),
+        }
+    }
+}
+
+/// Tokenize HTML using html5gum with our custom callback.
+pub fn tokenize(html: &str) -> Vec<IrToken> {
+    let mut emitter = CallbackEmitter::new(IrCallback::default());
+    emitter.naively_switch_states(true);
+    Tokenizer::new_with_emitter(html, emitter)
+        .flatten()
+        .collect()
+}
+
+// == Tree builder ==
+
+struct TreeBuilder {
+    tree: IrTree,
+    stack: Vec<IrNodeId>,
+    diagnostics: Vec<Diagnostic>,
+    line_map: LineMap,
+    file: String,
+    in_body: bool,
+    in_head: bool,
+}
+
+impl TreeBuilder {
+    fn new(html: &str, file: String) -> Self {
+        Self {
+            tree: IrTree::default(),
+            stack: Vec::new(),
+            diagnostics: Vec::new(),
+            line_map: LineMap::new(html),
+            file,
+            in_body: false,
+            in_head: false,
+        }
+    }
+
+    fn loc(&self, offset: usize) -> SourceLocation {
+        self.line_map.source_location(offset, self.file.clone())
+    }
+
+    fn current_parent(&self) -> Option<IrNodeId> {
+        self.stack.last().copied()
+    }
+
+    fn process_token(&mut self, token: IrToken) {
+        match token {
+            IrToken::StartTag {
+                name,
+                attributes,
+                self_closing,
+                span,
+            } => {
+                self.handle_start_tag(name, attributes, self_closing, span);
+            }
+            IrToken::EndTag { name, span } => {
+                self.handle_end_tag(name, span);
+            }
+            IrToken::String { text, span } => {
+                if !self.in_head && !text.is_empty() {
+                    self.tree.push_text(text, span, self.current_parent());
+                }
+            }
+            IrToken::Comment { text: _, span: _ } => {}
+            IrToken::Error { message, span } => {
+                self.diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::TokenizerError,
+                    format!("HTML tokenizer error: {}", message),
+                    self.loc(span.start),
+                ));
+            }
+        }
+    }
+
+    fn handle_start_tag(
+        &mut self,
+        name: String,
+        attributes: Vec<IrAttribute>,
+        self_closing: bool,
+        span: Span,
+    ) {
+        if name == "body" {
+            self.in_body = true;
+            // If head was left open (no explicit </head>), entering body
+            // implicitly closes it so body text isn't silently dropped.
+            self.in_head = false;
+            return;
+        }
+        if name == "html" || name == "head" {
+            if name == "head" {
+                self.in_head = true;
+            }
+            return;
+        }
+        if is_shell_tag(&name) && !self.in_body {
+            return;
+        }
+
+        let element = IrElement {
+            tag: name.clone(),
+            attributes,
+            semantic: None,
+        };
+        let parent = self.current_parent();
+        let id = self.tree.push_element(element, span, parent);
+
+        let is_void = find_tag(&name).map(|s| s.void).unwrap_or(false);
+        if !is_void && !self_closing {
+            self.stack.push(id);
+        }
+    }
+
+    fn handle_end_tag(&mut self, name: String, span: Span) {
+        if name == "body" {
+            self.in_body = false;
+            return;
+        }
+        if name == "html" || name == "head" {
+            if name == "head" {
+                self.in_head = false;
+            }
+            return;
+        }
+        if is_shell_tag(&name) && !self.in_body {
+            return;
+        }
+
+        let pos = self.stack.iter().rev().position(|&id| {
+            self.tree
+                .element(id)
+                .map(|e| e.tag == name)
+                .unwrap_or(false)
+        });
+
+        match pos {
+            Some(depth_from_top) => {
+                let stack_len = self.stack.len();
+                let match_idx = stack_len - 1 - depth_from_top;
+                for &id in &self.stack[match_idx + 1..] {
+                    let el = self.tree.element(id);
+                    let tag_name = el.map(|e| e.tag.as_str()).unwrap_or("unknown");
+                    self.diagnostics.push(Diagnostic::error(
+                        DiagnosticCode::UnclosedTag,
+                        format!(
+                            "<{}> was not explicitly closed before </{}>",
+                            tag_name, name
+                        ),
+                        self.loc(self.tree.nodes[id.0].span.start),
+                    ));
+                }
+                self.stack.truncate(match_idx);
+            }
+            None => {
+                self.diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::UnclosedTag,
+                    format!("stray </{}> with no matching open tag", name),
+                    self.loc(span.start),
+                ));
+            }
+        }
+    }
+
+    fn finish(mut self) -> (IrTree, Vec<Diagnostic>) {
+        for &id in self.stack.iter().rev() {
+            let el = self.tree.element(id);
+            let tag_name = el.map(|e| e.tag.as_str()).unwrap_or("unknown");
+            self.diagnostics.push(Diagnostic::error(
+                DiagnosticCode::UnclosedTag,
+                format!("<{}> was not closed before end of input", tag_name),
+                self.loc(self.tree.nodes[id.0].span.start),
+            ));
+        }
+        (self.tree, self.diagnostics)
+    }
+}
+
+/// Parse HTML source into an IR tree with diagnostics.
+/// This is Stage 1 (Tokenize) + Stage 2 (Tree Build).
+pub fn parse_html_to_ir(html: &str) -> (IrTree, Vec<Diagnostic>) {
+    parse_html_to_ir_named(html, "<inline>".to_string())
+}
+
+/// Same as parse_html_to_ir but with a file name for diagnostics.
+pub fn parse_html_to_ir_named(html: &str, file: String) -> (IrTree, Vec<Diagnostic>) {
+    let tokens = tokenize(html);
+    let mut builder = TreeBuilder::new(html, file);
+    for token in tokens {
+        builder.process_token(token);
+    }
+    builder.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fence::ir::IrNodeKind;
+
+    #[test]
+    fn simple_div_with_text() {
+        let (tree, diags) = parse_html_to_ir(r#"<div>hello</div>"#);
+        assert!(diags.is_empty(), "unexpected diagnostics: {:?}", diags);
+        assert_eq!(tree.roots.len(), 1);
+        let div = tree.roots[0];
+        assert_eq!(tree.element(div).unwrap().tag, "div");
+        assert_eq!(tree.nodes[div.0].children.len(), 1);
+        match &tree.nodes[tree.nodes[div.0].children[0].0].kind {
+            IrNodeKind::Text(t) => assert_eq!(t, "hello"),
+            other => panic!("expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn nested_structure() {
+        let (tree, diags) = parse_html_to_ir(r#"<div><span>x</span></div>"#);
+        assert!(diags.is_empty());
+        let div = tree.roots[0];
+        let span_id = tree.nodes[div.0].children[0];
+        assert_eq!(tree.element(span_id).unwrap().tag, "span");
+    }
+
+    #[test]
+    fn void_element_no_close_tag() {
+        let (tree, diags) = parse_html_to_ir(r#"<div><img src="a.png"></div>"#);
+        assert!(diags.is_empty(), "img is void -- no closing tag needed");
+        let div = tree.roots[0];
+        assert_eq!(tree.nodes[div.0].children.len(), 1);
+    }
+
+    #[test]
+    fn attributes_preserve_order() {
+        let (tree, _) = parse_html_to_ir(r#"<div id="x" class="y" data-z="w"></div>"#);
+        let el = tree.element(tree.roots[0]).unwrap();
+        assert_eq!(el.attributes.len(), 3);
+        assert_eq!(el.attributes[0].name, "id");
+        assert_eq!(el.attributes[1].name, "class");
+        assert_eq!(el.attributes[2].name, "data-z");
+    }
+
+    #[test]
+    fn unclosed_tag_produces_diagnostic() {
+        let (tree, diags) = parse_html_to_ir("<div><span>text</div>");
+        assert!(
+            !diags.is_empty(),
+            "unclosed <span> should produce a diagnostic"
+        );
+        assert!(diags.iter().any(|d| d.code == DiagnosticCode::UnclosedTag));
+        let _ = tree;
+    }
+
+    #[test]
+    fn body_wrapper_extracted() {
+        let (tree, diags) =
+            parse_html_to_ir(r#"<html><head></head><body><div>hi</div></body></html>"#);
+        assert!(diags.is_empty());
+        assert_eq!(tree.roots.len(), 1);
+        assert_eq!(tree.element(tree.roots[0]).unwrap().tag, "div");
+    }
+
+    #[test]
+    fn rich_text_inline_mix() {
+        let (tree, diags) = parse_html_to_ir(r#"<p>Hello <strong>world</strong>!</p>"#);
+        assert!(diags.is_empty());
+        let p = tree.roots[0];
+        assert_eq!(tree.nodes[p.0].children.len(), 3);
+    }
+}
