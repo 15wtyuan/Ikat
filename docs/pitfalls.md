@@ -1,3 +1,5 @@
+﻿> **⚠️ 本文档是 v1.x 踩坑记录（坑 1-150+）。R 系列 API 范式重构后，涉及旧范式（div 恒 flex、四标签围栏、NodeKind、data-controller、driver 虚拟列表等）的坑条目可能已失效。**
+> **新设计契约见 `docs/design/main-design.md`。触碰已重构代码时以新契约为准；触碰尚未重构的旧代码时，本文档仍然有效。**
 # LoomGUI 踩坑记录
 
 > 项目开发踩坑全库 + 依赖 API 适配。新踩坑继续编号递增（坑 100+），写法：症状/根因/解决/教训。AI 工作约束见 `CLAUDE.md`，设计契约见 `docs/design/main-design.md`。
@@ -1183,4 +1185,5 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **根因**：装饰线 quad 把 `ensure_solid()` 分配的 **1×1 白像素 UV rect 拉伸覆盖整条线宽/分段**。Bilinear 在单 texel UV 范围内会从该 texel(255) 渐变到相邻 texel（空位或 SDF 距离值），把采样值稀释到 SDF threshold 以下 → 覆盖度不足；dotted 2px 小段尤甚（整段被吃）。相邻 texel 是谁取决于 atlas 分配序 → 偶现。core 几何全宽正确（`dump_rich_showcase` 跑完整 desugar 管线取证），bug 纯在采样。
 **解决**：`ensure_solid()` 分配 3×3 全 255 块、返回中心 texel UV rect——中心 texel 四邻也 solid，Bilinear 恒采纯 255，覆盖度可靠。
 **教训**：用 atlas 单 texel 做纯色填充 quad 时，Bilinear 会在该 texel UV 边界混入邻居——拉伸覆盖大区域/小段的 quad（如装饰线）尤其受影响。给 solid 槽留四邻（3×3 块）。装饰线渲染异常先 `dump_rich_showcase`（core example 不跑 desugar 看不到 RichText）dump 几何排除 core，再查采样层。
+
 

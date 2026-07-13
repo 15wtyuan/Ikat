@@ -1,3 +1,6 @@
+﻿> **⚠️ 本文档描述的是旧围栏（v1 四标签范式）。R1 阶段会用 schema 驱动的新围栏完全替代。**
+> **新围栏设计见 `docs/design/main-design.md` §3 和 `docs/superpowers/specs/2026-07-13-api-refactor-design.md`。**
+> **R1 完成后本文档将被重写。在 R1 完成前触碰围栏代码时，仍以本文档和 `fence_contract.rs` 为准。**
 # LoomGUI 围栏（Fence）权威清单
 
 > **单一真相源**：`crates/core/tests/fence_contract.rs`（可执行围栏契约测试）。本文档为人类可读副本，**以测试为准**。文档与测试不一致时，测试赢。
@@ -258,3 +261,4 @@ open-design Chromium iframe 预览 ≠ taffy 渲染。AI 须分清：
 - **`@media` 响应式**：Chrome 响应、LoomGUI 用参考分辨率缩放不响应 @media。
 
 **口径**：不可信项"信围栏规则，别信预览"。
+
