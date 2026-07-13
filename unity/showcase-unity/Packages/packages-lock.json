@@ -1,7 +1,7 @@
 {
   "dependencies": {
     "com.loomgui.unity": {
-      "version": "file:../../loomgui_unity_package",
+      "version": "file:../../package",
       "depth": 0,
       "source": "local",
       "dependencies": {

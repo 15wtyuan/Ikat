@@ -31,10 +31,10 @@ namespace LoomGUI
     /// Font-atlas image_path construction. Must match Rust render::font_atlas_path
     /// (image_path field in blob). Changing the format here requires changing both sides.
     /// </summary>
-    public static class FontAtlasPath
-    {
-        public static string Format(int page) => $"loomgui://font-atlas/p{page}";
-    }
+   public static class FontAtlasPath
+   {
+        public static string Format(uint page) => $"loomgui://font-atlas/p{page}";
+   }
 
    public sealed class SpriteResolver
     {
