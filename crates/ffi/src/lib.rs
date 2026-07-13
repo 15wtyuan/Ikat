@@ -1291,3 +1291,5 @@ mod tests;
 
 #[cfg(test)]
 mod abi_tests;
+#[cfg(test)]
+mod test_helpers;

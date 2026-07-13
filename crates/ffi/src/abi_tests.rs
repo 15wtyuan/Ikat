@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(feature = "parse")]
 use std::ffi::CString;
+use crate::test_helpers::stage_new_with_dejavu;
 
 /// FFI 测试辅助：手搓单组件 pkg（不走 parse），组件名由参数指定。
 /// 组件 = 单 Container 根（无子）。返回 write_package 字节，可直接喂 load_package。
@@ -23,29 +24,6 @@ fn make_test_pkg_bytes(component: &str) -> Vec<u8> {
         components: vec![(component, nodes.as_slice(), &rules, &[])],
     };
     loomgui_core::asset::write_package(&input)
-}
-
-/// Helper: 通过 FFI 创建 Stage 并注册测试默认 DejaVu 字体。
-/// Panic 即测试失败（仅测试内部使用）。
-fn stage_new_with_dejavu(w: f32, h: f32) -> *mut StageHandle {
-    let h = loomgui_stage_new(w, h);
-    assert!(!h.is_null(), "stage_new must succeed");
-    let font_bytes = std::fs::read(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../core/tests/fixtures/DejaVuSans.ttf"
-    ))
-    .expect("DejaVuSans.ttf fixture must exist");
-    let family = b"DejaVu";
-    let rc = loomgui_stage_register_font(
-        h,
-        family.as_ptr(),
-        family.len(),
-        font_bytes.as_ptr(),
-        font_bytes.len(),
-        1,
-    );
-    assert_eq!(rc, 0, "register_font DejaVu must return 0");
-    h
 }
 
 /// load_package FFI 带 name 参数（对齐 Stage::load_package(name, bytes)）。

@@ -1,28 +1,6 @@
 use super::*;
 use std::ffi::CStr;
-
-/// Helper: 通过 FFI 创建 Stage 并注册测试默认 DejaVu 字体。
-/// Panic 即测试失败（仅测试内部使用）。
-fn stage_new_with_dejavu(w: f32, h: f32) -> *mut StageHandle {
-    let h = loomgui_stage_new(w, h);
-    assert!(!h.is_null(), "stage_new must succeed");
-    let font_bytes = std::fs::read(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../core/tests/fixtures/DejaVuSans.ttf"
-    ))
-    .expect("DejaVuSans.ttf fixture must exist");
-    let family = b"DejaVu";
-    let rc = loomgui_stage_register_font(
-        h,
-        family.as_ptr(),
-        family.len(),
-        font_bytes.as_ptr(),
-        font_bytes.len(),
-        1,
-    );
-    assert_eq!(rc, 0, "register_font DejaVu must return 0");
-    h
-}
+use crate::test_helpers::stage_new_with_dejavu;
 
 #[test]
 fn version_returns_c_string() {
