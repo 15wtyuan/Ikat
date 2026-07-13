@@ -1,4 +1,4 @@
-# R1 Fence Schema & Parser Implementation Plan
+﻿# R1 Fence Schema & Parser Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -281,6 +281,22 @@ impl IrTree {
             IrNodeKind::Element(e) => Some(e),
             _ => None,
         }
+    }
+
+    /// Iterate all element node IDs (depth-first, roots first).
+    /// Used by Stages 3 (Fence Gate), 5 (Structural), and 6 (Annotate).
+    pub fn all_element_ids(&self) -> Vec<IrNodeId> {
+        let mut out = Vec::new();
+        let mut stack: Vec<IrNodeId> = self.roots.iter().copied().collect();
+        while let Some(id) = stack.pop() {
+            if matches!(self.nodes[id.0].kind, IrNodeKind::Element(_)) {
+                out.push(id);
+            }
+            for child in self.nodes[id.0].children.iter().rev() {
+                stack.push(*child);
+            }
+        }
+        out
     }
 }
 ```
@@ -1626,37 +1642,18 @@ fn validate_inline_style(
         }
     }
 }
-```
 
-Also add a helper to `IrTree` in `ir.rs`:
-```rust
-impl IrTree {
-    /// Iterate all element node IDs (depth-first, roots first).
-    pub fn all_element_ids(&self) -> Vec<IrNodeId> {
-        let mut out = Vec::new();
-        let mut stack: Vec<IrNodeId> = self.roots.iter().copied().collect();
-        while let Some(id) = stack.pop() {
-            if matches!(self.nodes[id.0].kind, IrNodeKind::Element(_)) {
-                out.push(id);
-            }
-            // Push children in reverse for depth-first left-to-right
-            for child in self.nodes[id.0].children.iter().rev() {
-                stack.push(*child);
-            }
-        }
-        out
-    }
-}
-```
+Note: `all_element_ids()` was already defined in Task 2 as part of `IrTree`. Do NOT re-define it here.
 
 - [ ] **Step 4: Run test to verify it passes**
 Run: `cargo test -p loomgui_core fence::fence_gate -- --nocapture`
-Expected: PASS — 6 tests.
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 ```bash
-git add crates/core/src/fence/fence_gate.rs crates/core/src/fence/ir.rs
-git commit -m "r1: fence gate (Stage 3) — tag/attr/css-name validation per element"
+git add crates/core/src/fence/fence_gate.rs
+git commit -m "r1: fence gate (Stage 3)"
+```
 ```
 
 ---
@@ -1701,6 +1698,23 @@ mod tests {
         let (tree, _) = parse_html_to_ir(r#"<div style="display:grid"></div>"#);
         let (_, diags) = resolve_inline_styles_with_diags(&tree, "test.html");
         assert!(diags.iter().any(|d| d.code == crate::fence::diagnostic::DiagnosticCode::FenceBadCssValue));
+
+    #[test]
+    fn flex_defaults_to_row_direction() {
+        // Per spec: display:flex should default to flex-direction:row
+        let (tree, _) = parse_html_to_ir(r#"<div style="display:flex"></div>"#);
+        let styles = resolve_inline_styles(&tree);
+        let id = tree.roots[0];
+        assert_eq!(styles[id.0].taffy_style.flex_direction, taffy::FlexDirection::Row);
+    }
+
+    #[test]
+    fn explicit_flex_direction_preserved() {
+        let (tree, _) = parse_html_to_ir(r#"<div style="display:flex; flex-direction:column"></div>"#);
+        let styles = resolve_inline_styles(&tree);
+        let id = tree.roots[0];
+        assert_eq!(styles[id.0].taffy_style.flex_direction, taffy::FlexDirection::Column);
+    }
     }
 }
 ```
@@ -1739,6 +1753,8 @@ pub fn resolve_inline_styles_with_diags(
 
     for (idx, node) in tree.nodes.iter().enumerate() {
         let IrNodeKind::Element(el) = &node.kind else { continue };
+
+        let mut flex_direction_set = false;
 
         // Apply DisplayDefault from schema
         if let Some(spec) = find_tag(&el.tag) {
@@ -1792,9 +1808,22 @@ pub fn resolve_inline_styles_with_diags(
                     }
                 }
 
+                // Track explicit flex-direction
+                if prop == "flex-direction" {
+                    flex_direction_set = true;
+                }
+
                 // Apply using existing apply_decl
                 apply_decl(&mut styles[idx], prop, value);
             }
+        }
+
+        // CSS spec: flex-direction initial value is row.
+        // ResolvedStyle::default() hardcodes Column (legacy).
+        // If display ended up as Flex and no explicit flex-direction was
+        // applied, override to Row per CSS standard.
+        if styles[idx].display_mode == DisplayMode::Flex && !flex_direction_set {
+            styles[idx].taffy_style.flex_direction = taffy::FlexDirection::Row;
         }
     }
 
@@ -1910,13 +1939,16 @@ fn validate_content_model(tree: &IrTree, file: &str, diagnostics: &mut Vec<Diagn
             let child_tag = match &tree.nodes[child_id.0].kind {
                 IrNodeKind::Element(e) => e.tag.as_str(),
                 IrNodeKind::Text(_) => {
-                    // Text nodes: check against Text/Phrasing/Flow/Transparent
-                    if matches!(parent_spec.content, ContentModel::None) {
-                        diagnostics.push(Diagnostic::error(
-                            DiagnosticCode::InvalidContentModel,
-                            format!("<{}> 不接受文本内容", parent_tag),
-                            loc(file, tree.nodes[child_id.0].span.start),
-                        ));
+                    // Text nodes: reject if parent does not accept text
+                    match parent_spec.content {
+                        ContentModel::None | ContentModel::Only(_) => {
+                            diagnostics.push(Diagnostic::error(
+                                DiagnosticCode::InvalidContentModel,
+                                format!("<{}> does not accept text content", parent_tag),
+                                loc(file, tree.nodes[child_id.0].span.start),
+                            ));
+                        }
+                        _ => {} // Text/Phrasing/Flow/Transparent accept text
                     }
                     continue;
                 }
@@ -2139,9 +2171,7 @@ fn extract_sprites(tree: &IrTree) -> Vec<String> {
                 }
             }
             // background-image url(...)
-            if let Some(style) = el.attributes.iter().find(|a| a.name == "style") {
-                if let Some(url) = crate::style::mapping::parse_url(
-                    &style.value.split("url(").nth(1).unwrap_or("").trim_end_matches(')')
+                if let Some(url) = crate::style::mapping::parse_url(&style.value) {
                 ) {
                     sprites.push(url);
                 }
@@ -2397,6 +2427,10 @@ git commit -m "r1: integration tests — schema contract + end-to-end pipeline"
 
 **Type consistency:** `IrNodeId(usize)`, `Span { start, end }`, `SemanticKind` variants match across all tasks. `ParsedTemplate` fields match spec §8.2.
 
-**Note on `all_element_ids`:** Added as a helper on `IrTree` in Task 10. It's used by Stages 3, 5, and 6.
 
+**Note on `all_element_ids`:** Defined in Task 2 (ir.rs) as part of `IrTree`. Used by Stages 3, 5, and 6.
+
+**Note on `display` and `flex-direction`:** The existing `apply_decl` already has both `"display"` and `"flex-direction"` arms. `apply_decl` for `display:flex` sets `display_mode = Flex` but does NOT set `flex_direction` (it stays at the `ResolvedStyle::default()` value of `Column`). To comply with the spec decision that `display:flex` defaults to `flex-direction:row`, the css_resolve stage (Task 11) tracks whether `flex-direction` was explicitly applied and overrides to `Row` if not. See Task 11 tests `flex_defaults_to_row_direction` and `explicit_flex_direction_preserved`.
+
+**Note on diagnostic line/column:** For R1, fence_gate, css_resolve, and structural stages create `SourceLocation` with `line: 0, column: 0` because they do not receive the `LineMap`. The tree_builder creates proper locations for tokenizer and unclosed-tag diagnostics. Full line/column threading to all stages is a known gap that will be addressed when the pipeline is connected to the packer (R2/R3). The `LineMap` infrastructure is already in place (Task 3).
 **Note on inline style `display` handling:** The existing `apply_decl` doesn't have a `"display"` arm (display was hardcoded). The CSS resolve stage handles `display` separately — it checks against the schema keyword list and sets `display_mode` directly, then passes other properties through to `apply_decl`. This may need a small addition to `apply_decl` or a direct field set in `css_resolve.rs`. The worker should verify this compiles and add a `"display"` arm to `apply_decl` if needed.
