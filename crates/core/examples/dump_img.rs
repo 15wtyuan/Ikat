@@ -13,7 +13,7 @@ fn main() {
     );
     let pkg_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin"
+        "/../../unity/showcase-unity/Assets/StreamingAssets/showcase.pkg.bin"
     );
     let pkg = match std::fs::read(pkg_path) {
         Ok(b) => b,

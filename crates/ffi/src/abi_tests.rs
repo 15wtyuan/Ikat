@@ -1,7 +1,7 @@
 use super::*;
+use crate::test_helpers::stage_new_with_dejavu;
 #[cfg(feature = "parse")]
 use std::ffi::CString;
-use crate::test_helpers::stage_new_with_dejavu;
 
 /// FFI 测试辅助：手搓单组件 pkg（不走 parse），组件名由参数指定。
 /// 组件 = 单 Container 根（无子）。返回 write_package 字节，可直接喂 load_package。

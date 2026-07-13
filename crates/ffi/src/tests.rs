@@ -1,6 +1,6 @@
 use super::*;
-use std::ffi::CStr;
 use crate::test_helpers::stage_new_with_dejavu;
+use std::ffi::CStr;
 
 #[test]
 fn version_returns_c_string() {

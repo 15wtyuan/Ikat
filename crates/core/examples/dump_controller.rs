@@ -10,9 +10,9 @@ use loomgui_core::stage::Stage;
 use std::env;
 
 fn main() {
-    let pkg_path = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin".to_string());
+    let pkg_path = env::args().nth(1).unwrap_or_else(|| {
+        "unity/showcase-unity/Assets/StreamingAssets/showcase.pkg.bin".to_string()
+    });
     let bytes = std::fs::read(&pkg_path).unwrap_or_else(|e| panic!("read {pkg_path}: {e}"));
     let pkg = read_package(&bytes).expect("read_package");
     assert!(

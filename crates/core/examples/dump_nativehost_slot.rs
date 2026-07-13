@@ -28,9 +28,9 @@ use std::env;
 fn main() {
     // 默认 pkg 路径：worktree 根的 showcase.pkg.bin（对齐 PlayMode 从 StreamingAssets 加载）。
     // 命令行第 1 参覆盖——参考 verify_showcase_pkg.rs 的 arg 取法。
-    let pkg_path = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "loomgui_unity/Assets/StreamingAssets/showcase.pkg.bin".to_string());
+    let pkg_path = env::args().nth(1).unwrap_or_else(|| {
+        "unity/showcase-unity/Assets/StreamingAssets/showcase.pkg.bin".to_string()
+    });
     let bytes =
         std::fs::read(&pkg_path).unwrap_or_else(|e| panic!("read pkg.bin ({pkg_path}): {e}"));
     let pkg = read_package(&bytes).expect("read_package");

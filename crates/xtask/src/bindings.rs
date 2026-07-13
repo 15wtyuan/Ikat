@@ -5,12 +5,15 @@
 use std::path::PathBuf;
 
 fn ffi_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("ffi")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("ffi")
 }
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..").join("..")
+        .join("..")
+        .join("..")
 }
 
 pub fn sync_bindings() -> Result<(), Box<dyn std::error::Error>> {
@@ -20,8 +23,12 @@ pub fn sync_bindings() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let unity_target = repo_root()
-        .join("unity").join("package").join("Plugins")
-        .join("LoomGUI").join("Bindings").join("LoomGUIBindings.cs");
+        .join("unity")
+        .join("package")
+        .join("Plugins")
+        .join("LoomGUI")
+        .join("Bindings")
+        .join("LoomGUIBindings.cs");
 
     if let Some(parent) = unity_target.parent() {
         std::fs::create_dir_all(parent)?;

@@ -14,17 +14,14 @@ use loomgui_core::text::rich::RichKind;
 fn main() {
     let manifest = env!("CARGO_MANIFEST_DIR"); // loomgui_pkg
     let html_path = format!(
-        "{}/../../../loomgui_unity/Assets/LoomUI/showcase/page_text.html",
+        "{}/../../../unity/showcase-unity/Assets/LoomUI/showcase/page_text.html",
         manifest
     );
     let base_css_path = format!(
-        "{}/../../../loomgui_unity/Assets/LoomUI/showcase/preview/preview-base.css",
+        "{}/../../../unity/showcase-unity/Assets/LoomUI/showcase/preview/preview-base.css",
         manifest
     );
-    let font_path = format!(
-        "{}/../../core/tests/fixtures/wqy-microhei.ttc",
-        manifest
-    );
+    let font_path = format!("{}/../../core/tests/fixtures/wqy-microhei.ttc", manifest);
 
     let html = std::fs::read_to_string(&html_path).expect("read html");
     let base_css = std::fs::read_to_string(&base_css_path).expect("read base css");
