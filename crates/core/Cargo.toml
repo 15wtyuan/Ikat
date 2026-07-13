@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 scraper = { version = "0.19", optional = true }
 cssparser = { version = "0.34", optional = true }
+html5gum = { version = "0.8", optional = true }
 taffy = { version = "0.5", features = ["serde"] }
 ttf-parser = "0.20"
 ab_glyph_rasterizer = "0.1"
@@ -30,7 +31,7 @@ required-features = ["parse"]
 
 [features]
 default = ["parse"]
-parse = ["dep:scraper", "dep:cssparser"]
+parse = ["dep:scraper", "dep:cssparser", "dep:html5gum"]
 
 # parse-feature-gated targets —— 凡引用 parse 链路（parse 模块 / build_scene / cascade /
 # extract_*）的 test/example/bench 必须声明 required-features = ["parse"]，否则
@@ -53,6 +54,14 @@ required-features = ["parse"]
 
 [[test]]
 name = "v1e_dirty"
+required-features = ["parse"]
+
+[[test]]
+name = "r1_schema_contract"
+required-features = ["parse"]
+
+[[test]]
+name = "r1_pipeline"
 required-features = ["parse"]
 
 [[example]]
