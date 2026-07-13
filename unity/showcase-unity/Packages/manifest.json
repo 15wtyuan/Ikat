@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "com.loomgui.unity": "file:../../loomgui_unity_package",
+    "com.loomgui.unity": "file:../../package",
     "com.unity.2d.sprite": "1.0.0",
     "com.unity.ai.navigation": "2.0.13",
     "com.unity.collab-proxy": "2.12.4",
