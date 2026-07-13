@@ -1,3 +1,8 @@
 [workspace]
-members = ["crates/core", "crates/ffi", "crates/packer/pkg", "loomgui_gui"]
+members = [
+    "crates/core",
+    "crates/ffi",
+    "crates/packer/pkg",
+    "crates/packer/gui/src-tauri",
+]
 resolver = "2"
