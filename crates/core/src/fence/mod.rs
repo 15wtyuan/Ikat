@@ -18,3 +18,6 @@ pub mod schema;
 pub mod structural;
 #[cfg(feature = "parse")]
 pub mod tree_builder;
+
+#[cfg(feature = "parse")]
+pub use pipeline::{parse_template, ParsedTemplate};
