@@ -1,15 +1,15 @@
-//! End-to-end test: build() produces all artifacts + failure case.
+//! End-to-end tests: build() produces atlas + font + runtime artifacts.
 
 use loomgui_pkg::build::build;
 use loomgui_pkg::runtime::{RuntimeManifest, RUNTIME_FILE};
 use std::path::Path;
 
-fn write_workspace_json(root: &Path, packages: &str, atlases: &str, fonts: &str) {
+fn write_workspace_json(root: &Path, atlases: &str, fonts: &str) {
     let json = format!(
         r#"{{
     "version": 1,
     "output_dir": "output",
-    "packages": {packages},
+    "packages": [],
     "atlases": {atlases},
     "fonts": {fonts}
 }}"#
@@ -23,22 +23,16 @@ fn build_e2e_produces_all_artifacts() {
     let _ = std::fs::remove_dir_all(&tmp);
 
     // Create workspace structure.
-    std::fs::create_dir_all(tmp.join("ui")).unwrap();
     std::fs::create_dir_all(tmp.join("assets")).unwrap();
     std::fs::create_dir_all(tmp.join("fonts")).unwrap();
 
     write_workspace_json(
         &tmp,
-        r#"[{ "name": "showcase", "dirs": ["ui"], "html": [] }]"#,
         r#"[{ "name": "ui", "default": true, "dirs": ["assets"] }]"#,
         r#"[{ "family": "TestFont", "file": "fonts/f.ttf", "default": true, "fallback": false }]"#,
     );
 
-    // ui/main.html with img referencing assets/home.png → sprite_key = "assets/home.png".
-    let html = r#"<div><img src="../assets/home.png"></div>"#;
-    std::fs::write(tmp.join("ui/main.html"), html).unwrap();
-
-    // assets/home.png (4×4 RGBA).
+    // assets/home.png (4x4 RGBA).
     let img = image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 0, 0, 255]));
     img.save(tmp.join("assets/home.png")).unwrap();
 
@@ -47,17 +41,10 @@ fn build_e2e_produces_all_artifacts() {
 
     // Build.
     let report = build(&tmp).expect("build should succeed");
-    assert!(report.packages.contains(&"showcase".to_string()));
     assert!(report.atlases.contains(&"ui".to_string()));
     assert!(!report.fonts.is_empty());
 
     let output = tmp.join("output");
-
-    // Package artifact.
-    assert!(
-        output.join("ui/showcase.pkg.bin").exists(),
-        "ui/showcase.pkg.bin exists"
-    );
 
     // Atlas artifacts.
     assert!(output.join("atlas/ui.png").exists(), "atlas/ui.png exists");
@@ -85,8 +72,10 @@ fn build_e2e_produces_all_artifacts() {
     assert!(rt_path.exists(), "loom.runtime.json exists");
     let rt_text = std::fs::read_to_string(&rt_path).unwrap();
     let rt: RuntimeManifest = serde_json::from_str(&rt_text).unwrap();
-    assert!(!rt.packages.is_empty(), "runtime packages non-empty");
-    assert!(!rt.atlases.is_empty(), "runtime atlases non-empty");
+    assert!(
+        rt.atlases.contains(&"ui".to_string()),
+        "runtime has ui atlas"
+    );
     assert!(!rt.fonts.is_empty(), "runtime fonts non-empty");
 
     // Cleanup.
@@ -94,91 +83,38 @@ fn build_e2e_produces_all_artifacts() {
 }
 
 #[test]
-fn build_fails_when_referenced_image_not_in_any_atlas() {
-    let tmp = std::env::temp_dir().join("loom_build_fail_test");
+fn build_fails_when_font_file_missing() {
+    let tmp = std::env::temp_dir().join("loom_build_missing_font_test");
     let _ = std::fs::remove_dir_all(&tmp);
 
-    std::fs::create_dir_all(tmp.join("ui")).unwrap();
     std::fs::create_dir_all(tmp.join("assets")).unwrap();
 
     write_workspace_json(
         &tmp,
-        r#"[{ "name": "showcase", "dirs": ["ui"], "html": [] }]"#,
         r#"[{ "name": "ui", "default": true, "dirs": ["assets"] }]"#,
-        r#"[]"#,
+        r#"[{ "family": "Missing", "file": "fonts/ghost.ttf", "default": true, "fallback": false }]"#,
     );
 
-    // HTML references missing.png that does not exist on disk.
-    let html = r#"<div><img src="../assets/missing.png"></div>"#;
-    std::fs::write(tmp.join("ui/main.html"), html).unwrap();
-
-    // Build: referenced sprite missing → cross-validation should fail.
     let result = build(&tmp);
     assert!(
         result.is_err(),
-        "build should fail when referenced image is not in any atlas"
+        "build should fail when font file does not exist"
     );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
 #[test]
-fn build_e2e_explicit_html_list_first_dir_wins() {
-    let tmp = std::env::temp_dir().join("loom_build_explicit_html_test");
+fn build_fails_when_output_dir_empty() {
+    let tmp = std::env::temp_dir().join("loom_build_no_output_test");
     let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
 
-    std::fs::create_dir_all(tmp.join("ui")).unwrap();
-    std::fs::create_dir_all(tmp.join("ui2")).unwrap();
-    std::fs::create_dir_all(tmp.join("assets")).unwrap();
-
-    write_workspace_json(
-        &tmp,
-        r#"[{ "name": "showcase", "dirs": ["ui", "ui2"], "html": ["main.html"] }]"#,
-        r#"[{ "name": "ui", "default": true, "dirs": ["assets"] }]"#,
-        r#"[]"#,
-    );
-
-    // Both ui/ and ui2/ contain main.html; first dir (ui/) wins.
-    let html1 = r#"<div>first</div>"#;
-    let html2 = r#"<div>second</div>"#;
-    std::fs::write(tmp.join("ui/main.html"), html1).unwrap();
-    std::fs::write(tmp.join("ui2/main.html"), html2).unwrap();
+    let json = r#"{"version":1,"output_dir":"","packages":[],"atlases":[],"fonts":[]}"#;
+    std::fs::write(tmp.join("loom.workspace.json"), json).unwrap();
 
     let result = build(&tmp);
-    assert!(
-        result.is_ok(),
-        "build should succeed with explicit html list"
-    );
-    let report = result.unwrap();
-    assert!(report.packages.contains(&"showcase".to_string()));
-
-    // The pkg.bin should be produced.
-    let pkg_path = tmp.join("output/ui/showcase.pkg.bin");
-    assert!(pkg_path.exists(), "showcase.pkg.bin exists");
-
-    let _ = std::fs::remove_dir_all(&tmp);
-}
-
-#[test]
-fn build_fails_when_explicit_html_not_found() {
-    let tmp = std::env::temp_dir().join("loom_build_explicit_html_missing_test");
-    let _ = std::fs::remove_dir_all(&tmp);
-
-    std::fs::create_dir_all(tmp.join("ui")).unwrap();
-    std::fs::create_dir_all(tmp.join("assets")).unwrap();
-
-    write_workspace_json(
-        &tmp,
-        r#"[{ "name": "showcase", "dirs": ["ui"], "html": ["nonexistent.html"] }]"#,
-        r#"[{ "name": "ui", "default": true, "dirs": ["assets"] }]"#,
-        r#"[]"#,
-    );
-
-    let result = build(&tmp);
-    assert!(
-        result.is_err(),
-        "build should fail when explicit html file does not exist in any dir"
-    );
+    assert!(result.is_err(), "build should fail with empty output_dir");
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

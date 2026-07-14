@@ -776,33 +776,6 @@ fn text_shadow_empty_value_rejected() {
 }
 
 #[test]
-fn text_shadow_inherits_to_child() {
-    // text-shadow 是 CSS INHERITED 属性 → 父声明作用于子。
-    // 验 cascade.rs 继承白名单含 text_effects。
-    use crate::parse::css::parse_css;
-    use crate::parse::dom::parse_html;
-    let html = r#"<div class="root"><span class="child">hi</span></div>"#;
-    let css = r#".root { text-shadow: 2px 2px 4px #ff0000; }"#;
-    let tree = parse_html(html).unwrap();
-    let sheet = parse_css(css).unwrap();
-    let styles = crate::style::cascade::resolve_styles(&tree, &sheet);
-    let root_id = tree.roots[0];
-    assert_eq!(styles[root_id.0].text_effects.len(), 1, "root 有 1 shadow");
-    let child_id = tree.nodes[root_id.0].children[0];
-    assert_eq!(
-        styles[child_id.0].text_effects.len(),
-        1,
-        "子继承 text-shadow（INHERITED）"
-    );
-    match styles[child_id.0].text_effects[0] {
-        crate::text::font_effect::FontEffect::Shadow { ox, .. } => {
-            assert!((ox - 2.0).abs() < 1e-4, "继承值正确");
-        }
-        _ => panic!("child 应继承 Shadow"),
-    }
-}
-
-#[test]
 fn background_linear_gradient_2_stops_four_dirs() {
     // 4 正向 × 2 色 → 返 true 且 background_gradient 已设。
     for (val, expected_dir) in [
@@ -955,32 +928,6 @@ fn text_stroke_empty_value_rejected() {
     let mut s = ResolvedStyle::default();
     assert!(!apply_decl(&mut s, "-webkit-text-stroke", ""));
     assert!(s.text_effects.is_empty());
-}
-
-#[test]
-fn text_stroke_inherits_to_child() {
-    // -webkit-text-stroke 是 CSS INHERITED 属性 → 父声明作用于子（与 text-shadow 一致）。
-    use crate::parse::css::parse_css;
-    use crate::parse::dom::parse_html;
-    let html = r#"<div class="root"><span class="child">hi</span></div>"#;
-    let css = r#".root { -webkit-text-stroke: 2px #ff0000; }"#;
-    let tree = parse_html(html).unwrap();
-    let sheet = parse_css(css).unwrap();
-    let styles = crate::style::cascade::resolve_styles(&tree, &sheet);
-    let root_id = tree.roots[0];
-    assert_eq!(styles[root_id.0].text_effects.len(), 1, "root 有 1 stroke");
-    let child_id = tree.nodes[root_id.0].children[0];
-    assert_eq!(
-        styles[child_id.0].text_effects.len(),
-        1,
-        "子继承 -webkit-text-stroke（INHERITED）"
-    );
-    match styles[child_id.0].text_effects[0] {
-        crate::text::font_effect::FontEffect::Stroke { w, .. } => {
-            assert!((w - 2.0).abs() < 1e-4, "继承值正确");
-        }
-        _ => panic!("child 应继承 Stroke"),
-    }
 }
 
 #[test]

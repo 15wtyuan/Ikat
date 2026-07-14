@@ -1,0 +1,9 @@
+﻿[package]
+name = "loomgui_fence"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+loomgui_core = { path = "../core" }
+taffy = "0.5"
+html5gum = "0.8"

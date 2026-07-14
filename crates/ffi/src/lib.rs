@@ -125,60 +125,8 @@ pub extern "C" fn loomgui_stage_free(h: *mut StageHandle) {
     }
 }
 
-/// 装载 HTML+CSS 文本（指针+len）。0=ok，-1=err。null/非 UTF-8 返回 -1。
-///
-/// **parse-gated：**本函数走核心 HTML/CSS 解析路径，`--no-default-features` 关掉 parse 时不存在。
-/// 包加载路径走 `loomgui_stage_load_package`（常驻，不 gate）。
-///
-/// 内部直接调 parse_html + resolve_styles + build_scene。
-/// 不涉及纹理注册（核心不知图集）。
-#[cfg(feature = "parse")]
-#[no_mangle]
-pub extern "C" fn loomgui_stage_load_html(
-    h: *mut StageHandle,
-    html: *const u8,
-    html_len: usize,
-    css: *const u8,
-    css_len: usize,
-) -> i32 {
-    if h.is_null() || html.is_null() || css.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let html_bytes = unsafe { std::slice::from_raw_parts(html, html_len) };
-    let css_bytes = unsafe { std::slice::from_raw_parts(css, css_len) };
-    let html = match std::str::from_utf8(html_bytes) {
-        Ok(s) => s,
-        Err(_) => return -1,
-    };
-    let css = match std::str::from_utf8(css_bytes) {
-        Ok(s) => s,
-        Err(_) => return -1,
-    };
-    // 直接走 parse → resolve → build_scene。
-    let tree = match loomgui_core::parse::dom::parse_html(html) {
-        Ok(t) => t,
-        Err(_) => return -1,
-    };
-    let sheet = match loomgui_core::parse::css::parse_css(css) {
-        Ok(s) => s,
-        Err(_) => return -1,
-    };
-    let styles = loomgui_core::style::cascade::resolve_styles(&tree, &sheet);
-    sh.stage.tweens.clear();
-    if let Some(scene) = sh.stage.scene.as_mut() {
-        scene.scroll.clear();
-    }
-    sh.stage.prev_node_hashes.clear();
-    sh.stage.scene = Some(loomgui_core::scene::node::build_scene(&tree, &styles));
-    0
-}
-
 /// 装载二进制包（spec §12/§13）。name = 包名（进 packages 字典 key），bytes = .pkg.bin。
 /// 0=ok，-1=err。null 句柄/空指针返回 -1。包是 Rust-internal，C# 只透传 bytes（不解析）。
-///
-/// **常驻（不 gate）：**包格式是 runtime 的稳定入口，不依赖 parse feature——
-/// `--no-default-features` 构建的 .dll 仍有本函数（Unity 用 default 带 parse 的 dev .dll）。
 ///
 /// FFI 签名带 name 参数（对齐 `Stage::load_package(name, bytes)`）。
 /// load_package 只进资源池不建 scene——Unity 侧需先 create_root 建 scene 再 instantiate 建内容。
@@ -1194,30 +1142,6 @@ pub extern "C" fn loomgui_stage_set_text(
     };
     sh.stage
         .set_text(NodeId(node), text)
-        .map(|_| 0)
-        .unwrap_or(-1)
-}
-
-/// 改 RichText 节点的 markup + 标 dirty_text。markup = UTF-8 字节（指针+len）。
-/// 0=ok，-1=err（非 RichText / 解析失败 / null 句柄）。**常驻（不 gate）。**
-#[no_mangle]
-pub extern "C" fn loomgui_stage_set_rich_text(
-    h: *mut StageHandle,
-    node: u32,
-    markup_ptr: *const u8,
-    markup_len: usize,
-) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let markup =
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(markup_ptr, markup_len) }) {
-            Ok(s) => s,
-            Err(_) => return -1,
-        };
-    sh.stage
-        .set_rich_text(NodeId(node), markup)
         .map(|_| 0)
         .unwrap_or(-1)
 }

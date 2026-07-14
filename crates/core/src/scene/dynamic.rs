@@ -123,10 +123,10 @@ pub fn create_root(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
 
 /// 建节点（从已 bake 的 kind + base_style）：instantiate 用。
 /// 与 `create_node` 同构的节点构造（clip_rect 派生 / dirty_text / slotmap insert / id 回填），
-/// 但跳过 CSS parse——style 已在 ComponentTemplate.nodes[i].style 烘焙好（打包期 resolve_styles 产物）。
+/// 不涉及 CSS 解析——style 已在 ComponentTemplate.nodes[i].style 烘焙好（打包期产物）。
 /// 直接用传入 style 作 base_style（源）+ style.clone() 作 style 初始（派生，下帧 rematch 从 base 起算）。
 /// classes/id_attr/draggable/tabindex 由调用方在返回 NodeId 后填（与 create_node 一致——
-/// create_node 也不填这些，由 parse 路径的 gather_rec 填；instantiate 路径从 TemplateNode 填）。
+/// （同 create_node：classes/id_attr 等由调用方在返回 NodeId 后填）。
 pub fn create_node_from_template(
     scene: &mut Scene,
     kind: NodeKind,
@@ -235,29 +235,6 @@ pub fn set_text(scene: &mut Scene, node: NodeId, text: &str) -> Result<(), Strin
             *content = text.into();
         }
         _ => return Err("set_text 只对 Text 节点生效".into()),
-    }
-    n.dirty_text = true;
-    Ok(())
-}
-
-/// 改 RichText 节点的 markup：解析 → runs + 标 dirty_text。非 RichText 节点 → Err。
-///
-/// runs 的 base 样式从节点 base_style 取；font_id 用 0 占位（MVP 单字体，build 用节点 font）。
-pub fn set_rich_text(scene: &mut Scene, node: NodeId, markup: &str) -> Result<(), String> {
-    let n = scene.get_mut(node).ok_or("node not live")?;
-    let base = crate::text::rich::RichBaseStyle {
-        color: n.base_style.color,
-        font_size: n.base_style.font_size,
-        weight: crate::text::rich::RichWeight::Normal,
-        style: crate::text::rich::RichStyle::Normal,
-        deco: crate::text::rich::RichDeco::default(),
-    };
-    let runs = crate::text::rich::parse_rich_markup(markup, base, 0)?;
-    match &mut n.kind {
-        NodeKind::RichText { runs: slot } => {
-            *slot = runs;
-        }
-        _ => return Err("set_rich_text 只对 RichText 节点生效".into()),
     }
     n.dirty_text = true;
     Ok(())
@@ -743,7 +720,7 @@ mod tests {
 
     #[test]
     fn create_node_from_template_uses_baked_style() {
-        // instantiate 复用的节点构造：传入已 bake 的 kind+style，跳过 CSS parse。
+        // instantiate 调用的节点构造（不含 bake 后的 kind+style），不涉及 CSS 解析。
         let mut scene = empty_scene();
         let mut style = ResolvedStyle::default();
         apply_css(

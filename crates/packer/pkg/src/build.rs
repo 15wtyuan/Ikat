@@ -1,11 +1,16 @@
-//! Build orchestration: wire packages + atlases + fonts → output_dir.
-//! Single entry point `build()` called by CLI (Task 9) and GUI (Task 18).
+//! Build orchestration: atlases + fonts + runtime manifest -> output_dir.
+//! Single entry point build() called by CLI and GUI.
+//!
+//! R1.1 note: the HTML -> .pkg.bin compilation path was removed. It will be
+//! rebuilt in R3 via the fence crate. Until then, the packer handles only
+//! atlases, fonts, and the runtime manifest. The packages field in
+//! BuildReport and RuntimeManifest is kept (always empty) for forward
+//! compatibility with the GUI frontend.
 
 use serde::Serialize;
 
 use crate::atlas::collect::collect_pngs;
 use crate::atlas::pack::pack_atlas;
-use crate::atlas::validate::assign_and_validate;
 use crate::runtime::{RuntimeFont, RuntimeManifest, RUNTIME_FILE};
 use crate::workspace::load_workspace;
 use std::path::Path;
@@ -13,25 +18,27 @@ use std::path::Path;
 /// Build report: what was produced.
 #[derive(Debug, Clone, Serialize)]
 pub struct BuildReport {
+    /// Package names (always empty until R3 rebuilds the HTML path).
     pub packages: Vec<String>,
     pub atlases: Vec<String>,
     pub fonts: Vec<String>,
     pub log: Vec<String>,
 }
 
-/// Run the full build pipeline for a workspace rooted at `workspace_root`.
+/// Run the full build pipeline for a workspace rooted at workspace_root.
 ///
-/// Orchestration order:
-/// 1. load workspace → resolve output_dir → mkdir ui/atlas/fonts
-/// 2. per package: resolve html list → pack → write ui/<name>.pkg.bin, accumulate referenced_sprites
-/// 3. per atlas: collect_pngs → pack_atlas → save pages + write atlas/<name>.atlas.json
-/// 4. cross-validate (assign_and_validate)
-/// 5. per font: copy → fonts/<basename>.bytes
-/// 6. write loom.runtime.json → return BuildReport
+/// Steps:
+/// 1. load workspace, resolve output_dir, create atlas/fonts/ui dirs
+/// 2. per atlas: collect_pngs -> pack_atlas -> save pages + atlas.json
+/// 3. per font: copy -> fonts/<basename>.bytes
+/// 4. write loom.runtime.json -> return BuildReport
 pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
     let ws = load_workspace(workspace_root)?;
     if ws.output_dir.trim().is_empty() {
-        return Err("output_dir 未配置：请在工作区「常规」页设置导出目录后再打包".into());
+        return Err(
+            "output_dir not configured: set it in the workspace General page before building"
+                .into(),
+        );
     }
     let output_dir = workspace_root.join(&ws.output_dir);
 
@@ -51,37 +58,8 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
         fonts: Vec::new(),
         log: Vec::new(),
     };
-    let mut all_referenced: Vec<String> = Vec::new();
 
-    // ── Packages ──────────────────────────────────────────────
-    for pkg in &ws.packages {
-        let html_list = resolve_html_list(workspace_root, pkg)?;
-        let html_pairs: Vec<(String, std::path::PathBuf)> = html_list
-            .iter()
-            .map(|rel| (rel.clone(), workspace_root.join(rel)))
-            .collect();
-
-        report.log.push(format!(
-            "packing {}: {} html files",
-            pkg.name,
-            html_pairs.len()
-        ));
-        let packed = crate::pack(workspace_root, &pkg.name, &html_pairs)?;
-
-        let pkg_path = ui_dir.join(format!("{}.pkg.bin", pkg.name));
-        std::fs::write(&pkg_path, &packed.pkg_bytes)
-            .map_err(|e| format!("write {}: {e}", pkg_path.display()))?;
-        report.packages.push(pkg.name.clone());
-        report.log.push(format!("  wrote {}", pkg_path.display()));
-
-        for key in &packed.referenced_sprites {
-            if !all_referenced.contains(key) {
-                all_referenced.push(key.clone());
-            }
-        }
-    }
-
-    // ── Atlases ───────────────────────────────────────────────
+    // ---------- Atlases ----------
     let mut atlas_manifests: Vec<(String, crate::atlas::AtlasManifest)> = Vec::new();
     for atlas in &ws.atlases {
         report.log.push(format!(
@@ -118,17 +96,7 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
         atlas_manifests.push((atlas.name.clone(), packed.manifest));
     }
 
-    // ── Cross-validate ────────────────────────────────────────
-    {
-        let refs: Vec<(String, &crate::atlas::AtlasManifest)> = atlas_manifests
-            .iter()
-            .map(|(n, m)| (n.clone(), m))
-            .collect();
-        assign_and_validate(&all_referenced, &refs)?;
-        report.log.push("cross-validation passed".into());
-    }
-
-    // ── Fonts ─────────────────────────────────────────────────
+    // ---------- Fonts ----------
     for font in &ws.fonts {
         let src = workspace_root.join(&font.file);
         if !src.exists() {
@@ -145,7 +113,7 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
         report.log.push(format!("copied font {}", dst.display()));
     }
 
-    // ── Runtime manifest ─────────────────────────────────────
+    // ---------- Runtime manifest ----------
     let runtime = RuntimeManifest {
         version: 1,
         packages: report.packages.clone(),
@@ -176,65 +144,7 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
         .map_err(|e| format!("write {}: {e}", runtime_path.display()))?;
     report.log.push(format!("wrote {}", runtime_path.display()));
 
-    Ok(report)
-}
+    let _ = &atlas_manifests; // kept for future cross-validation (R3)
 
-/// Resolve the html list for a package into workspace-root-relative paths.
-///
-/// - `pkg.html` non-empty (explicit): for each html filename, scan `pkg.dirs` in order;
-///   first directory where the file exists wins. Returns relative paths like `ui/main.html`.
-/// - `pkg.html` empty (auto-scan): scan each dir's top-level `.html` (non-recursive),
-///   sorted, deduplicated.
-fn resolve_html_list(
-    workspace_root: &Path,
-    pkg: &crate::workspace::PackageCfg,
-) -> Result<Vec<String>, String> {
-    if !pkg.html.is_empty() {
-        let mut out = Vec::new();
-        for html_name in &pkg.html {
-            let mut found = false;
-            for dir in &pkg.dirs {
-                let candidate = workspace_root.join(dir).join(html_name);
-                if candidate.exists() {
-                    let rel = Path::new(dir).join(html_name);
-                    let rel_str = rel.to_string_lossy().replace('\\', "/");
-                    out.push(rel_str);
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                return Err(format!(
-                    "html `{}` not found in any of {:?}",
-                    html_name, pkg.dirs
-                ));
-            }
-        }
-        Ok(out)
-    } else {
-        let mut out = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for dir in &pkg.dirs {
-            let abs_dir = workspace_root.join(dir);
-            if !abs_dir.is_dir() {
-                return Err(format!("package dir not found: {}", abs_dir.display()));
-            }
-            let entries = std::fs::read_dir(&abs_dir)
-                .map_err(|e| format!("read_dir {}: {e}", abs_dir.display()))?;
-            for entry in entries {
-                let entry = entry.map_err(|e| format!("dir entry: {e}"))?;
-                let path = entry.path();
-                if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("html") {
-                    if let Ok(rel) = path.strip_prefix(workspace_root) {
-                        let key = rel.to_string_lossy().replace('\\', "/");
-                        if seen.insert(key.clone()) {
-                            out.push(key);
-                        }
-                    }
-                }
-            }
-        }
-        out.sort();
-        Ok(out)
-    }
+    Ok(report)
 }

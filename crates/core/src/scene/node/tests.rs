@@ -273,7 +273,7 @@ fn scene_build_7tuple_sets_tabindex() {
 #[test]
 fn scene_build_constructs_tree_without_parse() {
     // 手搓 entries：root Container + 一个 Text 子（parent=Some(0)）。
-    // 不走 parse_html/build_scene——证明 Scene::build 独立于 parse（read_package 依赖此）。
+    // 手搓 scene，证明 Scene::build 独立于打包期解析（read_package 依赖此）。
     let root_style = ResolvedStyle::default();
     let text_style = ResolvedStyle::default();
     let entries: Vec<(

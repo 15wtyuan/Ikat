@@ -1,6 +1,6 @@
-//! loom-pkg CLI：零参 build 读工作区配置一键打包。
-//! 用法：loom-pkg build <workspace-dir>
-//!   读 <workspace-dir>/loom.workspace.json，全量产出到配置的 output_dir。
+﻿//! loom-pkg CLI: read workspace config and build atlases + fonts + runtime manifest.
+//! Usage: loom-pkg build <workspace-dir>
+//!   Reads <workspace-dir>/loom.workspace.json, outputs to the configured output_dir.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -21,8 +21,7 @@ fn main() -> ExitCode {
                 eprintln!("{line}");
             }
             eprintln!(
-                "OK: {} packages, {} atlases, {} fonts",
-                report.packages.len(),
+                "OK: {} atlases, {} fonts",
                 report.atlases.len(),
                 report.fonts.len()
             );

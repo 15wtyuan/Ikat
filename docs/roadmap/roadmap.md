@@ -74,9 +74,21 @@
 
 ### 2.1 阶段总览
 
+> **顺序原则：靶子先行，护城河先验。** 项目的差异化只在设计期 HTML/CSS 的「AI 可预测性」上——即围栏内 HTML 渲染得像不像真浏览器。R2–R8 是让框架「成熟」（类型化 API、控件、ListView，FairyGUI/UITK 都有），不加宽护城河。所以在投入几个月运行时重写**之前**，先把目标冻结成可验收的靶子，并用一道差分门给核心赌注定性。
+
 ```text
-R1（围栏 schema + 新解析器）
+R1（围栏 schema + 新解析器）✅ 核心完成
     │
+    ├─ R1.1：架构清理 + 围栏终态化（showcase 驱动补全，见 §2.2.1）
+    ▼
+【靶子冻结】只依赖 R1，现在就能做，与运行时解耦
+    ├─ 终态 showcase HTML/CSS ＝ 渲染目标（R8 的设计期半扇）
+    └─ 终态 C# 公共 API 签名文件 ＝ 用户使用目标
+    │      能编译即可，不搭 mock 运行时；作为 R2–R7 的验收靶子
+    ▼
+【护城河差分门】最小 IR→渲染接线 + Chromium 差分
+    │      同一段围栏 HTML：浏览器截图 vs LoomGUI 渲染截图，比矩形/换行/位置
+    │      先回答「AI 写的围栏 HTML，LoomGUI 渲染得像不像浏览器」，再投入大重写
     ▼
 R2（Scene/Node 类型化对象树）
     │
@@ -93,8 +105,14 @@ R5（标准控件） R6（ListView） R7（文本模型）
               R4（Unity C# 公共 API）
                 │
                 ▼
-              R8（Showcase 迁移）
+              R8 合闸（showcase 运行时半扇跑通）
 ```
+
+**关于差分门的成本诚实注脚**：R1 产物 `ParsedTemplate{ tree, styles, ... }`（`crates/fence/src/pipeline.rs`）只走到「验证 + 带语义的 IR 树」，**没有 IR→scene→layout→render 那段桥**（旧 core 仍用旧 `dom.rs`）。所以强版差分（LoomGUI 渲染 vs 浏览器，而非「HTML 在浏览器好不好看」）**不是零成本**——它需要先接一段最小的「新围栏 IR → 渲染」线（本质是 R2/R3 的一小片）。关键性质仍成立：差分门在 R2–R7 全面铺开**之前**，先冻结靶子、接一小段线定性护城河，成立了再投几个月重写。
+
+**R8 拆成两半，依赖完全不同**：
+- **设计期半扇（R8-A）**：把 showcase 改写成终态 HTML/CSS。只依赖 R1，属于「靶子冻结」阶段，现在就做。
+- **运行时半扇（R8-B）**：showcase 用终态 C# API 跑起来、渲染正确。依赖 R2–R7 全部就位，是最后的合闸验收。二者不是一件事，B 不可能先于运行时完成（B 的定义就是「运行时把它跑起来」）。
 
 R5/R6/R7 在 R3 完成后可以并行推进（多会话同时开工）。R4 依赖 R2+R3 的核心契约，但可以在 R5/R6/R7 之后做（开发期间无人使用，不需要先让上层可用）。
 
@@ -102,7 +120,7 @@ R5/R6/R7 在 R3 完成后可以并行推进（多会话同时开工）。R4 依�
 
 **目标**：建立 machine-readable schema 作为标签/属性/CSS 值/运行时类型映射的单一真相源，重写 HTML parser 支持新围栏（全部标准元素），打包器做新围栏验证。
 
-**状态**：✅ 核心已完成（6 阶段流水线 + schema + 855 测试全绿）。以下遗留项进入 R1.1。
+**状态**：✅ R1 + R1.1 已完成（6 阶段流水线 + schema + 独立 fence crate + 766+ 测试全绿）。
 
 **内容**：
 - Schema 驱动的围栏注册表（标签 → 类型、结构属性、CSS 属性白名单、支持值）。
@@ -113,43 +131,26 @@ R5/R6/R7 在 R3 完成后可以并行推进（多会话同时开工）。R4 依�
 **依赖**：无。
 **验证**：fence contract tests 正例 + 反例全绿。
 
-### 2.2.1 R1.1：R1 遗留项与架构清理
+### 2.2.1 R1.1：R1 遗留项与架构清理 ✅ 已完成
 
-> R1 核心实现完成（commit `730d4dc`），但有几个架构问题和清理项需要先解决，再进入 R2。
+> R1 核心实现完成后，R1.1 解决了架构归属、旧代码退役、文档同步和延迟验证。
 
-**待讨论的架构问题：**
+**已完成项：**
 
-1. **围栏代码的归属 crate**：当前围栏验证流水线（tree_builder / fence_gate / css_resolve / structural / pipeline）全部放在 `crates/core` 里，靠 `#[cfg(feature = "parse")]` 门控。但 roadmap 原文说"打包器做新围栏验证"——围栏是打包期工具，运行时引擎只读 `.pkg.bin`，不需要验证代码。需要决定：
-   - 围栏验证流水线搬到 `crates/packer`？
-   - schema 定义（TagSpec / SemanticKind 等）留在 core（R2/R3 需要它）还是拆独立 `crates/schema`？
-   - tree_builder 该跟着谁——它产出 IrTree，R2 要消费它构建运行时对象树。
-   - `parse/dom.rs` 的旧 `FENCE_TAGS` 和 `apply_decl` 的 `feature = "parse"` 门控是否应该调整。
+1. **围栏代码独立 crate**：围栏验证流水线从 core 提取为独立 crates/fence/ crate。core 成为纯运行时库。
+2. **旧 parse 代码退役**：core 中 parse/、style/cascade.rs、build_scene() 等全部删除。
+3. **旧测试清理**：fence_contract.rs、snapshot.rs、parse_tests.rs 删除。新测试在 fence crate。
+4. **fence.md 完全重写**：新 30 标签 schema 驱动设计。
+5. **打包器模板更新**：workspace-CLAUDE.md 和 skill/SKILL.md 更新。
+6. **延迟验证实现**：ARIA IdRef、template root、label[for] 验证 + 15 个契约测试。
 
-2. **围栏的闭环路径**：打包器初始化工程目录 → AI 在里面写 HTML/CSS → 打包器用围栏验证 → 验证通过后编译成 `.pkg.bin` → 运行时引擎消费。这条路径需要和打包器的实际流程对齐，围栏验证应该嵌入打包器的工作流，不是 core 的职责。
+**已 Defer 到 R3：**
 
-**待清理的旧代码：**
+- 围栏闭环路径（打包器用 fence crate 验证+编译）
+- Custom Element 注册机制
+- 围栏终态化（showcase 驱动补全标签/role）
 
-3. **退役旧 `FENCE_TAGS`**：`crates/core/src/parse/dom.rs` 里的 `FENCE_TAGS = [div,span,img,button]` 和 `display:block` desugar 逻辑仍在。roadmap 明确要求退役，R1 没做。
-
-4. **`fence_contract.rs` 旧测试**：`crates/core/tests/fence_contract.rs` 测的是旧四标签围栏，需要用新 `r1_schema_contract.rs` + `r1_pipeline.rs` 替代或合并。
-
-**待更新的文档：**
-
-5. **`docs/design/fence.md`**：当前内容是旧四标签围栏（标了"R1 完成后重写"）。需要用新 schema（30 标签、三正交维度 CSS、六阶段流水线）完全重写。
-
-6. **`crates/packer/gui/src-tauri/templates/`**：打包器模板（workspace-CLAUDE.md / SKILL.md）还引用旧围栏规则，需要更新为新围栏。
-
-7. **`docs/design/main-design.md`**：确认围栏章节是否已经用新设计（之前讨论说"直接用新设计，不保留旧设计"），检查一致性。
-
-**R1 未完成的验证项（Stage 5 缺口）：**
-
-8. **ARIA 关系验证**：`aria-controls` / `aria-labelledby` 的 IdRef 目标存在性 + role 匹配（spec §3.4）。
-9. **template 根验证**：ListView 内的 template 根必须是 li（spec §3.4）。
-10. **Custom Element 注册验证**：自定义元素名称必须含 `-`（spec §3.4，当前只做 hyphen 检测，无注册机制）。
-11. **label for 验证**：`label[for]` 指向的 ID 必须存在于当前组件作用域（spec §3.4，Stage 5 未实现）。
-
-**依赖**：无（可立即开始讨论）。
-**验证**：上述每一项完成或明确 defer 后，R1.1 关闭，进入 R2。
+**验证**：全 workspace cargo build + cargo test（766+ 测试全绿）+ fmt + clippy 全通过。
 
 ### 2.3 R2：Scene/Node 类型化对象树
 
@@ -318,6 +319,8 @@ RenderNode payload 加 `Mask{shape_ref, mode: MaskMode}`，MaskMode{Write,Conten
 ## 6. 关键决策
 
 - **R 系列是范式转换，不是功能叠加**：公共 API 从"stage 全局"重做为"类型化对象树"，旧接口退役。底层算法（渲染/文本/滚动）保留复用，只重写接口形状。
+- **靶子先行，护城河先验（2026-07-14 定）**：护城河只在设计期 HTML/CSS 的「AI 可预测性」上——R2–R8 是让框架成熟（FairyGUI/UITK 都有），不加宽护城河。故 R1 之后先冻结靶子（终态 showcase HTML + 终态 C# API 签名，不搭 mock 运行时），再用 Chromium 差分门（LoomGUI 渲染 vs 浏览器，非「HTML 在浏览器好不好看」）给核心赌注定性，然后才投入 R2–R7 大重写。差分门需先接一段最小 IR→渲染线（R2/R3 的一小片），不是零成本，但仍在大重写之前。
+- **围栏终态化由 showcase 驱动**：现有 23 标签是骨架子集；缺什么由终态 showcase 暴露后补什么，不凭空补到理论清单。role dispatch（`<div role=tablist>→TabList`）是签名级结构缺口，单独立项。
 - **设计自上而下，实现按合理路径**：设计是公共 API 优先，实现可以从内向外（R1→R2→R3 先骨架），不需要先让上层可用（开发期间无人使用）。
 - **尽量并行**：R5/R6/R7 在 R3 完成后可多会话同时开工。
 - **v1.5 Controller 停止**：旧 `data-controller/data-page` 路线停止，转入 R5 标准 ARIA Pattern。

@@ -1,14 +1,12 @@
-#![cfg(feature = "parse")]
-
-use crate::fence::annotate::annotate;
-use crate::fence::css_resolve::resolve_inline_styles_with_diags;
-use crate::fence::diagnostic::{Diagnostic, LineMap};
-use crate::fence::fence_gate::run_fence_gate;
-use crate::fence::ir::{IrNodeKind, IrTree};
-use crate::fence::structural::run_structural;
-use crate::fence::tree_builder::parse_html_to_ir_named;
-use crate::style::mapping::parse_url;
-use crate::style::resolved::ResolvedStyle;
+use crate::annotate::annotate;
+use crate::css_resolve::resolve_inline_styles_with_diags;
+use crate::diagnostic::{Diagnostic, LineMap};
+use crate::fence_gate::run_fence_gate;
+use crate::ir::{IrNodeKind, IrTree};
+use crate::structural::run_structural;
+use crate::tree_builder::parse_html_to_ir_named;
+use loomgui_core::style::mapping::parse_url;
+use loomgui_core::style::resolved::ResolvedStyle;
 
 /// Final output of the R1 parsing pipeline.
 pub struct ParsedTemplate {
@@ -87,7 +85,7 @@ fn extract_sprites(tree: &IrTree) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fence::schema::tag::SemanticKind;
+    use crate::schema::tag::SemanticKind;
 
     #[test]
     fn pipeline_simple_template() {

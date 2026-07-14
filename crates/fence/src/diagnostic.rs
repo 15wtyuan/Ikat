@@ -1,5 +1,3 @@
-#![cfg(feature = "parse")]
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     Error,
@@ -49,7 +47,7 @@ pub struct DiagnosticNote {
 /// A structured diagnostic produced by the fence pipeline.
 ///
 /// The pipeline collects ALL diagnostics in a single pass and reports them
-/// once, rather than failing on the first error — this is critical for
+/// once, rather than failing on the first error -- this is critical for
 /// AI-assisted authoring where fixing all errors in one round minimises
 /// dialogue turns.
 #[derive(Debug, Clone)]

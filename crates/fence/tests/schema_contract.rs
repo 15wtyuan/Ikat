@@ -1,8 +1,6 @@
-use loomgui_core::fence::schema::attr::{is_global_attr, INPUT_STRUCTURAL};
-use loomgui_core::fence::schema::css::{find_css_prop, find_shorthand, CssValueParser};
-use loomgui_core::fence::schema::tag::{
-    find_tag, is_shell_tag, Category, ContentModel, DisplayDefault,
-};
+use loomgui_fence::schema::attr::{is_global_attr, INPUT_STRUCTURAL};
+use loomgui_fence::schema::css::{find_css_prop, find_shorthand, CssValueParser};
+use loomgui_fence::schema::tag::{find_tag, is_shell_tag, Category, ContentModel, DisplayDefault};
 
 #[test]
 fn all_23_runtime_tags_have_specs() {

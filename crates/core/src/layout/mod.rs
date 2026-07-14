@@ -403,7 +403,7 @@ pub fn solve(
         let (w, h) = (layout.size.width, layout.size.height);
         let node = scene.get_mut(id).expect("live node");
         node.layout_rect = Rect { x, y, w, h };
-        // overflow:hidden 节点（build_scene 已建 Some 槽）：用自身 border 框填 clip。
+        // overflow:hidden 节点（Scene::build 已建 Some 槽）：用自身 border 框填 clip。
         if node.clip_rect.is_some() {
             node.clip_rect = Some(Rect { x, y, w, h });
         }
@@ -417,12 +417,10 @@ pub fn solve(
     scene.text_layouts = text_layouts;
 }
 
-#[cfg(all(test, feature = "parse"))]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::{css::parse_css, dom::parse_html};
-    use crate::scene::{build_scene, NodeKind, Scene};
-    use crate::style::cascade::resolve_styles;
+    use crate::scene::{NodeKind, Scene};
     use crate::style::resolved::ResolvedStyle;
 
     fn font_table() -> Option<FontTable> {
@@ -448,57 +446,8 @@ mod tests {
         m
     }
 
-    #[test]
-    fn column_stack_sizes_children() {
-        let html2 = r#"<div class="root"><div class="a"></div><div class="b"></div></div>"#;
-        // div 默认 flex-direction: column（ResolvedStyle::default 落地）。
-        // CSS 不写 flex-direction，子项也应垂直堆叠。
-        let css =
-            r#".root { width: 200px; height: 200px; } .a { height: 50px; } .b { height: 30px; }"#;
-        let tree = parse_html(html2).unwrap();
-        let sheet = parse_css(css).unwrap();
-        let styles = resolve_styles(&tree, &sheet);
-        let mut scene = build_scene(&tree, &styles);
-        let fonts = font_table().expect("test needs a font");
-        solve(&mut scene, &fonts, (200.0, 200.0), &empty_sizes());
-        let root = scene.get(scene.roots[0]).unwrap();
-        let a = scene.get(root.children[0]).unwrap();
-        let b = scene.get(root.children[1]).unwrap();
-        assert!((a.layout_rect.h - 50.0).abs() < 0.1);
-        assert!((b.layout_rect.h - 30.0).abs() < 0.1);
-        assert!((b.layout_rect.y - 50.0).abs() < 0.1); // 垂直堆叠
-    }
-
-    /// 回归：未显式写 flex-direction 的 div 默认垂直堆叠（column）。
-    /// 防止有人把 ResolvedStyle::default 的 flex_direction 改回 Row。
-    #[test]
-    fn default_div_is_column() {
-        let html = r#"<div class="root"><div class="a"></div><div class="b"></div></div>"#;
-        let css = r#".root { width: 200px; height: 200px; } .a { width: 50px; height: 50px; } .b { width: 30px; height: 30px; }"#;
-        let tree = parse_html(html).unwrap();
-        let sheet = parse_css(css).unwrap();
-        let styles = resolve_styles(&tree, &sheet);
-        let mut scene = build_scene(&tree, &styles);
-        let fonts = font_table().expect("test needs a font");
-        solve(&mut scene, &fonts, (200.0, 200.0), &empty_sizes());
-        let root = scene.get(scene.roots[0]).unwrap();
-        let a = scene.get(root.children[0]).unwrap();
-        let b = scene.get(root.children[1]).unwrap();
-        // 垂直堆叠：b.y ≈ a.h（a 在上，b 在下）。
-        // 若默认回退到 row，b.y 会 ≈ 0（横排），此断言失败。
-        assert!(
-            (b.layout_rect.y - a.layout_rect.h).abs() < 0.1,
-            "expected column stack (b.y ≈ a.h), got a.h={} b.y={}",
-            a.layout_rect.h,
-            b.layout_rect.y
-        );
-        // a、b 同 x（列内左对齐），x 都 ≈ 0。
-        assert!(a.layout_rect.x.abs() < 0.1);
-        assert!(b.layout_rect.x.abs() < 0.1);
-    }
-
     /// Image measure 三档优先级（CSS Length > 真实像素 > 64×64 兜底）。
-    /// 用 Scene::build 手搓 Image scene，不走 parse_html。
+    /// 用 Scene::build 手搓 Image scene。
     ///
     /// **布局陷阱**：`solve` 会用 `root_size` 覆盖根节点的 taffy size（见 prod
     /// `set_style(... size: Length(root_size) ...)`），故 Image 不能做根——否则

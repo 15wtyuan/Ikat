@@ -536,11 +536,6 @@ impl Stage {
         crate::scene::dynamic::set_text(self.scene.as_mut().ok_or("no scene")?, node, text)
     }
 
-    /// 改 RichText 节点的 markup（runtime 解析 → runs + dirty）。
-    pub fn set_rich_text(&mut self, node: NodeId, markup: &str) -> Result<(), String> {
-        crate::scene::dynamic::set_rich_text(self.scene.as_mut().ok_or("no scene")?, node, markup)
-    }
-
     /// 改 Image 节点 src + 标 dirty_mesh。
     pub fn set_src(&mut self, node: NodeId, src: &str) -> Result<(), String> {
         crate::scene::dynamic::set_src(self.scene.as_mut().ok_or("no scene")?, node, src)
@@ -777,7 +772,7 @@ impl Stage {
             .resize_with(scene.nodes.capacity() + 1, || None);
         // 每帧先清空所有 slot，再写入本帧有 fragments 的 slot。
         // resize_with 只填充新增 slot，已有的 stale slot 不变——若不主动清空，
-        // 上一帧有链接、本帧 set_rich_text 删了链接的节点会保留 stale fragments，
+        // 上一帧有链接、本帧删了链接的节点会保留 stale fragments，
         // rich_link_at 读到已删 link_id。
         scene.rich_fragments.fill(None);
         for (node_id_u32, frags) in &rich_fragments {
@@ -793,28 +788,7 @@ impl Stage {
         let frame = self.tick_and_render();
         serde_json::to_string_pretty(&frame.nodes).unwrap()
     }
-
-    /// 测试专用：HTML+CSS 文本直接构 scene。保留 parse 路径供 stage/render 集成测试用
-    /// ——这些测验证 parse→render 管线，不走 package/instantiate。
-    /// 语义：parse_html → resolve_styles → build_scene → self.scene。
-    /// 不涉及纹理注册（图集归 Unity）。
-    #[cfg(all(test, feature = "parse"))]
-    pub fn load_inline_for_test(&mut self, html: &str, css: &str) -> Result<(), String> {
-        let tree = crate::parse::dom::parse_html(html)?;
-        let sheet = crate::parse::css::parse_css(css)?;
-        let styles = crate::style::cascade::resolve_styles(&tree, &sheet);
-        self.tweens.clear();
-        if let Some(scene) = self.scene.as_mut() {
-            scene.scroll.clear();
-        }
-        self.prev_node_hashes.clear();
-        self.scene = Some(crate::scene::node::build_scene(&tree, &styles));
-        Ok(())
-    }
 }
-
-#[cfg(all(test, feature = "parse"))]
-mod tests;
 
 /// 动态建树 API 测试（不依赖 parse feature——runtime API 可用性门）。
 /// 用 Stage::new_for_test() 建空 scene，用 create_root/create_node 返回的 NodeId，不硬编码值。

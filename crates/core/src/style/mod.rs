@@ -1,5 +1,3 @@
-#[cfg(feature = "parse")]
-pub mod cascade;
 pub mod color_filter;
 pub mod dynamic;
 pub mod mapping;

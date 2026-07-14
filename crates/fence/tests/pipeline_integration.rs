@@ -1,7 +1,7 @@
-use loomgui_core::fence::diagnostic::{DiagnosticCode, Severity};
-use loomgui_core::fence::ir::IrNodeKind;
-use loomgui_core::fence::pipeline::parse_template;
-use loomgui_core::fence::schema::tag::SemanticKind;
+use loomgui_fence::diagnostic::{DiagnosticCode, Severity};
+use loomgui_fence::ir::IrNodeKind;
+use loomgui_fence::pipeline::parse_template;
+use loomgui_fence::schema::tag::SemanticKind;
 
 #[test]
 fn complex_template_parses_clean() {

@@ -4,9 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-scraper = { version = "0.19", optional = true }
-cssparser = { version = "0.34", optional = true }
-html5gum = { version = "0.8", optional = true }
 taffy = { version = "0.5", features = ["serde"] }
 ttf-parser = "0.20"
 ab_glyph_rasterizer = "0.1"
@@ -15,63 +12,7 @@ unicode-linebreak = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bincode = "1"
-# slotmap 1.1.1 已在 Cargo.lock（taffy 间接依赖）。Scene.nodes 用 SlotMap<DefaultKey, Node>：
-# 应用层 NodeId(pub u32)（20bit index + 12bit gen，FFI/C# 透明）经 from_ffi/as_ffi 桥接到
-# slotmap DefaultKey（详见 scene/node.rs NodeId impl 与 Scene::key_for）。
+# slotmap: Scene.nodes uses SlotMap<DefaultKey, Node>. The application-layer
+# NodeId(pub u32) bridges to/from slotmap DefaultKey via from_ffi/as_ffi
+# (see scene/node.rs NodeId impl and Scene::key_for).
 slotmap = { version = "1.1", features = [] }
-
-[dev-dependencies]
-insta = "1"
-criterion = { version = "0.5", features = ["html_reports"] }
-
-[[bench]]
-name = "frame_emit"
-harness = false
-required-features = ["parse"]
-
-[features]
-default = ["parse"]
-parse = ["dep:scraper", "dep:cssparser", "dep:html5gum"]
-
-# parse-feature-gated targets —— 凡引用 parse 链路（parse 模块 / build_scene / cascade /
-# extract_*）的 test/example/bench 必须声明 required-features = ["parse"]，否则
-# `cargo build/test --no-default-features --all-targets` 仍会编译它们并因 parse 模块缺失而失败。
-[[test]]
-name = "snapshot"
-required-features = ["parse"]
-
-[[test]]
-name = "fence_contract"
-required-features = ["parse"]
-
-[[test]]
-name = "node_sort_keys"
-required-features = ["parse"]
-
-[[test]]
-name = "stage_getters"
-required-features = ["parse"]
-
-[[test]]
-name = "v1e_dirty"
-required-features = ["parse"]
-
-[[test]]
-name = "r1_schema_contract"
-required-features = ["parse"]
-
-[[test]]
-name = "r1_pipeline"
-required-features = ["parse"]
-
-[[example]]
-name = "dump_showcase_text"
-required-features = ["parse"]
-
-[[example]]
-name = "dump_render"
-required-features = ["parse"]
-
-[[example]]
-name = "dump_interact"
-required-features = ["parse"]

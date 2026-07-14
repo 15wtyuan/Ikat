@@ -70,7 +70,7 @@
 
 ## 3. HTML/CSS 围栏
 
-> **权威清单 = `docs/design/fence.md`**（真相源是可执行测试 `crates/core/tests/fence_contract.rs`）。本节只写设计哲学与原则。
+> **权威清单 = `docs/design/fence.md`**（真相源是可执行测试 `crates/fence/src/schema/ + crates/fence/tests/`）。本节只写设计哲学与原则。
 
 ### 3.1 设计哲学：标准 HTML 语义 + AI 强先验
 
@@ -146,7 +146,7 @@ HTML 没有原生 Tabs、Tree 等标签。此类控件采用白名单内的标�
 
 单一真相源 = machine-readable schema（标签、属性、结构属性、CSS 值、运行时类型、后端需求）。解析器、打包器、绑定生成器、文档和测试不得各维护一份白名单。
 
-防漂移门：`cargo test fence_contract`——改围栏后必跑。
+防漂移门：`cargo test -p loomgui_fence`——改围栏后必跑。
 
 ---
 

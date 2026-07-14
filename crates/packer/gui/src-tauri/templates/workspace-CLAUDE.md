@@ -1,4 +1,4 @@
-# LoomGUI Workspace
+﻿# LoomGUI Workspace
 
 This is a LoomGUI workspace directory. The workspace is the single source of truth for your game UI: HTML/CSS components, image assets for atlases, fonts, and the build configuration in `loom.workspace.json`.
 
@@ -6,17 +6,17 @@ This is a LoomGUI workspace directory. The workspace is the single source of tru
 
 ```
 workspace/
-  loom.workspace.json       ← The configuration file (see below)
-  ui/                       ← HTML/CSS components (one .pkg.bin per package)
+  loom.workspace.json       -> The configuration file (see below)
+  ui/                       -> HTML/CSS components (one .pkg.bin per package)
     showcase/
       main.html
       main.css
-  assets/                   ← Image source files for atlases (PNG only)
+  assets/                   -> Image source files for atlases (PNG only)
     icons/
       home.png
-  fonts/                    ← Font files (.ttf / .otf / .ttc)
+  fonts/                    -> Font files (.ttf / .otf / .ttc)
     NotoSansSC.ttc
-  dist/                     ← Default output directory (configurable via output_dir)
+  dist/                     -> Default output directory (configurable via output_dir)
 ```
 
 ## `loom.workspace.json` fields
@@ -81,23 +81,56 @@ loom-pkg build <path-to-this-workspace>
 ```
 
 This reads `loom.workspace.json`, processes all packages and atlases, and produces:
-- `{output_dir}/ui/*.pkg.bin` — packaged UI components
-- `{output_dir}/atlas/{name}.png` + `{name}.atlas.json` — texture atlases with sprite UV maps
-- `{output_dir}/fonts/*.bytes` — font binary copies
-- `{output_dir}/loom.runtime.json` — runtime bootstrap manifest
+- `{output_dir}/ui/*.pkg.bin` - packaged UI components
+- `{output_dir}/atlas/{name}.png` + `{name}.atlas.json` - texture atlases with sprite UV maps
+- `{output_dir}/fonts/*.bytes` - font binary copies
+- `{output_dir}/loom.runtime.json` - runtime bootstrap manifest
 
 ## Error reporting
 
 The packer reports actionable build errors:
 
-- **Missing image**: an `<img src="...">` references an image not found in any atlas directory, and no `default` atlas exists to catch it → error listing the orphaned sprite keys
-- **Atlas conflict**: the same image path is covered by more than one atlas → error listing the conflict
-- **Atlas overflow**: images don't fit within the atlas `max_size` pages → error with size details
-- **Missing font**: a font `file` path cannot be found → error with the path
-- **Fence violation**: HTML uses tags or CSS properties outside the LoomGUI fence → compile-time error (see below)
+- **Missing image**: an `<img src="...">` references an image not found in any atlas directory, and no `default` atlas exists to catch it -> error listing the orphaned sprite keys
+- **Atlas conflict**: the same image path is covered by more than one atlas -> error listing the conflict
+- **Atlas overflow**: images don't fit within the atlas `max_size` pages -> error with size details
+- **Missing font**: a font `file` path cannot be found -> error with the path
+- **Fence violation**: HTML uses tags, attributes, or CSS outside the LoomGUI fence -> compile-time error listing all violations with file/line/column (see below)
 
 ## Fence (supported HTML/CSS subset)
 
-LoomGUI only supports a specific subset of HTML/CSS called the "fence". The authoritative source is in the LoomGUI repository (`crates/core/tests/fence_contract.rs`). The loomgui-editor skill (`.claude/skills/loomgui-editor/SKILL.md`) summarizes the key fence rules.
+LoomGUI validates HTML/CSS against a schema-driven fence at build time. The authoritative specification is in the LoomGUI repository at `docs/design/fence.md`, and the machine-readable schema lives in `crates/fence/src/schema/`. The loomgui-editor skill (`.claude/skills/loomgui-editor/SKILL.md`) summarizes the key rules.
 
-**Critical rule**: fence-violating tags cause a parse error (build fails). Fence-violating CSS properties are silently ignored (they don't affect rendering, which means your preview may look different from the real output).
+**Key principle**: Tags determine stable object types; CSS grants behavior capabilities but never changes types. Fence violations cause **build-time errors** (not silent degradation). The packer collects all diagnostics in one pass and reports them together.
+
+### Supported tags (30 total)
+
+**Document shell** (consumed at build time, not in runtime tree): `html`, `head`, `body`, `title`, `meta`, `style`, `link`
+
+**Runtime tags** (23): `div`, `header`, `nav`, `p`, `span`, `strong`, `em`, `br`, `label`, `button`, `a`, `img`, `canvas`, `input`, `textarea`, `select`, `option`, `progress`, `ul`, `ol`, `li`, `template`, `slot`
+
+Custom elements with a hyphen (e.g. `<my-widget>`) are recognized as CustomElement.
+
+### Layout semantics (standard HTML/CSS)
+
+- `div`, `header`, `nav`, `p`, `ul`, `ol`, `li`, `option` default to `display:block`.
+- `span`, `strong`, `em`, `label`, `button`, `a`, `img`, `input`, etc. default to `display:inline`.
+- `display:flex` defaults to `flex-direction:row` (standard CSS default). Use `flex-direction:column` for vertical stacking.
+- `display:block` and `display:flex` select internal layout strategy without changing the node type.
+- `overflow:auto` or `overflow:scroll` enables scroll behavior.
+- Use `gap` for child spacing (not margin).
+- `display:grid` is NOT supported - it is a build-time error, not silently downgraded to flex.
+
+### CSS properties
+
+The fence recognizes a whitelist of CSS properties (width/height, flexbox, padding/margin, border, background, opacity, overflow, color/font/text, transform, filter, transitions, etc.). Properties outside the whitelist cause build-time errors. See `docs/design/fence.md` for the complete list.
+
+### What causes build errors
+
+- Unknown tag (not in the 30-tag fence, not a custom element with hyphen)
+- Unknown attribute (not a global attr, not a tag-specific structural/content attr)
+- Unknown CSS property or invalid keyword value (e.g. `display:grid`)
+- Invalid content model (e.g. `<div>` inside `<span>`)
+- Duplicate `id` in the same template scope
+- Missing `label[for]`, `aria-controls`, or `aria-labelledby` target
+
+All errors are collected and reported together with file name, line, and column.

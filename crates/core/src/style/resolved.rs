@@ -64,7 +64,7 @@ pub struct Gradient2 {
 
 /// LoomGUI display 旁路字段（与 taffy_style.display 解耦）。
 ///
-/// 打包期 desugar 据此识别 `display:block` div（展开成 flex div + RichText 叶）。
+/// （R1+ 围栏不允许 `display:block`——围栏外标签编译期报错。）
 /// IR 层 block div 仍是 flex（taffy_style.display = Flex）——不用 taffy `Display::Block`，
 /// 那会触发 taffy block 布局语义，违反"div 永远 flex"不变量。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -150,7 +150,7 @@ impl LocalTransform {
 pub struct ResolvedStyle {
     /// taffy 布局字段（flex/padding/margin/size/min/max/gap/position 等）
     pub taffy_style: TaffyStyle,
-    /// CSS display 的 LoomGUI 旁路标记（与 taffy_style.display 解耦）。打包期 desugar 用。
+    /// CSS display 的 LoomGUI 旁路标记（与 taffy_style.display 解耦）。
     pub display_mode: DisplayMode,
     /// 视觉字段（不进 taffy，渲染层消费）
     pub background_color: Option<[f32; 4]>, // rgba 0..1

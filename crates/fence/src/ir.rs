@@ -1,5 +1,3 @@
-#![cfg(feature = "parse")]
-
 /// Byte offset range in source text (start inclusive, end exclusive).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Span {
@@ -36,7 +34,7 @@ pub enum IrNodeKind {
 pub struct IrElement {
     pub tag: String,
     pub attributes: Vec<IrAttribute>,
-    pub semantic: Option<crate::fence::schema::tag::SemanticKind>,
+    pub semantic: Option<crate::schema::tag::SemanticKind>,
 }
 
 #[derive(Debug, Clone)]
