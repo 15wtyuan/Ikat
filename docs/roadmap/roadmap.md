@@ -74,9 +74,21 @@
 
 ### 2.1 阶段总览
 
+> **顺序原则：靶子先行，护城河先验。** 项目的差异化只在设计期 HTML/CSS 的「AI 可预测性」上——即围栏内 HTML 渲染得像不像真浏览器。R2–R8 是让框架「成熟」（类型化 API、控件、ListView，FairyGUI/UITK 都有），不加宽护城河。所以在投入几个月运行时重写**之前**，先把目标冻结成可验收的靶子，并用一道差分门给核心赌注定性。
+
 ```text
-R1（围栏 schema + 新解析器）
+R1（围栏 schema + 新解析器）✅ 核心完成
     │
+    ├─ R1.1：架构清理 + 围栏终态化（showcase 驱动补全，见 §2.2.1）
+    ▼
+【靶子冻结】只依赖 R1，现在就能做，与运行时解耦
+    ├─ 终态 showcase HTML/CSS ＝ 渲染目标（R8 的设计期半扇）
+    └─ 终态 C# 公共 API 签名文件 ＝ 用户使用目标
+    │      能编译即可，不搭 mock 运行时；作为 R2–R7 的验收靶子
+    ▼
+【护城河差分门】最小 IR→渲染接线 + Chromium 差分
+    │      同一段围栏 HTML：浏览器截图 vs LoomGUI 渲染截图，比矩形/换行/位置
+    │      先回答「AI 写的围栏 HTML，LoomGUI 渲染得像不像浏览器」，再投入大重写
     ▼
 R2（Scene/Node 类型化对象树）
     │
@@ -93,8 +105,14 @@ R5（标准控件） R6（ListView） R7（文本模型）
               R4（Unity C# 公共 API）
                 │
                 ▼
-              R8（Showcase 迁移）
+              R8 合闸（showcase 运行时半扇跑通）
 ```
+
+**关于差分门的成本诚实注脚**：R1 产物 `ParsedTemplate{ tree, styles, ... }`（`crates/fence/src/pipeline.rs`）只走到「验证 + 带语义的 IR 树」，**没有 IR→scene→layout→render 那段桥**（旧 core 仍用旧 `dom.rs`）。所以强版差分（LoomGUI 渲染 vs 浏览器，而非「HTML 在浏览器好不好看」）**不是零成本**——它需要先接一段最小的「新围栏 IR → 渲染」线（本质是 R2/R3 的一小片）。关键性质仍成立：差分门在 R2–R7 全面铺开**之前**，先冻结靶子、接一小段线定性护城河，成立了再投几个月重写。
+
+**R8 拆成两半，依赖完全不同**：
+- **设计期半扇（R8-A）**：把 showcase 改写成终态 HTML/CSS。只依赖 R1，属于「靶子冻结」阶段，现在就做。
+- **运行时半扇（R8-B）**：showcase 用终态 C# API 跑起来、渲染正确。依赖 R2–R7 全部就位，是最后的合闸验收。二者不是一件事，B 不可能先于运行时完成（B 的定义就是「运行时把它跑起来」）。
 
 R5/R6/R7 在 R3 完成后可以并行推进（多会话同时开工）。R4 依赖 R2+R3 的核心契约，但可以在 R5/R6/R7 之后做（开发期间无人使用，不需要先让上层可用）。
 
@@ -147,6 +165,14 @@ R5/R6/R7 在 R3 完成后可以并行推进（多会话同时开工）。R4 依�
 9. **template 根验证**：ListView 内的 template 根必须是 li（spec §3.4）。
 10. **Custom Element 注册验证**：自定义元素名称必须含 `-`（spec §3.4，当前只做 hyphen 检测，无注册机制）。
 11. **label for 验证**：`label[for]` 指向的 ID 必须存在于当前组件作用域（spec §3.4，Stage 5 未实现）。
+
+**围栏终态化（review 结论，2026-07-14）**：当前 `TAGS`（23 个）是能跑通验证的**骨架子集**，不是 spec §8 的终态。对比缺口——
+
+- **纯别名标签**（便宜，语义已有）：`main/section/footer/article/aside`（→ `Container`）、`h1-h6/small`（→ `TextBlock`/`TextElement`）。
+- **缺控件标签**：`meter`、`details/summary/dialog`、`form/fieldset/legend`（后两组需新 `SemanticKind`）。
+- **结构性缺口（非加条目可解）**：`resolve_semantic(tag, input_type)` 只看 `input[type]`，**完全不看 `role`**，`SemanticKind` 里也无 `TabList` 等复合控件。但 spec §8.1/§12 明确 `<div role="tablist"> → TabList`。补它要改 `resolve_semantic` 签名 + annotate 逻辑，单独立项，别当成加标签。
+
+**补全策略：showcase 驱动，不凭空补到理论终态。** 终态 showcase（靶子冻结阶段）会精确暴露实际需要哪些标签/role；缺什么补什么。唯一现在就该记账的是上面那个 role dispatch 结构缺口，因为它是签名级改动而非注册表增项。
 
 **依赖**：无（可立即开始讨论）。
 **验证**：上述每一项完成或明确 defer 后，R1.1 关闭，进入 R2。
@@ -318,6 +344,8 @@ RenderNode payload 加 `Mask{shape_ref, mode: MaskMode}`，MaskMode{Write,Conten
 ## 6. 关键决策
 
 - **R 系列是范式转换，不是功能叠加**：公共 API 从"stage 全局"重做为"类型化对象树"，旧接口退役。底层算法（渲染/文本/滚动）保留复用，只重写接口形状。
+- **靶子先行，护城河先验（2026-07-14 定）**：护城河只在设计期 HTML/CSS 的「AI 可预测性」上——R2–R8 是让框架成熟（FairyGUI/UITK 都有），不加宽护城河。故 R1 之后先冻结靶子（终态 showcase HTML + 终态 C# API 签名，不搭 mock 运行时），再用 Chromium 差分门（LoomGUI 渲染 vs 浏览器，非「HTML 在浏览器好不好看」）给核心赌注定性，然后才投入 R2–R7 大重写。差分门需先接一段最小 IR→渲染线（R2/R3 的一小片），不是零成本，但仍在大重写之前。
+- **围栏终态化由 showcase 驱动**：现有 23 标签是骨架子集；缺什么由终态 showcase 暴露后补什么，不凭空补到理论清单。role dispatch（`<div role=tablist>→TabList`）是签名级结构缺口，单独立项。
 - **设计自上而下，实现按合理路径**：设计是公共 API 优先，实现可以从内向外（R1→R2→R3 先骨架），不需要先让上层可用（开发期间无人使用）。
 - **尽量并行**：R5/R6/R7 在 R3 完成后可多会话同时开工。
 - **v1.5 Controller 停止**：旧 `data-controller/data-page` 路线停止，转入 R5 标准 ARIA Pattern。

@@ -100,7 +100,7 @@ pub struct Node {
     pub children: Vec<NodeId>,
     pub dirty_mesh: bool,
     pub dirty_text: bool,
-    /// 打包期 resolve_styles 产物（不变，rematch 基线）。style 是运行时 rematch 覆写值。
+            /// 打包期烘焙的 style（不变，rematch 基线）。style 是运行时 rematch 覆写值。
     pub base_style: ResolvedStyle,
     /// 运行时 class 列表（建树时从 ElementData.classes 填；供动态规则 class 选择器匹配）。
     pub classes: Vec<String>,
@@ -451,4 +451,3 @@ impl Scene {
 
 #[cfg(test)]
 mod tests;
-

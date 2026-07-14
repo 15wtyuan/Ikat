@@ -1,22 +1,19 @@
-//! 运行时伪类重匹配的动态规则表。
+//! 运行时伪类匹配的动态规则层。
 //!
-//! 本模块填实 `match_element_with_state`（完整后代链匹配 + 伪类状态门）+
-//! `rematch_pseudo_classes`（全量节点重 cascade，写 Node.style + 标 layout dirty）。
+//! 本模块实现 \match_element_with_state\：选择器匹配 + 伪类状态标 +
+//! ematch_pseudo_classes\，对所有节点做重算（写 Node.style + 标 layout dirty）。
 //!
-//! **常驻（不 gate）：**本模块的选择器数据模型（`ParsedSelector`/`Compound`/`Combinator`/
-//! `Specificity`）+ `Declaration`（CSS 声明）+ `compound_matches_node`（运行时 compound 匹配）+
-//! 动态规则匹配全不依赖 parse feature——bincode 序列化进 `.pkg.bin` 的就是这些结构
-//! （runtime 不重新 parse，直接用反序列化结构）。`parse::selector`/`parse::css`
-//! 只保留解析器函数（string → 这些结构），仍 `#[cfg(feature="parse")]`，本模块 `pub use` 重导出
-//! 数据类型以维持路径兼容（`loomgui_core::parse::selector::ParsedSelector` 仍可达）。
+//! 类型模型（\ParsedSelector\/\Compound\/\Combinator\/\Specificity\）+ \Declaration\（CSS 声明）+
+//! \compound_matches_node\（运行时 compound 匹配）+ 动态规则匹配全部无条件编译——
+//! bincode 反序列化的 \.pkg.bin\ 就是这些结构，runtime 不再 parse，直接用反序列化结构。
+//! 字符串 → 这些结构的解析器在 fence crate（\loomgui_fence\）。
 
 use serde::{Deserialize, Serialize};
 
-// ── 选择器数据模型（常驻；parse feature off 时仍可用于 bincode 反序列化 + rematch）──
+// 运行时选择器类型模型（无条件编译，支持 bincode 反序列化 + rematch）。
 
-/// CSS 声明（prop + value）。序列化进 .pkg.bin DynamicRuleSection。
-/// 与 `parse::css::Declaration` 同型——parse feature 下 `parse::css` 重导出本类型保持路径兼容。
-/// `PartialEq` 供 instantiate 伪类规则去重（同选择器 + 同声明视为重复规则）。
+/// CSS 声明（prop + value），序列化进 .pkg.bin DynamicRuleSection。
+/// \PartialEq\ 用于 instantiate 伪类去重（同选择器 + 同声明视为重复，跳过）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Declaration {
     pub prop: String,
@@ -468,8 +465,6 @@ fn emit_transition_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::css::Declaration;
-    use crate::parse::selector::parse_selector;
     use crate::scene::node::{Node, NodeId, NodeKind, Rect, Scene};
     use crate::style::resolved::TransitionSpec;
     use crate::tween::{Ease, TweenProp};
@@ -500,9 +495,93 @@ mod tests {
         s.get(s.roots[0]).unwrap().children[0]
     }
 
+    /// Construct a ParsedSelector manually (no parse dependency).
+    /// Supports the subset used in these tests: `.class`, `.class:hover`,
+    /// `.class:active`, `.class:disabled`, `[attr]`, `[attr="val"]`, and
+    /// tag selectors.
+    /// Construct a ParsedSelector manually (no parse dependency).
+    /// Supports: .class, #id, :hover/:active/:disabled/:focus,
+    /// [attr], [attr="val"], tag, and descendant combinator (space).
+    fn hand_selector(sel: &str) -> ParsedSelector {
+        let raw = sel.to_string();
+        let mut compounds = Vec::new();
+        for part in sel.split_whitespace() {
+            let mut c = Compound {
+                tag: None,
+                classes: Vec::new(),
+                id: None,
+                combinator: Combinator::Descendant,
+                pseudo_hover: false,
+                pseudo_active: false,
+                pseudo_disabled: false,
+                pseudo_focus: false,
+                attrs: Vec::new(),
+            };
+            let mut rest = part;
+            while !rest.is_empty() {
+                if rest.starts_with('.') {
+                    let r = &rest[1..];
+                    let end = r
+                        .find(|ch: char| !ch.is_alphanumeric() && ch != '-' && ch != '_')
+                        .unwrap_or(r.len());
+                    c.classes.push(r[..end].to_string());
+                    rest = &r[end..];
+                } else if rest.starts_with('#') {
+                    let r = &rest[1..];
+                    let end = r
+                        .find(|ch: char| !ch.is_alphanumeric() && ch != '-' && ch != '_')
+                        .unwrap_or(r.len());
+                    c.id = Some(r[..end].to_string());
+                    rest = &r[end..];
+                } else if let Some(r) = rest.strip_prefix(":hover") {
+                    c.pseudo_hover = true;
+                    rest = r;
+                } else if let Some(r) = rest.strip_prefix(":active") {
+                    c.pseudo_active = true;
+                    rest = r;
+                } else if let Some(r) = rest.strip_prefix(":disabled") {
+                    c.pseudo_disabled = true;
+                    rest = r;
+                } else if let Some(r) = rest.strip_prefix(":focus") {
+                    c.pseudo_focus = true;
+                    rest = r;
+                } else if rest.starts_with('[') {
+                    let close = rest.find(']').unwrap();
+                    let inner = &rest[1..close];
+                    if let Some(eq) = inner.find('=') {
+                        c.attrs.push(AttrSelector {
+                            name: inner[..eq].to_string(),
+                            op: AttrOp::Eq,
+                            value: Some(inner[eq + 1..].trim_matches('"').to_string()),
+                        });
+                    } else {
+                        c.attrs.push(AttrSelector {
+                            name: inner.to_string(),
+                            op: AttrOp::Exists,
+                            value: None,
+                        });
+                    }
+                    rest = &rest[close + 1..];
+                } else {
+                    let end = rest.find(['.', '#', ':', '[']).unwrap_or(rest.len());
+                    if end > 0 {
+                        c.tag = Some(rest[..end].to_string());
+                    }
+                    rest = &rest[end..];
+                }
+            }
+            compounds.push(c);
+        }
+        ParsedSelector {
+            raw,
+            compound: compounds,
+            specificity: Specificity(0, 0, 0),
+        }
+    }
+
     fn rule(sel: &str, prop: &str, val: &str) -> DynamicRule {
         DynamicRule {
-            selector: parse_selector(sel).unwrap(),
+            selector: hand_selector(sel),
             declarations: vec![Declaration {
                 prop: prop.to_string(),
                 value: val.to_string(),
@@ -841,8 +920,7 @@ mod tests {
 
     #[test]
     fn attr_selector_bincode_roundtrip() {
-        use crate::parse::selector::parse_selector;
-        let s = parse_selector(r#"[data-page="1"]"#).unwrap();
+        let s = hand_selector(r#"[data-page="1"]"#);
         assert_eq!(s.compound.len(), 1);
         assert_eq!(s.compound[0].attrs.len(), 1, "[data-page=\"1\"] → one attr");
         let a = &s.compound[0].attrs[0];

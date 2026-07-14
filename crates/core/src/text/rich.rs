@@ -148,7 +148,6 @@ pub struct RichBaseStyle {
     pub deco: RichDeco,
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +240,4 @@ mod tests {
         assert_eq!(back[1].link_id, Some(3));
         assert_eq!(back[1].weight, RichWeight::Bold);
     }
-
 }
