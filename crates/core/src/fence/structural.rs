@@ -40,8 +40,12 @@ fn validate_content_model(
 
         for &child_id in &tree.nodes[parent_id.0].children {
             match &tree.nodes[child_id.0].kind {
-                IrNodeKind::Text(_) => {
-                    // Text nodes: reject if parent does not accept text
+                IrNodeKind::Text(text) => {
+                    // Skip whitespace-only text nodes (indentation, line breaks).
+                    if text.trim().is_empty() {
+                        continue;
+                    }
+                    // Non-whitespace text: reject if parent does not accept text
                     if matches!(
                         parent_spec.content,
                         ContentModel::None | ContentModel::Only(_)
