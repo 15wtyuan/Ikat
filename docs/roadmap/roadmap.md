@@ -102,6 +102,8 @@ R5/R6/R7 在 R3 完成后可以并行推进（多会话同时开工）。R4 依�
 
 **目标**：建立 machine-readable schema 作为标签/属性/CSS 值/运行时类型映射的单一真相源，重写 HTML parser 支持新围栏（全部标准元素），打包器做新围栏验证。
 
+**状态**：✅ 核心已完成（6 阶段流水线 + schema + 855 测试全绿）。以下遗留项进入 R1.1。
+
 **内容**：
 - Schema 驱动的围栏注册表（标签 → 类型、结构属性、CSS 属性白名单、支持值）。
 - 新 HTML parser（支持 div/section/header/footer/main/nav/article/aside、span/p/h1-h6/strong/em/small/br、label、button/a、img/canvas、input/textarea/select/option、progress/meter、ul/ol/li、template、details/summary/dialog、form/fieldset/legend、slot、html/head/body/title/meta/style/link）。
@@ -110,6 +112,44 @@ R5/R6/R7 在 R3 完成后可以并行推进（多会话同时开工）。R4 依�
 
 **依赖**：无。
 **验证**：fence contract tests 正例 + 反例全绿。
+
+### 2.2.1 R1.1：R1 遗留项与架构清理
+
+> R1 核心实现完成（commit `730d4dc`），但有几个架构问题和清理项需要先解决，再进入 R2。
+
+**待讨论的架构问题：**
+
+1. **围栏代码的归属 crate**：当前围栏验证流水线（tree_builder / fence_gate / css_resolve / structural / pipeline）全部放在 `crates/core` 里，靠 `#[cfg(feature = "parse")]` 门控。但 roadmap 原文说"打包器做新围栏验证"——围栏是打包期工具，运行时引擎只读 `.pkg.bin`，不需要验证代码。需要决定：
+   - 围栏验证流水线搬到 `crates/packer`？
+   - schema 定义（TagSpec / SemanticKind 等）留在 core（R2/R3 需要它）还是拆独立 `crates/schema`？
+   - tree_builder 该跟着谁——它产出 IrTree，R2 要消费它构建运行时对象树。
+   - `parse/dom.rs` 的旧 `FENCE_TAGS` 和 `apply_decl` 的 `feature = "parse"` 门控是否应该调整。
+
+2. **围栏的闭环路径**：打包器初始化工程目录 → AI 在里面写 HTML/CSS → 打包器用围栏验证 → 验证通过后编译成 `.pkg.bin` → 运行时引擎消费。这条路径需要和打包器的实际流程对齐，围栏验证应该嵌入打包器的工作流，不是 core 的职责。
+
+**待清理的旧代码：**
+
+3. **退役旧 `FENCE_TAGS`**：`crates/core/src/parse/dom.rs` 里的 `FENCE_TAGS = [div,span,img,button]` 和 `display:block` desugar 逻辑仍在。roadmap 明确要求退役，R1 没做。
+
+4. **`fence_contract.rs` 旧测试**：`crates/core/tests/fence_contract.rs` 测的是旧四标签围栏，需要用新 `r1_schema_contract.rs` + `r1_pipeline.rs` 替代或合并。
+
+**待更新的文档：**
+
+5. **`docs/design/fence.md`**：当前内容是旧四标签围栏（标了"R1 完成后重写"）。需要用新 schema（30 标签、三正交维度 CSS、六阶段流水线）完全重写。
+
+6. **`crates/packer/gui/src-tauri/templates/`**：打包器模板（workspace-CLAUDE.md / SKILL.md）还引用旧围栏规则，需要更新为新围栏。
+
+7. **`docs/design/main-design.md`**：确认围栏章节是否已经用新设计（之前讨论说"直接用新设计，不保留旧设计"），检查一致性。
+
+**R1 未完成的验证项（Stage 5 缺口）：**
+
+8. **ARIA 关系验证**：`aria-controls` / `aria-labelledby` 的 IdRef 目标存在性 + role 匹配（spec §3.4）。
+9. **template 根验证**：ListView 内的 template 根必须是 li（spec §3.4）。
+10. **Custom Element 注册验证**：自定义元素名称必须含 `-`（spec §3.4，当前只做 hyphen 检测，无注册机制）。
+11. **label for 验证**：`label[for]` 指向的 ID 必须存在于当前组件作用域（spec §3.4，Stage 5 未实现）。
+
+**依赖**：无（可立即开始讨论）。
+**验证**：上述每一项完成或明确 defer 后，R1.1 关闭，进入 R2。
 
 ### 2.3 R2：Scene/Node 类型化对象树
 
