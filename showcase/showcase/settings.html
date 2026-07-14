@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="preview/preview-base.css">
+  <script src="preview/loom-preview.js"></script>
+  <title>LoomGUI 靶子冻结 Showcase · 设置</title>
+  <style>
+  .root { width:1920px; height:1080px; background-color:#0e1620; flex-direction:row; }
+  .sidebar { width:260px; background-color:#152433; padding:32px 20px; gap:6px; border-width:0 1px 0 0; border-color:#2a5a75; }
+  .side-back { color:#8ec5d8; font-size:14px; margin-bottom:20px; }
+  .side-title { color:#e0e6ec; font-size:22px; font-weight:700; margin-bottom:20px; }
+  .tab { text-align:left; color:#9aa0b4; font-size:16px; padding:12px 16px; border-radius:8px; }
+  .tab:hover { background-color:#1a2f45; }
+  .tab[aria-selected="true"] { background-color:#1a2f45; color:#5fb4d4; font-weight:700; }
+  .main { flex:1; padding:48px; gap:32px; overflow-y:auto; }
+  .page-title { color:#e0e6ec; font-size:36px; font-weight:700; }
+  .page-desc { color:#9aa0b4; font-size:15px; }
+  .field { flex-direction:row; align-items:center; justify-content:space-between; gap:24px; padding:14px 0; border-width:0 0 1px 0; border-color:#1a2f45; }
+  .field-label { color:#e0e6ec; font-size:16px; }
+  .field-hint { color:#6c7080; font-size:13px; margin-top:3px; }
+  .field-control { flex-direction:row; align-items:center; gap:12px; }
+  .val { color:#d4a44e; font-size:14px; min-width:48px; text-align:right; }
+  input[type="range"] { width:280px; accent-color:#5fb4d4; }
+  input[type="number"], input[type="text"], input[type="password"], input[type="search"] { background-color:#152433; border-width:0 0 0 2px; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; width:240px; }
+  select { background-color:#152433; border-width:0 0 0 2px; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; }
+  .checkbox-row { flex-direction:row; align-items:center; gap:10px; }
+  .radio-group { flex-direction:row; gap:20px; }
+  .radio-opt { flex-direction:row; align-items:center; gap:6px; color:#9aa0b4; font-size:15px; }
+  input[type="checkbox"], input[type="radio"] { accent-color:#5fb4d4; }
+  .panel { transition:opacity .2s; }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="sidebar">
+      <button class="side-back" id="back-home">← 返回首页</button>
+      <p class="side-title">设置</p>
+      <div role="tablist">
+        <button class="tab" role="tab" id="tab-audio" aria-controls="panel-audio" aria-selected="true">音效</button>
+        <button class="tab" role="tab" id="tab-graphics" aria-controls="panel-graphics" aria-selected="false">画面</button>
+        <button class="tab" role="tab" id="tab-controls" aria-controls="panel-controls" aria-selected="false">操作</button>
+        <button class="tab" role="tab" id="tab-account" aria-controls="panel-account" aria-selected="false">账号</button>
+        <button class="tab" role="tab" id="tab-search" aria-controls="panel-search" aria-selected="false">搜索</button>
+      </div>
+    </div>
+    <div class="main">
+      <div role="tabpanel" id="panel-audio" class="panel">
+        <p class="page-title">音效</p>
+        <p class="page-desc">input[type=range] · input[type=number]</p>
+        <div class="field">
+          <div><span class="field-label">主音量</span><p class="field-hint">range 0–100</p></div>
+          <div class="field-control"><input type="range" id="vol-master" min="0" max="100" value="80"><span class="val">80</span></div>
+        </div>
+        <div class="field">
+          <div><span class="field-label">音效音量</span><p class="field-hint">range 0–100</p></div>
+          <div class="field-control"><input type="range" id="vol-sfx" min="0" max="100" value="65"><span class="val">65</span></div>
+        </div>
+        <div class="field">
+          <div><span class="field-label">最多同时发声数</span><p class="field-hint">input[type=number] min/max/step</p></div>
+          <div class="field-control"><input type="number" id="snd-voices" min="1" max="64" step="1" value="32"><span class="val"> voices</span></div>
+        </div>
+      </div>
+      <div role="tabpanel" id="panel-graphics" class="panel" style="display:none">
+        <p class="page-title">画面</p>
+        <p class="page-desc">range · select/option · checkbox</p>
+        <div class="field">
+          <div><span class="field-label">亮度</span><p class="field-hint">range 0–100</p></div>
+          <div class="field-control"><input type="range" id="gfx-bright" min="0" max="100" value="50"><span class="val">50</span></div>
+        </div>
+        <div class="field">
+          <div><span class="field-label">分辨率</span><p class="field-hint">select + option</p></div>
+          <div class="field-control">
+            <select id="gfx-res">
+              <option value="1080">1920×1080</option>
+              <option value="1440">2560×1440</option>
+              <option value="4k">3840×2160</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <div><span class="field-label">全屏模式</span></div>
+          <div class="checkbox-row"><input type="checkbox" id="gfx-fullscreen" checked><label for="gfx-fullscreen">全屏</label></div>
+        </div>
+        <div class="field">
+          <div><span class="field-label">垂直同步</span></div>
+          <div class="checkbox-row"><input type="checkbox" id="gfx-vsync"><label for="gfx-vsync">启用</label></div>
+        </div>
+      </div>
+      <div role="tabpanel" id="panel-controls" class="panel" style="display:none">
+        <p class="page-title">操作</p>
+        <p class="page-desc">radio · text · label[for]</p>
+        <div class="field">
+          <div><span class="field-label">按键方案</span></div>
+          <div class="radio-group">
+            <div class="radio-opt"><input type="radio" id="key-default" name="keyscheme" checked><label for="key-default">默认</label></div>
+            <div class="radio-opt"><input type="radio" id="key-alt" name="keyscheme"><label for="key-alt">备用</label></div>
+            <div class="radio-opt"><input type="radio" id="key-lefty" name="keyscheme"><label for="key-lefty">左撇子</label></div>
+          </div>
+        </div>
+        <div class="field">
+          <div><span class="field-label">自定义按键</span><p class="field-hint">input[type=text]</p></div>
+          <div class="field-control"><input type="text" id="key-custom" placeholder="按键序列" value="Space"></div>
+        </div>
+      </div>
+      <div role="tabpanel" id="panel-account" class="panel" style="display:none">
+        <p class="page-title">账号</p>
+        <p class="page-desc">text · password · checkbox</p>
+        <div class="field">
+          <div><span class="field-label">账号名</span></div>
+          <div class="field-control"><input type="text" id="acc-name" placeholder="账号" value="player_01"></div>
+        </div>
+        <div class="field">
+          <div><span class="field-label">密码</span></div>
+          <div class="field-control"><input type="password" id="acc-pwd" placeholder="密码" value="secret"></div>
+        </div>
+        <div class="field">
+          <div><span class="field-label">记住账号</span></div>
+          <div class="checkbox-row"><input type="checkbox" id="acc-remember" checked><label for="acc-remember">记住</label></div>
+        </div>
+      </div>
+      <div role="tabpanel" id="panel-search" class="panel" style="display:none">
+        <p class="page-title">搜索</p>
+        <p class="page-desc">input[type=search]（围栏内 text 第 7 变体）</p>
+        <div class="field">
+          <div><span class="field-label">搜索设置项</span></div>
+          <div class="field-control"><input type="search" id="set-search" placeholder="输入关键词"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

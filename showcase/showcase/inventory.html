@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="preview/preview-base.css">
+  <script src="preview/loom-preview.js"></script>
+  <title>LoomGUI 靶子冻结 Showcase · 背包</title>
+  <style>
+  .root { width:1920px; height:1080px; background-color:#0e1620; }
+  .body { flex:1; flex-direction:row; gap:24px; padding:24px; overflow:hidden; }
+  .col-list { width:680px; flex-direction:column; gap:12px; overflow-y:auto; }
+  .col-title { color:#e0e6ec; font-size:22px; font-weight:700; margin-bottom:4px; }
+  .grid { flex-direction:row; flex-wrap:wrap; gap:12px; }
+  .item { width:120px; height:120px; background-color:#152433; border-radius:8px; padding:10px; gap:6px; align-items:center; position:relative; transition:transform .15s, background-color .15s; }
+  .item:hover { transform:scale(1.05); background-color:#1a2f45; }
+  .item.selected { border-width:0 0 0 3px; border-color:#d4a44e; }
+  .item-icon { width:56px; height:56px; }
+  .item-badge { position:absolute; top:6px; right:6px; background-color:#d4a44e; color:#0e1620; font-size:12px; font-weight:700; padding:1px 6px; border-radius:8px; }
+  .item-dur { width:80px; }
+  .col-detail { flex:1; background-color:#152433; border-radius:12px; padding:32px; gap:16px; overflow-y:auto; }
+  .detail-icon { width:160px; height:160px; align-self:center; }
+  .detail-name { color:#e0e6ec; font-size:30px; font-weight:700; align-self:center; }
+  .detail-rarity { color:#d4a44e; font-size:15px; align-self:center; }
+  .detail-desc { color:#9aa0b4; font-size:15px; line-height:1.7; }
+  .detail-attrs { flex-direction:row; gap:24px; justify-content:center; }
+  .attr { flex-direction:column; align-items:center; gap:4px; }
+  .attr-val { color:#8ec5d8; font-size:22px; font-weight:700; }
+  .attr-label { color:#6c7080; font-size:13px; }
+  .detail-actions { flex-direction:row; gap:12px; justify-content:center; margin-top:8px; }
+  .btn { padding:10px 24px; border-radius:8px; font-size:15px; font-weight:700; }
+  .btn-use { background-color:#5fb4d4; color:#0e1620; }
+  .btn-drop { background-color:#152433; color:#c2605a; }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <header class="topbar" style="flex-direction:row;align-items:center;justify-content:space-between;padding:20px 32px;background-color:#152433;border-width:0 0 1px 0;border-color:#2a5a75">
+      <div style="flex-direction:row;align-items:center;gap:12px"><button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">背包</span></div>
+    </header>
+    <div class="body">
+      <div class="col-list">
+        <p class="col-title">物品 · ListView</p>
+        <ul class="grid" data-fill="10">
+          <template>
+            <li class="item">
+              <span class="item-badge">x9</span>
+              <img class="item-icon" src="../res/icons/box.png" alt="item">
+              <progress class="item-dur" value="70" max="100"></progress>
+            </li>
+          </template>
+        </ul>
+      </div>
+      <div class="col-detail">
+        <img class="detail-icon" src="../res/icons/box.png" alt="detail">
+        <span class="detail-name">精铁宝箱</span>
+        <span class="detail-rarity">史诗 · 可堆叠</span>
+        <p class="detail-desc">从远古遗迹中发掘的精铁宝箱，开启后有概率获得稀有装备与材料。耐久度归零后碎裂。</p>
+        <div class="detail-attrs">
+          <div class="attr"><span class="attr-val">+128</span><span class="attr-label">攻击</span></div>
+          <div class="attr"><span class="attr-val">+64</span><span class="attr-label">防御</span></div>
+          <div class="attr"><span class="attr-val">+12%</span><span class="attr-label">暴击</span></div>
+        </div>
+        <p class="detail-desc"><strong>套装效果：</strong><em>2 件</em>提升 15% 移速；<em>4 件</em>触发反击。</p>
+        <div class="detail-actions">
+          <button class="btn btn-use">使用</button>
+          <button class="btn btn-drop">丢弃</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

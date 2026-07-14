@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="preview/preview-base.css">
+  <script src="preview/loom-preview.js"></script>
+  <title>LoomGUI 靶子冻结 Showcase · 角色创建</title>
+  <style>
+  .root { width:1920px; height:1080px; background-color:#0e1620; }
+  .body { flex:1; padding:40px 64px; gap:28px; overflow-y:auto; }
+  .page-title { color:#e0e6ec; font-size:32px; font-weight:700; }
+  .page-desc { color:#9aa0b4; font-size:15px; }
+  .group { background-color:#152433; border-radius:12px; padding:28px; gap:18px; }
+  .group-title { color:#8ec5d8; font-size:18px; font-weight:700; }
+  .field { flex-direction:column; gap:8px; }
+  .field-label { color:#9aa0b4; font-size:14px; }
+  input[type="text"], select, textarea { background-color:#1a2f45; border-width:0 0 0 2px; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:10px 14px; border-radius:6px; transition:border-color .15s; }
+  input[type="text"]:focus, select:focus, textarea:focus { border-color:#5fb4d4; }
+  textarea { width:100%; height:100px; resize:none; font-family:inherit; }
+  .radio-group { flex-direction:row; gap:24px; }
+  .radio-opt { flex-direction:row; align-items:center; gap:8px; color:#9aa0b4; font-size:15px; }
+  input[type="radio"], input[type="checkbox"] { accent-color:#5fb4d4; }
+  .slider-field { flex-direction:row; align-items:center; gap:16px; }
+  .slider-val { color:#d4a44e; font-size:16px; font-weight:700; min-width:40px; }
+  input[type="range"] { flex:1; accent-color:#5fb4d4; }
+  .actions { flex-direction:row; gap:16px; justify-content:flex-end; }
+  .btn { padding:12px 32px; border-radius:8px; font-size:16px; font-weight:700; transition:filter .15s; }
+  .btn-create { background-color:#d4a44e; color:#0e1620; }
+  .btn-reset { background-color:#1a2f45; color:#9aa0b4; }
+  .btn:hover { filter:brightness(1.12); }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <header class="topbar" style="flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:#152433;border-width:0 0 1px 0;border-color:#2a5a75">
+      <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">角色创建</span>
+    </header>
+    <div class="body">
+      <p class="page-title">创建新角色</p>
+      <p class="page-desc">表单控件编排 · 用 div + p 分组（替代 fieldset/legend）</p>
+      <div class="group">
+        <p class="group-title">基本信息</p>
+        <div class="field"><label class="field-label" for="char-name">角色名</label><input type="text" id="char-name" placeholder="输入角色名" maxlength="12"></div>
+      </div>
+      <div class="group">
+        <p class="group-title">职业与出身</p>
+        <div class="field"><label class="field-label" for="char-class">职业</label>
+          <select id="char-class">
+            <option value="ranger">游侠</option>
+            <option value="mage">法师</option>
+            <option value="warrior">战士</option>
+            <option value="assassin">刺客</option>
+          </select>
+        </div>
+      </div>
+      <div class="group">
+        <p class="group-title">性别与阵营</p>
+        <div class="radio-group">
+          <div class="radio-opt"><input type="radio" id="g-m" name="gender" checked><label for="g-m">男</label></div>
+          <div class="radio-opt"><input type="radio" id="g-f" name="gender"><label for="g-f">女</label></div>
+          <div class="radio-opt"><input type="radio" id="a-light" name="faction" checked><label for="a-light">光明阵营</label></div>
+          <div class="radio-opt"><input type="radio" id="a-dark" name="faction"><label for="a-dark">暗影阵营</label></div>
+        </div>
+      </div>
+      <div class="group">
+        <p class="group-title">初始属性分配</p>
+        <div class="field"><label class="field-label" for="attr-str">力量</label>
+          <div class="slider-field"><input type="range" id="attr-str" min="0" max="20" value="10"><span class="slider-val">10</span></div>
+        </div>
+        <div class="field"><label class="field-label" for="attr-agi">敏捷</label>
+          <div class="slider-field"><input type="range" id="attr-agi" min="0" max="20" value="12"><span class="slider-val">12</span></div>
+        </div>
+        <div class="field"><label class="field-label" for="attr-int">智力</label>
+          <div class="slider-field"><input type="range" id="attr-int" min="0" max="20" value="8"><span class="slider-val">8</span></div>
+        </div>
+      </div>
+      <div class="group">
+        <p class="group-title">背景故事</p>
+        <div class="field"><label class="field-label" for="char-bio">简介（textarea）</label><textarea id="char-bio" rows="4" cols="60" maxlength="200" placeholder="一段角色背景故事..."></textarea></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-reset">重置</button>
+        <button class="btn btn-create">创建角色</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

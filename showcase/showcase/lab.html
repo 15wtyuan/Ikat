@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="preview/preview-base.css">
+  <script src="preview/loom-preview.js"></script>
+  <title>LoomGUI 靶子冻结 Showcase · 标本馆</title>
+  <style>
+  .root { width:1920px; height:1080px; background-color:#0e1620; }
+  .body { flex:1; padding:40px 64px; gap:32px; overflow-y:auto; }
+  .page-title { color:#e0e6ec; font-size:32px; font-weight:700; }
+  .page-desc { color:#9aa0b4; font-size:15px; }
+  .section { background-color:#152433; border-radius:12px; padding:28px; gap:16px; }
+  .section-title { color:#8ec5d8; font-size:20px; font-weight:700; }
+  .specimen { background-color:#0e1620; border-radius:8px; padding:16px; gap:12px; }
+  .fx-demo { flex-direction:row; gap:8px; background-color:#1a2f45; padding:10px; border-radius:6px; }
+  .fx-item { background-color:#2a5a75; color:#e0e6ec; padding:10px 16px; border-radius:4px; font-size:13px; }
+  .box-pad { background-color:#2a5a75; padding:20px; }
+  .box-pad-inner { background-color:#d4a44e; padding:12px; color:#0e1620; font-size:13px; }
+  .box-margin { background-color:#1a2f45; padding:4px; }
+  .box-margin-inner { background-color:#5fb4d4; margin:16px; color:#0e1620; padding:8px; font-size:13px; }
+  .brd { width:80px; height:80px; background-color:#1a2f45; }
+  .brd-1 { border-radius:8px; border-color:#5fb4d4; }
+  .brd-2 { border-radius:16px 4px; border-color:#d4a44e; }
+  .brd-3 { border-radius:50%; border-color:#c2605a; }
+  .bg-cover { width:120px; height:80px; background-image:url("../res/icons/palette.png"); background-size:cover; border-radius:6px; }
+  .bg-contain { width:120px; height:80px; background-image:url("../res/icons/palette.png"); background-size:contain; background-color:#1a2f45; border-radius:6px; }
+  .bg-grad { width:120px; height:80px; background-image:linear-gradient(to right,#5fb4d4,#d4a44e); border-radius:6px; }
+  .txt p { color:#dfe4ec; }
+  .txt-serif { font-family:"DejaVuSans",serif; font-size:18px; }
+  .txt-mono { font-family:"JetBrainsMono",monospace; font-size:16px; }
+  .txt-pixel { font-family:"PressStart2P",monospace; font-size:12px; }
+  .fx-glow { color:#e0e6ec; font-size:28px; font-effect:glow(4 #5fb4d4); }
+  .fx-stroke { color:#152433; font-size:28px; -webkit-text-stroke:1px #d4a44e; }
+  .fx-shadow { color:#e0e6ec; font-size:24px; text-shadow:2px 2px 4px #000000; }
+  .fx-grad { font-size:28px; font-weight:700; background-image:linear-gradient(to right,#5fb4d4,#d4a44e); -webkit-background-clip:text; background-clip:text; color:#00000000; background-size:200% auto; animation:shimmer 3s linear infinite; }
+  @keyframes shimmer { to { background-position:200% center; } }
+  .vf { width:60px; height:60px; background-color:#5fb4d4; border-radius:6px; }
+  .vf-rot { transform:rotate(15deg); }
+  .vf-scale { transform:scale(1.2); }
+  .vf-trans { transform:translate(10px,10px); }
+  .vf-gray { filter:grayscale(1); background-color:#d4a44e; }
+  .vf-bright { filter:brightness(1.4); background-color:#d4a44e; }
+  .vf-hue { filter:hue-rotate(120deg); background-color:#c2605a; }
+  .ov-box { width:280px; height:80px; background-color:#1a2f45; border-radius:6px; padding:8px; }
+  .ov-scroll { overflow-y:scroll; }
+  .ov-auto { overflow-y:auto; }
+  .ov-hidden { overflow:hidden; }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <header class="topbar" style="flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:#152433;border-width:0 0 1px 0;border-color:#2a5a75">
+      <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">CSS 标本馆</span>
+    </header>
+    <div class="body">
+      <p class="page-title">CSS 全属性标本馆</p>
+      <p class="page-desc">围栏 §5.1 全白名单逐组 specimen · 小枚举全值，大枚举代表值 + 矩阵</p>
+
+      <div class="section">
+        <p class="section-title">1 · flex 全参数</p>
+        <div class="specimen" style="flex-direction:row;gap:16px;flex-wrap:wrap">
+          <div style="gap:6px"><span style="color:#9aa0b4;font-size:12px">row + gap</span><div class="fx-demo"><span class="fx-item">A</span><span class="fx-item">B</span><span class="fx-item">C</span></div></div>
+          <div style="gap:6px"><span style="color:#9aa0b4;font-size:12px">justify flex-end</span><div class="fx-demo" style="justify-content:flex-end"><span class="fx-item">A</span><span class="fx-item">B</span></div></div>
+          <div style="gap:6px"><span style="color:#9aa0b4;font-size:12px">justify space-between</span><div class="fx-demo" style="justify-content:space-between"><span class="fx-item">A</span><span class="fx-item">B</span><span class="fx-item">C</span></div></div>
+          <div style="gap:6px"><span style="color:#9aa0b4;font-size:12px">align center</span><div class="fx-demo" style="align-items:center"><span class="fx-item" style="height:40px">A</span><span class="fx-item">B</span></div></div>
+          <div style="gap:6px"><span style="color:#9aa0b4;font-size:12px">flex-grow</span><div class="fx-demo"><span class="fx-item" style="flex-grow:1">grow</span><span class="fx-item">B</span></div></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">2 · 尺寸单位</p>
+        <div class="specimen" style="flex-direction:row;gap:16px">
+          <div style="gap:4px"><span style="color:#9aa0b4;font-size:12px">width:200px</span><div style="width:200px;height:50px;background-color:#2a5a75;border-radius:4px"></div></div>
+          <div style="gap:4px"><span style="color:#9aa0b4;font-size:12px">width:50%</span><div style="width:50%;height:50px;background-color:#2a5a75;border-radius:4px"></div></div>
+          <div style="gap:4px"><span style="color:#9aa0b4;font-size:12px">aspect-ratio 16/9</span><div style="width:160px;aspect-ratio:16/9;background-color:#d4a44e;border-radius:4px"></div></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">3 · 盒模型（padding / margin）</p>
+        <div class="specimen" style="flex-direction:row;gap:24px">
+          <div style="gap:4px"><span style="color:#9aa0b4;font-size:12px">padding 20px</span><div class="box-pad"><div class="box-pad-inner">content</div></div></div>
+          <div style="gap:4px"><span style="color:#9aa0b4;font-size:12px">margin 16px</span><div class="box-margin"><div class="box-margin-inner">content</div></div></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">4 · 边框（color / radius）</p>
+        <div class="specimen" style="flex-direction:row;gap:16px;align-items:center">
+          <div class="brd brd-1"></div>
+          <div class="brd brd-2"></div>
+          <div class="brd brd-3"></div>
+          <span style="color:#9aa0b4;font-size:12px">border-image-slice 九宫格见运行时资源</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">5 · 背景（color / image / size / clip）</p>
+        <div class="specimen" style="flex-direction:row;gap:16px;align-items:center">
+          <div class="bg-cover"></div>
+          <div class="bg-contain"></div>
+          <div class="bg-grad"></div>
+          <span class="fx-grad">渐变字</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">6 · 文本排版（font / line-height / letter-spacing / white-space）</p>
+        <div class="specimen txt" style="gap:10px">
+          <p class="txt-serif">Serif 字体 · 中英文混排排版 The quick brown fox.</p>
+          <p class="txt-mono">Monospace 等宽 · code style</p>
+          <p class="txt-pixel">PIXEL 像素字体</p>
+          <p style="color:#dfe4ec;font-size:15px;letter-spacing:2px">字间距 2px · letter-spacing</p>
+          <p style="color:#dfe4ec;font-size:15px;white-space:nowrap;overflow:hidden">不换行长文本 white-space:nowrap · 截断演示截断演示截断演示截断演示</p>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">7 · 文本特效（text-shadow / stroke / font-effect / 渐变字）</p>
+        <div class="specimen" style="flex-direction:row;gap:24px;flex-wrap:wrap;align-items:center">
+          <span class="fx-glow">发光</span>
+          <span class="fx-stroke">描边</span>
+          <span class="fx-shadow">投影</span>
+          <span class="fx-grad">流光渐变</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">8 · 视觉变换（transform / opacity / filter / box-shadow）</p>
+        <div class="specimen" style="flex-direction:row;gap:20px;align-items:center;flex-wrap:wrap">
+          <div class="vf vf-rot"></div>
+          <div class="vf vf-scale"></div>
+          <div class="vf vf-trans"></div>
+          <div class="vf vf-gray"></div>
+          <div class="vf vf-bright"></div>
+          <div class="vf vf-hue"></div>
+          <div class="vf" style="opacity:0.4"></div>
+          <div class="vf" style="box-shadow:0 6px 16px #000a"></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">9 · 溢出（overflow-x/y scroll/auto/hidden）</p>
+        <div class="specimen" style="flex-direction:row;gap:16px">
+          <div style="gap:4px"><span style="color:#9aa0b4;font-size:12px">scroll</span><div class="ov-box ov-scroll"><p style="color:#9aa0b4;font-size:12px">行1<br>行2<br>行3<br>行4<br>行5<br>行6<br>行7<br>行8</p></div></div>
+          <div style="gap:4px"><span style="color:#9aa0b4;font-size:12px">auto</span><div class="ov-box ov-auto"><p style="color:#9aa0b4;font-size:12px">行1<br>行2<br>行3<br>行4<br>行5<br>行6<br>行7<br>行8</p></div></div>
+          <div style="gap:4px"><span style="color:#9aa0b4;font-size:12px">hidden</span><div class="ov-box ov-hidden"><p style="color:#9aa0b4;font-size:12px">行1<br>行2<br>行3<br>行4<br>行5<br>行6<br>行7<br>行8</p></div></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-title">10 · custom-element + slot 投影</p>
+        <div class="specimen" style="flex-direction:row;gap:16px">
+          <item-card style="flex-direction:column;gap:8px;width:160px;background-color:#1a2f45;border-radius:10px;padding:16px">
+            <img src="../res/icons/box.png" alt="item" style="width:64px;height:64px;align-self:center">
+            <slot name="ic-name"><span style="color:#e0e6ec;font-size:16px;font-weight:700;align-self:center">默认名</span></slot>
+            <slot name="ic-desc"><span style="color:#9aa0b4;font-size:13px;align-self:center">默认描述</span></slot>
+          </item-card>
+          <span style="color:#6c7080;font-size:13px;align-self:center">含 hyphen 标签名 = CustomElement；&lt;slot&gt; 接投影（运行时由组件系统填充）</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>
