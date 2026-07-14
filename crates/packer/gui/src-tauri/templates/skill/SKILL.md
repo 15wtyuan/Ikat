@@ -1,8 +1,8 @@
----
+﻿---
 name: loomgui-editor
 description: |
   Generate LoomGUI fence-compliant UI (HTML+CSS) for game dashboards/panels.
-  Uses flex-only layout, tag whitelist (div/span/img/button), no grid/margin-spacing.
+  Uses standard HTML/CSS subset with 30 fence tags, schema-driven validation.
   After generating, run `loom-pkg build <workspace>` to validate + pack into .pkg.bin.
 ---
 
@@ -10,24 +10,32 @@ description: |
 
 Generate fence-compliant game UI (HTML+CSS) for LoomGUI, validated and packed via `loom-pkg build`.
 
+## Core principle
+
+**Tags determine stable object types; CSS grants behavior capabilities but never changes types.** This means you write standard HTML, and the fence validates it against a schema. AI can predict the rendering result from the HTML alone — that is the primary design criterion.
+
 ## Workflow
 
 1. **Understand the workspace**: Read `loom.workspace.json` in the workspace root. It defines packages (HTML/CSS to build), atlases (image directories to pack), and fonts. Use this to know what already exists and where to add new components.
 
-2. **Generate HTML+CSS** according to the designer's prompt:
-   - **Elements**: Only `div`, `span` (+ raw text), `img`, `button`.
-   - **Layout**: Flexbox only. `div` always defaults to `flex-direction: column` (not browser block flow). Use `gap` for child spacing (not margin — Chrome collapses margins, LoomGUI doesn't).
-   - **Inline mix is a compile error**: A single element cannot contain both text and child elements (e.g. `<div>text<span/></div>` is illegal). Put text in a wrapper `<span>`.
+2. **Generate HTML+CSS** according to the designer's prompt using standard HTML semantics:
+   - Use any of the 30 fence tags (see list below). Unknown tags cause a build error.
+   - `div`, `header`, `nav`, `p`, `ul`, `ol`, `li`, `option` are block-level by default (standard HTML).
+   - `span`, `strong`, `em`, `label`, `button`, `a`, `img`, `input`, etc. are inline by default.
+   - `display:flex` defaults to `flex-direction:row` (standard CSS). Use `flex-direction:column` for vertical stacking.
+   - Use `gap` for child spacing (not margin — Chrome collapses margins, LoomGUI doesn't).
+   - `overflow:auto` or `overflow:scroll` enables scroll containers (no custom tag needed).
+   - `display:grid` is a build error — it is NOT silently downgraded to flex.
    - Place HTML files under the package's `dirs` directory (e.g. `ui/showcase/my-panel.html`).
    - `<img src="...">` is relative to the HTML file (browser-native).
-   - If you add images that aren't referenced by any HTML `<img>`, add their directory to an atlas `dirs` so they get packed into an atlas texture (for runtime dynamic icons).
+   - If you add images that aren't referenced by any HTML `<img>`, add their directory to an atlas `dirs` so they get packed.
 
 3. **Build and validate**:
    ```bash
    loom-pkg build <workspace-root>
    ```
-   - **Non-zero exit = fence violation or asset error**. Read the stderr output carefully — it tells you exactly what went wrong (missing image, atlas conflict, unsupported tag, inline mix, etc.).
-   - **Self-correct**: Fix the HTML/CSS based on the error message, then re-run `loom-pkg build`.
+   - **Non-zero exit = fence violation or asset error**. The packer collects ALL diagnostics in one pass and reports them together (file/line/column). Read the output carefully and fix all errors before re-running.
+   - **Self-correct**: Fix the HTML/CSS based on the error messages, then re-run `loom-pkg build`.
    - **Zero exit = success**. Artifacts are in `{output_dir}/`:
      - `ui/*.pkg.bin` — packaged UI components
      - `atlas/{name}.png` + `{name}.atlas.json` — texture atlases
@@ -36,47 +44,63 @@ Generate fence-compliant game UI (HTML+CSS) for LoomGUI, validated and packed vi
 
 4. **Report**: Tell the designer the artifact paths and that the game engine backend loads them from the output directory.
 
-## Fence rules (hard constraints)
+## Supported tags (30 total)
 
-These are the key rules. The authoritative source is `crates/core/tests/fence_contract.rs` in the LoomGUI repository.
+### Document shell (consumed at build time)
+`html`, `head`, `body`, `title`, `meta`, `style`, `link`
 
-### Element whitelist
-Only: `div`, `span` (+ raw text), `img`, `button`. Other tags (video, input, p, ul, etc.) cause a **parse error** — the build fails.
+### Runtime tags (23)
 
-### CSS layout (supported)
-- `display: flex` | `none` | `block` — **no grid** (grid maps to flex — renders as flex, not actual grid layout; don't use it)
-- `flex-direction`, `flex-wrap`, `gap` / `row-gap` / `column-gap`
-- `justify-content`, `align-items`, `align-self`, `flex` (grow/shrink/basis), `order`
-- `aspect-ratio`
-- `width` / `height` / `min-*` / `max-*` (px / % / auto)
-- `padding`, `margin`, `border-width`
-- Use `gap` for child spacing, not margin
-- `position: absolute` (with `top`/`right`/`bottom`/`left`); **no** `position: fixed` / `sticky`, **no** `float`, **no** `align-content`
-- **No `inset` shorthand** — use `top`/`right`/`bottom`/`left` explicitly
+| Tag | Type | Default display |
+|---|---|---|
+| `div` `header` `nav` | Container | block |
+| `p` | TextBlock | block |
+| `span` `strong` `em` | TextElement | inline |
+| `br` | LineBreak | inline (void) |
+| `label` | Label | inline |
+| `button` | Button | inline |
+| `a` | Link | inline |
+| `img` | Image | inline (void) |
+| `canvas` | Canvas | inline |
+| `input` | varies by `type` | inline (void) |
+| `textarea` | TextArea | inline |
+| `select` | Dropdown | inline |
+| `option` | OptionItem | block |
+| `progress` | ProgressBar | inline |
+| `ul` `ol` | ListView | block |
+| `li` | ListItem | block |
+| `template` | Template | none (inert) |
+| `slot` | Slot | inline |
 
-### CSS visual (supported)
-- `background-color`, `background-image` (url), `background-size` (cover/contain/100%, single value only)
-- `border-radius`, `border` (shorthand: `<width> <style>? <color>?`), `border-color`, `border-width`
-- `opacity`
-- `overflow` / `overflow-x` / `overflow-y`
-- `color`, `font-size` (px), `font-family`, `font-weight`
-- `text-align`, `line-height`, `letter-spacing`, `white-space: nowrap`
-- `transform` (translate/rotate/scale — no skew/matrix)
-- `pointer-events`
-- `filter` (grayscale/brightness/contrast/saturate/hue-rotate/invert/sepia)
-- `border-image-slice` (9-slice)
-- **Not supported** (silently ignored): `clip-path`, `background-position`, `background-repeat`, `transform-origin`, `font-style`, `cursor`
+Custom elements with a hyphen (e.g. `<my-widget>`) are recognized as CustomElement.
 
-### Selectors
-- Pseudo-classes: `:hover`, `:active`, `:disabled`, `:focus`
-- Combinators: tag, class, id, descendant, child (`>`), grouping (`,`)
-- Attribute selectors: `[attr]`, `[attr="val"]`
-- **Not supported**: `+`, `~`, `*`, `:nth-child()`, `:not()`
+### `input[type]` dispatch
 
-### The `div` default
-Every `<div>` is a flex container (`flex-direction: column`). There is no browser block/inline flow — only flex items participate in layout. This means text inside a `<div>` without a wrapping `<span>` participates as a flex item, but **inline mix** (text + element + text in one container) is a compile error.
+| type | Object type |
+|---|---|
+| `text` (default), `password`, `search` | TextField |
+| `number` | NumberField |
+| `range` | Slider |
+| `checkbox` | Toggle |
+| `radio` | RadioButton |
 
-### Preview trust
-Trust: flex, gap, color, px units, background-image, position:absolute.
-**Don't trust**: margin collapsing, pixel-exact text wrapping, `display:grid` (renders as flex in LoomGUI), `@media` (ignored).
+## CSS rules
+
+- Use only fence-recognized CSS properties. Unknown properties cause build errors (not silent ignoring).
+- Supported: width/height, min-/max- sizes, display (block/flex/none/inline), flexbox properties, gap, padding, margin, border, border-radius, background-*, opacity, overflow, color, font-*, text-align, line-height, letter-spacing, white-space, transform, filter, box-shadow, text-shadow, transition, and more.
+- **Not supported** (build error): `display:grid`, `cursor`, `clip-path`, `background-position`, `background-repeat`, `float`, `position:fixed/sticky`.
+
+## What causes build errors
+
+- Unknown tag (not in the 30-tag list, not a hyphenated custom element)
+- Unknown attribute on an element
+- Unknown CSS property name or invalid keyword value
+- Invalid content model (e.g. `<div>` inside `<span>`)
+- Duplicate `id` in the same template
+- `label[for]`, `aria-controls`, or `aria-labelledby` pointing to a non-existent ID
+
+## Preview trust
+
+Trust: flex layout, gap, color, px units, background-image, position:absolute, border-radius.
+Don't trust: margin collapsing, pixel-exact text wrapping, `display:grid` (build error in LoomGUI).
 Rule: "trust the fence rules, not the preview."
