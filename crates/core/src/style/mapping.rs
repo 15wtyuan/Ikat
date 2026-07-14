@@ -657,7 +657,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                     style.display_mode = DisplayMode::None;
                 }
                 "block" => {
-                    // block：taffy 仍 Flex（守铁律），仅旁路字段标记供打包器 desugar 识别。
+                    // block：taffy 仍 Flex（守铁律），仅旁路字段标记。
                     ts.display = taffy::Display::Flex;
                     style.display_mode = DisplayMode::Block;
                 }

@@ -240,29 +240,6 @@ pub fn set_text(scene: &mut Scene, node: NodeId, text: &str) -> Result<(), Strin
     Ok(())
 }
 
-/// 改 RichText 节点的 markup：解析 → runs + 标 dirty_text。非 RichText 节点 → Err。
-///
-/// runs 的 base 样式从节点 base_style 取；font_id 用 0 占位（MVP 单字体，build 用节点 font）。
-pub fn set_rich_text(scene: &mut Scene, node: NodeId, markup: &str) -> Result<(), String> {
-    let n = scene.get_mut(node).ok_or("node not live")?;
-    let base = crate::text::rich::RichBaseStyle {
-        color: n.base_style.color,
-        font_size: n.base_style.font_size,
-        weight: crate::text::rich::RichWeight::Normal,
-        style: crate::text::rich::RichStyle::Normal,
-        deco: crate::text::rich::RichDeco::default(),
-    };
-    let runs = crate::text::rich::parse_rich_markup(markup, base, 0)?;
-    match &mut n.kind {
-        NodeKind::RichText { runs: slot } => {
-            *slot = runs;
-        }
-        _ => return Err("set_rich_text 只对 RichText 节点生效".into()),
-    }
-    n.dirty_text = true;
-    Ok(())
-}
-
 /// 改 Image 节点 src + 标 dirty_mesh。非 Image 节点 → Err。
 pub fn set_src(scene: &mut Scene, node: NodeId, src: &str) -> Result<(), String> {
     let n = scene.get_mut(node).ok_or("node not live")?;

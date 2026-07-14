@@ -19,8 +19,6 @@ pub mod dump;
 pub mod hit;
 pub mod input;
 pub mod layout;
-#[cfg(feature = "parse")]
-pub mod parse;
 pub mod render;
 pub mod scene;
 pub mod scroll;

@@ -1,11 +1,9 @@
 //! Scene 层：持久 Node 树（场景图）。
 //!
-//! 消费 `ElementTree` + `Vec<ResolvedStyle>`，构建一棵 `Node` 树。
+//! Node 树 + 数据结构定义。Scene::build 是建树入口（runtime + 包加载共用）。
 //! layout 层后续往 `taffy_id`/`layout_rect` 写几何；render 层消费
 //! `clip_rect`/`dirty_*`。本模块只管建树 + 初始脏标志。
 
-#[cfg(feature = "parse")]
-use crate::parse::dom::{ElementId, ElementTree};
 use crate::style::resolved::{OverflowMode, ResolvedStyle};
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
 
@@ -300,7 +298,7 @@ pub struct Scene {
 impl Scene {
     /// 从扁平 entries（DFS 先序）建 Node 树。`parent_idx` 指向 entries 下标，`None` = 根。
     /// clip_rect slot / dirty 标志按 style.overflow_x/y（非 Visible 即 clip）/ kind 派生。
-    /// parse 路径（build_scene）与包加载路径（read_package）共用。
+    /// 包加载路径（read_package）也走此入口。
     ///
     /// **NodeId 由 slotmap 分配**：entries 第 i 个 → slotmap insert → NodeId（idx=i+1，version=1，
     /// 无删除时）。parent/children 用 entries 下标 → 经临时 ids 表映射到 NodeId。
@@ -451,142 +449,6 @@ impl Scene {
     }
 }
 
-/// 从 ElementTree + ResolvedStyle 构建 Node 树（gather 后调 `Scene::build`）。
-///
-/// `styles` 必须与 `tree.nodes` 同长且同序（由 `style::cascade::resolve_styles` 保证）。
-#[cfg(feature = "parse")]
-pub fn build_scene(tree: &ElementTree, styles: &[ResolvedStyle]) -> Scene {
-    let mut entries: Vec<(
-        Option<usize>,
-        NodeKind,
-        ResolvedStyle,
-        Vec<String>,
-        Option<String>,
-        bool,
-        Option<i32>,
-        Option<String>,
-    )> = Vec::new();
-    for root in &tree.roots {
-        gather_rec(tree, styles, *root, None, &mut entries);
-    }
-    Scene::build(&entries)
-}
-
-#[cfg(feature = "parse")]
-fn gather_rec(
-    tree: &ElementTree,
-    styles: &[ResolvedStyle],
-    el_id: ElementId,
-    parent_idx: Option<usize>,
-    entries: &mut Vec<(
-        Option<usize>,
-        NodeKind,
-        ResolvedStyle,
-        Vec<String>,
-        Option<String>,
-        bool,
-        Option<i32>,
-        Option<String>,
-    )>,
-) -> usize {
-    let el = &tree.nodes[el_id.0];
-    let style = &styles[el_id.0];
-    // tag→NodeKind 复用 runtime 的 `kind_from_tag`（dynamic.rs，不依赖 parse feature），
-    // 消除两处 tag 白名单重复。parse 层已保证 tag 在围栏白名单内（div/span/img/button），
-    // 故 kind_from_tag 在此必 Ok——Err 走 unreachable（parse/白名单契约破坏）。
-    // kind_from_tag 对 img/span 返空 src/content（动态建树语义）；parse 路径需从元素属性/文本回填。
-    // img 的 src 从属性取（`<img src="...">`），不是元素文本；
-    // span 的文本是其自身 content（Text 叶子，无子节点）。
-    let mut kind = crate::scene::dynamic::kind_from_tag(&el.tag).unwrap_or_else(|_| {
-        unreachable!(
-            "parse 层白名单已挡围栏外 tag，scene 不应见到 <{}>；这是 parse/scene 契约破坏",
-            el.tag
-        )
-    });
-    match &mut kind {
-        NodeKind::Image { src } => {
-            *src = el.attrs.get("src").cloned().unwrap_or_default();
-        }
-        NodeKind::Text { content } => {
-            *content = el.text.clone().unwrap_or_default();
-        }
-        _ => {}
-    }
-    // v1.7：block div 的 rich_runs（desugar 期填）→ 覆盖 kind 为 RichText 叶。
-    // block div 原 kind_from_tag("div")=Container，这里被 rich_runs 覆盖成 RichText。
-    // raw_rich 的 div 无子元素（parse 期 early-return 不递归），故 Container 的 children 逻辑不触发。
-    if let Some(runs) = el.rich_runs.clone() {
-        kind = NodeKind::RichText { runs };
-    }
-    // draggable="true" → Node.draggable（HTML 原生属性）。
-    // 非 "true" 一律 false（draggable="false"/缺省/任意值 → false，照 HTML truthy 语义简化）。
-    let draggable = el
-        .attrs
-        .get("draggable")
-        .map(|v| v == "true")
-        .unwrap_or(false);
-    // tabindex 属性 → Option<i32>。非数字 → None（照 DOM 容错：无效值忽略）。
-    // 语义：None=不可聚焦；Some(-1)=仅编程；Some(0)=DOM 序；Some(N>0)=显式序。
-    let tabindex = el.attrs.get("tabindex").and_then(|v| v.parse::<i32>().ok());
-    // data-controller="name" → Node.data_controller（HTML 属性，照 draggable 先例）。
-    // 值原样存（不归一大小写——HTML 属性值大小写敏感，name 是 caller-defined）。
-    let data_controller = el.attrs.get("data-controller").cloned();
-    let my_idx = entries.len();
-    entries.push((
-        parent_idx,
-        kind.clone(),
-        style.clone(),
-        el.classes.clone(),
-        el.id.clone(),
-        draggable,
-        tabindex,
-        data_controller,
-    ));
-
-    // Container/Button 的裸文本 → Text 子节点。文本子像无 class 的 <span>：
-    // taffy_style 取 DEFAULT（由测量定尺寸），视觉/字体字段继承父值。
-    // 不能直接克隆父 style——父若是 .h{height:30px} 会让文本子也高 30px，
-    // 既不正确也压制了文本自然测量。
-    if matches!(kind, NodeKind::Container | NodeKind::Button) {
-        if let Some(text) = &el.text {
-            let mut ts = ResolvedStyle::default();
-            ts.color = style.color;
-            ts.font_size = style.font_size;
-            ts.font_family = style.font_family.clone();
-            ts.font_weight = style.font_weight;
-            ts.line_height = style.line_height;
-            ts.letter_spacing = style.letter_spacing;
-            ts.text_align = style.text_align;
-            ts.white_space_nowrap = style.white_space_nowrap;
-            // text_effects（text-shadow/-webkit-text-stroke/font-effect:glow|blur）须随其他
-            // 文本字段一起透传：`<div style="text-shadow:...">裸文本</div>` 的特效声明在 div，
-            // 实际渲染的是这个 Text 子节点，漏搬则特效层 mesh 不产出。
-            ts.text_effects = style.text_effects.clone();
-            entries.push((
-                Some(my_idx),
-                NodeKind::Text {
-                    content: text.clone(),
-                },
-                ts,
-                Vec::new(),
-                None,
-                false,
-                None,
-                None,
-            ));
-        }
-    }
-
-    if !el.children.is_empty() {
-        for c in &el.children {
-            gather_rec(tree, styles, *c, Some(my_idx), entries);
-        }
-    }
-    my_idx
-}
-
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(test, feature = "parse"))]
-mod parse_tests;

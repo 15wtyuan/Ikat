@@ -105,7 +105,7 @@ pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
             NodeKind::Button => "button",
             NodeKind::Image { .. } => "img",
             NodeKind::Text { .. } => "span",
-            // 富文本是叶子 NodeKind（非围栏标签），由 set_rich_text FFI 动态设。
+            // 富文本是叶子 NodeKind（非围栏标签），由 FFI 动态设 RichText runs。
             // CSS 标签选择器对富文本无意义；按 span（最接近的文本叶子标签）匹配，
             // 允许 .rich-box span 这类选择器对 RichText 节点生效。
             NodeKind::RichText { .. } => "span",
