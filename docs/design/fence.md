@@ -1,264 +1,372 @@
-﻿> **⚠️ 本文档描述的是旧围栏（v1 四标签范式）。R1 阶段会用 schema 驱动的新围栏完全替代。**
-> **新围栏设计见 `docs/design/main-design.md` §3 和 `docs/superpowers/specs/2026-07-13-api-refactor-design.md`。**
-> **R1 完成后本文档将被重写。在 R1 完成前触碰围栏代码时，仍以本文档和 `fence_contract.rs` 为准。**
-# LoomGUI 围栏（Fence）权威清单
+﻿# LoomGUI 围栏（Fence）权威清单
 
-> **单一真相源**：`crates/core/tests/fence_contract.rs`（可执行围栏契约测试）。本文档为人类可读副本，**以测试为准**。文档与测试不一致时，测试赢。
+> **单一真相源**：`crates/fence/src/schema/` 下的 Rust const 注册表（machine-readable）。本文档为人类可读副本，以代码为准。
 >
-> **维护规则**：见 §4。改代码加/改围栏属性 → 必须同步改 `fence_contract.rs` 测试 → 同步本文档副本。CI/本机 build 前跑 `cargo test -p loomgui_core fence_contract` 是围栏契约的门。
->
-> **AI 可预测性口径**（design §1.1）：写什么得到什么，围栏外即失败或静默忽略——但"静默忽略"行为本身必须被测试锁定，不可靠"推测"。
+> **防漂移门**：`cargo test -p loomgui_fence`——改围栏后必跑。
 
 ---
 
-## 0. 核实方法论（为什么本清单可信）
+## 1. 设计哲学
 
-每条围栏规则分两类标注：
+### 1.1 标准 HTML 语义 + AI 强先验
 
-- **【实证】**：有 `fence_contract.rs` 测试断言锁定行为。`fence_contract.rs` 建成后，本标注生效。
-- **【推断·待测】**：靠源码 grep + taffy 默认值推断，`fence_contract.rs` 尚未覆盖。实现期补测试后转【实证】。
+围栏是一个面向游戏 UI、能够完整兑现语义的标准 HTML/CSS 子集。所有围栏决策的第一判据：AI 读 HTML 能否正确预测渲染结果。
 
-**反例（已纠正的推断错误）**：
-- `position:relative` 曾被误判"代码无 match = 不支持"。实际 taffy 0.5 `Style::DEFAULT.position = Position::Relative`（taffy style/mod.rs:311），LoomGUI 不碰 position 字段 → **所有节点默认 Relative**，写不写行为一致。靠 taffy 默认生效，非显式映射。教训：**"搜索无 match"≠"不支持"，可能是底层默认**。必须查依赖默认值 + 补测试。
+AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTML 元素和 CSS 属性，不自创框架标签（如 `<scroll-view>`）——已有的标准能力（如 `overflow`）不自定义标签重复发明。
 
----
+### 1.2 标签决定类型，CSS 赋予行为
 
-## 1. 元素标签围栏
+这是围栏的核心原则：
 
-**白名单**（`FENCE_TAGS`，parse/dom.rs:29）：
+- **标签 + 不可变结构属性决定稳定对象类型**。`<input type="range">` 永远是 Slider，`<button>` 永远是 Button。
+- **CSS（class、伪类、computed style）永远不改变对象类型**。`display:flex` 选择内部布局 Strategy，`overflow:auto` 选择滚动 Strategy。策略切换不重建节点、不丢状态。
+- 这条原则让围栏设计在许多设计模式（Strategy、State）上自然落地，后续工作变得顺畅。
 
-| 标签 | 映射 NodeKind | 出处 |
-|---|---|---|
-| `div` | Container | scene/node.rs:278 |
-| `span` | Text（内容取 `el.text`） | scene/node.rs:283 |
-| `img` | Image（src 取 `el.attrs["src"]`） | scene/node.rs:280 |
-| `button` | Button | scene/node.rs:279 |
+### 1.3 失败策略：明确报错，不静默降级
 
-**围栏外标签**：一律**报错**（不降级、不静默忽略）。parse/dom.rs:63-68。
-- 【实证】`rejects_fence_out_element`（dom.rs:203）：`<video>`/`<input>`/`<b>` 等被拒。
-- 【实证】`fence_tags_all_accepted`（dom.rs:216）：白名单标签全接受。
+围栏外输入在打包期明确报错。围栏外 CSS 不静默忽略——写什么得到什么，围栏外即失败。
 
-**裸文本规则**：Container/Button 内裸文本自动生成 Text 子节点（scene/node.rs:304-316）。行内混排（元素内"文本+元素+文本"）报错（dom.rs:31 注释）。
-
-**`data-*` 状态属性**（v1.5）：`data-controller`/`data-page` 等标准 HTML `data-*` 属性，配合属性选择器 `[data-controller="tab"][data-page="0"]` 实现 Controller 多页状态切换。属性本身不映射 CSS 声明，仅作为选择器匹配目标。
+流水线一次性收集所有 diagnostic 再输出（collect-all），不 fail-fast。这对 AI 辅助创作至关重要：一轮修完所有错误比多轮对话高效得多。
 
 ---
 
-## 2. CSS 属性围栏
+## 2. 围栏元素
 
-`apply_decl`（style/mapping.rs:294）match prop，支持项返回 `true`，末尾 `_ => false`（mapping.rs:558，装饰属性静默忽略）。
+### 2.1 文档壳标签（7 个，不进运行时树）
 
-### 2.1 布局属性（进 taffy_style）
+| 标签 | 用途 |
+|---|---|
+| `html` | 文档根，解析时消费 |
+| `head` | 元数据容器 |
+| `body` | 内容根，子元素提升为模板根 |
+| `title` | 文档标题 |
+| `meta` | 元数据 |
+| `style` | 内联 CSS（打包期消费） |
+| `link` | 外部 CSS 引用（`rel=stylesheet`） |
 
-| 属性 | 值约束 | 出处 | 标注 |
+这些标签在 `tree_builder` 阶段被消费，不产生运行时对象。
+
+### 2.2 运行时标签（23 个）
+
+下表是完整的运行时标签注册表。列含义：
+
+- **SemanticKind**：打包期标注的稳定语义类型。`InputDispatch` 表示需根据 `type` 属性进一步分派。
+- **Display**：不写 CSS `display` 时的默认显示值。Block/Inline 遵循标准 HTML 默认。
+- **Category**：HTML 分类简化为四值——Block（块级结构）、Phrasing（行内文本级）、Void（自闭合）、Transparent（透明，继承父级）。
+- **ContentModel**：允许的子内容——None（无子内容）、Text（仅文本）、Phrasing（行内元素+文本）、Flow（任意）、Transparent（继承父级）、Only([...])（仅列出的子标签）。
+
+| 标签 | SemanticKind | Display | Category | ContentModel | Void |
+|---|---|---|---|---|---|
+| `div` | Container | Block | Block | Flow | |
+| `header` | Container | Block | Block | Flow | |
+| `nav` | Container | Block | Block | Flow | |
+| `p` | TextBlock | Block | Block | Phrasing | |
+| `span` | TextElement | Inline | Phrasing | Phrasing | |
+| `strong` | TextElement | Inline | Phrasing | Phrasing | |
+| `em` | TextElement | Inline | Phrasing | Phrasing | |
+| `br` | LineBreak | Inline | Void | None | ✓ |
+| `label` | Label | Inline | Phrasing | Phrasing | |
+| `button` | Button | Inline | Phrasing | Phrasing | |
+| `a` | Link | Inline | Transparent | Transparent | |
+| `img` | Image | Inline | Void | None | ✓ |
+| `canvas` | Canvas | Inline | Phrasing | Flow | |
+| `input` | InputDispatch | Inline | Void | None | ✓ |
+| `textarea` | TextArea | Inline | Phrasing | Text | |
+| `select` | Dropdown | Inline | Phrasing | Only([`option`]) | |
+| `option` | OptionItem | Block | Block | Text | |
+| `progress` | ProgressBar | Inline | Phrasing | Phrasing | |
+| `ul` | ListView | Block | Block | Only([`li`, `template`]) | |
+| `ol` | ListView | Block | Block | Only([`li`, `template`]) | |
+| `li` | ListItem | Block | Block | Flow | |
+| `template` | Template | None | Phrasing | Flow | |
+| `slot` | Slot | Inline | Transparent | Transparent | |
+
+### 2.3 自定义元素
+
+标签名含 `-`（如 `<my-widget>`）识别为 CustomElement（`SemanticKind::CustomElement`）。围栏放行含 hyphen 的标签名通过 Fence Gate；注册验证（`customElements.define()` 注册表）defer 到 R3。
+
+---
+
+## 3. 稳定语义签名
+
+对象类型由不可变签名决定，实例化后不能改变。
+
+### 3.1 签名 = tag + 不可变结构属性
+
+| 签名 | SemanticKind |
+|---|---|
+| `div` / `header` / `nav` | Container |
+| `p` | TextBlock |
+| `span` / `strong` / `em` | TextElement |
+| `br` | LineBreak |
+| `label` | Label |
+| `button` | Button |
+| `a` | Link |
+| `img` | Image |
+| `canvas` | Canvas |
+| `input[type=text]`（含 `password`、`search`，默认） | TextField |
+| `input[type=number]` | NumberField |
+| `input[type=range]` | Slider |
+| `input[type=checkbox]` | Toggle |
+| `input[type=radio]` | RadioButton |
+| `textarea` | TextArea |
+| `select` | Dropdown |
+| `option` | OptionItem |
+| `progress` | ProgressBar |
+| `ul` / `ol` | ListView |
+| `li` | ListItem |
+| `template` | Template |
+| `slot` | Slot |
+| `tag-name`（含 hyphen） | CustomElement |
+
+`type`（input）是结构属性，在 Fence Gate 阶段校验取值，在 Annotate 阶段决定最终类型。
+
+### 3.2 CSS 不改变类型
+
+`display:block/flex/none` 选择布局 Strategy，`overflow:auto/scroll` 选择滚动 Strategy——都是行为切换，不重建节点、不丢状态、不改 SemanticKind。
+
+---
+
+## 4. 属性围栏
+
+### 4.1 全局属性（所有元素接受）
+
+| 属性 | 用途 |
+|---|---|
+| `id` | 组件作用域内唯一标识（打包期校验唯一性） |
+| `class` | CSS 类选择器目标 |
+| `style` | 行内 CSS（Fence Gate 校验属性名 + 关键字值） |
+| `slot` | 投影到父组件的具名 slot |
+| `hidden` | 隐藏元素 |
+| `tabindex` | 焦点顺序 |
+| `role` | WAI-ARIA 角色（白名单，影响复合控件语义） |
+| `aria-*` | WAI-ARIA 状态/属性（打包期校验 IdRef 关系） |
+| `data-*` | 自定义数据属性（透传，不做结构验证） |
+| `--*` | CSS 自定义属性（透传） |
+
+### 4.2 结构属性（影响类型/核心行为，Fence Gate 校验值域）
+
+| 元素 | 属性 | 值域 | 必填 |
 |---|---|---|---|
-| `display` | `none`/其他→Flex（无 grid）；**inline `display:block` div → v1.7 富文本叶 desugar（§2.5，走 dom.rs 非 apply_decl）** | mapping.rs:425-431 + dom.rs | 【实证】 |
-| `flex-direction` | row/row-reverse/column/column-reverse | mapping.rs:385-393 | 【实证】 |
-| `flex-wrap` | wrap/nowrap | mapping.rs:394-400 | 【实证】 |
-| `gap` | 四值展开取前两 | mapping.rs:377-384 | 【实证】 |
-| `row-gap`/`column-gap` | gap longhand | （apply_decl 无 match arm，落入 `_ => false`） | ❌ 不支持（仅 `gap` 简写） |
-| `justify-content` | flex-start/center/flex-end/space-between/space-around/space-evenly | mapping.rs:401-404 | 【实证】 |
-| `align-items` | flex-start/center/flex-end/stretch/baseline | mapping.rs:405-408 | 【实证】 |
-| `align-self` | 同 align-items 值 | mapping.rs:409-412 | 【实证】 |
-| `flex-grow` | number | mapping.rs:413-416 | 【实证】 |
-| `flex-shrink` | number | mapping.rs:417-420 | 【实证】 |
-| `flex-basis` | dimension | mapping.rs:421-424 | 【实证】 |
-| `order` | integer | mapping.rs:543-549 | 【实证】 |
-| `width`/`height` | px/%/auto | mapping.rs:297-304 | 【实证】 |
-| `min-width`/`min-height` | px/%/auto | mapping.rs:305-312 | 【实证】 |
-| `max-width`/`max-height` | px/% | mapping.rs:313-320 | 【实证】 |
-| `padding` | 1-4 值 px（仅 px） | mapping.rs:321-330 | 【实证】 |
-| `padding-top`/`padding-right`/`padding-bottom`/`padding-left` | 单边 longhand 1 值 px（仅 px）：设 `ts.padding` 对应边，不动其他三边。多单边声明累积 | mapping.rs `apply_padding_side` | 【实证】 |
-| `margin` | 1-4 值 px/%/auto | mapping.rs:331-340 | 【实证】 |
-| `border`（简写）/`border-width` | `border` 简写 `<width> <style>? <color>?`（三件任意序，style 围栏外忽略）：width 进 `ts.border` 四边同宽（渲染读此四边画边框环），color 进 `border_color`（等同 `border-color` 单属性）。`border-width` 单属性 1-4 值只设 `ts.border` 四边 width、不碰 color | mapping.rs `apply_decl` | 【实证】 |
-| `border-top`/`border-right`/`border-bottom`/`border-left` | 单边 longhand `<width> <style>? <color>?`：设 `ts.border` 对应边 + `border_color`（四边共享单色），不动其他三边。多单边声明累积 | mapping.rs `apply_border_side` | 【实证】 |
-| `aspect-ratio` | number | mapping.rs:537-542 | 【实证】 |
-| `position` | `relative`（默认）/`absolute`（v1.4-b 脱离流）；`fixed`/`sticky` 静默忽略 | mapping.rs:557-558 | 【实证】 |
-| `top`/`right`/`bottom`/`left` | px/%（仅 position:absolute 时生效） | mapping.rs:557-558 | 【实证】 |
+| `input` | `type` | `range` / `checkbox` / `radio` / `text` / `password` / `number` / `search` | 否（默认 `text`） |
+| `label` | `for` | IdRef（指向同作用域内控件 ID） | 否 |
+| `a` | `href` | FreeText（链接目标） | 否 |
 
-### 2.2 视觉属性
+### 4.3 内容属性（初始值透传，Fence Gate 校验属性名）
 
-| 属性 | 值约束 | 出处 | 标注 |
-|---|---|---|---|
-| `background-color` | #rrggbb hex | mapping.rs:444-447 | 【实证】 |
-| `background-image` | url("path") | mapping.rs:448-452 | 【实证】 |
-| `background-size` | 仅 cover/contain/100%（拒两值如 `100% 50%`） | mapping.rs:453-460 | 【实证】 |
-| `border-color` | #rrggbb hex（v1.8 起渲染彩色边框环，不再零引用） | mapping.rs:572-574 | 【实证】 |
-| `border-radius` | px/% 1-4 值 + `/` 垂直值 | mapping.rs:353-376 | 【实证】 |
-| `opacity` | 0-1 | mapping.rs:465-473 | 【实证】 |
-| `overflow` | visible/hidden/scroll/auto（双轴同设。无效值如 `bogus` 不改变字段但仍返回 true——属性名被识别） | mapping.rs:474-481 | 【实证】 |
-| `overflow-x`/`overflow-y` | longhand | mapping.rs:482-494 | 【实证】 |
-| `color` | #rrggbb hex | mapping.rs:495-500 | 【实证】 |
-| `font-size` | px（拒 %） | mapping.rs:501-504 | 【实证】 |
-| `font-family` | 原样存储 | mapping.rs:505-508 | 【实证】 |
-| `font-weight` | u16 数字 | mapping.rs:509-512 | 【实证】 |
-| `text-align` | left/center/right | mapping.rs:513-520 | 【实证】 |
-| `line-height` | px 或裸数字 | mapping.rs:521-528 | 【实证】 |
-| `letter-spacing` | px | mapping.rs:529-532 | 【实证】 |
-| `white-space` | 仅识别 nowrap | mapping.rs:533-536 | 【实证】 |
-| `transform` | translate(px,px)/rotate(deg)/scale(num[,num]) | mapping.rs:554-556 | 【实证】 |
-| `pointer-events` | auto/none | mapping.rs:549-553 | 【实证】 |
-
-### 2.3 v1.x 扩展属性（v1 围栏冻结子集未列，代码已实现）
-
-| 属性 | 值约束 | 出处 | v1.x 版本 | 标注 |
-|---|---|---|---|---|
-| `filter` | grayscale/brightness/contrast/saturate/hue-rotate/invert/sepia（颜色矩阵，不认 blur/drop-shadow）。sepia v1.8 修：现为正确棕褐矩阵（非 grayscale 占位） | mapping.rs:518-521, color_filter.rs | v1.3→v1.8 | 【实证】 |
-| `border-image-slice` | 1-4 值 px/%（九宫格）。v1.8 修：`%` 值现正确 resolve（乘源图边比例），不再坍缩为像素 | mapping.rs:523-529 | v1.3→v1.8 | 【实证】 |
-| `transition` | `<property> <duration> <easing>`（标准 CSS，映射 GTween） | mapping.rs | v1.5 | 【实证】 |
-| `border-color` | #rrggbb hex（v1.8 起边框环渲染，见 §2.2） | mapping.rs:572-574 | v1.3→v1.8 | 【实证】 |
-| `background` | `linear-gradient(to <dir>, #hex, #hex)` 2 色 4 正向（to right/left/top/bottom）。多 stop（>2 色）、斜角度、命名色静默忽略 | mapping.rs:550-562 | v1.8 | 【实证】 |
-| `box-shadow` | `ox oy [blur] [spread] color`；blur 静默忽略（几何近似，真模糊推 v1.14+），spread MVP=0 | mapping.rs:738-758 | v1.8 | 【实证】 |
-| `overflow:hidden` + `border-radius` | 圆角裁剪 SDF shader 变体（CLIPPED_ROUNDED），v1.8 新增 | mapping.rs（overflow 已有 arm） | v1.8 | 【实证】 |
-| `text-shadow` | `ox oy [blur] color`，逗号分隔多个。blur 可省（默认 0 = 硬边）。color 仅 #rrggbb（命名色静默拒，整条声明无效） | mapping.rs:760-775 | v1.8 | 【实证】 |
-| `-webkit-text-stroke` | `width color`（px + #rrggbb），内侧吃字 erode，Front layer 在字形上方绘 | mapping.rs:785-805 | v1.8 | 【实证】 |
-| `font-effect` | **LoomGUI 私有 CSS**：`glow(w color), blur(w)`（逗号分隔）。glow=dilate+高斯晕开（Back layer），blur=可分离高斯两 pass。w 仅 px，% 静默忽略 | mapping.rs:807-816 | v1.8 | 【实证】 |
-| `background-clip` / `-webkit-background-clip` | `text` 触发渐变字形（与 `background:linear-gradient` + `color:transparent` 三件套组合）。非 text 值静默忽略（不设 text 模式） | mapping.rs:777-783 | v1.8 | 【实证】 |
-| `text-decoration` | **仅 inline style 生效**：CSS3 shorthand `line style color thickness`（underline/line-through/overline + solid/dashed/dotted/double + color + px 粗细）。`<span style="text-decoration:underline">` 有效；CSS 规则形式（`.cls { text-decoration:underline }`）**静默忽略**（解析在 rich.rs 的 apply_inline_style，非 mapping.rs 的 apply_decl）。见 §2.4 围栏外项 | rich.rs:418-421 | v1.8 | 【实证】 |
-
-### 2.4 围栏外 CSS 属性（写了不生效/静默忽略，必须测试锁定）
-
-| 属性 | 实际行为 | 标注 |
-|---|---|---|
-| `position:relative` | v1.4-b 起已纳入显式映射（`apply_decl` 接受 `relative` 返回 true） | 【实证】 |
-| `position:fixed/sticky` | 静默忽略，position 保持默认 Relative | 【实证】 |
-| `inset` shorthand | 围栏只映射 `top`/`right`/`bottom`/`left` 四个显式属性，`inset:0` 无 handler 静默丢（浏览器支持→预览看着对，Unity 不脱离流定位，典型"信围栏别信预览"） | 【实证】 |
-| `display:grid` | 非 none 落 Flex，grid 布局不生效 | 【实证】 |
-| | ⚠️ AI 陷阱：浏览器 Chromium 预览 → grid 生效；打包无报错（apply_decl 返 true）→ Unity 为 Flex。三地结果各异，AI 按"预览截图"匹配 RenderNode 会错位。 | |
-| `float` | 静默忽略 | 【实证】 |
-| `align-content` | 无 handler，静默忽略 | 【实证】 |
-| `cursor` | 静默忽略 | 【实证】 |
-| `clip-path` | 静默忽略 | 【实证】 |
-| `background-position` | 静默忽略 | 【实证】 |
-| `background-repeat` | 静默忽略 | 【实证】 |
-| `transform-origin` | 硬编码 center，自定义静默忽略 | 【实证】 |
-| `transform: skew()/matrix()` | 显式跳过（mapping.rs:278） | 【实证】 |
-| `font-style` | 无 handler，静默忽略 | 【实证】 |
-| `border-style`（dashed/dotted） | 简写只取宽度，style 丢 | 【实证】 |
-| `text-decoration`（CSS 规则形式 `.cls { ... }`） | 仅 inline style（`<span style="text-decoration:underline">`）生效，CSS 规则形式静默忽略（解析在 rich.rs apply_inline_style，非 mapping.rs apply_decl） | 【实证】 |
-| `@media` | AtRuleParser 拒（parse/css.rs:58-63） | 【实证】 |
-
-### 2.5 v1.7 富文本围栏（display:block desugar）
-
-**触发**：`<div style="display:block">inline 内容</div>`——inline style 含 `display:block` 且 tag=div，parse 期（`dom.rs:is_inline_display_block`）捕获 inner HTML 原文，desugar 期 `parse_rich_markup`→runs，build_scene 覆盖 kind 为 `NodeKind::RichText`。**class 的 display:block 不触发**（MVP：parse 期未 cascade，只认 inline style）。
-
-**富内容标记子集**（`text/rich.rs:parse_rich_markup`，block div 内 / 动态 `set_rich_text` 串）：`b`/`strong`(粗)、`i`/`em`(斜)、`u`(下划)、`s`/`del`/`strike`(删)、`span`(内联样式容器，**唯一解析 style attr**)、`a`(链接，link_id=1-based 文档序，**href 不存**，业务侧挂 onClickLink)、`img`(行内图，src/width/height/vertical-align)、`br`(换行)。嵌套栈式 cascade。未知/未闭合/围栏外标记 → Err（静态打包拒 + 动态 set_rich_text 返 -1）。
-
-**span 内联样式子集**（`apply_inline_style`）：`color`/`font-size`/`font-weight`/`font-style`/`text-decoration`。颜色支持 `#rrggbb` + `#rgb`（3 位展开，坑 140，parse_color 统一）。未识别属性静默忽略。**`b/i/u/s` 不解析 style attr**（只 span）。
-
-**block div 盒属性**（bg/border/padding/text-align/overflow）留 flex div；文本属性（color/font-*/line-height/text-decoration）级联进 rich 叶 base_style。desugar 拒收 block div 上的 flex 属性。
-
-**【实证】**：`fence_contract.rs`（`block_div_captures_raw_rich` / `class_based_display_block_does_not_trigger_rich_at_parse` / `rejects_fence_out_element`）。
+| 元素 | 内容属性 |
+|---|---|
+| `img` | `src`, `alt`, `width`, `height` |
+| `canvas` | `width`, `height` |
+| `input` | `value`, `min`, `max`, `step`, `placeholder`, `readonly`, `disabled`, `checked`, `name`, `pattern`, `maxlength` |
+| `textarea` | `placeholder`, `readonly`, `disabled`, `name`, `rows`, `cols`, `maxlength` |
+| `select` | `name`, `disabled` |
+| `option` | `value`, `selected`, `disabled` |
+| `progress` | `value`, `max` |
+| `button` | `disabled` |
+| `slot` | `name` |
 
 ---
 
-## 3. 选择器围栏
+## 5. CSS 围栏
 
-### 3.1 支持
+CSS 在围栏中以三个正交维度建模：
 
-| 选择器 | 出处 | 标注 |
+### 5.1 属性白名单（CssPropSpec）
+
+每个 CSS 属性注册为一个 `CssPropSpec`，包含属性名、默认值、是否继承、值解析器类型。围栏只认注册表中的属性名，未注册属性名打包期报错。
+
+当前注册的 CSS 属性按功能分组：
+
+**尺寸**
+
+`width`, `height`, `min-width`, `min-height`, `max-width`, `max-height` — 值域 Length / Percent / Auto。
+
+**布局**
+
+- `display`（`block` / `flex` / `none` / `inline`，**不含 `grid`**）
+- `flex-direction`（默认 `row`——标准 CSS 默认），`flex-wrap`, `flex-grow`, `flex-shrink`, `flex-basis`, `gap`, `row-gap`, `column-gap`
+- `justify-content`, `align-items`, `align-content`, `align-self`
+- `order`, `aspect-ratio`
+
+**定位**
+
+- `position`（`absolute` / `relative`）
+- `top`, `right`, `bottom`, `left`
+
+**盒模型**
+
+`padding-top/right/bottom/left`, `margin-top/right/bottom/left`
+
+**边框**
+
+`border-color`, `border-radius`, `border-image-slice`
+
+**背景**
+
+`background-color`, `background-image`, `background-size`（`cover` / `contain` / `100%` / `stretch`）, `background-clip`, `-webkit-background-clip`
+
+**视觉**
+
+`opacity`, `box-shadow`, `pointer-events`, `transform`, `filter`
+
+**文本**
+
+`color`（继承）, `font-size`（继承）, `font-family`（继承）, `font-weight`（继承）, `text-align`（继承）, `line-height`（继承）, `letter-spacing`（继承）, `white-space`（继承）, `text-shadow`（继承）, `-webkit-text-stroke`（继承）, `font-effect`（继承，LoomGUI 私有扩展）, `transition`
+
+**溢出**
+
+`overflow-x`, `overflow-y`
+
+### 5.2 值校验（CssValueParser）
+
+每个属性的值通过对应的解析器校验。主要类型：
+
+| 解析器 | 校验方式 |
+|---|---|
+| `Keyword([...])` | 必须是列出的关键字之一 |
+| `Length` | 长度值（px） |
+| `LengthPercent` | 长度或百分比 |
+| `LengthPercentAuto` | 长度、百分比或 auto |
+| `Color` | `#rrggbb` 十六进制颜色 |
+| `Number` | 数字 |
+| `Integer` | 整数 |
+| `Overflow` | `visible` / `hidden` / `scroll` / `auto` |
+| `Transform` | translate / rotate / scale |
+| `Filter` | grayscale / brightness / contrast / saturate / hue-rotate / invert / sepia |
+| `BoxShadow` | `ox oy [blur] [spread] color` |
+| `TextShadow` | `ox oy [blur] color` |
+| `Transition` | `property duration easing` |
+| `Gradient2` | `linear-gradient(to dir, hex, hex)` |
+| `TextEffect` | `glow(w color)` / `blur(w)` |
+| `TextStroke` | `width color` |
+| `BackgroundClipText` | `text` 触发渐变字形 |
+| `Url` | `url("path")` |
+| `BorderRadius` | 1-4 值 px/% + `/` 垂直值 |
+| `FourSidedPx` | 1-4 值 px（九宫格等） |
+| `FourSidedMargin` | 1-4 值 px/%/auto |
+| `Raw` | 原样存储，不校验 |
+
+关键字值校验在 `css_resolve` 阶段进行。非关键字值由 `apply_decl` 的值解析逻辑处理，解析失败也产生 `FenceBadCssValue` diagnostic。
+
+### 5.3 简写展开（ShorthandSpec）
+
+| 简写 | 展开为 | 展开方式 |
 |---|---|---|
-| 标签 `div` | selector.rs:77-78 | 【实证】 |
-| 类 `.btn` | selector.rs:79,94-95 | 【实证】 |
-| ID `#main` | selector.rs:79,95-96 | 【实证】 |
-| 属性 `[attr]` | selector.rs:76-111（v1.5 新增解析 `[]`） | 【实证】 |
-| 属性值 `[attr="val"]` | 同上 | 【实证】 |
-| 后代 `div span` | selector.rs:18-60,238-253 | 【实证】 |
-| 子代 `div > span` | selector.rs:23-36,228-237 | 【实证】 |
-| 分组 `.a,.b` | css.rs:121-133（展开多 Rule） | 【实证】 |
-
-### 3.2 伪类
-
-| 伪类 | 出处 | 标注 |
-|---|---|---|
-| `:hover` | selector.rs:132, dynamic.rs:108-109 | 【实证】 |
-| `:active` | selector.rs:133, dynamic.rs:111-112 | 【实证】 |
-| `:disabled` | selector.rs:134, dynamic.rs:114-115 | 【实证】 |
-| `:focus` | selector.rs:135, dynamic.rs:117-118（v1d.2 修复） | 【实证】 |
-
-### 3.3 围栏外选择器（静默忽略）
-
-| 选择器 | 出处 | 标注 |
-|---|---|---|
-| `:nth-child`/`:nth-of-type`/`:first-child` | selector.rs:136 `_ => {}` | 【推断·待测】 |
-| `:not()` | 同上 | 【推断·待测】 |
-| 通配符 `*` | 走 FENCE_TAGS 报错 | 【实证】 |
-| 相邻兄弟 `+` / 后续兄弟 `~` | selector.rs:21-60 不认 | 【推断·待测】 |
+| `padding` | padding-top/right/bottom/left | Box（四边） |
+| `margin` | margin-top/right/bottom/left | Box（四边） |
+| `overflow` | overflow-x, overflow-y | Replicate（双轴同设） |
+| `border` | border-color | BorderShorthand |
+| `border-width` | — | Box |
+| `border-top/right/bottom/left` | — | FallThrough（单边） |
+| `background` | — | BackgroundShorthand |
+| `flex` | flex-grow, flex-shrink, flex-basis | FallThrough |
 
 ---
 
-## 4. 维护机制
+## 6. 六阶段流水线
 
-### 4.1 单一真相源
+围栏验证是一条六阶段流水线，输入 HTML 字符串，输出 `ParsedTemplate`（IrTree + ResolvedStyle 数组 + Diagnostic 数组 + 引用精灵列表）。
 
-`crates/core/tests/fence_contract.rs` 是围栏契约的可执行真相源。它显式枚举：
-- **支持项**：写进去断言生效（映射出非默认值 / 期望布局结果）。
-- **围栏外项**：写进去断言不改变布局 / 被忽略（如 `display:grid` 落 Flex、`float` 无效）。
+### 阶段 1+2：Tokenize + Tree Build
 
-本 `fence.md` 是测试的人类可读副本。**两者不一致时测试赢**；文档过时仅是可读性问题，不致命。
+- html5gum 0.8 WHATWG tokenizer 词法分析。
+- 构建中间表示 `IrTree`（元素节点 IrElement / 文本节点 Text / 注释 / Doctype）。
+- 每个 IrNode 携带字节偏移 Span，用于后续 diagnostic 定位。
+- 文档壳标签在此阶段被消费。
 
-### 4.2 改围栏时的流程
+### 阶段 3：Fence Gate（逐元素校验）
 
-**新增围栏属性**（如 v1.x 加新 CSS 支持）：
-1. `apply_decl` 加 match arm。
-2. `fence_contract.rs` 加"支持"断言（写进去 → 期望生效）。
-3. 本 `fence.md` §2 对应表补一行，标注【实证】。
-4. 若是 v1.x 新增，roadmap §1.2 同步补。
+对每个元素检查：
 
-**新增围栏外禁令**（明确某属性不该写）：
-1. `fence_contract.rs` 加"围栏外静默忽略"断言（写进去 → 期望不改变布局）。
-2. 本 `fence.md` §2.4 补一行，标注【实证】。
-3. Unity 插件 Editor Resources 的 fence-rules.md 同步"禁写"清单（LoomWorkspaceInitializer 注入）。
+- **标签名**：不在注册表中、不是壳标签、不含 `-` → `FenceUnknownTag`
+- **属性名**：全局属性放行；结构属性按值域校验（`FenceBadAttrValue`）；内容属性按白名单校验；未识别 → `FenceUnknownAttr`
+- **行内 CSS 属性名**：不在 `CSS_PROPS` 且不在 `CSS_SHORTHANDS` → `FenceUnknownCssProp`
 
-**改 arm 行为**：
-1. 测试 fail（行为变了）。
-2. 评估：是 bug 修复（同步测试+文档）还是契约变更（design 主文档也要改）。
-3. 同步测试 + 本文档。
+不做跨元素检查（那是阶段 5 的职责）。
 
-**【推断·待测】→【实证】**：实现期补 `fence_contract.rs` 对应断言后，把本表格标注改成【实证】。
+### 阶段 4：CSS Resolve（行内样式解析）
 
-### 4.3 防漂移门
+对每个元素的 `style` 属性：
 
-`cargo test -p loomgui_core fence_contract` 必须在以下时机跑：
-- 本机编码机 build .dll 前。
-- 任何 `apply_decl` / `FENCE_TAGS` / selector 解析的改动后。
-- PR/合并前。
+- 逐条声明解析 `prop: value`。
+- 属性名校验（同阶段 3 但在 resolve 上下文）。
+- 关键字值域校验（`Keyword([...])` 类型属性）。
+- 值解析校验（`apply_decl` 返回 false 时报 `FenceBadCssValue`）。
+- 应用 DisplayDefault（来自 schema）：Block → `DisplayMode::Block`，Inline → `DisplayMode::Flex` + `flex-direction:row`，None → `DisplayMode::None`。
+- **`flex-direction` 默认 `row`**（标准 CSS 默认值）。如果未显式设置且 display 为 flex，强制覆盖为 Row。
 
-测试 fail = 围栏契约被破坏，必须修复或显式更新契约（同步文档）。
+产出 `Vec<ResolvedStyle>`（每节点一个，按 node-index 对齐）。
 
-### 4.4 不做什么（YAGNI）
+### 阶段 5：Structural（跨元素结构校验）
 
-- **不从代码自动生成 fence.md**：match arm 提取不出"围栏外项"和"值约束"和"预览可信清单"，自动生成只能覆盖一部分，混合维护更乱。
-- **不把 match 重构成数组驱动**：CSS 属性的值约束（如 background-size 只认 cover/contain/100%）塞不进数组，过度工程。
-- 测试即文档是最轻的防漂移手段。
+- **Content Model**：子节点的 Category 必须被父节点的 ContentModel 允许。如 `<div>` 中放任何 Flow 内容合法，但 `<span>` 中放 `<div>`（Block inside Phrasing）报错。
+- **文本内容**：ContentModel 为 `None` 或 `Only([...])` 的元素不接受文本子节点（空白文本节点跳过）。
+- **ID 唯一性**：同一模板作用域内重复 `id` → `DuplicateId`。
+- **Deferred 验证**（R1.1 新增）：ARIA 关系（`aria-controls` / `aria-labelledby` 的 IdRef 目标存在）、template 根（`<ul>`/`<ol>` 内 `<template>` 根必须是 `<li>`）、`label[for]` 目标存在。
 
----
+### 阶段 6：Annotate（语义类型填充）
 
-## 5. 围栏副本分发
+对每个元素调用 `resolve_semantic(tag, input_type)`，填充 `IrElement.semantic`。这是确定性的：同样的 tag + input[type] 永远产生同样的 SemanticKind。
 
-围栏清单的消费者有三处，都引用本 `fence.md`（或其子集）为源，不各自维护：
+### 流水线特性
 
-| 消费者 | 位置 | 内容 |
-|---|---|---|
-| editor 围栏规则（注入设计师工作区） | Unity 插件 Editor Resources 注入（`LoomWorkspaceInitializer`） | 围栏清单 + 预览可信清单（roadmap §1.3） |
-| v1 范围冻结 | `docs/roadmap/roadmap.md` §1.2 | 引用 fence.md + 标注 v1 冻结子集 / v1.x 扩展 |
-| 设计契约 | `docs/design/main-design.md` | 引用 fence.md 为围栏权威源 |
-
-**同步规则**：改 fence.md → 检查三处消费者是否需同步。Editor Resources 的 fence-rules.md 由 LoomWorkspaceInitializer 注入给设计师工作区，过时会让 AI 生成违规 UI，优先同步。
+- **Collect-all**：所有阶段的 diagnostic 汇总到一个 `Vec<Diagnostic>` 输出，不 fail-fast。
+- **Diagnostic 结构**：每条包含 severity（Error/Warning）、code（DiagnosticCode）、message、SourceLocation（文件名/行/列/源文本）、notes（Help/Note/Related）。
+- **LineMap**：预计算的行偏移表，O(log n) 偏移到行列转换。
 
 ---
 
-## 6. 预览可信清单
+## 7. DiagnosticCode 完整清单
 
-open-design Chromium iframe 预览 ≠ taffy 渲染。AI 须分清：
+| Code | 含义 |
+|---|---|
+| `FenceUnknownTag` | 标签不在围栏注册表中 |
+| `FenceUnknownAttr` | 属性不在元素的白名单中 |
+| `FenceUnknownCssProp` | CSS 属性名不在围栏中 |
+| `FenceBadCssValue` | CSS 值解析失败或不在允许的关键字域内 |
+| `FenceBadAttrValue` | 结构属性值不在允许的枚举域内 |
+| `DuplicateId` | 同一模板作用域内 ID 重复 |
+| `UnclosedTag` | 标签未闭合 |
+| `InvalidContentModel` | 子元素不满足父元素的 ContentModel |
+| `InvalidIdRef` | `label[for]` 指向的 ID 不存在 |
+| `InvalidTemplateRoot` | ListView 内 template 根不是 `<li>` |
+| `UnregisteredCustomElement` | 自定义元素未注册（defer 到 R3） |
+| `InvalidAriaRelation` | `aria-controls` / `aria-labelledby` 目标不存在 |
+| `TokenizerError` | html5gum tokenizer 遇到无法恢复的词法错误 |
 
-**可信**（Chrome ≈ LoomGUI）：flex 轴/方向、显式 `display:flex`、`gap` 间距、颜色、opacity、图片、px 尺寸、`background-image`/`background-size`、`border-radius`（标准 CSS，Chrome 原生）。**`border`/`border-color` v1.8 起预览可信**（彩色边框环已渲染）。
+---
 
-**不可信**（Chrome ≠ LoomGUI，别按预览调）：
-- **margin 控间距**：Chrome（block flow）折叠 margin、LoomGUI（flex）求和不折叠。**子项间距用 `gap`**，别用 margin。
-- **文本换行/像素级**：Chrome 文本引擎 vs LoomGUI（unicode-linebreak），换行点/塞文本宽度会偏。
-- **`display:grid`**：Chrome 渲染 grid、LoomGUI 落 Flex。预览会骗 AI。
-- **`@media` 响应式**：Chrome 响应、LoomGUI 用参考分辨率缩放不响应 @media。
+## 8. 防漂移机制
 
-**口径**：不可信项"信围栏规则，别信预览"。
+### 8.1 单一真相源
 
+围栏的所有规则以 `crates/fence/src/schema/` 下的 Rust const 表为唯一真相源：
+
+- `tag.rs` → `TAGS`（23 运行时标签注册表）+ `SHELL_TAGS`
+- `attr.rs` → 全局属性、结构属性、内容属性定义
+- `css.rs` → `CSS_PROPS`（属性白名单）+ `CSS_SHORTHANDS`（简写展开）
+
+解析器、打包器、文档、测试不得各维护一份白名单。
+
+### 8.2 防漂移门
+
+```bash
+cargo test -p loomgui_fence                                # 全部围栏测试
+cargo test -p loomgui_fence --test schema_contract         # schema 注册表契约
+cargo test -p loomgui_fence --test pipeline_integration    # 端到端流水线
+```
+
+改围栏后必跑。测试 fail = 围栏契约被破坏。
+
+### 8.3 消费者
+
+本文档（`fence.md`）的消费者有三处，都引用本文为源：
+
+| 消费者 | 位置 |
+|---|---|
+| 设计契约 | `docs/design/main-design.md` §3 |
+| 设计师工作区 AI 规则 | 打包器模板 `workspace-CLAUDE.md` + `skill/SKILL.md` |
+| 重构路线 | `docs/roadmap/roadmap.md` |
+
+**同步规则**：改 schema 代码 → 检查三处消费者是否需同步。
