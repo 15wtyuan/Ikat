@@ -16,7 +16,3 @@ bincode = "1"
 # 应用层 NodeId(pub u32)（20bit index + 12bit gen，FFI/C# 透明）经 from_ffi/as_ffi 桥接到
 # slotmap DefaultKey（详见 scene/node.rs NodeId impl 与 Scene::key_for）。
 slotmap = { version = "1.1", features = [] }
-
-[dev-dependencies]
-insta = "1"
-criterion = { version = "0.5", features = ["html_reports"] }
