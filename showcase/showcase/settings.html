@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh">
 <head>
   <meta charset="utf-8">
@@ -6,28 +6,28 @@
   <script src="preview/loom-preview.js"></script>
   <title>LoomGUI 靶子冻结 Showcase · 设置</title>
   <style>
-  .root { width:1920px; height:1080px; background-color:#0e1620; flex-direction:row; }
-  .sidebar { width:260px; background-color:#152433; padding:32px 20px; gap:6px; border-width:0 1px 0 0; border-color:#2a5a75; }
+  .root {display:flex; width:1920px; height:1080px; background-color:#0e1620; flex-direction:row; }
+  .sidebar {display:flex;flex-direction:column; width:260px; background-color:rgba(21,36,51,0.72); padding:32px 20px; gap:6px; border-width:0 1px 0 0; border-color:#2a5a75; }
   .side-back { color:#8ec5d8; font-size:14px; margin-bottom:20px; }
   .side-title { color:#e0e6ec; font-size:22px; font-weight:700; margin-bottom:20px; }
-  .tab { text-align:left; color:#9aa0b4; font-size:16px; padding:12px 16px; border-radius:8px; }
-  .tab:hover { background-color:#1a2f45; }
-  .tab[aria-selected="true"] { background-color:#1a2f45; color:#5fb4d4; font-weight:700; }
-  .main { flex:1; padding:48px; gap:32px; overflow-y:auto; }
+  .tab { text-align:left; color:#9aa0b4; font-size:16px; padding:12px 16px; border-radius:10px; }
+  .tab:hover { background-color:rgba(26,47,69,0.85); }
+  .tab[aria-selected="true"] { background-color:rgba(26,47,69,0.85); color:#5fb4d4; font-weight:700; }
+  .main {display:flex;flex-direction:column; flex-grow:1; padding:48px; gap:32px; overflow-y:auto; }
   .page-title { color:#e0e6ec; font-size:36px; font-weight:700; }
   .page-desc { color:#9aa0b4; font-size:15px; }
-  .field { flex-direction:row; align-items:center; justify-content:space-between; gap:24px; padding:14px 0; border-width:0 0 1px 0; border-color:#1a2f45; }
+  .field {display:flex; flex-direction:row; align-items:center; justify-content:space-between; gap:24px; padding:14px 0; border-width:0 0 1px 0; border-color:#1a2f45; }
   .field-label { color:#e0e6ec; font-size:16px; }
   .field-hint { color:#6c7080; font-size:13px; margin-top:3px; }
-  .field-control { flex-direction:row; align-items:center; gap:12px; }
-  .val { color:#d4a44e; font-size:14px; min-width:48px; text-align:right; }
-  input[type="range"] { width:280px; accent-color:#5fb4d4; }
-  input[type="number"], input[type="text"], input[type="password"], input[type="search"] { background-color:#152433; border-width:0 0 0 2px; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; width:240px; }
-  select { background-color:#152433; border-width:0 0 0 2px; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; }
-  .checkbox-row { flex-direction:row; align-items:center; gap:10px; }
-  .radio-group { flex-direction:row; gap:20px; }
-  .radio-opt { flex-direction:row; align-items:center; gap:6px; color:#9aa0b4; font-size:15px; }
-  input[type="checkbox"], input[type="radio"] { accent-color:#5fb4d4; }
+  .field-control {display:flex; flex-direction:row; align-items:center; gap:12px; }
+  .val { color:#8ec5d8; font-size:14px; min-width:48px; text-align:right; }
+  input[type="range"] { width:280px;  }
+  input[type="number"], input[type="text"], input[type="password"], input[type="search"] { background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; width:240px; }
+  select { background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; }
+  .checkbox-row {display:flex; flex-direction:row; align-items:center; gap:10px; }
+  .radio-group {display:flex; flex-direction:row; gap:20px; }
+  .radio-opt {display:flex; flex-direction:row; align-items:center; gap:6px; color:#9aa0b4; font-size:15px; }
+  input[type="checkbox"], input[type="radio"] {  }
   .panel { transition:opacity .2s; }
   </style>
 </head>

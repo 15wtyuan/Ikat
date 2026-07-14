@@ -63,13 +63,22 @@
     });
   }
 
+  // Preview-only: rotate item icons across filled rows so the inventory grid
+  // reads as varied items. Runtime ListView is data-driven; this is a visual aid.
+  var ITEM_ROTATION = ['item-potion', 'item-chest', 'item-gem', 'item-scroll', 'item-staff', 'item-wand'];
   function fillListViews() {
+    var dir = location.href.substring(0, location.href.lastIndexOf('/') + 1) + '../res/icons/';
     document.querySelectorAll('ul[data-fill], ol[data-fill]').forEach(function (ul) {
       var tpl = ul.querySelector('template');
       if (!tpl) return;
       var count = parseInt(ul.getAttribute('data-fill'), 10) || 8;
       for (var i = 1; i < count; i++) {
-        ul.appendChild(tpl.content.cloneNode(true));
+        var node = tpl.content.cloneNode(true);
+        var img = node.querySelector('img');
+        if (img && /\/item-/.test(img.getAttribute('src') || '')) {
+          img.setAttribute('src', dir + ITEM_ROTATION[i % ITEM_ROTATION.length] + '.png');
+        }
+        ul.appendChild(node);
       }
     });
   }

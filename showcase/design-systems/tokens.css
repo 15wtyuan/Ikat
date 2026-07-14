@@ -1,12 +1,18 @@
-/* Deep Ocean design tokens. Fence does not enforce var(), designers can write hex directly. */
+/* Deep Ocean - refined dark game-UI tokens.
+   Accent hierarchy: --accent (cyan) is the SINGLE primary interaction color
+   (CTA, focus, active state). --gold is a SEMANTIC color reserved for
+   rarity / currency / level - it must not compete with the primary CTA.
+   Fence does not enforce var(); designers may write hex directly. */
 :root {
   --bg: #0e1620;
   --surface: #152433;
   --surface-2: #1a2f45;
+  --surface-glass: rgba(21, 36, 51, 0.6);     /* translucent panels */
   --border: #2a5a75;
-  --accent: #5fb4d4;
+  --border-soft: rgba(95, 180, 212, 0.14);    /* hairline / inner-glow edges */
+  --accent: #5fb4d4;        /* primary interaction */
   --accent-soft: #8ec5d8;
-  --gold: #d4a44e;
+  --gold: #d4a44e;          /* rarity / currency / level only */
   --fg: #e0e6ec;
   --muted: #9aa0b4;
   --dim: #6c7080;
@@ -26,7 +32,8 @@
   --space-4: 16px;
   --space-5: 20px;
   --space-6: 24px;
-  --radius-sm: 4px;
-  --radius-md: 8px;
+  --radius: 10px;           /* one corner-radius system, applied everywhere */
+  --radius-sm: 6px;
+  --radius-md: 10px;
   --radius-lg: 10px;
 }

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh">
 <head>
   <meta charset="utf-8">
@@ -6,36 +6,38 @@
   <script src="preview/loom-preview.js"></script>
   <title>LoomGUI 靶子冻结 Showcase · 背包</title>
   <style>
-  .root { width:1920px; height:1080px; background-color:#0e1620; }
-  .body { flex:1; flex-direction:row; gap:24px; padding:24px; overflow:hidden; }
-  .col-list { width:680px; flex-direction:column; gap:12px; overflow-y:auto; }
+  .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; }
+  .body {display:flex; flex-grow:1; flex-direction:row; gap:24px; padding:24px; overflow:hidden; }
+  .col-list {display:flex; width:680px; flex-direction:column; gap:12px; overflow-y:auto; }
   .col-title { color:#e0e6ec; font-size:22px; font-weight:700; margin-bottom:4px; }
-  .grid { flex-direction:row; flex-wrap:wrap; gap:12px; }
-  .item { width:120px; height:120px; background-color:#152433; border-radius:8px; padding:10px; gap:6px; align-items:center; position:relative; transition:transform .15s, background-color .15s; }
-  .item:hover { transform:scale(1.05); background-color:#1a2f45; }
+  .grid {display:flex; flex-direction:row; flex-wrap:wrap; gap:12px; }
+  .item {display:flex;flex-direction:column; width:120px; height:120px; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:10px; gap:6px; align-items:center; position:relative; transition:transform .15s, background-color .15s; }
+  .item:hover { transform:scale(1.05); background-color:rgba(26,47,69,0.85); }
   .item.selected { border-width:0 0 0 3px; border-color:#d4a44e; }
   .item-icon { width:56px; height:56px; }
-  .item-badge { position:absolute; top:6px; right:6px; background-color:#d4a44e; color:#0e1620; font-size:12px; font-weight:700; padding:1px 6px; border-radius:8px; }
+  .item-badge { position:absolute; top:6px; right:6px; background-color:#d4a44e; color:#0e1620; font-size:12px; font-weight:700; padding:1px 6px; border-radius:10px; }
   .item-dur { width:80px; }
-  .col-detail { flex:1; background-color:#152433; border-radius:12px; padding:32px; gap:16px; overflow-y:auto; }
+  .col-detail {display:flex;flex-direction:column; flex-grow:1; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:32px; gap:16px; overflow-y:auto; }
   .detail-icon { width:160px; height:160px; align-self:center; }
   .detail-name { color:#e0e6ec; font-size:30px; font-weight:700; align-self:center; }
   .detail-rarity { color:#d4a44e; font-size:15px; align-self:center; }
   .detail-desc { color:#9aa0b4; font-size:15px; line-height:1.7; }
-  .detail-attrs { flex-direction:row; gap:24px; justify-content:center; }
-  .attr { flex-direction:column; align-items:center; gap:4px; }
+  .detail-attrs {display:flex; flex-direction:row; gap:24px; justify-content:center; }
+  .attr {display:flex; flex-direction:column; align-items:center; gap:4px; }
   .attr-val { color:#8ec5d8; font-size:22px; font-weight:700; }
   .attr-label { color:#6c7080; font-size:13px; }
-  .detail-actions { flex-direction:row; gap:12px; justify-content:center; margin-top:8px; }
-  .btn { padding:10px 24px; border-radius:8px; font-size:15px; font-weight:700; }
-  .btn-use { background-color:#5fb4d4; color:#0e1620; }
-  .btn-drop { background-color:#152433; color:#c2605a; }
+  .detail-actions {display:flex; flex-direction:row; gap:12px; justify-content:center; margin-top:8px; }
+  .btn { padding:10px 24px; border-radius:10px; font-size:15px; font-weight:700; }
+  .btn-use { background-color:#5fb4d4; color:#08131a; box-shadow:0 0 0 1px rgba(95,180,212,0.5), 0 4px 14px rgba(95,180,212,0.22); }
+  .btn-drop { background-color:rgba(194,96,90,0.12); color:#c2605a; box-shadow:inset 0 0 0 1px rgba(194,96,90,0.32); }
+  .btn-use:hover { filter:brightness(1.1); transform:translateY(-1px); }
+  .btn-drop:hover { background-color:rgba(194,96,90,0.2); box-shadow:inset 0 0 0 1px rgba(194,96,90,0.5); }
   </style>
 </head>
 <body>
   <div class="root">
-    <header class="topbar" style="flex-direction:row;align-items:center;justify-content:space-between;padding:20px 32px;background-color:#152433;border-width:0 0 1px 0;border-color:#2a5a75">
-      <div style="flex-direction:row;align-items:center;gap:12px"><button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">背包</span></div>
+    <header class="topbar" style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-color:#2a5a75">
+      <div style="display:flex;flex-direction:row;align-items:center;gap:12px"><button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">背包</span></div>
     </header>
     <div class="body">
       <div class="col-list">
@@ -44,14 +46,14 @@
           <template>
             <li class="item">
               <span class="item-badge">x9</span>
-              <img class="item-icon" src="../res/icons/box.png" alt="item">
+              <img class="item-icon" src="../res/icons/item-potion.png" alt="item">
               <progress class="item-dur" value="70" max="100"></progress>
             </li>
           </template>
         </ul>
       </div>
       <div class="col-detail">
-        <img class="detail-icon" src="../res/icons/box.png" alt="detail">
+        <img class="detail-icon" src="../res/icons/item-chest.png" alt="detail">
         <span class="detail-name">精铁宝箱</span>
         <span class="detail-rarity">史诗 · 可堆叠</span>
         <p class="detail-desc">从远古遗迹中发掘的精铁宝箱，开启后有概率获得稀有装备与材料。耐久度归零后碎裂。</p>

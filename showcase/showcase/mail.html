@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh">
 <head>
   <meta charset="utf-8">
@@ -6,21 +6,21 @@
   <script src="preview/loom-preview.js"></script>
   <title>LoomGUI 靶子冻结 Showcase · 邮件</title>
   <style>
-  .root { width:1920px; height:1080px; background-color:#0e1620; }
-  .body { flex:1; flex-direction:row; gap:24px; padding:24px; overflow:hidden; }
-  .col-list { width:560px; gap:12px; overflow-y:auto; }
+  .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; }
+  .body {display:flex; flex-grow:1; flex-direction:row; gap:24px; padding:24px; overflow:hidden; }
+  .col-list {display:flex;flex-direction:column; width:560px; gap:12px; overflow-y:auto; }
   .col-title { color:#e0e6ec; font-size:22px; font-weight:700; margin-bottom:4px; }
-  .mail-item { flex-direction:row; gap:14px; align-items:center; padding:16px; background-color:#152433; border-radius:10px; transition:background-color .15s; }
-  .mail-item:hover { background-color:#1a2f45; }
+  .mail-item {display:flex; flex-direction:row; gap:14px; align-items:center; padding:16px; background-color:rgba(21,36,51,0.72); border-radius:10px; transition:background-color .15s; }
+  .mail-item:hover { background-color:rgba(26,47,69,0.85); }
   .mail-dot { width:10px; height:10px; border-radius:5px; background-color:#d4a44e; }
   .mail-dot.read { background-color:#3a5060; }
-  .mail-body { flex:1; gap:4px; }
+  .mail-body {display:flex;flex-direction:column; flex-grow:1; gap:4px; }
   .mail-from { color:#e0e6ec; font-size:16px; font-weight:700; }
   .mail-sub { color:#9aa0b4; font-size:14px; }
-  .col-read { flex:1; background-color:#152433; border-radius:12px; padding:40px; gap:18px; overflow-y:auto; }
+  .col-read {display:flex;flex-direction:column; flex-grow:1; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:40px; gap:18px; overflow-y:auto; }
   .read-title { color:#e0e6ec; font-size:28px; font-weight:700; }
   .read-meta { color:#6c7080; font-size:14px; }
-  .read-body { color:#dfe4ec; font-size:16px; line-height:1.9; gap:14px; }
+  .read-body {display:flex;flex-direction:column; color:#dfe4ec; font-size:16px; line-height:1.9; gap:14px; }
   .loot { color:#d4a44e; font-weight:700; }
   .sys { color:#5fb4d4; font-weight:700; }
   .enemy { color:#c2605a; font-weight:700; }
@@ -30,13 +30,13 @@
 </head>
 <body>
   <div class="root">
-    <header class="topbar" style="flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:#152433;border-width:0 0 1px 0;border-color:#2a5a75">
+    <header class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-color:#2a5a75">
       <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">邮件</span>
     </header>
     <div class="body">
       <div class="col-list">
         <p class="col-title">收件箱 · ListView</p>
-        <ul data-fill="6" style="gap:12px">
+        <ul data-fill="6" style="display:flex;flex-direction:column;gap:12px">
           <template>
             <li class="mail-item">
               <div class="mail-dot"></div>
@@ -51,8 +51,8 @@
         <div class="read-body">
           <p>勇士你好，<br>本赛季已结束，你的最终排名为 <span class="loot">127</span>。</p>
           <p>奖励清单：<span class="loot">金币 ×5000</span>、<span class="loot">传说宝箱 ×1</span>、<span class="sys">称号「不屈」</span>。</p>
-          <p><strong>注意：</strong>奖励将于 <em>7 天内</em>发放，请及时领取。<a href="#" style="color:#5fb4d4;text-decoration:underline">点此领取全部奖励</a></p>
-          <p>击败 <span class="enemy">暗影领主</span> 可额外获得赛季专属外观。详细规则见 <a href="#" style="color:#5fb4d4;text-decoration:underline">赛季手册</a>。</p>
+          <p><strong>注意：</strong>奖励将于 <em>7 天内</em>发放，请及时领取。<a href="#" style="color:#5fb4d4;">点此领取全部奖励</a></p>
+          <p>击败 <span class="enemy">暗影领主</span> 可额外获得赛季专属外观。详细规则见 <a href="#" style="color:#5fb4d4;">赛季手册</a>。</p>
         </div>
       </div>
     </div>

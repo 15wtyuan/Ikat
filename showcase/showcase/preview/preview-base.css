@@ -5,10 +5,14 @@
   src: url('../../res/fonts/LXGWWenKai.ttf') format('truetype');
   font-display: block;
 }
-div { display: flex; flex-direction: column; }
+/* No tag-level display polyfill: fence DisplayDefault matches the browser
+   (div/nav/header/p/ul/ol/li -> block, span/a/button/... -> inline), and the
+   runtime resolves inline -> Flex+Row. Authors must declare display:flex
+   explicitly per main-design.md; do not reintroduce a "div is flex" shim. */
 * { box-sizing: border-box; }
 body {
   margin: 0;
+  color: #e0e6ec;
   font-family: 'LXGW WenKai', sans-serif;
   background: #05080d;
   display: flex;
@@ -17,6 +21,12 @@ body {
   min-height: 100vh;
   padding: 24px;
 }
-.root { box-shadow: 0 0 0 1px #2a2f45, 0 8px 40px rgba(0,0,0,.6); }
+.root {
+  background-image: radial-gradient(1100px 560px at 82% -12%, rgba(95, 180, 212, 0.08), transparent 60%);
+  box-shadow: 0 0 0 1px rgba(95, 180, 212, 0.10), 0 8px 40px rgba(0, 0, 0, .6);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.page-title, .section-title, .panel-title, .group-title, .dialog-title, .read-title, .col-title, .side-title, .stage-name { letter-spacing: -0.01em; }
 button { background: none; border: none; color: inherit; font: inherit; padding: 0; cursor: pointer; }
 a { color: inherit; text-decoration: none; }

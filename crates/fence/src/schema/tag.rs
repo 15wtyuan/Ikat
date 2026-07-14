@@ -142,8 +142,10 @@ pub fn resolve_semantic(tag: &str, input_type: Option<&str>) -> Option<SemanticK
 
 /// Document-shell tags recognised by the parser but not part of the
 /// runtime object tree.  They provide structure (html/head/body) or
-/// metadata (title/meta/style/link) and are consumed during tree build.
-pub const SHELL_TAGS: &[&str] = &["html", "head", "body", "title", "meta", "style", "link"];
+/// metadata (title/meta/style/link/script) and are consumed during tree build.
+pub const SHELL_TAGS: &[&str] = &[
+    "html", "head", "body", "title", "meta", "style", "link", "script",
+];
 
 pub fn is_shell_tag(name: &str) -> bool {
     SHELL_TAGS.contains(&name)

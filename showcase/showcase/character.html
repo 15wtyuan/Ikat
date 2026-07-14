@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh">
 <head>
   <meta charset="utf-8">
@@ -6,29 +6,29 @@
   <script src="preview/loom-preview.js"></script>
   <title>LoomGUI 靶子冻结 Showcase · 角色</title>
   <style>
-  .root { width:1920px; height:1080px; background-color:#0e1620; }
-  .body { flex:1; flex-direction:row; gap:24px; padding:24px; overflow:hidden; }
-  .col-stage { width:720px; gap:16px; }
-  .native-slot { width:720px; height:680px; background-color:#0a121b; border-radius:12px; border-width:2px; border-color:#2a5a75; }
-  .stage-info { flex-direction:row; justify-content:space-between; }
+  .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; }
+  .body {display:flex; flex-grow:1; flex-direction:row; gap:24px; padding:24px; overflow:hidden; }
+  .col-stage {display:flex;flex-direction:column; width:720px; gap:16px; }
+  .native-slot { width:720px; height:680px; background-color:#0a121b; border-radius:10px; border-width:2px; border-color:#2a5a75; }
+  .stage-info {display:flex; flex-direction:row; justify-content:space-between; }
   .stage-name { color:#e0e6ec; font-size:28px; font-weight:700; }
   .stage-lv { color:#d4a44e; font-size:18px; font-weight:700; }
-  .stat-bars { gap:10px; padding:0 4px; }
-  .stat-row { flex-direction:row; align-items:center; gap:12px; }
+  .stat-bars {display:flex;flex-direction:column; gap:10px; padding:0 4px; }
+  .stat-row {display:flex; flex-direction:row; align-items:center; gap:12px; }
   .stat-label { color:#9aa0b4; font-size:14px; min-width:52px; }
   .stat-val { color:#e0e6ec; font-size:14px; min-width:90px; text-align:right; }
-  .col-side { flex:1; gap:20px; overflow-y:auto; }
-  .panel { background-color:#152433; border-radius:12px; padding:24px; gap:14px; }
+  .col-side {display:flex;flex-direction:column; flex-grow:1; gap:20px; overflow-y:auto; }
+  .panel {display:flex;flex-direction:column; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:24px; gap:14px; }
   .panel-title { color:#8ec5d8; font-size:16px; font-weight:700; }
-  .equip-grid { flex-direction:row; flex-wrap:wrap; gap:10px; }
-  .equip { width:72px; height:72px; background-color:#1a2f45; border-radius:8px; justify-content:center; align-items:center; transition:filter .15s; }
+  .equip-grid {display:flex; flex-direction:row; flex-wrap:wrap; gap:10px; }
+  .equip {display:flex;flex-direction:column; width:72px; height:72px; background-color:rgba(26,47,69,0.85); border-radius:10px; justify-content:center; align-items:center; transition:filter .15s; }
   .equip:hover { filter:brightness(1.3); }
   .equip img { width:44px; height:44px; }
-  .skill { flex-direction:row; align-items:center; gap:14px; padding:10px 0; border-width:0 0 1px 0; border-color:#1a2f45; transition:background-color .15s; }
-  .skill:hover { background-color:#1a2f45; }
+  .skill {display:flex; flex-direction:row; align-items:center; gap:14px; padding:10px 0; border-width:0 0 1px 0; border-color:#1a2f45; transition:background-color .15s; }
+  .skill:hover { background-color:rgba(26,47,69,0.85); }
   .skill-no { color:#6c7080; font-size:14px; min-width:24px; }
   .skill-icon { width:40px; height:40px; }
-  .skill-name { color:#e0e6ec; font-size:15px; flex:1; }
+  .skill-name { color:#e0e6ec; font-size:15px; flex-grow:1; }
   .skill-lv { color:#d4a44e; font-size:14px; font-weight:700; }
   @keyframes charge { from{filter:brightness(.7)} to{filter:brightness(1)} }
   progress { animation:charge 2s infinite alternate; }
@@ -36,7 +36,7 @@
 </head>
 <body>
   <div class="root">
-    <header class="topbar" style="flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:#152433;border-width:0 0 1px 0;border-color:#2a5a75">
+    <header class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-color:#2a5a75">
       <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">角色</span>
     </header>
     <div class="body">
@@ -47,30 +47,30 @@
           <span class="stage-lv">Lv.58</span>
         </div>
         <div class="stat-bars">
-          <div class="stat-row"><span class="stat-label">HP</span><progress value="780" max="1000" style="flex:1;height:16px;accent-color:#c2605a"></progress><span class="stat-val">780/1000</span></div>
-          <div class="stat-row"><span class="stat-label">MP</span><progress value="340" max="600" style="flex:1;height:16px;accent-color:#5fb4d4"></progress><span class="stat-val">340/600</span></div>
-          <div class="stat-row"><span class="stat-label">EXP</span><progress value="62" max="100" style="flex:1;height:16px;accent-color:#d4a44e"></progress><span class="stat-val">62%</span></div>
+          <div class="stat-row"><span class="stat-label">HP</span><progress value="780" max="1000" style="flex-grow:1;height:16px;"></progress><span class="stat-val">780/1000</span></div>
+          <div class="stat-row"><span class="stat-label">MP</span><progress value="340" max="600" style="flex-grow:1;height:16px;"></progress><span class="stat-val">340/600</span></div>
+          <div class="stat-row"><span class="stat-label">EXP</span><progress value="62" max="100" style="flex-grow:1;height:16px;"></progress><span class="stat-val">62%</span></div>
         </div>
       </div>
       <div class="col-side">
         <div class="panel">
           <span class="panel-title">装备槽</span>
           <div class="equip-grid">
-            <div class="equip"><img src="../res/icons/skin.png" alt="helm"></div>
-            <div class="equip"><img src="../res/icons/box.png" alt="armor"></div>
-            <div class="equip"><img src="../res/icons/cpu.png" alt="weapon"></div>
-            <div class="equip"><img src="../res/icons/zap.png" alt="ring"></div>
-            <div class="equip"><img src="../res/icons/hand.png" alt="glove"></div>
-            <div class="equip"><img src="../res/icons/eye.png" alt="boots"></div>
+            <div class="equip"><img src="../res/icons/helm.png" alt="helm"></div>
+            <div class="equip"><img src="../res/icons/shield.png" alt="armor"></div>
+            <div class="equip"><img src="../res/icons/weapon.png" alt="weapon"></div>
+            <div class="equip"><img src="../res/icons/ring.png" alt="ring"></div>
+            <div class="equip"><img src="../res/icons/glove.png" alt="glove"></div>
+            <div class="equip"><img src="../res/icons/boots.png" alt="boots"></div>
           </div>
         </div>
         <div class="panel">
           <span class="panel-title">技能（ol 有序列表）</span>
-          <ol style="gap:4px">
-            <li class="skill"><span class="skill-no">1</span><img class="skill-icon" src="../res/icons/zap.png" alt="skill"><span class="skill-name">影袭</span><span class="skill-lv">Lv.9</span></li>
-            <li class="skill"><span class="skill-no">2</span><img class="skill-icon" src="../res/icons/rotate-cw.png" alt="skill"><span class="skill-name">旋风斩</span><span class="skill-lv">Lv.7</span></li>
-            <li class="skill"><span class="skill-no">3</span><img class="skill-icon" src="../res/icons/eye.png" alt="skill"><span class="skill-name">鹰眼</span><span class="skill-lv">Lv.5</span></li>
-            <li class="skill"><span class="skill-no">4</span><img class="skill-icon" src="../res/icons/zap.png" alt="skill"><span class="skill-name">瞬步</span><span class="skill-lv">Lv.8</span></li>
+          <ol style="display:flex;flex-direction:column;gap:4px">
+            <li class="skill"><span class="skill-no">1</span><img class="skill-icon" src="../res/icons/weapon.png" alt="skill"><span class="skill-name">影袭</span><span class="skill-lv">Lv.9</span></li>
+            <li class="skill"><span class="skill-no">2</span><img class="skill-icon" src="../res/icons/skill-spin.png" alt="skill"><span class="skill-name">旋风斩</span><span class="skill-lv">Lv.7</span></li>
+            <li class="skill"><span class="skill-no">3</span><img class="skill-icon" src="../res/icons/skill-eye.png" alt="skill"><span class="skill-name">鹰眼</span><span class="skill-lv">Lv.5</span></li>
+            <li class="skill"><span class="skill-no">4</span><img class="skill-icon" src="../res/icons/skill-step.png" alt="skill"><span class="skill-name">瞬步</span><span class="skill-lv">Lv.8</span></li>
           </ol>
         </div>
       </div>

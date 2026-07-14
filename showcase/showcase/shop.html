@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh">
 <head>
   <meta charset="utf-8">
@@ -6,67 +6,67 @@
   <script src="preview/loom-preview.js"></script>
   <title>LoomGUI 靶子冻结 Showcase · 商店</title>
   <style>
-  .root { width:1920px; height:1080px; background-color:#0e1620; }
-  .body { flex:1; padding:32px; gap:24px; overflow-y:auto; }
+  .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; }
+  .body {display:flex;flex-direction:column; flex-grow:1; padding:32px; gap:24px; overflow-y:auto; }
   .page-title { color:#e0e6ec; font-size:28px; font-weight:700; }
-  .grid { flex-direction:row; flex-wrap:wrap; gap:24px; }
-  .product { width:360px; background-color:#152433; border-radius:12px; padding:20px; gap:14px; transition:transform .15s; }
+  .grid {display:flex; flex-direction:row; flex-wrap:wrap; gap:24px; }
+  .product {display:flex;flex-direction:column; width:360px; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:20px; gap:14px; transition:transform .15s; }
   .product:hover { transform:translateY(-6px); }
-  .product-img { width:100%; height:160px; background-color:#1a2f45; border-radius:8px; align-self:center; }
+  .product-img { width:140px; height:140px; background-color:rgba(26,47,69,0.85); border-radius:10px; align-self:center; }
   .product-name { color:#e0e6ec; font-size:18px; font-weight:700; }
   .product-price { color:#d4a44e; font-size:20px; font-weight:700; }
-  .product-meta { flex-direction:row; justify-content:space-between; align-items:center; }
-  .stock-row { flex-direction:row; align-items:center; gap:8px; }
+  .product-meta {display:flex; flex-direction:row; justify-content:space-between; align-items:center; }
+  .stock-row {display:flex; flex-direction:row; align-items:center; gap:8px; }
   .stock-label { color:#9aa0b4; font-size:13px; min-width:56px; }
-  .btn-buy { background-color:#d4a44e; color:#0e1620; font-size:15px; font-weight:700; padding:10px 20px; border-radius:8px; align-self:flex-start; }
+  .btn-buy { background-color:#d4a44e; color:#0e1620; font-size:15px; font-weight:700; padding:10px 20px; border-radius:10px; align-self:flex-start; }
   .btn-buy:hover { filter:brightness(1.12); }
   .link-detail { color:#5fb4d4; font-size:14px; }
-  .dialog-overlay { position:absolute; top:0; left:0; width:1920px; height:1080px; background-color:#000a; justify-content:center; align-items:center; }
-  .dialog { width:480px; background-color:#152433; border-radius:14px; padding:32px; gap:20px; box-shadow:0 12px 48px #000c; }
+  .dialog-overlay {display:flex;flex-direction:column; position:absolute; top:0; left:0; width:1920px; height:1080px; background-color:#000a; justify-content:center; align-items:center; }
+  .dialog {display:flex;flex-direction:column; width:480px; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:32px; gap:20px; box-shadow:0 12px 48px #000c; }
   .dialog-title { color:#e0e6ec; font-size:22px; font-weight:700; }
-  .dialog-row { flex-direction:row; align-items:center; justify-content:space-between; }
+  .dialog-row {display:flex; flex-direction:row; align-items:center; justify-content:space-between; }
   .dialog-label { color:#9aa0b4; font-size:15px; }
-  .qty { background-color:#1a2f45; border-width:0 0 0 2px; border-color:#2a5a75; color:#e0e6ec; font-size:18px; padding:8px 12px; border-radius:6px; width:90px; text-align:center; }
-  .balance-row { flex-direction:row; align-items:center; gap:10px; }
-  .dialog-actions { flex-direction:row; gap:12px; justify-content:flex-end; }
-  .btn-confirm { background-color:#5fb4d4; color:#0e1620; font-size:15px; font-weight:700; padding:10px 24px; border-radius:8px; }
-  .btn-cancel { background-color:#1a2f45; color:#9aa0b4; font-size:15px; padding:10px 24px; border-radius:8px; }
+  .qty { background-color:rgba(26,47,69,0.85); border-width:0 0 0 2px; border-color:#2a5a75; color:#e0e6ec; font-size:18px; padding:8px 12px; border-radius:6px; width:90px; text-align:center; }
+  .balance-row {display:flex; flex-direction:row; align-items:center; gap:10px; }
+  .dialog-actions {display:flex; flex-direction:row; gap:12px; justify-content:flex-end; }
+  .btn-confirm { background-color:#5fb4d4; color:#0e1620; font-size:15px; font-weight:700; padding:10px 24px; border-radius:10px; }
+  .btn-cancel { background-color:rgba(26,47,69,0.85); color:#9aa0b4; font-size:15px; padding:10px 24px; border-radius:10px; }
   </style>
 </head>
 <body>
   <div class="root">
-    <header class="topbar" style="flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:#152433;border-width:0 0 1px 0;border-color:#2a5a75">
+    <header class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-color:#2a5a75">
       <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">商店</span>
     </header>
     <div class="body">
       <p class="page-title">限时折扣</p>
       <div class="grid">
         <div class="product">
-          <img class="product-img" src="../res/icons/image.png" alt="product">
+          <img class="product-img" src="../res/icons/item-wand.png" alt="product">
           <span class="product-name">新手礼包</span>
           <span class="product-price">¥ 6</span>
           <div class="product-meta">
-            <div class="stock-row"><span class="stock-label">倒计时</span><progress value="35" max="100" style="flex:1;accent-color:#d4a44e"></progress></div>
+            <div class="stock-row"><span class="stock-label">倒计时</span><progress value="35" max="100" style="flex-grow:1;"></progress></div>
             <a class="link-detail" href="#">详情</a>
           </div>
           <button class="btn-buy" data-open-dialog="buy-dialog">购买</button>
         </div>
         <div class="product">
-          <img class="product-img" src="../res/icons/skin.png" alt="product">
+          <img class="product-img" src="../res/icons/character.png" alt="product">
           <span class="product-name">勇者外观包</span>
           <span class="product-price">¥ 30</span>
           <div class="product-meta">
-            <div class="stock-row"><span class="stock-label">库存</span><progress value="72" max="100" style="flex:1;accent-color:#5fb4d4"></progress></div>
+            <div class="stock-row"><span class="stock-label">库存</span><progress value="72" max="100" style="flex-grow:1;"></progress></div>
             <a class="link-detail" href="#">详情</a>
           </div>
           <button class="btn-buy" data-open-dialog="buy-dialog">购买</button>
         </div>
         <div class="product">
-          <img class="product-img" src="../res/icons/box.png" alt="product">
+          <img class="product-img" src="../res/icons/item-chest.png" alt="product">
           <span class="product-name">传说宝箱</span>
           <span class="product-price">¥ 98</span>
           <div class="product-meta">
-            <div class="stock-row"><span class="stock-label">倒计时</span><progress value="8" max="100" style="flex:1;accent-color:#c2605a"></progress></div>
+            <div class="stock-row"><span class="stock-label">倒计时</span><progress value="8" max="100" style="flex-grow:1;"></progress></div>
             <a class="link-detail" href="#">详情</a>
           </div>
           <button class="btn-buy" data-open-dialog="buy-dialog">购买</button>
@@ -82,7 +82,7 @@
         </div>
         <div class="dialog-row balance-row">
           <span class="dialog-label">余额</span>
-          <progress value="4200" max="5000" style="width:200px;accent-color:#d4a44e"></progress>
+          <progress value="4200" max="5000" style="width:200px;"></progress>
         </div>
         <div class="dialog-actions">
           <button class="btn-cancel" data-close-dialog>取消</button>

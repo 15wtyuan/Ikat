@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh">
 <head>
   <meta charset="utf-8">
@@ -6,26 +6,31 @@
   <script src="preview/loom-preview.js"></script>
   <title>LoomGUI 靶子冻结 Showcase · 首页</title>
   <style>
-  .root { width:1920px; height:1080px; background-color:#0e1620; padding:48px; gap:32px; }
-  .hero { flex-direction:row; align-items:center; gap:24px; }
-  .hero-logo { width:96px; height:96px; }
-  .hero-title { color:#e0e6ec; font-size:48px; font-weight:700; }
+  .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; background-image:radial-gradient(1100px 560px at 82% -12%, rgba(95,180,212,0.10), transparent 60%); padding:48px; gap:32px; }
+  .hero {display:flex; flex-direction:row; align-items:center; gap:24px; }
+  .hero-logo { width:92px; height:92px; }
+  .hero-title { color:#e6ebf2; font-size:46px; font-weight:800; letter-spacing:-0.02em; }
   .hero-sub { color:#9aa0b4; font-size:16px; margin-top:6px; }
-  .hero-version { color:#d4a44e; font-size:14px; font-weight:700; }
-  .actions { flex-direction:row; gap:16px; }
-  .btn-primary { background-color:#d4a44e; color:#0e1620; font-size:22px; font-weight:700; padding:14px 40px; border-radius:8px; }
-  .btn-ghost { background-color:#152433; color:#8ec5d8; font-size:18px; padding:14px 32px; border-radius:8px; }
-  .btn-primary:hover { filter:brightness(1.12); }
-  .btn-ghost:hover { background-color:#1a2f45; }
-  .nav-grid { flex-direction:row; flex-wrap:wrap; gap:24px; }
-  .nav-card { width:420px; background-color:#152433; border-radius:10px; padding:24px; gap:12px; flex-direction:row; align-items:center; transition:transform .18s, background-color .18s; }
-  .nav-card:hover { transform:translateY(-4px); background-color:#1a2f45; }
-  .nav-card-icon { width:56px; height:56px; }
-  .nav-card-body { gap:4px; flex:1; }
-  .nav-card-label { color:#e0e6ec; font-size:22px; font-weight:700; }
-  .nav-card-desc { color:#9aa0b4; font-size:14px; }
-  .nav-card-arrow { color:#5fb4d4; font-size:24px; }
-  .footbar { flex-direction:row; justify-content:space-between; align-items:center; }
+  .hero-version { color:#8ec5d8; font-size:13px; font-weight:700; letter-spacing:0.04em; }
+  .actions {display:flex; flex-direction:row; gap:14px; }
+  .btn-primary { background-color:#5fb4d4; color:#08131a; font-size:20px; font-weight:800; letter-spacing:0.02em; padding:14px 38px; border-radius:10px; box-shadow:0 0 0 1px rgba(95,180,212,0.5), 0 8px 26px rgba(95,180,212,0.30); }
+  .btn-ghost { background-color:rgba(95,180,212,0.06); color:#8ec5d8; font-size:17px; font-weight:600; padding:14px 30px; border-radius:10px; box-shadow:inset 0 0 0 1px rgba(95,180,212,0.22); }
+  .btn-primary:hover { filter:brightness(1.08); transform:translateY(-1px); }
+  .btn-ghost:hover { background-color:rgba(95,180,212,0.12); box-shadow:inset 0 0 0 1px rgba(95,180,212,0.42); }
+  .nav-grid {display:flex; flex-direction:row; flex-wrap:wrap; gap:20px; }
+  .nav-card {display:flex; width:420px; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:22px; gap:14px; flex-direction:row; align-items:center; box-shadow:inset 0 0 0 1px rgba(95,180,212,0.10), inset 0 1px 0 rgba(255,255,255,0.04); transition:transform .18s, background-color .18s, box-shadow .18s; }
+  .nav-card:hover { transform:translateY(-3px); background-color:rgba(26,47,69,0.85); box-shadow:inset 0 0 0 1px rgba(95,180,212,0.34), inset 0 1px 0 rgba(255,255,255,0.06); }
+  .nav-card-icon { width:52px; height:52px; }
+  .nav-card-body {display:flex;flex-direction:column; gap:4px; flex-grow:1; }
+  .nav-card-label { color:#e6ebf2; font-size:21px; font-weight:700; letter-spacing:-0.01em; }
+  .nav-card-desc { color:#9aa0b4; font-size:13px; }
+  .nav-card-arrow { color:#5fb4d4; font-size:22px; opacity:0.65; transition:transform .18s, opacity .18s; }
+  .nav-card:hover .nav-card-arrow { transform:translateX(4px); opacity:1; }
+  .quick-bar {display:flex; flex-direction:row; gap:12px; overflow-x:auto; padding-bottom:6px; max-width:1400px; align-self:center; }
+  .quick-chip {display:flex; flex-direction:row; align-items:center; gap:8px; flex-shrink:0; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:12px 18px; color:#9aa0b4; font-size:14px; box-shadow:inset 0 0 0 1px rgba(95,180,212,0.10); transition:color .15s, box-shadow .15s; }
+  .quick-chip:hover { color:#e6ebf2; box-shadow:inset 0 0 0 1px rgba(95,180,212,0.34); }
+  .quick-icon { width:24px; height:24px; }
+  .footbar {display:flex; flex-direction:row; justify-content:space-between; align-items:center; }
   .foot-text { color:#6c7080; font-size:13px; }
   .foot-strong { color:#8ec5d8; font-weight:700; }
   @keyframes fadeIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
@@ -39,8 +44,8 @@
 <body>
   <div class="root">
     <div class="hero">
-      <img class="hero-logo" src="../res/icons/zap.png" alt="logo">
-      <div style="gap:6px">
+      <img class="hero-logo" src="../res/icons/logo.png" alt="logo">
+      <div style="display:flex;flex-direction:column;gap:6px">
         <p class="hero-title">LoomGUI 靶子冻结 Showcase</p>
         <p class="hero-sub">围栏全标签 + CSS 全白名单验收靶子 · <span class="hero-version">R2–R7 运行时重写冲刺目标</span></p>
       </div>
@@ -52,40 +57,57 @@
     </div>
     <nav class="nav-grid">
       <a class="nav-card" id="nav-settings" href="settings.html">
-        <img class="nav-card-icon" src="../res/icons/cpu.png" alt="settings">
+        <img class="nav-card-icon" src="../res/icons/settings.png" alt="settings">
         <div class="nav-card-body"><span class="nav-card-label">设置</span><span class="nav-card-desc">input 全 7 型 · select · role dispatch</span></div>
         <span class="nav-card-arrow">→</span>
       </a>
       <a class="nav-card" id="nav-inventory" href="inventory.html">
-        <img class="nav-card-icon" src="../res/icons/box.png" alt="inventory">
+        <img class="nav-card-icon" src="../res/icons/inventory.png" alt="inventory">
         <div class="nav-card-body"><span class="nav-card-label">背包</span><span class="nav-card-desc">ListView 虚拟化主战场 · 物品网格</span></div>
         <span class="nav-card-arrow">→</span>
       </a>
       <a class="nav-card" id="nav-mail" href="mail.html">
-        <img class="nav-card-icon" src="../res/icons/list.png" alt="mail">
+        <img class="nav-card-icon" src="../res/icons/mail.png" alt="mail">
         <div class="nav-card-body"><span class="nav-card-label">邮件</span><span class="nav-card-desc">ListView + 富文本全家族</span></div>
         <span class="nav-card-arrow">→</span>
       </a>
       <a class="nav-card" id="nav-shop" href="shop.html">
-        <img class="nav-card-icon" src="../res/icons/image.png" alt="shop">
+        <img class="nav-card-icon" src="../res/icons/shop.png" alt="shop">
         <div class="nav-card-body"><span class="nav-card-label">商店</span><span class="nav-card-desc">progress + 弹窗 + 数量输入</span></div>
         <span class="nav-card-arrow">→</span>
       </a>
       <a class="nav-card" id="nav-character" href="character.html">
-        <img class="nav-card-icon" src="../res/icons/skin.png" alt="character">
+        <img class="nav-card-icon" src="../res/icons/character.png" alt="character">
         <div class="nav-card-body"><span class="nav-card-label">角色</span><span class="nav-card-desc">canvas 3D + 特效混合渲染</span></div>
         <span class="nav-card-arrow">→</span>
       </a>
       <a class="nav-card" id="nav-form" href="form.html">
-        <img class="nav-card-icon" src="../res/icons/type.png" alt="form">
+        <img class="nav-card-icon" src="../res/icons/form.png" alt="form">
         <div class="nav-card-body"><span class="nav-card-label">角色创建</span><span class="nav-card-desc">表单控件编排 · div+p 分组</span></div>
         <span class="nav-card-arrow">→</span>
       </a>
       <a class="nav-card" id="nav-lab" href="lab.html">
-        <img class="nav-card-icon" src="../res/icons/palette.png" alt="lab">
+        <img class="nav-card-icon" src="../res/icons/lab.png" alt="lab">
         <div class="nav-card-body"><span class="nav-card-label">标本馆</span><span class="nav-card-desc">CSS 全属性 specimen</span></div>
         <span class="nav-card-arrow">→</span>
       </a>
+    </nav>
+    <nav class="quick-bar" aria-label="快捷入口">
+      <a class="quick-chip" href="inventory.html"><img class="quick-icon" src="../res/icons/inventory.png" alt="背包">背包</a>
+      <a class="quick-chip" href="mail.html"><img class="quick-icon" src="../res/icons/mail.png" alt="邮件">邮件</a>
+      <a class="quick-chip" href="shop.html"><img class="quick-icon" src="../res/icons/shop.png" alt="商店">商店</a>
+      <a class="quick-chip" href="character.html"><img class="quick-icon" src="../res/icons/character.png" alt="角色">角色</a>
+      <a class="quick-chip" href="settings.html"><img class="quick-icon" src="../res/icons/settings.png" alt="设置">设置</a>
+      <a class="quick-chip" href="lab.html"><img class="quick-icon" src="../res/icons/lab.png" alt="标本馆">标本馆</a>
+      <a class="quick-chip" href="form.html"><img class="quick-icon" src="../res/icons/form.png" alt="创建">创建</a>
+      <a class="quick-chip" href="#"><img class="quick-icon" src="../res/icons/item-chest.png" alt="签到">每日签到</a>
+      <a class="quick-chip" href="#"><img class="quick-icon" src="../res/icons/logo.png" alt="活动">限时活动</a>
+      <a class="quick-chip" href="#"><img class="quick-icon" src="../res/icons/weapon.png" alt="任务">每日任务</a>
+      <a class="quick-chip" href="#"><img class="quick-icon" src="../res/icons/item-gem.png" alt="成就">成就</a>
+      <a class="quick-chip" href="#"><img class="quick-icon" src="../res/icons/skill-eye.png" alt="排行">排行榜</a>
+      <a class="quick-chip" href="#"><img class="quick-icon" src="../res/icons/rogue.png" alt="好友">好友</a>
+      <a class="quick-chip" href="#"><img class="quick-icon" src="../res/icons/item-scroll.png" alt="宝库">宝库</a>
+      <a class="quick-chip" href="#"><img class="quick-icon" src="../res/icons/item-staff.png" alt="公会">公会</a>
     </nav>
     <div class="footbar">
       <span class="foot-text">靶子冻结期：围栏标签 23 · CSS 白名单全覆盖</span>
