@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>LoomGUI.FrozenApi</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.Types.cs" Link="Public\LoomGUI.Types.cs" />
+    <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.Nodes.cs" Link="Public\LoomGUI.Nodes.cs" />
+    <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.Events.cs" Link="Public\LoomGUI.Events.cs" />
+  </ItemGroup>
+</Project>
