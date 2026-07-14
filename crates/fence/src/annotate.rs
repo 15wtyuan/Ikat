@@ -1,7 +1,5 @@
-#![cfg(feature = "parse")]
-
-use crate::fence::ir::{IrNodeKind, IrTree};
-use crate::fence::schema::tag::resolve_semantic;
+use crate::ir::{IrNodeKind, IrTree};
+use crate::schema::tag::resolve_semantic;
 
 /// Run Stage 6 (Annotate): fill in `IrElement.semantic` for all elements.
 ///

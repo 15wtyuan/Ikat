@@ -55,15 +55,6 @@ required-features = ["parse"]
 [[test]]
 name = "v1e_dirty"
 required-features = ["parse"]
-
-[[test]]
-name = "r1_schema_contract"
-required-features = ["parse"]
-
-[[test]]
-name = "r1_pipeline"
-required-features = ["parse"]
-
 [[example]]
 name = "dump_showcase_text"
 required-features = ["parse"]

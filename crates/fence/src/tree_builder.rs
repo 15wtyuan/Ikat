@@ -1,8 +1,6 @@
-#![cfg(feature = "parse")]
-
-use crate::fence::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
-use crate::fence::ir::{IrAttribute, IrElement, IrNodeId, IrTree, Span};
-use crate::fence::schema::tag::{find_tag, is_shell_tag};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
+use crate::ir::{IrAttribute, IrElement, IrNodeId, IrTree, Span};
+use crate::schema::tag::{find_tag, is_shell_tag};
 use html5gum::emitters::callback::{Callback, CallbackEmitter, CallbackEvent};
 use html5gum::{Span as GumSpan, Tokenizer};
 
@@ -327,7 +325,7 @@ pub fn parse_html_to_ir_named(html: &str, file: String) -> (IrTree, Vec<Diagnost
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fence::ir::IrNodeKind;
+    use crate::ir::IrNodeKind;
 
     #[test]
     fn simple_div_with_text() {

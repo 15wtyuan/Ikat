@@ -1,12 +1,8 @@
-#![cfg(feature = "parse")]
-
-use crate::fence::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
-use crate::fence::ir::{IrElement, IrNode, IrNodeKind, IrTree, Span};
-use crate::fence::schema::attr::{
-    find_structural_attr, is_content_attr, is_global_attr, AttrValueDomain,
-};
-use crate::fence::schema::css::{find_css_prop, find_shorthand};
-use crate::fence::schema::tag::{find_tag, is_shell_tag};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
+use crate::ir::{IrElement, IrNode, IrNodeKind, IrTree, Span};
+use crate::schema::attr::{find_structural_attr, is_content_attr, is_global_attr, AttrValueDomain};
+use crate::schema::css::{find_css_prop, find_shorthand};
+use crate::schema::tag::{find_tag, is_shell_tag};
 
 /// Run Stage 3 (Fence Gate): validate every element against the schema.
 ///
@@ -39,7 +35,7 @@ fn validate_element(
 ) {
     let tag = element.tag.as_str();
 
-    // 1. Tag name validation — unknown tag (not in registry, not shell, not custom)
+    // 1. Tag name validation -- unknown tag (not in registry, not shell, not custom)
     if !is_shell_tag(tag) && find_tag(tag).is_none() && !tag.contains('-') {
         diagnostics.push(Diagnostic::error(
             DiagnosticCode::FenceUnknownTag,
@@ -60,7 +56,7 @@ fn validate_element(
             continue;
         }
 
-        // Structural attrs — validate value against domain
+        // Structural attrs -- validate value against domain
         if let Some(spec) = tag_spec.and_then(|ts| find_structural_attr(ts, &attr.name)) {
             validate_attr_value(
                 &attr.name,
@@ -74,7 +70,7 @@ fn validate_element(
             continue;
         }
 
-        // Content attrs — just check name is in the tag's whitelist
+        // Content attrs -- just check name is in the tag's whitelist
         if let Some(ts) = tag_spec {
             if is_content_attr(ts, &attr.name) {
                 continue;
@@ -147,8 +143,8 @@ fn validate_inline_style(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fence::diagnostic::LineMap;
-    use crate::fence::tree_builder::parse_html_to_ir_named;
+    use crate::diagnostic::LineMap;
+    use crate::tree_builder::parse_html_to_ir_named;
 
     fn gate(html: &str) -> Vec<Diagnostic> {
         let (tree, _) = parse_html_to_ir_named(html, "test.html".into());
@@ -161,7 +157,7 @@ mod tests {
         let diags = gate(r#"<div><span>ok</span></div>"#);
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == crate::fence::diagnostic::Severity::Error)
+            .filter(|d| d.severity == crate::diagnostic::Severity::Error)
             .collect();
         assert!(
             errors.is_empty(),
@@ -191,7 +187,7 @@ mod tests {
         let diags = gate(r#"<div id="x" class="y" data-z="w" style="color:red"></div>"#);
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == crate::fence::diagnostic::Severity::Error)
+            .filter(|d| d.severity == crate::diagnostic::Severity::Error)
             .collect();
         assert!(
             errors.is_empty(),
@@ -213,7 +209,7 @@ mod tests {
         let diags = gate(r#"<input type="range">"#);
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == crate::fence::diagnostic::Severity::Error)
+            .filter(|d| d.severity == crate::diagnostic::Severity::Error)
             .collect();
         assert!(errors.is_empty(), "type=range is valid: {:?}", errors);
     }

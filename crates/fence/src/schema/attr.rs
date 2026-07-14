@@ -1,13 +1,11 @@
-#![cfg(feature = "parse")]
-
-/// Attribute value constraint — how the fence validator checks a given value.
+/// Attribute value constraint -- how the fence validator checks a given value.
 #[derive(Debug, Clone)]
 pub enum AttrValueDomain {
     /// Must be one of the listed keywords.
     Enum(&'static [&'static str]),
     /// Must reference an existing element ID in the same template scope.
     IdRef,
-    /// Free-form text — no structural validation.
+    /// Free-form text -- no structural validation.
     FreeText,
     /// Numeric value.
     Number,
@@ -24,7 +22,7 @@ pub struct AttrSpec {
     pub required: bool,
 }
 
-/// Structural attributes for `<input>` — `type` determines SemanticKind.
+/// Structural attributes for `<input>` -- `type` determines SemanticKind.
 pub static INPUT_STRUCTURAL: &[AttrSpec] = &[AttrSpec {
     name: "type",
     values: AttrValueDomain::Enum(&[
@@ -33,14 +31,14 @@ pub static INPUT_STRUCTURAL: &[AttrSpec] = &[AttrSpec {
     required: false,
 }];
 
-/// Structural attributes for `<label>` — `for` binds to a control's ID.
+/// Structural attributes for `<label>` -- `for` binds to a control's ID.
 pub static LABEL_STRUCTURAL: &[AttrSpec] = &[AttrSpec {
     name: "for",
     values: AttrValueDomain::IdRef,
     required: false,
 }];
 
-/// Structural attributes for `<a>` — `href` is the link target.
+/// Structural attributes for `<a>` -- `href` is the link target.
 pub static A_STRUCTURAL: &[AttrSpec] = &[AttrSpec {
     name: "href",
     values: AttrValueDomain::FreeText,

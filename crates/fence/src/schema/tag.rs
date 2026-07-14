@@ -1,5 +1,3 @@
-#![cfg(feature = "parse")]
-
 use super::attr::AttrSpec;
 
 // ── Classification enums ────────────────────────────────────────────
@@ -10,11 +8,11 @@ use super::attr::AttrSpec;
 pub enum Category {
     /// Void / self-closing (img, br, input).
     Void,
-    /// Inline text-level (span, strong, em, label, a, …).
+    /// Inline text-level (span, strong, em, label, a, -- .
     Phrasing,
-    /// Block-level structural (div, header, nav, p, ul, …).
+    /// Block-level structural (div, header, nav, p, ul, -- .
     Block,
-    /// Transparent — adopts parent's content model (a, slot).
+    /// Transparent -- adopts parent's content model (a, slot).
     Transparent,
 }
 
@@ -28,9 +26,9 @@ pub enum ContentModel {
     Text,
     /// Phrasing content (inline elements + text).
     Phrasing,
-    /// Flow content (anything — blocks, inline, text).
+    /// Flow content (anything -- blocks, inline, text).
     Flow,
-    /// Transparent — accepts whatever its parent accepts.
+    /// Transparent -- accepts whatever its parent accepts.
     Transparent,
     /// Only the listed child tags are allowed.
     Only(&'static [&'static str]),
@@ -63,7 +61,7 @@ pub enum SemanticKind {
     Link,
     Image,
     Canvas,
-    /// `<input>` before type dispatch — replaced by the specific kind
+    /// `<input>` before type dispatch -- replaced by the specific kind
     /// during annotation.
     InputDispatch,
     TextField,
@@ -79,7 +77,7 @@ pub enum SemanticKind {
     ListItem,
     Template,
     Slot,
-    /// Custom element — tag name contains a hyphen (e.g. `<my-widget>`).
+    /// Custom element -- tag name contains a hyphen (e.g. `<my-widget>`).
     CustomElement,
 }
 
@@ -95,7 +93,7 @@ pub struct TagSpec {
     pub void: bool,
     /// Structural attributes: validated, immutable, influence type/behaviour.
     pub structural_attrs: &'static [AttrSpec],
-    /// Content attributes: passthrough initial values (value, src, alt, …).
+    /// Content attributes: passthrough initial values (value, src, alt, -- .
     pub content_attrs: &'static [&'static str],
 }
 

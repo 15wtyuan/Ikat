@@ -1,8 +1,6 @@
-#![cfg(feature = "parse")]
-
-use crate::fence::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
-use crate::fence::ir::{IrNodeKind, IrTree};
-use crate::fence::schema::tag::{find_tag, Category, ContentModel};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
+use crate::ir::{IrNodeKind, IrTree};
+use crate::schema::tag::{find_tag, Category, ContentModel};
 use std::collections::HashSet;
 
 /// Run Stage 5 (Structural): validate cross-element constraints.
@@ -122,9 +120,9 @@ fn validate_id_uniqueness(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fence::diagnostic::LineMap;
-    use crate::fence::diagnostic::Severity;
-    use crate::fence::tree_builder::parse_html_to_ir;
+    use crate::diagnostic::LineMap;
+    use crate::diagnostic::Severity;
+    use crate::tree_builder::parse_html_to_ir;
 
     fn structural(html: &str) -> Vec<Diagnostic> {
         let (tree, _) = parse_html_to_ir(html);

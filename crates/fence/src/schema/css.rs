@@ -1,5 +1,3 @@
-#![cfg(feature = "parse")]
-
 // == CssPropSpec ==
 
 /// Compile-time schema entry for one CSS property.

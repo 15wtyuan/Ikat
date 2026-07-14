@@ -16,8 +16,6 @@
 
 pub mod asset;
 pub mod dump;
-#[cfg(feature = "parse")]
-pub mod fence;
 pub mod hit;
 pub mod input;
 pub mod layout;

@@ -2122,6 +2122,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "loomgui_fence"
+version = "0.1.0"
+dependencies = [
+ "cssparser 0.34.0",
+ "html5gum",
+ "insta",
+ "loomgui_core",
+ "taffy",
+]
+
+[[package]]
 name = "loomgui_ffi_c"
 version = "0.1.0"
 dependencies = [

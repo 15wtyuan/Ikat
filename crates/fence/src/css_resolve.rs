@@ -1,11 +1,9 @@
-#![cfg(feature = "parse")]
-
-use crate::fence::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
-use crate::fence::ir::{IrNodeKind, IrTree};
-use crate::fence::schema::css::{find_css_prop, find_shorthand, CssValueParser};
-use crate::fence::schema::tag::{find_tag, DisplayDefault};
-use crate::style::mapping::apply_decl;
-use crate::style::resolved::{DisplayMode, ResolvedStyle};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
+use crate::ir::{IrNodeKind, IrTree};
+use crate::schema::css::{find_css_prop, find_shorthand, CssValueParser};
+use crate::schema::tag::{find_tag, DisplayDefault};
+use loomgui_core::style::mapping::apply_decl;
+use loomgui_core::style::resolved::{DisplayMode, ResolvedStyle};
 
 /// Resolve inline styles for all nodes in the tree.
 ///
@@ -98,7 +96,7 @@ pub fn resolve_inline_styles_with_diags(
                 }
 
                 // Apply using existing apply_decl.
-                // If it returns false, the value failed to parse — report it.
+                // If it returns false, the value failed to parse -- report it.
                 if !apply_decl(&mut styles[idx], prop, value) {
                     diagnostics.push(Diagnostic::error(
                         DiagnosticCode::FenceBadCssValue,
@@ -133,7 +131,7 @@ fn resolve_for_test(tree: &IrTree) -> Vec<ResolvedStyle> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fence::tree_builder::parse_html_to_ir;
+    use crate::tree_builder::parse_html_to_ir;
 
     #[test]
     fn inline_style_applies_color() {
