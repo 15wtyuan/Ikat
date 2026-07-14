@@ -1,0 +1,32 @@
+/* Deep Ocean design tokens. Fence does not enforce var(), designers can write hex directly. */
+:root {
+  --bg: #0e1620;
+  --surface: #152433;
+  --surface-2: #1a2f45;
+  --border: #2a5a75;
+  --accent: #5fb4d4;
+  --accent-soft: #8ec5d8;
+  --gold: #d4a44e;
+  --fg: #e0e6ec;
+  --muted: #9aa0b4;
+  --dim: #6c7080;
+  --success: #7db86a;
+  --danger: #c2605a;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --text-3xl: 36px;
+  --text-4xl: 48px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+}
