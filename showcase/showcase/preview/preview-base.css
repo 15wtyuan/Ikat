@@ -1,0 +1,22 @@
+/* LoomGUI browser preview base (preview-only — packer consumes body only, head not in pkg.bin).
+   polyfill to align LoomGUI rendering conventions. */
+@font-face {
+  font-family: 'LXGW WenKai';
+  src: url('../../res/fonts/LXGWWenKai.ttf') format('truetype');
+  font-display: block;
+}
+div { display: flex; flex-direction: column; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: 'LXGW WenKai', sans-serif;
+  background: #05080d;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 100vh;
+  padding: 24px;
+}
+.root { box-shadow: 0 0 0 1px #2a2f45, 0 8px 40px rgba(0,0,0,.6); }
+button { background: none; border: none; color: inherit; font: inherit; padding: 0; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
