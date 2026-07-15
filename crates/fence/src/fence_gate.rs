@@ -147,7 +147,7 @@ mod tests {
     use crate::tree_builder::parse_html_to_ir_named;
 
     fn gate(html: &str) -> Vec<Diagnostic> {
-        let (tree, _) = parse_html_to_ir_named(html, "test.html".into());
+        let (tree, _, _) = parse_html_to_ir_named(html, "test.html".into());
         let lm = LineMap::new(html);
         run_fence_gate(&tree, "test.html", &lm)
     }

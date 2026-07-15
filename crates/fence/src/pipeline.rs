@@ -24,7 +24,7 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
     let line_map = LineMap::new(html);
 
     // Stage 1+2: Tokenize + Tree Build
-    let (mut tree, mut diagnostics) = parse_html_to_ir_named(html, file.to_string());
+    let (mut tree, mut diagnostics, _style_texts) = parse_html_to_ir_named(html, file.to_string());
 
     // Stage 3: Fence Gate (per-element validation)
     let gate_diags = run_fence_gate(&tree, file, &line_map);

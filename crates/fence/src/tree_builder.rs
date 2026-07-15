@@ -152,6 +152,8 @@ struct TreeBuilder {
     file: String,
     in_body: bool,
     in_head: bool,
+    in_style: bool,
+    style_texts: Vec<String>,
 }
 
 impl TreeBuilder {
@@ -164,6 +166,8 @@ impl TreeBuilder {
             file,
             in_body: false,
             in_head: false,
+            in_style: false,
+            style_texts: Vec::new(),
         }
     }
 
@@ -189,7 +193,9 @@ impl TreeBuilder {
                 self.handle_end_tag(name, span);
             }
             IrToken::String { text, span } => {
-                if !self.in_head && !text.is_empty() {
+                if self.in_style {
+                    self.style_texts.push(text);
+                } else if !self.in_head && !text.is_empty() {
                     self.tree.push_text(text, span, self.current_parent());
                 }
             }
@@ -211,6 +217,10 @@ impl TreeBuilder {
         self_closing: bool,
         span: Span,
     ) {
+        if name == "style" {
+            self.in_style = true;
+            return;
+        }
         if name == "body" {
             self.in_body = true;
             // If head was left open (no explicit </head>), entering body
@@ -243,6 +253,10 @@ impl TreeBuilder {
     }
 
     fn handle_end_tag(&mut self, name: String, span: Span) {
+        if name == "style" {
+            self.in_style = false;
+            return;
+        }
         if name == "body" {
             self.in_body = false;
             return;
@@ -292,7 +306,7 @@ impl TreeBuilder {
         }
     }
 
-    fn finish(mut self) -> (IrTree, Vec<Diagnostic>) {
+    fn finish(mut self) -> (IrTree, Vec<Diagnostic>, Vec<String>) {
         for &id in self.stack.iter().rev() {
             let el = self.tree.element(id);
             let tag_name = el.map(|e| e.tag.as_str()).unwrap_or("unknown");
@@ -302,18 +316,19 @@ impl TreeBuilder {
                 self.loc(self.tree.nodes[id.0].span.start),
             ));
         }
-        (self.tree, self.diagnostics)
+        (self.tree, self.diagnostics, self.style_texts)
     }
 }
 
 /// Parse HTML source into an IR tree with diagnostics.
 /// This is Stage 1 (Tokenize) + Stage 2 (Tree Build).
 pub fn parse_html_to_ir(html: &str) -> (IrTree, Vec<Diagnostic>) {
-    parse_html_to_ir_named(html, "<inline>".to_string())
+    let (tree, diags, _style_texts) = parse_html_to_ir_named(html, "<inline>".to_string());
+    (tree, diags)
 }
 
 /// Same as parse_html_to_ir but with a file name for diagnostics.
-pub fn parse_html_to_ir_named(html: &str, file: String) -> (IrTree, Vec<Diagnostic>) {
+pub fn parse_html_to_ir_named(html: &str, file: String) -> (IrTree, Vec<Diagnostic>, Vec<String>) {
     let tokens = tokenize(html);
     let mut builder = TreeBuilder::new(html, file);
     for token in tokens {
@@ -394,5 +409,32 @@ mod tests {
         assert!(diags.is_empty());
         let p = tree.roots[0];
         assert_eq!(tree.nodes[p.0].children.len(), 3);
+    }
+
+    #[test]
+    fn style_text_is_captured_not_dropped() {
+        let html = r#"<html><head><style>.foo { color: red }</style></head><body><div>hi</div></body></html>"#;
+        let (tree, diags, style_texts) = parse_html_to_ir_named(html, "x.html".into());
+        assert!(diags.is_empty(), "unexpected: {diags:?}");
+        // <style> 元素本身不进树（shell 标签）
+        assert!(
+            !tree
+                .nodes
+                .iter()
+                .any(|n| matches!(&n.kind, crate::ir::IrNodeKind::Element(e) if e.tag == "style")),
+            "<style> 不应进 IrTree"
+        );
+        // 但文本留下来了
+        assert_eq!(style_texts, vec![".foo { color: red }".to_string()]);
+    }
+
+    #[test]
+    fn style_in_body_also_captured() {
+        let (tree, _diags, style_texts) = parse_html_to_ir_named(
+            r#"<div><style>.a { width: 10px }</style></div>"#,
+            "x.html".into(),
+        );
+        let _ = tree;
+        assert_eq!(style_texts, vec![".a { width: 10px }".to_string()]);
     }
 }
