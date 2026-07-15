@@ -1,5 +1,5 @@
 // LoomGUI Frozen Public API: Value types & enums
-// See docs/superpowers/specs/2026-07-15-frozen-public-api-design.md
+// See docs/design/public-api.md (权威契约) + docs/design/projection-layer.md (投影层机制)
 
 using System;
 
@@ -14,10 +14,11 @@ namespace LoomGUI
         public static Length Px(float v) { throw NE(); }
         public static Length Pct(float v) { throw NE(); }
         public static Length Auto() { throw NE(); }
+        public static Length Unset() { throw NE(); }   // inline override 撤销哨兵：getter 未写过返回此，setter 写此 = 撤销回落 CSS
         static NotImplementedException NE() => new NotImplementedException();
     }
 
-    public enum LengthUnit { Px, Percent, Auto }
+    public enum LengthUnit { Px, Percent, Auto, Unset }
 
     public readonly struct Thickness
     {
@@ -34,7 +35,9 @@ namespace LoomGUI
         public float G { get { throw NE(); } }
         public float B { get { throw NE(); } }
         public float A { get { throw NE(); } }
+        public bool IsUnset { get { throw NE(); } }   // true = 未被 typed 层覆盖（Unset 哨兵），getter 据此返回
         public Color(float r, float g, float b, float a = 1f) { throw NE(); }
+        public static Color Unset { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
     }
 
@@ -57,15 +60,18 @@ namespace LoomGUI
         static NotImplementedException NE() => new NotImplementedException();
     }
 
-    public enum DisplayMode { Block, Flex, None }
-    public enum FlexDirection { Row, RowReverse, Column, ColumnReverse }
-    public enum FlexWrap { NoWrap, Wrap, WrapReverse }
-    public enum JustifyContent { FlexStart, FlexEnd, Center, SpaceBetween, SpaceAround, SpaceEvenly }
-    public enum AlignItems { Stretch, FlexStart, FlexEnd, Center, Baseline }
-    public enum Overflow { Visible, Clip, Auto, Scroll }
-    public enum PositionMode { Static, Relative, Absolute }
-    public enum Visibility { Visible, Hidden }
-    public enum ScrollBehavior { Instant, Smooth }
+    public enum DisplayMode { Unset, Block, Flex, None }
+    public enum FlexDirection { Unset, Row, RowReverse, Column, ColumnReverse }
+    public enum FlexWrap { Unset, NoWrap, Wrap, WrapReverse }
+    public enum JustifyContent { Unset, FlexStart, FlexEnd, Center, SpaceBetween, SpaceAround, SpaceEvenly }
+    public enum AlignItems { Unset, Stretch, FlexStart, FlexEnd, Center, Baseline }
+    public enum Overflow { Unset, Visible, Clip, Auto, Scroll }
+    public enum PositionMode { Unset, Static, Relative, Absolute }
+    public enum Visibility { Unset, Visible, Hidden }
+    public enum ScrollBehavior { Instant, Smooth }   // 方法参数，非 Style 属性，无需 Unset
+
+    // 指针键：对齐 web MouseEvent.button（0=左/1=中/2=右）但用枚举自解释。
+    public enum PointerButton { Left, Middle, Right }
 
     public enum KeyCode
     {

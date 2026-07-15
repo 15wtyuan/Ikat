@@ -1,0 +1,64 @@
+name: Sync agent docs
+
+# CLAUDE.md 与 AGENTS.md 是同一份内容的两个副本（中性标题，逐字节相同）。
+# 任一文件被改后，本工作流把改动同步到另一份；两者同帧都被改时以 CLAUDE.md 为准。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'CLAUDE.md'
+      - 'AGENTS.md'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-agent-docs
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: keep CLAUDE.md == AGENTS.md
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 同步后要 push 回 main，需要完整历史判断“本次改了哪个文件”。
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: sync
+        run: |
+          set -euo pipefail
+
+          if diff -q CLAUDE.md AGENTS.md >/dev/null; then
+            echo "两文件已一致，无需同步。"
+            exit 0
+          fi
+
+          # 本次 push 改了哪些文件（相对父 commit）。merge commit 取第一父。
+          PARENT=$(git rev-parse --short HEAD^1 2>/dev/null || echo "")
+          if [ -n "$PARENT" ]; then
+            CHANGED_CLAUDE=$(git diff --name-only "$PARENT" HEAD -- CLAUDE.md | wc -l)
+            CHANGED_AGENTS=$(git diff --name-only "$PARENT" HEAD -- AGENTS.md | wc -l)
+          else
+            # 无父 commit（首次提交）——以 CLAUDE.md 为准。
+            CHANGED_CLAUDE=1
+            CHANGED_AGENTS=0
+          fi
+
+          if [ "$CHANGED_CLAUDE" -eq 0 ] && [ "$CHANGED_AGENTS" -gt 0 ]; then
+            # 只改了 AGENTS.md → 用它覆盖 CLAUDE.md
+            cp AGENTS.md CLAUDE.md
+            echo "只改了 AGENTS.md，已回流到 CLAUDE.md。"
+          else
+            # 改了 CLAUDE.md，或两者都改 → 以 CLAUDE.md 为准
+            cp CLAUDE.md AGENTS.md
+            echo "以 CLAUDE.md 为准，已同步到 AGENTS.md。"
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CLAUDE.md AGENTS.md
+          git commit -m "chore: sync CLAUDE.md ↔ AGENTS.md [skip ci]"
+          git push

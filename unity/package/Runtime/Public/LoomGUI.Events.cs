@@ -1,5 +1,5 @@
 // LoomGUI Frozen Public API: Events
-// See docs/superpowers/specs/2026-07-15-frozen-public-api-design.md
+// See docs/design/public-api.md (权威契约) + docs/design/projection-layer.md (投影层机制)
 
 using System;
 
@@ -33,7 +33,7 @@ namespace LoomGUI
         public void StopPropagation() { throw NE(); }
         public void PreventDefault() { throw NE(); }
         public Vector2 Position { get { throw NE(); } }
-        public int Button { get { throw NE(); } }
+        public PointerButton Button { get { throw NE(); } }
         public int TouchId { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
     }
@@ -47,7 +47,7 @@ namespace LoomGUI
         public void StopPropagation() { throw NE(); }
         public void PreventDefault() { throw NE(); }
         public Vector2 Position { get { throw NE(); } }
-        public int Button { get { throw NE(); } }
+        public PointerButton Button { get { throw NE(); } }
         public int TouchId { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
     }

@@ -1,6 +1,8 @@
 ﻿# LoomGUI 主设计
 
 > 跨引擎游戏 UI 框架。Rust 核心（引擎无关纯库）+ 多引擎后端（Unity 首发，Godot 等），标准 HTML/CSS 子集作设计期 DSL，类型化对象树作运行时 API，自绘渲染。
+>
+> **关联权威契约**：[fence.md](fence.md)（围栏）、[public-api.md](public-api.md)（公共 API 终态契约）、[projection-layer.md](projection-layer.md)（C# 投影层机制）。本文定总体架构与渲染管线；公共 API 以 public-api.md 为准。
 
 ## 1. 目标与非目标
 
@@ -99,11 +101,9 @@
 | 操作 | `button/a` | `Button/Link` |
 | 图片与绘制 | `img/canvas` | `Image/Canvas` |
 | 输入 | `input/textarea/select/option` | 根据标准元素签名创建控件 |
-| 状态反馈 | `progress/meter` | `ProgressBar/Meter` |
+| 状态反馈 | `progress` | `ProgressBar` |
 | 列表 | `ul/ol/li` | `ListView/ListItem` |
 | 模板 | `template` | 惰性 `UITemplate`，不进入实时树 |
-| 展开与弹窗 | `details/summary/dialog` | `Disclosure/Dialog` |
-| 表单分组 | `form/fieldset/legend` | `Form/Container` |
 | 内容投影 | `slot` | Custom Element 的标准 Slot |
 
 `script` 不属于运行时围栏。
@@ -156,33 +156,31 @@ HTML 没有原生 Tabs、Tree 等标签。此类控件采用白名单内的标�
 
 ```text
 Node
-├── Container
-│   ├── Component
-│   ├── TextElement / TextBlock / Label / Link
-│   ├── Button
-│   ├── ListView / ListItem
-│   ├── Form / Disclosure / Dialog
-│   └── 用户 Custom Element 生成类型
-├── TextNode
-├── Image
+├── Container（内容模型 = 用户可编排的子节点）
+│   ├── AbsolutePanel（语法糖，子节点自动 absolute）
+│   ├── TextBlock（p）/ TextElement（span/strong/em）
+│   ├── Label / Button / Link / Canvas
+│   └── ListView（ul/ol）/ ListItem（li）
+├── TextNode / Image
 ├── TextField / NumberField / Slider / Toggle / RadioButton
-├── TextArea / Dropdown / ProgressBar / Meter
-└── Canvas
+├── TextArea / Dropdown / ProgressBar
+└── （叶子类：私有内部结构）
 ```
 
 - `Container` 才暴露子节点增删；叶子类没有 `AddChild()`。
 - `Button`、`Link` 等可包含图标和文本，因此属于容器。
-- 公共对象持有稳定身份，内部句柄不暴露。
+- 公共对象持有稳定身份，内部句柄（NodeId）不暴露。
 - `input[type]` 和白名单 `role` 是不可变结构属性。
+- **无 Panel/Component 类型**：作用域是运行时标记（`IsScopeRoot`），非类型；`Instantiate` 返回模板根真实类型。完整层级与划线见 [public-api.md](public-api.md) §2。
 
 ### 4.2 顶层上下文
 
-`UIContext` 是显式顶层实例，拥有 Package、根节点、焦点、输入、时钟和后端连接。允许同进程存在多个独立上下文。
+`UIContext` 是显式顶层实例，拥有 Package、根节点、焦点、输入、时钟和后端连接。允许同进程存在多个独立上下文。**UIContext 是「获取而非创建」**——无公共构造，由引擎集成层创建并驱动；业务程序员从集成层获取一个已跑起来的 UIContext（见 [public-api.md](public-api.md) §11.3）。
 
 ```csharp
-UIContext ui = new UIContext(backend);
+UIContext ui = backend.Context;                  // 由集成层提供，非 new
 UIPackage game = ui.LoadPackage("game-ui", bytes);
-Component home = game.Instantiate("views/home");
+Container home = game.Instantiate("views/home"); // 返回模板根真实类型
 ui.Root.AddChild(home);
 ```
 
@@ -272,18 +270,15 @@ HTML 属性提供初始值；C# 属性表示实时状态。用户输入和代码
 | `button` | `Button` | `Disabled`, `Clicked` |
 | `a[href]` | `Link` | `Href`, `Activated` |
 | `input[type=text/password/search]` | `TextField` | `Value`, `Placeholder`, `ReadOnly`, `ValueChanged`, `Submitted` |
-| `input[type=number]` | `NumberField` | `Value`, `Min`, `Max`, `Step`, `ValueChanged` |
-| `input[type=range]` | `Slider` | `Value`, `Min`, `Max`, `Step`, `ValueChanged`, `ChangeCommitted` |
-| `input[type=checkbox]` | `Toggle` | `IsChecked`, `IsIndeterminate`, `CheckedChanged` |
-| `input[type=radio]` | `RadioButton` | `IsChecked`, `Name`, `CheckedChanged` |
-| `textarea` | `TextArea` | `Value`, `Selection`, `ValueChanged` |
-| `select/option` | `Dropdown` | `SelectedIndex`, `SelectedValue`, `SelectionChanged` |
+| `input[type=number]` | `NumberField` | `Value`, `Min`, `Max`, `Step`, `Disabled`, `ValueChanged` |
+| `input[type=range]` | `Slider` | `Value`, `Min`, `Max`, `Step`, `Disabled`, `ValueChanged`, `ChangeCommitted` |
+| `input[type=checkbox]` | `Toggle` | `IsChecked`, `Disabled`, `CheckedChanged` |
+| `input[type=radio]` | `RadioButton` | `IsChecked`, `Name`, `Disabled`, `CheckedChanged` |
+| `textarea` | `TextArea` | `Value`, `Placeholder`, `Selection`, `ReadOnly`, `Disabled`, `ValueChanged` |
+| `select/option` | `Dropdown` | `SelectedIndex`, `SelectedValue`, `Disabled`, `SelectionChanged` |
 | `progress` | `ProgressBar` | `Value`, `Max`, `IsIndeterminate` |
-| `meter` | `Meter` | `Value`, `Min/Max/Low/High/Optimum` |
-| `details/summary` | `Disclosure` | `IsOpen`, `OpenChanged` |
-| `dialog` | `Dialog` | `Show`, `ShowModal`, `Close`, `Cancelled`, `Closed` |
 
-伪类 `:checked/:disabled/:focus/:open` 匹配实时状态。RadioButton 以标准 `name` 在当前组件或 Form 作用域分组。
+伪类 `:checked/:disabled/:focus` 匹配实时状态。RadioButton 同 `name` 组框架自动互斥（只新选中项触发 `CheckedChanged`）；按 name 聚合的 RadioGroup 是逻辑层积木，作用域边界由 `IsScopeRoot` 标记决定。控件数值（Slider/NumberField/ProgressBar）用 `float`。完整控件契约见 [public-api.md](public-api.md) §7。
 
 `ValueChanged` 表示实时变化；`ChangeCommitted` 表示拖动结束、回车或失焦确认。所有控件仍保留通用路由事件（`node.On<PointerDownEvent>(...)`）。
 
@@ -313,10 +308,9 @@ HTML 属性提供初始值；C# 属性表示实时状态。用户输入和代码
 
 ```csharp
 UITemplate item = common.GetTemplate("templates/mail-item");
-// 生成后：CommonUI.Templates.MailItem
 ```
 
-模板资产只编译、缓存一份；每次实例化生成独立对象树、状态、事件和 ID 作用域。
+模板资产只编译、缓存一份；每次实例化生成独立对象树、状态、事件和 ID 作用域。模板与实例化产物的关系同 Unity prefab：卸载模板不影响已实例化的活节点（独立副本）。
 
 ### 7.4 用户业务 Custom Elements
 
@@ -360,13 +354,14 @@ mails.BindItem = (item, index) => {
 
 契约：
 - `ul/ol` → `ListView`，`li` → `ListItem`。
-- 静态模式允许直接 `li`；数据驱动模式只允许 template，不混用。
-- `ItemTemplate` 与 `TemplateSelector` 首版同时提供。
+- 虚拟化是运行时实现决策（不进 HTML）；首次设 `ItemCount`/`ItemTemplate`/`BindItem` 即数据驱动 + 清空设计期 li。静态/数据驱动强制互斥（越界抛 `UIContractException`）。
+- item 模板来源优先级：显式 `ItemTemplate`/`TemplateSelector` > 设计期 `<template id>` > 第一个 li 兜底。未设且 ul 下单个 `<template>` 自动用、多个 `<template>` 抛 `UIContractException`。
+- `TemplateSelector` 是纯 `Func<int, UITemplate>`；用户 `view.GetTemplate("name")` 取 template 后塞 lambda 闭包按 index 选，框架不自动收集。
 - `TemplateSelector` 返回 `UITemplate` 对象，不返回字符串。
 - ListView 按模板分别池化。
 - 虚拟化、可见区、测量补偿、content size 和后端 reuse key 全部是内部实现。
 
-刷新 API：`RefreshItem(index)`、`RefreshItems()`、`NotifyInserted/Removed/Moved`。
+刷新 API：`RefreshItem(index)`、`RefreshItems()`、`NotifyInserted/Removed/Moved`。完整契约见 [public-api.md](public-api.md) §8。
 
 ---
 
@@ -579,7 +574,7 @@ enum NodePayload {
 
 ### 13.2 Transition
 
-纯数据 `items: Vec<TransitionItem>`。`Play()` 把每个 item 翻译成 Tweener 提交 TweenManager。与控件状态（如 TabList 切换、Disclosure 展开）正交，由状态变化触发。
+纯数据 `items: Vec<TransitionItem>`。`Play()` 把每个 item 翻译成 Tweener 提交 TweenManager。与控件状态（如 Toggle 切换、TabList 切换）正交，由状态变化触发。
 
 ### 13.3 Timers
 
@@ -656,28 +651,31 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
 ## 16. 更新循环（每帧管线）
 
 ```text
-引擎 update:
+引擎 update（C# 投影层 + Rust 核心，见 projection-layer.md）:
   1. set_input()                       ← 后端采集指针/键/触摸/IME
-  2. context.tick(dt) — 内部固定顺序：
-     a. TweenManager.update(dt)        ← 唯一动画时钟
+  2. flush 脏属性回写                   ← C# 投影层：攒批的 Style(css 串)/Transform(数值) 推 Rust（tick 前）
+  3. context.tick(dt) — 显式依赖拓扑：
+     a. TweenManager.update(dt)        ← 唯一动画时钟（ScrollPane 物理是例外，自维护 tween）
      b. 消费 pending_focus_request
-     c. process 指针输入               ← 多槽命中测试 + 拖拽/滚动/点击仲裁
+     c. process 指针输入               ← 多槽命中测试（用上帧 world）+ 拖拽/滚动/点击仲裁
      d. scroll.update + 消费 wheel      ← 惯性/回弹物理
-     e. process_keys                    ← keydown/up + Tab 导航
-     f. rematch_pseudo_classes          ← :hover/:active/:focus/:disabled/:checked/:open 等
-     g. transition drain                ← 消费 transition 请求，提交 tween
-     h. layout dirty → solve            ← Block/Flex 各自算法
+     e. process_keys                    ← keydown/up（无自动 Tab 导航——方向键/手柄导航是逻辑层积木）
+     f. rematch                         ← 伪类 :hover/:active/:focus/:disabled/:checked 重 cascade（class/style 变更下帧生效）
+     g. transition drain                ← 消费 transition 请求，提交 tween（基线 = 上帧 computed）
+     h. solve                           ← Block/Flex 各自算法（每帧一次，帧末一致）
      i. refresh_content_sizes           ← scroll content_size 刷新
-     j. compute_world_transforms        ← DFS 累计 world matrix
+     j. compute_world_transforms        ← DFS 累计 world matrix（含 Transform 渲染偏移，不触发 solve）
      k. build_render_nodes              ← 剪 display:none + dirty hash + 批合 + sort_key
-     l. 输出 Vec<RenderNode>
-  3. 后端消费 render_nodes → 同步镜像；borrow_events → 事件路由 → 业务回调
+     l. 输出 Vec<RenderNode>（SOA blob）
+  4. 后端 borrow_frame → MirrorPool 同步镜像；borrow_events → 事件路由 → 业务回调
 ```
 
 关键：
-- rematch 在 solve 和 compute 之前——伪类改样式当帧全部生效。
-- hit_test 用上帧 world_transforms（1 帧延迟）；scroll_pos 同帧进 world。
-- 事件回调里改的布局属性延迟到下帧 solve（避免反馈环）。
+- **flush 在 tick 前**：C# 投影层攒批的属性写（Style/Transform）在 tick 之前一次性推 Rust，与 set_input 合并过桥。见 [projection-layer.md](projection-layer.md) §2.1。
+- **rematch 在 solve 和 compute 之前**——伪类/class/style 变更当帧全部生效。class 切换驱动动画的下帧 rematch + 上帧 computed 做 transition 基线见 [public-api.md](public-api.md) §9.1。
+- **hit_test 用上帧 world_transforms**（1 帧延迟）；scroll_pos 同帧进 world。
+- **事件回调里改的布局属性延迟到下帧 solve**（避免反馈环）；Geometry 读的是最近完成的 solve（滞后一帧，同 web reflow）。
+- **单一动画时钟**：TweenManager.update(dt) 是唯一时钟；OnUpdate 是逻辑驱动每帧钩子（非动画系统）。
 - transform 动画不改布局，不触发 solve。
 
 ---

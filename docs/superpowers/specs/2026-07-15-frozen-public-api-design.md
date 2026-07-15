@@ -2,7 +2,9 @@
 
 > 日期：2026-07-15
 >
-> 状态：已完成设计讨论，待书面审阅
+> 状态：**历史设计记录**。本 spec 是冻结初稿；经一轮 API grill（Q1–Q27）后，权威契约已转至 [docs/design/public-api.md](../../design/public-api.md)（公共 API）与 [docs/design/projection-layer.md](../../design/projection-layer.md)（投影层机制）。本文保留作设计过程记录，**不再维护**——以 design 文档为准。
+>
+> 原状态：已完成设计讨论，待书面审阅
 >
 > 范围：R2-R7 的验收靶子。只依赖 R1 围栏，现在就能冻结。
 >

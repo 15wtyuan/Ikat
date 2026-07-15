@@ -4,7 +4,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>disable</Nullable>
     <IsPackable>false</IsPackable>
-    <RootNamespace>LoomGUI.FrozenApi</RootNamespace>
+    <RootNamespace>LoomGUI.PublicApi</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.Types.cs" Link="Public\LoomGUI.Types.cs" />
