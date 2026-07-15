@@ -249,8 +249,10 @@ panel.Style.OverflowY = Overflow.Auto;
 
 - Specificity：标准 CSS tuple a-b-c（`inline > id > class > tag`）。
 - 属性选择器与伪类同归 class 级（b）。
-- 打包期展开继承到 base_style；运行时 rematch 只处理伪类/状态变化。
+- **CSS 规则表进包（不 bake 丢）**：逻辑层运行时大量用 CSS（`Classes.Add/Replace`、`StyleSheet.Add`、class 切换驱动动画），规则表必须活到运行时，否则对设计期未带该 class 的节点 `Classes.Add` 会失效。cascade 引擎是 core 的运行时唯一真相源；fence 只把 `<style>` 解析成规则表。
+- 运行时 rematch 处理伪类 + class + Style override 变化，每帧从 `base_style` 重算基线（`base_style` = 每帧 cascade 基线，非首帧缓存）。
 - 运行时样式 = `base_style + 命中动态规则的合并`。
+- 详见 `docs/roadmap/roadmap.md` §3.2（cascade 归属决策）与 §2 阶段 S（选择器解析器是净新代码）。
 
 ### 5.4 组件样式边界（Shadow DOM 风格）
 
