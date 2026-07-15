@@ -1,10 +1,12 @@
 use crate::annotate::annotate;
 use crate::css_resolve::resolve_inline_styles_with_diags;
+use crate::css_rules::parse_style_block;
 use crate::diagnostic::{Diagnostic, LineMap};
 use crate::fence_gate::run_fence_gate;
 use crate::ir::{IrNodeKind, IrTree};
 use crate::structural::run_structural;
 use crate::tree_builder::parse_html_to_ir_named;
+use loomgui_core::style::dynamic::DynamicRule;
 use loomgui_core::style::mapping::parse_url;
 use loomgui_core::style::resolved::ResolvedStyle;
 
@@ -12,6 +14,7 @@ use loomgui_core::style::resolved::ResolvedStyle;
 pub struct ParsedTemplate {
     pub tree: IrTree,
     pub styles: Vec<ResolvedStyle>,
+    pub dynamic_rules: Vec<DynamicRule>,
     pub diagnostics: Vec<Diagnostic>,
     pub referenced_sprites: Vec<String>,
 }
@@ -24,7 +27,7 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
     let line_map = LineMap::new(html);
 
     // Stage 1+2: Tokenize + Tree Build
-    let (mut tree, mut diagnostics, _style_texts) = parse_html_to_ir_named(html, file.to_string());
+    let (mut tree, mut diagnostics, style_texts) = parse_html_to_ir_named(html, file.to_string());
 
     // Stage 3: Fence Gate (per-element validation)
     let gate_diags = run_fence_gate(&tree, file, &line_map);
@@ -33,6 +36,15 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
     // Stage 4: CSS Resolve
     let (styles, css_diags) = resolve_inline_styles_with_diags(&tree, file, &line_map);
     diagnostics.extend(css_diags);
+
+    // Stage 4.5: <style> → 动态规则表（CSS cascade 规则，运行时 rematch 消费）。
+    // style_texts 由 tree_builder 在 Stage 1 抽出（<style> 元素文本），此处统一解析。
+    let mut dynamic_rules = Vec::new();
+    for css in &style_texts {
+        let (rules, css_diags) = parse_style_block(css);
+        dynamic_rules.extend(rules);
+        diagnostics.extend(css_diags);
+    }
 
     // Stage 5: Structural (content model, IDs)
     let struct_diags = run_structural(&tree, file, &line_map);
@@ -47,6 +59,7 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
     ParsedTemplate {
         tree,
         styles,
+        dynamic_rules,
         diagnostics,
         referenced_sprites,
     }
