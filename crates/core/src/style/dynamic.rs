@@ -76,6 +76,37 @@ pub struct Specificity(pub u32, pub u32, pub u32); // (id 数, class 数, tag �
 use crate::scene::node::{NodeId, Scene};
 use crate::style::mapping::apply_decl;
 use crate::style::resolved::{ResolvedStyle, TransitionSpec};
+use std::collections::HashMap;
+
+/// cascade 期 transient：节点显式声明了哪些可继承属性（bitmask）。
+/// 不进 ResolvedStyle（避免改 bincode/pkg 格式），不进 Scene 持久字段。
+#[derive(Default, Clone, Copy)]
+struct InheritedSet(u16);
+
+const INH_FONT_SIZE: u16 = 1 << 0;
+const INH_COLOR: u16 = 1 << 1;
+const INH_FONT_FAMILY: u16 = 1 << 2;
+const INH_FONT_WEIGHT: u16 = 1 << 3;
+const INH_TEXT_ALIGN: u16 = 1 << 4;
+const INH_LINE_HEIGHT: u16 = 1 << 5;
+const INH_LETTER_SPACING: u16 = 1 << 6;
+const INH_WHITE_SPACE_NOWRAP: u16 = 1 << 7;
+
+/// prop 名 → 可继承属性 bit（非可继承返 None）。core 侧硬编码（fence schema 的
+/// inherited 标志是 build-time 校验用的另一份；本 spike core 用此局部表，Spec-3 再统一）。
+fn inherited_bit(prop: &str) -> Option<u16> {
+    match prop.trim() {
+        "font-size" => Some(INH_FONT_SIZE),
+        "color" => Some(INH_COLOR),
+        "font-family" => Some(INH_FONT_FAMILY),
+        "font-weight" => Some(INH_FONT_WEIGHT),
+        "text-align" => Some(INH_TEXT_ALIGN),
+        "line-height" => Some(INH_LINE_HEIGHT),
+        "letter-spacing" => Some(INH_LETTER_SPACING),
+        "white-space" => Some(INH_WHITE_SPACE_NOWRAP),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct DynamicRuleTable {
@@ -315,6 +346,8 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         .collect();
     // 收集所有 NodeId（slotmap 分配，不能手造 NodeId(i)）。
     let node_ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
+    // set-ness：每节点显式声明了哪些可继承属性。cascade 期收集，继承 pass 消费。
+    let mut set_map: HashMap<NodeId, InheritedSet> = HashMap::new();
     for node_id in node_ids {
         // 捕获旧级联值 + cascaded_once + transition 声明（写新 style 前留快照）。
         // transition 读自 base_style（打包期烘焙的静态声明，rematch 不改 base_style）。
@@ -337,11 +370,19 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         }
         // specificity 升序（高 specificity 后 apply 胜出）；同级保持原序（stable sort）
         matched.sort_by_key(|r| (r.0, r.1, r.2));
+        // apply 声明并收集 set-ness：apply_decl 返回 true = 该 prop 成功写入
+        // → 若是可继承属性，记对应 bit，供继承 pass 判"子是否显式声明"。
+        let mut inh: InheritedSet = InheritedSet::default();
         for (_, _, _, r) in &matched {
             for decl in &r.declarations {
-                apply_decl(&mut new_style, &decl.prop, &decl.value);
+                if apply_decl(&mut new_style, &decl.prop, &decl.value) {
+                    if let Some(bit) = inherited_bit(&decl.prop) {
+                        inh.0 |= bit;
+                    }
+                }
             }
         }
+        set_map.insert(node_id, inh);
         // transition 检测：仅 cascaded_once 后（首次 cascade 即时生效不动画），
         // 且声明了非零 duration 的 transition 时，比较可动画通道变化推请求。
         for ts in &transition_decl {
@@ -354,49 +395,63 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         node.style = new_style;
         node.cascaded_once = true;
     }
-    // runtime color 继承：rematch 各节点独立重 cascade（从 base_style 重起，不读父），
-    // CSS color 是继承属性，父 runtime color 变化（选中/hover）要在此按树序补传播给子。
-    propagate_color_inheritance(scene);
+    // 通用可继承属性传播：每节点从 base_style 独立 cascade（不读父），故继承须 rematch 后
+    // 按 tree order 补一次：子未显式声明（set_map 无该 bit）→ 取父 effective 值。
+    propagate_inherited(scene, &set_map);
 }
 
-/// runtime color 继承传播。
-///
-/// `rematch_pseudo_classes` 逐节点独立重 cascade，不读父 → 父 runtime color 变化不会
-/// 传给子。CSS `color` 是继承属性，故 rematch 后按树序 DFS 补一次：子若**未声明 color**
-/// （判据：子 rematch 后的 `style.color` == 父 `base_style.color`——子没声明 color 也没
-/// 动态命中改 color 时，new.color 从 base 重起等于打包期继承的父 base color），就把子的
-/// `style.color` 设为父的 effective color（anim tween 当前值优先，让文字随父 transition
-/// 渐变）。
-fn propagate_color_inheritance(scene: &mut Scene) {
+/// 通用可继承属性传播（tree-order DFS）。子未显式声明的可继承字段 → 取父 effective 值。
+/// `effective` = 节点当前 style 值（anim override 本轮仅 color 用过，font 等无 anim）。
+fn propagate_inherited(scene: &mut Scene, set_map: &HashMap<NodeId, InheritedSet>) {
     let roots = scene.roots.clone();
     for root in roots {
-        propagate_color_rec(scene, root, None);
+        propagate_inherited_rec(scene, root, None, set_map);
     }
 }
 
-fn propagate_color_rec(scene: &mut Scene, id: NodeId, parent: Option<([f32; 4], [f32; 4])>) {
-    let (my_base, my_style, my_anim_text, children) = {
+fn propagate_inherited_rec(
+    scene: &mut Scene,
+    id: NodeId,
+    parent_style: Option<ResolvedStyle>,
+    set_map: &HashMap<NodeId, InheritedSet>,
+) {
+    let (my_style, my_base, children) = {
         let n = scene.get(id).expect("live node");
-        let anim_text = scene.anim.get(id).and_then(|a| a.text_color);
-        (
-            n.base_style.color,
-            n.style.color,
-            anim_text,
-            n.children.clone(),
-        )
+        (n.style.clone(), n.base_style.clone(), n.children.clone())
     };
-    let mut my_effective = my_anim_text.unwrap_or(my_style);
-    if let Some((parent_eff, parent_base)) = parent {
-        // color 来自继承（rematch 后 new.color == 父 base.color：既没声明 color 也没动态
-        // 命中改 color）且无 anim override → 继承父 effective color（随父 runtime 变）。
-        if my_style == parent_base && my_anim_text.is_none() {
-            scene.get_mut(id).expect("live node").style.color = parent_eff;
-            my_effective = parent_eff;
+    // 父 effective = 父传下来的 style 快照（已含父自己的继承结果，因 tree order）
+    if let Some(parent_eff) = parent_style {
+        let inh = set_map.get(&id).copied().unwrap_or_default();
+        let mut new_style = my_style.clone();
+        macro_rules! copy_if_unset {
+            ($field:ident, $bit:expr) => {
+                if (inh.0 & $bit) == 0 {
+                    new_style.$field = parent_eff.$field;
+                }
+            };
+        }
+        copy_if_unset!(font_size, INH_FONT_SIZE);
+        copy_if_unset!(color, INH_COLOR);
+        copy_if_unset!(font_family, INH_FONT_FAMILY);
+        copy_if_unset!(font_weight, INH_FONT_WEIGHT);
+        copy_if_unset!(text_align, INH_TEXT_ALIGN);
+        copy_if_unset!(line_height, INH_LINE_HEIGHT);
+        copy_if_unset!(letter_spacing, INH_LETTER_SPACING);
+        copy_if_unset!(white_space_nowrap, INH_WHITE_SPACE_NOWRAP);
+        // ponytail: per-clone，节点多时换就地改 + 父快照
+        let eff_for_children = new_style.clone();
+        scene.get_mut(id).expect("live node").style = new_style;
+        // 向下传我更新后的 style 作为子 effective
+        for c in children {
+            propagate_inherited_rec(scene, c, Some(eff_for_children.clone()), set_map);
+        }
+    } else {
+        // 根节点：无父继承，effective = 自己 style，直接向下传
+        for c in children {
+            propagate_inherited_rec(scene, c, Some(my_style.clone()), set_map);
         }
     }
-    for c in children {
-        propagate_color_rec(scene, c, Some((my_effective, my_base)));
-    }
+    let _ = my_base; // base_style 本 pass 不读（rematch 已用）
 }
 
 /// 比较旧/新级联值的可动画通道；变化的（且 transition 声明覆盖该通道）推入 pending_transitions。
@@ -654,6 +709,87 @@ mod tests {
                 && (c[2] - 46.0 / 255.0).abs() < 1e-3,
             "child Text 该继承 parent hover color (#1a1d2e)，实际 {:?}",
             c
+        );
+    }
+
+    #[test]
+    fn child_inherits_parent_font_size() {
+        // root(.par font-size:24) > Text child。child 无 font-size 规则 → 该继承 24。
+        // 证明通用继承（非 color-only）。
+        let mut root = Node::default();
+        root.classes = vec!["par".to_string()];
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
+        let mut child = Node::default();
+        child.kind = NodeKind::Text {
+            content: "hi".into(),
+        };
+        child.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 20.0,
+        };
+        let mut s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
+        s.dynamic_rules
+            .rules
+            .push(rule(".par", "font-size", "24px"));
+        rematch_pseudo_classes(&mut s);
+        let cid = s.get(s.roots[0]).unwrap().children[0];
+        assert_eq!(
+            s.get(cid).unwrap().style.font_size,
+            24.0,
+            "child Text 该继承 parent .par 的 font-size:24"
+        );
+    }
+
+    #[test]
+    fn child_explicit_font_size_not_overridden_by_inheritance() {
+        // child 自己声明 font-size:12 → 不被父的 24 覆盖（set-ness 阻断继承）。
+        let mut root = Node::default();
+        root.classes = vec!["par".to_string()];
+        let mut child = Node::default();
+        child.classes = vec!["c".to_string()];
+        child.kind = NodeKind::Text {
+            content: "hi".into(),
+        };
+        let mut s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
+        s.dynamic_rules
+            .rules
+            .push(rule(".par", "font-size", "24px"));
+        s.dynamic_rules.rules.push(rule(".c", "font-size", "12px"));
+        rematch_pseudo_classes(&mut s);
+        let cid = s.get(s.roots[0]).unwrap().children[0];
+        assert_eq!(
+            s.get(cid).unwrap().style.font_size,
+            12.0,
+            "child 显式声明 12 不被继承覆盖"
+        );
+    }
+
+    #[test]
+    fn inheritance_cascades_two_levels() {
+        // root(.a font-size:20) > mid > leaf(Text)。mid/leaf 都不声明 → leaf 继承 20（跨两级）。
+        let mut root = Node::default();
+        root.classes = vec!["a".to_string()];
+        let mid = Node::default();
+        let mut leaf = Node::default();
+        leaf.kind = NodeKind::Text {
+            content: "x".into(),
+        };
+        let mut s = Scene::from_nodes(vec![root, mid, leaf], vec![(0, 1), (1, 2)]);
+        s.dynamic_rules.rules.push(rule(".a", "font-size", "20px"));
+        rematch_pseudo_classes(&mut s);
+        let mid_id = s.get(s.roots[0]).unwrap().children[0];
+        let leaf_id = s.get(mid_id).unwrap().children[0];
+        assert_eq!(
+            s.get(leaf_id).unwrap().style.font_size,
+            20.0,
+            "leaf 跨级继承 20"
         );
     }
 
