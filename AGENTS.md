@@ -8,7 +8,7 @@ LoomGUI = 跨引擎游戏 UI 框架。标准 HTML/CSS 子集作设计期 DSL，�
 
 对标 FairyGUI、RmlUi、Unity UI Toolkit（参考实现在 `temp/FairyGUI-unity/`、`temp/RmlUi/`，只读）。差异化：标准 HTML/CSS（vs fgui 的 `.fui` 二进制 AI 看不懂）、类型化对象树（标准 HTML 元素决定稳定类型）、Rust 跨引擎共享核心、围栏验证器。
 
-**当前状态**：v1 架构验证完成，正在进入 R 系列 API 范式重构（从"stage 全局 + NodeId 句柄"重做为"类型化对象树 + 标准 HTML 围栏"）。设计契约见 `docs/design/main-design.md`；**公共 API 终态契约见 `docs/design/public-api.md`（Q1-Q27 grill 修订已固化）+ C# 投影层机制见 `docs/design/projection-layer.md`（真身在 Rust，C# 是 OOP 投影 + 攒批回写）**；重构路线见 `docs/roadmap/roadmap.md`；重构 spec 见 `docs/superpowers/specs/2026-07-13-api-refactor-design.md`。公共签名冻结在 `unity/package/Runtime/Public/LoomGUI.*.cs`，编译校验门 `tests/dotnet/LoomGUI.PublicApi`。
+**当前状态**：v1 架构验证完成，正在进入 API 范式重构（从"stage 全局 + NodeId 句柄"重做为"类型化对象树 + 标准 HTML 围栏"）。**本轮路线 = 摸黑打通骨架链（双终点线：headless rect / Unity）再三束加宽**，不再横切 R2–R8（2026-07-15 重定，权威见 roadmap）。设计契约见 `docs/design/main-design.md`；**公共 API 终态契约见 `docs/design/public-api.md`（Q1-Q27 grill 修订已固化）+ C# 投影层机制见 `docs/design/projection-layer.md`（真身在 Rust，C# 是 OOP 投影 + 攒批回写）**；重构路线见 `docs/roadmap/roadmap.md`；早期探索 spec 见 `docs/superpowers/specs/2026-07-13-api-refactor-design.md`（历史草稿，大部分已吸收进上述 design，非活契约）。公共签名冻结在 `unity/package/Runtime/Public/LoomGUI.*.cs`，编译校验门 `tests/dotnet/LoomGUI.PublicApi`。
 
 ## 构建 / 测试命令
 
@@ -109,10 +109,10 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 > 以下不变量描述的是**尚未重构的当前代码**。当前目标就是要转化这些旧范式到新范式中，碰到下面的代码，请提醒用户重构或者清理。
 
 - **`<div>` 永远是 flex 容器**（默认 `flex-direction: column`）。只有 `div`/`span`/`img`/`button` 标签。→ R1.1 新围栏（fence crate）已完成，core parse 已移除。
-- **`NodeKind` enum + 代际 NodeId**：`NodeId(pub u32)` 对外透明句柄。→ R2 类型化对象树替代。
-- **`FindNodeById` 全局首匹配**。→ R2 组件作用域查找替代。
-- **虚拟列表 = 层 B'（核心不认识"列表"）**：driver 管 slot 映射/可见区间/不等高补偿。reuse_key 是场景级全局命名空间。→ R6 ListView 吸收。
-- **`data-controller/data-page` 私有状态协议**。→ R5 标准 WAI-ARIA 替代。
+- **`NodeKind` enum + 代际 NodeId**：`NodeId(pub u32)` 对外透明句柄。→ 类型化对象树替代（core 档位2 语义 enum + C# 类型化投影）。
+- **`FindNodeById` 全局首匹配**。→ 组件作用域 `Get<T>("id")` 替代（后端对象层）。
+- **虚拟列表 = 层 B'（核心不认识"列表"）**：driver 管 slot 映射/可见区间/不等高补偿。reuse_key 是场景级全局命名空间。→ 复合束 ListView 吸收。
+- **`data-controller/data-page` 私有状态协议**。→ 控件束标准 WAI-ARIA 替代。
 - **`display:block` 是 RichText desugar 暗号**。→ R1.1 parse 代码已从 core 移除（display:block desugar 随之退役）。
 
 ### 围栏
@@ -122,7 +122,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 ## 在本仓库怎么干活
 
 - **实现任何机制前，先对照 FairyGUI 源码和 RmlUi 源码**（`temp/FairyGUI-unity/` 和 `temp/RmlUi/`，只读）。LoomGUI 的渲染/对象模型/批合/事件/动画/资源管线全面借鉴 fgui，文本/布局借鉴 RmlUi/UITK。先读对应源码看它怎么做，再定设计。
-- **设计文档 vs 踩坑**：`docs/design/main-design.md`（总体架构与渲染管线）、`docs/design/fence.md`（围栏）、`docs/design/public-api.md`（公共 API 终态契约，Q1-Q27 grill 修订已固化）、`docs/design/projection-layer.md`（C# 投影层机制：真身在 Rust，C# 是 OOP 投影 + 攒批回写）、`docs/roadmap/roadmap.md`（R 系列路线 + 机制草稿）、`docs/superpowers/specs/2026-07-13-api-refactor-design.md`（重构 spec）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配）。
+- **设计文档 vs 踩坑**：`docs/design/main-design.md`（总体架构与渲染管线）、`docs/design/fence.md`（围栏）、`docs/design/public-api.md`（公共 API 终态契约，Q1-Q27 grill 修订已固化）、`docs/design/projection-layer.md`（C# 投影层机制：真身在 Rust，C# 是 OOP 投影 + 攒批回写）、`docs/roadmap/roadmap.md`（重构路线：摸黑打通 + 三束加宽 + 机制草稿）、`docs/superpowers/specs/2026-07-13-api-refactor-design.md`（早期探索 spec，历史草稿）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配）。
 - **Rust edition 2021**，依赖钉版本：`taffy 0.5`、`ttf-parser 0.20`、`cssparser 0.34`、`scraper 0.19`、`slotmap 1.1`、`csbindgen 1`。snapshot 测试用 `insta`。
 - `Cargo.lock` 入库（根级，尽管 `.gitignore` 有通用 `Cargo.lock` 行——它是被追踪的）。
 - 设计师工作区是独立磁盘目录（含 `loom.workspace.json`、HTML/CSS 源文件、res 资源、design-systems 组件库）。打包用独立打包器 GUI（Tauri `loomgui_gui`）或 CLI `loom-pkg build <workspace>`。运行时引导由 `loom.runtime.json` 统管。
@@ -133,7 +133,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 ### v1.8+ 独立打包器 + 自绘图集 + 工作区重构
 
-v1.8 起工作流脱离 Unity 编辑器依赖。工作区 = 独立磁盘目录（`loom.workspace.json`），打包器 = 自绘（CLI `loom-pkg build` + GUI `loomgui_gui`），图集 = Rust 自绘（etagere shelf pack → `atlas/*.png` + `atlas/*.atlas.json`），运行时引导 = `loom.runtime.json`。pkg.bin 格式 v14→v15。完整设计见 `docs/superpowers/specs/2026-07-10-standalone-packer-atlas-workspace-design.md`。
+v1.8 起工作流脱离 Unity 编辑器依赖。工作区 = 独立磁盘目录（`loom.workspace.json`），打包器 = 自绘（CLI `loom-pkg build` + GUI `loomgui_gui`），图集 = Rust 自绘（etagere shelf pack → `atlas/*.png` + `atlas/*.atlas.json`），运行时引导 = `loom.runtime.json`。pkg.bin 格式当前 v16（真相源 `crates/core/src/asset/mod.rs` `PKG_FORMAT_VERSION`）。完整设计见 `docs/superpowers/specs/2026-07-10-standalone-packer-atlas-workspace-design.md`。
 
 移除的 Unity Editor 脚本：`LoomSettingsWindow`、`LoomAtlasSync`、`LoomConfigExporter`、`LoomWorkspaceInitializer` 等。仅保留 `LoomOpenPacker.cs`（MenuItem 启动 Tauri GUI）。
 
