@@ -70,7 +70,7 @@ rect  ← 断言 §3 四条
 - **fence = 纯解析器**（构建期）：文本 → rule table，不做 cascade 决策。
 - **core = 唯一 cascade 引擎**（运行期）：消费 rule table，做匹配 + 继承 + 合并。`base_style` = 每帧 cascade 基线（§5.3 源码已确认）。
 - **rule table 进 pkg.bin 是终态**——但本轮不走完整 pkg 生产路径（packer 编排已删，Spec-3 ② 重建）。S3 用测试内部通路接通。
-- **类型单一真相源**：selector/rule 类型（`ParsedSelector`/`Compound`/`Specificity`/`Declaration`/`DynamicRule`，现均在 core `style/dynamic.rs`）只定义一份，不重复。具体产/消费归属由 S1.0 定（§5.1）。
+- **类型单一真相源**：selector/rule 类型（`ParsedSelector`/`Compound`/`Specificity`/`Declaration`/`DynamicRule`，现均在 core `style/dynamic.rs`）只定义一份，不重复。具体产/消费归属由 S1.0 定（§5.1）。 **S1.0 定论（落地于 spike，2026-07-16）**：选定路径 (c) 手搓解析器，零新依赖；selector/rule 类型留在 core（`style/dynamic.rs`），fence 直接产 core 的 `ParsedSelector`/`DynamicRule`（fence 已依赖 core，无适配层、无共享 crate）。
 
 ## 5. 组件设计
 
@@ -156,6 +156,7 @@ S3 集成测试 = §3 验收门。
 | S2 set-ness 追踪波及 `ResolvedStyle`/`apply_decl` | 先核对 `ResolvedStyle`/`apply_decl` 现状，局部加 set 标记，不重构整体 |
 | spike 在旧 enum 上，后续迁移到新 enum 有返工 | S1/S2 产物设计成 enum-agnostic（解析器不关心 NodeKind；继承走属性层）；仅 mini-bridge 是 throwaway |
 | `dynamic.rs:8-9` 注释 stale（声称"解析器在 fence"，其实没写） | 实现时顺手修正该注释为现状 |
+| 打包期声明的继承属性 set-ness 不可追踪（spike set-ness 仅记 dynamic cascade 写的属性）→ 生产环境父运行时值会覆盖子打包期声明的继承值 | spike 不触发（base=default、所有样式经 dynamic_rules）；Spec-2 升 v17 + 拆 ResolvedStyle 时，set-ness 须打包期 bake 进 base_style |
 
 ## 9. 验收清单
 
