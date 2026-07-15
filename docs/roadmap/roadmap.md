@@ -18,7 +18,7 @@
 | 层 | 真实状态 | 结论 |
 |---|---|---|
 | 算法层（layout/text/scroll/tween/render 批合） | 成熟，609 测试绿，**且与"节点怎么表示"解耦**（走 NodeId + 并行表） | 复用，类型化时算法不动 |
-| pkg.bin 格式（v16）+ 写包/读包/实例化 | 全链可用有测试 | 不用重造 |
+| pkg.bin 格式 + 写包/读包/实例化 | 全链可用有测试（当前 v16） | 格式复用，本轮升 v17 弃旧兼容 |
 | 单向渲染管线（Rust blob 21 列 SOA → Unity MirrorPool 镜像） | 成熟，三级 change_level | 不推翻，其上加回写层 |
 | FFI 命令式面（55 个）+ Unity 后端（LoomStage/MirrorPool/EventHandler/InputCollector） | 成熟在跑 | 当投影层底座 |
 | fence（HTML→IrTree，6 阶段流水线） | 成熟，79 测试 | 复用，但停在 IrTree |
@@ -39,13 +39,13 @@
 
 > 目标 = 把新范式的骨架链（div + 文字 + 图 + flex + cascade）从 HTML 一路打通到渲染，全程自动化测试兜底。骨架链**只做布局正确性**，渐变/阴影/滤镜/文字特效先用纯色块占位（护城河是"布局可预测"，不是"滤镜像素"，见 §3.4）。
 
-> **顺序原则（红队修订 2026-07-15）**：真风险不在 core 表示层重构（那是最机械的活，编译器牵着走 81 处 match），而在 **cascade 和桥**——三份代码核实推翻了本轮最初"复用已有 rematch 扩一下"的假设：CSS **选择器解析器根本不存在**（只有匹配器）、CSS **继承只支持 color 且是脆弱 hack**、打包器 **HTML→pkg 编排整段被删且冻结 pkg 不可再生**。所以**先探真风险（spike），再动大重构**。
+> **顺序原则（红队修订 2026-07-15）**：真风险不在 core 表示层重构（那是最机械的活，编译器牵着走 81 处 match），而在 **cascade 和桥**——三份代码核实推翻了本轮最初"复用已有 rematch 扩一下"的假设：CSS **选择器解析器根本不存在**（只有匹配器）、CSS **继承只支持 color 且是脆弱 hack**、打包器 **HTML→pkg 编排整段被删**。所以**先探真风险（spike），再动大重构**。
 
 ### P0 · 前置修复（必须最先）
 
-1. **dll/绑定/源码同步**：入库 `.dll` + csbindgen 绑定比 Rust 源码**过期**（`loomgui_stage_load_html` / `loomgui_stage_set_rich_text` 已删源码、dll 里还在，showcase 仍调）。按当前源码重编前先解决三者同步，否则任何重编都踩雷。
-2. **Golden 基线快照（防基线蒸发）**：冻结的 `showcase.pkg.bin` 是**唯一且不可再生**的 pkg（打包 HTML 路径已删，见 §1）。一旦重编 dll + 动 `NodeKind` 序列化，它要等 ②③ 做完才能重打——中间整程无可跑 showcase。故 P0 先用现有 `dump_*` example 把它 instantiate 出来的 render-node rect **dump 成 golden 文件入库**，当整程的回归判据。
-3. **pkg 格式版本决策**：扩 `NodeKind`（5→~15 变体）改 tag 空间 + 拆 `Node` struct 可能改 bincode 形状。冻结 pkg 是 v16（MIN=MAX=16，无迁移）。**显式决定升 v17 + 何时重打**，并加 bincode 稳定性测试（序列化形状变了就红），别撞运行时 `BadKind` 才发现。
+1. **dll/绑定/源码同步**：入库 `.dll` + csbindgen 绑定比 Rust 源码**过期**（`loomgui_stage_load_html` / `loomgui_stage_set_rich_text` 已删源码、dll 里还在，旧 showcase 仍调）。按当前源码重编前先解决三者同步，否则任何重编都踩雷。
+2. **旧 `showcase.pkg.bin` 直接弃用**：入库的 `showcase.pkg.bin`（commit a1a294b）是**旧范式时期打的、装的是旧 showcase 内容**，与靶子期重写的新 `showcase/showcase/*.html`（8 页，从未打包）**不是同一个东西**。个人项目不考虑兼容 → **旧包彻底抛弃，不为它做任何基线快照、不保留读旧格式能力**。整程的真基线是"新 showcase HTML 在浏览器里的 rect"，等打包链（②）通了才谈得上。
+3. **pkg 格式版本 = 一刀切升 v17，不留后向兼容**：扩 `NodeKind`（5→~15 变体）改 tag 空间 + 拆 `Node` struct 会改 bincode 形状。直接升 v17、`MIN=MAX=17`（弃 v16，无迁移器）。加 bincode 稳定性测试（序列化形状变了就红），别撞运行时 `BadKind` 才发现。
 
 ### 阶段 S · cascade + bridge 探路（spike，在当前 5 变体 enum 上，先行）
 
@@ -80,7 +80,7 @@
 
 ### 🏁 终点线 1（纯 Rust，headless，本机验）
 
-**真 smoke 测试在 ② 之后**（① 阶段 HTML 还进不来，那时只能拿手搓 Rust 树/冻结 pkg 测"表示层机制"，**证明不了范式**、也覆盖不了新控件——别把它当范式验收，是"假绿"最危险的一种）。
+**真 smoke 测试在 ② 之后**（① 阶段 HTML 还进不来，那时只能拿手搓 Rust 树测"表示层机制"，**证明不了范式**、也覆盖不了新控件——别把它当范式验收，是"假绿"最危险的一种）。
 
 **② 后的端到端**：HTML 字符串 → 打包（内存 bytes）→ `load_package` → `instantiate` → `tick_and_render` → 断言。判据**不只 rect**（§3.3）：同时覆盖 cascade 继承传播、display:none 子树剪枝、class 命中 computed style、SemanticKind→NodeKind 无静默丢失。rect 对 ≠ 语义对。绿 = 核心范式活了。
 
@@ -246,7 +246,8 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 ## 8. 关键决策记录
 
 - **推翻横切 R2–R8，改摸黑打通 + 三束加宽（2026-07-15）**：真实断点只在 IrTree↔TemplateNode 一处，其余全活。横切让每层成"啃不动的大山"，摸黑一次打通骨架链（终点线1 headless + 终点线2 Unity）比反复切片省，且 TDD 兜得住核心重构。
-- **红队修订：spike 先行 + 三个假设证伪（2026-07-15）**：代码核实推翻了"cascade 只需复用 rematch 扩一下"——① CSS 选择器**解析器缺席**（只有匹配器）；② 继承**只支持 color 且是脆弱 hack**；③ 打包器 HTML 编排**整段被删、冻结 pkg 不可再生**。故顺序改为"先 P0（含 golden 基线 + v17 决策）→ 阶段 S（cascade+bridge 在旧 enum 上探路）→ ①enum 扩容 → ③cascade 收尾 → ②桥+打包编排"。真 smoke 在 ② 后（① 阶段 HTML 进不来，只能测表示层，是"假绿"）。SemanticKind→NodeKind 映射必须 total+非静默（保留 semantic_hint）。④ 加 headless C# harness 破两台机串行。
+- **红队修订：spike 先行 + 三个假设证伪（2026-07-15）**：代码核实推翻了"cascade 只需复用 rematch 扩一下"——① CSS 选择器**解析器缺席**（只有匹配器）；② 继承**只支持 color 且是脆弱 hack**；③ 打包器 HTML 编排**整段被删**。故顺序改为"先 P0（弃旧 pkg + 一刀切升 v17）→ 阶段 S（cascade+bridge 在旧 enum 上探路）→ ①enum 扩容 → ③cascade 收尾 → ②桥+打包编排"。真 smoke 在 ② 后（① 阶段 HTML 进不来，只能测表示层，是"假绿"）。SemanticKind→NodeKind 映射必须 total+非静默（保留 semantic_hint）。④ 加 headless C# harness 破两台机串行。
+- **旧 showcase.pkg.bin ≠ 新 showcase（2026-07-15 用户更正）**：入库旧包是旧范式旧内容，新 showcase 8 页是靶子期重写、从未打包。个人项目不考虑兼容，旧包直接弃、不做基线快照、v17 不留后向兼容。原红队 F3"冻结 pkg 不可再生死锁"基于误判（把两者当同一个），已作废。
 - **core 类型化走档位2（2026-07-15）**：扩 enum + side table + bitflags，类型化用户表面留 C# 投影层，Rust 不上 trait object（封闭类型集 + 热循环数据局部性 + projection-layer 推论）。
 - **cascade 归 core、fence 只解析（2026-07-15）**：规则表必须进包（逻辑层运行时大量用 CSS，bake 丢规则会破"CSS 优先"赌注）；单一真相源，复用已有 rematch 扩全量。
 - **护城河判据 = 布局可预测不是滤镜像素（2026-07-15）**：放弃像素级 diff 和 PNG 软件渲染器（YAGNI），用 headless rect 比对 + Unity 视觉验收。
