@@ -33,16 +33,12 @@ cargo build -p loomgui_ffi_c
 cargo test
 ```
 
-**Feature gate（`parse`）**：`scraper`+`cssparser` 是可选的，由 `parse` feature 控制（core/pkg/ffi 默认开）。运行时不带 HTML 解析器。不带 parse 编译全部：
-```bash
-cargo build --no-default-features --all-targets   # 按 crate，或 workspace 级
-```
-`snapshot` 集成测试需要 `parse`（`required-features`）。
+**Feature gate**：R1.1 起 core 不再有 parse feature——HTML/CSS 解析已移至独立 crates/fence/ crate。core 是纯运行时，不带任何 HTML 解析器依赖。
 
 **跑单个测试 / 围栏门**：
 ```bash
-cargo test -p loomgui_core --test fence_contract   # ← 围栏契约门（见下）
-cargo test -p loomgui_core --test snapshot -- <name>
+cargo test -p loomgui_fence                              # ← 围栏契约门
+# (snapshot 测试已移至 fence crate)
 ```
 
 **基准测试**：`cargo bench -p loomgui_core`（criterion，`frame_emit`）。
@@ -112,18 +108,18 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 > 以下不变量描述的是**尚未重构的当前代码**。触碰旧代码时以这些为准。R 系列逐步替换后会删除此段。
 
-- **`<div>` 永远是 flex 容器**（默认 `flex-direction: column`）。只有 `div`/`span`/`img`/`button` 标签。→ R1 新围栏替代。
+- **`<div>` 永远是 flex 容器**（默认 `flex-direction: column`）。只有 `div`/`span`/`img`/`button` 标签。→ R1.1 新围栏（fence crate）已完成，core parse 已移除。
 - **`NodeKind` enum + 代际 NodeId**：`NodeId(pub u32)` 对外透明句柄。→ R2 类型化对象树替代。
 - **`FindNodeById` 全局首匹配**。→ R2 组件作用域查找替代。
 - **虚拟列表 = 层 B'（核心不认识"列表"）**：driver 管 slot 映射/可见区间/不等高补偿。reuse_key 是场景级全局命名空间。→ R6 ListView 吸收。
 - **`data-controller/data-page` 私有状态协议**。→ R5 标准 WAI-ARIA 替代。
-- **`display:block` 是 RichText desugar 暗号**。→ R7 正常 HTML 子树替代。
+- **`display:block` 是 RichText desugar 暗号**。→ R1.1 parse 代码已从 core 移除（display:block desugar 随之退役）。
 
-### 围栏（新旧交替期）
+### 围栏
 
-**新围栏**（R1 目标，见 main-design.md §3）：面向游戏 UI 的标准 HTML 子集。围栏外输入打包期报错，不静默降级。单一真相源 = machine-readable schema。防漂移门：`cargo test -p loomgui_core fence_contract`。
+面向游戏 UI 的标准 HTML 子集（30 标签 = 7 shell + 23 runtime）。围栏外输入打包期报错，不静默降级。单一真相源 = crates/fence/src/schema/ Rust const 表。防漂移门：cargo test -p loomgui_fence。权威文档：docs/design/fence.md。
 
-**旧围栏**（当前代码）：`FENCE_TAGS = [div,span,img,button]`。围栏外标签编译期报错；围栏外 CSS 静默忽略（`apply_decl` 返 false）。
+
 
 ## 在本仓库怎么干活
 
