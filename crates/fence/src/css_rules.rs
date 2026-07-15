@@ -353,4 +353,17 @@ mod tests {
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].selector.raw, ".x");
     }
+
+    #[test]
+    fn parse_style_block_preserves_cjk_and_strips_comment() {
+        // UTF-8 safety: 注释 + CJK font-family 都不能被 strip_comments 损坏
+        // （旧的 bytes[i] as char 字节循环会破坏多字节序列）。
+        let (rules, diags) = parse_style_block("/* 注释 */ .x { font-family: \"微软雅黑\" }");
+        assert!(diags.is_empty(), "diags: {diags:?}");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].selector.raw, ".x");
+        assert_eq!(rules[0].declarations.len(), 1);
+        assert_eq!(rules[0].declarations[0].prop, "font-family");
+        assert_eq!(rules[0].declarations[0].value, "\"微软雅黑\"");
+    }
 }

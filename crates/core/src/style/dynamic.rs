@@ -415,9 +415,9 @@ fn propagate_inherited_rec(
     parent_style: Option<ResolvedStyle>,
     set_map: &HashMap<NodeId, InheritedSet>,
 ) {
-    let (my_style, my_base, children) = {
+    let (my_style, children) = {
         let n = scene.get(id).expect("live node");
-        (n.style.clone(), n.base_style.clone(), n.children.clone())
+        (n.style.clone(), n.children.clone())
     };
     // 父 effective = 父传下来的 style 快照（已含父自己的继承结果，因 tree order）
     if let Some(parent_eff) = parent_style {
@@ -431,6 +431,7 @@ fn propagate_inherited_rec(
             };
         }
         copy_if_unset!(font_size, INH_FONT_SIZE);
+        // ponytail: anim text-color override to children dropped (old propagate_color_inheritance had it); restore in Spec-3 when text anim + inheritance interact.
         copy_if_unset!(color, INH_COLOR);
         copy_if_unset!(font_family, INH_FONT_FAMILY);
         copy_if_unset!(font_weight, INH_FONT_WEIGHT);
@@ -451,7 +452,6 @@ fn propagate_inherited_rec(
             propagate_inherited_rec(scene, c, Some(my_style.clone()), set_map);
         }
     }
-    let _ = my_base; // base_style 本 pass 不读（rematch 已用）
 }
 
 /// 比较旧/新级联值的可动画通道；变化的（且 transition 声明覆盖该通道）推入 pending_transitions。
