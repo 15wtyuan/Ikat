@@ -187,32 +187,7 @@ fn v18_all_nodekinds_roundtrip_no_collapse() {
         NodeKind::ListView, NodeKind::ListItem, NodeKind::Slot,
         NodeKind::CustomElement, NodeKind::Canvas,
     ];
-    let nodes: Vec<TemplateNode> = all_kinds
-        .iter()
-        .map(|&k| TemplateNode {
-            kind: k,
-            style: ResolvedStyle::default(),
-            parent_idx: None,
-            classes: vec![],
-            id_attr: None,
-            draggable: false,
-            tabindex: None,
-            data_controller: None,
-            content: None,
-            src: None,
-        })
-        .collect();
-    // 每变体一个组件（组件根 parent_idx=None），便于单独读回核对 kind。
-    let components: Vec<(&str, &[TemplateNode], &DynamicRuleTable, &[ControllerEntry])> = nodes
-        .iter()
-        .enumerate()
-        .map(|(i, n)| {
-            let _ = i;
-            std::slice::from_ref(n)
-        })
-        .collect::<Vec<_>>();
-    // 上面借用生命周期复杂，改用单组件多节点：parent 全 None 会被 nodes[0]=root 断言挡，
-    // 故本测试用一个组件含多个 parent 链。简化：逐变体单独 roundtrip。
+    // 逐变体单独 roundtrip（每变体一个单节点组件，组件根 parent_idx=None）。
     for &k in &all_kinds {
         let one = TemplateNode {
             kind: k,
