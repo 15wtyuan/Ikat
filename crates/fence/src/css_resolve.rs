@@ -202,11 +202,22 @@ mod tests {
         let (tree, _) = parse_html_to_ir(r#"<div style="width:100px"></div>"#);
         let styles = resolve_for_test(&tree);
         let id = tree.roots[0];
+        assert_eq!(
+            styles[id.0].inherited_set.0, 0,
+            "non-inherited width must not set any inherited bit"
+        );
+    }
+
+    #[test]
+    fn inline_font_size_sets_bit() {
+        let (tree, _) = parse_html_to_ir(r#"<div style="font-size:20px"></div>"#);
+        let styles = resolve_for_test(&tree);
+        let id = tree.roots[0];
         let fs_bit = loomgui_core::style::dynamic::inherited_bit("font-size").unwrap();
         assert_eq!(
             styles[id.0].inherited_set.0 & fs_bit,
-            0,
-            "width is not inherited"
+            fs_bit,
+            "inline font-size must set inherited_set FONT_SIZE bit"
         );
     }
 }
