@@ -47,7 +47,9 @@ pub fn pack_components(components: &[(String, String)]) -> Result<(Vec<u8>, Vec<
                 parsed.diagnostics
             ));
         }
-        let (nodes, controllers) = bridge(&parsed)?;
+        // bridge 错误带组件名：多组件包里，否则 "多根" 之类错误无法定位是哪个组件。
+        let (nodes, controllers) =
+            bridge(&parsed).map_err(|e| format!("bridge error in component {name}: {e}"))?;
         built.push((
             name.clone(),
             nodes,
@@ -57,6 +59,14 @@ pub fn pack_components(components: &[(String, String)]) -> Result<(Vec<u8>, Vec<
             controllers,
         ));
         refs.extend(parsed.referenced_sprites);
+    }
+    // 同名组件：write_package 不查（返回 Vec<u8> 无 Result），read_package 运行时才
+    // DupComponent 拒绝——产物是静默坏包。构建期 fail fast，给最早反馈。
+    let mut seen = std::collections::HashSet::new();
+    for (name, _, _, _) in &built {
+        if !seen.insert(name.as_str()) {
+            return Err(format!("duplicate component name `{name}` in package"));
+        }
     }
     let comp_refs: Vec<(&str, &[TemplateNode], &DynamicRuleTable, &[ControllerEntry])> = built
         .iter()
@@ -323,8 +333,27 @@ mod package_tests {
 
     #[test]
     fn pack_components_propagates_bridge_error() {
-        // 多根 → bridge 报错（不静默产森林）
+        // 多根 → bridge 报错（不静默产森林）；错误带组件名定位来源。
         let comps = vec![("bad".to_string(), r#"<div>a</div><div>b</div>"#.to_string())];
-        assert!(pack_components(&comps).is_err());
+        let err = pack_components(&comps).expect_err("multi-root should error");
+        assert!(
+            err.contains("component bad"),
+            "bridge error should name the component: {err}"
+        );
+    }
+
+    #[test]
+    fn pack_components_rejects_duplicate_names() {
+        // 同名组件：write_package 不查（返 Vec<u8> 无 Result），read_package 运行时才
+        // DupComponent 拒绝——产物是静默坏包。pack_components 构建期须 fail fast。
+        let comps = vec![
+            ("dup".to_string(), r#"<div>a</div>"#.to_string()),
+            ("dup".to_string(), r#"<div>b</div>"#.to_string()),
+        ];
+        let err = pack_components(&comps).expect_err("dup names should error");
+        assert!(
+            err.contains("duplicate component name") && err.contains("dup"),
+            "dup-name error should be descriptive: {err}"
+        );
     }
 }

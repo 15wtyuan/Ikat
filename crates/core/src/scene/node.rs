@@ -173,6 +173,39 @@ impl NodeKind {
     }
 }
 
+/// 编译期穷尽 guard：给 NodeKind 加变体却忘更新 `NodeKind::from_u8` 的 match，会让新变体
+/// 静默映射到 None（→ `PkgError::BadKind` 反序列化失败）。此未被调用的 fn 内的穷尽 match
+/// 强制加变体时同步触碰 from_u8，把静默运行时失败转成编译错。
+const _: () = {
+    fn _assert_from_u8_exhaustive(k: NodeKind) {
+        match k {
+            NodeKind::Container
+            | NodeKind::TextNode
+            | NodeKind::TextBlock
+            | NodeKind::TextElement
+            | NodeKind::LineBreak
+            | NodeKind::Label
+            | NodeKind::Button
+            | NodeKind::Link
+            | NodeKind::Image
+            | NodeKind::TextField
+            | NodeKind::NumberField
+            | NodeKind::Slider
+            | NodeKind::Toggle
+            | NodeKind::RadioButton
+            | NodeKind::TextArea
+            | NodeKind::Dropdown
+            | NodeKind::OptionItem
+            | NodeKind::ProgressBar
+            | NodeKind::ListView
+            | NodeKind::ListItem
+            | NodeKind::Slot
+            | NodeKind::CustomElement
+            | NodeKind::Canvas => {}
+        }
+    }
+};
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Rect {
     pub x: f32,

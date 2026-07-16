@@ -39,8 +39,10 @@ pub fn bridge(
         }
         // parent 总在 child 之前 push（tree_builder DFS），故此处 parent 的 tpl_idx 已知。
         let parent_tpl = node.parent.and_then(|pid| ir_to_tpl[pid.0]);
-        let style = parsed.styles.get(ir_idx).cloned().unwrap_or_default();
         match &node.kind {
+            // Comment/Doctype 不进实例化树——在 clone ResolvedStyle 前跳过，避免对
+            // 被丢弃节点做无谓的大结构 clone。
+            IrNodeKind::Comment(_) | IrNodeKind::Doctype { .. } => continue,
             IrNodeKind::Element(el) => {
                 let kind = map_semantic(el)?;
                 let tpl_idx = nodes.len();
@@ -52,7 +54,7 @@ pub fn bridge(
                 };
                 nodes.push(TemplateNode {
                     kind,
-                    style,
+                    style: parsed.styles.get(ir_idx).cloned().unwrap_or_default(),
                     parent_idx: parent_tpl,
                     classes: extract_classes(el),
                     id_attr: attr(el, "id"),
@@ -69,7 +71,7 @@ pub fn bridge(
                 ir_to_tpl[ir_idx] = Some(tpl_idx);
                 nodes.push(TemplateNode {
                     kind: NodeKind::TextNode,
-                    style,
+                    style: parsed.styles.get(ir_idx).cloned().unwrap_or_default(),
                     parent_idx: parent_tpl,
                     classes: vec![],
                     id_attr: None,
@@ -80,7 +82,6 @@ pub fn bridge(
                     src: None,
                 });
             }
-            IrNodeKind::Comment(_) | IrNodeKind::Doctype { .. } => continue,
         }
     }
     // 根被 <template> 包裹（或全 Comment/Doctype）会让 nodes 空——write_package 产 0 节点
