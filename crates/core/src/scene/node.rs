@@ -5,7 +5,31 @@
 //! `clip_rect`/`dirty_*`。本模块只管建树 + 初始脏标志。
 
 use crate::style::resolved::{OverflowMode, ResolvedStyle};
+use serde::{Deserialize, Serialize};
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
+
+bitflags::bitflags! {
+    /// Pseudo-class source flags + cascade gate, packed into a single byte for cache locality.
+    /// Only process + rematch passes touch these; solve/world/build skip entirely.
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct NodeFlags: u8 {
+        const HOVERED  = 1 << 0;
+        const ACTIVE   = 1 << 1;
+        const FOCUSED  = 1 << 2;
+        const DISABLED = 1 << 3;
+        const CASCALED = 1 << 4;
+    }
+}
+
+/// Interaction state grouped for cache locality — only process + rematch passes read/write.
+/// solve/world_transforms/build passes never touch these fields.
+#[derive(Debug, Clone, Default)]
+pub struct NodeInteraction {
+    pub flags: NodeFlags,
+    pub touchable: bool,
+    pub draggable: bool,
+    pub tabindex: Option<i32>,
+}
 
 /// 不透明节点句柄。对外 u32（FFI/C# 透明），内部 = 高 20 bit index + 低 12 bit generation。
 /// sentinel 0xFFFF_FFFF = INVALID。index 用于并行数组（anim/scroll/world_transforms）索引，

@@ -1,4 +1,11 @@
 use serde::{Deserialize, Serialize};
+
+/// Tracks which inherited CSS properties were explicitly declared (set-ness bitmask).
+/// Each bit corresponds to one inheritable property (see INH_* constants in dynamic.rs).
+/// Baked at package time into base_style; rematch reads it as the per-frame inheritance baseline.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InheritedSet(pub u16);
+
 use taffy::style::LengthPercentage;
 use taffy::style::Style as TaffyStyle;
 use taffy::FlexDirection;
