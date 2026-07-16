@@ -40,6 +40,7 @@ pub(crate) const BOX_SHADOW_FLAG: u32 = 0x1000_0000;
 /// synth_text_node_id 编码后 high byte = (1000 + idx) & 0xFF = 232..=255，不与跨页子页
 /// （1..=15）或 BOX_SHADOW_FLAG（high byte 16）撞——靠 `inline_image_pairs` 显式配对
 /// 传播 sort_key，不凭 high byte 判别。
+#[allow(dead_code)] // RichText retired in Spec-2; kept for compound-bundle text model.
 pub(crate) const INLINE_IMG_SYNTH_ID_BASE: u32 = 1000;
 
 /// Font-atlas image_path for a given page index. Consumed verbatim by the
@@ -272,11 +273,11 @@ pub fn build_render_nodes(
     // 先剪 display:none 子树——display:none 节点 + 后代不产 RenderNode（CSS 语义）。
     let pruned = collect_display_none_subtree(scene);
     let mut nodes: Vec<RenderNode> = Vec::new();
-    let mut rich_fragments: Vec<(u32, Vec<crate::text::rich::RichFragment>)> = Vec::new();
+    let rich_fragments: Vec<(u32, Vec<crate::text::rich::RichFragment>)> = Vec::new();
     // box-shadow 独立 RenderNode 追踪：(主节点 node_id, 阴影合成 node_id)。
     let mut shadow_pairs: Vec<(u32, u32)> = Vec::new();
     // 富文本行内图 RenderNode 追踪：(主节点 node_id, 行内图合成 node_id)。
-    let mut inline_image_pairs: Vec<(u32, u32)> = Vec::new();
+    let inline_image_pairs: Vec<(u32, u32)> = Vec::new();
     for n in scene.nodes.values() {
         if pruned.contains(&n.id) {
             continue;

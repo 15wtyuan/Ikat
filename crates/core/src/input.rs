@@ -480,7 +480,9 @@ impl PointerState {
             let slot = &mut self.slots[i];
             if slot.is_down && !slot.longpress_fired && !slot.longpress_cancelled {
                 if let Some(n) = slot.down_node {
-                    if scene.get(n).is_some_and(|node| !node.interaction.flags.contains(NodeFlags::DISABLED))
+                    if scene
+                        .get(n)
+                        .is_some_and(|node| !node.interaction.flags.contains(NodeFlags::DISABLED))
                         && time_s - slot.down_time >= LONGPRESS_TRIGGER
                     {
                         slot.longpress_fired = true;
@@ -703,9 +705,10 @@ impl PointerState {
                         .down_targets
                         .iter()
                         .find(|&&n| {
-                            scene
-                                .get(n)
-                                .is_some_and(|node| node.interaction.draggable && !node.interaction.flags.contains(NodeFlags::DISABLED))
+                            scene.get(n).is_some_and(|node| {
+                                node.interaction.draggable
+                                    && !node.interaction.flags.contains(NodeFlags::DISABLED)
+                            })
                         })
                         .copied();
                     slot.drag_testing = slot.drag_target.is_some();
@@ -754,7 +757,8 @@ impl PointerState {
                         .iter()
                         .find(|&&n| {
                             scene.get(n).is_some_and(|node| {
-                                !node.interaction.flags.contains(NodeFlags::DISABLED) && matches!(node.interaction.tabindex, Some(t) if t >= 0)
+                                !node.interaction.flags.contains(NodeFlags::DISABLED)
+                                    && matches!(node.interaction.tabindex, Some(t) if t >= 0)
                             })
                         })
                         .copied();
@@ -762,7 +766,9 @@ impl PointerState {
                         focus_node(scene, Some(t), &mut out);
                     }
                     if let Some(n) = hit {
-                        if scene.get(n).is_some_and(|node| !node.interaction.flags.contains(NodeFlags::DISABLED)) {
+                        if scene.get(n).is_some_and(|node| {
+                            !node.interaction.flags.contains(NodeFlags::DISABLED)
+                        }) {
                             out.push(EventRecord {
                                 node_id: n.0,
                                 event_type: EVT_DOWN,
@@ -810,7 +816,9 @@ impl PointerState {
                     // grip_dragging 时 hit 为 sentinel（scene.nodes 越界），跳过 EVT_UP/EVT_CLICK（grip Up 不产这些事件）。
                     if !slot.grip_dragging {
                         if let Some(n) = hit {
-                            if scene.get(n).is_some_and(|node| !node.interaction.flags.contains(NodeFlags::DISABLED)) {
+                            if scene.get(n).is_some_and(|node| {
+                                !node.interaction.flags.contains(NodeFlags::DISABLED)
+                            }) {
                                 out.push(EventRecord {
                                     node_id: n.0,
                                     event_type: EVT_UP,
@@ -821,7 +829,9 @@ impl PointerState {
                                     y: ev.y,
                                 });
                                 if let Some(target) = Self::click_test(slot, scene, hit) {
-                                    if scene.get(target).is_some_and(|node| !node.interaction.flags.contains(NodeFlags::DISABLED)) {
+                                    if scene.get(target).is_some_and(|node| {
+                                        !node.interaction.flags.contains(NodeFlags::DISABLED)
+                                    }) {
                                         let count = Self::bump_click_count(slot, ev.button, time_s);
                                         out.push(EventRecord {
                                             node_id: target.0,

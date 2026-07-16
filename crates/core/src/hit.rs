@@ -216,8 +216,12 @@ mod tests {
         let mut s = overlap_scene();
         compute_world_transforms(&mut s);
         let (_root, _a, b) = overlap_ids(&s);
-        s.get_mut(b).unwrap().interaction.flags.insert(NodeFlags::DISABLED); // b disabled
-                                               // 点 (75,75) 在 b 内——b 仍命中（disabled 不跳过）
+        s.get_mut(b)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::DISABLED); // b disabled
+                                          // 点 (75,75) 在 b 内——b 仍命中（disabled 不跳过）
         assert_eq!(hit_test(&s, (75.0, 75.0)), Some(b));
     }
 

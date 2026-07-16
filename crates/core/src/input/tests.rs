@@ -77,13 +77,28 @@ fn hover_text_child_sets_ancestor_btn_hovered() {
             touch_id: -1,
         }],
     );
-    assert!(s.get(txt_id).unwrap().interaction.flags.contains(NodeFlags::HOVERED), "Text 子（命中点）hovered");
     assert!(
-        s.get(btn_id).unwrap().interaction.flags.contains(NodeFlags::HOVERED),
+        s.get(txt_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::HOVERED),
+        "Text 子（命中点）hovered"
+    );
+    assert!(
+        s.get(btn_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::HOVERED),
         "btn（Text 的祖先）也 hovered——祖先链"
     );
     assert!(
-        s.get(root_id).unwrap().interaction.flags.contains(NodeFlags::HOVERED),
+        s.get(root_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::HOVERED),
         "root（btn 的祖先）也 hovered——祖先链"
     );
 }
@@ -107,9 +122,20 @@ fn down_text_child_sets_ancestor_btn_active() {
             touch_id: -1,
         }],
     );
-    assert!(s.get(txt_id).unwrap().interaction.flags.contains(NodeFlags::ACTIVE), "Text 子（命中点）active");
     assert!(
-        s.get(btn_id).unwrap().interaction.flags.contains(NodeFlags::ACTIVE),
+        s.get(txt_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::ACTIVE),
+        "Text 子（命中点）active"
+    );
+    assert!(
+        s.get(btn_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::ACTIVE),
         "btn（Text 祖先）也 active——祖先链"
     );
     // up 后清所有 active
@@ -124,8 +150,22 @@ fn down_text_child_sets_ancestor_btn_active() {
             touch_id: -1,
         }],
     );
-    assert!(!s.get(btn_id).unwrap().interaction.flags.contains(NodeFlags::ACTIVE), "up 后 btn active 清零");
-    assert!(!s.get(txt_id).unwrap().interaction.flags.contains(NodeFlags::ACTIVE), "up 后 Text active 清零");
+    assert!(
+        !s.get(btn_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::ACTIVE),
+        "up 后 btn active 清零"
+    );
+    assert!(
+        !s.get(txt_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::ACTIVE),
+        "up 后 Text active 清零"
+    );
 }
 
 #[test]
@@ -166,8 +206,22 @@ fn down_up_same_node_within_threshold_emits_click() {
     assert!(types.contains(&EVT_UP));
     assert!(types.contains(&EVT_CLICK), "同节点位移 <10px → Click");
     let btn_id = s.get(s.roots[0]).unwrap().children[0];
-    assert!(!s.get(btn_id).unwrap().interaction.flags.contains(NodeFlags::ACTIVE), "Up 后 active=false");
-    assert!(s.get(btn_id).unwrap().interaction.flags.contains(NodeFlags::HOVERED), "hover 保持");
+    assert!(
+        !s.get(btn_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::ACTIVE),
+        "Up 后 active=false"
+    );
+    assert!(
+        s.get(btn_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::HOVERED),
+        "hover 保持"
+    );
 }
 
 #[test]
@@ -201,7 +255,11 @@ fn down_up_exceeds_threshold_no_click() {
 fn down_on_disabled_node_no_active_no_click() {
     let mut s = one_button_scene();
     let btn_id = s.get(s.roots[0]).unwrap().children[0];
-    s.get_mut(btn_id).unwrap().interaction.flags.insert(NodeFlags::DISABLED);
+    s.get_mut(btn_id)
+        .unwrap()
+        .interaction
+        .flags
+        .insert(NodeFlags::DISABLED);
     let mut ps = PointerState::new();
     let evs = vec![
         PointerEvent {
@@ -223,7 +281,11 @@ fn down_on_disabled_node_no_active_no_click() {
     ];
     let out = ps.process(&mut s, &evs);
     assert!(
-        !s.get(btn_id).unwrap().interaction.flags.contains(NodeFlags::ACTIVE),
+        !s.get(btn_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::ACTIVE),
         "disabled 节点 down 不设 active"
     );
     let has_click = out.iter().any(|e| e.event_type == EVT_CLICK);
@@ -240,7 +302,11 @@ fn down_held_on_disabled_no_active() {
     let mut s = one_button_scene();
     let root_id = s.roots[0];
     let btn_id = s.get(root_id).unwrap().children[0];
-    s.get_mut(btn_id).unwrap().interaction.flags.insert(NodeFlags::DISABLED);
+    s.get_mut(btn_id)
+        .unwrap()
+        .interaction
+        .flags
+        .insert(NodeFlags::DISABLED);
     let mut ps = PointerState::new();
     ps.process(
         &mut s,
@@ -254,11 +320,19 @@ fn down_held_on_disabled_no_active() {
         }],
     );
     assert!(
-        !s.get(btn_id).unwrap().interaction.flags.contains(NodeFlags::ACTIVE),
+        !s.get(btn_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::ACTIVE),
         "按住 disabled btn 不应 active（active 抑制）"
     );
     assert!(
-        !s.get(root_id).unwrap().interaction.flags.contains(NodeFlags::ACTIVE),
+        !s.get(root_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::ACTIVE),
         "disabled 祖先 root 也不应 active"
     );
 }
@@ -270,7 +344,11 @@ fn down_held_on_disabled_via_text_child_no_active() {
     // disabled 祖先——须沿链逐节点查 disabled，不只查 down_node。
     let mut s = button_with_text_child_scene(); // root + btn + Text 挡 btn 上半
     let btn_id = s.get(s.roots[0]).unwrap().children[0];
-    s.get_mut(btn_id).unwrap().interaction.flags.insert(NodeFlags::DISABLED);
+    s.get_mut(btn_id)
+        .unwrap()
+        .interaction
+        .flags
+        .insert(NodeFlags::DISABLED);
     let mut ps = PointerState::new();
     ps.process(
         &mut s,
@@ -285,7 +363,11 @@ fn down_held_on_disabled_via_text_child_no_active() {
     );
     // (10,10) 命中 Text 子（Text @0,0,100,20 挡 btn 上半——hover_text_child_sets_ancestor_btn_hovered 已验）
     assert!(
-        !s.get(btn_id).unwrap().interaction.flags.contains(NodeFlags::ACTIVE),
+        !s.get(btn_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::ACTIVE),
         "按下 disabled btn 的 Text 子 → btn 不应 active（链遍历逐节点查 disabled）"
     );
 }
@@ -346,14 +428,26 @@ fn hover_diff_no_move_event_still_runs() {
             touch_id: -1,
         }],
     );
-    assert!(s.get(btn_id).unwrap().interaction.flags.contains(NodeFlags::HOVERED));
+    assert!(s
+        .get(btn_id)
+        .unwrap()
+        .interaction
+        .flags
+        .contains(NodeFlags::HOVERED));
     // 空事件——hover 应保持（无 RollOut）
     let out = ps.process(&mut s, &[]);
     assert!(
         !out.iter().any(|e| e.event_type == EVT_ROLL_OUT),
         "空事件 hover 保持"
     );
-    assert!(s.get(btn_id).unwrap().interaction.flags.contains(NodeFlags::HOVERED), "hover 仍 true");
+    assert!(
+        s.get(btn_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::HOVERED),
+        "hover 仍 true"
+    );
 }
 
 #[test]
@@ -856,8 +950,22 @@ fn hover_global_merge_two_fingers() {
             }, // 命中 B
         ],
     );
-    assert!(s.get(a_id).unwrap().interaction.flags.contains(NodeFlags::HOVERED), "A hovered（touch1 命中）");
-    assert!(s.get(b_id).unwrap().interaction.flags.contains(NodeFlags::HOVERED), "B hovered（touch2 命中）");
+    assert!(
+        s.get(a_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::HOVERED),
+        "A hovered（touch1 命中）"
+    );
+    assert!(
+        s.get(b_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::HOVERED),
+        "B hovered（touch2 命中）"
+    );
 }
 
 /// active 全局合并：两指按不同 btn → 都 active；松一指 → 剩余仍 active。
@@ -914,7 +1022,16 @@ fn active_global_merge_two_fingers() {
         ],
     );
     assert!(
-        s.get(a_id).unwrap().interaction.flags.contains(NodeFlags::ACTIVE) && s.get(b_id).unwrap().interaction.flags.contains(NodeFlags::ACTIVE),
+        s.get(a_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::ACTIVE)
+            && s.get(b_id)
+                .unwrap()
+                .interaction
+                .flags
+                .contains(NodeFlags::ACTIVE),
         "两指都按 → 两 btn active"
     );
     // 松 touch1
@@ -929,8 +1046,22 @@ fn active_global_merge_two_fingers() {
             touch_id: 1,
         }],
     );
-    assert!(!s.get(a_id).unwrap().interaction.flags.contains(NodeFlags::ACTIVE), "松 touch1 → A active 清");
-    assert!(s.get(b_id).unwrap().interaction.flags.contains(NodeFlags::ACTIVE), "touch2 仍按 → B 仍 active");
+    assert!(
+        !s.get(a_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::ACTIVE),
+        "松 touch1 → A active 清"
+    );
+    assert!(
+        s.get(b_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::ACTIVE),
+        "touch2 仍按 → B 仍 active"
+    );
 }
 
 /// RollOver per-touch：touch1 进 A、touch2 进 B，各自 RollOver 带 touch_id。
@@ -1783,7 +1914,14 @@ fn stationary_cursor_hover_follows_moved_element() {
             touch_id: -1,
         }],
     );
-    assert!(s1.get(s1_btn_id).unwrap().interaction.flags.contains(NodeFlags::HOVERED), "Move@btn → btn hovered");
+    assert!(
+        s1.get(s1_btn_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::HOVERED),
+        "Move@btn → btn hovered"
+    );
     // scene2：btn 移到 (150,150)——(50,50) 现仅 root
     let mut root2 = Node::default();
     root2.layout_rect = Rect {
@@ -2130,7 +2268,11 @@ fn drag_target_is_nearest_draggable_ancestor() {
 fn drag_disabled_node_no_drag() {
     let mut s = one_draggable_button_scene();
     let btn_id = s.get(s.roots[0]).unwrap().children[0];
-    s.get_mut(btn_id).unwrap().interaction.flags.insert(NodeFlags::DISABLED); // draggable 但 disabled
+    s.get_mut(btn_id)
+        .unwrap()
+        .interaction
+        .flags
+        .insert(NodeFlags::DISABLED); // draggable 但 disabled
     let mut ps = PointerState::new();
     let out = ps.process(
         &mut s,
@@ -2407,7 +2549,11 @@ fn longpress_independent_of_click() {
 fn longpress_disabled_node_no_fire() {
     let mut s = one_button_scene();
     let btn_id = s.get(s.roots[0]).unwrap().children[0];
-    s.get_mut(btn_id).unwrap().interaction.flags.insert(NodeFlags::DISABLED);
+    s.get_mut(btn_id)
+        .unwrap()
+        .interaction
+        .flags
+        .insert(NodeFlags::DISABLED);
     let mut ps = PointerState::new();
     ps.time_s = 0.0;
     ps.process(
@@ -2472,12 +2618,33 @@ fn focus_node_emits_focusout_then_focusin() {
     let mut out = Vec::new();
     // 先聚焦 A
     focus_node(&mut s, Some(a_id), &mut out);
-    assert!(s.get(a_id).unwrap().interaction.flags.contains(NodeFlags::FOCUSED), "A focused=true");
+    assert!(
+        s.get(a_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::FOCUSED),
+        "A focused=true"
+    );
     assert_eq!(s.focused_node, Some(a_id));
     // 聚焦 B → FocusOut@A + FocusIn@B
     focus_node(&mut s, Some(b_id), &mut out);
-    assert!(!s.get(a_id).unwrap().interaction.flags.contains(NodeFlags::FOCUSED), "A focused=false（失焦）");
-    assert!(s.get(b_id).unwrap().interaction.flags.contains(NodeFlags::FOCUSED), "B focused=true");
+    assert!(
+        !s.get(a_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::FOCUSED),
+        "A focused=false（失焦）"
+    );
+    assert!(
+        s.get(b_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::FOCUSED),
+        "B focused=true"
+    );
     assert_eq!(s.focused_node, Some(b_id));
     // out 含 [FocusIn@A, FocusOut@A, FocusIn@B]
     assert!(
@@ -2516,7 +2683,12 @@ fn focus_node_clear_blur() {
     focus_node(&mut s, Some(a_id), &mut out);
     focus_node(&mut s, None, &mut out); // 清焦点
     assert_eq!(s.focused_node, None);
-    assert!(!s.get(a_id).unwrap().interaction.flags.contains(NodeFlags::FOCUSED));
+    assert!(!s
+        .get(a_id)
+        .unwrap()
+        .interaction
+        .flags
+        .contains(NodeFlags::FOCUSED));
     assert!(
         out.iter()
             .any(|e| e.event_type == EVT_FOCUS_OUT && e.node_id == a_id.0),
@@ -2537,7 +2709,11 @@ fn tab_chain_scene() -> Scene {
         let mut n = Node::default();
         n.kind = NodeKind::Button;
         n.interaction.tabindex = ti;
-        if disabled { n.interaction.flags.insert(NodeFlags::DISABLED); } else { n.interaction.flags.remove(NodeFlags::DISABLED); }
+        if disabled {
+            n.interaction.flags.insert(NodeFlags::DISABLED);
+        } else {
+            n.interaction.flags.remove(NodeFlags::DISABLED);
+        }
         n.layout_rect = Rect {
             x: id as f32 * 50.0,
             y: 0.0,
@@ -2842,7 +3018,11 @@ fn click_disabled_focusable_no_focus() {
     // disabled 可聚焦节点 → pointer-down 不聚焦
     let mut s = two_focusable_scene();
     let a_id = s.get(s.roots[0]).unwrap().children[0];
-    s.get_mut(a_id).unwrap().interaction.flags.insert(NodeFlags::DISABLED); // A disabled（tabindex=0）
+    s.get_mut(a_id)
+        .unwrap()
+        .interaction
+        .flags
+        .insert(NodeFlags::DISABLED); // A disabled（tabindex=0）
     let mut ps = PointerState::new();
     let out = ps.process(
         &mut s,

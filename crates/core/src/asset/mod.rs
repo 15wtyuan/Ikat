@@ -154,7 +154,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         Vec::new();
     // RichText runs arena：所有 RichText 节点的 runs bincode blob 拼接，每段前缀 u32 len。
     // NodeBlock 的 rich_off 字段指向此 arena 的字节偏移。非 RichText 节点用 NULL_RICH_OFF 哨兵。
-    let mut rich_runs_arena: Vec<u8> = Vec::new();
+    let rich_runs_arena: Vec<u8> = Vec::new();
     let mut global_node_offset: u32 = 0;
     for (name, nodes, dynamic_rules, controllers) in &input.components {
         let name_idx = intern(name, &mut strings, &mut idx_of);
@@ -353,7 +353,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
     // RichRunsArena: arena_len(u32) + arena_bytes。需在 NodeBlock 解析前读出——
     // KIND_RICHTEXT 节点按 rich_off 查 arena 取 runs blob。
     let rich_arena_len = r.u32("rich_arena_len")? as usize;
-    let rich_runs_arena: &[u8] = r.take(rich_arena_len, "rich_runs_arena")?;
+    let _rich_runs_arena: &[u8] = r.take(rich_arena_len, "rich_runs_arena")?;
     // NodeBlock → TemplateNode（平铺，parent_idx 存盘是全局位置；读后转回组件内局部）
     let mut all_nodes: Vec<TemplateNode> = Vec::with_capacity(total_nodes as usize);
     for _ in 0..total_nodes {
@@ -391,7 +391,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             Some(string_at(&strings, dc_idx)?)
         };
         // rich_off：NULL_RICH_OFF=0xFFFF_FFFF 表非 RichText 节点；否则指向 rich_runs_arena 偏移。
-        let rich_off = r.u32("rich_off")?;
+        let _rich_off = r.u32("rich_off")?;
         // 存盘 parent_idx 是 NodeBlock 全局位置（-1=组件根）；先存全局，待切分组件时减 base 转局部
         let parent_global = if pidx < 0 { None } else { Some(pidx as usize) };
         let (kind, content, src) = match kind_tag {

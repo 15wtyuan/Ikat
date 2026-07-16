@@ -1,6 +1,5 @@
 //! 整树 JSON dump（调试用）。
 use crate::scene::node::{NodeKind, Scene};
-use crate::text::rich::RichKind;
 
 /// JSON 字符串转义：处理 `"` → `\"`、`\` → `\\`、控制字符 → `\uXXXX`。
 pub fn json_escape(s: &str) -> String {

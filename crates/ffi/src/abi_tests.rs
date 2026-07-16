@@ -15,6 +15,8 @@ fn make_test_pkg_bytes(component: &str) -> Vec<u8> {
         draggable: false,
         tabindex: None,
         data_controller: None,
+        content: None,
+        src: None,
     }];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -319,6 +321,8 @@ fn find_node_by_id_round_trip() {
         draggable: false,
         tabindex: None,
         data_controller: None,
+        content: None,
+        src: None,
     }];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let pkg = loomgui_core::asset::write_package(&PackageInput {
@@ -441,6 +445,8 @@ fn build_scroll_stage() -> Stage {
         false,
         None::<i32>,
         None::<String>,
+        None::<String>,
+        None::<String>,
     )];
     stage.scene = Some(Scene::build(&entries));
     let scene = stage.scene.as_mut().unwrap();
@@ -516,6 +522,8 @@ fn set_scroll_pos_non_container_no_op() {
         None::<String>,
         false,
         None::<i32>,
+        None::<String>,
+        None::<String>,
         None::<String>,
     )];
     stage.scene = Some(Scene::build(&entries));

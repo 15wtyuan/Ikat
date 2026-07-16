@@ -168,11 +168,11 @@ pub struct Node {
     /// 打包期烘焙的 style（不变，rematch 基线）。style 是运行时 rematch 覆写值。
     pub base_style: ResolvedStyle,
     /// 运行时 class 列表（建树时从 ElementData.classes 填；供动态规则 class 选择器匹配）。
-   pub classes: Vec<String>,
-   /// 运行时 id（建树时从 ElementData.id 填；供动态规则 id 选择器匹配）。
+    pub classes: Vec<String>,
+    /// 运行时 id（建树时从 ElementData.id 填；供动态规则 id 选择器匹配）。
     pub id_attr: Option<String>,
-   pub interaction: NodeInteraction,
-   pub reuse_key: u32,
+    pub interaction: NodeInteraction,
+    pub reuse_key: u32,
     pub data_controller: Option<String>,
 }
 
@@ -193,9 +193,9 @@ impl Default for Node {
             dirty_mesh: true,
             dirty_text: false,
             base_style: ResolvedStyle::default(),
-           classes: Vec::new(),
+            classes: Vec::new(),
             id_attr: None,
-           interaction: NodeInteraction {
+            interaction: NodeInteraction {
                 flags: NodeFlags::empty(),
                 touchable: true,
                 draggable: false,
@@ -351,17 +351,27 @@ impl Scene {
             ResolvedStyle,
             Vec<String>,
             Option<String>,
-           bool,
-           Option<i32>,
-           Option<String>,
+            bool,
+            Option<i32>,
             Option<String>,
             Option<String>,
-       )],
-   ) -> Scene {
-       let mut scene = Scene::default();
+            Option<String>,
+        )],
+    ) -> Scene {
+        let mut scene = Scene::default();
         let mut ids: Vec<NodeId> = Vec::with_capacity(entries.len());
-        for (_, kind, style, classes, id_attr, draggable, tabindex, data_controller, content, src) in
-            entries.iter()
+        for (
+            _,
+            kind,
+            style,
+            classes,
+            id_attr,
+            draggable,
+            tabindex,
+            data_controller,
+            content,
+            src,
+        ) in entries.iter()
         {
             let node = Node {
                 id: NodeId::INVALID, // 临时，insert 后回填
@@ -388,9 +398,9 @@ impl Scene {
                     touchable: style.touchable,
                     draggable: *draggable,
                     tabindex: *tabindex,
-                    },
-                    reuse_key: 0,
-                    data_controller: data_controller.clone(),
+                },
+                reuse_key: 0,
+                data_controller: data_controller.clone(),
             };
             let key = scene.nodes.insert(node);
             let id = NodeId::from_key(key);

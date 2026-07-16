@@ -329,16 +329,16 @@ fn build_skips_display_none_subtree() {
         Some([0.0, 1.0, 0.0, 1.0]),
     );
     child.style.taffy_style.display = taffy::Display::None;
-   let mut grandchild = Node::default();
-   grandchild.kind = NodeKind::TextNode;
-   grandchild.layout_rect = Rect {
+    let mut grandchild = Node::default();
+    grandchild.kind = NodeKind::TextNode;
+    grandchild.layout_rect = Rect {
         x: 0.0,
         y: 0.0,
         w: 50.0,
         h: 20.0,
     };
     // from_nodes 用 edges (parent_idx, child_idx) 按 vec 位置建 parent 关系。
-   let mut scene = Scene::from_nodes(vec![parent, child, grandchild], vec![(0, 1), (1, 2)]);
+    let mut scene = Scene::from_nodes(vec![parent, child, grandchild], vec![(0, 1), (1, 2)]);
     // grandchild 在 display:none 子树内（不渲染），但仍需注册 text_contents。
     let _root = scene.roots[0];
     let _mid = scene.get(_root).unwrap().children[0];
@@ -376,7 +376,9 @@ fn image_render_node_carries_path_not_texid() {
         h: 5.0,
     };
     let mut scene = Scene::from_nodes(vec![a], vec![]);
-    scene.image_srcs.insert(scene.roots[0], "icons/skin.png".into());
+    scene
+        .image_srcs
+        .insert(scene.roots[0], "icons/skin.png".into());
     let fonts = test_font_table().expect("need test font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
@@ -555,17 +557,17 @@ fn build_text_produces_text_layout() {
             return;
         }
     };
-   let mut n = Node::default();
-   n.kind = NodeKind::TextNode;
-   n.style.font_size = 16.0;
-   n.style.text_align = TextAlign::Left;
+    let mut n = Node::default();
+    n.kind = NodeKind::TextNode;
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
     n.layout_rect = Rect {
         x: 0.0,
         y: 0.0,
         w: 100.0,
         h: 20.0,
     };
-   let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
     scene.text_contents.insert(scene.roots[0], "Hello".into());
 
     crate::scene::transform::compute_world_transforms(&mut scene);
@@ -611,10 +613,10 @@ fn build_text_bakes_content_offset_into_glyph_pen() {
             return;
         }
     };
-   let mut n = Node::default();
-   n.kind = NodeKind::TextNode;
-   n.style.font_size = 16.0;
-   // padding/border 四向 4px/2px → content 偏移 left=2+4=6, top=2+4=6。
+    let mut n = Node::default();
+    n.kind = NodeKind::TextNode;
+    n.style.font_size = 16.0;
+    // padding/border 四向 4px/2px → content 偏移 left=2+4=6, top=2+4=6。
     n.style.taffy_style.padding = taffy::geometry::Rect {
         left: taffy::style::LengthPercentage::Length(4.0),
         right: taffy::style::LengthPercentage::Length(4.0),
@@ -633,7 +635,7 @@ fn build_text_bakes_content_offset_into_glyph_pen() {
         w: 100.0,
         h: 20.0,
     };
-   let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
     scene.text_contents.insert(scene.roots[0], "AB".into());
 
     crate::scene::transform::compute_world_transforms(&mut scene);
@@ -681,13 +683,13 @@ fn build_text_verts_in_world_space_and_upright() {
     n.kind = NodeKind::TextNode;
     n.style.font_size = 16.0;
     n.style.text_align = TextAlign::Left;
-   n.layout_rect = Rect {
-       x: 100.0,
-       y: 200.0,
-       w: 100.0,
-       h: 20.0,
-   };
-   let mut scene = Scene::from_nodes(vec![n], vec![]);
+    n.layout_rect = Rect {
+        x: 100.0,
+        y: 200.0,
+        w: 100.0,
+        h: 20.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
     scene.text_contents.insert(scene.roots[0], "Hello".into());
     crate::scene::transform::compute_world_transforms(&mut scene);
     // root 节点：layout_rect 即 world translate → wm 平移 (100,200)。
@@ -752,16 +754,16 @@ fn build_text_snaps_quad_to_integer_pixel() {
         }
     };
     let mut n = Node::default();
-   n.kind = NodeKind::TextNode;
-   n.style.font_size = 16.0;
-   // 模拟 flex 居中算出的亚像素原点（80×60 容器内文字居中 → 非整数起点）。
+    n.kind = NodeKind::TextNode;
+    n.style.font_size = 16.0;
+    // 模拟 flex 居中算出的亚像素原点（80×60 容器内文字居中 → 非整数起点）。
     n.layout_rect = Rect {
         x: 24.75,
         y: 40.5,
         w: 100.0,
         h: 20.0,
     };
-   let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
     scene.text_contents.insert(scene.roots[0], "Hello".into());
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
@@ -942,8 +944,8 @@ fn build_text_skips_blank_glyphs_like_space() {
         }
     };
     let mut n = Node::default();
-   n.kind = NodeKind::TextNode;
-   n.style.font_size = 16.0;
+    n.kind = NodeKind::TextNode;
+    n.style.font_size = 16.0;
     n.style.text_align = TextAlign::Left;
     n.layout_rect = Rect {
         x: 0.0,
@@ -951,7 +953,7 @@ fn build_text_skips_blank_glyphs_like_space() {
         w: 100.0,
         h: 20.0,
     };
-   let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
     scene.text_contents.insert(scene.roots[0], "A B".into());
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
@@ -1151,8 +1153,8 @@ fn effective_scroll_container_emits_thumb_node() {
         bool,
         Option<i32>,
         Option<String>,
-    Option<String>,
-    Option<String>,
+        Option<String>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -2458,8 +2460,8 @@ fn text_sub_pages_reuse_key_is_zero_not_inherited() {
         }
     };
     let mut n = Node::default();
-   n.kind = NodeKind::TextNode;
-   n.reuse_key = 7; // 模拟虚拟列表 slot
+    n.kind = NodeKind::TextNode;
+    n.reuse_key = 7; // 模拟虚拟列表 slot
     n.style.font_size = 16.0;
     n.style.text_align = TextAlign::Left;
     n.layout_rect = Rect {
@@ -2468,7 +2470,7 @@ fn text_sub_pages_reuse_key_is_zero_not_inherited() {
         w: 100.0,
         h: 20.0,
     };
-   let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
     scene.text_contents.insert(scene.roots[0], "Hello".into());
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
@@ -2926,10 +2928,10 @@ fn gradient_text_spans_whole_text_not_per_glyph() {
         }
     };
     let mut n = Node::default();
-   n.kind = NodeKind::TextNode;
-   n.style.font_size = 16.0;
-   n.style.text_align = TextAlign::Left;
-   n.style.background_clip_text = true;
+    n.kind = NodeKind::TextNode;
+    n.style.font_size = 16.0;
+    n.style.text_align = TextAlign::Left;
+    n.style.background_clip_text = true;
     n.style.background_gradient = Some(Gradient2 {
         color_a: [1.0, 0.0, 0.0, 1.0], // 红（左端）
         color_b: [0.0, 1.0, 0.0, 1.0], // 绿（右端）
@@ -2941,7 +2943,7 @@ fn gradient_text_spans_whole_text_not_per_glyph() {
         w: 100.0,
         h: 30.0,
     };
-   let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
     scene.text_contents.insert(scene.roots[0], "AB".into());
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(

@@ -94,14 +94,14 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         dirty_text,
         classes: Vec::new(),
         id_attr: None,
-            interaction: NodeInteraction {
+        interaction: NodeInteraction {
             flags: NodeFlags::empty(),
             touchable,
             draggable: false,
             tabindex: None,
-            },
-            reuse_key: 0,
-            data_controller: None,
+        },
+        reuse_key: 0,
+        data_controller: None,
     };
     let key = scene.nodes.insert(node);
     resize_parallel_arrays(scene);
@@ -154,14 +154,14 @@ pub fn create_node_from_template(
         dirty_text,
         classes: Vec::new(),
         id_attr: None,
-            interaction: NodeInteraction {
+        interaction: NodeInteraction {
             flags: NodeFlags::empty(),
             touchable,
             draggable: false,
             tabindex: None,
-            },
-            reuse_key: 0,
-            data_controller: None,
+        },
+        reuse_key: 0,
+        data_controller: None,
     };
     let key = scene.nodes.insert(node);
     resize_parallel_arrays(scene);
@@ -753,11 +753,8 @@ mod tests {
     #[test]
     fn create_node_from_template_text_marks_dirty_text() {
         let mut scene = empty_scene();
-        let id = create_node_from_template(
-            &mut scene,
-            NodeKind::TextNode,
-            ResolvedStyle::default(),
-        );
+        let id =
+            create_node_from_template(&mut scene, NodeKind::TextNode, ResolvedStyle::default());
         scene.text_contents.insert(id, "hi".into());
         let n = scene.get(id).unwrap();
         assert!(n.dirty_text, "Text 节点 dirty_text=true（同 create_node）");
@@ -876,7 +873,10 @@ mod tests {
         scene.get_mut(t).unwrap().dirty_text = false;
         set_text(&mut scene, t, "hello").unwrap();
         assert!(scene.get(t).unwrap().dirty_text);
-        assert_eq!(scene.text_contents.get(&t).map(|s| s.as_str()), Some("hello"))
+        assert_eq!(
+            scene.text_contents.get(&t).map(|s| s.as_str()),
+            Some("hello")
+        )
     }
 
     #[test]
@@ -893,7 +893,10 @@ mod tests {
         scene.get_mut(img).unwrap().dirty_mesh = false;
         set_src(&mut scene, img, "icon.png").unwrap();
         assert!(scene.get(img).unwrap().dirty_mesh);
-        assert_eq!(scene.image_srcs.get(&img).map(|s| s.as_str()), Some("icon.png"))
+        assert_eq!(
+            scene.image_srcs.get(&img).map(|s| s.as_str()),
+            Some("icon.png")
+        )
     }
 
     #[test]

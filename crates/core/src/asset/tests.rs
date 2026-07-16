@@ -31,18 +31,18 @@ fn write_package_panics_when_string_table_exhausted() {
     // write_package 须在打包期就 panic，不产坏包。
     let mut nodes = vec![tn(NodeKind::Container)];
     for i in 0..65536u32 {
-       nodes.push(TemplateNode {
+        nodes.push(TemplateNode {
             kind: NodeKind::TextNode,
             content: Some(i.to_string()),
             src: None,
-           style: ResolvedStyle::default(),
-           parent_idx: Some(0),
-           classes: vec![],
-           id_attr: None,
-           draggable: false,
-           tabindex: None,
-           data_controller: None,
-       });
+            style: ResolvedStyle::default(),
+            parent_idx: Some(0),
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            data_controller: None,
+        });
     }
     let rules = empty_rules();
     let input = PackageInput {
@@ -342,14 +342,14 @@ fn stringtable_dedups_across_components() {
     let sc = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
     assert_eq!(sc, 3, "重复 content 应跨组件去重");
     let pkg = read_package(&bytes).unwrap();
-   assert!(
+    assert!(
         matches!(pkg.components["c1"].nodes[0].kind, NodeKind::TextNode)
             && pkg.components["c1"].nodes[0].content.as_deref() == Some("dup")
-   );
-   assert!(
+    );
+    assert!(
         matches!(pkg.components["c2"].nodes[0].kind, NodeKind::TextNode)
             && pkg.components["c2"].nodes[0].content.as_deref() == Some("dup")
-   );
+    );
 }
 
 #[test]

@@ -132,7 +132,7 @@ pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
             NodeKind::Button => "button",
             NodeKind::Image => "img",
             NodeKind::TextNode => "span",
-            _ => "div",  // RichText retired in Spec-2; other leaf kinds map to div.
+            _ => "div", // RichText retired in Spec-2; other leaf kinds map to div.
         };
         if kind_tag != t.as_str() {
             return false;
@@ -651,7 +651,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "background-color", "#0000ff"));
-        s.get_mut(bid).unwrap().interaction.flags.insert(NodeFlags::HOVERED); // 模拟命中 diff 后状态
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED); // 模拟命中 diff 后状态
         rematch_pseudo_classes(&mut s);
         // background_color 是视觉字段，不触发 layout dirty
         assert_eq!(
@@ -696,7 +700,11 @@ mod tests {
             .rules
             .push(rule(".par:hover", "color", "#1a1d2e"));
         let pid = s.get(s.roots[0]).unwrap().children[0];
-        s.get_mut(pid).unwrap().interaction.flags.insert(NodeFlags::HOVERED);
+        s.get_mut(pid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         let cid = s.get(pid).unwrap().children[0];
         let c = s.get(cid).unwrap().style.color;
@@ -792,7 +800,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:active", "background-color", "#ff0000"));
-        s.get_mut(bid).unwrap().interaction.flags.insert(NodeFlags::ACTIVE);
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::ACTIVE);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
@@ -808,7 +820,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:disabled", "opacity", "0.5"));
-        s.get_mut(bid).unwrap().interaction.flags.insert(NodeFlags::DISABLED);
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::DISABLED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.opacity,
@@ -824,7 +840,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "width", "200px"));
-        s.get_mut(bid).unwrap().interaction.flags.insert(NodeFlags::HOVERED);
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         // 验 style.taffy_style.size.width 被改
         use taffy::style::Dimension;
@@ -841,7 +861,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "color", "#ff0000"));
-        s.get_mut(bid).unwrap().interaction.flags.insert(NodeFlags::HOVERED);
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(s.get(bid).unwrap().style.color, [1.0, 0.0, 0.0, 1.0]);
     }
@@ -871,7 +895,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".parent:hover .child", "color", "#0000ff"));
-        s.get_mut(root_id).unwrap().interaction.flags.insert(NodeFlags::HOVERED); // parent hovered
+        s.get_mut(root_id)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED); // parent hovered
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(child_id).unwrap().style.color,
@@ -888,7 +916,11 @@ mod tests {
         let mut s = btn_scene();
         let bid = btn_id(&s);
         s.dynamic_rules.rules.push(rule(".btn", "color", "#ff0000"));
-        s.get_mut(bid).unwrap().interaction.flags.insert(NodeFlags::HOVERED);
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(s.get(bid).unwrap().style.color, [1.0, 0.0, 0.0, 1.0]);
     }
@@ -902,13 +934,21 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "background-color", "#0000ff"));
-        s.get_mut(bid).unwrap().interaction.flags.insert(NodeFlags::HOVERED);
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
             Some([0.0, 0.0, 1.0, 1.0])
         );
-        s.get_mut(bid).unwrap().interaction.flags.remove(NodeFlags::HOVERED); // 取消 hover
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .remove(NodeFlags::HOVERED); // 取消 hover
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
@@ -924,7 +964,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:focus", "background-color", "#0000ff"));
-        s.get_mut(bid).unwrap().interaction.flags.insert(NodeFlags::FOCUSED);
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::FOCUSED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
@@ -941,7 +985,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:focus", "background-color", "#0000ff"));
-        s.get_mut(bid).unwrap().interaction.flags.remove(NodeFlags::FOCUSED);
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .remove(NodeFlags::FOCUSED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
@@ -975,7 +1023,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".parent:focus .child", "color", "#0000ff"));
-        s.get_mut(root_id).unwrap().interaction.flags.insert(NodeFlags::FOCUSED);
+        s.get_mut(root_id)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::FOCUSED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(child_id).unwrap().style.color,
@@ -994,7 +1046,11 @@ mod tests {
             "background-image",
             "url(icons/home.png)",
         ));
-        s.get_mut(bid).unwrap().interaction.flags.insert(NodeFlags::HOVERED);
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_image.as_deref(),
@@ -1011,7 +1067,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "background-size", "cover"));
-        s.get_mut(bid).unwrap().interaction.flags.insert(NodeFlags::HOVERED);
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_size,
@@ -1028,7 +1088,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "border-radius", "8px"));
-        s.get_mut(bid).unwrap().interaction.flags.insert(NodeFlags::HOVERED);
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         // hover → border-radius:8px 生效（四角 h=v=Length(8)）
         let bc = &s.get(bid).unwrap().style.border_radius.corners;
@@ -1188,11 +1252,19 @@ mod tests {
             ease: Ease::Linear,
             delay: 0.0,
         }];
-        s.get_mut(bid).unwrap().interaction.flags.insert(crate::scene::node::NodeFlags::CASCALED); // 已 warmup
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(crate::scene::node::NodeFlags::CASCALED); // 已 warmup
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "background-color", "#0000ff"));
-        s.get_mut(bid).unwrap().interaction.flags.insert(NodeFlags::HOVERED);
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         s.pending_transitions.clear();
         rematch_pseudo_classes(&mut s);
         assert_eq!(
@@ -1219,7 +1291,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "background-color", "#0000ff"));
-        s.get_mut(bid).unwrap().interaction.flags.insert(NodeFlags::HOVERED);
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.pending_transitions.len(),
@@ -1227,7 +1303,11 @@ mod tests {
             "first cascade instant (no transition)"
         );
         assert!(
-            s.get(bid).unwrap().interaction.flags.contains(crate::scene::node::NodeFlags::CASCALED),
+            s.get(bid)
+                .unwrap()
+                .interaction
+                .flags
+                .contains(crate::scene::node::NodeFlags::CASCALED),
             "首次 cascade 后 cascaded_once 置 true"
         );
     }

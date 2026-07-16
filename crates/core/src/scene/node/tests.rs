@@ -67,14 +67,12 @@ fn scene_nodes_is_slotmap_and_get_by_id() {
     if let Some(n) = scene.get_mut(root_id) {
         n.interaction.flags.insert(NodeFlags::DISABLED);
     }
-    assert!(
-        scene
-            .get(root_id)
-            .unwrap()
-            .interaction
-            .flags
-            .contains(NodeFlags::DISABLED)
-    );
+    assert!(scene
+        .get(root_id)
+        .unwrap()
+        .interaction
+        .flags
+        .contains(NodeFlags::DISABLED));
 }
 
 #[test]
@@ -221,7 +219,10 @@ fn scene_default_has_empty_dynamic_rules() {
 #[test]
 fn node_has_tabindex_focused_defaults() {
     let n = Node::default();
-    assert_eq!(n.interaction.tabindex, None, "tabindex 默认 None（不可聚焦）");
+    assert_eq!(
+        n.interaction.tabindex, None,
+        "tabindex 默认 None（不可聚焦）"
+    );
     assert!(
         !n.interaction.flags.contains(NodeFlags::FOCUSED),
         "focused 默认 false"

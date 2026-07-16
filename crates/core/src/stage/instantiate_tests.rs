@@ -176,18 +176,18 @@ fn instantiate_without_scene_errors() {
 /// mount_node_idx 经 id_map 重映射成活 NodeId（非模板下标 0，而是 slotmap 分配的真实 NodeId）。
 #[test]
 fn instantiate_builds_controller_registry() {
-   let mut root = TemplateNode {
-       kind: NodeKind::Container,
-       style: ResolvedStyle::default(),
-       parent_idx: None,
-       classes: vec![],
-       id_attr: None,
-       draggable: false,
-       tabindex: None,
-       data_controller: Some("tab".into()),
+    let mut root = TemplateNode {
+        kind: NodeKind::Container,
+        style: ResolvedStyle::default(),
+        parent_idx: None,
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        data_controller: Some("tab".into()),
         content: None,
         src: None,
-   };
+    };
     let mut child = TemplateNode {
         kind: NodeKind::Container,
         style: ResolvedStyle::default(),
@@ -231,19 +231,19 @@ fn instantiate_builds_controller_registry() {
 /// 在 registry 中有独立条目（不同 NodeId → 不覆盖），改一个不影响另一个。
 #[test]
 fn instantiate_multi_instance_controller_registry_independent() {
-   let mut root = TemplateNode {
-       kind: NodeKind::Container,
-       style: ResolvedStyle::default(),
-       parent_idx: None,
-       classes: vec![],
-       id_attr: None,
-       draggable: false,
-       tabindex: None,
-       data_controller: Some("tab".into()),
+    let mut root = TemplateNode {
+        kind: NodeKind::Container,
+        style: ResolvedStyle::default(),
+        parent_idx: None,
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        data_controller: Some("tab".into()),
         content: None,
         src: None,
-   };
-   let _ = &mut root;
+    };
+    let _ = &mut root;
     let nodes = [root];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let controllers = vec![ControllerEntry {
@@ -304,18 +304,18 @@ fn instantiate_controller_mount_on_child_node() {
         content: None,
         src: None,
     };
-   let child = TemplateNode {
-       kind: NodeKind::Container,
-       style: ResolvedStyle::default(),
-       parent_idx: Some(0),
-       classes: vec![],
-       id_attr: None,
-       draggable: false,
-       tabindex: None,
-       data_controller: Some("panel".into()),
+    let child = TemplateNode {
+        kind: NodeKind::Container,
+        style: ResolvedStyle::default(),
+        parent_idx: Some(0),
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        data_controller: Some("panel".into()),
         content: None,
         src: None,
-   };
+    };
     let nodes = [root, child];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     // mount_node_idx=1 = 子节点（组件内局部下标）

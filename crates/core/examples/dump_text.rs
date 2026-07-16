@@ -171,10 +171,10 @@ fn run_text_dump(font_path: &str) {
     );
     let mut flagged = 0;
     for n in scene.nodes.values() {
-       let content = match &n.kind {
+        let content = match &n.kind {
             NodeKind::TextNode => scene.text_contents.get(&n.id).cloned().unwrap_or_default(),
-           _ => continue,
-       };
+            _ => continue,
+        };
         let st = &n.style;
         let rect_w = n.layout_rect.w;
         let m_none = measure_text(

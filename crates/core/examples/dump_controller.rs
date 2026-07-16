@@ -165,9 +165,9 @@ fn dump_state(s: &Stage, label: &str) {
         .filter(|n| matches!(n.kind, NodeKind::TextNode))
         .collect();
     texts.sort_by_key(|n| scene.node_sort_keys.get(n.id.index()).copied().unwrap_or(0));
-   for n in &texts {
+    for n in &texts {
         let content = scene.text_contents.get(&n.id).cloned().unwrap_or_default();
-       let short: String = content.chars().take(12).collect();
+        let short: String = content.chars().take(12).collect();
         let parent_lbl = n
             .parent
             .and_then(|p| scene.get(p))

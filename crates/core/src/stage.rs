@@ -8,7 +8,7 @@ use crate::input::{EventRecord, PointerEvent, PointerState};
 use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
-use crate::scene::node::{ControllerChangedEvent, NodeFlags, NodeId, NodeKind, Rect, Scene};
+use crate::scene::node::{ControllerChangedEvent, NodeFlags, NodeId, Rect, Scene};
 use crate::style::dynamic::rematch_pseudo_classes;
 use crate::style::resolved::OverflowMode;
 use crate::text::layout::FontTable;
@@ -595,11 +595,8 @@ impl Stage {
             }
         }
         for (i, tn) in template.nodes.iter().enumerate() {
-            let node_id = crate::scene::dynamic::create_node_from_template(
-                scene,
-                tn.kind,
-                tn.style.clone(),
-            );
+            let node_id =
+                crate::scene::dynamic::create_node_from_template(scene, tn.kind, tn.style.clone());
             // 填 classes/id_attr/draggable/tabindex/data_controller（create_node_from_template 不填这些，同 create_node）
             let n = scene.get_mut(node_id).unwrap();
             n.classes = tn.classes.clone();

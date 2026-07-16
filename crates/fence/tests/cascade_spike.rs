@@ -10,9 +10,9 @@ use loomgui_core::text::layout::FontTable;
 use loomgui_fence::{parse_template, IrNodeKind};
 use std::collections::HashMap;
 
-    /// ponytail: throwaway mini-bridge for spike; replaced by production bridge (Spec-3 ②) on new enum.
-    /// 把 fence ParsedTemplate 的 IrTree 折叠成 core Scene：div→Container、文本叶子→TextNode。
-    fn bridge(html: &str) -> Scene {
+/// ponytail: throwaway mini-bridge for spike; replaced by production bridge (Spec-3 ②) on new enum.
+/// 把 fence ParsedTemplate 的 IrTree 折叠成 core Scene：div→Container、文本叶子→TextNode。
+fn bridge(html: &str) -> Scene {
     let parsed = parse_template(html, "spike.html");
     assert!(
         parsed.diagnostics.is_empty(),

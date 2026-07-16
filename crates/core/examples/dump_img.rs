@@ -42,10 +42,10 @@ fn main() {
     for pkg in s.packages.values() {
         for comp in pkg.components.values() {
             for n in &comp.nodes {
-               let src = match &n.kind {
+                let src = match &n.kind {
                     NodeKind::Image => n.src.clone().unwrap_or_default(),
-                   _ => continue,
-               };
+                    _ => continue,
+                };
                 let st = &n.style.taffy_style;
                 let css_w = format!("{:?}", st.size.width);
                 let css_h = format!("{:?}", st.size.height);
