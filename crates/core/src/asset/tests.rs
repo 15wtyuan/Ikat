@@ -10,6 +10,8 @@ fn tn(kind: NodeKind) -> TemplateNode {
         id_attr: None,
         draggable: false,
         tabindex: None,
+        content: None,
+        src: None,
         data_controller: None,
     }
 }
@@ -30,9 +32,9 @@ fn write_package_panics_when_string_table_exhausted() {
     let mut nodes = vec![tn(NodeKind::Container)];
     for i in 0..65536u32 {
         nodes.push(TemplateNode {
-            kind: NodeKind::Text {
-                content: i.to_string(),
-            },
+            kind: NodeKind::TextNode,
+            content: Some(i.to_string()),
+            src: None,
             style: ResolvedStyle::default(),
             parent_idx: Some(0),
             classes: vec![],
@@ -54,9 +56,8 @@ fn write_read_multi_component_roundtrip() {
     // 两组件：comp1 = root(parent=None) + child；comp2 单节点
     let mut tn_root = tn(NodeKind::Container);
     tn_root.id_attr = Some("r".into());
-    let mut tn_child = tn(NodeKind::Text {
-        content: "hi".into(),
-    });
+    let mut tn_child = tn(NodeKind::TextNode);
+    tn_child.content = Some("hi".into());
     tn_child.parent_idx = Some(0);
     let comp1_nodes = vec![tn_root, tn_child];
     let comp2_nodes = vec![tn(NodeKind::Container)];
@@ -130,15 +131,13 @@ fn multi_component_parent_idx_is_component_local() {
     // 验证 write 全局化 + read 减 base 转局部。
     let mut root_a = tn(NodeKind::Container);
     root_a.id_attr = Some("a".into());
-    let mut child_a = tn(NodeKind::Text {
-        content: "ca".into(),
-    });
+    let mut child_a = tn(NodeKind::TextNode);
+    child_a.content = Some("ca".into());
     child_a.parent_idx = Some(0);
     let mut root_b = tn(NodeKind::Container);
     root_b.id_attr = Some("b".into());
-    let mut child_b = tn(NodeKind::Text {
-        content: "cb".into(),
-    });
+    let mut child_b = tn(NodeKind::TextNode);
+    child_b.content = Some("cb".into());
     child_b.parent_idx = Some(0);
     let comp_a = [root_a, child_a];
     let comp_b = [root_b, child_b];
@@ -155,13 +154,11 @@ fn multi_component_parent_idx_is_component_local() {
 
 #[test]
 fn all_node_kinds_roundtrip() {
-    let mut img = tn(NodeKind::Image {
-        src: "icons/a.png".into(),
-    });
+    let mut img = tn(NodeKind::Image);
+    img.src = Some("icons/a.png".into());
     img.parent_idx = Some(0);
-    let mut txt = tn(NodeKind::Text {
-        content: "hello".into(),
-    });
+    let mut txt = tn(NodeKind::TextNode);
+    txt.content = Some("hello".into());
     txt.parent_idx = Some(0);
     let nodes = [tn(NodeKind::Container), tn(NodeKind::Button), img, txt];
     let rules = empty_rules();
@@ -172,165 +169,11 @@ fn all_node_kinds_roundtrip() {
     let ns = &pkg.components["c"].nodes;
     assert!(matches!(ns[0].kind, NodeKind::Container));
     assert!(matches!(ns[1].kind, NodeKind::Button));
-    assert!(matches!(&ns[2].kind, NodeKind::Image { src } if src == "icons/a.png"));
-    assert!(matches!(&ns[3].kind, NodeKind::Text { content } if content == "hello"));
+    assert!(matches!(ns[2].kind, NodeKind::Image) && ns[2].src.as_deref() == Some("icons/a.png"));
+    assert!(matches!(ns[3].kind, NodeKind::TextNode) && ns[3].content.as_deref() == Some("hello"));
 }
 
-/// RichText 节点经 write_package → read_package 往返：runs 整段 bincode 进 RichRunsArena，
-/// NodeBlock 的 rich_off 指向 arena 偏移，read 按 offset 取 blob 反序列化还原 Vec<RichRun>。
-#[test]
-fn rich_text_roundtrips_through_pkg() {
-    use crate::text::rich::{
-        RichDeco, RichKind, RichRun, RichStyle, RichVAlign, RichWeight, TextDecoLines,
-        TextDecoStyle,
-    };
-    let root = tn(NodeKind::Container);
-    let mut rich = tn(NodeKind::RichText {
-        runs: vec![
-            RichRun {
-                kind: RichKind::Text {
-                    text: "red ".into(),
-                },
-                color: [1.0, 0.0, 0.0, 1.0],
-                font_id: 0,
-                size_px: 16,
-                weight: RichWeight::Normal,
-                style: RichStyle::Italic,
-                deco: RichDeco {
-                    lines: TextDecoLines::UNDERLINE,
-                    style: TextDecoStyle::Solid,
-                    color: None,
-                    thickness: None,
-                },
-                link_id: None,
-            },
-            RichRun {
-                kind: RichKind::Text {
-                    text: "link".into(),
-                },
-                color: [0.0, 0.0, 1.0, 1.0],
-                font_id: 1,
-                size_px: 18,
-                weight: RichWeight::Bold,
-                style: RichStyle::Normal,
-                deco: RichDeco::default(),
-                link_id: Some(42),
-            },
-            RichRun {
-                kind: RichKind::Image {
-                    src: "icons/emote.png".into(),
-                    w: 16.0,
-                    h: 16.0,
-                    valign: RichVAlign::Bottom,
-                },
-                color: [1.0; 4],
-                font_id: 0,
-                size_px: 16,
-                weight: RichWeight::Normal,
-                style: RichStyle::Normal,
-                deco: RichDeco::default(),
-                link_id: None,
-            },
-        ],
-    });
-    rich.parent_idx = Some(0);
-    // 旁配一个非 RichText 节点，验 rich_off 哨兵（NULL_RICH_OFF）不影响其他 kind。
-    let mut txt = tn(NodeKind::Text {
-        content: "plain".into(),
-    });
-    txt.parent_idx = Some(0);
-    let nodes = [root, rich, txt];
-    let rules = empty_rules();
-    let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
-    };
-    let pkg = read_package(&write_package(&input)).unwrap();
-    let ns = &pkg.components["c"].nodes;
-    assert!(matches!(ns[0].kind, NodeKind::Container));
-    assert!(matches!(&ns[2].kind, NodeKind::Text { content } if content == "plain"));
-    let runs_back = match &ns[1].kind {
-        NodeKind::RichText { runs } => runs,
-        _ => panic!("expected RichText, got {:?}", ns[1].kind),
-    };
-    assert_eq!(runs_back.len(), 3, "三段 runs 往返");
-    // run 0：red italic underline
-    match &runs_back[0].kind {
-        RichKind::Text { text } => assert_eq!(text, "red "),
-        other => panic!("run 0 expected Text, got {other:?}"),
-    }
-    assert_eq!(runs_back[0].color, [1.0, 0.0, 0.0, 1.0]);
-    assert_eq!(runs_back[0].size_px, 16);
-    assert_eq!(runs_back[0].style, RichStyle::Italic);
-    assert!(runs_back[0].deco.lines.underline());
-    // run 1：blue bold link
-    assert_eq!(runs_back[1].color, [0.0, 0.0, 1.0, 1.0]);
-    assert_eq!(runs_back[1].font_id, 1);
-    assert_eq!(runs_back[1].weight, RichWeight::Bold);
-    assert_eq!(runs_back[1].link_id, Some(42));
-    // run 2：inline image
-    match &runs_back[2].kind {
-        RichKind::Image { src, w, h, valign } => {
-            assert_eq!(src, "icons/emote.png");
-            assert_eq!(*w, 16.0);
-            assert_eq!(*h, 16.0);
-            assert_eq!(*valign, RichVAlign::Bottom);
-        }
-        other => panic!("run 2 expected Image, got {other:?}"),
-    }
-}
-
-/// 多个 RichText 节点共享同一 RichRunsArena：各自的 rich_off 独立，无串扰。
-/// 验证 arena 拼接 + 偏移列读取的正确性（两节点 runs 长度不同时偏移不串）。
-#[test]
-fn multiple_rich_text_nodes_share_arena() {
-    use crate::text::rich::{RichKind, RichRun};
-    let root = tn(NodeKind::Container);
-    let mut r1 = tn(NodeKind::RichText {
-        runs: vec![RichRun::text("aaa", [1.0; 4], 0, 12)],
-    });
-    r1.parent_idx = Some(0);
-    let mut r2 = tn(NodeKind::RichText {
-        runs: vec![
-            RichRun::text("bbbb", [1.0; 4], 0, 14),
-            RichRun {
-                kind: RichKind::Text { text: "cc".into() },
-                color: [0.0, 1.0, 0.0, 1.0],
-                font_id: 2,
-                size_px: 14,
-                ..RichRun::text("", [0.0; 4], 0, 0)
-            },
-        ],
-    });
-    r2.parent_idx = Some(0);
-    let nodes = [root, r1, r2];
-    let rules = empty_rules();
-    let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
-    };
-    let pkg = read_package(&write_package(&input)).unwrap();
-    let ns = &pkg.components["c"].nodes;
-    let r1_runs = match &ns[1].kind {
-        NodeKind::RichText { runs } => runs,
-        _ => panic!("ns[1] should be RichText"),
-    };
-    let r2_runs = match &ns[2].kind {
-        NodeKind::RichText { runs } => runs,
-        _ => panic!("ns[2] should be RichText"),
-    };
-    assert_eq!(r1_runs.len(), 1);
-    assert_eq!(r2_runs.len(), 2);
-    // 验偏移不串：r1[0] 文本应是 "aaa" 而非 r2 的内容。
-    match &r1_runs[0].kind {
-        RichKind::Text { text } => assert_eq!(text, "aaa"),
-        _ => panic!("expected Text"),
-    }
-    match &r2_runs[1].kind {
-        RichKind::Text { text } => assert_eq!(text, "cc"),
-        _ => panic!("expected Text"),
-    }
-    assert_eq!(r2_runs[1].font_id, 2);
-}
-
+// RichText retired in Spec-2 — rich-run pkg round-trip tests removed.
 #[test]
 fn classes_id_attr_draggable_tabindex_roundtrip() {
     let mut root = tn(NodeKind::Container);
@@ -361,9 +204,8 @@ fn classes_id_attr_draggable_tabindex_roundtrip() {
 fn data_controller_roundtrips_through_pkg() {
     let mut root = tn(NodeKind::Container);
     root.data_controller = Some("tab".into());
-    let mut child = tn(NodeKind::Text {
-        content: "hi".into(),
-    });
+    let mut child = tn(NodeKind::TextNode);
+    child.content = Some("hi".into());
     child.parent_idx = Some(0);
     // child.data_controller 保持 None（验 None 端不误读成 Some）
     let nodes = [root, child];
@@ -481,13 +323,11 @@ fn style_blob_roundtrips_baked_resolved_style() {
 #[test]
 fn stringtable_dedups_across_components() {
     // 两组件共用同 content "dup" -> StringTable 去重（string_count=3: "dup","c1","c2"）
-    let mut n1 = tn(NodeKind::Text {
-        content: "dup".into(),
-    });
+    let mut n1 = tn(NodeKind::TextNode);
+    n1.content = Some("dup".into());
     n1.id_attr = Some("c1".into());
-    let mut n2 = tn(NodeKind::Text {
-        content: "dup".into(),
-    });
+    let mut n2 = tn(NodeKind::TextNode);
+    n2.content = Some("dup".into());
     n2.id_attr = Some("c2".into());
     let c1_nodes = [n1];
     let c2_nodes = [n2];
@@ -503,10 +343,12 @@ fn stringtable_dedups_across_components() {
     assert_eq!(sc, 3, "重复 content 应跨组件去重");
     let pkg = read_package(&bytes).unwrap();
     assert!(
-        matches!(&pkg.components["c1"].nodes[0].kind, NodeKind::Text { content } if content == "dup")
+        matches!(pkg.components["c1"].nodes[0].kind, NodeKind::TextNode)
+            && pkg.components["c1"].nodes[0].content.as_deref() == Some("dup")
     );
     assert!(
-        matches!(&pkg.components["c2"].nodes[0].kind, NodeKind::Text { content } if content == "dup")
+        matches!(pkg.components["c2"].nodes[0].kind, NodeKind::TextNode)
+            && pkg.components["c2"].nodes[0].content.as_deref() == Some("dup")
     );
 }
 
@@ -540,9 +382,8 @@ fn comp_table_offset(bytes: &[u8]) -> usize {
 fn two_comp_pkg_bytes() -> Vec<u8> {
     let mut root_a = tn(NodeKind::Container);
     root_a.id_attr = Some("a".into());
-    let mut child_a = tn(NodeKind::Text {
-        content: "ca".into(),
-    });
+    let mut child_a = tn(NodeKind::TextNode);
+    child_a.content = Some("ca".into());
     child_a.parent_idx = Some(0);
     let comp_a = [root_a, child_a];
     let comp_b = [tn(NodeKind::Container)];
@@ -648,4 +489,44 @@ fn write_rejects_non_root_nodes_zero() {
         components: vec![("c", &nodes, &rules, &[])],
     };
     let _ = write_package(&input);
+}
+
+/// TemplateNode content/src 字段经 write_package → read_package 往返稳定。
+/// 这是真实持久化路径（pkg.bin 不是 serde，是手动编码）。
+#[test]
+fn template_node_content_src_roundtrip_via_pkg() {
+    let mut text = tn(NodeKind::TextNode);
+    text.content = Some("hello world".into());
+    let img = TemplateNode {
+        kind: NodeKind::Image,
+        style: ResolvedStyle::default(),
+        parent_idx: Some(0),
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        data_controller: None,
+        content: None,
+        src: Some("icon.png".into()),
+    };
+    let nodes = [text, img];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+    };
+    let buf = write_package(&input);
+    let pkg = read_package(&buf).unwrap();
+    let read_nodes = &pkg.components["c"].nodes;
+    assert_eq!(read_nodes[0].kind, NodeKind::TextNode);
+    assert_eq!(
+        read_nodes[0].content.as_deref(),
+        Some("hello world"),
+        "TextNode content must survive pkg roundtrip"
+    );
+    assert_eq!(read_nodes[1].kind, NodeKind::Image);
+    assert_eq!(
+        read_nodes[1].src.as_deref(),
+        Some("icon.png"),
+        "Image src must survive pkg roundtrip"
+    );
 }

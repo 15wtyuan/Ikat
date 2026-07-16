@@ -18,6 +18,8 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             draggable: false,
             tabindex: None,
             data_controller: None,
+            content: None,
+            src: None,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -28,6 +30,8 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             draggable: false,
             tabindex: None,
             data_controller: None,
+            content: None,
+            src: None,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -94,6 +98,8 @@ fn instantiate_missing_pkg_or_comp_errors() {
         draggable: false,
         tabindex: None,
         data_controller: None,
+        content: None,
+        src: None,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -123,6 +129,8 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             draggable: false,
             tabindex: None,
             data_controller: None,
+            content: None,
+            src: None,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -133,6 +141,8 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             draggable: false,
             tabindex: None,
             data_controller: None,
+            content: None,
+            src: None,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -175,6 +185,8 @@ fn instantiate_builds_controller_registry() {
         draggable: false,
         tabindex: None,
         data_controller: Some("tab".into()),
+        content: None,
+        src: None,
     };
     let mut child = TemplateNode {
         kind: NodeKind::Container,
@@ -185,6 +197,8 @@ fn instantiate_builds_controller_registry() {
         draggable: false,
         tabindex: None,
         data_controller: None,
+        content: None,
+        src: None,
     };
     let _ = &mut root; // 借用占位
     let _ = &mut child;
@@ -226,6 +240,8 @@ fn instantiate_multi_instance_controller_registry_independent() {
         draggable: false,
         tabindex: None,
         data_controller: Some("tab".into()),
+        content: None,
+        src: None,
     };
     let _ = &mut root;
     let nodes = [root];
@@ -285,6 +301,8 @@ fn instantiate_controller_mount_on_child_node() {
         draggable: false,
         tabindex: None,
         data_controller: None,
+        content: None,
+        src: None,
     };
     let child = TemplateNode {
         kind: NodeKind::Container,
@@ -295,6 +313,8 @@ fn instantiate_controller_mount_on_child_node() {
         draggable: false,
         tabindex: None,
         data_controller: Some("panel".into()),
+        content: None,
+        src: None,
     };
     let nodes = [root, child];
     let rules = crate::style::dynamic::DynamicRuleTable::default();

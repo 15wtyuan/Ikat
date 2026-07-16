@@ -1,6 +1,5 @@
 //! 整树 JSON dump（调试用）。
 use crate::scene::node::{NodeKind, Scene};
-use crate::text::rich::RichKind;
 
 /// JSON 字符串转义：处理 `"` → `\"`、`\` → `\\`、控制字符 → `\uXXXX`。
 pub fn json_escape(s: &str) -> String {
@@ -27,28 +26,30 @@ pub fn dump_scene_json(scene: &Scene) -> String {
             s.push(',');
         }
         // kind_str 用 String（RichText 需动态格式化 runs 数 + 首段摘要）。
-        let (tag, kind_str): (&'static str, String) = match &n.kind {
+        let (tag, kind_str): (&'static str, String) = match n.kind {
             NodeKind::Container => ("div", "Container".into()),
+            NodeKind::TextNode => ("span", "TextNode".into()),
+            NodeKind::TextBlock => ("div", "TextBlock".into()),
+            NodeKind::TextElement => ("span", "TextElement".into()),
+            NodeKind::LineBreak => ("br", "LineBreak".into()),
+            NodeKind::Label => ("label", "Label".into()),
             NodeKind::Button => ("button", "Button".into()),
-            NodeKind::Text { .. } => ("span", "Text".into()),
-            NodeKind::Image { src: _src } => ("img", "Image".into()),
-            NodeKind::RichText { runs } => {
-                let first = runs.first().map(|r| match &r.kind {
-                    RichKind::Text { text } => {
-                        let snippet: String = text.chars().take(12).collect();
-                        format!("Text(\"{}\")", snippet)
-                    }
-                    RichKind::Image { src, .. } => format!("Image(\"{}\")", src),
-                });
-                (
-                    "span",
-                    format!(
-                        "RichText(runs={},first={})",
-                        runs.len(),
-                        first.unwrap_or_default()
-                    ),
-                )
-            }
+            NodeKind::Link => ("a", "Link".into()),
+            NodeKind::Image => ("img", "Image".into()),
+            NodeKind::TextField => ("input", "TextField".into()),
+            NodeKind::NumberField => ("input", "NumberField".into()),
+            NodeKind::Slider => ("input", "Slider".into()),
+            NodeKind::Toggle => ("input", "Toggle".into()),
+            NodeKind::RadioButton => ("input", "RadioButton".into()),
+            NodeKind::TextArea => ("textarea", "TextArea".into()),
+            NodeKind::Dropdown => ("select", "Dropdown".into()),
+            NodeKind::OptionItem => ("option", "OptionItem".into()),
+            NodeKind::ProgressBar => ("progress", "ProgressBar".into()),
+            NodeKind::ListView => ("div", "ListView".into()),
+            NodeKind::ListItem => ("li", "ListItem".into()),
+            NodeKind::Slot => ("slot", "Slot".into()),
+            NodeKind::CustomElement => ("div", "CustomElement".into()),
+            NodeKind::Canvas => ("canvas", "Canvas".into()),
         };
         let id = json_escape(n.id_attr.as_deref().unwrap_or(""));
         let classes = n

@@ -29,7 +29,7 @@ fn set_text_changes_content_and_marks_dirty() {
     let sc = s.scene.as_ref().unwrap();
     assert!(sc.get(t).unwrap().dirty_text);
     match &sc.get(t).unwrap().kind {
-        NodeKind::Text { content } => assert_eq!(content, "hello"),
+        NodeKind::TextNode => assert_eq!(sc.text_contents.get(&t).unwrap(), "hello"),
         _ => panic!("expected Text"),
     }
 }
@@ -229,7 +229,7 @@ fn rich_link_at_returns_link_id_on_hit() {
     {
         let sc = s.scene.as_mut().unwrap();
         let n = sc.get_mut(node).unwrap();
-        n.kind = NodeKind::RichText { runs: vec![] };
+        n.kind = NodeKind::TextNode;
         n.layout_rect = crate::scene::node::Rect {
             x: 0.0,
             y: 0.0,
@@ -295,7 +295,7 @@ fn rich_link_at_inverse_transforms_world_point() {
     {
         let sc = s.scene.as_mut().unwrap();
         let n = sc.get_mut(node).unwrap();
-        n.kind = NodeKind::RichText { runs: vec![] };
+        n.kind = NodeKind::TextNode;
     }
     let idx = node.index();
     {

@@ -5,7 +5,31 @@
 //! `clip_rect`/`dirty_*`。本模块只管建树 + 初始脏标志。
 
 use crate::style::resolved::{OverflowMode, ResolvedStyle};
+use serde::{Deserialize, Serialize};
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
+
+bitflags::bitflags! {
+    /// Pseudo-class source flags + cascade gate, packed into a single byte for cache locality.
+    /// Only process + rematch passes touch these; solve/world/build skip entirely.
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct NodeFlags: u8 {
+        const HOVERED  = 1 << 0;
+        const ACTIVE   = 1 << 1;
+        const FOCUSED  = 1 << 2;
+        const DISABLED = 1 << 3;
+        const CASCALED = 1 << 4;
+    }
+}
+
+/// Interaction state grouped for cache locality — only process + rematch passes read/write.
+/// solve/world_transforms/build passes never touch these fields.
+#[derive(Debug, Clone, Default)]
+pub struct NodeInteraction {
+    pub flags: NodeFlags,
+    pub touchable: bool,
+    pub draggable: bool,
+    pub tabindex: Option<i32>,
+}
 
 /// 不透明节点句柄。对外 u32（FFI/C# 透明），内部 = 高 20 bit index + 低 12 bit generation。
 /// sentinel 0xFFFF_FFFF = INVALID。index 用于并行数组（anim/scroll/world_transforms）索引，
@@ -57,23 +81,64 @@ impl NodeId {
 }
 
 /// 默认 `Container`（无数据变体），render 层测试构造 Node 用 `Default::default()`。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NodeKind {
     #[default]
     Container,
-    Text {
-        content: String,
-    },
-    /// v1.7 富文本叶子：inline flow 封装在 measure/build。
-    RichText {
-        runs: Vec<crate::text::rich::RichRun>,
-    },
-    /// src 原样存（不加载），render 层映射到 image_path（同 path 的图可合批）。
-    /// src 取自元素的 `src` 属性（`<img src="...">`），不是文本内容。
-    Image {
-        src: String,
-    },
+    TextNode,
+    TextBlock,
+    TextElement,
+    LineBreak,
+    Label,
     Button,
+    Link,
+    Image,
+    TextField,
+    NumberField,
+    Slider,
+    Toggle,
+    RadioButton,
+    TextArea,
+    Dropdown,
+    OptionItem,
+    ProgressBar,
+    ListView,
+    ListItem,
+    Slot,
+    CustomElement,
+    Canvas,
+}
+
+impl NodeKind {
+    /// Container content model: user-arrangeable children (div/button/a/p/span/ul/li/...).
+    /// Single source of truth for container vs leaf classification — adding a new
+    /// container variant only requires changing this method.
+    pub fn is_container(self) -> bool {
+        matches!(
+            self,
+            Self::Container
+                | Self::TextBlock
+                | Self::TextElement
+                | Self::Label
+                | Self::Button
+                | Self::Link
+                | Self::ListView
+                | Self::ListItem
+                | Self::Canvas
+                | Self::Slot
+                | Self::CustomElement
+        )
+    }
+
+    /// Leaf: private internal structure, no user-arrangeable children.
+    pub fn is_leaf(self) -> bool {
+        !self.is_container()
+    }
+
+    /// Semantic alias for is_container — "has children in content model".
+    pub fn has_children(self) -> bool {
+        self.is_container()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -106,34 +171,9 @@ pub struct Node {
     pub classes: Vec<String>,
     /// 运行时 id（建树时从 ElementData.id 填；供动态规则 id 选择器匹配）。
     pub id_attr: Option<String>,
-    /// pointer-events:auto=true / none=false（解析时落，建树时从 style.touchable 填）。
-    pub touchable: bool,
-    /// 当前帧命中（运行时，每帧命中 diff 更新）。
-    pub hovered: bool,
-    /// 指针按下且命中（运行时状态机）。
-    pub active: bool,
-    /// 业务设（set_node_disabled），伪类源 + active/click 抑制。
-    pub disabled: bool,
-    /// opt-in 可拖拽（HTML `draggable="true"` 属性）。drag 状态机据此发起 drag。
-    pub draggable: bool,
-    /// HTML tabindex 属性值。None=不可聚焦；Some(-1)=仅编程聚焦；
-    /// Some(0)=DOM 序可聚焦；Some(N>0)=显式序可聚焦。
-    pub tabindex: Option<i32>,
-    /// 当前是否聚焦（运行时，:focus 伪类源）。仅 focused_node 链上节点 true。
-    pub focused: bool,
-    /// 渲染复用键。0=无复用（后端按 node_id keying）；>0=按 reuse_key 复用 GO
-    /// （虚拟列表 slot 用：slot 换绑 item 时 NodeId 变但 reuse_key 不变 → 后端复用 GO）。
-    /// 运行时字段（不进 pkg，打包期不存）。driver 设。
+    pub interaction: NodeInteraction,
     pub reuse_key: u32,
-    /// HTML `data-controller="name"` 属性值。声明本节点为某 Controller 的挂载点
-    /// （子树归该 Controller 管）。运行时由 set_selected_index 改 selected_index，
-    /// 匹配器遇 [data-page] 时回溯找最近的 data_controller 祖先查其页。建树时从
-    /// ElementData.attrs["data-controller"] 填（照 draggable/tabindex 先例）。
     pub data_controller: Option<String>,
-    /// 是否已 cascade 过至少一次。首次 rematch 置 true 且不产 transition 请求
-    /// （初始出现即时生效，不动画入场）。后续 rematch 检测可动画通道变化时
-    /// 据此门控是否推 transition 请求。
-    pub cascaded_once: bool,
 }
 
 impl Default for Node {
@@ -155,16 +195,14 @@ impl Default for Node {
             base_style: ResolvedStyle::default(),
             classes: Vec::new(),
             id_attr: None,
-            touchable: true,
-            hovered: false,
-            active: false,
-            disabled: false,
-            draggable: false,
-            tabindex: None,
-            focused: false,
+            interaction: NodeInteraction {
+                flags: NodeFlags::empty(),
+                touchable: true,
+                draggable: false,
+                tabindex: None,
+            },
             reuse_key: 0,
             data_controller: None,
-            cascaded_once: false,
         }
     }
 }
@@ -283,6 +321,10 @@ pub struct Scene {
     /// v1.7：富文本链接 fragment 矩形（per-node，按 NodeId.index 索引）。与 text_layouts 同序。
     /// build 产出，tick_and_render 写回，供 rich_link_at 命中查询。
     pub rich_fragments: Vec<Option<Vec<crate::text::rich::RichFragment>>>,
+    /// TextNode content (only TextNode nodes have entries).
+    pub text_contents: std::collections::HashMap<NodeId, String>,
+    /// Image src paths (only Image nodes have entries).
+    pub image_srcs: std::collections::HashMap<NodeId, String>,
     /// Controller 状态机 registry：挂载点 NodeId → Controller。load_package/instantiate 建，
     /// driver 也可懒注册（set_controller_selected 首次写时建条目）。
     /// 匹配器遇 [data-page] 时回溯找最近 data_controller 祖先查此表（§1.4）。
@@ -312,18 +354,29 @@ impl Scene {
             bool,
             Option<i32>,
             Option<String>,
+            Option<String>,
+            Option<String>,
         )],
     ) -> Scene {
         let mut scene = Scene::default();
-        // 先 insert 所有节点，收集 slotmap 分配的 NodeId
         let mut ids: Vec<NodeId> = Vec::with_capacity(entries.len());
-        for (_, kind, style, classes, id_attr, draggable, tabindex, data_controller) in
-            entries.iter()
+        for (
+            _,
+            kind,
+            style,
+            classes,
+            id_attr,
+            draggable,
+            tabindex,
+            data_controller,
+            content,
+            src,
+        ) in entries.iter()
         {
             let node = Node {
                 id: NodeId::INVALID, // 临时，insert 后回填
                 parent: None,        // 下一轮填
-                kind: kind.clone(),
+                kind: *kind,
                 style: style.clone(),
                 base_style: style.clone(),
                 taffy_id: None,
@@ -337,27 +390,31 @@ impl Scene {
                 },
                 children: Vec::new(),
                 dirty_mesh: true,
-                dirty_text: matches!(kind, NodeKind::Text { .. } | NodeKind::RichText { .. }),
+                dirty_text: matches!(kind, NodeKind::TextNode),
                 classes: classes.clone(),
                 id_attr: id_attr.clone(),
-                touchable: style.touchable,
-                hovered: false,
-                active: false,
-                disabled: false,
-                draggable: *draggable,
-                tabindex: *tabindex,
-                focused: false,
+                interaction: NodeInteraction {
+                    flags: NodeFlags::empty(),
+                    touchable: style.touchable,
+                    draggable: *draggable,
+                    tabindex: *tabindex,
+                },
                 reuse_key: 0,
                 data_controller: data_controller.clone(),
-                cascaded_once: false,
             };
             let key = scene.nodes.insert(node);
             let id = NodeId::from_key(key);
             scene.nodes.get_mut(key).unwrap().id = id; // 回填
             ids.push(id);
+            if let Some(c) = content {
+                scene.text_contents.insert(id, c.clone());
+            }
+            if let Some(src) = src {
+                scene.image_srcs.insert(id, src.clone());
+            }
         }
         // 接 parent/children/roots（用 ids 映射 entries 下标 → NodeId）
-        for (i, (parent_idx, _, _, _, _, _, _, _)) in entries.iter().enumerate() {
+        for (i, (parent_idx, _, _, _, _, _, _, _, _, _)) in entries.iter().enumerate() {
             match parent_idx {
                 Some(p) => {
                     let child_id = ids[i];

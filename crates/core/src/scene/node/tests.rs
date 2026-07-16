@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::scene::node::NodeFlags;
+
 #[test]
 fn node_id_index_and_gen_decode() {
     // 高 20 bit index + 低 12 bit gen
@@ -25,6 +27,8 @@ fn scene_nodes_is_slotmap_and_get_by_id() {
         bool,
         Option<i32>,
         Option<String>,
+        Option<String>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -35,6 +39,8 @@ fn scene_nodes_is_slotmap_and_get_by_id() {
             false,
             None,
             None,
+            None,
+            None,
         ),
         (
             Some(0),
@@ -43,6 +49,8 @@ fn scene_nodes_is_slotmap_and_get_by_id() {
             Vec::new(),
             None,
             false,
+            None,
+            None,
             None,
             None,
         ),
@@ -57,9 +65,14 @@ fn scene_nodes_is_slotmap_and_get_by_id() {
     assert!(scene.get(root_id).is_some(), "Scene::get 桥接可用");
     // get_mut
     if let Some(n) = scene.get_mut(root_id) {
-        n.disabled = true;
+        n.interaction.flags.insert(NodeFlags::DISABLED);
     }
-    assert!(scene.get(root_id).unwrap().disabled);
+    assert!(scene
+        .get(root_id)
+        .unwrap()
+        .interaction
+        .flags
+        .contains(NodeFlags::DISABLED));
 }
 
 #[test]
@@ -89,6 +102,8 @@ fn node_id_from_key_to_key_roundtrip() {
         bool,
         Option<i32>,
         Option<String>,
+        Option<String>,
+        Option<String>,
     )> = vec![(
         None,
         NodeKind::Container,
@@ -96,6 +111,8 @@ fn node_id_from_key_to_key_roundtrip() {
         Vec::new(),
         None,
         false,
+        None,
+        None,
         None,
         None,
     )];
@@ -122,10 +139,10 @@ fn node_id_index_capacity_20bit() {
 #[test]
 fn node_has_runtime_state_fields_default() {
     let n = Node::default();
-    assert!(n.touchable, "touchable 默认 true");
-    assert!(!n.hovered);
-    assert!(!n.active);
-    assert!(!n.disabled);
+    assert!(n.interaction.touchable, "touchable 默认 true");
+    assert!(!n.interaction.flags.contains(NodeFlags::HOVERED));
+    assert!(!n.interaction.flags.contains(NodeFlags::ACTIVE));
+    assert!(!n.interaction.flags.contains(NodeFlags::DISABLED));
     assert!(n.classes.is_empty());
     assert!(n.id_attr.is_none());
     // base_style 与 style 初始相同（Default）
@@ -135,7 +152,7 @@ fn node_has_runtime_state_fields_default() {
 #[test]
 fn node_has_draggable_field_default_false() {
     let n = Node::default();
-    assert!(!n.draggable, "draggable 默认 false");
+    assert!(!n.interaction.draggable, "draggable 默认 false");
 }
 
 #[test]
@@ -149,6 +166,8 @@ fn scene_build_6tuple_sets_draggable() {
         bool,
         Option<i32>,
         Option<String>,
+        Option<String>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -157,6 +176,8 @@ fn scene_build_6tuple_sets_draggable() {
             Vec::new(),
             None,
             false,
+            None,
+            None,
             None,
             None,
         ),
@@ -169,16 +190,21 @@ fn scene_build_6tuple_sets_draggable() {
             true,
             None,
             None,
+            None,
+            None,
         ),
     ];
     let scene = Scene::build(&entries);
     let root_id = scene.roots[0];
     let btn_id = scene.get(root_id).unwrap().children[0];
     assert!(
-        !scene.get(root_id).unwrap().draggable,
+        !scene.get(root_id).unwrap().interaction.draggable,
         "root draggable=false"
     );
-    assert!(scene.get(btn_id).unwrap().draggable, "btn draggable=true");
+    assert!(
+        scene.get(btn_id).unwrap().interaction.draggable,
+        "btn draggable=true"
+    );
 }
 
 #[test]
@@ -193,8 +219,14 @@ fn scene_default_has_empty_dynamic_rules() {
 #[test]
 fn node_has_tabindex_focused_defaults() {
     let n = Node::default();
-    assert_eq!(n.tabindex, None, "tabindex 默认 None（不可聚焦）");
-    assert!(!n.focused, "focused 默认 false");
+    assert_eq!(
+        n.interaction.tabindex, None,
+        "tabindex 默认 None（不可聚焦）"
+    );
+    assert!(
+        !n.interaction.flags.contains(NodeFlags::FOCUSED),
+        "focused 默认 false"
+    );
 }
 
 #[test]
@@ -214,6 +246,8 @@ fn scene_build_7tuple_sets_tabindex() {
         bool,
         Option<i32>,
         Option<String>,
+        Option<String>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -222,6 +256,8 @@ fn scene_build_7tuple_sets_tabindex() {
             Vec::new(),
             None,
             false,
+            None,
+            None,
             None,
             None,
         ),
@@ -233,6 +269,8 @@ fn scene_build_7tuple_sets_tabindex() {
             None,
             false,
             Some(0),
+            None,
+            None,
             None,
         ),
         (
@@ -244,6 +282,8 @@ fn scene_build_7tuple_sets_tabindex() {
             false,
             Some(3),
             None,
+            None,
+            None,
         ),
     ];
     let scene = Scene::build(&entries);
@@ -252,21 +292,29 @@ fn scene_build_7tuple_sets_tabindex() {
     let btn1 = kids[0];
     let btn2 = kids[1];
     assert_eq!(
-        scene.get(root_id).unwrap().tabindex,
+        scene.get(root_id).unwrap().interaction.tabindex,
         None,
         "root tabindex=None"
     );
     assert_eq!(
-        scene.get(btn1).unwrap().tabindex,
+        scene.get(btn1).unwrap().interaction.tabindex,
         Some(0),
         "btn1 tabindex=Some(0)"
     );
     assert_eq!(
-        scene.get(btn2).unwrap().tabindex,
+        scene.get(btn2).unwrap().interaction.tabindex,
         Some(3),
         "btn2 tabindex=Some(3)"
     );
-    assert!(!scene.get(root_id).unwrap().focused, "focused 默认 false");
+    assert!(
+        !scene
+            .get(root_id)
+            .unwrap()
+            .interaction
+            .flags
+            .contains(NodeFlags::FOCUSED),
+        "focused 默认 false"
+    );
     assert_eq!(scene.focused_node, None, "build 后 focused_node=None");
 }
 
@@ -285,6 +333,8 @@ fn scene_build_constructs_tree_without_parse() {
         bool,
         Option<i32>,
         Option<String>,
+        Option<String>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -295,17 +345,19 @@ fn scene_build_constructs_tree_without_parse() {
             false,
             None,
             None,
+            None,
+            None,
         ),
         (
             Some(0),
-            NodeKind::Text {
-                content: "hi".into(),
-            },
+            NodeKind::TextNode,
             text_style,
             Vec::new(),
             None,
             false,
             None,
+            None,
+            Some("hi".into()),
             None,
         ),
     ];
@@ -321,9 +373,14 @@ fn scene_build_constructs_tree_without_parse() {
     assert!(root.clip_rect.is_none(), "overflow Visible → 无 clip slot");
     assert!(!root.dirty_text, "Container dirty_text=false");
     let text = scene.get(text_id).unwrap();
-    assert!(matches!(&text.kind, NodeKind::Text { content } if content == "hi"));
+    assert!(matches!(text.kind, NodeKind::TextNode));
     assert_eq!(text.parent, Some(root_id));
     assert!(text.dirty_text, "Text 节点 dirty_text=true");
+    assert_eq!(
+        scene.text_contents.get(&text_id).map(|s| s.as_str()),
+        Some("hi"),
+        "text content via side table"
+    );
 
     // overflow Hidden → clip slot 派生
     let mut of = ResolvedStyle::default();
@@ -336,6 +393,8 @@ fn scene_build_constructs_tree_without_parse() {
         Vec::new(),
         None,
         false,
+        None,
+        None,
         None,
         None,
     )]);
@@ -370,6 +429,8 @@ fn build_clip_rect_slot_for_scroll_auto_and_single_axis() {
             false,
             None,
             None,
+            None,
+            None,
         )]);
         assert!(
             sc.get(sc.roots[0]).unwrap().clip_rect.is_some(),
@@ -390,6 +451,8 @@ fn build_clip_rect_slot_for_scroll_auto_and_single_axis() {
         false,
         None,
         None,
+        None,
+        None,
     )]);
     assert!(
         sc.get(sc.roots[0]).unwrap().clip_rect.is_none(),
@@ -407,6 +470,8 @@ fn anim_scene_one_node() -> (Scene, NodeId) {
         Vec::new(),
         None,
         false,
+        None,
+        None,
         None,
         None,
     )]);
@@ -435,6 +500,8 @@ fn animtable_hashmap_get_ensure_clear() {
                 false,
                 None,
                 None,
+                None,
+                None,
             ),
             (
                 Some(0),
@@ -443,6 +510,8 @@ fn animtable_hashmap_get_ensure_clear() {
                 Vec::new(),
                 None,
                 false,
+                None,
+                None,
                 None,
                 None,
             ),
@@ -557,6 +626,8 @@ fn scene_controller_selected_set_get_roundtrip() {
         bool,
         Option<i32>,
         Option<String>,
+        Option<String>,
+        Option<String>,
     )> = vec![(
         None,
         NodeKind::Container,
@@ -564,6 +635,8 @@ fn scene_controller_selected_set_get_roundtrip() {
         Vec::new(),
         None,
         false,
+        None,
+        None,
         None,
         None,
     )];
@@ -587,4 +660,46 @@ fn scene_controller_selected_set_get_roundtrip() {
 #[test]
 fn controller_changed_event_size() {
     assert_eq!(std::mem::size_of::<ControllerChangedEvent>(), 12);
+}
+
+/// NodeKind 所有变体的 bincode 序列化往返稳定（pkg.bin 跨版本兼容性门）。
+#[test]
+fn node_kind_all_variants_bincode_roundtrip() {
+    let all = [
+        NodeKind::Container,
+        NodeKind::TextNode,
+        NodeKind::TextBlock,
+        NodeKind::TextElement,
+        NodeKind::LineBreak,
+        NodeKind::Label,
+        NodeKind::Button,
+        NodeKind::Link,
+        NodeKind::Image,
+        NodeKind::TextField,
+        NodeKind::NumberField,
+        NodeKind::Slider,
+        NodeKind::Toggle,
+        NodeKind::RadioButton,
+        NodeKind::TextArea,
+        NodeKind::Dropdown,
+        NodeKind::OptionItem,
+        NodeKind::ProgressBar,
+        NodeKind::ListView,
+        NodeKind::ListItem,
+        NodeKind::Slot,
+        NodeKind::CustomElement,
+        NodeKind::Canvas,
+    ];
+    for k in all {
+        let bytes = bincode::serialize(&k).unwrap();
+        let back: NodeKind = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(k, back, "roundtrip failed for {:?}", k);
+    }
+}
+
+/// Unit-variant enum bincode 序列化为 4 字节（bincode 默认 FixintEncoding：u32 判别值）。
+/// pkg.bin 实际不走 bincode（手动编码），这里只验证 serde derive 的稳定性。
+#[test]
+fn node_kind_unit_variant_is_one_byte() {
+    assert_eq!(bincode::serialize(&NodeKind::Container).unwrap().len(), 4);
 }

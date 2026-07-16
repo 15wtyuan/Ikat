@@ -330,9 +330,7 @@ fn build_skips_display_none_subtree() {
     );
     child.style.taffy_style.display = taffy::Display::None;
     let mut grandchild = Node::default();
-    grandchild.kind = NodeKind::Text {
-        content: "hi".into(),
-    };
+    grandchild.kind = NodeKind::TextNode;
     grandchild.layout_rect = Rect {
         x: 0.0,
         y: 0.0,
@@ -341,6 +339,11 @@ fn build_skips_display_none_subtree() {
     };
     // from_nodes 用 edges (parent_idx, child_idx) 按 vec 位置建 parent 关系。
     let mut scene = Scene::from_nodes(vec![parent, child, grandchild], vec![(0, 1), (1, 2)]);
+    // grandchild 在 display:none 子树内（不渲染），但仍需注册 text_contents。
+    let _root = scene.roots[0];
+    let _mid = scene.get(_root).unwrap().children[0];
+    let _gc = scene.get(_mid).unwrap().children[0];
+    scene.text_contents.insert(_gc, "hi".into());
     let ft = test_font_table().expect("need test font for build_render_nodes");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
@@ -365,9 +368,7 @@ fn build_skips_display_none_subtree() {
 #[test]
 fn image_render_node_carries_path_not_texid() {
     let mut a = Node::default();
-    a.kind = NodeKind::Image {
-        src: "icons/skin.png".into(),
-    };
+    a.kind = NodeKind::Image;
     a.layout_rect = Rect {
         x: 0.0,
         y: 0.0,
@@ -375,6 +376,9 @@ fn image_render_node_carries_path_not_texid() {
         h: 5.0,
     };
     let mut scene = Scene::from_nodes(vec![a], vec![]);
+    scene
+        .image_srcs
+        .insert(scene.roots[0], "icons/skin.png".into());
     let fonts = test_font_table().expect("need test font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
@@ -474,9 +478,7 @@ fn solid_container_image_path_is_none() {
 #[test]
 fn build_image_carries_path_and_full_uv() {
     let mut a = Node::default();
-    a.kind = NodeKind::Image {
-        src: "logo.png".into(),
-    };
+    a.kind = NodeKind::Image;
     a.layout_rect = Rect {
         x: 0.0,
         y: 0.0,
@@ -484,6 +486,7 @@ fn build_image_carries_path_and_full_uv() {
         h: 5.0,
     };
     let mut scene = Scene::from_nodes(vec![a], vec![]);
+    scene.image_srcs.insert(scene.roots[0], "logo.png".into());
     let fonts = test_font_table().expect("need test font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
@@ -518,9 +521,7 @@ fn build_image_carries_path_and_full_uv() {
 fn build_image_uv_is_full_region() {
     // 核心不知图集 → UV 永远全图 (0,0)-(1,1)（v 翻转后 TL=(0,1), BR=(1,0)）。
     let mut a = Node::default();
-    a.kind = NodeKind::Image {
-        src: "logo.png".into(),
-    };
+    a.kind = NodeKind::Image;
     a.layout_rect = Rect {
         x: 0.0,
         y: 0.0,
@@ -528,6 +529,7 @@ fn build_image_uv_is_full_region() {
         h: 5.0,
     };
     let mut scene = Scene::from_nodes(vec![a], vec![]);
+    scene.image_srcs.insert(scene.roots[0], "logo.png".into());
     let fonts = test_font_table().expect("need test font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
@@ -556,9 +558,7 @@ fn build_text_produces_text_layout() {
         }
     };
     let mut n = Node::default();
-    n.kind = NodeKind::Text {
-        content: "Hello".into(),
-    };
+    n.kind = NodeKind::TextNode;
     n.style.font_size = 16.0;
     n.style.text_align = TextAlign::Left;
     n.layout_rect = Rect {
@@ -568,6 +568,7 @@ fn build_text_produces_text_layout() {
         h: 20.0,
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);
+    scene.text_contents.insert(scene.roots[0], "Hello".into());
 
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
@@ -613,9 +614,7 @@ fn build_text_bakes_content_offset_into_glyph_pen() {
         }
     };
     let mut n = Node::default();
-    n.kind = NodeKind::Text {
-        content: "AB".into(),
-    };
+    n.kind = NodeKind::TextNode;
     n.style.font_size = 16.0;
     // padding/border 四向 4px/2px → content 偏移 left=2+4=6, top=2+4=6。
     n.style.taffy_style.padding = taffy::geometry::Rect {
@@ -637,6 +636,7 @@ fn build_text_bakes_content_offset_into_glyph_pen() {
         h: 20.0,
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);
+    scene.text_contents.insert(scene.roots[0], "AB".into());
 
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
@@ -680,9 +680,7 @@ fn build_text_verts_in_world_space_and_upright() {
         }
     };
     let mut n = Node::default();
-    n.kind = NodeKind::Text {
-        content: "Hello".into(),
-    };
+    n.kind = NodeKind::TextNode;
     n.style.font_size = 16.0;
     n.style.text_align = TextAlign::Left;
     n.layout_rect = Rect {
@@ -692,6 +690,7 @@ fn build_text_verts_in_world_space_and_upright() {
         h: 20.0,
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);
+    scene.text_contents.insert(scene.roots[0], "Hello".into());
     crate::scene::transform::compute_world_transforms(&mut scene);
     // root 节点：layout_rect 即 world translate → wm 平移 (100,200)。
     let wm = scene.world_transforms[1];
@@ -755,9 +754,7 @@ fn build_text_snaps_quad_to_integer_pixel() {
         }
     };
     let mut n = Node::default();
-    n.kind = NodeKind::Text {
-        content: "Hello".into(),
-    };
+    n.kind = NodeKind::TextNode;
     n.style.font_size = 16.0;
     // 模拟 flex 居中算出的亚像素原点（80×60 容器内文字居中 → 非整数起点）。
     n.layout_rect = Rect {
@@ -767,6 +764,7 @@ fn build_text_snaps_quad_to_integer_pixel() {
         h: 20.0,
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);
+    scene.text_contents.insert(scene.roots[0], "Hello".into());
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
         &scene,
@@ -946,9 +944,7 @@ fn build_text_skips_blank_glyphs_like_space() {
         }
     };
     let mut n = Node::default();
-    n.kind = NodeKind::Text {
-        content: "A B".into(),
-    };
+    n.kind = NodeKind::TextNode;
     n.style.font_size = 16.0;
     n.style.text_align = TextAlign::Left;
     n.layout_rect = Rect {
@@ -958,6 +954,7 @@ fn build_text_skips_blank_glyphs_like_space() {
         h: 20.0,
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);
+    scene.text_contents.insert(scene.roots[0], "A B".into());
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
         &scene,
@@ -1035,9 +1032,7 @@ fn build_merges_adjacent_same_drawstate_meshes() {
         None,
     );
     let mut a = Node::default();
-    a.kind = NodeKind::Image {
-        src: "a.png".into(),
-    };
+    a.kind = NodeKind::Image;
     a.layout_rect = Rect {
         x: 0.0,
         y: 0.0,
@@ -1045,9 +1040,7 @@ fn build_merges_adjacent_same_drawstate_meshes() {
         h: 10.0,
     };
     let mut b = Node::default();
-    b.kind = NodeKind::Image {
-        src: "a.png".into(),
-    };
+    b.kind = NodeKind::Image;
     b.layout_rect = Rect {
         x: 100.0,
         y: 0.0,
@@ -1055,6 +1048,11 @@ fn build_merges_adjacent_same_drawstate_meshes() {
         h: 10.0,
     };
     let mut scene = Scene::from_nodes(vec![root, a, b], vec![(0, 1), (0, 2)]);
+    let _root_id = scene.roots[0];
+    let _a_id = scene.get(_root_id).unwrap().children[0];
+    let _b_id = scene.get(_root_id).unwrap().children[1];
+    scene.image_srcs.insert(_a_id, "a.png".into());
+    scene.image_srcs.insert(_b_id, "a.png".into());
 
     let fonts = test_font_table().expect("need test font");
 
@@ -1155,6 +1153,8 @@ fn effective_scroll_container_emits_thumb_node() {
         bool,
         Option<i32>,
         Option<String>,
+        Option<String>,
+        Option<String>,
     )> = vec![
         (
             None,
@@ -1165,14 +1165,6 @@ fn effective_scroll_container_emits_thumb_node() {
             false,
             None,
             None,
-        ),
-        (
-            Some(0),
-            NodeKind::Container,
-            ResolvedStyle::default(),
-            vec![],
-            None,
-            false,
             None,
             None,
         ),
@@ -1183,6 +1175,20 @@ fn effective_scroll_container_emits_thumb_node() {
             vec![],
             None,
             false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            Some(0),
+            NodeKind::Container,
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
+            None,
             None,
             None,
         ),
@@ -1254,6 +1260,8 @@ fn non_effective_container_no_thumb() {
             false,
             None,
             None,
+            None,
+            None,
         ),
         (
             Some(0),
@@ -1262,6 +1270,8 @@ fn non_effective_container_no_thumb() {
             vec![],
             None,
             false,
+            None,
+            None,
             None,
             None,
         ),
@@ -1327,17 +1337,19 @@ fn render_text_payload_matches_layout_text_layout() {
             false,
             None,
             None,
+            None,
+            None,
         ),
         (
             Some(0),
-            NodeKind::Text {
-                content: content.into(),
-            },
+            NodeKind::TextNode,
             text_s,
             vec![],
             None,
             false,
             None,
+            None,
+            Some(content.into()),
             None,
         ),
     ];
@@ -1426,17 +1438,19 @@ fn render_long_text_still_wraps_with_layout_reuse() {
             false,
             None,
             None,
+            None,
+            None,
         ),
         (
             Some(0),
-            NodeKind::Text {
-                content: content.into(),
-            },
+            NodeKind::TextNode,
             text_s,
             vec![],
             None,
             false,
             None,
+            None,
+            Some(content.into()),
             None,
         ),
     ];
@@ -1869,9 +1883,7 @@ fn build_image_node_keeps_program_0() {
         h: 100.0,
     };
     let mut img = Node::default();
-    img.kind = NodeKind::Image {
-        src: "a.png".into(),
-    };
+    img.kind = NodeKind::Image;
     img.layout_rect = Rect {
         x: 0.0,
         y: 0.0,
@@ -1879,6 +1891,9 @@ fn build_image_node_keeps_program_0() {
         h: 10.0,
     };
     let mut scene = Scene::from_nodes(vec![root, img], vec![(0, 1)]);
+    let _root_id = scene.roots[0];
+    let _img_id = scene.get(_root_id).unwrap().children[0];
+    scene.image_srcs.insert(_img_id, "a.png".into());
     let fonts = test_font_table().expect("need font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
@@ -2445,9 +2460,7 @@ fn text_sub_pages_reuse_key_is_zero_not_inherited() {
         }
     };
     let mut n = Node::default();
-    n.kind = NodeKind::Text {
-        content: "Hello".into(),
-    };
+    n.kind = NodeKind::TextNode;
     n.reuse_key = 7; // 模拟虚拟列表 slot
     n.style.font_size = 16.0;
     n.style.text_align = TextAlign::Left;
@@ -2458,6 +2471,7 @@ fn text_sub_pages_reuse_key_is_zero_not_inherited() {
         h: 20.0,
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);
+    scene.text_contents.insert(scene.roots[0], "Hello".into());
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
         &scene,
@@ -2682,1092 +2696,7 @@ fn node_index_4096_triggers_sub_page_collision() {
     );
 }
 
-// ── RichText build arm 测试（v1.7）──
-
-/// RichText 节点产 Mesh{ program:1, loomgui:// image_path }，per-run 色烤顶点色。
-/// 两 run（红 + 蓝）→ 同一 mesh 的顶点色应分两段（前 N 顶点红、后 N 顶点蓝）。
-#[test]
-fn rich_text_node_emits_mesh_with_per_vertex_color() {
-    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    let mut n = Node::default();
-    n.kind = NodeKind::RichText {
-        runs: vec![
-            RichRun {
-                kind: RichKind::Text { text: "AB".into() },
-                color: [1.0, 0.0, 0.0, 1.0], // 红
-                font_id: 0,
-                size_px: 16,
-                weight: RichWeight::Normal,
-                style: RichStyle::Normal,
-                deco: RichDeco::default(),
-                link_id: None,
-            },
-            RichRun {
-                kind: RichKind::Text { text: "CD".into() },
-                color: [0.0, 0.0, 1.0, 1.0], // 蓝
-                font_id: 0,
-                size_px: 16,
-                weight: RichWeight::Normal,
-                style: RichStyle::Normal,
-                deco: RichDeco::default(),
-                link_id: None,
-            },
-        ],
-    };
-    n.style.font_size = 16.0;
-    n.style.text_align = TextAlign::Left;
-    n.layout_rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        w: 200.0,
-        h: 30.0,
-    };
-    let mut scene = Scene::from_nodes(vec![n], vec![]);
-
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    // 取 primary RichText mesh（program=1，非子页）。
-    let rn = frame
-        .nodes
-        .iter()
-        .find(|rn| {
-            !is_text_sub_page(rn.node_id)
-                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
-        })
-        .expect("应存在 primary RichText RenderNode");
-    match &rn.payload {
-        NodePayload::Mesh {
-            verts,
-            colors,
-            program,
-            image_path,
-            ..
-        } => {
-            assert_eq!(*program, 1, "rich text → program=1");
-            assert!(
-                image_path
-                    .as_ref()
-                    .is_some_and(|p| p.starts_with("loomgui://font-atlas/")),
-                "rich image_path = synthetic atlas path（与 Text 同形）"
-            );
-            // 4 字形 × 4 顶点 = 16（bold 不双绘：weight=Normal）。
-            assert_eq!(verts.len(), 16, "ABCD = 4 glyph × 4 verts = 16");
-            assert_eq!(colors.len(), 16, "colors 与 verts 等长");
-            // 前 8 顶点红（AB），后 8 顶点蓝（CD）。
-            for c in &colors[..8] {
-                assert_eq!(*c, [1.0, 0.0, 0.0, 1.0], "AB 段顶点色应红");
-            }
-            for c in &colors[8..] {
-                assert_eq!(*c, [0.0, 0.0, 1.0, 1.0], "CD 段顶点色应蓝");
-            }
-        }
-        _ => panic!("expected Mesh payload for rich text"),
-    }
-}
-
-/// RichText 叶带 background-color（如 .rt 底色）→ 须自画 bg quad（Container arm 不覆盖
-/// RichText 叶）。bg 占真 node_id（DFS sort_key S），text 首页改用子页 1（propagate 给
-/// S+1）→ bg 在 text 下层。无 bg-color 时 text 用真 node_id（原行为不变）。
-#[test]
-fn rich_text_node_emits_bg_quad_when_bg_color_set() {
-    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    let mut n = Node::default();
-    n.kind = NodeKind::RichText {
-        runs: vec![RichRun {
-            kind: RichKind::Text { text: "AB".into() },
-            color: [1.0, 1.0, 1.0, 1.0],
-            font_id: 0,
-            size_px: 16,
-            weight: RichWeight::Normal,
-            style: RichStyle::Normal,
-            deco: RichDeco::default(),
-            link_id: None,
-        }],
-    };
-    n.style.background_color = Some([0.102, 0.114, 0.18, 1.0]); // ~#1a1d2e
-    n.style.font_size = 16.0;
-    n.style.text_align = TextAlign::Left;
-    n.layout_rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        w: 200.0,
-        h: 30.0,
-    };
-    let mut scene = Scene::from_nodes(vec![n], vec![]);
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    // bg quad：program 0，真 node_id（非子页），4 verts，顶点色 = background-color。
-    let bg = frame
-        .nodes
-        .iter()
-        .find(|rn| {
-            !is_text_sub_page(rn.node_id)
-                && matches!(&rn.payload, NodePayload::Mesh { program: 0, .. })
-        })
-        .expect("RichText 带 bg-color 应产 bg quad（program 0，真 node_id，非子页）");
-    match &bg.payload {
-        NodePayload::Mesh {
-            verts,
-            colors,
-            program,
-            image_path,
-            ..
-        } => {
-            assert_eq!(*program, 0, "bg quad program=0");
-            assert_eq!(verts.len(), 4, "bg quad 4 verts");
-            assert_eq!(
-                colors[0],
-                [0.102, 0.114, 0.18, 1.0],
-                "bg 顶点色 = background-color"
-            );
-            assert!(image_path.is_none(), "纯色 bg 无 image_path");
-        }
-        _ => panic!("expected Mesh payload for bg quad"),
-    }
-    // text mesh 仍存在（program 1），且画在 bg 之上（sort_key 更大）。
-    let text = frame
-        .nodes
-        .iter()
-        .find(|rn| matches!(&rn.payload, NodePayload::Mesh { program: 1, .. }))
-        .expect("text mesh 应存在");
-    assert!(
-        text.sort_key > bg.sort_key,
-        "text 画在 bg 之上（sort_key {} > {}）",
-        text.sort_key,
-        bg.sort_key
-    );
-}
-
-/// 行内图（RichText 内 inline `<img>`）RenderNode 须叠在 bg + 文字之上，否则 sort_key=0
-/// 被底色盖住（行内图"消失"在底图之下）。端到端验：渲染后行内图 sort_key > bg 且 > text。
-#[test]
-fn rich_text_inline_image_sorts_above_bg_and_text() {
-    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichVAlign, RichWeight};
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    let mk_run = |kind: RichKind| RichRun {
-        kind,
-        color: [1.0, 1.0, 1.0, 1.0],
-        font_id: 0,
-        size_px: 16,
-        weight: RichWeight::Normal,
-        style: RichStyle::Normal,
-        deco: RichDeco::default(),
-        link_id: None,
-    };
-    let mut n = Node::default();
-    n.kind = NodeKind::RichText {
-        runs: vec![
-            mk_run(RichKind::Text { text: "x".into() }),
-            mk_run(RichKind::Image {
-                src: "icons/zap.png".into(),
-                w: 22.0,
-                h: 22.0,
-                valign: RichVAlign::Baseline,
-            }),
-        ],
-    };
-    n.style.background_color = Some([0.1, 0.1, 0.1, 1.0]); // 带 bg → 触发 bg quad
-    n.style.font_size = 16.0;
-    n.style.text_align = TextAlign::Left;
-    n.layout_rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        w: 200.0,
-        h: 40.0,
-    };
-    let mut scene = Scene::from_nodes(vec![n], vec![]);
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    // 行内图 RenderNode：image_path = 源 src（非 loomgui:// font-atlas）。
-    let img = frame
-        .nodes
-        .iter()
-        .find(|rn| {
-            matches!(&rn.payload, NodePayload::Mesh { image_path: Some(p), .. } if p == "icons/zap.png")
-        })
-        .expect("行内图 RenderNode 应存在");
-    assert!(
-        img.sort_key > 0,
-        "行内图 sort_key > 0（修复前=0 → 被底图盖住）"
-    );
-    // bg quad（program 0，无 image_path）与 text（program 1，font-atlas path）都应在行内图之下。
-    let bg = frame.nodes.iter().find(|rn| {
-        !is_text_sub_page(rn.node_id)
-            && matches!(
-                &rn.payload,
-                NodePayload::Mesh {
-                    program: 0,
-                    image_path: None,
-                    ..
-                }
-            )
-    });
-    let text = frame.nodes.iter().find(|rn| {
-        matches!(&rn.payload, NodePayload::Mesh { program: 1, image_path: Some(p), .. } if p.starts_with("loomgui://"))
-    });
-    if let Some(bg) = bg {
-        assert!(
-            img.sort_key > bg.sort_key,
-            "行内图在 bg 之上 ({} > {})",
-            img.sort_key,
-            bg.sort_key
-        );
-    }
-    if let Some(text) = text {
-        assert!(
-            img.sort_key > text.sort_key,
-            "行内图在 text 之上 ({} > {})",
-            img.sort_key,
-            text.sort_key
-        );
-    }
-}
-
-/// 两同字体 RichText span → merge 后应合并 draw call（program=1 已在合批白名单）。
-/// 验 RichText 与 Text 同走 atlas path 合批路径，不因 per-run 色破坏合批。
-#[test]
-fn two_rich_nodes_same_atlas_merge() {
-    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    // root 容器（无图，program=0）+ 两 RichText 子（同 font_id=0、同 page0 atlas path）。
-    let root = container_node(
-        0,
-        None,
-        Rect {
-            x: 0.0,
-            y: 0.0,
-            w: 300.0,
-            h: 50.0,
-        },
-        None,
-    );
-    let mk_rich = |id: usize, parent: usize, x: f32| {
-        let mut n = Node::default();
-        n.id = NodeId(id as u32);
-        n.parent = Some(NodeId(parent as u32));
-        n.kind = NodeKind::RichText {
-            runs: vec![RichRun {
-                kind: RichKind::Text { text: "AB".into() },
-                color: [1.0, 1.0, 1.0, 1.0],
-                font_id: 0,
-                size_px: 16,
-                weight: RichWeight::Normal,
-                style: RichStyle::Normal,
-                deco: RichDeco::default(),
-                link_id: None,
-            }],
-        };
-        n.style.font_size = 16.0;
-        n.layout_rect = Rect {
-            x,
-            y: 0.0,
-            w: 100.0,
-            h: 20.0,
-        };
-        n
-    };
-    let a = mk_rich(1, 0, 0.0);
-    let b = mk_rich(2, 0, 100.0);
-    let mut scene = Scene::from_nodes(vec![root, a, b], vec![(0, 1), (0, 2)]);
-
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    // 两 RichText 同 atlas path（loomgui://font-atlas/p0）→ merge 成 1 个 mesh。
-    // root 是 Container(image_path=None) 不同 DrawState → 不合。
-    // merge 后 program 归 0（merge 统一 program 字段），故按 image_path 过滤而非 program。
-    // 合并 mesh 应含两 RichText 的 8 顶点（2×2 字形 × 4）= 16 顶点。
-    let rich_meshes: Vec<_> = frame
-        .nodes
-        .iter()
-        .filter(|rn| {
-            matches!(
-                &rn.payload,
-                NodePayload::Mesh {
-                    image_path: Some(p),
-                    ..
-                } if p.starts_with("loomgui://font-atlas/")
-            )
-        })
-        .collect();
-    assert_eq!(
-        rich_meshes.len(),
-        1,
-        "两同 atlas RichText → 1 个合并 mesh，实 {}",
-        rich_meshes.len()
-    );
-    if let NodePayload::Mesh { verts, .. } = &rich_meshes[0].payload {
-        assert_eq!(
-            verts.len(),
-            16,
-            "两 RichText 各 2 字形 × 4 顶点 = 16（合并后），实 {}",
-            verts.len()
-        );
-    }
-}
-
-/// padding top 须偏移字形 y（bake 烤 line.baseline），否则文字顶到盒顶而非 padding 内。
-/// 框架层 bug：bake 旧版只烤 glyphs.x/y，字形 top 走 line.baseline（不含 off_y）→ y padding 丢。
-/// 行内图偏下（比文字低 padding）+ 文字垂直上对齐（html 居中）同根因。
-#[test]
-fn rich_text_padding_offsets_glyphs_vertically() {
-    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
-    use taffy::style::LengthPercentage;
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    let mk = |pad_top: f32| {
-        let mut n = Node::default();
-        n.kind = NodeKind::RichText {
-            runs: vec![RichRun {
-                kind: RichKind::Text { text: "A".into() },
-                color: [1.0, 1.0, 1.0, 1.0],
-                font_id: 0,
-                size_px: 16,
-                weight: RichWeight::Normal,
-                style: RichStyle::Normal,
-                deco: RichDeco::default(),
-                link_id: None,
-            }],
-        };
-        n.style.font_size = 16.0;
-        n.style.text_align = TextAlign::Left;
-        n.style.taffy_style.padding.top = LengthPercentage::Length(pad_top);
-        n.layout_rect = Rect {
-            x: 0.0,
-            y: 0.0,
-            w: 200.0,
-            h: 60.0,
-        };
-        n
-    };
-    let build_min_y = |n: Node| {
-        let mut scene = Scene::from_nodes(vec![n], vec![]);
-        crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _, _, _) = build_render_nodes(
-            &scene,
-            &fonts,
-            &std::collections::HashMap::new(),
-            &empty_sizes(),
-            &mut test_glyph_atlas(),
-        );
-        let mut min_y = f32::INFINITY;
-        for rn in &frame.nodes {
-            if let NodePayload::Mesh { verts, program, .. } = &rn.payload {
-                if *program == 1 {
-                    for v in verts {
-                        if v[1] < min_y {
-                            min_y = v[1];
-                        }
-                    }
-                }
-            }
-        }
-        min_y
-    };
-    let top_no_pad = build_min_y(mk(0.0));
-    let top_pad14 = build_min_y(mk(14.0));
-    let diff = top_pad14 - top_no_pad;
-    assert!(
-        (diff - 14.0).abs() < 1.5,
-        "padding top 14 须偏移字形 14px（diff={}，期望≈14）",
-        diff
-    );
-}
-
-/// text-align:right + padding：末字（最右顶点）不得超 box 右边。修复前 max_width=rect.w
-/// → 右对齐 offset 基准含 padding → 末字溢出 box 右 padding（B9 "右对齐超框" 症状）。
-/// 修复后 max_width=content width → 右对齐在 content area 内、末字 ≤ box right。
-#[test]
-fn rich_text_right_align_does_not_overflow_box_with_padding() {
-    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichWeight};
-    use taffy::style::LengthPercentage;
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    let mut n = Node::default();
-    n.kind = NodeKind::RichText {
-        runs: vec![RichRun {
-            kind: RichKind::Text {
-                text: "右对齐".into(),
-            },
-            color: [1.0; 4],
-            font_id: 0,
-            size_px: 20,
-            weight: RichWeight::Normal,
-            style: RichStyle::Normal,
-            deco: RichDeco::default(),
-            link_id: None,
-        }],
-    };
-    n.style.font_size = 20.0;
-    n.style.text_align = TextAlign::Right;
-    // 四向 padding 14 → content_w = rect.w - 28
-    n.style.taffy_style.padding.top = LengthPercentage::Length(14.0);
-    n.style.taffy_style.padding.bottom = LengthPercentage::Length(14.0);
-    n.style.taffy_style.padding.left = LengthPercentage::Length(14.0);
-    n.style.taffy_style.padding.right = LengthPercentage::Length(14.0);
-    n.layout_rect = Rect {
-        x: 100.0,
-        y: 50.0,
-        w: 120.0,
-        h: 60.0,
-    };
-    let mut scene = Scene::from_nodes(vec![n], vec![]);
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    let box_right = 100.0 + 120.0; // rect.x + rect.w
-    let content_right = box_right - 14.0; // 减 padding.right
-    let mut max_x = f32::NEG_INFINITY;
-    for rn in &frame.nodes {
-        if let NodePayload::Mesh { verts, program, .. } = &rn.payload {
-            if *program == 1 {
-                for v in verts {
-                    if v[0] > max_x {
-                        max_x = v[0];
-                    }
-                }
-            }
-        }
-    }
-    assert!(
-        max_x <= box_right + 0.5,
-        "右对齐末字不得超 box 右边（max_x={:.1} > box_right={:.1}）",
-        max_x,
-        box_right
-    );
-    assert!(
-        max_x > content_right - 2.0,
-        "右对齐末字应贴 content right（max_x={:.1}，content_right={:.1}）",
-        max_x,
-        content_right
-    );
-}
-
-/// 行内图 verts 须加节点 rect.x/y（同字形），否则跑到 design 原点。
-/// 旧版 ix=img.x+off_x（缺 rect），单测 rect=0 巧合过，PlayMode rect≠0 才显现（图消失/错位）。
-#[test]
-fn rich_image_positioned_at_node_rect() {
-    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichVAlign, RichWeight};
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    let mut n = Node::default();
-    n.kind = NodeKind::RichText {
-        runs: vec![RichRun {
-            kind: RichKind::Image {
-                src: "res/icons/zap.png".into(),
-                w: 20.0,
-                h: 20.0,
-                valign: RichVAlign::Baseline,
-            },
-            color: [1.0, 1.0, 1.0, 1.0],
-            font_id: 0,
-            size_px: 16,
-            weight: RichWeight::Normal,
-            style: RichStyle::Normal,
-            deco: RichDeco::default(),
-            link_id: None,
-        }],
-    };
-    n.style.font_size = 16.0;
-    n.style.text_align = TextAlign::Left;
-    n.layout_rect = Rect {
-        x: 100.0,
-        y: 50.0,
-        w: 200.0,
-        h: 30.0,
-    };
-    let mut scene = Scene::from_nodes(vec![n], vec![]);
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    // image mesh（program 0，image_path 含 zap）。
-    let img_mesh = frame
-        .nodes
-        .iter()
-        .find(|rn| {
-            matches!(
-                &rn.payload,
-                NodePayload::Mesh {
-                    program: 0,
-                    image_path: Some(p),
-                    ..
-                } if p.contains("zap")
-            )
-        })
-        .expect("行内图 mesh 应存在");
-    if let NodePayload::Mesh { verts, .. } = &img_mesh.payload {
-        let min_x = verts.iter().map(|v| v[0]).fold(f32::INFINITY, f32::min);
-        let min_y = verts.iter().map(|v| v[1]).fold(f32::INFINITY, f32::min);
-        // 行内图在节点 rect(100,50)处：x 含 rect.x（>=100），y 含 rect.y（>0，不跑负原点）。
-        assert!(
-            min_x >= 100.0,
-            "行内图 x 须含节点 rect.x（>=100，不跑原点），实 {}",
-            min_x
-        );
-        assert!(
-            min_y > 0.0,
-            "行内图 y 须含节点 rect.y（>0，不跑原点），实 {}",
-            min_y
-        );
-    }
-}
-
-/// RichText 含行内图 → frame 同时产 text Mesh（program=1）+ image Mesh（program=0, image_path=src）。
-/// 验证 measure_rich_text 记录 Image run 位置 + build 产 image quad 端到端。
-#[test]
-fn rich_image_emits_mesh_with_image_path_and_program_0() {
-    use crate::text::rich::{RichDeco, RichKind, RichRun, RichStyle, RichVAlign, RichWeight};
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    let mut n = Node::default();
-    n.kind = NodeKind::RichText {
-        runs: vec![
-            RichRun {
-                kind: RichKind::Text { text: "Hi".into() },
-                color: [1.0, 1.0, 1.0, 1.0],
-                font_id: 0,
-                size_px: 16,
-                weight: RichWeight::Normal,
-                style: RichStyle::Normal,
-                deco: RichDeco::default(),
-                link_id: None,
-            },
-            RichRun {
-                kind: RichKind::Image {
-                    src: "emoji/cool.png".into(),
-                    w: 16.0,
-                    h: 16.0,
-                    valign: RichVAlign::Baseline,
-                },
-                color: [1.0, 1.0, 1.0, 1.0],
-                font_id: 0,
-                size_px: 16,
-                weight: RichWeight::Normal,
-                style: RichStyle::Normal,
-                deco: RichDeco::default(),
-                link_id: None,
-            },
-        ],
-    };
-    n.style.font_size = 16.0;
-    n.style.text_align = TextAlign::Left;
-    n.layout_rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        w: 200.0,
-        h: 30.0,
-    };
-    let mut scene = Scene::from_nodes(vec![n], vec![]);
-
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    // 应同时存在 text Mesh（program=1）和 image Mesh（program=0）
-    let has_text = frame
-        .nodes
-        .iter()
-        .any(|rn| matches!(&rn.payload, NodePayload::Mesh { program: 1, .. }));
-    let image_node = frame.nodes.iter().find(|rn| {
-        matches!(&rn.payload, NodePayload::Mesh { program: 0, image_path: Some(p), .. } if p == "emoji/cool.png")
-    });
-    assert!(has_text, "应存在 text Mesh（program=1）");
-    assert!(
-        image_node.is_some(),
-        "应存在 image Mesh（program=0, image_path=src）"
-    );
-    // image Mesh 应有 4 顶点、6 索引、全图 UV
-    if let Some(rn) = image_node {
-        match &rn.payload {
-            NodePayload::Mesh {
-                verts,
-                uvs,
-                indices,
-                image_path,
-                program,
-                ..
-            } => {
-                assert_eq!(verts.len(), 4, "image quad = 4 顶点");
-                assert_eq!(indices.len(), 6, "2 三角形 = 6 索引");
-                assert_eq!(*program, 0, "image → program=0");
-                assert_eq!(
-                    *image_path,
-                    Some("emoji/cool.png".to_string()),
-                    "image_path = src"
-                );
-                // UV v-flip 与 mesh::quad Image arm 相同约定：
-                //   TL→(0,1), TR→(1,1), BR→(1,0), BL→(0,0)。
-                assert_eq!(uvs[0], [0.0, 1.0], "TL UV (v-flipped)");
-                assert_eq!(uvs[1], [1.0, 1.0], "TR UV (v-flipped)");
-                assert_eq!(uvs[2], [1.0, 0.0], "BR UV (v-flipped)");
-                assert_eq!(uvs[3], [0.0, 0.0], "BL UV (v-flipped)");
-            }
-            _ => panic!("expected Mesh"),
-        }
-    }
-}
-
-/// RichText run 带 underline → build 后 mesh 含 4 顶点装饰 quad，色 = run.color。
-#[test]
-fn rich_deco_underline_adds_quad() {
-    use crate::text::rich::{
-        RichDeco, RichKind, RichRun, RichStyle, RichWeight, TextDecoLines, TextDecoStyle,
-    };
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    let mut n = Node::default();
-    n.kind = NodeKind::RichText {
-        runs: vec![RichRun {
-            kind: RichKind::Text { text: "AB".into() },
-            color: [1.0, 0.0, 0.0, 1.0], // 红
-            font_id: 0,
-            size_px: 16,
-            weight: RichWeight::Normal,
-            style: RichStyle::Normal,
-            deco: RichDeco {
-                lines: TextDecoLines::UNDERLINE,
-                style: TextDecoStyle::Solid,
-                color: None,
-                thickness: None,
-            },
-            link_id: None,
-        }],
-    };
-    n.style.font_size = 16.0;
-    n.style.text_align = TextAlign::Left;
-    n.layout_rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        w: 200.0,
-        h: 30.0,
-    };
-    let mut scene = Scene::from_nodes(vec![n], vec![]);
-
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    let rn = frame
-        .nodes
-        .iter()
-        .find(|rn| {
-            !is_text_sub_page(rn.node_id)
-                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
-        })
-        .expect("应存在 primary RichText RenderNode");
-    match &rn.payload {
-        NodePayload::Mesh { verts, colors, .. } => {
-            // AB = 2 字形 × 4 顶点 + underline deco quad 4 顶点 = 12 顶点
-            assert_eq!(
-                verts.len(),
-                12,
-                "2 glyph × 4 + underline 4 = 12 verts，实 {}",
-                verts.len()
-            );
-            assert_eq!(colors.len(), verts.len(), "colors 与 verts 等长");
-            // 前 8 顶点是字形色（红），后 4 顶点是装饰线色（红，同 run.color）。
-            // 所有顶点色都应 = run.color（红）。
-            for c in colors.iter() {
-                assert_eq!(*c, [1.0, 0.0, 0.0, 1.0], "装饰线色 = run.color 红");
-            }
-        }
-        _ => panic!("expected Mesh payload"),
-    }
-}
-
-/// RichText run 带 strike → build 后 mesh 含装饰线 quad（厚度 ≥ 1px），色 = run.color。
-#[test]
-fn rich_deco_strike_adds_quad() {
-    use crate::text::rich::{
-        RichDeco, RichKind, RichRun, RichStyle, RichWeight, TextDecoLines, TextDecoStyle,
-    };
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    let mut n = Node::default();
-    n.kind = NodeKind::RichText {
-        runs: vec![RichRun {
-            kind: RichKind::Text { text: "CD".into() },
-            color: [0.0, 0.0, 1.0, 1.0], // 蓝
-            font_id: 0,
-            size_px: 16,
-            weight: RichWeight::Normal,
-            style: RichStyle::Normal,
-            deco: RichDeco {
-                lines: TextDecoLines::LINE_THROUGH,
-                style: TextDecoStyle::Solid,
-                color: None,
-                thickness: None,
-            },
-            link_id: None,
-        }],
-    };
-    n.style.font_size = 16.0;
-    n.style.text_align = TextAlign::Left;
-    n.layout_rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        w: 200.0,
-        h: 30.0,
-    };
-    let mut scene = Scene::from_nodes(vec![n], vec![]);
-
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    let rn = frame
-        .nodes
-        .iter()
-        .find(|rn| {
-            !is_text_sub_page(rn.node_id)
-                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
-        })
-        .expect("应存在 primary RichText RenderNode");
-    match &rn.payload {
-        NodePayload::Mesh { verts, colors, .. } => {
-            // CD = 2 字形 × 4 顶点 + strike deco quad 4 顶点 = 12 顶点
-            assert!(verts.len() > 8, "应含装饰线顶点（>8），实 {}", verts.len());
-            // 所有顶点色 = run.color（蓝）。
-            for c in colors.iter() {
-                assert_eq!(*c, [0.0, 0.0, 1.0, 1.0], "装饰线色 = run.color 蓝");
-            }
-        }
-        _ => panic!("expected Mesh payload"),
-    }
-}
-
-/// RichText dashed 装饰线 → 因分段 quad 数 > solid 单 quad，顶点数更多。
-#[test]
-fn rich_deco_dashed_produces_more_verts_than_solid() {
-    use crate::text::rich::{
-        RichDeco, RichKind, RichRun, RichStyle, RichWeight, TextDecoLines, TextDecoStyle,
-    };
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    for (style, label) in [
-        (TextDecoStyle::Solid, "solid"),
-        (TextDecoStyle::Dashed, "dashed"),
-        (TextDecoStyle::Dotted, "dotted"),
-    ] {
-        let mut n = Node::default();
-        n.kind = NodeKind::RichText {
-            runs: vec![RichRun {
-                kind: RichKind::Text {
-                    text: "ABCDEFGHIJKLMNOP".into(),
-                },
-                color: [1.0; 4],
-                font_id: 0,
-                size_px: 16,
-                weight: RichWeight::Normal,
-                style: RichStyle::Normal,
-                deco: RichDeco {
-                    lines: TextDecoLines::UNDERLINE,
-                    style,
-                    color: None,
-                    thickness: None,
-                },
-                link_id: None,
-            }],
-        };
-        n.style.font_size = 16.0;
-        n.style.text_align = TextAlign::Left;
-        n.layout_rect = Rect {
-            x: 0.0,
-            y: 0.0,
-            w: 400.0,
-            h: 30.0,
-        };
-        let mut scene = Scene::from_nodes(vec![n], vec![]);
-        crate::scene::transform::compute_world_transforms(&mut scene);
-        let (frame, _, _, _) = build_render_nodes(
-            &scene,
-            &fonts,
-            &std::collections::HashMap::new(),
-            &empty_sizes(),
-            &mut test_glyph_atlas(),
-        );
-        let rn = frame
-            .nodes
-            .iter()
-            .find(|rn| {
-                !is_text_sub_page(rn.node_id)
-                    && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
-            })
-            .expect("should exist primary RichText RenderNode");
-        match &rn.payload {
-            NodePayload::Mesh { verts, .. } => {
-                match label {
-                    "solid" => {
-                        // solid: glyphs + 1 quad (4 verts) for deco
-                        let glyph_verts = verts.len() - 4;
-                        assert!(glyph_verts > 0, "{label}: should have glyph vertices");
-                    }
-                    "dashed" | "dotted" => {
-                        // dashed/dotted: segments → >4 deco verts
-                        assert!(
-                            verts.len() > 20,
-                            "{label}: expected >20 verts (segmented), got {}",
-                            verts.len()
-                        );
-                    }
-                    _ => {}
-                }
-            }
-            _ => panic!("{label}: expected Mesh payload"),
-        }
-    }
-}
-
-/// RichText double 装饰线 → 两条 quad（8 顶点），比 solid 单 quad（4 顶点）多。
-#[test]
-fn rich_deco_double_produces_two_quads() {
-    use crate::text::rich::{
-        RichDeco, RichKind, RichRun, RichStyle, RichWeight, TextDecoLines, TextDecoStyle,
-    };
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    let mut n = Node::default();
-    n.kind = NodeKind::RichText {
-        runs: vec![RichRun {
-            kind: RichKind::Text { text: "AB".into() },
-            color: [1.0; 4],
-            font_id: 0,
-            size_px: 16,
-            weight: RichWeight::Normal,
-            style: RichStyle::Normal,
-            deco: RichDeco {
-                lines: TextDecoLines::UNDERLINE,
-                style: TextDecoStyle::Double,
-                color: None,
-                thickness: None,
-            },
-            link_id: None,
-        }],
-    };
-    n.style.font_size = 16.0;
-    n.style.text_align = TextAlign::Left;
-    n.layout_rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        w: 200.0,
-        h: 30.0,
-    };
-    let mut scene = Scene::from_nodes(vec![n], vec![]);
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    let rn = frame
-        .nodes
-        .iter()
-        .find(|rn| {
-            !is_text_sub_page(rn.node_id)
-                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
-        })
-        .expect("should exist primary RichText RenderNode");
-    match &rn.payload {
-        NodePayload::Mesh { verts, .. } => {
-            // 2 glyph × 4 = 8 + double deco 2×4 = 8 = 16 verts
-            assert_eq!(
-                verts.len(),
-                16,
-                "2 glyph × 4 + double (2 quads × 4) = 16 verts, got {}",
-                verts.len()
-            );
-        }
-        _ => panic!("expected Mesh payload"),
-    }
-}
-
-/// RichText 装饰线独立色：deco.color 覆盖 run.color。
-#[test]
-fn rich_deco_independent_color_overrides_run_color() {
-    use crate::text::rich::{
-        RichDeco, RichKind, RichRun, RichStyle, RichWeight, TextDecoLines, TextDecoStyle,
-    };
-    let fonts = match test_font_table() {
-        Some(f) => f,
-        None => {
-            eprintln!("skip: no test font");
-            return;
-        }
-    };
-    let mut n = Node::default();
-    n.kind = NodeKind::RichText {
-        runs: vec![RichRun {
-            kind: RichKind::Text { text: "AB".into() },
-            color: [1.0, 1.0, 1.0, 1.0], // run.color = 白
-            font_id: 0,
-            size_px: 16,
-            weight: RichWeight::Normal,
-            style: RichStyle::Normal,
-            deco: RichDeco {
-                lines: TextDecoLines::UNDERLINE,
-                style: TextDecoStyle::Solid,
-                color: Some([1.0, 0.0, 0.0, 1.0]), // deco.color = 红（独立于 run.color）
-                thickness: None,
-            },
-            link_id: None,
-        }],
-    };
-    n.style.font_size = 16.0;
-    n.style.text_align = TextAlign::Left;
-    n.layout_rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        w: 200.0,
-        h: 30.0,
-    };
-    let mut scene = Scene::from_nodes(vec![n], vec![]);
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    let rn = frame
-        .nodes
-        .iter()
-        .find(|rn| {
-            !is_text_sub_page(rn.node_id)
-                && matches!(&rn.payload, NodePayload::Mesh { program: 1, .. })
-        })
-        .expect("should exist primary RichText RenderNode");
-    match &rn.payload {
-        NodePayload::Mesh { verts, colors, .. } => {
-            // glyphs 色 = 白，deco quad 色 = 红
-            // 2 glyph × 4 = 8 glyph verts (白) + 4 deco verts (红) = 12 verts
-            assert_eq!(verts.len(), 12, "2 glyph × 4 + underline 4 = 12");
-            // 前 8 顶点（字形）色 = 白
-            for c in &colors[0..8] {
-                assert_eq!(*c, [1.0, 1.0, 1.0, 1.0], "glyph color = white");
-            }
-            // 后 4 顶点（装饰线）色 = 红
-            for c in &colors[8..] {
-                assert_eq!(*c, [1.0, 0.0, 0.0, 1.0], "deco color = red (independent)");
-            }
-        }
-        _ => panic!("expected Mesh payload"),
-    }
-}
-
+// RichText retired in Spec-2; deferred to compound-bundle text model.
 /// `ensure_solid` 首次调分配 1×1 白像素，二次命中返同 UV（缓存不重复分配）。
 #[test]
 fn ensure_solid_hit_returns_same_uv() {
@@ -3778,80 +2707,6 @@ fn ensure_solid_hit_returns_same_uv() {
     assert_eq!((r1.u0, r1.v0, r1.u1, r1.v1), (r2.u0, r2.v0, r2.u1, r2.v1));
     assert_eq!(r1.px_w, 1);
     assert_eq!(r1.px_h, 1);
-}
-
-/// 富文本链接 <a> 在窄宽度下跨行换行 → fragments 拆成多 rect，link_id 一致。
-#[test]
-fn rich_fragment_cross_line_link_splits_rects() {
-    use crate::text::rich::{RichDeco, RichFragment, RichKind, RichRun, RichStyle, RichWeight};
-    let ft = test_font_table().expect("need test font");
-    // 窄宽度下 "link text here" 会换行
-    let runs = vec![RichRun {
-        kind: RichKind::Text {
-            text: "link text here".into(),
-        },
-        color: [0.0, 1.0, 0.0, 1.0],
-        font_id: 0,
-        size_px: 24,
-        weight: RichWeight::Normal,
-        style: RichStyle::Normal,
-        deco: RichDeco::default(),
-        link_id: Some(7),
-    }];
-    let mut n = Node::default();
-    n.kind = NodeKind::RichText { runs };
-    n.layout_rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        w: 50.0,
-        h: 80.0,
-    };
-    n.style.color = [1.0, 1.0, 1.0, 1.0];
-    n.style.font_size = 24.0;
-    let mut scene = Scene::from_nodes(vec![n], vec![]);
-    let nid = scene.roots[0]; // from_nodes 覆盖 id，从 scene 取实值
-                              // 预填 text_layout（窄宽度 layout）
-    let layout = crate::text::layout::measure_rich_text(
-        &match &scene.get(nid).unwrap().kind {
-            NodeKind::RichText { runs } => runs.clone(),
-            _ => unreachable!(),
-        },
-        Some(50.0),
-        0.0,
-        crate::style::resolved::TextAlign::Left,
-        &ft.stack_for(None),
-    );
-    scene.text_layouts[nid.index()] = Some(layout);
-    scene.rich_fragments = vec![None; scene.nodes.capacity() + 1];
-    crate::scene::transform::compute_world_transforms(&mut scene);
-
-    let (_frame, _hashes, _sort_keys, rich_fragments) = build_render_nodes(
-        &scene,
-        &ft,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    // 找 node_id 对应的 fragments
-    let frags: Vec<&RichFragment> = rich_fragments
-        .iter()
-        .filter(|(nid_u32, _)| *nid_u32 == nid.0)
-        .flat_map(|(_, f)| f.iter())
-        .collect();
-    assert!(
-        frags.len() >= 2,
-        "窄宽度换行应产 >=2 fragment rect，实际 {} 个",
-        frags.len()
-    );
-    // 所有 fragment 的 link_id 一致
-    for f in &frags {
-        assert_eq!(f.link_id, 7, "所有 fragment link_id 应为 7");
-    }
-    // fragment rect 尺寸合理（非零宽高）
-    for f in &frags {
-        assert!(f.w > 0.0, "fragment w 应 > 0，实际 {:.1}", f.w);
-        assert!(f.h > 0.0, "fragment h 应 > 0，实际 {:.1}", f.h);
-    }
 }
 
 // ── box-shadow 集成测试 ───────────────────────────
@@ -4073,9 +2928,7 @@ fn gradient_text_spans_whole_text_not_per_glyph() {
         }
     };
     let mut n = Node::default();
-    n.kind = NodeKind::Text {
-        content: "AB".into(),
-    };
+    n.kind = NodeKind::TextNode;
     n.style.font_size = 16.0;
     n.style.text_align = TextAlign::Left;
     n.style.background_clip_text = true;
@@ -4091,6 +2944,7 @@ fn gradient_text_spans_whole_text_not_per_glyph() {
         h: 30.0,
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);
+    scene.text_contents.insert(scene.roots[0], "AB".into());
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _, _) = build_render_nodes(
         &scene,

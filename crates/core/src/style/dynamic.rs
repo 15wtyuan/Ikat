@@ -73,15 +73,14 @@ pub struct Specificity(pub u32, pub u32, pub u32); // (id 数, class 数, tag �
 
 // ── 动态规则表（DynamicRule 持有 ParsedSelector + Declarations，均 bincode 可序列化）──
 
-use crate::scene::node::{NodeId, Scene};
+use crate::scene::node::{NodeFlags, NodeId, Scene};
 use crate::style::mapping::apply_decl;
 use crate::style::resolved::{ResolvedStyle, TransitionSpec};
 use std::collections::HashMap;
 
 /// cascade 期 transient：节点显式声明了哪些可继承属性（bitmask）。
 /// 不进 ResolvedStyle（避免改 bincode/pkg 格式），不进 Scene 持久字段。
-#[derive(Default, Clone, Copy)]
-struct InheritedSet(u16);
+use crate::style::resolved::InheritedSet;
 
 const INH_FONT_SIZE: u16 = 1 << 0;
 const INH_COLOR: u16 = 1 << 1;
@@ -131,12 +130,9 @@ pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
         let kind_tag = match &node.kind {
             NodeKind::Container => "div",
             NodeKind::Button => "button",
-            NodeKind::Image { .. } => "img",
-            NodeKind::Text { .. } => "span",
-            // 富文本是叶子 NodeKind（非围栏标签），由 FFI 动态设 RichText runs。
-            // CSS 标签选择器对富文本无意义；按 span（最接近的文本叶子标签）匹配，
-            // 允许 .rich-box span 这类选择器对 RichText 节点生效。
-            NodeKind::RichText { .. } => "span",
+            NodeKind::Image => "img",
+            NodeKind::TextNode => "span",
+            _ => "div", // RichText retired in Spec-2; other leaf kinds map to div.
         };
         if kind_tag != t.as_str() {
             return false;
@@ -242,16 +238,16 @@ fn compound_matches_with_state(
     }
     // 伪类状态门
     let node = scene.get(node_id).expect("live node");
-    if c.pseudo_hover && !node.hovered {
+    if c.pseudo_hover && !node.interaction.flags.contains(NodeFlags::HOVERED) {
         return false;
     }
-    if c.pseudo_active && !node.active {
+    if c.pseudo_active && !node.interaction.flags.contains(NodeFlags::ACTIVE) {
         return false;
     }
-    if c.pseudo_disabled && !node.disabled {
+    if c.pseudo_disabled && !node.interaction.flags.contains(NodeFlags::DISABLED) {
         return false;
     }
-    if c.pseudo_focus && !node.focused {
+    if c.pseudo_focus && !node.interaction.flags.contains(NodeFlags::FOCUSED) {
         return false;
     }
     // data-controller 字面匹配在 compound_matches_node 中处理
@@ -355,7 +351,7 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
             let n = scene.get(node_id).expect("live node");
             (
                 n.style.clone(),
-                n.cascaded_once,
+                n.interaction.flags.contains(NodeFlags::CASCALED),
                 n.base_style.transition.clone(),
             )
         };
@@ -372,7 +368,11 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         matched.sort_by_key(|r| (r.0, r.1, r.2));
         // apply 声明并收集 set-ness：apply_decl 返回 true = 该 prop 成功写入
         // → 若是可继承属性，记对应 bit，供继承 pass 判"子是否显式声明"。
-        let mut inh: InheritedSet = InheritedSet::default();
+        // Seed from base_style.inherited_set (package-time baked declarations),
+        // then OR dynamic cascade bits on top.
+        // new_style is a fresh clone of base_style (not yet modified by apply_decl below),
+        // so its inherited_set == base_style.inherited_set at this point.
+        let mut inh: InheritedSet = new_style.inherited_set;
         for (_, _, _, r) in &matched {
             for decl in &r.declarations {
                 if apply_decl(&mut new_style, &decl.prop, &decl.value) {
@@ -393,7 +393,7 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         // 写 style + 标 cascaded_once
         let node = scene.get_mut(node_id).expect("live node");
         node.style = new_style;
-        node.cascaded_once = true;
+        node.interaction.flags.insert(NodeFlags::CASCALED);
     }
     // 通用可继承属性传播：每节点从 base_style 独立 cascade（不读父），故继承须 rematch 后
     // 按 tree order 补一次：子未显式声明（set_map 无该 bit）→ 取父 effective 值。
@@ -520,7 +520,7 @@ fn emit_transition_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::node::{Node, NodeId, NodeKind, Rect, Scene};
+    use crate::scene::node::{Node, NodeFlags, NodeId, NodeKind, Rect, Scene};
     use crate::style::resolved::TransitionSpec;
     use crate::tween::{Ease, TweenProp};
 
@@ -651,7 +651,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "background-color", "#0000ff"));
-        s.get_mut(bid).unwrap().hovered = true; // 模拟命中 diff 后状态
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED); // 模拟命中 diff 后状态
         rematch_pseudo_classes(&mut s);
         // background_color 是视觉字段，不触发 layout dirty
         assert_eq!(
@@ -683,9 +687,7 @@ mod tests {
             h: 100.0,
         };
         let mut child = Node::default();
-        child.kind = NodeKind::Text {
-            content: "hi".into(),
-        };
+        child.kind = NodeKind::TextNode;
         child.base_style.color = [0.6, 0.63, 0.71, 1.0]; // 灰（打包期继承 parent base）
         child.layout_rect = Rect {
             x: 0.0,
@@ -698,7 +700,11 @@ mod tests {
             .rules
             .push(rule(".par:hover", "color", "#1a1d2e"));
         let pid = s.get(s.roots[0]).unwrap().children[0];
-        s.get_mut(pid).unwrap().hovered = true;
+        s.get_mut(pid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         let cid = s.get(pid).unwrap().children[0];
         let c = s.get(cid).unwrap().style.color;
@@ -725,9 +731,7 @@ mod tests {
             h: 200.0,
         };
         let mut child = Node::default();
-        child.kind = NodeKind::Text {
-            content: "hi".into(),
-        };
+        child.kind = NodeKind::TextNode;
         child.layout_rect = Rect {
             x: 0.0,
             y: 0.0,
@@ -754,9 +758,7 @@ mod tests {
         root.classes = vec!["par".to_string()];
         let mut child = Node::default();
         child.classes = vec!["c".to_string()];
-        child.kind = NodeKind::Text {
-            content: "hi".into(),
-        };
+        child.kind = NodeKind::TextNode;
         let mut s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
         s.dynamic_rules
             .rules
@@ -778,9 +780,7 @@ mod tests {
         root.classes = vec!["a".to_string()];
         let mid = Node::default();
         let mut leaf = Node::default();
-        leaf.kind = NodeKind::Text {
-            content: "x".into(),
-        };
+        leaf.kind = NodeKind::TextNode;
         let mut s = Scene::from_nodes(vec![root, mid, leaf], vec![(0, 1), (1, 2)]);
         s.dynamic_rules.rules.push(rule(".a", "font-size", "20px"));
         rematch_pseudo_classes(&mut s);
@@ -800,7 +800,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:active", "background-color", "#ff0000"));
-        s.get_mut(bid).unwrap().active = true;
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::ACTIVE);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
@@ -816,7 +820,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:disabled", "opacity", "0.5"));
-        s.get_mut(bid).unwrap().disabled = true;
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::DISABLED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.opacity,
@@ -832,7 +840,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "width", "200px"));
-        s.get_mut(bid).unwrap().hovered = true;
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         // 验 style.taffy_style.size.width 被改
         use taffy::style::Dimension;
@@ -849,7 +861,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "color", "#ff0000"));
-        s.get_mut(bid).unwrap().hovered = true;
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(s.get(bid).unwrap().style.color, [1.0, 0.0, 0.0, 1.0]);
     }
@@ -879,7 +895,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".parent:hover .child", "color", "#0000ff"));
-        s.get_mut(root_id).unwrap().hovered = true; // parent hovered
+        s.get_mut(root_id)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED); // parent hovered
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(child_id).unwrap().style.color,
@@ -896,7 +916,11 @@ mod tests {
         let mut s = btn_scene();
         let bid = btn_id(&s);
         s.dynamic_rules.rules.push(rule(".btn", "color", "#ff0000"));
-        s.get_mut(bid).unwrap().hovered = true;
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(s.get(bid).unwrap().style.color, [1.0, 0.0, 0.0, 1.0]);
     }
@@ -910,13 +934,21 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "background-color", "#0000ff"));
-        s.get_mut(bid).unwrap().hovered = true;
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
             Some([0.0, 0.0, 1.0, 1.0])
         );
-        s.get_mut(bid).unwrap().hovered = false; // 取消 hover
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .remove(NodeFlags::HOVERED); // 取消 hover
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
@@ -932,7 +964,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:focus", "background-color", "#0000ff"));
-        s.get_mut(bid).unwrap().focused = true;
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::FOCUSED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
@@ -949,7 +985,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:focus", "background-color", "#0000ff"));
-        s.get_mut(bid).unwrap().focused = false;
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .remove(NodeFlags::FOCUSED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
@@ -983,7 +1023,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".parent:focus .child", "color", "#0000ff"));
-        s.get_mut(root_id).unwrap().focused = true;
+        s.get_mut(root_id)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::FOCUSED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(child_id).unwrap().style.color,
@@ -1002,7 +1046,11 @@ mod tests {
             "background-image",
             "url(icons/home.png)",
         ));
-        s.get_mut(bid).unwrap().hovered = true;
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_image.as_deref(),
@@ -1019,7 +1067,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "background-size", "cover"));
-        s.get_mut(bid).unwrap().hovered = true;
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.get(bid).unwrap().style.background_size,
@@ -1036,7 +1088,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "border-radius", "8px"));
-        s.get_mut(bid).unwrap().hovered = true;
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         // hover → border-radius:8px 生效（四角 h=v=Length(8)）
         let bc = &s.get(bid).unwrap().style.border_radius.corners;
@@ -1196,11 +1252,19 @@ mod tests {
             ease: Ease::Linear,
             delay: 0.0,
         }];
-        s.get_mut(bid).unwrap().cascaded_once = true; // 已 warmup
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(crate::scene::node::NodeFlags::CASCALED); // 已 warmup
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "background-color", "#0000ff"));
-        s.get_mut(bid).unwrap().hovered = true;
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         s.pending_transitions.clear();
         rematch_pseudo_classes(&mut s);
         assert_eq!(
@@ -1227,7 +1291,11 @@ mod tests {
         s.dynamic_rules
             .rules
             .push(rule(".btn:hover", "background-color", "#0000ff"));
-        s.get_mut(bid).unwrap().hovered = true;
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
         rematch_pseudo_classes(&mut s);
         assert_eq!(
             s.pending_transitions.len(),
@@ -1235,7 +1303,11 @@ mod tests {
             "first cascade instant (no transition)"
         );
         assert!(
-            s.get(bid).unwrap().cascaded_once,
+            s.get(bid)
+                .unwrap()
+                .interaction
+                .flags
+                .contains(crate::scene::node::NodeFlags::CASCALED),
             "首次 cascade 后 cascaded_once 置 true"
         );
     }

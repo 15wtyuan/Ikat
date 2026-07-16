@@ -25,7 +25,7 @@ fn main() {
             Some(n) => n,
             None => continue,
         };
-        let is_img = matches!(n.kind, loomgui_core::scene::node::NodeKind::Image { .. });
+        let is_img = matches!(n.kind, loomgui_core::scene::node::NodeKind::Image);
         if !is_img && !want.iter().any(|c| n.classes.iter().any(|cl| cl == c)) {
             continue;
         }

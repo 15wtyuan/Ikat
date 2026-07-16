@@ -15,6 +15,8 @@ fn make_test_pkg(_comp_name: &str) -> Vec<u8> {
         draggable: false,
         tabindex: None,
         data_controller: None,
+        content: None,
+        src: None,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {

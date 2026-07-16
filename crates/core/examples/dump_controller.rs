@@ -162,14 +162,11 @@ fn dump_state(s: &Stage, label: &str) {
     let mut texts: Vec<_> = scene
         .nodes
         .values()
-        .filter(|n| matches!(n.kind, NodeKind::Text { .. }))
+        .filter(|n| matches!(n.kind, NodeKind::TextNode))
         .collect();
     texts.sort_by_key(|n| scene.node_sort_keys.get(n.id.index()).copied().unwrap_or(0));
     for n in &texts {
-        let content = match &n.kind {
-            NodeKind::Text { content } => content.clone(),
-            _ => String::new(),
-        };
+        let content = scene.text_contents.get(&n.id).cloned().unwrap_or_default();
         let short: String = content.chars().take(12).collect();
         let parent_lbl = n
             .parent

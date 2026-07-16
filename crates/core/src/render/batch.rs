@@ -903,9 +903,7 @@ mod tests {
             h: 10.0,
         };
         let mut t = Node::default();
-        t.kind = NodeKind::Text {
-            content: "x".into(),
-        };
+        t.kind = NodeKind::TextNode;
         t.layout_rect = Rect {
             x: 100.0,
             y: 0.0,
@@ -920,6 +918,7 @@ mod tests {
             h: 10.0,
         };
         let scene = Scene::from_nodes(vec![root, a, t, b], vec![(0, 1), (0, 2), (0, 3)]);
+        let _text_id = scene.roots[0]; // text node content now lives in scene.text_contents (Spec-2)
         let ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
         // rns 顺 = scene.nodes.values() 顺（root, a, t, b）
         let mut rns: Vec<RenderNode> = vec![

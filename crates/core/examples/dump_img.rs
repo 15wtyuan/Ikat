@@ -43,7 +43,7 @@ fn main() {
         for comp in pkg.components.values() {
             for n in &comp.nodes {
                 let src = match &n.kind {
-                    NodeKind::Image { src } => src.clone(),
+                    NodeKind::Image => n.src.clone().unwrap_or_default(),
                     _ => continue,
                 };
                 let st = &n.style.taffy_style;

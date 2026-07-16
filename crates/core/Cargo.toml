@@ -3,8 +3,10 @@ name = "loomgui_core"
 version = "0.1.0"
 edition = "2021"
 
+
 [dependencies]
 taffy = { version = "0.5", features = ["serde"] }
+bitflags = { version = "2", features = ["serde"] }
 ttf-parser = "0.20"
 ab_glyph_rasterizer = "0.1"
 etagere = "0.3"

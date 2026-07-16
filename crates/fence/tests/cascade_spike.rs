@@ -11,7 +11,7 @@ use loomgui_fence::{parse_template, IrNodeKind};
 use std::collections::HashMap;
 
 /// ponytail: throwaway mini-bridge for spike; replaced by production bridge (Spec-3 ②) on new enum.
-/// 把 fence ParsedTemplate 的 IrTree 折叠成 core Scene：div→Container、文本叶子→Text{content}。
+/// 把 fence ParsedTemplate 的 IrTree 折叠成 core Scene：div→Container、文本叶子→TextNode。
 fn bridge(html: &str) -> Scene {
     let parsed = parse_template(html, "spike.html");
     assert!(
@@ -23,7 +23,7 @@ fn bridge(html: &str) -> Scene {
     let tree = &parsed.tree;
     // 给每个 Element IrNode 分配一个 Scene 节点 index（DFS 前序，跳过 Text IrNode）。
     // ponytail: 简化——假设测试 HTML 元素都是 div/span，文本是叶子。
-    // SceneEntry = Scene::build 的 entry 元组类型（parent_idx, kind, style, classes, id, draggable, tabindex, data_controller）。
+    // SceneEntry = Scene::build 的 entry 元组类型（..., content, src）。
     type SceneEntry = (
         Option<usize>,
         NodeKind,
@@ -32,6 +32,8 @@ fn bridge(html: &str) -> Scene {
         Option<String>,
         bool,
         Option<i32>,
+        Option<String>,
+        Option<String>,
         Option<String>,
     );
     let mut entries: Vec<SceneEntry> = Vec::new();
@@ -76,8 +78,8 @@ fn bridge(html: &str) -> Scene {
             "div" | "main" | "section" | "header" | "footer" | "nav" | "article" | "aside" => {
                 NodeKind::Container
             }
-            // span/p/h*/strong/em/label/a → Text 叶子（折叠文本）
-            _ => NodeKind::Text { content },
+            // span/p/h*/strong/em/label/a → TextNode 叶子（content 进 side table）
+            _ => NodeKind::TextNode,
         };
         entries.push((
             parent_scene_idx,
@@ -87,6 +89,12 @@ fn bridge(html: &str) -> Scene {
             id_attr,
             false,
             None,
+            None,
+            if matches!(kind, NodeKind::TextNode) {
+                Some(content)
+            } else {
+                None
+            },
             None,
         ));
         // 子元素入栈（逆序保前序）
