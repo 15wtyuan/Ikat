@@ -5,6 +5,8 @@
 >
 > **本轮路线的组织方式（2026-07-15 重定）**：不再横切 R2–R8 大层，而是**先摸黑打通一条最小骨架链、再沿骨架加宽**。原因见 §1。
 >
+> **进度（2026-07-16）**：Spec-1（阶段 S spike）✅ 完成——`div/span` HTML → `<style>` cascade → rect 端到端打通，4 条验收断言绿，三个致命假设证成。**下一棒 = Spec-2（① core 类型化重构）**。详见 §2「阶段 S」状态、§2「①」前置、§8。
+>
 > 权威设计契约：`docs/design/main-design.md`（总体架构）、`docs/design/public-api.md`（公共 API 终态，21 条锁定决策）、`docs/design/projection-layer.md`（C# 投影层机制）、`docs/design/fence.md`（围栏）。
 
 ---
@@ -47,9 +49,17 @@
 2. **旧 `showcase.pkg.bin` 直接弃用**：入库的 `showcase.pkg.bin`（commit a1a294b）是**旧范式时期打的、装的是旧 showcase 内容**，与靶子期重写的新 `showcase/showcase/*.html`（8 页，从未打包）**不是同一个东西**。个人项目不考虑兼容 → **旧包彻底抛弃，不为它做任何基线快照、不保留读旧格式能力**。整程的真基线是"新 showcase HTML 在浏览器里的 rect"，等打包链（②）通了才谈得上。
 3. **pkg 格式版本 = 一刀切升 v17，不留后向兼容**：扩 `NodeKind`（5→~15 变体）改 tag 空间 + 拆 `Node` struct 会改 bincode 形状。直接升 v17、`MIN=MAX=17`（弃 v16，无迁移器）。加 bincode 稳定性测试（序列化形状变了就红），别撞运行时 `BadKind` 才发现。
 
-### 阶段 S · cascade + bridge 探路（spike，在当前 5 变体 enum 上，先行）
+### 阶段 S · cascade + bridge 探路（spike，在当前 5 变体 enum 上，先行）— ✅ 完成（2026-07-16）
 
-在**不动** core 表示层的前提下，用 `div`/`span` 最小例先打通 `HTML → cascade → rect`，把三个致命假设探掉再决定投入大重构：
+> **状态：DONE**。spec `docs/superpowers/specs/2026-07-15-cascade-spike-design.md`、plan `docs/superpowers/plans/2026-07-16-cascade-spike.md`、commit `1c21b4d..9acd01e`（已 merge main）。`div/span` HTML → `<style>` cascade → rect 端到端打通；4 条验收断言（rect / font-size 继承 / class 命中 / display:none 剪枝）全绿（`crates/fence/tests/cascade_spike.rs`，opus 逐条 trace 生产源码确认非假绿）。三个致命假设全部证成，路线可继续 Spec-2。
+>
+> **产出（非废弃，③ 主体）**：(1) fence `css_rules.rs` 选择器解析器——**路径 c 手搓，零新依赖**（cssparser/scraper 全仓未引；cssparser 是分词器不给 selector AST，初版"接 cssparser"前提被推翻），直产 core `ParsedSelector`/`DynamicRule`；子集 class/tag/id/后代/伪类 + specificity。(2) fence 留存 `<style>` 文本 + 解析规则表接进 pipeline（`ParsedTemplate.dynamic_rules`）。(3) core `propagate_color_inheritance`（color-only hack）→ 通用继承 pass（set-ness bitmask，**transient 不进 `ResolvedStyle` / 不升 pkg 版本**）。cascade 引擎 `rematch_pseudo_classes` 本就完整（遍历全规则 + specificity 合并 + base_style 每帧重起），spike 只产规则表喂它。
+>
+> **throwaway（Spec-3 ② 替代）**：S3 的 IrTree→Scene mini-bridge 仅测试内部（div→Container / span→Text），不做 SemanticKind 24 种 total 映射。
+>
+> ⚠️ **Spec-2 前置（spike 挖出，必做）**：set-ness 现只追踪 **dynamic cascade** 写的属性 → 打包期声明（baked 进 base_style）的继承属性拿不到 set-bit，生产环境会被父运行时值覆盖（spike 不触发：base=default、全 dynamic）。**Spec-2 升 v17 + 拆 `ResolvedStyle` 时，set-ness 须打包期 bake 进 base_style**（见 §2 ①、§8）。另：anim-text-color 跨节点 override 随通用 pass 一起丢了，标 ponytail 推 Spec-3。
+
+原 spike 计划（保留对照）——在**不动** core 表示层的前提下，用 `div`/`span` 最小例先打通 `HTML → cascade → rect`，把三个致命假设探掉再决定投入大重构：
 
 - **S1 选择器解析器（净新代码，最大一坨）**：接 `cssparser`（CLAUDE.md 已钉 0.34，但**尚未接进任何 crate**）→ 把 `<style>` 文本 tokenize、拆规则、解析 compound 选择器、从源码算 specificity → 产 `Vec<DynamicRule>`。**先做 cssparser ↔ core 已有 `ParsedSelector`/`Compound` 的阻抗 spike**（0.34 的 selector AST 不是 drop-in）。
 - **S2 继承机制（推翻 color-only hack）**：给 cascade 加"属性是否**显式声明**"追踪（`ResolvedStyle` 当前只存 resolved 值、不存 set-ness）→ 通用 inherited 属性传播（font-size/font-family/line-height/... 全部），**删掉** `propagate_color_inheritance` 的值相等猜测，别复制它。验收测试必须断言：只在祖先规则里设了 `font-size` 的文本节点，字号正确继承。
@@ -59,7 +69,8 @@
 
 ### 摸黑主线（纯 Rust，依赖驱动顺序）
 
-**① core 类型化重构（档位2，见 §3.1）** — 最机械、低风险，放 S 之后
+**① core 类型化重构（档位2，见 §3.1）** — 最机械、低风险，放 S 之后（**= Spec-2，下一棒**）
+- **Spec-2 必做前置（spike 挖出）**：拆 `ResolvedStyle` + 升 v17 时，把"属性是否显式声明"的 **set-ness 一起 bake 进 base_style**。spike 的 set-ness 只追踪 dynamic cascade，打包期声明拿不到 bit → 生产环境继承会被父运行时值覆盖（详见阶段 S ⚠️ + §8）。这是 ③ cascade 收尾能正确处理打包期声明的前提，趁拆 struct + 升版本一次做掉。
 - `NodeKind` enum 从 5 变体扩容到承载围栏语义（div/text/image/button + 各控件语义），`match` 分发。**81 处 `NodeKind::` match（14 文件，重灾 scene/dynamic.rs 32、layout/mod.rs 17）编译器会牵着逐处过。**
 - 控件私有状态（slider value/min/max、dropdown selectedIndex、textfield value/光标）走 **side table**（按 NodeId 索引的稀疏表），续用旧代码 anim/scroll 已在用的 `HashMap<NodeId,_>`/并行数组模式——**不塞进统一 struct**。
 - 共性运行时 flag（hovered/active/disabled/focused）收进 bitflags；27 字段巨 struct 按关注点（结构/几何/运行时状态）拆分。
@@ -254,4 +265,5 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 - **攒批/set_transform 推迟到第一个高频控件（2026-07-15）**：摸黑期即时过桥兜底，标 ponytail 欠债。
 - **设计自上而下、实现按合理路径**：公共 API 优先（已冻结 Public/*.cs + public-api.md），实现从内向外（先 Rust 骨架，后端对象层随后）。
 - **平台移植排最后**；**编辑器工具链并行**（独立于 runtime）。
+- **Spec-1 阶段 S spike 完成（2026-07-16）**：三个致命假设全部证成，`div/span` HTML → `<style>` cascade → rect 端到端打通（4 验收断言绿，commit `1c21b4d..9acd01e` 已 merge main）。关键定论：① 选择器解析器走**路径 c 手搓、零新依赖**（cssparser/scraper 全仓未引；cssparser 是分词器不给 selector AST——初版"接 cssparser"前提被推翻）；selector/rule **类型留 core**（`style/dynamic.rs`），fence 直产 core 类型（无适配层/共享 crate）。② cascade 引擎 `rematch_pseudo_classes` **本就完整**（非"复用 rematch 扩一下"——它遍历全规则 + specificity 合并 + base_style 每帧重起），spike 只产规则表喂它。③ 通用继承 pass 替代 color-only hack，set-ness 用 transient bitmask **不进 `ResolvedStyle`**（避免升 pkg 版本）。真实断点经核为**三处**（IrTree↔TemplateNode 桥 / packer HTML 编排被删 / `<style>` 选择器解析器缺席），非旧述"一处"。**⚠️ Spec-2 前置**：set-ness 须打包期 bake 进 base_style（spike 只追 dynamic cascade，打包期声明会被父运行时值覆盖；详见 §2 ① + 阶段 S ⚠️）。anim-text-color 跨节点 override 随通用 pass 丢弃，标 ponytail 推 Spec-3。
 
