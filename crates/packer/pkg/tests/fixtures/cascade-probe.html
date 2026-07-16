@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>cascade probe</title>
+<!--
+  Cascade-finalization probe fixture.
+
+  Deliberately stays inside what the current selector parser + cascade engine
+  already support, so it round-trips HTML -> pkg -> Stage -> layout today.
+  Selector subset : class / tag / id / descendant / pseudo-class (hover/active/disabled/focus)
+  Property subset: display / flex-direction / width / height / color / font-size
+  Out of scope (parser returns None -> pack error if used):
+    attribute selectors [..], comma lists, child >, adjacent +/~, :nth-child,
+    @keyframes/animation, background-image/gradient/filter/box-shadow/transform/transition.
+
+  What the Stage public API can assert today: rect / visible / find_node_by_id.
+  What it CANNOT assert yet (cascade-finalization must add query exits):
+    inherited font-size/color, computed style, node-kind fidelity.
+-->
+<style>
+div { display: flex; flex-direction: column; }
+#root { width: 320px; font-size: 14px; color: #222222; }
+.row { flex-direction: row; }
+.title { font-size: 20px; color: #114488; }
+.muted { color: #888888; }
+.row .lbl { font-size: 12px; }
+#root .title { color: #0066aa; }
+button { color: #ffffff; }
+button:hover { color: #dddddd; }
+button:active { color: #ffeeaa; }
+button:disabled { color: #666666; }
+button:focus { color: #aaffff; }
+input { width: 200px; }
+progress { width: 160px; height: 8px; }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="root">
+  <div class="title" id="title">音量设置</div>
+  <div class="row" id="row-vol">
+    <span class="lbl" id="lbl-master">主音量</span>
+    <input type="range" id="vol" min="0" max="100">
+    <span class="muted" id="vol-val">80</span>
+  </div>
+  <div class="row" id="row-mute">
+    <input type="checkbox" id="mute">
+    <span>静音</span>
+  </div>
+  <progress id="pb" value="50" max="100"></progress>
+  <div class="row" id="row-quality">
+    <select id="quality">
+      <option value="low">低</option>
+      <option value="high" selected>高</option>
+    </select>
+  </div>
+  <ul id="hints">
+    <li id="li1">提示一</li>
+    <li>提示二</li>
+  </ul>
+  <div class="row" id="row-actions">
+    <button id="save">保存</button>
+    <button id="cancel" disabled>取消</button>
+    <button class="hidden" id="ghost">不应渲染</button>
+  </div>
+</div>
+</body>
+</html>
