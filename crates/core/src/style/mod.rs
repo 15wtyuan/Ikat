@@ -1,4 +1,5 @@
 pub mod color_filter;
+pub mod computed;
 pub mod dynamic;
 pub mod mapping;
 pub mod resolved;
