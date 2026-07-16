@@ -179,7 +179,7 @@ Node
 - `Container` 才暴露子节点增删；叶子类没有 `AddChild()`。
 - `Button`、`Link` 等可包含图标和文本，因此属于容器。
 - 公共对象持有稳定身份，内部句柄（NodeId）不暴露。
-- `input[type]` 和白名单 `role` 是不可变结构属性。
+- `input[type]` 是不可变结构属性（决定控件类型）；`role` / `aria-*` 是全局属性（不参与 R1 类型分派，见 §3.3）。
 - **无 Panel/Component 类型**：作用域是运行时标记（`IsScopeRoot`），非类型；`Instantiate` 返回模板根真实类型。完整层级与划线见 [public-api.md](public-api.md) §2。
 
 ### 4.2 顶层上下文
