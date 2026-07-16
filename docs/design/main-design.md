@@ -83,8 +83,8 @@
 **用标准 HTML 元素**：AI 训练数据海量、浏览器原生渲染。不自创框架 Widget 标签（如 `<scroll-view>`）——已有的标准 HTML/CSS 能力（如 `overflow`）不用自定义标签重复。
 
 **标准布局语义**：
-- `div/main/section/header/footer/nav/article/aside` 默认 `display:block`（标准浏览器默认）。
-- `span/a/strong/em/small` 默认 inline。
+- `div/header/nav/p/ul/ol/li/option` 默认 `display:block`（标准浏览器默认）。
+- `span/strong/em/label/button/a/img/canvas/input/textarea/select/progress/template/slot` 默认 inline。
 - `display:flex` 默认 `flex-direction:row`（标准 CSS 默认）。
 - 需要纵向堆叠明确写 `display:flex; flex-direction:column`。
 - `display:block/flex/none` 选择内部布局 Strategy，**不改变节点类型**。
@@ -95,13 +95,13 @@
 | 类别 | 元素 | 公共类型/语义 |
 |---|---|---|
 | 文档与样式 | `html/head/body/title/meta/style/link[rel=stylesheet]` | 打包和 authoring 元数据，不进入实时树 |
-| 结构 | `div/main/section/header/footer/nav/article/aside` | `Container` |
-| 文本 | `span/p/h1-h6/strong/em/small/br` | Inline/Text Block 语义 |
+| 结构 | `div/header/nav` | `Container`（block 默认） |
+| 文本 | `p/span/strong/em/br` | `TextBlock/TextElement/LineBreak` |
 | 关联文本 | `label` | `Label` |
 | 操作 | `button/a` | `Button/Link` |
 | 图片与绘制 | `img/canvas` | `Image/Canvas` |
-| 输入 | `input/textarea/select/option` | 根据标准元素签名创建控件 |
-| 状态反馈 | `progress` | `ProgressBar` |
+| 输入 | `input[type]` | `TextField/NumberField/Slider/Toggle/RadioButton` |
+| 输入 | `textarea/select/option` | `TextArea/Dropdown/OptionItem` |
 | 列表 | `ul/ol/li` | `ListView/ListItem` |
 | 模板 | `template` | 惰性 `UITemplate`，不进入实时树 |
 | 内容投影 | `slot` | Custom Element 的标准 Slot |
@@ -112,13 +112,22 @@
 
 > **节点类型由稳定 HTML 语义签名决定：tag + 不可变结构属性。CSS 永远不决定类型。**
 
-- `<input type="range">` → `Slider`
-- `<input type="checkbox">` → `Toggle`
-- `<input type="radio">` → `RadioButton`
-- `<input type="text">` → `TextField`
-- `<div role="tablist">` → `TabList`（白名单 ARIA role）
+完整签名表见 [fence.md](fence.md) §3.1。R1 的类型分派只看 tag + `input[type]`：
 
-`type` 和 `role` 是不可变结构属性；实例化后不能改成另一种控件类型。普通动态状态（`checked/open/selected/disabled/aria-selected`）可变。
+- `<div>` / `<header>` / `<nav>` → `Container`
+- `<p>` → `TextBlock`；`<span>` / `<strong>` / `<em>` → `TextElement`
+- `<button>` → `Button`；`<a>` → `Link`；`<label>` → `Label`
+- `<img>` → `Image`；`<canvas>` → `Canvas`；`<br>` → `LineBreak`
+- `<input type="text/password/search">` → `TextField`
+- `<input type="number">` → `NumberField`
+- `<input type="range">` → `Slider`
+- `<input type="checkbox">` → `Toggle`；`<input type="radio">` → `RadioButton`
+- `<textarea>` → `TextArea`；`<select>` → `Dropdown`；`<option>` → `OptionItem`
+- `<ul>` / `<ol>` → `ListView`；`<li>` → `ListItem`
+- `<progress>` → `ProgressBar`；`<template>` → `Template`；`<slot>` → `Slot`
+- 含 `-` 的标签名 → `CustomElement`（R3 注册验证）
+
+`input[type]` 是结构属性（Fence Gate 校验值域，Annotate 阶段决定最终类型），实例化后不能改成另一种控件类型。普通动态状态（`checked/selected/disabled`）可变。`role` / `aria-*` 是全局属性（Fence Gate 校验白名单值域），但不参与 R1 的 SemanticKind 分派——ARIA 复合控件类型是后续阶段（§3.4）。
 
 ### 3.4 WAI-ARIA 复合控件
 
@@ -128,7 +137,7 @@ HTML 没有原生 Tabs、Tree 等标签。此类控件采用白名单内的标�
 <div role="tablist" aria-label="设置">
     <button role="tab" aria-controls="graphics-panel" aria-selected="true">画面</button>
 </div>
-<section role="tabpanel" aria-labelledby="graphics-tab">...</section>
+<div role="tabpanel" aria-labelledby="graphics-tab">...</div>
 ```
 
 框架负责输入导航、`aria-selected`、`hidden` 同步。打包器验证 role 组合与 ARIA 关系。
@@ -435,7 +444,7 @@ bool hit = ui.IsPointerOnUI;
 
 - 裸文本形成叶子 `TextNode`。
 - inline 元素是语义容器。
-- `p/h1-h6` 建立文本 block。
+- `p` 建立文本 block。
 - `TextContent` 与 DOM 一样，用纯文本替换当前全部子内容。
 - 修改 inline 子树只使最近文本上下文失效。
 
