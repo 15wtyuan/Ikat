@@ -120,6 +120,54 @@ pub enum NodeKind {
 
 ---
 
+impl NodeKind {
+    /// Container content model: user-arrangeable children (div/button/a/p/span/ul/li/...).
+    /// Used by layout (build taffy subtree) and render (batch DFS) to classify nodes.
+    /// Single source of truth — adding a container variant only changes this method.
+    pub fn is_container(self) -> bool {
+        matches!(
+            self,
+            Self::Container
+                | Self::TextBlock
+                | Self::TextElement
+                | Self::Label
+                | Self::Button
+                | Self::Link
+                | Self::ListView
+                | Self::ListItem
+                | Self::Canvas
+                | Self::Slot
+                | Self::CustomElement
+        )
+    }
+
+    /// Leaf: private internal structure, no user-arrangeable children.
+    /// `!is_container()` — provided as a named method for readability at call sites.
+    pub fn is_leaf(self) -> bool {
+        !self.is_container()
+    }
+
+    /// Same as `is_container()` — semantic alias for "has children in content model".
+    pub fn has_children(self) -> bool {
+        self.is_container()
+    }
+}
+```
+
+### 1.6 谓词方法（reviewer 建议）
+
+11 个容器变体 vs 11 个叶子变体的二元分类是 81 处 match 里最高频的模式
+（layout 建不建 taffy 子树、render batch DFS 分流、build 遍不遍历 children）。
+若每个站点都写 `Container | TextBlock | ... | CustomElement`，11 变体的 match arm 散在各处，
+加一个新容器变体得改所有站点且漏一个只在那一处编译报错。谓词方法收成单一真相源：
+改一处全改、加变体只改一个方法。
+
+**不收谓词的场景**：dirty_text 门控（`matches!(k, NodeKind::TextNode)`）是具体变体行为
+（只有 TextNode 需要文本重排版），不是容器/叶子分类——留 match arm。layout measure dispatch
+（TextNode 查 text_contents、Image 查 image_srcs）也需具体变体 + side table 查表——留 match。
+
+---
+
 ## 2. Node struct 拆分
 
 ### 2.1 拆分原则
@@ -486,5 +534,40 @@ Spec-2 阶段 runtime create_node 不支持带初始 content（低频路径，�
 10. **cargo fmt + clippy + 全测试绿**。
 11. **升 v17**（PKG_FORMAT_VERSION = 17，MIN=MAX=17）+ bincode 稳定性测试
     （NodeKind 全变体 / ResolvedStyle 含 inherited_set / TemplateNode 含 content-src）。
+3. **NodeKind enum 扩容**（5 -> 22 unit variant）+ Default 改 Container + 谓词方法
+   （`is_container()`/`is_leaf()`/`has_children()`，§1.6）——编译报错。
+4. **Node struct 拆分**（interaction 子 struct + flags）——编译报错叠加（纯运行时，不影响 pkg）。
+5. **TemplateNode 加 content/src 字段**（§3.2 硬伤修复）——序列化形状变。
+6. **Scene 加 side table**（text_contents / image_srcs）+ build entry tuple 扩到 10-tuple。
+7. **逐文件迁移 81 处 match**（编译器牵着走，从 dynamic.rs 开始）。
+   容器/叶子分类用 `is_container()`/`is_leaf()` 谓词；Text{content} ->
+   TextNode + `scene.text_contents[&id]` 查表。
+8. **instantiate 循环填 side table**（stage.rs:597 -> 拿 NodeId 事后填 content/src，§3.2）。
+9. **spike mini-bridge + 测试适配**（cascade_spike.rs 的 SceneEntry 扩到 10-tuple、Text{content} ->
+   TextNode + side table）。
+10. **cargo fmt + clippy + 全测试绿**。
+11. **升 v17**（PKG_FORMAT_VERSION = 17，MIN=MAX=17）+ bincode 稳定性测试
+    （NodeKind 全变体 / ResolvedStyle 含 inherited_set / TemplateNode 含 content-src）。
 
 每步后 `cargo build -p loomgui_core` 验证编译，步骤 7 后 `cargo test` 验证全绿。
+### 6.2 迁移策略
+
+**优先用谓词方法处理容器/叶子二元分类**（§1.6）。现有最高频的模式是
+`NodeKind::Container | Button => { ... }`（render batch DFS）——扩到全容器类时，
+**直接换成 `node.kind.is_container()`**，不列 11 变体链。同理叶子分支用 `node.kind.is_leaf()`。
+好处：加新容器变体只改 `is_container()` 一处，所有调用方自动跟上；不漏变体。
+
+**具体变体行为仍走 match arm**（谓词不覆盖）：
+
+- **dirty_text 门控**（dynamic.rs:84,143）：`matches!(k, NodeKind::Text { .. })` ->
+  `matches!(k, NodeKind::TextNode)`。只有 TextNode 需要文本重排版，不是容器/叶子分类。
+- **layout measure dispatch**（layout/mod.rs:152）：`match kind { Text{content} => ...,
+  Image{src} => ..., _ => None }` -> `match kind { NodeKind::TextNode => { let c =
+  &scene.text_contents[&node.id]; ... }, NodeKind::Image => { let s =
+  &scene.image_srcs[&node.id]; ... }, _ => None }`。需具体变体 + side table 查表。
+- **render mesh 生成**：Image 单纹理 quad、Container 纯背景——各变体的 payload 渲染逻辑，
+  走 match arm 分发。
+
+**控件叶子**（TextField/Slider/Toggle/.../ProgressBar）在 Spec-2 阶段行为与 Image 类似
+（不建子 taffy 树、measure 或固定尺寸），但具体行为留到控件束实现。Spec-2 里它们落到
+match 的 `_ => ...` 分支或 `is_leaf()` 后的默认叶子处理。
