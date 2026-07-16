@@ -5,7 +5,7 @@
 >
 > **本轮路线的组织方式（2026-07-15 重定）**：不再横切 R2–R8 大层，而是**先摸黑打通一条最小骨架链、再沿骨架加宽**。原因见 §1。
 >
-> **进度（2026-07-16）**：Spec-1（阶段 S spike）✅ 完成——`div/span` HTML → `<style>` cascade → rect 端到端打通，4 条验收断言绿，三个致命假设证成。**下一棒 = Spec-2（① core 类型化重构）**。详见 §2「阶段 S」状态、§2「①」前置、§8。
+> **进度（2026-07-16）**：Spec-1（阶段 S spike）✅ 完成；**Spec-2（① core 类型化重构）✅ 完成**——NodeKind 5→22 unit 变体、Node 27 字段巨 struct 拆分（interaction 子 struct + bitflags）、leaf 数据迁移 side table、ResolvedStyle.inherited_set 打包期 bake、pkg 格式升 v17。全 workspace 675+ 测试绿，fmt/clippy 清。下一棒 = ② IrTree↔NodeKind 桥（生产级 HTML→scene）。详见 §2「①」、§8。
 >
 > 权威设计契约：`docs/design/main-design.md`（总体架构）、`docs/design/public-api.md`（公共 API 终态，21 条锁定决策）、`docs/design/projection-layer.md`（C# 投影层机制）、`docs/design/fence.md`（围栏）。
 
@@ -69,7 +69,7 @@
 
 ### 摸黑主线（纯 Rust，依赖驱动顺序）
 
-**① core 类型化重构（档位2，见 §3.1）** — 最机械、低风险，放 S 之后（**= Spec-2，下一棒**）
+**① core 类型化重构（档位2，见 §3.1）** ✅ DONE — Spec-2 完成（commit `c77967c..221c558`，branch `codex-spec-2-core-refactor`）
 - **Spec-2 必做前置（spike 挖出）**：拆 `ResolvedStyle` + 升 v17 时，把"属性是否显式声明"的 **set-ness 一起 bake 进 base_style**。spike 的 set-ness 只追踪 dynamic cascade，打包期声明拿不到 bit → 生产环境继承会被父运行时值覆盖（详见阶段 S ⚠️ + §8）。这是 ③ cascade 收尾能正确处理打包期声明的前提，趁拆 struct + 升版本一次做掉。
 - `NodeKind` enum 从 5 变体扩容到承载围栏语义（div/text/image/button + 各控件语义），`match` 分发。**81 处 `NodeKind::` match（14 文件，重灾 scene/dynamic.rs 32、layout/mod.rs 17）编译器会牵着逐处过。**
 - 控件私有状态（slider value/min/max、dropdown selectedIndex、textfield value/光标）走 **side table**（按 NodeId 索引的稀疏表），续用旧代码 anim/scroll 已在用的 `HashMap<NodeId,_>`/并行数组模式——**不塞进统一 struct**。
@@ -266,4 +266,4 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 - **设计自上而下、实现按合理路径**：公共 API 优先（已冻结 Public/*.cs + public-api.md），实现从内向外（先 Rust 骨架，后端对象层随后）。
 - **平台移植排最后**；**编辑器工具链并行**（独立于 runtime）。
 - **Spec-1 阶段 S spike 完成（2026-07-16）**：三个致命假设全部证成，`div/span` HTML → `<style>` cascade → rect 端到端打通（4 验收断言绿，commit `1c21b4d..9acd01e` 已 merge main）。关键定论：① 选择器解析器走**路径 c 手搓、零新依赖**（cssparser/scraper 全仓未引；cssparser 是分词器不给 selector AST——初版"接 cssparser"前提被推翻）；selector/rule **类型留 core**（`style/dynamic.rs`），fence 直产 core 类型（无适配层/共享 crate）。② cascade 引擎 `rematch_pseudo_classes` **本就完整**（非"复用 rematch 扩一下"——它遍历全规则 + specificity 合并 + base_style 每帧重起），spike 只产规则表喂它。③ 通用继承 pass 替代 color-only hack，set-ness 用 transient bitmask **不进 `ResolvedStyle`**（避免升 pkg 版本）。真实断点经核为**三处**（IrTree↔TemplateNode 桥 / packer HTML 编排被删 / `<style>` 选择器解析器缺席），非旧述"一处"。**⚠️ Spec-2 前置**：set-ness 须打包期 bake 进 base_style（spike 只追 dynamic cascade，打包期声明会被父运行时值覆盖；详见 §2 ① + 阶段 S ⚠️）。anim-text-color 跨节点 override 随通用 pass 丢弃，标 ponytail 推 Spec-3。
-
+- **Spec-2 ① core 类型化重构完成（2026-07-16）**：NodeKind 5 payload 变体 → 22 unit 变体（derives Copy + 谓词方法 is_container()/is_leaf()/has_children()）；Node 27 字段巨 struct 拆分（hovered/active/focused/disabled/cascaded_once → NodeFlags bitflags，	ouchable/draggable/tabindex → NodeInteraction 子 struct）；leaf 数据（text content / image src）从 enum payload 迁移到 Scene.text_contents / Scene.image_srcs HashMap side table，跨 pkg.bin 持久化靠 TemplateNode.content / TemplateNode.src 新字段（spike 挖出的数据丢失硬伤修法）；ResolvedStyle.inherited_set 打包期 bake（spike 前置完成）；pkg 格式 v16→v17。全 workspace 675+ 测试绿。关键定论：① RichText 变体退役（layout/render 旁路删除，	ext/rich.rs 算法保留待复合束）；② NodeKind 全 unit 后 bincode serialize = 4B（FixintEncoding u32 判别值）；③ Scene::build entry tuple 8→10（末两位 content/src）。commit `c77967c..221c558`，branch `codex-spec-2-core-refactor`。
