@@ -1790,6 +1790,7 @@ version = "0.1.0"
 dependencies = [
  "ab_glyph_rasterizer",
  "bincode",
+ "bitflags 2.13.0",
  "etagere",
  "serde",
  "serde_json",

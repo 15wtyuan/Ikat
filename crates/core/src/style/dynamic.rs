@@ -80,8 +80,7 @@ use std::collections::HashMap;
 
 /// cascade 期 transient：节点显式声明了哪些可继承属性（bitmask）。
 /// 不进 ResolvedStyle（避免改 bincode/pkg 格式），不进 Scene 持久字段。
-#[derive(Default, Clone, Copy)]
-struct InheritedSet(u16);
+use crate::style::resolved::InheritedSet;
 
 const INH_FONT_SIZE: u16 = 1 << 0;
 const INH_COLOR: u16 = 1 << 1;
@@ -372,7 +371,11 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         matched.sort_by_key(|r| (r.0, r.1, r.2));
         // apply 声明并收集 set-ness：apply_decl 返回 true = 该 prop 成功写入
         // → 若是可继承属性，记对应 bit，供继承 pass 判"子是否显式声明"。
-        let mut inh: InheritedSet = InheritedSet::default();
+        // Seed from base_style.inherited_set (package-time baked declarations),
+        // then OR dynamic cascade bits on top.
+        // new_style is a fresh clone of base_style (not yet modified by apply_decl below),
+        // so its inherited_set == base_style.inherited_set at this point.
+        let mut inh: InheritedSet = new_style.inherited_set;
         for (_, _, _, r) in &matched {
             for decl in &r.declarations {
                 if apply_decl(&mut new_style, &decl.prop, &decl.value) {

@@ -208,6 +208,9 @@ pub struct ResolvedStyle {
     /// CSS INHERITED 属性：父元素声明则作用于所有后代文字，故挂 style 而非 per-run。
     /// build 期按 effect 类型分 Back/Front 层注入字形渲染。空 = 无效果。
     pub text_effects: Vec<crate::text::font_effect::FontEffect>,
+    /// Which inherited CSS properties were explicitly declared (set-ness bitmask).
+    /// Baked at package time into base_style; rematch seeds from this each frame.
+    pub inherited_set: InheritedSet,
 }
 
 /// box-shadow 几何近似（无 blur，真实 blur 推 v1.14+ 离屏 RT）。
@@ -264,6 +267,7 @@ impl Default for ResolvedStyle {
             box_shadow: None,
             transition: Vec::new(),
             text_effects: Vec::new(),
+            inherited_set: InheritedSet::default(),
         }
     }
 }
@@ -596,5 +600,15 @@ mod tests {
             );
             assert_eq!(back, s, "全字段 round-trip 仍相等 ({v})");
         }
+    }
+
+    #[test]
+    fn inherited_set_bincode_roundtrip() {
+        let mut s = ResolvedStyle::default();
+        s.inherited_set = InheritedSet(0b0000_0011); // font-size + color set
+        let bytes = bincode::serialize(&s).expect("serialize");
+        let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
+        assert_eq!(back.inherited_set, s.inherited_set);
+        assert_eq!(back, s, "full round-trip equal");
     }
 }
