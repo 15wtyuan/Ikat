@@ -87,6 +87,7 @@ kind_tag 扩容改写读写映射 = pkg 格式变化 = 必须 bump 版本。fe81
 - **read**（asset/mod.rs `read_package`）：删 4-tag 识别，改为 `NodeKind::from_u8(byte)`——match 0..22 → 对应变体，其余返 `PkgError::BadKind`。
 - `NodeKind` 新增 `pub fn from_u8(b: u8) -> Option<NodeKind>`（match，不用 unsafe transmute）。
 - **变体只追加不插中间**：保持现有判别值稳定，新变体追加到 enum 末尾（MIN=MAX 模式下加变体本就要 bump，但追加语义上更安全）。
+- **tag 数字含义有意改变**：v17 的语义常量（`KIND_BUTTON=1`…）弃用，v18 改用 NodeKind 判别值（`Button=6`、`Image=8`…）。弃 v17 无读者，数字含义变更无害——此说明避免后人对照旧常量困惑。
 
 ### 3.3 删 RichText 死字段
 
@@ -152,6 +153,10 @@ IrTree 是 arena（全局 `IrNodeId(usize)`），TemplateNode 用组件内局部
 
 showcase 一个 workspace 含多 package，每 package 含多 HTML 组件（含 `components/*.html`）。桥函数按单组件：`fn bridge(parsed: &ParsedTemplate) -> (Vec<TemplateNode>, Vec<ControllerEntry>)`，遍历 `parsed.tree.roots`（fence 对一个 HTML 文件产一个 IrTree，roots 为顶层元素；showcase 组件 HTML 通常 `<body>` 下单根，如 form.html 的 `<div class="root">`）。每 HTML 文件 = 一个 `ComponentTemplate`（文件名去扩展 = 组件名），多组件组装在 §5 编排层。
 
+### 4.7 单根契约（防御性兜底）
+
+fence 对 showcase 组件 HTML（shell 标签 html/head/body 已剥，`<body>` 下单根）产单 root。但 `Stage::instantiate -> NodeId` 是**单根契约**（组件根 = `nodes[0]`，`parent_idx == None` 仅一个），多根会破坏它。bridge 入口检查 `parsed.tree.roots.len()`：**多根报 Diagnostic（"组件 HTML 必须单一根元素"），不默默产森林**（不静默降级）。showcase 全单根不触发，此为加固防未来 body 下多顶层元素（header+main+footer）默默出错。
+
 ---
 
 ## 5. C：packer 接 fence 打包编排
@@ -182,7 +187,7 @@ for pkg in &ws.packages:                       // 每个 package
 
 ### 5.2 referenced_sprites 回接 atlas validate
 
-`atlas/validate.rs::assign_and_validate`（引用图交叉验证）当前是死代码（d8fe705 删了 build 里的调用）。② 把 `all_refs` 累积进 `BuildReport`，调 `assign_and_validate` 验证"所有 HTML 引用的 sprite 都在 atlas 里"——缺失即报错（不静默降级）。命中 fe81e76 后 build.rs 的 `// kept for future cross-validation (R3)` 注释清除。
+`atlas/validate.rs::assign_and_validate`（引用图交叉验证）当前是死代码（d8fe705 删了 build 里的调用，函数本身 + 4 单测存活）。② 把 `all_refs` 累积进 `BuildReport`，调它验证"所有 HTML 引用的 sprite 都在 atlas 里"——缺失即报错（不静默降级）。签名 `assign_and_validate(referenced: &[String], atlases: &[(String, &AtlasManifest)]) -> Result<(), String>`（validate.rs:6）与 §5 想喂的 `all_refs + atlases` 已对得上，直接接入即可。命中 fe81e76 后 build.rs 的 `// kept for future cross-validation (R3)` 注释清除。
 
 ---
 
@@ -202,11 +207,11 @@ fence Stage 4 `resolve_inline_styles_with_diags`（css_resolve.rs）产每元素
 
 **修法**：`css_resolve` 的 `apply_decl(&mut styles[idx], prop, value)` 成功返回后，查 `CssPropSpec.inherited`（fence schema css.rs 已有此 flag）；为 true 则 set `styles[idx].inherited_set` 对应 bit。
 
-**统一双源**（坑 161 点名）：当前"哪些属性可继承"有两份来源——
-- fence schema `CssPropSpec.inherited: bool`（css.rs）
-- core `inherited_bit(prop) -> Option<u16>` + `INH_*` 常量（dynamic.rs:85-105，private）
+**统一双源 → 单一真相源留 core（方案 a）**（坑 161 点名；dynamic.rs:94-95 注释自标"Spec-3 再统一"）。当前 prop→可继承 bit 有两份来源：
+- core `inherited_bit(prop) -> Option<u16>` + `INH_*` 常量（dynamic.rs，private；rematch set bit 与 propagate `copy_if_unset` 都消费它）
+- fence schema `CssPropSpec.inherited: bool`（css.rs，build-time 围栏校验用）
 
-二者需核对一致并合并为**单一真相源**：把 core 的 `inherited_bit`（或 `INH_*` → prop 名映射）pub 出来供 fence 调，或把 bit 编进 fence schema（`CssPropSpec` 加 `inh_bit: Option<u16>`）。实现期定具体形态；关键是消除"fence 标 inherited 但 core 无对应 bit"或反之一类的不一致。
+**决定**：把 core 的 `inherited_bit` + `INH_*` **pub 出来**，fence `css_resolve` 的 inline bake **直接调 `core::style::inherited_bit(prop)`**——返回 `Some(bit)` 就 set。bit 的定义与消费都在 core（单一真相源），fence 不再自带 prop→bit 副本，"fence 标 inherited 但 core 无 bit"的不一致从结构上消失。fence schema 的 `inherited: bool` **保留**（服务 build-time 围栏校验，不参与运行时 cascade）。同时更新 dynamic.rs:94-95 注释（删"Spec-3 再统一"，标"已统一到 core 单源"）。
 
 **回归测试**（锁坑 161 不复发）：`<div style="color:red"><span style="color:blue">x</span></div>` → smoke 断言 span 渲染 **blue**（inline 声明不被父覆盖）；class 规则继承同时验。
 
@@ -304,7 +309,7 @@ CI 门禁：`cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D war
 3. **D' base_style + 坑 161**：fence css_resolve 接 inherited_set bake + 统一双源 → 桥填 base_style = styles[ir_idx] + 回归测试。
 4. **C 编排**：packer::build 加 packages 循环 + write_package + referenced_sprites 回接 atlas validate + runtime.json。
 5. **E smoke**：core 集成测试主门 5 断言 + form.html 冒烟。
-6. **cargo fmt + clippy + 全测试绿**；重编 .dll（NodeKind repr 改动影响 FFI ABI？核实——enum repr 不改 u32 ABI 判别值布局应兼容，但重编核实）+ commit .dll。
+6. **cargo fmt + clippy + 全测试绿**；按工作流重编 + commit .dll。**注意**：NodeKind 不跨 C ABI（FFI 边界是 NodeId u32，`create_node` 吃 tag 字符串），`#[repr(u8)]` 零 ABI 影响——重编只因 pkg v18 读写代码在 core→.dll，非 ABI 变更。
 7. 更新 roadmap 进度行（Spec-3 ② 完成）+ 清除 fe81e76 的 `TODO(pkg-format-cleanup)` / 坑 161 标记。
 
 每步后 `cargo build`/`cargo test` 验证。A' 后先确认 v18 roundtrip 绿再进 B。
