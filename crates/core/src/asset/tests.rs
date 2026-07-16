@@ -490,3 +490,43 @@ fn write_rejects_non_root_nodes_zero() {
     };
     let _ = write_package(&input);
 }
+
+/// TemplateNode content/src 字段经 write_package → read_package 往返稳定。
+/// 这是真实持久化路径（pkg.bin 不是 serde，是手动编码）。
+#[test]
+fn template_node_content_src_roundtrip_via_pkg() {
+    let mut text = tn(NodeKind::TextNode);
+    text.content = Some("hello world".into());
+    let img = TemplateNode {
+        kind: NodeKind::Image,
+        style: ResolvedStyle::default(),
+        parent_idx: Some(0),
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        data_controller: None,
+        content: None,
+        src: Some("icon.png".into()),
+    };
+    let nodes = [text, img];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+    };
+    let buf = write_package(&input);
+    let pkg = read_package(&buf).unwrap();
+    let read_nodes = &pkg.components["c"].nodes;
+    assert_eq!(read_nodes[0].kind, NodeKind::TextNode);
+    assert_eq!(
+        read_nodes[0].content.as_deref(),
+        Some("hello world"),
+        "TextNode content must survive pkg roundtrip"
+    );
+    assert_eq!(read_nodes[1].kind, NodeKind::Image);
+    assert_eq!(
+        read_nodes[1].src.as_deref(),
+        Some("icon.png"),
+        "Image src must survive pkg roundtrip"
+    );
+}

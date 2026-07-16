@@ -660,3 +660,45 @@ fn scene_controller_selected_set_get_roundtrip() {
 fn controller_changed_event_size() {
     assert_eq!(std::mem::size_of::<ControllerChangedEvent>(), 12);
 }
+
+/// NodeKind 所有变体的 bincode 序列化往返稳定（pkg.bin 跨版本兼容性门）。
+#[test]
+fn node_kind_all_variants_bincode_roundtrip() {
+    let all = [
+        NodeKind::Container,
+        NodeKind::TextNode,
+        NodeKind::TextBlock,
+        NodeKind::TextElement,
+        NodeKind::LineBreak,
+        NodeKind::Label,
+        NodeKind::Button,
+        NodeKind::Link,
+        NodeKind::Image,
+        NodeKind::TextField,
+        NodeKind::NumberField,
+        NodeKind::Slider,
+        NodeKind::Toggle,
+        NodeKind::RadioButton,
+        NodeKind::TextArea,
+        NodeKind::Dropdown,
+        NodeKind::OptionItem,
+        NodeKind::ProgressBar,
+        NodeKind::ListView,
+        NodeKind::ListItem,
+        NodeKind::Slot,
+        NodeKind::CustomElement,
+        NodeKind::Canvas,
+    ];
+    for k in all {
+        let bytes = bincode::serialize(&k).unwrap();
+        let back: NodeKind = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(k, back, "roundtrip failed for {:?}", k);
+    }
+}
+
+/// Unit-variant enum bincode 序列化为 4 字节（bincode 默认 FixintEncoding：u32 判别值）。
+/// pkg.bin 实际不走 bincode（手动编码），这里只验证 serde derive 的稳定性。
+#[test]
+fn node_kind_unit_variant_is_one_byte() {
+    assert_eq!(bincode::serialize(&NodeKind::Container).unwrap().len(), 4);
+}
