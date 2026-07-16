@@ -5,7 +5,7 @@
 > cascade 机制不变，只重做节点表示层。
 >
 > **范围**：NodeKind enum 扩容 + Node struct 拆分 + 数据进 side table +
-> set-ness 持久化 + pkg 格式升 v17。
+> TemplateNode 跨包传输叶子数据 + set-ness 持久化 + pkg 格式升 v17。
 >
 > **不做**：打包编排（② Spec-3）、cascade 全量产品化（③ Spec-3）、后端对象层（④ Spec-4）、
 > 控件状态表实现（控件束阶段）。摸黑骨架链（div + 文字 + 图 + flex + cascade）的
@@ -70,9 +70,9 @@ Template（打包期消费，不进实时 Scene 树），= 22 个 NodeKind 变�
 | 旧 NodeKind | 去向 |
 |---|---|
 | Container | 保留（unit variant） |
-| Text { content } | -> TextNode（unit，content 进 §3 text_contents） |
+| Text { content } | -> TextNode（unit，content 进 §3.2 text_contents） |
 | RichText { runs } | 删除（退役，复合束替代） |
-| Image { src } | -> Image（unit，src 进 §3 image_srcs） |
+| Image { src } | -> Image（unit，src 进 §3.2 image_srcs） |
 | Button | 保留（unit variant） |
 
 ### 1.5 新 NodeKind 定义
@@ -203,14 +203,51 @@ pub struct Node {
 
 ---
 
-## 3. Side table 组织
+## 3. Side table 组织 + 跨包传输
 
 ### 3.1 设计原则
 
 旧 NodeKind 的叶子数据（Text content、Image src）从 enum payload 移出，进 Scene 持有的
 稀疏表。模式统一：`HashMap<NodeId, T>`（和现有 anim/controllers 一致）。
 
-### 3.2 Spec-2 新增 side table
+### 3.2 跨包传输：TemplateNode 加叶子数据字段（🔴 硬伤修复）
+
+**问题**：当前 content/src 全靠 `NodeKind::Text{content}` / `Image{src}` 的 payload 带
+进 pkg.bin——`TemplateNode.kind: NodeKind` 整个序列化，payload 跟着进包。unit 化 NodeKind
+后 payload 消失，content/src 无处存。而 **TemplateNode 才是跨 pkg.bin 序列化的那个**
+（Node 运行时 struct 不进包）。instantiate 的 `create_node_from_template(scene, kind, style)`
+只吃 kind，拿不出 content。
+
+**修法**：TemplateNode 加两个叶子数据字段，序列化进包：
+
+```rust
+pub struct TemplateNode {
+    // ... 既有字段（kind/style/parent_idx/classes/id_attr/draggable/tabindex/data_controller）...
+    /// TextNode 的文本内容（仅 kind == TextNode 时 Some）。
+    pub content: Option<String>,
+    /// Image 的 src 路径（仅 kind == Image 时 Some）。
+    pub src: Option<String>,
+}
+```
+
+`Option<String>` bincode 序列化 = 1 byte tag（None/Some）+ 可选 string。大多数节点两个字段
+都 None，每节点仅 +2 bytes 开销，可接受。
+
+**instantiate 填充**：`Stage::instantiate` 循环 TemplateNode 建 live Node 时（stage.rs:597），
+拿到 `create_node_from_template` 返回的 NodeId 后，事后填 side table：
+
+```rust
+let node_id = create_node_from_template(scene, tn.kind, tn.style.clone());
+// 填叶子数据（unit 化后 content/src 不在 kind 里，从 TemplateNode 事后填）
+if let Some(c) = &tn.content { scene.text_contents.insert(node_id, c.clone()); }
+if let Some(s) = &tn.src     { scene.image_srcs.insert(node_id, s.clone()); }
+// ... 既有 classes/id_attr/draggable/tabindex/data_controller 填充不变 ...
+```
+
+`create_node_from_template` 签名**不改**——保持 `(scene, kind, style) -> NodeId`。
+content/src 由调用方（instantiate 循环）事后用返回的 NodeId 填 side table。
+
+### 3.3 Spec-2 新增 side table（Scene 字段）
 
 ```rust
 pub struct Scene {
@@ -226,14 +263,14 @@ pub struct Scene {
 （slider value、dropdown selectedIndex、textfield value/光标）留到控件束阶段加——
 Spec-2 只扩 enum 变体，不建控件状态表。
 
-### 3.3 访问模式
+### 3.4 访问模式
 
 - 读写：`scene.text_contents.get(&node_id)` / `.insert(node_id, content)`。
 - 删节点联动：Scene::remove_node 时 `text_contents.remove(&id)` + `image_srcs.remove(&id)`
   （和 anim/controllers 同模式）。
 - match 分发：`match node.kind { NodeKind::TextNode => { let c = &scene.text_contents[&node.id]; } }`。
 
-### 3.4 数据不进 enum 的收益
+### 3.5 数据不进 enum 的收益
 
 - 改 content/src 不重建 NodeKind 变体（旧 `node.kind = NodeKind::Text{content:new}` ->
   `scene.text_contents.insert(id, new)`）。
@@ -303,10 +340,17 @@ Spec-2 只把字段加好、把 rematch 读取逻辑改对。打包期实际填 
 
 `PKG_FORMAT_VERSION` 从 16 升到 17，`MIN == MAX == 17`（弃 v16，无迁移器，个人项目不兼容）。
 
-触发变更：
-1. NodeKind enum 形状变（5 变体 -> 22 变体 + Copy -> bincode tag 变）。
-2. ResolvedStyle 加 inherited_set 字段（bincode 布局变）。
-3. Node struct 拆分 + flags 压缩（若 Node 进 pkg 则影响 bincode——需核实哪些字段进 pkg）。
+> **Node 永远不进 pkg.bin**——进包的是 TemplateNode。Node struct 拆分
+>（interaction 子 struct、flags 压缩）对 pkg 零影响，纯运行时改动。
+
+v17 真正触发（均为 TemplateNode 序列化形状变化）：
+
+1. **NodeKind enum 形状变**：5 变体 -> 22 unit variant + Copy。TemplateNode.kind 序列化
+   形状变（旧 Text{content} 带 String payload，新 TextNode 是 unit 1 byte tag）。
+2. **ResolvedStyle 加 inherited_set 字段**：bincode 布局变（TemplateNode.style + Node.style）。
+3. **TemplateNode 新增 content/src 字段**：bincode 布局变（§3.2 硬伤修复带来的）。
+
+三者叠加 = pkg.bin 不可读旧包，一刀切升 v17。
 
 ### 5.2 稳定性门
 
@@ -314,6 +358,7 @@ Spec-2 只把字段加好、把 rematch 读取逻辑改对。打包期实际填 
 - NodeKind 全变体 roundtrip（确保 enum tag 映射稳定）。
 - ResolvedStyle 含 inherited_set roundtrip（现有测试扩展）。
 - NodeKind 序列化尺寸断言（unit variant = 1 byte tag）。
+- TemplateNode 含 content/src roundtrip。
 
 ### 5.3 旧格式处理
 
@@ -347,6 +392,39 @@ Spec-2 只把字段加好、把 rematch 读取逻辑改对。打包期实际填 
 语义决定（容器类有、叶子类无），建树/打包期验证叶子不收子节点。运行时不强制（避免每帧
 检查开销），违约 = 打包期错误。
 
+### 6.4 建树入口签名改动（🟡 硬伤配套）
+
+content/src 不再在 NodeKind payload 里 -> 三个建树入口都要改传输通道：
+
+**Scene::build entry tuple**（node.rs:305）：从 8-tuple 扩到 10-tuple：
+
+```rust
+pub fn build(entries: &[(
+    Option<usize>,      // parent_idx
+    NodeKind,
+    ResolvedStyle,
+    Vec<String>,        // classes
+    Option<String>,     // id_attr
+    bool,               // draggable
+    Option<i32>,        // tabindex
+    Option<String>,     // data_controller
+    Option<String>,     // content  <- 新增（TextNode 文本）
+    Option<String>,     // src      <- 新增（Image 路径）
+)]) -> Scene
+```
+
+build 内部循环 insert 后，按 content/src 填 `scene.text_contents` / `scene.image_srcs`
+（和 instantiate 事后填同模式）。spike mini-bridge（cascade_spike.rs 的 `SceneEntry` type alias）
+跟着改。
+
+**create_node_from_template**（dynamic.rs）：签名**不改**（保持 kind + style）。
+content/src 由 instantiate 循环事后填（§3.2）。
+
+**create_node**（dynamic.rs，runtime API / FFI 入口）：当前按 tag 字符串建节点
+（"span" -> Text）。unit 化后 content 不进 kind，runtime 创建的 TextNode content 暂填空串
+（`scene.text_contents.insert(id, String::new())`）。运行时改文本走后续 API（④ 后端对象层），
+Spec-2 阶段 runtime create_node 不支持带初始 content（低频路径，可接受）。
+
 ---
 
 ## 7. 验收标准
@@ -363,6 +441,7 @@ Spec-2 只把字段加好、把 rematch 读取逻辑改对。打包期实际填 
 - `cargo test -p loomgui_fence`——spike 4 验收断言仍绿（mini-bridge 适配新 enum 后）。
 - ResolvedStyle bincode roundtrip 含 inherited_set。
 - NodeKind 全变体 bincode roundtrip + 尺寸断言。
+- TemplateNode 含 content/src bincode roundtrip。
 
 ### 7.3 CI 门禁
 
@@ -394,13 +473,18 @@ Spec-2 只把字段加好、把 rematch 读取逻辑改对。打包期实际填 
 ## 9. 实现顺序（建议）
 
 1. **NodeFlags + InheritedSet 类型定义**（resolved.rs / node.rs）——零破坏。
-2. **ResolvedStyle 加 inherited_set** + bincode roundtrip 测试——触发 v17。
-3. **NodeKind enum 扩容** + Default 改 Container——编译报错。
-4. **Node struct 拆分**（interaction 子 struct + flags）——编译报错叠加。
-5. **Side table 加字段**（text_contents / image_srcs）。
-6. **逐文件迁移 81 处 match**（编译器牵着走，从 dynamic.rs 开始）。
-7. **spike mini-bridge + 测试适配**（cascade_spike.rs 的 Text{content} -> TextNode + side table）。
-8. **cargo fmt + clippy + 全测试绿**。
-9. **升 v17**（MIN=MAX=17）+ bincode 稳定性测试。
+2. **ResolvedStyle 加 inherited_set** + bincode roundtrip 测试——触发 v17 形状变化。
+3. **NodeKind enum 扩容**（5 -> 22 unit variant）+ Default 改 Container——编译报错。
+4. **Node struct 拆分**（interaction 子 struct + flags）——编译报错叠加（纯运行时，不影响 pkg）。
+5. **TemplateNode 加 content/src 字段**（§3.2 硬伤修复）——序列化形状变。
+6. **Scene 加 side table**（text_contents / image_srcs）+ build entry tuple 扩到 10-tuple。
+7. **逐文件迁移 81 处 match**（编译器牵着走，从 dynamic.rs 开始）。Text{content} ->
+   TextNode + `scene.text_contents[&id]` 查表。
+8. **instantiate 循环填 side table**（stage.rs:597 -> 拿 NodeId 事后填 content/src，§3.2）。
+9. **spike mini-bridge + 测试适配**（cascade_spike.rs 的 SceneEntry 扩到 10-tuple、Text{content} ->
+   TextNode + side table）。
+10. **cargo fmt + clippy + 全测试绿**。
+11. **升 v17**（PKG_FORMAT_VERSION = 17，MIN=MAX=17）+ bincode 稳定性测试
+    （NodeKind 全变体 / ResolvedStyle 含 inherited_set / TemplateNode 含 content-src）。
 
-每步后 `cargo build -p loomgui_core` 验证编译，步骤 6 后 `cargo test` 验证全绿。
+每步后 `cargo build -p loomgui_core` 验证编译，步骤 7 后 `cargo test` 验证全绿。
