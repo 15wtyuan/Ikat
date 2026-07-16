@@ -472,6 +472,56 @@ fn read_rejects_duplicate_component_name() {
     );
 }
 
+/// Important 4：NodeBlock 的 kind_tag 字节不在 `NodeKind::from_u8` 判别值范围（≥23）→ BadKind
+/// （不静默塌成 Container）。v17 的 KIND_* 5 常量方案 read 侧用 wildcard fallback 把未知字节
+/// 全塌成 Container（kind collapse）；v18 起 kind_tag = NodeKind 判别值(0..=22)，from_u8 对
+/// ≥23 返 None → BadKind。本测试同时正向验证改的是 kind_tag 字节（改成 Label 须读回 Label），
+/// 避免"改错字节却因别的原因碰巧报错"的假阳性。
+#[test]
+fn read_rejects_unknown_kind_tag() {
+    // 单组件单节点（Container, kind_tag=0），便于直接定位 kind_tag 字节。
+    let nodes = [tn(NodeKind::Container)];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+    };
+    let bytes = write_package(&input);
+
+    // NodeBlock 紧跟 ComponentTable（每条目 14B）。单组件 → NodeBlock 起点 = ct_off + 14。
+    let nodeblock_off = comp_table_offset(&bytes) + 14;
+    // 节点内布局：parent_idx(4) + kind_tag(1) + ... → kind_tag 在 node_start + 4。
+    let kind_tag_off = nodeblock_off + 4;
+
+    // 正向 sanity：把 kind_tag 从 0(Container) 改成 5(Label)，read 应回 Label。
+    // 确保改的是 kind_tag 字节；否则下面的 BadKind 断言会"对错原因通过"。
+    let mut patched_valid = bytes.clone();
+    patched_valid[kind_tag_off] = NodeKind::Label as u8;
+    let pkg = read_package(&patched_valid).expect("valid kind_tag must still read");
+    assert_eq!(
+        pkg.components["c"].nodes[0].kind,
+        NodeKind::Label,
+        "kind_tag offset sanity: patching to Label must read back Label"
+    );
+
+    // 23 = from_u8 的首个 None 分支（Canvas=22 是最后合法判别值）。
+    let mut patched_bad = bytes.clone();
+    patched_bad[kind_tag_off] = 23;
+    let err = read_package(&patched_bad).expect_err("unknown kind_tag must error");
+    assert!(
+        matches!(err, PkgError::BadKind(23)),
+        "expected BadKind(23), got {err:?}"
+    );
+
+    // 0xFF = 远超判别值范围，同样必须 BadKind。防 from_u8 回归（如 off-by-one 把 23 误返 Some）。
+    let mut patched_ff = bytes.clone();
+    patched_ff[kind_tag_off] = 0xFF;
+    let err = read_package(&patched_ff).expect_err("0xFF kind_tag must error");
+    assert!(
+        matches!(err, PkgError::BadKind(0xFF)),
+        "expected BadKind(0xFF), got {err:?}"
+    );
+}
+
 /// Minor 4：write_package 对 nodes[0].parent_idx=Some 的输入触发 debug_assert（spec 约定 nodes[0]=组件根）。
 /// write 输入由打包器控制，违反即打包器 bug；用 debug_assert（release 无代价）。
 /// 测试用 #[should_panic] 验证 debug 构建下触发。
@@ -528,11 +578,12 @@ fn template_node_content_src_roundtrip_via_pkg() {
     );
 }
 
-/// v18: 全 19 个非平凡 NodeKind 变体（除 Container/Button/Image/TextNode 外）经
-/// write_package → read_package 往返后 kind 不塌成 Container。
-/// v17 的 KIND_* 5 常量方案只覆盖 4 种 NodeKind，其余 19 种 wildcard fallback 塌成 Container。
+/// v18: 20 个非 Container/Button/Image 的 NodeKind 变体经 write_package → read_package
+/// 往返后 kind 不塌成 Container。v17 的 KIND_* 5 常量方案只覆盖 4 种 NodeKind，其余 wildcard
+/// fallback 塌成 Container；v18 用 NodeKind 判别值保真全 23 变体（Container/Button/Image 的
+/// content/src 路径由 template_node_content_src_roundtrip_via_pkg 覆盖，此处不重复）。
 #[test]
-fn v18_all_nodekinds_roundtrip_no_collapse() {
+fn v18_nontrivial_nodekinds_roundtrip() {
     let all_kinds = [
         NodeKind::TextNode,
         NodeKind::TextBlock,
