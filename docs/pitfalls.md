@@ -1190,7 +1190,14 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 
 **症状**：嵌套元素各自 inline 声明同一可继承属性时，子元素声明被父值覆盖。如 `<div style="color:red"><span style="color:blue">x</span></div>` → span 渲染成红色（blue 被盖）。`<style>` 规则声明的继承属性不受影响（运行时 rematch 正确 set bit）。
 **根因**：`ResolvedStyle.inherited_set`（u16 bitmask，记录"哪些继承属性被显式声明"）应在打包期烘焙进 `base_style`，运行时 `propagate_inherited`（core/style/dynamic.rs）据此 `copy_if_unset` 决定子是否取父值。但 fence `css_resolve.rs` 应用 inline style（调 `apply_decl`）时**完全不设 `inherited_set`** → 恒为 0 → 运行时所有继承属性判 unset → 父值覆盖子声明。注释（resolved.rs:212、dynamic.rs:371）声称"已烘焙"但实现没接——典型注释描述意图、代码未兑现。属 Spec-2 cascade spike 的未完成部分（dynamic.rs:95 标注 spike，Spec-3 统一 `inherited_bit` 与 fence schema `inherited` 双源）。
-**解决**：未修（spike 期）。已加 TODO 标记（css_resolve.rs `apply_decl` 处 + resolved.rs 字段注释）。Spec-3 统一时接线：`apply_decl` 成功且 `CssPropSpec.inherited=true` 时 set 对应 bit（core `inherited_bit` 需 pub 或合并到 schema 单源）。
+**解决**：✅ 已修（Spec-3 ②，commit b68678f+90bf480）。方案 a 单源：core `inherited_bit` 改 `pub`（`INH_*` 留 private）+ fence `css_resolve` 的 `apply_decl` 成功分支 set 对应 bit（`else if let Some(bit) = inherited_bit(prop) { styles[idx].inherited_set.0 |= bit; }`）。resolved.rs 字段 doc + css_resolve TODO 同步清。回归测试 `inline_inherited_sets_bit` / `inline_non_inherited_sets_no_bit` / `inline_font_size_sets_bit`（用 `inherited_bit("color")` 拿 bit，不魔数）。
 **教训**：OCR 报"`inherited_set` 未烘焙"是真 bug，但容易被当"spike 进行中"放过。注释声称"已烘焙"≠ 代码已烘焙——新加字段（Spec-2）的写入手要 grep 确认（搜 `inherited_set` 只命中读/default/test = 未接线）。继承属性被父覆盖的回归，先查 `inherited_set` 是否被 cascade 烘焙，别只看 propagate 逻辑。
+
+### 坑 162：fence 顶层 whitespace Text root → bridge 单根契约拒所有多行 HTML（Spec-3 ② Task 6）
+
+**症状**：多行 HTML（`<style>...</style>\n<div class="root">...`）经 fence 产多个顶层 root（whitespace Text 节点），bridge 单根契约（`roots.len() != 1` → Err）拒，报"组件 HTML 必须单一根元素（当前 N 个）"。所有多行 designer HTML（含 showcase `character.html` `roots:9`）加载失败——Task 6 smoke 用 fragment HTML 暴露。
+**根因**：fence `tree_builder` 的 `push_text` 守卫用 `!text.is_empty()` 而非 `!text.trim().is_empty()`；shell 标签（html/head/body）early-return 不 push（无 `current_parent`），故元素间 whitespace 成孤儿**顶层** Text root。
+**解决**：✅ `tree_builder` skip `push_text` when `text.trim().is_empty()` AND `current_parent().is_none()`（顶层 ws-only 不 push；in-element whitespace 仍保留，保 HTML mixed-content 语义）。回归测试 `top_level_whitespace_not_orphan_root` 双向验证（顶层 ws 不成 root + in-element ws Text 保留）。commit 09ec1b8。
+**教训**：HTML 解析器 whitespace 处理——顶层 formatting whitespace（元素间 `\n  `）是 artifact，不该成节点。"单根契约 + 不处理 whitespace" 叠加 = 多行 HTML 全拒。解析层源头清顶层 whitespace（如 tree_builder），别在下游（bridge）打补丁。
 
 
