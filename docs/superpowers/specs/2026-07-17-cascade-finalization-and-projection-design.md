@@ -90,12 +90,12 @@
 
 即 computed 值的 C# 出口 = **只读快照层**（与 Geometry 同类），不是 Style（那是写向 inline override）。
 
-**待定决策（spec 提出，review 时定）**：computed-style 快照落 `NodeGeometry`（扩字段）还是**并列一个 `NodeComputedStyle` 只读 struct**。推荐并列 `NodeComputedStyle`：
-- `NodeGeometry` 语义是几何（rect/matrix/坐标变换），塞 color/font-size 语义不纯。
+**决策：并列 `NodeComputedStyle` 只读 struct**（不扩 `NodeGeometry`）：
+- `NodeGeometry` 语义保持纯几何（rect/matrix/坐标变换），塞 color/font-size 语义不纯。
 - 并列 struct 字段集独立演进，不污染几何快照。
-- public-api.md「computed 走 Geometry」可读作「computed 走只读快照层」（与可写 Style 对立），并列 struct 仍符合该原则。
+- public-api.md「computed 走 Geometry」读作「computed 走只读快照层」（与可写 Style 对立），并列 struct 符合该原则。
 
-若选扩 `NodeGeometry`，则语义上 NodeGeometry 退化为「只读快照」总称。两种都可行；并列更干净，但都属公共签名扩展，**需过 `tests/dotnet/LoomGUI.PublicApi` 防漂移门，并在 public-api.md 落一行**。
+这是冻结签名（`Public/LoomGUI.*.cs`）第一次扩展，**需过 `tests/dotnet/LoomGUI.PublicApi` 防漂移门，并在 public-api.md 落一行**（新增 `node.ComputedStyle` 只读 struct）。
 
 ### 4.2 typed 类型树形态已定
 
@@ -127,7 +127,12 @@ impl Stage {
 FFI（`crates/ffi/src/lib.rs`，照 `loomgui_stage_get_node_layout_rect` 模式）：
 
 ```rust
-#[no_mangle] pub extern "C" fn loomgui_stage_get_node_kind(h, node_id: u32) -> u8;  // 0 = 不存在/None 哨兵
+// return-code + out-param（与 get_node_computed_style 一致）：返回 0 = ok 且 *out = kind，
+// 非 0 = 节点不存在。不用 `-> u8` + 0 哨兵——NodeKind 首变体 Container 判别值 = 0，
+// 0 哨兵会和每个 div（Container）撞，无法区分「不存在」与「Container」。
+#[no_mangle] pub extern "C" fn loomgui_stage_get_node_kind(
+    h: *const StageHandle, node_id: u32, out: *mut u8,
+) -> i32;
 #[no_mangle] pub extern "C" fn loomgui_stage_get_node_computed_style(
     h: *const StageHandle, node_id: u32, out: *mut ComputedNodeStyleRepr,
 ) -> i32;  // 0 = ok, 非 0 = 节点不存在
@@ -157,8 +162,7 @@ FFI（`crates/ffi/src/lib.rs`，照 `loomgui_stage_get_node_layout_rect` 模式�
 
 ### 5.4 base_style / set-ness 核实
 
-- 核实 `rematch_pseudo_classes` **每帧从 base_style 重启**（§3.2）——base_style 是每帧 cascade 基线，不是首帧缓存。`ResolvedStyle.inherited_set` 已打包期 bake（Spec-2 + Spec-3 修坑 161 双源统一），③ 用全量标签核实它在运行时 rematch 路径上被正确消费（不被父运行时值覆盖）。
-- 若核实发现 base_style 契约与实现不符，要么填 base_style，要么重构 rematch 契约（§3.2 已警告）。
+- **已核实**（`dynamic.rs:359-360`）：`rematch_pseudo_classes` 每节点每帧 `base_style.clone()` 重起 `new_style`，再 apply 命中动态规则——base_style 是每帧 cascade 基线，不是首帧缓存。set-ness 双源也已落地（`dynamic.rs:376` 从 `base_style.inherited_set` 起步 + 动态 cascade OR，坑 161 修法）。③ 无需重构 rematch，只需在全量标签下用集成断言验证 consumed 正确（继承不被父运行时值覆盖）。
 
 ### 5.5 选择器子集
 
@@ -180,17 +184,21 @@ FFI（`crates/ffi/src/lib.rs`，照 `loomgui_stage_get_node_layout_rect` 模式�
 `Public/LoomGUI.*.cs` 的 NotImplementedException 壳 → 转发到成熟旧 `LoomStage` 命令式 API（`docs/design/projection-layer.md`：真身 Rust，C# 是 OOP 投影 + 攒批回写）。形态已冻结，④ 是翻译层非从零造功能：
 - **NodeId→Node 强引用缓存**（对象身份稳定，projection-layer §2.4）。
 - **工厂**：`UIPackage.Instantiate` 返回 NodeId → 查 `get_node_kind` → switch 造正确子类（`Button`/`Slider`/...）。
-- **字段直读转发**：C# 属性一次 FFI 读 core（学 fgui 直接字段 getter 形态），不缓存、不做派生（cascade 在 core 算）。
+- **computed 读 + 控件字段直读转发**：`node.ComputedStyle.*`（只读快照）和控件字段（`Slider.Value` 等）一次 FFI 读 core（学 fgui 直接字段 getter 形态），不缓存、不做派生（cascade 在 core 算）。注意 `NodeStyle` **不是**直读——它是 projection-layer §2.3 的稀疏写镜像（getter 返 C# setter 写过的、否则 Unset），两个不同层别混。
 - **`underConstruct` 批量构造期标志**（学 fgui）：从 Rust 同步初始树时批量赋值不触发 N 次增量回写。
 - **避免**：fgui 式 setter 本地副作用链（权威在 core，C# setter 只转发）。
 
 ### 6.2 computed-style 只读快照（③ 出口的 C# 投影）
 
-`node.ComputedStyle`（或扩 `Geometry`，见 §4.1）= 从 ③ 的 `get_node_computed_style` FFI 填充的只读 struct。typed 字段直读（`node.ComputedStyle.FontSize` / `.Color`），不解析字符串。这是 §3 调研定论 C 候选的 C# 兑现。
+`node.ComputedStyle`（§4.1 已定：并列只读 struct）= 从 ③ 的 `get_node_computed_style` FFI 填充。typed 字段直读（`node.ComputedStyle.FontSize` / `.Color`），不解析字符串。这是 §3 调研定论 C 候选的 C# 兑现。
 
 ### 6.3 事件 typed glue（关键路径）
 
-旧 `EventHandler` 是 `EventType(byte)+nodeId` 面，无 typed 分发。壳已定 `node.On<T>(Action<T>)` + `button.Clicked` 等 event。④ 新建 glue：byte-EventType → typed-event demux + per-node 路由。渲染/输入/底层事件路由管线（MirrorPool/InputCollector/borrow_events）零改复用。`Clicked` 触发是终点线2 硬要求，此块在关键路径。
+旧 `EventHandler` 是 `EventType(byte)+nodeId` 面，无 typed 分发。壳已定 `node.On<T>(Action<T>)` + `button.Clicked` 等 event。④ 新建 glue，dispatch 机制草图（plan 期对照现有 `EventHandler`/`borrow_events` 核实）：
+- 每个 Node 持自己的 typed handler 列表（`On<T>` 注册时挂上；`button.Clicked` 等 `event` 是其语法糖）。
+- glue 收 `borrow_events` 的 `(nodeId, EventType, payload)` SOA 流 → 查 NodeId→Node 缓存 → 按 EventType 查该 Node 的 typed handler 列表 → 按类型分发。
+
+渲染/输入/底层事件路由管线（MirrorPool/InputCollector/borrow_events）零改复用。`Clicked` 触发是终点线2 硬要求，此块在关键路径。
 
 ### 6.4 headless C# harness（破两台机串行瓶颈）
 
