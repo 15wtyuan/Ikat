@@ -214,7 +214,7 @@ pub struct ResolvedStyle {
     /// Fence `css_resolve` calls `loomgui_core::style::dynamic::inherited_bit` after
     /// `apply_decl` success and OR's the bit into this field, so runtime
     /// `propagate_inherited` respects inline inherited declarations and does not
-    /// overwrite them with the parent value (pitfall #161 fixed).
+    /// overwrite them with the parent value.
     pub inherited_set: InheritedSet,
 }
 

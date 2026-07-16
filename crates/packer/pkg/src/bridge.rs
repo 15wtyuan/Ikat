@@ -21,6 +21,13 @@ pub fn bridge(
             parsed.tree.roots.len()
         ));
     }
+    // fence styles 必须与 tree nodes 1:1（css_resolve 对每个 IrNode 产一个 ResolvedStyle）。
+    // debug_assert 在测试/dev 暴露契约破裂；release 仍走下方 unwrap_or_default 兜底防 panic。
+    debug_assert_eq!(
+        parsed.styles.len(),
+        parsed.tree.nodes.len(),
+        "fence styles must be 1:1 with tree nodes"
+    );
     // ir_idx → template_idx 映射（Element/Text 占位；Comment/Doctype/Template 不占）。
     let mut ir_to_tpl: Vec<Option<usize>> = vec![None; parsed.tree.nodes.len()];
     let mut nodes: Vec<TemplateNode> = Vec::new();
@@ -75,6 +82,13 @@ pub fn bridge(
             }
             IrNodeKind::Comment(_) | IrNodeKind::Doctype { .. } => continue,
         }
+    }
+    // 根被 <template> 包裹（或全 Comment/Doctype）会让 nodes 空——write_package 产 0 节点
+    // ComponentTemplate 是静默契约违反，显式报错。
+    if nodes.is_empty() {
+        return Err(
+            "组件根被 <template> 包裹或无实例化节点，产物为空（template 子树整体跳过）".into(),
+        );
     }
     Ok((nodes, Vec::new()))
 }
@@ -216,5 +230,23 @@ mod tests {
         let nodes = bridged(r#"<div><button tabindex="2">b</button></div>"#);
         let btn = nodes.iter().find(|n| n.kind == NodeKind::Button).unwrap();
         assert_eq!(btn.tabindex, Some(2));
+    }
+
+    #[test]
+    fn template_root_yields_empty_error() {
+        // 根是 <template> → 整棵子树跳过 → nodes 空 → Err（不静默产 0 节点 ComponentTemplate）。
+        let parsed = loomgui_fence::parse_template(r#"<template><p>x</p></template>"#, "t.html");
+        assert!(
+            parsed.diagnostics.is_empty(),
+            "diags: {:?}",
+            parsed.diagnostics
+        );
+        let result = bridge(&parsed);
+        assert!(result.is_err(), "template 根应报错（产物为空）");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("产物为空") || err.contains("template"),
+            "错误信息应点明 template/空: {err}"
+        );
     }
 }

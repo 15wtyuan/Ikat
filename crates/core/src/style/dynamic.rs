@@ -93,7 +93,7 @@ const INH_WHITE_SPACE_NOWRAP: u16 = 1 << 7;
 
 /// prop 名 → 可继承属性 bit（非可继承返 None）。单一真相源：bit 的定义（本表 INH_*）与
 /// 消费（rematch set bit + propagate copy_if_unset）都在 core。fence css_resolve 调本函数
-/// 把 inline 可继承声明 bake 进 ResolvedStyle.inherited_set（坑 161 修复）。
+/// 把 inline 可继承声明 bake 进 ResolvedStyle.inherited_set，避免运行时被父值覆盖。
 pub fn inherited_bit(prop: &str) -> Option<u16> {
     match prop.trim() {
         "font-size" => Some(INH_FONT_SIZE),
