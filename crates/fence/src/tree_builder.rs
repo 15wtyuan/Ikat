@@ -218,6 +218,9 @@ impl TreeBuilder {
         span: Span,
     ) {
         if name == "style" {
+            // html5gum 对 <style> 切 RAWTEXT（naively_switch_states），self_closing 标志不阻止——
+            // <style/> 的 /> 被忽略，后续仍当 style 内容吞到 </style>（HTML5：style 非 void）。
+            // 故 in_style 无条件置 true，让被吞的 raw text 进 style_texts（CSS 源）而非可见文本。
             self.in_style = true;
             return;
         }

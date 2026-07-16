@@ -97,6 +97,13 @@ pub fn resolve_inline_styles_with_diags(
 
                 // Apply using existing apply_decl.
                 // If it returns false, the value failed to parse -- report it.
+                //
+                // TODO(Spec-3): when apply_decl succeeds and CssPropSpec.inherited is true,
+                // set the matching bit on styles[idx].inherited_set. Currently no bits are
+                // baked, so runtime propagate_inherited treats inline inherited declarations
+                // (color/font-size/...) as unset and overwrites them with the parent value.
+                // Wire together with core's inherited_bit (used for dynamic rules) — the two
+                // are a known dual source until Spec-3 unifies them.
                 if !apply_decl(&mut styles[idx], prop, value) {
                     diagnostics.push(Diagnostic::error(
                         DiagnosticCode::FenceBadCssValue,

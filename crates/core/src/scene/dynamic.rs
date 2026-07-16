@@ -109,6 +109,8 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
     scene.nodes.get_mut(key).unwrap().id = id; // 回填
     if k == NodeKind::TextNode {
         scene.text_contents.insert(id, String::new());
+    } else if k == NodeKind::Image {
+        scene.image_srcs.insert(id, String::new());
     }
     Ok(id)
 }
@@ -231,8 +233,10 @@ pub fn remove_child(scene: &mut Scene, parent: NodeId, child: NodeId) -> Result<
 
 /// 改 Text 节点 content + 标 dirty_text。非 Text 节点 → Err。
 pub fn set_text(scene: &mut Scene, node: NodeId, text: &str) -> Result<(), String> {
-    if !matches!(scene.get(node).map(|n| n.kind), Some(NodeKind::TextNode)) {
-        return Err("set_text 只对 Text 节点生效".into());
+    match scene.get(node).map(|n| n.kind) {
+        None => return Err("set_text: node not live".into()),
+        Some(NodeKind::TextNode) => {}
+        Some(_) => return Err("set_text 只对 Text 节点生效".into()),
     }
     scene.text_contents.insert(node, text.into());
     scene.get_mut(node).unwrap().dirty_text = true;
@@ -241,8 +245,10 @@ pub fn set_text(scene: &mut Scene, node: NodeId, text: &str) -> Result<(), Strin
 
 /// 改 Image 节点 src + 标 dirty_mesh。非 Image 节点 → Err。
 pub fn set_src(scene: &mut Scene, node: NodeId, src: &str) -> Result<(), String> {
-    if !matches!(scene.get(node).map(|n| n.kind), Some(NodeKind::Image)) {
-        return Err("set_src 只对 Image 节点生效".into());
+    match scene.get(node).map(|n| n.kind) {
+        None => return Err("set_src: node not live".into()),
+        Some(NodeKind::Image) => {}
+        Some(_) => return Err("set_src 只对 Image 节点生效".into()),
     }
     scene.image_srcs.insert(node, src.into());
     scene.get_mut(node).unwrap().dirty_mesh = true;
@@ -292,10 +298,12 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
         }
         None => scene.roots.retain(|&r| r != id),
     }
-    // 3. 联动清持久附属 map（anim/scroll/controllers HashMap remove + tween kill）。
+    // 3. 联动清持久附属 map（HashMap remove + tween kill），防悬空残留。
     scene.anim.clear_node(id);
     scene.scroll.remove(id);
     scene.controllers.remove(&id);
+    scene.text_contents.remove(&id);
+    scene.image_srcs.remove(&id);
     tweens.kill_node(id);
     // pending_controller_events / pending_transitions 不清：每帧首由 Stage drain/clear
     // （stage.rs），瞬态，非持久泄漏；消费方对悬空 NodeId 有 None-check 兜底。

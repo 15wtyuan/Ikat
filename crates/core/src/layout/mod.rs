@@ -170,10 +170,11 @@ pub fn solve(
             }
             NodeKind::Image => {
                 // Look up real intrinsic dims via the node's image src (Spec-2 side table).
-                let src = scene.image_srcs.get(&id).cloned().unwrap_or_default();
+                // 借引用查 image_sizes——src 仅用于查表，无需每帧每图节点克隆 String。
+                let src = scene.image_srcs.get(&id).map(String::as_str).unwrap_or("");
                 let s = &node.style.taffy_style;
                 let (iw, ih) = image_sizes
-                    .get(&src)
+                    .get(src)
                     .filter(|(w, h)| *w != 0 && *h != 0)
                     .map(|&(w, h)| (w as f32, h as f32))
                     .unwrap_or((64.0, 64.0));
@@ -186,12 +187,6 @@ pub fn solve(
             }
             _ => None,
         };
-        // RichText 叶（display:block div）模拟 CSS block width:auto = fill parent：
-        // taffy 0.5 flex item 的 cross stretch = max(measure, container)（只 fill 不 shrink），
-        // 长文本（max-content > parent）会撑超 parent 宽 → 超框。设 width=100% 让 box=parent
-        // content、measure 据此换行。仅 auto 时设（保留显式 width）。
-        // RichText retired in Spec-2; rich nodes no longer force width=100%.
-
         // 递归子节点（先建子，再建父以便 new_with_children）。
         let children_ids: Vec<taffy::NodeId> = node
             .children

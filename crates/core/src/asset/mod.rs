@@ -154,6 +154,10 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         Vec::new();
     // RichText runs arena：所有 RichText 节点的 runs bincode blob 拼接，每段前缀 u32 len。
     // NodeBlock 的 rich_off 字段指向此 arena 的字节偏移。非 RichText 节点用 NULL_RICH_OFF 哨兵。
+    //
+    // TODO(pkg-format-cleanup): RichText 在 Spec-2 退役——rich_runs_arena 恒空、rich_off 恒
+    // NULL_RICH_OFF（每节点 4 字节死字段）。删除二者须 bump PKG_FORMAT_VERSION (v17→v18) +
+    // 读写双端同步 + 重打所有包，留待专门的 pkg 格式清理，不值得现在为它升版本。
     let rich_runs_arena: Vec<u8> = Vec::new();
     let mut global_node_offset: u32 = 0;
     for (name, nodes, dynamic_rules, controllers) in &input.components {
@@ -191,7 +195,17 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                     NodeKind::Button => (KIND_BUTTON, NULL_IDX, NULL_IDX),
                     NodeKind::Image => (KIND_IMAGE, NULL_IDX, src_idx),
                     NodeKind::TextNode => (KIND_TEXT, text_idx, NULL_IDX),
-                    _ => (KIND_CONTAINER, NULL_IDX, NULL_IDX),
+                    // 23 变体是 Spec-2 冻结的前瞻类型表面；packer 当前只产上述 4 类（kind_from_tag）。
+                    // 后续 spec 把更多 kind 接进 packer 时此处会命中——debug 期 panic 提醒补 KIND_* 序列化臂。
+                    _ => {
+                        debug_assert!(
+                            false,
+                            "serializing unhandled NodeKind {:?} as Container — \
+                             add a KIND_* arm when the packer produces this kind",
+                            tn.kind
+                        );
+                        (KIND_CONTAINER, NULL_IDX, NULL_IDX)
+                    }
                 }
             };
             let style_blob = bincode::serialize(&tn.style).expect("ResolvedStyle serializable");

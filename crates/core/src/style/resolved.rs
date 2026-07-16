@@ -209,7 +209,13 @@ pub struct ResolvedStyle {
     /// build 期按 effect 类型分 Back/Front 层注入字形渲染。空 = 无效果。
     pub text_effects: Vec<crate::text::font_effect::FontEffect>,
     /// Which inherited CSS properties were explicitly declared (set-ness bitmask).
-    /// Baked at package time into base_style; rematch seeds from this each frame.
+    ///
+    /// Intended to be baked at package time into base_style (rematch seeds from this
+    /// each frame). **Bake wiring incomplete (Spec-2 spike):** fence `css_resolve` does
+    /// not yet set bits for inline inherited declarations, so runtime
+    /// `propagate_inherited` overwrites inline inherited props (color/font-size/...)
+    /// with the parent value. Spec-3 unifies this with the fence schema `inherited`
+    /// flag and wires the bake. See TODO in `css_resolve.rs`.
     pub inherited_set: InheritedSet,
 }
 

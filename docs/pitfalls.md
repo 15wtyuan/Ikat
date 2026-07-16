@@ -1186,4 +1186,11 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：`ensure_solid()` 分配 3×3 全 255 块、返回中心 texel UV rect——中心 texel 四邻也 solid，Bilinear 恒采纯 255，覆盖度可靠。
 **教训**：用 atlas 单 texel 做纯色填充 quad 时，Bilinear 会在该 texel UV 边界混入邻居——拉伸覆盖大区域/小段的 quad（如装饰线）尤其受影响。给 solid 槽留四邻（3×3 块）。装饰线渲染异常先 `dump_rich_showcase`（core example 不跑 desugar 看不到 RichText）dump 几何排除 core，再查采样层。
 
+### 坑 161：`inherited_set` 烘焙未接线 → inline 继承属性被父覆盖（Spec-2 cascade spike）
+
+**症状**：嵌套元素各自 inline 声明同一可继承属性时，子元素声明被父值覆盖。如 `<div style="color:red"><span style="color:blue">x</span></div>` → span 渲染成红色（blue 被盖）。`<style>` 规则声明的继承属性不受影响（运行时 rematch 正确 set bit）。
+**根因**：`ResolvedStyle.inherited_set`（u16 bitmask，记录"哪些继承属性被显式声明"）应在打包期烘焙进 `base_style`，运行时 `propagate_inherited`（core/style/dynamic.rs）据此 `copy_if_unset` 决定子是否取父值。但 fence `css_resolve.rs` 应用 inline style（调 `apply_decl`）时**完全不设 `inherited_set`** → 恒为 0 → 运行时所有继承属性判 unset → 父值覆盖子声明。注释（resolved.rs:212、dynamic.rs:371）声称"已烘焙"但实现没接——典型注释描述意图、代码未兑现。属 Spec-2 cascade spike 的未完成部分（dynamic.rs:95 标注 spike，Spec-3 统一 `inherited_bit` 与 fence schema `inherited` 双源）。
+**解决**：未修（spike 期）。已加 TODO 标记（css_resolve.rs `apply_decl` 处 + resolved.rs 字段注释）。Spec-3 统一时接线：`apply_decl` 成功且 `CssPropSpec.inherited=true` 时 set 对应 bit（core `inherited_bit` 需 pub 或合并到 schema 单源）。
+**教训**：OCR 报"`inherited_set` 未烘焙"是真 bug，但容易被当"spike 进行中"放过。注释声称"已烘焙"≠ 代码已烘焙——新加字段（Spec-2）的写入手要 grep 确认（搜 `inherited_set` 只命中读/default/test = 未接线）。继承属性被父覆盖的回归，先查 `inherited_set` 是否被 cascade 烘焙，别只看 propagate 逻辑。
+
 
