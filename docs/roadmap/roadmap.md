@@ -5,7 +5,7 @@
 >
 > **本轮路线的组织方式（2026-07-15 重定）**：不再横切 R2–R8 大层，而是**先摸黑打通一条最小骨架链、再沿骨架加宽**。原因见 §1。
 >
-> **进度（2026-07-16）**：Spec-1（阶段 S spike）✅ 完成；**Spec-2（① core 类型化重构）✅ 完成**——NodeKind 5→22 unit 变体、Node 27 字段巨 struct 拆分（interaction 子 struct + bitflags）、leaf 数据迁移 side table、ResolvedStyle.inherited_set 打包期 bake、pkg 格式升 v17。全 workspace 675+ 测试绿，fmt/clippy 清。下一棒 = ② IrTree↔NodeKind 桥（生产级 HTML→scene）。详见 §2「①」、§8。
+> **进度（2026-07-16）**：Spec-1（阶段 S spike）✅ 完成；Spec-2（① core 类型化重构）✅ 完成；**Spec-3 ②（IrTree→TemplateNode 桥 + 打包编排）✅ 完成**——pkg 格式 v17→v18（kind_tag=NodeKind 判别值、全 23 变体、删 RichText 死字段）、IrTree→TemplateNode 桥落 packer（SemanticKind 1:1 total 映射，无 collapse，semantic_hint 无需）、ResolvedStyle.inherited_set inline bake（修坑 161）、packer HTML→pkg.bin 编排重建 + referenced_sprites 回接 atlas、fence 顶层空白文本根修复。终点线1 smoke 绿（HTML→pkg→Stage→rect，width=200 + display:none 剪枝 + class 命中）。全 workspace ~790 测试绿，fmt/clippy/feature-gate 清。下一棒 = ③ cascade 收尾（把 spike 产品化、覆盖全量围栏标签/控件）。详见 §2「②」、§8。
 >
 > 权威设计契约：`docs/design/main-design.md`（总体架构）、`docs/design/public-api.md`（公共 API 终态，21 条锁定决策）、`docs/design/projection-layer.md`（C# 投影层机制）、`docs/design/fence.md`（围栏）。
 
@@ -84,10 +84,16 @@
 - 选择器摸黑 MVP 只支持子集：class / tag / id / 后代组合 / 伪类。`:nth-child`、`@keyframes`/`animation` 是否进 scope 见 §3.5（关系到终点线2 能否跑 home 动画）。打包期验证"只用了支持的选择器"。
 - **cascade 单独上集成级测试**（整段 HTML+CSS 断言 computed style）——历史翻车点，per-property 单测兜不住。
 
-**② Ir→TemplateNode 桥 + 打包编排（比"一个函数"大）**
+**② Ir→TemplateNode 桥 + 打包编排（比"一个函数"大）** ✅ DONE — Spec-3 完成（commit `aee3716..349ccb2`，branch `spec3-ir-bridge`）
+
+> **状态：DONE**。spec `docs/superpowers/specs/2026-07-16-ir-bridge-packer-design.md`、plan `docs/superpowers/plans/2026-07-16-ir-bridge-packer.md`。原三 bullets 全落地（见下"原 spec"）。终点线1 smoke 绿：HTML 字符串 → 内存 pkg.bin → `load_package` → `instantiate` → `tick_and_render` → 断言 rect（width=200）+ display:none 子树剪枝 + class 命中 computed style（`tests/smoke_ir_bridge.rs`）。
+>
+> **关键定论**：① pkg 格式 v17→**v18**——`kind_tag` 从独立 tag 表改为 **`NodeKind` 判别值 `u8`**（`#[repr(u8)]` + `from_u8`，全 23 变体），删 RichText 死字段（layout/render 旁路清，`text/rich.rs` 算法保留待复合束）；加 BadKind 测试（unknown kind_tag 走 `read_package` 错误路径）。② IrTree→TemplateNode **桥放 packer**（非 fence 非 core）：DFS 翻译，全局 IrNodeId→局部 parent_idx，SemanticKind→NodeKind **1:1 total 映射**（22 可映射语义各有专属 NodeKind，无 collapse；InputDispatch/Template/None → Err，semantic_hint 无需），抽 class/id/tabindex/src/data-controller。③ ResolvedStyle.inherited_set **inline bake**（修坑 161——inline style 的继承属性打包期拿不到 set-bit，运行时被父值覆盖）；坑 161 双源统一（inline + dynamic 都走打包期 bake）。④ packer HTML→pkg.bin 编排重建（`pack_components`：invoke fence → bridge → write_package v18 → 回填 packages），`referenced_sprites` 回接 atlas 校验闭环。⑤ fence 顶层空白文本根跳过（smoke 撞到的真实 bug，非假绿）。
+>
+> 原 spec（保留对照）：
 - 桥：fence 产物翻译成新 core 形状 `Vec<TemplateNode>`（DFS、全局 IrNodeId→局部 parent_idx、抽 class/id/tabindex、img src 归一化）。
 - **打包编排（被删的部分，不止桥）**：packer 的 `invoke fence → 建 ComponentTemplate → 从 cascade 填 dynamic_rules → write_package → 回填 packages` 整条编排层在 `d8fe705` 被删，要重建，不只写个翻译函数。加 `loomgui_fence` 依赖。
-- **SemanticKind（25 种）→ 新 NodeKind 映射必须 total 且非静默**（§3.3）：无专用 NodeKind 的语义映射到 Container/Button **+ 保留 `semantic_hint` 字段**，加测试断言"无 showcase 元素静默丢失语义标签"。绝不 lossy-and-silent。
+- **SemanticKind（25 种）→ 新 NodeKind 映射必须 total 且非静默**（§3.3）：每个可映射语义各有专属 NodeKind（1:1，无 collapse；InputDispatch/Template/None → Err），加测试断言"无 showcase 元素静默丢失语义标签"。绝不 lossy-and-silent。
 
 ### 🏁 终点线 1（纯 Rust，headless，本机验）
 
@@ -257,7 +263,7 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 ## 8. 关键决策记录
 
 - **推翻横切 R2–R8，改摸黑打通 + 三束加宽（2026-07-15）**：真实断点只在 IrTree↔TemplateNode 一处，其余全活。横切让每层成"啃不动的大山"，摸黑一次打通骨架链（终点线1 headless + 终点线2 Unity）比反复切片省，且 TDD 兜得住核心重构。
-- **红队修订：spike 先行 + 三个假设证伪（2026-07-15）**：代码核实推翻了"cascade 只需复用 rematch 扩一下"——① CSS 选择器**解析器缺席**（只有匹配器）；② 继承**只支持 color 且是脆弱 hack**；③ 打包器 HTML 编排**整段被删**。故顺序改为"先 P0（弃旧 pkg + 一刀切升 v17）→ 阶段 S（cascade+bridge 在旧 enum 上探路）→ ①enum 扩容 → ③cascade 收尾 → ②桥+打包编排"。真 smoke 在 ② 后（① 阶段 HTML 进不来，只能测表示层，是"假绿"）。SemanticKind→NodeKind 映射必须 total+非静默（保留 semantic_hint）。④ 加 headless C# harness 破两台机串行。
+- **红队修订：spike 先行 + 三个假设证伪（2026-07-15）**：代码核实推翻了"cascade 只需复用 rematch 扩一下"——① CSS 选择器**解析器缺席**（只有匹配器）；② 继承**只支持 color 且是脆弱 hack**；③ 打包器 HTML 编排**整段被删**。故顺序改为"先 P0（弃旧 pkg + 一刀切升 v17）→ 阶段 S（cascade+bridge 在旧 enum 上探路）→ ①enum 扩容 → ③cascade 收尾 → ②桥+打包编排"。真 smoke 在 ② 后（① 阶段 HTML 进不来，只能测表示层，是"假绿"）。SemanticKind→NodeKind 映射必须 total+非静默（实现证成 1:1，semantic_hint 无需）。④ 加 headless C# harness 破两台机串行。
 - **旧 showcase.pkg.bin ≠ 新 showcase（2026-07-15 用户更正）**：入库旧包是旧范式旧内容，新 showcase 8 页是靶子期重写、从未打包。个人项目不考虑兼容，旧包直接弃、不做基线快照、v17 不留后向兼容。原红队 F3"冻结 pkg 不可再生死锁"基于误判（把两者当同一个），已作废。
 - **core 类型化走档位2（2026-07-15）**：扩 enum + side table + bitflags，类型化用户表面留 C# 投影层，Rust 不上 trait object（封闭类型集 + 热循环数据局部性 + projection-layer 推论）。
 - **cascade 归 core、fence 只解析（2026-07-15）**：规则表必须进包（逻辑层运行时大量用 CSS，bake 丢规则会破"CSS 优先"赌注）；单一真相源，复用已有 rematch 扩全量。
@@ -267,3 +273,4 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 - **平台移植排最后**；**编辑器工具链并行**（独立于 runtime）。
 - **Spec-1 阶段 S spike 完成（2026-07-16）**：三个致命假设全部证成，`div/span` HTML → `<style>` cascade → rect 端到端打通（4 验收断言绿，commit `1c21b4d..9acd01e` 已 merge main）。关键定论：① 选择器解析器走**路径 c 手搓、零新依赖**（cssparser/scraper 全仓未引；cssparser 是分词器不给 selector AST——初版"接 cssparser"前提被推翻）；selector/rule **类型留 core**（`style/dynamic.rs`），fence 直产 core 类型（无适配层/共享 crate）。② cascade 引擎 `rematch_pseudo_classes` **本就完整**（非"复用 rematch 扩一下"——它遍历全规则 + specificity 合并 + base_style 每帧重起），spike 只产规则表喂它。③ 通用继承 pass 替代 color-only hack，set-ness 用 transient bitmask **不进 `ResolvedStyle`**（避免升 pkg 版本）。真实断点经核为**三处**（IrTree↔TemplateNode 桥 / packer HTML 编排被删 / `<style>` 选择器解析器缺席），非旧述"一处"。**⚠️ Spec-2 前置**：set-ness 须打包期 bake 进 base_style（spike 只追 dynamic cascade，打包期声明会被父运行时值覆盖；详见 §2 ① + 阶段 S ⚠️）。anim-text-color 跨节点 override 随通用 pass 丢弃，标 ponytail 推 Spec-3。
 - **Spec-2 ① core 类型化重构完成（2026-07-16）**：NodeKind 5 payload 变体 → 22 unit 变体（derives Copy + 谓词方法 is_container()/is_leaf()/has_children()）；Node 27 字段巨 struct 拆分（hovered/active/focused/disabled/cascaded_once → NodeFlags bitflags，	ouchable/draggable/tabindex → NodeInteraction 子 struct）；leaf 数据（text content / image src）从 enum payload 迁移到 Scene.text_contents / Scene.image_srcs HashMap side table，跨 pkg.bin 持久化靠 TemplateNode.content / TemplateNode.src 新字段（spike 挖出的数据丢失硬伤修法）；ResolvedStyle.inherited_set 打包期 bake（spike 前置完成）；pkg 格式 v16→v17。全 workspace 675+ 测试绿。关键定论：① RichText 变体退役（layout/render 旁路删除，	ext/rich.rs 算法保留待复合束）；② NodeKind 全 unit 后 bincode serialize = 4B（FixintEncoding u32 判别值）；③ Scene::build entry tuple 8→10（末两位 content/src）。commit `c77967c..221c558`，branch `codex-spec-2-core-refactor`。
+- **Spec-3 ② IrTree 桥 + 打包编排完成（2026-07-16）**：骨架链断点接上——HTML→fence→桥→pkg.bin→core 建树→layout→render 端到端打通（终点线1 smoke 绿，rect width=200 + display:none 剪枝 + class 命中）。关键定论：① pkg v17→**v18**，`kind_tag` 改为 **`NodeKind` 判别值**（`#[repr(u8)]` + `from_u8`，全 23 变体，**kind_tag≠独立 tag 表**是 v18 与 v17 的本质差），删 RichText 死字段；② IrTree→TemplateNode **桥放 packer**（fence 产 ParsedTemplate，packer 调 `bridge()` 翻译，core 不认 fence 类型——保持 core 纯运行时）；SemanticKind→NodeKind **1:1 total + 非**静默（22 可映射语义各有专属 NodeKind，无 collapse；InputDispatch/Template/None → Err，§3.3 判据兑现，semantic_hint 无需）；③ **坑 161 修法 = inline inherited_set bake**（Spec-2 只 bake 了 dynamic cascade 的 set-bit，inline style 声明的继承属性仍漏——本棒补 inline 源，双源统一走打包期 bake）；④ packer HTML→pkg.bin 编排重建（`pack_components` 闭环）+ `referenced_sprites` 回接 atlas 校验；⑤ fence 顶层空白文本根跳过（真实 bug，smoke 暴露非假绿）。**执行顺序修订**：原红队定 ①→③→②，实际走 ①→②（③ cascade 收尾推后到 ② 链通后，让 smoke 先验范式）。全 workspace ~790 测试绿，fmt/clippy/feature-gate 清。commit `aee3716..349ccb2`（含 .dll 重编），branch `spec3-ir-bridge`。

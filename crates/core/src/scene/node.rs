@@ -82,6 +82,7 @@ impl NodeId {
 
 /// 默认 `Container`（无数据变体），render 层测试构造 Node 用 `Default::default()`。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum NodeKind {
     #[default]
     Container,
@@ -110,6 +111,37 @@ pub enum NodeKind {
 }
 
 impl NodeKind {
+    /// u8 判别值 → NodeKind（pkg.bin kind_tag read 用）。越界返 None。
+    /// 变体只追加到 enum 末尾，保持既有判别值稳定。
+    pub fn from_u8(b: u8) -> Option<NodeKind> {
+        match b {
+            0 => Some(NodeKind::Container),
+            1 => Some(NodeKind::TextNode),
+            2 => Some(NodeKind::TextBlock),
+            3 => Some(NodeKind::TextElement),
+            4 => Some(NodeKind::LineBreak),
+            5 => Some(NodeKind::Label),
+            6 => Some(NodeKind::Button),
+            7 => Some(NodeKind::Link),
+            8 => Some(NodeKind::Image),
+            9 => Some(NodeKind::TextField),
+            10 => Some(NodeKind::NumberField),
+            11 => Some(NodeKind::Slider),
+            12 => Some(NodeKind::Toggle),
+            13 => Some(NodeKind::RadioButton),
+            14 => Some(NodeKind::TextArea),
+            15 => Some(NodeKind::Dropdown),
+            16 => Some(NodeKind::OptionItem),
+            17 => Some(NodeKind::ProgressBar),
+            18 => Some(NodeKind::ListView),
+            19 => Some(NodeKind::ListItem),
+            20 => Some(NodeKind::Slot),
+            21 => Some(NodeKind::CustomElement),
+            22 => Some(NodeKind::Canvas),
+            _ => None,
+        }
+    }
+
     /// Container content model: user-arrangeable children (div/button/a/p/span/ul/li/...).
     /// Single source of truth for container vs leaf classification — adding a new
     /// container variant only requires changing this method.
@@ -508,3 +540,52 @@ impl Scene {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod repr_tests {
+    use super::NodeKind;
+
+    #[test]
+    fn kind_as_u8_is_discriminant() {
+        // repr(u8) 后 as u8 等于声明顺序的判别值；锁定几个关键值防漂移。
+        assert_eq!(NodeKind::Container as u8, 0);
+        assert_eq!(NodeKind::TextNode as u8, 1);
+        assert_eq!(NodeKind::Button as u8, 6);
+        assert_eq!(NodeKind::Image as u8, 8);
+        assert_eq!(NodeKind::Canvas as u8, 22);
+    }
+
+    #[test]
+    fn from_u8_roundtrip_all_variants() {
+        let all = [
+            NodeKind::Container,
+            NodeKind::TextNode,
+            NodeKind::TextBlock,
+            NodeKind::TextElement,
+            NodeKind::LineBreak,
+            NodeKind::Label,
+            NodeKind::Button,
+            NodeKind::Link,
+            NodeKind::Image,
+            NodeKind::TextField,
+            NodeKind::NumberField,
+            NodeKind::Slider,
+            NodeKind::Toggle,
+            NodeKind::RadioButton,
+            NodeKind::TextArea,
+            NodeKind::Dropdown,
+            NodeKind::OptionItem,
+            NodeKind::ProgressBar,
+            NodeKind::ListView,
+            NodeKind::ListItem,
+            NodeKind::Slot,
+            NodeKind::CustomElement,
+            NodeKind::Canvas,
+        ];
+        for &k in &all {
+            assert_eq!(NodeKind::from_u8(k as u8), Some(k));
+        }
+        assert_eq!(NodeKind::from_u8(23), None); // 越界
+        assert_eq!(NodeKind::from_u8(255), None);
+    }
+}

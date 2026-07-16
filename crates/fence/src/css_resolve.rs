@@ -97,13 +97,6 @@ pub fn resolve_inline_styles_with_diags(
 
                 // Apply using existing apply_decl.
                 // If it returns false, the value failed to parse -- report it.
-                //
-                // TODO(Spec-3): when apply_decl succeeds and CssPropSpec.inherited is true,
-                // set the matching bit on styles[idx].inherited_set. Currently no bits are
-                // baked, so runtime propagate_inherited treats inline inherited declarations
-                // (color/font-size/...) as unset and overwrites them with the parent value.
-                // Wire together with core's inherited_bit (used for dynamic rules) — the two
-                // are a known dual source until Spec-3 unifies them.
                 if !apply_decl(&mut styles[idx], prop, value) {
                     diagnostics.push(Diagnostic::error(
                         DiagnosticCode::FenceBadCssValue,
@@ -113,6 +106,10 @@ pub fn resolve_inline_styles_with_diags(
                         ),
                         line_map.source_location(node.span.start, file.to_string()),
                     ));
+                } else if let Some(bit) = loomgui_core::style::dynamic::inherited_bit(prop) {
+                    // inline 可继承声明 bake 进 inherited_set，避免运行时
+                    // propagate_inherited 用父值覆盖子的 inline 声明。
+                    styles[idx].inherited_set.0 |= bit;
                 }
             }
         }
@@ -185,6 +182,42 @@ mod tests {
         assert_eq!(
             styles[id.0].taffy_style.flex_direction,
             taffy::FlexDirection::Column
+        );
+    }
+
+    #[test]
+    fn inline_inherited_sets_bit() {
+        let (tree, _) = parse_html_to_ir(r#"<span style="color:blue"></span>"#);
+        let styles = resolve_for_test(&tree);
+        let id = tree.roots[0];
+        let color_bit = loomgui_core::style::dynamic::inherited_bit("color").unwrap();
+        assert!(
+            styles[id.0].inherited_set.0 & color_bit != 0,
+            "inline color must set inherited_set COLOR bit"
+        );
+    }
+
+    #[test]
+    fn inline_non_inherited_sets_no_bit() {
+        let (tree, _) = parse_html_to_ir(r#"<div style="width:100px"></div>"#);
+        let styles = resolve_for_test(&tree);
+        let id = tree.roots[0];
+        assert_eq!(
+            styles[id.0].inherited_set.0, 0,
+            "non-inherited width must not set any inherited bit"
+        );
+    }
+
+    #[test]
+    fn inline_font_size_sets_bit() {
+        let (tree, _) = parse_html_to_ir(r#"<div style="font-size:20px"></div>"#);
+        let styles = resolve_for_test(&tree);
+        let id = tree.roots[0];
+        let fs_bit = loomgui_core::style::dynamic::inherited_bit("font-size").unwrap();
+        assert_eq!(
+            styles[id.0].inherited_set.0 & fs_bit,
+            fs_bit,
+            "inline font-size must set inherited_set FONT_SIZE bit"
         );
     }
 }

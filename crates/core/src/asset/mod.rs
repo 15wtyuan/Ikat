@@ -1,13 +1,11 @@
-//! 包格式（.pkg.bin，当前 version=16）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=18）：Rust-internal（packager 写、runtime 读，C# 不解析）。
 //!
 //! 多组件格式：一个 pkg.bin = 多个具名组件（ComponentTable 切分）。
-//! 布局：Header(20B) + StringTable + ComponentTable + RichRunsArena + NodeBlock +
+//! 布局：Header(20B) + StringTable + ComponentTable + NodeBlock +
 //!       PerComponent(DynamicRules+Controllers)。
 //!   - Header 不含 root_w/root_h（root_size 归 Stage）+ 不含 atlas 引用（图集归 Unity）。
 //!   - StringTable：组件名 / text content / img path / classes / id_attr 共用一张表（intern 去重）。
 //!   - ComponentTable：每组件 {name_idx, root_node_idx, node_count, dynamic_rules_blob_len}。
-//!   - RichRunsArena：所有 RichText 节点的 runs blob 拼接（每段前缀 u32 len）。NodeBlock
-//!     的 rich_off 字段指向此 arena 的字节偏移（NULL_RICH_OFF=0xFFFF_FFFF=无 runs）。
 //!   - NodeBlock：所有组件节点平铺，parent_idx 用 -1 表组件根（全局位置索引）。
 //!   - PerComponentDynamicRules：每组件 dynamic_rules 的 bincode blob（紧跟 ComponentTable 段）。
 //! style 字段 = bincode(ResolvedStyle，已 bake)。img src 指向归一化 path 字符串（非 atlas sprite）。
@@ -20,18 +18,10 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 17; // v17: NodeKind unit-variant expansion + inherited_set + TemplateNode content/src
-pub(crate) const MIN_VERSION: u32 = 17;
-pub(crate) const MAX_VERSION: u32 = 17;
+pub const PKG_FORMAT_VERSION: u32 = 18; // v18: kind_tag = NodeKind 判别值(全23变体) + 删 RichText 死字段(rich_runs_arena/rich_off)
+pub(crate) const MIN_VERSION: u32 = 18;
+pub(crate) const MAX_VERSION: u32 = 18;
 const NULL_IDX: u16 = 0xFFFF;
-/// NodeBlock 中 rich_off 字段的"无 runs"哨兵。非 RichText 节点写此值。
-const NULL_RICH_OFF: u32 = 0xFFFF_FFFF;
-
-const KIND_CONTAINER: u8 = 0;
-const KIND_BUTTON: u8 = 1;
-const KIND_IMAGE: u8 = 2;
-const KIND_TEXT: u8 = 3;
-const KIND_RICHTEXT: u8 = 4;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────
 
@@ -149,16 +139,9 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     let mut comp_records: Vec<(u16, u32, u32, Vec<u8>)> = Vec::with_capacity(component_count);
     // 每组件：Vec<(name_idx, mount_node_idx, initial_selected_index)>（ControllerSection 用）
     let mut ctrl_records: Vec<Vec<(u16, u32, i32)>> = Vec::with_capacity(component_count);
-    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, dc_idx, rich_off)
-    let mut node_records: Vec<(i32, u8, Vec<u8>, u16, u16, Vec<u16>, u16, u8, i32, u16, u32)> =
+    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, dc_idx)
+    let mut node_records: Vec<(i32, u8, Vec<u8>, u16, u16, Vec<u16>, u16, u8, i32, u16)> =
         Vec::new();
-    // RichText runs arena：所有 RichText 节点的 runs bincode blob 拼接，每段前缀 u32 len。
-    // NodeBlock 的 rich_off 字段指向此 arena 的字节偏移。非 RichText 节点用 NULL_RICH_OFF 哨兵。
-    //
-    // TODO(pkg-format-cleanup): RichText 在 Spec-2 退役——rich_runs_arena 恒空、rich_off 恒
-    // NULL_RICH_OFF（每节点 4 字节死字段）。删除二者须 bump PKG_FORMAT_VERSION (v17→v18) +
-    // 读写双端同步 + 重打所有包，留待专门的 pkg 格式清理，不值得现在为它升版本。
-    let rich_runs_arena: Vec<u8> = Vec::new();
     let mut global_node_offset: u32 = 0;
     for (name, nodes, dynamic_rules, controllers) in &input.components {
         let name_idx = intern(name, &mut strings, &mut idx_of);
@@ -178,7 +161,6 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 None => -1,
                 Some(p) => (comp_base as usize + p) as i32,
             };
-            let rich_off: u32 = NULL_RICH_OFF;
             let (kind_tag, text_idx, src_idx) = {
                 let text_idx = tn
                     .content
@@ -190,22 +172,12 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                     .as_ref()
                     .map(|c| intern(c, &mut strings, &mut idx_of))
                     .unwrap_or(NULL_IDX);
+                // kind_tag = NodeKind 判别值（repr(u8)），全 23 变体保真。
+                let kind_tag = tn.kind as u8;
                 match tn.kind {
-                    NodeKind::Container => (KIND_CONTAINER, NULL_IDX, NULL_IDX),
-                    NodeKind::Button => (KIND_BUTTON, NULL_IDX, NULL_IDX),
-                    NodeKind::Image => (KIND_IMAGE, NULL_IDX, src_idx),
-                    NodeKind::TextNode => (KIND_TEXT, text_idx, NULL_IDX),
-                    // 23 变体是 Spec-2 冻结的前瞻类型表面；packer 当前只产上述 4 类（kind_from_tag）。
-                    // 后续 spec 把更多 kind 接进 packer 时此处会命中——debug 期 panic 提醒补 KIND_* 序列化臂。
-                    _ => {
-                        debug_assert!(
-                            false,
-                            "serializing unhandled NodeKind {:?} as Container — \
-                             add a KIND_* arm when the packer produces this kind",
-                            tn.kind
-                        );
-                        (KIND_CONTAINER, NULL_IDX, NULL_IDX)
-                    }
+                    NodeKind::Image => (kind_tag, NULL_IDX, src_idx),
+                    NodeKind::TextNode => (kind_tag, text_idx, NULL_IDX),
+                    _ => (kind_tag, NULL_IDX, NULL_IDX),
                 }
             };
             let style_blob = bincode::serialize(&tn.style).expect("ResolvedStyle serializable");
@@ -238,7 +210,6 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 flags,
                 tabindex,
                 dc_idx,
-                rich_off,
             ));
         }
         let node_count = nodes.len() as u32;
@@ -276,12 +247,8 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         out.extend_from_slice(&node_count.to_le_bytes());
         out.extend_from_slice(&(dynamic_blob.len() as u32).to_le_bytes());
     }
-    // RichRunsArena: arena_len(u32) + arena_bytes。放在 NodeBlock 前——read 需在解 NodeBlock
-    // 时按 rich_off 查 arena 取 runs blob（需先有 arena 切片）。
-    out.extend_from_slice(&(rich_runs_arena.len() as u32).to_le_bytes());
-    out.extend_from_slice(&rich_runs_arena);
     // NodeBlock: 每节点 {parent_idx(i32), kind_tag(u8), style_len(u32)+style_blob, text_idx(u16), src_idx(u16),
-    //   class_count(u16)+class_idx[], id_idx(u16), flags(u8), tabindex(i32), dc_idx(u16), rich_off(u32)}
+    //   class_count(u16)+class_idx[], id_idx(u16), flags(u8), tabindex(i32), dc_idx(u16)}
     for (
         parent_idx,
         kind_tag,
@@ -293,7 +260,6 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         flags,
         tabindex,
         dc_idx,
-        rich_off,
     ) in &node_records
     {
         out.extend_from_slice(&parent_idx.to_le_bytes());
@@ -310,7 +276,6 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         out.push(*flags);
         out.extend_from_slice(&tabindex.to_le_bytes());
         out.extend_from_slice(&dc_idx.to_le_bytes());
-        out.extend_from_slice(&rich_off.to_le_bytes());
     }
     // PerComponentDynamicRules + PerComponentControllers：每组件 dynamic_blob 紧跟其
     // ControllerSection（同 ComponentTable 顺序）。read 按同序逐组件读。
@@ -364,10 +329,6 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
     }
     // 总节点数 = 各组件 node_count 之和
     let total_nodes: u32 = comp_table.iter().map(|(_, _, n, _)| *n).sum();
-    // RichRunsArena: arena_len(u32) + arena_bytes。需在 NodeBlock 解析前读出——
-    // KIND_RICHTEXT 节点按 rich_off 查 arena 取 runs blob。
-    let rich_arena_len = r.u32("rich_arena_len")? as usize;
-    let _rich_runs_arena: &[u8] = r.take(rich_arena_len, "rich_runs_arena")?;
     // NodeBlock → TemplateNode（平铺，parent_idx 存盘是全局位置；读后转回组件内局部）
     let mut all_nodes: Vec<TemplateNode> = Vec::with_capacity(total_nodes as usize);
     for _ in 0..total_nodes {
@@ -404,14 +365,10 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         } else {
             Some(string_at(&strings, dc_idx)?)
         };
-        // rich_off：NULL_RICH_OFF=0xFFFF_FFFF 表非 RichText 节点；否则指向 rich_runs_arena 偏移。
-        let _rich_off = r.u32("rich_off")?;
         // 存盘 parent_idx 是 NodeBlock 全局位置（-1=组件根）；先存全局，待切分组件时减 base 转局部
         let parent_global = if pidx < 0 { None } else { Some(pidx as usize) };
-        let (kind, content, src) = match kind_tag {
-            KIND_CONTAINER => (NodeKind::Container, None, None),
-            KIND_BUTTON => (NodeKind::Button, None, None),
-            KIND_IMAGE => (
+        let (kind, content, src) = match NodeKind::from_u8(kind_tag) {
+            Some(NodeKind::Image) => (
                 NodeKind::Image,
                 None,
                 if src_idx == NULL_IDX {
@@ -420,7 +377,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
                     Some(string_at(&strings, src_idx)?)
                 },
             ),
-            KIND_TEXT => (
+            Some(NodeKind::TextNode) => (
                 NodeKind::TextNode,
                 if text_idx == NULL_IDX {
                     None
@@ -429,9 +386,8 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
                 },
                 None,
             ),
-            // RichText retired in Spec-2; legacy pkg entries fall back to empty TextNode.
-            KIND_RICHTEXT => (NodeKind::TextNode, None, None),
-            other => return Err(PkgError::BadKind(other)),
+            Some(k) => (k, None, None),
+            None => return Err(PkgError::BadKind(kind_tag)),
         };
         all_nodes.push(TemplateNode {
             kind,

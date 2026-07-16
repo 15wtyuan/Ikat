@@ -419,15 +419,12 @@ fn read_rejects_oob_component_slice() {
 fn read_rejects_cross_component_parent() {
     let bytes = two_comp_pkg_bytes();
     // 找 comp_b 的 root 节点在 NodeBlock 中的 parent_idx 字段位置。
-    // 布局：ComponentTable(2 条目 × 14B = 28B) + RichRunsArena(arena_len_u32 + bytes) + NodeBlock。
+    // 布局（v18）：ComponentTable(2 条目 × 14B = 28B) + NodeBlock（无 RichRunsArena 段）。
     let ct_off = comp_table_offset(&bytes);
-    let arena_len_off = ct_off + 2 * 14;
-    let arena_len =
-        u32::from_le_bytes(bytes[arena_len_off..arena_len_off + 4].try_into().unwrap()) as usize;
-    let nodeblock_off = arena_len_off + 4 + arena_len;
-    // 节点布局：parent_idx(4) + kind(1) + style_len(4) + style_blob + text_idx(2) + src_idx(2)
-    //   + class_count(2) + class_idx[] + id_idx(2) + flags(1) + tabindex(4) + dc_idx(2) + rich_off(4)
-    //   固定部分 = 28B + style_blob_len + 2*class_count。所有节点用默认 style → style_len 相同。
+    let nodeblock_off = ct_off + 2 * 14;
+    // 节点布局（v18）：parent_idx(4) + kind(1) + style_len(4) + style_blob + text_idx(2) + src_idx(2)
+    //   + class_count(2) + class_idx[] + id_idx(2) + flags(1) + tabindex(4) + dc_idx(2)
+    //   固定部分 = 24B + style_blob_len + 2*class_count（v18 删 rich_off，v17 的 28B 减 4B）。
     let style_len_0 = u32::from_le_bytes(
         bytes[nodeblock_off + 5..nodeblock_off + 9]
             .try_into()
@@ -439,7 +436,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node0_size = 28 + style_len_0 + 2 * class_count_0;
+    let node0_size = 24 + style_len_0 + 2 * class_count_0;
     let node1_off = nodeblock_off + node0_size;
     let style_len_1 =
         u32::from_le_bytes(bytes[node1_off + 5..node1_off + 9].try_into().unwrap()) as usize;
@@ -448,7 +445,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node1_size = 28 + style_len_1 + 2 * class_count_1;
+    let node1_size = 24 + style_len_1 + 2 * class_count_1;
     let node2_off = nodeblock_off + node0_size + node1_size;
     // 篡改节点 2（comp_b root）的 parent_idx 从 -1 → 0（< base=2，跨组件）
     let mut patched = bytes.clone();
@@ -472,6 +469,56 @@ fn read_rejects_duplicate_component_name() {
     assert!(
         matches!(err, PkgError::DupComponent(_)),
         "expected DupComponent(_), got {err:?}"
+    );
+}
+
+/// Important 4：NodeBlock 的 kind_tag 字节不在 `NodeKind::from_u8` 判别值范围（≥23）→ BadKind
+/// （不静默塌成 Container）。v17 的 KIND_* 5 常量方案 read 侧用 wildcard fallback 把未知字节
+/// 全塌成 Container（kind collapse）；v18 起 kind_tag = NodeKind 判别值(0..=22)，from_u8 对
+/// ≥23 返 None → BadKind。本测试同时正向验证改的是 kind_tag 字节（改成 Label 须读回 Label），
+/// 避免"改错字节却因别的原因碰巧报错"的假阳性。
+#[test]
+fn read_rejects_unknown_kind_tag() {
+    // 单组件单节点（Container, kind_tag=0），便于直接定位 kind_tag 字节。
+    let nodes = [tn(NodeKind::Container)];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+    };
+    let bytes = write_package(&input);
+
+    // NodeBlock 紧跟 ComponentTable（每条目 14B）。单组件 → NodeBlock 起点 = ct_off + 14。
+    let nodeblock_off = comp_table_offset(&bytes) + 14;
+    // 节点内布局：parent_idx(4) + kind_tag(1) + ... → kind_tag 在 node_start + 4。
+    let kind_tag_off = nodeblock_off + 4;
+
+    // 正向 sanity：把 kind_tag 从 0(Container) 改成 5(Label)，read 应回 Label。
+    // 确保改的是 kind_tag 字节；否则下面的 BadKind 断言会"对错原因通过"。
+    let mut patched_valid = bytes.clone();
+    patched_valid[kind_tag_off] = NodeKind::Label as u8;
+    let pkg = read_package(&patched_valid).expect("valid kind_tag must still read");
+    assert_eq!(
+        pkg.components["c"].nodes[0].kind,
+        NodeKind::Label,
+        "kind_tag offset sanity: patching to Label must read back Label"
+    );
+
+    // 23 = from_u8 的首个 None 分支（Canvas=22 是最后合法判别值）。
+    let mut patched_bad = bytes.clone();
+    patched_bad[kind_tag_off] = 23;
+    let err = read_package(&patched_bad).expect_err("unknown kind_tag must error");
+    assert!(
+        matches!(err, PkgError::BadKind(23)),
+        "expected BadKind(23), got {err:?}"
+    );
+
+    // 0xFF = 远超判别值范围，同样必须 BadKind。防 from_u8 回归（如 off-by-one 把 23 误返 Some）。
+    let mut patched_ff = bytes.clone();
+    patched_ff[kind_tag_off] = 0xFF;
+    let err = read_package(&patched_ff).expect_err("0xFF kind_tag must error");
+    assert!(
+        matches!(err, PkgError::BadKind(0xFF)),
+        "expected BadKind(0xFF), got {err:?}"
     );
 }
 
@@ -529,4 +576,59 @@ fn template_node_content_src_roundtrip_via_pkg() {
         Some("icon.png"),
         "Image src must survive pkg roundtrip"
     );
+}
+
+/// v18: 20 个非 Container/Button/Image 的 NodeKind 变体经 write_package → read_package
+/// 往返后 kind 不塌成 Container。v17 的 KIND_* 5 常量方案只覆盖 4 种 NodeKind，其余 wildcard
+/// fallback 塌成 Container；v18 用 NodeKind 判别值保真全 23 变体（Container/Button/Image 的
+/// content/src 路径由 template_node_content_src_roundtrip_via_pkg 覆盖，此处不重复）。
+#[test]
+fn v18_nontrivial_nodekinds_roundtrip() {
+    let all_kinds = [
+        NodeKind::TextNode,
+        NodeKind::TextBlock,
+        NodeKind::TextElement,
+        NodeKind::LineBreak,
+        NodeKind::Label,
+        NodeKind::Link,
+        NodeKind::TextField,
+        NodeKind::NumberField,
+        NodeKind::Slider,
+        NodeKind::Toggle,
+        NodeKind::RadioButton,
+        NodeKind::TextArea,
+        NodeKind::Dropdown,
+        NodeKind::OptionItem,
+        NodeKind::ProgressBar,
+        NodeKind::ListView,
+        NodeKind::ListItem,
+        NodeKind::Slot,
+        NodeKind::CustomElement,
+        NodeKind::Canvas,
+    ];
+    for &k in &all_kinds {
+        let one = TemplateNode {
+            kind: k,
+            style: ResolvedStyle::default(),
+            parent_idx: None,
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            data_controller: None,
+            content: None,
+            src: None,
+        };
+        let empty_rules = DynamicRuleTable { rules: vec![] };
+        let input = PackageInput {
+            components: vec![("c", std::slice::from_ref(&one), &empty_rules, &[])],
+        };
+        let bytes = write_package(&input);
+        let pkg = read_package(&bytes).unwrap();
+        let comp = pkg.components.get("c").unwrap();
+        assert_eq!(
+            comp.nodes[0].kind, k,
+            "kind {k:?} collapsed after roundtrip"
+        );
+    }
 }

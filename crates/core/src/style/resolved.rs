@@ -210,12 +210,11 @@ pub struct ResolvedStyle {
     pub text_effects: Vec<crate::text::font_effect::FontEffect>,
     /// Which inherited CSS properties were explicitly declared (set-ness bitmask).
     ///
-    /// Intended to be baked at package time into base_style (rematch seeds from this
-    /// each frame). **Bake wiring incomplete (Spec-2 spike):** fence `css_resolve` does
-    /// not yet set bits for inline inherited declarations, so runtime
-    /// `propagate_inherited` overwrites inline inherited props (color/font-size/...)
-    /// with the parent value. Spec-3 unifies this with the fence schema `inherited`
-    /// flag and wires the bake. See TODO in `css_resolve.rs`.
+    /// Baked at package time into base_style (rematch seeds from this each frame).
+    /// Fence `css_resolve` calls `loomgui_core::style::dynamic::inherited_bit` after
+    /// `apply_decl` success and OR's the bit into this field, so runtime
+    /// `propagate_inherited` respects inline inherited declarations and does not
+    /// overwrite them with the parent value.
     pub inherited_set: InheritedSet,
 }
 
