@@ -1837,6 +1837,7 @@ dependencies = [
  "etagere",
  "image",
  "loomgui_core",
+ "loomgui_fence",
  "serde",
  "serde_json",
 ]
