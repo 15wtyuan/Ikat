@@ -29,8 +29,8 @@ fn build_stage(html: &str) -> (Stage, NodeId) {
 
 #[test]
 fn smoke_main_gate_class_hit_displaynone_flex() {
-    // 完整文档结构（html/head/body shell 由 fence 剥除）+ 单行（顶层无 inter-element 空白
-    // Text 节点——fence 当前把顶层空白 Text 也当 root，bridge 单根契约拒）。
+    // 完整文档结构（html/head/body shell 由 fence 剥除）。多行 HTML 也行——顶层空白
+    // 不再变孤立 Text root（fence tree_builder 已修）。
     let html = r#"<!DOCTYPE html><html><head><style>
 .wrap { display:flex; flex-direction:column; width:200px; }
 .hide { display:none; }
@@ -40,7 +40,7 @@ fn smoke_main_gate_class_hit_displaynone_flex() {
     let wrap = stage.find_node_by_id("wrap").expect("wrap");
     let wrap_rect = stage.get_node_layout_rect(wrap).expect("wrap rect");
     assert!(
-        (wrap_rect.w - 200.0).abs() < 1.0,
+        (wrap_rect.w - 200.0).abs() < 0.5,
         "class .wrap width:200 not applied (cascade broken?): w={}",
         wrap_rect.w
     );
@@ -50,10 +50,15 @@ fn smoke_main_gate_class_hit_displaynone_flex() {
         !stage.get_node_visible(hide),
         "display:none node should be invisible"
     );
-    // flex 布局：子 a 在 wrap 内（rect 合理）
+    // flex 布局：.wrap 是 flex-direction:column，子 a 无显式 width，align-items 默认
+    // stretch → cross-axis（width）应填满 200。仅查 h>=0 不证 flex 跑了（任何默认 rect 都过）。
     let a = stage.find_node_by_id("a").expect("a");
     let a_rect = stage.get_node_layout_rect(a).expect("a rect");
-    assert!(a_rect.h >= 0.0, "child a laid out, h={}", a_rect.h);
+    assert!(
+        (a_rect.w - 200.0).abs() < 1.0,
+        "child a cross-axis width should stretch to 200 (flex column ran): w={}",
+        a_rect.w
+    );
 }
 
 #[test]

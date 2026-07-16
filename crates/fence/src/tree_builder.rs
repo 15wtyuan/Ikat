@@ -196,7 +196,13 @@ impl TreeBuilder {
                 if self.in_style {
                     self.style_texts.push(text);
                 } else if !self.in_head && !text.is_empty() {
-                    self.tree.push_text(text, span, self.current_parent());
+                    // 顶层空白（元素间换行/缩进，栈空）不进树——否则多行 HTML 会冒出
+                    // 孤立 Text root，破坏 bridge 单根契约。元素内空白（parent=Some）
+                    // 仍保留为 Text 子节点。
+                    let is_top_level_ws = self.current_parent().is_none() && text.trim().is_empty();
+                    if !is_top_level_ws {
+                        self.tree.push_text(text, span, self.current_parent());
+                    }
                 }
             }
             IrToken::Comment { text: _, span: _ } => {}
@@ -439,5 +445,31 @@ mod tests {
         );
         let _ = tree;
         assert_eq!(style_texts, vec![".a { width: 10px }".to_string()]);
+    }
+
+    #[test]
+    fn top_level_whitespace_not_orphan_root() {
+        // 多行 HTML：元素间换行/缩进不能变成孤立 Text root（曾破坏 bridge 单根契约，
+        // 拒掉所有多行生产 HTML）。元素内空白仍保留。
+        let html = "<style>.x{width:50px}</style>\n<div class=\"root\">\n  <p>hi</p>\n</div>\n";
+        let (tree, diags) = parse_html_to_ir(html);
+        assert!(diags.is_empty(), "unexpected diags: {:?}", diags);
+        assert_eq!(
+            tree.roots.len(),
+            1,
+            "expected single root (top-level ws must not be roots), got roots: {:?}",
+            tree.roots
+        );
+        assert_eq!(tree.element(tree.roots[0]).unwrap().tag, "div");
+        // 元素内空白（div 和 p 之间的换行）仍保留为 Text 子节点——只丢顶层。
+        let div = tree.roots[0];
+        let has_ws_text_child = tree.nodes[div.0]
+            .children
+            .iter()
+            .any(|&c| matches!(&tree.nodes[c.0].kind, IrNodeKind::Text(_)));
+        assert!(
+            has_ws_text_child,
+            "in-element whitespace Text should be preserved (only top-level ws dropped)"
+        );
     }
 }
