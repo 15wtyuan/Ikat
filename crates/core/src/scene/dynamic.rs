@@ -13,7 +13,7 @@
 //!   复用 dom.rs 围栏白名单语义做 tag→NodeKind（`kind_from_tag`）。
 //! - create_node 填 base_style（源）+ style=base_style.clone()（派生），下帧 rematch 从 base 起算。
 
-use crate::scene::node::{Node, NodeId, NodeKind, Rect, Scene};
+use crate::scene::node::{Node, NodeFlags, NodeId, NodeInteraction, NodeKind, Rect, Scene};
 use crate::style::mapping::apply_decl;
 use crate::style::resolved::{OverflowMode, ResolvedStyle};
 use crate::tween::TweenManager;
@@ -25,10 +25,8 @@ pub fn kind_from_tag(tag: &str) -> Result<NodeKind, String> {
     match tag {
         "div" => Ok(NodeKind::Container),
         "button" => Ok(NodeKind::Button),
-        "img" => Ok(NodeKind::Image { src: String::new() }),
-        "span" => Ok(NodeKind::Text {
-            content: String::new(),
-        }),
+        "img" => Ok(NodeKind::Image),
+        "span" => Ok(NodeKind::TextNode),
         other => Err(format!(
             "unknown kind tag: {}（围栏白名单：div/button/img/span）",
             other
@@ -81,7 +79,7 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
     } else {
         None
     };
-    let dirty_text = matches!(k, NodeKind::Text { .. });
+    let dirty_text = matches!(k, NodeKind::TextNode);
     let node = Node {
         id: NodeId::INVALID, // 临时，insert 后回填
         parent: None,
@@ -96,21 +94,22 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         dirty_text,
         classes: Vec::new(),
         id_attr: None,
-        touchable,
-        hovered: false,
-        active: false,
-        disabled: false,
-        draggable: false,
-        tabindex: None,
-        focused: false,
-        reuse_key: 0,
-        data_controller: None,
-        cascaded_once: false,
+            interaction: NodeInteraction {
+            flags: NodeFlags::empty(),
+            touchable,
+            draggable: false,
+            tabindex: None,
+            },
+            reuse_key: 0,
+            data_controller: None,
     };
     let key = scene.nodes.insert(node);
     resize_parallel_arrays(scene);
     let id = NodeId::from_key(key);
     scene.nodes.get_mut(key).unwrap().id = id; // 回填
+    if k == NodeKind::TextNode {
+        scene.text_contents.insert(id, String::new());
+    }
     Ok(id)
 }
 
@@ -140,7 +139,7 @@ pub fn create_node_from_template(
     } else {
         None
     };
-    let dirty_text = matches!(kind, NodeKind::Text { .. });
+    let dirty_text = matches!(kind, NodeKind::TextNode);
     let node = Node {
         id: NodeId::INVALID, // 临时，insert 后回填
         parent: None,
@@ -155,21 +154,24 @@ pub fn create_node_from_template(
         dirty_text,
         classes: Vec::new(),
         id_attr: None,
-        touchable,
-        hovered: false,
-        active: false,
-        disabled: false,
-        draggable: false,
-        tabindex: None,
-        focused: false,
-        reuse_key: 0,
-        data_controller: None,
-        cascaded_once: false,
+            interaction: NodeInteraction {
+            flags: NodeFlags::empty(),
+            touchable,
+            draggable: false,
+            tabindex: None,
+            },
+            reuse_key: 0,
+            data_controller: None,
     };
     let key = scene.nodes.insert(node);
     resize_parallel_arrays(scene);
     let id = NodeId::from_key(key);
     scene.nodes.get_mut(key).unwrap().id = id; // 回填
+    if kind == NodeKind::TextNode {
+        scene.text_contents.insert(id, String::new());
+    } else if kind == NodeKind::Image {
+        scene.image_srcs.insert(id, String::new());
+    }
     id
 }
 
@@ -229,27 +231,21 @@ pub fn remove_child(scene: &mut Scene, parent: NodeId, child: NodeId) -> Result<
 
 /// 改 Text 节点 content + 标 dirty_text。非 Text 节点 → Err。
 pub fn set_text(scene: &mut Scene, node: NodeId, text: &str) -> Result<(), String> {
-    let n = scene.get_mut(node).ok_or("node not live")?;
-    match &mut n.kind {
-        NodeKind::Text { content } => {
-            *content = text.into();
-        }
-        _ => return Err("set_text 只对 Text 节点生效".into()),
+    if !matches!(scene.get(node).map(|n| n.kind), Some(NodeKind::TextNode)) {
+        return Err("set_text 只对 Text 节点生效".into());
     }
-    n.dirty_text = true;
+    scene.text_contents.insert(node, text.into());
+    scene.get_mut(node).unwrap().dirty_text = true;
     Ok(())
 }
 
 /// 改 Image 节点 src + 标 dirty_mesh。非 Image 节点 → Err。
 pub fn set_src(scene: &mut Scene, node: NodeId, src: &str) -> Result<(), String> {
-    let n = scene.get_mut(node).ok_or("node not live")?;
-    match &mut n.kind {
-        NodeKind::Image { src: s } => {
-            *s = src.into();
-        }
-        _ => return Err("set_src 只对 Image 节点生效".into()),
+    if !matches!(scene.get(node).map(|n| n.kind), Some(NodeKind::Image)) {
+        return Err("set_src 只对 Image 节点生效".into());
     }
-    n.dirty_mesh = true;
+    scene.image_srcs.insert(node, src.into());
+    scene.get_mut(node).unwrap().dirty_mesh = true;
     Ok(())
 }
 
@@ -334,6 +330,8 @@ mod tests {
             bool,
             Option<i32>,
             Option<String>,
+            Option<String>,
+            Option<String>,
         )> = vec![
             (
                 None,
@@ -342,6 +340,8 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
+                None,
                 None,
                 None,
             ),
@@ -354,6 +354,8 @@ mod tests {
                 false,
                 None,
                 None,
+                None,
+                None,
             ),
             (
                 Some(1),
@@ -362,6 +364,8 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
+                None,
                 None,
                 None,
             ),
@@ -473,6 +477,8 @@ mod tests {
             bool,
             Option<i32>,
             Option<String>,
+            Option<String>,
+            Option<String>,
         )> = vec![
             (
                 None,
@@ -483,14 +489,6 @@ mod tests {
                 false,
                 None,
                 None,
-            ),
-            (
-                Some(0),
-                NodeKind::Container,
-                ResolvedStyle::default(),
-                vec![],
-                None,
-                false,
                 None,
                 None,
             ),
@@ -503,6 +501,8 @@ mod tests {
                 false,
                 None,
                 None,
+                None,
+                None,
             ),
             (
                 Some(0),
@@ -511,6 +511,20 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+                None,
                 None,
                 None,
             ),
@@ -521,6 +535,8 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
+                None,
                 None,
                 None,
             ),
@@ -627,14 +643,8 @@ mod tests {
     fn kind_from_tag_maps_fence_whitelist() {
         assert!(matches!(kind_from_tag("div").unwrap(), NodeKind::Container));
         assert!(matches!(kind_from_tag("button").unwrap(), NodeKind::Button));
-        assert!(matches!(
-            kind_from_tag("img").unwrap(),
-            NodeKind::Image { .. }
-        ));
-        assert!(matches!(
-            kind_from_tag("span").unwrap(),
-            NodeKind::Text { .. }
-        ));
+        assert!(matches!(kind_from_tag("img").unwrap(), NodeKind::Image));
+        assert!(matches!(kind_from_tag("span").unwrap(), NodeKind::TextNode));
     }
 
     #[test]
@@ -700,7 +710,7 @@ mod tests {
         let id = create_node(&mut scene, "span", "").unwrap();
         let n = scene.get(id).unwrap();
         assert!(n.dirty_text, "Text 节点 dirty_text=true");
-        assert!(matches!(n.kind, NodeKind::Text { .. }));
+        assert!(matches!(n.kind, NodeKind::TextNode));
     }
 
     #[test]
@@ -745,14 +755,13 @@ mod tests {
         let mut scene = empty_scene();
         let id = create_node_from_template(
             &mut scene,
-            NodeKind::Text {
-                content: "hi".into(),
-            },
+            NodeKind::TextNode,
             ResolvedStyle::default(),
         );
+        scene.text_contents.insert(id, "hi".into());
         let n = scene.get(id).unwrap();
         assert!(n.dirty_text, "Text 节点 dirty_text=true（同 create_node）");
-        matches!(&n.kind, NodeKind::Text { content } if content == "hi");
+        assert_eq!(scene.text_contents.get(&id).map(|s| s.as_str()), Some("hi"));
     }
 
     #[test]
@@ -867,10 +876,7 @@ mod tests {
         scene.get_mut(t).unwrap().dirty_text = false;
         set_text(&mut scene, t, "hello").unwrap();
         assert!(scene.get(t).unwrap().dirty_text);
-        match &scene.get(t).unwrap().kind {
-            NodeKind::Text { content } => assert_eq!(content, "hello"),
-            _ => panic!("expected Text"),
-        }
+        assert_eq!(scene.text_contents.get(&t).map(|s| s.as_str()), Some("hello"))
     }
 
     #[test]
@@ -887,10 +893,7 @@ mod tests {
         scene.get_mut(img).unwrap().dirty_mesh = false;
         set_src(&mut scene, img, "icon.png").unwrap();
         assert!(scene.get(img).unwrap().dirty_mesh);
-        match &scene.get(img).unwrap().kind {
-            NodeKind::Image { src } => assert_eq!(src, "icon.png"),
-            _ => panic!("expected Image"),
-        }
+        assert_eq!(scene.image_srcs.get(&img).map(|s| s.as_str()), Some("icon.png"))
     }
 
     #[test]

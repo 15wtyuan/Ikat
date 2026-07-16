@@ -3,7 +3,7 @@
 //! disabled 节点产 RollOver/Out 但不产 Down/Up/Click。
 
 use crate::hit::hit_test;
-use crate::scene::node::{NodeId, Scene};
+use crate::scene::node::{NodeFlags, NodeId, Scene};
 use crate::scroll::{effective, SCROLL_THRESHOLD_MOUSE, SCROLL_THRESHOLD_TOUCH};
 
 #[repr(C)]
@@ -243,7 +243,7 @@ pub(crate) fn focus_node(scene: &mut Scene, new: Option<NodeId>, out: &mut Vec<E
     }
     if let Some(o) = old {
         if let Some(n) = scene.get_mut(o) {
-            n.focused = false;
+            n.interaction.flags.remove(NodeFlags::FOCUSED);
         }
         out.push(EventRecord {
             node_id: o.0,
@@ -257,7 +257,7 @@ pub(crate) fn focus_node(scene: &mut Scene, new: Option<NodeId>, out: &mut Vec<E
     }
     if let Some(n) = new {
         if let Some(node) = scene.get_mut(n) {
-            node.focused = true;
+            node.interaction.flags.insert(NodeFlags::FOCUSED);
         }
         out.push(EventRecord {
             node_id: n.0,
@@ -283,8 +283,8 @@ fn dfs_collect(
         Some(n) => n,
         None => return,
     };
-    if !n.disabled {
-        match n.tabindex {
+    if !n.interaction.flags.contains(NodeFlags::DISABLED) {
+        match n.interaction.tabindex {
             Some(t) if t > 0 => positive.push((t, id)),
             Some(0) => zero.push(id),
             _ => {} // Some(-1)/None 不进链
@@ -480,7 +480,7 @@ impl PointerState {
             let slot = &mut self.slots[i];
             if slot.is_down && !slot.longpress_fired && !slot.longpress_cancelled {
                 if let Some(n) = slot.down_node {
-                    if scene.get(n).is_some_and(|node| !node.disabled)
+                    if scene.get(n).is_some_and(|node| !node.interaction.flags.contains(NodeFlags::DISABLED))
                         && time_s - slot.down_time >= LONGPRESS_TRIGGER
                     {
                         slot.longpress_fired = true;
@@ -705,7 +705,7 @@ impl PointerState {
                         .find(|&&n| {
                             scene
                                 .get(n)
-                                .is_some_and(|node| node.draggable && !node.disabled)
+                                .is_some_and(|node| node.interaction.draggable && !node.interaction.flags.contains(NodeFlags::DISABLED))
                         })
                         .copied();
                     slot.drag_testing = slot.drag_target.is_some();
@@ -754,7 +754,7 @@ impl PointerState {
                         .iter()
                         .find(|&&n| {
                             scene.get(n).is_some_and(|node| {
-                                !node.disabled && matches!(node.tabindex, Some(t) if t >= 0)
+                                !node.interaction.flags.contains(NodeFlags::DISABLED) && matches!(node.interaction.tabindex, Some(t) if t >= 0)
                             })
                         })
                         .copied();
@@ -762,7 +762,7 @@ impl PointerState {
                         focus_node(scene, Some(t), &mut out);
                     }
                     if let Some(n) = hit {
-                        if scene.get(n).is_some_and(|node| !node.disabled) {
+                        if scene.get(n).is_some_and(|node| !node.interaction.flags.contains(NodeFlags::DISABLED)) {
                             out.push(EventRecord {
                                 node_id: n.0,
                                 event_type: EVT_DOWN,
@@ -810,7 +810,7 @@ impl PointerState {
                     // grip_dragging 时 hit 为 sentinel（scene.nodes 越界），跳过 EVT_UP/EVT_CLICK（grip Up 不产这些事件）。
                     if !slot.grip_dragging {
                         if let Some(n) = hit {
-                            if scene.get(n).is_some_and(|node| !node.disabled) {
+                            if scene.get(n).is_some_and(|node| !node.interaction.flags.contains(NodeFlags::DISABLED)) {
                                 out.push(EventRecord {
                                     node_id: n.0,
                                     event_type: EVT_UP,
@@ -821,7 +821,7 @@ impl PointerState {
                                     y: ev.y,
                                 });
                                 if let Some(target) = Self::click_test(slot, scene, hit) {
-                                    if scene.get(target).is_some_and(|node| !node.disabled) {
+                                    if scene.get(target).is_some_and(|node| !node.interaction.flags.contains(NodeFlags::DISABLED)) {
                                         let count = Self::bump_click_count(slot, ev.button, time_s);
                                         out.push(EventRecord {
                                             node_id: target.0,
@@ -975,7 +975,7 @@ impl PointerState {
     /// 全局 hovered 合并：清所有 → 所有活跃槽命中链 union（任一指命中元素或祖先 → :hover）。
     fn recompute_hovered(&self, scene: &mut Scene) {
         for n in scene.nodes.values_mut() {
-            n.hovered = false;
+            n.interaction.flags.remove(NodeFlags::HOVERED);
         }
         for i in 0..self.slots.len() {
             if i == 0 || self.slots[i].touch_id >= 0 {
@@ -983,7 +983,7 @@ impl PointerState {
                 while let Some(id) = cur {
                     let parent = match scene.get_mut(id) {
                         Some(n) => {
-                            n.hovered = true;
+                            n.interaction.flags.insert(NodeFlags::HOVERED);
                             n.parent
                         }
                         None => break,
@@ -997,7 +997,7 @@ impl PointerState {
     /// 全局 active 合并：清所有 → 所有 is_down 槽的 down_node 命中链 union（基于 down_node，Down 时命中）。
     fn recompute_active(&self, scene: &mut Scene) {
         for n in scene.nodes.values_mut() {
-            n.active = false;
+            n.interaction.flags.remove(NodeFlags::ACTIVE);
         }
         for slot in &self.slots {
             if slot.is_down {
@@ -1009,10 +1009,10 @@ impl PointerState {
                     // 祖先须截断，而非只查 down_node。
                     let parent = match scene.get_mut(id) {
                         Some(n) => {
-                            if n.disabled {
+                            if n.interaction.flags.contains(NodeFlags::DISABLED) {
                                 break;
                             }
-                            n.active = true;
+                            n.interaction.flags.insert(NodeFlags::ACTIVE);
                             n.parent
                         }
                         None => break,

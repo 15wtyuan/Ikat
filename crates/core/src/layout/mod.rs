@@ -150,10 +150,10 @@ pub fn solve(
             || node.style.overflow_y != OverflowMode::Visible;
         // 叶子：Text/Image 装 MeasureContext。
         let ctx: Option<MeasureContext> = match &node.kind {
-            NodeKind::Text { content } => {
+            NodeKind::TextNode => {
                 let s = &node.style;
                 Some(MeasureContext::Text {
-                    content: content.clone(),
+                    content: scene.text_contents.get(&id).cloned().unwrap_or_default(),
                     font_size: s.font_size,
                     line_height: s.line_height,
                     letter_spacing: s.letter_spacing,
@@ -168,26 +168,12 @@ pub fn solve(
                         + lp(s.taffy_style.border.right),
                 })
             }
-            NodeKind::RichText { runs } => {
-                let s = &node.style;
-                Some(MeasureContext::RichText {
-                    runs: runs.clone(),
-                    line_height: s.line_height,
-                    align: s.text_align,
-                    nowrap: s.white_space_nowrap,
-                    family: s.font_family.clone(),
-                    h_inset: lp(s.taffy_style.padding.left)
-                        + lp(s.taffy_style.padding.right)
-                        + lp(s.taffy_style.border.left)
-                        + lp(s.taffy_style.border.right),
-                })
-            }
-            NodeKind::Image { src } => {
-                // 查 Stage 尺寸表算 intrinsic 尺寸（三档：CSS > 真实像素 > 64×64）。
-                // path 缺失或 w/h=0 → fallback 64×64。核心不知图集（运行时纹理归 Unity）。
+            NodeKind::Image => {
+                // Look up real intrinsic dims via the node's image src (Spec-2 side table).
+                let src = scene.image_srcs.get(&id).cloned().unwrap_or_default();
                 let s = &node.style.taffy_style;
                 let (iw, ih) = image_sizes
-                    .get(src)
+                    .get(&src)
                     .filter(|(w, h)| *w != 0 && *h != 0)
                     .map(|&(w, h)| (w as f32, h as f32))
                     .unwrap_or((64.0, 64.0));
@@ -204,11 +190,7 @@ pub fn solve(
         // taffy 0.5 flex item 的 cross stretch = max(measure, container)（只 fill 不 shrink），
         // 长文本（max-content > parent）会撑超 parent 宽 → 超框。设 width=100% 让 box=parent
         // content、measure 据此换行。仅 auto 时设（保留显式 width）。
-        if matches!(node.kind, NodeKind::RichText { .. })
-            && matches!(style.size.width, taffy::style::Dimension::Auto)
-        {
-            style.size.width = taffy::style::Dimension::Percent(1.0);
-        }
+        // RichText retired in Spec-2; rich nodes no longer force width=100%.
 
         // 递归子节点（先建子，再建父以便 new_with_children）。
         let children_ids: Vec<taffy::NodeId> = node
@@ -469,18 +451,20 @@ mod tests {
                 false,
                 None,
                 None,
+                None,
+                None,
             ),
             (
                 Some(0),
-                NodeKind::Image {
-                    src: "x.png".into(),
-                },
+                NodeKind::Image,
                 img_style,
                 Vec::new(),
                 None,
                 false,
                 None,
                 None,
+                None,
+                Some("x.png".into()),
             ),
         ];
         let mut scene = Scene::build(&entries);
@@ -512,18 +496,20 @@ mod tests {
                 false,
                 None,
                 None,
+                None,
+                None,
             ),
             (
                 Some(0),
-                NodeKind::Image {
-                    src: "x.png".into(),
-                },
+                NodeKind::Image,
                 img_style,
                 Vec::new(),
                 None,
                 false,
                 None,
                 None,
+                None,
+                Some("x.png".into()),
             ),
         ];
         let mut scene = Scene::build(&entries);
@@ -551,18 +537,20 @@ mod tests {
                 false,
                 None,
                 None,
+                None,
+                None,
             ),
             (
                 Some(0),
-                NodeKind::Image {
-                    src: "x.png".into(),
-                },
+                NodeKind::Image,
                 img_style,
                 Vec::new(),
                 None,
                 false,
                 None,
                 None,
+                None,
+                Some("x.png".into()),
             ),
         ];
         let mut scene = Scene::build(&entries);
@@ -590,18 +578,20 @@ mod tests {
                 false,
                 None,
                 None,
+                None,
+                None,
             ),
             (
                 Some(0),
-                NodeKind::Image {
-                    src: "x.png".into(),
-                },
+                NodeKind::Image,
                 img_style,
                 Vec::new(),
                 None,
                 false,
                 None,
                 None,
+                None,
+                Some("x.png".into()),
             ),
         ];
         let mut scene = Scene::build(&entries);
@@ -630,18 +620,20 @@ mod tests {
                 false,
                 None,
                 None,
+                None,
+                None,
             ),
             (
                 Some(0),
-                NodeKind::Image {
-                    src: "x.png".into(),
-                },
+                NodeKind::Image,
                 img_style,
                 Vec::new(),
                 None,
                 false,
                 None,
                 None,
+                None,
+                Some("x.png".into()),
             ),
         ];
         let mut scene = Scene::build(&entries);
@@ -674,18 +666,20 @@ mod tests {
                 false,
                 None,
                 None,
+                None,
+                None,
             ),
             (
                 Some(0),
-                NodeKind::Image {
-                    src: "x.png".into(),
-                },
+                NodeKind::Image,
                 img_style,
                 Vec::new(),
                 None,
                 false,
                 None,
                 None,
+                None,
+                Some("x.png".into()),
             ),
         ];
         let mut scene = Scene::build(&entries);

@@ -309,8 +309,8 @@ pub fn build_render_nodes(
         let parent_id = n.parent.map(|p| p.0);
         let alpha = anim.and_then(|a| a.opacity).unwrap_or(n.style.opacity);
         let color_tint = anim.and_then(|a| a.text_color).unwrap_or(n.style.color);
-        let rn = match &n.kind {
-            NodeKind::Container | NodeKind::Button => {
+        let rn = match n.kind {
+            k if k.is_container() => {
                 let color = anim
                     .and_then(|a| a.bg_color)
                     .unwrap_or(n.style.background_color.unwrap_or([0.0, 0.0, 0.0, 0.0]));
@@ -474,11 +474,12 @@ pub fn build_render_nodes(
                     },
                 }
             }
-            NodeKind::Image { src } => {
+            NodeKind::Image => {
+                let src = scene.image_srcs.get(&n.id).cloned().unwrap_or_default();
                 let image_path = Some(src.clone());
                 let uv_min = [0.0, 0.0];
                 let uv_max = [1.0, 1.0];
-                let (src_w, src_h) = src_size(image_sizes, src);
+                let (src_w, src_h) = src_size(image_sizes, &src);
                 let (v, uvc, col, idx) = match &n.style.border_image_slice {
                     Some(slice) => {
                         let resolved = resolve_slice_percent(slice, src_w, src_h);
@@ -524,7 +525,8 @@ pub fn build_render_nodes(
                     },
                 }
             }
-            NodeKind::Text { content } => {
+            NodeKind::TextNode => {
+                let content = scene.text_contents.get(&n.id).cloned().unwrap_or_default();
                 // Text 节点单独处理：build_text_mesh 可能按 atlas 页号拆成多 Mesh，
                 // 对应推多个 RenderNode（primary 用真 node_id，子页用合成 id）。
                 // 避免 match arm 返回单个 RenderNode 的限制，在此处直接 push。
@@ -547,7 +549,7 @@ pub fn build_render_nodes(
                     .flatten()
                     .unwrap_or_else(|| {
                         measure_text(
-                            content,
+                            &content,
                             s.font_size,
                             s.line_height,
                             s.letter_spacing,
@@ -586,179 +588,35 @@ pub fn build_render_nodes(
                 );
                 continue; // 直接推完，跳过末尾的 id_to_pos / push。
             }
-            NodeKind::RichText { runs } => {
-                // RichText 与 Text 同走 build_text_mesh（per-run 样式从 GlyphRun 读）。
-                // MVP 单字体：所有 run 共用节点 font_family 选的 face + default_font_id；
-                // 合成 bold（双绘 +1px）/italic（quad 顶边右偏）在 build 期几何化。
-                let s = &n.style;
-                let stack = fonts.stack_for(s.font_family.as_deref());
-                let off_left =
-                    resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
-                let off_right = resolve_lp(s.taffy_style.border.right)
-                    + resolve_lp(s.taffy_style.padding.right);
-                let off_top =
-                    resolve_lp(s.taffy_style.border.top) + resolve_lp(s.taffy_style.padding.top);
-                // max_width 用 content width（同 Text arm）：富文本在 content area 内断行 + 对齐。
-                let content_w = (rect.w - off_left - off_right).max(0.0);
-                let mut layout = scene
-                    .text_layouts
-                    .get(n.id.index())
-                    .cloned()
-                    .flatten()
-                    .unwrap_or_else(|| {
-                        crate::text::layout::measure_rich_text(
-                            runs,
-                            Some(content_w),
-                            s.line_height,
-                            s.text_align,
-                            &stack,
-                        )
-                    });
-                if off_left != 0.0 || off_top != 0.0 {
-                    bake_content_offset(&mut layout, off_left, off_top);
-                }
-                // 收集链接 fragment 矩形（富文本 <a> 命中查询）。跨行链接自然拆多 rect——
-                // 每行同 link_id 各一个（fgui GetLinesShape 范式）。glyph x/y 已含 off_left/off_top。
-                {
-                    let mut frags: Vec<crate::text::rich::RichFragment> = Vec::new();
-                    for line in &layout.lines {
-                        for run in &line.runs {
-                            if let Some(lid) = run.link_id {
-                                if run.glyphs.is_empty() {
-                                    continue;
-                                }
-                                let x_start =
-                                    run.glyphs.iter().map(|g| g.x).fold(f32::INFINITY, f32::min);
-                                let x_end = run
-                                    .glyphs
-                                    .last()
-                                    .map(|g| g.x + g.advance)
-                                    .unwrap_or(x_start);
-                                frags.push(crate::text::rich::RichFragment {
-                                    x: x_start,
-                                    y: line.y + off_top,
-                                    w: (x_end - x_start).max(0.0),
-                                    h: line.height,
-                                    link_id: lid,
-                                });
-                            }
-                        }
-                    }
-                    if !frags.is_empty() {
-                        rich_fragments.push((node_id, frags));
-                    }
-                }
-                let meshes = build_text_mesh(
-                    &layout,
-                    atlas,
-                    fonts,
-                    rect,
-                    &n.style.text_effects,
-                    n.style.background_gradient,
-                    n.style.background_clip_text,
-                );
-                // 背景 quad：block div 带 background-color（如 .rt 底色）——RichText 叶须自画
-                // bg（Container arm 的 bg 逻辑不覆盖 RichText 叶）。bg 占真 node_id（进 id_to_pos
-                // 拿 DFS sort_key S），text 首页改用子页 1（propagate 给 S+1）→ bg 在 text 下层。
-                // 无 bg-color（透明）则跳过：text 用真 node_id（原行为，子页机制零介入）。
-                let bg_opt = anim.and_then(|a| a.bg_color).or(n.style.background_color);
-                let has_rich_bg = matches!(bg_opt, Some(c) if c[3] > 0.0);
-                if has_rich_bg {
-                    let bg = bg_opt.unwrap();
-                    let (bv, buv, bcol, bidx) =
-                        crate::render::mesh::quad(rect, bg, [0.0, 1.0], [1.0, 0.0]);
-                    let bg_program = if has_filter { 3u32 } else { 0u32 };
-                    id_to_pos.insert(n.id, nodes.len());
-                    nodes.push(RenderNode {
-                        node_id,
-                        parent_id,
-                        visible: true,
-                        alpha,
-                        color_tint,
-                        world_matrix: wm,
-                        blend: BlendMode::Normal,
-                        mask_context: MaskContext(0),
-                        sort_key: 0,
-                        change_level: ChangeLevel::Full,
-                        reuse_key: n.reuse_key,
-                        effect: EffectBlock::default(),
-                        payload: NodePayload::Mesh {
-                            verts: bv,
-                            uvs: buv,
-                            colors: bcol,
-                            indices: bidx,
-                            image_path: None,
-                            program: bg_program,
-                            color_matrix,
-                        },
-                    });
-                }
-                let text_primary_id = if has_rich_bg {
-                    synth_text_node_id(node_id, 1)
-                } else {
-                    node_id
-                };
-                push_text_meshes(
-                    &mut nodes,
-                    &mut id_to_pos,
-                    meshes,
-                    n,
-                    node_id,
-                    text_primary_id,
-                    parent_id,
-                    alpha,
-                    color_tint,
-                    wm,
-                    !has_rich_bg,
-                );
-                // 行内图：每个 image 一个 Mesh（program=0 image shader，image_path=src）。
-                // 走现有 image 路径（SpriteResolver 命中图集），Unity 零改。
-                // 顶点序、UV 与 mesh::quad 同：TL, TR, BR, BL；v-flip（design y-down
-                // 配 Unity root-stage y-flip → UV 方向与现有 Image/Container bg-image 一致）。
-                // 全图 UV（MVP：无 sprite 子区）。
-                for (img_idx, img) in layout.images.iter().enumerate() {
-                    let img_node_id =
-                        synth_text_node_id(node_id, INLINE_IMG_SYNTH_ID_BASE + img_idx as u32);
-                    inline_image_pairs.push((node_id, img_node_id));
-                    let (ix, iy) = (img.x + off_left + rect.x, img.y + off_top + rect.y);
-                    let payload = NodePayload::Mesh {
-                        verts: vec![
-                            [ix, iy],                 // TL (top-left, smallest y in design y-down)
-                            [ix + img.w, iy],         // TR
-                            [ix + img.w, iy + img.h], // BR
-                            [ix, iy + img.h],         // BL
-                        ],
-                        uvs: vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-                        colors: vec![[1.0, 1.0, 1.0, 1.0]; 4],
-                        indices: vec![0, 1, 2, 0, 2, 3],
-                        image_path: Some(img.src.clone()),
-                        program: 0,
-                        color_matrix: [0.0; 20],
-                    };
-                    nodes.push(RenderNode {
-                        node_id: img_node_id,
-                        parent_id,
-                        visible: true,
-                        alpha,
-                        color_tint,
-                        world_matrix: wm,
-                        blend: BlendMode::Normal,
-                        mask_context: MaskContext(0),
-                        sort_key: 0, // propagate_inline_image_sort_keys 后调
-                        change_level: ChangeLevel::Full,
-                        reuse_key: 0,
-                        effect: EffectBlock::default(),
-                        payload,
-                    });
-                }
-                continue;
-            }
+            _ => RenderNode {
+                node_id,
+                parent_id,
+                visible: true,
+                alpha,
+                color_tint,
+                world_matrix: wm,
+                blend: BlendMode::Normal,
+                mask_context: MaskContext(0),
+                sort_key: 0,
+                change_level: ChangeLevel::Full,
+                reuse_key: n.reuse_key,
+                effect: EffectBlock::default(),
+                payload: NodePayload::Mesh {
+                    verts: vec![],
+                    uvs: vec![],
+                    colors: vec![],
+                    indices: vec![],
+                    image_path: None,
+                    program: 0,
+                    color_matrix,
+                },
+            },
         };
         // box-shadow：独立 RenderNode 画在节点下层（sort_key 更小 = 先绘 = 在下）。
         // 阴影节点不入 id_to_pos（不在场景树中），sort_key 在 assign_sort_keys 后
         // 由 propagate_box_shadow_sort_keys 调整为主节点 sort_key（主节点后移一位）。
         if let Some(shadow) = n.style.box_shadow.as_ref() {
-            if matches!(n.kind, NodeKind::Container | NodeKind::Button) {
+            if n.kind.is_container() {
                 let rw = rect.w;
                 let rh = rect.h;
                 let radii = n.style.border_radius.as_corners(rw, rh);

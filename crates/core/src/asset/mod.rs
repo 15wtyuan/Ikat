@@ -77,6 +77,8 @@ pub struct TemplateNode {
     /// HTML `data-controller="name"` 属性值（Controller 挂载点声明）。
     /// instantiate 时填 live Node.data_controller；匹配器遇 `[data-page]` 回溯查此字段。
     pub data_controller: Option<String>,
+    pub content: Option<String>,
+    pub src: Option<String>,
 }
 
 /// write_package 的输入（打包器构造，已归一化：path 已相对、style 已 bake）。
@@ -172,28 +174,24 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 None => -1,
                 Some(p) => (comp_base as usize + p) as i32,
             };
-            let (kind_tag, text_idx, src_idx, rich_off) = match &tn.kind {
-                NodeKind::Container => (KIND_CONTAINER, NULL_IDX, NULL_IDX, NULL_RICH_OFF),
-                NodeKind::Button => (KIND_BUTTON, NULL_IDX, NULL_IDX, NULL_RICH_OFF),
-                NodeKind::Image { src } => (
-                    KIND_IMAGE,
-                    NULL_IDX,
-                    intern(src, &mut strings, &mut idx_of),
-                    NULL_RICH_OFF,
-                ),
-                NodeKind::Text { content } => (
-                    KIND_TEXT,
-                    intern(content, &mut strings, &mut idx_of),
-                    NULL_IDX,
-                    NULL_RICH_OFF,
-                ),
-                NodeKind::RichText { runs } => {
-                    // runs 整段 bincode 序列化进 rich_runs arena；列存 offset 供 NodeBlock 引用。
-                    let bytes = bincode::serialize(runs).expect("serialize RichText runs");
-                    let off = rich_runs_arena.len() as u32;
-                    rich_runs_arena.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-                    rich_runs_arena.extend_from_slice(&bytes);
-                    (KIND_RICHTEXT, NULL_IDX, NULL_IDX, off)
+            let rich_off: u32 = NULL_RICH_OFF;
+            let (kind_tag, text_idx, src_idx) = {
+                let text_idx = tn
+                    .content
+                    .as_ref()
+                    .map(|c| intern(c, &mut strings, &mut idx_of))
+                    .unwrap_or(NULL_IDX);
+                let src_idx = tn
+                    .src
+                    .as_ref()
+                    .map(|c| intern(c, &mut strings, &mut idx_of))
+                    .unwrap_or(NULL_IDX);
+                match tn.kind {
+                    NodeKind::Container => (KIND_CONTAINER, NULL_IDX, NULL_IDX),
+                    NodeKind::Button => (KIND_BUTTON, NULL_IDX, NULL_IDX),
+                    NodeKind::Image => (KIND_IMAGE, NULL_IDX, src_idx),
+                    NodeKind::TextNode => (KIND_TEXT, text_idx, NULL_IDX),
+                    _ => (KIND_CONTAINER, NULL_IDX, NULL_IDX),
                 }
             };
             let style_blob = bincode::serialize(&tn.style).expect("ResolvedStyle serializable");
@@ -396,40 +394,36 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         let rich_off = r.u32("rich_off")?;
         // 存盘 parent_idx 是 NodeBlock 全局位置（-1=组件根）；先存全局，待切分组件时减 base 转局部
         let parent_global = if pidx < 0 { None } else { Some(pidx as usize) };
-        let kind = match kind_tag {
-            KIND_CONTAINER => NodeKind::Container,
-            KIND_BUTTON => NodeKind::Button,
-            KIND_IMAGE => NodeKind::Image {
-                src: string_at(&strings, src_idx)?,
-            },
-            KIND_TEXT => NodeKind::Text {
-                content: string_at(&strings, text_idx)?,
-            },
-            KIND_RICHTEXT => {
-                // rich_runs_arena 布局：每段 [len_u32][bytes...]。rich_off 指向段首。
-                if rich_off == NULL_RICH_OFF {
-                    return Err(PkgError::Truncated("rich_off_null_for_richtext"));
-                }
-                let off = rich_off as usize;
-                if off + 4 > rich_runs_arena.len() {
-                    return Err(PkgError::Truncated("rich_off_oob"));
-                }
-                let len =
-                    u32::from_le_bytes(rich_runs_arena[off..off + 4].try_into().unwrap()) as usize;
-                let blob_start = off + 4;
-                let blob_end = blob_start + len;
-                if blob_end > rich_runs_arena.len() {
-                    return Err(PkgError::Truncated("rich_blob_oob"));
-                }
-                let runs: Vec<crate::text::rich::RichRun> =
-                    bincode::deserialize(&rich_runs_arena[blob_start..blob_end])?;
-                NodeKind::RichText { runs }
-            }
+        let (kind, content, src) = match kind_tag {
+            KIND_CONTAINER => (NodeKind::Container, None, None),
+            KIND_BUTTON => (NodeKind::Button, None, None),
+            KIND_IMAGE => (
+                NodeKind::Image,
+                None,
+                if src_idx == NULL_IDX {
+                    None
+                } else {
+                    Some(string_at(&strings, src_idx)?)
+                },
+            ),
+            KIND_TEXT => (
+                NodeKind::TextNode,
+                if text_idx == NULL_IDX {
+                    None
+                } else {
+                    Some(string_at(&strings, text_idx)?)
+                },
+                None,
+            ),
+            // RichText retired in Spec-2; legacy pkg entries fall back to empty TextNode.
+            KIND_RICHTEXT => (NodeKind::TextNode, None, None),
             other => return Err(PkgError::BadKind(other)),
         };
         all_nodes.push(TemplateNode {
             kind,
             style,
+            content,
+            src,
             parent_idx: parent_global, // 临时存全局，下方切分时减 base
             classes,
             id_attr,

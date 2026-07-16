@@ -77,7 +77,7 @@ fn hit_subtree(scene: &Scene, id: NodeId, point: (f32, f32)) -> Option<NodeId> {
     }
     // 子都不命中 → 自身 fallback：touchable + 点经 world matrix 逆投到本地 box
     // world_to_local：点经 world matrix 逆投到本地，判本地 box (0,0,w,h)
-    if node.touchable {
+    if node.interaction.touchable {
         // bounds guard：world_transforms 可能未对齐（结构变更帧新增节点本帧 world_transforms
         // 未算，或首帧 world_transforms 空）→ 越界返 None（1 帧延迟语义：本帧未命中）。
         // sentinel id（thumb flag）不会进 hit_subtree（hit_test 在 hit_scrollbar_grip 命中后
@@ -96,7 +96,7 @@ fn hit_subtree(scene: &Scene, id: NodeId, point: (f32, f32)) -> Option<NodeId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::node::{Node, NodeId, NodeKind, Rect, Scene};
+    use crate::scene::node::{Node, NodeFlags, NodeId, NodeKind, Rect, Scene};
     use crate::scene::transform::compute_world_transforms;
     use crate::style::resolved::LocalTransform;
     use crate::transform;
@@ -172,7 +172,7 @@ mod tests {
         compute_world_transforms(&mut s);
         let (root, a, _b) = overlap_ids(&s);
         // root touchable=false，但子 a 仍应命中（CSS 语义：none 不挡子）
-        s.get_mut(root).unwrap().touchable = false;
+        s.get_mut(root).unwrap().interaction.touchable = false;
         // 点 (10,10) 在 a 内——root 不命中但子 a 命中
         assert_eq!(hit_test(&s, (10.0, 10.0)), Some(a));
         // 点 (160,160) 在 root AABB 但不在 a/b（a=[0,100], b=[50,150]）
@@ -216,7 +216,7 @@ mod tests {
         let mut s = overlap_scene();
         compute_world_transforms(&mut s);
         let (_root, _a, b) = overlap_ids(&s);
-        s.get_mut(b).unwrap().disabled = true; // b disabled
+        s.get_mut(b).unwrap().interaction.flags.insert(NodeFlags::DISABLED); // b disabled
                                                // 点 (75,75) 在 b 内——b 仍命中（disabled 不跳过）
         assert_eq!(hit_test(&s, (75.0, 75.0)), Some(b));
     }
@@ -286,6 +286,8 @@ mod tests {
             bool,
             Option<i32>,
             Option<String>,
+            Option<String>,
+            Option<String>,
         )> = vec![
             (
                 None,
@@ -296,14 +298,6 @@ mod tests {
                 false,
                 None,
                 None,
-            ),
-            (
-                Some(0),
-                NodeKind::Container,
-                ResolvedStyle::default(),
-                vec![],
-                None,
-                false,
                 None,
                 None,
             ),
@@ -314,6 +308,20 @@ mod tests {
                 vec![],
                 None,
                 false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+                None,
                 None,
                 None,
             ),

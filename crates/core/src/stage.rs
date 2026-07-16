@@ -8,7 +8,7 @@ use crate::input::{EventRecord, PointerEvent, PointerState};
 use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
-use crate::scene::node::{ControllerChangedEvent, NodeId, NodeKind, Rect, Scene};
+use crate::scene::node::{ControllerChangedEvent, NodeFlags, NodeId, NodeKind, Rect, Scene};
 use crate::style::dynamic::rematch_pseudo_classes;
 use crate::style::resolved::OverflowMode;
 use crate::text::layout::FontTable;
@@ -140,7 +140,11 @@ impl Stage {
     pub fn set_node_disabled(&mut self, node_id: NodeId, disabled: bool) {
         if let Some(scene) = self.scene.as_mut() {
             if let Some(n) = scene.get_mut(node_id) {
-                n.disabled = disabled;
+                if disabled {
+                    n.interaction.flags.insert(NodeFlags::DISABLED);
+                } else {
+                    n.interaction.flags.remove(NodeFlags::DISABLED);
+                }
             }
         }
     }
@@ -324,13 +328,10 @@ impl Stage {
             None => return 0,
         };
         // 取节点 world_matrix 反变换到本地坐标（fragment 矩形存本地坐标）。
-        let n = match scene.get(node) {
-            Some(n) => n,
-            None => return 0,
-        };
-        if !matches!(n.kind, NodeKind::RichText { .. }) {
+        if scene.get(node).is_none() {
             return 0;
         }
+        // RichText retired in Spec-2; rich_fragments side table is always empty now.
         let wm = scene
             .world_transforms
             .get(node.index())
@@ -416,7 +417,7 @@ impl Stage {
         if let Some(scene) = self.scene.as_ref() {
             match scene.get(node_id) {
                 None => return,
-                Some(n) if n.disabled => return, // disabled 拒
+                Some(n) if n.interaction.flags.contains(NodeFlags::DISABLED) => return, // disabled 拒
                 _ => {}
             }
         } else {
@@ -596,16 +597,22 @@ impl Stage {
         for (i, tn) in template.nodes.iter().enumerate() {
             let node_id = crate::scene::dynamic::create_node_from_template(
                 scene,
-                tn.kind.clone(),
+                tn.kind,
                 tn.style.clone(),
             );
             // 填 classes/id_attr/draggable/tabindex/data_controller（create_node_from_template 不填这些，同 create_node）
             let n = scene.get_mut(node_id).unwrap();
             n.classes = tn.classes.clone();
             n.id_attr = tn.id_attr.clone();
-            n.draggable = tn.draggable;
-            n.tabindex = tn.tabindex;
+            n.interaction.draggable = tn.draggable;
+            n.interaction.tabindex = tn.tabindex;
             n.data_controller = tn.data_controller.clone();
+            if let Some(c) = &tn.content {
+                scene.text_contents.insert(node_id, c.clone());
+            }
+            if let Some(src) = &tn.src {
+                scene.image_srcs.insert(node_id, src.clone());
+            }
             id_map[i] = Some(node_id);
             // 按 parent_idx 串子树（根 parent_idx=None 不串）
             if let Some(pidx) = tn.parent_idx {
