@@ -4,8 +4,10 @@
 // - Pump(ptr,count) 每 tick 调（LoomStage.Tick 内，复用 borrow_events FFI 的同一 buffer）。
 // - 逐条 LoomEvent 翻译为 typed event struct：
 //     * _core.Target = _ctx._registry.GetOrCreate(nodeId)（投影层 Node 身份）。
-//     * 业务字段（Position/Button/KeyCode 等）暂未填充（struct 属性 throw NotImplementedException
-//       ——业务字段填充推后，D3 焦点是 demux 接线 + 路由正确性）。
+//     * 业务字段（Position/ClickCount/TouchId/Key/Modifiers）从 raw EventRecord 填充。
+//       不可从 raw 直接填充的字段（Button/DeltaX/DeltaY/StartPosition/Repeat/
+//       PreviousFocused/NewFocused/Scroll*/AnimationName/PropertyName/IterationCount）
+//       留在 default——后续接线补齐（D3 焦点是 demux 接线 + 路由正确性）。
 // - 调 _ctx._eventBus.Dispatch<T>(targetNodeId, evt) 走 D2 capture/bubble/once 路由。
 // - 旧 LoomEventHandler.DispatchPending 保留并行运行（backward compat：旧 AddListener 路径）。
 //
@@ -38,7 +40,7 @@ namespace LoomGUI
         public uint nodeId;
         public byte eventType;
         public byte clickCount;
-        ushort _pad;      // pad[2] @6-7（key events 的 modifiers 在 pad[0]）
+        internal ushort _pad;      // pad[2] @6-7（key events 的 modifiers 在 pad[0]）
         public int touchId; // -1=鼠标，>=0=触摸；key 复用装 key_code
         public float x;
         public float y;
@@ -76,51 +78,62 @@ namespace LoomGUI
                     // ── Pointer 类（bubble 事件）─────────────────────────
                     case (byte)EventType.Down:
                         DispatchTyped(nodeId,
-                            new PointerDownEvent { _core = NewCore(nodeId) });
+                            new PointerDownEvent { _core = NewCore(nodeId),
+                                _position = new Vector2(evt.x, evt.y), _touchId = evt.touchId });
                         break;
                     case (byte)EventType.Up:
                         DispatchTyped(nodeId,
-                            new PointerUpEvent { _core = NewCore(nodeId) });
+                            new PointerUpEvent { _core = NewCore(nodeId),
+                                _position = new Vector2(evt.x, evt.y), _touchId = evt.touchId });
                         break;
                     case (byte)EventType.Move:
                         DispatchTyped(nodeId,
-                            new PointerMoveEvent { _core = NewCore(nodeId) });
+                            new PointerMoveEvent { _core = NewCore(nodeId),
+                                _position = new Vector2(evt.x, evt.y), _touchId = evt.touchId });
                         break;
                     case (byte)EventType.RollOver:
                         DispatchTyped(nodeId,
-                            new PointerEnterEvent { _core = NewCore(nodeId) });
+                            new PointerEnterEvent { _core = NewCore(nodeId),
+                                _position = new Vector2(evt.x, evt.y) });
                         break;
                     case (byte)EventType.RollOut:
                         DispatchTyped(nodeId,
-                            new PointerLeaveEvent { _core = NewCore(nodeId) });
+                            new PointerLeaveEvent { _core = NewCore(nodeId),
+                                _position = new Vector2(evt.x, evt.y) });
                         break;
                     case (byte)EventType.Click:
                         DispatchTyped(nodeId,
-                            new ClickEvent { _core = NewCore(nodeId) });
+                            new ClickEvent { _core = NewCore(nodeId),
+                                _position = new Vector2(evt.x, evt.y), _clickCount = evt.clickCount });
                         break;
 
                     // ── Drag 类（bubble 事件）────────────────────────────
                     case (byte)EventType.DragStart:
                         DispatchTyped(nodeId,
-                            new DragStartEvent { _core = NewCore(nodeId) });
+                            new DragStartEvent { _core = NewCore(nodeId),
+                                _position = new Vector2(evt.x, evt.y) });
                         break;
                     case (byte)EventType.DragMove:
                         DispatchTyped(nodeId,
-                            new DragMoveEvent { _core = NewCore(nodeId) });
+                            new DragMoveEvent { _core = NewCore(nodeId),
+                                _position = new Vector2(evt.x, evt.y) });
                         break;
                     case (byte)EventType.DragEnd:
                         DispatchTyped(nodeId,
-                            new DragEndEvent { _core = NewCore(nodeId) });
+                            new DragEndEvent { _core = NewCore(nodeId),
+                                _position = new Vector2(evt.x, evt.y) });
                         break;
 
                     // ── Keyboard 类（bubble 事件）────────────────────────
                     case (byte)EventType.KeyDown:
                         DispatchTyped(nodeId,
-                            new KeyDownEvent { _core = NewCore(nodeId) });
+                            new KeyDownEvent { _core = NewCore(nodeId),
+                                _key = (KeyCode)evt.touchId, _modifiers = (KeyModifiers)(byte)evt._pad });
                         break;
                     case (byte)EventType.KeyUp:
                         DispatchTyped(nodeId,
-                            new KeyUpEvent { _core = NewCore(nodeId) });
+                            new KeyUpEvent { _core = NewCore(nodeId),
+                                _key = (KeyCode)evt.touchId, _modifiers = (KeyModifiers)(byte)evt._pad });
                         break;
 
                     // ── Focus 类（bubble 事件）───────────────────────────
@@ -135,14 +148,14 @@ namespace LoomGUI
 
                     // ── TweenComplete → AnimationEnd + TransitionEnd ─────
                     // core TweenComplete EventRecord：click_count = TweenProp (u8)、
-                    // touch_id = tag (i32)。两条 typed struct 共享同一 core。
+                    // touch_id = tag (i32)。两条 typed struct 各自独立 RouteEventCore——若共享，
+                    // AnimationEnd handler 调 StopPropagation 会污染 TransitionEnd 的 bubble。
                     case (byte)EventType.TweenComplete:
                         {
-                            var core = NewCore(nodeId);
                             DispatchTyped(nodeId,
-                                new AnimationEndEvent { _core = core });
+                                new AnimationEndEvent { _core = NewCore(nodeId) });
                             DispatchTyped(nodeId,
-                                new TransitionEndEvent { _core = core });
+                                new TransitionEndEvent { _core = NewCore(nodeId) });
                         }
                         break;
 

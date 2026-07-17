@@ -220,6 +220,8 @@ namespace LoomGUI
             byte* evPtr = Native.loomgui_stage_borrow_events(_stage, &evLen);
             _eventHandler.DispatchPending((System.IntPtr)evPtr, (int)evLen);   // 旧 AddListener 路径（backward compat）
             _eventDemuxer?.Pump((System.IntPtr)evPtr, (int)evLen);             // D3 typed 路径（On<T>）
+            // 两条路径并行运行，各自独立的订阅表，无冲突。
+            // DEPRECATION: 待所有 callers 从 AddListener 迁移到 On<T> 后移除 _eventHandler.DispatchPending（后续 cleanup）。
 
             // Controller 切页事件（同窗口：tick 后、下 tick 前。out_len=COUNT 非字节）。
             nuint ccLen = 0;

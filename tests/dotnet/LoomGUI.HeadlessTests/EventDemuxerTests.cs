@@ -323,6 +323,147 @@ namespace LoomGUI.HeadlessTests
             finally { StageHarness.Destroy(stage); }
         }
 
+        // ── Finding 1 regression: TweenComplete per-event core ──────────────────
+
+        /// <summary>
+        /// TweenComplete → AnimationEnd + TransitionEnd 各持独立 RouteEventCore。
+        /// AnimationEnd handler 调 StopPropagation 不影响 TransitionEnd bubble。
+        /// </summary>
+        [Fact]
+        public void TweenCompleteProducesIndependentCores()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                uint rootId = CreateRoot(stage, "div");
+                uint childId = CreateNode(stage, "div");
+                AppendChild(stage, rootId, childId);
+                Node root = ctx._registry.GetOrCreate(rootId);
+                Node child = ctx._registry.GetOrCreate(childId);
+
+                bool animEndFired = false, transitionEndBubbled = false;
+                child.On<AnimationEndEvent>(e => { animEndFired = true; e.StopPropagation(); });
+                root.On<TransitionEndEvent>(_ => transitionEndBubbled = true);
+
+                using (var buf = new NativeEventBuffer())
+                {
+                    buf.Add(child._id, (byte)EventType.TweenComplete);
+                    ctx._eventDemuxer.Pump(buf.Ptr, buf.Count);
+                }
+
+                Assert.True(animEndFired, "AnimationEnd fired on child");
+                Assert.True(transitionEndBubbled,
+                    "TransitionEnd bubbled to root — NOT affected by AnimationEnd's StopPropagation (independent cores)");
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        // ── Finding 2 regression: business fields from raw data ────────────────
+
+        /// <summary>
+        /// PointerDownEvent.Position 从 evt.x, evt.y 填充（不抛 NotImplementedException）。
+        /// </summary>
+        [Fact]
+        public void PointerDownPositionIsFilled()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                PointerDownEvent received = default;
+                n.On<PointerDownEvent>(e => received = e);
+
+                using (var buf = new NativeEventBuffer())
+                {
+                    buf.Add(n._id, (byte)EventType.Down, x: 123.5f, y: 456.7f);
+                    ctx._eventDemuxer.Pump(buf.Ptr, buf.Count);
+                }
+
+                Assert.Equal(123.5f, received.Position.X, 4);
+                Assert.Equal(456.7f, received.Position.Y, 4);
+                Assert.Equal(-1, received.TouchId);   // default mouse
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// ClickEvent.Position + ClickCount 从 evt.x, evt.y, evt.clickCount 填充。
+        /// </summary>
+        [Fact]
+        public void ClickPositionAndCountAreFilled()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                ClickEvent received = default;
+                n.On<ClickEvent>(e => received = e);
+
+                using (var buf = new NativeEventBuffer())
+                {
+                    buf.Add(n._id, (byte)EventType.Click, clickCount: 2, x: 10f, y: 20f);
+                    ctx._eventDemuxer.Pump(buf.Ptr, buf.Count);
+                }
+
+                Assert.Equal(10f, received.Position.X, 4);
+                Assert.Equal(20f, received.Position.Y, 4);
+                Assert.Equal(2, received.ClickCount);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// KeyDownEvent.Key + Modifiers 从 touchId (key_code) + pad[0] (modifiers) 填充。
+        /// </summary>
+        [Fact]
+        public void KeyDownKeyAndModifiersAreFilled()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                KeyDownEvent received = default;
+                n.On<KeyDownEvent>(e => received = e);
+
+                using (var buf = new NativeEventBuffer())
+                {
+                    // KeyCode.A = 97 (Unity KeyCode), modifiers = Shift(1)
+                    buf.AddKeyDown(n._id, keyCode: 97, modifiers: 1);
+                    ctx._eventDemuxer.Pump(buf.Ptr, buf.Count);
+                }
+
+                Assert.Equal(KeyCode.A, received.Key);
+                Assert.Equal(KeyModifiers.Shift, received.Modifiers);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// KeyUpEvent.Key + Modifiers from raw data, Ctrl+Alt combo.
+        /// </summary>
+        [Fact]
+        public void KeyUpKeyAndModifiersFromRaw()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                KeyUpEvent received = default;
+                n.On<KeyUpEvent>(e => received = e);
+
+                using (var buf = new NativeEventBuffer())
+                {
+                    // KeyCode.Enter = 13, modifiers = Ctrl(2) | Alt(4) = 6
+                    buf.AddKeyUp(n._id, keyCode: 13, modifiers: 6);
+                    ctx._eventDemuxer.Pump(buf.Ptr, buf.Count);
+                }
+
+                Assert.Equal(KeyCode.Enter, received.Key);
+                Assert.Equal(KeyModifiers.Control | KeyModifiers.Alt, received.Modifiers);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
         // ── helpers ───────────────────────────────────────────────────────
 
         static uint CreateRoot(IntPtr stage, string kind)
@@ -359,7 +500,7 @@ namespace LoomGUI.HeadlessTests
     {
         byte* _buf;
         int _count;
-        const int RecSize = 20;   // sizeof(EventRecord) = nodeId(4) + type(1) + clickCount(1) + pad(2) + touchId(4) + x(4) + y(4)
+        static readonly int RecSize = System.Runtime.InteropServices.Marshal.SizeOf<RawEventRecord>();
 
         public IntPtr Ptr => (IntPtr)_buf;
         public int Count => _count;
@@ -372,9 +513,9 @@ namespace LoomGUI.HeadlessTests
 
         /// <summary>
         /// Write a raw EventRecord into the buffer. Fields in native order:
-        /// nodeId(u32), eventType(u8), clickCount(u8), pad2, touchId(i32), x(f32), y(f32).
+        /// nodeId(u32), eventType(u8), clickCount(u8), pad(ushort; pad[0]=modifiers for key events), touchId(i32), x(f32), y(f32).
         /// </summary>
-        public void Add(uint nodeId, byte eventType, byte clickCount = 0, int touchId = -1, float x = 0, float y = 0)
+        public void Add(uint nodeId, byte eventType, byte clickCount = 0, ushort pad = 0, int touchId = -1, float x = 0, float y = 0)
         {
             int off = _count * RecSize;
             // nodeId @0 (u32 little-endian)
@@ -383,8 +524,8 @@ namespace LoomGUI.HeadlessTests
             *(_buf + off + 4) = eventType;
             // clickCount @5
             *(_buf + off + 5) = clickCount;
-            // pad @6-7 (zero)
-            *(ushort*)(_buf + off + 6) = 0;
+            // pad @6-7（key events: pad[0]=modifiers）
+            *(ushort*)(_buf + off + 6) = pad;
             // touchId @8
             *(int*)(_buf + off + 8) = touchId;
             // x @12
@@ -396,6 +537,14 @@ namespace LoomGUI.HeadlessTests
 
         /// <summary>Shortcut: Click event with click_count=1。</summary>
         public void AddClick(uint nodeId) => Add(nodeId, (byte)EventType.Click, clickCount: 1);
+
+        /// <summary>Shortcut: KeyDown event with key_code and modifiers。</summary>
+        public void AddKeyDown(uint nodeId, int keyCode, byte modifiers = 0)
+            => Add(nodeId, (byte)EventType.KeyDown, touchId: keyCode, pad: modifiers);
+
+        /// <summary>Shortcut: KeyUp event with key_code and modifiers。</summary>
+        public void AddKeyUp(uint nodeId, int keyCode, byte modifiers = 0)
+            => Add(nodeId, (byte)EventType.KeyUp, touchId: keyCode, pad: modifiers);
 
         public void Dispose()
         {
