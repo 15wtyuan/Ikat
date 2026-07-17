@@ -934,24 +934,40 @@ namespace LoomGUI
         internal ClassList(Node owner) { _owner = owner; }
 
         /// <summary>加 class（重复名 core 侧去重）。直 FFI add_class。</summary>
-        public void Add(string name) => CallAdd(name);
+        public void Add(string name) { _owner.ThrowIfDisposed(); CallAdd(name); }
         /// <summary>移除 class（core 全部匹配；不存在 no-op，对齐 DOM classList.remove）。直 FFI remove_class。</summary>
-        public void Remove(string name) => CallRemove(name);
-        /// <summary>查询 class 是否存在。直 FFI has_class：返 1 视为 true，0/-1 视为 false。</summary>
-        public bool Contains(string name) => CallHas(name) == 1;
+        public void Remove(string name) { _owner.ThrowIfDisposed(); CallRemove(name); }
+        /// <summary>
+        /// 查询 class 是否存在。直 FFI has_class tri-state：1=true / 0=false / -1=err。
+        /// err 抛 InvalidOperationException——stale/recycled NodeId 是 use-after-dispose 信号，
+        /// 不能伪装成"无此 class"掩盖 bug。null stage / 非 UTF-8 也走 err 分支，理论被前置检查拦截。
+        /// </summary>
+        public bool Contains(string name)
+        {
+            _owner.ThrowIfDisposed();
+            int rc = CallHas(name);
+            if (rc < 0) throw new InvalidOperationException("has_class FFI returned error (stale node / null stage / non-UTF-8).");
+            return rc == 1;
+        }
         /// <summary>翻转：在 → 移除；不在 → 添加。C# 组合（Contains + Add/Remove）。</summary>
-        public void Toggle(string name) { if (Contains(name)) Remove(name); else Add(name); }
+        public void Toggle(string name) { _owner.ThrowIfDisposed(); if (Contains(name)) Remove(name); else Add(name); }
         /// <summary>条件加/移除（on=true 加、on=false 移）。C# 组合。</summary>
-        public void Set(string name, bool on) { if (on) Add(name); else Remove(name); }
+        public void Set(string name, bool on) { _owner.ThrowIfDisposed(); if (on) Add(name); else Remove(name); }
         /// <summary>原子语义替换：移除 oldName + 添加 newName。C# 组合（两次 FFI，非真原子）。</summary>
-        public void Replace(string oldName, string newName) { Remove(oldName); Add(newName); }
+        public void Replace(string oldName, string newName) { _owner.ThrowIfDisposed(); Remove(oldName); Add(newName); }
 
         // ── FFI 转调（ptr+len，A6 编码）─────────────────────────────────
-        // 同 StyleMirror：UTF-8 编码 + fixed 钉住 + ptr+len。失败静默（rc!=0 仅发生于 null stage /
-        // 节点不 live / 非 UTF-8——前两者 ThrowIfDisposed 在 Node.Classes 入口已拦截，
-        // UTF-8 编码不会产非 UTF-8；防御性不抛，与同 assembly 其他 FFI 转调一致）。
-        // has_class 返 i32 三态：1=true，0=false，-1=err（lib.rs:1481）——Contains 把 1 当 true，
-        // 其余当 false（坏句柄 / 非 live 节点语义上即"没有该 class"）。
+        // 同 StyleMirror：UTF-8 编码 + fixed 钉住 + ptr+len。
+        //
+        // disposed 防御：每个公共方法入口调 _owner.ThrowIfDisposed()——覆盖"业务 var cl = node.Classes;
+        // node.Dispose(); cl.Add(...)"这条跨 Dispose 持引用路径（Node.Classes getter 的 ThrowIfDisposed
+        // 只拦 getter 入口，不拦后捕获的 cl）。ClassList 是低频 UI 事件路径，多一次 _disposed 读可忽略。
+        //
+        // add_class/remove_class 失败静默（rc!=0 仅发生于 null stage / 节点不 live / 非 UTF-8——
+        // 前两者 ThrowIfDisposed 已拦，UTF-8 编码不会产非 UTF-8；防御性不抛，与同 assembly 其他
+        // FFI 转调一致）。
+        // has_class 返 i32 三态（lib.rs:1481）：1=true / 0=false / -1=err——Contains 把 -1 升级为
+        // InvalidOperationException（不静默吞：stale NodeId 是 use-after-dispose 信号，不能当"无此 class"）。
 
         void CallAdd(string name)
         {

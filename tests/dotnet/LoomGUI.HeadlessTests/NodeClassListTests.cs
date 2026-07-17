@@ -249,6 +249,35 @@ namespace LoomGUI.HeadlessTests
             }
         }
 
+        /// <summary>
+        /// 业务捕获 `var cl = node.Classes;` 后 Dispose——后续每个公共方法（Add/Remove/Contains/
+        /// Toggle/Set/Replace）必须抛 ObjectDisposedException，不能让 FFI 走 disposed NodeId。
+        /// 覆盖 C5 review Minor #1：Node.Classes getter 的 ThrowIfDisposed 只拦 getter 入口，
+        /// 持引用跨 Dispose 这条路径靠 ClassList 各方法入口的 ThrowIfDisposed 兜。
+        /// </summary>
+        [Fact]
+        public void CapturedClassListPostDisposeThrowsOnEveryPublicMethod()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                ClassList cl = n.Classes;   // 先捕获引用
+                n.Dispose();
+
+                Assert.Throws<ObjectDisposedException>(() => cl.Add("x"));
+                Assert.Throws<ObjectDisposedException>(() => cl.Remove("x"));
+                Assert.Throws<ObjectDisposedException>(() => cl.Contains("x"));
+                Assert.Throws<ObjectDisposedException>(() => cl.Toggle("x"));
+                Assert.Throws<ObjectDisposedException>(() => cl.Set("x", true));
+                Assert.Throws<ObjectDisposedException>(() => cl.Replace("a", "b"));
+            }
+            finally
+            {
+                StageHarness.Destroy(stage);
+            }
+        }
+
         // ── helpers ──────────────────────────────────────────────────────
 
         private static uint CreateRoot(IntPtr stage, string kind)
