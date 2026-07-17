@@ -52,23 +52,31 @@ namespace LoomGUI
         public static Color Unset => new Color(0f, 0f, 0f, 0f, isUnset: true);
     }
 
+    // 2D 向量（Position / Scale / Origin / 滚动点等）。值语义：等号按字段比较（struct 默认）。
+    // 业务侧通过 new Vector2(x,y) 构造；Zero/One 是常用常量。投影层（C4 NodeTransform）镜像
+    // default 与业务语义对齐：Position/Origin 默认 Zero（不位移）、Scale 默认 One（不缩放）。
     public readonly struct Vector2
     {
-        public float X { get { throw NE(); } }
-        public float Y { get { throw NE(); } }
-        public Vector2(float x, float y) { throw NE(); }
-        public static Vector2 Zero { get { throw NE(); } }
-        public static Vector2 One { get { throw NE(); } }
-        static NotImplementedException NE() => new NotImplementedException();
+        public float X { get; }
+        public float Y { get; }
+        public Vector2(float x, float y) { X = x; Y = y; }
+        public static Vector2 Zero => default;   // (0,0)；default(Vector2) 直接给零值，免 alloc
+        public static Vector2 One => new Vector2(1f, 1f);   // 不缩放 / 不位移语义哨兵
     }
 
+    // 矩形（x/y/w/h，左上原点 + y 向下，与核心坐标系一致）。projection §2.5：Geometry.LayoutRect/
+    // WorldRect 返此。internal ctor 让同 assembly（NodeGeometry）FFI 读后构造；公共 ctor 留给业务
+    // 通过 Geometry 拿到后再传 API 的场景（暂时未加——frozen 公共 ctor 暂留 internal，需要时升级 public）。
     public readonly struct Rect
     {
-        public float X { get { throw NE(); } }
-        public float Y { get { throw NE(); } }
-        public float Width { get { throw NE(); } }
-        public float Height { get { throw NE(); } }
-        static NotImplementedException NE() => new NotImplementedException();
+        public float X { get; }
+        public float Y { get; }
+        public float Width { get; }
+        public float Height { get; }
+        internal Rect(float x, float y, float w, float h)
+        {
+            X = x; Y = y; Width = w; Height = h;
+        }
     }
 
     public enum DisplayMode { Unset, Block, Flex, None }

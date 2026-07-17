@@ -85,8 +85,39 @@ namespace LoomGUI
             }
         }
 
-        public NodeTransform Transform { get { throw NE(); } }
-        public NodeGeometry Geometry { get { throw NE(); } }
+        // 投影层（C4）：lazy 造 NodeTransform 挂本 Node。同 Style 模式：同一 Node 多次访问 Transform
+        // 返同一实例——node.Transform.Position=X 与 .Scale=Y 必须改同一 NodeTransform（projection §2.5）。
+        // 未访问过 = null（不预造，避免给从未读写的节点带镜像开销）。
+        internal NodeTransform _transform;
+
+        /// <summary>
+        /// Transform = 渲染层（不触发 solve）。lazy 造稳定单一实例：首次访问构造 + 挂本 Node；
+        /// 后续访问返同一引用。setter 只存镜像、不 flush（set_transform FFI 推后，ponytail 注释见
+        /// <see cref="NodeTransform"/>）。Dispose 后访问抛 ObjectDisposedException。
+        /// </summary>
+        public NodeTransform Transform
+        {
+            get
+            {
+                ThrowIfDisposed();
+                _transform ??= new NodeTransform(this);
+                return _transform;
+            }
+        }
+
+        /// <summary>
+        /// Geometry = 只读 layout/world 产物快照。每次访问返 fresh readonly struct（直读 FFI，不缓存）。
+        /// 滞后一帧（web-reflow 语义）：读最近一次 solve/compute_world_transforms 结果，本帧写入下帧才反映。
+        /// Dispose 后访问抛 ObjectDisposedException。
+        /// </summary>
+        public NodeGeometry Geometry
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return new NodeGeometry(_ctx, _id);
+            }
+        }
 
         public bool Touchable { get { throw NE(); } set { throw NE(); } }
         public bool Focusable { get { throw NE(); } set { throw NE(); } }   // 运行时改可获焦性（对齐 fgui focusable）
@@ -368,25 +399,183 @@ namespace LoomGUI
     }
 
     // Transform = 渲染层，不触发 solve。回写走独立数值 FFI（set_transform，纯 f32）。
+    //
+    // C4（标脏不 flush）：setter 只存镜像值、不调任何 FFI——set_transform FFI 推后到第一个逐帧
+    // transform 控件落地（roadmap §3.5 / spec §5）。升级路径：FFI 加上后，NodeTransform setter
+    // 标脏 + 帧末（攒批 seam 同 Style.FlushInline）一次性 flush 全属性到 core，core 在
+    // compute_world_transforms 时并入 local_transform。本类签名零改动——只把"存镜像"扩到"标脏 + flush"。
+    //
+    // ponytail: 4a 不实现 set_transform FFI 是有意——无控件消费 transform 写入时，flush 也只是落
+    // 空 core bit（无视觉变化）；等首个真实控件（如绝对定位动画 / 触摸抖动）落地再接通，避免 ghost state。
     public sealed class NodeTransform
     {
-        public Vector2 Position { get { throw NE(); } set { throw NE(); } }
-        public Vector2 Scale { get { throw NE(); } set { throw NE(); } }
-        public float Rotation { get { throw NE(); } set { throw NE(); } }
-        public Vector2 Origin { get { throw NE(); } set { throw NE(); } }
-        static NotImplementedException NE() => new NotImplementedException();
+        // 投影层内部：owner Node。lazy 造时由 Node.Transform 传 this；getter/setter 经它走 FFI
+        // （升级后：owner._ctx._stage + owner._id 转调 set_transform）。
+        internal readonly Node _owner;
+
+        // 镜像值：setter 写、getter 读。default 按业务语义初始化（Scale=One 不缩放，其它 Zero）。
+        // 未 flush 到 core——读到的是 C# 侧最近一次写入的快照。
+        internal Vector2 _position = Vector2.Zero;
+        internal Vector2 _scale = Vector2.One;
+        internal float _rotation;
+        internal Vector2 _origin = Vector2.Zero;
+        // dirty 在升级路径用（攒批 flush 时帧末扫所有 dirty 的 NodeTransform）。4a flush 未接通时
+        // 只标脏不消费，留作 future seam 接入点；现保留写以让"setter 改状态"语义可观察。
+        internal bool _dirty;
+
+        internal NodeTransform(Node owner) { _owner = owner; }
+
+        /// <summary>位移（local 坐标，px）。setter 存镜像、不 flush（set_transform 推后）。</summary>
+        public Vector2 Position { get => _position; set => Store(ref _position, value); }
+        /// <summary>缩放（local 基）。default = One（不缩放）；setter 存镜像、不 flush。</summary>
+        public Vector2 Scale { get => _scale; set => Store(ref _scale, value); }
+        /// <summary>旋转（弧度，绕 Origin）。setter 存镜像、不 flush。</summary>
+        public float Rotation { get => _rotation; set => Store(ref _rotation, value); }
+        /// <summary>旋转/缩放原点（local 坐标，px）。setter 存镜像、不 flush。</summary>
+        public Vector2 Origin { get => _origin; set => Store(ref _origin, value); }
+
+        // 统一 setter 路径：写镜像 + 标脏。ponytail: 升级时在此调帧末 flush seam（攒批同 Style）。
+        void Store<T>(ref T field, T value)
+        {
+            field = value;
+            _dirty = true;
+        }
     }
 
-    // Geometry = 只读快照，从每帧 blob 填充（滞后一帧，同 web reflow）。
-    public readonly struct NodeGeometry
+    // Geometry = 只读快照，直读 FFI layout/world 产物（滞后一帧，同 web reflow）。
+    //
+    // C4（直读 FFI）：readonly struct 持 owner 身份（uint _id + UIContext _ctx）；node.Geometry 每次
+    // 返 fresh struct snapshot。projection §2.5 / §2.6 读时序——LayoutRect/WorldRect 反映最近一次
+    // solve/compute_world_transforms 结果，本帧写 Style/Transform 下帧才反映（滞后一帧）。
+    //
+    // ponytail: blob 缓存推后（projection §5 升级路径给 FrameBlob 加 rect/world 列）。4a 直读 FFI
+    // 简单且正确——单次 layout_rect/world_matrix 读是 6 f32 + 1 dict 查找，热路径（每帧 N 节点读）
+    // 暂未达需缓存的规模，YAGNI。
+    public readonly unsafe struct NodeGeometry
     {
-        public Rect LayoutRect { get { throw NE(); } }
-        public Rect WorldRect { get { throw NE(); } }
-        public Vector2 LocalToGlobal(Vector2 p) { throw NE(); }
-        public Vector2 GlobalToLocal(Vector2 p) { throw NE(); }
-        public Rect LocalToGlobal(Rect r) { throw NE(); }
-        public Rect GlobalToLocal(Rect r) { throw NE(); }
-        static NotImplementedException NE() => new NotImplementedException();
+        // struct 不持 disposed 状态——disposed 检在 node.Geometry getter 入口（Node.ThrowIfDisposed）。
+        // 调用方拿到 struct 后假设 owner 活；FFI 在 owner 失效时返 identity/0（h.is_null/无效节点兜底）。
+        internal readonly UIContext _ctx;
+        internal readonly uint _id;
+        internal NodeGeometry(UIContext ctx, uint id) { _ctx = ctx; _id = id; }
+
+        /// <summary>
+        /// 节点 layout 产物（solve 输出，左上 + w/h）。直读 get_node_layout_rect FFI（x/y/w/h → Rect）。
+        /// 滞后一帧：本帧 Style 写入下帧才反映。
+        /// </summary>
+        public Rect LayoutRect
+        {
+            get
+            {
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                float x = 0, y = 0, w = 0, hh = 0;
+                Native.loomgui_stage_get_node_layout_rect(h, _id, &x, &y, &w, &hh);
+                return new Rect(x, y, w, hh);
+            }
+        }
+
+        /// <summary>
+        /// 节点 world AABB（layout_rect 经 world_matrix 变换后的轴对齐外接盒）。
+        /// 直读 get_node_world_matrix FFI（Affine2 = [a,b,c,d,tx,ty]）+ 对 LayoutRect 四角 apply_point + 取 AABB。
+        /// 滞后一帧：本帧 layout/transform 写入下帧才反映。
+        /// </summary>
+        public Rect WorldRect => LocalToGlobal(LayoutRect);
+
+        /// <summary>
+        /// 本地点 → 世界点（经 world_matrix）。Affine2 列主序：x' = a·x + c·y + tx，y' = b·x + d·y + ty
+        /// （crates/core/src/transform.rs:46 apply_point 公式）。
+        /// </summary>
+        public Vector2 LocalToGlobal(Vector2 p)
+        {
+            GetWorldMatrix(out float a, out float b, out float c, out float d, out float tx, out float ty);
+            return new Vector2(a * p.X + c * p.Y + tx, b * p.X + d * p.Y + ty);
+        }
+
+        /// <summary>
+        /// 世界点 → 本地点（world_matrix 的逆变换）。退化情形（det≈0，如 scale(0)）Rust 侧 inverse
+        /// 返 IDENTITY（transform.rs:55），此处逆变换即原 world_matrix 逆——与 hit_test 一致的兜底。
+        /// </summary>
+        public Vector2 GlobalToLocal(Vector2 p)
+        {
+            GetWorldMatrix(out float a, out float b, out float c, out float d, out float tx, out float ty);
+            InverseAffine(a, b, c, d, tx, ty,
+                          out float ia, out float ib, out float ic, out float id, out float itx, out float ity);
+            return new Vector2(ia * p.X + ic * p.Y + itx, ib * p.X + id * p.Y + ity);
+        }
+
+        /// <summary>本地 rect → world AABB：四角 LocalToGlobal + 轴对齐外接盒。</summary>
+        public Rect LocalToGlobal(Rect r)
+        {
+            GetWorldMatrix(out float a, out float b, out float c, out float d, out float tx, out float ty);
+            return TransformAABB(a, b, c, d, tx, ty, r);
+        }
+
+        /// <summary>world rect → local AABB：四角 GlobalToLocal + 轴对齐外接盒。</summary>
+        public Rect GlobalToLocal(Rect r)
+        {
+            GetWorldMatrix(out float a, out float b, out float c, out float d, out float tx, out float ty);
+            InverseAffine(a, b, c, d, tx, ty,
+                          out float ia, out float ib, out float ic, out float id, out float itx, out float ity);
+            return TransformAABB(ia, ib, ic, id, itx, ity, r);
+        }
+
+        // ── FFI + 矩阵 helpers ─────────────────────────────────────────
+        // 与 transform.rs 的 apply_point / inverse 公式一一对应；保留为 private 静态以便 JIT 内联。
+        // Rust FFI 的 null/无效节点兜底写 identity（[1,0,0,1,0,0]）——调用方 owner Dispose 后理论
+        // 不达（node.Geometry getter 抛 ODE），但兜底保证 struct 不持活节点也能安全读。
+
+        void GetWorldMatrix(out float a, out float b, out float c, out float d, out float tx, out float ty)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            // locals 而非直接 &out：C# 禁止对 out 参数取地址（GC 可能移动托管引用）。
+            float la = 1f, lb = 0f, lc = 0f, ld = 1f, ltx = 0f, lty = 0f;   // identity default（null/失效兜底）
+            Native.loomgui_stage_get_node_world_matrix(h, _id, &la, &lb, &lc, &ld, &ltx, &lty);
+            a = la; b = lb; c = lc; d = ld; tx = ltx; ty = lty;
+        }
+
+        // Affine2 逆：与 transform.rs:52 inverse 同算法（det≈0 退化返 identity）。
+        static void InverseAffine(float a, float b, float c, float d, float tx, float ty,
+                                  out float ia, out float ib, out float ic, out float id,
+                                  out float itx, out float ity)
+        {
+            float det = a * d - b * c;
+            if (Math.Abs(det) < 1e-12f)   // 退化：返 identity（与 Rust inverse 兜底一致）
+            {
+                ia = 1f; ib = 0f; ic = 0f; id = 1f; itx = 0f; ity = 0f;
+                return;
+            }
+            float invDet = 1f / det;
+            ia = d * invDet;
+            ib = -b * invDet;
+            ic = -c * invDet;
+            id = a * invDet;
+            itx = -(ia * tx + ic * ty);
+            ity = -(ib * tx + id * ty);
+        }
+
+        // 仿射变换 AABB：取四角变换后的外接盒（轴对齐）。旋转/缩放时 world box > local box。
+        static Rect TransformAABB(float a, float b, float c, float d, float tx, float ty, Rect r)
+        {
+            // 四角：min/max × min/max（避免重复算 0 尺寸退化点）。
+            float x0 = r.X, y0 = r.Y;
+            float x1 = r.X + r.Width, y1 = r.Y + r.Height;
+            ApplyPoint(a, b, c, d, tx, ty, x0, y0, out float p0x, out float p0y);
+            ApplyPoint(a, b, c, d, tx, ty, x1, y0, out float p1x, out float p1y);
+            ApplyPoint(a, b, c, d, tx, ty, x0, y1, out float p2x, out float p2y);
+            ApplyPoint(a, b, c, d, tx, ty, x1, y1, out float p3x, out float p3y);
+            float minX = Math.Min(Math.Min(p0x, p1x), Math.Min(p2x, p3x));
+            float minY = Math.Min(Math.Min(p0y, p1y), Math.Min(p2y, p3y));
+            float maxX = Math.Max(Math.Max(p0x, p1x), Math.Max(p2x, p3x));
+            float maxY = Math.Max(Math.Max(p0y, p1y), Math.Max(p2y, p3y));
+            return new Rect(minX, minY, maxX - minX, maxY - minY);
+        }
+
+        static void ApplyPoint(float a, float b, float c, float d, float tx, float ty,
+                               float x, float y, out float ox, out float oy)
+        {
+            ox = a * x + c * y + tx;
+            oy = b * x + d * y + ty;
+        }
     }
 
     // ── Container 与树操作 ──────────────────────────────────────────
