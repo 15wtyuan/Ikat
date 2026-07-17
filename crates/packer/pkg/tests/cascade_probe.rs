@@ -1,11 +1,12 @@
 //! Cascade-finalization probe: drive a hand-authored HTML fixture (kept inside
 //! the current selector/property subset) end-to-end and lock the
-//! HTML -> pkg -> Stage -> layout -> rect/visible chain.
+//! HTML -> pkg -> Stage -> layout -> query-exit chain.
 //!
-//! Asserts only what the Stage public API can observe today (rect / visible /
-//! find_node_by_id). Inheritance (font-size/color), computed style, and
-//! node-kind fidelity need query exits that cascade-finalization must add;
-//! those are tracked as gaps, not covered here.
+//! Coverage spans the full cascade surface exposed by the ③ query exits:
+//! rect/visible (geometry + display pruning), `get_node_computed_style`
+//! (inheritance, specificity, class matching), and `get_node_kind` (control
+//! kinds do not collapse to Container).
+use loomgui_core::scene::node::NodeKind;
 use loomgui_core::scene::NodeId;
 use loomgui_core::stage::Stage;
 use loomgui_pkg::build::pack_components;
@@ -85,4 +86,68 @@ fn probe_full_fence_tag_set_instantiates() {
     ] {
         assert!(stage.find_node_by_id(id).is_some(), "node {id} missing");
     }
+}
+
+#[test]
+fn probe_cascade_inheritance_and_specificity() {
+    let (stage, _) = build_stage(HTML);
+    // 继承 + 后代覆盖：`.row .lbl { font-size:12 }` 命中 span.lbl-master，
+    // 覆盖继承自 #root 的 14。一次断言同时验「后代选择器匹配」+「继承基线」+「显式声明胜继承」。
+    let lbl = stage.find_node_by_id("lbl-master").expect("lbl-master");
+    let c = stage.get_node_computed_style(lbl).expect("lbl computed");
+    assert!(
+        (c.font_size - 12.0).abs() < 0.5,
+        ".row .lbl should set font-size 12 (overriding inherited 14): got {}",
+        c.font_size
+    );
+    // 继承（无覆盖）：span.vol-val 无 font-size 规则 → 继承 #root 的 14。
+    let vol_val = stage.find_node_by_id("vol-val").expect("vol-val");
+    let c = stage
+        .get_node_computed_style(vol_val)
+        .expect("vol-val computed");
+    assert!(
+        (c.font_size - 14.0).abs() < 0.5,
+        "vol-val inherits #root font-size 14: got {}",
+        c.font_size
+    );
+    // class 命中：`.muted { color:#888 }` 命中 vol-val（r=136/255≈0.533）。
+    assert!(
+        (c.color[0] - 136.0 / 255.0).abs() < 0.01,
+        ".muted color #888 (r≈0.533): got {}",
+        c.color[0]
+    );
+    // specificity：`#root .title { color:#0066aa }`（id+class=1,1,0）胜 `.title { color:#114488 }`（class=0,1,0）。
+    // #0066aa = r=0, b=170/255≈0.667。
+    let title = stage.find_node_by_id("title").expect("title");
+    let c = stage
+        .get_node_computed_style(title)
+        .expect("title computed");
+    assert!(
+        c.color[0] < 0.01 && (c.color[2] - 170.0 / 255.0).abs() < 0.01,
+        "#root .title should win specificity (color #0066aa): got {:?}",
+        c.color
+    );
+}
+
+#[test]
+fn probe_control_kinds_do_not_collapse() {
+    // kind 保真（防 §3.3「假绿」）：控件不塌成 Container。get_node_kind 是 ③ 新出口，
+    // smoke 推迟的「kind 保真」断言在此兑现。
+    let (stage, _) = build_stage(HTML);
+    let kind = |id: &str| stage.get_node_kind(stage.find_node_by_id(id).expect(id));
+    assert_eq!(kind("vol"), Some(NodeKind::Slider), "vol == Slider");
+    assert_eq!(kind("mute"), Some(NodeKind::Toggle), "mute == Toggle");
+    assert_eq!(
+        kind("quality"),
+        Some(NodeKind::Dropdown),
+        "quality == Dropdown"
+    );
+    assert_eq!(kind("pb"), Some(NodeKind::ProgressBar), "pb == ProgressBar");
+    assert_eq!(kind("save"), Some(NodeKind::Button), "save == Button");
+    assert_eq!(kind("li1"), Some(NodeKind::ListItem), "li1 == ListItem");
+    assert_eq!(
+        kind("root"),
+        Some(NodeKind::Container),
+        "root still Container"
+    );
 }

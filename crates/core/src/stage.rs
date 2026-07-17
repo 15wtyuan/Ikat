@@ -307,6 +307,23 @@ impl Stage {
         self.scene.as_ref()?.get(node).map(|n| n.layout_rect)
     }
 
+    /// 节点语义类型（围栏 tag + 结构属性决定，CSS 不改变）。None = 节点不存在。
+    pub fn get_node_kind(&self, node: NodeId) -> Option<crate::scene::node::NodeKind> {
+        self.scene.as_ref()?.get(node).map(|n| n.kind)
+    }
+
+    /// cascade 解析后的非几何样式快照（`Node.style`，rematch 覆写值）。None = 节点不存在。
+    /// 几何（w/h/x/y）走 `get_node_layout_rect`；internal set-ness/复杂视觉不暴露。
+    pub fn get_node_computed_style(
+        &self,
+        node: NodeId,
+    ) -> Option<crate::style::computed::ComputedNodeStyle> {
+        self.scene
+            .as_ref()?
+            .get(node)
+            .map(|n| crate::style::computed::ComputedNodeStyle::from_resolved(&n.style))
+    }
+
     /// 读节点 world transform（compute_world_transforms 产物，全节点含空 div）。
     /// NativeHost FFI 查询用——merge_meshes 后空 div slot 的 RenderNode 消失，
     /// 但 world_transforms 保留全节点（与 node_sort_keys 同）。node 无效 / scene 未建 → None。
@@ -813,3 +830,45 @@ mod instantiate_tests;
 /// 验证端到端链路：set_image_sizes 灌入 (w,h) → solve 查表算 Image intrinsic（三档：CSS > 真实像素 > 64×64）。
 #[cfg(test)]
 mod image_size_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_node_kind_returns_builtin_kinds() {
+        let mut s = Stage::new((100.0, 100.0)).unwrap();
+        let root = s.create_root("div", "").unwrap();
+        let btn = s.create_node("button", "").unwrap();
+        s.append_child(root, btn).unwrap();
+        let img = s.create_node("img", "").unwrap();
+        s.append_child(root, img).unwrap();
+        let sp = s.create_node("span", "").unwrap();
+        s.append_child(root, sp).unwrap();
+        use crate::scene::node::NodeKind;
+        assert_eq!(s.get_node_kind(root), Some(NodeKind::Container));
+        assert_eq!(s.get_node_kind(btn), Some(NodeKind::Button));
+        assert_eq!(s.get_node_kind(img), Some(NodeKind::Image));
+        assert_eq!(s.get_node_kind(sp), Some(NodeKind::TextNode));
+        // 无效句柄 → None（不撞 Container=0）。
+        assert_eq!(s.get_node_kind(crate::scene::NodeId::INVALID), None);
+    }
+
+    #[test]
+    fn get_node_computed_style_returns_snapshot() {
+        use crate::style::resolved::DisplayMode;
+        let mut s = Stage::new((100.0, 100.0)).unwrap();
+        let root = s.create_root("div", "").unwrap();
+        let c = s
+            .get_node_computed_style(root)
+            .expect("root computed style");
+        // 默认值（不依赖 rematch 时机）：opacity 1.0、display Flex。精确 cascade 值由 Task 3 验。
+        assert_eq!(c.opacity, 1.0);
+        assert_eq!(c.display_mode, DisplayMode::Flex);
+        assert_eq!(
+            s.get_node_computed_style(crate::scene::NodeId::INVALID),
+            None,
+            "invalid node -> None"
+        );
+    }
+}

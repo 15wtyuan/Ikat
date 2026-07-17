@@ -8,6 +8,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 loomgui_core = { path = "../core" }
+# FlexDirection 是 ComputedNodeStyle 字段类型，FFI 稳定化时须 match 其变体（见 lib.rs）。
+taffy = "0.5"
 
 [build-dependencies]
 csbindgen = "1"
