@@ -856,6 +856,7 @@ mod tests {
 
     #[test]
     fn get_node_computed_style_returns_snapshot() {
+        use crate::style::resolved::DisplayMode;
         let mut s = Stage::new((100.0, 100.0)).unwrap();
         let root = s.create_root("div", "").unwrap();
         let c = s
@@ -863,6 +864,7 @@ mod tests {
             .expect("root computed style");
         // 默认值（不依赖 rematch 时机）：opacity 1.0、display Flex。精确 cascade 值由 Task 3 验。
         assert_eq!(c.opacity, 1.0);
+        assert_eq!(c.display_mode, DisplayMode::Flex);
         assert_eq!(
             s.get_node_computed_style(crate::scene::NodeId::INVALID),
             None,

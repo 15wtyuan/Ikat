@@ -1,11 +1,11 @@
 //! Cascade-finalization probe: drive a hand-authored HTML fixture (kept inside
 //! the current selector/property subset) end-to-end and lock the
-//! HTML -> pkg -> Stage -> layout -> rect/visible chain.
+//! HTML -> pkg -> Stage -> layout -> query-exit chain.
 //!
-//! Asserts only what the Stage public API can observe today (rect / visible /
-//! find_node_by_id). Inheritance (font-size/color), computed style, and
-//! node-kind fidelity need query exits that cascade-finalization must add;
-//! those are tracked as gaps, not covered here.
+//! Coverage spans the full cascade surface exposed by the ③ query exits:
+//! rect/visible (geometry + display pruning), `get_node_computed_style`
+//! (inheritance, specificity, class matching), and `get_node_kind` (control
+//! kinds do not collapse to Container).
 use loomgui_core::scene::node::NodeKind;
 use loomgui_core::scene::NodeId;
 use loomgui_core::stage::Stage;
@@ -116,7 +116,7 @@ fn probe_cascade_inheritance_and_specificity() {
         ".muted color #888 (r≈0.533): got {}",
         c.color[0]
     );
-    // specificity：`#root .title { color:#0066aa }`（id+class=0,2,0）胜 `.title { color:#114488 }`（class=0,1,0）。
+    // specificity：`#root .title { color:#0066aa }`（id+class=1,1,0）胜 `.title { color:#114488 }`（class=0,1,0）。
     // #0066aa = r=0, b=170/255≈0.667。
     let title = stage.find_node_by_id("title").expect("title");
     let c = stage

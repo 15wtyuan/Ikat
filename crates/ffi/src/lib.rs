@@ -794,7 +794,7 @@ pub extern "C" fn loomgui_stage_get_node_visible(
 }
 
 /// FFI 稳定快照（#[repr(C)] POD）。enum→u8（match 稳定化，不靠 enum 隐式 repr），
-/// Option<[f32;4]>→present flag + 数组。csbindgen 不生成 struct C# stub，C# 镜像 ④ 手写。
+/// Option<[f32;4]>→present flag + 数组。csbindgen 自动生成 struct C# stub；④ 如需重排字段可扩展或手写覆盖。
 #[repr(C)]
 #[derive(Default)]
 pub struct ComputedNodeStyleRepr {

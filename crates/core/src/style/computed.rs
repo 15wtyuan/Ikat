@@ -55,6 +55,7 @@ mod tests {
         r.display_mode = DisplayMode::None;
         r.taffy_style.flex_direction = taffy::FlexDirection::Row;
         r.overflow_x = OverflowMode::Hidden;
+        r.overflow_y = OverflowMode::Scroll;
         r.color = [0.1, 0.2, 0.3, 1.0];
         r.background_color = Some([1.0, 0.0, 0.0, 1.0]);
         r.border_color = Some([0.0, 1.0, 0.0, 1.0]);
@@ -68,6 +69,7 @@ mod tests {
         assert_eq!(c.display_mode, DisplayMode::None);
         assert_eq!(c.flex_direction, taffy::FlexDirection::Row);
         assert_eq!(c.overflow_x, OverflowMode::Hidden);
+        assert_eq!(c.overflow_y, OverflowMode::Scroll);
         assert_eq!(c.color, [0.1, 0.2, 0.3, 1.0]);
         assert_eq!(c.background_color, Some([1.0, 0.0, 0.0, 1.0]));
         assert_eq!(c.border_color, Some([0.0, 1.0, 0.0, 1.0]));
