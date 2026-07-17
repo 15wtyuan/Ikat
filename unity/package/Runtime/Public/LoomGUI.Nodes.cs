@@ -238,24 +238,121 @@ namespace LoomGUI
     }
 
     // ── Container 与树操作 ──────────────────────────────────────────
-    public class Container : Node
+    public unsafe class Container : Node
     {
         internal Container(UIContext ctx, uint id) : base(ctx, id) { }
 
-        public int ChildCount { get { throw NE(); } }
-        public IReadOnlyList<Node> Children { get { throw NE(); } }
+        /// <summary>
+        /// 直系子节点数。每次访问直读 Rust（get_child_count），不缓存——树可变
+        /// （C6 写操作 AddChild/InsertChild/RemoveChild 会改子数），缓存会 stale。
+        /// </summary>
+        public int ChildCount
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                int c = Native.loomgui_stage_get_child_count(h, _id);
+                // -1 = 节点不 live（post-ThrowIfDisposed 理论不达，FFI 防御性兜底）。
+                return c < 0 ? 0 : c;
+            }
+        }
+
+        /// <summary>
+        /// 直系子节点列表（typed）。每次访问 lazy 物化：调 get_children 拿 NodeId 数组 +
+        /// 逐个 registry.GetOrCreate 包成 typed Node。不缓存 list 本身——树可变，缓存的 list
+        /// 会 stale。但 list 内的 Node 引用稳定：GetOrCreate 走 registry 强引用缓存，同一 NodeId
+        /// 永远返同一实例（订阅 / 镜像挂对象上不丢——projection §2.4）。
+        /// </summary>
+        public IReadOnlyList<Node> Children
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return MaterializeChildren();
+            }
+        }
+
         public string TextContent { get { throw NE(); } set { throw NE(); } }   // DOM 语义：读=拼接后代文字；写=清子节点换单文本
         public T AddChild<T>(T c) where T : Node { throw NE(); }
         public T InsertChild<T>(T c, int i) where T : Node { throw NE(); }
         public void RemoveChild(Node c) { throw NE(); }
-        public Node GetChildAt(int i) { throw NE(); }
-        public int GetChildIndex(Node c) { throw NE(); }
+
+        /// <summary>
+        /// 取第 i 个直系子节点（按 append 顺序）。越界（负数 / ≥ ChildCount）抛
+        /// ArgumentOutOfRangeException。物化路径同 <see cref="Children"/>：lazy + registry 缓存。
+        /// </summary>
+        public Node GetChildAt(int i)
+        {
+            ThrowIfDisposed();
+            var kids = MaterializeChildren();
+            // uint 强转一次校验 i ∈ [0, kids.Count)：负数变大正数越界，省一条分支。
+            if ((uint)i >= (uint)kids.Count)
+                throw new ArgumentOutOfRangeException(nameof(i), i,
+                    $"index {i} out of range [0, {kids.Count})");
+            return kids[i];
+        }
+
+        /// <summary>
+        /// 查 c 在直系子中的索引（按 append 顺序）。未找到返 -1（.NET IndexOf 习惯，不抛）。
+        /// null → ArgumentNullException；c 已 Dispose → ObjectDisposedException（stale 句柄不该再传 API）。
+        /// 用 _id 比较：registry 保证同一 NodeId → 同一实例，_id 相等 ⇔ ReferenceEquals。
+        /// </summary>
+        public int GetChildIndex(Node c)
+        {
+            ThrowIfDisposed();
+            if (c is null) throw new ArgumentNullException(nameof(c));
+            if (c._disposed) throw new ObjectDisposedException(c.GetType().Name);
+
+            var kids = MaterializeChildren();
+            for (int i = 0; i < kids.Count; i++)
+            {
+                if (kids[i]._id == c._id) return i;
+            }
+            return -1;
+        }
+
         public void SetChildIndex(Node c, int i) { throw NE(); }
         public void SwapChildren(Node a, Node b) { throw NE(); }
         public void SwapChildrenAt(int a, int b) { throw NE(); }
         public void ScrollTo(Vector2 p, ScrollBehavior b = ScrollBehavior.Smooth) { throw NE(); }
         public event Action<ScrollChangedEvent> Scrolled;
         public UITemplate GetTemplate(string name) { throw NE(); }   // 取内联 template（原 Panel.GetTemplate 上移）
+
+        // ── helpers ─────────────────────────────────────────────────────
+
+        /// <summary>
+        /// 调 get_children 拿当前直系子 NodeId 数组 + 逐个 registry.GetOrCreate 包成 typed Node。
+        /// FFI 调用模式复用 C1 <see cref="Node.DisposeDescendantsInRegistry"/>：先 get_child_count
+        /// 定 cap，再 get_children 写入 fixed 钉住的 buffer（return-code + out-param，A6 cap 编码）。
+        /// 单线程同步内 count 不会 stale；written 防御性 clamp 兜底 ABI 异常。
+        /// </summary>
+        private List<Node> MaterializeChildren()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+
+            int count = Native.loomgui_stage_get_child_count(h, _id);
+            var list = new List<Node>(count > 0 ? count : 0);
+            if (count <= 0) return list;   // 0 子 / FFI err：返空 list（err post-ThrowIfDisposed 理论不达）
+
+            uint[] buf = new uint[count];
+            int written;
+            fixed (uint* bp = buf)
+            {
+                written = Native.loomgui_stage_get_children(h, _id, bp, (nuint)buf.Length);
+            }
+            // written < 0 = 节点刚被并发移除（单线程理论不达）；防御性早退防读越界。
+            if (written < 0) return list;
+            if (written > buf.Length) written = buf.Length;
+
+            for (int i = 0; i < written; i++)
+            {
+                // registry 缓存命中返同一实例；未命中走 NodeFactory 造 typed 子类（C1）+ 入缓存。
+                list.Add(_ctx._registry.GetOrCreate(buf[i]));
+            }
+            return list;
+        }
+
         static NotImplementedException NE() => new NotImplementedException();
     }
 
