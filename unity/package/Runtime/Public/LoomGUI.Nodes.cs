@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Text;
 using LoomGUI.Bindings;
 
 #pragma warning disable CS0169, CS0067, CS0649
@@ -121,7 +122,26 @@ namespace LoomGUI
 
         public bool Touchable { get { throw NE(); } set { throw NE(); } }
         public bool Focusable { get { throw NE(); } set { throw NE(); } }   // 运行时改可获焦性（对齐 fgui focusable）
-        public ClassList Classes { get { throw NE(); } }
+
+        // 投影层（C5）：lazy 造 ClassList 挂本 Node。同 Style/Transform 模式：同一 Node 多次访问
+        // Classes 返同一实例——node.Classes.Add("a") 与 .Contains("a") 必须作用同一 ClassList
+        // （projection §2.5 稳定单一实例）。未访问过 = null（不预造，避免给从未读写 class 的节点带开销）。
+        internal ClassList _classes;
+
+        /// <summary>
+        /// Classes = class 集合投影（Add/Remove/Contains/Toggle/Set/Replace）。lazy 造稳定单一实例：
+        /// 首次访问构造 + 挂本 Node；后续访问返同一引用。每次操作直 FFI（class 低频，无镜像——
+        /// Contains 直查 has_class 反映 core 真相）。Dispose 后访问抛 ObjectDisposedException。
+        /// </summary>
+        public ClassList Classes
+        {
+            get
+            {
+                ThrowIfDisposed();
+                _classes ??= new ClassList(this);
+                return _classes;
+            }
+        }
 
         public bool IsDisposed => _disposed;
 
@@ -901,15 +921,61 @@ namespace LoomGUI
     }
 
     // ── 样式辅助 ────────────────────────────────────────────────────
-    public sealed class ClassList
+    // ClassList = Node 的 class 集合投影（Add/Remove/Contains/Toggle/Set/Replace）。
+    //
+    // 投影层契约（projection §3.2 即时过桥）：class 是低频 UI 事件路径（非每帧热路径），每次操作
+    // 直 FFI；无镜像需求——class 状态真相在 core，Contains 直查 has_class FFI（不缓存）。Add/Remove
+    // 在 core 标 dirty_mesh（lib.rs:1428/1452）触发下帧 rematch，命中 .foo 规则的节点下帧 cascade
+    // 重算 computed_style——本类不参与 tick 时序，调用方自然推进帧。
+    public sealed unsafe class ClassList
     {
-        public void Add(string n) { throw NE(); }
-        public void Remove(string n) { throw NE(); }
-        public bool Contains(string n) { throw NE(); }
-        public void Toggle(string n) { throw NE(); }
-        public void Set(string n, bool on) { throw NE(); }            // 条件加/移除
-        public void Replace(string oldName, string newName) { throw NE(); }  // 互斥状态切换
-        static NotImplementedException NE() => new NotImplementedException();
+        // 投影层内部：owner Node。lazy 造时由 Node.Classes 传 this；方法体经它取 stage + NodeId 转调 FFI。
+        internal readonly Node _owner;
+        internal ClassList(Node owner) { _owner = owner; }
+
+        /// <summary>加 class（重复名 core 侧去重）。直 FFI add_class。</summary>
+        public void Add(string name) => CallAdd(name);
+        /// <summary>移除 class（core 全部匹配；不存在 no-op，对齐 DOM classList.remove）。直 FFI remove_class。</summary>
+        public void Remove(string name) => CallRemove(name);
+        /// <summary>查询 class 是否存在。直 FFI has_class：返 1 视为 true，0/-1 视为 false。</summary>
+        public bool Contains(string name) => CallHas(name) == 1;
+        /// <summary>翻转：在 → 移除；不在 → 添加。C# 组合（Contains + Add/Remove）。</summary>
+        public void Toggle(string name) { if (Contains(name)) Remove(name); else Add(name); }
+        /// <summary>条件加/移除（on=true 加、on=false 移）。C# 组合。</summary>
+        public void Set(string name, bool on) { if (on) Add(name); else Remove(name); }
+        /// <summary>原子语义替换：移除 oldName + 添加 newName。C# 组合（两次 FFI，非真原子）。</summary>
+        public void Replace(string oldName, string newName) { Remove(oldName); Add(newName); }
+
+        // ── FFI 转调（ptr+len，A6 编码）─────────────────────────────────
+        // 同 StyleMirror：UTF-8 编码 + fixed 钉住 + ptr+len。失败静默（rc!=0 仅发生于 null stage /
+        // 节点不 live / 非 UTF-8——前两者 ThrowIfDisposed 在 Node.Classes 入口已拦截，
+        // UTF-8 编码不会产非 UTF-8；防御性不抛，与同 assembly 其他 FFI 转调一致）。
+        // has_class 返 i32 三态：1=true，0=false，-1=err（lib.rs:1481）——Contains 把 1 当 true，
+        // 其余当 false（坏句柄 / 非 live 节点语义上即"没有该 class"）。
+
+        void CallAdd(string name)
+        {
+            StageHandle* h = (StageHandle*)_owner._ctx._stage.ToPointer();
+            byte[] b = Encoding.UTF8.GetBytes(name);
+            fixed (byte* p = b)
+                Native.loomgui_stage_add_class(h, _owner._id, p, (nuint)b.Length);
+        }
+
+        void CallRemove(string name)
+        {
+            StageHandle* h = (StageHandle*)_owner._ctx._stage.ToPointer();
+            byte[] b = Encoding.UTF8.GetBytes(name);
+            fixed (byte* p = b)
+                Native.loomgui_stage_remove_class(h, _owner._id, p, (nuint)b.Length);
+        }
+
+        int CallHas(string name)
+        {
+            StageHandle* h = (StageHandle*)_owner._ctx._stage.ToPointer();
+            byte[] b = Encoding.UTF8.GetBytes(name);
+            fixed (byte* p = b)
+                return Native.loomgui_stage_has_class(h, _owner._id, p, (nuint)b.Length);
+        }
     }
 
     // StyleSheet 逃生舱：Add 返回 IDisposable 句柄，撤销靠 Dispose（不靠原文匹配）。
