@@ -2,7 +2,8 @@
 //!
 //! `remove_node`（递归删子 + 联动清 anim/scroll/tween + slotmap remove）+
 //! 动态建树/改树 API：`kind_from_tag` / `apply_css` / `create_node` / `create_root`
-//! / `append_child` / `insert_before` / `remove_child`（摘除不删）/ `set_text` / `set_src` / `set_style`。
+//! / `append_child` / `insert_before` / `remove_child`（摘除不删）/ `set_text` / `set_src` / `set_style`
+//! / `set_inline_override` / `unset_inline_override`（便签层 inline override，rematch 最高优先级）。
 //!
 //! **设计要点**（spec §5.3 + §7 + §8）：
 //! - 删节点联动清持久附属 map（anim/scroll remove + tween kill），防悬空 NodeId 残留
@@ -14,7 +15,7 @@
 //! - create_node 填 base_style（源）+ style=base_style.clone()（派生），下帧 rematch 从 base 起算。
 
 use crate::scene::node::{Node, NodeFlags, NodeId, NodeInteraction, NodeKind, Rect, Scene};
-use crate::style::dynamic::InlineSet;
+use crate::style::dynamic::{inline_bit, InlineSet};
 use crate::style::mapping::apply_decl;
 use crate::style::resolved::{OverflowMode, ResolvedStyle};
 use crate::tween::TweenManager;
@@ -265,6 +266,44 @@ pub fn set_src(scene: &mut Scene, node: NodeId, src: &str) -> Result<(), String>
 pub fn set_style(scene: &mut Scene, node: NodeId, css: &str) -> Result<(), String> {
     let n = scene.get_mut(node).ok_or("node not live")?;
     apply_css(&mut n.base_style, css);
+    n.dirty_mesh = true;
+    Ok(())
+}
+
+/// 写 inline override（便签层）：把 CSS 声明应用到 `inline_override` 字段，并把每个
+/// 成功 apply 的 prop 对应 bit OR 进 `inline_set`。下帧 rematch 在动态规则之后应用，
+/// 故 inline 优先级最高（> 动态规则 > base_style）。node 不 live → Err。
+///
+/// 复用 `apply_decl`（apply_css 同路径，不依赖 parse feature）。未识别 prop 静默跳过
+/// （apply_decl 返 false 不置 bit）。多次 set 同 prop 累加（bit 幂等 OR，值覆盖）。
+pub fn set_inline_override(scene: &mut Scene, node: NodeId, css: &str) -> Result<(), String> {
+    let n = scene.get_mut(node).ok_or("node not live")?;
+    for decl in css.split(';') {
+        let decl = decl.trim();
+        if decl.is_empty() {
+            continue;
+        }
+        if let Some((prop, val)) = decl.split_once(':') {
+            let prop = prop.trim();
+            if apply_decl(&mut n.inline_override, prop, val.trim()) {
+                if let Some(bit) = inline_bit(prop) {
+                    n.inline_set.0 |= bit;
+                }
+            }
+        }
+    }
+    n.dirty_mesh = true;
+    Ok(())
+}
+
+/// 清 inline override 的某 prop bit（值保留在 `inline_override`，但下次 rematch 不再应用）。
+/// 下帧 rematch 回落到 base_style / 动态规则值。prop 不可 inline（不在 `inline_bit` 表）
+/// 时为 no-op（仍返 Ok，便于调用方无需判）。node 不 live → Err。
+pub fn unset_inline_override(scene: &mut Scene, node: NodeId, prop: &str) -> Result<(), String> {
+    let n = scene.get_mut(node).ok_or("node not live")?;
+    if let Some(bit) = inline_bit(prop) {
+        n.inline_set.0 &= !bit;
+    }
     n.dirty_mesh = true;
     Ok(())
 }
