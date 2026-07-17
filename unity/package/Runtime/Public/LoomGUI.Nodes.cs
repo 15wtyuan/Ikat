@@ -66,7 +66,25 @@ namespace LoomGUI
             }
         }
 
-        public NodeStyle Style { get { throw NE(); } }
+        // 投影层（C3）：lazy 造 NodeStyle 挂本 Node。同一 Node 多次访问 Style 返同一实例——
+        // projection §2.5：node.Style.Width=X 与 node.Style.Height=Y 必须改同一 StyleMirror。
+        // 未访问过 = null（不预造，避免给从未读写的节点带镜像开销）。
+        internal NodeStyle _style;
+
+        /// <summary>
+        /// Style = inline override 层（最高优先级，> 动态规则 > base_style）。lazy 造稳定单一实例：
+        /// 首次访问构造 + 挂本 Node；后续访问返同一引用。Dispose 后访问抛 ObjectDisposedException。
+        /// </summary>
+        public NodeStyle Style
+        {
+            get
+            {
+                ThrowIfDisposed();
+                _style ??= new NodeStyle(this);
+                return _style;
+            }
+        }
+
         public NodeTransform Transform { get { throw NE(); } }
         public NodeGeometry Geometry { get { throw NE(); } }
 
@@ -178,34 +196,167 @@ namespace LoomGUI
     // Style = inline override 层（最高优先级），不是 cascade 读取窗口。
     // getter 只反映 C# setter 写过的属性；未写过返回 Unset（要 computed 走 Geometry）。
     // setter 写 Unset = 撤销该属性 inline override，回落 CSS。
+    //
+    // C3：每个 typed 属性的 setter/getter 走 _mirror（StyleMirror）。CSS prop 名严格对照 core
+    // inline_bit 表（crates/core/src/style/dynamic.rs）+ apply_decl（mapping.rs）——表外的 prop
+    // 经 set_inline_override 会被 bit 检查前置静默丢弃（ghost-state 防护），故本类只接 24 个
+    // inline_bit 表内 prop；ZIndex / Visibility / SetVar / RemoveVar 暂 ponytail defer
+    // （core apply_decl 未实现，throw NE + 注释）。
     public sealed class NodeStyle
     {
-        public Length Width { get { throw NE(); } set { throw NE(); } }
-        public Length Height { get { throw NE(); } set { throw NE(); } }
-        public Length MinWidth { get { throw NE(); } set { throw NE(); } }
-        public Length MaxWidth { get { throw NE(); } set { throw NE(); } }
-        public Length MinHeight { get { throw NE(); } set { throw NE(); } }
-        public Length MaxHeight { get { throw NE(); } set { throw NE(); } }
-        public DisplayMode Display { get { throw NE(); } set { throw NE(); } }
-        public FlexDirection FlexDirection { get { throw NE(); } set { throw NE(); } }
-        public FlexWrap FlexWrap { get { throw NE(); } set { throw NE(); } }
-        public JustifyContent JustifyContent { get { throw NE(); } set { throw NE(); } }
-        public AlignItems AlignItems { get { throw NE(); } set { throw NE(); } }
-        public Length Gap { get { throw NE(); } set { throw NE(); } }
-        public Thickness Padding { get { throw NE(); } set { throw NE(); } }
-        public Thickness Margin { get { throw NE(); } set { throw NE(); } }
-        public Thickness BorderWidth { get { throw NE(); } set { throw NE(); } }
-        public Overflow OverflowX { get { throw NE(); } set { throw NE(); } }
-        public Overflow OverflowY { get { throw NE(); } set { throw NE(); } }
-        public Length Left { get { throw NE(); } set { throw NE(); } }
-        public Length Top { get { throw NE(); } set { throw NE(); } }
-        public Length Right { get { throw NE(); } set { throw NE(); } }
-        public Length Bottom { get { throw NE(); } set { throw NE(); } }
-        public PositionMode Position { get { throw NE(); } set { throw NE(); } }
+        // 投影层内部：owner Node + mirror。Node.Style lazy 造时传入 this；StyleMirror 持 owner
+        // 转调 FFI（set/unset_inline_override）需 owner._ctx._stage + owner._id。
+        internal readonly Node _owner;
+        internal readonly StyleMirror _mirror;
+        internal NodeStyle(Node owner) { _owner = owner; _mirror = new StyleMirror(owner); }
+
+        // ── 盒模型（Length：宽高 + min/max + inset 四边）──────────────────
+        // Length getter：mirror 无 → Length.Unset()（frozen 约定"未写过返 Unset"）。
+        public Length Width
+        {
+            get => _mirror.IsSet("width") ? _mirror.Get<Length>("width")!.Value : Length.Unset();
+            set => _mirror.Set("width", value);
+        }
+        public Length Height
+        {
+            get => _mirror.IsSet("height") ? _mirror.Get<Length>("height")!.Value : Length.Unset();
+            set => _mirror.Set("height", value);
+        }
+        public Length MinWidth
+        {
+            get => _mirror.IsSet("min-width") ? _mirror.Get<Length>("min-width")!.Value : Length.Unset();
+            set => _mirror.Set("min-width", value);
+        }
+        public Length MaxWidth
+        {
+            get => _mirror.IsSet("max-width") ? _mirror.Get<Length>("max-width")!.Value : Length.Unset();
+            set => _mirror.Set("max-width", value);
+        }
+        public Length MinHeight
+        {
+            get => _mirror.IsSet("min-height") ? _mirror.Get<Length>("min-height")!.Value : Length.Unset();
+            set => _mirror.Set("min-height", value);
+        }
+        public Length MaxHeight
+        {
+            get => _mirror.IsSet("max-height") ? _mirror.Get<Length>("max-height")!.Value : Length.Unset();
+            set => _mirror.Set("max-height", value);
+        }
+        public Length Left
+        {
+            get => _mirror.IsSet("left") ? _mirror.Get<Length>("left")!.Value : Length.Unset();
+            set => _mirror.Set("left", value);
+        }
+        public Length Top
+        {
+            get => _mirror.IsSet("top") ? _mirror.Get<Length>("top")!.Value : Length.Unset();
+            set => _mirror.Set("top", value);
+        }
+        public Length Right
+        {
+            get => _mirror.IsSet("right") ? _mirror.Get<Length>("right")!.Value : Length.Unset();
+            set => _mirror.Set("right", value);
+        }
+        public Length Bottom
+        {
+            get => _mirror.IsSet("bottom") ? _mirror.Get<Length>("bottom")!.Value : Length.Unset();
+            set => _mirror.Set("bottom", value);
+        }
+
+        // ── Thickness 盒模型（padding/margin/border-width）──────────────
+        // Thickness 无 Unset 哨兵（裸四值 struct）；getter 未写过返 default（全 0）+ 不代表
+        // "显式 0"，仅表示"未写过"。如需判"是否写过"走 Geometry（C4）或自带 IsSet 查询。
+        public Thickness Padding
+        {
+            get => _mirror.Get<Thickness>("padding") ?? default;
+            set => _mirror.Set("padding", value);
+        }
+        public Thickness Margin
+        {
+            get => _mirror.Get<Thickness>("margin") ?? default;
+            set => _mirror.Set("margin", value);
+        }
+        public Thickness BorderWidth
+        {
+            get => _mirror.Get<Thickness>("border-width") ?? default;
+            set => _mirror.Set("border-width", value);
+        }
+        public Length Gap
+        {
+            get => _mirror.IsSet("gap") ? _mirror.Get<Length>("gap")!.Value : Length.Unset();
+            set => _mirror.Set("gap", value);
+        }
+
+        // ── flex（enum：getter 未写过返 Unset=0 变体）─────────────────────
+        public DisplayMode Display
+        {
+            get => _mirror.Get<DisplayMode>("display") ?? DisplayMode.Unset;
+            set => _mirror.Set("display", value);
+        }
+        public FlexDirection FlexDirection
+        {
+            get => _mirror.Get<FlexDirection>("flex-direction") ?? FlexDirection.Unset;
+            set => _mirror.Set("flex-direction", value);
+        }
+        public FlexWrap FlexWrap
+        {
+            get => _mirror.Get<FlexWrap>("flex-wrap") ?? FlexWrap.Unset;
+            set => _mirror.Set("flex-wrap", value);
+        }
+        public JustifyContent JustifyContent
+        {
+            get => _mirror.Get<JustifyContent>("justify-content") ?? JustifyContent.Unset;
+            set => _mirror.Set("justify-content", value);
+        }
+        public AlignItems AlignItems
+        {
+            get => _mirror.Get<AlignItems>("align-items") ?? AlignItems.Unset;
+            set => _mirror.Set("align-items", value);
+        }
+
+        // ── 溢出 / 定位（enum）──────────────────────────────────────────
+        public Overflow OverflowX
+        {
+            get => _mirror.Get<Overflow>("overflow-x") ?? Overflow.Unset;
+            set => _mirror.Set("overflow-x", value);
+        }
+        public Overflow OverflowY
+        {
+            get => _mirror.Get<Overflow>("overflow-y") ?? Overflow.Unset;
+            set => _mirror.Set("overflow-y", value);
+        }
+        public PositionMode Position
+        {
+            get => _mirror.Get<PositionMode>("position") ?? PositionMode.Unset;
+            set => _mirror.Set("position", value);
+        }
+
+        // ── 视觉（Color/float）──────────────────────────────────────────
+        public Color BackgroundColor
+        {
+            get => _mirror.Get<Color>("background-color") ?? Color.Unset;
+            set => _mirror.Set("background-color", value);
+        }
+        public Color Color
+        {
+            get => _mirror.Get<Color>("color") ?? Color.Unset;
+            set => _mirror.Set("color", value);
+        }
+        // Opacity 无 Unset 哨兵（裸 float）；getter 未写过返 default（0f）+ 不代表"显式 0"。
+        // 业务语义：CSS opacity 默认 1f，但本 getter 只反映 setter 写过的值（projection §2.3 严格语义）。
+        public float Opacity
+        {
+            get => _mirror.Get<float>("opacity") ?? default;
+            set => _mirror.Set("opacity", value);
+        }
+
+        // ── ponytail defer：core apply_decl / inline_bit 表未实现的 prop ──
+        // ZIndex（z-index）：core 未实现 z-index 通道（scene::node 的 order 走 base_style.order 路径）。
+        // Visibility（visibility）：core apply_decl 无 "visibility" 分支（display:none 是围栏闭合的隐藏语义）。
+        // SetVar/RemoveVar（--xxx）：core apply_decl 不处理 CSS 自定义属性；custom-property 通道待加。
+        // 保留 throw NE 防止静默丢：调用方期望 round-trip，prop-name 不在 inline_bit 表经 set_inline_override
+        // 会被 bit 检查前置静默忽略（ghost-state 防护）。补 core 支持后把这些 setter 接 _mirror 即可。
         public int ZIndex { get { throw NE(); } set { throw NE(); } }
-        public Color BackgroundColor { get { throw NE(); } set { throw NE(); } }
-        public Color Color { get { throw NE(); } set { throw NE(); } }
-        public float Opacity { get { throw NE(); } set { throw NE(); } }
         public Visibility Visibility { get { throw NE(); } set { throw NE(); } }
         public void SetVar(string n, Length v) { throw NE(); }
         public void SetVar(string n, Color v) { throw NE(); }
