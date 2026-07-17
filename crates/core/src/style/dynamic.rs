@@ -495,8 +495,10 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
             let n_ref = scene.get(node_id).expect("live node");
             let inline_set = n_ref.inline_set;
             if inline_set.0 != 0 {
-                let inline = n_ref.inline_override.clone();
-                apply_inline_override(&mut new_style, &inline, inline_set);
+                // 直传 &n_ref.inline_override（不可变借，new_style 是 local 不冲突；
+                // block 结束 n_ref 借释放，后续 set_map.insert/get_mut 不受影响）。
+                // 省 ResolvedStyle clone（含 Vec<TransitionSpec>/text_effects，每帧每 inline 节点）。
+                apply_inline_override(&mut new_style, &n_ref.inline_override, inline_set);
                 // 只把继承子集（bits 0-7）并进 set_map；非继承 bit 不影响 propagate。
                 // InheritedSet.0 是 u16，INH_* 全在 u16 范围内，安全截位。
                 inh.0 |= (inline_set.0 & INH_ALL_MASK) as u16;
