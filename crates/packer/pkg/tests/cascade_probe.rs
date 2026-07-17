@@ -151,3 +151,67 @@ fn probe_control_kinds_do_not_collapse() {
         "root still Container"
     );
 }
+
+#[test]
+fn probe_e2_fixture_color_cascade() {
+    let fixture_html = r#"<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>E2</title>
+<style>
+  .container { display: flex; flex-direction: column; }
+  .highlight { color: #ff0000; }
+  #root { width: 200px; height: 100px; }
+  .spaced { margin: 4px; }
+</style>
+</head><body>
+  <div id="root" class="container highlight">
+    <div id="child" class="spaced">
+      <span id="text">hello</span>
+      <button id="btn" class="spaced">click me</button>
+      <img id="img" src="res/dot.png" />
+    </div>
+  </div>
+</body></html>"#;
+
+    let (bytes, _refs) =
+        pack_components(&[("probe".to_string(), fixture_html.to_string())])
+            .expect("pack_components");
+
+    let mut stage = Stage::new((400.0, 300.0)).expect("Stage::new");
+    stage
+        .register_font(
+            "LXGWWenKai",
+            include_bytes!("../../../core/tests/fixtures/LXGWWenKai.ttf").to_vec(),
+            true,
+        )
+        .expect("register_font");
+    stage.load_package("p", &bytes).expect("load_package");
+    let stage_root = stage.create_root("div", "").expect("create_root");
+    let comp_root = stage.instantiate("p", "probe").expect("instantiate");
+    stage.append_child(stage_root, comp_root).expect("append_child");
+    stage.advance_time(0.0);
+    stage.tick_and_render();
+
+    // Root has class "highlight" → color should be red [1,0,0,1]
+    let root = stage.find_node_by_id("root").expect("root");
+    let cs = stage.get_node_computed_style(root).expect("computed");
+    assert!(
+        (cs.color[0] - 1.0).abs() < 0.01,
+        ".highlight{{color:#ff0000}} should set root color.R=1.0; got {:?}", cs.color
+    );
+    assert!(
+        cs.color[1] < 0.01 && cs.color[2] < 0.01,
+        "color should be pure red; got {:?}", cs.color
+    );
+
+    // Verify geometry from #root{width:200px;height:100px}
+    let lr = stage.get_node_layout_rect(root).expect("root rect");
+    assert!((lr.w - 200.0).abs() < 1.0, "#root width=200; got {}", lr.w);
+
+    // Child inherits red color
+    let child = stage.find_node_by_id("child").expect("child");
+    let child_cs = stage.get_node_computed_style(child).expect("child computed");
+    assert!(
+        (child_cs.color[0] - 1.0).abs() < 0.01,
+        "child should inherit red; got {:?}", child_cs.color
+    );
+}

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "output_dir": "../test-ws-out",
+  "packages": [
+    {
+      "name": "test",
+      "dirs": ["."],
+      "html": ["test.html"]
+    }
+  ],
+  "atlases": [
+    {
+      "name": "test-atlas",
+      "dirs": ["res"],
+      "max_size": 256,
+      "padding": 2
+    }
+  ],
+  "fonts": []
+}

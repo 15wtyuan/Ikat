@@ -37,6 +37,10 @@
 
   <ItemGroup>
     <None Include="..\..\..\unity\package\Plugins\LoomGUI\loomgui_ffi_c.dll" Link="loomgui_ffi_c.dll" CopyToOutputDirectory="PreserveNewest" />
+    <!-- E2 fixture pkg.bin for LoadPackage/Instantiate end-to-end tests (E3 acceptance gate) -->
+    <None Include="fixtures\test.pkg.bin" Link="fixtures\test.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
+    <!-- E2 fixture font for text layout (tick panics without a default font) -->
+    <None Include="fixtures\fonts\DejaVuSans.ttf" Link="fixtures\fonts\DejaVuSans.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
