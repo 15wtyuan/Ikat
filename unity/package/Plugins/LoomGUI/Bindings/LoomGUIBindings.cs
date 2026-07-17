@@ -297,6 +297,20 @@ namespace LoomGUI.Bindings
         internal static extern void loomgui_stage_get_node_visible(StageHandle* h, uint node_id, byte* @out);
 
         /// <summary>
+        ///  读节点语义类型。return code：0 = ok 且 `*out` = kind 判别值，非 0 = 节点不存在。
+        ///  不用 `-&gt; u8` + 0 哨兵：`NodeKind` 首变体 `Container` 判别值 = 0，会与「不存在」撞。
+        ///  `NodeKind` 是 `#[repr(u8)]`，`k as u8` 跨 FFI 稳定。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_kind", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_node_kind(StageHandle* h, uint node_id, byte* @out);
+
+        /// <summary>
+        ///  读节点 computed style 快照。return code：0 = ok 且 `*out` 填好，非 0 = 节点不存在。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_computed_style", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_node_computed_style(StageHandle* h, uint node_id, ComputedNodeStyleRepr* @out);
+
+        /// <summary>
         ///  拉脏页 page_idx 列表（写入 out，返实际数）。null 句柄 / null out → 返 0。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_font_atlas_dirty_pages", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -476,6 +490,30 @@ namespace LoomGUI.Bindings
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct StageHandle
     {
+    }
+
+    /// <summary>
+    ///  FFI 稳定快照（#[repr(C)] POD）。enum→u8（match 稳定化，不靠 enum 隐式 repr），
+    ///  Option&lt;[f32;4]&gt;→present flag + 数组。csbindgen 不生成 struct C# stub，C# 镜像 ④ 手写。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct ComputedNodeStyleRepr
+    {
+        public byte display_mode;
+        public byte flex_direction;
+        public byte overflow_x;
+        public byte overflow_y;
+        public fixed float color[4];
+        public byte bg_present;
+        public fixed float background_color[4];
+        public float opacity;
+        public byte border_present;
+        public fixed float border_color[4];
+        public float font_size;
+        public ushort font_weight;
+        public byte text_align;
+        public float line_height;
+        public float letter_spacing;
     }
 
 
