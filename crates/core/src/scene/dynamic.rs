@@ -274,8 +274,16 @@ pub fn set_style(scene: &mut Scene, node: NodeId, css: &str) -> Result<(), Strin
 /// 成功 apply 的 prop 对应 bit OR 进 `inline_set`。下帧 rematch 在动态规则之后应用，
 /// 故 inline 优先级最高（> 动态规则 > base_style）。node 不 live → Err。
 ///
-/// 复用 `apply_decl`（apply_css 同路径，不依赖 parse feature）。未识别 prop 静默跳过
-/// （apply_decl 返 false 不置 bit）。多次 set 同 prop 累加（bit 幂等 OR，值覆盖）。
+/// 复用 `apply_decl`（apply_css 同路径，不依赖 parse feature）。多次 set 同 prop 累加
+/// （bit 幂等 OR，值覆盖）。
+///
+/// **bit 检查前置（review I1 修复）：** 不在 `inline_bit` 表的 prop（transform/filter/
+/// border/padding-top/flex-grow/background-image/order/pointer-events/aspect-ratio 等
+/// 约 20 个——它们走别的运行时路径或不在 NodeStyle 表面）**完全不写** `inline_override`，
+/// 避免 ghost state（写字段但不置 bit → rematch `apply_inline_override` 不拷该字段 →
+/// override 静默丢失；若后续 set 同族 longhand 置 bit，还会读到写字段时的旧 ghost 值）。
+/// 语义上这些 prop 对便签层"不可表达"，等价于 apply_decl 返 false——不进 inline_override，
+/// 不污染字段。
 pub fn set_inline_override(scene: &mut Scene, node: NodeId, css: &str) -> Result<(), String> {
     let n = scene.get_mut(node).ok_or("node not live")?;
     for decl in css.split(';') {
@@ -285,8 +293,10 @@ pub fn set_inline_override(scene: &mut Scene, node: NodeId, css: &str) -> Result
         }
         if let Some((prop, val)) = decl.split_once(':') {
             let prop = prop.trim();
-            if apply_decl(&mut n.inline_override, prop, val.trim()) {
-                if let Some(bit) = inline_bit(prop) {
+            // bit 检查前置：只对 inline_bit 表内的 prop apply。表外 prop 跳过 apply_decl，
+            // 连字段都不写 inline_override，杜绝 ghost state。
+            if let Some(bit) = inline_bit(prop) {
+                if apply_decl(&mut n.inline_override, prop, val.trim()) {
                     n.inline_set.0 |= bit;
                 }
             }

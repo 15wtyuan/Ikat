@@ -1687,4 +1687,100 @@ mod tests {
             "leaf 跨级继承父 inline red"
         );
     }
+
+    // ── Spec-4a review I1：unsupported prop 不写 ghost state ──
+
+    #[test]
+    fn set_inline_override_ignores_unsupported_prop_no_ghost() {
+        // transform / padding-top 不在 inline_bit 表：完全不写 inline_override（无 ghost state）。
+        // 修复前：apply_decl 写 taffy_style.transform / padding.top 字段但不置 bit
+        // → 下帧 rematch apply_inline_override 不拷这些字段 → 静默丢失（ghost state）。
+        let (mut scene, root) = build_simple_tree();
+        crate::scene::dynamic::set_inline_override(
+            &mut scene,
+            root,
+            "transform: scale(2); padding-top: 10px",
+        )
+        .unwrap();
+        let n = scene.get(root).unwrap();
+        // inline_set 不含任何 bit（transform/padding-top 都没 bit）
+        assert_eq!(n.inline_set.0, 0, "unsupported prop 不置 bit");
+        // inline_override 字段也不被写（transform 仍默认 scale 1.0，padding 仍 0）
+        use taffy::style::LengthPercentage;
+        assert_eq!(
+            n.inline_override.taffy_style.padding.top,
+            LengthPercentage::Length(0.0),
+            "padding-top 不写 inline_override（无 ghost）"
+        );
+        // rematch 不 panic，且 style 不受这些 prop 影响
+        rematch_pseudo_classes(&mut scene);
+        let n = scene.get(root).unwrap();
+        assert_eq!(
+            n.style.taffy_style.padding.top,
+            LengthPercentage::Length(0.0),
+            "rematch 后 padding 仍为 0（unsupported prop 未生效）"
+        );
+        // 对照：set "width:100px"（支持）→ bit 置 + 生效
+        crate::scene::dynamic::set_inline_override(&mut scene, root, "width:100px").unwrap();
+        let bit_after = scene.get(root).unwrap().inline_set.0;
+        assert_ne!(bit_after, 0, "supported prop（width）置 bit");
+        assert_eq!(
+            bit_after & INLINE_WIDTH,
+            INLINE_WIDTH,
+            "INLINE_WIDTH bit 被置"
+        );
+    }
+
+    #[test]
+    fn set_inline_override_no_ghost_when_shorthand_then_longhand() {
+        // ghost-state 复现测：set "border:1px solid red"（border 不在 inline_bit 表）→
+        // 修复前：apply_decl 写 taffy_style.border + border_color=red 字段但不置 bit。
+        // 再 set "border-width:2px"（在表）→ 置 INLINE_BORDER_WIDTH bit。
+        // rematch 时 apply_inline_override 拷 inline.taffy_style.border=2px，但
+        // border_color 无 bit → 不拷 → style.border_color 用 base 值（None）。但
+        // inline_override.border_color 留 red ghost 值污染字段。
+        //
+        // 修复后：border 整步被跳过（不写字段），只有 border-width 写入；
+        // inline_override.border_color 保持默认 None，无 ghost。
+        let (mut scene, root) = build_simple_tree();
+        crate::scene::dynamic::set_inline_override(&mut scene, root, "border:1px solid red")
+            .unwrap();
+        // border 不在 inline_bit → 整步跳过，border_color 字段也不写
+        assert_eq!(
+            scene.get(root).unwrap().inline_set.0,
+            0,
+            "border shorthand 不置 bit"
+        );
+        assert_eq!(
+            scene.get(root).unwrap().inline_override.border_color,
+            None,
+            "border shorthand 不写 border_color 字段（无 ghost）"
+        );
+        // 再 set border-width（在表）
+        crate::scene::dynamic::set_inline_override(&mut scene, root, "border-width:2px").unwrap();
+        let n = scene.get(root).unwrap();
+        assert_ne!(
+            n.inline_set.0 & INLINE_BORDER_WIDTH,
+            0,
+            "border-width 置 bit"
+        );
+        // border_color 字段仍未被污染（默认 None，未因 border shorthand 的 red 残留）
+        assert_eq!(
+            n.inline_override.border_color, None,
+            "border_color 无 ghost red 残留"
+        );
+        // rematch：border 2px 生效（bit 置），border_color 仍 None（base 值）
+        rematch_pseudo_classes(&mut scene);
+        use taffy::style::LengthPercentage;
+        let s = &scene.get(root).unwrap().style;
+        assert_eq!(
+            s.taffy_style.border.top,
+            LengthPercentage::Length(2.0),
+            "border-width 2px inline 生效"
+        );
+        assert_eq!(
+            s.border_color, None,
+            "border_color 用 base 值（无 ghost red）"
+        );
+    }
 }
