@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using LoomGUI.Bindings;
 
 #pragma warning disable CS0169, CS0067, CS0649
 
@@ -13,11 +14,57 @@ namespace LoomGUI
     //           Geometry（只读/布局产物，读最近一次 solve 结果，滞后一帧）。
     // Style/Transform 是 class + 内部 owner 引用（投影层：写回经 owner 标脏到 NodeId）；
     // Geometry 是 readonly struct 快照（从每帧 blob 填充）。
-    public abstract class Node
+    public abstract unsafe class Node
     {
-        public UIContext Context { get { throw NE(); } }
-        public string Id { get { throw NE(); } }
-        public Container Parent { get { throw NE(); } }   // Root.Parent == null
+        // ── 投影层字段（internal）：owner 身份 + 生命周期标志 ─────────────
+        // _id = Rust NodeId 的 u32 投影（slotmap key）；所有 FFI 调用经此转回 Rust 节点。
+        // _ctx = 持有 stage handle + NodeRegistry 的 UIContext；本 Node 入 _ctx._registry 缓存。
+        // _disposed = Dispose 后置 true；后续公共读操作抛 ObjectDisposedException。
+        internal readonly uint _id;
+        internal readonly UIContext _ctx;
+        internal bool _disposed;
+
+        // 投影层内部 ctor：经 NodeFactory 调（同 assembly 子类 base 链调）。公共 API 无构造路径
+        // （业务从 Create<T> / Instantiate 拿现成 Node）。
+        internal Node(UIContext ctx, uint id)
+        {
+            _ctx = ctx;
+            _id = id;
+        }
+
+        public UIContext Context
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return _ctx;
+            }
+        }
+
+        // Ponytail：暂无 FFI 读节点 id 属性（find_node_by_id 是反向：id 字符串 → NodeId）。
+        // 返 numeric NodeId 作调试可读占位；待 get_id_attr FFI 加上后替换为真 id 属性读取。
+        public string Id
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return _id.ToString();
+            }
+        }
+
+        // Root.Parent == null（FFI node_parent 返 sentinel 0xFFFF_FFFF）。
+        // 非根：registry.GetOrCreate(parent_id) → Container（围栏限定只容器型节点可为父）。
+        public Container Parent
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                uint parentId = Native.loomgui_node_parent(h, _id);
+                if (parentId == RootSentinel) return null;
+                return (Container)_ctx._registry.GetOrCreate(parentId);
+            }
+        }
 
         public NodeStyle Style { get { throw NE(); } }
         public NodeTransform Transform { get { throw NE(); } }
@@ -27,9 +74,41 @@ namespace LoomGUI
         public bool Focusable { get { throw NE(); } set { throw NE(); } }   // 运行时改可获焦性（对齐 fgui focusable）
         public ClassList Classes { get { throw NE(); } }
 
-        public bool IsDisposed { get { throw NE(); } }
-        public void RemoveFromParent() { throw NE(); }   // 可重挂，不清订阅
-        public void Dispose() { throw NE(); }            // 递归永久销毁，清订阅
+        public bool IsDisposed => _disposed;
+
+        /// <summary>
+        /// 摘父：从父节点 children 移除，自身仍 live 可重挂。不清订阅、不 Dispose。
+        /// 根节点（无父）no-op。
+        /// </summary>
+        public void RemoveFromParent()
+        {
+            ThrowIfDisposed();
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            uint parentId = Native.loomgui_node_parent(h, _id);
+            if (parentId == RootSentinel) return;   // 根：无父可摘
+            Native.loomgui_stage_remove_child(h, parentId, _id);
+        }
+
+        /// <summary>
+        /// 永久销毁：递归清子 + 调 Rust remove_node + evict 自身 + 标 _disposed。
+        /// 后续公共读操作抛 ObjectDisposedException。幂等（二次调 no-op）。
+        /// </summary>
+        public void Dispose()
+        {
+            if (_disposed) return;
+
+            // 先递归 evict C# 缓存中的后代（标 _disposed + 移出 registry），避免悬挂引用。
+            // 走 Rust FFI 遍历子树——后代的 C# wrapper 可能尚未 GetOrCreate 过，跳过即可。
+            DisposeDescendantsInRegistry(_id);
+
+            // Rust 侧递归清子 + slotmap remove + anim/scroll/tween 联动（lib.rs:1230）。
+            // 调用后 NodeId 失效（gen++）；后续该 id 的 FFI 调用是 no-op。
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_remove_node(h, _id);
+
+            _ctx._registry.Remove(_id);
+            _disposed = true;
+        }
 
         public T Get<T>(string id) where T : Node { throw NE(); }   // 作用域内查找，未找到抛 UIContractException
         public bool TryGet<T>(string id, out T node) where T : Node { throw NE(); }
@@ -43,6 +122,55 @@ namespace LoomGUI
 
         public IDisposable OnUpdate(Action<float> cb) { throw NE(); }   // 逻辑驱动每帧更新钩子（返回句柄，Dispose 撤销）
         public EventRegistration On<T>(Action<T> handler, bool useCapture = false, bool once = false) where T : IRouteEvent { throw NE(); }
+
+        // ── helpers ─────────────────────────────────────────────────────
+
+        // node_parent 哨兵：根 / 越界 / 无 scene 均返 0xFFFF_FFFF（lib.rs:429）。
+        internal const uint RootSentinel = 0xFFFF_FFFFu;
+
+        /// <summary>
+        /// Dispose 后访问抛 ObjectDisposedException。所有公共读操作入口都先调本方法。
+        /// 异常消息用具体子类名（GetType().Name），帮助定位是哪种节点被误用。
+        /// </summary>
+        internal void ThrowIfDisposed()
+        {
+            if (_disposed) throw new ObjectDisposedException(GetType().Name);
+        }
+
+        /// <summary>
+        /// 经 FFI 递归遍历 Rust 子树，对每个后代 NodeId：若 C# 侧有缓存 wrapper 则标 _disposed
+        /// + 从 registry 移除。单次 remove_node（调用方 Dispose 末尾调）清 Rust 侧整棵子树；
+        /// 本方法只维护 C# 缓存一致性，不调 remove_node per node。
+        /// </summary>
+        private void DisposeDescendantsInRegistry(uint subtreeRootId)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+
+            // Snapshot 直系子（Rust 侧查询；下面的递归会改 Rust 树结构，不能边遍历边改）。
+            int count = Native.loomgui_stage_get_child_count(h, subtreeRootId);
+            if (count <= 0) return;
+            uint[] buf = new uint[count];
+            int written;
+            fixed (uint* bp = buf)
+            {
+                written = Native.loomgui_stage_get_children(h, subtreeRootId, bp, (nuint)buf.Length);
+            }
+            // written < 0 = 节点刚被并发移除（理论单线程不达）；防御性早退防读越界。
+            if (written < 0) return;
+            if (written > buf.Length) written = buf.Length;
+
+            for (int i = 0; i < written; i++)
+            {
+                uint childId = buf[i];
+                // 深度优先：先清孙，再清子（清子后该 childId 在 Rust 侧可能已失效，但仍可读 cache）。
+                DisposeDescendantsInRegistry(childId);
+                if (_ctx._registry.TryGet(childId, out var cached))
+                {
+                    cached._disposed = true;
+                    _ctx._registry.Remove(childId);
+                }
+            }
+        }
 
         static NotImplementedException NE() => new NotImplementedException();
     }
@@ -112,6 +240,8 @@ namespace LoomGUI
     // ── Container 与树操作 ──────────────────────────────────────────
     public class Container : Node
     {
+        internal Container(UIContext ctx, uint id) : base(ctx, id) { }
+
         public int ChildCount { get { throw NE(); } }
         public IReadOnlyList<Node> Children { get { throw NE(); } }
         public string TextContent { get { throw NE(); } set { throw NE(); } }   // DOM 语义：读=拼接后代文字；写=清子节点换单文本
@@ -130,32 +260,57 @@ namespace LoomGUI
     }
 
     // AbsolutePanel：自身 relative，AddChild 自动施加 absolute 到子节点。API 与 Container 一致。
-    public sealed class AbsolutePanel : Container { }
+    public sealed class AbsolutePanel : Container
+    {
+        internal AbsolutePanel(UIContext ctx, uint id) : base(ctx, id) { }
+    }
 
     // 注：无 Panel 类型。作用域是运行时标记（IsScopeRoot），非类型；Instantiate 返回模板根真实类型。
 
     // ── 叶子：内容/绘制 ──
     public class TextNode : Node
     {
+        internal TextNode(UIContext ctx, uint id) : base(ctx, id) { }
+
         public string Text { get { throw NE(); } set { throw NE(); } }   // 对应 DOM Node.textContent / CharacterData.data
         static NotImplementedException NE() => new NotImplementedException();
     }
     public class Image : Node
     {
+        internal Image(UIContext ctx, uint id) : base(ctx, id) { }
+
         public string Src { get { throw NE(); } set { throw NE(); } }   // 字符串 key（包内 or 运行时注册）；动态纹理注册归引擎后端
         static NotImplementedException NE() => new NotImplementedException();
     }
 
     // ── 容器类文本/标签（TextContent 走 Container 继承）──
-    public class TextBlock : Container { }      // p
-    public class TextElement : Container { }    // span/strong/em
-    public class Label : Container { }          // 退化为语义容器：不加 For、不自动聚焦（点标签聚焦用 On<ClickEvent>+Focus() 积木）
-    public class Canvas : Container { }         // 引擎渲染挂载点，无绘图 API；集成层 Query<Canvas>() + 读 Geometry.WorldRect 摆摄像机
-    public class ListItem : Container { public int Index { get { throw NE(); } } static NotImplementedException NE() => new NotImplementedException(); }
+    public class TextBlock : Container
+    {
+        internal TextBlock(UIContext ctx, uint id) : base(ctx, id) { }
+    }      // p
+    public class TextElement : Container
+    {
+        internal TextElement(UIContext ctx, uint id) : base(ctx, id) { }
+    }    // span/strong/em
+    public class Label : Container
+    {
+        internal Label(UIContext ctx, uint id) : base(ctx, id) { }
+    }          // 退化为语义容器：不加 For、不自动聚焦（点标签聚焦用 On<ClickEvent>+Focus() 积木）
+    public class Canvas : Container
+    {
+        internal Canvas(UIContext ctx, uint id) : base(ctx, id) { }
+    }         // 引擎渲染挂载点，无绘图 API；集成层 Query<Canvas>() + 读 Geometry.WorldRect 摆摄像机
+    public class ListItem : Container
+    {
+        internal ListItem(UIContext ctx, uint id) : base(ctx, id) { }
+        public int Index { get { throw NE(); } } static NotImplementedException NE() => new NotImplementedException();
+    }
 
     // ── 控件（叶子：私有内部结构）──
     public class Button : Container
     {
+        internal Button(UIContext ctx, uint id) : base(ctx, id) { }
+
         public bool Disabled { get { throw NE(); } set { throw NE(); } }
         // 文本走 Container.TextContent（删原 TextContent 特例）
         public event Action Clicked;
@@ -164,6 +319,8 @@ namespace LoomGUI
 
     public class Link : Container
     {
+        internal Link(UIContext ctx, uint id) : base(ctx, id) { }
+
         public string Href { get { throw NE(); } set { throw NE(); } }   // 仅存字符串，框架不自动导航
         public event Action Activated;
         static NotImplementedException NE() => new NotImplementedException();
@@ -171,6 +328,8 @@ namespace LoomGUI
 
     public class TextField : Node
     {
+        internal TextField(UIContext ctx, uint id) : base(ctx, id) { }
+
         public string Value { get { throw NE(); } set { throw NE(); } }
         public string Placeholder { get { throw NE(); } set { throw NE(); } }
         public TextSelection Selection { get { throw NE(); } set { throw NE(); } }   // 单行也支持选区/光标控制
@@ -183,6 +342,8 @@ namespace LoomGUI
 
     public class NumberField : Node
     {
+        internal NumberField(UIContext ctx, uint id) : base(ctx, id) { }
+
         public float Value { get { throw NE(); } set { throw NE(); } }
         public float? Min { get { throw NE(); } set { throw NE(); } }
         public float? Max { get { throw NE(); } set { throw NE(); } }
@@ -194,6 +355,8 @@ namespace LoomGUI
 
     public class Slider : Node
     {
+        internal Slider(UIContext ctx, uint id) : base(ctx, id) { }
+
         public float Value { get { throw NE(); } set { throw NE(); } }
         public float Min { get { throw NE(); } set { throw NE(); } }
         public float Max { get { throw NE(); } set { throw NE(); } }
@@ -206,6 +369,8 @@ namespace LoomGUI
 
     public class Toggle : Node
     {
+        internal Toggle(UIContext ctx, uint id) : base(ctx, id) { }
+
         public bool IsChecked { get { throw NE(); } set { throw NE(); } }
         public bool Disabled { get { throw NE(); } set { throw NE(); } }
         public event Action<ValueChangedEvent<bool>> CheckedChanged;
@@ -214,6 +379,8 @@ namespace LoomGUI
 
     public class RadioButton : Node
     {
+        internal RadioButton(UIContext ctx, uint id) : base(ctx, id) { }
+
         public bool IsChecked { get { throw NE(); } set { throw NE(); } }
         public string Name { get { throw NE(); } }   // 只读：结构性，决定分组语义
         public bool Disabled { get { throw NE(); } set { throw NE(); } }
@@ -223,6 +390,8 @@ namespace LoomGUI
 
     public class TextArea : Node
     {
+        internal TextArea(UIContext ctx, uint id) : base(ctx, id) { }
+
         public string Value { get { throw NE(); } set { throw NE(); } }
         public string Placeholder { get { throw NE(); } set { throw NE(); } }
         public TextSelection Selection { get { throw NE(); } set { throw NE(); } }
@@ -234,6 +403,8 @@ namespace LoomGUI
 
     public class Dropdown : Node
     {
+        internal Dropdown(UIContext ctx, uint id) : base(ctx, id) { }
+
         public int SelectedIndex { get { throw NE(); } set { throw NE(); } }
         public string SelectedValue { get { throw NE(); } set { throw NE(); } }
         public bool Disabled { get { throw NE(); } set { throw NE(); } }
@@ -243,6 +414,8 @@ namespace LoomGUI
 
     public class ProgressBar : Node
     {
+        internal ProgressBar(UIContext ctx, uint id) : base(ctx, id) { }
+
         public float Value { get { throw NE(); } set { throw NE(); } }
         public float Max { get { throw NE(); } set { throw NE(); } }   // 0 基底，照 <progress> 标准，无 Min
         public bool IsIndeterminate { get { throw NE(); } set { throw NE(); } }
@@ -254,6 +427,8 @@ namespace LoomGUI
     // 静态/数据驱动强制互斥（越界抛 UIContractException）。
     public class ListView : Container
     {
+        internal ListView(UIContext ctx, uint id) : base(ctx, id) { }
+
         public int ItemCount { get { throw NE(); } set { throw NE(); } }
         public UITemplate ItemTemplate { get { throw NE(); } set { throw NE(); } }
         public Func<int, UITemplate> TemplateSelector { get { throw NE(); } set { throw NE(); } }
@@ -323,9 +498,17 @@ namespace LoomGUI
         // 投影层（C1+）通过它转调 loomgui_stage_* FFI；公共 API 表面看不到本字段。
         internal IntPtr _stage;
 
+        // C1：NodeId → typed Node 的强引用身份缓存（投影层 §2.4）。
+        // NodeFactory 造节点入缓存；Node.Dispose 时 evict。公共 API 不见本字段。
+        internal readonly NodeRegistry _registry;
+
         // B3：headless harness 工厂构造。public API 无构造（业务从集成层拿现成 instance）。
-        // 只设 _stage；NodeRegistry（C1）等其余字段在对应 task 里补加。
-        internal UIContext(IntPtr stage) { _stage = stage; }
+        // 建 NodeRegistry 持有自身反向引用（registry 转调 FFI 时需 stage handle）。
+        internal UIContext(IntPtr stage)
+        {
+            _stage = stage;
+            _registry = new NodeRegistry(this);
+        }
 
         public Container Root { get { throw NE(); } }
         public Node FocusedNode { get { throw NE(); } }
