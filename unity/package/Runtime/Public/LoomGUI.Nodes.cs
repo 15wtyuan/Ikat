@@ -319,6 +319,14 @@ namespace LoomGUI
     // UIContext 是「获取而非创建」：无公共构造，由引擎集成层创建/驱动。业务程序员从集成层获取。
     public sealed class UIContext
     {
+        // B3：headless harness / 引擎集成层建 UIContext 时持有的 Stage 句柄（raw FFI handle）。
+        // 投影层（C1+）通过它转调 loomgui_stage_* FFI；公共 API 表面看不到本字段。
+        internal IntPtr _stage;
+
+        // B3：headless harness 工厂构造。public API 无构造（业务从集成层拿现成 instance）。
+        // 只设 _stage；NodeRegistry（C1）等其余字段在对应 task 里补加。
+        internal UIContext(IntPtr stage) { _stage = stage; }
+
         public Container Root { get { throw NE(); } }
         public Node FocusedNode { get { throw NE(); } }
         public StyleSheet StyleSheet { get { throw NE(); } }

@@ -9,11 +9,18 @@
   </PropertyGroup>
 
   <!--
-    B1 范围：纯 managed 测试。直接 Compile Include Public/*.cs + Projection/*.cs，
-    编进测试程序集（不走 ProjectReference），所以 internal CssValueConvert 可见。
-    不含 dll / Bindings / Stubs（B3 会在此 csproj 上扩展加 native P/Invoke）。
+    B3 范围：在 B1 纯 managed 基础上扩展 native P/Invoke。直接 Compile Include
+    Public/*.cs + Projection/*.cs + Bindings/*.cs 编进测试程序集（不走 ProjectReference），
+    所以 internal CssValueConvert / Native / StageHandle 等对 Harness 可见。
+    Native dll（loomgui_ffi_c.dll）随测试拷到输出目录，P/Invoke 才加载得到
+    （.NET 默认从 base dir 探 native library；CopyToOutputDirectory 把它放那）。
     PackageReference 版本对齐 tests/dotnet/LoomGUI.Tests.Core.csproj（不自己造版本号）。
+    AllowUnsafeBlocks：Bindings 是 csbindgen 生成的 unsafe P/Invoke + 指针类型。
   -->
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
@@ -23,6 +30,13 @@
   <ItemGroup>
     <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.*.cs" Link="Public\%(Filename)%(Extension)" />
     <Compile Include="..\..\..\unity\package\Runtime\Projection\*.cs" Link="Projection\%(Filename)%(Extension)" />
+    <!-- csbindgen P/Invoke 声明（Native）+ 手补 #[repr(C)] 镜像 struct（PointerEvent/KeyEvent/WheelEvent）。
+         LoomGUIBindings.cs 引用后三者作 *PointerEvent 等参数类型，必须一并编进同一程序集。 -->
+    <Compile Include="..\..\..\unity\package\Plugins\LoomGUI\Bindings\*.cs" Link="Bindings\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\..\unity\package\Plugins\LoomGUI\loomgui_ffi_c.dll" Link="loomgui_ffi_c.dll" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
