@@ -333,6 +333,35 @@ pub fn get_children(scene: &Scene, node: NodeId) -> Option<Vec<NodeId>> {
     scene.get(node).map(|n| n.children.clone())
 }
 
+/// 加 class。重复名不重复 push。node 不 live → Err。标 dirty_mesh 触发下帧 rematch。
+///
+/// 给 C# 投影层 ClassList.Add 铺路（class 变化影响 cascade，须触发 rematch）。
+pub fn add_class(scene: &mut Scene, node: NodeId, name: &str) -> Result<(), String> {
+    let n = scene.get_mut(node).ok_or("node not live")?;
+    if !n.classes.iter().any(|c| c == name) {
+        n.classes.push(name.to_string());
+    }
+    n.dirty_mesh = true;
+    Ok(())
+}
+
+/// 移除 class（全部匹配）。node 不 live → Err。标 dirty_mesh。
+///
+/// 给 C# 投影层 ClassList.Remove 铺路（class 变化影响 cascade，须触发 rematch）。
+pub fn remove_class(scene: &mut Scene, node: NodeId, name: &str) -> Result<(), String> {
+    let n = scene.get_mut(node).ok_or("node not live")?;
+    n.classes.retain(|c| c != name);
+    n.dirty_mesh = true;
+    Ok(())
+}
+
+/// 查询 class 是否存在。node 不 live → None。
+///
+/// 给 C# 投影层 ClassList.Contains 铺路（只读查询，不改 dirty）。
+pub fn has_class(scene: &Scene, node: NodeId, name: &str) -> Option<bool> {
+    scene.get(node).map(|n| n.classes.iter().any(|c| c == name))
+}
+
 /// 设渲染复用键（虚拟列表 slot 用）。node 无效 → no-op（不 panic）。
 pub fn set_reuse_key(scene: &mut Scene, node: NodeId, key: u32) {
     if let Some(n) = scene.get_mut(node) {
@@ -472,6 +501,38 @@ mod tests {
         // 不存在节点 → None（slotmap 查不到）
         assert_eq!(get_child_count(&scene, NodeId(0xFFFF_FFFF)), None);
         assert_eq!(get_children(&scene, NodeId(0xFFFF_FFFF)), None);
+    }
+
+    // ── Spec-4a A5：add_class / remove_class / has_class（操作 Node.classes）──
+
+    #[test]
+    fn class_ops_mutate_and_flag_dirty() {
+        // 用现有 build_3level() helper（scene/dynamic.rs tests，root→child→grand）
+        let (mut scene, root, _child, _grand) = build_3level();
+        add_class(&mut scene, root, "active").unwrap();
+        assert!(has_class(&scene, root, "active").unwrap());
+        assert!(
+            scene.get(root).unwrap().dirty_mesh,
+            "add 标 dirty 触发 rematch"
+        );
+        remove_class(&mut scene, root, "active").unwrap();
+        assert!(!has_class(&scene, root, "active").unwrap());
+        // 重复 add 不重复 push
+        add_class(&mut scene, root, "x").unwrap();
+        add_class(&mut scene, root, "x").unwrap();
+        assert_eq!(
+            scene
+                .get(root)
+                .unwrap()
+                .classes
+                .iter()
+                .filter(|c| **c == "x")
+                .count(),
+            1
+        );
+        // 不存在节点 → Err / None
+        assert!(add_class(&mut scene, NodeId(0xFFFF_FFFF), "y").is_err());
+        assert_eq!(has_class(&scene, NodeId(0xFFFF_FFFF), "y"), None);
     }
 
     #[test]
