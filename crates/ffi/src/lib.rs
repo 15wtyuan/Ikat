@@ -20,6 +20,8 @@ pub mod blob;
 use loomgui_core::input::{EventRecord, KeyEvent, PointerEvent};
 use loomgui_core::scene::NodeId;
 use loomgui_core::stage::Stage;
+use loomgui_core::style::computed::ComputedNodeStyle;
+use loomgui_core::style::resolved::TextAlign;
 use loomgui_core::transform;
 use std::ffi::CString;
 
@@ -788,6 +790,116 @@ pub extern "C" fn loomgui_stage_get_node_visible(
         unsafe {
             *out = if vis { 1 } else { 0 };
         }
+    }
+}
+
+/// FFI 稳定快照（#[repr(C)] POD）。enum→u8（match 稳定化，不靠 enum 隐式 repr），
+/// Option<[f32;4]>→present flag + 数组。csbindgen 不生成 struct C# stub，C# 镜像 ④ 手写。
+#[repr(C)]
+#[derive(Default)]
+pub struct ComputedNodeStyleRepr {
+    pub display_mode: u8,
+    pub flex_direction: u8,
+    pub overflow_x: u8,
+    pub overflow_y: u8,
+    pub color: [f32; 4],
+    pub bg_present: u8,
+    pub background_color: [f32; 4],
+    pub opacity: f32,
+    pub border_present: u8,
+    pub border_color: [f32; 4],
+    pub font_size: f32,
+    pub font_weight: u16,
+    pub text_align: u8,
+    pub line_height: f32,
+    pub letter_spacing: f32,
+}
+
+impl ComputedNodeStyleRepr {
+    /// 从 typed `ComputedNodeStyle` 投影 FFI 稳定布局。
+    /// `DisplayMode`/`OverflowMode` 是 `#[repr(u8)]` 可直接 `as u8`；`taffy::FlexDirection`
+    /// （外部类型，无 repr 保证）与 `TextAlign`（无 repr）用 `match` 显式映射，不依赖判别值。
+    fn from_computed(c: &ComputedNodeStyle) -> Self {
+        let (bg_present, background_color) = match c.background_color {
+            Some(col) => (1, col),
+            None => (0, [0.0; 4]),
+        };
+        let (border_present, border_color) = match c.border_color {
+            Some(col) => (1, col),
+            None => (0, [0.0; 4]),
+        };
+        Self {
+            display_mode: c.display_mode as u8,
+            flex_direction: match c.flex_direction {
+                taffy::FlexDirection::Row => 0,
+                taffy::FlexDirection::Column => 1,
+                taffy::FlexDirection::RowReverse => 2,
+                taffy::FlexDirection::ColumnReverse => 3,
+            },
+            overflow_x: c.overflow_x as u8,
+            overflow_y: c.overflow_y as u8,
+            color: c.color,
+            bg_present,
+            background_color,
+            opacity: c.opacity,
+            border_present,
+            border_color,
+            font_size: c.font_size,
+            font_weight: c.font_weight,
+            text_align: match c.text_align {
+                TextAlign::Left => 0,
+                TextAlign::Center => 1,
+                TextAlign::Right => 2,
+            },
+            line_height: c.line_height,
+            letter_spacing: c.letter_spacing,
+        }
+    }
+}
+
+/// 读节点语义类型。return code：0 = ok 且 `*out` = kind 判别值，非 0 = 节点不存在。
+/// 不用 `-> u8` + 0 哨兵：`NodeKind` 首变体 `Container` 判别值 = 0，会与「不存在」撞。
+/// `NodeKind` 是 `#[repr(u8)]`，`k as u8` 跨 FFI 稳定。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_kind(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+) -> i32 {
+    if h.is_null() {
+        return 1;
+    }
+    let sh = unsafe { &*h };
+    match sh.stage.get_node_kind(NodeId(node_id)) {
+        Some(k) => {
+            if !out.is_null() {
+                unsafe { *out = k as u8 };
+            }
+            0
+        }
+        None => 1,
+    }
+}
+
+/// 读节点 computed style 快照。return code：0 = ok 且 `*out` 填好，非 0 = 节点不存在。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_computed_style(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut ComputedNodeStyleRepr,
+) -> i32 {
+    if h.is_null() {
+        return 1;
+    }
+    let sh = unsafe { &*h };
+    match sh.stage.get_node_computed_style(NodeId(node_id)) {
+        Some(c) => {
+            if !out.is_null() {
+                unsafe { *out = ComputedNodeStyleRepr::from_computed(&c) };
+            }
+            0
+        }
+        None => 1,
     }
 }
 
