@@ -153,4 +153,13 @@ namespace LoomGUI
         public UIContractException(string message) : base(message) { }
         public UIContractException(string message, Exception inner) : base(message, inner) { }
     }
+
+    // UIPackageException = 包操作失败（LoadPackage 内部异常：pkg.bin 格式错 / 重复 pkg id /
+    // 资源缺失 等）。与 UIContractException 互补：UIContractException 是调用方写错了
+    // （Create<T> 非白名单 / 同名重复 load），UIPackageException 是包内部错了。
+    public class UIPackageException : Exception
+    {
+        public UIPackageException(string message) : base(message) { }
+        public UIPackageException(string message, Exception inner) : base(message, inner) { }
+    }
 }

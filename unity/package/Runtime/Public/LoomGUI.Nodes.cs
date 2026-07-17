@@ -1543,16 +1543,51 @@ namespace LoomGUI
     }
 
     // ── 模板 ────────────────────────────────────────────────────────
-    public sealed class UITemplate
+    public sealed unsafe class UITemplate
     {
-        public string Name { get { throw NE(); } }
-        public Container Instantiate() { throw NE(); }   // 返回模板根真实类型（围栏限定模板根为容器类）
-        static NotImplementedException NE() => new NotImplementedException();
+        // 投影层内部字段：持有上下文 + 包名 + 模板路径。
+        // Name 返 _path（模板路径即名称）；Instantiate 经 _ctx FFI instantiate(_pkg, _path)。
+        internal readonly UIContext _ctx;
+        internal readonly string _pkg;
+        internal readonly string _path;
+
+        internal UITemplate(UIContext ctx, string pkg, string path)
+        {
+            _ctx = ctx; _pkg = pkg; _path = path;
+        }
+
+        public string Name => _path;
+        public Container Instantiate()
+        {
+            if (_ctx._stage == IntPtr.Zero)
+                throw new ObjectDisposedException(nameof(UIContext));
+            return DoInstantiate(_ctx, _pkg, _path);
+        }
+
+        /// <summary>
+        /// 调 instantiate FFI → 根 NodeId → registry.GetOrCreate → typed Container。
+        /// UIPackage.Instantiate 和 UITemplate.Instantiate 共享同一实现。
+        /// </summary>
+        internal static Container DoInstantiate(UIContext ctx, string pkg, string path)
+        {
+            StageHandle* h = (StageHandle*)ctx._stage.ToPointer();
+            byte[] pb = Encoding.UTF8.GetBytes(pkg);
+            byte[] cb = Encoding.UTF8.GetBytes(path);
+            uint rootId;
+            fixed (byte* pp = pb)
+            fixed (byte* cp = cb)
+                rootId = Native.loomgui_stage_instantiate(h, pp, (nuint)pb.Length, cp, (nuint)cb.Length);
+            if (rootId == Node.RootSentinel)
+                throw new UIPackageException(
+                    $"instantiate failed: pkg='{pkg}' comp='{path}' " +
+                    "(package not loaded / component not found / no scene created)");
+            return (Container)ctx._registry.GetOrCreate(rootId);
+        }
     }
 
     // ── 顶层上下文 ──────────────────────────────────────────────────
     // UIContext 是「获取而非创建」：无公共构造，由引擎集成层创建/驱动。业务程序员从集成层获取。
-    public sealed class UIContext
+    public sealed unsafe class UIContext
     {
         // B3：headless harness / 引擎集成层建 UIContext 时持有的 Stage 句柄（raw FFI handle）。
         // 投影层（C1+）通过它转调 loomgui_stage_* FFI；公共 API 表面看不到本字段。
@@ -1570,6 +1605,19 @@ namespace LoomGUI
         // 翻译 borrow_events buffer → EventBus.Dispatch。公共 API 不见本字段。
         internal readonly EventDemuxer _eventDemuxer;
 
+        // E1：create_root FFI 返回的根 NodeId。由 harness/集成层调 create_root 后写入本字段；
+        // Root getter 据此返回 typed Container。无公共 FFI 直接读 roots[0]——Rust 侧 roots Vec
+        // 未暴露 getter，故投影层需自己跟踪。
+        internal uint _rootId = Node.RootSentinel;
+
+        // E1：已加载包名集合（load_package 时加入，unload_package 时移除）。
+        // 用于同名重复检测（公共契约：LoadPackage 同名重复抛 UIContractException）。
+        internal readonly HashSet<string> _loadedPackages = new HashSet<string>();
+
+        // E1：lazy 创建的 StyleSheet 实例。同 Node.Style/Node.Transform 模式——未访问过 = null，
+        // 首次访问构造并挂本 context。StyleSheet.Add/Clear 方法体本身仍 throw NE（core 未接通）。
+        StyleSheet _styleSheet;
+
         // B3：headless harness 工厂构造。public API 无构造（业务从集成层拿现成 instance）。
         // 建 NodeRegistry 持有自身反向引用（registry 转调 FFI 时需 stage handle）。
         // 建 EventBus + EventDemuxer 同持自身反向引用。
@@ -1581,24 +1629,248 @@ namespace LoomGUI
             _eventDemuxer = new EventDemuxer(this);
         }
 
-        public Container Root { get { throw NE(); } }
-        public Node FocusedNode { get { throw NE(); } }
-        public StyleSheet StyleSheet { get { throw NE(); } }
-        public UIPackage LoadPackage(string name, byte[] bytes) { throw NE(); }   // 同名重复抛 UIContractException；失败抛 UIPackageException
-        public void UnloadPackage(string name) { throw NE(); }   // 同 Unity prefab：删模板，已实例化活节点独立副本不受影响
-        public T Create<T>() where T : Node { throw NE(); }   // 白名单：Container/AbsolutePanel/TextNode/Image；控件+作用域根只能 Instantiate；非法 T 抛 UIContractException
-        public void CallLater(float d, Action cb) { throw NE(); }
-        public void CallNextFrame(Action cb) { throw NE(); }
-        public bool IsPointerOnUI { get { throw NE(); } }
-        public Node Pick(Vector2 globalPoint) { throw NE(); }   // 命中测试：返回该点最上层可命中节点（drop 逻辑靠它 + 积木）
+        /// <summary>
+        /// 场景根节点（Container）。create_root FFI 建根后由 harness/集成层写入 _rootId；
+        /// 若 _rootId 尚未设置（根未建），getter 读不到合法值——_rootId 仍是 RootSentinel
+        /// （0xFFFF_FFFF），registry.GetOrCreate 会产无意义的 wrapper。调用方需确保 create_root
+        /// 先于 Root 访问（集成层保证此顺序）。
+        /// </summary>
+        public Container Root
+        {
+            get
+            {
+                if (_rootId == Node.RootSentinel)
+                    throw new InvalidOperationException(
+                        "Root accessed before create_root (harness/integration layer must create_root first)");
+                return (Container)_registry.GetOrCreate(_rootId);
+            }
+        }
+
+        /// <summary>
+        /// 当前焦点节点。FFI loomgui_stage_focused_node 返 NodeId（无焦点 → sentinel）。
+        /// 返 null 当无焦点（DOM document.activeElement 为 body 的习惯：LoomGUI 返 null 而非抛异常）。
+        /// </summary>
+        public Node FocusedNode
+        {
+            get
+            {
+                if (_stage == IntPtr.Zero) return null;
+                StageHandle* h = (StageHandle*)_stage.ToPointer();
+                uint id = Native.loomgui_stage_focused_node(h);
+                if (id == Node.RootSentinel) return null;
+                return _registry.GetOrCreate(id);
+            }
+        }
+
+        /// <summary>
+        /// 样式逃生舱（动态 CSS 规则注入）。lazy 造单一实例：同一 UIContext 多次访问返同一 StyleSheet。
+        /// StyleSheet.Add(string css) 返回 IDisposable 句柄，撤销靠 Dispose（不靠原文匹配）。
+        /// StyleSheet.Add/Clear 方法体当前 throw NE——core 未接通动态 CSS 注入通道（ponytail defer）。
+        /// </summary>
+        public StyleSheet StyleSheet
+        {
+            get
+            {
+                _styleSheet ??= new StyleSheet();
+                return _styleSheet;
+            }
+        }
+
+        /// <summary>
+        /// 装载包（pkg.bin bytes → 注册模板到 Rust stage）。同名重复抛 UIContractException；
+        /// 内部失败（格式错 / 重复 pkg id / 资源缺失）抛 UIPackageException。
+        /// null/空 name 直接抛（与 DOM getElementById 习惯一致：空 id 是调用方写错）。
+        /// </summary>
+        public UIPackage LoadPackage(string name, byte[] bytes)
+        {
+            if (string.IsNullOrEmpty(name))
+                throw new ArgumentNullException(nameof(name));
+            if (bytes == null || bytes.Length == 0)
+                throw new ArgumentNullException(nameof(bytes));
+            if (_loadedPackages.Contains(name))
+                throw new UIContractException(
+                    $"package '{name}' is already loaded. Unload it first or use a different name.");
+
+            StageHandle* h = (StageHandle*)_stage.ToPointer();
+            byte[] nb = Encoding.UTF8.GetBytes(name);
+            int rc;
+            fixed (byte* np = nb)
+            fixed (byte* bp = bytes)
+                rc = Native.loomgui_stage_load_package(h, np, (nuint)nb.Length, bp, (nuint)bytes.Length);
+            if (rc != 0)
+                throw new UIPackageException(
+                    $"load_package '{name}' failed (malformed pkg.bin / duplicate pkg id / missing resources)");
+
+            _loadedPackages.Add(name);
+            return new UIPackage(this, name);
+        }
+
+        /// <summary>
+        /// 卸载包：从 Rust stage 移除模板注册。已实例化的活节点独立副本不受影响
+        /// （同 Unity prefab：删 prefab 不删已实例化的 GO）。
+        /// ponytail: lib.rs 无 unload_package FFI——待 Rust 侧加 Stage::unload_package 后接通。
+        /// 届时 C# 侧只需加一句 Native.loomgui_stage_unload_package(h, name) + _loadedPackages.Remove。
+        /// </summary>
+        public void UnloadPackage(string name)
+        {
+            // ponytail: no loomgui_stage_unload_package FFI yet.
+            // When Rust side adds Stage::unload_package(name), wire here:
+            //   StageHandle* h = (StageHandle*)_stage.ToPointer();
+            //   byte[] nb = Encoding.UTF8.GetBytes(name ?? "");
+            //   fixed (byte* np = nb)
+            //       Native.loomgui_stage_unload_package(h, np, (nuint)nb.Length);
+            //   _loadedPackages.Remove(name);
+            throw new NotImplementedException(
+                "UnloadPackage: no loomgui_stage_unload_package FFI yet (ponytail defer). " +
+                "Will wire when Rust side adds Stage::unload_package.");
+        }
+
+        /// <summary>
+        /// 建类型化节点（不挂父）。白名单：Container, AbsolutePanel, TextNode, Image。
+        /// 非法 T（Button / Slider / Toggle / ListView 等控件或作用域根）
+        /// 抛 UIContractException——控件只能 Instantiate（含内建子树），不能裸建。
+        ///
+        /// tag 映射（对齐 core dynamic.rs::kind_from_tag）：
+        /// Container/AbsolutePanel → "div", TextNode → "span", Image → "img"。
+        /// Button 虽在 kind_from_tag 白名单但 E1 不列入 Create<T>——Button 带内建子树，
+        /// 裸建 produce 无 label 的残缺按钮，Instantiate 是唯一路径。
+        /// </summary>
+        public T Create<T>() where T : Node
+        {
+            Type t = typeof(T);
+            string tag;
+            if (t == typeof(Container) || t == typeof(AbsolutePanel))
+                tag = "div";
+            else if (t == typeof(TextNode))
+                tag = "span";
+            else if (t == typeof(Image))
+                tag = "img";
+            else
+                throw new UIContractException(
+                    $"Create<{t.Name}> is not allowed. Create<T> whitelist: " +
+                    "Container, AbsolutePanel, TextNode, Image. " +
+                    "Controls (Button, Slider, Toggle, ...) must be Instantiate'd, not Create'd.");
+
+            StageHandle* h = (StageHandle*)_stage.ToPointer();
+            byte[] tb = Encoding.UTF8.GetBytes(tag);
+            uint id;
+            fixed (byte* tp = tb)
+                id = Native.loomgui_stage_create_node(h, tp, (nuint)tb.Length, null, 0);
+            if (id == Node.RootSentinel)
+                throw new InvalidOperationException(
+                    $"create_node(\"{tag}\") failed (stage null / non-UTF-8 / unknown kind)");
+
+            // AbsolutePanel：Rust 侧 kind 是 Container，但 C# 需 AbsolutePanel 子类实例。
+            // NodeFactory 据 kind 派发到 Container ctor——此处绕过 registry.GetOrCreate，
+            // 手动造 AbsolutePanel + 注册到 registry（id 是刚 create_node 的新鲜 id，不会覆盖已有缓存）。
+            if (t == typeof(AbsolutePanel))
+            {
+                var panel = new AbsolutePanel(this, id);
+                _registry.Register(id, panel);
+                return (T)(Node)panel;
+            }
+            return (T)_registry.GetOrCreate(id);
+        }
+
+        /// <summary>
+        /// 命中测试：返回 globalPoint 处最上层可 Touchable 节点。
+        /// ponytail: lib.rs 无 hit_test / pick FFI。core hit_test 走 Node::hit_test 递归，
+        /// 依赖上帧 world_matrix，但未暴露为 FFI。待 Rust 侧加 loomgui_stage_hit_test(h, x, y) → NodeId
+        /// 后接通。现阶段 C# 业务可走 Geometry.WorldRect + 手工 Contains 做近似命中（简陋但有）。
+        /// </summary>
+        public Node Pick(Vector2 globalPoint)
+        {
+            // ponytail: no loomgui_stage_hit_test FFI.
+            // When Rust adds Stage::hit_test(x,y) → Option<NodeId>, wire:
+            //   StageHandle* h = (StageHandle*)_stage.ToPointer();
+            //   uint id = Native.loomgui_stage_hit_test(h, globalPoint.X, globalPoint.Y);
+            //   if (id == Node.RootSentinel) return null;
+            //   return _registry.GetOrCreate(id);
+            throw new NotImplementedException(
+                "Pick: no loomgui_stage_hit_test FFI yet (ponytail defer). " +
+                "Will wire when Rust side adds Stage::hit_test.");
+        }
+
+        /// <summary>
+        /// 延迟回调（秒）。同 DOM setTimeout——d 秒后调 cb（不精确，帧级粒度）。
+        /// ponytail: core 无 call_later / timer queue。动画时钟仅 TweenManager::update(dt)，
+        /// 无通用延迟回调基础设施。待 Rust 侧加 timer 队列后接通。
+        /// </summary>
+        public void CallLater(float d, Action cb)
+        {
+            // ponytail: no timer queue in Rust yet.
+            throw new NotImplementedException(
+                "CallLater: no timer queue FFI yet (ponytail defer). " +
+                "Will wire when Rust side adds Stage::call_later(dt, cb).");
+        }
+
+        /// <summary>
+        /// 下帧回调（帧末 fire，先于 render）。ponytail defer——理由同 CallLater。
+        /// </summary>
+        public void CallNextFrame(Action cb)
+        {
+            // ponytail: no per-frame deferred callback queue in Rust yet.
+            throw new NotImplementedException(
+                "CallNextFrame: no next-frame queue FFI yet (ponytail defer). " +
+                "Will wire when Rust side adds Stage::call_next_frame.");
+        }
+
+        /// <summary>
+        /// 当前是否有指针在 UI 上（命中任意 Touchable 节点）。
+        /// 直透传 loomgui_stage_is_pointer_on_ui FFI（lib.rs:399）。
+        /// null stage → false（防御性——_stage 不应为 null，但容错不抛）。
+        /// </summary>
+        public bool IsPointerOnUI
+        {
+            get
+            {
+                if (_stage == IntPtr.Zero) return false;
+                StageHandle* h = (StageHandle*)_stage.ToPointer();
+                return Native.loomgui_stage_is_pointer_on_ui(h);
+            }
+        }
+
         static NotImplementedException NE() => new NotImplementedException();
     }
 
     public sealed class UIPackage
     {
-        public string Name { get { throw NE(); } }
-        public Container Instantiate(string path) { throw NE(); }   // 返回模板根真实类型
-        public UITemplate GetTemplate(string path) { throw NE(); }
-        static NotImplementedException NE() => new NotImplementedException();
+        // 投影层内部：持有上下文 + 包名。Instantiate/GetTemplate 经 _ctx 转调 FFI。
+        internal readonly UIContext _ctx;
+        internal readonly string _name;
+
+        internal UIPackage(UIContext ctx, string name)
+        {
+            _ctx = ctx; _name = name;
+        }
+
+        /// <summary>
+        /// 包名（load_package 时指定）。只读——包名是 load 期确定的身份标识，不可变。
+        /// </summary>
+        public string Name => _name;
+
+        /// <summary>
+        /// 从包内克隆组件到当前 scene，返回模板根（typed Container）。
+        /// path = 组件路径（HTML 文件名，如 "pages/main.html"）。包必须已 load_package 过
+        /// （否则 FFI 返 sentinel → UIPackageException）。
+        /// </summary>
+        public Container Instantiate(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                throw new ArgumentNullException(nameof(path));
+            return UITemplate.DoInstantiate(_ctx, _name, path);
+        }
+
+        /// <summary>
+        /// 取模板句柄（不实例化）。返回持有 pkg+path 的 UITemplate，
+        /// 供 ListView.ItemTemplate 等延迟实例化场景用。
+        /// null/空 path 直接抛。
+        /// </summary>
+        public UITemplate GetTemplate(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                throw new ArgumentNullException(nameof(path));
+            return new UITemplate(_ctx, _name, path);
+        }
     }
 }

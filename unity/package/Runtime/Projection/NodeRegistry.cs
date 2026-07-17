@@ -46,5 +46,12 @@ namespace LoomGUI
         /// Node.Dispose 完成时 evict 自己；外部直接调用破坏身份稳定，仅 Dispose 路径用。
         /// </summary>
         internal void Remove(uint id) => _nodes.Remove(id);
+
+        /// <summary>
+        /// 手动注册节点（绕过 NodeFactory）。Create&lt;AbsolutePanel&gt; 等场景需要：
+        /// Rust 侧 kind 是 Container，但 C# 需要 AbsolutePanel 子类实例。
+        /// 调用方负责确保 id 尚未注册（否则覆盖现有缓存，破坏身份稳定）。
+        /// </summary>
+        internal void Register(uint id, Node node) => _nodes[id] = node;
     }
 }
