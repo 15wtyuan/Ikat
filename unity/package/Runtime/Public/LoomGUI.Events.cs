@@ -21,10 +21,36 @@ namespace LoomGUI
         void PreventDefault();
     }
 
+    /// <summary>
+    /// 订阅句柄（<see cref="Node.On{T}"/> 返回值）。Dispose 退订对应 handler。
+    ///
+    /// 设计：EventBus.Subscribe 在录入订阅表后 new EventRegistration(unsubscribeAction)
+    /// 把退订闭包交回调用方；Dispose 调闭包 → EventBus.Remove 从订阅表移 entry。
+    /// 幂等：二次 Dispose no-op（<c>_disposed</c> flag 拦）。订阅随 Node.Dispose 自动清理
+    /// （public-api §5.4）—— Node.Dispose 走 evict 路径不调本类 Dispose，但订阅表通过
+    /// NodeId 查询命中已 evict 节点是无效订阅；EventBus 不会主动清，由 GC 回收 Node 后
+    /// 弱引用路径清理（roadmap 项，4a 不做：业务侧 Dispose reg 即可）。
+    /// </summary>
     public sealed class EventRegistration : IDisposable
     {
-        public void Dispose() { throw NE(); }
-        static NotImplementedException NE() => new NotImplementedException();
+        Action _unsubscribe;
+        bool _disposed;
+
+        /// <summary>
+        /// 投影层内部：EventBus.Subscribe 调，传退订闭包。公共 API 无构造（业务从 On&lt;T&gt; 拿现成 reg）。
+        /// </summary>
+        internal EventRegistration(Action unsubscribe) { _unsubscribe = unsubscribe; }
+
+        /// <summary>
+        /// 退订。幂等（二次调 no-op）。不抛——handler 内调 Dispose（罕见但合法）也安全。
+        /// </summary>
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _unsubscribe?.Invoke();
+            _unsubscribe = null;   // 释放闭包引用（防闭包捕获的 handler/target 长寿）
+        }
     }
 
     // Pointer

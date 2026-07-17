@@ -281,7 +281,23 @@ namespace LoomGUI
         public void Blur() { throw NE(); }
 
         public IDisposable OnUpdate(Action<float> cb) { throw NE(); }   // 逻辑驱动每帧更新钩子（返回句柄，Dispose 撤销）
-        public EventRegistration On<T>(Action<T> handler, bool useCapture = false, bool once = false) where T : IRouteEvent { throw NE(); }
+        /// <summary>
+        /// 订阅 typed 路由事件（DOM addEventListener 等价）。
+        ///
+        /// <paramref name="useCapture"/>：true → capture 阶段触发（root→target 路径上）；false → bubble
+        /// 阶段触发（target→root 路径上，默认）。target 节点上 capture/bubble listener 都触发
+        /// （DOM target 阶段等价）。<paramref name="once"/>：true → 触发一次后自动退订（防"等一个结束事件"
+        /// 泄漏，如等 <see cref="AnimationEndEvent"/> 后 Dispose）。
+        ///
+        /// 返 <see cref="EventRegistration"/>——Dispose 退订。订阅随 <see cref="Dispose"/> 自动清理
+        /// （public-api §5.4）。详细路由模型见 public-api §5.2。
+        /// </summary>
+        public EventRegistration On<T>(Action<T> handler, bool useCapture = false, bool once = false) where T : IRouteEvent
+        {
+            ThrowIfDisposed();
+            if (handler == null) throw new ArgumentNullException(nameof(handler));
+            return _ctx._eventBus.Subscribe<T>(_id, handler, useCapture, once);
+        }
 
         // ── helpers ─────────────────────────────────────────────────────
 
@@ -1498,12 +1514,18 @@ namespace LoomGUI
         // NodeFactory 造节点入缓存；Node.Dispose 时 evict。公共 API 不见本字段。
         internal readonly NodeRegistry _registry;
 
+        // D2：typed 事件订阅表 + capture/bubble/once 路由。Node.On<T> 经此转调 Subscribe<T>；
+        // D3 demux 翻译 raw LoomEvent → typed struct 后调 Dispatch<T>。公共 API 不见本字段。
+        internal readonly EventBus _eventBus;
+
         // B3：headless harness 工厂构造。public API 无构造（业务从集成层拿现成 instance）。
         // 建 NodeRegistry 持有自身反向引用（registry 转调 FFI 时需 stage handle）。
+        // 建 EventBus 同持自身反向引用（Dispatch 走 node_parent FFI 时需 stage handle）。
         internal UIContext(IntPtr stage)
         {
             _stage = stage;
             _registry = new NodeRegistry(this);
+            _eventBus = new EventBus(this);
         }
 
         public Container Root { get { throw NE(); } }
