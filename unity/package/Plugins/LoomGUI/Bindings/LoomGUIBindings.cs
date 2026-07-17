@@ -297,15 +297,16 @@ namespace LoomGUI.Bindings
         internal static extern void loomgui_stage_get_node_visible(StageHandle* h, uint node_id, byte* @out);
 
         /// <summary>
-        ///  读节点语义类型。return code：0 = ok 且 `*out` = kind 判别值，非 0 = 节点不存在。
-        ///  不用 `-&gt; u8` + 0 哨兵：`NodeKind` 首变体 `Container` 判别值 = 0，会与「不存在」撞。
-        ///  `NodeKind` 是 `#[repr(u8)]`，`k as u8` 跨 FFI 稳定。
+        ///  读节点语义类型。return code：0 = ok 且 `*out` = kind 判别值；非 0 = 失败（节点不存在
+        ///  或 `out` = null）。不用 `-&gt; u8` + 0 哨兵：`NodeKind` 首变体 `Container` 判别值 = 0，
+        ///  会与「不存在」撞。`NodeKind` 是 `#[repr(u8)]`，`k as u8` 跨 FFI 稳定。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_kind", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_get_node_kind(StageHandle* h, uint node_id, byte* @out);
 
         /// <summary>
-        ///  读节点 computed style 快照。return code：0 = ok 且 `*out` 填好，非 0 = 节点不存在。
+        ///  读节点 computed style 快照。return code：0 = ok 且 `*out` 填好；非 0 = 失败（节点不存在
+        ///  或 `out` = null）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_computed_style", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_get_node_computed_style(StageHandle* h, uint node_id, ComputedNodeStyleRepr* @out);
@@ -494,7 +495,7 @@ namespace LoomGUI.Bindings
 
     /// <summary>
     ///  FFI 稳定快照（#[repr(C)] POD）。enum→u8（match 稳定化，不靠 enum 隐式 repr），
-    ///  Option&lt;[f32;4]&gt;→present flag + 数组。csbindgen 不生成 struct C# stub，C# 镜像 ④ 手写。
+    ///  Option&lt;[f32;4]&gt;→present flag + 数组。csbindgen 自动生成 struct C# stub；④ 如需重排字段可扩展或手写覆盖。
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct ComputedNodeStyleRepr

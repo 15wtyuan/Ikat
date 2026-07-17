@@ -225,3 +225,22 @@ fn computed_style_repr_is_aligned_pod() {
         "repr(C) POD must be 4-byte aligned: got {sz}"
     );
 }
+
+/// null out + 节点存在 → rc 非 0：return code 0 严格意味「*out 已填」，
+/// null out 没填不能返 0（否则 C 侧只看 rc 会用 uninit memory）。
+#[test]
+fn ffi_null_out_is_error() {
+    let h = stage_new_with_dejavu(100.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    let rc = loomgui_stage_get_node_kind(h, root, std::ptr::null_mut());
+    assert_ne!(
+        rc, 0,
+        "get_node_kind: null out + existing node must not return 0"
+    );
+    let rc_c = loomgui_stage_get_node_computed_style(h, root, std::ptr::null_mut());
+    assert_ne!(
+        rc_c, 0,
+        "get_node_computed_style: null out + existing node must not return 0"
+    );
+    loomgui_stage_free(h);
+}

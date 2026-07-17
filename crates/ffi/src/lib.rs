@@ -796,7 +796,7 @@ pub extern "C" fn loomgui_stage_get_node_visible(
 /// FFI 稳定快照（#[repr(C)] POD）。enum→u8（match 稳定化，不靠 enum 隐式 repr），
 /// Option<[f32;4]>→present flag + 数组。csbindgen 自动生成 struct C# stub；④ 如需重排字段可扩展或手写覆盖。
 #[repr(C)]
-#[derive(Default)]
+#[derive(Default, Copy, Clone, Debug)]
 pub struct ComputedNodeStyleRepr {
     pub display_mode: u8,
     pub flex_direction: u8,
@@ -857,9 +857,9 @@ impl ComputedNodeStyleRepr {
     }
 }
 
-/// 读节点语义类型。return code：0 = ok 且 `*out` = kind 判别值，非 0 = 节点不存在。
-/// 不用 `-> u8` + 0 哨兵：`NodeKind` 首变体 `Container` 判别值 = 0，会与「不存在」撞。
-/// `NodeKind` 是 `#[repr(u8)]`，`k as u8` 跨 FFI 稳定。
+/// 读节点语义类型。return code：0 = ok 且 `*out` = kind 判别值；非 0 = 失败（节点不存在
+/// 或 `out` = null）。不用 `-> u8` + 0 哨兵：`NodeKind` 首变体 `Container` 判别值 = 0，
+/// 会与「不存在」撞。`NodeKind` 是 `#[repr(u8)]`，`k as u8` 跨 FFI 稳定。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_kind(
     h: *const StageHandle,
@@ -872,16 +872,18 @@ pub extern "C" fn loomgui_stage_get_node_kind(
     let sh = unsafe { &*h };
     match sh.stage.get_node_kind(NodeId(node_id)) {
         Some(k) => {
-            if !out.is_null() {
-                unsafe { *out = k as u8 };
+            if out.is_null() {
+                return 1;
             }
+            unsafe { *out = k as u8 };
             0
         }
         None => 1,
     }
 }
 
-/// 读节点 computed style 快照。return code：0 = ok 且 `*out` 填好，非 0 = 节点不存在。
+/// 读节点 computed style 快照。return code：0 = ok 且 `*out` 填好；非 0 = 失败（节点不存在
+/// 或 `out` = null）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_computed_style(
     h: *const StageHandle,
@@ -894,9 +896,10 @@ pub extern "C" fn loomgui_stage_get_node_computed_style(
     let sh = unsafe { &*h };
     match sh.stage.get_node_computed_style(NodeId(node_id)) {
         Some(c) => {
-            if !out.is_null() {
-                unsafe { *out = ComputedNodeStyleRepr::from_computed(&c) };
+            if out.is_null() {
+                return 1;
             }
+            unsafe { *out = ComputedNodeStyleRepr::from_computed(&c) };
             0
         }
         None => 1,
