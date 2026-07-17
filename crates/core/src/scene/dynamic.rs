@@ -318,6 +318,21 @@ pub fn unset_inline_override(scene: &mut Scene, node: NodeId, prop: &str) -> Res
     Ok(())
 }
 
+/// 读节点子节点数。node 不 live（已删 / 未建）→ None。
+///
+/// 给 C# 投影层 Container.Children / Get<T> 提供只读遍历入口。
+pub fn get_child_count(scene: &Scene, node: NodeId) -> Option<usize> {
+    scene.get(node).map(|n| n.children.len())
+}
+
+/// 读节点子节点列表（clone，调用方拿到独立 Vec）。node 不 live → None。
+/// 叶子节点 → Some(vec![])（空 Vec，不是 None——区分"节点存在但无子" vs "节点不存在"）。
+///
+/// 给 C# 投影层 Container.Children / Get<T> 提供只读遍历入口。
+pub fn get_children(scene: &Scene, node: NodeId) -> Option<Vec<NodeId>> {
+    scene.get(node).map(|n| n.children.clone())
+}
+
 /// 设渲染复用键（虚拟列表 slot 用）。node 无效 → no-op（不 panic）。
 pub fn set_reuse_key(scene: &mut Scene, node: NodeId, key: u32) {
     if let Some(n) = scene.get_mut(node) {
@@ -437,6 +452,26 @@ mod tests {
         let child = scene.get(root).unwrap().children[0];
         let grand = scene.get(child).unwrap().children[0];
         (scene, root, child, grand)
+    }
+
+    // ── Spec-4a A4：get_children / get_child_count（只读子节点遍历）──
+
+    #[test]
+    fn get_children_returns_node_children() {
+        // build_3level: root → child → grand。覆盖中间节点（1 子）/ 叶子（0 子）/ 不存在节点。
+        let (scene, root, child, grand) = build_3level();
+        // root 有 1 子（child）
+        assert_eq!(get_child_count(&scene, root), Some(1));
+        assert_eq!(get_children(&scene, root), Some(vec![child]));
+        // child 有 1 子（grand）—— 中间节点
+        assert_eq!(get_child_count(&scene, child), Some(1));
+        assert_eq!(get_children(&scene, child), Some(vec![grand]));
+        // grand 是叶子 → 空 Vec（不是 None）
+        assert_eq!(get_child_count(&scene, grand), Some(0));
+        assert_eq!(get_children(&scene, grand), Some(vec![]));
+        // 不存在节点 → None（slotmap 查不到）
+        assert_eq!(get_child_count(&scene, NodeId(0xFFFF_FFFF)), None);
+        assert_eq!(get_children(&scene, NodeId(0xFFFF_FFFF)), None);
     }
 
     #[test]
