@@ -634,10 +634,134 @@ namespace LoomGUI
             }
         }
 
-        public string TextContent { get { throw NE(); } set { throw NE(); } }   // DOM 语义：读=拼接后代文字；写=清子节点换单文本
-        public T AddChild<T>(T c) where T : Node { throw NE(); }
-        public T InsertChild<T>(T c, int i) where T : Node { throw NE(); }
-        public void RemoveChild(Node c) { throw NE(); }
+        /// <summary>
+        /// DOM textContent：读=递归拼接后代 TextNode.Text（文档序），写=清所有子 + 挂单个 TextNode。
+        /// 读侧递归 Container 子树（含 TextBlock/TextElement/Button 等 Container 子类）累加 TextNode._text；
+        /// 非 TextNode 叶子（Image / 控件）贡献 0 字符。
+        ///
+        /// 写侧 DOM 语义：先清所有当前子（remove_child 各子——DOM 不 Dispose，子可重挂），再建一个
+        /// TextNode（create_node "span" + set_text）+ append_child。多次写值=替换当前 TextNode 文本
+        /// 不重建——但本实现简化为每次写都重建（与 DOM textContent setter 一致：每次写都重建内容树）。
+        /// </summary>
+        public string TextContent
+        {
+            get
+            {
+                ThrowIfDisposed();
+                var sb = new StringBuilder();
+                AppendDescendantText(this, sb);
+                return sb.ToString();
+            }
+            set
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                string text = value ?? "";
+
+                // 1) 清当前直系子（DOM：移除但不 Dispose——子可重挂）。直 FFI 逐个 remove_child，
+                //    跳过 RemoveChild 的 GetChildIndex 校验（snapshot 已确保是直系子，校验纯开销）。
+                ClearDirectChildrenFFI(h);
+
+                // 2) 建 TextNode + 写文本 + append。三步 FFI 顺序——建后才有 NodeId，setText 后再挂，
+                //    避免 append 后挂前核心状态不一致窗口（无父 TextNode 也合法，标 dirty_text 即可）。
+                byte[] tag = Encoding.UTF8.GetBytes("span");   // 围栏 kind_from_tag: "span" → TextNode
+                uint textId;
+                fixed (byte* tp = tag)
+                    textId = Native.loomgui_stage_create_node(h, tp, (nuint)tag.Length, null, 0);
+                if (textId == RootSentinel)
+                    throw new InvalidOperationException("create_node(\"span\") failed (stage null / non-UTF-8)");
+
+                byte[] tb = Encoding.UTF8.GetBytes(text);
+                fixed (byte* tp = tb)
+                {
+                    int src = Native.loomgui_stage_set_text(h, textId, tp, (nuint)tb.Length);
+                    if (src != 0)
+                        throw new InvalidOperationException("set_text on fresh TextNode failed (non-TextNode kind)");
+                }
+
+                int arc = Native.loomgui_stage_append_child(h, _id, textId);
+                if (arc != 0)
+                    throw new InvalidOperationException("append_child(textNode) failed (child has existing parent)");
+
+                // 3) Cache 镜像到 C# TextNode wrapper——registry.GetOrCreate 据 textId 派发到 TextNode
+                //    （NodeFactory: kind=TextNode → TextNode ctor）。写镜像避免下次读触发 FFI。
+                var tn = (TextNode)_ctx._registry.GetOrCreate(textId);
+                tn._text = text;
+            }
+        }
+
+        /// <summary>
+        /// 挂子到末尾（DOM AppendChild 语义）。返回 c（身份稳定——registry 同一 NodeId → 同一实例）。
+        /// c 必须当前无父（Rust append_child 前置：child.parent=None）；若 c 已挂别处，FFI 返错抛。
+        /// 不 Dispose / 不复制 c——c 仍是调用方传入的同一对象。
+        /// </summary>
+        public T AddChild<T>(T c) where T : Node
+        {
+            ThrowIfDisposed();
+            if (c is null) throw new ArgumentNullException(nameof(c));
+            c.ThrowIfDisposed();
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_append_child(h, _id, c._id);
+            // rc!=0：child 已挂父 / 节点不 live / null stage（前两者 ThrowIfDisposed 拦）。
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    $"append_child(parent={_id}, child={c._id}) failed (child has existing parent?)");
+            return c;
+        }
+
+        /// <summary>
+        /// 在 index i 处插子（DOM insertBefore 语义，但按 index）。i=0 头插，i=ChildCount 末尾追加，
+        /// 中间值插到「当前第 i 子之前」。越界（负数 / &gt; ChildCount）抛 ArgumentOutOfRangeException。
+        /// 返回 c（身份稳定）。
+        /// </summary>
+        public T InsertChild<T>(T c, int i) where T : Node
+        {
+            ThrowIfDisposed();
+            if (c is null) throw new ArgumentNullException(nameof(c));
+            c.ThrowIfDisposed();
+
+            // MaterializeChildren 拿当前直系子——既要算 ChildCount 也要拿 refChild NodeId。
+            // 一次性 materialize 复用，避免 GetChildAt 二次 FFI。
+            var kids = MaterializeChildren();
+            // uint 强转一次校验 i ∈ [0, kids.Count]：负数 → 大正数越界，省一条分支。
+            // i == kids.Count 允许（append 语义，对应 insert_before ref_id=INVALID）。
+            if ((uint)i > (uint)kids.Count)
+                throw new ArgumentOutOfRangeException(nameof(i), i,
+                    $"index {i} out of range [0, {kids.Count}]");
+
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            // i == Count：ref_id = INVALID（Rust insert_before：INVALID → 末尾追加）。
+            uint refId = (i == kids.Count) ? RootSentinel : kids[i]._id;
+            int rc = Native.loomgui_stage_insert_before(h, _id, c._id, refId);
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    $"insert_before(parent={_id}, child={c._id}, ref={refId}) failed (child has existing parent?)");
+            return c;
+        }
+
+        /// <summary>
+        /// 摘子（DOM RemoveChild 语义）。不 Dispose 子——子仍 live，可重挂到别处。区别于
+        /// <see cref="Node.Dispose"/>（递归永久销毁）。c 必须是 this 的当前直系子（GetChildIndex != -1），
+        /// 否则抛 ArgumentException（DOM NotFoundError 等价）。
+        /// </summary>
+        public void RemoveChild(Node c)
+        {
+            ThrowIfDisposed();
+            if (c is null) throw new ArgumentNullException(nameof(c));
+            c.ThrowIfDisposed();
+            // 必须先校验 c 是直系子：core remove_child 不校验，会对「别 parent 的子」误设 parent=None
+            // （dynamic.rs:231 retain no-op 但 parent=None 仍执行——bug 兜底在投影层拦）。
+            if (GetChildIndex(c) < 0)
+                throw new ArgumentException(
+                    $"node (id={c._id}) is not a child of container (id={_id})", nameof(c));
+
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_remove_child(h, _id, c._id);
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    $"remove_child(parent={_id}, child={c._id}) failed (post-check race?)");
+            // 不 Dispose c：DOM 语义——c 可重挂。c._disposed 保持 false。
+        }
 
         /// <summary>
         /// 取第 i 个直系子节点（按 append 顺序）。越界（负数 / ≥ ChildCount）抛
@@ -673,9 +797,81 @@ namespace LoomGUI
             return -1;
         }
 
-        public void SetChildIndex(Node c, int i) { throw NE(); }
-        public void SwapChildren(Node a, Node b) { throw NE(); }
-        public void SwapChildrenAt(int a, int b) { throw NE(); }
+        /// <summary>
+        /// 改 c 在直系子中的位置到 i（DOM 无直接等价，但 fgui/setChildIndex 习惯）。
+        /// i ∈ [0, ChildCount-1]：c 的最终位置（在最终排列里）。范围外抛 ArgumentOutOfRangeException。
+        /// c 必须是直系子。组合实现：RemoveChild + InsertChild。Remove 后 count=N-1，InsertChild
+        /// 在该减表上 i ∈ [0, N-1] 合法——恰好对应原表 i ∈ [0, N-1] 的目标位（见 swap/insert 算法）。
+        /// </summary>
+        public void SetChildIndex(Node c, int i)
+        {
+            ThrowIfDisposed();
+            if (c is null) throw new ArgumentNullException(nameof(c));
+            c.ThrowIfDisposed();
+            // 入口校验 i ∈ [0, ChildCount-1]：c 当前占一槽，最终排列总位数 ChildCount，
+            // 故 c 的目标位最大为 ChildCount-1。i == ChildCount 拒（语义「排到末尾新位」无意义）。
+            int n = ChildCount;
+            if ((uint)i >= (uint)n)
+                throw new ArgumentOutOfRangeException(nameof(i), i,
+                    $"target index {i} out of range [0, {n - 1}]");
+
+            // RemoveChild 内再校验 GetChildIndex != -1（直系子约束）。
+            RemoveChild(c);
+            // InsertChild 在减表上校验 i ∈ [0, newCount]——这里 i ≤ 原 N-1 = newCount，必通过。
+            InsertChild(c, i);
+        }
+
+        /// <summary>
+        /// 交换两直系子 a/b 的位置。a/b 必须都是直系子（否则 ArgumentException）。
+        /// 同一节点（ia == ib）no-op。索引偏移处理：先移高位再移低位（移高位不影低位索引），
+        /// 再分别按原索引插回（upper→lower 位、lower→upper 位）。首末 / 相邻 / 含中位 情形
+        /// 经 ContainerTreeWriteOpsTests.SwapChildrenSwapsPositions Theory 覆盖（4 case）。
+        /// </summary>
+        public void SwapChildren(Node a, Node b)
+        {
+            ThrowIfDisposed();
+            if (a is null) throw new ArgumentNullException(nameof(a));
+            if (b is null) throw new ArgumentNullException(nameof(b));
+            a.ThrowIfDisposed();
+            b.ThrowIfDisposed();
+
+            int ia = GetChildIndex(a), ib = GetChildIndex(b);
+            if (ia < 0)
+                throw new ArgumentException($"node (id={a._id}) is not a child of container (id={_id})", nameof(a));
+            if (ib < 0)
+                throw new ArgumentException($"node (id={b._id}) is not a child of container (id={_id})", nameof(b));
+            if (ia == ib) return;   // 同节点（或同位不同实例，理论不达——registry 身份保证）
+
+            // upper/lower：先移高位（不影低位索引），再移低位。最后按原索引插回：
+            //   upperChild → lower 位（占据 a/b 中较前者的原位）
+            //   lowerChild → upper 位（占据 a/b 中较后者的原位）
+            // 验：首末 / 相邻 / 含中位 情形均经 ContainerTreeWriteOpsTests.SwapChildrenSwapsPositions Theory 覆盖。
+            int lower = Math.Min(ia, ib), upper = Math.Max(ia, ib);
+            Node lowerChild = (ia < ib) ? a : b;   // 占 lower 位的原始节点
+            Node upperChild = (ia < ib) ? b : a;   // 占 upper 位的原始节点
+
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            // 顺序敏感：先移 upper（不影 lower 索引），再移 lower。
+            Native.loomgui_stage_remove_child(h, _id, upperChild._id);
+            Native.loomgui_stage_remove_child(h, _id, lowerChild._id);
+            // 插 upperChild 到 lower 位：当前 count = N-2，lower ∈ [0, N-2] 合法。
+            InsertChild(upperChild, lower);
+            // 插 lowerChild 到 upper 位：当前 count = N-1，upper ≤ N-1 合法（== 时 append）。
+            InsertChild(lowerChild, upper);
+        }
+
+        /// <summary>
+        /// 按索引交换两直系子。a/b ∈ [0, ChildCount)——越界抛 ArgumentOutOfRangeException。
+        /// 委托给 <see cref="SwapChildren(Node, Node)"/>（GetChildAt 已做范围校验 + 物化）。
+        /// </summary>
+        public void SwapChildrenAt(int a, int b)
+        {
+            ThrowIfDisposed();
+            // GetChildAt 校验 (uint)i >= (uint)Count 并抛 ArgumentOutOfRangeException——复用其校验路径。
+            Node ca = GetChildAt(a);
+            Node cb = GetChildAt(b);
+            SwapChildren(ca, cb);
+        }
         public void ScrollTo(Vector2 p, ScrollBehavior b = ScrollBehavior.Smooth) { throw NE(); }
         public event Action<ScrollChangedEvent> Scrolled;
         public UITemplate GetTemplate(string name) { throw NE(); }   // 取内联 template（原 Panel.GetTemplate 上移）
@@ -714,6 +910,44 @@ namespace LoomGUI
             return list;
         }
 
+        /// <summary>
+        /// 清当前直系子（DOM semantics：移除不 Dispose，子可重挂）。snapshot NodeId 列表 + 逐个
+        /// remove_child FFI——跳过 RemoveChild 的 GetChildIndex 校验（snapshot 保证是直系子，校验纯开销）。
+        /// TextContent setter 用——清后立建新 TextNode。
+        /// </summary>
+        private void ClearDirectChildrenFFI(StageHandle* h)
+        {
+            int count = Native.loomgui_stage_get_child_count(h, _id);
+            if (count <= 0) return;
+
+            uint[] buf = new uint[count];
+            int written;
+            fixed (uint* bp = buf)
+                written = Native.loomgui_stage_get_children(h, _id, bp, (nuint)buf.Length);
+            if (written < 0) return;
+            if (written > buf.Length) written = buf.Length;
+
+            for (int i = 0; i < written; i++)
+                Native.loomgui_stage_remove_child(h, _id, buf[i]);
+        }
+
+        /// <summary>
+        /// 递归子树累加 TextNode._text 到 sb（文档序）。Container 子递归；TextNode 叶子累加 _text；
+        /// 其它叶子（Image / 控件）贡献 0 字符。TextContent getter 用。
+        /// 递归终止：围栏闭合保证无循环引用（parent 指针单向）；深度受场景树规模有界。
+        /// </summary>
+        static void AppendDescendantText(Container root, StringBuilder sb)
+        {
+            // Children getter lazy materialize + registry cache：每次访问重新拿最新直系子列表。
+            // 递归路径稳——同一 Node 多次入参不会（无环）。
+            foreach (Node child in root.Children)
+            {
+                if (child is TextNode tn) sb.Append(tn._text);
+                else if (child is Container c) AppendDescendantText(c, sb);
+                // 其它（Image / 控件 / 未知叶子）：跳过。
+            }
+        }
+
         static NotImplementedException NE() => new NotImplementedException();
     }
 
@@ -726,12 +960,53 @@ namespace LoomGUI
     // 注：无 Panel 类型。作用域是运行时标记（IsScopeRoot），非类型；Instantiate 返回模板根真实类型。
 
     // ── 叶子：内容/绘制 ──
-    public class TextNode : Node
+    //
+    // TextNode.Text 的读侧是 C# 镜像（_text），不是 core 直读——lib.rs 无 get_text FFI
+    // （grep crates/ffi/src/lib.rs 只有 set_text）。setter 同步写穿到 core（set_text 标 dirty_text
+    // → 下帧 rematch）+ 缓存到 _text；getter 读 _text。Container.TextContent 读递归子树累加
+    // 各 TextNode._text。
+    //
+    // ponytail: 真值在 core（text_contents HashMap<NodeId, String>），Instantiate 路径把
+    // pkg 内文本写入 core 但不通知 C# → 这类 TextNode 的 _text 保持 ""。读镜像返 ""
+    // 与 core 实际渲染不一致是已知 ghost state；待首个 Instantiate 文本读回场景落地时
+    // 加 get_text FFI（同 C4 set_transform 推后的模式——等真实读回消费者出现再接通，
+    // 避免空 flush / 无用 FFI）。业务侧文本交互（Create<TextNode>() + 写 Text）当前路径正确。
+    public unsafe class TextNode : Node
     {
+        // C# 镜像：默认空串（围栏 create_node("span") 建 TextNode 时 core text_contents 也填 "")。
+        // setter 写穿 core（set_text FFI）后更新本字段；getter 直接读，不走 FFI。
+        internal string _text = "";
+
         internal TextNode(UIContext ctx, uint id) : base(ctx, id) { }
 
-        public string Text { get { throw NE(); } set { throw NE(); } }   // 对应 DOM Node.textContent / CharacterData.data
-        static NotImplementedException NE() => new NotImplementedException();
+        /// <summary>
+        /// 文本内容（对应 DOM Text.data / CharacterData.data）。setter 写穿 core（set_text FFI：
+        /// UTF-8 编码 + ptr+len，标 dirty_text → 下帧重排文本 runs）+ 缓存镜像；getter 读镜像。
+        /// null 当空串处理（与 DOM textContent=null 一致）。Dispose 后访问抛 ObjectDisposedException。
+        /// </summary>
+        public string Text
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return _text;
+            }
+            set
+            {
+                ThrowIfDisposed();
+                string v = value ?? "";
+                _text = v;
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                byte[] b = Encoding.UTF8.GetBytes(v);
+                fixed (byte* p = b)
+                {
+                    // rc!=0 仅发生于 null stage / 节点不 live / 非 TextNode——本类 ctor 经 NodeFactory
+                    // 据 get_node_kind 派发（kind=TextNode=1 → TextNode ctor），kind 不可变；ThrowIfDisposed
+                    // 拦 stale；UTF-8 编码不会产非 UTF-8。故 rc 理论必 0，与 ClassList add/remove 一致不抛。
+                    _ = Native.loomgui_stage_set_text(h, _id, p, (nuint)b.Length);
+                }
+            }
+        }
     }
     public class Image : Node
     {
