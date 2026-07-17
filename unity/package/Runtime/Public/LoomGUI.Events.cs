@@ -3,6 +3,10 @@
 
 using System;
 
+// 下文每个 typed event struct 持 internal static byte EventType 属性，名字与 core 的 EventType
+// enum 同名——struct 成员查找会遮蔽外层 enum。别名 LoomEventType 让属性表达式体内能解析到 enum。
+using LoomEventType = LoomGUI.EventType;
+
 #pragma warning disable CS0169, CS0067, CS0649
 
 namespace LoomGUI
@@ -26,12 +30,15 @@ namespace LoomGUI
     // Pointer
     public struct PointerDownEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        /// <summary>D2 EventBus 订阅表 key（对齐 core <see cref="EventType"/>）。</summary>
+        internal static byte EventType => (byte)LoomEventType.Down;
         public Vector2 Position { get { throw NE(); } }
         public PointerButton Button { get { throw NE(); } }
         public int TouchId { get { throw NE(); } }
@@ -40,12 +47,14 @@ namespace LoomGUI
 
     public struct PointerUpEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.Up;
         public Vector2 Position { get { throw NE(); } }
         public PointerButton Button { get { throw NE(); } }
         public int TouchId { get { throw NE(); } }
@@ -54,12 +63,14 @@ namespace LoomGUI
 
     public struct PointerMoveEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.Move;
         public Vector2 Position { get { throw NE(); } }
         public float DeltaX { get { throw NE(); } }
         public float DeltaY { get { throw NE(); } }
@@ -69,36 +80,42 @@ namespace LoomGUI
 
     public struct PointerEnterEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.RollOver;
         public Vector2 Position { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
     }
 
     public struct PointerLeaveEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.RollOut;
         public Vector2 Position { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
     }
 
     public struct ClickEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.Click;
         public Vector2 Position { get { throw NE(); } }
         public int ClickCount { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
@@ -107,12 +124,14 @@ namespace LoomGUI
     // Drag
     public struct DragStartEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.DragStart;
         public Vector2 Position { get { throw NE(); } }
         public Vector2 StartPosition { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
@@ -120,12 +139,14 @@ namespace LoomGUI
 
     public struct DragMoveEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.DragMove;
         public Vector2 Position { get { throw NE(); } }
         public float DeltaX { get { throw NE(); } }
         public float DeltaY { get { throw NE(); } }
@@ -134,12 +155,14 @@ namespace LoomGUI
 
     public struct DragEndEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.DragEnd;
         public Vector2 Position { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
     }
@@ -147,12 +170,14 @@ namespace LoomGUI
     // Keyboard
     public struct KeyDownEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.KeyDown;
         public KeyCode Key { get { throw NE(); } }
         public KeyModifiers Modifiers { get { throw NE(); } }
         public bool Repeat { get { throw NE(); } }
@@ -161,12 +186,14 @@ namespace LoomGUI
 
     public struct KeyUpEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.KeyUp;
         public KeyCode Key { get { throw NE(); } }
         public KeyModifiers Modifiers { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
@@ -175,24 +202,28 @@ namespace LoomGUI
     // Focus
     public struct FocusEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.FocusIn;
         public Node PreviousFocused { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
     }
 
     public struct BlurEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.FocusOut;
         public Node NewFocused { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
     }
@@ -200,12 +231,15 @@ namespace LoomGUI
     // Scroll
     public struct ScrollChangedEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        // 无 LoomEvent 源（ScrollPane 物理自维护 tween）——D3 接 ScrollPane 回调。
+        internal static byte EventType => (byte)LoomEventType.ScrollChanged;
         public float ScrollX { get { throw NE(); } }
         public float ScrollY { get { throw NE(); } }
         public float DeltaX { get { throw NE(); } }
@@ -216,36 +250,45 @@ namespace LoomGUI
     // Animation lifecycle
     public struct AnimationStartEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        // 无 LoomEvent 源（tween 回调产）——D3 接 TweenManager 回调。
+        internal static byte EventType => (byte)LoomEventType.AnimationStart;
         public string AnimationName { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
     }
 
     public struct AnimationEndEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        // v1 经 TweenComplete（core 产，prop 名装 click_count）——D3 按 prop 名分流到本类型。
+        internal static byte EventType => (byte)LoomEventType.AnimationEnd;
         public string AnimationName { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
     }
 
     public struct AnimationIterationEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        // 无 LoomEvent 源（tween 回调产）——D3 接 TweenManager 回调。
+        internal static byte EventType => (byte)LoomEventType.AnimationIteration;
         public string AnimationName { get { throw NE(); } }
         public int IterationCount { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
@@ -253,12 +296,15 @@ namespace LoomGUI
 
     public struct TransitionEndEvent : IRouteEvent
     {
-        public Node Target { get { throw NE(); } }
-        public Node CurrentTarget { get { throw NE(); } }
-        public bool DefaultPrevented { get { throw NE(); } }
-        public bool PropagationStopped { get { throw NE(); } }
-        public void StopPropagation() { throw NE(); }
-        public void PreventDefault() { throw NE(); }
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        // v1 经 TweenComplete（core 产，prop 名装 click_count）——D3 按 prop 名分流到本类型。
+        internal static byte EventType => (byte)LoomEventType.TransitionEnd;
         public string PropertyName { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
     }

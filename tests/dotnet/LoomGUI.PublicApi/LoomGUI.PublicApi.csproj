@@ -14,6 +14,9 @@
     <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.Types.cs" Link="Public\LoomGUI.Types.cs" />
     <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.Nodes.cs" Link="Public\LoomGUI.Nodes.cs" />
     <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.Events.cs" Link="Public\LoomGUI.Events.cs" />
+    <!-- D1：EventType enum 同时被 LoomEventHandler demux（运行时实现，未编进本冻结门）和
+         Events.cs 的 typed struct 关联引用，故 enum 单独放 Public/ 并显式编进 PublicApi。 -->
+    <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.EventType.cs" Link="Public\LoomGUI.EventType.cs" />
     <!-- C1：Public/Node 引用 internal NodeRegistry + NodeFactory；编译门需把 Projection/ 全集纳入
          以便 internal 类型可解析（验证 public 签名编译性仍兜得住，只是底层依赖一并验）。 -->
     <Compile Include="..\..\..\unity\package\Runtime\Projection\*.cs" Link="Projection\%(Filename)%(Extension)" />

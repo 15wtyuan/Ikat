@@ -5,28 +5,7 @@ using LoomGUI.Bindings;
 
 namespace LoomGUI
 {
-    /// EventType 与 Rust loomgui_core::input::EVT_* 常量一致（:byte 对齐 event_type:u8）。
-    public enum EventType : byte
-    {
-        Down = 0,
-        Up = 1,
-        Move = 2,
-        Click = 3,
-        RollOver = 4,
-        RollOut = 5,
-        // drag（opt-in draggable，core 检测）+ longpress（universal）。
-        DragStart = 6,
-        DragMove = 7,
-        DragEnd = 8,
-        LongPress = 9,
-        // 键盘 + 焦点（core 检测，C# 路由）。
-        KeyDown = 12,
-        KeyUp = 13,
-        FocusIn = 14,
-        FocusOut = 15,
-        // tween 完成（core 产，C# 直派）。click_count 复用装 prop、touch_id 复用装 tag。
-        TweenComplete = 16,
-    }
+    // EventType enum 见 Public/LoomGUI.EventType.cs（PublicApi 冻结编译门需 Events.cs 能引用）。
 
     /// C# 镜像 Rust loomgui_core::input::EventRecord（#[repr(C)]）。
     /// 字段序：node_id:u32 @0 → event_type:u8 @4 → click_count:u8 @5 → pad 2 → touch_id:i32 @8 → x:f32 @12 → y:f32 @16（sizeof=20）。
