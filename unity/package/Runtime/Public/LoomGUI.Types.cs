@@ -129,8 +129,9 @@ namespace LoomGUI
     }
 
     // ── 异常类型 ──────────────────────────────────────────────────────
-    // public-api.md §6：运行时异常体系。UIContractException = 业务侧违反 API 契约（Get<T> 未命中、
-    // Create<T> 非白名单、LoadPackage 同名重复、ListView 静态/数据驱动混用 等）。与 ObjectDisposedException
+    // public-api.md §1.4 失败策略：运行时异常体系。UIContractException = 业务侧违反 API 契约（Get<T>
+    // 未命中、Create<T> 非白名单、LoadPackage 同名重复、ListView 静态/数据驱动混用 等；另见 §3.1 Get /
+    // §7 ListView / §11.1 Create<T> / §11.2 LoadPackage 各 API 处的抛出语义）。与 ObjectDisposedException
     // （操作已 Dispose 节点）/ InvalidOperationException （内部不变量违例 / FFI 残错）互补：
     // UIContractException 是「调用方写错了」，InvalidOperationException 是「投影层内部状态异常」。
     public class UIContractException : Exception

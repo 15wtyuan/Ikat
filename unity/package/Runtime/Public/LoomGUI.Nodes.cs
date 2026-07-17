@@ -181,6 +181,8 @@ namespace LoomGUI
 
         /// <summary>
         /// 按 id 在本节点子树内查找 typed T（DFS 候选取 find_node_by_id 全局首匹配 + 父链 scope-check）。
+        /// 不含 self（与 <see cref="Query{T}"/> 一致）：仅查 _id 的后代，自身 id_attr 不被命中——
+        /// 即使本节点声明了 id 等于查询值也返 miss。scope-check（IsInSubtree）严格判后代。
         /// 未命中（无 id / 不在子树 / 类型不符）抛 <see cref="UIContractException"/>。null/empty id 直接抛
         /// （DOM getElementById 习惯：空 id 是调用方写错）。
         ///
@@ -375,6 +377,13 @@ namespace LoomGUI
         /// input 无 type 默认 TextField；type=range/checkbox/... 派生 kind 在 parse 期已固化，selector
         /// 用 "input" 只匹配 TextField（不匹配派生——4a 简化，type-aware selector 推后续）。
         /// template 不在映射表——parse 期消费、不进 runtime 树，selector "template" 永远空集。
+        ///
+        /// 已知 core 不一致（span）：本表对齐 parse/pkg 路径（resolve_semantic("span") → TextElement，
+        /// 覆盖 pkg 加载的绝大多数 span）。但 core 的动态建树 API 走另一张表——
+        /// crates/core/src/scene/dynamic.rs::kind_from_tag("span") → NodeKind::TextNode（byte=1）。因此
+        /// 运行时通过 Container.TextContent setter / create_node("span") 产出的 span 携带 kind=TextNode，
+        /// `Query("span")` 对该子树会落空（不命中 TextElement）。pkg-loaded 节点不受影响。core 表拓宽
+        /// 到完整映射（或动态 API 改走 resolve_semantic）留作 roadmap 项，本表不改（4a：取 pkg 主路径）。
         /// </summary>
         private static NodeKind? TagToNodeKind(string tag) => tag switch
         {
