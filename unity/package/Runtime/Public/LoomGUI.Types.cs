@@ -127,4 +127,15 @@ namespace LoomGUI
         public int End { get { throw NE(); } set { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
     }
+
+    // ── 异常类型 ──────────────────────────────────────────────────────
+    // public-api.md §6：运行时异常体系。UIContractException = 业务侧违反 API 契约（Get<T> 未命中、
+    // Create<T> 非白名单、LoadPackage 同名重复、ListView 静态/数据驱动混用 等）。与 ObjectDisposedException
+    // （操作已 Dispose 节点）/ InvalidOperationException （内部不变量违例 / FFI 残错）互补：
+    // UIContractException 是「调用方写错了」，InvalidOperationException 是「投影层内部状态异常」。
+    public class UIContractException : Exception
+    {
+        public UIContractException(string message) : base(message) { }
+        public UIContractException(string message, Exception inner) : base(message, inner) { }
+    }
 }

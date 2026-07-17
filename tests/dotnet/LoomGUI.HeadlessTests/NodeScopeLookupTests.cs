@@ -1,0 +1,471 @@
+using System;
+using System.Text;
+using LoomGUI.Bindings;
+using Xunit;
+
+namespace LoomGUI.HeadlessTests
+{
+    /// <summary>
+    /// C7 投影层验收：Node 作用域查找 API（Get&lt;T&gt;/TryGet&lt;T&gt;/Query&lt;T&gt;/Query(selector)）。
+    ///
+    /// 每条 Fact 验一条投影层不变量：
+    /// - Query&lt;T&gt; 按 C# typed 子类匹配（is T 含派生），DFS 子树文档序 pre-order，不含 self。
+    /// - Query(".cls" / "tag" / "tag.cls") 经 NodeKind + Classes.Contains 匹配。
+    /// - Get/TryGet 经 find_node_by_id + 父链 scope-check 限定在本子树；未命中路径抛 UIContractException / 返 false。
+    /// - Dispose 后访问任一查找入口抛 ObjectDisposedException（C1 ThrowIfDisposed 套到 C7 入口）。
+    ///
+    /// **id-lookup 正路径（GetFindsByIdAndType / GetThrowsWhenWrongType）部分 defer 到 E2**：
+    /// 4a 无 set_id_attr FFI，create_node FFI 不接 id 参数，唯一能设 live 节点 id_attr 的路径是
+    /// load_package + instantiate（pkg.bin 内 TemplateNode.id_attr）—— 即 E2 的 fixture pkg 工作。
+    /// 故 Get/TryGet 只测「未命中」路径（id=""、id=null、id 不存在——这些路径不需要预先设 id）。
+    /// 正路径在 E2 fixture pkg 落地后补测（同 ClassAffectsComputedStyle 的 defer 模式）。
+    ///
+    /// 全部经 headless harness P/Invoke 真 dll，不启 Unity。
+    /// </summary>
+    public unsafe class NodeScopeLookupTests
+    {
+        // lib.rs create_root 失败哨兵（与 parent / find_node_by_id 未命中同值）。
+        private const uint InvalidNodeId = 0xFFFF_FFFFu;
+
+        // ── Query<T>()：按类型 DFS 子树 ────────────────────────────────
+
+        /// <summary>
+        /// Query&lt;Button&gt; 在 div &gt; [button, img] 子树里返单元素 Button 列表。
+        /// 验 DFS pre-order + is T 类型过滤正确。
+        /// </summary>
+        [Fact]
+        public void QueryByTypeReturnsTypedDescendants()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                AppendChild(stage, root._id, CreateNode(stage, "button"));
+                AppendChild(stage, root._id, CreateNode(stage, "img"));
+
+                var buttons = root.Query<Button>();
+                Assert.Single(buttons);
+                Assert.IsType<Button>(buttons[0]);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// 子树无 T 类型节点 → Query&lt;T&gt; 返空 list（不抛、不返 null）。
+        /// </summary>
+        [Fact]
+        public void QueryByTypeEmptyWhenNoMatch()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                AppendChild(stage, root._id, CreateNode(stage, "div"));
+
+                Assert.Empty(root.Query<Image>());
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// Query&lt;Container&gt; 含 Container 派生类（Button/Link/TextBlock/...）。
+        /// is T 在 C# 自动含派生——Button : Container，故 Query&lt;Container&gt; 命中 Button。
+        /// </summary>
+        [Fact]
+        public void QueryByTypeIncludesSubclasses()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                AppendChild(stage, root._id, CreateNode(stage, "div"));
+                AppendChild(stage, root._id, CreateNode(stage, "button"));
+                AppendChild(stage, root._id, CreateNode(stage, "img"));
+
+                // Container 子类：div(Container) + button(Button : Container)；img 不算。
+                var containers = root.Query<Container>();
+                Assert.Equal(2, containers.Count);
+                Assert.IsType<Container>(containers[0]);
+                Assert.IsType<Button>(containers[1]);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// Query 跨多层后代：div &gt; div &gt; button，root.Query&lt;Button&gt; 命中深层 button。
+        /// 验 DFS 真递归（不是只看直系子）。
+        /// </summary>
+        [Fact]
+        public void QueryByTypeDescendsMultipleLevels()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                uint mid = CreateNode(stage, "div");
+                AppendChild(stage, root._id, mid);
+                AppendChild(stage, mid, CreateNode(stage, "button"));
+
+                Assert.Single(root.Query<Button>());
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// Query&lt;T&gt; 不含 self（与 DOM querySelectorAll 一致：element.query 只查后代）。
+        /// root 是 Container —— root.Query&lt;Container&gt; 不应含 root 自身。
+        /// </summary>
+        [Fact]
+        public void QueryByTypeExcludesSelf()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                // root 是 Container；Query<Container> 在自身上不应返 root。
+                Assert.Empty(root.Query<Container>());
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// 在非 Container 叶子节点上 Query 返空（无 Children 可 DFS）。
+        /// </summary>
+        [Fact]
+        public void QueryOnLeafNodeReturnsEmpty()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Node leaf = ctx._registry.GetOrCreate(CreateRoot(stage, "img"));
+                Assert.Empty(leaf.Query<Node>());
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        // ── Query(selector)：class / tag / tag.cls ──────────────────────
+
+        /// <summary>
+        /// Query(".hi") 返所有 has_class("hi") 的后代。class 经 add_class FFI 设、has_class FFI 查。
+        /// </summary>
+        [Fact]
+        public void QueryByClassFindsNodesWithClass()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                uint a = CreateNode(stage, "div");
+                uint b = CreateNode(stage, "div");
+                AppendChild(stage, root._id, a);
+                AppendChild(stage, root._id, b);
+
+                ctx._registry.GetOrCreate(a).Classes.Add("hi");
+                ctx._registry.GetOrCreate(b).Classes.Add("hi");
+                ctx._registry.GetOrCreate(b).Classes.Add("bye");
+
+                var his = root.Query(".hi");
+                Assert.Equal(2, his.Count);
+                Assert.True(his[0].Classes.Contains("hi"));
+                Assert.True(his[1].Classes.Contains("hi"));
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// 子树无 class 节点 → Query(".cls") 返空。
+        /// </summary>
+        [Fact]
+        public void QueryByClassEmptyWhenNoMatch()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                AppendChild(stage, root._id, CreateNode(stage, "div"));
+
+                Assert.Empty(root.Query(".never-added"));
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// Query("button") 按 tag 匹配 —— 经 get_node_kind → NodeKind → 围栏 tag 名。
+        /// 建 div + button + img 子树，"button" 只命中 button 节点。
+        /// </summary>
+        [Fact]
+        public void QueryByTagMatchesTaggedNodes()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                AppendChild(stage, root._id, CreateNode(stage, "button"));
+                AppendChild(stage, root._id, CreateNode(stage, "img"));
+                AppendChild(stage, root._id, CreateNode(stage, "div"));
+
+                var buttons = root.Query("button");
+                Assert.Single(buttons);
+                Assert.IsType<Button>(buttons[0]);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// tag 别名：div/header/nav 都映 NodeKind.Container。selector "div" 只命中 Container 节点
+        /// （注意：button 虽然 : Container，但 NodeKind=Button，不命中 "div"——tag 匹配走 NodeKind 严格 ==）。
+        /// </summary>
+        [Fact]
+        public void QueryByTagMatchesOnlyExactNodeKind()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                AppendChild(stage, root._id, CreateNode(stage, "div"));     // NodeKind.Container
+                AppendChild(stage, root._id, CreateNode(stage, "button"));   // NodeKind.Button
+
+                // "div" 严格匹配 NodeKind.Container，不匹配 Button（Button : Container 但 kind 不同）。
+                var divs = root.Query("div");
+                Assert.Single(divs);
+                Assert.IsType<Container>(divs[0]);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// Query("button.primary")：tag AND class 同时匹配。button 无 primary class 不命中。
+        /// </summary>
+        [Fact]
+        public void QueryByTagAndClassRequiresBoth()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                uint b1 = CreateNode(stage, "button");
+                uint b2 = CreateNode(stage, "button");
+                AppendChild(stage, root._id, b1);
+                AppendChild(stage, root._id, b2);
+                ctx._registry.GetOrCreate(b2).Classes.Add("primary");
+
+                var primaryButtons = root.Query("button.primary");
+                Assert.Single(primaryButtons);
+                Assert.True(primaryButtons[0].Classes.Contains("primary"));
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// 未知 tag（围栏外）→ Query 返空（容错，不抛）。
+        /// </summary>
+        [Fact]
+        public void QueryByUnknownTagReturnsEmpty()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                AppendChild(stage, root._id, CreateNode(stage, "div"));
+
+                Assert.Empty(root.Query("video"));   // 围栏外 tag
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// null / 空 / whitespace selector → 返空 list（容错，不抛）。
+        /// </summary>
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("   ")]
+        public void QueryEmptySelectorReturnsEmpty(string selector)
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                AppendChild(stage, root._id, CreateNode(stage, "div"));
+
+                Assert.Empty(root.Query(selector));
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        // ── 文档序（pre-order DFS）──────────────────────────────────────
+
+        /// <summary>
+        /// Query 文档序 pre-order：先 visit 直系子（按 append 顺序），再递归各子的子树。
+        /// 建 div &gt; [a, b&gt;[c, d], e]，Query&lt;Container&gt; 应返 [a, b, c, d, e] 严格按文档序。
+        /// </summary>
+        [Fact]
+        public void QueryReturnsDocumentOrder()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                uint a = CreateNode(stage, "div");
+                uint b = CreateNode(stage, "div");
+                uint c = CreateNode(stage, "div");
+                uint d = CreateNode(stage, "div");
+                uint e = CreateNode(stage, "div");
+                AppendChild(stage, root._id, a);
+                AppendChild(stage, root._id, b);
+                AppendChild(stage, root._id, e);
+                AppendChild(stage, b, c);
+                AppendChild(stage, b, d);
+
+                var order = root.Query<Container>();
+                // 预期文档序：a, b（先 visit 直系子）→ b 的子树 c, d → e。
+                // pre-order：visit(b) 后立即递归 b 的子树（c, d），再回 root 的下一子 e。
+                Assert.Equal(new[] { a, b, c, d, e }, AssertConvertIds(order));
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        // ── Get<T> / TryGet<T>：未命中路径（正路径 defer 到 E2）──────────
+
+        /// <summary>
+        /// Get 在子树内无此 id 时抛 UIContractException。
+        /// 这是 4a 可测的「未命中」路径——不需要预先设 id（默认子树内无任何 id_attr）。
+        /// 正路径（命中 + 类型匹配）defer 到 E2 fixture pkg。
+        /// </summary>
+        [Fact]
+        public void GetThrowsUIContractWhenMissing()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                AppendChild(stage, root._id, CreateNode(stage, "button"));
+
+                Assert.Throws<UIContractException>(() => root.Get<Button>("never-set-id"));
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// Get(null) / Get("") 抛 UIContractException（调用方写错——DOM getElementById 习惯）。
+        /// null 也能 throw NE/Lazy —— 经 TryGet 内的 IsNullOrEmpty 早返 false 后 Get 抛 UIContract。
+        /// </summary>
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        public void GetThrowsUIContractOnNullOrEmptyId(string badId)
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                Assert.Throws<UIContractException>(() => root.Get<Button>(badId));
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// TryGet 未命中返 false + node=default。宽松路径（null/空 id 也 false，不抛）。
+        /// </summary>
+        [Fact]
+        public void TryGetReturnsFalseWhenMissing()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                AppendChild(stage, root._id, CreateNode(stage, "button"));
+
+                Assert.False(root.TryGet<Button>("never-set-id", out var found));
+                Assert.Null(found);   // default(Button) == null（Button 是引用类型）
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// TryGet(null/empty) 返 false（不抛——TryGet 是宽松查询路径，与 Get 抛互补）。
+        /// </summary>
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        public void TryGetReturnsFalseOnNullOrEmptyId(string badId)
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                Assert.False(root.TryGet<Button>(badId, out _));
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// 全局命中但不在本子树 → scope-check 拦，TryGet 返 false。
+        /// 4a 可间接验 scope-check 工作：建两棵独立 root（root2 不在 root1 子树），root2 的 id（如设）
+        /// 不应被 root1.Get 看到。但 4a 无 set_id FFI——只能间接：find_node_by_id 全局返首个匹配节点，
+        /// 若它在另一棵子树，root1 的 TryGet 应 scope-check 拦下。具体正路径 defer E2；此测试占位说明语义。
+        /// **占位测试**：当前 4a 无 set_id FFI，无法在 C# 造 id_attr；保留占位防忘，E2 fixture pkg 落地后补真实数据。
+        /// </summary>
+        [Fact(Skip = "scope-boundary 正路径需 set_id FFI / fixture pkg（E2）。4a 仅 IsInSubtree 父链实现已就位，" +
+                     "待 E2 fixture pkg 落地后补真实数据 + 启用本测试。")]
+
+        public void TryGetScopeCheckRejectsOutOfSubtreeMatch() { }
+
+        // ── Dispose 闸门（C1 ThrowIfDisposed 套用到 C7 新入口）──────────
+
+        /// <summary>
+        /// Dispose 后访问 Get/TryGet/Query 抛 ObjectDisposedException（ThrowIfDisposed 在每个公共入口）。
+        /// </summary>
+        [Fact]
+        public void PostDisposeAccessThrowsObjectDisposed()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                AppendChild(stage, root._id, CreateNode(stage, "button"));
+                root.Dispose();
+
+                Assert.Throws<ObjectDisposedException>(() => root.Get<Button>("any"));
+                Assert.Throws<ObjectDisposedException>(() => root.TryGet<Button>("any", out _));
+                Assert.Throws<ObjectDisposedException>(() => root.Query<Button>());
+                Assert.Throws<ObjectDisposedException>(() => root.Query(".cls"));
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        // ── helpers ──────────────────────────────────────────────────────
+
+        private static uint[] AssertConvertIds(System.Collections.Generic.IReadOnlyList<Node> nodes)
+        {
+            var arr = new uint[nodes.Count];
+            for (int i = 0; i < nodes.Count; i++) arr[i] = nodes[i]._id;
+            return arr;
+        }
+
+        private static uint CreateRoot(IntPtr stage, string kind)
+        {
+            StageHandle* h = (StageHandle*)stage.ToPointer();
+            byte[] k = Encoding.UTF8.GetBytes(kind);
+            fixed (byte* kp = k)
+                return Native.loomgui_stage_create_root(h, kp, (nuint)k.Length, null, 0);
+        }
+
+        private static uint CreateNode(IntPtr stage, string kind)
+        {
+            StageHandle* h = (StageHandle*)stage.ToPointer();
+            byte[] k = Encoding.UTF8.GetBytes(kind);
+            fixed (byte* kp = k)
+                return Native.loomgui_stage_create_node(h, kp, (nuint)k.Length, null, 0);
+        }
+
+        private static void AppendChild(IntPtr stage, uint parent, uint child)
+        {
+            StageHandle* h = (StageHandle*)stage.ToPointer();
+            int rc = Native.loomgui_stage_append_child(h, parent, child);
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    $"append_child(parent={parent}, child={child}) failed rc={rc}");
+        }
+    }
+}

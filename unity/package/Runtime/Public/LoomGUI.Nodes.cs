@@ -179,10 +179,99 @@ namespace LoomGUI
             _disposed = true;
         }
 
-        public T Get<T>(string id) where T : Node { throw NE(); }   // 作用域内查找，未找到抛 UIContractException
-        public bool TryGet<T>(string id, out T node) where T : Node { throw NE(); }
-        public IReadOnlyList<T> Query<T>() where T : Node { throw NE(); }            // 按类型，文档序
-        public IReadOnlyList<Node> Query(string selector) { throw NE(); }            // ".class" / "tag.class"，文档序
+        /// <summary>
+        /// 按 id 在本节点子树内查找 typed T（DFS 候选取 find_node_by_id 全局首匹配 + 父链 scope-check）。
+        /// 未命中（无 id / 不在子树 / 类型不符）抛 <see cref="UIContractException"/>。null/empty id 直接抛
+        /// （DOM getElementById 习惯：空 id 是调用方写错）。
+        ///
+        /// 作用域契约（public-api §3.1）：组件作用域内查找，不穿透嵌套组件边界。4a 简化：仅校验候选在
+        /// 本节点子树内（parent chain 命中 _id）；完整 IsScopeRoot 边界（不穿透嵌套组件/List item）推 4b。
+        ///
+        /// find_node_by_id 是全局首匹配（core stage.find_node_by_id 遍历整 scene 的 id_attr）——若多节点
+        /// 共用同一 id（本身违反"id 在作用域内唯一"约定），first-match 可能落在本子树外导致 Get 误报未命中。
+        /// 这是已知 gap，等 4b 加 scope-rooted lookup FFI 时一并修（roadmap §3.1）。
+        /// </summary>
+        public T Get<T>(string id) where T : Node
+        {
+            if (!TryGet<T>(id, out var node))
+                throw new UIContractException(
+                    $"node with id '{id ?? "<null>"}' not found in scope of ({GetType().Name} id={_id})" +
+                    " (missing / outside subtree / wrong type)");
+            return node;
+        }
+
+        /// <summary>
+        /// TryGet 是 Get 的 bool-out 版：找到且类型符 → true + out；否则 false（不抛）。
+        /// 找到但类型不符（found is not T）也算 miss（false），与 Get 共享一致命中判定。
+        /// null/empty id 直接返 false（与 Get 的「抛」互补——TryGet 是宽松查询路径）。
+        /// </summary>
+        public bool TryGet<T>(string id, out T node) where T : Node
+        {
+            node = default;
+            ThrowIfDisposed();
+            if (string.IsNullOrEmpty(id)) return false;
+
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte[] idb = Encoding.UTF8.GetBytes(id);
+            uint candidate;
+            fixed (byte* p = idb)
+                candidate = Native.loomgui_stage_find_node_by_id(h, p, (nuint)idb.Length);
+
+            // 无匹配（含 null stage / 非 UTF-8，后两者 ThrowIfDisposed + UTF-8 编码已拦）。
+            if (candidate == RootSentinel) return false;
+            // 命中但不在本子树：scope-check 走父链，确认候选的祖先链中有 _id。
+            if (!IsInSubtree(h, candidate)) return false;
+
+            // registry.GetOrCreate 兑现身份稳定（同 NodeId → 同实例）。若已 Dispose 后 slot 复用，
+            // candidate 指向新节点——find_node_by_id 返 live NodeId，不会是已 Dispose 的 stale id。
+            Node found = _ctx._registry.GetOrCreate(candidate);
+            if (found is T typed) { node = typed; return true; }
+            return false;   // 找到但类型不符：算 miss（TryGet false / Get 抛）。
+        }
+
+        /// <summary>
+        /// 按类型 DFS 子树（文档序 pre-order）。visit 顺序：先子后孙——先访问当前节点所有直系子，
+        /// 再递归各子的子树。<see cref="Query{T}"/> 不含 self（与 DOM querySelectorAll 一致：
+        /// 在 element 上调 query 只查后代，不含 element 自身）。
+        ///
+        /// T 是 C# typed 子类（Button/Container/Image/...）；is T 同时匹配子类（Query&lt;Container&gt;
+        /// 含 Button/Link/TextBlock 等 Container 派生）。
+        /// </summary>
+        public IReadOnlyList<T> Query<T>() where T : Node
+        {
+            ThrowIfDisposed();
+            var result = new List<T>();
+            DfsPreOrder(n => { if (n is T t) result.Add(t); });
+            return result;
+        }
+
+        /// <summary>
+        /// 按 CSS-like selector DFS 子树（文档序 pre-order）。selector 支持 ".cls"（class）/ "tag"
+        /// （tag 名）/ "tag.cls"（both），空 selector 返空 list（不抛）。tag 匹配经 get_node_kind →
+        /// NodeKind → 围栏 tag 名（fence schema 子集，详见 <see cref="TagToNodeKind"/>）。
+        ///
+        /// 不支持：复合 selector（"div &gt; .foo" / ".a.b" 多 class）、伪类（":hover"）、
+        /// 属性（"[type=text]"）。围栏闭合下 runtime 节点的 type 已固化为 NodeKind，"input" selector
+        /// 只匹配 TextField（默认 type=text），不匹配 Slider/Toggle 等 type 派生——这是 4a 简化，
+        /// type-aware selector 推后续（YAGNI：尚无场景驱动）。
+        /// </summary>
+        public IReadOnlyList<Node> Query(string selector)
+        {
+            ThrowIfDisposed();
+            var (tag, cls) = ParseSelector(selector);
+            // 空 selector（null/empty/whitespace）→ 空结果（不是「匹配全部」）。
+            // DOM querySelectorAll("") 抛 SyntaxError；LoomGUI 容错返空（不抛——宽松查询路径）。
+            // "*" 走下面的 path：TagToNodeKind("*")=null → 所有节点 tagOk=false → 空结果（4a 不支持通用选择器）。
+            if (tag == null && cls == null) return Array.Empty<Node>();
+            var result = new List<Node>();
+            DfsPreOrder(n =>
+            {
+                bool tagOk = tag == null || MatchesTag(n, tag);
+                bool clsOk = cls == null || n.Classes.Contains(cls);
+                if (tagOk && clsOk) result.Add(n);
+            });
+            return result;
+        }
 
         public Animation Play(string name) { throw NE(); }
 
@@ -205,6 +294,109 @@ namespace LoomGUI
         {
             if (_disposed) throw new ObjectDisposedException(GetType().Name);
         }
+
+        // ── scope lookup helpers（Get/TryGet/Query 内部）──────────────────
+
+        /// <summary>
+        /// 走父链判断 candidateId 是否在 _id 子树内（含直接子 + 任意深度后代；不含 _id 自身）。
+        /// 用 loomgui_node_parent 逐层向上，直到撞 _id（在子树）或 RootSentinel（走出根）。
+        /// 单线程同步内树结构稳定；防御性 cycle check（parent == current）防 ABI 异常死循环。
+        /// </summary>
+        private bool IsInSubtree(StageHandle* h, uint candidateId)
+        {
+            uint current = candidateId;
+            for (int i = 0; i < 10_000; i++)   // 上限防御：scene 树深度受围栏闭合有界，10k 兜底
+            {
+                uint parent = Native.loomgui_node_parent(h, current);
+                if (parent == RootSentinel) return false;   // 走出根，candidate 在别棵子树
+                if (parent == _id) return true;             // 命中本节点——candidate 是其后代
+                if (parent == current) return false;        // 防御：自循环（理论不达）
+                current = parent;
+            }
+            return false;   // 深度超 10k：当作不在子树（理论不达，scene 不会有如此深树）
+        }
+
+        /// <summary>
+        /// 文档序 pre-order DFS：从本节点的直系子开始，依次 visit 每个子 + 递归子的子树。
+        /// 不 visit self（与 DOM querySelectorAll 语义一致——element.query 不含 element 自身）。
+        /// 非 Container 节点无 Children —— no-op（Query 在叶子节点上返空 list）。
+        /// </summary>
+        private void DfsPreOrder(Action<Node> visit)
+        {
+            if (this is Container c)
+            {
+                // c.Children lazy materialize 每次 re-fetch 最新直系子（树可变，不缓存 list）。
+                // registry.GetOrCreate 兑现身份稳定——同 NodeId 多次 DFS 入参返同实例。
+                foreach (Node child in c.Children)
+                {
+                    visit(child);
+                    child.DfsPreOrder(visit);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 解析 CSS-like selector（fence 子集）。支持 ".cls" / "tag" / "tag.cls" 三种形式；
+        /// 其它形式（".a.b" / "a &gt; b"）按容错解析：取首个 '.' 切 tag|cls，多 class 取末段为 cls
+        /// （粗糙 4a 简化——复合 selector 不在 4a 范围）。null/空/whitespace → (null,null) 即匹配空集。
+        /// </summary>
+        private static (string tag, string cls) ParseSelector(string selector)
+        {
+            if (string.IsNullOrWhiteSpace(selector)) return (null, null);
+            string s = selector.Trim();
+            int dot = s.IndexOf('.');
+            if (dot < 0) return (s, null);                      // "tag"
+            string tagPart = dot > 0 ? s.Substring(0, dot) : null;
+            string clsPart = dot < s.Length - 1 ? s.Substring(dot + 1) : null;
+            // cls 含 '.' 或 tag 时不再细切——4a 把 "tag.a.b" 当作 (tag, "a.b") 永远 miss。
+            // 后续升级到真 CSS selector parser 时替换本方法。
+            return (tagPart, clsPart);
+        }
+
+        /// <summary>
+        /// tag 匹配：取节点 NodeKind + 查 <see cref="TagToNodeKind"/> 映射。
+        /// 多个 tag 共映同一 NodeKind（div/header/nav → Container；ul/ol → ListView；span/strong/em
+        /// → TextElement）—— selector 用任一别名都命中。未知 tag（含围栏外的）TagToNodeKind 返 null
+        /// → 永远 false（容错：不抛、selector 静默空集）。
+        /// </summary>
+        private static bool MatchesTag(Node n, string tag)
+        {
+            NodeKind? expected = TagToNodeKind(tag);
+            if (expected == null) return false;
+            StageHandle* h = (StageHandle*)n._ctx._stage.ToPointer();
+            byte kind = 0xFF;
+            int rc = Native.loomgui_stage_get_node_kind(h, n._id, &kind);
+            if (rc != 0) return false;   // 节点不 live / stage 失效——保守 false
+            return (NodeKind)kind == expected.Value;
+        }
+
+        /// <summary>
+        /// 围栏 tag 名 → C# NodeKind 映射（crates/fence/src/schema/tag.rs::resolve_semantic 子集）。
+        /// input 无 type 默认 TextField；type=range/checkbox/... 派生 kind 在 parse 期已固化，selector
+        /// 用 "input" 只匹配 TextField（不匹配派生——4a 简化，type-aware selector 推后续）。
+        /// template 不在映射表——parse 期消费、不进 runtime 树，selector "template" 永远空集。
+        /// </summary>
+        private static NodeKind? TagToNodeKind(string tag) => tag switch
+        {
+            "div" or "header" or "nav" => NodeKind.Container,
+            "p" => NodeKind.TextBlock,
+            "span" or "strong" or "em" => NodeKind.TextElement,
+            "br" => NodeKind.LineBreak,
+            "label" => NodeKind.Label,
+            "button" => NodeKind.Button,
+            "a" => NodeKind.Link,
+            "img" => NodeKind.Image,
+            "canvas" => NodeKind.Canvas,
+            "input" => NodeKind.TextField,       // 默认 type=text；派生 kind 不命中（4a 简化）
+            "textarea" => NodeKind.TextArea,
+            "select" => NodeKind.Dropdown,
+            "option" => NodeKind.OptionItem,
+            "progress" => NodeKind.ProgressBar,
+            "ul" or "ol" => NodeKind.ListView,
+            "li" => NodeKind.ListItem,
+            "slot" => NodeKind.Slot,
+            _ => null,                            // 含围栏外 tag + 自定义标签（带连字符）
+        };
 
         /// <summary>
         /// 经 FFI 递归遍历 Rust 子树，对每个后代 NodeId：若 C# 侧有缓存 wrapper 则标 _disposed
