@@ -237,6 +237,19 @@ pub fn parse_color(s: &str) -> Option<[f32; 4]> {
         let g = u8::from_str_radix(&s[2..4], 16).ok()?;
         let b = u8::from_str_radix(&s[4..6], 16).ok()?;
         Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0])
+    } else if s.len() == 8 {
+        // CSS Color Module Level 4 `#rrggbbaa`：末 2 位 hex 为 alpha（aa=ff 不透明）。
+        // 接受 StyleMirror flush 的 8 位形式（与 6 位 hex aa=ff 等价），确保 color round-trip。
+        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+        let a = u8::from_str_radix(&s[6..8], 16).ok()?;
+        Some([
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            a as f32 / 255.0,
+        ])
     } else if s.len() == 3 {
         // CSS 3 位 hex：每数字重复（#rgb → #rrggbb，如 #888 = #888888）。
         // digit d → d*17（d*16+d）：0→0、f→255，与 6 位展开一致。
@@ -758,7 +771,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         }
         "color" => {
             // transparent 关键字 + rgba(0,0,0,0)（AI 常与 transparent 混用）都判透明。
-            // parse_color 仅认 #rrggbb hex，rgba 走不到——此处显式拦截避免渐变字三件套
+            // parse_color 仅认 hex 形式（3/6/8 位），rgba() 函数走不到——此处显式拦截避免渐变字三件套
             // 里 color:rgba(0,0,0,0) 静默退化为不透明黑（AI 可预测性破坏）。
             let norm = value.trim().replace(' ', "").to_lowercase();
             if norm == "transparent" || norm == "rgba(0,0,0,0)" {
@@ -916,7 +929,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         "text-shadow" => {
             // CSS text-shadow: ox oy [blur] color，逗号分隔多阴影。
             // 每段 → FontEffect::Shadow{ox, oy, blur, color}，叠进 text_effects（INHERITED）。
-            // blur 可省（默认 0 = 硬边投影）；color 必须可解析（parse_color 仅认 #rrggbb 6 位 hex）。
+            // blur 可省（默认 0 = 硬边投影）；color 必须可解析（parse_color 仅认 hex 3/6/8 位）。
             // 任一段非法 → 整条声明静默忽略（返 false，与围栏外 CSS 同模式）。
             let shadows = parse_text_shadow(value);
             if shadows.is_empty() {
@@ -942,7 +955,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             // CSS -webkit-text-stroke: w color（标准 CSS，fact-standard）。
             // → FontEffect::Stroke{w, color}，叠进 text_effects（INHERITED）。
             // 内侧吃字（erode），Front layer（描边在文字上方绘制）。
-            // color 必须可解析（parse_color 仅认 #rrggbb 6 位 hex，命名色静默拒）。
+            // color 必须可解析（parse_color 仅认 hex 3/6/8 位，命名色静默拒）。
             let parts: Vec<&str> = value.split_whitespace().collect();
             if parts.len() < 2 {
                 return false;
@@ -1039,7 +1052,7 @@ fn parse_one_transition(part: &str) -> Option<crate::style::resolved::Transition
 /// 解析 CSS `text-shadow` 声明值 → FontEffect::Shadow 列表。
 ///
 /// 逗号分隔多阴影；每段形如 `ox oy [blur] color`（CSS 标准语法）。blur 可省（默认 0），
-/// color 必须是 `#rrggbb` 6 位 hex（parse_color 限制，命名色静默拒）。任一段非法 →
+/// color 必须是 hex 形式（3/6/8 位，parse_color 限制，命名色静默拒）。任一段非法 →
 /// 返回空 Vec（apply_decl 据此返 false，整条声明静默忽略——CSS 一条声明全有或全无语义）。
 fn parse_text_shadow(value: &str) -> Vec<crate::text::font_effect::FontEffect> {
     value.split(',').filter_map(parse_one_text_shadow).collect()
