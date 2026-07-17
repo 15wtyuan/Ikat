@@ -176,28 +176,26 @@ namespace LoomGUI.HeadlessTests
                 Container instRoot = InstantiateFixture(h, ctx);
                 Container child = instRoot.Get<Container>("child");
 
-                // Before adding highlight class: child has no explicit color rule.
-                // CSS .highlight{color:#ff0000} is in fixture; child starts without this class.
+                // root has class="highlight" → .highlight{color:#ff0000}.
+                // color is inherited, so child initially inherits red (R=1,G=0,B=0).
+                // To prove Classes.Add actually changes computed style, we add
+                // .blue{color:#0000ff} → child's color must change red→blue.
                 Tick(h);
                 ComputedNodeStyleRepr csBefore = GetComputedStyle(h, child._id);
-                // child may inherit red from root's class; but child itself has no highlight,
-                // so its computed color is inherited (red from root via cascade).
-                // The key assertion: after adding "highlight", child's OWN computed color
-                // is explicitly red (not just inherited).
+                Assert.True(csBefore.color[0] >= 0.99f,
+                    "pre-Add: child inherits red from root's .highlight");
+                Assert.True(csBefore.color[2] <= 0.01f,
+                    "pre-Add: child blue channel near 0 (not yet .blue)");
 
-                // Add "highlight" class → cascade re-runs on next tick.
-                child.Classes.Add("highlight");
+                // Add "blue" class → cascade re-runs on next tick.
+                child.Classes.Add("blue");
                 Tick(h);
 
                 ComputedNodeStyleRepr cs = GetComputedStyle(h, child._id);
-                Assert.True(cs.color[0] >= 0.99f,
-                    $"color.R should be ~1.0 (red from .highlight{{color:#ff0000}}); got {cs.color[0]}");
-                Assert.True(cs.color[1] <= 0.01f,
-                    $"color.G should be ~0.0; got {cs.color[1]}");
-                Assert.True(cs.color[2] <= 0.01f,
-                    $"color.B should be ~0.0; got {cs.color[2]}");
-                Assert.True(cs.color[3] >= 0.99f,
-                    $"color.A should be ~1.0; got {cs.color[3]}");
+                Assert.True(cs.color[0] <= 0.01f,
+                    $"post-Add: color.R should be ~0.0 (blue, not red); got {cs.color[0]}");
+                Assert.True(cs.color[2] >= 0.99f,
+                    $"post-Add: color.B should be ~1.0 (blue from .blue{{color:#0000ff}}); got {cs.color[2]}");
             }
             finally { StageHarness.Destroy(stage); }
         }
@@ -251,6 +249,7 @@ namespace LoomGUI.HeadlessTests
                 Assert.Same(childContainer, btn.Parent);
                 Assert.Same(childContainer, img.Parent);
                 Assert.NotNull(childContainer.Parent);
+                Assert.Same(instRoot, childContainer.Parent);
             }
             finally { StageHarness.Destroy(stage); }
         }
