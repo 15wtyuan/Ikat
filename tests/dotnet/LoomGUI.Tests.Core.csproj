@@ -19,4 +19,11 @@
     <Compile Include="..\..\unity\package\Runtime\FrameBlob.cs" Link="Src\FrameBlob.cs" />
   </ItemGroup>
 
+  <!-- 排除独立 csproj 子目录：SDK 默认 **/*.cs glob 会误扫 HeadlessTests / PublicApi，
+       它们有自己的 csproj + 依赖（unsafe / Bindings），扫进 Tests.Core 会编译失败。 -->
+  <ItemGroup>
+    <Compile Remove="LoomGUI.HeadlessTests\**\*.cs" />
+    <Compile Remove="LoomGUI.PublicApi\**\*.cs" />
+  </ItemGroup>
+
 </Project>
