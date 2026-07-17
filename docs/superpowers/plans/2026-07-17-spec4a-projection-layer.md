@@ -594,7 +594,10 @@ git commit -m "feat(ffi): export inline_override/children/class ops + rebuild dl
 [Fact] public void LengthPct() => Assert.Equal("50%", CssValueConvert.ToCss(Length.Pct(50)));
 [Fact] public void ColorHex() => Assert.Equal("#ff0000ff", CssValueConvert.ToCss(new Color(1f,0f,0f,1f)));
 ```
-- [ ] **Step 2: 实现** `CssValueConvert`（`Length.Px→"{n}px"`、`Pct→"{n}%"`、`Auto→"auto"`；`Color→"#rrggbbaa"`；`Thickness→"{t} {r} {b} {l}"`）。Unset 值由调用方跳过（不进 flush）。
+- [ ] **Step 2: 实现** `CssValueConvert`：
+  - typed 重载：`Length`（Px→`"{n}px"`、Pct→"{n}%"、Auto→"auto"）、`Color`（→"#rrggbbaa"）、`Thickness`（→"{t} {r} {b} {l}"）、`float`（→ InvariantCulture 串）。
+  - **enum → CSS keyword**：NodeStyle 的 enum 属性（DisplayMode/FlexDirection/FlexWrap/JustifyContent/AlignItems/Overflow/Position/Visibility）各映射到 CSS keyword（`DisplayMode.Block→"block"`、`FlexDirection.Row→"row"`、…），照 CSS 标准 + 对照 `crates/core/src/style/mapping.rs` apply_decl 的反向。
+  - **`ToCss(object)` 派发重载**（switch 运行时类型派发到上述 typed 重载）——供 StyleMirror（C3）拼 CSS 用。Unset 值由调用方跳过（不进 flush）。
 - [ ] **Step 3: 跑过 + commit** `feat(c#): CssValueConvert typed↔css`
 
 ---
