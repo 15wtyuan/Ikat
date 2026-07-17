@@ -9,36 +9,47 @@ namespace LoomGUI
 {
     public readonly struct Length
     {
-        public float Value { get { throw NE(); } }
-        public LengthUnit Unit { get { throw NE(); } }
-        public static Length Px(float v) { throw NE(); }
-        public static Length Pct(float v) { throw NE(); }
-        public static Length Auto() { throw NE(); }
-        public static Length Unset() { throw NE(); }   // inline override 撤销哨兵：getter 未写过返回此，setter 写此 = 撤销回落 CSS
-        static NotImplementedException NE() => new NotImplementedException();
+        public float Value { get; }
+        public LengthUnit Unit { get; }
+        private Length(float value, LengthUnit unit) { Value = value; Unit = unit; }
+        public static Length Px(float v) => new Length(v, LengthUnit.Px);
+        public static Length Pct(float v) => new Length(v, LengthUnit.Percent);
+        public static Length Auto() => new Length(0f, LengthUnit.Auto);
+        public static Length Unset() => new Length(0f, LengthUnit.Unset);   // inline override 撤销哨兵：getter 未写过返回此，setter 写此 = 撤销回落 CSS
     }
 
     public enum LengthUnit { Px, Percent, Auto, Unset }
 
     public readonly struct Thickness
     {
-        public float Left { get { throw NE(); } }
-        public float Top { get { throw NE(); } }
-        public float Right { get { throw NE(); } }
-        public float Bottom { get { throw NE(); } }
-        static NotImplementedException NE() => new NotImplementedException();
+        public float Left { get; }
+        public float Top { get; }
+        public float Right { get; }
+        public float Bottom { get; }
+        // 补全 ctor（frozen 仅约束既有成员不删/不改，补构造不算改签名）。
+        // 参数顺序按字段声明序：left, top, right, bottom。
+        public Thickness(float left, float top, float right, float bottom)
+        {
+            Left = left; Top = top; Right = right; Bottom = bottom;
+        }
     }
 
     public readonly struct Color
     {
-        public float R { get { throw NE(); } }
-        public float G { get { throw NE(); } }
-        public float B { get { throw NE(); } }
-        public float A { get { throw NE(); } }
-        public bool IsUnset { get { throw NE(); } }   // true = 未被 typed 层覆盖（Unset 哨兵），getter 据此返回
-        public Color(float r, float g, float b, float a = 1f) { throw NE(); }
-        public static Color Unset { get { throw NE(); } }
-        static NotImplementedException NE() => new NotImplementedException();
+        public float R { get; }
+        public float G { get; }
+        public float B { get; }
+        public float A { get; }
+        public bool IsUnset { get; }   // true = 未被 typed 层覆盖（Unset 哨兵），getter 据此返回
+
+        // 公共 ctor 强制 IsUnset=false（用户态颜色必然是已设置）；IsUnset=true 仅由 Unset factory 获得，
+        // 故另设 private 5-参 ctor 让 Unset 走特化路径而不破公共 ctor 签名。
+        public Color(float r, float g, float b, float a = 1f) : this(r, g, b, a, isUnset: false) { }
+        private Color(float r, float g, float b, float a, bool isUnset)
+        {
+            R = r; G = g; B = b; A = a; IsUnset = isUnset;
+        }
+        public static Color Unset => new Color(0f, 0f, 0f, 0f, isUnset: true);
     }
 
     public readonly struct Vector2

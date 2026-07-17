@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>LoomGUI.HeadlessTests</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    B1 范围：纯 managed 测试。直接 Compile Include Public/*.cs + Projection/*.cs，
+    编进测试程序集（不走 ProjectReference），所以 internal CssValueConvert 可见。
+    不含 dll / Bindings / Stubs（B3 会在此 csproj 上扩展加 native P/Invoke）。
+    PackageReference 版本对齐 tests/dotnet/LoomGUI.Tests.Core.csproj（不自己造版本号）。
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.*.cs" Link="Public\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\unity\package\Runtime\Projection\*.cs" Link="Projection\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>
