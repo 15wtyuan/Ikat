@@ -351,7 +351,8 @@ namespace LoomGUI
         }
 
         // ── ponytail defer：core apply_decl / inline_bit 表未实现的 prop ──
-        // ZIndex（z-index）：core 未实现 z-index 通道（scene::node 的 order 走 base_style.order 路径）。
+        // ZIndex（z-index）：core apply_decl 处理 "order"（mapping.rs:829）但未给 inline_bit —
+        // set_inline_override 会被 bit 检查前置跳过（打包期 CSS order:N 仍生效）。
         // Visibility（visibility）：core apply_decl 无 "visibility" 分支（display:none 是围栏闭合的隐藏语义）。
         // SetVar/RemoveVar（--xxx）：core apply_decl 不处理 CSS 自定义属性；custom-property 通道待加。
         // 保留 throw NE 防止静默丢：调用方期望 round-trip，prop-name 不在 inline_bit 表经 set_inline_override
