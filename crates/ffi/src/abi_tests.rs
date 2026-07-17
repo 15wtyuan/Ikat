@@ -750,3 +750,208 @@ fn non_utf8_entry_returns_error() {
     );
     loomgui_stage_free(h);
 }
+
+/// A6 smoke：便签层 7 FFI 的 ABI 不 panic 契约。
+/// 流程：create_root（建 scene + 根 div）→
+///   set_inline_override("width:100px") → 0；get_child_count(root) → 0；
+///   add_class("foo") → 0；has_class("foo") → 1；remove_class("foo") → 0；has_class → 0；
+///   get_children(cap=0) → -(n+2)（所需 cap）；unset_inline_override("width") → 0。
+/// 还覆盖 null handle / 非 UTF-8 入参 → -1 的错误路径。
+#[test]
+fn a6_inline_children_class_smoke() {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    assert!(!h.is_null());
+    let empty_css = b"";
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+
+    // set_inline_override：合法 CSS → 0
+    let css = b"width:100px";
+    assert_eq!(
+        loomgui_stage_set_inline_override(h, root, css.as_ptr(), css.len()),
+        0,
+        "set_inline_override ok"
+    );
+
+    // get_child_count：根无子 → 0
+    assert_eq!(
+        loomgui_stage_get_child_count(h, root),
+        0,
+        "get_child_count 根 0 子"
+    );
+
+    // get_children：cap=0 且有 0 子 → 写入数 0（不算不够，len <= cap）
+    let mut out: u32 = 0xDEAD;
+    let r = loomgui_stage_get_children(h, root, &mut out as *mut u32, 0);
+    assert_eq!(r, 0, "get_children 0 子 → 写入 0");
+    assert_eq!(out, 0xDEAD, "cap=0 时不应写 out");
+
+    // add_class + has_class round-trip
+    let class_name = b"foo";
+    assert_eq!(
+        loomgui_stage_add_class(h, root, class_name.as_ptr(), class_name.len()),
+        0,
+        "add_class ok"
+    );
+    assert_eq!(
+        loomgui_stage_has_class(h, root, class_name.as_ptr(), class_name.len()),
+        1,
+        "has_class foo → true"
+    );
+    // 未加的 class → 0 (false)
+    let absent = b"bar";
+    assert_eq!(
+        loomgui_stage_has_class(h, root, absent.as_ptr(), absent.len()),
+        0,
+        "has_class bar → false"
+    );
+    // remove_class + has_class → 0
+    assert_eq!(
+        loomgui_stage_remove_class(h, root, class_name.as_ptr(), class_name.len()),
+        0,
+        "remove_class ok"
+    );
+    assert_eq!(
+        loomgui_stage_has_class(h, root, class_name.as_ptr(), class_name.len()),
+        0,
+        "remove 后 has_class → false"
+    );
+
+    // unset_inline_override：合法 prop → 0
+    let prop = b"width";
+    assert_eq!(
+        loomgui_stage_unset_inline_override(h, root, prop.as_ptr(), prop.len()),
+        0,
+        "unset_inline_override ok"
+    );
+
+    // 错误路径：null handle 全部 → -1
+    assert_eq!(
+        loomgui_stage_set_inline_override(std::ptr::null_mut(), root, css.as_ptr(), css.len()),
+        -1
+    );
+    assert_eq!(loomgui_stage_get_child_count(std::ptr::null(), root), -1);
+    assert_eq!(
+        loomgui_stage_has_class(
+            std::ptr::null(),
+            root,
+            class_name.as_ptr(),
+            class_name.len()
+        ),
+        -1
+    );
+
+    // 错误路径：非 UTF-8 入参 → -1
+    let bad: &[u8] = &[0xFF, 0xFE];
+    assert_eq!(
+        loomgui_stage_add_class(h, root, bad.as_ptr(), bad.len()),
+        -1,
+        "非 UTF-8 class 名 → -1"
+    );
+
+    // 错误路径：不 live 节点 → -1 / -1
+    assert_eq!(
+        loomgui_stage_get_child_count(h, 0xFFFF_FFFF),
+        -1,
+        "不 live 节点 get_child_count → -1"
+    );
+    assert_eq!(
+        loomgui_stage_has_class(h, 0xFFFF_FFFF, class_name.as_ptr(), class_name.len()),
+        -1,
+        "不 live 节点 has_class → -1"
+    );
+
+    loomgui_stage_free(h);
+}
+
+/// A6 get_children 缓冲不够契约：构造 2 子节点 → cap=0 → 返 -(n+2)（所需 cap）→
+/// cap=2 → 写入 2 + 数据正确。
+#[test]
+fn a6_get_children_capacity_contract() {
+    use loomgui_core::asset::{PackageInput, TemplateNode};
+    use loomgui_core::scene::NodeKind;
+    use loomgui_core::style::resolved::ResolvedStyle;
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    assert!(!h.is_null());
+    // 手搓包：comp1 含 2 Container 子（idx 1/2 parent_idx=0）
+    let nodes = [
+        TemplateNode {
+            kind: NodeKind::Container,
+            style: ResolvedStyle::default(),
+            parent_idx: None,
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            data_controller: None,
+            content: None,
+            src: None,
+        },
+        TemplateNode {
+            kind: NodeKind::Container,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(0),
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            data_controller: None,
+            content: None,
+            src: None,
+        },
+        TemplateNode {
+            kind: NodeKind::Container,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(0),
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            data_controller: None,
+            content: None,
+            src: None,
+        },
+    ];
+    let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
+    let pkg = loomgui_core::asset::write_package(&PackageInput {
+        components: vec![("comp1", nodes.as_slice(), &rules, &[])],
+    });
+    assert_eq!(
+        loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len()),
+        0
+    );
+    let empty_css = b"";
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    let comp = loomgui_stage_instantiate(h, b"bag".as_ptr(), 3, b"comp1".as_ptr(), 5);
+    assert_ne!(comp, 0xFFFF_FFFF, "instantiate ok");
+    assert_eq!(
+        loomgui_stage_append_child(h, root, comp),
+        0,
+        "append_child ok"
+    );
+
+    // comp 有 2 子 → get_child_count = 2
+    assert_eq!(loomgui_stage_get_child_count(h, comp), 2, "comp 2 子");
+
+    // cap=0 不够 → -(2+2) = -4
+    let r = loomgui_stage_get_children(h, comp, std::ptr::null_mut(), 0);
+    assert_eq!(r, -4, "cap 不够 → -(len+2) = -4");
+
+    // cap=2 正好 → 写入 2
+    let mut kids = [0u32; 2];
+    let r = loomgui_stage_get_children(h, comp, kids.as_mut_ptr(), 2);
+    assert_eq!(r, 2, "cap=2 → 写入 2");
+    // 写入的是 live 子 NodeId（非 0、非 sentinel）
+    for k in kids.iter() {
+        assert_ne!(*k, 0xFFFF_FFFF, "子 NodeId 非 sentinel");
+    }
+    assert_ne!(kids[0], kids[1], "两子 NodeId 应不同");
+
+    // cap=1 不够（2 子）→ -4
+    let mut small = [0u32; 1];
+    let r = loomgui_stage_get_children(h, comp, small.as_mut_ptr(), 1);
+    assert_eq!(r, -4, "cap=1 不够 → -4");
+
+    loomgui_stage_free(h);
+}
