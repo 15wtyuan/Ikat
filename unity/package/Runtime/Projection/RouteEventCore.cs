@@ -5,9 +5,15 @@
 // event struct 的 _core 字段是引用，handler 副本与 Dispatch 局部 evt 共享同一 RouteEventCore
 // 堆实例——突变经共享堆对象传播，DOM event.stopPropagation() 语义对齐。
 //
-// sealed：防派生；class 默认 LayoutType.Auto，字段顺序对投影层不透明（D2 EventBus 经
-// EventTypeCache<T> 反射读 EventType 属性，不依赖 _core 在 typed struct 中的偏移；Unsafe.As
-// 走引用槽，class/struct 都行）。
+// sealed：防派生。class 默认 LayoutKind.Auto——本类自身字段顺序对投影层不透明（投影层不
+// Unsafe.As 读 RouteEventCore，只经方法调用）。
+//
+// ⚠️ 偏移不变量（EventBus.Dispatch 依赖）：每个 typed event struct（ClickEvent 等）的
+// `RouteEventCore _core` 字段必须是该 struct 的首 field——EventBus.Dispatch 经
+// `Unsafe.As<T, RouteEventCore>(ref evt)` 把 evt 首 field 存储槽别名为 ref RouteEventCore。
+// _core 不在 offset 0 会让 Unsafe.As 读错字段 → 静默内存损坏。此不变量由 EventTypeCache<T>
+// 静态 ctor 的 `Marshal.OffsetOf<T>("_core") == 0` 断言强制（fail-fast）。
+// （与本类 LayoutKind.Auto 无关——本类字段顺序对投影层不透明，无关偏移约束。）
 
 namespace LoomGUI
 {

@@ -341,6 +341,35 @@ namespace LoomGUI.HeadlessTests
             finally { StageHarness.Destroy(stage); }
         }
 
+        // ── dispatch 期间同步 Dispose ───────────────────────────────────
+
+        /// <summary>
+        /// handler A 在 dispatch 期间同步 Dispose handler B 的 EventRegistration → B 的 handler
+        /// 不触发。验：Remove 置 entry.IsDisposed=true，InvokeHandlers 循环到 B 的 snapshot entry
+        /// 时跳过（"Dispose 后不再触发"契约）。snapshot 防 list 边遍边改，但 snapshot 内含已 Dispose
+        /// 的 entry 仍需 IsDisposed flag 拦截——Remove 的 MarkDisposed 是关键。
+        /// </summary>
+        [Fact]
+        public void DisposingOtherHandlersRegistrationDuringDispatchSkipsIt()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                int bCount = 0;
+                EventRegistration regB = null;
+                // 注册顺序决定 snapshot 顺序——A 在 B 之前注册，A 先触发。A 闭包捕获 regB 引用变量，
+                // dispatch 时 regB 已被 B 的注册赋值。
+                n.On<ClickEvent>(_ => regB.Dispose());             // A：Dispose B 的 reg
+                regB = n.On<ClickEvent>(_ => bCount++);            // B：被同步 Dispose
+
+                DispatchClick(ctx, n);
+
+                Assert.Equal(0, bCount);   // B 的 IsDisposed=true → snapshot 循环跳过
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
         // ── helpers ─────────────────────────────────────────────────────
 
         static void DispatchClick(UIContext ctx, Node target)

@@ -1,5 +1,11 @@
 // LoomGUI Frozen Public API: Events
 // See docs/design/public-api.md (权威契约) + docs/design/projection-layer.md (投影层机制)
+//
+// ⚠️ 关键不变量——每个 typed event struct 的 `RouteEventCore _core` 字段必须是该 struct 的
+// 首 field（offset 0）。EventBus.Dispatch 经 `Unsafe.As<T, RouteEventCore>(ref evt)` 把 evt
+// 首 field 别名为 ref RouteEventCore；_core 不在首位会让 Unsafe.As 读错字段 → 静默内存损坏。
+// 新增 typed event struct 时必须保持 `internal RouteEventCore _core;` 为首字段。此不变量由
+// EventTypeCache<T> 静态 ctor 的 Marshal.OffsetOf 断言强制（fail-fast）。
 
 using System;
 

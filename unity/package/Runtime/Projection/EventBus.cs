@@ -20,6 +20,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using LoomGUI.Bindings;
 
 namespace LoomGUI
@@ -164,9 +165,14 @@ namespace LoomGUI
         /// <summary>
         /// 从订阅表移除 entry。list 空则移 key（防 dict 膨胀）。
         /// 由 EventRegistration.Dispose 经闭包调；幂等（多次移同一 entry 后续 no-op）。
+        /// 同步置 entry.IsDisposed=true——Dispatch 的 snapshot 可能含 dispatch 过程中被
+        /// 同步 Dispose 的 entry（如 handler A 内 Dispose handler B 的 reg），IsDisposed flag
+        /// 让 InvokeHandlers 在循环到该 entry 时跳过（"Dispose 后不再触发"契约）。
         /// </summary>
         void Remove((uint nodeId, byte eventType, bool capture) key, IHandlerEntry entry)
         {
+            // 先置 flag 再移 list——flag 是 Dispatch snapshot 跳过判据，list.Remove 仅做表清理。
+            entry.MarkDisposed();
             if (_subs.TryGetValue(key, out var list))
             {
                 list.Remove(entry);
@@ -180,25 +186,33 @@ namespace LoomGUI
         {
             bool Once { get; }
             bool IsDisposed { get; }
+            /// <summary>
+            /// 置 IsDisposed=true。EventRegistration.Dispose 经 Remove 调——Dispatch snapshot
+            /// 含 dispatch 过程中被同步 Dispose 的 entry 时跳过该 entry（"Dispose 后不再触发"契约）。
+            /// </summary>
+            void MarkDisposed();
         }
 
         /// <summary>
         /// typed handler + once flag。<see cref="Invoke"/> 转调 <see cref="_handler"/>；
         /// once 触发后由 <see cref="EventBus.InvokeHandlers{T}"/> 收集移除。
-        /// <see cref="IsDisposed"/> 标记：EventRegistration.Dispose 后置 true——dispatch 时跳过
-        /// 已退订 entry（snapshot 可能含 dispatch 过程中被同步 Dispose 的 entry）。
+        /// <see cref="IsDisposed"/> 标记：EventRegistration.Dispose 经 <see cref="Remove"/>
+        /// 调 <see cref="MarkDisposed"/> 置 true——dispatch 时 snapshot 内的已退订 entry 跳过
+        /// （handler 触发前可能被前面 entry 同步 Dispose——如 handler A 内 Dispose handler B 的 reg）。
         /// </summary>
         sealed class HandlerEntry<T> : IHandlerEntry
         {
             readonly Action<T> _handler;
             public bool Once { get; }
-            public bool IsDisposed { get; internal set; }
+            public bool IsDisposed { get; private set; }
 
             internal HandlerEntry(Action<T> handler, bool once)
             {
                 _handler = handler;
                 Once = once;
             }
+
+            public void MarkDisposed() => IsDisposed = true;
 
             internal void Invoke(ref T evt) => _handler(evt);
         }
@@ -222,6 +236,18 @@ namespace LoomGUI
                     throw new InvalidOperationException(
                         $"typed event {typeof(T).Name} missing internal static byte EventType " +
                         "(D1 contract: each IRouteEvent struct declares it as D2 subscription key)");
+
+                // 关键不变量：Dispatch 的 Unsafe.As<T, RouteEventCore>(ref evt) 要求 _core 是 T
+                // 的首 field（别名为 ref RouteEventCore 读 offset 0）。每个封闭类型的静态 ctor 跑一次，
+                // 此处断言摊到类型加载期——运行时偏移错（有人误把 _core 放非首位）立刻 fail-fast，
+                // 而非静默读错字段。T 必须是 struct（IRouteEvent 全是 struct）+ 默认 LayoutKind.Sequential
+                // （C# struct 默认，Marshal.OffsetOf 读此 layout）。
+                if (!typeof(T).IsValueType ||
+                    Marshal.OffsetOf<T>("_core") != IntPtr.Zero)
+                    throw new InvalidOperationException(
+                        $"event struct {typeof(T).Name}: _core must be the first field " +
+                        "(EventBus.Dispatch Unsafe.As<T, RouteEventCore> reads offset 0)");
+
                 return (byte)p.GetValue(null);
             }
         }
