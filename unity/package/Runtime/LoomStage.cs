@@ -41,6 +41,7 @@ namespace LoomGUI
         // Dispose 归还防泄漏。冷帧零 GC（ReadMesh per-node alloc 留观察，撞墙再上 List 复用）。
         byte[] _frameBuf;
         readonly LoomEventHandler _eventHandler = new();
+        EventDemuxer _eventDemuxer;   // D3 typed event path（可选——headless 测试直调 Pump；Unity 生产路径 SetEventDemuxer 注入）
 
         // Driver 在 Awake 后注入：渲染根 transform（MirrorPool 挂此 root 下）+ safe-area 开关。
         // 未注入（null）时 Tick 跳过渲染——测试构造后直接 Tick(null) 不崩。
@@ -71,6 +72,12 @@ namespace LoomGUI
         /// 游戏侧通过此属性注册 listener（AddListener/RemoveListener），例如
         /// stage.EventHandler.AddListener(nodeId, EventType.Click, OnBtnClick)。
         public LoomEventHandler EventHandler => _eventHandler;
+
+        /// <summary>
+        /// D3 typed event path注入：set 后每帧 Tick 内自动调用 EventDemuxer.Pump
+        /// 翻译 borrow_events → EventBus.Dispatch。null 时跳过 typed path（仅旧 LoomEventHandler 运行）。
+        /// </summary>
+        internal void SetEventDemuxer(EventDemuxer demuxer) => _eventDemuxer = demuxer;
 
         /// 暴露给 LoomInputCollector.CollectWheel + demo 等内部消费者。
         internal System.IntPtr StagePtr => (System.IntPtr)_stage;
@@ -211,7 +218,8 @@ namespace LoomGUI
             // 即使 borrow_frame 为空（无渲染节点），事件仍须派发（hover/点击不依赖渲染）。
             nuint evLen = 0;
             byte* evPtr = Native.loomgui_stage_borrow_events(_stage, &evLen);
-            _eventHandler.DispatchPending((System.IntPtr)evPtr, (int)evLen);
+            _eventHandler.DispatchPending((System.IntPtr)evPtr, (int)evLen);   // 旧 AddListener 路径（backward compat）
+            _eventDemuxer?.Pump((System.IntPtr)evPtr, (int)evLen);             // D3 typed 路径（On<T>）
 
             // Controller 切页事件（同窗口：tick 后、下 tick 前。out_len=COUNT 非字节）。
             nuint ccLen = 0;

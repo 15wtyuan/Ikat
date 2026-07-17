@@ -1090,6 +1090,8 @@ namespace LoomGUI
             SwapChildren(ca, cb);
         }
         public void ScrollTo(Vector2 p, ScrollBehavior b = ScrollBehavior.Smooth) { throw NE(); }
+        // ScrollChanged source 待补：ScrollPane 物理自维护 tween，无 borrow_scroll_events FFI。
+        // D3 defer——event 签名冻结（PublicApi 编译门已含此字段），add/remove 推后到 source 补齐。
         public event Action<ScrollChangedEvent> Scrolled;
         public UITemplate GetTemplate(string name) { throw NE(); }   // 取内联 template（原 Panel.GetTemplate 上移）
 
@@ -1263,7 +1265,31 @@ namespace LoomGUI
 
         public bool Disabled { get { throw NE(); } set { throw NE(); } }
         // 文本走 Container.TextContent（删原 TextContent 特例）
-        public event Action Clicked;
+
+        // D3 semantic sugar：Action 参数无类型——handler 形参与 ClickEvent 解耦，对齐 UGUI Button.onClick。
+        // add = On<ClickEvent>(e => value()) 冒泡到自身（button 是 target，bubble 阶段自触）。
+        // remove 经 EventRegistration backing 退订（Dictionary<Action,EventRegistration>）。
+        [NonSerialized] System.Collections.Generic.Dictionary<Action, EventRegistration> _clickedBacking;
+        public event Action Clicked
+        {
+            add
+            {
+                if (value == null) return;
+                if (_clickedBacking == null)
+                    _clickedBacking = new System.Collections.Generic.Dictionary<Action, EventRegistration>();
+                if (_clickedBacking.ContainsKey(value)) return;
+                var reg = On<ClickEvent>(e => value(), useCapture: false);
+                _clickedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_clickedBacking != null && _clickedBacking.TryGetValue(value, out var reg))
+                {
+                    _clickedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
         static NotImplementedException NE() => new NotImplementedException();
     }
 
@@ -1272,7 +1298,29 @@ namespace LoomGUI
         internal Link(UIContext ctx, uint id) : base(ctx, id) { }
 
         public string Href { get { throw NE(); } set { throw NE(); } }   // 仅存字符串，框架不自动导航
-        public event Action Activated;
+
+        // D3 semantic sugar：同 Button.Clicked——ClickEvent 冒泡到自身后调 handler。
+        [NonSerialized] System.Collections.Generic.Dictionary<Action, EventRegistration> _activatedBacking;
+        public event Action Activated
+        {
+            add
+            {
+                if (value == null) return;
+                if (_activatedBacking == null)
+                    _activatedBacking = new System.Collections.Generic.Dictionary<Action, EventRegistration>();
+                if (_activatedBacking.ContainsKey(value)) return;
+                var reg = On<ClickEvent>(e => value(), useCapture: false);
+                _activatedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_activatedBacking != null && _activatedBacking.TryGetValue(value, out var reg))
+                {
+                    _activatedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
         static NotImplementedException NE() => new NotImplementedException();
     }
 
@@ -1518,14 +1566,19 @@ namespace LoomGUI
         // D3 demux 翻译 raw LoomEvent → typed struct 后调 Dispatch<T>。公共 API 不见本字段。
         internal readonly EventBus _eventBus;
 
+        // D3：raw LoomEvent stream → typed event struct demux。LoomStage.Tick 调 Pump 每帧
+        // 翻译 borrow_events buffer → EventBus.Dispatch。公共 API 不见本字段。
+        internal readonly EventDemuxer _eventDemuxer;
+
         // B3：headless harness 工厂构造。public API 无构造（业务从集成层拿现成 instance）。
         // 建 NodeRegistry 持有自身反向引用（registry 转调 FFI 时需 stage handle）。
-        // 建 EventBus 同持自身反向引用（Dispatch 走 node_parent FFI 时需 stage handle）。
+        // 建 EventBus + EventDemuxer 同持自身反向引用。
         internal UIContext(IntPtr stage)
         {
             _stage = stage;
             _registry = new NodeRegistry(this);
             _eventBus = new EventBus(this);
+            _eventDemuxer = new EventDemuxer(this);
         }
 
         public Container Root { get { throw NE(); } }
