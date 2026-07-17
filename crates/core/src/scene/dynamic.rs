@@ -14,6 +14,7 @@
 //! - create_node 填 base_style（源）+ style=base_style.clone()（派生），下帧 rematch 从 base 起算。
 
 use crate::scene::node::{Node, NodeFlags, NodeId, NodeInteraction, NodeKind, Rect, Scene};
+use crate::style::dynamic::InlineSet;
 use crate::style::mapping::apply_decl;
 use crate::style::resolved::{OverflowMode, ResolvedStyle};
 use crate::tween::TweenManager;
@@ -102,6 +103,8 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         },
         reuse_key: 0,
         data_controller: None,
+        inline_override: ResolvedStyle::default(),
+        inline_set: InlineSet(0),
     };
     let key = scene.nodes.insert(node);
     resize_parallel_arrays(scene);
@@ -164,6 +167,8 @@ pub fn create_node_from_template(
         },
         reuse_key: 0,
         data_controller: None,
+        inline_override: ResolvedStyle::default(),
+        inline_set: InlineSet(0),
     };
     let key = scene.nodes.insert(node);
     resize_parallel_arrays(scene);

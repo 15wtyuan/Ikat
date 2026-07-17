@@ -108,6 +108,110 @@ pub fn inherited_bit(prop: &str) -> Option<u16> {
     }
 }
 
+// ── Spec-4a：inline override（便签层）set-ness 位图 ────────────────────────────
+//
+// InlineSet 与 InheritedSet 同构（newtype 包位图），但语义相反：
+//   - InheritedSet: 打包期 bake 进 base_style.inherited_set，序列化进 pkg.bin
+//   - InlineSet:    运行时 transient，C# Style.X=v 写入，不进 pkg.bin
+// 继承属性 bit 复用 INH_*（同一位空间，不重新编号）；非继承属性用 INLINE_*。
+//
+// **位编号说明（为何从 bit 8 起而不是 bit 9）：** INH_* 实际占用 bits 0-7（8 个继承属性，
+// 不是 9 个）。task spec 草稿的 `INLINE_WIDTH = 1 << 9` 与"前 9 bit"措辞是 off-by-one——
+// 按 INH_* 实际位数，bit 8 是下一个可用位。从 bit 8 起，bits 8-31 共 24 位恰好容纳
+// apply_decl 处理的全部 24 个非继承属性（width/height/min-*/max-*/padding/margin/
+// border-width/gap/flex-*/display/overflow-x/y/position/left/top/right/bottom/
+// background-color/opacity）。无任何属性被遗漏（task spec 硬约束："不要漏"）。
+// 若未来需要扩展（如 visibility/z-index 进 inline），位图升级到 u64 即可，无需改 API。
+
+/// inline override 的 set-ness 位图。复用 INH_* 给继承属性（bits 0-7），
+/// 其后是 INLINE_* 非继承属性 bit。rematch 用它应用便签层；继承子集 OR 进 set_map
+/// 让 propagate 自动传播父的 inline 继承值给未自设的子。纯运行时 transient，不进 pkg.bin。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InlineSet(pub u32);
+
+/// 所有继承属性 bit 的 OR——rematch 用它把 inline 的继承部分（bits 0-7）并进 set_map，
+/// 使 propagate_inherited 把父的 inline 继承值（如 inline color）传给未自设的子。
+/// INH_* 是 u16，这里 OR 成 u32 与 InlineSet 同位宽。
+pub const INH_ALL_MASK: u32 = INH_FONT_SIZE as u32
+    | INH_COLOR as u32
+    | INH_FONT_FAMILY as u32
+    | INH_FONT_WEIGHT as u32
+    | INH_TEXT_ALIGN as u32
+    | INH_LINE_HEIGHT as u32
+    | INH_LETTER_SPACING as u32
+    | INH_WHITE_SPACE_NOWRAP as u32;
+
+// 非继承属性 bit（编号接在 INH_* 之后，从 bit 8 起）。对照 apply_decl 能处理的属性清单，
+// 逐个分配 1 bit。INH_* 位（继承属性）复用 inherited_bit，不重复定义。
+pub const INLINE_WIDTH: u32 = 1 << 8;
+pub const INLINE_HEIGHT: u32 = 1 << 9;
+pub const INLINE_MIN_WIDTH: u32 = 1 << 10;
+pub const INLINE_MIN_HEIGHT: u32 = 1 << 11;
+pub const INLINE_MAX_WIDTH: u32 = 1 << 12;
+pub const INLINE_MAX_HEIGHT: u32 = 1 << 13;
+pub const INLINE_PADDING: u32 = 1 << 14;
+pub const INLINE_MARGIN: u32 = 1 << 15;
+pub const INLINE_BORDER_WIDTH: u32 = 1 << 16;
+pub const INLINE_GAP: u32 = 1 << 17;
+pub const INLINE_FLEX_DIRECTION: u32 = 1 << 18;
+pub const INLINE_FLEX_WRAP: u32 = 1 << 19;
+pub const INLINE_JUSTIFY_CONTENT: u32 = 1 << 20;
+pub const INLINE_ALIGN_ITEMS: u32 = 1 << 21;
+pub const INLINE_DISPLAY: u32 = 1 << 22;
+pub const INLINE_OVERFLOW_X: u32 = 1 << 23;
+pub const INLINE_OVERFLOW_Y: u32 = 1 << 24;
+pub const INLINE_POSITION: u32 = 1 << 25;
+pub const INLINE_LEFT: u32 = 1 << 26;
+pub const INLINE_TOP: u32 = 1 << 27;
+pub const INLINE_RIGHT: u32 = 1 << 28;
+pub const INLINE_BOTTOM: u32 = 1 << 29;
+pub const INLINE_BACKGROUND_COLOR: u32 = 1 << 30;
+pub const INLINE_OPACITY: u32 = 1 << 31;
+
+/// prop 名 → InlineSet bit。继承属性复用 `inherited_bit`（bits 0-7），非继承属性走
+/// INLINE_*（bits 8-31）。返回 None = 该属性不可 inline（apply_decl 也不处理）。
+///
+/// **覆盖范围：** apply_decl 处理的所有非继承属性都有 bit（对照
+/// `crates/core/src/style/mapping.rs::apply_decl`）。inset 四边（top/right/bottom/left）
+/// 各占独立 bit（虽由 position 派生，但 C# Style API 暴露为 4 个独立 Length setter）。
+/// 少数装饰性/列表型属性（transition / text-shadow / -webkit-text-stroke / font-effect /
+/// box-shadow / background-image / background-size / border-color / border-radius /
+/// transform / order / pointer-events / background-clip）不在 inline 范围：
+/// 它们要么是列表（Vec）不便简单 set/unset，要么已有独立路径（transform 走 NodeAnim），
+/// 要么设计期声明为主（bg-image 等）。这些若后续需要 inline，再扩位图。
+pub fn inline_bit(prop: &str) -> Option<u32> {
+    if let Some(b) = inherited_bit(prop) {
+        return Some(b as u32);
+    }
+    match prop.trim() {
+        "width" => Some(INLINE_WIDTH),
+        "height" => Some(INLINE_HEIGHT),
+        "min-width" => Some(INLINE_MIN_WIDTH),
+        "min-height" => Some(INLINE_MIN_HEIGHT),
+        "max-width" => Some(INLINE_MAX_WIDTH),
+        "max-height" => Some(INLINE_MAX_HEIGHT),
+        "padding" => Some(INLINE_PADDING),
+        "margin" => Some(INLINE_MARGIN),
+        "border-width" => Some(INLINE_BORDER_WIDTH),
+        "gap" => Some(INLINE_GAP),
+        "flex-direction" => Some(INLINE_FLEX_DIRECTION),
+        "flex-wrap" => Some(INLINE_FLEX_WRAP),
+        "justify-content" => Some(INLINE_JUSTIFY_CONTENT),
+        "align-items" => Some(INLINE_ALIGN_ITEMS),
+        "display" => Some(INLINE_DISPLAY),
+        "overflow-x" => Some(INLINE_OVERFLOW_X),
+        "overflow-y" => Some(INLINE_OVERFLOW_Y),
+        "position" => Some(INLINE_POSITION),
+        "left" => Some(INLINE_LEFT),
+        "top" => Some(INLINE_TOP),
+        "right" => Some(INLINE_RIGHT),
+        "bottom" => Some(INLINE_BOTTOM),
+        "background-color" => Some(INLINE_BACKGROUND_COLOR),
+        "opacity" => Some(INLINE_OPACITY),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct DynamicRuleTable {
     pub rules: Vec<DynamicRule>,
