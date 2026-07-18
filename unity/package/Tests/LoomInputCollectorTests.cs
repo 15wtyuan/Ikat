@@ -14,8 +14,8 @@ namespace LoomGUI.Tests
             // screen (100,50) in 200x100, root 200x100 (aspect-matched) → sf=1 → design (100, 50) y-flip = (100, 50)
             //   offX=0+(200-200*1)*0.5=0；offYTop=100；dx=(100-0)/1=100；dy=(100-50)/1=50
             var design = LoomInputCollector.ScreenToDesign(
-                new Vector2(100f, 50f), new Vector2Int(200, 100), new Vector2(200f, 100f),
-                new Rect(0, 0, 200, 100), false);
+                new UnityEngine.Vector2(100f, 50f), new Vector2Int(200, 100), new UnityEngine.Vector2(200f, 100f),
+                new UnityEngine.Rect(0, 0, 200, 100), false);
             Assert.AreEqual(100f, design.x, 0.01f, "aspect-matched sf=1 → design_x = screen_x");
             Assert.AreEqual(50f, design.y, 0.01f, "design_y = sh - screen_y（y-flip，sf=1）");
         }
@@ -26,8 +26,8 @@ namespace LoomGUI.Tests
         public void ScreenToDesign_TopLeftScreen_IsTopLeftDesign()
         {
             var design = LoomInputCollector.ScreenToDesign(
-                new Vector2(0f, 100f), new Vector2Int(200, 100), new Vector2(200f, 100f),
-                new Rect(0, 0, 200, 100), false);
+                new UnityEngine.Vector2(0f, 100f), new Vector2Int(200, 100), new UnityEngine.Vector2(200f, 100f),
+                new UnityEngine.Rect(0, 0, 200, 100), false);
             Assert.AreEqual(0f, design.x, 0.01f);
             Assert.AreEqual(0f, design.y, 0.01f, "screen 顶部 → design y=0（左上原点）");
         }
@@ -37,8 +37,8 @@ namespace LoomGUI.Tests
         public void ScreenToDesign_BottomScreen_IsBottomDesign()
         {
             var design = LoomInputCollector.ScreenToDesign(
-                new Vector2(0f, 0f), new Vector2Int(200, 100), new Vector2(200f, 100f),
-                new Rect(0, 0, 200, 100), false);
+                new UnityEngine.Vector2(0f, 0f), new Vector2Int(200, 100), new UnityEngine.Vector2(200f, 100f),
+                new UnityEngine.Rect(0, 0, 200, 100), false);
             Assert.AreEqual(0f, design.x, 0.01f);
             Assert.AreEqual(100f, design.y, 0.01f, "screen 底部 → design y=root_h");
         }
@@ -57,8 +57,8 @@ namespace LoomGUI.Tests
         public void ScreenToDesign_NotchedSafeArea_RoundTrip()
         {
             var screenSize = new Vector2Int(400, 800);
-            var rootSize = new Vector2(200f, 400f);
-            var area = new Rect(40f, 0f, 320f, 800f);   // 左侧 40px 刘海
+            var rootSize = new UnityEngine.Vector2(200f, 400f);
+            var area = new UnityEngine.Rect(40f, 0f, 320f, 800f);   // 左侧 40px 刘海
             // 与 ComputeRootTransform 同一公式（静态重算，避免依赖 Screen.safeArea）。
             float dw = rootSize.x, dh = rootSize.y;
             float sf = Mathf.Min(area.width / dw, area.height / dh);   // = 1.6
@@ -66,19 +66,19 @@ namespace LoomGUI.Tests
             float offYTop = area.y + area.height;                      // = 800
 
             // 测多个设计点：四角 + 中心 + 刘海边缘。
-            Vector2[] designPoints = new[]
+            UnityEngine.Vector2[] designPoints = new[]
             {
-                new Vector2(0f, 0f),       // 左上（span 左上，恰在刘海右沿）
-                new Vector2(200f, 0f),     // 右上
-                new Vector2(0f, 400f),     // 左下
-                new Vector2(200f, 400f),   // 右下
-                new Vector2(100f, 200f),   // 中心
-                new Vector2(50f, 350f),    // 刘海右沿附近
+                new UnityEngine.Vector2(0f, 0f),       // 左上（span 左上，恰在刘海右沿）
+                new UnityEngine.Vector2(200f, 0f),     // 右上
+                new UnityEngine.Vector2(0f, 400f),     // 左下
+                new UnityEngine.Vector2(200f, 400f),   // 右下
+                new UnityEngine.Vector2(100f, 200f),   // 中心
+                new UnityEngine.Vector2(50f, 350f),    // 刘海右沿附近
             };
             foreach (var d in designPoints)
             {
                 // 前向：design → screen（ComputeRootTransform 同款）
-                var screen = new Vector2(offX + d.x * sf, offYTop - d.y * sf);
+                var screen = new UnityEngine.Vector2(offX + d.x * sf, offYTop - d.y * sf);
                 // 逆：screen → design
                 var back = LoomInputCollector.ScreenToDesign(screen, screenSize, rootSize, area, true);
                 Assert.AreEqual(d.x, back.x, 0.001f, $"round-trip dx 失败（design={d}, screen={screen}）");

@@ -280,7 +280,7 @@ namespace LoomGUI.Tests
 
             // 构造 SpriteResolver：一个 atlas，一个 sprite "sprites/test" 在子区 (0.2, 0.3, 0.1, 0.15)
             // uvRect = (x=0.2, y=0.3, w=0.1, h=0.15) 即 UV 子区 [0.2,0.3]..[0.3,0.45]
-            Rect knownUvRect = new Rect(0.2f, 0.3f, 0.1f, 0.15f);
+            UnityEngine.Rect knownUvRect = new UnityEngine.Rect(0.2f, 0.3f, 0.1f, 0.15f);
             var tex = new Texture2D(64, 64);
             var atlas = new AtlasManifest();
             atlas.pages.Add("test.png");
@@ -308,7 +308,7 @@ namespace LoomGUI.Tests
                 var mf = root.transform.GetChild(0).GetComponent<MeshFilter>();
                 Assert.IsNotNull(mf, "MeshFilter present");
 
-                var uvs = new List<Vector2>();
+                var uvs = new List<UnityEngine.Vector2>();
                 mf.sharedMesh.GetUVs(0, uvs);
                 Assert.AreEqual(4, uvs.Count, "4 verts");
 
@@ -350,7 +350,7 @@ namespace LoomGUI.Tests
         [Test]
         public void LoomStage_ConstructsAsPureClass_WithoutMonoBehaviour()
         {
-            using var stage = new LoomStage(new Vector2(1080, 1920));
+            using var stage = new LoomStage(new UnityEngine.Vector2(1080, 1920));
             Assert.IsFalse(stage is UnityEngine.Component,
                 "LoomStage must be a pure class, not a MonoBehaviour/Component");
             // 无字体注册 + 无 renderRoot → tick 走空帧路径不崩（stage 句柄非空即 tick）。

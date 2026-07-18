@@ -30,7 +30,7 @@ namespace LoomGUI
     public sealed unsafe class LoomStage : IDisposable
     {
         StageHandle* _stage;
-        readonly Vector2 _designSize;
+        readonly UnityEngine.Vector2 _designSize;
         MaterialManager _mm;
         MirrorPool _pool;
         NativeHostManager _nhm;
@@ -54,9 +54,9 @@ namespace LoomGUI
         /// v10：不再绑 Font.textureRebuilt——核心自产 atlas，无异步 Unity font atlas rebuild。
         /// designSize 默认 (1080,1920)；零向量退回默认（避免除零）。
         /// </summary>
-        public LoomStage(Vector2 designSize = default)
+        public LoomStage(UnityEngine.Vector2 designSize = default)
         {
-            _designSize = designSize == default ? new Vector2(1080, 1920) : designSize;
+            _designSize = designSize == default ? new UnityEngine.Vector2(1080, 1920) : designSize;
             _stage = Native.loomgui_stage_new(_designSize.x, _designSize.y);
             if (_stage == null) { Debug.LogError("[LoomStage] loomgui_stage_new failed"); return; }
             _eventHandler.SetHandle((System.IntPtr)_stage);
@@ -81,7 +81,7 @@ namespace LoomGUI
 
         /// 暴露给 LoomInputCollector.CollectWheel + demo 等内部消费者。
         internal System.IntPtr StagePtr => (System.IntPtr)_stage;
-        public Vector2 DesignSize => _designSize;
+        public UnityEngine.Vector2 DesignSize => _designSize;
 
         /// safe-area letterbox 开关（Driver 配置）。LoomInputCollector.CollectWheel 读此做坐标映射。
         /// 默认 true；Driver 可在 Awake 设 false（全屏无 letterbox）。
@@ -534,15 +534,6 @@ namespace LoomGUI
             byte[] t = Encoding.UTF8.GetBytes(text ?? "");
             fixed (byte* tp = t)
                 return Native.loomgui_stage_set_text(_stage, node, tp, (nuint)t.Length);
-        }
-
-        /// 改 RichText 节点 markup（runtime 解析 → runs + 标 dirty_text）。非 RichText / 解析失败 → -1。0=ok，-1=err。
-        public int SetRichText(uint node, string markup)
-        {
-            if (_stage == null) return -1;
-            byte[] m = Encoding.UTF8.GetBytes(markup ?? "");
-            fixed (byte* mp = m)
-                return Native.loomgui_stage_set_rich_text(_stage, node, mp, (nuint)m.Length);
         }
 
         /// 改 Image 节点 src + 标 dirty_mesh。非 Image 节点 → -1。返 0=ok，-1=err。

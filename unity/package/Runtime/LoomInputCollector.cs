@@ -23,13 +23,13 @@ namespace LoomGUI
         ///   dy = (offYTop - screen.y) / sf
         /// sf = min(area.w/dw, area.h/dh)【统一缩放，与渲染一致】。
         /// useSafeArea=false 时 area 退回全屏。
-        public static Vector2 ScreenToDesign(Vector2 screen, Vector2Int screenSize, Vector2 rootSize, Rect area, bool useSafeArea)
+        public static UnityEngine.Vector2 ScreenToDesign(UnityEngine.Vector2 screen, Vector2Int screenSize, UnityEngine.Vector2 rootSize, UnityEngine.Rect area, bool useSafeArea)
         {
             float sw = screenSize.x > 0 ? screenSize.x : 1;
             float sh = screenSize.y > 0 ? screenSize.y : 1;
-            Rect a = useSafeArea ? area : new Rect(0, 0, sw, sh);
+            UnityEngine.Rect a = useSafeArea ? area : new UnityEngine.Rect(0, 0, sw, sh);
             // 防御：safeArea 可能零宽高（编辑器未配屏）→ 退回全屏
-            if (a.width <= 0f || a.height <= 0f) a = new Rect(0, 0, sw, sh);
+            if (a.width <= 0f || a.height <= 0f) a = new UnityEngine.Rect(0, 0, sw, sh);
             float dw = rootSize.x > 0 ? rootSize.x : 1;
             float dh = rootSize.y > 0 ? rootSize.y : 1;
             // 统一 shrink-to-fit 缩放（与 ComputeRootTransform 同一式）。
@@ -39,17 +39,17 @@ namespace LoomGUI
             float offYTop = a.y + a.height;
             float dx = (screen.x - offX) / sf;
             float dy = (offYTop - screen.y) / sf;
-            return new Vector2(dx, dy);
+            return new UnityEngine.Vector2(dx, dy);
         }
 
         /// 采集本帧指针（鼠标+触摸）→ set_input。鼠标 touch_id=-1（slot0），触摸 touch_id=fingerId（slot1-4）。
         /// 鼠标+触摸可同帧共存（带触摸屏桌面）；EditMode 无 Touchscreen 跳过触摸。
-        public void Collect(System.IntPtr stage, Vector2 rootSize, bool useSafeArea)
+        public void Collect(System.IntPtr stage, UnityEngine.Vector2 rootSize, bool useSafeArea)
         {
             if (stage == System.IntPtr.Zero) return;
             var events = new System.Collections.Generic.List<Bindings.PointerEvent>();
             var screenSize = new Vector2Int(Screen.width, Screen.height);
-            Rect safeArea = Screen.safeArea;
+            UnityEngine.Rect safeArea = Screen.safeArea;
 
 #if ENABLE_INPUT_SYSTEM
             // 鼠标（主指，touch_id=-1）
@@ -152,22 +152,22 @@ namespace LoomGUI
 
             float dy = 0f;
 #if ENABLE_INPUT_SYSTEM
-            var v = UnityEngine.InputSystem.Mouse.current?.scroll?.ReadValue() ?? Vector2.zero;
+            var v = UnityEngine.InputSystem.Mouse.current?.scroll?.ReadValue() ?? UnityEngine.Vector2.zero;
             dy = v.y / 120f;  // 归一：新系统 ~120 像素/格 → ±1/格
 #else
             dy = Input.mouseScrollDelta.y;  // 旧系统已 ≈ ±1/格
 #endif
             if (Mathf.Approximately(dy, 0f)) return;
 
-            Vector2 screenPos;
+            UnityEngine.Vector2 screenPos;
 #if ENABLE_INPUT_SYSTEM
-            screenPos = UnityEngine.InputSystem.Mouse.current?.position?.ReadValue() ?? Vector2.zero;
+            screenPos = UnityEngine.InputSystem.Mouse.current?.position?.ReadValue() ?? UnityEngine.Vector2.zero;
 #else
             screenPos = Input.mousePosition;
 #endif
 
             var ss = new Vector2Int(Screen.width, Screen.height);
-            Rect sa = Screen.safeArea;
+            UnityEngine.Rect sa = Screen.safeArea;
             var pos = ScreenToDesign(screenPos, ss, stage.DesignSize, sa, stage.UseSafeArea);
 
             var ev = new Bindings.WheelEvent { x = pos.x, y = pos.y, delta_x = 0f, delta_y = dy };

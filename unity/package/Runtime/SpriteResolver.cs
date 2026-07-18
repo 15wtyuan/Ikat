@@ -11,7 +11,7 @@ namespace LoomGUI
     public struct SpriteLookup
     {
         public Texture2D tex;
-        public Rect uvRect;
+        public UnityEngine.Rect uvRect;
         public int origW;
         public int origH;
         public bool found;
@@ -39,7 +39,7 @@ namespace LoomGUI
    public sealed class SpriteResolver
     {
         // Merged sprite table: sprite_key → (atlasIdx, page, uvRect, origW, origH).
-        Dictionary<string, (int atlasIdx, int page, Rect uvRect, int origW, int origH)> _sprites;
+        Dictionary<string, (int atlasIdx, int page, UnityEngine.Rect uvRect, int origW, int origH)> _sprites;
 
         // Page texture cache: (atlasIdx, page) → Texture2D. Lazy-loaded via loadPage delegate.
         Dictionary<(int, int), Texture2D> _pageCache;
@@ -63,7 +63,7 @@ namespace LoomGUI
         /// </summary>
         public void Init(List<AtlasManifest> atlases, Func<string, Texture2D> loadPage)
         {
-            _sprites = new Dictionary<string, (int, int, Rect, int, int)>();
+            _sprites = new Dictionary<string, (int, int, UnityEngine.Rect, int, int)>();
             _pageCache = new Dictionary<(int, int), Texture2D>();
             _fontPages = new Dictionary<string, SpriteLookup>();
             _warned = new HashSet<string>();
@@ -87,7 +87,7 @@ namespace LoomGUI
                     if (entry.orig == null || entry.orig.Length < 2) continue;
                     // atlas.json 的 uv 是像素左上原点（v0=顶，打包器按 image crate 约定算）；
                     // Unity 纹理采样 v=0 在底，故翻转 v：y = 1 - v1（atlas 底对应 Unity 底）。
-                    var uvRect = new Rect(uv[0], 1f - uv[3], uv[2] - uv[0], uv[3] - uv[1]);
+                    var uvRect = new UnityEngine.Rect(uv[0], 1f - uv[3], uv[2] - uv[0], uv[3] - uv[1]);
                     _sprites[kv.Key] = (atlasIdx, entry.page, uvRect, entry.orig[0], entry.orig[1]);
                 }
             }
@@ -147,7 +147,7 @@ namespace LoomGUI
             _fontPages[path] = new SpriteLookup
             {
                 tex = tex,
-                uvRect = new Rect(0, 0, 1, 1),
+                uvRect = new UnityEngine.Rect(0, 0, 1, 1),
                 origW = tex.width,
                 origH = tex.height,
                 found = true

@@ -25,7 +25,7 @@ namespace LoomGUI
     public class LoomStageDriver : MonoBehaviour
     {
         [Tooltip("设计分辨率（design px）。1080x1920 竖屏 / 1920x1080 横屏。")]
-        [SerializeField] Vector2 _designSize = new(1080, 1920);
+        [SerializeField] UnityEngine.Vector2 _designSize = new(1080, 1920);
 
         [Tooltip("UI 相机（独立 GO，渲染 LoomUILayer）。留空时 Awake 自建。")]
         [SerializeField] Camera _uiCamera;
@@ -55,7 +55,7 @@ namespace LoomGUI
         public LoomStage Stage => _stage;
 
         /// <summary>暴露给输入采集等同程序集内部消费者。</summary>
-        internal Vector2 DesignSize => _designSize;
+        internal UnityEngine.Vector2 DesignSize => _designSize;
         internal bool UseSafeArea => _safeArea;
 
         // ===== Virtual loading hooks (override for AB/Addressables) =====
@@ -313,7 +313,7 @@ namespace LoomGUI
         {
             if (!_showFps) return;
             float fps = Time.smoothDeltaTime > 0f ? 1f / Time.smoothDeltaTime : 0f;
-            GUI.Label(new Rect(8f, 8f, 240f, 24f), $"FPS {fps:F1}");
+            GUI.Label(new UnityEngine.Rect(8f, 8f, 240f, 24f), $"FPS {fps:F1}");
         }
 
         void OnDestroy()
@@ -401,9 +401,9 @@ namespace LoomGUI
         (float sf, Vector3 rootPos) ComputeRootTransform()
         {
             float sw = Screen.width, sh = Screen.height;
-            Rect area = _safeArea ? Screen.safeArea : new Rect(0, 0, sw, sh);
+            UnityEngine.Rect area = _safeArea ? Screen.safeArea : new UnityEngine.Rect(0, 0, sw, sh);
             // 防御：safeArea 可能零宽高（编辑器未配屏）→ 退回全屏
-            if (area.width <= 0f || area.height <= 0f) area = new Rect(0, 0, sw, sh);
+            if (area.width <= 0f || area.height <= 0f) area = new UnityEngine.Rect(0, 0, sw, sh);
             float dw = _designSize.x, dh = _designSize.y;
             // shrink-to-fit：取较小缩放比，保证完整可见 + 留白 letterbox。
             float sf = Mathf.Min(area.width / dw, area.height / dh);

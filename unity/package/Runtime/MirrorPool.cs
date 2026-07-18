@@ -23,8 +23,8 @@ namespace LoomGUI
         // UploadMesh 每帧 Clear+fill 后用 Mesh.SetVertices(List) 等 overload 上传——
         // List<T>.Clear() 保留 Capacity，故 warm-up 后零 per-frame 数组 alloc。
         public readonly List<Vector3> VList = new();
-        public readonly List<Vector2> UvList = new();
-        public readonly List<Color> CList = new();
+        public readonly List<UnityEngine.Vector2> UvList = new();
+        public readonly List<UnityEngine.Color> CList = new();
         public readonly List<int> IList = new();
         // cached MaterialPropertyBlock for per-renderer uniforms (_ObjM, _CF, _Alpha).
         // Lazy-init; consolidated into single SetPropertyBlock per frame.
@@ -300,13 +300,13 @@ namespace LoomGUI
         /// 把 mesh UV（core 产 [0,1] 全图 UV）线性映射到 sprite 在 atlas 页内的子区。
         /// uvRect 是打包器算好的 atlas 子区——Unity Rect (x=u0, y=v0, w=u1-u0, h=v1-v0)。
         /// 不内缩半纹素：padding 下 bilinear 边缘 fringe 几乎不可见；开 atlas enableAlphaDilation（边缘像素复制进 padding）防 bleed。
-        static void RemapMeshUvToSprite(RenderObj ro, Rect uvRect)
+        static void RemapMeshUvToSprite(RenderObj ro, UnityEngine.Rect uvRect)
         {
             // blob UV v 已翻转（TL.v=1），线性映射进子区保持翻转。
             // 直接改 ro.UvList（UploadMesh 已填），不复 alloc 新 List。
             var uvs = ro.UvList;
             for (int i = 0; i < uvs.Count; i++)
-                uvs[i] = new Vector2(
+                uvs[i] = new UnityEngine.Vector2(
                     uvRect.x + uvs[i].x * uvRect.width,
                     uvRect.y + uvs[i].y * uvRect.height);
             ro.Mesh.SetUVs(0, uvs);
