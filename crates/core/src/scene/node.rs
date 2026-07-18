@@ -4,6 +4,7 @@
 //! layout 层后续往 `taffy_id`/`layout_rect` 写几何；render 层消费
 //! `clip_rect`/`dirty_*`。本模块只管建树 + 初始脏标志。
 
+use crate::style::dynamic::InlineSet;
 use crate::style::resolved::{OverflowMode, ResolvedStyle};
 use serde::{Deserialize, Serialize};
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
@@ -239,6 +240,13 @@ pub struct Node {
     pub interaction: NodeInteraction,
     pub reuse_key: u32,
     pub data_controller: Option<String>,
+    /// 运行时 inline override（便签层）。C# Style.X=v 经 set_inline_override 写入；
+    /// rematch 在动态规则后应用（最高优先级）。默认空 = 无 inline override。
+    /// 纯运行时 transient，不进 pkg.bin（设计期无 inline override 概念）。
+    pub inline_override: ResolvedStyle,
+    /// inline_override 里哪些字段被设了（继承属性复用 INH_* bit，非继承用 INLINE_*）。
+    /// 默认 0 = 无任何 inline override。rematch 据此把 inline_override 字段拷进 style。
+    pub inline_set: InlineSet,
 }
 
 impl Default for Node {
@@ -268,6 +276,8 @@ impl Default for Node {
             },
             reuse_key: 0,
             data_controller: None,
+            inline_override: ResolvedStyle::default(),
+            inline_set: InlineSet(0),
         }
     }
 }
@@ -466,6 +476,8 @@ impl Scene {
                 },
                 reuse_key: 0,
                 data_controller: data_controller.clone(),
+                inline_override: ResolvedStyle::default(),
+                inline_set: InlineSet(0),
             };
             let key = scene.nodes.insert(node);
             let id = NodeId::from_key(key);

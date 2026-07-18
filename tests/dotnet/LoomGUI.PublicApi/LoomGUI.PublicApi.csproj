@@ -5,10 +5,22 @@
     <Nullable>disable</Nullable>
     <IsPackable>false</IsPackable>
     <RootNamespace>LoomGUI.PublicApi</RootNamespace>
+    <!-- C1 起 Public/ 文件（Node）经 Projection/NodeRegistry + NodeFactory 转调 FFI（unsafe 指针算术）。
+         Bindings（csbindgen 生成的 unsafe P/Invoke）也被 NodeFactory 引用。本工程作为「公共签名冻结
+         编译门」需把整条依赖链编进来，故开 AllowUnsafeBlocks（同 HeadlessTests）。 -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.Types.cs" Link="Public\LoomGUI.Types.cs" />
     <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.Nodes.cs" Link="Public\LoomGUI.Nodes.cs" />
     <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.Events.cs" Link="Public\LoomGUI.Events.cs" />
+    <!-- D1：EventType enum 同时被 LoomEventHandler demux（运行时实现，未编进本冻结门）和
+         Events.cs 的 typed struct 关联引用，故 enum 单独放 Public/ 并显式编进 PublicApi。 -->
+    <Compile Include="..\..\..\unity\package\Runtime\Public\LoomGUI.EventType.cs" Link="Public\LoomGUI.EventType.cs" />
+    <!-- C1：Public/Node 引用 internal NodeRegistry + NodeFactory；编译门需把 Projection/ 全集纳入
+         以便 internal 类型可解析（验证 public 签名编译性仍兜得住，只是底层依赖一并验）。 -->
+    <Compile Include="..\..\..\unity\package\Runtime\Projection\*.cs" Link="Projection\%(Filename)%(Extension)" />
+    <!-- NodeFactory 调 Native P/Invoke + 持 StageHandle*；Bindings 必须同 assembly 编译。 -->
+    <Compile Include="..\..\..\unity\package\Plugins\LoomGUI\Bindings\*.cs" Link="Bindings\%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

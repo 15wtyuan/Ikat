@@ -703,3 +703,16 @@ fn node_kind_all_variants_bincode_roundtrip() {
 fn node_kind_unit_variant_is_one_byte() {
     assert_eq!(bincode::serialize(&NodeKind::Container).unwrap().len(), 4);
 }
+
+/// Spec-4a Task A1：Node.inline_override / inline_set 便签层基础设施。
+/// 默认 Node 无 inline override——inline_set 全 0、inline_override 全默认。
+#[test]
+fn node_inline_override_defaults_empty() {
+    let n = Node::default();
+    assert_eq!(
+        n.inline_set.0, 0,
+        "inline_set 默认空（无任何 inline override）"
+    );
+    // inline_override 全默认 = 与 ResolvedStyle::default() 等价（无字段被显式设值）。
+    assert_eq!(n.inline_override, ResolvedStyle::default());
+}

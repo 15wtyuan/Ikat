@@ -482,6 +482,68 @@ namespace LoomGUI.Bindings
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_style", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_set_style(StageHandle* h, uint node, byte* css, nuint len);
 
+        /// <summary>
+        ///  写 inline override（便签层，优先级 &gt; 动态规则 &gt; base_style）。css = UTF-8 字节。
+        ///  0=ok，-1=err（null 句柄 / 非 UTF-8 / 节点不 live）。下帧 rematch 应用。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_inline_override", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_inline_override(StageHandle* h, uint node, byte* css, nuint len);
+
+        /// <summary>
+        ///  清 inline override 的某 prop bit。prop = UTF-8 字节。0=ok，-1=err。
+        ///  prop 不可 inline 时为 no-op（仍返 0）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_unset_inline_override", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_unset_inline_override(StageHandle* h, uint node, byte* prop, nuint len);
+
+        /// <summary>
+        ///  读节点子节点数。返回 i32：≥0 = 子节点数；-1 = err（null 句柄 / 节点不 live）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_child_count", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_child_count(StageHandle* h, uint node);
+
+        /// <summary>
+        ///  读节点子节点 NodeId 列表，写入 `out` buffer（u32 per slot）。
+        ///  返回 i32：≥0 = 实际写入数；负值 = err（-1 = null 句柄 / 节点不 live；
+        ///  -(n+2) = buffer 不够，n = 所需 cap）。调用方遇负值重分配 n+ 容量再调。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_children", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_children(StageHandle* h, uint node, uint* @out, nuint cap);
+
+        /// <summary>
+        ///  加 class（重复名不重复 push）。name = UTF-8 字节。0=ok，-1=err。
+        ///  标 dirty_mesh 触发下帧 rematch。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_add_class", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_add_class(StageHandle* h, uint node, byte* name, nuint len);
+
+        /// <summary>
+        ///  移除 class（全部匹配）。name = UTF-8 字节。0=ok，-1=err。标 dirty_mesh。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_remove_class", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_remove_class(StageHandle* h, uint node, byte* name, nuint len);
+
+        /// <summary>
+        ///  查询 class 是否存在。返回 i32：1 = true；0 = false；-1 = err（null 句柄 / 节点不 live）。
+        ///  name = UTF-8 字节，非 UTF-8 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_has_class", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_has_class(StageHandle* h, uint node, byte* name, nuint len);
+
 
     }
 

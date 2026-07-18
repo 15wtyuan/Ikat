@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>E2 fixture &mdash; E3 acceptance gate 9 criteria</title>
+<style>
+  /* Criterion 5: class rule changes computed style */
+  .container { display: flex; flex-direction: column; }
+  .highlight { color: #ff0000; }
+  .blue { color: #0000ff; }
+  .spaced { margin: 4px; }
+
+  /* Criterion 3: fixed dimensions on root (Geometry check) */
+  #root { width: 200px; height: 100px; }
+
+  /* Criterion 9: inline inheritance — parent color propagates to children */
+  /* .highlight sets color:red on root; children inherit through cascade */
+</style>
+</head>
+<body>
+  <!-- Criterion 6: nested tree structure -->
+  <div id="root" class="container highlight">
+    <div id="child" class="spaced">
+      <!-- Criterion 1: type fidelity — span → TextNode -->
+      <span id="text">hello</span>
+      <!-- Criterion 1: type fidelity — button → Button -->
+      <!-- Criterion 8: button event (Click += handler) -->
+      <button id="btn" class="spaced">click me</button>
+      <!-- Criterion 1: type fidelity — img → Image -->
+      <img id="img" src="res/dot.png" />
+    </div>
+  </div>
+</body>
+</html>

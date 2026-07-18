@@ -108,6 +108,110 @@ pub fn inherited_bit(prop: &str) -> Option<u16> {
     }
 }
 
+// ── Spec-4a：inline override（便签层）set-ness 位图 ────────────────────────────
+//
+// InlineSet 与 InheritedSet 同构（newtype 包位图），但语义相反：
+//   - InheritedSet: 打包期 bake 进 base_style.inherited_set，序列化进 pkg.bin
+//   - InlineSet:    运行时 transient，C# Style.X=v 写入，不进 pkg.bin
+// 继承属性 bit 复用 INH_*（同一位空间，不重新编号）；非继承属性用 INLINE_*。
+//
+// **位编号说明（为何从 bit 8 起而不是 bit 9）：** INH_* 实际占用 bits 0-7（8 个继承属性，
+// 不是 9 个）。task spec 草稿的 `INLINE_WIDTH = 1 << 9` 与"前 9 bit"措辞是 off-by-one——
+// 按 INH_* 实际位数，bit 8 是下一个可用位。从 bit 8 起，bits 8-31 共 24 位恰好容纳
+// apply_decl 处理的全部 24 个非继承属性（width/height/min-*/max-*/padding/margin/
+// border-width/gap/flex-*/display/overflow-x/y/position/left/top/right/bottom/
+// background-color/opacity）。无任何属性被遗漏（task spec 硬约束："不要漏"）。
+// 若未来需要扩展（如 visibility/z-index 进 inline），位图升级到 u64 即可，无需改 API。
+
+/// inline override 的 set-ness 位图。复用 INH_* 给继承属性（bits 0-7），
+/// 其后是 INLINE_* 非继承属性 bit。rematch 用它应用便签层；继承子集 OR 进 set_map
+/// 让 propagate 自动传播父的 inline 继承值给未自设的子。纯运行时 transient，不进 pkg.bin。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InlineSet(pub u32);
+
+/// 所有继承属性 bit 的 OR——rematch 用它把 inline 的继承部分（bits 0-7）并进 set_map，
+/// 使 propagate_inherited 把父的 inline 继承值（如 inline color）传给未自设的子。
+/// INH_* 是 u16，这里 OR 成 u32 与 InlineSet 同位宽。
+pub const INH_ALL_MASK: u32 = INH_FONT_SIZE as u32
+    | INH_COLOR as u32
+    | INH_FONT_FAMILY as u32
+    | INH_FONT_WEIGHT as u32
+    | INH_TEXT_ALIGN as u32
+    | INH_LINE_HEIGHT as u32
+    | INH_LETTER_SPACING as u32
+    | INH_WHITE_SPACE_NOWRAP as u32;
+
+// 非继承属性 bit（编号接在 INH_* 之后，从 bit 8 起）。对照 apply_decl 能处理的属性清单，
+// 逐个分配 1 bit。INH_* 位（继承属性）复用 inherited_bit，不重复定义。
+pub const INLINE_WIDTH: u32 = 1 << 8;
+pub const INLINE_HEIGHT: u32 = 1 << 9;
+pub const INLINE_MIN_WIDTH: u32 = 1 << 10;
+pub const INLINE_MIN_HEIGHT: u32 = 1 << 11;
+pub const INLINE_MAX_WIDTH: u32 = 1 << 12;
+pub const INLINE_MAX_HEIGHT: u32 = 1 << 13;
+pub const INLINE_PADDING: u32 = 1 << 14;
+pub const INLINE_MARGIN: u32 = 1 << 15;
+pub const INLINE_BORDER_WIDTH: u32 = 1 << 16;
+pub const INLINE_GAP: u32 = 1 << 17;
+pub const INLINE_FLEX_DIRECTION: u32 = 1 << 18;
+pub const INLINE_FLEX_WRAP: u32 = 1 << 19;
+pub const INLINE_JUSTIFY_CONTENT: u32 = 1 << 20;
+pub const INLINE_ALIGN_ITEMS: u32 = 1 << 21;
+pub const INLINE_DISPLAY: u32 = 1 << 22;
+pub const INLINE_OVERFLOW_X: u32 = 1 << 23;
+pub const INLINE_OVERFLOW_Y: u32 = 1 << 24;
+pub const INLINE_POSITION: u32 = 1 << 25;
+pub const INLINE_LEFT: u32 = 1 << 26;
+pub const INLINE_TOP: u32 = 1 << 27;
+pub const INLINE_RIGHT: u32 = 1 << 28;
+pub const INLINE_BOTTOM: u32 = 1 << 29;
+pub const INLINE_BACKGROUND_COLOR: u32 = 1 << 30;
+pub const INLINE_OPACITY: u32 = 1 << 31;
+
+/// prop 名 → InlineSet bit。继承属性复用 `inherited_bit`（bits 0-7），非继承属性走
+/// INLINE_*（bits 8-31）。返回 None = 该属性不可 inline（apply_decl 也不处理）。
+///
+/// **覆盖范围：** apply_decl 处理的所有非继承属性都有 bit（对照
+/// `crates/core/src/style/mapping.rs::apply_decl`）。inset 四边（top/right/bottom/left）
+/// 各占独立 bit（虽由 position 派生，但 C# Style API 暴露为 4 个独立 Length setter）。
+/// 少数装饰性/列表型属性（transition / text-shadow / -webkit-text-stroke / font-effect /
+/// box-shadow / background-image / background-size / border-color / border-radius /
+/// transform / order / pointer-events / background-clip）不在 inline 范围：
+/// 它们要么是列表（Vec）不便简单 set/unset，要么已有独立路径（transform 走 NodeAnim），
+/// 要么设计期声明为主（bg-image 等）。这些若后续需要 inline，再扩位图。
+pub fn inline_bit(prop: &str) -> Option<u32> {
+    if let Some(b) = inherited_bit(prop) {
+        return Some(b as u32);
+    }
+    match prop.trim() {
+        "width" => Some(INLINE_WIDTH),
+        "height" => Some(INLINE_HEIGHT),
+        "min-width" => Some(INLINE_MIN_WIDTH),
+        "min-height" => Some(INLINE_MIN_HEIGHT),
+        "max-width" => Some(INLINE_MAX_WIDTH),
+        "max-height" => Some(INLINE_MAX_HEIGHT),
+        "padding" => Some(INLINE_PADDING),
+        "margin" => Some(INLINE_MARGIN),
+        "border-width" => Some(INLINE_BORDER_WIDTH),
+        "gap" => Some(INLINE_GAP),
+        "flex-direction" => Some(INLINE_FLEX_DIRECTION),
+        "flex-wrap" => Some(INLINE_FLEX_WRAP),
+        "justify-content" => Some(INLINE_JUSTIFY_CONTENT),
+        "align-items" => Some(INLINE_ALIGN_ITEMS),
+        "display" => Some(INLINE_DISPLAY),
+        "overflow-x" => Some(INLINE_OVERFLOW_X),
+        "overflow-y" => Some(INLINE_OVERFLOW_Y),
+        "position" => Some(INLINE_POSITION),
+        "left" => Some(INLINE_LEFT),
+        "top" => Some(INLINE_TOP),
+        "right" => Some(INLINE_RIGHT),
+        "bottom" => Some(INLINE_BOTTOM),
+        "background-color" => Some(INLINE_BACKGROUND_COLOR),
+        "opacity" => Some(INLINE_OPACITY),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct DynamicRuleTable {
     pub rules: Vec<DynamicRule>,
@@ -383,6 +487,23 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
                 }
             }
         }
+        // inline_override 应用（最高优先级，动态规则之后）。
+        // 按 inline_set 把 inline_override 字段拷进 new_style；继承子集 OR 进 set_map，
+        // 使 propagate 把含 inline 的父值传给未自设的子、且本节点自身不被父覆盖。
+        // inline_set 默认空 → 对没设 inline 的节点 no-op（Spec-3 probe 不回归）。
+        {
+            let n_ref = scene.get(node_id).expect("live node");
+            let inline_set = n_ref.inline_set;
+            if inline_set.0 != 0 {
+                // 直传 &n_ref.inline_override（不可变借，new_style 是 local 不冲突；
+                // block 结束 n_ref 借释放，后续 set_map.insert/get_mut 不受影响）。
+                // 省 ResolvedStyle clone（含 Vec<TransitionSpec>/text_effects，每帧每 inline 节点）。
+                apply_inline_override(&mut new_style, &n_ref.inline_override, inline_set);
+                // 只把继承子集（bits 0-7）并进 set_map；非继承 bit 不影响 propagate。
+                // InheritedSet.0 是 u16，INH_* 全在 u16 范围内，安全截位。
+                inh.0 |= (inline_set.0 & INH_ALL_MASK) as u16;
+            }
+        }
         set_map.insert(node_id, inh);
         // transition 检测：仅 cascaded_once 后（首次 cascade 即时生效不动画），
         // 且声明了非零 duration 的 transition 时，比较可动画通道变化推请求。
@@ -399,6 +520,64 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
     // 通用可继承属性传播：每节点从 base_style 独立 cascade（不读父），故继承须 rematch 后
     // 按 tree order 补一次：子未显式声明（set_map 无该 bit）→ 取父 effective 值。
     propagate_inherited(scene, &set_map);
+}
+
+/// 按 set 位图把 `inline_override` 字段拷进 style（最高优先级覆盖）。覆盖全部 8 个继承
+/// 字段（INH_*，bits 0-7）+ 24 个非继承字段（INLINE_*，bits 8-31）。INLINE_DISPLAY
+/// 一对应两字段（`taffy_style.display` + `display_mode`，与 apply_decl 行为对齐），
+/// 其余 INLINE_* 一对一映射到 ResolvedStyle/taffy_style 字段。
+///
+/// 该函数不改 `style.inherited_set`——inline 的继承子集由调用方 OR 进 set_map。
+fn apply_inline_override(style: &mut ResolvedStyle, inline: &ResolvedStyle, set: InlineSet) {
+    let s = set.0;
+    // 单字段拷贝：`$($f:ident).+` 支持顶层（color）+ taffy 嵌套（taffy_style.size.width）路径。
+    // `$bit as u32` 同时容纳 INH_*（u16）与 INLINE_*（u32）。
+    macro_rules! cpy {
+        ($($f:ident).+, $bit:expr) => {
+            if s & (($bit) as u32) != 0 {
+                style.$($f).+ = inline.$($f).+.clone();
+            }
+        };
+    }
+    // 继承属性（bits 0-7）
+    cpy!(font_size, INH_FONT_SIZE);
+    cpy!(color, INH_COLOR);
+    cpy!(font_family, INH_FONT_FAMILY);
+    cpy!(font_weight, INH_FONT_WEIGHT);
+    cpy!(text_align, INH_TEXT_ALIGN);
+    cpy!(line_height, INH_LINE_HEIGHT);
+    cpy!(letter_spacing, INH_LETTER_SPACING);
+    cpy!(white_space_nowrap, INH_WHITE_SPACE_NOWRAP);
+    // 非继承属性（bits 8-31）——taffy_style 子字段
+    cpy!(taffy_style.size.width, INLINE_WIDTH);
+    cpy!(taffy_style.size.height, INLINE_HEIGHT);
+    cpy!(taffy_style.min_size.width, INLINE_MIN_WIDTH);
+    cpy!(taffy_style.min_size.height, INLINE_MIN_HEIGHT);
+    cpy!(taffy_style.max_size.width, INLINE_MAX_WIDTH);
+    cpy!(taffy_style.max_size.height, INLINE_MAX_HEIGHT);
+    cpy!(taffy_style.padding, INLINE_PADDING);
+    cpy!(taffy_style.margin, INLINE_MARGIN);
+    cpy!(taffy_style.border, INLINE_BORDER_WIDTH);
+    cpy!(taffy_style.gap, INLINE_GAP);
+    cpy!(taffy_style.flex_direction, INLINE_FLEX_DIRECTION);
+    cpy!(taffy_style.flex_wrap, INLINE_FLEX_WRAP);
+    cpy!(taffy_style.justify_content, INLINE_JUSTIFY_CONTENT);
+    cpy!(taffy_style.align_items, INLINE_ALIGN_ITEMS);
+    cpy!(overflow_x, INLINE_OVERFLOW_X);
+    cpy!(overflow_y, INLINE_OVERFLOW_Y);
+    cpy!(taffy_style.position, INLINE_POSITION);
+    cpy!(taffy_style.inset.left, INLINE_LEFT);
+    cpy!(taffy_style.inset.top, INLINE_TOP);
+    cpy!(taffy_style.inset.right, INLINE_RIGHT);
+    cpy!(taffy_style.inset.bottom, INLINE_BOTTOM);
+    // 非继承属性——视觉/渲染字段
+    cpy!(background_color, INLINE_BACKGROUND_COLOR);
+    cpy!(opacity, INLINE_OPACITY);
+    // INLINE_DISPLAY：apply_decl 同时设 taffy_style.display + display_mode，需双字段覆盖。
+    if s & INLINE_DISPLAY != 0 {
+        style.taffy_style.display = inline.taffy_style.display;
+        style.display_mode = inline.display_mode;
+    }
 }
 
 /// 通用可继承属性传播（tree-order DFS）。子未显式声明的可继承字段 → 取父 effective 值。
@@ -1310,6 +1489,300 @@ mod tests {
                 .flags
                 .contains(crate::scene::node::NodeFlags::CASCALED),
             "首次 cascade 后 cascaded_once 置 true"
+        );
+    }
+
+    // ── Spec-4a A2：inline_override（便签层）应用步 ──
+
+    /// 建 root → child（child 为 TextNode，无自身 color 声明）。
+    fn build_parent_child() -> (Scene, NodeId, NodeId) {
+        let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
+        let mut child = Node::default();
+        child.kind = NodeKind::TextNode;
+        child.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 20.0,
+        };
+        let s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
+        let root_id = s.roots[0];
+        let child_id = s.get(root_id).unwrap().children[0];
+        (s, root_id, child_id)
+    }
+
+    /// 建 root-only scene（无子），用于 probe。
+    fn build_simple_tree() -> (Scene, NodeId) {
+        let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
+        let s = Scene::from_nodes(vec![root], vec![]);
+        let root_id = s.roots[0];
+        (s, root_id)
+    }
+
+    #[test]
+    fn inline_override_color_inherits_to_child() {
+        // 父 inline 设 color:red；child 无自身 color 声明 → 该继承父 inline 值。
+        // 验证 set_map 接收 inline 的继承 bit（经 propagate_inherited 传父子）。
+        let (mut scene, root, child) = build_parent_child();
+        crate::scene::dynamic::set_inline_override(&mut scene, root, "color:#ff0000").unwrap();
+        rematch_pseudo_classes(&mut scene);
+        let child_color = scene.get(child).unwrap().style.color;
+        assert_eq!(
+            child_color,
+            [1.0, 0.0, 0.0, 1.0],
+            "child 无 color 声明 → 继承父 inline red"
+        );
+        // 父自己也该是 red（inline 应用到自身）
+        assert_eq!(scene.get(root).unwrap().style.color, [1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn inline_override_unset_falls_back() {
+        // set 后 unset → bit 清 → rematch 不应用 → 回 base_style 值（非 red）。
+        let (mut scene, root, _child) = build_parent_child();
+        crate::scene::dynamic::set_inline_override(&mut scene, root, "color:#ff0000").unwrap();
+        crate::scene::dynamic::unset_inline_override(&mut scene, root, "color").unwrap();
+        rematch_pseudo_classes(&mut scene);
+        assert_ne!(
+            scene.get(root).unwrap().style.color,
+            [1.0, 0.0, 0.0, 1.0],
+            "unset 后 color 回落（不再 red）"
+        );
+        // inline_set 的 color bit 应被清
+        let set = scene.get(root).unwrap().inline_set.0;
+        assert_eq!(set & INH_COLOR as u32, 0, "INH_COLOR bit 清零");
+    }
+
+    #[test]
+    fn spec3_probe_no_regress_when_no_inline() {
+        // 没设 inline 的节点（inline_set == 0）：rematch 不 panic、行为同 Spec-3。
+        let (mut scene, root) = build_simple_tree();
+        assert_eq!(scene.get(root).unwrap().inline_set.0, 0);
+        rematch_pseudo_classes(&mut scene);
+        // base color = 默认黑（ResolvedStyle::default）
+        assert_eq!(scene.get(root).unwrap().style.color, [0.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn inline_override_beats_dynamic_rule() {
+        // inline 优先级 > dynamic rule。同节点 hover 规则设 blue，inline 设 red → red 胜。
+        let (mut scene, root, _child) = build_parent_child();
+        scene.get_mut(root).unwrap().classes = vec!["r".to_string()];
+        scene
+            .dynamic_rules
+            .rules
+            .push(rule(".r", "color", "#0000ff"));
+        crate::scene::dynamic::set_inline_override(&mut scene, root, "color:#ff0000").unwrap();
+        rematch_pseudo_classes(&mut scene);
+        assert_eq!(
+            scene.get(root).unwrap().style.color,
+            [1.0, 0.0, 0.0, 1.0],
+            "inline red 胜过 dynamic blue"
+        );
+    }
+
+    #[test]
+    fn inline_override_background_color_non_inherited() {
+        // 非继承属性 background-color：inline 设 → 仅本节点生效，不传子。
+        let (mut scene, root, child) = build_parent_child();
+        crate::scene::dynamic::set_inline_override(&mut scene, root, "background-color:#00ff00")
+            .unwrap();
+        rematch_pseudo_classes(&mut scene);
+        assert_eq!(
+            scene.get(root).unwrap().style.background_color,
+            Some([0.0, 1.0, 0.0, 1.0]),
+            "root inline bg green"
+        );
+        // child 无 inline，background_color 不继承 → 仍 None
+        assert_eq!(
+            scene.get(child).unwrap().style.background_color,
+            None,
+            "background_color 非继承 → 不传子"
+        );
+    }
+
+    #[test]
+    fn inline_override_width_non_inherited() {
+        // 非继承 taffy 字段 width：inline 设 → 应用到 style.taffy_style.size.width。
+        let (mut scene, root, _child) = build_parent_child();
+        crate::scene::dynamic::set_inline_override(&mut scene, root, "width:123px").unwrap();
+        rematch_pseudo_classes(&mut scene);
+        use taffy::style::Dimension;
+        assert!(matches!(
+            scene.get(root).unwrap().style.taffy_style.size.width,
+            Dimension::Length(123.0)
+        ));
+    }
+
+    #[test]
+    fn inline_override_display_copies_both_taffy_and_mode() {
+        // inline display:none 应同时设 taffy_style.display=None + display_mode=None。
+        // 验证 INLINE_DISPLAY bit 的双字段覆盖。
+        let (mut scene, root, _child) = build_parent_child();
+        crate::scene::dynamic::set_inline_override(&mut scene, root, "display:none").unwrap();
+        rematch_pseudo_classes(&mut scene);
+        assert_eq!(
+            scene.get(root).unwrap().style.taffy_style.display,
+            taffy::Display::None,
+            "inline display:none → taffy Display::None"
+        );
+        assert_eq!(
+            scene.get(root).unwrap().style.display_mode,
+            crate::style::resolved::DisplayMode::None,
+            "inline display:none → display_mode=None"
+        );
+    }
+
+    #[test]
+    fn child_explicit_color_not_overridden_by_parent_inline() {
+        // 父 inline color red；child 自身 dynamic rule color blue（child inh bit 设）
+        // → propagate 不覆盖 child，child 仍 blue。验证 set_map 阻断继承。
+        let (mut scene, root, child) = build_parent_child();
+        scene.get_mut(child).unwrap().classes = vec!["c".to_string()];
+        scene
+            .dynamic_rules
+            .rules
+            .push(rule(".c", "color", "#0000ff"));
+        crate::scene::dynamic::set_inline_override(&mut scene, root, "color:#ff0000").unwrap();
+        rematch_pseudo_classes(&mut scene);
+        assert_eq!(
+            scene.get(child).unwrap().style.color,
+            [0.0, 0.0, 1.0, 1.0],
+            "child 显式声明 blue 不被父 inline red 覆盖"
+        );
+    }
+
+    #[test]
+    fn inline_override_two_level_inheritance() {
+        // root inline color red → mid → leaf（均无自身 color）→ leaf 应继承 red。
+        let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
+        let mid = Node::default();
+        let mut leaf = Node::default();
+        leaf.kind = NodeKind::TextNode;
+        let mut scene = Scene::from_nodes(vec![root, mid, leaf], vec![(0, 1), (1, 2)]);
+        let root_id = scene.roots[0];
+        let mid_id = scene.get(root_id).unwrap().children[0];
+        let leaf_id = scene.get(mid_id).unwrap().children[0];
+        crate::scene::dynamic::set_inline_override(&mut scene, root_id, "color:#ff0000").unwrap();
+        rematch_pseudo_classes(&mut scene);
+        assert_eq!(
+            scene.get(leaf_id).unwrap().style.color,
+            [1.0, 0.0, 0.0, 1.0],
+            "leaf 跨级继承父 inline red"
+        );
+    }
+
+    // ── Spec-4a review I1：unsupported prop 不写 ghost state ──
+
+    #[test]
+    fn set_inline_override_ignores_unsupported_prop_no_ghost() {
+        // transform / padding-top 不在 inline_bit 表：完全不写 inline_override（无 ghost state）。
+        // 修复前：apply_decl 写 taffy_style.transform / padding.top 字段但不置 bit
+        // → 下帧 rematch apply_inline_override 不拷这些字段 → 静默丢失（ghost state）。
+        let (mut scene, root) = build_simple_tree();
+        crate::scene::dynamic::set_inline_override(
+            &mut scene,
+            root,
+            "transform: scale(2); padding-top: 10px",
+        )
+        .unwrap();
+        let n = scene.get(root).unwrap();
+        // inline_set 不含任何 bit（transform/padding-top 都没 bit）
+        assert_eq!(n.inline_set.0, 0, "unsupported prop 不置 bit");
+        // inline_override 字段也不被写（transform 仍默认 scale 1.0，padding 仍 0）
+        use taffy::style::LengthPercentage;
+        assert_eq!(
+            n.inline_override.taffy_style.padding.top,
+            LengthPercentage::Length(0.0),
+            "padding-top 不写 inline_override（无 ghost）"
+        );
+        // rematch 不 panic，且 style 不受这些 prop 影响
+        rematch_pseudo_classes(&mut scene);
+        let n = scene.get(root).unwrap();
+        assert_eq!(
+            n.style.taffy_style.padding.top,
+            LengthPercentage::Length(0.0),
+            "rematch 后 padding 仍为 0（unsupported prop 未生效）"
+        );
+        // 对照：set "width:100px"（支持）→ bit 置 + 生效
+        crate::scene::dynamic::set_inline_override(&mut scene, root, "width:100px").unwrap();
+        let bit_after = scene.get(root).unwrap().inline_set.0;
+        assert_ne!(bit_after, 0, "supported prop（width）置 bit");
+        assert_eq!(
+            bit_after & INLINE_WIDTH,
+            INLINE_WIDTH,
+            "INLINE_WIDTH bit 被置"
+        );
+    }
+
+    #[test]
+    fn set_inline_override_no_ghost_when_shorthand_then_longhand() {
+        // ghost-state 复现测：set "border:1px solid red"（border 不在 inline_bit 表）→
+        // 修复前：apply_decl 写 taffy_style.border + border_color=red 字段但不置 bit。
+        // 再 set "border-width:2px"（在表）→ 置 INLINE_BORDER_WIDTH bit。
+        // rematch 时 apply_inline_override 拷 inline.taffy_style.border=2px，但
+        // border_color 无 bit → 不拷 → style.border_color 用 base 值（None）。但
+        // inline_override.border_color 留 red ghost 值污染字段。
+        //
+        // 修复后：border 整步被跳过（不写字段），只有 border-width 写入；
+        // inline_override.border_color 保持默认 None，无 ghost。
+        let (mut scene, root) = build_simple_tree();
+        crate::scene::dynamic::set_inline_override(&mut scene, root, "border:1px solid red")
+            .unwrap();
+        // border 不在 inline_bit → 整步跳过，border_color 字段也不写
+        assert_eq!(
+            scene.get(root).unwrap().inline_set.0,
+            0,
+            "border shorthand 不置 bit"
+        );
+        assert_eq!(
+            scene.get(root).unwrap().inline_override.border_color,
+            None,
+            "border shorthand 不写 border_color 字段（无 ghost）"
+        );
+        // 再 set border-width（在表）
+        crate::scene::dynamic::set_inline_override(&mut scene, root, "border-width:2px").unwrap();
+        let n = scene.get(root).unwrap();
+        assert_ne!(
+            n.inline_set.0 & INLINE_BORDER_WIDTH,
+            0,
+            "border-width 置 bit"
+        );
+        // border_color 字段仍未被污染（默认 None，未因 border shorthand 的 red 残留）
+        assert_eq!(
+            n.inline_override.border_color, None,
+            "border_color 无 ghost red 残留"
+        );
+        // rematch：border 2px 生效（bit 置），border_color 仍 None（base 值）
+        rematch_pseudo_classes(&mut scene);
+        use taffy::style::LengthPercentage;
+        let s = &scene.get(root).unwrap().style;
+        assert_eq!(
+            s.taffy_style.border.top,
+            LengthPercentage::Length(2.0),
+            "border-width 2px inline 生效"
+        );
+        assert_eq!(
+            s.border_color, None,
+            "border_color 用 base 值（无 ghost red）"
         );
     }
 }

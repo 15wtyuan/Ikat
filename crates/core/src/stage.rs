@@ -564,6 +564,55 @@ impl Stage {
         crate::scene::dynamic::set_style(self.scene.as_mut().ok_or("no scene")?, node, css)
     }
 
+    /// 写 inline override（便签层，优先级 > 动态规则 > base_style）。node 不 live / 无 scene → Err。
+    pub fn set_inline_override(&mut self, node: NodeId, css: &str) -> Result<(), String> {
+        crate::scene::dynamic::set_inline_override(
+            self.scene.as_mut().ok_or("no scene")?,
+            node,
+            css,
+        )
+    }
+
+    /// 清 inline override 的某 prop bit（值保留但下帧 rematch 不再应用）。node 不 live / 无 scene → Err。
+    pub fn unset_inline_override(&mut self, node: NodeId, prop: &str) -> Result<(), String> {
+        crate::scene::dynamic::unset_inline_override(
+            self.scene.as_mut().ok_or("no scene")?,
+            node,
+            prop,
+        )
+    }
+
+    /// 读节点子节点数。无 scene / 节点不 live → None。
+    pub fn get_child_count(&self, node: NodeId) -> Option<usize> {
+        self.scene
+            .as_ref()
+            .and_then(|s| crate::scene::dynamic::get_child_count(s, node))
+    }
+
+    /// 读节点子节点列表（clone Vec）。无 scene / 节点不 live → None；叶子 → Some(vec![])。
+    pub fn get_children(&self, node: NodeId) -> Option<Vec<NodeId>> {
+        self.scene
+            .as_ref()
+            .and_then(|s| crate::scene::dynamic::get_children(s, node))
+    }
+
+    /// 加 class（重复名不重复 push）+ 标 dirty_mesh。node 不 live / 无 scene → Err。
+    pub fn add_class(&mut self, node: NodeId, name: &str) -> Result<(), String> {
+        crate::scene::dynamic::add_class(self.scene.as_mut().ok_or("no scene")?, node, name)
+    }
+
+    /// 移除 class（全部匹配）+ 标 dirty_mesh。node 不 live / 无 scene → Err。
+    pub fn remove_class(&mut self, node: NodeId, name: &str) -> Result<(), String> {
+        crate::scene::dynamic::remove_class(self.scene.as_mut().ok_or("no scene")?, node, name)
+    }
+
+    /// 查询 class 是否存在。无 scene / 节点不 live → None。
+    pub fn has_class(&self, node: NodeId, name: &str) -> Option<bool> {
+        self.scene
+            .as_ref()
+            .and_then(|s| crate::scene::dynamic::has_class(s, node, name))
+    }
+
     /// 设渲染复用键（虚拟列表 slot）。node 无效 → no-op。
     pub fn set_reuse_key(&mut self, node: NodeId, key: u32) {
         if let Some(scene) = self.scene.as_mut() {

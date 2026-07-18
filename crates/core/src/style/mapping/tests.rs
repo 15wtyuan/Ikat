@@ -114,6 +114,59 @@ fn color_hex_short_expands() {
         ]
     );
 }
+
+// CSS Color Module Level 4：`#rrggbbaa` 8 位 hex（第 7-8 位为 alpha）。
+// StyleMirror（Spec-4a C3）会把 color flush 成此形式，core parse_color 必须收。
+#[test]
+fn color_hex_8_opaque_red() {
+    // aa=ff → 不透明红（与 6-hex #ff0000 等价）。
+    let c = parse_color("#ff0000ff").unwrap();
+    assert_eq!(c, [1.0, 0.0, 0.0, 1.0]);
+}
+
+#[test]
+fn color_hex_8_alpha_128_of_255() {
+    // aa=80 → alpha = 128/255 ≈ 0.502（半透明黑）。
+    let c = parse_color("#00000080").unwrap();
+    assert_eq!(c[0], 0.0);
+    assert_eq!(c[1], 0.0);
+    assert_eq!(c[2], 0.0);
+    assert!((c[3] - 128.0 / 255.0).abs() < 1e-5, "alpha = 128/255");
+}
+
+#[test]
+fn color_hex_8_round_trip() {
+    // C3 StyleMirror flush #rrggbbaa → core parse → 值对。
+    // aa=ff 等价 6-hex a=1.0；aa=00 完全透明。
+    let opaque = parse_color("#aabbccff").unwrap();
+    assert_eq!(
+        opaque,
+        [
+            0xaa as f32 / 255.0,
+            0xbb as f32 / 255.0,
+            0xcc as f32 / 255.0,
+            1.0
+        ]
+    );
+    let transparent = parse_color("#aabbcc00").unwrap();
+    assert_eq!(
+        transparent,
+        [
+            0xaa as f32 / 255.0,
+            0xbb as f32 / 255.0,
+            0xcc as f32 / 255.0,
+            0.0
+        ],
+        "aa=00 → alpha=0 完全透明"
+    );
+}
+
+#[test]
+fn color_hex_8_no_regress_6_and_3() {
+    // 6-hex / 3-hex 仍正确（不回归）。
+    assert_eq!(parse_color("#ff0000").unwrap(), [1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(parse_color("#f00").unwrap(), [1.0, 0.0, 0.0, 1.0]);
+}
 #[test]
 fn apply_width_and_bg() {
     let mut s = ResolvedStyle::default();
@@ -741,7 +794,7 @@ fn text_shadow_bare_numbers_no_px() {
 
 #[test]
 fn text_shadow_named_color_rejected() {
-    // parse_color 仅认 #rrggbb 6 位 hex，命名色（red）静默返 false。
+    // parse_color 仅认 hex 形式（3/6/8 位），命名色（red）静默返 false。
     // CSS 一条声明全有或全无 → 非法色整条忽略。
     let mut s = ResolvedStyle::default();
     assert!(
@@ -846,7 +899,7 @@ fn background_linear_gradient_diagonal_angle_rejected() {
 
 #[test]
 fn background_linear_gradient_named_color_rejected() {
-    // parse_color 仅认 6 位 hex；命名色（red/blue）→ 解析失败 → 整体返 false。
+    // parse_color 仅认 hex（3/6/8 位）；命名色（red/blue）→ 解析失败 → 整体返 false。
     let mut s = ResolvedStyle::default();
     assert!(
         !apply_decl(&mut s, "background", "linear-gradient(to right, red, blue)"),
@@ -914,7 +967,7 @@ fn text_stroke_bare_number_no_px() {
 
 #[test]
 fn text_stroke_named_color_rejected() {
-    // parse_color 仅认 #rrggbb 6 位 hex，命名色静默返 false。
+    // parse_color 仅认 hex 形式（3/6/8 位），命名色静默返 false。
     let mut s = ResolvedStyle::default();
     assert!(
         !apply_decl(&mut s, "-webkit-text-stroke", "2px red"),

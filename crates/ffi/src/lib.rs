@@ -1325,6 +1325,180 @@ pub extern "C" fn loomgui_stage_set_style(
         .unwrap_or(-1)
 }
 
+/// 写 inline override（便签层，优先级 > 动态规则 > base_style）。css = UTF-8 字节。
+/// 0=ok，-1=err（null 句柄 / 非 UTF-8 / 节点不 live）。下帧 rematch 应用。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_inline_override(
+    h: *mut StageHandle,
+    node: u32,
+    css: *const u8,
+    len: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let css = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, len) }) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    sh.stage
+        .set_inline_override(NodeId(node), css)
+        .map(|_| 0)
+        .unwrap_or(-1)
+}
+
+/// 清 inline override 的某 prop bit。prop = UTF-8 字节。0=ok，-1=err。
+/// prop 不可 inline 时为 no-op（仍返 0）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_unset_inline_override(
+    h: *mut StageHandle,
+    node: u32,
+    prop: *const u8,
+    len: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let prop = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(prop, len) }) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    sh.stage
+        .unset_inline_override(NodeId(node), prop)
+        .map(|_| 0)
+        .unwrap_or(-1)
+}
+
+/// 读节点子节点数。返回 i32：≥0 = 子节点数；-1 = err（null 句柄 / 节点不 live）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_child_count(h: *const StageHandle, node: u32) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    match sh.stage.get_child_count(NodeId(node)) {
+        Some(c) => c as i32,
+        None => -1,
+    }
+}
+
+/// 读节点子节点 NodeId 列表，写入 `out` buffer（u32 per slot）。
+/// 返回 i32：≥0 = 实际写入数；负值 = err（-1 = null 句柄 / 节点不 live；
+/// -(n+2) = buffer 不够，n = 所需 cap）。调用方遇负值重分配 n+ 容量再调。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_children(
+    h: *const StageHandle,
+    node: u32,
+    out: *mut u32,
+    cap: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    match sh.stage.get_children(NodeId(node)) {
+        None => -1,
+        Some(kids) => {
+            if kids.len() > cap {
+                return -(kids.len() as i32 + 2);
+            }
+            if !out.is_null() {
+                for (i, k) in kids.iter().enumerate() {
+                    unsafe {
+                        *out.add(i) = k.0;
+                    }
+                }
+            }
+            kids.len() as i32
+        }
+    }
+}
+
+/// 加 class（重复名不重复 push）。name = UTF-8 字节。0=ok，-1=err。
+/// 标 dirty_mesh 触发下帧 rematch。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_add_class(
+    h: *mut StageHandle,
+    node: u32,
+    name: *const u8,
+    len: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, len) }) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    sh.stage
+        .add_class(NodeId(node), name)
+        .map(|_| 0)
+        .unwrap_or(-1)
+}
+
+/// 移除 class（全部匹配）。name = UTF-8 字节。0=ok，-1=err。标 dirty_mesh。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_remove_class(
+    h: *mut StageHandle,
+    node: u32,
+    name: *const u8,
+    len: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, len) }) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    sh.stage
+        .remove_class(NodeId(node), name)
+        .map(|_| 0)
+        .unwrap_or(-1)
+}
+
+/// 查询 class 是否存在。返回 i32：1 = true；0 = false；-1 = err（null 句柄 / 节点不 live）。
+/// name = UTF-8 字节，非 UTF-8 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_has_class(
+    h: *const StageHandle,
+    node: u32,
+    name: *const u8,
+    len: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, len) }) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    match sh.stage.has_class(NodeId(node), name) {
+        Some(true) => 1,
+        Some(false) => 0,
+        None => -1,
+    }
+}
+
 #[cfg(test)]
 mod tests;
 

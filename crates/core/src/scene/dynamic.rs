@@ -2,7 +2,8 @@
 //!
 //! `remove_node`（递归删子 + 联动清 anim/scroll/tween + slotmap remove）+
 //! 动态建树/改树 API：`kind_from_tag` / `apply_css` / `create_node` / `create_root`
-//! / `append_child` / `insert_before` / `remove_child`（摘除不删）/ `set_text` / `set_src` / `set_style`。
+//! / `append_child` / `insert_before` / `remove_child`（摘除不删）/ `set_text` / `set_src` / `set_style`
+//! / `set_inline_override` / `unset_inline_override`（便签层 inline override，rematch 最高优先级）。
 //!
 //! **设计要点**（spec §5.3 + §7 + §8）：
 //! - 删节点联动清持久附属 map（anim/scroll remove + tween kill），防悬空 NodeId 残留
@@ -14,6 +15,7 @@
 //! - create_node 填 base_style（源）+ style=base_style.clone()（派生），下帧 rematch 从 base 起算。
 
 use crate::scene::node::{Node, NodeFlags, NodeId, NodeInteraction, NodeKind, Rect, Scene};
+use crate::style::dynamic::{inline_bit, InlineSet};
 use crate::style::mapping::apply_decl;
 use crate::style::resolved::{OverflowMode, ResolvedStyle};
 use crate::tween::TweenManager;
@@ -102,6 +104,8 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         },
         reuse_key: 0,
         data_controller: None,
+        inline_override: ResolvedStyle::default(),
+        inline_set: InlineSet(0),
     };
     let key = scene.nodes.insert(node);
     resize_parallel_arrays(scene);
@@ -164,6 +168,8 @@ pub fn create_node_from_template(
         },
         reuse_key: 0,
         data_controller: None,
+        inline_override: ResolvedStyle::default(),
+        inline_set: InlineSet(0),
     };
     let key = scene.nodes.insert(node);
     resize_parallel_arrays(scene);
@@ -262,6 +268,98 @@ pub fn set_style(scene: &mut Scene, node: NodeId, css: &str) -> Result<(), Strin
     apply_css(&mut n.base_style, css);
     n.dirty_mesh = true;
     Ok(())
+}
+
+/// 写 inline override（便签层）：把 CSS 声明应用到 `inline_override` 字段，并把每个
+/// 成功 apply 的 prop 对应 bit OR 进 `inline_set`。下帧 rematch 在动态规则之后应用，
+/// 故 inline 优先级最高（> 动态规则 > base_style）。node 不 live → Err。
+///
+/// 复用 `apply_decl`（apply_css 同路径，不依赖 parse feature）。多次 set 同 prop 累加
+/// （bit 幂等 OR，值覆盖）。
+///
+/// **bit 检查前置（review I1 修复）：** 不在 `inline_bit` 表的 prop（transform/filter/
+/// border/padding-top/flex-grow/background-image/order/pointer-events/aspect-ratio 等
+/// 约 20 个——它们走别的运行时路径或不在 NodeStyle 表面）**完全不写** `inline_override`，
+/// 避免 ghost state（写字段但不置 bit → rematch `apply_inline_override` 不拷该字段 →
+/// override 静默丢失；若后续 set 同族 longhand 置 bit，还会读到写字段时的旧 ghost 值）。
+/// 语义上这些 prop 对便签层"不可表达"，等价于 apply_decl 返 false——不进 inline_override，
+/// 不污染字段。
+pub fn set_inline_override(scene: &mut Scene, node: NodeId, css: &str) -> Result<(), String> {
+    let n = scene.get_mut(node).ok_or("node not live")?;
+    for decl in css.split(';') {
+        let decl = decl.trim();
+        if decl.is_empty() {
+            continue;
+        }
+        if let Some((prop, val)) = decl.split_once(':') {
+            let prop = prop.trim();
+            // bit 检查前置：只对 inline_bit 表内的 prop apply。表外 prop 跳过 apply_decl，
+            // 连字段都不写 inline_override，杜绝 ghost state。
+            if let Some(bit) = inline_bit(prop) {
+                if apply_decl(&mut n.inline_override, prop, val.trim()) {
+                    n.inline_set.0 |= bit;
+                }
+            }
+        }
+    }
+    n.dirty_mesh = true;
+    Ok(())
+}
+
+/// 清 inline override 的某 prop bit（值保留在 `inline_override`，但下次 rematch 不再应用）。
+/// 下帧 rematch 回落到 base_style / 动态规则值。prop 不可 inline（不在 `inline_bit` 表）
+/// 时为 no-op（仍返 Ok，便于调用方无需判）。node 不 live → Err。
+pub fn unset_inline_override(scene: &mut Scene, node: NodeId, prop: &str) -> Result<(), String> {
+    let n = scene.get_mut(node).ok_or("node not live")?;
+    if let Some(bit) = inline_bit(prop) {
+        n.inline_set.0 &= !bit;
+    }
+    n.dirty_mesh = true;
+    Ok(())
+}
+
+/// 读节点子节点数。node 不 live（已删 / 未建）→ None。
+///
+/// 给 C# 投影层 Container.Children / Get<T> 提供只读遍历入口。
+pub fn get_child_count(scene: &Scene, node: NodeId) -> Option<usize> {
+    scene.get(node).map(|n| n.children.len())
+}
+
+/// 读节点子节点列表（clone，调用方拿到独立 Vec）。node 不 live → None。
+/// 叶子节点 → Some(vec![])（空 Vec，不是 None——区分"节点存在但无子" vs "节点不存在"）。
+///
+/// 给 C# 投影层 Container.Children / Get<T> 提供只读遍历入口。
+pub fn get_children(scene: &Scene, node: NodeId) -> Option<Vec<NodeId>> {
+    scene.get(node).map(|n| n.children.clone())
+}
+
+/// 加 class。重复名不重复 push。node 不 live → Err。标 dirty_mesh 触发下帧 rematch。
+///
+/// 给 C# 投影层 ClassList.Add 铺路（class 变化影响 cascade，须触发 rematch）。
+pub fn add_class(scene: &mut Scene, node: NodeId, name: &str) -> Result<(), String> {
+    let n = scene.get_mut(node).ok_or("node not live")?;
+    if !n.classes.iter().any(|c| c == name) {
+        n.classes.push(name.to_string());
+    }
+    n.dirty_mesh = true;
+    Ok(())
+}
+
+/// 移除 class（全部匹配）。node 不 live → Err。标 dirty_mesh。
+///
+/// 给 C# 投影层 ClassList.Remove 铺路（class 变化影响 cascade，须触发 rematch）。
+pub fn remove_class(scene: &mut Scene, node: NodeId, name: &str) -> Result<(), String> {
+    let n = scene.get_mut(node).ok_or("node not live")?;
+    n.classes.retain(|c| c != name);
+    n.dirty_mesh = true;
+    Ok(())
+}
+
+/// 查询 class 是否存在。node 不 live → None。
+///
+/// 给 C# 投影层 ClassList.Contains 铺路（只读查询，不改 dirty）。
+pub fn has_class(scene: &Scene, node: NodeId, name: &str) -> Option<bool> {
+    scene.get(node).map(|n| n.classes.iter().any(|c| c == name))
 }
 
 /// 设渲染复用键（虚拟列表 slot 用）。node 无效 → no-op（不 panic）。
@@ -383,6 +481,58 @@ mod tests {
         let child = scene.get(root).unwrap().children[0];
         let grand = scene.get(child).unwrap().children[0];
         (scene, root, child, grand)
+    }
+
+    // ── Spec-4a A4：get_children / get_child_count（只读子节点遍历）──
+
+    #[test]
+    fn get_children_returns_node_children() {
+        // build_3level: root → child → grand。覆盖中间节点（1 子）/ 叶子（0 子）/ 不存在节点。
+        let (scene, root, child, grand) = build_3level();
+        // root 有 1 子（child）
+        assert_eq!(get_child_count(&scene, root), Some(1));
+        assert_eq!(get_children(&scene, root), Some(vec![child]));
+        // child 有 1 子（grand）—— 中间节点
+        assert_eq!(get_child_count(&scene, child), Some(1));
+        assert_eq!(get_children(&scene, child), Some(vec![grand]));
+        // grand 是叶子 → 空 Vec（不是 None）
+        assert_eq!(get_child_count(&scene, grand), Some(0));
+        assert_eq!(get_children(&scene, grand), Some(vec![]));
+        // 不存在节点 → None（slotmap 查不到）
+        assert_eq!(get_child_count(&scene, NodeId(0xFFFF_FFFF)), None);
+        assert_eq!(get_children(&scene, NodeId(0xFFFF_FFFF)), None);
+    }
+
+    // ── Spec-4a A5：add_class / remove_class / has_class（操作 Node.classes）──
+
+    #[test]
+    fn class_ops_mutate_and_flag_dirty() {
+        // 用现有 build_3level() helper（scene/dynamic.rs tests，root→child→grand）
+        let (mut scene, root, _child, _grand) = build_3level();
+        add_class(&mut scene, root, "active").unwrap();
+        assert!(has_class(&scene, root, "active").unwrap());
+        assert!(
+            scene.get(root).unwrap().dirty_mesh,
+            "add 标 dirty 触发 rematch"
+        );
+        remove_class(&mut scene, root, "active").unwrap();
+        assert!(!has_class(&scene, root, "active").unwrap());
+        // 重复 add 不重复 push
+        add_class(&mut scene, root, "x").unwrap();
+        add_class(&mut scene, root, "x").unwrap();
+        assert_eq!(
+            scene
+                .get(root)
+                .unwrap()
+                .classes
+                .iter()
+                .filter(|c| **c == "x")
+                .count(),
+            1
+        );
+        // 不存在节点 → Err / None
+        assert!(add_class(&mut scene, NodeId(0xFFFF_FFFF), "y").is_err());
+        assert_eq!(has_class(&scene, NodeId(0xFFFF_FFFF), "y"), None);
     }
 
     #[test]
