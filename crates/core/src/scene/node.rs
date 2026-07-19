@@ -239,7 +239,6 @@ pub struct Node {
     pub id_attr: Option<String>,
     pub interaction: NodeInteraction,
     pub reuse_key: u32,
-    pub data_controller: Option<String>,
     /// 运行时 inline override（便签层）。C# Style.X=v 经 set_inline_override 写入；
     /// rematch 在动态规则后应用（最高优先级）。默认空 = 无 inline override。
     /// 纯运行时 transient，不进 pkg.bin（设计期无 inline override 概念）。
@@ -275,7 +274,6 @@ impl Default for Node {
                 tabindex: None,
             },
             reuse_key: 0,
-            data_controller: None,
             inline_override: ResolvedStyle::default(),
             inline_set: InlineSet(0),
         }
@@ -346,26 +344,6 @@ impl AnimTable {
     }
 }
 
-/// Controller 状态机（挂载点 NodeId 作 HashMap key，不存对象里）。
-/// selected_index = -1 表无选中页（由 set_controller_selected 懒注册时写入；
-/// Default 为 0，但 registry 中不存在 Default 建的条目——条目只由 set_controller_selected 建）。
-/// 运行时由 Stage::set_selected_index 改，匹配器遇 [data-page] 时回溯找最近
-/// data_controller 祖先查此表定可见性（§1.4）。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Controller {
-    pub selected_index: i32,
-}
-
-/// Controller 切页事件（borrow_controller_changed_events 出口，pull 模式）。
-/// mount_node = 挂载点 NodeId（句柄身份）。#[repr(C)] 跨 FFI；size_of 断言 ABI 尺寸。
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct ControllerChangedEvent {
-    pub mount_node: u32,
-    pub prev: i32,
-    pub new: i32,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct Scene {
     pub roots: Vec<NodeId>,
@@ -397,13 +375,6 @@ pub struct Scene {
     pub text_contents: std::collections::HashMap<NodeId, String>,
     /// Image src paths (only Image nodes have entries).
     pub image_srcs: std::collections::HashMap<NodeId, String>,
-    /// Controller 状态机 registry：挂载点 NodeId → Controller。load_package/instantiate 建，
-    /// driver 也可懒注册（set_controller_selected 首次写时建条目）。
-    /// 匹配器遇 [data-page] 时回溯找最近 data_controller 祖先查此表（§1.4）。
-    pub controllers: std::collections::HashMap<NodeId, Controller>,
-    /// 本帧 Controller 切页事件（set_selected_index 推入；borrow_controller_changed_events 读）。
-    /// pull 模式：FFI 每 tick 借出后清空。运行时态，不进 pkg。
-    pub pending_controller_events: Vec<ControllerChangedEvent>,
     /// 本帧 transition 请求（rematch 检测 data-page 通道变化时推入；Stage tick drain 后
     /// kill 旧 tween + 提交新 tween，见 Phase E）。运行时态，不进 pkg。
     pub pending_transitions: Vec<crate::tween::TransitionRequest>,
@@ -425,7 +396,7 @@ impl Scene {
             Option<String>,
             bool,
             Option<i32>,
-            Option<String>,
+            Option<String>, // data_controller（dead：Node 字段 P1.4 删；P1.6 删 TemplateNode 后此参数随之移除）
             Option<String>,
             Option<String>,
         )],
@@ -440,7 +411,7 @@ impl Scene {
             id_attr,
             draggable,
             tabindex,
-            data_controller,
+            _data_controller,
             content,
             src,
         ) in entries.iter()
@@ -472,7 +443,6 @@ impl Scene {
                     tabindex: *tabindex,
                 },
                 reuse_key: 0,
-                data_controller: data_controller.clone(),
                 inline_override: ResolvedStyle::default(),
                 inline_set: InlineSet(0),
             };
@@ -558,23 +528,6 @@ impl Scene {
             .iter()
             .find(|(_, n)| n.id_attr.as_deref() == Some(id))
             .map(|(_, n)| n.id)
-    }
-
-    /// 设 Controller 的 selected_index。挂载点无注册 Controller 时自动建（懒注册，
-    /// 供测试 + instantiate 后 driver 覆盖初始页）。返 prev_index（无条目 → -1）。
-    pub fn set_controller_selected(&mut self, mount: NodeId, idx: i32) -> i32 {
-        let entry = self
-            .controllers
-            .entry(mount)
-            .or_insert(Controller { selected_index: -1 });
-        let prev = entry.selected_index;
-        entry.selected_index = idx;
-        prev
-    }
-
-    /// 读 Controller 的 selected_index。无条目 → None（调用方自定 -1 兜底语义）。
-    pub fn controller_selected(&self, mount: NodeId) -> Option<i32> {
-        self.controllers.get(&mount).map(|c| c.selected_index)
     }
 }
 

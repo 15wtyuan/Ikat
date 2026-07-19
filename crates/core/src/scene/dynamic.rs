@@ -100,7 +100,6 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
             tabindex: None,
         },
         reuse_key: 0,
-        data_controller: None,
         inline_override: ResolvedStyle::default(),
         inline_set: InlineSet(0),
     };
@@ -164,7 +163,6 @@ pub fn create_node_from_template(
             tabindex: None,
         },
         reuse_key: 0,
-        data_controller: None,
         inline_override: ResolvedStyle::default(),
         inline_set: InlineSet(0),
     };
@@ -387,12 +385,11 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
     // 3. 联动清持久附属 map（HashMap remove + tween kill），防悬空残留。
     scene.anim.clear_node(id);
     scene.scroll.remove(id);
-    scene.controllers.remove(&id);
     scene.text_contents.remove(&id);
     scene.image_srcs.remove(&id);
     tweens.kill_node(id);
-    // pending_controller_events / pending_transitions 不清：每帧首由 Stage drain/clear
-    // （stage.rs），瞬态，非持久泄漏；消费方对悬空 NodeId 有 None-check 兜底。
+    // pending_transitions 不清：每帧首由 Stage drain/clear（stage.rs），瞬态，非持久泄漏；
+    // 消费方对悬空 NodeId 有 None-check 兜底。
     // 3b. focused_node 联动清：删焦点节点后 focused_node 不应悬空（否则 FOCUS_OUT 带 stale node_id）。
     //     全局单一焦点，== Some(id) 检查对每个被删节点都做（递归删子时若子是焦点同样清）。
     if scene.focused_node == Some(id) {
@@ -423,7 +420,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
-            Option<String>,
+            Option<String>, // data_controller
             Option<String>,
             Option<String>,
         )> = vec![
@@ -577,41 +574,6 @@ mod tests {
     }
 
     #[test]
-    fn remove_node_clears_controller_mount() {
-        let (mut scene, _root, child, _grand) = build_3level();
-        let mut tweens = TweenManager::new();
-        // child 懒注册成 controller 挂载点（set_controller_selected 建条目）
-        assert_eq!(
-            scene.set_controller_selected(child, 2),
-            -1,
-            "新建条目 prev=-1"
-        );
-        assert!(
-            scene.controllers.contains_key(&child),
-            "前置：controller 已注册"
-        );
-        remove_node(&mut scene, &mut tweens, child);
-        assert!(
-            !scene.controllers.contains_key(&child),
-            "remove_node 必须清 controller 挂载条目（原持久泄漏）"
-        );
-    }
-
-    #[test]
-    fn remove_node_recurses_clears_descendant_controller() {
-        let (mut scene, root, child, _grand) = build_3level();
-        let mut tweens = TweenManager::new();
-        // child 挂 controller；删 root 应递归把 child 的 controller 条目也清掉
-        assert_eq!(scene.set_controller_selected(child, 1), -1);
-        assert!(scene.controllers.contains_key(&child));
-        remove_node(&mut scene, &mut tweens, root);
-        assert!(
-            !scene.controllers.contains_key(&child),
-            "递归删子时子树的 controller 条目也须清"
-        );
-    }
-
-    #[test]
     fn remove_node_from_middle_clears_subtree_and_keeps_siblings() {
         // root → [a, b, c]；删 b → a/c 保留，b 子树（b → bchild）递归删。
         let entries: Vec<(
@@ -622,7 +584,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
-            Option<String>,
+            Option<String>, // data_controller
             Option<String>,
             Option<String>,
         )> = vec![

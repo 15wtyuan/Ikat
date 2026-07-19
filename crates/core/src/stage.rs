@@ -8,7 +8,7 @@ use crate::input::{EventRecord, PointerEvent, PointerState};
 use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
-use crate::scene::node::{ControllerChangedEvent, NodeFlags, NodeId, Rect, Scene};
+use crate::scene::node::{NodeFlags, NodeId, Rect, Scene};
 use crate::style::dynamic::rematch_pseudo_classes;
 use crate::style::resolved::OverflowMode;
 use crate::text::layout::FontTable;
@@ -153,62 +153,6 @@ impl Stage {
     /// 供 FFI find_node_by_id：业务用 id 定位节点（注册 listener / 设 disabled）。
     pub fn find_node_by_id(&self, id: &str) -> Option<NodeId> {
         self.scene.as_ref().and_then(|s| s.find_by_id_attr(id))
-    }
-
-    /// 在 mount_subtree_root 的子树内找名为 name 的 Controller 挂载点 NodeId。
-    /// driver 先 instantiate 拿到组件根，再 get_controller(root, "tab") 取句柄。
-    /// DFS 遍历子树（含 mount_subtree_root 自身）找首个 data_controller == Some(name) 的节点。
-    /// 返 None = 子树内无 data-controller="name"。无 scene → None。
-    pub fn get_controller(&self, mount_subtree_root: NodeId, name: &str) -> Option<NodeId> {
-        let scene = self.scene.as_ref()?;
-        let mut found = None;
-        let mut stack = vec![mount_subtree_root];
-        while let Some(nid) = stack.pop() {
-            if let Some(n) = scene.get(nid) {
-                if n.data_controller.as_deref() == Some(name) {
-                    found = Some(nid);
-                    break;
-                }
-                stack.extend(n.children.iter().copied());
-            }
-        }
-        found
-    }
-
-    /// 切 Controller 页。无效 mount（无 scene / 节点不存在 / 未挂 data_controller）→ 静默
-    /// 返 -1（不 panic，照 FFI no-panic 约定）。prev != idx 时推一条 ControllerChangedEvent
-    /// 进 pending_controller_events 供 FFI borrow_controller_changed_events pull。
-    pub fn set_selected_index(&mut self, mount: NodeId, idx: i32) -> i32 {
-        let Some(scene) = self.scene.as_mut() else {
-            return -1;
-        };
-        // 校验 mount 确实挂了 controller（data_controller.is_some）——否则静默忽略。
-        if scene
-            .get(mount)
-            .and_then(|n| n.data_controller.as_ref())
-            .is_none()
-        {
-            return -1;
-        }
-        let prev = scene.set_controller_selected(mount, idx);
-        if prev != idx {
-            scene
-                .pending_controller_events
-                .push(ControllerChangedEvent {
-                    mount_node: mount.0,
-                    prev,
-                    new: idx,
-                });
-        }
-        prev
-    }
-
-    /// 读 Controller 当前选中页。无 scene / 无条目 → -1（调用方据 -1 判无 Controller）。
-    pub fn get_selected_index(&self, mount: NodeId) -> i32 {
-        self.scene
-            .as_ref()
-            .and_then(|s| s.controller_selected(mount))
-            .unwrap_or(-1)
     }
 
     /// UI 挡住时游戏不响应点击。委托 PointerState（任一活跃槽命中非根）。
@@ -582,7 +526,7 @@ impl Stage {
     /// 1. 查 `packages[pkg].components[component]`，clone 出 ComponentTemplate（避开 packages/scene 双借）。
     /// 2. 遍历 template.nodes，按 parent_idx 序建 live Node（父先建于子），复用节点构造
     ///    （`create_node_from_template`：kind + baked style → base_style/style 初始 + clip_rect +
-    ///    dirty_text + slotmap insert + id 回填），再填 classes/id_attr/draggable/tabindex/data_controller。
+    ///    dirty_text + slotmap insert + id 回填），再填 classes/id_attr/draggable/tabindex。
     ///    按 parent_idx 串子树（append_child 语义：parent.children.push + child.parent=Some(parent)）。
     ///    根（parent_idx=None）不串父，记录返回。
     /// 3. 伪类规则合并去重：遍历 template.dynamic_rules，相同选择器（ParsedSelector.eq）不重复加进
@@ -619,13 +563,12 @@ impl Stage {
         for (i, tn) in template.nodes.iter().enumerate() {
             let node_id =
                 crate::scene::dynamic::create_node_from_template(scene, tn.kind, tn.style.clone());
-            // 填 classes/id_attr/draggable/tabindex/data_controller（create_node_from_template 不填这些，同 create_node）
+            // 填 classes/id_attr/draggable/tabindex（create_node_from_template 不填这些，同 create_node）
             let n = scene.get_mut(node_id).unwrap();
             n.classes = tn.classes.clone();
             n.id_attr = tn.id_attr.clone();
             n.interaction.draggable = tn.draggable;
             n.interaction.tabindex = tn.tabindex;
-            n.data_controller = tn.data_controller.clone();
             if let Some(c) = &tn.content {
                 scene.text_contents.insert(node_id, c.clone());
             }
@@ -644,15 +587,6 @@ impl Stage {
             }
         }
         let root = root_id.ok_or("component has no root node (parent_idx=None missing)")?;
-
-        // 建 Controller registry：组件内 mount_node_idx → 活 NodeId（经 id_map）。
-        // set_controller_selected 懒注册（无条目时建），此处显式建条目写 initial_selected_index。
-        // 多实例独立：每次 instantiate 各自 id_map → 不同 NodeId → 独立 registry 条目。
-        for c in &template.controllers {
-            if let Some(&Some(mount_live)) = id_map.get(c.mount_node_idx as usize) {
-                scene.set_controller_selected(mount_live, c.initial_selected_index);
-            }
-        }
 
         // 伪类规则合并去重：相同选择器（ParsedSelector PartialEq）不重复加。
         // 规则按 class 匹配，多实例共享同一规则条目；hit_test 返具体 NodeId → 各实例独立命中。
@@ -686,16 +620,6 @@ impl Stage {
         &self.last_events
     }
 
-    /// 本帧 Controller 切页事件（set_selected_index 推入；FFI borrow_controller_changed_events 读）。
-    /// pull 模式：out_len 是 COUNT（非字节）。事件存活至下 tick start 清空——C# 在 tick 后、
-    /// 下 tick 前的窗口内读（同 last_events 语义窗口）。
-    pub fn controller_changed_events(&self) -> &[ControllerChangedEvent] {
-        self.scene
-            .as_ref()
-            .map(|s| s.pending_controller_events.as_slice())
-            .unwrap_or(&[])
-    }
-
     /// 每帧管线（支柱1重排——rematch 提到 solve 前，伪类三类全当帧消费）：
     /// ①tween ②focus_request ③process（仲裁+拖拽写 scroll_pos；hit_test 读上帧 world，1帧延迟已认）
     /// ④scroll update ⑤process_keys ⑥rematch_pseudo_classes（提到 solve 前：改 layout/transform/colors
@@ -717,10 +641,6 @@ impl Stage {
             Some(s) => s,
             None => return FrameData::default(),
         };
-        // 清上帧残留的 Controller 切页事件。事件由 set_selected_index（tick 外 C# 调）推入，
-        // C# 在上 tick 后、本 tick 前的窗口内已 borrow 读走。同 last_events 语义窗口
-        // （last_events 每帧末覆写；pending_controller_events 每帧首清空）。
-        scene.pending_controller_events.clear();
         let mut out: Vec<EventRecord> = Vec::new();
         // tween 推进（写 scene.anim + 产 complete 事件进 out）。须在 solve/compute_world_transforms 前。
         let dt = self.pending_dt;
