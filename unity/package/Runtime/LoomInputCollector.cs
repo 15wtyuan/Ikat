@@ -14,6 +14,14 @@ namespace LoomGUI
     [ExecuteAlways]
     public unsafe class LoomInputCollector : MonoBehaviour
     {
+        /// <summary>
+        /// 设计分辨率（design px）+ safe-area 开关：UnityLoomBackend.CollectInput / CollectWheel 读此做
+        /// screen→design 映射（替代旧 LoomStage.DesignSize/UseSafeArea 路径——P2 后端分层不再持 LoomStage）。
+        /// 由当前 Driver（LoomStageDriver 或 P2.5 LoomHost Driver）在 Awake 注入。
+        /// </summary>
+        internal UnityEngine.Vector2 DesignSize { get; set; }
+        internal bool UseSafeArea { get; set; }
+
         /// screen→design 映射，与 LoomStageDriver.ConfigureTransforms 逐项逆（同一 sf 居中公式）。
         /// 前向（design→screen，见 Driver 的根变换注释）：
         ///   screen.x = offX    + dx*sf     其中 offX = area.x + (area.width  - dw*sf)*0.5
@@ -146,9 +154,13 @@ namespace LoomGUI
         /// 新旧输入系统双路径：滚轮用旧 Input.mouseScrollDelta 或新 Mouse.current.scroll。
         /// 归一 delta → ±1/格：旧 Input.mouseScrollDelta 已 ≈ ±1/格；新系统 120 像素/格除 120。
         /// 鼠标不在 UI 上也可滚——hit test 由 Rust 侧做（只在悬停的 scroll 容器响应）。
-        public static void CollectWheel(LoomStage stage)
+        //
+        // 签名说明：旧签名 CollectWheel(LoomStage stage) 在 P2.2 拆为 (stagePtr, ctx)——
+        // UnityLoomBackend 不持 LoomStage（只持 IntPtr stage handle + LoomInputCollector ctx），
+        // DesignSize/UseSafeArea 由 ctx 读（替代 stage.DesignSize/UseSafeArea）。
+        public static void CollectWheel(System.IntPtr stagePtr, LoomInputCollector ctx)
         {
-            if (stage == null || stage.StagePtr == System.IntPtr.Zero) return;
+            if (ctx == null || stagePtr == System.IntPtr.Zero) return;
 
             float dy = 0f;
 #if ENABLE_INPUT_SYSTEM
@@ -168,11 +180,11 @@ namespace LoomGUI
 
             var ss = new Vector2Int(Screen.width, Screen.height);
             UnityEngine.Rect sa = Screen.safeArea;
-            var pos = ScreenToDesign(screenPos, ss, stage.DesignSize, sa, stage.UseSafeArea);
+            var pos = ScreenToDesign(screenPos, ss, ctx.DesignSize, sa, ctx.UseSafeArea);
 
             var ev = new Bindings.WheelEvent { x = pos.x, y = pos.y, delta_x = 0f, delta_y = dy };
             // 栈局部值类型直接 & 取址（CS0213：栈上已固定，无需 fixed）。
-            Native.loomgui_stage_set_wheel_input((Bindings.StageHandle*)stage.StagePtr, &ev, 1);
+            Native.loomgui_stage_set_wheel_input((Bindings.StageHandle*)stagePtr, &ev, 1);
         }
 
         /// 当前 modifiers 位掩码（bit0=shift/bit1=ctrl/bit2=alt）。core MOD_SHIFT/CTRL/ALT 同值。

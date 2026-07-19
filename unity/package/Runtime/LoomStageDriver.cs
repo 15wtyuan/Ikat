@@ -237,6 +237,13 @@ namespace LoomGUI
             gameObject.layer = LoomUILayer;
 
             if (_inputCollector == null) _inputCollector = GetComponent<LoomInputCollector>();
+            // CollectWheel 自 P2.2 起从 ctx 读 DesignSize/UseSafeArea（替代旧 stage 路径），Awake 同步一次。
+            // _designSize/_safeArea 都是 Inspector 字段，运行时不变；Awake 设一次即可。
+            if (_inputCollector != null)
+            {
+                _inputCollector.DesignSize = _designSize;
+                _inputCollector.UseSafeArea = _safeArea;
+            }
         }
 
         // ===== Font registration (from runtime.json) =====
@@ -300,7 +307,7 @@ namespace LoomGUI
             {
                 _inputCollector.Collect(_stage.StagePtr, _designSize, _safeArea);
                 _inputCollector.CollectKeys(_stage.StagePtr);
-                LoomInputCollector.CollectWheel(_stage);
+                LoomInputCollector.CollectWheel(_stage.StagePtr, _inputCollector);
             }
 
             // tick → borrow_frame → MirrorPool.Sync → NativeHost.Sync → 事件派发（全在 stage.Tick 内）。
