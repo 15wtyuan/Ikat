@@ -45,7 +45,7 @@
 
 ### P0 · 前置修复（必须最先）
 
-1. **dll/绑定/源码同步**：入库 `.dll` + csbindgen 绑定比 Rust 源码**过期**（`loomgui_stage_load_html` / `loomgui_stage_set_rich_text` 已删源码、dll 里还在，旧 showcase 仍调）。按当前源码重编前先解决三者同步，否则任何重编都踩雷。
+1. ~~**dll/绑定/源码同步**：入库 `.dll` + csbindgen 绑定比 Rust 源码**过期**（`loomgui_stage_load_html` / `loomgui_stage_set_rich_text` 已删源码、dll 里还在，旧 showcase 仍调）~~ **✅ 已解决（Spec-4a 重编 .dll + b03929a 修 stale caller）**。三者当前同步，重编不再踩雷。
 2. **旧 `showcase.pkg.bin` 直接弃用**：入库的 `showcase.pkg.bin`（commit a1a294b）是**旧范式时期打的、装的是旧 showcase 内容**，与靶子期重写的新 `showcase/showcase/*.html`（8 页，从未打包）**不是同一个东西**。个人项目不考虑兼容 → **旧包彻底抛弃，不为它做任何基线快照、不保留读旧格式能力**。整程的真基线是"新 showcase HTML 在浏览器里的 rect"，等打包链（②）通了才谈得上。
 3. **pkg 格式版本 = 一刀切升 v17，不留后向兼容**：扩 `NodeKind`（5→~15 变体）改 tag 空间 + 拆 `Node` struct 会改 bincode 形状。直接升 v17、`MIN=MAX=17`（弃 v16，无迁移器）。加 bincode 稳定性测试（序列化形状变了就红），别撞运行时 `BadKind` 才发现。
 
