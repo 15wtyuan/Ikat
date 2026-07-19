@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;                // ArrayPool<byte> for _frameBuf（搬自 LoomStage.Tick）
+using System.Collections.Generic;    // List<AtlasManifest> for InitSprites
 using System.Runtime.InteropServices;
 using LoomGUI.Bindings;
 using UnityEngine;
@@ -44,6 +45,20 @@ namespace LoomGUI
         /// internal——<see cref="NativeHostManager"/> 自身是 internal sealed，LoomHost 同程序集可见。
         /// </summary>
         internal NativeHostManager NativeHost => _nhm;
+
+        /// <summary>
+        /// SpriteResolver 初始化：传入所有 atlas manifest + 页纹理懒加载委托。
+        /// Driver.Awake 后调：ParseAtlas 解析每个 atlas.json → <see cref="AtlasManifest"/>，传入此方法。
+        /// loadPage(pageFileName) 按需加载页 PNG（Driver 决定走 Resources/AB/Addressables）。
+        /// loadPage=null 则 GetSprite 全 miss（调用方 fallback）。
+        ///
+        /// Unity 特定资源 IO（Texture2D）——不进 <see cref="LoomHost"/> 引擎无关层。
+        /// 搬自 LoomStage.cs:131-134（_sprites.Init 转调）。
+        /// </summary>
+        public void InitSprites(List<AtlasManifest> atlases, Func<string, Texture2D> loadPage)
+        {
+            _sprites?.Init(atlases, loadPage);
+        }
 
         // ── LoomBackend 契约 ──
 

@@ -1,0 +1,180 @@
+// LoomHost：引擎无关 stage 宿主 + 每帧驱动核心（spec-4b P2.3）。
+//
+// 设计契约（spec §3.1，main-design §16 严格时序）：
+// - 持 stage handle（StageHandle*）+ UIContext（4a 业务表面）+ LoomBackend（Unity/Godot 实现）。
+// - 构造：loomgui_stage_new → UIContext(stage)（复用 4a internal UIContext(IntPtr)）。
+//   不重新建 EventDemuxer——UIContext 构造时已建并接到自身 _eventBus（单一实例，单一事件入口）。
+// - 每帧 Step(dt)：backend.CollectInput → tick → borrow_frame → backend.SyncFrame → borrow_events → demuxer.Pump。
+//   borrow_frame FFI 在此（backend 只消费 blob，避免二次 borrow）；set_input FFI 由 backend 调（引擎中立）。
+// - 资源 FFI（register_font/set_fallback_families/set_image_sizes）引擎中立，byte[]/描述过桥，放此。
+// - Dispose：loomgui_stage_free。
+//
+// 零 UnityEngine（放 Runtime/Host/）。Unity + Godot-C# 共享——Godot 写 GodotLoomBackend : LoomBackend 注入。
+
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+using LoomGUI.Bindings;
+
+namespace LoomGUI
+{
+    /// <summary>
+    /// 引擎无关 stage 宿主 + 每帧驱动核心。持 stage handle + <see cref="UIContext"/> +
+    /// <see cref="LoomBackend"/>。Driver 持本类，每帧调 <see cref="Step"/>。
+    /// 零 UnityEngine（放 Runtime/Host/，Unity+Godot-C# 共享）。
+    /// </summary>
+    public sealed unsafe class LoomHost : IDisposable
+    {
+        StageHandle* _stage;
+        readonly UIContext _ctx;
+        readonly LoomBackend _backend;
+
+        /// <summary>stage 失败标记（构造后 stage=null 也算 disposed，Step/资源 FFI 全 no-op）。</summary>
+        public bool IsDisposed { get; private set; }
+
+        /// <summary>
+        /// 建 Stage 句柄 + <see cref="UIContext"/> + 接 backend。
+        /// 不在此注入 Unity 特定资源（SpriteResolver 等）——交给 <paramref name="backend"/> 内部持有，
+        /// 由 Driver 调 <see cref="UnityLoomBackend"/>.InitSprites/SetRuntimeRoot 等引擎特定初始化。
+        /// </summary>
+        /// <param name="designW">设计宽（design px，与 HTML/CSS 像素 1:1）。</param>
+        /// <param name="designH">设计高。</param>
+        /// <param name="backend">引擎后端实现（Unity: <see cref="UnityLoomBackend"/>；未来 Godot: GodotLoomBackend）。</param>
+        /// <exception cref="InvalidOperationException">loomgui_stage_new 返 null（核心侧 stage 分配失败）。</exception>
+        public LoomHost(float designW, float designH, LoomBackend backend)
+        {
+            _stage = Native.loomgui_stage_new(designW, designH);
+            if (_stage == null)
+                throw new InvalidOperationException($"loomgui_stage_new({designW},{designH}) returned null");
+            _ctx = new UIContext((IntPtr)_stage);
+            _backend = backend ?? throw new ArgumentNullException(nameof(backend));
+        }
+
+        /// <summary>业务 API 表面（4a typed Node 树 + 事件 + LoadPackage）。</summary>
+        public UIContext Context => _ctx;
+
+        /// <summary>Stage 原始句柄（internal——同程序集 backend / Driver / InputCollector 可见）。</summary>
+        internal IntPtr StagePtr => (IntPtr)_stage;
+
+        /// <summary>注入的引擎后端（Driver 可拿回去调引擎特定方法，如 UnityLoomBackend.NativeHost）。</summary>
+        public LoomBackend Backend => _backend;
+
+        /// <summary>
+        /// 每帧驱动序（main-design §16，严格时序）：
+        /// 1. <see cref="LoomBackend.CollectInput"/>（backend 采集引擎输入 → set_input 系 FFI，引擎中立）
+        /// 2. flush seam（4a 即时过桥：setter 立即调 set_inline_override；升级攒批时此处加帧末 Flush 在 tick 前）
+        /// 3. loomgui_stage_tick（核心 process/rematch/solve/refresh/compute_world/build）
+        /// 4. borrow_frame → <see cref="LoomBackend.SyncFrame"/>（backend 只消费 blob，不再调 borrow FFI）
+        /// 5. borrow_events → <see cref="EventDemuxer.Pump"/>（typed On&lt;T&gt; 路由，UIContext._eventDemuxer）
+        /// </summary>
+        /// <param name="dt">帧时长（秒，建议 Time.unscaledDeltaTime——暂停不受影响）。</param>
+        public void Step(float dt)
+        {
+            if (_stage == null) return;
+
+            // 1. 输入采集 → set_input 系 FFI（backend 调引擎中立 FFI，不破坏 LoomHost 引擎无关性）。
+            _backend.CollectInput((IntPtr)_stage);
+
+            // 2. flush seam：4a 即时过桥（StyleMirror setter 立即 set_inline_override），无需显式调用。
+            //    攒批升级时此处插帧末 FlushInline(_stage)，位置在 tick 前（main-design §16 flush→solve 序）。
+
+            // 3. tick：核心一帧编排（process hit 用上帧 world → rematch → solve → refresh_content →
+            //    compute_world_transforms → build RenderNode blob）。
+            Native.loomgui_stage_tick(_stage, dt);
+
+            // 4. borrow_frame → backend.SyncFrame（backend 不调 borrow FFI，只消费 blob 做镜像渲染）。
+            //    ptr 在下帧 tick 前都有效（核心 reset 借出 buffer）；len=0 时 backend.SyncFrame 自检跳过。
+            nuint lenRaw = 0;
+            byte* ptr = Native.loomgui_stage_borrow_frame(_stage, &lenRaw);
+            _backend.SyncFrame((IntPtr)_stage, (IntPtr)ptr, (int)lenRaw);
+
+            // 5. borrow_events → demuxer.Pump（typed 路由：raw EventRecord → typed struct → EventBus.Dispatch）。
+            //    即使 borrow_frame 空（无渲染节点），事件仍须派发（hover/点击不依赖渲染）。
+            //    UIContext._eventDemuxer 在 ctx 构造时建并接到 ctx._eventBus——LoomHost 复用单一实例。
+            nuint evLen = 0;
+            byte* evPtr = Native.loomgui_stage_borrow_events(_stage, &evLen);
+            _ctx._eventDemuxer.Pump((IntPtr)evPtr, (int)evLen);
+        }
+
+        // ── 资源 FFI（引擎中立，byte[]/描述过桥；搬自 LoomStage.cs:96-121,141-165）──
+
+        /// <summary>
+        /// 注册字体进 Stage 字体表。bytes 喂 Rust（核心端 ttf-parser 测量 + 自绘字形产 atlas）。
+        /// family = 字体族名（CSS font-family 匹配键）；isDefault=true 设为 Rust FontTable 默认 fallback。
+        /// 多次调可注册多字体（Driver.Awake 后注入项目字体）。
+        /// </summary>
+        public void RegisterFont(string family, byte[] bytes, bool isDefault)
+        {
+            if (_stage == null) return;
+            byte[] fb = Encoding.UTF8.GetBytes(family ?? "");
+            fixed (byte* fp = fb, bp = bytes)
+            {
+                Native.loomgui_stage_register_font(
+                    _stage, fp, (nuint)fb.Length, bp, (nuint)(bytes?.Length ?? 0),
+                    isDefault ? (byte)1 : (byte)0);
+            }
+        }
+
+        /// <summary>
+        /// 设全局字体回退链。families 中主字体缺字时按序 probe，首个含该字的补上（RmlUi fallback 模型）。
+        /// 空/null 清空回退。须在所有 RegisterFont 之后调（family 须已注册，未注册的 Rust 端静默跳过）。
+        /// </summary>
+        public void SetFallbackFamilies(IEnumerable<string> families)
+        {
+            if (_stage == null) return;
+            string text = families == null ? "" : string.Join("\n", families);
+            byte[] tb = Encoding.UTF8.GetBytes(text);
+            fixed (byte* tp = tb)
+            {
+                Native.loomgui_stage_set_fallback_families(_stage, tp, (nuint)tb.Length);
+            }
+        }
+
+        /// <summary>
+        /// 注入合并图集 sprite 像素尺寸（atlas.json 解析后）。须在第一次 <see cref="Step"/> 前调——
+        /// 核心用此尺寸算 Image 节点的 aspect-ratio + 闭包 known.w/h。
+        /// 路径与 Unity Texture2D 上传无关（只传元数据），引擎中立放此；
+        /// 实际 Texture2D 上传由 <see cref="UnityLoomBackend.InitSprites"/> 走 SpriteResolver 注册。
+        /// </summary>
+        public void SetImageSizes(string[] paths, uint[] ws, uint[] hs)
+        {
+            if (_stage == null || paths == null || paths.Length == 0) return;
+            int n = paths.Length;
+            var pathPtrs = new IntPtr[n];
+            for (int i = 0; i < n; i++)
+                pathPtrs[i] = Marshal.StringToHGlobalAnsi(paths[i] ?? "");
+            try
+            {
+                fixed (IntPtr* pp = pathPtrs)
+                fixed (uint* wp = ws)
+                fixed (uint* hp = hs)
+                {
+                    Native.loomgui_stage_set_image_sizes(_stage, (byte**)pp, wp, hp, (nuint)n);
+                }
+            }
+            finally
+            {
+                for (int i = 0; i < n; i++)
+                    Marshal.FreeHGlobal(pathPtrs[i]);
+            }
+        }
+
+        // ── 释放 ──────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// 释放 Stage 句柄（Rust 侧 drop Stage + 拥有的所有内存：scene/atlas/tween table）。
+        /// 引擎资源（MirrorPool GO/MaterialManager 等）归 backend 自管，本方法不递归——
+        /// Driver.OnDestroy 调本方法后，backend 资源由 Driver 额外清理（或 backend 自己 Dispose）。
+        /// </summary>
+        public void Dispose()
+        {
+            if (_stage != null)
+            {
+                Native.loomgui_stage_free(_stage);
+                _stage = null;
+            }
+            IsDisposed = true;
+        }
+    }
+}
