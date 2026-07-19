@@ -2,8 +2,6 @@ using System.Collections.Generic;
 using LoomGUI.Bindings;
 using UnityEngine;
 
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("LoomGUI.Demo")]
-
 namespace LoomGUI
 {
     /// <summary>
