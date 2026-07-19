@@ -17,7 +17,6 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             id_attr: None,
             draggable: false,
             tabindex: None,
-            data_controller: None,
             content: None,
             src: None,
         },
@@ -29,14 +28,13 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             id_attr: None,
             draggable: false,
             tabindex: None,
-            data_controller: None,
             content: None,
             src: None,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("comp1", &nodes, &rules, &[])],
+        components: vec![("comp1", &nodes, &rules)],
     };
     crate::asset::write_package(&input)
 }
@@ -97,13 +95,12 @@ fn instantiate_missing_pkg_or_comp_errors() {
         id_attr: None,
         draggable: false,
         tabindex: None,
-        data_controller: None,
         content: None,
         src: None,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("c1", &nodes, &rules, &[])],
+        components: vec![("c1", &nodes, &rules)],
     };
     s.load_package("bag", &crate::asset::write_package(&input))
         .unwrap();
@@ -128,7 +125,6 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             id_attr: None,
             draggable: false,
             tabindex: None,
-            data_controller: None,
             content: None,
             src: None,
         },
@@ -140,14 +136,13 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             id_attr: None,
             draggable: false,
             tabindex: None,
-            data_controller: None,
             content: None,
             src: None,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("c1", &nodes, &rules, &[])],
+        components: vec![("c1", &nodes, &rules)],
     };
     s.load_package("bag", &crate::asset::write_package(&input))
         .unwrap();

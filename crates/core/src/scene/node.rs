@@ -396,7 +396,7 @@ impl Scene {
             Option<String>,
             bool,
             Option<i32>,
-            Option<String>, // data_controller（dead：Node 字段 P1.4 删；P1.6 删 TemplateNode 后此参数随之移除）
+            Option<String>, // data_controller（dead：Node 字段 P1.4 删、TemplateNode.data_controller P1.6 删；此参数留 P1.12 一并清）
             Option<String>,
             Option<String>,
         )],

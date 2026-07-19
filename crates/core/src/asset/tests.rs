@@ -12,7 +12,6 @@ fn tn(kind: NodeKind) -> TemplateNode {
         tabindex: None,
         content: None,
         src: None,
-        data_controller: None,
     }
 }
 
@@ -41,12 +40,11 @@ fn write_package_panics_when_string_table_exhausted() {
             id_attr: None,
             draggable: false,
             tabindex: None,
-            data_controller: None,
         });
     }
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", nodes.as_slice(), &rules, &[])],
+        components: vec![("c", nodes.as_slice(), &rules)],
     };
     let _ = write_package(&input);
 }
@@ -64,8 +62,8 @@ fn write_read_multi_component_roundtrip() {
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![
-            ("comp1", comp1_nodes.as_slice(), &rules, &[]),
-            ("comp2", comp2_nodes.as_slice(), &rules, &[]),
+            ("comp1", comp1_nodes.as_slice(), &rules),
+            ("comp2", comp2_nodes.as_slice(), &rules),
         ],
     };
     let bytes = write_package(&input);
@@ -80,11 +78,25 @@ fn write_read_multi_component_roundtrip() {
 
 #[test]
 fn old_version_pkg_rejected() {
-    // 手构 version < MIN_VERSION 的 header -> read_package 报 TooOld
+    // 手构 version < MIN_VERSION 的 header -> read_package 报 TooOld（v18 弃载，MIN=19）
     let mut old = vec![];
     old.extend_from_slice(&PKG_MAGIC.to_le_bytes());
-    old.extend_from_slice(&(MIN_VERSION - 1).to_le_bytes()); // version 低于 MIN_VERSION
+    old.extend_from_slice(&(MIN_VERSION - 1).to_le_bytes()); // v18 低于 MIN_VERSION=19
     assert!(matches!(read_package(&old), Err(PkgError::TooOld(_))));
+}
+
+/// v18 pkg（pre-drop Controller schema）一刀切拒载：MIN=MAX=19，无迁移器。
+/// 验证 bump 后旧 fixture/pkg.bin 不会半读半坏（schema 已不兼容）。
+#[test]
+fn v18_pkg_rejected_after_schema_drop() {
+    let mut v18 = vec![];
+    v18.extend_from_slice(&PKG_MAGIC.to_le_bytes());
+    v18.extend_from_slice(&18u32.to_le_bytes()); // v18 = MIN_VERSION - 1
+    let err = read_package(&v18);
+    assert!(
+        matches!(err, Err(PkgError::TooOld(18))),
+        "v18 pkg must be rejected as TooOld after v19 bump, got {err:?}"
+    );
 }
 
 #[test]
@@ -99,7 +111,7 @@ fn read_rejects_too_new_version() {
     let nodes = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
+        components: vec![("c", &nodes, &rules)],
     };
     let mut bytes = write_package(&input);
     bytes[4..8].copy_from_slice(&(MAX_VERSION + 1).to_le_bytes());
@@ -112,7 +124,7 @@ fn header_is_20_bytes_no_root_size() {
     let nodes = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
+        components: vec![("c", &nodes, &rules)],
     };
     let bytes = write_package(&input);
     let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
@@ -143,7 +155,7 @@ fn multi_component_parent_idx_is_component_local() {
     let comp_b = [root_b, child_b];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("a", &comp_a, &rules, &[]), ("b", &comp_b, &rules, &[])],
+        components: vec![("a", &comp_a, &rules), ("b", &comp_b, &rules)],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     assert_eq!(pkg.components["a"].nodes[1].parent_idx, Some(0));
@@ -163,7 +175,7 @@ fn all_node_kinds_roundtrip() {
     let nodes = [tn(NodeKind::Container), tn(NodeKind::Button), img, txt];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
+        components: vec![("c", &nodes, &rules)],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     let ns = &pkg.components["c"].nodes;
@@ -186,7 +198,7 @@ fn classes_id_attr_draggable_tabindex_roundtrip() {
     let nodes = [root, btn];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
+        components: vec![("c", &nodes, &rules)],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     let ns = &pkg.components["c"].nodes;
@@ -198,113 +210,8 @@ fn classes_id_attr_draggable_tabindex_roundtrip() {
     assert_eq!(ns[1].tabindex, Some(3));
 }
 
-/// data_controller 字段经 write_package/read_package 往返保留（含 Some/None 两端）。
-/// 镜像 classes_id_attr_draggable_tabindex_roundtrip 的 Some/None 覆盖风格。
-#[test]
-fn data_controller_roundtrips_through_pkg() {
-    let mut root = tn(NodeKind::Container);
-    root.data_controller = Some("tab".into());
-    let mut child = tn(NodeKind::TextNode);
-    child.content = Some("hi".into());
-    child.parent_idx = Some(0);
-    // child.data_controller 保持 None（验 None 端不误读成 Some）
-    let nodes = [root, child];
-    let rules = empty_rules();
-    let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
-    };
-    let pkg = read_package(&write_package(&input)).unwrap();
-    let ns = &pkg.components["c"].nodes;
-    assert_eq!(
-        ns[0].data_controller.as_deref(),
-        Some("tab"),
-        "root data_controller 应往返保留"
-    );
-    assert!(
-        ns[1].data_controller.is_none(),
-        "child data_controller=None 应保持 None"
-    );
-}
-
-/// ControllerSection 往返：单组件带 2 个 ControllerEntry（不同 name/mount/initial），
-/// write_package → read_package 后字段全保留。验 name 经 StringTable intern（去重）+
-/// mount_node_idx/initial_selected_index 定长小端读写对称。
-#[test]
-fn controller_section_roundtrips_through_pkg() {
-    let mut root = tn(NodeKind::Container);
-    root.data_controller = Some("tab".into());
-    let mut page1 = tn(NodeKind::Container);
-    page1.parent_idx = Some(0);
-    let mut page2 = tn(NodeKind::Container);
-    page2.parent_idx = Some(0);
-    let nodes = [root, page1, page2];
-    let rules = empty_rules();
-    let controllers = vec![
-        ControllerEntry {
-            name: "tab".into(),
-            mount_node_idx: 0,
-            initial_selected_index: 1,
-        },
-        ControllerEntry {
-            name: "sub".into(),
-            mount_node_idx: 2,
-            initial_selected_index: -1,
-        },
-    ];
-    let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &controllers)],
-    };
-    let pkg = read_package(&write_package(&input)).unwrap();
-    let cs = &pkg.components["c"].controllers;
-    assert_eq!(cs.len(), 2, "两 ControllerEntry 往返保留");
-    assert_eq!(cs[0].name, "tab");
-    assert_eq!(cs[0].mount_node_idx, 0);
-    assert_eq!(cs[0].initial_selected_index, 1);
-    assert_eq!(cs[1].name, "sub");
-    assert_eq!(cs[1].mount_node_idx, 2);
-    assert_eq!(cs[1].initial_selected_index, -1, "负 initial 往返保留");
-}
-
-/// ControllerSection 空组件（无 controller）往返：controller_count=0 段合法，
-/// read 后 controllers 为空 Vec（不 panic、不误读）。
-#[test]
-fn controller_section_empty_roundtrips() {
-    let nodes = [tn(NodeKind::Container)];
-    let rules = empty_rules();
-    let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
-    };
-    let pkg = read_package(&write_package(&input)).unwrap();
-    assert!(
-        pkg.components["c"].controllers.is_empty(),
-        "无 controller → 空 Vec"
-    );
-}
-
-/// ControllerSection name 经 StringTable 去重：两组件 controller 同名 "tab" →
-/// StringTable 只存一份 "tab"，read 后两组件 controller.name 仍为 "tab"。
-#[test]
-fn controller_section_name_dedups_across_components() {
-    let mut root_a = tn(NodeKind::Container);
-    root_a.data_controller = Some("tab".into());
-    let mut root_b = tn(NodeKind::Container);
-    root_b.data_controller = Some("tab".into());
-    let comp_a = [root_a];
-    let comp_b = [root_b];
-    let rules = empty_rules();
-    let ctrl = vec![ControllerEntry {
-        name: "tab".into(),
-        mount_node_idx: 0,
-        initial_selected_index: 0,
-    }];
-    let input = PackageInput {
-        components: vec![("a", &comp_a, &rules, &ctrl), ("b", &comp_b, &rules, &ctrl)],
-    };
-    let bytes = write_package(&input);
-    let pkg = read_package(&bytes).unwrap();
-    assert_eq!(pkg.components["a"].controllers[0].name, "tab");
-    assert_eq!(pkg.components["b"].controllers[0].name, "tab");
-}
+// Controller schema (ControllerEntry/controllers/data_controller) dropped in v19
+// — data_controller / ControllerSection round-trip tests removed (no longer serialized).
 
 #[test]
 fn style_blob_roundtrips_baked_resolved_style() {
@@ -313,7 +220,7 @@ fn style_blob_roundtrips_baked_resolved_style() {
     let nodes = [n];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
+        components: vec![("c", &nodes, &rules)],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     let n2 = &pkg.components["c"].nodes[0];
@@ -333,10 +240,7 @@ fn stringtable_dedups_across_components() {
     let c2_nodes = [n2];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![
-            ("c1", &c1_nodes, &rules, &[]),
-            ("c2", &c2_nodes, &rules, &[]),
-        ],
+        components: vec![("c1", &c1_nodes, &rules), ("c2", &c2_nodes, &rules)],
     };
     let bytes = write_package(&input);
     let sc = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
@@ -389,7 +293,7 @@ fn two_comp_pkg_bytes() -> Vec<u8> {
     let comp_b = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("a", &comp_a, &rules, &[]), ("b", &comp_b, &rules, &[])],
+        components: vec![("a", &comp_a, &rules), ("b", &comp_b, &rules)],
     };
     write_package(&input)
 }
@@ -419,12 +323,12 @@ fn read_rejects_oob_component_slice() {
 fn read_rejects_cross_component_parent() {
     let bytes = two_comp_pkg_bytes();
     // 找 comp_b 的 root 节点在 NodeBlock 中的 parent_idx 字段位置。
-    // 布局（v18）：ComponentTable(2 条目 × 14B = 28B) + NodeBlock（无 RichRunsArena 段）。
+    // 布局（v19）：ComponentTable(2 条目 × 14B = 28B) + NodeBlock（无 RichRunsArena 段）。
     let ct_off = comp_table_offset(&bytes);
     let nodeblock_off = ct_off + 2 * 14;
-    // 节点布局（v18）：parent_idx(4) + kind(1) + style_len(4) + style_blob + text_idx(2) + src_idx(2)
-    //   + class_count(2) + class_idx[] + id_idx(2) + flags(1) + tabindex(4) + dc_idx(2)
-    //   固定部分 = 24B + style_blob_len + 2*class_count（v18 删 rich_off，v17 的 28B 减 4B）。
+    // 节点布局（v19）：parent_idx(4) + kind(1) + style_len(4) + style_blob + text_idx(2) + src_idx(2)
+    //   + class_count(2) + class_idx[] + id_idx(2) + flags(1) + tabindex(4)
+    //   固定部分 = 22B + style_blob_len + 2*class_count（v19 删 dc_idx 2B，v18 的 24B 减 2B）。
     let style_len_0 = u32::from_le_bytes(
         bytes[nodeblock_off + 5..nodeblock_off + 9]
             .try_into()
@@ -436,7 +340,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node0_size = 24 + style_len_0 + 2 * class_count_0;
+    let node0_size = 22 + style_len_0 + 2 * class_count_0;
     let node1_off = nodeblock_off + node0_size;
     let style_len_1 =
         u32::from_le_bytes(bytes[node1_off + 5..node1_off + 9].try_into().unwrap()) as usize;
@@ -445,7 +349,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node1_size = 24 + style_len_1 + 2 * class_count_1;
+    let node1_size = 22 + style_len_1 + 2 * class_count_1;
     let node2_off = nodeblock_off + node0_size + node1_size;
     // 篡改节点 2（comp_b root）的 parent_idx 从 -1 → 0（< base=2，跨组件）
     let mut patched = bytes.clone();
@@ -483,7 +387,7 @@ fn read_rejects_unknown_kind_tag() {
     let nodes = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
+        components: vec![("c", &nodes, &rules)],
     };
     let bytes = write_package(&input);
 
@@ -533,7 +437,7 @@ fn write_rejects_non_root_nodes_zero() {
     let nodes = [root];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
+        components: vec![("c", &nodes, &rules)],
     };
     let _ = write_package(&input);
 }
@@ -552,14 +456,13 @@ fn template_node_content_src_roundtrip_via_pkg() {
         id_attr: None,
         draggable: false,
         tabindex: None,
-        data_controller: None,
         content: None,
         src: Some("icon.png".into()),
     };
     let nodes = [text, img];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules, &[])],
+        components: vec![("c", &nodes, &rules)],
     };
     let buf = write_package(&input);
     let pkg = read_package(&buf).unwrap();
@@ -615,13 +518,12 @@ fn v18_nontrivial_nodekinds_roundtrip() {
             id_attr: None,
             draggable: false,
             tabindex: None,
-            data_controller: None,
             content: None,
             src: None,
         };
         let empty_rules = DynamicRuleTable { rules: vec![] };
         let input = PackageInput {
-            components: vec![("c", std::slice::from_ref(&one), &empty_rules, &[])],
+            components: vec![("c", std::slice::from_ref(&one), &empty_rules)],
         };
         let bytes = write_package(&input);
         let pkg = read_package(&bytes).unwrap();
