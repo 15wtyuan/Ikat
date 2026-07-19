@@ -40,7 +40,6 @@ namespace LoomGUI
         // ArrayPool 租用（非 new）。Rent 返回 ≥len，只 copy/解析 len 字节。
         // Dispose 归还防泄漏。冷帧零 GC（ReadMesh per-node alloc 留观察，撞墙再上 List 复用）。
         byte[] _frameBuf;
-        readonly LoomEventHandler _eventHandler = new();
         EventDemuxer _eventDemuxer;   // D3 typed event path（可选——headless 测试直调 Pump；Unity 生产路径 SetEventDemuxer 注入）
 
         // Driver 在 Awake 后注入：渲染根 transform（MirrorPool 挂此 root 下）+ safe-area 开关。
@@ -59,7 +58,6 @@ namespace LoomGUI
             _designSize = designSize == default ? new UnityEngine.Vector2(1080, 1920) : designSize;
             _stage = Native.loomgui_stage_new(_designSize.x, _designSize.y);
             if (_stage == null) { Debug.LogError("[LoomStage] loomgui_stage_new failed"); return; }
-            _eventHandler.SetHandle((System.IntPtr)_stage);
             var shader = Shader.Find("LoomGUI/Unlit");
             if (shader == null) { Debug.LogError("[LoomStage] Shader LoomGUI/Unlit not found"); FreeStage(); return; }
             _mm = new MaterialManager(shader);
@@ -69,13 +67,9 @@ namespace LoomGUI
             _sprites = new SpriteResolver();
         }
 
-        /// 游戏侧通过此属性注册 listener（AddListener/RemoveListener），例如
-        /// stage.EventHandler.AddListener(nodeId, EventType.Click, OnBtnClick)。
-        public LoomEventHandler EventHandler => _eventHandler;
-
         /// <summary>
         /// D3 typed event path注入：set 后每帧 Tick 内自动调用 EventDemuxer.Pump
-        /// 翻译 borrow_events → EventBus.Dispatch。null 时跳过 typed path（仅旧 LoomEventHandler 运行）。
+        /// 翻译 borrow_events → EventBus.Dispatch（typed On&lt;T&gt; 路径）。
         /// </summary>
         internal void SetEventDemuxer(EventDemuxer demuxer) => _eventDemuxer = demuxer;
 
@@ -218,15 +212,7 @@ namespace LoomGUI
             // 即使 borrow_frame 为空（无渲染节点），事件仍须派发（hover/点击不依赖渲染）。
             nuint evLen = 0;
             byte* evPtr = Native.loomgui_stage_borrow_events(_stage, &evLen);
-            _eventHandler.DispatchPending((System.IntPtr)evPtr, (int)evLen);   // 旧 AddListener 路径（backward compat）
             _eventDemuxer?.Pump((System.IntPtr)evPtr, (int)evLen);             // D3 typed 路径（On<T>）
-            // 两条路径并行运行，各自独立的订阅表，无冲突。
-            // DEPRECATION: 待所有 callers 从 AddListener 迁移到 On<T> 后移除 _eventHandler.DispatchPending（后续 cleanup）。
-
-            // Controller 切页事件（同窗口：tick 后、下 tick 前。out_len=COUNT 非字节）。
-            nuint ccLen = 0;
-            byte* ccPtr = Native.loomgui_stage_borrow_controller_changed_events(_stage, &ccLen);
-            _eventHandler.DispatchControllerChanged((System.IntPtr)ccPtr, (int)ccLen);
         }
 
         /// <summary>
@@ -308,31 +294,6 @@ namespace LoomGUI
         {
             if (_stage == null) return;
             Native.loomgui_stage_set_node_disabled(_stage, nodeId, disabled);
-        }
-
-        /// 在子树内找 data-controller="name" 的挂载点，返其 NodeId。
-        /// 无匹配 / stage 未建 → uint.MaxValue（0xFFFF_FFFF）。
-        public uint GetController(uint subtreeRoot, string name)
-        {
-            if (_stage == null) return uint.MaxValue;
-            byte[] nb = Encoding.UTF8.GetBytes(name ?? "");
-            fixed (byte* np = nb)
-                return Native.loomgui_stage_get_controller(_stage, subtreeRoot, np, (nuint)nb.Length);
-        }
-
-        /// 切 Controller 页。无效 mount（未挂 data-controller）→ 静默返 -1。
-        /// 返 prev（切前 selected_index）；首次 set（无条目）返 -1。
-        public int SetSelectedIndex(uint mount, int idx)
-        {
-            if (_stage == null) return -1;
-            return Native.loomgui_stage_set_selected_index(_stage, mount, idx);
-        }
-
-        /// 读 Controller 当前选中页。无条目 / 无效 mount → -1。
-        public int GetSelectedIndex(uint mount)
-        {
-            if (_stage == null) return -1;
-            return Native.loomgui_stage_get_selected_index(_stage, mount);
         }
 
         /// 编程滚动到指定位置。非 scroll 容器 / 越界 node → no-op（不 panic）。
@@ -543,16 +504,6 @@ namespace LoomGUI
             byte[] s = Encoding.UTF8.GetBytes(src ?? "");
             fixed (byte* sp = s)
                 return Native.loomgui_stage_set_src(_stage, node, sp, (nuint)s.Length);
-        }
-
-        /// 改 base_style（apply_css）+ 标 dirty_mesh。下帧 rematch 从 base 重算 style。
-        /// 返 0=ok，-1=err。
-        public int SetStyle(uint node, string css)
-        {
-            if (_stage == null) return -1;
-            byte[] c = Encoding.UTF8.GetBytes(css ?? "");
-            fixed (byte* cp = c)
-                return Native.loomgui_stage_set_style(_stage, node, cp, (nuint)c.Length);
         }
 
         // ===== 释放（Driver.OnDestroy 调；或 using 语法）=====

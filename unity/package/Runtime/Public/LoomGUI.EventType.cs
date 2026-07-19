@@ -1,16 +1,16 @@
 // LoomGUI Frozen Public API: EventType enum
 // See docs/design/public-api.md (权威契约) + docs/design/projection-layer.md (投影层机制)
 //
-// EventType 既被 demux 实现（LoomEventHandler.DispatchPending 按 type 分流 LoomEvent）也被
+// EventType 既被 demux 实现（EventDemuxer.Pump 按 type 分流 raw EventRecord）也被
 // typed event struct 关联（Events.cs 每个 struct 的 internal static byte EventType 属性）。
-// 放 Public/ 让 Events.cs（编译进 PublicApi 冻结门）能引用——demux 实现文件 LoomEventHandler.cs
+// 放 Public/ 让 Events.cs（编译进 PublicApi 冻结门）能引用——demux 实现文件 EventDemuxer.cs
 // 不在 PublicApi 编译链，故 enum 不能只留在那。
 
 namespace LoomGUI
 {
     /// <summary>
     /// EventType 与 Rust <c>loomgui_core::input::EVT_*</c> 常量一致（<c>:byte</c> 对齐
-    /// <c>event_type:u8</c>）。既驱动 <see cref="LoomEventHandler"/> demux 分流（LoomEvent stream），
+    /// <c>event_type:u8</c>）。既驱动 <see cref="EventDemuxer"/> demux 分流（raw EventRecord stream），
     /// 也作 typed event struct 的 D2 EventBus 订阅表 key（<c>Events.cs</c> 每 struct 的
     /// <c>internal static byte EventType</c> 属性）。
     /// </summary>

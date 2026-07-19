@@ -19,7 +19,8 @@ namespace LoomGUI
     public delegate void EventCallback(EventContext ctx);
 
     /// dotnet 测试桩：摘除 Unity [RuntimeInitializeOnLoadMethod] 属性。
-    /// 真实定义见 loomgui_unity_package/Runtime/LoomEventHandler.cs:72-103。
+    /// 历史来源——production Unity 包内的 LoomEventHandler 已退役（Spec-4b P1），现仅作
+    /// EventRouter 路由算法的测试桩存在。
     public class EventContext
     {
         public uint target;
