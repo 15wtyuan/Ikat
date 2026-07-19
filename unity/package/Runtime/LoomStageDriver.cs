@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using LoomGUI.Bindings;
 using UnityEngine;
 
@@ -283,10 +284,82 @@ namespace LoomGUI
                 RegisterFontsFromManifest(runtime);
             }
 
+            // 7. Create scene root（必须 step——instantiate/cascade/solve 都依赖 scene 存在）。
+            //    围栏闭合下根节点 kind=Container（div）。设 ctx._rootId 让 ctx.Root 公共入口可用——
+            //    业务代码（runner）通过 ctx.Root 拿 typed Container 做挂子 / 查询。
+            EnsureSceneRoot();
+
             EnsureCamera();
             ConfigureTransforms();
 
             gameObject.layer = LoomUILayer;
+        }
+
+        /// <summary>
+        /// 建场景根（kind=div Container）并写 ctx._rootId。Awake 末尾调一次；多次调幂等（_rootId
+        /// 已设则跳过）。create_root 失败（Rust 侧 stage 异常）只 LogError——后续 Instantiate 会
+        /// 因 scene 缺失返 sentinel，runner 自行处理 null。
+        /// </summary>
+        unsafe void EnsureSceneRoot()
+        {
+            if (_host == null) return;
+            var ctx = _host.Context;
+            if (ctx._rootId != Node.RootSentinel) return;
+
+            StageHandle* h = (StageHandle*)_host.StagePtr.ToPointer();
+            byte[] kind = Encoding.UTF8.GetBytes("div");
+            uint rootId;
+            fixed (byte* kp = kind)
+                rootId = Native.loomgui_stage_create_root(h, kp, (nuint)kind.Length, null, 0);
+            if (rootId == Node.RootSentinel)
+            {
+                Debug.LogError("[LoomStageDriver] create_root failed (stage null / kind non-UTF-8)");
+                return;
+            }
+            ctx._rootId = rootId;
+        }
+
+        /// <summary>
+        /// 实例化模板组件到当前 scene 根下。封装 FFI instantiate + typed 包装 + append 到 ctx.Root，
+        /// 让业务 runner 不必直接持 UIPackage 句柄（package 已在 Awake 经 runtime.json 自动 load）。
+        /// 返回模板根的 typed Container；package 未加载 / 组件路径错 / scene 未建 → null + LogError。
+        ///
+        /// pkgName 必须已在 loom.runtime.json packages 段列出（Awake 时已 load_package）。
+        /// compPath 是 HTML 文件主干名（去 .html），如 workspace 下 foo.html → "foo"。
+        /// </summary>
+        public unsafe Container Instantiate(string pkgName, string compPath)
+        {
+            if (_host == null)
+            {
+                Debug.LogError("[LoomStageDriver] Instantiate called but host is null (Awake failed?)");
+                return null;
+            }
+            EnsureSceneRoot();
+            var ctx = _host.Context;
+            if (ctx._rootId == Node.RootSentinel)
+            {
+                Debug.LogError($"[LoomStageDriver] Instantiate({pkgName},{compPath}) aborted: scene root not created");
+                return null;
+            }
+
+            StageHandle* h = (StageHandle*)_host.StagePtr.ToPointer();
+            byte[] pb = Encoding.UTF8.GetBytes(pkgName ?? "");
+            byte[] cb = Encoding.UTF8.GetBytes(compPath ?? "");
+            uint instId;
+            fixed (byte* pp = pb)
+            fixed (byte* cp = cb)
+                instId = Native.loomgui_stage_instantiate(h, pp, (nuint)pb.Length, cp, (nuint)cb.Length);
+            if (instId == Node.RootSentinel)
+            {
+                Debug.LogError($"[LoomStageDriver] instantiate failed: pkg={pkgName} comp={compPath} (pkg not loaded / comp not found / scene missing)");
+                return null;
+            }
+
+            Container inst = (Container)ctx._registry.GetOrCreate(instId);
+            int rc = Native.loomgui_stage_append_child(h, ctx._rootId, instId);
+            if (rc != 0)
+                Debug.LogWarning($"[LoomStageDriver] append_child(sceneRoot, {pkgName}/{compPath}) failed rc={rc} (child may have existing parent)");
+            return inst;
         }
 
         // ===== Font registration (from runtime.json) =====
