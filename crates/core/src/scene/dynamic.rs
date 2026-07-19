@@ -223,12 +223,18 @@ pub fn insert_before(
 
 /// 摘子：从 parent.children 移除 child + child.parent = None。
 /// 与 remove_node 不同——节点不删（slotmap 槽保留，NodeId 仍 live），可再挂到别处。
+///
+/// **直系子校验**：child 的真实 parent 必须是传入的 parent，否则 Err。
+/// 原实现无校验——`retain` 对非直系子无效（child 不在 parent.children）但仍清 child.parent，
+/// 误断 child 与其真实 parent 的关系。调用方应先调 `append_child`/`insert_before` 摘除再挂。
 pub fn remove_child(scene: &mut Scene, parent: NodeId, child: NodeId) -> Result<(), String> {
+    let actual_parent = scene.get(child).and_then(|c| c.parent);
+    if actual_parent != Some(parent) {
+        return Err("remove_child: child is not a direct child of parent".into());
+    }
     let p = scene.get_mut(parent).ok_or("parent not live")?;
     p.children.retain(|&c| c != child);
-    if let Some(c) = scene.get_mut(child) {
-        c.parent = None;
-    }
+    scene.get_mut(child).unwrap().parent = None;
     Ok(())
 }
 
@@ -970,6 +976,34 @@ mod tests {
         assert!(
             scene.get(child).is_some(),
             "child 仍存活（未删 slotmap 槽）"
+        );
+    }
+
+    #[test]
+    fn remove_child_rejects_non_direct_child() {
+        // 直系子校验：b 的真实 parent 是 root，remove_child(a, b) 应 Err，
+        // 且不动 b.parent / a.children / root.children（防误断真实父子关系）。
+        let mut scene = empty_scene();
+        let root = create_root(&mut scene, "div", "").unwrap();
+        let a = create_node(&mut scene, "div", "").unwrap();
+        let b = create_node(&mut scene, "div", "").unwrap();
+        append_child(&mut scene, root, a).unwrap();
+        append_child(&mut scene, root, b).unwrap();
+        // b 的 parent 是 root，不是 a → remove_child(a, b) 应 Err。
+        let err = remove_child(&mut scene, a, b);
+        assert!(err.is_err(), "remove_child on non-direct child must error");
+        assert_eq!(
+            scene.get(b).unwrap().parent,
+            Some(root),
+            "b.parent must stay root"
+        );
+        assert!(
+            !scene.get(a).unwrap().children.contains(&b),
+            "a.children unchanged"
+        );
+        assert!(
+            scene.get(root).unwrap().children.contains(&b),
+            "root.children still has b"
         );
     }
 
