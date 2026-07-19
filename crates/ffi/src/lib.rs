@@ -1017,6 +1017,8 @@ pub extern "C" fn loomgui_stage_clear_anim_prop(h: *mut StageHandle, node_id: u3
 
 /// 建根节点并设为 roots[0]。kind/css = UTF-8 字节。返 NodeId；0xFFFF_FFFF = 失败。
 ///
+/// null 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
+///
 /// **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_create_root(
@@ -1031,13 +1033,22 @@ pub extern "C" fn loomgui_stage_create_root(
         return FAIL;
     }
     let sh = unsafe { &mut *h };
-    let kind = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }) {
-        Ok(s) => s,
-        Err(_) => return FAIL,
+    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+    let kind = if kind.is_null() || kind_len == 0 {
+        ""
+    } else {
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }) {
+            Ok(s) => s,
+            Err(_) => return FAIL,
+        }
     };
-    let css = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }) {
-        Ok(s) => s,
-        Err(_) => return FAIL,
+    let css = if css.is_null() || css_len == 0 {
+        ""
+    } else {
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }) {
+            Ok(s) => s,
+            Err(_) => return FAIL,
+        }
     };
     match sh.stage.create_root(kind, css) {
         Ok(id) => id.0,
@@ -1047,6 +1058,8 @@ pub extern "C" fn loomgui_stage_create_root(
 
 /// 建节点（不挂父）。kind/css = UTF-8 字节。返 NodeId；0xFFFF_FFFF = 失败。
 /// 需配合 append_child/insert_before 挂到树。
+///
+/// null 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -1062,13 +1075,22 @@ pub extern "C" fn loomgui_stage_create_node(
         return FAIL;
     }
     let sh = unsafe { &mut *h };
-    let kind = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }) {
-        Ok(s) => s,
-        Err(_) => return FAIL,
+    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+    let kind = if kind.is_null() || kind_len == 0 {
+        ""
+    } else {
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }) {
+            Ok(s) => s,
+            Err(_) => return FAIL,
+        }
     };
-    let css = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }) {
-        Ok(s) => s,
-        Err(_) => return FAIL,
+    let css = if css.is_null() || css_len == 0 {
+        ""
+    } else {
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }) {
+            Ok(s) => s,
+            Err(_) => return FAIL,
+        }
     };
     match sh.stage.create_node(kind, css) {
         Ok(id) => id.0,
@@ -1146,6 +1168,8 @@ pub extern "C" fn loomgui_stage_remove_node(h: *mut StageHandle, node: u32) -> i
 /// 改 Text 节点 content + 标 dirty_text。text = UTF-8 字节。0=ok，-1=err。
 /// 非 Text 节点 → -1（Stage::set_text Err）。null 句柄 → -1。
 ///
+/// null text 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
+///
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_text(
@@ -1158,9 +1182,14 @@ pub extern "C" fn loomgui_stage_set_text(
         return -1;
     }
     let sh = unsafe { &mut *h };
-    let text = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, len) }) {
-        Ok(s) => s,
-        Err(_) => return -1,
+    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+    let text = if text.is_null() || len == 0 {
+        ""
+    } else {
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, len) }) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        }
     };
     sh.stage
         .set_text(NodeId(node), text)
@@ -1170,6 +1199,8 @@ pub extern "C" fn loomgui_stage_set_text(
 
 /// 改 Image 节点 src + 标 dirty_mesh。src = UTF-8 字节。0=ok，-1=err。
 /// 非 Image 节点 → -1。null 句柄 → -1。
+///
+/// null src 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -1183,15 +1214,22 @@ pub extern "C" fn loomgui_stage_set_src(
         return -1;
     }
     let sh = unsafe { &mut *h };
-    let src = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(src, len) }) {
-        Ok(s) => s,
-        Err(_) => return -1,
+    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+    let src = if src.is_null() || len == 0 {
+        ""
+    } else {
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(src, len) }) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        }
     };
     sh.stage.set_src(NodeId(node), src).map(|_| 0).unwrap_or(-1)
 }
 
 /// 写 inline override（便签层，优先级 > 动态规则 > base_style）。css = UTF-8 字节。
 /// 0=ok，-1=err（null 句柄 / 非 UTF-8 / 节点不 live）。下帧 rematch 应用。
+///
+/// null css 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -1205,9 +1243,14 @@ pub extern "C" fn loomgui_stage_set_inline_override(
         return -1;
     }
     let sh = unsafe { &mut *h };
-    let css = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, len) }) {
-        Ok(s) => s,
-        Err(_) => return -1,
+    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+    let css = if css.is_null() || len == 0 {
+        ""
+    } else {
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, len) }) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        }
     };
     sh.stage
         .set_inline_override(NodeId(node), css)
@@ -1217,6 +1260,8 @@ pub extern "C" fn loomgui_stage_set_inline_override(
 
 /// 清 inline override 的某 prop bit。prop = UTF-8 字节。0=ok，-1=err。
 /// prop 不可 inline 时为 no-op（仍返 0）。
+///
+/// null prop 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -1230,9 +1275,14 @@ pub extern "C" fn loomgui_stage_unset_inline_override(
         return -1;
     }
     let sh = unsafe { &mut *h };
-    let prop = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(prop, len) }) {
-        Ok(s) => s,
-        Err(_) => return -1,
+    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+    let prop = if prop.is_null() || len == 0 {
+        ""
+    } else {
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(prop, len) }) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        }
     };
     sh.stage
         .unset_inline_override(NodeId(node), prop)
