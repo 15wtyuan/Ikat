@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "output_dir": "../../unity/showcase-unity/Assets/Bundles",
+  "packages": [
+    {
+      "name": "spec4b-acceptance",
+      "dirs": ["."],
+      "html": []
+    }
+  ],
+  "atlases": [
+    {
+      "name": "icons",
+      "standalone": false,
+      "dirs": ["res/icons"],
+      "max_size": 1024,
+      "padding": 4
+    }
+  ]
+}
