@@ -109,7 +109,7 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 1. 对象树真身在 Rust 核心（被 Godot/UE 重心 + 薄后端逼出），C# 是 OOP 投影。
 2. 不推翻 v1 FrameBlob/MirrorPool 单向管线，在其上加回写层。
 3. 回写时序混合：结构即时（拿 NodeId）+ 属性攒批（帧末 flush，tick 前）。
-4. Style flush 复用字符串 `set_style`（标记优化点）；Transform 走独立数值 FFI。
+4. Style flush 走 `set_inline_override` 便签层（非 set_style——后者写 base_style 污染设计期基线，4a 退役；标记优化点不变）；Transform 走独立数值 FFI。
 5. C# 镜像 = 稀疏 override 层（只存写过的，读没写过返回 Unset）。
 6. 对象身份稳定：NodeId→Node 强引用缓存，销毁时显式清除。
 7. Style/Transform = class + owner 引用；Geometry = readonly struct blob 快照。
