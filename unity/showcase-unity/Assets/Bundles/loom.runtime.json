@@ -1,10 +1,12 @@
 {
   "version": 1,
   "packages": [
-    "showcase"
+    "showcase",
+    "spec4b-acceptance"
   ],
   "atlases": [
-    "icons"
+    "icons",
+    "spec4b-icons"
   ],
   "fonts": [
     {
