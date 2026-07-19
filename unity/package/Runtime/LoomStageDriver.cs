@@ -7,8 +7,11 @@ using UnityEngine;
 namespace LoomGUI
 {
     /// <summary>
-    /// LoomStage 的 Unity 生命周期宿主。持纯 C# <see cref="LoomStage"/> 实例，在 Awake 构造 + 注入
-    /// 字体/根 transform + 配 UI 相机/根变换；LateUpdate 每帧驱动 stage.Tick(dt) + 输入采集。
+    /// LoomHost 的 Unity 生命周期宿主。持引擎无关 <see cref="LoomHost"/>（stage 句柄 +
+    /// <see cref="UIContext"/> + <see cref="LoomBackend"/>）+ Unity 特定 <see cref="UnityLoomBackend"/>
+    /// （MirrorPool / MaterialManager / NativeHostManager / SpriteResolver / InputCollector）。
+    /// Awake 构造两者 + 注入字体/根 transform + 配 UI 相机/根变换；LateUpdate 每帧驱动
+    /// <see cref="LoomHost.Step"/>（内含 CollectInput→tick→borrow_frame→SyncFrame→borrow_events→Pump）。
     ///
     /// 启动流程（v1.8）：读 loom.runtime.json → 加载包 → 加载 atlas.json → set_image_sizes →
     /// SpriteResolver.Init → 注册字体 → 正常 tick。不再依赖 ScriptableObject 配置（改读 loom.runtime.json）。
@@ -42,17 +45,27 @@ namespace LoomGUI
         [Tooltip("产物根目录（含 loom.runtime.json + ui/ + atlas/ + fonts/）。空 = Assets/Bundles（打包器输出，editor 用）；built player 该路径不存在，须显式设此字段（如指向 StreamingAssets 拷贝）。")]
         [SerializeField] string _productRoot = "";
 
-        LoomStage _stage;
+        LoomHost _host;
+        UnityLoomBackend _backend;
+        MaterialManager _mm;
         int _lastScreenW = -1, _lastScreenH = -1;
 
         // UI 节点 + 相机 + NativeHost wrapper 都用此 layer；cullingMask = 1<<6 让 UI 相机只渲 UI。
         const int LoomUILayer = 6;
 
         /// <summary>
-        /// 持有的 LoomStage 实例（Awake 构造）。游戏侧通过此属性拿 stage 调 FFI 透传 API
-        /// （CreateRoot/LoadPackage/Instantiate/Tween/...）。Awake 失败时为 null。
+        /// 持有的 <see cref="LoomHost"/>（Awake 构造）。引擎无关 stage 宿主——
+        /// 持 stage 句柄 + <see cref="UIContext"/> + <see cref="UnityLoomBackend"/>。
+        /// Awake 失败时为 null。
         /// </summary>
-        public LoomStage Stage => _stage;
+        public LoomHost Host => _host;
+
+        /// <summary>
+        /// 业务 API 表面（4a typed Node 树 + 事件 + LoadPackage）。游戏侧通过此 property 拿
+        /// <see cref="UIContext"/> 调 typed API（Create&lt;T&gt;/LoadPackage/Events）。
+        /// 替代旧 <c>LoomStage.Stage</c> 透传 FFI 表面。Awake 失败时为 null。
+        /// </summary>
+        public UIContext Context => _host?.Context;
 
         /// <summary>暴露给输入采集等同程序集内部消费者。</summary>
         internal UnityEngine.Vector2 DesignSize => _designSize;
@@ -161,12 +174,50 @@ namespace LoomGUI
                 if (child.name == "loom_node") DestroyImmediate(child.gameObject);
             }
 
-            _stage = new LoomStage(_designSize);
-            _stage.UseSafeArea = _safeArea;
+            // InputCollector 提前 GetComponent：backend.SetRuntimeRoot 需要它（CollectInput 内读）。
+            // 同步注入 DesignSize/UseSafeArea——LoomInputCollector 自 P2.2 起自带这两个属性，
+            // backend.CollectInput 走 _inputCollector.DesignSize/UseSafeArea 路径（不再依赖 stage 字段）。
+            if (_inputCollector == null) _inputCollector = GetComponent<LoomInputCollector>();
+            if (_inputCollector != null)
+            {
+                _inputCollector.DesignSize = _designSize;
+                _inputCollector.UseSafeArea = _safeArea;
+            }
 
-            // 注入渲染根（NativeHostManager 建 container GO 挂此 root；MirrorPool 镜像 GO 也挂此 root）。
-            // 必须在 Tick 前调——Tick 读 _renderRoot，未注入则跳过渲染（空帧）。
-            _stage.SetNativeHostRoot(transform);
+            // Unity 特定资源：Shader + MaterialManager（搬自 LoomStage ctor，LoomStage.cs:61-63）。
+            var shader = Shader.Find("LoomGUI/Unlit");
+            if (shader == null)
+            {
+                Debug.LogError("[LoomStageDriver] Shader LoomGUI/Unlit not found");
+                return;
+            }
+            _mm = new MaterialManager(shader);
+
+            // 引擎分层：backend（Unity 特定）+ host（引擎无关驱动序）。
+            // LoomHost 构造 loomgui_stage_new → 建 UIContext → 接 backend。
+            // loomgui_stage_new 失败时 LoomHost 抛 InvalidOperationException——保留旧 LoomStage
+            // 「LogError + return」语义（_host 留 null，LateUpdate/OnDestroy 静默跳过）。
+            // 零向量 designSize 退回 (1080,1920)——避免 loomgui_stage_new(0,0) 返 null（搬自旧
+            // LoomStage ctor 的 fallback 语义）。
+            float dw = _designSize.x > 0f ? _designSize.x : 1080f;
+            float dh = _designSize.y > 0f ? _designSize.y : 1920f;
+            _backend = new UnityLoomBackend(_mm);
+            try
+            {
+                _host = new LoomHost(dw, dh, _backend);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[LoomStageDriver] LoomHost construct failed: {e.Message}");
+                return;
+            }
+
+            // 引擎根注入：MirrorPool/NativeHost 镜像 GO 挂此 root（transform）。
+            // backend.SetRuntimeRoot 设 backend._renderRoot + _inputCollector；
+            // backend.NativeHost.Init 建 _container GO 挂此 root（抵消 root y-flip）。
+            // 必须在第一次 Step 前——Step 读 _renderRoot，未注入则跳过镜像（空帧）。
+            _backend.SetRuntimeRoot(transform, _inputCollector);
+            _backend.NativeHost.Init(transform);
 
             // ── Bootstrap from loom.runtime.json ──
             // 1. Load runtime manifest
@@ -180,12 +231,12 @@ namespace LoomGUI
 
             if (runtime != null)
             {
-                // 2. Load packages
+                // 2. Load packages（UIContext.LoadPackage 4a typed path，替代旧 stage.LoadPackage FFI 透传）
                 foreach (var pkgName in runtime.packages)
                 {
                     byte[] bytes = LoadPackageBytes(pkgName);
-                    if (bytes != null)
-                        _stage.LoadPackage(pkgName, bytes);
+                    if (bytes != null && bytes.Length > 0)
+                        _host.Context.LoadPackage(pkgName, bytes);
                     else
                         Debug.LogWarning($"[LoomStageDriver] Package not found: ui/{pkgName}.pkg.bin");
                 }
@@ -220,12 +271,13 @@ namespace LoomGUI
                             ws[i] = sizes[i].w;
                             hs[i] = sizes[i].h;
                         }
-                        _stage.SetImageSizes(paths, ws, hs);
+                        _host.SetImageSizes(paths, ws, hs);
                     }
                 }
 
                 // 5. Init SpriteResolver with atlas manifests + lazy page loader
-                _stage.InitSprites(atlasManifests, pageName => LoadTexture($"atlas/{pageName}"));
+                //    Unity 特定资源 IO（Texture2D）——归 UnityLoomBackend，不进引擎无关 LoomHost。
+                _backend.InitSprites(atlasManifests, pageName => LoadTexture($"atlas/{pageName}"));
 
                 // 6. Register fonts from runtime manifest
                 RegisterFontsFromManifest(runtime);
@@ -235,15 +287,6 @@ namespace LoomGUI
             ConfigureTransforms();
 
             gameObject.layer = LoomUILayer;
-
-            if (_inputCollector == null) _inputCollector = GetComponent<LoomInputCollector>();
-            // CollectWheel 自 P2.2 起从 ctx 读 DesignSize/UseSafeArea（替代旧 stage 路径），Awake 同步一次。
-            // _designSize/_safeArea 都是 Inspector 字段，运行时不变；Awake 设一次即可。
-            if (_inputCollector != null)
-            {
-                _inputCollector.DesignSize = _designSize;
-                _inputCollector.UseSafeArea = _safeArea;
-            }
         }
 
         // ===== Font registration (from runtime.json) =====
@@ -261,13 +304,13 @@ namespace LoomGUI
                 if (string.IsNullOrEmpty(rf.family) || string.IsNullOrEmpty(rf.file)) continue;
                 byte[] bytes = LoadFontBytes(rf.file);
                 if (bytes != null)
-                    _stage.RegisterFont(rf.family, bytes, rf.@default);
+                    _host.RegisterFont(rf.family, bytes, rf.@default);
                 // Collect fallback families (registered or not — Rust side skips unregistered).
                 if (rf.fallback)
                     fallbacks.Add(rf.family);
             }
             if (fallbacks.Count > 0)
-                _stage.SetFallbackFamilies(fallbacks);
+                _host.SetFallbackFamilies(fallbacks);
         }
 
         /// <summary>
@@ -292,7 +335,7 @@ namespace LoomGUI
 
         void LateUpdate()
         {
-            if (_stage == null) return;
+            if (_host == null) return;
 
             // 屏幕 resize 检测（editor 改 Game 视图尺寸 / player 改窗口）→ 重配根变换 + 相机 orthoSize。
             if (Screen.width != _lastScreenW || Screen.height != _lastScreenH)
@@ -302,17 +345,11 @@ namespace LoomGUI
                 ConfigureTransforms();
             }
 
-            // 输入采集 → set_input/set_key_input/set_wheel_input（tick 前——input 管线消费本帧输入产事件）。
-            if (_inputCollector != null)
-            {
-                _inputCollector.Collect(_stage.StagePtr, _designSize, _safeArea);
-                _inputCollector.CollectKeys(_stage.StagePtr);
-                LoomInputCollector.CollectWheel(_stage.StagePtr, _inputCollector);
-            }
-
-            // tick → borrow_frame → MirrorPool.Sync → NativeHost.Sync → 事件派发（全在 stage.Tick 内）。
+            // host.Step 内含：backend.CollectInput → tick → borrow_frame → backend.SyncFrame
+            // → borrow_events → demuxer.Pump。输入采集不再 Driver 直调 InputCollector——
+            // backend.CollectInput 走 UnityLoomBackend._inputCollector 路径（与 host 引擎无关性兼容）。
             // unscaledDeltaTime：暂停不受影响（与 UI 时间语义一致）。
-            _stage.Tick(Time.unscaledDeltaTime);
+            _host.Step(Time.unscaledDeltaTime);
         }
 
         /// <summary>on-screen FPS 读数（_showFps=true 时显示）。1/Time.smoothDeltaTime 平滑帧率。</summary>
@@ -325,11 +362,17 @@ namespace LoomGUI
 
         void OnDestroy()
         {
-            if (_stage != null)
+            // host.Dispose 释放 stage 句柄（引擎中立），backend.Dispose 清理 Unity 资源
+            // （MirrorPool GO + NativeHostManager wrapper + MaterialManager 材质 + ArrayPool buffer）。
+            // 两者顺序无关（host 不持 backend 引用计数）；先 host 再 backend 与「先 core drop scene
+            // 再清引擎镜像」的语义一致。
+            if (_host != null)
             {
-                _stage.Dispose();
-                _stage = null;
+                _host.Dispose();
+                _host = null;
             }
+            _backend?.Dispose();
+            _backend = null;
         }
 
         // Domain reload 保护。SubsystemRegistration 在 Domain reload 时跑（关闭 Domain Reload 仍跑——

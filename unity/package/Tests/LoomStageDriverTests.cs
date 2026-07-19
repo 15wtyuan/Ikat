@@ -12,23 +12,24 @@ namespace LoomGUI.Tests
     public class LoomStageDriverTests
     {
         /// <summary>
-        /// Driver.Awake must construct LoomStage instance (Stage property non-null).
-        /// Verifies Awake sequence: new LoomStage + SetNativeHostRoot + bootstrap from
-        /// runtime.json + EnsureCamera + ConfigureTransforms all run without exception.
+        /// Driver.Awake must construct LoomHost instance (Context property non-null).
+        /// Verifies Awake sequence: new UnityLoomBackend + LoomHost + SetRuntimeRoot +
+        /// NativeHost.Init + bootstrap from runtime.json + EnsureCamera + ConfigureTransforms
+        /// all run without exception.
         /// </summary>
         [Test]
-        public void LoomStageDriver_AwakeBuildsStage()
+        public void LoomStageDriver_AwakeBuildsHost()
         {
             var go = new GameObject("driver_test");
             try
             {
                 var driver = go.AddComponent<LoomStageDriver>();
                 Assert.IsNotNull(driver, "AddComponent must return the driver instance");
-                Assert.IsNotNull(driver.Stage, "Driver.Awake must construct LoomStage");
+                Assert.IsNotNull(driver.Context, "Driver.Awake must construct LoomHost (Context non-null)");
             }
             finally
             {
-                // OnDestroy disposes stage (releases native handle).
+                // OnDestroy disposes host + backend (frees native handle + Unity resources).
                 Object.DestroyImmediate(go);
                 // EnsureCamera creates independent GO (not child of root), DestroyImmediate(go)
                 // does not clean it up — manual cleanup.

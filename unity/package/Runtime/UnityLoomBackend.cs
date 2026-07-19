@@ -9,14 +9,19 @@ namespace LoomGUI
 {
     /// <summary>
     /// Unity 引擎后端实现：持 MirrorPool / MaterialManager / NativeHostManager / SpriteResolver /
-    /// LoomInputCollector（零改复用，引用从 LoomStage 搬来——LoomStage 在 P2.6 退役前与之共存）。
-    /// <see cref="LoomHost"/> 通过 <see cref="LoomBackend"/> 契约驱动：每帧先 <see cref="CollectInput"/>
-    /// 再 <see cref="SyncFrame"/>（borrow_frame 已由 LoomHost 完成，ptr+len 传入避免二次 borrow）。
+    /// LoomInputCollector（零改复用，引用从 LoomStage 搬来）。<see cref="LoomHost"/> 通过
+    /// <see cref="LoomBackend"/> 契约驱动：每帧先 <see cref="CollectInput"/> 再 <see cref="SyncFrame"/>
+    /// （borrow_frame 已由 LoomHost 完成，ptr+len 传入避免二次 borrow）。
     ///
     /// NativeHost（GameObject 绑定 3D 模型，<see cref="NativeHostManager"/>）是 Unity 专属，
     /// 不进 <see cref="LoomBackend"/> 通用契约，作额外属性 <see cref="NativeHost"/> 暴露给 LoomHost。
+    ///
+    /// 资源回收：本类实现 <see cref="IDisposable"/>——Driver.OnDestroy 调 <see cref="Dispose"/>
+    /// 清理 MirrorPool GO / MaterialManager 材质 / NativeHostManager wrapper / SpriteResolver 缓存 /
+    /// ArrayPool frame buffer。<see cref="LoomHost.Dispose"/> 只释放 stage 句柄（引擎中立），
+    /// 引擎资源归本类。搬自旧 LoomStage.Dispose（LoomStage.cs:515-529，已删）。
     /// </summary>
-    public sealed unsafe class UnityLoomBackend : LoomBackend
+    public sealed unsafe class UnityLoomBackend : LoomBackend, IDisposable
     {
         readonly MirrorPool _pool = new();
         MaterialManager _mm;                 // ctgfx 程序化 material 缓存（Shader Find 后注入）
@@ -154,6 +159,28 @@ namespace LoomGUI
                 finally { ArrayPool<byte>.Shared.Return(buf); }
             }
             Native.loomgui_stage_font_atlas_clear_dirty(h);
+        }
+
+        // ── 释放（搬自 LoomStage.cs:515-529，引擎资源归 backend 自管）──
+
+        /// <summary>
+        /// 释放 Unity 引擎资源：MirrorPool 镜像 GO + NativeHostManager wrapper + MaterialManager 材质 +
+        /// SpriteResolver 缓存 + ArrayPool frame buffer。<see cref="LoomHost"/>.Dispose 不递归——
+        /// 引擎资源归本类。Driver.OnDestroy 先 host.Dispose（释放 stage 句柄）再 backend.Dispose。
+        /// SpriteResolver 持 lazy-loaded 页 Texture2D 缓存，Clear 清表但不 Dispose 页纹理
+        /// （归 caller / 构建后端拥有其生命周期——同原 LoomStage 语义）。
+        /// </summary>
+        public void Dispose()
+        {
+            _pool?.Clear();
+            _nhm?.Clear();
+            _mm?.Clear();
+            _sprites?.Clear();
+            if (_frameBuf != null)
+            {
+                ArrayPool<byte>.Shared.Return(_frameBuf);
+                _frameBuf = null;
+            }
         }
     }
 }

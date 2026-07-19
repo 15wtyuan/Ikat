@@ -10,13 +10,13 @@ namespace LoomGUI.Tests
     public class LoomStageDriverPlayTests
     {
         [UnityTest]
-        public IEnumerator Driver_Awake_CreatesStage()
+        public IEnumerator Driver_Awake_CreatesHost()
         {
             var go = new GameObject("TestDriver");
             var driver = go.AddComponent<LoomStageDriver>();
             yield return null;  // 等一帧 Awake 执行
 
-            Assert.IsNotNull(driver.Stage, "Awake 应构造 LoomStage 实例");
+            Assert.IsNotNull(driver.Context, "Awake 应构造 LoomHost 实例（Context 非空）");
 
             Object.Destroy(go);
         }

@@ -340,22 +340,4 @@ namespace LoomGUI.Tests
             }
         }
     }
-
-    /// LoomStage 纯 C# 类构造测试（B2）。
-    /// 锁：LoomStage 不再是 MonoBehaviour——new 构造可用、无 Unity 生命周期依赖；
-    /// 无字体注册时 Tick(null) 不崩（stage 句柄建好，borrow_frame 返空帧 → 跳渲染 → 事件派发空过）。
-    public class LoomStagePureClassTests
-    {
-        /// LoomStage 是纯 class（非 Component）：new 构造 + Tick(null) 不崩。
-        [Test]
-        public void LoomStage_ConstructsAsPureClass_WithoutMonoBehaviour()
-        {
-            using var stage = new LoomStage(new UnityEngine.Vector2(1080, 1920));
-            Assert.IsFalse(stage is UnityEngine.Component,
-                "LoomStage must be a pure class, not a MonoBehaviour/Component");
-            // 无字体注册 + 无 renderRoot → tick 走空帧路径不崩（stage 句柄非空即 tick）。
-            stage.Tick(0.016f);
-            Assert.Pass("LoomStage 构造 + 空 tick 成功（pure class，无 MonoBehaviour 依赖）");
-        }
-    }
 }

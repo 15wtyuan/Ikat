@@ -1,7 +1,7 @@
 // EventDemuxer：raw LoomEvent stream → typed event struct dispatch（投影层 D3）。
 //
 // 设计契约（spec §3.4 task D3）：
-// - Pump(ptr,count) 每 tick 调（LoomStage.Tick 内，复用 borrow_events FFI 的同一 buffer）。
+// - Pump(ptr,count) 每 tick 调（LoomHost.Step 内，复用 borrow_events FFI 的同一 buffer）。
 // - 逐条 LoomEvent 翻译为 typed event struct：
 //     * _core.Target = _ctx._registry.GetOrCreate(nodeId)（投影层 Node 身份）。
 //     * 业务字段（Position/ClickCount/TouchId/Key/Modifiers）从 raw EventRecord 填充。
@@ -46,7 +46,7 @@ namespace LoomGUI
     /// <summary>
     /// 投影层内部：每 tick 把 core borrow_events 的 raw <c>EventRecord[]</c> stream
     /// 翻译为 typed event struct 并喂 <see cref="EventBus.Dispatch{T}"/>。
-    /// <see cref="UIContext"/> 持单实例；<see cref="LoomStage.Tick"/> 调 <see cref="Pump"/>。
+    /// <see cref="UIContext"/> 持单实例；<see cref="LoomHost.Step"/> 调 <see cref="Pump"/>。
     /// </summary>
     internal sealed class EventDemuxer
     {
@@ -55,7 +55,7 @@ namespace LoomGUI
         internal EventDemuxer(UIContext ctx) => _ctx = ctx;
 
         /// <summary>
-        /// 每 tick 调：读 <c>borrow_events</c> buffer（LoomStage 已 byte* → IntPtr 透传）
+        /// 每 tick 调：读 <c>borrow_events</c> buffer（LoomHost.Step 已 byte* → IntPtr 透传）
         /// → 逐条翻译 → EventBus.Dispatch（typed On&lt;T&gt; 路径，单一订阅表）。
         /// </summary>
         /// <param name="ptr">borrow_events 返回的 native buffer（IntPtr=null 时 no-op）。</param>
