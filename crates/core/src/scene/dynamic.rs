@@ -53,15 +53,12 @@ pub fn apply_css(style: &mut ResolvedStyle, css: &str) {
 }
 
 /// slotmap insert 后若 capacity 增长，resize parallel arrays 对齐新容量。
-/// parallel arrays（text_layouts / rich_fragments）按 NodeId.index() 索引，
+/// parallel arrays（text_layouts）按 NodeId.index() 索引，
 /// 必须至少为 capacity+1（1 基索引，idx 0 占位），否则索引越界 panic。
 fn resize_parallel_arrays(scene: &mut Scene) {
     let need = scene.nodes.capacity() + 1;
     if scene.text_layouts.len() < need {
         scene.text_layouts.resize(need, None);
-    }
-    if scene.rich_fragments.len() < need {
-        scene.rich_fragments.resize(need, None);
     }
 }
 
@@ -1099,7 +1096,7 @@ mod tests {
 
     #[test]
     fn create_node_resizes_parallel_arrays_on_slotmap_expansion() {
-        // 动态 create_node 后 parallel arrays (text_layouts / rich_fragments)
+        // 动态 create_node 后 parallel arrays (text_layouts)
         // 必须对齐 slotmap capacity，否则后续按 NodeId.index() 访问会越界 panic。
         let mut scene = empty_scene();
         // 创建大量节点确保触发 slotmap 容量增长（初始 capacity 较小）。
@@ -1113,12 +1110,6 @@ mod tests {
                 id.index(),
                 scene.text_layouts.len()
             );
-            assert!(
-                id.index() < scene.rich_fragments.len(),
-                "rich_fragments must cover node index {} (len {})",
-                id.index(),
-                scene.rich_fragments.len()
-            );
             ids.push(id);
         }
         // 最终 arrays 至少为 capacity+1（1 基索引，idx 0 占位）
@@ -1127,12 +1118,6 @@ mod tests {
             scene.text_layouts.len() > cap,
             "text_layouts len {} > capacity {}",
             scene.text_layouts.len(),
-            cap
-        );
-        assert!(
-            scene.rich_fragments.len() > cap,
-            "rich_fragments len {} > capacity {}",
-            scene.rich_fragments.len(),
             cap
         );
     }
@@ -1152,15 +1137,8 @@ mod tests {
                 id.index(),
                 scene.text_layouts.len()
             );
-            assert!(
-                id.index() < scene.rich_fragments.len(),
-                "rich_fragments must cover node index {} (len {})",
-                id.index(),
-                scene.rich_fragments.len()
-            );
         }
         let cap = scene.nodes.capacity();
         assert!(scene.text_layouts.len() > cap);
-        assert!(scene.rich_fragments.len() > cap);
     }
 }

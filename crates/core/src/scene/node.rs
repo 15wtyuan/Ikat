@@ -393,9 +393,6 @@ pub struct Scene {
     /// 不换行；长文本 → Some(available) 换行），render 若用 rect.w（stretch 后的 available 整数宽）
     /// 重测，短文本因 intrinsic 亚像素超 available 误判换行。故 render 复用 layout 结果，不重测。
     pub text_layouts: Vec<Option<crate::text::layout::TextLayout>>,
-    /// v1.7：富文本链接 fragment 矩形（per-node，按 NodeId.index 索引）。与 text_layouts 同序。
-    /// build 产出，tick_and_render 写回，供 rich_link_at 命中查询。
-    pub rich_fragments: Vec<Option<Vec<crate::text::rich::RichFragment>>>,
     /// TextNode content (only TextNode nodes have entries).
     pub text_contents: std::collections::HashMap<NodeId, String>,
     /// Image src paths (only Image nodes have entries).
@@ -504,11 +501,10 @@ impl Scene {
                 None => scene.roots.push(ids[i]),
             }
         }
-        // text_layouts / rich_fragments 随槽位容量对齐（None 占位，layout::solve / render::build 填）。
+        // text_layouts 随槽位容量对齐（None 占位，layout::solve / render::build 填）。
         // **容量而非存活数**：按 id.index() 索引，remove_node 后 idx 不变但存活数减，
         // 按 len 分配会越界。capacity+1（1 基索引，idx 0 占位）。
         scene.text_layouts = vec![None; scene.nodes.capacity() + 1];
-        scene.rich_fragments = vec![None; scene.nodes.capacity() + 1];
         scene
     }
 
@@ -538,7 +534,6 @@ impl Scene {
             }
         }
         scene.text_layouts = vec![None; scene.nodes.capacity() + 1];
-        scene.rich_fragments = vec![None; scene.nodes.capacity() + 1];
         scene
     }
 

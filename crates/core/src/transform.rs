@@ -48,7 +48,7 @@ pub fn apply_point(m: &Affine2, x: f32, y: f32) -> (f32, f32) {
 }
 
 /// 仿射逆。det≈0（奇异，如 scale(0,*) 动画过零）降级返 IDENTITY——避免 1/det=Inf→NaN
-/// 污染调用方（hit_test/rich_link_at 把屏幕点逆投本地 box 比较）；零尺寸节点自然 miss。
+/// 污染调用方（hit_test 把屏幕点逆投本地 box 比较）；零尺寸节点自然 miss。
 pub fn inverse(m: &Affine2) -> Affine2 {
     let (a, b, c, d, tx, ty) = (m[0], m[1], m[2], m[3], m[4], m[5]);
     let det = a * d - b * c;

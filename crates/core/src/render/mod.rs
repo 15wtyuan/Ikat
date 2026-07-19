@@ -254,7 +254,6 @@ pub fn build_render_nodes(
     FrameData,
     std::collections::HashMap<u32, (u64, u64)>,
     Vec<u32>,
-    Vec<(u32, Vec<crate::text::rich::RichFragment>)>,
 ) {
     // id_to_pos: NodeId → nodes vec 0 基位置。剪 display:none 子树后 nodes 与 scene.nodes
     // 不等长，batch 按此映射索引 nodes；pruned 节点不入表（batch DFS 遇 id_to_pos 没有
@@ -273,7 +272,6 @@ pub fn build_render_nodes(
     // 先剪 display:none 子树——display:none 节点 + 后代不产 RenderNode（CSS 语义）。
     let pruned = collect_display_none_subtree(scene);
     let mut nodes: Vec<RenderNode> = Vec::new();
-    let rich_fragments: Vec<(u32, Vec<crate::text::rich::RichFragment>)> = Vec::new();
     // box-shadow 独立 RenderNode 追踪：(主节点 node_id, 阴影合成 node_id)。
     let mut shadow_pairs: Vec<(u32, u32)> = Vec::new();
     // 富文本行内图 RenderNode 追踪：(主节点 node_id, 行内图合成 node_id)。
@@ -718,12 +716,7 @@ pub fn build_render_nodes(
         };
         new_hashes.insert(rn.node_id, (hh, ph));
     }
-    (
-        FrameData { nodes, clips },
-        new_hashes,
-        sort_keys,
-        rich_fragments,
-    )
+    (FrameData { nodes, clips }, new_hashes, sort_keys)
 }
 
 /// 合成 node_id：为跨页 text 子页生成区别于主节点的 id。
