@@ -355,6 +355,8 @@ namespace LoomGUI.Bindings
         /// <summary>
         ///  建根节点并设为 roots[0]。kind/css = UTF-8 字节。返 NodeId；0xFFFF_FFFF = 失败。
         ///
+        ///  null 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
+        ///
         ///  **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_create_root", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -363,6 +365,8 @@ namespace LoomGUI.Bindings
         /// <summary>
         ///  建节点（不挂父）。kind/css = UTF-8 字节。返 NodeId；0xFFFF_FFFF = 失败。
         ///  需配合 append_child/insert_before 挂到树。
+        ///
+        ///  null 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
         ///
         ///  **常驻（不 gate）。**
         /// </summary>
@@ -409,6 +413,8 @@ namespace LoomGUI.Bindings
         ///  改 Text 节点 content + 标 dirty_text。text = UTF-8 字节。0=ok，-1=err。
         ///  非 Text 节点 → -1（Stage::set_text Err）。null 句柄 → -1。
         ///
+        ///  null text 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
+        ///
         ///  **常驻（不 gate）。**
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -417,6 +423,8 @@ namespace LoomGUI.Bindings
         /// <summary>
         ///  改 Image 节点 src + 标 dirty_mesh。src = UTF-8 字节。0=ok，-1=err。
         ///  非 Image 节点 → -1。null 句柄 → -1。
+        ///
+        ///  null src 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
         ///
         ///  **常驻（不 gate）。**
         /// </summary>
@@ -427,6 +435,8 @@ namespace LoomGUI.Bindings
         ///  写 inline override（便签层，优先级 &gt; 动态规则 &gt; base_style）。css = UTF-8 字节。
         ///  0=ok，-1=err（null 句柄 / 非 UTF-8 / 节点不 live）。下帧 rematch 应用。
         ///
+        ///  null css 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
+        ///
         ///  **常驻（不 gate）。**
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_inline_override", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -435,6 +445,8 @@ namespace LoomGUI.Bindings
         /// <summary>
         ///  清 inline override 的某 prop bit。prop = UTF-8 字节。0=ok，-1=err。
         ///  prop 不可 inline 时为 no-op（仍返 0）。
+        ///
+        ///  null prop 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
         ///
         ///  **常驻（不 gate）。**
         /// </summary>
