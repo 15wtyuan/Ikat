@@ -1,20 +1,17 @@
 //! IrTree → core TemplateNode 桥（生产级，替代 fence/tests/cascade_spike.rs 的 throwaway mini-bridge）。
 //! fence parse_template 停在 IrTree；本模块是第一处把 IrTree 翻译成 core 打包结构的代码。
 
-use loomgui_core::asset::{ControllerEntry, TemplateNode};
+use loomgui_core::asset::TemplateNode;
 use loomgui_core::scene::NodeKind;
 use loomgui_fence::ir::{IrElement, IrNodeKind};
 use loomgui_fence::schema::tag::SemanticKind;
 use loomgui_fence::ParsedTemplate;
 
-/// 把一个组件 HTML 的 ParsedTemplate 翻译成 (TemplateNode 树, controllers)。
+/// 把一个组件 HTML 的 ParsedTemplate 翻译成 TemplateNode 树。
 ///
 /// 单根契约：`parsed.tree.roots` 必须恰好 1 个（html/head/body 等 shell 标签已由 fence 剥除）。
-/// controllers 恒空（② 不做 controller 逻辑，旧范式退役中；data_controller 数据仍抽取保留）。
 /// base_style = fence styles[ir_idx]（Task 4 会把 inherited_set bake 进 styles）。
-pub fn bridge(
-    parsed: &ParsedTemplate,
-) -> Result<(Vec<TemplateNode>, Vec<ControllerEntry>), String> {
+pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
     if parsed.tree.roots.len() != 1 {
         return Err(format!(
             "组件 HTML 必须单一根元素（当前 {} 个顶层；html/head/body 等 shell 标签已由 fence 剥除）",
@@ -60,7 +57,6 @@ pub fn bridge(
                     id_attr: attr(el, "id"),
                     draggable: false,
                     tabindex: attr(el, "tabindex").and_then(|s| s.parse::<i32>().ok()),
-                    data_controller: attr(el, "data-controller"),
                     content: None,
                     src,
                 });
@@ -77,7 +73,6 @@ pub fn bridge(
                     id_attr: None,
                     draggable: false,
                     tabindex: None,
-                    data_controller: None,
                     content: Some(s.clone()),
                     src: None,
                 });
@@ -91,7 +86,7 @@ pub fn bridge(
             "组件根被 <template> 包裹或无实例化节点，产物为空（template 子树整体跳过）".into(),
         );
     }
-    Ok((nodes, Vec::new()))
+    Ok(nodes)
 }
 
 /// SemanticKind → NodeKind（total，非静默）。
@@ -173,7 +168,7 @@ mod tests {
             "diags: {:?}",
             parsed.diagnostics
         );
-        bridge(&parsed).unwrap().0
+        bridge(&parsed).unwrap()
     }
 
     #[test]
