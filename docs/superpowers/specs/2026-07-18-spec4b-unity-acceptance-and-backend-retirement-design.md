@@ -29,9 +29,11 @@ Spec-4a 预判"4a 比 4b 重"。实际进入 4b 设计后，因用户连续要�
 
 ### 2.1 LoomStage 业务 API：30 方法，29 个零活体 caller
 
-`unity/package/Runtime/LoomStage.cs`（589 行）的业务 API 透传方法，**唯一活体 caller 是 `LoomStageDriver.cs:188` 的 `_stage.LoadPackage(pkgName, bytes)`**（driver bootstrap）。其余 29 个方法零外部 caller——旧 demo `unity/showcase-unity/Assets/Scripts/Demo/LoomShowcaseDriver.cs.bak` 是唯一曾经广泛调用者，已 `.bak`（Unity 不编译 `.bak`），属死代码。4a headless 测试全走 UIContext，不碰 LoomStage 业务 API。
+`unity/package/Runtime/LoomStage.cs`（589 行）的**业务 API 透传方法**（CreateNode/SetStyle/SetText/Tween/FindNodeById 那一类，§4.1 列全），**29 个零外部 caller**——旧 demo `unity/showcase-unity/Assets/Scripts/Demo/LoomShowcaseDriver.cs.bak` 是唯一曾经广泛调用者，已 `.bak`（Unity 不编译），属死代码。4a headless 测试全走 UIContext，不碰 LoomStage 业务 API。唯一有活体 caller 的业务方法是 `LoadPackage`（`LoomStageDriver.cs:188` bootstrap）。
 
-→ **业务 API 透传层可整层删除**，语义已被 4a UIContext 投影层全覆盖。
+⚠️ **别误以为 driver 只调 LoadPackage**——`LoomStageDriver` 还调了 ~10 个**生命周期/后端编排方法**（grep 核实：`Tick`/`RegisterFont`/`SetImageSizes`/`SetFallbackFamilies`/`InitSprites`/`UseSafeArea`/`SetNativeHostRoot`/`StagePtr`/`Dispose`）。这些**不在 §4.1 业务 API 删除表里**，而是按 §3 迁移到 LoomHost/UnityLoomBackend——它们是引擎后端编排，不是被 UIContext 取代的命令式业务 API。
+
+→ **业务 API 透传层可整层删除**（§4.1），driver 的 ~10 个编排调用随 §3 分层迁移。
 
 ### 2.2 引擎无关层 4a 已建好
 
@@ -44,7 +46,15 @@ Spec-4a 预判"4a 比 4b 重"。实际进入 4b 设计后，因用户连续要�
 
 Controller（`data-controller`/`data-page`，v1.5 停止）新表层干净（Public/EventType/fence 全无），但**全链半退役**：core state 机 + 4 FFI + 6 测试 + C# wrapper + `LoomEventHandler` 全套 ControllerChanged + packer bridge attr parse + **pkg.bin v18 schema（ControllerEntry + data_controller 序列化）**。
 
-关键：`ControllerChanged` 是旧范式里**最后一个还有运行时事件源的**（经 `borrow_controller_changed_events` 喂旧 `LoomEventHandler`）。删 Controller → 旧 demux 失去最后事件源 → `LoomEventHandler` 整体可彻底删（业务侧零 caller，typed `On<T>` 全覆盖）。**不删 Controller = 旧 demux 必须留 ponytail = 清不干净**。
+**`LoomEventHandler`（旧 demux）有两个运行时事件源**（`LoomStage.cs:220-229` 核实）：
+1. `borrow_events` → `DispatchPending`（喂旧 `AddListener` 路径，:221）
+2. `borrow_controller_changed_events` → `DispatchControllerChanged`（喂 Controller 切页，:229）
+
+删 `LoomEventHandler` 的真正门是**两个源都没**：
+- **源 1 gate = AddListener 零业务 caller**——`:224` DEPRECATION 注释明写"待所有 callers 从 AddListener 迁走后删 DispatchPending"。grep 核实：`AddListener`/`AddCapture` 仅 `LoomEventHandler.cs` 自身定义 + `LoomEventHandlerTests.cs` 测试调用，**业务/demo/driver 零 caller**（.bak 不编译不计）→ gate 已满足。
+- **源 2 gate = Controller 删**——删 Controller 全链 → `borrow_controller_changed_events` FFI 消失 → DispatchControllerChanged 无源。
+
+两源都没 → `LoomEventHandler` 整体可删（+ `LoomEventHandlerTests.cs`）。**不删 Controller = 源 2 还在 = 旧 demux 清不干净**。
 
 → 决策：Controller 全链删 + bump pkg v19（详见 §4）。
 
@@ -52,7 +62,7 @@ Controller（`data-controller`/`data-page`，v1.5 停止）新表层干净（Pub
 
 - **RichText 死链**：主体（NodeKind::RichText / set_rich_text / SetRichText / display:block desugar）4a 前已彻底删干净。但 `loomgui_stage_rich_link_at` FFI + `stage.rs rich_link_at` + `scene.rich_fragments` 字段（恒空，注释自承"RichText retired, always empty"）+ 回写循环是死路径。**`text/rich.rs` 算法本体要留**（复合束要用，layout/render 全在用）。
 - **set_style 写 base_style 死路径**：FFI + `Stage::set_style` + `dynamic::set_style` + 2 测试，active C# 零 caller（4a StyleMirror.cs:17 已严禁，走 `set_inline_override`）。**`apply_css` 本体要留**（create_node 烘焙 base_style 要用）。
-- **HEAD 编译断**：`LoomStage.cs:545`（committed）仍调已删的 `loomgui_stage_set_rich_text`，但 bindings 已删 → HEAD 仓库 C# 编译失败。working tree 已修（删 SetRichText）但**未提交**。4b 必须带上。
+- ✅ **HEAD 编译断已修**（commit `b03929a` "fix: unity 编译通过"，2026-07-18 20:26）：HEAD `LoomStage.cs:545` 曾调已删的 `loomgui_stage_set_rich_text` 导致 C# 编译失败，working tree 删 `SetRichText` + 7 文件 namespace 消歧已提交。spec 写于该 commit 之后。→ **4b 无需再处理**。
 - **旧 demo 目录**：`unity/showcase-unity/Assets/Scripts/Demo/`（.bak + 孤立 asmdef + Demo.meta）+ `SampleScene.unity:608` broken MonoBehaviour ref。
 - **文档漂移**：`projection-layer.md:35,50` 还说 flush 走 `set_style/apply_css`（与 4a 便签层 `set_inline_override` 矛盾）；`roadmap.md:48` stale dll 描述过时。
 
@@ -149,8 +159,7 @@ public abstract class LoomBackend {
 | `dump_controller.rs` example | 删 |
 | `showcase-unity/Assets/Scripts/Demo/` 整目录（.bak + 孤立 asmdef + Demo.meta）+ `SampleScene.unity:608` broken ref | 删（清场景引用） |
 | `.gitignore:22-23` 死代码（LoomUI 目录已删） | 清 |
-| HEAD `LoomStage.cs:545` stale `set_rich_text` caller（working tree 已修未提交） | commit 带上 |
-| working tree 7 文件 namespace 消歧（Vector2→UnityEngine.Vector2 等） | commit 带上 |
+| ~~HEAD `set_rich_text` stale caller + 7 文件 namespace 消歧~~ | ✅ 已由 commit `b03929a` 提交，4b 无需处理 |
 
 ### 4.3 Controller 全链 + pkg v19（C 组，连锁清旧 demux）
 
