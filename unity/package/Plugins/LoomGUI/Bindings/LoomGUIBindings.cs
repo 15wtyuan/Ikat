@@ -115,48 +115,6 @@ namespace LoomGUI.Bindings
         internal static extern byte* loomgui_stage_borrow_events(StageHandle* h, nuint* out_len);
 
         /// <summary>
-        ///  拉取本帧 Controller 切页事件（pull，同 borrow_events 语义）。
-        ///  返 `pending_controller_events` 的 `as_ptr` + 写 len。null 句柄或无事件 → null + len=0。
-        ///  指针下 tick 失效（tick start 清空 pending_controller_events）。
-        ///
-        ///  **out_len 是 COUNT 非字节**——C 侧按 `len * sizeof(ControllerChangedEvent)` 切片读。
-        ///  ControllerChangedEvent 是 `#[repr(C)]` POD（mount_node:u32 + prev:i32 + new:i32 = 12B）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_borrow_controller_changed_events", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern byte* loomgui_stage_borrow_controller_changed_events(StageHandle* h, nuint* out_len);
-
-        /// <summary>
-        ///  在子树内找 data-controller="name" 的挂载点，返其 NodeId（u32）。
-        ///  subtree_root = 搜索起点 NodeId；name = UTF-8 字节（指针+len）。
-        ///  无匹配 / null 句柄 / 非 UTF-8 name → 0xFFFF_FFFF（sentinel，同 find_node_by_id）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_controller", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern uint loomgui_stage_get_controller(StageHandle* h, uint subtree_root, byte* name, nuint name_len);
-
-        /// <summary>
-        ///  切 Controller 页。无效 mount（无 scene / 节点不存在 / 未挂 data_controller）→ 静默返 -1。
-        ///  返 prev（切前 selected_index）；首次 set（无条目）返 -1。null 句柄 → -1。
-        ///  prev != idx 时推一条 ControllerChangedEvent 进 pending 队列供 borrow 拉取。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_selected_index(StageHandle* h, uint mount, int idx);
-
-        /// <summary>
-        ///  读 Controller 当前选中页。无 scene / 无条目 / 无效 mount → -1。
-        ///  null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_selected_index(StageHandle* h, uint mount);
-
-        /// <summary>
         ///  UI 挡住时游戏不响应点击（§10.6）。= 任一活跃槽 last_hit 非空且非根（多指：鼠标 slot0 + 已分配触摸槽）。
         ///  null 句柄 → false。
         ///
@@ -457,14 +415,6 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_set_text(StageHandle* h, uint node, byte* text, nuint len);
 
         /// <summary>
-        ///  查 (x,y) 落在 RichText 节点哪个链接上 → link_id（0=无链接/越界/非 RichText/null 句柄）。
-        ///  pull 模式（独立于 hit_test，不改 EventRecord ABI）。x/y 是 design（世界）坐标，core 内部
-        ///  反变换到节点本地后扫 rich_fragments 矩形。Unity Click 分支命中节点级 AABB 后调本函数细分。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_rich_link_at", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern uint loomgui_stage_rich_link_at(StageHandle* h, uint node_id, float x, float y);
-
-        /// <summary>
         ///  改 Image 节点 src + 标 dirty_mesh。src = UTF-8 字节。0=ok，-1=err。
         ///  非 Image 节点 → -1。null 句柄 → -1。
         ///
@@ -472,15 +422,6 @@ namespace LoomGUI.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_src", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_set_src(StageHandle* h, uint node, byte* src, nuint len);
-
-        /// <summary>
-        ///  改 base_style（apply_css）+ 标 dirty_mesh。css = UTF-8 字节。0=ok，-1=err。
-        ///  下帧 rematch 从 base 重算 style。null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_style", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_style(StageHandle* h, uint node, byte* css, nuint len);
 
         /// <summary>
         ///  写 inline override（便签层，优先级 &gt; 动态规则 &gt; base_style）。css = UTF-8 字节。
