@@ -35,22 +35,6 @@ fn set_text_changes_content_and_marks_dirty() {
 }
 
 #[test]
-fn set_style_changes_base_style() {
-    let mut s = Stage::new_for_test();
-    let n = s.create_node("div", "").unwrap();
-    s.set_style(n, "background-color:#ff0000").unwrap();
-    let bg = s
-        .scene
-        .as_ref()
-        .unwrap()
-        .get(n)
-        .unwrap()
-        .base_style
-        .background_color;
-    assert_eq!(bg, Some([1.0, 0.0, 0.0, 1.0]));
-}
-
-#[test]
 fn remove_child_detaches_but_keeps_node() {
     let mut s = Stage::new_for_test();
     let root = s.create_root("div", "").unwrap();

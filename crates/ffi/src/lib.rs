@@ -1104,7 +1104,7 @@ pub extern "C" fn loomgui_stage_clear_anim_prop(h: *mut StageHandle, node_id: u3
 }
 
 // ===== 动态树 API FFI（§7.2）：create_root/create_node/append_child/insert_before/
-// remove_child/remove_node/set_text/set_src/set_style。转调 Stage 方法。
+// remove_child/remove_node/set_text/set_src。转调 Stage 方法。
 // 错误语义：create_root/create_node 返 u32 NodeId（0xFFFF_FFFF = 失败）；
 // 其余返 i32（0=ok，-1=err）。null 句柄 → 失败/sentinel（不 panic）。
 
@@ -1281,31 +1281,6 @@ pub extern "C" fn loomgui_stage_set_src(
         Err(_) => return -1,
     };
     sh.stage.set_src(NodeId(node), src).map(|_| 0).unwrap_or(-1)
-}
-
-/// 改 base_style（apply_css）+ 标 dirty_mesh。css = UTF-8 字节。0=ok，-1=err。
-/// 下帧 rematch 从 base 重算 style。null 句柄 → -1。
-///
-/// **常驻（不 gate）。**
-#[no_mangle]
-pub extern "C" fn loomgui_stage_set_style(
-    h: *mut StageHandle,
-    node: u32,
-    css: *const u8,
-    len: usize,
-) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let css = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, len) }) {
-        Ok(s) => s,
-        Err(_) => return -1,
-    };
-    sh.stage
-        .set_style(NodeId(node), css)
-        .map(|_| 0)
-        .unwrap_or(-1)
 }
 
 /// 写 inline override（便签层，优先级 > 动态规则 > base_style）。css = UTF-8 字节。

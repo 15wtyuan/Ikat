@@ -2,7 +2,7 @@
 //!
 //! `remove_node`（递归删子 + 联动清 anim/scroll/tween + slotmap remove）+
 //! 动态建树/改树 API：`kind_from_tag` / `apply_css` / `create_node` / `create_root`
-//! / `append_child` / `insert_before` / `remove_child`（摘除不删）/ `set_text` / `set_src` / `set_style`
+//! / `append_child` / `insert_before` / `remove_child`（摘除不删）/ `set_text` / `set_src`
 //! / `set_inline_override` / `unset_inline_override`（便签层 inline override，rematch 最高优先级）。
 //!
 //! **设计要点**（spec §5.3 + §7 + §8）：
@@ -255,15 +255,6 @@ pub fn set_src(scene: &mut Scene, node: NodeId, src: &str) -> Result<(), String>
     }
     scene.image_srcs.insert(node, src.into());
     scene.get_mut(node).unwrap().dirty_mesh = true;
-    Ok(())
-}
-
-/// 改 base_style（apply_css）+ 标 dirty_mesh。
-/// 下帧 rematch_pseudo_classes 从 base_style 起算重算 style。
-pub fn set_style(scene: &mut Scene, node: NodeId, css: &str) -> Result<(), String> {
-    let n = scene.get_mut(node).ok_or("node not live")?;
-    apply_css(&mut n.base_style, css);
-    n.dirty_mesh = true;
     Ok(())
 }
 
@@ -1059,17 +1050,6 @@ mod tests {
         let mut scene = empty_scene();
         let d = create_node(&mut scene, "div", "").unwrap();
         assert!(set_src(&mut scene, d, "x").is_err());
-    }
-
-    #[test]
-    fn set_style_changes_base_style_marks_dirty() {
-        let mut scene = empty_scene();
-        let n = create_node(&mut scene, "div", "").unwrap();
-        scene.get_mut(n).unwrap().dirty_mesh = false;
-        set_style(&mut scene, n, "background-color:#ff0000").unwrap();
-        let bg = scene.get(n).unwrap().base_style.background_color;
-        assert_eq!(bg, Some([1.0, 0.0, 0.0, 1.0]));
-        assert!(scene.get(n).unwrap().dirty_mesh, "set_style 标 dirty_mesh");
     }
 
     #[test]

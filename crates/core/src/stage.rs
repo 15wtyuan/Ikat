@@ -520,11 +520,6 @@ impl Stage {
         crate::scene::dynamic::set_src(self.scene.as_mut().ok_or("no scene")?, node, src)
     }
 
-    /// 改 base_style（apply_css）+ 标 dirty_mesh。下帧 rematch 从 base 重算 style。
-    pub fn set_style(&mut self, node: NodeId, css: &str) -> Result<(), String> {
-        crate::scene::dynamic::set_style(self.scene.as_mut().ok_or("no scene")?, node, css)
-    }
-
     /// 写 inline override（便签层，优先级 > 动态规则 > base_style）。node 不 live / 无 scene → Err。
     pub fn set_inline_override(&mut self, node: NodeId, css: &str) -> Result<(), String> {
         crate::scene::dynamic::set_inline_override(

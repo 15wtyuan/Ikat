@@ -547,10 +547,10 @@ fn wheel_event_is_16_bytes() {
     assert_eq!(std::mem::size_of::<loomgui_core::scroll::WheelEvent>(), 16);
 }
 
-/// 动态树 API FFI round-trip——9 函数经 FFI 调用建/改/删节点。
+/// 动态树 API FFI round-trip——8 函数经 FFI 调用建/改/删节点。
 /// create_root 自动建空 scene（ensure_scene），无需 load_package 预建 scene。
 /// 流程：create_root(div) → create_node(button/img/span) → append_child ×3 →
-///       set_text/set_src/set_style 改属性 → insert_before 插序 →
+///       set_text/set_src 改属性 → insert_before 插序 →
 ///       remove_child 摘子 → remove_node 删根。每步断言返回值契约。
 #[test]
 fn dynamic_tree_api_ffi_round_trip() {
@@ -571,7 +571,7 @@ fn dynamic_tree_api_ffi_round_trip() {
     assert_eq!(loomgui_stage_append_child(h, root, btn), 0, "append btn");
     assert_eq!(loomgui_stage_append_child(h, root, img), 0, "append img");
     assert_eq!(loomgui_stage_append_child(h, root, span), 0, "append span");
-    // set_text(span) / set_src(img) / set_style(btn)
+    // set_text(span) / set_src(img)
     let txt = b"hello";
     assert_eq!(
         loomgui_stage_set_text(h, span, txt.as_ptr(), txt.len()),
@@ -583,12 +583,6 @@ fn dynamic_tree_api_ffi_round_trip() {
         loomgui_stage_set_src(h, img, src.as_ptr(), src.len()),
         0,
         "set_src img ok"
-    );
-    let css = b"width:100px;height:50px;";
-    assert_eq!(
-        loomgui_stage_set_style(h, btn, css.as_ptr(), css.len()),
-        0,
-        "set_style btn ok"
     );
     // set_text 对非 Text 节点（img）应失败
     assert_eq!(
