@@ -1,7 +1,7 @@
 // EventDemuxer：raw LoomEvent stream → typed event struct dispatch（投影层 D3）。
 //
 // 设计契约（spec §3.4 task D3）：
-// - Pump(ptr,count) 每 tick 调（LoomStage.Tick 内，复用 borrow_events FFI 的同一 buffer）。
+// - Pump(ptr,count) 每 tick 调（LoomHost.Step 内，复用 borrow_events FFI 的同一 buffer）。
 // - 逐条 LoomEvent 翻译为 typed event struct：
 //     * _core.Target = _ctx._registry.GetOrCreate(nodeId)（投影层 Node 身份）。
 //     * 业务字段（Position/ClickCount/TouchId/Key/Modifiers）从 raw EventRecord 填充。
@@ -9,7 +9,6 @@
 //       PreviousFocused/NewFocused/Scroll*/AnimationName/PropertyName/IterationCount）
 //       留在 default——后续接线补齐（D3 焦点是 demux 接线 + 路由正确性）。
 // - 调 _ctx._eventBus.Dispatch<T>(targetNodeId, evt) 走 D2 capture/bubble/once 路由。
-// - 旧 LoomEventHandler.DispatchPending 保留并行运行（backward compat：旧 AddListener 路径）。
 //
 // 5 无核心 source struct 处理（D1 EventType 17-21）：
 // - AnimationEnd (20) / TransitionEnd (21)：接 TweenComplete (type=16) 源。
@@ -18,9 +17,8 @@
 // - ScrollChanged (17) / AnimationStart (18) / AnimationIteration (19)：defer（无 core event source）。
 //   ScrollPane 物理自维护、tween 启动/循环无对应 FFI。Defer 标记见下文注释。
 //
-// RawEventRecord：读 raw byte* 解包 EventRecord（与 Rust input::EventRecord 布局一致，
-// 也与 LoomEventHandler.LoomEvent 布局一致——20 字节）。不依赖 LoomEventHandler.cs 的
-// LoomEvent struct（该文件不在 headless 测试编译链）——用 unsafe 读 byte* 避免依赖。
+// RawEventRecord：读 raw byte* 解包 EventRecord（与 Rust input::EventRecord 布局一致——20 字节）。
+// 自足 struct，不依赖任何外部 LoomEvent 镜像——headless 测试编译链和 Unity 生产链共用此定义。
 
 using System;
 using System.Runtime.InteropServices;
@@ -31,8 +29,7 @@ namespace LoomGUI
     /// <summary>
     /// Rust <c>loomgui_core::input::EventRecord</c> C# 镜像（20 字节）。
     /// 字段序：node_id:u32 @0 → event_type:u8 @4 → click_count:u8 @5 → pad [2] → touch_id:i32 @8 → x:f32 @12 → y:f32 @16。
-    /// 与 <see cref="LoomEventHandler"/> 内 LoomEvent struct 布局一致（独立副本——headless 测试编译链
-    /// 不含 LoomEventHandler.cs，故本 struct 自足）。
+    /// 自足 struct（headless 测试编译链用 unsafe 读 byte*，不依赖任何外部的 LoomEvent 镜像）。
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     struct RawEventRecord
@@ -49,7 +46,7 @@ namespace LoomGUI
     /// <summary>
     /// 投影层内部：每 tick 把 core borrow_events 的 raw <c>EventRecord[]</c> stream
     /// 翻译为 typed event struct 并喂 <see cref="EventBus.Dispatch{T}"/>。
-    /// <see cref="UIContext"/> 持单实例；<see cref="LoomStage.Tick"/> 调 <see cref="Pump"/>。
+    /// <see cref="UIContext"/> 持单实例；<see cref="LoomHost.Step"/> 调 <see cref="Pump"/>。
     /// </summary>
     internal sealed class EventDemuxer
     {
@@ -58,10 +55,8 @@ namespace LoomGUI
         internal EventDemuxer(UIContext ctx) => _ctx = ctx;
 
         /// <summary>
-        /// 每 tick 调：读 <c>borrow_events</c> buffer（LoomStage 已 byte* → IntPtr 透传）
-        /// → 逐条翻译 → EventBus.Dispatch。
-        /// 与 LoomEventHandler.DispatchPending 并行运行——旧 AddListener 路径和新 On&lt;T&gt; 路径
-        /// 各自独立的订阅表，无冲突、无重复触发。
+        /// 每 tick 调：读 <c>borrow_events</c> buffer（LoomHost.Step 已 byte* → IntPtr 透传）
+        /// → 逐条翻译 → EventBus.Dispatch（typed On&lt;T&gt; 路径，单一订阅表）。
         /// </summary>
         /// <param name="ptr">borrow_events 返回的 native buffer（IntPtr=null 时 no-op）。</param>
         /// <param name="count">事件条数（非字节数；≤0 时 no-op）。</param>

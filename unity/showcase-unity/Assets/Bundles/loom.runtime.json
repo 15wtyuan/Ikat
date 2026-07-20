@@ -1,10 +1,10 @@
 {
   "version": 1,
   "packages": [
-    "showcase"
+    "spec4b-acceptance"
   ],
   "atlases": [
-    "icons"
+    "spec4b-icons"
   ],
   "fonts": [
     {
@@ -14,28 +14,10 @@
       "fallback": false
     },
     {
-      "family": "wqy-microhei",
-      "file": "wqy-microhei.ttc.bytes",
-      "default": false,
-      "fallback": true
-    },
-    {
-      "family": "PressStart2P",
-      "file": "PressStart2P.ttf.bytes",
-      "default": false,
-      "fallback": false
-    },
-    {
       "family": "DejaVuSans",
       "file": "DejaVuSans.ttf.bytes",
       "default": false,
-      "fallback": false
-    },
-    {
-      "family": "JetBrainsMono",
-      "file": "JetBrainsMono.ttf.bytes",
-      "default": false,
-      "fallback": false
+      "fallback": true
     }
   ]
 }

@@ -14,13 +14,12 @@ fn make_test_pkg_bytes(component: &str) -> Vec<u8> {
         id_attr: None,
         draggable: false,
         tabindex: None,
-        data_controller: None,
         content: None,
         src: None,
     }];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![(component, nodes.as_slice(), &rules, &[])],
+        components: vec![(component, nodes.as_slice(), &rules)],
     };
     loomgui_core::asset::write_package(&input)
 }
@@ -320,13 +319,12 @@ fn find_node_by_id_round_trip() {
         id_attr: Some("ok".to_string()),
         draggable: false,
         tabindex: None,
-        data_controller: None,
         content: None,
         src: None,
     }];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let pkg = loomgui_core::asset::write_package(&PackageInput {
-        components: vec![("comp1", nodes.as_slice(), &rules, &[])],
+        components: vec![("comp1", nodes.as_slice(), &rules)],
     });
     assert_eq!(
         loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len()),
@@ -444,7 +442,7 @@ fn build_scroll_stage() -> Stage {
         None::<String>,
         false,
         None::<i32>,
-        None::<String>,
+        None::<String>, // data_controller
         None::<String>,
         None::<String>,
     )];
@@ -522,7 +520,7 @@ fn set_scroll_pos_non_container_no_op() {
         None::<String>,
         false,
         None::<i32>,
-        None::<String>,
+        None::<String>, // data_controller
         None::<String>,
         None::<String>,
     )];
@@ -547,10 +545,10 @@ fn wheel_event_is_16_bytes() {
     assert_eq!(std::mem::size_of::<loomgui_core::scroll::WheelEvent>(), 16);
 }
 
-/// 动态树 API FFI round-trip——9 函数经 FFI 调用建/改/删节点。
+/// 动态树 API FFI round-trip——8 函数经 FFI 调用建/改/删节点。
 /// create_root 自动建空 scene（ensure_scene），无需 load_package 预建 scene。
 /// 流程：create_root(div) → create_node(button/img/span) → append_child ×3 →
-///       set_text/set_src/set_style 改属性 → insert_before 插序 →
+///       set_text/set_src 改属性 → insert_before 插序 →
 ///       remove_child 摘子 → remove_node 删根。每步断言返回值契约。
 #[test]
 fn dynamic_tree_api_ffi_round_trip() {
@@ -571,7 +569,7 @@ fn dynamic_tree_api_ffi_round_trip() {
     assert_eq!(loomgui_stage_append_child(h, root, btn), 0, "append btn");
     assert_eq!(loomgui_stage_append_child(h, root, img), 0, "append img");
     assert_eq!(loomgui_stage_append_child(h, root, span), 0, "append span");
-    // set_text(span) / set_src(img) / set_style(btn)
+    // set_text(span) / set_src(img)
     let txt = b"hello";
     assert_eq!(
         loomgui_stage_set_text(h, span, txt.as_ptr(), txt.len()),
@@ -583,12 +581,6 @@ fn dynamic_tree_api_ffi_round_trip() {
         loomgui_stage_set_src(h, img, src.as_ptr(), src.len()),
         0,
         "set_src img ok"
-    );
-    let css = b"width:100px;height:50px;";
-    assert_eq!(
-        loomgui_stage_set_style(h, btn, css.as_ptr(), css.len()),
-        0,
-        "set_style btn ok"
     );
     // set_text 对非 Text 节点（img）应失败
     assert_eq!(
@@ -883,7 +875,6 @@ fn a6_get_children_capacity_contract() {
             id_attr: None,
             draggable: false,
             tabindex: None,
-            data_controller: None,
             content: None,
             src: None,
         },
@@ -895,7 +886,6 @@ fn a6_get_children_capacity_contract() {
             id_attr: None,
             draggable: false,
             tabindex: None,
-            data_controller: None,
             content: None,
             src: None,
         },
@@ -907,14 +897,13 @@ fn a6_get_children_capacity_contract() {
             id_attr: None,
             draggable: false,
             tabindex: None,
-            data_controller: None,
             content: None,
             src: None,
         },
     ];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let pkg = loomgui_core::asset::write_package(&PackageInput {
-        components: vec![("comp1", nodes.as_slice(), &rules, &[])],
+        components: vec![("comp1", nodes.as_slice(), &rules)],
     });
     assert_eq!(
         loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len()),

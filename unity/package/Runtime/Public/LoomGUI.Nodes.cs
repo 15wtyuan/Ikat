@@ -1601,7 +1601,7 @@ namespace LoomGUI
         // D3 demux 翻译 raw LoomEvent → typed struct 后调 Dispatch<T>。公共 API 不见本字段。
         internal readonly EventBus _eventBus;
 
-        // D3：raw LoomEvent stream → typed event struct demux。LoomStage.Tick 调 Pump 每帧
+        // D3：raw LoomEvent stream → typed event struct demux。LoomHost.Step 调 Pump 每帧
         // 翻译 borrow_events buffer → EventBus.Dispatch。公共 API 不见本字段。
         internal readonly EventDemuxer _eventDemuxer;
 

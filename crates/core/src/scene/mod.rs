@@ -6,4 +6,4 @@ pub mod dynamic;
 pub mod node;
 pub mod transform;
 
-pub use node::{Node, NodeId, NodeKind, Rect, Scene};
+pub use node::{is_whitespace_only_text, Node, NodeId, NodeKind, Rect, Scene};

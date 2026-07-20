@@ -4,7 +4,16 @@
   "packages": [
     {
       "name": "showcase",
-      "dirs": ["showcase"],
+      "dirs": [
+        "showcase"
+      ],
+      "html": []
+    },
+    {
+      "name": "spec4b-acceptance",
+      "dirs": [
+        "spec4b"
+      ],
       "html": []
     }
   ],
@@ -12,16 +21,43 @@
     {
       "name": "icons",
       "standalone": false,
-      "dirs": ["res/icons"],
+      "dirs": [
+        "res/icons"
+      ],
       "max_size": 1024,
       "padding": 4
     }
   ],
   "fonts": [
-    { "family": "LXGWWenKai", "file": "res/fonts/LXGWWenKai.ttf", "default": true, "fallback": false },
-    { "family": "wqy-microhei", "file": "res/fonts/wqy-microhei.ttc", "default": false, "fallback": true },
-    { "family": "PressStart2P", "file": "res/fonts/PressStart2P.ttf", "default": false, "fallback": false },
-    { "family": "DejaVuSans", "file": "res/fonts/DejaVuSans.ttf", "default": false, "fallback": false },
-    { "family": "JetBrainsMono", "file": "res/fonts/JetBrainsMono.ttf", "default": false, "fallback": false }
+    {
+      "family": "LXGWWenKai",
+      "file": "res/fonts/LXGWWenKai.ttf",
+      "default": true,
+      "fallback": false
+    },
+    {
+      "family": "wqy-microhei",
+      "file": "res/fonts/wqy-microhei.ttc",
+      "default": false,
+      "fallback": true
+    },
+    {
+      "family": "PressStart2P",
+      "file": "res/fonts/PressStart2P.ttf",
+      "default": false,
+      "fallback": false
+    },
+    {
+      "family": "DejaVuSans",
+      "file": "res/fonts/DejaVuSans.ttf",
+      "default": false,
+      "fallback": false
+    },
+    {
+      "family": "JetBrainsMono",
+      "file": "res/fonts/JetBrainsMono.ttf",
+      "default": false,
+      "fallback": false
+    }
   ]
 }

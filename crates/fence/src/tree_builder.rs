@@ -338,8 +338,12 @@ pub fn parse_html_to_ir(html: &str) -> (IrTree, Vec<Diagnostic>) {
 
 /// Same as parse_html_to_ir but with a file name for diagnostics.
 pub fn parse_html_to_ir_named(html: &str, file: String) -> (IrTree, Vec<Diagnostic>, Vec<String>) {
-    let tokens = tokenize(html);
-    let mut builder = TreeBuilder::new(html, file);
+    // 文件首的 UTF-8 BOM (`\u{feff}`) 由 html5gum 当作可见文本产 String token，且
+    // Rust `char::is_whitespace` 自 Unicode 3.2 不再认 BOM 为空白——BOM 顶层 Text
+    // 节点漏过 ws filter，被 bridge 当成额外顶层根，破坏单根契约。源首一次性剥除。
+    let html_stripped = html.strip_prefix('\u{feff}').unwrap_or(html);
+    let tokens = tokenize(html_stripped);
+    let mut builder = TreeBuilder::new(html_stripped, file);
     for token in tokens {
         builder.process_token(token);
     }

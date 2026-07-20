@@ -3,11 +3,41 @@
 //! 路径 c：手搓解析器，直产 core 的 ParsedSelector/Compound（fence 已依赖 core）。
 //! 子集：class / tag / id / 后代组合（空格）/ 伪类（hover/active/disabled/focus/checked）。
 //! 越界（属性选择器、nth-child、+ ~ 组合子、逗号多选等）返 None，由调用方报错。
+//!
+//! @keyframes at-rule（对齐 public-api.md §9「动画定义全在 CSS」终态）：fence 解析
+//! `@keyframes <name> { <stop-selector> { decls } ... }` 产 `KeyframesRule`。runtime
+//! 驱动（tween 发射）在 §4 视觉束实现（v1.10）；本轮 fence 接受语法 + bridge 静默丢弃——
+//! pkg.bin 格式不变（runtime 收不到 keyframes；animation 属性走 cascade 静默跳过）。
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
 use crate::schema::css::{find_css_prop, find_shorthand};
 use loomgui_core::style::dynamic::{
     Combinator, Compound, Declaration, DynamicRule, ParsedSelector, Specificity,
 };
+
+// ── @keyframes 类型（fence-local；pkg.bin 暂不序列化）──────────────────────────
+
+/// `@keyframes` 一条 stop 的选择器位置。CSS 标准：`from`=`0%`，`to`=`100%`。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyframeStopSelector {
+    From,
+    To,
+    /// 0..=100，CSS 允许小数百分比但本围栏子集只接受整数（showcase 用法覆盖）。
+    Percent(u8),
+}
+
+/// `@keyframes` 内一条 stop：选择器位置 + 声明块（如 `from { opacity:0 }`）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyframeStop {
+    pub selector: KeyframeStopSelector,
+    pub declarations: Vec<Declaration>,
+}
+
+/// `@keyframes <name> { ... }` 整体规则。stops 按 source 顺序保留（runtime 按需插值）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyframesRule {
+    pub name: String,
+    pub stops: Vec<KeyframeStop>,
+}
 
 /// 解析单条选择器串 → ParsedSelector（含 specificity）。越界返 None。
 ///
@@ -130,41 +160,78 @@ fn take_ident(s: &str) -> (&str, &str) {
     (&s[..end], &s[end..])
 }
 
-/// 解析一段 `<style>` 文本 → 规则表 + 诊断。
+/// 解析一段 `<style>` 文本 → (动态规则表, keyframes 规则表, 诊断)。
 ///
-/// 文法（子集）：`selector_list? { decl_list }` 重复；`selector_list` 为单选择器（不支持逗号）；
-/// `decl_list` = `prop: value;` 重复。CSS 注释 `/* ... */` 剥除。越界选择器 → 该规则丢弃 + 诊断；
-/// 声明 prop 名不在 schema（find_css_prop/find_shorthand）→ 诊断（与 css_resolve 一致）。
-pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<Diagnostic>) {
+/// 文法（子集）：
+/// - 普通规则：`selector { decl_list }`，selector 为单选择器（不支持逗号）。
+/// - At-rule：`@keyframes <name> { <stop>{decls} ... }`（嵌套大括号）→ KeyframesRule。
+///   其他 `@xxx` at-rule 不在围栏子集，整块丢弃 + 诊断。
+/// - `decl_list` = `prop: value;` 重复。CSS 注释 `/* ... */` 剥除。
+/// - 越界 selector / at-rule → 丢弃 + 诊断；声明 prop 名不在 schema（find_css_prop/find_shorthand）
+///   → 诊断（与 css_resolve 一致）。
+///
+/// @keyframes 解析后产出 KeyframesRule；打包器 bridge 当前**静默丢弃**（pkg.bin 格式与
+/// runtime §4 视觉束 v1.10 一同落地，本轮不序列化以避免 pkg 版本 bump + dll 重编）。
+pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Vec<Diagnostic>) {
     let stripped = strip_comments(css);
     // 诊断定位用（粗略）：strip_comments 后 offset 已不对应原文，但行号近似可用。
     let line_map = LineMap::new(&stripped);
     let mut rules = Vec::new();
+    let mut keyframes = Vec::new();
     let mut diagnostics = Vec::new();
     let mut pos = 0;
     while pos < stripped.len() {
         // 找下一个 '{'
-        let Some(brace_open) = stripped[pos..].find('{') else {
+        let Some(brace_open_rel) = stripped[pos..].find('{') else {
             break;
         };
+        let brace_open = pos + brace_open_rel;
+        let prelude = stripped[pos..brace_open].trim();
+        let after_open = brace_open + 1;
         let sel_start = pos;
-        let sel_raw = stripped[pos..pos + brace_open].trim();
-        let after_open = pos + brace_open + 1;
+
+        // At-rule 分支：prelude 以 `@` 开头
+        if prelude.starts_with('@') {
+            let loc = line_map.source_location(sel_start, "<style>".to_string());
+            // 找匹配的 `}`（@keyframes 体含嵌套大括号，必须按深度匹配）
+            let Some((body, end_pos)) = find_matching_brace(&stripped, after_open) else {
+                break;
+            };
+            pos = end_pos;
+            let at_body = body;
+            // 拆 @keyword + 后续 token（如 `@keyframes charge` → `keyframes` + `charge`）
+            let at_kw_str = prelude.trim_start_matches('@').trim_start();
+            let (at_name, at_rest) = split_at_keyword(at_kw_str);
+            match at_name.as_str() {
+                "keyframes" => match parse_keyframes_rule(&at_rest, at_body, &loc) {
+                    Ok(kf) => keyframes.push(kf),
+                    Err(d) => diagnostics.push(d),
+                },
+                _ => diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::FenceBadCssValue,
+                    format!("unsupported at-rule @{at_name} in <style>"),
+                    loc,
+                )),
+            }
+            continue;
+        }
+
+        // 普通选择器分支：用首 `}`（无嵌套）取 body
         let Some(brace_close_rel) = stripped[after_open..].find('}') else {
             break;
         };
         let body = &stripped[after_open..after_open + brace_close_rel];
         pos = after_open + brace_close_rel + 1;
 
-        if sel_raw.is_empty() {
+        if prelude.is_empty() {
             continue;
         }
         // <style> 内无精确 per-token span —— 定位用选择器起点近似。
         let loc = line_map.source_location(sel_start, "<style>".to_string());
-        let Some(selector) = parse_selector(sel_raw) else {
+        let Some(selector) = parse_selector(prelude) else {
             diagnostics.push(Diagnostic::error(
                 DiagnosticCode::FenceBadCssValue,
-                format!("unsupported selector \"{}\" in <style>", sel_raw),
+                format!("unsupported selector \"{}\" in <style>", prelude),
                 loc,
             ));
             continue;
@@ -177,7 +244,137 @@ pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<Diagnostic>) {
             });
         }
     }
-    (rules, diagnostics)
+    (rules, keyframes, diagnostics)
+}
+
+/// 在 `s[start..]` 中找与（已消费的）`{` 匹配的 `}`。返回 (body_slice, position_after_close)。
+///
+/// 用于 @keyframes 这类含嵌套大括号的 at-rule body：朴素 `find('}')` 会停在第一个内层 `}`，
+/// 切错 body。按深度计数：`{` +1 / `}` -1，归 0 即匹配。
+fn find_matching_brace(s: &str, start: usize) -> Option<(&str, usize)> {
+    let bytes = s.as_bytes();
+    let mut depth: i32 = 1;
+    let mut i = start;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((&s[start..i], i + 1));
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// 把 `@<keyword>` 后的首标识符分出来，剩下作为 prelude 余部（trim 后）。
+/// `keyframes charge` → (`keyframes`, `charge`)；`media screen` → (`media`, `screen`)。
+fn split_at_keyword(s: &str) -> (String, String) {
+    let s = s.trim();
+    let end = s.find(|ch: char| ch.is_whitespace()).unwrap_or(s.len());
+    (s[..end].to_string(), s[end..].trim().to_string())
+}
+
+/// 解析 `@keyframes <name> { <body> }` 的 body → KeyframesRule。
+///
+/// body 文法：`<stop-selector-list> { decl_list }` 重复，stop-selector-list = 逗号分隔的
+/// `from` / `to` / `<N>%`。逗号多 stop（`0%,100%{...}`）展开为多个 KeyframeStop 共享同声明块。
+/// 任一 stop-selector 非法 → 整个 @keyframes 块丢弃 + 诊断（CSS 严格失败模式）。
+fn parse_keyframes_rule(
+    name: &str,
+    body: &str,
+    loc: &SourceLocation,
+) -> Result<KeyframesRule, Diagnostic> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(Diagnostic::error(
+            DiagnosticCode::FenceBadCssValue,
+            "@keyframes 缺少 name",
+            loc.clone(),
+        ));
+    }
+    let mut stops: Vec<KeyframeStop> = Vec::new();
+    let mut pos = 0;
+    while pos < body.len() {
+        let Some(brace_open_rel) = body[pos..].find('{') else {
+            break;
+        };
+        let brace_open = pos + brace_open_rel;
+        let stop_sel_raw = body[pos..brace_open].trim();
+        let after_open = brace_open + 1;
+        let Some((inner, end_pos)) = find_matching_brace(body, after_open) else {
+            break;
+        };
+        pos = end_pos;
+        if stop_sel_raw.is_empty() {
+            continue;
+        }
+        // 逗号多 stop：`0%,100%` → 展开为 [Percent(0), Percent(100)]，每 stop 共享同 declarations
+        let mut sel_parsed: Vec<KeyframeStopSelector> = Vec::new();
+        for raw in stop_sel_raw.split(',') {
+            match parse_stop_selector(raw.trim(), loc) {
+                Ok(s) => sel_parsed.push(s),
+                Err(d) => return Err(d),
+            }
+        }
+        let decls = parse_declarations(inner, loc, &mut Vec::new()); // stops 内 prop 名错误 tolerable
+        for sel in sel_parsed {
+            stops.push(KeyframeStop {
+                selector: sel,
+                declarations: decls.clone(),
+            });
+        }
+    }
+    if stops.is_empty() {
+        return Err(Diagnostic::error(
+            DiagnosticCode::FenceBadCssValue,
+            format!("@keyframes {name} 缺少 stop（from/to/N% 块）"),
+            loc.clone(),
+        ));
+    }
+    Ok(KeyframesRule {
+        name: name.to_string(),
+        stops,
+    })
+}
+
+/// 解析单个 stop 选择器：`from` / `to` / `<N>%`（0..=100 整数）。
+fn parse_stop_selector(
+    raw: &str,
+    loc: &SourceLocation,
+) -> Result<KeyframeStopSelector, Diagnostic> {
+    match raw {
+        "from" => Ok(KeyframeStopSelector::From),
+        "to" => Ok(KeyframeStopSelector::To),
+        _ => {
+            let Some(num_str) = raw.strip_suffix('%') else {
+                return Err(Diagnostic::error(
+                    DiagnosticCode::FenceBadCssValue,
+                    format!("@keyframes stop \"{}\" 不合法（应为 from / to / N%）", raw),
+                    loc.clone(),
+                ));
+            };
+            let pct: u32 = num_str.parse().map_err(|_| {
+                Diagnostic::error(
+                    DiagnosticCode::FenceBadCssValue,
+                    format!("@keyframes stop \"{}\" 百分比非数字", raw),
+                    loc.clone(),
+                )
+            })?;
+            if pct > 100 {
+                return Err(Diagnostic::error(
+                    DiagnosticCode::FenceBadCssValue,
+                    format!("@keyframes stop \"{}\" 超过 100%", raw),
+                    loc.clone(),
+                ));
+            }
+            Ok(KeyframeStopSelector::Percent(pct as u8))
+        }
+    }
 }
 
 /// 剥除 CSS 注释 `/* ... */`。UTF-8 安全：在 `&str` 上用 `find`（ASCII 针的偏移恒为 char 边界）。
@@ -318,7 +515,7 @@ mod tests {
     #[test]
     fn parse_style_block_basic() {
         let css = ".foo { color: red; font-size: 24px }\ndiv.bar { width: 100px }";
-        let (rules, diags) = parse_style_block(css);
+        let (rules, _kf, diags) = parse_style_block(css);
         assert!(diags.is_empty(), "diags: {diags:?}");
         assert_eq!(rules.len(), 2);
         assert_eq!(rules[0].selector.raw, ".foo");
@@ -338,7 +535,7 @@ mod tests {
     #[test]
     fn parse_style_block_skips_unparseable_selector() {
         // .a > .b 越界 → 该规则进 diagnostic，其他规则照常
-        let (rules, diags) = parse_style_block(".a > .b { color: red }\n.ok { color: blue }");
+        let (rules, _kf, diags) = parse_style_block(".a > .b { color: red }\n.ok { color: blue }");
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].selector.raw, ".ok");
         assert!(
@@ -349,7 +546,7 @@ mod tests {
 
     #[test]
     fn parse_style_block_ignores_comments() {
-        let (rules, _diags) = parse_style_block("/* c */ .x { color: red } /* tail */");
+        let (rules, _kf, _diags) = parse_style_block("/* c */ .x { color: red } /* tail */");
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].selector.raw, ".x");
     }
@@ -358,12 +555,108 @@ mod tests {
     fn parse_style_block_preserves_cjk_and_strips_comment() {
         // UTF-8 safety: 注释 + CJK font-family 都不能被 strip_comments 损坏
         // （旧的 bytes[i] as char 字节循环会破坏多字节序列）。
-        let (rules, diags) = parse_style_block("/* 注释 */ .x { font-family: \"微软雅黑\" }");
+        let (rules, _kf, diags) = parse_style_block("/* 注释 */ .x { font-family: \"微软雅黑\" }");
         assert!(diags.is_empty(), "diags: {diags:?}");
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].selector.raw, ".x");
         assert_eq!(rules[0].declarations.len(), 1);
         assert_eq!(rules[0].declarations[0].prop, "font-family");
         assert_eq!(rules[0].declarations[0].value, "\"微软雅黑\"");
+    }
+
+    // ── @keyframes at-rule 解析测 ──
+
+    #[test]
+    fn parse_style_block_keyframes_from_to() {
+        // character.html 用法
+        let css = "@keyframes charge { from{filter:brightness(.7)} to{filter:brightness(1)} }";
+        let (_rules, keyframes, diags) = parse_style_block(css);
+        assert!(diags.is_empty(), "diags: {diags:?}");
+        assert_eq!(keyframes.len(), 1, "应解析出 1 个 @keyframes");
+        let kf = &keyframes[0];
+        assert_eq!(kf.name, "charge");
+        assert_eq!(kf.stops.len(), 2, "from + to → 2 stops");
+        assert_eq!(kf.stops[0].selector, KeyframeStopSelector::From);
+        assert_eq!(kf.stops[1].selector, KeyframeStopSelector::To);
+        assert_eq!(kf.stops[0].declarations.len(), 1);
+        assert_eq!(kf.stops[0].declarations[0].prop, "filter");
+    }
+
+    #[test]
+    fn parse_style_block_keyframes_multi_percent_stops() {
+        // 多 stop 百分比（home/lab 类）
+        let css = "@keyframes fade { 0%{opacity:0} 50%{opacity:.5} 100%{opacity:1} }";
+        let (_rules, keyframes, diags) = parse_style_block(css);
+        assert!(diags.is_empty(), "diags: {diags:?}");
+        assert_eq!(keyframes.len(), 1);
+        let kf = &keyframes[0];
+        assert_eq!(kf.name, "fade");
+        assert_eq!(kf.stops.len(), 3);
+        assert_eq!(kf.stops[0].selector, KeyframeStopSelector::Percent(0));
+        assert_eq!(kf.stops[1].selector, KeyframeStopSelector::Percent(50));
+        assert_eq!(kf.stops[2].selector, KeyframeStopSelector::Percent(100));
+    }
+
+    #[test]
+    fn parse_style_block_keyframes_comma_stop_selector_expands() {
+        // mail.html 用法：`0%,100%{opacity:1} 50%{opacity:.4}` → 展开 3 stops
+        let css = "@keyframes breathe { 0%,100%{opacity:1} 50%{opacity:.4} }";
+        let (_rules, keyframes, diags) = parse_style_block(css);
+        assert!(diags.is_empty(), "diags: {diags:?}");
+        assert_eq!(keyframes.len(), 1);
+        let kf = &keyframes[0];
+        assert_eq!(kf.name, "breathe");
+        assert_eq!(kf.stops.len(), 3, "0%,100% 展开为 2 + 1 = 3 stops");
+        // 按 source 顺序：Percent(0), Percent(100), Percent(50)
+        assert_eq!(kf.stops[0].selector, KeyframeStopSelector::Percent(0));
+        assert_eq!(kf.stops[1].selector, KeyframeStopSelector::Percent(100));
+        assert_eq!(kf.stops[2].selector, KeyframeStopSelector::Percent(50));
+        // 0% 与 100% 共享同 declarations（来自同一块）
+        assert_eq!(kf.stops[0].declarations, kf.stops[1].declarations);
+    }
+
+    #[test]
+    fn parse_style_block_keyframes_with_other_rules_interleaved() {
+        // home.html 用法：@keyframes 块 + 后续 selector 规则混合
+        let css = "@keyframes fadeIn { from{opacity:0} to{opacity:1} }\n.nav-card { color:red }";
+        let (rules, keyframes, diags) = parse_style_block(css);
+        assert!(diags.is_empty(), "diags: {diags:?}");
+        assert_eq!(keyframes.len(), 1, "@keyframes 解析");
+        assert_eq!(keyframes[0].name, "fadeIn");
+        assert_eq!(rules.len(), 1, "普通 selector 规则照常解析");
+        assert_eq!(rules[0].selector.raw, ".nav-card");
+    }
+
+    #[test]
+    fn parse_style_block_keyframes_single_to_stop() {
+        // lab.html 用法：只有 to stop（CSS 合法：from 隐式 = 当前状态）
+        let css = "@keyframes shimmer { to { background-position:200% center; } }";
+        let (_rules, keyframes, diags) = parse_style_block(css);
+        assert!(diags.is_empty(), "diags: {diags:?}");
+        assert_eq!(keyframes.len(), 1);
+        assert_eq!(keyframes[0].stops.len(), 1);
+        assert_eq!(keyframes[0].stops[0].selector, KeyframeStopSelector::To);
+    }
+
+    #[test]
+    fn parse_style_block_unknown_at_rule_errors() {
+        // @media / @font-face 不在围栏子集 → diagnostic
+        let (_rules, _kf, diags) = parse_style_block("@media screen { .x { color:red } }");
+        assert!(
+            diags.iter().any(|d| d.message.contains("@media")),
+            "未知 at-rule 应报错: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn parse_style_block_keyframes_missing_name_errors() {
+        let (_rules, _kf, diags) = parse_style_block("@keyframes { from{opacity:0} }");
+        assert!(!diags.is_empty(), "无名 @keyframes 应报错");
+    }
+
+    #[test]
+    fn parse_style_block_keyframes_over_100_pct_errors() {
+        let (_rules, _kf, diags) = parse_style_block("@keyframes x { 150%{opacity:0} }");
+        assert!(!diags.is_empty(), "百分比 > 100 应报错");
     }
 }

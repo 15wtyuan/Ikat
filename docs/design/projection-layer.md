@@ -32,7 +32,7 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 ### 1.3 v1 现状（此模型已跑通大半）
 
 - v1 渲染路径已是「真身 Rust + 薄后端 + 每帧一次 SOA blob 过桥」：`stage.Tick(dt)` → `build_blob` → C# `FrameBlob` 读 21 列 SOA → `MirrorPool` 对齐 GameObject。**单向 Rust→C# 成熟**（change_level 三级、reuse_key 复用）。
-- v1 回写走命令式 FFI 透传（`SetStyle`/`SetText`/`AppendChild`/`Tween`...），一对一对应冻结 OOP API。
+- v1 回写走命令式 FFI 透传（结构操作 `AppendChild`/`Instantiate`、资源 `SetSrc`、动画 `Tween`、文本 `SetText`...）；**Style 属性走 inline override 便签层**（`set_inline_override`/`unset_inline_override`，4a 落地），**不走 `set_style`**——`set_style` 写 `base_style` 污染设计期基线，已退役（见 `unity/package/Runtime/Projection/StyleMirror.cs:17`）。
 - **R2 的增量 = 在 v1 命令式 FFI 上加 OOP 封装 + 攒批回写**，不推翻管线。
 
 ---
@@ -47,7 +47,7 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 
 ### 2.2 攒批编码（Q31）
 
-- **Style 属性**：flush 时把脏属性拼成 CSS 串（`"width:100px;left:20px"`），一次 `set_style` 过桥，Rust `apply_css` parse。**复用 v1 现有字符串 FFI，零改动。** 标记为已知优化点：字符串序列化+parse 往返若 profile 出热点，换二进制 batch FFI（`set_style_props(nodeId, propId[], values[])`，Rust 加绕过 parse 的直写路径）。
+- **Style 属性**：flush 时把脏属性拼成 CSS 串（`"width:100px;left:20px"`），一次 `set_inline_override` 过桥（4a 新建，非 `set_style`），Rust `apply_css` parse 后**写入 inline override 便签层**——下帧 rematch 应用，优先级 > 动态规则 > `base_style`，故不污染设计期基线。撤销走 `unset_inline_override`。**标记为已知优化点**：字符串序列化+parse 往返若 profile 出热点，换二进制 batch FFI（`set_style_props(nodeId, propId[], values[])`，Rust 加绕过 parse 的直写路径）。
 - **Transform**：走**独立数值 FFI `set_transform`（纯 f32：pos/scale/rot/origin）**，不走字符串、不触发 solve。这是必需通路（Transform 非 CSS 属性），非优化。R2 需新增此 FFI。
 
 ### 2.3 C# 镜像 = 稀疏 override 层（Q32）
@@ -109,7 +109,7 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 1. 对象树真身在 Rust 核心（被 Godot/UE 重心 + 薄后端逼出），C# 是 OOP 投影。
 2. 不推翻 v1 FrameBlob/MirrorPool 单向管线，在其上加回写层。
 3. 回写时序混合：结构即时（拿 NodeId）+ 属性攒批（帧末 flush，tick 前）。
-4. Style flush 复用字符串 `set_style`（标记优化点）；Transform 走独立数值 FFI。
+4. Style flush 走 `set_inline_override` 便签层（非 set_style——后者写 base_style 污染设计期基线，4a 退役；标记优化点不变）；Transform 走独立数值 FFI。
 5. C# 镜像 = 稀疏 override 层（只存写过的，读没写过返回 Unset）。
 6. 对象身份稳定：NodeId→Node 强引用缓存，销毁时显式清除。
 7. Style/Transform = class + owner 引用；Geometry = readonly struct blob 快照。

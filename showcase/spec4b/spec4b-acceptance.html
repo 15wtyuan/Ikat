@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Spec-4b Acceptance</title>
+  <style>
+  /* reset：清浏览器 UA 默认（button 灰底/凸起阴影、inline 间隙）。
+     LoomGUI 无 UA 样式表，这些值本就是 default（transparent/none/0），reset 对 LoomGUI 冗余，
+     作用是让浏览器打开此文件时也渲染出 LoomGUI 的去-UA 效果，两边一致便于对比。
+     class 样式（下方）优先级更高，覆盖 reset。 */
+  button { background-color: transparent; border-color: transparent; box-shadow: none; text-align: center; padding: 0; margin: 0; }
+  img { display: block; margin: 0; }
+
+  .root { display:flex; flex-direction:column; width:1280px; height:720px; background-color:#1a1a2e; font-family: LXGWWenKai; }
+  .header { display:flex; flex-direction:row; align-items:center; gap:12px; padding:16px 24px; background-color:#16213e; }
+  .header-title { color:#e0e6ec; font-size:22px; font-weight:700; }
+  .btn-back { color:#8ec5d8; font-size:14px; }
+  .body { display:flex; flex-direction:column; flex-grow:1; padding:24px; gap:16px; }
+  .page-title { color:#e0e6ec; font-size:20px; font-weight:700; }
+  .grid { display:flex; flex-direction:row; flex-wrap:wrap; gap:16px; }
+  .card { display:flex; flex-direction:row; align-items:center; width:300px; background-color:#0f3460; padding:16px; gap:12px; }
+  .card-img { width:48px; height:48px; background-color:#533483; }
+  .card-text { color:#e0e6ec; font-size:15px; flex-grow:1; }
+  .btn-buy { background-color:#e94560; color:#ffffff; font-size:13px; padding:6px 14px; }
+  .card.highlight .card-text { color:#e94560; }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="header">
+      <button class="btn-back" id="btn-back">Back</button>
+      <span class="header-title">Shop</span>
+    </div>
+    <div class="body">
+      <div class="page-title">Products</div>
+      <div class="grid">
+        <div class="card" id="card-1">
+          <img class="card-img" src="res/icons/item-wand.png" alt="item">
+          <span class="card-text">Wand</span>
+          <button class="btn-buy">Buy</button>
+        </div>
+        <div class="card highlight" id="card-2">
+          <img class="card-img" src="res/icons/item-chest.png" alt="item">
+          <span class="card-text">Chest</span>
+          <button class="btn-buy">Buy</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

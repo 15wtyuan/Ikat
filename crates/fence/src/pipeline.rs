@@ -1,6 +1,6 @@
 use crate::annotate::annotate;
 use crate::css_resolve::resolve_inline_styles_with_diags;
-use crate::css_rules::parse_style_block;
+use crate::css_rules::{parse_style_block, KeyframesRule};
 use crate::diagnostic::{Diagnostic, LineMap};
 use crate::fence_gate::run_fence_gate;
 use crate::ir::{IrNodeKind, IrTree};
@@ -15,6 +15,10 @@ pub struct ParsedTemplate {
     pub tree: IrTree,
     pub styles: Vec<ResolvedStyle>,
     pub dynamic_rules: Vec<DynamicRule>,
+    /// @keyframes 规则（对齐 public-api.md「动画全在 CSS」终态契约）。
+    /// 当前 bridge 静默丢弃：pkg.bin 序列化与 runtime 驱动留待 §4 视觉束（v1.10），
+    /// 避免本轮 pkg 版本 bump + dll 重编。fence 接受语法、runtime 不报错——动画不跑。
+    pub keyframes: Vec<KeyframesRule>,
     pub diagnostics: Vec<Diagnostic>,
     pub referenced_sprites: Vec<String>,
 }
@@ -40,9 +44,11 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
     // Stage 4.5: <style> → 动态规则表（CSS cascade 规则，运行时 rematch 消费）。
     // style_texts 由 tree_builder 在 Stage 1 抽出（<style> 元素文本），此处统一解析。
     let mut dynamic_rules = Vec::new();
+    let mut keyframes = Vec::new();
     for css in &style_texts {
-        let (rules, css_diags) = parse_style_block(css);
+        let (rules, kf, css_diags) = parse_style_block(css);
         dynamic_rules.extend(rules);
+        keyframes.extend(kf);
         diagnostics.extend(css_diags);
     }
 
@@ -60,6 +66,7 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
         tree,
         styles,
         dynamic_rules,
+        keyframes,
         diagnostics,
         referenced_sprites,
     }

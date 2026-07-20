@@ -480,7 +480,7 @@ Camera:
   far clip plane: 100
   field of view: 60
   orthographic: 1
-  orthographic size: 960
+  orthographic size: 360
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
@@ -571,7 +571,7 @@ GameObject:
   - component: {fileID: 1806355432}
   - component: {fileID: 1806355435}
   - component: {fileID: 1806355434}
-  - component: {fileID: 1806355433}
+  - component: {fileID: 1806355436}
   m_Layer: 6
   m_Name: LoomGUI
   m_TagString: Untagged
@@ -588,39 +588,12 @@ Transform:
   m_GameObject: {fileID: 1806355431}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -540, y: 960, z: 0}
+  m_LocalPosition: {x: -640, y: 360, z: 0}
   m_LocalScale: {x: 1, y: -1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1806355433
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1806355431}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c87b130ae22184b41bdb5354e3e920c0, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: LoomGUI.Demo::LoomGUI.LoomShowcaseDriver
-  _driver: {fileID: 1806355435}
-  _nativeModel: {fileID: 8097087592796462330, guid: 64e6fe192753e404c83db2bdb60f0fd0, type: 3}
-  _nativeScale: {x: 100, y: 100, z: 100}
-  _characterPrefab: {fileID: 8097087592796462330, guid: 64e6fe192753e404c83db2bdb60f0fd0, type: 3}
-  _effectPrefab: {fileID: 1372040286346358, guid: 53ebac442b16db64f9177d0c749cbb06, type: 3}
-  _characterScale: {x: 70, y: 70}
-  _characterLocalOffset: {x: 0, y: 0}
-  _effectScale: {x: 120, y: 120}
-  _effectLocalOffset: {x: 0, y: 0}
-  _characterAnimator: {fileID: 0}
-  _animStates:
-  - Idle
-  - Walk
-  - Run
-  _characterAnchor: {x: 0.5, y: 1}
 --- !u!114 &1806355434
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -645,11 +618,24 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 807cafc80f771280949bbfadbeb16c63, type: 3}
   m_Name: 
   m_EditorClassIdentifier: LoomGUI.Runtime::LoomGUI.LoomStageDriver
-  _designSize: {x: 1080, y: 1920}
+  _designSize: {x: 1280, y: 720}
   _uiCamera: {fileID: 716283212}
   _showFps: 1
   _safeArea: 1
-  _inputCollector: {fileID: 0}
+  _inputCollector: {fileID: 1806355434}
+  _productRoot: 
+--- !u!114 &1806355436
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1806355431}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4481cc01eff30244482d31496cd5022b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Spec4bAcceptanceRunner
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

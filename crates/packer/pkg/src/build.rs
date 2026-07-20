@@ -11,7 +11,7 @@ use crate::atlas::pack::pack_atlas;
 use crate::bridge::bridge;
 use crate::runtime::{RuntimeFont, RuntimeManifest, RUNTIME_FILE};
 use crate::workspace::{load_workspace, PackageCfg};
-use loomgui_core::asset::{write_package, ControllerEntry, PackageInput, TemplateNode};
+use loomgui_core::asset::{write_package, PackageInput, TemplateNode};
 use loomgui_core::style::dynamic::DynamicRuleTable;
 use std::path::Path;
 
@@ -32,12 +32,7 @@ pub struct BuildReport {
 /// fence diagnostics 非空 → Err（不静默降级）；bridge 多根 → Err（不静默产森林）。
 /// referenced_sprites = 所有组件 img src / background-image 并集（供 atlas 交叉验证）。
 pub fn pack_components(components: &[(String, String)]) -> Result<(Vec<u8>, Vec<String>), String> {
-    let mut built: Vec<(
-        String,
-        Vec<TemplateNode>,
-        DynamicRuleTable,
-        Vec<ControllerEntry>,
-    )> = Vec::new();
+    let mut built: Vec<(String, Vec<TemplateNode>, DynamicRuleTable)> = Vec::new();
     let mut refs: Vec<String> = Vec::new();
     for (name, src) in components {
         let parsed = loomgui_fence::parse_template(src, name);
@@ -48,7 +43,7 @@ pub fn pack_components(components: &[(String, String)]) -> Result<(Vec<u8>, Vec<
             ));
         }
         // bridge 错误带组件名：多组件包里，否则 "多根" 之类错误无法定位是哪个组件。
-        let (nodes, controllers) =
+        let nodes =
             bridge(&parsed).map_err(|e| format!("bridge error in component {name}: {e}"))?;
         built.push((
             name.clone(),
@@ -56,21 +51,20 @@ pub fn pack_components(components: &[(String, String)]) -> Result<(Vec<u8>, Vec<
             DynamicRuleTable {
                 rules: parsed.dynamic_rules,
             },
-            controllers,
         ));
         refs.extend(parsed.referenced_sprites);
     }
     // 同名组件：write_package 不查（返回 Vec<u8> 无 Result），read_package 运行时才
     // DupComponent 拒绝——产物是静默坏包。构建期 fail fast，给最早反馈。
     let mut seen = std::collections::HashSet::new();
-    for (name, _, _, _) in &built {
+    for (name, _, _) in &built {
         if !seen.insert(name.as_str()) {
             return Err(format!("duplicate component name `{name}` in package"));
         }
     }
-    let comp_refs: Vec<(&str, &[TemplateNode], &DynamicRuleTable, &[ControllerEntry])> = built
+    let comp_refs: Vec<(&str, &[TemplateNode], &DynamicRuleTable)> = built
         .iter()
-        .map(|(n, nodes, dr, c)| (n.as_str(), nodes.as_slice(), dr, c.as_slice()))
+        .map(|(n, nodes, dr)| (n.as_str(), nodes.as_slice(), dr))
         .collect();
     let bytes = write_package(&PackageInput {
         components: comp_refs,

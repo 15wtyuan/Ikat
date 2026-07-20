@@ -253,94 +253,19 @@ pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
             return false;
         }
     }
-    // 属性选择器匹配：当前仅 data-controller 存储在 Node 上（字面值匹配）。
-    // data-page 是状态查询，已在 compound_matches_with_state 顶层短路验证，
-    // 此处跳过避免误判为"未知属性"。
-    // 其他属性（节点不携带）→ 不匹配。
-    for a in &c.attrs {
-        if a.name == "data-controller" {
-            let got = node.data_controller.as_deref();
-            match a.op {
-                AttrOp::Exists => {
-                    if got.is_none() {
-                        return false;
-                    }
-                }
-                AttrOp::Eq => {
-                    if got != a.value.as_deref() {
-                        return false;
-                    }
-                }
-            }
-        } else if a.name == "data-page" {
-            // data-page 状态查询已在 compound_matches_with_state 验证，此处跳过。
-            continue;
-        } else {
-            // 其他属性节点不携带字面值 → 此 compound 不匹配。
-            return false;
-        }
+    // 属性选择器：Node 不携带 HTML 属性字面值（data-controller/data-page 随 v1.5 Controller
+    // 全链退役）。任何属性选择器在此层都不匹配。
+    if !c.attrs.is_empty() {
+        return false;
     }
     true
 }
 
-/// 从 node（含自身）向上找最近的带 data_controller 祖先，
-/// 返回 (挂载节点 NodeId, Controller.selected_index)。
-/// 声明了 data_controller 但 registry 无条目（加载未完成/孤儿）→ 该祖先不算，继续向上。
-fn find_governing_controller(start: NodeId, scene: &Scene) -> Option<(NodeId, i32)> {
-    let mut cur = Some(start);
-    while let Some(nid) = cur {
-        if let Some(n) = scene.get(nid) {
-            if n.data_controller.is_some() {
-                if let Some(ctrl) = scene.controllers.get(&nid) {
-                    return Some((nid, ctrl.selected_index));
-                }
-                // data_controller 声明但 registry 无条目 → 跳过，继续向上
-            }
-            cur = n.parent;
-        } else {
-            break;
-        }
-    }
-    None
-}
-
 /// 判定 compound 是否匹配 node + 状态门。
 ///
-/// 状态门分两层：
-/// 1. [data-page] 属性选择器是状态查询（非字面匹配）：使用预计算的 governing
-///    （从最右目标节点查到的最近 data_controller 祖先的 selected_index），
-///    与 CSS 值字面比较。多层 controller 嵌套时内层优先——governing 始终来自
-///    原始目标节点，不在祖先链回溯中重查。
-/// 2. 伪类状态门：hovered / active / disabled / focused。
-///
-/// 两层均通过后才调 compound_matches_node 做字面匹配（tag/classes/id_attr）。
-fn compound_matches_with_state(
-    c: &Compound,
-    node_id: NodeId,
-    scene: &Scene,
-    governing: Option<(NodeId, i32)>,
-) -> bool {
-    // [data-page="N"] 是状态查询，需在伪类/字面匹配前短路判定。
-    // 如果一个 compound 有多个 [data-page] attr，任一不匹配即整体不匹配。
-    for a in &c.attrs {
-        if a.name == "data-page" {
-            // [data-page] 只认 = 运算符；Exists 等形式不匹配。
-            if !matches!(a.op, AttrOp::Eq) {
-                return false;
-            }
-            let want = match &a.value {
-                Some(v) => v.as_str(),
-                None => return false,
-            };
-            let matched = match governing {
-                Some((_, selected)) => selected.to_string() == want,
-                None => false,
-            };
-            if !matched {
-                return false;
-            }
-        }
-    }
+/// 状态门：伪类（hovered / active / disabled / focused）。
+/// 通过后调 compound_matches_node 做字面匹配（tag/classes/id_attr）。
+fn compound_matches_with_state(c: &Compound, node_id: NodeId, scene: &Scene) -> bool {
     // 伪类状态门
     let node = scene.get(node_id).expect("live node");
     if c.pseudo_hover && !node.interaction.flags.contains(NodeFlags::HOVERED) {
@@ -355,31 +280,25 @@ fn compound_matches_with_state(
     if c.pseudo_focus && !node.interaction.flags.contains(NodeFlags::FOCUSED) {
         return false;
     }
-    // data-controller 字面匹配在 compound_matches_node 中处理
     compound_matches_node(c, node)
 }
 
 /// 完整后代链匹配（从右往左，复用 selector.rs `matches` 算法，消费 Node/Scene）。
 /// 最后一个 compound 必须命中目标 node 本身（含状态门）；前面按 combinator 沿
 /// parent 链找（Child=直接父，Descendant=任一祖先，带回溯）。
-///
-/// governing 从 node_id 预计算一次（[data-page] 的最近 data_controller），
-/// 整个链共用——不在祖先回溯时对中间节点重查，保证"最近 controller 治理"语义。
 pub fn match_element_with_state(sel: &ParsedSelector, node_id: NodeId, scene: &Scene) -> bool {
     let comps = &sel.compound;
     if comps.is_empty() {
         return false;
     }
-    // 从目标节点预计算 [data-page] 的 governing controller（整个链共用）
-    let governing = find_governing_controller(node_id, scene);
     let last = &comps[comps.len() - 1];
-    if !compound_matches_with_state(last, node_id, scene, governing) {
+    if !compound_matches_with_state(last, node_id, scene) {
         return false;
     }
     if comps.len() == 1 {
         return true;
     }
-    match_chain_with_state(comps, comps.len() - 1, node_id, scene, governing)
+    match_chain_with_state(comps, comps.len() - 1, node_id, scene)
 }
 
 /// 递归匹配 comps[0..end_idx] 在 start_node 的祖先链上（同 selector.rs
@@ -390,7 +309,6 @@ fn match_chain_with_state(
     end_idx: usize,
     start_node: NodeId,
     scene: &Scene,
-    governing: Option<(NodeId, i32)>,
 ) -> bool {
     if end_idx == 0 {
         return true;
@@ -400,16 +318,16 @@ fn match_chain_with_state(
     match combinator {
         Combinator::Child => match scene.get(start_node).and_then(|n| n.parent) {
             Some(parent) => {
-                compound_matches_with_state(target_comp, parent, scene, governing)
-                    && match_chain_with_state(comps, end_idx - 1, parent, scene, governing)
+                compound_matches_with_state(target_comp, parent, scene)
+                    && match_chain_with_state(comps, end_idx - 1, parent, scene)
             }
             None => false,
         },
         Combinator::Descendant => {
             let mut cur = scene.get(start_node).and_then(|n| n.parent);
             while let Some(ancestor) = cur {
-                if compound_matches_with_state(target_comp, ancestor, scene, governing)
-                    && match_chain_with_state(comps, end_idx - 1, ancestor, scene, governing)
+                if compound_matches_with_state(target_comp, ancestor, scene)
+                    && match_chain_with_state(comps, end_idx - 1, ancestor, scene)
                 {
                     return true;
                 }
@@ -1304,120 +1222,6 @@ mod tests {
         let back: ParsedSelector = bincode::deserialize(&bytes).unwrap();
         assert_eq!(back.compound[0].attrs.len(), 1);
         assert_eq!(back.compound[0].attrs[0].name, "data-page");
-    }
-
-    #[test]
-    fn attr_selector_literal_matches_data_controller() {
-        // node with data_controller="tab" matches [data-controller="tab"]
-        let mut root = Node::default();
-        root.classes = vec!["root".to_string()];
-        root.data_controller = Some("tab".into());
-        let mut s = Scene::from_nodes(vec![root], vec![]);
-        let rid = s.roots[0];
-        s.dynamic_rules
-            .rules
-            .push(rule(r#"[data-controller="tab"]"#, "color", "#0000ff"));
-        rematch_pseudo_classes(&mut s);
-        assert_eq!(s.get(rid).unwrap().style.color, [0.0, 0.0, 1.0, 1.0]);
-    }
-
-    #[test]
-    fn attr_selector_not_match_different_value() {
-        let mut root = Node::default();
-        root.data_controller = Some("tab".into());
-        let mut s = Scene::from_nodes(vec![root], vec![]);
-        let rid = s.roots[0];
-        s.dynamic_rules
-            .rules
-            .push(rule(r#"[data-controller="modal"]"#, "color", "#ff0000"));
-        rematch_pseudo_classes(&mut s);
-        assert_eq!(
-            s.get(rid).unwrap().style.color,
-            [0.0, 0.0, 0.0, 1.0],
-            "different value → no match → base color"
-        );
-    }
-
-    // ── [data-page] state query tests ──
-
-    #[test]
-    fn data_page_matches_governing_controller_page() {
-        // root 挂载 controller "tab"（selected_index=1），子节点 .panel 匹配 [data-page="1"]。
-        let mut root = Node::default();
-        root.data_controller = Some("tab".into());
-        let mut child = Node::default();
-        child.classes = vec!["panel".to_string()];
-        let mut s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
-        let root_id = s.roots[0];
-        let child_id = s.get(root_id).unwrap().children[0];
-        s.set_controller_selected(root_id, 1);
-        s.dynamic_rules
-            .rules
-            .push(rule(r#"[data-page="1"] .panel"#, "color", "#0000ff"));
-        rematch_pseudo_classes(&mut s);
-        assert_eq!(s.get(child_id).unwrap().style.color, [0.0, 0.0, 1.0, 1.0]);
-    }
-
-    #[test]
-    fn data_page_no_match_different_page() {
-        // root 挂载 controller "tab"（selected_index=0），[data-page="1"] 不匹配。
-        let mut root = Node::default();
-        root.data_controller = Some("tab".into());
-        let mut child = Node::default();
-        child.classes = vec!["panel".to_string()];
-        let mut s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
-        let root_id = s.roots[0];
-        let child_id = s.get(root_id).unwrap().children[0];
-        s.set_controller_selected(root_id, 0);
-        s.dynamic_rules
-            .rules
-            .push(rule(r#"[data-page="1"] .panel"#, "color", "#0000ff"));
-        rematch_pseudo_classes(&mut s);
-        assert_eq!(
-            s.get(child_id).unwrap().style.color,
-            [0.0, 0.0, 0.0, 1.0],
-            "selected_index=0 → [data-page=\"1\"] 不匹配 → base color"
-        );
-    }
-
-    #[test]
-    fn nested_controllers_nearest_governs() {
-        // 外层 data-controller="tab"（page 0），内层 data-controller="sub"（page 1）。
-        // 内层子节点匹配 [data-page="1"]（内层 nearest 胜），不匹配 [data-page="0"]。
-        let mut outer = Node::default();
-        outer.data_controller = Some("tab".into());
-        let mut inner = Node::default();
-        inner.data_controller = Some("sub".into());
-        let mut child = Node::default();
-        child.classes = vec!["panel".to_string()];
-        // outer → inner → child
-        let mut s = Scene::from_nodes(vec![outer, inner, child], vec![(0, 1), (1, 2)]);
-        let outer_id = s.roots[0];
-        let inner_id = s.get(outer_id).unwrap().children[0];
-        let child_id = s.get(inner_id).unwrap().children[0];
-        s.set_controller_selected(outer_id, 0);
-        s.set_controller_selected(inner_id, 1);
-        // [data-page="1"] .panel：inner nearest → selected_index=1 → 匹配
-        s.dynamic_rules
-            .rules
-            .push(rule(r#"[data-page="1"] .panel"#, "color", "#0000ff"));
-        rematch_pseudo_classes(&mut s);
-        assert_eq!(
-            s.get(child_id).unwrap().style.color,
-            [0.0, 0.0, 1.0, 1.0],
-            "inner controller page=1 → [data-page=\"1\"] 匹配"
-        );
-        // 换规则：[data-page="0"] .panel：inner nearest → selected_index=1 ≠ 0 → 不匹配
-        s.dynamic_rules.rules.clear();
-        s.dynamic_rules
-            .rules
-            .push(rule(r#"[data-page="0"] .panel"#, "color", "#ff0000"));
-        rematch_pseudo_classes(&mut s);
-        assert_eq!(
-            s.get(child_id).unwrap().style.color,
-            [0.0, 0.0, 0.0, 1.0],
-            "inner controller page=1 → [data-page=\"0\"] 不匹配（nearest wins）"
-        );
     }
 
     // ── transition 请求发射测 ──

@@ -8,7 +8,7 @@ use crate::input::{EventRecord, PointerEvent, PointerState};
 use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
-use crate::scene::node::{ControllerChangedEvent, NodeFlags, NodeId, Rect, Scene};
+use crate::scene::node::{NodeFlags, NodeId, Rect, Scene};
 use crate::style::dynamic::rematch_pseudo_classes;
 use crate::style::resolved::OverflowMode;
 use crate::text::layout::FontTable;
@@ -155,62 +155,6 @@ impl Stage {
         self.scene.as_ref().and_then(|s| s.find_by_id_attr(id))
     }
 
-    /// 在 mount_subtree_root 的子树内找名为 name 的 Controller 挂载点 NodeId。
-    /// driver 先 instantiate 拿到组件根，再 get_controller(root, "tab") 取句柄。
-    /// DFS 遍历子树（含 mount_subtree_root 自身）找首个 data_controller == Some(name) 的节点。
-    /// 返 None = 子树内无 data-controller="name"。无 scene → None。
-    pub fn get_controller(&self, mount_subtree_root: NodeId, name: &str) -> Option<NodeId> {
-        let scene = self.scene.as_ref()?;
-        let mut found = None;
-        let mut stack = vec![mount_subtree_root];
-        while let Some(nid) = stack.pop() {
-            if let Some(n) = scene.get(nid) {
-                if n.data_controller.as_deref() == Some(name) {
-                    found = Some(nid);
-                    break;
-                }
-                stack.extend(n.children.iter().copied());
-            }
-        }
-        found
-    }
-
-    /// 切 Controller 页。无效 mount（无 scene / 节点不存在 / 未挂 data_controller）→ 静默
-    /// 返 -1（不 panic，照 FFI no-panic 约定）。prev != idx 时推一条 ControllerChangedEvent
-    /// 进 pending_controller_events 供 FFI borrow_controller_changed_events pull。
-    pub fn set_selected_index(&mut self, mount: NodeId, idx: i32) -> i32 {
-        let Some(scene) = self.scene.as_mut() else {
-            return -1;
-        };
-        // 校验 mount 确实挂了 controller（data_controller.is_some）——否则静默忽略。
-        if scene
-            .get(mount)
-            .and_then(|n| n.data_controller.as_ref())
-            .is_none()
-        {
-            return -1;
-        }
-        let prev = scene.set_controller_selected(mount, idx);
-        if prev != idx {
-            scene
-                .pending_controller_events
-                .push(ControllerChangedEvent {
-                    mount_node: mount.0,
-                    prev,
-                    new: idx,
-                });
-        }
-        prev
-    }
-
-    /// 读 Controller 当前选中页。无 scene / 无条目 → -1（调用方据 -1 判无 Controller）。
-    pub fn get_selected_index(&self, mount: NodeId) -> i32 {
-        self.scene
-            .as_ref()
-            .and_then(|s| s.controller_selected(mount))
-            .unwrap_or(-1)
-    }
-
     /// UI 挡住时游戏不响应点击。委托 PointerState（任一活跃槽命中非根）。
     pub fn is_pointer_on_ui(&self) -> bool {
         match &self.scene {
@@ -331,45 +275,6 @@ impl Stage {
         let scene = self.scene.as_ref()?;
         scene.get(node)?; // gen 校验（slotmap 代际）；失效 → None
         scene.world_transforms.get(node.index()).copied()
-    }
-
-    /// 查 (world_x, world_y) 落在 RichText 节点哪个链接上 → link_id（0=无/越界/非 RichText）。
-    ///
-    /// pull 模式：Unity Click 命中节点级 AABB 后调本函数细分到 fragment。独立于 hit_test，
-    /// 不改 EventRecord ABI。复用 get_node_world_matrix 的 world_transforms 通路（merge blob
-    /// 吞空 div 但 world_transforms 保留全节点）反变换世界点到节点本地坐标，再扫描该节点的
-    /// rich_fragments（本地坐标矩形）做 rect.contains。
-    pub fn rich_link_at(&self, node: NodeId, world_x: f32, world_y: f32) -> u32 {
-        let scene = match self.scene.as_ref() {
-            Some(s) => s,
-            None => return 0,
-        };
-        // 取节点 world_matrix 反变换到本地坐标（fragment 矩形存本地坐标）。
-        if scene.get(node).is_none() {
-            return 0;
-        }
-        // RichText retired in Spec-2; rich_fragments side table is always empty now.
-        let wm = scene
-            .world_transforms
-            .get(node.index())
-            .copied()
-            .unwrap_or(crate::transform::IDENTITY);
-        let inv = crate::transform::inverse(&wm);
-        let (lx, ly) = crate::transform::apply_point(&inv, world_x, world_y);
-        let frags = match scene
-            .rich_fragments
-            .get(node.index())
-            .and_then(|f| f.as_ref())
-        {
-            Some(f) => f,
-            None => return 0,
-        };
-        for fr in frags {
-            if lx >= fr.x && lx <= fr.x + fr.w && ly >= fr.y && ly <= fr.y + fr.h {
-                return fr.link_id;
-            }
-        }
-        0
     }
 
     /// 读节点 sort_key（assign_sort_keys 在 merge_meshes 前的 DFS 序号快照）。
@@ -559,11 +464,6 @@ impl Stage {
         crate::scene::dynamic::set_src(self.scene.as_mut().ok_or("no scene")?, node, src)
     }
 
-    /// 改 base_style（apply_css）+ 标 dirty_mesh。下帧 rematch 从 base 重算 style。
-    pub fn set_style(&mut self, node: NodeId, css: &str) -> Result<(), String> {
-        crate::scene::dynamic::set_style(self.scene.as_mut().ok_or("no scene")?, node, css)
-    }
-
     /// 写 inline override（便签层，优先级 > 动态规则 > base_style）。node 不 live / 无 scene → Err。
     pub fn set_inline_override(&mut self, node: NodeId, css: &str) -> Result<(), String> {
         crate::scene::dynamic::set_inline_override(
@@ -626,7 +526,7 @@ impl Stage {
     /// 1. 查 `packages[pkg].components[component]`，clone 出 ComponentTemplate（避开 packages/scene 双借）。
     /// 2. 遍历 template.nodes，按 parent_idx 序建 live Node（父先建于子），复用节点构造
     ///    （`create_node_from_template`：kind + baked style → base_style/style 初始 + clip_rect +
-    ///    dirty_text + slotmap insert + id 回填），再填 classes/id_attr/draggable/tabindex/data_controller。
+    ///    dirty_text + slotmap insert + id 回填），再填 classes/id_attr/draggable/tabindex。
     ///    按 parent_idx 串子树（append_child 语义：parent.children.push + child.parent=Some(parent)）。
     ///    根（parent_idx=None）不串父，记录返回。
     /// 3. 伪类规则合并去重：遍历 template.dynamic_rules，相同选择器（ParsedSelector.eq）不重复加进
@@ -663,13 +563,12 @@ impl Stage {
         for (i, tn) in template.nodes.iter().enumerate() {
             let node_id =
                 crate::scene::dynamic::create_node_from_template(scene, tn.kind, tn.style.clone());
-            // 填 classes/id_attr/draggable/tabindex/data_controller（create_node_from_template 不填这些，同 create_node）
+            // 填 classes/id_attr/draggable/tabindex（create_node_from_template 不填这些，同 create_node）
             let n = scene.get_mut(node_id).unwrap();
             n.classes = tn.classes.clone();
             n.id_attr = tn.id_attr.clone();
             n.interaction.draggable = tn.draggable;
             n.interaction.tabindex = tn.tabindex;
-            n.data_controller = tn.data_controller.clone();
             if let Some(c) = &tn.content {
                 scene.text_contents.insert(node_id, c.clone());
             }
@@ -688,15 +587,6 @@ impl Stage {
             }
         }
         let root = root_id.ok_or("component has no root node (parent_idx=None missing)")?;
-
-        // 建 Controller registry：组件内 mount_node_idx → 活 NodeId（经 id_map）。
-        // set_controller_selected 懒注册（无条目时建），此处显式建条目写 initial_selected_index。
-        // 多实例独立：每次 instantiate 各自 id_map → 不同 NodeId → 独立 registry 条目。
-        for c in &template.controllers {
-            if let Some(&Some(mount_live)) = id_map.get(c.mount_node_idx as usize) {
-                scene.set_controller_selected(mount_live, c.initial_selected_index);
-            }
-        }
 
         // 伪类规则合并去重：相同选择器（ParsedSelector PartialEq）不重复加。
         // 规则按 class 匹配，多实例共享同一规则条目；hit_test 返具体 NodeId → 各实例独立命中。
@@ -730,16 +620,6 @@ impl Stage {
         &self.last_events
     }
 
-    /// 本帧 Controller 切页事件（set_selected_index 推入；FFI borrow_controller_changed_events 读）。
-    /// pull 模式：out_len 是 COUNT（非字节）。事件存活至下 tick start 清空——C# 在 tick 后、
-    /// 下 tick 前的窗口内读（同 last_events 语义窗口）。
-    pub fn controller_changed_events(&self) -> &[ControllerChangedEvent] {
-        self.scene
-            .as_ref()
-            .map(|s| s.pending_controller_events.as_slice())
-            .unwrap_or(&[])
-    }
-
     /// 每帧管线（支柱1重排——rematch 提到 solve 前，伪类三类全当帧消费）：
     /// ①tween ②focus_request ③process（仲裁+拖拽写 scroll_pos；hit_test 读上帧 world，1帧延迟已认）
     /// ④scroll update ⑤process_keys ⑥rematch_pseudo_classes（提到 solve 前：改 layout/transform/colors
@@ -761,10 +641,6 @@ impl Stage {
             Some(s) => s,
             None => return FrameData::default(),
         };
-        // 清上帧残留的 Controller 切页事件。事件由 set_selected_index（tick 外 C# 调）推入，
-        // C# 在上 tick 后、本 tick 前的窗口内已 borrow 读走。同 last_events 语义窗口
-        // （last_events 每帧末覆写；pending_controller_events 每帧首清空）。
-        scene.pending_controller_events.clear();
         let mut out: Vec<EventRecord> = Vec::new();
         // tween 推进（写 scene.anim + 产 complete 事件进 out）。须在 solve/compute_world_transforms 前。
         let dt = self.pending_dt;
@@ -826,7 +702,7 @@ impl Stage {
         //    返回新 hash 存 self.prev_node_hashes 供下帧比。
         // build_render_nodes 查 Stage.image_sizes 算九宫格 UV（slice_px / src_px）。
         // Image payload 带 path，UV 全图 (0,0)-(1,1)（无 atlas 子区），Unity 查 Sprite 拿真实 UV。
-        let (frame, new_hashes, sort_keys, rich_fragments) = build_render_nodes(
+        let (frame, new_hashes, sort_keys) = build_render_nodes(
             scene,
             &self.fonts,
             &self.prev_node_hashes,
@@ -835,22 +711,6 @@ impl Stage {
         );
         scene.node_sort_keys = sort_keys;
         self.prev_node_hashes = new_hashes;
-        // 写回 rich_fragments：resize 对齐 slotmap capacity（remove_node 后 idx 不变），
-        // 再按 node_id 索引入表。
-        scene
-            .rich_fragments
-            .resize_with(scene.nodes.capacity() + 1, || None);
-        // 每帧先清空所有 slot，再写入本帧有 fragments 的 slot。
-        // resize_with 只填充新增 slot，已有的 stale slot 不变——若不主动清空，
-        // 上一帧有链接、本帧删了链接的节点会保留 stale fragments，
-        // rich_link_at 读到已删 link_id。
-        scene.rich_fragments.fill(None);
-        for (node_id_u32, frags) in &rich_fragments {
-            let idx = crate::scene::node::NodeId(*node_id_u32).index();
-            if let Some(slot) = scene.rich_fragments.get_mut(idx) {
-                *slot = Some(std::mem::take(&mut frags.clone()));
-            }
-        }
         frame
     }
 

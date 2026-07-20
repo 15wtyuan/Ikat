@@ -2,7 +2,7 @@
 //!
 //! `remove_node`（递归删子 + 联动清 anim/scroll/tween + slotmap remove）+
 //! 动态建树/改树 API：`kind_from_tag` / `apply_css` / `create_node` / `create_root`
-//! / `append_child` / `insert_before` / `remove_child`（摘除不删）/ `set_text` / `set_src` / `set_style`
+//! / `append_child` / `insert_before` / `remove_child`（摘除不删）/ `set_text` / `set_src`
 //! / `set_inline_override` / `unset_inline_override`（便签层 inline override，rematch 最高优先级）。
 //!
 //! **设计要点**（spec §5.3 + §7 + §8）：
@@ -53,15 +53,12 @@ pub fn apply_css(style: &mut ResolvedStyle, css: &str) {
 }
 
 /// slotmap insert 后若 capacity 增长，resize parallel arrays 对齐新容量。
-/// parallel arrays（text_layouts / rich_fragments）按 NodeId.index() 索引，
+/// parallel arrays（text_layouts）按 NodeId.index() 索引，
 /// 必须至少为 capacity+1（1 基索引，idx 0 占位），否则索引越界 panic。
 fn resize_parallel_arrays(scene: &mut Scene) {
     let need = scene.nodes.capacity() + 1;
     if scene.text_layouts.len() < need {
         scene.text_layouts.resize(need, None);
-    }
-    if scene.rich_fragments.len() < need {
-        scene.rich_fragments.resize(need, None);
     }
 }
 
@@ -103,7 +100,6 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
             tabindex: None,
         },
         reuse_key: 0,
-        data_controller: None,
         inline_override: ResolvedStyle::default(),
         inline_set: InlineSet(0),
     };
@@ -167,7 +163,6 @@ pub fn create_node_from_template(
             tabindex: None,
         },
         reuse_key: 0,
-        data_controller: None,
         inline_override: ResolvedStyle::default(),
         inline_set: InlineSet(0),
     };
@@ -228,12 +223,18 @@ pub fn insert_before(
 
 /// 摘子：从 parent.children 移除 child + child.parent = None。
 /// 与 remove_node 不同——节点不删（slotmap 槽保留，NodeId 仍 live），可再挂到别处。
+///
+/// **直系子校验**：child 的真实 parent 必须是传入的 parent，否则 Err。
+/// 原实现无校验——`retain` 对非直系子无效（child 不在 parent.children）但仍清 child.parent，
+/// 误断 child 与其真实 parent 的关系。调用方应先调 `append_child`/`insert_before` 摘除再挂。
 pub fn remove_child(scene: &mut Scene, parent: NodeId, child: NodeId) -> Result<(), String> {
+    let actual_parent = scene.get(child).and_then(|c| c.parent);
+    if actual_parent != Some(parent) {
+        return Err("remove_child: child is not a direct child of parent".into());
+    }
     let p = scene.get_mut(parent).ok_or("parent not live")?;
     p.children.retain(|&c| c != child);
-    if let Some(c) = scene.get_mut(child) {
-        c.parent = None;
-    }
+    scene.get_mut(child).unwrap().parent = None;
     Ok(())
 }
 
@@ -258,15 +259,6 @@ pub fn set_src(scene: &mut Scene, node: NodeId, src: &str) -> Result<(), String>
     }
     scene.image_srcs.insert(node, src.into());
     scene.get_mut(node).unwrap().dirty_mesh = true;
-    Ok(())
-}
-
-/// 改 base_style（apply_css）+ 标 dirty_mesh。
-/// 下帧 rematch_pseudo_classes 从 base_style 起算重算 style。
-pub fn set_style(scene: &mut Scene, node: NodeId, css: &str) -> Result<(), String> {
-    let n = scene.get_mut(node).ok_or("node not live")?;
-    apply_css(&mut n.base_style, css);
-    n.dirty_mesh = true;
     Ok(())
 }
 
@@ -399,12 +391,11 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
     // 3. 联动清持久附属 map（HashMap remove + tween kill），防悬空残留。
     scene.anim.clear_node(id);
     scene.scroll.remove(id);
-    scene.controllers.remove(&id);
     scene.text_contents.remove(&id);
     scene.image_srcs.remove(&id);
     tweens.kill_node(id);
-    // pending_controller_events / pending_transitions 不清：每帧首由 Stage drain/clear
-    // （stage.rs），瞬态，非持久泄漏；消费方对悬空 NodeId 有 None-check 兜底。
+    // pending_transitions 不清：每帧首由 Stage drain/clear（stage.rs），瞬态，非持久泄漏；
+    // 消费方对悬空 NodeId 有 None-check 兜底。
     // 3b. focused_node 联动清：删焦点节点后 focused_node 不应悬空（否则 FOCUS_OUT 带 stale node_id）。
     //     全局单一焦点，== Some(id) 检查对每个被删节点都做（递归删子时若子是焦点同样清）。
     if scene.focused_node == Some(id) {
@@ -435,7 +426,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
-            Option<String>,
+            Option<String>, // data_controller
             Option<String>,
             Option<String>,
         )> = vec![
@@ -589,41 +580,6 @@ mod tests {
     }
 
     #[test]
-    fn remove_node_clears_controller_mount() {
-        let (mut scene, _root, child, _grand) = build_3level();
-        let mut tweens = TweenManager::new();
-        // child 懒注册成 controller 挂载点（set_controller_selected 建条目）
-        assert_eq!(
-            scene.set_controller_selected(child, 2),
-            -1,
-            "新建条目 prev=-1"
-        );
-        assert!(
-            scene.controllers.contains_key(&child),
-            "前置：controller 已注册"
-        );
-        remove_node(&mut scene, &mut tweens, child);
-        assert!(
-            !scene.controllers.contains_key(&child),
-            "remove_node 必须清 controller 挂载条目（原持久泄漏）"
-        );
-    }
-
-    #[test]
-    fn remove_node_recurses_clears_descendant_controller() {
-        let (mut scene, root, child, _grand) = build_3level();
-        let mut tweens = TweenManager::new();
-        // child 挂 controller；删 root 应递归把 child 的 controller 条目也清掉
-        assert_eq!(scene.set_controller_selected(child, 1), -1);
-        assert!(scene.controllers.contains_key(&child));
-        remove_node(&mut scene, &mut tweens, root);
-        assert!(
-            !scene.controllers.contains_key(&child),
-            "递归删子时子树的 controller 条目也须清"
-        );
-    }
-
-    #[test]
     fn remove_node_from_middle_clears_subtree_and_keeps_siblings() {
         // root → [a, b, c]；删 b → a/c 保留，b 子树（b → bchild）递归删。
         let entries: Vec<(
@@ -634,7 +590,7 @@ mod tests {
             Option<String>,
             bool,
             Option<i32>,
-            Option<String>,
+            Option<String>, // data_controller
             Option<String>,
             Option<String>,
         )> = vec![
@@ -1024,6 +980,34 @@ mod tests {
     }
 
     #[test]
+    fn remove_child_rejects_non_direct_child() {
+        // 直系子校验：b 的真实 parent 是 root，remove_child(a, b) 应 Err，
+        // 且不动 b.parent / a.children / root.children（防误断真实父子关系）。
+        let mut scene = empty_scene();
+        let root = create_root(&mut scene, "div", "").unwrap();
+        let a = create_node(&mut scene, "div", "").unwrap();
+        let b = create_node(&mut scene, "div", "").unwrap();
+        append_child(&mut scene, root, a).unwrap();
+        append_child(&mut scene, root, b).unwrap();
+        // b 的 parent 是 root，不是 a → remove_child(a, b) 应 Err。
+        let err = remove_child(&mut scene, a, b);
+        assert!(err.is_err(), "remove_child on non-direct child must error");
+        assert_eq!(
+            scene.get(b).unwrap().parent,
+            Some(root),
+            "b.parent must stay root"
+        );
+        assert!(
+            !scene.get(a).unwrap().children.contains(&b),
+            "a.children unchanged"
+        );
+        assert!(
+            scene.get(root).unwrap().children.contains(&b),
+            "root.children still has b"
+        );
+    }
+
+    #[test]
     fn set_text_changes_content_and_marks_dirty() {
         let mut scene = empty_scene();
         let t = create_node(&mut scene, "span", "").unwrap();
@@ -1065,17 +1049,6 @@ mod tests {
     }
 
     #[test]
-    fn set_style_changes_base_style_marks_dirty() {
-        let mut scene = empty_scene();
-        let n = create_node(&mut scene, "div", "").unwrap();
-        scene.get_mut(n).unwrap().dirty_mesh = false;
-        set_style(&mut scene, n, "background-color:#ff0000").unwrap();
-        let bg = scene.get(n).unwrap().base_style.background_color;
-        assert_eq!(bg, Some([1.0, 0.0, 0.0, 1.0]));
-        assert!(scene.get(n).unwrap().dirty_mesh, "set_style 标 dirty_mesh");
-    }
-
-    #[test]
     fn create_node_id_is_live_via_get() {
         // slotmap insert 返回的 NodeId 经 from_key 转换，Scene::get 能查到（to_key roundtrip）
         let mut scene = empty_scene();
@@ -1099,7 +1072,7 @@ mod tests {
 
     #[test]
     fn create_node_resizes_parallel_arrays_on_slotmap_expansion() {
-        // 动态 create_node 后 parallel arrays (text_layouts / rich_fragments)
+        // 动态 create_node 后 parallel arrays (text_layouts)
         // 必须对齐 slotmap capacity，否则后续按 NodeId.index() 访问会越界 panic。
         let mut scene = empty_scene();
         // 创建大量节点确保触发 slotmap 容量增长（初始 capacity 较小）。
@@ -1113,12 +1086,6 @@ mod tests {
                 id.index(),
                 scene.text_layouts.len()
             );
-            assert!(
-                id.index() < scene.rich_fragments.len(),
-                "rich_fragments must cover node index {} (len {})",
-                id.index(),
-                scene.rich_fragments.len()
-            );
             ids.push(id);
         }
         // 最终 arrays 至少为 capacity+1（1 基索引，idx 0 占位）
@@ -1127,12 +1094,6 @@ mod tests {
             scene.text_layouts.len() > cap,
             "text_layouts len {} > capacity {}",
             scene.text_layouts.len(),
-            cap
-        );
-        assert!(
-            scene.rich_fragments.len() > cap,
-            "rich_fragments len {} > capacity {}",
-            scene.rich_fragments.len(),
             cap
         );
     }
@@ -1152,15 +1113,8 @@ mod tests {
                 id.index(),
                 scene.text_layouts.len()
             );
-            assert!(
-                id.index() < scene.rich_fragments.len(),
-                "rich_fragments must cover node index {} (len {})",
-                id.index(),
-                scene.rich_fragments.len()
-            );
         }
         let cap = scene.nodes.capacity();
         assert!(scene.text_layouts.len() > cap);
-        assert!(scene.rich_fragments.len() > cap);
     }
 }

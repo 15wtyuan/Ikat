@@ -133,7 +133,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 ### v1.8+ 独立打包器 + 自绘图集 + 工作区重构
 
-v1.8 起工作流脱离 Unity 编辑器依赖。工作区 = 独立磁盘目录（`loom.workspace.json`），打包器 = 自绘（CLI `loom-pkg build` + GUI `loomgui_gui`），图集 = Rust 自绘（etagere shelf pack → `atlas/*.png` + `atlas/*.atlas.json`），运行时引导 = `loom.runtime.json`。pkg.bin 格式当前 v16（真相源 `crates/core/src/asset/mod.rs` `PKG_FORMAT_VERSION`）。完整设计见 `docs/superpowers/specs/2026-07-10-standalone-packer-atlas-workspace-design.md`。
+v1.8 起工作流脱离 Unity 编辑器依赖。工作区 = 独立磁盘目录（`loom.workspace.json`），打包器 = 自绘（CLI `loom-pkg build` + GUI `loomgui_gui`），图集 = Rust 自绘（etagere shelf pack → `atlas/*.png` + `atlas/*.atlas.json`），运行时引导 = `loom.runtime.json`。pkg.bin 格式当前 v19（真相源 `crates/core/src/asset/mod.rs` `PKG_FORMAT_VERSION`；v16→v17 Spec-2 / v17→v18 Spec-3 ② / v18→v19 Spec-4b Controller schema drop）。完整设计见 `docs/superpowers/specs/2026-07-10-standalone-packer-atlas-workspace-design.md`。
 
 移除的 Unity Editor 脚本：`LoomSettingsWindow`、`LoomAtlasSync`、`LoomConfigExporter`、`LoomWorkspaceInitializer` 等。仅保留 `LoomOpenPacker.cs`（MenuItem 启动 Tauri GUI）。
 
@@ -146,9 +146,15 @@ v1.8 起工作流脱离 Unity 编辑器依赖。工作区 = 独立磁盘目录�
 - `dump_render` — 渲染节点（rect、bg、UV）
 - `dump_sw` / `dump_bg` — 节点 base_style（验是否进 pkg）
 - `dump_nativehost_slot` — NativeHost FFI 查询
-- `dump_controller` — v1.5 Controller（旧范式，R5 后退役）
+- `spec4b_dump` — Spec-4b 验收用：dump 全节点 layout_rect + img src + text metrics + glyph probe（验 core solve 跟 PlayMode 一致，定位 layout bug 在 core 还是 Unity 后端）
 
 **跨层特性 PlayMode 报错**先 example 实测 core 状态再改，避免盲改物理掩盖 layout 根因。
+
+**core dump 复现 Unity solve**：PlayMode layout/视觉 bug 先编码机用 `spec4b_dump` / 对应 dump_*.rs example 喂同样的 pkg.bin 复现 core solve，定位 bug 在 core（dump 错）还是 Unity 后端（dump 对、渲染错）。core 和 Unity 是同一份 solve 的两面，dump 取证再改，别静态猜反复试。
+
+**围栏真相源 = `crates/fence/src/schema/` Rust const 表，`docs/design/fence.md` 是人类可读权威副本**：围栏最终形态 = schema 注册表（30 标签 + CSS 子集 + `@keyframes`/`animation` 终态），fence.md 是它的可读镜像（改 schema 必同步 fence.md，防漂移门 `cargo test -p loomgui_fence`）。roadmap 决策「终点线2 scope 用哪些」（如 `:nth-child` / 多 selector / @keyframes runtime 驱动 留 §4 视觉束）。代码往围栏最终形态靠，围栏外的 showcase bug 跟围栏最终形态（showcase 整体打包挂留专门 task）。
+
+**GUI exe 绑 fence crate**：fence 改动后必须重编 GUI exe（`loomgui_gui.exe` 静态链入 fence），否则 GUI stale 误报围栏外（pkg bump 时也触发，坑 158 同源）。打包器 exe 闭环见上方「GUI 打包器 exe 闭环」段。
 
 **SDD per-task review 是代码质量门，不是集成正确性门**：单测验不了 CSS 语义集成（display 子树剪枝、继承传播、多 spec 解析）——SDD 后必跑 showcase PlayMode 逐项过。
 
