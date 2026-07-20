@@ -78,7 +78,9 @@ Custom elements with a hyphen (e.g. `<my-widget>`) are recognized as CustomEleme
 
 | type | Object type |
 |---|---|
-| `text` (default), `password`, `search` | TextField |
+| `text` (default) | TextField |
+| `password` | PasswordField |
+| `search` | SearchField |
 | `number` | NumberField |
 | `range` | Slider |
 | `checkbox` | Toggle |

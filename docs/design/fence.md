@@ -105,7 +105,9 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `a` | Link |
 | `img` | Image |
 | `canvas` | Canvas |
-| `input[type=text]`（含 `password`、`search`，默认） | TextField |
+| `input[type=text]`（默认） | TextField |
+| `input[type=password]` | PasswordField |
+| `input[type=search]` | SearchField |
 | `input[type=number]` | NumberField |
 | `input[type=range]` | Slider |
 | `input[type=checkbox]` | Toggle |
@@ -308,7 +310,7 @@ CSS 在围栏中以三个正交维度建模：
 
 ### 阶段 4.5：`<style>` 块解析
 
-- 解析 `<style>` 标签的文本内容为 `DynamicRule` 选择器规则表（class/tag/id/后代/子代/伪类 + specificity）。
+- 解析 `<style>` 标签的文本内容为 `DynamicRule` 选择器规则表（class/tag/id/后代空格/属性选择器/伪类 + specificity）。
 - 解析 `@keyframes` at-rule 为 `KeyframesRule` 表（`from`/`to`/`N%` stop 选择器）。
 - 产出存入 `ParsedTemplate.dynamic_rules` + `ParsedTemplate.keyframes`。
 - 其他 at-rule（`@media` 等）丢弃 + 诊断。

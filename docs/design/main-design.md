@@ -100,7 +100,7 @@
 | 关联文本 | `label` | `Label` |
 | 操作 | `button/a` | `Button/Link` |
 | 图片与绘制 | `img/canvas` | `Image/Canvas` |
-| 输入 | `input[type]` | `TextField/NumberField/Slider/Toggle/RadioButton` |
+| 输入 | `input[type]` | `TextField/PasswordField/SearchField/NumberField/Slider/Toggle/RadioButton` |
 | 输入 | `textarea/select/option` | `TextArea/Dropdown/OptionItem` |
 | 列表 | `ul/ol/li` | `ListView/ListItem` |
 | 模板 | `template` | 惰性 `UITemplate`，不进入实时树 |
@@ -118,7 +118,9 @@
 - `<p>` → `TextBlock`；`<span>` / `<strong>` / `<em>` → `TextElement`
 - `<button>` → `Button`；`<a>` → `Link`；`<label>` → `Label`
 - `<img>` → `Image`；`<canvas>` → `Canvas`；`<br>` → `LineBreak`
-- `<input type="text/password/search">` → `TextField`
+- `<input type="text">` → `TextField`（默认 type）
+- `<input type="password">` → `PasswordField`
+- `<input type="search">` → `SearchField`
 - `<input type="number">` → `NumberField`
 - `<input type="range">` → `Slider`
 - `<input type="checkbox">` → `Toggle`；`<input type="radio">` → `RadioButton`
@@ -171,7 +173,7 @@ Node
 │   ├── Label / Button / Link / Canvas
 │   └── ListView（ul/ol）/ ListItem（li）
 ├── TextNode / Image / ProgressBar
-├── TextField / NumberField / Slider / Toggle / RadioButton
+├── TextField / PasswordField / SearchField / NumberField / Slider / Toggle / RadioButton
 ├── TextArea / Dropdown
 ├── LineBreak（br）/ OptionItem（option）/ Slot / CustomElement
 ```
@@ -281,7 +283,9 @@ HTML 属性提供初始值；C# 属性表示实时状态。用户输入和代码
 |---|---|---|
 | `button` | `Button` | `Disabled`, `Clicked` |
 | `a[href]` | `Link` | `Href`, `Activated` |
-| `input[type=text/password/search]` | `TextField` | `Value`, `Placeholder`, `ReadOnly`, `ValueChanged`, `Submitted` |
+| `input[type=text]` | `TextField` | `Value`, `Placeholder`, `ReadOnly`, `ValueChanged`, `Submitted` |
+| `input[type=password]` | `PasswordField` | `Value`, `Placeholder`, `ReadOnly`, `ValueChanged`, `Submitted` |
+| `input[type=search]` | `SearchField` | `Value`, `Placeholder`, `ReadOnly`, `ValueChanged`, `Submitted` |
 | `input[type=number]` | `NumberField` | `Value`, `Min`, `Max`, `Step`, `Disabled`, `ValueChanged` |
 | `input[type=range]` | `Slider` | `Value`, `Min`, `Max`, `Step`, `Disabled`, `ValueChanged`, `ChangeCommitted` |
 | `input[type=checkbox]` | `Toggle` | `IsChecked`, `Disabled`, `CheckedChanged` |

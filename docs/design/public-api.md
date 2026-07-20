@@ -51,7 +51,7 @@ Node
 |   +-- Label / Button / Link / Canvas
 |   +-- ListView（ul/ol）/ ListItem（li）
 +-- TextNode / Image                          （叶子：内容/绘制）
-+-- TextField / NumberField / Slider          （叶子：私有内部结构）
++-- TextField / PasswordField / SearchField / NumberField / Slider  （叶子：私有内部结构）
 +-- Toggle / RadioButton / TextArea / Dropdown / ProgressBar
 ```
 
@@ -293,7 +293,9 @@ Node node = ui.Pick(globalPoint);   // 命中测试：返回该点最上层可�
 |---|---|---|
 | button | Button : Container | Disabled, Clicked（文本走 Container.TextContent） |
 | a | Link : Container | Href（仅存字符串，不自动导航）, Activated |
-| input[text/password/search] | TextField : Node | Value, Placeholder, Selection, ReadOnly, Disabled, ValueChanged, Submitted |
+| input[text] | TextField : Node | Value, Placeholder, Selection, ReadOnly, Disabled, ValueChanged, Submitted |
+| input[password] | PasswordField : Node | Value, Placeholder, Selection, ReadOnly, Disabled, ValueChanged, Submitted |
+| input[search] | SearchField : Node | Value, Placeholder, Selection, ReadOnly, Disabled, ValueChanged, Submitted |
 | input[number] | NumberField : Node | Value, Min, Max, Step（float）, Disabled, ValueChanged |
 | input[range] | Slider : Node | Value, Min, Max, Step（float）, Disabled, ValueChanged, ChangeCommitted |
 | input[checkbox] | Toggle : Node | IsChecked, Disabled, CheckedChanged |
