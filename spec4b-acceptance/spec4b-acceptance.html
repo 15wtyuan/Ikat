@@ -4,7 +4,14 @@
   <meta charset="utf-8">
   <title>Spec-4b Acceptance</title>
   <style>
-  .root { display:flex; flex-direction:column; width:1280px; height:720px; background-color:#1a1a2e; }
+  /* reset：清浏览器 UA 默认（button 灰底/凸起阴影、inline 间隙）。
+     LoomGUI 无 UA 样式表，这些值本就是 default（transparent/none/0），reset 对 LoomGUI 冗余，
+     作用是让浏览器打开此文件时也渲染出 LoomGUI 的去-UA 效果，两边一致便于对比。
+     class 样式（下方）优先级更高，覆盖 reset。 */
+  button { background-color: transparent; border-color: transparent; box-shadow: none; text-align: center; padding: 0; margin: 0; }
+  img { display: block; margin: 0; }
+
+  .root { display:flex; flex-direction:column; width:1280px; height:720px; background-color:#1a1a2e; font-family: LXGWWenKai; }
   .header { display:flex; flex-direction:row; align-items:center; gap:12px; padding:16px 24px; background-color:#16213e; }
   .header-title { color:#e0e6ec; font-size:22px; font-weight:700; }
   .btn-back { color:#8ec5d8; font-size:14px; }
@@ -25,7 +32,7 @@
       <span class="header-title">Shop</span>
     </div>
     <div class="body">
-      <p class="page-title">Products</p>
+      <div class="page-title">Products</div>
       <div class="grid">
         <div class="card" id="card-1">
           <img class="card-img" src="res/icons/item-wand.png" alt="item">
