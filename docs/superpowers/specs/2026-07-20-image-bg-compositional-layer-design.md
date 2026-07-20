@@ -1,3 +1,5 @@
+> **⚠️ SUPERSEDED (2026-07-20):** The back-layer mechanism for image-bg described below was abandoned as YAGNI after a shader read revealed `BG_COMPOSITE` (program 2/4) already does source-over compositing (`tex over vcol`) for Container — Image just wasn't using it. The actual fix is ~5 lines (Image → BG_COMPOSITE when bg-color present), **not** a synthetic-id back-layer. Container is already correct (shader composites). Only the rename portion (`BOX_SHADOW_FLAG` → `BACK_LAYER_FLAG`, by semantics) survived. See `docs/superpowers/plans/2026-07-20-image-bg-color-via-bg-composite.md`.
+
 # image-bg 合成层机制（back-layer）设计
 
 > 2026-07-20。摸黑结束（Spec-4b）后 §4 视觉束第一个 tech-debt。
