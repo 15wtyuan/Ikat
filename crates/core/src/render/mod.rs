@@ -280,6 +280,11 @@ pub fn build_render_nodes(
         if pruned.contains(&n.id) {
             continue;
         }
+        // 纯空白 TextNode（HTML tag 间换行+缩进）不画——layout 已过滤，layout_rect 为
+        // 默认 0×0，但 content 非空（"\n    "）仍可能产 0 尺寸 mesh，跳过更干净。
+        if crate::scene::node::is_whitespace_only_text(scene, n.id) {
+            continue;
+        }
         let anim = scene.anim.get(n.id);
         let wm = scene
             .world_transforms

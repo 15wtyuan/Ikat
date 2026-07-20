@@ -531,6 +531,28 @@ impl Scene {
     }
 }
 
+/// 纯空白 TextNode 判定（HTML 元素源码里 tag 之间的换行+缩进）。
+///
+/// HTML 标准行为：block/flex 容器子节点间的纯空白应折叠，不成 box/item。
+/// inline 间有意空格（如 `"A B"`）保留——那种 text 含非空白字符，不被此过滤误伤。
+/// 用于 layout（不进 taffy 树）+ render（不画），避免空白 text 撑开 flex 父容器
+/// 主轴或挤压兄弟 flex item。
+pub fn is_whitespace_only_text(scene: &Scene, id: NodeId) -> bool {
+    let node = match scene.nodes.get(id.to_key()) {
+        Some(n) => n,
+        None => return false,
+    };
+    if !matches!(node.kind, NodeKind::TextNode) {
+        return false;
+    }
+    match scene.text_contents.get(&id) {
+        // 空串（""）不算空白 text——空串本身就是 0 尺寸，不会撑开。
+        // 只过滤含至少一个字符且全是空白的（"\n    "）。
+        Some(c) if !c.is_empty() => c.chars().all(char::is_whitespace),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests;
 

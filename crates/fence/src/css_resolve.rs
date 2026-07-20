@@ -1,9 +1,9 @@
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::ir::{IrNodeKind, IrTree};
 use crate::schema::css::{find_css_prop, find_shorthand, CssValueParser};
-use crate::schema::tag::{find_tag, DisplayDefault};
+use crate::schema::tag::{find_tag, DisplayDefault, SemanticKind};
 use loomgui_core::style::mapping::apply_decl;
-use loomgui_core::style::resolved::{DisplayMode, ResolvedStyle};
+use loomgui_core::style::resolved::{DisplayMode, ResolvedStyle, TextAlign};
 
 /// Resolve inline styles for all nodes in the tree.
 ///
@@ -46,6 +46,18 @@ pub fn resolve_inline_styles_with_diags(
                 }
                 DisplayDefault::None => {
                     styles[idx].display_mode = DisplayMode::None;
+                }
+            }
+            // UA 样式表等价：button 默认 text-align: center（浏览器 UA 行为）。
+            // LoomGUI 无 UA 样式表概念——直接在 tag default 处硬编码。运行时
+            // propagate_inherited 会把此值继承给 text 子节点（"Buy" 等居中）。
+            // 同时 set INH_TEXT_ALIGN bit，把 UA 默认视为"显式声明"——防
+            // propagate_inherited 用父（卡片/列表项）的 text-align 覆盖 button。
+            // 用户显式 text-align 声明仍走 inline apply_decl 分支覆盖（CSS 级联）。
+            if spec.semantic == SemanticKind::Button {
+                styles[idx].text_align = TextAlign::Center;
+                if let Some(bit) = loomgui_core::style::dynamic::inherited_bit("text-align") {
+                    styles[idx].inherited_set.0 |= bit;
                 }
             }
         }
@@ -218,6 +230,56 @@ mod tests {
             styles[id.0].inherited_set.0 & fs_bit,
             fs_bit,
             "inline font-size must set inherited_set FONT_SIZE bit"
+        );
+    }
+
+    /// 浏览器 UA 样式表：button 默认 text-align: center（继承到 text 子节点）。
+    /// LoomGUI 无 UA 样式表概念——按 tag semantic 直接设默认。
+    /// 修前根因：button 元素 text-align=Left（无 UA 表，回落 ResolvedStyle::default Left）
+    /// → text 子节点继承 Left → "Buy" 字不居中。
+    #[test]
+    fn button_default_text_align_is_center() {
+        let (tree, _) = parse_html_to_ir(r#"<button>Buy</button>"#);
+        let styles = resolve_for_test(&tree);
+        let id = tree.roots[0];
+        assert_eq!(
+            styles[id.0].text_align,
+            loomgui_core::style::resolved::TextAlign::Center,
+            "button UA 默认 text-align: center"
+        );
+        // UA 默认视为"显式声明"，set INH_TEXT_ALIGN bit——防 propagate_inherited
+        // 把父（卡片/列表项等）的 text-align 覆盖到 button。
+        let ta_bit = loomgui_core::style::dynamic::inherited_bit("text-align").unwrap();
+        assert_eq!(
+            styles[id.0].inherited_set.0 & ta_bit,
+            ta_bit,
+            "button UA text-align 必须置 INH_TEXT_ALIGN bit 防 propagate 覆盖"
+        );
+    }
+
+    /// 用户显式声明 text-align 覆盖 button UA default（CSS 级联优先级）。
+    #[test]
+    fn explicit_text_align_overrides_button_default() {
+        let (tree, _) = parse_html_to_ir(r#"<button style="text-align:left">Buy</button>"#);
+        let styles = resolve_for_test(&tree);
+        let id = tree.roots[0];
+        assert_eq!(
+            styles[id.0].text_align,
+            loomgui_core::style::resolved::TextAlign::Left,
+            "显式 text-align:left 覆盖 button UA center"
+        );
+    }
+
+    /// 非 button 元素 text-align 保持 default Left（不应被误改）。
+    #[test]
+    fn non_button_keeps_default_text_align() {
+        let (tree, _) = parse_html_to_ir(r#"<div>hi</div>"#);
+        let styles = resolve_for_test(&tree);
+        let id = tree.roots[0];
+        assert_eq!(
+            styles[id.0].text_align,
+            loomgui_core::style::resolved::TextAlign::Left,
+            "div UA 无 text-align 默认（保持 Left）"
         );
     }
 }

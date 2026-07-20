@@ -24,7 +24,7 @@
 //! （运行时纹理/UV 归 Unity）。solve 接 `image_sizes: &HashMap<String,(u32,u32)>` 查 Image intrinsic
 //! 尺寸（三档：CSS > 真实像素 > 64×64）。render payload 带 path，UV 全图 (0,0)-(1,1)。
 
-use crate::scene::node::{NodeId, NodeKind, Rect, Scene};
+use crate::scene::node::{is_whitespace_only_text, NodeId, NodeKind, Rect, Scene};
 use crate::style::resolved::{OverflowMode, TextAlign};
 use crate::text::layout::{measure_text, FontTable, TextLayout};
 use std::collections::HashMap;
@@ -188,9 +188,13 @@ pub fn solve(
             _ => None,
         };
         // 递归子节点（先建子，再建父以便 new_with_children）。
+        // 过滤纯空白 TextNode（HTML tag 间换行+缩进）——它们不应成 flex item 撑开父容器
+        // 主轴或挤压兄弟（HTML 标准空白折叠行为）。被过滤的节点 taffy_ids[id.index()]
+        // 保持 None，write_back 跳过、layout_rect 保持默认 0。
         let children_ids: Vec<taffy::NodeId> = node
             .children
             .iter()
+            .filter(|c| !is_whitespace_only_text(scene, **c))
             .map(|c| build(scene, tree, taffy_ids, *c, self_overflow, image_sizes))
             .collect();
 
@@ -373,7 +377,12 @@ pub fn solve(
         id: NodeId,
         parent_origin: (f32, f32),
     ) {
-        let tid = taffy_ids[id.index()].unwrap();
+        // 被过滤的节点（纯空白 TextNode）：taffy_ids 槽为 None，layout_rect 保持默认 0。
+        // 早返，跳过 solve 结果回写——但递归子节点（无，TextNode 是叶子），安全。
+        let tid = match taffy_ids[id.index()] {
+            Some(tid) => tid,
+            None => return,
+        };
         let layout = tree.layout(tid).unwrap();
         let x = parent_origin.0 + layout.location.x;
         let y = parent_origin.1 + layout.location.y;
@@ -687,6 +696,121 @@ mod tests {
             (r.w - 120.0).abs() < 0.1,
             "w 等比=120（60×40/20，2:1 真实 aspect），got {}",
             r.w
+        );
+    }
+
+    /// 纯空白 TextNode（HTML 元素间的换行+缩进）不应成 flex item 撑开父容器。
+    ///
+    /// HTML 标准行为：block/flex 容器子节点间的纯空白应折叠，不成 box/item。
+    /// 修前根因：layout::build 把空白 TextNode 当 flex item，每个占一行行高
+    /// （line-height 撑高）→ 后续兄弟节点被推下去 + flex-shrink:1 把它当
+    /// shrinkable 内容压缩 → 卡片 img 被压成 19×48（应 48×48）。
+    /// 修后：空白 TextNode 不进 taffy 树，layout_rect 保持默认 0。
+    #[test]
+    fn whitespace_only_text_does_not_open_flex_item() {
+        // 建模：flex column 容器 > [空白 TextNode, Button]。
+        // 期望：Button.y == 0（空白 text 不撑开父容器主轴）。
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::TextNode,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                Some("\n    ".into()),
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Button,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (300.0, 300.0), &empty_sizes());
+        let children = &scene.get(scene.roots[0]).unwrap().children;
+        // TextNode 在 children[0]，Button 在 children[1]。
+        let ws_id = children[0];
+        let btn_id = children[1];
+        let ws = scene.get(ws_id).unwrap();
+        let btn = scene.get(btn_id).unwrap();
+        // 空白 text 不应占主轴空间——layout_rect.h 应保持默认 0。
+        assert!(
+            ws.layout_rect.h.abs() < 0.1,
+            "空白 TextNode h 应 0（不撑开），got {}",
+            ws.layout_rect.h
+        );
+        // Button 应顶在 y=0（不被空白 text 推下去）。
+        assert!(
+            btn.layout_rect.y.abs() < 0.1,
+            "Button y 应 0（空白 text 不撑开），got {}",
+            btn.layout_rect.y
+        );
+    }
+
+    /// 含非空白字符的 TextNode 不被过滤（防误伤 inline 间的有意空格）。
+    #[test]
+    fn non_whitespace_text_keeps_layout_space() {
+        // "Buy" 含字母 → 正常占 flex item 空间。
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::TextNode,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                Some("Buy".into()),
+                None,
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (300.0, 300.0), &empty_sizes());
+        let text_id = scene.get(scene.roots[0]).unwrap().children[0];
+        let r = scene.get(text_id).unwrap().layout_rect;
+        assert!(
+            r.w > 1.0 && r.h > 1.0,
+            "非空白 text 应正常测出尺寸，got w={} h={}",
+            r.w,
+            r.h
         );
     }
 }
