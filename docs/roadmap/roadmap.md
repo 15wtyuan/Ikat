@@ -180,9 +180,11 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 
 ⚠️ **两个可能在终点线2 就爆、而非"以后"的雷**（红队 I4）：
 1. **Transform 债**：Transform（Position/Scale/Rotation）是公共 API。从 C# `SetStyle("transform:...")` 字符串走 cascade 每帧重应用，表达不了公共 `Transform` API 隐含的逐帧动画值。
-2. **@keyframes 根本没进解析器 scope**：home.html 的入场动画是 CSS `@keyframes`+`animation`。而 §2 的选择器 scope 只列了 class/tag/id/后代/伪类，**没有 @keyframes/animation 解析**。所以 home 的动画**在终点线2 可能压根不跑**，与 transform 债无关。
+2. ~~**@keyframes 根本没进解析器 scope**~~（**已解**，commit 见下方）：home.html 的入场动画是 CSS `@keyframes`+`animation`，原 §2 的选择器 scope 不含。**fence 已加 `@keyframes` at-rule + `animation` 属性 DSL**（对齐 public-api.md「动画定义全在 CSS」终态）；runtime 驱动（keyframes 表序列化 + tween 发射）仍留 §4 视觉束 v1.10——本轮 fence 接受语法、bridge 静默丢弃、runtime 收到 animation 声明不报错不跑动画。pkg.bin 格式不变（避免版本 bump + dll 重编），keyframes 序列化随 §4 一同落地。
 
 **决策**：终点线2 的验收页要么**选一个不含 @keyframes/transform 动画的 showcase 页**当门（推荐，把动画留到 §4 视觉束/控件束），要么把 @keyframes/animation 解析 + set_transform 提前拉进 S/③/④ scope。不要让"transform 债留以后"和"home 当 demo"硬撞。
+
+**P3.4c 落地**（@keyframes DSL）：`@keyframes` at-rule + `animation` CssPropSpec（parser Animation）入 fence crate。keyframes 规则在 ParsedTemplate.keyframes 暴露；packer bridge 当前静默丢弃（不序列化进 pkg.bin）；css_resolve 给 `SemanticKind::Button` 加默认 `justify-content/align-items: center`（修 Buy 字不居中 bug——core dump 实证 text.x=269 居中 btn-buy.x+w/2=280）。runtime 驱动（@keyframes 表 + tween 发射）留 §4 视觉束。
 
 ---
 
@@ -208,7 +210,7 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 
 | 功能 | 旧编号 | 归属 |
 |---|---|---|
-| 动画增强（@keyframes/ease/iteration） | v1.10 | 三束后 |
+| 动画 runtime 驱动（@keyframes 表 + tween 发射/ease/iteration） | v1.10 | 三束后（fence DSL 已提前进 P3.4c，跟 public-api 终态；只欠 runtime） |
 | 离屏 RT 基础设施 | v1.14 | 渲染层工作，与 API 范式无关 |
 | 高级滤镜 + BlendMode（12 种） | v1.15 | 视觉束延伸 |
 | 几何扩展 | v1.16 | 三束后 |

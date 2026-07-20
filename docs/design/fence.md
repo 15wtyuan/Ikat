@@ -214,6 +214,12 @@ CSS 在围栏中以三个正交维度建模：
 
 `color`（继承）, `font-size`（继承）, `font-family`（继承）, `font-weight`（继承）, `text-align`（继承）, `line-height`（继承）, `letter-spacing`（继承）, `white-space`（继承）, `text-shadow`（继承）, `-webkit-text-stroke`（继承）, `font-effect`（继承，LoomGUI 私有扩展）, `transition`
 
+**动画**
+
+`animation`——`<name> <duration> [easing] [iteration-count|infinite] [fill-mode] [direction] [play-state] [delay]` 简写。对齐 public-api.md「动画定义全在 CSS」终态契约：fence 接受语法 + 校验拼写错误，runtime 驱动（@keyframes 表查询 + tween 发射）在 §4 视觉束（v1.10）实现；本轮收到合法 `animation` 声明的节点静默不跑动画（不报错）。
+
+`@keyframes <name> { <stop> { decls } ... }` at-rule——`<style>` 内定义命名关键帧。stop 选择器子集：`from` / `to` / `<N>%`（0..=100 整数）；逗号多 stop（`0%,100%{...}`）按 CSS 语义展开为多条 stop（共享同声明块）。其他 at-rule（`@media` / `@font-face` 等）不在围栏子集，整块丢弃 + 诊断。
+
 **溢出**
 
 `overflow-x`, `overflow-y`
@@ -237,6 +243,7 @@ CSS 在围栏中以三个正交维度建模：
 | `BoxShadow` | `ox oy [blur] [spread] color` |
 | `TextShadow` | `ox oy [blur] color` |
 | `Transition` | `property duration easing` |
+| `Animation` | `<name> <duration> [easing/count/fill/direction/play-state/delay]` 简写——结构校验，runtime 驱动 §4 视觉束实现 |
 | `Gradient2` | `linear-gradient(to dir, hex, hex)` |
 | `TextEffect` | `glow(w color)` / `blur(w)` |
 | `TextStroke` | `width color` |

@@ -1,6 +1,6 @@
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::ir::{IrNodeKind, IrTree};
-use crate::schema::css::{find_css_prop, find_shorthand, CssValueParser};
+use crate::schema::css::{find_css_prop, find_shorthand, validate_animation_value, CssValueParser};
 use crate::schema::tag::{find_tag, DisplayDefault, SemanticKind};
 use loomgui_core::style::mapping::apply_decl;
 use loomgui_core::style::resolved::{DisplayMode, ResolvedStyle, TextAlign};
@@ -59,6 +59,14 @@ pub fn resolve_inline_styles_with_diags(
                 if let Some(bit) = loomgui_core::style::dynamic::inherited_bit("text-align") {
                     styles[idx].inherited_set.0 |= bit;
                 }
+                // UA 容器居中：button 默认 justify-content + align-items = center（CSS 浏览器 UA
+                // 行为：button content 居中）。Bug B（commit 3916a1c）只修 text-align center（
+                // text *内部* 居中），但 button 作为 flex 容器在缺省 justify/align=flex-start/stretch
+                // 时，text 子作为 flex item 仍从 padding-left 起——core dump 实证 text.x=266 而非
+                // 居中 268.5。justify-content/align-items 非继承属性 → 无 INH bit，仅本节点生效，
+                // 运行时 rematch 从 base_style 重起，UA 默认每帧稳定。
+                styles[idx].taffy_style.justify_content = Some(taffy::JustifyContent::Center);
+                styles[idx].taffy_style.align_items = Some(taffy::AlignItems::Center);
             }
         }
 
@@ -87,18 +95,36 @@ pub fn resolve_inline_styles_with_diags(
 
                 // Validate keyword values against schema
                 if let Some(spec) = find_css_prop(prop) {
-                    if let CssValueParser::Keyword(allowed) = &spec.parser {
-                        if !allowed.contains(&value) {
-                            diagnostics.push(Diagnostic::error(
-                                DiagnosticCode::FenceBadCssValue,
-                                format!(
-                                    "value \"{}\" is not valid for CSS property \"{}\"",
-                                    value, prop
-                                ),
-                                line_map.source_location(node.span.start, file.to_string()),
-                            ));
-                            continue;
+                    match &spec.parser {
+                        CssValueParser::Keyword(allowed) => {
+                            if !allowed.contains(&value) {
+                                diagnostics.push(Diagnostic::error(
+                                    DiagnosticCode::FenceBadCssValue,
+                                    format!(
+                                        "value \"{}\" is not valid for CSS property \"{}\"",
+                                        value, prop
+                                    ),
+                                    line_map.source_location(node.span.start, file.to_string()),
+                                ));
+                                continue;
+                            }
                         }
+                        CssValueParser::Animation => {
+                            // animation 简写语法校验（捕捉拼写错误）。runtime 驱动留 §4 视觉束，
+                            // 本轮不存值——apply_decl 不识别 "animation"，跳过避免误报 FenceBadCssValue。
+                            if !validate_animation_value(value) {
+                                diagnostics.push(Diagnostic::error(
+                                    DiagnosticCode::FenceBadCssValue,
+                                    format!(
+                                        "value \"{}\" is not valid for CSS property \"{}\"",
+                                        value, prop
+                                    ),
+                                    line_map.source_location(node.span.start, file.to_string()),
+                                ));
+                            }
+                            continue; // 校验过即可，不调 apply_decl（runtime 不存 animation）
+                        }
+                        _ => {}
                     }
                 }
 
@@ -280,6 +306,85 @@ mod tests {
             styles[id.0].text_align,
             loomgui_core::style::resolved::TextAlign::Left,
             "div UA 无 text-align 默认（保持 Left）"
+        );
+    }
+
+    /// Bug 续修：button UA 容器居中（justify-content + align-items = center）。
+    /// Bug B（commit 3916a1c）只修 text-align center（text 内部居中），未修容器居中，
+    /// text 子作为 flex item 从 padding-left 起——core dump 实证 text.x=266 应 268.5。
+    /// 非继承属性 → 无 INH bit，仅本节点生效，但每帧 rematch 从 base_style 重起，稳定。
+    #[test]
+    fn button_default_flex_centering() {
+        let (tree, _) = parse_html_to_ir(r#"<button>Buy</button>"#);
+        let styles = resolve_for_test(&tree);
+        let id = tree.roots[0];
+        assert_eq!(
+            styles[id.0].taffy_style.justify_content,
+            Some(taffy::JustifyContent::Center),
+            "button UA justify-content: center"
+        );
+        assert_eq!(
+            styles[id.0].taffy_style.align_items,
+            Some(taffy::AlignItems::Center),
+            "button UA align-items: center"
+        );
+    }
+
+    /// 用户显式 justify/align 覆盖 button UA center（CSS 级联优先级）。
+    #[test]
+    fn explicit_justify_align_overrides_button_default() {
+        let (tree, _) = parse_html_to_ir(
+            r#"<button style="justify-content:flex-start; align-items:flex-end">x</button>"#,
+        );
+        let styles = resolve_for_test(&tree);
+        let id = tree.roots[0];
+        assert_eq!(
+            styles[id.0].taffy_style.justify_content,
+            Some(taffy::JustifyContent::FlexStart),
+            "显式 justify-content 覆盖 button UA center"
+        );
+        assert_eq!(
+            styles[id.0].taffy_style.align_items,
+            Some(taffy::AlignItems::FlexEnd),
+            "显式 align-items 覆盖 button UA center"
+        );
+    }
+
+    /// 非 button 元素不沾 button UA center（防误改）。
+    #[test]
+    fn non_button_keeps_default_justify_align() {
+        let (tree, _) = parse_html_to_ir(r#"<div>hi</div>"#);
+        let styles = resolve_for_test(&tree);
+        let id = tree.roots[0];
+        assert_ne!(
+            styles[id.0].taffy_style.justify_content,
+            Some(taffy::JustifyContent::Center),
+            "div 不沾 button UA center"
+        );
+    }
+
+    /// animation 行内声明：合法值不报诊断（语法校验通过，apply_decl 不存）。
+    /// runtime §4 没实现 → fence 接受语法 + 静默不跑动画。
+    #[test]
+    fn inline_animation_valid_no_diagnostic() {
+        let (tree, _) = parse_html_to_ir(r#"<div style="animation:fadeIn .4s both"></div>"#);
+        let (_styles, diags) =
+            resolve_inline_styles_with_diags(&tree, "test.html", &LineMap::new(""));
+        assert!(diags.is_empty(), "合法 animation 值不应报诊断: {diags:?}");
+    }
+
+    /// animation 行内声明：非法值报诊断（语法错误非静默）。
+    #[test]
+    fn inline_animation_invalid_reports_diagnostic() {
+        let (tree, _) = parse_html_to_ir(r#"<div style="animation:bogusKeyword"></div>"#);
+        let (_styles, diags) =
+            resolve_inline_styles_with_diags(&tree, "test.html", &LineMap::new(""));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::FenceBadCssValue
+                    && d.message.contains("animation")),
+            "非法 animation 值应报 FenceBadCssValue: {diags:?}"
         );
     }
 }
