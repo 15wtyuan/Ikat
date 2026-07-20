@@ -479,38 +479,6 @@ pub fn build_render_nodes(
                 }
             }
             NodeKind::Image => {
-                // background-color 先画一层纯色底（HTML img 语义：图标 texture 叠在
-                // bg-color 上，透明像素透出底色）。无 bg-color（transparent）则跳过。
-                let bg_color = anim
-                    .and_then(|a| a.bg_color)
-                    .unwrap_or(n.style.background_color.unwrap_or([0.0, 0.0, 0.0, 0.0]));
-                if bg_color[3] > 0.0 {
-                    let (bv, buc, bcol, bidx) =
-                        crate::render::mesh::quad(rect, bg_color, [0.0, 1.0], [1.0, 0.0]);
-                    nodes.push(RenderNode {
-                        node_id,
-                        parent_id,
-                        visible: true,
-                        alpha,
-                        color_tint,
-                        world_matrix: wm,
-                        blend: BlendMode::Normal,
-                        mask_context: MaskContext(0),
-                        sort_key: 0,
-                        change_level: ChangeLevel::Full,
-                        reuse_key: n.reuse_key,
-                        effect: EffectBlock::default(),
-                        payload: NodePayload::Mesh {
-                            verts: bv,
-                            uvs: buc,
-                            colors: bcol,
-                            indices: bidx,
-                            image_path: None,
-                            program: 0,
-                            color_matrix,
-                        },
-                    });
-                }
                 let src = scene.image_srcs.get(&n.id).cloned().unwrap_or_default();
                 let image_path = Some(src.clone());
                 let uv_min = [0.0, 0.0];
