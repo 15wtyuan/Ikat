@@ -5,3 +5,9 @@
 body { margin: 0; padding: 0; }
 h1,h2,h3,h4,h5,h6,p,ul,ol,li,div { margin: 0; padding: 0; }
 ul,ol { list-style: none; }
+/* Form elements: strip UA padding/border/font so browser matches LoomGUI (no UA
+   stylesheet). Showcase CSS then applies its own button/input styles on top. */
+button,input,select,textarea {
+  margin: 0; padding: 0; border: 0; background: none;
+  font: inherit; color: inherit; text-align: inherit;
+}
