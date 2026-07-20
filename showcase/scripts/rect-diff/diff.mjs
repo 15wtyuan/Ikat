@@ -20,7 +20,8 @@
 // Usage: node diff.mjs <browser.json> <core.json> [--tol-box=N] [--tol-text=N]
 //   --tol-box  (default 1) rect tolerance for non-text elements
 //   --tol-text (default 3) rect tolerance for span / #text (font-metric drift)
-// Exit code: 1 if any diff / unmatched / idless-unpaired, else 0.
+// Exit code: 1 if any diff / unmatched, else 0 (idless-unpaired is informational —
+// core's implicit root + component wrappers always appear core-side only).
 
 import { readFileSync } from 'fs';
 
