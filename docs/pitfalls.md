@@ -1200,4 +1200,26 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：✅ `tree_builder` skip `push_text` when `text.trim().is_empty()` AND `current_parent().is_none()`（顶层 ws-only 不 push；in-element whitespace 仍保留，保 HTML mixed-content 语义）。回归测试 `top_level_whitespace_not_orphan_root` 双向验证（顶层 ws 不成 root + in-element ws Text 保留）。commit 09ec1b8。
 **教训**：HTML 解析器 whitespace 处理——顶层 formatting whitespace（元素间 `\n  `）是 artifact，不该成节点。"单根契约 + 不处理 whitespace" 叠加 = 多行 HTML 全拒。解析层源头清顶层 whitespace（如 tree_builder），别在下游（bridge）打补丁。
 
+### 坑 163：HTML 元素间空白 TextNode 撑开布局（Spec-4b P3.4 视觉）
+
+**症状**：spec4b 验收页 card-1/card-2 内 `img + span + button` 之间间距过大、文字被挤压；core dump（spec4b_dump.rs）显示 card 子树多了若干 0-宽 / 微-宽 TextNode flex item。
+
+**根因**：HTML 源码 `<div class="card">\n  <img ...>\n  <span>Wand</span>\n  <button>Buy</button>\n</div>`——元素间换行+缩进被 fence `tree_builder` 建成真实 TextNode（in-element whitespace 要保留以符 HTML mixed-content 语义，坑 162 同源但反向），但 layout 把它**当 flex item**——`display:flex` 容器每个 child（含 TextNode）都是 flex item，空白 TextNode 撑开间距 / 占 flex-grow / 挤压兄弟。
+
+**解决**：✅ layout build filter（flex 容器构造子项时跳过 ws-only TextNode）+ render skip（render tree 不产 render node）+ write_back 早返（不回写 layout rect）。commit `3916a1c`（P3.4b）。CSS 规范 `white-space:normal` 下 inline layout 会折叠空白，flex 容器更严——核心须主动跳过 ws-only TextNode，避免每个元素间空白都成 flex item。对照 RmlUi/UITK 的 whitespace handling：flex/block 容器对 ws-only TextNode 的处理是「layout 不计入」。
+
+**教训**：HTML mixed-content 语义要求保留 in-element whitespace（坑 162 反向），但**布局层**不能把 ws-only TextNode 当 flex item——flex/block 容器构造子项时跳过 ws-only TextNode，否则元素间换行+缩进成撑开间距的元凶。诊断：core dump（spec4b_dump.rs）看子树节点列表+rect，空白 TextNode 有 layout rect 就是 bug。fence 层（保留 ws）和 layout 层（跳过 ws）分工，别在 fence 层删（破坏 mixed-content）。
+
+### 坑 164：driver Awake 漏 create_root → PlayMode Instantiate 失败（Spec-4b P2.6）
+
+**症状**：Spec-4b P2 重写 LoomStageDriver 走 LoomHost + UIContext 后，PlayMode 一进就报 `[Spec4b] Instantiate 失败` 或 `NullReferenceException`，headless 测试全绿看不出问题。
+
+**根因**：P2 把 LoomStageDriver 拆成「LoomHost 持 stage + ctx + backend」+「driver 只做 Unity 生命周期 + 资源 IO」，driver Awake 序列漏调 `ctx.CreateRoot()` / `LoomHost.CreateRoot()`（显式建根节点，4a UIContext 投影层没自动建根），`Instantiate(pkg, template)` 把模板挂到空 root 时 parent 句柄无效 → Instantiate 失败。
+
+**根因深一层**：headless 测试走 UIContext 路径自带 root（fixture 预建），driver Awake 路径只有 PlayMode 跑——headless 测不到 driver Awake 编排层是否完整调用 LoomHost lifecycle。
+
+**解决**：✅ driver Awake 序列补 `host.CreateRoot()` 或 `ctx.CreateRoot()`（具体 API 以 P2 LoomHost 实际为准）——Instantiate 前先建 root，再 `ctx.LoadPackage` + `Instantiate` 挂到 root 下。commit `9495c88`（P2.6 LoomStage 退役 commit 一并修）。
+
+**教训**：Unity driver 编排层（Awake/Start/Update 序列）**headless 测不到**——headless 只测 UIContext 投影层（fixture 自带 root），driver Awake 是否完整调 LoomHost lifecycle 必须真机 PlayMode 验。诊断：PlayMode 一进就 Instantiate 失败 / NRE → 先查 driver Awake 是否漏建 root（或 stage 没 new），别先怀疑 UIContext 投影层（headless 已锁）。改 driver Awake/Start 序列必跑 PlayMode 真机。
+
 

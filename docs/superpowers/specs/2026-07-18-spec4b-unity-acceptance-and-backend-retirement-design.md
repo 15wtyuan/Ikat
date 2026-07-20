@@ -97,7 +97,7 @@ Controller（`data-controller`/`data-page`，v1.5 停止）新表层干净（Pub
   1. `backend.CollectInput(stage)` → set_input（Unity: InputCollector）
   2. （UIContext flush 脏属性——最小通关用 4a 即时过桥 seam，setter 立即调 `set_inline_override`；升级攒批时此处加帧末 `Flush()` 在 tick 前）
   3. `loomgui_stage_tick` FFI
-  4. `borrow_frame` FFI → `backend.SyncFrame(frameBlob)`（Unity: MirrorPool 镜像）
+  4. `borrow_frame` FFI → `backend.SyncFrame(stage, framePtr, frameLen)`（Unity: MirrorPool 镜像；stage 透传以便 backend 需要时复用）
   5. `borrow_events` FFI → `EventDemuxer.Pump` → EventBus（typed `On<T>` 路由）
 - **资源 FFI**（引擎中立，放这）：`RegisterFont(family, bytes, isDefault)` / `SetImageSizes(paths, ws, hs)` / `SetFallbackFamilies`。byte[] 引擎中立，FFI 调用在 LoomHost。
 - **Dispose**：`loomgui_stage_free` + 递归清理。
@@ -111,8 +111,8 @@ Controller（`data-controller`/`data-page`，v1.5 停止）新表层干净（Pub
 public abstract class LoomBackend {
     // 采集引擎输入（Unity: InputCollector）+ 调 set_input FFI（FFI 引擎中立，backend 可调）。
     public abstract void CollectInput(IntPtr stage);
-    // 消费 borrow_frame 的 blob 做镜像渲染——不调 borrow FFI（LoomHost 已 borrow，把 ptr+len 传进来）。
-    public abstract void SyncFrame(IntPtr framePtr, int frameLen);
+    // 消费 borrow_frame 的 blob 做镜像渲染——不调 borrow FFI（LoomHost 已 borrow，把 stage + ptr + len 传进来）。
+    public abstract void SyncFrame(IntPtr stage, IntPtr framePtr, int frameLen);
     // 资源 byte[] 由 Driver 读、LoomHost 调 FFI；backend 只负责引擎特定的资源对象（如 Texture2D 上传）。
 }
 ```
@@ -230,8 +230,8 @@ P1/P2 是纯重构（不改行为），编码机本机可验；P3 才需搬家�
 - **`docs/design/projection-layer.md:35,50`**：flush 描述还说"一次 `set_style` 过桥，Rust `apply_css` parse"+"复用 v1 现有字符串 FFI 零改动"。与 4a 实际矛盾——`StyleMirror.cs:17` 已严禁 set_style，走 `set_inline_override` 便签层。改为 inline override 层需 core 新建（4a 已落地），set_style 写 base_style 不胜任。
 - **`docs/roadmap/roadmap.md:48`**：stale dll 描述（"`loomgui_stage_load_html`/`set_rich_text` 已删源码、dll 里还在"）已与现实不符——bindings 已双侧删。改为"`LoomStage.cs:545` HEAD stale caller，working tree 已修"或直接删该段。
 - **`crates/ffi/src/lib.rs:305`**：doc 注释 `\ ControllerChangedEvent` 应为 `///`（随 Controller 删顺带没了）。
-- **`docs/design/main-design.md`**：若有"LoomStage"作为集成层门面的措辞，降级为 LoomHost/LoomStageDriver（§3 落地后改）。
-- **roadmap**：4b 完成后更新进度 + 记录 deferred ①②已修 / ③仍推后。
+- **`docs/design/main-design.md`**：✅ §17 跨引擎扩展段已补 LoomHost/LoomBackend/UnityLoomBackend 分层图 + LoomStage 退役说明（Spec-4b P3.5 落地）。
+- **roadmap**：✅ 4b 完成后 §2 终点线2 DONE + §8 决策记录 + §4 tech-debt 段；deferred ①②已修 / ③仍推后 / card-img bg 机制 tech-debt 留。
 
 ---
 
