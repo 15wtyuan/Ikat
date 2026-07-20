@@ -1,6 +1,6 @@
 # LoomGUI C# 投影层契约
 
-> **定位**：公共 API（[public-api.md](public-api.md)）的实现机制契约。跨 R2-R7 有效——不是用过即丢的 spec，是实现层的长期不变量。
+> **定位**：公共 API（[public-api.md](public-api.md)）的实现机制契约。跨摸黑+三束有效——不是用过即丢的 spec，是实现层的长期不变量。
 >
 > **一句话**：对象树真身在 Rust 核心，C# 语义对象是它的 OOP 投影（裹 NodeId 的遥控器 + 攒批回写 + 稀疏镜像）。不推翻 v1 的 FrameBlob/MirrorPool 单向渲染管线，在其上加回写层。
 
@@ -33,7 +33,7 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 
 - v1 渲染路径已是「真身 Rust + 薄后端 + 每帧一次 SOA blob 过桥」：`stage.Tick(dt)` → `build_blob` → C# `FrameBlob` 读 21 列 SOA → `MirrorPool` 对齐 GameObject。**单向 Rust→C# 成熟**（change_level 三级、reuse_key 复用）。
 - v1 回写走命令式 FFI 透传（结构操作 `AppendChild`/`Instantiate`、资源 `SetSrc`、动画 `Tween`、文本 `SetText`...）；**Style 属性走 inline override 便签层**（`set_inline_override`/`unset_inline_override`，4a 落地），**不走 `set_style`**——`set_style` 写 `base_style` 污染设计期基线，已退役（见 `unity/package/Runtime/Projection/StyleMirror.cs:17`）。
-- **R2 的增量 = 在 v1 命令式 FFI 上加 OOP 封装 + 攒批回写**，不推翻管线。
+- **投影层的增量 = 在 v1 命令式 FFI 上加 OOP 封装 + 攒批回写**，不推翻管线。
 
 ---
 
@@ -42,13 +42,13 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 ### 2.1 回写时序 = 混合（Q30）
 
 - **结构操作即时过桥**：`AddChild`/`InsertChild`/`RemoveChild`/`Instantiate`/`Dispose`。必须即时——要立刻拿到 Rust 分配的 NodeId 建立 C#↔Rust 映射；且低频，即时无所谓。
-- **属性写攒批**：`Style.X = v` / `Transform.X = v` / `TextContent` / `Src` 只改 C# 镜像 + 标脏，帧末一次性 flush。高频（拖拽/动画/批量改样式），攒批把 N 次过桥压成每帧每脏节点一次。
-- **flush 时机**：`LateUpdate` 里 `stage.Tick(dt)` **之前**——先 flush 脏属性 → tick（solve）→ borrow_frame 读回。与 tick 时序契合。
+- **属性写攒批**：`Style.X = v` / `Transform.X = v` / `TextContent` / `Src` 只改 C# 镜像 + 标脏，帧末一次性 flush。高频（拖拽/动画/批量改样式），攒批把 N 次过桥压成每帧每脏节点一次。> 当前（4a）实现为**即时过桥**——StyleMirror setter 直接调 `set_inline_override` FFI，无攒批。升级攒批只改 setter 调用时机（标脏替代即时 FFI），不推翻镜像结构。Transform 尚未接入（`set_transform` FFI 待加）。
+- **flush 时机**：在 `LoomHost.Step(dt)` 中 tick **之前**——先 flush 脏属性 → tick（solve）→ borrow_frame 读回。与 tick 时序契合。
 
 ### 2.2 攒批编码（Q31）
 
 - **Style 属性**：flush 时把脏属性拼成 CSS 串（`"width:100px;left:20px"`），一次 `set_inline_override` 过桥（4a 新建，非 `set_style`），Rust `apply_css` parse 后**写入 inline override 便签层**——下帧 rematch 应用，优先级 > 动态规则 > `base_style`，故不污染设计期基线。撤销走 `unset_inline_override`。**标记为已知优化点**：字符串序列化+parse 往返若 profile 出热点，换二进制 batch FFI（`set_style_props(nodeId, propId[], values[])`，Rust 加绕过 parse 的直写路径）。
-- **Transform**：走**独立数值 FFI `set_transform`（纯 f32：pos/scale/rot/origin）**，不走字符串、不触发 solve。这是必需通路（Transform 非 CSS 属性），非优化。R2 需新增此 FFI。
+- **Transform**：走**独立数值 FFI `set_transform`（纯 f32：pos/scale/rot/origin）**，不走字符串、不触发 solve。这是必需通路（Transform 非 CSS 属性），非优化。> **4a 现状**：`set_transform` FFI 尚未实现（roadmap defer：第一个高频控件触发时加上）。当前 C# `NodeTransform` setter 为 `NotImplementedException` 壳。
 
 ### 2.3 C# 镜像 = 稀疏 override 层（Q32）
 
@@ -81,16 +81,23 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 
 ---
 
-## 3. R2 FFI / 实现待办
+## 3. 实现状态
 
-投影层落地需要的核心/FFI 改动（非公共签名）：
+投影层落地进度（4a 已完成核心通路，4b/后续补完）：
 
-1. **新增 `set_transform` FFI**（纯 f32：pos/scale/rot/origin，不触发 solve）——§2.2。
-2. **补「撤销单个 inline 属性、回落 CSS」的 FFI 能力**（对应 Style `Unset` 撤销）——新 FFI 或 `set_style` 扩展，实现时定——§2.3。
-3. **NodeId→Node 缓存 + 生命周期**（销毁清缓存 + IsDisposed）——§2.4。
-4. **帧末 flush 管线**：脏节点集 → 拼 CSS → `set_style`（+ `set_transform`），在 `LateUpdate` tick 之前 flush——§2.1/2.2。
-5. **Geometry 从 blob 填充**：确认 LayoutRect 是否进 blob，否则走 `get_node_layout_rect`——§2.5。
-6. **标记优化点**：字符串 flush 若成热点换二进制 batch FFI——§2.2。
+### 3.1 已完成（4a 落地）
+
+1. **`set_inline_override` / `unset_inline_override` FFI** ✅ — core 便签层折进 rematch 单 set_map，C# StyleMirror 即时过桥。撤销走 `unset_inline_override`（Rust FFI 已就绪，C# `Unset()` 待暴露）。
+2. **NodeId→Node 缓存 + 生命周期** ✅ — `NodeRegistry` Dictionary\<uint,Node\> + `Dispose` 清缓存 + `IsDisposed` 守卫。
+3. **Geometry 直读 FFI** ✅ — `get_node_layout_rect` / `get_node_world_matrix` 即时 FFI（blob 缓存推后，YAGNI）。
+4. **即时过桥 seam** ✅ — StyleMirror setter 即时调 `set_inline_override`，`LoomHost.Step()` 中 flush 位在 tick 前。
+
+### 3.2 待办（按优先级）
+
+1. **`set_transform` FFI**（纯 f32：pos/scale/rot/origin，不触发 solve）——§2.2。路标：第一个高频控件（拖拽/动画每帧改 Transform）触发时加上。
+2. **C# `Unset()` 暴露**（对应 Style `Unset` 撤销，回落 CSS）——Rust `unset_inline_override` FFI 已就绪，C# StyleMirror 尚未暴露。
+3. **攒批 flush 升级**：当前即时过桥每 setter 一次 FFI。升级路径：StyleMirror setter 标脏替代即时 FFI → 帧末 flush 拼 CSS 一次 `set_inline_override`。镜像结构不变。
+4. **标记优化点**：字符串 flush 若成热点换二进制 batch FFI（`set_style_props(nodeId, propId[], values[])`，Rust 加绕过 parse 的直写路径）——§2.2。
 
 ## 4. 对冻结签名的影响
 

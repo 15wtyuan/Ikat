@@ -39,7 +39,7 @@ cargo test -p loomgui_fence                              # ← 围栏契约门
 # (snapshot 测试已移至 fence crate)
 ```
 
-**基准测试**：`cargo bench -p loomgui_core`（criterion，`frame_emit`）。
+**基准测试**：暂无 `[[bench]]` 目标（criterion 待后续配置）。
 
 **CI 门禁**（`.github/workflows/rust-ci.yml`，push main / PR 触发）：fmt 严（`cargo fmt --all -- --check`）+ clippy 严（`cargo clippy --all-targets -- -D warnings`）+ Win/Ubuntu matrix test + feature-gate check（`--no-default-features --all-targets`）+ Windows `.dll` artifact（release build）。**push 前本地跑 `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`**，否则 CI 红。clippy 各 crate root 有 `#![allow]` 放行可辩护的测试/FFI 模式 lint（`field_reassign_with_default` / `not_unsafe_ptr_arg_deref` / `too_many_arguments` 等，带理由注释），勿误清——新增可辩护模式 lint 在那里加。
 
@@ -70,9 +70,9 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 ## 架构（大局——权威契约读 `docs/design/main-design.md`）
 
-> **当前状态**：R 系列 API 范式重构进行中。下方同时列出**新范式（目标）**和**旧范式（当前代码）**的架构不变量。重构阶段以新范式为准；触碰尚未重构的旧代码时以旧范式为准。
+> **当前状态**：摸黑结束（Spec-4b DONE），进入三束加宽阶段。下方同时列出**新范式（目标）**和**旧范式（v1 残留）**的架构不变量。以新范式为准；触碰尚未重构的旧代码时以旧范式为准。
 
-### 新范式（R 系列目标——权威读 main-design.md）
+### 新范式（目标——权威读 main-design.md）
 
 **分层、单向数据流、引擎对象不进核心：**
 ```
@@ -100,26 +100,24 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 - **坐标系**：核心 = 左上原点、y 向下。y-flip 是后端根一次性变换。
 - **公共语义树与内部渲染树可以不同**：文本在公共层是正常 HTML 子树（TextNode/TextElement/Link），内部扁平化为 runs。
 
-### 旧范式（当前 v1 代码——R 系列重构中）
+### 旧范式（v1 残留——摸黑+三束重构中逐步消除）
 
-> 以下不变量描述的是**尚未重构的当前代码**。当前目标就是要转化这些旧范式到新范式中，碰到下面的代码，请提醒用户重构或者清理。
+> 以下不变量描述的是**尚未完全重构的当前代码**。碰到下面的代码，提醒用户重构或清理。
 
-- **`<div>` 永远是 flex 容器**（默认 `flex-direction: column`）。只有 `div`/`span`/`img`/`button` 标签。→ 新围栏（fence crate）已完成，core parse 已移除。
-- **`NodeKind` enum + 代际 NodeId**：`NodeId(pub u32)` 对外透明句柄。→ 类型化对象树替代（core 档位2 语义 enum + C# 类型化投影）。
-- **`FindNodeById` 全局首匹配**。→ 组件作用域 `Get<T>("id")` 替代（后端对象层）。
+- **`<div>` 永远是 flex 容器**：旧 4-tag 限制已解（fence crate 已完成 23 运行时标签），但 flex-only 不变量仍在代码中强制——`display:block` 映射到 `taffy::Display::Flex`，仅旁路 `DisplayMode::Block` 标记。→ 终态：标准 CSS block 布局（见 main-design.md §11.1，roadmap deferred）。
+- **`NodeKind` enum + 代际 NodeId**：`NodeId(pub u32)` 对外透明句柄。已扩容到 22 变体（档位2）+ C# 类型化投影层（Node/Container/Button/...）已落地，但 Rust 侧 NodeKind/NodeId 仍在核心所有热路径中活跃。→ 类型化用户表面已兑现；内部表示重构在复合束推进时逐段迁移。
+- **`FindNodeById` 全局首匹配**：C# `Get<T>("id")` 已存在但底层仍调全局 `find_node_by_id` + subtree check。完整 `IsScopeRoot` 边界未实现（Nodes.cs:190 gap）。→ 复合束加完整作用域查找 FFI 时替换。
 - **虚拟列表 = 层 B'（核心不认识"列表"）**：driver 管 slot 映射/可见区间/不等高补偿。reuse_key 是场景级全局命名空间。→ 复合束 ListView 吸收。
-- **`data-controller/data-page` 私有状态协议**。→ 控件束标准 WAI-ARIA 替代。
-- **`display:block` 是 RichText desugar 暗号**。→ parse 代码已从 core 移除（display:block desugar 随之退役）。
 
 ### 围栏
 
-面向游戏 UI 的标准 HTML 子集（30 标签 = 7 shell + 23 runtime）。围栏外输入打包期报错，不静默降级。单一真相源 = crates/fence/src/schema/ Rust const 表。防漂移门：cargo test -p loomgui_fence。权威文档：docs/design/fence.md。
+面向游戏 UI 的标准 HTML 子集（31 标签 = 8 shell + 23 runtime）。围栏外输入打包期报错，不静默降级。单一真相源 = crates/fence/src/schema/ Rust const 表。防漂移门：cargo test -p loomgui_fence。权威文档：docs/design/fence.md。
 
 ## 在本仓库怎么干活
 
 - **实现任何机制前，先对照 FairyGUI 源码和 RmlUi 源码**（`temp/FairyGUI-unity/` 和 `temp/RmlUi/`，只读）。LoomGUI 的渲染/对象模型/批合/事件/动画/资源管线全面借鉴 fgui，文本/布局借鉴 RmlUi/UITK。先读对应源码看它怎么做，再定设计。
 - **设计文档 vs 踩坑**：`docs/design/main-design.md`（总体架构与渲染管线）、`docs/design/fence.md`（围栏）、`docs/design/public-api.md`（公共 API 终态契约）、`docs/design/projection-layer.md`（C# 投影层机制：真身在 Rust，C# 是 OOP 投影 + 攒批回写）、`docs/roadmap/roadmap.md`（重构路线：摸黑打通 + 三束加宽 + 机制草稿）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配）。
-- **Rust edition 2021**，依赖钉版本：`taffy 0.5`、`ttf-parser 0.20`、`cssparser 0.34`、`scraper 0.19`、`slotmap 1.1`、`csbindgen 1`。snapshot 测试用 `insta`。
+- **Rust edition 2021**，依赖钉版本：`taffy 0.5`、`ttf-parser 0.20`、`slotmap 1.1`、`csbindgen 1`。CSS 选择器解析器手搓（零新依赖，spike 阶段推翻了"接 cssparser"前提）。旧版 snapshot 测试用 `insta` 已移除，换自维护。
 - `Cargo.lock` 入库（根级，尽管 `.gitignore` 有通用 `Cargo.lock` 行——它是被追踪的）。
 - 设计师工作区是独立磁盘目录（含 `loom.workspace.json`、HTML/CSS 源文件、res 资源、design-systems 组件库）。打包用独立打包器 GUI（Tauri `loomgui_gui`）或 CLI `loom-pkg build <workspace>`。运行时引导由 `loom.runtime.json` 统管。
 - 用户只读中文——问答/选项/总结用中文；代码/commit 照旧英文。
@@ -133,8 +131,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 - `dump_text` — 文本换行（验 known.width 来源、行数、pen 坐标）
 - `dump_img` — 图片尺寸（css.w/h、rect、tex、闭包 `known.w`）
 - `dump_scroll` — 滚动（overlap、scroll_pos、content_size）
-- `dump_render` — 渲染节点（rect、bg、UV）
-- `dump_sw` / `dump_bg` — 节点 base_style（验是否进 pkg）
+- `dump_bg` — 节点 base_style（验是否进 pkg）
 - `dump_nativehost_slot` — NativeHost FFI 查询
 - `spec4b_dump` — Spec-4b 验收用：dump 全节点 layout_rect + img src + text metrics + glyph probe（验 core solve 跟 PlayMode 一致，定位 layout bug 在 core 还是 Unity 后端）
 
@@ -142,7 +139,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 **core dump 复现 Unity solve**：PlayMode layout/视觉 bug 先编码机用 `spec4b_dump` / 对应 dump_*.rs example 喂同样的 pkg.bin 复现 core solve，定位 bug 在 core（dump 错）还是 Unity 后端（dump 对、渲染错）。core 和 Unity 是同一份 solve 的两面，dump 取证再改，别静态猜反复试。
 
-**围栏真相源 = `crates/fence/src/schema/` Rust const 表，`docs/design/fence.md` 是人类可读权威副本**：围栏最终形态 = schema 注册表（30 标签 + CSS 子集 + `@keyframes`/`animation` 终态），fence.md 是它的可读镜像（改 schema 必同步 fence.md，防漂移门 `cargo test -p loomgui_fence`）。roadmap 决策「终点线2 scope 用哪些」（如 `:nth-child` / 多 selector / @keyframes runtime 驱动 留 §4 视觉束）。代码往围栏最终形态靠，围栏外的 showcase bug 跟围栏最终形态（showcase 整体打包挂留专门 task）。
+**围栏真相源 = `crates/fence/src/schema/` Rust const 表，`docs/design/fence.md` 是人类可读权威副本**：围栏最终形态 = schema 注册表（31 标签 + CSS 子集 + `@keyframes`/`animation` 终态），fence.md 是它的可读镜像（改 schema 必同步 fence.md，防漂移门 `cargo test -p loomgui_fence`）。roadmap 决策「终点线2 scope 用哪些」（如 `:nth-child` / 多 selector / @keyframes runtime 驱动 留 §4 视觉束）。代码往围栏最终形态靠，围栏外的 showcase bug 跟围栏最终形态（showcase 整体打包挂留专门 task）。
 
 **GUI exe 绑 fence crate**：fence 改动后必须重编 GUI exe（`loomgui_gui.exe` 静态链入 fence），否则 GUI stale 误报围栏外（pkg bump 时也触发，坑 158 同源）。打包器 exe 闭环见上方「GUI 打包器 exe 闭环」段。
 
@@ -162,7 +159,7 @@ csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件�
 
 **plan/草稿的 API 常与 crate 实际不符**——遇编译错按 crate 实际源码调，**勿硬改依赖版本**。具体 crate 差异见 `docs/pitfalls.md` §3。
 
-**Unity API 同理别信记忆/草稿**——查 `Editor/Data/Managed/UnityEditor.xml`。
+**Unity API 同理别信记忆/草稿**——查 Unity 安装目录 `Editor/Data/Managed/UnityEditor.xml`。
 
 **FFI 边界 C-like enum 必须 `#[repr(uN)]`**。永远 `size_of::<T>()` 断言 ABI struct 尺寸。
 
@@ -172,4 +169,4 @@ csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件�
 
 ## 坑索引
 
-完整踩坑记录见 `docs/pitfalls.md`（v1.x 坑记录，R 系列重写后部分失效）。新踩坑继续编号递增，写法：症状/根因/解决/教训。
+完整踩坑记录见 `docs/pitfalls.md`（v1.x 坑记录，摸黑重写后部分失效）。新踩坑继续编号递增，写法：症状/根因/解决/教训。

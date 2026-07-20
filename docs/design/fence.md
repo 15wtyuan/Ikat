@@ -32,7 +32,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 
 ## 2. 围栏元素
 
-### 2.1 文档壳标签（7 个，不进运行时树）
+### 2.1 文档壳标签（8 个，不进运行时树）
 
 | 标签 | 用途 |
 |---|---|
@@ -43,6 +43,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `meta` | 元数据 |
 | `style` | 内联 CSS（打包期消费） |
 | `link` | 外部 CSS 引用（`rel=stylesheet`） |
+| `script` | 脚本（围栏外，打包期报错或跳过） |
 
 这些标签在 `tree_builder` 阶段被消费，不产生运行时对象。
 
@@ -216,7 +217,7 @@ CSS 在围栏中以三个正交维度建模：
 
 **动画**
 
-`animation`——`<name> <duration> [easing] [iteration-count|infinite] [fill-mode] [direction] [play-state] [delay]` 简写。对齐 public-api.md「动画定义全在 CSS」终态契约：fence 接受语法 + 校验拼写错误，runtime 驱动（@keyframes 表查询 + tween 发射）在 §4 视觉束（v1.10）实现；本轮收到合法 `animation` 声明的节点静默不跑动画（不报错）。
+`animation`——`<name> <duration> [easing] [iteration-count|infinite] [fill-mode] [direction] [play-state] [delay]` 简写。对齐 public-api.md「动画定义全在 CSS」终态契约：fence 接受语法 + 校验拼写错误。当前仅简写存在，标准 CSS 的 8 个长划子属性（`animation-name`/`animation-duration` 等）未加入；runtime 驱动（@keyframes 表查询 + tween 发射）在 §4 视觉束（v1.10）实现。`transition` 属性已注册但解析器为空壳（`CssValueParser::Transition` 未实现校验逻辑），接受任意值不报错但不生效。
 
 `@keyframes <name> { <stop> { decls } ... }` at-rule——`<style>` 内定义命名关键帧。stop 选择器子集：`from` / `to` / `<N>%`（0..=100 整数）；逗号多 stop（`0%,100%{...}`）按 CSS 语义展开为多条 stop（共享同声明块）。其他 at-rule（`@media` / `@font-face` 等）不在围栏子集，整块丢弃 + 诊断。
 
@@ -271,9 +272,9 @@ CSS 在围栏中以三个正交维度建模：
 
 ---
 
-## 6. 六阶段流水线
+## 6. 六阶段流水线（+ `<style>` 解析）
 
-围栏验证是一条六阶段流水线，输入 HTML 字符串，输出 `ParsedTemplate`（IrTree + ResolvedStyle 数组 + Diagnostic 数组 + 引用精灵列表）。
+围栏验证是一条六阶段流水线，输入 HTML 字符串，输出 `ParsedTemplate`（IrTree + ResolvedStyle 数组 + Diagnostic 数组 + 引用精灵列表 + `dynamic_rules` 规则表 + `keyframes` 关键帧表）。
 
 ### 阶段 1+2：Tokenize + Tree Build
 
@@ -305,12 +306,19 @@ CSS 在围栏中以三个正交维度建模：
 
 产出 `Vec<ResolvedStyle>`（每节点一个，按 node-index 对齐）。
 
+### 阶段 4.5：`<style>` 块解析
+
+- 解析 `<style>` 标签的文本内容为 `DynamicRule` 选择器规则表（class/tag/id/后代/子代/伪类 + specificity）。
+- 解析 `@keyframes` at-rule 为 `KeyframesRule` 表（`from`/`to`/`N%` stop 选择器）。
+- 产出存入 `ParsedTemplate.dynamic_rules` + `ParsedTemplate.keyframes`。
+- 其他 at-rule（`@media` 等）丢弃 + 诊断。
+
 ### 阶段 5：Structural（跨元素结构校验）
 
 - **Content Model**：子节点的 Category 必须被父节点的 ContentModel 允许。如 `<div>` 中放任何 Flow 内容合法，但 `<span>` 中放 `<div>`（Block inside Phrasing）报错。
 - **文本内容**：ContentModel 为 `None` 或 `Only([...])` 的元素不接受文本子节点（空白文本节点跳过）。
 - **ID 唯一性**：同一模板作用域内重复 `id` → `DuplicateId`。
-- **Deferred 验证**（R1.1 新增）：ARIA 关系（`aria-controls` / `aria-labelledby` 的 IdRef 目标存在）、template 根（`<ul>`/`<ol>` 内 `<template>` 根必须是 `<li>`）、`label[for]` 目标存在。
+- **Deferred 验证**（后续阶段新增）：ARIA 关系（`aria-controls` / `aria-labelledby` 的 IdRef 目标存在）、template 根（`<ul>`/`<ol>` 内 `<template>` 根必须是 `<li>`）、`label[for]` 目标存在。
 
 ### 阶段 6：Annotate（语义类型填充）
 

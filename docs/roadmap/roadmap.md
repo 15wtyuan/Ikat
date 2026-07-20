@@ -221,7 +221,14 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 > 摸黑打通骨架链的过程里有意 defer 的非阻塞项，按「后续在哪个束 / 机制草稿待商议 / 直接修」分类。新加 tech-debt 统一进这里，写法：症状 / 根因 / 处置路标。
 
 - **card-img Image bg 合成 node_id 机制**（Spec-4b P3.4 视觉 1/5 未过；机制后续商议）：Unity 后端按 node_id 去重，Image bg + texture 同 node_id 只画 texture。要照 box-shadow `BOX_SHADOW_FLAG` bit 28 合成 id 模式：core render Image bg 用 `IMG_BG_FLAG` 合成 id + Unity 后端建 2 GameObject + sort_key propagate（bg 在 texture 下）。本轮补丁（commit `73e560e`）reverted（`8ea81aa`）——机制草稿待商议后再实现。
-- **keyframes runtime 驱动**（§4 视觉束 v1.10 后续；fence DSL 已就绪）：fence `@keyframes` at-rule + `animation` 属性 DSL 已对齐 public-api §9 终态（commit `e2e2812`），但 runtime 驱动缺失——keyframes 规则在 `ParsedTemplate.keyframes` 暴露但 packer bridge 静默丢弃；缺 `KeyframesTable` 进 pkg + `ResolvedStyle.animation` 字段 + bridge 序列化 + tween 发射 + pkg bump 19→20 + dll 重编。fence 已就绪无需再改。
+- **keyframes runtime 驱动 + fence 动画子集补全**（§4 视觉束 v1.10 后续）：fence `@keyframes` at-rule + `animation` 简写 DSL 已完成基础语法校验（commit `e2e2812`），但存在以下缺口，全部归入视觉束与 runtime 驱动一同落地：
+  - **runtime 驱动缺失**：keyframes 规则在 `ParsedTemplate.keyframes` 暴露但 packer bridge 静默丢弃；缺 `KeyframesTable` 进 pkg + `ResolvedStyle.animation` 字段 + bridge 序列化 + tween 发射 + pkg bump 19→20 + dll 重编。
+  - **`transition` 空壳**：`CssValueParser::Transition` 枚举变体已定义但零校验逻辑。fence 接受任意 `transition` 值不报错，但实际不生效。
+  - **无 `animation` 长划子属性**：仅 `animation` 简写存在，缺少标准 CSS 的 8 个长划属性（`animation-name`/`animation-duration`/`animation-delay`/`animation-iteration-count`/`animation-direction`/`animation-fill-mode`/`animation-play-state`/`animation-timing-function`）。长划是简写的语法糖基础，应先补长划再补简写展开。
+  - **`animation-delay` 处理粗糙**：简写解析器将最后一个数值 token 当 delay，非标准 CSS delay 语法。
+  - **缓动仅 7 种**：`linear`/`ease`/`ease-in`/`ease-out`/`ease-in-out`/`step-start`/`step-end`。无 `cubic-bezier()`、无弹簧/弹性物理缓动。
+  - **keyframes 内不支持 per-stop 缓动**：标准 CSS 每个 stop 可带 `animation-timing-function`，当前不支持。
+  - **无 `@loom-hook`**：public-api.md §9.3 描述的 `/* @loom-hook name */` 注释锚点，fence 未解析。
 - **showcase 围栏违规**（showcase 整体打包挂，专门 task 后续）：showcase home `:nth-child` + form/settings 逗号多 selector / 属性 selector / `resize` CSS prop 预存围栏子集限制，showcase 整体打包挂（spec4b 单独 package 打包过）。showcase 跟围栏最终形态见 `docs/design/fence.md`（后续专门 task）。
 - **`Scene::build` data_controller dead 参数**（R2 待办段，签名重构后清）：P1 妥协保留 `Scene::build` 入参里的 data_controller 位，Controller 全链已删但签名未重构。
 - **projection-layer §3 items 2/4 set_style 残留**（R2 待办段）：projection-layer 文档 §3 items 2/4 描述的 set_style 残留，R2 投影层升级攒批时清。
@@ -229,6 +236,22 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 - **GUI exe 拷贝滞后**（编码机工作流）：GUI exe 重出后编码机忙没拷 `unity/package/Editor/Tools/loomgui_gui.exe`，编码机关 GUI 后拷。不影响 runtime，影响打包器版本（pkg bump 时触发，坑 158 同源 stale exe 链）。
 - **loom.runtime.json stomping**（P3.2 concern 1，多 workspace 共享 output_dir）：多 workspace 共享同一 output_dir 时 packer 重写 `loom.runtime.json` 互相覆盖。处置：每 workspace 独立 output_dir（`loom.workspace.json` 配），或 packer 加 namespace 隔离。
 - **showcase src/key packer bug**（P3.1 发现，showcase 预存）：showcase HTML src "../res/icons/..." vs sprite key "res/icons/..." 路径前缀不匹配，packer referenced_sprites 校验挂。showcase 整体打包门推迟（跟围栏违规同 task）。
+
+### main-design.md 校验发现的 deferred 项（2026-07-20 review）
+
+> 以下各项 = 文档描述终态、代码尚未实现。全部归入 tech-debt，按束分配处置路标。
+
+- **Block 布局策略**（§4 视觉束 / 复合束文本模型）：`display:block` 当前强制映射为 `taffy::Display::Flex`（mapping.rs:672-675），仅旁路 `DisplayMode::Block` 标记未消费。taffy 0.5 虽有 block layout 但 LoomGUI 刻意不用。终态需实现标准 block 布局（垂直堆叠、margin collapse），触发时机与复合束文本模型（p/h1-h6 建文本 block）同频。
+- **grayed 灰化渲染**（§4 视觉束）：`RenderNode` 缺少 `grayed: bool` 字段。文档描述禁用节点灰化渲染，全仓搜索零匹配。待视觉束补字段 + 渲染管线（shader / color tint 路径）。
+- **NodeTransform 替代 Affine2**（§4 控件束，第一个高频控件触发）：`RenderNode.world_matrix` 当前为 `Affine2`（[f32;6] 裸仿射矩阵），文档终态为 `NodeTransform`（分解 Position/Scale/Rotation，对齐 public-api.md 三分模型）。升级与 set_transform 数值 FFI 同频。
+- **动画系统终态**（§4 视觉束 v1.10）：当前 `TweenManager` 为单个 `Vec<Tween>`、flat `tween()` API、10 种缓动（Quad/Cubic/Back）、value_size max=4。文档描述终态为池化 `{active,pool}` + 链式 builder API + 28+ 缓动（含 Sine/Elastic/Bounce/Custom）+ value_size(1..6) + prop_type 分层（transform_dirty vs layout_dirty）。与 keyframes runtime 驱动一同落地。
+- **控件 C# 投影类缺失**（控件束/复合束）：`OptionItem`、`LineBreak`、`Slot`、`CustomElement` 在 Rust `NodeKind` 中已有变体，但 C# 投影层无对应 public class，`NodeFactory` fallback 到 `Container`。
+- **IsScopeRoot 作用域查找**（复合束）：`Get<T>("id")` 当前仅 `IsInSubtree` 简单祖先检查（Nodes.cs:190-194 显式标注 gap），完整 IsScopeRoot 边界（不穿透嵌套组件/List item）未实现。
+- **Per-scope ID 去重**（复合束）：打包期 ID 唯一性校验当前为全 tree 去重（structural.rs），文档描述 per-template-scope 语义未实现。
+- **Shadow DOM 样式隔离**（复合束）：Rust cascade 引擎零 scope 隔离代码。模板内部选择器作用域边界、父组件选择器不穿透——全部未实现。
+- **CSS 自定义属性 `--*`**（控件束/复合束）：Rust core 零 custom property / `var()` 代码。C# `SetVar`/`RemoveVar` 为 `NotImplementedException` 壳。
+- **控件 API 实现**（控件束）：`Slider`/`Toggle`/`TextField`/`NumberField`/`TextArea`/`Dropdown`/`ProgressBar` 全部属性/事件（除 `Button.Clicked`/`Link.Activated`）为 `NotImplementedException` 壳。公共签名已冻结，实现待控件束推进。
+- **`UIStyleException` 缺失**（Minor，控件束）：public-api.md 声明 4 种异常类型（§1.4 / §12），`Types.cs` 仅定义 `UIContractException` + `UIPackageException`；`UIStyleException` 未定义。在控件束实现 Style 相关功能时补上此类。
 
 **本轮之后、与范式重写解耦的**（旧 §3 功能线，保留对照）：
 

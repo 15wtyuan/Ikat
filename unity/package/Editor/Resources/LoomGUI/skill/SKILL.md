@@ -1,9 +1,10 @@
 ---
 name: loomgui-editor
 description: |
-  Generate LoomGUI fence-compliant UI (HTML+CSS) for game dashboards/panels.
-  Uses flex-only layout, tag whitelist (div/span/img/button), no grid/absolute/margin-spacing.
-  After generating, read config.json and run loomgui_pkg.exe to validate + pack into .pkg.bin for Unity.
+  Generate LoomGUI fence-compliant game UI (HTML+CSS).
+  Uses standard HTML/CSS semantics — block/flex layout, 30-tag whitelist.
+  No grid, no float, no @media. Spacing via gap, not margin.
+  After generating, run loom-pkg to validate and pack into .pkg.bin for Unity.
 triggers:
   - "loomgui ui"
   - "game dashboard"
@@ -17,26 +18,25 @@ triggers:
 
 ## 工作流
 
-1. **读围栏规则**：读 `references/fence.md`（围栏硬约束）+ `references/preview-trust.md`（预览可信清单）。围栏是硬约束，违反会导致预览与 Unity 渲染不一致。
+1. **读围栏规则**：读 `references/fence.md`（标签/CSS/选择器硬约束）+ `references/preview-trust.md`（预览可信清单）。围栏 = 硬约束，围栏外输入打包期报错。
 
 2. **按设计师 prompt 生成 HTML+CSS**：
-   - 元素只用 `div`/`span`/`img`/`button`。
-   - 布局用 flex + `gap`（子项间距用 gap 不用 margin）。
-   - 禁 grid/absolute/float/@media/skew 等（详见 fence.md）。
-   - 风格由设计师 prompt 决定（颜色/字号/字体自由，只要守围栏）。
-   - **HTML `<head>` 必须内联预览 polyfill**（从 `references/preview-polyfill.html` 抄整段 `<style>`）。LoomGUI 契约 div 永远 flex column，Chromium 默认 block 会让预览塌。polyfill 只在 head（预览用），设计师样式放外部 css 文件（跑 loomgui_pkg.exe 传该 css，打包用）。loomgui_pkg.exe 吃外部 css、忽略 head `<style>`，polyfill 不进 pkg。
+   - 元素用围栏白名单（30 标签，详见 fence.md §1）。
+   - 布局用 flex + `gap`（子项间距用 gap 不用 margin——Chrome 折叠 margin，LoomGUI 不折叠）。
+   - 禁 grid / float / @media / 固定定位（详见 fence.md）。
+   - `display:flex` 默认 `flex-direction:row`（标准 CSS）；纵向堆叠写 `flex-direction:column`。
+   - 风格（颜色/字号/字体）自由，只要守围栏规则。
 
 3. **生成完跑验证+打包**：
-   ```bash
-   loomgui_pkg.exe <sourceDir> <pkgName> --html <list> --res-root <工作区根/res> -o <out.pkg.bin>
    ```
-   - 先读 `.claude/skills/loomgui-editor/config.json` 拿 exe_path + 配置。
-   - **非零退出 = 围栏违规**（loomgui_pkg 报错）。读 stderr，自纠 HTML/CSS 后重跑。
-   - **零退出 = 合规**，.pkg.bin + atlas.png 已产出到指定目录。
+   loom-pkg build <workspace-dir>
+   ```
+   - **非零退出 = 围栏违规**。读 stderr，自纠 HTML/CSS 后重跑。
+   - **零退出 = 合规**，.pkg.bin + 图集已产出。
 
-4. **报告**：向设计师报告产出路径（.pkg.bin + atlas.png），说明 Unity 加载方式（Bundles/ui/ 下，LoomStageDriver.LoadPackageBytes 自动加载）。
+4. **报告**：向设计师报告产出路径（.pkg.bin + atlas.png），说明 Unity 加载方式。
 
 ## 注意
 
-- **预览不可信项**：open-design 预览是 Chromium iframe，与 LoomGUI（taffy）有分歧。margin 折叠/文本换行/position:absolute/display:grid/@media 别按预览调。详见 references/preview-trust.md。
-- **打包器即验证器**：loomgui_pkg.exe 内含围栏验证（FENCE_TAGS + apply_decl），违规打包期报错。不需要单独的 lint 步骤。
+- **预览不可信项**：open-design 预览是 Chromium iframe，与 LoomGUI 有分歧。margin 折叠 / 文本换行 / display:grid / @media 别按预览调。详见 references/preview-trust.md。
+- **打包器即验证器**：`loom-pkg build` 内含围栏验证，违规打包期报错。不需要单独的 lint 步骤。

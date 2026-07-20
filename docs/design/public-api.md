@@ -4,7 +4,7 @@
 >
 > **防漂移门**：`tests/dotnet/LoomGUI.PublicApi` 编译校验——改公共签名后必编过。
 >
-> **定位**：面向游戏业务程序员的终态公共 API。自上而下设计，公共契约优先，core/FFI/后端为它服务。R2-R7 的实现完成后，用本契约作验收靶子。实现机制（真身 Rust + C# 投影）见 [projection-layer.md](projection-layer.md)。
+> **定位**：面向游戏业务程序员的终态公共 API。自上而下设计，公共契约优先，core/FFI/后端为它服务。摸黑+三束的实现完成后，用本契约作验收靶子。实现机制（真身 Rust + C# 投影）见 [projection-layer.md](projection-layer.md)。
 
 ---
 
@@ -310,7 +310,7 @@ Node node = ui.Pick(globalPoint);   // 命中测试：返回该点最上层可�
 - RadioButton 同 `Name` 组框架自动互斥；只有新选中项触发 `CheckedChanged`（对齐 web，不触发被取消项）。RadioGroup（按 name 聚合、读选中 index）是逻辑层积木，不进公共层。
 - 通用事件类型：`ValueChangedEvent<T>`, `SelectionChangedEvent`, `TextSelection`。
 
-WAI-ARIA 复合控件（TabList 等）使用白名单 role，单独立项（R1 围栏首版不含 role/aria-*）。
+WAI-ARIA 复合控件（TabList 等）使用白名单 role，单独立项（`role` / `aria-*` 已作为全局属性进入围栏 fence §4.1；复合控件的类型分派与行为实现是后续阶段）。
 
 ---
 

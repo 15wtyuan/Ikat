@@ -88,7 +88,7 @@
 - `display:flex` 默认 `flex-direction:row`（标准 CSS 默认）。
 - 需要纵向堆叠明确写 `display:flex; flex-direction:column`。
 - `display:block/flex/none` 选择内部布局 Strategy，**不改变节点类型**。
-- `box-sizing:border-box` 作为 UA 样式例外（游戏 UI 友好），围栏中明确记录。
+- `box-sizing:border-box` 作为 UA 样式例外（游戏 UI 友好），待 fence 补入 CSS 属性表并实现。
 
 ### 3.2 围栏元素
 
@@ -112,7 +112,7 @@
 
 > **节点类型由稳定 HTML 语义签名决定：tag + 不可变结构属性。CSS 永远不决定类型。**
 
-完整签名表见 [fence.md](fence.md) §3.1。R1 的类型分派只看 tag + `input[type]`：
+完整签名表见 [fence.md](fence.md) §3.1。类型分派只看 tag + `input[type]`：
 
 - `<div>` / `<header>` / `<nav>` → `Container`
 - `<p>` → `TextBlock`；`<span>` / `<strong>` / `<em>` → `TextElement`
@@ -127,7 +127,7 @@
 - `<progress>` → `ProgressBar`；`<template>` → `Template`；`<slot>` → `Slot`
 - 含 `-` 的标签名 → `CustomElement`（R3 注册验证）
 
-`input[type]` 是结构属性（Fence Gate 校验值域，Annotate 阶段决定最终类型），实例化后不能改成另一种控件类型。普通动态状态（`checked/selected/disabled`）可变。`role` / `aria-*` 是全局属性（Fence Gate 校验白名单值域），但不参与 R1 的 SemanticKind 分派——ARIA 复合控件类型是后续阶段（§3.4）。
+`input[type]` 是结构属性（Fence Gate 校验值域，Annotate 阶段决定最终类型），实例化后不能改成另一种控件类型。普通动态状态（`checked/selected/disabled`）可变。`role` / `aria-*` 是全局属性（Fence Gate 校验白名单值域），但不参与当前的 SemanticKind 分派——ARIA 复合控件类型是后续阶段（§3.4）。
 
 ### 3.4 WAI-ARIA 复合控件
 
@@ -170,16 +170,17 @@ Node
 │   ├── TextBlock（p）/ TextElement（span/strong/em）
 │   ├── Label / Button / Link / Canvas
 │   └── ListView（ul/ol）/ ListItem（li）
-├── TextNode / Image
+├── TextNode / Image / ProgressBar
 ├── TextField / NumberField / Slider / Toggle / RadioButton
-├── TextArea / Dropdown / ProgressBar
-└── （叶子类：私有内部结构）
+├── TextArea / Dropdown
+├── LineBreak（br）/ OptionItem（option）/ Slot / CustomElement
 ```
+> 注：`LineBreak`、`OptionItem`、`Slot`、`CustomElement` 在 Rust `NodeKind` 中已有对应变体，C# 投影类待后续控件束/复合束落地（当前 `NodeFactory` fallback 到 `Container`）。
 
 - `Container` 才暴露子节点增删；叶子类没有 `AddChild()`。
 - `Button`、`Link` 等可包含图标和文本，因此属于容器。
 - 公共对象持有稳定身份，内部句柄（NodeId）不暴露。
-- `input[type]` 是不可变结构属性（决定控件类型）；`role` / `aria-*` 是全局属性（不参与 R1 类型分派，见 §3.3）。
+- `input[type]` 是不可变结构属性（决定控件类型）；`role` / `aria-*` 是全局属性（不参与当前类型分派，见 §3.3）。
 - **无 Panel/Component 类型**：作用域是运行时标记（`IsScopeRoot`），非类型；`Instantiate` 返回模板根真实类型。完整层级与划线见 [public-api.md](public-api.md) §2。
 
 ### 4.2 顶层上下文
@@ -261,7 +262,7 @@ panel.Style.OverflowY = Overflow.Auto;
 - **CSS 规则表进包（不 bake 丢）**：逻辑层运行时大量用 CSS（`Classes.Add/Replace`、`StyleSheet.Add`、class 切换驱动动画），规则表必须活到运行时，否则对设计期未带该 class 的节点 `Classes.Add` 会失效。cascade 引擎是 core 的运行时唯一真相源；fence 只把 `<style>` 解析成规则表。
 - 运行时 rematch 处理伪类 + class + Style override 变化，每帧从 `base_style` 重算基线（`base_style` = 每帧 cascade 基线，非首帧缓存）。
 - 运行时样式 = `base_style + 命中动态规则的合并`。
-- 详见 `docs/roadmap/roadmap.md` §3.2（cascade 归属决策）与 §2 阶段 S（选择器解析器是净新代码）。
+- 详见 `docs/roadmap/roadmap.md` §8（cascade 归属决策）与 §2 阶段 S（选择器解析器是净新代码）。
 
 ### 5.4 组件样式边界（Shadow DOM 风格）
 
@@ -483,7 +484,7 @@ taffy 0.5 同时支持 Flex 和 Block 布局算法。`display:block` 使用 `com
 | `flex-basis` / `flex-grow/shrink` | 同名（flex 模式） |
 | `flex-direction/wrap/gap` / `justify/align-*` | 同名（flex 模式） |
 | `padding/border-width/margin` | `padding`/`border`/`margin` |
-| `position:relative`+insets | `Relative`+`inset`（视觉偏移，不影响兄弟布局） |
+| `position:relative`+insets | `Relative`+`inset`（视觉偏移，不影响兄弟布局）。注：taffy `Style::DEFAULT.position` 已是 `Relative`，显式写 `position:relative` 为 no-op |
 | `position:absolute` | taffy `Absolute` + inset（脱离流） |
 | 内容自适应（文本/图片） | `MeasureFunc` 回调（§10.4） |
 
@@ -495,7 +496,7 @@ taffy 0.5 同时支持 Flex 和 Block 布局算法。`display:block` 使用 `com
 
 ### 11.5 参考分辨率 / DPI 缩放
 
-设计稿 1080×1920 在 1440×2560 整体等比放大。Stage 持 `design_resolution` + `match_mode`。后端注入屏幕尺寸 + safe-area，核心算 scale + 根 size。
+设计稿 1080×1920 在 1440×2560 整体等比放大。引擎集成层（C# Driver）持设计分辨率，据屏幕实际尺寸计算 scale 后设置 `Stage.root_size`，核心按此根尺寸布局。`match_mode`（shrink-to-fit 策略）同样在引擎集成层配置。
 
 叠加顺序：先参考分辨率整体 scale → 再布局 → 最后 safe-area 避让。
 
@@ -509,7 +510,7 @@ taffy 0.5 同时支持 Flex 和 Block 布局算法。`display:block` 使用 `com
 
 内部 Overflow Strategy 可以在 Visible、Clip、AutoScroll 和 Scroll 间切换；`ScrollState` 独立保存。非滚动态调用滚动 API 遵循 DOM，位置被钳制或不产生视觉滚动。
 
-**惯性回弹物理**：ScrollPane 自维护可变 target 的 tween，content size 变化时按状态补偿 start、不突变。不走 GTween（content 异步变化时 GTween 的固定 end 会跳变）。tick 时机在 solve 后、process 后、compute_world_transforms 前。
+**惯性回弹物理**：ScrollPane 自维护可变 target 的 tween，content size 变化时按状态补偿 start、不突变。不走 GTween（content 异步变化时 GTween 的固定 end 会跳变）。tick 分两段：`advance_all`（惯性/回弹物理推进）在 solve 前消费指针输入并推进滚动位置；`refresh_content_sizes`（内容尺寸刷新）在 solve 后、compute_world_transforms 前。
 
 能力：滚动类型、惯性+回弹、滚动条、鼠标滚轮。分页/吸附/下拉刷新后期。
 
@@ -549,15 +550,19 @@ soft clip/shape mask/paintingMode 见 roadmap（机制草稿）。
 
 ```rust
 struct RenderNode {
-    node_id: NodeId,
-    parent_id: Option<NodeId>,
+    node_id: u32,                     // 与 scene.nodes 索引对齐（build 直填 n.id.0）
+    parent_id: Option<u32>,
     visible: bool,
-    alpha: f32, grayed: bool,
-    color_tint: Color,
-    transform: NodeTransform,
+    alpha: f32,
+    // grayed: bool — deferred（灰化禁用节点渲染，待视觉束落地）
+    color_tint: [f32; 4],
+    world_matrix: Affine2,            // 已累计的 world-space 仿射矩阵（过渡；终态用 NodeTransform）
     blend: BlendMode,
     mask_context: MaskContext,
     sort_key: u32,
+    change_level: ChangeLevel,        // Skip=0 / Header=1 / Full=2
+    reuse_key: u32,                   // MirrorPool GO 复用键
+    effect: EffectBlock,              // 文字效果参数（128B 定长）
     payload: NodePayload,
 }
 
@@ -566,6 +571,8 @@ enum NodePayload {
     // Mask / PaintTarget / NativeHost — 见 roadmap
 }
 ```
+
+> 注：`grayed` 灰化渲染待 visual beam 落地；`world_matrix: Affine2` 为 v1 过渡形态，终态替换为 `NodeTransform`（分解 Position/Scale/Rotation，对齐 public-api.md 三分模型）。
 
 `ChangeLevel::Skip/Header/Full` 表达本帧变化程度。
 
@@ -611,7 +618,7 @@ enum NodePayload {
 
 ### 14.4 包格式
 
-- Header：**formatVersion** + 魔数 + compressed flag。
+- Header（20B）：magic（`0x474B504C`，"LPKG" LE）+ formatVersion（u32）+ flags（u32，预留）+ component_count（u32）+ string_count（u32）。
 - 组件描述分块，运行时只读需要的块。
 - 全局 stringTable 去重。
 - 跨资源引用存 id 不存内容。
@@ -708,7 +715,7 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
 ```
 
 - **LoomHost（引擎无关，`Runtime/Host/`）**：持 stage handle (IntPtr) + UIContext + LoomBackend。零 `using UnityEngine`。每帧驱动 `Step(dt)` 严格按 §16 五步序：(1) `backend.CollectInput(stage)` → set_input；(2) UIContext flush 脏属性（4a 即时过桥 seam）；(3) `loomgui_stage_tick` FFI；(4) `borrow_frame` FFI → `backend.SyncFrame(stage, framePtr, frameLen)`；(5) `borrow_events` FFI → EventDemuxer → EventBus typed `On<T>` 路由。资源 FFI 引擎中立（RegisterFont / SetImageSizes / SetFallbackFamilies）放此层。`borrow_frame` 的 FFI 调用归 LoomHost（产生引擎特定镜像对象的 FFI 仍归引擎无关驱动核心），backend 只消费 blob 做镜像。
-- **LoomBackend（引擎无关抽象契约，`Runtime/Host/`）**：契约 = 本节三件事——`CollectInput(stage)` / `SyncFrame(stage, framePtr, frameLen)` / 资源对象上传（如 Texture2D 上传 atlas 页）。`set_input` FFI 在 backend（采集引擎特定但 FFI 引擎中立，省一次交互）。
+- **LoomBackend（引擎无关抽象契约，`Runtime/Host/`）**：契约 = 2 个 abstract 方法——`CollectInput(stage)` / `SyncFrame(stage, framePtr, frameLen)`。`set_input` FFI 在 backend（采集引擎特定但 FFI 引擎中立，省一次交互）。资源对象上传（如 Texture2D 上传 atlas 页）是引擎特定实现细节，不进入抽象契约（由 `UnityLoomBackend` 内部方法如 `InitSprites`/`SyncFontAtlas` 承担）。
 - **UnityLoomBackend : LoomBackend**：持 MirrorPool + MaterialManager + NativeHostManager + SpriteResolver + InputCollector（零改复用，从退役的 LoomStage 搬过来）。NativeHost（GameObject 绑定 3D 模型）作为 UnityLoomBackend 额外方法，不进通用契约（Unity 专属概念）。
 - **LoomStageDriver（Unity MonoBehaviour，瘦宿主）**：Awake 创建 UnityLoomBackend（注入 Unity 组件）→ `new LoomHost(designSize, backend)` → 读 .ttf/atlas 喂 `host.RegisterFont`/资源 → `ctx.LoadPackage`。Update 调 `host.Step(Time.unscaledDeltaTime)`。保留 Unity 特定（相机 / safeArea / 输入钩子 / 设计分辨率 / NativeHost 根 transform）。
 
