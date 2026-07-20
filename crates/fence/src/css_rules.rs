@@ -550,6 +550,13 @@ mod tests {
         assert!(parse_selector(".a > .b").is_none()); // Child 组合子本轮不做（仅后代空格）
         assert!(parse_selector(".a + .b").is_none());
         assert!(parse_selector(":nth-child(2)").is_none());
+        // 属性选择器越界形态须显式拒（防静默降级：否则坏 selector 会被默默吞，
+        // 用户 CSS 静默失效）。仅支持 = / 裸 [attr]；修饰符操作符 / 空名 / 缺 ] 均拒。
+        assert!(parse_selector("[a^=b]").is_none()); // 修饰符操作符 ^= 越界
+        assert!(parse_selector("[a~=b]").is_none()); // 修饰符操作符 ~= 越界
+        assert!(parse_selector("[=x]").is_none()); // 空名（Eq 形）
+        assert!(parse_selector("[]").is_none()); // 空名（Exists 形）
+        assert!(parse_selector("[a=b").is_none()); // 缺闭合 ]
     }
 
     #[test]
