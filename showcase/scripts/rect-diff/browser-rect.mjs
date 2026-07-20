@@ -1,0 +1,46 @@
+// Browser rect exporter: measure every body descendant's getBoundingClientRect
+// in a real Chromium via Playwright, dump JSON for later diff against LoomGUI core.
+//
+// Usage: node browser-rect.mjs <showcase-html-abs-path> <out.json>
+// Loads HTML via file://, injects A1 reset (strip UA defaults LoomGUI lacks),
+// waits briefly for reflow, then captures per-element rects.
+
+import { chromium } from 'playwright';
+import { readFileSync, writeFileSync } from 'fs';
+
+const [, , htmlPath, outPath] = process.argv;
+if (!htmlPath || !outPath) {
+  console.error('usage: node browser-rect.mjs <showcase-html-abs-path> <out.json>');
+  process.exit(1);
+}
+
+const reset = readFileSync(new URL('./reset.css', import.meta.url), 'utf8');
+
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+await page.goto('file://' + htmlPath, { waitUntil: 'networkidle' });
+// Inject reset AFTER load so it overrides UA defaults before measurement;
+// showcase <style> rules still win where they specify values.
+await page.addStyleTag({ content: reset });
+await page.waitForTimeout(100); // let reset reflow settle
+
+const rects = await page.evaluate(() => {
+  const els = document.querySelectorAll('body *');
+  return Array.from(els).map((el, i) => {
+    const r = el.getBoundingClientRect();
+    return {
+      domIndex: i,
+      tag: el.tagName.toLowerCase(),
+      id: el.id || null,
+      classes: Array.from(el.classList),
+      x: r.x,
+      y: r.y,
+      w: r.width,
+      h: r.height,
+    };
+  });
+});
+
+await browser.close();
+writeFileSync(outPath, JSON.stringify(rects, null, 2));
+console.log(`wrote ${rects.length} elements -> ${outPath}`);
