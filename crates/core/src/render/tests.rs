@@ -2709,6 +2709,101 @@ fn ensure_solid_hit_returns_same_uv() {
     assert_eq!(r1.px_h, 1);
 }
 
+// ── Image bg-color via BG_COMPOSITE ───────────────────────────────────
+
+/// Image (`<img>`) + bg-color → program 2 (BG_COMPOSITE)，顶点色 = bg-color。
+/// shader source-over：图(tex) over 底色(vcol)，透明像素透出底色（修紫底不显示 bug）。
+/// 无需 back-layer / 合成 node_id——单 quad，GPU 合成（与 Container 同路径）。
+#[test]
+fn build_image_with_bg_color_uses_bg_composite() {
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        },
+        Some([0.5, 0.0, 0.5, 1.0]), // 紫底
+    );
+    n.kind = NodeKind::Image;
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    scene.image_srcs.insert(scene.roots[0], "icon.png".into());
+
+    let fonts = test_font_table().expect("need font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    assert_eq!(
+        frame.nodes.len(),
+        1,
+        "Image 单 quad（shader 合成，不产 back-layer）"
+    );
+    match &frame.nodes[0].payload {
+        NodePayload::Mesh {
+            program,
+            colors,
+            image_path,
+            ..
+        } => {
+            assert_eq!(*program, 2, "Image+bg-color → program 2 (BG_COMPOSITE)");
+            assert_eq!(
+                *colors.first().unwrap(),
+                [0.5, 0.0, 0.5, 1.0],
+                "顶点色 = bg-color（紫）"
+            );
+            assert_eq!(
+                *image_path,
+                Some("icon.png".to_string()),
+                "image_path = src"
+            );
+        }
+        _ => panic!("expected Mesh"),
+    }
+}
+
+/// Image + bg-color + filter → program 4（BG_COMPOSITE + COLOR_FILTER 双 keyword）。
+#[test]
+fn build_image_with_bg_color_and_filter_uses_program_4() {
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        },
+        Some([0.5, 0.0, 0.5, 1.0]),
+    );
+    n.kind = NodeKind::Image;
+    n.style.color_filter = Some([0.0; 20]); // 触发 has_filter
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    scene.image_srcs.insert(scene.roots[0], "icon.png".into());
+
+    let fonts = test_font_table().expect("need font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    match &frame.nodes[0].payload {
+        NodePayload::Mesh { program, .. } => {
+            assert_eq!(*program, 4, "Image+bg-color+filter → program 4");
+        }
+        _ => panic!("expected Mesh"),
+    }
+}
+
 // ── box-shadow 集成测试 ───────────────────────────
 
 /// box-shadow:2px 3px #000000 → 阴影节点 node_id = main_id|BACK_LAYER_FLAG、

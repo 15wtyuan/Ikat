@@ -489,12 +489,28 @@ pub fn build_render_nodes(
                 let uv_min = [0.0, 0.0];
                 let uv_max = [1.0, 1.0];
                 let (src_w, src_h) = src_size(image_sizes, &src);
+                // bg-color 走 BG_COMPOSITE（shader source-over：图 over 底色，透明像素透出
+                // 底色）——与 Container 同路径。无 bg-color 时 program 0（tex×白 = 原图）。
+                let bg_opt = anim.and_then(|a| a.bg_color).or(n.style.background_color);
+                let has_bg = bg_opt.map(|c| c[3] > 0.0).unwrap_or(false);
+                let vertex_color = if has_bg { bg_opt.unwrap() } else { [1.0; 4] };
+                let program = if has_filter {
+                    if has_bg {
+                        4u32
+                    } else {
+                        3u32
+                    }
+                } else if has_bg {
+                    2u32
+                } else {
+                    0u32
+                };
                 let (v, uvc, col, idx) = match &n.style.border_image_slice {
                     Some(slice) => {
                         let resolved = resolve_slice_percent(slice, src_w, src_h);
                         crate::render::mesh::nine_slice(
                             rect,
-                            [1.0; 4],
+                            vertex_color,
                             &resolved,
                             src_w,
                             src_h,
@@ -504,12 +520,11 @@ pub fn build_render_nodes(
                     }
                     None => crate::render::mesh::quad(
                         rect,
-                        [1.0, 1.0, 1.0, 1.0],
+                        vertex_color,
                         [uv_min[0], uv_max[1]],
                         [uv_max[0], uv_min[1]],
                     ),
                 };
-                let program = if has_filter { 3u32 } else { 0u32 };
                 RenderNode {
                     node_id,
                     parent_id,
