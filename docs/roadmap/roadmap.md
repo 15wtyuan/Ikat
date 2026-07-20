@@ -252,7 +252,7 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 - **事件**：命中（等效绘制顺序逆序）+ click/hover/leave + 拖拽；多触摸（5 槽）+ CaptureTouch + 拖拽/滚动仲裁 + 键盘/焦点/Tab。
 - **布局**：taffy 0.5 flex + block；参考分辨率缩放；safe-area。
 - **滚动**：ScrollPane 惯性 + 回弹 + 滚动条 + 鼠标滚轮（自维护可变 target tween）。
-- **资源**：pkg.bin 格式 v16（写包/读包/实例化全链）；独立工作区 + Tauri GUI 打包器；Rust 自绘图集。
+- **资源**：pkg.bin 格式 v19（写包/读包/实例化全链）；独立工作区 + Tauri GUI 打包器；Rust 自绘图集。
 - **FFI**：csbindgen + SOA 多 arena 渲染树同步（blob v11，21 列，含 SDF 文字特效）。
 - **状态/样式**：`:hover/:active/:disabled/:focus` 动态规则；apply_decl 属性级覆盖相当完整（flex/盒模型/背景/边框/字体/transform/filter/box-shadow/transition/font-effect）。
 

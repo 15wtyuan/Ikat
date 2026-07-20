@@ -712,7 +712,7 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
 - **UnityLoomBackend : LoomBackend**：持 MirrorPool + MaterialManager + NativeHostManager + SpriteResolver + InputCollector（零改复用，从退役的 LoomStage 搬过来）。NativeHost（GameObject 绑定 3D 模型）作为 UnityLoomBackend 额外方法，不进通用契约（Unity 专属概念）。
 - **LoomStageDriver（Unity MonoBehaviour，瘦宿主）**：Awake 创建 UnityLoomBackend（注入 Unity 组件）→ `new LoomHost(designSize, backend)` → 读 .ttf/atlas 喂 `host.RegisterFont`/资源 → `ctx.LoadPackage`。Update 调 `host.Step(Time.unscaledDeltaTime)`。保留 Unity 特定（相机 / safeArea / 输入钩子 / 设计分辨率 / NativeHost 根 transform）。
 
-> **LoomStage 退役**：v1 的 `LoomStage`（589 行业务 API 透传层）在 Spec-4b clean break 整层删，无双壳——业务 API 透传已被 4a UIContext 取代，driver 的 ~10 个生命周期/后端编排调用按上述分层迁移。终态契约里只有 LoomHost/LoomBackend/UnityLoomBackend，无 LoomStage。
+> **LoomStage 退役**：v1 的 `LoomStage`（业务 API 透传层）在 Spec-4b clean break 整层删，无双壳——业务 API 透传已被 4a UIContext 取代，driver 的 ~10 个生命周期/后端编排调用按上述分层迁移。终态契约里只有 LoomHost/LoomBackend/UnityLoomBackend，无 LoomStage。
 
 - **Godot 后端**：镜像成 Node2D + RenderingServer canvas_item 自绘。否决 Control 路线（与核心布局双系统冲突）。遮罩用 canvas_group/clip。复用 LoomHost + 整个 Projection + Public，只写 `GodotLoomBackend : LoomBackend`。
 - **SRP 混合渲染**（Unity 增强）：自绘节点用自定义 SRP RendererFeature 批合绘制。

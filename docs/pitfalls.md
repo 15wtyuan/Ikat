@@ -1214,11 +1214,11 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 
 **症状**：Spec-4b P2 重写 LoomStageDriver 走 LoomHost + UIContext 后，PlayMode 一进就报 `[Spec4b] Instantiate 失败` 或 `NullReferenceException`，headless 测试全绿看不出问题。
 
-**根因**：P2 把 LoomStageDriver 拆成「LoomHost 持 stage + ctx + backend」+「driver 只做 Unity 生命周期 + 资源 IO」，driver Awake 序列漏调 `ctx.CreateRoot()` / `LoomHost.CreateRoot()`（显式建根节点，4a UIContext 投影层没自动建根），`Instantiate(pkg, template)` 把模板挂到空 root 时 parent 句柄无效 → Instantiate 失败。
+**根因**：P2 把 LoomStageDriver 拆成「LoomHost 持 stage + ctx + backend」+「driver 只做 Unity 生命周期 + 资源 IO」，driver Awake 序列漏建 scene root（4a UIContext 投影层没自动建根），`Instantiate(pkg, template)` 把模板挂到空 root 时 parent 句柄无效 → Instantiate 失败。
 
 **根因深一层**：headless 测试走 UIContext 路径自带 root（fixture 预建），driver Awake 路径只有 PlayMode 跑——headless 测不到 driver Awake 编排层是否完整调用 LoomHost lifecycle。
 
-**解决**：✅ driver Awake 序列补 `host.CreateRoot()` 或 `ctx.CreateRoot()`（具体 API 以 P2 LoomHost 实际为准）——Instantiate 前先建 root，再 `ctx.LoadPackage` + `Instantiate` 挂到 root 下。commit `9495c88`（P2.6 LoomStage 退役 commit 一并修）。
+**解决**：✅ driver Awake 加私有 `EnsureSceneRoot()`（直调 FFI `loomgui_stage_create_root` 建 div 根）——Instantiate 前先建 root，再 load_package + Instantiate 挂到 root 下。P2.6（`9495c88`）漏建是 bug，P3.3（`8abe8a2`）补 `EnsureSceneRoot` 修。
 
 **教训**：Unity driver 编排层（Awake/Start/Update 序列）**headless 测不到**——headless 只测 UIContext 投影层（fixture 自带 root），driver Awake 是否完整调 LoomHost lifecycle 必须真机 PlayMode 验。诊断：PlayMode 一进就 Instantiate 失败 / NRE → 先查 driver Awake 是否漏建 root（或 stage 没 new），别先怀疑 UIContext 投影层（headless 已锁）。改 driver Awake/Start 序列必跑 PlayMode 真机。
 
