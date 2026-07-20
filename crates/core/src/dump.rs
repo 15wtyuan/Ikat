@@ -37,6 +37,8 @@ pub fn dump_scene_json(scene: &Scene) -> String {
             NodeKind::Link => ("a", "Link".into()),
             NodeKind::Image => ("img", "Image".into()),
             NodeKind::TextField => ("input", "TextField".into()),
+            NodeKind::PasswordField => ("input", "PasswordField".into()),
+            NodeKind::SearchField => ("input", "SearchField".into()),
             NodeKind::NumberField => ("input", "NumberField".into()),
             NodeKind::Slider => ("input", "Slider".into()),
             NodeKind::Toggle => ("input", "Toggle".into()),

@@ -1,4 +1,4 @@
-//! 包格式（.pkg.bin，当前 version=19）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=20）：Rust-internal（packager 写、runtime 读，C# 不解析）。
 //!
 //! 多组件格式：一个 pkg.bin = 多个具名组件（ComponentTable 切分）。
 //! 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponent(DynamicRules)。
@@ -17,9 +17,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 19; // v19: drop Controller schema (ControllerEntry/controllers/data_controller) — data-controller v1.5 retired
-pub(crate) const MIN_VERSION: u32 = 19;
-pub(crate) const MAX_VERSION: u32 = 19;
+pub const PKG_FORMAT_VERSION: u32 = 20; // v20: split NodeKind::TextField into TextField/PasswordField/SearchField (added discriminants 23/24)
+pub(crate) const MIN_VERSION: u32 = 20;
+pub(crate) const MAX_VERSION: u32 = 20;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────
@@ -147,7 +147,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                     .as_ref()
                     .map(|c| intern(c, &mut strings, &mut idx_of))
                     .unwrap_or(NULL_IDX);
-                // kind_tag = NodeKind 判别值（repr(u8)），全 23 变体保真。
+                // kind_tag = NodeKind 判别值（repr(u8)），全 25 变体保真。
                 let kind_tag = tn.kind as u8;
                 match tn.kind {
                     NodeKind::Image => (kind_tag, NULL_IDX, src_idx),

@@ -109,6 +109,10 @@ pub enum NodeKind {
     Slot,
     CustomElement,
     Canvas,
+    /// `<input type="password">` — split from TextField for attribute-selector matching.
+    PasswordField,
+    /// `<input type="search">` — split from TextField for attribute-selector matching.
+    SearchField,
 }
 
 impl NodeKind {
@@ -139,6 +143,8 @@ impl NodeKind {
             20 => Some(NodeKind::Slot),
             21 => Some(NodeKind::CustomElement),
             22 => Some(NodeKind::Canvas),
+            23 => Some(NodeKind::PasswordField),
+            24 => Some(NodeKind::SearchField),
             _ => None,
         }
     }
@@ -202,7 +208,9 @@ const _: () = {
             | NodeKind::ListItem
             | NodeKind::Slot
             | NodeKind::CustomElement
-            | NodeKind::Canvas => {}
+            | NodeKind::Canvas
+            | NodeKind::PasswordField
+            | NodeKind::SearchField => {}
         }
     }
 };
@@ -568,6 +576,8 @@ mod repr_tests {
         assert_eq!(NodeKind::Button as u8, 6);
         assert_eq!(NodeKind::Image as u8, 8);
         assert_eq!(NodeKind::Canvas as u8, 22);
+        assert_eq!(NodeKind::PasswordField as u8, 23);
+        assert_eq!(NodeKind::SearchField as u8, 24);
     }
 
     #[test]
@@ -596,11 +606,13 @@ mod repr_tests {
             NodeKind::Slot,
             NodeKind::CustomElement,
             NodeKind::Canvas,
+            NodeKind::PasswordField,
+            NodeKind::SearchField,
         ];
         for &k in &all {
             assert_eq!(NodeKind::from_u8(k as u8), Some(k));
         }
-        assert_eq!(NodeKind::from_u8(23), None); // 越界
+        assert_eq!(NodeKind::from_u8(25), None); // 越界
         assert_eq!(NodeKind::from_u8(255), None);
     }
 }

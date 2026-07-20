@@ -65,6 +65,10 @@ pub enum SemanticKind {
     /// during annotation.
     InputDispatch,
     TextField,
+    /// `<input type="password">` — split from TextField so attribute selectors can match it.
+    PasswordField,
+    /// `<input type="search">` — split from TextField so attribute selectors can match it.
+    SearchField,
     NumberField,
     Slider,
     Toggle,
@@ -113,7 +117,9 @@ pub fn resolve_semantic(tag: &str, input_type: Option<&str>) -> Option<SemanticK
         "img" => Some(SemanticKind::Image),
         "canvas" => Some(SemanticKind::Canvas),
         "input" => match input_type.unwrap_or("text") {
-            "text" | "password" | "search" => Some(SemanticKind::TextField),
+            "text" => Some(SemanticKind::TextField),
+            "password" => Some(SemanticKind::PasswordField),
+            "search" => Some(SemanticKind::SearchField),
             "number" => Some(SemanticKind::NumberField),
             "range" => Some(SemanticKind::Slider),
             "checkbox" => Some(SemanticKind::Toggle),
@@ -450,6 +456,26 @@ mod tests {
     #[test]
     fn resolve_input_bogus_type() {
         assert_eq!(resolve_semantic("input", Some("bogus")), None);
+    }
+
+    #[test]
+    fn resolve_input_password_search_split() {
+        assert_eq!(
+            resolve_semantic("input", Some("text")),
+            Some(SemanticKind::TextField)
+        );
+        assert_eq!(
+            resolve_semantic("input", Some("password")),
+            Some(SemanticKind::PasswordField)
+        );
+        assert_eq!(
+            resolve_semantic("input", Some("search")),
+            Some(SemanticKind::SearchField)
+        );
+        assert_eq!(
+            resolve_semantic("input", None),
+            Some(SemanticKind::TextField)
+        ); // 默认 text
     }
 
     #[test]

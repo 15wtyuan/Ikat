@@ -78,24 +78,24 @@ fn write_read_multi_component_roundtrip() {
 
 #[test]
 fn old_version_pkg_rejected() {
-    // 手构 version < MIN_VERSION 的 header -> read_package 报 TooOld（v18 弃载，MIN=19）
+    // 手构 version < MIN_VERSION 的 header -> read_package 报 TooOld（v19 弃载，MIN=20）
     let mut old = vec![];
     old.extend_from_slice(&PKG_MAGIC.to_le_bytes());
-    old.extend_from_slice(&(MIN_VERSION - 1).to_le_bytes()); // v18 低于 MIN_VERSION=19
+    old.extend_from_slice(&(MIN_VERSION - 1).to_le_bytes()); // v19 低于 MIN_VERSION=20
     assert!(matches!(read_package(&old), Err(PkgError::TooOld(_))));
 }
 
-/// v18 pkg（pre-drop Controller schema）一刀切拒载：MIN=MAX=19，无迁移器。
+/// v19 pkg（pre-TextField-split schema）一刀切拒载：MIN=MAX=20，无迁移器。
 /// 验证 bump 后旧 fixture/pkg.bin 不会半读半坏（schema 已不兼容）。
 #[test]
-fn v18_pkg_rejected_after_schema_drop() {
-    let mut v18 = vec![];
-    v18.extend_from_slice(&PKG_MAGIC.to_le_bytes());
-    v18.extend_from_slice(&18u32.to_le_bytes()); // v18 = MIN_VERSION - 1
-    let err = read_package(&v18);
+fn v19_pkg_rejected_after_schema_drop() {
+    let mut v19 = vec![];
+    v19.extend_from_slice(&PKG_MAGIC.to_le_bytes());
+    v19.extend_from_slice(&19u32.to_le_bytes()); // v19 = MIN_VERSION - 1
+    let err = read_package(&v19);
     assert!(
-        matches!(err, Err(PkgError::TooOld(18))),
-        "v18 pkg must be rejected as TooOld after v19 bump, got {err:?}"
+        matches!(err, Err(PkgError::TooOld(19))),
+        "v19 pkg must be rejected as TooOld after v20 bump, got {err:?}"
     );
 }
 
@@ -376,10 +376,10 @@ fn read_rejects_duplicate_component_name() {
     );
 }
 
-/// Important 4：NodeBlock 的 kind_tag 字节不在 `NodeKind::from_u8` 判别值范围（≥23）→ BadKind
+/// Important 4：NodeBlock 的 kind_tag 字节不在 `NodeKind::from_u8` 判别值范围（≥25）→ BadKind
 /// （不静默塌成 Container）。v17 的 KIND_* 5 常量方案 read 侧用 wildcard fallback 把未知字节
-/// 全塌成 Container（kind collapse）；v18 起 kind_tag = NodeKind 判别值(0..=22)，from_u8 对
-/// ≥23 返 None → BadKind。本测试同时正向验证改的是 kind_tag 字节（改成 Label 须读回 Label），
+/// 全塌成 Container（kind collapse）；v18 起 kind_tag = NodeKind 判别值，from_u8 对越界值
+/// 返 None → BadKind。本测试同时正向验证改的是 kind_tag 字节（改成 Label 须读回 Label），
 /// 避免"改错字节却因别的原因碰巧报错"的假阳性。
 #[test]
 fn read_rejects_unknown_kind_tag() {
@@ -407,16 +407,16 @@ fn read_rejects_unknown_kind_tag() {
         "kind_tag offset sanity: patching to Label must read back Label"
     );
 
-    // 23 = from_u8 的首个 None 分支（Canvas=22 是最后合法判别值）。
+    // 25 = from_u8 的首个 None 分支（SearchField=24 是最后合法判别值）。
     let mut patched_bad = bytes.clone();
-    patched_bad[kind_tag_off] = 23;
+    patched_bad[kind_tag_off] = 25;
     let err = read_package(&patched_bad).expect_err("unknown kind_tag must error");
     assert!(
-        matches!(err, PkgError::BadKind(23)),
-        "expected BadKind(23), got {err:?}"
+        matches!(err, PkgError::BadKind(25)),
+        "expected BadKind(25), got {err:?}"
     );
 
-    // 0xFF = 远超判别值范围，同样必须 BadKind。防 from_u8 回归（如 off-by-one 把 23 误返 Some）。
+    // 0xFF = 远超判别值范围，同样必须 BadKind。防 from_u8 回归（如 off-by-one 把 25 误返 Some）。
     let mut patched_ff = bytes.clone();
     patched_ff[kind_tag_off] = 0xFF;
     let err = read_package(&patched_ff).expect_err("0xFF kind_tag must error");
@@ -533,4 +533,41 @@ fn v18_nontrivial_nodekinds_roundtrip() {
             "kind {k:?} collapsed after roundtrip"
         );
     }
+}
+
+/// v20: PasswordField/SearchField 节点经 write_package → read_package 往返后 kind 保真，
+/// 且包版本号 = 20。这两个变体是 v20 从 TextField 拆出的（判别值 23/24），本测试锁定
+/// pkg kind_tag 写读映射 + 版本号 bump 的一致性。
+#[test]
+fn v20_password_search_field_roundtrip() {
+    let root = tn(NodeKind::Container);
+    let mut pwd = tn(NodeKind::PasswordField);
+    pwd.parent_idx = Some(0);
+    let mut search = tn(NodeKind::SearchField);
+    search.parent_idx = Some(0);
+    let nodes = [root, pwd, search];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules)],
+    };
+    let bytes = write_package(&input);
+
+    // 版本号 = 20（Header 偏移 4..8 是 version 字段）。
+    let ver = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+    assert_eq!(ver, 20, "pkg format version must be 20 after bump");
+
+    let pkg = read_package(&bytes).expect("roundtrip read ok");
+    let ns = &pkg.components["c"].nodes;
+    assert_eq!(ns.len(), 3);
+    assert_eq!(ns[0].kind, NodeKind::Container);
+    assert_eq!(
+        ns[1].kind,
+        NodeKind::PasswordField,
+        "PasswordField must survive pkg roundtrip (discriminant 23)"
+    );
+    assert_eq!(
+        ns[2].kind,
+        NodeKind::SearchField,
+        "SearchField must survive pkg roundtrip (discriminant 24)"
+    );
 }

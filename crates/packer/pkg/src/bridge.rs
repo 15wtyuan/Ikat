@@ -104,6 +104,8 @@ fn map_semantic(el: &IrElement) -> Result<NodeKind, String> {
         Some(SemanticKind::Image) => Ok(NodeKind::Image),
         Some(SemanticKind::Canvas) => Ok(NodeKind::Canvas),
         Some(SemanticKind::TextField) => Ok(NodeKind::TextField),
+        Some(SemanticKind::PasswordField) => Ok(NodeKind::PasswordField),
+        Some(SemanticKind::SearchField) => Ok(NodeKind::SearchField),
         Some(SemanticKind::NumberField) => Ok(NodeKind::NumberField),
         Some(SemanticKind::Slider) => Ok(NodeKind::Slider),
         Some(SemanticKind::Toggle) => Ok(NodeKind::Toggle),
