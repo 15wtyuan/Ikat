@@ -1339,9 +1339,9 @@ namespace LoomGUI
     }
 
     // PasswordField / SearchField：<input type="password"> / <input type="search"> 的 typed 投影。
-    // 与 TextField 同语义表面（Rust 侧 NodeKind 拆分仅服务于 attribute-selector [type=...] 精确匹配，
-    // 运行时 API 与 TextField 一致——public-api.md 把三者合并在 input[text/password/search] | TextField
-    // 一行；此处分作 sibling 类是投影层为 Rust kind 留 arm 的对齐，public-api.md 待后续同步）。
+    // 与 TextField 同语义表面（Rust 侧 NodeKind 拆分服务于 attribute-selector [type=...] 精确匹配，
+    // 运行时 API 与 TextField 一致）。分作 sibling 类是投影层为 Rust kind 留 arm 的对齐；
+    // public-api.md 同步拆为 TextField/PasswordField/SearchField 三行。
     public class PasswordField : Node
     {
         internal PasswordField(UIContext ctx, uint id) : base(ctx, id) { }

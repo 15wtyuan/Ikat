@@ -222,14 +222,14 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 
 - **card-img Image bg 合成 node_id 机制**（Spec-4b P3.4 视觉 1/5 未过；机制后续商议）：Unity 后端按 node_id 去重，Image bg + texture 同 node_id 只画 texture。要照 box-shadow `BOX_SHADOW_FLAG` bit 28 合成 id 模式：core render Image bg 用 `IMG_BG_FLAG` 合成 id + Unity 后端建 2 GameObject + sort_key propagate（bg 在 texture 下）。本轮补丁（commit `73e560e`）reverted（`8ea81aa`）——机制草稿待商议后再实现。
 - **keyframes runtime 驱动 + fence 动画子集补全**（§4 视觉束 v1.10 后续）：fence `@keyframes` at-rule + `animation` 简写 DSL 已完成基础语法校验（commit `e2e2812`），但存在以下缺口，全部归入视觉束与 runtime 驱动一同落地：
-  - **runtime 驱动缺失**：keyframes 规则在 `ParsedTemplate.keyframes` 暴露但 packer bridge 静默丢弃；缺 `KeyframesTable` 进 pkg + `ResolvedStyle.animation` 字段 + bridge 序列化 + tween 发射 + pkg bump 19→20 + dll 重编。
+  - **runtime 驱动缺失**：keyframes 规则在 `ParsedTemplate.keyframes` 暴露但 packer bridge 静默丢弃；缺 `KeyframesTable` 进 pkg + `ResolvedStyle.animation` 字段 + bridge 序列化 + tween 发射 + pkg bump 20→21 + dll 重编。
   - **`transition` 空壳**：`CssValueParser::Transition` 枚举变体已定义但零校验逻辑。fence 接受任意 `transition` 值不报错，但实际不生效。
   - **无 `animation` 长划子属性**：仅 `animation` 简写存在，缺少标准 CSS 的 8 个长划属性（`animation-name`/`animation-duration`/`animation-delay`/`animation-iteration-count`/`animation-direction`/`animation-fill-mode`/`animation-play-state`/`animation-timing-function`）。长划是简写的语法糖基础，应先补长划再补简写展开。
   - **`animation-delay` 处理粗糙**：简写解析器将最后一个数值 token 当 delay，非标准 CSS delay 语法。
   - **缓动仅 7 种**：`linear`/`ease`/`ease-in`/`ease-out`/`ease-in-out`/`step-start`/`step-end`。无 `cubic-bezier()`、无弹簧/弹性物理缓动。
   - **keyframes 内不支持 per-stop 缓动**：标准 CSS 每个 stop 可带 `animation-timing-function`，当前不支持。
   - **无 `@loom-hook`**：public-api.md §9.3 描述的 `/* @loom-hook name */` 注释锚点，fence 未解析。
-- **showcase 围栏违规**（showcase 整体打包挂，专门 task 后续）：showcase home `:nth-child` + form/settings 逗号多 selector / 属性 selector / `resize` CSS prop 预存围栏子集限制，showcase 整体打包挂（spec4b 单独 package 打包过）。showcase 跟围栏最终形态见 `docs/design/fence.md`（后续专门 task）。
+- ✅ **showcase 围栏违规 — RESOLVED**（showcase-package-unblock 2026-07-21）：原 blocker（home `:nth-child` + form/settings 逗号/属性 selector + `resize` 围栏外）已由 fence 扩围（逗号 list / 属性 selector / resize noop）+ showcase nth-child/aria-selected defer 注释解决，`cargo run -p loomgui_pkg -- build showcase` exit 0、8 组件 showcase.pkg.bin 产出。剩余 nth-child / aria-selected / keyframes runtime 见下专门条目。
 - **`:nth-child(N)` selector + `animation-delay` 错峰**（§4 视觉束）：fence 选择器子集本轮不收 `:nth-child(N)`，相关错峰规则 defer 到视觉束与 keyframes runtime 一同落地（pkg v20→v21 reserved）。showcase `home.html` 7 条 `.nav-card:nth-child(N){animation-delay:...}` 已注释（见 home.html TODO）。
 - **`[aria-selected]` state-attr selector**（§4 控件束 TabList）：fence 属性选择器本轮只匹配 `[type=x]`，state-attr 匹配（`[aria-selected="true"]` 等）随 Tab 控件（role dispatch + WAI-ARIA 复合控件）落地。showcase `settings.html` `.tab[aria-selected="true"]` CSS 规则已注释（见 settings.html TODO；HTML `aria-selected` 属性本身 fence 解析正常，仅 CSS 选择器 deferred）。
 - **`Scene::build` data_controller dead 参数**（R2 待办段，签名重构后清）：P1 妥协保留 `Scene::build` 入参里的 data_controller 位，Controller 全链已删但签名未重构。
@@ -237,7 +237,7 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 - **add_class null check gap**（Minor，P2.5）：FFI `add_class` 对 null class 指针的 null-check 守卫缺失（与 P2.5 deferred ② `create_node`/`set_text` null css 同源模式），低风险（业务 caller 不传 null），核心 null-check 修法套用。
 - **GUI exe 拷贝滞后**（编码机工作流）：GUI exe 重出后编码机忙没拷 `unity/package/Editor/Tools/loomgui_gui.exe`，编码机关 GUI 后拷。不影响 runtime，影响打包器版本（pkg bump 时触发，坑 158 同源 stale exe 链）。
 - **loom.runtime.json stomping**（P3.2 concern 1，多 workspace 共享 output_dir）：多 workspace 共享同一 output_dir 时 packer 重写 `loom.runtime.json` 互相覆盖。处置：每 workspace 独立 output_dir（`loom.workspace.json` 配），或 packer 加 namespace 隔离。
-- **showcase src/key packer bug**（P3.1 发现，showcase 预存）：showcase HTML src "../res/icons/..." vs sprite key "res/icons/..." 路径前缀不匹配，packer referenced_sprites 校验挂。showcase 整体打包门推迟（跟围栏违规同 task）。
+- ✅ **showcase src/key packer bug — RESOLVED**（showcase-package-unblock Task 8）：`normalize_sprite_key`（crates/packer/pkg/src/build.rs）把 HTML 相对 img src 归一为 workspace-root 相对 sprite_key；showcase img src + spec4b img-src 深度修对后 referenced_sprites ↔ atlas 校验过。
 
 ### main-design.md 校验发现的 deferred 项（2026-07-20 review）
 
