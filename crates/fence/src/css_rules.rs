@@ -1,8 +1,9 @@
 //! `<style>` 选择器解析 + 规则表产物（fence = 纯解析器）。
 //!
 //! 路径 c：手搓解析器，直产 core 的 ParsedSelector/Compound（fence 已依赖 core）。
-//! 子集：class / tag / id / 后代组合（空格）/ 伪类（hover/active/disabled/focus/checked）。
-//! 越界（属性选择器、nth-child、+ ~ 组合子、逗号多选等）返 None，由调用方报错。
+//! 子集：class / tag / id / 后代组合（空格）/ 伪类（hover/active/disabled/focus/checked）
+//! / 属性选择器（[attr] / [attr="val"]，仅 Exists + Eq）。
+//! 越界（nth-child、+ ~ 组合子等）返 None，由调用方报错。
 //!
 //! @keyframes at-rule（对齐 public-api.md §9「动画定义全在 CSS」终态）：fence 解析
 //! `@keyframes <name> { <stop-selector> { decls } ... }` 产 `KeyframesRule`。runtime
@@ -11,7 +12,8 @@
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
 use crate::schema::css::{find_css_prop, find_shorthand};
 use loomgui_core::style::dynamic::{
-    Combinator, Compound, Declaration, DynamicRule, ParsedSelector, Specificity,
+    AttrOp, AttrSelector, Combinator, Compound, Declaration, DynamicRule, ParsedSelector,
+    Specificity,
 };
 
 // ── @keyframes 类型（fence-local；pkg.bin 暂不序列化）──────────────────────────
@@ -41,20 +43,16 @@ pub struct KeyframesRule {
 
 /// 解析单条选择器串 → ParsedSelector（含 specificity）。越界返 None。
 ///
-/// 子集：空格分隔的若干 compound（后代组合）；每个 compound = tag? + (class/id/pseudo)*。
-/// 越界：属性选择器 `[...]`、Child `>`、相邻 `+`/`~`、逗号多选 → None。
+/// 子集：空格分隔的若干 compound（后代组合）；每个 compound =
+/// tag? + (class/id/pseudo/attr)*。
+/// 越界：Child `>`、相邻 `+`/`~`、逗号多选（逗号在 parse_style_block 预切分）→ None。
 pub fn parse_selector(raw: &str) -> Option<ParsedSelector> {
     let raw = raw.trim();
     if raw.is_empty() {
         return None;
     }
-    // 越界字符快速判定（本子集不含这些）
-    if raw.contains('[')
-        || raw.contains(',')
-        || raw.contains('>')
-        || raw.contains('+')
-        || raw.contains('~')
-    {
+    // 越界字符快速判定：逗号 / > + ~ 组合子不在本子集（属性选择器 `[...]` 已支持，见 parse_compound）。
+    if raw.contains(',') || raw.contains('>') || raw.contains('+') || raw.contains('~') {
         return None;
     }
 
@@ -134,6 +132,42 @@ fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
             }
             b += 1; // 伪类算 class 级
             rest = next;
+        } else if let Some(r) = rest.strip_prefix('[') {
+            // 属性选择器：[attr] / [attr="val"] / [attr=val]。仅 Eq + Exists；高阶运算符
+            // (^= ~= $= *= |=) 不在围栏子集 → 返 None 让 parse_style_block 报错。
+            let close = r.find(']')?;
+            let inner = r[..close].trim();
+            let after = &r[close + 1..];
+            let (name, op, value) = match inner.find('=') {
+                Some(eq_pos) => {
+                    let name_part = inner[..eq_pos].trim();
+                    // 高阶属性运算符的修饰字符紧贴 = 前 → 围栏外，直接拒绝。
+                    if name_part.ends_with(['~', '^', '$', '*', '|']) {
+                        return None;
+                    }
+                    if name_part.is_empty() {
+                        return None;
+                    }
+                    let val = inner[eq_pos + 1..]
+                        .trim()
+                        .trim_matches('"')
+                        .trim_matches('\'');
+                    (
+                        name_part.to_ascii_lowercase(),
+                        AttrOp::Eq,
+                        Some(val.to_string()),
+                    )
+                }
+                None => {
+                    if inner.is_empty() {
+                        return None;
+                    }
+                    (inner.to_ascii_lowercase(), AttrOp::Exists, None)
+                }
+            };
+            c.attrs.push(AttrSelector { name, op, value });
+            b += 1; // 属性选择器算 class 级
+            rest = after;
         } else {
             // tag（必须出现在 compound 最前）
             if consumed_tag {
@@ -509,12 +543,40 @@ mod tests {
 
     #[test]
     fn out_of_subset_returns_none() {
-        // 属性选择器、逗号、+ ~ 组合子都不在本子集
-        assert!(parse_selector(r#"[type="text"]"#).is_none());
+        // 属性选择器现已支持（[attr]/[attr="val"]）；逗号在 parse_style_block 预切分，
+        // parse_selector 自身仍拒；> + ~ 组合子、nth-child 仍越界。
+        assert!(parse_selector(r#"[type="text"]"#).is_some());
         assert!(parse_selector(".a, .b").is_none());
         assert!(parse_selector(".a > .b").is_none()); // Child 组合子本轮不做（仅后代空格）
         assert!(parse_selector(".a + .b").is_none());
         assert!(parse_selector(":nth-child(2)").is_none());
+    }
+
+    #[test]
+    fn parse_attr_selector_eq() {
+        let s = parse_selector(r#"input[type="text"]"#).unwrap();
+        assert_eq!(s.compound[0].tag.as_deref(), Some("input"));
+        assert_eq!(s.compound[0].attrs.len(), 1);
+        let a = &s.compound[0].attrs[0];
+        assert_eq!(a.name, "type");
+        assert_eq!(a.op, AttrOp::Eq);
+        assert_eq!(a.value.as_deref(), Some("text"));
+        // 属性选择器算 class 级 specificity → (id=0, class+attr=1, tag=1)
+        assert_eq!(s.specificity, Specificity(0, 1, 1));
+    }
+
+    #[test]
+    fn parse_attr_selector_unquoted_and_exists() {
+        assert_eq!(
+            parse_selector(r#"input[type=password]"#).unwrap().compound[0].attrs[0]
+                .value
+                .as_deref(),
+            Some("password")
+        );
+        // [attr] 存在形式
+        let s = parse_selector(r#"[disabled]"#).unwrap();
+        assert_eq!(s.compound[0].attrs[0].op, AttrOp::Exists);
+        assert!(s.compound[0].attrs[0].value.is_none());
     }
 
     use loomgui_core::style::dynamic::Declaration;
