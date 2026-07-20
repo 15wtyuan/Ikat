@@ -228,20 +228,29 @@ pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Ve
         }
         // <style> 内无精确 per-token span —— 定位用选择器起点近似。
         let loc = line_map.source_location(sel_start, "<style>".to_string());
-        let Some(selector) = parse_selector(prelude) else {
-            diagnostics.push(Diagnostic::error(
-                DiagnosticCode::FenceBadCssValue,
-                format!("unsupported selector \"{}\" in <style>", prelude),
-                loc,
-            ));
-            continue;
-        };
+        // 声明块只解析一次，逗号 selector list 的每段共享同一 declarations（clone）。
         let declarations = parse_declarations(body, &loc, &mut diagnostics);
-        if !declarations.is_empty() {
-            rules.push(DynamicRule {
-                selector,
-                declarations,
-            });
+        if declarations.is_empty() {
+            continue;
+        }
+        // 逗号 selector list：`a, b, c { decls }` → 每段独立 parse_selector，共享声明块。
+        // parse_selector 自身仍拒逗号（越界），由这里先 split，每段不再含逗号。
+        for sel_raw in prelude.split(',') {
+            let sel_raw = sel_raw.trim();
+            if sel_raw.is_empty() {
+                continue;
+            }
+            match parse_selector(sel_raw) {
+                Some(selector) => rules.push(DynamicRule {
+                    selector,
+                    declarations: declarations.clone(),
+                }),
+                None => diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::FenceBadCssValue,
+                    format!("unsupported selector \"{sel_raw}\" in <style>"),
+                    loc.clone(),
+                )),
+            }
         }
     }
     (rules, keyframes, diagnostics)
@@ -540,6 +549,17 @@ mod tests {
             diags.iter().any(|d| d.message.contains(".a > .b")),
             "越界选择器应报错: {diags:?}"
         );
+    }
+
+    #[test]
+    fn parse_comma_selector_list_expands_to_shared_declarations() {
+        // 逗号 selector list：`a, b, c { decls }` → 3 条 DynamicRule 共享同一声明块。
+        // 用纯 tag 选择器隔离逗号展开机制本身（属性选择器 [type="..."] 是另一个 task）。
+        let (rules, _, diags) = parse_style_block("input, select, textarea { color: red }");
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(rules.len(), 3, "逗号 list 展开为 3 条规则");
+        assert_eq!(rules[0].declarations, rules[1].declarations);
+        assert_eq!(rules[1].declarations, rules[2].declarations);
     }
 
     #[test]
