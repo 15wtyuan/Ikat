@@ -253,12 +253,41 @@ pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
             return false;
         }
     }
-    // 属性选择器：Node 不携带 HTML 属性字面值（data-controller/data-page 随 v1.5 Controller
-    // 全链退役）。任何属性选择器在此层都不匹配。
-    if !c.attrs.is_empty() {
-        return false;
+    // 属性选择器：Node 不携带任意 HTML 属性字面值，但 [type="x"] 可经 type→NodeKind 映射精确匹配
+    // （input 的 type 在 parse 期已固化为 NodeKind，TextField/PasswordField/SearchField 等各自独立
+    // kind）。其他 attr name 仍不匹配（Node 无对应字面值）。
+    for a in &c.attrs {
+        if !attr_matches_node(a, node) {
+            return false;
+        }
     }
     true
+}
+
+/// `[type="x"]` 经 type 值 → NodeKind 精确对应。其他 attr name / `[type]` 存在形式本轮不匹配。
+///
+/// type→NodeKind 映射必须与 `crates/fence/src/schema/tag.rs::resolve_semantic`（input 分支）
+/// 保持一致：那是 parse 期 `<input type=x>` → SemanticKind → NodeKind 的同一份标准 HTML 语义，
+/// 这里是 match 期 selector `[type=x]` → NodeKind 的另一面。两者分歧会导致 `[type="password"]`
+/// 匹配错误 kind。
+fn attr_matches_node(a: &AttrSelector, node: &Node) -> bool {
+    if a.name != "type" {
+        return false;
+    }
+    let Some(val) = &a.value else {
+        return false;
+    }; // [type] 存在形式本轮不匹配
+    let expected_kind = match val.as_str() {
+        "text" => NodeKind::TextField,
+        "password" => NodeKind::PasswordField,
+        "search" => NodeKind::SearchField,
+        "number" => NodeKind::NumberField,
+        "range" => NodeKind::Slider,
+        "checkbox" => NodeKind::Toggle,
+        "radio" => NodeKind::RadioButton,
+        _ => return false,
+    };
+    node.kind == expected_kind
 }
 
 /// 判定 compound 是否匹配 node + 状态门。
@@ -1222,6 +1251,43 @@ mod tests {
         let back: ParsedSelector = bincode::deserialize(&bytes).unwrap();
         assert_eq!(back.compound[0].attrs.len(), 1);
         assert_eq!(back.compound[0].attrs[0].name, "data-page");
+    }
+
+    /// 极简 Node 构造（仅设 kind）。attr selector 测试不需要 layout_rect/scene。
+    fn test_node(kind: NodeKind) -> Node {
+        let mut n = Node::default();
+        n.kind = kind;
+        n
+    }
+
+    #[test]
+    fn attr_selector_type_matches_nodekind_precisely() {
+        // [type="password"] 只匹配 PasswordField，不匹配 TextField
+        let sel = hand_selector(r#"[type="password"]"#);
+        let pw_node = test_node(NodeKind::PasswordField);
+        assert!(compound_matches_node(&sel.compound[0], &pw_node));
+        let text_node = test_node(NodeKind::TextField);
+        assert!(!compound_matches_node(&sel.compound[0], &text_node));
+        // [type="text"] 只匹配 TextField
+        let sel_text = hand_selector(r#"[type="text"]"#);
+        assert!(compound_matches_node(&sel_text.compound[0], &text_node));
+        assert!(!compound_matches_node(&sel_text.compound[0], &pw_node));
+    }
+
+    #[test]
+    fn attr_selector_non_type_attr_does_not_match() {
+        // 非 type 属性：本轮不匹配（Node 不携带任意 HTML 属性字面值）
+        let sel = hand_selector("[disabled]");
+        let node = test_node(NodeKind::TextField);
+        assert!(!compound_matches_node(&sel.compound[0], &node));
+    }
+
+    #[test]
+    fn attr_selector_type_exists_form_does_not_match() {
+        // [type] 存在形式（无 = val）：本轮不支持（只走 Eq 精确匹配）
+        let sel = hand_selector("[type]");
+        let node = test_node(NodeKind::TextField);
+        assert!(!compound_matches_node(&sel.compound[0], &node));
     }
 
     // ── transition 请求发射测 ──
