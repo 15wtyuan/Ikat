@@ -7,6 +7,7 @@
 
 import { chromium } from 'playwright';
 import { readFileSync, writeFileSync } from 'fs';
+import { pathToFileURL } from 'node:url';
 
 const [, , htmlPath, outPath] = process.argv;
 if (!htmlPath || !outPath) {
@@ -17,30 +18,33 @@ if (!htmlPath || !outPath) {
 const reset = readFileSync(new URL('./reset.css', import.meta.url), 'utf8');
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
-await page.goto('file://' + htmlPath, { waitUntil: 'networkidle' });
-// Inject reset AFTER load so it overrides UA defaults before measurement;
-// showcase <style> rules still win where they specify values.
-await page.addStyleTag({ content: reset });
-await page.waitForTimeout(100); // let reset reflow settle
+try {
+  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+  await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'networkidle' });
+  // Inject reset AFTER load so it overrides UA defaults before measurement;
+  // showcase <style> rules still win where they specify values.
+  await page.addStyleTag({ content: reset });
+  await page.waitForTimeout(100); // let reset reflow settle
 
-const rects = await page.evaluate(() => {
-  const els = document.querySelectorAll('body *');
-  return Array.from(els).map((el, i) => {
-    const r = el.getBoundingClientRect();
-    return {
-      domIndex: i,
-      tag: el.tagName.toLowerCase(),
-      id: el.id || null,
-      classes: Array.from(el.classList),
-      x: r.x,
-      y: r.y,
-      w: r.width,
-      h: r.height,
-    };
+  const rects = await page.evaluate(() => {
+    const els = document.querySelectorAll('body *');
+    return Array.from(els).map((el, i) => {
+      const r = el.getBoundingClientRect();
+      return {
+        domIndex: i,
+        tag: el.tagName.toLowerCase(),
+        id: el.id || null,
+        classes: Array.from(el.classList),
+        x: r.x,
+        y: r.y,
+        w: r.width,
+        h: r.height,
+      };
+    });
   });
-});
 
-await browser.close();
-writeFileSync(outPath, JSON.stringify(rects, null, 2));
-console.log(`wrote ${rects.length} elements -> ${outPath}`);
+  writeFileSync(outPath, JSON.stringify(rects, null, 2));
+  console.log(`wrote ${rects.length} elements -> ${outPath}`);
+} finally {
+  await browser.close();
+}
