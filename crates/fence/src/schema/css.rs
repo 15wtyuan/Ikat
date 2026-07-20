@@ -383,6 +383,13 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         inherited: false,
         parser: CssValueParser::Keyword(&["auto", "none"]),
     },
+    // resize: 标准浏览器禁 textarea 拖拽手柄。core 不消费（noop），fence 接受避免报 prop 名错。
+    CssPropSpec {
+        name: "resize",
+        default: "none",
+        inherited: false,
+        parser: CssValueParser::Keyword(&["none", "both", "horizontal", "vertical"]),
+    },
     CssPropSpec {
         name: "transform",
         default: "none",
@@ -632,6 +639,7 @@ fn is_animation_keyword(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::css_rules::parse_style_block;
 
     #[test]
     fn known_css_props() {
@@ -701,5 +709,15 @@ mod tests {
         assert!(!validate_animation_value("123 2s")); // 数字开头 name
         assert!(!validate_animation_value("fadeIn 2s bogusKeyword"));
         assert!(!validate_animation_value("--custom 2s")); // CSS 变量前缀作 name
+    }
+
+    #[test]
+    fn resize_prop_accepted_as_noop() {
+        // resize 进 CSS_PROPS（find_css_prop 命中），值 none/both/horizontal/vertical 接受
+        assert!(find_css_prop("resize").is_some());
+        // 通过 parse_style_block 验：含 resize:none 的规则不产 prop 名诊断
+        let (_, _, diags) = parse_style_block("textarea { resize: none }");
+        let resize_diag = diags.iter().find(|d| d.message.contains("resize"));
+        assert!(resize_diag.is_none(), "resize 不该报 prop 名错：{diags:?}");
     }
 }
