@@ -230,6 +230,8 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
   - **keyframes 内不支持 per-stop 缓动**：标准 CSS 每个 stop 可带 `animation-timing-function`，当前不支持。
   - **无 `@loom-hook`**：public-api.md §9.3 描述的 `/* @loom-hook name */` 注释锚点，fence 未解析。
 - **showcase 围栏违规**（showcase 整体打包挂，专门 task 后续）：showcase home `:nth-child` + form/settings 逗号多 selector / 属性 selector / `resize` CSS prop 预存围栏子集限制，showcase 整体打包挂（spec4b 单独 package 打包过）。showcase 跟围栏最终形态见 `docs/design/fence.md`（后续专门 task）。
+- **`:nth-child(N)` selector + `animation-delay` 错峰**（§4 视觉束）：fence 选择器子集本轮不收 `:nth-child(N)`，相关错峰规则 defer 到视觉束与 keyframes runtime 一同落地（pkg v20→v21 reserved）。showcase `home.html` 7 条 `.nav-card:nth-child(N){animation-delay:...}` 已注释（见 home.html TODO）。
+- **`[aria-selected]` state-attr selector**（§4 控件束 TabList）：fence 属性选择器本轮只匹配 `[type=x]`，state-attr 匹配（`[aria-selected="true"]` 等）随 Tab 控件（role dispatch + WAI-ARIA 复合控件）落地。showcase `settings.html` `.tab[aria-selected="true"]` CSS 规则已注释（见 settings.html TODO；HTML `aria-selected` 属性本身 fence 解析正常，仅 CSS 选择器 deferred）。
 - **`Scene::build` data_controller dead 参数**（R2 待办段，签名重构后清）：P1 妥协保留 `Scene::build` 入参里的 data_controller 位，Controller 全链已删但签名未重构。
 - **projection-layer §3 items 2/4 set_style 残留**（R2 待办段）：projection-layer 文档 §3 items 2/4 描述的 set_style 残留，R2 投影层升级攒批时清。
 - **add_class null check gap**（Minor，P2.5）：FFI `add_class` 对 null class 指针的 null-check 守卫缺失（与 P2.5 deferred ② `create_node`/`set_text` null css 同源模式），低风险（业务 caller 不传 null），核心 null-check 修法套用。
