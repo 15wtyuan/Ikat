@@ -9,7 +9,7 @@
 use loomgui_core::scene::node::NodeKind;
 use loomgui_core::scene::NodeId;
 use loomgui_core::stage::Stage;
-use loomgui_pkg::build::pack_components;
+use loomgui_pkg::build::{pack_components, Component};
 
 const HTML: &str = include_str!("fixtures/cascade-probe.html");
 
@@ -18,8 +18,12 @@ const HTML: &str = include_str!("fixtures/cascade-probe.html");
 /// without `append_child` the component is orphaned and never reaches layout
 /// (solve walks scene roots only).
 fn build_stage(html: &str) -> (Stage, NodeId) {
-    let (bytes, _refs) =
-        pack_components(&[("probe".to_string(), html.to_string())]).expect("pack_components");
+    let (bytes, _refs) = pack_components(&[Component {
+        name: "probe".to_string(),
+        src: html.to_string(),
+        html_rel: "probe.html".to_string(),
+    }])
+    .expect("pack_components");
     let mut stage = Stage::new((400.0, 300.0)).expect("Stage::new");
     // Text layout needs a default font at tick time; the fixture has Chinese
     // text, so register a CJK font. Embedded at compile time to keep the test
@@ -172,8 +176,12 @@ fn probe_e2_fixture_color_cascade() {
   </div>
 </body></html>"#;
 
-    let (bytes, _refs) = pack_components(&[("probe".to_string(), fixture_html.to_string())])
-        .expect("pack_components");
+    let (bytes, _refs) = pack_components(&[Component {
+        name: "probe".to_string(),
+        src: fixture_html.to_string(),
+        html_rel: "probe.html".to_string(),
+    }])
+    .expect("pack_components");
 
     let mut stage = Stage::new((400.0, 300.0)).expect("Stage::new");
     stage

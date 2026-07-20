@@ -25,16 +25,31 @@ pub struct BuildReport {
     pub log: Vec<String>,
 }
 
-/// 打包一个 package：components = [(组件名, html 源码)]。返 (pkg.bin bytes, referenced_sprites)。
-/// build() 读文件组 (name, src) 调本函数；本函数接字符串便于单测。
+/// 一个待打包的组件：名字 + HTML 源码 + 该 HTML 相对 workspace_root 的路径（正斜杠）。
+/// `html_rel` 仅用于把 img src 归一化为 sprite_key（见 `normalize_sprite_key`），
+/// 不参与 fence/bridge——后者只关心 `name` + `src`。
+pub struct Component {
+    pub name: String,
+    pub src: String,
+    pub html_rel: String,
+}
+
+/// 打包一个 package：components = [Component]。返 (pkg.bin bytes, referenced_sprites)。
+/// build() 读文件组装 Component 调本函数；本函数接字符串便于单测。
 ///
 /// 流程：每组件 `parse_template` → `bridge` → 累积；末尾 `write_package` 出 pkg.bin。
 /// fence diagnostics 非空 → Err（不静默降级）；bridge 多根 → Err（不静默产森林）。
-/// referenced_sprites = 所有组件 img src / background-image 并集（供 atlas 交叉验证）。
-pub fn pack_components(components: &[(String, String)]) -> Result<(Vec<u8>, Vec<String>), String> {
+/// referenced_sprites = 所有组件 img src / background-image 并集，已归一化为 workspace_root
+/// 相对路径（sprite_key 口径），供 atlas 交叉验证。
+pub fn pack_components(components: &[Component]) -> Result<(Vec<u8>, Vec<String>), String> {
     let mut built: Vec<(String, Vec<TemplateNode>, DynamicRuleTable)> = Vec::new();
     let mut refs: Vec<String> = Vec::new();
-    for (name, src) in components {
+    for comp in components {
+        let Component {
+            name,
+            src,
+            html_rel,
+        } = comp;
         let parsed = loomgui_fence::parse_template(src, name);
         if !parsed.diagnostics.is_empty() {
             return Err(format!(
@@ -52,7 +67,11 @@ pub fn pack_components(components: &[(String, String)]) -> Result<(Vec<u8>, Vec<
                 rules: parsed.dynamic_rules,
             },
         ));
-        refs.extend(parsed.referenced_sprites);
+        // img src 相对 HTML 文件；归一化为 sprite_key（相对 workspace_root，正斜杠），
+        // 否则与 atlas collect 的 sprite_key 前缀不匹配 → 交叉验证挂。
+        for img_src in &parsed.referenced_sprites {
+            refs.push(normalize_sprite_key(html_rel, img_src));
+        }
     }
     // 同名组件：write_package 不查（返回 Vec<u8> 无 Result），read_package 运行时才
     // DupComponent 拒绝——产物是静默坏包。构建期 fail fast，给最早反馈。
@@ -115,6 +134,34 @@ fn stem(path: &str) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or(path)
         .to_string()
+}
+
+/// 把 img src（相对 HTML 文件）归一化为 sprite_key（相对 workspace_root，正斜杠）。
+/// `html_rel` = HTML 相对 workspace_root（如 `"showcase/home.html"`）；`src` = img src 原值。
+/// 例：`("showcase/home.html", "../res/icons/x.png")` → `"res/icons/x.png"`。
+///
+/// 为什么手写归约而不是用 `PathBuf::canonicalize`：canonicalize 要求路径在磁盘上存在
+/// 且返绝对路径；这里只做纯字符串词法归约（HTML src 可能指向尚未收集的图）。
+/// `Component`-based 归约跨平台（Windows `\` 与 `/` 都正确迭代），输出统一正斜杠
+/// 与 `atlas/collect.rs` 的 sprite_key 口径一致（`replace('\\', "/")`）。
+fn normalize_sprite_key(html_rel: &str, src: &str) -> String {
+    let base = Path::new(html_rel)
+        .parent()
+        .unwrap_or_else(|| Path::new(""));
+    let joined = base.join(src);
+    let mut stack: Vec<&str> = Vec::new();
+    for comp in joined.components() {
+        use std::path::Component;
+        match comp {
+            Component::Normal(s) => stack.push(s.to_str().unwrap_or("")),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                stack.pop();
+            }
+            Component::RootDir | Component::Prefix(_) => {} // 绝对路径不归一化（围栏外）
+        }
+    }
+    stack.join("/")
 }
 
 /// Run the full build pipeline for a workspace rooted at workspace_root.
@@ -214,13 +261,17 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
     let mut all_refs: Vec<String> = Vec::new();
     for pkg in &ws.packages {
         let html_files = resolve_html_list(workspace_root, pkg)?;
-        let comps: Vec<(String, String)> = html_files
+        let comps: Vec<Component> = html_files
             .iter()
             .map(|rel| {
                 let path = workspace_root.join(rel);
                 let src = std::fs::read_to_string(&path)
                     .map_err(|e| format!("read {}: {e}", path.display()))?;
-                Ok((stem(rel), src))
+                Ok(Component {
+                    name: stem(rel),
+                    src,
+                    html_rel: rel.clone(),
+                })
             })
             .collect::<Result<Vec<_>, String>>()?;
         report.log.push(format!(
@@ -293,10 +344,12 @@ mod package_tests {
 
     #[test]
     fn pack_components_roundtrip_single() {
-        let comps = vec![(
-            "home".to_string(),
-            r#"<div class="root"><p>hi</p><img src="icons/a.png"></div>"#.to_string(),
-        )];
+        // html_rel 放 workspace_root 顶层 → src 原样进 refs（base 为空）。
+        let comps = vec![Component {
+            name: "home".to_string(),
+            src: r#"<div class="root"><p>hi</p><img src="icons/a.png"></div>"#.to_string(),
+            html_rel: "home.html".to_string(),
+        }];
         let (bytes, refs) = pack_components(&comps).unwrap();
         let pkg = loomgui_core::asset::read_package(&bytes).unwrap();
         let comp = pkg.components.get("home").expect("home component");
@@ -310,14 +363,16 @@ mod package_tests {
     #[test]
     fn pack_components_multi_component() {
         let comps = vec![
-            (
-                "nav".to_string(),
-                r#"<nav><a href="x">l</a></nav>"#.to_string(),
-            ),
-            (
-                "page".to_string(),
-                r#"<div class="page">body</div>"#.to_string(),
-            ),
+            Component {
+                name: "nav".to_string(),
+                src: r#"<nav><a href="x">l</a></nav>"#.to_string(),
+                html_rel: "nav.html".to_string(),
+            },
+            Component {
+                name: "page".to_string(),
+                src: r#"<div class="page">body</div>"#.to_string(),
+                html_rel: "page.html".to_string(),
+            },
         ];
         let (bytes, _) = pack_components(&comps).unwrap();
         let pkg = loomgui_core::asset::read_package(&bytes).unwrap();
@@ -328,7 +383,11 @@ mod package_tests {
     #[test]
     fn pack_components_propagates_bridge_error() {
         // 多根 → bridge 报错（不静默产森林）；错误带组件名定位来源。
-        let comps = vec![("bad".to_string(), r#"<div>a</div><div>b</div>"#.to_string())];
+        let comps = vec![Component {
+            name: "bad".to_string(),
+            src: r#"<div>a</div><div>b</div>"#.to_string(),
+            html_rel: "bad.html".to_string(),
+        }];
         let err = pack_components(&comps).expect_err("multi-root should error");
         assert!(
             err.contains("component bad"),
@@ -341,13 +400,40 @@ mod package_tests {
         // 同名组件：write_package 不查（返 Vec<u8> 无 Result），read_package 运行时才
         // DupComponent 拒绝——产物是静默坏包。pack_components 构建期须 fail fast。
         let comps = vec![
-            ("dup".to_string(), r#"<div>a</div>"#.to_string()),
-            ("dup".to_string(), r#"<div>b</div>"#.to_string()),
+            Component {
+                name: "dup".to_string(),
+                src: r#"<div>a</div>"#.to_string(),
+                html_rel: "dup1.html".to_string(),
+            },
+            Component {
+                name: "dup".to_string(),
+                src: r#"<div>b</div>"#.to_string(),
+                html_rel: "dup2.html".to_string(),
+            },
         ];
         let err = pack_components(&comps).expect_err("dup names should error");
         assert!(
             err.contains("duplicate component name") && err.contains("dup"),
             "dup-name error should be descriptive: {err}"
         );
+    }
+
+    #[test]
+    fn normalize_sprite_key_resolves_dotdot_against_html_dir() {
+        // HTML 在 showcase/home.html（workspace_root 相对），img src ../res/icons/x.png
+        // → sprite_key res/icons/x.png（atlas sprite_key 是 workspace_root 相对，collect.rs:56）。
+        // 这是 showcase 的核心用例：HTML 嵌套在子目录，src 用 ../ 逃到 workspace_root。
+        assert_eq!(
+            normalize_sprite_key("showcase/home.html", "../res/icons/x.png"),
+            "res/icons/x.png"
+        );
+        // 无 ../ 的 src：相对 HTML 所在目录解析（浏览器语义）→ showcase/res/icons/y.png。
+        // 不是直接相对 workspace_root；与相对 URL 标准一致。
+        assert_eq!(
+            normalize_sprite_key("showcase/home.html", "res/icons/y.png"),
+            "showcase/res/icons/y.png"
+        );
+        // HTML 位于 workspace_root 顶层：parent 为空，src 原样（去掉 leading "./"）。
+        assert_eq!(normalize_sprite_key("home.html", "res/z.png"), "res/z.png");
     }
 }

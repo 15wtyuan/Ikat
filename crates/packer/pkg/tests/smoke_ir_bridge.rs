@@ -5,7 +5,7 @@
 //! （get_node_layout_rect / get_node_visible / find_node_by_id）可达的部分。
 use loomgui_core::scene::NodeId;
 use loomgui_core::stage::Stage;
-use loomgui_pkg::build::pack_components;
+use loomgui_pkg::build::{pack_components, Component};
 
 /// Pack HTML -> pkg.bin -> Stage -> instantiate -> 帧推进，返回 Stage + 组件根 NodeId。
 ///
@@ -13,8 +13,12 @@ use loomgui_pkg::build::pack_components;
 /// 已存在——见 stage.rs:573 `ok_or("no scene (create_root first)")`）。`append_child` 把
 /// 组件根挂进 tree，否则 `solve` 只走 `scene.roots[0]`（layout/mod.rs:217），孤立组件不进 layout。
 fn build_stage(html: &str) -> (Stage, NodeId) {
-    let (bytes, _refs) =
-        pack_components(&[("c".to_string(), html.to_string())]).expect("pack_components");
+    let (bytes, _refs) = pack_components(&[Component {
+        name: "c".to_string(),
+        src: html.to_string(),
+        html_rel: "c.html".to_string(),
+    }])
+    .expect("pack_components");
     let mut stage = Stage::new((400.0, 300.0)).expect("Stage::new");
     stage.load_package("p", &bytes).expect("load_package");
     let stage_root = stage.create_root("div", "").expect("create_root");
