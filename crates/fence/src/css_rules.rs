@@ -316,10 +316,8 @@ fn parse_keyframes_rule(
         // 逗号多 stop：`0%,100%` → 展开为 [Percent(0), Percent(100)]，每 stop 共享同 declarations
         let mut sel_parsed: Vec<KeyframeStopSelector> = Vec::new();
         for raw in stop_sel_raw.split(',') {
-            match parse_stop_selector(raw.trim(), loc) {
-                Ok(s) => sel_parsed.push(s),
-                Err(d) => return Err(d),
-            }
+            let s = parse_stop_selector(raw.trim(), loc)?;
+            sel_parsed.push(s);
         }
         let decls = parse_declarations(inner, loc, &mut Vec::new()); // stops 内 prop 名错误 tolerable
         for sel in sel_parsed {
