@@ -36,5 +36,7 @@ namespace LoomGUI
         Slot         = 20,
         CustomElement = 21,
         Canvas       = 22,
+        PasswordField = 23,
+        SearchField   = 24,
     }
 }

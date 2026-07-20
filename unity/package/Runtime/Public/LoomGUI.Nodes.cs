@@ -1338,6 +1338,38 @@ namespace LoomGUI
         static NotImplementedException NE() => new NotImplementedException();
     }
 
+    // PasswordField / SearchField：<input type="password"> / <input type="search"> 的 typed 投影。
+    // 与 TextField 同语义表面（Rust 侧 Task 1 拆分仅服务于 attribute-selector [type=...] 精确匹配，
+    // 运行时 API 与 TextField 一致——public-api.md 把三者合并在 input[text/password/search] | TextField
+    // 一行；此处分作 sibling 类是投影层为 Rust kind 留 arm 的对齐，待 Task 7 同步 public-api.md）。
+    public class PasswordField : Node
+    {
+        internal PasswordField(UIContext ctx, uint id) : base(ctx, id) { }
+
+        public string Value { get { throw NE(); } set { throw NE(); } }
+        public string Placeholder { get { throw NE(); } set { throw NE(); } }
+        public TextSelection Selection { get { throw NE(); } set { throw NE(); } }
+        public bool ReadOnly { get { throw NE(); } set { throw NE(); } }
+        public bool Disabled { get { throw NE(); } set { throw NE(); } }
+        public event Action<ValueChangedEvent<string>> ValueChanged;
+        public event Action<string> Submitted;
+        static NotImplementedException NE() => new NotImplementedException();
+    }
+
+    public class SearchField : Node
+    {
+        internal SearchField(UIContext ctx, uint id) : base(ctx, id) { }
+
+        public string Value { get { throw NE(); } set { throw NE(); } }
+        public string Placeholder { get { throw NE(); } set { throw NE(); } }
+        public TextSelection Selection { get { throw NE(); } set { throw NE(); } }
+        public bool ReadOnly { get { throw NE(); } set { throw NE(); } }
+        public bool Disabled { get { throw NE(); } set { throw NE(); } }
+        public event Action<ValueChangedEvent<string>> ValueChanged;
+        public event Action<string> Submitted;
+        static NotImplementedException NE() => new NotImplementedException();
+    }
+
     public class NumberField : Node
     {
         internal NumberField(UIContext ctx, uint id) : base(ctx, id) { }

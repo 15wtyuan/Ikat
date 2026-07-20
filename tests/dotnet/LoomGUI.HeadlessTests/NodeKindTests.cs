@@ -51,6 +51,12 @@ namespace LoomGUI.HeadlessTests
         public void TextFieldIsNine() => Assert.Equal((byte)9, (byte)NodeKind.TextField);
 
         [Fact]
+        public void PasswordFieldIsTwentyThree() => Assert.Equal((byte)23, (byte)NodeKind.PasswordField);
+
+        [Fact]
+        public void SearchFieldIsTwentyFour() => Assert.Equal((byte)24, (byte)NodeKind.SearchField);
+
+        [Fact]
         public void NumberFieldIsTen() => Assert.Equal((byte)10, (byte)NodeKind.NumberField);
 
         [Fact]
@@ -89,11 +95,11 @@ namespace LoomGUI.HeadlessTests
         // ── 结构不变量：变体数 + 紧凑 0..N-1（无空洞、无跳号）──────────
 
         /// <summary>
-        /// Rust node.rs 当前 23 变体。若 Rust 加/删变体未同步 C# → 此测红，
+        /// Rust node.rs 当前 25 变体。若 Rust 加/删变体未同步 C# → 此测红，
         /// 提醒看护 ABI 对齐（同步两侧 enum）。
         /// </summary>
         [Fact]
-        public void VariantCountMatchesRust() => Assert.Equal(23, Enum.GetNames<NodeKind>().Length);
+        public void VariantCountMatchesRust() => Assert.Equal(25, Enum.GetNames<NodeKind>().Length);
 
         /// <summary>
         /// 显式赋值防隐式错位：最大判别值 == 变体数 - 1 验全变体紧凑连续
@@ -102,7 +108,7 @@ namespace LoomGUI.HeadlessTests
         [Fact]
         public void AllValuesContiguousFromZero()
         {
-            byte max = (byte)NodeKind.Canvas; // 末变体（声明序最后）
+            byte max = (byte)NodeKind.SearchField; // 末变体（声明序最后）
             Assert.Equal((byte)(Enum.GetNames<NodeKind>().Length - 1), max);
         }
     }
