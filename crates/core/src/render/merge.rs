@@ -23,8 +23,8 @@ fn hash_color_matrix(m: &[f32; 20]) -> u64 {
 /// program=0/1 Mesh 才参与合并。含 color_matrix 哈希——不同 color filter（如 grayscale vs sepia）
 /// 不能合批，否则 filter 数据在 merge_batch 中被清零丢失。
 fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32, u64)> {
-    if rn.node_id & crate::render::BOX_SHADOW_FLAG != 0 {
-        return None; // div box-shadow 合成节点不合批
+    if rn.node_id & crate::render::BACK_LAYER_FLAG != 0 {
+        return None; // back-layer 合成节点（如 box-shadow）不合批
     }
     match &rn.payload {
         NodePayload::Mesh {

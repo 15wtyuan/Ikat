@@ -26,19 +26,23 @@ use node::*;
 
 use taffy::style::LengthPercentage;
 
-/// 合成 node_id 标志位：div box-shadow 独立 RenderNode（独立 draw call 画在主节点下层）。
-/// 0x1000_0000（bit 28），不与 V_THUMB_FLAG（0x4000_0000）、H_THUMB_FLAG（0x2000_0000）、
-/// 跨页 text 子页（bits [31:24]，实际值 1..~10）冲突。Back layer sort_key < primary（先绘 = 下层）。
+/// 合成 node_id 标志位：主节点的"下层"合成 RenderNode（独立 draw call 画在主节点之下，
+/// sort_key < primary，经 propagate_back_layer_sort_keys 调整）。按语义命名（back-layer
+/// marker），不按当前唯一使用者 box-shadow 命名——未来新增"独立 quad 下层"需求复用此位。
 ///
-/// 仅 div box-shadow 使用——文字效果（shadow/stroke/glow/blur）SDF 改造后改由 shader
-/// uniform 实现，不再产 back/front layer 合成节点。
-pub(crate) const BOX_SHADOW_FLAG: u32 = 0x1000_0000;
+/// 0x1000_0000（bit 28），不与 V_THUMB_FLAG（0x4000_0000）、H_THUMB_FLAG（0x2000_0000）、
+/// 跨页 text 子页（bits [31:24]，实际值 1..~10）冲突。
+///
+/// 边界：bg-color-under-texture（Image/Container 底色透图）不走此机制——由 shader
+/// BG_COMPOSITE（program 2/4）的 source-over 合成处理（单 quad，GPU 合成），无需独立 RenderNode。
+/// 仅"独立 quad 下层"（当前：box-shadow 的偏移阴影 quad）走此位。
+pub(crate) const BACK_LAYER_FLAG: u32 = 0x1000_0000;
 
 /// 富文本行内图（inline `<img>`）合成 node_id 子页基址。每个行内图一个独立 RenderNode
 /// （image shader + image_path=src），须叠在 primary 文字层之上：sort_key 由
 /// `propagate_inline_image_sort_keys` 设为 primary 文字层 max + img_idx + 1。
 /// synth_text_node_id 编码后 high byte = (1000 + idx) & 0xFF = 232..=255，不与跨页子页
-/// （1..=15）或 BOX_SHADOW_FLAG（high byte 16）撞——靠 `inline_image_pairs` 显式配对
+/// （1..=15）或 BACK_LAYER_FLAG（high byte 16）撞——靠 `inline_image_pairs` 显式配对
 /// 传播 sort_key，不凭 high byte 判别。
 #[allow(dead_code)] // RichText retired in Spec-2; kept for compound-bundle text model.
 pub(crate) const INLINE_IMG_SYNTH_ID_BASE: u32 = 1000;
@@ -272,8 +276,9 @@ pub fn build_render_nodes(
     // 先剪 display:none 子树——display:none 节点 + 后代不产 RenderNode（CSS 语义）。
     let pruned = collect_display_none_subtree(scene);
     let mut nodes: Vec<RenderNode> = Vec::new();
-    // box-shadow 独立 RenderNode 追踪：(主节点 node_id, 阴影合成 node_id)。
-    let mut shadow_pairs: Vec<(u32, u32)> = Vec::new();
+    // back-layer 合成 RenderNode 追踪：(主节点 node_id, 下层合成 node_id)。
+    // 当前唯一使用者 box-shadow；未来"独立 quad 下层"复用。
+    let mut back_layer_pairs: Vec<(u32, u32)> = Vec::new();
     // 富文本行内图 RenderNode 追踪：(主节点 node_id, 行内图合成 node_id)。
     let inline_image_pairs: Vec<(u32, u32)> = Vec::new();
     for n in scene.nodes.values() {
@@ -618,7 +623,7 @@ pub fn build_render_nodes(
         };
         // box-shadow：独立 RenderNode 画在节点下层（sort_key 更小 = 先绘 = 在下）。
         // 阴影节点不入 id_to_pos（不在场景树中），sort_key 在 assign_sort_keys 后
-        // 由 propagate_box_shadow_sort_keys 调整为主节点 sort_key（主节点后移一位）。
+        // 由 propagate_back_layer_sort_keys 调整为主节点 sort_key（主节点后移一位）。
         if let Some(shadow) = n.style.box_shadow.as_ref() {
             if n.kind.is_container() {
                 let rw = rect.w;
@@ -637,8 +642,8 @@ pub fn build_render_nodes(
                     shadow.color,
                 );
                 if !v.is_empty() {
-                    let sid = node_id | BOX_SHADOW_FLAG;
-                    shadow_pairs.push((node_id, sid));
+                    let sid = node_id | BACK_LAYER_FLAG;
+                    back_layer_pairs.push((node_id, sid));
                     nodes.push(RenderNode {
                         node_id: sid,
                         parent_id,
@@ -679,7 +684,7 @@ pub fn build_render_nodes(
     // 不认识合成子页。此处把子页 sort_key 设为 primary.sort_key + page_idx，并把后续真节点
     // 的 sort_key 后移子页个数，保持单调连续。
     propagate_text_sub_page_sort_keys(&mut nodes, &id_to_pos);
-    propagate_box_shadow_sort_keys(&mut nodes, &shadow_pairs);
+    propagate_back_layer_sort_keys(&mut nodes, &back_layer_pairs);
     propagate_inline_image_sort_keys(&mut nodes, &inline_image_pairs);
     let max_sort = nodes.iter().map(|n| n.sort_key).max().unwrap_or(0);
     batch::reorder_for_batching(scene, &mut nodes);
@@ -732,7 +737,7 @@ fn synth_text_node_id(primary_id: u32, sub_page: u32) -> u32 {
 }
 
 /// 判断 node_id 是否为跨页 text 子页（high byte 在 1..=15，即 bits [31:24] 值 1-15）。
-/// BOX_SHADOW_FLAG（bit 28，对应 high byte >= 16）和 INLINE_IMG_SYNTH_ID_BASE（high byte
+/// BACK_LAYER_FLAG（bit 28，对应 high byte >= 16）和 INLINE_IMG_SYNTH_ID_BASE（high byte
 /// = 232..=255）均不在此范围——各自的 propagate 函数单独传播 sort_key，不走子页传播。
 fn is_text_sub_page(node_id: u32) -> bool {
     let page = (node_id >> 24) as u8;
@@ -753,11 +758,11 @@ fn text_sub_page_idx(node_id: u32) -> u32 {
 /// 主节点及后续节点后移一位（阴影在背景层之下 = sort_key 更小 = 先绘）。
 ///
 /// assign_sort_keys 只给 id_to_pos 中的真 scene 节点赋 sort_key；
-/// box-shadow 合成节点不在场景树中，初始 sort_key=0。此函数将其调整到
-/// 主节点 sort_key 位置，保证阴影在主节点背景之前渲染。
+/// back-layer 合成节点不在场景树中，初始 sort_key=0。此函数将其调整到
+/// 主节点 sort_key 位置，保证下层（当前：box-shadow）在主节点之前渲染。
 ///
-/// 处理多个阴影节点时从最大 sort_key 开始（降序），避免累积偏移后的 stale 值。
-fn propagate_box_shadow_sort_keys(
+/// 处理多个下层节点时从最大 sort_key 开始（降序），避免累积偏移后的 stale 值。
+fn propagate_back_layer_sort_keys(
     nodes: &mut [RenderNode],
     shadows: &[(u32, u32)], // (main_node_id, shadow_node_id)
 ) {
@@ -1353,8 +1358,8 @@ fn emit_deco_segments(
 ///
 /// base 字形走跨页子页机制：首页（page 0）用真 node_id，后续页用 `synth_text_node_id` 合成 id。
 /// SDF 改造后文字效果（shadow/stroke/glow/blur）改由 shader uniform 实现——`meshes.effect`
-/// 直接塞进 base/子页/占位 RenderNode.effect，不再产 back/front layer 合成节点（原 BOX_SHADOW_FLAG
-/// + TEXT_STROKE_FRONT_FLAG 双层机制全废；BOX_SHADOW_FLAG 留给 div box-shadow 单独使用）。
+/// 直接塞进 base/子页/占位 RenderNode.effect，不再产 back/front layer 合成节点（原 BACK_LAYER_FLAG
+/// + TEXT_STROKE_FRONT_FLAG 双层机制全废；BACK_LAYER_FLAG 留给 div box-shadow 单独使用）。
 fn push_text_meshes(
     nodes: &mut Vec<RenderNode>,
     id_to_pos: &mut std::collections::HashMap<NodeId, usize>,

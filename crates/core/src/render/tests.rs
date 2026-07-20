@@ -2666,18 +2666,18 @@ fn synth_text_node_id_roundtrip() {
     assert_eq!(text_sub_primary_id(sub), primary & 0x00FF_FFFF);
     assert_eq!(text_sub_page_idx(sub), 5);
 
-    // 边界：page=15（不与 BOX_SHADOW_FLAG bit 28 冲突的最大子页号）。
-    // page>=16 会设置 bit 28（BOX_SHADOW_FLAG），is_text_sub_page 据此排除 shadow 节点——
+    // 边界：page=15（不与 BACK_LAYER_FLAG bit 28 冲突的最大子页号）。
+    // page>=16 会设置 bit 28（BACK_LAYER_FLAG），is_text_sub_page 据此排除 shadow 节点——
     // 故 sub_page 编码实际可用范围是 1..15（atlas 跨页远不到此上限）。
     let max_sub = synth_text_node_id(0, 15);
     assert_eq!(text_sub_page_idx(max_sub), 15);
     assert!(is_text_sub_page(max_sub));
 
-    // page=16 设置 BOX_SHADOW_FLAG → is_text_sub_page 返 false（shadow 节点语义）。
+    // page=16 设置 BACK_LAYER_FLAG → is_text_sub_page 返 false（shadow 节点语义）。
     let shadow_like = synth_text_node_id(0, 16);
     assert!(
         !is_text_sub_page(shadow_like),
-        "page=16 触发 BOX_SHADOW_FLAG"
+        "page=16 触发 BACK_LAYER_FLAG"
     );
 
     // 真实 node index=4095（bits[23:12]=4095）不应被误判为子页
@@ -2711,7 +2711,7 @@ fn ensure_solid_hit_returns_same_uv() {
 
 // ── box-shadow 集成测试 ───────────────────────────
 
-/// box-shadow:2px 3px #000000 → 阴影节点 node_id = main_id|BOX_SHADOW_FLAG、
+/// box-shadow:2px 3px #000000 → 阴影节点 node_id = main_id|BACK_LAYER_FLAG、
 /// sort_key < main sort_key、阴影 verts x 偏移 ox=2、y 偏移 oy=3。
 #[test]
 fn box_shadow_emits_node_with_offset_and_sort_key() {
@@ -2753,19 +2753,19 @@ fn box_shadow_emits_node_with_offset_and_sort_key() {
     let shadow_rn = frame
         .nodes
         .iter()
-        .find(|rn| rn.node_id & BOX_SHADOW_FLAG != 0)
-        .expect("应存在 box-shadow RenderNode（node_id 带 BOX_SHADOW_FLAG）");
+        .find(|rn| rn.node_id & BACK_LAYER_FLAG != 0)
+        .expect("应存在 box-shadow RenderNode（node_id 带 BACK_LAYER_FLAG）");
     let main_rn = frame
         .nodes
         .iter()
-        .find(|rn| rn.node_id & BOX_SHADOW_FLAG == 0)
+        .find(|rn| rn.node_id & BACK_LAYER_FLAG == 0)
         .expect("应存在主节点 RenderNode");
 
-    // 阴影 node_id = main_id | BOX_SHADOW_FLAG
+    // 阴影 node_id = main_id | BACK_LAYER_FLAG
     assert_eq!(
         shadow_rn.node_id,
-        main_rn.node_id | BOX_SHADOW_FLAG,
-        "阴影 node_id = main_id | BOX_SHADOW_FLAG"
+        main_rn.node_id | BACK_LAYER_FLAG,
+        "阴影 node_id = main_id | BACK_LAYER_FLAG"
     );
 
     // 阴影 sort_key < main sort_key（阴影绘在主节点之下）
