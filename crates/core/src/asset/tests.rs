@@ -536,8 +536,8 @@ fn v18_nontrivial_nodekinds_roundtrip() {
 }
 
 /// v20: PasswordField/SearchField 节点经 write_package → read_package 往返后 kind 保真，
-/// 且包版本号 = 20。这两个变体是 v20 从 TextField 拆出的（判别值 23/24），本测试锁定
-/// pkg kind_tag 写读映射 + 版本号 bump 的一致性。
+/// 且包版本号 = PKG_FORMAT_VERSION。这两个变体是 v20 从 TextField 拆出的（判别值 23/24），
+/// 本测试锁定 pkg kind_tag 写读映射 + 版本号 bump 的一致性。
 #[test]
 fn v20_password_search_field_roundtrip() {
     let root = tn(NodeKind::Container);
@@ -552,9 +552,12 @@ fn v20_password_search_field_roundtrip() {
     };
     let bytes = write_package(&input);
 
-    // 版本号 = 20（Header 偏移 4..8 是 version 字段）。
+    // 版本号 = PKG_FORMAT_VERSION（Header 偏移 4..8 是 version 字段）。
     let ver = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
-    assert_eq!(ver, 20, "pkg format version must be 20 after bump");
+    assert_eq!(
+        ver, PKG_FORMAT_VERSION,
+        "pkg format version must match PKG_FORMAT_VERSION"
+    );
 
     let pkg = read_package(&bytes).expect("roundtrip read ok");
     let ns = &pkg.components["c"].nodes;
