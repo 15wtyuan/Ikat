@@ -32,7 +32,7 @@
 | `crates/core/src/style/resolved.rs` | `as_corners` 闘包 match 改写 + 测试构造器替换 | ResolvedStyle(含 taffy_style)+ 圆角 |
 | `crates/core/src/style/dynamic.rs` | 测试构造器替换 | 测试 |
 | `crates/core/src/layout/mod.rs` | `fn lp` match 改写 | solve 入口 |
-| `crates/fence/src/css_resolve.rs` | 对齐常量默认值替换 | 围栏默认样式 |
+| `crates/fence/src/css_resolve.rs` | 对齐常量替换(Task 1)+ `DisplayDefault::Block` 设 taffy_style.display=Block(Task 5) | 围栏默认样式 |
 | `crates/core/src/asset/mod.rs` | `PKG_FORMAT_VERSION` 20→21 | pkg 格式版本 |
 | `showcase/spec4b/p1-block-acceptance.html` | 新建 C2 验收页 | block 布局验收基准 |
 | `tests/dotnet/LoomGUI.HeadlessTests/BlockLayoutTests.cs` | 新建 C2 验收 test | block 垂直堆叠断言 |
@@ -279,9 +279,10 @@ C1(taffy 升级)到此完成——build/test/打包全绿,dll/exe/pkg 入库。�
   <title>P1 Block Acceptance</title>
   <style>
     .root { width: 400px; height: 300px; background-color: #111; }
-    /* 显式 display:block 的容器,两个固定尺寸子 div。
-       标准 CSS block:子 div 垂直堆叠(c2.y > c1.y + c1.h)。
-       伪 block(flex row):子 div 水平排列(c2.y == c1.y)。 */
+    /* 显式 display:block 容器 + 两个 width:100px 子 div。
+       判别真假 block 看 width:真 block 子 div 保留 100px(不拉伸 cross-axis);
+       伪 block(flex-column,默认 align-items:stretch)拉到容器宽(~400px)。
+       (垂直堆叠两者都成立,不作判别。) */
     .stack { display: block; }
     .item { width: 100px; height: 40px; background-color: #e94560; }
   </style>
@@ -327,11 +328,15 @@ namespace LoomGUI.HeadlessTests
 
                 Native.loomgui_stage_tick(h, 0.016f);
 
-                // 标准 block:c2 在 c1 下方(c2.y >= c1.y + c1.h - 1px 容差)
+                // 判别真假 block:真 block 子元素不拉伸 cross-axis(保留显式 width 100px);
+                // 伪 block(flex-column)默认 align-items:stretch 把 100px 拉到容器宽(~400px)。
+                Assert.True(c1.Geometry.LayoutRect.Width <= 101.0f,
+                    $"block: c1.width ({c1.Geometry.LayoutRect.Width}) should stay ~100px (real block, no cross-axis stretch); " +
+                    $"got pseudo-block flex-column stretch to container width");
+                // sanity:真假 block 都垂直堆叠(c2 在 c1 下方),不区分但顺带验。
                 float c1Bottom = c1.Geometry.LayoutRect.Y + c1.Geometry.LayoutRect.Height;
                 Assert.True(c2.Geometry.LayoutRect.Y >= c1Bottom - 1.0f,
-                    $"block: c2.y ({c2.Geometry.LayoutRect.Y}) should be >= c1 bottom ({c1Bottom}); " +
-                    $"got pseudo-block flex-row stacking");
+                    $"block: c2.y ({c2.Geometry.LayoutRect.Y}) should be >= c1 bottom ({c1Bottom})");
             }
             finally { StageHarness.Destroy(stage); }
         }
@@ -347,7 +352,7 @@ namespace LoomGUI.HeadlessTests
 - [ ] **Step 4: 跑 test 确认 fail**
 
 Run: `dotnet test tests/dotnet/LoomGUI.HeadlessTests --filter BlockChildrenStackVertically`
-Expected: FAIL —— c2.y < c1Bottom(伪 block = flex row,c2 与 c1 水平排列,y 相同)。这正是 C2 要修的。
+Expected: FAIL —— c1.width ≈ 400px(伪 block = flex-column,默认 align-items:stretch 把 100px 子元素拉到容器宽),> 101px 容差。这正是 C2 要修的(真 block 不拉伸 cross-axis)。**改前就该 FAIL——若 PASS 说明判别式没生效(回查 c1 是否真被 stretch)。**
 
 - [ ] **Step 5: Commit(failing test 入库)**
 
@@ -369,9 +374,20 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: Task 4 的 failing test。
 - Produces: `display:block` → `taffy::Display::Block`(标准 CSS 块流);Task 4 test 转 pass。
 
-- [ ] **Step 1: 改 display block 分支**
+- [ ] **Step 1: 启用真 block(fence 默认标签 + mapping 显式声明两处)**
 
-`crates/core/src/style/mapping.rs:672-676`,原:
+真 block 要覆盖两类元素,两处都把 `taffy_style.display` 设 `Display::Block`:
+
+(a) `crates/fence/src/css_resolve.rs` 的 `DisplayDefault::Block` 分支(原仅设 `display_mode`),追加 taffy_style.display:
+```rust
+DisplayDefault::Block => {
+    styles[idx].display_mode = DisplayMode::Block;
+    styles[idx].taffy_style.display = taffy::Display::Block;
+}
+```
+裸 block 默认标签(div/header/nav/p/...,无显式 display)由此走真 block(否则 taffy.display 继承 Flex 默认,改 mapping 也救不了它们)。显式 `display:flex`/`display:none` 仍覆盖:fence 先铺默认、mapping 后应用声明,声明胜出。
+
+(b) `crates/core/src/style/mapping.rs:672-676`,原:
 ```rust
 "block" => {
     // block：taffy 仍 Flex（守铁律），仅旁路字段标记。
@@ -393,23 +409,26 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 Run: `dotnet test tests/dotnet/LoomGUI.HeadlessTests --filter BlockChildrenStackVertically`
 Expected: PASS —— c2.y >= c1Bottom(block 垂直堆叠)。
 
-- [ ] **Step 3: 确认 fence 默认 display 对齐 main-design §3.1**
+- [ ] **Step 3: 核实 schema 各 tag DisplayDefault 对齐 main-design §3.1(Step 1a 已设 fence Block arm)**
 
-main-design §3.1 规定 `div/header/nav/p/ul/ol/li/option` 默认 `display:block`。查 `crates/fence/src/css_resolve.rs` 给这些元素的默认 display:若 fence 给 div 默认 flex(旧范式残留"div 永远 flex column"),改为默认 block(或在 mapping/fence 默认值处对齐)。grep `css_resolve.rs` 的 display/flex_direction 默认值,核实每个围栏 block 元素默认走 block。
+Step 1(a) 已在 fence `DisplayDefault::Block` arm 设 `taffy_style.display=Block`。这里核实 `crates/fence/src/schema/tag.rs` 的 tag spec:block 类(div/header/nav/p/ul/ol/li/option/...)确为 `DisplayDefault::Block`、inline 类(span/strong/em/a/...)确为 `DisplayDefault::Inline`(inline 仍走 flex-row,不动)。若 schema 有误标(本该 block 却 inline,或反之),按 main-design §3.1 修 schema 并同步 `docs/design/fence.md`。
 
 - [ ] **Step 4: 全 workspace test 绿(回归)**
 
 Run: `cargo test --workspace && dotnet test tests/dotnet/LoomGUI.HeadlessTests`
 Expected: PASS。注意:现有 spec4a `AcceptanceGateTests` 用的是显式 `display:flex`(.container{display:flex;flex-direction:column}),不受 C2 影响;若有 test 依赖"裸 div = flex"会红,按"裸 div 应 block"修正该 test(那是旧范式假设)。
 
-- [ ] **Step 5: 重编 dll(运行时行为变)+ 重打受影响 pkg**
+- [ ] **Step 5: 重编 dll + 重打所有 pkg(parse-time 改,必重打)**
+
+C2 改了 `mapping.rs` + `fence/css_resolve.rs`——都是 **parse-time**(CLAUDE.md「改 parse-time 逻辑必重打 pkg」:`taffy_style.display` 是打包期产物进 pkg.bin)。pkg 格式版本不动(v21 wire 未变,只是 display 值 Flex→Block),但所有 pkg.bin 必重打。
 
 Run:
 ```bash
 cargo build -p loomgui_ffi_c --release
 cp target/release/loomgui_ffi_c.dll unity/package/Plugins/LoomGUI/loomgui_ffi_c.dll
+cargo run -p loomgui_pkg -- build showcase
 ```
-(C2 是纯 runtime 改,不动 pkg 格式,无需 bump 版本;但 display 默认若改了 fence 打包期默认值,需重打 pkg:`cargo run -p loomgui_pkg -- build showcase`。)
+Task 4 的 p1-block fixture 也要用新打包器重打(否则 fixture 里 .stack 仍 Flex、Task 4 test 转 pass 无从验)。
 
 - [ ] **Step 6: 更新不变量文档(CLAUDE.md + main-design)**
 
@@ -418,10 +437,10 @@ cp target/release/loomgui_ffi_c.dll unity/package/Plugins/LoomGUI/loomgui_ffi_c.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add crates/core/src/style/mapping.rs crates/fence/src/css_resolve.rs CLAUDE.md docs/design/main-design.md unity/package/Plugins/LoomGUI/loomgui_ffi_c.dll
+git add crates/core/src/style/mapping.rs crates/fence/src/css_resolve.rs CLAUDE.md docs/design/main-design.md unity/package/Plugins/LoomGUI/loomgui_ffi_c.dll showcase/
 git commit -m "feat(layout): enable real CSS block layout (Display::Block) replacing flex pseudo-block
 
-div defaults to block (standard CSS); display:flex still available. flex->block changes all block div layout (vertical stack). CLAUDE.md/main-design invariants updated.
+Both fence DisplayDefault::Block tags (plain div/header/nav/p) and explicit display:block now set taffy Display::Block; display:flex/none still override. Real block keeps child width (no cross-axis stretch) vs flex-column stretch. pkg repacked (parse-time). CLAUDE.md/main-design invariants updated.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
