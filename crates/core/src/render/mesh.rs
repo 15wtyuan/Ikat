@@ -84,6 +84,7 @@ pub fn radius_scale(radii: &[(f32, f32); 4], w: f32, h: f32) -> f32 {
 /// - 圆角(rx>0 且 ry>0):弧上 seg+1 个点(末段锁 start+π/2 保精度,照 fgui)。
 /// - 直角(rx≤0 或 ry≤0):产 seg+1 个 corner 点(重复),供 `border_ring` 环带配对——
 ///   外圆内方时内角直角但与外角同分段,自动形成角内 infill 扇。
+/// - seg=0:单点落在末角(start+π/2),非 start 角;`border_ring` 不传 seg=0(最小 2)。
 pub fn corner_arc_pts(
     corner: [f32; 2],
     rx: f32,
@@ -1531,7 +1532,12 @@ mod tests {
             100.0,
             100.0,
         );
-        assert!(s < 1.0 && s > 0.0, "缩放因子 ∈ (0,1)");
+        // scale = w/(tl+tr) = 100/120 ≈ 0.8333(两 (0,0) 角的 .max(1e-6) 让其轴因子 → 1e8,不参与 min)
+        assert!(
+            (s - 0.8333).abs() < 1e-3,
+            "scale = 100/120 ≈ 0.8333, got {}",
+            s
+        );
     }
 
     #[test]
