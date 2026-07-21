@@ -152,10 +152,17 @@ pub fn resolve_inline_styles_with_diags(
                         ),
                         line_map.source_location(node.span.start, file.to_string()),
                     ));
-                } else if let Some(bit) = loomgui_core::style::dynamic::inherited_bit(prop) {
-                    // inline 可继承声明 bake 进 inherited_set，避免运行时
+                } else {
+                    // inline 声明标记：记该属性由 inline style 声明，rematch 时 class 规则
+                    // 不覆盖它（CSS inline > class）。INLINE_* 位覆盖继承与非继承（如 display）。
+                    if let Some(bit) = loomgui_core::style::dynamic::inline_bit(prop) {
+                        styles[idx].inline_declared |= bit;
+                    }
+                    // inline 可继承声明另 bake 进 inherited_set，避免运行时
                     // propagate_inherited 用父值覆盖子的 inline 声明。
-                    styles[idx].inherited_set.0 |= bit;
+                    if let Some(bit) = loomgui_core::style::dynamic::inherited_bit(prop) {
+                        styles[idx].inherited_set.0 |= bit;
+                    }
                 }
             }
         }

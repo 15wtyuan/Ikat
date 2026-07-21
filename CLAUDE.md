@@ -134,6 +134,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 - `dump_bg` — 节点 base_style（验是否进 pkg）
 - `dump_nativehost_slot` — NativeHost FFI 查询
 - `spec4b_dump` — Spec-4b 验收用：dump 全节点 layout_rect + img src + text metrics + glyph probe（验 core solve 跟 PlayMode 一致，定位 layout bug 在 core 还是 Unity 后端）
+- `dump_shop` — showcase/shop 命中/层叠诊断：dump 全节点 layout_rect/display/touchable + hit_test 探针（定位点击被谁接走、inline vs class cascade 谁赢）
 
 **跨层特性 PlayMode 报错**先 example 实测 core 状态再改，避免盲改物理掩盖 layout 根因。
 

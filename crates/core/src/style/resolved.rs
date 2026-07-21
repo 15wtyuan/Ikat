@@ -223,6 +223,16 @@ pub struct ResolvedStyle {
     /// `propagate_inherited` respects inline inherited declarations and does not
     /// overwrite them with the parent value.
     pub inherited_set: InheritedSet,
+
+    /// Which CSS properties were declared via inline `style="..."` at package time
+    /// (INLINE_* bitmask, see `dynamic::inline_bit`). Baked into base_style.
+    ///
+    /// CSS cascade: an inline style attribute beats class rules. But fence bakes inline
+    /// declarations into base_style, while `<style>` class rules become dynamic_rules
+    /// applied later at runtime rematch — so without this bitmask a class rule would
+    /// overwrite the inline value (priority inverted). rematch skips class declarations
+    /// whose `inline_bit` is set here, restoring inline > class.
+    pub inline_declared: u32,
 }
 
 /// box-shadow 几何近似（无 blur，真实 blur 推 v1.14+ 离屏 RT）。
@@ -280,6 +290,7 @@ impl Default for ResolvedStyle {
             transition: Vec::new(),
             text_effects: Vec::new(),
             inherited_set: InheritedSet::default(),
+            inline_declared: 0,
         }
     }
 }

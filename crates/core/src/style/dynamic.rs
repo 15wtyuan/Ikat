@@ -427,6 +427,15 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         let mut inh: InheritedSet = new_style.inherited_set;
         for (_, _, _, r) in &matched {
             for decl in &r.declarations {
+                // CSS inline > class：base_style.inline_declared 标记的属性由打包期 inline
+                // style 声明，class 规则不覆盖（如 dialog-overlay 的 inline display:none 不被
+                // .dialog-overlay{display:flex} 覆盖）。inline_bit 返 None 的属性（transition 等）
+                // 无 inline 来源，照常应用。
+                if let Some(bit) = inline_bit(&decl.prop) {
+                    if new_style.inline_declared & bit != 0 {
+                        continue;
+                    }
+                }
                 if apply_decl(&mut new_style, &decl.prop, &decl.value) {
                     if let Some(bit) = inherited_bit(&decl.prop) {
                         inh.0 |= bit;
@@ -1512,6 +1521,37 @@ mod tests {
             scene.get(root).unwrap().style.display_mode,
             crate::style::resolved::DisplayMode::None,
             "inline display:none → display_mode=None"
+        );
+    }
+
+    #[test]
+    fn package_inline_display_beats_class_rule() {
+        // 打包期 inline style display:none（base_style + inline_declared 标记）不被 class 规则
+        // .r{display:flex} 覆盖（CSS inline > class）。回归 showcase/shop dialog-overlay：class
+        // display:flex + inline display:none 被错误覆盖成 flex，全屏 overlay 吞掉 back-home 点击。
+        let (mut scene, root, _child) = build_parent_child();
+        scene.get_mut(root).unwrap().classes = vec!["r".to_string()];
+        {
+            // 模拟打包期 inline display:none：base_style 双字段 + inline_declared 标记
+            let n = scene.get_mut(root).unwrap();
+            n.base_style.taffy_style.display = taffy::Display::None;
+            n.base_style.display_mode = crate::style::resolved::DisplayMode::None;
+            n.base_style.inline_declared |= INLINE_DISPLAY;
+        }
+        scene
+            .dynamic_rules
+            .rules
+            .push(rule(".r", "display", "flex"));
+        rematch_pseudo_classes(&mut scene);
+        assert_eq!(
+            scene.get(root).unwrap().style.taffy_style.display,
+            taffy::Display::None,
+            "inline display:none 胜过 class display:flex"
+        );
+        assert_eq!(
+            scene.get(root).unwrap().style.display_mode,
+            crate::style::resolved::DisplayMode::None,
+            "display_mode 同步 None"
         );
     }
 
