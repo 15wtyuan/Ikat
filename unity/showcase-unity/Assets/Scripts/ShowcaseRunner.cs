@@ -1,39 +1,38 @@
 using UnityEngine;
 using LoomGUI;
 
-// OnGUI 用 UnityEngine.Rect / UnityEngine.Color;LoomGUI 命名空间也有同名类型,
-// using LoomGUI 会让 Rect/Color 歧义(CS0104)。alias 显式锁定到 UnityEngine 侧。
-using Rect = UnityEngine.Rect;
-using Color = UnityEngine.Color;
-
-/// <summary>
-/// PlayMode showcase 逐页查看器：OnGUI 画页签按钮，点击切换 showcase 8 页。
-/// 挂在与 LoomStageDriver 同一 GameObject 上（仿 Spec4bAcceptanceRunner）。
+/// PlayMode showcase 查看器：导航完全走框架自己的事件系统，无 IMGUI。
 ///
-/// 用法（家里机）：
-///   1. 选中 LoomGUI GameObject → Inspector → Add Component → ShowcaseRunner
-///   2. 把同 GameObject 上其他 runner（Spec4bAcceptanceRunner / VisualAcceptanceRunner）
-///      的 enabled 关掉——多个 runner 同帧各 Instantiate 会叠在一起看不清。
-///   3. Play → 左上角点页签切页；Game 视图看该页渲染；当前页按钮高亮黄。
-///
-/// 切页靠 Node.Dispose() 销毁旧实例（递归清子 + Rust remove_node + 后端镜像 GO 下帧清），
-/// 再 Instantiate 新页 append 到 ctx.Root。driver 已在 Awake 加载 showcase 包，所以
-/// Instantiate("showcase", stem) 直接可用。
+/// 挂在与 LoomStageDriver 同一 GameObject 上。Play 后：
+///   - 首页 home：点 7 张 nav-card（nav-settings / nav-mail / ...）跳对应页
+///   - 各页：点顶栏 / 侧栏的「← 首页」(button#back-home) 回 home
+/// 这些导航元素的 id 已在 showcase HTML 里就位（home.html 的 nav-card、各页的
+/// back-home），runner 只用 Button.Clicked / Link.Activated 订阅，不画任何 Unity GUI。
+/// 订阅随切页 Dispose 自动清理（public-api §5.4），切页即换树即换订阅。
 ///
 /// 验收 7-20/7-21 改动时各页看什么：
 ///   - 圆角 border (P2-A)：lab(16处)/shop(7)/home(4) 等页的边框/阴影圆角，边角不突出
 ///   - 真 CSS block (P1)：裸 div 子元素垂直堆叠、不被 flex-grow 拉伸
 ///   - Image bg-color：带 background-color 的 img 有底色
 ///   - TextField/Password/Search 投影：form 页三种输入框类型正确
-/// </summary>
 public class ShowcaseRunner : MonoBehaviour
 {
-    static readonly string[] PAGES =
-    { "home", "settings", "mail", "inventory", "shop", "character", "form", "lab" };
+    // home 页 nav-card id → showcase 组件 stem（Instantiate 第二参）。
+    // 与 showcase/showcase/home.html 的 nav-card id 一一对应。
+    static readonly (string cardId, string page)[] NAV_CARDS =
+    {
+        ("nav-settings", "settings"),
+        ("nav-inventory", "inventory"),
+        ("nav-mail", "mail"),
+        ("nav-shop", "shop"),
+        ("nav-character", "character"),
+        ("nav-form", "form"),
+        ("nav-lab", "lab"),
+    };
 
     LoomStageDriver _driver;
     Container _current;
-    string _shown;   // 当前显示页名（OnGUI 高亮 + 防重复点击）
+    string _shown;
 
     void Start()
     {
@@ -57,28 +56,35 @@ public class ShowcaseRunner : MonoBehaviour
         if (_shown == page) return;
         if (_current != null)
         {
-            _current.Dispose();   // 递归销毁旧页（Rust remove_node + 后端镜像下帧清）
+            _current.Dispose();   // 递归销毁旧页 + 清旧页事件订阅（Rust remove_node + 后端镜像下帧清）
             _current = null;
         }
         _current = _driver.Instantiate("showcase", page);
         _shown = _current != null ? page : null;
-        Debug.Log($"[Showcase] Instantiate showcase/{page} = {(_current != null ? "OK" : "FAIL (pkg not loaded? comp not found?)")}");
+        if (_current == null)
+        {
+            Debug.Log($"[Showcase] Instantiate showcase/{page} = FAIL (pkg not loaded? comp not found?)");
+            return;
+        }
+        WireNav(_current, page);
+        Debug.Log($"[Showcase] Instantiate showcase/{page} = OK");
     }
 
-    void OnGUI()
+    /// 用框架事件系统接导航：nav-card 是 `<a>`（Link.Activated），back-home 是 `<button>`（Button.Clicked）。
+    /// TryGet 找不到（本页没该元素）就跳过——home 页无 back-home，其他页无 nav-card，各取所需。
+    /// 闭包捕获的 page/target 是 per-iteration 局部，每次 Show 重新订阅当前页实例。
+    void WireNav(Container page, string pageName)
     {
-        GUI.skin.button.fontSize = 18;
-        GUILayout.BeginArea(new Rect(8f, 40f, 1180f, 44f));   // y=40 避开 driver FPS 读数
-        GUILayout.BeginHorizontal();
-        foreach (var p in PAGES)
+        if (page.TryGet<Button>("back-home", out var back))
+            back.Clicked += () => Show("home");
+        if (pageName == "home")
         {
-            var prev = GUI.color;
-            if (_shown == p) GUI.color = Color.yellow;   // 当前页高亮
-            if (GUILayout.Button(p, GUILayout.Width(130f), GUILayout.Height(36f)))
-                Show(p);
-            GUI.color = prev;
+            foreach (var (cardId, target) in NAV_CARDS)
+            {
+                string p = target;   // 防御性局部拷贝，确保每个闭包绑各自的页名
+                if (page.TryGet<Link>(cardId, out var card))
+                    card.Activated += () => Show(p);
+            }
         }
-        GUILayout.EndHorizontal();
-        GUILayout.EndArea();
     }
 }

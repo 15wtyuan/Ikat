@@ -105,11 +105,18 @@ namespace LoomGUI
                 current = parent;
             }
 
+            // 预物化 chain 上所有节点：dispatch 入口整条路径 live（NewCore 已确认 target live，此处同步
+            // 无 Dispose），GetOrCreate 必成功且 wrapper 入 registry 缓存。之后 capture/bubble 不再造节点，
+            // 改用 IsLive 判活——handler 可能在路由途中 Dispose 路径节点（关面板 / 切页 / 删 item 等 DOM
+            // 合法操作），Dispose 经 registry.Remove 移缓存 + 标 _disposed，IsLive 即此判据。
+            foreach (uint nid in chain) _ctx._registry.GetOrCreate(nid);
+
             // ── capture 阶段：root → target（chain 反向遍历，不检 stop——对齐 EventRouter.cs）。
             for (int i = chain.Count - 1; i >= 0; i--)
             {
                 uint nodeId = chain[i];
-                core.CurrentTarget = _ctx._registry.GetOrCreate(nodeId);
+                if (!IsLive(nodeId, out var node)) continue;   // 路由中被 Dispose → 跳过（DOM：移除节点不再触发）
+                core.CurrentTarget = node;
                 InvokeHandlers(nodeId, eventType, capture: true, ref evt);
             }
 
@@ -120,10 +127,24 @@ namespace LoomGUI
             for (int i = 0; i < chain.Count; i++)
             {
                 uint nodeId = chain[i];
-                core.CurrentTarget = _ctx._registry.GetOrCreate(nodeId);
+                if (!IsLive(nodeId, out var node)) continue;
+                core.CurrentTarget = node;
                 InvokeHandlers(nodeId, eventType, capture: false, ref evt);
                 if (core._propagationStopped) break;
             }
+        }
+
+        /// <summary>
+        /// chain 节点是否仍 live。预物化后 live 节点必在 registry 缓存；Dispose 经 registry.Remove 移缓存
+        /// + 标 _disposed，故 TryGet 未命中或 _disposed=true 即 not-live——dispatch 路由跳过它，对齐 DOM
+        /// 「事件派发中移除的节点不再触发 listener」。out 节点供 CurrentTarget 赋值；not-live 时 null
+        /// （调用方 continue 不使用）。
+        /// </summary>
+        bool IsLive(uint nodeId, out Node node)
+        {
+            if (_ctx._registry.TryGet(nodeId, out node) && !node._disposed) return true;
+            node = null;
+            return false;
         }
 
         /// <summary>

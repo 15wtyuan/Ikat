@@ -339,6 +339,41 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>
+        /// bubble handler 在路由途中 Dispose 祖先（切页 / 关面板 / 删 item 等 DOM 合法操作）：
+        /// 剩余路径节点已被 Dispose（registry 移除 + 标 _disposed），Dispatch 须跳过它们，而不是
+        /// GetOrCreate 重建 → get_node_kind rc=1 崩泵。回归 ShowcaseRunner 点 nav-card 切页：handler
+        /// 内 Dispose 当前页根，bubble 上溯已销毁祖先，GetOrCreate(ancestor) 抛 InvalidOperationException。
+        /// </summary>
+        [Fact]
+        public void DispatchSurvivesAncestorDisposeMidBubble()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                uint rootId = CreateRoot(stage, "div");
+                uint midId = CreateNode(stage, "div");
+                uint leafId = CreateNode(stage, "div");
+                AppendChild(stage, rootId, midId);
+                AppendChild(stage, midId, leafId);
+                Container root = (Container)ctx._registry.GetOrCreate(rootId);
+                Node leaf = ctx._registry.GetOrCreate(leafId);
+
+                bool rootBubbleFired = false;
+                leaf.On<ClickEvent>(_ => root.Dispose());    // 模拟切页：销毁整棵当前页树（含 leaf 自己）
+                root.On<ClickEvent>(_ => rootBubbleFired = true);
+
+                using (var buf = new NativeEventBuffer())
+                {
+                    buf.AddClick(leaf._id);
+                    ctx._eventDemuxer.Pump(buf.Ptr, buf.Count);   // 不抛：IsLive 跳过已 Dispose 的 mid / root
+                }
+
+                Assert.False(rootBubbleFired, "Dispose 后路径节点不应再触发 handler");
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
         /// Empty buffer (ptr=null, count=0) → Pump no-op，不抛。
         /// </summary>
         [Fact]
