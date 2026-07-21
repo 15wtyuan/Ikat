@@ -86,3 +86,6 @@ crates/packer/gui/src-tauri/gen/
 # superpowers SDD scratch (briefs/reports/review diffs — session-local, not source)
 .superpowers/
 *.snap.new
+
+# HeadlessTests fixture packer output (loom-pkg build of *.workspace → ../<name>-ws-out/)
+tests/dotnet/LoomGUI.HeadlessTests/fixtures/*-ws-out/
