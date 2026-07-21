@@ -39,6 +39,9 @@
     <None Include="..\..\..\unity\package\Plugins\LoomGUI\loomgui_ffi_c.dll" Link="loomgui_ffi_c.dll" CopyToOutputDirectory="PreserveNewest" />
     <!-- E2 fixture pkg.bin for LoadPackage/Instantiate end-to-end tests (E3 acceptance gate) -->
     <None Include="fixtures\test.pkg.bin" Link="fixtures\test.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
+    <!-- P1 C2 fixture: p1-block-acceptance (display:block + flex-grow:1 children) — used by BlockLayoutTests.
+         Built from fixtures/p1-block.workspace via loom-pkg; output copied here as a git-tracked fixture. -->
+    <None Include="fixtures\p1-block.pkg.bin" Link="fixtures\p1-block.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
     <!-- E2 fixture font for text layout (tick panics without a default font) -->
     <None Include="fixtures\fonts\DejaVuSans.ttf" Link="fixtures\fonts\DejaVuSans.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
