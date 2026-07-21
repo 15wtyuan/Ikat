@@ -69,11 +69,12 @@ pub struct Gradient2 {
     pub dir: GradientDir,
 }
 
-/// LoomGUI display 旁路字段（与 taffy_style.display 解耦）。
+/// LoomGUI display 旁路字段（与 taffy_style.display 并行设置）。
 ///
-/// （R1+ 围栏不允许 `display:block`——围栏外标签编译期报错。）
-/// IR 层 block div 仍是 flex（taffy_style.display = Flex）——不用 taffy `Display::Block`，
-/// 那会触发 taffy block 布局语义，违反"div 永远 flex"不变量。
+/// `display_mode` 让内部 Strategy 选择（Block vs Flex scrolling/text alignment
+/// 分支）不依赖 taffy 模式枚举。`taffy_style.display` 同步设置——P1 C2 起 block
+/// 标签和 `display:block` 都走 taffy `Display::Block`（真 CSS 块流，垂直堆叠且
+/// 忽略子元素 flex-grow）。inline 走 Flex Row，none 走 None。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum DisplayMode {

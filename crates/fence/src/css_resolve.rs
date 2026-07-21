@@ -38,6 +38,14 @@ pub fn resolve_inline_styles_with_diags(
             match spec.display {
                 DisplayDefault::Block => {
                     styles[idx].display_mode = DisplayMode::Block;
+                    // Schema-level default for block tags (div/header/nav/p/...).
+                    // Must set taffy Display::Block here too — otherwise the
+                    // taffy_style.display field keeps its Flex default from
+                    // ResolvedStyle::default() and explicit display:block in
+                    // mapping.rs can't rescue plain <div> without inline style.
+                    // Explicit display:flex/none in inline style still wins: this
+                    // runs first, apply_decl overwrites later.
+                    styles[idx].taffy_style.display = taffy::Display::Block;
                 }
                 DisplayDefault::Inline => {
                     styles[idx].display_mode = DisplayMode::Flex;

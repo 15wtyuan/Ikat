@@ -675,8 +675,11 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                     style.display_mode = DisplayMode::None;
                 }
                 "block" => {
-                    // block：taffy 仍 Flex（守铁律），仅旁路字段标记。
-                    ts.display = taffy::Display::Flex;
+                    // Real CSS block flow: taffy 0.12 Block mode stacks children
+                    // vertically and, unlike Flex column, ignores flex-grow on
+                    // children (they keep their explicit height). display_mode is
+                    // still set so internal Strategy selection can branch on it.
+                    ts.display = taffy::Display::Block;
                     style.display_mode = DisplayMode::Block;
                 }
                 _ => {

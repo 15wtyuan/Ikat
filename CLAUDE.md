@@ -104,7 +104,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 > 以下不变量描述的是**尚未完全重构的当前代码**。碰到下面的代码，提醒用户重构或清理。
 
-- **`<div>` 永远是 flex 容器**：旧 4-tag 限制已解（fence crate 已完成 23 运行时标签），但 flex-only 不变量仍在代码中强制——`display:block` 映射到 `taffy::Display::Flex`，仅旁路 `DisplayMode::Block` 标记。→ 终态：标准 CSS block 布局（见 main-design.md §11.1，roadmap deferred）。
+- ~~**`<div>` 永远是 flex 容器**~~（**P1 C2 已消除**）：`display:block` 和裸 block 默认标签（div/header/nav/p/ul/ol/li/option）现在都设 `taffy_style.display = taffy::Display::Block`（真 CSS 块流，垂直堆叠且忽略子 flex-grow），不再走 flex-column 伪 block。显式 `display:flex`/`display:none` 仍覆盖。两处赋值：`crates/fence/src/css_resolve.rs` 铺默认、`crates/core/src/style/mapping.rs` 应用显式声明。
 - **`NodeKind` enum + 代际 NodeId**：`NodeId(pub u32)` 对外透明句柄。已扩容到 22 变体（档位2）+ C# 类型化投影层（Node/Container/Button/...）已落地，但 Rust 侧 NodeKind/NodeId 仍在核心所有热路径中活跃。→ 类型化用户表面已兑现；内部表示重构在复合束推进时逐段迁移。
 - **`FindNodeById` 全局首匹配**：C# `Get<T>("id")` 已存在但底层仍调全局 `find_node_by_id` + subtree check。完整 `IsScopeRoot` 边界未实现（Nodes.cs:190 gap）。→ 复合束加完整作用域查找 FFI 时替换。
 - **虚拟列表 = 层 B'（核心不认识"列表"）**：driver 管 slot 映射/可见区间/不等高补偿。reuse_key 是场景级全局命名空间。→ 复合束 ListView 吸收。
@@ -117,7 +117,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 - **实现任何机制前，先对照 FairyGUI 源码和 RmlUi 源码**（`temp/FairyGUI-unity/` 和 `temp/RmlUi/`，只读）。LoomGUI 的渲染/对象模型/批合/事件/动画/资源管线全面借鉴 fgui，文本/布局借鉴 RmlUi/UITK。先读对应源码看它怎么做，再定设计。
 - **设计文档 vs 踩坑**：`docs/design/main-design.md`（总体架构与渲染管线）、`docs/design/fence.md`（围栏）、`docs/design/public-api.md`（公共 API 终态契约）、`docs/design/projection-layer.md`（C# 投影层机制：真身在 Rust，C# 是 OOP 投影 + 攒批回写）、`docs/roadmap/roadmap.md`（重构路线：摸黑打通 + 三束加宽 + 机制草稿）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配）。
-- **Rust edition 2021**，依赖钉版本：`taffy 0.5`、`ttf-parser 0.20`、`slotmap 1.1`、`csbindgen 1`。CSS 选择器解析器手搓（零新依赖，spike 阶段推翻了"接 cssparser"前提）。旧版 snapshot 测试用 `insta` 已移除，换自维护。
+- **Rust edition 2021**，依赖钉版本：`taffy 0.12`、`ttf-parser 0.20`、`slotmap 1.1`、`csbindgen 1`。CSS 选择器解析器手搓（零新依赖，spike 阶段推翻了"接 cssparser"前提）。旧版 snapshot 测试用 `insta` 已移除，换自维护。
 - `Cargo.lock` 入库（根级，尽管 `.gitignore` 有通用 `Cargo.lock` 行——它是被追踪的）。
 - 设计师工作区是独立磁盘目录（含 `loom.workspace.json`、HTML/CSS 源文件、res 资源、design-systems 组件库）。打包用独立打包器 GUI（Tauri `loomgui_gui`）或 CLI `loom-pkg build <workspace>`。运行时引导由 `loom.runtime.json` 统管。
 - 用户只读中文——问答/选项/总结用中文；代码/commit 照旧英文。
