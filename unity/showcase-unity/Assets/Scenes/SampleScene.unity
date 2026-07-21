@@ -480,7 +480,7 @@ Camera:
   far clip plane: 100
   field of view: 60
   orthographic: 1
-  orthographic size: 360
+  orthographic size: 540
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
@@ -572,6 +572,8 @@ GameObject:
   - component: {fileID: 1806355435}
   - component: {fileID: 1806355434}
   - component: {fileID: 1806355436}
+  - component: {fileID: 1806355438}
+  - component: {fileID: 1806355437}
   m_Layer: 6
   m_Name: LoomGUI
   m_TagString: Untagged
@@ -588,8 +590,8 @@ Transform:
   m_GameObject: {fileID: 1806355431}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -640, y: 360, z: 0}
-  m_LocalScale: {x: 1, y: -1, z: 1}
+  m_LocalPosition: {x: -960, y: 540, z: 0}
+  m_LocalScale: {x: 1.5, y: -1.5, z: 1.5}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -618,7 +620,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 807cafc80f771280949bbfadbeb16c63, type: 3}
   m_Name: 
   m_EditorClassIdentifier: LoomGUI.Runtime::LoomGUI.LoomStageDriver
-  _designSize: {x: 1280, y: 720}
+  _designSize: {x: 1920, y: 1080}
   _uiCamera: {fileID: 716283212}
   _showFps: 1
   _safeArea: 1
@@ -631,11 +633,35 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1806355431}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4481cc01eff30244482d31496cd5022b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Spec4bAcceptanceRunner
+--- !u!114 &1806355437
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1806355431}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b2d8f9e3506c5743a91b2c3d4e5f6071, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::VisualAcceptanceRunner
+--- !u!114 &1806355438
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1806355431}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a1c7e8d24f5b4632980a1b2c3d4e5f60, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ShowcaseRunner
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
