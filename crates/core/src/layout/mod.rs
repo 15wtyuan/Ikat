@@ -278,13 +278,17 @@ pub fn solve(
                         // 内字段私有无法 match 变体。先取 tag/value 再用 if-else 分派。
                         // width：known.width（Percent/fit 解析后，taffy 传）> css Length > 等比 height > intrinsic。
                         //   Percent width：taffy 第二次传 known.width=Some(解析宽)。
+                        //
+                        // 等比分支精确复刻升级前 match 臂 `(None, Dimension::Auto, Dimension::Length(h)) => h*iw/ih`：
+                        // 仅 wd==Auto 时按 height 推宽。Percent width（无可解析父）落 intrinsic iw，
+                        // 不混进 height-derive（P1 升级行为中立）。
                         let wd_is_length = wd.tag() == taffy::style::CompactLength::LENGTH_TAG;
                         let hd_is_length = hd.tag() == taffy::style::CompactLength::LENGTH_TAG;
                         let w = if let Some(v) = known.width {
                             v
                         } else if wd_is_length {
                             wd.value()
-                        } else if hd_is_length {
+                        } else if hd_is_length && wd.is_auto() {
                             hd.value() * iw / ih
                         } else {
                             iw
