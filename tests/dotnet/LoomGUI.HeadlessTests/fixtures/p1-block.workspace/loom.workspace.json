@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output_dir": "../p1-block-ws-out",
+  "packages": [
+    {
+      "name": "p1-block",
+      "dirs": ["."],
+      "html": ["p1-block-acceptance.html"]
+    }
+  ],
+  "atlases": [],
+  "fonts": []
+}

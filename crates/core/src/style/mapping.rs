@@ -6,11 +6,11 @@ use crate::style::resolved::{
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, LengthPercentage, LengthPercentageAuto};
 
-/// px → Dimension::Length(f32)；% → LengthPercentage::Percent；auto → Auto
+/// px → Dimension::length(f32)；% → LengthPercentage::percent；auto → auto()
 pub fn parse_length(s: &str) -> LengthPercentageAuto {
     let s = s.trim();
     if s == "auto" {
-        return LengthPercentageAuto::Auto;
+        return LengthPercentageAuto::auto();
     }
     parse_lp(s).into()
 }
@@ -19,29 +19,34 @@ pub fn parse_lp(s: &str) -> LengthPercentage {
     let s = s.trim();
     if let Some(pct) = s.strip_suffix('%') {
         if let Ok(v) = pct.trim().parse::<f32>() {
-            return LengthPercentage::Percent(v / 100.0);
+            return LengthPercentage::percent(v / 100.0);
         }
     }
     if let Some(px) = s.strip_suffix("px") {
         if let Ok(v) = px.trim().parse::<f32>() {
-            return LengthPercentage::Length(v);
+            return LengthPercentage::length(v);
         }
     }
     // 裸数字当 px
     if let Ok(v) = s.parse::<f32>() {
-        return LengthPercentage::Length(v);
+        return LengthPercentage::length(v);
     }
-    LengthPercentage::Length(0.0)
+    LengthPercentage::length(0.0)
 }
 
 pub fn parse_dimension(s: &str) -> Dimension {
     let s = s.trim();
     if s == "auto" {
-        return Dimension::Auto;
+        return Dimension::auto();
     }
-    match parse_lp(s) {
-        LengthPercentage::Length(v) => Dimension::Length(v),
-        LengthPercentage::Percent(v) => Dimension::Percent(v),
+    // taffy 0.12：LengthPercentage 是 pub struct(CompactLength) tagged pointer，
+    // 内字段私有无法 match 变体——用 into_raw + tag 解构（length/percent 二选一）。
+    let lp = parse_lp(s);
+    let cl = lp.into_raw();
+    match cl.tag() {
+        taffy::style::CompactLength::LENGTH_TAG => Dimension::length(cl.value()),
+        taffy::style::CompactLength::PERCENT_TAG => Dimension::percent(cl.value()),
+        _ => Dimension::length(0.0),
     }
 }
 
@@ -75,10 +80,10 @@ fn parse_margin_four(s: &str) -> Option<[LengthPercentageAuto; 4]> {
     let p = |i: usize| -> Option<LengthPercentageAuto> {
         let x = parts.get(i)?.trim();
         if x == "auto" {
-            return Some(LengthPercentageAuto::Auto);
+            return Some(LengthPercentageAuto::auto());
         }
         if let Some(pct) = x.strip_suffix('%') {
-            return Some(LengthPercentageAuto::Percent(
+            return Some(LengthPercentageAuto::percent(
                 pct.parse::<f32>().ok()? / 100.0,
             ));
         }
@@ -88,7 +93,7 @@ fn parse_margin_four(s: &str) -> Option<[LengthPercentageAuto; 4]> {
             .trim()
             .parse::<f32>()
             .ok()?;
-        Some(LengthPercentageAuto::Length(px))
+        Some(LengthPercentageAuto::length(px))
     };
     Some(match parts.len() {
         1 => {
@@ -464,7 +469,7 @@ fn apply_border_side(style: &mut ResolvedStyle, side: Side, value: &str) -> bool
     let Some((w, color)) = parse_border_value(value) else {
         return false;
     };
-    let lp = LengthPercentage::Length(w);
+    let lp = LengthPercentage::length(w);
     let ts = &mut style.taffy_style;
     match side {
         Side::Top => ts.border.top = lp,
@@ -485,7 +490,7 @@ fn apply_padding_side(style: &mut ResolvedStyle, side: Side, value: &str) -> boo
         Some(f) => f,
         None => return false,
     };
-    let lp = LengthPercentage::Length(v);
+    let lp = LengthPercentage::length(v);
     let ts = &mut style.taffy_style;
     match side {
         Side::Top => ts.padding.top = lp,
@@ -530,10 +535,10 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 None => return false,
             };
             ts.padding = Rect {
-                left: LengthPercentage::Length(l),
-                right: LengthPercentage::Length(r),
-                top: LengthPercentage::Length(t),
-                bottom: LengthPercentage::Length(b),
+                left: LengthPercentage::length(l),
+                right: LengthPercentage::length(r),
+                top: LengthPercentage::length(t),
+                bottom: LengthPercentage::length(b),
             };
             true
         }
@@ -559,7 +564,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             let Some((w, color)) = parse_border_value(value) else {
                 return false;
             };
-            let lp = LengthPercentage::Length(w);
+            let lp = LengthPercentage::length(w);
             ts.border = Rect {
                 left: lp,
                 right: lp,
@@ -581,10 +586,10 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 None => return false,
             };
             ts.border = Rect {
-                left: LengthPercentage::Length(l),
-                right: LengthPercentage::Length(r),
-                top: LengthPercentage::Length(t),
-                bottom: LengthPercentage::Length(b),
+                left: LengthPercentage::length(l),
+                right: LengthPercentage::length(r),
+                top: LengthPercentage::length(t),
+                bottom: LengthPercentage::length(b),
             };
             true
         }
@@ -618,8 +623,8 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 None => return false,
             };
             ts.gap = Size {
-                width: LengthPercentage::Length(f[1]),
-                height: LengthPercentage::Length(f[0]),
+                width: LengthPercentage::length(f[1]),
+                height: LengthPercentage::length(f[0]),
             };
             true
         }
@@ -670,8 +675,11 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                     style.display_mode = DisplayMode::None;
                 }
                 "block" => {
-                    // block：taffy 仍 Flex（守铁律），仅旁路字段标记。
-                    ts.display = taffy::Display::Flex;
+                    // Real CSS block flow: taffy 0.12 Block mode stacks children
+                    // vertically and, unlike Flex column, ignores flex-grow on
+                    // children (they keep their explicit height). display_mode is
+                    // still set so internal Strategy selection can branch on it.
+                    ts.display = taffy::Display::Block;
                     style.display_mode = DisplayMode::Block;
                 }
                 _ => {
@@ -858,7 +866,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         "top" | "right" | "bottom" | "left" => {
             // inset 四边。auto 保持默认（不写）；px 写 Length。
             if let Some(px) = parse_px(value) {
-                let lp = taffy::style::LengthPercentageAuto::Length(px);
+                let lp = taffy::style::LengthPercentageAuto::length(px);
                 match prop {
                     "top" => ts.inset.top = lp,
                     "right" => ts.inset.right = lp,
@@ -869,7 +877,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 true
             } else if value.trim() == "auto" {
                 // auto 显式置回默认（覆盖之前的 px 值）
-                let lp = taffy::style::LengthPercentageAuto::Auto;
+                let lp = taffy::style::LengthPercentageAuto::auto();
                 match prop {
                     "top" => ts.inset.top = lp,
                     "right" => ts.inset.right = lp,
@@ -1136,23 +1144,24 @@ fn parse_px(s: &str) -> Option<f32> {
 }
 
 fn parse_justify(v: &str) -> taffy::JustifyContent {
-    // JustifyContent 是 AlignContent 的类型别名（taffy 0.5），用全路径构造
+    // JustifyContent 是 AlignContent 的类型别名，用全路径构造。
+    // taffy 0.11+：对齐常量从 PascalCase 变体改成 SCREAMING_SNAKE 关联常量。
     match v.trim() {
-        "center" => taffy::AlignContent::Center,
-        "flex-end" => taffy::AlignContent::FlexEnd,
-        "space-between" => taffy::AlignContent::SpaceBetween,
-        "space-around" => taffy::AlignContent::SpaceAround,
-        "space-evenly" => taffy::AlignContent::SpaceEvenly,
-        _ => taffy::AlignContent::FlexStart,
+        "center" => taffy::AlignContent::CENTER,
+        "flex-end" => taffy::AlignContent::FLEX_END,
+        "space-between" => taffy::AlignContent::SPACE_BETWEEN,
+        "space-around" => taffy::AlignContent::SPACE_AROUND,
+        "space-evenly" => taffy::AlignContent::SPACE_EVENLY,
+        _ => taffy::AlignContent::FLEX_START,
     }
 }
 fn parse_align(v: &str) -> taffy::AlignItems {
     match v.trim() {
-        "center" => taffy::AlignItems::Center,
-        "flex-end" => taffy::AlignItems::FlexEnd,
-        "stretch" => taffy::AlignItems::Stretch,
-        "baseline" => taffy::AlignItems::Baseline,
-        _ => taffy::AlignItems::FlexStart,
+        "center" => taffy::AlignItems::CENTER,
+        "flex-end" => taffy::AlignItems::FLEX_END,
+        "stretch" => taffy::AlignItems::STRETCH,
+        "baseline" => taffy::AlignItems::BASELINE,
+        _ => taffy::AlignItems::FLEX_START,
     }
 }
 

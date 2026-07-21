@@ -50,9 +50,13 @@ fn map_overflow(m: OverflowMode) -> taffy::style::Overflow {
 /// 叶子节点的测量上下文。Container/Button 无上下文（用 None 叶子或 new_with_children）。
 /// taffy LengthPercentage → f32（固定尺寸节点 Percent 罕见，按 0 处理）。
 fn lp(v: taffy::style::LengthPercentage) -> f32 {
-    match v {
-        taffy::style::LengthPercentage::Length(x) => x,
-        _ => 0.0,
+    // taffy 0.12：LengthPercentage 是 pub struct(CompactLength) tagged pointer，
+    // 内字段私有无法 match 变体——用 into_raw + tag 解构（只要 Length 分支）。
+    let cl = v.into_raw();
+    if cl.tag() == taffy::style::CompactLength::LENGTH_TAG {
+        cl.value()
+    } else {
+        0.0
     }
 }
 
@@ -203,7 +207,7 @@ pub fn solve(
             // max-content 当 min-content，阻止 shrink → 长文本不收缩、超框。设 0 放开宽度。
             // 只设宽度：文本不纵向 shrink，min-height=0 无收益却有副作用——让 flex column 父
             // 容器主轴尺寸算大（按钮等容器被撑高、底图下沿往下拉），所以 height 保留 Auto。
-            style.min_size.width = taffy::style::Dimension::Length(0.0);
+            style.min_size.width = taffy::style::Dimension::length(0.0);
             // 叶子：装测量上下文。children 应为空（Text/Image 是叶子）。
             tree.new_leaf_with_context(style, mctx).unwrap()
         } else {
@@ -241,8 +245,8 @@ pub fn solve(
             root_tid,
             Style {
                 size: Size {
-                    width: Dimension::Length(root_size.0),
-                    height: Dimension::Length(root_size.1),
+                    width: Dimension::length(root_size.0),
+                    height: Dimension::length(root_size.1),
                 },
                 ..root_style
             },
@@ -270,19 +274,32 @@ pub fn solve(
                         h_dim,
                     }) => {
                         let (iw, ih, wd, hd) = (*iw, *ih, *w_dim, *h_dim);
+                        // taffy 0.12：Dimension 是 pub struct(CompactLength) tagged pointer，
+                        // 内字段私有无法 match 变体。先取 tag/value 再用 if-else 分派。
                         // width：known.width（Percent/fit 解析后，taffy 传）> css Length > 等比 height > intrinsic。
                         //   Percent width：taffy 第二次传 known.width=Some(解析宽)。
-                        let w = match (known.width, wd, hd) {
-                            (Some(v), _, _) => v,
-                            (None, Dimension::Length(v), _) => v,
-                            (None, Dimension::Auto, Dimension::Length(h)) => h * iw / ih,
-                            (None, _, _) => iw,
+                        //
+                        // 等比分支精确复刻升级前 match 臂 `(None, Dimension::Auto, Dimension::Length(h)) => h*iw/ih`：
+                        // 仅 wd==Auto 时按 height 推宽。Percent width（无可解析父）落 intrinsic iw，
+                        // 不混进 height-derive（P1 升级行为中立）。
+                        let wd_is_length = wd.tag() == taffy::style::CompactLength::LENGTH_TAG;
+                        let hd_is_length = hd.tag() == taffy::style::CompactLength::LENGTH_TAG;
+                        let w = if let Some(v) = known.width {
+                            v
+                        } else if wd_is_length {
+                            wd.value()
+                        } else if hd_is_length && wd.is_auto() {
+                            hd.value() * iw / ih
+                        } else {
+                            iw
                         };
                         // height：css Length > known.height > 等比 width（CSS img height:auto 默认）。
-                        let h = match (hd, known.height) {
-                            (Dimension::Length(v), _) => v,
-                            (_, Some(v)) => v,
-                            _ => w * ih / iw,
+                        let h = if hd_is_length {
+                            hd.value()
+                        } else if let Some(v) = known.height {
+                            v
+                        } else {
+                            w * ih / iw
                         };
                         Size {
                             width: w,
@@ -443,8 +460,8 @@ mod tests {
     fn image_css_length_overrides_intrinsic() {
         // CSS width:100px height:50px → CSS 声明赢（覆盖 intrinsic 真实像素 / 64×64 兜底）。
         let mut img_style = ResolvedStyle::default();
-        img_style.taffy_style.size.width = Dimension::Length(100.0);
-        img_style.taffy_style.size.height = Dimension::Length(50.0);
+        img_style.taffy_style.size.width = Dimension::length(100.0);
+        img_style.taffy_style.size.height = Dimension::length(50.0);
         let entries = [
             (
                 None,
@@ -489,7 +506,7 @@ mod tests {
     fn image_measure_uses_real_dims_when_no_css() {
         // 无 CSS 尺寸 + 尺寸表有 x.png=40×20 → intrinsic = 40×20（真实像素）。
         let mut img_style = ResolvedStyle::default();
-        img_style.taffy_style.align_self = Some(AlignSelf::FlexStart);
+        img_style.taffy_style.align_self = Some(AlignSelf::FLEX_START);
         let entries = [
             (
                 None,
@@ -530,7 +547,7 @@ mod tests {
     fn image_measure_uses_64_fallback_when_no_size_entry() {
         // 无 CSS + 尺寸表无 x.png → 64×64 兜底。
         let mut img_style = ResolvedStyle::default();
-        img_style.taffy_style.align_self = Some(AlignSelf::FlexStart);
+        img_style.taffy_style.align_self = Some(AlignSelf::FLEX_START);
         let entries = [
             (
                 None,
@@ -571,7 +588,7 @@ mod tests {
     fn image_measure_falls_back_to_64_when_zero_dims() {
         // 尺寸表 x.png=(0,0)（非 PNG 兜底）→ fallback 64×64。
         let mut img_style = ResolvedStyle::default();
-        img_style.taffy_style.align_self = Some(AlignSelf::FlexStart);
+        img_style.taffy_style.align_self = Some(AlignSelf::FLEX_START);
         let entries = [
             (
                 None,
@@ -612,8 +629,8 @@ mod tests {
     fn image_measure_scales_height_to_width_aspect() {
         // img style="width:80px" intrinsic 40×20（真实，2:1）→ height 等比 = 40（80×20/40）。
         let mut img_style = ResolvedStyle::default();
-        img_style.taffy_style.size.width = Dimension::Length(80.0);
-        img_style.taffy_style.align_self = Some(AlignSelf::FlexStart);
+        img_style.taffy_style.size.width = Dimension::length(80.0);
+        img_style.taffy_style.align_self = Some(AlignSelf::FLEX_START);
         let entries = [
             (
                 None,
@@ -658,8 +675,8 @@ mod tests {
     fn image_measure_scales_width_to_height_aspect() {
         // 只设 height：style="height:60px" intrinsic 40×20（真实，2:1）→ width 等比 = 120（60×40/20）。
         let mut img_style = ResolvedStyle::default();
-        img_style.taffy_style.size.height = Dimension::Length(60.0);
-        img_style.taffy_style.align_self = Some(AlignSelf::FlexStart);
+        img_style.taffy_style.size.height = Dimension::length(60.0);
+        img_style.taffy_style.align_self = Some(AlignSelf::FLEX_START);
         let entries = [
             (
                 None,

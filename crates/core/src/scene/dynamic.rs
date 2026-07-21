@@ -773,8 +773,8 @@ mod tests {
         let mut s = ResolvedStyle::default();
         apply_css(&mut s, "width:100px;height:50px;background-color:#ff0000");
         use taffy::style::Dimension;
-        assert!(matches!(s.taffy_style.size.width, Dimension::Length(100.0)));
-        assert!(matches!(s.taffy_style.size.height, Dimension::Length(50.0)));
+        assert_eq!(s.taffy_style.size.width, Dimension::length(100.0));
+        assert_eq!(s.taffy_style.size.height, Dimension::length(50.0));
         assert_eq!(s.background_color, Some([1.0, 0.0, 0.0, 1.0]));
     }
 
@@ -787,7 +787,7 @@ mod tests {
         apply_css(&mut s, "noscolon");
         apply_css(&mut s, "width:200px");
         use taffy::style::Dimension;
-        assert!(matches!(s.taffy_style.size.width, Dimension::Length(200.0)));
+        assert_eq!(s.taffy_style.size.width, Dimension::length(200.0));
     }
 
     #[test]
@@ -795,8 +795,9 @@ mod tests {
         let mut s = ResolvedStyle::default();
         apply_css(&mut s, "unknown-prop:42px;width:100px");
         use taffy::style::Dimension;
-        assert!(
-            matches!(s.taffy_style.size.width, Dimension::Length(100.0)),
+        assert_eq!(
+            s.taffy_style.size.width,
+            Dimension::length(100.0),
             "known 声明生效"
         );
     }
@@ -809,10 +810,10 @@ mod tests {
         assert_eq!(n.id, id, "id 回填");
         assert!(n.parent.is_none());
         use taffy::style::Dimension;
-        assert!(matches!(
+        assert_eq!(
             n.base_style.taffy_style.size.width,
-            Dimension::Length(100.0)
-        ));
+            Dimension::length(100.0)
+        );
         // style 初始 = base_style.clone()
         assert_eq!(n.style, n.base_style);
         assert!(n.dirty_mesh, "新建节点 dirty_mesh=true");

@@ -69,11 +69,12 @@ pub struct Gradient2 {
     pub dir: GradientDir,
 }
 
-/// LoomGUI display 旁路字段（与 taffy_style.display 解耦）。
+/// LoomGUI display 旁路字段（与 taffy_style.display 并行设置）。
 ///
-/// （R1+ 围栏不允许 `display:block`——围栏外标签编译期报错。）
-/// IR 层 block div 仍是 flex（taffy_style.display = Flex）——不用 taffy `Display::Block`，
-/// 那会触发 taffy block 布局语义，违反"div 永远 flex"不变量。
+/// `display_mode` 让内部 Strategy 选择（Block vs Flex scrolling/text alignment
+/// 分支）不依赖 taffy 模式枚举。`taffy_style.display` 同步设置——P1 C2 起 block
+/// 标签和 `display:block` 都走 taffy `Display::Block`（真 CSS 块流，垂直堆叠且
+/// 忽略子元素 flex-grow）。inline 走 Flex Row，none 走 None。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum DisplayMode {
@@ -94,8 +95,8 @@ pub struct CornerRadius {
 impl Default for CornerRadius {
     fn default() -> Self {
         Self {
-            h: LengthPercentage::Length(0.0),
-            v: LengthPercentage::Length(0.0),
+            h: LengthPercentage::length(0.0),
+            v: LengthPercentage::length(0.0),
         }
     }
 }
@@ -111,9 +112,15 @@ impl BorderRadius {
     /// `border::border_ring` 同约定）。百分比按 `(w, h)`（rect 宽/高）解析——水平半径
     /// 按宽、垂直半径按高（CSS border-radius 百分比语义）。
     pub fn as_corners(&self, w: f32, h: f32) -> [(f32, f32); 4] {
-        let r = |lp: LengthPercentage, side: f32| match lp {
-            LengthPercentage::Length(v) => v,
-            LengthPercentage::Percent(p) => side * p,
+        // taffy 0.12：LengthPercentage 是 pub struct(CompactLength) tagged pointer，
+        // 内字段私有无法 match 变体——用 into_raw + tag 解构。
+        let r = |lp: LengthPercentage, side: f32| {
+            let cl = lp.into_raw();
+            match cl.tag() {
+                taffy::style::CompactLength::LENGTH_TAG => cl.value(),
+                taffy::style::CompactLength::PERCENT_TAG => side * cl.value(),
+                _ => 0.0,
+            }
         };
         [
             (r(self.corners[0].h, w), r(self.corners[0].v, h)),
@@ -285,12 +292,12 @@ mod tests {
         // TL=10px（正圆角），TR=50%（水平按宽 200→100，垂直按高 100→50）。
         let mut br = BorderRadius::default();
         br.corners[0] = CornerRadius {
-            h: LengthPercentage::Length(10.0),
-            v: LengthPercentage::Length(10.0),
+            h: LengthPercentage::length(10.0),
+            v: LengthPercentage::length(10.0),
         };
         br.corners[1] = CornerRadius {
-            h: LengthPercentage::Percent(0.5),
-            v: LengthPercentage::Percent(0.5),
+            h: LengthPercentage::percent(0.5),
+            v: LengthPercentage::percent(0.5),
         };
         let c = br.as_corners(200.0, 100.0);
         assert_eq!(c[0], (10.0, 10.0), "TL px 不变");
@@ -342,20 +349,20 @@ mod tests {
         s.border_radius = BorderRadius {
             corners: [
                 CornerRadius {
-                    h: LengthPercentage::Length(12.0),
-                    v: LengthPercentage::Length(12.0),
+                    h: LengthPercentage::length(12.0),
+                    v: LengthPercentage::length(12.0),
                 },
                 CornerRadius {
-                    h: LengthPercentage::Length(0.0),
-                    v: LengthPercentage::Length(0.0),
+                    h: LengthPercentage::length(0.0),
+                    v: LengthPercentage::length(0.0),
                 },
                 CornerRadius {
-                    h: LengthPercentage::Percent(0.25),
-                    v: LengthPercentage::Percent(0.25),
+                    h: LengthPercentage::percent(0.25),
+                    v: LengthPercentage::percent(0.25),
                 },
                 CornerRadius {
-                    h: LengthPercentage::Length(4.0),
-                    v: LengthPercentage::Length(2.0),
+                    h: LengthPercentage::length(4.0),
+                    v: LengthPercentage::length(2.0),
                 },
             ],
         };
@@ -406,8 +413,8 @@ mod tests {
         let s = ResolvedStyle::default();
         // 默认四角全 Length(0)（直角）
         for c in &s.border_radius.corners {
-            assert_eq!(c.h, LengthPercentage::Length(0.0), "默认水平半径 0");
-            assert_eq!(c.v, LengthPercentage::Length(0.0), "默认垂直半径 0");
+            assert_eq!(c.h, LengthPercentage::length(0.0), "默认水平半径 0");
+            assert_eq!(c.v, LengthPercentage::length(0.0), "默认垂直半径 0");
         }
     }
 
@@ -418,20 +425,20 @@ mod tests {
         s.border_radius = BorderRadius {
             corners: [
                 CornerRadius {
-                    h: LengthPercentage::Length(8.0),
-                    v: LengthPercentage::Length(8.0),
+                    h: LengthPercentage::length(8.0),
+                    v: LengthPercentage::length(8.0),
                 },
                 CornerRadius {
-                    h: LengthPercentage::Length(10.0),
-                    v: LengthPercentage::Length(5.0),
+                    h: LengthPercentage::length(10.0),
+                    v: LengthPercentage::length(5.0),
                 },
                 CornerRadius {
-                    h: LengthPercentage::Percent(0.5),
-                    v: LengthPercentage::Percent(0.5),
+                    h: LengthPercentage::percent(0.5),
+                    v: LengthPercentage::percent(0.5),
                 },
                 CornerRadius {
-                    h: LengthPercentage::Length(0.0),
-                    v: LengthPercentage::Length(0.0),
+                    h: LengthPercentage::length(0.0),
+                    v: LengthPercentage::length(0.0),
                 },
             ],
         };

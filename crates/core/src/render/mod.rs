@@ -957,9 +957,13 @@ fn propagate_text_sub_page_sort_keys(
 ///   只产 `Length`（裸数字/px），故实际不会命中 Percent 分支；若未来 CSS 允许百分比
 ///   padding/border，需在 layout 阶段把解析结果写回 ResolvedStyle。
 fn resolve_lp(lp: LengthPercentage) -> f32 {
-    match lp {
-        LengthPercentage::Length(v) => v,
-        LengthPercentage::Percent(_) => 0.0,
+    // taffy 0.12：LengthPercentage 是 pub struct(CompactLength) tagged pointer，
+    // 内字段私有无法 match 变体——用 into_raw + tag 解构（仅 Length 分支返回值）。
+    let cl = lp.into_raw();
+    if cl.tag() == taffy::style::CompactLength::LENGTH_TAG {
+        cl.value()
+    } else {
+        0.0
     }
 }
 

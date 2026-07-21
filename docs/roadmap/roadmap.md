@@ -243,7 +243,7 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 
 > 以下各项 = 文档描述终态、代码尚未实现。全部归入 tech-debt，按束分配处置路标。
 
-- **Block 布局策略**（§4 视觉束 / 复合束文本模型）：`display:block` 当前强制映射为 `taffy::Display::Flex`（mapping.rs:672-675），仅旁路 `DisplayMode::Block` 标记未消费。taffy 0.5 虽有 block layout 但 LoomGUI 刻意不用。终态需实现标准 block 布局（垂直堆叠、margin collapse），触发时机与复合束文本模型（p/h1-h6 建文本 block）同频。
+- ✅ **Block 布局策略 — RESOLVED**（Phase1 Spec-P1 C2 @ `0b1525a`）：`display:block` 现映射 `taffy::Display::Block`（mapping.rs:672 + fence `css_resolve.rs` `DisplayDefault::Block` arm 两处），真标准 CSS block 布局（垂直堆叠、忽略 flex-grow、保留显式 cross-size）。taffy 已升 0.12（C1）。rect-diff 对齐 Chrome 已验。margin collapse / BFC 等边缘语义验收留 Unity 阶段 + 复合束文本模型（p/h1-h6 block）时补全。
 - **grayed 灰化渲染**（§4 视觉束）：`RenderNode` 缺少 `grayed: bool` 字段。文档描述禁用节点灰化渲染，全仓搜索零匹配。待视觉束补字段 + 渲染管线（shader / color tint 路径）。
 - **NodeTransform 替代 Affine2**（§4 控件束，第一个高频控件触发）：`RenderNode.world_matrix` 当前为 `Affine2`（[f32;6] 裸仿射矩阵），文档终态为 `NodeTransform`（分解 Position/Scale/Rotation，对齐 public-api.md 三分模型）。升级与 set_transform 数值 FFI 同频。
 - **动画系统终态**（§4 视觉束 v1.10）：当前 `TweenManager` 为单个 `Vec<Tween>`、flat `tween()` API、10 种缓动（Quad/Cubic/Back）、value_size max=4。文档描述终态为池化 `{active,pool}` + 链式 builder API + 28+ 缓动（含 Sine/Elastic/Bounce/Custom）+ value_size(1..6) + prop_type 分层（transform_dirty vs layout_dirty）。与 keyframes runtime 驱动一同落地。
@@ -275,7 +275,7 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 - **渲染**：贴图 quad + 纯文本 + 硬矩形裁剪；FairyBatching 重排 + 显式 mesh 合并（真 N→1 draw call）；Unity GameObject 镜像 + DrawState 缓存。
 - **文本**：核心自绘字体（ttf-parser outline + ab_glyph 光栅 + etagere 图集）；kerning；可合批；跨引擎一致；CJK 断行 + fallback 栈。
 - **事件**：命中（等效绘制顺序逆序）+ click/hover/leave + 拖拽；多触摸（5 槽）+ CaptureTouch + 拖拽/滚动仲裁 + 键盘/焦点/Tab。
-- **布局**：taffy 0.5 flex + block；参考分辨率缩放；safe-area。
+- **布局**：taffy 0.12 flex + block；参考分辨率缩放；safe-area。
 - **滚动**：ScrollPane 惯性 + 回弹 + 滚动条 + 鼠标滚轮（自维护可变 target tween）。
 - **资源**：pkg.bin 格式 v19（写包/读包/实例化全链）；独立工作区 + Tauri GUI 打包器；Rust 自绘图集。
 - **FFI**：csbindgen + SOA 多 arena 渲染树同步（blob v11，21 列，含 SDF 文字特效）。

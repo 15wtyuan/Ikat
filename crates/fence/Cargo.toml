@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 loomgui_core = { path = "../core" }
-taffy = "0.5"
+taffy = "0.12"
 html5gum = "0.8"

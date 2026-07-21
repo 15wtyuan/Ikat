@@ -8,8 +8,8 @@ use taffy::style::Dimension;
 /// 图尺寸不再进入 pkg.bin，改为通过 Stage.image_sizes 直接灌入。
 fn make_pkg_with_image(src: &str) -> Vec<u8> {
     let mut img_style = ResolvedStyle::default();
-    // align_self=FlexStart 防 column 容器 stretch 把 cross 轴宽拉满
-    img_style.taffy_style.align_self = Some(taffy::style::AlignSelf::FlexStart);
+    // align_self=FLEX_START 防 column 容器 stretch 把 cross 轴宽拉满
+    img_style.taffy_style.align_self = Some(taffy::style::AlignSelf::FLEX_START);
     let nodes = [
         TemplateNode {
             kind: NodeKind::Container,
@@ -117,8 +117,8 @@ fn missing_path_falls_back_to_64() {
 #[test]
 fn css_length_overrides_real_image_size() {
     let mut img_style = ResolvedStyle::default();
-    img_style.taffy_style.size.width = Dimension::Length(80.0);
-    img_style.taffy_style.align_self = Some(taffy::style::AlignSelf::FlexStart);
+    img_style.taffy_style.size.width = Dimension::length(80.0);
+    img_style.taffy_style.align_self = Some(taffy::style::AlignSelf::FLEX_START);
     let nodes = [
         TemplateNode {
             kind: NodeKind::Container,

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>P1 Block Acceptance (fixture)</title>
+  <style>
+    /* Fixture copy of showcase/spec4b/p1-block-acceptance.html.
+       Kept in sync so the headless test exercises the same layout as the
+       browser/rect-diff acceptance page used in T6. Discriminator (see showcase
+       copy for full rationale): pseudo-block honors flex-grow → child h≈140;
+       real block ignores flex-grow → child h=40. */
+    .root { width: 400px; height: 300px; background-color: #111; }
+    .stack { display: block; width: 400px; height: 280px; }
+    .item { width: 100px; height: 40px; flex-grow: 1; background-color: #e94560; }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="stack" id="stack">
+      <div class="item" id="c1"></div>
+      <div class="item" id="c2"></div>
+    </div>
+  </div>
+</body>
+</html>
