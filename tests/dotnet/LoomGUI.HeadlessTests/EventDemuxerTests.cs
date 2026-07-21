@@ -46,6 +46,35 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>
+        /// Pump 遇 not-live nodeId（节点已 Dispose，core 事件队列残留旧 id）不崩泵，handler 不收到。
+        /// 回归 ShowcaseRunner 切页 Dispose 旧页后，下帧 Pump 拿到旧节点 id 事件 → NewCore 经
+        /// GetOrCreate → get_node_kind rc=1 抛 InvalidOperationException 崩泵。NewCore 现容忍 →
+        /// Target=null → DispatchTyped 丢弃。
+        /// </summary>
+        [Fact]
+        public void DemuxSkipsEventForNotLiveNode()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                bool called = false;
+                n.On<ClickEvent>(e => called = true);
+
+                n.Dispose();   // 节点销毁 → id not live（模拟切页 Dispose 旧页残留事件）
+
+                using (var buf = new NativeEventBuffer())
+                {
+                    buf.AddClick(n._id);   // 残留事件指向已销毁 id
+                    ctx._eventDemuxer.Pump(buf.Ptr, buf.Count);   // 不抛：not-live 容忍
+                }
+
+                Assert.False(called, "已销毁节点的事件不应送达 handler");
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
         /// demux 翻译不同 event type 到不同 typed struct：PointerDown → PointerDownEvent。
         /// 验 demux 的 eventType switch 正确映射。
         /// </summary>

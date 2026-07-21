@@ -178,9 +178,11 @@ namespace LoomGUI
         /// <summary>
         /// 调 EventBus.Dispatch：target node 已由 _core.Target 指定（NewCore 已填）。
         /// Dispatch 内走 ancestor chain（capture→bubble），CurrentTarget 逐节点刷新。
+        /// Target=null（NewCore 遇 not-live nodeId）时丢弃该条——节点已销毁，事件无人接收。
         /// </summary>
         void DispatchTyped<T>(uint targetNodeId, T evt) where T : IRouteEvent
         {
+            if (evt.Target == null) return;   // not-live node（见 NewCore）：丢弃不崩泵
             _ctx._eventBus.Dispatch(targetNodeId, evt);
         }
 
@@ -189,13 +191,24 @@ namespace LoomGUI
         /// 若 registry 无缓存（本 tick 前未物化过该 NodeId），GetOrCreate 调 NodeFactory
         /// FFI 造 typed Node 并入缓存——首次触及时物化，后续 Dispatch 的 CurrentTarget
         /// 刷新也复用同一 Instance。
+        ///
+        /// not-live 容忍：nodeId 可能指向已销毁节点（切页 Dispose 旧页 / runtime 节点移除后，
+        /// core 事件队列仍残留旧 id 的 hover/leave/click 等）。GetOrCreate → get_node_kind 此刻
+        /// rc=1（node not live）抛 InvalidOperationException——节点不在，事件本就无人接收，
+        /// 留 Target=null 让 DispatchTyped 丢弃，而不是让单条死事件崩整个事件泵。
         /// </summary>
         RouteEventCore NewCore(uint nodeId)
         {
-            return new RouteEventCore
+            Node target = null;
+            try
             {
-                Target = _ctx._registry.GetOrCreate(nodeId),
-            };
+                target = _ctx._registry.GetOrCreate(nodeId);
+            }
+            catch (InvalidOperationException)
+            {
+                // node not live：残留事件指向已销毁节点，丢弃（见方法注释）。
+            }
+            return new RouteEventCore { Target = target };
         }
     }
 }
