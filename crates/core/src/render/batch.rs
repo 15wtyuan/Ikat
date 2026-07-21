@@ -447,20 +447,20 @@ mod tests {
         root.style.border_radius = BorderRadius {
             corners: [
                 CornerRadius {
-                    h: LengthPercentage::Length(10.0),
-                    v: LengthPercentage::Length(15.0),
+                    h: LengthPercentage::length(10.0),
+                    v: LengthPercentage::length(15.0),
                 },
                 CornerRadius {
-                    h: LengthPercentage::Length(20.0),
-                    v: LengthPercentage::Length(25.0),
+                    h: LengthPercentage::length(20.0),
+                    v: LengthPercentage::length(25.0),
                 },
                 CornerRadius {
-                    h: LengthPercentage::Length(30.0),
-                    v: LengthPercentage::Length(35.0),
+                    h: LengthPercentage::length(30.0),
+                    v: LengthPercentage::length(35.0),
                 },
                 CornerRadius {
-                    h: LengthPercentage::Length(40.0),
-                    v: LengthPercentage::Length(45.0),
+                    h: LengthPercentage::length(40.0),
+                    v: LengthPercentage::length(45.0),
                 },
             ],
         };

@@ -975,10 +975,10 @@ mod tests {
         rematch_pseudo_classes(&mut s);
         // 验 style.taffy_style.size.width 被改
         use taffy::style::Dimension;
-        assert!(matches!(
+        assert_eq!(
             s.get(bid).unwrap().style.taffy_style.size.width,
-            Dimension::Length(200.0)
-        ));
+            Dimension::length(200.0)
+        );
     }
 
     #[test]
@@ -1226,12 +1226,12 @@ mod tests {
         for c in bc {
             assert_eq!(
                 c.h,
-                taffy::style::LengthPercentage::Length(8.0),
+                taffy::style::LengthPercentage::length(8.0),
                 "hover → border-radius 水平 8px"
             );
             assert_eq!(
                 c.v,
-                taffy::style::LengthPercentage::Length(8.0),
+                taffy::style::LengthPercentage::length(8.0),
                 "hover → border-radius 垂直 8px"
             );
         }
@@ -1490,10 +1490,10 @@ mod tests {
         crate::scene::dynamic::set_inline_override(&mut scene, root, "width:123px").unwrap();
         rematch_pseudo_classes(&mut scene);
         use taffy::style::Dimension;
-        assert!(matches!(
+        assert_eq!(
             scene.get(root).unwrap().style.taffy_style.size.width,
-            Dimension::Length(123.0)
-        ));
+            Dimension::length(123.0)
+        );
     }
 
     #[test]
@@ -1581,7 +1581,7 @@ mod tests {
         use taffy::style::LengthPercentage;
         assert_eq!(
             n.inline_override.taffy_style.padding.top,
-            LengthPercentage::Length(0.0),
+            LengthPercentage::length(0.0),
             "padding-top 不写 inline_override（无 ghost）"
         );
         // rematch 不 panic，且 style 不受这些 prop 影响
@@ -1589,7 +1589,7 @@ mod tests {
         let n = scene.get(root).unwrap();
         assert_eq!(
             n.style.taffy_style.padding.top,
-            LengthPercentage::Length(0.0),
+            LengthPercentage::length(0.0),
             "rematch 后 padding 仍为 0（unsupported prop 未生效）"
         );
         // 对照：set "width:100px"（支持）→ bit 置 + 生效
@@ -1647,7 +1647,7 @@ mod tests {
         let s = &scene.get(root).unwrap().style;
         assert_eq!(
             s.taffy_style.border.top,
-            LengthPercentage::Length(2.0),
+            LengthPercentage::length(2.0),
             "border-width 2px inline 生效"
         );
         assert_eq!(

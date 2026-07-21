@@ -13,10 +13,10 @@ fn create_node_and_append_builds_tree() {
     assert_eq!(sc.get(child).unwrap().parent, Some(root));
     // CSS 应用生效：base_style width 100px
     use taffy::style::Dimension;
-    assert!(matches!(
+    assert_eq!(
         sc.get(root).unwrap().base_style.taffy_style.size.width,
-        Dimension::Length(100.0)
-    ));
+        Dimension::length(100.0)
+    );
 }
 
 #[test]

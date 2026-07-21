@@ -618,16 +618,16 @@ fn build_text_bakes_content_offset_into_glyph_pen() {
     n.style.font_size = 16.0;
     // padding/border 四向 4px/2px → content 偏移 left=2+4=6, top=2+4=6。
     n.style.taffy_style.padding = taffy::geometry::Rect {
-        left: taffy::style::LengthPercentage::Length(4.0),
-        right: taffy::style::LengthPercentage::Length(4.0),
-        top: taffy::style::LengthPercentage::Length(4.0),
-        bottom: taffy::style::LengthPercentage::Length(4.0),
+        left: taffy::style::LengthPercentage::length(4.0),
+        right: taffy::style::LengthPercentage::length(4.0),
+        top: taffy::style::LengthPercentage::length(4.0),
+        bottom: taffy::style::LengthPercentage::length(4.0),
     };
     n.style.taffy_style.border = taffy::geometry::Rect {
-        left: taffy::style::LengthPercentage::Length(2.0),
-        right: taffy::style::LengthPercentage::Length(2.0),
-        top: taffy::style::LengthPercentage::Length(2.0),
-        bottom: taffy::style::LengthPercentage::Length(2.0),
+        left: taffy::style::LengthPercentage::length(2.0),
+        right: taffy::style::LengthPercentage::length(2.0),
+        top: taffy::style::LengthPercentage::length(2.0),
+        bottom: taffy::style::LengthPercentage::length(2.0),
     };
     n.layout_rect = Rect {
         x: 0.0,
@@ -1324,7 +1324,7 @@ fn render_text_payload_matches_layout_text_layout() {
     let content = "the layout reuse check text";
     let fs = 16.0;
     let mut root_s = ResolvedStyle::default();
-    root_s.taffy_style.size.width = Dimension::Length(120.0);
+    root_s.taffy_style.size.width = Dimension::length(120.0);
     let mut text_s = ResolvedStyle::default();
     text_s.font_size = fs;
     let entries = vec![
@@ -1425,7 +1425,7 @@ fn render_long_text_still_wraps_with_layout_reuse() {
         "测试前置：长文本 intrinsic 应远超 container"
     );
     let mut root_s = ResolvedStyle::default();
-    root_s.taffy_style.size.width = Dimension::Length(container_w);
+    root_s.taffy_style.size.width = Dimension::length(container_w);
     let mut text_s = ResolvedStyle::default();
     text_s.font_size = fs;
     let entries = vec![
@@ -2322,8 +2322,8 @@ fn container_radius_uses_rounded_rect() {
     );
     n.style.border_radius = BorderRadius {
         corners: [CornerRadius {
-            h: LengthPercentage::Length(8.0),
-            v: LengthPercentage::Length(8.0),
+            h: LengthPercentage::length(8.0),
+            v: LengthPercentage::length(8.0),
         }; 4],
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);
@@ -2366,8 +2366,8 @@ fn container_radius_percent_resolved() {
     );
     n.style.border_radius = BorderRadius {
         corners: [CornerRadius {
-            h: LengthPercentage::Percent(0.5),
-            v: LengthPercentage::Percent(0.5),
+            h: LengthPercentage::percent(0.5),
+            v: LengthPercentage::percent(0.5),
         }; 4],
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);
@@ -2411,8 +2411,8 @@ fn container_bg_image_with_radius_uses_rounded_rect() {
     n.style.background_size = BackgroundSize::Stretch;
     n.style.border_radius = BorderRadius {
         corners: [CornerRadius {
-            h: LengthPercentage::Length(12.0),
-            v: LengthPercentage::Length(12.0),
+            h: LengthPercentage::length(12.0),
+            v: LengthPercentage::length(12.0),
         }; 4],
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);

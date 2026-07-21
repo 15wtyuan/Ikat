@@ -2,20 +2,18 @@ use super::*;
 use taffy::style::LengthPercentage;
 #[test]
 fn parse_length_px_pct_auto() {
-    assert!(matches!(parse_lp("100px"), LengthPercentage::Length(100.0)));
-    assert!(matches!(parse_lp("50%"), LengthPercentage::Percent(0.5)));
+    // taffy 0.12：LengthPercentage 是 tagged pointer struct，用 == 比较而非 matches!。
+    assert_eq!(parse_lp("100px"), LengthPercentage::length(100.0));
+    assert_eq!(parse_lp("50%"), LengthPercentage::percent(0.5));
 }
-/// `width:auto` 必须解析成 `Dimension::Auto`（fit-content），
+/// `width:auto` 必须解析成 `Dimension::auto()`（fit-content），
 /// 不能 fallback 到 `Length(0.0)`（→ img rect=(0,0) 不渲染）。
 #[test]
 fn parse_dimension_auto_is_auto_not_zero() {
     use taffy::style::Dimension;
-    assert!(
-        matches!(parse_dimension("auto"), Dimension::Auto),
-        "auto → Auto"
-    );
-    assert!(matches!(parse_dimension("80px"), Dimension::Length(80.0)));
-    assert!(matches!(parse_dimension("50%"), Dimension::Percent(0.5)));
+    assert!(parse_dimension("auto").is_auto(), "auto → Auto");
+    assert_eq!(parse_dimension("80px"), Dimension::length(80.0));
+    assert_eq!(parse_dimension("50%"), Dimension::percent(0.5));
 }
 #[test]
 fn four_value_expand() {
@@ -52,10 +50,7 @@ fn apply_decl_padding_rejects_percent_and_em() {
     // px 仍生效（不回归）
     let mut s5 = ResolvedStyle::default();
     assert!(apply_decl(&mut s5, "padding", "4px"));
-    assert!(matches!(
-        s5.taffy_style.padding.top,
-        LengthPercentage::Length(4.0)
-    ));
+    assert_eq!(s5.taffy_style.padding.top, LengthPercentage::length(4.0));
 }
 
 /// margin 围栏 px/%/auto：须真正解析 % 与 auto（之前 parse_four 静默落 0 还返 true，
@@ -65,27 +60,20 @@ fn apply_decl_margin_supports_percent_and_auto() {
     use taffy::style::LengthPercentageAuto;
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "margin", "10%"));
-    assert!(
-        matches!(s.taffy_style.margin.top, LengthPercentageAuto::Percent(v) if (v - 0.1).abs() < 1e-6),
-        "margin 10% → Percent(0.1)"
-    );
+    // taffy 0.12：LengthPercentageAuto 是 tagged pointer struct。Percent 分支
+    // 用 into_raw 解出值校验（ == 无法捕获 v 的近似匹配）。
+    let top = s.taffy_style.margin.top;
+    let cl = top.into_raw();
+    assert_eq!(cl.tag(), taffy::style::CompactLength::PERCENT_TAG);
+    assert!((cl.value() - 0.1).abs() < 1e-6, "margin 10% → Percent(0.1)");
     let mut s2 = ResolvedStyle::default();
     assert!(apply_decl(&mut s2, "margin", "auto"));
-    assert!(
-        matches!(s2.taffy_style.margin.top, LengthPercentageAuto::Auto),
-        "margin auto → Auto"
-    );
+    assert!(s2.taffy_style.margin.top.is_auto(), "margin auto → Auto");
     // margin:0 auto → top/bottom Length(0)，left/right Auto（居中模式）
     let mut s3 = ResolvedStyle::default();
     assert!(apply_decl(&mut s3, "margin", "0 auto"));
-    assert!(matches!(
-        s3.taffy_style.margin.top,
-        LengthPercentageAuto::Length(0.0)
-    ));
-    assert!(matches!(
-        s3.taffy_style.margin.right,
-        LengthPercentageAuto::Auto
-    ));
+    assert_eq!(s3.taffy_style.margin.top, LengthPercentageAuto::length(0.0));
+    assert!(s3.taffy_style.margin.right.is_auto(), "margin right auto");
     // em/rem 仍不支持（fence 未列）
     let mut s4 = ResolvedStyle::default();
     assert!(!apply_decl(&mut s4, "margin", "1em"), "margin em → false");
@@ -488,8 +476,8 @@ fn apply_border_radius_percent() {
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "border-radius", "50%"));
     for c in &s.border_radius.corners {
-        assert_eq!(c.h, LengthPercentage::Percent(0.5));
-        assert_eq!(c.v, LengthPercentage::Percent(0.5));
+        assert_eq!(c.h, LengthPercentage::percent(0.5));
+        assert_eq!(c.v, LengthPercentage::percent(0.5));
     }
 }
 
@@ -608,10 +596,10 @@ fn apply_border_shorthand_sets_width_and_color() {
     assert_eq!(c[2], 0x55 as f32 / 255.0);
     assert_eq!(c[3], 1.0);
     let ts = &s.taffy_style.border;
-    assert!(matches!(ts.top, LengthPercentage::Length(1.0)), "四边同宽");
-    assert!(matches!(ts.right, LengthPercentage::Length(1.0)));
-    assert!(matches!(ts.bottom, LengthPercentage::Length(1.0)));
-    assert!(matches!(ts.left, LengthPercentage::Length(1.0)));
+    assert_eq!(ts.top, LengthPercentage::length(1.0), "四边同宽");
+    assert_eq!(ts.right, LengthPercentage::length(1.0));
+    assert_eq!(ts.bottom, LengthPercentage::length(1.0));
+    assert_eq!(ts.left, LengthPercentage::length(1.0));
 }
 
 /// border 简写 width/style/color 任意序；省 color 时只设 width。
@@ -619,8 +607,9 @@ fn apply_border_shorthand_sets_width_and_color() {
 fn apply_border_shorthand_token_order_and_optional_color() {
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "border", "2px"));
-    assert!(
-        matches!(s.taffy_style.border.top, LengthPercentage::Length(2.0)),
+    assert_eq!(
+        s.taffy_style.border.top,
+        LengthPercentage::length(2.0),
         "border 简写四边同宽"
     );
     assert!(
@@ -631,8 +620,9 @@ fn apply_border_shorthand_token_order_and_optional_color() {
     // color 在前、width 在后（CSS 简写任意序）
     let mut s2 = ResolvedStyle::default();
     assert!(apply_decl(&mut s2, "border", "#ff0000 3px solid"));
-    assert!(
-        matches!(s2.taffy_style.border.top, LengthPercentage::Length(3.0)),
+    assert_eq!(
+        s2.taffy_style.border.top,
+        LengthPercentage::length(3.0),
         "color 在前时 width 仍解析"
     );
     let c = s2.border_color.expect("color 在前也解析");
@@ -645,8 +635,9 @@ fn apply_border_longhand_width_leaves_color_untouched() {
     let mut s = ResolvedStyle::default();
     s.border_color = Some([0.5; 4]);
     assert!(apply_decl(&mut s, "border-width", "4px"));
-    assert!(
-        matches!(s.taffy_style.border.top, LengthPercentage::Length(4.0)),
+    assert_eq!(
+        s.taffy_style.border.top,
+        LengthPercentage::length(4.0),
         "border-width 设四边"
     );
     assert_eq!(
@@ -664,13 +655,10 @@ fn apply_border_width_four_values_sets_all_four_sides() {
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "border-width", "1px 2px 3px 4px"));
     let ts = &s.taffy_style.border;
-    assert!(matches!(ts.top, LengthPercentage::Length(1.0)), "top=1");
-    assert!(matches!(ts.right, LengthPercentage::Length(2.0)), "right=2");
-    assert!(
-        matches!(ts.bottom, LengthPercentage::Length(3.0)),
-        "bottom=3"
-    );
-    assert!(matches!(ts.left, LengthPercentage::Length(4.0)), "left=4");
+    assert_eq!(ts.top, LengthPercentage::length(1.0), "top=1");
+    assert_eq!(ts.right, LengthPercentage::length(2.0), "right=2");
+    assert_eq!(ts.bottom, LengthPercentage::length(3.0), "bottom=3");
+    assert_eq!(ts.left, LengthPercentage::length(4.0), "left=4");
     assert!(
         s.border_color.is_none(),
         "border-width 只设 width，不碰 border_color"
@@ -1257,27 +1245,19 @@ fn apply_border_side_longhands_set_one_side_only() {
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "border-bottom", "1px solid #3a3f55"));
     let ts = &s.taffy_style.border;
-    assert!(
-        matches!(ts.bottom, LengthPercentage::Length(1.0)),
-        "bottom 设了"
-    );
-    assert!(
-        matches!(ts.top, LengthPercentage::Length(0.0)),
-        "top 不动（默认 0）"
-    );
-    assert!(matches!(ts.left, LengthPercentage::Length(0.0)));
-    assert!(matches!(ts.right, LengthPercentage::Length(0.0)));
+    assert_eq!(ts.bottom, LengthPercentage::length(1.0), "bottom 设了");
+    assert_eq!(ts.top, LengthPercentage::length(0.0), "top 不动（默认 0）");
+    assert_eq!(ts.left, LengthPercentage::length(0.0));
+    assert_eq!(ts.right, LengthPercentage::length(0.0));
     let c = s.border_color.expect("单边 color 解析");
     assert_eq!(c[0], 0x3a as f32 / 255.0);
 
     // 累积：再设 top，bottom 仍在
     assert!(apply_decl(&mut s, "border-top", "4px solid #e0e0e0"));
-    assert!(matches!(
-        s.taffy_style.border.top,
-        LengthPercentage::Length(4.0)
-    ));
-    assert!(
-        matches!(s.taffy_style.border.bottom, LengthPercentage::Length(1.0)),
+    assert_eq!(s.taffy_style.border.top, LengthPercentage::length(4.0));
+    assert_eq!(
+        s.taffy_style.border.bottom,
+        LengthPercentage::length(1.0),
         "bottom 不被覆盖"
     );
 }
@@ -1287,8 +1267,9 @@ fn apply_border_side_longhand_rejects_non_px() {
     // 非 px width → 整条 false（围栏外静默忽略），不碰任何字段
     let mut s = ResolvedStyle::default();
     assert!(!apply_decl(&mut s, "border-bottom", "1em solid red"));
-    assert!(
-        matches!(s.taffy_style.border.bottom, LengthPercentage::Length(0.0)),
+    assert_eq!(
+        s.taffy_style.border.bottom,
+        LengthPercentage::length(0.0),
         "失败不设值"
     );
     assert!(s.border_color.is_none(), "失败不设 color");
@@ -1300,9 +1281,6 @@ fn apply_border_side_longhand_optional_color() {
     let mut s = ResolvedStyle::default();
     s.border_color = Some([0.5; 4]);
     assert!(apply_decl(&mut s, "border-bottom", "1px"));
-    assert!(matches!(
-        s.taffy_style.border.bottom,
-        LengthPercentage::Length(1.0)
-    ));
+    assert_eq!(s.taffy_style.border.bottom, LengthPercentage::length(1.0));
     assert_eq!(s.border_color, Some([0.5; 4]), "无 color token 不覆盖");
 }

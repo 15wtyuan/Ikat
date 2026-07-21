@@ -65,8 +65,8 @@ pub fn resolve_inline_styles_with_diags(
                 // 时，text 子作为 flex item 仍从 padding-left 起——core dump 实证 text.x=266 而非
                 // 居中 268.5。justify-content/align-items 非继承属性 → 无 INH bit，仅本节点生效，
                 // 运行时 rematch 从 base_style 重起，UA 默认每帧稳定。
-                styles[idx].taffy_style.justify_content = Some(taffy::JustifyContent::Center);
-                styles[idx].taffy_style.align_items = Some(taffy::AlignItems::Center);
+                styles[idx].taffy_style.justify_content = Some(taffy::JustifyContent::CENTER);
+                styles[idx].taffy_style.align_items = Some(taffy::AlignItems::CENTER);
             }
         }
 
@@ -320,12 +320,12 @@ mod tests {
         let id = tree.roots[0];
         assert_eq!(
             styles[id.0].taffy_style.justify_content,
-            Some(taffy::JustifyContent::Center),
+            Some(taffy::JustifyContent::CENTER),
             "button UA justify-content: center"
         );
         assert_eq!(
             styles[id.0].taffy_style.align_items,
-            Some(taffy::AlignItems::Center),
+            Some(taffy::AlignItems::CENTER),
             "button UA align-items: center"
         );
     }
@@ -340,12 +340,12 @@ mod tests {
         let id = tree.roots[0];
         assert_eq!(
             styles[id.0].taffy_style.justify_content,
-            Some(taffy::JustifyContent::FlexStart),
+            Some(taffy::JustifyContent::FLEX_START),
             "显式 justify-content 覆盖 button UA center"
         );
         assert_eq!(
             styles[id.0].taffy_style.align_items,
-            Some(taffy::AlignItems::FlexEnd),
+            Some(taffy::AlignItems::FLEX_END),
             "显式 align-items 覆盖 button UA center"
         );
     }
@@ -358,7 +358,7 @@ mod tests {
         let id = tree.roots[0];
         assert_ne!(
             styles[id.0].taffy_style.justify_content,
-            Some(taffy::JustifyContent::Center),
+            Some(taffy::JustifyContent::CENTER),
             "div 不沾 button UA center"
         );
     }
