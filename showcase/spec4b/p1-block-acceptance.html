@@ -4,24 +4,29 @@
   <meta charset="utf-8">
   <title>P1 Block Acceptance</title>
   <style>
-    /* C2 acceptance page: discriminates pseudo-block (flex-column) from real block.
-       The single signal is child height under flex-grow:
-         - pseudo-block maps display:block → taffy Flex, honors flex-grow → child grows to ~140.
-         - real block ignores flex-grow → child stays at explicit 40px.
-       width and y-stacking do NOT discriminate (verified via layout dump):
-         - width:100px is not stretched by either flex-column (align-items stretch is cross-axis) or block.
-         - Both modes stack vertically (flex-direction:column main-axis vs block normal flow).
-       Discriminator was empirically confirmed via dump_p1block_probe: cg1.h=140 under pseudo-block. */
+    /* C2 acceptance page: discriminate real CSS block from pseudo-block (flex-column),
+       judged by eye without measuring pixels:
+         - real block: .item flex-grow is ignored → c1/c2 keep height:40, two small bars
+           sit at the top of .stack with a large empty area below.
+         - pseudo-block (flex-column): flex-grow stretches c1/c2 to ~140 each → they
+           fill the whole .stack dashed frame, almost no empty area.
+       .stack is a dark dashed frame (visible region); c1 red / c2 blue (tells the two
+       bars apart); margin:8px separates them. The fixture copy under
+       tests/dotnet/LoomGUI.HeadlessTests/fixtures/p1-block.workspace/ is kept in sync
+       and drives BlockLayoutTests (asserts c1.height≤41, unaffected by margin/color).
+       width and y-stacking do NOT discriminate (verified via layout dump). */
     .root { width: 400px; height: 300px; background-color: #111; }
-    .stack { display: block; width: 400px; height: 280px; }
-    .item { width: 100px; height: 40px; flex-grow: 1; background-color: #e94560; }
+    .stack { display: block; width: 400px; height: 280px; background-color: #333; border: 2px dashed #888; }
+    .item { width: 200px; height: 40px; flex-grow: 1; margin: 8px; }
+    .first { background-color: #e94560; }
+    .second { background-color: #4a90d9; }
   </style>
 </head>
 <body>
   <div class="root">
     <div class="stack" id="stack">
-      <div class="item" id="c1"></div>
-      <div class="item" id="c2"></div>
+      <div class="item first" id="c1"></div>
+      <div class="item second" id="c2"></div>
     </div>
   </div>
 </body>

@@ -4,21 +4,23 @@
   <meta charset="utf-8">
   <title>P1 Block Acceptance (fixture)</title>
   <style>
-    /* Fixture copy of showcase/spec4b/p1-block-acceptance.html.
-       Kept in sync so the headless test exercises the same layout as the
-       browser/rect-diff acceptance page used in T6. Discriminator (see showcase
-       copy for full rationale): pseudo-block honors flex-grow → child h≈140;
-       real block ignores flex-grow → child h=40. */
+    /* Fixture copy of showcase/spec4b/p1-block-acceptance.html. Kept in sync so the
+       headless test exercises the same layout as the browser/Unity acceptance page.
+       Discriminator (see showcase copy): real block ignores flex-grow → c1/c2 stay
+       height:40 (two small bars at top); pseudo-block stretches them to ~140 (fill the
+       .stack frame). .stack dark dashed frame = visible region; c1 red / c2 blue. */
     .root { width: 400px; height: 300px; background-color: #111; }
-    .stack { display: block; width: 400px; height: 280px; }
-    .item { width: 100px; height: 40px; flex-grow: 1; background-color: #e94560; }
+    .stack { display: block; width: 400px; height: 280px; background-color: #333; border: 2px dashed #888; }
+    .item { width: 200px; height: 40px; flex-grow: 1; margin: 8px; }
+    .first { background-color: #e94560; }
+    .second { background-color: #4a90d9; }
   </style>
 </head>
 <body>
   <div class="root">
     <div class="stack" id="stack">
-      <div class="item" id="c1"></div>
-      <div class="item" id="c2"></div>
+      <div class="item first" id="c1"></div>
+      <div class="item second" id="c2"></div>
     </div>
   </div>
 </body>
