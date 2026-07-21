@@ -279,12 +279,13 @@ C1(taffy 升级)到此完成——build/test/打包全绿,dll/exe/pkg 入库。�
   <title>P1 Block Acceptance</title>
   <style>
     .root { width: 400px; height: 300px; background-color: #111; }
-    /* 显式 display:block 容器 + 两个 width:100px 子 div。
-       判别真假 block 看 width:真 block 子 div 保留 100px(不拉伸 cross-axis);
-       伪 block(flex-column,默认 align-items:stretch)拉到容器宽(~400px)。
-       (垂直堆叠两者都成立,不作判别。) */
-    .stack { display: block; }
-    .item { width: 100px; height: 40px; background-color: #e94560; }
+    /* 显式 display:block 容器 + 两个 flex-grow:1 子 div。
+       判别真假 block 看 height:flex(flex-column)尊重 flex-grow 把子元素拉到 ~140;
+       真 block 忽略 flex-grow,子元素保持显式 height:40。
+       (width 不判别:flex 和 block 都不拉伸显式 width:100px 的项;实测 cw1.w=100 两边同。
+        y 堆叠也不判别:两边都垂直。flex-grow 判别经 dump 实测确认:pseudo cg1.h=140。) */
+    .stack { display: block; width: 400px; height: 280px; }
+    .item { width: 100px; height: 40px; flex-grow: 1; background-color: #e94560; }
   </style>
 </head>
 <body>
@@ -314,7 +315,7 @@ namespace LoomGUI.HeadlessTests
     public unsafe class BlockLayoutTests
     {
         [Fact]
-        public void BlockChildrenStackVertically()
+        public void BlockIgnoresFlexGrow()
         {
             var (stage, ctx) = StageHarness.Create();
             try
@@ -324,19 +325,15 @@ namespace LoomGUI.HeadlessTests
                 Container root = InstantiateBlockFixture(h, ctx);
                 Container stack = root.Get<Container>("stack");
                 Container c1 = stack.Get<Container>("c1");
-                Container c2 = stack.Get<Container>("c2");
 
                 Native.loomgui_stage_tick(h, 0.016f);
 
-                // 判别真假 block:真 block 子元素不拉伸 cross-axis(保留显式 width 100px);
-                // 伪 block(flex-column)默认 align-items:stretch 把 100px 拉到容器宽(~400px)。
-                Assert.True(c1.Geometry.LayoutRect.Width <= 101.0f,
-                    $"block: c1.width ({c1.Geometry.LayoutRect.Width}) should stay ~100px (real block, no cross-axis stretch); " +
-                    $"got pseudo-block flex-column stretch to container width");
-                // sanity:真假 block 都垂直堆叠(c2 在 c1 下方),不区分但顺带验。
-                float c1Bottom = c1.Geometry.LayoutRect.Y + c1.Geometry.LayoutRect.Height;
-                Assert.True(c2.Geometry.LayoutRect.Y >= c1Bottom - 1.0f,
-                    $"block: c2.y ({c2.Geometry.LayoutRect.Y}) should be >= c1 bottom ({c1Bottom})");
+                // 判别真假 block:真 block 忽略 flex-grow(c1 保持显式 height:40);
+                // 伪 block(flex-column)尊重 flex-grow,2 个 flex-grow:1 子元素平分 .stack 280px → 各 ~140。
+                // (dump 实测取证:pseudo cg1.h=140;预期 T5 后 =40。)
+                Assert.True(c1.Geometry.LayoutRect.Height <= 41.0f,
+                    $"block: c1.height ({c1.Geometry.LayoutRect.Height}) should stay ~40px (real block ignores flex-grow); " +
+                    $"got pseudo-block flex-column flex-grow to ~140");
             }
             finally { StageHarness.Destroy(stage); }
         }
@@ -351,14 +348,16 @@ namespace LoomGUI.HeadlessTests
 
 - [ ] **Step 4: 跑 test 确认 fail**
 
-Run: `dotnet test tests/dotnet/LoomGUI.HeadlessTests --filter BlockChildrenStackVertically`
-Expected: FAIL —— c1.width ≈ 400px(伪 block = flex-column,默认 align-items:stretch 把 100px 子元素拉到容器宽),> 101px 容差。这正是 C2 要修的(真 block 不拉伸 cross-axis)。**改前就该 FAIL——若 PASS 说明判别式没生效(回查 c1 是否真被 stretch)。**
+Run: `dotnet test tests/dotnet/LoomGUI.HeadlessTests --filter BlockIgnoresFlexGrow`
+Expected: FAIL —— c1.height ≈ 140px(伪 block = flex-column,2 个 flex-grow:1 子元素平分 .stack 280px),> 41px 容差。这正是 C2 要修的(真 block 忽略 flex-grow,c1 保持 40px)。dump 实测取证:pseudo cg1.h=140。**改前就该 FAIL——若 PASS 说明判别式没生效。**
 
 - [ ] **Step 5: Commit(failing test 入库)**
 
 ```bash
 git add showcase/spec4b/p1-block-acceptance.html tests/dotnet/LoomGUI.HeadlessTests/BlockLayoutTests.cs
-git commit -m "test(block): add failing block vertical-stack acceptance (pseudo-block flex-row)
+git commit -m "test(block): add failing block flex-grow acceptance (pseudo-block honors flex-grow)
+
+Discriminator empirically confirmed via layout dump: pseudo-block (flex-column) grows flex-grow:1 children to ~140 in 280px; real block ignores flex-grow (children stay 40). width/y-stacking don't discriminate (both unchanged).
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
