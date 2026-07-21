@@ -26,12 +26,19 @@ impl BorderWidths {
     }
 }
 
-/// 生成彩色边框 mesh：外轮廓（rect 4 角）减内轮廓（四边各自向内缩）的环形三角带。
+/// 生成彩色圆角边框 mesh：外轮廓（外圆角矩形周边）减内轮廓（内圆角矩形周边）的环形三角带。
 ///
-/// - 非均匀宽度：每边梯形带宽 = 该边 widths；角是邻接梯形重叠区，不需额外几何。
+/// - 外半径经 CSS 邻角缩放（与 `mesh::rounded_rect` 共用 `radius_scale`），保证背景圆角
+///   与边框圆角视觉一致。
+/// - 内半径 = 外半径 − 邻边 insets（per-corner per-axis，钳 0）；内角圆心 = 外角圆心
+///   （因 `inner_corner + inner_radius = (rect 角 + inset) + (外半径 − inset) = rect 角 + 外半径
+///   = 外圆心`）。
+/// - 内外角**同分段** `max(seg_outer, seg_inner, 2)`：内角直角（内半径≤0）时
+///   `corner_arc_pts` 产 seg+1 个 corner 重复点，与外角弧顶点 1:1 配对 → 角内自动形成
+///   infill 扇（外圆内方）。
+/// - 环带三角：每对邻顶点 2 三角 `[外i, 外i+1, 内i+1] + [外i, 内i+1, 内i]`；零宽边处
+///   内外重合 → 退化三角（GPU 免费，不另跳过）。
 /// - per-axis 比例钳制（CSS 浏览器语义）：对边和超过 rect 尺寸时等比缩，防内轮廓交叉。
-/// - per-edge 跳零宽：width=0 的边不发三角（顶点仍 8 个——零宽邻边的内角被相邻非零边引用）。
-/// - radii 遇 border-radius 当前直角退化（圆角留待 SDF task）。
 /// - 返 SOA 四表（verts/uvs/colors/indices），uvs 全 0（纯色不采样）。
 pub fn border_ring(
     rect: &Rect,
@@ -39,15 +46,14 @@ pub fn border_ring(
     widths: BorderWidths,
     color: [f32; 4],
 ) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
-    let _ = radii; // 直角退化；圆角 SDF task 再处理
     let (x, y, rw, rh) = (rect.x, rect.y, rect.w, rect.h);
-    if rw <= 0.0 || rh <= 0.0 {
+    if rw <= 0.0
+        || rh <= 0.0
+        || (widths.top <= 0.0 && widths.right <= 0.0 && widths.bottom <= 0.0 && widths.left <= 0.0)
+    {
         return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     }
-    if widths.top <= 0.0 && widths.right <= 0.0 && widths.bottom <= 0.0 && widths.left <= 0.0 {
-        return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-    }
-    // per-axis 比例钳制：对边和 > 尺寸 → 等比缩（只缩不放）
+    // per-axis width 钳制：对边和 > 尺寸等比缩（只缩不放）
     let (mut t, mut r, mut b, mut l) = (widths.top, widths.right, widths.bottom, widths.left);
     let xsum = l + r;
     if xsum > rw && xsum > 0.0 {
@@ -61,39 +67,133 @@ pub fn border_ring(
         t *= s;
         b *= s;
     }
-    // 外轮廓 4 角（TL,TR,BR,BL），内轮廓按四边独立缩进
-    let outer = [[x, y], [x + rw, y], [x + rw, y + rh], [x, y + rh]];
-    let inner = [
+    // 外半径 CSS 邻角缩放（与 rounded_rect 共用 → 背景圆角与边框圆角一致）
+    let scale = crate::render::mesh::radius_scale(radii, rw, rh);
+    let sr = |rad: (f32, f32)| ((rad.0 * scale).max(0.0), (rad.1 * scale).max(0.0));
+    let (tl, tr, br, bl) = (sr(radii[0]), sr(radii[1]), sr(radii[2]), sr(radii[3]));
+
+    // 直角 fast-path：四角全 0 → 8 顶点矩形环（无 per-corner 弧细分，零宽边跳过发三角）。
+    // 走原 sharp 路径保 backward-compat（build_container_with_border_emits_border_node 等
+    // 现有测试约定 sharp = 8 顶点 + 24 索引 / 零宽边跳过）。
+    let all_sharp = [tl, tr, br, bl]
+        .iter()
+        .all(|&(rx, ry)| rx <= 0.0 || ry <= 0.0);
+    if all_sharp {
+        let outer = [[x, y], [x + rw, y], [x + rw, y + rh], [x, y + rh]];
+        let inner = [
+            [x + l, y + t],
+            [x + rw - r, y + t],
+            [x + rw - r, y + rh - b],
+            [x + l, y + rh - b],
+        ];
+        let mut verts = Vec::with_capacity(8);
+        verts.extend_from_slice(&outer);
+        verts.extend_from_slice(&inner);
+        let uvs = vec![[0.0, 0.0]; 8];
+        let colors = vec![color; 8];
+        // 每边 2 三角；width>0 才发（顶点固定 8）。序 [top, right, bottom, left] 与
+        // outer/inner 的 TL,TR,BR,BL 角序对齐：边 i 连角 i 与下一角 (i+1)%4。
+        let widths_arr = [t, r, b, l];
+        let mut indices = Vec::with_capacity(24);
+        for (i, &w) in widths_arr.iter().enumerate() {
+            if w <= 0.0 {
+                continue;
+            }
+            let ni = (i + 1) % 4;
+            let (oi, oni) = (i as u32, ni as u32);
+            let (ii, ini) = ((i + 4) as u32, (ni + 4) as u32);
+            indices.extend_from_slice(&[oi, oni, ini, oi, ini, ii]);
+        }
+        return (verts, uvs, colors, indices);
+    }
+
+    // 内半径 = 外半径 − 邻边 insets（per-corner per-axis，钳 0）。内角直角(≤0)时外圆内方。
+    let itl = ((tl.0 - l).max(0.0), (tl.1 - t).max(0.0));
+    let itr = ((tr.0 - r).max(0.0), (tr.1 - t).max(0.0));
+    let ibr = ((br.0 - r).max(0.0), (br.1 - b).max(0.0));
+    let ibl = ((bl.0 - l).max(0.0), (bl.1 - b).max(0.0));
+
+    use std::f32::consts::{FRAC_PI_2, PI};
+    // 外角 (rx, ry, center, start, corner)；内角 center 复用外角 center（见上方几何推导）
+    let outer_cfg: [(f32, f32, [f32; 2], f32, [f32; 2]); 4] = [
+        (tl.0, tl.1, [x + tl.0, y + tl.1], PI, [x, y]),
+        (
+            tr.0,
+            tr.1,
+            [x + rw - tr.0, y + tr.1],
+            -FRAC_PI_2,
+            [x + rw, y],
+        ),
+        (
+            br.0,
+            br.1,
+            [x + rw - br.0, y + rh - br.1],
+            0.0,
+            [x + rw, y + rh],
+        ),
+        (
+            bl.0,
+            bl.1,
+            [x + bl.0, y + rh - bl.1],
+            FRAC_PI_2,
+            [x, y + rh],
+        ),
+    ];
+    // 内角 corner = rect 角 + (inset_x, inset_y)；center 复用外角 center
+    let inner_corner = [
         [x + l, y + t],
         [x + rw - r, y + t],
         [x + rw - r, y + rh - b],
         [x + l, y + rh - b],
     ];
-    let mut verts = Vec::with_capacity(8);
-    verts.extend_from_slice(&outer);
-    verts.extend_from_slice(&inner);
-    let uvs = vec![[0.0, 0.0]; 8];
-    let colors = vec![color; 8];
-    // 每边 2 三角；width>0 才发（顶点固定 8）。序 [top, right, bottom, left] 与
-    // outer/inner 的 TL,TR,BR,BL 角序对齐：边 i 连角 i 与下一角 (i+1)%4。
-    let widths_arr = [t, r, b, l];
-    let mut indices = Vec::with_capacity(24);
-    for (i, &w) in widths_arr.iter().enumerate() {
-        if w <= 0.0 {
-            continue;
+    let inner_radii = [itl, itr, ibr, ibl];
+
+    let seg_of = |rx: f32, ry: f32| {
+        if rx <= 0.0 || ry <= 0.0 {
+            1u32
+        } else {
+            ((PI * rx.max(ry) / 4.0).ceil() as i32 + 1).max(2) as u32
         }
-        let ni = (i + 1) % 4;
-        let (oi, oni) = (i as u32, ni as u32);
-        let (ii, ini) = ((i + 4) as u32, (ni + 4) as u32);
-        indices.extend_from_slice(&[oi, oni, ini, oi, ini, ii]);
+    };
+    let mut outer_pts: Vec<[f32; 2]> = Vec::new();
+    let mut inner_pts: Vec<[f32; 2]> = Vec::new();
+    for i in 0..4 {
+        let (orx, ory, oc, os, ocorner) = outer_cfg[i];
+        let (irx, iry) = inner_radii[i];
+        // 内外同分段：外圆内方时内角直角，corner_arc_pts 产 seg+1 个内角点 → infill 扇
+        let seg = seg_of(orx, ory).max(seg_of(irx, iry)).max(2);
+        outer_pts.extend(crate::render::mesh::corner_arc_pts(
+            ocorner, orx, ory, oc, os, seg,
+        ));
+        inner_pts.extend(crate::render::mesh::corner_arc_pts(
+            inner_corner[i],
+            irx,
+            iry,
+            oc,
+            os,
+            seg,
+        ));
+    }
+    let n = outer_pts.len();
+    debug_assert_eq!(n, inner_pts.len(), "内外轮廓等长(同分段)");
+    let n_u32 = n as u32;
+    let mut verts = Vec::with_capacity(2 * n);
+    verts.extend_from_slice(&outer_pts);
+    verts.extend_from_slice(&inner_pts);
+    let uvs = vec![[0.0, 0.0]; 2 * n];
+    let colors = vec![color; 2 * n];
+    // 环带三角带：每对邻顶点 2 三角。零宽边处内外重合 → 退化三角(GPU 免费，不另跳过)。
+    let mut indices: Vec<u32> = Vec::with_capacity(6 * n);
+    for i in 0..n_u32 {
+        let ni = if i + 1 < n_u32 { i + 1 } else { 0 };
+        indices.extend_from_slice(&[i, ni, n_u32 + ni, i, n_u32 + ni, n_u32 + i]);
     }
     (verts, uvs, colors, indices)
 }
 
-/// box-shadow 几何近似：比 rect 外扩 spread 的圆角 quad（直角退化）。
+/// box-shadow 几何近似：比 rect 外扩 spread 的圆角矩形（CSS box-shadow：每角半径 + spread）。
 /// 无 blur（真实 blur 需离屏 RT，排 v1.14+）。独立 RenderNode 画在节点下层。
-/// ponytail: 圆角阴影随圆角 SDF task 补，先直角外扩 quad。
-/// ponytail: 软边 alpha 衰减未实现 — 当前产纯色 quad（mesh::quad 4 顶点同色），
+/// ponytail: 软边 alpha 衰减未实现 — 当前产纯色圆角 quad（rounded_rect 顶点同色），
 ///   无边缘 alpha falloff。升级路径：外 rect + inset vertex ring 带 alpha falloff →
 ///   v1.14+ 离屏 RT。
 pub fn box_shadow_quad(
@@ -102,7 +202,6 @@ pub fn box_shadow_quad(
     spread: f32,
     color: [f32; 4],
 ) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
-    let _ = radii; // ponytail: 圆角阴影随圆角 SDF task 补，先直角
     let outer = Rect {
         x: rect.x - spread,
         y: rect.y - spread,
@@ -112,7 +211,14 @@ pub fn box_shadow_quad(
     if outer.w <= 0.0 || outer.h <= 0.0 {
         return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     }
-    crate::render::mesh::quad(&outer, color, [0.0, 0.0], [0.0, 0.0])
+    // 圆角随 spread 外扩（CSS box-shadow：每角半径 + spread）。rounded_rect 内部再 CSS 缩放。
+    let spread_radii = [
+        (radii[0].0 + spread, radii[0].1 + spread),
+        (radii[1].0 + spread, radii[1].1 + spread),
+        (radii[2].0 + spread, radii[2].1 + spread),
+        (radii[3].0 + spread, radii[3].1 + spread),
+    ];
+    crate::render::mesh::rounded_rect(&outer, color, &spread_radii, [0.0, 0.0], [0.0, 0.0])
 }
 
 #[cfg(test)]
