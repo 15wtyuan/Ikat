@@ -3206,3 +3206,95 @@ fn build_text_packs_effects_into_meshes() {
     // base 非空（字形 quad 仍产出）
     assert!(!m.base.is_empty(), "base 字形 mesh 仍产出");
 }
+
+#[test]
+fn border_ring_rounded_has_more_vertices_than_sharp() {
+    use crate::render::border::{border_ring, BorderWidths};
+    let rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    };
+    let w = BorderWidths::all(4.0);
+    let sharp = border_ring(&rect, &[(0.0, 0.0); 4], w, [1.0; 4]);
+    let round = border_ring(&rect, &[(20.0, 20.0); 4], w, [1.0; 4]);
+    assert_eq!(sharp.0.len(), 8, "直角环 8 顶点(现状)");
+    assert!(
+        round.0.len() > 8,
+        "圆角环顶点数 > 8(弧分段), got {}",
+        round.0.len()
+    );
+    assert_eq!(round.0.len() % 2, 0, "外+内轮廓等长");
+}
+
+#[test]
+fn border_ring_rounded_inner_radius_clamps() {
+    // 外半径 5 < border width 10 → 内半径钳 0(内角直角),外圆内方
+    use crate::render::border::{border_ring, BorderWidths};
+    let rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    };
+    let (verts, _, _, _) = border_ring(&rect, &[(5.0, 5.0); 4], BorderWidths::all(10.0), [1.0; 4]);
+    assert!(verts.len() > 8, "外圆角分段 + 内角点 infill");
+}
+
+#[test]
+fn border_ring_zero_width_returns_empty() {
+    use crate::render::border::{border_ring, BorderWidths};
+    let rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    };
+    let (v, _, _, _) = border_ring(&rect, &[(20.0, 20.0); 4], BorderWidths::all(0.0), [1.0; 4]);
+    assert!(v.is_empty(), "全零宽早期返回");
+}
+
+#[test]
+fn container_border_with_radius_emits_rounded_border() {
+    // border-radius:20px + border:4px solid red → 边框环走圆角路径（顶点数 > 直角态 12）
+    use crate::style::mapping::apply_decl;
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        },
+        Some([0.0, 0.0, 1.0, 1.0]),
+    );
+    assert!(apply_decl(&mut n.style, "border-radius", "20px"));
+    assert!(apply_decl(&mut n.style, "border", "4px solid #ff0000"));
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let mesh = frame
+        .nodes
+        .iter()
+        .find(|rn| matches!(&rn.payload, NodePayload::Mesh { verts, .. } if !verts.is_empty()))
+        .expect("至少一个非空 Mesh 节点");
+    let NodePayload::Mesh { verts, colors, .. } = &mesh.payload else {
+        unreachable!()
+    };
+    // 背景 rounded_rect(中心+弧) + 边框圆角环(外+内轮廓),总顶点 > 直角态 12
+    assert!(
+        verts.len() > 12,
+        "圆角 border+bg 顶点 > 12, got {}",
+        verts.len()
+    );
+    assert!(colors.contains(&[1.0, 0.0, 0.0, 1.0]), "红色边框顶点存在");
+}

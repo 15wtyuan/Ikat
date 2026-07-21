@@ -69,6 +69,46 @@ pub fn quad_gradient(
     (verts, uvs, colors, indices)
 }
 
+/// CSS border-radius 邻角和缩放因子(只缩不放,防负)。两邻角半径和 ≤ 边长,等比缩。
+/// `rounded_rect`(背景填充)与 `border::border_ring`(边框环)共用,保证两者圆角一致。
+pub fn radius_scale(radii: &[(f32, f32); 4], w: f32, h: f32) -> f32 {
+    let (tl, tr, br, bl) = (radii[0], radii[1], radii[2], radii[3]);
+    1.0_f32
+        .min(w / (tl.0 + tr.0).max(1e-6))
+        .min(w / (bl.0 + br.0).max(1e-6))
+        .min(h / (tl.1 + bl.1).max(1e-6))
+        .min(h / (tr.1 + br.1).max(1e-6))
+}
+
+/// 单角圆弧顶点序列(seg+1 个点,沿 start→start+π/2)。
+/// - 圆角(rx>0 且 ry>0):弧上 seg+1 个点(末段锁 start+π/2 保精度,照 fgui)。
+/// - 直角(rx≤0 或 ry≤0):产 seg+1 个 corner 点(重复),供 `border_ring` 环带配对——
+///   外圆内方时内角直角但与外角同分段,自动形成角内 infill 扇。
+/// - seg=0:单点落在末角(start+π/2),非 start 角;`border_ring` 不传 seg=0(最小 2)。
+pub fn corner_arc_pts(
+    corner: [f32; 2],
+    rx: f32,
+    ry: f32,
+    center: [f32; 2],
+    start: f32,
+    seg: u32,
+) -> Vec<[f32; 2]> {
+    if rx <= 0.0 || ry <= 0.0 {
+        return vec![corner; seg as usize + 1];
+    }
+    let delta = std::f32::consts::FRAC_PI_2 / seg as f32;
+    (0..=seg)
+        .map(|j| {
+            let a = if j == seg {
+                start + std::f32::consts::FRAC_PI_2
+            } else {
+                start + delta * j as f32
+            };
+            [center[0] + a.cos() * rx, center[1] + a.sin() * ry]
+        })
+        .collect()
+}
+
 /// 生成圆角矩形的 verts/uvs/colors/indices（SOA 四表，与 quad 同形）。
 ///
 /// - 三角扇：中心点 + 4 角圆弧顶点，三角形 (0, i, i+1) 连接，末尾回 1 闭合。
@@ -92,11 +132,7 @@ pub fn rounded_rect(
     // CSS 按边缩放钳制（vs fgui per-corner min）。两邻角半径和不超过边长，等比缩放；
     // 只缩不放（min(1.0) 兜底）；防负 max(0.0)。
     let (tl, tr, br, bl) = (radii[0], radii[1], radii[2], radii[3]);
-    let scale = 1.0_f32
-        .min(w / (tl.0 + tr.0).max(1e-6))
-        .min(w / (bl.0 + br.0).max(1e-6))
-        .min(h / (tl.1 + bl.1).max(1e-6))
-        .min(h / (tr.1 + br.1).max(1e-6));
+    let scale = radius_scale(radii, w, h);
     let scale_r =
         |r: (f32, f32)| -> (f32, f32) { ((r.0 * scale).max(0.0), (r.1 * scale).max(0.0)) };
     let tl = scale_r(tl);
@@ -1466,6 +1502,41 @@ mod tests {
             (v[4][1] - 24.0).abs() < 1e-3,
             "顶切片线 `round` 后为整数 24（非 23.7），实 {}",
             v[4][1]
+        );
+    }
+
+    #[test]
+    fn corner_arc_pts_sharp_returns_repeated_corner() {
+        let pts = crate::render::mesh::corner_arc_pts([10.0, 20.0], 0.0, 5.0, [0.0, 0.0], 0.0, 3);
+        assert_eq!(pts.len(), 4, "seg+1 个点");
+        assert!(pts.iter().all(|&p| p == [10.0, 20.0]), "全落 corner");
+    }
+
+    #[test]
+    fn corner_arc_pts_round_arc_endpoints() {
+        // start=0(右方向),seg=2:0, π/4, π/2
+        let pts = crate::render::mesh::corner_arc_pts([0.0, 0.0], 10.0, 10.0, [0.0, 0.0], 0.0, 2);
+        assert_eq!(pts.len(), 3);
+        assert!(
+            (pts[0][0] - 10.0).abs() < 1e-4 && pts[0][1].abs() < 1e-4,
+            "起点 (rx,0)"
+        );
+        assert!((pts[2][1] - 10.0).abs() < 1e-4, "末点 y=ry");
+    }
+
+    #[test]
+    fn radius_scale_clamps_oversized() {
+        // 两邻角和 > 边长 → 等比缩
+        let s = crate::render::mesh::radius_scale(
+            &[(60.0, 60.0), (60.0, 60.0), (0.0, 0.0), (0.0, 0.0)],
+            100.0,
+            100.0,
+        );
+        // scale = w/(tl+tr) = 100/120 ≈ 0.8333(两 (0,0) 角的 .max(1e-6) 让其轴因子 → 1e8,不参与 min)
+        assert!(
+            (s - 0.8333).abs() < 1e-3,
+            "scale = 100/120 ≈ 0.8333, got {}",
+            s
         );
     }
 
