@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>P2 Visual Acceptance (fixture)</title>
+  <style>
+    /* Fixture copy of showcase/spec4b/p2-visual-acceptance.html.
+       Kept in sync so the headless test exercises the same declarations as the
+       browser/Unity acceptance page.
+
+       P2-A: border_ring consumes border-radius (rounded ring — the border corner
+       no longer leaks past the rounded background) and box_shadow_quad rounds
+       with the same radius. Two cases:
+         #rb — border + border-radius: exercises border_ring's outer/inner paired strip.
+         #rs — box-shadow + border-radius: exercises box_shadow_quad rounding.
+       Linear-gradient angle (P2-B) is deferred — intentionally not in this page.
+
+       Layering (honest): the headless test (VisualDecorationTests) verifies these
+       declarations reach computed style and the layout rect; the rounded-corner
+       geometry itself is covered by crates/core/src/render/tests.rs; final visual
+       parity is verified in Unity PlayMode. */
+    .root { width: 400px; height: 320px; background-color: #111; }
+    .rounded-border {
+      width: 200px; height: 120px;
+      border: 6px solid #ff0000;
+      border-radius: 24px;
+      margin: 20px;
+    }
+    .rounded-shadow {
+      width: 200px; height: 120px;
+      border-radius: 24px;
+      background-color: #224466;
+      box-shadow: 8px 8px 0 #00aa00;
+      margin: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="rounded-border" id="rb"></div>
+    <div class="rounded-shadow" id="rs"></div>
+  </div>
+</body>
+</html>

@@ -42,6 +42,9 @@
     <!-- P1 C2 fixture: p1-block-acceptance (display:block + flex-grow:1 children) — used by BlockLayoutTests.
          Built from fixtures/p1-block.workspace via loom-pkg; output copied here as a git-tracked fixture. -->
     <None Include="fixtures\p1-block.pkg.bin" Link="fixtures\p1-block.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
+    <!-- P2-A fixture: p2-visual-acceptance (border-radius + border / box-shadow) — used by VisualDecorationTests.
+         Built from fixtures/p2-visual.workspace via loom-pkg; output copied here as a git-tracked fixture. -->
+    <None Include="fixtures\p2-visual.pkg.bin" Link="fixtures\p2-visual.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
     <!-- E2 fixture font for text layout (tick panics without a default font) -->
     <None Include="fixtures\fonts\DejaVuSans.ttf" Link="fixtures\fonts\DejaVuSans.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output_dir": "../p2-visual-ws-out",
+  "packages": [
+    {
+      "name": "p2-visual",
+      "dirs": ["."],
+      "html": ["p2-visual-acceptance.html"]
+    }
+  ],
+  "atlases": [],
+  "fonts": []
+}
