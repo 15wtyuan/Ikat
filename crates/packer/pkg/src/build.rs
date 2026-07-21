@@ -58,8 +58,17 @@ pub fn pack_components(components: &[Component]) -> Result<(Vec<u8>, Vec<String>
             ));
         }
         // bridge 错误带组件名：多组件包里，否则 "多根" 之类错误无法定位是哪个组件。
-        let nodes =
+        let mut nodes =
             bridge(&parsed).map_err(|e| format!("bridge error in component {name}: {e}"))?;
+        // pkg Image.src 归一为 sprite_key（workspace_root 相对，与 atlas key 口径一致）。
+        // bridge 存的是 HTML 原 src（如 ../res/icons/x.png），runtime SpriteResolver 拿原 src
+        // 查 atlas（key 是 res/icons/...）会 miss。refs（atlas 交叉验证）已归一；这里补 pkg
+        // src 字段本身——同一 normalize_sprite_key + html_rel，保 pkg 字段与 atlas key 一致。
+        for n in nodes.iter_mut() {
+            if let Some(s) = n.src.take() {
+                n.src = Some(normalize_sprite_key(html_rel, &s));
+            }
+        }
         built.push((
             name.clone(),
             nodes,
@@ -357,6 +366,36 @@ mod package_tests {
         assert!(
             refs.iter().any(|r| r == "icons/a.png"),
             "referenced_sprites missing: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn pack_components_normalizes_image_src_to_sprite_key() {
+        // HTML 嵌套子目录（spec4b/spec4b.html），img src ../res/icons/x.png → pkg Image.src
+        // 必须归一成 res/icons/x.png（atlas key 口径）。否则 runtime SpriteResolver 拿原 src
+        // ../res/.. 查 atlas miss。回归 bug：bridge 存原 src、refs 归一但 pkg src 字段漏。
+        let comps = vec![Component {
+            name: "spec4b".to_string(),
+            src: r#"<div class="root"><img src="../res/icons/x.png"></div>"#.to_string(),
+            html_rel: "spec4b/spec4b.html".to_string(),
+        }];
+        let (bytes, refs) = pack_components(&comps).unwrap();
+        let pkg = loomgui_core::asset::read_package(&bytes).unwrap();
+        let comp = pkg.components.get("spec4b").expect("spec4b component");
+        let img = comp
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Image)
+            .expect("Image node");
+        assert_eq!(
+            img.src.as_deref(),
+            Some("res/icons/x.png"),
+            "pkg Image.src must be normalized to atlas key (got {:?})",
+            img.src
+        );
+        assert!(
+            refs.iter().any(|r| r == "res/icons/x.png"),
+            "refs should also be normalized: {refs:?}"
         );
     }
 
