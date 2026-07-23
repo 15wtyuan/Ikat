@@ -406,10 +406,18 @@ pub fn solve(
         let (w, h) = (layout.size.width, layout.size.height);
         let node = scene.get_mut(id).expect("live node");
         node.layout_rect = Rect { x, y, w, h };
-        // overflow:hidden 节点（Scene::build 已建 Some 槽）：用自身 border 框填 clip。
-        if node.clip_rect.is_some() {
-            node.clip_rect = Some(Rect { x, y, w, h });
-        }
+        // clip_rect 按 rematch 后的 style.overflow 重派生（而非仅填充 create 时建的 Some 槽）。
+        // 原因：<style> class 规则设的 overflow 走 dynamic_rules 运行时应用，打包期
+        // base_style 无 overflow → create_node_from_template 时 clip_rect=None。若这里
+        // 只填已有的 Some，rematch 后 overflow 虽设上但 clip_rect 仍 None → render 不裁剪。
+        // 现在：任一轴 非 Visible → clip = 自身 border 框（解出的 layout_rect）；否则 None。
+        let should_clip = node.style.overflow_x != OverflowMode::Visible
+            || node.style.overflow_y != OverflowMode::Visible;
+        node.clip_rect = if should_clip {
+            Some(Rect { x, y, w, h })
+        } else {
+            None
+        };
         let kids = node.children.clone();
         for c in kids {
             write_back(scene, tree, taffy_ids, c, (x, y));
@@ -828,6 +836,69 @@ mod tests {
             "非空白 text 应正常测出尺寸，got w={} h={}",
             r.w,
             r.h
+        );
+    }
+
+    /// 回归（showcase quick-bar 裁剪丢失）：overflow 由 <style> class 规则设（运行时
+    /// rematch 应用），打包期 base_style 无 overflow → create_node_from_template 时
+    /// clip_rect=None。rematch 后 style.overflow 被设上，但 clip_rect 若不重派生 →
+    /// render 不开 clip mask → 内容溢出可见。solve 的 write_back 必须按 rematch 后的
+    /// style.overflow 重派生 clip_rect（而非仅填充已有 Some 槽）。
+    #[test]
+    fn clip_rect_rederived_from_rematched_overflow() {
+        // 建 root：base_style overflow 双轴 Visible（clip_rect=None，模拟 class 规则未烘进 base）。
+        let mut root_style = ResolvedStyle::default();
+        root_style.overflow_x = OverflowMode::Visible;
+        root_style.overflow_y = OverflowMode::Visible;
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                root_style,
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        // 模拟 rematch 把 overflow-y 设上（class 规则 .quick-bar{overflow-x:auto} 在运行时应用）。
+        let root = scene.roots[0];
+        scene.get_mut(root).unwrap().style.overflow_x = OverflowMode::Auto;
+        scene.get_mut(root).unwrap().style.overflow_y = OverflowMode::Visible;
+        // create 时 base 无 overflow → clip_rect 是 None（重现在 bug 现场）。
+        assert!(
+            scene.get(root).unwrap().clip_rect.is_none(),
+            "建节点时 base 无 overflow → clip None"
+        );
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (300.0, 300.0), &empty_sizes());
+        // solve 后：style.overflow_x=Auto（rematched）→ clip_rect 应被重派生为 Some(解出的 rect)。
+        let clip = scene.get(root).unwrap().clip_rect;
+        assert!(
+            clip.is_some(),
+            "rematch 后 overflow 非 Visible → solve 应重派生 clip_rect"
+        );
+        let r = clip.unwrap();
+        assert!(
+            (r.w - 300.0).abs() < 1e-2 && (r.h - 300.0).abs() < 1e-2,
+            "clip_rect 应=root border box (300,300)，got {:?}",
+            r
         );
     }
 }

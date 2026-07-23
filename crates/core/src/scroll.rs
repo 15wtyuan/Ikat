@@ -598,16 +598,24 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
             continue;
         }
         // content_size = 直接子节点 layout_rect AABB。
+        // 跳过零尺寸子节点（w=0 且 h=0）：HTML 元素间的纯空白 TextNode 被 layout
+        // 的 is_whitespace_only_text 滤出 taffy 树，layout_rect 保持默认 (0,0,0,0)。
+        // 若计入 AABB，其 (0,0) 原点会撑出假的 content 范围 → 水平滚动容器被误开垂直轴。
         let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
         let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
+        let mut counted = 0u32;
         for c in &kids {
             let r = scene.get(*c).expect("live node").layout_rect;
+            if r.w == 0.0 && r.h == 0.0 {
+                continue;
+            }
             min_x = min_x.min(r.x);
             min_y = min_y.min(r.y);
             max_x = max_x.max(r.x + r.w);
             max_y = max_y.max(r.y + r.h);
+            counted += 1;
         }
-        let content = if kids.is_empty() {
+        let content = if counted == 0 {
             (0.0, 0.0)
         } else {
             ((max_x - min_x).max(0.0), (max_y - min_y).max(0.0))

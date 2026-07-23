@@ -237,7 +237,7 @@ CSS 在围栏中以三个正交维度建模：
 | `Length` | 长度值（px） |
 | `LengthPercent` | 长度或百分比 |
 | `LengthPercentAuto` | 长度、百分比或 auto |
-| `Color` | `#rrggbb` 十六进制颜色 |
+| `Color` | 颜色值（围栏仅校验属性名，值格式交 core `parse_color`：`#rgb`/`#rrggbb`/`#rrggbbaa` hex、`rgb()`/`rgba()` 函数式） |
 | `Number` | 数字 |
 | `Integer` | 整数 |
 | `Overflow` | `visible` / `hidden` / `scroll` / `auto` |

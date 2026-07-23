@@ -135,6 +135,63 @@ fn content_size_is_children_aabb() {
 }
 
 #[test]
+fn content_aabb_skips_zero_size_whitespace_kids() {
+    // 回归：HTML flex 容器（如 showcase quick-bar）的 <a> 标签间换行+缩进产生纯空白
+    // TextNode。layout 阶段 is_whitespace_only_text 把它们滤出 taffy 树（防撑父），
+    // 但其 layout_rect 仍是默认 (0,0,0,0)。refresh_content_sizes 若把 (0,0) 算进
+    // 子 AABB，会得到假的 content 高度（0..真实底）→ 假垂直 overlap → 水平滚动容器
+    // 被误开垂直拖动。零尺寸子节点必须排除出 content AABB。
+    let mut s = build_scroll_scene();
+    let root0 = scroll_container_id(&s);
+    let (c0, c1) = child_ids(&s);
+    // 构造水平滚动场景：两子水平排（同 y=10），content 高应=40（10..50）。
+    s.get_mut(root0).unwrap().style.overflow_x = OverflowMode::Auto;
+    s.get_mut(root0).unwrap().style.overflow_y = OverflowMode::Visible;
+    s.get_mut(c0).unwrap().layout_rect = Rect {
+        x: 0.0,
+        y: 10.0,
+        w: 150.0,
+        h: 40.0,
+    };
+    s.get_mut(c1).unwrap().layout_rect = Rect {
+        x: 150.0,
+        y: 10.0,
+        w: 150.0,
+        h: 40.0,
+    };
+    // 塞一个 (0,0,0,0) 的空白 TextNode 子（模拟被滤出的 whitespace TextNode）。
+    // 用 Scene::build 独立建一个 TextNode 节点，再手动挂为 root0 的 child。
+    let ws_scene = Scene::build(&[(
+        None,
+        NodeKind::TextNode,
+        ResolvedStyle::default(),
+        vec![],
+        None,
+        false,
+        None,
+        None,
+        None,
+        None,
+    )]);
+    let ws_kid = ws_scene.roots[0];
+    s.get_mut(root0).unwrap().children.push(ws_kid);
+    s.get_mut(ws_kid).unwrap().layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 0.0,
+        h: 0.0,
+    };
+    refresh_content_sizes(&mut s);
+    let st = s.scroll.get(root0).unwrap();
+    // 真实子范围 10..50 → content.h=40。修复前 bug：(0,0) 子进 AABB → 0..50 → content.h=50。
+    assert!(
+        (st.content_size.1 - 40.0).abs() < 1e-3,
+        "零尺寸子节点不应进 content AABB：content.h 应=40，got {}",
+        st.content_size.1
+    );
+}
+
+#[test]
 fn viewport_and_overlap_from_geometry() {
     let mut s = build_scroll_scene();
     let root0 = scroll_container_id(&s);

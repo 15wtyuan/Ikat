@@ -103,6 +103,44 @@ fn color_hex_short_expands() {
     );
 }
 
+// CSS 函数式颜色：rgb() / rgba()。AI 常写 rgba()（showcase nav-card/quick-chip 即用），
+// parse_color 原先只认 hex 导致静默丢色（卡片透明露底）。这里钉死函数式语法。
+#[test]
+fn color_rgb_function() {
+    // rgb(r,g,b) 0-255 整数 → alpha 1.0。
+    assert_eq!(parse_color("rgb(255,0,0)").unwrap(), [1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(
+        parse_color("rgb(21, 36, 51)").unwrap(),
+        [21.0 / 255.0, 36.0 / 255.0, 51.0 / 255.0, 1.0]
+    );
+}
+
+#[test]
+fn color_rgba_function() {
+    // rgba(r,g,b,a)：a 为 0..1 浮点（0.72）→ 卡片半透明背景。
+    let c = parse_color("rgba(21, 36, 51, 0.72)").unwrap();
+    assert!((c[0] - 21.0 / 255.0).abs() < 1e-5);
+    assert!((c[1] - 36.0 / 255.0).abs() < 1e-5);
+    assert!((c[2] - 51.0 / 255.0).abs() < 1e-5);
+    assert!((c[3] - 0.72).abs() < 1e-5, "alpha 0.72");
+}
+
+#[test]
+fn color_rgb_percent() {
+    // rgb 支持百分比分量（100% = 255）。CSS 合法形态，AI 偶写。
+    assert_eq!(
+        parse_color("rgb(100%,0%,0%)").unwrap(),
+        [1.0, 0.0, 0.0, 1.0]
+    );
+}
+
+#[test]
+fn color_rgb_alpha_via_slash() {
+    // CSS Color 4：rgb(r g b / a) 空格分隔 + 斜杠 alpha（与 rgba 等价）。
+    let c = parse_color("rgb(21 36 51 / 0.5)").unwrap();
+    assert!((c[3] - 0.5).abs() < 1e-5);
+}
+
 // CSS Color Module Level 4：`#rrggbbaa` 8 位 hex（第 7-8 位为 alpha）。
 // StyleMirror（Spec-4a C3）会把 color flush 成此形式，core parse_color 必须收。
 #[test]

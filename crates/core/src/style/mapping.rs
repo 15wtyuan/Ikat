@@ -236,6 +236,18 @@ fn parse_radius_group(s: &str) -> Option<[LengthPercentage; 4]> {
 
 pub fn parse_color(s: &str) -> Option<[f32; 4]> {
     let s = s.trim();
+    // CSS 函数式颜色：rgb() / rgba()（现代写法统一用 rgb；rgba 为 legacy 别名）。
+    // AI 与设计稿导出常写 rgba()——原先只认 hex 导致静默丢色。
+    // 支持：rgb(r,g,b) / rgba(r,g,b,a) / rgb(r g b) / rgb(r g b / a)，
+    // 分量可 0-255 整数或百分比，alpha 为 0..1。
+    let lower = s.to_ascii_lowercase();
+    if let Some(rest) = lower
+        .strip_prefix("rgba(")
+        .or_else(|| lower.strip_prefix("rgb("))
+        .and_then(|r| r.strip_suffix(')'))
+    {
+        return parse_rgb_inner(rest);
+    }
     let s = s.strip_prefix('#').unwrap_or(s);
     if s.len() == 6 {
         let r = u8::from_str_radix(&s[0..2], 16).ok()?;
@@ -269,6 +281,67 @@ pub fn parse_color(s: &str) -> Option<[f32; 4]> {
         ])
     } else {
         None
+    }
+}
+
+/// 解析 rgb()/rgba() 括号内分量。接受两种现代/legacy 语法：
+/// - legacy：`r,g,b` 或 `r,g,b,a`（逗号分隔，a 仅 rgba）
+/// - CSS Color 4：`r g b` 或 `r g b / a`（空格分隔，斜杠前缀 alpha）
+/// 分量：0-255 整数 或 0%-100%（255≡1.0）。alpha：0..1 浮点（也接受百分比）。
+/// 不可解析（分量数不对、值越界、空）→ None（静默忽略，与 hex 同模式）。
+fn parse_rgb_inner(inner: &str) -> Option<[f32; 4]> {
+    // 斜杠分隔 alpha（CSS 4）："r g b / a" → ("r g b", Some("a"))
+    let (color_part, alpha_part) = if let Some((c, a)) = inner.split_once('/') {
+        (c, Some(a.trim()))
+    } else {
+        (inner, None)
+    };
+    // 分量按逗号或空白切（legacy 逗号 / CSS4 空格混用也能收）。
+    let comps: Vec<&str> = color_part
+        .split(|ch: char| ch == ',' || ch.is_whitespace())
+        .filter(|p| !p.trim().is_empty())
+        .collect();
+    // legacy rgba(r,g,b,a)：无斜杠但 4 个逗号分量 → 第 4 个是 alpha。
+    let (rgb, legacy_alpha) = match comps.len() {
+        3 => (comps.as_slice(), None),
+        4 if alpha_part.is_none() => (&comps[0..3], Some(comps[3])),
+        _ => return None,
+    };
+    let r = parse_component(rgb[0])?;
+    let g = parse_component(rgb[1])?;
+    let b = parse_component(rgb[2])?;
+    // alpha 优先级：斜杠 > legacy 第 4 参 > 缺省 1.0。
+    let a = match alpha_part {
+        Some(a) => parse_alpha(a)?,
+        None => match legacy_alpha {
+            Some(a) => parse_alpha(a)?,
+            None => 1.0,
+        },
+    };
+    Some([r, g, b, a])
+}
+
+/// 颜色分量解析：整数 0-255 或百分比 0%-100%（% → /255 归一）。
+fn parse_component(p: &str) -> Option<f32> {
+    let p = p.trim();
+    if let Some(pct) = p.strip_suffix('%') {
+        let v: f32 = pct.trim().parse().ok()?;
+        Some((v / 100.0).clamp(0.0, 1.0))
+    } else {
+        let v: f32 = p.parse().ok()?;
+        Some((v / 255.0).clamp(0.0, 1.0))
+    }
+}
+
+/// alpha 分量解析：0..1 浮点（rgba 第 4 参），也接受百分比（50% → 0.5）。
+fn parse_alpha(p: &str) -> Option<f32> {
+    let p = p.trim();
+    if let Some(pct) = p.strip_suffix('%') {
+        let v: f32 = pct.trim().parse().ok()?;
+        Some((v / 100.0).clamp(0.0, 1.0))
+    } else {
+        let v: f32 = p.parse().ok()?;
+        Some(v.clamp(0.0, 1.0))
     }
 }
 

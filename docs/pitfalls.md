@@ -1222,4 +1222,40 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 
 **教训**：Unity driver 编排层（Awake/Start/Update 序列）**headless 测不到**——headless 只测 UIContext 投影层（fixture 自带 root），driver Awake 是否完整调 LoomHost lifecycle 必须真机 PlayMode 验。诊断：PlayMode 一进就 Instantiate 失败 / NRE → 先查 driver Awake 是否漏建 root（或 stage 没 new），别先怀疑 UIContext 投影层（headless 已锁）。改 driver Awake/Start 序列必跑 PlayMode 真机。
 
+### 坑 165：`parse_color` 只认 hex，`rgb()`/`rgba()` 被静默丢色（showcase 色块变深）
+
+**症状**：showcase home 的 nav-card / quick-chip / btn-ghost 在 Unity 里颜色偏深（似背景透明）。core dump（dump_home）显示这些节点 `background_color=None`，而 CSS 明明写了 `background-color:rgba(21,36,51,0.72)`。btn-primary（`#hex`）却正常。
+
+**根因**：`style::mapping::parse_color` 原先**只认 hex**（`#rgb`/`#rrggbb`/`#rrggbbaa`），完全没有 `rgb()`/`rgba()` 函数式语法分支 → 返 None → `apply_decl` 不设 `background_color`。规律：所有 `rgba(...)` 背景都丢，只有 `#hex` 生效。卡片透明 → 露出更深的 root 底色 #0e1620 → 观感变深。
+
+**根因深一层**：fence `validate_inline_style` 只校验**属性名**在白名单（`find_css_prop`），**不校验值格式**——所以 `rgba()` 能过围栏门却在 core 被静默吞掉，设计期无任何报错。围栏门与 core 值解析的分工有裂缝。
+
+**解决**：✅ `parse_color` 加 `rgb()`/`rgba()` 分支（legacy 逗号 `rgba(r,g,b,a)` + CSS4 空格/斜杠 `rgb(r g b / a)`，分量接受整数 0-255 与百分比，alpha 0..1）。`mapping/tests.rs` 4 个新测钉死。修复同时作用于打包期（css_resolve 烘 inline 色）和运行时（rematch 应用 class 规则色），故改后须重编 .dll **且** 重打 pkg（inline rgba 烘进 base_style，showcase pkg 实测 776050→776130）。
+
+**教训**：颜色解析新格式须同时查「围栏是否放行」+「core 是否真解析」，两层裂缝会静默丢色无报错。诊断：core dump（dump_home）看节点 `background_color` 是否 None，对照 CSS 源判格式。围栏 validate 不校验值格式是设计决定（白名单是属性级），core parse_color 必须自承全形态。
+
+### 坑 166：被滤出的空白 TextNode `(0,0,0,0)` 污染 scroll content AABB（showcase quick-bar 误开垂直拖动）
+
+**症状**：showcase home 的 `.quick-bar`（`overflow-x:auto`）在 Unity 里可上下左右四向拖。core dump（dump_home）显示 `overlap=(660,496)`——水平 overlap 660 正确，但**垂直 overlap 496 是假的**（chips 单行高 48，viewport 高 54，垂直本不该滚）。
+
+**根因**：HTML `<a class="quick-chip">` 间的换行+缩进产生纯空白 TextNode（坑 163 同源）。layout 的 `is_whitespace_only_text` 把它们滤出 taffy 树（防撑父，对的），但它们的 `layout_rect` 仍保持默认 `(0,0,0,0)`。而 `scroll::refresh_content_sizes` 算 content_size 时**遍历所有直接子节点的 AABB**，把 (0,0) 原点也算进去 → content 高度从真实的 ~48 变成 0..550=550 → 假的垂直 overlap 496 → `drag_follow` 的 `if ov<=0 {continue}` 守卫放行 → 垂直能拖。
+
+**根因深一层**：坑 163 只补了 layout/render 层跳过 ws-only TextNode，**漏了 scroll 层**——content AABB 计算独立于 taffy 布局，另走 `refresh_content_sizes` 遍历子 rect，ws 节点的 (0,0,0,0) 在这条路径上没被跳过。ws-only TextNode 的清理想象成一个横切需多路径协同（layout/render/scroll），漏任一路径就漏出症状。
+
+**解决**：✅ `scroll::refresh_content_sizes` 算 content AABB 时跳过 `w==0 && h==0` 的子节点（`counted` 计数，全零则 content=(0,0)）。`scroll/tests.rs` 新测钉死。修复后 quick-bar `overlap=(400,0)` 垂直轴归零。
+
+**教训**：ws-only TextNode 的「不计入几何」是横切需多路径协同（layout 坑 163 / scroll 本坑 / 可能还有 hit），加新几何路径（如 content AABB）要复查是否过滤零尺寸 ws 节点。诊断：scroll 容器四向拖 / 假 overlap → dump（dump_home）看 `overlap` 非零轴是否对应真实溢出，子节点列表里夹 `(0,0,0,0)` 即污染源。
+
+### 坑 167：动态 overflow（class 规则）不重派生 `clip_rect`（showcase quick-bar 裁剪失效）
+
+**症状**：showcase home 的 `.quick-bar`（`overflow-x:auto` 写在 `<style>` 块 class 规则里）在 Unity 里内容溢出可见、裁剪没了。core dump（dump_home）显示 `clip_rect=None`——尽管 `style.overflow_x=Auto`。
+
+**根因**：`overflow` 写在 `<style>` class 规则里 → 打包器塞进 `dynamic_rules`（运行时 rematch 消费），**不烘进 base_style**。而 `clip_rect` 只在 `create_node_from_template` 建节点时算一次（那时 `base_style.overflow` 还是默认 Visible → `clip_rect=None`）。rematch 之后 `style.overflow_x=Auto` 是有了（所以 scroll 表能建、能滚），但 **clip_rect 永远不重算** → 一直是 None → render `batch.rs` 不开 clip mask → 内容溢出可见。
+
+**根因深一层**：这是「静态属性（inline/base）」与「动态属性（class 规则/rematch）」的架构裂痕——overflow 既能静态设（inline）也能动态设（class），但 clip_rect 只跟静态路径派生。inline overflow 的节点 create 时就有 clip（正常），class overflow 的节点 create 时没有、rematch 后也没有（bug）。scroll 成员资格（`refresh_content_sizes`）走另一条路读 rematch 后的 `style.overflow`，所以「能滚但不裁剪」并存。
+
+**解决**：✅ layout `write_back` 不再仅「填充已有 Some 槽」，而是按 **rematch 后的 `style.overflow_x/y`** 重派生 clip_rect（任一轴非 Visible → `Some(border 框)`，否则 None）。write_back 在 solve 末尾跑，此时 style.overflow 已由上游 rematch 钉死，render 读到的 clip_rect 永远反映当帧真实 overflow。`layout/mod.rs` 新测钉死（base 无 overflow + rematch 设 overflow → solve 后 clip_rect 应 Some）。原 create 时派生保留（供首帧 hit_test 的 1 帧延迟默认值）。
+
+**教训**：clip_rect 是 overflow 的几何镜像，必须跟 overflow 同源同时效——overflow 走 rematch（动态），clip_rect 派生也得在 rematch 之后。凡是「create 时算一次、之后不重算」的 style 派生字段（clip_rect 等），都要查是否被 rematch 改的 style 属性（overflow/display/...）影响，若影响须在 rematch 后重派生。诊断：节点能滚（scroll 表有）但不裁剪（clip_rect None）→ 查 overflow 是 class 规则（动态）还是 inline（静态），动态的必查 clip_rect 是否在 rematch/solve 后重派生。
+
 
