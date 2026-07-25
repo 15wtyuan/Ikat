@@ -59,7 +59,7 @@ fn main() {
         scene.nodes.len()
     );
     println!(
-        "{:<5} {:<11} {:<16} {:<22} {:>8} {:>8} {:>8} {:>8}  {:<5} touch",
+        "{:<5} {:<11} {:<16} {:<22} {:>8} {:>8} {:>8} {:>8}  {:<5} touch  base  eff",
         "nid", "kind", "id", "class", "x", "y", "w", "h", "disp"
     );
     // 收集后排序：按 y 再按 x，方便肉眼对照视觉布局
@@ -202,8 +202,16 @@ fn print_row(n: &Node) {
     let r = n.layout_rect;
     let id = n.id_attr.clone().unwrap_or_default();
     let class = n.classes.join(",");
+    let bg_base = match n.base_style.background_color {
+        Some([r_, g, b, a]) => format!("rgba({:.2},{:.2},{:.2},{:.2})", r_, g, b, a),
+        None => "-".to_string(),
+    };
+    let bg_eff = match n.style.background_color {
+        Some([r_, g, b, a]) => format!("rgba({:.2},{:.2},{:.2},{:.2})", r_, g, b, a),
+        None => "-".to_string(),
+    };
     println!(
-        "{:<5} {:<11} {:<16} {:<22} {:>8.1} {:>8.1} {:>8.1} {:>8.1}  {:<5} {}",
+        "{:<5} {:<11} {:<16} {:<22} {:>8.1} {:>8.1} {:>8.1} {:>8.1}  {:<5} {}  base={} eff={}",
         n.id.index(),
         kind_str(n.kind),
         id,
@@ -213,7 +221,9 @@ fn print_row(n: &Node) {
         r.w,
         r.h,
         disp_str(n),
-        n.interaction.touchable
+        n.interaction.touchable,
+        bg_base,
+        bg_eff,
     );
 }
 
