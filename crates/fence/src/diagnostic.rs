@@ -25,6 +25,14 @@ pub enum DiagnosticCode {
     /// 强制作者把 inline 元素放进 flex 容器或 `<p>`，让布局意图显式。
     /// 详见 fence.md「inline 元素布局上下文」。
     FenceInlineElementInBlockContext,
+    /// border-width 已声明但 border-style 缺省（CSS initial=none）。
+    /// 浏览器按 CSS 规范不画边框，而 LoomGUI 历史实现会画 → 预览 ≠ 运行时。
+    /// 详见 fence.md「围栏内一致性 warning」。
+    FenceBorderWithoutStyle,
+    /// background-image 已声明但 background-size 缺省。
+    /// CSS 默认 `auto`（原始尺寸），LoomGUI 默认 `stretch`（拉伸填满）→ 预览 ≠ 运行时。
+    /// 详见 fence.md「围栏内一致性 warning」。
+    FenceBgImageWithoutSize,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +81,22 @@ impl Diagnostic {
     ) -> Self {
         Self {
             severity: Severity::Error,
+            code,
+            message: message.into(),
+            location,
+            notes: Vec::new(),
+        }
+    }
+
+    /// 构造一条 warning（severity=Warning）。围栏内一致性诊断用——
+    /// 这类问题是「合法但预览 ≠ 运行时」的不一致，不阻断打包，只提醒作者补全声明。
+    pub fn warning(
+        code: DiagnosticCode,
+        message: impl Into<String>,
+        location: SourceLocation,
+    ) -> Self {
+        Self {
+            severity: Severity::Warning,
             code,
             message: message.into(),
             location,

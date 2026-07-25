@@ -1,4 +1,5 @@
 pub mod annotate;
+pub mod consistency_check;
 pub mod css_resolve;
 pub mod css_rules;
 pub mod diagnostic;

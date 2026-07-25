@@ -373,6 +373,8 @@ CSS 在围栏中以三个正交维度建模：
 | `InvalidAriaRelation` | `aria-controls` / `aria-labelledby` 目标不存在 |
 | `TokenizerError` | html5gum tokenizer 遇到无法恢复的词法错误 |
 | `FenceInlineElementInBlockContext` | inline 布局 box（button/a/label/input/img/...）裸放在 block 容器里（非 flex、非 `<p>`）；LoomGUI 无 `<p>`/flex 之外的 inline flow，撑满竖排会和浏览器不一致 |
+| `FenceBorderWithoutStyle` | **warning**：`border-width` 已声明但 `border-style` 缺省（CSS initial=none，浏览器不画边框，LoomGUI 会画）；预览 ≠ 运行时 |
+| `FenceBgImageWithoutSize` | **warning**：`background-image` 已声明但 `background-size` 缺省（CSS 默认 auto=原始尺寸，LoomGUI 默认 stretch=拉伸填满）；预览 ≠ 运行时 |
 
 ---
 
