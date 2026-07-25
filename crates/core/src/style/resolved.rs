@@ -159,6 +159,19 @@ impl LocalTransform {
     }
 }
 
+/// CSS border-style：控制边框线型。None=不渲染（CSS initial），其余=渲染对应线型。
+/// 门控 render 层的 border 调用（None 时不画，对齐 CSS 规范默认值语义）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum BorderStyle {
+    #[default]
+    None,
+    Solid,
+    Dashed,
+    Dotted,
+    Double,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResolvedStyle {
     /// taffy 布局字段（flex/padding/margin/size/min/max/gap/position 等）
@@ -182,6 +195,8 @@ pub struct ResolvedStyle {
     /// CSS border-radius 四角半径。默认全 0（直角）。
     pub border_radius: BorderRadius,
     pub border_color: Option<[f32; 4]>,
+    /// CSS border-style：None=不画边框（CSS initial 值）。门控 border 渲染。
+    pub border_style: BorderStyle,
     pub opacity: f32,
     /// overflow 两轴模式。Default 双轴 Visible。
     pub overflow_x: OverflowMode,
@@ -278,6 +293,7 @@ impl Default for ResolvedStyle {
             background_clip_text: false,
             border_radius: BorderRadius::default(),
             border_color: None,
+            border_style: BorderStyle::None,
             opacity: 1.0,
             overflow_x: OverflowMode::Visible,
             overflow_y: OverflowMode::Visible,
@@ -322,6 +338,41 @@ mod tests {
         assert_eq!(c[0], (10.0, 10.0), "TL px 不变");
         assert_eq!(c[1], (100.0, 50.0), "TR 50% → h=200×0.5=100, v=100×0.5=50");
         assert_eq!(c[2], (0.0, 0.0), "BR 默认 0");
+    }
+
+    #[test]
+    fn border_style_defaults_to_none() {
+        // CSS initial value of border-style is `none` (no border drawn). The render
+        // layer gates border drawing on this field, so the default must be None to
+        // match CSS semantics for nodes that declare no border-style.
+        let s = ResolvedStyle::default();
+        assert_eq!(s.border_style, BorderStyle::None);
+    }
+
+    #[test]
+    fn border_style_bincode_roundtrip() {
+        // border_style is a pkg field (ResolvedStyle is bincode-serialized into pkg.bin).
+        // #[repr(u8)] keeps the on-disk layout stable and compact.
+        for style in [
+            BorderStyle::None,
+            BorderStyle::Solid,
+            BorderStyle::Dashed,
+            BorderStyle::Dotted,
+            BorderStyle::Double,
+        ] {
+            let mut s = ResolvedStyle::default();
+            s.border_style = style;
+            let bytes = bincode::serialize(&s).expect("serialize");
+            let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
+            assert_eq!(back.border_style, style, "{style:?} round-trip");
+            assert_eq!(back, s, "全字段 round-trip 仍相等 ({style:?})");
+        }
+    }
+
+    #[test]
+    fn border_style_is_one_byte() {
+        // FFI / 序列化稳定不变量：#[repr(u8)] enum 占 1 字节（与 OverflowMode 同模式）。
+        assert_eq!(std::mem::size_of::<BorderStyle>(), 1);
     }
 
     #[test]
