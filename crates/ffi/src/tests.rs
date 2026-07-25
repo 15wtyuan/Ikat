@@ -42,7 +42,7 @@ fn ffi_get_node_computed_style_div() {
     let rc = loomgui_stage_get_node_computed_style(h, root, &mut repr);
     assert_eq!(rc, 0, "computed style rc");
     assert_eq!(repr.opacity, 1.0);
-    assert_eq!(repr.display_mode, DisplayMode::Flex as u8);
+    assert_eq!(repr.display_mode, DisplayMode::Block as u8);
     // 无效 node → rc 非 0。
     let rc_bad = loomgui_stage_get_node_computed_style(h, 0xFFFF_FFFF, &mut repr);
     assert_ne!(rc_bad, 0);

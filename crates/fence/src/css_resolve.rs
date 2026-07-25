@@ -30,8 +30,8 @@ pub fn resolve_inline_styles_with_diags(
             continue;
         };
 
-        // Apply DisplayDefault from schema (overrides ResolvedStyle::default
-        // which hardcodes Flex + Column for legacy reasons).
+        // Apply DisplayDefault from schema (overrides ResolvedStyle::default,
+        // whose display fields stay Flex — taffy's own DEFAULT is Flex).
         if let Some(spec) = find_tag(&el.tag) {
             match spec.display {
                 DisplayDefault::Block => {

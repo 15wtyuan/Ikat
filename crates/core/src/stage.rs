@@ -777,9 +777,10 @@ mod tests {
         let c = s
             .get_node_computed_style(root)
             .expect("root computed style");
-        // 默认值（不依赖 rematch 时机）：opacity 1.0、display Flex。精确 cascade 值由 Task 3 验。
+        // 默认值（不依赖 rematch 时机）：opacity 1.0、div 默认 display Block
+        // （运行时 create_root 复刻 css_resolve 的 tag DisplayDefault 铺底）。精确 cascade 值由 Task 3 验。
         assert_eq!(c.opacity, 1.0);
-        assert_eq!(c.display_mode, DisplayMode::Flex);
+        assert_eq!(c.display_mode, DisplayMode::Block);
         assert_eq!(
             s.get_node_computed_style(crate::scene::NodeId::INVALID),
             None,

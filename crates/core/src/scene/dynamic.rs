@@ -17,7 +17,7 @@
 use crate::scene::node::{Node, NodeFlags, NodeId, NodeInteraction, NodeKind, Rect, Scene};
 use crate::style::dynamic::{inline_bit, InlineSet};
 use crate::style::mapping::apply_decl;
-use crate::style::resolved::{OverflowMode, ResolvedStyle};
+use crate::style::resolved::{DisplayMode, OverflowMode, ResolvedStyle};
 use crate::tween::TweenManager;
 
 /// tag 字符串 → NodeKind（复用 dom.rs 围栏白名单语义，runtime 可用，不依赖 parse feature）。
@@ -33,6 +33,24 @@ pub fn kind_from_tag(tag: &str) -> Result<NodeKind, String> {
             "unknown kind tag: {}（围栏白名单：div/button/img/span）",
             other
         )),
+    }
+}
+
+/// 运行时 create_node 支持的 tag 子集（div/button/img/span）的默认 display 铺底。
+///
+/// 复刻打包器 `fence::css_resolve` 对 tag DisplayDefault 的处理：block tag → Block，
+/// inline tag → Flex（taffy 兼容）。运行时动态建的节点（不经 css_resolve）必须同样铺底，
+/// 否则未声明 display 的元素会拿到 `ResolvedStyle::default()` 的 Flex（旧范式残留）。
+///
+/// 注意：这只是 NodeKind 级映射（create_node 仅 4 tag），不是完整 schema——
+/// 完整 31 tag 表真相源仍在 fence（打包期消费）。两套不漂移：NodeKind↔display 是固定的。
+fn default_display_for_kind(k: NodeKind) -> (DisplayMode, taffy::Display) {
+    match k {
+        // block tag：div（Container）→ 真 CSS block 流。
+        NodeKind::Container => (DisplayMode::Block, taffy::Display::Block),
+        // inline tag：button/img/span（运行时映射 Button/Image/TextNode）→ Flex（taffy 无 inline flow）。
+        // 与 fence css_resolve 的 DisplayDefault::Inline → Flex 一致。
+        _ => (DisplayMode::Flex, taffy::Display::Flex),
     }
 }
 
@@ -69,6 +87,12 @@ fn resize_parallel_arrays(scene: &mut Scene) {
 pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, String> {
     let k = kind_from_tag(kind)?;
     let mut base_style = ResolvedStyle::default();
+    // schema display 铺底（block tag→Block，inline tag→Flex）：复刻打包器 css_resolve，
+    // 让运行时动态建的节点默认 display 正确（旧范式 default 是 Flex，div 会误成 Flex）。
+    // 在 apply_css 之前——显式 inline display 声明仍胜出（apply_css 后覆盖）。
+    let (dm, td) = default_display_for_kind(k);
+    base_style.display_mode = dm;
+    base_style.taffy_style.display = td;
     apply_css(&mut base_style, css);
     let touchable = base_style.touchable;
     let clip = if base_style.overflow_x != OverflowMode::Visible
@@ -832,6 +856,34 @@ mod tests {
         // style 初始 = base_style.clone()
         assert_eq!(n.style, n.base_style);
         assert!(n.dirty_mesh, "新建节点 dirty_mesh=true");
+    }
+
+    #[test]
+    fn create_node_applies_schema_display_default() {
+        // 新范式：未声明 display 的元素按 tag 的 DisplayDefault 铺底（对齐打包器 css_resolve）。
+        // div 是 block 标签 → display_mode=Block + taffy display=Block（不是旧范式的 Flex）。
+        // 运行时 create_node 必须复刻 css_resolve 的 schema 铺底，否则动态建的 div 会是 Flex。
+        use crate::style::resolved::DisplayMode;
+        let mut scene = empty_scene();
+        let div = create_node(&mut scene, "div", "").unwrap();
+        let n = scene.get(div).unwrap();
+        assert_eq!(
+            n.base_style.display_mode,
+            DisplayMode::Block,
+            "div（block tag）默认该是 Block，不是 Flex"
+        );
+        assert_eq!(
+            n.base_style.taffy_style.display,
+            taffy::Display::Block,
+            "taffy display 也要 Block"
+        );
+        // button/img 是 inline tag → 运行时映射成 Flex（taffy 兼容，同 css_resolve）。
+        let btn = create_node(&mut scene, "button", "").unwrap();
+        assert_eq!(
+            scene.get(btn).unwrap().base_style.display_mode,
+            DisplayMode::Flex,
+            "button（inline tag）默认映射成 Flex"
+        );
     }
 
     #[test]

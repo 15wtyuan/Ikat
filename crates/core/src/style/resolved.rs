@@ -263,6 +263,13 @@ impl Default for ResolvedStyle {
         // initial value (Row), same as taffy's own default.
         Self {
             taffy_style: TaffyStyle::DEFAULT,
+            // display fields (display_mode + taffy_style.display) here are Flex
+            // (= taffy's own DEFAULT). They do NOT decide a real node's display:
+            //   - packed (pkg) nodes: css_resolve bakes the tag's DisplayDefault
+            //     into base_style at pack time.
+            //   - runtime create_node: default_display_for_kind overrides these
+            //     before apply_css (div→Block, button/img/span→Flex).
+            // So this default only matters for hand-built test fixtures.
             display_mode: DisplayMode::Flex,
             background_color: None,
             background_image: None,
