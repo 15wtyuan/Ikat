@@ -742,8 +742,9 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         }
         "flex-wrap" => {
             ts.flex_wrap = match value.trim() {
+                "nowrap" => taffy::FlexWrap::NoWrap,
                 "wrap" => taffy::FlexWrap::Wrap,
-                _ => taffy::FlexWrap::NoWrap,
+                _ => return false, // wrap-reverse 等未支持值不静默降级（schema 已拦）
             };
             true
         }

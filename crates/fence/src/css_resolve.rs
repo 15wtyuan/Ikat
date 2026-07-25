@@ -450,4 +450,19 @@ mod tests {
             d.message
         );
     }
+
+    /// flex-wrap:wrap-reverse 不支持——schema 删值后必须报 FenceBadCssValue，
+    /// 而非像 v1 那样静默降级成 nowrap。Task 7（E2）。
+    #[test]
+    fn flex_wrap_reverse_rejected() {
+        let r = crate::parse_template(r#"<div style="flex-wrap:wrap-reverse"></div>"#, "t.html");
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::FenceBadCssValue
+                    && d.message.contains("wrap-reverse")),
+            "wrap-reverse should error: {:?}",
+            r.diagnostics
+        );
+    }
 }

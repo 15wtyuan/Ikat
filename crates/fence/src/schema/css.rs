@@ -167,7 +167,9 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         name: "flex-wrap",
         default: "nowrap",
         inherited: false,
-        parser: CssValueParser::Keyword(&["nowrap", "wrap", "wrap-reverse"]),
+        // wrap-reverse 删值：LoomGUI 不真支持，apply_decl 不映射。写它会报
+        // FenceBadCssValue（schema 拒绝）引导改用 wrap——不静默降级成 nowrap。
+        parser: CssValueParser::Keyword(&["nowrap", "wrap"]),
     },
     CssPropSpec {
         name: "justify-content",
