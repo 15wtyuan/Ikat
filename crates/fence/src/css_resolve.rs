@@ -30,8 +30,6 @@ pub fn resolve_inline_styles_with_diags(
             continue;
         };
 
-        let mut flex_direction_set = false;
-
         // Apply DisplayDefault from schema (overrides ResolvedStyle::default
         // which hardcodes Flex + Column for legacy reasons).
         if let Some(spec) = find_tag(&el.tag) {
@@ -136,11 +134,6 @@ pub fn resolve_inline_styles_with_diags(
                     }
                 }
 
-                // Track explicit flex-direction
-                if prop == "flex-direction" {
-                    flex_direction_set = true;
-                }
-
                 // Apply using existing apply_decl.
                 // If it returns false, the value failed to parse -- report it.
                 if !apply_decl(&mut styles[idx], prop, value) {
@@ -167,13 +160,8 @@ pub fn resolve_inline_styles_with_diags(
             }
         }
 
-        // CSS spec: flex-direction initial value is row.
-        // ResolvedStyle::default() hardcodes Column (legacy).
-        // If display ended up as Flex and no explicit flex-direction was
-        // applied, override to Row per CSS standard.
-        if styles[idx].display_mode == DisplayMode::Flex && !flex_direction_set {
-            styles[idx].taffy_style.flex_direction = taffy::FlexDirection::Row;
-        }
+        // flex-direction 默认 = CSS 初始值 row（ResolvedStyle::default() 已是 Row，
+        // 同 taffy DEFAULT）。显式声明走 apply_decl 无条件覆盖。无需补偿。
     }
 
     (styles, diagnostics)

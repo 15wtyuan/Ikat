@@ -83,11 +83,11 @@ mod tests {
 
     #[test]
     fn from_resolved_defaults_match_resolved_default() {
-        // 默认 ResolvedStyle → 投影反映默认（flex column / opacity 1 / font 16 / 无背景）。
+        // 默认 ResolvedStyle → 投影反映默认（flex row / opacity 1 / font 16 / 无背景）。
         let r = ResolvedStyle::default();
         let c = ComputedNodeStyle::from_resolved(&r);
         assert_eq!(c.display_mode, DisplayMode::Flex);
-        assert_eq!(c.flex_direction, taffy::FlexDirection::Column);
+        assert_eq!(c.flex_direction, taffy::FlexDirection::Row);
         assert_eq!(c.opacity, 1.0);
         assert_eq!(c.font_size, 16.0);
         assert_eq!(c.background_color, None);

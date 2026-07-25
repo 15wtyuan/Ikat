@@ -8,7 +8,6 @@ pub struct InheritedSet(pub u16);
 
 use taffy::style::LengthPercentage;
 use taffy::style::Style as TaffyStyle;
-use taffy::FlexDirection;
 
 /// CSS transition 声明（单属性）。prop: None = all（任一通道变化触发）。
 /// 围栏先支持 opacity/color/background-color/all 映射到 TweenProp。
@@ -254,14 +253,16 @@ pub enum TextAlign {
 
 impl Default for ResolvedStyle {
     fn default() -> Self {
-        // div 永远是 flex 容器，默认 flex-direction: column。
-        // taffy Style::DEFAULT 是 Row，这里改默认为 Column。
-        // CSS 显式声明 flex-direction 时，style::mapping::apply_decl 的对应分支
-        // 无条件覆盖 ts.flex_direction——故显式声明永远胜出（写在 row 即 row）。
-        let mut taffy_style = TaffyStyle::DEFAULT;
-        taffy_style.flex_direction = FlexDirection::Column;
+        // CSS spec: flex-direction initial value is `row`. taffy Style::DEFAULT
+        // is already Row — we used to override to Column for the legacy v1
+        // "div is always a flex container" model, but that was removed (P1 C2:
+        // div is real CSS block flow now). Keeping the Column default broke
+        // containers whose display:flex comes from a <style> class rule (applied
+        // at runtime rematch, past stage-4's row-override) — they stacked
+        // vertically instead of flowing in a row. Default now matches the CSS
+        // initial value (Row), same as taffy's own default.
         Self {
-            taffy_style,
+            taffy_style: TaffyStyle::DEFAULT,
             display_mode: DisplayMode::Flex,
             background_color: None,
             background_image: None,
@@ -331,8 +332,8 @@ mod tests {
             OverflowMode::Visible,
             "overflow_y 默认 Visible"
         );
-        // div 默认 flex-direction: column（taffy DEFAULT 是 row，必须显式覆盖）
-        assert_eq!(s.taffy_style.flex_direction, taffy::FlexDirection::Column);
+        // flex-direction 默认 = CSS 初始值 row（= taffy DEFAULT）。
+        assert_eq!(s.taffy_style.flex_direction, taffy::FlexDirection::Row);
     }
 
     #[test]
