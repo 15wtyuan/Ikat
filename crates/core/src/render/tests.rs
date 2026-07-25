@@ -2912,6 +2912,82 @@ fn box_shadow_emits_node_with_offset_and_sort_key() {
     );
 }
 
+/// box-shadow 背层节点须继承主节点的 mask_context（clip 上下文）。
+/// 坑：旧实现 push 阴影节点时硬编码 mask_context=0，overflow:auto 容器内的子节点
+/// inset box-shadow 不被裁，溢出到容器外，UI 上表现为「黑底没被裁剪」。
+/// showcase home 的 quick-bar（overflow-x:auto）的 chip 都带 inset box-shadow，
+/// chip 本身被裁但 inset 环没被裁 → 溢出到 bar 外。
+#[test]
+fn box_shadow_back_layer_inherits_clip_mask_context() {
+    // 构造：root clip 容器（clip_rect 开 mask_context=1）内一个 chip（带 box-shadow）。
+    let root = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        },
+        None,
+    );
+    let mut chip = container_node(
+        1,
+        Some(0),
+        Rect {
+            x: 200.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        }, // 在 root 外（溢出）
+        Some([0.1, 0.1, 0.1, 1.0]),
+    );
+    chip.style.box_shadow = Some(BoxShadow {
+        ox: 0.0,
+        oy: 0.0,
+        spread: 0.0,
+        color: [0.0, 0.0, 0.0, 1.0],
+    });
+    let mut scene = Scene::from_nodes(vec![root, chip], vec![(0, 1)]);
+    // root 开 clip（overflow）→ assign_sort_keys DFS 给 root + 后代开 mask_context
+    let root_id = *scene.roots.first().unwrap();
+    let chip_id = scene.get(root_id).unwrap().children[0];
+    scene.get_mut(root_id).unwrap().clip_rect = Some(Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    });
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // chip 主节点 + chip 阴影节点，都应继承 root 的 mask_context(>0)
+    let chip_main = frame
+        .nodes
+        .iter()
+        .find(|rn| rn.node_id == chip_id.0)
+        .expect("chip 主节点");
+    let chip_shadow = frame
+        .nodes
+        .iter()
+        .find(|rn| rn.node_id == (chip_id.0 | BACK_LAYER_FLAG))
+        .expect("chip 阴影节点");
+    assert!(
+        chip_main.mask_context.0 > 0,
+        "chip 主节点应被 root clip（mask>0）"
+    );
+    assert_eq!(
+        chip_shadow.mask_context, chip_main.mask_context,
+        "box-shadow 背层须继承主节点的 mask_context（旧实现硬编码 0 → overflow 容器内 inset shadow 不被裁）"
+    );
+}
+
 // ── resolve_slice_percent ───────────────────────────
 
 #[test]

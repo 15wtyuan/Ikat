@@ -823,6 +823,11 @@ fn propagate_back_layer_sort_keys(
             if main_sk > 0 {
                 nodes[shadow_pos].sort_key = main_sk - 1;
             }
+            // box-shadow back layer 继承主节点的 mask_context（clip 上下文）：
+            // 阴影是节点的视觉一部分（inset 环/外阴影），overflow 容器裁剪时阴影须与主节点同裁。
+            // 旧实现 push 时硬编码 mask=0（坑：overflow:auto 容器内子节点的 inset box-shadow
+            // 不被裁，溢出到容器外，UI 上表现为「黑底没被裁剪」）。此处补传播。
+            nodes[shadow_pos].mask_context = nodes[main_pos].mask_context;
         }
     }
 }
