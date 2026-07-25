@@ -306,6 +306,12 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         parser: CssValueParser::Color,
     },
     CssPropSpec {
+        name: "border-style",
+        default: "none",
+        inherited: false,
+        parser: CssValueParser::Keyword(&["none", "solid", "dashed", "dotted", "double"]),
+    },
+    CssPropSpec {
         name: "border-radius",
         default: "0",
         inherited: false,
@@ -709,6 +715,19 @@ mod tests {
         assert!(!validate_animation_value("123 2s")); // 数字开头 name
         assert!(!validate_animation_value("fadeIn 2s bogusKeyword"));
         assert!(!validate_animation_value("--custom 2s")); // CSS 变量前缀作 name
+    }
+
+    #[test]
+    fn border_style_registered() {
+        let spec = find_css_prop("border-style").expect("border-style must be in fence");
+        let allowed = match &spec.parser {
+            CssValueParser::Keyword(k) => k,
+            _ => panic!("border-style must be Keyword parser"),
+        };
+        assert!(allowed.contains(&"none"));
+        assert!(allowed.contains(&"solid"));
+        assert_eq!(spec.default, "none");
+        assert!(!spec.inherited);
     }
 
     #[test]

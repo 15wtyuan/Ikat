@@ -203,7 +203,7 @@ CSS 在围栏中以三个正交维度建模：
 
 **边框**
 
-`border-color`, `border-radius`, `border-image-slice`
+`border-color`, `border-style`（`none` / `solid` / `dashed` / `dotted` / `double`，默认 `none`）, `border-radius`, `border-image-slice`
 
 **背景**
 
