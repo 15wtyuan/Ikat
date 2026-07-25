@@ -356,7 +356,9 @@ mod package_tests {
         // html_rel 放 workspace_root 顶层 → src 原样进 refs（base 为空）。
         let comps = vec![Component {
             name: "home".to_string(),
-            src: r#"<div class="root"><p>hi</p><img src="icons/a.png"></div>"#.to_string(),
+            src:
+                r#"<div class="root"><p>hi</p><img src="icons/a.png" style="display:block"></div>"#
+                    .to_string(),
             html_rel: "home.html".to_string(),
         }];
         let (bytes, refs) = pack_components(&comps).unwrap();
@@ -376,7 +378,8 @@ mod package_tests {
         // ../res/.. 查 atlas miss。回归 bug：bridge 存原 src、refs 归一但 pkg src 字段漏。
         let comps = vec![Component {
             name: "spec4b".to_string(),
-            src: r#"<div class="root"><img src="../res/icons/x.png"></div>"#.to_string(),
+            src: r#"<div class="root"><img src="../res/icons/x.png" style="display:block"></div>"#
+                .to_string(),
             html_rel: "spec4b/spec4b.html".to_string(),
         }];
         let (bytes, refs) = pack_components(&comps).unwrap();
@@ -404,7 +407,7 @@ mod package_tests {
         let comps = vec![
             Component {
                 name: "nav".to_string(),
-                src: r#"<nav><a href="x">l</a></nav>"#.to_string(),
+                src: r#"<nav><a href="x" style="display:block">l</a></nav>"#.to_string(),
                 html_rel: "nav.html".to_string(),
             },
             Component {

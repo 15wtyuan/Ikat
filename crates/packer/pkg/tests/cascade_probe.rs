@@ -164,7 +164,7 @@ fn probe_e2_fixture_color_cascade() {
   .container { display: flex; flex-direction: column; }
   .highlight { color: #ff0000; }
   #root { width: 200px; height: 100px; }
-  .spaced { margin: 4px; }
+  .spaced { display: flex; margin: 4px; }
 </style>
 </head><body>
   <div id="root" class="container highlight">

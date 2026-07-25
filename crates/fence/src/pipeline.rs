@@ -2,8 +2,8 @@ use crate::annotate::annotate;
 use crate::css_resolve::resolve_inline_styles_with_diags;
 use crate::css_rules::{parse_style_block, KeyframesRule};
 use crate::diagnostic::{Diagnostic, LineMap};
-use crate::display_check::check_inline_display;
 use crate::fence_gate::run_fence_gate;
+use crate::inline_context_check::check_inline_context;
 use crate::ir::{IrNodeKind, IrTree};
 use crate::structural::run_structural;
 use crate::tree_builder::parse_html_to_ir_named;
@@ -60,9 +60,17 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
     // Stage 6: Annotate (fill SemanticKind)
     annotate(&mut tree);
 
-    // Stage 6.5: inline 元素 display 声明检查（taffy 无 inline flow，裸 inline 元素不可预测）。
-    // 必须在 Annotate 之后（需 SemanticKind 判定豁免名单）+ 4.5 之后（需 dynamic_rules）。
-    diagnostics.extend(check_inline_display(&tree, &dynamic_rules, file, &line_map));
+    // Stage 6.5: inline 元素布局上下文检查。LoomGUI 没有 <p>/flex 之外的 inline flow——
+    // block 容器里的裸 inline 元素会被当 block-level（撑满+竖排），和浏览器不一致。
+    // 必须在 Annotate 之后（需 TextBlock 语义判定 <p> 豁免）+ Stage 4（inline style display）
+    // + Stage 4.5（class 规则 display）之后——parent 是 block 还是 flex 要合并两个来源。
+    diagnostics.extend(check_inline_context(
+        &tree,
+        &styles,
+        &dynamic_rules,
+        file,
+        &line_map,
+    ));
 
     // Extract referenced sprites (img src, background-image url)
     let referenced_sprites = extract_sprites(&tree);
@@ -114,7 +122,10 @@ mod tests {
 
     #[test]
     fn pipeline_simple_template() {
-        let result = parse_template(r#"<div id="root"><span>Hello</span></div>"#, "home.html");
+        let result = parse_template(
+            r#"<div id="root"><p>Hello <span>x</span></p></div>"#,
+            "home.html",
+        );
         assert!(
             result.diagnostics.is_empty(),
             "unexpected diagnostics: {:?}",
@@ -127,7 +138,14 @@ mod tests {
         assert_eq!(el.tag, "div");
         assert_eq!(el.semantic, Some(SemanticKind::Container));
 
-        let span_id = result.tree.nodes[root.0].children[0];
+        // root > p > span
+        let p_id = result.tree.nodes[root.0].children[0];
+        let span_id = result.tree.nodes[p_id.0]
+            .children
+            .iter()
+            .copied()
+            .find(|&c| result.tree.element(c).map(|e| e.tag.as_str()) == Some("span"))
+            .expect("span under p");
         let span_el = result.tree.element(span_id).unwrap();
         assert_eq!(span_el.semantic, Some(SemanticKind::TextElement));
     }

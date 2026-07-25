@@ -175,8 +175,9 @@ mod tests {
 
     #[test]
     fn div_p_text_img_mapping_and_structure() {
-        let nodes =
-            bridged(r#"<div class="root" id="r"><p class="t">hi</p><img src="a.png"></div>"#);
+        let nodes = bridged(
+            r#"<div class="root" id="r"><p class="t">hi</p><img src="a.png" style="display:block"></div>"#,
+        );
         // [0] div Container root (parent=None, class=root, id=r)
         assert_eq!(nodes[0].kind, NodeKind::Container);
         assert_eq!(nodes[0].parent_idx, None);
@@ -197,7 +198,9 @@ mod tests {
 
     #[test]
     fn input_dispatch_to_concrete_kinds() {
-        let nodes = bridged(r#"<div><input type="range"><input type="checkbox"></div>"#);
+        let nodes = bridged(
+            r#"<div><input type="range" style="display:block"><input type="checkbox" style="display:block"></div>"#,
+        );
         let kinds: Vec<_> = nodes.iter().map(|n| n.kind).collect();
         assert!(
             kinds.contains(&NodeKind::Slider),
@@ -225,7 +228,7 @@ mod tests {
 
     #[test]
     fn tabindex_parsed() {
-        let nodes = bridged(r#"<div><button tabindex="2">b</button></div>"#);
+        let nodes = bridged(r#"<div><button tabindex="2" style="display:block">b</button></div>"#);
         let btn = nodes.iter().find(|n| n.kind == NodeKind::Button).unwrap();
         assert_eq!(btn.tabindex, Some(2));
     }

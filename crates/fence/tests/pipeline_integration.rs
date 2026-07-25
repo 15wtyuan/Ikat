@@ -7,13 +7,13 @@ use loomgui_fence::schema::tag::SemanticKind;
 fn complex_template_parses_clean() {
     let html = r#"<div id="root" class="panel">
         <header><my-title>Title</my-title>
-            <button class="close" style="display:flex">X</button>
+            <button class="close" style="display:block">X</button>
         </header>
         <ul>
             <li><span>Item 1</span></li>
             <li><span>Item 2</span></li>
         </ul>
-        <input type="range" min="0" max="100">
+        <input type="range" min="0" max="100" style="display:block">
     </div>"#;
     let result = parse_template(html, "complex.html");
     let errors: Vec<_> = result

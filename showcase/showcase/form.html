@@ -14,7 +14,6 @@
   .group-title { color:#8ec5d8; font-size:18px; font-weight:700; }
   .field {display:flex; flex-direction:column; gap:8px; }
   .field-label { color:#9aa0b4; font-size:14px; }
-  label { display:flex; }
   input[type="text"], select, textarea { background-color:rgba(26,47,69,0.85); border-width:0 0 0 2px; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:10px 14px; border-radius:6px; transition:border-color .15s; }
   input[type="text"]:focus, select:focus, textarea:focus { border-color:#5fb4d4; }
   textarea { width:100%; height:100px; resize:none; font-family:inherit; }
@@ -25,7 +24,7 @@
   .slider-val { color:#d4a44e; font-size:16px; font-weight:700; min-width:40px; }
   input[type="range"] { flex-grow:1;  }
   .actions {display:flex; flex-direction:row; gap:16px; justify-content:flex-end; }
-  .btn { display:flex; padding:12px 32px; border-radius:10px; font-size:16px; font-weight:700; transition:filter .15s; }
+  .btn { padding:12px 32px; border-radius:10px; font-size:16px; font-weight:700; transition:filter .15s; }
   .btn-create { background-color:#d4a44e; color:#0e1620; }
   .btn-reset { background-color:rgba(26,47,69,0.85); color:#9aa0b4; }
   .btn:hover { filter:brightness(1.12); }
@@ -34,7 +33,7 @@
 <body>
   <div class="root">
     <header class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-color:#2a5a75">
-      <button id="back-home" style="display:flex;color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">角色创建</span>
+      <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">角色创建</span>
     </header>
     <div class="body">
       <p class="page-title">创建新角色</p>

@@ -8,9 +8,10 @@
   <style>
   .root {display:flex; width:1920px; height:1080px; background-color:#0e1620; flex-direction:row; }
   .sidebar {display:flex;flex-direction:column; width:260px; background-color:rgba(21,36,51,0.72); padding:32px 20px; gap:6px; border-width:0 1px 0 0; border-color:#2a5a75; }
-  .side-back { display:flex; color:#8ec5d8; font-size:14px; margin-bottom:20px; }
+  .side-back { color:#8ec5d8; font-size:14px; margin-bottom:20px; }
   .side-title { color:#e0e6ec; font-size:22px; font-weight:700; margin-bottom:20px; }
-  .tab { display:flex; text-align:left; color:#9aa0b4; font-size:16px; padding:12px 16px; border-radius:10px; }
+  .tablist { display:flex; flex-direction:row; flex-wrap:wrap; gap:4px; }
+  .tab { text-align:left; color:#9aa0b4; font-size:16px; padding:12px 16px; border-radius:10px; }
   .tab:hover { background-color:rgba(26,47,69,0.85); }
   /* TODO(roadmap §4 tech-debt aria-selected): state-attr selector + tab 控件 defer to 控件束 TabList. */
   /* .tab[aria-selected="true"] { background-color:rgba(26,47,69,0.85); color:#5fb4d4; font-weight:700; } */
@@ -19,7 +20,6 @@
   .page-desc { color:#9aa0b4; font-size:15px; }
   .field {display:flex; flex-direction:row; align-items:center; justify-content:space-between; gap:24px; padding:14px 0; border-width:0 0 1px 0; border-color:#1a2f45; }
   .field-label { color:#e0e6ec; font-size:16px; }
-  label { display:flex; }
   .field-hint { color:#6c7080; font-size:13px; margin-top:3px; }
   .field-control {display:flex; flex-direction:row; align-items:center; gap:12px; }
   .val { color:#8ec5d8; font-size:14px; min-width:48px; text-align:right; }
@@ -38,7 +38,7 @@
     <div class="sidebar">
       <button class="side-back" id="back-home">← 返回首页</button>
       <p class="side-title">设置</p>
-      <div role="tablist">
+      <div class="tablist" role="tablist">
         <button class="tab" role="tab" id="tab-audio" aria-controls="panel-audio" aria-selected="true">音效</button>
         <button class="tab" role="tab" id="tab-graphics" aria-controls="panel-graphics" aria-selected="false">画面</button>
         <button class="tab" role="tab" id="tab-controls" aria-controls="panel-controls" aria-selected="false">操作</button>
