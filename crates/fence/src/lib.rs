@@ -2,6 +2,7 @@
 pub mod css_resolve;
 pub mod css_rules;
 pub mod diagnostic;
+pub mod display_check;
 pub mod fence_gate;
 pub mod ir;
 pub mod pipeline;

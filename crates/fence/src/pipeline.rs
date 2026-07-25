@@ -2,6 +2,7 @@ use crate::annotate::annotate;
 use crate::css_resolve::resolve_inline_styles_with_diags;
 use crate::css_rules::{parse_style_block, KeyframesRule};
 use crate::diagnostic::{Diagnostic, LineMap};
+use crate::display_check::check_inline_display;
 use crate::fence_gate::run_fence_gate;
 use crate::ir::{IrNodeKind, IrTree};
 use crate::structural::run_structural;
@@ -58,6 +59,10 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
 
     // Stage 6: Annotate (fill SemanticKind)
     annotate(&mut tree);
+
+    // Stage 6.5: inline 元素 display 声明检查（taffy 无 inline flow，裸 inline 元素不可预测）。
+    // 必须在 Annotate 之后（需 SemanticKind 判定豁免名单）+ 4.5 之后（需 dynamic_rules）。
+    diagnostics.extend(check_inline_display(&tree, &dynamic_rules, file, &line_map));
 
     // Extract referenced sprites (img src, background-image url)
     let referenced_sprites = extract_sprites(&tree);

@@ -19,6 +19,11 @@ pub enum DiagnosticCode {
     UnregisteredCustomElement,
     InvalidAriaRelation,
     TokenizerError,
+    /// inline 元素未显式声明 display（inline style 或 class 规则均未声明）。
+    /// taffy 不支持 CSS inline flow，inline 标签在 LoomGUI 运行时是 block-level（撑满、竖排），
+    /// 与 AI 的浏览器先验（inline 横排）冲突 → 渲染不可预测。强制作者声明 display 消除歧义。
+    /// 详见 fence.md「inline 元素 display 声明」。
+    FenceInlineElementMissingDisplay,
 }
 
 #[derive(Debug, Clone)]

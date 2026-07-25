@@ -52,7 +52,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 下表是完整的运行时标签注册表。列含义：
 
 - **SemanticKind**：打包期标注的稳定语义类型。`InputDispatch` 表示需根据 `type` 属性进一步分派。
-- **Display**：不写 CSS `display` 时的默认显示值。Block/Inline 遵循标准 HTML 默认。
+- **Display**：不写 CSS `display` 时的默认显示值。**注意：LoomGUI 运行时不实现 CSS inline flow**——`Inline` 标签运行时被当作 block-level flex（撑满父宽、竖向堆叠），与浏览器的横向 inline 行为不同。为防止 AI 先验错误，`Button`/`Link`/`Label` 三类布局 box 必须**显式声明 `display`**（inline style 或 class 规则均可），否则打包报错（见阶段 6.5）。其余 inline 标签豁免：`span/strong/em`（文本行内，终态 TextRun）、`input/select/textarea/img/canvas/progress`（叶子控件/媒体）、`br/slot`。
 - **Category**：HTML 分类简化为四值——Block（块级结构）、Phrasing（行内文本级）、Void（自闭合）、Transparent（透明，继承父级）。
 - **ContentModel**：允许的子内容——None（无子内容）、Text（仅文本）、Phrasing（行内元素+文本）、Flow（任意）、Transparent（继承父级）、Only([...])（仅列出的子标签）。
 
@@ -326,6 +326,24 @@ CSS 在围栏中以三个正交维度建模：
 
 对每个元素调用 `resolve_semantic(tag, input_type)`，填充 `IrElement.semantic`。这是确定性的：同样的 tag + input[type] 永远产生同样的 SemanticKind。
 
+### 阶段 6.5：inline 元素 display 声明检查
+
+**根因**：taffy 0.12 不支持 CSS inline flow（inline 元素自动横排换行）。LoomGUI 把 inline 标签在布局流里当 block-level（撑满、竖排）——与 AI 的浏览器先验（inline 横排）冲突。放任裸 inline 元素会让 AI 按浏览器先验预期横排、运行时却竖排 → 渲染不可预测 → 返工。
+
+**规则**：`Button`/`Link`/`Label` 三类 inline 标签（布局 box）必须**显式声明 `display`**，来源不限：
+- inline `style="display:..."`，或
+- 匹配的 `<style>` class 规则含 `display` 声明。
+
+两者任一即可（声明了就说明作者有意确定布局策略）。都没声明 → `FenceInlineElementMissingDisplay` error，打包失败。
+
+**豁免名单**（display 对它们无意义或另有终态处理）：
+- `span/strong/em`（TextElement）：终态是 `<p>` 文本 block 内的 TextRun（main-design §10），用 display 约束它们是错的。
+- `input/select/textarea/img/canvas/progress`（控件/叶子媒体）：自绘叶子，display 对布局流无意义。
+- `br/slot`：无 box 概念。
+- **文本上下文豁免**：祖先链含 `<p>`（TextBlock）的 inline 元素（如 `<p>...<a>点此</a>...</p>`）是文本行内混排的一员（终态走 LinkRun/TextRun），display 不适用。
+
+**class 匹配简化**：仅判单 compound 选择器（`.tab`、`button.tab`、`.btn.primary`）是否命中元素的 class 列表；多 compound 选择器（后代/子代，如 `.parent button`）声明 display 时保守放行（不报 error，避免假阳性）。
+
 ### 流水线特性
 
 - **Collect-all**：所有阶段的 diagnostic 汇总到一个 `Vec<Diagnostic>` 输出，不 fail-fast。
@@ -351,6 +369,7 @@ CSS 在围栏中以三个正交维度建模：
 | `UnregisteredCustomElement` | 自定义元素未注册（defer 到 R3） |
 | `InvalidAriaRelation` | `aria-controls` / `aria-labelledby` 目标不存在 |
 | `TokenizerError` | html5gum tokenizer 遇到无法恢复的词法错误 |
+| `FenceInlineElementMissingDisplay` | inline 布局 box（Button/Link/Label）未显式声明 `display`（taffy 无 inline flow，裸的不可预测） |
 
 ---
 

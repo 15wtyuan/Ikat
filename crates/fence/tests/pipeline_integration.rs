@@ -7,7 +7,7 @@ use loomgui_fence::schema::tag::SemanticKind;
 fn complex_template_parses_clean() {
     let html = r#"<div id="root" class="panel">
         <header><my-title>Title</my-title>
-            <button class="close">X</button>
+            <button class="close" style="display:flex">X</button>
         </header>
         <ul>
             <li><span>Item 1</span></li>
