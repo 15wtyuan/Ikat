@@ -9,7 +9,7 @@
   .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; }
   .body {display:flex; flex-grow:1; flex-direction:row; gap:24px; padding:24px; overflow:hidden; }
   .col-stage {display:flex;flex-direction:column; width:720px; gap:16px; }
-  .native-slot { width:720px; height:680px; background-color:#0a121b; border-radius:10px; border-width:2px; border-color:#2a5a75; }
+  .native-slot { width:720px; height:680px; background-color:#0a121b; border-radius:10px; border-width:2px; border-style:solid; border-color:#2a5a75; }
   .stage-info {display:flex; flex-direction:row; justify-content:space-between; }
   .stage-name { color:#e0e6ec; font-size:28px; font-weight:700; }
   .stage-lv { color:#d4a44e; font-size:18px; font-weight:700; }
@@ -24,7 +24,7 @@
   .equip {display:flex;flex-direction:column; width:72px; height:72px; background-color:rgba(26,47,69,0.85); border-radius:10px; justify-content:center; align-items:center; transition:filter .15s; }
   .equip:hover { filter:brightness(1.3); }
   .equip img { width:44px; height:44px; }
-  .skill {display:flex; flex-direction:row; align-items:center; gap:14px; padding:10px 0; border-width:0 0 1px 0; border-color:#1a2f45; transition:background-color .15s; }
+  .skill {display:flex; flex-direction:row; align-items:center; gap:14px; padding:10px 0; border-width:0 0 1px 0; border-style:solid; border-color:#1a2f45; transition:background-color .15s; }
   .skill:hover { background-color:rgba(26,47,69,0.85); }
   .skill-no { color:#6c7080; font-size:14px; min-width:24px; }
   .skill-icon { width:40px; height:40px; }
@@ -36,7 +36,7 @@
 </head>
 <body>
   <div class="root">
-    <header class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-color:#2a5a75">
+    <header class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
       <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">角色</span>
     </header>
     <div class="body">
