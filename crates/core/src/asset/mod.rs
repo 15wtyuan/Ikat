@@ -1,4 +1,5 @@
-//! 包格式（.pkg.bin，当前 version=22）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=23）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! v23：ResolvedStyle 加 border_style 字段（bincode 布局变，旧 v22 pkg 加载报 TooOld）。
 //!
 //! 多组件格式：一个 pkg.bin = 多个具名组件（ComponentTable 切分）。
 //! 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponent(DynamicRules)。
@@ -17,9 +18,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 22; // v22: ResolvedStyle.inline_declared (inline > class cascade)
-pub(crate) const MIN_VERSION: u32 = 22;
-pub(crate) const MAX_VERSION: u32 = 22;
+pub const PKG_FORMAT_VERSION: u32 = 23; // v23: ResolvedStyle.border_style field (bincode layout change)
+pub(crate) const MIN_VERSION: u32 = 23;
+pub(crate) const MAX_VERSION: u32 = 23;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────
