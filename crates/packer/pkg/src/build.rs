@@ -38,7 +38,7 @@ pub struct Component {
 /// build() 读文件组装 Component 调本函数；本函数接字符串便于单测。
 ///
 /// 流程：每组件 `parse_template` → `bridge` → 累积；末尾 `write_package` 出 pkg.bin。
-/// fence diagnostics 非空 → Err（不静默降级）；bridge 多根 → Err（不静默产森林）。
+/// fence Error 级 diagnostic → Err（不静默降级；Warning 级不阻断打包）；bridge 多根 → Err（不静默产森林）。
 /// referenced_sprites = 所有组件 img src / background-image 并集，已归一化为 workspace_root
 /// 相对路径（sprite_key 口径），供 atlas 交叉验证。
 pub fn pack_components(components: &[Component]) -> Result<(Vec<u8>, Vec<String>), String> {
@@ -51,7 +51,13 @@ pub fn pack_components(components: &[Component]) -> Result<(Vec<u8>, Vec<String>
             html_rel,
         } = comp;
         let parsed = loomgui_fence::parse_template(src, name);
-        if !parsed.diagnostics.is_empty() {
+        // Warning 不阻断打包（围栏内一致性 warning：合法但预览≠运行时，只提醒作者补声明）。
+        // 仅 Error 级 diagnostic 视为 fatal；warning 留在 parsed.diagnostics 里，由后续日志/报告消费。
+        if parsed
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == loomgui_fence::diagnostic::Severity::Error)
+        {
             return Err(format!(
                 "fence diagnostics in {name}: {:?}",
                 parsed.diagnostics
@@ -457,6 +463,37 @@ mod package_tests {
         assert!(
             err.contains("duplicate component name") && err.contains("dup"),
             "dup-name error should be descriptive: {err}"
+        );
+    }
+
+    #[test]
+    fn pack_components_warning_does_not_block_packaging() {
+        // F1 回归锁：围栏内一致性 warning（W1 border-width 无 style）合法但不阻断打包。
+        // build.rs 曾把任何 diagnostic 当 fatal → warning 命中时 pkg 打不出来，违反设计意图。
+        // 构造只产 W1 warning（无 Error）的组件，断言 pack_components 返 Ok。
+        let comps = vec![Component {
+            name: "warn".to_string(),
+            src: r#"<div style="border-width:2px;border-color:#ff0000"></div>"#.to_string(),
+            html_rel: "warn.html".to_string(),
+        }];
+        // 双重断言：先证明确实产了 W1 warning（否则测试无效——HTML 没命中 warning），
+        // 再证明 pack_components 仍返 Ok（warning 被放行）。
+        let parsed = loomgui_fence::parse_template(&comps[0].src, "warn.html");
+        assert!(
+            parsed.diagnostics.iter().any(|d| {
+                d.code == loomgui_fence::diagnostic::DiagnosticCode::FenceBorderWithoutStyle
+                    && d.severity == loomgui_fence::diagnostic::Severity::Warning
+            }),
+            "测试前置：HTML 应触发 W1 warning，否则此测试无效: {:?}",
+            parsed.diagnostics
+        );
+        let (bytes, _refs) = pack_components(&comps)
+            .expect("warning 不应阻断打包：pack_components 应返 Ok，但实际被当 fatal");
+        // 确认产物可读（不是静默坏包）。
+        let pkg = loomgui_core::asset::read_package(&bytes).unwrap();
+        assert!(
+            pkg.components.contains_key("warn"),
+            "warning 组件应正常写入 pkg"
         );
     }
 
