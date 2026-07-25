@@ -1,7 +1,7 @@
 use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
-    BackgroundSize, BorderRadius, BoxShadow, CornerRadius, DisplayMode, Gradient2, GradientDir,
-    OverflowMode, ResolvedStyle, SliceInsets, TextAlign,
+    BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, Gradient2,
+    GradientDir, OverflowMode, ResolvedStyle, SliceInsets, TextAlign,
 };
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, LengthPercentage, LengthPercentageAuto};
@@ -505,10 +505,13 @@ fn parse_overflow(value: &str) -> Option<OverflowMode> {
     }
 }
 
-/// 解析 border 宽度+颜色声明：`<width> <style>? <color>?`（CSS 简写语义，style 围栏外忽略）。
-/// width 取首个 px token，color 取首个可解析颜色 token。width 缺失 → None（整条无效）。
-fn parse_border_value(value: &str) -> Option<(f32, Option<[f32; 4]>)> {
+/// 解析 border 简写值：`<width> <style>? <color>?`（CSS 标准简写语义）。
+/// width 取首个 px token，style 取首个关键字（solid/dashed/dotted/double/none），
+/// color 取首个可解析颜色 token。width 缺失 → None（整条无效）。未声明 style 时
+/// style 默认 None（CSS：不画边框），调用方据此决定是否填 border_style。
+fn parse_border_value(value: &str) -> Option<(f32, BorderStyle, Option<[f32; 4]>)> {
     let mut w: Option<f32> = None;
+    let mut style: BorderStyle = BorderStyle::None; // 未声明 = CSS 默认 none
     let mut color: Option<[f32; 4]> = None;
     for tok in value.split_whitespace() {
         if color.is_none() {
@@ -516,6 +519,30 @@ fn parse_border_value(value: &str) -> Option<(f32, Option<[f32; 4]>)> {
                 color = Some(c);
                 continue;
             }
+        }
+        // style 关键字优先于 width 判定，避免 "solid" 被 strip_suffix("px") 误漏。
+        match tok {
+            "solid" => {
+                style = BorderStyle::Solid;
+                continue;
+            }
+            "dashed" => {
+                style = BorderStyle::Dashed;
+                continue;
+            }
+            "dotted" => {
+                style = BorderStyle::Dotted;
+                continue;
+            }
+            "double" => {
+                style = BorderStyle::Double;
+                continue;
+            }
+            "none" => {
+                style = BorderStyle::None;
+                continue;
+            }
+            _ => {}
         }
         if w.is_none() {
             if let Some(px) = tok
@@ -526,7 +553,7 @@ fn parse_border_value(value: &str) -> Option<(f32, Option<[f32; 4]>)> {
             }
         }
     }
-    Some((w?, color))
+    Some((w?, style, color))
 }
 
 /// CSS 盒模型四边（border/padding 单边 longhand 共用）。
@@ -537,9 +564,10 @@ enum Side {
     Left,
 }
 
-/// border-top/right/bottom/left 单边 longhand：设 ts.border 对应边 + border_color，不动其他三边。
+/// border-top/right/bottom/left 单边 longhand：设 ts.border 对应边 + border_color +
+/// border_style，不动其他三边。
 fn apply_border_side(style: &mut ResolvedStyle, side: Side, value: &str) -> bool {
-    let Some((w, color)) = parse_border_value(value) else {
+    let Some((w, bstyle, color)) = parse_border_value(value) else {
         return false;
     };
     let lp = LengthPercentage::length(w);
@@ -553,6 +581,7 @@ fn apply_border_side(style: &mut ResolvedStyle, side: Side, value: &str) -> bool
     if let Some(c) = color {
         style.border_color = Some(c);
     }
+    style.border_style = bstyle;
     true
 }
 
@@ -633,8 +662,8 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "border" => {
-            // CSS 简写：四边同值。width + color 共用 parse_border_value。
-            let Some((w, color)) = parse_border_value(value) else {
+            // CSS 简写：四边同值。width + style + color 共用 parse_border_value。
+            let Some((w, bstyle, color)) = parse_border_value(value) else {
                 return false;
             };
             let lp = LengthPercentage::length(w);
@@ -647,6 +676,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             if let Some(c) = color {
                 style.border_color = Some(c);
             }
+            style.border_style = bstyle;
             true
         }
         "border-top" => apply_border_side(style, Side::Top, value),
@@ -818,6 +848,17 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         }
         "border-color" => {
             style.border_color = parse_color(value);
+            true
+        }
+        "border-style" => {
+            // CSS longhand：border-style:solid 等。未声明 border-style 时默认 None（不画）。
+            style.border_style = match value.trim() {
+                "solid" => BorderStyle::Solid,
+                "dashed" => BorderStyle::Dashed,
+                "dotted" => BorderStyle::Dotted,
+                "double" => BorderStyle::Double,
+                _ => BorderStyle::None,
+            };
             true
         }
         "opacity" => {

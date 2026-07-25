@@ -1322,3 +1322,42 @@ fn apply_border_side_longhand_optional_color() {
     assert_eq!(s.taffy_style.border.bottom, LengthPercentage::length(1.0));
     assert_eq!(s.border_color, Some([0.5; 4]), "无 color token 不覆盖");
 }
+
+// ── border-style 语义对齐（CSS：不声明 style → None，不画边框） ──
+
+#[test]
+fn apply_border_style_longhand() {
+    use crate::style::resolved::BorderStyle;
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "border-style", "solid"));
+    assert_eq!(s.border_style, BorderStyle::Solid);
+}
+
+#[test]
+fn apply_border_shorthand_captures_style() {
+    use crate::style::resolved::BorderStyle;
+    // border: 2px solid red → width + style + color 都进
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "border", "2px solid #ff0000"));
+    assert_eq!(s.border_style, BorderStyle::Solid);
+    assert_eq!(s.border_color, Some([1.0, 0.0, 0.0, 1.0]));
+    // width 四边
+    let bw = &s.taffy_style.border;
+    assert!((resolve_lp_for_test(bw.left) - 2.0).abs() < 0.01);
+}
+
+#[test]
+fn apply_border_no_style_keeps_none() {
+    use crate::style::resolved::BorderStyle;
+    // border: 2px red（无 style）→ border_style 仍 None（CSS 规范：不画）
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "border", "2px #ff0000"));
+    assert_eq!(s.border_style, BorderStyle::None);
+}
+
+// 测试用：把 LengthPercentage 解析回 f32（taffy 0.12 是 tagged pointer struct，
+// 用 into_raw + tag + value 解构，复用 render 的 resolve_lp 逻辑）。
+fn resolve_lp_for_test(lp: taffy::style::LengthPercentage) -> f32 {
+    let cl = lp.into_raw();
+    cl.value()
+}
