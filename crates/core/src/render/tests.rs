@@ -118,6 +118,8 @@ fn build_container_with_border_emits_border_node() {
     );
     n.style.border_color = Some([1.0, 0.0, 0.0, 1.0]); // 红边
     n.style.taffy_style.border = taffy::geometry::Rect::length(4.0_f32);
+    // border_style=Solid 放行 render 门控（CSS initial=None 不画；本测试意图画边框）。
+    n.style.border_style = crate::style::resolved::BorderStyle::Solid;
     let mut scene = Scene::from_nodes(vec![n], vec![]);
     let fonts = test_font_table().expect("need test font for build_render_nodes");
     crate::scene::transform::compute_world_transforms(&mut scene);
@@ -3373,4 +3375,49 @@ fn container_border_with_radius_emits_rounded_border() {
         verts.len()
     );
     assert!(colors.contains(&[1.0, 0.0, 0.0, 1.0]), "红色边框顶点存在");
+}
+
+/// border 门控（对齐 CSS initial=none）：设了 border-width>0 + border-color，但
+/// border_style=None（ResolvedStyle 默认）时不应产任何 border_ring 几何——背景 quad 仅
+/// 4 顶点。CSS 规范 border-style 默认 none，none 不渲染边框（即便 width/color 已声明）。
+#[test]
+fn border_style_none_renders_no_border_even_with_width_and_color() {
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        },
+        Some([0.0, 0.0, 1.0, 1.0]), // 蓝底（产背景 quad 4 顶点）
+    );
+    // width=2 四边 + color=红，但 border_style 保持默认 None。
+    n.style.taffy_style.border = taffy::geometry::Rect::length(2.0_f32);
+    n.style.border_color = Some([1.0, 0.0, 0.0, 1.0]);
+    n.style.border_style = crate::style::resolved::BorderStyle::None;
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let fonts = test_font_table().expect("need test font for build_render_nodes");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // 期望：没有 border_ring 顶点。border_ring 直角态产 8 顶点（背景 4 + 边框 8 = 12），
+    // 阈值 >10 区分“有边框”与“纯背景 4 顶点”。
+    let has_border_geom = frame.nodes.iter().any(|rn| {
+        if let NodePayload::Mesh { verts, .. } = &rn.payload {
+            verts.len() > 10
+        } else {
+            false
+        }
+    });
+    assert!(
+        !has_border_geom,
+        "border_style=None 不应渲染边框几何（即使 width+color 已设）"
+    );
 }

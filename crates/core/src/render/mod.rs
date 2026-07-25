@@ -422,28 +422,31 @@ pub fn build_render_nodes(
                 // ponytail: 有背景图（program=2/4）时边框需独立 draw call（边框纯色 vs 背景采样
                 // 图），本 task 不做——留待 border + bg-image 共存场景单独处理。
                 if !has_image {
-                    if let Some(border_col) = n.style.border_color {
-                        let bw = &n.style.taffy_style.border;
-                        let widths = crate::render::border::BorderWidths {
-                            top: resolve_lp(bw.top),
-                            right: resolve_lp(bw.right),
-                            bottom: resolve_lp(bw.bottom),
-                            left: resolve_lp(bw.left),
-                        };
-                        if widths.top > 0.0
-                            || widths.right > 0.0
-                            || widths.bottom > 0.0
-                            || widths.left > 0.0
-                        {
-                            let br = crate::render::border::border_ring(
-                                rect, &radii, widths, border_col,
-                            );
-                            if !br.3.is_empty() {
-                                let base = v.len() as u32;
-                                v.extend_from_slice(&br.0);
-                                uvc.extend_from_slice(&br.1);
-                                col.extend_from_slice(&br.2);
-                                idx.extend(br.3.iter().map(|i| i + base));
+                    // CSS border-style 默认 none：none 即便 border-width/color 已声明也不渲染边框。
+                    if n.style.border_style != crate::style::resolved::BorderStyle::None {
+                        if let Some(border_col) = n.style.border_color {
+                            let bw = &n.style.taffy_style.border;
+                            let widths = crate::render::border::BorderWidths {
+                                top: resolve_lp(bw.top),
+                                right: resolve_lp(bw.right),
+                                bottom: resolve_lp(bw.bottom),
+                                left: resolve_lp(bw.left),
+                            };
+                            if widths.top > 0.0
+                                || widths.right > 0.0
+                                || widths.bottom > 0.0
+                                || widths.left > 0.0
+                            {
+                                let br = crate::render::border::border_ring(
+                                    rect, &radii, widths, border_col,
+                                );
+                                if !br.3.is_empty() {
+                                    let base = v.len() as u32;
+                                    v.extend_from_slice(&br.0);
+                                    uvc.extend_from_slice(&br.1);
+                                    col.extend_from_slice(&br.2);
+                                    idx.extend(br.3.iter().map(|i| i + base));
+                                }
                             }
                         }
                     }
