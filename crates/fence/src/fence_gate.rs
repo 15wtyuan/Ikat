@@ -1,3 +1,4 @@
+use crate::css_resolve::unsupported_hint;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
 use crate::ir::{IrElement, IrNode, IrNodeKind, IrTree, Span};
 use crate::schema::attr::{find_structural_attr, is_content_attr, is_global_attr, AttrValueDomain};
@@ -131,9 +132,11 @@ fn validate_inline_style(
             continue;
         }
         if find_css_prop(prop).is_none() && find_shorthand(prop).is_none() {
+            let hint = unsupported_hint(prop)
+                .unwrap_or("not supported by fence — remove or replace with a supported property.");
             diagnostics.push(Diagnostic::error(
                 DiagnosticCode::FenceUnknownCssProp,
-                format!("CSS property \"{}\" is not in the fence", prop),
+                format!("CSS property \"{}\": {}", prop, hint),
                 loc(file, span.start, line_map),
             ));
         }
