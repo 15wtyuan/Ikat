@@ -30,6 +30,7 @@ namespace LoomGUI
         LoomInputCollector _inputCollector;  // Driver Awake 注入（指针/键盘/滚轮采集）
         Transform _renderRoot;               // MirrorPool 镜像 GO + NativeHost container 挂此 root
         byte[] _frameBuf;                    // ArrayPool 租用（搬自 LoomStage.Tick 的复用语义）
+        int _lastFrameLen;                   // 诊断：上一帧 blob 实际字节数（_frameBuf 可能 Rent 超长）
 
         /// <param name="mm">由 Driver 构造并注入（Shader.Find("LoomGUI/Unlit") 后建）。</param>
         public UnityLoomBackend(MaterialManager mm) { _mm = mm; }
@@ -96,6 +97,7 @@ namespace LoomGUI
                 _frameBuf = ArrayPool<byte>.Shared.Rent(frameLen);
             }
             Marshal.Copy(framePtr, _frameBuf, 0, frameLen);
+            _lastFrameLen = frameLen;
             var blob = new FrameBlob(_frameBuf);
 
             SyncFontAtlas(h);
@@ -159,6 +161,67 @@ namespace LoomGUI
                 finally { ArrayPool<byte>.Shared.Return(buf); }
             }
             Native.loomgui_stage_font_atlas_clear_dirty(h);
+        }
+
+        // ── 诊断（F8 dump）：blob 内容 + MirrorPool 状态 ──
+
+        /// <summary>诊断：dump 当前 MirrorPool GO 状态（Unity 渲染视角）。</summary>
+        public string DumpMirrorState() => _pool?.DumpState() ?? "(pool null)";
+
+        /// <summary>
+        /// 诊断：dump 当前 blob 每个渲染节点（core 视角）：node_id + world_matrix tx/ty +
+        /// mesh vert bbox。对照 DumpMirrorState 看两层是否一致。仅 dump 非 SKIP 节点。
+        /// </summary>
+        public string DumpBlobState()
+        {
+            var sb = new System.Text.StringBuilder();
+            if (_frameBuf == null || _lastFrameLen <= 0) { sb.AppendLine("(no frame yet)"); return sb.ToString(); }
+            // FrameBlob 只解析 _frameBuf 前 _lastFrameLen 字节；Rent 超长部分是垃圾。
+            var blob = new FrameBlob(_frameBuf);
+            if (!blob.IsValid) { sb.AppendLine($"(blob invalid magic/version, len={_lastFrameLen})"); return sb.ToString(); }
+            sb.AppendLine($"[Blob] nodes={blob.NodeCount}");
+            sb.AppendLine("  i    nodeId   mask  pure  Mtx    Mty    program  meshBBox");
+            for (int i = 0; i < blob.NodeCount; i++)
+            {
+                if (!blob.Visible(i)) continue;
+                // 只 dump 有 mesh 的节点（PayloadKind=1），减少噪音
+                if (blob.PayloadKind(i) != 1) continue;
+                float mtx = blob.Mtx(i), mty = blob.Mty(i);
+                bool pure = blob.IsPureTranslation(i);
+                byte level = blob.ChangeLevel(i);  // 0=Skip 1=Header 2=Full
+                uint mask = blob.MaskContext(i);
+                // 读 mesh bbox：仅 Full 节点 mesh_off/len>0（Skip/Header 占位 0，读 arena 开头是垃圾）
+                string bbox;
+                uint meshLen = blob.ReadMeshLenRaw(i);
+                if (meshLen == 0)
+                {
+                    bbox = $"(no-mesh level={level})";
+                }
+                else
+                {
+                    var seg = blob.ReadMesh(i);
+                    float minx = float.MaxValue, miny = float.MaxValue, maxx = float.MinValue, maxy = float.MinValue;
+                    for (int v = 0; v < seg.Verts.Length; v++)
+                    {
+                        minx = Math.Min(minx, seg.Verts[v].x); miny = Math.Min(miny, seg.Verts[v].y);
+                        maxx = Math.Max(maxx, seg.Verts[v].x); maxy = Math.Max(maxy, seg.Verts[v].y);
+                    }
+                    bbox = seg.Verts.Length > 0 ? $"({minx:F0},{miny:F0})~({maxx:F0},{maxy:F0})" : "(empty)";
+                }
+                sb.AppendLine($"  {i,3} {blob.NodeId(i),8} m={mask,3} {(pure?"P":"T")} ({mtx,6:F0},{mty,6:F0}) prog={blob.Program(i)} lv={level} mb={bbox}");
+            }
+            // clip 表：overflow:auto 容器的 mask_context 是否进表（Unity 据此设 _ClipBox）
+            sb.AppendLine($"  [clip table] count={blob.ClipCount}");
+            for (int c = 0; c < blob.ClipCount; c++)
+            {
+                // ClipRect 是按 ctx 查；这里线性扫表读原 entry（复用同一段读法）
+                int p = blob.ClipTableOffPub + 4 + c * 52;
+                uint ctx = blob.ReadU32Public(p);
+                float dx = blob.ReadF32Public(p + 4), dy = blob.ReadF32Public(p + 8);
+                float dw = blob.ReadF32Public(p + 12), dh = blob.ReadF32Public(p + 16);
+                sb.AppendLine($"    ctx={ctx} rect=({dx:F0},{dy:F0},{dw:F0},{dh:F0})");
+            }
+            return sb.ToString();
         }
 
         // ── 释放（搬自 LoomStage.cs:515-529，引擎资源归 backend 自管）──

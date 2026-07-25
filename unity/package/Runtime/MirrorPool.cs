@@ -320,6 +320,42 @@ namespace LoomGUI
             _poolByReuse.Clear();
         }
 
+        /// <summary>
+        /// 诊断：dump 当前 MirrorPool 里所有活 GO 的状态（node_id / localPosition / mesh bounds）
+        /// 到字符串。按 F8 调用，在「好」「坏」两种布局各 dump 一次对比，定位 Unity 侧状态泄漏。
+        /// </summary>
+        public string DumpState()
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"[MirrorPool] byNodeId={_poolByNodeId.Count} byReuse={_poolByReuse.Count}");
+            sb.AppendLine("  poolKey  nodeId    sort  pos(x,y)            meshBounds(center,size)");
+            DumpDict(sb, "id", _poolByNodeId);
+            DumpDict(sb, "rk", _poolByReuse);
+            return sb.ToString();
+        }
+
+        void DumpDict(System.Text.StringBuilder sb, string tag, Dictionary<uint, RenderObj> pool)
+        {
+            foreach (var kv in pool)
+            {
+                var ro = kv.Value;
+                if (ro?.Go == null) { sb.AppendLine($"  [{tag}{kv.Key}] (null GO)"); continue; }
+                var p = ro.Go.transform.localPosition;
+                int sort = ro.Mr != null ? ro.Mr.sortingOrder : 0;
+                var b = ro.Mesh != null ? ro.Mesh.bounds : new Bounds();
+                // 材质 clip 诊断：是否启 CLIPPED keyword + _ClipBox 值（验证 clip 是否真挂上）。
+                string matInfo = "";
+                if (ro.Mr != null && ro.Mr.sharedMaterial != null)
+                {
+                    var m = ro.Mr.sharedMaterial;
+                    bool clipped = m.IsKeywordEnabled("CLIPPED") || m.IsKeywordEnabled("CLIPPED_ROUNDED");
+                    var cb = m.GetVector("_ClipBox");
+                    matInfo = $" clip={clipped} cb=({cb.x:F2},{cb.y:F2},{cb.z:F3},{cb.w:F3})";
+                }
+                sb.AppendLine($"  [{tag}{kv.Key}] nid={ro.LastNodeId} sort={sort} pos=({p.x:F0},{p.y:F0}) mb=(({b.center.x:F0},{b.center.y:F0}),({b.size.x:F0},{b.size.y:F0})) active={ro.Go.activeInHierarchy}{matInfo}");
+            }
+        }
+
         // Edit-mode-safe 销毁：Driver 可能挂 [ExecuteAlways]，Sync/Clear 会在 Edit mode 跑；
         // Object.Destroy 在 Edit mode 非法（须 DestroyImmediate）。
         static void TearDown(RenderObj ro)

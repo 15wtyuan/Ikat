@@ -406,6 +406,33 @@ namespace LoomGUI
             return LoadBytes($"ui/{name}.pkg.bin");
         }
 
+        void Update()
+        {
+            // 诊断：按 F8 dump 当前 blob（core 视角）+ MirrorPool（Unity 视角）到 console + 文件。
+            // 用法：进 play 导航到出问题的页面，按 F8。在「好」「坏」两种布局各按一次，对比两份 dump。
+            if (!Input.GetKeyDown(UnityEngine.KeyCode.F8)) return;
+            DumpDiagnostic();
+        }
+
+        /// <summary>F8 诊断：dump 当前帧 blob（core 给 Unity 的）+ MirrorPool GO 状态（Unity 渲染的）。</summary>
+        void DumpDiagnostic()
+        {
+            if (_backend == null) { Debug.LogWarning("[DumpF8] backend null"); return; }
+            string blobDump = _backend.DumpBlobState();
+            string poolDump = _backend.DumpMirrorState();
+            string stamp = System.DateTime.Now.ToString("HHmmss");
+            string combined = $"===== F8 DIAGNOSTIC {stamp} =====\nstage={(int)_designSize.x}x{(int)_designSize.y} screen={Screen.width}x{Screen.height}\n\n{blobDump}\n{poolDump}\n";
+            Debug.Log(combined);
+            try
+            {
+                string dir = Path.Combine(Application.dataPath, "..");
+                string path = Path.Combine(dir, $"loom-dump-{stamp}.txt");
+                File.WriteAllText(path, combined);
+                Debug.Log($"[DumpF8] written to {path}");
+            }
+            catch (Exception e) { Debug.LogWarning($"[DumpF8] file write failed: {e.Message}"); }
+        }
+
         void LateUpdate()
         {
             if (_host == null) return;

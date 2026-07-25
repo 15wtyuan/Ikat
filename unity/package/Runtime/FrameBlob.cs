@@ -76,6 +76,8 @@ namespace LoomGUI
         public byte PayloadKind(int i) => _buf[ColOff(12) + i];
         uint MeshOff(int i) => ReadU32(ColOff(13) + i * 4);
         uint MeshLen(int i) => ReadU32(ColOff(14) + i * 4);
+        /// 诊断用：节点 i 的 mesh_len 原始列值（Skip/Header=0，Full>0）。判断 ReadMesh 是否有效。
+        public uint ReadMeshLenRaw(int i) => MeshLen(i);
         /// v10：path_idx 前移至第 15 列（原第 17 列，删 text_off/text_len 后前移 2）。
         /// Mesh→path 表 1-based 索引（0=纯色无图）。MirrorPool 读 path_idx → ReadPath(idx) 取 path → 查 Sprite。
         public uint PathIdx(int i) => ReadU32(ColOff(15) + i * 4);
@@ -218,6 +220,11 @@ namespace LoomGUI
 
         uint ReadU32(int o) => BitConverter.ToUInt32(_buf, o);
         float ReadF32(int o) => BitConverter.ToSingle(_buf, o);
+
+        // 诊断 dump 用：暴露读原语 + clip 表偏移（UnityLoomBackend.DumpBlobState 线性扫表）。
+        public uint ReadU32Public(int o) => ReadU32(o);
+        public float ReadF32Public(int o) => ReadF32(o);
+        public int ClipTableOffPub => ClipTableOff;
     }
 
     /// ReadMesh 返回的 mesh 数据拷贝。verts/uvs/colors 长度 == vertCount，Idx 长度 == idxCount。
