@@ -946,16 +946,28 @@ fn background_linear_gradient_one_stop_rejected() {
 }
 
 #[test]
-fn background_other_shorthand_values_ignored() {
-    // `background: red` 等 shorthand 值不在围栏内（纯色须写 background-color）→ false。
+fn background_shorthand_url_and_color_supported() {
+    // `background` shorthand 现支持 url() 与纯色（Task 8 扩展，修复假阳性）。
+    // url() → background_image；hex 纯色 → background_color。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "background", "url(a.png)"));
+    assert_eq!(s.background_image.as_deref(), Some("a.png"));
+
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "background", "#ff0000"));
+    assert_eq!(s.background_color, Some([1.0, 0.0, 0.0, 1.0]));
+}
+
+#[test]
+fn background_shorthand_named_color_rejected() {
+    // 命名色（red/blue）parse_color 不收（仅 hex 3/6/8 位）→ 整体返 false（不静默降级）。
     let mut s = ResolvedStyle::default();
     assert!(!apply_decl(&mut s, "background", "red"));
-    assert!(!apply_decl(&mut s, "background", "url(a.png)"));
     assert!(s.background_gradient.is_none());
     assert!(s.background_image.is_none());
     assert!(
         s.background_color.is_none(),
-        "background shorthand 不影响 background_color"
+        "无法解析的值不影响 background_color"
     );
 }
 
@@ -1353,6 +1365,53 @@ fn apply_border_no_style_keeps_none() {
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "border", "2px #ff0000"));
     assert_eq!(s.border_style, BorderStyle::None);
+}
+
+// Task 8：shorthand 展开 + longhand 补齐。
+// flex shorthand：单值 `flex:1` → grow=1/shrink=1（CSS 规范 basis=0%，仅验 grow/shrink）。
+#[test]
+fn flex_shorthand_single_value() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "flex", "1"));
+    assert!((s.taffy_style.flex_grow - 1.0).abs() < 0.01);
+    assert!((s.taffy_style.flex_shrink - 1.0).abs() < 0.01);
+}
+
+// flex shorthand：三值 `flex:2 0 100px` → grow=2/shrink=0/basis=100px。
+#[test]
+fn flex_shorthand_three_values() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "flex", "2 0 100px"));
+    assert!((s.taffy_style.flex_grow - 2.0).abs() < 0.01);
+    assert!((s.taffy_style.flex_shrink - 0.0).abs() < 0.01);
+}
+
+// background shorthand：纯色 `background:#ff0000` 应展开成 background_color
+// （修复假阳性：原本仅识别 gradient，纯色静默返 false）。
+#[test]
+fn background_shorthand_color() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "background", "#ff0000"));
+    assert_eq!(s.background_color, Some([1.0, 0.0, 0.0, 1.0]));
+}
+
+// align-content longhand：补齐缺失分支（与 justify-content 对称的 cross 轴对齐）。
+#[test]
+fn align_content_longhand_applies() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "align-content", "center"));
+    assert_eq!(
+        s.taffy_style.align_content,
+        Some(taffy::AlignContent::CENTER)
+    );
+}
+
+// row-gap longhand：补齐缺失分支。CSS row-gap 对应 taffy gap.height（行间距=纵向）。
+#[test]
+fn row_gap_longhand_applies() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "row-gap", "10px"));
+    assert!((resolve_lp_for_test(s.taffy_style.gap.height) - 10.0).abs() < 0.01);
 }
 
 // 测试用：把 LengthPercentage 解析回 f32（taffy 0.12 是 tagged pointer struct，

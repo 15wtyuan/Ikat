@@ -731,6 +731,30 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             };
             true
         }
+        // CSS `gap` longhand：row-gap 对应纵向间距（gap.height），column-gap 横向（gap.width），
+        // 与上方 `gap` shorthand 拆分语义一致。仅认 px（与 fence gap shorthand 同口径）。
+        "row-gap" => match value
+            .trim()
+            .strip_suffix("px")
+            .and_then(|s| s.trim().parse::<f32>().ok())
+        {
+            Some(v) => {
+                ts.gap.height = LengthPercentage::length(v);
+                true
+            }
+            None => false,
+        },
+        "column-gap" => match value
+            .trim()
+            .strip_suffix("px")
+            .and_then(|s| s.trim().parse::<f32>().ok())
+        {
+            Some(v) => {
+                ts.gap.width = LengthPercentage::length(v);
+                true
+            }
+            None => false,
+        },
         "flex-direction" => {
             ts.flex_direction = match value.trim() {
                 "row" => taffy::FlexDirection::Row,
@@ -760,6 +784,12 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             ts.align_self = Some(parse_align(value));
             true
         }
+        // `align-content` longhand：cross 轴多行内容对齐，与 justify-content（main 轴）对称。
+        // 复用 parse_justify（JustifyContent 是 AlignContent 的类型别名，常量集相同）。
+        "align-content" => {
+            ts.align_content = Some(parse_justify(value));
+            true
+        }
         "flex-grow" => {
             ts.flex_grow = value.trim().parse::<f32>().unwrap_or(0.0);
             true
@@ -770,6 +800,70 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         }
         "flex-basis" => {
             ts.flex_basis = parse_dimension(value);
+            true
+        }
+        // CSS `flex` shorthand：`<grow> <shrink>? <basis>?`。
+        // 单 number（`flex:1`）→ grow=1/shrink=1/basis=0%（CSS 规范），
+        // 单 length（`flex:100px`）→ grow=1/shrink=1/basis=length，
+        // `none` → 0 0 auto，`initial` → 0 1 auto。未支持形态返 false（不静默降级）。
+        // flex_basis 字段类型是 taffy Dimension（length/percent/auto 三态），非 LengthPercentageAuto。
+        "flex" => {
+            let toks: Vec<&str> = value.split_whitespace().collect();
+            match toks.as_slice() {
+                ["none"] => {
+                    ts.flex_grow = 0.0;
+                    ts.flex_shrink = 0.0;
+                    ts.flex_basis = Dimension::auto();
+                }
+                ["initial"] => {
+                    ts.flex_grow = 0.0;
+                    ts.flex_shrink = 1.0;
+                    ts.flex_basis = Dimension::auto();
+                }
+                [g] => {
+                    // 单 number → basis=0%（CSS 规范），单 length → basis=该长度。
+                    if let Ok(gv) = g.parse::<f32>() {
+                        ts.flex_grow = gv;
+                        ts.flex_shrink = 1.0;
+                        ts.flex_basis = Dimension::percent(0.0);
+                    } else if let Some(px) = g
+                        .strip_suffix("px")
+                        .and_then(|s| s.trim().parse::<f32>().ok())
+                    {
+                        ts.flex_grow = 1.0;
+                        ts.flex_shrink = 1.0;
+                        ts.flex_basis = Dimension::length(px);
+                    } else {
+                        return false;
+                    }
+                }
+                [g, sh] => {
+                    ts.flex_grow = g.parse::<f32>().unwrap_or(0.0);
+                    ts.flex_shrink = sh.parse::<f32>().unwrap_or(1.0);
+                    ts.flex_basis = Dimension::percent(0.0);
+                }
+                [g, sh, b] => {
+                    ts.flex_grow = g.parse::<f32>().unwrap_or(0.0);
+                    ts.flex_shrink = sh.parse::<f32>().unwrap_or(1.0);
+                    // basis：length | percent | auto（auto 显式，无单位/未知 → false）。
+                    ts.flex_basis = if *b == "auto" {
+                        Dimension::auto()
+                    } else if let Some(px) = b
+                        .strip_suffix("px")
+                        .and_then(|s| s.trim().parse::<f32>().ok())
+                    {
+                        Dimension::length(px)
+                    } else if let Some(p) = b
+                        .strip_suffix('%')
+                        .and_then(|s| s.trim().parse::<f32>().ok())
+                    {
+                        Dimension::percent(p / 100.0)
+                    } else {
+                        return false;
+                    };
+                }
+                _ => return false,
+            }
             true
         }
         "display" => {
@@ -826,15 +920,22 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.background_image.is_some()
         }
         "background" => {
-            // `background` shorthand：仅识别 `linear-gradient(...)` 形态。
-            // 其他 shorthand 值（纯色、url()）围栏不支持——纯色须写 `background-color`，
-            // 图片须写 `background-image`。围栏外值静默返 false（与 clip-path 等同模式）。
+            // `background` shorthand：按 CSS 优先级依次试 linear-gradient → url() → 纯色。
+            // 三者互斥（gradient 走顶点色无采样；url() 走纹理；纯色写 background_color）。
             let v = value.trim();
             if let Some(rest) = v
                 .strip_prefix("linear-gradient(")
                 .and_then(|s| s.strip_suffix(')'))
             {
                 return parse_linear_gradient_2(style, rest);
+            }
+            if v.starts_with("url(") {
+                style.background_image = parse_url(v);
+                return style.background_image.is_some();
+            }
+            if let Some(c) = parse_color(v) {
+                style.background_color = Some(c);
+                return true;
             }
             false
         }
