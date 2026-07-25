@@ -1454,6 +1454,30 @@ fn row_gap_longhand_applies() {
     assert!((resolve_lp_for_test(s.taffy_style.gap.height) - 10.0).abs() < 0.01);
 }
 
+// row-gap/column-gap 必须与 `gap` shorthand 同口径：px 与裸数字都接受（F3 修复）。
+// 此前 strip_suffix("px") 拒裸数字——row-gap:0 / column-gap:10 被静默丢弃，
+// 连 schema default `0`（裸数字）都过不了。
+#[test]
+fn row_column_gap_accept_bare_number() {
+    // row-gap:0 —— default 值（裸 0），必须生效且落 gap.height=0。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "row-gap", "0"), "row-gap:0 应被接受");
+    assert!((resolve_lp_for_test(s.taffy_style.gap.height) - 0.0).abs() < 0.01);
+
+    // column-gap:10 —— 裸数字（无 px），必须生效且落 gap.width=10。
+    let mut s = ResolvedStyle::default();
+    assert!(
+        apply_decl(&mut s, "column-gap", "10"),
+        "column-gap:10 应被接受"
+    );
+    assert!((resolve_lp_for_test(s.taffy_style.gap.width) - 10.0).abs() < 0.01);
+
+    // px 后缀仍接受（不回退）。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "column-gap", "10px"));
+    assert!((resolve_lp_for_test(s.taffy_style.gap.width) - 10.0).abs() < 0.01);
+}
+
 // 测试用：把 LengthPercentage 解析回 f32（taffy 0.12 是 tagged pointer struct，
 // 用 into_raw + tag + value 解构，复用 render 的 resolve_lp 逻辑）。
 fn resolve_lp_for_test(lp: taffy::style::LengthPercentage) -> f32 {

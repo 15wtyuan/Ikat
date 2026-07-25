@@ -69,8 +69,6 @@ const REPRESENTATION_DIFF_PROPS: &[&str] = &[
 ///   - `margin-top/right/bottom/left`：apply_decl 仅有 `margin` 简写臂，无单边
 ///     longhand 臂（与 padding 不对称——padding 有 longhand 臂）。直接写
 ///     `margin-top:10px` 会被静默丢弃。
-///   - `row-gap`/`column-gap`：handler 要求 `px` 后缀，default `0`（裸数字）被拒
-///     （`gap` 简写用 parse_four 能收裸 `0`，longhand 用了更严的路径，不一致）。
 ///   - `background-size`：schema 广告 `stretch` 为合法值，但 apply 仅认 `100%`，
 ///     `stretch` 被静默拒（schema 接受 + core 丢弃的反模式）。
 const UNCONSUMED_DEFAULT_PROPS: &[&str] = &[
@@ -78,8 +76,6 @@ const UNCONSUMED_DEFAULT_PROPS: &[&str] = &[
     "margin-right",
     "margin-bottom",
     "margin-left",
-    "row-gap",
-    "column-gap",
     "border-image-slice",
     "background-image",
     "background-size",

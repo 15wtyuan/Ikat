@@ -732,29 +732,25 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         // CSS `gap` longhand：row-gap 对应纵向间距（gap.height），column-gap 横向（gap.width），
-        // 与上方 `gap` shorthand 拆分语义一致。仅认 px（与 fence gap shorthand 同口径）。
-        "row-gap" => match value
-            .trim()
-            .strip_suffix("px")
-            .and_then(|s| s.trim().parse::<f32>().ok())
-        {
-            Some(v) => {
-                ts.gap.height = LengthPercentage::length(v);
-                true
-            }
-            None => false,
-        },
-        "column-gap" => match value
-            .trim()
-            .strip_suffix("px")
-            .and_then(|s| s.trim().parse::<f32>().ok())
-        {
-            Some(v) => {
-                ts.gap.width = LengthPercentage::length(v);
-                true
-            }
-            None => false,
-        },
+        // 与上方 `gap` shorthand 拆分语义一致。复用 parse_four 的 px 解析（含裸数字），
+        // 单 longhand 取首值——与 padding-* 单边 longhand 同口径（px-only：非 px 落 false）。
+        // 裸数字（如 row-gap:0）须与 px 后缀等价，否则 default `0` 会被静默拒。
+        "row-gap" => {
+            let [v, _, _, _] = match parse_four(value) {
+                Some(f) => f,
+                None => return false,
+            };
+            ts.gap.height = LengthPercentage::length(v);
+            true
+        }
+        "column-gap" => {
+            let [v, _, _, _] = match parse_four(value) {
+                Some(f) => f,
+                None => return false,
+            };
+            ts.gap.width = LengthPercentage::length(v);
+            true
+        }
         "flex-direction" => {
             ts.flex_direction = match value.trim() {
                 "row" => taffy::FlexDirection::Row,
