@@ -784,10 +784,21 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             ts.align_self = Some(parse_align(value));
             true
         }
-        // `align-content` longhand：cross 轴多行内容对齐，与 justify-content（main 轴）对称。
-        // 复用 parse_justify（JustifyContent 是 AlignContent 的类型别名，常量集相同）。
+        // `align-content` longhand：cross 轴多行内容对齐。
+        // 不复用 parse_justify——后者服务于 justify-content，无 stretch 分支，会把
+        // align-content 的 CSS 默认值 stretch 静默降级成 FLEX_START。这里独立 match
+        // 覆盖 fence schema 列出的全部合法值（flex-start/center/flex-end/stretch/
+        // space-between/space-around/space-evenly）。
         "align-content" => {
-            ts.align_content = Some(parse_justify(value));
+            ts.align_content = Some(match value.trim() {
+                "center" => taffy::AlignContent::CENTER,
+                "flex-end" => taffy::AlignContent::FLEX_END,
+                "stretch" => taffy::AlignContent::STRETCH,
+                "space-between" => taffy::AlignContent::SPACE_BETWEEN,
+                "space-around" => taffy::AlignContent::SPACE_AROUND,
+                "space-evenly" => taffy::AlignContent::SPACE_EVENLY,
+                _ => taffy::AlignContent::FLEX_START,
+            });
             true
         }
         "flex-grow" => {

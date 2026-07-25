@@ -1406,6 +1406,46 @@ fn align_content_longhand_applies() {
     );
 }
 
+// align-content: stretch 是 CSS 默认值 + fence schema 合法 keyword。
+// 回归锁：显式写 stretch 必须映射到 STRETCH，不得静默降级成 FLEX_START
+//（修复前 align-content 分支复用 parse_justify，后者无 stretch 分支，stretch 被
+// `_ => FLEX_START` 吞掉）。
+#[test]
+fn align_content_stretch_not_downgraded() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "align-content", "stretch"));
+    assert_eq!(
+        s.taffy_style.align_content,
+        Some(taffy::AlignContent::STRETCH)
+    );
+}
+
+// align-content 全 schema 合法值（flex-start/center/flex-end/stretch/
+// space-between/space-around/space-evenly）逐一映射，确保无其它静默降级。
+#[test]
+fn align_content_all_schema_keywords_map() {
+    for (input, expected) in [
+        ("flex-start", taffy::AlignContent::FLEX_START),
+        ("center", taffy::AlignContent::CENTER),
+        ("flex-end", taffy::AlignContent::FLEX_END),
+        ("stretch", taffy::AlignContent::STRETCH),
+        ("space-between", taffy::AlignContent::SPACE_BETWEEN),
+        ("space-around", taffy::AlignContent::SPACE_AROUND),
+        ("space-evenly", taffy::AlignContent::SPACE_EVENLY),
+    ] {
+        let mut s = ResolvedStyle::default();
+        assert!(
+            apply_decl(&mut s, "align-content", input),
+            "{input} 应被识别"
+        );
+        assert_eq!(
+            s.taffy_style.align_content,
+            Some(expected),
+            "align-content: {input} 映射错误"
+        );
+    }
+}
+
 // row-gap longhand：补齐缺失分支。CSS row-gap 对应 taffy gap.height（行间距=纵向）。
 #[test]
 fn row_gap_longhand_applies() {
