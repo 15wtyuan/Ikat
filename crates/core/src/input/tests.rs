@@ -3790,6 +3790,78 @@ fn grip_move_drives_scroll_pos() {
     );
 }
 
+/// 点击 thumb 不应导致列表瞬移：Down 在 thumb 中心后，微小 Move 应跟手（保持抓取点），
+/// 而非把 thumb 顶端跳到指针处。旧实现把指针当 thumb 参考点（无 grab offset），
+/// thumb 初始在中间（perc=0.5）时 Down+微移会瞬移到指针位置。
+#[test]
+fn grip_drag_follows_with_grab_offset_no_jump() {
+    let mut s = grip_scroll_scene();
+    let root_id = s.roots[0];
+    // 先把 scroll_pos 拨到中间（perc=0.5）：viewport=100 content=200 overlap=100 → pos=50
+    s.scroll.get_mut(root_id).unwrap().scroll_pos.1 = 50.0;
+    // thumb_h=50，thumb 在 y=25..75（perc=0.5 → thumb_top=0.5*(100-50)=25）。compute 刷新 thumb rect
+    compute_world_transforms(&mut s);
+    let mut ps = PointerState::new();
+    // Down 在 thumb 中心 (96, 50)——抓取偏移 y=0（指针正好在 thumb 中心）
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: 96.0,
+            y: 50.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    // 微移 5px（跟手，不是跳跃）：Move 到 (96, 55)
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Move,
+            x: 96.0,
+            y: 55.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    // thumb 中心应 = 指针 - grab_offset(0) = 55 → thumb_top = 55-25 = 30 → range=50 → perc=0.6 → pos=60
+    // 旧实现（无 grab offset）：perc=(55-0)/(100-20)=0.6875 → pos=68.75（瞬移到指针比例）
+    let st = s.scroll.get(root_id).unwrap();
+    assert!(
+        (st.scroll_pos.1 - 60.0).abs() < 0.5,
+        "跟手拖拽：指针微移 5px（grab_offset=0）→ thumb 中心=55 → scroll_pos≈60（got {}）；旧实现瞬移到 ~68.75",
+        st.scroll_pos.1
+    );
+}
+
+/// Down 在 thumb 上不移动 → scroll_pos 完全不变（确认 Down 不写 scroll_pos）。
+#[test]
+fn grip_down_alone_does_not_move_scroll_pos() {
+    let mut s = grip_scroll_scene();
+    let root_id = s.roots[0];
+    s.scroll.get_mut(root_id).unwrap().scroll_pos.1 = 50.0;
+    compute_world_transforms(&mut s);
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: 96.0,
+            y: 50.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    let st = s.scroll.get(root_id).unwrap();
+    assert_eq!(
+        st.scroll_pos.1, 50.0,
+        "Down 不应写 scroll_pos（仅设 grip_dragging 状态）"
+    );
+}
+
 #[test]
 fn grip_up_clears_state_and_no_inertia() {
     let mut s = grip_scroll_scene();

@@ -163,6 +163,7 @@ pub struct TouchSlot {
     pub scrolling_pane: Option<NodeId>,   // 已判定：本槽正滚动该容器
     pub scroll_gesture: u8,               // bit0=垂直手势（Y 位移） bit1=水平手势（X 位移）
     pub grip_dragging: bool,              // scrollbar grip 拖拽中（grip 不启 inertia）
+    pub grip_grab_offset: (f32, f32),     // Down 时刻指针相对 thumb 中心的偏移（跟手拖拽不跳）
     pub scroll_down_pos: (f32, f32),      // Down 时刻 pos（scroll 阈值/跟手基准）
 }
 
@@ -194,6 +195,7 @@ impl TouchSlot {
             scrolling_pane: None,
             scroll_gesture: 0,
             grip_dragging: false,
+            grip_grab_offset: (0.0, 0.0),
             scroll_down_pos: (0.0, 0.0),
         }
     }
@@ -643,15 +645,32 @@ impl PointerState {
                             };
                             if let Some(s) = scene.scroll.get_mut(pane) {
                                 let pe = slot.last_pos;
-                                let min_thumb = crate::scroll::MIN_THUMB_SIZE;
+                                let grab = slot.grip_grab_offset;
+                                // 跟手拖拽：thumb 中心 = 指针 - 抓取偏移（保持按下点在 thumb 上的相对位置）。
+                                // thumb_top = 中心 - 半尺寸；perc = thumb_top / 可移动范围（track - thumb）；scroll_pos = perc * overlap。
+                                // 旧实现把指针当 thumb 参考点且分母用 min_thumb（错），点击后第一次 Move 列表瞬移。
                                 if slot.scroll_gesture & 1 != 0 {
                                     // 垂直 thumb
-                                    let perc = ((pe.1 - lr.y) / (lr.h - min_thumb)).clamp(0.0, 1.0);
+                                    let track_h = lr.h;
+                                    let thumb_h = (s.viewport_size.1
+                                        * (s.viewport_size.1 / s.content_size.1))
+                                        .max(crate::scroll::MIN_THUMB_SIZE)
+                                        .min(track_h);
+                                    let thumb_top = (pe.1 - grab.1) - lr.y - thumb_h * 0.5;
+                                    let range = (track_h - thumb_h).max(1.0);
+                                    let perc = (thumb_top / range).clamp(0.0, 1.0);
                                     s.scroll_pos.1 = (perc * s.overlap.1).clamp(0.0, s.overlap.1);
                                 }
                                 if slot.scroll_gesture & 2 != 0 {
                                     // 水平 thumb
-                                    let perc = ((pe.0 - lr.x) / (lr.w - min_thumb)).clamp(0.0, 1.0);
+                                    let track_w = lr.w;
+                                    let thumb_w = (s.viewport_size.0
+                                        * (s.viewport_size.0 / s.content_size.0))
+                                        .max(crate::scroll::MIN_THUMB_SIZE)
+                                        .min(track_w);
+                                    let thumb_left = (pe.0 - grab.0) - lr.x - thumb_w * 0.5;
+                                    let range = (track_w - thumb_w).max(1.0);
+                                    let perc = (thumb_left / range).clamp(0.0, 1.0);
                                     s.scroll_pos.0 = (perc * s.overlap.0).clamp(0.0, s.overlap.0);
                                 }
                             }
@@ -688,6 +707,17 @@ impl PointerState {
                         slot.is_down = true;
                         slot.down_pos = (ev.x, ev.y);
                         slot.scroll_gesture = if grip.1 == 0 { 1 } else { 2 };
+                        // 抓取偏移 = 指针相对 thumb 中心（跟手拖拽：保持按下点在 thumb 上的相对位置，
+                        // 不把 thumb 顶端/中心跳到指针处——否则点击后第一次 Move 列表瞬移）。
+                        let thumb = if grip.1 == 0 {
+                            crate::scroll::v_thumb_rect(scene, grip.0)
+                        } else {
+                            crate::scroll::h_thumb_rect(scene, grip.0)
+                        };
+                        slot.grip_grab_offset = match thumb {
+                            Some(r) => ((ev.x - (r.x + r.w * 0.5)), (ev.y - (r.y + r.h * 0.5))),
+                            None => (0.0, 0.0),
+                        };
                         Self::hover_diff_slot(slot, scene, &mut out);
                         continue; // grip 不走 drag/scroll/click 候选
                     }
