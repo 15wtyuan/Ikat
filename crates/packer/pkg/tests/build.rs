@@ -119,6 +119,67 @@ fn build_fails_when_output_dir_empty() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// Task 10b: build() 必须把围栏一致性 warning 收集进 BuildReport.warnings。
+/// 修前 pack_components 丢弃 warning（只查 Error 级），build 也未暴露 → CLI/GUI
+/// 都看不到 W1/W2，机制对作者名存实亡。本测锁住「warning 经 build 进报告」的链路。
+#[test]
+fn build_propagates_warnings_into_report() {
+    let tmp = std::env::temp_dir().join("loom_build_warnings_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    let pkg_src_dir = tmp.join("ui/showcase");
+    std::fs::create_dir_all(&pkg_src_dir).unwrap();
+    // home.html 触发 W1（border-width 无 border-style）；无 img/background 引用 → 不走交叉验证。
+    std::fs::write(
+        pkg_src_dir.join("home.html"),
+        r#"<div style="border-width:2px;border-color:#ff0000"></div>"#,
+    )
+    .unwrap();
+    // shop.html 触发 W2（background-image 无 background-size）。url(a.png) 会被
+    // extract_sprites 收进 referenced_sprites → 须提供同名 atlas 图，否则交叉验证拦。
+    std::fs::write(
+        pkg_src_dir.join("shop.html"),
+        r#"<div style="background-image:url(a.png)"></div>"#,
+    )
+    .unwrap();
+    // 与 shop.html 同目录的 sprite（sprite_key = ui/showcase/a.png）。
+    let img = image::RgbaImage::from_pixel(4, 4, image::Rgba([0, 255, 0, 255]));
+    img.save(pkg_src_dir.join("a.png")).unwrap();
+
+    let json = r#"{
+    "version": 1,
+    "output_dir": "output",
+    "packages": [{ "name": "showcase", "dirs": ["ui/showcase"], "html": [] }],
+    "atlases": [{ "name": "ui", "default": true, "dirs": ["ui/showcase"] }],
+    "fonts": []
+}"#;
+    std::fs::write(tmp.join("loom.workspace.json"), json).unwrap();
+
+    let report = build(&tmp).expect("warning 不阻断打包：build 应返 Ok");
+    assert!(
+        report.packages.contains(&"showcase".to_string()),
+        "pkg 仍正常产出（warning 未阻断）: {:?}",
+        report.packages
+    );
+    // W1（home 组件）必须在报告里。
+    let w1 = report
+        .warnings
+        .iter()
+        .find(|w| w.code == "FenceBorderWithoutStyle" && w.component == "home")
+        .expect("BuildReport.warnings 应含 W1（home）");
+    assert_eq!(w1.file, "ui/showcase/home.html");
+    assert!(w1.line >= 1);
+    // W2（shop 组件）也必须在报告里（跨组件收集）。
+    let w2 = report
+        .warnings
+        .iter()
+        .find(|w| w.code == "FenceBgImageWithoutSize" && w.component == "shop")
+        .expect("BuildReport.warnings 应含 W2（shop）");
+    assert_eq!(w2.file, "ui/showcase/shop.html");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 /// I-3 coverage: build() packages path (resolve_html_list dir scan + stem() +
 /// pack_components + ui/<name>.pkg.bin write + runtime.packages fill-back) via its
 /// real entry point. Existing tests all use `"packages": []`, leaving T5 orchestration

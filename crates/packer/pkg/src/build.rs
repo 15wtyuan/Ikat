@@ -15,6 +15,53 @@ use loomgui_core::asset::{write_package, PackageInput, TemplateNode};
 use loomgui_core::style::dynamic::DynamicRuleTable;
 use std::path::Path;
 
+/// A non-fatal warning surfaced to the author after a successful pack.
+///
+/// 围栏内一致性 warning（W1/W2）：属性本身围栏合法，但漏写或默认值冲突导致 HTML 预览 ≠
+/// 运行时渲染。warning **不阻断打包**（pkg 仍正常产出），只提醒作者补全声明让预览与运行时
+/// 一致。`pack_components` 从 fence diagnostics 收集 Warning 级条目转成本结构，由 CLI 打印
+/// 到 stderr / GUI 呈现。修前这类 warning 被丢弃（`pack_components` 只查 Error 级），作者感知
+/// 不到不一致——本结构让 warning 在 BuildReport 里可见。
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PackWarning {
+    /// 产生 warning 的组件名（package 内定位来源组件）。
+    pub component: String,
+    /// 源文件相对 workspace_root（正斜杠）。取 `html_rel`（真实磁盘路径，可点击定位），
+    /// 而非 `diagnostic.location.file`（后者被 parse_template 设成组件名，定位不到文件）。
+    pub file: String,
+    /// 1-based 行号。
+    pub line: u32,
+    /// 1-based 列号。
+    pub column: u32,
+    /// warning 短码（`DiagnosticCode` 的 Debug 名，如 `"FenceBorderWithoutStyle"`），
+    /// 便于 CLI/GUI 分类与过滤。
+    pub code: String,
+    /// 人类可读主信息（含问题说明 + 修复引导；W1/W2 的引导 baked 在此字段里）。
+    pub message: String,
+    /// help note 文案（若 diagnostic 带 `NoteKind::Help`）；W1/W2 为 None（引导已在 message）。
+    pub help: Option<String>,
+}
+
+impl PackWarning {
+    /// 渲染成多行 CLI 文本（文件:行:列 定位 + 短码 + message）。CLI 打到 stderr。
+    pub fn render(&self) -> String {
+        let mut out = format!(
+            "warning[{}] in component \"{}\" ({}:{}:{}):",
+            self.code, self.component, self.file, self.line, self.column
+        );
+        // message 含多句说明 + 引导，缩进两格保持与 header 的视觉层级。
+        for line in self.message.lines() {
+            out.push_str("\n  ");
+            out.push_str(line);
+        }
+        if let Some(help) = &self.help {
+            out.push_str("\n  help: ");
+            out.push_str(help);
+        }
+        out
+    }
+}
+
 /// Build report: what was produced.
 #[derive(Debug, Clone, Serialize)]
 pub struct BuildReport {
@@ -23,6 +70,9 @@ pub struct BuildReport {
     pub atlases: Vec<String>,
     pub fonts: Vec<String>,
     pub log: Vec<String>,
+    /// 围栏内一致性 warning（W1/W2）：合法但预览 ≠ 运行时的不一致。不阻断打包，
+    /// 供 CLI 打印 / GUI 呈现提醒作者补全声明。空 = 无 warning。
+    pub warnings: Vec<PackWarning>,
 }
 
 /// 一个待打包的组件：名字 + HTML 源码 + 该 HTML 相对 workspace_root 的路径（正斜杠）。
@@ -34,16 +84,31 @@ pub struct Component {
     pub html_rel: String,
 }
 
-/// 打包一个 package：components = [Component]。返 (pkg.bin bytes, referenced_sprites)。
+/// `pack_components` 的产出：pkg.bin 字节 + 引用到的 sprite_key 集合 + 围栏一致性 warning。
+/// 用具名结构体而非裸 3-tuple——`Result<(Vec<u8>, Vec<String>, Vec<PackWarning>), String>`
+/// 会触发 clippy type_complexity，且调用点 `let (bytes, refs, _w) = ...` 的位置语义不自说明。
+/// 具名后调用点 `let PackResult { bytes, referenced_sprites, warnings } = ...` 清晰可读。
+#[derive(Debug, Clone)]
+pub struct PackResult {
+    /// pkg.bin 字节（write_package 产出，可直接写 ui/<name>.pkg.bin）。
+    pub bytes: Vec<u8>,
+    /// 所有组件 img src / background-image 并集，已归一化为 workspace_root 相对路径
+    /// （sprite_key 口径），供 atlas 交叉验证。
+    pub referenced_sprites: Vec<String>,
+    /// 围栏一致性 warning（W1/W2）：合法但预览≠运行时的不一致，不阻断打包，供 CLI/GUI 呈现。
+    pub warnings: Vec<PackWarning>,
+}
+
+/// 打包一个 package：components = [Component]。返 [`PackResult`]。
 /// build() 读文件组装 Component 调本函数；本函数接字符串便于单测。
 ///
 /// 流程：每组件 `parse_template` → `bridge` → 累积；末尾 `write_package` 出 pkg.bin。
-/// fence Error 级 diagnostic → Err（不静默降级；Warning 级不阻断打包）；bridge 多根 → Err（不静默产森林）。
-/// referenced_sprites = 所有组件 img src / background-image 并集，已归一化为 workspace_root
-/// 相对路径（sprite_key 口径），供 atlas 交叉验证。
-pub fn pack_components(components: &[Component]) -> Result<(Vec<u8>, Vec<String>), String> {
+/// fence Error 级 diagnostic → Err（不静默降级；Warning 级不阻断打包，收集进返回值
+/// `warnings` 供 CLI/GUI 呈现）。bridge 多根 → Err（不静默产森林）。
+pub fn pack_components(components: &[Component]) -> Result<PackResult, String> {
     let mut built: Vec<(String, Vec<TemplateNode>, DynamicRuleTable)> = Vec::new();
     let mut refs: Vec<String> = Vec::new();
+    let mut warnings: Vec<PackWarning> = Vec::new();
     for comp in components {
         let Component {
             name,
@@ -52,7 +117,7 @@ pub fn pack_components(components: &[Component]) -> Result<(Vec<u8>, Vec<String>
         } = comp;
         let parsed = loomgui_fence::parse_template(src, name);
         // Warning 不阻断打包（围栏内一致性 warning：合法但预览≠运行时，只提醒作者补声明）。
-        // 仅 Error 级 diagnostic 视为 fatal；warning 留在 parsed.diagnostics 里，由后续日志/报告消费。
+        // 仅 Error 级 diagnostic 视为 fatal；Warning 级收集进返回值供调用方（CLI/GUI）呈现。
         if parsed
             .diagnostics
             .iter()
@@ -62,6 +127,32 @@ pub fn pack_components(components: &[Component]) -> Result<(Vec<u8>, Vec<String>
                 "fence diagnostics in {name}: {:?}",
                 parsed.diagnostics
             ));
+        }
+        // 收集 Warning 级 diagnostic 转成 PackWarning（带组件名 + 文件位置 + 短码），
+        // 否则 warning 留在局部 parsed 里随循环结束丢弃 → 作者感知不到不一致。
+        //
+        // file 用 html_rel（真实 HTML 相对路径）而非 diagnostic.location.file——后者被
+        // parse_template(src, name) 设成组件名（作者拿组件名定位不到磁盘文件）。location
+        // 的 line/column 是相对 src（即该 HTML 文件内容）算出的，与 html_rel 同一份文件，故
+        // 用 html_rel 覆盖 file 既准确又可点击定位。
+        for d in parsed
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == loomgui_fence::diagnostic::Severity::Warning)
+        {
+            warnings.push(PackWarning {
+                component: name.clone(),
+                file: html_rel.clone(),
+                line: d.location.line,
+                column: d.location.column,
+                code: format!("{:?}", d.code),
+                message: d.message.clone(),
+                help: d
+                    .notes
+                    .iter()
+                    .find(|n| n.kind == loomgui_fence::diagnostic::NoteKind::Help)
+                    .map(|n| n.text.clone()),
+            });
         }
         // bridge 错误带组件名：多组件包里，否则 "多根" 之类错误无法定位是哪个组件。
         let mut nodes =
@@ -103,7 +194,11 @@ pub fn pack_components(components: &[Component]) -> Result<(Vec<u8>, Vec<String>
     let bytes = write_package(&PackageInput {
         components: comp_refs,
     });
-    Ok((bytes, refs))
+    Ok(PackResult {
+        bytes,
+        referenced_sprites: refs,
+        warnings,
+    })
 }
 
 /// 把 PackageCfg 解析成 HTML 文件相对路径列表（相对工作区根，正斜杠）。
@@ -213,6 +308,7 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
         atlases: Vec::new(),
         fonts: Vec::new(),
         log: Vec::new(),
+        warnings: Vec::new(),
     };
 
     // ---------- Atlases ----------
@@ -294,11 +390,17 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
             pkg.name,
             comps.len()
         ));
-        let (bytes, refs) = pack_components(&comps)?;
+        let PackResult {
+            bytes,
+            referenced_sprites: refs,
+            warnings: pkg_warnings,
+        } = pack_components(&comps)?;
         let pkg_path = ui_dir.join(format!("{}.pkg.bin", pkg.name));
         std::fs::write(&pkg_path, &bytes)
             .map_err(|e| format!("write {}: {e}", pkg_path.display()))?;
         report.packages.push(pkg.name.clone());
+        // warning 聚合进报告（跨 package），供 CLI/GUI 统一呈现。不阻断打包。
+        report.warnings.extend(pkg_warnings);
         report.log.push(format!(
             "  wrote {} ({} bytes)",
             pkg_path.display(),
@@ -367,7 +469,11 @@ mod package_tests {
                     .to_string(),
             html_rel: "home.html".to_string(),
         }];
-        let (bytes, refs) = pack_components(&comps).unwrap();
+        let PackResult {
+            bytes,
+            referenced_sprites: refs,
+            ..
+        } = pack_components(&comps).unwrap();
         let pkg = loomgui_core::asset::read_package(&bytes).unwrap();
         let comp = pkg.components.get("home").expect("home component");
         assert_eq!(comp.nodes[0].kind, NodeKind::Container); // div
@@ -388,7 +494,11 @@ mod package_tests {
                 .to_string(),
             html_rel: "spec4b/spec4b.html".to_string(),
         }];
-        let (bytes, refs) = pack_components(&comps).unwrap();
+        let PackResult {
+            bytes,
+            referenced_sprites: refs,
+            ..
+        } = pack_components(&comps).unwrap();
         let pkg = loomgui_core::asset::read_package(&bytes).unwrap();
         let comp = pkg.components.get("spec4b").expect("spec4b component");
         let img = comp
@@ -422,7 +532,7 @@ mod package_tests {
                 html_rel: "page.html".to_string(),
             },
         ];
-        let (bytes, _) = pack_components(&comps).unwrap();
+        let PackResult { bytes, .. } = pack_components(&comps).unwrap();
         let pkg = loomgui_core::asset::read_package(&bytes).unwrap();
         assert!(pkg.components.contains_key("nav"));
         assert!(pkg.components.contains_key("page"));
@@ -487,7 +597,8 @@ mod package_tests {
             "测试前置：HTML 应触发 W1 warning，否则此测试无效: {:?}",
             parsed.diagnostics
         );
-        let (bytes, _refs) = pack_components(&comps)
+        // 具名结构体：修后 warning 经 PackResult.warnings 暴露（修前是二元组，warning 被丢弃）。
+        let PackResult { bytes, .. } = pack_components(&comps)
             .expect("warning 不应阻断打包：pack_components 应返 Ok，但实际被当 fatal");
         // 确认产物可读（不是静默坏包）。
         let pkg = loomgui_core::asset::read_package(&bytes).unwrap();
@@ -495,6 +606,50 @@ mod package_tests {
             pkg.components.contains_key("warn"),
             "warning 组件应正常写入 pkg"
         );
+    }
+
+    #[test]
+    fn pack_components_exposes_warnings_in_return_value() {
+        // Task 10b 回归锁：W1/W2 warning 不阻断打包，但必须对 CLI/GUI 可见。
+        // 修前 pack_components 只查 Error 级 diagnostic，warning 留在局部 parsed.diagnostics
+        // 里随循环结束丢弃 → 作者感知不到「预览 ≠ 运行时」的不一致。修后 warning 经
+        // PackResult.warnings 暴露 → build() 进 BuildReport.warnings → CLI 打印。
+        let comps = vec![
+            Component {
+                name: "warn".to_string(),
+                // W1：border-width 有、border-style 缺省。
+                src: r#"<div style="border-width:2px;border-color:#ff0000"></div>"#.to_string(),
+                html_rel: "warn.html".to_string(),
+            },
+            Component {
+                name: "bg".to_string(),
+                // W2：background-image 有、background-size 缺省。
+                src: r#"<div style="background-image:url(a.png)"></div>"#.to_string(),
+                html_rel: "bg.html".to_string(),
+            },
+        ];
+        // 修后 warning 经返回值 PackResult.warnings 暴露（修前被丢弃）。
+        let PackResult { warnings, .. } = pack_components(&comps).expect("warning 不阻断打包");
+        // W1 来自 warn 组件，须带组件名 + 文件位置 + 短码。
+        let w1 = warnings
+            .iter()
+            .find(|w| w.code == "FenceBorderWithoutStyle")
+            .expect("W1 warning 应暴露在返回值里（修前被丢弃）");
+        assert_eq!(w1.component, "warn");
+        assert_eq!(w1.file, "warn.html");
+        assert!(w1.line >= 1, "warning 须带行号定位");
+        assert!(w1.column >= 1, "warning 须带列号定位");
+        assert!(
+            !w1.message.is_empty(),
+            "message 非空（含问题说明 + 修复引导）"
+        );
+        // W2 来自 bg 组件，证明跨组件收集（非只留首个组件的）。
+        let w2 = warnings
+            .iter()
+            .find(|w| w.code == "FenceBgImageWithoutSize")
+            .expect("W2 warning 应暴露在返回值里");
+        assert_eq!(w2.component, "bg");
+        assert_eq!(w2.file, "bg.html");
     }
 
     #[test]
