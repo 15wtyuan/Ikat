@@ -223,6 +223,22 @@ pub struct DynamicRule {
     pub declarations: Vec<Declaration>,
 }
 
+/// 带作用域的动态规则（scene 运行时态，不进 pkg）。main-design §5.4 Shadow DOM 风格：
+/// 模板实例化时，规则绑定到实例根 NodeId；rematch 只在 scope 内匹配 + 后代选择器不穿透边界。
+/// `scope_root == NodeId::INVALID` = 全局规则（UIContext.StyleSheet 逃生舱），跨作用域命中。
+/// pkg 里的 DynamicRuleTable（无 scope）在 instantiate 时包装成 ScopedRule。
+#[derive(Debug, Clone)]
+pub struct ScopedRule {
+    pub rule: DynamicRule,
+    pub scope_root: crate::scene::node::NodeId,
+}
+
+/// scene 级规则容器（运行时）。pkg 用 DynamicRuleTable（无 scope，可序列化）。
+#[derive(Debug, Clone, Default)]
+pub struct ScopedRuleTable {
+    pub entries: Vec<ScopedRule>,
+}
+
 use crate::scene::node::{Node, NodeKind};
 
 /// 运行时版 compound 匹配（消费 Node 而非 ElementData，运行时无 ElementTree）。
@@ -315,7 +331,14 @@ fn compound_matches_with_state(c: &Compound, node_id: NodeId, scene: &Scene) -> 
 /// 完整后代链匹配（从右往左，复用 selector.rs `matches` 算法，消费 Node/Scene）。
 /// 最后一个 compound 必须命中目标 node 本身（含状态门）；前面按 combinator 沿
 /// parent 链找（Child=直接父，Descendant=任一祖先，带回溯）。
-pub fn match_element_with_state(sel: &ParsedSelector, node_id: NodeId, scene: &Scene) -> bool {
+/// 匹配选择器 `sel` 到节点 `node_id`。`scope_bound` = 规则所属作用域根（NodeId::INVALID=全局，无边界）。
+/// 后代/子代选择器沿祖先链匹配时，不穿透 scope_bound（其父在作用域外）——main-design §5.4。
+pub fn match_element_with_state(
+    sel: &ParsedSelector,
+    node_id: NodeId,
+    scene: &Scene,
+    scope_bound: NodeId,
+) -> bool {
     let comps = &sel.compound;
     if comps.is_empty() {
         return false;
@@ -327,17 +350,19 @@ pub fn match_element_with_state(sel: &ParsedSelector, node_id: NodeId, scene: &S
     if comps.len() == 1 {
         return true;
     }
-    match_chain_with_state(comps, comps.len() - 1, node_id, scene)
+    match_chain_with_state(comps, comps.len() - 1, node_id, scene, scope_bound)
 }
 
 /// 递归匹配 comps[0..end_idx] 在 start_node 的祖先链上（同 selector.rs
 /// `match_compound_chain`）。`start_node` 是已匹配 comps[end_idx] 的节点，
 /// 为 comps[end_idx - 1] 找祖先（Child：直接父；Descendant：任一祖先+回溯）。
+/// `scope_bound` 约束祖先链不穿透作用域根（其父在作用域外）。
 fn match_chain_with_state(
     comps: &[Compound],
     end_idx: usize,
     start_node: NodeId,
     scene: &Scene,
+    scope_bound: NodeId,
 ) -> bool {
     if end_idx == 0 {
         return true;
@@ -345,27 +370,61 @@ fn match_chain_with_state(
     let target_comp = &comps[end_idx - 1];
     let combinator = comps[end_idx].combinator;
     match combinator {
-        Combinator::Child => match scene.get(start_node).and_then(|n| n.parent) {
+        Combinator::Child => match parent_in_scope(scene, start_node, scope_bound) {
             Some(parent) => {
                 compound_matches_with_state(target_comp, parent, scene)
-                    && match_chain_with_state(comps, end_idx - 1, parent, scene)
+                    && match_chain_with_state(comps, end_idx - 1, parent, scene, scope_bound)
             }
             None => false,
         },
         Combinator::Descendant => {
-            let mut cur = scene.get(start_node).and_then(|n| n.parent);
+            let mut cur = parent_in_scope(scene, start_node, scope_bound);
             while let Some(ancestor) = cur {
                 if compound_matches_with_state(target_comp, ancestor, scene)
-                    && match_chain_with_state(comps, end_idx - 1, ancestor, scene)
+                    && match_chain_with_state(comps, end_idx - 1, ancestor, scene, scope_bound)
                 {
                     return true;
                 }
                 // 此祖先匹配但更左链匹配不上 → 继续往上找
-                cur = scene.get(ancestor).and_then(|n| n.parent);
+                cur = parent_in_scope(scene, ancestor, scope_bound);
             }
             false
         }
     }
+}
+
+/// 取 `node` 的父，但不超过 `scope_bound`：若 node == scope_bound，其父在作用域外 → None。
+/// `scope_bound == NodeId::INVALID` = 全局规则，无边界 → 直接返父（可能跨作用域）。
+/// 作用域根节点的父在作用域外，后代/子代选择器不应据它匹配（main-design §5.4 不穿透边界）。
+fn parent_in_scope(scene: &Scene, node: NodeId, scope_bound: NodeId) -> Option<NodeId> {
+    if scope_bound != NodeId::INVALID && node == scope_bound {
+        return None;
+    }
+    scene.get(node).and_then(|n| n.parent)
+}
+
+/// 计算每节点的所属作用域根（沿父链最近的 SCOPE_ROOT，含自身）。无作用域根祖先 → INVALID。
+/// 每帧 rematch 调一次，O(节点 × 深度)；scope 校验快路径用此表 O(1) 查。
+/// 根节点通常由 create_root/instantiate 打 SCOPE_ROOT，故多数节点能命中某作用域根。
+fn compute_scope_map(scene: &Scene, node_ids: &[NodeId]) -> HashMap<NodeId, NodeId> {
+    let mut map = HashMap::with_capacity(node_ids.len());
+    for &id in node_ids {
+        let mut cur = Some(id);
+        let mut found = NodeId::INVALID;
+        while let Some(nid) = cur {
+            if let Some(n) = scene.get(nid) {
+                if n.interaction.flags.contains(NodeFlags::SCOPE_ROOT) {
+                    found = nid;
+                    break;
+                }
+                cur = n.parent;
+            } else {
+                break;
+            }
+        }
+        map.insert(id, found);
+    }
+    map
 }
 
 /// 全量节点重匹配（仅动态规则子集）。每节点从 base_style 重起，
@@ -378,22 +437,26 @@ fn match_chain_with_state(
 /// `scene.pending_transitions`，供 Stage tick drain 后 kill 旧 tween + 提交新 tween。
 /// 首次 cascade（cascaded_once=false）即时生效不产请求，并置 cascaded_once=true。
 pub fn rematch_pseudo_classes(scene: &mut Scene) {
-    // 预提取 specificity 元组 + owned rule 副本（避免借 scene.dynamic_rules 跨 get_mut）。
-    let rules_with_spec: Vec<(u32, u32, u32, DynamicRule)> = scene
+    // 预提取 specificity 元组 + owned rule 副本 + scope_root（避免借 scene.dynamic_rules 跨 get_mut）。
+    let rules_with_spec: Vec<(u32, u32, u32, DynamicRule, NodeId)> = scene
         .dynamic_rules
-        .rules
+        .entries
         .iter()
-        .map(|r| {
+        .map(|sr| {
             (
-                r.selector.specificity.0,
-                r.selector.specificity.1,
-                r.selector.specificity.2,
-                r.clone(),
+                sr.rule.selector.specificity.0,
+                sr.rule.selector.specificity.1,
+                sr.rule.selector.specificity.2,
+                sr.rule.clone(),
+                sr.scope_root,
             )
         })
         .collect();
     // 收集所有 NodeId（slotmap 分配，不能手造 NodeId(i)）。
     let node_ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
+    // 每节点的所属作用域根（沿父链最近的 SCOPE_ROOT，含自身）。全局规则（scope_root=INVALID）
+    // 跳过此过滤；scoped 规则只匹配 node_scope == rule.scope_root 的节点（main-design §5.4）。
+    let scope_map = compute_scope_map(scene, &node_ids);
     // set-ness：每节点显式声明了哪些可继承属性。cascade 期收集，继承 pass 消费。
     let mut set_map: HashMap<NodeId, InheritedSet> = HashMap::new();
     for node_id in node_ids {
@@ -409,11 +472,16 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         };
         // 从 base_style 重起
         let mut new_style = scene.get(node_id).expect("live node").base_style.clone();
-        // 收集命中规则
+        // 收集命中规则（按作用域过滤：全局规则 scope_root=INVALID 总匹配；scoped 规则只匹配本作用域节点）
+        let node_scope = scope_map.get(&node_id).copied().unwrap_or(NodeId::INVALID);
         let mut matched: Vec<(u32, u32, u32, DynamicRule)> = Vec::new();
         for r in &rules_with_spec {
-            if match_element_with_state(&r.3.selector, node_id, scene) {
-                matched.push(r.clone());
+            let scope_root = r.4;
+            if scope_root != NodeId::INVALID && scope_root != node_scope {
+                continue; // scoped 规则不匹配他作用域节点
+            }
+            if match_element_with_state(&r.3.selector, node_id, scene, scope_root) {
+                matched.push((r.0, r.1, r.2, r.3.clone()));
             }
         }
         // specificity 升序（高 specificity 后 apply 胜出）；同级保持原序（stable sort）
@@ -660,6 +728,15 @@ mod tests {
     use crate::style::resolved::TransitionSpec;
     use crate::tween::{Ease, TweenProp};
 
+    /// 把规则作为全局规则（scope_root=INVALID）推进 scene——跨作用域命中。
+    /// 现有单场景测试无实例化，规则走全局路径保持原有行为（node_scope=INVALID，全局规则匹配）。
+    fn push_global(s: &mut Scene, r: DynamicRule) {
+        s.dynamic_rules.entries.push(ScopedRule {
+            rule: r,
+            scope_root: NodeId::INVALID,
+        });
+    }
+
     /// 构造 root + button(.btn) scene，button 在 (0,0,100,100)。
     fn btn_scene() -> Scene {
         let mut root = Node::default();
@@ -784,9 +861,7 @@ mod tests {
     fn hover_pseudo_changes_background_color() {
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn:hover", "background-color", "#0000ff"));
+        push_global(&mut s, rule(".btn:hover", "background-color", "#0000ff"));
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -832,9 +907,7 @@ mod tests {
             h: 20.0,
         };
         let mut s = Scene::from_nodes(vec![root, parent, child], vec![(0, 1), (1, 2)]);
-        s.dynamic_rules
-            .rules
-            .push(rule(".par:hover", "color", "#1a1d2e"));
+        push_global(&mut s, rule(".par:hover", "color", "#1a1d2e"));
         let pid = s.get(s.roots[0]).unwrap().children[0];
         s.get_mut(pid)
             .unwrap()
@@ -875,9 +948,7 @@ mod tests {
             h: 20.0,
         };
         let mut s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
-        s.dynamic_rules
-            .rules
-            .push(rule(".par", "font-size", "24px"));
+        push_global(&mut s, rule(".par", "font-size", "24px"));
         rematch_pseudo_classes(&mut s);
         let cid = s.get(s.roots[0]).unwrap().children[0];
         assert_eq!(
@@ -896,10 +967,8 @@ mod tests {
         child.classes = vec!["c".to_string()];
         child.kind = NodeKind::TextNode;
         let mut s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
-        s.dynamic_rules
-            .rules
-            .push(rule(".par", "font-size", "24px"));
-        s.dynamic_rules.rules.push(rule(".c", "font-size", "12px"));
+        push_global(&mut s, rule(".par", "font-size", "24px"));
+        push_global(&mut s, rule(".c", "font-size", "12px"));
         rematch_pseudo_classes(&mut s);
         let cid = s.get(s.roots[0]).unwrap().children[0];
         assert_eq!(
@@ -918,7 +987,7 @@ mod tests {
         let mut leaf = Node::default();
         leaf.kind = NodeKind::TextNode;
         let mut s = Scene::from_nodes(vec![root, mid, leaf], vec![(0, 1), (1, 2)]);
-        s.dynamic_rules.rules.push(rule(".a", "font-size", "20px"));
+        push_global(&mut s, rule(".a", "font-size", "20px"));
         rematch_pseudo_classes(&mut s);
         let mid_id = s.get(s.roots[0]).unwrap().children[0];
         let leaf_id = s.get(mid_id).unwrap().children[0];
@@ -933,9 +1002,7 @@ mod tests {
     fn active_pseudo_on_down() {
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn:active", "background-color", "#ff0000"));
+        push_global(&mut s, rule(".btn:active", "background-color", "#ff0000"));
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -953,9 +1020,7 @@ mod tests {
     fn disabled_pseudo_via_disabled_flag() {
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn:disabled", "opacity", "0.5"));
+        push_global(&mut s, rule(".btn:disabled", "opacity", "0.5"));
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -973,9 +1038,7 @@ mod tests {
     fn rematch_layout_dirty_when_size_changes() {
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn:hover", "width", "200px"));
+        push_global(&mut s, rule(".btn:hover", "width", "200px"));
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -994,9 +1057,7 @@ mod tests {
     fn rematch_no_dirty_when_only_visual_changes() {
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn:hover", "color", "#ff0000"));
+        push_global(&mut s, rule(".btn:hover", "color", "#ff0000"));
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -1028,9 +1089,7 @@ mod tests {
         let mut s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
         let root_id = s.roots[0];
         let child_id = s.get(root_id).unwrap().children[0];
-        s.dynamic_rules
-            .rules
-            .push(rule(".parent:hover .child", "color", "#0000ff"));
+        push_global(&mut s, rule(".parent:hover .child", "color", "#0000ff"));
         s.get_mut(root_id)
             .unwrap()
             .interaction
@@ -1051,7 +1110,7 @@ mod tests {
         // 打包器保证无伪类规则不进 dynamic_rules。此测断言 color 变红。
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.dynamic_rules.rules.push(rule(".btn", "color", "#ff0000"));
+        push_global(&mut s, rule(".btn", "color", "#ff0000"));
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -1067,9 +1126,7 @@ mod tests {
         let mut s = btn_scene();
         let bid = btn_id(&s);
         s.get_mut(bid).unwrap().base_style.background_color = None; // base 无 bg
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn:hover", "background-color", "#0000ff"));
+        push_global(&mut s, rule(".btn:hover", "background-color", "#0000ff"));
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -1097,9 +1154,7 @@ mod tests {
     fn focus_pseudo_matches_focused_node() {
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn:focus", "background-color", "#0000ff"));
+        push_global(&mut s, rule(".btn:focus", "background-color", "#0000ff"));
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -1118,9 +1173,7 @@ mod tests {
         let mut s = btn_scene();
         let bid = btn_id(&s);
         s.get_mut(bid).unwrap().base_style.background_color = None;
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn:focus", "background-color", "#0000ff"));
+        push_global(&mut s, rule(".btn:focus", "background-color", "#0000ff"));
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -1156,9 +1209,7 @@ mod tests {
         let mut s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
         let root_id = s.roots[0];
         let child_id = s.get(root_id).unwrap().children[0];
-        s.dynamic_rules
-            .rules
-            .push(rule(".parent:focus .child", "color", "#0000ff"));
+        push_global(&mut s, rule(".parent:focus .child", "color", "#0000ff"));
         s.get_mut(root_id)
             .unwrap()
             .interaction
@@ -1177,11 +1228,10 @@ mod tests {
         // background-image 是视觉字段（非 taffy_style/order）→ rematch 不 layout dirty
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.dynamic_rules.rules.push(rule(
-            ".btn:hover",
-            "background-image",
-            "url(icons/home.png)",
-        ));
+        push_global(
+            &mut s,
+            rule(".btn:hover", "background-image", "url(icons/home.png)"),
+        );
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -1200,9 +1250,7 @@ mod tests {
         // background-size 是视觉字段 → rematch 不 layout dirty
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn:hover", "background-size", "cover"));
+        push_global(&mut s, rule(".btn:hover", "background-size", "cover"));
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -1221,9 +1269,7 @@ mod tests {
         // border-radius 是视觉字段（非 taffy_style/order）→ rematch 不 layout dirty
         let mut s = btn_scene();
         let bid = btn_id(&s);
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn:hover", "border-radius", "8px"));
+        push_global(&mut s, rule(".btn:hover", "border-radius", "8px"));
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -1316,9 +1362,7 @@ mod tests {
             .interaction
             .flags
             .insert(crate::scene::node::NodeFlags::CASCALED); // 已 warmup
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn:hover", "background-color", "#0000ff"));
+        push_global(&mut s, rule(".btn:hover", "background-color", "#0000ff"));
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -1347,9 +1391,7 @@ mod tests {
             delay: 0.0,
         }];
         // cascaded_once 保持 false
-        s.dynamic_rules
-            .rules
-            .push(rule(".btn:hover", "background-color", "#0000ff"));
+        push_global(&mut s, rule(".btn:hover", "background-color", "#0000ff"));
         s.get_mut(bid)
             .unwrap()
             .interaction
@@ -1459,10 +1501,7 @@ mod tests {
         // inline 优先级 > dynamic rule。同节点 hover 规则设 blue，inline 设 red → red 胜。
         let (mut scene, root, _child) = build_parent_child();
         scene.get_mut(root).unwrap().classes = vec!["r".to_string()];
-        scene
-            .dynamic_rules
-            .rules
-            .push(rule(".r", "color", "#0000ff"));
+        push_global(&mut scene, rule(".r", "color", "#0000ff"));
         crate::scene::dynamic::set_inline_override(&mut scene, root, "color:#ff0000").unwrap();
         rematch_pseudo_classes(&mut scene);
         assert_eq!(
@@ -1538,10 +1577,7 @@ mod tests {
             n.base_style.display_mode = crate::style::resolved::DisplayMode::None;
             n.base_style.inline_declared |= INLINE_DISPLAY;
         }
-        scene
-            .dynamic_rules
-            .rules
-            .push(rule(".r", "display", "flex"));
+        push_global(&mut scene, rule(".r", "display", "flex"));
         rematch_pseudo_classes(&mut scene);
         assert_eq!(
             scene.get(root).unwrap().style.taffy_style.display,
@@ -1561,10 +1597,7 @@ mod tests {
         // → propagate 不覆盖 child，child 仍 blue。验证 set_map 阻断继承。
         let (mut scene, root, child) = build_parent_child();
         scene.get_mut(child).unwrap().classes = vec!["c".to_string()];
-        scene
-            .dynamic_rules
-            .rules
-            .push(rule(".c", "color", "#0000ff"));
+        push_global(&mut scene, rule(".c", "color", "#0000ff"));
         crate::scene::dynamic::set_inline_override(&mut scene, root, "color:#ff0000").unwrap();
         rematch_pseudo_classes(&mut scene);
         assert_eq!(

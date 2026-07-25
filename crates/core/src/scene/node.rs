@@ -19,6 +19,10 @@ bitflags::bitflags! {
         const FOCUSED  = 1 << 2;
         const DISABLED = 1 << 3;
         const CASCALED = 1 << 4;
+        /// 作用域根标记（Shadow DOM 风格，main-design §5.4）：模板实例化根 / 文档根打此位。
+        /// `Get<T>` 查找边界 + CSS dynamic_rules 作用域隔离都据此判定。rematch 的 scope 校验 +
+        /// 后代选择器边界停止都读此位。
+        const SCOPE_ROOT = 1 << 5;
     }
 }
 
@@ -358,8 +362,9 @@ pub struct Scene {
     /// 节点存储。Vec<Node> → SlotMap<DefaultKey, Node>（动态树 spec §4.1）。
     /// 应用层用 NodeId(u32) 句柄（FFI/C# 透明），经 `Scene::key_for`/`NodeId::to_key` 桥接到 DefaultKey。
     pub nodes: SlotMap<DefaultKey, Node>,
-    /// 运行时伪类重匹配规则表。默认空；包加载填，inline 路径空。
-    pub dynamic_rules: crate::style::dynamic::DynamicRuleTable,
+    /// 运行时伪类重匹配规则表（带作用域，Shadow DOM 风格）。默认空；instantiate 时填
+    /// （模板规则绑定实例根 scope_root），inline 路径空。不进 pkg（pkg 用无 scope 的 DynamicRuleTable）。
+    pub dynamic_rules: crate::style::dynamic::ScopedRuleTable,
     /// 当前焦点节点（单一全局，照 fgui Stage.focus）。None=无焦点。
     pub focused_node: Option<NodeId>,
     /// 每节点累计世界矩阵（compute_world_transforms 填）。index = NodeId.index()。运行时态，不进 pkg。

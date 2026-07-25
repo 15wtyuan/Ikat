@@ -9,7 +9,7 @@ use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
 use crate::scene::node::{NodeFlags, NodeId, Rect, Scene};
-use crate::style::dynamic::rematch_pseudo_classes;
+use crate::style::dynamic::{rematch_pseudo_classes, ScopedRule};
 use crate::style::resolved::OverflowMode;
 use crate::text::layout::FontTable;
 
@@ -588,17 +588,23 @@ impl Stage {
         }
         let root = root_id.ok_or("component has no root node (parent_idx=None missing)")?;
 
-        // 伪类规则合并去重：相同选择器（ParsedSelector PartialEq）不重复加。
-        // 规则按 class 匹配，多实例共享同一规则条目；hit_test 返具体 NodeId → 各实例独立命中。
+        // 实例根 = 作用域根（Shadow DOM 风格，main-design §5.4 / public-api §2.3）。
+        // 该实例的 CSS 规则只在本实例子树内匹配，不泄漏到其他组件实例。
+        scene
+            .get_mut(root)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::SCOPE_ROOT);
+
+        // 模板规则包装成 ScopedRule（scope_root = 实例根），push 进 scene 动态规则表。
+        // 不再按 selector 去重：同模板多实例各带独立 scope_root，rematch 按 scope 隔离匹配，
+        // 互不干扰（旧实现的 selector-only 去重会把不同组件同名 class 规则误判为重复丢弃——坑）。
         for rule in &template.dynamic_rules.rules {
-            let dup = scene
-                .dynamic_rules
-                .rules
-                .iter()
-                .any(|r| r.selector == rule.selector);
-            if !dup {
-                scene.dynamic_rules.rules.push(rule.clone());
-            }
+            scene.dynamic_rules.entries.push(ScopedRule {
+                rule: rule.clone(),
+                scope_root: root,
+            });
         }
         Ok(root)
     }

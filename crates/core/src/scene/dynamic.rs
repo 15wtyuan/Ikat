@@ -119,6 +119,11 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
 pub fn create_root(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, String> {
     let id = create_node(scene, kind, css)?;
     scene.roots.push(id);
+    // 文档根 = 顶层作用域根（main-design §5.4 / public-api §2.3）。全局规则（scope_root=INVALID）
+    // 跨作用域命中；文档根作为外层作用域，其直接子树（未嵌套其他实例根时）归属此作用域。
+    if let Some(n) = scene.get_mut(id) {
+        n.interaction.flags.insert(NodeFlags::SCOPE_ROOT);
+    }
     Ok(id)
 }
 
@@ -371,8 +376,12 @@ pub fn set_reuse_key(scene: &mut Scene, node: NodeId, key: u32) {
 pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
     // 0. 已删/无效节点 → no-op（防重复删或悬空 id 调用 panic）。
     //    先取 children + parent（持有不可变借），drop 后再递归/可变借。
-    let (children, parent_id) = match scene.get(id) {
-        Some(n) => (n.children.clone(), n.parent),
+    let (children, parent_id, was_scope_root) = match scene.get(id) {
+        Some(n) => (
+            n.children.clone(),
+            n.parent,
+            n.interaction.flags.contains(NodeFlags::SCOPE_ROOT),
+        ),
         None => return,
     };
     // 1. 递归删子（先 clone 了 children，避免边迭代边改 slotmap）。
@@ -407,6 +416,12 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
     // 4. slotmap remove（gen++，NodeId 失效，槽位可复用）。
     //    经 key_for(NodeId) 桥接到 DefaultKey。
     scene.nodes.remove(scene.key_for(id));
+    // 5. 作用域根销毁 → 连带清理其贡献的 dynamic_rules（scope_root == id）。
+    //    防规则跨页残留污染（坑：旧实现不清理，切页后规则只增不减，跨组件同名 class 互相覆盖）。
+    //    remove_node 递归删子，子作用域根的规则在此同样被清（每层递归各自清自己的 scope）。
+    was_scope_root.then(|| {
+        scene.dynamic_rules.entries.retain(|sr| sr.scope_root != id);
+    });
 }
 
 #[cfg(test)]

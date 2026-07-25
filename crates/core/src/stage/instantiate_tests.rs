@@ -1,7 +1,11 @@
 use super::*;
 use crate::asset::{PackageInput, TemplateNode};
 use crate::scene::NodeKind;
+use crate::style::dynamic::{
+    Combinator, Compound, Declaration, DynamicRule, ParsedSelector, Specificity,
+};
 use crate::style::resolved::ResolvedStyle;
+use taffy::style::FlexDirection;
 
 /// 辅助：建带子树的 pkg（comp1 = root(Container) + child(Container)）。
 fn make_test_pkg_with_subtree() -> Vec<u8> {
@@ -164,4 +168,260 @@ fn instantiate_without_scene_errors() {
     s.load_package("bag", &make_test_pkg_with_subtree())
         .unwrap();
     assert!(s.instantiate("bag", "comp1").is_err(), "无 scene → Err");
+}
+
+// ── dynamic_rules 作用域隔离测试（Shadow DOM 风格，main-design §5.4）──
+//
+// 背景（坑）：旧实现把模板规则 push 进全局 scene.dynamic_rules 且不清理、去重只比 selector。
+// 导致 home 的 `.root{column}` 残留污染后实例化的 settings 的 `.root{row}`——
+// 两个组件 selector 相同（都 `.root`）但 declaration 不同，被错误去重丢弃，
+// settings 的 .root 被 rematch 成 column（上下布局）。
+//
+// 修复后：规则带 scope_root（实例根），rematch 按 scope 过滤 + 后代选择器不穿透边界。
+// 切页（remove + instantiate）不再跨组件污染。
+
+/// 测试用 selector 构造器：支持单个 `.class` / `tag` / `tag.class`。
+fn single_selector(raw: &str) -> ParsedSelector {
+    let mut c = Compound {
+        tag: None,
+        classes: Vec::new(),
+        id: None,
+        combinator: Combinator::Descendant,
+        pseudo_hover: false,
+        pseudo_active: false,
+        pseudo_disabled: false,
+        pseudo_focus: false,
+        attrs: Vec::new(),
+    };
+    let mut rest = raw;
+    // tag（开头非 . # 的字母段）
+    if let Some(end) = rest.find(['.', '#']) {
+        if end > 0 {
+            c.tag = Some(rest[..end].to_string());
+            rest = &rest[end..];
+        }
+    } else if !rest.is_empty() && rest.chars().next().unwrap().is_alphabetic() {
+        c.tag = Some(rest.to_string());
+        rest = "";
+    }
+    while !rest.is_empty() {
+        if rest.starts_with('.') {
+            let r = &rest[1..];
+            let end = r
+                .find(|ch: char| !ch.is_alphanumeric() && ch != '-' && ch != '_')
+                .unwrap_or(r.len());
+            c.classes.push(r[..end].to_string());
+            rest = &r[end..];
+        } else {
+            rest = &rest[1..];
+        }
+    }
+    let class_count = c.classes.len() as u32 + c.id.is_some() as u32;
+    let tag_count = c.tag.is_some() as u32;
+    ParsedSelector {
+        raw: raw.to_string(),
+        compound: vec![c],
+        specificity: Specificity(class_count, 0, tag_count),
+    }
+}
+
+fn class_rule(class: &str, prop: &str, val: &str) -> DynamicRule {
+    DynamicRule {
+        selector: single_selector(&format!(".{class}")),
+        declarations: vec![Declaration {
+            prop: prop.to_string(),
+            value: val.to_string(),
+        }],
+    }
+}
+
+/// 建一个单根组件 pkg：根 Container 带 class `root`，附一条 `.root` 规则。
+fn pkg_with_root_rule(pkg_name: &str, flex_dir_val: &str) -> (String, Vec<u8>) {
+    let mut root_style = ResolvedStyle::default();
+    crate::scene::dynamic::apply_css(&mut root_style, "display:flex");
+    let nodes = [TemplateNode {
+        kind: NodeKind::Container,
+        style: root_style,
+        parent_idx: None,
+        classes: vec!["root".to_string()],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        content: None,
+        src: None,
+    }];
+    let rules = crate::style::dynamic::DynamicRuleTable {
+        rules: vec![class_rule("root", "flex-direction", flex_dir_val)],
+    };
+    let input = PackageInput {
+        components: vec![(pkg_name, &nodes, &rules)],
+    };
+    (pkg_name.to_string(), crate::asset::write_package(&input))
+}
+
+#[test]
+fn dynamic_rules_scoped_switch_page_no_leak() {
+    // 复现总坑：home 的 `.root{column}` 不应泄漏到后实例化的 settings 的 `.root{row}`。
+    // 两个组件 .root selector 相同但 declaration 不同——必须各自隔离。
+    let (_, home_pkg) = pkg_with_root_rule("home", "column");
+    let (_, settings_pkg) = pkg_with_root_rule("settings", "row");
+    let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+    let mut s = Stage::new((400.0, 400.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
+    s.load_package("home", &home_pkg).unwrap();
+    s.load_package("settings", &settings_pkg).unwrap();
+    let doc = s.create_root("div", "").unwrap();
+
+    // 1. 实例化 home，跑几帧
+    let home = s.instantiate("home", "home").unwrap();
+    crate::scene::dynamic::append_child(s.scene.as_mut().unwrap(), doc, home).unwrap();
+    s.tick_and_render();
+    assert_eq!(
+        s.scene
+            .as_ref()
+            .unwrap()
+            .get(home)
+            .unwrap()
+            .style
+            .taffy_style
+            .flex_direction,
+        FlexDirection::Column,
+        "home .root 应是 column"
+    );
+
+    // 2. 切页：删 home，实例化 settings
+    s.remove_node(home);
+    let settings = s.instantiate("settings", "settings").unwrap();
+    crate::scene::dynamic::append_child(s.scene.as_mut().unwrap(), doc, settings).unwrap();
+    s.tick_and_render();
+
+    // 3. settings 的 .root 必须是 row（不被 home 的 column 污染）
+    assert_eq!(
+        s.scene
+            .as_ref()
+            .unwrap()
+            .get(settings)
+            .unwrap()
+            .style
+            .taffy_style
+            .flex_direction,
+        FlexDirection::Row,
+        "settings .root 应是 row（home 的 column 规则不应跨页泄漏）"
+    );
+}
+
+#[test]
+fn dynamic_rules_descendant_selector_not_cross_scope() {
+    // 父组件的 `.a .b`（后代选择器）不应穿透子组件边界命中子组件内的 .b。
+    // 父 `.outer{...}` 包一个子组件实例，子组件内有 `.inner`。
+    // 规则 `.outer .inner`（scope=父）不应命中子组件内的 .inner（scope=子根）。
+    // 这里用两套规则验证：父的 `.outer .leaf` 后代规则只命中父自己的 .leaf，不命中子的 .leaf。
+    let mut outer_style = ResolvedStyle::default();
+    crate::scene::dynamic::apply_css(&mut outer_style, "display:flex");
+    let outer_nodes = [
+        TemplateNode {
+            kind: NodeKind::Container,
+            style: outer_style.clone(),
+            parent_idx: None,
+            classes: vec!["outer".to_string()],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: None,
+            src: None,
+        },
+        TemplateNode {
+            kind: NodeKind::Container,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(0),
+            classes: vec!["leaf".to_string()],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: None,
+            src: None,
+        },
+    ];
+    let outer_rules = crate::style::dynamic::DynamicRuleTable {
+        rules: vec![DynamicRule {
+            // 后代选择器 `.outer .leaf`：两 compound
+            selector: ParsedSelector {
+                raw: ".outer .leaf".to_string(),
+                compound: vec![
+                    {
+                        let mut c = single_selector(".outer").compound.remove(0);
+                        c.combinator = Combinator::Descendant;
+                        c
+                    },
+                    single_selector(".leaf").compound.remove(0),
+                ],
+                specificity: Specificity(2, 0, 0),
+            },
+            declarations: vec![Declaration {
+                prop: "background-color".to_string(),
+                value: "#ff0000".to_string(),
+            }],
+        }],
+    };
+    // 子组件：只有 `.leaf`（不含 .outer）
+    let inner_nodes = [TemplateNode {
+        kind: NodeKind::Container,
+        style: ResolvedStyle::default(),
+        parent_idx: None,
+        classes: vec!["leaf".to_string()],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        content: None,
+        src: None,
+    }];
+    let inner_rules = crate::style::dynamic::DynamicRuleTable::default();
+    let input = PackageInput {
+        components: vec![
+            ("outer", &outer_nodes, &outer_rules),
+            ("inner", &inner_nodes, &inner_rules),
+        ],
+    };
+    let pkg = crate::asset::write_package(&input);
+
+    let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+    let mut s = Stage::new((400.0, 400.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
+    s.load_package("p", &pkg).unwrap();
+    let doc = s.create_root("div", "").unwrap();
+
+    // 父实例化 → 子嵌套进父
+    let outer = s.instantiate("p", "outer").unwrap();
+    crate::scene::dynamic::append_child(s.scene.as_mut().unwrap(), doc, outer).unwrap();
+    let inner = s.instantiate("p", "inner").unwrap();
+    // 把子挂到父的 .leaf 节点下（模拟嵌套组件）
+    let outer_leaf = s.scene.as_ref().unwrap().get(outer).unwrap().children[0];
+    crate::scene::dynamic::append_child(s.scene.as_mut().unwrap(), outer_leaf, inner).unwrap();
+    s.tick_and_render();
+
+    // 父的 .leaf（outer_leaf）应命中 `.outer .leaf`（红）；子的 .leaf（inner 根）不应命中（透明）
+    assert_eq!(
+        s.scene
+            .as_ref()
+            .unwrap()
+            .get(outer_leaf)
+            .unwrap()
+            .style
+            .background_color,
+        Some([1.0, 0.0, 0.0, 1.0]),
+        "父的 .leaf 在父作用域内 → 命中后代规则（红）"
+    );
+    assert_eq!(
+        s.scene
+            .as_ref()
+            .unwrap()
+            .get(inner)
+            .unwrap()
+            .style
+            .background_color,
+        None,
+        "子组件的 .leaf 被作用域边界挡住 → 不命中父的后代规则（无背景）"
+    );
 }

@@ -211,7 +211,7 @@ fn scene_build_6tuple_sets_draggable() {
 fn scene_default_has_empty_dynamic_rules() {
     let s = Scene::default();
     assert!(
-        s.dynamic_rules.rules.is_empty(),
+        s.dynamic_rules.entries.is_empty(),
         "Scene 默认 dynamic_rules 空"
     );
 }
