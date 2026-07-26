@@ -33,6 +33,11 @@ namespace LoomGUI.HeadlessTests
             typeof(ScrollChangedEvent),
             typeof(AnimationStartEvent), typeof(AnimationEndEvent),
             typeof(AnimationIterationEvent), typeof(TransitionEndEvent),
+            // 控件交互事件（internal route struct，P1 控件束）：携 payload 经 EventBus，控件类
+            // 翻译为公共 ValueChangedEvent<*>。这 3 个 internal struct 同样实现 IRouteEvent +
+            // 持 _core 首 field + 声明 EventType，故被本门覆盖。
+            typeof(ControlValueChangedEvent), typeof(ControlCheckedChangedEvent),
+            typeof(ControlChangeCommittedEvent),
         };
 
         // 每个结构体映射到期望的 EventType 字节值见 EventTypeCases（xUnit MemberData 须 static，
@@ -165,6 +170,10 @@ namespace LoomGUI.HeadlessTests
             yield return new object[] { typeof(AnimationEndEvent),       (byte)EventType.AnimationEnd };
             yield return new object[] { typeof(AnimationIterationEvent), (byte)EventType.AnimationIteration };
             yield return new object[] { typeof(TransitionEndEvent),      (byte)EventType.TransitionEnd };
+            // 控件交互事件（22+，core EVT_*）。route struct 的 EventType 与 Rust EVT_ 常量一致。
+            yield return new object[] { typeof(ControlValueChangedEvent),     (byte)EventType.ValueChanged };
+            yield return new object[] { typeof(ControlCheckedChangedEvent),   (byte)EventType.CheckedChanged };
+            yield return new object[] { typeof(ControlChangeCommittedEvent),  (byte)EventType.ChangeCommitted };
         }
 
         // 反射兜底：扫 Public/LoomGUI.Events.cs assembly 里所有 IRouteEvent 实现 struct，

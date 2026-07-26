@@ -358,4 +358,55 @@ namespace LoomGUI
         internal static byte EventType => (byte)LoomEventType.TransitionEnd;
         public string PropertyName { get { return _propertyName; } }
     }
+
+    // ── 控件交互事件（internal route struct，D3）──────────────────────────
+    // ValueChangedEvent<T> 是冻结公共 struct 但不实现 IRouteEvent（泛型 + 无 _core），不能直接走
+    // EventBus。这三个 internal route struct 携 raw payload 经 EventBus 路由；控件类（Slider/Toggle/
+    // RadioButton）的 ValueChanged/CheckedChanged 事件访问器订阅它们，翻译为公共 ValueChangedEvent<*>。
+    // 这套 internal→public 翻译是 Button.Clicked backing-dict 模式的控件对应（On<ClickEvent> e=>value()）。
+    //
+    // payload 来自 core EVT_* EventRecord：VALUE_CHANGED/CHANGE_COMMITTED 用 x（float），
+    // CHECKED_CHANGED 用 pad[0]（0/1）。core stream 不携旧值，故这些 struct 只装新值；
+    // 翻译出的 ValueChangedEvent<*>.OldValue 留 default（core 契约同 web change 事件只给新值）。
+    internal struct ControlValueChangedEvent : IRouteEvent
+    {
+        internal RouteEventCore _core;
+        internal float _value;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.ValueChanged;
+        internal float Value { get { return _value; } }
+    }
+
+    internal struct ControlCheckedChangedEvent : IRouteEvent
+    {
+        internal RouteEventCore _core;
+        internal bool _checked;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.CheckedChanged;
+        internal bool Checked { get { return _checked; } }
+    }
+
+    internal struct ControlChangeCommittedEvent : IRouteEvent
+    {
+        internal RouteEventCore _core;
+        internal float _value;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.ChangeCommitted;
+        internal float Value { get { return _value; } }
+    }
 }

@@ -1335,39 +1335,262 @@ namespace LoomGUI
         static NotImplementedException NE() => new NotImplementedException();
     }
 
-    public class Slider : Node
+    public unsafe class Slider : Node
     {
         internal Slider(UIContext ctx, uint id) : base(ctx, id) { }
 
-        public float Value { get { throw NE(); } set { throw NE(); } }
-        public float Min { get { throw NE(); } set { throw NE(); } }
-        public float Max { get { throw NE(); } set { throw NE(); } }
-        public float Step { get { throw NE(); } set { throw NE(); } }
-        public bool Disabled { get { throw NE(); } set { throw NE(); } }
-        public event Action<ValueChangedEvent<float>> ValueChanged;
-        public event Action<float> ChangeCommitted;
+        // 投影层填实：value/min/max/step 直转 FFI（value clamp [min,max] + step 量化）。
+        public float Value
+        {
+            get { ThrowIfDisposed(); return GetControlValue(); }
+            set { ThrowIfDisposed(); SetControlValue(value); }
+        }
+        public float Min
+        {
+            get { ThrowIfDisposed(); return GetControlMin(); }
+            set { ThrowIfDisposed(); SetControlMin(value); }
+        }
+        public float Max
+        {
+            get { ThrowIfDisposed(); return GetControlMax(); }
+            set { ThrowIfDisposed(); SetControlMax(value); }
+        }
+        public float Step
+        {
+            get { ThrowIfDisposed(); return GetControlStep(); }
+            set { ThrowIfDisposed(); SetControlStep(value); }
+        }
+        // disabled 是伪类源 + active/click 抑制（set_node_disabled）。core 无 getter——setter 直 FFI，
+        // getter 暂留 throw（disabled 状态真相在 core，不镜像防漂移；待 core 暴露 query 后填）。
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+
+        // ValueChanged：逐帧拖拽值变更（core EVT_VALUE_CHANGED，x=新值）。backing-dict 模式同
+        // Button.Clicked——订阅 internal ControlValueChangedEvent，翻译为公共 ValueChangedEvent<float>。
+        [NonSerialized] Dictionary<Action<ValueChangedEvent<float>>, EventRegistration> _valueChangedBacking;
+        public event Action<ValueChangedEvent<float>> ValueChanged
+        {
+            add
+            {
+                if (value == null) return;
+                if (_valueChangedBacking == null)
+                    _valueChangedBacking = new Dictionary<Action<ValueChangedEvent<float>>, EventRegistration>();
+                if (_valueChangedBacking.ContainsKey(value)) return;
+                var reg = On<ControlValueChangedEvent>(e => value(new ValueChangedEvent<float> { _newValue = e.Value }));
+                _valueChangedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_valueChangedBacking != null && _valueChangedBacking.TryGetValue(value, out var reg))
+                {
+                    _valueChangedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
+
+        // ChangeCommitted：拖拽松手提交终值（core EVT_CHANGE_COMMITTED，x=终值）。Action<float> 直给终值。
+        [NonSerialized] Dictionary<Action<float>, EventRegistration> _changeCommittedBacking;
+        public event Action<float> ChangeCommitted
+        {
+            add
+            {
+                if (value == null) return;
+                if (_changeCommittedBacking == null)
+                    _changeCommittedBacking = new Dictionary<Action<float>, EventRegistration>();
+                if (_changeCommittedBacking.ContainsKey(value)) return;
+                var reg = On<ControlChangeCommittedEvent>(e => value(e.Value));
+                _changeCommittedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_changeCommittedBacking != null && _changeCommittedBacking.TryGetValue(value, out var reg))
+                {
+                    _changeCommittedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
         static NotImplementedException NE() => new NotImplementedException();
+
+        // ── FFI 转调（float out 经 local + &local，同 GetWorldMatrix 模式）──────────
+        float GetControlValue()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            float v = 0f; int rc = Native.loomgui_stage_get_control_value(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_control_value failed (node {_id})");
+            return v;
+        }
+        void SetControlValue(float v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_control_value(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_value failed (node {_id})");
+        }
+        float GetControlMin()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            float v = 0f; int rc = Native.loomgui_stage_get_control_min(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_control_min failed (node {_id})");
+            return v;
+        }
+        void SetControlMin(float v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_control_min(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_min failed (node {_id})");
+        }
+        float GetControlMax()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            float v = 0f; int rc = Native.loomgui_stage_get_control_max(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_control_max failed (node {_id})");
+            return v;
+        }
+        void SetControlMax(float v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_control_max(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_max failed (node {_id})");
+        }
+        float GetControlStep()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            float v = 0f; int rc = Native.loomgui_stage_get_control_step(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_control_step failed (node {_id})");
+            return v;
+        }
+        void SetControlStep(float v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_control_step(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_step failed (node {_id})");
+        }
+        void SetNodeDisabled(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_set_node_disabled(h, _id, v);
+        }
     }
 
-    public class Toggle : Node
+    public unsafe class Toggle : Node
     {
         internal Toggle(UIContext ctx, uint id) : base(ctx, id) { }
 
-        public bool IsChecked { get { throw NE(); } set { throw NE(); } }
-        public bool Disabled { get { throw NE(); } set { throw NE(); } }
-        public event Action<ValueChangedEvent<bool>> CheckedChanged;
+        // IsChecked 直转 FFI set/get_control_checked（bool* out 经 local + &local）。
+        public bool IsChecked
+        {
+            get { ThrowIfDisposed(); return GetControlChecked(); }
+            set { ThrowIfDisposed(); SetControlChecked(value); }
+        }
+        // disabled setter 直 FFI（set_node_disabled）；无 getter（见 Slider.Disabled 注释）。
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+
+        // CheckedChanged：翻转事件（core EVT_CHECKED_CHANGED，pad[0]=0/1）。订阅 internal
+        // ControlCheckedChangedEvent，翻译为公共 ValueChangedEvent<bool>。backing-dict 同 Button.Clicked。
+        [NonSerialized] Dictionary<Action<ValueChangedEvent<bool>>, EventRegistration> _checkedChangedBacking;
+        public event Action<ValueChangedEvent<bool>> CheckedChanged
+        {
+            add
+            {
+                if (value == null) return;
+                if (_checkedChangedBacking == null)
+                    _checkedChangedBacking = new Dictionary<Action<ValueChangedEvent<bool>>, EventRegistration>();
+                if (_checkedChangedBacking.ContainsKey(value)) return;
+                var reg = On<ControlCheckedChangedEvent>(e => value(new ValueChangedEvent<bool> { _newValue = e.Checked }));
+                _checkedChangedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_checkedChangedBacking != null && _checkedChangedBacking.TryGetValue(value, out var reg))
+                {
+                    _checkedChangedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
         static NotImplementedException NE() => new NotImplementedException();
+
+        // ── FFI 转调 ────────────────────────────────────────────────────────
+        bool GetControlChecked()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            bool v = false; int rc = Native.loomgui_stage_get_control_checked(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_control_checked failed (node {_id})");
+            return v;
+        }
+        void SetControlChecked(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_control_checked(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_checked failed (node {_id})");
+        }
+        void SetNodeDisabled(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_set_node_disabled(h, _id, v);
+        }
     }
 
-    public class RadioButton : Node
+    public unsafe class RadioButton : Node
     {
         internal RadioButton(UIContext ctx, uint id) : base(ctx, id) { }
 
-        public bool IsChecked { get { throw NE(); } set { throw NE(); } }
-        public string Name { get { throw NE(); } }   // 只读：结构性，决定分组语义
-        public bool Disabled { get { throw NE(); } set { throw NE(); } }
-        public event Action<ValueChangedEvent<bool>> CheckedChanged;   // 同组互斥框架自动做；只新选中项触发（对齐 web）
+        // IsChecked 直转 FFI set/get_control_checked（与 Toggle 同语义；同组互斥框架自动做）。
+        public bool IsChecked
+        {
+            get { ThrowIfDisposed(); return GetControlChecked(); }
+            set { ThrowIfDisposed(); SetControlChecked(value); }
+        }
+        // Name = radio 分组名（HTML name 属性，结构性，决定互斥语义）。core 无 node-attribute getter FFI
+        // ——暂留 throw，待打包期属性镜像或 side query 暴露后填。
+        public string Name { get { throw NE(); } }
+        // disabled setter 直 FFI；无 getter（见 Slider.Disabled 注释）。
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+
+        // CheckedChanged：新选中事件（core EVT_CHECKED_CHANGED，pad[0]=1）。与 Toggle 同 payload 结构——
+        // 语义差别在 core（同组互斥只新选中项触发），C# 投影同一套 demux。backing-dict 同 Button.Clicked。
+        [NonSerialized] Dictionary<Action<ValueChangedEvent<bool>>, EventRegistration> _checkedChangedBacking;
+        public event Action<ValueChangedEvent<bool>> CheckedChanged
+        {
+            add
+            {
+                if (value == null) return;
+                if (_checkedChangedBacking == null)
+                    _checkedChangedBacking = new Dictionary<Action<ValueChangedEvent<bool>>, EventRegistration>();
+                if (_checkedChangedBacking.ContainsKey(value)) return;
+                var reg = On<ControlCheckedChangedEvent>(e => value(new ValueChangedEvent<bool> { _newValue = e.Checked }));
+                _checkedChangedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_checkedChangedBacking != null && _checkedChangedBacking.TryGetValue(value, out var reg))
+                {
+                    _checkedChangedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
         static NotImplementedException NE() => new NotImplementedException();
+
+        // ── FFI 转调 ────────────────────────────────────────────────────────
+        bool GetControlChecked()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            bool v = false; int rc = Native.loomgui_stage_get_control_checked(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_control_checked failed (node {_id})");
+            return v;
+        }
+        void SetControlChecked(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_control_checked(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_checked failed (node {_id})");
+        }
+        void SetNodeDisabled(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_set_node_disabled(h, _id, v);
+        }
     }
 
     public class TextArea : Node
@@ -1394,14 +1617,56 @@ namespace LoomGUI
         static NotImplementedException NE() => new NotImplementedException();
     }
 
-    public class ProgressBar : Node
+    public unsafe class ProgressBar : Node
     {
         internal ProgressBar(UIContext ctx, uint id) : base(ctx, id) { }
 
-        public float Value { get { throw NE(); } set { throw NE(); } }
-        public float Max { get { throw NE(); } set { throw NE(); } }   // 0 基底，照 <progress> 标准，无 Min
+        // 投影层填实：直转 FFI set/get_control_value·set/get_control_max（value clamp [0,max]）。
+        // rc<0（非值控件 / 节点缺失）经 ThrowIfDisposed 后不该达——升 InvalidOperationException 不吞。
+        public float Value
+        {
+            get { ThrowIfDisposed(); return GetControlValue(); }
+            set { ThrowIfDisposed(); SetControlValue(value); }
+        }
+        public float Max
+        {
+            get { ThrowIfDisposed(); return GetControlMax(); }
+            set { ThrowIfDisposed(); SetControlMax(value); }
+        }
+        // indeterminate 是打包期 control_init 字段（core 无 runtime setter / 无 getter FFI）——
+        // 设计期产物，运行时不可变。getter 暂留 throw：待 core 暴露 side query 或打包期镜像后再填。
         public bool IsIndeterminate { get { throw NE(); } set { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
+
+        // float out 经 local + &local（同 GetWorldMatrix 局部取址模式，不用 fixed）。rc<0 升异常不吞。
+        float GetControlValue()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            float v = 0f;
+            int rc = Native.loomgui_stage_get_control_value(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_control_value failed (node {_id})");
+            return v;
+        }
+        void SetControlValue(float v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_control_value(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_value failed (node {_id})");
+        }
+        float GetControlMax()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            float v = 0f;
+            int rc = Native.loomgui_stage_get_control_max(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_control_max failed (node {_id})");
+            return v;
+        }
+        void SetControlMax(float v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_control_max(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_max failed (node {_id})");
+        }
     }
 
     // ── ListView ────────────────────────────────────────────────────

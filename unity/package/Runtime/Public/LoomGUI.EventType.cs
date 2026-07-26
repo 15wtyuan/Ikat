@@ -45,5 +45,13 @@ namespace LoomGUI
         AnimationIteration = 19,
         AnimationEnd = 20,
         TransitionEnd = 21,
+        // ── 控件交互事件（22+，对齐 core EVT_VALUE_CHANGED / EVT_CHECKED_CHANGED /
+        // EVT_CHANGE_COMMITTED，input.rs:83-85）──────────────────────────────
+        // 这些走 LoomEvent stream（demux 产）：Slider 拖拽逐值 / Toggle·Radio 翻转 / Slider 松手提交。
+        // payload 复用 EventRecord 现有字段（不扩 struct）：VALUE_CHANGED·CHANGE_COMMITTED 用 x（float），
+        // CHECKED_CHANGED 用 pad[0]（0/1）。
+        ValueChanged = 22,
+        CheckedChanged = 23,
+        ChangeCommitted = 24,
     }
 }

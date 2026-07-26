@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output_dir": "../controls-ws-out",
+  "packages": [
+    {
+      "name": "controls",
+      "dirs": ["."],
+      "html": ["controls.html"]
+    }
+  ],
+  "atlases": [],
+  "fonts": []
+}

@@ -154,6 +154,25 @@ namespace LoomGUI
                         }
                         break;
 
+                    // ── 控件交互事件（22+，core EVT_*）──────────────────────
+                    // payload 复用 EventRecord 现有字段（input.rs:80-85）：
+                    //   VALUE_CHANGED(22) / CHANGE_COMMITTED(24)：x 装新 float 值（Slider 拖拽逐值 / 松手终值）。
+                    //   CHECKED_CHANGED(23)：pad[0] 装布尔（Toggle 翻转 / Radio 新选中）。
+                    // route struct（ControlValueChangedEvent 等）携 raw payload 经 EventBus 路由；控件类的
+                    // ValueChanged/CheckedChanged 订阅它们并翻译为公共 ValueChangedEvent<*>。
+                    case (byte)EventType.ValueChanged:
+                        DispatchTyped(nodeId,
+                            new ControlValueChangedEvent { _core = NewCore(nodeId), _value = evt.x });
+                        break;
+                    case (byte)EventType.CheckedChanged:
+                        DispatchTyped(nodeId,
+                            new ControlCheckedChangedEvent { _core = NewCore(nodeId), _checked = evt._pad != 0 });
+                        break;
+                    case (byte)EventType.ChangeCommitted:
+                        DispatchTyped(nodeId,
+                            new ControlChangeCommittedEvent { _core = NewCore(nodeId), _value = evt.x });
+                        break;
+
                     // ── deferred（无 core source）────────────────────────
                     // LongPress (9)：无对应 typed event struct——跳过。
                     //

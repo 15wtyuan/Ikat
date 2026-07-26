@@ -121,9 +121,13 @@ namespace LoomGUI
 
     public struct ValueChangedEvent<T>
     {
-        public T OldValue { get { throw NE(); } }
-        public T NewValue { get { throw NE(); } }
-        static NotImplementedException NE() => new NotImplementedException();
+        // 投影层填（EventDemuxer 造本 struct 时赋）。core 控件事件 stream 只携新值（EVT_VALUE_CHANGED
+        // x=新 float / EVT_CHECKED_CHANGED pad[0]=bool），无 OldValue——故 _oldValue 留 default(T)。
+        // 公共 OldValue/NewValue 签名冻结；此处仅补 backing 字段把 throw 占位转实读（同控件属性壳填实）。
+        internal T _oldValue;
+        internal T _newValue;
+        public T OldValue { get { return _oldValue; } }
+        public T NewValue { get { return _newValue; } }
     }
 
     public struct SelectionChangedEvent

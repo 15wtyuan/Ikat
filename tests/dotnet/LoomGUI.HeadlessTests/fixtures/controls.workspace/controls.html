@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>control projection fixture</title>
+<style>
+  #root { width: 200px; height: 100px; }
+</style>
+</head>
+<body>
+  <div id="root">
+    <!-- inline controls 显式 display:block（围栏 inline-in-block 契约：作者有意块级撑满）。
+         ProgressBar: value + max bake ControlState::Progress (determinate)。 -->
+    <progress id="prog" value="40" max="100" style="display:block"></progress>
+    <!-- Slider: value attr required to bake ControlState::Slider。 -->
+    <input id="sld" type="range" value="50" min="0" max="100" step="5" style="display:block" />
+    <!-- Toggle: checked attr bakes ControlState::Toggle。 -->
+    <input id="tggl" type="checkbox" style="display:block" />
+    <!-- RadioButton。 -->
+    <input id="rdo" type="radio" name="grp" style="display:block" />
+  </div>
+</body>
+</html>
