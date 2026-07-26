@@ -1,7 +1,7 @@
 //! IrTree → core TemplateNode 桥（生产级，替代 fence/tests/cascade_spike.rs 的 throwaway mini-bridge）。
 //! fence parse_template 停在 IrTree；本模块是第一处把 IrTree 翻译成 core 打包结构的代码。
 
-use loomgui_core::asset::TemplateNode;
+use loomgui_core::asset::{ControlInit, TemplateNode};
 use loomgui_core::scene::NodeKind;
 use loomgui_fence::ir::{IrElement, IrNodeKind};
 use loomgui_fence::schema::tag::SemanticKind;
@@ -49,6 +49,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                 } else {
                     None
                 };
+                let control_init = extract_control_init(kind, el);
                 nodes.push(TemplateNode {
                     kind,
                     style: parsed.styles.get(ir_idx).cloned().unwrap_or_default(),
@@ -59,7 +60,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     tabindex: attr(el, "tabindex").and_then(|s| s.parse::<i32>().ok()),
                     content: None,
                     src,
-                    control_init: None,
+                    control_init,
                 });
             }
             IrNodeKind::Text(s) => {
@@ -134,6 +135,64 @@ fn attr(el: &IrElement, name: &str) -> Option<String> {
         .iter()
         .find(|a| a.name == name)
         .map(|a| a.value.clone())
+}
+
+/// 按 NodeKind 从 HTML 属性提取控件初始值（打包期 bake 进 pkg.bin，instantiate 时读出）。
+///
+/// 语义：
+/// - ProgressBar：始终产 Some。无 value 属性视为 indeterminate（HTML 语义：浏览器
+///   同样把无 value 的 progress 渲染为旋转动画）；value 缺省 0.0，max 缺省 100.0。
+/// - Slider：无 value 返回 None（运行时用默认值兜底）。
+/// - Toggle/RadioButton：始终产 Some，显式记录勾选状态（checked 缺省 false）。
+///   radio name 缺省空串。
+///
+/// 非 control 节点返回 None。
+fn extract_control_init(kind: NodeKind, el: &IrElement) -> Option<ControlInit> {
+    match kind {
+        NodeKind::ProgressBar => {
+            // value 缺席 = indeterminate（必须先判 is_some 再 parse，否则 indeterminate 误判 false）。
+            let value_attr = attr(el, "value");
+            let indeterminate = value_attr.is_none();
+            let value = value_attr
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(0.0);
+            let max = attr(el, "max")
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(100.0);
+            Some(ControlInit::Progress {
+                value,
+                max,
+                indeterminate,
+            })
+        }
+        NodeKind::Slider => attr(el, "value")
+            .and_then(|v| v.parse::<f32>().ok())
+            .map(|value| {
+                let min = attr(el, "min")
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(0.0);
+                let max = attr(el, "max")
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(100.0);
+                let step = attr(el, "step")
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(1.0);
+                ControlInit::Slider {
+                    value,
+                    min,
+                    max,
+                    step,
+                }
+            }),
+        NodeKind::Toggle => Some(ControlInit::Toggle {
+            checked: attr(el, "checked").is_some(),
+        }),
+        NodeKind::RadioButton => Some(ControlInit::Radio {
+            checked: attr(el, "checked").is_some(),
+            name: attr(el, "name").unwrap_or_default(),
+        }),
+        _ => None,
+    }
 }
 
 /// 本 ir 节点或任一祖先是 `<template>` → true（template 子树整体跳过，content 留 ListView 复合束）。
