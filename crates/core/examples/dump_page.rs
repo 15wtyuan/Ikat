@@ -51,6 +51,7 @@ fn main() {
         let scene = s.scene.as_mut().unwrap();
         append_child(scene, root_id, inst).expect("append_child");
     }
+    let _frame0 = s.tick_and_render(); // warm-up: 控件 sync 写 inline_override，rematch 下帧才进 style
     let frame = s.tick_and_render();
     let scene = s.scene.as_ref().unwrap();
 

@@ -253,12 +253,29 @@ use crate::scene::node::{Node, NodeKind};
 /// **常驻：**runtime rematch 用，不依赖 parse feature。
 pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
     if let Some(t) = &c.tag {
-        let kind_tag = match &node.kind {
+        // NodeKind → HTML 标签名：标准元素用其 tag，控件 kind 回溯到作者写的 tag
+        // （input/progress），使 `input[type="range"]`、`progress` 等选择器在运行时 rematch
+        // 仍能命中。映射须与 fence schema/tag.rs resolve_semantic（tag→SemanticKind→NodeKind）
+        // 的逆方向一致。
+        let kind_tag = match node.kind {
             NodeKind::Container => "div",
             NodeKind::Button => "button",
             NodeKind::Image => "img",
-            NodeKind::TextNode => "span",
-            _ => "div", // RichText retired in Spec-2; other leaf kinds map to div.
+            NodeKind::TextNode | NodeKind::TextElement => "span",
+            NodeKind::TextArea => "textarea",
+            NodeKind::Dropdown => "select",
+            NodeKind::OptionItem => "option",
+            NodeKind::ListItem => "li",
+            // input 变体：type 在 parse 期固化为独立 kind，tag 统一为 "input"
+            NodeKind::TextField
+            | NodeKind::NumberField
+            | NodeKind::PasswordField
+            | NodeKind::SearchField
+            | NodeKind::Slider
+            | NodeKind::Toggle
+            | NodeKind::RadioButton => "input",
+            NodeKind::ProgressBar => "progress",
+            _ => "div", // Slot/ListView/CustomElement 等回退 div
         };
         if kind_tag != t.as_str() {
             return false;

@@ -31,7 +31,9 @@
   .skill-name { color:#e0e6ec; font-size:15px; flex-grow:1; }
   .skill-lv { color:#d4a44e; font-size:14px; font-weight:700; }
   @keyframes charge { from{filter:brightness(.7)} to{filter:brightness(1)} }
-  progress { animation:charge 2s infinite alternate; }
+  /* ProgressBar: 控件本身是轨道，core 注入 .loom-fill 填充条（width:% 由 value 驱动）*/
+  progress { animation:charge 2s infinite alternate; background-color:rgba(26,47,69,0.85); border-radius:4px; overflow:hidden; }
+  .loom-fill { background-color:#5fb4d4; height:100%; }
   </style>
 </head>
 <body>
@@ -45,11 +47,12 @@
         <div class="stage-info">
           <span class="stage-name">暗影游侠 · <span>影刃</span></span>
           <span class="stage-lv">Lv.58</span>
+          <button id="btn-train" style="background-color:#d4a44e;color:#0e1620;font-size:14px;font-weight:700;padding:6px 16px;border-radius:8px">训练 +EXP</button>
         </div>
         <div class="stat-bars">
           <div class="stat-row"><span class="stat-label">HP</span><progress value="780" max="1000" style="flex-grow:1;height:16px;"></progress><span class="stat-val">780/1000</span></div>
           <div class="stat-row"><span class="stat-label">MP</span><progress value="340" max="600" style="flex-grow:1;height:16px;"></progress><span class="stat-val">340/600</span></div>
-          <div class="stat-row"><span class="stat-label">EXP</span><progress value="62" max="100" style="flex-grow:1;height:16px;"></progress><span class="stat-val">62%</span></div>
+          <div class="stat-row"><span class="stat-label">EXP</span><progress id="stat-exp" value="62" max="100" style="flex-grow:1;height:16px;"></progress><span class="stat-val" id="stat-exp-val">62%</span></div>
         </div>
       </div>
       <div class="col-side">

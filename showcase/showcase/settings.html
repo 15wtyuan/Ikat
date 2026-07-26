@@ -23,13 +23,21 @@
   .field-hint { color:#6c7080; font-size:13px; margin-top:3px; }
   .field-control {display:flex; flex-direction:row; align-items:center; gap:12px; }
   .val { color:#8ec5d8; font-size:14px; min-width:48px; text-align:right; }
-  input[type="range"] { width:280px;  }
   input[type="number"], input[type="text"], input[type="password"], input[type="search"] { background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; width:240px; }
   select { background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; }
   .checkbox-row {display:flex; flex-direction:row; align-items:center; gap:10px; }
   .radio-group {display:flex; flex-direction:row; gap:20px; }
   .radio-opt {display:flex; flex-direction:row; align-items:center; gap:6px; color:#9aa0b4; font-size:15px; }
-  input[type="checkbox"], input[type="radio"] {  }
+  /* Toggle/Radio: 控件本身是框，core 注入 .loom-check 勾选图标（display 控制可见）*/
+  input[type="checkbox"], input[type="radio"] { width:18px; height:18px; background-color:rgba(26,47,69,0.85); border-width:2px; border-style:solid; border-color:#2a5a75; border-radius:4px; justify-content:center; align-items:center; }
+  input[type="radio"] { border-radius:9px; }
+  .loom-check { width:8px; height:8px; background-color:#5fb4d4; border-radius:2px; }
+  input[type="radio"] .loom-check { border-radius:4px; }
+  /* Slider: 控件本身是轨道容器，core 注入 .loom-track>.loom-fill + .loom-thumb */
+  input[type="range"] { width:280px; height:6px; background-color:rgba(26,47,69,0.85); border-radius:3px; border-width:0; padding:0; flex-direction:row; align-items:center; }
+  .loom-track { flex-grow:1; height:6px; background-color:rgba(26,47,69,0.85); border-radius:3px; overflow:hidden; }
+  .loom-fill { background-color:#5fb4d4; height:100%; }
+  .loom-thumb { width:16px; height:16px; background-color:#d4a44e; border-radius:8px; }
   .panel { transition:opacity .2s; }
   </style>
 </head>
@@ -52,7 +60,7 @@
         <div class="page-desc">input[type=range] · input[type=number]</div>
         <div class="field">
           <div><span class="field-label">主音量</span><div class="field-hint">range 0–100</div></div>
-          <div class="field-control"><input type="range" id="vol-master" min="0" max="100" value="80"><span class="val">80</span></div>
+          <div class="field-control"><input type="range" id="vol-master" min="0" max="100" value="80"><span class="val" id="vol-master-val">80</span></div>
         </div>
         <div class="field">
           <div><span class="field-label">音效音量</span><div class="field-hint">range 0–100</div></div>

@@ -19,10 +19,18 @@
   textarea { width:100%; height:100px; resize:none; font-family:inherit; }
   .radio-group {display:flex; flex-direction:row; gap:24px; }
   .radio-opt {display:flex; flex-direction:row; align-items:center; gap:8px; color:#9aa0b4; font-size:15px; }
-  input[type="radio"], input[type="checkbox"] {  }
+  /* Toggle/Radio: 控件本身是框，core 注入 .loom-check 勾选图标（display 控制可见）*/
+  input[type="checkbox"], input[type="radio"] { width:18px; height:18px; background-color:rgba(26,47,69,0.85); border-width:2px; border-style:solid; border-color:#2a5a75; border-radius:4px; justify-content:center; align-items:center; }
+  input[type="radio"] { border-radius:9px; }
+  .loom-check { width:8px; height:8px; background-color:#5fb4d4; border-radius:2px; }
+  input[type="radio"] .loom-check { border-radius:4px; }
+  /* Slider: 控件本身是轨道容器，core 注入 .loom-track>.loom-fill + .loom-thumb */
+  input[type="range"] { flex-grow:1; height:6px; background-color:rgba(26,47,69,0.85); border-radius:3px; border-width:0; padding:0; flex-direction:row; align-items:center; }
+  .loom-track { flex-grow:1; height:6px; background-color:rgba(26,47,69,0.85); border-radius:3px; overflow:hidden; }
+  .loom-fill { background-color:#5fb4d4; height:100%; }
+  .loom-thumb { width:16px; height:16px; background-color:#d4a44e; border-radius:8px; }
   .slider-field {display:flex; flex-direction:row; align-items:center; gap:16px; }
   .slider-val { color:#d4a44e; font-size:16px; font-weight:700; min-width:40px; }
-  input[type="range"] { flex-grow:1;  }
   .actions {display:flex; flex-direction:row; gap:16px; justify-content:flex-end; }
   .btn { padding:12px 32px; border-radius:10px; font-size:16px; font-weight:700; transition:filter .15s; }
   .btn-create { background-color:#d4a44e; color:#0e1620; }

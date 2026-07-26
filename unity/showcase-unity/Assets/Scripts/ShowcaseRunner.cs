@@ -67,6 +67,7 @@ public class ShowcaseRunner : MonoBehaviour
             return;
         }
         WireNav(_current, page);
+        WireControls(_current, page);
         Debug.Log($"[Showcase] Instantiate showcase/{page} = OK");
     }
 
@@ -85,6 +86,40 @@ public class ShowcaseRunner : MonoBehaviour
                 string p = target;   // 防御性局部拷贝，确保每个闭包绑各自的页名
                 if (page.TryGet<Button>(cardId, out var card))
                     card.Clicked += () => Show(p);
+            }
+        }
+    }
+
+    /// 控件事件流演示：settings 滑块拖动更新旁边数值、character 训练按钮给 EXP 进度条加经验。
+    /// 只验证 ValueChanged / Clicked → ProgressBar.Value 的端到端事件链，不构建完整逻辑。
+    /// 元素缺失（本页没该控件）TryGet 返 false 跳过——和 WireNav 同样的宽松查询模式。
+    void WireControls(Container page, string pageName)
+    {
+        if (pageName == "settings")
+        {
+            // Slider.ValueChanged 逐帧拖拽值 → 同步刷新旁边的数值标签。
+            if (page.TryGet<Slider>("vol-master", out var vol)
+                && page.TryGet<TextElement>("vol-master-val", out var volVal))
+            {
+                vol.ValueChanged += e => volVal.TextContent = Mathf.RoundToInt(e.NewValue).ToString();
+            }
+            // Toggle.CheckedChanged → 控制台输出（演示 checkbox 事件链）。
+            if (page.TryGet<Toggle>("gfx-fullscreen", out var fs))
+                fs.CheckedChanged += e => Debug.Log($"[Showcase] fullscreen = {e.NewValue}");
+        }
+
+        if (pageName == "character")
+        {
+            // Button.Clicked → ProgressBar.Value += 10（clamp 由 core 做），并刷新百分比标签。
+            if (page.TryGet<Button>("btn-train", out var train)
+                && page.TryGet<ProgressBar>("stat-exp", out var exp)
+                && page.TryGet<TextElement>("stat-exp-val", out var expVal))
+            {
+                train.Clicked += () =>
+                {
+                    exp.Value = Mathf.Min(exp.Value + 10f, exp.Max);
+                    expVal.TextContent = $"{Mathf.RoundToInt(exp.Value)}%";
+                };
             }
         }
     }

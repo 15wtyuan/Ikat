@@ -31,6 +31,9 @@
   .dialog-actions {display:flex; flex-direction:row; gap:12px; justify-content:flex-end; }
   .btn-confirm { background-color:#5fb4d4; color:#0e1620; font-size:15px; font-weight:700; padding:10px 24px; border-radius:10px; }
   .btn-cancel { background-color:rgba(26,47,69,0.85); color:#9aa0b4; font-size:15px; padding:10px 24px; border-radius:10px; }
+  /* ProgressBar: 控件本身是轨道，core 注入 .loom-fill 填充条（width:% 由 value 驱动）*/
+  progress { background-color:rgba(26,47,69,0.85); border-radius:4px; overflow:hidden; height:8px; }
+  .loom-fill { background-color:#5fb4d4; height:100%; }
   </style>
 </head>
 <body>
