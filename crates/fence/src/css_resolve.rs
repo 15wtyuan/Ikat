@@ -5,6 +5,26 @@ use crate::schema::tag::{find_tag, DisplayDefault, SemanticKind};
 use loomgui_core::style::mapping::apply_decl;
 use loomgui_core::style::resolved::{DisplayMode, ResolvedStyle, TextAlign};
 
+/// 围栏外但常见的 CSS 属性 → 引导文案（说明 LoomGUI 行为 + 建议怎么改）。
+///
+/// 这些属性围栏不支持，写了一律 error（`FenceUnknownCssProp`）阻断打包——
+/// 但 error message 帮作者改到 LoomGUI 等价写法，而非只说「不在围栏」。
+/// 返回 `None` 的属性走通用文案。
+///
+/// 共享给 inline style（`css_resolve`）、fence gate（`fence_gate`）、外部
+/// `<style>` 块（`css_rules`）三处 `FenceUnknownCssProp` 构造点，保证引导文案一致。
+pub(crate) fn unsupported_hint(prop: &str) -> Option<&'static str> {
+    Some(match prop {
+        "box-sizing" => "LoomGUI uses border-box model exclusively (width includes padding+border). This declaration has no effect — remove it.",
+        "visibility" => "LoomGUI has no visibility:hidden. To hide an element use `display:none` (removes layout space) or `opacity:0` (keeps space).",
+        "z-index" => "LoomGUI renders in DOM order; z-index has no effect. Reorder DOM siblings or use `position:absolute` to control stacking.",
+        "cursor" | "outline" | "user-select" | "text-decoration" | "object-fit" => {
+            "not supported by fence — remove this declaration."
+        }
+        _ => return None,
+    })
+}
+
 /// Resolve inline styles for all nodes in the tree.
 ///
 /// Returns one `ResolvedStyle` per node, in node-index order.
@@ -91,9 +111,12 @@ pub fn resolve_inline_styles_with_diags(
                 // Validate property name
                 let is_known = find_css_prop(prop).is_some() || find_shorthand(prop).is_some();
                 if !is_known {
+                    let hint = unsupported_hint(prop).unwrap_or(
+                        "not supported by fence — remove or replace with a supported property.",
+                    );
                     diagnostics.push(Diagnostic::error(
                         DiagnosticCode::FenceUnknownCssProp,
-                        format!("CSS property \"{}\" is not in the fence", prop),
+                        format!("CSS property \"{}\": {}", prop, hint),
                         line_map.source_location(node.span.start, file.to_string()),
                     ));
                     continue;
@@ -388,6 +411,58 @@ mod tests {
                 .any(|d| d.code == DiagnosticCode::FenceBadCssValue
                     && d.message.contains("animation")),
             "非法 animation 值应报 FenceBadCssValue: {diags:?}"
+        );
+    }
+
+    /// 围栏外常见属性（box-sizing 等）error message 必须带替代方案引导，
+    /// 帮作者改到正确写法而非只说「不在围栏」。Task 6（E1）。
+    #[test]
+    fn box_sizing_error_guides_to_removal() {
+        let r = crate::parse_template(r#"<div style="box-sizing:border-box"></div>"#, "t.html");
+        let d = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::FenceUnknownCssProp)
+            .expect("should error");
+        assert!(
+            d.message.contains("border-box"),
+            "msg should explain LoomGUI uses border-box: {}",
+            d.message
+        );
+        assert!(
+            d.message.contains("remove"),
+            "msg should guide removal: {}",
+            d.message
+        );
+    }
+
+    #[test]
+    fn visibility_error_guides_to_display_none() {
+        let r = crate::parse_template(r#"<div style="visibility:hidden"></div>"#, "t.html");
+        let d = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::FenceUnknownCssProp)
+            .expect("should error");
+        assert!(
+            d.message.contains("display:none"),
+            "msg should suggest display:none: {}",
+            d.message
+        );
+    }
+
+    /// flex-wrap:wrap-reverse 不支持——schema 删值后必须报 FenceBadCssValue，
+    /// 而非像 v1 那样静默降级成 nowrap。Task 7（E2）。
+    #[test]
+    fn flex_wrap_reverse_rejected() {
+        let r = crate::parse_template(r#"<div style="flex-wrap:wrap-reverse"></div>"#, "t.html");
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::FenceBadCssValue
+                    && d.message.contains("wrap-reverse")),
+            "wrap-reverse should error: {:?}",
+            r.diagnostics
         );
     }
 }

@@ -13,7 +13,7 @@
   .grid {display:flex; flex-direction:row; flex-wrap:wrap; gap:12px; }
   .item {display:flex;flex-direction:column; width:120px; height:120px; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:10px; gap:6px; align-items:center; position:relative; transition:transform .15s, background-color .15s; }
   .item:hover { transform:scale(1.05); background-color:rgba(26,47,69,0.85); }
-  .item.selected { border-width:0 0 0 3px; border-color:#d4a44e; }
+  .item.selected { border-width:0 0 0 3px; border-style:solid; border-color:#d4a44e; }
   .item-icon { width:56px; height:56px; }
   .item-badge { position:absolute; top:6px; right:6px; background-color:#d4a44e; color:#0e1620; font-size:12px; font-weight:700; padding:1px 6px; border-radius:10px; }
   .item-dur { width:80px; }
@@ -36,7 +36,7 @@
 </head>
 <body>
   <div class="root">
-    <header class="topbar" style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-color:#2a5a75">
+    <header class="topbar" style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
       <div style="display:flex;flex-direction:row;align-items:center;gap:12px"><button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">背包</span></div>
     </header>
     <div class="body">

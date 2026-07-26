@@ -17,13 +17,23 @@ fn main() -> ExitCode {
     let root = PathBuf::from(&args[2]);
     match loomgui_pkg::build::build(&root) {
         Ok(report) => {
+            // 围栏一致性 warning（W1/W2）打到 stderr：合法但预览≠运行时的不一致，
+            // 不阻断打包，但作者须看到以补全声明。修前 warning 被丢弃，CLI 用户名存实亡。
+            for w in &report.warnings {
+                eprintln!("{}", w.render());
+            }
             for line in &report.log {
                 eprintln!("{line}");
             }
             eprintln!(
-                "OK: {} atlases, {} fonts",
+                "OK: {} atlases, {} fonts{}",
                 report.atlases.len(),
-                report.fonts.len()
+                report.fonts.len(),
+                if report.warnings.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {} warning(s)", report.warnings.len())
+                },
             );
             ExitCode::SUCCESS
         }

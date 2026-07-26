@@ -1,4 +1,5 @@
 use crate::annotate::annotate;
+use crate::consistency_check::check_consistency;
 use crate::css_resolve::resolve_inline_styles_with_diags;
 use crate::css_rules::{parse_style_block, KeyframesRule};
 use crate::diagnostic::{Diagnostic, LineMap};
@@ -71,6 +72,11 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
         file,
         &line_map,
     ));
+
+    // Stage 6.6: 围栏内属性一致性 warning。属性本身围栏合法，但漏写/默认值冲突致
+    // HTML 预览（浏览器按 CSS initial 值）≠ 运行时（LoomGUI 默认值）——不阻断打包，
+    // 只提醒作者补全声明。必须在 Stage 4（styles 已 cascade）之后。
+    diagnostics.extend(check_consistency(&tree, &styles, file, &line_map));
 
     // Extract referenced sprites (img src, background-image url)
     let referenced_sprites = extract_sprites(&tree);

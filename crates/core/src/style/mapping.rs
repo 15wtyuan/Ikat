@@ -1,7 +1,7 @@
 use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
-    BackgroundSize, BorderRadius, BoxShadow, CornerRadius, DisplayMode, Gradient2, GradientDir,
-    OverflowMode, ResolvedStyle, SliceInsets, TextAlign,
+    BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, Gradient2,
+    GradientDir, OverflowMode, ResolvedStyle, SliceInsets, TextAlign,
 };
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, LengthPercentage, LengthPercentageAuto};
@@ -505,10 +505,13 @@ fn parse_overflow(value: &str) -> Option<OverflowMode> {
     }
 }
 
-/// 解析 border 宽度+颜色声明：`<width> <style>? <color>?`（CSS 简写语义，style 围栏外忽略）。
-/// width 取首个 px token，color 取首个可解析颜色 token。width 缺失 → None（整条无效）。
-fn parse_border_value(value: &str) -> Option<(f32, Option<[f32; 4]>)> {
+/// 解析 border 简写值：`<width> <style>? <color>?`（CSS 标准简写语义）。
+/// width 取首个 px token，style 取首个关键字（solid/dashed/dotted/double/none），
+/// color 取首个可解析颜色 token。width 缺失 → None（整条无效）。未声明 style 时
+/// style 默认 None（CSS：不画边框），调用方据此决定是否填 border_style。
+fn parse_border_value(value: &str) -> Option<(f32, BorderStyle, Option<[f32; 4]>)> {
     let mut w: Option<f32> = None;
+    let mut style: BorderStyle = BorderStyle::None; // 未声明 = CSS 默认 none
     let mut color: Option<[f32; 4]> = None;
     for tok in value.split_whitespace() {
         if color.is_none() {
@@ -516,6 +519,30 @@ fn parse_border_value(value: &str) -> Option<(f32, Option<[f32; 4]>)> {
                 color = Some(c);
                 continue;
             }
+        }
+        // style 关键字优先于 width 判定，避免 "solid" 被 strip_suffix("px") 误漏。
+        match tok {
+            "solid" => {
+                style = BorderStyle::Solid;
+                continue;
+            }
+            "dashed" => {
+                style = BorderStyle::Dashed;
+                continue;
+            }
+            "dotted" => {
+                style = BorderStyle::Dotted;
+                continue;
+            }
+            "double" => {
+                style = BorderStyle::Double;
+                continue;
+            }
+            "none" => {
+                style = BorderStyle::None;
+                continue;
+            }
+            _ => {}
         }
         if w.is_none() {
             if let Some(px) = tok
@@ -526,7 +553,7 @@ fn parse_border_value(value: &str) -> Option<(f32, Option<[f32; 4]>)> {
             }
         }
     }
-    Some((w?, color))
+    Some((w?, style, color))
 }
 
 /// CSS 盒模型四边（border/padding 单边 longhand 共用）。
@@ -537,9 +564,10 @@ enum Side {
     Left,
 }
 
-/// border-top/right/bottom/left 单边 longhand：设 ts.border 对应边 + border_color，不动其他三边。
+/// border-top/right/bottom/left 单边 longhand：设 ts.border 对应边 + border_color +
+/// border_style，不动其他三边。
 fn apply_border_side(style: &mut ResolvedStyle, side: Side, value: &str) -> bool {
-    let Some((w, color)) = parse_border_value(value) else {
+    let Some((w, bstyle, color)) = parse_border_value(value) else {
         return false;
     };
     let lp = LengthPercentage::length(w);
@@ -553,6 +581,7 @@ fn apply_border_side(style: &mut ResolvedStyle, side: Side, value: &str) -> bool
     if let Some(c) = color {
         style.border_color = Some(c);
     }
+    style.border_style = bstyle;
     true
 }
 
@@ -633,8 +662,8 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "border" => {
-            // CSS 简写：四边同值。width + color 共用 parse_border_value。
-            let Some((w, color)) = parse_border_value(value) else {
+            // CSS 简写：四边同值。width + style + color 共用 parse_border_value。
+            let Some((w, bstyle, color)) = parse_border_value(value) else {
                 return false;
             };
             let lp = LengthPercentage::length(w);
@@ -647,6 +676,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             if let Some(c) = color {
                 style.border_color = Some(c);
             }
+            style.border_style = bstyle;
             true
         }
         "border-top" => apply_border_side(style, Side::Top, value),
@@ -701,6 +731,26 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             };
             true
         }
+        // CSS `gap` longhand：row-gap 对应纵向间距（gap.height），column-gap 横向（gap.width），
+        // 与上方 `gap` shorthand 拆分语义一致。复用 parse_four 的 px 解析（含裸数字），
+        // 单 longhand 取首值——与 padding-* 单边 longhand 同口径（px-only：非 px 落 false）。
+        // 裸数字（如 row-gap:0）须与 px 后缀等价，否则 default `0` 会被静默拒。
+        "row-gap" => {
+            let [v, _, _, _] = match parse_four(value) {
+                Some(f) => f,
+                None => return false,
+            };
+            ts.gap.height = LengthPercentage::length(v);
+            true
+        }
+        "column-gap" => {
+            let [v, _, _, _] = match parse_four(value) {
+                Some(f) => f,
+                None => return false,
+            };
+            ts.gap.width = LengthPercentage::length(v);
+            true
+        }
         "flex-direction" => {
             ts.flex_direction = match value.trim() {
                 "row" => taffy::FlexDirection::Row,
@@ -712,8 +762,9 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         }
         "flex-wrap" => {
             ts.flex_wrap = match value.trim() {
+                "nowrap" => taffy::FlexWrap::NoWrap,
                 "wrap" => taffy::FlexWrap::Wrap,
-                _ => taffy::FlexWrap::NoWrap,
+                _ => return false, // wrap-reverse 等未支持值不静默降级（schema 已拦）
             };
             true
         }
@@ -729,6 +780,23 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             ts.align_self = Some(parse_align(value));
             true
         }
+        // `align-content` longhand：cross 轴多行内容对齐。
+        // 不复用 parse_justify——后者服务于 justify-content，无 stretch 分支，会把
+        // align-content 的 CSS 默认值 stretch 静默降级成 FLEX_START。这里独立 match
+        // 覆盖 fence schema 列出的全部合法值（flex-start/center/flex-end/stretch/
+        // space-between/space-around/space-evenly）。
+        "align-content" => {
+            ts.align_content = Some(match value.trim() {
+                "center" => taffy::AlignContent::CENTER,
+                "flex-end" => taffy::AlignContent::FLEX_END,
+                "stretch" => taffy::AlignContent::STRETCH,
+                "space-between" => taffy::AlignContent::SPACE_BETWEEN,
+                "space-around" => taffy::AlignContent::SPACE_AROUND,
+                "space-evenly" => taffy::AlignContent::SPACE_EVENLY,
+                _ => taffy::AlignContent::FLEX_START,
+            });
+            true
+        }
         "flex-grow" => {
             ts.flex_grow = value.trim().parse::<f32>().unwrap_or(0.0);
             true
@@ -739,6 +807,70 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         }
         "flex-basis" => {
             ts.flex_basis = parse_dimension(value);
+            true
+        }
+        // CSS `flex` shorthand：`<grow> <shrink>? <basis>?`。
+        // 单 number（`flex:1`）→ grow=1/shrink=1/basis=0%（CSS 规范），
+        // 单 length（`flex:100px`）→ grow=1/shrink=1/basis=length，
+        // `none` → 0 0 auto，`initial` → 0 1 auto。未支持形态返 false（不静默降级）。
+        // flex_basis 字段类型是 taffy Dimension（length/percent/auto 三态），非 LengthPercentageAuto。
+        "flex" => {
+            let toks: Vec<&str> = value.split_whitespace().collect();
+            match toks.as_slice() {
+                ["none"] => {
+                    ts.flex_grow = 0.0;
+                    ts.flex_shrink = 0.0;
+                    ts.flex_basis = Dimension::auto();
+                }
+                ["initial"] => {
+                    ts.flex_grow = 0.0;
+                    ts.flex_shrink = 1.0;
+                    ts.flex_basis = Dimension::auto();
+                }
+                [g] => {
+                    // 单 number → basis=0%（CSS 规范），单 length → basis=该长度。
+                    if let Ok(gv) = g.parse::<f32>() {
+                        ts.flex_grow = gv;
+                        ts.flex_shrink = 1.0;
+                        ts.flex_basis = Dimension::percent(0.0);
+                    } else if let Some(px) = g
+                        .strip_suffix("px")
+                        .and_then(|s| s.trim().parse::<f32>().ok())
+                    {
+                        ts.flex_grow = 1.0;
+                        ts.flex_shrink = 1.0;
+                        ts.flex_basis = Dimension::length(px);
+                    } else {
+                        return false;
+                    }
+                }
+                [g, sh] => {
+                    ts.flex_grow = g.parse::<f32>().unwrap_or(0.0);
+                    ts.flex_shrink = sh.parse::<f32>().unwrap_or(1.0);
+                    ts.flex_basis = Dimension::percent(0.0);
+                }
+                [g, sh, b] => {
+                    ts.flex_grow = g.parse::<f32>().unwrap_or(0.0);
+                    ts.flex_shrink = sh.parse::<f32>().unwrap_or(1.0);
+                    // basis：length | percent | auto（auto 显式，无单位/未知 → false）。
+                    ts.flex_basis = if *b == "auto" {
+                        Dimension::auto()
+                    } else if let Some(px) = b
+                        .strip_suffix("px")
+                        .and_then(|s| s.trim().parse::<f32>().ok())
+                    {
+                        Dimension::length(px)
+                    } else if let Some(p) = b
+                        .strip_suffix('%')
+                        .and_then(|s| s.trim().parse::<f32>().ok())
+                    {
+                        Dimension::percent(p / 100.0)
+                    } else {
+                        return false;
+                    };
+                }
+                _ => return false,
+            }
             true
         }
         "display" => {
@@ -795,15 +927,22 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.background_image.is_some()
         }
         "background" => {
-            // `background` shorthand：仅识别 `linear-gradient(...)` 形态。
-            // 其他 shorthand 值（纯色、url()）围栏不支持——纯色须写 `background-color`，
-            // 图片须写 `background-image`。围栏外值静默返 false（与 clip-path 等同模式）。
+            // `background` shorthand：按 CSS 优先级依次试 linear-gradient → url() → 纯色。
+            // 三者互斥（gradient 走顶点色无采样；url() 走纹理；纯色写 background_color）。
             let v = value.trim();
             if let Some(rest) = v
                 .strip_prefix("linear-gradient(")
                 .and_then(|s| s.strip_suffix(')'))
             {
                 return parse_linear_gradient_2(style, rest);
+            }
+            if v.starts_with("url(") {
+                style.background_image = parse_url(v);
+                return style.background_image.is_some();
+            }
+            if let Some(c) = parse_color(v) {
+                style.background_color = Some(c);
+                return true;
             }
             false
         }
@@ -818,6 +957,17 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         }
         "border-color" => {
             style.border_color = parse_color(value);
+            true
+        }
+        "border-style" => {
+            // CSS longhand：border-style:solid 等。未声明 border-style 时默认 None（不画）。
+            style.border_style = match value.trim() {
+                "solid" => BorderStyle::Solid,
+                "dashed" => BorderStyle::Dashed,
+                "dotted" => BorderStyle::Dotted,
+                "double" => BorderStyle::Double,
+                _ => BorderStyle::None,
+            };
             true
         }
         "opacity" => {

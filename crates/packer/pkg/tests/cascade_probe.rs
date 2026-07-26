@@ -9,7 +9,7 @@
 use loomgui_core::scene::node::NodeKind;
 use loomgui_core::scene::NodeId;
 use loomgui_core::stage::Stage;
-use loomgui_pkg::build::{pack_components, Component};
+use loomgui_pkg::build::{pack_components, Component, PackResult};
 
 const HTML: &str = include_str!("fixtures/cascade-probe.html");
 
@@ -18,7 +18,7 @@ const HTML: &str = include_str!("fixtures/cascade-probe.html");
 /// without `append_child` the component is orphaned and never reaches layout
 /// (solve walks scene roots only).
 fn build_stage(html: &str) -> (Stage, NodeId) {
-    let (bytes, _refs) = pack_components(&[Component {
+    let PackResult { bytes, .. } = pack_components(&[Component {
         name: "probe".to_string(),
         src: html.to_string(),
         html_rel: "probe.html".to_string(),
@@ -176,7 +176,7 @@ fn probe_e2_fixture_color_cascade() {
   </div>
 </body></html>"#;
 
-    let (bytes, _refs) = pack_components(&[Component {
+    let PackResult { bytes, .. } = pack_components(&[Component {
         name: "probe".to_string(),
         src: fixture_html.to_string(),
         html_rel: "probe.html".to_string(),

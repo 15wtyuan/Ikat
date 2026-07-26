@@ -9,6 +9,7 @@
 //! `@keyframes <name> { <stop-selector> { decls } ... }` 产 `KeyframesRule`。runtime
 //! 驱动（tween 发射）在 §4 视觉束实现（v1.10）；本轮 fence 接受语法 + bridge 静默丢弃——
 //! pkg.bin 格式不变（runtime 收不到 keyframes；animation 属性走 cascade 静默跳过）。
+use crate::css_resolve::unsupported_hint;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
 use crate::schema::css::{find_css_prop, find_shorthand};
 use loomgui_core::style::dynamic::{
@@ -459,9 +460,11 @@ fn parse_declarations(
             continue;
         }
         if find_css_prop(prop).is_none() && find_shorthand(prop).is_none() {
+            let hint = unsupported_hint(prop)
+                .unwrap_or("not supported by fence — remove or replace with a supported property.");
             diagnostics.push(Diagnostic::error(
                 DiagnosticCode::FenceUnknownCssProp,
-                format!("CSS property \"{}\" is not in the fence", prop),
+                format!("CSS property \"{}\": {}", prop, hint),
                 loc.clone(),
             ));
             continue;
