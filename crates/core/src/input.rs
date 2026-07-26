@@ -76,6 +76,14 @@ pub const EVT_FOCUS_IN: u8 = 14;
 pub const EVT_FOCUS_OUT: u8 = 15;
 pub const EVT_TWEEN_COMPLETE: u8 = 16;
 
+// 控件交互事件（22+）。payload 复用 EventRecord 现有字段（不扩 struct，ABI 安全）：
+// - VALUE_CHANGED：x 装新 float 值（Slider 拖拽中逐值）。
+// - CHECKED_CHANGED：pad[0] 装布尔（0=false/1=true；Toggle 翻转 / Radio 新选中）。
+// - CHANGE_COMMITTED：x 装最终 float 值（Slider 松手，提交本次拖拽的终值）。
+pub const EVT_VALUE_CHANGED: u8 = 22;
+pub const EVT_CHECKED_CHANGED: u8 = 23;
+pub const EVT_CHANGE_COMMITTED: u8 = 24;
+
 const CLICK_THRESHOLD_MOUSE: f32 = 10.0; // per-axis click 容忍（鼠标）
 const CLICK_THRESHOLD_TOUCH: f32 = 50.0; // per-axis click 容忍（触摸）
 const DOUBLE_CLICK_TIME: f32 = 0.35; // 双击窗口秒
@@ -533,7 +541,11 @@ impl PointerState {
                     // 控件 Move：Slider 拖拽中 → 跟随指针更新 value（scroll/drag 已被占据手势抑制）。
                     if slot.is_down {
                         if let Some(cid) = slot.control_target {
-                            crate::scene::control::on_pointer_move(scene, cid, [ev.x, ev.y]);
+                            out.extend(crate::scene::control::on_pointer_move(
+                                scene,
+                                cid,
+                                [ev.x, ev.y],
+                            ));
                         }
                     }
                     // scroll 阈值赛跑（drag/scroll 都未判定时）。scene 此处只读（查 effective）。
@@ -795,7 +807,11 @@ impl PointerState {
                             slot.scroll_testing = false;
                             slot.scroll_candidate = None;
                         }
-                        crate::scene::control::on_pointer_down(scene, cid, [ev.x, ev.y]);
+                        out.extend(crate::scene::control::on_pointer_down(
+                            scene,
+                            cid,
+                            [ev.x, ev.y],
+                        ));
                     }
                     // click-to-focus：pointer-down 命中 tabindex>=0 节点 → 聚焦（照 DOM）。
                     // 沿 down_targets（leaf 优先，同 drag_target 模式）找最近可聚焦非 disabled 节点。
@@ -834,9 +850,9 @@ impl PointerState {
                     if ev.kind == PointerKind::Canceled {
                         slot.click_cancelled = true; // Canceled 隐式 CancelClick（不发 Click + reset）
                     }
-                    // 控件 Up：Slider 松手（含 Canceled）→ 清 dragging。
+                    // 控件 Up：Slider 松手（含 Canceled）→ 清 dragging + 提交 ChangeCommitted。
                     if let Some(cid) = slot.control_target {
-                        crate::scene::control::on_pointer_up(scene, cid);
+                        out.extend(crate::scene::control::on_pointer_up(scene, cid));
                     }
                     // drag 中 Up/Canceled → DragEnd
                     if slot.dragging {

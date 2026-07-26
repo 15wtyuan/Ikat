@@ -6,6 +6,7 @@
 //! 不会误命中框架内部节点）。子节点是普通 Container（div），display 默认按 schema 铺底，
 //! 与用户手写 `<div class="loom-fill">` 实例化结果一致。
 
+use crate::input::{EventRecord, EVT_CHANGE_COMMITTED, EVT_CHECKED_CHANGED, EVT_VALUE_CHANGED};
 use crate::scene::dynamic::{append_child, create_node, set_inline_override, set_user_transform};
 use crate::scene::node::{ControlState, NodeFlags, NodeId, NodeKind, Scene};
 use crate::transform::NodeTransform;
@@ -171,35 +172,45 @@ pub fn occupies_gesture(scene: &Scene, id: NodeId) -> bool {
     matches!(scene.controls.get(id), Some(ControlState::Slider { .. }))
 }
 
-/// 指针按下命中控件 → 更新控件状态。返回 true 表示命中控件并已处理。
+/// 指针按下命中控件 → 更新控件状态。返回产生的事件（空 Vec=未命中/未处理）。
 ///
-/// - Toggle：翻转 checked。
-/// - Radio：同名组互斥——全树找同 name 的其它 radio 置 checked=false，本 radio 置 true。
+/// - Toggle：翻转 checked → 产 EVT_CHECKED_CHANGED（pad[0]=新值）。
+/// - Radio：同名组互斥——全树找同 name 的其它 radio 置 checked=false，本 radio 置 true
+///   → 产 EVT_CHECKED_CHANGED（仅新选中那个，pad[0]=1；照 HTML 只对选中项发 change）。
 /// - Slider：置 dragging=true + 按 pos 重算 value（track 几何取上一帧 solve，1 帧滞后，同 hit_test）。
-/// - Progress：无交互（false）。
+///   value 实际变化时产 EVT_VALUE_CHANGED（x=新值）。
+/// - Progress：无交互（空）。
 ///
 /// disabled 控件不响应（照 HTML：disabled input 不接受点击）。pos 仅 Slider 用。
-pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> bool {
+pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<EventRecord> {
+    let mut out = Vec::new();
     // disabled 控件不响应交互。
     if scene
         .get(id)
         .is_some_and(|n| n.interaction.flags.contains(NodeFlags::DISABLED))
     {
-        return false;
+        return out;
     }
     let Some(state) = scene.controls.get(id).cloned() else {
-        return false;
+        return out;
     };
     match state {
         ControlState::Toggle { checked } => {
             scene
                 .controls
                 .ensure(id, ControlState::Toggle { checked: !checked });
-            true
+            out.push(EventRecord {
+                node_id: id.0,
+                event_type: EVT_CHECKED_CHANGED,
+                click_count: 0,
+                pad: [checked_to_u8(!checked), 0],
+                touch_id: 0,
+                x: 0.0,
+                y: 0.0,
+            });
         }
         ControlState::Radio { name, .. } => {
-            select_radio(scene, id, name);
-            true
+            select_radio(scene, id, name, &mut out);
         }
         ControlState::Slider { .. } => {
             // 先置 dragging=true，再按 pos 重算 value（track 几何取上一帧 solve）。
@@ -207,39 +218,72 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> bool {
                 *dragging = true;
             }
             if let Some(v) = slider_pos_to_value(scene, id, pos) {
-                set_slider_value(scene, id, v);
+                set_slider_value(scene, id, v, &mut out);
             }
-            true
         }
-        ControlState::Progress { .. } => false,
+        ControlState::Progress { .. } => {}
     }
+    out
 }
 
-/// 指针移动。仅 Slider 拖拽中（dragging=true）跟随指针重算 value；其它情况 no-op。
-/// PointerState Move 臂在 control_target 存在时调用（函数内部自检 dragging，安全）。
-pub fn on_pointer_move(scene: &mut Scene, id: NodeId, pos: [f32; 2]) {
+/// 指针移动。仅 Slider 拖拽中（dragging=true）跟随指针重算 value → value 变化时产
+/// EVT_VALUE_CHANGED；其它情况返空。PointerState Move 臂在 control_target 存在时调用
+/// （函数内部自检 dragging，安全）。
+pub fn on_pointer_move(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<EventRecord> {
+    let mut out = Vec::new();
     let dragging = matches!(
         scene.controls.get(id),
         Some(ControlState::Slider { dragging: true, .. })
     );
     if !dragging {
-        return;
+        return out;
     }
     if let Some(v) = slider_pos_to_value(scene, id, pos) {
-        set_slider_value(scene, id, v);
+        set_slider_value(scene, id, v, &mut out);
     }
+    out
 }
 
-/// 指针松手。Slider 清 dragging（结束本次拖拽）；其它控件 no-op。PointerState Up/Canceled 臂调用。
-pub fn on_pointer_up(scene: &mut Scene, id: NodeId) {
-    if let Some(ControlState::Slider { dragging, .. }) = scene.controls.get_mut(id) {
-        *dragging = false;
+/// 指针松手。Slider 清 dragging（结束本次拖拽）+ 产 EVT_CHANGE_COMMITTED（x=最终值，
+/// 仅当本次确实在拖拽）；其它控件返空。PointerState Up/Canceled 臂调用。
+pub fn on_pointer_up(scene: &mut Scene, id: NodeId) -> Vec<EventRecord> {
+    let mut out = Vec::new();
+    let prev = scene.controls.get(id).cloned();
+    if let Some(ControlState::Slider {
+        value, dragging, ..
+    }) = prev
+    {
+        if dragging {
+            if let Some(ControlState::Slider { dragging: d, .. }) = scene.controls.get_mut(id) {
+                *d = false;
+            }
+            out.push(EventRecord {
+                node_id: id.0,
+                event_type: EVT_CHANGE_COMMITTED,
+                click_count: 0,
+                pad: [0, 0],
+                touch_id: 0,
+                x: value,
+                y: 0.0,
+            });
+        }
+    }
+    out
+}
+
+/// bool → EventRecord.pad[0] 载荷编码（0=false / 1=true）。语义由 EVT_CHECKED_CHANGED 消费方约定。
+fn checked_to_u8(b: bool) -> u8 {
+    if b {
+        1
+    } else {
+        0
     }
 }
 
 /// 选 Radio：同名组互斥。全树找同 name 的其它 radio 置 checked=false，本 radio 置 true。
 /// HTML 语义：radio 按 name 分组（跨 DOM 层级，不限兄弟），同组至多一个选中。
-fn select_radio(scene: &mut Scene, id: NodeId, name: String) {
+/// 事件只对新选中项产 EVT_CHECKED_CHANGED（pad[0]=1），照 HTML 只对 change 的那一项发。
+fn select_radio(scene: &mut Scene, id: NodeId, name: String, out: &mut Vec<EventRecord>) {
     // 先收集同组其它 radio 的 NodeId（避免边遍历边改 HashMap）。
     let others: Vec<NodeId> = scene
         .controls
@@ -258,6 +302,15 @@ fn select_radio(scene: &mut Scene, id: NodeId, name: String) {
     if let Some(ControlState::Radio { checked, .. }) = scene.controls.get_mut(id) {
         *checked = true;
     }
+    out.push(EventRecord {
+        node_id: id.0,
+        event_type: EVT_CHECKED_CHANGED,
+        click_count: 0,
+        pad: [checked_to_u8(true), 0],
+        touch_id: 0,
+        x: 0.0,
+        y: 0.0,
+    });
 }
 
 /// Slider pos→value：指针 x 投到 track 的 layout_rect，映射到 [min,max]，step 量化 + clamp。
@@ -283,13 +336,27 @@ fn slider_pos_to_value(scene: &Scene, slider: NodeId, pos: [f32; 2]) -> Option<f
     Some(v.clamp(min, max))
 }
 
-/// 写 Slider 的 value（clamp 到 [min,max]，保留 dragging/step）。非 Slider / 无槽 → no-op。
-fn set_slider_value(scene: &mut Scene, id: NodeId, value: f32) {
+/// 写 Slider 的 value（clamp 到 [min,max]，保留 dragging/step）。value 实际变化时产
+/// EVT_VALUE_CHANGED（x=新值）—— 用精确 != 防 no-change（同 pos → 同量化值 → 不发误报事件）。
+/// 非 Slider / 无槽 → no-op。
+fn set_slider_value(scene: &mut Scene, id: NodeId, value: f32, out: &mut Vec<EventRecord>) {
     if let Some(ControlState::Slider {
         value: v, min, max, ..
     }) = scene.controls.get_mut(id)
     {
-        *v = value.clamp(*min, *max);
+        let clamped = value.clamp(*min, *max);
+        if *v != clamped {
+            *v = clamped;
+            out.push(EventRecord {
+                node_id: id.0,
+                event_type: EVT_VALUE_CHANGED,
+                click_count: 0,
+                pad: [0, 0],
+                touch_id: 0,
+                x: clamped,
+                y: 0.0,
+            });
+        }
     }
 }
 
@@ -634,7 +701,8 @@ mod tests {
     fn toggle_click_flips_checked() {
         let mut scene = Scene::default();
         let id = make_toggle(&mut scene, false);
-        assert!(on_pointer_down(&mut scene, id, [0.0, 0.0]));
+        let events = on_pointer_down(&mut scene, id, [0.0, 0.0]);
+        assert!(!events.is_empty(), "toggle down is handled");
         assert!(matches!(
             scene.controls.get(id),
             Some(ControlState::Toggle { checked: true })
@@ -795,7 +863,10 @@ mod tests {
     fn on_pointer_down_noop_for_non_control() {
         let mut scene = Scene::default();
         let id = make_control(&mut scene, NodeKind::Container);
-        assert!(!on_pointer_down(&mut scene, id, [0.0, 0.0]));
+        assert!(
+            on_pointer_down(&mut scene, id, [0.0, 0.0]).is_empty(),
+            "non-control produces no events"
+        );
     }
 
     #[test]
@@ -828,5 +899,123 @@ mod tests {
         assert!(!occupies_gesture(&scene, toggle));
         assert!(!occupies_gesture(&scene, radio));
         assert!(!occupies_gesture(&scene, progress));
+    }
+
+    // ── Task 10: 控件事件出口（CheckedChanged / ValueChanged / ChangeCommitted） ──
+    //
+    // 控件交互产生 EventRecord，随 PointerState::process 的 out 流出。直接调交互函数捕获
+    // 返回的 Vec<EventRecord> 验事件载荷（隔离 process 仲裁）。payload 复用 EventRecord
+    // 现有字段：Toggle/Radio 的 pad[0]=bool，Slider 的 x=value（ABI 不变）。
+
+    use crate::input::{EVT_CHANGE_COMMITTED, EVT_CHECKED_CHANGED, EVT_VALUE_CHANGED};
+
+    #[test]
+    fn toggle_click_emits_checked_changed() {
+        // false→true：产一条 EVT_CHECKED_CHANGED，pad[0]=1。
+        let mut scene = Scene::default();
+        let id = make_toggle(&mut scene, false);
+        let events = on_pointer_down(&mut scene, id, [0.0, 0.0]);
+        let hits: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type == EVT_CHECKED_CHANGED && e.node_id == id.0)
+            .collect();
+        assert_eq!(hits.len(), 1, "exactly one CheckedChanged for the toggle");
+        assert_eq!(hits[0].pad[0], 1, "pad[0]=1 means checked=true");
+    }
+
+    #[test]
+    fn toggle_uncheck_emits_false_payload() {
+        // true→false：pad[0]=0（验双向载荷编码，不只发 true）。
+        let mut scene = Scene::default();
+        let id = make_toggle(&mut scene, true);
+        let events = on_pointer_down(&mut scene, id, [0.0, 0.0]);
+        let hit = events
+            .iter()
+            .find(|e| e.event_type == EVT_CHECKED_CHANGED && e.node_id == id.0)
+            .expect("emits CheckedChanged");
+        assert_eq!(hit.pad[0], 0, "pad[0]=0 means checked=false");
+    }
+
+    #[test]
+    fn radio_click_emits_checked_changed() {
+        // 选 radio：产一条 EVT_CHECKED_CHANGED，仅对新选中项，pad[0]=1。
+        let mut scene = Scene::default();
+        let a = make_radio(&mut scene, "g", false);
+        let events = on_pointer_down(&mut scene, a, [0.0, 0.0]);
+        let hits: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type == EVT_CHECKED_CHANGED && e.node_id == a.0)
+            .collect();
+        assert_eq!(
+            hits.len(),
+            1,
+            "exactly one CheckedChanged for selected radio"
+        );
+        assert_eq!(hits[0].pad[0], 1);
+        // 未选中的同组 radio 不产事件（照 HTML 只对新选中项发 change）。
+    }
+
+    #[test]
+    fn slider_drag_emits_value_changed() {
+        // down→move 改 value：move 产 EVT_VALUE_CHANGED，x=新值。
+        let mut scene = Scene::default();
+        let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
+        set_track_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
+        let _ = on_pointer_down(&mut scene, id, [100.0, 10.0]); // value=50，无变化→不发
+        let events = on_pointer_move(&mut scene, id, [150.0, 10.0]); // value→75
+        let hit = events
+            .iter()
+            .find(|e| e.event_type == EVT_VALUE_CHANGED && e.node_id == id.0)
+            .expect("emits ValueChanged on drag");
+        assert!(
+            (hit.x - 75.0).abs() < 1.0,
+            "x carries new value ~75, got {}",
+            hit.x
+        );
+    }
+
+    #[test]
+    fn slider_no_spurious_value_changed_on_no_change() {
+        // value 未变（down 命中现值位置）→ 不产 ValueChanged（防误报事件）。
+        let mut scene = Scene::default();
+        let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
+        set_track_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
+        let events = on_pointer_down(&mut scene, id, [100.0, 10.0]); // pos→value=50，与现值同
+        assert!(
+            events.iter().all(|e| e.event_type != EVT_VALUE_CHANGED),
+            "no ValueChanged when value unchanged"
+        );
+    }
+
+    #[test]
+    fn slider_up_emits_change_committed() {
+        // down→move→up：up 产 EVT_CHANGE_COMMITTED，x=最终值。
+        let mut scene = Scene::default();
+        let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
+        set_track_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
+        let _ = on_pointer_down(&mut scene, id, [100.0, 10.0]);
+        let _ = on_pointer_move(&mut scene, id, [160.0, 10.0]); // value→80
+        let events = on_pointer_up(&mut scene, id);
+        let hit = events
+            .iter()
+            .find(|e| e.event_type == EVT_CHANGE_COMMITTED && e.node_id == id.0)
+            .expect("emits ChangeCommitted on up after drag");
+        assert!(
+            (hit.x - 80.0).abs() < 1.0,
+            "x carries final value ~80, got {}",
+            hit.x
+        );
+    }
+
+    #[test]
+    fn slider_up_without_drag_emits_nothing() {
+        // 未 down（dragging=false）直接 up → 不产 ChangeCommitted（非拖拽不提交）。
+        let mut scene = Scene::default();
+        let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
+        let events = on_pointer_up(&mut scene, id);
+        assert!(
+            events.iter().all(|e| e.event_type != EVT_CHANGE_COMMITTED),
+            "no ChangeCommitted without a drag"
+        );
     }
 }
