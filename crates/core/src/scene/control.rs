@@ -6,8 +6,9 @@
 //! 不会误命中框架内部节点）。子节点是普通 Container（div），display 默认按 schema 铺底，
 //! 与用户手写 `<div class="loom-fill">` 实例化结果一致。
 
-use crate::scene::dynamic::{append_child, create_node, set_inline_override};
+use crate::scene::dynamic::{append_child, create_node, set_inline_override, set_user_transform};
 use crate::scene::node::{ControlState, NodeId, NodeKind, Scene};
+use crate::transform::NodeTransform;
 
 const FILL: &str = "loom-fill";
 const TRACK: &str = "loom-track";
@@ -80,7 +81,8 @@ pub fn find_child_by_class(scene: &Scene, parent: NodeId, class: &str) -> Option
 /// 各控件映射：
 /// - ProgressBar / Slider：`value / max` → `.loom-fill` 的 `width:%`（Slider 的 fill 在 track 内）。
 /// - Toggle / Radio：`checked` → `.loom-check` 的 `display:flex/none`。
-/// - Slider thumb 位置由 transform 表达，不在此（走 Task 6 set_transform 路径）。
+/// - Slider thumb：`pct` → thumb 的 `user_transform.translate.x = track_w * pct`（渲染/命中层
+///   位移，不触发 solve；track_w 取上一帧 solve 的 layout_rect，1 帧滞后同 hit_test 标准）。
 ///
 /// 无控件状态（非 control 节点）→ no-op。tick 每帧对所有控件节点调一次（控件稀疏，代价可接受）。
 /// 对找不到子节点的控件（结构未注入）静默跳过——防御性，instantiate 保证子节点就位。
@@ -118,13 +120,27 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
             } else {
                 0.0
             };
-            // Slider 结构：slider → [track, thumb]，track → [fill]。fill 在 track 内一层。
+            // Slider 结构：slider → [track, thumb]，track → [fill]。
             if let Some(track) = find_child_by_class(scene, id, TRACK) {
                 if let Some(fill) = find_child_by_class(scene, track, FILL) {
                     let _ = set_inline_override(scene, fill, &format!("width:{}%", pct * 100.0));
                 }
+                // thumb 沿 track 滑动：translate.x = track_w * pct。track_w 取 track 的
+                // layout_rect.w（上一帧 solve 写入，1 帧滞后——同 hit_test 用上帧 world 的标准模式）。
+                // 走 user_transform 而非 inline：这是渲染/命中层位移，不进布局、不触发 solve，
+                // 供高频拖拽每帧写一次（下帧 compute_world_transforms 读取）。
+                if let Some(thumb) = find_child_by_class(scene, id, THUMB) {
+                    let track_w = scene.get(track).map(|n| n.layout_rect.w).unwrap_or(0.0);
+                    let _ = set_user_transform(
+                        scene,
+                        thumb,
+                        NodeTransform {
+                            translate: [track_w * pct, 0.0],
+                            ..Default::default()
+                        },
+                    );
+                }
             }
-            // thumb 定位 = track 末端 = pct；走 transform（Task 6），不在此。
         }
     }
 }
@@ -405,6 +421,29 @@ mod tests {
             Dimension::percent(0.25),
             "25/100 → width:25%"
         );
+    }
+
+    #[test]
+    fn slider_thumb_positioned_by_transform() {
+        // value=50/min=0/max=100 → pct=0.5。thumb translate.x = track_w * pct。
+        // track_w 取自 track 的 layout_rect.w——运行时由上一帧 solve 写入（1 帧滞后，同
+        // hit_test 用上帧 world 的标准模式）。此处手动设，以解耦 layout wiring（make_slider
+        // 不入 roots，solve 不会触达），聚焦验 pct→translate 的映射本身。
+        let mut scene = Scene::default();
+        let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
+        let track = find_child_by_class(&scene, id, TRACK).expect("slider has track child");
+        scene.get_mut(track).unwrap().layout_rect.w = 200.0;
+        sync_control_visuals(&mut scene, id);
+        let thumb = find_child_by_class(&scene, id, THUMB).expect("slider has thumb child");
+        let tr = scene.get(thumb).unwrap().user_transform;
+        let track_w = scene.get(track).unwrap().layout_rect.w;
+        let expected = track_w * 0.5;
+        assert!(
+            (tr.translate[0] - expected).abs() < 1e-4,
+            "thumb x = track_w({track_w}) * pct(0.5) = {expected}, got {}",
+            tr.translate[0]
+        );
+        assert!(tr.translate[1].abs() < 1e-4, "thumb y 保持 0");
     }
 
     #[test]
