@@ -7,7 +7,7 @@
 //! 与用户手写 `<div class="loom-fill">` 实例化结果一致。
 
 use crate::scene::dynamic::{append_child, create_node, set_inline_override, set_user_transform};
-use crate::scene::node::{ControlState, NodeId, NodeKind, Scene};
+use crate::scene::node::{ControlState, NodeFlags, NodeId, NodeKind, Scene};
 use crate::transform::NodeTransform;
 
 const FILL: &str = "loom-fill";
@@ -142,6 +142,154 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
                 }
             }
         }
+    }
+}
+
+// ── 控件指针交互 ──────────────────────────────────────────────────
+//
+// Toggle/Radio 在 pointer-down 翻转/互斥选中；Slider 在 down→move→up 期间拖拽改 value。
+// 这些函数是纯逻辑（读 ControlState + track 几何，写 side table），由 PointerState::process
+// 在 Down/Move/Up 臂调用（命中控件时）。独立于事件仲裁——只改控件状态，不产事件。
+
+/// 从命中节点向上找最近的控件节点。命中常落在控件的内部视觉子节点（.loom-thumb/.loom-fill）
+/// 上，需向上追溯到控件本身（控件是顶层 control 节点，其 loom-* 子节点不是控件）。
+/// 无命中 / 链上无控件 → None。
+pub fn find_control_at(scene: &Scene, hit: Option<NodeId>) -> Option<NodeId> {
+    let mut cur = hit;
+    while let Some(id) = cur {
+        if scene.controls.get(id).is_some() {
+            return Some(id);
+        }
+        cur = scene.get(id).and_then(|n| n.parent);
+    }
+    None
+}
+
+/// Slider 是否占据指针手势（拖拽期间需抑制祖先 scroll）。仅 Slider 为真——Toggle/Radio
+/// 点击瞬时完成，不占据手势。PointerState 据此决定是否抑制 scroll 候选。
+pub fn occupies_gesture(scene: &Scene, id: NodeId) -> bool {
+    matches!(scene.controls.get(id), Some(ControlState::Slider { .. }))
+}
+
+/// 指针按下命中控件 → 更新控件状态。返回 true 表示命中控件并已处理。
+///
+/// - Toggle：翻转 checked。
+/// - Radio：同名组互斥——全树找同 name 的其它 radio 置 checked=false，本 radio 置 true。
+/// - Slider：置 dragging=true + 按 pos 重算 value（track 几何取上一帧 solve，1 帧滞后，同 hit_test）。
+/// - Progress：无交互（false）。
+///
+/// disabled 控件不响应（照 HTML：disabled input 不接受点击）。pos 仅 Slider 用。
+pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> bool {
+    // disabled 控件不响应交互。
+    if scene
+        .get(id)
+        .is_some_and(|n| n.interaction.flags.contains(NodeFlags::DISABLED))
+    {
+        return false;
+    }
+    let Some(state) = scene.controls.get(id).cloned() else {
+        return false;
+    };
+    match state {
+        ControlState::Toggle { checked } => {
+            scene
+                .controls
+                .ensure(id, ControlState::Toggle { checked: !checked });
+            true
+        }
+        ControlState::Radio { name, .. } => {
+            select_radio(scene, id, name);
+            true
+        }
+        ControlState::Slider { .. } => {
+            // 先置 dragging=true，再按 pos 重算 value（track 几何取上一帧 solve）。
+            if let Some(ControlState::Slider { dragging, .. }) = scene.controls.get_mut(id) {
+                *dragging = true;
+            }
+            if let Some(v) = slider_pos_to_value(scene, id, pos) {
+                set_slider_value(scene, id, v);
+            }
+            true
+        }
+        ControlState::Progress { .. } => false,
+    }
+}
+
+/// 指针移动。仅 Slider 拖拽中（dragging=true）跟随指针重算 value；其它情况 no-op。
+/// PointerState Move 臂在 control_target 存在时调用（函数内部自检 dragging，安全）。
+pub fn on_pointer_move(scene: &mut Scene, id: NodeId, pos: [f32; 2]) {
+    let dragging = matches!(
+        scene.controls.get(id),
+        Some(ControlState::Slider { dragging: true, .. })
+    );
+    if !dragging {
+        return;
+    }
+    if let Some(v) = slider_pos_to_value(scene, id, pos) {
+        set_slider_value(scene, id, v);
+    }
+}
+
+/// 指针松手。Slider 清 dragging（结束本次拖拽）；其它控件 no-op。PointerState Up/Canceled 臂调用。
+pub fn on_pointer_up(scene: &mut Scene, id: NodeId) {
+    if let Some(ControlState::Slider { dragging, .. }) = scene.controls.get_mut(id) {
+        *dragging = false;
+    }
+}
+
+/// 选 Radio：同名组互斥。全树找同 name 的其它 radio 置 checked=false，本 radio 置 true。
+/// HTML 语义：radio 按 name 分组（跨 DOM 层级，不限兄弟），同组至多一个选中。
+fn select_radio(scene: &mut Scene, id: NodeId, name: String) {
+    // 先收集同组其它 radio 的 NodeId（避免边遍历边改 HashMap）。
+    let others: Vec<NodeId> = scene
+        .controls
+        .0
+        .iter()
+        .filter_map(|(&nid, s)| match s {
+            ControlState::Radio { name: n, .. } if nid != id && n == &name => Some(nid),
+            _ => None,
+        })
+        .collect();
+    for oid in others {
+        if let Some(ControlState::Radio { checked, .. }) = scene.controls.get_mut(oid) {
+            *checked = false;
+        }
+    }
+    if let Some(ControlState::Radio { checked, .. }) = scene.controls.get_mut(id) {
+        *checked = true;
+    }
+}
+
+/// Slider pos→value：指针 x 投到 track 的 layout_rect，映射到 [min,max]，step 量化 + clamp。
+/// track 几何取 loom-track 子节点的 layout_rect（上一帧 solve 写入，1 帧滞后，同 hit_test 标准）。
+/// track 未注入 / 宽度退化（≤0）/ 节点非 Slider → None（调用方 no-op）。
+fn slider_pos_to_value(scene: &Scene, slider: NodeId, pos: [f32; 2]) -> Option<f32> {
+    let (min, max, step) = match scene.controls.get(slider)? {
+        ControlState::Slider { min, max, step, .. } => (*min, *max, *step),
+        _ => return None,
+    };
+    let track = find_child_by_class(scene, slider, TRACK)?;
+    let lr = scene.get(track)?.layout_rect;
+    if lr.w <= 0.0 {
+        return None;
+    }
+    let ratio = ((pos[0] - lr.x) / lr.w).clamp(0.0, 1.0);
+    let raw = min + ratio * (max - min);
+    let v = if step > 0.0 {
+        min + ((raw - min) / step).round() * step
+    } else {
+        raw
+    };
+    Some(v.clamp(min, max))
+}
+
+/// 写 Slider 的 value（clamp 到 [min,max]，保留 dragging/step）。非 Slider / 无槽 → no-op。
+fn set_slider_value(scene: &mut Scene, id: NodeId, value: f32) {
+    if let Some(ControlState::Slider {
+        value: v, min, max, ..
+    }) = scene.controls.get_mut(id)
+    {
+        *v = value.clamp(*min, *max);
     }
 }
 
@@ -453,5 +601,232 @@ mod tests {
         let id = make_control(&mut scene, NodeKind::Container);
         sync_control_visuals(&mut scene, id);
         assert!(scene.get(id).unwrap().children.is_empty());
+    }
+
+    // ── Task 9: 控件指针交互（on_pointer_down/move/up） ──
+    //
+    // 直接调交互函数验逻辑（隔离 PointerState 仲裁）：Toggle 翻转、Radio 同名组互斥、
+    // Slider 拖拽改 value + step 量化。track 几何手动设（解耦 solve：测试不把 slider 入 roots，
+    // solve 不触达 track，故手动写 layout_rect，同 slider_thumb_positioned_by_transform 模式）。
+
+    use crate::scene::node::Rect;
+
+    /// 建一个带 ControlInit 的 Radio（name 分组）。
+    fn make_radio(scene: &mut Scene, name: &str, checked: bool) -> NodeId {
+        create_node_from_template(
+            scene,
+            NodeKind::RadioButton,
+            ResolvedStyle::default(),
+            Some(ControlInit::Radio {
+                checked,
+                name: name.into(),
+            }),
+        )
+    }
+
+    /// 手动设 slider 的 loom-track layout_rect（解耦 solve：测试不把 slider 入 roots，solve 不触达）。
+    fn set_track_rect(scene: &mut Scene, slider: NodeId, x: f32, y: f32, w: f32, h: f32) {
+        let track = find_child_by_class(scene, slider, TRACK).expect("slider has track");
+        scene.get_mut(track).unwrap().layout_rect = Rect { x, y, w, h };
+    }
+
+    #[test]
+    fn toggle_click_flips_checked() {
+        let mut scene = Scene::default();
+        let id = make_toggle(&mut scene, false);
+        assert!(on_pointer_down(&mut scene, id, [0.0, 0.0]));
+        assert!(matches!(
+            scene.controls.get(id),
+            Some(ControlState::Toggle { checked: true })
+        ));
+    }
+
+    #[test]
+    fn toggle_click_flips_back_to_unchecked() {
+        let mut scene = Scene::default();
+        let id = make_toggle(&mut scene, true);
+        on_pointer_down(&mut scene, id, [0.0, 0.0]);
+        assert!(matches!(
+            scene.controls.get(id),
+            Some(ControlState::Toggle { checked: false })
+        ));
+    }
+
+    #[test]
+    fn radio_click_mutually_exclusive() {
+        let mut scene = Scene::default();
+        let a = make_radio(&mut scene, "g", false);
+        let b = make_radio(&mut scene, "g", false);
+        // 选 a
+        on_pointer_down(&mut scene, a, [0.0, 0.0]);
+        assert!(matches!(
+            scene.controls.get(a),
+            Some(ControlState::Radio { checked: true, .. })
+        ));
+        // 选 b → a 应取消（同 name 互斥）
+        on_pointer_down(&mut scene, b, [0.0, 0.0]);
+        assert!(matches!(
+            scene.controls.get(a),
+            Some(ControlState::Radio { checked: false, .. })
+        ));
+        assert!(matches!(
+            scene.controls.get(b),
+            Some(ControlState::Radio { checked: true, .. })
+        ));
+    }
+
+    #[test]
+    fn radio_different_names_are_independent() {
+        // 不同 name 的 radio 互不影响（HTML：radio 按 name 分组，不按 DOM 层级）。
+        let mut scene = Scene::default();
+        let a = make_radio(&mut scene, "g1", false);
+        let b = make_radio(&mut scene, "g2", false);
+        on_pointer_down(&mut scene, a, [0.0, 0.0]);
+        on_pointer_down(&mut scene, b, [0.0, 0.0]);
+        // 两个都选中（不同组，不互斥）
+        assert!(matches!(
+            scene.controls.get(a),
+            Some(ControlState::Radio { checked: true, .. })
+        ));
+        assert!(matches!(
+            scene.controls.get(b),
+            Some(ControlState::Radio { checked: true, .. })
+        ));
+    }
+
+    #[test]
+    fn slider_drag_changes_value() {
+        let mut scene = Scene::default();
+        let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
+        set_track_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
+        // 按下在 track 中间（pos.x=100 → value=50），拖到 75%（pos.x=150 → value=75）
+        on_pointer_down(&mut scene, id, [100.0, 10.0]);
+        on_pointer_move(&mut scene, id, [150.0, 10.0]);
+        let v = match scene.controls.get(id) {
+            Some(ControlState::Slider { value, .. }) => *value,
+            _ => 0.0,
+        };
+        assert!((v - 75.0).abs() < 1.0, "expected ~75, got {v}");
+    }
+
+    #[test]
+    fn slider_value_step_quantized() {
+        // step=10 → value 落在 10 的倍数。pos.x=73 (track_w=100) → raw=73 → 量化 70。
+        let mut scene = Scene::default();
+        let id = create_node_from_template(
+            &mut scene,
+            NodeKind::Slider,
+            ResolvedStyle::default(),
+            Some(ControlInit::Slider {
+                value: 50.0,
+                min: 0.0,
+                max: 100.0,
+                step: 10.0,
+            }),
+        );
+        set_track_rect(&mut scene, id, 0.0, 0.0, 100.0, 20.0);
+        on_pointer_down(&mut scene, id, [73.0, 10.0]);
+        let v = match scene.controls.get(id) {
+            Some(ControlState::Slider { value, .. }) => *value,
+            _ => 0.0,
+        };
+        assert!((v - 70.0).abs() < 0.01, "expected 70 (step=10), got {v}");
+    }
+
+    #[test]
+    fn slider_down_sets_dragging_up_clears() {
+        let mut scene = Scene::default();
+        let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
+        set_track_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
+        assert!(matches!(
+            scene.controls.get(id),
+            Some(ControlState::Slider {
+                dragging: false,
+                ..
+            })
+        ));
+        on_pointer_down(&mut scene, id, [100.0, 10.0]);
+        assert!(matches!(
+            scene.controls.get(id),
+            Some(ControlState::Slider { dragging: true, .. })
+        ));
+        on_pointer_up(&mut scene, id);
+        assert!(matches!(
+            scene.controls.get(id),
+            Some(ControlState::Slider {
+                dragging: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn slider_move_ignored_when_not_dragging() {
+        // 未先 down（dragging=false）直接 move → value 不变。
+        let mut scene = Scene::default();
+        let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
+        set_track_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
+        on_pointer_move(&mut scene, id, [150.0, 10.0]);
+        let v = match scene.controls.get(id) {
+            Some(ControlState::Slider { value, .. }) => *value,
+            _ => 0.0,
+        };
+        assert!(
+            (v - 50.0).abs() < 0.01,
+            "value unchanged without down, got {v}"
+        );
+    }
+
+    #[test]
+    fn slider_value_clamped_to_range() {
+        // pos 超出 track 左边界 → ratio clamp 0 → value=min=0。
+        let mut scene = Scene::default();
+        let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
+        set_track_rect(&mut scene, id, 0.0, 0.0, 100.0, 20.0);
+        on_pointer_down(&mut scene, id, [-50.0, 10.0]);
+        let v = match scene.controls.get(id) {
+            Some(ControlState::Slider { value, .. }) => *value,
+            _ => 0.0,
+        };
+        assert!((v - 0.0).abs() < 0.01, "clamped to min, got {v}");
+    }
+
+    #[test]
+    fn on_pointer_down_noop_for_non_control() {
+        let mut scene = Scene::default();
+        let id = make_control(&mut scene, NodeKind::Container);
+        assert!(!on_pointer_down(&mut scene, id, [0.0, 0.0]));
+    }
+
+    #[test]
+    fn find_control_at_walks_to_ancestor() {
+        // 命中控件的 loom-thumb 子节点 → 向上找到 Slider 控件本身。
+        let mut scene = Scene::default();
+        let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
+        let thumb = find_child_by_class(&scene, id, THUMB).expect("slider has thumb");
+        assert_eq!(find_control_at(&scene, Some(thumb)), Some(id));
+        assert_eq!(find_control_at(&scene, Some(id)), Some(id));
+        assert_eq!(find_control_at(&scene, None), None);
+    }
+
+    #[test]
+    fn find_control_at_skips_non_control_chain() {
+        // 命中非控件叶子 → 链上无控件 → None。
+        let mut scene = Scene::default();
+        let id = make_control(&mut scene, NodeKind::Container);
+        assert_eq!(find_control_at(&scene, Some(id)), None);
+    }
+
+    #[test]
+    fn occupies_gesture_only_for_slider() {
+        let mut scene = Scene::default();
+        let slider = make_slider(&mut scene, 0.0, 0.0, 100.0);
+        let toggle = make_toggle(&mut scene, false);
+        let radio = make_radio(&mut scene, "g", false);
+        let progress = make_progress(&mut scene, 0.0, 100.0);
+        assert!(occupies_gesture(&scene, slider));
+        assert!(!occupies_gesture(&scene, toggle));
+        assert!(!occupies_gesture(&scene, radio));
+        assert!(!occupies_gesture(&scene, progress));
     }
 }

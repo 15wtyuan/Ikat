@@ -146,13 +146,14 @@ pub struct TouchSlot {
     pub last_hovered_chain: Vec<NodeId>,
     pub touch_monitors: Vec<NodeId>, // capture 的节点（Move/Up 派发用）
     pub down_targets: Vec<NodeId>,   // Down 时填 [leaf, …祖先]
-    pub click_cancelled: bool,       // Move>50 / CancelClick / Canceled 置
-    pub last_click_time: f32,        // time_s（双击窗口）
-    pub last_click_pos: (f32, f32),  // 上次 Click 位置
-    pub last_click_button: u8,       // 上次 Click 键
-    pub click_count: u8,             // 1→2→1 循环
-    pub drag_testing: bool,          // Down 在 draggable 链上置 true
-    pub dragging: bool,              // DragStart 后置 true
+    pub control_target: Option<NodeId>, // Down 命中控件 → 记控件节点（Slider Move/Up 续推；Toggle/Radio 瞬时完成）
+    pub click_cancelled: bool,          // Move>50 / CancelClick / Canceled 置
+    pub last_click_time: f32,           // time_s（双击窗口）
+    pub last_click_pos: (f32, f32),     // 上次 Click 位置
+    pub last_click_button: u8,          // 上次 Click 键
+    pub click_count: u8,                // 1→2→1 循环
+    pub drag_testing: bool,             // Down 在 draggable 链上置 true
+    pub dragging: bool,                 // DragStart 后置 true
     pub drag_target: Option<NodeId>, // down_targets 中最近 draggable（含 down_node）；None 无 drag
     pub down_time: f32,              // Down 时=time_s（longpress 用）
     pub longpress_fired: bool,       // 触发后置 true（本 press 不再发）
@@ -179,6 +180,7 @@ impl TouchSlot {
             last_hovered_chain: Vec::new(),
             touch_monitors: Vec::new(),
             down_targets: Vec::new(),
+            control_target: None,
             click_cancelled: false,
             last_click_time: 0.0,
             last_click_pos: (0.0, 0.0),
@@ -528,6 +530,12 @@ impl PointerState {
                             slot.longpress_cancelled = true;
                         }
                     }
+                    // 控件 Move：Slider 拖拽中 → 跟随指针更新 value（scroll/drag 已被占据手势抑制）。
+                    if slot.is_down {
+                        if let Some(cid) = slot.control_target {
+                            crate::scene::control::on_pointer_move(scene, cid, [ev.x, ev.y]);
+                        }
+                    }
                     // scroll 阈值赛跑（drag/scroll 都未判定时）。scene 此处只读（查 effective）。
                     if slot.is_down
                         && slot.scroll_testing
@@ -779,6 +787,16 @@ impl PointerState {
                         }
                         slot.scroll_testing = slot.scroll_candidate.is_some();
                     }
+                    // 控件交互：命中（含 .loom-* 子）向上找控件 → on_pointer_down。
+                    // Slider 占据手势：抑制 scroll（拖 thumb 不让祖先滚动）+ 记 control_target。
+                    if let Some(cid) = crate::scene::control::find_control_at(scene, hit) {
+                        slot.control_target = Some(cid);
+                        if crate::scene::control::occupies_gesture(scene, cid) {
+                            slot.scroll_testing = false;
+                            slot.scroll_candidate = None;
+                        }
+                        crate::scene::control::on_pointer_down(scene, cid, [ev.x, ev.y]);
+                    }
                     // click-to-focus：pointer-down 命中 tabindex>=0 节点 → 聚焦（照 DOM）。
                     // 沿 down_targets（leaf 优先，同 drag_target 模式）找最近可聚焦非 disabled 节点。
                     // 不可聚焦/`-1` → 不夺焦（照 DOM：点空白不 blur）。
@@ -815,6 +833,10 @@ impl PointerState {
                 PointerKind::Up | PointerKind::Canceled => {
                     if ev.kind == PointerKind::Canceled {
                         slot.click_cancelled = true; // Canceled 隐式 CancelClick（不发 Click + reset）
+                    }
+                    // 控件 Up：Slider 松手（含 Canceled）→ 清 dragging。
+                    if let Some(cid) = slot.control_target {
+                        crate::scene::control::on_pointer_up(scene, cid);
                     }
                     // drag 中 Up/Canceled → DragEnd
                     if slot.dragging {
@@ -897,6 +919,7 @@ impl PointerState {
                     }
                     slot.touch_monitors.clear();
                     slot.down_targets.clear();
+                    slot.control_target = None;
                     slot.down_node = None;
                     slot.drag_testing = false;
                     slot.dragging = false;
