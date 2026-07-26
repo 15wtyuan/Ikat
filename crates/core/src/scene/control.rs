@@ -43,11 +43,18 @@ pub fn inject_control_children(scene: &mut Scene, id: NodeId, kind: NodeKind) {
             append_child(scene, id, fill).expect("fresh child has no parent");
         }
         NodeKind::Slider => {
-            // slider → [track, thumb]；track → [fill]
+            // slider → [track, thumb]；track → [fill]。
+            // thumb 用 position:absolute 脱离 flex 流（不占 track 的兄弟排列位），锚定 slider
+            // （slider 设 position:relative 作 absolute containing block）。thumb 的 left:0/
+            // top:0 定位到 slider content 左上（= track 左端，因 track flex-grow 占满 content）；
+            // 沿 track 的水平滑动由 sync_control_visuals 走 user_transform（高频、不触发 solve）。
+            // 参考 RmlUi WidgetSlider：bar 为 non-DOM 手动 SetOffset，不参与 box 流。
+            let _ = set_inline_override(scene, id, "position:relative");
             let track = make_child(scene, TRACK);
             let thumb = make_child(scene, THUMB);
             append_child(scene, id, track).expect("fresh child has no parent");
             append_child(scene, id, thumb).expect("fresh child has no parent");
+            let _ = set_inline_override(scene, thumb, "position:absolute;left:0;top:0");
             let fill = make_child(scene, FILL);
             append_child(scene, track, fill).expect("fresh child has no parent");
         }
@@ -82,8 +89,9 @@ pub fn find_child_by_class(scene: &Scene, parent: NodeId, class: &str) -> Option
 /// 各控件映射：
 /// - ProgressBar / Slider：`value / max` → `.loom-fill` 的 `width:%`（Slider 的 fill 在 track 内）。
 /// - Toggle / Radio：`checked` → `.loom-check` 的 `display:flex/none`。
-/// - Slider thumb：`pct` → thumb 的 `user_transform.translate.x = track_w * pct`（渲染/命中层
-///   位移，不触发 solve；track_w 取上一帧 solve 的 layout_rect，1 帧滞后同 hit_test 标准）。
+/// - Slider thumb：`pct` → thumb 的 `user_transform.translate` = `(track_w - thumb_w) × pct`
+///   （水平，扣自身宽的可滑动距离）+ `(track_h - thumb_h)/2`（垂直居中）。渲染/命中层位移，
+///   不触发 solve；track/thumb 几何取上一帧 solve 的 layout_rect，1 帧滞后同 hit_test 标准）。
 ///
 /// 无控件状态（非 control 节点）→ no-op。tick 每帧对所有控件节点调一次（控件稀疏，代价可接受）。
 /// 对找不到子节点的控件（结构未注入）静默跳过——防御性，instantiate 保证子节点就位。
@@ -126,17 +134,27 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
                 if let Some(fill) = find_child_by_class(scene, track, FILL) {
                     let _ = set_inline_override(scene, fill, &format!("width:{}%", pct * 100.0));
                 }
-                // thumb 沿 track 滑动：translate.x = track_w * pct。track_w 取 track 的
-                // layout_rect.w（上一帧 solve 写入，1 帧滞后——同 hit_test 用上帧 world 的标准模式）。
-                // 走 user_transform 而非 inline：这是渲染/命中层位移，不进布局、不触发 solve，
-                // 供高频拖拽每帧写一次（下帧 compute_world_transforms 读取）。
+                // thumb 沿 track 滑动。thumb 已 position:absolute（inject 设），不参与 flex
+                // 排列，其 layout_rect 锁在 slider content 左上（= track 左端）。水平位移走
+                // user_transform（渲染/命中层，不触发 solve，供高频拖拽每帧写）。公式对齐
+                // RmlUi PositionBar：可滑动距离 = track_w - thumb_w（扣自身宽），位置 = 该距离 × pct。
+                // 垂直方向把 thumb 居中到 track 中心（thumb 绝对定位后 align-items 不生效）。
                 if let Some(thumb) = find_child_by_class(scene, id, THUMB) {
-                    let track_w = scene.get(track).map(|n| n.layout_rect.w).unwrap_or(0.0);
+                    let (track_w, track_h) = scene
+                        .get(track)
+                        .map(|n| (n.layout_rect.w, n.layout_rect.h))
+                        .unwrap_or((0.0, 0.0));
+                    let (thumb_w, thumb_h) = scene
+                        .get(thumb)
+                        .map(|n| (n.layout_rect.w, n.layout_rect.h))
+                        .unwrap_or((0.0, 0.0));
+                    let traversable = (track_w - thumb_w).max(0.0);
+                    let center_y = (track_h - thumb_h) / 2.0;
                     let _ = set_user_transform(
                         scene,
                         thumb,
                         NodeTransform {
-                            translate: [track_w * pct, 0.0],
+                            translate: [traversable * pct, center_y],
                             ..Default::default()
                         },
                     );

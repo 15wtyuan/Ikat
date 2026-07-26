@@ -30,6 +30,18 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-lab", "lab"),
     };
 
+    // settings 页 tab → panel 配对（HTML 标准 role=tab/tabpanel 模式）。
+    // 浏览器里 loom-preview.js 的 JS 切 panel display；LoomGUI 运行时无 JS，这里复刻该逻辑。
+    // panel-audio 默认可见，其余 HTML 里 style="display:none" 冻结进 pkg。
+    static readonly (string tabId, string panelId)[] SETTINGS_TABS =
+    {
+        ("tab-audio", "panel-audio"),
+        ("tab-graphics", "panel-graphics"),
+        ("tab-controls", "panel-controls"),
+        ("tab-account", "panel-account"),
+        ("tab-search", "panel-search"),
+    };
+
     LoomStageDriver _driver;
     Container _current;
     string _shown;
@@ -68,6 +80,7 @@ public class ShowcaseRunner : MonoBehaviour
         }
         WireNav(_current, page);
         WireControls(_current, page);
+        WireSettingsTabs(_current, page);
         Debug.Log($"[Showcase] Instantiate showcase/{page} = OK");
     }
 
@@ -90,6 +103,42 @@ public class ShowcaseRunner : MonoBehaviour
         }
     }
 
+    /// settings 页 tab 切换：HTML 的 role=tab/tabpanel 模式依赖运行时 JS 改 panel display，
+    /// LoomGUI 运行时无 JS，这里订阅 tab 按钮 Clicked → 隐藏当前 panel + 显示目标 panel。
+    /// panel 默认 display:flex（.panel CSS），隐藏用 display:none。改 Style.Display 攒批下帧
+    /// flush 到 core 触发 solve 重排（display 变是低频 UI 操作，solve 代价可接受）。
+    void WireSettingsTabs(Container page, string pageName)
+    {
+        if (pageName != "settings") return;
+        // 预取 tab 按钮与 panel，过滤掉本页不存在的（宽松查询，同 WireNav）。
+        var tabs = new System.Collections.Generic.List<(Button tab, Container panel)>();
+        foreach (var (tabId, panelId) in SETTINGS_TABS)
+        {
+            if (page.TryGet<Button>(tabId, out var tab) && page.TryGet<Container>(panelId, out var panel))
+                tabs.Add((tab, panel));
+        }
+        if (tabs.Count == 0) return;
+        // 找当前可见的 panel 作初始 active（HTML 里 panel-audio 默认可见）。
+        Container initial = null;
+        foreach (var (_, panel) in tabs)
+        {
+            if (panel.Style.Display != DisplayMode.None) { initial = panel; break; }
+        }
+        // active 用单元素数组承载：C# 闭包捕获数组引用，所有 tab 闭包共享 arr[0]，
+        // 任一 tab 点击后更新它，其余 tab 下次点击读到最新 active（避免 per-iteration 快照失同步）。
+        var active = new Container[] { initial };
+        foreach (var (tab, panel) in tabs)
+        {
+            Container target = panel;        // 防御性局部拷贝
+            tab.Clicked += () =>
+            {
+                if (active[0] == target) return;   // 已是当前页，no-op
+                if (active[0] != null) active[0].Style.Display = DisplayMode.None;
+                target.Style.Display = DisplayMode.Flex;
+                active[0] = target;                // 后续点击以新 active 为基准
+            };
+        }
+    }
     /// 控件事件流演示：settings 滑块拖动更新旁边数值、character 训练按钮给 EXP 进度条加经验。
     /// 只验证 ValueChanged / Clicked → ProgressBar.Value 的端到端事件链，不构建完整逻辑。
     /// 元素缺失（本页没该控件）TryGet 返 false 跳过——和 WireNav 同样的宽松查询模式。

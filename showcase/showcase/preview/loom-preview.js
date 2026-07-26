@@ -1,5 +1,6 @@
 // LoomGUI showcase browser preview driver (preview-only — packer consumes body only).
-// Nav + role=tablist switch + dialog display toggle + ListView visual fill + NativeHost placeholder + body letterbox.
+// Nav + role=tablist switch + dialog display toggle + ListView visual fill + NativeHost placeholder + body letterbox
+// + control visual injection (mirrors core's .loom-* children so the browser preview matches the runtime).
 // Classic script (non-ES module) to avoid file:// CORS.
 (function () {
   'use strict';
@@ -86,6 +87,77 @@
   // NativeHost slot is now a plain <div> (canvas removed from the fence).
   // A div has no 2D context, so the preview only shows the CSS background;
   // the runtime still projects the real 3D model via FFI onto this element.
+  // Mirrors the runtime: core injects .loom-* visual children into control nodes so CSS
+  // (not the browser UA) decides their look. Without this the browser renders <progress>/<input
+  // type=range> with the green OS UA, which diverges from the Unity output and misleads designers.
+  // We inject the same .loom-* structure (class only — showcase CSS paints it) and neutralize the
+  // native widget via appearance:none. Interactive state (slider drag, toggle click) is wired too,
+  // so the preview stays in sync as the user interacts.
+  function injectControlVisuals() {
+    // progress → append .loom-fill sized by value/max (like core sync_control_visuals).
+    document.querySelectorAll('progress').forEach(function (p) {
+      if (p.querySelector('.loom-fill')) return; // idempotent
+      var max = parseFloat(p.getAttribute('max')) || 100;
+      var val = parseFloat(p.getAttribute('value')) || 0;
+      var fill = document.createElement('div');
+      fill.className = 'loom-fill';
+      fill.style.width = (val / max * 100) + '%';
+      // progress UA fills its own bar; reset so only .loom-fill shows the fill color.
+      p.style.appearance = 'none';
+      p.style.MozAppearance = 'none';
+      p.style.webkitAppearance = 'none';
+      p.appendChild(fill);
+    });
+
+    // input[type=range] → .loom-track > .loom-fill + sibling .loom-thumb (core inject layout).
+    document.querySelectorAll('input[type="range"]').forEach(function (r) {
+      if (r.querySelector('.loom-track')) return;
+      r.style.appearance = 'none';
+      r.style.MozAppearance = 'none';
+      r.style.webkitAppearance = 'none';
+      var track = document.createElement('div');
+      track.className = 'loom-track';
+      var fill = document.createElement('div');
+      fill.className = 'loom-fill';
+      var thumb = document.createElement('div');
+      thumb.className = 'loom-thumb';
+      track.appendChild(fill);
+      // core structure: slider → [track, thumb]; track → [fill]. thumb is a sibling of track.
+      r.appendChild(track);
+      r.appendChild(thumb);
+      positionRangeThumb(r, track, fill, thumb);
+      r.addEventListener('input', function () { positionRangeThumb(r, track, fill, thumb); });
+    });
+
+    // checkbox/radio → .loom-check (visibility mirrors checked state, like core).
+    document.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach(function (c) {
+      if (c.querySelector('.loom-check')) return;
+      c.style.appearance = 'none';
+      c.style.MozAppearance = 'none';
+      c.style.webkitAppearance = 'none';
+      var check = document.createElement('div');
+      check.className = 'loom-check';
+      check.style.display = c.checked ? '' : 'none';
+      c.appendChild(check);
+      c.addEventListener('change', function () { check.style.display = c.checked ? '' : 'none'; });
+    });
+  }
+
+  // Position the range thumb like core sync_control_visuals: traversable = track_w - thumb_w,
+  // left = traversable * pct. Reads computed px (after CSS sizing) to stay layout-accurate.
+  function positionRangeThumb(range, track, fill, thumb) {
+    var min = parseFloat(range.getAttribute('min')) || 0;
+    var max = parseFloat(range.getAttribute('max')) || 100;
+    var val = parseFloat(range.getAttribute('value')) || 0;
+    var pct = max > min ? (val - min) / (max - min) : 0;
+    var tw = track.clientWidth || 0;
+    var th = thumb.clientWidth || 0;
+    var traversable = Math.max(tw - th, 0);
+    thumb.style.position = 'absolute';
+    thumb.style.left = (traversable * pct) + 'px';
+    fill.style.width = (pct * 100) + '%';
+  }
+
   function fillNativeHost() {
   }
 
@@ -110,6 +182,7 @@
     wireDialogs();
     fillListViews();
     fillNativeHost();
+    injectControlVisuals();
     fitScale();
     window.addEventListener('resize', fitScale);
   }
