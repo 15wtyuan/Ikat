@@ -191,8 +191,13 @@ pub fn inline_bit(prop: &str) -> Option<u32> {
         "max-width" => Some(INLINE_MAX_WIDTH),
         "max-height" => Some(INLINE_MAX_HEIGHT),
         "padding" => Some(INLINE_PADDING),
+        "padding-top" | "padding-right" | "padding-bottom" | "padding-left" => Some(INLINE_PADDING),
         "margin" => Some(INLINE_MARGIN),
+        "margin-top" | "margin-right" | "margin-bottom" | "margin-left" => Some(INLINE_MARGIN),
         "border-width" => Some(INLINE_BORDER_WIDTH),
+        "border-top" | "border-right" | "border-bottom" | "border-left" => {
+            Some(INLINE_BORDER_WIDTH)
+        }
         "gap" => Some(INLINE_GAP),
         "flex-direction" => Some(INLINE_FLEX_DIRECTION),
         "flex-wrap" => Some(INLINE_FLEX_WRAP),
@@ -1637,9 +1642,10 @@ mod tests {
 
     #[test]
     fn set_inline_override_ignores_unsupported_prop_no_ghost() {
-        // transform / padding-top 不在 inline_bit 表：完全不写 inline_override（无 ghost state）。
-        // 修复前：apply_decl 写 taffy_style.transform / padding.top 字段但不置 bit
-        // → 下帧 rematch apply_inline_override 不拷这些字段 → 静默丢失（ghost state）。
+        // transform 不在 inline_bit 表：完全不写 inline_override（无 ghost state）。
+        // padding-top 现在在表（复用 INLINE_PADDING bit）→ 正常置 bit + 生效。
+        // 修复前（padding-top 无 bit）：apply_decl 写 taffy_style.padding.top 字段但不置 bit
+        // → 下帧 rematch apply_inline_override 不拷该字段 → 静默丢失（ghost state）。
         let (mut scene, root) = build_simple_tree();
         crate::scene::dynamic::set_inline_override(
             &mut scene,
@@ -1648,22 +1654,28 @@ mod tests {
         )
         .unwrap();
         let n = scene.get(root).unwrap();
-        // inline_set 不含任何 bit（transform/padding-top 都没 bit）
-        assert_eq!(n.inline_set.0, 0, "unsupported prop 不置 bit");
-        // inline_override 字段也不被写（transform 仍默认 scale 1.0，padding 仍 0）
+        // padding-top 有 bit（INLINE_PADDING），transform 无 bit
+        assert_ne!(n.inline_set.0, 0, "padding-top 置 bit");
+        assert_eq!(
+            n.inline_set.0 & INLINE_PADDING,
+            INLINE_PADDING,
+            "padding-top 复用 INLINE_PADDING bit"
+        );
+        // padding-top 写进 inline_override（有 bit → 有效）
         use taffy::style::LengthPercentage;
         assert_eq!(
             n.inline_override.taffy_style.padding.top,
-            LengthPercentage::length(0.0),
-            "padding-top 不写 inline_override（无 ghost）"
+            LengthPercentage::length(10.0),
+            "padding-top 写入 inline_override"
         );
-        // rematch 不 panic，且 style 不受这些 prop 影响
+        // transform 无 bit → 不写 inline_override（transform 字段保持默认，无 ghost）
+        // rematch 不 panic
         rematch_pseudo_classes(&mut scene);
         let n = scene.get(root).unwrap();
         assert_eq!(
             n.style.taffy_style.padding.top,
-            LengthPercentage::length(0.0),
-            "rematch 后 padding 仍为 0（unsupported prop 未生效）"
+            LengthPercentage::length(10.0),
+            "rematch 后 padding-top 生效（10px）"
         );
         // 对照：set "width:100px"（支持）→ bit 置 + 生效
         crate::scene::dynamic::set_inline_override(&mut scene, root, "width:100px").unwrap();

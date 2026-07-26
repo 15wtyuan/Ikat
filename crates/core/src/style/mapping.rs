@@ -603,6 +603,23 @@ fn apply_padding_side(style: &mut ResolvedStyle, side: Side, value: &str) -> boo
     true
 }
 
+/// margin 单边声明：与 apply_padding_side 同构，但走 parse_margin_four（支持 px/%/auto）。
+/// 只设指定边，其余边保持不动（不重置四边）。
+fn apply_margin_side(style: &mut ResolvedStyle, side: Side, value: &str) -> bool {
+    let [v, _, _, _] = match parse_margin_four(value) {
+        Some(f) => f,
+        None => return false,
+    };
+    let ts = &mut style.taffy_style;
+    match side {
+        Side::Top => ts.margin.top = v,
+        Side::Right => ts.margin.right = v,
+        Side::Bottom => ts.margin.bottom = v,
+        Side::Left => ts.margin.left = v,
+    }
+    true
+}
+
 /// 把一条 declaration 应用到 style（覆盖对应字段）。返回是否被识别。
 pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
     let ts = &mut style.taffy_style;
@@ -648,6 +665,10 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         "padding-right" => apply_padding_side(style, Side::Right, value),
         "padding-bottom" => apply_padding_side(style, Side::Bottom, value),
         "padding-left" => apply_padding_side(style, Side::Left, value),
+        "margin-top" => apply_margin_side(style, Side::Top, value),
+        "margin-right" => apply_margin_side(style, Side::Right, value),
+        "margin-bottom" => apply_margin_side(style, Side::Bottom, value),
+        "margin-left" => apply_margin_side(style, Side::Left, value),
         "margin" => {
             let [t, r, b, l] = match parse_margin_four(value) {
                 Some(v) => v,

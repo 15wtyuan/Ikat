@@ -89,3 +89,4 @@ crates/packer/gui/src-tauri/gen/
 
 # HeadlessTests fixture packer output (loom-pkg build of *.workspace → ../<name>-ws-out/)
 tests/dotnet/LoomGUI.HeadlessTests/fixtures/*-ws-out/
+node_modules

@@ -78,6 +78,50 @@ fn apply_decl_margin_supports_percent_and_auto() {
     let mut s4 = ResolvedStyle::default();
     assert!(!apply_decl(&mut s4, "margin", "1em"), "margin em → false");
 }
+/// margin 单边声明（margin-top/right/bottom/left）必须被解析——与 padding/border 单边
+/// 对齐。之前只处理 `margin` 简写，导致 `.side-back{margin-bottom:20px}` 这类常见写法
+/// 被静默吞，flex 子元素间距算错（showcase settings 返回首页→标题间距）。
+#[test]
+fn apply_decl_margin_side_per_side() {
+    use taffy::style::LengthPercentageAuto;
+    // margin-bottom: 20px → 只设 bottom，其余不动
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "margin-bottom", "20px"));
+    assert_eq!(
+        s.taffy_style.margin.bottom,
+        LengthPercentageAuto::length(20.0),
+        "margin-bottom 设上"
+    );
+    // 其余边保持 default（不被清零）
+    assert_eq!(
+        s.taffy_style.margin.top,
+        ResolvedStyle::default().taffy_style.margin.top,
+        "margin-top 不受 margin-bottom 影响"
+    );
+    // 四边各能单独设
+    let mut s2 = ResolvedStyle::default();
+    apply_decl(&mut s2, "margin-top", "5px");
+    apply_decl(&mut s2, "margin-right", "6px");
+    apply_decl(&mut s2, "margin-bottom", "7px");
+    apply_decl(&mut s2, "margin-left", "8px");
+    assert_eq!(s2.taffy_style.margin.top, LengthPercentageAuto::length(5.0));
+    assert_eq!(
+        s2.taffy_style.margin.right,
+        LengthPercentageAuto::length(6.0)
+    );
+    assert_eq!(
+        s2.taffy_style.margin.bottom,
+        LengthPercentageAuto::length(7.0)
+    );
+    assert_eq!(
+        s2.taffy_style.margin.left,
+        LengthPercentageAuto::length(8.0)
+    );
+    // % 和 auto 也走单边（与简写语义一致）
+    let mut s3 = ResolvedStyle::default();
+    assert!(apply_decl(&mut s3, "margin-left", "auto"));
+    assert!(s3.taffy_style.margin.left.is_auto(), "单边 auto");
+}
 #[test]
 fn color_hex() {
     let c = parse_color("#ff0000").unwrap();
