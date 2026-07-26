@@ -11,6 +11,15 @@ use std::sync::Arc;
 use serde::Serialize;
 use ttf_parser::Face;
 
+/// CSS `line-height: normal` 的渲染倍数。
+///
+/// 不用字体的自然行高（ascent - descent + line_gap）——它因字体而异且常偏小，
+/// 与浏览器/AI 预期不符。此处用实测的 Blink 对齐值（LXGWWenKai/sans-serif/monospace
+/// 跨字体稳定为 ~1.31，是 Blink 的固定行为而非字体表值）。RmlUi 用 1.2，但
+/// LXGWWenKai 的 hhea metrics 本就 ≈1.184，1.2 改善微；1.31 才贴近浏览器。
+/// 想调 normal 倍数只改这一处。
+const NORMAL_LINE_HEIGHT: f32 = 1.31;
+
 /// 单个字形。坐标为绝对坐标（pen 位 = glyph.x/y + bearing）。
 #[derive(Debug, Clone, Serialize)]
 pub struct Glyph {
@@ -370,10 +379,12 @@ pub fn measure_text(
     let ascent = font.ascent(font_size);
     let descent = font.descent(font_size); // 负
 
-    // CSS line-height: normal → 1.2×font-size（业界惯例/RmlUi 同），不用字体自然行高
-    // （ascent-descent+line_gap 因字体而异且常偏小，与浏览器/AI 预期不符）。精确对齐
-    // 浏览器（~1.31，Blink 固定行为）留 tech-debt。
-    let lh = if line_height > 0.0 { line_height } else { 1.2 };
+    // CSS line-height: normal → NORMAL_LINE_HEIGHT（见常量说明，别处不再复述理据）。
+    let lh = if line_height > 0.0 {
+        line_height
+    } else {
+        NORMAL_LINE_HEIGHT
+    };
 
     // Line.height：倍数烤进 height（后端不重套，§9.1）。
     let line_h = font_size * lh;
@@ -890,10 +901,13 @@ fn is_cjk(ch: char) -> bool {
         || (0x3040..=0x30FF).contains(&c) // 假名
 }
 
-/// strut 行高：line_height>0 用倍数；normal(0) 用 1.2×size（对齐业界惯例/浏览器预期，
-/// 不用字体自然行高 ascent-descent+gap）。
+/// strut 行高：line_height>0 用倍数；normal(0) 用 NORMAL_LINE_HEIGHT×size（见常量说明）。
 fn strut_height(line_height: f32, size: f32, _ascent: f32, _descent: f32, _line_gap: f32) -> f32 {
-    let lh = if line_height > 0.0 { line_height } else { 1.2 };
+    let lh = if line_height > 0.0 {
+        line_height
+    } else {
+        NORMAL_LINE_HEIGHT
+    };
     size * lh
 }
 
@@ -1296,11 +1310,9 @@ mod tests {
 
     #[test]
     fn line_height_normal_is_1_2_not_font_metrics() {
-        // CSS line-height: normal 应对齐业界惯例 ~1.2×font-size（RmlUi 亦固定 1.2），
+        // CSS line-height: normal 应对齐浏览器（实测 Blink ~1.31，见 NORMAL_LINE_HEIGHT），
         // 而非字体的自然行高（ascent-descent+line_gap，因字体而异且常偏小）。
-        // 这是 LoomGUI 渲染对齐浏览器/AI 预期的关键：浏览器实测 ~1.31，core 旧用 hhea
-        // metrics（LXGWWenKai=1.184）偏小，导致所有文字行高比浏览器矮 ~10%。
-        // 选 C：先用 1.2（RmlUi 方案）立即改善，精确对齐浏览器（~1.31）留 tech-debt。
+        // 最终值待定；调 normal 倍数改常量，本测试自动跟随。
         let font = match test_font() {
             Some(f) => f,
             None => {
@@ -1322,10 +1334,10 @@ mod tests {
             crate::text::rich::RichWeight::Normal,
         );
         let line_h = result.lines[0].height;
-        let expected = font_size * 1.2;
+        let expected = font_size * NORMAL_LINE_HEIGHT;
         assert_eq!(
             line_h, expected,
-            "normal line-height 该是 1.2×font_size={expected}，实际 {line_h}"
+            "normal line-height 该是 {NORMAL_LINE_HEIGHT}×font_size={expected}，实际 {line_h}"
         );
     }
 
