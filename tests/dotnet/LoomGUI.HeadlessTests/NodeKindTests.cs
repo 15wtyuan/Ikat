@@ -21,70 +21,70 @@ namespace LoomGUI.HeadlessTests
         public void TextNodeIsOne() => Assert.Equal((byte)1, (byte)NodeKind.TextNode);
 
         [Fact]
-        public void ButtonIsSix() => Assert.Equal((byte)6, (byte)NodeKind.Button);
+        public void ButtonIsThree() => Assert.Equal((byte)3, (byte)NodeKind.Button);
 
         [Fact]
-        public void ImageIsEight() => Assert.Equal((byte)8, (byte)NodeKind.Image);
+        public void ImageIsFour() => Assert.Equal((byte)4, (byte)NodeKind.Image);
 
-        // ── 全变体逐个验判别值（显式声明的 Rust 顺序 0..22）──────────────
+        // ── 全变体逐个验判别值（显式声明的 Rust 顺序 0..19）──────────────
         // 任何变体名抄错 / 顺序错位 / 判别值漂移 → 对应 Fact 红。
 
         [Fact]
-        public void TextElementIsThree() => Assert.Equal((byte)3, (byte)NodeKind.TextElement);
+        public void TextElementIsTwo() => Assert.Equal((byte)2, (byte)NodeKind.TextElement);
 
         [Fact]
-        public void TextFieldIsNine() => Assert.Equal((byte)9, (byte)NodeKind.TextField);
+        public void TextFieldIsFive() => Assert.Equal((byte)5, (byte)NodeKind.TextField);
 
         [Fact]
-        public void PasswordFieldIsTwentyThree() => Assert.Equal((byte)23, (byte)NodeKind.PasswordField);
+        public void PasswordFieldIsEighteen() => Assert.Equal((byte)18, (byte)NodeKind.PasswordField);
 
         [Fact]
-        public void SearchFieldIsTwentyFour() => Assert.Equal((byte)24, (byte)NodeKind.SearchField);
+        public void SearchFieldIsNineteen() => Assert.Equal((byte)19, (byte)NodeKind.SearchField);
 
         [Fact]
-        public void NumberFieldIsTen() => Assert.Equal((byte)10, (byte)NodeKind.NumberField);
+        public void NumberFieldIsSix() => Assert.Equal((byte)6, (byte)NodeKind.NumberField);
 
         [Fact]
-        public void SliderIsEleven() => Assert.Equal((byte)11, (byte)NodeKind.Slider);
+        public void SliderIsSeven() => Assert.Equal((byte)7, (byte)NodeKind.Slider);
 
         [Fact]
-        public void ToggleIsTwelve() => Assert.Equal((byte)12, (byte)NodeKind.Toggle);
+        public void ToggleIsEight() => Assert.Equal((byte)8, (byte)NodeKind.Toggle);
 
         [Fact]
-        public void RadioButtonIsThirteen() => Assert.Equal((byte)13, (byte)NodeKind.RadioButton);
+        public void RadioButtonIsNine() => Assert.Equal((byte)9, (byte)NodeKind.RadioButton);
 
         [Fact]
-        public void TextAreaIsFourteen() => Assert.Equal((byte)14, (byte)NodeKind.TextArea);
+        public void TextAreaIsTen() => Assert.Equal((byte)10, (byte)NodeKind.TextArea);
 
         [Fact]
-        public void DropdownIsFifteen() => Assert.Equal((byte)15, (byte)NodeKind.Dropdown);
+        public void DropdownIsEleven() => Assert.Equal((byte)11, (byte)NodeKind.Dropdown);
 
         [Fact]
-        public void OptionItemIsSixteen() => Assert.Equal((byte)16, (byte)NodeKind.OptionItem);
+        public void OptionItemIsTwelve() => Assert.Equal((byte)12, (byte)NodeKind.OptionItem);
 
         [Fact]
-        public void ProgressBarIsSeventeen() => Assert.Equal((byte)17, (byte)NodeKind.ProgressBar);
+        public void ProgressBarIsThirteen() => Assert.Equal((byte)13, (byte)NodeKind.ProgressBar);
 
         [Fact]
-        public void ListViewIsEighteen() => Assert.Equal((byte)18, (byte)NodeKind.ListView);
+        public void ListViewIsFourteen() => Assert.Equal((byte)14, (byte)NodeKind.ListView);
 
         [Fact]
-        public void ListItemIsNineteen() => Assert.Equal((byte)19, (byte)NodeKind.ListItem);
+        public void ListItemIsFifteen() => Assert.Equal((byte)15, (byte)NodeKind.ListItem);
 
         [Fact]
-        public void SlotIsTwenty() => Assert.Equal((byte)20, (byte)NodeKind.Slot);
+        public void SlotIsSixteen() => Assert.Equal((byte)16, (byte)NodeKind.Slot);
 
         [Fact]
-        public void CustomElementIsTwentyOne() => Assert.Equal((byte)21, (byte)NodeKind.CustomElement);
+        public void CustomElementIsSeventeen() => Assert.Equal((byte)17, (byte)NodeKind.CustomElement);
 
         // ── 结构不变量：变体数 + 紧凑 0..N-1（无空洞、无跳号）──────────
 
         /// <summary>
-        /// Rust node.rs 当前 25 变体。若 Rust 加/删变体未同步 C# → 此测红，
+        /// Rust node.rs 当前 20 变体。若 Rust 加/删变体未同步 C# → 此测红，
         /// 提醒看护 ABI 对齐（同步两侧 enum）。
         /// </summary>
         [Fact]
-        public void VariantCountMatchesRust() => Assert.Equal(25, Enum.GetNames<NodeKind>().Length);
+        public void VariantCountMatchesRust() => Assert.Equal(20, Enum.GetNames<NodeKind>().Length);
 
         /// <summary>
         /// 显式赋值防隐式错位：最大判别值 == 变体数 - 1 验全变体紧凑连续
@@ -93,8 +93,10 @@ namespace LoomGUI.HeadlessTests
         [Fact]
         public void AllValuesContiguousFromZero()
         {
-            byte max = (byte)NodeKind.SearchField; // 末变体（声明序最后）
-            Assert.Equal((byte)(Enum.GetNames<NodeKind>().Length - 1), max);
+            var values = (byte[])Enum.GetValuesAsUnderlyingType<NodeKind>();
+            Array.Sort(values);
+            for (int i = 0; i < values.Length; i++)
+                Assert.Equal(i, values[i]);
         }
     }
 }
