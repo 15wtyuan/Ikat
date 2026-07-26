@@ -497,6 +497,102 @@ namespace LoomGUI.Bindings
         [DllImport(__DllName, EntryPoint = "loomgui_stage_has_class", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_has_class(StageHandle* h, uint node, byte* name, nuint len);
 
+        /// <summary>
+        ///  设控件 value（ProgressBar / Slider）。ProgressBar clamp [0, max]；
+        ///  Slider clamp [min, max] 并按 step 量化。非 value 控件 / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_value(StageHandle* h, uint node_id, float value);
+
+        /// <summary>
+        ///  读控件 value（ProgressBar / Slider）。rc=0 且 *out 已填；非 value 控件 / null out /
+        ///  节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_value(StageHandle* h, uint node_id, float* @out);
+
+        /// <summary>
+        ///  设控件 checked（Toggle / Radio）。非 check 控件 / null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_checked", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_checked(StageHandle* h, uint node_id, [MarshalAs(UnmanagedType.U1)] bool @checked);
+
+        /// <summary>
+        ///  读控件 checked（Toggle / Radio）。rc=0 且 *out 已填；非 check 控件 / null out /
+        ///  节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_checked", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_checked(StageHandle* h, uint node_id, bool* @out);
+
+        /// <summary>
+        ///  设控件 max（ProgressBar / Slider）。null 句柄 / 非值控件 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_max", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_max(StageHandle* h, uint node_id, float max);
+
+        /// <summary>
+        ///  读控件 max（ProgressBar / Slider）。非值控件 / null out / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_max", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_max(StageHandle* h, uint node_id, float* @out);
+
+        /// <summary>
+        ///  设控件 min（Slider 独有；ProgressBar 无 min 语义 → -1）。
+        ///  null 句柄 / 节点缺失 → -1。改 min 后 value 重新 clamp。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_min", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_min(StageHandle* h, uint node_id, float min);
+
+        /// <summary>
+        ///  读控件 min（Slider 独有）。非 Slider / null out / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_min", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_min(StageHandle* h, uint node_id, float* @out);
+
+        /// <summary>
+        ///  设控件 step（Slider 独有；ProgressBar 无 step 语义 → -1）。
+        ///  null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_step", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_step(StageHandle* h, uint node_id, float step);
+
+        /// <summary>
+        ///  读控件 step（Slider 独有）。非 Slider / null out / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_step", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_step(StageHandle* h, uint node_id, float* @out);
+
+        /// <summary>
+        ///  设节点 user transform（位移/缩放/旋转）。走 `set_user_transform`（dynamic.rs）：
+        ///  只写 `node.user_transform`，不触发 layout solve——`compute_world_transforms` 在
+        ///  世界矩阵累计时并入（渲染/命中层，同 CSS transform）。供高频拖拽等运行时定位用。
+        ///  不 live 节点 / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_transform", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_transform(StageHandle* h, uint node_id, float tx, float ty, float sx, float sy, float rot);
+
 
     }
 

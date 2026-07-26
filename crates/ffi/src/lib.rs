@@ -18,11 +18,12 @@
 pub mod blob;
 
 use loomgui_core::input::{EventRecord, KeyEvent, PointerEvent};
-use loomgui_core::scene::NodeId;
+use loomgui_core::scene::node::ControlState;
+use loomgui_core::scene::{dynamic, NodeId};
 use loomgui_core::stage::Stage;
 use loomgui_core::style::computed::ComputedNodeStyle;
 use loomgui_core::style::resolved::TextAlign;
-use loomgui_core::transform;
+use loomgui_core::transform::{self, NodeTransform};
 use std::ffi::CString;
 
 /// 版本字符串（C null-terminated `b"v1e\0"`）。
@@ -1411,6 +1412,415 @@ pub extern "C" fn loomgui_stage_has_class(
         Some(true) => 1,
         Some(false) => 0,
         None => -1,
+    }
+}
+
+// ===== control state + transform get/set FFI（C# 投影层控件属性回写出口）=====
+//
+// 业务读写 ProgressBar/Slider 的 value/max、Toggle/Radio 的 checked，
+// 以及运行时高频 transform（拖拽 thumb）。所有 getter 走 return-code + out-param
+// （rc=0 严格意味 *out 已填；非 0 = err），避免 enum 判别值 0 与哨兵撞。
+//
+// 实现走「clone ControlState → 改字段 → re-ensure」模式：ControlTable 是 HashMap，
+// 原地改需 &mut 借出后写回不便，clone 后整覆盖更直捷且 ControlState 小（克隆成本低）。
+// 非语义适用（如 Progress 的 min/step）→ -1，不静默降级。
+
+/// 设控件 value（ProgressBar / Slider）。ProgressBar clamp [0, max]；
+/// Slider clamp [min, max] 并按 step 量化。非 value 控件 / null 句柄 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_control_value(
+    h: *mut StageHandle,
+    node_id: u32,
+    value: f32,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let scene = match sh.stage.scene.as_mut() {
+        Some(s) => s,
+        None => return -1,
+    };
+    let id = NodeId(node_id);
+    let Some(state) = scene.controls.get(id).cloned() else {
+        return -1;
+    };
+    let new_state = match state {
+        ControlState::Progress {
+            max, indeterminate, ..
+        } => {
+            let clamped = value.clamp(0.0, max);
+            ControlState::Progress {
+                value: clamped,
+                max,
+                indeterminate,
+            }
+        }
+        ControlState::Slider {
+            min,
+            max,
+            step,
+            dragging,
+            ..
+        } => {
+            let clamped = value.clamp(min, max);
+            let quantized = if step > 0.0 {
+                // 对齐到最近 step 边界：round((v - min) / step) * step + min
+                ((clamped - min) / step).round() * step + min
+            } else {
+                clamped
+            };
+            ControlState::Slider {
+                value: quantized,
+                min,
+                max,
+                step,
+                dragging,
+            }
+        }
+        _ => return -1,
+    };
+    scene.controls.ensure(id, new_state);
+    0
+}
+
+/// 读控件 value（ProgressBar / Slider）。rc=0 且 *out 已填；非 value 控件 / null out /
+/// 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_control_value(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut f32,
+) -> i32 {
+    if h.is_null() || out.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::Progress { value, .. } | ControlState::Slider { value, .. }) => {
+            unsafe { *out = *value };
+            0
+        }
+        _ => -1,
+    }
+}
+
+/// 设控件 checked（Toggle / Radio）。非 check 控件 / null 句柄 / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_control_checked(
+    h: *mut StageHandle,
+    node_id: u32,
+    checked: bool,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let scene = match sh.stage.scene.as_mut() {
+        Some(s) => s,
+        None => return -1,
+    };
+    let id = NodeId(node_id);
+    let Some(state) = scene.controls.get(id).cloned() else {
+        return -1;
+    };
+    let new_state = match state {
+        ControlState::Toggle { .. } => ControlState::Toggle { checked },
+        ControlState::Radio { name, .. } => ControlState::Radio { checked, name },
+        _ => return -1,
+    };
+    scene.controls.ensure(id, new_state);
+    0
+}
+
+/// 读控件 checked（Toggle / Radio）。rc=0 且 *out 已填；非 check 控件 / null out /
+/// 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_control_checked(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut bool,
+) -> i32 {
+    if h.is_null() || out.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::Toggle { checked } | ControlState::Radio { checked, .. }) => {
+            unsafe { *out = *checked };
+            0
+        }
+        _ => -1,
+    }
+}
+
+/// 设控件 max（ProgressBar / Slider）。null 句柄 / 非值控件 / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_control_max(
+    h: *mut StageHandle,
+    node_id: u32,
+    max: f32,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let scene = match sh.stage.scene.as_mut() {
+        Some(s) => s,
+        None => return -1,
+    };
+    let id = NodeId(node_id);
+    let Some(state) = scene.controls.get(id).cloned() else {
+        return -1;
+    };
+    let new_state = match state {
+        ControlState::Progress {
+            value,
+            indeterminate,
+            ..
+        } => {
+            // 改 max 后把 value 重新 clamp 进新区间（避免 value > max 的悬空态）
+            let value = value.clamp(0.0, max);
+            ControlState::Progress {
+                value,
+                max,
+                indeterminate,
+            }
+        }
+        ControlState::Slider {
+            value,
+            min,
+            step,
+            dragging,
+            ..
+        } => {
+            let max = max.max(min);
+            let value = value.clamp(min, max);
+            ControlState::Slider {
+                value,
+                min,
+                max,
+                step,
+                dragging,
+            }
+        }
+        _ => return -1,
+    };
+    scene.controls.ensure(id, new_state);
+    0
+}
+
+/// 读控件 max（ProgressBar / Slider）。非值控件 / null out / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_control_max(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut f32,
+) -> i32 {
+    if h.is_null() || out.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::Progress { max, .. } | ControlState::Slider { max, .. }) => {
+            unsafe { *out = *max };
+            0
+        }
+        _ => -1,
+    }
+}
+
+/// 设控件 min（Slider 独有；ProgressBar 无 min 语义 → -1）。
+/// null 句柄 / 节点缺失 → -1。改 min 后 value 重新 clamp。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_control_min(
+    h: *mut StageHandle,
+    node_id: u32,
+    min: f32,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let scene = match sh.stage.scene.as_mut() {
+        Some(s) => s,
+        None => return -1,
+    };
+    let id = NodeId(node_id);
+    let Some(state) = scene.controls.get(id).cloned() else {
+        return -1;
+    };
+    let new_state = match state {
+        ControlState::Slider {
+            value,
+            max,
+            step,
+            dragging,
+            ..
+        } => {
+            let min = min.min(max);
+            let value = value.clamp(min, max);
+            ControlState::Slider {
+                value,
+                min,
+                max,
+                step,
+                dragging,
+            }
+        }
+        _ => return -1,
+    };
+    scene.controls.ensure(id, new_state);
+    0
+}
+
+/// 读控件 min（Slider 独有）。非 Slider / null out / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_control_min(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut f32,
+) -> i32 {
+    if h.is_null() || out.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::Slider { min, .. }) => {
+            unsafe { *out = *min };
+            0
+        }
+        _ => -1,
+    }
+}
+
+/// 设控件 step（Slider 独有；ProgressBar 无 step 语义 → -1）。
+/// null 句柄 / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_control_step(
+    h: *mut StageHandle,
+    node_id: u32,
+    step: f32,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let scene = match sh.stage.scene.as_mut() {
+        Some(s) => s,
+        None => return -1,
+    };
+    let id = NodeId(node_id);
+    let Some(state) = scene.controls.get(id).cloned() else {
+        return -1;
+    };
+    let new_state = match state {
+        ControlState::Slider {
+            value,
+            min,
+            max,
+            dragging,
+            ..
+        } => ControlState::Slider {
+            value,
+            min,
+            max,
+            step,
+            dragging,
+        },
+        _ => return -1,
+    };
+    scene.controls.ensure(id, new_state);
+    0
+}
+
+/// 读控件 step（Slider 独有）。非 Slider / null out / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_control_step(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut f32,
+) -> i32 {
+    if h.is_null() || out.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::Slider { step, .. }) => {
+            unsafe { *out = *step };
+            0
+        }
+        _ => -1,
+    }
+}
+
+/// 设节点 user transform（位移/缩放/旋转）。走 `set_user_transform`（dynamic.rs）：
+/// 只写 `node.user_transform`，不触发 layout solve——`compute_world_transforms` 在
+/// 世界矩阵累计时并入（渲染/命中层，同 CSS transform）。供高频拖拽等运行时定位用。
+/// 不 live 节点 / null 句柄 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_transform(
+    h: *mut StageHandle,
+    node_id: u32,
+    tx: f32,
+    ty: f32,
+    sx: f32,
+    sy: f32,
+    rot: f32,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let scene = match sh.stage.scene.as_mut() {
+        Some(s) => s,
+        None => return -1,
+    };
+    let t = NodeTransform {
+        translate: [tx, ty],
+        scale: [sx, sy],
+        rotation: rot,
+    };
+    match dynamic::set_user_transform(scene, NodeId(node_id), t) {
+        Ok(()) => 0,
+        Err(_) => -1,
     }
 }
 
