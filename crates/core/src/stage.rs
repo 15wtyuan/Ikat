@@ -700,6 +700,14 @@ impl Stage {
                 TRANSITION_TAG,
             );
         }
+        // 4.6 控件状态→视觉同步：ControlState 变化后把 fill width / check display 写进
+        //     子节点 inline_override。须在 solve 前（inline 影响布局：fill width 决定 bar 宽度）。
+        //     每帧对所有控件节点扫一次（控件稀疏，代价可接受）。读 controls.0.keys() 克隆
+        //     避免与 sync_control_visuals 的可变借冲突。
+        let control_ids: Vec<NodeId> = scene.controls.0.keys().copied().collect();
+        for cid in control_ids {
+            crate::scene::control::sync_control_visuals(scene, cid);
+        }
         // 5. solve（读 rematch 后的 taffy_style → layout_rect）
         // 核心知图尺寸（打包期 PNG IHDR 静态，存 Stage.image_sizes）。solve 查尺寸表算
         // Image intrinsic（三档：CSS > 真实像素 > 64×64）。不知图集（运行时纹理/UV 归 Unity）。
