@@ -23,6 +23,7 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             tabindex: None,
             content: None,
             src: None,
+            control_init: None,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -34,6 +35,7 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             tabindex: None,
             content: None,
             src: None,
+            control_init: None,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -101,6 +103,7 @@ fn instantiate_missing_pkg_or_comp_errors() {
         tabindex: None,
         content: None,
         src: None,
+        control_init: None,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -131,6 +134,7 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             tabindex: None,
             content: None,
             src: None,
+            control_init: None,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -142,6 +146,7 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             tabindex: None,
             content: None,
             src: None,
+            control_init: None,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -249,6 +254,7 @@ fn pkg_with_root_rule(pkg_name: &str, flex_dir_val: &str) -> (String, Vec<u8>) {
         tabindex: None,
         content: None,
         src: None,
+        control_init: None,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable {
         rules: vec![class_rule("root", "flex-direction", flex_dir_val)],
@@ -330,6 +336,7 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
             tabindex: None,
             content: None,
             src: None,
+            control_init: None,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -341,6 +348,7 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
             tabindex: None,
             content: None,
             src: None,
+            control_init: None,
         },
     ];
     let outer_rules = crate::style::dynamic::DynamicRuleTable {
@@ -375,6 +383,7 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
         tabindex: None,
         content: None,
         src: None,
+        control_init: None,
     }];
     let inner_rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {

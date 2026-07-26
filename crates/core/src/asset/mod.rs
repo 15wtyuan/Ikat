@@ -1,4 +1,5 @@
-//! 包格式（.pkg.bin，当前 version=23）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=24）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! v24：TemplateNode 加 control_init 字段（bincode 布局变，旧 v23 pkg 加载报 TooOld）。
 //! v23：ResolvedStyle 加 border_style 字段（bincode 布局变，旧 v22 pkg 加载报 TooOld）。
 //!
 //! 多组件格式：一个 pkg.bin = 多个具名组件（ComponentTable 切分）。
@@ -18,9 +19,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 23; // v23: ResolvedStyle.border_style field (bincode layout change)
-pub(crate) const MIN_VERSION: u32 = 23;
-pub(crate) const MAX_VERSION: u32 = 23;
+pub const PKG_FORMAT_VERSION: u32 = 24; // v24: TemplateNode.control_init (bincode layout change)
+pub(crate) const MIN_VERSION: u32 = 24;
+pub(crate) const MAX_VERSION: u32 = 24;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────
@@ -40,6 +41,31 @@ pub struct ComponentTemplate {
     pub dynamic_rules: DynamicRuleTable,
 }
 
+/// 控件初始值（从 HTML 属性 bake，按 NodeKind 分派）。打包期 bridge 提取 → 进
+/// pkg.bin → core instantiate 时填 runtime side table。variant 与控件 NodeKind 一一对应；
+/// 非 control 节点此字段为 None。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum ControlInit {
+    Progress {
+        value: f32,
+        max: f32,
+        indeterminate: bool,
+    },
+    Toggle {
+        checked: bool,
+    },
+    Radio {
+        checked: bool,
+        name: String,
+    },
+    Slider {
+        value: f32,
+        min: f32,
+        max: f32,
+        step: f32,
+    },
+}
+
 /// 模板节点：序列化态（instantiate 时 build 成 live Node）。
 /// 与 live Node 区别：无 NodeId（instantiate 时 slotmap 分配）、无 taffy_id（每帧 solve 重建）。
 #[derive(Debug, Clone)]
@@ -53,6 +79,8 @@ pub struct TemplateNode {
     pub tabindex: Option<i32>,
     pub content: Option<String>,
     pub src: Option<String>,
+    /// 控件初始值（按 kind 分派；None = 非控件节点）。打包期 bridge 从 HTML 属性提取。
+    pub control_init: Option<ControlInit>,
 }
 
 /// write_package 的输入（打包器构造，已归一化：path 已相对、style 已 bake）。
@@ -116,8 +144,9 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     // 每组件：(name_idx, root_node_idx, node_count, dynamic_blob)
     // 全局 NodeBlock 由各组件节点顺次拼接，root_node_idx = 该组件首节点在全局的位置。
     let mut comp_records: Vec<(u16, u32, u32, Vec<u8>)> = Vec::with_capacity(component_count);
-    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex)
-    let mut node_records: Vec<(i32, u8, Vec<u8>, u16, u16, Vec<u16>, u16, u8, i32)> = Vec::new();
+    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, control_init_blob)
+    let mut node_records: Vec<(i32, u8, Vec<u8>, u16, u16, Vec<u16>, u16, u8, i32, Vec<u8>)> =
+        Vec::new();
     let mut global_node_offset: u32 = 0;
     for (name, nodes, dynamic_rules) in &input.components {
         let name_idx = intern(name, &mut strings, &mut idx_of);
@@ -157,6 +186,10 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 }
             };
             let style_blob = bincode::serialize(&tn.style).expect("ResolvedStyle serializable");
+            // control_init：Option<ControlInit> 整体 bincode（None 为 1B tag，Some 含 variant 载荷）。
+            // 打包期 bake 自 HTML 属性；runtime instantiate 读取填 side table。
+            let control_init_blob =
+                bincode::serialize(&tn.control_init).expect("ControlInit serializable");
             let class_idx: Vec<u16> = tn
                 .classes
                 .iter()
@@ -179,6 +212,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 id_idx,
                 flags,
                 tabindex,
+                control_init_blob,
             ));
         }
         let node_count = nodes.len() as u32;
@@ -209,9 +243,19 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         out.extend_from_slice(&(dynamic_blob.len() as u32).to_le_bytes());
     }
     // NodeBlock: 每节点 {parent_idx(i32), kind_tag(u8), style_len(u32)+style_blob, text_idx(u16), src_idx(u16),
-    //   class_count(u16)+class_idx[], id_idx(u16), flags(u8), tabindex(i32)}
-    for (parent_idx, kind_tag, style_blob, text_idx, src_idx, class_idx, id_idx, flags, tabindex) in
-        &node_records
+    //   class_count(u16)+class_idx[], id_idx(u16), flags(u8), tabindex(i32), control_init_len(u32)+control_init_blob}
+    for (
+        parent_idx,
+        kind_tag,
+        style_blob,
+        text_idx,
+        src_idx,
+        class_idx,
+        id_idx,
+        flags,
+        tabindex,
+        control_init_blob,
+    ) in &node_records
     {
         out.extend_from_slice(&parent_idx.to_le_bytes());
         out.push(*kind_tag);
@@ -226,6 +270,8 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         out.extend_from_slice(&id_idx.to_le_bytes());
         out.push(*flags);
         out.extend_from_slice(&tabindex.to_le_bytes());
+        out.extend_from_slice(&(control_init_blob.len() as u32).to_le_bytes());
+        out.extend_from_slice(control_init_blob);
     }
     // PerComponentDynamicRules：每组件 dynamic_blob（同 ComponentTable 顺序）。read 按同序逐组件读。
     for (_, _, _, dynamic_blob) in &comp_records {
@@ -300,6 +346,9 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         } else {
             Some(tab_raw)
         };
+        let control_init_len = r.u32("control_init_len")? as usize;
+        let control_init: Option<ControlInit> =
+            bincode::deserialize(r.take(control_init_len, "control_init_blob")?)?;
         // 存盘 parent_idx 是 NodeBlock 全局位置（-1=组件根）；先存全局，待切分组件时减 base 转局部
         let parent_global = if pidx < 0 { None } else { Some(pidx as usize) };
         let (kind, content, src) = match NodeKind::from_u8(kind_tag) {
@@ -334,6 +383,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             id_attr,
             draggable,
             tabindex,
+            control_init,
         });
     }
     // PerComponentDynamicRules: 每组件 dynamic_blob（按 ComponentTable 序）

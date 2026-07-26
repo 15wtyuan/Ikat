@@ -12,6 +12,7 @@ fn tn(kind: NodeKind) -> TemplateNode {
         tabindex: None,
         content: None,
         src: None,
+        control_init: None,
     }
 }
 
@@ -40,6 +41,7 @@ fn write_package_panics_when_string_table_exhausted() {
             id_attr: None,
             draggable: false,
             tabindex: None,
+            control_init: None,
         });
     }
     let rules = empty_rules();
@@ -329,6 +331,7 @@ fn read_rejects_cross_component_parent() {
     // 节点布局（v19）：parent_idx(4) + kind(1) + style_len(4) + style_blob + text_idx(2) + src_idx(2)
     //   + class_count(2) + class_idx[] + id_idx(2) + flags(1) + tabindex(4)
     //   固定部分 = 22B + style_blob_len + 2*class_count（v19 删 dc_idx 2B，v18 的 24B 减 2B）。
+    //   v24 加 control_init_len(4) + control_init_blob（None = 1B），故固定部分 +5B。
     let style_len_0 = u32::from_le_bytes(
         bytes[nodeblock_off + 5..nodeblock_off + 9]
             .try_into()
@@ -340,7 +343,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node0_size = 22 + style_len_0 + 2 * class_count_0;
+    let node0_size = 22 + style_len_0 + 2 * class_count_0 + 5;
     let node1_off = nodeblock_off + node0_size;
     let style_len_1 =
         u32::from_le_bytes(bytes[node1_off + 5..node1_off + 9].try_into().unwrap()) as usize;
@@ -349,7 +352,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node1_size = 22 + style_len_1 + 2 * class_count_1;
+    let node1_size = 22 + style_len_1 + 2 * class_count_1 + 5;
     let node2_off = nodeblock_off + node0_size + node1_size;
     // 篡改节点 2（comp_b root）的 parent_idx 从 -1 → 0（< base=2，跨组件）
     let mut patched = bytes.clone();
@@ -458,6 +461,7 @@ fn template_node_content_src_roundtrip_via_pkg() {
         tabindex: None,
         content: None,
         src: Some("icon.png".into()),
+        control_init: None,
     };
     let nodes = [text, img];
     let rules = empty_rules();
@@ -515,6 +519,7 @@ fn v18_nontrivial_nodekinds_roundtrip() {
             tabindex: None,
             content: None,
             src: None,
+            control_init: None,
         };
         let empty_rules = DynamicRuleTable { rules: vec![] };
         let input = PackageInput {
@@ -567,5 +572,62 @@ fn v20_password_search_field_roundtrip() {
         ns[2].kind,
         NodeKind::SearchField,
         "SearchField must survive pkg roundtrip (discriminant 24)"
+    );
+}
+
+/// v24: ControlInit 经 bincode serialize/deserialize 往返保真（pkg.bin 里 control_init
+/// 字段就是 Option<ControlInit> 的 bincode blob）。锁定序列化布局稳定性，防后续重构
+/// 悄悄改 variant 载荷形态破坏 pkg.bin 兼容。
+#[test]
+fn pkg_v24_control_init_roundtrip() {
+    let init = Some(ControlInit::Progress {
+        value: 70.0,
+        max: 100.0,
+        indeterminate: false,
+    });
+    let bytes = bincode::serialize(&init).expect("Option<ControlInit> serializable");
+    let back: Option<ControlInit> =
+        bincode::deserialize(&bytes).expect("Option<ControlInit> deserializable");
+    assert_eq!(back, init);
+}
+
+/// v24: control_init 经完整 pkg.bin 路径（write_package → read_package）往返保真。
+/// 这是真实持久化路径（pkg.bin 手动编码，非 serde），验证 control_init_blob 段写读一致。
+#[test]
+fn pkg_v24_control_init_roundtrip_via_pkg() {
+    let mut node = tn(NodeKind::ProgressBar);
+    node.control_init = Some(ControlInit::Progress {
+        value: 70.0,
+        max: 100.0,
+        indeterminate: false,
+    });
+    let nodes = [node];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules)],
+    };
+    let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
+    let back = &pkg.components["c"].nodes[0];
+    assert_eq!(
+        back.control_init,
+        Some(ControlInit::Progress {
+            value: 70.0,
+            max: 100.0,
+            indeterminate: false,
+        })
+    );
+}
+
+/// v24: version=23 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=24，无迁移器）。
+/// 验证 bump 后旧 v23 fixture 不会半读半坏（control_init 字段缺失致 bincode 错位）。
+#[test]
+fn pkg_v24_rejects_v23() {
+    let mut bad = vec![];
+    bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
+    bad.extend_from_slice(&23u32.to_le_bytes()); // v23 < MIN_VERSION=24
+    let err = read_package(&bad);
+    assert!(
+        matches!(err, Err(PkgError::TooOld(23))),
+        "v23 pkg must be rejected as TooOld after v24 bump, got {err:?}"
     );
 }

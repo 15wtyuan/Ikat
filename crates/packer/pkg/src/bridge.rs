@@ -59,6 +59,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     tabindex: attr(el, "tabindex").and_then(|s| s.parse::<i32>().ok()),
                     content: None,
                     src,
+                    control_init: None,
                 });
             }
             IrNodeKind::Text(s) => {
@@ -75,6 +76,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     tabindex: None,
                     content: Some(s.clone()),
                     src: None,
+                    control_init: None,
                 });
             }
         }
