@@ -313,7 +313,7 @@ pub fn find_tag(name: &str) -> Option<&'static TagSpec> {
 mod tests {
     use super::*;
 
-    // -- Task 4: resolve_semantic --
+    // -- resolve_semantic --
 
     #[test]
     fn resolve_input_types() {
@@ -375,7 +375,7 @@ mod tests {
         assert_eq!(resolve_semantic("video", None), None);
     }
 
-    // -- Task 5: TAGS registry --
+    // -- TAGS registry --
 
     #[test]
     fn all_runtime_tags_present() {

@@ -456,7 +456,7 @@ mod tests {
         }
     }
 
-    // ── Task 5: sync_control_visuals（状态 → 子节点 inline style） ──
+    // ── sync_control_visuals（状态 → 子节点 inline style） ──
     //
     // 控件状态变后由 core 写子节点 inline style（语义优先级 = HTML inline，最高）。
     // ProgressBar/Slider 写 .loom-fill 的 width:%，Toggle/Radio 切 .loom-check 的 display。
@@ -619,7 +619,7 @@ mod tests {
     #[test]
     fn slider_fill_width_reflects_value() {
         // Slider: value=25/min=0/max=100 → track 内 fill width = 25%。
-        // thumb 位置走 transform（Task 6），本测只验 fill width。
+        // thumb 位置走 transform（set_user_transform），本测只验 fill width。
         let mut scene = Scene::default();
         let id = make_slider(&mut scene, 25.0, 0.0, 100.0);
         sync_control_visuals(&mut scene, id);
@@ -670,7 +670,7 @@ mod tests {
         assert!(scene.get(id).unwrap().children.is_empty());
     }
 
-    // ── Task 9: 控件指针交互（on_pointer_down/move/up） ──
+    // ── 控件指针交互（on_pointer_down/move/up） ──
     //
     // 直接调交互函数验逻辑（隔离 PointerState 仲裁）：Toggle 翻转、Radio 同名组互斥、
     // Slider 拖拽改 value + step 量化。track 几何手动设（解耦 solve：测试不把 slider 入 roots，
@@ -901,7 +901,7 @@ mod tests {
         assert!(!occupies_gesture(&scene, progress));
     }
 
-    // ── Task 10: 控件事件出口（CheckedChanged / ValueChanged / ChangeCommitted） ──
+    // ── 控件事件出口（CheckedChanged / ValueChanged / ChangeCommitted） ──
     //
     // 控件交互产生 EventRecord，随 PointerState::process 的 out 流出。直接调交互函数捕获
     // 返回的 Vec<EventRecord> 验事件载荷（隔离 process 仲裁）。payload 复用 EventRecord

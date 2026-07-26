@@ -610,7 +610,7 @@ mod package_tests {
 
     #[test]
     fn pack_components_exposes_warnings_in_return_value() {
-        // Task 10b 回归锁：W1/W2 warning 不阻断打包，但必须对 CLI/GUI 可见。
+        // 回归锁：W1/W2 warning 不阻断打包，但必须对 CLI/GUI 可见。
         // 修前 pack_components 只查 Error 级 diagnostic，warning 留在局部 parsed.diagnostics
         // 里随循环结束丢弃 → 作者感知不到「预览 ≠ 运行时」的不一致。修后 warning 经
         // PackResult.warnings 暴露 → build() 进 BuildReport.warnings → CLI 打印。

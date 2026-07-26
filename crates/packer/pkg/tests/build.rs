@@ -119,7 +119,7 @@ fn build_fails_when_output_dir_empty() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-/// Task 10b: build() 必须把围栏一致性 warning 收集进 BuildReport.warnings。
+/// build() 必须把围栏一致性 warning 收集进 BuildReport.warnings。
 /// 修前 pack_components 丢弃 warning（只查 Error 级），build 也未暴露 → CLI/GUI
 /// 都看不到 W1/W2，机制对作者名存实亡。本测锁住「warning 经 build 进报告」的链路。
 #[test]

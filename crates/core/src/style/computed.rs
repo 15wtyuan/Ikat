@@ -6,7 +6,7 @@
 //! 留视觉束）。供 `Stage::get_node_computed_style` + 集成断言消费。
 use crate::style::resolved::{DisplayMode, OverflowMode, ResolvedStyle, TextAlign};
 
-/// Cascade 解析后的非几何样式快照（typed）。跨 FFI 由 `ComputedNodeStyleRepr` 稳定化（Task 4）。
+/// Cascade 解析后的非几何样式快照（typed）。跨 FFI 由 `ComputedNodeStyleRepr` 稳定化。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ComputedNodeStyle {
     pub display_mode: DisplayMode,

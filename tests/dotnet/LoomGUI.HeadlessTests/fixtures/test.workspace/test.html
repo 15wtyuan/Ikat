@@ -25,9 +25,11 @@
       <span id="text">hello</span>
       <!-- Criterion 1: type fidelity — button → Button -->
       <!-- Criterion 8: button event (Click += handler) -->
-      <button id="btn" class="spaced">click me</button>
+      <!-- display:block: button/img are inline elements; fence requires explicit
+           block intent when placed directly in a block container (LoomGUI has no inline flow). -->
+      <button id="btn" class="spaced" style="display:block">click me</button>
       <!-- Criterion 1: type fidelity — img → Image -->
-      <img id="img" src="res/dot.png" />
+      <img id="img" src="res/dot.png" style="display:block" />
     </div>
   </div>
 </body>

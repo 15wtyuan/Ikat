@@ -2,11 +2,11 @@
 //! 即便被 `merge_meshes` 吞掉（不进 `frame.nodes` 渲染 blob），仍可直查
 //! `scene.world_transforms` + `scene.node_sort_keys`（FFI 查询独立于 merge）。
 //!
-//! 这是 Task 1-4 修复的端到端验证：
-//! - Task 1：Scene 新增 `node_sort_keys: Vec<u32>`（merge 前的 DFS 序号快照）
-//! - Task 2：Stage 3 个 getter（world_transforms / node_sort_keys / visible）
-//! - Task 3：FFI 3 个 extern（同上，给 C# P/Invoke）
-//! - Task 4：C# SyncNativeHostSlot 调 FFI 查 world_transforms/sort_key/visible
+//! 端到端验证的修复链：
+//! - Scene 新增 `node_sort_keys: Vec<u32>`（merge 前的 DFS 序号快照）
+//! - Stage 暴露 3 个 getter（world_transforms / node_sort_keys / visible）
+//! - FFI 暴露 3 个 extern（同上，给 C# P/Invoke）
+//! - C# SyncNativeHostSlot 调 FFI 查 world_transforms/sort_key/visible
 //!
 //! 根因：NativeHost 角色挂 nh-stage 节点，需要查它的 world_matrix 决定 GO 位置。
 //! 旧实现走 `frame.nodes` blob——但 nh-stage 是空 div（无 mesh payload），被

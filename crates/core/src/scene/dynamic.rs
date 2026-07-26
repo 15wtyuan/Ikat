@@ -1021,7 +1021,7 @@ mod tests {
     #[test]
     fn create_node_from_template_control_init_injects_children() {
         // 传 control_init 的控件节点：side table 填充 + 视觉子节点注入都要发生。
-        // 验 Task-4 接线：create_node_from_template 内部调 inject_control_children。
+        // 验子节点注入接线：create_node_from_template 内部调 inject_control_children。
         let mut scene = empty_scene();
         let id = create_node_from_template(
             &mut scene,

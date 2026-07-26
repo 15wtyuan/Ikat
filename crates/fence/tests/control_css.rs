@@ -1,4 +1,4 @@
-//! Task 12：控件必须被 CSS 命中校验（端到端）。
+//! 控件必须被 CSS 命中校验（端到端）。
 //!
 //! LoomGUI 控件（ProgressBar/Slider/Toggle/RadioButton）不带 UA 默认样式——
 //! 写了控件标签却没匹配的 CSS 规则 = 运行时空白。本测试覆盖打包期校验：

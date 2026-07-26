@@ -10,7 +10,7 @@ use loomgui_fence::ParsedTemplate;
 /// 把一个组件 HTML 的 ParsedTemplate 翻译成 TemplateNode 树。
 ///
 /// 单根契约：`parsed.tree.roots` 必须恰好 1 个（html/head/body 等 shell 标签已由 fence 剥除）。
-/// base_style = fence styles[ir_idx]（Task 4 会把 inherited_set bake 进 styles）。
+/// base_style = fence styles[ir_idx]（inherited_set 在 cascade 时 bake 进 styles）。
 pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
     if parsed.tree.roots.len() != 1 {
         return Err(format!(

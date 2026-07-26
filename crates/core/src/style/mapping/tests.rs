@@ -991,7 +991,7 @@ fn background_linear_gradient_one_stop_rejected() {
 
 #[test]
 fn background_shorthand_url_and_color_supported() {
-    // `background` shorthand 现支持 url() 与纯色（Task 8 扩展，修复假阳性）。
+    // `background` shorthand 现支持 url() 与纯色（扩展后修复假阳性）。
     // url() → background_image；hex 纯色 → background_color。
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "background", "url(a.png)"));
@@ -1015,7 +1015,7 @@ fn background_shorthand_named_color_rejected() {
     );
 }
 
-// ── -webkit-text-stroke（v1.8 Task 9）──
+// ── -webkit-text-stroke ──
 
 #[test]
 fn text_stroke_single_with_color() {
@@ -1084,7 +1084,7 @@ fn text_stroke_and_shadow_can_coexist() {
     ));
 }
 
-// ── font-effect (v1.8 Task 10/11) ──
+// ── font-effect ──
 
 #[test]
 fn font_effect_glow_with_color() {
@@ -1411,7 +1411,7 @@ fn apply_border_no_style_keeps_none() {
     assert_eq!(s.border_style, BorderStyle::None);
 }
 
-// Task 8：shorthand 展开 + longhand 补齐。
+// shorthand 展开 + longhand 补齐。
 // flex shorthand：单值 `flex:1` → grow=1/shrink=1（CSS 规范 basis=0%，仅验 grow/shrink）。
 #[test]
 fn flex_shorthand_single_value() {

@@ -1,4 +1,4 @@
-//! Task 2: bridge 提取控件 HTML 属性 → ControlInit 的契约测试。
+//! bridge 提取控件 HTML 属性 → ControlInit 的契约测试。
 //!
 //! bridge() 在 IrTree→TemplateNode 翻译时，按 NodeKind 从 HTML 属性提取控件初始值
 //! （value/max/min/step/checked/name），填进 TemplateNode.control_init，使其随 pkg.bin
@@ -92,7 +92,7 @@ fn bridge_extracts_slider_attrs() {
 
 #[test]
 fn bridge_extracts_slider_without_value_is_none() {
-    // Slider 无 value 属性 → control_init=None（运行时 Task 3+ 用默认值兜底）。
+    // Slider 无 value 属性 → control_init=None（运行时 instantiate 用默认值兜底）。
     let html = r#"<input type="range" min="0" max="100">"#;
     let node = &run_bridge(html)[0];
     assert_eq!(node.kind, NodeKind::Slider);

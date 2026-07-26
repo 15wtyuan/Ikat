@@ -632,7 +632,7 @@ fn node_kind_unit_variant_is_one_byte() {
     assert_eq!(bincode::serialize(&NodeKind::Container).unwrap().len(), 4);
 }
 
-/// Spec-4a Task A1：Node.inline_override / inline_set 便签层基础设施。
+/// Node.inline_override / inline_set 便签层基础设施。
 /// 默认 Node 无 inline override——inline_set 全 0、inline_override 全默认。
 #[test]
 fn node_inline_override_defaults_empty() {
@@ -645,7 +645,7 @@ fn node_inline_override_defaults_empty() {
     assert_eq!(n.inline_override, ResolvedStyle::default());
 }
 
-/// Task 3：instantiate 把打包期 `ControlInit` 映射填进运行时 `Scene.controls` side table。
+/// instantiate 把打包期 `ControlInit` 映射填进运行时 `Scene.controls` side table。
 /// ProgressBar：value/max/indeterminate 原样透传。
 #[test]
 fn instantiate_fills_control_state_progress_from_init() {
