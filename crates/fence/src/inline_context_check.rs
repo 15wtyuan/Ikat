@@ -1,13 +1,12 @@
 //! Stage 6.5：inline 元素布局上下文检查。
 //!
-//! taffy 0.12 不支持 CSS inline flow（inline 元素自动横排换行）。LoomGUI 只在两种上下文里
-//! 让 inline 元素和浏览器一致：
-//!   1. **flex 容器内**——inline 元素是 flex item，按 flex 规则排（两边行为相同）。
-//!   2. **`<p>` 文本流内**——inline 元素被文本模型扁平成 TextRun/LinkRun（main-design §10）。
+//! taffy 0.12 不支持 CSS inline flow（inline 元素自动横排换行）。LoomGUI 只在一种上下文里
+//! 让 inline 元素和浏览器一致：**flex 容器内**——inline 元素是 flex item，按 flex 规则排
+//! （两边行为相同）。
 //!
 //! 在 **block 容器**里（裸 `<div>` 等），LoomGUI 把 inline 标签当 block-level（撑满父宽 + 竖排），
 //! 和浏览器的 inline 行为（按内容收缩 + 横排流）**必然不一致**。本检查在打包期拦下这种写法，
-//! 并教学三种改法，让 AI 一次就写对。
+//! 并教学改法（父容器加 flex / 元素显式 display:block），让 AI 一次就写对。
 //!
 //! 判定依据：读 stage 4 css_resolve 产出的解析后 display（tag 默认 + inline style + class 规则
 //! 都已 cascade），parent 是 block 还是 flex 是确定的，不靠猜。
@@ -18,18 +17,18 @@ use crate::schema::tag::{find_tag, DisplayDefault, SemanticKind};
 use loomgui_core::style::dynamic::{Compound, DynamicRule};
 use loomgui_core::style::resolved::ResolvedStyle;
 
-/// 文本级 inline 语义豁免。这些标签是“文本片段”（span/strong/em 终态是 TextRun，main-design §10）
-/// 或结构占位（br/slot）——它们在 block 容器里的“不一致”要等文本模型（roadmap §4 复合束）
+/// 文本级 inline 语义豁免。这些标签是“文本片段”（span 终态是 TextRun，main-design §10）
+/// 或结构占位（slot）——它们在 block 容器里的“不一致”要等文本模型（roadmap §4 复合束）
 /// 解决，不是靠强制作者声明 flex 能修的。报错只会逼作者把 `<li><span>x</span></li>` 改成怪结构，
-/// 无益。只拦布局 box（button/a/label/input/img/...）。
-const TEXT_LEVEL_SEMANTICS: &[SemanticKind] = &[
-    SemanticKind::TextElement,
-    SemanticKind::LineBreak,
-    SemanticKind::Slot,
-];
+/// 无益。只拦布局 box（button/input/img/...）。
+/// （strong/em/br 已从围栏移除——它们就是 span/\n 的语义糖，不再单独存在。）
+const TEXT_LEVEL_SEMANTICS: &[SemanticKind] = &[SemanticKind::TextElement, SemanticKind::Slot];
 
-/// 文本上下文判定：沿祖先链找 <p>（TextBlock）。在 <p> 内的 inline 元素走文本流
-/// （终态 LinkRun/TextRun，main-design §10），不适用 block/flex 上下文判定。
+/// 文本上下文判定：沿祖先链找文本块容器（TextBlock 语义）。
+///
+/// `<p>` 已从围栏移除——当前没有标签产生 TextBlock，本函数暂不触发（永不命中）。
+/// 保留是留给 roadmap §4 文本模型：届时文本流容器（可能是 CustomElement 或重新引入的
+/// 语义标签）会恢复 TextBlock 产出，本判定自动重新生效。
 fn in_text_context(tree: &IrTree, mut id: usize) -> bool {
     while let Some(parent_id) = tree.nodes[id].parent {
         if let IrNodeKind::Element(pel) = &tree.nodes[parent_id.0].kind {
@@ -130,8 +129,8 @@ pub fn check_inline_context(
             continue;
         };
 
-        // 只查 inline-origin 标签（button/a/label/span/img/input/...）。
-        // block-origin（div/header/nav/p/...）在 block 流里本就撑满竖排，和浏览器一致。
+        // 只查 inline-origin 标签（button/span/img/input/select/textarea/progress）。
+        // block-origin（div）在 block 流里本就撑满竖排，和浏览器一致。
         let Some(spec) = find_tag(&el.tag) else {
             continue;
         };
@@ -139,7 +138,7 @@ pub fn check_inline_context(
             continue;
         }
 
-        // 文本级语义豁免（span/strong/em/br/slot）：它们的行内混排要等文本模型（roadmap §4），
+        // 文本级语义豁免（span/slot）：它们的行内混排要等文本模型（roadmap §4），
         // 不是 flex 能修的；报错只会逼怪结构。只拦布局 box。
         if el
             .semantic
@@ -183,11 +182,10 @@ pub fn check_inline_context(
                 "inline element <{tag}> is directly inside a block container — \
                  LoomGUI renders it block-level (fills width + stacks vertically), \
                  which differs from the browser's inline behavior (shrink-to-fit + horizontal flow). \
-                 LoomGUI has no inline flow outside <p>/flex. \
+                 LoomGUI has no inline flow outside flex. \
                  Fix (pick one): \
                  (1) make the parent a flex container (add display:flex; add flex-wrap:wrap for multi-element rows); \
-                 (2) set display:block on the element if you intentionally want it to fill width / behave as a block; \
-                 (3) move text-level content (a/span/strong/em) into <p>.",
+                 (2) set display:block on the element if you intentionally want it to fill width / behave as a block.",
                 tag = el.tag
             ),
             line_map.source_location(node.span.start, file.to_string()),

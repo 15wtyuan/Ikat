@@ -26,7 +26,7 @@
   .bg-cover { width:120px; height:80px; background-image:url("../res/icons/lab.png"); background-size:cover; border-radius:6px; }
   .bg-contain { width:120px; height:80px; background-image:url("../res/icons/lab.png"); background-size:contain; background-color:#1a2f45; border-radius:6px; }
   .bg-grad { width:120px; height:80px; background-image:linear-gradient(to right,#5fb4d4,#d4a44e); border-radius:6px; }
-  .txt p { color:#dfe4ec; }
+  .txt div { color:#dfe4ec; }
   .txt-serif { font-family:"DejaVuSans",serif; font-size:18px; }
   .txt-mono { font-family:"JetBrainsMono",monospace; font-size:16px; }
   .txt-pixel { font-family:"PressStart2P",monospace; font-size:12px; }
@@ -50,15 +50,15 @@
 </head>
 <body>
   <div class="root">
-    <header class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:#152433;border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
+    <div class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:#152433;border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
       <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">CSS 标本馆</span>
-    </header>
+    </div>
     <div class="body">
-      <p class="page-title">CSS 全属性标本馆</p>
-      <p class="page-desc">围栏 §5.1 全白名单逐组 specimen · 小枚举全值，大枚举代表值 + 矩阵</p>
+      <div class="page-title">CSS 全属性标本馆</div>
+      <div class="page-desc">围栏 §5.1 全白名单逐组 specimen · 小枚举全值，大枚举代表值 + 矩阵</div>
 
       <div class="section">
-        <p class="section-title">1 · flex 全参数</p>
+        <div class="section-title">1 · flex 全参数</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:16px;flex-wrap:wrap">
           <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">row + gap</span><div class="fx-demo"><span class="fx-item">A</span><span class="fx-item">B</span><span class="fx-item">C</span></div></div>
           <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">justify flex-end</span><div class="fx-demo" style="justify-content:flex-end"><span class="fx-item">A</span><span class="fx-item">B</span></div></div>
@@ -69,7 +69,7 @@
       </div>
 
       <div class="section">
-        <p class="section-title">2 · 尺寸单位</p>
+        <div class="section-title">2 · 尺寸单位</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:16px">
           <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">width:200px</span><div style="width:200px;height:50px;background-color:#2a5a75;border-radius:4px"></div></div>
           <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">width:50%</span><div style="width:50%;height:50px;background-color:#2a5a75;border-radius:4px"></div></div>
@@ -78,7 +78,7 @@
       </div>
 
       <div class="section">
-        <p class="section-title">3 · 盒模型（padding / margin）</p>
+        <div class="section-title">3 · 盒模型（padding / margin）</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:24px">
           <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">padding 20px</span><div class="box-pad"><div class="box-pad-inner">content</div></div></div>
           <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">margin 16px</span><div class="box-margin"><div class="box-margin-inner">content</div></div></div>
@@ -86,7 +86,7 @@
       </div>
 
       <div class="section">
-        <p class="section-title">4 · 边框（color / radius）</p>
+        <div class="section-title">4 · 边框（color / radius）</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:16px;align-items:center">
           <div class="brd brd-1"></div>
           <div class="brd brd-2"></div>
@@ -96,7 +96,7 @@
       </div>
 
       <div class="section">
-        <p class="section-title">5 · 背景（color / image / size / clip）</p>
+        <div class="section-title">5 · 背景（color / image / size / clip）</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:16px;align-items:center">
           <div class="bg-cover"></div>
           <div class="bg-contain"></div>
@@ -106,18 +106,18 @@
       </div>
 
       <div class="section">
-        <p class="section-title">6 · 文本排版（font / line-height / letter-spacing / white-space）</p>
+        <div class="section-title">6 · 文本排版（font / line-height / letter-spacing / white-space）</div>
         <div class="specimen txt" style="gap:10px">
-          <p class="txt-serif">Serif 字体 · 中英文混排排版 The quick brown fox.</p>
-          <p class="txt-mono">Monospace 等宽 · code style</p>
-          <p class="txt-pixel">PIXEL 像素字体</p>
-          <p style="color:#dfe4ec;font-size:15px;letter-spacing:2px">字间距 2px · letter-spacing</p>
-          <p style="color:#dfe4ec;font-size:15px;white-space:nowrap;overflow:hidden">不换行长文本 white-space:nowrap · 截断演示截断演示截断演示截断演示</p>
+          <div class="txt-serif">Serif 字体 · 中英文混排排版 The quick brown fox.</div>
+          <div class="txt-mono">Monospace 等宽 · code style</div>
+          <div class="txt-pixel">PIXEL 像素字体</div>
+          <div style="color:#dfe4ec;font-size:15px;letter-spacing:2px">字间距 2px · letter-spacing</div>
+          <div style="color:#dfe4ec;font-size:15px;white-space:nowrap;overflow:hidden">不换行长文本 white-space:nowrap · 截断演示截断演示截断演示截断演示</div>
         </div>
       </div>
 
       <div class="section">
-        <p class="section-title">7 · 文本特效（text-shadow / stroke / font-effect / 渐变字）</p>
+        <div class="section-title">7 · 文本特效（text-shadow / stroke / font-effect / 渐变字）</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:24px;flex-wrap:wrap;align-items:center">
           <span class="fx-glow">发光</span>
           <span class="fx-stroke">描边</span>
@@ -127,7 +127,7 @@
       </div>
 
       <div class="section">
-        <p class="section-title">8 · 视觉变换（transform / opacity / filter / box-shadow）</p>
+        <div class="section-title">8 · 视觉变换（transform / opacity / filter / box-shadow）</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:20px;align-items:center;flex-wrap:wrap">
           <div class="vf vf-rot"></div>
           <div class="vf vf-scale"></div>
@@ -141,16 +141,16 @@
       </div>
 
       <div class="section">
-        <p class="section-title">9 · 溢出（overflow-x/y scroll/auto/hidden）</p>
+        <div class="section-title">9 · 溢出（overflow-x/y scroll/auto/hidden）</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:16px">
-          <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">scroll</span><div class="ov-box ov-scroll"><p style="color:#9aa0b4;font-size:12px">行1<br>行2<br>行3<br>行4<br>行5<br>行6<br>行7<br>行8</p></div></div>
-          <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">auto</span><div class="ov-box ov-auto"><p style="color:#9aa0b4;font-size:12px">行1<br>行2<br>行3<br>行4<br>行5<br>行6<br>行7<br>行8</p></div></div>
-          <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">hidden</span><div class="ov-box ov-hidden"><p style="color:#9aa0b4;font-size:12px">行1<br>行2<br>行3<br>行4<br>行5<br>行6<br>行7<br>行8</p></div></div>
+          <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">scroll</span><div class="ov-box ov-scroll"><div style="color:#9aa0b4;font-size:12px">行1\n行2\n行3\n行4\n行5\n行6\n行7\n行8</div></div></div>
+          <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">auto</span><div class="ov-box ov-auto"><div style="color:#9aa0b4;font-size:12px">行1\n行2\n行3\n行4\n行5\n行6\n行7\n行8</div></div></div>
+          <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">hidden</span><div class="ov-box ov-hidden"><div style="color:#9aa0b4;font-size:12px">行1\n行2\n行3\n行4\n行5\n行6\n行7\n行8</div></div></div>
         </div>
       </div>
 
       <div class="section">
-        <p class="section-title">10 · custom-element + slot 投影</p>
+        <div class="section-title">10 · custom-element + slot 投影</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:16px">
           <item-card style="display:flex;flex-direction:column;gap:8px;width:160px;background-color:#1a2f45;border-radius:10px;padding:16px">
             <img src="../res/icons/item-chest.png" alt="item" style="width:64px;height:64px;align-self:center">

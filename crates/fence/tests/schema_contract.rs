@@ -3,16 +3,21 @@ use loomgui_fence::schema::css::{find_css_prop, find_shorthand, CssValueParser};
 use loomgui_fence::schema::tag::{find_tag, is_shell_tag, Category, ContentModel, DisplayDefault};
 
 #[test]
-fn all_23_runtime_tags_have_specs() {
+fn all_13_runtime_tags_have_specs() {
     let tags = [
-        "div", "header", "nav", "p", "span", "strong", "em", "br", "label", "button", "a", "img",
-        "canvas", "input", "textarea", "select", "option", "progress", "ul", "ol", "li",
-        "template", "slot",
+        "div", "span", "button", "img", "input", "textarea", "select", "option", "progress", "ul",
+        "li", "template", "slot",
     ];
     for t in tags {
-        assert!(find_tag(t).is_some(), "<{}> must be in TAGS", t);
+        assert!(find_tag(t).is_some(), "<{t}> must be in TAGS");
     }
-    assert_eq!(tags.len(), 23);
+    assert_eq!(tags.len(), 13);
+    // 被移除的 10 个标签现应 not found
+    for removed in [
+        "p", "header", "nav", "ol", "canvas", "strong", "em", "br", "label", "a",
+    ] {
+        assert!(find_tag(removed).is_none(), "<{removed}> 应已从围栏移除");
+    }
 }
 
 #[test]
@@ -27,7 +32,6 @@ fn shell_tags_are_seven() {
 #[test]
 fn content_model_table_matches_spec() {
     assert_eq!(find_tag("div").unwrap().content, ContentModel::Flow);
-    assert_eq!(find_tag("p").unwrap().content, ContentModel::Phrasing);
     assert_eq!(find_tag("span").unwrap().content, ContentModel::Phrasing);
     assert_eq!(find_tag("img").unwrap().content, ContentModel::None);
     assert_eq!(
@@ -38,7 +42,6 @@ fn content_model_table_matches_spec() {
         find_tag("ul").unwrap().content,
         ContentModel::Only(&["li", "template"])
     );
-    assert_eq!(find_tag("a").unwrap().content, ContentModel::Transparent);
     assert_eq!(find_tag("slot").unwrap().content, ContentModel::Transparent);
 }
 
@@ -52,7 +55,6 @@ fn display_defaults_match_spec() {
 #[test]
 fn void_elements() {
     assert!(find_tag("img").unwrap().void);
-    assert!(find_tag("br").unwrap().void);
     assert!(find_tag("input").unwrap().void);
     assert!(!find_tag("div").unwrap().void);
 }
@@ -62,7 +64,7 @@ fn category_table() {
     assert_eq!(find_tag("div").unwrap().category, Category::Block);
     assert_eq!(find_tag("span").unwrap().category, Category::Phrasing);
     assert_eq!(find_tag("img").unwrap().category, Category::Void);
-    assert_eq!(find_tag("a").unwrap().category, Category::Transparent);
+    assert_eq!(find_tag("slot").unwrap().category, Category::Transparent);
 }
 
 #[test]

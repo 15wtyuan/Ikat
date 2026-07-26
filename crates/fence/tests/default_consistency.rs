@@ -66,16 +66,10 @@ const REPRESENTATION_DIFF_PROPS: &[&str] = &[
 ///     不消费，见 schema 注释）。
 /// - **apply 完整性缺口（独立 bug，非 default 漂移，见报告顾虑）**：default 值本应
 ///   被 apply 识别却返 false：
-///   - `margin-top/right/bottom/left`：apply_decl 仅有 `margin` 简写臂，无单边
-///     longhand 臂（与 padding 不对称——padding 有 longhand 臂）。直接写
-///     `margin-top:10px` 会被静默丢弃。
 ///   - `background-size`：schema 广告 `stretch` 为合法值，但 apply 仅认 `100%`，
 ///     `stretch` 被静默拒（schema 接受 + core 丢弃的反模式）。
+///   - margin-top/right/bottom/left 已补单边 longhand 臂（与 padding 对称），不再在此列表。
 const UNCONSUMED_DEFAULT_PROPS: &[&str] = &[
-    "margin-top",
-    "margin-right",
-    "margin-bottom",
-    "margin-left",
     "border-image-slice",
     "background-image",
     "background-size",

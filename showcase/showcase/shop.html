@@ -35,11 +35,11 @@
 </head>
 <body>
   <div class="root">
-    <header class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
+    <div class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
       <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">商店</span>
-    </header>
+    </div>
     <div class="body">
-      <p class="page-title">限时折扣</p>
+      <div class="page-title">限时折扣</div>
       <div class="grid">
         <div class="product">
           <img class="product-img" src="../res/icons/item-wand.png" alt="product">
@@ -47,7 +47,7 @@
           <span class="product-price">¥ 6</span>
           <div class="product-meta">
             <div class="stock-row"><span class="stock-label">倒计时</span><progress value="35" max="100" style="flex-grow:1;"></progress></div>
-            <a class="link-detail" href="#">详情</a>
+            <button class="link-detail">详情</button>
           </div>
           <button class="btn-buy" data-open-dialog="buy-dialog">购买</button>
         </div>
@@ -57,7 +57,7 @@
           <span class="product-price">¥ 30</span>
           <div class="product-meta">
             <div class="stock-row"><span class="stock-label">库存</span><progress value="72" max="100" style="flex-grow:1;"></progress></div>
-            <a class="link-detail" href="#">详情</a>
+            <button class="link-detail">详情</button>
           </div>
           <button class="btn-buy" data-open-dialog="buy-dialog">购买</button>
         </div>
@@ -67,7 +67,7 @@
           <span class="product-price">¥ 98</span>
           <div class="product-meta">
             <div class="stock-row"><span class="stock-label">倒计时</span><progress value="8" max="100" style="flex-grow:1;"></progress></div>
-            <a class="link-detail" href="#">详情</a>
+            <button class="link-detail">详情</button>
           </div>
           <button class="btn-buy" data-open-dialog="buy-dialog">购买</button>
         </div>

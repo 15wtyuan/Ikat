@@ -418,8 +418,9 @@ mod tests {
 
     #[test]
     fn rich_text_inline_mix() {
-        let (tree, diags) = parse_html_to_ir(r#"<p>Hello <strong>world</strong>!</p>"#);
-        assert!(diags.is_empty());
+        let (tree, diags) =
+            parse_html_to_ir(r#"<div>Hello <span style="font-weight:700">world</span>!</div>"#);
+        assert!(diags.is_empty(), "unexpected diags: {diags:?}");
         let p = tree.roots[0];
         assert_eq!(tree.nodes[p.0].children.len(), 3);
     }
@@ -455,7 +456,7 @@ mod tests {
     fn top_level_whitespace_not_orphan_root() {
         // 多行 HTML：元素间换行/缩进不能变成孤立 Text root（曾破坏 bridge 单根契约，
         // 拒掉所有多行生产 HTML）。元素内空白仍保留。
-        let html = "<style>.x{width:50px}</style>\n<div class=\"root\">\n  <p>hi</p>\n</div>\n";
+        let html = "<style>.x{width:50px}</style>\n<div class=\"root\">\n  <div>hi</div>\n</div>\n";
         let (tree, diags) = parse_html_to_ir(html);
         assert!(diags.is_empty(), "unexpected diags: {:?}", diags);
         assert_eq!(

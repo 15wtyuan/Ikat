@@ -107,15 +107,10 @@ pub struct TagSpec {
 /// the `type` attribute.  Returns `None` for tags outside the fence.
 pub fn resolve_semantic(tag: &str, input_type: Option<&str>) -> Option<SemanticKind> {
     match tag {
-        "div" | "header" | "nav" => Some(SemanticKind::Container),
-        "p" => Some(SemanticKind::TextBlock),
-        "span" | "strong" | "em" => Some(SemanticKind::TextElement),
-        "br" => Some(SemanticKind::LineBreak),
-        "label" => Some(SemanticKind::Label),
+        "div" => Some(SemanticKind::Container),
+        "span" => Some(SemanticKind::TextElement),
         "button" => Some(SemanticKind::Button),
-        "a" => Some(SemanticKind::Link),
         "img" => Some(SemanticKind::Image),
-        "canvas" => Some(SemanticKind::Canvas),
         "input" => match input_type.unwrap_or("text") {
             "text" => Some(SemanticKind::TextField),
             "password" => Some(SemanticKind::PasswordField),
@@ -130,7 +125,7 @@ pub fn resolve_semantic(tag: &str, input_type: Option<&str>) -> Option<SemanticK
         "select" => Some(SemanticKind::Dropdown),
         "option" => Some(SemanticKind::OptionItem),
         "progress" => Some(SemanticKind::ProgressBar),
-        "ul" | "ol" => Some(SemanticKind::ListView),
+        "ul" => Some(SemanticKind::ListView),
         "li" => Some(SemanticKind::ListItem),
         "template" => Some(SemanticKind::Template),
         "slot" => Some(SemanticKind::Slot),
@@ -159,7 +154,7 @@ pub fn is_shell_tag(name: &str) -> bool {
 
 // ── TAGS registry ───────────────────────────────────────────────────
 
-/// All 23 runtime fence tags with full Category × ContentModel mapping.
+/// All 13 runtime fence tags with full Category × ContentModel mapping.
 pub static TAGS: &[TagSpec] = &[
     TagSpec {
         name: "div",
@@ -167,36 +162,6 @@ pub static TAGS: &[TagSpec] = &[
         display: DisplayDefault::Block,
         category: Category::Block,
         content: ContentModel::Flow,
-        void: false,
-        structural_attrs: &[],
-        content_attrs: &[],
-    },
-    TagSpec {
-        name: "header",
-        semantic: SemanticKind::Container,
-        display: DisplayDefault::Block,
-        category: Category::Block,
-        content: ContentModel::Flow,
-        void: false,
-        structural_attrs: &[],
-        content_attrs: &[],
-    },
-    TagSpec {
-        name: "nav",
-        semantic: SemanticKind::Container,
-        display: DisplayDefault::Block,
-        category: Category::Block,
-        content: ContentModel::Flow,
-        void: false,
-        structural_attrs: &[],
-        content_attrs: &[],
-    },
-    TagSpec {
-        name: "p",
-        semantic: SemanticKind::TextBlock,
-        display: DisplayDefault::Block,
-        category: Category::Block,
-        content: ContentModel::Phrasing,
         void: false,
         structural_attrs: &[],
         content_attrs: &[],
@@ -212,64 +177,14 @@ pub static TAGS: &[TagSpec] = &[
         content_attrs: &[],
     },
     TagSpec {
-        name: "strong",
-        semantic: SemanticKind::TextElement,
-        display: DisplayDefault::Inline,
-        category: Category::Phrasing,
-        content: ContentModel::Phrasing,
-        void: false,
-        structural_attrs: &[],
-        content_attrs: &[],
-    },
-    TagSpec {
-        name: "em",
-        semantic: SemanticKind::TextElement,
-        display: DisplayDefault::Inline,
-        category: Category::Phrasing,
-        content: ContentModel::Phrasing,
-        void: false,
-        structural_attrs: &[],
-        content_attrs: &[],
-    },
-    TagSpec {
-        name: "br",
-        semantic: SemanticKind::LineBreak,
-        display: DisplayDefault::Inline,
-        category: Category::Void,
-        content: ContentModel::None,
-        void: true,
-        structural_attrs: &[],
-        content_attrs: &[],
-    },
-    TagSpec {
-        name: "label",
-        semantic: SemanticKind::Label,
-        display: DisplayDefault::Inline,
-        category: Category::Phrasing,
-        content: ContentModel::Phrasing,
-        void: false,
-        structural_attrs: super::attr::LABEL_STRUCTURAL,
-        content_attrs: &[],
-    },
-    TagSpec {
         name: "button",
         semantic: SemanticKind::Button,
         display: DisplayDefault::Inline,
         category: Category::Phrasing,
-        content: ContentModel::Phrasing,
+        content: ContentModel::Flow,
         void: false,
         structural_attrs: &[],
         content_attrs: &["disabled"],
-    },
-    TagSpec {
-        name: "a",
-        semantic: SemanticKind::Link,
-        display: DisplayDefault::Inline,
-        category: Category::Transparent,
-        content: ContentModel::Transparent,
-        void: false,
-        structural_attrs: super::attr::A_STRUCTURAL,
-        content_attrs: &[],
     },
     TagSpec {
         name: "img",
@@ -280,16 +195,6 @@ pub static TAGS: &[TagSpec] = &[
         void: true,
         structural_attrs: &[],
         content_attrs: &["src", "alt", "width", "height"],
-    },
-    TagSpec {
-        name: "canvas",
-        semantic: SemanticKind::Canvas,
-        display: DisplayDefault::Inline,
-        category: Category::Phrasing,
-        content: ContentModel::Flow,
-        void: false,
-        structural_attrs: &[],
-        content_attrs: &["width", "height"],
     },
     TagSpec {
         name: "input",
@@ -363,16 +268,6 @@ pub static TAGS: &[TagSpec] = &[
     },
     TagSpec {
         name: "ul",
-        semantic: SemanticKind::ListView,
-        display: DisplayDefault::Block,
-        category: Category::Block,
-        content: ContentModel::Only(&["li", "template"]),
-        void: false,
-        structural_attrs: &[],
-        content_attrs: &[],
-    },
-    TagSpec {
-        name: "ol",
         semantic: SemanticKind::ListView,
         display: DisplayDefault::Block,
         category: Category::Block,
@@ -490,10 +385,15 @@ mod tests {
     #[test]
     fn all_runtime_tags_present() {
         let expected = [
-            "div", "header", "nav", "p", "span", "strong", "em", "br", "label", "button", "a",
-            "img", "canvas", "input", "textarea", "select", "option", "progress", "ul", "ol", "li",
-            "template", "slot",
+            "div", "span", "button", "img", "input", "textarea", "select", "option", "progress",
+            "ul", "li", "template", "slot",
         ];
+        // 被移除的 10 个标签（p/header/nav/ol/canvas/strong/em/br/label/a）现在应 not found。
+        for removed in [
+            "p", "header", "nav", "ol", "canvas", "strong", "em", "br", "label", "a",
+        ] {
+            assert!(find_tag(removed).is_none(), "<{removed}> 应已从围栏移除");
+        }
         for name in expected {
             assert!(find_tag(name).is_some(), "<{}> missing from TAGS", name);
         }

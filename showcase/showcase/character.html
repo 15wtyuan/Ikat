@@ -36,14 +36,14 @@
 </head>
 <body>
   <div class="root">
-    <header class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
+    <div class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
       <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">角色</span>
-    </header>
+    </div>
     <div class="body">
       <div class="col-stage">
-        <canvas class="native-slot" id="native-slot" width="720" height="680"></canvas>
+        <div class="native-slot" id="native-slot" style="width:720px;height:680px"></div>
         <div class="stage-info">
-          <span class="stage-name">暗影游侠 · <em>影刃</em></span>
+          <span class="stage-name">暗影游侠 · <span>影刃</span></span>
           <span class="stage-lv">Lv.58</span>
         </div>
         <div class="stat-bars">
@@ -66,12 +66,12 @@
         </div>
         <div class="panel">
           <span class="panel-title">技能（ol 有序列表）</span>
-          <ol style="display:flex;flex-direction:column;gap:4px">
+          <ul style="display:flex;flex-direction:column;gap:4px">
             <li class="skill"><span class="skill-no">1</span><img class="skill-icon" src="../res/icons/weapon.png" alt="skill"><span class="skill-name">影袭</span><span class="skill-lv">Lv.9</span></li>
             <li class="skill"><span class="skill-no">2</span><img class="skill-icon" src="../res/icons/skill-spin.png" alt="skill"><span class="skill-name">旋风斩</span><span class="skill-lv">Lv.7</span></li>
             <li class="skill"><span class="skill-no">3</span><img class="skill-icon" src="../res/icons/skill-eye.png" alt="skill"><span class="skill-name">鹰眼</span><span class="skill-lv">Lv.5</span></li>
             <li class="skill"><span class="skill-no">4</span><img class="skill-icon" src="../res/icons/skill-step.png" alt="skill"><span class="skill-name">瞬步</span><span class="skill-lv">Lv.8</span></li>
-          </ol>
+          </ul>
         </div>
       </div>
     </div>

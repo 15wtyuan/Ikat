@@ -47,7 +47,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 
 这些标签在 `tree_builder` 阶段被消费，不产生运行时对象。
 
-### 2.2 运行时标签（23 个）
+### 2.2 运行时标签（13 个）
 
 下表是完整的运行时标签注册表。列含义：
 
@@ -59,25 +59,15 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | 标签 | SemanticKind | Display | Category | ContentModel | Void |
 |---|---|---|---|---|---|
 | `div` | Container | Block | Block | Flow | |
-| `header` | Container | Block | Block | Flow | |
-| `nav` | Container | Block | Block | Flow | |
-| `p` | TextBlock | Block | Block | Phrasing | |
 | `span` | TextElement | Inline | Phrasing | Phrasing | |
-| `strong` | TextElement | Inline | Phrasing | Phrasing | |
-| `em` | TextElement | Inline | Phrasing | Phrasing | |
-| `br` | LineBreak | Inline | Void | None | ✓ |
-| `label` | Label | Inline | Phrasing | Phrasing | |
 | `button` | Button | Inline | Phrasing | Phrasing | |
-| `a` | Link | Inline | Transparent | Transparent | |
 | `img` | Image | Inline | Void | None | ✓ |
-| `canvas` | Canvas | Inline | Phrasing | Flow | |
 | `input` | InputDispatch | Inline | Void | None | ✓ |
 | `textarea` | TextArea | Inline | Phrasing | Text | |
 | `select` | Dropdown | Inline | Phrasing | Only([`option`]) | |
 | `option` | OptionItem | Block | Block | Text | |
 | `progress` | ProgressBar | Inline | Phrasing | Phrasing | |
 | `ul` | ListView | Block | Block | Only([`li`, `template`]) | |
-| `ol` | ListView | Block | Block | Only([`li`, `template`]) | |
 | `li` | ListItem | Block | Block | Flow | |
 | `template` | Template | None | Phrasing | Flow | |
 | `slot` | Slot | Inline | Transparent | Transparent | |
@@ -96,15 +86,10 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 
 | 签名 | SemanticKind |
 |---|---|
-| `div` / `header` / `nav` | Container |
-| `p` | TextBlock |
-| `span` / `strong` / `em` | TextElement |
-| `br` | LineBreak |
-| `label` | Label |
+| `div` | Container |
+| `span` | TextElement |
 | `button` | Button |
-| `a` | Link |
 | `img` | Image |
-| `canvas` | Canvas |
 | `input[type=text]`（默认） | TextField |
 | `input[type=password]` | PasswordField |
 | `input[type=search]` | SearchField |
@@ -116,7 +101,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `select` | Dropdown |
 | `option` | OptionItem |
 | `progress` | ProgressBar |
-| `ul` / `ol` | ListView |
+| `ul` | ListView |
 | `li` | ListItem |
 | `template` | Template |
 | `slot` | Slot |
@@ -328,9 +313,7 @@ CSS 在围栏中以三个正交维度建模：
 
 ### 阶段 6.5：inline 元素布局上下文检查
 
-**根因**：taffy 0.12 不支持 CSS inline flow（inline 元素自动横排换行）。LoomGUI 只在两种上下文里让 inline 元素和浏览器一致：
-1. **flex 容器内**——inline 元素是 flex item，按 flex 规则排（两边行为相同）。
-2. **`<p>` 文本流内**——inline 元素被文本模型扁平成 TextRun/LinkRun（main-design §10）。
+**根因**：taffy 0.12 不支持 CSS inline flow（inline 元素自动横排换行）。LoomGUI 只在一种上下文里让 inline 元素和浏览器一致：**flex 容器内**——inline 元素是 flex item，按 flex 规则排（两边行为相同）。
 
 在 **block 容器**里（裸 `<div>` 等），LoomGUI 把 inline 标签当 block-level（撑满 + 竖排），和浏览器的 inline 行为（收缩 + 横排）必然不一致。放任这种写法会让 AI 按浏览器先验预期横排、运行时却竖排 → 渲染不可预测 → 返工。
 

@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn flow_inside_div_accepted() {
-        let diags = structural(r#"<div><span>ok</span><p>text</p></div>"#);
+        let diags = structural(r#"<div><span>ok</span><div>text</div></div>"#);
         let errors: Vec<_> = diags
             .iter()
             .filter(|d| d.severity == Severity::Error)

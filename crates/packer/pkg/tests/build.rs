@@ -195,7 +195,7 @@ fn build_e2e_packages_path_writes_pkg_bin_and_fills_runtime() {
     // A real component HTML on disk (single div root, no image refs → no atlas cross-validate).
     std::fs::write(
         pkg_src_dir.join("home.html"),
-        r#"<div class="root"><p>hi</p></div>"#,
+        r#"<div class="root"><div>hi</div></div>"#,
     )
     .unwrap();
 

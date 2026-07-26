@@ -465,7 +465,7 @@ mod package_tests {
         let comps = vec![Component {
             name: "home".to_string(),
             src:
-                r#"<div class="root"><p>hi</p><img src="icons/a.png" style="display:block"></div>"#
+                r#"<div class="root"><div>hi</div><img src="icons/a.png" style="display:block"></div>"#
                     .to_string(),
             html_rel: "home.html".to_string(),
         }];
@@ -523,7 +523,7 @@ mod package_tests {
         let comps = vec![
             Component {
                 name: "nav".to_string(),
-                src: r#"<nav><a href="x" style="display:block">l</a></nav>"#.to_string(),
+                src: r#"<div><button style="display:block">l</button></div>"#.to_string(),
                 html_rel: "nav.html".to_string(),
             },
             Component {

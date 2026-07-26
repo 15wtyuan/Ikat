@@ -37,7 +37,7 @@
   <div class="root">
     <div class="sidebar">
       <button class="side-back" id="back-home">← 返回首页</button>
-      <p class="side-title">设置</p>
+      <div class="side-title">设置</div>
       <div class="tablist" role="tablist">
         <button class="tab" role="tab" id="tab-audio" aria-controls="panel-audio" aria-selected="true">音效</button>
         <button class="tab" role="tab" id="tab-graphics" aria-controls="panel-graphics" aria-selected="false">画面</button>
@@ -48,30 +48,30 @@
     </div>
     <div class="main">
       <div role="tabpanel" id="panel-audio" class="panel">
-        <p class="page-title">音效</p>
-        <p class="page-desc">input[type=range] · input[type=number]</p>
+        <div class="page-title">音效</div>
+        <div class="page-desc">input[type=range] · input[type=number]</div>
         <div class="field">
-          <div><span class="field-label">主音量</span><p class="field-hint">range 0–100</p></div>
+          <div><span class="field-label">主音量</span><div class="field-hint">range 0–100</div></div>
           <div class="field-control"><input type="range" id="vol-master" min="0" max="100" value="80"><span class="val">80</span></div>
         </div>
         <div class="field">
-          <div><span class="field-label">音效音量</span><p class="field-hint">range 0–100</p></div>
+          <div><span class="field-label">音效音量</span><div class="field-hint">range 0–100</div></div>
           <div class="field-control"><input type="range" id="vol-sfx" min="0" max="100" value="65"><span class="val">65</span></div>
         </div>
         <div class="field">
-          <div><span class="field-label">最多同时发声数</span><p class="field-hint">input[type=number] min/max/step</p></div>
+          <div><span class="field-label">最多同时发声数</span><div class="field-hint">input[type=number] min/max/step</div></div>
           <div class="field-control"><input type="number" id="snd-voices" min="1" max="64" step="1" value="32"><span class="val"> voices</span></div>
         </div>
       </div>
       <div role="tabpanel" id="panel-graphics" class="panel" style="display:none">
-        <p class="page-title">画面</p>
-        <p class="page-desc">range · select/option · checkbox</p>
+        <div class="page-title">画面</div>
+        <div class="page-desc">range · select/option · checkbox</div>
         <div class="field">
-          <div><span class="field-label">亮度</span><p class="field-hint">range 0–100</p></div>
+          <div><span class="field-label">亮度</span><div class="field-hint">range 0–100</div></div>
           <div class="field-control"><input type="range" id="gfx-bright" min="0" max="100" value="50"><span class="val">50</span></div>
         </div>
         <div class="field">
-          <div><span class="field-label">分辨率</span><p class="field-hint">select + option</p></div>
+          <div><span class="field-label">分辨率</span><div class="field-hint">select + option</div></div>
           <div class="field-control">
             <select id="gfx-res">
               <option value="1080">1920×1080</option>
@@ -82,32 +82,32 @@
         </div>
         <div class="field">
           <div><span class="field-label">全屏模式</span></div>
-          <div class="checkbox-row"><input type="checkbox" id="gfx-fullscreen" checked><label for="gfx-fullscreen">全屏</label></div>
+          <div class="checkbox-row"><input type="checkbox" id="gfx-fullscreen" checked><span>全屏</span></div>
         </div>
         <div class="field">
           <div><span class="field-label">垂直同步</span></div>
-          <div class="checkbox-row"><input type="checkbox" id="gfx-vsync"><label for="gfx-vsync">启用</label></div>
+          <div class="checkbox-row"><input type="checkbox" id="gfx-vsync"><span>启用</span></div>
         </div>
       </div>
       <div role="tabpanel" id="panel-controls" class="panel" style="display:none">
-        <p class="page-title">操作</p>
-        <p class="page-desc">radio · text · label[for]</p>
+        <div class="page-title">操作</div>
+        <div class="page-desc">radio · text · label[for]</div>
         <div class="field">
           <div><span class="field-label">按键方案</span></div>
           <div class="radio-group">
-            <div class="radio-opt"><input type="radio" id="key-default" name="keyscheme" checked><label for="key-default">默认</label></div>
-            <div class="radio-opt"><input type="radio" id="key-alt" name="keyscheme"><label for="key-alt">备用</label></div>
-            <div class="radio-opt"><input type="radio" id="key-lefty" name="keyscheme"><label for="key-lefty">左撇子</label></div>
+            <div class="radio-opt"><input type="radio" id="key-default" name="keyscheme" checked><span>默认</span></div>
+            <div class="radio-opt"><input type="radio" id="key-alt" name="keyscheme"><span>备用</span></div>
+            <div class="radio-opt"><input type="radio" id="key-lefty" name="keyscheme"><span>左撇子</span></div>
           </div>
         </div>
         <div class="field">
-          <div><span class="field-label">自定义按键</span><p class="field-hint">input[type=text]</p></div>
+          <div><span class="field-label">自定义按键</span><div class="field-hint">input[type=text]</div></div>
           <div class="field-control"><input type="text" id="key-custom" placeholder="按键序列" value="Space"></div>
         </div>
       </div>
       <div role="tabpanel" id="panel-account" class="panel" style="display:none">
-        <p class="page-title">账号</p>
-        <p class="page-desc">text · password · checkbox</p>
+        <div class="page-title">账号</div>
+        <div class="page-desc">text · password · checkbox</div>
         <div class="field">
           <div><span class="field-label">账号名</span></div>
           <div class="field-control"><input type="text" id="acc-name" placeholder="账号" value="player_01"></div>
@@ -118,12 +118,12 @@
         </div>
         <div class="field">
           <div><span class="field-label">记住账号</span></div>
-          <div class="checkbox-row"><input type="checkbox" id="acc-remember" checked><label for="acc-remember">记住</label></div>
+          <div class="checkbox-row"><input type="checkbox" id="acc-remember" checked><span>记住</span></div>
         </div>
       </div>
       <div role="tabpanel" id="panel-search" class="panel" style="display:none">
-        <p class="page-title">搜索</p>
-        <p class="page-desc">input[type=search]（围栏内 text 第 7 变体）</p>
+        <div class="page-title">搜索</div>
+        <div class="page-desc">input[type=search]（围栏内 text 第 7 变体）</div>
         <div class="field">
           <div><span class="field-label">搜索设置项</span></div>
           <div class="field-control"><input type="search" id="set-search" placeholder="输入关键词"></div>

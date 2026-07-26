@@ -68,7 +68,7 @@
   var ITEM_ROTATION = ['item-potion', 'item-chest', 'item-gem', 'item-scroll', 'item-staff', 'item-wand'];
   function fillListViews() {
     var dir = location.href.substring(0, location.href.lastIndexOf('/') + 1) + '../res/icons/';
-    document.querySelectorAll('ul[data-fill], ol[data-fill]').forEach(function (ul) {
+    document.querySelectorAll('ul[data-fill]').forEach(function (ul) {
       var tpl = ul.querySelector('template');
       if (!tpl) return;
       var count = parseInt(ul.getAttribute('data-fill'), 10) || 8;
@@ -83,20 +83,10 @@
     });
   }
 
+  // NativeHost slot is now a plain <div> (canvas removed from the fence).
+  // A div has no 2D context, so the preview only shows the CSS background;
+  // the runtime still projects the real 3D model via FFI onto this element.
   function fillNativeHost() {
-    var cv = document.getElementById('native-slot');
-    if (!cv || cv.tagName.toLowerCase() !== 'canvas') return;
-    var ctx = cv.getContext && cv.getContext('2d');
-    if (!ctx) return;
-    ctx.fillStyle = '#0e1620';
-    ctx.fillRect(0, 0, cv.width, cv.height);
-    ctx.fillStyle = '#5fb4d4';
-    ctx.font = '20px "LXGW WenKai", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('NativeHost 3D character slot', cv.width / 2, cv.height / 2 - 10);
-    ctx.fillStyle = '#9aa0b4';
-    ctx.font = '14px "LXGW WenKai", sans-serif';
-    ctx.fillText('Runtime renders character model + particle effects', cv.width / 2, cv.height / 2 + 18);
   }
 
   function fitScale() {

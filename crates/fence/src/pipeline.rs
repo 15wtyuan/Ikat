@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn pipeline_simple_template() {
         let result = parse_template(
-            r#"<div id="root"><p>Hello <span>x</span></p></div>"#,
+            r#"<div id="root"><div>Hello <span>x</span></div></div>"#,
             "home.html",
         );
         assert!(
@@ -144,14 +144,14 @@ mod tests {
         assert_eq!(el.tag, "div");
         assert_eq!(el.semantic, Some(SemanticKind::Container));
 
-        // root > p > span
-        let p_id = result.tree.nodes[root.0].children[0];
-        let span_id = result.tree.nodes[p_id.0]
+        // root > div > span
+        let mid_id = result.tree.nodes[root.0].children[0];
+        let span_id = result.tree.nodes[mid_id.0]
             .children
             .iter()
             .copied()
             .find(|&c| result.tree.element(c).map(|e| e.tag.as_str()) == Some("span"))
-            .expect("span under p");
+            .expect("span under div");
         let span_el = result.tree.element(span_id).unwrap();
         assert_eq!(span_el.semantic, Some(SemanticKind::TextElement));
     }

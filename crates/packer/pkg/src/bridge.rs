@@ -174,17 +174,17 @@ mod tests {
     }
 
     #[test]
-    fn div_p_text_img_mapping_and_structure() {
+    fn div_container_text_img_mapping_and_structure() {
         let nodes = bridged(
-            r#"<div class="root" id="r"><p class="t">hi</p><img src="a.png" style="display:block"></div>"#,
+            r#"<div class="root" id="r"><div class="t">hi</div><img src="a.png" style="display:block"></div>"#,
         );
         // [0] div Container root (parent=None, class=root, id=r)
         assert_eq!(nodes[0].kind, NodeKind::Container);
         assert_eq!(nodes[0].parent_idx, None);
         assert!(nodes[0].classes.contains(&"root".to_string()));
         assert_eq!(nodes[0].id_attr.as_deref(), Some("r"));
-        // [1] p TextBlock (parent=0, class=t)
-        assert_eq!(nodes[1].kind, NodeKind::TextBlock);
+        // [1] div Container (parent=0, class=t)
+        assert_eq!(nodes[1].kind, NodeKind::Container);
         assert_eq!(nodes[1].parent_idx, Some(0));
         // [2] "hi" TextNode (parent=1, content=hi) — Text 保留为独立子节点
         assert_eq!(nodes[2].kind, NodeKind::TextNode);
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn template_element_skipped() {
-        let nodes = bridged(r#"<div><template><p>x</p></template></div>"#);
+        let nodes = bridged(r#"<div><template><div>x</div></template></div>"#);
         // [0] = div Container；template 节点本身不进 nodes
         assert_eq!(nodes[0].kind, NodeKind::Container);
         assert_eq!(nodes.len(), 1);
@@ -236,7 +236,8 @@ mod tests {
     #[test]
     fn template_root_yields_empty_error() {
         // 根是 <template> → 整棵子树跳过 → nodes 空 → Err（不静默产 0 节点 ComponentTemplate）。
-        let parsed = loomgui_fence::parse_template(r#"<template><p>x</p></template>"#, "t.html");
+        let parsed =
+            loomgui_fence::parse_template(r#"<template><div>x</div></template>"#, "t.html");
         assert!(
             parsed.diagnostics.is_empty(),
             "diags: {:?}",

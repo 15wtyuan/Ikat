@@ -30,12 +30,12 @@
 </head>
 <body>
   <div class="root">
-    <header class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
+    <div class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
       <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">邮件</span>
-    </header>
+    </div>
     <div class="body">
       <div class="col-list">
-        <p class="col-title">收件箱 · ListView</p>
+        <div class="col-title">收件箱 · ListView</div>
         <ul data-fill="6" style="display:flex;flex-direction:column;gap:12px">
           <template>
             <li class="mail-item">
@@ -46,13 +46,13 @@
         </ul>
       </div>
       <div class="col-read">
-        <p class="read-title">赛季结算奖励</p>
-        <p class="read-meta">来自：竞技场 · 2 小时前</p>
+        <div class="read-title">赛季结算奖励</div>
+        <div class="read-meta">来自：竞技场 · 2 小时前</div>
         <div class="read-body">
-          <p>勇士你好，<br>本赛季已结束，你的最终排名为 <span class="loot">127</span>。</p>
-          <p>奖励清单：<span class="loot">金币 ×5000</span>、<span class="loot">传说宝箱 ×1</span>、<span class="sys">称号「不屈」</span>。</p>
-          <p><strong>注意：</strong>奖励将于 <em>7 天内</em>发放，请及时领取。<a href="#" style="color:#5fb4d4;">点此领取全部奖励</a></p>
-          <p>击败 <span class="enemy">暗影领主</span> 可额外获得赛季专属外观。详细规则见 <a href="#" style="color:#5fb4d4;">赛季手册</a>。</p>
+          <div>勇士你好，\n本赛季已结束，你的最终排名为 <span class="loot">127</span>。</div>
+          <div>奖励清单：<span class="loot">金币 ×5000</span>、<span class="loot">传说宝箱 ×1</span>、<span class="sys">称号「不屈」</span>。</div>
+          <div style="display:flex;flex-wrap:wrap"><span style="font-weight:700">注意：</span>奖励将于 <span>7 天内</span>发放，请及时领取。<button style="color:#5fb4d4;">点此领取全部奖励</button></div>
+          <div style="display:flex;flex-wrap:wrap">击败 <span class="enemy">暗影领主</span> 可额外获得赛季专属外观。详细规则见 <button style="color:#5fb4d4;">赛季手册</button>。</div>
         </div>
       </div>
     </div>

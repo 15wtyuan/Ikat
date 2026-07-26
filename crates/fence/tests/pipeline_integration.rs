@@ -6,9 +6,9 @@ use loomgui_fence::schema::tag::SemanticKind;
 #[test]
 fn complex_template_parses_clean() {
     let html = r#"<div id="root" class="panel">
-        <header><my-title>Title</my-title>
+        <div><my-title>Title</my-title>
             <button class="close" style="display:block">X</button>
-        </header>
+        </div>
         <ul>
             <li><span>Item 1</span></li>
             <li><span>Item 2</span></li>
@@ -71,16 +71,16 @@ fn multiple_errors_collected() {
 
 #[test]
 fn rich_text_mixed_children() {
-    let html = r#"<p>Hello <strong>bold</strong> and <em>italic</em>!</p>"#;
+    let html = r#"<div>Hello <span>bold</span> and <span>italic</span>!</div>"#;
     let result = parse_template(html, "rich.html");
     assert!(
         result.diagnostics.is_empty(),
         "rich text should parse clean: {:?}",
         result.diagnostics
     );
-    let p = result.tree.roots[0];
-    // p should have 5 children: Text, strong, Text, em, Text
-    assert_eq!(result.tree.nodes[p.0].children.len(), 5);
+    let root = result.tree.roots[0];
+    // div should have 5 children: Text, span, Text, span, Text
+    assert_eq!(result.tree.nodes[root.0].children.len(), 5);
 }
 
 #[test]
