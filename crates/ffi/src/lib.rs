@@ -1472,6 +1472,9 @@ pub extern "C" fn loomgui_stage_set_control_value(
             } else {
                 clamped
             };
+            // 量化可能把值推过 max（如 min=0,max=100,step=6,v=100 → 102），
+            // 重新 clamp 回 [min,max]，保证不违反区间契约。
+            let quantized = quantized.clamp(min, max);
             ControlState::Slider {
                 value: quantized,
                 min,
@@ -1595,6 +1598,10 @@ pub extern "C" fn loomgui_stage_set_control_max(
             indeterminate,
             ..
         } => {
+            // Progress 的 max 天然非负；caller 可能传负值，先 guard 到 ≥0 再 clamp。
+            // f32::clamp 在 min > max（即 0.0 > max）时 panic，FFI 不可因 caller
+            // 输入 abort 宿主进程（镜像 Slider arm 的 max.max(min) 守卫）。
+            let max = max.max(0.0);
             // 改 max 后把 value 重新 clamp 进新区间（避免 value > max 的悬空态）
             let value = value.clamp(0.0, max);
             ControlState::Progress {

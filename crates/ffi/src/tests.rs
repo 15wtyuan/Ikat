@@ -368,3 +368,45 @@ fn ffi_set_transform_invalid_node_err() {
     assert_eq!(rc, -1, "invalid node set_transform → -1");
     loomgui_stage_free(h);
 }
+
+/// set_control_max 对 Progress 传负 max 不可 panic（FFI 不可因 caller 输入 abort
+/// 进程）；max guard 到 ≥0，rc=0，get_control_max 返 ≥0。
+#[test]
+fn ffi_set_control_max_negative_does_not_panic() {
+    let (h, node) = make_progress_stage(50.0, 100.0);
+    // 传负 max：旧实现 value.clamp(0.0, -5.0) 会 panic（min > max）
+    let rc = loomgui_stage_set_control_max(h, node, -5.0);
+    assert_eq!(rc, 0, "set_control_max(-5) on Progress → rc=0 (guard to 0)");
+    let mut out = -999.0f32;
+    let rc = loomgui_stage_get_control_max(h, node, &mut out);
+    assert_eq!(rc, 0);
+    assert!(out >= 0.0, "max guard to ≥0, got {out}");
+    // value 也被重新 clamp 进 [0, 0] = 0，不悬空
+    let mut v = -999.0f32;
+    let rc = loomgui_stage_get_control_value(h, node, &mut v);
+    assert_eq!(rc, 0);
+    assert!(v >= 0.0 && v <= out, "value clamp into [0,max], got {v}");
+    loomgui_stage_free(h);
+}
+
+/// set_control_value 对 Slider 量化后不可超 max：min=0,max=100,step=6,v=100 →
+/// 量化得 102 > max，必须重新 clamp 回 100。
+#[test]
+fn ffi_set_control_value_slider_quantize_respects_max() {
+    let (h, node) = make_slider_stage(0.0, 0.0, 100.0, 6.0);
+    // 100 / 6 = 16.67 → round 17 → 17*6 = 102 > max 100（旧实现违反区间）
+    let rc = loomgui_stage_set_control_value(h, node, 100.0);
+    assert_eq!(rc, 0);
+    let mut out = 0.0f32;
+    let rc = loomgui_stage_get_control_value(h, node, &mut out);
+    assert_eq!(rc, 0);
+    assert!(
+        out <= 100.0,
+        "quantized value must not exceed max 100, got {out}"
+    );
+    assert!(
+        out >= 0.0,
+        "quantized value must not go below min 0, got {out}"
+    );
+    loomgui_stage_free(h);
+}
