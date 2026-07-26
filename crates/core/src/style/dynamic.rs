@@ -255,8 +255,17 @@ pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
     if let Some(t) = &c.tag {
         // NodeKind → HTML 标签名：标准元素用其 tag，控件 kind 回溯到作者写的 tag
         // （input/progress），使 `input[type="range"]`、`progress` 等选择器在运行时 rematch
-        // 仍能命中。映射须与 fence schema/tag.rs resolve_semantic（tag→SemanticKind→NodeKind）
-        // 的逆方向一致。
+        // 仍能命中。与 fence schema/tag.rs resolve_semantic（tag→SemanticKind→NodeKind）互逆：
+        // fence 列出的、且在运行时成为 Node 的每个 tag 都有对应 arm，使任何通过围栏的 tag
+        // 选择器在 rematch 仍命中。
+        //
+        // 例外：
+        //  - `<template>` 不生成运行时 Node（它在打包期被消费进 ComponentTemplate/TemplateNode，
+        //    不进 scene 对象树），故无对应 NodeKind、无需逆映射。
+        //  - CustomElement：作者写的自定义元素 tag 含连字符（如 `<my-widget>`），NodeKind 只记
+        //    CustomElement 一个判别值、丢弃原始 tag 名，无法逆推。因此带连字符的自定义 tag
+        //    选择器在 rematch 不会命中（围栏放行，运行时退回 div）。要支持需在 NodeKind 侧保留
+        //    原始 tag 字面值，属于已知限制，非本映射 bug。
         let kind_tag = match node.kind {
             NodeKind::Container => "div",
             NodeKind::Button => "button",
@@ -266,6 +275,8 @@ pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
             NodeKind::Dropdown => "select",
             NodeKind::OptionItem => "option",
             NodeKind::ListItem => "li",
+            NodeKind::ListView => "ul",
+            NodeKind::Slot => "slot",
             // input 变体：type 在 parse 期固化为独立 kind，tag 统一为 "input"
             NodeKind::TextField
             | NodeKind::NumberField
@@ -275,7 +286,8 @@ pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
             | NodeKind::Toggle
             | NodeKind::RadioButton => "input",
             NodeKind::ProgressBar => "progress",
-            _ => "div", // Slot/ListView/CustomElement 等回退 div
+            // CustomElement：原始带连字符 tag 已在 NodeKind 中丢失，无法逆推（见上方注释）。
+            NodeKind::CustomElement => "div",
         };
         if kind_tag != t.as_str() {
             return false;
@@ -1349,6 +1361,38 @@ mod tests {
         let sel_text = hand_selector(r#"[type="text"]"#);
         assert!(compound_matches_node(&sel_text.compound[0], &text_node));
         assert!(!compound_matches_node(&sel_text.compound[0], &pw_node));
+    }
+
+    #[test]
+    fn tag_selector_matches_nodekind_roundtrip() {
+        // 标签选择器 ↔ NodeKind 互逆回归：fence resolve_semantic 放行的、且在运行时成为 Node
+        // 的每个 tag 都须在 rematch 命中。这里覆盖曾误退回 "div" 的 ListView/Slot，
+        // 以及控件回溯 tag（progress）与基础 tag 作为健全性检查。
+        //
+        // 注意 `<template>` 不在此列：它在打包期被消费进 ComponentTemplate，不生成运行时 Node，
+        // 故无对应 NodeKind，不参与 rematch。
+        // fence tag → NodeKind 真相源：crates/fence/src/schema/tag.rs::resolve_semantic
+        let cases: &[(&str, NodeKind)] = &[
+            ("ul", NodeKind::ListView),
+            ("slot", NodeKind::Slot),
+            ("progress", NodeKind::ProgressBar),
+            ("div", NodeKind::Container),
+        ];
+        for (tag, kind) in cases {
+            let sel = hand_selector(tag);
+            let node = test_node(*kind);
+            assert!(
+                compound_matches_node(&sel.compound[0], &node),
+                "tag 选择器 `{tag}` 应命中 NodeKind::{kind:?}（rematch 路径）"
+            );
+        }
+        // 负向：`ul` 不该命中 Container（防误退回 div 后误匹配）
+        let ul_sel = hand_selector("ul");
+        let div_node = test_node(NodeKind::Container);
+        assert!(
+            !compound_matches_node(&ul_sel.compound[0], &div_node),
+            "`ul` 不应命中 Container"
+        );
     }
 
     #[test]
