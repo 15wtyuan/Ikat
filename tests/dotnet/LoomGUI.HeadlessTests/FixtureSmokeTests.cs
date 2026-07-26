@@ -15,7 +15,7 @@ namespace LoomGUI.HeadlessTests
     ///   CSS rules: .container{display:flex;flex-direction:column} .highlight{color:red}
     ///   #root{width:200px;height:100px} .spaced{margin:4px}
     ///
-    /// Note on span: the fence parser maps &lt;span&gt; → SemanticKind::TextElement → NodeKind::TextElement (3).
+    /// Note on span: the fence parser maps &lt;span&gt; → SemanticKind::TextElement → NodeKind::TextElement (2).
     /// This differs from kind_from_tag("span") → NodeKind::TextNode (1) used by the dynamic create_node path.
     /// Both are valid projection types — TextElement : Container (inline text container) while TextNode : Node
     /// (leaf text run). The fixture tests use Get&lt;TextElement&gt; to match the pkg-built path.
@@ -88,13 +88,13 @@ namespace LoomGUI.HeadlessTests
                 Assert.Equal(0, Native.loomgui_stage_get_node_kind(h, child._id, &childKind));
                 Assert.Equal(0, childKind);
 
-                // span#text → TextElement (kind=3 — fence parse path; not TextNode=1 from kind_from_tag)
+                // span#text → TextElement (kind=2 — fence parse path; not TextNode=1 from kind_from_tag)
                 TextElement text = child.Get<TextElement>("text");
                 Assert.NotNull(text);
                 Assert.IsType<TextElement>(text);
                 byte textKind = 0xFF;
                 Assert.Equal(0, Native.loomgui_stage_get_node_kind(h, text._id, &textKind));
-                Assert.Equal(3, textKind);
+                Assert.Equal(2, textKind);
 
                 // button#btn → Button (kind=6)
                 Button btn = child.Get<Button>("btn");
@@ -102,7 +102,7 @@ namespace LoomGUI.HeadlessTests
                 Assert.IsType<Button>(btn);
                 byte btnKind = 0xFF;
                 Assert.Equal(0, Native.loomgui_stage_get_node_kind(h, btn._id, &btnKind));
-                Assert.Equal(6, btnKind);
+                Assert.Equal(3, btnKind);   // Button
 
                 // img#img → Image (kind=8)
                 Image img = child.Get<Image>("img");
@@ -110,7 +110,7 @@ namespace LoomGUI.HeadlessTests
                 Assert.IsType<Image>(img);
                 byte imgKind = 0xFF;
                 Assert.Equal(0, Native.loomgui_stage_get_node_kind(h, img._id, &imgKind));
-                Assert.Equal(8, imgKind);
+                Assert.Equal(4, imgKind);   // Image
 
                 // ── Criterion 2: Scope lookup via Get<T>("id") ────────────
                 // Positive paths already covered above. Verify TryGet also works.

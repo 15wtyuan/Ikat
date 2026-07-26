@@ -120,12 +120,12 @@ namespace LoomGUI.HeadlessTests
                 var img = ctx.Create<Image>();
                 Assert.IsType<Image>(img);
                 Assert.NotEqual(RootSentinel, img._id);
-                // Image kind = 8（Rust NodeKind 枚举序：Container=0, TextNode=1, ..., Image=8）
+                // Image kind = 4（Rust NodeKind 枚举序：Container=0, TextNode=1, TextElement=2, Button=3, Image=4）
                 StageHandle* h = (StageHandle*)stage.ToPointer();
                 byte kind = 0xFF;
                 int rc = Native.loomgui_stage_get_node_kind(h, img._id, &kind);
                 Assert.Equal(0, rc);
-                Assert.Equal(8, kind);   // Image
+                Assert.Equal(4, kind);   // Image
             }
             finally { StageHarness.Destroy(stage); }
         }
