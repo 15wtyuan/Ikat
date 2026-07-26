@@ -137,12 +137,8 @@ fn kind_to_html_tag(k: NodeKind) -> &'static str {
     match k {
         NodeKind::Container => "div",
         NodeKind::TextNode => "#text",
-        NodeKind::TextBlock => "p",
         NodeKind::TextElement => "span",
-        NodeKind::LineBreak => "br",
-        NodeKind::Label => "label",
         NodeKind::Button => "button",
-        NodeKind::Link => "a",
         NodeKind::Image => "img",
         NodeKind::TextField
         | NodeKind::NumberField
@@ -159,7 +155,6 @@ fn kind_to_html_tag(k: NodeKind) -> &'static str {
         NodeKind::ListItem => "li",
         NodeKind::Slot => "slot",
         NodeKind::CustomElement => "custom",
-        NodeKind::Canvas => "canvas",
     }
 }
 
@@ -173,8 +168,6 @@ fn print_diagnostic_row(n: &Node, scene: &Scene, s: &Stage) {
         NodeKind::Button => "btn",
         NodeKind::TextElement => "span",
         NodeKind::TextNode => "#text",
-        NodeKind::Label => "label",
-        NodeKind::TextBlock => "p",
         _ => "?",
     };
     let class = n.classes.join(",");

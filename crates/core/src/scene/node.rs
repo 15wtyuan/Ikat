@@ -92,12 +92,8 @@ pub enum NodeKind {
     #[default]
     Container,
     TextNode,
-    TextBlock,
     TextElement,
-    LineBreak,
-    Label,
     Button,
-    Link,
     Image,
     TextField,
     NumberField,
@@ -112,7 +108,6 @@ pub enum NodeKind {
     ListItem,
     Slot,
     CustomElement,
-    Canvas,
     /// `<input type="password">` — split from TextField for attribute-selector matching.
     PasswordField,
     /// `<input type="search">` — split from TextField for attribute-selector matching.
@@ -126,48 +121,39 @@ impl NodeKind {
         match b {
             0 => Some(NodeKind::Container),
             1 => Some(NodeKind::TextNode),
-            2 => Some(NodeKind::TextBlock),
-            3 => Some(NodeKind::TextElement),
-            4 => Some(NodeKind::LineBreak),
-            5 => Some(NodeKind::Label),
-            6 => Some(NodeKind::Button),
-            7 => Some(NodeKind::Link),
-            8 => Some(NodeKind::Image),
-            9 => Some(NodeKind::TextField),
-            10 => Some(NodeKind::NumberField),
-            11 => Some(NodeKind::Slider),
-            12 => Some(NodeKind::Toggle),
-            13 => Some(NodeKind::RadioButton),
-            14 => Some(NodeKind::TextArea),
-            15 => Some(NodeKind::Dropdown),
-            16 => Some(NodeKind::OptionItem),
-            17 => Some(NodeKind::ProgressBar),
-            18 => Some(NodeKind::ListView),
-            19 => Some(NodeKind::ListItem),
-            20 => Some(NodeKind::Slot),
-            21 => Some(NodeKind::CustomElement),
-            22 => Some(NodeKind::Canvas),
-            23 => Some(NodeKind::PasswordField),
-            24 => Some(NodeKind::SearchField),
+            2 => Some(NodeKind::TextElement),
+            3 => Some(NodeKind::Button),
+            4 => Some(NodeKind::Image),
+            5 => Some(NodeKind::TextField),
+            6 => Some(NodeKind::NumberField),
+            7 => Some(NodeKind::Slider),
+            8 => Some(NodeKind::Toggle),
+            9 => Some(NodeKind::RadioButton),
+            10 => Some(NodeKind::TextArea),
+            11 => Some(NodeKind::Dropdown),
+            12 => Some(NodeKind::OptionItem),
+            13 => Some(NodeKind::ProgressBar),
+            14 => Some(NodeKind::ListView),
+            15 => Some(NodeKind::ListItem),
+            16 => Some(NodeKind::Slot),
+            17 => Some(NodeKind::CustomElement),
+            18 => Some(NodeKind::PasswordField),
+            19 => Some(NodeKind::SearchField),
             _ => None,
         }
     }
 
-    /// Container content model: user-arrangeable children (div/button/a/p/span/ul/li/...).
+    /// Container content model: user-arrangeable children (div/button/span/ul/li/...).
     /// Single source of truth for container vs leaf classification — adding a new
     /// container variant only requires changing this method.
     pub fn is_container(self) -> bool {
         matches!(
             self,
             Self::Container
-                | Self::TextBlock
                 | Self::TextElement
-                | Self::Label
                 | Self::Button
-                | Self::Link
                 | Self::ListView
                 | Self::ListItem
-                | Self::Canvas
                 | Self::Slot
                 | Self::CustomElement
         )
@@ -192,12 +178,8 @@ const _: () = {
         match k {
             NodeKind::Container
             | NodeKind::TextNode
-            | NodeKind::TextBlock
             | NodeKind::TextElement
-            | NodeKind::LineBreak
-            | NodeKind::Label
             | NodeKind::Button
-            | NodeKind::Link
             | NodeKind::Image
             | NodeKind::TextField
             | NodeKind::NumberField
@@ -212,7 +194,6 @@ const _: () = {
             | NodeKind::ListItem
             | NodeKind::Slot
             | NodeKind::CustomElement
-            | NodeKind::Canvas
             | NodeKind::PasswordField
             | NodeKind::SearchField => {}
         }
@@ -578,11 +559,10 @@ mod repr_tests {
         // repr(u8) 后 as u8 等于声明顺序的判别值；锁定几个关键值防漂移。
         assert_eq!(NodeKind::Container as u8, 0);
         assert_eq!(NodeKind::TextNode as u8, 1);
-        assert_eq!(NodeKind::Button as u8, 6);
-        assert_eq!(NodeKind::Image as u8, 8);
-        assert_eq!(NodeKind::Canvas as u8, 22);
-        assert_eq!(NodeKind::PasswordField as u8, 23);
-        assert_eq!(NodeKind::SearchField as u8, 24);
+        assert_eq!(NodeKind::Button as u8, 3);
+        assert_eq!(NodeKind::Image as u8, 4);
+        assert_eq!(NodeKind::PasswordField as u8, 18);
+        assert_eq!(NodeKind::SearchField as u8, 19);
     }
 
     #[test]
@@ -590,12 +570,8 @@ mod repr_tests {
         let all = [
             NodeKind::Container,
             NodeKind::TextNode,
-            NodeKind::TextBlock,
             NodeKind::TextElement,
-            NodeKind::LineBreak,
-            NodeKind::Label,
             NodeKind::Button,
-            NodeKind::Link,
             NodeKind::Image,
             NodeKind::TextField,
             NodeKind::NumberField,
@@ -610,14 +586,13 @@ mod repr_tests {
             NodeKind::ListItem,
             NodeKind::Slot,
             NodeKind::CustomElement,
-            NodeKind::Canvas,
             NodeKind::PasswordField,
             NodeKind::SearchField,
         ];
         for &k in &all {
             assert_eq!(NodeKind::from_u8(k as u8), Some(k));
         }
-        assert_eq!(NodeKind::from_u8(25), None); // 越界
+        assert_eq!(NodeKind::from_u8(20), None); // 越界（SearchField=19 是最后合法判别值）
         assert_eq!(NodeKind::from_u8(255), None);
     }
 }

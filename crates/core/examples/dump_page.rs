@@ -240,12 +240,9 @@ fn kind_str(k: NodeKind) -> &'static str {
     match k {
         NodeKind::Container => "div",
         NodeKind::Button => "btn",
-        NodeKind::Link => "a",
         NodeKind::Image => "img",
         NodeKind::TextNode => "#text",
-        NodeKind::TextBlock => "p",
         NodeKind::TextElement => "span",
-        NodeKind::Label => "label",
         _ => "?",
     }
 }

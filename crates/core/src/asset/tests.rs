@@ -376,10 +376,10 @@ fn read_rejects_duplicate_component_name() {
     );
 }
 
-/// Important 4：NodeBlock 的 kind_tag 字节不在 `NodeKind::from_u8` 判别值范围（≥25）→ BadKind
+/// Important 4：NodeBlock 的 kind_tag 字节不在 `NodeKind::from_u8` 判别值范围（≥20）→ BadKind
 /// （不静默塌成 Container）。v17 的 KIND_* 5 常量方案 read 侧用 wildcard fallback 把未知字节
 /// 全塌成 Container（kind collapse）；v18 起 kind_tag = NodeKind 判别值，from_u8 对越界值
-/// 返 None → BadKind。本测试同时正向验证改的是 kind_tag 字节（改成 Label 须读回 Label），
+/// 返 None → BadKind。本测试同时正向验证改的是 kind_tag 字节（改成 Button 须读回 Button），
 /// 避免"改错字节却因别的原因碰巧报错"的假阳性。
 #[test]
 fn read_rejects_unknown_kind_tag() {
@@ -396,24 +396,24 @@ fn read_rejects_unknown_kind_tag() {
     // 节点内布局：parent_idx(4) + kind_tag(1) + ... → kind_tag 在 node_start + 4。
     let kind_tag_off = nodeblock_off + 4;
 
-    // 正向 sanity：把 kind_tag 从 0(Container) 改成 5(Label)，read 应回 Label。
+    // 正向 sanity：把 kind_tag 从 0(Container) 改成 3(Button)，read 应回 Button。
     // 确保改的是 kind_tag 字节；否则下面的 BadKind 断言会"对错原因通过"。
     let mut patched_valid = bytes.clone();
-    patched_valid[kind_tag_off] = NodeKind::Label as u8;
+    patched_valid[kind_tag_off] = NodeKind::Button as u8;
     let pkg = read_package(&patched_valid).expect("valid kind_tag must still read");
     assert_eq!(
         pkg.components["c"].nodes[0].kind,
-        NodeKind::Label,
-        "kind_tag offset sanity: patching to Label must read back Label"
+        NodeKind::Button,
+        "kind_tag offset sanity: patching to Button must read back Button"
     );
 
-    // 25 = from_u8 的首个 None 分支（SearchField=24 是最后合法判别值）。
+    // 20 = from_u8 的首个 None 分支（SearchField=19 是最后合法判别值）。
     let mut patched_bad = bytes.clone();
-    patched_bad[kind_tag_off] = 25;
+    patched_bad[kind_tag_off] = 20;
     let err = read_package(&patched_bad).expect_err("unknown kind_tag must error");
     assert!(
-        matches!(err, PkgError::BadKind(25)),
-        "expected BadKind(25), got {err:?}"
+        matches!(err, PkgError::BadKind(20)),
+        "expected BadKind(20), got {err:?}"
     );
 
     // 0xFF = 远超判别值范围，同样必须 BadKind。防 from_u8 回归（如 off-by-one 把 25 误返 Some）。
@@ -489,11 +489,7 @@ fn template_node_content_src_roundtrip_via_pkg() {
 fn v18_nontrivial_nodekinds_roundtrip() {
     let all_kinds = [
         NodeKind::TextNode,
-        NodeKind::TextBlock,
         NodeKind::TextElement,
-        NodeKind::LineBreak,
-        NodeKind::Label,
-        NodeKind::Link,
         NodeKind::TextField,
         NodeKind::NumberField,
         NodeKind::Slider,
@@ -507,7 +503,6 @@ fn v18_nontrivial_nodekinds_roundtrip() {
         NodeKind::ListItem,
         NodeKind::Slot,
         NodeKind::CustomElement,
-        NodeKind::Canvas,
     ];
     for &k in &all_kinds {
         let one = TemplateNode {

@@ -44,13 +44,9 @@ namespace LoomGUI
             {
                 // ── 基础容器类（Container 派生）──
                 NodeKind.Container     => new Container(ctx, id),
-                NodeKind.TextBlock     => new TextBlock(ctx, id),
                 NodeKind.TextElement   => new TextElement(ctx, id),
-                NodeKind.Label         => new Label(ctx, id),
-                NodeKind.Canvas        => new Canvas(ctx, id),
                 NodeKind.ListItem      => new ListItem(ctx, id),
                 NodeKind.Button        => new Button(ctx, id),
-                NodeKind.Link          => new Link(ctx, id),
                 NodeKind.ListView      => new ListView(ctx, id),
 
                 // ── 叶子：内容/绘制 ──
@@ -70,15 +66,14 @@ namespace LoomGUI
                 NodeKind.ProgressBar   => new ProgressBar(ctx, id),
 
                 // ── Rust 侧变体尚无专用 C# 子类：回落 Container。
-                // 结构上都是容器型节点（行中断占位 / 下拉选项 / 模板插槽 / 自定义标签），
+                // 结构上都是容器型节点（下拉选项 / 模板插槽 / 自定义标签），
                 // Container 是它们最近的具体基类。专用 C# 子类待后续 task 引入时补 arm 替换。
-                NodeKind.LineBreak      => new Container(ctx, id),
                 NodeKind.OptionItem     => new Container(ctx, id),
                 NodeKind.Slot           => new Container(ctx, id),
                 NodeKind.CustomElement  => new Container(ctx, id),
 
                 // ── 兜底：围栏闭合理论不达，防 FFI 异常 byte 崩整树。──
-                // Rust 侧 NodeKind 是 #[repr(u8)] 25 变体（kind_as_u8_is_discriminant 锁），
+                // Rust 侧 NodeKind #[repr(u8)] 20 变体（kind_as_u8_is_discriminant 锁），
                 // 越界 byte 只能来自 ABI 漂移或内存损坏——这种情况下造 Container 不 crash，
                 // 让上层逻辑继续运行（用户看到的是错类型而非进程崩溃，更易诊断）。
                 _ => new Container(ctx, id),

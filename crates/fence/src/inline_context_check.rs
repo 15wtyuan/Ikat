@@ -24,23 +24,6 @@ use loomgui_core::style::resolved::ResolvedStyle;
 /// （strong/em/br 已从围栏移除——它们就是 span/\n 的语义糖，不再单独存在。）
 const TEXT_LEVEL_SEMANTICS: &[SemanticKind] = &[SemanticKind::TextElement, SemanticKind::Slot];
 
-/// 文本上下文判定：沿祖先链找文本块容器（TextBlock 语义）。
-///
-/// `<p>` 已从围栏移除——当前没有标签产生 TextBlock，本函数暂不触发（永不命中）。
-/// 保留是留给 roadmap §4 文本模型：届时文本流容器（可能是 CustomElement 或重新引入的
-/// 语义标签）会恢复 TextBlock 产出，本判定自动重新生效。
-fn in_text_context(tree: &IrTree, mut id: usize) -> bool {
-    while let Some(parent_id) = tree.nodes[id].parent {
-        if let IrNodeKind::Element(pel) = &tree.nodes[parent_id.0].kind {
-            if pel.semantic == Some(SemanticKind::TextBlock) {
-                return true;
-            }
-        }
-        id = parent_id.0;
-    }
-    false
-}
-
 /// 判定 parent 是否为 flex 上下文。
 ///
 /// stage 4 css_resolve 只烘 inline `style=""` + tag 默认 display 进 styles——`<style>` class 规则
@@ -150,11 +133,6 @@ pub fn check_inline_context(
         // 元素自己显式 display:block → 作者有意当块级（撑满），浏览器也撑满，两边一致 → 放行。
         // （display:flex 的 inline 元素在浏览器仍 shrink-to-fit，和 LoomGUI 撑满不一致 → 不放行。）
         if styles[idx].taffy_style.display == taffy::Display::Block {
-            continue;
-        }
-
-        // 文本上下文豁免：<p> 内的 inline 元素走文本流。
-        if in_text_context(tree, idx) {
             continue;
         }
 

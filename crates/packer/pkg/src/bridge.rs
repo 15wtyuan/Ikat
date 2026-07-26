@@ -95,14 +95,9 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
 fn map_semantic(el: &IrElement) -> Result<NodeKind, String> {
     match el.semantic {
         Some(SemanticKind::Container) => Ok(NodeKind::Container),
-        Some(SemanticKind::TextBlock) => Ok(NodeKind::TextBlock),
         Some(SemanticKind::TextElement) => Ok(NodeKind::TextElement),
-        Some(SemanticKind::LineBreak) => Ok(NodeKind::LineBreak),
-        Some(SemanticKind::Label) => Ok(NodeKind::Label),
         Some(SemanticKind::Button) => Ok(NodeKind::Button),
-        Some(SemanticKind::Link) => Ok(NodeKind::Link),
         Some(SemanticKind::Image) => Ok(NodeKind::Image),
-        Some(SemanticKind::Canvas) => Ok(NodeKind::Canvas),
         Some(SemanticKind::TextField) => Ok(NodeKind::TextField),
         Some(SemanticKind::PasswordField) => Ok(NodeKind::PasswordField),
         Some(SemanticKind::SearchField) => Ok(NodeKind::SearchField),

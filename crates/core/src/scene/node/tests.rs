@@ -601,12 +601,8 @@ fn node_kind_all_variants_bincode_roundtrip() {
     let all = [
         NodeKind::Container,
         NodeKind::TextNode,
-        NodeKind::TextBlock,
         NodeKind::TextElement,
-        NodeKind::LineBreak,
-        NodeKind::Label,
         NodeKind::Button,
-        NodeKind::Link,
         NodeKind::Image,
         NodeKind::TextField,
         NodeKind::NumberField,
@@ -621,7 +617,6 @@ fn node_kind_all_variants_bincode_roundtrip() {
         NodeKind::ListItem,
         NodeKind::Slot,
         NodeKind::CustomElement,
-        NodeKind::Canvas,
     ];
     for k in all {
         let bytes = bincode::serialize(&k).unwrap();

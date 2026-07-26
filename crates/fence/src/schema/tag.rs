@@ -53,14 +53,9 @@ pub enum DisplayDefault {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SemanticKind {
     Container,
-    TextBlock,
     TextElement,
-    LineBreak,
-    Label,
     Button,
-    Link,
     Image,
-    Canvas,
     /// `<input>` before type dispatch -- replaced by the specific kind
     /// during annotation.
     InputDispatch,

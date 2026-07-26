@@ -311,10 +311,7 @@ fn collect_text(scene: &Scene, id: loomgui_core::scene::node::NodeId) -> String 
 
 fn collect_text_rec(scene: &Scene, id: loomgui_core::scene::node::NodeId, out: &mut String) {
     if let Some(n) = scene.get(id) {
-        if matches!(
-            n.kind,
-            NodeKind::TextNode | NodeKind::TextBlock | NodeKind::TextElement
-        ) {
+        if matches!(n.kind, NodeKind::TextNode | NodeKind::TextElement) {
             if let Some(c) = scene.text_contents.get(&id) {
                 out.push_str(c);
             }

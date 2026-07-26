@@ -29,12 +29,8 @@ pub fn dump_scene_json(scene: &Scene) -> String {
         let (tag, kind_str): (&'static str, String) = match n.kind {
             NodeKind::Container => ("div", "Container".into()),
             NodeKind::TextNode => ("span", "TextNode".into()),
-            NodeKind::TextBlock => ("div", "TextBlock".into()),
             NodeKind::TextElement => ("span", "TextElement".into()),
-            NodeKind::LineBreak => ("br", "LineBreak".into()),
-            NodeKind::Label => ("label", "Label".into()),
             NodeKind::Button => ("button", "Button".into()),
-            NodeKind::Link => ("a", "Link".into()),
             NodeKind::Image => ("img", "Image".into()),
             NodeKind::TextField => ("input", "TextField".into()),
             NodeKind::PasswordField => ("input", "PasswordField".into()),
@@ -51,7 +47,6 @@ pub fn dump_scene_json(scene: &Scene) -> String {
             NodeKind::ListItem => ("li", "ListItem".into()),
             NodeKind::Slot => ("slot", "Slot".into()),
             NodeKind::CustomElement => ("div", "CustomElement".into()),
-            NodeKind::Canvas => ("canvas", "Canvas".into()),
         };
         let id = json_escape(n.id_attr.as_deref().unwrap_or(""));
         let classes = n

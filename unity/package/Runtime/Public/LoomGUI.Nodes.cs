@@ -403,21 +403,16 @@ namespace LoomGUI
         /// </summary>
         private static NodeKind? TagToNodeKind(string tag) => tag switch
         {
-            "div" or "header" or "nav" => NodeKind.Container,
-            "p" => NodeKind.TextBlock,
-            "span" or "strong" or "em" => NodeKind.TextElement,
-            "br" => NodeKind.LineBreak,
-            "label" => NodeKind.Label,
+            "div" => NodeKind.Container,
+            "span" => NodeKind.TextElement,
             "button" => NodeKind.Button,
-            "a" => NodeKind.Link,
             "img" => NodeKind.Image,
-            "canvas" => NodeKind.Canvas,
             "input" => NodeKind.TextField,       // 默认 type=text；派生 kind 不命中（4a 简化）
             "textarea" => NodeKind.TextArea,
             "select" => NodeKind.Dropdown,
             "option" => NodeKind.OptionItem,
             "progress" => NodeKind.ProgressBar,
-            "ul" or "ol" => NodeKind.ListView,
+            "ul" => NodeKind.ListView,
             "li" => NodeKind.ListItem,
             "slot" => NodeKind.Slot,
             _ => null,                            // 含围栏外 tag + 自定义标签（带连字符）
@@ -1236,22 +1231,10 @@ namespace LoomGUI
     }
 
     // ── 容器类文本/标签（TextContent 走 Container 继承）──
-    public class TextBlock : Container
-    {
-        internal TextBlock(UIContext ctx, uint id) : base(ctx, id) { }
-    }      // p
     public class TextElement : Container
     {
         internal TextElement(UIContext ctx, uint id) : base(ctx, id) { }
-    }    // span/strong/em
-    public class Label : Container
-    {
-        internal Label(UIContext ctx, uint id) : base(ctx, id) { }
-    }          // 退化为语义容器：不加 For、不自动聚焦（点标签聚焦用 On<ClickEvent>+Focus() 积木）
-    public class Canvas : Container
-    {
-        internal Canvas(UIContext ctx, uint id) : base(ctx, id) { }
-    }         // 引擎渲染挂载点，无绘图 API；集成层 Query<Canvas>() + 读 Geometry.WorldRect 摆摄像机
+    }    // span
     public class ListItem : Container
     {
         internal ListItem(UIContext ctx, uint id) : base(ctx, id) { }
@@ -1286,37 +1269,6 @@ namespace LoomGUI
                 if (_clickedBacking != null && _clickedBacking.TryGetValue(value, out var reg))
                 {
                     _clickedBacking.Remove(value);
-                    reg.Dispose();
-                }
-            }
-        }
-        static NotImplementedException NE() => new NotImplementedException();
-    }
-
-    public class Link : Container
-    {
-        internal Link(UIContext ctx, uint id) : base(ctx, id) { }
-
-        public string Href { get { throw NE(); } set { throw NE(); } }   // 仅存字符串，框架不自动导航
-
-        // D3 semantic sugar：同 Button.Clicked——ClickEvent 冒泡到自身后调 handler。
-        [NonSerialized] System.Collections.Generic.Dictionary<Action, EventRegistration> _activatedBacking;
-        public event Action Activated
-        {
-            add
-            {
-                if (value == null) return;
-                if (_activatedBacking == null)
-                    _activatedBacking = new System.Collections.Generic.Dictionary<Action, EventRegistration>();
-                if (_activatedBacking.ContainsKey(value)) return;
-                var reg = On<ClickEvent>(e => value(), useCapture: false);
-                _activatedBacking[value] = reg;
-            }
-            remove
-            {
-                if (_activatedBacking != null && _activatedBacking.TryGetValue(value, out var reg))
-                {
-                    _activatedBacking.Remove(value);
                     reg.Dispose();
                 }
             }
