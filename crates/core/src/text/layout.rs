@@ -369,21 +369,16 @@ pub fn measure_text(
     let font = stack.primary;
     let ascent = font.ascent(font_size);
     let descent = font.descent(font_size); // 负
-    let line_gap = font.line_gap(font_size);
 
-    // Line.height：line-height 生效则烤进 height（后端不重套，§9.1）；
-    // 否则用字体自然行高（ascent - descent + line_gap）。
-    let line_h = if line_height > 0.0 {
-        font_size * line_height
-    } else {
-        ascent - descent + line_gap
-    };
-    // baseline：简化占位。
-    let baseline = if line_height > 0.0 {
-        (line_h + ascent - descent) / 2.0 - descent.abs()
-    } else {
-        ascent
-    };
+    // CSS line-height: normal → 1.2×font-size（业界惯例/RmlUi 同），不用字体自然行高
+    // （ascent-descent+line_gap 因字体而异且常偏小，与浏览器/AI 预期不符）。精确对齐
+    // 浏览器（~1.31，Blink 固定行为）留 tech-debt。
+    let lh = if line_height > 0.0 { line_height } else { 1.2 };
+
+    // Line.height：倍数烤进 height（后端不重套，§9.1）。
+    let line_h = font_size * lh;
+    // baseline：half-leading 居中。
+    let baseline = (line_h + ascent - descent) / 2.0 - descent.abs();
 
     // 度量一段文本的宽度（含字距）。per-char 按 stack 选字体——回退字形的 advance
     // 用其来源字体算，否则行宽估错导致断行位置偏。
@@ -895,13 +890,11 @@ fn is_cjk(ch: char) -> bool {
         || (0x3040..=0x30FF).contains(&c) // 假名
 }
 
-/// strut 行高（搬 RmlUi GetStrut：line_height > 0 用倍数，否则自然行高 ascent-descent+gap）。
-fn strut_height(line_height: f32, size: f32, ascent: f32, descent: f32, line_gap: f32) -> f32 {
-    if line_height > 0.0 {
-        size * line_height
-    } else {
-        ascent - descent + line_gap
-    }
+/// strut 行高：line_height>0 用倍数；normal(0) 用 1.2×size（对齐业界惯例/浏览器预期，
+/// 不用字体自然行高 ascent-descent+gap）。
+fn strut_height(line_height: f32, size: f32, _ascent: f32, _descent: f32, _line_gap: f32) -> f32 {
+    let lh = if line_height > 0.0 { line_height } else { 1.2 };
+    size * lh
 }
 
 #[cfg(test)]
@@ -1299,6 +1292,41 @@ mod tests {
             crate::text::rich::RichWeight::Normal,
         );
         assert!(layout.lines.len() >= 2, "超长无空格串应逐字断 ≥2 行");
+    }
+
+    #[test]
+    fn line_height_normal_is_1_2_not_font_metrics() {
+        // CSS line-height: normal 应对齐业界惯例 ~1.2×font-size（RmlUi 亦固定 1.2），
+        // 而非字体的自然行高（ascent-descent+line_gap，因字体而异且常偏小）。
+        // 这是 LoomGUI 渲染对齐浏览器/AI 预期的关键：浏览器实测 ~1.31，core 旧用 hhea
+        // metrics（LXGWWenKai=1.184）偏小，导致所有文字行高比浏览器矮 ~10%。
+        // 选 C：先用 1.2（RmlUi 方案）立即改善，精确对齐浏览器（~1.31）留 tech-debt。
+        let font = match test_font() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip: no test font");
+                return;
+            }
+        };
+        let font_size = 36.0;
+        let result = measure_text(
+            "Hi",
+            font_size,
+            0.0, // normal
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &FontStack::single(&font, 0),
+            [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
+        );
+        let line_h = result.lines[0].height;
+        let expected = font_size * 1.2;
+        assert_eq!(
+            line_h, expected,
+            "normal line-height 该是 1.2×font_size={expected}，实际 {line_h}"
+        );
     }
 
     #[test]
