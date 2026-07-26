@@ -561,8 +561,12 @@ impl Stage {
             }
         }
         for (i, tn) in template.nodes.iter().enumerate() {
-            let node_id =
-                crate::scene::dynamic::create_node_from_template(scene, tn.kind, tn.style.clone());
+            let node_id = crate::scene::dynamic::create_node_from_template(
+                scene,
+                tn.kind,
+                tn.style.clone(),
+                tn.control_init.clone(),
+            );
             // 填 classes/id_attr/draggable/tabindex（create_node_from_template 不填这些，同 create_node）
             let n = scene.get_mut(node_id).unwrap();
             n.classes = tn.classes.clone();

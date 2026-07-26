@@ -337,6 +337,59 @@ impl AnimTable {
     }
 }
 
+/// 控件运行时状态（按 NodeKind 分派）。与 `ControlInit`（打包期 pkg.bin 载荷）
+/// 一一对应，区别仅在 Slider 多一个 `dragging: bool`——拖拽中间态只在运行时存在，
+/// 不进 pkg（松手即丢）。instantiate 时由 `ControlInit` 映射填入 `ControlTable`。
+#[derive(Debug, Clone, PartialEq)]
+pub enum ControlState {
+    Progress {
+        value: f32,
+        max: f32,
+        indeterminate: bool,
+    },
+    Toggle {
+        checked: bool,
+    },
+    Radio {
+        checked: bool,
+        name: String,
+    },
+    Slider {
+        value: f32,
+        min: f32,
+        max: f32,
+        step: f32,
+        /// 拖拽中间态（按下→松手期间 true）。运行时独有，不进 pkg，故不在 `ControlInit`。
+        dragging: bool,
+    },
+}
+
+/// 每节点控件状态表（`HashMap<NodeId, ControlState>`）。结构与访问约定同 `AnimTable`/
+/// `ScrollTable`（见 AnimTable doc：用 HashMap 而非 SecondaryMap 的理由）。instantiate 时填、
+/// `remove_node` 时联动清，防悬空 NodeId 残留。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ControlTable(pub std::collections::HashMap<NodeId, ControlState>);
+
+impl ControlTable {
+    pub fn get(&self, id: NodeId) -> Option<&ControlState> {
+        self.0.get(&id)
+    }
+    pub fn get_mut(&mut self, id: NodeId) -> Option<&mut ControlState> {
+        self.0.get_mut(&id)
+    }
+    /// 写入（或覆盖）该节点的控件状态。instantiate 时由 `ControlInit` 映射调用。
+    pub fn ensure(&mut self, id: NodeId, state: ControlState) {
+        self.0.insert(id, state);
+    }
+    /// 删该节点控件槽（`remove_node` 联动调，防悬空 NodeId 残留）。
+    pub fn remove(&mut self, id: NodeId) {
+        self.0.remove(&id);
+    }
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Scene {
     pub roots: Vec<NodeId>,
@@ -358,6 +411,8 @@ pub struct Scene {
     pub anim: AnimTable,
     /// 每节点滚动状态（refresh_content_sizes / scroll 物理填）。index = NodeId.index()。运行时态，不进 pkg。
     pub scroll: crate::scroll::ScrollTable,
+    /// 每节点控件状态（instantiate 从 `ControlInit` 填、交互改）。运行时态，不进 pkg。
+    pub controls: ControlTable,
     /// 每节点 text 测量结果（layout solve 填，render 复用——消除双测量不一致）。
     /// index = NodeId.index()，仅 Text 节点 Some。运行时态，不进 pkg。
     ///

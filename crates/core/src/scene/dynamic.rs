@@ -14,7 +14,10 @@
 //!   复用 dom.rs 围栏白名单语义做 tag→NodeKind（`kind_from_tag`）。
 //! - create_node 填 base_style（源）+ style=base_style.clone()（派生），下帧 rematch 从 base 起算。
 
-use crate::scene::node::{Node, NodeFlags, NodeId, NodeInteraction, NodeKind, Rect, Scene};
+use crate::asset::ControlInit;
+use crate::scene::node::{
+    ControlState, Node, NodeFlags, NodeId, NodeInteraction, NodeKind, Rect, Scene,
+};
 use crate::style::dynamic::{inline_bit, InlineSet};
 use crate::style::mapping::apply_decl;
 use crate::style::resolved::{DisplayMode, OverflowMode, ResolvedStyle};
@@ -157,10 +160,13 @@ pub fn create_root(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
 /// 直接用传入 style 作 base_style（源）+ style.clone() 作 style 初始（派生，下帧 rematch 从 base 起算）。
 /// classes/id_attr/draggable/tabindex 由调用方在返回 NodeId 后填（与 create_node 一致——
 /// （同 create_node：classes/id_attr 等由调用方在返回 NodeId 后填）。
+/// `control_init` 为 `Some` 时按变体映射填 `Scene.controls` side table（Slider 补
+/// 运行时独有 `dragging:false`）；`None` = 非控件节点，不建槽。
 pub fn create_node_from_template(
     scene: &mut Scene,
     kind: NodeKind,
     base_style: ResolvedStyle,
+    control_init: Option<ControlInit>,
 ) -> NodeId {
     let touchable = base_style.touchable;
     let clip = if base_style.overflow_x != OverflowMode::Visible
@@ -203,6 +209,36 @@ pub fn create_node_from_template(
         scene.text_contents.insert(id, String::new());
     } else if kind == NodeKind::Image {
         scene.image_srcs.insert(id, String::new());
+    }
+    // 控件状态：按 ControlInit 变体映射填 ControlState（Slider 补运行时独有 dragging:false）。
+    // 非 control 节点 control_init=None，不建槽（get 返 None，渲染/交互按无控件处理）。
+    if let Some(init) = control_init {
+        let state = match init {
+            ControlInit::Progress {
+                value,
+                max,
+                indeterminate,
+            } => ControlState::Progress {
+                value,
+                max,
+                indeterminate,
+            },
+            ControlInit::Toggle { checked } => ControlState::Toggle { checked },
+            ControlInit::Radio { checked, name } => ControlState::Radio { checked, name },
+            ControlInit::Slider {
+                value,
+                min,
+                max,
+                step,
+            } => ControlState::Slider {
+                value,
+                min,
+                max,
+                step,
+                dragging: false,
+            },
+        };
+        scene.controls.ensure(id, state);
     }
     id
 }
@@ -424,6 +460,7 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
     // 3. 联动清持久附属 map（HashMap remove + tween kill），防悬空残留。
     scene.anim.clear_node(id);
     scene.scroll.remove(id);
+    scene.controls.remove(id);
     scene.text_contents.remove(&id);
     scene.image_srcs.remove(&id);
     tweens.kill_node(id);
@@ -919,7 +956,7 @@ mod tests {
             &mut style,
             "width:100px;height:100px;overflow:hidden;background-color:#ff0000",
         );
-        let id = create_node_from_template(&mut scene, NodeKind::Container, style.clone());
+        let id = create_node_from_template(&mut scene, NodeKind::Container, style.clone(), None);
         let n = scene.get(id).unwrap();
         assert_eq!(n.id, id, "id 回填");
         assert!(n.parent.is_none());
@@ -935,8 +972,12 @@ mod tests {
     #[test]
     fn create_node_from_template_text_marks_dirty_text() {
         let mut scene = empty_scene();
-        let id =
-            create_node_from_template(&mut scene, NodeKind::TextNode, ResolvedStyle::default());
+        let id = create_node_from_template(
+            &mut scene,
+            NodeKind::TextNode,
+            ResolvedStyle::default(),
+            None,
+        );
         scene.text_contents.insert(id, "hi".into());
         let n = scene.get(id).unwrap();
         assert!(n.dirty_text, "Text 节点 dirty_text=true（同 create_node）");
@@ -946,8 +987,12 @@ mod tests {
     #[test]
     fn create_node_from_template_id_is_live() {
         let mut scene = empty_scene();
-        let id =
-            create_node_from_template(&mut scene, NodeKind::Container, ResolvedStyle::default());
+        let id = create_node_from_template(
+            &mut scene,
+            NodeKind::Container,
+            ResolvedStyle::default(),
+            None,
+        );
         assert!(scene.get(id).is_some(), "返回的 NodeId live");
         assert_ne!(id, NodeId::INVALID);
     }
@@ -1174,6 +1219,7 @@ mod tests {
                 &mut scene,
                 NodeKind::Container,
                 ResolvedStyle::default(),
+                None,
             );
             assert!(
                 id.index() < scene.text_layouts.len(),

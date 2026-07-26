@@ -644,3 +644,120 @@ fn node_inline_override_defaults_empty() {
     // inline_override 全默认 = 与 ResolvedStyle::default() 等价（无字段被显式设值）。
     assert_eq!(n.inline_override, ResolvedStyle::default());
 }
+
+/// Task 3：instantiate 把打包期 `ControlInit` 映射填进运行时 `Scene.controls` side table。
+/// ProgressBar：value/max/indeterminate 原样透传。
+#[test]
+fn instantiate_fills_control_state_progress_from_init() {
+    let mut scene = Scene::default();
+    let id = crate::scene::dynamic::create_node_from_template(
+        &mut scene,
+        NodeKind::ProgressBar,
+        ResolvedStyle::default(),
+        Some(crate::asset::ControlInit::Progress {
+            value: 70.0,
+            max: 100.0,
+            indeterminate: false,
+        }),
+    );
+    let state = scene.controls.get(id).expect("control state filled");
+    assert!(
+        matches!(
+            state,
+            ControlState::Progress {
+                value: 70.0,
+                max: 100.0,
+                indeterminate: false
+            }
+        ),
+        "Progress 字段原样透传"
+    );
+}
+
+/// Toggle：checked 原样透传。
+#[test]
+fn instantiate_fills_control_state_toggle_from_init() {
+    let mut scene = Scene::default();
+    let id = crate::scene::dynamic::create_node_from_template(
+        &mut scene,
+        NodeKind::Toggle,
+        ResolvedStyle::default(),
+        Some(crate::asset::ControlInit::Toggle { checked: true }),
+    );
+    let state = scene.controls.get(id).expect("control state filled");
+    assert!(
+        matches!(state, ControlState::Toggle { checked: true }),
+        "Toggle.checked 透传"
+    );
+}
+
+/// Radio：checked + name 原样透传。
+#[test]
+fn instantiate_fills_control_state_radio_from_init() {
+    let mut scene = Scene::default();
+    let id = crate::scene::dynamic::create_node_from_template(
+        &mut scene,
+        NodeKind::RadioButton,
+        ResolvedStyle::default(),
+        Some(crate::asset::ControlInit::Radio {
+            checked: true,
+            name: "group-a".into(),
+        }),
+    );
+    let state = scene.controls.get(id).expect("control state filled");
+    assert!(
+        matches!(state, ControlState::Radio { checked: true, .. }),
+        "Radio.checked 透传"
+    );
+    if let ControlState::Radio { name, .. } = state {
+        assert_eq!(name, "group-a", "Radio.name 透传");
+    }
+}
+
+/// Slider：value/min/max/step 透传，且 `dragging` 初始为 false（运行时独有，
+/// 不进 pkg，故 `ControlInit` 无此字段——instantiate 必须补默认 false）。
+#[test]
+fn instantiate_fills_control_state_slider_dragging_false() {
+    let mut scene = Scene::default();
+    let id = crate::scene::dynamic::create_node_from_template(
+        &mut scene,
+        NodeKind::Slider,
+        ResolvedStyle::default(),
+        Some(crate::asset::ControlInit::Slider {
+            value: 50.0,
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+        }),
+    );
+    let state = scene.controls.get(id).expect("control state filled");
+    assert!(
+        matches!(
+            state,
+            ControlState::Slider {
+                value: 50.0,
+                min: 0.0,
+                max: 100.0,
+                step: 1.0,
+                dragging: false
+            }
+        ),
+        "Slider 字段透传 + dragging 初始 false（运行时独有，ControlInit 无此字段）"
+    );
+}
+
+/// 非控件节点（control_init=None）不建 controls 槽——get 返 None，渲染/交互按无控件处理。
+#[test]
+fn instantiate_no_control_state_for_non_control_node() {
+    let mut scene = Scene::default();
+    let id = crate::scene::dynamic::create_node_from_template(
+        &mut scene,
+        NodeKind::Container,
+        ResolvedStyle::default(),
+        None,
+    );
+    assert!(
+        scene.controls.get(id).is_none(),
+        "非控件节点不应有 controls 槽"
+    );
+}
