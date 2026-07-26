@@ -78,6 +78,49 @@ pub fn is_pure_translation(m: &Affine2) -> bool {
     (m[0] - 1.0).abs() < EPS && m[1].abs() < EPS && m[2].abs() < EPS && (m[3] - 1.0).abs() < EPS
 }
 
+/// 用户态 Transform（public-api Transform API 的 core 端存储）。
+///
+/// 解耦的 translate/scale/rotation（TRS）三元组——供游戏业务程序员在用户空间
+/// 设定位移/缩放/旋转，由 `compute_world_transforms` 在世界矩阵累计时并入，
+/// **不触发 layout solve**（与 CSS transform 同层：渲染/命中层，不进布局）。
+///
+/// 与 `Affine2`（列主序 6 元）的区别：`NodeTransform` 是结构化、可逐字段写的
+/// 用户表面（对齐 C# 投影层 `NodeTransform.Position/Scale/Rotation`），`Affine2`
+/// 是内部紧凑矩阵。pivot 不在此处——`compute_world_transforms` 用 box center 统一处理。
+///
+/// `Default` = identity（scale=[1,1]，非 derive 的 [0,0]——零缩放会坍缩一切）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NodeTransform {
+    /// 局部位移（local 坐标系，px）。
+    pub translate: [f32; 2],
+    /// 局部缩放。default = [1.0, 1.0]（不缩放）。
+    pub scale: [f32; 2],
+    /// 局部旋转（弧度，绕节点 box center——由 compute_world_transforms 的 pivot 环绕实现）。
+    pub rotation: f32,
+}
+
+impl Default for NodeTransform {
+    /// identity：scale=[1,1]、translate=[0,0]、rotation=0。注意不用 derive（scale 会变 [0,0]）。
+    fn default() -> Self {
+        NodeTransform {
+            translate: [0.0, 0.0],
+            scale: [1.0, 1.0],
+            rotation: 0.0,
+        }
+    }
+}
+
+impl NodeTransform {
+    /// 合成 Affine2：T(translate) ∘ R(rotation) ∘ S(scale)（标准 TRS，点先缩放、再旋转、再平移）。
+    /// pivot 由调用方（compute_world_transforms）环绕，此处只产出无 pivot 的局部矩阵。
+    pub fn to_matrix(self) -> Affine2 {
+        let t = from_translate(self.translate[0], self.translate[1]);
+        let r = from_rotate(self.rotation);
+        let s = from_scale(self.scale[0], self.scale[1]);
+        mul(&t, &mul(&r, &s))
+    }
+}
+
 /// 给 Affine2 配套的扩展 trait，让调用处写 `m.mul(...)` / `m.apply_point(...)` 更顺。
 pub trait Affine2Ext {
     fn mul(self, other: Affine2) -> Affine2;
@@ -188,5 +231,42 @@ mod tests {
             "奇异矩阵逆须有限（降级 IDENTITY），got {inv:?}"
         );
         assert_eq!(inv, IDENTITY, "奇异矩阵逆降级为 IDENTITY");
+    }
+
+    #[test]
+    fn node_transform_default_is_identity() {
+        // Default 须是 identity：scale=[1,1]（非 derive 的 [0,0]——零缩放坍缩一切）。
+        let t = super::NodeTransform::default();
+        assert_eq!(
+            t.to_matrix(),
+            IDENTITY,
+            "default NodeTransform == identity matrix"
+        );
+        assert_eq!(t.scale, [1.0, 1.0]);
+    }
+
+    #[test]
+    fn node_transform_translate_to_matrix() {
+        let t = super::NodeTransform {
+            translate: [50.0, 0.0],
+            ..Default::default()
+        };
+        assert!(t.to_matrix().is_pure_translation());
+        let (x, y) = t.to_matrix().apply_point(0.0, 0.0);
+        assert!((x - 50.0).abs() < 1e-5 && y.abs() < 1e-5);
+    }
+
+    #[test]
+    fn node_transform_trs_compose() {
+        // TRS: 先 scale(2,1) → 再 rotate(45°) → 再 translate(10,0)。
+        // point (1,0): S → (2,0); R(45) → (2·√2/2, 2·√2/2) = (√2, √2); T(10,0) → (10+√2, √2)
+        let t = super::NodeTransform {
+            translate: [10.0, 0.0],
+            scale: [2.0, 1.0],
+            rotation: std::f32::consts::FRAC_PI_4,
+        };
+        let (x, y) = t.to_matrix().apply_point(1.0, 0.0);
+        let r2 = std::f32::consts::FRAC_1_SQRT_2 * 2.0; // 2·√2/2 = √2
+        assert!((x - (10.0 + r2)).abs() < 1e-5 && (y - r2).abs() < 1e-5);
     }
 }

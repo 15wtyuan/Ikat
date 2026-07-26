@@ -239,6 +239,11 @@ pub struct Node {
     /// inline_override 里哪些字段被设了（继承属性复用 INH_* bit，非继承用 INLINE_*）。
     /// 默认 0 = 无任何 inline override。rematch 据此把 inline_override 字段拷进 style。
     pub inline_set: InlineSet,
+    /// 用户态 Transform（public-api Transform API 的 core 端存储）。解耦的 TRS 三元组，
+    /// `compute_world_transforms` 在世界矩阵累计时并入，**不触发 layout solve**（与 CSS
+    /// transform 同层：渲染/命中层）。default = identity。供高频拖拽（slider thumb）等
+    /// 运行时定位用。纯运行时 transient，不进 pkg.bin。
+    pub user_transform: crate::transform::NodeTransform,
 }
 
 impl Default for Node {
@@ -269,6 +274,7 @@ impl Default for Node {
             reuse_key: 0,
             inline_override: ResolvedStyle::default(),
             inline_set: InlineSet(0),
+            user_transform: crate::transform::NodeTransform::default(),
         }
     }
 }
@@ -494,6 +500,7 @@ impl Scene {
                 reuse_key: 0,
                 inline_override: ResolvedStyle::default(),
                 inline_set: InlineSet(0),
+                user_transform: crate::transform::NodeTransform::default(),
             };
             let key = scene.nodes.insert(node);
             let id = NodeId::from_key(key);

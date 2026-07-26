@@ -129,6 +129,7 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         reuse_key: 0,
         inline_override: ResolvedStyle::default(),
         inline_set: InlineSet(0),
+        user_transform: crate::transform::NodeTransform::default(),
     };
     let key = scene.nodes.insert(node);
     resize_parallel_arrays(scene);
@@ -200,6 +201,7 @@ pub fn create_node_from_template(
         reuse_key: 0,
         inline_override: ResolvedStyle::default(),
         inline_set: InlineSet(0),
+        user_transform: crate::transform::NodeTransform::default(),
     };
     let key = scene.nodes.insert(node);
     resize_parallel_arrays(scene);
@@ -374,6 +376,22 @@ pub fn unset_inline_override(scene: &mut Scene, node: NodeId, prop: &str) -> Res
     if let Some(bit) = inline_bit(prop) {
         n.inline_set.0 &= !bit;
     }
+    n.dirty_mesh = true;
+    Ok(())
+}
+
+/// 写节点用户态 Transform（public-api Transform API 的 core 端落点）。
+///
+/// 写 `node.user_transform`，不触发 layout solve——`compute_world_transforms` 在世界矩阵
+/// 累计时并入（同 CSS transform：渲染/命中层）。供高频拖拽（slider thumb）等运行时定位用：
+/// 每帧写一次、下帧 compute 读取，避开 solve 开销。node 不 live → Err。
+pub fn set_user_transform(
+    scene: &mut Scene,
+    node: NodeId,
+    t: crate::transform::NodeTransform,
+) -> Result<(), String> {
+    let n = scene.get_mut(node).ok_or("node not live")?;
+    n.user_transform = t;
     n.dirty_mesh = true;
     Ok(())
 }

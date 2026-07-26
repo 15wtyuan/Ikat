@@ -32,10 +32,13 @@ fn rec(scene: &Scene, anim: &AnimTable, id: NodeId, parent_world: Affine2, world
         None => (lr.x, lr.y),
     };
     // transform 矩阵源 = anim.transform override（replace-override）unwrap css matrix。
-    let m = anim
+    // 再并入用户态 user_transform（public-api Transform API 的 core 端存储，TRS 三元组）。
+    // user_transform 在节点局部空间叠加于 css/anim 矩阵之上——不触发 solve，仅此帧 compute 生效。
+    let base_m = anim
         .get(id)
         .and_then(|a| a.transform)
         .unwrap_or(node.style.transform.matrix);
+    let m = transform::mul(&base_m, &node.user_transform.to_matrix());
     // local = T(rel) ∘ T(pivot) ∘ m ∘ T(-pivot)（free fn by ref，更显式）
     let local = transform::mul(
         &transform::from_translate(rel.0, rel.1),
@@ -67,9 +70,10 @@ fn rec(scene: &Scene, anim: &AnimTable, id: NodeId, parent_world: Affine2, world
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scene::dynamic::set_user_transform;
     use crate::scene::node::{Node, Rect, Scene};
     use crate::style::resolved::{LocalTransform, OverflowMode};
-    use crate::transform::Affine2Ext;
+    use crate::transform::{Affine2Ext, NodeTransform};
 
     fn node(id: usize, parent: Option<usize>, rect: Rect) -> Node {
         let mut n = Node::default();
@@ -439,6 +443,100 @@ mod tests {
         assert!(
             (x - 0.0).abs() < 1e-3 && (y - (-30.0)).abs() < 1e-3,
             "嵌套累积：A(-10) + B(-20) = -30"
+        );
+    }
+
+    // --- user_transform（public-api Transform API 的 core 端）---
+    // set_user_transform 写 node.user_transform；compute_world_transforms 在世界矩阵累计时并入，
+    // **不触发 solve**。供高频拖拽（slider thumb）等运行时定位用。
+
+    #[test]
+    fn user_transform_offsets_world_without_solve() {
+        // rect (0,0,100,100)；user translate [50,0] → world.apply(0,0) x≈50（未调 solve）
+        let mut s = scene_with(vec![node(
+            0,
+            None,
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
+        )]);
+        let rid = root_id(&s);
+        set_user_transform(
+            &mut s,
+            rid,
+            NodeTransform {
+                translate: [50.0, 0.0],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        compute_world_transforms(&mut s);
+        let (x, _y) = s.world_transforms[rid.index()].apply_point(0.0, 0.0);
+        assert!(
+            (x - 50.0).abs() < 0.1,
+            "user_transform 偏移生效：x≈50，got {x}"
+        );
+    }
+
+    #[test]
+    fn identity_user_transform_is_no_op_zero_regression() {
+        // identity user_transform（default）→ world 与未设等价（零回归）
+        let nodes = vec![node(
+            0,
+            None,
+            Rect {
+                x: 5.0,
+                y: 7.0,
+                w: 100.0,
+                h: 100.0,
+            },
+        )];
+        let mut a = scene_with(nodes.clone());
+        let mut b = scene_with(nodes);
+        let a_rid = root_id(&a);
+        set_user_transform(&mut a, a_rid, NodeTransform::default()).unwrap();
+        compute_world_transforms(&mut a);
+        compute_world_transforms(&mut b);
+        assert_eq!(
+            a.world_transforms, b.world_transforms,
+            "identity user_transform no-op：与未设等价"
+        );
+    }
+
+    #[test]
+    fn user_transform_composes_with_css_matrix() {
+        // CSS translate(10,0) + user translate(50,0) → world x≈60（user 叠加于 css 之上）
+        let mut s = scene_with(vec![node(
+            0,
+            None,
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
+        )]);
+        let rid = root_id(&s);
+        s.get_mut(rid).unwrap().style.transform = LocalTransform {
+            matrix: transform::from_translate(10.0, 0.0),
+        };
+        set_user_transform(
+            &mut s,
+            rid,
+            NodeTransform {
+                translate: [50.0, 0.0],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        compute_world_transforms(&mut s);
+        let (x, _y) = s.world_transforms[rid.index()].apply_point(0.0, 0.0);
+        assert!(
+            (x - 60.0).abs() < 0.1,
+            "css(10)+user(50) 叠加：x≈60，got {x}"
         );
     }
 }
