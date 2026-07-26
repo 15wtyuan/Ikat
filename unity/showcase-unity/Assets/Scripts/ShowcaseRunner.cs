@@ -7,7 +7,7 @@ using LoomGUI;
 ///   - 首页 home：点 7 张 nav-card（nav-settings / nav-mail / ...）跳对应页
 ///   - 各页：点顶栏 / 侧栏的「← 首页」(button#back-home) 回 home
 /// 这些导航元素的 id 已在 showcase HTML 里就位（home.html 的 nav-card、各页的
-/// back-home），runner 只用 Button.Clicked / Link.Activated 订阅，不画任何 Unity GUI。
+/// back-home），runner 只用 Button.Clicked 订阅，不画任何 Unity GUI。
 /// 订阅随切页 Dispose 自动清理（public-api §5.4），切页即换树即换订阅。
 ///
 /// 验收 7-20/7-21 改动时各页看什么：
@@ -70,7 +70,8 @@ public class ShowcaseRunner : MonoBehaviour
         Debug.Log($"[Showcase] Instantiate showcase/{page} = OK");
     }
 
-    /// 用框架事件系统接导航：nav-card 是 `<a>`（Link.Activated），back-home 是 `<button>`（Button.Clicked）。
+    /// 用框架事件系统接导航：nav-card 与 back-home 都是 `<button>`（Button.Clicked）。
+    /// （nav-card 原为 `<a>`/Link.Activated，围栏紧缩 a→button 后统一走 Button.Clicked。）
     /// TryGet 找不到（本页没该元素）就跳过——home 页无 back-home，其他页无 nav-card，各取所需。
     /// 闭包捕获的 page/target 是 per-iteration 局部，每次 Show 重新订阅当前页实例。
     void WireNav(Container page, string pageName)
@@ -82,8 +83,8 @@ public class ShowcaseRunner : MonoBehaviour
             foreach (var (cardId, target) in NAV_CARDS)
             {
                 string p = target;   // 防御性局部拷贝，确保每个闭包绑各自的页名
-                if (page.TryGet<Link>(cardId, out var card))
-                    card.Activated += () => Show(p);
+                if (page.TryGet<Button>(cardId, out var card))
+                    card.Clicked += () => Show(p);
             }
         }
     }
