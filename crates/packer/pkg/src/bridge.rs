@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn input_dispatch_to_concrete_kinds() {
         let nodes = bridged(
-            r#"<div><input type="range" style="display:block"><input type="checkbox" style="display:block"></div>"#,
+            r#"<style>input[type="range"],input[type="checkbox"]{width:100px}</style><div><input type="range" style="display:block"><input type="checkbox" style="display:block"></div>"#,
         );
         let kinds: Vec<_> = nodes.iter().map(|n| n.kind).collect();
         assert!(

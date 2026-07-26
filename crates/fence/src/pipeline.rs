@@ -78,6 +78,16 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
     // 只提醒作者补全声明。必须在 Stage 4（styles 已 cascade）之后。
     diagnostics.extend(check_consistency(&tree, &styles, file, &line_map));
 
+    // Stage 6.7: 控件必须被 CSS 命中。LoomGUI 控件不带 UA 默认样式——写了控件标签却
+    // 无匹配 CSS 规则 = 运行时空白（浏览器预览却看着正常，因为浏览器套自己的 UA 表）。
+    // 必须在 Annotate 之后（需 IrElement.semantic）+ Stage 4.5 之后（需 dynamic_rules）。
+    diagnostics.extend(crate::control_css_check::check_control_css(
+        &tree,
+        &dynamic_rules,
+        file,
+        &line_map,
+    ));
+
     // Extract referenced sprites (img src, background-image url)
     let referenced_sprites = extract_sprites(&tree);
 
@@ -158,7 +168,12 @@ mod tests {
 
     #[test]
     fn pipeline_input_semantic() {
-        let result = parse_template(r#"<input type="range">"#, "form.html");
+        // range 控件需 CSS 命中（控件不带 UA 默认样式），否则触发 FenceControlWithoutCss。
+        // 本测试聚焦 semantic 标注，故加规则满足前置条件。
+        let result = parse_template(
+            r#"<style>input[type="range"]{width:100px}</style><input type="range">"#,
+            "form.html",
+        );
         assert!(result.diagnostics.is_empty());
         let el = result.tree.element(result.tree.roots[0]).unwrap();
         assert_eq!(el.semantic, Some(SemanticKind::Slider));

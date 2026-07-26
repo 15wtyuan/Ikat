@@ -10,8 +10,15 @@ use loomgui_pkg::bridge::bridge;
 
 /// fence parse → bridge → 首节点。单根契约下 [0] 即根元素。
 /// 断言 diagnostics 为空（parse 干净），否则 bridge 行为无意义。
+///
+/// 注入一条匹配所有控件的 `<style>` 规则，满足围栏 control-css 契约
+/// （控件不带 UA 默认样式，须被 CSS 命中）。本测试文件聚焦 bridge 提取，
+/// 非围栏校验本身。
 fn run_bridge(html: &str) -> Vec<TemplateNode> {
-    let parsed = loomgui_fence::parse_template(html, "test.html");
+    let wrapped = format!(
+        r#"<style>progress,input[type="range"],input[type="checkbox"],input[type="radio"]{{background:#ddd}}</style>{html}"#
+    );
+    let parsed = loomgui_fence::parse_template(&wrapped, "test.html");
     assert!(
         parsed.diagnostics.is_empty(),
         "parse diags (bridge 行为无意义): {:?}",

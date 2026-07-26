@@ -330,6 +330,16 @@ CSS 在围栏中以三个正交维度建模：
 
 **parent display 判定**：stage 4 css_resolve 只烘 inline style + tag 默认 display；`<style>` class 规则的 display 在 dynamic_rules（运行时 rematch）。检查合并两个来源判定 parent 是 block 还是 flex：class 匹配用单 compound 选择器（`.tab`/`button.tab`/`.btn.primary`）；多 compound（后代/子代）声明 flex 时保守放行（避免假阳性）。
 
+### 阶段 6.7：控件 CSS 命中校验
+
+**根因**：LoomGUI 控件（`<progress>` / `<input type="range|checkbox|radio">`）**不带 UA 默认样式**——core 刻意保持纯净，不开「框架自带样式源」先例。写了控件标签却没匹配的 CSS 规则 = 运行时渲染空白。浏览器会套自己的 UA 样式表，预览看着正常，打包进 LoomGUI 却空——作者无法从预览察觉。本检查在打包期拦下，明确告诉作者差异。
+
+**规则**：受校验控件（ProgressBar / Slider / Toggle / RadioButton 四种 SemanticKind）若**无任何 `<style>` 规则的选择器命中它本身** → `FenceControlWithoutCss` error，打包失败。tag / class / id / 后代选择器落地在该节点都算命中；伪类（`:hover` 等）不门控（带状态规则同样表明作者在样式控件）。**只有完全无命中才报错**。
+
+**选择器匹配**：复用 stage 4.5 解析出的 `dynamic_rules`，按 tag/class/id/attr 字面对照 IrElement 判定（fence-local，不依赖运行时 Node）。后代选择器沿祖先链逐层尝试（fence 子集只有后代组合空格，拒 `>` `+` `~`）。
+
+**教学文案**：指出控件无内置默认样式 + 引导作者为控件本身（轨道/框）和框架运行时注入的 `.loom-*` 内部子节点（ProgressBar/Slider 的 `.loom-fill`/`.loom-track`/`.loom-thumb`，Toggle/RadioButton 的 `.loom-check`）提供 CSS。
+
 ### 流水线特性
 
 - **Collect-all**：所有阶段的 diagnostic 汇总到一个 `Vec<Diagnostic>` 输出，不 fail-fast。
@@ -358,6 +368,7 @@ CSS 在围栏中以三个正交维度建模：
 | `FenceInlineElementInBlockContext` | inline 布局 box（button/a/label/input/img/...）裸放在 block 容器里（非 flex、非 `<p>`）；LoomGUI 无 `<p>`/flex 之外的 inline flow，撑满竖排会和浏览器不一致 |
 | `FenceBorderWithoutStyle` | **warning**：`border-width` 已声明但 `border-style` 缺省（CSS initial=none，浏览器不画边框，LoomGUI 会画）；预览 ≠ 运行时 |
 | `FenceBgImageWithoutSize` | **warning**：`background-image` 已声明但 `background-size` 缺省（CSS 默认 auto=原始尺寸，LoomGUI 默认 stretch=拉伸填满）；预览 ≠ 运行时 |
+| `FenceControlWithoutCss` | 控件（`<progress>` / `<input type="range\|checkbox\|radio">`）无任何 `<style>` 规则命中。控件不带 UA 默认样式，无 CSS = 运行时空白；须为控件及 `.loom-*` 子节点提供 CSS |
 
 ---
 

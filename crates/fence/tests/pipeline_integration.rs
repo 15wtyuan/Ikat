@@ -5,7 +5,7 @@ use loomgui_fence::schema::tag::SemanticKind;
 
 #[test]
 fn complex_template_parses_clean() {
-    let html = r#"<div id="root" class="panel">
+    let html = r#"<style>input[type="range"]{width:100%}</style><div id="root" class="panel">
         <div><my-title>Title</my-title>
             <button class="close" style="display:block">X</button>
         </div>
