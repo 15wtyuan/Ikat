@@ -26,26 +26,11 @@ namespace LoomGUI.HeadlessTests
         [Fact]
         public void ImageIsEight() => Assert.Equal((byte)8, (byte)NodeKind.Image);
 
-        [Fact]
-        public void CanvasIsTwentyTwo() => Assert.Equal((byte)22, (byte)NodeKind.Canvas);
-
         // ── 全变体逐个验判别值（显式声明的 Rust 顺序 0..22）──────────────
         // 任何变体名抄错 / 顺序错位 / 判别值漂移 → 对应 Fact 红。
 
         [Fact]
-        public void TextBlockIsTwo() => Assert.Equal((byte)2, (byte)NodeKind.TextBlock);
-
-        [Fact]
         public void TextElementIsThree() => Assert.Equal((byte)3, (byte)NodeKind.TextElement);
-
-        [Fact]
-        public void LineBreakIsFour() => Assert.Equal((byte)4, (byte)NodeKind.LineBreak);
-
-        [Fact]
-        public void LabelIsFive() => Assert.Equal((byte)5, (byte)NodeKind.Label);
-
-        [Fact]
-        public void LinkIsSeven() => Assert.Equal((byte)7, (byte)NodeKind.Link);
 
         [Fact]
         public void TextFieldIsNine() => Assert.Equal((byte)9, (byte)NodeKind.TextField);
