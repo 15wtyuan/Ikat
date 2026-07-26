@@ -2,6 +2,7 @@
 //!
 //! 见 `node` 模块（Node 树数据结构 + Scene::build 建树入口）。
 
+pub mod control;
 pub mod dynamic;
 pub mod node;
 pub mod transform;

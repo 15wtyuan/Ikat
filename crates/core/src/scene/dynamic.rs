@@ -239,6 +239,9 @@ pub fn create_node_from_template(
             },
         };
         scene.controls.ensure(id, state);
+        // 控件即容器：instantiate 后注入框架内部视觉子节点（.loom-fill/.loom-track/...）。
+        // 紧跟 side table 填充之后——控件状态先就位，再挂视觉结构。非控件节点不走此分支。
+        crate::scene::control::inject_control_children(scene, id, kind);
     }
     id
 }
@@ -995,6 +998,55 @@ mod tests {
         );
         assert!(scene.get(id).is_some(), "返回的 NodeId live");
         assert_ne!(id, NodeId::INVALID);
+    }
+
+    #[test]
+    fn create_node_from_template_control_init_injects_children() {
+        // 传 control_init 的控件节点：side table 填充 + 视觉子节点注入都要发生。
+        // 验 Task-4 接线：create_node_from_template 内部调 inject_control_children。
+        let mut scene = empty_scene();
+        let id = create_node_from_template(
+            &mut scene,
+            NodeKind::ProgressBar,
+            ResolvedStyle::default(),
+            Some(ControlInit::Progress {
+                value: 0.5,
+                max: 1.0,
+                indeterminate: false,
+            }),
+        );
+        // side table 填了
+        assert!(
+            scene.controls.get(id).is_some(),
+            "control side table filled"
+        );
+        // 视觉子节点注入了（ProgressBar → 1 个 loom-fill 子）
+        let children = scene.get(id).unwrap().children.clone();
+        assert_eq!(children.len(), 1, "ProgressBar injects fill child");
+        assert!(scene
+            .get(children[0])
+            .unwrap()
+            .classes
+            .iter()
+            .any(|c| c == "loom-fill"));
+    }
+
+    #[test]
+    fn create_node_from_template_no_control_init_injects_nothing() {
+        // control_init=None 的节点（即使是控件 kind）不注入子节点。
+        // inject 只在 control_init.is_some() 分支触发。
+        let mut scene = empty_scene();
+        let id = create_node_from_template(
+            &mut scene,
+            NodeKind::ProgressBar,
+            ResolvedStyle::default(),
+            None,
+        );
+        assert!(scene.controls.get(id).is_none());
+        assert!(
+            scene.get(id).unwrap().children.is_empty(),
+            "no control_init → no injected children"
+        );
     }
 
     #[test]
