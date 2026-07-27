@@ -37,13 +37,21 @@ pub fn line_byte_ranges(layout: &TextLayout, value: &str) -> Vec<(usize, usize)>
 /// 返回 `(pixel_x, line_index)`。`pixel_x` 是笔位累计 advance 后对应字节偏移的 x。
 /// offset = 0 → x = 0（行首）。
 /// offset = 行末 → x = 该行总 advance 之和。
+///
+/// ## Preconditions
+///
+/// `layout.lines` must be non-empty (as produced by `measure_text` on non-empty content).
+/// If empty, returns `(0.0, 0)` defensively.
 pub fn cursor_pixel_x(
     layout: &TextLayout,
     ranges: &[(usize, usize)],
     offset: usize,
 ) -> (f32, usize) {
+    if layout.lines.is_empty() {
+        return (0.0, 0);
+    }
     for (li, &(start, end)) in ranges.iter().enumerate() {
-        if offset <= end || li == ranges.len() - 1 {
+        if offset < end || li == ranges.len() - 1 {
             let line = &layout.lines[li];
             let mut x = 0.0;
             let mut cur = start;
@@ -69,7 +77,15 @@ pub fn cursor_pixel_x(
 /// y 决定行（越下取末行），x 决定字形（取中点最近，中点左=前一字，中点右=后一字）。
 /// x 在最后一个字形中点右 → offset = 末字符后（即字符串长度 byte）。
 /// x 在第一个字形中点左 → offset = 0。
+///
+/// ## Preconditions
+///
+/// `layout.lines` must be non-empty (as produced by `measure_text` on non-empty content).
+/// If empty, returns `0` defensively.
 pub fn hit_byte_offset(layout: &TextLayout, ranges: &[(usize, usize)], x: f32, y: f32) -> usize {
+    if layout.lines.is_empty() {
+        return 0;
+    }
     let mut li = 0;
     for (i, line) in layout.lines.iter().enumerate() {
         if y >= line.y {
