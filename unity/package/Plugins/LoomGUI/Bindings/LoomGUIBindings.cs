@@ -183,6 +183,20 @@ namespace LoomGUI.Bindings
         internal static extern void loomgui_stage_set_key_input(StageHandle* h, KeyEvent* keys, nuint len);
 
         /// <summary>
+        ///  注入本帧字符输入（UTF-32 codepoints 数组，已 shift-mapped 的可打印字符）。tick 前调。
+        ///
+        ///  与 `set_key_input` 互补：keydown 通道走物理键（KeyEvent），textinput 通道走已映射好的
+        ///  可打印 codepoint。tick 把 codepoints 插进聚焦的 TextField/TextArea；无焦点 / 非文本控件 /
+        ///  readonly 时静默丢弃（无副作用）。null/len=0 = 清空本帧 pending（no-op）。
+        ///
+        ///  **返回码：** 0=ok，-1=null 句柄。len&gt;0 但 codepoints=null 视作空（防 from_raw_parts(null) UB）。
+        ///
+        ///  **常驻（不 gate）：**输入是 runtime 稳定入口。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_text_input", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_text_input(StageHandle* h, uint* codepoints, nuint len);
+
+        /// <summary>
         ///  注入本帧滚轮事件（扁平 WheelEvent 数组）。tick 前调；**累积式**（多次调合并）。
         ///  null/len=0 = 本帧无滚轮（直接 return，不清空——与 set_key_input 不同；累积语义）。
         ///

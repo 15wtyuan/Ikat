@@ -8,7 +8,7 @@ use crate::input::{EventRecord, PointerEvent, PointerState};
 use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
-use crate::scene::node::{NodeFlags, NodeId, Rect, Scene};
+use crate::scene::node::{ControlState, NodeFlags, NodeId, NodeKind, Rect, Scene};
 use crate::style::dynamic::{rematch_pseudo_classes, ScopedRule};
 use crate::style::resolved::OverflowMode;
 use crate::text::layout::FontTable;
@@ -38,6 +38,10 @@ pub struct Stage {
     pub last_events: Vec<EventRecord>,
     /// set_key_input 缓存的本帧键盘输入；tick 消费后 clear。
     pub pending_keys: Vec<crate::input::KeyEvent>,
+    /// set_text_input 缓存的本帧字符输入（UTF-32 codepoints，已 shift-mapped）。
+    /// tick 消费（插进聚焦 TextField/TextArea）后 clear。与 pending_keys 互补：
+    /// keydown 通道走物理键（KeyEvent），textinput 通道走可打印字符（已映射好的 codepoint）。
+    pub pending_text_input: Vec<u32>,
     /// set_wheel_input 缓存的本帧滚轮输入；tick 消费（apply_wheel_to_hit）后 clear。
     /// 累积式（extend，非 clear-then-set）——多组滚轮合并到一帧。
     pub pending_wheel: Vec<crate::scroll::WheelEvent>,
@@ -69,6 +73,7 @@ impl Stage {
             pending_input: Vec::new(),
             last_events: Vec::new(),
             pending_keys: Vec::new(),
+            pending_text_input: Vec::new(),
             pending_wheel: Vec::new(),
             pending_focus_request: None,
             tweens: crate::tween::TweenManager::new(),
@@ -187,6 +192,14 @@ impl Stage {
     pub fn set_key_input(&mut self, keys: &[crate::input::KeyEvent]) {
         self.pending_keys.clear();
         self.pending_keys.extend_from_slice(keys);
+    }
+
+    /// 缓存本帧字符输入（tick 前调；覆盖式）。codepoints 为已 shift-mapped 的 UTF-32。
+    /// 后端把按键事件映射成可打印字符后由此注入；tick 在处理 keydown 后把 codepoints
+    /// 插进聚焦的 TextField/TextArea。非聚焦/非文本控件 → 字符静默丢弃（无副作用）。
+    pub fn set_text_input(&mut self, codepoints: &[u32]) {
+        self.pending_text_input.clear();
+        self.pending_text_input.extend_from_slice(codepoints);
     }
 
     /// 缓存本帧滚轮输入（tick 前调；**累积式** extend——多组滚轮合并）。
@@ -682,6 +695,28 @@ impl Stage {
         // 3. 键盘事件（keydown/up + Tab 导航 + FocusIn/Out）
         let keys = std::mem::take(&mut self.pending_keys);
         crate::input::process_keys(scene, &keys, &mut out);
+        // 3.5 字符输入通道（UTF-32 codepoints，已 shift-mapped）。与 keydown 互补：
+        //     keydown 走物理键，textinput 走可打印字符。仅作用于聚焦的 TextField/TextArea；
+        //     readonly 控件 insert_text 自身返 false（不改值）。非法 codepoint（代理项/越界）
+        //     被 char::from_u32 滤掉。
+        let cps = std::mem::take(&mut self.pending_text_input);
+        if !cps.is_empty() {
+            if let Some(fid) = scene.focused_node {
+                // kind 须在 controls.get_mut 之前读——避免与 mutable 借冲突（同 on_text_pointer_down 克隆模式）。
+                let kind = scene
+                    .get(fid)
+                    .map(|n| n.kind)
+                    .unwrap_or(NodeKind::TextField);
+                if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
+                    scene.controls.get_mut(fid)
+                {
+                    let s: String = cps.iter().filter_map(|&cp| char::from_u32(cp)).collect();
+                    if crate::scene::control::insert_text(e, kind, &s) {
+                        // Task 11 owns EVT_VALUE_CHANGED emission — wire here once that lands.
+                    }
+                }
+            }
+        }
         self.last_events = out;
         // 4. 伪类重匹配（提到 solve 前：改 taffy_style/transform/colors，本帧全部消费）
         rematch_pseudo_classes(scene);

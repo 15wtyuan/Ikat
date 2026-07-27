@@ -438,6 +438,34 @@ pub extern "C" fn loomgui_stage_set_key_input(
     sh.stage.set_key_input(ks);
 }
 
+/// 注入本帧字符输入（UTF-32 codepoints 数组，已 shift-mapped 的可打印字符）。tick 前调。
+///
+/// 与 `set_key_input` 互补：keydown 通道走物理键（KeyEvent），textinput 通道走已映射好的
+/// 可打印 codepoint。tick 把 codepoints 插进聚焦的 TextField/TextArea；无焦点 / 非文本控件 /
+/// readonly 时静默丢弃（无副作用）。null/len=0 = 清空本帧 pending（no-op）。
+///
+/// **返回码：** 0=ok，-1=null 句柄。len>0 但 codepoints=null 视作空（防 from_raw_parts(null) UB）。
+///
+/// **常驻（不 gate）：**输入是 runtime 稳定入口。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_text_input(
+    h: *mut StageHandle,
+    codepoints: *const u32,
+    len: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    if codepoints.is_null() || len == 0 {
+        sh.stage.set_text_input(&[]);
+        return 0;
+    }
+    let cps = unsafe { std::slice::from_raw_parts(codepoints, len) };
+    sh.stage.set_text_input(cps);
+    0
+}
+
 /// 注入本帧滚轮事件（扁平 WheelEvent 数组）。tick 前调；**累积式**（多次调合并）。
 /// null/len=0 = 本帧无滚轮（直接 return，不清空——与 set_key_input 不同；累积语义）。
 ///

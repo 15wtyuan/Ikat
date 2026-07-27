@@ -1,6 +1,6 @@
 use super::*;
 use crate::test_helpers::stage_new_with_dejavu;
-use loomgui_core::scene::node::{ControlState, NodeKind};
+use loomgui_core::scene::node::{ControlState, EditState, NodeKind};
 use loomgui_core::style::resolved::DisplayMode;
 use std::ffi::CStr;
 
@@ -409,4 +409,75 @@ fn ffi_set_control_value_slider_quantize_respects_max() {
         "quantized value must not go below min 0, got {out}"
     );
     loomgui_stage_free(h);
+}
+
+// ===== text input channel (set_text_input -> focused TextField) =====
+
+/// 测试辅助：建根 div + 一个聚焦的 TextField（初始 value），返回 (handle, textfield_node)。
+/// FFI 表面无 control_init setter（打包期产物），故测试侧手工注入 ControlState + 设焦点。
+/// 光标初始在 value 末尾（from_init 默认），便于在末尾追加的断言。
+fn make_stage_with_focused_textfield(value: &str) -> (*mut StageHandle, u32) {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    // create_node 走 kind_from_tag 白名单（不含 input），改用 create_node_from_template 的
+    // FFI 等价：先建个 div 再手工把 kind 改成 TextField 不现实——这里直接复用 create_node
+    // 建 div 占位，再注入 TextField ControlState（kind 字段保留 div 不影响 insert_text：
+    // insert_text 收 NodeKind 入参，测试侧显式传 TextField）。
+    let tf = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(tf, 0xFFFF_FFFF, "create textfield node ok");
+    loomgui_stage_append_child(h, root, tf);
+    let sh = unsafe { &mut *h };
+    let scene = sh.stage.scene.as_mut().expect("scene built");
+    scene.controls.ensure(
+        NodeId(tf),
+        ControlState::TextField(EditState::from_init(value.into(), String::new(), 0, false)),
+    );
+    scene.focused_node = Some(NodeId(tf));
+    (h, tf)
+}
+
+/// 读 TextField value（断言为 TextField，否则 panic）。
+fn textfield_value(h: *mut StageHandle, node: u32) -> String {
+    let sh = unsafe { &*h };
+    let scene = sh.stage.scene.as_ref().expect("scene built");
+    match scene.controls.get(NodeId(node)) {
+        Some(ControlState::TextField(e)) => e.value.clone(),
+        _ => panic!("node {node} is not a TextField"),
+    }
+}
+
+/// set_text_input 推 UTF-32 codepoints → tick → 插入聚焦 TextField 末尾。
+/// 初始 value "ab" + codepoints ['b','c'] → "ab" + "bc" = "abbc"。
+#[test]
+fn ffi_text_input_inserts_into_focused_textfield() {
+    let (h, tf) = make_stage_with_focused_textfield("ab");
+    let cps = [b'b' as u32, b'c' as u32];
+    assert_eq!(
+        loomgui_stage_set_text_input(h, cps.as_ptr(), 2),
+        0,
+        "set_text_input rc"
+    );
+    loomgui_stage_tick(h, 0.0);
+    assert_eq!(textfield_value(h, tf), "abbc");
+    loomgui_stage_free(h);
+}
+
+/// null/len=0 → 清空 pending（no-op），不 UB。返 0。
+#[test]
+fn ffi_set_text_input_null_is_noop() {
+    let (h, tf) = make_stage_with_focused_textfield("ab");
+    let rc = loomgui_stage_set_text_input(h, std::ptr::null(), 0);
+    assert_eq!(rc, 0, "null/len=0 must return 0 (no-op)");
+    loomgui_stage_tick(h, 0.0);
+    // 无字符插入，value 不变
+    assert_eq!(textfield_value(h, tf), "ab");
+    loomgui_stage_free(h);
+}
+
+/// null 句柄 → -1（不 panic）。
+#[test]
+fn ffi_set_text_input_null_handle_err() {
+    let rc = loomgui_stage_set_text_input(std::ptr::null_mut(), std::ptr::null(), 0);
+    assert_eq!(rc, -1, "null handle must return -1");
 }
