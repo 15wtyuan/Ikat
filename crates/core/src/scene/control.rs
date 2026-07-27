@@ -9,6 +9,7 @@
 use crate::input::{EventRecord, EVT_CHANGE_COMMITTED, EVT_CHECKED_CHANGED, EVT_VALUE_CHANGED};
 use crate::scene::dynamic::{append_child, create_node, set_inline_override, set_user_transform};
 use crate::scene::node::{ControlState, NodeFlags, NodeId, NodeKind, Scene};
+use crate::scene::text_cursor::{hit_byte_offset, line_byte_ranges};
 use crate::transform::NodeTransform;
 
 const FILL: &str = "loom-fill";
@@ -238,6 +239,10 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
     }
 }
 
+/// 光标闪烁周期（秒）。stage tick 每帧累计，周期到翻转 cursor_visible。
+/// 0.7s 对齐常见平台光标闪烁频率（~1.4Hz 全周期，0.7s 半周期 ON/OFF）。
+const CURSOR_BLINK_PERIOD: f32 = 0.7;
+
 // ── 控件指针交互 ──────────────────────────────────────────────────
 //
 // Toggle/Radio 在 pointer-down 翻转/互斥选中；Slider 在 down→move→up 期间拖拽改 value。
@@ -319,9 +324,21 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
                 set_slider_value(scene, id, v, &mut out);
             }
         }
-        // TextField/TextArea: pointer-down focus + caret placement delegated to
-        // TextField beam (not yet implemented).
-        ControlState::TextField(_) | ControlState::TextArea(_) => {}
+        // TextField/TextArea: convert world pos to content-area-local coords
+        // (subtract layout_rect offset + border+padding inset), then set cursor/anchor
+        // via hit_byte_offset. TextLayout glyphs are in content-area-local space.
+        ControlState::TextField(_) | ControlState::TextArea(_) => {
+            if let Some(n) = scene.get(id) {
+                let lr = n.layout_rect;
+                let border_left = crate::render::resolve_lp(n.style.taffy_style.border.left);
+                let padding_left = crate::render::resolve_lp(n.style.taffy_style.padding.left);
+                let border_top = crate::render::resolve_lp(n.style.taffy_style.border.top);
+                let padding_top = crate::render::resolve_lp(n.style.taffy_style.padding.top);
+                let local_x = pos[0] - lr.x - border_left - padding_left;
+                let local_y = pos[1] - lr.y - border_top - padding_top;
+                on_text_pointer_down(scene, id, local_x, local_y);
+            }
+        }
         ControlState::Progress { .. } => {}
     }
     out
@@ -370,6 +387,54 @@ pub fn on_pointer_up(scene: &mut Scene, id: NodeId) -> Vec<EventRecord> {
         }
     }
     out
+}
+
+/// 文本控件 pointer-down：世界坐标已转为 content-area-local（减 layout_rect.xy + border+padding），
+/// 用 hit_byte_offset 计算字节偏移，设 cursor=anchor=offset，重置闪烁 timer。
+///
+/// 无缓存 TextLayout（首帧尚无 measure）→ no-op。非 TextField/TextArea → no-op。
+pub fn on_text_pointer_down(scene: &mut Scene, id: NodeId, local_x: f32, local_y: f32) {
+    let value = match scene.controls.get(id) {
+        Some(ControlState::TextField(e) | ControlState::TextArea(e)) => e.value.clone(),
+        _ => return,
+    };
+    // 克隆 TextLayout 解借用冲突：text_layouts 不可变借 + controls 可变写。
+    let Some(layout) = scene.text_layouts[id.index()].as_ref().cloned() else {
+        return;
+    };
+    let ranges = line_byte_ranges(&layout, &value);
+    let offset = hit_byte_offset(&layout, &ranges, local_x, local_y);
+    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get_mut(id)
+    {
+        e.cursor = offset;
+        e.anchor = offset;
+        e.cursor_visible = true;
+        e.cursor_timer = 0.0;
+    }
+}
+
+/// 推进光标闪烁 timer（每帧由 Stage tick 调用，单一动画时钟不变量）。
+///
+/// 仅处理 TextField/TextArea 的 EditState：
+/// - 有焦点：累计 cursor_timer += dt，每 CURSOR_BLINK_PERIOD (0.7s) 翻转 cursor_visible。
+/// - 无焦点：cursor_visible = false（隐藏光标）。
+///
+/// 先取 `scene.focused_node` 副本再可变迭代 controls，避免对 scene 的双借冲突。
+pub fn advance_cursor_blink(scene: &mut Scene, dt: f32) {
+    let focused = scene.focused_node;
+    for (&id, state) in scene.controls.0.iter_mut() {
+        if let ControlState::TextField(e) | ControlState::TextArea(e) = state {
+            if Some(id) == focused {
+                e.cursor_timer += dt;
+                if e.cursor_timer >= CURSOR_BLINK_PERIOD {
+                    e.cursor_timer = 0.0;
+                    e.cursor_visible = !e.cursor_visible;
+                }
+            } else {
+                e.cursor_visible = false;
+            }
+        }
+    }
 }
 
 /// bool → EventRecord.pad[0] 载荷编码（0=false / 1=true）。语义由 EVT_CHECKED_CHANGED 消费方约定。
@@ -1209,5 +1274,141 @@ mod tests {
             events.iter().all(|e| e.event_type != EVT_CHANGE_COMMITTED),
             "no ChangeCommitted without a drag"
         );
+    }
+
+    // ── 文本控件 pointer-down 光标命中 ──
+
+    /// 建带 TextLayout 缓存的 TextField（解耦 solve：手动测文本 + 设 layout_rect）。
+    fn make_scene_with_textfield(text: &str) -> (Scene, NodeId) {
+        let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+        let font_data = std::fs::read(font_path).unwrap();
+        let mut fonts = crate::text::layout::FontTable::new();
+        fonts.register("DejaVu", font_data, true).unwrap();
+
+        let mut scene = Scene::default();
+        let id = create_node_from_template(
+            &mut scene,
+            NodeKind::TextField,
+            ResolvedStyle::default(),
+            Some(crate::asset::ControlInit::TextField(
+                crate::asset::EditInit {
+                    value: text.to_string(),
+                    placeholder: String::new(),
+                    max_length: 0,
+                    readonly: false,
+                },
+            )),
+        );
+        // 设 layout_rect：click 坐标转换用 layout_rect.xy + border/padding。
+        scene.get_mut(id).unwrap().layout_rect = Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 200.0,
+            h: 30.0,
+        };
+
+        // 手动测文本 + 缓存 TextLayout（on_text_pointer_down 需要已缓存）。
+        let style = scene.get(id).unwrap().style.clone();
+        let stack = fonts.stack_for(style.font_family.as_deref());
+        let off_left = crate::render::resolve_lp(style.taffy_style.border.left)
+            + crate::render::resolve_lp(style.taffy_style.padding.left);
+        let off_right = crate::render::resolve_lp(style.taffy_style.border.right)
+            + crate::render::resolve_lp(style.taffy_style.padding.right);
+        let lr = scene.get(id).unwrap().layout_rect;
+        let content_w = (lr.w - off_left - off_right).max(0.0);
+        let layout = crate::text::layout::measure_text(
+            text,
+            style.font_size,
+            style.line_height,
+            style.letter_spacing,
+            style.text_align,
+            style.white_space_nowrap,
+            Some(content_w),
+            &stack,
+            style.color,
+            crate::text::rich::weight_from_font_weight(style.font_weight),
+        );
+        scene.text_layouts[id.index()] = Some(layout);
+        (scene, id)
+    }
+
+    #[test]
+    fn textfield_click_sets_cursor() {
+        // 点击 "hello" 在 local_x=20 附近（第 2 个字符 "e" 区域），光标应落在合理范围。
+        let (mut scene, id) = make_scene_with_textfield("hello");
+        on_text_pointer_down(&mut scene, id, 20.0, 5.0);
+        if let Some(ControlState::TextField(e)) = scene.controls.get(id) {
+            assert!(
+                e.cursor >= 1 && e.cursor <= 3,
+                "cursor near char 2 (byte range 1..=3), got {}",
+                e.cursor
+            );
+            assert_eq!(e.anchor, e.cursor, "anchor equals cursor (no selection)");
+            assert!(e.cursor_visible, "cursor_visible true after click");
+        } else {
+            panic!("not TextField");
+        }
+    }
+
+    #[test]
+    fn textfield_click_noop_without_layout_cache() {
+        // 无 TextLayout 缓存（首帧尚无 measure）→ no-op，不 panic。
+        let mut scene = Scene::default();
+        let id = create_node_from_template(
+            &mut scene,
+            NodeKind::TextField,
+            ResolvedStyle::default(),
+            Some(crate::asset::ControlInit::TextField(
+                crate::asset::EditInit {
+                    value: "hello".into(),
+                    placeholder: String::new(),
+                    max_length: 0,
+                    readonly: false,
+                },
+            )),
+        );
+        on_text_pointer_down(&mut scene, id, 20.0, 5.0);
+        // 未设 layout_rect 也无 TextLayout → no-op，cursor 维持初始值（末尾）。
+        if let Some(ControlState::TextField(e)) = scene.controls.get(id) {
+            assert_eq!(e.cursor, 5, "cursor stays at end (initial value)");
+        } else {
+            panic!("not TextField");
+        }
+    }
+
+    #[test]
+    fn advance_cursor_blink_flips_visibility() {
+        let (mut scene, id) = make_scene_with_textfield("hi");
+        // 聚焦该节点
+        scene.focused_node = Some(id);
+        // 初始 cursor_visible = true（from_init 设）
+        assert!(get_cursor_visible(&scene, id));
+        // 推进 < 0.7s：不应翻转
+        advance_cursor_blink(&mut scene, 0.3);
+        assert!(get_cursor_visible(&scene, id));
+        // 推进够 0.7s（累计 1.0s）：应翻转一次
+        advance_cursor_blink(&mut scene, 0.5);
+        assert!(!get_cursor_visible(&scene, id));
+        // 再 0.7s：再次翻转
+        advance_cursor_blink(&mut scene, 0.7);
+        assert!(get_cursor_visible(&scene, id));
+    }
+
+    #[test]
+    fn advance_cursor_blink_hides_when_not_focused() {
+        let (mut scene, id) = make_scene_with_textfield("hi");
+        // 不聚焦（focused_node = None）
+        scene.focused_node = None;
+        advance_cursor_blink(&mut scene, 1.0);
+        // 未聚焦 → cursor_visible 强制 false
+        assert!(!get_cursor_visible(&scene, id));
+    }
+
+    /// 读 TextField EditState.cursor_visible。panic 若非 TextField。
+    fn get_cursor_visible(scene: &Scene, id: NodeId) -> bool {
+        match scene.controls.get(id) {
+            Some(ControlState::TextField(e)) => e.cursor_visible,
+            _ => panic!("not TextField"),
+        }
     }
 }

@@ -658,6 +658,8 @@ impl Stage {
         let dt = self.pending_dt;
         self.pending_dt = 0.0;
         self.tweens.update(dt, scene, &mut out);
+        // 光标闪烁 timer（单一动画时钟：与 tweens 同 dt，每帧 tick 推进一步）。
+        crate::scene::control::advance_cursor_blink(scene, dt);
         // 消费 pending_focus_request（编程聚焦/清焦点，tick 外 request_focus/blur 记）。
         // 最前消费——下 tick 才生效，避免 tick 覆写 last_events 丢请求事件。
         if let Some(req) = self.pending_focus_request.take() {
