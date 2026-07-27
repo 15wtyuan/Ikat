@@ -1451,6 +1451,9 @@ pub extern "C" fn loomgui_stage_set_control_value(
         ControlState::Progress {
             max, indeterminate, ..
         } => {
+            // 存储的 max 来自 ControlInit（instantiate sanitize 到 ≥0）或 set_control_max
+            // （guard 到 ≥0），但 FFI 边界纵深守卫：负 max 会让 clamp(0.0,max) panic。
+            let max = max.max(0.0);
             let clamped = value.clamp(0.0, max);
             ControlState::Progress {
                 value: clamped,
@@ -1465,20 +1468,22 @@ pub extern "C" fn loomgui_stage_set_control_value(
             dragging,
             ..
         } => {
-            let clamped = value.clamp(min, max);
+            // 同上：clamp(min,max) 在 min>max 时 panic，FFI 边界纵深守卫。
+            let (lo, hi) = if min <= max { (min, max) } else { (max, min) };
+            let clamped = value.clamp(lo, hi);
             let quantized = if step > 0.0 {
                 // 对齐到最近 step 边界：round((v - min) / step) * step + min
-                ((clamped - min) / step).round() * step + min
+                ((clamped - lo) / step).round() * step + lo
             } else {
                 clamped
             };
-            // 量化可能把值推过 max（如 min=0,max=100,step=6,v=100 → 102），
-            // 重新 clamp 回 [min,max]，保证不违反区间契约。
-            let quantized = quantized.clamp(min, max);
+            // 量化可能把值推过 hi（如 lo=0,hi=100,step=6,v=100 → 102），
+            // 重新 clamp 回 [lo,hi]，保证不违反区间契约。
+            let quantized = quantized.clamp(lo, hi);
             ControlState::Slider {
                 value: quantized,
-                min,
-                max,
+                min: lo,
+                max: hi,
                 step,
                 dragging,
             }
@@ -1618,7 +1623,14 @@ pub extern "C" fn loomgui_stage_set_control_max(
             ..
         } => {
             let max = max.max(min);
-            let value = value.clamp(min, max);
+            let clamped = value.clamp(min, max);
+            // 改 max 后重新量化（与 set_control_value 同口径，维持 step 对齐不变量）。
+            let value = if step > 0.0 {
+                ((clamped - min) / step).round() * step + min
+            } else {
+                clamped
+            }
+            .clamp(min, max);
             ControlState::Slider {
                 value,
                 min,
@@ -1758,13 +1770,20 @@ pub extern "C" fn loomgui_stage_set_control_step(
             max,
             dragging,
             ..
-        } => ControlState::Slider {
-            value,
-            min,
-            max,
-            step,
-            dragging,
-        },
+        } => {
+            // step 语义为正（量化步长）：负值/NaN 无意义，拒绝而非存脏（下游 step>0.0
+            // 守卫虽不 panic，但存负 step 会让 set_control_value 的量化分支走错路径）。
+            if !step.is_finite() || step < 0.0 {
+                return -1;
+            }
+            ControlState::Slider {
+                value,
+                min,
+                max,
+                step,
+                dragging,
+            }
+        }
         _ => return -1,
     };
     scene.controls.ensure(id, new_state);

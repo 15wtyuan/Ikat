@@ -221,12 +221,15 @@ fn single_selector(raw: &str) -> ParsedSelector {
             rest = &rest[1..];
         }
     }
-    let class_count = c.classes.len() as u32 + c.id.is_some() as u32;
+    // specificity = (id 数, class 数, tag 数)——与生产 Specificity struct 同口径。
+    // 旧实现把 id 混进 class 位（class_count 含 id），掩盖 id vs class 的优先级排序 bug。
+    let id_count = c.id.is_some() as u32;
+    let class_count = c.classes.len() as u32;
     let tag_count = c.tag.is_some() as u32;
     ParsedSelector {
         raw: raw.to_string(),
         compound: vec![c],
-        specificity: Specificity(class_count, 0, tag_count),
+        specificity: Specificity(id_count, class_count, tag_count),
     }
 }
 

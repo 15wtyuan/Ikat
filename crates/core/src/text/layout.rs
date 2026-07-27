@@ -1309,7 +1309,7 @@ mod tests {
     }
 
     #[test]
-    fn line_height_normal_is_1_2_not_font_metrics() {
+    fn line_height_normal_uses_const_not_font_metrics() {
         // CSS line-height: normal 应对齐浏览器（实测 Blink ~1.31，见 NORMAL_LINE_HEIGHT），
         // 而非字体的自然行高（ascent-descent+line_gap，因字体而异且常偏小）。
         // 最终值待定；调 normal 倍数改常量，本测试自动跟随。

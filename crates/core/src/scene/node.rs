@@ -387,6 +387,10 @@ impl ControlTable {
     pub fn ensure(&mut self, id: NodeId, state: ControlState) {
         self.0.insert(id, state);
     }
+    /// 遍历所有控件槽（借出 NodeId + &ControlState）。select_radio 同名组互斥查全树用。
+    pub fn iter(&self) -> impl Iterator<Item = (NodeId, &ControlState)> {
+        self.0.iter().map(|(&k, v)| (k, v))
+    }
     /// 删该节点控件槽（`remove_node` 联动调，防悬空 NodeId 残留）。
     pub fn remove(&mut self, id: NodeId) {
         self.0.remove(&id);

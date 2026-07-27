@@ -184,10 +184,16 @@ pub fn find_control_at(scene: &Scene, hit: Option<NodeId>) -> Option<NodeId> {
     None
 }
 
-/// Slider 是否占据指针手势（拖拽期间需抑制祖先 scroll）。仅 Slider 为真——Toggle/Radio
-/// 点击瞬时完成，不占据手势。PointerState 据此决定是否抑制 scroll 候选。
+/// Slider 是否占据指针手势（拖拽期间需抑制祖先 scroll）。仅未禁用的 Slider 为真——
+/// Toggle/Radio 点击瞬时完成不占手势；disabled 控件不拦截指针（照 HTML：disabled input
+/// 不接受交互），故 disabled Slider 不抑制祖先 scroll（否则按下后 scroll 仲裁被清却无人处理，
+/// 用户滚不动）。PointerState 据此决定是否抑制 scroll 候选。
 pub fn occupies_gesture(scene: &Scene, id: NodeId) -> bool {
-    matches!(scene.controls.get(id), Some(ControlState::Slider { .. }))
+    let is_slider = matches!(scene.controls.get(id), Some(ControlState::Slider { .. }));
+    let disabled = scene
+        .get(id)
+        .is_some_and(|n| n.interaction.flags.contains(NodeFlags::DISABLED));
+    is_slider && !disabled
 }
 
 /// 指针按下命中控件 → 更新控件状态。返回产生的事件（空 Vec=未命中/未处理）。
@@ -305,9 +311,8 @@ fn select_radio(scene: &mut Scene, id: NodeId, name: String, out: &mut Vec<Event
     // 先收集同组其它 radio 的 NodeId（避免边遍历边改 HashMap）。
     let others: Vec<NodeId> = scene
         .controls
-        .0
         .iter()
-        .filter_map(|(&nid, s)| match s {
+        .filter_map(|(nid, s)| match s {
             ControlState::Radio { name: n, .. } if nid != id && n == &name => Some(nid),
             _ => None,
         })
@@ -333,12 +338,17 @@ fn select_radio(scene: &mut Scene, id: NodeId, name: String, out: &mut Vec<Event
 
 /// Slider pos→value：指针 x 投到 track 的 layout_rect，映射到 [min,max]，step 量化 + clamp。
 /// track 几何取 loom-track 子节点的 layout_rect（上一帧 solve 写入，1 帧滞后，同 hit_test 标准）。
-/// track 未注入 / 宽度退化（≤0）/ 节点非 Slider → None（调用方 no-op）。
+/// track 未注入 / 宽度退化（≤0）/ 节点非 Slider / min>max（畸形配置，正常路径 instantiate 已 sanitize）→ None（调用方 no-op）。
 fn slider_pos_to_value(scene: &Scene, slider: NodeId, pos: [f32; 2]) -> Option<f32> {
     let (min, max, step) = match scene.controls.get(slider)? {
         ControlState::Slider { min, max, step, .. } => (*min, *max, *step),
         _ => return None,
     };
+    // 防御：instantiate 已 sanitize min≤max，但 FFI 或外部注入可能破坏不变量。
+    // clamp(min,max) 在 min>max 时 panic（FFI 路径不可 panic），此处守卫。
+    if min > max {
+        return None;
+    }
     let track = find_child_by_class(scene, slider, TRACK)?;
     let lr = scene.get(track)?.layout_rect;
     if lr.w <= 0.0 {
@@ -362,7 +372,14 @@ fn set_slider_value(scene: &mut Scene, id: NodeId, value: f32, out: &mut Vec<Eve
         value: v, min, max, ..
     }) = scene.controls.get_mut(id)
     {
-        let clamped = value.clamp(*min, *max);
+        // 防御：clamp(min,max) 在 min>max 时 panic。instantiate + FFI setter 已维持
+        // min≤max，但此处是 FFI 指针路径下游，纵深守卫保 FFI no-panic 不变量。
+        let (lo, hi) = if *min <= *max {
+            (*min, *max)
+        } else {
+            (*max, *min)
+        };
+        let clamped = value.clamp(lo, hi);
         if *v != clamped {
             *v = clamped;
             out.push(EventRecord {
@@ -887,6 +904,67 @@ mod tests {
         );
     }
 
+    // ── 畸形配置 panic 回归（clamp no-panic 不变量）──
+    //
+    // ControlInit 的 min/max/value 来自 HTML 属性，无 schema 约束。下游 clamp(min,max) 在
+    // min>max 时 debug 断言 abort；FFI 路径 panic = 杀宿主进程。instantiate sanitize +
+    // 指针路径守卫保证任何畸形配置都不 panic。这些测试锁住该不变量。
+
+    #[test]
+    fn malformed_slider_min_gt_max_does_not_panic_on_interaction() {
+        // <input type=range min=100 max=0>：instantiate sanitize 成 min=0(取max),max=0，
+        // 指针 down/move/up 全程不 panic（slider_pos_to_value 的 min>max 守卫 + set_slider_value
+        // 的 (lo,hi) 守卫双保险）。
+        let mut scene = Scene::default();
+        let id = create_node_from_template(
+            &mut scene,
+            NodeKind::Slider,
+            ResolvedStyle::default(),
+            Some(ControlInit::Slider {
+                value: 50.0,
+                min: 100.0,
+                max: 0.0,
+                step: 1.0,
+            }),
+        );
+        set_track_rect(&mut scene, id, 0.0, 0.0, 100.0, 20.0);
+        // 不 panic 即过；dragging 仍置（交互被处理）。
+        let _ = on_pointer_down(&mut scene, id, [50.0, 10.0]);
+        let _ = on_pointer_move(&mut scene, id, [80.0, 10.0]);
+        let _ = on_pointer_up(&mut scene, id);
+        // sanitize 后 min≤max：min 被 clamp 到 max（0≤0）。
+        assert!(
+            matches!(scene.controls.get(id), Some(ControlState::Slider { min, max, .. }) if min <= max),
+            "sanitize 保证 min<=max"
+        );
+    }
+
+    #[test]
+    fn malformed_progress_negative_max_sanitized() {
+        // <progress max="-5">：instantiate sanitize max 到 0（≥0），value clamp 进 [0,0]=0。
+        // 下游 sync_control_visuals 的 (value/max).clamp 不 panic（max>0 守卫已生效）。
+        let mut scene = Scene::default();
+        let id = create_node_from_template(
+            &mut scene,
+            NodeKind::ProgressBar,
+            ResolvedStyle::default(),
+            Some(ControlInit::Progress {
+                value: 30.0,
+                max: -5.0,
+                indeterminate: false,
+            }),
+        );
+        // sync 不 panic（max=0 时 pct=0.0 走 max>0 else 臂）。
+        sync_control_visuals(&mut scene, id);
+        match scene.controls.get(id) {
+            Some(ControlState::Progress { value, max, .. }) => {
+                assert!(*max >= 0.0, "max sanitized to >=0, got {max}");
+                assert!((value - 0.0).abs() < 1e-6, "value clamped into [0,0]");
+            }
+            _ => panic!("progress state exists"),
+        }
+    }
+
     #[test]
     fn find_control_at_walks_to_ancestor() {
         // 命中控件的 loom-thumb 子节点 → 向上找到 Slider 控件本身。
@@ -917,6 +995,25 @@ mod tests {
         assert!(!occupies_gesture(&scene, toggle));
         assert!(!occupies_gesture(&scene, radio));
         assert!(!occupies_gesture(&scene, progress));
+    }
+
+    #[test]
+    fn occupies_gesture_false_for_disabled_slider() {
+        // disabled Slider 不占据手势 → 不抑制祖先 scroll（照 HTML：disabled input 不接受交互）。
+        // 坑：旧实现对所有 Slider 返 true，按下后 scroll 仲裁被清却无人处理 → 用户滚不动。
+        let mut scene = Scene::default();
+        let slider = make_slider(&mut scene, 0.0, 0.0, 100.0);
+        assert!(occupies_gesture(&scene, slider), "enabled slider 占据手势");
+        scene
+            .get_mut(slider)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::DISABLED);
+        assert!(
+            !occupies_gesture(&scene, slider),
+            "disabled slider 不占据手势（不抑制 scroll）"
+        );
     }
 
     // ── 控件事件出口（CheckedChanged / ValueChanged / ChangeCommitted） ──

@@ -33,7 +33,10 @@ fn rec(scene: &Scene, anim: &AnimTable, id: NodeId, parent_world: Affine2, world
     };
     // transform 矩阵源 = anim.transform override（replace-override）unwrap css matrix。
     // 再并入用户态 user_transform（public-api Transform API 的 core 端存储，TRS 三元组）。
-    // user_transform 在节点局部空间叠加于 css/anim 矩阵之上——不触发 solve，仅此帧 compute 生效。
+    // 合成顺序 m = base_m ∘ user_m：点先经 user_transform（节点局部空间平移/缩放/旋转），
+    // 再经 css/anim 矩阵——即 css/anim 在外层（最后应用），user_transform 在内层（最先作用）。
+    // 对 slider thumb 等纯平移场景，css 矩阵多为 identity，两者可交换，效果一致。
+    // 不触发 layout solve——仅此帧 compute 生效（渲染/命中层）。
     let base_m = anim
         .get(id)
         .and_then(|a| a.transform)
@@ -537,6 +540,47 @@ mod tests {
         assert!(
             (x - 60.0).abs() < 0.1,
             "css(10)+user(50) 叠加：x≈60，got {x}"
+        );
+    }
+
+    #[test]
+    fn user_transform_order_css_outer_user_inner() {
+        // 锁定合成顺序 m = base_m(css) ∘ user_m：点先经 user 再经 css（css 在外层）。
+        // 用 box center 点测（center 经 T(-pivot) 落到原点，绕开 pivot 环绕对算术的干扰）：
+        //   原 center(50,50) → T(-pivot) → (0,0)
+        //   user translate(100,0)：(0,0) → (100,0)
+        //   css rotate(90°)：(100,0) → (0,100)   [rotate90: (x,y)→(-y,x)]
+        //   T(pivot)：(0,100) → (50,150)
+        // 若顺序反（user 在外）：(0,0) → css rotate → (0,0) → user → (100,0) → pivot → (150,50)。不同 → 锁住。
+        let mut s = scene_with(vec![node(
+            0,
+            None,
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
+        )]);
+        let rid = root_id(&s);
+        s.get_mut(rid).unwrap().style.transform = LocalTransform {
+            matrix: transform::from_rotate(std::f32::consts::FRAC_PI_2),
+        };
+        set_user_transform(
+            &mut s,
+            rid,
+            NodeTransform {
+                translate: [100.0, 0.0],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        compute_world_transforms(&mut s);
+        // center(50,50) 经 world 变换应到 (50,150)（见上推导）。
+        let (x, y) = s.world_transforms[rid.index()].apply_point(50.0, 50.0);
+        assert!(
+            (x - 50.0).abs() < 0.1 && (y - 150.0).abs() < 0.1,
+            "css∘user：user 先平移原点→(100,0)，css rotate→(0,100)，+pivot→(50,150)，got ({x},{y})"
         );
     }
 }

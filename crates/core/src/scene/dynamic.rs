@@ -214,17 +214,26 @@ pub fn create_node_from_template(
     }
     // 控件状态：按 ControlInit 变体映射填 ControlState（Slider 补运行时独有 dragging:false）。
     // 非 control 节点 control_init=None，不建槽（get 返 None，渲染/交互按无控件处理）。
+    //
+    // **sanitize（坑：clamp panic）**：ControlInit 的 min/max/value 来自打包期 HTML 属性
+    // （`<progress max="-5">`、`<input min="100" max="0">`），无 schema 约束。下游所有
+    // clamp 调用（指针交互 slider_pos_to_value/set_slider_value、FFI set_control_value）都用
+    // f32::clamp(min,max)，它在 min>max 时 debug 断言 abort——FFI 边界 panic = 杀宿主进程。
+    // 在此单一入口建立不变量（max≥0、min≤max、value∈[lo,hi]、step≥0），下游方可无守卫 clamp。
     if let Some(init) = control_init {
         let state = match init {
             ControlInit::Progress {
                 value,
                 max,
                 indeterminate,
-            } => ControlState::Progress {
-                value,
-                max,
-                indeterminate,
-            },
+            } => {
+                let max = max.max(0.0);
+                ControlState::Progress {
+                    value: value.clamp(0.0, max),
+                    max,
+                    indeterminate,
+                }
+            }
             ControlInit::Toggle { checked } => ControlState::Toggle { checked },
             ControlInit::Radio { checked, name } => ControlState::Radio { checked, name },
             ControlInit::Slider {
@@ -232,13 +241,16 @@ pub fn create_node_from_template(
                 min,
                 max,
                 step,
-            } => ControlState::Slider {
-                value,
-                min,
-                max,
-                step,
-                dragging: false,
-            },
+            } => {
+                let max = max.max(min);
+                ControlState::Slider {
+                    value: value.clamp(min, max),
+                    min,
+                    max,
+                    step: step.max(0.0),
+                    dragging: false,
+                }
+            }
         };
         scene.controls.ensure(id, state);
         // 控件即容器：instantiate 后注入框架内部视觉子节点（.loom-fill/.loom-track/...）。

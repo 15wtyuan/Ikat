@@ -529,8 +529,10 @@ impl Stage {
     ///    dirty_text + slotmap insert + id 回填），再填 classes/id_attr/draggable/tabindex。
     ///    按 parent_idx 串子树（append_child 语义：parent.children.push + child.parent=Some(parent)）。
     ///    根（parent_idx=None）不串父，记录返回。
-    /// 3. 伪类规则合并去重：遍历 template.dynamic_rules，相同选择器（ParsedSelector.eq）不重复加进
-    ///    scene.dynamic_rules。规则按 class 匹配，多实例共享；hit_test 返具体 NodeId → 各实例独立 :hover。
+    /// 3. 作用域规则包装：遍历 template.dynamic_rules.rules，每条包装成 ScopedRule
+    ///    （scope_root = 实例根），push 进 scene.dynamic_rules.entries。不再按 selector 去重——
+    ///    同模板多实例各带独立 scope_root，rematch 按 scope 隔离匹配（main-design §5.4
+    ///    Shadow DOM 风格：后代选择器不穿透实例边界）。hit_test 返具体 NodeId → 各实例独立 :hover。
     /// 4. scene 必须已存在（create_root 建过），否则 Err。
     ///
     /// 多实例独立：同组件多次 instantiate → 各自独立子树（NodeId 不同）+ 各自独立事件/伪类命中。

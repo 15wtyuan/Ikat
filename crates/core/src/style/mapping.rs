@@ -179,6 +179,27 @@ fn parse_number(s: &str) -> Option<f32> {
     }
 }
 
+/// 解析 flex basis token：length(px) | percent(%) | auto。
+/// 供 flex shorthand 的 `[g, sh]`（歧义二 token）和 `[g, sh, b]`（三 token）共用，
+/// 保证两分支 basis 解析同口径。无单位/未知关键字 → None（调用方 return false，不静默降级）。
+fn parse_flex_basis(tok: &str) -> Option<Dimension> {
+    let tok = tok.trim();
+    if tok == "auto" {
+        return Some(Dimension::auto());
+    }
+    // length(px) 或 percent(%)：先抽出数值与单位标记。
+    let (num, is_px) = tok
+        .strip_suffix("px")
+        .map(|s| (s.trim(), true))
+        .or_else(|| tok.strip_suffix('%').map(|s| (s.trim(), false)))?;
+    let v = num.parse::<f32>().ok()?;
+    Some(if is_px {
+        Dimension::length(v)
+    } else {
+        Dimension::percent(v / 100.0)
+    })
+}
+
 /// 解析 border-image-slice 4 值（CSS 4 值缩写同 margin）。
 /// px 存像素，% 存比例（渲染期 resolve 乘源图边）。
 fn parse_slice(value: &str) -> Option<SliceInsets> {
@@ -807,14 +828,17 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         // 覆盖 fence schema 列出的全部合法值（flex-start/center/flex-end/stretch/
         // space-between/space-around/space-evenly）。
         "align-content" => {
+            // cross 轴多行内容对齐。fence schema 列出的合法值全覆盖；未知值返 false
+            // （不静默降级成 FLEX_START，与 flex-wrap 同口径——拼写错误应报错而非吞）。
             ts.align_content = Some(match value.trim() {
+                "flex-start" => taffy::AlignContent::FLEX_START,
                 "center" => taffy::AlignContent::CENTER,
                 "flex-end" => taffy::AlignContent::FLEX_END,
                 "stretch" => taffy::AlignContent::STRETCH,
                 "space-between" => taffy::AlignContent::SPACE_BETWEEN,
                 "space-around" => taffy::AlignContent::SPACE_AROUND,
                 "space-evenly" => taffy::AlignContent::SPACE_EVENLY,
-                _ => taffy::AlignContent::FLEX_START,
+                _ => return false,
             });
             true
         }
@@ -836,6 +860,14 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         // `none` → 0 0 auto，`initial` → 0 1 auto。未支持形态返 false（不静默降级）。
         // flex_basis 字段类型是 taffy Dimension（length/percent/auto 三态），非 LengthPercentageAuto。
         "flex" => {
+            // CSS flex shorthand 语义（spec 用 `||` 可换序，但 fence 子集只支持标准顺序）：
+            //   `none`=0 0 auto / `initial`=0 1 auto / `auto`=1 1 auto
+            //   `<grow>` → grow=g,shrink=1,basis=0%
+            //   `<grow> <shrink>` → 两 number
+            //   `<grow> <basis>` → grow,number + basis(length/percent/auto)；shrink 默认 1
+            //   `<grow> <shrink> <basis>` → 三值显式
+            // 单值可以是 number 或 length（`flex:2` vs `flex:100px`）。
+            // **不静默降级**：任何 token 解析失败 → return false（不 unwrap_or 吞值）。
             let toks: Vec<&str> = value.split_whitespace().collect();
             match toks.as_slice() {
                 ["none"] => {
@@ -845,6 +877,12 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 }
                 ["initial"] => {
                     ts.flex_grow = 0.0;
+                    ts.flex_shrink = 1.0;
+                    ts.flex_basis = Dimension::auto();
+                }
+                ["auto"] => {
+                    // CSS spec: `auto` ≡ `1 1 auto`（与 initial 对称的关键字）。
+                    ts.flex_grow = 1.0;
                     ts.flex_shrink = 1.0;
                     ts.flex_basis = Dimension::auto();
                 }
@@ -866,29 +904,41 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                     }
                 }
                 [g, sh] => {
-                    ts.flex_grow = g.parse::<f32>().unwrap_or(0.0);
-                    ts.flex_shrink = sh.parse::<f32>().unwrap_or(1.0);
-                    ts.flex_basis = Dimension::percent(0.0);
-                }
-                [g, sh, b] => {
-                    ts.flex_grow = g.parse::<f32>().unwrap_or(0.0);
-                    ts.flex_shrink = sh.parse::<f32>().unwrap_or(1.0);
-                    // basis：length | percent | auto（auto 显式，无单位/未知 → false）。
-                    ts.flex_basis = if *b == "auto" {
-                        Dimension::auto()
-                    } else if let Some(px) = b
-                        .strip_suffix("px")
-                        .and_then(|s| s.trim().parse::<f32>().ok())
-                    {
-                        Dimension::length(px)
-                    } else if let Some(p) = b
-                        .strip_suffix('%')
-                        .and_then(|s| s.trim().parse::<f32>().ok())
-                    {
-                        Dimension::percent(p / 100.0)
+                    // 第二 token 歧义：number → shrink；length/percent/auto → basis（shrink 默认 1）。
+                    // 防 `flex:1 50%` / `flex:1 auto` 被误当 shrink（旧实现静默吞值，basis 变 0%）。
+                    let gv = match g.parse::<f32>() {
+                        Ok(v) => v,
+                        Err(_) => return false,
+                    };
+                    ts.flex_grow = gv;
+                    if let Ok(sv) = sh.parse::<f32>() {
+                        ts.flex_shrink = sv;
+                        ts.flex_basis = Dimension::percent(0.0);
+                    } else if let Some(basis) = parse_flex_basis(sh) {
+                        ts.flex_shrink = 1.0;
+                        ts.flex_basis = basis;
                     } else {
                         return false;
+                    }
+                }
+                [g, sh, b] => {
+                    // 三值：grow(number) shrink(number) basis(length/percent/auto)。
+                    // 不用 unwrap_or——解析失败返 false，让调用方/围栏报错（不静默降级）。
+                    let gv = match g.parse::<f32>() {
+                        Ok(v) => v,
+                        Err(_) => return false,
                     };
+                    let sv = match sh.parse::<f32>() {
+                        Ok(v) => v,
+                        Err(_) => return false,
+                    };
+                    let basis = match parse_flex_basis(b) {
+                        Some(b) => b,
+                        None => return false,
+                    };
+                    ts.flex_grow = gv;
+                    ts.flex_shrink = sv;
+                    ts.flex_basis = basis;
                 }
                 _ => return false,
             }

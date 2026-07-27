@@ -1412,22 +1412,102 @@ fn apply_border_no_style_keeps_none() {
 }
 
 // shorthand 展开 + longhand 补齐。
-// flex shorthand：单值 `flex:1` → grow=1/shrink=1（CSS 规范 basis=0%，仅验 grow/shrink）。
+// flex shorthand：单值 `flex:1` → grow=1/shrink=1（CSS 规范 basis=0%）。
 #[test]
 fn flex_shorthand_single_value() {
+    use taffy::style::Dimension;
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "flex", "1"));
     assert!((s.taffy_style.flex_grow - 1.0).abs() < 0.01);
     assert!((s.taffy_style.flex_shrink - 1.0).abs() < 0.01);
+    assert_eq!(
+        s.taffy_style.flex_basis,
+        Dimension::percent(0.0),
+        "单 number → basis=0%（CSS 规范）"
+    );
 }
 
 // flex shorthand：三值 `flex:2 0 100px` → grow=2/shrink=0/basis=100px。
 #[test]
 fn flex_shorthand_three_values() {
+    use taffy::style::Dimension;
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "flex", "2 0 100px"));
     assert!((s.taffy_style.flex_grow - 2.0).abs() < 0.01);
     assert!((s.taffy_style.flex_shrink - 0.0).abs() < 0.01);
+    // basis 必须被实际解析（旧实现漏断言，basis bug 静默过关）。
+    assert_eq!(
+        s.taffy_style.flex_basis,
+        Dimension::length(100.0),
+        "basis=100px"
+    );
+}
+
+// flex shorthand：两值歧义——`flex:1 50%` 第二 token 是 basis（非 shrink）。
+// 旧实现把 50% 当 shrink → parse 失败 unwrap_or(1.0) → basis 静默变 0%。这是 High bug。
+#[test]
+fn flex_shorthand_two_values_basis_percent() {
+    use taffy::style::Dimension;
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "flex", "1 50%"));
+    assert!((s.taffy_style.flex_grow - 1.0).abs() < 0.01);
+    assert!(
+        (s.taffy_style.flex_shrink - 1.0).abs() < 0.01,
+        "basis 形态时 shrink 默认 1"
+    );
+    assert_eq!(
+        s.taffy_style.flex_basis,
+        Dimension::percent(0.5),
+        "basis=50%"
+    );
+}
+
+// flex shorthand：两值歧义——`flex:1 auto` 第二 token 是 basis(auto)。
+#[test]
+fn flex_shorthand_two_values_basis_auto() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "flex", "1 auto"));
+    assert!((s.taffy_style.flex_grow - 1.0).abs() < 0.01);
+    assert!((s.taffy_style.flex_shrink - 1.0).abs() < 0.01);
+    assert!(s.taffy_style.flex_basis.is_auto(), "basis=auto");
+}
+
+// flex shorthand：两值都是 number → grow + shrink（basis=0%）。
+#[test]
+fn flex_shorthand_two_values_grow_shrink() {
+    use taffy::style::Dimension;
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "flex", "2 0"));
+    assert!((s.taffy_style.flex_grow - 2.0).abs() < 0.01);
+    assert!((s.taffy_style.flex_shrink - 0.0).abs() < 0.01);
+    assert_eq!(s.taffy_style.flex_basis, Dimension::percent(0.0));
+}
+
+// flex shorthand：`auto` 关键字 ≡ `1 1 auto`（CSS spec，与 initial 对称）。
+#[test]
+fn flex_shorthand_auto_keyword() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "flex", "auto"));
+    assert!((s.taffy_style.flex_grow - 1.0).abs() < 0.01);
+    assert!((s.taffy_style.flex_shrink - 1.0).abs() < 0.01);
+    assert!(s.taffy_style.flex_basis.is_auto());
+}
+
+// flex shorthand：畸形值必须返 false（不静默降级）——
+// 旧实现 unwrap_or 会把 `flex:abc 2` 静默成 grow=0。锁住不静默降级不变量。
+#[test]
+fn flex_shorthand_invalid_values_rejected() {
+    let mut s = ResolvedStyle::default();
+    // 非法 grow
+    assert!(!apply_decl(&mut s, "flex", "abc"));
+    // 两 token：非法 grow
+    assert!(!apply_decl(&mut s, "flex", "abc 2"));
+    // 两 token：第二 token 既非 number 也非 basis
+    assert!(!apply_decl(&mut s, "flex", "1 xyz"));
+    // 三 token：shrink 非法
+    assert!(!apply_decl(&mut s, "flex", "1 xyz 100px"));
+    // 三 token：basis 非法（裸数字无单位不是合法 basis）
+    assert!(!apply_decl(&mut s, "flex", "1 1 5"));
 }
 
 // background shorthand：纯色 `background:#ff0000` 应展开成 background_color
