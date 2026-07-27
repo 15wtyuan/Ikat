@@ -28,6 +28,18 @@ fn make_child(scene: &mut Scene, class: &str) -> NodeId {
     id
 }
 
+/// 显示变换：PasswordField 掩码（'•' × 字符数）。其他 kind 原样。
+///
+/// 掩码保持字符串长度不变，每个 UTF-8 字符映射为一个 '•'（U+2022），
+/// 使密码框渲染为等长圆点行（掩码不透露密码长度之外的任何信息）。
+/// composition 期间不掩码（Task 13 处理——此阶段 value 不含 composition 字符）。
+pub fn transform_display_value(kind: NodeKind, value: &str) -> String {
+    match kind {
+        NodeKind::PasswordField => value.chars().map(|_| '•').collect(),
+        _ => value.to_string(),
+    }
+}
+
 /// 给控件节点注入框架内部视觉子节点。非控件 NodeKind 为 no-op。
 ///
 /// 在 `create_node_from_template` 填完 `ControlTable` side table 后调用——只有

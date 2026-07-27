@@ -19,7 +19,7 @@ pub mod mesh;
 pub mod node;
 
 use crate::layout::ImageSizeTable;
-use crate::scene::node::{NodeId, NodeKind, Rect, Scene};
+use crate::scene::node::{ControlState, NodeId, NodeKind, Rect, Scene};
 use crate::text::atlas::{GlyphAtlas, GlyphKey};
 use crate::text::layout::{measure_text, FontTable};
 use node::*;
@@ -247,6 +247,190 @@ fn thumb_render_node(node_id: u32, rect: Rect, sort_key: u32) -> RenderNode {
 /// `batch::assign_sort_keys` 算祖先 clip 链交集后产出。
 ///
 /// `image_sizes` = Stage 持有的 path→(w,h) 尺寸表。九宫格 UV 用此表算 src_w/src_h
+/// 构建 Container 背景/边框/渐变 mesh（不含子节点文字）。
+///
+/// 从原 `k if k.is_container()` 臂抽出，供 TextField/PasswordField/SearchField/TextArea
+/// 复用——这些控件需要画背景框（与 Container 一致）并在其上叠加文字。
+/// box-shadow 由调用方在 match 外统一处理（检查 `n.kind.is_container()`）。
+#[allow(clippy::too_many_arguments)]
+fn build_container_mesh(
+    n: &crate::scene::node::Node,
+    node_id: u32,
+    parent_id: Option<u32>,
+    rect: &Rect,
+    wm: [f32; 6],
+    alpha: f32,
+    color_tint: [f32; 4],
+    has_filter: bool,
+    color_matrix: [f32; 20],
+    anim: Option<&crate::scene::node::NodeAnim>,
+    image_sizes: &ImageSizeTable,
+) -> RenderNode {
+    let color = anim
+        .and_then(|a| a.bg_color)
+        .unwrap_or(n.style.background_color.unwrap_or([0.0, 0.0, 0.0, 0.0]));
+    let (image_path, src_w, src_h) = match &n.style.background_image {
+        Some(url) => {
+            let (sw, sh) = src_size(image_sizes, url);
+            (Some(url.clone()), sw, sh)
+        }
+        None => (None, 64.0f32, 64.0f32),
+    };
+    let has_image = image_path.is_some();
+    let u_min = [0.0, 0.0];
+    let u_max = [1.0, 1.0];
+    let (rw, rh) = (rect.w, rect.h);
+    let radii = n.style.border_radius.as_corners(rw, rh);
+    let all_zero = radii.iter().all(|&(rx, ry)| rx <= 0.0 || ry <= 0.0);
+    let has_slice = n.style.border_image_slice.is_some();
+    // 渐变背景仅在没有背景图（互斥）、没有九宫格切片、直角 quad 时启用——
+    // quad_gradient 是 4 角独立色 quad，GPU 顶点色插值得 2 色线性渐变。
+    // 与圆角 / 切片共存需 gradient + rounded_rect/slice 混合 mesh，留待后续 task。
+    let use_gradient =
+        !has_image && !has_slice && all_zero && n.style.background_gradient.is_some();
+    let draw_rect = if !has_slice
+        && matches!(
+            n.style.background_size,
+            crate::style::resolved::BackgroundSize::Contain
+        ) {
+        let s = (rect.w / src_w.max(1.0)).min(rect.h / src_h.max(1.0));
+        crate::scene::node::Rect {
+            x: rect.x,
+            y: rect.y,
+            w: src_w.max(1.0) * s,
+            h: src_h.max(1.0) * s,
+        }
+    } else {
+        *rect
+    };
+    let (mut v, mut uvc, mut col, mut idx) = if use_gradient {
+        let g = n.style.background_gradient.expect("use_gradient 已校验");
+        crate::render::mesh::quad_gradient(
+            &draw_rect,
+            gradient_corner_colors(g),
+            [u_min[0], u_max[1]],
+            [u_max[0], u_min[1]],
+        )
+    } else {
+        match (has_slice, all_zero) {
+            (false, true) => crate::render::mesh::quad(
+                &draw_rect,
+                color,
+                [u_min[0], u_max[1]],
+                [u_max[0], u_min[1]],
+            ),
+            (false, false) => crate::render::mesh::rounded_rect(
+                &draw_rect,
+                color,
+                &radii,
+                [u_min[0], u_max[1]],
+                [u_max[0], u_min[1]],
+            ),
+            (true, true) => {
+                let resolved_slice = resolve_slice_percent(
+                    n.style.border_image_slice.as_ref().unwrap(),
+                    src_w,
+                    src_h,
+                );
+                crate::render::mesh::nine_slice(
+                    rect,
+                    color,
+                    &resolved_slice,
+                    src_w,
+                    src_h,
+                    [u_min[0], u_max[1]],
+                    [u_max[0], u_min[1]],
+                )
+            }
+            (true, false) => {
+                let resolved_slice = resolve_slice_percent(
+                    n.style.border_image_slice.as_ref().unwrap(),
+                    src_w,
+                    src_h,
+                );
+                crate::render::mesh::nine_slice_rounded(
+                    rect,
+                    color,
+                    &resolved_slice,
+                    &radii,
+                    src_w,
+                    src_h,
+                    [u_min[0], u_max[1]],
+                    [u_max[0], u_min[1]],
+                )
+            }
+        }
+    };
+    // 彩色边框激活（v1.8 修 border_color 死字段）。无背景图时把边框环形 mesh
+    // 拼进同一 payload：纯色 Container 背景与边框同走 program=0（白 1×1 纹理 ×
+    // 顶点色），单 draw call，边框三角序在背景之后——重叠的边框环区边框覆盖背景，
+    // 内部仅背景，视觉正确。filter（program=3）也走此路：filter 应作用于整元素含边框。
+    // ponytail: 有背景图（program=2/4）时边框需独立 draw call（边框纯色 vs 背景采样
+    // 图），本 task 不做——留待 border + bg-image 共存场景单独处理。
+    if !has_image {
+        // CSS border-style 默认 none：none 即便 border-width/color 已声明也不渲染边框。
+        if n.style.border_style != crate::style::resolved::BorderStyle::None {
+            if let Some(border_col) = n.style.border_color {
+                let bw = &n.style.taffy_style.border;
+                let widths = crate::render::border::BorderWidths {
+                    top: resolve_lp(bw.top),
+                    right: resolve_lp(bw.right),
+                    bottom: resolve_lp(bw.bottom),
+                    left: resolve_lp(bw.left),
+                };
+                if widths.top > 0.0
+                    || widths.right > 0.0
+                    || widths.bottom > 0.0
+                    || widths.left > 0.0
+                {
+                    let br = crate::render::border::border_ring(rect, &radii, widths, border_col);
+                    if !br.3.is_empty() {
+                        let base = v.len() as u32;
+                        v.extend_from_slice(&br.0);
+                        uvc.extend_from_slice(&br.1);
+                        col.extend_from_slice(&br.2);
+                        idx.extend(br.3.iter().map(|i| i + base));
+                    }
+                }
+            }
+        }
+    }
+    let program = if has_filter {
+        if has_image {
+            4u32
+        } else {
+            3u32
+        }
+    } else if has_image {
+        2u32
+    } else {
+        0u32
+    };
+    RenderNode {
+        node_id,
+        parent_id,
+        visible: true,
+        alpha,
+        color_tint,
+        world_matrix: wm,
+        blend: BlendMode::Normal,
+        mask_context: MaskContext(0),
+        sort_key: 0,
+        change_level: ChangeLevel::Full,
+        reuse_key: n.reuse_key,
+        effect: EffectBlock::default(),
+        payload: NodePayload::Mesh {
+            verts: v,
+            uvs: uvc,
+            colors: col,
+            indices: idx,
+            image_path,
+            program,
+            color_matrix,
+        },
+    }
+}
+
 /// （slice_px / src_px）。path 缺失或 w/h=0 → 64×64 兜底。
 pub fn build_render_nodes(
     scene: &Scene,
@@ -319,173 +503,19 @@ pub fn build_render_nodes(
         let alpha = anim.and_then(|a| a.opacity).unwrap_or(n.style.opacity);
         let color_tint = anim.and_then(|a| a.text_color).unwrap_or(n.style.color);
         let rn = match n.kind {
-            k if k.is_container() => {
-                let color = anim
-                    .and_then(|a| a.bg_color)
-                    .unwrap_or(n.style.background_color.unwrap_or([0.0, 0.0, 0.0, 0.0]));
-                let (image_path, src_w, src_h) = match &n.style.background_image {
-                    Some(url) => {
-                        let (sw, sh) = src_size(image_sizes, url);
-                        (Some(url.clone()), sw, sh)
-                    }
-                    None => (None, 64.0f32, 64.0f32),
-                };
-                let has_image = image_path.is_some();
-                let u_min = [0.0, 0.0];
-                let u_max = [1.0, 1.0];
-                let (rw, rh) = (rect.w, rect.h);
-                let radii = n.style.border_radius.as_corners(rw, rh);
-                let all_zero = radii.iter().all(|&(rx, ry)| rx <= 0.0 || ry <= 0.0);
-                let has_slice = n.style.border_image_slice.is_some();
-                // 渐变背景仅在没有背景图（互斥）、没有九宫格切片、直角 quad 时启用——
-                // quad_gradient 是 4 角独立色 quad，GPU 顶点色插值得 2 色线性渐变。
-                // 与圆角 / 切片共存需 gradient + rounded_rect/slice 混合 mesh，留待后续 task。
-                let use_gradient =
-                    !has_image && !has_slice && all_zero && n.style.background_gradient.is_some();
-                let draw_rect = if !has_slice
-                    && matches!(
-                        n.style.background_size,
-                        crate::style::resolved::BackgroundSize::Contain
-                    ) {
-                    let s = (rect.w / src_w.max(1.0)).min(rect.h / src_h.max(1.0));
-                    crate::scene::node::Rect {
-                        x: rect.x,
-                        y: rect.y,
-                        w: src_w.max(1.0) * s,
-                        h: src_h.max(1.0) * s,
-                    }
-                } else {
-                    *rect
-                };
-                let (mut v, mut uvc, mut col, mut idx) = if use_gradient {
-                    let g = n.style.background_gradient.expect("use_gradient 已校验");
-                    crate::render::mesh::quad_gradient(
-                        &draw_rect,
-                        gradient_corner_colors(g),
-                        [u_min[0], u_max[1]],
-                        [u_max[0], u_min[1]],
-                    )
-                } else {
-                    match (has_slice, all_zero) {
-                        (false, true) => crate::render::mesh::quad(
-                            &draw_rect,
-                            color,
-                            [u_min[0], u_max[1]],
-                            [u_max[0], u_min[1]],
-                        ),
-                        (false, false) => crate::render::mesh::rounded_rect(
-                            &draw_rect,
-                            color,
-                            &radii,
-                            [u_min[0], u_max[1]],
-                            [u_max[0], u_min[1]],
-                        ),
-                        (true, true) => {
-                            let resolved_slice = resolve_slice_percent(
-                                n.style.border_image_slice.as_ref().unwrap(),
-                                src_w,
-                                src_h,
-                            );
-                            crate::render::mesh::nine_slice(
-                                rect,
-                                color,
-                                &resolved_slice,
-                                src_w,
-                                src_h,
-                                [u_min[0], u_max[1]],
-                                [u_max[0], u_min[1]],
-                            )
-                        }
-                        (true, false) => {
-                            let resolved_slice = resolve_slice_percent(
-                                n.style.border_image_slice.as_ref().unwrap(),
-                                src_w,
-                                src_h,
-                            );
-                            crate::render::mesh::nine_slice_rounded(
-                                rect,
-                                color,
-                                &resolved_slice,
-                                &radii,
-                                src_w,
-                                src_h,
-                                [u_min[0], u_max[1]],
-                                [u_max[0], u_min[1]],
-                            )
-                        }
-                    }
-                };
-                // 彩色边框激活（v1.8 修 border_color 死字段）。无背景图时把边框环形 mesh
-                // 拼进同一 payload：纯色 Container 背景与边框同走 program=0（白 1×1 纹理 ×
-                // 顶点色），单 draw call，边框三角序在背景之后——重叠的边框环区边框覆盖背景，
-                // 内部仅背景，视觉正确。filter（program=3）也走此路：filter 应作用于整元素含边框。
-                // ponytail: 有背景图（program=2/4）时边框需独立 draw call（边框纯色 vs 背景采样
-                // 图），本 task 不做——留待 border + bg-image 共存场景单独处理。
-                if !has_image {
-                    // CSS border-style 默认 none：none 即便 border-width/color 已声明也不渲染边框。
-                    if n.style.border_style != crate::style::resolved::BorderStyle::None {
-                        if let Some(border_col) = n.style.border_color {
-                            let bw = &n.style.taffy_style.border;
-                            let widths = crate::render::border::BorderWidths {
-                                top: resolve_lp(bw.top),
-                                right: resolve_lp(bw.right),
-                                bottom: resolve_lp(bw.bottom),
-                                left: resolve_lp(bw.left),
-                            };
-                            if widths.top > 0.0
-                                || widths.right > 0.0
-                                || widths.bottom > 0.0
-                                || widths.left > 0.0
-                            {
-                                let br = crate::render::border::border_ring(
-                                    rect, &radii, widths, border_col,
-                                );
-                                if !br.3.is_empty() {
-                                    let base = v.len() as u32;
-                                    v.extend_from_slice(&br.0);
-                                    uvc.extend_from_slice(&br.1);
-                                    col.extend_from_slice(&br.2);
-                                    idx.extend(br.3.iter().map(|i| i + base));
-                                }
-                            }
-                        }
-                    }
-                }
-                let program = if has_filter {
-                    if has_image {
-                        4u32
-                    } else {
-                        3u32
-                    }
-                } else if has_image {
-                    2u32
-                } else {
-                    0u32
-                };
-                RenderNode {
-                    node_id,
-                    parent_id,
-                    visible: true,
-                    alpha,
-                    color_tint,
-                    world_matrix: wm,
-                    blend: BlendMode::Normal,
-                    mask_context: MaskContext(0),
-                    sort_key: 0,
-                    change_level: ChangeLevel::Full,
-                    reuse_key: n.reuse_key,
-                    effect: EffectBlock::default(),
-                    payload: NodePayload::Mesh {
-                        verts: v,
-                        uvs: uvc,
-                        colors: col,
-                        indices: idx,
-                        image_path,
-                        program,
-                        color_matrix,
-                    },
-                }
-            }
+            k if k.is_container() => build_container_mesh(
+                n,
+                node_id,
+                parent_id,
+                rect,
+                wm,
+                alpha,
+                color_tint,
+                has_filter,
+                color_matrix,
+                anim,
+                image_sizes,
+            ),
             NodeKind::Image => {
                 let src = scene.image_srcs.get(&n.id).cloned().unwrap_or_default();
                 let image_path = Some(src.clone());
@@ -614,6 +644,97 @@ pub fn build_render_nodes(
                     true,
                 );
                 continue; // 直接推完，跳过末尾的 id_to_pos / push。
+            }
+            NodeKind::TextField
+            | NodeKind::PasswordField
+            | NodeKind::SearchField
+            | NodeKind::TextArea => {
+                // 控件叶子节点：先画背景框（与 Container 相同），再叠加 value/placeholder 文字。
+                // 背景 RenderNode 先进 nodes，占住 id_to_pos（供 batch 子节点查找）；
+                // 文字走 push_text_meshes 追加，register_id_map=false 避免覆盖背景位置。
+                let bg_rn = build_container_mesh(
+                    n,
+                    node_id,
+                    parent_id,
+                    rect,
+                    wm,
+                    alpha,
+                    color_tint,
+                    has_filter,
+                    color_matrix,
+                    anim,
+                    image_sizes,
+                );
+                nodes.push(bg_rn);
+                id_to_pos.insert(n.id, nodes.len() - 1);
+                // 取控件状态；无状态时跳过文字渲染（防御：控件未初始化或误入此臂）。
+                let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
+                    scene.controls.get(n.id)
+                else {
+                    continue;
+                };
+                // 显示文本：value 优先，空时退到 placeholder。
+                // PasswordField 先经 transform_display_value 掩码为 '•' × 字符数。
+                let display = if e.value.is_empty() {
+                    e.placeholder.clone()
+                } else {
+                    crate::scene::control::transform_display_value(n.kind, &e.value)
+                };
+                let s = &n.style;
+                let stack = fonts.stack_for(s.font_family.as_deref());
+                let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
+                let off_left =
+                    resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
+                let off_right = resolve_lp(s.taffy_style.border.right)
+                    + resolve_lp(s.taffy_style.padding.right);
+                let off_top =
+                    resolve_lp(s.taffy_style.border.top) + resolve_lp(s.taffy_style.padding.top);
+                let content_w = (rect.w - off_left - off_right).max(0.0);
+                let mut layout = scene
+                    .text_layouts
+                    .get(n.id.index())
+                    .cloned()
+                    .flatten()
+                    .unwrap_or_else(|| {
+                        measure_text(
+                            &display,
+                            s.font_size,
+                            s.line_height,
+                            s.letter_spacing,
+                            s.text_align,
+                            s.white_space_nowrap,
+                            Some(content_w),
+                            &stack,
+                            text_color,
+                            crate::text::rich::weight_from_font_weight(s.font_weight),
+                        )
+                    });
+                if off_left != 0.0 || off_top != 0.0 {
+                    bake_content_offset(&mut layout, off_left, off_top);
+                }
+                let meshes = build_text_mesh(
+                    &layout,
+                    atlas,
+                    fonts,
+                    rect,
+                    &n.style.text_effects,
+                    n.style.background_gradient,
+                    n.style.background_clip_text,
+                );
+                push_text_meshes(
+                    &mut nodes,
+                    &mut id_to_pos,
+                    meshes,
+                    n,
+                    node_id,
+                    node_id,
+                    parent_id,
+                    alpha,
+                    text_color,
+                    wm,
+                    false, // 背景已注册 n.id → id_to_pos，文字不重复注册
+                );
+                continue;
             }
             _ => RenderNode {
                 node_id,

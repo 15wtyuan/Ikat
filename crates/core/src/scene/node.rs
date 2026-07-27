@@ -359,6 +359,9 @@ pub struct Composition {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditState {
     pub value: String,
+    /// 占位文本：value 为空时渲染此文本代替。来自 HTML `placeholder` 属性，
+    /// 打包期 bake 进 EditInit，instantiate 传入运行时 EditState。
+    pub placeholder: String,
     pub cursor: usize, // [0, value.len()]
     pub anchor: usize, // 选区锚；选区 = [min(anchor,cursor), max]
     pub composition: Option<Composition>,
@@ -372,11 +375,16 @@ pub struct EditState {
 impl EditState {
     /// 从打包期 `EditInit` 构造运行时 `EditState`。`cursor`/`anchor` 初始设在
     /// value 末尾（光标在文字最后），composition 初始 None，视觉标记皆默认值。
-    /// `_ph` 是 placeholder（暂存控制视图用，不进入 EditState 自身）。
-    pub fn from_init(value: String, _ph: String, max_length: usize, readonly: bool) -> Self {
+    pub fn from_init(
+        value: String,
+        placeholder: String,
+        max_length: usize,
+        readonly: bool,
+    ) -> Self {
         let cursor = value.len();
         Self {
             value,
+            placeholder,
             cursor,
             anchor: cursor,
             composition: None,

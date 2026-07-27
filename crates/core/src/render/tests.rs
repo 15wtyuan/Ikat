@@ -3421,3 +3421,201 @@ fn border_style_none_renders_no_border_even_with_width_and_color() {
         "border_style=None 不应渲染边框几何（即使 width+color 已设）"
     );
 }
+
+// ── TextField / PasswordField / SearchField / TextArea 渲染 ──
+
+/// 构造一个带控件状态的叶子节点 scene（TextField/PasswordField/SearchField/TextArea）。
+/// node_id=0，layout_rect 200×50，无背景色。
+fn make_scene_with_text_control(kind: NodeKind, state: ControlState) -> (Scene, NodeId) {
+    let mut n = Node::default();
+    n.id = NodeId(0);
+    n.kind = kind;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 50.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let root = scene.roots[0];
+    scene.controls.ensure(root, state);
+    (scene, root)
+}
+
+#[test]
+fn textfield_renders_value_text() {
+    let (mut scene, id) = make_scene_with_text_control(
+        NodeKind::TextField,
+        ControlState::TextField(EditState::from_init("hello".into(), "".into(), 0, false)),
+    );
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // TextField 产背景(program=0) + 文字(program=1) 两个 RenderNode。
+    // 验证文字节点存在且非空：node_id=0 且 program=1 的 Mesh。
+    let has_text = frame.nodes.iter().any(|rn| {
+        rn.node_id == id.0
+            && matches!(
+                &rn.payload,
+                NodePayload::Mesh {
+                    program: 1,
+                    verts,
+                    ..
+                } if !verts.is_empty()
+            )
+    });
+    assert!(
+        has_text,
+        "TextField value='hello' must produce non-empty text glyph mesh (program=1)"
+    );
+}
+
+#[test]
+fn password_field_renders_masked_value() {
+    // PasswordField value="ab" → 渲染为 "••"（2 个 '•' 字符）。
+    let (mut scene, id) = make_scene_with_text_control(
+        NodeKind::PasswordField,
+        ControlState::TextField(EditState::from_init("ab".into(), "".into(), 0, false)),
+    );
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // 掩码后仍产字符（'•' × 2 → 2 个 glyph），program=1。
+    let has_text = frame.nodes.iter().any(|rn| {
+        rn.node_id == id.0
+            && matches!(
+                &rn.payload,
+                NodePayload::Mesh {
+                    program: 1,
+                    verts,
+                    ..
+                } if !verts.is_empty()
+            )
+    });
+    assert!(
+        has_text,
+        "PasswordField value='ab' must render masked glyphs (●●)"
+    );
+}
+
+#[test]
+fn textfield_empty_value_renders_placeholder() {
+    // value 为空 → 渲染 placeholder 文字。
+    let (mut scene, id) = make_scene_with_text_control(
+        NodeKind::TextField,
+        ControlState::TextField(EditState::from_init(
+            "".into(),
+            "Search...".into(),
+            0,
+            false,
+        )),
+    );
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // placeholder 文字也应产 glyph mesh。
+    let has_text = frame.nodes.iter().any(|rn| {
+        rn.node_id == id.0
+            && matches!(
+                &rn.payload,
+                NodePayload::Mesh {
+                    program: 1,
+                    verts,
+                    ..
+                } if !verts.is_empty()
+            )
+    });
+    assert!(
+        has_text,
+        "TextField with empty value must render placeholder 'Search...'"
+    );
+}
+
+#[test]
+fn search_field_renders_value_text() {
+    // SearchField 是 TextField 的变体，渲染行为与 TextField 一致。
+    let (mut scene, id) = make_scene_with_text_control(
+        NodeKind::SearchField,
+        ControlState::TextField(EditState::from_init("query".into(), "".into(), 0, false)),
+    );
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let has_text = frame.nodes.iter().any(|rn| {
+        rn.node_id == id.0
+            && matches!(
+                &rn.payload,
+                NodePayload::Mesh {
+                    program: 1,
+                    verts,
+                    ..
+                } if !verts.is_empty()
+            )
+    });
+    assert!(
+        has_text,
+        "SearchField value='query' must produce text glyph mesh"
+    );
+}
+
+#[test]
+fn textarea_renders_value_text() {
+    // TextArea 多行输入也渲染 value。
+    let (mut scene, id) = make_scene_with_text_control(
+        NodeKind::TextArea,
+        ControlState::TextArea(EditState::from_init(
+            "line1\nline2".into(),
+            "".into(),
+            0,
+            false,
+        )),
+    );
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let has_text = frame.nodes.iter().any(|rn| {
+        rn.node_id == id.0
+            && matches!(
+                &rn.payload,
+                NodePayload::Mesh {
+                    program: 1,
+                    verts,
+                    ..
+                } if !verts.is_empty()
+            )
+    });
+    assert!(
+        has_text,
+        "TextArea value='line1\\nline2' must produce text glyph mesh"
+    );
+}
