@@ -614,8 +614,10 @@ fn sanitize_str(kind: NodeKind, s: &str) -> String {
 
 /// 在 cursor 处插入文本（若有选区则先删选区再插）。成功改动返回 true，否则 false。
 ///
-/// 步骤：readonly → no-op；sanitize 输入（单行框滤换行）；空串插入 no-op；有选区先 delete_selection；
-/// max_length 校验（按字符数，超额拒插）；insert_str 后 cursor/anchor 同步到新末尾，
+/// 步骤：readonly → no-op；sanitize 输入（单行框滤换行）；空串插入 no-op；
+/// max_length 校验须在 delete_selection 之前——按「删后长度 = 当前 - 选区 + 新增」算，
+/// 超额则干净拒绝（不删选区、不改 value），否则被拒的插入会静默丢掉用户选区；
+/// 有选区则 delete_selection；insert_str 后 cursor/anchor 同步到新末尾，
 /// 重置光标闪烁 timer（显示光标）。返回 true 表示 value 已变（调用方据此产 change 事件）。
 pub fn insert_text(e: &mut EditState, kind: NodeKind, text: &str) -> bool {
     if e.readonly {
@@ -625,14 +627,18 @@ pub fn insert_text(e: &mut EditState, kind: NodeKind, text: &str) -> bool {
     if text.is_empty() {
         return false;
     }
-    delete_selection(e);
+    // max_length 校验在任何 mutation 之前：post-delete 长度 = 当前字符数 - 选区字符数 + 新增字符数。
+    // selection_range 返回的字节区间必落在 char 边界上，可安全切片计字符数。
     if e.max_length > 0 {
+        let (sel_b, sel_e) = e.selection_range();
+        let sel_chars = e.value[sel_b..sel_e].chars().count();
         let cur = e.value.chars().count();
         let add = text.chars().count();
-        if cur + add > e.max_length {
+        if cur - sel_chars + add > e.max_length {
             return false;
         }
     }
+    delete_selection(e);
     e.value.insert_str(e.cursor, &text);
     e.cursor += text.len();
     e.anchor = e.cursor;
@@ -1804,5 +1810,19 @@ mod tests {
         e.anchor = 2;
         insert_text(&mut e, NodeKind::TextField, "c");
         assert_eq!(e.value, "ab");
+    }
+
+    #[test]
+    fn insert_over_max_after_selection_rejects_cleanly() {
+        // value="hello"(5 chars), 选区 [1,4)="ell"(3), max_length=2。插 "XYZ"(3) 会超 2 →
+        // 必须干净拒绝：不删选区、不改 value、selection 完好。
+        // 回归契约：max_length 校验须在 delete_selection 之前，否则被拒插入会静默丢掉选区。
+        let mut e = EditState::from_init("hello".into(), "".into(), 2, false);
+        e.anchor = 1;
+        e.cursor = 4;
+        assert!(!insert_text(&mut e, NodeKind::TextField, "XYZ"));
+        assert_eq!(e.value, "hello"); // value 未变
+        assert_eq!(e.anchor, 1); // 选区完好
+        assert_eq!(e.cursor, 4);
     }
 }
