@@ -105,8 +105,10 @@ public class ShowcaseRunner : MonoBehaviour
 
     /// settings 页 tab 切换：HTML 的 role=tab/tabpanel 模式依赖运行时 JS 改 panel display，
     /// LoomGUI 运行时无 JS，这里订阅 tab 按钮 Clicked → 隐藏当前 panel + 显示目标 panel。
-    /// panel 默认 display:flex（.panel CSS），隐藏用 display:none。改 Style.Display 攒批下帧
-    /// flush 到 core 触发 solve 重排（display 变是低频 UI 操作，solve 代价可接受）。
+    /// panel 是裸 <div>（.panel CSS 无 display 声明）→ 默认 display:block（子元素 page-title/
+    /// page-desc/field 垂直堆叠）。显示用 DisplayMode.Block，**不能用 Flex**——Flex 默认
+    /// flex-direction:row 会让 panel 的子元素水平排列，布局错乱。隐藏用 DisplayMode.None。
+    /// 改 Style.Display 攒批下帧 flush 到 core 触发 solve 重排（display 变是低频 UI 操作）。
     void WireSettingsTabs(Container page, string pageName)
     {
         if (pageName != "settings") return;
@@ -134,7 +136,7 @@ public class ShowcaseRunner : MonoBehaviour
             {
                 if (active[0] == target) return;   // 已是当前页，no-op
                 if (active[0] != null) active[0].Style.Display = DisplayMode.None;
-                target.Style.Display = DisplayMode.Flex;
+                target.Style.Display = DisplayMode.Block;
                 active[0] = target;                // 后续点击以新 active 为基准
             };
         }
