@@ -714,6 +714,9 @@ impl Stage {
         // 核心知图尺寸（打包期 PNG IHDR 静态，存 Stage.image_sizes）。solve 查尺寸表算
         // Image intrinsic（三档：CSS > 真实像素 > 64×64）。不知图集（运行时纹理/UV 归 Unity）。
         solve(scene, &self.fonts, self.root_size, &self.image_sizes);
+        // 5.5 measure 文本控件显示文本——需 solve 产出的 layout_rect.w 定 content width，
+        //     且须在 render 前完成（光标命中测试/几何依赖 TextLayout 缓存）。
+        crate::scene::control::measure_text_controls(scene, &self.fonts);
         // 6. content_size 填充（solve 后 content_size/viewport/overlap）
         crate::scroll::refresh_content_sizes(scene);
         // 7. compute_world_transforms（读 rematch 后 transform + scroll_pos → world）
@@ -799,6 +802,77 @@ mod tests {
             s.get_node_computed_style(crate::scene::NodeId::INVALID),
             None,
             "invalid node -> None"
+        );
+    }
+
+    #[test]
+    fn tick_measures_textfield_layout_after_solve() {
+        // TextField TextLayout 应在 tick_and_render 的 solve 后即 measure 并缓存，
+        // 而非推迟到 render 阶段 lazily 计算——光标命中（Task 7）和几何（Task 12）
+        // 在 render 前就需 TextLayout。
+        let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+        let mut stage = Stage::new((200.0, 100.0)).unwrap();
+        stage
+            .register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+            .unwrap();
+        // 用 create_node_from_template 直接建 TextField（kind_from_tag 白名单不含 input 标签）。
+        stage.ensure_scene();
+        let scene = stage.scene.as_mut().unwrap();
+        let root = crate::scene::dynamic::create_root(scene, "div", "").unwrap();
+        let tf = crate::scene::dynamic::create_node_from_template(
+            scene,
+            crate::scene::node::NodeKind::TextField,
+            crate::style::resolved::ResolvedStyle::default(),
+            Some(crate::asset::ControlInit::TextField(
+                crate::asset::EditInit {
+                    value: "hello".into(),
+                    placeholder: String::new(),
+                    max_length: 0,
+                    readonly: false,
+                },
+            )),
+        );
+        crate::scene::dynamic::append_child(scene, root, tf).unwrap();
+        stage.tick_and_render();
+        // solve 后 measure_text_controls 已写 text_layouts —— 不应为空。
+        let scene = stage.scene.as_ref().unwrap();
+        assert!(
+            scene.text_layouts[tf.index()].is_some(),
+            "TextField TextLayout must be measured at layout stage (after solve), not lazily at render"
+        );
+    }
+
+    #[test]
+    fn tick_skips_empty_textfield_placeholder_at_layout() {
+        // value 为空时不缓存 TextLayout——render 阶段 lazy fallback 会测 placeholder。
+        // 若缓存空串 layout，render 的 unwrap_or_else 不触发，placeholder 无法显示。
+        let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+        let mut stage = Stage::new((200.0, 100.0)).unwrap();
+        stage
+            .register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+            .unwrap();
+        stage.ensure_scene();
+        let scene = stage.scene.as_mut().unwrap();
+        let root = crate::scene::dynamic::create_root(scene, "div", "").unwrap();
+        let tf = crate::scene::dynamic::create_node_from_template(
+            scene,
+            crate::scene::node::NodeKind::TextField,
+            crate::style::resolved::ResolvedStyle::default(),
+            Some(crate::asset::ControlInit::TextField(
+                crate::asset::EditInit {
+                    value: String::new(),
+                    placeholder: "enter text".into(),
+                    max_length: 0,
+                    readonly: false,
+                },
+            )),
+        );
+        crate::scene::dynamic::append_child(scene, root, tf).unwrap();
+        stage.tick_and_render();
+        let scene = stage.scene.as_ref().unwrap();
+        assert!(
+            scene.text_layouts[tf.index()].is_none(),
+            "empty value TextField should NOT cache TextLayout — render lazy fallback handles placeholder"
         );
     }
 }

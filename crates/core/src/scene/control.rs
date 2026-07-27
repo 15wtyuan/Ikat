@@ -92,6 +92,70 @@ pub fn find_child_by_class(scene: &Scene, parent: NodeId, class: &str) -> Option
     })
 }
 
+/// 在 layout 阶段提前 measure 文本控件的显示文本 TextLayout，写入 `scene.text_layouts`。
+///
+/// 正常文本节点的 TextLayout 在 render 阶段 lazily 计算（`unwrap_or_else(measure_text)`），
+/// 但文本控件需要在 render 前就拿到 TextLayout：光标命中测试（Task 7）需 glyph 位置、
+/// 光标几何（Task 12）需行高/基线，都依赖已算好的 TextLayout。
+///
+/// 在 solve 后调用——此时 `layout_rect.w` 已就位（content width = rect.w - border - padding），
+/// `ControlState` 已在之前步骤同步（值/placeholder 在 sync_control_visuals 无关——TextField
+/// 视觉同步委托给 TextField beam，此处直接用 `transform_display_value` 取显示文本）。
+///
+/// 写入的 TextLayout 含 border/padding 偏移（`bake_content_offset`），render 阶段直接从缓存
+/// 取用，不再重测。placeholder 场景（value 为空）：此处仍用 value 测（空串 → 0 宽零高 layout），
+/// render 阶段的 lazy fallback 在 value 为空时补测 placeholder——两条路径各自处理自己的显示逻辑，
+/// layout 阶段 measure 只是预热缓存（命中率 > 布局阶段缓存零高 placeholder 无价值）。
+pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::FontTable) {
+    let ids: Vec<NodeId> = scene
+        .controls
+        .0
+        .iter()
+        .filter(|(_, s)| matches!(s, ControlState::TextField(_) | ControlState::TextArea(_)))
+        .map(|(&id, _)| id)
+        .collect();
+    for id in ids {
+        let Some(n) = scene.get(id) else {
+            continue;
+        };
+        let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get(id)
+        else {
+            continue;
+        };
+        let display = transform_display_value(n.kind, &e.value);
+        // value 为空时跳过缓存——render 阶段会用 placeholder 重测（空串 TextLayout 零高，
+        // 缓存后 render 的 unwrap_or_else 不触发，placeholder 无法显示）。
+        if display.is_empty() {
+            continue;
+        }
+        let s = &n.style;
+        let stack = fonts.stack_for(s.font_family.as_deref());
+        let off_left = crate::render::resolve_lp(s.taffy_style.border.left)
+            + crate::render::resolve_lp(s.taffy_style.padding.left);
+        let off_right = crate::render::resolve_lp(s.taffy_style.border.right)
+            + crate::render::resolve_lp(s.taffy_style.padding.right);
+        let content_w = (n.layout_rect.w - off_left - off_right).max(0.0);
+        let off_top = crate::render::resolve_lp(s.taffy_style.border.top)
+            + crate::render::resolve_lp(s.taffy_style.padding.top);
+        let mut layout = crate::text::layout::measure_text(
+            &display,
+            s.font_size,
+            s.line_height,
+            s.letter_spacing,
+            s.text_align,
+            s.white_space_nowrap,
+            Some(content_w),
+            &stack,
+            s.color,
+            crate::text::rich::weight_from_font_weight(s.font_weight),
+        );
+        if off_left != 0.0 || off_top != 0.0 {
+            crate::render::bake_content_offset(&mut layout, off_left, off_top);
+        }
+        scene.text_layouts[id.index()] = Some(layout);
+    }
+}
+
 /// 把控件状态同步到其框架内部视觉子节点的 inline style。
 ///
 /// 这是状态→视觉的单向桥：上层逻辑改 `ControlState`（交互/Tween/C# API），core 据此

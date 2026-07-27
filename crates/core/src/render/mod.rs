@@ -1085,7 +1085,7 @@ fn propagate_text_sub_page_sort_keys(
 ///   无法解析百分比的 padding/border。`style::mapping::parse_four` 对 padding/border
 ///   只产 `Length`（裸数字/px），故实际不会命中 Percent 分支；若未来 CSS 允许百分比
 ///   padding/border，需在 layout 阶段把解析结果写回 ResolvedStyle。
-fn resolve_lp(lp: LengthPercentage) -> f32 {
+pub(crate) fn resolve_lp(lp: LengthPercentage) -> f32 {
     // taffy 0.12：LengthPercentage 是 pub struct(CompactLength) tagged pointer，
     // 内字段私有无法 match 变体——用 into_raw + tag 解构（仅 Length 分支返回值）。
     let cl = lp.into_raw();
@@ -1098,7 +1098,11 @@ fn resolve_lp(lp: LengthPercentage) -> f32 {
 
 /// 烤 content 偏移进 TextLayout 每个 glyph 的 (x, y)（pen = GO-local）。
 /// layout 是刚由 measure_text 产的 owned 值，直接 mutate。
-fn bake_content_offset(layout: &mut crate::text::layout::TextLayout, off_x: f32, off_y: f32) {
+pub(crate) fn bake_content_offset(
+    layout: &mut crate::text::layout::TextLayout,
+    off_x: f32,
+    off_y: f32,
+) {
     for line in &mut layout.lines {
         // line.y/baseline 也烤 off_y：字形 top = line.baseline - bearing + rect.y 走 line.baseline
         // （不走 g.y），不烤则文字缺 padding/border top（顶到盒顶，非 padding 内）。
