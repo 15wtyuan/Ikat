@@ -1,6 +1,6 @@
-//! 包格式（.pkg.bin，当前 version=24）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=25）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! v25：ControlInit 加 TextField/TextArea 变体（bincode 布局变，旧 v24 pkg 加载报 TooOld）。
 //! v24：TemplateNode 加 control_init 字段（bincode 布局变，旧 v23 pkg 加载报 TooOld）。
-//! v23：ResolvedStyle 加 border_style 字段（bincode 布局变，旧 v22 pkg 加载报 TooOld）。
 //!
 //! 多组件格式：一个 pkg.bin = 多个具名组件（ComponentTable 切分）。
 //! 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponent(DynamicRules)。
@@ -19,9 +19,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 24; // v24: TemplateNode.control_init (bincode layout change)
-pub(crate) const MIN_VERSION: u32 = 24;
-pub(crate) const MAX_VERSION: u32 = 24;
+pub const PKG_FORMAT_VERSION: u32 = 25; // v25: ControlInit TextField/TextArea (bincode layout change)
+pub(crate) const MIN_VERSION: u32 = 25;
+pub(crate) const MAX_VERSION: u32 = 25;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────
@@ -39,6 +39,15 @@ pub struct ComponentTemplate {
     pub name: String,
     pub nodes: Vec<TemplateNode>,
     pub dynamic_rules: DynamicRuleTable,
+}
+
+/// 文本控件初始值（TextField/TextArea 共用，从 HTML value/placeholder 属性 bake）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EditInit {
+    pub value: String,
+    pub placeholder: String,
+    pub max_length: usize, // 0 = 无限
+    pub readonly: bool,
 }
 
 /// 控件初始值（从 HTML 属性 bake，按 NodeKind 分派）。打包期 bridge 提取 → 进
@@ -64,6 +73,10 @@ pub enum ControlInit {
         max: f32,
         step: f32,
     },
+    /// 单行文本输入（TextField）。EditInit 含 value/placeholder/max_length/readonly。
+    TextField(EditInit),
+    /// 多行文本输入（TextArea）。EditInit 含 value/placeholder/max_length/readonly。
+    TextArea(EditInit),
 }
 
 /// 模板节点：序列化态（instantiate 时 build 成 live Node）。

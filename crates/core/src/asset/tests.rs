@@ -631,3 +631,47 @@ fn pkg_v24_rejects_v23() {
         "v23 pkg must be rejected as TooOld after v24 bump, got {err:?}"
     );
 }
+
+// ── v25: TextField/TextArea ──────────────────────────────────────────
+
+/// v25: EditInit 经 bincode serialize/deserialize 往返保真。EditInit 是 TextField 和 TextArea
+/// 共用的载荷结构，锁定其序列化布局稳定性，防后续重构破坏 pkg.bin 兼容。
+#[test]
+fn pkg_v25_edit_init_roundtrip() {
+    let init = ControlInit::TextField(EditInit {
+        value: "hi".into(),
+        placeholder: "name".into(),
+        max_length: 20,
+        readonly: false,
+    });
+    let bytes = bincode::serialize(&init).expect("ControlInit::TextField serializable");
+    let back: ControlInit =
+        bincode::deserialize(&bytes).expect("ControlInit::TextField deserializable");
+    assert_eq!(init, back);
+
+    // TextArea 同样路径
+    let ta = ControlInit::TextArea(EditInit {
+        value: "line1\nline2".into(),
+        placeholder: "enter text".into(),
+        max_length: 0,
+        readonly: true,
+    });
+    let bytes = bincode::serialize(&ta).expect("ControlInit::TextArea serializable");
+    let back: ControlInit = bincode::deserialize(&bytes).expect("deserializable");
+    assert_eq!(ta, back);
+}
+
+/// v25: version=24 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=25，无迁移器）。
+/// ControlInit 新增 TextField/TextArea 变体改变 bincode layout，旧 v24 fixture 不能
+/// 半读半坏。
+#[test]
+fn pkg_v25_rejects_v24() {
+    let mut bad = vec![];
+    bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
+    bad.extend_from_slice(&24u32.to_le_bytes()); // v24 < MIN_VERSION=25
+    let err = read_package(&bad);
+    assert!(
+        matches!(err, Err(PkgError::TooOld(24))),
+        "v24 pkg must be rejected as TooOld after v25 bump, got {err:?}"
+    );
+}

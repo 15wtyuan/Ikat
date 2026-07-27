@@ -251,6 +251,10 @@ pub fn create_node_from_template(
                     dragging: false,
                 }
             }
+            // TextField/TextArea: ControlState + runtime side table deferred to TextField beam.
+            ControlInit::TextField(_) | ControlInit::TextArea(_) => {
+                return id;
+            }
         };
         scene.controls.ensure(id, state);
         // 控件即容器：instantiate 后注入框架内部视觉子节点（.loom-fill/.loom-track/...）。
