@@ -16,7 +16,7 @@ use loomgui_pkg::bridge::bridge;
 /// 非围栏校验本身。
 fn run_bridge(html: &str) -> Vec<TemplateNode> {
     let wrapped = format!(
-        r#"<style>progress,input[type="range"],input[type="checkbox"],input[type="radio"]{{background:#ddd}}</style>{html}"#
+        r#"<style>progress,input[type="range"],input[type="checkbox"],input[type="radio"],input[type="text"],input[type="password"],input[type="search"],textarea{{background:#ddd}}</style>{html}"#
     );
     let parsed = loomgui_fence::parse_template(&wrapped, "test.html");
     assert!(
@@ -137,4 +137,69 @@ fn bridge_extracts_radio_name() {
             ref name
         }) if name == "grp"
     ));
+}
+
+#[test]
+fn bridge_extracts_text_attrs() {
+    let html = r#"<input type="text" value="bob" placeholder="name" maxlength="20">"#;
+    let node = &run_bridge(html)[0];
+    assert_eq!(node.kind, NodeKind::TextField);
+    match &node.control_init {
+        Some(ControlInit::TextField(e)) => {
+            assert_eq!(e.value, "bob");
+            assert_eq!(e.placeholder, "name");
+            assert_eq!(e.max_length, 20);
+            assert!(!e.readonly);
+        }
+        other => panic!("expected TextField, got {:?}", other),
+    }
+}
+
+#[test]
+fn bridge_extracts_textarea_attrs() {
+    let html = r#"<textarea placeholder="body" maxlength="500">hello</textarea>"#;
+    let node = &run_bridge(html)[0];
+    assert_eq!(node.kind, NodeKind::TextArea);
+    match &node.control_init {
+        Some(ControlInit::TextArea(e)) => {
+            assert_eq!(e.value, "hello");
+            assert_eq!(e.placeholder, "body");
+            assert_eq!(e.max_length, 500);
+            assert!(!e.readonly);
+        }
+        other => panic!("expected TextArea, got {:?}", other),
+    }
+}
+
+#[test]
+fn bridge_extracts_password_attrs() {
+    let html =
+        r#"<input type="password" value="secret" placeholder="pwd" maxlength="32" readonly>"#;
+    let node = &run_bridge(html)[0];
+    assert_eq!(node.kind, NodeKind::PasswordField);
+    match &node.control_init {
+        Some(ControlInit::TextField(e)) => {
+            assert_eq!(e.value, "secret");
+            assert_eq!(e.placeholder, "pwd");
+            assert_eq!(e.max_length, 32);
+            assert!(e.readonly);
+        }
+        other => panic!("expected TextField (password variant), got {:?}", other),
+    }
+}
+
+#[test]
+fn bridge_extracts_search_attrs() {
+    let html = r#"<input type="search" value="query" placeholder="search..." maxlength="100">"#;
+    let node = &run_bridge(html)[0];
+    assert_eq!(node.kind, NodeKind::SearchField);
+    match &node.control_init {
+        Some(ControlInit::TextField(e)) => {
+            assert_eq!(e.value, "query");
+            assert_eq!(e.placeholder, "search...");
+            assert_eq!(e.max_length, 100);
+            assert!(!e.readonly);
+        }
+        other => panic!("expected TextField (search variant), got {:?}", other),
+    }
 }

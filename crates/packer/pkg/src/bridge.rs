@@ -1,9 +1,9 @@
 //! IrTree → core TemplateNode 桥（生产级，替代 fence/tests/cascade_spike.rs 的 throwaway mini-bridge）。
 //! fence parse_template 停在 IrTree；本模块是第一处把 IrTree 翻译成 core 打包结构的代码。
 
-use loomgui_core::asset::{ControlInit, TemplateNode};
+use loomgui_core::asset::{ControlInit, EditInit, TemplateNode};
 use loomgui_core::scene::NodeKind;
-use loomgui_fence::ir::{IrElement, IrNodeKind};
+use loomgui_fence::ir::{IrElement, IrNodeKind, IrTree};
 use loomgui_fence::schema::tag::SemanticKind;
 use loomgui_fence::ParsedTemplate;
 
@@ -49,7 +49,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                 } else {
                     None
                 };
-                let control_init = extract_control_init(kind, el);
+                let control_init = extract_control_init(kind, el, ir_idx, &parsed.tree);
                 nodes.push(TemplateNode {
                     kind,
                     style: parsed.styles.get(ir_idx).cloned().unwrap_or_default(),
@@ -146,8 +146,25 @@ fn attr(el: &IrElement, name: &str) -> Option<String> {
 /// - Toggle/RadioButton：始终产 Some，显式记录勾选状态（checked 缺省 false）。
 ///   radio name 缺省空串。
 ///
+/// 从 IrTree 中收集某个元素的所有直接文本子节点内容，拼接成单个字符串。
+/// 用于 `<textarea>`：按 HTML 规范 value 来自元素文本内容，非 value 属性。
+fn collect_element_text(ir_idx: usize, tree: &IrTree) -> String {
+    let mut out = String::new();
+    for child_id in &tree.nodes[ir_idx].children {
+        if let IrNodeKind::Text(s) = &tree.nodes[child_id.0].kind {
+            out.push_str(s);
+        }
+    }
+    out
+}
+
 /// 非 control 节点返回 None。
-fn extract_control_init(kind: NodeKind, el: &IrElement) -> Option<ControlInit> {
+fn extract_control_init(
+    kind: NodeKind,
+    el: &IrElement,
+    ir_idx: usize,
+    tree: &IrTree,
+) -> Option<ControlInit> {
     match kind {
         NodeKind::ProgressBar => {
             // value 缺席 = indeterminate（必须先判 is_some 再 parse，否则 indeterminate 误判 false）。
@@ -191,6 +208,25 @@ fn extract_control_init(kind: NodeKind, el: &IrElement) -> Option<ControlInit> {
             checked: attr(el, "checked").is_some(),
             name: attr(el, "name").unwrap_or_default(),
         }),
+        NodeKind::TextField | NodeKind::PasswordField | NodeKind::SearchField => {
+            Some(ControlInit::TextField(EditInit {
+                value: attr(el, "value").unwrap_or_default().to_string(),
+                placeholder: attr(el, "placeholder").unwrap_or_default().to_string(),
+                max_length: attr(el, "maxlength")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0),
+                readonly: attr(el, "readonly").is_some(),
+            }))
+        }
+        NodeKind::TextArea => Some(ControlInit::TextArea(EditInit {
+            // textarea 按 HTML 规范用元素文本内容而非 value 属性。
+            value: collect_element_text(ir_idx, tree),
+            placeholder: attr(el, "placeholder").unwrap_or_default().to_string(),
+            max_length: attr(el, "maxlength")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+            readonly: attr(el, "readonly").is_some(),
+        })),
         _ => None,
     }
 }
