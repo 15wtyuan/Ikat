@@ -16,7 +16,7 @@
 
 use crate::asset::ControlInit;
 use crate::scene::node::{
-    ControlState, Node, NodeFlags, NodeId, NodeInteraction, NodeKind, Rect, Scene,
+    ControlState, EditState, Node, NodeFlags, NodeId, NodeInteraction, NodeKind, Rect, Scene,
 };
 use crate::style::dynamic::{inline_bit, InlineSet};
 use crate::style::mapping::apply_decl;
@@ -251,10 +251,18 @@ pub fn create_node_from_template(
                     dragging: false,
                 }
             }
-            // TextField/TextArea: ControlState + runtime side table deferred to TextField beam.
-            ControlInit::TextField(_) | ControlInit::TextArea(_) => {
-                return id;
-            }
+            ControlInit::TextField(e) => ControlState::TextField(EditState::from_init(
+                e.value.clone(),
+                e.placeholder.clone(),
+                e.max_length,
+                e.readonly,
+            )),
+            ControlInit::TextArea(e) => ControlState::TextArea(EditState::from_init(
+                e.value.clone(),
+                e.placeholder.clone(),
+                e.max_length,
+                e.readonly,
+            )),
         };
         scene.controls.ensure(id, state);
         // 控件即容器：instantiate 后注入框架内部视觉子节点（.loom-fill/.loom-track/...）。

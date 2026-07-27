@@ -161,6 +161,9 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
                 }
             }
         }
+        // TextField/TextArea: visual sync delegated to TextField beam (cursor blink,
+        // selection highlight, composition underline — not yet implemented).
+        ControlState::TextField(_) | ControlState::TextArea(_) => {}
     }
 }
 
@@ -245,6 +248,9 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
                 set_slider_value(scene, id, v, &mut out);
             }
         }
+        // TextField/TextArea: pointer-down focus + caret placement delegated to
+        // TextField beam (not yet implemented).
+        ControlState::TextField(_) | ControlState::TextArea(_) => {}
         ControlState::Progress { .. } => {}
     }
     out

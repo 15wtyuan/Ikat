@@ -761,3 +761,38 @@ fn instantiate_no_control_state_for_non_control_node() {
         "非控件节点不应有 controls 槽"
     );
 }
+
+/// TextField：value/placeholder/max_length/readonly 透传进 EditState，cursor/anchor
+/// 初始化为 value.len()（光标在文本末尾），composition 初始 None，视觉标记为可见。
+#[test]
+fn instantiate_fills_textfield_edit_state_from_init() {
+    let mut scene = Scene::default();
+    let id = crate::scene::dynamic::create_node_from_template(
+        &mut scene,
+        NodeKind::TextField,
+        ResolvedStyle::default(),
+        Some(crate::asset::ControlInit::TextField(
+            crate::asset::EditInit {
+                value: "hi".into(),
+                placeholder: "p".into(),
+                max_length: 10,
+                readonly: false,
+            },
+        )),
+    );
+    let state = scene.controls.get(id).expect("control state filled");
+    match state {
+        ControlState::TextField(e) => {
+            assert_eq!(e.value, "hi", "value 原样透传");
+            assert_eq!(e.cursor, 2, "cursor 初始为 value.len()（光标在末尾）");
+            assert_eq!(e.anchor, 2, "anchor 初始同 cursor（无选区）");
+            assert_eq!(e.max_length, 10);
+            assert!(!e.readonly);
+            assert!(e.cursor_visible, "cursor 初始可见");
+            assert_eq!(e.cursor_timer, 0.0);
+            assert_eq!(e.ideal_cursor_x, 0.0);
+            assert!(e.composition.is_none(), "composition 初始 None");
+        }
+        other => panic!("expected TextField, got {:?}", other),
+    }
+}

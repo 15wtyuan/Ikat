@@ -343,6 +343,61 @@ impl AnimTable {
     }
 }
 
+/// 输入法组合态（composing text）。`text` 是预提交字符串，`pos` 是该串在 `EditState.value`
+/// 中的插入字节偏移。预提交期间光标在 composition 内移动，IME 提交后并入 value。
+#[derive(Debug, Clone, PartialEq)]
+pub struct Composition {
+    pub text: String,
+    pub pos: usize,
+}
+
+/// 文本输入控件运行时状态（TextField / TextArea 共享）。cursor/ anchor 以字节偏移
+/// 计量，二者构成的区间（闭区间：`selection_range()`）可退化为零宽光标。
+///
+/// 所有字节偏移必须落在合法 UTF-8 边界上——`from_init` 中 cursor/anchor 初始化为
+/// `value.len()`（末尾后第 0 字节），后续所有写入/选区操作由调用方保证边界正确。
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditState {
+    pub value: String,
+    pub cursor: usize, // [0, value.len()]
+    pub anchor: usize, // 选区锚；选区 = [min(anchor,cursor), max]
+    pub composition: Option<Composition>,
+    pub max_length: usize, // 0 = 无限（按 UTF-8 字符数）
+    pub readonly: bool,
+    pub cursor_visible: bool,
+    pub cursor_timer: f32,
+    pub ideal_cursor_x: f32, // 上下行 sticky x（TextArea 用）
+}
+
+impl EditState {
+    /// 从打包期 `EditInit` 构造运行时 `EditState`。`cursor`/`anchor` 初始设在
+    /// value 末尾（光标在文字最后），composition 初始 None，视觉标记皆默认值。
+    /// `_ph` 是 placeholder（暂存控制视图用，不进入 EditState 自身）。
+    pub fn from_init(value: String, _ph: String, max_length: usize, readonly: bool) -> Self {
+        let cursor = value.len();
+        Self {
+            value,
+            cursor,
+            anchor: cursor,
+            composition: None,
+            max_length,
+            readonly,
+            cursor_visible: true,
+            cursor_timer: 0.0,
+            ideal_cursor_x: 0.0,
+        }
+    }
+
+    /// 返回 (start, end) 闭区间字节偏移，start ≤ end。退化为零宽时 start == end。
+    pub fn selection_range(&self) -> (usize, usize) {
+        if self.anchor <= self.cursor {
+            (self.anchor, self.cursor)
+        } else {
+            (self.cursor, self.anchor)
+        }
+    }
+}
+
 /// 控件运行时状态（按 NodeKind 分派）。与 `ControlInit`（打包期 pkg.bin 载荷）
 /// 一一对应，区别仅在 Slider 多一个 `dragging: bool`——拖拽中间态只在运行时存在，
 /// 不进 pkg（松手即丢）。instantiate 时由 `ControlInit` 映射填入 `ControlTable`。
@@ -368,6 +423,10 @@ pub enum ControlState {
         /// 拖拽中间态（按下→松手期间 true）。运行时独有，不进 pkg，故不在 `ControlInit`。
         dragging: bool,
     },
+    /// 单行文本输入（TextField）。EditState 含 value/cursor/anchor 等运行时文字编辑态。
+    TextField(EditState),
+    /// 多行文本输入（TextArea）。EditState 含 value/cursor/anchor 等运行时文字编辑态。
+    TextArea(EditState),
 }
 
 /// 每节点控件状态表（`HashMap<NodeId, ControlState>`）。结构与访问约定同 `AnimTable`/
