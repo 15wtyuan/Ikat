@@ -8,7 +8,7 @@
 
 use crate::input::{EventRecord, EVT_CHANGE_COMMITTED, EVT_CHECKED_CHANGED, EVT_VALUE_CHANGED};
 use crate::scene::dynamic::{append_child, create_node, set_inline_override, set_user_transform};
-use crate::scene::node::{ControlState, NodeFlags, NodeId, NodeKind, Scene};
+use crate::scene::node::{ControlState, EditState, NodeFlags, NodeId, NodeKind, Scene};
 use crate::scene::text_cursor::{hit_byte_offset, line_byte_ranges};
 use crate::transform::NodeTransform;
 
@@ -535,6 +535,181 @@ fn set_slider_value(scene: &mut Scene, id: NodeId, value: f32, out: &mut Vec<Eve
             });
         }
     }
+}
+
+// ── 文本编辑原语（pure functions over EditState） ──────────────────────────────
+//
+// Task 8：编辑内核。insert_text/delete_char/move_cursor/sanitize_value 是 Task 9
+// （textinput channel）与 Task 10（control-key 路由）的底层原语。它们是纯函数——
+// 仅读写 EditState（无 Scene 访问），故可独立单测。读写光标/锚点后由调用方决定是否
+// 同步渲染（Task 12）。
+//
+// 不变量：cursor/anchor 必须永远落在合法 UTF-8 字符边界上（char 起始字节）。CJK 字符
+// 占 3 字节，若停在中间字节则后续 str slice panic。下面三个边界助手保证所有偏移合法。
+//
+// max_length 按 UTF-8 字符数计（value.chars().count()），非字节——用户感知「字数」
+// 而非内存占用，与 HTML maxlength 语义一致。0 = 无限。
+//
+// readonly 守卫：insert/delete 在 readonly=true 时 no-op 返 false（照 HTML disabled/readonly）。
+//
+// 单行 vs 多行：sanitize 按 NodeKind 分派——TextArea 保留换行（删 \r/\t），其余
+// （TextField/PasswordField/SearchField/...）删 \n/\r/\t。paste/输入到单行框时换行被滤。
+
+/// 向左找前一个 UTF-8 字符的起始字节（即 idx 左侧那个 char 的开头）。
+///
+/// backspace 删除左侧字符 / move-cursor 左移时用：cursor 在某 char 之后（落在该 char 的
+/// 起始字节上），prev 边界 = 左侧那个 char 的起始字节。idx=0（无前驱）时返回 0。
+///
+/// 与 [`next_char_boundary`] 对称：后者从 idx+1 向右扫，本函数从 idx-1 向左扫——
+/// 若直接从 idx 起扫则 idx 落在边界时会原地返回（delete/move 会 no-op，ASCII 场景全坏）。
+fn prev_char_boundary(value: &str, idx: usize) -> usize {
+    if idx == 0 {
+        return 0;
+    }
+    let mut i = idx - 1;
+    while i > 0 && !value.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// 向右找最近的 UTF-8 字符边界（下一个 char 起始字节，或末尾 len）。
+///
+/// delete（向前删）用：cursor 在某 char 之前，next 边界 = 该 char 结束字节 = 下一 char 起始。
+/// 从 idx+1 起扫（idx 自身可能是边界，但删右侧需跨过当前 char）。
+fn next_char_boundary(value: &str, idx: usize) -> usize {
+    let mut i = idx + 1;
+    while i < value.len() && !value.is_char_boundary(i) {
+        i += 1;
+    }
+    i.min(value.len())
+}
+
+/// 把任意字节偏移 clamp 到合法 UTF-8 边界（向左回退到最近 char 起始字节）。
+///
+/// sanitize_value 在重写 value 后重对齐 cursor/anchor 用——旧偏移可能因 value 变短越界
+/// 或落在 char 中间。先 clamp 到 [0, len]，再回退到 char 边界。
+fn clamp_boundary(value: &str, idx: usize) -> usize {
+    let mut i = idx.min(value.len());
+    while i > 0 && !value.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// 按 NodeKind 净化字符串：TextArea 保留 `\n`（多行换行），其余控件删 `\n`/`\r`/`\t`。
+///
+/// 单行输入框（TextField/PasswordField/SearchField/...）不应含换行/制表符——
+/// paste 带换行的多行文本进单行框时滤成单行（照 HTML 单行 input 行为）。
+/// TextArea 保留 `\n`（用户可手动换行）但仍删 `\r`/`\t`（CR 与 TAB 在文本域内无意义）。
+fn sanitize_str(kind: NodeKind, s: &str) -> String {
+    match kind {
+        NodeKind::TextArea => s.chars().filter(|&c| c != '\r' && c != '\t').collect(),
+        _ => s
+            .chars()
+            .filter(|&c| !matches!(c, '\n' | '\r' | '\t'))
+            .collect(),
+    }
+}
+
+/// 在 cursor 处插入文本（若有选区则先删选区再插）。成功改动返回 true，否则 false。
+///
+/// 步骤：readonly → no-op；sanitize 输入（单行框滤换行）；空串插入 no-op；有选区先 delete_selection；
+/// max_length 校验（按字符数，超额拒插）；insert_str 后 cursor/anchor 同步到新末尾，
+/// 重置光标闪烁 timer（显示光标）。返回 true 表示 value 已变（调用方据此产 change 事件）。
+pub fn insert_text(e: &mut EditState, kind: NodeKind, text: &str) -> bool {
+    if e.readonly {
+        return false;
+    }
+    let text = sanitize_str(kind, text);
+    if text.is_empty() {
+        return false;
+    }
+    delete_selection(e);
+    if e.max_length > 0 {
+        let cur = e.value.chars().count();
+        let add = text.chars().count();
+        if cur + add > e.max_length {
+            return false;
+        }
+    }
+    e.value.insert_str(e.cursor, &text);
+    e.cursor += text.len();
+    e.anchor = e.cursor;
+    e.cursor_visible = true;
+    e.cursor_timer = 0.0;
+    true
+}
+
+/// 删除选区 [min(anchor,cursor), max]。无选区（anchor==cursor）时 no-op 返 false。
+///
+/// replace_range 删区间后 cursor=anchor=选区起点。供 insert_text（先删后插）与
+/// delete_char（有选区时退化为删选区）复用。
+pub fn delete_selection(e: &mut EditState) -> bool {
+    let (b, end) = e.selection_range();
+    if b == end {
+        return false;
+    }
+    e.value.replace_range(b..end, "");
+    e.cursor = b;
+    e.anchor = b;
+    true
+}
+
+/// 删一个字符。backspace=true 删左（cursor 前），false 删右（cursor 后）。有选区时删选区。
+///
+/// readonly → no-op。无选区时按方向用 prev/next 边界确定删除区间（保证跨多字节字符不 panic）。
+/// 边界 case（cursor 在头/尾且方向越界）no-op 返 false。
+pub fn delete_char(e: &mut EditState, _kind: NodeKind, backspace: bool) -> bool {
+    if e.readonly {
+        return false;
+    }
+    if e.anchor != e.cursor {
+        return delete_selection(e);
+    }
+    if backspace && e.cursor > 0 {
+        let nc = prev_char_boundary(&e.value, e.cursor);
+        e.value.replace_range(nc..e.cursor, "");
+        e.cursor = nc;
+        e.anchor = nc;
+        true
+    } else if !backspace && e.cursor < e.value.len() {
+        let end = next_char_boundary(&e.value, e.cursor);
+        e.value.replace_range(e.cursor..end, "");
+        e.anchor = e.cursor;
+        true
+    } else {
+        false
+    }
+}
+
+/// 移动光标一个字符。right=true 右移，false 左移。select=true 扩展选区（anchor 不动），
+/// 否则折叠（cursor=anchor=新位）。跨越按 UTF-8 字符（非字节），保证停在 char 边界。
+///
+/// 重置光标闪烁 timer（移动后立显光标）。无返回值（光标移动必生效，无失败语义）。
+pub fn move_cursor(e: &mut EditState, _kind: NodeKind, right: bool, select: bool) {
+    let nc = if right {
+        next_char_boundary(&e.value, e.cursor)
+    } else {
+        prev_char_boundary(&e.value, e.cursor)
+    };
+    e.cursor = nc;
+    if !select {
+        e.anchor = nc;
+    }
+    e.cursor_visible = true;
+    e.cursor_timer = 0.0;
+}
+
+/// 按 NodeKind 净化 EditState.value（重写 value + 重对齐 cursor/anchor 到合法边界）。
+///
+/// 供 paste/FFI 设值后调用：外部注入的 value 可能含单行框不该有的换行，或 cursor 落在
+/// char 中间。sanitize_str 重写 value 后用 clamp_boundary 把 cursor/anchor 回退到
+/// 合法 char 边界（value 变短后旧偏移可能越界，clamp 到 [0,len] + char 边界）。
+pub fn sanitize_value(e: &mut EditState, kind: NodeKind) {
+    e.value = sanitize_str(kind, &e.value);
+    e.cursor = clamp_boundary(&e.value, e.cursor);
+    e.anchor = clamp_boundary(&e.value, e.anchor);
 }
 
 #[cfg(test)]
@@ -1563,5 +1738,71 @@ mod tests {
             insensitive, expected,
             "[target, target+6] 跨 glyph 中点：减法错误会翻转 offset（测试非退化）"
         );
+    }
+
+    // ── 文本编辑原语（insert/delete/move + UTF-8 边界 + sanitize） ──
+    //
+    // Task 8：纯函数 over EditState（无 Scene 改动）。insert_text/delete_char/move_cursor
+    // 是 Task 9（textinput channel）+ Task 10（control-key 路由）的编辑内核。UTF-8 边界
+    // 保证 cursor/anchor 永远落在 char 起始字节（CJK 3 字节字符不能停在中间字节）。
+
+    #[test]
+    fn insert_at_cursor() {
+        let mut e = EditState::from_init("ac".into(), "".into(), 0, false);
+        e.cursor = 1;
+        e.anchor = 1;
+        insert_text(&mut e, NodeKind::TextField, "b");
+        assert_eq!(e.value, "abc");
+        assert_eq!(e.cursor, 2);
+    }
+
+    #[test]
+    fn insert_replaces_selection() {
+        let mut e = EditState::from_init("hello".into(), "".into(), 0, false);
+        e.anchor = 1;
+        e.cursor = 4;
+        insert_text(&mut e, NodeKind::TextField, "X");
+        assert_eq!(e.value, "hXo");
+        assert_eq!(e.cursor, 2);
+    }
+
+    #[test]
+    fn backspace_deletes_left() {
+        let mut e = EditState::from_init("abc".into(), "".into(), 0, false);
+        e.cursor = 2;
+        e.anchor = 2;
+        delete_char(&mut e, NodeKind::TextField, true);
+        assert_eq!(e.value, "ac");
+        assert_eq!(e.cursor, 1);
+    }
+
+    #[test]
+    fn sanitize_strips_newline_single_line() {
+        let mut e = EditState::from_init("a\nb".into(), "".into(), 0, false);
+        sanitize_value(&mut e, NodeKind::TextField);
+        assert_eq!(e.value, "ab");
+        let mut e2 = EditState::from_init("a\nb".into(), "".into(), 0, false);
+        sanitize_value(&mut e2, NodeKind::TextArea);
+        assert_eq!(e2.value, "a\nb");
+    }
+
+    #[test]
+    fn utf8_boundary_clamp() {
+        // 你好 = 6 字节（每字 3 字节）。cursor=3 落在第一字末尾（非法边界）→ move right
+        // 应跳到下一 char 边界 6，不停在 3（中途字节）。
+        let mut e = EditState::from_init("你好".into(), "".into(), 0, false);
+        e.cursor = 3;
+        move_cursor(&mut e, NodeKind::TextField, true, false);
+        assert_eq!(e.cursor, 6);
+    }
+
+    #[test]
+    fn max_length_truncates() {
+        // max_length 按 UTF-8 字符数计（非字节）。已有 2 字符 "ab"，上限 2 → 插 "c" 拒绝。
+        let mut e = EditState::from_init("ab".into(), "".into(), 2, false);
+        e.cursor = 2;
+        e.anchor = 2;
+        insert_text(&mut e, NodeKind::TextField, "c");
+        assert_eq!(e.value, "ab");
     }
 }
