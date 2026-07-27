@@ -3,7 +3,7 @@
 //! disabled 节点产 RollOver/Out 但不产 Down/Up/Click。
 
 use crate::hit::hit_test;
-use crate::scene::node::{NodeFlags, NodeId, Scene};
+use crate::scene::node::{ControlState, NodeFlags, NodeId, NodeKind, Scene};
 use crate::scroll::{effective, SCROLL_THRESHOLD_MOUSE, SCROLL_THRESHOLD_TOUCH};
 
 #[repr(C)]
@@ -46,6 +46,28 @@ pub const MOD_ALT: u8 = 0x04;
 /// Tab 的 KeyCode 值（Unity KeyCode.Tab = 9）。core 内判定 Tab 导航用。
 pub const KEY_TAB: u32 = 9;
 
+/// 控制键 KeyCode 值。LoomInputCollector 用 `(uint)UnityEngine.KeyCode` 直传——core
+/// 须匹配 Unity KeyCode 枚举的原值。数值源：`unity/package/Runtime/Public/LoomGUI.Types.cs`
+/// 的 `KeyCode` enum（项目冻结的公共 API 镜像，注释明确「Values match Unity KeyCode enum」，
+/// 且其 Tab=9 / Backspace=8 / Left=276 等与本仓既有 KEY_TAB 及 Unity 公开文档一致，互为佐证）。
+/// 字母键 A-Z = 97-122（ASCII 小写区间，Unity KeyCode 同此）。Home/End 不在该 enum 内，
+/// 取 Unity 公开文档的编辑键块值（UpArrow=273…LeftArrow=276…Home=278,End=279）。
+pub const KEY_BACKSPACE: u32 = 8;
+pub const KEY_RETURN: u32 = 13; // Unity KeyCode.Return（主回车；KeypadEnter=271 另算）
+pub const KEY_ESCAPE: u32 = 27;
+pub const KEY_DELETE: u32 = 127; // 前向删（Unity KeyCode.Delete）
+pub const KEY_LEFT: u32 = 276; // LeftArrow
+pub const KEY_RIGHT: u32 = 275; // RightArrow
+pub const KEY_UP: u32 = 273; // UpArrow
+pub const KEY_DOWN: u32 = 274; // DownArrow
+pub const KEY_HOME: u32 = 278;
+pub const KEY_END: u32 = 279;
+pub const KEY_A: u32 = 97;
+pub const KEY_C: u32 = 99;
+pub const KEY_V: u32 = 118;
+pub const KEY_X: u32 = 120;
+pub const KEY_Z: u32 = 122;
+
 /// 事件输出（FFI 扁平 POD）。event_type: 0=Down,1=Up,2=Move,3=Click,4=RollOver,5=RollOut。
 /// +touch_id:i32 @8。pad[0]→click_count（20B 不变）。
 #[repr(C)]
@@ -83,6 +105,9 @@ pub const EVT_TWEEN_COMPLETE: u8 = 16;
 pub const EVT_VALUE_CHANGED: u8 = 22;
 pub const EVT_CHECKED_CHANGED: u8 = 23;
 pub const EVT_CHANGE_COMMITTED: u8 = 24;
+/// TextField/Password/Search 单行框按 Enter 提交（TextArea 不发——Enter 插换行）。
+/// payload 复用 EventRecord 现有字段（node_id 指向提交控件；x/y=0 无载荷）。
+pub const EVT_SUBMITTED: u8 = 25;
 
 const CLICK_THRESHOLD_MOUSE: f32 = 10.0; // per-axis click 容忍（鼠标）
 const CLICK_THRESHOLD_TOUCH: f32 = 50.0; // per-axis click 容忍（触摸）
@@ -350,8 +375,11 @@ fn next_focus(chain: &[NodeId], current: Option<NodeId>, backward: bool) -> Opti
     Some(next)
 }
 
-/// 处理键盘事件——keydown/up（有焦点才发）+ Tab/Shift+Tab 导航（focus_node）。
+/// 处理键盘事件——keydown/up（有焦点才发）+ Tab/Shift+Tab 导航（focus_node）+
+/// 控制键路由到 focused TextField/TextArea 编辑内核。
 /// Stage tick 在 pointer process 后调。Tab 被导航消费（不发 keydown，照 DOM Tab 默认动作=移焦）。
+/// 控制键（Backspace/Delete/方向/Home/End/Enter/Escape/ctrl+A）被编辑内核消费（不发 keydown，
+/// 照现有 Tab 消费模式）；非控制键（如无 ctrl 的字母）透传 keydown（字符输入走 textinput 通道）。
 pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<EventRecord>) {
     for ke in keys {
         let focused = scene.focused_node;
@@ -365,6 +393,90 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
             let next = next_focus(&chain, focused, backward);
             focus_node(scene, next, out); // 发 FocusOut(旧)+FocusIn(新)
             continue; // Tab 被消费，不发 keydown
+        }
+        // 控制键路由：keydown 且 focused 是 TextField/TextArea → 路由到编辑内核。
+        // 路由键 consume（continue，不发 keydown）。非路由键（含 keyup）透传到下面的普通分支。
+        // 借用模式（同 stage.rs textinput / on_text_pointer_down）：先不可变读 kind，再 controls.get_mut。
+        if ke.is_down {
+            if let Some(fid) = focused {
+                let kind = scene.get(fid).map(|n| n.kind);
+                let is_text = matches!(kind, Some(NodeKind::TextField) | Some(NodeKind::TextArea));
+                if is_text {
+                    let ctrl = ke.modifiers & MOD_CTRL != 0;
+                    let shift = ke.modifiers & MOD_SHIFT != 0;
+                    let mut routed = false;
+                    let mut changed = false;
+                    // 单次 controls 可变借跑除 Escape 外的全部路由（这些只动 EditState / 推 out，
+                    // 不碰 scene）。Escape 单独处理——它调 focus_node(scene,None) 要 &mut scene，
+                    // 与此处 controls 借冲突。
+                    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
+                        scene.controls.get_mut(fid)
+                    {
+                        match ke.key_code {
+                            KEY_BACKSPACE => {
+                                if crate::scene::control::delete_char(e, kind.unwrap(), true) {
+                                    changed = true;
+                                }
+                                routed = true;
+                            }
+                            KEY_DELETE => {
+                                if crate::scene::control::delete_char(e, kind.unwrap(), false) {
+                                    changed = true;
+                                }
+                                routed = true;
+                            }
+                            KEY_LEFT => {
+                                crate::scene::control::move_cursor(e, kind.unwrap(), false, shift);
+                                routed = true;
+                            }
+                            KEY_RIGHT => {
+                                crate::scene::control::move_cursor(e, kind.unwrap(), true, shift);
+                                routed = true;
+                            }
+                            KEY_HOME => {
+                                e.cursor = 0;
+                                if !shift {
+                                    e.anchor = 0;
+                                }
+                                routed = true;
+                            }
+                            KEY_END => {
+                                e.cursor = e.value.len();
+                                if !shift {
+                                    e.anchor = e.cursor;
+                                }
+                                routed = true;
+                            }
+                            // ctrl+A 全选（单选一条，避免与「无 ctrl 的 A」冲突——后者透传 keydown）。
+                            KEY_A if ctrl => {
+                                e.anchor = 0;
+                                e.cursor = e.value.len();
+                                routed = true;
+                            }
+                            // Enter：line_break 只用 e/kind/out/fid（不碰 scene），
+                            // 可在此 controls 借内调用。
+                            KEY_RETURN => {
+                                crate::scene::control::line_break(e, kind.unwrap(), out, fid);
+                                routed = true;
+                            }
+                            // TODO(Task 14): ctrl+C/X/V 需 clipboard FFI。暂不路由——
+                            // ctrl+C/X/V 会透传 keydown（业务可自行读 selection 做剪贴板）。
+                            _ => {}
+                        }
+                    }
+                    // Escape 要改 scene.focused_node（focus_node 借 &mut scene），故放在 controls 借释放后。
+                    if !routed && ke.key_code == KEY_ESCAPE {
+                        focus_node(scene, None, out); // blur：发 FocusOut
+                        routed = true;
+                    }
+                    if changed {
+                        crate::scene::control::emit_value_changed(out, fid);
+                    }
+                    if routed {
+                        continue; // 控制键被消费，不发 keydown
+                    }
+                }
+            }
         }
         // 普通 keydown/up：有焦点才发（无焦点丢弃）
         if let Some(n) = focused {

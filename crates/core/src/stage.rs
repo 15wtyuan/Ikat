@@ -712,7 +712,7 @@ impl Stage {
                 {
                     let s: String = cps.iter().filter_map(|&cp| char::from_u32(cp)).collect();
                     if crate::scene::control::insert_text(e, kind, &s) {
-                        // Task 11 owns EVT_VALUE_CHANGED emission — wire here once that lands.
+                        crate::scene::control::emit_value_changed(&mut out, fid);
                     }
                 }
             }

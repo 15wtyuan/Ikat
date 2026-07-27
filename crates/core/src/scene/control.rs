@@ -6,7 +6,9 @@
 //! 不会误命中框架内部节点）。子节点是普通 Container（div），display 默认按 schema 铺底，
 //! 与用户手写 `<div class="loom-fill">` 实例化结果一致。
 
-use crate::input::{EventRecord, EVT_CHANGE_COMMITTED, EVT_CHECKED_CHANGED, EVT_VALUE_CHANGED};
+use crate::input::{
+    EventRecord, EVT_CHANGE_COMMITTED, EVT_CHECKED_CHANGED, EVT_SUBMITTED, EVT_VALUE_CHANGED,
+};
 use crate::scene::dynamic::{append_child, create_node, set_inline_override, set_user_transform};
 use crate::scene::node::{ControlState, EditState, NodeFlags, NodeId, NodeKind, Scene};
 use crate::scene::text_cursor::{hit_byte_offset, line_byte_ranges};
@@ -716,6 +718,51 @@ pub fn sanitize_value(e: &mut EditState, kind: NodeKind) {
     e.value = sanitize_str(kind, &e.value);
     e.cursor = clamp_boundary(&e.value, e.cursor);
     e.anchor = clamp_boundary(&e.value, e.anchor);
+}
+
+/// 推一条 EVT_VALUE_CHANGED@node（文本框值变更后调用）。payload 无额外字段——
+/// 文本值变更不报新值进 EventRecord（文本框的 value 走 Get<T> 直读 ControlState，
+/// 与 Slider 的 x=新值 不同）。对照 EVT_VALUE_CHANGED 现有约定：Slider 用 x 装新 float，
+/// 文本框语义是「值已变」，业务通过 API 读当前值。
+pub fn emit_value_changed(out: &mut Vec<EventRecord>, node: NodeId) {
+    out.push(EventRecord {
+        node_id: node.0,
+        event_type: EVT_VALUE_CHANGED,
+        click_count: 0,
+        pad: [0, 0],
+        touch_id: 0,
+        x: 0.0,
+        y: 0.0,
+    });
+}
+
+/// 回车键处理（单行/多行分派）。
+///
+/// 单行框（TextField/PasswordField/SearchField/...）→ 不改 value，推一条 EVT_SUBMITTED@node
+/// （照 HTML 单行 input Enter=表单提交语义）。TextArea → 插入 `\n`（insert_text）+
+/// ValueChanged；不发 Submitted（多行框 Enter 是换行，非提交）。
+///
+/// readonly 单行框仍发 Submitted（提交是意图表达，不受只读限制）；readonly TextArea 的
+/// insert_text 自身 no-op 返 false（不发 ValueChanged）。
+pub fn line_break(e: &mut EditState, kind: NodeKind, out: &mut Vec<EventRecord>, node: NodeId) {
+    match kind {
+        NodeKind::TextArea => {
+            if insert_text(e, kind, "\n") {
+                emit_value_changed(out, node);
+            }
+        }
+        _ => {
+            out.push(EventRecord {
+                node_id: node.0,
+                event_type: EVT_SUBMITTED,
+                click_count: 0,
+                pad: [0, 0],
+                touch_id: 0,
+                x: 0.0,
+                y: 0.0,
+            });
+        }
+    }
 }
 
 #[cfg(test)]

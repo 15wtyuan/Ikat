@@ -1,5 +1,5 @@
 use super::*;
-use crate::scene::node::{Node, NodeFlags, NodeKind, Rect, Scene};
+use crate::scene::node::{ControlState, EditState, Node, NodeFlags, NodeKind, Rect, Scene};
 use crate::scene::transform::compute_world_transforms;
 
 fn one_button_scene() -> Scene {
@@ -3930,5 +3930,442 @@ fn grip_no_hit_on_non_thumb_area() {
     assert!(
         out.iter().any(|e| e.event_type == EVT_DOWN),
         "非 thumb Down 正常发 EVT_DOWN"
+    );
+}
+
+// ===== 控制键路由（Task 10+11）：keydown → 编辑内核 =====
+//
+// 这些测试直接调 process_keys（隔离 PointerState/Stage）。focused 节点带正确的 NodeKind
+// + 注入 ControlState（TextField/TextArea）。常量 KEY_* / EVT_SUBMITTED 在 input.rs 定义。
+// KeyCode 数值取 Unity KeyCode 枚举（与 unity/package/.../LoomGUI.Types.cs 的 KeyCode enum 对齐——
+// LoomInputCollector 用 (uint)UnityEngine.KeyCode 直传，core 须匹配同值）。
+
+/// root + focused TextField(value)。kind 设 NodeKind::TextField（路由按 kind 分派单行/多行）。
+fn focused_textfield_scene(value: &str) -> (Scene, NodeId) {
+    let mut root = Node::default();
+    root.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 100.0,
+    };
+    let mut tf = Node::default();
+    tf.kind = NodeKind::TextField;
+    tf.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut s = Scene::from_nodes(vec![root, tf], vec![(0, 1)]);
+    let tf_id = s.get(s.roots[0]).unwrap().children[0];
+    s.controls.ensure(
+        tf_id,
+        ControlState::TextField(EditState::from_init(value.into(), String::new(), 0, false)),
+    );
+    s.focused_node = Some(tf_id);
+    compute_world_transforms(&mut s);
+    (s, tf_id)
+}
+
+/// root + focused TextArea(value)。kind 设 NodeKind::TextArea。
+fn focused_textarea_scene(value: &str) -> (Scene, NodeId) {
+    let mut root = Node::default();
+    root.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 100.0,
+    };
+    let mut ta = Node::default();
+    ta.kind = NodeKind::TextArea;
+    ta.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 60.0,
+    };
+    let mut s = Scene::from_nodes(vec![root, ta], vec![(0, 1)]);
+    let ta_id = s.get(s.roots[0]).unwrap().children[0];
+    s.controls.ensure(
+        ta_id,
+        ControlState::TextArea(EditState::from_init(value.into(), String::new(), 0, false)),
+    );
+    s.focused_node = Some(ta_id);
+    compute_world_transforms(&mut s);
+    (s, ta_id)
+}
+
+/// 取 TextField 的 EditState（panic 若非 TextField）。
+fn tf_edit(s: &Scene, id: NodeId) -> &EditState {
+    match s.controls.get(id) {
+        Some(ControlState::TextField(e)) => e,
+        _ => panic!("not TextField"),
+    }
+}
+
+#[test]
+fn textfield_backspace_key_deletes() {
+    let (mut s, tf) = focused_textfield_scene("abc");
+    // value="abc"(cursor=3 末尾)。Backspace 删左 → "ab"，cursor=2。
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_BACKSPACE,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(tf_edit(&s, tf).value, "ab");
+    assert_eq!(tf_edit(&s, tf).cursor, 2);
+}
+
+#[test]
+fn textfield_delete_forward_key_deletes() {
+    let (mut s, tf) = focused_textfield_scene("abc");
+    // 光标移到中间（cursor=1），Delete 删右。
+    if let Some(ControlState::TextField(e)) = s.controls.get_mut(tf) {
+        e.cursor = 1;
+        e.anchor = 1;
+    }
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_DELETE,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(tf_edit(&s, tf).value, "ac", "Delete 删右侧 'b'");
+    assert_eq!(tf_edit(&s, tf).cursor, 1);
+}
+
+#[test]
+fn textfield_left_arrow_moves_cursor() {
+    let (mut s, tf) = focused_textfield_scene("abc");
+    // cursor=3 末尾 → Left → cursor=2。
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_LEFT,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(tf_edit(&s, tf).cursor, 2);
+    assert_eq!(tf_edit(&s, tf).anchor, 2, "无 shift → 折叠选区");
+}
+
+#[test]
+fn textfield_right_arrow_moves_cursor() {
+    let (mut s, tf) = focused_textfield_scene("abc");
+    // 先把 cursor 移到 1，Right → 2。
+    if let Some(ControlState::TextField(e)) = s.controls.get_mut(tf) {
+        e.cursor = 1;
+        e.anchor = 1;
+    }
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_RIGHT,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(tf_edit(&s, tf).cursor, 2);
+}
+
+#[test]
+fn textfield_home_sets_cursor_to_zero() {
+    let (mut s, tf) = focused_textfield_scene("abc");
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_HOME,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(tf_edit(&s, tf).cursor, 0);
+    assert_eq!(tf_edit(&s, tf).anchor, 0, "Home 折叠选区");
+}
+
+#[test]
+fn textfield_end_sets_cursor_to_len() {
+    let (mut s, tf) = focused_textfield_scene("abc");
+    // 先移到 0，End → 末尾 3。
+    if let Some(ControlState::TextField(e)) = s.controls.get_mut(tf) {
+        e.cursor = 0;
+        e.anchor = 0;
+    }
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_END,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(tf_edit(&s, tf).cursor, 3);
+}
+
+#[test]
+fn textfield_ctrl_a_selects_all() {
+    let (mut s, tf) = focused_textfield_scene("hello");
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_A,
+            modifiers: MOD_CTRL,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    let e = tf_edit(&s, tf);
+    assert_eq!(e.anchor, 0, "ctrl+A anchor→0");
+    assert_eq!(e.cursor, 5, "ctrl+A cursor→len");
+}
+
+#[test]
+fn textfield_shift_left_extends_selection() {
+    let (mut s, tf) = focused_textfield_scene("abc");
+    // cursor=3，Shift+Left → cursor=2，anchor 保持 3（选区 [2,3]）。
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_LEFT,
+            modifiers: MOD_SHIFT,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    let e = tf_edit(&s, tf);
+    assert_eq!(e.cursor, 2);
+    assert_eq!(e.anchor, 3, "shift 选区 anchor 不动");
+}
+
+#[test]
+fn textfield_routed_key_consumed_no_keydown() {
+    // 路由的控制键不发 keydown（照 Tab 消费模式）。
+    let (mut s, _tf) = focused_textfield_scene("abc");
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_BACKSPACE,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert!(
+        out.iter().all(|e| e.event_type != EVT_KEY_DOWN),
+        "Backspace 被路由消费，不发 keydown"
+    );
+}
+
+#[test]
+fn textfield_non_control_key_still_emits_keydown() {
+    // 非控制键（如字母 'Z'=122 不带 ctrl）→ 仍走 keydown 透传（字符输入走 textinput 通道）。
+    let (mut s, tf) = focused_textfield_scene("abc");
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_Z,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(tf_edit(&s, tf).value, "abc", "无 ctrl 的字母键不改 value");
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_KEY_DOWN && e.node_id == tf.0),
+        "非控制键透传 keydown"
+    );
+}
+
+#[test]
+fn textfield_delete_emits_value_changed() {
+    let (mut s, tf) = focused_textfield_scene("abc");
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_BACKSPACE,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_VALUE_CHANGED && e.node_id == tf.0),
+        "Backspace 删值 → 发 ValueChanged"
+    );
+}
+
+#[test]
+fn textfield_escape_blurs() {
+    let (mut s, _tf) = focused_textfield_scene("abc");
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_ESCAPE,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(s.focused_node, None, "Escape → blur");
+    assert!(
+        out.iter().any(|e| e.event_type == EVT_FOCUS_OUT),
+        "Escape → FocusOut"
+    );
+}
+
+#[test]
+fn textfield_single_line_enter_emits_submitted() {
+    let (mut s, tf) = focused_textfield_scene("query");
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_RETURN,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    // 单行框 Enter → Submitted（不改 value）。
+    assert_eq!(tf_edit(&s, tf).value, "query", "单行 Enter 不改 value");
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_SUBMITTED && e.node_id == tf.0),
+        "单行 Enter → Submitted"
+    );
+}
+
+#[test]
+fn textarea_enter_inserts_newline_no_submitted() {
+    let (mut s, ta) = focused_textarea_scene("ab");
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_RETURN,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    // TextArea Enter → 插 \n + ValueChanged；不发 Submitted。
+    match s.controls.get(ta) {
+        Some(ControlState::TextArea(e)) => {
+            assert_eq!(e.value, "ab\n", "TextArea Enter 插换行");
+        }
+        _ => panic!("not TextArea"),
+    }
+    assert!(
+        out.iter().all(|e| e.event_type != EVT_SUBMITTED),
+        "TextArea Enter 不发 Submitted"
+    );
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_VALUE_CHANGED && e.node_id == ta.0),
+        "TextArea Enter 插换行 → ValueChanged"
+    );
+}
+
+#[test]
+fn textfield_keyup_not_routed_still_keyup() {
+    // keyup（is_down=false）不路由（控制键只对 keydown 生效），仍走普通 keyup 透传。
+    let (mut s, tf) = focused_textfield_scene("abc");
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_BACKSPACE,
+            modifiers: 0,
+            is_down: false,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(tf_edit(&s, tf).value, "abc", "keyup 不触发删除");
+    assert!(out.iter().any(|e| e.event_type == EVT_KEY_UP), "keyup 透传");
+}
+
+#[test]
+fn textfield_no_focus_control_key_dropped() {
+    // 无焦点 → 控制键丢弃（不路由、不发 keydown）。
+    let (mut s, _tf) = focused_textfield_scene("abc");
+    s.focused_node = None;
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_BACKSPACE,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert!(out.is_empty(), "无焦点控制键全丢");
+}
+
+#[test]
+fn non_text_focused_node_not_routed() {
+    // 焦点在普通 Button → 控制键不路由到编辑内核，走普通 keydown。
+    let mut s = two_focusable_scene();
+    let a_id = s.get(s.roots[0]).unwrap().children[0];
+    let mut out = Vec::new();
+    focus_node(&mut s, Some(a_id), &mut out);
+    out.clear();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_BACKSPACE,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_KEY_DOWN && e.node_id == a_id.0),
+        "Button 焦点 → Backspace 走普通 keydown"
     );
 }
