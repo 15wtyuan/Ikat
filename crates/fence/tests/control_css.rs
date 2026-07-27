@@ -198,6 +198,6 @@ fn pseudo_class_rule_still_counts() {
     assert!(
         !has_control_css_diag(&result, "progress"),
         "progress{{}} 已命中，:hover 规则不影响: {:?}",
-        &result.diagnostics
+        result.diagnostics
     );
 }
