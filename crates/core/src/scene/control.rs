@@ -233,8 +233,8 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
                 }
             }
         }
-        // TextField/TextArea: visual sync delegated to TextField beam (cursor blink,
-        // selection highlight, composition underline — not yet implemented).
+        // TextField/TextArea: 光标闪烁 timer 已实现（advance_cursor_blink，stage tick 驱动）；
+        // cursor/selection/composition 的渲染同步（几何计算 + 绘制）仍 pending（Task 12）。
         ControlState::TextField(_) | ControlState::TextArea(_) => {}
     }
 }
@@ -1410,5 +1410,158 @@ mod tests {
             Some(ControlState::TextField(e)) => e.cursor_visible,
             _ => panic!("not TextField"),
         }
+    }
+
+    /// 读 TextField EditState.cursor（字节偏移）。panic 若非 TextField。
+    fn get_cursor(scene: &Scene, id: NodeId) -> usize {
+        match scene.controls.get(id) {
+            Some(ControlState::TextField(e)) => e.cursor,
+            _ => panic!("not TextField"),
+        }
+    }
+
+    // ── on_pointer_down 世界→内容区坐标转换 ──
+    //
+    // on_text_pointer_down 接收的坐标已是 content-area-local（减过 layout_rect.xy +
+    // border + padding）。on_pointer_down（公共协调器）负责这层减法。既有 4 个光标测试都
+    // 直调 on_text_pointer_down，跳过了减法——此测试锁住 on_pointer_down 的转换链：
+    //   world_x − lr.x − border_left − padding_left → content-local x → hit_byte_offset
+    // 用非零 border/padding（content offset = 6）+ 非零 layout_rect.xy，使减法非平凡，
+    // 并选点击点跨 glyph 中点，保证减法错误会翻转 byte offset（非退化）。
+
+    /// 建带非零 border/padding + 已缓存 TextLayout 的 TextField（解耦 solve）。
+    ///
+    /// content offset = border_left(2) + padding_left(4) = 6（左），border_top(1) +
+    /// padding_top(3) = 4（上）。layout_rect = {x:10, y:20, w:200, h:30}。测文本时 content_w
+    /// 用同一 border/padding 算（与 measure_text_controls 一致），保证 TextLayout 坐标系
+    /// 与 on_pointer_down 减法后的 content-local 对齐。
+    fn make_scene_with_textfield_inset(text: &str) -> (Scene, NodeId) {
+        let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+        let font_data = std::fs::read(font_path).unwrap();
+        let mut fonts = crate::text::layout::FontTable::new();
+        fonts.register("DejaVu", font_data, true).unwrap();
+
+        let mut scene = Scene::default();
+        let id = create_node_from_template(
+            &mut scene,
+            NodeKind::TextField,
+            ResolvedStyle::default(),
+            Some(crate::asset::ControlInit::TextField(
+                crate::asset::EditInit {
+                    value: text.to_string(),
+                    placeholder: String::new(),
+                    max_length: 0,
+                    readonly: false,
+                },
+            )),
+        );
+        // 非零 border/padding：使 on_pointer_down 的减法非平凡（content offset 左=6, 上=4）。
+        scene.get_mut(id).unwrap().style.taffy_style.border = taffy::geometry::Rect {
+            left: taffy::style::LengthPercentage::length(2.0),
+            right: taffy::style::LengthPercentage::length(0.0),
+            top: taffy::style::LengthPercentage::length(1.0),
+            bottom: taffy::style::LengthPercentage::length(0.0),
+        };
+        scene.get_mut(id).unwrap().style.taffy_style.padding = taffy::geometry::Rect {
+            left: taffy::style::LengthPercentage::length(4.0),
+            right: taffy::style::LengthPercentage::length(0.0),
+            top: taffy::style::LengthPercentage::length(3.0),
+            bottom: taffy::style::LengthPercentage::length(0.0),
+        };
+        scene.get_mut(id).unwrap().layout_rect = Rect {
+            x: 10.0,
+            y: 20.0,
+            w: 200.0,
+            h: 30.0,
+        };
+
+        // 手动测文本 + 缓存 TextLayout（content_w 用同一 border/padding，对齐坐标系）。
+        let style = scene.get(id).unwrap().style.clone();
+        let stack = fonts.stack_for(style.font_family.as_deref());
+        let off_left = crate::render::resolve_lp(style.taffy_style.border.left)
+            + crate::render::resolve_lp(style.taffy_style.padding.left);
+        let off_right = crate::render::resolve_lp(style.taffy_style.border.right)
+            + crate::render::resolve_lp(style.taffy_style.padding.right);
+        let lr = scene.get(id).unwrap().layout_rect;
+        let content_w = (lr.w - off_left - off_right).max(0.0);
+        let layout = crate::text::layout::measure_text(
+            text,
+            style.font_size,
+            style.line_height,
+            style.letter_spacing,
+            style.text_align,
+            style.white_space_nowrap,
+            Some(content_w),
+            &stack,
+            style.color,
+            crate::text::rich::weight_from_font_weight(style.font_weight),
+        );
+        scene.text_layouts[id.index()] = Some(layout);
+        (scene, id)
+    }
+
+    #[test]
+    fn on_pointer_down_converts_world_to_content_local() {
+        // 锁住 on_pointer_down（公共协调器）的世界→内容区坐标转换。
+        // content offset 左=6（border 2 + padding 4），上=4（border 1 + padding 3），
+        // layout_rect.xy=(10,20)。点击点选在跨某 glyph 中点处，使减法错误会翻转 byte offset。
+        let (mut scene, id) = make_scene_with_textfield_inset("hello");
+
+        // 扫首行 glyph，取第一个中点 >= 6 的（保证 target = mid - 3 > 0）。
+        let layout = scene.text_layouts[id.index()]
+            .as_ref()
+            .expect("layout cached")
+            .clone();
+        assert!(!layout.lines.is_empty(), "hello 至少一行");
+        let first_line = &layout.lines[0];
+        let mut pen = 0.0f32;
+        let mut mid = None;
+        'scan: for run in &first_line.runs {
+            for g in &run.glyphs {
+                let m = pen + g.advance / 2.0;
+                if m >= 6.0 {
+                    mid = Some(m);
+                    break 'scan;
+                }
+                pen += g.advance;
+            }
+        }
+        let mid = mid.expect("hello 有中点 >= 6 的 glyph");
+
+        // content-local 目标 = mid - 3（中点左侧 → cursor 落在该 glyph 起始字节）。
+        let target_x = mid - 3.0;
+        let target_y = 5.0; // 单行，任意 content-local y（hit 选行 0）
+
+        // 参考：直接用 content-local 调 on_text_pointer_down 取预期 offset。
+        let expected = {
+            let (mut ref_scene, ref_id) = make_scene_with_textfield_inset("hello");
+            on_text_pointer_down(&mut ref_scene, ref_id, target_x, target_y);
+            get_cursor(&ref_scene, ref_id)
+        };
+
+        // 经 on_pointer_down（公共协调器）点击对应世界坐标：
+        //   world_x = lr.x(10) + border_left(2) + padding_left(4) + target_x
+        //   world_y = lr.y(20) + border_top(1) + padding_top(3) + target_y
+        let world_x = 10.0 + 2.0 + 4.0 + target_x;
+        let world_y = 20.0 + 1.0 + 3.0 + target_y;
+        on_pointer_down(&mut scene, id, [world_x, world_y]);
+
+        assert_eq!(
+            get_cursor(&scene, id),
+            expected,
+            "on_pointer_down 减 layout_rect.xy + border + padding 后命中 content-local x"
+        );
+
+        // 灵敏度保证：若减法被跳过/错误（如 resolve_lp 返 0），content-local 会偏 +6 到
+        // mid+3（中点右侧 → cursor +1），与 expected 不同。这证明点击点对减法敏感（非退化）。
+        let insensitive = {
+            let (mut ref2, rid2) = make_scene_with_textfield_inset("hello");
+            on_text_pointer_down(&mut ref2, rid2, target_x + 6.0, target_y);
+            get_cursor(&ref2, rid2)
+        };
+        assert_ne!(
+            insensitive, expected,
+            "[target, target+6] 跨 glyph 中点：减法错误会翻转 offset（测试非退化）"
+        );
     }
 }
