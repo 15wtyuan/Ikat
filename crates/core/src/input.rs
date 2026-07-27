@@ -60,7 +60,7 @@ pub const KEY_LEFT: u32 = 276; // LeftArrow
 pub const KEY_RIGHT: u32 = 275; // RightArrow
 pub const KEY_UP: u32 = 273; // UpArrow
 pub const KEY_DOWN: u32 = 274; // DownArrow
-pub const KEY_HOME: u32 = 278;
+pub const KEY_HOME: u32 = 278; // UnityEngine.KeyCode.Home == 278, End == 279 (Unity docs; not in Types.cs enum surface)
 pub const KEY_END: u32 = 279;
 pub const KEY_A: u32 = 97;
 pub const KEY_C: u32 = 99;

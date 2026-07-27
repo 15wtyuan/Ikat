@@ -20,6 +20,15 @@ fn build_stage(html: &str) -> (Stage, NodeId) {
     }])
     .expect("pack_components");
     let mut stage = Stage::new((400.0, 300.0)).expect("Stage::new");
+    // Text layout needs a default font at tick time (measure_text panics without one).
+    // Register a default ASCII font; embedded at compile time to stay cwd-independent.
+    stage
+        .register_font(
+            "DejaVu",
+            include_bytes!("../../../core/tests/fixtures/DejaVuSans.ttf").to_vec(),
+            true,
+        )
+        .expect("register_font");
     stage.load_package("p", &bytes).expect("load_package");
     let stage_root = stage.create_root("div", "").expect("create_root");
     let comp_root = stage.instantiate("p", "c").expect("instantiate");
