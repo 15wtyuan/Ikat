@@ -102,10 +102,10 @@ pub fn find_child_by_class(scene: &Scene, parent: NodeId, class: &str) -> Option
 /// `ControlState` 已在之前步骤同步（值/placeholder 在 sync_control_visuals 无关——TextField
 /// 视觉同步委托给 TextField beam，此处直接用 `transform_display_value` 取显示文本）。
 ///
-/// 写入的 TextLayout 含 border/padding 偏移（`bake_content_offset`），render 阶段直接从缓存
-/// 取用，不再重测。placeholder 场景（value 为空）：此处仍用 value 测（空串 → 0 宽零高 layout），
-/// render 阶段的 lazy fallback 在 value 为空时补测 placeholder——两条路径各自处理自己的显示逻辑，
-/// layout 阶段 measure 只是预热缓存（命中率 > 布局阶段缓存零高 placeholder 无价值）。
+/// 写入的 TextLayout 不含 border/padding 偏移——偏移由 render 阶段统一 `bake_content_offset`，
+/// 与正常 TextNode 路径（solve 测原始，render 烤偏移）保持一致。placeholder 场景（value 为空）：
+/// 跳过缓存（continue），render 阶段的 lazy fallback 会用 placeholder 重测。
+/// 布局阶段 measure 只是预热缓存：光标命中/几何 Task 依赖 TextLayout 在 render 前就位。
 pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::FontTable) {
     let ids: Vec<NodeId> = scene
         .controls
@@ -135,9 +135,7 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
         let off_right = crate::render::resolve_lp(s.taffy_style.border.right)
             + crate::render::resolve_lp(s.taffy_style.padding.right);
         let content_w = (n.layout_rect.w - off_left - off_right).max(0.0);
-        let off_top = crate::render::resolve_lp(s.taffy_style.border.top)
-            + crate::render::resolve_lp(s.taffy_style.padding.top);
-        let mut layout = crate::text::layout::measure_text(
+        let layout = crate::text::layout::measure_text(
             &display,
             s.font_size,
             s.line_height,
@@ -149,9 +147,6 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
             s.color,
             crate::text::rich::weight_from_font_weight(s.font_weight),
         );
-        if off_left != 0.0 || off_top != 0.0 {
-            crate::render::bake_content_offset(&mut layout, off_left, off_top);
-        }
         scene.text_layouts[id.index()] = Some(layout);
     }
 }
