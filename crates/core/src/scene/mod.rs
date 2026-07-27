@@ -5,6 +5,7 @@
 pub mod control;
 pub mod dynamic;
 pub mod node;
+pub mod text_cursor;
 pub mod transform;
 
 pub use node::{is_whitespace_only_text, Node, NodeId, NodeKind, Rect, Scene};
