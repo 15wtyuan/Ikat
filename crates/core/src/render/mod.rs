@@ -674,10 +674,11 @@ pub fn build_render_nodes(
                     continue;
                 };
                 // 显示文本：value 优先（经 display_value：PasswordField 掩码 + composition
-                // 预提交文本拼接），空时退到 placeholder。measure_text_controls 缓存的
-                // TextLayout 与这里 display 同源（都走 display_value），故文字 mesh 与
-                // 下划线几何一致。
-                let dv = crate::scene::control::display_value(e, n.kind);
+                // 预提交文本拼接），空时退到 placeholder。display_value 同时给出 composition
+                // 的 display 字节区间（PasswordField 掩码后的真实位置），供下划线对齐预提交文本
+                // 而非误指某个圆点。measure_text_controls 缓存的 TextLayout 与这里 display 同源
+                // （都走 display_value），故文字 mesh 与下划线几何一致。
+                let (dv, comp_range) = crate::scene::control::display_value(e, n.kind);
                 let display = if dv.is_empty() {
                     e.placeholder.clone()
                 } else {
@@ -812,14 +813,11 @@ pub fn build_render_nodes(
                     false, // 背景已注册 n.id → id_to_pos，文字不重复注册
                 );
                 // composition 下划线：有 composition 时在 composition 段下方画 2px 横线。
-                // display = display_value（value 掩码后 + composition 拼接），故 composition 字节
-                // 区间 [comp.pos, comp.pos + comp.text.len()] 在 display 坐标里正确覆盖预提交文本
-                // （PasswordField 例外：掩码改变字节长度，comp.pos 是原始 value 字节偏移——但
-                // PasswordField 的 IME 罕见且 display_value 用 char 对齐拼接，此处仍按 comp.pos
-                // 取近似位置，可接受）。
-                if let Some(comp) = e.composition.as_ref() {
-                    let comp_start = comp.pos;
-                    let comp_end = (comp.pos + comp.text.len()).min(display.len());
+                // 区间取 display_value 返回的 comp_range（display 坐标里 composition 的真实字节
+                // 区间），而非 raw comp.pos——PasswordField 掩码改变字节布局，raw comp.pos 会
+                // 落在错误字符（某个圆点）上。comp_range 由 char 计数对齐生成，对所有 kind 都精确
+                // 覆盖预提交文本（包括 PasswordField）。
+                if let Some((comp_start, comp_end)) = comp_range {
                     if comp_end > comp_start {
                         let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
                         let (xs, lis) =

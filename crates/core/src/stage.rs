@@ -333,6 +333,9 @@ impl Stage {
     /// [`loomgui_core::scene::control::display_value`]（含 composition 拼接），与 measure 缓存的
     /// TextLayout 同源；无缓存（首帧/空 value）→ None（后端 fallback 到节点 layout_rect）。
     ///
+    /// 有 composition 时候选窗锁在 composition 的 display 起点（IME 候选窗锁在 composition，
+    /// 不是原始光标；用 raw `e.cursor` 会因 composition 拼进 display 后光标字节偏移平移而偏早）。
+    ///
     /// 非文本控件 / 节点无效 / scene 未建 → None。
     pub fn cursor_rect(&self, node: NodeId) -> Option<crate::scene::node::Rect> {
         use crate::render::resolve_lp;
@@ -348,12 +351,18 @@ impl Stage {
         // display 须与 measure_text_controls 缓存同源（含 composition），否则光标字节偏移对
         // 不上缓存的 ranges。缓存为空（空 value/placeholder/首帧）→ 无法定位，返 None。
         let layout = scene.text_layouts.get(node.index())?.as_ref()?.clone();
-        let display = display_value(e, n.kind);
+        let (display, comp_range) = display_value(e, n.kind);
         if display.is_empty() {
             return None;
         }
         let ranges = line_byte_ranges(&layout, &display);
-        let cur = e.cursor.min(display.len());
+        // IME 候选窗锁在 composition 处（而非原始光标字节偏移）——composition 拼进 display 后
+        // 光标的 display 偏移会随 comp.text.len() 平移，按原始 e.cursor 取位会偏早。有
+        // composition 时用其 display 起点（comp_range），无 composition 时退回光标。
+        let cur = match comp_range {
+            Some((start, _)) => start,
+            None => e.cursor.min(display.len()),
+        };
         let (cx, li) = cursor_pixel_x(&layout, &ranges, cur);
         let line = layout.lines.get(li)?;
         let rect = n.layout_rect;

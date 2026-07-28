@@ -45,22 +45,28 @@ pub fn transform_display_value(kind: NodeKind, value: &str) -> String {
     }
 }
 
-/// 返回 measure/render 应用的「显示文本」：value 经 [`transform_display_value`] 掩码后，
-/// 把 composition 预提交文本拼到 composition.pos 处（composition 本身不掩码——用户输
-/// 拼音须可见）。
+/// 返回 measure/render 应用的「显示文本」及其 composition 字节区间：value 经
+/// [`transform_display_value`] 掩码后，把 composition 预提交文本拼到 composition.pos 处
+/// （composition 本身不掩码——用户输拼音须可见）。
+///
+/// 返回 `(String, Option<(usize, usize)>)`：第一个是显示文本，第二个是 composition 在该
+/// 显示文本里的字节区间 `[start, end)`（无 composition 或空 composition 时为 `None`）。
+/// 这个区间是 render 下划线 / 光标几何 / IME 候选窗定位的统一真相源——对 PasswordField
+/// 尤其关键：掩码后字节布局改变（每字符→1 个 '•'），原始 `comp.pos`（value 字节偏移）
+/// 不再落在正确字符上，必须用此返回区间。
 ///
 /// 标记子串模型（RmlUi/FairyGUI 共识）：composition 不是独立 buffer，而是拼进显示文本的
 /// 一个段落，作为一个 text run 参与 measure/换行/光标几何。该段落在 render 时由 Task 12
-/// 的 composition 分支按字节区间画下划线。无 composition 时等价于 `transform_display_value`。
+/// 的 composition 分支按下划线区间绘制。无 composition 时等价于 `transform_display_value`。
 ///
 /// PasswordField 的 char 对齐：掩码后 value 的字节长度改变（每个字符→1 个 '•'），故
 /// composition.pos（基于原始 value 的字节偏移）不能直接索引掩码串。用字符计数对齐——
 /// composition.pos 落在原始 value 的某字符边界，掩码串同位字符位置 = 该边界前的字符数。
-/// PasswordField 的 IME 较罕见，按字符对齐已足够正确。
-pub fn display_value(e: &EditState, kind: NodeKind) -> String {
+/// composition 占据掩码串 `[pos_char, pos_char + composition_chars)` 字符位，再换算成字节区间。
+pub fn display_value(e: &EditState, kind: NodeKind) -> (String, Option<(usize, usize)>) {
     let base = transform_display_value(kind, &e.value);
     let Some(c) = e.composition.as_ref() else {
-        return base;
+        return (base, None);
     };
     let mut chars: Vec<char> = base.chars().collect();
     // composition.pos 钳到原始 value 的合法 UTF-8 字符边界（防后端传越界/中间字节 pos）。
@@ -69,13 +75,37 @@ pub fn display_value(e: &EditState, kind: NodeKind) -> String {
     while aligned > 0 && !e.value.is_char_boundary(aligned) {
         aligned -= 1;
     }
+    // 掩码改变字节长度（PasswordField 每字符→1 个 '•'），故按字符计数对齐：
+    // value 边界前的字符数 = 掩码串里的对应字符位置。钳到掩码串当前长度内（防 pos 越界）。
     let pos_char = e.value[..aligned].chars().count();
-    for (i, ch) in c.text.chars().enumerate() {
+    let insert_start_char = pos_char.min(chars.len());
+    let comp_chars: Vec<char> = c.text.chars().collect();
+    for (i, ch) in comp_chars.iter().enumerate() {
         // 插入点越界（composition.pos 在掩码串末尾之外）时追加到末尾，不丢字符。
-        let at = (pos_char + i).min(chars.len());
-        chars.insert(at, ch);
+        let at = (insert_start_char + i).min(chars.len());
+        chars.insert(at, *ch);
     }
-    chars.into_iter().collect()
+    let display: String = chars.iter().collect();
+    if comp_chars.is_empty() {
+        return (display, None);
+    }
+    // composition 在 display 串里的真实字节区间 [start, end)。对非 PasswordField 与 raw
+    // comp.pos 等价；对 PasswordField 因掩码改变字节布局而不同——此区间让下划线 / 光标几何
+    // 对齐预提交文本本身（而非误指某个圆点）。
+    let comp_end_char = insert_start_char + comp_chars.len();
+    let comp_start_byte = char_index_to_byte(&display, insert_start_char);
+    let comp_end_byte = char_index_to_byte(&display, comp_end_char);
+    (display, Some((comp_start_byte, comp_end_byte)))
+}
+
+/// 字符索引 → 字节偏移：返回 s 里第 `char_idx` 个字符的起始字节。`char_idx` 超出字符数
+/// 时返回 `s.len()`（串末尾）。用于 [`display_value`] 把 composition 的字符区间换算成
+/// 字节区间（multi-byte 字符下字符数 ≠ 字节数）。
+fn char_index_to_byte(s: &str, char_idx: usize) -> usize {
+    s.char_indices()
+        .nth(char_idx)
+        .map(|(b, _)| b)
+        .unwrap_or(s.len())
 }
 
 /// 给控件节点注入框架内部视觉子节点。非控件 NodeKind 为 no-op。
@@ -160,7 +190,9 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
         else {
             continue;
         };
-        let display = display_value(e, n.kind);
+        // display_value 同时返回 composition 的 display 字节区间；measure 只需显示文本本身
+        // （区间由 render underline / cursor_rect 消费）。
+        let (display, _comp_range) = display_value(e, n.kind);
         // value 为空时跳过缓存——render 阶段会用 placeholder 重测（空串 TextLayout 零高，
         // 缓存后 render 的 unwrap_or_else 不触发，placeholder 无法显示）。
         if display.is_empty() {
@@ -812,9 +844,17 @@ pub fn line_break(e: &mut EditState, kind: NodeKind, out: &mut Vec<EventRecord>,
 
 /// 设置 composition（后端读 IME compositionString 回灌）。pos 钳到 value 合法字节边界。
 ///
-/// 重置光标闪烁 timer（显示光标）——与编辑原语（insert_text/move_cursor）一致，让用户在
-/// 输入过程中能看到光标位置。连续 set_composition（每帧更新 composition string）是常态。
+/// **空串 = 取消 composition**：`text` 为空时清掉 `e.composition`（设为 None），与 FFI 文档
+/// 约定（传空串取消正在进行的 composition）一致，不存空 composition（否则 commit/render 会
+/// 拿到一个零宽 composition，下游边界判断 `comp_end > comp_start` 退化）。
+///
+/// 非空 text 时重置光标闪烁 timer（显示光标）——与编辑原语（insert_text/move_cursor）一致，
+/// 让用户在输入过程中能看到光标位置。连续 set_composition（每帧更新 composition string）是常态。
 pub fn set_composition(e: &mut EditState, text: &str, pos: usize) {
+    if text.is_empty() {
+        e.composition = None;
+        return;
+    }
     let mut p = pos.min(e.value.len());
     // 钳到 UTF-8 字符边界：后端传的 pos 可能落在多字节字符中间，直接存会让下游
     // value[..pos] 切片 panic。回退到最近的 char 起始字节。
@@ -1949,5 +1989,61 @@ mod tests {
         assert_eq!(e.value, "hello"); // value 未变
         assert_eq!(e.anchor, 1); // 选区完好
         assert_eq!(e.cursor, 4);
+    }
+
+    // ── composition / display_value（Fix 1/3/4） ──
+
+    #[test]
+    fn password_field_composition_display_range_points_at_composition() {
+        // PasswordField value "ab" → 掩码 "••"。composition "中" 插在 pos=1（ab 中间）→
+        // 显示文本 "•中•"（composition 不掩码，用户输入拼音须可见）。composition 的 display
+        // 字节区间必须指向 "中"，而不是某个圆点——这是 Fix 1 的核心：掩码改变字节布局后，
+        // raw comp.pos(=1) 会落在第二个圆点上，下划线 / 光标会误指。
+        let mut e = EditState::from_init("ab".into(), "".into(), 0, false);
+        set_composition(&mut e, "中", 1);
+        assert_eq!(e.composition.as_ref().unwrap().pos, 1);
+        let (display, range) = display_value(&e, NodeKind::PasswordField);
+        assert_eq!(display, "•中•", "masked value + visible composition");
+        let (start, end) = range.expect("composition range present for PasswordField");
+        assert_eq!(
+            &display[start..end],
+            "中",
+            "range points at composition char, not a bullet"
+        );
+    }
+
+    #[test]
+    fn display_value_range_normal_field_matches_raw_comp_pos() {
+        // 非 PasswordField：掩码不改变字节布局，display_value 返回的区间 = raw comp.pos..+len。
+        // 回归锁：确保 char 对齐改造未坏掉普通文本框的常见路径。
+        let mut e = EditState::from_init("ab".into(), "".into(), 0, false);
+        set_composition(&mut e, "ni", 1);
+        let (display, range) = display_value(&e, NodeKind::TextField);
+        assert_eq!(display, "anib");
+        let (start, end) = range.expect("composition range present");
+        assert_eq!(&display[start..end], "ni");
+    }
+
+    #[test]
+    fn display_value_no_composition_returns_none() {
+        // 无 composition → range 为 None（render 不画下划线，cursor_rect 退回原始光标）。
+        let e = EditState::from_init("ab".into(), "".into(), 0, false);
+        let (display, range) = display_value(&e, NodeKind::TextField);
+        assert_eq!(display, "ab");
+        assert!(range.is_none());
+    }
+
+    #[test]
+    fn set_composition_empty_clears_composition() {
+        // Fix 3：空串 = 取消 composition。set_composition("") 应清掉 composition（设 None），
+        // 而不是存一个零宽空 composition（FFI 文档约定「传空串 = 取消」）。
+        let mut e = EditState::from_init("ab".into(), "".into(), 0, false);
+        set_composition(&mut e, "ni", 1);
+        assert!(e.composition.is_some());
+        set_composition(&mut e, "", 1);
+        assert!(e.composition.is_none(), "empty text clears composition");
+        // display_value 随之返 None 区间（无下划线 / 候选窗）。
+        let (_display, range) = display_value(&e, NodeKind::TextField);
+        assert!(range.is_none());
     }
 }
