@@ -18,6 +18,8 @@
      caret-color = 光标色；selection-background = 选区高亮（围栏无 ::selection 伪元素，用私有属性平铺）。 */
   input[type="text"], input[type="password"], input[type="search"], select, textarea { background-color:rgba(26,47,69,0.85); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:10px 14px; border-radius:6px; caret-color:#5fb4d4; selection-background:rgba(95,180,212,0.45); transition:border-color .15s; }
   input[type="text"]:focus, input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea:focus { border-color:#5fb4d4; }
+  /* readonly 态：灰底暗字（围栏认 [readonly] 属性选择器；打包期读 readonly 属性设 ControlState.readonly，core edit guard 拒改） */
+  input[readonly], textarea[readonly] { background-color:rgba(40,52,68,0.6); color:#6a7280; border-color:#3a4252; }
   textarea { width:100%; height:100px; resize:none; font-family:inherit; }
   .radio-group {display:flex; flex-direction:row; gap:24px; }
   .radio-opt {display:flex; flex-direction:row; align-items:center; gap:8px; color:#9aa0b4; font-size:15px; }
@@ -53,6 +55,7 @@
         <div class="field"><span class="field-label">角色名（text · 回车提交）</span><input type="text" id="char-name" placeholder="输入角色名后回车" maxlength="12"></div>
         <div class="field"><span class="field-label">通行密语（password · 掩码显示）</span><input type="password" id="char-pass" placeholder="6-16 位" maxlength="16"></div>
         <div class="field"><span class="field-label">搜索已有角色（search）</span><input type="search" id="char-search" placeholder="输入关键词搜索"></div>
+        <div class="field"><span class="field-label">角色编号（readonly · 只读锁定）</span><input type="text" id="char-id" value="CHR-2026-0728" readonly></div>
         <div class="field"><span class="field-label">提交反馈</span><div id="name-feedback" style="color:#8ec5d8;font-size:14px;min-height:18px">（输入角色名后回车，此处显示提交结果）</div></div>
       </div>
       <div class="group">
