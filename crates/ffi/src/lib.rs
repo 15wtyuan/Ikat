@@ -1781,7 +1781,7 @@ pub extern "C" fn loomgui_stage_set_control_max(
     0
 }
 
-/// 读控件 max（ProgressBar / Slider）。非值控件 / null out / 节点缺失 → -1。
+/// 读控件 max（ProgressBar / Slider / NumberField）。非值控件 / null out / 节点缺失 → -1。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -1798,7 +1798,11 @@ pub extern "C" fn loomgui_stage_get_control_max(
         return -1;
     };
     match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::Progress { max, .. } | ControlState::Slider { max, .. }) => {
+        Some(
+            ControlState::Progress { max, .. }
+            | ControlState::Slider { max, .. }
+            | ControlState::NumberField { max, .. },
+        ) => {
             unsafe { *out = *max };
             0
         }
@@ -1852,7 +1856,7 @@ pub extern "C" fn loomgui_stage_set_control_min(
     0
 }
 
-/// 读控件 min（Slider 独有）。非 Slider / null out / 节点缺失 → -1。
+/// 读控件 min（Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -1869,7 +1873,7 @@ pub extern "C" fn loomgui_stage_get_control_min(
         return -1;
     };
     match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::Slider { min, .. }) => {
+        Some(ControlState::Slider { min, .. } | ControlState::NumberField { min, .. }) => {
             unsafe { *out = *min };
             0
         }
@@ -1926,7 +1930,7 @@ pub extern "C" fn loomgui_stage_set_control_step(
     0
 }
 
-/// 读控件 step（Slider 独有）。非 Slider / null out / 节点缺失 → -1。
+/// 读控件 step（Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -1943,7 +1947,7 @@ pub extern "C" fn loomgui_stage_get_control_step(
         return -1;
     };
     match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::Slider { step, .. }) => {
+        Some(ControlState::Slider { step, .. } | ControlState::NumberField { step, .. }) => {
             unsafe { *out = *step };
             0
         }

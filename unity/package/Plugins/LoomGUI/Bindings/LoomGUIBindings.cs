@@ -607,7 +607,7 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_set_control_max(StageHandle* h, uint node_id, float max);
 
         /// <summary>
-        ///  读控件 max（ProgressBar / Slider）。非值控件 / null out / 节点缺失 → -1。
+        ///  读控件 max（ProgressBar / Slider / NumberField）。非值控件 / null out / 节点缺失 → -1。
         ///
         ///  **常驻（不 gate）。**
         /// </summary>
@@ -624,7 +624,7 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_set_control_min(StageHandle* h, uint node_id, float min);
 
         /// <summary>
-        ///  读控件 min（Slider 独有）。非 Slider / null out / 节点缺失 → -1。
+        ///  读控件 min（Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
         ///
         ///  **常驻（不 gate）。**
         /// </summary>
@@ -641,7 +641,7 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_set_control_step(StageHandle* h, uint node_id, float step);
 
         /// <summary>
-        ///  读控件 step（Slider 独有）。非 Slider / null out / 节点缺失 → -1。
+        ///  读控件 step（Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
         ///
         ///  **常驻（不 gate）。**
         /// </summary>

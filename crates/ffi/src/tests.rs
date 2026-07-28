@@ -1410,3 +1410,57 @@ fn ffi_number_value_non_number_control_err() {
     );
     loomgui_stage_free(h);
 }
+
+/// NumberField get_control_min/max/step 读回 baked 约束值（min=0/max=10/step=2）。
+/// 修复前这三个 getter 只 match Slider，对 NumberField 返 -1；现已扩到 NumberField。
+#[test]
+fn ffi_get_control_min_max_step_number_field() {
+    let (h, n) = make_number_stage("5", 0.0, 10.0, 2.0);
+
+    let mut out = -999.0f32;
+    let rc = loomgui_stage_get_control_max(h, n, &mut out);
+    assert_eq!(rc, 0, "get_control_max rc");
+    assert!((out - 10.0).abs() < 0.001, "max == 10, got {out}");
+
+    let mut out = -999.0f32;
+    let rc = loomgui_stage_get_control_min(h, n, &mut out);
+    assert_eq!(rc, 0, "get_control_min rc");
+    assert!((out - 0.0).abs() < 0.001, "min == 0, got {out}");
+
+    let mut out = -999.0f32;
+    let rc = loomgui_stage_get_control_step(h, n, &mut out);
+    assert_eq!(rc, 0, "get_control_step rc");
+    assert!((out - 2.0).abs() < 0.001, "step == 2, got {out}");
+    loomgui_stage_free(h);
+}
+
+/// NumberField set_control_min/max/step 目前是 Slider 独有（重 clamp value）→ -1。
+/// NumberField 的 value 存为 EditState 文本，setter 须 parse→clamp→quantize→re-format，
+/// 留待后续（运行时改约束较少见，读约束才是 C# 投影层 gap）。锁住当前 -1 行为防漂移。
+#[test]
+fn ffi_set_control_min_max_step_number_field_unsupported() {
+    let (h, n) = make_number_stage("5", 0.0, 10.0, 2.0);
+    assert_eq!(
+        loomgui_stage_set_control_min(h, n, 1.0),
+        -1,
+        "set_control_min on NumberField not yet supported"
+    );
+    assert_eq!(
+        loomgui_stage_set_control_max(h, n, 20.0),
+        -1,
+        "set_control_max on NumberField not yet supported"
+    );
+    assert_eq!(
+        loomgui_stage_set_control_step(h, n, 1.0),
+        -1,
+        "set_control_step on NumberField not yet supported"
+    );
+    // 原值未被改动
+    let mut out = -999.0f32;
+    assert_eq!(loomgui_stage_get_control_max(h, n, &mut out), 0);
+    assert!(
+        (out - 10.0).abs() < 0.001,
+        "max unchanged after rejected set"
+    );
+    loomgui_stage_free(h);
+}
