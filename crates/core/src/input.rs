@@ -451,7 +451,14 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
         if ke.is_down {
             if let Some(fid) = focused {
                 let kind = scene.get(fid).map(|n| n.kind);
-                let is_text = matches!(kind, Some(NodeKind::TextField) | Some(NodeKind::TextArea));
+                // NumberField 的 EditState 与 TextField/TextArea 同构，编辑原语（Backspace/Delete/
+                // 方向键/Home/End/ctrl+A/C/X/V）共享：它们只动 EditState 的 value/cursor/anchor。
+                let is_text = matches!(
+                    kind,
+                    Some(NodeKind::TextField)
+                        | Some(NodeKind::TextArea)
+                        | Some(NodeKind::NumberField)
+                );
                 if is_text {
                     let ctrl = ke.modifiers & MOD_CTRL != 0;
                     let shift = ke.modifiers & MOD_SHIFT != 0;
@@ -460,8 +467,12 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                     // 单次 controls 可变借跑除 Escape 外的全部路由（这些只动 EditState / 推 out，
                     // 不碰 scene）。Escape 单独处理——它调 focus_node(scene,None) 要 &mut scene，
                     // 与此处 controls 借冲突。
-                    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
-                        scene.controls.get_mut(fid)
+                    // 三控件共享同一 &mut EditState（NumberField 是 struct 变体，解出 edit 字段）。
+                    if let Some(
+                        ControlState::TextField(e)
+                        | ControlState::TextArea(e)
+                        | ControlState::NumberField { edit: e, .. },
+                    ) = scene.controls.get_mut(fid)
                     {
                         match ke.key_code {
                             KEY_BACKSPACE => {
@@ -551,7 +562,7 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                 }
                 // Dropdown 键盘路由（仅 open 时）：Up/Down seek 跳 disabled、Enter 提交、
                 // Esc 回滚。消费的路由键不发普通 keydown（同 TextField 控制键消费模式）。
-                // is_text 已先走文本路由；Dropdown 不是 TextField/TextArea，二者互斥。
+                // is_text 已先走文本路由；Dropdown 不是 TextField/TextArea/NumberField，二者互斥。
                 let is_open_dropdown = matches!(
                     scene.controls.get(fid),
                     Some(ControlState::Dropdown { open: true, .. })

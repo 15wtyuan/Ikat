@@ -5232,3 +5232,120 @@ fn number_field_ime_commit_filters_non_numeric() {
         "'+' 被拒（'+' 不是数字语法）"
     );
 }
+
+// ── Task 15 fix：NumberField 接进 keydown 控制键路由（Backspace/Delete/arrows/ctrl+A）
+//
+// process_keys 的 is_text 此前只含 TextField/TextArea，NumberField 聚焦后能收字符
+// （process_text_input 渠）但 Backspace/Delete/方向键/Home/End/ctrl 组合键全透传，
+// 不可纠错。现 is_text 含 NumberField、ControlState 解构臂含 NumberField.edit，
+// 共享同一套 EditState 编辑原语（delete_char/move_cursor 等都 kind 无关，直接生效）。
+// paste 过滤的集成测见 control.rs（`paste_filters_non_numeric_for_number_field`，
+// 复用该模块的剪贴板测试架 CLIP_TEST_LOCK/TEST_CLIP）。
+
+#[test]
+fn number_field_backspace_deletes_char() {
+    // NumberField value="123"(cursor=3 末尾)，Backspace 删左 → "12"，发 ValueChanged。
+    let (mut s, nf) = focused_numberfield_scene("123");
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_BACKSPACE,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(nf_edit(&s, nf).value, "12", "Backspace 删末尾 '3'");
+    assert_eq!(nf_edit(&s, nf).cursor, 2);
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_VALUE_CHANGED && e.node_id == nf.0),
+        "删字符发 ValueChanged"
+    );
+}
+
+#[test]
+fn number_field_delete_key_works() {
+    // NumberField value="123"，光标移到起点（cursor=0），Delete 删右 → "23"。
+    let (mut s, nf) = focused_numberfield_scene("123");
+    if let Some(ControlState::NumberField { edit, .. }) = s.controls.get_mut(nf) {
+        edit.cursor = 0;
+        edit.anchor = 0;
+    }
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_DELETE,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(nf_edit(&s, nf).value, "23", "Delete 删首位 '1'");
+    assert_eq!(nf_edit(&s, nf).cursor, 0);
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_VALUE_CHANGED && e.node_id == nf.0),
+        "Delete 删字符发 ValueChanged"
+    );
+}
+
+#[test]
+fn number_field_arrow_keys_move_cursor() {
+    // NumberField value="123"(cursor=3 末尾)，Left → cursor=2、anchor=2（无 shift 折叠）。
+    let (mut s, nf) = focused_numberfield_scene("123");
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_LEFT,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(nf_edit(&s, nf).cursor, 2, "Left 左移一位");
+    assert_eq!(nf_edit(&s, nf).anchor, 2, "无 shift → 折叠选区");
+    // 方向键不发 ValueChanged（只动光标，不改 value）。
+    assert!(
+        out.iter().all(|e| e.event_type != EVT_VALUE_CHANGED),
+        "方向键不发 ValueChanged"
+    );
+    // Right 回到末尾。
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_RIGHT,
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(nf_edit(&s, nf).cursor, 3, "Right 回到末尾");
+}
+
+#[test]
+fn number_field_ctrl_a_selects_all() {
+    // NumberField value="123"，ctrl+A → anchor=0、cursor=3（全选，不动 value）。
+    let (mut s, nf) = focused_numberfield_scene("123");
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: KEY_A,
+            modifiers: MOD_CTRL,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(nf_edit(&s, nf).anchor, 0, "ctrl+A anchor 归零");
+    assert_eq!(nf_edit(&s, nf).cursor, 3, "ctrl+A cursor 到末尾");
+    assert_eq!(nf_edit(&s, nf).value, "123", "全选不改 value");
+}

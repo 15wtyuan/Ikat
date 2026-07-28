@@ -1401,8 +1401,17 @@ pub fn cut_selection(e: &mut EditState, _kind: NodeKind) -> bool {
 
 /// 粘贴：读剪贴板后 [`insert_text`]（自带选区替换 + sanitize + max_length 校验）。
 /// 返回 value 是否改变。readonly / 剪贴板空 / 超 max_length → no-op 返 false。
+///
+/// NumberField：照 process_text_input / commit_composition 的输入 guard，先滤成数字语法
+/// 字符（[`filter_number_field_text`]）再插——三渠（textinput / IME commit / keydown-paste）
+/// 共享同一过滤语义，避免漂移。
 pub fn paste(e: &mut EditState, kind: NodeKind) -> bool {
-    insert_text(e, kind, &read_clipboard())
+    let raw = read_clipboard();
+    let text = match kind {
+        NodeKind::NumberField => crate::input::filter_number_field_text(&raw),
+        _ => raw,
+    };
+    insert_text(e, kind, &text)
 }
 
 #[cfg(test)]
@@ -3139,6 +3148,17 @@ mod tests {
             "paste at the cut gap reinserts text in place"
         );
         assert_eq!(e.cursor, 4, "cursor advanced past pasted text");
+    }
+
+    #[test]
+    fn paste_filters_non_numeric_for_number_field() {
+        // NumberField 的 keydown-paste 渠道须与 textinput/IME-commit 共享输入 guard
+        // （filter_number_field_text，三渠同语义防漂移）：粘贴 "1a2" → 滤掉 'a' → "12"。
+        let _g = clip_test_setup();
+        *TEST_CLIP.lock().unwrap() = "1a2".into();
+        let mut e = EditState::from_init("".into(), "".into(), 0, false);
+        assert!(paste(&mut e, NodeKind::NumberField));
+        assert_eq!(e.value, "12", "paste 滤掉 'a' 仅留数字语法字符");
     }
 
     #[test]

@@ -370,7 +370,9 @@ impl Stage {
         let scene = self.scene.as_ref()?;
         let n = scene.get(node)?;
         let e = match scene.controls.get(node)? {
-            ControlState::TextField(e) | ControlState::TextArea(e) => e,
+            ControlState::TextField(e)
+            | ControlState::TextArea(e)
+            | ControlState::NumberField { edit: e, .. } => e,
             _ => return None,
         };
         // display 须与 measure_text_controls 缓存同源（含 composition），否则光标字节偏移对
