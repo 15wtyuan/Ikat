@@ -724,39 +724,20 @@ pub fn build_render_nodes(
                 if off_left != 0.0 || off_top != 0.0 {
                     bake_content_offset(&mut layout, off_left, off_top);
                 }
-                let meshes = build_text_mesh(
-                    &layout,
-                    atlas,
-                    fonts,
-                    rect,
-                    &n.style.text_effects,
-                    n.style.background_gradient,
-                    n.style.background_clip_text,
-                );
-                push_text_meshes(
-                    &mut nodes,
-                    &mut id_to_pos,
-                    meshes,
-                    n,
-                    node_id,
-                    node_id,
-                    parent_id,
-                    alpha,
-                    text_color,
-                    wm,
-                    false, // 背景已注册 n.id → id_to_pos，文字不重复注册
-                );
                 // ── 编辑反馈 mesh：选区背景 / composition 下划线 / 光标 ──
                 // 几何用上面烤过 content offset 的 `layout`；坐标与世界文字字形同系
                 // （rect.xy + 局部）。各 mesh 用独立合成 node_id，避免与背景/文字 mesh 在
                 // dirty hash 表碰撞（Task 4 parked 的同 id 问题）。
                 //
-                // push 顺序 = 绘制层序（sort_key 升序，后绘者在上层）：选区 → composition →
-                // 光标。光标最后 push = 最上层（caret 压在选区/下划线之上）。
+                // push 顺序 = 绘制层序（sort_key 升序，后绘者在上层）：选区 → 文字 →
+                // composition → 光标。选区先于文字 push = 落在文字之下（标准编辑器行为：
+                // 选区高亮作背景，选中文字保持清晰可读）。光标最后 push = 最上层
+                // （caret 压在 composition 下划线与文字之上）。
                 //
                 // 缺省色为常量：caret = 文字色，selection-bg = 蓝半透，composition-underline
                 // = 文字色。Task 15 加 caret-color / selection-background style 字段后替换。
-                // 选区背景：sel_begin<sel_end 时逐行画覆盖选中文本的 quad。
+                // 选区背景：sel_begin<sel_end 时逐行画覆盖选中文本的 quad。先于文字 push，
+                // 使选区落在文字之下（文字清晰，选区作半透背景）。
                 let (sel_b, sel_e) = e.selection_range();
                 if sel_b < sel_e {
                     let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
@@ -819,6 +800,28 @@ pub fn build_render_nodes(
                         );
                     }
                 }
+                let meshes = build_text_mesh(
+                    &layout,
+                    atlas,
+                    fonts,
+                    rect,
+                    &n.style.text_effects,
+                    n.style.background_gradient,
+                    n.style.background_clip_text,
+                );
+                push_text_meshes(
+                    &mut nodes,
+                    &mut id_to_pos,
+                    meshes,
+                    n,
+                    node_id,
+                    node_id,
+                    parent_id,
+                    alpha,
+                    text_color,
+                    wm,
+                    false, // 背景已注册 n.id → id_to_pos，文字不重复注册
+                );
                 // composition 下划线：有 composition 时在 composition 段下方画 2px 横线。
                 // composition 尚未接入输入路径（Task 13），此分支现实不触发；几何按
                 // composition.pos/value 字节区间算，覆盖预提交文本范围。
@@ -1054,16 +1057,34 @@ fn synth_text_node_id(primary_id: u32, sub_page: u32) -> u32 {
 // hash 表（new_hashes，以 node_id 为键）会因键碰撞只保留其一的 hash，导致增量更新
 // 漏检（Task 4 parked 的背景+文字共用 node_id 问题即此机制）。此处用独立合成 id 规避。
 //
-// high-byte 取值避开 text 跨页子页范围（1..=15）与 BACK_LAYER_FLAG（bit 28 = high byte 16），
-// 选 20+ 区间，与现有所有合成 id 方案互不干扰；is_text_sub_page 对此区间返 false。
-const TF_CURSOR_SYNTH_BYTE: u32 = 20;
-const TF_SELECTION_SYNTH_BYTE: u32 = 21;
-const TF_COMPOSITION_SYNTH_BYTE: u32 = 22;
+// 这些 mesh 是逐帧重算的动态反馈（光标闪烁、选区随拖拽变），绝不能与静态背景/文字
+// 合批——否则（1）光标闪烁会连累背景每帧重传；（2）cursor 与 composition 变化节奏
+// 不同，合批会让 composition 的 node_id 随光标可见性跳变，dirty-tracking 抖动。故
+// [`is_tf_edit_synth`] 在 batch/merge 里显式排除它们（不靠 BACK_LAYER_FLAG 滥位）。
+//
+// high-byte 取值约束（须同时满足）：
+//   1. 不在 text 跨页子页范围（1..=15），否则 is_text_sub_page 误判；
+//   2. BACK_LAYER_FLAG 清零——该位是 bit 28，即 high byte 的 bit-4（值 0x10），故
+//      high byte 取 16-31/48-63/... 都会置位。high byte 必须落在 32-47 区间
+//      （仅 bit-5 置位，bit-4 清零），才保证 BACK_LAYER_FLAG 不被置位；
+//   3. 不与 retired INLINE_IMG_SYNTH_ID_BASE（high byte 232..=255）撞。
+// 选 32/33/34，满足全部约束；is_text_sub_page 对此区间返 false。
+const TF_CURSOR_SYNTH_BYTE: u32 = 32;
+const TF_SELECTION_SYNTH_BYTE: u32 = 33;
+const TF_COMPOSITION_SYNTH_BYTE: u32 = 34;
 
 /// 生成 TextField 编辑反馈 mesh 的合成 node_id（high byte = tag，低 24 位 = primary）。
 /// 编码同 `synth_text_node_id`，仅 high-byte 标签语义不同（编辑反馈 vs 跨页子页）。
 fn tf_synth_id(primary_id: u32, tag_byte: u32) -> u32 {
     (primary_id & 0x00FF_FFFF) | (tag_byte << 24)
+}
+
+/// 判断 node_id 是否为 TextField 编辑反馈 mesh（high byte 在 32..=34）。
+/// 这些 mesh 须保留为独立 RenderNode（不与背景/文字合批，理由见上方常量注释），
+/// batch::is_mergeable_mesh 与 merge::mesh_key 据此排除它们。
+pub(crate) fn is_tf_edit_synth(node_id: u32) -> bool {
+    let hi = (node_id >> 24) as u8;
+    (TF_CURSOR_SYNTH_BYTE as u8..=TF_COMPOSITION_SYNTH_BYTE as u8).contains(&hi)
 }
 
 /// 判断 node_id 是否为跨页 text 子页（high byte 在 1..=15，即 bits [31:24] 值 1-15）。

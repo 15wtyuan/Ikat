@@ -36,6 +36,7 @@ fn is_mergeable_mesh(rn: &RenderNode) -> bool {
     matches!(&rn.payload, NodePayload::Mesh { program, .. } if *program == 0)
         && crate::transform::is_pure_translation(&rn.world_matrix)
         && (rn.node_id & crate::render::BACK_LAYER_FLAG == 0)
+        && !crate::render::is_tf_edit_synth(rn.node_id)
 }
 
 /// 可合并 Mesh 的 DrawState = (image_path, mask_context)。

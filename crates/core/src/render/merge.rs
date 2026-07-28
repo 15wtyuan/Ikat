@@ -26,6 +26,9 @@ fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32, u64)> {
     if rn.node_id & crate::render::BACK_LAYER_FLAG != 0 {
         return None; // back-layer 合成节点（如 box-shadow）不合批
     }
+    if crate::render::is_tf_edit_synth(rn.node_id) {
+        return None; // TextField 编辑反馈 mesh（光标/选区/composition）须独立保留
+    }
     match &rn.payload {
         NodePayload::Mesh {
             image_path,

@@ -3833,9 +3833,20 @@ fn tf_synth_ids_are_distinct() {
     assert!(!is_text_sub_page(c));
     assert!(!is_text_sub_page(s));
     assert!(!is_text_sub_page(u));
+    // 不与 BACK_LAYER_FLAG（bit 28 = high byte bit-4）撞——撞了会被 batch.rs
+    // is_mergeable_mesh / merge.rs mesh_key 当 box-shadow 下层节点排除，导致这些 mesh
+    // 永不 merge-batch（坑：synth byte 20/21/22 = high byte 0x14/0x15/0x16，bit-4 置位）。
+    for id in [c, s, u] {
+        assert_eq!(
+            id & BACK_LAYER_FLAG,
+            0,
+            "edit synth id must not collide with back-layer flag"
+        );
+    }
 }
 
-/// 编辑反馈 mesh 的 sort_key 顺序：背景 < 文字 < 选区 < 光标。
+/// 编辑反馈 mesh 的 sort_key 顺序：背景 < 选区 < 文字 < 光标。
+/// 选区先于文字 push（在文字下层，标准编辑器行为）；光标最后 push（最上层）。
 /// 锁定 reorder_for_batching 对合成 id（program=0 mergeable）不 panic 且保序
 /// （坑 139：合成 id + program:0 曾触发 aabb_of 的 scene.get().expect panic；
 /// aabb_of 已加零面积兜底，此测回归保护）。多节点 reorder（n≥2）才触 aabb_of 路径。
@@ -3877,8 +3888,9 @@ fn textfield_editing_mesh_sort_key_order() {
         })
         .map(|rn| rn.sort_key)
         .expect("文字 mesh 必须存在");
-    // 顺序：背景 < 文字 < 选区 < 光标（升序 sort_key = 绘制序，后绘者在上层）。
-    assert!(bg_sk < text_sk, "背景在文字之下: {bg_sk} < {text_sk}");
-    assert!(text_sk < sel_sk, "选区在文字之上: {text_sk} < {sel_sk}");
-    assert!(sel_sk < cur_sk, "光标在选区之上: {sel_sk} < {cur_sk}");
+    // 顺序：背景 < 选区 < 文字 < 光标（升序 sort_key = 绘制序，后绘者在上层）。
+    // 选区在文字之下（选区作背景，文字保持清晰）；光标在文字之上（caret 压在选中文字上）。
+    assert!(bg_sk < sel_sk, "背景在选区之下: {bg_sk} < {sel_sk}");
+    assert!(sel_sk < text_sk, "选区在文字之下: {sel_sk} < {text_sk}");
+    assert!(text_sk < cur_sk, "光标在文字之上: {text_sk} < {cur_sk}");
 }
