@@ -1,13 +1,18 @@
 //! Stage 6.7：控件必须被 CSS 命中校验。
 //!
-//! LoomGUI 控件（ProgressBar / Slider / Toggle / RadioButton）**不带 UA 默认样式**——
+//! LoomGUI 控件（ProgressBar / Slider / Toggle / RadioButton + 文本控件
+//! TextField / PasswordField / SearchField / TextArea）**不带 UA 默认样式**——
 //! core 刻意保持纯净，不开「框架自带样式源」先例。代价：写了控件标签却没匹配的 CSS
 //! 规则 = 运行时渲染空白，作者无法察觉（HTML 在浏览器预览里浏览器会套自己的 UA 表，
 //! 看着正常，打包进 LoomGUI 却空）。
 //!
 //! 本 pass 在打包期（cascade resolve 之后）拦下这种写法：对每个控件节点，检查是否有
 //! 任意 `<style>` 规则的选择器命中它本身（tag / class / id / 后代链落地在该节点）。
-//! 完全无命中 → `FenceControlWithoutCss` error + 教学（为控件和 `.loom-*` 子节点提供 CSS）。
+//! 完全无命中 → `FenceControlWithoutCss` error + 教学。
+//!
+//! 教学分支：进度/滑块/勾选控件靠框架运行时注入的 `.loom-*` 子节点呈现
+//! （fill/track/thumb/check）→ 教学引导为子节点配样式；文本控件无注入子节点
+//! （文本和光标由控件自身渲染）→ 教学引导为控件本身配 background/border + caret-color。
 //!
 //! 选择器匹配消费 fence 的 IrTree（解析期产物），不依赖运行时 Node——复用 css_rules
 //! 解析出的 `DynamicRule` 表，按 tag/class/id/attr 字面对照 IrElement 判定。
@@ -19,14 +24,33 @@ use loomgui_core::style::dynamic::{AttrOp, Compound, DynamicRule, ParsedSelector
 
 /// 触发本校验的控件 SemanticKind。
 ///
-/// 这些控件的共同点：core 实例化时注入 `.loom-*` 内部视觉子节点（fill/track/thumb/check），
-/// 用户必须为控件本身（轨道/框）和子节点（填充/勾选）配 CSS 才有可见外观。缺任意规则 = 空白。
+/// 共同点：core 不带 UA 默认样式——写了标签却无匹配 CSS = 运行时空白。分两类：
+/// - **注入子节点型**（ProgressBar/Slider/Toggle/RadioButton）：core 实例化时注入
+///   `.loom-*` 视觉子节点（fill/track/thumb/check），作者须为控件本身 + 子节点配 CSS。
+/// - **文本控件型**（TextField/PasswordField/SearchField/TextArea）：控件自身渲染
+///   文本和光标，无注入子节点——作者须为控件本身配 background/border + caret-color。
 const CONTROL_KINDS: &[SemanticKind] = &[
     SemanticKind::ProgressBar,
     SemanticKind::Slider,
     SemanticKind::Toggle,
     SemanticKind::RadioButton,
+    SemanticKind::TextField,
+    SemanticKind::PasswordField,
+    SemanticKind::SearchField,
+    SemanticKind::TextArea,
 ];
+
+/// 控件是否为「注入子节点型」——core 运行时为其插入 `.loom-*` 视觉子节点。
+/// 文本控件返回 false：它们自身渲染文本，不注入子节点，故教学文案不同。
+fn has_injected_children(semantic: SemanticKind) -> bool {
+    matches!(
+        semantic,
+        SemanticKind::ProgressBar
+            | SemanticKind::Slider
+            | SemanticKind::Toggle
+            | SemanticKind::RadioButton
+    )
+}
 
 /// 判定 semantic 是否为受校验控件。
 fn is_control(semantic: Option<SemanticKind>) -> bool {
@@ -191,22 +215,38 @@ pub fn check_control_css(
 
         let semantic = el.semantic.unwrap();
         let tag = control_tag_name(el);
-        let children = loom_children_hint(semantic);
         let kind_name = match semantic {
             SemanticKind::ProgressBar => "progress bar",
             SemanticKind::Slider => "slider",
             SemanticKind::Toggle => "toggle (checkbox)",
             SemanticKind::RadioButton => "radio button",
+            SemanticKind::TextField => "text field",
+            SemanticKind::PasswordField => "password field",
+            SemanticKind::SearchField => "search field",
+            SemanticKind::TextArea => "text area",
             _ => "control",
+        };
+        // 教学分支：注入子节点型控件需为 .loom-* 子节点配样式；文本控件无子节点，
+        // 靠控件本身的 background/border + caret-color 可见（文本和光标自绘）。
+        let fix_hint = if has_injected_children(semantic) {
+            let children = loom_children_hint(semantic);
+            format!(
+                "Provide CSS for <{tag}> (e.g. a background/border for the track or box) \
+                 and for its internal {children} child element(s), which the framework \
+                 injects at runtime."
+            )
+        } else {
+            format!(
+                "Provide CSS for <{tag}> (e.g. a background/border and caret-color so the \
+                 text field is visible)."
+            )
         };
         diagnostics.push(Diagnostic::error(
             DiagnosticCode::FenceControlWithoutCss,
             format!(
                 "LoomGUI {kind_name} element <{tag}> has no matching CSS rule. \
                  Controls have NO built-in default style — without CSS they render blank. \
-                 Provide CSS for <{tag}> (e.g. a background/border for the track or box) \
-                 and for its internal {children} child element(s), which the framework \
-                 injects at runtime. See docs/design/fence.md §control-css."
+                 {fix_hint} See docs/design/fence.md §control-css."
             ),
             line_map.source_location(node.span.start, file.to_string()),
         ));

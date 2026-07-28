@@ -201,3 +201,176 @@ fn pseudo_class_rule_still_counts() {
         result.diagnostics
     );
 }
+
+// ── TextField (input[type=text] / bare input) ──
+//
+// 文本输入控件同样不带 UA 默认样式：浏览器给 <input>/textarea 套自带外观
+// （边框/底色/光标），但 LoomGUI core 无 UA 表——打包后运行时空白。本组覆盖
+// Stage 6.7 校验扩到文本控件后的行为（Task 17）。
+
+/// 裸 `<input type="text">` 无 CSS → error。
+#[test]
+fn text_input_without_css_errors() {
+    let html = r#"<input type="text" value="x">"#;
+    let result = parse_template(html, "t.html");
+    assert!(
+        has_control_css_diag(&result, "input"),
+        "裸 text input 无 CSS 应报错: {:?}",
+        result.diagnostics
+    );
+    // 必须是 error 级（空白文本框是破坏性 bug，应阻断打包）
+    assert!(
+        result.diagnostics.iter().any(|d| {
+            d.code == DiagnosticCode::FenceControlWithoutCss
+                && d.severity == Severity::Error
+                && d.message.contains("input")
+                && d.message.contains("CSS")
+        }),
+        "应为 Error 级且 message 含 input/CSS: {:?}",
+        result.diagnostics
+    );
+}
+
+/// 裸 `<input>`（默认 type=text）无 CSS → error。
+#[test]
+fn bare_input_without_css_errors() {
+    let html = r#"<input value="x">"#;
+    let result = parse_template(html, "t.html");
+    assert!(
+        has_control_css_diag(&result, "input"),
+        "裸 input（默认 text）无 CSS 应报错: {:?}",
+        result.diagnostics
+    );
+}
+
+/// `<input type="text">` + tag 选择器 CSS → 放行。
+#[test]
+fn text_input_with_css_passes() {
+    let html = r#"<style>input{background:#fff;border:1px solid #888;caret-color:#000}</style><input type="text" value="x">"#;
+    let result = parse_template(html, "t.html");
+    assert!(
+        !has_control_css_diag(&result, "input"),
+        "text input + tag 选择器 CSS 不应报错: {:?}",
+        result.diagnostics
+    );
+}
+
+/// `<input type="text">` + 属性选择器 CSS → 放行（属性选择器也算命中）。
+#[test]
+fn text_input_with_attr_selector_passes() {
+    let html = r#"<style>input[type="text"]{background:#fff}</style><input type="text" value="x">"#;
+    let result = parse_template(html, "t.html");
+    assert!(
+        !has_control_css_diag(&result, "input"),
+        "text input + 属性选择器 CSS 不应报错: {:?}",
+        result.diagnostics
+    );
+}
+
+/// 教学文案：文本框无 .loom-* 子节点，应引导 background/border + caret-color
+/// （而非 progress/slider 的 loom-fill/loom-thumb）。
+#[test]
+fn text_input_without_css_message_suggests_caret_color() {
+    let html = r#"<input type="text" value="x">"#;
+    let result = parse_template(html, "t.html");
+    let d = result
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::FenceControlWithoutCss)
+        .expect("should emit control-css diagnostic");
+    assert!(d.message.contains("input"), "msg 应含标签名");
+    assert!(d.message.contains("CSS"), "msg 应提 CSS");
+    // 文本框靠 caret-color 可见（输入光标），框架不注入 loom-* 子节点
+    assert!(
+        d.message.contains("caret-color"),
+        "msg 应建议 caret-color: {}",
+        d.message
+    );
+}
+
+// ── PasswordField (input[type=password]) ──
+
+/// 裸 `<input type="password">` 无 CSS → error。
+#[test]
+fn password_without_css_errors() {
+    let html = r#"<input type="password">"#;
+    let result = parse_template(html, "t.html");
+    assert!(
+        has_control_css_diag(&result, "input"),
+        "裸 password input 无 CSS 应报错: {:?}",
+        result.diagnostics
+    );
+}
+
+/// `<input type="password">` + CSS 命中 → 放行。
+#[test]
+fn password_with_css_passes() {
+    let html = r#"<style>input[type="password"]{background:#fff}</style><input type="password">"#;
+    let result = parse_template(html, "t.html");
+    assert!(
+        !has_control_css_diag(&result, "input"),
+        "password + CSS 不应报错: {:?}",
+        result.diagnostics
+    );
+}
+
+// ── SearchField (input[type=search]) ──
+
+/// 裸 `<input type="search">` 无 CSS → error。
+#[test]
+fn search_without_css_errors() {
+    let html = r#"<input type="search">"#;
+    let result = parse_template(html, "t.html");
+    assert!(
+        has_control_css_diag(&result, "input"),
+        "裸 search input 无 CSS 应报错: {:?}",
+        result.diagnostics
+    );
+}
+
+/// `<input type="search">` + CSS 命中 → 放行。
+#[test]
+fn search_with_css_passes() {
+    let html = r#"<style>input[type="search"]{background:#fff}</style><input type="search">"#;
+    let result = parse_template(html, "t.html");
+    assert!(
+        !has_control_css_diag(&result, "input"),
+        "search + CSS 不应报错: {:?}",
+        result.diagnostics
+    );
+}
+
+// ── TextArea (textarea) ──
+
+/// 裸 `<textarea>` 无 CSS → error。
+#[test]
+fn textarea_without_css_errors() {
+    let html = r#"<textarea></textarea>"#;
+    let result = parse_template(html, "t.html");
+    assert!(
+        has_control_css_diag(&result, "textarea"),
+        "裸 textarea 无 CSS 应报错: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        result.diagnostics.iter().any(|d| {
+            d.code == DiagnosticCode::FenceControlWithoutCss
+                && d.severity == Severity::Error
+                && d.message.contains("textarea")
+        }),
+        "应为 Error 级: {:?}",
+        result.diagnostics
+    );
+}
+
+/// `<textarea>` + tag 选择器 CSS → 放行。
+#[test]
+fn textarea_with_css_passes() {
+    let html = r#"<style>textarea{background:#fff}</style><textarea></textarea>"#;
+    let result = parse_template(html, "t.html");
+    assert!(
+        !has_control_css_diag(&result, "textarea"),
+        "textarea + tag 选择器 CSS 不应报错: {:?}",
+        result.diagnostics
+    );
+}
