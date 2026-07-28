@@ -1698,12 +1698,20 @@ namespace LoomGUI
     {
         internal NumberField(UIContext ctx, uint id) : base(ctx, id) { }
 
-        // NumberField Value/Min/Max/Step：core ControlState::Number 变体尚未走通 set/get_control_value
-        // FFI 通道（NumberField 专用字段语义与 Slider 不同）——暂留 throw，待 ControlState::Number
-        // side query 暴露后填（同 RadioButton.Name 模式）。
-        public float Value { get { throw NE(); } set { throw NE(); } }
-        public float? Min { get { throw NE(); } set { throw NE(); } }
-        public float? Max { get { throw NE(); } set { throw NE(); } }
+        // Value：直转 NumberField 专用 FFI（get/set_number_value）。setter 在 core 侧做 clamp[min,max]
+        // + step 量化后写回 EditState.value 文本（与 Slider set_control_value 同口径，只是 NumberField
+        // 存文本、Slider 存 f32）。getter 解析文本→f32。故 C# 侧只透传，不做 clamp/量化。
+        public float Value
+        {
+            get { ThrowIfDisposed(); return GetNumberValue(); }
+            set { ThrowIfDisposed(); SetNumberValue(value); }
+        }
+        // Min/Max/Step：core ControlState::NumberField 存了 min/max/step（set_number_value 据此 clamp+量化），
+        // 但尚无 NumberField 专用 side-query FFI；Slider 的 get_control_min/max/step 只 pattern-match
+        // ControlState::Slider，对 NumberField 返 -1，不可复用。需新增 get_number_min/max/step FFI
+        // （Rust 侧改动，出本 C# 任务 scope）—— 暂留 throw，与 RadioButton.Name 同模式。
+        public float Min { get { throw NE(); } set { throw NE(); } }
+        public float Max { get { throw NE(); } set { throw NE(); } }
         public float Step { get { throw NE(); } set { throw NE(); } }
         // ReadOnly：NumberField 与 TextField/TextArea 共享 EditState（get_control_readonly 按 node 派发）。
         // setter 直转 FFI；getter 读 EditState.readonly（与 set 对称）。
@@ -1714,10 +1722,49 @@ namespace LoomGUI
         }
         // Disabled：伪类源 + active/click 抑制（set_node_disabled）。getter 读 NodeFlags::DISABLED。
         public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
-        public event Action<ValueChangedEvent<float>> ValueChanged;
+
+        // ValueChanged：值变更事件（core EVT_VALUE_CHANGED = 22，与 Slider 同事件，x=新值）。backing-dict
+        // 模式同 Slider/Slider.ValueChanged——订阅 internal ControlValueChangedEvent，翻译为公共
+        // ValueChangedEvent<float>（NewValue 取 demux 解出的 float）。
+        [NonSerialized] Dictionary<Action<ValueChangedEvent<float>>, EventRegistration> _valueChangedBacking;
+        public event Action<ValueChangedEvent<float>> ValueChanged
+        {
+            add
+            {
+                if (value == null) return;
+                if (_valueChangedBacking == null)
+                    _valueChangedBacking = new Dictionary<Action<ValueChangedEvent<float>>, EventRegistration>();
+                if (_valueChangedBacking.ContainsKey(value)) return;
+                var reg = On<ControlValueChangedEvent>(e => value(new ValueChangedEvent<float> { _newValue = e.Value }));
+                _valueChangedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_valueChangedBacking != null && _valueChangedBacking.TryGetValue(value, out var reg))
+                {
+                    _valueChangedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
         static NotImplementedException NE() => new NotImplementedException();
 
-        // ── FFI 转调（收口在 TextControlFFI：readonly 经 EditState 共享通道，disabled 经 node flag）─
+        // ── FFI 转调 ───────────────────────────────────────────────────────────
+        // value：NumberField 专用通道（clamp+量化在 core）。float out 经 local + &local（同 GetControlValue）。
+        float GetNumberValue()
+        {
+            StageHandle* h = Handle();
+            float v = 0f; int rc = Native.loomgui_stage_get_number_value(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_number_value failed (node {_id})");
+            return v;
+        }
+        void SetNumberValue(float v)
+        {
+            StageHandle* h = Handle();
+            int rc = Native.loomgui_stage_set_number_value(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_number_value failed (node {_id})");
+        }
+        // readonly/disabled 经 TextControlFFI（readonly 共享 EditState 通道，disabled 经 node flag）。
         StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
         void SetControlReadonly(bool v) => TextControlFFI.SetControlReadonly(Handle(), _id, v);
         bool GetControlReadonly() => TextControlFFI.GetControlReadonly(Handle(), _id);

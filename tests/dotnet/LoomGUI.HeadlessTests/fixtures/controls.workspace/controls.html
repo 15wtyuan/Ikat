@@ -6,7 +6,7 @@
 <style>
   #root { width: 200px; height: 100px; }
   /* 控件需 CSS 命中（围栏 control-css 契约：控件不带 UA 默认样式）。 */
-  #prog, #sld, #tggl, #rdo { background: #ddd; }
+  #prog, #sld, #tggl, #rdo, #nf { background: #ddd; }
 </style>
 </head>
 <body>
@@ -20,6 +20,8 @@
     <input id="tggl" type="checkbox" style="display:block" />
     <!-- RadioButton。 -->
     <input id="rdo" type="radio" name="grp" style="display:block" />
+    <!-- NumberField: value+min+max+step bake ControlState::NumberField (min/max/step 约束 + set_number_value 走 clamp+量化)。 -->
+    <input id="nf" type="number" value="0" min="0" max="10" step="2" style="display:block" />
   </div>
 </body>
 </html>

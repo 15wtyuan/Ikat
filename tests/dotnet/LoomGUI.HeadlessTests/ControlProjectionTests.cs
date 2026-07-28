@@ -87,6 +87,56 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>
+        /// NumberField.Value clamp+量化：fixture min=0 max=10 step=2。set 15 → clamp 到 max=10；
+        /// set 3 → 量化到 2（round 到最近 step）。验 FFI set/get_number_value round-trip（core 侧 clamp+量化）。
+        /// </summary>
+        [Fact]
+        public void numberfield_value_clamps_and_quantizes()
+        {
+            var (stage, ctx, root) = LoadControlsFixture();
+            try
+            {
+                var nf = root.Get<NumberField>("nf");
+
+                // clamp 到 max=10（fixture max=10）。
+                nf.Value = 15f;
+                Assert.Equal(10f, nf.Value, 0.01f);
+
+                // 量化到最近 step=2（3 → round((3-0)/2)*2+0 = 2*2 = 4 → 取偶数 step 端：round(1.5)=2 → 4）。
+                nf.Value = 3f;
+                Assert.Equal(4f, nf.Value, 0.01f);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// NumberField.ValueChanged 经 demux 触发：NativeEventBuffer 喂 EVT_VALUE_CHANGED(x=7)
+        /// → demux → ControlValueChangedEvent → 翻译为 ValueChangedEvent&lt;float&gt;，handler 收到 NewValue≈7。
+        /// 与 Slider.ValueChanged 同 demux 分支（22），backing-dict 模式相同。
+        /// </summary>
+        [Fact]
+        public void numberfield_value_changed_raises_via_demux()
+        {
+            var (stage, ctx, root) = LoadControlsFixture();
+            try
+            {
+                var nf = root.Get<NumberField>("nf");
+                ValueChangedEvent<float> received = default;
+                nf.ValueChanged += e => received = e;
+
+                using (var buf = new NativeEventBuffer())
+                {
+                    // x=7 → 新 float 值（EVT_VALUE_CHANGED = 22）。
+                    buf.Add(nf._id, (byte)EventType.ValueChanged, x: 7f);
+                    ctx._eventDemuxer.Pump(buf.Ptr, buf.Count);
+                }
+
+                Assert.Equal(7f, received.NewValue, 2);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
         /// Toggle.IsChecked round-trip：set true → get true；set false → get false。
         /// 验 FFI set/get_control_checked 全链通（bool* out 经 local + &local）。
         /// </summary>
