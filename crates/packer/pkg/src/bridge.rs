@@ -236,14 +236,19 @@ fn extract_control_init(
         })),
         NodeKind::Dropdown => {
             // 扫 select 的 option 子节点，找带 selected 属性的索引；无则默认 0（首项）。
+            // selected_index 是「第几个 option」，不是「children 里的第几个」——多行
+            // HTML 的 option 之间夹着空白 Text 节点（fence 只剥顶层空白，in-element
+            // 保留），用 children 下标会把 option_b 误算成 3 而非 1。
             let mut selected_index: u32 = 0;
-            for (i, child_id) in tree.nodes[ir_idx].children.iter().enumerate() {
+            let mut option_index: u32 = 0;
+            for child_id in &tree.nodes[ir_idx].children {
                 if let IrNodeKind::Element(child) = &tree.nodes[child_id.0].kind {
-                    if child.tag == "option"
-                        && child.attributes.iter().any(|a| a.name == "selected")
-                    {
-                        selected_index = i as u32;
-                        break;
+                    if child.tag == "option" {
+                        if child.attributes.iter().any(|a| a.name == "selected") {
+                            selected_index = option_index;
+                            break;
+                        }
+                        option_index += 1;
                     }
                 }
             }

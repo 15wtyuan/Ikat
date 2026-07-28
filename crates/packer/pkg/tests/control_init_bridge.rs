@@ -222,6 +222,24 @@ fn bridge_extracts_dropdown_selected_index_from_option_selected() {
 }
 
 #[test]
+fn bridge_extracts_dropdown_selected_index_ignores_whitespace_text_children() {
+    // 多行 HTML：option 之间夹着空白 Text 节点（fence 只剥顶层空白，in-element 保留）。
+    // selected_index 必须是「第几个 option」，而非「children 里的第几个」——否则
+    // option_b 会被误算成 index 3（2 个前置空白 Text + option_a 占 child 下标 0..3），
+    // 而它实际是第 2 个 option（index 1）。回归 bug：旧实现用 children 的 enumerate 下标。
+    let html = "<select id=\"s\">\n  <option value=\"a\">A</option>\n  <option value=\"b\" selected>B</option>\n</select>";
+    let nodes = run_bridge(html);
+    let sel = nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Dropdown)
+        .expect("Dropdown node missing");
+    assert!(matches!(
+        sel.control_init,
+        Some(ControlInit::Dropdown { selected_index: 1 })
+    ));
+}
+
+#[test]
 fn bridge_extracts_dropdown_no_selected_defaults_to_zero() {
     // 无 option 带 selected → 默认首项（index 0）。
     let html =
