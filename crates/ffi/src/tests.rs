@@ -1076,3 +1076,283 @@ fn ffi_set_selection_preserves_textarea_variant() {
     }
     loomgui_stage_free(h);
 }
+
+// ===== get_node_disabled / get_control_readonly / blur / Dropdown / NumberField FFI =====
+
+/// 测试辅助：建根 div 子节点并注入 Dropdown 状态。
+fn make_dropdown_stage(selected: usize, open: bool) -> (*mut StageHandle, u32) {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(node, 0xFFFF_FFFF, "create dropdown node ok");
+    loomgui_stage_append_child(h, root, node);
+    let sh = unsafe { &mut *h };
+    let scene = sh.stage.scene.as_mut().expect("scene built");
+    scene.controls.ensure(
+        NodeId(node),
+        ControlState::Dropdown {
+            selected_index: selected,
+            open,
+            value_lock: false,
+        },
+    );
+    if let Some(n) = scene.get_mut(NodeId(node)) {
+        n.kind = NodeKind::Dropdown;
+    }
+    (h, node)
+}
+
+/// 测试辅助：建根 div 子节点并注入 NumberField 状态。value 是数字的文本形式。
+fn make_number_stage(value: &str, min: f32, max: f32, step: f32) -> (*mut StageHandle, u32) {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(node, 0xFFFF_FFFF, "create number node ok");
+    loomgui_stage_append_child(h, root, node);
+    let sh = unsafe { &mut *h };
+    let scene = sh.stage.scene.as_mut().expect("scene built");
+    let edit = EditState::from_init(value.into(), String::new(), 0, false);
+    scene.controls.ensure(
+        NodeId(node),
+        ControlState::NumberField {
+            edit,
+            min,
+            max,
+            step,
+        },
+    );
+    if let Some(n) = scene.get_mut(NodeId(node)) {
+        n.kind = NodeKind::NumberField;
+    }
+    (h, node)
+}
+
+/// 测试辅助：建一个 readonly=true 的 TextField 节点。
+fn make_readonly_textfield_stage(readonly: bool) -> (*mut StageHandle, u32) {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(node, 0xFFFF_FFFF, "create textfield node ok");
+    loomgui_stage_append_child(h, root, node);
+    let sh = unsafe { &mut *h };
+    let scene = sh.stage.scene.as_mut().expect("scene built");
+    scene.controls.ensure(
+        NodeId(node),
+        ControlState::TextField(EditState::from_init(
+            "ab".into(),
+            String::new(),
+            0,
+            readonly,
+        )),
+    );
+    if let Some(n) = scene.get_mut(NodeId(node)) {
+        n.kind = NodeKind::TextField;
+    }
+    (h, node)
+}
+
+/// get_node_disabled：set_node_disabled(true) 后读回 1；默认 0；无效节点写 0。
+#[test]
+fn ffi_get_node_disabled_reads_flag() {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    // 默认非 disabled
+    let mut out: u8 = 9;
+    loomgui_stage_get_node_disabled(h, root, &mut out);
+    assert_eq!(out, 0, "default not disabled");
+    // set disabled 后读回 1
+    loomgui_stage_set_node_disabled(h, root, true);
+    let mut out: u8 = 9;
+    loomgui_stage_get_node_disabled(h, root, &mut out);
+    assert_eq!(out, 1, "disabled flag read back");
+    // 无效节点 → 0（false）
+    let mut out: u8 = 9;
+    loomgui_stage_get_node_disabled(h, 0xFFFF_FFFF, &mut out);
+    assert_eq!(out, 0, "invalid node → 0");
+    loomgui_stage_free(h);
+}
+
+/// get_control_readonly：TextField / TextArea / NumberField 三 variant 都能读 readonly；
+/// 非文本控件（Slider）返 -1。
+#[test]
+fn ffi_get_control_readonly_text_and_number() {
+    // TextField readonly=true → 1
+    let (h, tf) = make_readonly_textfield_stage(true);
+    let mut out: u8 = 9;
+    let rc = loomgui_stage_get_control_readonly(h, tf, &mut out);
+    assert_eq!(rc, 0, "textfield rc");
+    assert_eq!(out, 1, "textfield readonly=true");
+    loomgui_stage_free(h);
+
+    // NumberField readonly=true → 1
+    let (h, n) = make_number_stage("5", 0.0, 10.0, 1.0);
+    // 手工置 readonly（from_init 默认 false）
+    {
+        let sh = unsafe { &mut *h };
+        let scene = sh.stage.scene.as_mut().expect("scene built");
+        if let Some(ControlState::NumberField { edit, .. }) = scene.controls.get_mut(NodeId(n)) {
+            edit.readonly = true;
+        }
+    }
+    let mut out: u8 = 9;
+    let rc = loomgui_stage_get_control_readonly(h, n, &mut out);
+    assert_eq!(rc, 0, "numberfield rc");
+    assert_eq!(out, 1, "numberfield readonly=true");
+    loomgui_stage_free(h);
+
+    // 非文本控件（Slider）→ -1
+    let (h, s) = make_slider_stage(50.0, 0.0, 100.0, 1.0);
+    let mut out: u8 = 9;
+    let rc = loomgui_stage_get_control_readonly(h, s, &mut out);
+    assert_eq!(rc, -1, "slider get_control_readonly → -1");
+    loomgui_stage_free(h);
+}
+
+/// blur：request_focus 后 focused_node 非 null；blur 后下 tick 清焦点（pending 消费）。
+/// 本测试只验 FFI rc=0 且 Stage.pending_focus_request 被置为 Some(None)。
+#[test]
+fn ffi_blur_sets_pending_none() {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    loomgui_stage_request_focus(h, root);
+    // blur FFI 包装
+    let rc = loomgui_stage_blur(h);
+    assert_eq!(rc, 0, "blur rc");
+    // 验 pending_focus_request == Some(None)（下 tick 消费清焦点）
+    let sh = unsafe { &*h };
+    assert_eq!(
+        sh.stage.pending_focus_request,
+        Some(None),
+        "blur sets pending to Some(None)"
+    );
+    loomgui_stage_free(h);
+}
+
+/// get/set_dropdown_selected_index round-trip + value_lock 置位 + 非 Dropdown → -1。
+#[test]
+fn ffi_dropdown_selected_index_roundtrip() {
+    let (h, dd) = make_dropdown_stage(1, false);
+    let mut idx: u32 = 99;
+    let rc = loomgui_stage_get_dropdown_selected_index(h, dd, &mut idx);
+    assert_eq!(rc, 0, "get rc");
+    assert_eq!(idx, 1, "initial selected_index");
+    // set 3
+    let rc = loomgui_stage_set_dropdown_selected_index(h, dd, 3);
+    assert_eq!(rc, 0, "set rc");
+    // value_lock 应置位（防本轮 cascade 回写）
+    {
+        let sh = unsafe { &*h };
+        let scene = sh.stage.scene.as_ref().expect("scene built");
+        match scene.controls.get(NodeId(dd)) {
+            Some(ControlState::Dropdown {
+                selected_index,
+                value_lock,
+                ..
+            }) => {
+                assert_eq!(*selected_index, 3, "selected_index updated");
+                assert!(*value_lock, "value_lock set to prevent feedback loop");
+            }
+            _ => panic!("dropdown state lost"),
+        }
+    }
+    // 读回
+    let mut idx: u32 = 99;
+    let rc = loomgui_stage_get_dropdown_selected_index(h, dd, &mut idx);
+    assert_eq!(rc, 0);
+    assert_eq!(idx, 3, "read back updated index");
+    // 非 Dropdown（Slider）→ -1
+    let (h2, s) = make_slider_stage(50.0, 0.0, 100.0, 1.0);
+    let mut idx: u32 = 0;
+    assert_eq!(
+        loomgui_stage_get_dropdown_selected_index(h2, s, &mut idx),
+        -1
+    );
+    assert_eq!(loomgui_stage_set_dropdown_selected_index(h2, s, 0), -1);
+    loomgui_stage_free(h);
+    loomgui_stage_free(h2);
+}
+
+/// get/set_dropdown_open round-trip + 非 Dropdown → -1。
+#[test]
+fn ffi_dropdown_open_roundtrip() {
+    let (h, dd) = make_dropdown_stage(0, false);
+    let mut open: u8 = 9;
+    let rc = loomgui_stage_get_dropdown_open(h, dd, &mut open);
+    assert_eq!(rc, 0, "get rc");
+    assert_eq!(open, 0, "initial closed");
+    let rc = loomgui_stage_set_dropdown_open(h, dd, 1);
+    assert_eq!(rc, 0, "set rc");
+    let mut open: u8 = 9;
+    let rc = loomgui_stage_get_dropdown_open(h, dd, &mut open);
+    assert_eq!(rc, 0);
+    assert_eq!(open, 1, "open after set");
+    // 非 Dropdown（Toggle）→ -1
+    let (h2, t) = make_toggle_stage(false);
+    let mut open: u8 = 0;
+    assert_eq!(loomgui_stage_get_dropdown_open(h2, t, &mut open), -1);
+    assert_eq!(loomgui_stage_set_dropdown_open(h2, t, 1), -1);
+    loomgui_stage_free(h);
+    loomgui_stage_free(h2);
+}
+
+/// get/set_number_value round-trip：clamp[min,max] + step 量化，再写回 EditState.value 文本。
+#[test]
+fn ffi_number_value_clamp_and_quantize() {
+    // min=0 max=10 step=2，set 7 → 量化到 8（最近 step 边界），文本写回 "8"
+    let (h, n) = make_number_stage("5", 0.0, 10.0, 2.0);
+    let rc = loomgui_stage_set_number_value(h, n, 7.0);
+    assert_eq!(rc, 0, "set rc");
+    let mut out = -1.0f32;
+    let rc = loomgui_stage_get_number_value(h, n, &mut out);
+    assert_eq!(rc, 0, "get rc");
+    assert!(
+        (out - 8.0).abs() < 0.001,
+        "7 quantized to 8 (step=2), got {out}"
+    );
+    // 文本写回
+    {
+        let sh = unsafe { &*h };
+        let scene = sh.stage.scene.as_ref().expect("scene built");
+        match scene.controls.get(NodeId(n)) {
+            Some(ControlState::NumberField { edit, .. }) => {
+                assert_eq!(
+                    edit.value, "8",
+                    "EditState.value rewritten to formatted number"
+                );
+            }
+            _ => panic!("numberfield state lost"),
+        }
+    }
+    // 超 max clamp：15 → 10
+    let rc = loomgui_stage_set_number_value(h, n, 15.0);
+    assert_eq!(rc, 0);
+    let mut out = -1.0f32;
+    let rc = loomgui_stage_get_number_value(h, n, &mut out);
+    assert_eq!(rc, 0);
+    assert!(
+        (out - 10.0).abs() < 0.001,
+        "15 clamped to max 10, got {out}"
+    );
+    loomgui_stage_free(h);
+}
+
+/// NumberField get/set 对非 NumberField 控件（Slider）→ -1。
+#[test]
+fn ffi_number_value_non_number_control_err() {
+    let (h, s) = make_slider_stage(50.0, 0.0, 100.0, 1.0);
+    let mut out = -1.0f32;
+    assert_eq!(
+        loomgui_stage_get_number_value(h, s, &mut out),
+        -1,
+        "get on slider"
+    );
+    assert_eq!(
+        loomgui_stage_set_number_value(h, s, 5.0),
+        -1,
+        "set on slider"
+    );
+    loomgui_stage_free(h);
+}

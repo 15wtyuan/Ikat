@@ -2307,6 +2307,275 @@ pub extern "C" fn loomgui_stage_set_transform(
     }
 }
 
+// ===== get_node_disabled / get_control_readonly / blur / Dropdown / NumberField FFI =====
+
+/// 读节点 disabled 伪类态（`NodeFlags::DISABLED`）。null 句柄 / 无 scene / 节点缺失 → 写 0（false）。
+/// 与 `loomgui_stage_set_node_disabled` 对称的读出口（伪类态级联查询用）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_disabled(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+) {
+    let disabled = if h.is_null() {
+        false
+    } else {
+        let sh = unsafe { &*h };
+        sh.stage.get_node_disabled(NodeId(node_id))
+    };
+    if !out.is_null() {
+        unsafe {
+            *out = if disabled { 1 } else { 0 };
+        }
+    }
+}
+
+/// 读文本控件 readonly（`EditState.readonly`）：TextField / TextArea / NumberField 共享 EditState，
+/// 故三者皆读。非文本控件 / null 句柄 / 节点缺失 / null out → -1；命中且 `*out` 已填则返 0。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_control_readonly(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+) -> i32 {
+    if h.is_null() || out.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match scene.controls.get(NodeId(node_id)) {
+        Some(
+            ControlState::TextField(e)
+            | ControlState::TextArea(e)
+            | ControlState::NumberField { edit: e, .. },
+        ) => {
+            unsafe { *out = if e.readonly { 1 } else { 0 } };
+            0
+        }
+        _ => -1,
+    }
+}
+
+/// 清除当前 focus（`Stage::blur` 的 FFI 包装）：记 pending_focus_request = Some(None)，
+/// 下 tick 消费清焦点（与 `request_focus` 对称）。null 句柄 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_blur(h: *mut StageHandle) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    sh.stage.blur();
+    0
+}
+
+/// 读 Dropdown 当前选中项索引（`ControlState::Dropdown.selected_index`）。
+/// 非 Dropdown / null 句柄 / 节点缺失 / null out → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_dropdown_selected_index(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u32,
+) -> i32 {
+    if h.is_null() || out.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::Dropdown { selected_index, .. }) => {
+            unsafe { *out = *selected_index as u32 };
+            0
+        }
+        _ => -1,
+    }
+}
+
+/// 设 Dropdown 选中项。置 `value_lock=true` 防本轮 cascade 回写（popup option 子项的
+/// selected 类规则在 rematch 阶段读 value_lock 跳过回写）。事件发射（EVT_SELECTION_CHANGED）
+/// 在 tick，非此处——照 ValueChanged 模式。非 Dropdown / null 句柄 / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_dropdown_selected_index(
+    h: *mut StageHandle,
+    node_id: u32,
+    index: u32,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let Some(scene) = sh.stage.scene.as_mut() else {
+        return -1;
+    };
+    if let Some(ControlState::Dropdown {
+        selected_index,
+        value_lock,
+        ..
+    }) = scene.controls.get_mut(NodeId(node_id))
+    {
+        *selected_index = index as usize;
+        *value_lock = true;
+        0
+    } else {
+        -1
+    }
+}
+
+/// 读 Dropdown popup 是否展开（`ControlState::Dropdown.open`）。
+/// 非 Dropdown / null 句柄 / 节点缺失 / null out → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_dropdown_open(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+) -> i32 {
+    if h.is_null() || out.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::Dropdown { open, .. }) => {
+            unsafe { *out = if *open { 1 } else { 0 } };
+            0
+        }
+        _ => -1,
+    }
+}
+
+/// 设 Dropdown popup 展开态。非 Dropdown / null 句柄 / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_dropdown_open(
+    h: *mut StageHandle,
+    node_id: u32,
+    open: u8,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let Some(scene) = sh.stage.scene.as_mut() else {
+        return -1;
+    };
+    if let Some(ControlState::Dropdown { open: o, .. }) = scene.controls.get_mut(NodeId(node_id)) {
+        *o = open != 0;
+        0
+    } else {
+        -1
+    }
+}
+
+/// 读 NumberField 数值（解析 `EditState.value` 文本→f32）。解析失败 / 非 NumberField /
+/// null 句柄 / 节点缺失 / null out → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_number_value(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut f32,
+) -> i32 {
+    if h.is_null() || out.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::NumberField { edit, .. }) => match edit.value.parse::<f32>() {
+            Ok(v) => {
+                unsafe { *out = v };
+                0
+            }
+            Err(_) => -1,
+        },
+        _ => -1,
+    }
+}
+
+/// 设 NumberField 数值：先 clamp[min,max]（纵深守卫 min>max 不 panic），再 step 量化对齐
+/// （step>0 时 round((v-min)/step)*step+min，量化后重 clamp 回区间），最后把量化值格式化为
+/// 文本写回 `EditState.value`（保持 value 文本与数值约束一致，与 Slider set_control_value
+/// 同口径，只是 Slider 存 f32 而 NumberField 存文本）。step<=0 跳过量化。
+/// 非 NumberField / null 句柄 / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_number_value(
+    h: *mut StageHandle,
+    node_id: u32,
+    value: f32,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let Some(scene) = sh.stage.scene.as_mut() else {
+        return -1;
+    };
+    let id = NodeId(node_id);
+    let Some(state) = scene.controls.get(id).cloned() else {
+        return -1;
+    };
+    let ControlState::NumberField { min, max, step, .. } = state else {
+        return -1;
+    };
+    // clamp：min>max 时 swap，保 clamp 闭区间不 panic（同 set_control_value 纵深守卫）。
+    let (lo, hi) = if min <= max { (min, max) } else { (max, min) };
+    let clamped = value.clamp(lo, hi);
+    let quantized = if step > 0.0 {
+        ((clamped - lo) / step).round() * step + lo
+    } else {
+        clamped
+    };
+    // 量化可能把值推过 hi，重新 clamp 回区间。
+    let quantized = quantized.clamp(lo, hi);
+    // 写回：原地改 edit.value（get_mut 保 variant，不重建整个 NumberField）。
+    if let Some(ControlState::NumberField { edit, .. }) = scene.controls.get_mut(id) {
+        // 数字文本用 Rust 默认 f32 格式化（如 "8"、"-3.5"）；trimmed 避免尾随 0。
+        edit.value = format_number(quantized);
+    } else {
+        return -1; // 极端竞态：get_mut 返回 None（理论上 cloned 后同槽仍在）
+    }
+    0
+}
+
+/// NumberField 文本格式化：整数去 `.0` 尾，保留小数。避免 EditState.value 出现 "8.0"。
+fn format_number(v: f32) -> String {
+    if v.fract() == 0.0 && v.is_finite() {
+        format!("{:.0}", v)
+    } else {
+        // 非 整数：用通用格式，strip 尾随 0（如 3.50 → "3.5"）。
+        let s = format!("{:.6}", v);
+        let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+        if trimmed.is_empty() {
+            "0".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;
 

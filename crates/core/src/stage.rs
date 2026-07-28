@@ -417,6 +417,19 @@ impl Stage {
         }
     }
 
+    /// 节点 disabled 伪类态（`NodeFlags::DISABLED`）。无 scene / 节点缺失 → false。
+    /// 业务读当前 disabled 态用（伪类级联查询出口，与 `set_node_disabled` 对称）。
+    pub fn get_node_disabled(&self, node: NodeId) -> bool {
+        let scene = match self.scene.as_ref() {
+            Some(s) => s,
+            None => return false,
+        };
+        match scene.get(node) {
+            None => false,
+            Some(n) => n.interaction.flags.contains(NodeFlags::DISABLED),
+        }
+    }
+
     /// 拉脏页 page_idx 列表（写入 out，返实际数）。atlas 未用 / 无 scene → 0。
     pub fn font_atlas_dirty_pages(&self, out: &mut [u32]) -> usize {
         let dirty = self.glyph_atlas.dirty_pages();

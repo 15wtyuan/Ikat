@@ -735,6 +735,90 @@ namespace LoomGUI.Bindings
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_transform", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_set_transform(StageHandle* h, uint node_id, float tx, float ty, float sx, float sy, float rot);
 
+        /// <summary>
+        ///  读节点 disabled 伪类态（`NodeFlags::DISABLED`）。null 句柄 / 无 scene / 节点缺失 → 写 0（false）。
+        ///  与 `loomgui_stage_set_node_disabled` 对称的读出口（伪类态级联查询用）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_disabled", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_get_node_disabled(StageHandle* h, uint node_id, byte* @out);
+
+        /// <summary>
+        ///  读文本控件 readonly（`EditState.readonly`）：TextField / TextArea / NumberField 共享 EditState，
+        ///  故三者皆读。非文本控件 / null 句柄 / 节点缺失 / null out → -1；命中且 `*out` 已填则返 0。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_readonly", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_readonly(StageHandle* h, uint node_id, byte* @out);
+
+        /// <summary>
+        ///  清除当前 focus（`Stage::blur` 的 FFI 包装）：记 pending_focus_request = Some(None)，
+        ///  下 tick 消费清焦点（与 `request_focus` 对称）。null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_blur", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_blur(StageHandle* h);
+
+        /// <summary>
+        ///  读 Dropdown 当前选中项索引（`ControlState::Dropdown.selected_index`）。
+        ///  非 Dropdown / null 句柄 / 节点缺失 / null out → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_dropdown_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_dropdown_selected_index(StageHandle* h, uint node_id, uint* @out);
+
+        /// <summary>
+        ///  设 Dropdown 选中项。置 `value_lock=true` 防本轮 cascade 回写（popup option 子项的
+        ///  selected 类规则在 rematch 阶段读 value_lock 跳过回写）。事件发射（EVT_SELECTION_CHANGED）
+        ///  在 tick，非此处——照 ValueChanged 模式。非 Dropdown / null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_dropdown_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_dropdown_selected_index(StageHandle* h, uint node_id, uint index);
+
+        /// <summary>
+        ///  读 Dropdown popup 是否展开（`ControlState::Dropdown.open`）。
+        ///  非 Dropdown / null 句柄 / 节点缺失 / null out → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_dropdown_open", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_dropdown_open(StageHandle* h, uint node_id, byte* @out);
+
+        /// <summary>
+        ///  设 Dropdown popup 展开态。非 Dropdown / null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_dropdown_open", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_dropdown_open(StageHandle* h, uint node_id, byte open);
+
+        /// <summary>
+        ///  读 NumberField 数值（解析 `EditState.value` 文本→f32）。解析失败 / 非 NumberField /
+        ///  null 句柄 / 节点缺失 / null out → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_number_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_number_value(StageHandle* h, uint node_id, float* @out);
+
+        /// <summary>
+        ///  设 NumberField 数值：先 clamp[min,max]（纵深守卫 min&gt;max 不 panic），再 step 量化对齐
+        ///  （step&gt;0 时 round((v-min)/step)*step+min，量化后重 clamp 回区间），最后把量化值格式化为
+        ///  文本写回 `EditState.value`（保持 value 文本与数值约束一致，与 Slider set_control_value
+        ///  同口径，只是 Slider 存 f32 而 NumberField 存文本）。step&lt;=0 跳过量化。
+        ///  非 NumberField / null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_number_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_number_value(StageHandle* h, uint node_id, float value);
+
 
     }
 
