@@ -5049,3 +5049,186 @@ fn enter_after_keyboard_nav_commits() {
         "commit 发 SelectionChanged@select，payload=index 1"
     );
 }
+
+// ── Task 15：NumberField 字符输入 guard（filter 非数字） ───────────────
+//
+// NumberField 是文本类控件（EditState.value 是数字的字符串形式），但字符输入通道
+// （textinput，UTF-32 codepoints）须过滤非数字字符：仅允许 0-9 / '-' / '.' / 'e' / 'E'。
+// 过滤发生在 commit 路径（process_text_input），不在 IME composition 预编辑期（set_composition
+// 不滤，commit_composition 时滤——照「filter only at commit」约定）。TextField/TextArea
+// 不受影响（仍接受任意字符）。
+
+/// 取 NumberField 的 EditState（panic 若非 NumberField）。
+fn nf_edit(s: &Scene, id: NodeId) -> &EditState {
+    match s.controls.get(id) {
+        Some(ControlState::NumberField { edit, .. }) => edit,
+        _ => panic!("not NumberField"),
+    }
+}
+
+/// root + focused NumberField(value)。kind 设 NodeKind::NumberField。
+fn focused_numberfield_scene(value: &str) -> (Scene, NodeId) {
+    let mut root = Node::default();
+    root.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 100.0,
+    };
+    let mut nf = Node::default();
+    nf.kind = NodeKind::NumberField;
+    nf.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut s = Scene::from_nodes(vec![root, nf], vec![(0, 1)]);
+    let nf_id = s.get(s.roots[0]).unwrap().children[0];
+    s.controls.ensure(
+        nf_id,
+        ControlState::NumberField {
+            edit: EditState::from_init(value.into(), String::new(), 0, false),
+            min: f32::MIN,
+            max: f32::MAX,
+            step: 1.0,
+        },
+    );
+    s.focused_node = Some(nf_id);
+    compute_world_transforms(&mut s);
+    (s, nf_id)
+}
+
+/// UTF-32 codepoint 串 → char。便捷构造 textinput 测试输入。
+fn cps(s: &str) -> Vec<u32> {
+    s.chars().map(|c| c as u32).collect()
+}
+
+#[test]
+fn number_field_rejects_non_digit_input() {
+    // NumberField 收 'a' → value 不变（拒非数字）；收 '5' → value 追加 '5'。
+    let (mut s, nf) = focused_numberfield_scene("");
+    let mut out = Vec::new();
+    // 先打 'a'：应被 guard 拒（value 仍空，不发 ValueChanged）。
+    crate::input::process_text_input(&mut s, &cps("a"), &mut out);
+    assert_eq!(nf_edit(&s, nf).value, "", "非数字字符 'a' 被拒");
+    assert!(
+        out.iter().all(|e| e.event_type != EVT_VALUE_CHANGED),
+        "拒收不发 ValueChanged"
+    );
+    // 再打 '5'：应接受（value="5"，发 ValueChanged）。
+    out.clear();
+    crate::input::process_text_input(&mut s, &cps("5"), &mut out);
+    assert_eq!(nf_edit(&s, nf).value, "5", "数字 '5' 被接受");
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_VALUE_CHANGED && e.node_id == nf.0),
+        "接受数字发 ValueChanged"
+    );
+}
+
+#[test]
+fn number_field_accepts_minus_dot_e() {
+    // '-'/'.'/'e'/'E' 在合法位置 → 接受；其它字母（'x'/'@'）被拒。
+    // 输入过滤只拒明显非数字字符（字母 a-z 除 e/E、标点除 '.'/'-'），不做完整浮点语法校验
+    // （'1.2.3' 这种留到读值时 parse；filter 目标是拦 'a'/'x'/'@' 等）。
+    let (mut s, nf) = focused_numberfield_scene("");
+    let mut out = Vec::new();
+    // '-' 开头合法（负数）。
+    crate::input::process_text_input(&mut s, &cps("-"), &mut out);
+    assert_eq!(nf_edit(&s, nf).value, "-", "'-' 被接受");
+    // '.' 接受（可构成 ".5" 或 "3."）。
+    out.clear();
+    crate::input::process_text_input(&mut s, &cps(".5"), &mut out);
+    assert_eq!(nf_edit(&s, nf).value, "-.5", "'.' 和数字被接受");
+    // 'e'/'E' 接受（科学记数法）。
+    out.clear();
+    crate::input::process_text_input(&mut s, &cps("e3"), &mut out);
+    assert_eq!(nf_edit(&s, nf).value, "-.5e3", "'e' 和数字被接受");
+    out.clear();
+    crate::input::process_text_input(&mut s, &cps("E2"), &mut out);
+    assert_eq!(nf_edit(&s, nf).value, "-.5e3E2", "'E' 被接受");
+    // 'x'/'@' 被拒。
+    out.clear();
+    crate::input::process_text_input(&mut s, &cps("x@"), &mut out);
+    assert_eq!(nf_edit(&s, nf).value, "-.5e3E2", "'x'/'@' 被拒，value 不变");
+    assert!(
+        out.iter().all(|e| e.event_type != EVT_VALUE_CHANGED),
+        "拒收不发 ValueChanged"
+    );
+}
+
+#[test]
+fn number_field_mixed_batch_filters_per_char() {
+    // 一次 textinput 批含混合字符（如 "3a.5"）→ 滤掉 'a'，保留 "3.5"。
+    // 过滤是逐字符的，不是整批拒/整批收。
+    let (mut s, nf) = focused_numberfield_scene("");
+    let mut out = Vec::new();
+    crate::input::process_text_input(&mut s, &cps("3a.5"), &mut out);
+    assert_eq!(
+        nf_edit(&s, nf).value,
+        "3.5",
+        "批内逐字符过滤：'a' 去掉，'3'/'.'/'5' 留"
+    );
+}
+
+#[test]
+fn textfield_input_unaffected_by_number_guard() {
+    // 回归：TextField 仍接受任意字符（NumberField guard 不影响 TextField）。
+    // 'a' 在 TextField 应被接受（与 NumberField 相反）。
+    let (mut s, tf) = focused_textfield_scene("");
+    let mut out = Vec::new();
+    crate::input::process_text_input(&mut s, &cps("abc"), &mut out);
+    assert_eq!(tf_edit(&s, tf).value, "abc", "TextField 接受任意字符");
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_VALUE_CHANGED && e.node_id == tf.0),
+        "TextField 接受字符发 ValueChanged"
+    );
+}
+
+#[test]
+fn is_number_input_char_predicate() {
+    // 纯单元：guard 谓词。允许 0-9 / '-' / '.' / 'e' / 'E'；拒其它字母、标点、空白。
+    use crate::input::is_number_input_char;
+    for c in '0'..='9' {
+        assert!(is_number_input_char(c), "数字 {c} 应被接受");
+    }
+    assert!(is_number_input_char('-'));
+    assert!(is_number_input_char('.'));
+    assert!(is_number_input_char('e'));
+    assert!(is_number_input_char('E'));
+    // 拒其它字母。
+    for c in ['a', 'x', 'z', 'A', 'X', 'Z', 'b', 'B'] {
+        assert!(!is_number_input_char(c), "字母 {c} 应被拒");
+    }
+    // 拒标点 / 空白。
+    for c in ['@', '#', ' ', '\t', ',', ';', '+', '/', '*', '('] {
+        assert!(!is_number_input_char(c), "非数字字符 {c:?} 应被拒");
+    }
+}
+
+#[test]
+fn number_field_ime_commit_filters_non_numeric() {
+    // IME：「composition 预编辑期不过滤，commit 时过滤」。composition 原语 set_composition
+    // 是 control 层纯函数（不知道 NumberField 语义），不过滤；commit 路径（Stage.commit_composition
+    // 的 NumberField 臂）调 filter_number_field_text 把 composition.text 滤成数字再落定。
+    // 这里单测 filter_number_field_text 谓词本身（集成接线见 stage 测）。
+    use crate::input::filter_number_field_text;
+    assert_eq!(
+        filter_number_field_text("3a5"),
+        "35",
+        "滤掉 'a'，保 '3'/'5'"
+    );
+    assert_eq!(
+        filter_number_field_text("-1.2e3"),
+        "-1.2e3",
+        "合法数字串原样保留"
+    );
+    assert_eq!(filter_number_field_text("abc"), "", "纯非数字 → 空");
+    assert_eq!(
+        filter_number_field_text("1+2"),
+        "12",
+        "'+' 被拒（'+' 不是数字语法）"
+    );
+}

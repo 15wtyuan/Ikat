@@ -8,7 +8,7 @@ use crate::input::{EventRecord, PointerEvent, PointerState};
 use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
-use crate::scene::node::{ControlState, NodeFlags, NodeId, NodeKind, Rect, Scene};
+use crate::scene::node::{NodeFlags, NodeId, NodeKind, Rect, Scene};
 use crate::style::dynamic::{rematch_pseudo_classes, ScopedRule};
 use crate::style::resolved::OverflowMode;
 use crate::text::layout::FontTable;
@@ -210,15 +210,22 @@ impl Stage {
     /// 设文本控件的 IME composition（后端读 Input.compositionString 回灌）。pos 是 composition
     /// 在 value 中的字节偏移。非文本控件 / 越界 node → no-op（不 panic）。下一帧 measure/render
     /// 会把 composition 拼进显示文本（[`loomgui_core::scene::control::display_value`]）。
+    ///
+    /// NumberField 也接受 composition（预编辑期**不**过滤——composition 是 provisional，
+    /// 用户可能还在组字；过滤发生在 [`commit_composition`] 落定时）。
     pub fn set_composition(&mut self, node: NodeId, text: &str, pos: usize) {
         use crate::scene::node::ControlState;
         let Some(scene) = self.scene.as_mut() else {
             return;
         };
-        // 仅 TextField/TextArea 有 EditState；ControlState match 自身就过滤了非文本控件，
-        // 无需先读 kind。set_composition 原语不收 kind（与 insert_text 不同）。
-        if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
-            scene.controls.get_mut(node)
+        // TextField/TextArea/NumberField 有 EditState；ControlState match 过滤非文本控件。
+        // set_composition 原语不收 kind（与 insert_text 不同）——预编辑串原样存，不过滤
+        // （「filter only at commit」约定）。
+        if let Some(
+            ControlState::TextField(e)
+            | ControlState::TextArea(e)
+            | ControlState::NumberField { edit: e, .. },
+        ) = scene.controls.get_mut(node)
         {
             crate::scene::control::set_composition(e, text, pos);
         }
@@ -226,8 +233,12 @@ impl Stage {
 
     /// 提交文本控件的 composition（落定进 value）。返 true = 有 composition 且 value 改变；
     /// false = 无 composition（或插入被 readonly/max_length 拒）。非文本控件 / 越界 node → false。
+    ///
+    /// NumberField：提交时把 composition.text 用 [`filter_number_field_text`] 滤成数字语法
+    /// 字符再落定（照「filter only at commit」约定——预编辑期不过滤，落定时滤）。
     pub fn commit_composition(&mut self, node: NodeId) -> bool {
         use crate::scene::node::ControlState;
+        use crate::scene::node::NodeKind;
         let Some(scene) = self.scene.as_mut() else {
             return false;
         };
@@ -239,6 +250,15 @@ impl Stage {
             scene.controls.get_mut(node)
         {
             return crate::scene::control::commit_composition(e, kind);
+        }
+        // NumberField：commit 阶段过滤（预编辑期 set_composition 不过滤）。
+        if let Some(ControlState::NumberField { edit, .. }) = scene.controls.get_mut(node) {
+            // 先把 provisional composition.text 滤成数字语法字符，再走原 commit 路径。
+            // 全被滤掉 → 空串 → commit_composition 原语 insert_text no-op → 返 false（不改值）。
+            if let Some(comp) = edit.composition.as_mut() {
+                comp.text = crate::input::filter_number_field_text(&comp.text);
+            }
+            return crate::scene::control::commit_composition(edit, NodeKind::NumberField);
         }
         false
     }
@@ -835,27 +855,11 @@ impl Stage {
         let keys = std::mem::take(&mut self.pending_keys);
         crate::input::process_keys(scene, &keys, &mut out);
         // 3.5 字符输入通道（UTF-32 codepoints，已 shift-mapped）。与 keydown 互补：
-        //     keydown 走物理键，textinput 走可打印字符。仅作用于聚焦的 TextField/TextArea；
-        //     readonly 控件 insert_text 自身返 false（不改值）。非法 codepoint（代理项/越界）
-        //     被 char::from_u32 滤掉。
+        //     keydown 走物理键，textinput 走可打印字符。集中到 input.rs 的 process_text_input
+        //     处理（含 NumberField 数字 guard；TextField/TextArea 接受任意字符）。
+        //     readonly 控件 insert_text 自身返 false（不改值）。
         let cps = std::mem::take(&mut self.pending_text_input);
-        if !cps.is_empty() {
-            if let Some(fid) = scene.focused_node {
-                // kind 须在 controls.get_mut 之前读——避免与 mutable 借冲突（同 on_text_pointer_down 克隆模式）。
-                let kind = scene
-                    .get(fid)
-                    .map(|n| n.kind)
-                    .unwrap_or(NodeKind::TextField);
-                if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
-                    scene.controls.get_mut(fid)
-                {
-                    let s: String = cps.iter().filter_map(|&cp| char::from_u32(cp)).collect();
-                    if crate::scene::control::insert_text(e, kind, &s) {
-                        crate::scene::control::emit_value_changed(&mut out, fid);
-                    }
-                }
-            }
-        }
+        crate::input::process_text_input(scene, &cps, &mut out);
         self.last_events = out;
         // 4. 伪类重匹配（提到 solve 前：改 taffy_style/transform/colors，本帧全部消费）
         rematch_pseudo_classes(scene);

@@ -580,6 +580,90 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
     }
 }
 
+// ── Task 15：NumberField 字符输入 guard（textinput 通道） ──────────────────────
+//
+// 字符输入（可打印字符）走 textinput 通道（UTF-32 codepoints，后端已 shift-mapped），与
+// keydown 物理键通道互补。原内联于 stage.rs tick step 3.5，现集中到 input.rs，由
+// [`process_text_input`] 统一处理聚焦控件的字符提交。NumberField 在此加 guard——仅接受
+// 数字语法字符（0-9 / '-' / '.' / 'e' / 'E'），非数字字符（字母 a-z 除 e/E、标点等）被逐字符
+// 滤掉。TextField/TextArea 不受影响（仍接受任意字符）。
+//
+// IME：「composition 预编辑期不过滤，commit 时过滤」。composition 走独立渠（set_composition /
+// commit_composition，Stage 层）：set_composition 是 control 层纯函数（不区分控件语义），
+// 不过滤 provisional 串；commit 路径（Stage.commit_composition 的 NumberField 臂）调
+// [`filter_number_field_text`] 把 composition.text 滤成数字再落定。
+
+/// NumberField 输入 guard 谓词：字符是否属于合法数字语法。
+/// 允许 0-9、'-'（负号）、'.'（小数点）、'e'/'E'（科学记数法指数）。其余字符被拒。
+/// 注意：这是**输入过滤器**，不是完整浮点语法校验——它拒明显非数字字符（'a'/'x'/'@'），
+/// 不拒 "1.2.3" 这种语法上非法的串（那是读值时 parse 的职责，不在输入期拦）。
+pub fn is_number_input_char(c: char) -> bool {
+    c.is_ascii_digit() || matches!(c, '-' | '.' | 'e' | 'E')
+}
+
+/// 把字符串滤成只含 NumberField 合法字符。逐字符调 [`is_number_input_char`]。
+/// 用于 textinput 提交（process_text_input）与 IME commit（Stage.commit_composition
+/// 的 NumberField 臂）——两路径共享同一过滤语义，避免漂移。
+pub fn filter_number_field_text(s: &str) -> String {
+    s.chars().filter(|c| is_number_input_char(*c)).collect()
+}
+
+/// 处理字符输入（textinput 通道）——把本帧 UTF-32 codepoints 提交进聚焦的文本控件。
+///
+/// 与 [`process_keys`]（keydown 物理键通道）互补：keydown 走物理键（控制键路由 + Tab 导航），
+/// textinput 走已映射的可打印字符。仅作用于聚焦的 TextField/TextArea/NumberField；
+/// 非聚焦 / 非文本控件 → 静默丢弃（无副作用）。readonly 控件 insert_text 自身返 false
+/// （不改值）。非法 codepoint（代理项/越界）被 `char::from_u32` 滤掉。
+///
+/// NumberField guard：提交前用 [`filter_number_field_text`] 过滤，仅留数字语法字符；
+/// 全部被滤掉 → 不改值（不发 ValueChanged）。TextField/TextArea 不过滤（接受任意字符）。
+///
+/// 原内联于 stage.rs tick step 3.5（集中到此处以便单测 + 复用 guard）。
+pub(crate) fn process_text_input(
+    scene: &mut Scene,
+    codepoints: &[u32],
+    out: &mut Vec<EventRecord>,
+) {
+    if codepoints.is_empty() {
+        return;
+    }
+    let Some(fid) = scene.focused_node else {
+        return;
+    };
+    // kind 须在 controls.get_mut 之前读——避免与 mutable 借冲突（同 on_text_pointer_down 克隆模式）。
+    let kind = scene
+        .get(fid)
+        .map(|n| n.kind)
+        .unwrap_or(NodeKind::TextField);
+    let changed = match scene.controls.get_mut(fid) {
+        Some(ControlState::TextField(e) | ControlState::TextArea(e)) => {
+            // TextField/TextArea：接受任意字符（sanitize 滤换行/制表等由 insert_text 内部处理）。
+            let s: String = codepoints
+                .iter()
+                .filter_map(|&cp| char::from_u32(cp))
+                .collect();
+            crate::scene::control::insert_text(e, kind, &s)
+        }
+        Some(ControlState::NumberField { edit, .. }) => {
+            // NumberField：先滤成数字语法字符，再插。全部被滤掉 → 空串 → insert_text no-op。
+            let raw: String = codepoints
+                .iter()
+                .filter_map(|&cp| char::from_u32(cp))
+                .collect();
+            let s = filter_number_field_text(&raw);
+            if s.is_empty() {
+                false
+            } else {
+                crate::scene::control::insert_text(edit, NodeKind::NumberField, &s)
+            }
+        }
+        _ => false,
+    };
+    if changed {
+        crate::scene::control::emit_value_changed(out, fid);
+    }
+}
+
 impl PointerState {
     pub fn new() -> Self {
         Self::default()
