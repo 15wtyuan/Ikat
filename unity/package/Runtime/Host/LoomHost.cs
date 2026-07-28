@@ -63,7 +63,8 @@ namespace LoomGUI
         /// <summary>
         /// 每帧驱动序（main-design §16，严格时序）：
         /// 1. <see cref="LoomBackend.CollectInput"/>（backend 采集引擎输入 → set_input 系 FFI，引擎中立）
-        /// 2. flush seam（4a 即时过桥：setter 立即调 set_inline_override；升级攒批时此处加帧末 Flush 在 tick 前）
+        /// 2. flush seam：攒批回写——一次性把帧内标脏的 StyleMirror / NodeTransform flush 到 core
+        ///    （在 tick 前，保证下帧 solve/compute_world_transforms 拿到最新 inline/transform）
         /// 3. loomgui_stage_tick（核心 process/rematch/solve/refresh/compute_world/build）
         /// 4. borrow_frame → <see cref="LoomBackend.SyncFrame"/>（backend 只消费 blob，不再调 borrow FFI）
         /// 5. borrow_events → <see cref="EventDemuxer.Pump"/>（typed On&lt;T&gt; 路由，UIContext._eventDemuxer）
@@ -76,8 +77,10 @@ namespace LoomGUI
             // 1. 输入采集 → set_input 系 FFI（backend 调引擎中立 FFI，不破坏 LoomHost 引擎无关性）。
             _backend.CollectInput((IntPtr)_stage);
 
-            // 2. flush seam：4a 即时过桥（StyleMirror setter 立即 set_inline_override），无需显式调用。
-            //    攒批升级时此处插帧末 FlushInline(_stage)，位置在 tick 前（main-design §16 flush→solve 序）。
+            // 2. 帧末 flush seam：攒批回写（Task 9）。把帧内标脏的 StyleMirror（set_inline_override）
+            //    + NodeTransform（set_transform）一次性过桥，在 tick 前保证 core 拿到最新 inline/transform。
+            //    旧即时版：setter 每次立即过桥（本处空）；攒批版：集中过桥（N setter = 1 次 flush 遍历）。
+            _ctx.FlushPendingWrites();
 
             // 3. tick：核心一帧编排（process hit 用上帧 world → rematch → solve → refresh_content →
             //    compute_world_transforms → build RenderNode blob）。

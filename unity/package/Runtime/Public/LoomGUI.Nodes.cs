@@ -648,45 +648,58 @@ namespace LoomGUI
 
     // Transform = 渲染层，不触发 solve。回写走独立数值 FFI（set_transform，纯 f32）。
     //
-    // C4（标脏不 flush）：setter 只存镜像值、不调任何 FFI——set_transform FFI 推后到第一个逐帧
-    // transform 控件落地（roadmap §3.5 / spec §5）。升级路径：FFI 加上后，NodeTransform setter
-    // 标脏 + 帧末（攒批 seam 同 Style.FlushInline）一次性 flush 全属性到 core，core 在
-    // compute_world_transforms 时并入 local_transform。本类签名零改动——只把"存镜像"扩到"标脏 + flush"。
-    //
-    // ponytail: 4a 不实现 set_transform FFI 是有意——无控件消费 transform 写入时，flush 也只是落
-    // 空 core bit（无视觉变化）；等首个真实控件（如绝对定位动画 / 触摸抖动）落地再接通，避免 ghost state。
-    public sealed class NodeTransform
+    // 攒批 flush（Task 9）：setter 存镜像 + 标脏 + 注册到 NodeRegistry dirty 集；帧末
+    // （LoomHost.Step flush seam / UIContext.FlushPendingWrites）调 FlushTransform 一次性送
+    // set_transform FFI（9-arg：tx,ty,sx,sy,rot,ox,oy）。core compute_world_transforms 并入 local_transform。
+    // 整值替换语义（非累加）：每次 flush 送全 4 字段，不需要增量。本类签名零改动——只加帧末 flush。
+    public sealed unsafe class NodeTransform
     {
         // 投影层内部：owner Node。lazy 造时由 Node.Transform 传 this；getter/setter 经它走 FFI
-        // （升级后：owner._ctx._stage + owner._id 转调 set_transform）。
+        // （owner._ctx._stage + owner._id 转调 set_transform）。
         internal readonly Node _owner;
 
         // 镜像值：setter 写、getter 读。default 按业务语义初始化（Scale=One 不缩放，其它 Zero）。
-        // 未 flush 到 core——读到的是 C# 侧最近一次写入的快照。
+        // 帧末 flush 前读到的是 C# 侧最近一次写入的快照（getter 不依赖 core 状态）。
         internal Vector2 _position = Vector2.Zero;
         internal Vector2 _scale = Vector2.One;
         internal float _rotation;
         internal Vector2 _origin = Vector2.Zero;
-        // dirty 在升级路径用（攒批 flush 时帧末扫所有 dirty 的 NodeTransform）。4a flush 未接通时
-        // 只标脏不消费，留作 future seam 接入点；现保留写以让"setter 改状态"语义可观察。
+        // dirty 标志：Store 置 true；FlushTransform 末尾置 false。配合 NodeRegistry dirty 集。
         internal bool _dirty;
 
         internal NodeTransform(Node owner) { _owner = owner; }
 
-        /// <summary>位移（local 坐标，px）。setter 存镜像、不 flush（set_transform 推后）。</summary>
+        /// <summary>位移（local 坐标，px）。setter 存镜像 + 标脏（帧末 flush 到 core）。</summary>
         public Vector2 Position { get => _position; set => Store(ref _position, value); }
-        /// <summary>缩放（local 基）。default = One（不缩放）；setter 存镜像、不 flush。</summary>
+        /// <summary>缩放（local 基）。default = One（不缩放）；setter 存镜像 + 标脏。</summary>
         public Vector2 Scale { get => _scale; set => Store(ref _scale, value); }
-        /// <summary>旋转（弧度，绕 Origin）。setter 存镜像、不 flush。</summary>
+        /// <summary>旋转（弧度，绕 Origin）。setter 存镜像 + 标脏。</summary>
         public float Rotation { get => _rotation; set => Store(ref _rotation, value); }
-        /// <summary>旋转/缩放原点（local 坐标，px）。setter 存镜像、不 flush。</summary>
+        /// <summary>旋转/缩放原点（local 坐标，px）。setter 存镜像 + 标脏。</summary>
         public Vector2 Origin { get => _origin; set => Store(ref _origin, value); }
 
-        // 统一 setter 路径：写镜像 + 标脏。ponytail: 升级时在此调帧末 flush seam（攒批同 Style）。
+        // 统一 setter 路径：写镜像 + 标脏 + 注册 dirty 集（帧末集中 flush）。
         void Store<T>(ref T field, T value)
         {
             field = value;
             _dirty = true;
+            _owner._ctx._registry.MarkTransformDirty(_owner);
+        }
+
+        /// <summary>
+        /// 帧末 flush：送全 4 字段到 set_transform FFI（整值替换，非累加）+ 清 _dirty。
+        /// 由 NodeRegistry.FlushDirtyTransforms 遍历 dirty 集调。null stage / dead NodeId 静默返 -1（防御）。
+        /// </summary>
+        internal void FlushTransform()
+        {
+            _dirty = false;
+            StageHandle* h = (StageHandle*)_owner._ctx._stage.ToPointer();
+            Native.loomgui_stage_set_transform(
+                h, _owner._id,
+                _position.X, _position.Y,
+                _scale.X, _scale.Y,
+                _rotation,
+                _origin.X, _origin.Y);
         }
     }
 
@@ -2384,6 +2397,17 @@ namespace LoomGUI
             _registry = new NodeRegistry(this);
             _eventBus = new EventBus(this);
             _eventDemuxer = new EventDemuxer(this);
+        }
+
+        /// <summary>
+        /// 帧末 flush seam：一次性把所有标脏的 StyleMirror / NodeTransform 回写到 core。
+        /// LoomHost.Step 在 tick 前调（main-design §16 flush→solve 序）；headless 测试在 raw tick 前调。
+        /// 攒批契约（Task 9）：setter 只标脏不立即过桥，本方法集中过桥，避免每 setter 一次 FFI。
+        /// </summary>
+        internal void FlushPendingWrites()
+        {
+            _registry.FlushDirtyStyles();
+            _registry.FlushDirtyTransforms();
         }
 
         /// <summary>

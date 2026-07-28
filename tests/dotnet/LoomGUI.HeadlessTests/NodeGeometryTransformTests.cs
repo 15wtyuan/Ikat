@@ -40,7 +40,7 @@ namespace LoomGUI.HeadlessTests
                 child.Style.Width = Length.Px(100);
                 child.Style.Height = Length.Px(50);
 
-                Tick(stage);
+                Tick(stage, ctx);
                 Rect lr = child.Geometry.LayoutRect;
                 Assert.InRange(lr.Width, 99, 101);
                 Assert.InRange(lr.Height, 49, 51);
@@ -65,7 +65,7 @@ namespace LoomGUI.HeadlessTests
             {
                 Node child = AppendChildDiv(stage, ctx);
                 child.Style.Width = Length.Px(50);
-                Tick(stage);
+                Tick(stage, ctx);
                 Assert.InRange(child.Geometry.LayoutRect.Width, 49, 51);   // 旧值已 settle 到 50
 
                 // 改 width:100，不 tick——Geometry 该帧应仍反映旧值 50。
@@ -74,7 +74,7 @@ namespace LoomGUI.HeadlessTests
                 Assert.InRange(sameFrame, 49, 51);   // 滞后：仍 50，未 solve
 
                 // tick 后 Geometry 反映新值 100。
-                Tick(stage);
+                Tick(stage, ctx);
                 float nextFrame = child.Geometry.LayoutRect.Width;
                 Assert.InRange(nextFrame, 99, 101);
             }
@@ -96,7 +96,7 @@ namespace LoomGUI.HeadlessTests
             {
                 Node child = AppendChildDiv(stage, ctx);
                 child.Style.Width = Length.Px(100);
-                Tick(stage);
+                Tick(stage, ctx);
 
                 Rect lr1 = child.Geometry.LayoutRect;
                 Rect lr2 = child.Geometry.LayoutRect;
@@ -124,7 +124,7 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Node root = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                Tick(stage);   // compute_world_transforms 跑
+                Tick(stage, ctx);   // compute_world_transforms 跑
 
                 var p = new Vector2(10f, 20f);
                 Assert.Equal(p, root.Geometry.LocalToGlobal(p));
@@ -149,7 +149,7 @@ namespace LoomGUI.HeadlessTests
                 Node child = AppendChildDiv(stage, ctx);
                 child.Style.Width = Length.Px(40);
                 child.Style.Height = Length.Px(30);
-                Tick(stage);
+                Tick(stage, ctx);
 
                 Rect lr = child.Geometry.LayoutRect;
                 Rect world = child.Geometry.WorldRect;
@@ -178,7 +178,7 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Node child = AppendChildDiv(stage, ctx);
-                Tick(stage);
+                Tick(stage, ctx);
 
                 var p = new Vector2(123.4f, 567.8f);
                 Vector2 roundTrip = child.Geometry.GlobalToLocal(child.Geometry.LocalToGlobal(p));
@@ -345,7 +345,10 @@ namespace LoomGUI.HeadlessTests
             return ctx._registry.GetOrCreate(child);
         }
 
-        private static void Tick(IntPtr stage) =>
+        private static void Tick(IntPtr stage, UIContext ctx)
+        {
+            ctx.FlushPendingWrites();
             Native.loomgui_stage_tick((StageHandle*)stage.ToPointer(), 0.016f);
+        }
     }
 }

@@ -1,4 +1,4 @@
-// StyleMirror：NodeStyle 写入属性的稀疏镜像 + FlushInline seam。
+// StyleMirror：NodeStyle 写入属性的稀疏镜像 + 帧末攒批 flush seam。
 //
 // 投影层契约（docs/design/projection-layer.md §2.3 + §3.2）：
 //   - 只存 setter 写过的属性（稀疏 dict，CSS prop name → typed value）。
@@ -6,13 +6,13 @@
 //     enum 的 Unset=0 变体；Thickness/float 无 Unset 概念，getter 走 default）。
 //   - setter 写 Unset 哨兵 → 视为撤销该属性（移除 key + unset_inline_override FFI），不写 Set。
 //
-// FlushInline seam（§3.2 即时过桥版）：每次 setter 立即把整个镜像 flush 成 CSS 串调
-// set_inline_override FFI（A6 ptr+len）。core 侧 inline_override 是累加语义（set 只 OR bit /
-// 覆盖值，不清其他），故每次 flush 整个镜像安全。
+// 攒批 flush（Task 9，§3.2 升级版）：setter 只标脏（_dirty=true + 注册到 NodeRegistry dirty 集），
+// 不立即调 set_inline_override；帧末（LoomHost.Step 的 flush seam，或 UIContext.FlushPendingWrites）
+// 一次性遍历 dirty 集 调 FlushInline。core 侧 inline_override 是累加语义（set 只 OR bit /
+// 覆盖值，不清其他），故帧末重建整个镜像拼 CSS 串送一次安全。
 //
-// ponytail: 即时过桥够用（NodeStyle 写入是低频 UI 事件路径，非每帧热路径）。升级到攒批版只改
-// 本文件：setter 标脏不立即 flush，帧末（UIContext.EndFrame 或显式 Flush）一次性 flush。
-// 公共签名零改动——setter 还是写 mirror，只是 FlushInline 调用时机从立即改帧末。seam 两边共用。
+// Unset 路径：unset_inline_override 是清 bit 操作（与 set 的 OR 互补），仍立即调——
+// 清 bit 必须及时否则下帧 rematch 仍命中旧 inline。同时标脏让帧末 FlushInline 重同步剩余 _set。
 //
 // **严禁 set_style**（写 base_style，污染设计期基线）。只走 set_inline_override / unset_inline_override
 // （写便签层，下帧 rematch 应用，优先级 > 动态规则 > base_style）。
@@ -33,7 +33,14 @@ namespace LoomGUI
         // CSS prop name → typed value（Length/Color/Thickness/float/enum）。未在 dict 的属性 = 未写过。
         readonly Dictionary<string, object> _set = new();
 
+        // 攒批 dirty 标志：Set/Unset 置 true；FlushInline 末尾置 false。
+        // 配合 NodeRegistry dirty 集（帧末集中 flush，避免每 setter 一次 FFI）。
+        internal bool _dirty;
+
         internal StyleMirror(Node owner) => _owner = owner;
+
+        /// <summary>是否有未 flush 的写入（测试可观察 + registry flush 判据）。</summary>
+        internal bool IsDirty => _dirty;
 
         /// <summary>该 prop 是否被 setter 写过（无则 getter 返 Unset 哨兵）。</summary>
         internal bool IsSet(string prop) => _set.ContainsKey(prop);
@@ -44,7 +51,7 @@ namespace LoomGUI
 
         /// <summary>
         /// 写 prop = value。value 是 Unset 哨兵时改走 <see cref="Unset"/>（撤销）。
-        /// 写后立即 flush 整个镜像到 core（ponytail: 攒批版改延迟 flush）。
+        /// 攒批版：只写 mirror + 标脏，不立即 flush——帧末（UIContext.FlushPendingWrites）集中过桥。
         /// </summary>
         internal void Set(string prop, object value)
         {
@@ -54,17 +61,25 @@ namespace LoomGUI
                 return;
             }
             _set[prop] = value;
-            FlushInline();
+            MarkDirty();
         }
 
         /// <summary>
-        /// 撤销 prop：移除镜像 key + 调 unset_inline_override 清 core 侧 bit（即使镜像无此 key，
-        /// 也 flush——用户可能之前 flush 过，core 侧 bit 仍置）。
+        /// 撤销 prop：移除镜像 key + 立即调 unset_inline_override 清 core 侧 bit（即使镜像无此 key，
+        /// 也 flush——用户可能之前 flush 过，core 侧 bit 仍置）+ 标脏（帧末 FlushInline 重同步剩余 _set）。
         /// </summary>
         internal void Unset(string prop)
         {
             _set.Remove(prop);
             FlushUnset(prop);
+            MarkDirty();
+        }
+
+        // 标脏 + 注册到 registry dirty 集（帧末集中 flush）。
+        void MarkDirty()
+        {
+            _dirty = true;
+            _owner._ctx._registry.MarkStyleDirty(_owner);
         }
 
         // ── Unset 哨兵检测 ──────────────────────────────────────────────
@@ -80,15 +95,17 @@ namespace LoomGUI
         };
 
         // ── Flush seam ─────────────────────────────────────────────────
-        // ponytail: 即时过桥——每次 setter 触发一次 FFI。攒批版改本组两方法为标脏 + 帧末批量 flush。
-        // 公共签名不变（NodeStyle setter 还是同步返），只延迟过桥时机。
+        // 攒批版：setter 只标脏不调本组方法；帧末（NodeRegistry.FlushDirtyStyles）集中调 FlushInline。
+        // FlushUnset 仍由 Unset 立即调（清 bit 必须及时，否则下帧 rematch 命中旧 inline）。
 
         /// <summary>
         /// 把整个镜像拼成 CSS 申明串（prop:val;prop:val;）调 set_inline_override FFI。
         /// 累加语义：core 侧只 OR bit / 覆盖值，不清其他；重复 flush 同 dict 安全。
+        /// 帧末由 NodeRegistry.FlushDirtyStyles 遍历 dirty 集调本方法。末尾清 _dirty。
         /// </summary>
         internal void FlushInline()
         {
+            _dirty = false;
             if (_set.Count == 0) return;
             var sb = new StringBuilder();
             foreach (var kv in _set)

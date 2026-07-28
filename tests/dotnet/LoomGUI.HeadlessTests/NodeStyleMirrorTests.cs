@@ -127,7 +127,7 @@ namespace LoomGUI.HeadlessTests
                 child.Style.Width = Length.Px(100);
                 child.Style.Height = Length.Px(50);
 
-                Tick(stage);
+                Tick(stage, ctx);
                 var (_, _, w, h) = GetLayoutRect(stage, child._id);
                 Assert.InRange(w, 99, 101);
                 Assert.InRange(h, 49, 51);
@@ -151,12 +151,12 @@ namespace LoomGUI.HeadlessTests
             {
                 Node child = AppendChildDiv(stage, ctx);
                 child.Style.Width = Length.Px(100);
-                Tick(stage);
+                Tick(stage, ctx);
                 var (_, _, wSet, _) = GetLayoutRect(stage, child._id);
                 Assert.InRange(wSet, 99, 101);
 
                 child.Style.Width = Length.Unset();   // Unset 哨兵 → 走 unset_inline_override
-                Tick(stage);
+                Tick(stage, ctx);
                 var (_, _, wUnset, _) = GetLayoutRect(stage, child._id);
                 // auto width 在无内容时回落 0（不再是 100）。
                 Assert.True(wUnset < 99 || wUnset > 101, $"unset 后 w={wUnset} 该不再为 100");
@@ -181,7 +181,7 @@ namespace LoomGUI.HeadlessTests
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
                 n.Style.BackgroundColor = new Color(1f, 0f, 0f, 1f);   // → #ff0000ff
-                Tick(stage);
+                Tick(stage, ctx);
 
                 var cs = GetComputedStyle(stage, n._id);
                 Assert.Equal(1, cs.bg_present);
@@ -208,7 +208,7 @@ namespace LoomGUI.HeadlessTests
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
                 n.Style.BackgroundColor = new Color(1f, 1f, 1f, 0.5f);
-                Tick(stage);
+                Tick(stage, ctx);
 
                 var cs = GetComputedStyle(stage, n._id);
                 Assert.Equal(1, cs.bg_present);
@@ -236,11 +236,11 @@ namespace LoomGUI.HeadlessTests
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
                 n.Style.BackgroundColor = new Color(1f, 0f, 0f, 1f);
-                Tick(stage);
+                Tick(stage, ctx);
                 Assert.Equal(1, GetComputedStyle(stage, n._id).bg_present);
 
                 n.Style.BackgroundColor = Color.Unset;   // IsUnset=true → Unset(prop)
-                Tick(stage);
+                Tick(stage, ctx);
                 Assert.Equal(0, GetComputedStyle(stage, n._id).bg_present);
             }
             finally
@@ -332,7 +332,7 @@ namespace LoomGUI.HeadlessTests
                 Assert.True(n.Style.BackgroundColor.G > 0.99f);
                 Assert.Equal(0.5f, n.Style.Opacity);
 
-                Tick(stage);
+                Tick(stage, ctx);
                 var cs = GetComputedStyle(stage, n._id);
                 Assert.Equal(0f, cs.background_color[0], 3);
                 Assert.Equal(1f, cs.background_color[1], 3);
@@ -416,8 +416,11 @@ namespace LoomGUI.HeadlessTests
             return ctx._registry.GetOrCreate(child);
         }
 
-        private static void Tick(IntPtr stage) =>
+        private static void Tick(IntPtr stage, UIContext ctx)
+        {
+            ctx.FlushPendingWrites();
             Native.loomgui_stage_tick((StageHandle*)stage.ToPointer(), 0.016f);
+        }
 
         private static (float x, float y, float w, float h) GetLayoutRect(IntPtr stage, uint id)
         {

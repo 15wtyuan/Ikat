@@ -113,7 +113,7 @@ namespace LoomGUI.HeadlessTests
                 Container instRoot = InstantiateFixture(h, ctx);
 
                 // instRoot #root has {width:200px;height:100px} → verify after tick.
-                Tick(h);
+                Tick(h, ctx);
                 Rect lr = instRoot.Geometry.LayoutRect;
                 Assert.InRange(lr.Width, 195, 205);
                 Assert.InRange(lr.Height, 95, 105);
@@ -121,7 +121,7 @@ namespace LoomGUI.HeadlessTests
                 // Write child width to 100px; tick; read back.
                 Container child = instRoot.Get<Container>("child");
                 child.Style.Width = Length.Px(100);
-                Tick(h);
+                Tick(h, ctx);
                 float w = child.Geometry.LayoutRect.Width;
                 Assert.InRange(w, 95, 105);
             }
@@ -146,13 +146,13 @@ namespace LoomGUI.HeadlessTests
 
                 // Set explicit width → verify it takes effect.
                 child.Style.Width = Length.Px(300);
-                Tick(h);
+                Tick(h, ctx);
                 float wSet = child.Geometry.LayoutRect.Width;
                 Assert.InRange(wSet, 295, 305);
 
                 // Unset → reverts to auto (content-dependent, far below 300).
                 child.Style.Width = Length.Unset();
-                Tick(h);
+                Tick(h, ctx);
                 float wUnset = child.Geometry.LayoutRect.Width;
                 Assert.True(wUnset < 295,
                     $"unset width should revert below 300; got {wUnset}");
@@ -180,7 +180,7 @@ namespace LoomGUI.HeadlessTests
                 // color is inherited, so child initially inherits red (R=1,G=0,B=0).
                 // To prove Classes.Add actually changes computed style, we add
                 // .blue{color:#0000ff} → child's color must change red→blue.
-                Tick(h);
+                Tick(h, ctx);
                 ComputedNodeStyleRepr csBefore = GetComputedStyle(h, child._id);
                 Assert.True(csBefore.color[0] >= 0.99f,
                     "pre-Add: child inherits red from root's .highlight");
@@ -189,7 +189,7 @@ namespace LoomGUI.HeadlessTests
 
                 // Add "blue" class → cascade re-runs on next tick.
                 child.Classes.Add("blue");
-                Tick(h);
+                Tick(h, ctx);
 
                 ComputedNodeStyleRepr cs = GetComputedStyle(h, child._id);
                 Assert.True(cs.color[0] <= 0.01f,
@@ -349,7 +349,7 @@ namespace LoomGUI.HeadlessTests
                 // This must override the CSS class .highlight{color:red} on root
                 // and propagate to child via cascade inheritance.
                 instRoot.Style.Color = new Color(0, 0, 1, 1);
-                Tick(h);
+                Tick(h, ctx);
 
                 ComputedNodeStyleRepr rootCs = GetComputedStyle(h, instRoot._id);
                 Assert.True(rootCs.color[2] >= 0.99f,
@@ -406,9 +406,12 @@ namespace LoomGUI.HeadlessTests
                     $"append_child(parent={parent}, child={child}) failed rc={rc}");
         }
 
-        /// <summary>Single tick (16ms ≈ 60fps). Triggers cascade + solve + compute_world_transforms.</summary>
-        private static void Tick(StageHandle* h)
-            => Native.loomgui_stage_tick(h, 0.016f);
+        /// <summary>Single tick (16ms ≈ 60fps). Flushes pending writes then triggers cascade + solve + compute_world_transforms.</summary>
+        private static void Tick(StageHandle* h, UIContext ctx)
+        {
+            ctx.FlushPendingWrites();
+            Native.loomgui_stage_tick(h, 0.016f);
+        }
 
         /// <summary>FFI read computed style for a node. Returns the struct; throws on non-zero rc.</summary>
         private static ComputedNodeStyleRepr GetComputedStyle(StageHandle* h, uint id)
@@ -451,7 +454,7 @@ namespace LoomGUI.HeadlessTests
             AppendChild(h, sceneRoot._id, instRoot._id);
 
             // Initial tick to run cascade + solve.
-            Tick(h);
+            Tick(h, ctx);
 
             return instRoot;
         }

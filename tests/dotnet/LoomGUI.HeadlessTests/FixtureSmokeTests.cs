@@ -72,7 +72,7 @@ namespace LoomGUI.HeadlessTests
                 AppendChild(h, sceneRoot._id, instRoot._id);
 
                 // Tick to run cascade + solve (base_style + CSS rules → computed_style + layout).
-                Tick(h);
+                Tick(h, ctx);
 
                 // ── Criterion 1: Type fidelity ───────────────────────────
                 // div#root → Container (kind=0)
@@ -132,14 +132,14 @@ namespace LoomGUI.HeadlessTests
                 // Set 300px, tick, verify; then Unset → reverts to auto (content-dependent).
                 {
                     child.Style.Width = Length.Px(300);
-                    Tick(h);
+                    Tick(h, ctx);
                     float wBefore = child.Geometry.LayoutRect.Width;
                     Assert.InRange(wBefore, 295, 305);
                 }
 
                 {
                     child.Style.Width = Length.Unset();
-                    Tick(h);
+                    Tick(h, ctx);
                     float wAfter = child.Geometry.LayoutRect.Width;
                     Assert.True(wAfter < 295,
                         $"unset width should revert below 300; got {wAfter}");
@@ -195,7 +195,7 @@ namespace LoomGUI.HeadlessTests
                     Container inst2 = pkg.Instantiate("test");
                     Assert.NotNull(inst2);
                     AppendChild(h, sceneRoot._id, inst2._id);
-                    Tick(h);
+                    Tick(h, ctx);
 
                     Button btn2 = inst2.Get<Button>("btn");
                     Assert.NotNull(btn2);
@@ -222,7 +222,7 @@ namespace LoomGUI.HeadlessTests
                     Container inst3 = pkg.Instantiate("test");
                     Assert.NotNull(inst3);
                     AppendChild(h, sceneRoot._id, inst3._id);
-                    Tick(h);
+                    Tick(h, ctx);
 
                     Container child3 = inst3.Get<Container>("child");
                     Assert.NotNull(child3);
@@ -280,8 +280,11 @@ namespace LoomGUI.HeadlessTests
                     $"append_child(parent={parent}, child={child}) failed rc={rc}");
         }
 
-        private static void Tick(StageHandle* h) =>
+        private static void Tick(StageHandle* h, UIContext ctx)
+        {
+            ctx.FlushPendingWrites();
             Native.loomgui_stage_tick(h, 0.016f);
+        }
 
         private static ComputedNodeStyleRepr GetComputedStyle(StageHandle* h, uint id)
         {
