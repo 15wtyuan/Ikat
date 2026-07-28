@@ -733,10 +733,18 @@ pub fn build_render_nodes(
                 let (sel_b, sel_e) = e.selection_range();
                 if sel_b < sel_e {
                     let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
+                    // sel_b/sel_e 是 value 字节偏移，PasswordField 掩码后显示串字节布局变了，
+                    // 须先换算到显示串字节偏移再取像素几何，否则选区会错位到错误的圆点上。
+                    let sel_b_d = crate::scene::control::value_byte_to_display_byte(
+                        e, n.kind, sel_b, &display,
+                    );
+                    let sel_e_d = crate::scene::control::value_byte_to_display_byte(
+                        e, n.kind, sel_e, &display,
+                    );
                     let (xb, lib) =
-                        crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_b);
+                        crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_b_d);
                     let (xe, lie) =
-                        crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_e);
+                        crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_e_d);
                     let sel_color = s.selection_background.unwrap_or([0.0, 0.0, 1.0, 0.5]); // 缺省蓝半透（CSS 未声明 selection-background 时）
                     let mut verts = Vec::new();
                     let mut uvs = Vec::new();
@@ -882,8 +890,14 @@ pub fn build_render_nodes(
                 // 最上层（sort_key 升序 = 后绘者在上，caret 压在选区/下划线之上）。
                 if scene.focused_node == Some(n.id) && !e.readonly && e.cursor_visible {
                     let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
+                    // e.cursor 是 value 字节偏移；PasswordField 掩码后显示串字节布局变了，
+                    // 须换算到显示串字节偏移再取像素 x，否则末尾光标会落在第一个圆点之后
+                    // （value byte 2 指向掩码串 byte 2 = 第一个 '•' 中间）而非第二个之后。
+                    let cursor_d = crate::scene::control::value_byte_to_display_byte(
+                        e, n.kind, e.cursor, &display,
+                    );
                     let (cx, li) =
-                        crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, e.cursor);
+                        crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, cursor_d);
                     if let Some(line) = layout.lines.get(li) {
                         // cx 是 advance 累计（内容区相对，不含 off_left）；line.y 已含 off_top。
                         let x = rect.x + off_left + cx;

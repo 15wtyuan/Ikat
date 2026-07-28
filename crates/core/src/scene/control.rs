@@ -108,6 +108,50 @@ fn char_index_to_byte(s: &str, char_idx: usize) -> usize {
         .unwrap_or(s.len())
 }
 
+/// 把 `e.value` 的字节偏移换算成 [`display_value`] 返回的显示串里的字节偏移。
+///
+/// 掩码（PasswordField 每字符→'•'）与 composition 拼接都按字符改变字节长度，
+/// 故原始 value 字节偏移不能直接索引显示串——PasswordField value="ab"（2 字节）
+/// 掩码成 "••"（6 字节），末尾光标（value byte 2）必须映射到显示串 byte 6，
+/// 否则光标会落在第一个圆点之后而非第二个圆点之后。
+///
+/// 对齐单位是字符（掩码与拼接都在字符边界操作，绝不拆分多字节字符）：先取 value 的
+/// 字符序号，再按 composition 拼接点平移到显示串字符序号，最后经 [`char_index_to_byte']
+/// 落成字节偏移。非 PasswordField 显示串的 value 段与原值字节相同（identity），
+/// 直接返回原偏移（composition 的下划线几何由 `comp_range` 单独驱动，不经此函数）。
+///
+/// `display` 须为 `display_value(e, kind)` 的第一个返回值（与 measure/render 同源）。
+pub fn value_byte_to_display_byte(
+    e: &EditState,
+    kind: NodeKind,
+    vbyte: usize,
+    display: &str,
+) -> usize {
+    if kind != NodeKind::PasswordField {
+        return vbyte;
+    }
+    let vc = e.value[..vbyte.min(e.value.len())].chars().count();
+    // composition 拼在显示串的 comp.pos 字符位；value 字符序号越过拼接点后须加上
+    // composition 字符数才得到显示串里的对应字符序号（与 display_value 的插入逻辑对齐）。
+    let display_vc = match e.composition.as_ref() {
+        Some(c) => {
+            let mut p = c.pos.min(e.value.len());
+            while p > 0 && !e.value.is_char_boundary(p) {
+                p -= 1;
+            }
+            let splice_char = e.value[..p].chars().count();
+            let comp_chars = c.text.chars().count();
+            if vc <= splice_char {
+                vc
+            } else {
+                vc + comp_chars
+            }
+        }
+        None => vc,
+    };
+    char_index_to_byte(display, display_vc)
+}
+
 /// 给控件节点注入框架内部视觉子节点。非控件 NodeKind 为 no-op。
 ///
 /// 在 `create_node_from_template` 填完 `ControlTable` side table 后调用——只有
