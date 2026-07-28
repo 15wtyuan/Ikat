@@ -1258,4 +1258,64 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 
 **教训**：clip_rect 是 overflow 的几何镜像，必须跟 overflow 同源同时效——overflow 走 rematch（动态），clip_rect 派生也得在 rematch 之后。凡是「create 时算一次、之后不重算」的 style 派生字段（clip_rect 等），都要查是否被 rematch 改的 style 属性（overflow/display/...）影响，若影响须在 rematch 后重派生。诊断：节点能滚（scroll 表有）但不裁剪（clip_rect None）→ 查 overflow 是 class 规则（动态）还是 inline（静态），动态的必查 clip_rect 是否在 rematch/solve 后重派生。
 
+### 坑 168：SDD plan/brief 伪代码不可信——implementer 必须 trace 验（控件束 P2）
+
+**症状**：Task 8 编辑原语的 `prev_char_boundary` brief 伪代码从 `idx` 起扫，ASCII 边界（idx 落在 char_boundary）返回 idx 不变 → backspace 删不掉字符（`backspace_deletes_left` 测试红）。同棒 `insert_text` brief 伪代码先 `delete_selection` 再查 `max_length`，超限时选区已被删但函数返 false（caller 以为没变，用户选区静默丢失）。Task 14 `cut_selection` 走 `delete_selection`（无 readonly guard）→ Ctrl+X 在 readonly 字段删内容。
+
+**根因**：plan/brief 的伪代码是设计期草稿，未经编译/测试。prev_char_boundary 的 `while !is_char_boundary(i) { i -= 1 }` 从 idx 起扫，但 idx 本身在边界上时循环不进 → 原地返回（应从 idx-1 起扫才对称于 next_char_boundary）。insert_text 的顺序 bug 是“先做副作用再校验”反模式。这些都是 brief 作者（AI）的逻辑疏忽，不是 crate API 差异。
+
+**解决**：implementer trace 验伪代码：prev_char_boundary 改 `idx==0→0，else 从 idx-1 起扫`（对称 next）；insert_text 把 max_length 检查移到 delete_selection 前（算 post-delete 长度不 mutate）；cut_selection 加 readonly guard（copy 永远，delete 仅 !readonly）。每处加回归测试。
+
+**教训**：**plan/brief 伪代码可能有 bug，implementer 不能盲信转录**。对编辑原语/位运算/状态机这类易错逻辑，implementer 要手工 trace 关键路径（ASCII + CJK + 边界）再实现。reviewer 也要把 brief 伪代码当“未经验证的草稿”审——发现 brief 本身错时，implementer 的修正不是“偏离 spec”而是修 bug（reviewer 判 plan-mandated defect 时，若 brief 伪代码进不了自己的测试，就是 brief 错）。
+
+### 坑 169：measure 和 render 双 bake content offset → 字形位移 2x（控件束 P2）
+
+**症状**：TextField 有 border/padding 时，渲染文本整体偏移 2× border/padding（字跑到框外/挤一起）。
+
+**根因**：Task 5 `measure_text_controls`（layout 阶段 measure）调了 `bake_content_offset`（把 border/padding offset 烤进 glyph 坐标）存进 `text_layouts` 缓存。Task 4 render arm 消费缓存时**又调一次** `bake_content_offset` → 同一 offset 烤两遍。TextNode 路径 solve 测原始（不 bake）、render bake 一次，所以 TextNode 没事；TextField 自持 measure 两个路径都 bake 才撞。
+
+**解决**：`bake_content_offset` 所有权单一——**render 拥有**，measure 写原始（不 bake）。删 measure_text_controls 里的 bake 调用，让 render 统一 bake（与 TextNode 同构：solve/measure 测原始，render bake 一次）。
+
+**教训**：offset bake 的所有权必须单一且跨路径一致。新机制（自持 measure）若复用既有路径的 bake 逻辑，要确认 bake 在哪一层只做一次——“measure 测原始、render bake”是 TextNode 既有契约，自持 measure 要遵守，不能在 measure 也 bake。诊断：文本位置偏 2x → 查 measure 和 render 是否都 bake 同一 offset。
+
+### 坑 170：合成 node_id 的 high byte 撞 BACK_LAYER_FLAG（bit 28 = high byte bit-4，不是 value 16）（控件束 P2）
+
+**症状**：TextField 光标/选区/composition 的合成 RenderNode 被误分类为 box-shadow back-layer，排除出 merge-batching（is_mergeable_mesh / mesh_key），本该批合的 mesh 各自独立 draw call。
+
+**根因**：合成 id 用 `TF_CURSOR/SELECTION/COMPOSITION_SYNTH_BYTE = 20/21/22`。`BACK_LAYER_FLAG = 0x1000_0000`（bit 28）= **high byte 的 bit-4**（value 0x10）。high byte 20/21/22 = 0x14/0x15/0x16，bit-4（0x10）都被置位 → `id & BACK_LAYER_FLAG != 0`。implementer 注释写“bit 28 = high byte 16”把 bit（位）误读成 value（值）。
+
+**解决**：选 high byte 32/33/34（0x20/0x21/0x22，bit-5 置位、bit-4 清零）→ BACK_LAYER_FLAG 清。但清 flag 后 mesh 变 merge-eligible 会被 merge 进 background（破坏 dirty-tracking），所以加显式 `is_tf_edit_synth` guard（batch::is_mergeable_mesh + merge::mesh_key）排除动态 per-frame mesh——动态反馈 mesh（光标闪/选区拖/composition）必须保持独立 node。
+
+**教训**：**bit flag 的位运算要看 bit 不是 value**——bit 28 是 high byte 的第 4 位（0x10），不是“high byte 值 16”。任何 high byte 落在 16-31/48-63/...（bit-4 置位段）都撞 BACK_LAYER_FLAG。合成 id 选 high byte 时要避开所有既有 flag 段（back-layer bit-4 / text sub-page 1-15 / inline-img 232-255）。另外：清 flag 让 mesh merge-eligible 不一定是好事——动态 mesh 该独立就加显式 guard，别靠 flag 副作用排除。
+
+### 坑 171：fence 扩围（要求 CSS）波及所有 pkg fixture——单 crate review 兑不住，要全 workspace test（控件束 P2）
+
+**症状**：Task 17 把“控件必须被 CSS 命中”校验扩到 input/textarea。review 绿（fence crate 测试过）。但 final whole-branch review 发现 `smoke_control_kinds_load_without_crash`（packer crate）红——这个 fixture 的 HTML 含 `<input type="text">` 但 `<style>` 只覆盖 range/checkbox/radio，fence 扩围后它没匹配规则 → 打包失败。
+
+**根因**：fence 校验是**打包期**的，作用于所有 pkg fixture（不只 showcase）。Task 17 单 crate review 只跑 `cargo test -p loomgui_fence`，没跑 packer crate，看不到 cross-crate regression。SDD 的 per-task review 只审本 task diff，扩围的“波及面”超出单 task 视野。
+
+**解决**：fixture CSS 加 `input[type="text"]`。**final review 必须跑全 workspace `cargo test`**（不只单 crate）——这是 cross-task regression 的唯一兜底。
+
+**教训**：**fence 扩围（新要求 CSS / 新围栏规则）会波及所有打包 fixture**——不只 showcase，还有各 crate 的 smoke/probe fixture。改 fence 校验 pass 后必跑全 workspace test，不能只跑 fence crate。SDD 多 task 割裂，per-task review 兑不住 cross-task regression，final whole-branch review 的“全 workspace cargo test”是强制门。诊断：fence 校验改后某 fixture 红 → 查 fixture HTML 是否含新规要求的元素但缺对应 CSS。
+
+### 坑 172：variant match 后重构 flatten——TextArea 在 setter 里被静默转 TextField（控件束 P2）
+
+**症状**：Task 15 五个 setter（set_control_text/selection/placeholder/readonly/maxlength）调过后，TextArea 节点的 ControlState 变体变成 TextField（与 NodeKind::TextArea 不一致）。
+
+**根因**：setter 用 `ControlState::TextField(mut e) | ControlState::TextArea(mut e) => { /*改 e*/ ControlState::TextField(e) }`——match 两个变体但重构时总写成 TextField，丢原变体。今天无 active bug（所有单/多行 dispatch 按 NodeKind 不按 ControlState 变体），但是 latent landmine（未来 variant-based dispatch 会坏）。
+
+**解决**：改用 in-place `scene.controls.get_mut(id)` + `ControlState::TextField(e) | ControlState::TextArea(e)` match（改 e 字段，不重构变体）。加回归测试（TextArea setter 后变体仍 TextArea）。
+
+**教训**：**match 多变体后重构必须保变体**——`A(x) | B(x) => { .. A(x) }` 会把 B flatten 成 A。正确做法是 in-place 改字段（get_mut + match，不 take+ensure），或 match 里分别重构各自变体。诊断： ControlState 变体和 NodeKind 不一致 → 查 setter 是否 take+重构-单一变体。
+
+### 坑 173：PasswordField 光标/选区用 value-byte 偏移对 masked display → 位置错（控件束 P2）
+
+**症状**：PasswordField 聚焦时光标位置偏左（在 value="ab" cursor=2 末尾，光标画在 bullet 1 后而非 bullet 2 后）。选区同理偏移。
+
+**根因**：render arm 用 `cursor_pixel_x(layout, ranges, e.cursor)`，`e.cursor` 是 **value 字节偏移**（"ab"=2），但 `layout` 是**掩码 display**（"••"=6 bytes，每 bullet 3 bytes）。cursor_pixel_x 在掩码 layout 上按字节走，value 偏移 2 落在 bullet 1 中间。value 和掩码 display 的字节长度不同（掩码把每 char 换成 '•' 3 bytes）。
+
+**解决**：render 前把 value-byte 偏移 remap 成 display-byte 偏移（`value_byte_to_display_byte` helper：PasswordField = char-count 换算 `value[..cursor].chars().count()` 再转 display 字节；非 PasswordField identity）。cursor_rect FFI 同根源（Task 13 已修 composition 路径，render 路径 final fix 补）。
+
+**教训**：**掩码/变形显示控件的几何要用 display 偏移不是 value 偏移**。Password 掩码、composition 拼接、富文本 run 都会让“逻辑偏移”和“显示偏移”不一致。光标/选区/命中几何凡走 TextLayout 的，都要经 value→display remap。单一真相源是 `display_value(e, kind)`——measure/render/cursor_rect 都从它派生（含 composition range）。诊断：掩码控件光标位置错 → 查几何用的是 value 偏移还是 display 偏移。
+
 

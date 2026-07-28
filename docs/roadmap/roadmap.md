@@ -203,6 +203,7 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 摸黑打通的是"div + 文字 + 图 + flex + cascade"骨架链。之后沿骨架加宽，大致三束，不排死顺序（每束的细化留到摸黑验证完）。加宽的加料方式统一是"core 加语义 + cascade 加伪类 + 后端加对象类"，由 showcase 页面逼出需求，不凭空补理论清单。
 
 **控件束**：progress → input 全家（text/password/number/range/checkbox/radio）→ select/textarea → 滑块/开关。
+> **进度（2026-07-28）**：P1（ProgressBar + Toggle + Slider + RadioButton）✅；**P2（TextField/Password/Search + TextArea + IME）✅** —— leaf 渲染（自渲染文本+光标+选区+composition）+ EditState side table + layout 阶段 measure + 字形位置查询 + 编辑原语（UTF-8）+ 字符输入通道 + 控制键路由 + IME composition（core 标记子串 + 后端采集架构）+ host-callback clipboard + C# 投影 + 围栏 CSS 命中校验。剩 NumberField、Dropdown（select 弹出列表，复合束边界）。IME core 全就绪，**Unity 后端采集（Input.compositionString + KeyList 补 Backspace/Delete/Home/End）待家里机接**。pkg v25。
 - 第一个真正高频改值的控件出现时，**还摸黑期欠的债**：上攒批回写 flush + set_transform 数值 FFI（projection-layer §2）。
 - 吸收旧 v1.9（TextInput/IME）、v1.12（滑块/进度条）、v1.13（DragDrop/Window/Popup）大部分功能。
 - WAI-ARIA 复合控件（TabList/Tree 等，role dispatch）——签名级结构缺口，单独立项。
@@ -258,7 +259,7 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 - **Per-scope ID 去重**（复合束）：打包期 ID 唯一性校验当前为全 tree 去重（structural.rs），文档描述 per-template-scope 语义未实现。
 - **Shadow DOM 样式隔离**（复合束）：Rust cascade 引擎零 scope 隔离代码。模板内部选择器作用域边界、父组件选择器不穿透——全部未实现。
 - **CSS 自定义属性 `--*`**（控件束/复合束）：Rust core 零 custom property / `var()` 代码。C# `SetVar`/`RemoveVar` 为 `NotImplementedException` 壳。
-- **控件 API 实现**（控件束）：`Slider`/`Toggle`/`TextField`/`NumberField`/`TextArea`/`Dropdown`/`ProgressBar` 全部属性/事件（除 `Button.Clicked`/`Link.Activated`）为 `NotImplementedException` 壳。公共签名已冻结，实现待控件束推进。
+- **控件 API 实现**（控件束）：P1 实装 Slider/Toggle/RadioButton/ProgressBar，P2 实装 TextField/PasswordField/SearchField/TextArea（value/selection/placeholder/readonly/maxlength + ValueChanged/Submitted + IME composition set/commit + clipboard copy/cut/paste）。**仍 NE**：NumberField、Dropdown（select 弹出列表，复合束边界）；TextField/TextArea 的 `Blur()` + `ReadOnly`/`Disabled` **getter**（core FFI gap：无 `loomgui_stage_blur` / `get_control_readonly` / `get_node_disabled`；setter 都工作）。
 - **`UIStyleException` 缺失**（Minor，控件束）：public-api.md 声明 4 种异常类型（§1.4 / §12），`Types.cs` 仅定义 `UIContractException` + `UIPackageException`；`UIStyleException` 未定义。在控件束实现 Style 相关功能时补上此类。
 
 **本轮之后、与范式重写解耦的**（旧 §3 功能线，保留对照）：
