@@ -48,6 +48,10 @@ pub struct Stage {
     /// 编程聚焦/清焦点请求（request_focus/blur tick 外调记，tick 最前消费）。
     /// 外层 Some=有请求；内层 Some(id)=聚焦某节点 / None=清焦点。
     pub pending_focus_request: Option<Option<NodeId>>,
+    /// FFI setter（set_control_text 等）产的事件缓冲。这些 setter 在 tick 外调用，
+    /// 不能直接写 last_events（下 tick 会 clear 覆盖）。tick_and_render 最前把它 drain
+    /// 进本帧 out，使 setter 产的事件在下一 tick 入 last_events（与 C# 读事件节奏一致）。
+    pub pending_events: Vec<EventRecord>,
     /// tween 引擎（每 tick update 写 scene.anim + 产 complete 事件）。
     pub tweens: crate::tween::TweenManager,
     /// advance_time stash 的本帧 dt（tick_and_render 消费，喂 tweens.update）。
@@ -76,6 +80,7 @@ impl Stage {
             pending_text_input: Vec::new(),
             pending_wheel: Vec::new(),
             pending_focus_request: None,
+            pending_events: Vec::new(),
             tweens: crate::tween::TweenManager::new(),
             pending_dt: 0.0,
             prev_node_hashes: std::collections::HashMap::new(),
@@ -767,6 +772,11 @@ impl Stage {
             None => return FrameData::default(),
         };
         let mut out: Vec<EventRecord> = Vec::new();
+        // drain FFI setter 产的事件（set_control_text 等）进本帧 out。这些 setter 在 tick 外
+        // 调用、写 pending_events；此处 drain 使事件在下 tick 入 last_events（与 C# 读
+        // 事件节奏一致）。排在最前 = 先于本帧输入事件（setter 发生在上 tick 与本 tick 之间）。
+        let ffi_events = std::mem::take(&mut self.pending_events);
+        out.extend(ffi_events);
         // tween 推进（写 scene.anim + 产 complete 事件进 out）。须在 solve/compute_world_transforms 前。
         let dt = self.pending_dt;
         self.pending_dt = 0.0;

@@ -1951,6 +1951,344 @@ pub extern "C" fn loomgui_stage_get_control_step(
     }
 }
 
+/// 设文本控件 value（TextField / TextArea）。直接替换 EditState.value + 光标/anchor 移到
+/// 末尾（不走 insert_text 的光标插入路径——这是编程 setter，照 JS `.value = ...` 语义）。
+/// 改变时产 ValueChanged（经 Stage.pending_events 缓冲，下 tick 入 last_events）。
+/// readonly 不拦（编程可写，照 HTML JS 语义）；非文本控件 / null 句柄 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_control_text(
+    h: *mut StageHandle,
+    node_id: u32,
+    text: *const u8,
+    len: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+    let text = if text.is_null() || len == 0 {
+        ""
+    } else {
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, len) }) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        }
+    };
+    let sh = unsafe { &mut *h };
+    let scene = match sh.stage.scene.as_mut() {
+        Some(s) => s,
+        None => return -1,
+    };
+    let id = NodeId(node_id);
+    let Some(state) = scene.controls.get(id).cloned() else {
+        return -1;
+    };
+    let new_value = text.to_string();
+    let new_state = match state {
+        ControlState::TextField(mut e) | ControlState::TextArea(mut e) => {
+            // 记录旧 value 以判断是否产 ValueChanged（与 text_input / insert_text 同口径：
+            // value 实际变才发事件）。
+            let prev_value = e.value.clone();
+            // 直接替换 value + 光标/anchor 移到末尾（编程 setter，不走 insert_text 路径）。
+            // readonly 不拦（编程可写，照 JS .value = ... 语义）。同值仍重置光标但不发事件。
+            if e.value != new_value {
+                e.value = new_value.clone();
+                e.cursor_visible = true;
+                e.cursor_timer = 0.0;
+            }
+            e.cursor = new_value.len();
+            e.anchor = e.cursor;
+            // value 被整体替换 → 抹掉正在进行的 composition（旧预提交文本失效）。
+            e.composition = None;
+            if prev_value != new_value {
+                loomgui_core::scene::control::emit_value_changed(&mut sh.stage.pending_events, id);
+            }
+            ControlState::TextField(e)
+        }
+        _ => return -1,
+    };
+    scene.controls.ensure(id, new_state);
+    0
+}
+
+/// 读文本控件 value（TextField / TextArea）。return-code + out-param（ptr+len）双调法：
+/// buf_cap 足够 → rc=0，写入 buf[..*out_len]；buf_cap 不够 → rc=-2，*out_len = 所需字节数
+/// （caller 扩容重调）；非文本控件 / null 句柄 → -1。buf_cap=0 探大小 → rc=-2 + 所需 len。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_control_text(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+    buf_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    if h.is_null() || out_len.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    let value = match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::TextField(e) | ControlState::TextArea(e)) => e.value.as_bytes(),
+        _ => return -1,
+    };
+    let needed = value.len();
+    unsafe { *out_len = needed };
+    // buf_cap 不够（含 0 探大小）→ -2 + 所需 len（双调法，同 font_atlas_page）。
+    if needed > buf_cap {
+        return -2;
+    }
+    // buf_cap >= needed > 0：out 必非 null（caller 保证），拷贝。needed=0 时 null out 也合法。
+    if needed > 0 {
+        if out.is_null() {
+            return -2;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(value.as_ptr(), out, needed);
+        }
+    }
+    0
+}
+
+/// 设文本控件选区 (anchor, cursor)（字节偏移）。反向（anchor>cursor）允许，get_selection
+/// 会归一。越界偏移 clamp 到 [0, value.len()]（不 panic）。非文本控件 / null 句柄 → -1。
+/// 偏移须落在 char 边界——caller 传字节偏移（同 EditState 约定）；越界字节位置 clamp
+/// 到最近的合法边界（value.len() 总是合法边界）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_selection(
+    h: *mut StageHandle,
+    node_id: u32,
+    anchor: usize,
+    cursor: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let scene = match sh.stage.scene.as_mut() {
+        Some(s) => s,
+        None => return -1,
+    };
+    let id = NodeId(node_id);
+    let Some(state) = scene.controls.get(id).cloned() else {
+        return -1;
+    };
+    let new_state = match state {
+        ControlState::TextField(mut e) | ControlState::TextArea(mut e) => {
+            let len = e.value.len();
+            // clamp 到 [0, len]（len 总是合法 char 边界 = 末尾）。中间字节位置若非法 char
+            // 边界，向右退到最近合法边界（避免 UTF-8 切割 panic）。
+            e.anchor = clamp_char_boundary(&e.value, anchor.min(len));
+            e.cursor = clamp_char_boundary(&e.value, cursor.min(len));
+            ControlState::TextField(e)
+        }
+        _ => return -1,
+    };
+    scene.controls.ensure(id, new_state);
+    0
+}
+
+/// 读文本控件选区。写入 *start/*end（闭区间，min/max 归一）。有选区 start<end，退化
+/// 选区 start==end（零宽光标）。非文本控件 / null 句柄 / null out → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_selection(
+    h: *const StageHandle,
+    node_id: u32,
+    start: *mut usize,
+    end: *mut usize,
+) -> i32 {
+    if h.is_null() || start.is_null() || end.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::TextField(e) | ControlState::TextArea(e)) => {
+            let (b, c) = e.selection_range();
+            unsafe {
+                *start = b;
+                *end = c;
+            }
+            0
+        }
+        _ => -1,
+    }
+}
+
+/// 设文本控件 placeholder（value 为空时渲染它）。非文本控件 / null 句柄 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_control_placeholder(
+    h: *mut StageHandle,
+    node_id: u32,
+    text: *const u8,
+    len: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    // null/零长兜底为空串（清 placeholder）：from_raw_parts(null, 0) 是 UB。
+    let text = if text.is_null() || len == 0 {
+        ""
+    } else {
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, len) }) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        }
+    };
+    let sh = unsafe { &mut *h };
+    let scene = match sh.stage.scene.as_mut() {
+        Some(s) => s,
+        None => return -1,
+    };
+    let id = NodeId(node_id);
+    let Some(state) = scene.controls.get(id).cloned() else {
+        return -1;
+    };
+    let new_state = match state {
+        ControlState::TextField(mut e) | ControlState::TextArea(mut e) => {
+            e.placeholder = text.to_string();
+            ControlState::TextField(e)
+        }
+        _ => return -1,
+    };
+    scene.controls.ensure(id, new_state);
+    0
+}
+
+/// 读文本控件 placeholder。return-code + out-param（ptr+len）双调法（同 get_control_text）：
+/// buf_cap 足够 → rc=0；buf_cap 不够 → rc=-2 + *out_len=所需；非文本控件 / null 句柄 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_control_placeholder(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+    buf_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    if h.is_null() || out_len.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    let ph = match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::TextField(e) | ControlState::TextArea(e)) => e.placeholder.as_bytes(),
+        _ => return -1,
+    };
+    let needed = ph.len();
+    unsafe { *out_len = needed };
+    if needed > buf_cap {
+        return -2;
+    }
+    if needed > 0 {
+        if out.is_null() {
+            return -2;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(ph.as_ptr(), out, needed);
+        }
+    }
+    0
+}
+
+/// 设文本控件 readonly 标志（true = 用户不可编辑，编程 setter 仍可改 value）。
+/// 非文本控件 / null 句柄 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_control_readonly(
+    h: *mut StageHandle,
+    node_id: u32,
+    readonly: bool,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let scene = match sh.stage.scene.as_mut() {
+        Some(s) => s,
+        None => return -1,
+    };
+    let id = NodeId(node_id);
+    let Some(state) = scene.controls.get(id).cloned() else {
+        return -1;
+    };
+    let new_state = match state {
+        ControlState::TextField(mut e) | ControlState::TextArea(mut e) => {
+            e.readonly = readonly;
+            ControlState::TextField(e)
+        }
+        _ => return -1,
+    };
+    scene.controls.ensure(id, new_state);
+    0
+}
+
+/// 设文本控件 max_length（UTF-8 字符上限；0 = 无限）。非文本控件 / null 句柄 → -1。
+/// 注意：改 max_length 不追溯裁剪现有 value（照 HTML maxlength 语义，只限后续输入）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_control_maxlength(
+    h: *mut StageHandle,
+    node_id: u32,
+    max_length: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let scene = match sh.stage.scene.as_mut() {
+        Some(s) => s,
+        None => return -1,
+    };
+    let id = NodeId(node_id);
+    let Some(state) = scene.controls.get(id).cloned() else {
+        return -1;
+    };
+    let new_state = match state {
+        ControlState::TextField(mut e) | ControlState::TextArea(mut e) => {
+            e.max_length = max_length;
+            ControlState::TextField(e)
+        }
+        _ => return -1,
+    };
+    scene.controls.ensure(id, new_state);
+    0
+}
+
+/// 把字节偏移 clamp 到 [0, len] 且落到合法 UTF-8 char 边界。idx 可能是非法边界（指向
+/// 多字节字符中间），向右退到最近合法边界（不 panic）。idx > len → len（len 总是合法）。
+/// str::ceil_char_boundary 在 nightly；这里手写等价（线性向前 probe，UTF-8 短串代价可接受）。
+fn clamp_char_boundary(s: &str, idx: usize) -> usize {
+    if idx >= s.len() {
+        return s.len();
+    }
+    // 向右 probe 直到 idx 是 char 边界（s.is_char_boundary）。UTF-8 多字节序列最长 4 字节，
+    // 最多 probe 3 次。
+    let mut i = idx;
+    while i < s.len() && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
+}
+
 /// 设节点 user transform（位移/缩放/旋转）。走 `set_user_transform`（dynamic.rs）：
 /// 只写 `node.user_transform`，不触发 layout solve——`compute_world_transforms` 在
 /// 世界矩阵累计时并入（渲染/命中层，同 CSS transform）。供高频拖拽等运行时定位用。

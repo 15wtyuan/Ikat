@@ -202,6 +202,17 @@ pub struct ResolvedStyle {
     pub overflow_x: OverflowMode,
     pub overflow_y: OverflowMode,
     pub color: [f32; 4],
+    /// CSS `caret-color`（TextField/TextArea 光标色）。None = 缺省回退到 `color`
+    /// （render arm `unwrap_or(s.color)`），与 CSS `caret-color: auto` 语义一致。
+    /// CSS INHERITED 属性（照 CSS 规范），打包期 bake 进 base_style。
+    pub caret_color: Option<[f32; 4]>,
+    /// CSS `selection-background`（选中文本的背景色）。None = 缺省回退蓝半透
+    /// `[0,0,1,0.5]`（render arm fallback，Task 12 的常量）。LoomGUI 私有属性
+    /// （CSS 用 `::selection { background }`，围栏无伪元素选择器，故用平铺 prop）。
+    pub selection_background: Option<[f32; 4]>,
+    /// CSS `selection-color`（选中文本的文字色）。None = 缺省回退白色（render arm fallback）。
+    /// 同 `selection_background`，LoomGUI 私有属性（CSS `::selection { color }`）。
+    pub selection_color: Option<[f32; 4]>,
     pub font_size: f32,
     pub font_family: Option<String>,
     pub font_weight: u16,
@@ -298,6 +309,9 @@ impl Default for ResolvedStyle {
             overflow_x: OverflowMode::Visible,
             overflow_y: OverflowMode::Visible,
             color: [0.0, 0.0, 0.0, 1.0],
+            caret_color: None,
+            selection_background: None,
+            selection_color: None,
             font_size: 16.0,
             font_family: None,
             font_weight: 400,
@@ -692,5 +706,38 @@ mod tests {
         let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
         assert_eq!(back.inherited_set, s.inherited_set);
         assert_eq!(back, s, "full round-trip equal");
+    }
+
+    #[test]
+    fn caret_selection_colors_default_none() {
+        // 缺省 None：render arm 回退到 color（caret）/ 蓝半透（selection-bg）/ 白（selection-color）。
+        let s = ResolvedStyle::default();
+        assert!(
+            s.caret_color.is_none(),
+            "caret_color 默认 None（回退 color）"
+        );
+        assert!(
+            s.selection_background.is_none(),
+            "selection_background 默认 None（回退蓝半透）"
+        );
+        assert!(
+            s.selection_color.is_none(),
+            "selection_color 默认 None（回退白）"
+        );
+    }
+
+    #[test]
+    fn caret_selection_colors_bincode_roundtrip() {
+        // pkg 字段：ResolvedStyle 经 bincode 进 pkg.bin。None / Some 都需 round-trip 稳定。
+        let mut s = ResolvedStyle::default();
+        s.caret_color = Some([0.1, 0.2, 0.3, 1.0]);
+        s.selection_background = Some([0.0, 0.5, 0.0, 0.7]);
+        s.selection_color = Some([1.0, 1.0, 0.0, 1.0]);
+        let bytes = bincode::serialize(&s).expect("serialize");
+        let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
+        assert_eq!(back.caret_color, s.caret_color);
+        assert_eq!(back.selection_background, s.selection_background);
+        assert_eq!(back.selection_color, s.selection_color);
+        assert_eq!(back, s, "加字段后全字段 round-trip 仍相等");
     }
 }

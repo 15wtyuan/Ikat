@@ -3894,3 +3894,145 @@ fn textfield_editing_mesh_sort_key_order() {
     assert!(sel_sk < text_sk, "选区在文字之下: {sel_sk} < {text_sk}");
     assert!(text_sk < cur_sk, "光标在文字之上: {text_sk} < {cur_sk}");
 }
+
+// ===== caret-color / selection-background / selection-color render style (Task 15) =====
+//
+// Task 12 用常量缺省色画 caret/selection（caret=text color，selection-bg=蓝半透）。
+// Task 15 让 render arm 读 ResolvedStyle 的 caret_color/selection_background/selection_color
+// （None 时回退到同样的常量）。这些测验：声明 style 色后 mesh 颜色 == 声明色。
+
+/// 从一个 RenderNode 的 Mesh payload 取首个顶点色（quad 是 4 同色顶点，首色即代表）。
+/// 无几何 / 非 program=0 纯色 mesh → None。
+fn first_vertex_color(rn: &crate::render::RenderNode) -> Option<[f32; 4]> {
+    match &rn.payload {
+        NodePayload::Mesh {
+            verts,
+            colors,
+            program: 0,
+            ..
+        } if !verts.is_empty() && !colors.is_empty() => Some(colors[0]),
+        _ => None,
+    }
+}
+
+/// caret-color style 声明后，光标 mesh 颜色 == 声明色（非缺省 text color）。
+#[test]
+fn textfield_caret_uses_caret_color_style() {
+    let (mut scene, id) = make_focused_textfield("ab");
+    // 声明 caret-color = 纯红。node.style.color 仍是默认黑——若 render 用缺省会画黑光标。
+    scene.get_mut(id).expect("node").style.caret_color = Some([1.0, 0.0, 0.0, 1.0]);
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let cursor_id = tf_synth_id(id.0, TF_CURSOR_SYNTH_BYTE);
+    let caret_color = frame
+        .nodes
+        .iter()
+        .find(|rn| rn.node_id == cursor_id)
+        .and_then(first_vertex_color)
+        .expect("cursor mesh must have geometry");
+    assert_eq!(
+        caret_color,
+        [1.0, 0.0, 0.0, 1.0],
+        "caret uses caret-color style, not default text color"
+    );
+}
+
+/// 未声明 caret-color 时光标回退到 text color（Task 12 缺省行为保持）。
+#[test]
+fn textfield_caret_falls_back_to_text_color() {
+    let (mut scene, id) = make_focused_textfield("ab");
+    // color = 纯蓝，不声明 caret_color → 光标应回退到蓝。
+    scene.get_mut(id).expect("node").style.color = [0.0, 0.0, 1.0, 1.0];
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let cursor_id = tf_synth_id(id.0, TF_CURSOR_SYNTH_BYTE);
+    let caret_color = frame
+        .nodes
+        .iter()
+        .find(|rn| rn.node_id == cursor_id)
+        .and_then(first_vertex_color)
+        .expect("cursor mesh must have geometry");
+    assert_eq!(
+        caret_color,
+        [0.0, 0.0, 1.0, 1.0],
+        "caret falls back to text color when caret-color unset"
+    );
+}
+
+/// selection-background style 声明后，选区 mesh 颜色 == 声明色（非缺省蓝半透）。
+#[test]
+fn textfield_selection_uses_selection_background_style() {
+    let (mut scene, id) = make_focused_textfield("hello");
+    if let Some(ControlState::TextField(e)) = scene.controls.get_mut(id) {
+        e.cursor = 4;
+        e.anchor = 1;
+    }
+    // 声明 selection-background = 绿半透。缺省是蓝半透——若 render 用缺省会画蓝色。
+    scene.get_mut(id).expect("node").style.selection_background = Some([0.0, 1.0, 0.0, 0.4]);
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let sel_id = tf_synth_id(id.0, TF_SELECTION_SYNTH_BYTE);
+    let sel_color = frame
+        .nodes
+        .iter()
+        .find(|rn| rn.node_id == sel_id)
+        .and_then(first_vertex_color)
+        .expect("selection mesh must have geometry");
+    assert_eq!(
+        sel_color,
+        [0.0, 1.0, 0.0, 0.4],
+        "selection uses selection-background style, not default blue"
+    );
+}
+
+/// 未声明 selection-background 时选区回退到蓝半透（Task 12 缺省行为保持）。
+#[test]
+fn textfield_selection_falls_back_to_default_blue() {
+    let (mut scene, id) = make_focused_textfield("hello");
+    if let Some(ControlState::TextField(e)) = scene.controls.get_mut(id) {
+        e.cursor = 4;
+        e.anchor = 1;
+    }
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let sel_id = tf_synth_id(id.0, TF_SELECTION_SYNTH_BYTE);
+    let sel_color = frame
+        .nodes
+        .iter()
+        .find(|rn| rn.node_id == sel_id)
+        .and_then(first_vertex_color)
+        .expect("selection mesh must have geometry");
+    assert_eq!(
+        sel_color,
+        [0.0, 0.0, 1.0, 0.5],
+        "selection falls back to default blue translucent"
+    );
+}

@@ -802,3 +802,198 @@ fn ffi_clipboard_global_left_registered() {
     let _g = CLIP_FFI_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     loomgui_register_clipboard(Some(ffi_test_set), Some(ffi_test_get));
 }
+
+// ===== control text / selection / placeholder / readonly / maxlength FFI (Task 15) =====
+//
+// 业务侧（C# 投影层）经这些 setter/getter 读写 TextField/TextArea 的 value/selection/
+// placeholder/readonly/maxlength。set_control_text 直接替换 value（不走 insert_text 的
+// cursor 插入路径）+ 光标移到末尾 + 标 dirty；setter-via-FFI 也产 ValueChanged（与
+// C# Value 属性 setter 契约一致），经 Stage.pending_events 缓冲，下 tick 入 last_events。
+
+/// 读 TextField EditState 的 (cursor, anchor) 选区（断言为 TextField）。
+fn textfield_selection(h: *mut StageHandle, node: u32) -> (usize, usize) {
+    let sh = unsafe { &*h };
+    let scene = sh.stage.scene.as_ref().expect("scene built");
+    match scene.controls.get(NodeId(node)) {
+        Some(ControlState::TextField(e)) => (e.cursor, e.anchor),
+        _ => panic!("node {node} is not a TextField"),
+    }
+}
+
+/// set_control_text 替换 value + 光标移末尾。get_control_text 读回经 ptr+len out-param。
+#[test]
+fn ffi_set_get_control_text_round_trip() {
+    let (h, tf) = make_stage_with_focused_textfield("old");
+    let new = b"new";
+    assert_eq!(
+        loomgui_stage_set_control_text(h, tf, new.as_ptr(), new.len()),
+        0,
+        "set_control_text rc"
+    );
+    // 光标/anchor 移到 value 末尾（new.len() = 3）。
+    assert_eq!(textfield_selection(h, tf), (3, 3), "cursor moved to end");
+    // tick 让 measure 重算 + flush pending_events。
+    loomgui_stage_tick(h, 0.0);
+    assert_eq!(textfield_value(h, tf), "new", "value replaced");
+
+    // get_control_text：buf 足够 → rc=0，写入 buf[..len]。
+    let mut buf = [0u8; 16];
+    let mut len = 0usize;
+    assert_eq!(
+        loomgui_stage_get_control_text(h, tf, buf.as_mut_ptr(), buf.len(), &mut len),
+        0,
+        "get_control_text rc (buf enough)"
+    );
+    assert_eq!(len, 3, "written len = value byte len");
+    assert_eq!(&buf[..len], b"new", "round-trip value bytes");
+    loomgui_stage_free(h);
+}
+
+/// get_control_text buf 不够 → rc=-2（所需大小），不改 buf（双调法探大小）。
+#[test]
+fn ffi_get_control_text_buf_too_small_returns_needed() {
+    let (h, tf) = make_stage_with_focused_textfield("hello");
+    let mut buf = [0u8; 2];
+    let mut len = 0usize;
+    let rc = loomgui_stage_get_control_text(h, tf, buf.as_mut_ptr(), buf.len(), &mut len);
+    assert_eq!(rc, -2, "buf too small returns -2");
+    assert_eq!(len, 5, "len reports needed size (b\"hello\" = 5)");
+    loomgui_stage_free(h);
+}
+
+/// set_control_text 产 ValueChanged（经 pending_events → 下 tick 入 last_events）。
+#[test]
+fn ffi_set_control_text_emits_value_changed() {
+    let (h, tf) = make_stage_with_focused_textfield("old");
+    let new = b"new";
+    assert_eq!(
+        loomgui_stage_set_control_text(h, tf, new.as_ptr(), new.len()),
+        0
+    );
+    loomgui_stage_tick(h, 0.0);
+    let events = drain_events(h);
+    assert!(
+        events
+            .iter()
+            .any(|e| e.event_type == EVT_VALUE_CHANGED && e.node_id == tf),
+        "set_control_text emits ValueChanged on next tick"
+    );
+    loomgui_stage_free(h);
+}
+
+/// set_selection 设 (anchor, cursor) 选区（可反向 anchor>cursor）。rc=0。
+#[test]
+fn ffi_set_selection() {
+    let (h, tf) = make_stage_with_focused_textfield("hello");
+    // 选 "el"（字节 [1,3)）。
+    assert_eq!(
+        loomgui_stage_set_selection(h, tf, 1, 3),
+        0,
+        "set_selection rc"
+    );
+    assert_eq!(textfield_selection(h, tf), (3, 1), "cursor=3 anchor=1");
+    loomgui_stage_free(h);
+}
+
+/// get_selection 读回 (start, end) 闭区间（min/max 归一）。
+#[test]
+fn ffi_get_selection() {
+    let (h, tf) = make_stage_with_focused_textfield("hello");
+    // 反向选区 anchor=4 cursor=1 → get 归一为 (1, 4)。
+    assert_eq!(loomgui_stage_set_selection(h, tf, 4, 1), 0);
+    let mut start = 0usize;
+    let mut end = 0usize;
+    assert_eq!(loomgui_stage_get_selection(h, tf, &mut start, &mut end), 0);
+    assert_eq!(
+        (start, end),
+        (1, 4),
+        "get_selection normalizes to [min,max]"
+    );
+    loomgui_stage_free(h);
+}
+
+/// set_control_placeholder 改 placeholder，value 为空时 render 用它。get 回读。
+#[test]
+fn ffi_set_get_control_placeholder() {
+    let (h, tf) = make_stage_with_focused_textfield(""); // 空 value
+    let ph = b"type here";
+    assert_eq!(
+        loomgui_stage_set_control_placeholder(h, tf, ph.as_ptr(), ph.len()),
+        0,
+        "set_control_placeholder rc"
+    );
+    loomgui_stage_tick(h, 0.0);
+    // 读回 placeholder。
+    let mut buf = [0u8; 16];
+    let mut len = 0usize;
+    assert_eq!(
+        loomgui_stage_get_control_placeholder(h, tf, buf.as_mut_ptr(), buf.len(), &mut len),
+        0
+    );
+    assert_eq!(&buf[..len], b"type here", "placeholder round-trip");
+    loomgui_stage_free(h);
+}
+
+/// set_control_readonly 切换 readonly 标志（聚焦时光标不画）。
+#[test]
+fn ffi_set_control_readonly() {
+    let (h, tf) = make_stage_with_focused_textfield("ab");
+    assert_eq!(
+        loomgui_stage_set_control_readonly(h, tf, true),
+        0,
+        "set readonly"
+    );
+    let sh = unsafe { &*h };
+    let scene = sh.stage.scene.as_ref().expect("scene built");
+    match scene.controls.get(NodeId(tf)) {
+        Some(ControlState::TextField(e)) => assert!(e.readonly, "readonly set true"),
+        _ => panic!("not a textfield"),
+    }
+    loomgui_stage_free(h);
+}
+
+/// set_control_maxlength 改 max_length（UTF-8 字符上限）。0 = 无限。
+#[test]
+fn ffi_set_control_maxlength() {
+    let (h, tf) = make_stage_with_focused_textfield("ab");
+    assert_eq!(
+        loomgui_stage_set_control_maxlength(h, tf, 5),
+        0,
+        "set maxlength=5"
+    );
+    let sh = unsafe { &*h };
+    let scene = sh.stage.scene.as_ref().expect("scene built");
+    match scene.controls.get(NodeId(tf)) {
+        Some(ControlState::TextField(e)) => assert_eq!(e.max_length, 5),
+        _ => panic!("not a textfield"),
+    }
+    loomgui_stage_free(h);
+}
+
+/// set_control_text 非文本控件 → -1（不 panic）。
+#[test]
+fn ffi_set_control_text_non_text_control_err() {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    // div 无 ControlState → -1。
+    assert_eq!(
+        loomgui_stage_set_control_text(h, root, b"x".as_ptr(), 1),
+        -1,
+        "non-text-control node returns -1"
+    );
+    loomgui_stage_free(h);
+}
+
+/// null 句柄 / 无效 node 健壮性（不 panic，返 -1）。
+#[test]
+fn ffi_control_text_null_handle_err() {
+    assert_eq!(
+        loomgui_stage_set_control_text(std::ptr::null_mut(), 0, b"x".as_ptr(), 1),
+        -1
+    );
+    let mut len = 0usize;
+    assert_eq!(
+        loomgui_stage_get_control_text(std::ptr::null(), 0, std::ptr::null_mut(), 0, &mut len),
+        -1
+    );
+}

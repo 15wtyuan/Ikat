@@ -1083,6 +1083,28 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             }
             true
         }
+        "caret-color" => {
+            // CSS caret-color：文本框光标色。`auto`（CSS 初始值）= 用 color 属性 → None
+            // （render arm unwrap_or(text_color) 兑现）。其他值走 parse_color（不可解析 → None，
+            // 与 background-color 同口径：静默吞坏色值，不报错）。
+            if value.trim() == "auto" {
+                style.caret_color = None;
+            } else {
+                style.caret_color = parse_color(value);
+            }
+            true
+        }
+        // LoomGUI 私有属性（CSS 用 ::selection 伪元素，围栏无伪元素选择器，故平铺 prop）。
+        // None = render 回退到缺省色（selection-background 蓝半透 / selection-color 白）。
+        // 不可解析色静默落 None（与 background-color 同口径，不报错）。
+        "selection-background" => {
+            style.selection_background = parse_color(value);
+            true
+        }
+        "selection-color" => {
+            style.selection_color = parse_color(value);
+            true
+        }
         "font-size" => {
             style.font_size = parse_px(value).unwrap_or(style.font_size);
             true

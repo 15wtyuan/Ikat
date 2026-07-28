@@ -1608,3 +1608,43 @@ fn resolve_lp_for_test(lp: taffy::style::LengthPercentage) -> f32 {
     let cl = lp.into_raw();
     cl.value()
 }
+
+// ===== caret-color / selection-background / selection-color CSS mapping (Task 15) =====
+
+#[test]
+fn caret_color_applies() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "caret-color", "#ff0000"));
+    assert_eq!(s.caret_color, Some([1.0, 0.0, 0.0, 1.0]));
+}
+
+#[test]
+fn selection_background_applies() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "selection-background", "#00ff00"));
+    assert_eq!(s.selection_background, Some([0.0, 1.0, 0.0, 1.0]));
+}
+
+#[test]
+fn selection_color_applies() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "selection-color", "#0000ff"));
+    assert_eq!(s.selection_color, Some([0.0, 0.0, 1.0, 1.0]));
+}
+
+/// 坏色值 → apply_decl 返 true 但字段落 None（与 background-color 同口径：
+/// 静默吞不可解析色，不报错）。render 退回缺省 fallback。
+#[test]
+fn caret_selection_bad_color_falls_to_none() {
+    let mut s = ResolvedStyle::default();
+    assert!(
+        apply_decl(&mut s, "caret-color", "notacolor"),
+        "bad color returns true (same as background-color convention)"
+    );
+    assert!(
+        apply_decl(&mut s, "selection-background", "bogus"),
+        "bad color returns true"
+    );
+    assert!(s.caret_color.is_none(), "bad color → None");
+    assert!(s.selection_background.is_none(), "bad color → None");
+}

@@ -379,6 +379,30 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         inherited: true,
         parser: CssValueParser::Color,
     },
+    // caret-color：CSS 标准 inherited 属性（文本框光标色）。None = render 回退到 color
+    // （caret-color:auto 语义）。fence 接受色值，apply_decl 解析。
+    CssPropSpec {
+        name: "caret-color",
+        default: "auto",
+        inherited: true,
+        parser: CssValueParser::Color,
+    },
+    // LoomGUI 私有属性：选区背景色（CSS 用 ::selection { background }，围栏无伪元素选择器，
+    // 故平铺 prop）。None = render 回退蓝半透。
+    CssPropSpec {
+        name: "selection-background",
+        default: "transparent",
+        inherited: false,
+        parser: CssValueParser::Color,
+    },
+    // LoomGUI 私有属性：选区文字色（::selection { color }）。None = render 回退白。
+    // default transparent（= 未显式声明 → None），与 selection-background 对称。
+    CssPropSpec {
+        name: "selection-color",
+        default: "transparent",
+        inherited: false,
+        parser: CssValueParser::Color,
+    },
     CssPropSpec {
         name: "box-shadow",
         default: "none",
@@ -740,5 +764,33 @@ mod tests {
         let (_, _, diags) = parse_style_block("textarea { resize: none }");
         let resize_diag = diags.iter().find(|d| d.message.contains("resize"));
         assert!(resize_diag.is_none(), "resize 不该报 prop 名错：{diags:?}");
+    }
+
+    #[test]
+    fn caret_selection_props_registered() {
+        // caret-color 是 CSS 标准属性（inherited）；selection-background/-color 是 LoomGUI
+        // 私有属性（::selection 伪元素平铺化）。都走 Color 解析器。
+        let caret = find_css_prop("caret-color").expect("caret-color must be in fence");
+        assert!(caret.inherited, "caret-color is CSS inherited");
+        assert!(matches!(caret.parser, CssValueParser::Color));
+        let sb =
+            find_css_prop("selection-background").expect("selection-background must be in fence");
+        assert!(!sb.inherited);
+        assert!(matches!(sb.parser, CssValueParser::Color));
+        let sc = find_css_prop("selection-color").expect("selection-color must be in fence");
+        assert!(!sc.inherited);
+        assert!(matches!(sc.parser, CssValueParser::Color));
+    }
+
+    #[test]
+    fn caret_color_accepted_in_style_block() {
+        // 声明 caret-color + selection-background + selection-color 不产 prop 名 / 值诊断。
+        let (_, _, diags) = parse_style_block(
+            "input { caret-color: #ff0000; selection-background: #00ff00; selection-color: #0000ff }",
+        );
+        assert!(
+            diags.is_empty(),
+            "valid caret/selection colors report no diagnostics: {diags:?}"
+        );
     }
 }

@@ -724,8 +724,10 @@ pub fn build_render_nodes(
                 // 选区高亮作背景，选中文字保持清晰可读）。光标最后 push = 最上层
                 // （caret 压在 composition 下划线与文字之上）。
                 //
-                // 缺省色为常量：caret = 文字色，selection-bg = 蓝半透，composition-underline
-                // = 文字色。Task 15 加 caret-color / selection-background style 字段后替换。
+                // 缺省色：caret = caret-color style（缺省回退文字色），selection-bg =
+                // selection-background style（缺省蓝半透），composition-underline = 文字色。
+                // selection-color style 字段已解析存储，但选中文字的 per-run 着色需 text run
+                // 拆分（独立于本臂的 quad 绘制），留待后续文本渲染细化。
                 // 选区背景：sel_begin<sel_end 时逐行画覆盖选中文本的 quad。先于文字 push，
                 // 使选区落在文字之下（文字清晰，选区作半透背景）。
                 let (sel_b, sel_e) = e.selection_range();
@@ -735,7 +737,7 @@ pub fn build_render_nodes(
                         crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_b);
                     let (xe, lie) =
                         crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_e);
-                    let sel_color = [0.0, 0.0, 1.0, 0.5]; // 缺省蓝半透（Task 15 换 selection-background）
+                    let sel_color = s.selection_background.unwrap_or([0.0, 0.0, 1.0, 0.5]); // 缺省蓝半透（CSS 未声明 selection-background 时）
                     let mut verts = Vec::new();
                     let mut uvs = Vec::new();
                     let mut colors = Vec::new();
@@ -897,7 +899,7 @@ pub fn build_render_nodes(
                             y,
                             1.0, // 1px caret 宽
                             line.height,
-                            text_color, // 缺省 caret 色 = 文字色（Task 15 换 caret-color）
+                            s.caret_color.unwrap_or(text_color), // caret-color style（缺省回退文字色）
                         );
                     }
                 }

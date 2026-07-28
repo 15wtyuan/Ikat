@@ -649,6 +649,82 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_get_control_step(StageHandle* h, uint node_id, float* @out);
 
         /// <summary>
+        ///  设文本控件 value（TextField / TextArea）。直接替换 EditState.value + 光标/anchor 移到
+        ///  末尾（不走 insert_text 的光标插入路径——这是编程 setter，照 JS `.value = ...` 语义）。
+        ///  改变时产 ValueChanged（经 Stage.pending_events 缓冲，下 tick 入 last_events）。
+        ///  readonly 不拦（编程可写，照 HTML JS 语义）；非文本控件 / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_text(StageHandle* h, uint node_id, byte* text, nuint len);
+
+        /// <summary>
+        ///  读文本控件 value（TextField / TextArea）。return-code + out-param（ptr+len）双调法：
+        ///  buf_cap 足够 → rc=0，写入 buf[..*out_len]；buf_cap 不够 → rc=-2，*out_len = 所需字节数
+        ///  （caller 扩容重调）；非文本控件 / null 句柄 → -1。buf_cap=0 探大小 → rc=-2 + 所需 len。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_text(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  设文本控件选区 (anchor, cursor)（字节偏移）。反向（anchor&gt;cursor）允许，get_selection
+        ///  会归一。越界偏移 clamp 到 [0, value.len()]（不 panic）。非文本控件 / null 句柄 → -1。
+        ///  偏移须落在 char 边界——caller 传字节偏移（同 EditState 约定）；越界字节位置 clamp
+        ///  到最近的合法边界（value.len() 总是合法边界）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_selection", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_selection(StageHandle* h, uint node_id, nuint anchor, nuint cursor);
+
+        /// <summary>
+        ///  读文本控件选区。写入 *start/*end（闭区间，min/max 归一）。有选区 start&lt;end，退化
+        ///  选区 start==end（零宽光标）。非文本控件 / null 句柄 / null out → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_selection", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_selection(StageHandle* h, uint node_id, nuint* start, nuint* end);
+
+        /// <summary>
+        ///  设文本控件 placeholder（value 为空时渲染它）。非文本控件 / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_placeholder", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_placeholder(StageHandle* h, uint node_id, byte* text, nuint len);
+
+        /// <summary>
+        ///  读文本控件 placeholder。return-code + out-param（ptr+len）双调法（同 get_control_text）：
+        ///  buf_cap 足够 → rc=0；buf_cap 不够 → rc=-2 + *out_len=所需；非文本控件 / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_placeholder", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_placeholder(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  设文本控件 readonly 标志（true = 用户不可编辑，编程 setter 仍可改 value）。
+        ///  非文本控件 / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_readonly", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_readonly(StageHandle* h, uint node_id, [MarshalAs(UnmanagedType.U1)] bool @readonly);
+
+        /// <summary>
+        ///  设文本控件 max_length（UTF-8 字符上限；0 = 无限）。非文本控件 / null 句柄 → -1。
+        ///  注意：改 max_length 不追溯裁剪现有 value（照 HTML maxlength 语义，只限后续输入）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_maxlength", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_maxlength(StageHandle* h, uint node_id, nuint max_length);
+
+        /// <summary>
         ///  设节点 user transform（位移/缩放/旋转）。走 `set_user_transform`（dynamic.rs）：
         ///  只写 `node.user_transform`，不触发 layout solve——`compute_world_transforms` 在
         ///  世界矩阵累计时并入（渲染/命中层，同 CSS transform）。供高频拖拽等运行时定位用。
