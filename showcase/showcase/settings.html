@@ -23,7 +23,9 @@
   .field-hint { color:#6c7080; font-size:13px; margin-top:3px; }
   .field-control {display:flex; flex-direction:row; align-items:center; gap:12px; }
   .val { color:#8ec5d8; font-size:14px; min-width:48px; text-align:right; }
-  input[type="number"], input[type="text"], input[type="password"], input[type="search"] { background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; width:240px; }
+  /* 文本控件无 UA 样式表：必须由 CSS 提供 background/border（Task 17 围栏校验）。
+     caret-color = 光标色；selection-background = 选区高亮（围栏无 ::selection 伪元素，用私有属性平铺）。 */
+  input[type="number"], input[type="text"], input[type="password"], input[type="search"] { background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; caret-color:#5fb4d4; selection-background:rgba(95,180,212,0.45); width:240px; }
   select { background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; }
   .checkbox-row {display:flex; flex-direction:row; align-items:center; gap:10px; }
   .radio-group {display:flex; flex-direction:row; gap:20px; }

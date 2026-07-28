@@ -24,6 +24,11 @@
   .loot { color:#d4a44e; font-weight:700; }
   .sys { color:#5fb4d4; font-weight:700; }
   .enemy { color:#c2605a; font-weight:700; }
+  /* 文本控件无 UA 样式表：必须由 CSS 提供 background/border（Task 17 围栏校验）。
+     caret-color = 光标色；selection-background = 选区高亮（围栏无 ::selection 伪元素，用私有属性平铺）。 */
+  textarea { width:100%; height:96px; resize:none; font-family:inherit; background-color:rgba(14,22,32,0.85); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:10px 14px; border-radius:6px; caret-color:#5fb4d4; selection-background:rgba(95,180,212,0.45); }
+  .reply-row {display:flex; flex-direction:row; gap:12px; align-items:flex-end; }
+  .reply-btn { padding:10px 20px; border-radius:8px; background-color:#d4a44e; color:#0e1620; font-size:14px; font-weight:700; white-space:nowrap; }
   @keyframes breathe { 0%,100%{opacity:1} 50%{opacity:.4} }
   .mail-dot { animation:breathe 1.6s infinite; }
   </style>
@@ -53,6 +58,11 @@
           <div>奖励清单：<span class="loot">金币 ×5000</span>、<span class="loot">传说宝箱 ×1</span>、<span class="sys">称号「不屈」</span>。</div>
           <div style="display:flex;flex-wrap:wrap"><span style="font-weight:700">注意：</span>奖励将于 <span>7 天内</span>发放，请及时领取。<button style="color:#5fb4d4;">点此领取全部奖励</button></div>
           <div style="display:flex;flex-wrap:wrap">击败 <span class="enemy">暗影领主</span> 可额外获得赛季专属外观。详细规则见 <button style="color:#5fb4d4;">赛季手册</button>。</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;border-width:1px 0 0 0;border-style:solid;border-color:#1a2f45;padding-top:18px">
+          <span style="color:#e0e6ec;font-size:15px;font-weight:700">回复（textarea · 多行编辑）</span>
+          <textarea id="mail-reply" placeholder="写下你的回复..." maxlength="200"></textarea>
+          <div class="reply-row"><button class="reply-btn">发送回复</button><span style="color:#8ec5d8;font-size:13px">按 Ctrl+Enter 发送</span></div>
         </div>
       </div>
     </div>
