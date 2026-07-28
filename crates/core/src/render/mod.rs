@@ -1714,7 +1714,8 @@ fn render_one_node(
         NodeKind::TextField
         | NodeKind::PasswordField
         | NodeKind::SearchField
-        | NodeKind::TextArea => {
+        | NodeKind::TextArea
+        | NodeKind::NumberField => {
             // 控件叶子节点：先画背景框（与 Container 相同），再叠加 value/placeholder 文字。
             // 背景 RenderNode 先进 nodes，占住 id_to_pos（供 batch 子节点查找）；
             // 文字走 push_text_meshes 追加，register_id_map=false 避免覆盖背景位置。
@@ -1736,8 +1737,13 @@ fn render_one_node(
                 id_to_pos.insert(n.id, nodes.len() - 1);
             }
             // 取控件状态；无状态时跳过文字渲染（防御：控件未初始化或误入此臂）。
-            let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
-                scene.controls.get(n.id)
+            // NumberField 是 TextField 的数值约束变体：edit 复用同一 EditState，
+            // 故文字/光标/选区渲染与 TextField 完全一致（数值约束只作用在读写门）。
+            let Some(
+                ControlState::TextField(e)
+                | ControlState::TextArea(e)
+                | ControlState::NumberField { edit: e, .. },
+            ) = scene.controls.get(n.id)
             else {
                 return;
             };

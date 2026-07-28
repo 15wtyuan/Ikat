@@ -3477,6 +3477,46 @@ fn textfield_renders_value_text() {
 }
 
 #[test]
+fn numberfield_renders_value_text() {
+    // NumberField 是 TextField 的数值约束变体：edit 复用 EditState，渲染路径应与 TextField
+    // 完全一致。回归守卫：验证 NumberField 产非空文字 mesh（修复前落入 catch-all 返空 mesh）。
+    let (mut scene, id) = make_scene_with_text_control(
+        NodeKind::NumberField,
+        ControlState::NumberField {
+            edit: EditState::from_init("42".into(), "".into(), 0, false),
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+        },
+    );
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // 与 textfield_renders_value_text 同断言：node_id 命中且 program=1 的 Mesh 非空。
+    let has_text = frame.nodes.iter().any(|rn| {
+        rn.node_id == id.0
+            && matches!(
+                &rn.payload,
+                NodePayload::Mesh {
+                    program: 1,
+                    verts,
+                    ..
+                } if !verts.is_empty()
+            )
+    });
+    assert!(
+        has_text,
+        "NumberField value='42' must produce non-empty text glyph mesh (program=1)"
+    );
+}
+
+#[test]
 fn password_field_renders_masked_value() {
     // PasswordField value="ab" → 渲染为 "••"（2 个 '•' 字符）。
     let (mut scene, id) = make_scene_with_text_control(

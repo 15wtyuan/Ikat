@@ -556,14 +556,25 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
         .controls
         .0
         .iter()
-        .filter(|(_, s)| matches!(s, ControlState::TextField(_) | ControlState::TextArea(_)))
+        .filter(|(_, s)| {
+            matches!(
+                s,
+                ControlState::TextField(_)
+                    | ControlState::TextArea(_)
+                    | ControlState::NumberField { .. }
+            )
+        })
         .map(|(&id, _)| id)
         .collect();
     for id in ids {
         let Some(n) = scene.get(id) else {
             continue;
         };
-        let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get(id)
+        let Some(
+            ControlState::TextField(e)
+            | ControlState::TextArea(e)
+            | ControlState::NumberField { edit: e, .. },
+        ) = scene.controls.get(id)
         else {
             continue;
         };
@@ -799,10 +810,13 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
                 set_slider_value(scene, id, v, &mut out);
             }
         }
-        // TextField/TextArea: convert world pos to content-area-local coords
+        // TextField/TextArea/NumberField: convert world pos to content-area-local coords
         // (subtract layout_rect offset + border+padding inset), then set cursor/anchor
         // via hit_byte_offset. TextLayout glyphs are in content-area-local space.
-        ControlState::TextField(_) | ControlState::TextArea(_) => {
+        // NumberField 是 TextField 的数值变体——光标定位逻辑完全一致（edit 共享 EditState）。
+        ControlState::TextField(_)
+        | ControlState::TextArea(_)
+        | ControlState::NumberField { .. } => {
             if let Some(n) = scene.get(id) {
                 let lr = n.layout_rect;
                 let border_left = crate::render::resolve_lp(n.style.taffy_style.border.left);
@@ -832,8 +846,6 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
                 open_dropdown(scene, id);
             }
         }
-        // NumberField: pointer interaction pending（未在本任务范围）。
-        ControlState::NumberField { .. } => {}
     }
     out
 }
@@ -886,10 +898,14 @@ pub fn on_pointer_up(scene: &mut Scene, id: NodeId) -> Vec<EventRecord> {
 /// 文本控件 pointer-down：世界坐标已转为 content-area-local（减 layout_rect.xy + border+padding），
 /// 用 hit_byte_offset 计算字节偏移，设 cursor=anchor=offset，重置闪烁 timer。
 ///
-/// 无缓存 TextLayout（首帧尚无 measure）→ no-op。非 TextField/TextArea → no-op。
+/// 无缓存 TextLayout（首帧尚无 measure）→ no-op。非 TextField/TextArea/NumberField → no-op。
 pub fn on_text_pointer_down(scene: &mut Scene, id: NodeId, local_x: f32, local_y: f32) {
     let value = match scene.controls.get(id) {
-        Some(ControlState::TextField(e) | ControlState::TextArea(e)) => e.value.clone(),
+        Some(
+            ControlState::TextField(e)
+            | ControlState::TextArea(e)
+            | ControlState::NumberField { edit: e, .. },
+        ) => e.value.clone(),
         _ => return,
     };
     // 克隆 TextLayout 解借用冲突：text_layouts 不可变借 + controls 可变写。
@@ -898,7 +914,11 @@ pub fn on_text_pointer_down(scene: &mut Scene, id: NodeId, local_x: f32, local_y
     };
     let ranges = line_byte_ranges(&layout, &value);
     let offset = hit_byte_offset(&layout, &ranges, local_x, local_y);
-    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get_mut(id)
+    if let Some(
+        ControlState::TextField(e)
+        | ControlState::TextArea(e)
+        | ControlState::NumberField { edit: e, .. },
+    ) = scene.controls.get_mut(id)
     {
         e.cursor = offset;
         e.anchor = offset;
@@ -909,7 +929,7 @@ pub fn on_text_pointer_down(scene: &mut Scene, id: NodeId, local_x: f32, local_y
 
 /// 推进光标闪烁 timer（每帧由 Stage tick 调用，单一动画时钟不变量）。
 ///
-/// 仅处理 TextField/TextArea 的 EditState：
+/// 仅处理 TextField/TextArea/NumberField 的 EditState：
 /// - 有焦点：累计 cursor_timer += dt，每 CURSOR_BLINK_PERIOD (0.7s) 翻转 cursor_visible。
 /// - 无焦点：cursor_visible = false（隐藏光标）。
 ///
@@ -917,7 +937,10 @@ pub fn on_text_pointer_down(scene: &mut Scene, id: NodeId, local_x: f32, local_y
 pub fn advance_cursor_blink(scene: &mut Scene, dt: f32) {
     let focused = scene.focused_node;
     for (&id, state) in scene.controls.0.iter_mut() {
-        if let ControlState::TextField(e) | ControlState::TextArea(e) = state {
+        if let ControlState::TextField(e)
+        | ControlState::TextArea(e)
+        | ControlState::NumberField { edit: e, .. } = state
+        {
             if Some(id) == focused {
                 e.cursor_timer += dt;
                 if e.cursor_timer >= CURSOR_BLINK_PERIOD {
