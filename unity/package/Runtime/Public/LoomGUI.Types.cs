@@ -179,4 +179,16 @@ namespace LoomGUI
         public UIPackageException(string message) : base(message) { }
         public UIPackageException(string message, Exception inner) : base(message, inner) { }
     }
+
+    // UIStyleException = 运行时 CSS 解析失败（public-api §1.4：SetInlineStyle / 动态规则注入等
+    // 运行时改 CSS 的路径，值非法或语法错时抛）。与 UIContractException（调用方写错 API 契约）/
+    // UIPackageException（包内部错）互补：UIStyleException 专指 CSS 值/规则解析失败。
+    // 构造签名对齐 UIContractException（message + message/inner 双参），补无参默认 ctor 兼容
+    // default-activation 抛出场景（public-api §1.4 列四种异常，本类补齐 frozen 异常体系）。
+    public class UIStyleException : Exception
+    {
+        public UIStyleException() { }
+        public UIStyleException(string message) : base(message) { }
+        public UIStyleException(string message, Exception inner) : base(message, inner) { }
+    }
 }

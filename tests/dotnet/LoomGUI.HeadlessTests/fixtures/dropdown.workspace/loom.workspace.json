@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output_dir": "../dropdown-ws-out",
+  "packages": [
+    {
+      "name": "dropdown",
+      "dirs": ["."],
+      "html": ["dropdown.html"]
+    }
+  ],
+  "atlases": [],
+  "fonts": []
+}

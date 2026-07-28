@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dropdown / option projection fixture</title>
+<style>
+  #root { width: 200px; height: 100px; }
+  #sel { background: #ddd; display: block; }
+  /* option 默认 display:block（围栏 OptionItem::Block）；命中背景验 layout */
+  option { background: #eee; }
+</style>
+</head>
+<body>
+  <div id="root">
+    <!-- select 含 3 option：NodeFactory 应把 option 派发到 OptionItem（非 Container）。 -->
+    <select id="sel" style="display:block">
+      <option id="opt-a" value="a">Alpha</option>
+      <option id="opt-b" value="b" selected>Beta</option>
+      <option id="opt-c" value="c" disabled>Gamma</option>
+    </select>
+    <!-- slot / custom-element shell：NodeFactory 派发到 Slot / CustomElement。 -->
+    <slot id="sl">fallback</slot>
+    <my-widget id="cw">custom</my-widget>
+  </div>
+</body>
+</html>

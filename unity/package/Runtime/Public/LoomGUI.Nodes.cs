@@ -286,9 +286,15 @@ namespace LoomGUI
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
             Native.loomgui_stage_request_focus(h, _id);
         }
-        // Blur 暂无 FFI（core stage::blur 存在但未暴露 loomgui_stage_blur C ABI）——留 throw，
-        // 待 FFI 补齐后填（同 request_focus 路径）。
-        public void Blur() { throw NE(); }
+        // Blur 清除当前焦点（stage::blur）：记 pending_focus_request = Some(None)，下 tick 消费清焦点
+        // （与 request_focus 对称的 stage 级操作）。FFI loomgui_stage_blur 不带 node_id——它清的是
+        // 「当前获焦节点」而非「本节点」，故无焦点时调为 no-op（业务侧通常对聚焦控件调 Blur）。
+        public void Blur()
+        {
+            ThrowIfDisposed();
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_blur(h);
+        }
 
         public IDisposable OnUpdate(Action<float> cb) { throw NE(); }   // 逻辑驱动每帧更新钩子（返回句柄，Dispose 撤销）
         /// <summary>
@@ -1339,9 +1345,29 @@ namespace LoomGUI
             if (rc != 0) throw new InvalidOperationException($"set_control_readonly failed (node {id})");
         }
 
+        // get_control_readonly：return-code + byte* out（与 set 对称的读出口）。TextField / TextArea /
+        // NumberField 共享 EditState，故三者皆读。非文本控件 / 节点缺失 / null out → rc=-1；命中 → rc=0
+        // 且 *out 已填（0/1）。rc<0 升异常不吞（post-ThrowIfDisposed 理论不达）。
+        internal static bool GetControlReadonly(StageHandle* h, uint id)
+        {
+            byte b = 0;
+            int rc = Native.loomgui_stage_get_control_readonly(h, id, &b);
+            if (rc != 0) throw new InvalidOperationException($"get_control_readonly failed (node {id}, non-text?)");
+            return b != 0;
+        }
+
         internal static void SetNodeDisabled(StageHandle* h, uint id, bool v)
         {
             Native.loomgui_stage_set_node_disabled(h, id, v);
+        }
+
+        // get_node_disabled：void + byte* out（与 set 对称的读出口）。null 句柄 / 节点缺失 → 写 0（false），
+        // 不报错（与 set 的「悬空 NodeId 静默跳过」语义一致）。所有 Node 子类的 Disabled getter 经此。
+        internal static bool GetNodeDisabled(StageHandle* h, uint id)
+        {
+            byte b = 0;
+            Native.loomgui_stage_get_node_disabled(h, id, &b);
+            return b != 0;
         }
 
         // get_control_text/get_control_placeholder 共用的双调法：fn(h, buf, cap, out_len) → rc。
@@ -1397,14 +1423,15 @@ namespace LoomGUI
             set { ThrowIfDisposed(); SetSelection(value.Start, value.End); }
         }
         // readonly：true = 用户不可编辑（拦输入 / 退格 / 粘贴），但编程 setter Value 仍可写
-        // （HTML JS 语义）。core 无 getter FFI——getter 暂留 throw（同 Slider.Disabled）。
+        // （HTML JS 语义）。getter 读 core EditState.readonly（get_control_readonly，与 set 对称）。
         public bool ReadOnly
         {
             set { ThrowIfDisposed(); SetControlReadonly(value); }
-            get { throw NE(); }
+            get { ThrowIfDisposed(); return GetControlReadonly(); }
         }
-        // disabled：伪类源 + active/click 抑制（set_node_disabled）。core 无 getter（同 Slider.Disabled）。
-        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+        // disabled：伪类源 + active/click 抑制（set_node_disabled）。getter 读 NodeFlags::DISABLED
+        // （get_node_disabled，与 set 对称）。
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
 
         // ValueChanged：文本框值变更（core EVT_VALUE_CHANGED=22）。文本框的 EventRecord 不携值
         // （x=0，与 Slider 的 x=新值 不同）——订阅 ControlValueChangedEvent，在触发时回读当前
@@ -1468,7 +1495,9 @@ namespace LoomGUI
         TextSelection GetSelection() => TextControlFFI.GetSelection(Handle(), _id);
         void SetSelection(int anchor, int cursor) => TextControlFFI.SetSelection(Handle(), _id, anchor, cursor);
         void SetControlReadonly(bool v) => TextControlFFI.SetControlReadonly(Handle(), _id, v);
+        bool GetControlReadonly() => TextControlFFI.GetControlReadonly(Handle(), _id);
         void SetNodeDisabled(bool v) => TextControlFFI.SetNodeDisabled(Handle(), _id, v);
+        bool GetNodeDisabled() => TextControlFFI.GetNodeDisabled(Handle(), _id);
     }
 
     // PasswordField / SearchField：<input type="password"> / <input type="search"> 的 typed 投影。
@@ -1499,9 +1528,9 @@ namespace LoomGUI
         public bool ReadOnly
         {
             set { ThrowIfDisposed(); SetControlReadonly(value); }
-            get { throw NE(); }
+            get { ThrowIfDisposed(); return GetControlReadonly(); }
         }
-        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
 
         [NonSerialized] Dictionary<Action<ValueChangedEvent<string>>, EventRegistration> _valueChangedBacking;
         public event Action<ValueChangedEvent<string>> ValueChanged
@@ -1559,7 +1588,9 @@ namespace LoomGUI
         TextSelection GetSelection() => TextControlFFI.GetSelection(Handle(), _id);
         void SetSelection(int anchor, int cursor) => TextControlFFI.SetSelection(Handle(), _id, anchor, cursor);
         void SetControlReadonly(bool v) => TextControlFFI.SetControlReadonly(Handle(), _id, v);
+        bool GetControlReadonly() => TextControlFFI.GetControlReadonly(Handle(), _id);
         void SetNodeDisabled(bool v) => TextControlFFI.SetNodeDisabled(Handle(), _id, v);
+        bool GetNodeDisabled() => TextControlFFI.GetNodeDisabled(Handle(), _id);
     }
 
     public unsafe class SearchField : Node
@@ -1585,9 +1616,9 @@ namespace LoomGUI
         public bool ReadOnly
         {
             set { ThrowIfDisposed(); SetControlReadonly(value); }
-            get { throw NE(); }
+            get { ThrowIfDisposed(); return GetControlReadonly(); }
         }
-        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
 
         [NonSerialized] Dictionary<Action<ValueChangedEvent<string>>, EventRegistration> _valueChangedBacking;
         public event Action<ValueChangedEvent<string>> ValueChanged
@@ -1645,20 +1676,40 @@ namespace LoomGUI
         TextSelection GetSelection() => TextControlFFI.GetSelection(Handle(), _id);
         void SetSelection(int anchor, int cursor) => TextControlFFI.SetSelection(Handle(), _id, anchor, cursor);
         void SetControlReadonly(bool v) => TextControlFFI.SetControlReadonly(Handle(), _id, v);
+        bool GetControlReadonly() => TextControlFFI.GetControlReadonly(Handle(), _id);
         void SetNodeDisabled(bool v) => TextControlFFI.SetNodeDisabled(Handle(), _id, v);
+        bool GetNodeDisabled() => TextControlFFI.GetNodeDisabled(Handle(), _id);
     }
 
-    public class NumberField : Node
+    public unsafe class NumberField : Node
     {
         internal NumberField(UIContext ctx, uint id) : base(ctx, id) { }
 
+        // NumberField Value/Min/Max/Step：core ControlState::Number 变体尚未走通 set/get_control_value
+        // FFI 通道（NumberField 专用字段语义与 Slider 不同）——暂留 throw，待 ControlState::Number
+        // side query 暴露后填（同 RadioButton.Name 模式）。
         public float Value { get { throw NE(); } set { throw NE(); } }
         public float? Min { get { throw NE(); } set { throw NE(); } }
         public float? Max { get { throw NE(); } set { throw NE(); } }
         public float Step { get { throw NE(); } set { throw NE(); } }
-        public bool Disabled { get { throw NE(); } set { throw NE(); } }
+        // ReadOnly：NumberField 与 TextField/TextArea 共享 EditState（get_control_readonly 按 node 派发）。
+        // setter 直转 FFI；getter 读 EditState.readonly（与 set 对称）。
+        public bool ReadOnly
+        {
+            set { ThrowIfDisposed(); SetControlReadonly(value); }
+            get { ThrowIfDisposed(); return GetControlReadonly(); }
+        }
+        // Disabled：伪类源 + active/click 抑制（set_node_disabled）。getter 读 NodeFlags::DISABLED。
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
         public event Action<ValueChangedEvent<float>> ValueChanged;
         static NotImplementedException NE() => new NotImplementedException();
+
+        // ── FFI 转调（收口在 TextControlFFI：readonly 经 EditState 共享通道，disabled 经 node flag）─
+        StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
+        void SetControlReadonly(bool v) => TextControlFFI.SetControlReadonly(Handle(), _id, v);
+        bool GetControlReadonly() => TextControlFFI.GetControlReadonly(Handle(), _id);
+        void SetNodeDisabled(bool v) => TextControlFFI.SetNodeDisabled(Handle(), _id, v);
+        bool GetNodeDisabled() => TextControlFFI.GetNodeDisabled(Handle(), _id);
     }
 
     public unsafe class Slider : Node
@@ -1686,9 +1737,9 @@ namespace LoomGUI
             get { ThrowIfDisposed(); return GetControlStep(); }
             set { ThrowIfDisposed(); SetControlStep(value); }
         }
-        // disabled 是伪类源 + active/click 抑制（set_node_disabled）。core 无 getter——setter 直 FFI，
-        // getter 暂留 throw（disabled 状态真相在 core，不镜像防漂移；待 core 暴露 query 后填）。
-        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+        // disabled 是伪类源 + active/click 抑制（set_node_disabled）。getter 读 NodeFlags::DISABLED
+        // （get_node_disabled，与 set 对称）。
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
 
         // ValueChanged：逐帧拖拽值变更（core EVT_VALUE_CHANGED，x=新值）。backing-dict 模式同
         // Button.Clicked——订阅 internal ControlValueChangedEvent，翻译为公共 ValueChangedEvent<float>。
@@ -1796,6 +1847,13 @@ namespace LoomGUI
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
             Native.loomgui_stage_set_node_disabled(h, _id, v);
         }
+        bool GetNodeDisabled()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte b = 0;
+            Native.loomgui_stage_get_node_disabled(h, _id, &b);
+            return b != 0;
+        }
     }
 
     public unsafe class Toggle : Node
@@ -1808,8 +1866,8 @@ namespace LoomGUI
             get { ThrowIfDisposed(); return GetControlChecked(); }
             set { ThrowIfDisposed(); SetControlChecked(value); }
         }
-        // disabled setter 直 FFI（set_node_disabled）；无 getter（见 Slider.Disabled 注释）。
-        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+        // disabled setter 直 FFI（set_node_disabled）；getter 读 NodeFlags::DISABLED（get_node_disabled）。
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
 
         // CheckedChanged：翻转事件（core EVT_CHECKED_CHANGED，pad[0]=0/1）。订阅 internal
         // ControlCheckedChangedEvent，翻译为公共 ValueChangedEvent<bool>。backing-dict 同 Button.Clicked。
@@ -1855,6 +1913,13 @@ namespace LoomGUI
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
             Native.loomgui_stage_set_node_disabled(h, _id, v);
         }
+        bool GetNodeDisabled()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte b = 0;
+            Native.loomgui_stage_get_node_disabled(h, _id, &b);
+            return b != 0;
+        }
     }
 
     public unsafe class RadioButton : Node
@@ -1870,8 +1935,8 @@ namespace LoomGUI
         // Name = radio 分组名（HTML name 属性，结构性，决定互斥语义）。core 无 node-attribute getter FFI
         // ——暂留 throw，待打包期属性镜像或 side query 暴露后填。
         public string Name { get { throw NE(); } }
-        // disabled setter 直 FFI；无 getter（见 Slider.Disabled 注释）。
-        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+        // disabled setter 直 FFI；getter 读 NodeFlags::DISABLED（get_node_disabled）。
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
 
         // CheckedChanged：新选中事件（core EVT_CHECKED_CHANGED，pad[0]=1）。与 Toggle 同 payload 结构——
         // 语义差别在 core（同组互斥只新选中项触发），C# 投影同一套 demux。backing-dict 同 Button.Clicked。
@@ -1917,6 +1982,13 @@ namespace LoomGUI
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
             Native.loomgui_stage_set_node_disabled(h, _id, v);
         }
+        bool GetNodeDisabled()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte b = 0;
+            Native.loomgui_stage_get_node_disabled(h, _id, &b);
+            return b != 0;
+        }
     }
 
     public unsafe class TextArea : Node
@@ -1943,9 +2015,9 @@ namespace LoomGUI
         public bool ReadOnly
         {
             set { ThrowIfDisposed(); SetControlReadonly(value); }
-            get { throw NE(); }
+            get { ThrowIfDisposed(); return GetControlReadonly(); }
         }
-        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
 
         // ValueChanged：值变更（core EVT_VALUE_CHANGED=22，含 Enter 插换行）。订阅
         // ControlValueChangedEvent，在触发时回读当前 value 填 ValueChangedEvent<string>。
@@ -1984,7 +2056,9 @@ namespace LoomGUI
         TextSelection GetSelection() => TextControlFFI.GetSelection(Handle(), _id);
         void SetSelection(int anchor, int cursor) => TextControlFFI.SetSelection(Handle(), _id, anchor, cursor);
         void SetControlReadonly(bool v) => TextControlFFI.SetControlReadonly(Handle(), _id, v);
+        bool GetControlReadonly() => TextControlFFI.GetControlReadonly(Handle(), _id);
         void SetNodeDisabled(bool v) => TextControlFFI.SetNodeDisabled(Handle(), _id, v);
+        bool GetNodeDisabled() => TextControlFFI.GetNodeDisabled(Handle(), _id);
     }
 
     public class Dropdown : Node
@@ -1996,6 +2070,59 @@ namespace LoomGUI
         public bool Disabled { get { throw NE(); } set { throw NE(); } }
         public event Action<SelectionChangedEvent> SelectionChanged;
         static NotImplementedException NE() => new NotImplementedException();
+    }
+
+    // OptionItem = <option> 的 typed 投影（Dropdown 的子项）。结构上是容器型节点（围栏 content=text，
+    // 可被渲染当文本块），故继承 Container（同 ListItem 模式）。NodeFactory 据 NodeKind.OptionItem
+    // 派发到本类（替代之前的 Container 回落）。
+    //
+    // Value/Selected：core 尚无 option-value / option-selected 的 side query FFI（option 的 value 属性
+    // 在打包期进 ControlInit::Dropdown.options，运行时无 per-option getter）——暂留 throw，待
+    // Dropdown 完整投影（composite bundle）落地后填。Disabled 读 NodeFlags::DISABLED（通用 node flag）。
+    public unsafe class OptionItem : Container
+    {
+        internal OptionItem(UIContext ctx, uint id) : base(ctx, id) { }
+
+        // TODO(option-ffi): core 无 per-option value getter（option value 在打包期进 Dropdown.options
+        // side table，运行时未暴露）。待 Dropdown 完整投影补 get_option_value FFI 后填。
+        public string Value { get { throw NE(); } }
+        // TODO(option-ffi): selected 由父 Dropdown.selected_index 派生，无 per-option selected getter。
+        // 待 Dropdown 投影补齐后，OptionItem 可回查父 Dropdown 的 selected_index == self.Index 判定。
+        public bool Selected { get { throw NE(); } }
+        // Disabled：伪类源（NodeFlags::DISABLED）。setter 直 FFI；getter 读 node flag（与 Slider 等一致）。
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
+
+        // ── FFI 转调（disabled 经通用 node flag 通道；Value/Selected 待 option FFI）──────────
+        StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
+        void SetNodeDisabled(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_set_node_disabled(h, _id, v);
+        }
+        bool GetNodeDisabled()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte b = 0;
+            Native.loomgui_stage_get_node_disabled(h, _id, &b);
+            return b != 0;
+        }
+        static NotImplementedException NE() => new NotImplementedException();
+    }
+
+    // Slot = <slot> 的 typed 投影（模板插槽占位）。结构上是容器型节点，继承 Container。
+    // 完整插槽投影机制（按 name 填充 / fallback content）是 composite bundle 工作，本类先落 class
+    // shell 让 NodeFactory 派发到正确类型（替代之前的 Container 回落）。
+    public class Slot : Container
+    {
+        internal Slot(UIContext ctx, uint id) : base(ctx, id) { }
+    }
+
+    // CustomElement = 带连字符的自定义标签（<my-widget>）的 typed 投影。围栏把未知 tag（含连字符）
+    // 归为 CustomElement。结构上是容器型节点，继承 Container。投影机制（自定义元素注册 / 生命周期
+    // 钩子）是 composite bundle 工作，本类先落 class shell 让 NodeFactory 派发到正确类型。
+    public class CustomElement : Container
+    {
+        internal CustomElement(UIContext ctx, uint id) : base(ctx, id) { }
     }
 
     public unsafe class ProgressBar : Node

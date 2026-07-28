@@ -54,6 +54,10 @@
          FFI round-trip + Submitted/textinput via set_key_input/set_text_input. Built from
          fixtures/textfield.workspace via loom-pkg. -->
     <None Include="fixtures\textfield.pkg.bin" Link="fixtures\textfield.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Task 8 dropdown/option projection fixture: dropdown.pkg.bin (select with option children +
+         slot + custom-element) — used by OptionItemDispatchTests for NodeFactory dispatch to
+         OptionItem/Slot/CustomElement (vs Container fallback). Built from fixtures/dropdown.workspace. -->
+    <None Include="fixtures\dropdown.pkg.bin" Link="fixtures\dropdown.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
     <!-- E2 fixture font for text layout (tick panics without a default font) -->
     <None Include="fixtures\fonts\DejaVuSans.ttf" Link="fixtures\fonts\DejaVuSans.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

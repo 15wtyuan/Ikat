@@ -4,9 +4,9 @@
 // table，不做 OOP；C# 投影层用 typed 子类（Container/Button/Slider/...）给业务程序员稳定 API 表面。
 // NodeFactory 据 loomgui_stage_get_node_kind 返的 byte，switch 到对应 C# 子类构造。
 //
-// 全 25 NodeKind 变体都需 arm（对照 Projection/NodeKind.cs）。当前 C# 公共类型集尚未覆盖全部
-// Rust kind——LineBreak/OptionItem/Slot/CustomElement 4 个暂无专用 C# 子类，回落 Container
-// （结构上都是容器型节点，Container 是它们最近的具体基类）。专用子类待后续 task 引入时补 arm。
+// 全 20 NodeKind 变体都需 arm（对照 Projection/NodeKind.cs）。当前 C# 公共类型集已覆盖全部
+// Rust kind——OptionItem/Slot/CustomElement 三容器型变体经本 factory 派发到专用子类（继承
+// Container）；仅 LineBreak 在 Rust 侧尚未实装（kind_from_tag 不产）。
 //
 // 兜底 arm：未知 byte → Container + 不 crash。围栏闭合保证理论上不达（pkg.bin 只装合法 kind_tag，
 // kind_from_tag 只接受围栏白名单），防御性兜底防 FFI 异常 byte 崩整树。
@@ -65,12 +65,12 @@ namespace LoomGUI
                 NodeKind.Dropdown      => new Dropdown(ctx, id),
                 NodeKind.ProgressBar   => new ProgressBar(ctx, id),
 
-                // ── Rust 侧变体尚无专用 C# 子类：回落 Container。
-                // 结构上都是容器型节点（下拉选项 / 模板插槽 / 自定义标签），
-                // Container 是它们最近的具体基类。专用 C# 子类待后续 task 引入时补 arm 替换。
-                NodeKind.OptionItem     => new Container(ctx, id),
-                NodeKind.Slot           => new Container(ctx, id),
-                NodeKind.CustomElement  => new Container(ctx, id),
+                // ── Container 型派生（Rust 侧有专用 NodeKind，C# 有专用子类）──
+                // OptionItem = <option>、Slot = <slot>、CustomElement = 自定义标签。都是容器型节点
+                // （继承 Container），但 NodeFactory 派发到专用子类让业务 Get<OptionItem>() 命中。
+                NodeKind.OptionItem     => new OptionItem(ctx, id),
+                NodeKind.Slot           => new Slot(ctx, id),
+                NodeKind.CustomElement  => new CustomElement(ctx, id),
 
                 // ── 兜底：围栏闭合理论不达，防 FFI 异常 byte 崩整树。──
                 // Rust 侧 NodeKind #[repr(u8)] 20 变体（kind_as_u8_is_discriminant 锁），
