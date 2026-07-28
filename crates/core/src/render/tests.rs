@@ -3619,3 +3619,266 @@ fn textarea_renders_value_text() {
         "TextArea value='line1\\nline2' must produce text glyph mesh"
     );
 }
+
+// ── Task 12: 光标 / 选区 / composition 渲染 mesh ──
+
+/// 构造一个聚焦的 TextField（focused_node + cursor_visible）。
+/// `value` 非空时 cursor 默认在末尾（from_init）。
+fn make_focused_textfield(value: &str) -> (Scene, NodeId) {
+    let (mut scene, id) = make_scene_with_text_control(
+        NodeKind::TextField,
+        ControlState::TextField(EditState::from_init(value.into(), "".into(), 0, false)),
+    );
+    scene.focused_node = Some(id);
+    // from_init 已设 cursor_visible=true，显式重申以便后续 readonly 变体改写后仍可见意图。
+    if let Some(ControlState::TextField(e)) = scene.controls.get_mut(id) {
+        e.cursor_visible = true;
+    }
+    (scene, id)
+}
+
+/// 聚焦 TextField 必须产出光标 quad（合成 node_id，program=0 纯色，非空 verts）。
+#[test]
+fn focused_textfield_renders_cursor_quad() {
+    let (mut scene, id) = make_focused_textfield("ab");
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let cursor_id = tf_synth_id(id.0, TF_CURSOR_SYNTH_BYTE);
+    let cursor_nodes: Vec<_> = frame
+        .nodes
+        .iter()
+        .filter(|rn| rn.node_id == cursor_id)
+        .collect();
+    assert!(
+        !cursor_nodes.is_empty(),
+        "聚焦 TextField 必须产出光标 RenderNode（合成 id）"
+    );
+    // 光标 mesh 非空（4 顶点 quad）。
+    let has_geom = cursor_nodes.iter().any(|rn| {
+        matches!(&rn.payload, NodePayload::Mesh { verts, program: 0, .. } if !verts.is_empty())
+    });
+    assert!(has_geom, "光标 mesh 必须有几何（4 顶点纯色 quad）");
+}
+
+/// 未聚焦 TextField 不画光标。
+#[test]
+fn unfocused_textfield_no_cursor_quad() {
+    let (mut scene, id) = make_scene_with_text_control(
+        NodeKind::TextField,
+        ControlState::TextField(EditState::from_init("ab".into(), "".into(), 0, false)),
+    );
+    scene.focused_node = None; // 未聚焦
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let cursor_id = tf_synth_id(id.0, TF_CURSOR_SYNTH_BYTE);
+    let has_cursor = frame.nodes.iter().any(|rn| {
+        rn.node_id == cursor_id
+            && matches!(&rn.payload, NodePayload::Mesh { verts, .. } if !verts.is_empty())
+    });
+    assert!(!has_cursor, "未聚焦 TextField 不应画光标");
+}
+
+/// cursor_visible=false（闪烁灭相）时不画光标。
+#[test]
+fn textfield_cursor_hidden_when_not_visible() {
+    let (mut scene, id) = make_focused_textfield("ab");
+    // 模拟闪烁灭相
+    if let Some(ControlState::TextField(e)) = scene.controls.get_mut(id) {
+        e.cursor_visible = false;
+    }
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let cursor_id = tf_synth_id(id.0, TF_CURSOR_SYNTH_BYTE);
+    let has_cursor = frame.nodes.iter().any(|rn| {
+        rn.node_id == cursor_id
+            && matches!(&rn.payload, NodePayload::Mesh { verts, .. } if !verts.is_empty())
+    });
+    assert!(!has_cursor, "cursor_visible=false（灭相）不应画光标");
+}
+
+/// readonly TextField 即使聚焦也不画光标（照 HTML readonly 行为，焦点框无 caret）。
+#[test]
+fn readonly_focused_textfield_no_cursor_quad() {
+    let (mut scene, id) = make_scene_with_text_control(
+        NodeKind::TextField,
+        ControlState::TextField(EditState::from_init("ab".into(), "".into(), 0, true)),
+    );
+    scene.focused_node = Some(id);
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let cursor_id = tf_synth_id(id.0, TF_CURSOR_SYNTH_BYTE);
+    let has_cursor = frame.nodes.iter().any(|rn| {
+        rn.node_id == cursor_id
+            && matches!(&rn.payload, NodePayload::Mesh { verts, .. } if !verts.is_empty())
+    });
+    assert!(!has_cursor, "readonly TextField 聚焦不应画光标");
+}
+
+/// 有选区（selection_begin < selection_end）时画选区背景 quad（合成 id）。
+#[test]
+fn textfield_with_selection_renders_selection_bg() {
+    let (mut scene, id) = make_focused_textfield("hello");
+    // 选区 [1, 4) = "ell"
+    if let Some(ControlState::TextField(e)) = scene.controls.get_mut(id) {
+        e.cursor = 4;
+        e.anchor = 1;
+    }
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let sel_id = tf_synth_id(id.0, TF_SELECTION_SYNTH_BYTE);
+    let has_sel = frame.nodes.iter().any(|rn| {
+        rn.node_id == sel_id
+            && matches!(&rn.payload, NodePayload::Mesh { verts, program: 0, .. } if !verts.is_empty())
+    });
+    assert!(has_sel, "有选区时必须画选区背景 quad");
+}
+
+/// 退化选区（cursor == anchor）不画选区背景。
+#[test]
+fn textfield_no_selection_no_selection_bg() {
+    let (mut scene, id) = make_focused_textfield("hello");
+    // cursor == anchor（from_init 默认，无选区）
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let sel_id = tf_synth_id(id.0, TF_SELECTION_SYNTH_BYTE);
+    let has_sel = frame.nodes.iter().any(|rn| {
+        rn.node_id == sel_id
+            && matches!(&rn.payload, NodePayload::Mesh { verts, .. } if !verts.is_empty())
+    });
+    assert!(!has_sel, "退化选区（cursor==anchor）不应画选区背景");
+}
+
+/// 有 composition 时画下划线 quad（合成 id）。
+#[test]
+fn textfield_with_composition_renders_underline() {
+    let (mut scene, id) = make_focused_textfield("a");
+    // 插入 composition：pos=1（value="a" 末尾），text="b"
+    if let Some(ControlState::TextField(e)) = scene.controls.get_mut(id) {
+        e.composition = Some(Composition {
+            text: "b".into(),
+            pos: 1,
+        });
+    }
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let comp_id = tf_synth_id(id.0, TF_COMPOSITION_SYNTH_BYTE);
+    let has_comp = frame.nodes.iter().any(|rn| {
+        rn.node_id == comp_id
+            && matches!(&rn.payload, NodePayload::Mesh { verts, program: 0, .. } if !verts.is_empty())
+    });
+    assert!(has_comp, "有 composition 时必须画下划线 quad");
+}
+
+/// 合成 id 三标签互不冲突，且不与真 node_id 冲突。
+#[test]
+fn tf_synth_ids_are_distinct() {
+    let primary = 0x0000_0005u32;
+    let c = tf_synth_id(primary, TF_CURSOR_SYNTH_BYTE);
+    let s = tf_synth_id(primary, TF_SELECTION_SYNTH_BYTE);
+    let u = tf_synth_id(primary, TF_COMPOSITION_SYNTH_BYTE);
+    assert_ne!(c, s);
+    assert_ne!(c, u);
+    assert_ne!(s, u);
+    assert_ne!(c, primary);
+    // 不被误判为 text 跨页子页（high byte 1..=15）。
+    assert!(!is_text_sub_page(c));
+    assert!(!is_text_sub_page(s));
+    assert!(!is_text_sub_page(u));
+}
+
+/// 编辑反馈 mesh 的 sort_key 顺序：背景 < 文字 < 选区 < 光标。
+/// 锁定 reorder_for_batching 对合成 id（program=0 mergeable）不 panic 且保序
+/// （坑 139：合成 id + program:0 曾触发 aabb_of 的 scene.get().expect panic；
+/// aabb_of 已加零面积兜底，此测回归保护）。多节点 reorder（n≥2）才触 aabb_of 路径。
+#[test]
+fn textfield_editing_mesh_sort_key_order() {
+    let (mut scene, id) = make_focused_textfield("hello");
+    // 选区 [1,4)
+    if let Some(ControlState::TextField(e)) = scene.controls.get_mut(id) {
+        e.cursor = 4;
+        e.anchor = 1;
+    }
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let sk = |nid: u32| -> u32 {
+        frame
+            .nodes
+            .iter()
+            .find(|rn| rn.node_id == nid)
+            .map(|rn| rn.sort_key)
+            .unwrap_or(u32::MAX)
+    };
+    let bg_sk = sk(id.0);
+    let sel_sk = sk(tf_synth_id(id.0, TF_SELECTION_SYNTH_BYTE));
+    let cur_sk = sk(tf_synth_id(id.0, TF_CURSOR_SYNTH_BYTE));
+    // 找文字 mesh（node_id=id.0 且 program=1，非空 verts）。
+    let text_sk = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            rn.node_id == id.0
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, verts, .. } if !verts.is_empty())
+        })
+        .map(|rn| rn.sort_key)
+        .expect("文字 mesh 必须存在");
+    // 顺序：背景 < 文字 < 选区 < 光标（升序 sort_key = 绘制序，后绘者在上层）。
+    assert!(bg_sk < text_sk, "背景在文字之下: {bg_sk} < {text_sk}");
+    assert!(text_sk < sel_sk, "选区在文字之上: {text_sk} < {sel_sk}");
+    assert!(sel_sk < cur_sk, "光标在选区之上: {sel_sk} < {cur_sk}");
+}
