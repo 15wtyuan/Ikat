@@ -24,10 +24,12 @@ use loomgui_core::style::dynamic::{AttrOp, Compound, DynamicRule, ParsedSelector
 
 /// 触发本校验的控件 SemanticKind。
 ///
-/// 共同点：core 不带 UA 默认样式——写了标签却无匹配 CSS = 运行时空白。分两类：
+/// 共同点：core 不带 UA 默认样式——写了标签却无匹配 CSS = 运行时空白。分三类：
 /// - **注入子节点型**（ProgressBar/Slider/Toggle/RadioButton）：core 实例化时注入
 ///   `.loom-*` 视觉子节点（fill/track/thumb/check），作者须为控件本身 + 子节点配 CSS。
-/// - **文本控件型**（TextField/PasswordField/SearchField/TextArea）：控件自身渲染
+/// - **Dropdown**：core 注入 `.loom-value`/`.loom-popup` 子节点，但**不注入箭头**——
+///   教学文案单独分支，明确告诉作者需自绘箭头指示器。
+/// - **文本控件型**（TextField/PasswordField/SearchField/TextArea/NumberField）：控件自身渲染
 ///   文本和光标，无注入子节点——作者须为控件本身配 background/border + caret-color。
 const CONTROL_KINDS: &[SemanticKind] = &[
     SemanticKind::ProgressBar,
@@ -38,6 +40,8 @@ const CONTROL_KINDS: &[SemanticKind] = &[
     SemanticKind::PasswordField,
     SemanticKind::SearchField,
     SemanticKind::TextArea,
+    SemanticKind::Dropdown,
+    SemanticKind::NumberField,
 ];
 
 /// 控件是否为「注入子节点型」——core 运行时为其插入 `.loom-*` 视觉子节点。
@@ -49,6 +53,7 @@ fn has_injected_children(semantic: SemanticKind) -> bool {
             | SemanticKind::Slider
             | SemanticKind::Toggle
             | SemanticKind::RadioButton
+            | SemanticKind::Dropdown
     )
 }
 
@@ -185,6 +190,8 @@ fn loom_children_hint(semantic: SemanticKind) -> &'static str {
         SemanticKind::Slider => "`.loom-track`, `.loom-fill`, `.loom-thumb`",
         // 勾选图标容器
         SemanticKind::Toggle | SemanticKind::RadioButton => "`.loom-check` (the check mark)",
+        SemanticKind::Dropdown =>
+            "`.loom-value` (shows selected text) and `.loom-popup` (the popup list container); `<option>` children also need CSS",
         _ => "",
     }
 }
@@ -224,11 +231,22 @@ pub fn check_control_css(
             SemanticKind::PasswordField => "password field",
             SemanticKind::SearchField => "search field",
             SemanticKind::TextArea => "text area",
+            SemanticKind::Dropdown => "dropdown (select)",
+            SemanticKind::NumberField => "number field",
             _ => "control",
         };
-        // 教学分支：注入子节点型控件需为 .loom-* 子节点配样式；文本控件无子节点，
-        // 靠控件本身的 background/border + caret-color 可见（文本和光标自绘）。
-        let fix_hint = if has_injected_children(semantic) {
+        // 教学分支：Dropdown 需专属文案（框架不注入箭头，作者须自绘）；其余注入子节点型
+        // 控件需为 .loom-* 子节点配样式；文本/数值控件无子节点，靠控件本身的
+        // background/border + caret-color 可见。
+        let fix_hint = if semantic == SemanticKind::Dropdown {
+            format!(
+                "Provide CSS for <{tag}> (background/border so the box is visible) and for its \
+                 internal `.loom-value` and `.loom-popup` child elements. LoomGUI dropdowns have \
+                 NO built-in arrow indicator — if you want one, draw it yourself via CSS (e.g. a \
+                 background-image on `.loom-value`, or an extra child element). `<option>` children \
+                 also need CSS (they are normal DOM children of <{tag}>)."
+            )
+        } else if has_injected_children(semantic) {
             let children = loom_children_hint(semantic);
             format!(
                 "Provide CSS for <{tag}> (e.g. a background/border for the track or box) \
@@ -318,6 +336,41 @@ mod tests {
         let diags = check(r#"<progress value="1"></progress>"#);
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].code, DiagnosticCode::FenceControlWithoutCss);
+    }
+
+    #[test]
+    fn bare_select_no_rules_errors() {
+        let diags = check(r#"<select><option value="a">A</option></select>"#);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].code, DiagnosticCode::FenceControlWithoutCss);
+        assert!(
+            diags[0].message.contains("NO built-in arrow"),
+            "msg: {}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn select_with_tag_rule_passes() {
+        let diags = check(
+            r#"<style>select{background:#ddd}</style><select><option value="a">A</option></select>"#,
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn bare_number_input_no_rules_errors() {
+        let diags = check(r#"<input type="number" min="0" max="10">"#);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].code, DiagnosticCode::FenceControlWithoutCss);
+    }
+
+    #[test]
+    fn number_input_with_rule_passes() {
+        let diags = check(
+            r#"<style>input[type="number"]{background:#ddd}</style><input type="number" min="0" max="10">"#,
+        );
+        assert!(diags.is_empty(), "{diags:?}");
     }
 
     #[test]
