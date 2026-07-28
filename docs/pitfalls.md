@@ -1317,5 +1317,24 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：render 前把 value-byte 偏移 remap 成 display-byte 偏移（`value_byte_to_display_byte` helper：PasswordField = char-count 换算 `value[..cursor].chars().count()` 再转 display 字节；非 PasswordField identity）。cursor_rect FFI 同根源（Task 13 已修 composition 路径，render 路径 final fix 补）。
 
 **教训**：**掩码/变形显示控件的几何要用 display 偏移不是 value 偏移**。Password 掩码、composition 拼接、富文本 run 都会让“逻辑偏移”和“显示偏移”不一致。光标/选区/命中几何凡走 TextLayout 的，都要经 value→display remap。单一真相源是 `display_value(e, kind)`——measure/render/cursor_rect 都从它派生（含 composition range）。诊断：掩码控件光标位置错 → 查几何用的是 value 偏移还是 display 偏移。
+### 坑 174：`NodeTransform.origin` 与 CSS box-center 双枢轴层叠加 → 旋转中心偏移（控件束 P3 set_transform origin）
+
+**症状**：业务代码设 `node.Transform.Origin = (50, 50)`（期望绕 100×100 节点中心旋转），实际旋转中心在 `2·boxcenter = (100,100)`——节点飞到 `(150,50)` 不是原地转。origin=0 时无此问题（向后兼容）。
+
+**根因**：core 有两套独立的 pivot 层。① `NodeTransform.origin`（控件束 P3 Task 7 新增，runtime user_transform）：`to_matrix()` 产 `T(translate) ∘ T(origin) ∘ R ∘ S ∘ T(-origin)`。② CSS box-center pivot（`compute_world_transforms` 固有）：`local = T(rel) ∘ T(boxcenter) ∘ [base_m ∘ user_m] ∘ T(-boxcenter)`。两层叠加：user_m 的 origin 平移被 boxcenter 层再包一层，`T(boxcenter) ∘ T(origin)` 复合成 `T(boxcenter+origin)`，旋转中心 = `boxcenter + origin`。设 origin=boxcenter 时中心 = `2·boxcenter`。确定性（非 bug，是复合语义），但与 CSS `transform-origin` 直觉冲突。
+
+**解决**：非阻塞（向后兼容 + origin=0 默认正确）。处置路标：① 在 `docs/design/public-api.md` 的 NodeTransform 条目加 caveat——Origin 是相对自身坐标的 pivot，与 CSS box-center pivot 叠加，设 origin=boxcenter 会绕 2·boxcenter 转；② 加一个 `compute_world_transforms` 集成测试（origin≠0）锁语义。未来若要统一成 CSS `transform-origin` 语义，需重构 compute_world_transforms 把 boxcenter pivot 并入 user_m 的 origin。
+
+**教训**：retained 渲染树的 transform pivot 可能有多个层（layout box-center + runtime user origin + 未来可能的父级）。新增 pivot 字段时算清与既有层的复合（`T(a) ∘ T(b) = T(a+b)`），别只测 origin=0 的兼容。文档化 pivot 叠加语义防业务代码踩。诊断：节点 transform 后位置飞了 → 查多层 pivot 复合（boxcenter + origin）。
+
+### 坑 175：fence CSS 不支持 SVG data-URI → 自绘箭头只能纯色块/边框（控件束 P3 验收页）
+
+**症状**：Dropdown 验收页想用 `background-image: url("data:image/svg+xml,...")` 画下拉箭头（围栏教学说 dropdown 无内置箭头、要自绘），打包期 fence CSS parser 报错或静默损坏 data-URI（URL 编码的 `<`/`>`/`#` 等字符）。
+
+**根因**：fence CSS `Url` parser（`parse_url`）对 `url(...)` 内容做简单字符串处理，不识别 RFC 2397 data-URI（`data:image/svg+xml,<svg>...`）；且 SVG 里的 `<`/`>`/`#` 等在 CSS 字符串里需特殊编码。围栏子集未覆盖 data-URI。
+
+**解决**：验收页改用纯色块（`background-color`）当箭头占位——足够证明“无内置箭头”教学（作者需自绘），不追求像素级美观。真要 SVG 箭头，defer 到视觉束（§4）补 data-URI 支持，或作者用外部 PNG sprite + `background-image: url("arrow.png")`（围栏支持普通 url）。
+
+**教训**：fence CSS 子集 ≠ 完整 CSS——复杂值（data-URI、calc()、多层 background 逗号带括号）当前不支持或静默损坏。控件视觉装饰用最简围栏内表达（纯色/边框/外部 sprite url），别用 data-URI/CSS tricks。验收页踩到的 fence 限制是 tech-debt 信号，记 pitfalls 防后人重踏。诊断：CSS 值打包报错或装饰没显示 → 查 fence CssValueParser 是否支持该值类型。
 
 
