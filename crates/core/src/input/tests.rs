@@ -4502,17 +4502,22 @@ fn pointer_down_on_option_does_not_close_dropdown() {
             touch_id: -1,
         }],
     );
+    // Task 13：点 option 现在选中 + 收起（不再是 Task 12 的「不收起」占位）。
+    // outside-click 保护仍生微——点 option 不走 close_outside（命中在 popup 子树内），
+    // 收起是 on_pointer_down 的选中提交副作用，不是 outside-close。
     assert!(
-        dropdown_open(&s, select),
-        "pointer-down 在 option（popup 子树内）→ 不收起"
+        !dropdown_open(&s, select),
+        "pointer-down 在 option → 选中 + 收起（Task 13 交互闭环）"
     );
     // opt0 仍可被命中（前置 popup check 生效）
     assert_eq!(hit_test(&s, (50.0, 50.0)), Some(opt0));
 }
 
 #[test]
-fn pointer_down_on_select_header_does_not_close_dropdown() {
-    // pointer-down 落在 select 本身（header 区）→ 不收起（header 点击是 toggle，另一任务）。
+fn pointer_down_on_select_header_toggles_closed() {
+    // Task 13：open 时点 select header → toggle 收起（不再是 Task 12 的「不收起」占位）。
+    // outside-click 保护仍生微——点 header 不走 close_outside（命中在 select 子树内），
+    // 收起是 on_pointer_down 的 toggle 副作用。
     let (mut s, select, _popup, _opt0, _btn) = open_dropdown_with_outside_button_scene();
     let mut ps = PointerState::new();
     ps.process(
@@ -4527,8 +4532,8 @@ fn pointer_down_on_select_header_does_not_close_dropdown() {
         }],
     );
     assert!(
-        dropdown_open(&s, select),
-        "pointer-down 在 select 本身 → 不收起（toggle 是另一任务）"
+        !dropdown_open(&s, select),
+        "open 时 pointer-down 在 select header → toggle 收起（Task 13）"
     );
 }
 
@@ -4574,5 +4579,343 @@ fn pointer_down_outside_closes_only_open_dropdown_not_closed_one() {
     assert!(
         !dropdown_open(&s, select_closed),
         "closed 的保持 closed（不变）"
+    );
+}
+
+// ── Dropdown 交互：click toggle / click option select / 键盘 seek-commit-revert（Task 13）─
+//
+// 交互闭环：点 select header 收起↔展开；点 option 选中+收起+发 SelectionChanged；
+// 键盘 Up/Down seek 跳过 disabled、Enter 提交、Esc 回滚到打开时的选中项。
+// 照 RmlUi WidgetDropDown：SeekSelection 跳 disabled、CancelSelectBox 回滚 open 时刻值。
+
+use crate::asset::ControlInit;
+use crate::scene::control::{find_child_by_class, POPUP};
+use crate::scene::dynamic::create_node_from_template;
+use crate::style::resolved::ResolvedStyle;
+
+/// 建 Dropdown 场景：root > select(Dropdown，selected_index/open 可控)，select 的 popup
+/// 含若干 option（每个 (text, disabled)）。option 经 reparent 进 popup（与生产结构对齐）。
+/// 布局：select @(10,10,120,30)；popup @(10,40,80, n*20)；option_i @(10, 40+i*20, 80, 20)。
+/// 返回 (select_id, popup_id, Vec<opt_id>)。
+fn dropdown_scene(
+    options: &[(&str, bool)],
+    selected_index: usize,
+    open: bool,
+) -> (Scene, NodeId, NodeId, Vec<NodeId>) {
+    let mut root = Node::default();
+    root.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 400.0,
+        h: 400.0,
+    };
+    let mut s = Scene::from_nodes(vec![root], vec![]);
+    let root_id = s.roots[0];
+
+    let select = create_node_from_template(
+        &mut s,
+        NodeKind::Dropdown,
+        ResolvedStyle::default(),
+        Some(ControlInit::Dropdown {
+            selected_index: selected_index as u32,
+        }),
+    );
+    crate::scene::dynamic::append_child(&mut s, root_id, select).unwrap();
+    s.get_mut(select).unwrap().layout_rect = Rect {
+        x: 10.0,
+        y: 10.0,
+        w: 120.0,
+        h: 30.0,
+    };
+
+    let mut opt_ids = Vec::new();
+    for (i, (text, disabled)) in options.iter().enumerate() {
+        let opt =
+            create_node_from_template(&mut s, NodeKind::OptionItem, ResolvedStyle::default(), None);
+        s.text_contents.insert(opt, (*text).to_string());
+        crate::scene::dynamic::append_child(&mut s, select, opt).unwrap();
+        if *disabled {
+            s.get_mut(opt)
+                .unwrap()
+                .interaction
+                .flags
+                .insert(NodeFlags::DISABLED);
+        }
+        opt_ids.push(opt);
+        // 先挂 select（声明序），reparent 后再设 rect（与生产 instantiate 顺序一致）。
+        let _ = i;
+    }
+    crate::scene::control::reparent_options_into_popup(&mut s, select);
+
+    let popup = find_child_by_class(&s, select, POPUP).expect("popup injected");
+    let n = options.len() as f32;
+    s.get_mut(popup).unwrap().layout_rect = Rect {
+        x: 10.0,
+        y: 40.0,
+        w: 80.0,
+        h: n * 20.0,
+    };
+    for (i, &opt) in opt_ids.iter().enumerate() {
+        s.get_mut(opt).unwrap().layout_rect = Rect {
+            x: 10.0,
+            y: 40.0 + (i as f32) * 20.0,
+            w: 80.0,
+            h: 20.0,
+        };
+    }
+
+    if open {
+        if let Some(ControlState::Dropdown {
+            open,
+            open_selected_index,
+            selected_index,
+            ..
+        }) = s.controls.get_mut(select)
+        {
+            *open = true;
+            *open_selected_index = Some(*selected_index);
+        }
+    }
+    compute_world_transforms(&mut s);
+    (s, select, popup, opt_ids)
+}
+
+/// 取 dropdown 的 selected_index。
+fn dropdown_selected(scene: &Scene, select: NodeId) -> usize {
+    match scene.controls.get(select) {
+        Some(ControlState::Dropdown { selected_index, .. }) => *selected_index,
+        _ => panic!("not a dropdown"),
+    }
+}
+
+/// 取 dropdown 的 open_selected_index。
+fn dropdown_open_selected(scene: &Scene, select: NodeId) -> Option<usize> {
+    match scene.controls.get(select) {
+        Some(ControlState::Dropdown {
+            open_selected_index,
+            ..
+        }) => *open_selected_index,
+        _ => panic!("not a dropdown"),
+    }
+}
+
+#[test]
+fn click_select_toggles_open() {
+    // 收起→点 select header→open=true + open_selected_index 记下当前 selected_index。
+    let (mut s, select, _popup, _opts) = dropdown_scene(&[("A", false), ("B", false)], 0, false);
+    assert!(!dropdown_open(&s, select), "初始 closed");
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: 70.0,
+            y: 25.0, // select header 中心 (10,10,120,30)
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert!(dropdown_open(&s, select), "点 header → open=true");
+    assert_eq!(
+        dropdown_open_selected(&s, select),
+        Some(0),
+        "展开时记 open_selected_index=当前 selected_index"
+    );
+}
+
+#[test]
+fn click_option_selects_and_closes() {
+    // open→点 option B(index 1)→selected_index=1, value_lock=true, open=false,
+    // 发 EVT_SELECTION_CHANGED（node=select，payload=新 index）。
+    let (mut s, select, _popup, opts) = dropdown_scene(&[("A", false), ("B", false)], 0, true);
+    assert!(dropdown_open(&s, select));
+    let opt1 = opts[1];
+    let opt1_rect = s.get(opt1).unwrap().layout_rect;
+    let cx = opt1_rect.x + opt1_rect.w * 0.5;
+    let cy = opt1_rect.y + opt1_rect.h * 0.5;
+    let mut ps = PointerState::new();
+    let events = ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: cx,
+            y: cy, // option B 中心
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert_eq!(dropdown_selected(&s, select), 1, "selected_index=B");
+    assert!(!dropdown_open(&s, select), "选中后收起");
+    assert_eq!(
+        dropdown_open_selected(&s, select),
+        None,
+        "收起后 open_selected_index 清 None"
+    );
+    assert!(
+        matches!(
+            s.controls.get(select),
+            Some(ControlState::Dropdown {
+                value_lock: true,
+                ..
+            })
+        ),
+        "value_lock=true（防反馈环）"
+    );
+    let sel_evt = events
+        .iter()
+        .find(|e| e.event_type == EVT_SELECTION_CHANGED && e.node_id == select.0)
+        .expect("发 EVT_SELECTION_CHANGED@select");
+    assert_eq!(
+        sel_evt.touch_id, 1,
+        "SelectionChanged payload touch_id=新 selected_index"
+    );
+}
+
+#[test]
+fn click_disabled_option_does_not_select() {
+    // 点 disabled option → 不选中、不收起（照 HTML：disabled option 不可交互）。
+    let (mut s, select, _popup, opts) = dropdown_scene(&[("A", false), ("B", true)], 0, true);
+    let opt1 = opts[1];
+    let r = s.get(opt1).unwrap().layout_rect;
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: r.x + r.w * 0.5,
+            y: r.y + r.h * 0.5,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert_eq!(dropdown_selected(&s, select), 0, "disabled option 不改选中");
+    assert!(dropdown_open(&s, select), "disabled option 不收起");
+}
+
+#[test]
+fn click_header_while_open_closes() {
+    // open→再点 select header→收起（toggle）。
+    let (mut s, select, _popup, _opts) = dropdown_scene(&[("A", false)], 0, true);
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: 70.0,
+            y: 25.0, // header
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert!(!dropdown_open(&s, select), "open 时点 header → toggle 收起");
+}
+
+fn key_down(code: u32) -> KeyEvent {
+    KeyEvent {
+        key_code: code,
+        modifiers: 0,
+        is_down: true,
+        pad: [0, 0],
+    }
+}
+
+#[test]
+fn arrow_down_seeks_non_disabled_option() {
+    // open，selected_index=0（A）。[A, B(disabled), C]。Down→跳过 B 落 C(index 2)。
+    let (mut s, select, _popup, _opts) =
+        dropdown_scene(&[("A", false), ("B", true), ("C", false)], 0, true);
+    focus_node(&mut s, Some(select), &mut Vec::new());
+    let mut out = Vec::new();
+    process_keys(&mut s, &[key_down(KEY_DOWN)], &mut out);
+    assert_eq!(
+        dropdown_selected(&s, select),
+        2,
+        "Down 跳过 disabled B 落 C"
+    );
+    assert!(
+        out.iter().all(|e| e.event_type != EVT_SELECTION_CHANGED),
+        "seek 不发 SelectionChanged（仅移动高亮，不提交）"
+    );
+}
+
+#[test]
+fn arrow_up_seeks_backward() {
+    // selected_index=2（C）。Up→落 B(index 1)（一步一个，不跳两个）。
+    let (mut s, select, _popup, _opts) =
+        dropdown_scene(&[("A", false), ("B", false), ("C", false)], 2, true);
+    focus_node(&mut s, Some(select), &mut Vec::new());
+    let mut out = Vec::new();
+    process_keys(&mut s, &[key_down(KEY_UP)], &mut out);
+    assert_eq!(dropdown_selected(&s, select), 1, "Up 落 B（前一个）");
+    // 再 Up→落 A。
+    process_keys(&mut s, &[key_down(KEY_UP)], &mut out);
+    assert_eq!(dropdown_selected(&s, select), 0, "再 Up 落 A");
+}
+
+#[test]
+fn enter_commits_highlight_and_closes() {
+    // open，Down 走到 B，Enter→提交 B + 收起 + 发 SelectionChanged。
+    let (mut s, select, _popup, _opts) = dropdown_scene(&[("A", false), ("B", false)], 0, true);
+    focus_node(&mut s, Some(select), &mut Vec::new());
+    let mut out = Vec::new();
+    process_keys(&mut s, &[key_down(KEY_DOWN)], &mut out);
+    assert_eq!(dropdown_selected(&s, select), 1, "Down 移高亮到 B");
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_RETURN)], &mut out);
+    assert_eq!(dropdown_selected(&s, select), 1, "Enter 提交 B");
+    assert!(!dropdown_open(&s, select), "Enter 收起");
+    assert!(
+        out.iter().any(|e| e.event_type == EVT_SELECTION_CHANGED
+            && e.node_id == select.0
+            && e.touch_id == 1),
+        "Enter 发 SelectionChanged@select，payload=index 1"
+    );
+}
+
+#[test]
+fn escape_closes_and_reverts() {
+    // open（selected_index=0）。Down 移到 B(index 1)。Esc→open=false，selected_index 回 0。
+    let (mut s, select, _popup, _opts) = dropdown_scene(&[("A", false), ("B", false)], 0, true);
+    focus_node(&mut s, Some(select), &mut Vec::new());
+    let mut out = Vec::new();
+    process_keys(&mut s, &[key_down(KEY_DOWN)], &mut out); // 高亮到 B
+    assert_eq!(dropdown_selected(&s, select), 1);
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_ESCAPE)], &mut out);
+    assert!(!dropdown_open(&s, select), "Esc 收起");
+    assert_eq!(
+        dropdown_selected(&s, select),
+        0,
+        "Esc 回滚到打开时的 selected_index"
+    );
+    assert_eq!(
+        dropdown_open_selected(&s, select),
+        None,
+        "收起后 open_selected_index 清 None"
+    );
+    assert!(
+        out.iter().all(|e| e.event_type != EVT_SELECTION_CHANGED),
+        "Esc 回滚不发 SelectionChanged（净变=0）"
+    );
+}
+
+#[test]
+fn keyboard_ignored_when_dropdown_closed() {
+    // 收起态：Up/Down/Enter/Esc 不路由（透传为普通 keydown），不改 selected_index/open。
+    let (mut s, select, _popup, _opts) = dropdown_scene(&[("A", false), ("B", false)], 0, false);
+    focus_node(&mut s, Some(select), &mut Vec::new());
+    let mut out = Vec::new();
+    process_keys(&mut s, &[key_down(KEY_DOWN)], &mut out);
+    assert_eq!(dropdown_selected(&s, select), 0, "closed 时 Down 不改选中");
+    assert!(!dropdown_open(&s, select), "closed 时 Down 不展开");
+    // 透传普通 keydown@select（未消费）。
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_KEY_DOWN && e.node_id == select.0),
+        "closed 时 Down 透传为 keydown（不路由）"
     );
 }

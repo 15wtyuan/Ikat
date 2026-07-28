@@ -770,6 +770,7 @@ fn control_state_dropdown_variant() {
         selected_index: 2,
         open: false,
         value_lock: false,
+        open_selected_index: None,
     };
     assert!(matches!(
         s,

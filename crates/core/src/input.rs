@@ -108,6 +108,10 @@ pub const EVT_CHANGE_COMMITTED: u8 = 24;
 /// TextField/Password/Search 单行框按 Enter 提交（TextArea 不发——Enter 插换行）。
 /// payload 复用 EventRecord 现有字段（node_id 指向提交控件；x/y=0 无载荷）。
 pub const EVT_SUBMITTED: u8 = 25;
+/// Dropdown 选中项变更（点 option / Enter 提交 / 外部 SetSelectedIndex）。payload 复用
+/// EventRecord 现有字段：touch_id 装新 selected_index（usize 转 i32；dropdown 项数远小
+/// i32 范围，无损）。与 CHECKED_CHANGED（布尔选中态）区分——Dropdown 是多选一索引变更。
+pub const EVT_SELECTION_CHANGED: u8 = 26;
 
 const CLICK_THRESHOLD_MOUSE: f32 = 10.0; // per-axis click 容忍（鼠标）
 const CLICK_THRESHOLD_TOUCH: f32 = 50.0; // per-axis click 容忍（触摸）
@@ -544,6 +548,19 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                     if routed {
                         continue; // 控制键被消费，不发 keydown
                     }
+                }
+                // Dropdown 键盘路由（仅 open 时）：Up/Down seek 跳 disabled、Enter 提交、
+                // Esc 回滚。消费的路由键不发普通 keydown（同 TextField 控制键消费模式）。
+                // is_text 已先走文本路由；Dropdown 不是 TextField/TextArea，二者互斥。
+                let is_open_dropdown = matches!(
+                    scene.controls.get(fid),
+                    Some(ControlState::Dropdown { open: true, .. })
+                );
+                if ke.is_down
+                    && is_open_dropdown
+                    && crate::scene::control::on_dropdown_key(scene, fid, ke.key_code, out)
+                {
+                    continue; // 路由键被消费，不发 keydown
                 }
             }
         }

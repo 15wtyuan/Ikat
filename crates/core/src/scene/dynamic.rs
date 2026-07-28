@@ -267,6 +267,7 @@ pub fn create_node_from_template(
                 selected_index: selected_index as usize,
                 open: false,
                 value_lock: false,
+                open_selected_index: None,
             },
             ControlInit::NumberField {
                 edit,

@@ -4357,6 +4357,7 @@ fn make_popup_scene(open: bool) -> (Scene, NodeId, NodeId, NodeId, NodeId, NodeI
             selected_index: 0,
             open,
             value_lock: false,
+            open_selected_index: None,
         },
     );
     crate::scene::transform::compute_world_transforms(&mut scene);
@@ -4569,6 +4570,7 @@ fn popup_sort_key_strictly_above_scrollbar_thumb() {
             selected_index: 0,
             open: true,
             value_lock: false,
+            open_selected_index: None,
         },
     );
     crate::scene::transform::compute_world_transforms(&mut scene);
@@ -4659,6 +4661,7 @@ fn open_popup_renders_option_list_via_reparent_path() {
             selected_index: 0,
             open: true,
             value_lock: false,
+            open_selected_index: None,
         },
     );
     crate::scene::control::sync_control_visuals(&mut scene, sel);

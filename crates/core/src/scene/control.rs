@@ -7,7 +7,8 @@
 //! 与用户手写 `<div class="loom-fill">` 实例化结果一致。
 
 use crate::input::{
-    EventRecord, EVT_CHANGE_COMMITTED, EVT_CHECKED_CHANGED, EVT_SUBMITTED, EVT_VALUE_CHANGED,
+    EventRecord, EVT_CHANGE_COMMITTED, EVT_CHECKED_CHANGED, EVT_SELECTION_CHANGED, EVT_SUBMITTED,
+    EVT_VALUE_CHANGED, KEY_DOWN, KEY_ESCAPE, KEY_RETURN, KEY_UP,
 };
 use crate::scene::dynamic::{
     append_child, create_node, remove_child, set_inline_override, set_user_transform,
@@ -313,6 +314,234 @@ fn collect_subtree_text(scene: &Scene, id: NodeId, buf: &mut String) {
     }
 }
 
+// ── Dropdown 交互辅助（Task 13：点 option 选中 / seek 跳 disabled）─
+//
+// option 的索引语义与 `nth_option_text` 一致：在 popup 的 OptionItem 直接子节点里按声明序
+// 从 0 计数（非 OptionItem 的 popup 子节点不计入，与 selected_index 对齐）。disabled option
+// 占一个索引档位但 seek / 点击不可落地（照 HTML：disabled option 不可交互）。
+
+/// popup 的 OptionItem 直接子节点列表，按声明序，附是否 disabled 标志。
+/// 用于键盘 seek（跳 disabled）和点击命中（disabled 不选中）。select 无 popup / 无 option → 空。
+pub(crate) fn dropdown_option_list(scene: &Scene, select: NodeId) -> Vec<(NodeId, bool)> {
+    let Some(popup) = find_child_by_class(scene, select, POPUP) else {
+        return Vec::new();
+    };
+    scene
+        .get(popup)
+        .map(|n| n.children.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|&cid| {
+            scene
+                .get(cid)
+                .is_some_and(|c| c.kind == NodeKind::OptionItem)
+        })
+        .map(|cid| {
+            let disabled = scene
+                .get(cid)
+                .is_some_and(|n| n.interaction.flags.contains(NodeFlags::DISABLED));
+            (cid, disabled)
+        })
+        .collect()
+}
+
+/// 点中 `pos` 所在的**非 disabled** option 的索引（按 OptionItem 序）。pos 不在任一 enabled
+/// option 矩形内 / select 无 popup / 无 option → None。layout_rect 取上一帧 solve（与 hit_test
+/// 同口径，1 帧滞后），option 互不重叠故 pos-矩形判定与实际 hit 一致。
+pub(crate) fn dropdown_option_at_pos(
+    scene: &Scene,
+    select: NodeId,
+    pos: [f32; 2],
+) -> Option<usize> {
+    let mut idx = 0usize;
+    for (cid, disabled) in dropdown_option_list(scene, select) {
+        if disabled {
+            idx += 1;
+            continue;
+        }
+        if let Some(n) = scene.get(cid) {
+            let r = n.layout_rect;
+            if pos[0] >= r.x && pos[0] <= r.x + r.w && pos[1] >= r.y && pos[1] <= r.y + r.h {
+                return Some(idx);
+            }
+        }
+        idx += 1;
+    }
+    None
+}
+
+/// `pos` 是否落在 popup 矩形内。用于区分「open 时点 header（select 自身区，不在 popup）→
+/// toggle 收起」与「open 时点 disabled option / popup 背景 → 不动」（两者 dropdown_option_at_pos
+/// 都返 None，但语义不同）。select 无 popup → false。
+pub(crate) fn pos_in_popup(scene: &Scene, select: NodeId, pos: [f32; 2]) -> bool {
+    let Some(popup) = find_child_by_class(scene, select, POPUP) else {
+        return false;
+    };
+    scene.get(popup).is_some_and(|n| {
+        let r = n.layout_rect;
+        pos[0] >= r.x && pos[0] <= r.x + r.w && pos[1] >= r.y && pos[1] <= r.y + r.h
+    })
+}
+
+/// 提交选中：设 selected_index=idx + value_lock=true（防反馈环）+ open=false + 清
+/// open_selected_index，并发 EVT_SELECTION_CHANGED@select（payload touch_id=新 index）。
+/// 仅在 idx 与「展开时刻提交值」（open_selected_index；无快照退回现 selected_index）不同时发
+/// 事件——键盘 Up/Down 已移动 selected_index 作高亮，Enter 提交时要跟「打开时的原值」比才
+/// 能正确报净变（Down 到 B 后 Enter：B != 打开时的 A → 发；未 Down 直接 Enter：A == A → 不发）。
+/// 点击路径同理：点 B → B != 打开时的 A → 发；点已选 A → 不发（与 HTML change 语义一致）。
+fn commit_dropdown_selection(
+    scene: &mut Scene,
+    select: NodeId,
+    idx: usize,
+    out: &mut Vec<EventRecord>,
+) {
+    let prev_committed = match scene.controls.get(select) {
+        Some(ControlState::Dropdown {
+            open_selected_index,
+            selected_index,
+            ..
+        }) => open_selected_index.unwrap_or(*selected_index),
+        _ => idx, // 防御：控件态消失 → 视为无变化（不发）
+    };
+    let changed = idx != prev_committed;
+    if let Some(ControlState::Dropdown {
+        selected_index,
+        open,
+        value_lock,
+        open_selected_index,
+    }) = scene.controls.get_mut(select)
+    {
+        *selected_index = idx;
+        *value_lock = true;
+        *open = false;
+        *open_selected_index = None;
+    }
+    if changed {
+        out.push(EventRecord {
+            node_id: select.0,
+            event_type: EVT_SELECTION_CHANGED,
+            click_count: 0,
+            pad: [0, 0],
+            touch_id: idx as i32, // payload = 新 selected_index
+            x: 0.0,
+            y: 0.0,
+        });
+    }
+}
+
+/// 展开 Dropdown：open=true + 记 open_selected_index=当前 selected_index（Esc 回滚快照）。
+/// 已 open 时为 no-op（防重复记快照覆盖原始值）。
+fn open_dropdown(scene: &mut Scene, select: NodeId) {
+    if let Some(ControlState::Dropdown {
+        selected_index,
+        open,
+        open_selected_index,
+        ..
+    }) = scene.controls.get_mut(select)
+    {
+        if !*open {
+            *open = true;
+            *open_selected_index = Some(*selected_index);
+        }
+    }
+}
+
+/// 收起 Dropdown：open=false + 清 open_selected_index。不发事件（open/close 无事件常量，
+/// host 轮询 `open` 读状态）。selected_index 不变（由调用方在收起前定值）。
+fn close_dropdown(scene: &mut Scene, select: NodeId) {
+    if let Some(ControlState::Dropdown {
+        open,
+        open_selected_index,
+        ..
+    }) = scene.controls.get_mut(select)
+    {
+        *open = false;
+        *open_selected_index = None;
+    }
+}
+
+/// Dropdown 键盘交互路由（仅 open 时生效）。返回是否消费了该键（消费 → 不发普通 keydown）。
+///
+/// - Up/Down：seek 到前一/后一个非 disabled option（移动 selected_index 作高亮，不发事件、
+///   不收起；照 RmlUi SeekSelection——从 cur±1 起步，跳过 disabled，越界则不变）。
+/// - Enter：提交当前 selected_index + 收起 + 发 SelectionChanged（净变才报）。
+/// - Esc：回滚 selected_index 到 open_selected_index（展开时刻快照）+ 收起（不发事件——
+///   回滚后净变=0；照 RmlUi CancelSelectBox）。
+///
+/// 非 open / 非 Dropdown / 非路由键 → false（让调用方走普通 keydown）。由 `process_keys`
+/// 在焦点是 open Dropdown 时调用。
+pub(crate) fn on_dropdown_key(
+    scene: &mut Scene,
+    select: NodeId,
+    key_code: u32,
+    out: &mut Vec<EventRecord>,
+) -> bool {
+    let is_open = matches!(
+        scene.controls.get(select),
+        Some(ControlState::Dropdown { open: true, .. })
+    );
+    if !is_open {
+        return false;
+    }
+    match key_code {
+        KEY_UP | KEY_DOWN => {
+            let forward = key_code == KEY_DOWN;
+            let opts = dropdown_option_list(scene, select);
+            let cur = match scene.controls.get(select) {
+                Some(ControlState::Dropdown { selected_index, .. }) => *selected_index,
+                _ => return true, // 防御：控件态消失 → 消费但不操作
+            };
+            let n = opts.len();
+            if n == 0 {
+                return true; // 无 option → 消费但不操作
+            }
+            // RmlUi SeekSelection：从 cur±dir 起步，跳 disabled，越界不变。
+            let dir: i64 = if forward { 1 } else { -1 };
+            let mut i = cur as i64 + dir;
+            while i >= 0 && i < n as i64 {
+                if !opts[i as usize].1 {
+                    if let Some(ControlState::Dropdown { selected_index, .. }) =
+                        scene.controls.get_mut(select)
+                    {
+                        *selected_index = i as usize;
+                    }
+                    break;
+                }
+                i += dir;
+            }
+            true
+        }
+        KEY_RETURN => {
+            let idx = match scene.controls.get(select) {
+                Some(ControlState::Dropdown { selected_index, .. }) => *selected_index,
+                _ => return true,
+            };
+            commit_dropdown_selection(scene, select, idx, out);
+            true
+        }
+        KEY_ESCAPE => {
+            // 先读快照（不可变借），再回滚 selected_index + 收起（可变借）。
+            let revert_to = match scene.controls.get(select) {
+                Some(ControlState::Dropdown {
+                    open_selected_index,
+                    ..
+                }) => *open_selected_index,
+                _ => None,
+            };
+            if let Some(prev) = revert_to {
+                if let Some(ControlState::Dropdown { selected_index, .. }) =
+                    scene.controls.get_mut(select)
+                {
+                    *selected_index = prev;
+                }
+            }
+            close_dropdown(scene, select);
+            true
+        }
+        _ => false,
+    }
+}
+
 /// 在 layout 阶段提前 measure 文本控件的显示文本 TextLayout，写入 `scene.text_layouts`。
 ///
 /// 正常文本节点的 TextLayout 在 render 阶段 lazily 计算（`unwrap_or_else(measure_text)`），
@@ -591,8 +820,25 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
             }
         }
         ControlState::Progress { .. } => {}
-        // Dropdown/NumberField: pointer interaction pending Task 2.
-        ControlState::Dropdown { .. } | ControlState::NumberField { .. } => {}
+        ControlState::Dropdown { open, .. } => {
+            // 交互（照 RmlUi WidgetDropDown）：
+            // - closed → 点 select（header/value 区）→ open=true + 记 open_selected_index。
+            // - open → 点 enabled option → 选中 + 收起 + 发 SelectionChanged。
+            // - open → 点 header（不在 popup 矩形内）→ toggle 收起。
+            // - open → 点 disabled option / popup 背景 → 不动（dropdown_option_at_pos 返 None
+            //   且 pos 在 popup 内 → 不收起，照 HTML disabled option 不可交互）。
+            if open {
+                if let Some(idx) = dropdown_option_at_pos(scene, id, pos) {
+                    commit_dropdown_selection(scene, id, idx, &mut out);
+                } else if !pos_in_popup(scene, id, pos) {
+                    close_dropdown(scene, id);
+                }
+            } else {
+                open_dropdown(scene, id);
+            }
+        }
+        // NumberField: pointer interaction pending（未在本任务范围）。
+        ControlState::NumberField { .. } => {}
     }
     out
 }
@@ -1249,6 +1495,7 @@ mod tests {
                 selected_index: 0,
                 open: false,
                 value_lock: false,
+                open_selected_index: None,
             },
         );
         inject_control_children(&mut scene, id, NodeKind::Dropdown);
