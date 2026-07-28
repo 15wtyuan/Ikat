@@ -78,6 +78,6 @@ fn smoke_main_gate_class_hit_displaynone_flex() {
 fn smoke_control_kinds_load_without_crash() {
     // 控件全家（input dispatch 5 种 + select）— instantiate 不 panic = 链通。
     // kind 保真（不塌 Container）由 pkg roundtrip + bridge map unit test 覆盖。
-    let html = r#"<!DOCTYPE html><html><head><style>input[type="text"],input[type="range"],input[type="checkbox"],input[type="radio"]{width:80px}</style></head><body><div style="display:flex"><input type="text"><input type="range"><input type="checkbox"><input type="radio"><select><option></option></select></div></body></html>"#;
+    let html = r#"<!DOCTYPE html><html><head><style>input[type="text"],input[type="range"],input[type="checkbox"],input[type="radio"]{width:80px}select{width:80px}option{color:#222222}</style></head><body><div style="display:flex"><input type="text"><input type="range"><input type="checkbox"><input type="radio"><select><option></option></select></div></body></html>"#;
     let _ = build_stage(html); // 不 panic = 通过
 }
