@@ -349,7 +349,7 @@ fn ffi_set_transform_translates_user_transform() {
     let h = stage_new_with_dejavu(200.0, 200.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
     assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
-    let rc = loomgui_stage_set_transform(h, root, 50.0, 0.0, 1.0, 1.0, 0.0);
+    let rc = loomgui_stage_set_transform(h, root, 50.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0);
     assert_eq!(rc, 0, "set_transform rc");
     // 读回 node.user_transform（同 crate 可访私有字段，需 unsafe 解原指针）
     let sh = unsafe { &*h };
@@ -360,11 +360,29 @@ fn ffi_set_transform_translates_user_transform() {
     loomgui_stage_free(h);
 }
 
+/// set_transform 带 origin（ox,oy）：写入 user_transform.origin 字段。
+/// origin = 旋转/缩放原点（local 坐标），连接 C# NodeTransform.Origin。default origin=[0,0]。
+#[test]
+fn ffi_set_transform_stores_origin() {
+    let h = stage_new_with_dejavu(200.0, 200.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    let rc = loomgui_stage_set_transform(h, root, 10.0, 0.0, 1.0, 1.0, 0.0, 5.0, 5.0);
+    assert_eq!(rc, 0, "set_transform rc");
+    // 读回 node.user_transform.origin（同 crate 可访私有字段，需 unsafe 解原指针）
+    let sh = unsafe { &*h };
+    let scene = sh.stage.scene.as_ref().expect("scene built");
+    let node_ref = scene.get(NodeId(root)).expect("node live");
+    assert_eq!(node_ref.user_transform.origin, [5.0, 5.0]);
+    assert_eq!(node_ref.user_transform.translate, [10.0, 0.0]);
+    loomgui_stage_free(h);
+}
+
 /// set_transform 对不 live 节点 → -1（set_user_transform 返 Err）。
 #[test]
 fn ffi_set_transform_invalid_node_err() {
     let h = stage_new_with_dejavu(200.0, 200.0);
-    let rc = loomgui_stage_set_transform(h, 0xFFFF_FFFF, 10.0, 10.0, 1.0, 1.0, 0.0);
+    let rc = loomgui_stage_set_transform(h, 0xFFFF_FFFF, 10.0, 10.0, 1.0, 1.0, 0.0, 0.0, 0.0);
     assert_eq!(rc, -1, "invalid node set_transform → -1");
     loomgui_stage_free(h);
 }

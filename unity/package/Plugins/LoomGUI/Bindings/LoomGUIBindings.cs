@@ -725,15 +725,16 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_set_control_maxlength(StageHandle* h, uint node_id, nuint max_length);
 
         /// <summary>
-        ///  设节点 user transform（位移/缩放/旋转）。走 `set_user_transform`（dynamic.rs）：
+        ///  设节点 user transform（位移/缩放/旋转/原点）。走 `set_user_transform`（dynamic.rs）：
         ///  只写 `node.user_transform`，不触发 layout solve——`compute_world_transforms` 在
         ///  世界矩阵累计时并入（渲染/命中层，同 CSS transform）。供高频拖拽等运行时定位用。
+        ///  `ox/oy` = 旋转/缩放原点（local 坐标 px），连接 C# `NodeTransform.Origin`。
         ///  不 live 节点 / null 句柄 → -1。
         ///
         ///  **常驻（不 gate）。**
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_transform", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_transform(StageHandle* h, uint node_id, float tx, float ty, float sx, float sy, float rot);
+        internal static extern int loomgui_stage_set_transform(StageHandle* h, uint node_id, float tx, float ty, float sx, float sy, float rot, float ox, float oy);
 
         /// <summary>
         ///  读节点 disabled 伪类态（`NodeFlags::DISABLED`）。null 句柄 / 无 scene / 节点缺失 → 写 0（false）。

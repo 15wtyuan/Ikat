@@ -80,13 +80,14 @@ pub fn is_pure_translation(m: &Affine2) -> bool {
 
 /// 用户态 Transform（public-api Transform API 的 core 端存储）。
 ///
-/// 解耦的 translate/scale/rotation（TRS）三元组——供游戏业务程序员在用户空间
-/// 设定位移/缩放/旋转，由 `compute_world_transforms` 在世界矩阵累计时并入，
+/// 解耦的 translate/scale/rotation（TRS）三元组 + origin（旋转/缩放原点）——供游戏业务
+/// 程序员在用户空间设定位移/缩放/旋转，由 `compute_world_transforms` 在世界矩阵累计时并入，
 /// **不触发 layout solve**（与 CSS transform 同层：渲染/命中层，不进布局）。
 ///
 /// 与 `Affine2`（列主序 6 元）的区别：`NodeTransform` 是结构化、可逐字段写的
-/// 用户表面（对齐 C# 投影层 `NodeTransform.Position/Scale/Rotation`），`Affine2`
-/// 是内部紧凑矩阵。pivot 不在此处——`compute_world_transforms` 用 box center 统一处理。
+/// 用户表面（对齐 C# 投影层 `NodeTransform.Position/Scale/Rotation/Origin`），`Affine2`
+/// 是内部紧凑矩阵。CSS transform 层的 box-center pivot 由 `compute_world_transforms`
+/// 统一环绕（与本结构无关）；本结构的 `origin` 是用户 TRS 自身的旋转/缩放原点。
 ///
 /// `Default` = identity（scale=[1,1]，非 derive 的 [0,0]——零缩放会坍缩一切）。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -95,29 +96,39 @@ pub struct NodeTransform {
     pub translate: [f32; 2],
     /// 局部缩放。default = [1.0, 1.0]（不缩放）。
     pub scale: [f32; 2],
-    /// 局部旋转（弧度，绕节点 box center——由 compute_world_transforms 的 pivot 环绕实现）。
+    /// 局部旋转（弧度，绕 `origin`——由 `to_matrix` 的 origin 环绕实现）。
     pub rotation: f32,
+    /// 旋转/缩放原点（local 坐标系，px）。default = [0.0, 0.0]（左上角）。
+    /// scale/rotate 绕此点：`to_matrix` = T(origin) ∘ [TRS] ∘ T(-origin)。
+    pub origin: [f32; 2],
 }
 
 impl Default for NodeTransform {
-    /// identity：scale=[1,1]、translate=[0,0]、rotation=0。注意不用 derive（scale 会变 [0,0]）。
+    /// identity：scale=[1,1]、translate=[0,0]、rotation=0、origin=[0,0]。
+    /// 注意不用 derive（scale 会变 [0,0]）。
     fn default() -> Self {
         NodeTransform {
             translate: [0.0, 0.0],
             scale: [1.0, 1.0],
             rotation: 0.0,
+            origin: [0.0, 0.0],
         }
     }
 }
 
 impl NodeTransform {
-    /// 合成 Affine2：T(translate) ∘ R(rotation) ∘ S(scale)（标准 TRS，点先缩放、再旋转、再平移）。
-    /// pivot 由调用方（compute_world_transforms）环绕，此处只产出无 pivot 的局部矩阵。
+    /// 合成 Affine2。origin=[0,0] 时 = 标准 TRS：T(translate) ∘ R(rotation) ∘ S(scale)
+    /// （点先缩放、再旋转、再平移）。origin≠[0,0] 时 scale/rotate 绕 origin：
+    /// `T(translate) ∘ [T(origin) ∘ R ∘ S ∘ T(-origin)]`——即 TRS 环绕 origin 后再平移。
+    /// CSS box-center pivot 由调用方（compute_world_transforms）在更外层环绕，与本处独立。
     pub fn to_matrix(self) -> Affine2 {
         let t = from_translate(self.translate[0], self.translate[1]);
         let r = from_rotate(self.rotation);
         let s = from_scale(self.scale[0], self.scale[1]);
-        mul(&t, &mul(&r, &s))
+        // TRS 环绕 origin：T(origin) ∘ R ∘ S ∘ T(-origin)（origin=[0,0] 时两侧 T 为 identity，等价于纯 TRS）
+        let pivot = from_translate(self.origin[0], self.origin[1]);
+        let unpin = from_translate(-self.origin[0], -self.origin[1]);
+        mul(&t, &mul(&pivot, &mul(&r, &mul(&s, &unpin))))
     }
 }
 
@@ -264,9 +275,46 @@ mod tests {
             translate: [10.0, 0.0],
             scale: [2.0, 1.0],
             rotation: std::f32::consts::FRAC_PI_4,
+            origin: [0.0, 0.0],
         };
         let (x, y) = t.to_matrix().apply_point(1.0, 0.0);
         let r2 = std::f32::consts::FRAC_1_SQRT_2 * 2.0; // 2·√2/2 = √2
         assert!((x - (10.0 + r2)).abs() < 1e-5 && (y - r2).abs() < 1e-5);
+    }
+
+    #[test]
+    fn node_transform_origin_is_rotation_pivot() {
+        // origin 是旋转原点：scale/rotate 绕 origin 发生。
+        // scale(2,2) origin=(5,0)：点 (5,0) 在 origin 上 → 不动 (5,0)；点 (6,0) 相对 origin 偏 (1,0)
+        // → scale(2,2) → (2,0) → +origin → (7,0)。
+        let t = super::NodeTransform {
+            scale: [2.0, 2.0],
+            origin: [5.0, 0.0],
+            ..Default::default()
+        };
+        let m = t.to_matrix();
+        let (x, y) = m.apply_point(5.0, 0.0);
+        assert!((x - 5.0).abs() < 1e-5 && y.abs() < 1e-5, "origin 点不动");
+        let (x2, y2) = m.apply_point(6.0, 0.0);
+        assert!(
+            (x2 - 7.0).abs() < 1e-5 && y2.abs() < 1e-5,
+            "origin 右侧点被 origin-relative scale"
+        );
+    }
+
+    #[test]
+    fn node_transform_origin_zero_is_noop_vs_no_origin() {
+        // origin=[0,0] 时 to_matrix 与纯 TRS 等价（origin 两侧 T 为 identity）。
+        let with_origin = super::NodeTransform {
+            translate: [10.0, 0.0],
+            scale: [2.0, 1.0],
+            rotation: std::f32::consts::FRAC_PI_4,
+            origin: [0.0, 0.0],
+        };
+        // 手算纯 TRS（无 origin 环绕）
+        let pure = from_translate(10.0, 0.0)
+            .mul(from_rotate(std::f32::consts::FRAC_PI_4))
+            .mul(from_scale(2.0, 1.0));
+        assert_eq!(with_origin.to_matrix(), pure, "origin=[0,0] == 纯 TRS");
     }
 }

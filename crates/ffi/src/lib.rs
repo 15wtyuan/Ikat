@@ -2277,9 +2277,10 @@ fn clamp_char_boundary(s: &str, idx: usize) -> usize {
     i
 }
 
-/// 设节点 user transform（位移/缩放/旋转）。走 `set_user_transform`（dynamic.rs）：
+/// 设节点 user transform（位移/缩放/旋转/原点）。走 `set_user_transform`（dynamic.rs）：
 /// 只写 `node.user_transform`，不触发 layout solve——`compute_world_transforms` 在
 /// 世界矩阵累计时并入（渲染/命中层，同 CSS transform）。供高频拖拽等运行时定位用。
+/// `ox/oy` = 旋转/缩放原点（local 坐标 px），连接 C# `NodeTransform.Origin`。
 /// 不 live 节点 / null 句柄 → -1。
 ///
 /// **常驻（不 gate）。**
@@ -2292,6 +2293,8 @@ pub extern "C" fn loomgui_stage_set_transform(
     sx: f32,
     sy: f32,
     rot: f32,
+    ox: f32,
+    oy: f32,
 ) -> i32 {
     if h.is_null() {
         return -1;
@@ -2305,6 +2308,7 @@ pub extern "C" fn loomgui_stage_set_transform(
         translate: [tx, ty],
         scale: [sx, sy],
         rotation: rot,
+        origin: [ox, oy],
     };
     match dynamic::set_user_transform(scene, NodeId(node_id), t) {
         Ok(()) => 0,
