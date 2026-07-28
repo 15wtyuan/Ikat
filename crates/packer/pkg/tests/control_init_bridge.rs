@@ -1,8 +1,10 @@
 //! bridge 提取控件 HTML 属性 → ControlInit 的契约测试。
 //!
 //! bridge() 在 IrTree→TemplateNode 翻译时，按 NodeKind 从 HTML 属性提取控件初始值
-//! （value/max/min/step/checked/name），填进 TemplateNode.control_init，使其随 pkg.bin
-//! 存活到运行时 instantiate。此文件覆盖四种控件 + ProgressBar 无 value 的 indeterminate 语义。
+//! （value/max/min/step/checked/name/selected），填进 TemplateNode.control_init，使其随
+//! pkg.bin 存活到运行时 instantiate。此文件覆盖所有控件 NodeKind 的提取契约
+//! （progress/slider/toggle/radio/text/textarea/dropdown/number）+ ProgressBar 无 value
+//! 的 indeterminate 语义。
 
 use loomgui_core::asset::{ControlInit, TemplateNode};
 use loomgui_core::scene::NodeKind;
@@ -16,7 +18,7 @@ use loomgui_pkg::bridge::bridge;
 /// 非围栏校验本身。
 fn run_bridge(html: &str) -> Vec<TemplateNode> {
     let wrapped = format!(
-        r#"<style>progress,input[type="range"],input[type="checkbox"],input[type="radio"],input[type="text"],input[type="password"],input[type="search"],textarea{{background:#ddd}}</style>{html}"#
+        r#"<style>progress,input[type="range"],input[type="checkbox"],input[type="radio"],input[type="text"],input[type="password"],input[type="search"],input[type="number"],textarea,select,option{{background:#ddd}}</style>{html}"#
     );
     let parsed = loomgui_fence::parse_template(&wrapped, "test.html");
     assert!(
@@ -201,5 +203,58 @@ fn bridge_extracts_search_attrs() {
             assert!(!e.readonly);
         }
         other => panic!("expected TextField (search variant), got {:?}", other),
+    }
+}
+
+#[test]
+fn bridge_extracts_dropdown_selected_index_from_option_selected() {
+    // <select> 的 option[selected] 决定初始选中索引（这里第 2 项 selected → index 1）。
+    let html = r#"<select id="s"><option value="a">A</option><option value="b" selected>B</option></select>"#;
+    let nodes = run_bridge(html);
+    let sel = nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Dropdown)
+        .expect("Dropdown node missing");
+    assert!(matches!(
+        sel.control_init,
+        Some(ControlInit::Dropdown { selected_index: 1 })
+    ));
+}
+
+#[test]
+fn bridge_extracts_dropdown_no_selected_defaults_to_zero() {
+    // 无 option 带 selected → 默认首项（index 0）。
+    let html =
+        r#"<select id="s"><option value="a">A</option><option value="b">B</option></select>"#;
+    let nodes = run_bridge(html);
+    let sel = nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Dropdown)
+        .expect("Dropdown node missing");
+    assert!(matches!(
+        sel.control_init,
+        Some(ControlInit::Dropdown { selected_index: 0 })
+    ));
+}
+
+#[test]
+fn bridge_extracts_number_field_min_max_step_value() {
+    // <input type="number"> 的 value/min/max/step 全部从属性提取。
+    let html = r#"<input type="number" value="5" min="0" max="10" step="2">"#;
+    let node = &run_bridge(html)[0];
+    assert_eq!(node.kind, NodeKind::NumberField);
+    match &node.control_init {
+        Some(ControlInit::NumberField {
+            edit,
+            min,
+            max,
+            step,
+        }) => {
+            assert_eq!(edit.value, "5");
+            assert_eq!(*min, 0.0);
+            assert_eq!(*max, 10.0);
+            assert_eq!(*step, 2.0);
+        }
+        other => panic!("expected NumberField, got {:?}", other),
     }
 }

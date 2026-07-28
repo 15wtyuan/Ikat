@@ -158,6 +158,20 @@ fn collect_element_text(ir_idx: usize, tree: &IrTree) -> String {
     out
 }
 
+/// 从 value/placeholder/maxlength/readonly 属性构建 EditInit（TextField/NumberField 共用）。
+/// 缺省值与 HTML 一致：value/placeholder 空串、maxlength 0（无限）、readonly false。
+/// 注意 TextArea 不用本函数——其 value 按 HTML 规范取元素文本内容而非 value 属性。
+fn extract_edit_init(el: &IrElement) -> EditInit {
+    EditInit {
+        value: attr(el, "value").unwrap_or_default(),
+        placeholder: attr(el, "placeholder").unwrap_or_default(),
+        max_length: attr(el, "maxlength")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+        readonly: attr(el, "readonly").is_some(),
+    }
+}
+
 /// 非 control 节点返回 None。
 fn extract_control_init(
     kind: NodeKind,
@@ -209,17 +223,10 @@ fn extract_control_init(
             name: attr(el, "name").unwrap_or_default(),
         }),
         NodeKind::TextField | NodeKind::PasswordField | NodeKind::SearchField => {
-            Some(ControlInit::TextField(EditInit {
-                value: attr(el, "value").unwrap_or_default().to_string(),
-                placeholder: attr(el, "placeholder").unwrap_or_default().to_string(),
-                max_length: attr(el, "maxlength")
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(0),
-                readonly: attr(el, "readonly").is_some(),
-            }))
+            Some(ControlInit::TextField(extract_edit_init(el)))
         }
         NodeKind::TextArea => Some(ControlInit::TextArea(EditInit {
-            // textarea 按 HTML 规范用元素文本内容而非 value 属性。
+            // textarea 按 HTML 规范用元素文本内容而非 value 属性（不走 extract_edit_init）。
             value: collect_element_text(ir_idx, tree),
             placeholder: attr(el, "placeholder").unwrap_or_default().to_string(),
             max_length: attr(el, "maxlength")
@@ -227,6 +234,39 @@ fn extract_control_init(
                 .unwrap_or(0),
             readonly: attr(el, "readonly").is_some(),
         })),
+        NodeKind::Dropdown => {
+            // 扫 select 的 option 子节点，找带 selected 属性的索引；无则默认 0（首项）。
+            let mut selected_index: u32 = 0;
+            for (i, child_id) in tree.nodes[ir_idx].children.iter().enumerate() {
+                if let IrNodeKind::Element(child) = &tree.nodes[child_id.0].kind {
+                    if child.tag == "option"
+                        && child.attributes.iter().any(|a| a.name == "selected")
+                    {
+                        selected_index = i as u32;
+                        break;
+                    }
+                }
+            }
+            Some(ControlInit::Dropdown { selected_index })
+        }
+        NodeKind::NumberField => {
+            let edit = extract_edit_init(el);
+            let min = attr(el, "min")
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(f32::MIN);
+            let max = attr(el, "max")
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(f32::MAX);
+            let step = attr(el, "step")
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(0.0);
+            Some(ControlInit::NumberField {
+                edit,
+                min,
+                max,
+                step,
+            })
+        }
         _ => None,
     }
 }
