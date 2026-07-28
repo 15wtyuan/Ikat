@@ -435,6 +435,20 @@ pub enum ControlState {
     TextField(EditState),
     /// 多行文本输入（TextArea）。EditState 含 value/cursor/anchor 等运行时文字编辑态。
     TextArea(EditState),
+    /// `<select>` 下拉。selected_index=当前选中项；open=popup 是否展开；value_lock 防反馈环。
+    Dropdown {
+        selected_index: usize,
+        open: bool,
+        value_lock: bool,
+    },
+    /// `<input type="number">`。edit 复用 EditState（value 是数字的文本形式）；
+    /// min/max/step 是数值约束，读写门做 clamp + 量化。
+    NumberField {
+        edit: EditState,
+        min: f32,
+        max: f32,
+        step: f32,
+    },
 }
 
 /// 每节点控件状态表（`HashMap<NodeId, ControlState>`）。结构与访问约定同 `AnimTable`/

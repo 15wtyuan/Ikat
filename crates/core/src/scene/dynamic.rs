@@ -263,6 +263,27 @@ pub fn create_node_from_template(
                 e.max_length,
                 e.readonly,
             )),
+            ControlInit::Dropdown { selected_index } => ControlState::Dropdown {
+                selected_index: selected_index as usize,
+                open: false,
+                value_lock: false,
+            },
+            ControlInit::NumberField {
+                edit,
+                min,
+                max,
+                step,
+            } => ControlState::NumberField {
+                edit: EditState::from_init(
+                    edit.value,
+                    edit.placeholder,
+                    edit.max_length,
+                    edit.readonly,
+                ),
+                min,
+                max,
+                step,
+            },
         };
         scene.controls.ensure(id, state);
         // 控件即容器：instantiate 后注入框架内部视觉子节点（.loom-fill/.loom-track/...）。

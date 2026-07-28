@@ -675,3 +675,106 @@ fn pkg_v25_rejects_v24() {
         "v24 pkg must be rejected as TooOld after v25 bump, got {err:?}"
     );
 }
+
+// ── v26: Dropdown / NumberField ─────────────────────────────────────
+
+/// v26: ControlInit::Dropdown 经 bincode serialize/deserialize 往返保真。
+/// 锁定序列化布局稳定性，防后续重构破坏 pkg.bin 兼容。
+#[test]
+fn pkg_v26_dropdown_init_roundtrip() {
+    let init = ControlInit::Dropdown { selected_index: 1 };
+    let bytes = bincode::serialize(&init).expect("ControlInit::Dropdown serializable");
+    let back: ControlInit =
+        bincode::deserialize(&bytes).expect("ControlInit::Dropdown deserializable");
+    assert_eq!(init, back);
+}
+
+/// v26: ControlInit::NumberField 经 bincode serialize/deserialize 往返保真。
+#[test]
+fn pkg_v26_number_field_init_roundtrip() {
+    let init = ControlInit::NumberField {
+        edit: EditInit {
+            value: "50".into(),
+            placeholder: "0".into(),
+            max_length: 10,
+            readonly: false,
+        },
+        min: 0.0,
+        max: 100.0,
+        step: 1.0,
+    };
+    let bytes = bincode::serialize(&init).expect("ControlInit::NumberField serializable");
+    let back: ControlInit =
+        bincode::deserialize(&bytes).expect("ControlInit::NumberField deserializable");
+    assert_eq!(init, back);
+}
+
+/// v26: Dropdown control_init 经完整 pkg.bin 路径往返保真。
+#[test]
+fn pkg_v26_dropdown_init_via_pkg() {
+    let mut node = tn(NodeKind::Dropdown);
+    node.control_init = Some(ControlInit::Dropdown { selected_index: 1 });
+    let nodes = [node];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules)],
+    };
+    let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
+    let back = &pkg.components["c"].nodes[0];
+    assert_eq!(
+        back.control_init,
+        Some(ControlInit::Dropdown { selected_index: 1 })
+    );
+}
+
+/// v26: NumberField control_init 经完整 pkg.bin 路径往返保真。
+#[test]
+fn pkg_v26_number_field_init_via_pkg() {
+    let mut node = tn(NodeKind::NumberField);
+    node.control_init = Some(ControlInit::NumberField {
+        edit: EditInit {
+            value: "50".into(),
+            placeholder: "0".into(),
+            max_length: 10,
+            readonly: false,
+        },
+        min: 0.0,
+        max: 100.0,
+        step: 1.0,
+    });
+    let nodes = [node];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules)],
+    };
+    let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
+    let back = &pkg.components["c"].nodes[0];
+    assert_eq!(
+        back.control_init,
+        Some(ControlInit::NumberField {
+            edit: EditInit {
+                value: "50".into(),
+                placeholder: "0".into(),
+                max_length: 10,
+                readonly: false,
+            },
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+        })
+    );
+}
+
+/// v26: version=25 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=26，无迁移器）。
+/// ControlInit 新增 Dropdown/NumberField 变体改变 bincode layout，旧 v25 fixture 不能半读半坏。
+#[test]
+fn pkg_v26_rejects_v25() {
+    let mut bad = vec![];
+    bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
+    bad.extend_from_slice(&25u32.to_le_bytes()); // v25 < MIN_VERSION=26
+    let err = read_package(&bad);
+    assert!(
+        matches!(err, Err(PkgError::TooOld(25))),
+        "v25 pkg must be rejected as TooOld after v26 bump, got {err:?}"
+    );
+}

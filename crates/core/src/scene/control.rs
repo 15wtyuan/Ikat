@@ -349,6 +349,10 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
         // TextField/TextArea: 光标闪烁 timer 已实现（advance_cursor_blink，stage tick 驱动）；
         // cursor/selection/composition 的渲染同步（几何计算 + 绘制）仍 pending（Task 12）。
         ControlState::TextField(_) | ControlState::TextArea(_) => {}
+        // Dropdown/NumberField: visuals injected via inject_control_children;
+        // dynamic value sync (selected-index highlight / number constraint clamp)
+        // will be driven by pointer-interaction handlers (pending Task 2).
+        ControlState::Dropdown { .. } | ControlState::NumberField { .. } => {}
     }
 }
 
@@ -453,6 +457,8 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
             }
         }
         ControlState::Progress { .. } => {}
+        // Dropdown/NumberField: pointer interaction pending Task 2.
+        ControlState::Dropdown { .. } | ControlState::NumberField { .. } => {}
     }
     out
 }

@@ -762,6 +762,45 @@ fn instantiate_no_control_state_for_non_control_node() {
     );
 }
 
+// ── ControlState Dropdown/NumberField variant tests ─────────────────
+
+#[test]
+fn control_state_dropdown_variant() {
+    let s = ControlState::Dropdown {
+        selected_index: 2,
+        open: false,
+        value_lock: false,
+    };
+    assert!(matches!(
+        s,
+        ControlState::Dropdown {
+            selected_index: 2,
+            open: false,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn control_state_number_field_variant() {
+    let edit = EditState::from_init("3.14".into(), String::new(), 0, false);
+    let s = ControlState::NumberField {
+        edit,
+        min: 0.0,
+        max: 100.0,
+        step: 1.0,
+    };
+    assert!(matches!(
+        s,
+        ControlState::NumberField {
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+            ..
+        }
+    ));
+}
+
 /// TextField：value/placeholder/max_length/readonly 透传进 EditState，cursor/anchor
 /// 初始化为 value.len()（光标在文本末尾），composition 初始 None，视觉标记为可见。
 #[test]
