@@ -1982,34 +1982,33 @@ pub extern "C" fn loomgui_stage_set_control_text(
         None => return -1,
     };
     let id = NodeId(node_id);
-    let Some(state) = scene.controls.get(id).cloned() else {
-        return -1;
-    };
     let new_value = text.to_string();
-    let new_state = match state {
-        ControlState::TextField(mut e) | ControlState::TextArea(mut e) => {
-            // 记录旧 value 以判断是否产 ValueChanged（与 text_input / insert_text 同口径：
-            // value 实际变才发事件）。
-            let prev_value = e.value.clone();
-            // 直接替换 value + 光标/anchor 移到末尾（编程 setter，不走 insert_text 路径）。
-            // readonly 不拦（编程可写，照 JS .value = ... 语义）。同值仍重置光标但不发事件。
-            if e.value != new_value {
-                e.value = new_value.clone();
-                e.cursor_visible = true;
-                e.cursor_timer = 0.0;
-            }
-            e.cursor = new_value.len();
-            e.anchor = e.cursor;
-            // value 被整体替换 → 抹掉正在进行的 composition（旧预提交文本失效）。
-            e.composition = None;
-            if prev_value != new_value {
-                loomgui_core::scene::control::emit_value_changed(&mut sh.stage.pending_events, id);
-            }
-            ControlState::TextField(e)
+    // 原地改 EditState（get_mut），不重建 ControlState——重建为 TextField 会把 TextArea
+    // 节点改写成 TextField，破坏 ControlState/NodeKind variant 一致性不变量。同 control.rs
+    // on_text_pointer_down 的 in-place 改法。
+    let mut changed = false;
+    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get_mut(id)
+    {
+        // 直接替换 value + 光标/anchor 移到末尾（编程 setter，不走 insert_text 路径）。
+        // readonly 不拦（编程可写，照 JS .value = ... 语义）。同值仍重置光标但不发事件。
+        if e.value != new_value {
+            e.value = new_value.clone();
+            e.cursor_visible = true;
+            e.cursor_timer = 0.0;
+            changed = true;
         }
-        _ => return -1,
-    };
-    scene.controls.ensure(id, new_state);
+        e.cursor = new_value.len();
+        e.anchor = e.cursor;
+        // value 被整体替换 → 抹掉正在进行的 composition（旧预提交文本失效）。
+        e.composition = None;
+    } else {
+        return -1;
+    }
+    // ValueChanged 须在 get_mut 借用结束后产：if-let 块出来后 scene 借用（借 sh.stage.scene）
+    // 由 NLL 释放，方可另借 sh.stage.pending_events（不同字段）。
+    if changed {
+        loomgui_core::scene::control::emit_value_changed(&mut sh.stage.pending_events, id);
+    }
     0
 }
 
@@ -2077,21 +2076,17 @@ pub extern "C" fn loomgui_stage_set_selection(
         None => return -1,
     };
     let id = NodeId(node_id);
-    let Some(state) = scene.controls.get(id).cloned() else {
+    // 原地改（get_mut），保 variant（重建为 TextField 会把 TextArea 改写成 TextField）。
+    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get_mut(id)
+    {
+        let len = e.value.len();
+        // clamp 到 [0, len]（len 总是合法 char 边界 = 末尾）。中间字节位置若非法 char
+        // 边界，向右退到最近合法边界（避免 UTF-8 切割 panic）。
+        e.anchor = clamp_char_boundary(&e.value, anchor.min(len));
+        e.cursor = clamp_char_boundary(&e.value, cursor.min(len));
+    } else {
         return -1;
-    };
-    let new_state = match state {
-        ControlState::TextField(mut e) | ControlState::TextArea(mut e) => {
-            let len = e.value.len();
-            // clamp 到 [0, len]（len 总是合法 char 边界 = 末尾）。中间字节位置若非法 char
-            // 边界，向右退到最近合法边界（避免 UTF-8 切割 panic）。
-            e.anchor = clamp_char_boundary(&e.value, anchor.min(len));
-            e.cursor = clamp_char_boundary(&e.value, cursor.min(len));
-            ControlState::TextField(e)
-        }
-        _ => return -1,
-    };
-    scene.controls.ensure(id, new_state);
+    }
     0
 }
 
@@ -2154,17 +2149,13 @@ pub extern "C" fn loomgui_stage_set_control_placeholder(
         None => return -1,
     };
     let id = NodeId(node_id);
-    let Some(state) = scene.controls.get(id).cloned() else {
+    // 原地改（get_mut），保 variant。
+    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get_mut(id)
+    {
+        e.placeholder = text.to_string();
+    } else {
         return -1;
-    };
-    let new_state = match state {
-        ControlState::TextField(mut e) | ControlState::TextArea(mut e) => {
-            e.placeholder = text.to_string();
-            ControlState::TextField(e)
-        }
-        _ => return -1,
-    };
-    scene.controls.ensure(id, new_state);
+    }
     0
 }
 
@@ -2226,17 +2217,13 @@ pub extern "C" fn loomgui_stage_set_control_readonly(
         None => return -1,
     };
     let id = NodeId(node_id);
-    let Some(state) = scene.controls.get(id).cloned() else {
+    // 原地改（get_mut），保 variant。
+    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get_mut(id)
+    {
+        e.readonly = readonly;
+    } else {
         return -1;
-    };
-    let new_state = match state {
-        ControlState::TextField(mut e) | ControlState::TextArea(mut e) => {
-            e.readonly = readonly;
-            ControlState::TextField(e)
-        }
-        _ => return -1,
-    };
-    scene.controls.ensure(id, new_state);
+    }
     0
 }
 
@@ -2259,17 +2246,13 @@ pub extern "C" fn loomgui_stage_set_control_maxlength(
         None => return -1,
     };
     let id = NodeId(node_id);
-    let Some(state) = scene.controls.get(id).cloned() else {
+    // 原地改（get_mut），保 variant。
+    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get_mut(id)
+    {
+        e.max_length = max_length;
+    } else {
         return -1;
-    };
-    let new_state = match state {
-        ControlState::TextField(mut e) | ControlState::TextArea(mut e) => {
-            e.max_length = max_length;
-            ControlState::TextField(e)
-        }
-        _ => return -1,
-    };
-    scene.controls.ensure(id, new_state);
+    }
     0
 }
 

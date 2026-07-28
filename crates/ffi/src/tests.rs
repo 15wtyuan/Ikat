@@ -997,3 +997,82 @@ fn ffi_control_text_null_handle_err() {
         -1
     );
 }
+
+// ===== TextArea variant 保持回归（Fix Round 1）=====
+//
+// 5 个改写 setter（set_control_text/set_selection/set_control_placeholder/
+// set_control_readonly/set_control_maxlength）原以 `match state { TextField(e)|TextArea(e) =>
+// ..., _ => ...; ControlState::TextField(e) }` 重建——会把 TextArea 节点的 ControlState
+// 改写成 TextField，破坏 ControlState/NodeKind variant 一致性。现改 in-place get_mut 原地改。
+// 这两个回归测试锁不变量：在 TextArea 节点上调 setter 后，ControlState 仍为 TextArea。
+
+/// 测试辅助：建根 div + 一个 TextArea（ControlState::TextArea + NodeKind::TextArea），
+/// 返回 (handle, textarea_node)。不对焦（setter 不依赖焦点）。
+fn make_stage_with_textarea(value: &str) -> (*mut StageHandle, u32) {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    let ta = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(ta, 0xFFFF_FFFF, "create textarea node ok");
+    loomgui_stage_append_child(h, root, ta);
+    let sh = unsafe { &mut *h };
+    let scene = sh.stage.scene.as_mut().expect("scene built");
+    scene.controls.ensure(
+        NodeId(ta),
+        ControlState::TextArea(EditState::from_init(value.into(), String::new(), 0, false)),
+    );
+    // kind 同步为 TextArea（保 ControlState/NodeKind 一致，复现真实不变量场景）。
+    if let Some(n) = scene.get_mut(NodeId(ta)) {
+        n.kind = NodeKind::TextArea;
+    }
+    (h, ta)
+}
+
+/// 回归：set_control_text 在 TextArea 节点上调用后，ControlState 仍为 TextArea（不被
+/// 改写成 TextField）。同时验 value/光标 已正确改。锁 variant 一致性不变量。
+#[test]
+fn ffi_set_control_text_preserves_textarea_variant() {
+    let (h, ta) = make_stage_with_textarea("old");
+    assert_eq!(
+        loomgui_stage_set_control_text(h, ta, b"new".as_ptr(), 3),
+        0,
+        "set_control_text rc"
+    );
+    let sh = unsafe { &*h };
+    let scene = sh.stage.scene.as_ref().expect("scene built");
+    match scene.controls.get(NodeId(ta)) {
+        Some(ControlState::TextArea(e)) => {
+            assert_eq!(e.value, "new", "value replaced");
+            assert_eq!(e.cursor, 3, "cursor at end");
+            assert_eq!(e.anchor, 3, "anchor at end");
+        }
+        Some(ControlState::TextField(_)) => {
+            panic!("TextArea node rewritten to TextField ControlState by set_control_text");
+        }
+        _ => panic!("node {ta} lost its control state"),
+    }
+    loomgui_stage_free(h);
+}
+
+/// 回归：set_selection 在 TextArea 节点上调用后，ControlState 仍为 TextArea，选区正确。
+#[test]
+fn ffi_set_selection_preserves_textarea_variant() {
+    let (h, ta) = make_stage_with_textarea("hello");
+    assert_eq!(
+        loomgui_stage_set_selection(h, ta, 1, 3),
+        0,
+        "set_selection rc"
+    );
+    let sh = unsafe { &*h };
+    let scene = sh.stage.scene.as_ref().expect("scene built");
+    match scene.controls.get(NodeId(ta)) {
+        Some(ControlState::TextArea(e)) => {
+            assert_eq!((e.cursor, e.anchor), (3, 1), "selection set");
+        }
+        Some(ControlState::TextField(_)) => {
+            panic!("TextArea node rewritten to TextField ControlState by set_selection");
+        }
+        _ => panic!("node {ta} lost its control state"),
+    }
+    loomgui_stage_free(h);
+}
