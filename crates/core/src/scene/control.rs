@@ -20,6 +20,8 @@ const FILL: &str = "loom-fill";
 const TRACK: &str = "loom-track";
 const THUMB: &str = "loom-thumb";
 const CHECK: &str = "loom-check";
+const VALUE: &str = "loom-value";
+const POPUP: &str = "loom-popup";
 
 /// 建一个携带单个框架保留 class 的 Container 子节点（div）。
 ///
@@ -185,6 +187,17 @@ pub fn inject_control_children(scene: &mut Scene, id: NodeId, kind: NodeKind) {
         NodeKind::Toggle | NodeKind::RadioButton => {
             let check = make_child(scene, CHECK);
             append_child(scene, id, check).expect("fresh child has no parent");
+        }
+        NodeKind::Dropdown => {
+            // select 设 position:relative 作 absolute containing block（同 Slider 模式），
+            // 锚定 .loom-popup（position:absolute）相对 select 定位。
+            let _ = set_inline_override(scene, id, "position:relative");
+            let value = make_child(scene, VALUE);
+            append_child(scene, id, value).expect("fresh child has no parent");
+            let popup = make_child(scene, POPUP);
+            append_child(scene, id, popup).expect("fresh child has no parent");
+            // popup 默认收起（display:none），展开由 sync_control_visuals（open=true）移除覆盖。
+            let _ = set_inline_override(scene, popup, "display:none;position:absolute");
         }
         _ => {}
     }
@@ -1101,6 +1114,42 @@ mod tests {
         let check = scene.get(children[0]).unwrap();
         assert!(check.classes.iter().any(|c| c == CHECK));
         assert_eq!(check.kind, NodeKind::Container);
+    }
+
+    #[test]
+    fn dropdown_injects_value_and_popup() {
+        // select → [.loom-value, .loom-popup]：value 显示选中项文本，popup 是展开列表容器。
+        // 模拟 instantiate：先把 select 加入 controls 表为 Dropdown 状态，再注入视觉子节点。
+        let mut scene = Scene::default();
+        let id = make_control(&mut scene, NodeKind::Dropdown);
+        scene.controls.ensure(
+            id,
+            ControlState::Dropdown {
+                selected_index: 0,
+                open: false,
+                value_lock: false,
+            },
+        );
+        inject_control_children(&mut scene, id, NodeKind::Dropdown);
+        let value = find_child_by_class(&scene, id, "loom-value").expect("loom-value injected");
+        let popup = find_child_by_class(&scene, id, "loom-popup").expect("loom-popup injected");
+        assert!(scene
+            .get(value)
+            .unwrap()
+            .classes
+            .iter()
+            .any(|c| c == "loom-value"));
+        assert_eq!(scene.get(value).unwrap().kind, NodeKind::Container);
+        assert!(scene
+            .get(popup)
+            .unwrap()
+            .classes
+            .iter()
+            .any(|c| c == "loom-popup"));
+        assert_eq!(scene.get(popup).unwrap().kind, NodeKind::Container);
+        // 两个子节点都不带 id（不污染用户命名空间）。
+        assert!(scene.get(value).unwrap().id_attr.is_none());
+        assert!(scene.get(popup).unwrap().id_attr.is_none());
     }
 
     #[test]
