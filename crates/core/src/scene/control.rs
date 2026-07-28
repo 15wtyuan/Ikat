@@ -194,6 +194,13 @@ pub fn inject_control_children(scene: &mut Scene, id: NodeId, kind: NodeKind) {
             let _ = set_inline_override(scene, id, "position:relative");
             let value = make_child(scene, VALUE);
             append_child(scene, id, value).expect("fresh child has no parent");
+            // .loom-value 是 Container（div），文本渲染只对 TextNode 生效（render 按
+            // NodeKind::TextNode 读 text_contents）。故注入一个 TextNode 子节点承载选中项
+            // 文本——与用户手写 `<div class="loom-value"><span>...</span></div>` 同构。
+            // sync_control_visuals 每帧把选中 option 文本写进这个 TextNode 的 text_contents。
+            let value_text =
+                create_node(scene, "span", "").expect("\"span\" is in the fence whitelist");
+            append_child(scene, value, value_text).expect("fresh child has no parent");
             let popup = make_child(scene, POPUP);
             append_child(scene, id, popup).expect("fresh child has no parent");
             // popup 默认收起（display:none），展开由 sync_control_visuals（open=true）移除覆盖。
@@ -215,6 +222,45 @@ pub fn find_child_by_class(scene: &Scene, parent: NodeId, class: &str) -> Option
             .get(cid)
             .is_some_and(|n| n.classes.iter().any(|c| c == class))
     })
+}
+
+/// 取 select（Dropdown）的第 `n` 个 option 子节点的文本内容。
+///
+/// option 是 select 的 DOM 子节点（`NodeKind::OptionItem`），与框架注入的 `.loom-value` /
+/// `.loom-popup`（Container）平级——按 NodeKind 过滤掉非 option 子节点，保证只数用户写的
+/// `<option>`。文本可能在 option 自身的 `text_contents`（`<option>B</option>` 打包期把 content
+/// 存进 side table），也可能在后代 TextNode（`<option><span>B</span></option>`），故递归收集
+/// option 子树所有 TextNode 的文本，与 render 的文本采集口径一致。
+///
+/// 越界（n 超过 option 数）/ select 无 option → None。调用方据此显空（.loom-value 清空）。
+pub fn nth_option_text(scene: &Scene, select: NodeId, n: usize) -> Option<String> {
+    let children = scene.get(select)?.children.clone();
+    let opt = children
+        .into_iter()
+        .filter(|&cid| {
+            scene
+                .get(cid)
+                .is_some_and(|c| c.kind == NodeKind::OptionItem)
+        })
+        .nth(n)?;
+    let mut buf = String::new();
+    collect_subtree_text(scene, opt, &mut buf);
+    Some(buf)
+}
+
+/// 递归收集 `id` 子树的全部文本：先取节点自身的 text_contents（option 自带 content 的常见路径），
+/// 再 DFS 所有子节点。与 render 只渲染 TextNode 的口径一致——非 TextNode 的 text_contents
+/// 不参与渲染，但 option 节点自身的 content 是打包期为非 TextNode 叶子存的源文本，这里一并
+/// 收（option 几乎不含非 TextNode 子树，叠加不会重复）。
+fn collect_subtree_text(scene: &Scene, id: NodeId, buf: &mut String) {
+    if let Some(t) = scene.text_contents.get(&id) {
+        buf.push_str(t);
+    }
+    if let Some(n) = scene.get(id) {
+        for &c in n.children.clone().iter() {
+            collect_subtree_text(scene, c, buf);
+        }
+    }
 }
 
 /// 在 layout 阶段提前 measure 文本控件的显示文本 TextLayout，写入 `scene.text_layouts`。
@@ -362,10 +408,35 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
         // TextField/TextArea: 光标闪烁 timer 已实现（advance_cursor_blink，stage tick 驱动）；
         // cursor/selection/composition 的渲染同步（几何计算 + 绘制）仍 pending（Task 12）。
         ControlState::TextField(_) | ControlState::TextArea(_) => {}
-        // Dropdown/NumberField: visuals injected via inject_control_children;
-        // dynamic value sync (selected-index highlight / number constraint clamp)
-        // will be driven by pointer-interaction handlers (pending Task 2).
-        ControlState::Dropdown { .. } | ControlState::NumberField { .. } => {}
+        ControlState::Dropdown {
+            selected_index,
+            open,
+            ..
+        } => {
+            // popup display 切换：open → display:flex，收起 → display:none。
+            // 与 Toggle/Radio 的 check 切换同机制（inline 最高优先级）。
+            if let Some(popup) = find_child_by_class(scene, id, POPUP) {
+                let decl = if open { "display:flex" } else { "display:none" };
+                let _ = set_inline_override(scene, popup, decl);
+            }
+            // value 显示选中 option 的文本：读第 selected_index 个 option 子节点的文本，
+            // 写进 .loom-value 内的 TextNode（inject 时注入）。越界 / 无 option → 清空。
+            if let Some(value) = find_child_by_class(scene, id, VALUE) {
+                let text = nth_option_text(scene, id, selected_index).unwrap_or_default();
+                if let Some(tn) = scene.get(value).and_then(|n| {
+                    n.children
+                        .iter()
+                        .find(|&&c| scene.get(c).is_some_and(|x| x.kind == NodeKind::TextNode))
+                        .copied()
+                }) {
+                    scene.text_contents.insert(tn, text);
+                    scene.get_mut(tn).unwrap().dirty_text = true;
+                }
+            }
+        }
+        // NumberField: visuals injected via inject_control_children;
+        // dynamic value sync (number constraint clamp) pending.
+        ControlState::NumberField { .. } => {}
     }
 }
 
@@ -1387,6 +1458,172 @@ mod tests {
         let id = make_control(&mut scene, NodeKind::Container);
         sync_control_visuals(&mut scene, id);
         assert!(scene.get(id).unwrap().children.is_empty());
+    }
+
+    // ── sync_control_visuals：Dropdown（value 文本 + popup display 切换） ──
+    //
+    // select 的 selected_index → .loom-value 显示对应 option 文本；open → .loom-popup 的
+    // display:flex/none 切换。option 文本取自 option 子树（自身 text_contents 或后代 TextNode）。
+    // .loom-value 是 Container（div），文本落在其内部 TextNode 子节点（inject 时注入）。
+
+    /// 建一个带 ControlInit 的 Dropdown，并挂 N 个 OptionItem 子节点（每个带文本）。
+    /// 模拟 `<select><option>A</option><option>B</option>...</select>`。
+    fn make_dropdown_with_options(
+        scene: &mut Scene,
+        option_texts: &[&str],
+        selected: u32,
+    ) -> NodeId {
+        let id = create_node_from_template(
+            scene,
+            NodeKind::Dropdown,
+            ResolvedStyle::default(),
+            Some(ControlInit::Dropdown {
+                selected_index: selected,
+            }),
+        );
+        // 挂用户 option 子节点（instantiate 流程里 option 作为 select 的 DOM 子节点挂入）。
+        for &t in option_texts {
+            let opt = create_node_from_template(
+                scene,
+                NodeKind::OptionItem,
+                ResolvedStyle::default(),
+                None,
+            );
+            scene.text_contents.insert(opt, t.to_string());
+            append_child(scene, id, opt).expect("option append");
+        }
+        id
+    }
+
+    /// 取 .loom-value 内的 TextNode 子节点的文本内容（inject 注入的 span）。
+    fn value_text(scene: &Scene, select: NodeId) -> String {
+        let value = find_child_by_class(scene, select, VALUE).expect("loom-value present");
+        let text_node = scene
+            .get(value)
+            .unwrap()
+            .children
+            .iter()
+            .find(|&&c| scene.get(c).is_some_and(|n| n.kind == NodeKind::TextNode))
+            .copied()
+            .expect("loom-value has a TextNode child");
+        scene
+            .text_contents
+            .get(&text_node)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn sync_dropdown_shows_selected_option_text_in_value() {
+        // selected_index=1 → .loom-value 文本应是第 2 个 option 的文本（"B"）。
+        let mut scene = Scene::default();
+        let sel = make_dropdown_with_options(&mut scene, &["A", "B", "C"], 1);
+        sync_control_visuals(&mut scene, sel);
+        assert_eq!(
+            value_text(&scene, sel),
+            "B",
+            "value shows selected option text"
+        );
+    }
+
+    #[test]
+    fn sync_dropdown_value_text_tracks_selected_index_change() {
+        // 改 selected_index 后再 sync，.loom-value 文本随之更新。
+        let mut scene = Scene::default();
+        let sel = make_dropdown_with_options(&mut scene, &["A", "B", "C"], 0);
+        sync_control_visuals(&mut scene, sel);
+        assert_eq!(value_text(&scene, sel), "A");
+        if let Some(ControlState::Dropdown { selected_index, .. }) = scene.controls.get_mut(sel) {
+            *selected_index = 2;
+        }
+        sync_control_visuals(&mut scene, sel);
+        assert_eq!(value_text(&scene, sel), "C", "re-sync after index change");
+    }
+
+    #[test]
+    fn sync_dropdown_selected_index_out_of_range_yields_empty() {
+        // selected_index 越界（无对应 option）→ .loom-value 文本为空（不 panic、不残留旧值语义由
+        // 调用方保证；此处只验不 panic 且文本被写成空串）。
+        let mut scene = Scene::default();
+        let sel = make_dropdown_with_options(&mut scene, &["A", "B"], 0);
+        if let Some(ControlState::Dropdown { selected_index, .. }) = scene.controls.get_mut(sel) {
+            *selected_index = 99;
+        }
+        sync_control_visuals(&mut scene, sel);
+        assert_eq!(
+            value_text(&scene, sel),
+            "",
+            "out-of-range index → empty value text"
+        );
+    }
+
+    #[test]
+    fn sync_dropdown_option_text_from_child_text_node() {
+        // option 文本不在 option 自身的 text_contents，而在其后代 TextNode 里——收集须递归。
+        let mut scene = Scene::default();
+        let id = create_node_from_template(
+            &mut scene,
+            NodeKind::Dropdown,
+            ResolvedStyle::default(),
+            Some(ControlInit::Dropdown { selected_index: 0 }),
+        );
+        // option > TextNode("Deep")
+        let opt = create_node_from_template(
+            &mut scene,
+            NodeKind::OptionItem,
+            ResolvedStyle::default(),
+            None,
+        );
+        let txt = create_node_from_template(
+            &mut scene,
+            NodeKind::TextNode,
+            ResolvedStyle::default(),
+            None,
+        );
+        scene.text_contents.insert(txt, "Deep".into());
+        append_child(&mut scene, opt, txt).expect("text append");
+        append_child(&mut scene, id, opt).expect("option append");
+        sync_control_visuals(&mut scene, id);
+        assert_eq!(
+            value_text(&scene, id),
+            "Deep",
+            "collects text from option subtree"
+        );
+    }
+
+    #[test]
+    fn sync_dropdown_open_toggles_popup_display() {
+        // open=true → popup display:flex；open=false → display:none。
+        let mut scene = Scene::default();
+        let sel = make_dropdown_with_options(&mut scene, &["A"], 0);
+        // 默认 open=false
+        sync_control_visuals(&mut scene, sel);
+        let popup = find_child_by_class(&scene, sel, POPUP).expect("loom-popup present");
+        assert_eq!(
+            scene
+                .get(popup)
+                .unwrap()
+                .inline_override
+                .taffy_style
+                .display,
+            taffy::Display::None,
+            "closed → display:none"
+        );
+        // 展开
+        if let Some(ControlState::Dropdown { open, .. }) = scene.controls.get_mut(sel) {
+            *open = true;
+        }
+        sync_control_visuals(&mut scene, sel);
+        assert_eq!(
+            scene
+                .get(popup)
+                .unwrap()
+                .inline_override
+                .taffy_style
+                .display,
+            taffy::Display::Flex,
+            "open → display:flex"
+        );
     }
 
     // ── 控件指针交互（on_pointer_down/move/up） ──
