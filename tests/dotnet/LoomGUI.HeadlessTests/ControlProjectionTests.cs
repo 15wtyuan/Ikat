@@ -110,6 +110,26 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>
+        /// NumberField.Min/Max/Step 读回打包期烘焙的约束值：fixture nf min=0 max=10 step=2。
+        /// 验 FFI get_control_min/max/step 已扩到 NumberField（c55389d，原只 match Slider 返 -1）。
+        /// 三者打包期冻结、运行时不可变——C# 只读 getter，与 Slider 同 get+set 形状但 setter throw NE。
+        /// </summary>
+        [Fact]
+        public void numberfield_min_max_step_read_baked_values()
+        {
+            var (stage, ctx, root) = LoadControlsFixture();
+            try
+            {
+                var nf = root.Get<NumberField>("nf");
+
+                Assert.Equal(0f, nf.Min);
+                Assert.Equal(10f, nf.Max);
+                Assert.Equal(2f, nf.Step);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
         /// NumberField.ValueChanged 经 demux 触发：NativeEventBuffer 喂 EVT_VALUE_CHANGED(x=7)
         /// → demux → ControlValueChangedEvent → 翻译为 ValueChangedEvent&lt;float&gt;，handler 收到 NewValue≈7。
         /// 与 Slider.ValueChanged 同 demux 分支（22），backing-dict 模式相同。

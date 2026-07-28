@@ -1706,13 +1706,14 @@ namespace LoomGUI
             get { ThrowIfDisposed(); return GetNumberValue(); }
             set { ThrowIfDisposed(); SetNumberValue(value); }
         }
-        // Min/Max/Step：core ControlState::NumberField 存了 min/max/step（set_number_value 据此 clamp+量化），
-        // 但尚无 NumberField 专用 side-query FFI；Slider 的 get_control_min/max/step 只 pattern-match
-        // ControlState::Slider，对 NumberField 返 -1，不可复用。需新增 get_number_min/max/step FFI
-        // （Rust 侧改动，出本 C# 任务 scope）—— 暂留 throw，与 RadioButton.Name 同模式。
-        public float Min { get { throw NE(); } set { throw NE(); } }
-        public float Max { get { throw NE(); } set { throw NE(); } }
-        public float Step { get { throw NE(); } set { throw NE(); } }
+        // Min/Max/Step：core ControlState::NumberField 存了 min/max/step（打包期 ControlInit 烘焙，
+        // set_number_value 据此 clamp+量化）。getter 复用 Slider 的 get_control_min/max/step FFI——FFI 侧
+        // pattern-match 已扩到 NumberField（见 c55389d）。三者打包期冻结、运行时不可变：core 无 NumberField
+        // 专用 setter（value 存 EditState 文本，setter 须 parse→clamp→quantize→re-format，留待后续），
+        // 故 getter 通、setter throw NE，与 Slider 同 get+set 形状但 setter 锁住只读语义（同 RadioButton.Name）。
+        public float Min { get { ThrowIfDisposed(); return GetControlMin(); } set { throw NE(); } }
+        public float Max { get { ThrowIfDisposed(); return GetControlMax(); } set { throw NE(); } }
+        public float Step { get { ThrowIfDisposed(); return GetControlStep(); } set { throw NE(); } }
         // ReadOnly：NumberField 与 TextField/TextArea 共享 EditState（get_control_readonly 按 node 派发）。
         // setter 直转 FFI；getter 读 EditState.readonly（与 set 对称）。
         public bool ReadOnly
@@ -1770,6 +1771,29 @@ namespace LoomGUI
         bool GetControlReadonly() => TextControlFFI.GetControlReadonly(Handle(), _id);
         void SetNodeDisabled(bool v) => TextControlFFI.SetNodeDisabled(Handle(), _id, v);
         bool GetNodeDisabled() => TextControlFFI.GetNodeDisabled(Handle(), _id);
+        // min/max/step：复用 Slider 同名 FFI（get_control_min/max/step 已扩到 NumberField，见 c55389d）。
+        // float out 经 local + &local（同 GetControlValue 局部取址模式）。rc!=0 升异常不吞。
+        float GetControlMin()
+        {
+            StageHandle* h = Handle();
+            float v = 0f; int rc = Native.loomgui_stage_get_control_min(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_control_min failed (node {_id})");
+            return v;
+        }
+        float GetControlMax()
+        {
+            StageHandle* h = Handle();
+            float v = 0f; int rc = Native.loomgui_stage_get_control_max(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_control_max failed (node {_id})");
+            return v;
+        }
+        float GetControlStep()
+        {
+            StageHandle* h = Handle();
+            float v = 0f; int rc = Native.loomgui_stage_get_control_step(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_control_step failed (node {_id})");
+            return v;
+        }
     }
 
     public unsafe class Slider : Node
