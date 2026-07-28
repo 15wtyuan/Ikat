@@ -179,6 +179,14 @@ namespace LoomGUI
                         DispatchTyped(nodeId,
                             new ControlSubmittedEvent { _core = NewCore(nodeId) });
                         break;
+                    // Dropdown 选中项变更（core EVT_SELECTION_CHANGED，26）。payload = 新 selected_index
+                    // 装在 EventRecord.touch_id（control.rs:422 commit_dropdown_selection，与 Slider 装新值到 x
+                    // 不同——Dropdown 的 index 是整数，复用 touch_id:i32 位，避免浮点往返精度损失）。
+                    // Dropdown.SelectionChanged 订阅本 route struct 翻译为公共 SelectionChangedEvent。
+                    case (byte)EventType.SelectionChanged:
+                        DispatchTyped(nodeId,
+                            new ControlSelectionChangedEvent { _core = NewCore(nodeId), _newIndex = evt.touchId });
+                        break;
 
                     // ── deferred（无 core source）────────────────────────
                     // LongPress (9)：无对应 typed event struct——跳过。

@@ -2145,15 +2145,80 @@ namespace LoomGUI
         bool GetNodeDisabled() => TextControlFFI.GetNodeDisabled(Handle(), _id);
     }
 
-    public class Dropdown : Node
+    public unsafe class Dropdown : Node
     {
         internal Dropdown(UIContext ctx, uint id) : base(ctx, id) { }
 
-        public int SelectedIndex { get { throw NE(); } set { throw NE(); } }
-        public string SelectedValue { get { throw NE(); } set { throw NE(); } }
-        public bool Disabled { get { throw NE(); } set { throw NE(); } }
-        public event Action<SelectionChangedEvent> SelectionChanged;
+        // SelectedIndex：直转 FFI get/set_dropdown_selected_index（Task 6）。core ControlState::Dropdown
+        // 的 selected_index（打包期 ControlInit::Dropdown.options 由 <option selected> 烘焙初值；运行时
+        // 交互 / 本 setter 改写）。FFI 以 uint* 出参，公共签名用 int（index 不会超 int 正区）——边界 cast。
+        public int SelectedIndex
+        {
+            get { ThrowIfDisposed(); return (int)GetDropdownSelectedIndex(); }
+            set { ThrowIfDisposed(); SetDropdownSelectedIndex((uint)value); }
+        }
+        // SelectedValue：选中 option 的 value 属性。core 无 per-option value getter FFI（option value 在
+        // 打包期进 Dropdown.options side table，运行时未暴露——见 OptionItem.Value 同源 gap）。只读——
+        // HTML 语义上 value 由选中项派生，业务经 SelectedIndex 改选即可。待 option-value FFI 补后填。
+        public string SelectedValue { get { throw NE(); } }
+        // Disabled：伪类源 + active/click 抑制（set_node_disabled）。getter 读 NodeFlags::DISABLED（通用
+        // node flag 通道，与 Slider/Toggle 一致）。
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
+
+        // SelectionChanged：选中项变更事件（core EVT_SELECTION_CHANGED = 26，touch_id=新 index）。
+        // backing-dict 模式同 Slider.ValueChanged——订阅 internal ControlSelectionChangedEvent，翻译为公共
+        // SelectionChangedEvent（NewIndex 取 demux 解出的 index；OldIndex=-1 sentinel，core 不携旧值，
+        // 同 ValueChangedEvent.OldValue=default 语义但用 -1 避免与合法 index 0 混淆）。
+        [NonSerialized] Dictionary<Action<SelectionChangedEvent>, EventRegistration> _selectionChangedBacking;
+        public event Action<SelectionChangedEvent> SelectionChanged
+        {
+            add
+            {
+                if (value == null) return;
+                if (_selectionChangedBacking == null)
+                    _selectionChangedBacking = new Dictionary<Action<SelectionChangedEvent>, EventRegistration>();
+                if (_selectionChangedBacking.ContainsKey(value)) return;
+                var reg = On<ControlSelectionChangedEvent>(e => value(new SelectionChangedEvent { _oldIndex = -1, _newIndex = e.NewIndex }));
+                _selectionChangedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_selectionChangedBacking != null && _selectionChangedBacking.TryGetValue(value, out var reg))
+                {
+                    _selectionChangedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
         static NotImplementedException NE() => new NotImplementedException();
+
+        // ── FFI 转调 ────────────────────────────────────────────────────────
+        StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
+        uint GetDropdownSelectedIndex()
+        {
+            StageHandle* h = Handle();
+            uint v = 0; int rc = Native.loomgui_stage_get_dropdown_selected_index(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_dropdown_selected_index failed (node {_id})");
+            return v;
+        }
+        void SetDropdownSelectedIndex(uint v)
+        {
+            StageHandle* h = Handle();
+            int rc = Native.loomgui_stage_set_dropdown_selected_index(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_dropdown_selected_index failed (node {_id})");
+        }
+        void SetNodeDisabled(bool v)
+        {
+            StageHandle* h = Handle();
+            Native.loomgui_stage_set_node_disabled(h, _id, v);
+        }
+        bool GetNodeDisabled()
+        {
+            StageHandle* h = Handle();
+            byte b = 0;
+            Native.loomgui_stage_get_node_disabled(h, _id, &b);
+            return b != 0;
+        }
     }
 
     // OptionItem = <option> 的 typed 投影（Dropdown 的子项）。结构上是容器型节点（围栏 content=text，

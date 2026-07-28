@@ -132,8 +132,15 @@ namespace LoomGUI
 
     public struct SelectionChangedEvent
     {
-        public int OldIndex { get { throw NE(); } }
-        public int NewIndex { get { throw NE(); } }
+        // 投影层填（Dropdown.SelectionChanged backing-dict 翻译时赋 _newIndex）。core 控件事件 stream
+        // 只携新 index（EVT_SELECTION_CHANGED touch_id=新 selected_index），无 OldIndex——故 _oldIndex
+        // 留 sentinel -1（表示「core 未携旧值」；0 是合法 index 故不用 default(0)）。
+        // OldValue/NewValue 暂无数据源（core 无 per-option value getter FFI——option value 在打包期进
+        // Dropdown.options side table，运行时未暴露）——保留 throw，待 option-value FFI 补后填。
+        internal int _oldIndex;
+        internal int _newIndex;
+        public int OldIndex { get { return _oldIndex; } }
+        public int NewIndex { get { return _newIndex; } }
         public string OldValue { get { throw NE(); } }
         public string NewValue { get { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();

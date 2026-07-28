@@ -56,5 +56,9 @@ namespace LoomGUI
         /// 单行文本框（TextField/PasswordField/SearchField）Enter=提交（core EVT_SUBMITTED）。
         /// TextArea 不发此事件（Enter 插换行）。payload 无额外字段（node_id 指向提交控件）。
         Submitted = 25,
+        /// Dropdown 选中项变更（core EVT_SELECTION_CHANGED = 26，input.rs:114）。
+        /// payload = 新 selected_index（装 EventRecord.touch_id:i32，见 control.rs:422——commit_dropdown_selection
+        /// 把新 index 写 touch_id，与 Slider 装新值到 x 不同）。core 不携 OldIndex（同 change 语义只报新值）。
+        SelectionChanged = 26,
     }
 }

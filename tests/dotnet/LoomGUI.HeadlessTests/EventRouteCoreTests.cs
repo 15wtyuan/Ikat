@@ -34,12 +34,15 @@ namespace LoomGUI.HeadlessTests
             typeof(AnimationStartEvent), typeof(AnimationEndEvent),
             typeof(AnimationIterationEvent), typeof(TransitionEndEvent),
             // 控件交互事件（internal route struct，P1 控件束）：携 payload 经 EventBus，控件类
-            // 翻译为公共 ValueChangedEvent<*>。这 3 个 internal struct 同样实现 IRouteEvent +
+            // 翻译为公共 ValueChangedEvent<*>。这 4 个 internal struct 同样实现 IRouteEvent +
             // 持 _core 首 field + 声明 EventType，故被本门覆盖。
             typeof(ControlValueChangedEvent), typeof(ControlCheckedChangedEvent),
             typeof(ControlChangeCommittedEvent),
             // 单行文本框 Enter 提交（Task 16）。payload 无额外字段——控件类 Submitted 访问器回读 value。
             typeof(ControlSubmittedEvent),
+            // Dropdown 选中项变更（Task 14）。payload=新 index（touch_id）——控件类 SelectionChanged
+            // 访问器翻译为公共 SelectionChangedEvent。
+            typeof(ControlSelectionChangedEvent),
         };
 
         // 每个结构体映射到期望的 EventType 字节值见 EventTypeCases（xUnit MemberData 须 static，
@@ -178,10 +181,12 @@ namespace LoomGUI.HeadlessTests
             yield return new object[] { typeof(ControlChangeCommittedEvent),  (byte)EventType.ChangeCommitted };
             // 单行文本框 Enter 提交（Task 16）。payload 无额外字段——控件类 Submitted 访问器回读 value。
             yield return new object[] { typeof(ControlSubmittedEvent),        (byte)EventType.Submitted };
+            // Dropdown 选中项变更（Task 14）。payload=新 selected_index（core 装在 touch_id）。
+            yield return new object[] { typeof(ControlSelectionChangedEvent), (byte)EventType.SelectionChanged };
         }
 
         // 反射兜底：扫 Public/LoomGUI.Events.cs assembly 里所有 IRouteEvent 实现 struct，
-        // 断言数量 == ExpectedEventStructs.Length（21）。新增 struct 不更新清单 → 此测失败提醒。
+        // 断言数量 == ExpectedEventStructs.Length（23）。新增 struct 不更新清单 → 此测失败提醒。
         [Fact]
         public void NoUnexpectedEventStructsAdded()
         {

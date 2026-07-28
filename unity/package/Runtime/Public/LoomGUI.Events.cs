@@ -425,4 +425,22 @@ namespace LoomGUI
         public void PreventDefault() => _core.PreventDefault();
         internal static byte EventType => (byte)LoomEventType.Submitted;
     }
+
+    // Dropdown 选中项变更（core EVT_SELECTION_CHANGED，touch_id=新 selected_index）。route struct 携 raw
+    // payload 经 EventBus 路由；Dropdown.SelectionChanged 订阅它并翻译为公共 SelectionChangedEvent。
+    // core stream 不携 OldIndex（同 ControlValueChangedEvent 的「只报新值」语义）——翻译出的
+    // SelectionChangedEvent.OldIndex 留 sentinel -1（NewIndex 由 demux 解出的 index 填）。
+    internal struct ControlSelectionChangedEvent : IRouteEvent
+    {
+        internal RouteEventCore _core;
+        internal int _newIndex;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.SelectionChanged;
+        internal int NewIndex { get { return _newIndex; } }
+    }
 }
