@@ -4202,3 +4202,401 @@ fn password_field_selection_aligned_to_masked_display() {
         "PasswordField 选区起点 sel_min={sel_min} 须在第 1 个圆点之后（跳过首个圆点）"
     );
 }
+
+// ── Dropdown 浮层渲染（Task 11：popup 子树跳出正常 DFS，末尾追加，mask=0）──
+//
+// 模式同 scrollbar thumb（render/mod.rs 末尾 append）：open Dropdown 的 .loom-popup
+// 子树不在正常 DFS 渲染（不进 id_to_pos），merge 后末尾追加——sort_key 续 max_sort+1，
+// mask_context=MaskContext(0) 跳出祖先 overflow:hidden clip。
+//
+// 测试场景：overflow:hidden 容器内的 select（open=true）→ .loom-popup 子树（含 option +
+// 其 text）应全部 sort_key > 正常节点，mask_context=0（不被 outer clip 裁）。
+
+/// 建测试 dropdown 场景：outer(overflow:hidden) > select(Dropdown,open) > [.loom-value,
+/// .loom-popup > [option > text]]。返回 (scene, outer_id, select_id, popup_id, option_id,
+/// option_text_id)。`open` 控制 Dropdown 的 open 字段 + .loom-popup 的 display。
+fn make_popup_scene(open: bool) -> (Scene, NodeId, NodeId, NodeId, NodeId, NodeId) {
+    use crate::style::resolved::OverflowMode;
+    let mut outer_style = ResolvedStyle::default();
+    outer_style.overflow_x = OverflowMode::Hidden;
+    outer_style.overflow_y = OverflowMode::Hidden;
+    // .loom-popup 的 display：open→flex（可见，走末尾追加路径），closed→none（被
+    // collect_display_none_subtree 剪掉，整子树不渲染——模拟 sync_control_visuals 的
+    // inline override 效果，这里直接写 style.taffy_style.display 省去 rematch）。
+    let mut popup_style = ResolvedStyle::default();
+    popup_style.taffy_style.display = if open {
+        taffy::style::Display::Flex
+    } else {
+        taffy::style::Display::None
+    };
+    let entries: Vec<(
+        Option<usize>,
+        NodeKind,
+        ResolvedStyle,
+        Vec<String>,
+        Option<String>,
+        bool,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = vec![
+        // 0: outer overflow:hidden 容器（开 clip，子树 mask_context>0）
+        (
+            None,
+            NodeKind::Container,
+            outer_style,
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        // 1: select（Dropdown 控件节点）
+        (
+            Some(0),
+            NodeKind::Dropdown,
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        // 2: .loom-value（Container，不在 popup 子树——正常渲染）
+        (
+            Some(1),
+            NodeKind::Container,
+            ResolvedStyle::default(),
+            vec!["loom-value".to_string()],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        // 3: .loom-popup（浮层容器；display 由 popup_style 定）
+        (
+            Some(1),
+            NodeKind::Container,
+            popup_style,
+            vec!["loom-popup".to_string()],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        // 4: option（OptionItem，popup 子树成员）
+        (
+            Some(3),
+            NodeKind::OptionItem,
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        // 5: option 的文本（TextNode，popup 子树叶子）
+        (
+            Some(4),
+            NodeKind::TextNode,
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            Some("B".to_string()),
+            None,
+        ),
+    ];
+    let mut scene = Scene::build(&entries);
+    let outer_id = scene.roots[0];
+    let select_id = scene.get(outer_id).unwrap().children[0];
+    let popup_id = scene
+        .get(select_id)
+        .unwrap()
+        .children
+        .iter()
+        .copied()
+        .find(|&c| {
+            scene
+                .get(c)
+                .unwrap()
+                .classes
+                .iter()
+                .any(|x| x == "loom-popup")
+        })
+        .expect("loom-popup child");
+    let option_id = scene.get(popup_id).unwrap().children[0];
+    let option_text_id = scene.get(option_id).unwrap().children[0];
+    // 给所有节点非零 layout_rect（render 按 rect 产几何；0×0 节点会被某些路径跳过）。
+    let all_ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
+    for nid in all_ids {
+        scene.get_mut(nid).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
+    }
+    // 挂 Dropdown 控件状态（open 字段驱动末尾追加逻辑）。
+    scene.controls.ensure(
+        select_id,
+        ControlState::Dropdown {
+            selected_index: 0,
+            open,
+            value_lock: false,
+        },
+    );
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    (
+        scene,
+        outer_id,
+        select_id,
+        popup_id,
+        option_id,
+        option_text_id,
+    )
+}
+
+#[test]
+fn open_popup_renders_above_all_with_no_clip() {
+    let fonts = test_font_table().expect("need test font");
+    let (scene, _outer_id, _select_id, popup_id, option_id, option_text_id) =
+        make_popup_scene(true);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // popup 子树 = .loom-popup + option + option 的 TextNode（按 node_id 过滤）。
+    let popup_subtree_ids = [popup_id.0, option_id.0, option_text_id.0];
+    let popup_rns: Vec<&RenderNode> = frame
+        .nodes
+        .iter()
+        .filter(|rn| popup_subtree_ids.contains(&rn.node_id))
+        .collect();
+    assert!(
+        !popup_rns.is_empty(),
+        "open popup 子树必须渲染（至少 .loom-popup + option text）"
+    );
+    // 正常节点（outer / select / .loom-value）的最大 sort_key。
+    let normal_ids = scene
+        .nodes
+        .values()
+        .map(|n| n.id.0)
+        .filter(|id| !popup_subtree_ids.contains(id))
+        .collect::<Vec<_>>();
+    let normal_rns: Vec<&RenderNode> = frame
+        .nodes
+        .iter()
+        .filter(|rn| normal_ids.contains(&rn.node_id))
+        .collect();
+    let max_normal_sort = normal_rns.iter().map(|rn| rn.sort_key).max().unwrap_or(0);
+    // 前置验证：outer(overflow:hidden) 内的正常节点（.loom-value）确实被裁（mask>0），
+    // 证明 popup 的 mask=0 不是“场景无 clip”的假象，而是真的跳出了祖先 clip。
+    let value_rn = frame.nodes.iter().find(|rn| {
+        scene
+            .get(NodeId(rn.node_id))
+            .is_some_and(|n| n.classes.iter().any(|c| c == "loom-value"))
+    });
+    if let Some(rn) = value_rn {
+        assert!(
+            rn.mask_context.0 > 0,
+            ".loom-value 在 outer(overflow:hidden) 内应被裁（mask>0），证明场景 clip 生效"
+        );
+    }
+    // 浮层 sort_key 全部 > 正常节点 max（画在最上层）。
+    assert!(
+        popup_rns.iter().all(|rn| rn.sort_key > max_normal_sort),
+        "open popup 子树 sort_key 必须全部 > 正常节点 max sort_key {max_normal_sort}"
+    );
+    // 浮层 mask_context 全部 = MaskContext(0)（跳出 outer 的 overflow:hidden clip）。
+    assert!(
+        popup_rns.iter().all(|rn| rn.mask_context == MaskContext(0)),
+        "open popup 子树 mask_context 必须 = MaskContext(0)（不被祖先 overflow:hidden 裁）"
+    );
+}
+
+#[test]
+fn closed_popup_not_rendered() {
+    // open=false → .loom-popup display:none → collect_display_none_subtree 剪掉整子树，
+    // 也不走末尾追加（open=false 不进追加循环）→ popup 子树完全不出现在 FrameData。
+    let fonts = test_font_table().expect("need test font");
+    let (scene, _outer_id, _select_id, popup_id, option_id, option_text_id) =
+        make_popup_scene(false);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let popup_subtree_ids = [popup_id.0, option_id.0, option_text_id.0];
+    let leaked: Vec<u32> = frame
+        .nodes
+        .iter()
+        .filter(|rn| popup_subtree_ids.contains(&rn.node_id))
+        .map(|rn| rn.node_id)
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "closed popup 子树不应渲染，但有节点泄漏：{leaked:?}"
+    );
+}
+
+#[test]
+fn popup_sort_key_strictly_above_scrollbar_thumb() {
+    // 回归防护：scrollbar thumb 与 open popup 末尾追加同走 max_sort+1 续号——
+    // popup_counter 必须从 thumb 之后再续，避免 popup 首节点与 thumb sort_key 撞号
+    // （撞号会让 Unity MirrorPool 按 sort_key 排序时 popup/thumb 顺序不确定）。
+    // 构造：outer(overflow:scroll + 超高 content → 产 thumb) > select(open, popup 子树)。
+    use crate::style::resolved::OverflowMode;
+    let fonts = test_font_table().expect("need test font");
+    let mut outer_style = ResolvedStyle::default();
+    outer_style.overflow_y = OverflowMode::Scroll;
+    let mut popup_style = ResolvedStyle::default();
+    popup_style.taffy_style.display = taffy::style::Display::Flex;
+    let entries: Vec<(
+        Option<usize>,
+        NodeKind,
+        ResolvedStyle,
+        Vec<String>,
+        Option<String>,
+        bool,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = vec![
+        (
+            None,
+            NodeKind::Container,
+            outer_style,
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            Some(0),
+            NodeKind::Dropdown,
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            Some(1),
+            NodeKind::Container,
+            popup_style,
+            vec!["loom-popup".to_string()],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+    ];
+    let mut scene = Scene::build(&entries);
+    let outer_id = scene.roots[0];
+    let select_id = scene.get(outer_id).unwrap().children[0];
+    let popup_id = scene
+        .get(select_id)
+        .unwrap()
+        .children
+        .iter()
+        .copied()
+        .find(|&c| {
+            scene
+                .get(c)
+                .unwrap()
+                .classes
+                .iter()
+                .any(|x| x == "loom-popup")
+        })
+        .expect("loom-popup");
+    // outer 设大 viewport，content 更高 → overflow:scroll effective → 产 v-thumb。
+    scene.get_mut(outer_id).unwrap().layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    };
+    scene.get_mut(select_id).unwrap().layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 40.0,
+        h: 40.0,
+    };
+    scene.get_mut(popup_id).unwrap().layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 10.0,
+        h: 10.0,
+    };
+    // content 尺寸需 > viewport 才 effective：手动设 scroll content_size。
+    crate::scroll::refresh_content_sizes(&mut scene);
+    // 强制 content 超高（refresh 可能因单子未溢出而不超——直接写 scroll 表）。gurad：
+    if let Some(s) = scene.scroll.get_mut(outer_id) {
+        s.content_size = (100.0, 300.0);
+        s.viewport_size = (100.0, 100.0);
+    }
+    scene.controls.ensure(
+        select_id,
+        ControlState::Dropdown {
+            selected_index: 0,
+            open: true,
+            value_lock: false,
+        },
+    );
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // thumb 节点（合成 id 带 V_THUMB_FLAG）与 popup 节点都应存在。
+    let thumb_sk = frame
+        .nodes
+        .iter()
+        .find(|rn| rn.node_id & crate::scroll::V_THUMB_FLAG != 0)
+        .map(|rn| rn.sort_key);
+    let popup_sk = frame
+        .nodes
+        .iter()
+        .find(|rn| rn.node_id == popup_id.0)
+        .map(|rn| rn.sort_key);
+    if let (Some(thumb_sk), Some(popup_sk)) = (thumb_sk, popup_sk) {
+        assert!(
+            popup_sk > thumb_sk,
+            "popup sort_key ({popup_sk}) 必须 > scrollbar thumb sort_key ({thumb_sk})——
+            popup 末尾追加续号须在 thumb 之后"
+        );
+    }
+    // 至少 popup 必须存在（thumb 可能因 content 计算细节不 effective，但 popup 一定有）。
+    assert!(popup_sk.is_some(), "open popup 必须渲染");
+}

@@ -181,6 +181,56 @@ fn collect_display_none_subtree(scene: &Scene) -> std::collections::HashSet<Node
     pruned
 }
 
+/// 收集所有 open Dropdown 的 `.loom-popup` 根 NodeId（供末尾浮层追加 DFS 用）。
+///
+/// 浮层渲染（Task 11，套 scrollbar thumb 末尾追加模式）：open Dropdown 的 `.loom-popup`
+/// 子树跳出正常 DFS 渲染序——正常 DFS 跳过它（不进 id_to_pos），merge 后末尾追加，
+/// sort_key 续 max_sort+1，mask_context=MaskContext(0) 跳出祖先 overflow:hidden clip
+/// （dropdown 常出现在 scroll 容器/固定高度面板里，展开列表要溢出父边界显示，同 scrollbar
+/// thumb 语义）。收起态（open=false）的 popup 已被 `collect_display_none_subtree` 剪掉
+/// （display:none），不在此收集——只在 open 时收集根，供 render 末尾 DFS。
+///
+/// 返回 popup 根 NodeId 列表（调用方再展开整子树进 pruned 集 + 末尾按根 DFS 追加）。
+fn collect_open_popup_roots(scene: &Scene) -> Vec<NodeId> {
+    let mut roots = Vec::new();
+    for n in scene.nodes.values() {
+        // 仅 open 的 Dropdown 才收集其 popup（收起态 popup 是 display:none，已被常规剪枝）。
+        let is_open_dropdown = matches!(
+            scene.controls.get(n.id),
+            Some(ControlState::Dropdown { open: true, .. })
+        );
+        if !is_open_dropdown {
+            continue;
+        }
+        if let Some(popup) =
+            crate::scene::control::find_child_by_class(scene, n.id, crate::scene::control::POPUP)
+        {
+            roots.push(popup);
+        }
+    }
+    roots
+}
+
+/// 把 `roots` 列表里每个根的整子树 NodeId 并入 `pruned`（防环）。
+///
+/// 供 open popup 子树：正常 DFS 跳过（不进 id_to_pos）→ assign_sort_keys 的 dfs 遇
+/// `!id_to_pos.contains_key(&id)` 早返，自然不赋 sort_key / mask / 不递归。
+fn prune_subtrees(scene: &Scene, roots: &[NodeId], pruned: &mut std::collections::HashSet<NodeId>) {
+    for &root in roots {
+        let mut stack = vec![root];
+        while let Some(nid) = stack.pop() {
+            if !pruned.insert(nid) {
+                continue; // 已收（防环）
+            }
+            if let Some(node) = scene.get(nid) {
+                for c in &node.children {
+                    stack.push(*c);
+                }
+            }
+        }
+    }
+}
+
 /// clip 表条目：context_id（mask_context>0 的层级）→ 该层级的交集绝对 design rect。
 ///
 /// 由 `batch::assign_sort_keys` 在 DFS 时产；`context_id` 与 RenderNode 的
@@ -458,7 +508,11 @@ pub fn build_render_nodes(
     );
     // 直接逐节点构造真 RenderNode。change_level 先占 Full，末尾统一定级。
     // 先剪 display:none 子树——display:none 节点 + 后代不产 RenderNode（CSS 语义）。
-    let pruned = collect_display_none_subtree(scene);
+    let mut pruned = collect_display_none_subtree(scene);
+    // open Dropdown 的 .loom-popup 子树也跳过正常 DFS：末尾以浮层模式追加（sort_key 续号、
+    // mask=0 跳出祖先 clip）。收集根列表供末尾 DFS 用，同时把整子树并入 pruned。
+    let open_popup_roots = collect_open_popup_roots(scene);
+    prune_subtrees(scene, &open_popup_roots, &mut pruned);
     let mut nodes: Vec<RenderNode> = Vec::new();
     // back-layer 合成 RenderNode 追踪：(主节点 node_id, 下层合成 node_id)。
     // 当前唯一使用者 box-shadow；未来"独立 quad 下层"复用。
@@ -474,526 +528,20 @@ pub fn build_render_nodes(
         if crate::scene::node::is_whitespace_only_text(scene, n.id) {
             continue;
         }
-        let anim = scene.anim.get(n.id);
-        let wm = scene
-            .world_transforms
-            .get(n.id.index())
-            .copied()
-            .unwrap_or(crate::transform::IDENTITY);
-        let rect = if crate::transform::is_pure_translation(&wm) {
-            crate::scene::node::Rect {
-                x: wm[4],
-                y: wm[5],
-                w: n.layout_rect.w,
-                h: n.layout_rect.h,
-            }
-        } else {
-            crate::scene::node::Rect {
-                x: 0.0,
-                y: 0.0,
-                w: n.layout_rect.w,
-                h: n.layout_rect.h,
-            }
-        };
-        let rect = &rect;
-        let has_filter = n.style.color_filter.is_some();
-        let color_matrix = n.style.color_filter.unwrap_or([0.0; 20]);
-        let node_id = n.id.0;
-        let parent_id = n.parent.map(|p| p.0);
-        let alpha = anim.and_then(|a| a.opacity).unwrap_or(n.style.opacity);
-        let color_tint = anim.and_then(|a| a.text_color).unwrap_or(n.style.color);
-        let rn = match n.kind {
-            k if k.is_container() => build_container_mesh(
-                n,
-                node_id,
-                parent_id,
-                rect,
-                wm,
-                alpha,
-                color_tint,
-                has_filter,
-                color_matrix,
-                anim,
-                image_sizes,
-            ),
-            NodeKind::Image => {
-                let src = scene.image_srcs.get(&n.id).cloned().unwrap_or_default();
-                let image_path = Some(src.clone());
-                let uv_min = [0.0, 0.0];
-                let uv_max = [1.0, 1.0];
-                let (src_w, src_h) = src_size(image_sizes, &src);
-                // bg-color 走 BG_COMPOSITE（shader source-over：图 over 底色，透明像素透出
-                // 底色）——与 Container 同路径。无 bg-color 时 program 0（tex×白 = 原图）。
-                let bg_opt = anim.and_then(|a| a.bg_color).or(n.style.background_color);
-                let has_bg = bg_opt.map(|c| c[3] > 0.0).unwrap_or(false);
-                let vertex_color = if has_bg { bg_opt.unwrap() } else { [1.0; 4] };
-                let program = if has_filter {
-                    if has_bg {
-                        4u32
-                    } else {
-                        3u32
-                    }
-                } else if has_bg {
-                    2u32
-                } else {
-                    0u32
-                };
-                let (v, uvc, col, idx) = match &n.style.border_image_slice {
-                    Some(slice) => {
-                        let resolved = resolve_slice_percent(slice, src_w, src_h);
-                        crate::render::mesh::nine_slice(
-                            rect,
-                            vertex_color,
-                            &resolved,
-                            src_w,
-                            src_h,
-                            [uv_min[0], uv_max[1]],
-                            [uv_max[0], uv_min[1]],
-                        )
-                    }
-                    None => crate::render::mesh::quad(
-                        rect,
-                        vertex_color,
-                        [uv_min[0], uv_max[1]],
-                        [uv_max[0], uv_min[1]],
-                    ),
-                };
-                RenderNode {
-                    node_id,
-                    parent_id,
-                    visible: true,
-                    alpha,
-                    color_tint,
-                    world_matrix: wm,
-                    blend: BlendMode::Normal,
-                    mask_context: MaskContext(0),
-                    sort_key: 0,
-                    change_level: ChangeLevel::Full,
-                    reuse_key: n.reuse_key,
-                    effect: EffectBlock::default(),
-                    payload: NodePayload::Mesh {
-                        verts: v,
-                        uvs: uvc,
-                        colors: col,
-                        indices: idx,
-                        image_path,
-                        program,
-                        color_matrix,
-                    },
-                }
-            }
-            NodeKind::TextNode => {
-                let content = scene.text_contents.get(&n.id).cloned().unwrap_or_default();
-                // Text 节点单独处理：build_text_mesh 可能按 atlas 页号拆成多 Mesh，
-                // 对应推多个 RenderNode（primary 用真 node_id，子页用合成 id）。
-                // 避免 match arm 返回单个 RenderNode 的限制，在此处直接 push。
-                let s = &n.style;
-                let stack = fonts.stack_for(s.font_family.as_deref());
-                let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
-                let off_left =
-                    resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
-                let off_right = resolve_lp(s.taffy_style.border.right)
-                    + resolve_lp(s.taffy_style.padding.right);
-                let off_top =
-                    resolve_lp(s.taffy_style.border.top) + resolve_lp(s.taffy_style.padding.top);
-                // max_width 用 content width（rect.w - 左右 border/padding），文字在 content area
-                // 内断行 + 对齐，不溢出 box（修复前传 rect.w → 文字吃到 padding、右对齐/换行超框）。
-                let content_w = (rect.w - off_left - off_right).max(0.0);
-                let mut layout = scene
-                    .text_layouts
-                    .get(n.id.index())
-                    .cloned()
-                    .flatten()
-                    .unwrap_or_else(|| {
-                        measure_text(
-                            &content,
-                            s.font_size,
-                            s.line_height,
-                            s.letter_spacing,
-                            s.text_align,
-                            s.white_space_nowrap,
-                            Some(content_w),
-                            &stack,
-                            text_color,
-                            crate::text::rich::weight_from_font_weight(s.font_weight),
-                        )
-                    });
-                if off_left != 0.0 || off_top != 0.0 {
-                    bake_content_offset(&mut layout, off_left, off_top);
-                }
-                let meshes = build_text_mesh(
-                    &layout,
-                    atlas,
-                    fonts,
-                    rect,
-                    &n.style.text_effects,
-                    n.style.background_gradient,
-                    n.style.background_clip_text,
-                );
-                push_text_meshes(
-                    &mut nodes,
-                    &mut id_to_pos,
-                    meshes,
-                    n,
-                    node_id,
-                    node_id,
-                    parent_id,
-                    alpha,
-                    color_tint,
-                    wm,
-                    true,
-                );
-                continue; // 直接推完，跳过末尾的 id_to_pos / push。
-            }
-            NodeKind::TextField
-            | NodeKind::PasswordField
-            | NodeKind::SearchField
-            | NodeKind::TextArea => {
-                // 控件叶子节点：先画背景框（与 Container 相同），再叠加 value/placeholder 文字。
-                // 背景 RenderNode 先进 nodes，占住 id_to_pos（供 batch 子节点查找）；
-                // 文字走 push_text_meshes 追加，register_id_map=false 避免覆盖背景位置。
-                let bg_rn = build_container_mesh(
-                    n,
-                    node_id,
-                    parent_id,
-                    rect,
-                    wm,
-                    alpha,
-                    color_tint,
-                    has_filter,
-                    color_matrix,
-                    anim,
-                    image_sizes,
-                );
-                nodes.push(bg_rn);
-                id_to_pos.insert(n.id, nodes.len() - 1);
-                // 取控件状态；无状态时跳过文字渲染（防御：控件未初始化或误入此臂）。
-                let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
-                    scene.controls.get(n.id)
-                else {
-                    continue;
-                };
-                // 显示文本：value 优先（经 display_value：PasswordField 掩码 + composition
-                // 预提交文本拼接），空时退到 placeholder。display_value 同时给出 composition
-                // 的 display 字节区间（PasswordField 掩码后的真实位置），供下划线对齐预提交文本
-                // 而非误指某个圆点。measure_text_controls 缓存的 TextLayout 与这里 display 同源
-                // （都走 display_value），故文字 mesh 与下划线几何一致。
-                let (dv, comp_range) = crate::scene::control::display_value(e, n.kind);
-                let display = if dv.is_empty() {
-                    e.placeholder.clone()
-                } else {
-                    dv
-                };
-                let s = &n.style;
-                let stack = fonts.stack_for(s.font_family.as_deref());
-                let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
-                let off_left =
-                    resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
-                let off_right = resolve_lp(s.taffy_style.border.right)
-                    + resolve_lp(s.taffy_style.padding.right);
-                let off_top =
-                    resolve_lp(s.taffy_style.border.top) + resolve_lp(s.taffy_style.padding.top);
-                let content_w = (rect.w - off_left - off_right).max(0.0);
-                // layout 期缓存（measure_text_controls 走同一份 display_value）与这里一致；
-                // value 为空时 measure 跳过缓存（display 串为空），此处 lazy fallback 测 placeholder。
-                let cached = scene.text_layouts.get(n.id.index()).cloned().flatten();
-                let mut layout = cached.unwrap_or_else(|| {
-                    measure_text(
-                        &display,
-                        s.font_size,
-                        s.line_height,
-                        s.letter_spacing,
-                        s.text_align,
-                        s.white_space_nowrap,
-                        Some(content_w),
-                        &stack,
-                        text_color,
-                        crate::text::rich::weight_from_font_weight(s.font_weight),
-                    )
-                });
-                if off_left != 0.0 || off_top != 0.0 {
-                    bake_content_offset(&mut layout, off_left, off_top);
-                }
-                // ── 编辑反馈 mesh：选区背景 / composition 下划线 / 光标 ──
-                // 几何用上面烤过 content offset 的 `layout`；坐标与世界文字字形同系
-                // （rect.xy + 局部）。各 mesh 用独立合成 node_id，避免与背景/文字 mesh 在
-                // dirty hash 表碰撞（Task 4 parked 的同 id 问题）。
-                //
-                // push 顺序 = 绘制层序（sort_key 升序，后绘者在上层）：选区 → 文字 →
-                // composition → 光标。选区先于文字 push = 落在文字之下（标准编辑器行为：
-                // 选区高亮作背景，选中文字保持清晰可读）。光标最后 push = 最上层
-                // （caret 压在 composition 下划线与文字之上）。
-                //
-                // 缺省色：caret = caret-color style（缺省回退文字色），selection-bg =
-                // selection-background style（缺省蓝半透），composition-underline = 文字色。
-                // selection-color style 字段已解析存储，但选中文字的 per-run 着色需 text run
-                // 拆分（独立于本臂的 quad 绘制），留待后续文本渲染细化。
-                // 选区背景：sel_begin<sel_end 时逐行画覆盖选中文本的 quad。先于文字 push，
-                // 使选区落在文字之下（文字清晰，选区作半透背景）。
-                let (sel_b, sel_e) = e.selection_range();
-                if sel_b < sel_e {
-                    let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
-                    // sel_b/sel_e 是 value 字节偏移，PasswordField 掩码后显示串字节布局变了，
-                    // 须先换算到显示串字节偏移再取像素几何，否则选区会错位到错误的圆点上。
-                    let sel_b_d = crate::scene::control::value_byte_to_display_byte(
-                        e, n.kind, sel_b, &display,
-                    );
-                    let sel_e_d = crate::scene::control::value_byte_to_display_byte(
-                        e, n.kind, sel_e, &display,
-                    );
-                    let (xb, lib) =
-                        crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_b_d);
-                    let (xe, lie) =
-                        crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_e_d);
-                    let sel_color = s.selection_background.unwrap_or([0.0, 0.0, 1.0, 0.5]); // 缺省蓝半透（CSS 未声明 selection-background 时）
-                    let mut verts = Vec::new();
-                    let mut uvs = Vec::new();
-                    let mut colors = Vec::new();
-                    let mut indices = Vec::new();
-                    for li in lib..=lie.min(layout.lines.len().saturating_sub(1)) {
-                        let Some(line) = layout.lines.get(li) else {
-                            break;
-                        };
-                        // 本行选区起点/终点（advance 相对，加 off_left 入世界）。
-                        let line_x0 = if li == lib {
-                            off_left + xb
-                        } else {
-                            off_left // 跨行选区中间行从行首开始
-                        };
-                        let line_x1 = if li == lie {
-                            off_left + xe
-                        } else {
-                            off_left + line.width // 跨行选区中间行延至行末
-                        };
-                        if line_x1 <= line_x0 {
-                            continue;
-                        }
-                        let (v, u, c, i) = crate::render::mesh::quad(
-                            &Rect {
-                                x: rect.x + line_x0,
-                                y: rect.y + line.y,
-                                w: line_x1 - line_x0,
-                                h: line.height,
-                            },
-                            sel_color,
-                            [0.0, 0.0],
-                            [1.0, 1.0],
-                        );
-                        let base = verts.len() as u32;
-                        verts.extend(v);
-                        uvs.extend(u);
-                        colors.extend(c);
-                        indices.extend(i.iter().map(|&idx| idx + base));
-                    }
-                    if !verts.is_empty() {
-                        push_solid_mesh(
-                            &mut nodes,
-                            tf_synth_id(node_id, TF_SELECTION_SYNTH_BYTE),
-                            parent_id,
-                            wm,
-                            alpha,
-                            0,
-                            verts,
-                            uvs,
-                            colors,
-                            indices,
-                        );
-                    }
-                }
-                let meshes = build_text_mesh(
-                    &layout,
-                    atlas,
-                    fonts,
-                    rect,
-                    &n.style.text_effects,
-                    n.style.background_gradient,
-                    n.style.background_clip_text,
-                );
-                push_text_meshes(
-                    &mut nodes,
-                    &mut id_to_pos,
-                    meshes,
-                    n,
-                    node_id,
-                    node_id,
-                    parent_id,
-                    alpha,
-                    text_color,
-                    wm,
-                    false, // 背景已注册 n.id → id_to_pos，文字不重复注册
-                );
-                // composition 下划线：有 composition 时在 composition 段下方画 2px 横线。
-                // 区间取 display_value 返回的 comp_range（display 坐标里 composition 的真实字节
-                // 区间），而非 raw comp.pos——PasswordField 掩码改变字节布局，raw comp.pos 会
-                // 落在错误字符（某个圆点）上。comp_range 由 char 计数对齐生成，对所有 kind 都精确
-                // 覆盖预提交文本（包括 PasswordField）。
-                if let Some((comp_start, comp_end)) = comp_range {
-                    if comp_end > comp_start {
-                        let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
-                        let (xs, lis) =
-                            crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, comp_start);
-                        let (xe, lie) =
-                            crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, comp_end);
-                        let ul_color = text_color; // 缺省下划线色 = 文字色（Task 15 可换）
-                        let mut verts = Vec::new();
-                        let mut uvs = Vec::new();
-                        let mut colors = Vec::new();
-                        let mut indices = Vec::new();
-                        for li in lis..=lie.min(layout.lines.len().saturating_sub(1)) {
-                            let Some(line) = layout.lines.get(li) else {
-                                break;
-                            };
-                            let line_x0 = if li == lis { off_left + xs } else { off_left };
-                            let line_x1 = if li == lie {
-                                off_left + xe
-                            } else {
-                                off_left + line.width
-                            };
-                            if line_x1 <= line_x0 {
-                                continue;
-                            }
-                            // 下划线贴行底（line.y + line.height），2px 厚。
-                            let (v, u, c, i) = crate::render::mesh::quad(
-                                &Rect {
-                                    x: rect.x + line_x0,
-                                    y: rect.y + line.y + line.height - 2.0,
-                                    w: line_x1 - line_x0,
-                                    h: 2.0,
-                                },
-                                ul_color,
-                                [0.0, 0.0],
-                                [1.0, 1.0],
-                            );
-                            let base = verts.len() as u32;
-                            verts.extend(v);
-                            uvs.extend(u);
-                            colors.extend(c);
-                            indices.extend(i.iter().map(|&idx| idx + base));
-                        }
-                        if !verts.is_empty() {
-                            push_solid_mesh(
-                                &mut nodes,
-                                tf_synth_id(node_id, TF_COMPOSITION_SYNTH_BYTE),
-                                parent_id,
-                                wm,
-                                alpha,
-                                0,
-                                verts,
-                                uvs,
-                                colors,
-                                indices,
-                            );
-                        }
-                    }
-                }
-                // 光标（focused + cursor_visible + !readonly）：1px × 行高 caret。最后 push =
-                // 最上层（sort_key 升序 = 后绘者在上，caret 压在选区/下划线之上）。
-                if scene.focused_node == Some(n.id) && !e.readonly && e.cursor_visible {
-                    let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
-                    // e.cursor 是 value 字节偏移；PasswordField 掩码后显示串字节布局变了，
-                    // 须换算到显示串字节偏移再取像素 x，否则末尾光标会落在第一个圆点之后
-                    // （value byte 2 指向掩码串 byte 2 = 第一个 '•' 中间）而非第二个之后。
-                    let cursor_d = crate::scene::control::value_byte_to_display_byte(
-                        e, n.kind, e.cursor, &display,
-                    );
-                    let (cx, li) =
-                        crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, cursor_d);
-                    if let Some(line) = layout.lines.get(li) {
-                        // cx 是 advance 累计（内容区相对，不含 off_left）；line.y 已含 off_top。
-                        let x = rect.x + off_left + cx;
-                        let y = rect.y + line.y;
-                        push_solid_quad(
-                            &mut nodes,
-                            tf_synth_id(node_id, TF_CURSOR_SYNTH_BYTE),
-                            parent_id,
-                            wm,
-                            alpha,
-                            0, // 合成 id 不继承主节点 reuse_key（独立 GO）
-                            x,
-                            y,
-                            1.0, // 1px caret 宽
-                            line.height,
-                            s.caret_color.unwrap_or(text_color), // caret-color style（缺省回退文字色）
-                        );
-                    }
-                }
-                continue;
-            }
-            _ => RenderNode {
-                node_id,
-                parent_id,
-                visible: true,
-                alpha,
-                color_tint,
-                world_matrix: wm,
-                blend: BlendMode::Normal,
-                mask_context: MaskContext(0),
-                sort_key: 0,
-                change_level: ChangeLevel::Full,
-                reuse_key: n.reuse_key,
-                effect: EffectBlock::default(),
-                payload: NodePayload::Mesh {
-                    verts: vec![],
-                    uvs: vec![],
-                    colors: vec![],
-                    indices: vec![],
-                    image_path: None,
-                    program: 0,
-                    color_matrix,
-                },
-            },
-        };
-        // box-shadow：独立 RenderNode 画在节点下层（sort_key 更小 = 先绘 = 在下）。
-        // 阴影节点不入 id_to_pos（不在场景树中），sort_key 在 assign_sort_keys 后
-        // 由 propagate_back_layer_sort_keys 调整为主节点 sort_key（主节点后移一位）。
-        if let Some(shadow) = n.style.box_shadow.as_ref() {
-            if n.kind.is_container() {
-                let rw = rect.w;
-                let rh = rect.h;
-                let radii = n.style.border_radius.as_corners(rw, rh);
-                let shadow_rect = Rect {
-                    x: rect.x + shadow.ox,
-                    y: rect.y + shadow.oy,
-                    w: rect.w,
-                    h: rect.h,
-                };
-                let (v, uvc, col, idx) = crate::render::border::box_shadow_quad(
-                    &shadow_rect,
-                    &radii,
-                    shadow.spread,
-                    shadow.color,
-                );
-                if !v.is_empty() {
-                    let sid = node_id | BACK_LAYER_FLAG;
-                    back_layer_pairs.push((node_id, sid));
-                    nodes.push(RenderNode {
-                        node_id: sid,
-                        parent_id,
-                        visible: true,
-                        alpha,
-                        color_tint,
-                        world_matrix: wm,
-                        blend: BlendMode::Normal,
-                        mask_context: MaskContext(0),
-                        sort_key: 0, // assign_sort_keys 后重调
-                        change_level: ChangeLevel::Full,
-                        reuse_key: 0,
-                        effect: EffectBlock::default(),
-                        payload: NodePayload::Mesh {
-                            verts: v,
-                            uvs: uvc,
-                            colors: col,
-                            indices: idx,
-                            image_path: None,
-                            program: 0,
-                            color_matrix: [0.0; 20],
-                        },
-                    });
-                }
-            }
-        }
-        id_to_pos.insert(n.id, nodes.len());
-        nodes.push(rn);
+        // 主 DFS 走正常路径：register_id_map=true（登记 id_to_pos 供 assign_sort_keys /
+        // NativeHost FFI 查询）。open popup 子树末尾另走 render_one_node(register=false) +
+        // 浮层 sort_key/mask 重赋（见下方 popup 追加块）。
+        render_one_node(
+            scene,
+            n,
+            fonts,
+            image_sizes,
+            atlas,
+            &mut nodes,
+            &mut id_to_pos,
+            &mut back_layer_pairs,
+            true,
+        );
     }
     // batch / merge / thumb
     // sort_keys buffer：按 NodeId.index() 索引（capacity+1，对齐 world_transforms 扩容——
@@ -1008,9 +556,13 @@ pub fn build_render_nodes(
     propagate_text_sub_page_sort_keys(&mut nodes, &id_to_pos);
     propagate_back_layer_sort_keys(&mut nodes, &back_layer_pairs);
     propagate_inline_image_sort_keys(&mut nodes, &inline_image_pairs);
-    let max_sort = nodes.iter().map(|n| n.sort_key).max().unwrap_or(0);
     batch::reorder_for_batching(scene, &mut nodes);
     let mut nodes = merge::merge_meshes(nodes);
+    // post-merge 最大 sort_key：scrollbar thumb / open popup 末尾追加续号用。须在
+    // reorder + merge 之后算——reorder 重赋全序 sort_key、merge 可能吞空 mesh entry，
+    // pre-merge 的 max 会过期（popup 末尾追加若用过期值，sort_key 会与正常节点交错，
+    // 破坏“浮层画在最上层”不变量）。
+    let max_sort = nodes.iter().map(|n| n.sort_key).max().unwrap_or(0);
     // 合成 scrollbar thumb
     for n in scene.nodes.values() {
         let nid = n.id;
@@ -1026,6 +578,53 @@ pub fn build_render_nodes(
                     let thumb_id = nid.0 | crate::scroll::H_THUMB_FLAG;
                     nodes.push(thumb_render_node(thumb_id, r, max_sort + 1));
                 }
+            }
+        }
+    }
+    // open Dropdown 的 .loom-popup 浮层子树：跳出正常 DFS（已在主遍历剪枝），末尾追加。
+    // 模式同 scrollbar thumb（上方），但追加整子树 DFS 而非单 quad。sort_key 续 scrollbar
+    // thumb 之后（重算 max——thumb 刚 push 进 nodes，占用了 max_sort+1 槽位），mask_context
+    // =MaskContext(0) 跳出祖先 overflow:hidden clip（dropdown 常在 scroll 容器/固定高度面板
+    // 里，展开列表要溢出父边界显示）。走 render_one_node(register=false)：popup 节点产出
+    // 与正常节点几何一致的 RenderNode（背景/文本/图/边框/box-shadow 同路径），但不登记
+    // id_to_pos（已在 assign_sort_keys 之后，id_to_pos 不再使用）。
+    let mut popup_counter = nodes.iter().map(|n| n.sort_key).max().unwrap_or(0) + 1;
+    for &popup_root in &open_popup_roots {
+        // DFS 子树（先序=绘制序）。跳过空白 text（同主遍历）。
+        let mut stack: Vec<NodeId> = vec![popup_root];
+        while let Some(nid) = stack.pop() {
+            // 子节点逆序入栈 → 出栈保跨子树先序（同 assign_sort_keys dfs 风格）。
+            // 但 popup 先序只影响同 popup 内的绘制序（父子 / 前后兄弟），不跨 popup。
+            let Some(node) = scene.get(nid) else {
+                continue;
+            };
+            if crate::scene::node::is_whitespace_only_text(scene, nid) {
+                // 仍需递归子节点（空白 text 无子，此分支实际不进）。
+                continue;
+            }
+            // 记录 push 前位置——render_one_node 可能 push 多个（跨页 text 子页 / 编辑反馈），
+            // 全部需重赋浮层 sort_key + mask。
+            let start = nodes.len();
+            render_one_node(
+                scene,
+                node,
+                fonts,
+                image_sizes,
+                atlas,
+                &mut nodes,
+                &mut id_to_pos,
+                &mut back_layer_pairs,
+                false,
+            );
+            for rn in &mut nodes[start..] {
+                rn.sort_key = popup_counter;
+                rn.mask_context = MaskContext(0);
+                popup_counter += 1;
+            }
+            // 逆序 push 子节点（stack LIFO → 先序出栈）。
+            let kids = node.children.clone();
+            for c in kids.into_iter().rev() {
+                stack.push(c);
             }
         }
     }
@@ -1915,5 +1514,545 @@ fn push_solid_mesh(
     });
 }
 
+/// 渲染单个 Scene 节点为一个或多个 RenderNode 并推入 `nodes`（共享于主 DFS 与 open popup
+/// 末尾追加 DFS）。
+///
+/// 复用入口——主 DFS 与 [`build_render_nodes`] 末尾的 popup 浮层追加（Task 11）都走此函数，
+/// 保证 popup 子树节点与正常节点产出几何一致的 RenderNode（背景/文本/图/边框/box-shadow
+/// 完全同一路径）。两者区别仅在 `register_id_map`：
+/// - 主 DFS（register=true）：登记 `id_to_pos` 供 `assign_sort_keys` / NativeHost FFI 查询；
+/// - popup 浮层追加（register=false）：不登记 id_to_pos（popup 跳出正常 DFS），sort_key /
+///   mask_context 由调用方 popup DFS 末尾重赋（续 max_sort+1，MaskContext(0) 跳出祖先 clip）。
+///
+/// TextNode/TextField 内部多 RenderNode push（跨页子页 / 编辑反馈 mesh）也走此函数——
+/// push_text_meshes 的 register_id_map 参数透传本函数入参，与主调用同语义。
+///
+/// 不跳过任何节点：调用方负责 pruned / 空白 text 过滤（主 DFS）或 popup 子树枚举（浮层）。
+#[allow(clippy::too_many_arguments)]
+fn render_one_node(
+    scene: &Scene,
+    n: &crate::scene::node::Node,
+    fonts: &FontTable,
+    image_sizes: &ImageSizeTable,
+    atlas: &mut GlyphAtlas,
+    nodes: &mut Vec<RenderNode>,
+    id_to_pos: &mut std::collections::HashMap<NodeId, usize>,
+    back_layer_pairs: &mut Vec<(u32, u32)>,
+    register_id_map: bool,
+) {
+    let anim = scene.anim.get(n.id);
+    let wm = scene
+        .world_transforms
+        .get(n.id.index())
+        .copied()
+        .unwrap_or(crate::transform::IDENTITY);
+    let rect = if crate::transform::is_pure_translation(&wm) {
+        crate::scene::node::Rect {
+            x: wm[4],
+            y: wm[5],
+            w: n.layout_rect.w,
+            h: n.layout_rect.h,
+        }
+    } else {
+        crate::scene::node::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: n.layout_rect.w,
+            h: n.layout_rect.h,
+        }
+    };
+    let rect = &rect;
+    let has_filter = n.style.color_filter.is_some();
+    let color_matrix = n.style.color_filter.unwrap_or([0.0; 20]);
+    let node_id = n.id.0;
+    let parent_id = n.parent.map(|p| p.0);
+    let alpha = anim.and_then(|a| a.opacity).unwrap_or(n.style.opacity);
+    let color_tint = anim.and_then(|a| a.text_color).unwrap_or(n.style.color);
+    let rn = match n.kind {
+        k if k.is_container() => build_container_mesh(
+            n,
+            node_id,
+            parent_id,
+            rect,
+            wm,
+            alpha,
+            color_tint,
+            has_filter,
+            color_matrix,
+            anim,
+            image_sizes,
+        ),
+        NodeKind::Image => {
+            let src = scene.image_srcs.get(&n.id).cloned().unwrap_or_default();
+            let image_path = Some(src.clone());
+            let uv_min = [0.0, 0.0];
+            let uv_max = [1.0, 1.0];
+            let (src_w, src_h) = src_size(image_sizes, &src);
+            // bg-color 走 BG_COMPOSITE（shader source-over：图 over 底色，透明像素透出
+            // 底色）——与 Container 同路径。无 bg-color 时 program 0（tex×白 = 原图）。
+            let bg_opt = anim.and_then(|a| a.bg_color).or(n.style.background_color);
+            let has_bg = bg_opt.map(|c| c[3] > 0.0).unwrap_or(false);
+            let vertex_color = if has_bg { bg_opt.unwrap() } else { [1.0; 4] };
+            let program = if has_filter {
+                if has_bg {
+                    4u32
+                } else {
+                    3u32
+                }
+            } else if has_bg {
+                2u32
+            } else {
+                0u32
+            };
+            let (v, uvc, col, idx) = match &n.style.border_image_slice {
+                Some(slice) => {
+                    let resolved = resolve_slice_percent(slice, src_w, src_h);
+                    crate::render::mesh::nine_slice(
+                        rect,
+                        vertex_color,
+                        &resolved,
+                        src_w,
+                        src_h,
+                        [uv_min[0], uv_max[1]],
+                        [uv_max[0], uv_min[1]],
+                    )
+                }
+                None => crate::render::mesh::quad(
+                    rect,
+                    vertex_color,
+                    [uv_min[0], uv_max[1]],
+                    [uv_max[0], uv_min[1]],
+                ),
+            };
+            RenderNode {
+                node_id,
+                parent_id,
+                visible: true,
+                alpha,
+                color_tint,
+                world_matrix: wm,
+                blend: BlendMode::Normal,
+                mask_context: MaskContext(0),
+                sort_key: 0,
+                change_level: ChangeLevel::Full,
+                reuse_key: n.reuse_key,
+                effect: EffectBlock::default(),
+                payload: NodePayload::Mesh {
+                    verts: v,
+                    uvs: uvc,
+                    colors: col,
+                    indices: idx,
+                    image_path,
+                    program,
+                    color_matrix,
+                },
+            }
+        }
+        NodeKind::TextNode => {
+            let content = scene.text_contents.get(&n.id).cloned().unwrap_or_default();
+            // Text 节点单独处理：build_text_mesh 可能按 atlas 页号拆成多 Mesh，
+            // 对应推多个 RenderNode（primary 用真 node_id，子页用合成 id）。
+            // 避免 match arm 返回单个 RenderNode 的限制，在此处直接 push。
+            let s = &n.style;
+            let stack = fonts.stack_for(s.font_family.as_deref());
+            let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
+            let off_left =
+                resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
+            let off_right =
+                resolve_lp(s.taffy_style.border.right) + resolve_lp(s.taffy_style.padding.right);
+            let off_top =
+                resolve_lp(s.taffy_style.border.top) + resolve_lp(s.taffy_style.padding.top);
+            // max_width 用 content width（rect.w - 左右 border/padding），文字在 content area
+            // 内断行 + 对齐，不溢出 box（修复前传 rect.w → 文字吃到 padding、右对齐/换行超框）。
+            let content_w = (rect.w - off_left - off_right).max(0.0);
+            let mut layout = scene
+                .text_layouts
+                .get(n.id.index())
+                .cloned()
+                .flatten()
+                .unwrap_or_else(|| {
+                    measure_text(
+                        &content,
+                        s.font_size,
+                        s.line_height,
+                        s.letter_spacing,
+                        s.text_align,
+                        s.white_space_nowrap,
+                        Some(content_w),
+                        &stack,
+                        text_color,
+                        crate::text::rich::weight_from_font_weight(s.font_weight),
+                    )
+                });
+            if off_left != 0.0 || off_top != 0.0 {
+                bake_content_offset(&mut layout, off_left, off_top);
+            }
+            let meshes = build_text_mesh(
+                &layout,
+                atlas,
+                fonts,
+                rect,
+                &n.style.text_effects,
+                n.style.background_gradient,
+                n.style.background_clip_text,
+            );
+            push_text_meshes(
+                nodes,
+                id_to_pos,
+                meshes,
+                n,
+                node_id,
+                node_id,
+                parent_id,
+                alpha,
+                color_tint,
+                wm,
+                register_id_map,
+            );
+            return; // 直接推完，跳过末尾的 id_to_pos / push。
+        }
+        NodeKind::TextField
+        | NodeKind::PasswordField
+        | NodeKind::SearchField
+        | NodeKind::TextArea => {
+            // 控件叶子节点：先画背景框（与 Container 相同），再叠加 value/placeholder 文字。
+            // 背景 RenderNode 先进 nodes，占住 id_to_pos（供 batch 子节点查找）；
+            // 文字走 push_text_meshes 追加，register_id_map=false 避免覆盖背景位置。
+            let bg_rn = build_container_mesh(
+                n,
+                node_id,
+                parent_id,
+                rect,
+                wm,
+                alpha,
+                color_tint,
+                has_filter,
+                color_matrix,
+                anim,
+                image_sizes,
+            );
+            nodes.push(bg_rn);
+            if register_id_map {
+                id_to_pos.insert(n.id, nodes.len() - 1);
+            }
+            // 取控件状态；无状态时跳过文字渲染（防御：控件未初始化或误入此臂）。
+            let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
+                scene.controls.get(n.id)
+            else {
+                return;
+            };
+            // 显示文本：value 优先（经 display_value：PasswordField 掩码 + composition
+            // 预提交文本拼接），空时退到 placeholder。display_value 同时给出 composition
+            // 的 display 字节区间（PasswordField 掩码后的真实位置），供下划线对齐预提交文本
+            // 而非误指某个圆点。measure_text_controls 缓存的 TextLayout 与这里 display 同源
+            // （都走 display_value），故文字 mesh 与下划线几何一致。
+            let (dv, comp_range) = crate::scene::control::display_value(e, n.kind);
+            let display = if dv.is_empty() {
+                e.placeholder.clone()
+            } else {
+                dv
+            };
+            let s = &n.style;
+            let stack = fonts.stack_for(s.font_family.as_deref());
+            let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
+            let off_left =
+                resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
+            let off_right =
+                resolve_lp(s.taffy_style.border.right) + resolve_lp(s.taffy_style.padding.right);
+            let off_top =
+                resolve_lp(s.taffy_style.border.top) + resolve_lp(s.taffy_style.padding.top);
+            let content_w = (rect.w - off_left - off_right).max(0.0);
+            // layout 期缓存（measure_text_controls 走同一份 display_value）与这里一致；
+            // value 为空时 measure 跳过缓存（display 串为空），此处 lazy fallback 测 placeholder。
+            let cached = scene.text_layouts.get(n.id.index()).cloned().flatten();
+            let mut layout = cached.unwrap_or_else(|| {
+                measure_text(
+                    &display,
+                    s.font_size,
+                    s.line_height,
+                    s.letter_spacing,
+                    s.text_align,
+                    s.white_space_nowrap,
+                    Some(content_w),
+                    &stack,
+                    text_color,
+                    crate::text::rich::weight_from_font_weight(s.font_weight),
+                )
+            });
+            if off_left != 0.0 || off_top != 0.0 {
+                bake_content_offset(&mut layout, off_left, off_top);
+            }
+            // ── 编辑反馈 mesh：选区背景 / composition 下划线 / 光标 ──
+            // 几何用上面烤过 content offset 的 `layout`；坐标与世界文字字形同系
+            // （rect.xy + 局部）。各 mesh 用独立合成 node_id，避免与背景/文字 mesh 在
+            // dirty hash 表碰撞（Task 4 parked 的同 id 问题）。
+            //
+            // push 顺序 = 绘制层序（sort_key 升序，后绘者在上层）：选区 → 文字 →
+            // composition → 光标。选区先于文字 push = 落在文字之下（标准编辑器行为：
+            // 选区高亮作背景，选中文字保持清晰可读）。光标最后 push = 最上层
+            // （caret 压在 composition 下划线与文字之上）。
+            //
+            // 缺省色：caret = caret-color style（缺省回退文字色），selection-bg =
+            // selection-background style（缺省蓝半透），composition-underline = 文字色。
+            // selection-color style 字段已解析存储，但选中文字的 per-run 着色需 text run
+            // 拆分（独立于本臂的 quad 绘制），留待后续文本渲染细化。
+            // 选区背景：sel_begin<sel_end 时逐行画覆盖选中文本的 quad。先于文字 push，
+            // 使选区落在文字之下（文字清晰，选区作半透背景）。
+            let (sel_b, sel_e) = e.selection_range();
+            if sel_b < sel_e {
+                let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
+                // sel_b/sel_e 是 value 字节偏移，PasswordField 掩码后显示串字节布局变了，
+                // 须先换算到显示串字节偏移再取像素几何，否则选区会错位到错误的圆点上。
+                let sel_b_d =
+                    crate::scene::control::value_byte_to_display_byte(e, n.kind, sel_b, &display);
+                let sel_e_d =
+                    crate::scene::control::value_byte_to_display_byte(e, n.kind, sel_e, &display);
+                let (xb, lib) =
+                    crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_b_d);
+                let (xe, lie) =
+                    crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_e_d);
+                let sel_color = s.selection_background.unwrap_or([0.0, 0.0, 1.0, 0.5]); // 缺省蓝半透（CSS 未声明 selection-background 时）
+                let mut verts = Vec::new();
+                let mut uvs = Vec::new();
+                let mut colors = Vec::new();
+                let mut indices = Vec::new();
+                for li in lib..=lie.min(layout.lines.len().saturating_sub(1)) {
+                    let Some(line) = layout.lines.get(li) else {
+                        break;
+                    };
+                    // 本行选区起点/终点（advance 相对，加 off_left 入世界）。
+                    let line_x0 = if li == lib {
+                        off_left + xb
+                    } else {
+                        off_left // 跨行选区中间行从行首开始
+                    };
+                    let line_x1 = if li == lie {
+                        off_left + xe
+                    } else {
+                        off_left + line.width // 跨行选区中间行延至行末
+                    };
+                    if line_x1 <= line_x0 {
+                        continue;
+                    }
+                    let (v, u, c, i) = crate::render::mesh::quad(
+                        &Rect {
+                            x: rect.x + line_x0,
+                            y: rect.y + line.y,
+                            w: line_x1 - line_x0,
+                            h: line.height,
+                        },
+                        sel_color,
+                        [0.0, 0.0],
+                        [1.0, 1.0],
+                    );
+                    let base = verts.len() as u32;
+                    verts.extend(v);
+                    uvs.extend(u);
+                    colors.extend(c);
+                    indices.extend(i.iter().map(|&idx| idx + base));
+                }
+                if !verts.is_empty() {
+                    push_solid_mesh(
+                        nodes,
+                        tf_synth_id(node_id, TF_SELECTION_SYNTH_BYTE),
+                        parent_id,
+                        wm,
+                        alpha,
+                        0,
+                        verts,
+                        uvs,
+                        colors,
+                        indices,
+                    );
+                }
+            }
+            let meshes = build_text_mesh(
+                &layout,
+                atlas,
+                fonts,
+                rect,
+                &n.style.text_effects,
+                n.style.background_gradient,
+                n.style.background_clip_text,
+            );
+            push_text_meshes(
+                nodes, id_to_pos, meshes, n, node_id, node_id, parent_id, alpha, text_color, wm,
+                false, // 背景已注册 n.id → id_to_pos，文字不重复注册
+            );
+            // composition 下划线：有 composition 时在 composition 段下方画 2px 横线。
+            // 区间取 display_value 返回的 comp_range（display 坐标里 composition 的真实字节
+            // 区间），而非 raw comp.pos——PasswordField 掩码改变字节布局，raw comp.pos 会
+            // 落在错误字符（某个圆点）上。comp_range 由 char 计数对齐生成，对所有 kind 都精确
+            // 覆盖预提交文本（包括 PasswordField）。
+            if let Some((comp_start, comp_end)) = comp_range {
+                if comp_end > comp_start {
+                    let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
+                    let (xs, lis) =
+                        crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, comp_start);
+                    let (xe, lie) =
+                        crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, comp_end);
+                    let ul_color = text_color; // 缺省下划线色 = 文字色（Task 15 可换）
+                    let mut verts = Vec::new();
+                    let mut uvs = Vec::new();
+                    let mut colors = Vec::new();
+                    let mut indices = Vec::new();
+                    for li in lis..=lie.min(layout.lines.len().saturating_sub(1)) {
+                        let Some(line) = layout.lines.get(li) else {
+                            break;
+                        };
+                        let line_x0 = if li == lis { off_left + xs } else { off_left };
+                        let line_x1 = if li == lie {
+                            off_left + xe
+                        } else {
+                            off_left + line.width
+                        };
+                        if line_x1 <= line_x0 {
+                            continue;
+                        }
+                        // 下划线贴行底（line.y + line.height），2px 厚。
+                        let (v, u, c, i) = crate::render::mesh::quad(
+                            &Rect {
+                                x: rect.x + line_x0,
+                                y: rect.y + line.y + line.height - 2.0,
+                                w: line_x1 - line_x0,
+                                h: 2.0,
+                            },
+                            ul_color,
+                            [0.0, 0.0],
+                            [1.0, 1.0],
+                        );
+                        let base = verts.len() as u32;
+                        verts.extend(v);
+                        uvs.extend(u);
+                        colors.extend(c);
+                        indices.extend(i.iter().map(|&idx| idx + base));
+                    }
+                    if !verts.is_empty() {
+                        push_solid_mesh(
+                            nodes,
+                            tf_synth_id(node_id, TF_COMPOSITION_SYNTH_BYTE),
+                            parent_id,
+                            wm,
+                            alpha,
+                            0,
+                            verts,
+                            uvs,
+                            colors,
+                            indices,
+                        );
+                    }
+                }
+            }
+            // 光标（focused + cursor_visible + !readonly）：1px × 行高 caret。最后 push =
+            // 最上层（sort_key 升序 = 后绘者在上，caret 压在选区/下划线之上）。
+            if scene.focused_node == Some(n.id) && !e.readonly && e.cursor_visible {
+                let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
+                // e.cursor 是 value 字节偏移；PasswordField 掩码后显示串字节布局变了，
+                // 须换算到显示串字节偏移再取像素 x，否则末尾光标会落在第一个圆点之后
+                // （value byte 2 指向掩码串 byte 2 = 第一个 '•' 中间）而非第二个之后。
+                let cursor_d = crate::scene::control::value_byte_to_display_byte(
+                    e, n.kind, e.cursor, &display,
+                );
+                let (cx, li) =
+                    crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, cursor_d);
+                if let Some(line) = layout.lines.get(li) {
+                    // cx 是 advance 累计（内容区相对，不含 off_left）；line.y 已含 off_top。
+                    let x = rect.x + off_left + cx;
+                    let y = rect.y + line.y;
+                    push_solid_quad(
+                        nodes,
+                        tf_synth_id(node_id, TF_CURSOR_SYNTH_BYTE),
+                        parent_id,
+                        wm,
+                        alpha,
+                        0, // 合成 id 不继承主节点 reuse_key（独立 GO）
+                        x,
+                        y,
+                        1.0, // 1px caret 宽
+                        line.height,
+                        s.caret_color.unwrap_or(text_color), // caret-color style（缺省回退文字色）
+                    );
+                }
+            }
+            return;
+        }
+        _ => RenderNode {
+            node_id,
+            parent_id,
+            visible: true,
+            alpha,
+            color_tint,
+            world_matrix: wm,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: 0,
+            change_level: ChangeLevel::Full,
+            reuse_key: n.reuse_key,
+            effect: EffectBlock::default(),
+            payload: NodePayload::Mesh {
+                verts: vec![],
+                uvs: vec![],
+                colors: vec![],
+                indices: vec![],
+                image_path: None,
+                program: 0,
+                color_matrix,
+            },
+        },
+    };
+    // box-shadow：独立 RenderNode 画在节点下层（sort_key 更小 = 先绘 = 在下）。
+    // 阴影节点不入 id_to_pos（不在场景树中），sort_key 在 assign_sort_keys 后
+    // 由 propagate_back_layer_sort_keys 调整为主节点 sort_key（主节点后移一位）。
+    if let Some(shadow) = n.style.box_shadow.as_ref() {
+        if n.kind.is_container() {
+            let rw = rect.w;
+            let rh = rect.h;
+            let radii = n.style.border_radius.as_corners(rw, rh);
+            let shadow_rect = Rect {
+                x: rect.x + shadow.ox,
+                y: rect.y + shadow.oy,
+                w: rect.w,
+                h: rect.h,
+            };
+            let (v, uvc, col, idx) = crate::render::border::box_shadow_quad(
+                &shadow_rect,
+                &radii,
+                shadow.spread,
+                shadow.color,
+            );
+            if !v.is_empty() {
+                let sid = node_id | BACK_LAYER_FLAG;
+                back_layer_pairs.push((node_id, sid));
+                nodes.push(RenderNode {
+                    node_id: sid,
+                    parent_id,
+                    visible: true,
+                    alpha,
+                    color_tint,
+                    world_matrix: wm,
+                    blend: BlendMode::Normal,
+                    mask_context: MaskContext(0),
+                    sort_key: 0, // assign_sort_keys 后重调
+                    change_level: ChangeLevel::Full,
+                    reuse_key: 0,
+                    effect: EffectBlock::default(),
+                    payload: NodePayload::Mesh {
+                        verts: v,
+                        uvs: uvc,
+                        colors: col,
+                        indices: idx,
+                        image_path: None,
+                        program: 0,
+                        color_matrix: [0.0; 20],
+                    },
+                });
+            }
+        }
+    }
+    if register_id_map {
+        id_to_pos.insert(n.id, nodes.len());
+    }
+    nodes.push(rn);
+}
 #[cfg(test)]
 mod tests;

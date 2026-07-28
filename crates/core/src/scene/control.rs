@@ -21,7 +21,9 @@ const TRACK: &str = "loom-track";
 const THUMB: &str = "loom-thumb";
 const CHECK: &str = "loom-check";
 const VALUE: &str = "loom-value";
-const POPUP: &str = "loom-popup";
+/// Dropdown 浮层容器的保留 class。pub 供 render 层识别 open popup 子树（Task 11
+/// 浮层渲染：open Dropdown 的 .loom-popup 子树跳出正常 DFS，末尾追加，mask=0）。
+pub const POPUP: &str = "loom-popup";
 
 /// 建一个携带单个框架保留 class 的 Container 子节点（div）。
 ///
