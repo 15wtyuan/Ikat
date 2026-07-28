@@ -270,6 +270,53 @@ fn ancestor_chain(scene: &Scene, target: Option<NodeId>) -> Vec<NodeId> {
     chain
 }
 
+/// `target` 是否在 `ancestor` 的子树内（含 target==ancestor）。沿 parent 链上行，
+/// 命中 ancestor 返 true。target=None → false。供 outside-click close 判定点击是否
+/// 落在某 open Dropdown 的 select 子树内（select 本身 + .loom-value/.loom-popup 后代）。
+fn is_in_subtree(scene: &Scene, target: Option<NodeId>, ancestor: NodeId) -> bool {
+    let mut cur = target;
+    while let Some(id) = cur {
+        if id == ancestor {
+            return true;
+        }
+        cur = scene.get(id).and_then(|n| n.parent);
+    }
+    false
+}
+
+/// outside-click close：pointer-down 命中不在任何 open Dropdown 的 select 子树内 → 收起那些
+/// dropdown（open=false）。select 子树 = select 本身 + .loom-value/.loom-popup（含 option）
+/// 后代。点击 option（popup 内）不算 outside → 不收起（option 选中由其 click EVT 驱动，
+/// 单独任务）。点击 select header 同理不收起（header 点击是 toggle，单独任务）。
+///
+/// 仅置 open=false：sync_control_visuals 下 tick 据 open 收起 popup display（display:none）。
+/// 不发新 EVT——无现有 open/close 事件常量，host 经轮询 `open` 读状态（与其它控件状态读取同源）。
+/// 调用点：PointerState::process 的 Down 臂（hit 计算后、down_targets 填后）。
+fn close_outside_dropdowns(scene: &mut Scene, hit: Option<NodeId>) {
+    // 先收集所有 open Dropdown 的 select id（不可变借），再判定 + 收起（可变借），避免借用冲突。
+    let open_selects: Vec<NodeId> = scene
+        .nodes
+        .values()
+        .filter_map(|n| {
+            if matches!(
+                scene.controls.get(n.id),
+                Some(ControlState::Dropdown { open: true, .. })
+            ) {
+                Some(n.id)
+            } else {
+                None
+            }
+        })
+        .collect();
+    for select in open_selects {
+        if !is_in_subtree(scene, hit, select) {
+            if let Some(ControlState::Dropdown { open, .. }) = scene.controls.get_mut(select) {
+                *open = false;
+            }
+        }
+    }
+}
+
 /// 设焦点为 new（None=清除焦点）。发 FocusOut@旧焦点 + FocusIn@新焦点。
 /// 模块级 pub(crate) 自由函数——process（click-to-focus）+ process_keys（Tab）+ Stage（pending_focus_request）共用。
 /// 写 scene.focused_node + node.focused 标志 + 推 FocusOut/FocusIn 进 out。old==new → no-op。
@@ -880,7 +927,10 @@ impl PointerState {
                     slot.down_node = hit;
                     slot.down_targets = ancestor_chain(scene, hit); // [leaf,…祖先]
                     slot.click_cancelled = false; // 新按下重置
-                                                  // drag/longpress 初始化
+                                                  // outside-click close：命中不在任何 open Dropdown 的 select 子树内 → 收起。
+                                                  // 须在 hit/down_targets 计算后、控件 on_pointer_down 前跑（确保状态一致）。
+                    close_outside_dropdowns(scene, hit);
+                    // drag/longpress 初始化
                     slot.down_time = time_s;
                     slot.longpress_fired = false;
                     slot.longpress_cancelled = false;

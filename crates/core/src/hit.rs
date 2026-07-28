@@ -2,7 +2,7 @@
 //! 逆等效绘制序遍历（顶层优先），layout_rect AABB + clip 门控 + pointer-events。
 //! 不做 transform world_to_local（无动画故无影响）。
 
-use crate::scene::node::{NodeId, Rect, Scene};
+use crate::scene::node::{ControlState, NodeId, Rect, Scene};
 
 /// 点是否在 Rect 内（含边界，design 坐标）。
 pub(crate) fn point_in_rect(point: (f32, f32), r: Rect) -> bool {
@@ -39,6 +39,40 @@ pub fn hit_scrollbar_grip(scene: &Scene, point: (f32, f32)) -> Option<(NodeId, u
     None
 }
 
+/// 命中 open Dropdown 的 popup 子树。open popup 浮层渲染在所有正常内容之上（Task 11：
+/// mask=0、末尾追加 DFS），故命中优先级高于正常内容——在主 roots DFS 前测。
+///
+/// 与 [`hit_scrollbar_grip`] 的优先级：scrollbar grip 仍先于此（grip 返 sentinel NodeId）。
+/// 理由：popup 自身可滚（长 option 列表）时其 scrollbar grip 不能被 popup 命中遮蔽——
+/// grip 必须可抓。grip 与正常 dropdown popup 几何重叠极少（grip 在滚动容器边缘、popup
+/// 绝对定位浮层），两者互不冲突。返真节点（option/popup）的 NodeId。
+fn hit_open_popups(scene: &Scene, point: (f32, f32)) -> Option<NodeId> {
+    // 先收集所有 open Dropdown 的 popup 根（不可变借），再逐个 hit_subtree（不可变借）。
+    // 两阶段分开避免边迭代 controls 边递归 scene 的复杂借用。收集口径与 render 层
+    // `collect_open_popup_roots` 一致（同源：open Dropdown → .loom-popup 子节点）。
+    let mut popups: Vec<NodeId> = Vec::new();
+    for n in scene.nodes.values() {
+        let is_open_dropdown = matches!(
+            scene.controls.get(n.id),
+            Some(ControlState::Dropdown { open: true, .. })
+        );
+        if !is_open_dropdown {
+            continue;
+        }
+        if let Some(popup) =
+            crate::scene::control::find_child_by_class(scene, n.id, crate::scene::control::POPUP)
+        {
+            popups.push(popup);
+        }
+    }
+    for popup in popups {
+        if let Some(hit) = hit_subtree(scene, popup, point) {
+            return Some(hit);
+        }
+    }
+    None
+}
+
 /// 命中测试。逆等效绘制序遍历，第一个命中即返回（顶层优先）。
 /// scrollbar thumb 最上层，前置 check。
 pub fn hit_test(scene: &Scene, point: (f32, f32)) -> Option<NodeId> {
@@ -50,6 +84,11 @@ pub fn hit_test(scene: &Scene, point: (f32, f32)) -> Option<NodeId> {
             crate::scroll::H_THUMB_FLAG
         };
         return Some(NodeId(container.0 | flag));
+    }
+    // open popup 浮层（Task 11 渲染在所有正常内容之上）→ 命中优先于正常内容。
+    // 顺序在 scrollbar grip 之后（见 [`hit_open_popups`] 文档：grip 须可抓）。
+    if let Some(hit) = hit_open_popups(scene, point) {
+        return Some(hit);
     }
     // 从 roots 逐棵 DFS。多个 root 按顺序，后 root 顶层（与渲染序一致）。
     for &root in &scene.roots {
@@ -407,6 +446,144 @@ mod tests {
             raw & !crate::scroll::V_THUMB_FLAG,
             container_id.0,
             "flag off → container id"
+        );
+    }
+
+    // ── open popup 前置命中（Task 12）─────────────────────────
+
+    /// 建 open Dropdown 场景：root > select(Dropdown,open,120x30 @(10,10))，
+    /// select 的 .loom-popup(80x60 @(10,40)) 内含两个 option（各 80x20，垂直堆叠）。
+    /// 复刻生产运行时结构（spec §4.1：select > [.loom-value, .loom-popup > [option...]]）。
+    /// 返回 (select_id, popup_id, opt0_id, opt1_id)。点 opt0 用 (50,50)（opt0 区 40..60）。
+    fn open_dropdown_scene() -> (Scene, NodeId, NodeId, NodeId, NodeId) {
+        use crate::asset::ControlInit;
+        use crate::scene::control::POPUP;
+        use crate::scene::dynamic::create_node_from_template;
+        use crate::scene::node::ControlState;
+        use crate::style::resolved::ResolvedStyle;
+
+        let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 300.0,
+            h: 300.0,
+        };
+        let mut s = Scene::from_nodes(vec![root], vec![]);
+        let root_id = s.roots[0];
+
+        // select（Dropdown 控件）—— create_node_from_template 会 inject .loom-value/.loom-popup。
+        let select = create_node_from_template(
+            &mut s,
+            NodeKind::Dropdown,
+            ResolvedStyle::default(),
+            Some(ControlInit::Dropdown { selected_index: 0 }),
+        );
+        crate::scene::dynamic::append_child(&mut s, root_id, select).unwrap();
+        // 设 open=true（create 默认 open=false）。
+        if let Some(ControlState::Dropdown { open, .. }) = s.controls.get_mut(select) {
+            *open = true;
+        }
+        s.get_mut(select).unwrap().layout_rect = Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 120.0,
+            h: 30.0,
+        };
+
+        // 两个 option 挂到 select，再 reparent 进 .loom-popup（同生产 instantiate 路径）。
+        let opt0 =
+            create_node_from_template(&mut s, NodeKind::OptionItem, ResolvedStyle::default(), None);
+        let opt1 =
+            create_node_from_template(&mut s, NodeKind::OptionItem, ResolvedStyle::default(), None);
+        crate::scene::dynamic::append_child(&mut s, select, opt0).unwrap();
+        crate::scene::dynamic::append_child(&mut s, select, opt1).unwrap();
+        crate::scene::control::reparent_options_into_popup(&mut s, select);
+
+        let popup = crate::scene::control::find_child_by_class(&s, select, POPUP).unwrap();
+        // popup 浮在 select 下方（absolute，相对 select 定位）。
+        s.get_mut(popup).unwrap().layout_rect = Rect {
+            x: 10.0,
+            y: 40.0,
+            w: 80.0,
+            h: 60.0,
+        };
+        s.get_mut(opt0).unwrap().layout_rect = Rect {
+            x: 10.0,
+            y: 40.0,
+            w: 80.0,
+            h: 20.0,
+        };
+        s.get_mut(opt1).unwrap().layout_rect = Rect {
+            x: 10.0,
+            y: 60.0,
+            w: 80.0,
+            h: 20.0,
+        };
+        compute_world_transforms(&mut s);
+        (s, select, popup, opt0, opt1)
+    }
+
+    #[test]
+    fn hit_inside_open_popup_returns_option() {
+        // open dropdown，点击落在 opt0 的 layout_rect 内 → 返回 opt0 NodeId（不是 select）。
+        let (s, _select, _popup, opt0, _opt1) = open_dropdown_scene();
+        // opt0 区 (10,40,80,20) → center (50,50)
+        assert_eq!(
+            hit_test(&s, (50.0, 50.0)),
+            Some(opt0),
+            "点击 open popup 内 option → 返回该 option"
+        );
+    }
+
+    #[test]
+    fn hit_inside_open_popup_second_option_returns_it() {
+        // opt1 区 (10,60,80,20) → center (50,70)
+        let (s, _select, _popup, _opt0, opt1) = open_dropdown_scene();
+        assert_eq!(
+            hit_test(&s, (50.0, 70.0)),
+            Some(opt1),
+            "点击第二个 option → 返回 opt1"
+        );
+    }
+
+    #[test]
+    fn hit_open_popup_beats_normal_content_on_top() {
+        // 优先级：一个在正常 DFS 序里「顶层」的节点（后挂的 root 子节点）几何覆盖 opt0 区。
+        // open=true 时 popup 前置命中应赢——返回 opt0 而非 cover。
+        // 这验证 popup 前置 check 在主 roots DFS 之前。
+        use crate::scene::dynamic::create_node_from_template;
+        use crate::scene::node::ControlState;
+        use crate::style::resolved::ResolvedStyle;
+
+        let (mut s, select, _popup, opt0, _opt1) = open_dropdown_scene();
+        let root_id = s.roots[0];
+        // cover：全覆盖 300x300，作为 root 的后挂子节点（后绘制=顶层）。在正常 DFS 里它会
+        // 先于 select 子树被测（顶层优先），点 (50,50) 应命中 cover。
+        let cover =
+            create_node_from_template(&mut s, NodeKind::Container, ResolvedStyle::default(), None);
+        crate::scene::dynamic::append_child(&mut s, root_id, cover).unwrap();
+        s.get_mut(cover).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 300.0,
+            h: 300.0,
+        };
+        compute_world_transforms(&mut s);
+        // open → popup 前置赢
+        assert_eq!(
+            hit_test(&s, (50.0, 50.0)),
+            Some(opt0),
+            "open 时 popup 前置命中赢过正常顶层内容"
+        );
+        // 收起 popup → 正常 DFS，cover（顶层）赢
+        if let Some(ControlState::Dropdown { open, .. }) = s.controls.get_mut(select) {
+            *open = false;
+        }
+        assert_eq!(
+            hit_test(&s, (50.0, 50.0)),
+            Some(cover),
+            "closed 时正常 DFS，顶层 cover 赢（popup 不前置）"
         );
     }
 }

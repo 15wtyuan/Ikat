@@ -4369,3 +4369,210 @@ fn non_text_focused_node_not_routed() {
         "Button 焦点 → Backspace 走普通 keydown"
     );
 }
+
+// ── outside-click close（Task 12）──────────────────────────────
+//
+// open Dropdown：pointer-down 命中不在其 select 子树内 → 收起（open=false）。
+// select 子树 = select 本身 + .loom-value/.loom-popup（含 option）后代。
+// 点击 option（popup 内）不算 outside → 不收起（option 选中由其 click EVT 驱动，另一任务）。
+
+/// 建 open Dropdown 场景：root > select(Dropdown,open,120x30 @(10,10))，
+/// select 的 .loom-popup(80x60 @(10,40)) 内含两个 option。
+/// 另 root 有一个独立 button(50x50 @(200,200)) 作「outside」点击靶。
+/// 返回 (select_id, popup_id, opt0_id, button_id)。
+fn open_dropdown_with_outside_button_scene() -> (Scene, NodeId, NodeId, NodeId, NodeId) {
+    use crate::asset::ControlInit;
+    use crate::scene::control::{find_child_by_class, POPUP};
+    use crate::scene::dynamic::create_node_from_template;
+    use crate::style::resolved::ResolvedStyle;
+
+    let mut root = Node::default();
+    root.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 400.0,
+        h: 400.0,
+    };
+    let mut s = Scene::from_nodes(vec![root], vec![]);
+    let root_id = s.roots[0];
+
+    let select = create_node_from_template(
+        &mut s,
+        NodeKind::Dropdown,
+        ResolvedStyle::default(),
+        Some(ControlInit::Dropdown { selected_index: 0 }),
+    );
+    crate::scene::dynamic::append_child(&mut s, root_id, select).unwrap();
+    if let Some(ControlState::Dropdown { open, .. }) = s.controls.get_mut(select) {
+        *open = true;
+    }
+    s.get_mut(select).unwrap().layout_rect = Rect {
+        x: 10.0,
+        y: 10.0,
+        w: 120.0,
+        h: 30.0,
+    };
+
+    let opt0 =
+        create_node_from_template(&mut s, NodeKind::OptionItem, ResolvedStyle::default(), None);
+    let opt1 =
+        create_node_from_template(&mut s, NodeKind::OptionItem, ResolvedStyle::default(), None);
+    crate::scene::dynamic::append_child(&mut s, select, opt0).unwrap();
+    crate::scene::dynamic::append_child(&mut s, select, opt1).unwrap();
+    crate::scene::control::reparent_options_into_popup(&mut s, select);
+
+    let popup = find_child_by_class(&s, select, POPUP).unwrap();
+    s.get_mut(popup).unwrap().layout_rect = Rect {
+        x: 10.0,
+        y: 40.0,
+        w: 80.0,
+        h: 60.0,
+    };
+    s.get_mut(opt0).unwrap().layout_rect = Rect {
+        x: 10.0,
+        y: 40.0,
+        w: 80.0,
+        h: 20.0,
+    };
+    s.get_mut(opt1).unwrap().layout_rect = Rect {
+        x: 10.0,
+        y: 60.0,
+        w: 80.0,
+        h: 20.0,
+    };
+
+    // outside 按钮（200,200,50,50）作 outside 点击靶。
+    let btn = create_node_from_template(&mut s, NodeKind::Button, ResolvedStyle::default(), None);
+    crate::scene::dynamic::append_child(&mut s, root_id, btn).unwrap();
+    s.get_mut(btn).unwrap().layout_rect = Rect {
+        x: 200.0,
+        y: 200.0,
+        w: 50.0,
+        h: 50.0,
+    };
+
+    compute_world_transforms(&mut s);
+    (s, select, popup, opt0, btn)
+}
+
+fn dropdown_open(scene: &Scene, select: NodeId) -> bool {
+    matches!(
+        scene.controls.get(select),
+        Some(ControlState::Dropdown { open: true, .. })
+    )
+}
+
+#[test]
+fn pointer_down_outside_open_dropdown_closes_it() {
+    // open dropdown，pointer-down 落在 outside 按钮 → 收起 dropdown（open=false）。
+    let (mut s, select, _popup, _opt0, _btn) = open_dropdown_with_outside_button_scene();
+    assert!(dropdown_open(&s, select), "初始 open=true");
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: 225.0,
+            y: 225.0, // outside 按钮中心
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert!(
+        !dropdown_open(&s, select),
+        "pointer-down 在 select 子树外 → open=false"
+    );
+}
+
+#[test]
+fn pointer_down_on_option_does_not_close_dropdown() {
+    // pointer-down 落在 option（popup 内）→ 不收起（option 选中由 click EVT 驱动，另一任务）。
+    let (mut s, select, _popup, opt0, _btn) = open_dropdown_with_outside_button_scene();
+    assert!(dropdown_open(&s, select));
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: 50.0,
+            y: 50.0, // opt0 区中心
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert!(
+        dropdown_open(&s, select),
+        "pointer-down 在 option（popup 子树内）→ 不收起"
+    );
+    // opt0 仍可被命中（前置 popup check 生效）
+    assert_eq!(hit_test(&s, (50.0, 50.0)), Some(opt0));
+}
+
+#[test]
+fn pointer_down_on_select_header_does_not_close_dropdown() {
+    // pointer-down 落在 select 本身（header 区）→ 不收起（header 点击是 toggle，另一任务）。
+    let (mut s, select, _popup, _opt0, _btn) = open_dropdown_with_outside_button_scene();
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: 70.0,
+            y: 25.0, // select header 区中心 (10,10,120,30)
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert!(
+        dropdown_open(&s, select),
+        "pointer-down 在 select 本身 → 不收起（toggle 是另一任务）"
+    );
+}
+
+#[test]
+fn pointer_down_outside_closes_only_open_dropdown_not_closed_one() {
+    // 多个 dropdown：只收起 open 的那个。closed 的不动。
+    let (mut s, select_open, _popup, _opt0, _btn) = open_dropdown_with_outside_button_scene();
+    // 额外建一个 closed dropdown（open=false），验证它不被误改。
+    use crate::asset::ControlInit;
+    use crate::scene::dynamic::create_node_from_template;
+    use crate::style::resolved::ResolvedStyle;
+    let root_id = s.roots[0];
+    let select_closed = create_node_from_template(
+        &mut s,
+        NodeKind::Dropdown,
+        ResolvedStyle::default(),
+        Some(ControlInit::Dropdown { selected_index: 0 }),
+    );
+    crate::scene::dynamic::append_child(&mut s, root_id, select_closed).unwrap();
+    s.get_mut(select_closed).unwrap().layout_rect = Rect {
+        x: 10.0,
+        y: 300.0,
+        w: 120.0,
+        h: 30.0,
+    };
+    compute_world_transforms(&mut s);
+    // 初始：select_open 开，select_closed 关
+    assert!(dropdown_open(&s, select_open));
+    assert!(!dropdown_open(&s, select_closed));
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: 225.0,
+            y: 225.0, // outside 按钮
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert!(!dropdown_open(&s, select_open), "open 的被收起");
+    assert!(
+        !dropdown_open(&s, select_closed),
+        "closed 的保持 closed（不变）"
+    );
+}
