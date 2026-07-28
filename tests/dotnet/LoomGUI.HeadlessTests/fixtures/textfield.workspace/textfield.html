@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>textfield projection fixture</title>
+<style>
+  #root { width: 200px; height: 200px; }
+  /* 围栏 control-css 契约：控件不带 UA 默认样式，需 CSS 命中（display:block 撑满）。 */
+  #tf, #pw, #sf, #ta { background: #ddd; display: block; }
+</style>
+</head>
+<body>
+  <div id="root">
+    <!-- TextField（<input type="text">，缺省 type=text 也归 TextField）。 -->
+    <input id="tf" type="text" placeholder="name" style="display:block" />
+    <!-- PasswordField（<input type="password">）：C# Value 仍是明文，mask 在 Rust 渲染侧。 -->
+    <input id="pw" type="password" style="display:block" />
+    <!-- SearchField（<input type="search">）。 -->
+    <input id="sf" type="search" placeholder="query" style="display:block" />
+    <!-- TextArea（<textarea>）：无 Submitted（Enter 插换行）。 -->
+    <textarea id="ta" placeholder="body" style="display:block"></textarea>
+  </div>
+</body>
+</html>

@@ -172,6 +172,13 @@ namespace LoomGUI
                         DispatchTyped(nodeId,
                             new ControlChangeCommittedEvent { _core = NewCore(nodeId), _value = evt.x });
                         break;
+                    // 单行文本框 Enter 提交（core EVT_SUBMITTED，25）。无 payload（node_id 指向提交控件）。
+                    // 控件类的 Submitted 访问器订阅 ControlSubmittedEvent，在触发时回读当前 value 填
+                    // Action<string>（文本值不进 EventRecord）。TextArea 不订阅此事件（多行框 Enter 插换行）。
+                    case (byte)EventType.Submitted:
+                        DispatchTyped(nodeId,
+                            new ControlSubmittedEvent { _core = NewCore(nodeId) });
+                        break;
 
                     // ── deferred（无 core source）────────────────────────
                     // LongPress (9)：无对应 typed event struct——跳过。

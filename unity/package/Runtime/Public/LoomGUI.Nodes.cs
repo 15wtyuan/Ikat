@@ -277,7 +277,17 @@ namespace LoomGUI
 
         public Animation Play(string name) { throw NE(); }
 
-        public void Focus() { throw NE(); }
+        // 编程聚焦节点（照 fgui RequestFocus）。直转 FFI request_focus（记 pending_focus_request，
+        // 下 tick 最前消费写 scene.focused_node + 产 FocusIn/FocusOut）。文本框聚焦后才能接收
+        // set_key_input / set_text_input 的输入（core input 只插焦点控件）。
+        public void Focus()
+        {
+            ThrowIfDisposed();
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_request_focus(h, _id);
+        }
+        // Blur 暂无 FFI（core stage::blur 存在但未暴露 loomgui_stage_blur C ABI）——留 throw，
+        // 待 FFI 补齐后填（同 request_focus 路径）。
         public void Blur() { throw NE(); }
 
         public IDisposable OnUpdate(Action<float> cb) { throw NE(); }   // 逻辑驱动每帧更新钩子（返回句柄，Dispose 撤销）
@@ -1276,50 +1286,464 @@ namespace LoomGUI
         static NotImplementedException NE() => new NotImplementedException();
     }
 
-    public class TextField : Node
+    public unsafe class TextField : Node
     {
         internal TextField(UIContext ctx, uint id) : base(ctx, id) { }
 
-        public string Value { get { throw NE(); } set { throw NE(); } }
-        public string Placeholder { get { throw NE(); } set { throw NE(); } }
-        public TextSelection Selection { get { throw NE(); } set { throw NE(); } }   // 单行也支持选区/光标控制
-        public bool ReadOnly { get { throw NE(); } set { throw NE(); } }
-        public bool Disabled { get { throw NE(); } set { throw NE(); } }
-        public event Action<ValueChangedEvent<string>> ValueChanged;
-        public event Action<string> Submitted;   // 单行回车=提交；多行（TextArea）不提交
+        // Value：编程 setter（照 JS `.value =`）直替换 EditState.value + 光标移末尾；getter 双调法读 UTF-8。
+        public string Value
+        {
+            get { ThrowIfDisposed(); return GetControlText(); }
+            set { ThrowIfDisposed(); SetControlText(value); }
+        }
+        // Placeholder：value 为空时渲染它（渲染侧逻辑，core 仅存串）。同 Value 的双调法。
+        public string Placeholder
+        {
+            get { ThrowIfDisposed(); return GetControlPlaceholder(); }
+            set { ThrowIfDisposed(); SetControlPlaceholder(value); }
+        }
+        // Selection：选区 [Start,End)（字节偏移）。setter 直转 set_selection(anchor,cursor)；
+        // getter get_selection 归一为 [start,end]（start≤end）。单行框也支持选区/光标控制。
+        public TextSelection Selection
+        {
+            get { ThrowIfDisposed(); return GetSelection(); }
+            set { ThrowIfDisposed(); SetSelection(value.Start, value.End); }
+        }
+        // readonly：true = 用户不可编辑（拦输入 / 退格 / 粘贴），但编程 setter Value 仍可写
+        // （HTML JS 语义）。core 无 getter FFI——getter 暂留 throw（同 Slider.Disabled）。
+        public bool ReadOnly
+        {
+            set { ThrowIfDisposed(); SetControlReadonly(value); }
+            get { throw NE(); }
+        }
+        // disabled：伪类源 + active/click 抑制（set_node_disabled）。core 无 getter（同 Slider.Disabled）。
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+
+        // ValueChanged：文本框值变更（core EVT_VALUE_CHANGED=22）。文本框的 EventRecord 不携值
+        // （x=0，与 Slider 的 x=新值 不同）——订阅 ControlValueChangedEvent，在触发时回读当前
+        // value（get_control_text）填 ValueChangedEvent<string>。backing-dict 模式同 Button.Clicked。
+        [NonSerialized] Dictionary<Action<ValueChangedEvent<string>>, EventRegistration> _valueChangedBacking;
+        public event Action<ValueChangedEvent<string>> ValueChanged
+        {
+            add
+            {
+                if (value == null) return;
+                if (_valueChangedBacking == null)
+                    _valueChangedBacking = new Dictionary<Action<ValueChangedEvent<string>>, EventRegistration>();
+                if (_valueChangedBacking.ContainsKey(value)) return;
+                var reg = On<ControlValueChangedEvent>(e =>
+                    value(new ValueChangedEvent<string> { _newValue = GetControlText() }));
+                _valueChangedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_valueChangedBacking != null && _valueChangedBacking.TryGetValue(value, out var reg))
+                {
+                    _valueChangedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
+
+        // Submitted：单行框回车提交（core EVT_SUBMITTED=25）。订阅 ControlSubmittedEvent，
+        // 在触发时回读当前 value 填 Action<string>。backing-dict 同 ValueChanged。
+        [NonSerialized] Dictionary<Action<string>, EventRegistration> _submittedBacking;
+        public event Action<string> Submitted
+        {
+            add
+            {
+                if (value == null) return;
+                if (_submittedBacking == null)
+                    _submittedBacking = new Dictionary<Action<string>, EventRegistration>();
+                if (_submittedBacking.ContainsKey(value)) return;
+                var reg = On<ControlSubmittedEvent>(e => value(GetControlText()));
+                _submittedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_submittedBacking != null && _submittedBacking.TryGetValue(value, out var reg))
+                {
+                    _submittedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
         static NotImplementedException NE() => new NotImplementedException();
+
+        // ── FFI 转调 ────────────────────────────────────────────────────────
+        // 文本读写走 UTF-8 ptr+len 通道。get_control_text/get_control_placeholder 是 return-code +
+        // out-param 双调法：buf_cap 足够 → rc=0；不够 → rc=-2 + *out_len=所需（扩容重调）；
+        // 非文本控件/null → -1。ReadText 封装双调法（先 stack 256 探，不够堆分配按所需重调）。
+        string GetControlText() => ReadText((h, buf, cap, len) =>
+            Native.loomgui_stage_get_control_text(h, _id, buf, cap, len));
+        void SetControlText(string v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
+            fixed (byte* bp = b)
+            {
+                int rc = Native.loomgui_stage_set_control_text(h, _id, bp, (nuint)b.Length);
+                if (rc != 0) throw new InvalidOperationException($"set_control_text failed (node {_id})");
+            }
+        }
+        string GetControlPlaceholder() => ReadText((h, buf, cap, len) =>
+            Native.loomgui_stage_get_control_placeholder(h, _id, buf, cap, len));
+        void SetControlPlaceholder(string v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
+            fixed (byte* bp = b)
+            {
+                int rc = Native.loomgui_stage_set_control_placeholder(h, _id, bp, (nuint)b.Length);
+                if (rc != 0) throw new InvalidOperationException($"set_control_placeholder failed (node {_id})");
+            }
+        }
+        TextSelection GetSelection()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            nuint start = 0, end = 0;
+            int rc = Native.loomgui_stage_get_selection(h, _id, &start, &end);
+            if (rc != 0) throw new InvalidOperationException($"get_selection failed (node {_id})");
+            return new TextSelection((int)start, (int)end);
+        }
+        void SetSelection(int anchor, int cursor)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_selection(h, _id, (nuint)anchor, (nuint)cursor);
+            if (rc != 0) throw new InvalidOperationException($"set_selection failed (node {_id})");
+        }
+        void SetControlReadonly(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_control_readonly(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_readonly failed (node {_id})");
+        }
+        void SetNodeDisabled(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_set_node_disabled(h, _id, v);
+        }
+
+        // get_control_text/get_control_placeholder 共用的双调法：fn(h, buf, cap, out_len) → rc。
+        // 先 stackalloc 256 探；rc=-2 时 *out_len = 所需 → 堆分配按所需重调一次（必合）。非文本/-1 升异常。
+        string ReadText(ReadTextFn fn)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            nuint needed = 0;
+            // stack 探（256 字节够绝大多数 placeholder / 短 value）。
+            Span<byte> stackBuf = stackalloc byte[256];
+            fixed (byte* sbp = stackBuf)
+            {
+                int rc = fn(h, sbp, (nuint)stackBuf.Length, &needed);
+                if (rc == 0) return Encoding.UTF8.GetString(stackBuf.Slice(0, (int)needed)).TrimEnd('\0');
+                if (rc != -2) throw new InvalidOperationException($"read text failed rc={rc} (node {_id})");
+            }
+            // 不够：按 needed 堆分配重调。
+            byte[] heapBuf = new byte[(int)needed];
+            fixed (byte* hbp = heapBuf)
+            {
+                nuint written = 0;
+                int rc = fn(h, hbp, (nuint)heapBuf.Length, &written);
+                if (rc != 0) throw new InvalidOperationException($"read text retry failed rc={rc} (node {_id})");
+                return Encoding.UTF8.GetString(heapBuf, 0, (int)written).TrimEnd('\0');
+            }
+        }
+        internal delegate int ReadTextFn(StageHandle* h, byte* buf, nuint cap, nuint* outLen);
     }
 
     // PasswordField / SearchField：<input type="password"> / <input type="search"> 的 typed 投影。
     // 与 TextField 同语义表面（Rust 侧 NodeKind 拆分服务于 attribute-selector [type=...] 精确匹配，
     // 运行时 API 与 TextField 一致）。分作 sibling 类是投影层为 Rust kind 留 arm 的对齐；
     // public-api.md 同步拆为 TextField/PasswordField/SearchField 三行。
-    public class PasswordField : Node
+    public unsafe class PasswordField : Node
     {
         internal PasswordField(UIContext ctx, uint id) : base(ctx, id) { }
 
-        public string Value { get { throw NE(); } set { throw NE(); } }
-        public string Placeholder { get { throw NE(); } set { throw NE(); } }
-        public TextSelection Selection { get { throw NE(); } set { throw NE(); } }
-        public bool ReadOnly { get { throw NE(); } set { throw NE(); } }
-        public bool Disabled { get { throw NE(); } set { throw NE(); } }
-        public event Action<ValueChangedEvent<string>> ValueChanged;
-        public event Action<string> Submitted;
+        // PasswordField 与 TextField 同 EditState 语义表面（mask 在 Rust 渲染侧，C# Value 是明文）。
+        // FFI 通道与 TextField 共用（get/set_control_text 按 node 派发，不分 kind）。详参 TextField。
+        public string Value
+        {
+            get { ThrowIfDisposed(); return GetControlText(); }
+            set { ThrowIfDisposed(); SetControlText(value); }
+        }
+        public string Placeholder
+        {
+            get { ThrowIfDisposed(); return GetControlPlaceholder(); }
+            set { ThrowIfDisposed(); SetControlPlaceholder(value); }
+        }
+        public TextSelection Selection
+        {
+            get { ThrowIfDisposed(); return GetSelection(); }
+            set { ThrowIfDisposed(); SetSelection(value.Start, value.End); }
+        }
+        public bool ReadOnly
+        {
+            set { ThrowIfDisposed(); SetControlReadonly(value); }
+            get { throw NE(); }
+        }
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+
+        [NonSerialized] Dictionary<Action<ValueChangedEvent<string>>, EventRegistration> _valueChangedBacking;
+        public event Action<ValueChangedEvent<string>> ValueChanged
+        {
+            add
+            {
+                if (value == null) return;
+                if (_valueChangedBacking == null)
+                    _valueChangedBacking = new Dictionary<Action<ValueChangedEvent<string>>, EventRegistration>();
+                if (_valueChangedBacking.ContainsKey(value)) return;
+                var reg = On<ControlValueChangedEvent>(e =>
+                    value(new ValueChangedEvent<string> { _newValue = GetControlText() }));
+                _valueChangedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_valueChangedBacking != null && _valueChangedBacking.TryGetValue(value, out var reg))
+                {
+                    _valueChangedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
+
+        [NonSerialized] Dictionary<Action<string>, EventRegistration> _submittedBacking;
+        public event Action<string> Submitted
+        {
+            add
+            {
+                if (value == null) return;
+                if (_submittedBacking == null)
+                    _submittedBacking = new Dictionary<Action<string>, EventRegistration>();
+                if (_submittedBacking.ContainsKey(value)) return;
+                var reg = On<ControlSubmittedEvent>(e => value(GetControlText()));
+                _submittedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_submittedBacking != null && _submittedBacking.TryGetValue(value, out var reg))
+                {
+                    _submittedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
         static NotImplementedException NE() => new NotImplementedException();
+
+        string GetControlText() => ReadText((h, buf, cap, len) =>
+            Native.loomgui_stage_get_control_text(h, _id, buf, cap, len));
+        void SetControlText(string v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
+            fixed (byte* bp = b)
+            {
+                int rc = Native.loomgui_stage_set_control_text(h, _id, bp, (nuint)b.Length);
+                if (rc != 0) throw new InvalidOperationException($"set_control_text failed (node {_id})");
+            }
+        }
+        string GetControlPlaceholder() => ReadText((h, buf, cap, len) =>
+            Native.loomgui_stage_get_control_placeholder(h, _id, buf, cap, len));
+        void SetControlPlaceholder(string v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
+            fixed (byte* bp = b)
+            {
+                int rc = Native.loomgui_stage_set_control_placeholder(h, _id, bp, (nuint)b.Length);
+                if (rc != 0) throw new InvalidOperationException($"set_control_placeholder failed (node {_id})");
+            }
+        }
+        TextSelection GetSelection()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            nuint start = 0, end = 0;
+            int rc = Native.loomgui_stage_get_selection(h, _id, &start, &end);
+            if (rc != 0) throw new InvalidOperationException($"get_selection failed (node {_id})");
+            return new TextSelection((int)start, (int)end);
+        }
+        void SetSelection(int anchor, int cursor)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_selection(h, _id, (nuint)anchor, (nuint)cursor);
+            if (rc != 0) throw new InvalidOperationException($"set_selection failed (node {_id})");
+        }
+        void SetControlReadonly(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_control_readonly(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_readonly failed (node {_id})");
+        }
+        void SetNodeDisabled(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_set_node_disabled(h, _id, v);
+        }
+        string ReadText(ReadTextFn fn)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            nuint needed = 0;
+            Span<byte> stackBuf = stackalloc byte[256];
+            fixed (byte* sbp = stackBuf)
+            {
+                int rc = fn(h, sbp, (nuint)stackBuf.Length, &needed);
+                if (rc == 0) return Encoding.UTF8.GetString(stackBuf.Slice(0, (int)needed)).TrimEnd('\0');
+                if (rc != -2) throw new InvalidOperationException($"read text failed rc={rc} (node {_id})");
+            }
+            byte[] heapBuf = new byte[(int)needed];
+            fixed (byte* hbp = heapBuf)
+            {
+                nuint written = 0;
+                int rc = fn(h, hbp, (nuint)heapBuf.Length, &written);
+                if (rc != 0) throw new InvalidOperationException($"read text retry failed rc={rc} (node {_id})");
+                return Encoding.UTF8.GetString(heapBuf, 0, (int)written).TrimEnd('\0');
+            }
+        }
+        internal delegate int ReadTextFn(StageHandle* h, byte* buf, nuint cap, nuint* outLen);
     }
 
-    public class SearchField : Node
+    public unsafe class SearchField : Node
     {
         internal SearchField(UIContext ctx, uint id) : base(ctx, id) { }
 
-        public string Value { get { throw NE(); } set { throw NE(); } }
-        public string Placeholder { get { throw NE(); } set { throw NE(); } }
-        public TextSelection Selection { get { throw NE(); } set { throw NE(); } }
-        public bool ReadOnly { get { throw NE(); } set { throw NE(); } }
-        public bool Disabled { get { throw NE(); } set { throw NE(); } }
-        public event Action<ValueChangedEvent<string>> ValueChanged;
-        public event Action<string> Submitted;
+        // SearchField 与 TextField 同 EditState 语义表面。FFI 通道共用（按 node 派发）。详参 TextField。
+        public string Value
+        {
+            get { ThrowIfDisposed(); return GetControlText(); }
+            set { ThrowIfDisposed(); SetControlText(value); }
+        }
+        public string Placeholder
+        {
+            get { ThrowIfDisposed(); return GetControlPlaceholder(); }
+            set { ThrowIfDisposed(); SetControlPlaceholder(value); }
+        }
+        public TextSelection Selection
+        {
+            get { ThrowIfDisposed(); return GetSelection(); }
+            set { ThrowIfDisposed(); SetSelection(value.Start, value.End); }
+        }
+        public bool ReadOnly
+        {
+            set { ThrowIfDisposed(); SetControlReadonly(value); }
+            get { throw NE(); }
+        }
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+
+        [NonSerialized] Dictionary<Action<ValueChangedEvent<string>>, EventRegistration> _valueChangedBacking;
+        public event Action<ValueChangedEvent<string>> ValueChanged
+        {
+            add
+            {
+                if (value == null) return;
+                if (_valueChangedBacking == null)
+                    _valueChangedBacking = new Dictionary<Action<ValueChangedEvent<string>>, EventRegistration>();
+                if (_valueChangedBacking.ContainsKey(value)) return;
+                var reg = On<ControlValueChangedEvent>(e =>
+                    value(new ValueChangedEvent<string> { _newValue = GetControlText() }));
+                _valueChangedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_valueChangedBacking != null && _valueChangedBacking.TryGetValue(value, out var reg))
+                {
+                    _valueChangedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
+
+        [NonSerialized] Dictionary<Action<string>, EventRegistration> _submittedBacking;
+        public event Action<string> Submitted
+        {
+            add
+            {
+                if (value == null) return;
+                if (_submittedBacking == null)
+                    _submittedBacking = new Dictionary<Action<string>, EventRegistration>();
+                if (_submittedBacking.ContainsKey(value)) return;
+                var reg = On<ControlSubmittedEvent>(e => value(GetControlText()));
+                _submittedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_submittedBacking != null && _submittedBacking.TryGetValue(value, out var reg))
+                {
+                    _submittedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
         static NotImplementedException NE() => new NotImplementedException();
+
+        string GetControlText() => ReadText((h, buf, cap, len) =>
+            Native.loomgui_stage_get_control_text(h, _id, buf, cap, len));
+        void SetControlText(string v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
+            fixed (byte* bp = b)
+            {
+                int rc = Native.loomgui_stage_set_control_text(h, _id, bp, (nuint)b.Length);
+                if (rc != 0) throw new InvalidOperationException($"set_control_text failed (node {_id})");
+            }
+        }
+        string GetControlPlaceholder() => ReadText((h, buf, cap, len) =>
+            Native.loomgui_stage_get_control_placeholder(h, _id, buf, cap, len));
+        void SetControlPlaceholder(string v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
+            fixed (byte* bp = b)
+            {
+                int rc = Native.loomgui_stage_set_control_placeholder(h, _id, bp, (nuint)b.Length);
+                if (rc != 0) throw new InvalidOperationException($"set_control_placeholder failed (node {_id})");
+            }
+        }
+        TextSelection GetSelection()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            nuint start = 0, end = 0;
+            int rc = Native.loomgui_stage_get_selection(h, _id, &start, &end);
+            if (rc != 0) throw new InvalidOperationException($"get_selection failed (node {_id})");
+            return new TextSelection((int)start, (int)end);
+        }
+        void SetSelection(int anchor, int cursor)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_selection(h, _id, (nuint)anchor, (nuint)cursor);
+            if (rc != 0) throw new InvalidOperationException($"set_selection failed (node {_id})");
+        }
+        void SetControlReadonly(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_control_readonly(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_readonly failed (node {_id})");
+        }
+        void SetNodeDisabled(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_set_node_disabled(h, _id, v);
+        }
+        string ReadText(ReadTextFn fn)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            nuint needed = 0;
+            Span<byte> stackBuf = stackalloc byte[256];
+            fixed (byte* sbp = stackBuf)
+            {
+                int rc = fn(h, sbp, (nuint)stackBuf.Length, &needed);
+                if (rc == 0) return Encoding.UTF8.GetString(stackBuf.Slice(0, (int)needed)).TrimEnd('\0');
+                if (rc != -2) throw new InvalidOperationException($"read text failed rc={rc} (node {_id})");
+            }
+            byte[] heapBuf = new byte[(int)needed];
+            fixed (byte* hbp = heapBuf)
+            {
+                nuint written = 0;
+                int rc = fn(h, hbp, (nuint)heapBuf.Length, &written);
+                if (rc != 0) throw new InvalidOperationException($"read text retry failed rc={rc} (node {_id})");
+                return Encoding.UTF8.GetString(heapBuf, 0, (int)written).TrimEnd('\0');
+            }
+        }
+        internal delegate int ReadTextFn(StageHandle* h, byte* buf, nuint cap, nuint* outLen);
     }
 
     public class NumberField : Node
@@ -1593,17 +2017,131 @@ namespace LoomGUI
         }
     }
 
-    public class TextArea : Node
+    public unsafe class TextArea : Node
     {
         internal TextArea(UIContext ctx, uint id) : base(ctx, id) { }
 
-        public string Value { get { throw NE(); } set { throw NE(); } }
-        public string Placeholder { get { throw NE(); } set { throw NE(); } }
-        public TextSelection Selection { get { throw NE(); } set { throw NE(); } }
-        public bool ReadOnly { get { throw NE(); } set { throw NE(); } }
-        public bool Disabled { get { throw NE(); } set { throw NE(); } }
-        public event Action<ValueChangedEvent<string>> ValueChanged;
+        // TextArea：多行文本框。FFI 通道与 TextField 共用（get/set_control_text 按 node 派发）。
+        // 与单行框的差别在 core：sanitize_str 保留换行 / Enter 插换行而非提交（故无 Submitted 事件）。
+        public string Value
+        {
+            get { ThrowIfDisposed(); return GetControlText(); }
+            set { ThrowIfDisposed(); SetControlText(value); }
+        }
+        public string Placeholder
+        {
+            get { ThrowIfDisposed(); return GetControlPlaceholder(); }
+            set { ThrowIfDisposed(); SetControlPlaceholder(value); }
+        }
+        public TextSelection Selection
+        {
+            get { ThrowIfDisposed(); return GetSelection(); }
+            set { ThrowIfDisposed(); SetSelection(value.Start, value.End); }
+        }
+        public bool ReadOnly
+        {
+            set { ThrowIfDisposed(); SetControlReadonly(value); }
+            get { throw NE(); }
+        }
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { throw NE(); } }
+
+        // ValueChanged：值变更（core EVT_VALUE_CHANGED=22，含 Enter 插换行）。订阅
+        // ControlValueChangedEvent，在触发时回读当前 value 填 ValueChangedEvent<string>。
+        // 无 Submitted 事件（多行框 Enter 插换行，不提交）。
+        [NonSerialized] Dictionary<Action<ValueChangedEvent<string>>, EventRegistration> _valueChangedBacking;
+        public event Action<ValueChangedEvent<string>> ValueChanged
+        {
+            add
+            {
+                if (value == null) return;
+                if (_valueChangedBacking == null)
+                    _valueChangedBacking = new Dictionary<Action<ValueChangedEvent<string>>, EventRegistration>();
+                if (_valueChangedBacking.ContainsKey(value)) return;
+                var reg = On<ControlValueChangedEvent>(e =>
+                    value(new ValueChangedEvent<string> { _newValue = GetControlText() }));
+                _valueChangedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_valueChangedBacking != null && _valueChangedBacking.TryGetValue(value, out var reg))
+                {
+                    _valueChangedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
         static NotImplementedException NE() => new NotImplementedException();
+
+        string GetControlText() => ReadText((h, buf, cap, len) =>
+            Native.loomgui_stage_get_control_text(h, _id, buf, cap, len));
+        void SetControlText(string v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
+            fixed (byte* bp = b)
+            {
+                int rc = Native.loomgui_stage_set_control_text(h, _id, bp, (nuint)b.Length);
+                if (rc != 0) throw new InvalidOperationException($"set_control_text failed (node {_id})");
+            }
+        }
+        string GetControlPlaceholder() => ReadText((h, buf, cap, len) =>
+            Native.loomgui_stage_get_control_placeholder(h, _id, buf, cap, len));
+        void SetControlPlaceholder(string v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
+            fixed (byte* bp = b)
+            {
+                int rc = Native.loomgui_stage_set_control_placeholder(h, _id, bp, (nuint)b.Length);
+                if (rc != 0) throw new InvalidOperationException($"set_control_placeholder failed (node {_id})");
+            }
+        }
+        TextSelection GetSelection()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            nuint start = 0, end = 0;
+            int rc = Native.loomgui_stage_get_selection(h, _id, &start, &end);
+            if (rc != 0) throw new InvalidOperationException($"get_selection failed (node {_id})");
+            return new TextSelection((int)start, (int)end);
+        }
+        void SetSelection(int anchor, int cursor)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_selection(h, _id, (nuint)anchor, (nuint)cursor);
+            if (rc != 0) throw new InvalidOperationException($"set_selection failed (node {_id})");
+        }
+        void SetControlReadonly(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_control_readonly(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_readonly failed (node {_id})");
+        }
+        void SetNodeDisabled(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_set_node_disabled(h, _id, v);
+        }
+        string ReadText(ReadTextFn fn)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            nuint needed = 0;
+            Span<byte> stackBuf = stackalloc byte[256];
+            fixed (byte* sbp = stackBuf)
+            {
+                int rc = fn(h, sbp, (nuint)stackBuf.Length, &needed);
+                if (rc == 0) return Encoding.UTF8.GetString(stackBuf.Slice(0, (int)needed)).TrimEnd('\0');
+                if (rc != -2) throw new InvalidOperationException($"read text failed rc={rc} (node {_id})");
+            }
+            byte[] heapBuf = new byte[(int)needed];
+            fixed (byte* hbp = heapBuf)
+            {
+                nuint written = 0;
+                int rc = fn(h, hbp, (nuint)heapBuf.Length, &written);
+                if (rc != 0) throw new InvalidOperationException($"read text retry failed rc={rc} (node {_id})");
+                return Encoding.UTF8.GetString(heapBuf, 0, (int)written).TrimEnd('\0');
+            }
+        }
+        internal delegate int ReadTextFn(StageHandle* h, byte* buf, nuint cap, nuint* outLen);
     }
 
     public class Dropdown : Node

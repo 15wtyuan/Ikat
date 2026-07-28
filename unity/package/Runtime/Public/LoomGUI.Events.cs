@@ -409,4 +409,20 @@ namespace LoomGUI
         internal static byte EventType => (byte)LoomEventType.ChangeCommitted;
         internal float Value { get { return _value; } }
     }
+
+    // 单行文本框 Enter 提交（core EVT_SUBMITTED，type=25）。无 raw payload（node_id 指向提交控件）——
+    // 提交时的当前 value 由控件类的 Submitted 访问器在触发时回读 get_control_text（文本值不进
+    // EventRecord，同 ControlValueChangedEvent 的文本框语义）。TextArea 不订阅此事件（多行框
+    // Enter 插换行，不提交）。
+    internal struct ControlSubmittedEvent : IRouteEvent
+    {
+        internal RouteEventCore _core;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.Submitted;
+    }
 }

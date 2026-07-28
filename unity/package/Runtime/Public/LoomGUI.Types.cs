@@ -139,11 +139,24 @@ namespace LoomGUI
         static NotImplementedException NE() => new NotImplementedException();
     }
 
+    /// <summary>
+    /// 文本选区（字节偏移）：[<see cref="Start"/>, <see cref="End"/>）半开区间。
+    /// 投影层填实为纯值类型（Start/End 自动属性 + ctor）——选区语义在 core（EditState.anchor/cursor），
+    /// C# struct 仅作调用方传参载体，FFI set_selection/get_selection 在 TextField.Selection 访问器里转。
+    /// Start≤End（get_selection 归一后）；退化选区 Start==End（零宽光标）。
+    /// </summary>
     public struct TextSelection
     {
-        public int Start { get { throw NE(); } set { throw NE(); } }
-        public int End { get { throw NE(); } set { throw NE(); } }
-        static NotImplementedException NE() => new NotImplementedException();
+        /// <summary>选区起点（min(anchor,cursor)，字节偏移）。</summary>
+        public int Start { get; set; }
+        /// <summary>选区终点（max(anchor,cursor)，字节偏移；==Start 时零宽光标）。</summary>
+        public int End { get; set; }
+
+        public TextSelection(int start, int end)
+        {
+            Start = start;
+            End = end;
+        }
     }
 
     // ── 异常类型 ──────────────────────────────────────────────────────

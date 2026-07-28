@@ -53,5 +53,8 @@ namespace LoomGUI
         ValueChanged = 22,
         CheckedChanged = 23,
         ChangeCommitted = 24,
+        /// 单行文本框（TextField/PasswordField/SearchField）Enter=提交（core EVT_SUBMITTED）。
+        /// TextArea 不发此事件（Enter 插换行）。payload 无额外字段（node_id 指向提交控件）。
+        Submitted = 25,
     }
 }

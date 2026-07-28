@@ -38,6 +38,8 @@ namespace LoomGUI.HeadlessTests
             // 持 _core 首 field + 声明 EventType，故被本门覆盖。
             typeof(ControlValueChangedEvent), typeof(ControlCheckedChangedEvent),
             typeof(ControlChangeCommittedEvent),
+            // 单行文本框 Enter 提交（Task 16）。payload 无额外字段——控件类 Submitted 访问器回读 value。
+            typeof(ControlSubmittedEvent),
         };
 
         // 每个结构体映射到期望的 EventType 字节值见 EventTypeCases（xUnit MemberData 须 static，
@@ -174,10 +176,12 @@ namespace LoomGUI.HeadlessTests
             yield return new object[] { typeof(ControlValueChangedEvent),     (byte)EventType.ValueChanged };
             yield return new object[] { typeof(ControlCheckedChangedEvent),   (byte)EventType.CheckedChanged };
             yield return new object[] { typeof(ControlChangeCommittedEvent),  (byte)EventType.ChangeCommitted };
+            // 单行文本框 Enter 提交（Task 16）。payload 无额外字段——控件类 Submitted 访问器回读 value。
+            yield return new object[] { typeof(ControlSubmittedEvent),        (byte)EventType.Submitted };
         }
 
         // 反射兜底：扫 Public/LoomGUI.Events.cs assembly 里所有 IRouteEvent 实现 struct，
-        // 断言数量 == ExpectedEventStructs.Length（18）。新增 struct 不更新清单 → 此测失败提醒。
+        // 断言数量 == ExpectedEventStructs.Length（21）。新增 struct 不更新清单 → 此测失败提醒。
         [Fact]
         public void NoUnexpectedEventStructsAdded()
         {

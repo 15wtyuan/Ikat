@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output_dir": "../textfield-ws-out",
+  "packages": [
+    {
+      "name": "textfield",
+      "dirs": ["."],
+      "html": ["textfield.html"]
+    }
+  ],
+  "atlases": [],
+  "fonts": []
+}
