@@ -481,3 +481,116 @@ fn ffi_set_text_input_null_handle_err() {
     let rc = loomgui_stage_set_text_input(std::ptr::null_mut(), std::ptr::null(), 0);
     assert_eq!(rc, -1, "null handle must return -1");
 }
+
+// ===== IME composition (set_composition / commit_composition / get_cursor_rect) =====
+//
+// IME 渠道：后端读 Input.compositionString 回灌 core，core 把 composition 拼进显示文本
+// （measure + render 同源），提交时落定进 value。下划线由 Task 12 的 composition 分支按
+// display 字节区间画（此处验 composition 进了显示文本 + 提交落定 + 光标矩形可读）。
+
+/// 读 TextField 的 cached TextLayout 的 text_width（measure_text_controls 在 solve 后写入）。
+/// 无缓存 / 非 TextField/TextArea → None。
+fn textfield_text_width(h: *const StageHandle, node: u32) -> Option<f32> {
+    let sh = unsafe { &*h };
+    let scene = sh.stage.scene.as_ref().expect("scene built");
+    if !matches!(
+        scene.controls.get(NodeId(node)),
+        Some(ControlState::TextField(_) | ControlState::TextArea(_))
+    ) {
+        return None;
+    }
+    scene
+        .text_layouts
+        .get(NodeId(node).index())
+        .and_then(|l| l.as_ref().map(|l| l.text_width))
+}
+
+/// set_composition 把预提交文本拼进显示文本：value "ab" + composition "ni" → 测到 "abni"
+/// 的 text_width（严格大于无 composition 时 "ab" 的 text_width）。
+#[test]
+fn composition_spliced_into_display() {
+    let (h, tf) = make_stage_with_focused_textfield("ab");
+    // 先 tick 拿无 composition 基线 text_width（measure "ab"）。
+    loomgui_stage_tick(h, 0.0);
+    let baseline = textfield_text_width(h, tf).expect("baseline layout measured");
+    assert!(baseline > 0.0, "non-empty value must measure > 0");
+
+    // 设 composition "ni" 在 value 末尾（pos=2）。
+    let s = b"ni";
+    let rc = loomgui_stage_set_composition(h, tf, s.as_ptr(), s.len(), 2);
+    assert_eq!(rc, 0, "set_composition rc");
+    loomgui_stage_tick(h, 0.0);
+    // composition 拼进显示文本 → text_width 应反映 "abni"（4 字符），严格大于 "ab"。
+    let with_comp = textfield_text_width(h, tf).expect("composition layout measured");
+    assert!(
+        with_comp > baseline,
+        "composition spliced in: width {with_comp} must exceed baseline {baseline} (abni > ab)"
+    );
+    loomgui_stage_free(h);
+}
+
+/// commit_composition 落定：composition "ni" 提交后并入 value，value "ab" → "abni"。
+#[test]
+fn commit_composition_appends_to_value() {
+    let (h, tf) = make_stage_with_focused_textfield("ab");
+    let s = b"ni";
+    assert_eq!(
+        loomgui_stage_set_composition(h, tf, s.as_ptr(), s.len(), 2),
+        0,
+        "set_composition rc"
+    );
+    assert_eq!(
+        loomgui_stage_commit_composition(h, tf),
+        1,
+        "commit returns 1 (changed) when a composition was pending"
+    );
+    loomgui_stage_tick(h, 0.0);
+    assert_eq!(textfield_value(h, tf), "abni");
+    loomgui_stage_free(h);
+}
+
+/// 无 composition 时 commit 返 0（未改），value 不变。
+#[test]
+fn commit_composition_noop_when_none() {
+    let (h, tf) = make_stage_with_focused_textfield("ab");
+    assert_eq!(
+        loomgui_stage_commit_composition(h, tf),
+        0,
+        "commit without composition returns 0 (no change)"
+    );
+    loomgui_stage_tick(h, 0.0);
+    assert_eq!(textfield_value(h, tf), "ab");
+    loomgui_stage_free(h);
+}
+
+/// get_cursor_rect 返 0（成功）并写出有限光标矩形（x/y/w/h 皆 finite，h>0）。
+/// 光标在 value 末尾，measure 已缓存 TextLayout → 应能定位。null 句柄 → -1。
+#[test]
+fn get_cursor_rect_returns_finite_rect() {
+    let (h, tf) = make_stage_with_focused_textfield("hello");
+    loomgui_stage_tick(h, 0.0);
+    let mut rect = CursorRectRepr::default();
+    let rc = loomgui_stage_get_cursor_rect(h, tf, &mut rect);
+    assert_eq!(rc, 0, "get_cursor_rect rc");
+    assert!(rect.x.is_finite(), "cursor rect x finite");
+    assert!(rect.y.is_finite(), "cursor rect y finite");
+    assert!(rect.h > 0.0, "cursor rect h = line height > 0");
+    loomgui_stage_free(h);
+}
+
+/// null 句柄 / 无效 node 的健壮性（不 panic）。
+#[test]
+fn composition_ffi_null_handle_err() {
+    let rc = loomgui_stage_set_composition(std::ptr::null_mut(), 0, b"x".as_ptr(), 1, 0);
+    assert_eq!(rc, -1, "null handle set_composition -> -1");
+    assert_eq!(
+        loomgui_stage_commit_composition(std::ptr::null_mut(), 0),
+        -1,
+        "null handle commit -> -1"
+    );
+    assert_eq!(
+        loomgui_stage_get_cursor_rect(std::ptr::null_mut(), 0, std::ptr::null_mut()),
+        -1,
+        "null handle get_cursor_rect -> -1"
+    );
+}

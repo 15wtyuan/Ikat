@@ -391,6 +391,18 @@ fn key_event_sizeof_and_unchanged() {
     assert_eq!(size_of::<PointerEvent>(), 16, "PointerEvent 16B 不变");
 }
 
+/// CursorRectRepr = 4 × f32 = 16B（#[repr(C)] POD）。FFI ABI 锁。
+#[test]
+fn cursor_rect_repr_sizeof() {
+    use crate::CursorRectRepr;
+    use std::mem::size_of;
+    assert_eq!(
+        size_of::<CursorRectRepr>(),
+        16,
+        "CursorRectRepr 4*f32 = 16B"
+    );
+}
+
 /// EVT 常量值锁（12/13/14/15）。
 #[test]
 fn evt_constants() {

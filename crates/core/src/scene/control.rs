@@ -10,7 +10,9 @@ use crate::input::{
     EventRecord, EVT_CHANGE_COMMITTED, EVT_CHECKED_CHANGED, EVT_SUBMITTED, EVT_VALUE_CHANGED,
 };
 use crate::scene::dynamic::{append_child, create_node, set_inline_override, set_user_transform};
-use crate::scene::node::{ControlState, EditState, NodeFlags, NodeId, NodeKind, Scene};
+use crate::scene::node::{
+    Composition, ControlState, EditState, NodeFlags, NodeId, NodeKind, Scene,
+};
 use crate::scene::text_cursor::{hit_byte_offset, line_byte_ranges};
 use crate::transform::NodeTransform;
 
@@ -35,12 +37,45 @@ fn make_child(scene: &mut Scene, class: &str) -> NodeId {
 ///
 /// 掩码保持字符串长度不变，每个 UTF-8 字符映射为一个 '•'（U+2022），
 /// 使密码框渲染为等长圆点行（掩码不透露密码长度之外的任何信息）。
-/// composition 期间不掩码（Task 13 处理——此阶段 value 不含 composition 字符）。
+/// composition 期间 value 仍掩码，但预提交 composition 文本不掩码（见 [`display_value`]）。
 pub fn transform_display_value(kind: NodeKind, value: &str) -> String {
     match kind {
         NodeKind::PasswordField => value.chars().map(|_| '•').collect(),
         _ => value.to_string(),
     }
+}
+
+/// 返回 measure/render 应用的「显示文本」：value 经 [`transform_display_value`] 掩码后，
+/// 把 composition 预提交文本拼到 composition.pos 处（composition 本身不掩码——用户输
+/// 拼音须可见）。
+///
+/// 标记子串模型（RmlUi/FairyGUI 共识）：composition 不是独立 buffer，而是拼进显示文本的
+/// 一个段落，作为一个 text run 参与 measure/换行/光标几何。该段落在 render 时由 Task 12
+/// 的 composition 分支按字节区间画下划线。无 composition 时等价于 `transform_display_value`。
+///
+/// PasswordField 的 char 对齐：掩码后 value 的字节长度改变（每个字符→1 个 '•'），故
+/// composition.pos（基于原始 value 的字节偏移）不能直接索引掩码串。用字符计数对齐——
+/// composition.pos 落在原始 value 的某字符边界，掩码串同位字符位置 = 该边界前的字符数。
+/// PasswordField 的 IME 较罕见，按字符对齐已足够正确。
+pub fn display_value(e: &EditState, kind: NodeKind) -> String {
+    let base = transform_display_value(kind, &e.value);
+    let Some(c) = e.composition.as_ref() else {
+        return base;
+    };
+    let mut chars: Vec<char> = base.chars().collect();
+    // composition.pos 钳到原始 value 的合法 UTF-8 字符边界（防后端传越界/中间字节 pos）。
+    // value[..aligned] 仅在 aligned 是字符边界时合法；回退到最近 char 起始字节避免切片 panic。
+    let mut aligned = c.pos.min(e.value.len());
+    while aligned > 0 && !e.value.is_char_boundary(aligned) {
+        aligned -= 1;
+    }
+    let pos_char = e.value[..aligned].chars().count();
+    for (i, ch) in c.text.chars().enumerate() {
+        // 插入点越界（composition.pos 在掩码串末尾之外）时追加到末尾，不丢字符。
+        let at = (pos_char + i).min(chars.len());
+        chars.insert(at, ch);
+    }
+    chars.into_iter().collect()
 }
 
 /// 给控件节点注入框架内部视觉子节点。非控件 NodeKind 为 no-op。
@@ -125,7 +160,7 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
         else {
             continue;
         };
-        let display = transform_display_value(n.kind, &e.value);
+        let display = display_value(e, n.kind);
         // value 为空时跳过缓存——render 阶段会用 placeholder 重测（空串 TextLayout 零高，
         // 缓存后 render 的 unwrap_or_else 不触发，placeholder 无法显示）。
         if display.is_empty() {
@@ -763,6 +798,49 @@ pub fn line_break(e: &mut EditState, kind: NodeKind, out: &mut Vec<EventRecord>,
             });
         }
     }
+}
+
+// ── IME composition 原语（set/commit） ─────────────────────────────
+//
+// Task 13：IME 渠道。后端读平台 IME 的 compositionString 回灌 core——set_composition 存进
+// EditState.composition，commit_composition 落定进 value。显示侧由 [`display_value`] 把
+// composition 拼进显示文本（measure/render 同源），下划线由 Task 12 的 composition 分支画。
+//
+// composition.pos 是基于原始 value 的字节偏移（光标在 value 中的位置）。提交时把光标定位到
+// composition.pos，再 insert_text 落定（insert_text 自带选区删除 + sanitize + max_length
+// 校验，复用它保持与普通字符输入一致的落定语义）。
+
+/// 设置 composition（后端读 IME compositionString 回灌）。pos 钳到 value 合法字节边界。
+///
+/// 重置光标闪烁 timer（显示光标）——与编辑原语（insert_text/move_cursor）一致，让用户在
+/// 输入过程中能看到光标位置。连续 set_composition（每帧更新 composition string）是常态。
+pub fn set_composition(e: &mut EditState, text: &str, pos: usize) {
+    let mut p = pos.min(e.value.len());
+    // 钳到 UTF-8 字符边界：后端传的 pos 可能落在多字节字符中间，直接存会让下游
+    // value[..pos] 切片 panic。回退到最近的 char 起始字节。
+    while p > 0 && !e.value.is_char_boundary(p) {
+        p -= 1;
+    }
+    e.composition = Some(Composition {
+        text: text.to_string(),
+        pos: p,
+    });
+    e.cursor_visible = true;
+    e.cursor_timer = 0.0;
+}
+
+/// 提交 composition：把 composition.text 落定进 value（在 composition.pos 插入）。
+///
+/// 光标先定位到 composition.pos（并折叠选区），再调 insert_text 插 composition.text——
+/// 复用 insert_text 的选区删除/sanitize/max_length 校验逻辑，保持与普通字符输入一致的
+/// 落定语义。有 composition 且 value 改变时返 true，无 composition 返 false。
+pub fn commit_composition(e: &mut EditState, kind: NodeKind) -> bool {
+    let Some(comp) = e.composition.take() else {
+        return false;
+    };
+    e.cursor = comp.pos;
+    e.anchor = comp.pos;
+    insert_text(e, kind, &comp.text)
 }
 
 #[cfg(test)]

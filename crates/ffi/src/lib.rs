@@ -466,6 +466,87 @@ pub extern "C" fn loomgui_stage_set_text_input(
     0
 }
 
+/// 设文本控件的 IME composition（后端读平台 IME compositionString 回灌）。
+/// text = UTF-8 字节（指针+len），pos = composition 在 value 中的字节偏移。
+/// 非文本控件 / 越界 node → 静默跳过（仍返 0）。null 句柄 → -1。下一帧 measure/render
+/// 会把 composition 拼进显示文本（下划线由 Task 12 composition 分支画）。
+///
+/// **常驻（不 gate）：**IME 是 runtime 稳定入口。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_composition(
+    h: *mut StageHandle,
+    node: u32,
+    text: *const u8,
+    text_len: usize,
+    pos: usize,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    // null/零长兜底为空串（composition 可被清空：传空串 = 取消正在进行的 composition）。
+    let s = if text.is_null() || text_len == 0 {
+        String::new()
+    } else {
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, text_len) }) {
+            Ok(s) => s.to_string(),
+            Err(_) => return -1,
+        }
+    };
+    sh.stage.set_composition(NodeId(node), &s, pos);
+    0
+}
+
+/// 提交文本控件的 composition（落定进 value）。返 1 = 有 composition 且 value 改变；
+/// 0 = 无 composition（或被 readonly/max_length 拒）。非文本控件 / 越界 node → 0。
+/// null 句柄 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_commit_composition(h: *mut StageHandle, node: u32) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    sh.stage.commit_composition(NodeId(node)) as i32
+}
+
+/// 读文本控件光标的世界矩形（IME 候选窗定位用，照 Unity Input.compositionCursorPos）。
+/// out 指向 [`CursorRectRepr`]（4 个 f32）。返 0 = 成功且 `*out` 已填；1 = 失败（节点无效 /
+/// 非文本控件 / 无缓存 TextLayout / out 为 null）。null 句柄 → -1。
+///
+/// 几何与 render arm 画光标同源（layout 空间 caret + world transform）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_cursor_rect(
+    h: *const StageHandle,
+    node: u32,
+    out: *mut CursorRectRepr,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    if out.is_null() {
+        return 1;
+    }
+    let sh = unsafe { &*h };
+    match sh.stage.cursor_rect(NodeId(node)) {
+        Some(r) => {
+            unsafe {
+                *out = CursorRectRepr {
+                    x: r.x,
+                    y: r.y,
+                    w: r.w,
+                    h: r.h,
+                };
+            }
+            0
+        }
+        None => 1,
+    }
+}
+
 /// 注入本帧滚轮事件（扁平 WheelEvent 数组）。tick 前调；**累积式**（多次调合并）。
 /// null/len=0 = 本帧无滚轮（直接 return，不清空——与 set_key_input 不同；累积语义）。
 ///
@@ -727,6 +808,17 @@ pub extern "C" fn loomgui_stage_get_node_visible(
             *out = if vis { 1 } else { 0 };
         }
     }
+}
+
+/// 光标世界矩形（IME 候选窗定位用）。#[repr(C)] POD，4 × f32 = 16B。后端读 [`crate::CursorRectRepr`]
+/// 定位 Unity Input.compositionCursorPos / Win32 IME 候选窗。
+#[repr(C)]
+#[derive(Default, Copy, Clone, Debug)]
+pub struct CursorRectRepr {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
 }
 
 /// FFI 稳定快照（#[repr(C)] POD）。enum→u8（match 稳定化，不靠 enum 隐式 repr），

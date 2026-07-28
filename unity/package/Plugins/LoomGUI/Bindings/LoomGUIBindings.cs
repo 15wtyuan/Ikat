@@ -197,6 +197,39 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_set_text_input(StageHandle* h, uint* codepoints, nuint len);
 
         /// <summary>
+        ///  设文本控件的 IME composition（后端读平台 IME compositionString 回灌）。
+        ///  text = UTF-8 字节（指针+len），pos = composition 在 value 中的字节偏移。
+        ///  非文本控件 / 越界 node → 静默跳过（仍返 0）。null 句柄 → -1。下一帧 measure/render
+        ///  会把 composition 拼进显示文本（下划线由 Task 12 composition 分支画）。
+        ///
+        ///  **常驻（不 gate）：**IME 是 runtime 稳定入口。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_composition", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_composition(StageHandle* h, uint node, byte* text, nuint text_len, nuint pos);
+
+        /// <summary>
+        ///  提交文本控件的 composition（落定进 value）。返 1 = 有 composition 且 value 改变；
+        ///  0 = 无 composition（或被 readonly/max_length 拒）。非文本控件 / 越界 node → 0。
+        ///  null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_commit_composition", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_commit_composition(StageHandle* h, uint node);
+
+        /// <summary>
+        ///  读文本控件光标的世界矩形（IME 候选窗定位用，照 Unity Input.compositionCursorPos）。
+        ///  out 指向 [`CursorRectRepr`]（4 个 f32）。返 0 = 成功且 `*out` 已填；1 = 失败（节点无效 /
+        ///  非文本控件 / 无缓存 TextLayout / out 为 null）。null 句柄 → -1。
+        ///
+        ///  几何与 render arm 画光标同源（layout 空间 caret + world transform）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_cursor_rect", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_cursor_rect(StageHandle* h, uint node, CursorRectRepr* @out);
+
+        /// <summary>
         ///  注入本帧滚轮事件（扁平 WheelEvent 数组）。tick 前调；**累积式**（多次调合并）。
         ///  null/len=0 = 本帧无滚轮（直接 return，不清空——与 set_key_input 不同；累积语义）。
         ///
@@ -616,6 +649,19 @@ namespace LoomGUI.Bindings
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct StageHandle
     {
+    }
+
+    /// <summary>
+    ///  光标世界矩形（IME 候选窗定位用）。#[repr(C)] POD，4 × f32 = 16B。后端读 [`crate::CursorRectRepr`]
+    ///  定位 Unity Input.compositionCursorPos / Win32 IME 候选窗。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct CursorRectRepr
+    {
+        public float x;
+        public float y;
+        public float w;
+        public float h;
     }
 
     /// <summary>

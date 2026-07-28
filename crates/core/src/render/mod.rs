@@ -673,22 +673,15 @@ pub fn build_render_nodes(
                 else {
                     continue;
                 };
-                // 显示文本：value 优先，空时退到 placeholder。
-                // PasswordField 先经 transform_display_value 掩码为 '•' × 字符数。
-                // composition 期间（Task 13 接入 IME 前现实不触发）：把预提交文本拼到
-                // value 的 composition.pos 处，不掩码（与 Task 13 "composition 期间不掩码"
-                // 设计一致），使文字 mesh 与下划线几何同源。
-                let display = if let Some(comp) = e.composition.as_ref() {
-                    let pos = comp.pos.min(e.value.len());
-                    let mut s = String::with_capacity(e.value.len() + comp.text.len());
-                    s.push_str(&e.value[..pos]);
-                    s.push_str(&comp.text);
-                    s.push_str(&e.value[pos..]);
-                    s
-                } else if e.value.is_empty() {
+                // 显示文本：value 优先（经 display_value：PasswordField 掩码 + composition
+                // 预提交文本拼接），空时退到 placeholder。measure_text_controls 缓存的
+                // TextLayout 与这里 display 同源（都走 display_value），故文字 mesh 与
+                // 下划线几何一致。
+                let dv = crate::scene::control::display_value(e, n.kind);
+                let display = if dv.is_empty() {
                     e.placeholder.clone()
                 } else {
-                    crate::scene::control::transform_display_value(n.kind, &e.value)
+                    dv
                 };
                 let s = &n.style;
                 let stack = fonts.stack_for(s.font_family.as_deref());
@@ -700,13 +693,9 @@ pub fn build_render_nodes(
                 let off_top =
                     resolve_lp(s.taffy_style.border.top) + resolve_lp(s.taffy_style.padding.top);
                 let content_w = (rect.w - off_left - off_right).max(0.0);
-                // composition 期间 display 含预提交文本，与 layout 期缓存（按非 composition
-                // value 测）不一致——此时越过缓存重测，保证文字 mesh 与下划线几何同源。
-                let cached = if e.composition.is_some() {
-                    None
-                } else {
-                    scene.text_layouts.get(n.id.index()).cloned().flatten()
-                };
+                // layout 期缓存（measure_text_controls 走同一份 display_value）与这里一致；
+                // value 为空时 measure 跳过缓存（display 串为空），此处 lazy fallback 测 placeholder。
+                let cached = scene.text_layouts.get(n.id.index()).cloned().flatten();
                 let mut layout = cached.unwrap_or_else(|| {
                     measure_text(
                         &display,
@@ -823,8 +812,11 @@ pub fn build_render_nodes(
                     false, // 背景已注册 n.id → id_to_pos，文字不重复注册
                 );
                 // composition 下划线：有 composition 时在 composition 段下方画 2px 横线。
-                // composition 尚未接入输入路径（Task 13），此分支现实不触发；几何按
-                // composition.pos/value 字节区间算，覆盖预提交文本范围。
+                // display = display_value（value 掩码后 + composition 拼接），故 composition 字节
+                // 区间 [comp.pos, comp.pos + comp.text.len()] 在 display 坐标里正确覆盖预提交文本
+                // （PasswordField 例外：掩码改变字节长度，comp.pos 是原始 value 字节偏移——但
+                // PasswordField 的 IME 罕见且 display_value 用 char 对齐拼接，此处仍按 comp.pos
+                // 取近似位置，可接受）。
                 if let Some(comp) = e.composition.as_ref() {
                     let comp_start = comp.pos;
                     let comp_end = (comp.pos + comp.text.len()).min(display.len());

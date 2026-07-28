@@ -202,6 +202,42 @@ impl Stage {
         self.pending_text_input.extend_from_slice(codepoints);
     }
 
+    /// 设文本控件的 IME composition（后端读 Input.compositionString 回灌）。pos 是 composition
+    /// 在 value 中的字节偏移。非文本控件 / 越界 node → no-op（不 panic）。下一帧 measure/render
+    /// 会把 composition 拼进显示文本（[`loomgui_core::scene::control::display_value`]）。
+    pub fn set_composition(&mut self, node: NodeId, text: &str, pos: usize) {
+        use crate::scene::node::ControlState;
+        let Some(scene) = self.scene.as_mut() else {
+            return;
+        };
+        // 仅 TextField/TextArea 有 EditState；ControlState match 自身就过滤了非文本控件，
+        // 无需先读 kind。set_composition 原语不收 kind（与 insert_text 不同）。
+        if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
+            scene.controls.get_mut(node)
+        {
+            crate::scene::control::set_composition(e, text, pos);
+        }
+    }
+
+    /// 提交文本控件的 composition（落定进 value）。返 true = 有 composition 且 value 改变；
+    /// false = 无 composition（或插入被 readonly/max_length 拒）。非文本控件 / 越界 node → false。
+    pub fn commit_composition(&mut self, node: NodeId) -> bool {
+        use crate::scene::node::ControlState;
+        let Some(scene) = self.scene.as_mut() else {
+            return false;
+        };
+        let kind = scene.get(node).map(|n| n.kind);
+        let Some(kind) = kind else {
+            return false;
+        };
+        if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
+            scene.controls.get_mut(node)
+        {
+            return crate::scene::control::commit_composition(e, kind);
+        }
+        false
+    }
+
     /// 缓存本帧滚轮输入（tick 前调；**累积式** extend——多组滚轮合并）。
     /// wire 进 tick 消费（apply_wheel_to_hit）。
     pub fn set_wheel_input(&mut self, events: &[crate::scroll::WheelEvent]) {
@@ -288,6 +324,61 @@ impl Stage {
         let scene = self.scene.as_ref()?;
         scene.get(node)?; // gen 校验（slotmap 代际）；失效 → None
         scene.world_transforms.get(node.index()).copied()
+    }
+
+    /// 读文本控件光标的世界矩形（IME 候选窗定位用，照 Unity Input.compositionCursorPos）。
+    ///
+    /// 几何与 render arm 画光标同源：layout 空间 caret = `{rect.x + off_left + cx,
+    /// rect.y + line.y, 1.0, line.height}`，再经节点 world transform 投到世界。display 取
+    /// [`loomgui_core::scene::control::display_value`]（含 composition 拼接），与 measure 缓存的
+    /// TextLayout 同源；无缓存（首帧/空 value）→ None（后端 fallback 到节点 layout_rect）。
+    ///
+    /// 非文本控件 / 节点无效 / scene 未建 → None。
+    pub fn cursor_rect(&self, node: NodeId) -> Option<crate::scene::node::Rect> {
+        use crate::render::resolve_lp;
+        use crate::scene::control::display_value;
+        use crate::scene::node::ControlState;
+        use crate::scene::text_cursor::{cursor_pixel_x, line_byte_ranges};
+        let scene = self.scene.as_ref()?;
+        let n = scene.get(node)?;
+        let e = match scene.controls.get(node)? {
+            ControlState::TextField(e) | ControlState::TextArea(e) => e,
+            _ => return None,
+        };
+        // display 须与 measure_text_controls 缓存同源（含 composition），否则光标字节偏移对
+        // 不上缓存的 ranges。缓存为空（空 value/placeholder/首帧）→ 无法定位，返 None。
+        let layout = scene.text_layouts.get(node.index())?.as_ref()?.clone();
+        let display = display_value(e, n.kind);
+        if display.is_empty() {
+            return None;
+        }
+        let ranges = line_byte_ranges(&layout, &display);
+        let cur = e.cursor.min(display.len());
+        let (cx, li) = cursor_pixel_x(&layout, &ranges, cur);
+        let line = layout.lines.get(li)?;
+        let rect = n.layout_rect;
+        let off_left = resolve_lp(n.style.taffy_style.border.left)
+            + resolve_lp(n.style.taffy_style.padding.left);
+        // layout 空间 caret 矩形（与 render arm 同公式）。
+        let lx = rect.x + off_left + cx;
+        let ly = rect.y + line.y;
+        let lw = 1.0_f32;
+        let lh = line.height;
+        // 投到世界：左右上角经 world transform。纯平移时 transform 不改宽高；
+        // scale/rotate 时宽高由两点差值吸收（近似矩形，够 IME 候选窗定位用）。
+        let wm = scene
+            .world_transforms
+            .get(node.index())
+            .copied()
+            .unwrap_or(crate::transform::IDENTITY);
+        let (x0, y0) = crate::transform::apply_point(&wm, lx, ly);
+        let (x1, y1) = crate::transform::apply_point(&wm, lx + lw, ly + lh);
+        Some(crate::scene::node::Rect {
+            x: x0.min(x1),
+            y: y0.min(y1),
+            w: (x1 - x0).abs(),
+            h: (y1 - y0).abs(),
+        })
     }
 
     /// 读节点 sort_key（assign_sort_keys 在 merge_meshes 前的 DFS 序号快照）。
