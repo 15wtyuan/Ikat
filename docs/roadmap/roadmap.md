@@ -203,10 +203,14 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 摸黑打通的是"div + 文字 + 图 + flex + cascade"骨架链。之后沿骨架加宽，大致三束，不排死顺序（每束的细化留到摸黑验证完）。加宽的加料方式统一是"core 加语义 + cascade 加伪类 + 后端加对象类"，由 showcase 页面逼出需求，不凭空补理论清单。
 
 **控件束**：progress → input 全家（text/password/number/range/checkbox/radio）→ select/textarea → 滑块/开关。
-> **进度（2026-07-28）**：P1（ProgressBar + Toggle + Slider + RadioButton）✅；**P2（TextField/Password/Search + TextArea + IME）✅** —— leaf 渲染（自渲染文本+光标+选区+composition）+ EditState side table + layout 阶段 measure + 字形位置查询 + 编辑原语（UTF-8）+ 字符输入通道 + 控制键路由 + IME composition（core 标记子串 + 后端采集架构）+ host-callback clipboard + C# 投影 + 围栏 CSS 命中校验。剩 NumberField、Dropdown（select 弹出列表，复合束边界）。IME core 全就绪，**Unity 后端采集（Input.compositionString + KeyList 补 Backspace/Delete/Home/End）待家里机接**。pkg v25。
-- 第一个真正高频改值的控件出现时，**还摸黑期欠的债**：上攒批回写 flush + set_transform 数值 FFI（projection-layer §2）。
+> **进度（2026-07-28）**：P1（ProgressBar + Toggle + Slider + RadioButton）✅；**P2（TextField/Password/Search + TextArea + IME）✅** —— leaf 渲染（自渲染文本+光标+选区+composition）+ EditState side table + layout 阶段 measure + 字形位置查询 + 编辑原语（UTF-8）+ 字符输入通道 + 控制键路由 + IME composition（core 标记子串 + 后端采集架构）+ host-callback clipboard + C# 投影 + 围栏 CSS 命中校验。IME core 全就绪，**Unity 后端采集（Input.compositionString + KeyList 补 Backspace/Delete/Home/End）待家里机接**。pkg v25。
+>
+> **P3（规划中，2026-08）= 控件债收口 + Dropdown 全栈**：一个 spec 一批做掉——① NumberField（数值约束层，TextField 变体）；② 文本控件 getter 缺口（TextField/TextArea 的 ReadOnly/Disabled getter + Blur()，根因是 core FFI 无 `get_control_readonly`/`get_node_disabled`/`blur` 导出，数据 core 齐全）；③ 控件 C# 投影类补齐（OptionItem/Slot/CustomElement，当前 NodeFactory fallback Container）；④ UIStyleException（public-api 声明 4 种异常，Types.cs 缺此）；⑤ 攒批回写 flush（StyleMirror setter 立即过桥改帧末）+ set_transform 接通（FFI 已存在 `loomgui_stage_set_transform`，C# NodeTransform 只写镜像未调 FFI）；⑥ **Dropdown/OptionItem 全栈 + overlay 渲染通道**（见下）。这一批不碰 cascade/attr 主路径。
+>
+> **Dropdown 的前置 = overlay 渲染通道（渲染管线级新基建）**：对照 RmlUi（`temp/RmlUi/Source/Core/Elements/WidgetDropDown.cpp`）实证——RmlUi 靠 `z-index:1` + `visibility:hidden` + `clip:none` 浮层，**LoomGUI 围栏三者全拒**，且 DFS 出序渲染（sort_key = 全局出现计数器，`render/batch.rs`）做不到真正 topmost（popup 溢出父边界会被祖先后续兄弟遮住）。方案：open 的 popup 从正常 DFS 摘出，整树画完后**追加一轮渲染**画最上（不动 z-index 概念，只加「open popups 最后画」规则）。RmlUi 其余机制（双选中态：option.selected + select.value；option 即 select 子节点；Up/Down seek 跳过 disabled；OnValueChange 发 change）可直接迁移。**这是以后所有浮层（tooltip/context-menu/dialog）的公共基建**，不只 Dropdown 用。blitz（`tmp/blitz`）连 select 都没实现（纯 TODO），无参考价值。
+>
+> **P4（后续独立线）= WAI-ARIA 复合控件（TabList/Tree）**：单独立 spec，**因技术线独立**——它牵出 cascade/选择器主路径的基建改动（见 tech-debt `[aria-selected]` 条实证）：① Node 当前不存任意 HTML 属性（`scene/node.rs` 只有 kind/classes/id_attr），aria-* 在 parse 期透传后丢弃 → `[aria-selected="true"]` 选择器能解析但运行时无法匹配；② role 属性纯透传不参与 `resolve_semantic` 分派（`fence/schema/tag.rs`）；③ fence `attr_matches_node`（`style/dynamic.rs`）硬编码只认 `[type=...]`。前置 = Node 加 `attrs` 存储 + attr_matches_node 扩展 + role dispatch 分支。和 P3 的渲染管线改动是两条独立主路径，不宜混进同一 spec（家里机串行验收时互相干扰难定位）。对照 blitz（`accessibility.rs`）实证：role 纯 a11y 透传、不参与布局分派，LoomGUI 照此（role 只做 C# a11y 输出，不强行塞进控件类型分派，除非 role 显式标记复合控件）。
 - 吸收旧 v1.9（TextInput/IME）、v1.12（滑块/进度条）、v1.13（DragDrop/Window/Popup）大部分功能。
-- WAI-ARIA 复合控件（TabList/Tree 等，role dispatch）——签名级结构缺口，单独立项。
 
 **复合束**（三块各是硬骨头，独立推进，不挤一片）：
 - **ListView 虚拟化**：`ul/ol/li/template → ListView/ListItem`，把 driver 层虚拟化（池化/可见区/不等高补偿/content size/reuse key）全吸收进框架。吸收旧 v1.4 + v1.11。
@@ -232,7 +236,11 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
   - **无 `@loom-hook`**：public-api.md §9.3 描述的 `/* @loom-hook name */` 注释锚点，fence 未解析。
 - ✅ **showcase 围栏违规 — RESOLVED**（showcase-package-unblock 2026-07-21）：原 blocker（home `:nth-child` + form/settings 逗号/属性 selector + `resize` 围栏外）已由 fence 扩围（逗号 list / 属性 selector / resize noop）+ showcase nth-child/aria-selected defer 注释解决，`cargo run -p loomgui_pkg -- build showcase` exit 0、8 组件 showcase.pkg.bin 产出。剩余 nth-child / aria-selected / keyframes runtime 见下专门条目。
 - **`:nth-child(N)` selector + `animation-delay` 错峰**（§4 视觉束）：fence 选择器子集本轮不收 `:nth-child(N)`，相关错峰规则 defer 到视觉束与 keyframes runtime 一同落地（pkg v20→v21 reserved）。showcase `home.html` 7 条 `.nav-card:nth-child(N){animation-delay:...}` 已注释（见 home.html TODO）。
-- **`[aria-selected]` state-attr selector**（§4 控件束 TabList）：fence 属性选择器本轮只匹配 `[type=x]`，state-attr 匹配（`[aria-selected="true"]` 等）随 Tab 控件（role dispatch + WAI-ARIA 复合控件）落地。showcase `settings.html` `.tab[aria-selected="true"]` CSS 规则已注释（见 settings.html TODO；HTML `aria-selected` 属性本身 fence 解析正常，仅 CSS 选择器 deferred）。
+- **`[aria-selected]` state-attr selector + Node attrs 存储 + role dispatch**（§4 控件束 P4 TabList/Tree 独立线，2026-08 对照 blitz 实证）：三个串连的前置缺口，都打在 cascade/选择器主路径上——
+  - **① Node 不存任意 HTML 属性**：`crates/core/src/scene/node.rs` 的 `Node` 只有 `kind`/`classes`/`id_attr`，aria-*/data-* 在 parse 期透传后丢弃。后果：`[aria-selected="true"]` 选择器 fence 能解析（`css_rules.rs` AttrOp::Exists/Eq），但运行时 `attr_matches_node`（`style/dynamic.rs:323`）找不到值可比。修法：Node 加 `attrs: HashMap<Atom, String>`（或 BTreeMap），parse 期 aria-/data- 落盘。
+  - **② attr_matches_node 硬编码 `[type=...]`**：`style/dynamic.rs:323-347` 属性选择器匹配只认 type 属性，其他 attr name 直接 `return false`。修法：扩成查 Node.attrs。
+  - **③ role 不参与分派**：`resolve_semantic`（`fence/schema/tag.rs:140`）仅按 tag + input[type]，role 是纯透传属性（`schema/attr.rs:52`）。TabList/Tree 需要 role dispatch 分支（role=tablist/tab/tabpanel → 对应控件语义）。对照 blitz（`tmp/blitz/packages/blitz-dom/src/accessibility.rs`）实证：role 纯 a11y 输出、不参与布局/控件分派，LoomGUI 照此——role 只做 C# a11y 输出，仅复合控件（TabList 等）显式读 role 决定内部行为。
+  - showcase `settings.html` `.tab[aria-selected="true"]` CSS 规则已注释（见 settings.html TODO；HTML `aria-selected` 属性本身 fence 解析正常，仅 CSS 选择器 deferred）。处置路标：P4 TabList/Tree spec 一并落地（Node attrs + attr 匹配 + role dispatch），不进 P3（P3 只碰渲染管线，两条主路径改动不混 spec）。
 - **`Scene::build` data_controller dead 参数**（R2 待办段，签名重构后清）：P1 妥协保留 `Scene::build` 入参里的 data_controller 位，Controller 全链已删但签名未重构。
 - **projection-layer §3 items 2/4 set_style 残留**（R2 待办段）：projection-layer 文档 §3 items 2/4 描述的 set_style 残留，R2 投影层升级攒批时清。
 - **add_class null check gap**（Minor，P2.5）：FFI `add_class` 对 null class 指针的 null-check 守卫缺失（与 P2.5 deferred ② `create_node`/`set_text` null css 同源模式），低风险（业务 caller 不传 null），核心 null-check 修法套用。
