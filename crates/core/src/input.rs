@@ -459,8 +459,30 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                                 crate::scene::control::line_break(e, kind.unwrap(), out, fid);
                                 routed = true;
                             }
-                            // TODO(Task 14): ctrl+C/X/V 需 clipboard FFI。暂不路由——
-                            // ctrl+C/X/V 会透传 keydown（业务可自行读 selection 做剪贴板）。
+                            // ctrl+C：复制选区到剪贴板。不改 value（非破坏性），不发 ValueChanged。
+                            // copy_selection 经 host 回调写剪贴板（未注册回调则 no-op）。
+                            KEY_C if ctrl => {
+                                crate::scene::control::copy_selection(e);
+                                routed = true;
+                            }
+                            // ctrl+X：剪切（复制 + 删选区）。value 改变时发 ValueChanged
+                            // （照 Task 10/11 编辑原语 change 模式）。readonly 时 delete
+                            // 自身 no-op（返 false→不发事件），但复制仍发生（readonly 不阻 copy）。
+                            KEY_X if ctrl => {
+                                if crate::scene::control::cut_selection(e, kind.unwrap()) {
+                                    changed = true;
+                                }
+                                routed = true;
+                            }
+                            // ctrl+V：粘贴（读剪贴板 + insert_text）。insert_text 自带选区替换
+                            // + sanitize + max_length 校验，返 true 才发 ValueChanged。
+                            // 未注册 host 读回调 / 剪贴板空 / readonly → no-op，不发事件。
+                            KEY_V if ctrl => {
+                                if crate::scene::control::paste(e, kind.unwrap()) {
+                                    changed = true;
+                                }
+                                routed = true;
+                            }
                             _ => {}
                         }
                     }

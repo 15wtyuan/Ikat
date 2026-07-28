@@ -511,6 +511,22 @@ pub extern "C" fn loomgui_stage_commit_composition(h: *mut StageHandle, node: u3
     sh.stage.commit_composition(NodeId(node)) as i32
 }
 
+/// 注册宿主剪贴板回调。set_fn/get_fn = 后端实现的剪贴板桥（如 Unity
+/// GUIUtility.systemCopyBuffer）：set 收 (ptr,len) UTF-8 字节拷走，get 写 (out_ptr,out_len)
+/// 返宿主持有的缓冲区（活到下次 get）。传 null 解除注册。
+///
+/// core 是 cdylib，不能 extern 调宿主符号——故走回调注册。后端应在 Stage 启动后尽早
+/// 注册一次。未注册时 Ctrl+C/X 仍走（写丢），Ctrl+V 读空串（no-op）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_register_clipboard(
+    set_fn: Option<unsafe extern "C" fn(*const u8, usize) -> i32>,
+    get_fn: Option<unsafe extern "C" fn(*mut *mut u8, *mut usize) -> i32>,
+) {
+    loomgui_core::scene::control::register_clipboard(set_fn, get_fn);
+}
+
 /// 读文本控件光标的世界矩形（IME 候选窗定位用，照 Unity Input.compositionCursorPos）。
 /// out 指向 [`CursorRectRepr`]（4 个 f32）。返 0 = 成功且 `*out` 已填；1 = 失败（节点无效 /
 /// 非文本控件 / 无缓存 TextLayout / out 为 null）。null 句柄 → -1。

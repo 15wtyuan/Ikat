@@ -594,3 +594,211 @@ fn composition_ffi_null_handle_err() {
         "null handle get_cursor_rect -> -1"
     );
 }
+
+// ===== clipboard (loomgui_register_clipboard + Ctrl+C/X/V routing) =====
+//
+// 剪贴板走 host callback 注册：core 是 cdylib 不能 extern 调宿主，后端注册 set/get 回调。
+// 测试注册一对 Rust fn 做内存 round-trip（不依赖真实系统剪贴板），然后经 set_key_input +
+// tick 驱动 Ctrl+C/X/V，验证 process_keys 路由 + 剪贴板读写 + ValueChanged 事件。
+// 剪贴板测试共享全局 callback 槽 + 测试 buffer，须串行（CLIP_FFI_TEST_LOCK）。
+
+use loomgui_core::input::{KeyEvent, EVT_VALUE_CHANGED, MOD_CTRL};
+use std::sync::Mutex;
+
+/// 串行所有剪贴板 FFI 测试（共享全局 callback + 测试 buffer）。
+static CLIP_FFI_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+/// 测试用剪贴板内容（ffi test_set 写 / ffi test_get 读）。
+static FFI_TEST_CLIP: Mutex<String> = Mutex::new(String::new());
+
+/// test_get 把剪贴板内容 leak 成 'static 切片返稳定指针（host 须持有缓冲区至下次 get；
+/// 测试小量 leak 可接受，避免 dangling / static_mut_refs lint）。
+static FFI_TEST_GET_BYTES: Mutex<&'static [u8]> = Mutex::new(&[]);
+
+/// host 「写剪贴板」回调：拷 (ptr,len) 进 FFI_TEST_CLIP。返 0。
+unsafe extern "C" fn ffi_test_set(ptr: *const u8, len: usize) -> i32 {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    *FFI_TEST_CLIP.lock().unwrap() = String::from_utf8_lossy(bytes).into_owned();
+    0
+}
+
+/// host 「读剪贴板」回调：把 FFI_TEST_CLIP 内容 leak 一份返稳定指针 + len。返 0。
+unsafe extern "C" fn ffi_test_get(out: *mut *mut u8, out_len: *mut usize) -> i32 {
+    let s = FFI_TEST_CLIP.lock().unwrap().clone();
+    let leaked: &'static [u8] = s.into_bytes().leak();
+    *FFI_TEST_GET_BYTES.lock().unwrap() = leaked;
+    unsafe {
+        *out = leaked.as_ptr() as *mut u8;
+        *out_len = leaked.len();
+    }
+    0
+}
+
+/// 注册测试 callback + 取串行锁。返回 (锁 guard)。调方持有至测试体结束。
+fn ffi_clip_setup() -> std::sync::MutexGuard<'static, ()> {
+    let g = CLIP_FFI_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    *FFI_TEST_CLIP.lock().unwrap() = String::new();
+    loomgui_register_clipboard(Some(ffi_test_set), Some(ffi_test_get));
+    g
+}
+
+/// 建根 div + 一个聚焦的 TextField（kind 真为 TextField + 初始 value + 可选选区）。
+///
+/// process_keys 检查 `n.kind == TextField/TextArea` 才路由控制键——helper 创建的 div 节点
+/// kind 是 Container，须手工把 kind 改成 TextField（control state 已注入但 kind 未同步）。
+/// selection = Some((anchor, cursor)) 设选区；None 则 cursor/anchor 在末尾（from_init 默认）。
+fn make_stage_with_focused_textfield_selection(
+    value: &str,
+    selection: Option<(usize, usize)>,
+) -> (*mut StageHandle, u32) {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    let tf = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(tf, 0xFFFF_FFFF, "create textfield node ok");
+    loomgui_stage_append_child(h, root, tf);
+    let sh = unsafe { &mut *h };
+    let scene = sh.stage.scene.as_mut().expect("scene built");
+    let mut e = EditState::from_init(value.into(), String::new(), 0, false);
+    if let Some((anchor, cursor)) = selection {
+        e.anchor = anchor;
+        e.cursor = cursor;
+    }
+    scene
+        .controls
+        .ensure(NodeId(tf), ControlState::TextField(e));
+    // process_keys 验 kind——div 节点 kind=Container，手工改成 TextField 让控制键路由生效。
+    if let Some(n) = scene.get_mut(NodeId(tf)) {
+        n.kind = NodeKind::TextField;
+    }
+    scene.focused_node = Some(NodeId(tf));
+    (h, tf)
+}
+
+/// 推一个 keydown 事件 + tick。tick 后 last_events 更新。
+fn send_keydown_tick(h: *mut StageHandle, key_code: u32, modifiers: u8) {
+    let ke = KeyEvent {
+        key_code,
+        modifiers,
+        is_down: true,
+        pad: [0, 0],
+    };
+    loomgui_stage_set_key_input(h, &ke, 1);
+    loomgui_stage_tick(h, 0.0);
+}
+
+/// 读本帧事件列表（拷贝出来解借 stage 句柄）。borrow_events 的 out_len 是事件元素数
+/// （非字节数——FFI 文档「C 侧按 len * sizeof(EventRecord) 切片读」），直接当 count 用。
+fn drain_events(h: *const StageHandle) -> Vec<EventRecord> {
+    let mut len = 0usize;
+    let ptr = loomgui_stage_borrow_events(h, &mut len);
+    if ptr.is_null() || len == 0 {
+        return Vec::new();
+    }
+    // len = 事件数（非字节）。直接构造切片。
+    let slice = unsafe { std::slice::from_raw_parts(ptr as *const EventRecord, len) };
+    slice.to_vec()
+}
+
+/// Ctrl+C 复制选区到剪贴板，不改 value，不发 ValueChanged。
+#[test]
+fn ffi_ctrl_c_copies_selection() {
+    let _g = ffi_clip_setup();
+    let (h, tf) = make_stage_with_focused_textfield_selection("hello", Some((0, 3)));
+    send_keydown_tick(h, loomgui_core::input::KEY_C, MOD_CTRL);
+    assert_eq!(
+        textfield_value(h, tf),
+        "hello",
+        "copy does not change value"
+    );
+    assert_eq!(*FFI_TEST_CLIP.lock().unwrap(), "hel", "clipboard filled");
+    // Ctrl+C 不发 ValueChanged（copy 非破坏）。
+    let events = drain_events(h);
+    assert!(
+        events.iter().all(|e| e.event_type != EVT_VALUE_CHANGED),
+        "Ctrl+C emits no ValueChanged"
+    );
+    loomgui_stage_free(h);
+}
+
+/// Ctrl+X 剪切：选区进剪贴板 + value 删除 + 发 ValueChanged。
+#[test]
+fn ffi_ctrl_x_cuts_and_emits_value_changed() {
+    let _g = ffi_clip_setup();
+    let (h, tf) = make_stage_with_focused_textfield_selection("hello", Some((1, 4)));
+    send_keydown_tick(h, loomgui_core::input::KEY_X, MOD_CTRL);
+    assert_eq!(textfield_value(h, tf), "ho", "selection removed by cut");
+    assert_eq!(
+        *FFI_TEST_CLIP.lock().unwrap(),
+        "ell",
+        "clipboard has cut text"
+    );
+    let events = drain_events(h);
+    assert!(
+        events
+            .iter()
+            .any(|e| e.event_type == EVT_VALUE_CHANGED && e.node_id == tf),
+        "Ctrl+X emits ValueChanged when value changes"
+    );
+    loomgui_stage_free(h);
+}
+
+/// Ctrl+V 粘贴：把剪贴板插到光标，value 改变 + 发 ValueChanged。
+#[test]
+fn ffi_ctrl_v_pastes_and_emits_value_changed() {
+    let _g = ffi_clip_setup();
+    *FFI_TEST_CLIP.lock().unwrap() = "hi".into();
+    let (h, tf) = make_stage_with_focused_textfield_selection("XY", None);
+    send_keydown_tick(h, loomgui_core::input::KEY_V, MOD_CTRL);
+    assert_eq!(textfield_value(h, tf), "XYhi", "clipboard pasted at cursor");
+    let events = drain_events(h);
+    assert!(
+        events
+            .iter()
+            .any(|e| e.event_type == EVT_VALUE_CHANGED && e.node_id == tf),
+        "Ctrl+V emits ValueChanged when value changes"
+    );
+    loomgui_stage_free(h);
+}
+
+/// Ctrl+A 全选（Task 10 已有）+ Ctrl+C 复制：验证两步组合工作。
+#[test]
+fn ffi_ctrl_a_then_ctrl_c_copies_all() {
+    let _g = ffi_clip_setup();
+    let (h, tf) = make_stage_with_focused_textfield_selection("hello", None);
+    // Ctrl+A 全选（cursor/anchor → 0..len），再 Ctrl+C 复制。
+    send_keydown_tick(h, loomgui_core::input::KEY_A, MOD_CTRL);
+    send_keydown_tick(h, loomgui_core::input::KEY_C, MOD_CTRL);
+    assert_eq!(textfield_value(h, tf), "hello", "value unchanged");
+    assert_eq!(
+        *FFI_TEST_CLIP.lock().unwrap(),
+        "hello",
+        "whole value copied"
+    );
+    loomgui_stage_free(h);
+}
+
+/// 未注册回调时 Ctrl+V 读空串 → no-op（value 不变），不 panic。
+#[test]
+fn ffi_ctrl_v_noop_when_clipboard_unregistered() {
+    let _g = CLIP_FFI_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    loomgui_register_clipboard(None, None);
+    let (h, tf) = make_stage_with_focused_textfield_selection("XY", None);
+    send_keydown_tick(h, loomgui_core::input::KEY_V, MOD_CTRL);
+    assert_eq!(
+        textfield_value(h, tf),
+        "XY",
+        "paste no-op without clipboard registration"
+    );
+    loomgui_stage_free(h);
+    // 复原测试 callback。
+    loomgui_register_clipboard(Some(ffi_test_set), Some(ffi_test_get));
+}
+
+/// loomgui_register_clipboard 是 process-scoped 全局——测完须清理，防污染其他测试。
+/// 此测试放最后，重注册成 ffi_test_* 以保全局处于已知态（防御性，非断言驱动）。
+#[test]
+fn ffi_clipboard_global_left_registered() {
+    let _g = CLIP_FFI_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    loomgui_register_clipboard(Some(ffi_test_set), Some(ffi_test_get));
+}

@@ -16,6 +16,12 @@ namespace LoomGUI.Bindings
 
 
 
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate int loomgui_register_clipboard_get_fn_delegate(byte** arg1, nuint* arg2);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate int loomgui_register_clipboard_set_fn_delegate(byte* arg1, nuint arg2);
+
 
 
         /// <summary>
@@ -216,6 +222,19 @@ namespace LoomGUI.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_commit_composition", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_commit_composition(StageHandle* h, uint node);
+
+        /// <summary>
+        ///  注册宿主剪贴板回调。set_fn/get_fn = 后端实现的剪贴板桥（如 Unity
+        ///  GUIUtility.systemCopyBuffer）：set 收 (ptr,len) UTF-8 字节拷走，get 写 (out_ptr,out_len)
+        ///  返宿主持有的缓冲区（活到下次 get）。传 null 解除注册。
+        ///
+        ///  core 是 cdylib，不能 extern 调宿主符号——故走回调注册。后端应在 Stage 启动后尽早
+        ///  注册一次。未注册时 Ctrl+C/X 仍走（写丢），Ctrl+V 读空串（no-op）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_register_clipboard", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_register_clipboard(loomgui_register_clipboard_set_fn_delegate set_fn, loomgui_register_clipboard_get_fn_delegate get_fn);
 
         /// <summary>
         ///  读文本控件光标的世界矩形（IME 候选窗定位用，照 Unity Input.compositionCursorPos）。

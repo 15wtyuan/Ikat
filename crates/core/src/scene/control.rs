@@ -883,6 +883,95 @@ pub fn commit_composition(e: &mut EditState, kind: NodeKind) -> bool {
     insert_text(e, kind, &comp.text)
 }
 
+// ── 剪贴板（host callback 注册模式） ──────────────────────────────
+//
+// core 是 cdylib，不能 extern 调宿主剪贴板（Unity GUIUtility.systemCopyBuffer / Win32
+// clipboard）——宿主符号在 core 链接期不可解析，且 C# 宿主无法提供 linkable C 符号。
+// 故由后端在启动时经 FFI `loomgui_register_clipboard` 注册一对 set/get 函数指针，core
+// 经这两指针间接调。未注册时 write_clipboard no-op、read_clipboard 返空串（防宿主未接线
+// 时 panic）。
+//
+// 内存契约：get 回调返的缓冲区由宿主持有（至少活到下次 get 调用）；core 立即拷成 String，
+// 不释放（避免跨分配器 free）。set 回调收 (ptr,len)，宿主在调用期间拷走，ptr 不需宿主释放。
+
+use std::sync::Mutex;
+
+/// 宿主「写剪贴板」回调签名。收 (ptr,len) 指向合法 UTF-8 字节，宿主拷走；返 0=成功。
+pub type ClipboardSetFn = unsafe extern "C" fn(*const u8, usize) -> i32;
+/// 宿主「读剪贴板」回调签名。宿主写 (out_ptr,out_len)，缓冲区宿主持有（活到下次 get）；
+/// 返 0=成功。非 0 / null ptr 视作空。
+pub type ClipboardGetFn = unsafe extern "C" fn(*mut *mut u8, *mut usize) -> i32;
+
+/// 注册的回调槽。Option：None = 未注册（no-op）。Mutex 包串行注册/读写的并发安全。
+static CLIPBOARD_SET: Mutex<Option<ClipboardSetFn>> = Mutex::new(None);
+static CLIPBOARD_GET: Mutex<Option<ClipboardGetFn>> = Mutex::new(None);
+
+/// 注册宿主剪贴板回调（FFI 层 `loomgui_register_clipboard` 调）。传 None 可注销。
+/// 重复注册覆盖旧值（测试需重注册）。后端应在 Stage 启动后尽早注册一次。
+pub fn register_clipboard(set_fn: Option<ClipboardSetFn>, get_fn: Option<ClipboardGetFn>) {
+    *CLIPBOARD_SET.lock().unwrap() = set_fn;
+    *CLIPBOARD_GET.lock().unwrap() = get_fn;
+}
+
+/// 读剪贴板。未注册 get 回调 / 回调返非 0 / null ptr / 非 UTF-8 → 返空串（no-op 不 panic）。
+/// 宿主缓冲区立即拷成 String（缓冲区宿主持有，见 [`ClipboardGetFn`] 契约）。
+pub fn read_clipboard() -> String {
+    // 拷出 fn 指针再解锁，回调在锁外调（防回调内再 lock 造成重入死锁）。
+    let Some(get) = *CLIPBOARD_GET.lock().unwrap() else {
+        return String::new();
+    };
+    let mut ptr: *mut u8 = std::ptr::null_mut();
+    let mut len: usize = 0;
+    // SAFETY: 宿主保证 rc=0 且 ptr 非空时 [ptr, ptr+len) 是合法字节切片。
+    let rc = unsafe { get(&mut ptr, &mut len) };
+    if rc != 0 || ptr.is_null() || len == 0 {
+        return String::new();
+    }
+    // SAFETY: len 由宿主给出，已在上面非零校验；ptr 非空。
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// 写剪贴板。未注册 set 回调 → no-op（不 panic）。
+pub fn write_clipboard(s: &str) {
+    // 拷出 fn 指针再解锁，回调在锁外调。
+    if let Some(set) = *CLIPBOARD_SET.lock().unwrap() {
+        // SAFETY: 传 (ptr,len) 指向 s 的合法 UTF-8 字节，宿主在调用期间拷走。
+        unsafe { set(s.as_ptr(), s.len()) };
+    }
+}
+
+/// 当前选区文本（无选区 → 空串）。选区字节区间必落在 UTF-8 char 边界（selection_range
+/// 返回的是 cursor/anchor 的 min/max，二者均由编辑原语维护在 char 边界）。
+pub fn selected_text(e: &EditState) -> String {
+    let (b, end) = e.selection_range();
+    e.value[b..end].to_string()
+}
+
+/// 复制选区到剪贴板，返回选区文本。无选区 → 写空串 + 返空串（照 HTML：copy 空选区无副作用）。
+/// 不改 value（copy 是非破坏性）。
+pub fn copy_selection(e: &EditState) -> String {
+    let s = selected_text(e);
+    write_clipboard(&s);
+    s
+}
+
+/// 剪切选区：先复制到剪贴板再 [`delete_selection`]。返回 value 是否改变。
+/// readonly → 复制仍发生（照 HTML：readonly 不阻止 copy），但 [`delete_selection`] 自身
+/// 在 readonly 时 no-op 返 false（照 HTML disabled/readonly）。
+/// `kind` 未使用（delete_selection 只动选区），保留参数为与 [`paste`] API 对称。
+pub fn cut_selection(e: &mut EditState, _kind: NodeKind) -> bool {
+    let s = selected_text(e);
+    write_clipboard(&s);
+    delete_selection(e)
+}
+
+/// 粘贴：读剪贴板后 [`insert_text`]（自带选区替换 + sanitize + max_length 校验）。
+/// 返回 value 是否改变。readonly / 剪贴板空 / 超 max_length → no-op 返 false。
+pub fn paste(e: &mut EditState, kind: NodeKind) -> bool {
+    insert_text(e, kind, &read_clipboard())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2045,5 +2134,181 @@ mod tests {
         // display_value 随之返 None 区间（无下划线 / 候选窗）。
         let (_display, range) = display_value(&e, NodeKind::TextField);
         assert!(range.is_none());
+    }
+
+    // ── 剪贴板原语（copy/cut/paste + host callback 注册） ──
+    //
+    // core 是 cdylib，不能 extern 调宿主剪贴板（Unity GUIUtility.systemCopyBuffer），故走
+    // host callback 注册：测试注册一对 Rust fn（匹配 ClipboardSetFn/GetFn 签名）做内存中
+    // round-trip，不依赖真实系统剪贴板。剪贴板测试共享全局 callback 槽 + 全局测试 buffer，
+    // 须串行（cargo test 默认多线程并行）——用 CLIP_TEST_LOCK 把所有剪贴板测试串成独占段，
+    // 防并发注册/读写互踩。锁取 poison-tolerant 访问（前测 panic 不连坐后测）。
+
+    use std::sync::atomic::Ordering;
+    use std::sync::Mutex;
+
+    /// 串行所有剪贴板测试（共享全局 callback + 测试 buffer，必须独占）。
+    static CLIP_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// 测试用剪贴板内容（test_set 写 / test_get 读）。
+    static TEST_CLIP: Mutex<String> = Mutex::new(String::new());
+
+    /// test_get 把剪贴板内容 leak 成 'static 切片返回稳定指针——host 须持有缓冲区至下次 get
+    /// （见 ClipboardGetFn 契约）；测试小量 leak 可接受，避免 dangling / static_mut_refs lint。
+    static TEST_GET_BYTES: Mutex<&'static [u8]> = Mutex::new(&[]);
+
+    /// test_get 写回泄漏字节长度（'static 切片 len 在 leak 时固定，存一份供 read 校验）。
+    static TEST_GET_LEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    /// host 「写剪贴板」回调：拷贝 (ptr,len) 进 TEST_CLIP。返 0。
+    unsafe extern "C" fn test_set(ptr: *const u8, len: usize) -> i32 {
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+        *TEST_CLIP.lock().unwrap() = String::from_utf8_lossy(bytes).into_owned();
+        0
+    }
+
+    /// host 「读剪贴板」回调：把 TEST_CLIP 内容 leak 一份返稳定指针 + len。返 0。
+    /// leak 进 TEST_GET_BYTES 持有 'static 引用防回收；长度另存 TEST_GET_LEN。
+    unsafe extern "C" fn test_get(out: *mut *mut u8, out_len: *mut usize) -> i32 {
+        let s = TEST_CLIP.lock().unwrap().clone();
+        let leaked: &'static [u8] = s.into_bytes().leak();
+        TEST_GET_LEN.store(leaked.len(), Ordering::SeqCst);
+        *TEST_GET_BYTES.lock().unwrap() = leaked;
+        unsafe {
+            *out = leaked.as_ptr() as *mut u8;
+            *out_len = leaked.len();
+        }
+        0
+    }
+
+    /// 注册测试 callback 并取串行锁。返回锁 guard（测试体内持有）。结束时 register(None)
+    /// 清回调槽（下个剪贴板测试从干净态开始）。
+    fn clip_test_setup() -> std::sync::MutexGuard<'static, ()> {
+        let g = CLIP_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        *TEST_CLIP.lock().unwrap() = String::new();
+        register_clipboard(Some(test_set), Some(test_get));
+        g
+    }
+
+    #[test]
+    fn selected_text_returns_selection() {
+        let _g = clip_test_setup();
+        // value "hello", 选区 [0,3)="hel"。
+        let mut e = EditState::from_init("hello".into(), "".into(), 0, false);
+        e.anchor = 0;
+        e.cursor = 3;
+        assert_eq!(selected_text(&e), "hel");
+    }
+
+    #[test]
+    fn selected_text_empty_when_no_selection() {
+        let _g = clip_test_setup();
+        // 无选区（anchor==cursor）→ 空串。
+        let e = EditState::from_init("hello".into(), "".into(), 0, false);
+        assert_eq!(selected_text(&e), "");
+    }
+
+    #[test]
+    fn copy_selection_fills_clipboard() {
+        let _g = clip_test_setup();
+        let mut e = EditState::from_init("hello".into(), "".into(), 0, false);
+        e.anchor = 0;
+        e.cursor = 3;
+        let s = copy_selection(&e);
+        assert_eq!(s, "hel");
+        // host callback 把 "hel" 写进 TEST_CLIP。
+        assert_eq!(*TEST_CLIP.lock().unwrap(), "hel");
+        assert_eq!(e.value, "hello", "copy does not mutate value");
+    }
+
+    #[test]
+    fn cut_selection_copies_and_deletes() {
+        let _g = clip_test_setup();
+        let mut e = EditState::from_init("hello".into(), "".into(), 0, false);
+        e.anchor = 1;
+        e.cursor = 4; // 选区 [1,4)="ell"
+        assert!(cut_selection(&mut e, NodeKind::TextField));
+        assert_eq!(e.value, "ho", "selection removed");
+        assert_eq!(
+            *TEST_CLIP.lock().unwrap(),
+            "ell",
+            "clipboard filled with cut text"
+        );
+        assert_eq!(e.cursor, 1, "cursor at selection start after cut");
+    }
+
+    #[test]
+    fn cut_selection_noop_without_selection() {
+        let _g = clip_test_setup();
+        let mut e = EditState::from_init("abc".into(), "".into(), 0, false);
+        // 无选区 → delete_selection 返 false（cut 返 false），value 不变。
+        assert!(!cut_selection(&mut e, NodeKind::TextField));
+        assert_eq!(e.value, "abc");
+    }
+
+    #[test]
+    fn paste_inserts_clipboard_at_cursor() {
+        let _g = clip_test_setup();
+        *TEST_CLIP.lock().unwrap() = "hi".into();
+        let mut e = EditState::from_init("XY".into(), "".into(), 0, false);
+        // 光标在末尾（from_init 默认）→ 插 "hi" → "XYhi"。
+        assert!(paste(&mut e, NodeKind::TextField));
+        assert_eq!(e.value, "XYhi");
+    }
+
+    #[test]
+    fn paste_replaces_selection() {
+        let _g = clip_test_setup();
+        *TEST_CLIP.lock().unwrap() = "QQ".into();
+        let mut e = EditState::from_init("hello".into(), "".into(), 0, false);
+        e.anchor = 1;
+        e.cursor = 4; // 选区 "ell"
+        assert!(paste(&mut e, NodeKind::TextField));
+        assert_eq!(e.value, "hQQo", "selection replaced with clipboard");
+    }
+
+    #[test]
+    fn cut_then_paste_roundtrip() {
+        let _g = clip_test_setup();
+        // 完整 round-trip：cut 把 "ell" 进剪贴板 + 删（value "hello"→"ho"，cursor=1），
+        // paste 在 cursor=1 插 "ell" → "h"+"ell"+"o" = "hello"（原地 cut/paste 还原原文，
+        // insert_str(idx,...) 在 idx 前插入，把原本的 'o' 推到末尾）。这是 std insert_str 语义，
+        // 非逻辑错误——cut 后 paste 在同一位置插回选区文本，等价于撤销删除。
+        let mut e = EditState::from_init("hello".into(), "".into(), 0, false);
+        e.anchor = 1;
+        e.cursor = 4;
+        assert!(cut_selection(&mut e, NodeKind::TextField));
+        assert_eq!(e.value, "ho");
+        assert!(paste(&mut e, NodeKind::TextField));
+        assert_eq!(
+            e.value, "hello",
+            "paste at the cut gap reinserts text in place"
+        );
+        assert_eq!(e.cursor, 4, "cursor advanced past pasted text");
+    }
+
+    #[test]
+    fn read_clipboard_empty_when_unregistered() {
+        // 注销 callback 后 read_clipboard 返空串（no-op，不 panic）。
+        let _g = CLIP_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        register_clipboard(None, None);
+        assert_eq!(read_clipboard(), "");
+        // 复原（注册回测试 callback，防污染后续测试）。
+        register_clipboard(Some(test_set), Some(test_get));
+    }
+
+    #[test]
+    fn write_clipboard_noop_when_unregistered() {
+        // 注销 set 后 write_clipboard 是 no-op（不 panic），TEST_CLIP 不被写。
+        let _g = CLIP_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        *TEST_CLIP.lock().unwrap() = "sentinel".into();
+        register_clipboard(None, None);
+        write_clipboard("ignored");
+        assert_eq!(
+            *TEST_CLIP.lock().unwrap(),
+            "sentinel",
+            "unregistered write is no-op"
+        );
+        register_clipboard(Some(test_set), Some(test_get));
     }
 }
