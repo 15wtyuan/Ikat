@@ -1148,6 +1148,7 @@ fn make_dropdown_stage(selected: usize, open: bool) -> (*mut StageHandle, u32) {
         ControlState::Dropdown {
             selected_index: selected,
             open,
+            open_selected_index: if open { Some(selected) } else { None },
             value_lock: false,
         },
     );

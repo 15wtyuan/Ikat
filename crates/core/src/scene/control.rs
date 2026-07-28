@@ -446,15 +446,23 @@ fn open_dropdown(scene: &mut Scene, select: NodeId) {
     }
 }
 
-/// 收起 Dropdown：open=false + 清 open_selected_index。不发事件（open/close 无事件常量，
-/// host 轮询 `open` 读状态）。selected_index 不变（由调用方在收起前定值）。
-fn close_dropdown(scene: &mut Scene, select: NodeId) {
+/// 收起 Dropdown（取消语义）：open=false + 把 selected_index 回滚到 open_selected_index
+/// （展开时刻快照，丢弃键盘导航的未提交高亮）+ 清 open_selected_index。不发事件——
+/// 这是一次取消：Up/Down 只移动高亮不提交，未发 SelectionChanged；收起时应还原到展开
+/// 时刻的值。所有非提交收起路径都走这里（Esc / header toggle / outside-click），保证取消
+/// 语义一致。提交路径（commit_dropdown_selection：Enter / 点 option）保留新 selected_index
+/// 并发 SelectionChanged，不经本函数。open/close 无事件常量，host 轮询 `open` 读状态。
+pub(crate) fn close_dropdown(scene: &mut Scene, select: NodeId) {
     if let Some(ControlState::Dropdown {
+        selected_index,
         open,
         open_selected_index,
         ..
     }) = scene.controls.get_mut(select)
     {
+        if let Some(prev) = *open_selected_index {
+            *selected_index = prev;
+        }
         *open = false;
         *open_selected_index = None;
     }
@@ -520,21 +528,8 @@ pub(crate) fn on_dropdown_key(
             true
         }
         KEY_ESCAPE => {
-            // 先读快照（不可变借），再回滚 selected_index + 收起（可变借）。
-            let revert_to = match scene.controls.get(select) {
-                Some(ControlState::Dropdown {
-                    open_selected_index,
-                    ..
-                }) => *open_selected_index,
-                _ => None,
-            };
-            if let Some(prev) = revert_to {
-                if let Some(ControlState::Dropdown { selected_index, .. }) =
-                    scene.controls.get_mut(select)
-                {
-                    *selected_index = prev;
-                }
-            }
+            // 取消：close_dropdown 回滚 selected_index 到 open_selected_index 快照
+            // 并收起（不发事件——回滚后净变=0；照 RmlUi CancelSelectBox）。
             close_dropdown(scene, select);
             true
         }

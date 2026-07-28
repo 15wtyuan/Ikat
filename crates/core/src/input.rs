@@ -289,12 +289,14 @@ fn is_in_subtree(scene: &Scene, target: Option<NodeId>, ancestor: NodeId) -> boo
 }
 
 /// outside-click close：pointer-down 命中不在任何 open Dropdown 的 select 子树内 → 收起那些
-/// dropdown（open=false）。select 子树 = select 本身 + .loom-value/.loom-popup（含 option）
-/// 后代。点击 option（popup 内）不算 outside → 不收起（option 选中由其 click EVT 驱动，
-/// 单独任务）。点击 select header 同理不收起（header 点击是 toggle，单独任务）。
+/// dropdown。select 子树 = select 本身 + .loom-value/.loom-popup（含 option）后代。点击
+/// option（popup 内）不算 outside → 不收起（option 选中由其 click EVT 驱动）。点击 select
+/// header 同理不收起（header 点击是 toggle）。
 ///
-/// 仅置 open=false：sync_control_visuals 下 tick 据 open 收起 popup display（display:none）。
-/// 不发新 EVT——无现有 open/close 事件常量，host 经轮询 `open` 读状态（与其它控件状态读取同源）。
+/// 收起走 close_dropdown（取消语义）：open=false + 把 selected_index 回滚到展开时刻快照
+/// （open_selected_index）+ 清快照。键盘导航（Up/Down）只移动高亮不提交，未发
+/// SelectionChanged；outside-click 是一次取消，必须还原 selected_index，否则 host 读到
+/// 改动却无事件通知（违反 SelectionChanged 事件契约）。不发新 EVT——回滚后净变=0。
 /// 调用点：PointerState::process 的 Down 臂（hit 计算后、down_targets 填后）。
 fn close_outside_dropdowns(scene: &mut Scene, hit: Option<NodeId>) {
     // 先收集所有 open Dropdown 的 select id（不可变借），再判定 + 收起（可变借），避免借用冲突。
@@ -314,9 +316,7 @@ fn close_outside_dropdowns(scene: &mut Scene, hit: Option<NodeId>) {
         .collect();
     for select in open_selects {
         if !is_in_subtree(scene, hit, select) {
-            if let Some(ControlState::Dropdown { open, .. }) = scene.controls.get_mut(select) {
-                *open = false;
-            }
+            crate::scene::control::close_dropdown(scene, select);
         }
     }
 }

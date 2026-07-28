@@ -4919,3 +4919,133 @@ fn keyboard_ignored_when_dropdown_closed() {
         "closed 时 Down 透传为 keydown（不路由）"
     );
 }
+
+// === 非 commit 收起路径必须回滚 selected_index（cancel 语义一致性回归） ===
+// 契约：Up/Down 只移动高亮不提交、不发 SelectionChanged。所有非提交收起路径
+//（Esc / header-toggle / outside-click）都必须把 selected_index 回滚到展开时刻快照
+//（open_selected_index），否则 host 读到改动却收不到事件（违反 SelectionChanged 事件契约）。
+// 提交路径（Enter / 点 option）保留新值并发事件——见 enter_after_keyboard_nav_commits。
+
+#[test]
+fn header_toggle_close_after_keyboard_nav_reverts_selection() {
+    // open 在 A(0) → Down 高亮到 B(1) → 点 header 收起（toggle）。
+    // 期望：收起（open=false）、selected_index 回滚到 0（A）、open_selected_index 清 None、
+    // 不发 SelectionChanged（这是一次取消，A→B 未提交）。
+    let (mut s, select, _popup, _opts) = dropdown_scene(&[("A", false), ("B", false)], 0, true);
+    focus_node(&mut s, Some(select), &mut Vec::new());
+    let mut out = Vec::new();
+    process_keys(&mut s, &[key_down(KEY_DOWN)], &mut out); // 高亮到 B
+    assert_eq!(dropdown_selected(&s, select), 1, "Down 移高亮到 B");
+    out.clear();
+    // 点 select header（toggle 收起）。
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: 70.0,
+            y: 25.0, // select header 中心 (10,10,120,30)
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert!(!dropdown_open(&s, select), "header toggle 收起");
+    assert_eq!(
+        dropdown_selected(&s, select),
+        0,
+        "收起回滚 selected_index 到展开时刻快照 A（cancel 语义）"
+    );
+    assert_eq!(
+        dropdown_open_selected(&s, select),
+        None,
+        "收起后 open_selected_index 清 None"
+    );
+    assert!(
+        out.iter().all(|e| e.event_type != EVT_SELECTION_CHANGED),
+        "未提交的 A→B 不发 SelectionChanged"
+    );
+}
+
+#[test]
+fn outside_click_after_keyboard_nav_reverts_selection() {
+    // open 在 A(0) → Down 高亮到 B(1) → 点 select 子树外收起。
+    // 期望：收起（open=false）、selected_index 回滚到 0（A）、open_selected_index 清 None、
+    // 不发 SelectionChanged。
+    let (mut s, select, _popup, _opts) = dropdown_scene(&[("A", false), ("B", false)], 0, true);
+    focus_node(&mut s, Some(select), &mut Vec::new());
+    let mut out = Vec::new();
+    process_keys(&mut s, &[key_down(KEY_DOWN)], &mut out); // 高亮到 B
+    assert_eq!(dropdown_selected(&s, select), 1, "Down 移高亮到 B");
+    out.clear();
+    // 点 select 子树外（root 区域，不在 select/.loom-popup 内）。
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: 300.0,
+            y: 300.0, // select 子树外
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert!(!dropdown_open(&s, select), "outside-click 收起");
+    assert_eq!(
+        dropdown_selected(&s, select),
+        0,
+        "收起回滚 selected_index 到展开时刻快照 A（cancel 语义）"
+    );
+    assert_eq!(
+        dropdown_open_selected(&s, select),
+        None,
+        "收起后 open_selected_index 清 None（之前 stale）"
+    );
+    assert!(
+        out.iter().all(|e| e.event_type != EVT_SELECTION_CHANGED),
+        "未提交的 A→B 不发 SelectionChanged"
+    );
+}
+
+#[test]
+fn enter_after_keyboard_nav_commits() {
+    // 提交路径对照：open 在 A(0) → Down 高亮到 B(1) → Enter 提交。
+    // 期望：selected_index=1（B，保留新值）、open=false、open_selected_index 清 None、
+    // value_lock=true、发 SelectionChanged@select payload=index 1。
+    // （与 cancel 路径对照：commit 保留新值并发事件，cancel 回滚不发事件。）
+    let (mut s, select, _popup, _opts) = dropdown_scene(&[("A", false), ("B", false)], 0, true);
+    focus_node(&mut s, Some(select), &mut Vec::new());
+    let mut out = Vec::new();
+    process_keys(&mut s, &[key_down(KEY_DOWN)], &mut out); // 高亮到 B
+    assert_eq!(dropdown_selected(&s, select), 1, "Down 移高亮到 B");
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_RETURN)], &mut out);
+    assert_eq!(
+        dropdown_selected(&s, select),
+        1,
+        "Enter 提交保留新值 B（commit 语义）"
+    );
+    assert!(!dropdown_open(&s, select), "Enter 收起");
+    assert_eq!(
+        dropdown_open_selected(&s, select),
+        None,
+        "收起后 open_selected_index 清 None"
+    );
+    assert!(
+        matches!(
+            s.controls.get(select),
+            Some(ControlState::Dropdown {
+                value_lock: true,
+                ..
+            })
+        ),
+        "value_lock=true（防反馈环）"
+    );
+    assert!(
+        out.iter().any(|e| e.event_type == EVT_SELECTION_CHANGED
+            && e.node_id == select.0
+            && e.touch_id == 1),
+        "commit 发 SelectionChanged@select，payload=index 1"
+    );
+}
