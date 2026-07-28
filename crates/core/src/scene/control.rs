@@ -948,21 +948,29 @@ pub fn selected_text(e: &EditState) -> String {
     e.value[b..end].to_string()
 }
 
-/// 复制选区到剪贴板，返回选区文本。无选区 → 写空串 + 返空串（照 HTML：copy 空选区无副作用）。
-/// 不改 value（copy 是非破坏性）。
+/// 复制选区到剪贴板，返回选区文本。无选区 → 直接返空串，不碰剪贴板
+///（照 HTML/浏览器：Ctrl+C 无选区时 no-op，不清空系统剪贴板）。
+/// 有选区 → 写剪贴板并返回选区文本。不改 value（copy 是非破坏性）。
 pub fn copy_selection(e: &EditState) -> String {
+    if e.anchor == e.cursor {
+        return String::new();
+    }
     let s = selected_text(e);
     write_clipboard(&s);
     s
 }
 
-/// 剪切选区：先复制到剪贴板再 [`delete_selection`]。返回 value 是否改变。
-/// readonly → 复制仍发生（照 HTML：readonly 不阻止 copy），但 [`delete_selection`] 自身
-/// 在 readonly 时 no-op 返 false（照 HTML disabled/readonly）。
+/// 剪切选区：先复制到剪贴板，再在非 readonly 时 [`delete_selection`]。返回 value 是否改变。
+/// 照 HTML：readonly 不阻止 copy，但禁止修改——故复制永远发生，删除受 readonly 守卫
+///（readonly 时 copy 后直接返 false，不动 value、不发 ValueChanged）。无选区时
+/// copy 也是 no-op（见 [`copy_selection`]）。
 /// `kind` 未使用（delete_selection 只动选区），保留参数为与 [`paste`] API 对称。
 pub fn cut_selection(e: &mut EditState, _kind: NodeKind) -> bool {
     let s = selected_text(e);
-    write_clipboard(&s);
+    write_clipboard(&s); // 复制永远发生（readonly 允许 copy）
+    if e.readonly {
+        return false; // readonly 禁止删除
+    }
     delete_selection(e)
 }
 
@@ -2244,6 +2252,24 @@ mod tests {
         // 无选区 → delete_selection 返 false（cut 返 false），value 不变。
         assert!(!cut_selection(&mut e, NodeKind::TextField));
         assert_eq!(e.value, "abc");
+    }
+
+    #[test]
+    fn cut_selection_readonly_copies_but_does_not_delete() {
+        // 照 HTML：readonly 允许 copy、禁止修改。Ctrl+X 在 readonly 字段上应复制选区
+        // 到剪贴板，但不删 value、不发 ValueChanged（cut 返 false），选区保持不变。
+        let _g = clip_test_setup();
+        let mut e = EditState::from_init("hello".into(), "".into(), 0, true); // readonly
+        e.anchor = 1;
+        e.cursor = 4; // 选区 [1,4)="ell"
+        assert!(
+            !cut_selection(&mut e, NodeKind::TextField),
+            "readonly cut returns false (no mutation)"
+        );
+        assert_eq!(e.value, "hello", "readonly value untouched");
+        assert_eq!(e.anchor, 1, "selection anchor intact");
+        assert_eq!(e.cursor, 4, "selection cursor intact");
+        assert_eq!(*TEST_CLIP.lock().unwrap(), "ell", "copy still happened");
     }
 
     #[test]
