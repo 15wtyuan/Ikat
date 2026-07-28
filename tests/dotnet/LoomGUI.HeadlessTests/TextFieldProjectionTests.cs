@@ -163,11 +163,13 @@ namespace LoomGUI.HeadlessTests
 
         /// <summary>
         /// TextArea 无 Submitted 事件（Enter 插换行而非提交）——投影层 TextArea 不暴露 Submitted。
-        /// 此测验证 TextArea.Enter 插换行（textinput 通道的 '\n' 经 line_break 多行分支 insert_text）：
-        /// 聚焦 ta → set_text_input('\n') → tick → value 含 '\n'。
+        /// 此测验证 TextArea 经 textinput 通道输入换行（set_text_input('\n') 经 line_break 多行分支
+        /// insert_text）：聚焦 ta → set_text_input('\n') → tick → value 含 '\n'。
+        /// 注：本测走 textinput 通道（非 KEY Enter 下键路由）——KEY Enter→line_break 的键路由分支
+        /// 由 core（input/tests.rs）覆盖；此处仅验 C# 投影的 textinput 路径通。
         /// </summary>
         [Fact]
-        public void textarea_enter_inserts_newline_not_submit()
+        public void textarea_textinput_newline_works()
         {
             var (stage, ctx, root) = LoadTextfieldFixture();
             try

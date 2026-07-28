@@ -1286,6 +1286,93 @@ namespace LoomGUI
         static NotImplementedException NE() => new NotImplementedException();
     }
 
+    // 文本控件 FFI 通道共享层。TextField/PasswordField/SearchField/TextArea 四类投影原先各拷一份
+    // 9 个 FFI helper（get/set text/placeholder、get/set selection、set readonly、set disabled、
+    // 双调法 ReadText）+ ReadTextFn 委托——收口到本单一真相源防漂移。投影类仅保留薄转调。
+    internal static unsafe class TextControlFFI
+    {
+        // get_control_text/get_control_placeholder 是 return-code + out-param 双调法：
+        // buf_cap 足够 → rc=0；不够 → rc=-2 + *out_len=所需（扩容重调）；非文本/null → -1。
+        internal static string GetControlText(StageHandle* h, uint id) =>
+            ReadText(h, id, (hp, buf, cap, len) => Native.loomgui_stage_get_control_text(hp, id, buf, cap, len));
+
+        internal static void SetControlText(StageHandle* h, uint id, string v)
+        {
+            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
+            fixed (byte* bp = b)
+            {
+                int rc = Native.loomgui_stage_set_control_text(h, id, bp, (nuint)b.Length);
+                if (rc != 0) throw new InvalidOperationException($"set_control_text failed (node {id})");
+            }
+        }
+
+        internal static string GetControlPlaceholder(StageHandle* h, uint id) =>
+            ReadText(h, id, (hp, buf, cap, len) => Native.loomgui_stage_get_control_placeholder(hp, id, buf, cap, len));
+
+        internal static void SetControlPlaceholder(StageHandle* h, uint id, string v)
+        {
+            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
+            fixed (byte* bp = b)
+            {
+                int rc = Native.loomgui_stage_set_control_placeholder(h, id, bp, (nuint)b.Length);
+                if (rc != 0) throw new InvalidOperationException($"set_control_placeholder failed (node {id})");
+            }
+        }
+
+        internal static TextSelection GetSelection(StageHandle* h, uint id)
+        {
+            nuint start = 0, end = 0;
+            int rc = Native.loomgui_stage_get_selection(h, id, &start, &end);
+            if (rc != 0) throw new InvalidOperationException($"get_selection failed (node {id})");
+            return new TextSelection((int)start, (int)end);
+        }
+
+        internal static void SetSelection(StageHandle* h, uint id, int anchor, int cursor)
+        {
+            int rc = Native.loomgui_stage_set_selection(h, id, (nuint)anchor, (nuint)cursor);
+            if (rc != 0) throw new InvalidOperationException($"set_selection failed (node {id})");
+        }
+
+        internal static void SetControlReadonly(StageHandle* h, uint id, bool v)
+        {
+            int rc = Native.loomgui_stage_set_control_readonly(h, id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_readonly failed (node {id})");
+        }
+
+        internal static void SetNodeDisabled(StageHandle* h, uint id, bool v)
+        {
+            Native.loomgui_stage_set_node_disabled(h, id, v);
+        }
+
+        // get_control_text/get_control_placeholder 共用的双调法：fn(h, buf, cap, out_len) → rc。
+        // 先 stackalloc 256 探；rc=-2 时 *out_len = 所需 → 堆分配按所需重调一次（必合）。非文本/-1 升异常。
+        // FFI 写恰好 out_len 字节（copy_nonoverlapping，无 NUL 填充）——不做 TrimEnd('\0')，信任契约
+        // （用户合法设 Value 含 '\0' 也不被静默截断；之前防御性 trim 是死代码 + 值腐化风险）。
+        internal static string ReadText(StageHandle* h, uint id, ReadTextFn fn)
+        {
+            nuint needed = 0;
+            // stack 探（256 字节够绝大多数 placeholder / 短 value）。
+            Span<byte> stackBuf = stackalloc byte[256];
+            fixed (byte* sbp = stackBuf)
+            {
+                int rc = fn(h, sbp, (nuint)stackBuf.Length, &needed);
+                if (rc == 0) return Encoding.UTF8.GetString(stackBuf.Slice(0, (int)needed));
+                if (rc != -2) throw new InvalidOperationException($"read text failed rc={rc} (node {id})");
+            }
+            // 不够：按 needed 堆分配重调。
+            byte[] heapBuf = new byte[(int)needed];
+            fixed (byte* hbp = heapBuf)
+            {
+                nuint written = 0;
+                int rc = fn(h, hbp, (nuint)heapBuf.Length, &written);
+                if (rc != 0) throw new InvalidOperationException($"read text retry failed rc={rc} (node {id})");
+                return Encoding.UTF8.GetString(heapBuf, 0, (int)written);
+            }
+        }
+
+        internal delegate int ReadTextFn(StageHandle* h, byte* buf, nuint cap, nuint* outLen);
+    }
+
     public unsafe class TextField : Node
     {
         internal TextField(UIContext ctx, uint id) : base(ctx, id) { }
@@ -1371,84 +1458,17 @@ namespace LoomGUI
         static NotImplementedException NE() => new NotImplementedException();
 
         // ── FFI 转调 ────────────────────────────────────────────────────────
-        // 文本读写走 UTF-8 ptr+len 通道。get_control_text/get_control_placeholder 是 return-code +
-        // out-param 双调法：buf_cap 足够 → rc=0；不够 → rc=-2 + *out_len=所需（扩容重调）；
-        // 非文本控件/null → -1。ReadText 封装双调法（先 stack 256 探，不够堆分配按所需重调）。
-        string GetControlText() => ReadText((h, buf, cap, len) =>
-            Native.loomgui_stage_get_control_text(h, _id, buf, cap, len));
-        void SetControlText(string v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
-            fixed (byte* bp = b)
-            {
-                int rc = Native.loomgui_stage_set_control_text(h, _id, bp, (nuint)b.Length);
-                if (rc != 0) throw new InvalidOperationException($"set_control_text failed (node {_id})");
-            }
-        }
-        string GetControlPlaceholder() => ReadText((h, buf, cap, len) =>
-            Native.loomgui_stage_get_control_placeholder(h, _id, buf, cap, len));
-        void SetControlPlaceholder(string v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
-            fixed (byte* bp = b)
-            {
-                int rc = Native.loomgui_stage_set_control_placeholder(h, _id, bp, (nuint)b.Length);
-                if (rc != 0) throw new InvalidOperationException($"set_control_placeholder failed (node {_id})");
-            }
-        }
-        TextSelection GetSelection()
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            nuint start = 0, end = 0;
-            int rc = Native.loomgui_stage_get_selection(h, _id, &start, &end);
-            if (rc != 0) throw new InvalidOperationException($"get_selection failed (node {_id})");
-            return new TextSelection((int)start, (int)end);
-        }
-        void SetSelection(int anchor, int cursor)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            int rc = Native.loomgui_stage_set_selection(h, _id, (nuint)anchor, (nuint)cursor);
-            if (rc != 0) throw new InvalidOperationException($"set_selection failed (node {_id})");
-        }
-        void SetControlReadonly(bool v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            int rc = Native.loomgui_stage_set_control_readonly(h, _id, v);
-            if (rc != 0) throw new InvalidOperationException($"set_control_readonly failed (node {_id})");
-        }
-        void SetNodeDisabled(bool v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            Native.loomgui_stage_set_node_disabled(h, _id, v);
-        }
-
-        // get_control_text/get_control_placeholder 共用的双调法：fn(h, buf, cap, out_len) → rc。
-        // 先 stackalloc 256 探；rc=-2 时 *out_len = 所需 → 堆分配按所需重调一次（必合）。非文本/-1 升异常。
-        string ReadText(ReadTextFn fn)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            nuint needed = 0;
-            // stack 探（256 字节够绝大多数 placeholder / 短 value）。
-            Span<byte> stackBuf = stackalloc byte[256];
-            fixed (byte* sbp = stackBuf)
-            {
-                int rc = fn(h, sbp, (nuint)stackBuf.Length, &needed);
-                if (rc == 0) return Encoding.UTF8.GetString(stackBuf.Slice(0, (int)needed)).TrimEnd('\0');
-                if (rc != -2) throw new InvalidOperationException($"read text failed rc={rc} (node {_id})");
-            }
-            // 不够：按 needed 堆分配重调。
-            byte[] heapBuf = new byte[(int)needed];
-            fixed (byte* hbp = heapBuf)
-            {
-                nuint written = 0;
-                int rc = fn(h, hbp, (nuint)heapBuf.Length, &written);
-                if (rc != 0) throw new InvalidOperationException($"read text retry failed rc={rc} (node {_id})");
-                return Encoding.UTF8.GetString(heapBuf, 0, (int)written).TrimEnd('\0');
-            }
-        }
-        internal delegate int ReadTextFn(StageHandle* h, byte* buf, nuint cap, nuint* outLen);
+        // FFI 通道收口在 TextControlFFI（四类文本框共享单一真相源：双调法 ReadText + set/get 直转 +
+        // rc 升异常）。本类仅薄转调：Handle() 取 stage 句柄，TextControlFFI.X(h, _id, ...) 直转。
+        StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
+        string GetControlText() => TextControlFFI.GetControlText(Handle(), _id);
+        void SetControlText(string v) => TextControlFFI.SetControlText(Handle(), _id, v);
+        string GetControlPlaceholder() => TextControlFFI.GetControlPlaceholder(Handle(), _id);
+        void SetControlPlaceholder(string v) => TextControlFFI.SetControlPlaceholder(Handle(), _id, v);
+        TextSelection GetSelection() => TextControlFFI.GetSelection(Handle(), _id);
+        void SetSelection(int anchor, int cursor) => TextControlFFI.SetSelection(Handle(), _id, anchor, cursor);
+        void SetControlReadonly(bool v) => TextControlFFI.SetControlReadonly(Handle(), _id, v);
+        void SetNodeDisabled(bool v) => TextControlFFI.SetNodeDisabled(Handle(), _id, v);
     }
 
     // PasswordField / SearchField：<input type="password"> / <input type="search"> 的 typed 投影。
@@ -1529,76 +1549,17 @@ namespace LoomGUI
         }
         static NotImplementedException NE() => new NotImplementedException();
 
-        string GetControlText() => ReadText((h, buf, cap, len) =>
-            Native.loomgui_stage_get_control_text(h, _id, buf, cap, len));
-        void SetControlText(string v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
-            fixed (byte* bp = b)
-            {
-                int rc = Native.loomgui_stage_set_control_text(h, _id, bp, (nuint)b.Length);
-                if (rc != 0) throw new InvalidOperationException($"set_control_text failed (node {_id})");
-            }
-        }
-        string GetControlPlaceholder() => ReadText((h, buf, cap, len) =>
-            Native.loomgui_stage_get_control_placeholder(h, _id, buf, cap, len));
-        void SetControlPlaceholder(string v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
-            fixed (byte* bp = b)
-            {
-                int rc = Native.loomgui_stage_set_control_placeholder(h, _id, bp, (nuint)b.Length);
-                if (rc != 0) throw new InvalidOperationException($"set_control_placeholder failed (node {_id})");
-            }
-        }
-        TextSelection GetSelection()
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            nuint start = 0, end = 0;
-            int rc = Native.loomgui_stage_get_selection(h, _id, &start, &end);
-            if (rc != 0) throw new InvalidOperationException($"get_selection failed (node {_id})");
-            return new TextSelection((int)start, (int)end);
-        }
-        void SetSelection(int anchor, int cursor)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            int rc = Native.loomgui_stage_set_selection(h, _id, (nuint)anchor, (nuint)cursor);
-            if (rc != 0) throw new InvalidOperationException($"set_selection failed (node {_id})");
-        }
-        void SetControlReadonly(bool v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            int rc = Native.loomgui_stage_set_control_readonly(h, _id, v);
-            if (rc != 0) throw new InvalidOperationException($"set_control_readonly failed (node {_id})");
-        }
-        void SetNodeDisabled(bool v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            Native.loomgui_stage_set_node_disabled(h, _id, v);
-        }
-        string ReadText(ReadTextFn fn)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            nuint needed = 0;
-            Span<byte> stackBuf = stackalloc byte[256];
-            fixed (byte* sbp = stackBuf)
-            {
-                int rc = fn(h, sbp, (nuint)stackBuf.Length, &needed);
-                if (rc == 0) return Encoding.UTF8.GetString(stackBuf.Slice(0, (int)needed)).TrimEnd('\0');
-                if (rc != -2) throw new InvalidOperationException($"read text failed rc={rc} (node {_id})");
-            }
-            byte[] heapBuf = new byte[(int)needed];
-            fixed (byte* hbp = heapBuf)
-            {
-                nuint written = 0;
-                int rc = fn(h, hbp, (nuint)heapBuf.Length, &written);
-                if (rc != 0) throw new InvalidOperationException($"read text retry failed rc={rc} (node {_id})");
-                return Encoding.UTF8.GetString(heapBuf, 0, (int)written).TrimEnd('\0');
-            }
-        }
-        internal delegate int ReadTextFn(StageHandle* h, byte* buf, nuint cap, nuint* outLen);
+        // FFI 通道收口在 TextControlFFI（四类文本框共享单一真相源）。本类仅薄转调：Handle() 取
+        // stage 句柄，TextControlFFI.X(h, _id, ...) 直转。详参 TextControlFFI。
+        StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
+        string GetControlText() => TextControlFFI.GetControlText(Handle(), _id);
+        void SetControlText(string v) => TextControlFFI.SetControlText(Handle(), _id, v);
+        string GetControlPlaceholder() => TextControlFFI.GetControlPlaceholder(Handle(), _id);
+        void SetControlPlaceholder(string v) => TextControlFFI.SetControlPlaceholder(Handle(), _id, v);
+        TextSelection GetSelection() => TextControlFFI.GetSelection(Handle(), _id);
+        void SetSelection(int anchor, int cursor) => TextControlFFI.SetSelection(Handle(), _id, anchor, cursor);
+        void SetControlReadonly(bool v) => TextControlFFI.SetControlReadonly(Handle(), _id, v);
+        void SetNodeDisabled(bool v) => TextControlFFI.SetNodeDisabled(Handle(), _id, v);
     }
 
     public unsafe class SearchField : Node
@@ -1674,76 +1635,17 @@ namespace LoomGUI
         }
         static NotImplementedException NE() => new NotImplementedException();
 
-        string GetControlText() => ReadText((h, buf, cap, len) =>
-            Native.loomgui_stage_get_control_text(h, _id, buf, cap, len));
-        void SetControlText(string v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
-            fixed (byte* bp = b)
-            {
-                int rc = Native.loomgui_stage_set_control_text(h, _id, bp, (nuint)b.Length);
-                if (rc != 0) throw new InvalidOperationException($"set_control_text failed (node {_id})");
-            }
-        }
-        string GetControlPlaceholder() => ReadText((h, buf, cap, len) =>
-            Native.loomgui_stage_get_control_placeholder(h, _id, buf, cap, len));
-        void SetControlPlaceholder(string v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
-            fixed (byte* bp = b)
-            {
-                int rc = Native.loomgui_stage_set_control_placeholder(h, _id, bp, (nuint)b.Length);
-                if (rc != 0) throw new InvalidOperationException($"set_control_placeholder failed (node {_id})");
-            }
-        }
-        TextSelection GetSelection()
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            nuint start = 0, end = 0;
-            int rc = Native.loomgui_stage_get_selection(h, _id, &start, &end);
-            if (rc != 0) throw new InvalidOperationException($"get_selection failed (node {_id})");
-            return new TextSelection((int)start, (int)end);
-        }
-        void SetSelection(int anchor, int cursor)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            int rc = Native.loomgui_stage_set_selection(h, _id, (nuint)anchor, (nuint)cursor);
-            if (rc != 0) throw new InvalidOperationException($"set_selection failed (node {_id})");
-        }
-        void SetControlReadonly(bool v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            int rc = Native.loomgui_stage_set_control_readonly(h, _id, v);
-            if (rc != 0) throw new InvalidOperationException($"set_control_readonly failed (node {_id})");
-        }
-        void SetNodeDisabled(bool v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            Native.loomgui_stage_set_node_disabled(h, _id, v);
-        }
-        string ReadText(ReadTextFn fn)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            nuint needed = 0;
-            Span<byte> stackBuf = stackalloc byte[256];
-            fixed (byte* sbp = stackBuf)
-            {
-                int rc = fn(h, sbp, (nuint)stackBuf.Length, &needed);
-                if (rc == 0) return Encoding.UTF8.GetString(stackBuf.Slice(0, (int)needed)).TrimEnd('\0');
-                if (rc != -2) throw new InvalidOperationException($"read text failed rc={rc} (node {_id})");
-            }
-            byte[] heapBuf = new byte[(int)needed];
-            fixed (byte* hbp = heapBuf)
-            {
-                nuint written = 0;
-                int rc = fn(h, hbp, (nuint)heapBuf.Length, &written);
-                if (rc != 0) throw new InvalidOperationException($"read text retry failed rc={rc} (node {_id})");
-                return Encoding.UTF8.GetString(heapBuf, 0, (int)written).TrimEnd('\0');
-            }
-        }
-        internal delegate int ReadTextFn(StageHandle* h, byte* buf, nuint cap, nuint* outLen);
+        // FFI 通道收口在 TextControlFFI（四类文本框共享单一真相源）。本类仅薄转调：Handle() 取
+        // stage 句柄，TextControlFFI.X(h, _id, ...) 直转。详参 TextControlFFI。
+        StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
+        string GetControlText() => TextControlFFI.GetControlText(Handle(), _id);
+        void SetControlText(string v) => TextControlFFI.SetControlText(Handle(), _id, v);
+        string GetControlPlaceholder() => TextControlFFI.GetControlPlaceholder(Handle(), _id);
+        void SetControlPlaceholder(string v) => TextControlFFI.SetControlPlaceholder(Handle(), _id, v);
+        TextSelection GetSelection() => TextControlFFI.GetSelection(Handle(), _id);
+        void SetSelection(int anchor, int cursor) => TextControlFFI.SetSelection(Handle(), _id, anchor, cursor);
+        void SetControlReadonly(bool v) => TextControlFFI.SetControlReadonly(Handle(), _id, v);
+        void SetNodeDisabled(bool v) => TextControlFFI.SetNodeDisabled(Handle(), _id, v);
     }
 
     public class NumberField : Node
@@ -2072,76 +1974,17 @@ namespace LoomGUI
         }
         static NotImplementedException NE() => new NotImplementedException();
 
-        string GetControlText() => ReadText((h, buf, cap, len) =>
-            Native.loomgui_stage_get_control_text(h, _id, buf, cap, len));
-        void SetControlText(string v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
-            fixed (byte* bp = b)
-            {
-                int rc = Native.loomgui_stage_set_control_text(h, _id, bp, (nuint)b.Length);
-                if (rc != 0) throw new InvalidOperationException($"set_control_text failed (node {_id})");
-            }
-        }
-        string GetControlPlaceholder() => ReadText((h, buf, cap, len) =>
-            Native.loomgui_stage_get_control_placeholder(h, _id, buf, cap, len));
-        void SetControlPlaceholder(string v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            byte[] b = Encoding.UTF8.GetBytes(v ?? "");
-            fixed (byte* bp = b)
-            {
-                int rc = Native.loomgui_stage_set_control_placeholder(h, _id, bp, (nuint)b.Length);
-                if (rc != 0) throw new InvalidOperationException($"set_control_placeholder failed (node {_id})");
-            }
-        }
-        TextSelection GetSelection()
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            nuint start = 0, end = 0;
-            int rc = Native.loomgui_stage_get_selection(h, _id, &start, &end);
-            if (rc != 0) throw new InvalidOperationException($"get_selection failed (node {_id})");
-            return new TextSelection((int)start, (int)end);
-        }
-        void SetSelection(int anchor, int cursor)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            int rc = Native.loomgui_stage_set_selection(h, _id, (nuint)anchor, (nuint)cursor);
-            if (rc != 0) throw new InvalidOperationException($"set_selection failed (node {_id})");
-        }
-        void SetControlReadonly(bool v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            int rc = Native.loomgui_stage_set_control_readonly(h, _id, v);
-            if (rc != 0) throw new InvalidOperationException($"set_control_readonly failed (node {_id})");
-        }
-        void SetNodeDisabled(bool v)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            Native.loomgui_stage_set_node_disabled(h, _id, v);
-        }
-        string ReadText(ReadTextFn fn)
-        {
-            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            nuint needed = 0;
-            Span<byte> stackBuf = stackalloc byte[256];
-            fixed (byte* sbp = stackBuf)
-            {
-                int rc = fn(h, sbp, (nuint)stackBuf.Length, &needed);
-                if (rc == 0) return Encoding.UTF8.GetString(stackBuf.Slice(0, (int)needed)).TrimEnd('\0');
-                if (rc != -2) throw new InvalidOperationException($"read text failed rc={rc} (node {_id})");
-            }
-            byte[] heapBuf = new byte[(int)needed];
-            fixed (byte* hbp = heapBuf)
-            {
-                nuint written = 0;
-                int rc = fn(h, hbp, (nuint)heapBuf.Length, &written);
-                if (rc != 0) throw new InvalidOperationException($"read text retry failed rc={rc} (node {_id})");
-                return Encoding.UTF8.GetString(heapBuf, 0, (int)written).TrimEnd('\0');
-            }
-        }
-        internal delegate int ReadTextFn(StageHandle* h, byte* buf, nuint cap, nuint* outLen);
+        // FFI 通道收口在 TextControlFFI（四类文本框共享单一真相源）。本类仅薄转调：Handle() 取
+        // stage 句柄，TextControlFFI.X(h, _id, ...) 直转。详参 TextControlFFI。
+        StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
+        string GetControlText() => TextControlFFI.GetControlText(Handle(), _id);
+        void SetControlText(string v) => TextControlFFI.SetControlText(Handle(), _id, v);
+        string GetControlPlaceholder() => TextControlFFI.GetControlPlaceholder(Handle(), _id);
+        void SetControlPlaceholder(string v) => TextControlFFI.SetControlPlaceholder(Handle(), _id, v);
+        TextSelection GetSelection() => TextControlFFI.GetSelection(Handle(), _id);
+        void SetSelection(int anchor, int cursor) => TextControlFFI.SetSelection(Handle(), _id, anchor, cursor);
+        void SetControlReadonly(bool v) => TextControlFFI.SetControlReadonly(Handle(), _id, v);
+        void SetNodeDisabled(bool v) => TextControlFFI.SetNodeDisabled(Handle(), _id, v);
     }
 
     public class Dropdown : Node
