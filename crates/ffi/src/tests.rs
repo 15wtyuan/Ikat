@@ -952,6 +952,42 @@ fn ffi_set_control_readonly() {
     loomgui_stage_free(h);
 }
 
+/// set_control_readonly 对 NumberField 生效：setter 返 0，get_control_readonly 读回 1，
+/// 且 ControlState variant 仍是 NumberField（保 variant 一致性）。原 setter 漏 NumberField
+/// arm，调用静默返 -1；本测试锁读写对称（与 get_control_readonly 三 variant 同口径）。
+#[test]
+fn ffi_set_control_readonly_numberfield() {
+    // make_number_stage 注入的 EditState.readonly 默认 false
+    let (h, n) = make_number_stage("5", 0.0, 10.0, 1.0);
+    // setter 现在覆盖 NumberField（不再静默返 -1）
+    let rc = loomgui_stage_set_control_readonly(h, n, true);
+    assert_eq!(rc, 0, "set readonly on NumberField returns 0");
+    // 读回：get_control_readonly 应返 0 且 out=1
+    let mut out: u8 = 9;
+    let rc = loomgui_stage_get_control_readonly(h, n, &mut out);
+    assert_eq!(rc, 0, "get readonly rc");
+    assert_eq!(out, 1, "readonly read back as 1");
+    // ControlState variant 仍是 NumberField（原地改，不重建为 TextField/TextArea）
+    let sh = unsafe { &*h };
+    let scene = sh.stage.scene.as_ref().expect("scene built");
+    match scene.controls.get(NodeId(n)) {
+        Some(ControlState::NumberField { edit, .. }) => {
+            assert!(edit.readonly, "NumberField.edit.readonly is true");
+        }
+        _ => panic!("ControlState variant changed (expected NumberField)"),
+    }
+    loomgui_stage_free(h);
+
+    // 非文本控件（Slider）→ -1（不 panic，不变量保留）
+    let (h, s) = make_slider_stage(50.0, 0.0, 100.0, 1.0);
+    assert_eq!(
+        loomgui_stage_set_control_readonly(h, s, true),
+        -1,
+        "non-text control returns -1"
+    );
+    loomgui_stage_free(h);
+}
+
 /// set_control_maxlength 改 max_length（UTF-8 字符上限）。0 = 无限。
 #[test]
 fn ffi_set_control_maxlength() {

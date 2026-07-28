@@ -2217,8 +2217,13 @@ pub extern "C" fn loomgui_stage_set_control_readonly(
         None => return -1,
     };
     let id = NodeId(node_id);
-    // 原地改（get_mut），保 variant。
-    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get_mut(id)
+    // 原地改（get_mut），保 variant。NumberField 共享 EditState.readonly（与
+    // get_control_readonly 三 variant 同口径，保读写对称）。
+    if let Some(
+        ControlState::TextField(e)
+        | ControlState::TextArea(e)
+        | ControlState::NumberField { edit: e, .. },
+    ) = scene.controls.get_mut(id)
     {
         e.readonly = readonly;
     } else {
