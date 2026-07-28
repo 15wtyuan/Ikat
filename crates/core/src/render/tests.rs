@@ -4600,3 +4600,113 @@ fn popup_sort_key_strictly_above_scrollbar_thumb() {
     // 至少 popup 必须存在（thumb 可能因 content 计算细节不 effective，但 popup 一定有）。
     assert!(popup_sk.is_some(), "open popup 必须渲染");
 }
+
+#[test]
+fn open_popup_renders_option_list_via_reparent_path() {
+    // 生产路径回归：select 经 create_node_from_template（注入 .loom-popup）+ option 手挂 select
+    // + reparent_options_into_popup（把 option 移进 popup）+ sync_control_visuals（open=true
+    // 移除 popup 的 display:none）后，render 末尾追加须把 option 文本画进浮层 popup（mask=0，
+    // 跳出祖先 overflow:hidden）。这是 Task 11 popup 渲染的真正生产结构证明：option 是 popup
+    // 的子节点（而非 select 的兄弟），否则 popup 浮层为空、option 被祖先 clip 裁掉。
+    use crate::asset::ControlInit;
+    use crate::scene::control::{find_child_by_class, reparent_options_into_popup, POPUP};
+    use crate::style::resolved::OverflowMode;
+    let fonts = test_font_table().expect("need test font");
+    // outer(overflow:hidden) > select(Dropdown) 。select 不入 roots（隔离 solve，手动设 rect）。
+    let mut outer_style = ResolvedStyle::default();
+    outer_style.overflow_x = OverflowMode::Hidden;
+    outer_style.overflow_y = OverflowMode::Hidden;
+    let mut scene = Scene::default();
+    // outer 作 root（overflow:hidden 开 clip，验证 popup 跳出它）。
+    let outer = crate::scene::dynamic::create_root(&mut scene, "div", "").expect("create root div");
+    scene.get_mut(outer).unwrap().base_style = outer_style.clone();
+    scene.get_mut(outer).unwrap().style = outer_style;
+    // select：用 create_node_from_template 走注入路径（产 .loom-value + .loom-popup）。
+    let sel = crate::scene::dynamic::create_node_from_template(
+        &mut scene,
+        NodeKind::Dropdown,
+        ResolvedStyle::default(),
+        Some(ControlInit::Dropdown { selected_index: 0 }),
+    );
+    crate::scene::dynamic::append_child(&mut scene, outer, sel).expect("select attach");
+    // 2 个 option，先挂 select（模拟 instantiate 按 parent_idx），再 reparent 进 popup。
+    let mut opt_ids = vec![];
+    for t in ["Apple", "Banana"] {
+        let opt = crate::scene::dynamic::create_node_from_template(
+            &mut scene,
+            NodeKind::OptionItem,
+            ResolvedStyle::default(),
+            None,
+        );
+        let txt = crate::scene::dynamic::create_node_from_template(
+            &mut scene,
+            NodeKind::TextNode,
+            ResolvedStyle::default(),
+            None,
+        );
+        scene.text_contents.insert(txt, t.to_string());
+        crate::scene::dynamic::append_child(&mut scene, opt, txt).expect("text attach");
+        crate::scene::dynamic::append_child(&mut scene, sel, opt).expect("option attach");
+        opt_ids.push(opt);
+    }
+    // 关键：reparent（同 Stage::instantiate 建树后调用）。option 从 select 移进 popup。
+    reparent_options_into_popup(&mut scene, sel);
+    let popup = find_child_by_class(&scene, sel, POPUP).expect("loom-popup");
+    // 展开 popup：sync_control_visuals 按 open=true 移除 popup 的 display:none 覆盖。
+    scene.controls.ensure(
+        sel,
+        ControlState::Dropdown {
+            selected_index: 0,
+            open: true,
+            value_lock: false,
+        },
+    );
+    crate::scene::control::sync_control_visuals(&mut scene, sel);
+    assert_eq!(
+        scene
+            .get(popup)
+            .unwrap()
+            .inline_override
+            .taffy_style
+            .display,
+        taffy::style::Display::Flex,
+        "sync 后 popup inline display:flex（展开始可见，下帧 rematch 应用）"
+    );
+    // 给所有节点非零 layout_rect（render 按 rect 产几何）。
+    let all_ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
+    for nid in all_ids {
+        scene.get_mut(nid).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
+    }
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // option 子树（option + 其 TextNode）必须出现在 FrameData（证明 popup 浮层 DFS
+    // 遍历到了它们——未 reparent 的旧结构会漏掉，option 会在 popup 外被祖先 clip 裁掉）。
+    for opt in &opt_ids {
+        assert!(
+            frame.nodes.iter().any(|rn| rn.node_id == opt.0),
+            "option {opt:?} 须渲染（popup 浮层含它）"
+        );
+        // option 是 popup 的直接子（reparent 后），其 RenderNode mask 必须 = 0（跳出 outer clip）。
+        let opt_rn = frame
+            .nodes
+            .iter()
+            .find(|rn| rn.node_id == opt.0)
+            .expect("option render node");
+        assert_eq!(
+            opt_rn.mask_context,
+            MaskContext(0),
+            "option 在 popup 浮层里 → mask=0（跳出祖先 overflow:hidden）"
+        );
+    }
+}

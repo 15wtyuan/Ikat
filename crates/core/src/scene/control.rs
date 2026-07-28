@@ -9,7 +9,9 @@
 use crate::input::{
     EventRecord, EVT_CHANGE_COMMITTED, EVT_CHECKED_CHANGED, EVT_SUBMITTED, EVT_VALUE_CHANGED,
 };
-use crate::scene::dynamic::{append_child, create_node, set_inline_override, set_user_transform};
+use crate::scene::dynamic::{
+    append_child, create_node, remove_child, set_inline_override, set_user_transform,
+};
 use crate::scene::node::{
     Composition, ControlState, EditState, NodeFlags, NodeId, NodeKind, Scene,
 };
@@ -207,6 +209,10 @@ pub fn inject_control_children(scene: &mut Scene, id: NodeId, kind: NodeKind) {
             append_child(scene, id, popup).expect("fresh child has no parent");
             // popup 默认收起（display:none），展开由 sync_control_visuals（open=true）移除覆盖。
             let _ = set_inline_override(scene, popup, "display:none;position:absolute");
+            // 注意：此处只建空的 popup 容器。用户的 <option> 子节点此时尚未实例化
+            // （instantiate 按 parent_idx 父先于子建树，select 在 option 之前），故 option
+            // 的 reparent 必须在整子树建完后做——见 [`reparent_options_into_popup`]，由
+            // `Stage::instantiate` 在建树循环之后对每个 Dropdown 调一次。
         }
         _ => {}
     }
@@ -226,17 +232,19 @@ pub fn find_child_by_class(scene: &Scene, parent: NodeId, class: &str) -> Option
     })
 }
 
-/// 取 select（Dropdown）的第 `n` 个 option 子节点的文本内容。
+/// 取 select（Dropdown）的第 `n` 个 option 的文本内容。
 ///
-/// option 是 select 的 DOM 子节点（`NodeKind::OptionItem`），与框架注入的 `.loom-value` /
-/// `.loom-popup`（Container）平级——按 NodeKind 过滤掉非 option 子节点，保证只数用户写的
-/// `<option>`。文本可能在 option 自身的 `text_contents`（`<option>B</option>` 打包期把 content
-/// 存进 side table），也可能在后代 TextNode（`<option><span>B</span></option>`），故递归收集
-/// option 子树所有 TextNode 的文本，与 render 的文本采集口径一致。
+/// option 经 [`reparent_options_into_popup`] 后是 `.loom-popup` 的直接子节点（spec §4.1
+/// 运行时结构 `<select> > [.loom-value, .loom-popup > [option...]]`），不是 select 的直接
+/// 子节点——故先定位 popup，再在其直接子节点里按 `NodeKind::OptionItem` 取第 n 个。文本可能在
+/// option 自身的 `text_contents`（`<option>B</option>` 打包期把 content 存进 side table），
+/// 也可能在后代 TextNode（`<option><span>B</span></option>`），故递归收集 option 子树所有
+/// TextNode 的文本，与 render 的文本采集口径一致。
 ///
-/// 越界（n 超过 option 数）/ select 无 option → None。调用方据此显空（.loom-value 清空）。
+/// 越界（n 超过 option 数）/ select 无 popup / 无 option → None。调用方据此显空（.loom-value 清空）。
 pub fn nth_option_text(scene: &Scene, select: NodeId, n: usize) -> Option<String> {
-    let children = scene.get(select)?.children.clone();
+    let popup = find_child_by_class(scene, select, POPUP)?;
+    let children = scene.get(popup)?.children.clone();
     let opt = children
         .into_iter()
         .filter(|&cid| {
@@ -248,6 +256,46 @@ pub fn nth_option_text(scene: &Scene, select: NodeId, n: usize) -> Option<String
     let mut buf = String::new();
     collect_subtree_text(scene, opt, &mut buf);
     Some(buf)
+}
+
+/// 把 select 的 `<option>`（`NodeKind::OptionItem`）直接子节点 reparent 进它的
+/// `.loom-popup`，确立 spec §4.1 运行时结构：`<select> > [.loom-value, .loom-popup > [option...]]`。
+///
+/// 必要性：`inject_control_children` 在 select 实例化时只建空的 popup 容器；用户的 `<option>`
+/// 是模板里 select 的 DOM 子节点（parent_idx = select），`Stage::instantiate` 的建树循环按
+/// 父先于子的顺序把它们先挂到 select 上。若不 reparent，option 就是 select 的直接子节点、与
+/// popup 平级——popup 浮层渲染（Task 11，末尾追加 DFS 从 popup 根展开子树）只能拿到空的 popup，
+/// option 列表在正常 DFS 序里被祖先 `overflow:hidden` 裁掉，展开的 dropdown 是个空浮层。
+///
+/// reparent 把每个 option 从 select 摘下、挂到 popup（保留声明顺序），让 popup 浮层 DFS 能
+/// 遍历到 option 子树并绘制。幂等：select 无 OptionItem 直接子节点（已 reparent 过 / 非控件
+/// Dropdown 无 popup）时为 no-op。由 `Stage::instantiate` 在建树循环后对每个 Dropdown 调一次，
+/// 测试 harness 手搓 dropdown 的 helper 同样调用以与生产结构对齐。
+pub fn reparent_options_into_popup(scene: &mut Scene, select: NodeId) {
+    // 先定位 popup（不可变借），再收集 option（不可变借），最后 detach/attach（可变借）。
+    // 三阶段分开避免边迭代 select.children 边 mutate 的借用冲突 + 漏项。
+    let Some(popup) = find_child_by_class(scene, select, POPUP) else {
+        return; // 无注入 popup（非 control-init Dropdown）→ 无可 reparent 的目标。
+    };
+    let options: Vec<NodeId> = scene
+        .get(select)
+        .map(|n| n.children.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|&cid| {
+            scene
+                .get(cid)
+                .is_some_and(|c| c.kind == NodeKind::OptionItem)
+        })
+        .collect();
+    for opt in options {
+        // move = remove_child（从 select 摘：清 select.children 条目 + option.parent=None）
+        //       + append_child（挂到 popup：push popup.children + option.parent=Some(popup)）。
+        // 两个 helper 各自维护 children 列表 + parent 指针，不手编列表。option 已确保是
+        // select 的直接子节点（filter 取的就是其 children），remove_child 的直系校验必过。
+        let _ = remove_child(scene, select, opt);
+        let _ = append_child(scene, popup, opt);
+    }
 }
 
 /// 递归收集 `id` 子树的全部文本：先取节点自身的 text_contents（option 自带 content 的常见路径），
@@ -1468,7 +1516,9 @@ mod tests {
     // display:flex/none 切换。option 文本取自 option 子树（自身 text_contents 或后代 TextNode）。
     // .loom-value 是 Container（div），文本落在其内部 TextNode 子节点（inject 时注入）。
 
-    /// 建一个带 ControlInit 的 Dropdown，并挂 N 个 OptionItem 子节点（每个带文本）。
+    /// 建一个带 ControlInit 的 Dropdown，并挂 N 个 OptionItem 子节点（每个带文本），
+    /// 随后 reparent option 进 .loom-popup——复刻生产 instantiate 路径的运行时结构
+    /// （spec §4.1：`<select> > [.loom-value, .loom-popup > [option...]]`）。
     /// 模拟 `<select><option>A</option><option>B</option>...</select>`。
     fn make_dropdown_with_options(
         scene: &mut Scene,
@@ -1483,7 +1533,7 @@ mod tests {
                 selected_index: selected,
             }),
         );
-        // 挂用户 option 子节点（instantiate 流程里 option 作为 select 的 DOM 子节点挂入）。
+        // 先把 option 挂到 select（模拟 instantiate 按 parent_idx 的挂入），再 reparent 进 popup。
         for &t in option_texts {
             let opt = create_node_from_template(
                 scene,
@@ -1494,6 +1544,8 @@ mod tests {
             scene.text_contents.insert(opt, t.to_string());
             append_child(scene, id, opt).expect("option append");
         }
+        // 与 Stage::instantiate 一致：建完后把 option 从 select 移进 .loom-popup。
+        reparent_options_into_popup(scene, id);
         id
     }
 
@@ -1585,6 +1637,8 @@ mod tests {
         scene.text_contents.insert(txt, "Deep".into());
         append_child(&mut scene, opt, txt).expect("text append");
         append_child(&mut scene, id, opt).expect("option append");
+        // option 现任 popup（同生产 instantiate 路径）——nth_option_text 扫 popup 子节点。
+        reparent_options_into_popup(&mut scene, id);
         sync_control_visuals(&mut scene, id);
         assert_eq!(
             value_text(&scene, id),
@@ -1625,6 +1679,200 @@ mod tests {
                 .display,
             taffy::Display::Flex,
             "open → display:flex"
+        );
+    }
+
+    // ── reparent_options_into_popup：option 移进 .loom-popup（spec §4.1 运行时结构）──
+    //
+    // 生产路径：Stage::instantiate 建完子树后对每个 Dropdown 调 reparent；测试 helper
+    // make_dropdown_with_options 同样调用。这里直接测原语本身 + 顺序保页 + 幂等 +
+    // nth_option_text 扫 popup。
+
+    /// 返回 select 的 OptionItem 直接子节点列表（旧结构：option 是 select 的直接子）。
+    fn direct_option_children(scene: &Scene, select: NodeId) -> Vec<NodeId> {
+        scene
+            .get(select)
+            .map(|n| n.children.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|&cid| {
+                scene
+                    .get(cid)
+                    .is_some_and(|c| c.kind == NodeKind::OptionItem)
+            })
+            .collect()
+    }
+
+    /// 返回 popup 的 OptionItem 直接子节点列表（新结构：option 是 popup 的直接子）。
+    fn popup_option_children(scene: &Scene, select: NodeId) -> Vec<NodeId> {
+        let popup = find_child_by_class(scene, select, POPUP).expect("loom-popup");
+        scene
+            .get(popup)
+            .map(|n| n.children.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|&cid| {
+                scene
+                    .get(cid)
+                    .is_some_and(|c| c.kind == NodeKind::OptionItem)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn reparent_moves_options_from_select_into_popup() {
+        // 建 select + 3 option（先挂 select，未 reparent）：option 是 select 的直接子、popup 为空。
+        let mut scene = Scene::default();
+        let sel = create_node_from_template(
+            &mut scene,
+            NodeKind::Dropdown,
+            ResolvedStyle::default(),
+            Some(ControlInit::Dropdown { selected_index: 0 }),
+        );
+        let mut opts = vec![];
+        for t in ["A", "B", "C"] {
+            let opt = create_node_from_template(
+                &mut scene,
+                NodeKind::OptionItem,
+                ResolvedStyle::default(),
+                None,
+            );
+            scene.text_contents.insert(opt, t.into());
+            append_child(&mut scene, sel, opt).unwrap();
+            opts.push(opt);
+        }
+        // reparent 前：option 是 select 的直接子、popup 为空。
+        assert_eq!(direct_option_children(&scene, sel), opts);
+        let popup = find_child_by_class(&scene, sel, POPUP).expect("loom-popup");
+        assert!(scene.get(popup).unwrap().children.is_empty());
+        // reparent。
+        reparent_options_into_popup(&mut scene, sel);
+        // reparent 后：select 不再含 option 直接子；popup 含全部 3 个 option、保声明顺序。
+        assert!(
+            direct_option_children(&scene, sel).is_empty(),
+            "select 不再含 OptionItem 直接子"
+        );
+        assert_eq!(
+            popup_option_children(&scene, sel),
+            opts,
+            "option 移进 popup 且保序"
+        );
+        // parent 指针指向 popup（不是 select）。
+        for &opt in &opts {
+            assert_eq!(scene.get(opt).unwrap().parent, Some(popup));
+        }
+    }
+
+    #[test]
+    fn reparent_preserves_option_order() {
+        // 5 个 option reparent 后顺序与声明一致（顺序决定 nth_option_text 取值 + popup 渲染序）。
+        let mut scene = Scene::default();
+        let sel = create_node_from_template(
+            &mut scene,
+            NodeKind::Dropdown,
+            ResolvedStyle::default(),
+            Some(ControlInit::Dropdown { selected_index: 0 }),
+        );
+        let texts = ["alpha", "beta", "gamma", "delta", "epsilon"];
+        for t in texts {
+            let opt = create_node_from_template(
+                &mut scene,
+                NodeKind::OptionItem,
+                ResolvedStyle::default(),
+                None,
+            );
+            scene.text_contents.insert(opt, t.into());
+            append_child(&mut scene, sel, opt).unwrap();
+        }
+        reparent_options_into_popup(&mut scene, sel);
+        let popup_kids = popup_option_children(&scene, sel);
+        assert_eq!(popup_kids.len(), texts.len());
+        for (i, &opt) in popup_kids.iter().enumerate() {
+            assert_eq!(
+                scene.text_contents.get(&opt).map(|s| s.as_str()),
+                Some(texts[i]),
+                "第 {i} 个 option 须是 `{}`（声明顺序），顺序乱了",
+                texts[i]
+            );
+        }
+    }
+
+    #[test]
+    fn reparent_is_idempotent() {
+        // 重复调用不重复移动 / 不丢 option / 不 panic。option 已在 popup 里时再调为 no-op。
+        let mut scene = Scene::default();
+        let sel = make_dropdown_with_options(&mut scene, &["A", "B"], 0);
+        let after_first = popup_option_children(&scene, sel);
+        reparent_options_into_popup(&mut scene, sel); // 已 reparent 过（helper 调过）
+        reparent_options_into_popup(&mut scene, sel); // 再调一次
+        assert_eq!(
+            popup_option_children(&scene, sel),
+            after_first,
+            "幂等：重复 reparent 不改 popup 内容"
+        );
+    }
+
+    #[test]
+    fn reparent_no_popup_is_noop() {
+        // select 未注入 popup（control_init=None 的裸 Dropdown kind 节点）→ 无可 reparent 目标，
+        // 不 panic、不误移 option。
+        let mut scene = Scene::default();
+        let sel = create_node_from_template(
+            &mut scene,
+            NodeKind::Dropdown,
+            ResolvedStyle::default(),
+            None, // 无 control_init → inject_control_children 不走、无 popup
+        );
+        let opt = create_node_from_template(
+            &mut scene,
+            NodeKind::OptionItem,
+            ResolvedStyle::default(),
+            None,
+        );
+        append_child(&mut scene, sel, opt).unwrap();
+        reparent_options_into_popup(&mut scene, sel); // 无 popup → no-op
+        assert_eq!(
+            direct_option_children(&scene, sel),
+            vec![opt],
+            "无 popup → option 留在 select（不误移）"
+        );
+    }
+
+    #[test]
+    fn nth_option_text_reads_options_from_popup() {
+        // nth_option_text 须扫 popup（不是 select）拿 option 文本——reparent 后 select 无 option 直接子。
+        // 这里走 helper（已 reparent），验 selected_index=2 取到第 3 个 option 文本。
+        let mut scene = Scene::default();
+        let sel = make_dropdown_with_options(&mut scene, &["A", "B", "C"], 2);
+        assert_eq!(nth_option_text(&scene, sel, 0).as_deref(), Some("A"));
+        assert_eq!(nth_option_text(&scene, sel, 1).as_deref(), Some("B"));
+        assert_eq!(nth_option_text(&scene, sel, 2).as_deref(), Some("C"));
+        // 越界 → None。
+        assert!(nth_option_text(&scene, sel, 3).is_none());
+    }
+
+    #[test]
+    fn nth_option_text_returns_none_when_options_are_select_direct_children() {
+        // 证明 nth_option_text 现严格扫 popup：未 reparent（option 仍在 select 直接子）时返 None，
+        // 防止误以为还能从 select 拿 option（旧行为）。反向验证新扫 popup 的正确性。
+        let mut scene = Scene::default();
+        let sel = create_node_from_template(
+            &mut scene,
+            NodeKind::Dropdown,
+            ResolvedStyle::default(),
+            Some(ControlInit::Dropdown { selected_index: 0 }),
+        );
+        let opt = create_node_from_template(
+            &mut scene,
+            NodeKind::OptionItem,
+            ResolvedStyle::default(),
+            None,
+        );
+        scene.text_contents.insert(opt, "A".into());
+        append_child(&mut scene, sel, opt).unwrap(); // 未 reparent：option 是 select 直接子
+        assert!(
+            nth_option_text(&scene, sel, 0).is_none(),
+            "option 不在 popup 里 → nth_option_text 返 None（严格扫 popup）"
         );
     }
 

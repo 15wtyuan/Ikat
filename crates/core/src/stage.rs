@@ -682,6 +682,9 @@ impl Stage {
         // id_map[模板 idx] = live NodeId（slotmap 分配）。
         let mut id_map: Vec<Option<NodeId>> = vec![None; template.nodes.len()];
         let mut root_id: Option<NodeId> = None;
+        // Dropdown NodeId 收集：建树循环后 reparent 其 <option> 子节点进 .loom-popup
+        // （spec §4.1 运行时结构；option 是模板里 select 的 DOM 子节点，先被挂到 select）。
+        let mut dropdown_ids: Vec<NodeId> = Vec::new();
         // no-panic 契约：parent_idx 来自 pkg.bin（运行时读，可能 corrupt），不能信任"父先于子"。
         // pidx >= i 同时覆盖前向引用（父排在子后）与越界（pidx >= len，因 i < len）→ Err，不 panic。
         for (i, tn) in template.nodes.iter().enumerate() {
@@ -713,6 +716,10 @@ impl Stage {
                 scene.image_srcs.insert(node_id, src.clone());
             }
             id_map[i] = Some(node_id);
+            // 记 Dropdown，供建树后 reparent option 进 popup（见下方 reparent 循环）。
+            if tn.kind == NodeKind::Dropdown {
+                dropdown_ids.push(node_id);
+            }
             // 按 parent_idx 串子树（根 parent_idx=None 不串）
             if let Some(pidx) = tn.parent_idx {
                 let parent = id_map[pidx].expect("parent built before child (parent_idx < i)");
@@ -724,6 +731,15 @@ impl Stage {
             }
         }
         let root = root_id.ok_or("component has no root node (parent_idx=None missing)")?;
+
+        // Reparent 每个 Dropdown 的 <option> 子节点进其 .loom-popup（spec §4.1 运行时结构）。
+        // option 在建树循环里按 parent_idx 先挂到 select（其模板父），这里移到 popup 内，
+        // 使展开时浮层 DFS（render 末尾追加）能遍历到 option 列表并跳出祖先 overflow:hidden。
+        // 在 SCOPE_ROOT / dynamic_rules 装载之前做：reparent 只改 parent 指针 + children 列表，
+        // 不影响作用域边界（option 仍在 select 实例子树内）。
+        for sel in &dropdown_ids {
+            crate::scene::control::reparent_options_into_popup(scene, *sel);
+        }
 
         // 实例根 = 作用域根（Shadow DOM 风格，main-design §5.4 / public-api §2.3）。
         // 该实例的 CSS 规则只在本实例子树内匹配，不泄漏到其他组件实例。

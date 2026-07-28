@@ -437,3 +437,158 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
         "子组件的 .leaf 被作用域边界挡住 → 不命中父的后代规则（无背景）"
     );
 }
+
+#[test]
+fn instantiate_reparents_dropdown_options_into_popup() {
+    // 生产路径回归：模板里 <select><option>A<option>B<option>C</select>，经 load_package +
+    // instantiate 后，option 须是 .loom-popup 的直接子（spec §4.1 运行时结构），而非 select 的
+    // 直接子。这是 popup 浮层能渲染 option 列表的前提（render 末尾追加从 popup 根 DFS）。
+    use crate::asset::ControlInit;
+    use crate::scene::control::{find_child_by_class, POPUP};
+    // 模板：[0]=select(Dropdown), [1..]=option（parent_idx=0）。
+    let nodes = [
+        TemplateNode {
+            kind: NodeKind::Dropdown,
+            style: ResolvedStyle::default(),
+            parent_idx: None,
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: None,
+            src: None,
+            control_init: Some(ControlInit::Dropdown { selected_index: 0 }),
+        },
+        TemplateNode {
+            kind: NodeKind::OptionItem,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(0),
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            // OptionItem.content 不跨 pkg 往返（asset 序列化只为 TextNode/Image 存 content/src），
+            // 故生产路径把 option 文本放在子 TextNode（<option><span>A</span></option>），
+            // nth_option_text 经 collect_subtree_text 收集。这里复刻该结构。
+            content: None,
+            src: None,
+            control_init: None,
+        },
+        // option A 的文本子节点（parent = option index 1）。
+        TemplateNode {
+            kind: NodeKind::TextNode,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(1),
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: Some("A".to_string()),
+            src: None,
+            control_init: None,
+        },
+        TemplateNode {
+            kind: NodeKind::OptionItem,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(0),
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: None,
+            src: None,
+            control_init: None,
+        },
+        TemplateNode {
+            kind: NodeKind::TextNode,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(3),
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: Some("B".to_string()),
+            src: None,
+            control_init: None,
+        },
+        TemplateNode {
+            kind: NodeKind::OptionItem,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(0),
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: None,
+            src: None,
+            control_init: None,
+        },
+        TemplateNode {
+            kind: NodeKind::TextNode,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(5),
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: Some("C".to_string()),
+            src: None,
+            control_init: None,
+        },
+    ];
+    let rules = crate::style::dynamic::DynamicRuleTable::default();
+    let pkg = crate::asset::write_package(&PackageInput {
+        components: vec![("dropdown", &nodes, &rules)],
+    });
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("bag", &pkg).unwrap();
+    let sel = s.instantiate("bag", "dropdown").unwrap();
+    let scene = s.scene.as_ref().unwrap();
+    // select 的直接 OptionItem 子须为 0（全部移进 popup）。
+    let direct_opts: Vec<_> = scene
+        .get(sel)
+        .unwrap()
+        .children
+        .iter()
+        .copied()
+        .filter(|&c| scene.get(c).is_some_and(|n| n.kind == NodeKind::OptionItem))
+        .collect();
+    assert!(
+        direct_opts.is_empty(),
+        "instantiate 后 select 无 OptionItem 直接子（全 reparent 进 popup）"
+    );
+    // popup 含 3 个 option，保声明顺序 A/B/C。
+    let popup = find_child_by_class(scene, sel, POPUP).expect("loom-popup injected");
+    let popup_opts: Vec<_> = scene
+        .get(popup)
+        .unwrap()
+        .children
+        .iter()
+        .copied()
+        .filter(|&c| scene.get(c).is_some_and(|n| n.kind == NodeKind::OptionItem))
+        .collect();
+    assert_eq!(popup_opts.len(), 3, "popup 含 3 个 option");
+    // 经 nth_option_text（扫 popup 子节点 + collect_subtree_text）验证 option 文本可取、保序。
+    // option 文本在子 TextNode（<option><span>A</span></option>，生产路径——OptionItem.content
+    // 不跨 pkg 往返，故文本须走子节点）。
+    assert_eq!(
+        crate::scene::control::nth_option_text(scene, sel, 0).as_deref(),
+        Some("A"),
+        "第 0 个 option 文本 = A"
+    );
+    assert_eq!(
+        crate::scene::control::nth_option_text(scene, sel, 1).as_deref(),
+        Some("B"),
+        "第 1 个 option 文本 = B"
+    );
+    assert_eq!(
+        crate::scene::control::nth_option_text(scene, sel, 2).as_deref(),
+        Some("C"),
+        "第 2 个 option 文本 = C"
+    );
+    // parent 指针指向 popup。
+    for &o in &popup_opts {
+        assert_eq!(scene.get(o).unwrap().parent, Some(popup));
+    }
+}
