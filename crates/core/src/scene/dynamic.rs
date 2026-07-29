@@ -576,6 +576,10 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
     scene.anim.clear_node(id);
     scene.scroll.remove(id);
     scene.controls.remove(id);
+    // ListView 模板是游离子树（parent=None、不在 roots、不在任何父的 children），
+    // remove_node 的递归删子够不到它。删 ul 前先取 template_root，随 ul 一并递归释放，
+    // 否则 ListState 条目被清后该游离子树成孤儿、slotmap 槽永久泄漏。
+    let list_template_root = scene.lists.get(id).and_then(|ls| ls.template_root);
     scene.lists.remove(id);
     scene.text_contents.remove(&id);
     scene.image_srcs.remove(&id);
@@ -599,6 +603,11 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
     was_css_scope.then(|| {
         scene.dynamic_rules.entries.retain(|sr| sr.scope_root != id);
     });
+    // 6. ListView 模板游离子树随 ul 一并释放（见上方 list_template_root 注释）。
+    //    template_root != id 且与 id 无父子关系（游离），递归删它不会重入 id。
+    if let Some(tpl) = list_template_root {
+        remove_node(scene, tweens, tpl);
+    }
 }
 
 #[cfg(test)]

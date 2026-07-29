@@ -316,15 +316,14 @@ pub fn plan_visible(scene: &mut Scene) -> Vec<PendingOps> {
 }
 
 fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
-    // 先用不可变借收集算可见区 + spacer 高所需的所有输入（heights、scroll、gap）。
-    // 不能与后续 lists.get_mut 的可变借并存。
+    // Phase A：单次不可变借完成所有只读计算——可见区（Copy 的 Range）+ spacer 高度 + gap。
+    // spacer 高需 heights.sum，故一并在此算出，避免后续跨可变借再 clone heights。
     let (scroll_y, viewport_h, ul_y) = {
         let (sy, vh) = ancestor_scroll_viewport(scene, ul);
         let uy = scene.get(ul).map(|n| n.layout_rect.y).unwrap_or(0.0);
         (sy, vh, uy)
     };
-    // 克隆 heights + item_count 避免跨可变借持有 ls 引用。
-    let (item_count, heights, gap) = {
+    let (visible, spacer_head_h, spacer_tail_h) = {
         let ls = scene.lists.get(ul)?;
         let gap = if matches!(
             scene.get(ul).unwrap().base_style.taffy_style.display,
@@ -334,13 +333,15 @@ fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
         } else {
             0.0
         };
-        (ls.item_count, ls.heights.clone(), gap)
+        let visible = compute_visible_range(ls.item_count, scroll_y, ul_y, viewport_h, &ls.heights);
+        let spacer_head_h = (ls.heights.sum(0..visible.start) - gap).max(0.0);
+        let spacer_tail_h = (ls.heights.sum(visible.end..ls.item_count) - gap).max(0.0);
+        (visible, spacer_head_h, spacer_tail_h)
     };
-    let visible = compute_visible_range(item_count, scroll_y, ul_y, viewport_h, &heights);
-    // 回收离开的 slot（old item_index − new visible）→ free 池。
+    // Phase B：可变借回收离开的 slot。被回收的 NodeId 仅暂存（不在此 detach——detach 需借 scene
+    // 建树函数，与本处 ls 可变借冲突），待 Phase A/B 借释放后再处理。to_clone 也在此算出。
     let new_set: std::collections::HashSet<usize> = visible.clone().collect();
-    let to_clone: Vec<usize>;
-    {
+    let (to_clone, to_free): (Vec<usize>, Vec<NodeId>) = {
         let ls = scene.lists.get_mut(ul)?;
         let mut keep_slots = Vec::new();
         let mut to_free = Vec::new();
@@ -352,15 +353,21 @@ fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
             }
         }
         ls.slots = keep_slots;
-        ls.free.extend(to_free);
         // 待克隆 = visible − 当前已有 slot indices。
         let have: std::collections::HashSet<usize> =
             ls.slots.iter().map(|s| s.item_index).collect();
-        to_clone = visible.clone().filter(|i| !have.contains(i)).collect();
+        let to_clone = visible.clone().filter(|i| !have.contains(i)).collect();
+        (to_clone, to_free)
+    };
+    // Phase C：摘除被回收的 slot——必须从场景树移出（parent=None + 出 ul.children），
+    // 否则复用时 insert_before 因 child 已有 parent 返 Err 而被吞掉，slot 停在旧位、顺序漂移。
+    // remove_child 保留 slotmap 槽（NodeId 仍 live），正是 free 池“存活 NodeId 池”语义。
+    for node in &to_free {
+        let _ = crate::scene::dynamic::remove_child(scene, ul, *node);
     }
-    // spacer 高度 = 累计项高度 − gap 扣除（flex 容器 gap 额外占主轴）。
-    let spacer_head_h = (heights.sum(0..visible.start) - gap).max(0.0);
-    let spacer_tail_h = (heights.sum(visible.end..item_count) - gap).max(0.0);
+    if let Some(ls) = scene.lists.get_mut(ul) {
+        ls.free.extend(to_free);
+    }
     Some(PendingOps {
         list_ul: ul,
         to_clone,
@@ -580,6 +587,43 @@ mod tests {
         assert!((a - b).abs() < 0.01, "{a} != {b}");
     }
 
+    /// 断言所有 slot 都正确接在 ul 树上：每个 slot 的 parent==Some(ul)、且在 ul.children
+    /// 中位于 head_spacer 之后 / tail_spacer 之前、按 item_index 严格递增（复用未 detach
+    /// 会让被复用 slot 停在旧位、顺序乱掉）。同时检 ul.children 无重复 NodeId。
+    fn assert_all_slots_well_parented(scene: &crate::scene::node::Scene, ul: NodeId) {
+        let ls = scene.lists.get(ul).expect("list state");
+        let head = ls.head_spacer;
+        let tail = ls.tail_spacer;
+        let ul_node = scene.get(ul).unwrap();
+        // head/tail 始终首尾。
+        assert_eq!(ul_node.children.first(), Some(&head), "head spacer first");
+        assert_eq!(ul_node.children.last(), Some(&tail), "tail spacer last");
+        // 无重复子。
+        let mut seen = std::collections::HashSet::new();
+        for &c in &ul_node.children {
+            assert!(seen.insert(c), "duplicate child in ul.children");
+        }
+        // slot → item_index 映射。
+        let item_of: std::collections::HashMap<NodeId, usize> =
+            ls.slots.iter().map(|s| (s.node, s.item_index)).collect();
+        // 逐 slot：parent 正确 + 在 head/tail 之间。并收集物理顺序的 item_index。
+        let mut physical_order: Vec<usize> = Vec::new();
+        for &c in &ul_node.children[1..ul_node.children.len() - 1] {
+            let cn = scene.get(c).unwrap();
+            assert_eq!(cn.parent, Some(ul), "slot parent must be ul");
+            let idx = *item_of.get(&c).expect("child maps to a slot item");
+            physical_order.push(idx);
+        }
+        // 物理顺序严格递增（复用未 detach 会让旧位 slot 的 item_index 乱序）。
+        let mut sorted = physical_order.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            physical_order, sorted,
+            "slot physical order must match sorted item_index (no drift)"
+        );
+    }
+
     #[test]
     fn enter_data_driven_creates_spacers_and_backups_li() {
         let (mut s, ul, _li) = stage_with_ul_li();
@@ -621,6 +665,107 @@ mod tests {
         assert!(
             !slot_node.interaction.flags.contains(NodeFlags::SCOPE_ROOT),
             "slot root must NOT carry SCOPE_ROOT (CSS rules still apply)"
+        );
+    }
+
+    /// 回收路径回归：滚后部分 slot 离开可见区→进 free 池，下一帧需复用时 insert_before
+    /// 因未 detach 旧父会 Err 被吞、slot 停在旧位、ul.children 顺序漂移。此测模拟两次帧。
+    #[test]
+    fn update_visible_recycles_slots_across_frames() {
+        use crate::scene::node::{Node, NodeKind};
+        // 3 层树：scroll_ancestor(Container) → ul(ListView) → li(ListItem)。
+        let ancestor = Node {
+            kind: NodeKind::Container,
+            ..Node::default()
+        };
+        let ul_node = Node {
+            kind: NodeKind::ListView,
+            ..Node::default()
+        };
+        let li = Node {
+            kind: NodeKind::ListItem,
+            ..Node::default()
+        };
+        let scene = crate::scene::node::Scene::from_nodes(
+            vec![ancestor, ul_node, li],
+            vec![(0, 1), (1, 2)],
+        );
+        let ancestor_id = scene.roots[0];
+        let ul = scene.get(ancestor_id).unwrap().children[0];
+        let mut s = crate::stage::Stage::new_for_test();
+        s.scene = Some(scene);
+
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 1000);
+        // 给真实高度（避免 estimate=0 导致可见区退化为整列）：20px/项。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..1000 {
+                ls.heights.set(i, 20.0);
+            }
+            // 滚动祖先视口高 100，scroll_y=0 → 第一帧可见 0..7（首项顶=0，+BUFFER）。
+            let st = scene.scroll.ensure(ancestor_id);
+            st.viewport_size = (1000.0, 100.0);
+            st.scroll_pos = (0.0, 0.0);
+        }
+
+        // 第一帧：实例化初始 slot。
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        assert_eq!(ls.slots.len(), 7, "first frame: visible 0..7 → 7 slots");
+        assert_eq!(ls.free.len(), 0, "no recycle yet");
+        assert_all_slots_well_parented(scene, ul);
+
+        // 第二帧：滚下 100px（~5 项）→ 可见 3..12。items 0,1,2 离开→进 free 池，复用给 7,8,9。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let st = scene.scroll.ensure(ancestor_id);
+            st.scroll_pos = (0.0, 100.0);
+        }
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        assert_eq!(ls.visible, 3..12, "second frame: scrolled to 3..12");
+        assert_eq!(ls.slots.len(), 9, "second frame: 9 visible slots");
+        assert_all_slots_well_parented(scene, ul);
+    }
+
+    /// template_root 是游离子树（parent=None、不在 roots）。remove_node(ul) 必须
+    /// 随 ul 一并释放它，否则 ListState 条目清掉后成孤儿、slotmap 槽永久泄漏。
+    #[test]
+    fn remove_node_frees_template_root_subtree() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        let template_root = s
+            .scene
+            .as_ref()
+            .unwrap()
+            .lists
+            .get(ul)
+            .unwrap()
+            .template_root
+            .expect("template backed up");
+        // template_root 此时是游离节点（parent=None、不在 roots）。
+        assert!(
+            s.scene.as_ref().unwrap().get(template_root).is_some(),
+            "template live before remove"
+        );
+        s.remove_node(ul);
+        assert!(
+            s.scene.as_ref().unwrap().get(ul).is_none(),
+            "ul removed (slotmap slot freed)"
+        );
+        assert!(
+            s.scene.as_ref().unwrap().get(template_root).is_none(),
+            "template subtree freed (no leak)"
+        );
+        assert!(
+            s.scene.as_ref().unwrap().lists.get(ul).is_none(),
+            "list state entry removed"
         );
     }
 }
