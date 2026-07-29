@@ -576,6 +576,7 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
     scene.anim.clear_node(id);
     scene.scroll.remove(id);
     scene.controls.remove(id);
+    scene.lists.remove(id);
     scene.text_contents.remove(&id);
     scene.image_srcs.remove(&id);
     tweens.kill_node(id);

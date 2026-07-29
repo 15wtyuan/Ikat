@@ -878,6 +878,10 @@ impl Stage {
         let cps = std::mem::take(&mut self.pending_text_input);
         crate::input::process_text_input(scene, &cps, &mut out);
         self.last_events = out;
+        // 3.6 ListView 虚拟化可见区更新（solve 前：新克隆 slot 本帧布局）。拆 plan/execute 两阶段
+        //     解 clone 借用冲突——两阶段都只借 scene，依次调即可。
+        let list_ops = crate::list::plan_visible(scene);
+        crate::list::execute_visible(scene, list_ops);
         // 4. 伪类重匹配（提到 solve 前：改 taffy_style/transform/colors，本帧全部消费）
         rematch_pseudo_classes(scene);
         // 4.5 transition drain：rematch 检测可动画通道变化时推入 scene.pending_transitions。

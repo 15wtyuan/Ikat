@@ -516,6 +516,9 @@ pub struct Scene {
     pub anim: AnimTable,
     /// 每节点滚动状态（refresh_content_sizes / scroll 物理填）。index = NodeId.index()。运行时态，不进 pkg。
     pub scroll: crate::scroll::ScrollTable,
+    /// 每节点 ListView 虚拟化状态（enter_data_driven 填，update_visible 更新）。运行时态，不进 pkg。
+    /// side table 模式（同 scroll/anim），不塞进 Node。
+    pub lists: crate::list::ListTable,
     /// 每节点控件状态（instantiate 从 `ControlInit` 填、交互改）。运行时态，不进 pkg。
     pub controls: ControlTable,
     /// 每节点 text 测量结果（layout solve 填，render 复用——消除双测量不一致）。

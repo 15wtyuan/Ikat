@@ -1,6 +1,8 @@
 //! ListView 虚拟化内核：HeightCache + 可见区算法 + slot 池 + spacer 撑高 + anchoring。
 //! side table 模式（照 scroll.rs / EditState），不塞进 Node。
 
+use crate::scene::node::{NodeFlags, NodeId, NodeKind, Scene};
+
 /// 预渲染缓冲项数（可见区前后各 BUFFER 项提前克隆 + bind，吸收滚动速度）。
 pub const BUFFER: usize = 2;
 /// 冷启动（首帧 layout_rect 全 0 → viewport.h=0）时实例化的项数。
@@ -22,6 +24,7 @@ impl HeightCache {
         }
     }
 
+    /// 改变项数。旧已知项保留（不收缩则 resize 填 None）。`initial_estimate` 仅在已测项清空时生效。
     pub fn resize(&mut self, item_count: usize, initial_estimate: f32) {
         self.known.resize(item_count, None);
         if self.known.is_empty() {
@@ -59,6 +62,175 @@ impl HeightCache {
             self.estimate = known.iter().sum::<f32>() / known.len() as f32;
         }
     }
+}
+
+impl Default for HeightCache {
+    fn default() -> Self {
+        Self {
+            known: Vec::new(),
+            estimate: 0.0,
+        }
+    }
+}
+
+/// 单个虚拟列表 slot（克隆出的实例根 + 它绑定的 item 序号）。
+/// `node` 在 slots vec 中按 item_index 排序（克隆时按 visible 顺序 append）。
+#[derive(Debug, Clone, Copy)]
+pub struct Slot {
+    pub node: NodeId,
+    pub item_index: usize,
+}
+
+/// ListView 运行时虚拟化状态。每 ul（NodeKind::ListView）一个槽。
+///
+/// - `slots`：当前实例化的 slot（克隆出的 li），按 item_index 升序（克隆 / 回收均保序）。
+/// - `free`：回收的 slot 根 NodeId 池（下次克隆优先复用，避免 clone_subtree 开销）。
+/// - `visible`：上帧算出的可见 item 区间 [start, end)。
+/// - `pending_binds`：本帧新克隆待绑定的 (slot_node, item_index)，由 bind 阶段（Task 6）消费。
+/// - `anchoring_active` / `dirty`：anchoring / 静默刷新标记（预留，Task 5+ 用）。
+#[derive(Debug, Clone)]
+pub struct ListState {
+    pub item_count: usize,
+    /// 克隆模板的游离根（enter_data_driven 备份的设计期 li）。
+    pub template_root: Option<NodeId>,
+    pub heights: HeightCache,
+    pub slots: Vec<Slot>,
+    pub free: Vec<NodeId>,
+    pub visible: std::ops::Range<usize>,
+    pub head_spacer: NodeId,
+    pub tail_spacer: NodeId,
+    pub pending_binds: Vec<(NodeId, usize)>,
+    pub list_ordinal: u32,
+    pub anchoring_active: bool,
+    pub dirty: bool,
+}
+
+impl Default for ListState {
+    fn default() -> Self {
+        Self {
+            item_count: 0,
+            template_root: None,
+            heights: HeightCache::default(),
+            slots: Vec::new(),
+            free: Vec::new(),
+            visible: 0..0,
+            head_spacer: NodeId::INVALID,
+            tail_spacer: NodeId::INVALID,
+            pending_binds: Vec::new(),
+            list_ordinal: 0,
+            anchoring_active: false,
+            dirty: true,
+        }
+    }
+}
+
+/// 每 ListView 节点的虚拟化状态表（`HashMap<NodeId, ListState>`）。运行时态，不进 pkg。
+/// 结构与访问约定同 `ScrollTable`/`AnimTable`（见 node.rs AnimTable doc：NodeId 不能直接当
+/// SecondaryMap Key，用 HashMap 便租用 / 零转换）。enter_data_driven 填、remove_node 联动清。
+#[derive(Debug, Clone, Default)]
+pub struct ListTable(pub std::collections::HashMap<NodeId, ListState>);
+
+impl ListTable {
+    pub fn get(&self, id: NodeId) -> Option<&ListState> {
+        self.0.get(&id)
+    }
+    pub fn get_mut(&mut self, id: NodeId) -> Option<&mut ListState> {
+        self.0.get_mut(&id)
+    }
+    /// 删该节点 ListState（remove_node 联动调，防悬空 NodeId 残留）。
+    pub fn remove(&mut self, id: NodeId) {
+        self.0.remove(&id);
+    }
+}
+
+/// 进入数据驱动模式：备份模板（兜底=第一个设计期 li）+ 建 spacer + 清空设计期 li + 建 ListState。
+///
+/// ul 高度必须 auto（否则虚拟化无法撑出可滚内容）；非 auto → Err。被祖先 flex 拉伸检测复杂，
+/// 这里只检显式 height 非 auto，flex 拉伸留 Unity 真机诊断（可接受：spec §4 约定 ul 高度 auto）。
+pub fn enter_data_driven(
+    stage: &mut crate::stage::Stage,
+    ul: NodeId,
+    list_ordinal: u32,
+) -> Result<(), String> {
+    // 短期不可变借：校验 kind + height + 收集设计期 li（含模板候选）。
+    // 不能跨 clone_subtree 持有 scene 借（clone_subtree 也要 &mut stage）。
+    let (first_li, lis): (Option<NodeId>, Vec<NodeId>) = {
+        let scene = stage.scene.as_ref().ok_or("no scene")?;
+        if scene.get(ul).map(|n| n.kind) != Some(NodeKind::ListView) {
+            return Err("enter_data_driven: node is not a ListView".into());
+        }
+        check_ul_height_auto(scene, ul)?;
+        let ul_node = scene.get(ul).unwrap();
+        let first_li = ul_node
+            .children
+            .iter()
+            .copied()
+            .find(|&c| scene.get(c).map(|cn| cn.kind) == Some(NodeKind::ListItem));
+        let lis: Vec<NodeId> = ul_node
+            .children
+            .iter()
+            .copied()
+            .filter(|&c| scene.get(c).map(|cn| cn.kind) == Some(NodeKind::ListItem))
+            .collect();
+        (first_li, lis)
+    };
+    // 先 clone 模板（需 &mut stage，此时无 scene 借），再清空原 li。
+    let template_root = if let Some(li) = first_li {
+        let cloned = stage.clone_subtree(li)?;
+        for li in &lis {
+            stage.remove_node(*li);
+        }
+        Some(cloned)
+    } else {
+        return Err("ListView 无模板来源：无 <template>、无设计期 li、未设 ItemTemplate".into());
+    };
+    let head = stage.create_node("div", "")?;
+    let tail = stage.create_node("div", "")?;
+    configure_spacer(stage, head);
+    configure_spacer(stage, tail);
+    stage.append_child(ul, head)?;
+    stage.append_child(ul, tail)?;
+    let ls = ListState {
+        item_count: 0,
+        template_root,
+        heights: HeightCache::new(0, 0.0),
+        slots: Vec::new(),
+        free: Vec::new(),
+        visible: 0..0,
+        head_spacer: head,
+        tail_spacer: tail,
+        pending_binds: Vec::new(),
+        list_ordinal,
+        anchoring_active: false,
+        dirty: true,
+    };
+    stage.scene.as_mut().unwrap().lists.0.insert(ul, ls);
+    Ok(())
+}
+
+/// ul 高度必须 auto（虚拟化靠 spacer 撑出可滚高度，ul 自身被滚动容器裁切）。
+/// taffy 0.12 的 size.height 是 `Dimension`，用 `is_auto()` 检测。
+fn check_ul_height_auto(scene: &Scene, ul: NodeId) -> Result<(), String> {
+    let n = scene.get(ul).ok_or("ul not found")?;
+    if !n.base_style.taffy_style.size.height.is_auto() {
+        return Err("数据驱动 ListView 高度必须为 auto（否则虚拟化无法撑出可滚内容）".into());
+    }
+    Ok(())
+}
+
+/// spacer 初始样式：flex-shrink:0（不被压缩）+ height:0 + padding-top:0.01px（阻断 margin collapsing）。
+/// 直接改 base_style.taffy_style（运行时 create_node 的 css 参数虽经 apply_decl，但直接赋值更明确，
+/// 避免 padding shorthand 的多值解析路径）。
+fn configure_spacer(stage: &mut crate::stage::Stage, spacer: NodeId) {
+    let scene = stage.scene.as_mut().unwrap();
+    let n = scene.get_mut(spacer).unwrap();
+    n.base_style.taffy_style.flex_shrink = 0.0;
+    // padding 字段是 LengthPercentage（非 Auto）；size.height 是 Dimension（含 Auto 变体）。
+    // taffy 0.12 用小写构造函数 `length(val)` / `auto()`。
+    n.base_style.taffy_style.padding.top = taffy::style::LengthPercentage::length(0.01);
+    n.base_style.taffy_style.size.height = taffy::style::Dimension::length(0.0);
+    n.style = n.base_style.clone();
+    n.dirty_mesh = true;
 }
 
 /// 计算可见项区间 [start, end)（含 BUFFER）。viewport.h==0 → 冷启动返 INITIAL_SLOTS。
@@ -101,6 +273,241 @@ pub fn compute_visible_range(
     let start = first.saturating_sub(BUFFER);
     let end = (last + BUFFER).min(item_count);
     start..end
+}
+
+// ── 数据驱动模式：可见区计算 + slot 池 + spacer 撑高 ───────────────────────
+
+/// 设 ListView 的项数。重置 HeightCache 容量（保留已测高度）。
+pub fn set_item_count(stage: &mut crate::stage::Stage, ul: NodeId, count: usize) {
+    if let Some(scene) = stage.scene.as_mut() {
+        if let Some(ls) = scene.lists.get_mut(ul) {
+            ls.item_count = count;
+            // 保留已测高度：resize 只扩缩 known vec，estimate 不变。
+            // initial_estimate 取当前 estimate（无已测时 0.0，首帧 solve 后 Task 5 补真实模板高）。
+            ls.heights.resize(count, ls.heights.estimate);
+            ls.dirty = true;
+        }
+    }
+}
+
+/// plan 阶段的待执行操作（与 execute 解耦，避开 clone_subtree 的 &mut Stage 与
+/// plan 的 &mut Scene 借用冲突）。单个 ListView 一条。
+pub struct PendingOps {
+    pub list_ul: NodeId,
+    /// 本帧需新克隆的 item 序号（visible − 当前已有 slot）。
+    pub to_clone: Vec<usize>,
+    pub new_visible: std::ops::Range<usize>,
+    pub spacer_head_h: f32,
+    pub spacer_tail_h: f32,
+}
+
+/// plan 阶段：算可见区、回收离开的 slot 入 free 池、产待克隆 index 列表。**只借 scene**
+/// （clone_subtree 不在此调）。tick_and_render 先调 plan_visible 再调 execute_visible。
+pub fn plan_visible(scene: &mut Scene) -> Vec<PendingOps> {
+    // 收集所有 ListView 节点的 NodeId（避免在借 scene.lists 时借 scene.nodes）。
+    let uls: Vec<NodeId> = scene.lists.0.keys().copied().collect();
+    let mut out = Vec::new();
+    for ul in uls {
+        if let Some(op) = plan_one(scene, ul) {
+            out.push(op);
+        }
+    }
+    out
+}
+
+fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
+    // 先用不可变借收集算可见区 + spacer 高所需的所有输入（heights、scroll、gap）。
+    // 不能与后续 lists.get_mut 的可变借并存。
+    let (scroll_y, viewport_h, ul_y) = {
+        let (sy, vh) = ancestor_scroll_viewport(scene, ul);
+        let uy = scene.get(ul).map(|n| n.layout_rect.y).unwrap_or(0.0);
+        (sy, vh, uy)
+    };
+    // 克隆 heights + item_count 避免跨可变借持有 ls 引用。
+    let (item_count, heights, gap) = {
+        let ls = scene.lists.get(ul)?;
+        let gap = if matches!(
+            scene.get(ul).unwrap().base_style.taffy_style.display,
+            taffy::Display::Flex
+        ) {
+            crate::render::resolve_lp(scene.get(ul).unwrap().base_style.taffy_style.gap.height)
+        } else {
+            0.0
+        };
+        (ls.item_count, ls.heights.clone(), gap)
+    };
+    let visible = compute_visible_range(item_count, scroll_y, ul_y, viewport_h, &heights);
+    // 回收离开的 slot（old item_index − new visible）→ free 池。
+    let new_set: std::collections::HashSet<usize> = visible.clone().collect();
+    let to_clone: Vec<usize>;
+    {
+        let ls = scene.lists.get_mut(ul)?;
+        let mut keep_slots = Vec::new();
+        let mut to_free = Vec::new();
+        for s in ls.slots.drain(..) {
+            if new_set.contains(&s.item_index) {
+                keep_slots.push(s);
+            } else {
+                to_free.push(s.node);
+            }
+        }
+        ls.slots = keep_slots;
+        ls.free.extend(to_free);
+        // 待克隆 = visible − 当前已有 slot indices。
+        let have: std::collections::HashSet<usize> =
+            ls.slots.iter().map(|s| s.item_index).collect();
+        to_clone = visible.clone().filter(|i| !have.contains(i)).collect();
+    }
+    // spacer 高度 = 累计项高度 − gap 扣除（flex 容器 gap 额外占主轴）。
+    let spacer_head_h = (heights.sum(0..visible.start) - gap).max(0.0);
+    let spacer_tail_h = (heights.sum(visible.end..item_count) - gap).max(0.0);
+    Some(PendingOps {
+        list_ul: ul,
+        to_clone,
+        new_visible: visible,
+        spacer_head_h,
+        spacer_tail_h,
+    })
+}
+
+/// execute 阶段：clone slot + insert_before tail_spacer + 标 LOOKUP_SCOPE + reuse_key +
+/// 入队 pending_binds + 写 spacer 高度。只借 scene（直接调 scene::dynamic 建树函数，
+/// 不经 Stage 包装——避免与 plan_visible 的 &mut Scene 借用冲突）。
+pub fn execute_visible(scene: &mut Scene, ops: Vec<PendingOps>) {
+    for op in ops {
+        execute_one(scene, op);
+    }
+}
+
+fn execute_one(scene: &mut Scene, op: PendingOps) {
+    let (template_root, list_ordinal, tail_spacer) = {
+        let ls = match scene.lists.get(op.list_ul) {
+            Some(ls) => ls,
+            None => return,
+        };
+        (ls.template_root, ls.list_ordinal, ls.tail_spacer)
+    };
+    let tpl = match template_root {
+        Some(t) => t,
+        None => return,
+    };
+    for item_index in &op.to_clone {
+        // 优先从 free 池复用（避免 clone 开销）；取不到才 clone_node_recursive。
+        let node = scene.lists.get_mut(op.list_ul).and_then(|ls| ls.free.pop());
+        let node = match node {
+            Some(n) => n,
+            None => crate::scene::dynamic::clone_node_recursive(scene, tpl),
+        };
+        // 标 LOOKUP_SCOPE（不打 SCOPE_ROOT：spec §6.2，slot 根 CSS 规则仍按页面根 scope 匹配）。
+        if let Some(n) = scene.get_mut(node) {
+            n.interaction.flags.insert(NodeFlags::LOOKUP_SCOPE);
+        }
+        // reuse_key 编码：((list_ordinal+1)<<16)|(slot_idx)。恒 ≠ 0（list_ordinal+1 ≥ 1）。
+        let slot_idx = scene
+            .lists
+            .get(op.list_ul)
+            .map(|ls| ls.slots.len())
+            .unwrap_or(0);
+        crate::scene::dynamic::set_reuse_key(scene, node, encode_reuse_key(list_ordinal, slot_idx));
+        // append 到 tail_spacer 之前（head/tail spacer 始终首位）。
+        let _ = crate::scene::dynamic::insert_before(scene, op.list_ul, node, tail_spacer);
+        if let Some(ls) = scene.lists.get_mut(op.list_ul) {
+            ls.slots.push(Slot {
+                node,
+                item_index: *item_index,
+            });
+            ls.pending_binds.push((node, *item_index));
+        }
+    }
+    // 写 spacer 高度 + 记录本帧 visible。
+    let (head, tail) = {
+        let ls = scene.lists.get_mut(op.list_ul).unwrap();
+        ls.visible = op.new_visible;
+        (ls.head_spacer, ls.tail_spacer)
+    };
+    set_spacer_height(scene, head, op.spacer_head_h);
+    set_spacer_height(scene, tail, op.spacer_tail_h);
+}
+
+/// reuse_key 编码：高 16 bit = list_ordinal+1（0 保留表“无 key”），低 16 bit = slot_idx。
+/// 恒 ≠ 0（list_ordinal+1 ≥ 1）。场景级全局命名空间（同 ordinal 的 slot 跨帧复用）。
+fn encode_reuse_key(list_ordinal: u32, slot_idx: usize) -> u32 {
+    ((list_ordinal + 1) << 16) | ((slot_idx as u32) & 0xFFFF)
+}
+
+/// 沿祖先链找最近滚动容器，返 (scroll_pos.y, viewport.h)。无祖先 ScrollPane → (0,0)
+/// （viewport.h=0 触发冷启动 → INITIAL_SLOTS），保证无滚动容器的测试也能实例化初始 slot。
+fn ancestor_scroll_viewport(scene: &Scene, node: NodeId) -> (f32, f32) {
+    let mut cur = scene.get(node).and_then(|n| n.parent);
+    while let Some(pid) = cur {
+        if let Some(st) = scene.scroll.get(pid) {
+            return (st.scroll_pos.1, st.viewport_size.1);
+        }
+        cur = scene.get(pid).and_then(|n| n.parent);
+    }
+    (0.0, 0.0)
+}
+
+/// 写 spacer 高度（base_style + style 同步，标 dirty_mesh 触发重布局）。
+fn set_spacer_height(scene: &mut Scene, spacer: NodeId, h: f32) {
+    if let Some(n) = scene.get_mut(spacer) {
+        let d = taffy::style::Dimension::length(h);
+        n.base_style.taffy_style.size.height = d;
+        n.style.taffy_style.size.height = d;
+        n.dirty_mesh = true;
+    }
+}
+
+/// 构造测试用 Stage：场景含一个 ListView(ul) 根 + 一个 ListItem(li) 子。
+/// 运行时 create_node 只支持 div/button/img/span，故 ListView/ListItem 须经
+/// Scene::build 直接构造（同打包器入口），再注入 Stage。
+#[cfg(test)]
+fn stage_with_ul_li() -> (crate::stage::Stage, NodeId, NodeId) {
+    use crate::scene::node::{NodeKind, Scene};
+    use crate::style::resolved::ResolvedStyle;
+    let mut s = crate::stage::Stage::new_for_test();
+    let entries: [(
+        Option<usize>,
+        NodeKind,
+        crate::style::resolved::ResolvedStyle,
+        Vec<String>,
+        Option<String>,
+        bool,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ); 2] = [
+        (
+            None,
+            NodeKind::ListView,
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            Some(0),
+            NodeKind::ListItem,
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+    ];
+    let scene = Scene::build(&entries);
+    let ul = scene.roots[0];
+    let li = scene.get(ul).unwrap().children[0];
+    s.scene = Some(scene);
+    (s, ul, li)
 }
 
 #[cfg(test)]
@@ -171,5 +578,49 @@ mod tests {
 
     fn approx_eq(a: f32, b: f32) {
         assert!((a - b).abs() < 0.01, "{a} != {b}");
+    }
+
+    #[test]
+    fn enter_data_driven_creates_spacers_and_backups_li() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        let scene = s.scene.as_ref().unwrap();
+        let ul_node = scene.get(ul).unwrap();
+        assert_eq!(ul_node.children.len(), 2, "ul has head+tail spacer only");
+        let ls = scene.lists.get(ul).expect("list state created");
+        assert!(
+            ls.template_root.is_some(),
+            "design-time li backed up as template"
+        );
+    }
+
+    #[test]
+    fn update_visible_instantiates_initial_slots() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 1000);
+        // plan（借 scene）+ execute（借 scene）两阶段，同 tick_and_render 调法。
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let scene = s.scene.as_ref().unwrap();
+        let ul_node = scene.get(ul).unwrap();
+        assert_eq!(
+            ul_node.children.len(),
+            2 + crate::list::INITIAL_SLOTS,
+            "2 spacers + INITIAL_SLOTS slots for cold-start count=1000"
+        );
+        // slot 根打 LOOKUP_SCOPE（不打 SCOPE_ROOT）
+        let slot_node = scene.get(ul_node.children[2]).unwrap();
+        assert!(
+            slot_node
+                .interaction
+                .flags
+                .contains(NodeFlags::LOOKUP_SCOPE),
+            "slot root carries LOOKUP_SCOPE"
+        );
+        assert!(
+            !slot_node.interaction.flags.contains(NodeFlags::SCOPE_ROOT),
+            "slot root must NOT carry SCOPE_ROOT (CSS rules still apply)"
+        );
     }
 }
