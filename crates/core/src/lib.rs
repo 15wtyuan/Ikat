@@ -19,6 +19,7 @@ pub mod dump;
 pub mod hit;
 pub mod input;
 pub mod layout;
+pub mod list;
 pub mod render;
 pub mod scene;
 pub mod scroll;
