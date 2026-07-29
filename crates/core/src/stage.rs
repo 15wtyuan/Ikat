@@ -765,12 +765,13 @@ impl Stage {
 
         // 实例根 = 作用域根（Shadow DOM 风格，main-design §5.4 / public-api §2.3）。
         // 该实例的 CSS 规则只在本实例子树内匹配，不泄漏到其他组件实例。
+        // SCOPE_ROOT = CSS 作用域隔离；LOOKUP_SCOPE = Get<T> 查找边界（两语义解耦，保现有行为）。
         scene
             .get_mut(root)
             .unwrap()
             .interaction
             .flags
-            .insert(NodeFlags::SCOPE_ROOT);
+            .insert(NodeFlags::SCOPE_ROOT | NodeFlags::LOOKUP_SCOPE);
 
         // 模板规则包装成 ScopedRule（scope_root = 实例根），push 进 scene 动态规则表。
         // 不再按 selector 去重：同模板多实例各带独立 scope_root，rematch 按 scope 隔离匹配，

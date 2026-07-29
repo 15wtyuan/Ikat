@@ -771,6 +771,15 @@ mod tests {
         });
     }
 
+    /// 把规则作为 scoped 规则（scope_root = 指定实例根）推进 scene——只命中该作用域内节点。
+    /// 用于 CSS 作用域隔离测试。
+    fn push_scoped(s: &mut Scene, scope_root: NodeId, r: DynamicRule) {
+        s.dynamic_rules.entries.push(ScopedRule {
+            rule: r,
+            scope_root,
+        });
+    }
+
     /// 构造 root + button(.btn) scene，button 在 (0,0,100,100)。
     fn btn_scene() -> Scene {
         let mut root = Node::default();
@@ -1799,6 +1808,77 @@ mod tests {
         assert_eq!(
             s.border_color, None,
             "border_color 用 base 值（无 ghost red）"
+        );
+    }
+
+    /// CSS 作用域隔离回归测试（main-design §5.4）：页面根(SCOPE_ROOT) → child → 组件实例根(SCOPE_ROOT)
+    /// → leaf(.leaf)。页面根作用域的 .leaf 规则不应命中实例内部节点——leaf 的 node_scope =
+    /// 实例根（沿父链最近的 SCOPE_ROOT）≠ 页面根，scoped 规则被过滤。
+    ///
+    /// 此测试锁定 SCOPE_ROOT/LOOKUP_SCOPE 拆分后 CSS 作用域隔离语义不变（SCOPE_ROOT 仍是
+    /// 作用域隔离的唯一依据）。注意：实例根在此测同样打双 flag（复现生产 instantiate 路径），
+    /// 但即便只打 SCOPE_ROOT，leaf 的 node_scope 仍是实例根，隔离仍成立。
+    #[test]
+    fn page_scoped_rule_does_not_match_component_instance_node() {
+        let mut page_root = Node::default();
+        page_root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 400.0,
+            h: 400.0,
+        };
+        let mut child = Node::default();
+        child.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
+        let mut instance_root = Node::default();
+        instance_root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        let mut leaf = Node::default();
+        leaf.classes = vec!["leaf".to_string()];
+        leaf.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
+        // 树：page_root → child → instance_root → leaf
+        let mut s = Scene::from_nodes(
+            vec![page_root, child, instance_root, leaf],
+            vec![(0, 1), (1, 2), (2, 3)],
+        );
+        let page_root_id = s.roots[0];
+        let child_id = s.get(page_root_id).unwrap().children[0];
+        let instance_root_id = s.get(child_id).unwrap().children[0];
+        let leaf_id = s.get(instance_root_id).unwrap().children[0];
+        // 页面根 + 实例根都打 SCOPE_ROOT（复现 create_root / instantiate 生产路径）；
+        // 页面根同时打 LOOKUP_SCOPE（lookup 边界，此测不验证 lookup，只验证 CSS 隔离）。
+        s.get_mut(page_root_id)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::SCOPE_ROOT | NodeFlags::LOOKUP_SCOPE);
+        s.get_mut(instance_root_id)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::SCOPE_ROOT | NodeFlags::LOOKUP_SCOPE);
+        // 页面根作用域的 .leaf 规则：叶子 base color 为默认（非红）。若作用域隔离失效，
+        // 该规则会穿透命中 leaf 染红。
+        let base_color = s.get(leaf_id).unwrap().base_style.color;
+        push_scoped(&mut s, page_root_id, rule(".leaf", "color", "#ff0000"));
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(
+            s.get(leaf_id).unwrap().style.color,
+            base_color,
+            "页面根作用域的 .leaf 规则不应命中实例内节点（作用域隔离：leaf scope = 实例根 ≠ 页面根）"
         );
     }
 }

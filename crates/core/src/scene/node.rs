@@ -19,10 +19,14 @@ bitflags::bitflags! {
         const FOCUSED  = 1 << 2;
         const DISABLED = 1 << 3;
         const CASCALED = 1 << 4;
-        /// 作用域根标记（Shadow DOM 风格，main-design §5.4）：模板实例化根 / 文档根打此位。
-        /// `Get<T>` 查找边界 + CSS dynamic_rules 作用域隔离都据此判定。rematch 的 scope 校验 +
-        /// 后代选择器边界停止都读此位。
+        /// **仅** CSS scoped 规则隔离（Shadow DOM 风格，main-design §5.4）：模板实例化根 /
+        /// 文档根打此位。rematch 的 scope 校验 + 后代选择器边界停止都读此位。与 `Get<T>`
+        /// 查找边界无关（改读 `LOOKUP_SCOPE`）。
         const SCOPE_ROOT = 1 << 5;
+        /// `Get<T>` 查找边界（与 CSS 作用域隔离解耦）：模板实例化根 / 文档根 / ListView slot 根打此位。
+        /// `find_by_id_attr` 在此边界内停止向下穿透嵌套作用域。
+        /// 与 SCOPE_ROOT 独立：slot 根只打此位（CSS 规则仍按页面根 scope 匹配，页面 CSS 对 item 生效）。
+        const LOOKUP_SCOPE = 1 << 6;
     }
 }
 

@@ -3,6 +3,28 @@ use super::*;
 use crate::scene::node::NodeFlags;
 
 #[test]
+fn lookup_scope_flag_exists_distinct_from_scope_root() {
+    assert!(NodeFlags::LOOKUP_SCOPE.contains(NodeFlags::LOOKUP_SCOPE));
+    assert!(!NodeFlags::LOOKUP_SCOPE.contains(NodeFlags::SCOPE_ROOT));
+    let both = NodeFlags::SCOPE_ROOT | NodeFlags::LOOKUP_SCOPE;
+    assert!(both.contains(NodeFlags::SCOPE_ROOT));
+    assert!(both.contains(NodeFlags::LOOKUP_SCOPE));
+}
+
+#[test]
+fn find_by_id_attr_global_match_unaffected_by_flag_split() {
+    // 本任务不引入 scoped find（slot 边界由 list.rs 处理），只拆 flag。
+    // 锁定：增加 LOOKUP_SCOPE 后全局首匹配不变。
+    use crate::scene::dynamic;
+    let mut scene = Scene::default();
+    let root = dynamic::create_root(&mut scene, "div", "").unwrap();
+    let child = dynamic::create_node(&mut scene, "div", "").unwrap();
+    dynamic::append_child(&mut scene, root, child).unwrap();
+    scene.get_mut(child).unwrap().id_attr = Some("dup".into());
+    assert_eq!(scene.find_by_id_attr("dup"), Some(child));
+}
+
+#[test]
 fn node_id_index_and_gen_decode() {
     // 高 20 bit index + 低 12 bit gen
     let id = NodeId((5 << 12) | 7);
