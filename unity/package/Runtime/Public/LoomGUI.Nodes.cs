@@ -2440,9 +2440,6 @@ namespace LoomGUI
             }
         }
 
-        public int SelectedIndex { get { throw NE(); } set { throw NE(); } }
-        public event Action<SelectionChangedEvent> SelectionChanged;
-
         /// <summary>
         /// 滚动到指定 item（spec §7）。core 先设祖先 ScrollPane.scroll_pos 到目标偏移，再
         /// drain_now 同帧克隆新可见区 slot + binds 入队；随后本方法调 DrainPendingBinds 绑定

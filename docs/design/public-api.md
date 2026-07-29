@@ -49,7 +49,7 @@ Node
 |   +-- AbsolutePanel（语法糖，子节点自动 absolute）
 |   +-- TextBlock（p）/ TextElement（span/strong/em）
 |   +-- Label / Button / Link / Canvas
-|   +-- ListView（ul/ol）/ ListItem（li）
+|   +-- ListView（ul）/ ListItem（li）
 +-- TextNode / Image                          （叶子：内容/绘制）
 +-- TextField / PasswordField / SearchField / NumberField / Slider  （叶子：私有内部结构）
 +-- Toggle / RadioButton / TextArea / Dropdown / ProgressBar
@@ -324,8 +324,6 @@ public class ListView : Container {
     public UITemplate ItemTemplate { get; set; }
     public Func<int, UITemplate> TemplateSelector { get; set; }
     public Action<ListItem, int> BindItem { get; set; }
-    public int SelectedIndex { get; set; }
-    public event Action<SelectionChangedEvent> SelectionChanged;
     public void ScrollToItem(int index, ScrollBehavior behavior = ScrollBehavior.Smooth);
     public void RefreshItem(int index);
     public void RefreshItems();
@@ -336,7 +334,7 @@ public class ListView : Container {
 }
 ```
 
-**契约**：`ul/ol → ListView`，`li → ListItem`。布局走 CSS。虚拟化全内部。
+**契约**：`ul → ListView`，`li → ListItem`。布局走 CSS。虚拟化全内部。
 
 **静态 vs 数据驱动（运行时隐式锁定，强制互斥）**：
 - 虚拟化是**运行时实现决策**（程序员按数据规模定），不进 HTML——它不改变渲染结果，不属 AI 可预测性范围。
@@ -345,7 +343,7 @@ public class ListView : Container {
 
 **item 模板来源（优先级从高到低）**：
 1. 运行时显式赋 `ItemTemplate`（单模板）或 `TemplateSelector`（多模板）——程序员完全控制。
-2. 设计期 `<template id>` 声明（[fence.md](fence.md) 允许 `ul/ol` 含 `template`，打包期校验 template 根是 `li`）。多模板时配合 `TemplateSelector`：用户 `view.GetTemplate("name")` 取出 `UITemplate` 后塞进 lambda 闭包按 index 选（`TemplateSelector` 是纯 `Func<int, UITemplate>`，框架不自动收集 ul 下 template）。
+2. 设计期 `<template id>` 声明（[fence.md](fence.md) 允许 `ul` 含 `template`，打包期校验 template 根是 `li`）。多模板时配合 `TemplateSelector`：用户 `view.GetTemplate("name")` 取出 `UITemplate` 后塞进 lambda 闭包按 index 选（`TemplateSelector` 是纯 `Func<int, UITemplate>`，框架不自动收集 ul 下 template）。
 3. 都没有 → 设计期第一个 li 结构兜底当模板（instantiate 时先捕获再清空）。
 
 **自动/报错规则**：未设 `ItemTemplate`/`TemplateSelector` 时——ul 下有**单个** `<template id>` → 自动用它；有**多个** `<template id>` → 抛 `UIContractException`（有多个模板却没说怎么选）。`<template>` 与运行时 virtual 开关不冲突：virtual 管是否虚拟化，`<template>` 管 item 模板长什么样。
