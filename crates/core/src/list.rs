@@ -428,8 +428,23 @@ fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
             0.0
         };
         let visible = compute_visible_range(ls.item_count, scroll_y, ul_y, viewport_h, &ls.heights);
-        let spacer_head_h = (ls.heights.sum(0..visible.start) - gap).max(0.0);
-        let spacer_tail_h = (ls.heights.sum(visible.end..ls.item_count) - gap).max(0.0);
+        // Gap accounting for flex+gap uls. The virtualized ul's flex children are
+        // [head_spacer, slot, ..., slot, tail_spacer], so a visible slot sits one gap
+        // past the head spacer. For a visible slot (bound to item visible.start) to match
+        // the non-virtualized reference position (item[k].top = sum(0..k) + k*gap), the
+        // head spacer must reserve sum(0..visible.start) + (visible.start - 1)*gap:
+        //   slot.top = head_spacer.h + gap = sum + (count-1)*gap + gap = sum + count*gap. ✓
+        // The tail is symmetric. count = hidden items in each spacer's range. count=0 →
+        // saturating_sub(1)=0 → no gap contribution (spacer empty). Block uls have gap=0
+        // so this is a no-op for them.
+        let head_count = visible.start;
+        let tail_count = ls.item_count.saturating_sub(visible.end);
+        let spacer_head_h = (ls.heights.sum(0..visible.start)
+            + (head_count.saturating_sub(1) as f32) * gap)
+            .max(0.0);
+        let spacer_tail_h = (ls.heights.sum(visible.end..ls.item_count)
+            + (tail_count.saturating_sub(1) as f32) * gap)
+            .max(0.0);
         (visible, spacer_head_h, spacer_tail_h)
     };
     // Phase B：可变借回收离开的 slot。被回收的 NodeId 仅暂存（不在此 detach——detach 需借 scene
@@ -1084,6 +1099,63 @@ mod tests {
         assert!(
             ls.anchoring_active,
             "anchoring_active must be set this frame"
+        );
+    }
+
+    /// display:flex + gap>0 时，head spacer 必须保留 (count-1)*gap 的项间 gap，
+    /// 使首个可见 slot 的 y 与非虚拟化参考一致。回归旧 `sum - gap` 公式：
+    /// 多个隐藏项时只扣一个 gap，系统性偏小（visible.start 越大偏越多）。
+    ///
+    /// 反例（旧公式错）：3 项 [10,10,10]，gap=5，visible.start=1。
+    ///   参考：item[1].top = sum(0..1) + 1*gap = 10 + 5 = 15。
+    ///   虚拟化：slot.top = head_spacer.h + gap。要 slot.top=15 → head_spacer.h=10。
+    ///   旧 `sum-gap`=10-5=5（slot 在 10，偏 5）。新 `sum+(count-1)*gap`=10+0=10（正确）。
+    #[test]
+    fn flex_gap_spacer_head_matches_non_virtualized_reference() {
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        // 设 ul 为 display:flex + gap:5。base_style 是 plan_one 读的源（from_nodes 不从
+        // style 拷贝 base_style，须显式设）。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let n = scene.get_mut(ul).unwrap();
+            n.base_style.taffy_style.display = taffy::Display::Flex;
+            n.base_style.taffy_style.gap.height = taffy::style::LengthPercentage::length(5.0);
+        }
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 10);
+        // 每项实测高 10。预填 HeightCache（跳过 solve，直接给已知高度）。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..10 {
+                ls.heights.set(i, 10.0);
+            }
+            // 视口高 30 → 约 3 项可见；滚到 scroll_y=55 → first=5 → visible.start=3
+            // （BUFFER=2 回退）。start>1 才能检验多项 head 区的 (count-1)*gap。
+            let st = scene.scroll.ensure(pane);
+            st.viewport_size = (1000.0, 30.0);
+            st.scroll_pos = (0.0, 55.0);
+        }
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        assert_eq!(ops.len(), 1, "one ListView planned");
+        let op = &ops[0];
+        assert!(
+            op.new_visible.start > 1,
+            "precondition: visible.start>1 to exercise multi-gap head region, got {}",
+            op.new_visible.start
+        );
+        // 参考：item[visible.start].top = sum(0..start) + start*gap。
+        // 虚拟化：slot.top = head_spacer.h + gap → head_spacer.h = sum + (start-1)*gap。
+        let start = op.new_visible.start;
+        let expected_head = (start * 10) as f32 + ((start - 1) as f32) * 5.0;
+        approx_eq(op.spacer_head_h, expected_head);
+        // 旧 `sum - gap` 会偏小：expected_head - (start*gap)。断言差异明显（start>1）。
+        let old_wrong = (start * 10) as f32 - 5.0;
+        assert!(
+            (op.spacer_head_h - old_wrong).abs() > 0.01,
+            "spacer_head_h {} must differ from old wrong `sum-gap` {} ",
+            op.spacer_head_h,
+            old_wrong
         );
     }
 }

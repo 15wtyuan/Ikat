@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using LoomGUI.Bindings;
 using Xunit;
@@ -41,17 +43,23 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>
-        /// Task 6 exit criterion: variable-height list (li height:auto + per-item text +
-        /// margin-bottom) scrolled down to the bottom then back to the top must NOT drift —
-        /// the first visible item reappears at the same world-y as the initial state, and
-        /// scroll_pos returns to ~0 without accumulating anchoring error.
+        /// Task 6 exit criterion: a genuinely variable-height list (per-item inline height set
+        /// in BindItem + margin-bottom) must keep the first visible item's world-y stable across
+        /// a scroll-down-then-up round trip, AND the scroll-anchoring compensation must actually
+        /// fire mid-scroll (otherwise the test is tautological — it would pass with the anchoring
+        /// code deleted, as the previous fixed-height version did).
         ///
-        /// Drift mechanism under test: as the list scrolls, items leave/enter the visible window
-        /// and collect_heights backfills their real margin-box heights. Without scroll anchoring,
-        /// the head spacer height would jump when estimates get replaced by measurements,
-        /// making the content visually shift even though scroll_pos is unchanged. Anchoring
-        /// compensates scroll_pos.y by the head-region delta so content stays put, and the clamp
-        /// exemption keeps any in-flight tween alive across the overlap change.
+        /// Two load-bearing assertions:
+        /// 1. <b>Anchoring-fires (delete-gate)</b>: after snapping scroll_pos to a mid-range value
+        ///    and ticking ONE frame, scroll_pos.y must DIFFER from the snapped value. During a
+        ///    down-scroll the virtualized content only ever grows (more items get measured and
+        ///    folded into the spacers → overlap grows), so the refresh_content_sizes clamp cannot
+        ///    be what moved an in-range scroll_pos. The only remaining modifier is collect_heights'
+        ///    anchoring delta (scroll_pos.y += head-region height delta). With anchoring deleted,
+        ///    scroll_pos would stay exactly at the snapped value → assertion fails.
+        /// 2. <b>No-drift round-trip</b>: scroll to the bottom then back to the top; the first
+        ///    visible item reappears at the same world-y as the initial state.
+        /// Plus a sanity check that measured heights are genuinely non-uniform.
         /// </summary>
         [Fact]
         public void VariableHeight_NoDrift_OnScrollDownThenUp()
@@ -82,63 +90,78 @@ namespace LoomGUI.HeadlessTests
                 Container pane = instRoot.Get<Container>("pane");
                 Assert.NotNull(pane);
 
-                // No-op BindItem (slot content stays template default). The fixture bakes li
-                // height:40px + margin-bottom:8px, so every slot's margin-box height = 48 —
-                // collect_heights backfills 48 (not the bare 40 border box), exercising the
-                // margin-box path. Uniform heights keep anchoring delta ~0 (estimate converges
-                // on first backfill), so this validates the no-drift round trip without depending
-                // on per-item inline-override propagation (a separate concern).
-                list.BindItem = (item, index) => { };
-                list.ItemCount = 60;
+                // Per-item variable height via inline override (Option B). The periodic pattern
+                // (period 4: 40/70/100/130) guarantees every visible window contains a mix of
+                // short and tall items, so the non-uniform sanity check holds at any scroll
+                // position. Crucially, the estimate (mean of the few measured items) never
+                // exactly matches the next unmeasured item, so as each new region scrolls into
+                // view and gets measured, the head-region height sum shifts → anchoring must
+                // compensate. With uniform heights the delta converges to ~0 and the test would
+                // pass with the anchoring code deleted.
+                list.BindItem = (item, index) =>
+                {
+                    float hh = 40f + (index % 4) * 30f;
+                    item.Style.Height = Length.Px(hh);
+                };
+                list.ItemCount = 200;
 
-                // Settle a few frames: cold-start slots clone, BindItem fires, solve measures real
-                // heights, collect_heights backfills them, anchoring stabilizes.
-                for (int i = 0; i < 6; i++)
+                // Settle a few frames at the top: cold-start slots clone, BindItem sets heights,
+                // solve measures them, collect_heights backfills, anchoring stabilizes.
+                for (int i = 0; i < 4; i++)
                     TickAndDrain(h, ctx);
 
-                // Capture initial state at top: first slot's world-y + scroll_pos.
                 uint ul = list._id;
+
+                // ── Sanity: measured heights are genuinely non-uniform ──────────────────
+                // Read each visible slot's border-box height; at least two must differ, proving
+                // the dataset is variable (guards against a regression that silently re-bakes a
+                // fixed height and makes the anchoring assertion vacuous).
+                var slotRects0 = SlotLayoutRects(h, ul);
+                Assert.True(slotRects0.Count >= 2, $"at least 2 slots visible at top: {slotRects0.Count}");
+                float minH = slotRects0.Min(r => r.h);
+                float maxH = slotRects0.Max(r => r.h);
+                Assert.True(maxH - minH > 1f,
+                    $"heights must be non-uniform to exercise anchoring; min={minH} max={maxH}");
+
+                // Capture initial state at top: first slot's world-y + scroll_pos.
                 uint firstSlot0 = FirstSlotChildId(h, ul);
                 Assert.NotEqual(0u, firstSlot0);
-                var lr0 = GetLayoutRect(h, firstSlot0);
-                float initialFirstSlotWorldY = lr0.y;
+                float initialFirstSlotWorldY = GetLayoutRect(h, firstSlot0).y;
                 float initialScrollY = GetScrollY(h, pane._id);
 
-                // Scroll down near the bottom. Several frames let virtualization recycle/clone slots
-                // at the new window and backfill their heights (anchoring fires here).
-                float bigY = 4000f;
-                SetScrollPos(h, pane._id, bigY);
+                // ── Anchoring-fires (delete-gate) ────────────────────────────────────────
+                // Snap scroll_pos to a value comfortably inside the scroll range (the tail spacer
+                // already makes overlap large at the top). One tick materializes the new window's
+                // slots, measures them, and collect_heights must compensate scroll_pos by the
+                // head-region delta. Read scroll_pos back: it must have moved off the snapped
+                // value. clamp cannot be responsible (content only grows on a down-scroll), so a
+                // non-zero delta proves anchoring ran. Deleting the anchoring code leaves
+                // scroll_pos untouched → this assertion fails.
+                float snapY = 1500f;
+                SetScrollPos(h, pane._id, snapY);
+                float snappedY = GetScrollY(h, pane._id); // post-snap (already clamped to range)
+                Assert.True(snappedY > initialScrollY + 50f,
+                    $"snap advanced past top: snapped={snappedY} initial={initialScrollY}");
+                TickAndDrain(h, ctx);
+                float afterOneTickY = GetScrollY(h, pane._id);
+                Assert.True(!float.IsNaN(afterOneTickY) && !float.IsInfinity(afterOneTickY),
+                    $"scroll_pos.y finite after tick: {afterOneTickY}");
+                Assert.True(MathF.Abs(afterOneTickY - snappedY) > 0.5f,
+                    $"anchoring must shift scroll_pos off the snapped value " +
+                    $"(snapped={snappedY}, afterTick={afterOneTickY}); " +
+                    $"a no-op means anchoring never fired (delete-gate)");
+
+                // Continue scrolling to near the bottom so the whole short→tall transition is
+                // traversed and every region's heights get measured.
+                SetScrollPos(h, pane._id, 20000f);
                 for (int i = 0; i < 8; i++)
                     TickAndDrain(h, ctx);
                 float midScrollY = GetScrollY(h, pane._id);
-                // set_scroll_pos clamps to [0, overlap]; anchoring may further shift it by the
-                // head-region delta. Assert finite + advanced past the top (virtualization recycled
-                // slots at the new window — the precondition for the no-drift round trip).
-                Assert.True(!float.IsNaN(midScrollY) && !float.IsInfinity(midScrollY),
-                    $"scroll_pos.y unstable after scroll down: {midScrollY}");
-                Assert.True(midScrollY > 0f, $"scroll advanced past top: {midScrollY}");
+                Assert.True(midScrollY > snappedY,
+                    $"scroll advanced toward bottom: mid={midScrollY} snapped={snappedY}");
 
-                // Confirm virtualization pushed items above the visible window: the head spacer
-                // (the last Container before the first slot) must have grown beyond zero, proving
-                // items were measured + collapsed into the spacer — the precondition for anchoring.
-                int childCount = Native.loomgui_stage_get_child_count(h, ul);
-                Assert.True(childCount >= 3, $"slots materialized at mid-scroll: {childCount}");
-                uint[] midKids = new uint[childCount];
-                fixed (uint* bp = midKids)
-                    Native.loomgui_stage_get_children(h, ul, bp, (nuint)childCount);
-                // Locate the head spacer: the last Container (kind 0) before the first ListItem (slot).
-                // HTML-source whitespace TextNodes (kind 1) may precede it, so we scan for it.
-                int firstSlotIdx = -1;
-                for (int i = 0; i < childCount; i++)
-                {
-                    byte kn = 0;
-                    Native.loomgui_stage_get_node_kind(h, midKids[i], &kn);
-                    if (kn == 15) { firstSlotIdx = i; break; }
-                }
-                Assert.True(firstSlotIdx > 0, $"head spacer exists before first slot: firstSlotIdx={firstSlotIdx}");
-                var headSpacerRect = GetLayoutRect(h, midKids[firstSlotIdx - 1]);
-                Assert.True(headSpacerRect.h > 1f,
-                    $"head spacer grew (items virtualized above window): h={headSpacerRect.h}");
+                // Confirm virtualization pushed items above the visible window (head spacer grew).
+                Assert.True(HeadSpacerHeight(h, ul) > 1f, "head spacer grew (items virtualized above)");
 
                 // Scroll back to the top.
                 SetScrollPos(h, pane._id, 0f);
@@ -149,12 +172,12 @@ namespace LoomGUI.HeadlessTests
                 // sits at the same world-y as the initial state, and scroll_pos returned to ~0.
                 uint firstSlot1 = FirstSlotChildId(h, ul);
                 Assert.NotEqual(0u, firstSlot1);
-                var lr1 = GetLayoutRect(h, firstSlot1);
-                float finalFirstSlotWorldY = lr1.y;
+                float finalFirstSlotWorldY = GetLayoutRect(h, firstSlot1).y;
                 float finalScrollY = GetScrollY(h, pane._id);
 
                 _log.WriteLine(
                     $"initial: firstSlotY={initialFirstSlotWorldY:F2} scrollY={initialScrollY:F2}; " +
+                    $"snap={snappedY:F2} after1Tick={afterOneTickY:F2} (delta={afterOneTickY - snappedY:F2}); " +
                     $"mid: scrollY={midScrollY:F2}; " +
                     $"final: firstSlotY={finalFirstSlotWorldY:F2} scrollY={finalScrollY:F2}");
 
@@ -314,6 +337,53 @@ namespace LoomGUI.HeadlessTests
             float x, y;
             Native.loomgui_stage_get_scroll_pos(h, pane, &x, &y);
             return y;
+        }
+
+        /// <summary>
+        /// Collect the layout rects of every slot (ListItem child of ul). Used for the
+        /// non-uniform-height sanity check: confirms the dataset is genuinely variable so the
+        /// anchoring assertion is not vacuous.
+        /// </summary>
+        static List<(float x, float y, float w, float h)> SlotLayoutRects(StageHandle* h, uint ul)
+        {
+            var result = new List<(float, float, float, float)>();
+            int count = Native.loomgui_stage_get_child_count(h, ul);
+            if (count == 0) return result;
+            uint[] buf = new uint[count];
+            int written;
+            fixed (uint* bp = buf)
+                written = Native.loomgui_stage_get_children(h, ul, bp, (nuint)count);
+            for (int i = 0; i < written; i++)
+            {
+                byte kn = 0;
+                Native.loomgui_stage_get_node_kind(h, buf[i], &kn);
+                if (kn == 15) // ListItem
+                    result.Add(GetLayoutRect(h, buf[i]));
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Height of the head spacer (the Container child immediately before the first slot).
+        /// Non-zero after scrolling proves items were collapsed above the visible window.
+        /// </summary>
+        static float HeadSpacerHeight(StageHandle* h, uint ul)
+        {
+            int count = Native.loomgui_stage_get_child_count(h, ul);
+            if (count == 0) return 0f;
+            uint[] buf = new uint[count];
+            int written;
+            fixed (uint* bp = buf)
+                written = Native.loomgui_stage_get_children(h, ul, bp, (nuint)count);
+            int firstSlotIdx = -1;
+            for (int i = 0; i < written; i++)
+            {
+                byte kn = 0;
+                Native.loomgui_stage_get_node_kind(h, buf[i], &kn);
+                if (kn == 15) { firstSlotIdx = i; break; }
+            }
+            if (firstSlotIdx <= 0) return 0f;
+            return GetLayoutRect(h, buf[firstSlotIdx - 1]).h;
         }
     }
 }
