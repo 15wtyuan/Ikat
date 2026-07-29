@@ -1445,17 +1445,25 @@ mod tests {
     #[test]
     fn clone_subtree_skips_runtime_side_tables() {
         // side table 判定（list spec §6）：运行时状态（scroll/anim/tween/EditState）
-        // 不深拷——克隆根是干净模板，调用方按需重设。这里验 scroll 副表不残留：
-        // 即使源根是 scroll 容器，克隆根无 ScrollPaneState 或 scroll_pos 归零。
+        // 不深拷——克隆根是干净模板，调用方按需重设。
+        //
+        // 非平凡设置：create_root("div","overflow:auto") 只写 CSS，不预填 ScrollTable
+        // （HashMap 懒初始化，仅 layout/refresh 调 ensure 时填）。若源根无 scroll 条目，
+        // 旧断言 unwrap_or(true) 恒过——拷 scroll 的错误实现也通过（None→默认条目→0.0）。
+        // 故显式给源根灌非零 scroll_pos，使断言能区分 skip（clone=None）vs copy（Some+42.0）。
         let mut s = crate::stage::Stage::new_for_test();
         let root = s.create_root("div", "overflow:auto").unwrap();
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let st = scene.scroll.ensure(root);
+            st.scroll_pos = (0.0, 42.0);
+        }
         let cloned = s.clone_subtree(root).unwrap();
-        let scene = s.scene.as_ref().unwrap();
-        let scroll_zero = scene
-            .scroll
-            .get(cloned)
-            .map(|st| st.scroll_pos.1 == 0.0)
-            .unwrap_or(true);
-        assert!(scroll_zero, "scroll 运行时状态不得克隆");
+        // 克隆根不得有 scroll state：clone_node_recursive 从不调 ensure，运行时状态零拷贝。
+        // 比旧"scroll_pos 归零"更严——拷实现会把 42.0 带过来导致 Some → 断言失败。
+        assert!(
+            s.scene.as_ref().unwrap().scroll.get(cloned).is_none(),
+            "scroll 运行时状态不得克隆"
+        );
     }
 }
