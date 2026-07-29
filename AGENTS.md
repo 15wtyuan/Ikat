@@ -144,7 +144,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 **GUI exe 绑 fence crate**：fence 改动后必须重编 GUI exe（`loomgui_gui.exe` 静态链入 fence），否则 GUI stale 误报围栏外（pkg bump 时也触发，坑 158 同源）。打包器 exe 闭环见上方「GUI 打包器 exe 闭环」段。
 
-**SDD per-task review 是代码质量门，不是集成正确性门**：单测验不了 CSS 语义集成（display 子树剪枝、继承传播、多 spec 解析）——SDD 后必跑 showcase PlayMode 逐项过。
+**SDD per-task review 是代码质量门，不是集成正确性门**：单测验不了 CSS 语义集成（display 子树剪枝、继承传播、多 spec 解析）——SDD 后必跑 showcase PlayMode 逐项过。**跨层缺口 per-task review 必漏**：控件束 P3 加 NumberField 时，enum/FFI/C# 各 task 都绿，但 render/measure/cursor 的 type-dispatch arm 漏了 NumberField → 控件运行时不可见（空 mesh），是 final whole-branch review 才抓到。**教训：加新控件类型（新 NodeKind/ControlState 变体）时，强制 grep 所有按 kind/变体 dispatch 的点**（render arm、measure_text_controls、on_pointer_down/on_text_pointer_down、cursor blink、FFI setter or-pattern）逐一确认覆盖，别只验自己 task 的层——各层 dispatch 独立写、独立测，漏一个 = 控件半残/不可见。
 
 **SDD long-running worktree 要防 main 漂移**：反向 merge（`git merge main` 进 feature 分支解冲突），合超集签名，用对方分支的测试当合并验收标准。
 
