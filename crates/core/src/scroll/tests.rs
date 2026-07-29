@@ -1233,3 +1233,71 @@ fn refresh_clamps_idle_overridden_out_of_range_pos() {
     );
     assert_eq!(st3.overlap.1, 3600.0);
 }
+
+/// anchoring 豁免：pane 是某 anchoring_active ListView 的祖先时，refresh 的 clamp
+/// 分支仍 clamp scroll_pos 但不清 tweening（几何变化源于虚拟化回填，tween 应继续）。
+/// 回归 §5 anchoring-vs-tween 交互——不豁免会让 ScrollToItem(Smooth) 半途静默停住。
+#[test]
+fn refresh_clamp_keeps_tween_when_anchoring_active() {
+    use crate::list::ListState;
+    use crate::scene::node::{Node, NodeKind};
+    // pane(scroll, layout 200x200) → ul(ListView)。content 缩使 overlap 缩、pos 越界。
+    let mut scroll_style = ResolvedStyle::default();
+    scroll_style.overflow_y = OverflowMode::Scroll;
+    let pane_node = Node {
+        kind: NodeKind::Container,
+        style: scroll_style,
+        layout_rect: Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        },
+        ..Node::default()
+    };
+    let ul_node = Node {
+        kind: NodeKind::ListView,
+        // 给一个大 content 使 overlap 初始 > 0：content_y=1000 → overlap=800。
+        layout_rect: Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 1000.0,
+        },
+        ..Node::default()
+    };
+    let scene = crate::scene::node::Scene::from_nodes(vec![pane_node, ul_node], vec![(0, 1)]);
+    let pane = scene.roots[0];
+    let ul = scene.get(pane).unwrap().children[0];
+    let mut s = Scene::default();
+    // 注入两节点进 scene.nodes（from_nodes 产独立 SlotMap；这里转存）。
+    s.nodes = scene.nodes;
+    s.roots = vec![pane];
+    // 初次 refresh 建立 scroll state（overlap_y=800）。
+    refresh_content_sizes(&mut s);
+    let st = s.scroll.get_mut(pane).unwrap();
+    st.scroll_pos = (0.0, 800.0); // 贴底（在 overlap 内）
+    st.tweening = [1, 1]; // 模拟 ScrollToItem Smooth 正在跑
+                          // 标 ul 为 anchoring_active（collect_heights 本帧补偿过 head 区）。
+    let mut ls = ListState::default();
+    ls.anchoring_active = true;
+    s.lists.0.insert(ul, ls);
+    // 缩 content → overlap 缩到 400，pos=800 越界。anchoring 期应 clamp pos 但保留 tweening。
+    s.get_mut(ul).unwrap().layout_rect.h = 600.0; // content=600 → overlap=400
+    refresh_content_sizes(&mut s);
+    let st2 = s.scroll.get(pane).unwrap();
+    assert_eq!(st2.scroll_pos.1, 400.0, "越界 pos 仍被 clamp 到 overlap");
+    assert_eq!(st2.tweening, [1, 1], "anchoring 期不清 tweening");
+    // 对照：清 anchoring_active 后再缩 → 应清 tweening（回归豁免只在本帧生效）。
+    s.lists.get_mut(ul).unwrap().anchoring_active = false;
+    s.scroll.get_mut(pane).unwrap().tweening = [1, 1]; // 重置（上一帧被保留）
+    s.get_mut(ul).unwrap().layout_rect.h = 500.0; // content=500 → overlap=300, pos=400 越界
+    refresh_content_sizes(&mut s);
+    let st3 = s.scroll.get(pane).unwrap();
+    assert_eq!(st3.scroll_pos.1, 300.0, "非 anchoring 越界仍 clamp");
+    assert_eq!(
+        st3.tweening,
+        [0, 0],
+        "非 anchoring 越界清 tweening（原行为）"
+    );
+}

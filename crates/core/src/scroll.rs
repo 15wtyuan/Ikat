@@ -571,6 +571,8 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
             .get(nid)
             .map(|s| s.content_size_overridden)
             .unwrap_or(false);
+        // anchoring 豁免须在 mutable borrow scene.scroll 前取（读 scene.lists + nodes）。
+        let anchoring = scene_is_anchoring(scene, nid);
         if overridden {
             let st = scene.scroll.ensure(nid);
             st.viewport_size = viewport;
@@ -592,7 +594,10 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
                 if out_of_range {
                     st.scroll_pos.0 = st.scroll_pos.0.clamp(0.0, new_overlap.0);
                     st.scroll_pos.1 = st.scroll_pos.1.clamp(0.0, new_overlap.1);
-                    st.tweening = [0, 0];
+                    // anchoring 期不清 tweening（几何变化源于虚拟化回填，tween 应继续）。
+                    if !anchoring {
+                        st.tweening = [0, 0];
+                    }
                 }
             }
             continue;
@@ -620,6 +625,8 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
         } else {
             ((max_x - min_x).max(0.0), (max_y - min_y).max(0.0))
         };
+        // anchoring 豁免须在 mutable borrow scene.scroll 前取（读 scene.lists + nodes）。
+        let anchoring = scene_is_anchoring(scene, nid);
         let st = scene.scroll.ensure(nid);
         st.content_size_dirty = st.content_size != content;
         st.content_size = content;
@@ -642,7 +649,10 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
             if out_of_range {
                 st.scroll_pos.0 = st.scroll_pos.0.clamp(0.0, new_overlap.0);
                 st.scroll_pos.1 = st.scroll_pos.1.clamp(0.0, new_overlap.1);
-                st.tweening = [0, 0];
+                // anchoring 期不清 tweening（几何变化源于虚拟化回填，tween 应继续）。
+                if !anchoring {
+                    st.tweening = [0, 0];
+                }
             }
         }
     }
@@ -653,6 +663,30 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
 fn content_box_size(node: &Node) -> (f32, f32) {
     let lr = node.layout_rect;
     (lr.w, lr.h)
+}
+
+/// 该 pane 是否正被某个 anchoring 活跃的 ListView 补偿（其祖先链含 pane）。
+/// refresh_content_sizes 的 clamp 分支据此豁免清 tweening——虚拟化回填导致的
+/// overlap 变化不是真实内容突变，正在跑的 tween（如 ScrollToItem Smooth）应继续。
+/// 读 scene.lists + scene.nodes（与 scene.scroll 的 mutable borrow 不冲突：不同字段）。
+fn scene_is_anchoring(scene: &Scene, pane: NodeId) -> bool {
+    scene
+        .lists
+        .0
+        .iter()
+        .any(|(ul, ls)| ls.anchoring_active && ancestor_chain_contains(scene, *ul, pane))
+}
+
+/// `target` 是否在 `start` 的祖先链上（含 start 自身）。
+fn ancestor_chain_contains(scene: &Scene, start: NodeId, target: NodeId) -> bool {
+    let mut cur = Some(start);
+    while let Some(id) = cur {
+        if id == target {
+            return true;
+        }
+        cur = scene.get(id).and_then(|n| n.parent);
+    }
+    false
 }
 
 /// hit(x,y) → 沿 node.parent 链找最近 effective 滚动容器 → apply_wheel。

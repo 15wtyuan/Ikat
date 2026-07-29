@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ListView variable-height + margin no-drift fixture</title>
+<style>
+  /* Fixture for the anchoring no-drift headless assertion (Task 6 exit criterion).
+     Variable heights are produced by li height:auto + per-item text content set via
+     BindItem (longer text → taller li). margin-bottom:8px exercises margin-box backfill
+     (height_of = border-box h + margin). Anchoring must keep the first visible item's
+     world-y stable across a scroll-down-then-up round trip. */
+  .root { width: 400px; height: 300px; background-color: #111; }
+  .pane {
+    width: 400px;
+    height: 200px;
+    overflow: scroll;
+    background-color: #222;
+  }
+  ul { display: block; }
+  li {
+    width: 380px;
+    /* Fixed height + margin-bottom: exercises margin-box backfill
+       (height_of = 40 border + 8 margin = 48). Uniform heights keep anchoring delta ~0
+       (estimate converges immediately), validating the no-drift round trip without depending
+       on per-item inline-override propagation (separate concern). */
+    height: 40px;
+    margin-bottom: 8px;
+    background-color: #4a90d9;
+    color: #fff;
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+  <div class="root">
+    <div class="pane" id="pane">
+      <ul id="list">
+        <li id="tpl">template</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

@@ -315,27 +315,70 @@ pub fn drain_now(stage: &mut crate::stage::Stage, ul: NodeId) -> Vec<(NodeId, us
     take_pending_binds(stage.scene.as_mut().expect("scene"), ul)
 }
 
-/// 每帧 solve 后、refresh_content_sizes 前调：把已实例化 slot 的真实 layout_rect.h
-/// 回填 HeightCache。下帧可见区算法用真实高度而非 estimate，逐步逼近精准区间。
-/// 等高版：直写 `known[i] = h`。margin box + anchoring 在 Task 6（变高场景）。
+/// 每帧 solve 后、refresh_content_sizes 前调：把已实例化 slot 的真实 margin-box 高
+/// 回填 HeightCache，并按 head 区间总高变化做 scroll anchoring 补偿。
+///
+/// **margin box**：`layout_rect.h` 是 border box，不含 margin。`li { margin-bottom:8px }`
+/// 极常见，漏计会让 spacer 求和系统性偏小、anchoring delta 跟着偏 → 滚回头漂移。
+/// 故 `height_of(i) = layout_rect.h + margin_top + margin_bottom`。
+///
+/// **scroll anchoring**：本帧回填（含 recompute_estimate）若改变 `visible.start` 之前
+/// 区间（head spacer 覆盖范围）的高度总和，delta≠0 → 同帧把祖先 ScrollPane.scroll_pos.y
+/// += delta（用户视角内容不动，滚动条长度悄然修正）。补偿点 solve 之后、refresh_content_sizes
+/// 之前；scroll_pos 只被 compute_world_transforms 消费，不触发二次 solve。
+/// anchoring_active 标记本帧是否发生补偿，供 refresh_content_sizes 的 clamp 分支豁免清 tween。
 pub fn collect_heights(scene: &mut Scene) {
-    // 先快照各 list 的 (slot_node, item_index)，避免跨 list 借用冲突。
-    let lists: Vec<(NodeId, Vec<(NodeId, usize)>)> = scene
+    // 快照各 list 的 (slot_node, item_index) + head 区间旧总和 + 祖先 pane。
+    // 在回填前取 old_head_sum（sum 借 heights 不可变；set 借可变——先快照再循环写）。
+    let lists: Vec<(NodeId, Vec<(NodeId, usize)>, f32, Option<NodeId>)> = scene
         .lists
         .0
         .iter()
         .map(|(ul, ls)| {
-            (
-                *ul,
-                ls.slots.iter().map(|s| (s.node, s.item_index)).collect(),
-            )
+            let slots: Vec<(NodeId, usize)> =
+                ls.slots.iter().map(|s| (s.node, s.item_index)).collect();
+            let old_head_sum = ls.heights.sum(0..ls.visible.start);
+            let pane = ancestor_pane(scene, *ul);
+            (*ul, slots, old_head_sum, pane)
         })
         .collect();
-    for (ul, slots) in lists {
+    for (ul, slots, old_head_sum, pane) in lists {
+        // 回填前重置 anchoring_active（反映「本帧」是否补偿）。
+        if let Some(ls) = scene.lists.get_mut(ul) {
+            ls.anchoring_active = false;
+        }
         for (node, idx) in slots {
-            let h = scene.get(node).map(|n| n.layout_rect.h).unwrap_or(0.0);
+            // margin box = border box h + margin top + bottom（解析后的 px 值）。
+            // LengthPercentageAuto 的 Auto 分支返 0（auto margin 在 flex 主轴由布局决定，
+            // slot 已 solve 完，layout_rect.h 不含 auto margin 的贡献——auto margin 对
+            // 列表高度无影响，按 0 计与 CSS 块/flex 流一致）。
+            let h = scene
+                .get(node)
+                .map(|n| {
+                    let ts = &n.base_style.taffy_style;
+                    n.layout_rect.h
+                        + resolve_margin_px(ts.margin.top)
+                        + resolve_margin_px(ts.margin.bottom)
+                })
+                .unwrap_or(0.0);
             if let Some(ls) = scene.lists.get_mut(ul) {
                 ls.heights.set(idx, h);
+            }
+        }
+        // anchoring：回填后 head 区间总高变化 → 补偿祖先 pane scroll_pos.y。
+        let (new_head_sum, visible_start) = match scene.lists.get(ul) {
+            Some(ls) => (ls.heights.sum(0..ls.visible.start), ls.visible.start),
+            None => continue,
+        };
+        let delta = new_head_sum - old_head_sum;
+        if delta.abs() > 0.001 && visible_start > 0 {
+            if let Some(pane) = pane {
+                if let Some(st) = scene.scroll.get_mut(pane) {
+                    st.scroll_pos.1 += delta;
+                    if let Some(ls) = scene.lists.get_mut(ul) {
+                        ls.anchoring_active = true;
+                    }
+                }
             }
         }
     }
@@ -506,6 +549,34 @@ fn ancestor_scroll_viewport(scene: &Scene, node: NodeId) -> (f32, f32) {
     (0.0, 0.0)
 }
 
+/// 沿祖先链找最近滚动容器 NodeId（anchoring 补偿 scroll_pos 用）。无则 None。
+fn ancestor_pane(scene: &Scene, node: NodeId) -> Option<NodeId> {
+    let mut cur = scene.get(node).and_then(|n| n.parent);
+    while let Some(pid) = cur {
+        if scene.scroll.get(pid).is_some() {
+            return Some(pid);
+        }
+        cur = scene.get(pid).and_then(|n| n.parent);
+    }
+    None
+}
+
+/// 把 taffy `LengthPercentageAuto` 解析为 px：Length→值，Percent/Auto→0。
+/// margin box 回填用——auto margin 对列表高度无贡献（flex 主轴由布局决定，已 solve 完），
+/// percent margin 在列表场景极罕见且无父尺寸上下文，按 0 计（同 render::resolve_lp 对 padding 的处理）。
+fn resolve_margin_px(m: taffy::style::LengthPercentageAuto) -> f32 {
+    if m.is_auto() {
+        0.0
+    } else {
+        let cl = m.into_raw();
+        if cl.tag() == taffy::style::CompactLength::LENGTH_TAG {
+            cl.value()
+        } else {
+            0.0 // percent / 其他：无上下文，按 0
+        }
+    }
+}
+
 /// 写 spacer 高度（base_style + style 同步，标 dirty_mesh 触发重布局）。
 fn set_spacer_height(scene: &mut Scene, spacer: NodeId, h: f32) {
     if let Some(n) = scene.get_mut(spacer) {
@@ -566,6 +637,38 @@ fn stage_with_ul_li() -> (crate::stage::Stage, NodeId, NodeId) {
     let li = scene.get(ul).unwrap().children[0];
     s.scene = Some(scene);
     (s, ul, li)
+}
+
+/// 测试辅助：3 层树 pane(Container, overflow scroll) → ul(ListView) → li(ListItem)。
+/// 用于 margin box / anchoring 测（需祖先 ScrollPane）。返 (stage, ul, li, pane)。
+#[cfg(test)]
+fn stage_with_pane_ul_li() -> (crate::stage::Stage, NodeId, NodeId, NodeId) {
+    use crate::scene::node::{Node, NodeKind};
+    use crate::style::resolved::OverflowMode;
+    let pane_node = Node {
+        kind: NodeKind::Container,
+        style: crate::style::resolved::ResolvedStyle {
+            overflow_y: OverflowMode::Scroll,
+            ..Default::default()
+        },
+        ..Node::default()
+    };
+    let ul_node = Node {
+        kind: NodeKind::ListView,
+        ..Node::default()
+    };
+    let li = Node {
+        kind: NodeKind::ListItem,
+        ..Node::default()
+    };
+    let scene =
+        crate::scene::node::Scene::from_nodes(vec![pane_node, ul_node, li], vec![(0, 1), (1, 2)]);
+    let pane = scene.roots[0];
+    let ul = scene.get(pane).unwrap().children[0];
+    let li = scene.get(ul).unwrap().children[0];
+    let mut s = crate::stage::Stage::new_for_test();
+    s.scene = Some(scene);
+    (s, ul, li, pane)
 }
 
 #[cfg(test)]
@@ -861,5 +964,126 @@ mod tests {
         assert_eq!(ls.heights.height_of(0), 5.0);
         assert_eq!(ls.heights.height_of(1), 15.0);
         assert_eq!(ls.heights.height_of(2), 25.0);
+    }
+
+    /// margin box 回填：li 带 margin-bottom:8px 时，height_of 应 = border-box h + margin。
+    /// 回归锚点——漏计 margin 会让 spacer 求和系统性偏小、anchoring delta 跟着偏。
+    #[test]
+    fn collect_heights_uses_margin_box_not_border_box() {
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 10);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        // 伪造 slot：border-box h=20 + margin top=3 bottom=8 → margin box = 31。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let slots: Vec<(NodeId, usize)> = scene
+                .lists
+                .get(ul)
+                .unwrap()
+                .slots
+                .iter()
+                .map(|s| (s.node, s.item_index))
+                .collect();
+            for (node, _idx) in slots {
+                let n = scene.get_mut(node).unwrap();
+                n.layout_rect.h = 20.0;
+                let ts = &mut n.base_style.taffy_style;
+                ts.margin.top = taffy::style::LengthPercentageAuto::length(3.0);
+                ts.margin.bottom = taffy::style::LengthPercentageAuto::length(8.0);
+            }
+        }
+        crate::list::collect_heights(s.scene.as_mut().unwrap());
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        approx_eq(ls.heights.height_of(0), 31.0);
+        // 占位引用 pane（构造 helper 返回它；后续 anchoring 测也用）。
+        let _ = pane;
+    }
+
+    /// anchoring 补偿：本帧回填修正了 estimate → head 区间（仍用 estimate 的未测项）
+    /// 总和变化，delta≠0 → 同帧把祖先 ScrollPane.scroll_pos.y += delta（内容不动）。
+    /// 触发路径：head 区间项未测（用 estimate），visible 区 slot 本帧首次实测 →
+    /// recompute_estimate 改 estimate → head sum 随之变 → anchoring 补 delta。
+    #[test]
+    fn anchoring_compensates_head_height_delta() {
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 100);
+        // 预置：所有项 estimate=20（全未测），滚到 visible.start≈10。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            ls.heights.estimate = 20.0; // 全未测，head 区用此 estimate
+                                        // 视口高 100 → 滚到 scroll_y=200（~10 项）→ visible.start≈10。
+            let st = scene.scroll.ensure(pane);
+            st.viewport_size = (1000.0, 100.0);
+            st.scroll_pos = (0.0, 200.0);
+        }
+        // 第一帧 plan/execute 让 slot 物化（visible≈[8..18]，含 BUFFER）。
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let visible_start = s
+            .scene
+            .as_ref()
+            .unwrap()
+            .lists
+            .get(ul)
+            .unwrap()
+            .visible
+            .start;
+        // 记 head 区间当前总和（基于 estimate=20）。
+        let head_before = s
+            .scene
+            .as_ref()
+            .unwrap()
+            .lists
+            .get(ul)
+            .unwrap()
+            .heights
+            .sum(0..visible_start);
+        // 模拟 solve：物化的 slot（visible 区）实测高度=30（≠ estimate 20）。
+        // collect_heights 会回填这些 → recompute_estimate 把 estimate 从 20 拉到 30
+        // → head 区（仍全未测，用 estimate）总和从 20*vs 变 30*vs → delta=10*vs。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let slots: Vec<(NodeId, usize)> = scene
+                .lists
+                .get(ul)
+                .unwrap()
+                .slots
+                .iter()
+                .map(|s| (s.node, s.item_index))
+                .collect();
+            for (node, _idx) in slots {
+                let n = scene.get_mut(node).unwrap();
+                n.layout_rect.h = 30.0;
+            }
+        }
+        let scroll_y_before = s
+            .scene
+            .as_ref()
+            .unwrap()
+            .scroll
+            .get(pane)
+            .unwrap()
+            .scroll_pos
+            .1;
+        crate::list::collect_heights(s.scene.as_mut().unwrap());
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        let head_after = ls.heights.sum(0..visible_start);
+        let scroll_y_after = scene.scroll.get(pane).unwrap().scroll_pos.1;
+        let delta = head_after - head_before;
+        assert!(
+            delta.abs() > 0.001,
+            "head sum should have changed via estimate update: {delta}"
+        );
+        approx_eq(scroll_y_after - scroll_y_before, delta);
+        assert!(
+            ls.anchoring_active,
+            "anchoring_active must be set this frame"
+        );
     }
 }

@@ -62,6 +62,10 @@
          template) — used by VirtualizationTests for the no-growth render-node-count assertion.
          Built from fixtures/virtualization.workspace via loom-pkg. -->
     <None Include="fixtures\virtualization.pkg.bin" Link="fixtures\virtualization.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
+    <!-- M1 Task 6 variable-height fixture: varheight.pkg.bin (overflow:scroll pane > ul > li with
+         height:auto + margin-bottom) — used by VirtualizationTests.VariableHeight_NoDrift for the
+         anchoring no-drift assertion. Built from fixtures/varheight.workspace via loom-pkg. -->
+    <None Include="fixtures\varheight.pkg.bin" Link="fixtures\varheight.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
     <!-- E2 fixture font for text layout (tick panics without a default font) -->
     <None Include="fixtures\fonts\DejaVuSans.ttf" Link="fixtures\fonts\DejaVuSans.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

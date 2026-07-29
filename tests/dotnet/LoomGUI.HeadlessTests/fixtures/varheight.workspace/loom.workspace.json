@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output_dir": "../varheight-ws-out",
+  "packages": [
+    {
+      "name": "varheight",
+      "dirs": ["."],
+      "html": ["varheight.html"]
+    }
+  ],
+  "atlases": [],
+  "fonts": []
+}
