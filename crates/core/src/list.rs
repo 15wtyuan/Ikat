@@ -306,13 +306,257 @@ pub fn take_pending_binds(scene: &mut Scene, ul: NodeId) -> Vec<(NodeId, usize)>
         .unwrap_or_default()
 }
 
-/// 同帧排空（spec §7）：先跑一次 plan/execute 再取队列。ScrollToItem / 首次 ItemCount
-/// 调用走此路径——避免新进入可见区的 item 首帧以模板原样显示（克隆 + bind 同帧完成）。
-pub fn drain_now(stage: &mut crate::stage::Stage, ul: NodeId) -> Vec<(NodeId, usize)> {
+/// 同帧推进虚拟化管线（spec §7）：立即跑一次 plan/execute，让本帧滚动后新进入可见区的
+/// item 的 slot 同帧克隆，其 bind 入 `pending_binds` 队列等 C# `DrainPendingBinds` 消费。
+///
+/// **不取队列**——core 无法调业务 BindItem 回调；取队列是 C# `take_pending_binds` 的职责
+/// （每 tick 开头跑一次）。若此处也 take，FFI 会丢掉返回的 Vec，刚克隆的 slot 永不 bind。
+/// ScrollToItem / 首次 ItemCount 调用走此路径——避免目标 item 首帧以模板原样显示。
+///
+/// `ul` 仅作存在性校验；plan_visible 本就遍历所有 ListView（对其余 list 是幂等 no-op）。
+pub fn drain_now(stage: &mut crate::stage::Stage, ul: NodeId) {
     let scene = stage.scene.as_mut().expect("scene");
+    if scene.lists.get(ul).is_none() {
+        return;
+    }
     let ops = plan_visible(scene);
     execute_visible(scene, ops);
-    take_pending_binds(stage.scene.as_mut().expect("scene"), ul)
+}
+
+/// 滚动到指定 item（spec §7 ScrollToItem）。越界 index → Err（FFI 转 -1 → C# 抛 UIContractException）。
+///
+/// 时序：先设祖先 ScrollPane.scroll_pos 到目标偏移，**再** drain_now（plan+execute）——
+/// plan_visible 读 scroll_pos 算可见区，故须先定 scroll_pos 才能让目标 item 的 slot
+/// 进新可见区、同帧克隆 + 入 pending_binds 队列。binds 留队列给 C# DrainPendingBinds 消费
+/// （core 不取——见 drain_now 文档）。
+///
+/// behavior：0=Instant（直接 snap+clamp），1=Smooth（走 ScrollPane 自维护的 cubic-out
+/// tween，TweenProp 无 Scroll 变体——滚动容器物理独立于 GTween）。
+///
+/// 目标偏移 = `heights.sum(0..index)`（未测项用 estimate；下帧 collect_heights 回填后
+/// anchoring 会修正偏差）。`set_pos` 按 overlap clamp——虚拟列表 content_size 由 driver 注入。
+pub fn scroll_to_item(
+    stage: &mut crate::stage::Stage,
+    ul: NodeId,
+    index: usize,
+    behavior: u8,
+) -> Result<(), String> {
+    let pane = {
+        let scene = stage.scene.as_ref().ok_or("no scene")?;
+        if scene.get(ul).map(|n| n.kind) != Some(NodeKind::ListView) {
+            return Err("scroll_to_item: node is not a ListView".into());
+        }
+        let ls = scene
+            .lists
+            .get(ul)
+            .ok_or("scroll_to_item: ListView not in data-driven mode")?;
+        if index >= ls.item_count {
+            return Err("scroll_to_item: index out of range".into());
+        }
+        ancestor_pane(scene, ul)
+    };
+    // 算目标偏移（单独借，避免与下面 set_pos 的可变借重叠）。
+    let target = stage
+        .scene
+        .as_ref()
+        .ok_or("no scene")?
+        .lists
+        .get(ul)
+        .map(|ls| ls.heights.sum(0..index))
+        .unwrap_or(0.0);
+    // 设祖先 ScrollPane scroll_pos（保留 x，设 y）。animated=behavior==1（Smooth）。
+    if let Some(pane) = pane {
+        let scene = stage.scene.as_mut().ok_or("no scene")?;
+        if let Some(st) = scene.scroll.get_mut(pane) {
+            let x = st.scroll_pos.0;
+            st.set_pos((x, target), behavior == 1);
+        }
+    }
+    // drain_now（plan+execute）让新可见区的 slot 同帧克隆 + binds 入队。
+    drain_now(stage, ul);
+    Ok(())
+}
+
+/// 插入通知（spec §10 NotifyInserted）：在 `at` 处插入 `count` 项。heights.known 插入
+/// `count` 个 None（新项未测）；item_count += count；slot.item_index >= at 的 +count
+/// （保持物化 slot 与逻辑项的映射）。越界（at > item_count）→ Err。
+/// dirty 置真，让下帧 plan_visible 按新 item_count / 可见区重算 spacer + 复用 slot。
+pub fn notify_inserted(
+    scene: &mut Scene,
+    ul: NodeId,
+    at: usize,
+    count: usize,
+) -> Result<(), String> {
+    let ls = scene
+        .lists
+        .get_mut(ul)
+        .ok_or("notify_inserted: ListView not in data-driven mode")?;
+    if at > ls.item_count {
+        return Err("notify_inserted: at out of range".into());
+    }
+    for _ in 0..count {
+        ls.heights.known.insert(at, None);
+    }
+    ls.item_count += count;
+    // 移位 + 重排队：item_index >= at 的 slot 移位后语义指向新 item，需重新 bind。
+    // 收集移位 slot 的 (node, new_idx) 再 push（iter_mut 借 ls.slots 与 push ls.pending_binds 同借冲突）。
+    let to_rebind: Vec<(NodeId, usize)> = ls
+        .slots
+        .iter()
+        .filter(|s| s.item_index >= at)
+        .map(|s| (s.node, s.item_index + count))
+        .collect();
+    for s in ls.slots.iter_mut() {
+        if s.item_index >= at {
+            s.item_index += count;
+        }
+    }
+    ls.pending_binds.extend(to_rebind);
+    ls.dirty = true;
+    Ok(())
+}
+
+/// 删除通知（spec §10 NotifyRemoved）：删 [at, at+count) 项。越界（at+count > item_count）→ Err。
+/// heights.known drain 该区间；item_count -= count；item_index 在 [at,end) 的 slot 回收
+/// （从 slots 剔除 + 从 ul 子树 detach + 入 free 池，供下次克隆复用）；item_index > end
+/// 的 slot.item_index -= count。dirty 置真。
+///
+/// 借用顺序：先快照待回收 slot 的 NodeId 与待移位的 (idx, delta)，再可变借 ls 做回收 +
+/// 移位——避免在同一可变借里调 remove_child（它另借 scene）。
+pub fn notify_removed(
+    scene: &mut Scene,
+    ul: NodeId,
+    at: usize,
+    count: usize,
+) -> Result<(), String> {
+    let end = {
+        let ls = scene
+            .lists
+            .get(ul)
+            .ok_or("notify_removed: ListView not in data-driven mode")?;
+        let end = at + count;
+        if at >= ls.item_count || end > ls.item_count {
+            return Err("notify_removed: range out of bounds".into());
+        }
+        end
+    };
+    // Phase A：可变借 ls —— drain heights + 算回收 / 移位分区（记 NodeId）。
+    let (to_recycle, to_shift): (Vec<NodeId>, Vec<(NodeId, usize)>) = {
+        let ls = scene.lists.get_mut(ul).unwrap();
+        let end = end.min(ls.heights.known.len());
+        ls.heights.known.drain(at..end);
+        ls.item_count -= count;
+        let mut recycle = Vec::new();
+        let mut shift = Vec::new();
+        for s in ls.slots.iter() {
+            if s.item_index >= at && s.item_index < end {
+                recycle.push(s.node);
+            } else if s.item_index >= end {
+                shift.push((s.node, s.item_index - count));
+            }
+        }
+        (recycle, shift)
+    };
+    // Phase B：可变借 ls —— 从 slots 剔除回收项 + 重写移位项 index + 重排队移位 slot（重新 bind）。
+    {
+        let ls = scene.lists.get_mut(ul).unwrap();
+        ls.slots.retain(|s| !to_recycle.contains(&s.node));
+        for s in ls.slots.iter_mut() {
+            if let Some((_, new_idx)) = to_shift.iter().find(|(n, _)| *n == s.node) {
+                s.item_index = *new_idx;
+            }
+        }
+        // 移位 slot 现指向新 item_index → 重新 bind（业务数据跟到新序号）。
+        ls.pending_binds.extend(to_shift);
+        ls.dirty = true;
+    }
+    // Phase C：从 ul 子树 detach 回收 slot（remove_child 保 slotmap 槽，正是 free 池语义）+ 入 free。
+    for node in &to_recycle {
+        let _ = crate::scene::dynamic::remove_child(scene, ul, *node);
+    }
+    if let Some(ls) = scene.lists.get_mut(ul) {
+        ls.free.extend(to_recycle);
+    }
+    Ok(())
+}
+
+/// 移动通知（spec §10 NotifyMoved）：把 `from` 项搬到 `to` 位置。heights.known 同步搬；
+/// slot.item_index 重映射（from 的 → to；from<to 区间内的项后移，from>to 区间内的前移）。
+/// 越界（from/to >= item_count）→ Err。
+pub fn notify_moved(scene: &mut Scene, ul: NodeId, from: usize, to: usize) -> Result<(), String> {
+    let max = {
+        let ls = scene
+            .lists
+            .get(ul)
+            .ok_or("notify_moved: ListView not in data-driven mode")?;
+        let max = ls.item_count;
+        if from >= max || to >= max {
+            return Err("notify_moved: index out of range".into());
+        }
+        max
+    };
+    if from == to {
+        return Ok(());
+    }
+    // heights.known 搬移：remove(from).insert(to)。
+    {
+        let ls = scene.lists.get_mut(ul).unwrap();
+        let v = ls.heights.known.remove(from);
+        ls.heights.known.insert(to, v);
+        // slot.item_index 重映射：原 from → to；
+        //   from<to：原 (from,to] 的项前移 1（item_index-1）；
+        //   from>to：原 [to,from) 的项后移 1（item_index+1）。
+        // 同时收 集受影响 slot 重新 bind（item_index 变 → 业务数据需跟到新序号）。
+        let mut to_rebind: Vec<(NodeId, usize)> = Vec::new();
+        for s in ls.slots.iter_mut() {
+            let i = s.item_index;
+            if i == from {
+                s.item_index = to;
+                to_rebind.push((s.node, to));
+            } else if from < to && i > from && i <= to {
+                s.item_index = i - 1;
+                to_rebind.push((s.node, s.item_index));
+            } else if from > to && i >= to && i < from {
+                s.item_index = i + 1;
+                to_rebind.push((s.node, s.item_index));
+            }
+        }
+        ls.pending_binds.extend(to_rebind);
+        ls.dirty = true;
+    }
+    let _ = max;
+    Ok(())
+}
+
+/// 刷新通知（spec §10 RefreshItems）：把 [start, start+count) 内**已物化**的 slot
+/// 重新入 pending_binds 队列，让 C# 下帧重新 BindItem（业务数据刷新）。
+/// 未物化的 slot（不在 slots 中）无法刷新——静默跳过（不报错）。越界（start >= item_count）→ Err。
+pub fn refresh_items(
+    scene: &mut Scene,
+    ul: NodeId,
+    start: usize,
+    count: usize,
+) -> Result<(), String> {
+    let end = start + count;
+    // 先快照匹配的 (node, idx)，再 push——避免 iter(ls.slots) 与 push(ls.pending_binds) 同借冲突。
+    let to_requeue: Vec<(NodeId, usize)> = {
+        let ls = scene
+            .lists
+            .get_mut(ul)
+            .ok_or("refresh_items: ListView not in data-driven mode")?;
+        if start >= ls.item_count {
+            return Err("refresh_items: start out of range".into());
+        }
+        ls.slots
+            .iter()
+            .filter(|s| s.item_index >= start && s.item_index < end)
+            .map(|s| (s.node, s.item_index))
+            .collect()
+    };
+    if let Some(ls) = scene.lists.get_mut(ul) {
+        ls.pending_binds.extend(to_requeue);
+    }
+    Ok(())
 }
 
 /// 每帧 solve 后、refresh_content_sizes 前调：把已实例化 slot 的真实 margin-box 高
@@ -1156,6 +1400,202 @@ mod tests {
             "spacer_head_h {} must differ from old wrong `sum-gap` {} ",
             op.spacer_head_h,
             old_wrong
+        );
+    }
+
+    // ── Task 7：scroll_to_item / notify_* / refresh_items ──────────────────
+
+    /// ScrollToItem：跑一次虚拟化管线（plan+execute）让目标 item 的 slot 同帧物化 +
+    /// pending_binds 入队；设祖先 ScrollPane.scroll_pos.y 到 item 偏移（Instant）。
+    /// 断言：drain 后目标 slot 在 slots 中（binds 入队）；scroll_pos.y ≈ sum(0..index)。
+    #[test]
+    fn scroll_to_item_drains_pipeline_and_targets_index() {
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 100);
+        // 每项 20px，视口 100 → 滚到 item 50 偏移 1000。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..100 {
+                ls.heights.set(i, 20.0);
+            }
+            // content_size/overlap 设大，让 set_pos 不 clamp 掉目标。
+            let st = scene.scroll.ensure(pane);
+            st.viewport_size = (1000.0, 100.0);
+            st.content_size = (1000.0, 2000.0);
+            st.overlap = (0.0, 1900.0);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        crate::list::scroll_to_item(&mut s, ul, 50, 0).unwrap();
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        // drain 后 binds 入队（同帧物化）。
+        assert!(
+            !ls.pending_binds.is_empty(),
+            "drain should have queued binds for the newly-visible slots"
+        );
+        // scroll_pos.y 落到 item 50 的累积偏移 = 50*20 = 1000。
+        let scroll_y = scene.scroll.get(pane).unwrap().scroll_pos.1;
+        approx_eq(scroll_y, 1000.0);
+    }
+
+    /// 越界 index → Err（FFI 转 -1 → C# 抛 UIContractException）。
+    #[test]
+    fn scroll_to_item_out_of_range_errs() {
+        let (mut s, ul, _li, _pane) = stage_with_pane_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 5);
+        assert!(crate::list::scroll_to_item(&mut s, ul, 5, 0).is_err());
+        assert!(crate::list::scroll_to_item(&mut s, ul, 100, 0).is_err());
+    }
+
+    /// NotifyInserted：在 at 插 count 项 → heights.known 在 at 插 count 个 None；
+    /// slot.item_index >= at 的 +count。原 idx=2 的 slot 插入后变 idx=3。
+    #[test]
+    fn notify_inserted_shifts_heights_and_slot_indices() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 5);
+        // 实例化 5 个 slot（冷启动 INITIAL_SLOTS=5，正好全覆盖）。
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        // 全填已知高度，便于验插入后插的是 None。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..5 {
+                ls.heights.set(i, 10.0);
+            }
+        }
+        // 在 at=2 插 1 项。
+        crate::list::notify_inserted(s.scene.as_mut().unwrap(), ul, 2, 1).unwrap();
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        assert_eq!(ls.item_count, 6);
+        assert_eq!(ls.heights.known.len(), 6);
+        // idx 2 现在是 None（新插入的未知项）。
+        assert!(
+            ls.heights.known[2].is_none(),
+            "inserted slot is unknown height"
+        );
+        // 原 idx 0,1 保持 Some(10)；idx 3+ （原 2,3,4）保持 Some(10)（移位不丢值）。
+        assert_eq!(ls.heights.known[0], Some(10.0));
+        assert_eq!(ls.heights.known[3], Some(10.0));
+        // slot.item_index >= 2 的 +1：原 [0,1,2,3,4] → [0,1,3,4,5]。
+        let indices: Vec<usize> = ls.slots.iter().map(|s| s.item_index).collect();
+        let mut sorted = indices.clone();
+        sorted.sort_unstable();
+        assert_eq!(
+            sorted,
+            vec![0, 1, 3, 4, 5],
+            "slots shifted past insert point"
+        );
+    }
+
+    /// NotifyRemoved：删 [at, at+count) → heights.known drain 该区间；item_count -= count；
+    /// 该区间 slot 回收（出 slots、入 free），其余 >end 的 slot.item_index -= count。
+    #[test]
+    fn notify_removed_drains_range_and_recycles_slots() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        // 冷启动 INITIAL_SLOTS=5 → 物化 items 0..5 全集（无滚动容器，viewport.h=0）。
+        crate::list::set_item_count(&mut s, ul, 5);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let slot_count_before = s.scene.as_ref().unwrap().lists.get(ul).unwrap().slots.len();
+        assert_eq!(
+            slot_count_before, 5,
+            "precondition: all 5 items instantiated"
+        );
+        // 删 [2, 4)（删 2 项）：item 2,3 的 slot 回收；item 4 的 slot.item_index 4→2。
+        crate::list::notify_removed(s.scene.as_mut().unwrap(), ul, 2, 2).unwrap();
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        assert_eq!(ls.item_count, 3);
+        assert_eq!(ls.heights.known.len(), 3);
+        // 回收了 2 个 slot（item_index 原 2,3）。
+        assert_eq!(
+            ls.slots.len(),
+            slot_count_before - 2,
+            "removed-range slots recycled out of slots"
+        );
+        // 剩余 slot：item 0,1 不变 + item 4→2。物理顺序应 [0,1,2]。
+        let mut indices: Vec<usize> = ls.slots.iter().map(|s| s.item_index).collect();
+        indices.sort_unstable();
+        assert_eq!(
+            indices,
+            vec![0, 1, 2],
+            "indices after end shifted down by count"
+        );
+        // 回收的 slot 入 free 池（下次克隆优先复用，不 leak）。
+        assert_eq!(ls.free.len(), 2, "recycled slots pushed to free pool");
+    }
+
+    /// NotifyMoved：from→to 搬一项，heights.known 同步搬，slot.item_index 重映射。
+    #[test]
+    fn notify_moved_remaps_height_and_slot_index() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 5);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        // 给 idx 1 一个独特高度，验搬移后跟到 to。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            ls.heights.set(1, 77.0);
+        }
+        // 把 item 1 搬到 3（前→后）。
+        crate::list::notify_moved(s.scene.as_mut().unwrap(), ul, 1, 3).unwrap();
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        assert_eq!(ls.heights.known[3], Some(77.0), "height moved from→to");
+        assert_eq!(
+            ls.heights.known[1], None,
+            "from slot now holds the shifted item"
+        );
+        // slot.item_index：原绑 1 的 slot 现绑 3；原绑 2,3 的 slot 各前移 1（→1,2）。
+        let mut indices: Vec<usize> = ls.slots.iter().map(|s| s.item_index).collect();
+        indices.sort_unstable();
+        assert_eq!(
+            indices,
+            vec![0, 1, 2, 3, 4],
+            "indices still cover full range"
+        );
+    }
+
+    /// notify 越界 → Err（at > item_count / count 溢出）。
+    #[test]
+    fn notify_out_of_range_errs() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 5);
+        assert!(crate::list::notify_inserted(s.scene.as_mut().unwrap(), ul, 6, 1).is_err());
+        assert!(crate::list::notify_removed(s.scene.as_mut().unwrap(), ul, 0, 6).is_err());
+        assert!(crate::list::notify_moved(s.scene.as_mut().unwrap(), ul, 5, 0).is_err());
+    }
+
+    /// refresh_items：把 [start, start+count) 内已物化的 slot 重新入 pending_binds 队列，
+    /// 让 C# 下帧重新 BindItem（业务数据刷新）。未物化的不重复入队。
+    #[test]
+    fn refresh_items_requeues_visible_slots_in_range() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 10);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        // 清空首次 execute 产的 binds，只看 refresh 入队的。
+        let _ = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
+        // 当前冷启动 visible = [0,5)，refresh [1,3) → 应入队 slot 绑 1,2。
+        crate::list::refresh_items(s.scene.as_mut().unwrap(), ul, 1, 2).unwrap();
+        let binds = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
+        let mut idxs: Vec<usize> = binds.iter().map(|(_, i)| *i).collect();
+        idxs.sort_unstable();
+        assert_eq!(
+            idxs,
+            vec![1, 2],
+            "refresh re-queues only in-range instantiated slots"
         );
     }
 }

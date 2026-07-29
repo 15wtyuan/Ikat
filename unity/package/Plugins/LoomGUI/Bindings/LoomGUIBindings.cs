@@ -851,20 +851,37 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_list_take_pending_binds(StageHandle* h, uint* out_nodes, int* out_indices, uint cap, uint* out_len);
 
         /// <summary>
-        ///  同帧排空（plan+execute+take_pending_binds）。ScrollToItem / 首次 ItemCount 调用走此路径
-        ///  ——避免新进入可见区的 item 首帧以模板原样显示。null 句柄 → -1。
+        ///  同帧推进虚拟化管线（plan+execute，不取 binds 队列——C# `DrainPendingBinds` 取）。
+        ///  ScrollToItem / 首次 ItemCount 调用走此路径——让本帧滚动后新进入可见区的 item 的 slot
+        ///  同帧克隆、binds 入队等 C# 消费，避免首帧模板原样。null 句柄 → -1；成功 → 0。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_list_drain_now", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_list_drain_now(StageHandle* h, uint node);
 
+        /// <summary>
+        ///  刷新指定区间已物化的 slot（重新入 pending_binds，C# 下帧重新 BindItem）。
+        ///  start/count：负值拒（越界）。0=ok，-1=err（null 句柄 / 非 ListView / 越界）。
+        /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_list_refresh", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_list_refresh(StageHandle* _h, uint _node, int _start, int _count);
+        internal static extern int loomgui_list_refresh(StageHandle* h, uint node, int start, int count);
 
+        /// <summary>
+        ///  增删搬通知（单 FFI 多 op，spec §10）。a/b 语义随 op：
+        ///  - 0=Inserted: a=at, b=count
+        ///  - 1=Removed:  a=at, b=count
+        ///  - 2=Moved:    a=from, b=to
+        ///
+        ///  返 0=ok，-1=err（null 句柄 / 未知 op / 越界）。
+        /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_list_notify", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_list_notify(StageHandle* _h, uint _node, byte _op, int _a, int _b);
+        internal static extern int loomgui_list_notify(StageHandle* h, uint node, byte op, int a, int b);
 
+        /// <summary>
+        ///  滚动到指定 item。index 越界 / 负值 → -1。behavior：0=Instant，1=Smooth。
+        ///  内部 drain_now 让目标 slot 同帧物化；C# 调后需 DrainPendingBinds 把 binds 灌进 BindItem。
+        /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_list_scroll_to", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_list_scroll_to(StageHandle* _h, uint _node, int _index, byte _behavior);
+        internal static extern int loomgui_list_scroll_to(StageHandle* h, uint node, int index, byte behavior);
 
 
     }

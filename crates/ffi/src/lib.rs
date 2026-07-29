@@ -2703,46 +2703,98 @@ pub extern "C" fn loomgui_list_take_pending_binds(
     0
 }
 
-/// 同帧排空（plan+execute+take_pending_binds）。ScrollToItem / 首次 ItemCount 调用走此路径
-/// ——避免新进入可见区的 item 首帧以模板原样显示。null 句柄 → -1。
+/// 同帧推进虚拟化管线（plan+execute，不取 binds 队列——C# `DrainPendingBinds` 取）。
+/// ScrollToItem / 首次 ItemCount 调用走此路径——让本帧滚动后新进入可见区的 item 的 slot
+/// 同帧克隆、binds 入队等 C# 消费，避免首帧模板原样。null 句柄 → -1；成功 → 0。
 #[no_mangle]
 pub extern "C" fn loomgui_list_drain_now(h: *mut StageHandle, node: u32) -> i32 {
     if h.is_null() {
         return -1;
     }
     let sh = unsafe { &mut *h };
-    let _ = loomgui_core::list::drain_now(&mut sh.stage, NodeId(node));
+    loomgui_core::list::drain_now(&mut sh.stage, NodeId(node));
     0
 }
 
-// 占位 stub（Task 7 实装完整动态增删/滚动/刷新机制）。签名固定，C# 投影已可调，core 侧 no-op。
+/// notify 操作码（与 C# NotifyOp 对齐）。单 FFI 多 op，避免 C# 端三个导入。
+const NOTIFY_INSERTED: u8 = 0;
+const NOTIFY_REMOVED: u8 = 1;
+const NOTIFY_MOVED: u8 = 2;
+
+/// 刷新指定区间已物化的 slot（重新入 pending_binds，C# 下帧重新 BindItem）。
+/// start/count：负值拒（越界）。0=ok，-1=err（null 句柄 / 非 ListView / 越界）。
 #[no_mangle]
 pub extern "C" fn loomgui_list_refresh(
-    _h: *mut StageHandle,
-    _node: u32,
-    _start: i32,
-    _count: i32,
+    h: *mut StageHandle,
+    node: u32,
+    start: i32,
+    count: i32,
 ) -> i32 {
-    0
+    if h.is_null() || start < 0 || count < 0 {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let Some(scene) = sh.stage.scene.as_mut() else {
+        return -1;
+    };
+    match loomgui_core::list::refresh_items(scene, NodeId(node), start as usize, count as usize) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
 }
+
+/// 增删搬通知（单 FFI 多 op，spec §10）。a/b 语义随 op：
+/// - 0=Inserted: a=at, b=count
+/// - 1=Removed:  a=at, b=count
+/// - 2=Moved:    a=from, b=to
+///
+/// 返 0=ok，-1=err（null 句柄 / 未知 op / 越界）。
 #[no_mangle]
 pub extern "C" fn loomgui_list_notify(
-    _h: *mut StageHandle,
-    _node: u32,
-    _op: u8,
-    _a: i32,
-    _b: i32,
+    h: *mut StageHandle,
+    node: u32,
+    op: u8,
+    a: i32,
+    b: i32,
 ) -> i32 {
-    0
+    if h.is_null() || a < 0 || b < 0 {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let Some(scene) = sh.stage.scene.as_mut() else {
+        return -1;
+    };
+    let ul = NodeId(node);
+    let res = match op {
+        NOTIFY_INSERTED => loomgui_core::list::notify_inserted(scene, ul, a as usize, b as usize),
+        NOTIFY_REMOVED => loomgui_core::list::notify_removed(scene, ul, a as usize, b as usize),
+        NOTIFY_MOVED => loomgui_core::list::notify_moved(scene, ul, a as usize, b as usize),
+        _ => return -1,
+    };
+    match res {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
 }
+
+/// 滚动到指定 item。index 越界 / 负值 → -1。behavior：0=Instant，1=Smooth。
+/// 内部 drain_now 让目标 slot 同帧物化；C# 调后需 DrainPendingBinds 把 binds 灌进 BindItem。
 #[no_mangle]
 pub extern "C" fn loomgui_list_scroll_to(
-    _h: *mut StageHandle,
-    _node: u32,
-    _index: i32,
-    _behavior: u8,
+    h: *mut StageHandle,
+    node: u32,
+    index: i32,
+    behavior: u8,
 ) -> i32 {
-    0
+    if h.is_null() || index < 0 {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    match loomgui_core::list::scroll_to_item(&mut sh.stage, NodeId(node), index as usize, behavior)
+    {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
 }
 
 #[cfg(test)]

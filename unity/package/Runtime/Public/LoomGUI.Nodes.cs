@@ -2339,6 +2339,10 @@ namespace LoomGUI
         // C# 侧缓存（core 无 item-count getter FFI）。setter 过桥后回填本字段，getter 直读。
         // set 0 时回填 0，保证 getter 与 core item_count 同步。
         int _itemCount;
+        // 首次设 ItemCount 标记：首次过桥后调 drain_now 同帧克隆初始 slot + binds 入队，
+        // 再 DrainPendingBinds 绑定（spec §7 同帧 bind，避免首帧模板原样）。后续 set 靠
+        // tick-drain 自然推进，无需重复 drain（hot-path 避免 FFI 开销）。
+        bool _firstItemCountSet;
         // BindItem 委托 + ItemTemplate/TemplateSelector（core 不存这二者，纯 C# 业务回调）。
         // internal：UIContext.DrainPendingBinds 同程序集直读调本委托。
         internal Action<ListItem, int> _bindItem;
@@ -2366,6 +2370,14 @@ namespace LoomGUI
                         $"list_set_item_count failed (node {_id}): not a ListView / no template source");
                 _itemCount = value;
                 _ctx.RegisterListView(this);
+                // 首次进入数据驱动：同帧推进虚拟化管线（plan+execute 克隆初始 slot + binds 入队），
+                // 再 DrainPendingBinds 绑定——避免首帧模板原样（spec §7）。后续 set 靠 tick-drain。
+                if (!_firstItemCountSet)
+                {
+                    _firstItemCountSet = true;
+                    Native.loomgui_list_drain_now(h, _id);
+                    _ctx.DrainPendingBinds();
+                }
             }
         }
 
@@ -2430,12 +2442,112 @@ namespace LoomGUI
 
         public int SelectedIndex { get { throw NE(); } set { throw NE(); } }
         public event Action<SelectionChangedEvent> SelectionChanged;
-        public void ScrollToItem(int i, ScrollBehavior b = ScrollBehavior.Smooth) { throw NE(); }
-        public void RefreshItem(int i) { throw NE(); }
-        public void RefreshItems() { throw NE(); }
-        public void NotifyInserted(int i, int c = 1) { throw NE(); }
-        public void NotifyRemoved(int i, int c = 1) { throw NE(); }
-        public void NotifyMoved(int f, int t) { throw NE(); }
+
+        /// <summary>
+        /// 滚动到指定 item（spec §7）。core 先设祖先 ScrollPane.scroll_pos 到目标偏移，再
+        /// drain_now 同帧克隆新可见区 slot + binds 入队；随后本方法调 DrainPendingBinds 绑定
+        /// ——同帧完成克隆 + bind，避免首帧模板原样。越界 index（负 / ≥ ItemCount）→
+        /// UIContractException（调用方写错，非投影层内部错）。Smooth 走 ScrollPane 自维护
+        /// cubic-out tween（TweenProp 无 Scroll 变体）。
+        /// </summary>
+        public void ScrollToItem(int i, ScrollBehavior b = ScrollBehavior.Smooth)
+        {
+            ThrowIfDisposed();
+            if (i < 0 || i >= _itemCount)
+                throw new UIContractException(
+                    $"ScrollToItem index {i} out of range [0, {_itemCount})");
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte behavior = (byte)(b == ScrollBehavior.Smooth ? 1 : 0);
+            int rc = Native.loomgui_list_scroll_to(h, _id, i, behavior);
+            if (rc != 0)
+                throw new UIContractException(
+                    $"ScrollToItem failed (node {_id}, index {i}): not a data-driven ListView");
+            // core 已 drain_now（slot 克隆 + binds 入队）；此处取出 binds 绑定，同帧完成。
+            _ctx.DrainPendingBinds();
+        }
+
+        /// <summary>刷新单个已物化 item（重新 BindItem）。未物化的静默跳过。</summary>
+        public void RefreshItem(int i)
+        {
+            ThrowIfDisposed();
+            if (i < 0 || i >= _itemCount)
+                throw new UIContractException(
+                    $"RefreshItem index {i} out of range [0, {_itemCount})");
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_list_refresh(h, _id, i, 1);
+            if (rc != 0)
+                throw new UIContractException(
+                    $"RefreshItem failed (node {_id}, index {i}): not a data-driven ListView");
+            _ctx.DrainPendingBinds();
+        }
+
+        /// <summary>刷新全部已物化 item（重新 BindItem）。count=ItemCount 覆盖全部可见 slot。</summary>
+        public void RefreshItems()
+        {
+            ThrowIfDisposed();
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_list_refresh(h, _id, 0, _itemCount);
+            if (rc != 0)
+                throw new UIContractException(
+                    $"RefreshItems failed (node {_id}): not a data-driven ListView");
+            _ctx.DrainPendingBinds();
+        }
+
+        /// <summary>
+        /// 插入通知（spec §10）：在 <paramref name="i"/> 处插入 <paramref name="c"/> 项。
+        /// heights 插入 c 个未知项；已物化 slot 的 item_index 后移。i 越界 → UIContractException。
+        /// </summary>
+        public void NotifyInserted(int i, int c = 1)
+        {
+            ThrowIfDisposed();
+            if (i < 0 || i > _itemCount)
+                throw new UIContractException(
+                    $"NotifyInserted at {i} out of range [0, {_itemCount}]");
+            if (c < 0)
+                throw new ArgumentOutOfRangeException(nameof(c), c, "count must be non-negative");
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_list_notify(h, _id, (byte)0, i, c);
+            if (rc != 0)
+                throw new UIContractException(
+                    $"NotifyInserted failed (node {_id}): not a data-driven ListView");
+            _itemCount += c;
+        }
+
+        /// <summary>
+        /// 删除通知（spec §10）：删 [i, i+c)。区间内已物化 slot 回收入 free 池；区间后的 slot.item_index 前移。
+        /// i/c 越界 → UIContractException。同步更新 _itemCount 缓存。
+        /// </summary>
+        public void NotifyRemoved(int i, int c = 1)
+        {
+            ThrowIfDisposed();
+            if (i < 0 || c < 0 || i + c > _itemCount)
+                throw new UIContractException(
+                    $"NotifyRemoved range [{i}, {i + c}) out of bounds [0, {_itemCount})");
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_list_notify(h, _id, (byte)1, i, c);
+            if (rc != 0)
+                throw new UIContractException(
+                    $"NotifyRemoved failed (node {_id}): not a data-driven ListView");
+            _itemCount -= c;
+        }
+
+        /// <summary>
+        /// 移动通知（spec §10）：把 from 项搬到 to 位置。heights 同步搬；slot.item_index 重映射。
+        /// from/to 越界 → UIContractException。
+        /// </summary>
+        public void NotifyMoved(int f, int t)
+        {
+            ThrowIfDisposed();
+            if (f < 0 || f >= _itemCount || t < 0 || t >= _itemCount)
+                throw new UIContractException(
+                    $"NotifyMoved from {f} / to {t} out of range [0, {_itemCount})");
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_list_notify(h, _id, (byte)2, f, t);
+            if (rc != 0)
+                throw new UIContractException(
+                    $"NotifyMoved failed (node {_id}): not a data-driven ListView");
+        }
+
         public string ItemExitClass { get { throw NE(); } set { throw NE(); } }
         static NotImplementedException NE() => new NotImplementedException();
     }

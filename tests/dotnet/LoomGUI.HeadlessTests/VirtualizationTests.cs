@@ -188,10 +188,82 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>
-        /// Loads the virtualization fixture fresh, drives it to data-driven mode with the given
-        /// ItemCount, ticks a few frames (draining pending binds each tick so BindItem fires and
-        /// layout_rect settles), then returns the frame's render-node count.
+        /// Task 7 Step 7: NotifyInserted must not corrupt scroll position or visible content.
+        /// Inserts items at the END of the list (after the visible window) — nothing above the
+        /// viewport changes, so scroll_pos.y and the visible slot set must be byte-for-byte
+        /// preserved across the notify + tick. This is the robust, unambiguous assertion of the
+        /// Notify plumbing (insert-before-visible would require scroll anchoring for insertions,
+        /// which is out of Task 7 scope). Also verifies ItemCount cache stays in sync and the
+        /// list keeps ticking cleanly after the notify.
         /// </summary>
+        [Fact]
+        public void NotifyInserted_AtTail_PreservesScrollPositionAndVisibleSlots()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                StageHandle* h = (StageHandle*)stage.ToPointer();
+                RegisterDefaultFont(h);
+
+                uint sceneRootId = CreateRoot(h, "div");
+                ctx._rootId = sceneRootId;
+                Container sceneRoot = (Container)ctx._registry.GetOrCreate(sceneRootId);
+
+                string fixturePath = Path.Combine(AppContext.BaseDirectory, "fixtures", "varheight.pkg.bin");
+                Assert.True(File.Exists(fixturePath), $"fixture missing: {fixturePath}");
+                byte[] pkgBytes = File.ReadAllBytes(fixturePath);
+                UIPackage pkg = ctx.LoadPackage("varheight", pkgBytes);
+                Container instRoot = pkg.Instantiate("varheight");
+                AppendChild(h, sceneRoot._id, instRoot._id);
+
+                TickAndDrain(h, ctx);
+
+                ListView list = instRoot.Get<ListView>("list");
+                Container pane = instRoot.Get<Container>("pane");
+                list.BindItem = (item, index) => { item.Style.Height = Length.Px(40f + (index % 4) * 30f); };
+                list.ItemCount = 200;
+
+                // Settle at top first: cold-start slots clone, BindItem sets heights, solve
+                // measures them, collect_heights backfills, the tail spacer grows the pane's
+                // overlap so a mid-list scroll_pos is actually reachable (otherwise set_scroll_pos
+                // clamps to overlap=0 → stays at top).
+                for (int i = 0; i < 4; i++)
+                    TickAndDrain(h, ctx);
+
+                // Now scroll to mid-list.
+                SetScrollPos(h, pane._id, 1500f);
+                for (int i = 0; i < 4; i++)
+                    TickAndDrain(h, ctx);
+
+                float scrollYBefore = GetScrollY(h, pane._id);
+                int slotCountBefore = SlotLayoutRects(h, list._id).Count;
+                int itemCountBefore = list.ItemCount;
+                Assert.True(scrollYBefore > 100f, $"precondition: scrolled to mid-list (y={scrollYBefore})");
+                Assert.True(slotCountBefore > 0, "precondition: slots visible");
+
+                // Insert 5 items at the END (after all visible content).
+                list.NotifyInserted(itemCountBefore, 5);
+
+                // ItemCount cache updated synchronously.
+                Assert.Equal(itemCountBefore + 5, list.ItemCount);
+
+                // Tick a frame: notify shifts no visible slot (insert is past the viewport),
+                // so scroll_pos and visible slot set must be unchanged.
+                TickAndDrain(h, ctx);
+
+                float scrollYAfter = GetScrollY(h, pane._id);
+                int slotCountAfter = SlotLayoutRects(h, list._id).Count;
+                Assert.Equal(scrollYBefore, scrollYAfter, 0.5f);
+                Assert.Equal(slotCountBefore, slotCountAfter);
+
+                _log.WriteLine(
+                    $"scroll y: {scrollYBefore:F2}→{scrollYAfter:F2}; " +
+                    $"slots: {slotCountBefore}→{slotCountAfter}; " +
+                    $"items: {itemCountBefore}→{list.ItemCount}");
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
         static int CountRenderNodesAfterTick(int itemCount)
         {
             var (stage, ctx) = StageHarness.Create();
