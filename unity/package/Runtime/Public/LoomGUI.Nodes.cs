@@ -1267,7 +1267,10 @@ namespace LoomGUI
     public class ListItem : Container
     {
         internal ListItem(UIContext ctx, uint id) : base(ctx, id) { }
-        public int Index { get { throw NE(); } } static NotImplementedException NE() => new NotImplementedException();
+        // 业务逻辑项序号（tick-drain BindItem 时由 UIContext 回填，不走 FFI）。
+        // core 不存该值；item_index 进 pending_binds 队列，C# 取后传给本属性。
+        internal int _index;
+        public int Index => _index;
     }
 
     // ── 控件（叶子：私有内部结构）──
@@ -2329,14 +2332,102 @@ namespace LoomGUI
     // ── ListView ────────────────────────────────────────────────────
     // 虚拟化是运行时实现决策，不进 HTML。首次设 ItemCount/ItemTemplate/BindItem 即数据驱动+清空设计期 li；
     // 静态/数据驱动强制互斥（越界抛 UIContractException）。
-    public class ListView : Container
+    public unsafe class ListView : Container
     {
         internal ListView(UIContext ctx, uint id) : base(ctx, id) { }
 
-        public int ItemCount { get { throw NE(); } set { throw NE(); } }
-        public UITemplate ItemTemplate { get { throw NE(); } set { throw NE(); } }
-        public Func<int, UITemplate> TemplateSelector { get { throw NE(); } set { throw NE(); } }
-        public Action<ListItem, int> BindItem { get { throw NE(); } set { throw NE(); } }
+        // C# 侧缓存（core 无 item-count getter FFI）。setter 过桥后回填本字段，getter 直读。
+        // set 0 时回填 0，保证 getter 与 core item_count 同步。
+        int _itemCount;
+        // BindItem 委托 + ItemTemplate/TemplateSelector（core 不存这二者，纯 C# 业务回调）。
+        // internal：UIContext.DrainPendingBinds 同程序集直读调本委托。
+        internal Action<ListItem, int> _bindItem;
+        UITemplate _itemTemplate;
+        Func<int, UITemplate> _templateSelector;
+
+        /// <summary>
+        /// 项数（数据驱动）。setter 调 loomgui_list_set_item_count：首次调用若该 ul 尚未进入
+        /// 数据驱动模式，FFI 内部自动 enter_data_driven（备用模板 = 第一个设计期 li、分配全局
+        /// list_ordinal）。注册本实例到 ctx._listViews（tick-drain 分发 BindItem 时反查祖先用）。
+        /// 负值拋（与 DOM 语义一致：负 item 数无意义）。
+        /// </summary>
+        public int ItemCount
+        {
+            get { ThrowIfDisposed(); return _itemCount; }
+            set
+            {
+                ThrowIfDisposed();
+                if (value < 0)
+                    throw new ArgumentOutOfRangeException(nameof(value), "ItemCount must be non-negative");
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                int rc = Native.loomgui_list_set_item_count(h, _id, value);
+                if (rc != 0)
+                    throw new InvalidOperationException(
+                        $"list_set_item_count failed (node {_id}): not a ListView / no template source");
+                _itemCount = value;
+                _ctx.RegisterListView(this);
+            }
+        }
+
+        /// <summary>
+        /// 项模板。SceneSubtree 变体：调 loomgui_list_set_template 覆盖 enter_data_driven 备份的
+        /// 备用 li，指向场景内克隆出的模板子树根。PackageComponent 变体需先 Instantiate 再传
+        /// （本 setter 只接 SceneSubtree，包组件路径走业务侧 Instantiate + 转传）。
+        /// </summary>
+        public UITemplate ItemTemplate
+        {
+            get { ThrowIfDisposed(); return _itemTemplate; }
+            set
+            {
+                ThrowIfDisposed();
+                _itemTemplate = value;
+                if (value != null && value.IsSceneSubtree)
+                {
+                    StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                    Native.loomgui_list_set_template(h, _id, value._srcNodeId);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 多模板选择器（按 item index 选模板）。纯 C# 业务回调，core 不存。
+        /// setter 只缓存委托；实际选模板在 BindItem 回调里由业务据 index 调本选择器（若需要）。
+        /// </summary>
+        public Func<int, UITemplate> TemplateSelector
+        {
+            get { ThrowIfDisposed(); return _templateSelector; }
+            set { ThrowIfDisposed(); _templateSelector = value; }
+        }
+
+        /// <summary>
+        /// 绑定回调（每新克隆 slot 触发一次）。core tick 产 pending_binds，C# tick-drain
+        /// 取队列后按 slot 的 ListView 祖先反查本实例调本委托。委托存 C# 侧（core 不感知业务回调）。
+        /// </summary>
+        public Action<ListItem, int> BindItem
+        {
+            get { ThrowIfDisposed(); return _bindItem; }
+            set { ThrowIfDisposed(); _bindItem = value; _ctx.RegisterListView(this); }
+        }
+
+        /// <summary>
+        /// 数据驱动模式下返 ItemCount（不直走 get_child_count——core ul 的真子是
+        /// 2 spacer + N slot，与业务「逻辑项数」语义不符）。非数据驱动（未设过 ItemCount）
+        /// 回落 get_child_count。用 new 而非 virtual override：Container.ChildCount 非虚，
+        // 且 ListView 总经 NodeFactory 造为具体子类，调用方按 ListView 类型访问即命中本隐藏属性。
+        /// </summary>
+        public new int ChildCount
+        {
+            get
+            {
+                ThrowIfDisposed();
+                // _itemCount 默认 0；设过 ItemCount 后 >0（或特意设 0）。用 _ctx._listViews
+                // 注册态判数据驱动（设过 ItemCount/BindItem 即注册过）。
+                if (_ctx.IsListViewRegistered(_id))
+                    return _itemCount;
+                return base.ChildCount;
+            }
+        }
+
         public int SelectedIndex { get { throw NE(); } set { throw NE(); } }
         public event Action<SelectionChangedEvent> SelectionChanged;
         public void ScrollToItem(int i, ScrollBehavior b = ScrollBehavior.Smooth) { throw NE(); }
@@ -2553,6 +2644,11 @@ namespace LoomGUI
         // 用于同名重复检测（公共契约：LoadPackage 同名重复抛 UIContractException）。
         internal readonly HashSet<string> _loadedPackages = new HashSet<string>();
 
+        // ListView NodeId → C# 实例表。ListView 设 ItemCount/BindItem 时 RegisterListView 进本表；
+        // tick-drain 取 pending_binds 后按 slot 的 NodeId 向上走 node_parent，命中本表即找到
+        // 所属 ListView 实例、调其 BindItem。公共 API 不见本字段。
+        internal readonly Dictionary<uint, ListView> _listViews = new Dictionary<uint, ListView>();
+
         // E1：lazy 创建的 StyleSheet 实例。同 Node.Style/Node.Transform 模式——未访问过 = null，
         // 首次访问构造并挂本 context。StyleSheet.Add/Clear 方法体本身仍 throw NE（core 未接通）。
         StyleSheet _styleSheet;
@@ -2577,6 +2673,66 @@ namespace LoomGUI
         {
             _registry.FlushDirtyStyles();
             _registry.FlushDirtyTransforms();
+        }
+
+        // ── ListView 虚拟化 tick-drain（Task 5）───────────────────────
+        // ListView.ItemCount/BindItem setter 调 RegisterListView 进本表；DrainPendingBinds
+        // 在 tick 前（raw tick 前或集成层 Step 开头）调一次：拉 core pending_binds 队列、
+        // 按 slot NodeId 反查所属 ListView、构 ListItem 调 BindItem。core 不存业务回调——
+        // 本路径是 C# 业务状态与 core 虚拟化内核的唯一结合点。
+
+        /// <summary>注册 ListView 实例（ItemCount/BindItem setter 调）。幂等。</summary>
+        internal void RegisterListView(ListView lv) => _listViews[lv._id] = lv;
+        /// <summary>该 NodeId 是否已注册为 ListView（数据驱动模式已激活）。</summary>
+        internal bool IsListViewRegistered(uint id) => _listViews.ContainsKey(id);
+
+        /// <summary>
+        /// 排空 core pending_binds 并分发到对应 ListView 的 BindItem。集成层 Step 开头 /
+        /// headless 测试 raw tick 前调一次。同帧克隆的 slot 在本 tick 完成绑定，避免首帧
+        /// 显示模板原样。调法：take_pending_binds(out nodes[], out indices[], cap, out len)，
+        /// 逐条按 node_id 向上走 node_parent 找命中 _listViews 的祖先，调 BindItem。
+        /// cap 足够大（core 虚拟化保证常量 slot 数，不会溢出）。
+        /// </summary>
+        internal void DrainPendingBinds()
+        {
+            if (_listViews.Count == 0) return;
+            if (_stage == IntPtr.Zero) return;
+            StageHandle* h = (StageHandle*)_stage.ToPointer();
+            // 缓冲区：虚拟化保证可见 slot 常量级（INITIAL_SLOTS + 2*BUFFER 起），取 1024 冗余上限。
+            const int Cap = 1024;
+            uint* nodes = stackalloc uint[Cap];
+            int* indices = stackalloc int[Cap];
+            uint len = 0;
+            int rc = Native.loomgui_list_take_pending_binds(h, nodes, indices, Cap, &len);
+            if (rc != 0) return;
+            for (int i = 0; i < len; i++)
+            {
+                uint slotNode = nodes[i];
+                int itemIndex = indices[i];
+                ListView lv = FindListViewAncestor(h, slotNode);
+                if (lv == null || lv._bindItem == null) continue;
+                // 构 ListItem 包装（registry 走身份缓存——同 slot 跨帧返同一实例）。
+                ListItem item = (ListItem)_registry.GetOrCreate(slotNode);
+                item._index = itemIndex;
+                try { lv._bindItem(item, itemIndex); }
+                catch { /* 业务回调抛不阻断其他 slot 绑定；上层应自己捕获 */ }
+            }
+        }
+
+        /// <summary>
+        /// 从 slotNode 向上走 node_parent，找到首个命中 _listViews 的祖先 ListView。
+        /// 未找到（slot 已脱离树 / ListView 未注册）返 null。防环：限 10 万层（远超任何合法树深）。
+        /// </summary>
+        ListView FindListViewAncestor(StageHandle* h, uint slotNode)
+        {
+            uint cur = slotNode;
+            for (int i = 0; i < 100_000; i++)
+            {
+                if (cur == Node.RootSentinel) return null;
+                if (_listViews.TryGetValue(cur, out var lv)) return lv;
+                cur = Native.loomgui_node_parent(h, cur);
+            }
+            return null;
         }
 
         /// <summary>

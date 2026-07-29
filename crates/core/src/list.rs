@@ -248,6 +248,11 @@ pub fn compute_visible_range(
     if viewport_h <= 0.0 {
         return 0..INITIAL_SLOTS.min(item_count);
     } // 冷启动
+      // 无已测高度（estimate<=0）：无法估算可见项数（每项高度 0 → 累积和永不达阈值 → 误判整列可见）。
+      // 退化为冷启动定数，等首帧 solve + collect_heights 回填真实高度后下帧才走精准路径。
+    if heights.estimate <= 0.0 {
+        return 0..INITIAL_SLOTS.min(item_count);
+    }
     let top = scroll_pos_y - listview_offset;
     // first = 首个顶边超过 top 的项（累积后判）。若全项顶边 ≤ top（内容短于视口），
     // 循环不 break，first 保持 0 → start 经 BUFFER 回退到 0，整列可见。
@@ -286,6 +291,52 @@ pub fn set_item_count(stage: &mut crate::stage::Stage, ul: NodeId, count: usize)
             // initial_estimate 取当前 estimate（无已测时 0.0，首帧 solve 后 Task 5 补真实模板高）。
             ls.heights.resize(count, ls.heights.estimate);
             ls.dirty = true;
+        }
+    }
+}
+
+/// 取该 ListView 的 pending bind 队列（C# tick 前调，逐条 BindItem 后数据写回 core）。
+/// `std::mem::take` 把队列内容搬出、原位置空——保证同一批 bind 不被重复消费。
+/// 队列由 execute_visible 在克隆新 slot 时填充；无 ListState 条目则返空 Vec。
+pub fn take_pending_binds(scene: &mut Scene, ul: NodeId) -> Vec<(NodeId, usize)> {
+    scene
+        .lists
+        .get_mut(ul)
+        .map(|ls| std::mem::take(&mut ls.pending_binds))
+        .unwrap_or_default()
+}
+
+/// 同帧排空（spec §7）：先跑一次 plan/execute 再取队列。ScrollToItem / 首次 ItemCount
+/// 调用走此路径——避免新进入可见区的 item 首帧以模板原样显示（克隆 + bind 同帧完成）。
+pub fn drain_now(stage: &mut crate::stage::Stage, ul: NodeId) -> Vec<(NodeId, usize)> {
+    let scene = stage.scene.as_mut().expect("scene");
+    let ops = plan_visible(scene);
+    execute_visible(scene, ops);
+    take_pending_binds(stage.scene.as_mut().expect("scene"), ul)
+}
+
+/// 每帧 solve 后、refresh_content_sizes 前调：把已实例化 slot 的真实 layout_rect.h
+/// 回填 HeightCache。下帧可见区算法用真实高度而非 estimate，逐步逼近精准区间。
+/// 等高版：直写 `known[i] = h`。margin box + anchoring 在 Task 6（变高场景）。
+pub fn collect_heights(scene: &mut Scene) {
+    // 先快照各 list 的 (slot_node, item_index)，避免跨 list 借用冲突。
+    let lists: Vec<(NodeId, Vec<(NodeId, usize)>)> = scene
+        .lists
+        .0
+        .iter()
+        .map(|(ul, ls)| {
+            (
+                *ul,
+                ls.slots.iter().map(|s| (s.node, s.item_index)).collect(),
+            )
+        })
+        .collect();
+    for (ul, slots) in lists {
+        for (node, idx) in slots {
+            let h = scene.get(node).map(|n| n.layout_rect.h).unwrap_or(0.0);
+            if let Some(ls) = scene.lists.get_mut(ul) {
+                ls.heights.set(idx, h);
+            }
         }
     }
 }
@@ -767,5 +818,48 @@ mod tests {
             s.scene.as_ref().unwrap().lists.get(ul).is_none(),
             "list state entry removed"
         );
+    }
+
+    /// take_pending_binds：首次取回全部新克隆 slot 的 (node,item_index)，二次取空。
+    /// C# tick 前调本函数逐条 BindItem，数据写回 core 后队列清空——保证每条 bind 仅触发一次。
+    #[test]
+    fn take_pending_binds_returns_new_slots_then_empty() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 5);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let binds = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
+        assert_eq!(binds.len(), crate::list::INITIAL_SLOTS);
+        let binds2 = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
+        assert!(binds2.is_empty(), "second take empty");
+    }
+
+    /// collect_heights：solve 后把 slot 实际 layout_rect.h 回填 HeightCache，
+    /// 下帧可见区算法用真实高度而非 estimate。等高版：直写 known[i]。
+    #[test]
+    fn collect_heights_writes_slot_layout_height() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 10);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        // 给每个 slot 一个伪造 layout_rect.h（绕过 solve，直写 layout_rect 验 collect 读对字段）。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get(ul).unwrap();
+            let slots: Vec<(NodeId, usize)> =
+                ls.slots.iter().map(|s| (s.node, s.item_index)).collect();
+            for (node, idx) in slots {
+                let n = scene.get_mut(node).unwrap();
+                n.layout_rect.h = (idx as f32) * 10.0 + 5.0;
+            }
+        }
+        crate::list::collect_heights(s.scene.as_mut().unwrap());
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        assert_eq!(ls.heights.height_of(0), 5.0);
+        assert_eq!(ls.heights.height_of(1), 15.0);
+        assert_eq!(ls.heights.height_of(2), 25.0);
     }
 }

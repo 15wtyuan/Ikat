@@ -82,6 +82,12 @@ namespace LoomGUI
             //    旧即时版：setter 每次立即过桥（本处空）；攒批版：集中过桥（N setter = 1 次 flush 遍历）。
             _ctx.FlushPendingWrites();
 
+            // 2.5 ListView tick-drain：拉 core pending_binds 队列、按 slot 反查所属 ListView
+            //    调 BindItem。须在 tick 前——同帧克隆的 slot 本 tick 即完成绑定 + 布局，
+            //    不首帧显示模板原样。core tick 内 plan/execute 产 pending_binds 是在 solve 前，
+            //    故本帧 drain 的 bind 数据下帧 solve 时可见（文本/图片等业务内容）。
+            _ctx.DrainPendingBinds();
+
             // 3. tick：核心一帧编排（process hit 用上帧 world → rematch → solve → refresh_content →
             //    compute_world_transforms → build RenderNode blob）。
             Native.loomgui_stage_tick(_stage, dt);

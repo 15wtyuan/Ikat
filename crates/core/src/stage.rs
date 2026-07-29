@@ -63,6 +63,10 @@ pub struct Stage {
     /// 核心字形 atlas（v1.6 自绘字体）。render build 期 ensure 字形 UV，
     /// FFI 拉 R8 脏页上传。Stage 持有（非 Scene——atlas 是渲染资源，生命周期跨 tick）。
     pub glyph_atlas: crate::text::atlas::GlyphAtlas,
+    /// 全局 ListView 序号分配器（reuse_key 命名空间隔离用，见 list::encode_reuse_key）。
+    /// 每个 ListView 首次进入数据驱动模式时取一个唯 ordinal，确保多 List 的 slot reuse_key
+    /// 在场景级全局命名空间不冲突。Stage 持有（跨 tick 单调递增，重置场景也不回卷）。
+    pub next_list_ordinal: u32,
 }
 
 impl Stage {
@@ -85,6 +89,7 @@ impl Stage {
             pending_dt: 0.0,
             prev_node_hashes: std::collections::HashMap::new(),
             glyph_atlas: crate::text::atlas::GlyphAtlas::new(),
+            next_list_ordinal: 0,
         })
     }
 
@@ -915,9 +920,13 @@ impl Stage {
         // 核心知图尺寸（打包期 PNG IHDR 静态，存 Stage.image_sizes）。solve 查尺寸表算
         // Image intrinsic（三档：CSS > 真实像素 > 64×64）。不知图集（运行时纹理/UV 归 Unity）。
         solve(scene, &self.fonts, self.root_size, &self.image_sizes);
-        // 5.5 measure 文本控件显示文本——需 solve 产出的 layout_rect.w 定 content width，
+        // 5.5 measure 文本控件显示文本——需 solve 产出的 layout_rect.w 定 content width,
         //     且须在 render 前完成（光标命中测试/几何依赖 TextLayout 缓存）。
         crate::scene::control::measure_text_controls(scene, &self.fonts);
+        // 5.6 ListView 高度回填：solve 后 slot 拿到真实 layout_rect.h，回填 HeightCache。
+        //     须在 refresh_content_sizes 前——content_size 用 spacer 高度（由可见区算法算出，
+        //     下帧用回填后的精准高度而非 estimate）。
+        crate::list::collect_heights(scene);
         // 6. content_size 填充（solve 后 content_size/viewport/overlap）
         crate::scroll::refresh_content_sizes(scene);
         // 7. compute_world_transforms（读 rematch 后 transform + scroll_pos → world）

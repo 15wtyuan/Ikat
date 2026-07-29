@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ListView virtualization essence fixture</title>
+<style>
+  /* Fixture for the project's core virtualization proof (headless):
+     render-node count must NOT grow with total item count.
+
+     Structure: a scroll container with a FIXED viewport (.pane, overflow:scroll,
+     bounded height) wrapping a <ul> ListView whose own height is auto (required by
+     the virtualization core — the head/tail spacers grow it to the full content size
+     so the pane becomes the scroll viewport). The single <li> is the design-time
+     template source: enter_data_driven backs it up and clears it on first ItemCount. */
+  .root { width: 400px; height: 300px; background-color: #111; }
+  /* overflow:scroll + fixed height = scroll viewport (virtualization prunes by it).
+     Width fixed so li stretch to a stable width. */
+  .pane {
+    width: 400px;
+    height: 200px;
+    overflow: scroll;
+    background-color: #222;
+  }
+  /* ul height MUST be auto (virtualization invariant): the core rejects an explicit
+     ul height — spacers drive the scrollable content size instead. display:block so
+     li stack vertically (block flow, not flex). */
+  ul { display: block; }
+  /* li template: fixed height so the visible-range math is deterministic. A visible
+     background so each slot contributes a render node (mesh). */
+  li {
+    width: 380px;
+    height: 40px;
+    background-color: #4a90d9;
+  }
+</style>
+</head>
+<body>
+  <div class="root">
+    <div class="pane" id="pane">
+      <ul id="list">
+        <li id="tpl">template</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

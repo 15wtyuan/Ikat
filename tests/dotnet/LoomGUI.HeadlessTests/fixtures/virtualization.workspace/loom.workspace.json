@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output_dir": "../virtualization-ws-out",
+  "packages": [
+    {
+      "name": "virtualization",
+      "dirs": ["."],
+      "html": ["virtualization.html"]
+    }
+  ],
+  "atlases": [],
+  "fonts": []
+}

@@ -826,6 +826,46 @@ namespace LoomGUI.Bindings
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_number_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_set_number_value(StageHandle* h, uint node_id, float value);
 
+        /// <summary>
+        ///  设 ListView 的项数。首次调用若该 node 尚未进入数据驱动模式（无 ListState 条目），
+        ///  自动 enter_data_driven（取备用模板 = 第一个设计期 li、分配全局 list_ordinal）。
+        ///  这避免 C# 侧需显式调 enter——ItemCount 是业务进入虚拟化的唯一入口。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_list_set_item_count", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_list_set_item_count(StageHandle* h, uint node, int count);
+
+        /// <summary>
+        ///  设 ListView 的模板根（覆盖 enter_data_driven 备份的备用 li）。业务通过
+        ///  ListView.ItemTemplate 设——指向场景内克隆出的模板子树根。无 ListState 条目 → -1。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_list_set_template", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_list_set_template(StageHandle* h, uint node, uint template_node);
+
+        /// <summary>
+        ///  拉取本帧待绑定 slot 列表（SOA）。C# tick 前调：遍历所有 ListView 的 pending_binds，
+        ///  拍平成 (node_id[], item_index[]) 两列，cap 限 copy 上限。调用方按 out_nodes[i] 的
+        ///  node_id 反查其 ListView 祖先实例调 BindItem。取后队列清空（每条 bind 仅触发一次）。
+        ///  任一指针 null → -1；out_len 写实际返回条数。各参数 null 句柄 guard 在最前。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_list_take_pending_binds", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_list_take_pending_binds(StageHandle* h, uint* out_nodes, int* out_indices, uint cap, uint* out_len);
+
+        /// <summary>
+        ///  同帧排空（plan+execute+take_pending_binds）。ScrollToItem / 首次 ItemCount 调用走此路径
+        ///  ——避免新进入可见区的 item 首帧以模板原样显示。null 句柄 → -1。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_list_drain_now", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_list_drain_now(StageHandle* h, uint node);
+
+        [DllImport(__DllName, EntryPoint = "loomgui_list_refresh", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_list_refresh(StageHandle* _h, uint _node, int _start, int _count);
+
+        [DllImport(__DllName, EntryPoint = "loomgui_list_notify", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_list_notify(StageHandle* _h, uint _node, byte _op, int _a, int _b);
+
+        [DllImport(__DllName, EntryPoint = "loomgui_list_scroll_to", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_list_scroll_to(StageHandle* _h, uint _node, int _index, byte _behavior);
+
 
     }
 

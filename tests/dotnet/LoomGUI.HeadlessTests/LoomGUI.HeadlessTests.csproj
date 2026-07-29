@@ -58,6 +58,10 @@
          slot + custom-element) — used by OptionItemDispatchTests for NodeFactory dispatch to
          OptionItem/Slot/CustomElement (vs Container fallback). Built from fixtures/dropdown.workspace. -->
     <None Include="fixtures\dropdown.pkg.bin" Link="fixtures\dropdown.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
+    <!-- M1 ListView virtualization fixture: virtualization.pkg.bin (overflow:scroll pane > ul > li
+         template) — used by VirtualizationTests for the no-growth render-node-count assertion.
+         Built from fixtures/virtualization.workspace via loom-pkg. -->
+    <None Include="fixtures\virtualization.pkg.bin" Link="fixtures\virtualization.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
     <!-- E2 fixture font for text layout (tick panics without a default font) -->
     <None Include="fixtures\fonts\DejaVuSans.ttf" Link="fixtures\fonts\DejaVuSans.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

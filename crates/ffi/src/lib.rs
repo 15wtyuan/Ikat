@@ -2603,6 +2603,148 @@ fn format_number(v: f32) -> String {
     }
 }
 
+// ── ListView 虚拟化（数据驱动）FFI ────────────────────────────────
+// C# ListView 投影经本组 FFI 驱动 core 虚拟化内核：set_item_count 进数据驱动，
+// take_pending_binds 是关键——C# 每 tick 前调，取新克隆 slot 列表逐条 BindItem。
+// null 句柄 / 无效 node → -1；成功 → 0。
+
+/// 设 ListView 的项数。首次调用若该 node 尚未进入数据驱动模式（无 ListState 条目），
+/// 自动 enter_data_driven（取备用模板 = 第一个设计期 li、分配全局 list_ordinal）。
+/// 这避免 C# 侧需显式调 enter——ItemCount 是业务进入虚拟化的唯一入口。
+#[no_mangle]
+pub extern "C" fn loomgui_list_set_item_count(h: *mut StageHandle, node: u32, count: i32) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let ul = NodeId(node);
+    let needs_enter = sh
+        .stage
+        .scene
+        .as_ref()
+        .map(|s| s.lists.get(ul).is_none())
+        .unwrap_or(true);
+    if needs_enter {
+        let ordinal = sh.stage.next_list_ordinal;
+        sh.stage.next_list_ordinal = sh.stage.next_list_ordinal.wrapping_add(1);
+        if loomgui_core::list::enter_data_driven(&mut sh.stage, ul, ordinal).is_err() {
+            return -1;
+        }
+    }
+    loomgui_core::list::set_item_count(&mut sh.stage, ul, count.max(0) as usize);
+    0
+}
+
+/// 设 ListView 的模板根（覆盖 enter_data_driven 备份的备用 li）。业务通过
+/// ListView.ItemTemplate 设——指向场景内克隆出的模板子树根。无 ListState 条目 → -1。
+#[no_mangle]
+pub extern "C" fn loomgui_list_set_template(
+    h: *mut StageHandle,
+    node: u32,
+    template_node: u32,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let Some(scene) = sh.stage.scene.as_mut() else {
+        return -1;
+    };
+    match scene.lists.get_mut(NodeId(node)) {
+        Some(ls) => {
+            ls.template_root = Some(NodeId(template_node));
+            0
+        }
+        None => -1,
+    }
+}
+
+/// 拉取本帧待绑定 slot 列表（SOA）。C# tick 前调：遍历所有 ListView 的 pending_binds，
+/// 拍平成 (node_id[], item_index[]) 两列，cap 限 copy 上限。调用方按 out_nodes[i] 的
+/// node_id 反查其 ListView 祖先实例调 BindItem。取后队列清空（每条 bind 仅触发一次）。
+/// 任一指针 null → -1；out_len 写实际返回条数。各参数 null 句柄 guard 在最前。
+#[no_mangle]
+pub extern "C" fn loomgui_list_take_pending_binds(
+    h: *mut StageHandle,
+    out_nodes: *mut u32,
+    out_indices: *mut i32,
+    cap: u32,
+    out_len: *mut u32,
+) -> i32 {
+    if h.is_null() || out_nodes.is_null() || out_indices.is_null() || out_len.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    // 快照所有 ListView 的 NodeId（避免在借 scene.lists 时 mutable 借 take_pending_binds）。
+    let uls: Vec<NodeId> = sh
+        .stage
+        .scene
+        .as_ref()
+        .map(|s| s.lists.0.keys().copied().collect())
+        .unwrap_or_default();
+    let mut all: Vec<(u32, i32)> = Vec::new();
+    let Some(scene) = sh.stage.scene.as_mut() else {
+        return -1;
+    };
+    for ul in uls {
+        let binds = loomgui_core::list::take_pending_binds(scene, ul);
+        for (n, idx) in binds {
+            all.push((n.0, idx as i32));
+        }
+    }
+    let n = all.len().min(cap as usize);
+    unsafe {
+        for (i, (node, idx)) in all.iter().take(n).enumerate() {
+            *out_nodes.add(i) = *node;
+            *out_indices.add(i) = *idx;
+        }
+        *out_len = n as u32;
+    }
+    0
+}
+
+/// 同帧排空（plan+execute+take_pending_binds）。ScrollToItem / 首次 ItemCount 调用走此路径
+/// ——避免新进入可见区的 item 首帧以模板原样显示。null 句柄 → -1。
+#[no_mangle]
+pub extern "C" fn loomgui_list_drain_now(h: *mut StageHandle, node: u32) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let _ = loomgui_core::list::drain_now(&mut sh.stage, NodeId(node));
+    0
+}
+
+// 占位 stub（Task 7 实装完整动态增删/滚动/刷新机制）。签名固定，C# 投影已可调，core 侧 no-op。
+#[no_mangle]
+pub extern "C" fn loomgui_list_refresh(
+    _h: *mut StageHandle,
+    _node: u32,
+    _start: i32,
+    _count: i32,
+) -> i32 {
+    0
+}
+#[no_mangle]
+pub extern "C" fn loomgui_list_notify(
+    _h: *mut StageHandle,
+    _node: u32,
+    _op: u8,
+    _a: i32,
+    _b: i32,
+) -> i32 {
+    0
+}
+#[no_mangle]
+pub extern "C" fn loomgui_list_scroll_to(
+    _h: *mut StageHandle,
+    _node: u32,
+    _index: i32,
+    _behavior: u8,
+) -> i32 {
+    0
+}
+
 #[cfg(test)]
 mod tests;
 
