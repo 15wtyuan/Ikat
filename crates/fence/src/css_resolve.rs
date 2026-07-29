@@ -72,6 +72,13 @@ pub fn resolve_inline_styles_with_diags(
                 }
                 DisplayDefault::None => {
                     styles[idx].display_mode = DisplayMode::None;
+                    // Must set taffy Display::None here too — every core pruner
+                    // (collect_display_none_subtree, taffy layout cut, hit-test
+                    // via zero layout_rect) keys off taffy_style.display, not
+                    // display_mode. Leaving it at taffy's Flex default (from
+                    // ResolvedStyle::default) lets <template> subtrees get real
+                    // layout and render/hit-test. Mirrors the Block arm above.
+                    styles[idx].taffy_style.display = taffy::Display::None;
                 }
             }
             // UA 样式表等价：button 默认 text-align: center（浏览器 UA 行为）。

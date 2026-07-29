@@ -86,9 +86,10 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
     Ok(nodes)
 }
 
-/// `<template>` 的直接子元素必须全是 `<li>`——它是 ListView item 蓝图，克隆产的
-/// slot 根必须是 ListItem。主循环按 IrTree 顺序建节点、不好回溯 template→child 关系，
-/// 故做成独立前置遍历。
+/// `<template>` 是 ListView item 蓝图：spec §8 要求根为**恰好一个** `<li>`（克隆
+/// 产 slot 根 = ListItem）。主循环按 IrTree 顺序建节点、不好回溯 template→child
+/// 关系，故做成独立前置遍历。零元素（如 `<template>text</template>`）与多元素
+/// （如 `<template><li/><li/></template>`）均拒。
 fn validate_template_children(tree: &IrTree) -> Result<(), String> {
     for node in &tree.nodes {
         let IrNodeKind::Element(el) = &node.kind else {
@@ -97,15 +98,19 @@ fn validate_template_children(tree: &IrTree) -> Result<(), String> {
         if el.semantic != Some(SemanticKind::Template) {
             continue;
         }
-        for child in &node.children {
-            if let IrNodeKind::Element(cel) = &tree.nodes[child.0].kind {
-                if cel.tag != "li" {
-                    return Err(format!(
-                        "<template> 子元素必须是 <li>（当前 <{}>）",
-                        cel.tag
-                    ));
-                }
-            }
+        let element_children: Vec<&str> = node
+            .children
+            .iter()
+            .filter_map(|c| match &tree.nodes[c.0].kind {
+                IrNodeKind::Element(cel) => Some(cel.tag.as_str()),
+                _ => None,
+            })
+            .collect();
+        if element_children.len() != 1 || element_children[0] != "li" {
+            return Err(format!(
+                "<template> 根必须恰好一个 <li>（当前 {} 个元素）",
+                element_children.len()
+            ));
         }
     }
     Ok(())
@@ -328,7 +333,27 @@ mod tests {
             r#"<ul><template><div>x</div></template></ul>"#,
             "test.html",
         );
-        assert!(bridge(&parsed).is_err(), "template 直接子元素必须是 <li>");
+        assert!(bridge(&parsed).is_err(), "template 根必须是单个 <li>");
+    }
+
+    #[test]
+    fn template_with_two_li_errors() {
+        // spec §8：template 根必须恰好一个 <li>，两个是契约违反。
+        let parsed = loomgui_fence::parse_template(
+            r#"<ul><template><li>a</li><li>b</li></template></ul>"#,
+            "test.html",
+        );
+        assert!(bridge(&parsed).is_err(), "template 根不能是两个 <li>");
+    }
+
+    #[test]
+    fn template_with_only_text_errors() {
+        // 零元素（纯文本）也拒：根必须是 <li>。
+        let parsed = loomgui_fence::parse_template(
+            r#"<ul><template>just text</template></ul>"#,
+            "test.html",
+        );
+        assert!(bridge(&parsed).is_err(), "template 根不能是纯文本");
     }
 
     #[test]
@@ -390,6 +415,10 @@ mod tests {
             nodes[1].style.display_mode,
             loomgui_core::style::resolved::DisplayMode::None
         );
+        // 这才是真正驱动剪枝的字段：collect_display_none_subtree / taffy layout cut
+        // / hit-test 全都看 taffy_style.display。display_mode 是旁路标记，无消费者。
+        // 只断言 display_mode 会放过 css_resolve 漏写 taffy_style.display 的 bug。
+        assert_eq!(nodes[1].style.taffy_style.display, taffy::Display::None);
     }
 
     #[test]

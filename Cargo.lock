@@ -1841,6 +1841,7 @@ dependencies = [
  "loomgui_fence",
  "serde",
  "serde_json",
+ "taffy",
 ]
 
 [[package]]
