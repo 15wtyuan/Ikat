@@ -785,6 +785,20 @@ impl Stage {
         Ok(root)
     }
 
+    /// 场景级子树克隆（与 instantiate 并列，但不走 pkg 组件）。
+    ///
+    /// 深拷贝 kind/classes/id_attr/base_style/文本/img src，返回游离新根（不挂树，调用方负责
+    /// append_child 挂载）。虚拟列表 slot 填充路径：clone_subtree(模板根) → 得游离实例 →
+    /// append_child(slot, 实例)。side table 判定见 list spec §6：结构化数据（text/image）拷贝，
+    /// 运行时状态（scroll/anim/tween/EditState）不拷——克隆是干净模板，由调用方按需重设。
+    pub fn clone_subtree(&mut self, src: NodeId) -> Result<NodeId, String> {
+        let scene = self.scene.as_mut().ok_or("no scene (create_root first)")?;
+        if scene.get(src).is_none() {
+            return Err("clone_subtree: src node not found".into());
+        }
+        Ok(crate::scene::dynamic::clone_node_recursive(scene, src))
+    }
+
     /// 测试 helper：建空 scene 的 Stage（不依赖 parse feature）。
     /// 供动态建树 API 测试用——用 create_root/create_node 返回的 NodeId，不硬编码值。
     #[cfg(test)]

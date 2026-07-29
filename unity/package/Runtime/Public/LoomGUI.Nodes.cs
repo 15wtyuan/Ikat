@@ -2457,9 +2457,24 @@ namespace LoomGUI
         internal readonly string _pkg;
         internal readonly string _path;
 
+        // SceneSubtree 变体标识：非 RootSentinel 时本模板表示「克隆场景内某个子树」
+        // （非包组件）。Task 2 加，供虚拟列表 slot 克隆路径用——
+        // ListView ItemTemplate 可指向场景内已建子树，Instantiate 走 clone_subtree FFI
+        // 而非包组件 instantiate FFI。两种变体共用同一个公共 API 表面（Name/Instantiate）。
+        internal readonly uint _srcNodeId = Node.RootSentinel;
+        internal bool IsSceneSubtree => _srcNodeId != Node.RootSentinel;
+
         internal UITemplate(UIContext ctx, string pkg, string path)
         {
             _ctx = ctx; _pkg = pkg; _path = path;
+        }
+
+        // SceneSubtree 变体构造：克隆场景内 srcNodeId 子树。path/pkg 留空（不供人读，
+        // Name 返空串——调用方按 IsSceneSubtree 区分两种变体）。
+        internal UITemplate(UIContext ctx, uint srcNodeId)
+        {
+            _ctx = ctx; _pkg = string.Empty; _path = string.Empty;
+            _srcNodeId = srcNodeId;
         }
 
         public string Name => _path;
@@ -2467,7 +2482,25 @@ namespace LoomGUI
         {
             if (_ctx._stage == IntPtr.Zero)
                 throw new ObjectDisposedException(nameof(UIContext));
-            return DoInstantiate(_ctx, _pkg, _path);
+            // SceneSubtree 变体：clone_subtree FFI（游离根，不挂树）。
+            // PackageComponent 变体：原包组件 instantiate FFI。
+            return IsSceneSubtree
+                ? DoInstantiateSubtree(_ctx, _srcNodeId)
+                : DoInstantiate(_ctx, _pkg, _path);
+        }
+
+        /// <summary>
+        /// SceneSubtree 变体实例化：调 clone_subtree FFI → 根 NodeId → registry.GetOrCreate。
+        /// 返回游离 Container（调用方负责 append_child 挂到 slot）。
+        /// </summary>
+        internal static Container DoInstantiateSubtree(UIContext ctx, uint srcNodeId)
+        {
+            StageHandle* h = (StageHandle*)ctx._stage.ToPointer();
+            uint rootId = Native.loomgui_stage_clone_subtree(h, srcNodeId);
+            if (rootId == Node.RootSentinel)
+                throw new UIPackageException(
+                    "clone_subtree failed: invalid source node / no scene created");
+            return (Container)ctx._registry.GetOrCreate(rootId);
         }
 
         /// <summary>

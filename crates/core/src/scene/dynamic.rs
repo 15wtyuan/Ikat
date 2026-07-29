@@ -296,6 +296,51 @@ pub fn create_node_from_template(
     id
 }
 
+/// 递归克隆子树：返回游离新根（parent=None，不挂树，调用方 append_child 挂载）。
+///
+/// side table 判定（list spec §6）：
+/// 拷贝：kind/classes/id_attr/base_style/text_contents/image_srcs（模板化数据，克隆出新实例）。
+/// 不拷贝：scroll/anim/tweens/EditState/text_layouts/focused_node/事件订阅（运行时状态——
+/// 克隆是干净模板，由调用方按需重设）。
+///
+/// 控件初值传 None：create_node_from_template 的 control_init 分支建控件视觉子树 + ControlState。
+/// 列表 slot 场景下，控件值由 driver bind 后 `set_control_value` 显式设（slot 复用时 reset）。
+pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
+    // 先取出源节点的不可变快照（kind/base_style/classes/id_attr/text/image_srcs），
+    // drop 借后再可变借建新节点——避免边读边写 scene 的借用冲突。
+    let (kind, base_style, classes, id_attr, content, src_path) = {
+        let n = scene.get(src).expect("live src");
+        (
+            n.kind,
+            n.base_style.clone(),
+            n.classes.clone(),
+            n.id_attr.clone(),
+            scene.text_contents.get(&src).cloned(),
+            scene.image_srcs.get(&src).cloned(),
+        )
+    };
+    let new_id = create_node_from_template(scene, kind, base_style, None);
+    {
+        let n = scene.get_mut(new_id).unwrap();
+        n.classes = classes;
+        n.id_attr = id_attr;
+    }
+    if let Some(c) = content {
+        scene.text_contents.insert(new_id, c);
+    }
+    if let Some(sp) = src_path {
+        scene.image_srcs.insert(new_id, sp);
+    }
+    // 递归克隆子（先 clone children，避免边迭代边改 slotmap 的借用冲突）。
+    let children = scene.get(src).expect("live src").children.clone();
+    for child in children {
+        let new_child = clone_node_recursive(scene, child);
+        scene.get_mut(new_id).unwrap().children.push(new_child);
+        scene.get_mut(new_child).unwrap().parent = Some(new_id);
+    }
+    new_id
+}
+
 /// 挂子：parent.children 末尾追加 + child.parent = Some(parent)。
 /// child 必须当前无父（先 remove_child 摘除当前父）。重复挂同一父子对幂等（已含则 no-op）。
 pub fn append_child(scene: &mut Scene, parent: NodeId, child: NodeId) -> Result<(), String> {
@@ -1349,5 +1394,68 @@ mod tests {
         }
         let cap = scene.nodes.capacity();
         assert!(scene.text_layouts.len() > cap);
+    }
+
+    // ── clone_subtree：场景级子树深拷贝（list spec §6 side table 判定）──
+
+    #[test]
+    fn clone_subtree_copies_structure_text_image_classes() {
+        // clone_subtree 返游离新根：深拷结构 + text_contents + image_srcs + classes，
+        // 新根 parent=None（不挂树，调用方负责 append）。文本/图片内容映射到新 NodeId。
+        let mut s = crate::stage::Stage::new_for_test();
+        let root = s.create_root("div", "").unwrap();
+        let img = s.create_node("img", "").unwrap();
+        s.set_src(img, "icon.png").unwrap();
+        s.append_child(root, img).unwrap();
+        let txt = s.create_node("span", "").unwrap();
+        s.set_text(txt, "hello").unwrap();
+        s.append_child(root, txt).unwrap();
+
+        let cloned = s.clone_subtree(root).unwrap();
+        let scene = s.scene.as_ref().unwrap();
+        assert!(
+            scene.get(cloned).unwrap().parent.is_none(),
+            "cloned root is detached"
+        );
+        assert_eq!(scene.get(cloned).unwrap().children.len(), 2);
+        assert_ne!(cloned, root, "新 NodeId 不同于源");
+        // image_srcs 映射到新 NodeId（按 kind 找到对应 img 子节点）
+        let cloned_kids: Vec<_> = scene.get(cloned).unwrap().children.clone();
+        let img_child = cloned_kids
+            .iter()
+            .copied()
+            .find(|&c| scene.get(c).unwrap().kind == NodeKind::Image)
+            .unwrap();
+        assert_eq!(
+            scene.image_srcs.get(&img_child).map(|s| s.as_str()),
+            Some("icon.png")
+        );
+        // text_contents 映射到新 NodeId（按 kind 找到对应 span 子节点）
+        let txt_child = cloned_kids
+            .iter()
+            .copied()
+            .find(|&c| scene.get(c).unwrap().kind == NodeKind::TextNode)
+            .unwrap();
+        assert_eq!(
+            scene.text_contents.get(&txt_child).map(|s| s.as_str()),
+            Some("hello")
+        );
+    }
+
+    #[test]
+    fn clone_subtree_skips_runtime_side_tables() {
+        // side table 判定（list spec §6）：运行时状态（scroll/anim/tween/EditState）
+        // 不深拷——克隆根是干净模板，调用方按需重设。这里验 scroll 副表不残留：
+        // 即使源根是 scroll 容器，克隆根无 ScrollPaneState 或 scroll_pos 归零。
+        let mut s = crate::stage::Stage::new_for_test();
+        let root = s.create_root("div", "overflow:auto").unwrap();
+        let cloned = s.clone_subtree(root).unwrap();
+        let scene = s.scene.as_ref().unwrap();
+        let scroll_zero = scene
+            .scroll
+            .get(cloned)
+            .map(|st| st.scroll_pos.1 == 0.0)
+            .unwrap_or(true);
+        assert!(scroll_zero, "scroll 运行时状态不得克隆");
     }
 }

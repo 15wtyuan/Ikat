@@ -1031,6 +1031,20 @@ pub extern "C" fn loomgui_stage_set_reuse_key(h: *mut StageHandle, node_id: u32,
     handle.stage.set_reuse_key(NodeId(node_id), key);
 }
 
+/// 克隆场景内子树（游离根，不挂树）。返回新 node_id；0xFFFF_FFFF = err / null 句柄 / 无效 src。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_clone_subtree(h: *mut StageHandle, src: u32) -> u32 {
+    const ERR: u32 = 0xFFFF_FFFF;
+    if h.is_null() {
+        return ERR;
+    }
+    let sh = unsafe { &mut *h };
+    match sh.stage.clone_subtree(NodeId(src)) {
+        Ok(id) => id.0,
+        Err(_) => ERR,
+    }
+}
+
 /// 编程聚焦节点（照 fgui RequestFocus）。强制聚焦任意非 disabled 节点
 /// （含 tabindex=None/-1）；disabled 拒；越界跳过。null 句柄 → no-op。
 ///

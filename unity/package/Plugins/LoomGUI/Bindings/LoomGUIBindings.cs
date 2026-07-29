@@ -361,6 +361,12 @@ namespace LoomGUI.Bindings
         internal static extern void loomgui_stage_set_reuse_key(StageHandle* h, uint node_id, uint key);
 
         /// <summary>
+        ///  克隆场景内子树（游离根，不挂树）。返回新 node_id；0xFFFF_FFFF = err / null 句柄 / 无效 src。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_clone_subtree", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern uint loomgui_stage_clone_subtree(StageHandle* h, uint src);
+
+        /// <summary>
         ///  编程聚焦节点（照 fgui RequestFocus）。强制聚焦任意非 disabled 节点
         ///  （含 tabindex=None/-1）；disabled 拒；越界跳过。null 句柄 → no-op。
         ///

@@ -961,3 +961,45 @@ fn a6_get_children_capacity_contract() {
 
     loomgui_stage_free(h);
 }
+
+/// clone_subtree FFI round-trip：create_root > img → clone_subtree(root) →
+/// 新根 NodeId 非哨兵 + 游离（无父）+ 结构完整（1 子）。验证 FFI 序列化/句柄传递正确。
+#[test]
+fn clone_subtree_ffi_round_trip() {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    assert!(!h.is_null());
+    let empty_css = b"";
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    let img = loomgui_stage_create_node(h, b"img".as_ptr(), 3, empty_css.as_ptr(), 0);
+    assert_ne!(img, 0xFFFF_FFFF, "create_node ok");
+    assert_eq!(
+        loomgui_stage_append_child(h, root, img),
+        0,
+        "append_child ok"
+    );
+
+    let cloned = loomgui_stage_clone_subtree(h, root);
+    assert_ne!(cloned, 0xFFFF_FFFF, "clone_subtree 返有效 NodeId");
+    assert_ne!(cloned, root, "新 NodeId 不同于源根");
+    // 游离：新根无父（0xFFFF_FFFF = root sentinel）
+    assert_eq!(
+        loomgui_node_parent(h, cloned),
+        0xFFFF_FFFF,
+        "克隆根游离（无父）"
+    );
+    // 结构完整：1 子
+    assert_eq!(
+        loomgui_stage_get_child_count(h, cloned),
+        1,
+        "克隆根子数 = 源子数"
+    );
+    // 错误路径：无效 src → 哨兵
+    assert_eq!(
+        loomgui_stage_clone_subtree(h, 0xFFFF_FFFF),
+        0xFFFF_FFFF,
+        "无效 src → 哨兵"
+    );
+
+    loomgui_stage_free(h);
+}
