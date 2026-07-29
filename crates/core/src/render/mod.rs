@@ -1569,19 +1569,25 @@ fn render_one_node(
     let alpha = anim.and_then(|a| a.opacity).unwrap_or(n.style.opacity);
     let color_tint = anim.and_then(|a| a.text_color).unwrap_or(n.style.color);
     let rn = match n.kind {
-        k if k.is_container() => build_container_mesh(
-            n,
-            node_id,
-            parent_id,
-            rect,
-            wm,
-            alpha,
-            color_tint,
-            has_filter,
-            color_matrix,
-            anim,
-            image_sizes,
-        ),
+        // Dropdown/OptionItem 是控件（不在 is_container：子节点是框架注入的 .loom-*，
+        // 非用户排列），但渲染上需要一个背景框（select 外壳 / option 列表项），故与
+        // Container 同路径 build_container_mesh。文字由各自的 TextNode 子节点画
+        //（Dropdown .loom-value 内的 TextNode、OptionItem 的子文本），本臂不叠加文字。
+        k if k.is_container() || matches!(k, NodeKind::Dropdown | NodeKind::OptionItem) => {
+            build_container_mesh(
+                n,
+                node_id,
+                parent_id,
+                rect,
+                wm,
+                alpha,
+                color_tint,
+                has_filter,
+                color_matrix,
+                anim,
+                image_sizes,
+            )
+        }
         NodeKind::Image => {
             let src = scene.image_srcs.get(&n.id).cloned().unwrap_or_default();
             let image_path = Some(src.clone());

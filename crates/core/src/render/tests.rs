@@ -4260,12 +4260,12 @@ fn make_popup_scene(open: bool) -> (Scene, NodeId, NodeId, NodeId, NodeId, NodeI
     let mut outer_style = ResolvedStyle::default();
     outer_style.overflow_x = OverflowMode::Hidden;
     outer_style.overflow_y = OverflowMode::Hidden;
-    // .loom-popup 的 display：open→flex（可见，走末尾追加路径），closed→none（被
+    // .loom-popup 的 display：open→block（可见，标准弹出列表语义，走末尾追加路径），closed→none（被
     // collect_display_none_subtree 剪掉，整子树不渲染——模拟 sync_control_visuals 的
     // inline override 效果，这里直接写 style.taffy_style.display 省去 rematch）。
     let mut popup_style = ResolvedStyle::default();
     popup_style.taffy_style.display = if open {
-        taffy::style::Display::Flex
+        taffy::style::Display::Block
     } else {
         taffy::style::Display::None
     };
@@ -4712,8 +4712,8 @@ fn open_popup_renders_option_list_via_reparent_path() {
             .inline_override
             .taffy_style
             .display,
-        taffy::style::Display::Flex,
-        "sync 后 popup inline display:flex（展开始可见，下帧 rematch 应用）"
+        taffy::style::Display::Block,
+        "sync 后 popup inline display:block（展开始可见，标准弹出列表语义，下帧 rematch 应用）"
     );
     // 给所有节点非零 layout_rect（render 按 rect 产几何）。
     let all_ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
