@@ -365,6 +365,56 @@ fn build_skips_display_none_subtree() {
     );
 }
 
+#[test]
+fn template_subtree_pruned_from_render() {
+    // <template> 是 ListView item 蓝图：进场景树供克隆，但 display:none 强制不渲染。
+    // 整子树（含 li 与其文本）都不该产 RenderNode。
+    let parent = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        },
+        Some([1.0, 0.0, 0.0, 1.0]),
+    );
+    let mut tpl = Node::default();
+    tpl.kind = NodeKind::Template;
+    tpl.style.taffy_style.display = taffy::Display::None;
+    tpl.style.display_mode = crate::style::resolved::DisplayMode::None;
+    let mut li = Node::default();
+    li.kind = NodeKind::ListItem;
+    li.style.background_color = Some([0.0, 1.0, 0.0, 1.0]);
+    li.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 50.0,
+        h: 20.0,
+    };
+    let mut scene = Scene::from_nodes(vec![parent, tpl, li], vec![(0, 1), (1, 2)]);
+    let root = scene.roots[0];
+    let tpl_id = scene.get(root).unwrap().children[0];
+    let li_id = scene.get(tpl_id).unwrap().children[0];
+    let ft = test_font_table().expect("need test font for build_render_nodes");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &ft,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    assert!(
+        !frame
+            .nodes
+            .iter()
+            .any(|rn| rn.node_id == tpl_id.0 || rn.node_id == li_id.0),
+        "template 整子树必须被 display:none 剪枝"
+    );
+}
+
 /// Image RenderNode payload 带 path（核心不知图集/UV）。
 /// Image 节点 src="icons/skin.png" → Mesh payload image_path=Some("icons/skin.png")。
 #[test]

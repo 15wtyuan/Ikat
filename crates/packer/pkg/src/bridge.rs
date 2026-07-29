@@ -18,6 +18,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
             parsed.tree.roots.len()
         ));
     }
+    validate_template_children(&parsed.tree)?;
     // fence styles 必须与 tree nodes 1:1（css_resolve 对每个 IrNode 产一个 ResolvedStyle）。
     // debug_assert 在测试/dev 暴露契约破裂；release 仍走下方 unwrap_or_default 兜底防 panic。
     debug_assert_eq!(
@@ -25,15 +26,10 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
         parsed.tree.nodes.len(),
         "fence styles must be 1:1 with tree nodes"
     );
-    // ir_idx → template_idx 映射（Element/Text 占位；Comment/Doctype/Template 不占）。
+    // ir_idx → template_idx 映射（Element/Text 占位；Comment/Doctype 不占）。
     let mut ir_to_tpl: Vec<Option<usize>> = vec![None; parsed.tree.nodes.len()];
     let mut nodes: Vec<TemplateNode> = Vec::new();
     for (ir_idx, node) in parsed.tree.nodes.iter().enumerate() {
-        // <template> display:none：整个子树不进实例化（content 是 ListView 复合束蓝图，非活节点）。
-        // 检测 = 本节点或任一祖先是 template。packer 构建期跑，O(N*depth) 无妨。
-        if is_in_template_subtree(ir_idx, parsed) {
-            continue;
-        }
         // parent 总在 child 之前 push（tree_builder DFS），故此处 parent 的 tpl_idx 已知。
         let parent_tpl = node.parent.and_then(|pid| ir_to_tpl[pid.0]);
         match &node.kind {
@@ -82,18 +78,41 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
             }
         }
     }
-    // 根被 <template> 包裹（或全 Comment/Doctype）会让 nodes 空——write_package 产 0 节点
-    // ComponentTemplate 是静默契约违反，显式报错。
+    // 全 Comment/Doctype 的输入会让 nodes 空——write_package 产 0 节点 ComponentTemplate
+    // 是静默契约违反，显式报错。
     if nodes.is_empty() {
-        return Err(
-            "组件根被 <template> 包裹或无实例化节点，产物为空（template 子树整体跳过）".into(),
-        );
+        return Err("组件无可实例化节点，产物为空".into());
     }
     Ok(nodes)
 }
 
+/// `<template>` 的直接子元素必须全是 `<li>`——它是 ListView item 蓝图，克隆产的
+/// slot 根必须是 ListItem。主循环按 IrTree 顺序建节点、不好回溯 template→child 关系，
+/// 故做成独立前置遍历。
+fn validate_template_children(tree: &IrTree) -> Result<(), String> {
+    for node in &tree.nodes {
+        let IrNodeKind::Element(el) = &node.kind else {
+            continue;
+        };
+        if el.semantic != Some(SemanticKind::Template) {
+            continue;
+        }
+        for child in &node.children {
+            if let IrNodeKind::Element(cel) = &tree.nodes[child.0].kind {
+                if cel.tag != "li" {
+                    return Err(format!(
+                        "<template> 子元素必须是 <li>（当前 <{}>）",
+                        cel.tag
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// SemanticKind → NodeKind（total，非静默）。
-/// InputDispatch 不进 IrTree（annotate 已分派）；Template 在 bridge 主循环跳过；
+/// InputDispatch 不进 IrTree（annotate 已分派）；
 /// None = 未识别标签 → Err（围栏门应已挡，防御性兜底）。
 fn map_semantic(el: &IrElement) -> Result<NodeKind, String> {
     match el.semantic {
@@ -120,9 +139,7 @@ fn map_semantic(el: &IrElement) -> Result<NodeKind, String> {
             "InternalError: InputDispatch reached bridge (annotate should have dispatched) on <{}>",
             el.tag
         )),
-        Some(SemanticKind::Template) => Err(
-            "InternalError: Template reached map_semantic (bridge main loop should skip it)".into(),
-        ),
+        Some(SemanticKind::Template) => Ok(NodeKind::Template),
         None => Err(format!(
             "未识别标签 <{}>（semantic=None；围栏门应已挡）",
             el.tag
@@ -276,20 +293,6 @@ fn extract_control_init(
     }
 }
 
-/// 本 ir 节点或任一祖先是 `<template>` → true（template 子树整体跳过，content 留 ListView 复合束）。
-fn is_in_template_subtree(ir_idx: usize, parsed: &ParsedTemplate) -> bool {
-    let mut cur = Some(loomgui_fence::ir::IrNodeId(ir_idx));
-    while let Some(cid) = cur {
-        if let IrNodeKind::Element(el) = &parsed.tree.nodes[cid.0].kind {
-            if el.semantic == Some(SemanticKind::Template) {
-                return true;
-            }
-        }
-        cur = parsed.tree.nodes[cid.0].parent;
-    }
-    false
-}
-
 fn extract_classes(el: &IrElement) -> Vec<String> {
     attr(el, "class")
         .map(|c| c.split_whitespace().map(String::from).collect())
@@ -308,6 +311,24 @@ mod tests {
             parsed.diagnostics
         );
         bridge(&parsed).unwrap()
+    }
+
+    #[test]
+    fn template_subtree_enters_pkg() {
+        let nodes = bridged(
+            r#"<ul><template><li class="row"><span class="title">x</span></li></template></ul>"#,
+        );
+        assert!(nodes.iter().any(|n| n.kind == NodeKind::Template));
+        assert!(nodes.iter().any(|n| n.kind == NodeKind::ListItem));
+    }
+
+    #[test]
+    fn template_root_not_li_errors() {
+        let parsed = loomgui_fence::parse_template(
+            r#"<ul><template><div>x</div></template></ul>"#,
+            "test.html",
+        );
+        assert!(bridge(&parsed).is_err(), "template 直接子元素必须是 <li>");
     }
 
     #[test]
@@ -356,11 +377,19 @@ mod tests {
     }
 
     #[test]
-    fn template_element_skipped() {
-        let nodes = bridged(r#"<div><template><div>x</div></template></div>"#);
-        // [0] = div Container；template 节点本身不进 nodes
+    fn template_element_enters_nodes() {
+        // v27：template 子树是真实 pkg 节点（运行时克隆源），不再打包期丢弃。
+        let nodes = bridged(r#"<div><template><li>x</li></template></div>"#);
         assert_eq!(nodes[0].kind, NodeKind::Container);
-        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[1].kind, NodeKind::Template);
+        assert_eq!(nodes[1].parent_idx, Some(0));
+        assert_eq!(nodes[2].kind, NodeKind::ListItem);
+        assert_eq!(nodes[2].parent_idx, Some(1));
+        // display:none 由 fence tag schema 铺底 → render/layout 自动剪整子树。
+        assert_eq!(
+            nodes[1].style.display_mode,
+            loomgui_core::style::resolved::DisplayMode::None
+        );
     }
 
     #[test]
@@ -371,21 +400,10 @@ mod tests {
     }
 
     #[test]
-    fn template_root_yields_empty_error() {
-        // 根是 <template> → 整棵子树跳过 → nodes 空 → Err（不静默产 0 节点 ComponentTemplate）。
-        let parsed =
-            loomgui_fence::parse_template(r#"<template><div>x</div></template>"#, "t.html");
-        assert!(
-            parsed.diagnostics.is_empty(),
-            "diags: {:?}",
-            parsed.diagnostics
-        );
-        let result = bridge(&parsed);
-        assert!(result.is_err(), "template 根应报错（产物为空）");
-        let err = result.unwrap_err();
-        assert!(
-            err.contains("产物为空") || err.contains("template"),
-            "错误信息应点明 template/空: {err}"
-        );
+    fn template_as_root_produces_template_node() {
+        // 根是 <template> 不再产空——它是合法节点，只是 display:none 不渲染。
+        let nodes = bridged(r#"<template><li>x</li></template>"#);
+        assert_eq!(nodes[0].kind, NodeKind::Template);
+        assert_eq!(nodes[0].parent_idx, None);
     }
 }

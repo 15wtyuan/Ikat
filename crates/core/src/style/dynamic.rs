@@ -260,8 +260,6 @@ pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
         // 选择器在 rematch 仍命中。
         //
         // 例外：
-        //  - `<template>` 不生成运行时 Node（它在打包期被消费进 ComponentTemplate/TemplateNode，
-        //    不进 scene 对象树），故无对应 NodeKind、无需逆映射。
         //  - CustomElement：作者写的自定义元素 tag 含连字符（如 `<my-widget>`），NodeKind 只记
         //    CustomElement 一个判别值、丢弃原始 tag 名，无法逆推。因此带连字符的自定义 tag
         //    选择器在 rematch 不会命中（围栏放行，运行时退回 div）。要支持需在 NodeKind 侧保留
@@ -277,6 +275,8 @@ pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
             NodeKind::ListItem => "li",
             NodeKind::ListView => "ul",
             NodeKind::Slot => "slot",
+            // <template> 已进场景树（强制 display:none），保留逆映射使 `template` tag 选择器可命中。
+            NodeKind::Template => "template",
             // input 变体：type 在 parse 期固化为独立 kind，tag 统一为 "input"
             NodeKind::TextField
             | NodeKind::NumberField

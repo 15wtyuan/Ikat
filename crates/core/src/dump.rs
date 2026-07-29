@@ -47,6 +47,7 @@ pub fn dump_scene_json(scene: &Scene) -> String {
             NodeKind::ListItem => ("li", "ListItem".into()),
             NodeKind::Slot => ("slot", "Slot".into()),
             NodeKind::CustomElement => ("div", "CustomElement".into()),
+            NodeKind::Template => ("template", "Template".into()),
         };
         let id = json_escape(n.id_attr.as_deref().unwrap_or(""));
         let classes = n

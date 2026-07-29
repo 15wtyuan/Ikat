@@ -1,4 +1,5 @@
-//! 包格式（.pkg.bin，当前 version=26）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=27）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! v27：<template> 子树进 pkg（NodeKind::Template 新增，旧 v26 pkg 加载报 TooOld）。
 //! v26：ControlInit 加 Dropdown/NumberField 变体（bincode 布局变，旧 v25 pkg 加载报 TooOld）。
 //! v25：ControlInit 加 TextField/TextArea 变体（bincode 布局变，旧 v24 pkg 加载报 TooOld）。
 //! v24：TemplateNode 加 control_init 字段（bincode 布局变，旧 v23 pkg 加载报 TooOld）。
@@ -20,9 +21,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 26; // v26: ControlInit Dropdown/NumberField (bincode layout change)
-pub(crate) const MIN_VERSION: u32 = 26;
-pub(crate) const MAX_VERSION: u32 = 26;
+pub const PKG_FORMAT_VERSION: u32 = 27; // v27: <template> subtree enters pkg (NodeKind::Template added)
+pub(crate) const MIN_VERSION: u32 = 27;
+pub(crate) const MAX_VERSION: u32 = 27;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────

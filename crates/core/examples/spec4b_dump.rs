@@ -155,6 +155,7 @@ fn kind_to_html_tag(k: NodeKind) -> &'static str {
         NodeKind::ListItem => "li",
         NodeKind::Slot => "slot",
         NodeKind::CustomElement => "custom",
+        NodeKind::Template => "template",
     }
 }
 

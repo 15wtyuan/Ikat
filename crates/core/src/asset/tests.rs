@@ -379,7 +379,7 @@ fn read_rejects_duplicate_component_name() {
     );
 }
 
-/// Important 4：NodeBlock 的 kind_tag 字节不在 `NodeKind::from_u8` 判别值范围（≥20）→ BadKind
+/// Important 4：NodeBlock 的 kind_tag 字节不在 `NodeKind::from_u8` 判别值范围（≥21）→ BadKind
 /// （不静默塌成 Container）。v17 的 KIND_* 5 常量方案 read 侧用 wildcard fallback 把未知字节
 /// 全塌成 Container（kind collapse）；v18 起 kind_tag = NodeKind 判别值，from_u8 对越界值
 /// 返 None → BadKind。本测试同时正向验证改的是 kind_tag 字节（改成 Button 须读回 Button），
@@ -410,13 +410,13 @@ fn read_rejects_unknown_kind_tag() {
         "kind_tag offset sanity: patching to Button must read back Button"
     );
 
-    // 20 = from_u8 的首个 None 分支（SearchField=19 是最后合法判别值）。
+    // 21 = from_u8 的首个 None 分支（Template=20 是最后合法判别值）。
     let mut patched_bad = bytes.clone();
-    patched_bad[kind_tag_off] = 20;
+    patched_bad[kind_tag_off] = 21;
     let err = read_package(&patched_bad).expect_err("unknown kind_tag must error");
     assert!(
-        matches!(err, PkgError::BadKind(20)),
-        "expected BadKind(20), got {err:?}"
+        matches!(err, PkgError::BadKind(21)),
+        "expected BadKind(21), got {err:?}"
     );
 
     // 0xFF = 远超判别值范围，同样必须 BadKind。防 from_u8 回归（如 off-by-one 把 25 误返 Some）。
@@ -765,16 +765,16 @@ fn pkg_v26_number_field_init_via_pkg() {
     );
 }
 
-/// v26: version=25 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=26，无迁移器）。
-/// ControlInit 新增 Dropdown/NumberField 变体改变 bincode layout，旧 v25 fixture 不能半读半坏。
+/// v27: version=26 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=27，无迁移器）。
+/// NodeKind 新增 Template 变体 + template 子树进 pkg，旧 v26 fixture 不能半读半坏。
 #[test]
-fn pkg_v26_rejects_v25() {
+fn pkg_v27_rejects_v26() {
     let mut bad = vec![];
     bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
-    bad.extend_from_slice(&25u32.to_le_bytes()); // v25 < MIN_VERSION=26
+    bad.extend_from_slice(&26u32.to_le_bytes()); // v26 < MIN_VERSION=27
     let err = read_package(&bad);
     assert!(
-        matches!(err, Err(PkgError::TooOld(25))),
-        "v25 pkg must be rejected as TooOld after v26 bump, got {err:?}"
+        matches!(err, Err(PkgError::TooOld(26))),
+        "v26 pkg must be rejected as TooOld after v27 bump, got {err:?}"
     );
 }
