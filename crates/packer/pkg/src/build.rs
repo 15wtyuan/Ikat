@@ -303,6 +303,13 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
     std::fs::create_dir_all(&fonts_dir)
         .map_err(|e| format!("create fonts dir {}: {e}", fonts_dir.display()))?;
 
+    // 清理上次构建的残留产物（删包重打场景）：删 ui/atlas/fonts 下的生成文件
+    //（.pkg.bin / .atlas.json / .png / .bytes），保留 Unity 的 .meta（删了会重生成 GUID、断引用）。
+    // 不清理 loom.runtime.json（本函数末尾覆盖写）。
+    clean_stale_outputs(&ui_dir, &["pkg.bin"])?;
+    clean_stale_outputs(&atlas_dir, &["atlas.json", "png"])?;
+    clean_stale_outputs(&fonts_dir, &["bytes"])?;
+
     let mut report = BuildReport {
         packages: Vec::new(),
         atlases: Vec::new(),
@@ -454,10 +461,63 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
     Ok(report)
 }
 
+/// 清理输出目录里上次构建的残留产物：删扩展名匹配的文件，跳过 .meta（Unity GUID，
+/// 删了重生成会断引用）和非匹配文件。删包重打场景必需——否则 workspace 里删掉的
+/// package/atlas/font 的产物会一直残留在 output_dir，运行时读到旧产物。
+fn clean_stale_outputs(dir: &Path, exts: &[&str]) -> Result<(), String> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("read dir {}: {e}", dir.display())),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none() {
+            continue;
+        }
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        // .meta 是 Unity 资产序列化文件（同名的 .pkg.bin.meta / .png.meta），绝不能删。
+        if ext == "meta" {
+            continue;
+        }
+        // 多段扩展名（pkg.bin / atlas.json）用文件名后缀匹配，单段（png / bytes）用 ext 匹配。
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let stale = exts.iter().any(|e| name.ends_with(&format!(".{e}")));
+        if stale {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("remove stale {}: {e}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod package_tests {
     use super::*;
     use loomgui_core::scene::NodeKind;
+
+    #[test]
+    fn clean_stale_outputs_removes_products_keeps_meta() {
+        // 模拟删包重打：ui 目录里有旧产物 + .meta + 非产物文件。clean 应删产物、留 .meta。
+        let tmp = std::env::temp_dir().join(format!("loom_clean_test_{}", std::process::id()));
+        let ui = tmp.join("ui");
+        std::fs::create_dir_all(&ui).unwrap();
+        std::fs::write(ui.join("showcase.pkg.bin"), b"old").unwrap();
+        std::fs::write(ui.join("showcase.pkg.bin.meta"), b"guid").unwrap(); // 必须留
+        std::fs::write(ui.join("deleted.pkg.bin"), b"stale").unwrap(); // 删包重打应清掉
+        std::fs::write(ui.join("readme.txt"), b"keep").unwrap(); // 非产物留着
+
+        clean_stale_outputs(&ui, &["pkg.bin"]).unwrap();
+
+        assert!(!ui.join("showcase.pkg.bin").exists(), "产物删除");
+        assert!(
+            ui.join("showcase.pkg.bin.meta").exists(),
+            ".meta 必须保留（删了断 Unity GUID）"
+        );
+        assert!(!ui.join("deleted.pkg.bin").exists(), "残留产物清掉");
+        assert!(ui.join("readme.txt").exists(), "非产物文件不动");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn pack_components_roundtrip_single() {
