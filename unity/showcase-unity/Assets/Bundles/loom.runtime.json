@@ -1,8 +1,7 @@
 {
   "version": 1,
   "packages": [
-    "showcase",
-    "spec4b-acceptance"
+    "showcase"
   ],
   "atlases": [
     "icons"
