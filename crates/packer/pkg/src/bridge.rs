@@ -440,7 +440,9 @@ mod tests {
     fn role_and_data_slot_extracted_into_template_node() {
         // role 驱动语义分派 + data-slot 标识控件视觉部件：两个属性都须从 HTML 提取进 TemplateNode，
         // 供 runtime RoleTable 查表。验证 bridge 是 HTML→pkg 的唯一入口不丢这两列。
-        let nodes = bridged(r#"<div role="slider"><div data-slot="thumb"></div></div>"#);
+        let nodes = bridged(
+            r#"<style>[role="slider"]{background:#ddd}</style><div role="slider"><div data-slot="thumb"></div></div>"#,
+        );
         let root = &nodes[0];
         assert_eq!(root.role.as_deref(), Some("slider"));
         assert!(root.data_slot.is_none(), "root has no data-slot");

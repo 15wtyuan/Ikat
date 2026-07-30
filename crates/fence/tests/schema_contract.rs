@@ -1,4 +1,4 @@
-use loomgui_fence::schema::attr::{is_global_attr, INPUT_STRUCTURAL};
+use loomgui_fence::schema::attr::is_global_attr;
 use loomgui_fence::schema::css::{find_css_prop, find_shorthand, CssValueParser};
 use loomgui_fence::schema::tag::{find_tag, is_shell_tag, Category, ContentModel, DisplayDefault};
 
@@ -120,10 +120,7 @@ fn global_attr_detection() {
     assert!(is_global_attr("id"));
     assert!(is_global_attr("data-anything"));
     assert!(is_global_attr("aria-label"));
-    assert!(!is_global_attr("type"));
-}
-
-#[test]
-fn input_structural_has_type() {
-    assert_eq!(INPUT_STRUCTURAL[0].name, "type");
+    // `type` is a plain global attribute now that input[type] structural
+    // dispatch is retired.
+    assert!(is_global_attr("type"));
 }

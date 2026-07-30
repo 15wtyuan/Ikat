@@ -56,8 +56,11 @@ pub enum SemanticKind {
     TextElement,
     Button,
     Image,
-    /// `<input>` before type dispatch -- replaced by the specific kind
-    /// during annotation.
+    /// Vestigial placeholder for the legacy `<input>` tag. No longer produced: the
+    /// annotator now resolves `<input>` straight to its concrete kind (legacy
+    /// `type` map) or via `role`. Retained only so the bridge can reject it as an
+    /// internal error if it ever surfaces; removed when the `input` tag leaves
+    /// the fence.
     InputDispatch,
     TextField,
     /// `<input type="password">` — split from TextField so attribute selectors can match it.
@@ -98,24 +101,59 @@ pub struct TagSpec {
 
 // ── resolve_semantic ────────────────────────────────────────────────
 
-/// Resolve the final `SemanticKind` from tag name and, for `<input>`,
-/// the `type` attribute.  Returns `None` for tags outside the fence.
-pub fn resolve_semantic(tag: &str, input_type: Option<&str>) -> Option<SemanticKind> {
+/// WAI-ARIA `role` → `SemanticKind`.
+///
+/// `textbox` is intentionally absent: `aria-multiline` selects TextArea vs
+/// TextField, which a flat value table cannot express, so it is handled inline
+/// in [`resolve_semantic`]. `listbox` maps to a plain Container because it is the
+/// popup list inside a `combobox` and has no dedicated NodeKind; the runtime
+/// addresses it by role.
+const ROLE_TO_SEMANTIC: &[(&str, SemanticKind)] = &[
+    ("combobox", SemanticKind::Dropdown),
+    ("option", SemanticKind::OptionItem),
+    ("listbox", SemanticKind::Container),
+    ("slider", SemanticKind::Slider),
+    ("spinbutton", SemanticKind::NumberField),
+    ("switch", SemanticKind::Toggle),
+    ("radio", SemanticKind::RadioButton),
+    ("progressbar", SemanticKind::ProgressBar),
+    ("list", SemanticKind::ListView),
+    ("listitem", SemanticKind::ListItem),
+];
+
+/// Resolve the [`SemanticKind`] of an element from its tag and, when present,
+/// its WAI-ARIA `role`.
+///
+/// `role` takes precedence over the tag: `<div role="slider">` is a Slider
+/// regardless of the `div` tag. An unrecognized role falls through to the
+/// tag-based mapping. Legacy control/list tags (`select`, `progress`, ...) are
+/// still mapped here while they remain in the fence; `<input>` has no tag-level
+/// default because its semantics historically came from the `type` attribute,
+/// which the annotator resolves directly (see `annotate::legacy_input_semantic`).
+pub fn resolve_semantic(
+    tag: &str,
+    role: Option<&str>,
+    aria_multiline: bool,
+) -> Option<SemanticKind> {
+    if let Some(r) = role {
+        // `textbox` + aria-multiline selects the multi-line variant.
+        if r == "textbox" {
+            return Some(if aria_multiline {
+                SemanticKind::TextArea
+            } else {
+                SemanticKind::TextField
+            });
+        }
+        if let Some((_, kind)) = ROLE_TO_SEMANTIC.iter().find(|(k, _)| *k == r) {
+            return Some(*kind);
+        }
+        // Unrecognized role: fall through to the tag-based mapping below.
+    }
     match tag {
         "div" => Some(SemanticKind::Container),
         "span" => Some(SemanticKind::TextElement),
         "button" => Some(SemanticKind::Button),
         "img" => Some(SemanticKind::Image),
-        "input" => match input_type.unwrap_or("text") {
-            "text" => Some(SemanticKind::TextField),
-            "password" => Some(SemanticKind::PasswordField),
-            "search" => Some(SemanticKind::SearchField),
-            "number" => Some(SemanticKind::NumberField),
-            "range" => Some(SemanticKind::Slider),
-            "checkbox" => Some(SemanticKind::Toggle),
-            "radio" => Some(SemanticKind::RadioButton),
-            _ => None,
-        },
         "textarea" => Some(SemanticKind::TextArea),
         "select" => Some(SemanticKind::Dropdown),
         "option" => Some(SemanticKind::OptionItem),
@@ -124,13 +162,8 @@ pub fn resolve_semantic(tag: &str, input_type: Option<&str>) -> Option<SemanticK
         "li" => Some(SemanticKind::ListItem),
         "template" => Some(SemanticKind::Template),
         "slot" => Some(SemanticKind::Slot),
-        _ => {
-            if tag.contains('-') {
-                Some(SemanticKind::CustomElement)
-            } else {
-                None
-            }
-        }
+        _ if tag.contains('-') => Some(SemanticKind::CustomElement),
+        _ => None,
     }
 }
 
@@ -198,7 +231,7 @@ pub static TAGS: &[TagSpec] = &[
         category: Category::Void,
         content: ContentModel::None,
         void: true,
-        structural_attrs: super::attr::INPUT_STRUCTURAL,
+        structural_attrs: &[],
         content_attrs: &[
             "value",
             "min",
@@ -316,63 +349,92 @@ mod tests {
     // -- resolve_semantic --
 
     #[test]
-    fn resolve_input_types() {
+    fn resolve_semantic_role_driven() {
+        // div + role → control SemanticKind (WAI-ARIA).
         assert_eq!(
-            resolve_semantic("input", None),
-            Some(SemanticKind::TextField)
+            resolve_semantic("div", Some("combobox"), false),
+            Some(SemanticKind::Dropdown)
         );
         assert_eq!(
-            resolve_semantic("input", Some("text")),
-            Some(SemanticKind::TextField)
-        );
-        assert_eq!(
-            resolve_semantic("input", Some("range")),
+            resolve_semantic("div", Some("slider"), false),
             Some(SemanticKind::Slider)
         );
         assert_eq!(
-            resolve_semantic("input", Some("checkbox")),
+            resolve_semantic("div", Some("spinbutton"), false),
+            Some(SemanticKind::NumberField)
+        );
+        assert_eq!(
+            resolve_semantic("div", Some("switch"), false),
             Some(SemanticKind::Toggle)
         );
         assert_eq!(
-            resolve_semantic("input", Some("radio")),
-            Some(SemanticKind::RadioButton)
+            resolve_semantic("div", Some("progressbar"), false),
+            Some(SemanticKind::ProgressBar)
         );
         assert_eq!(
-            resolve_semantic("input", Some("number")),
-            Some(SemanticKind::NumberField)
+            resolve_semantic("div", Some("list"), false),
+            Some(SemanticKind::ListView)
         );
-    }
-
-    #[test]
-    fn resolve_input_bogus_type() {
-        assert_eq!(resolve_semantic("input", Some("bogus")), None);
-    }
-
-    #[test]
-    fn resolve_input_password_search_split() {
+        // textbox + aria-multiline selects TextArea vs TextField.
         assert_eq!(
-            resolve_semantic("input", Some("text")),
+            resolve_semantic("div", Some("textbox"), false),
             Some(SemanticKind::TextField)
         );
         assert_eq!(
-            resolve_semantic("input", Some("password")),
-            Some(SemanticKind::PasswordField)
+            resolve_semantic("div", Some("textbox"), true),
+            Some(SemanticKind::TextArea)
+        );
+        // role takes precedence over the tag.
+        assert_eq!(
+            resolve_semantic("button", Some("slider"), false),
+            Some(SemanticKind::Slider)
+        );
+        // Base tags without a role.
+        assert_eq!(
+            resolve_semantic("div", None, false),
+            Some(SemanticKind::Container)
         );
         assert_eq!(
-            resolve_semantic("input", Some("search")),
-            Some(SemanticKind::SearchField)
+            resolve_semantic("span", None, false),
+            Some(SemanticKind::TextElement)
         );
         assert_eq!(
-            resolve_semantic("input", None),
-            Some(SemanticKind::TextField)
-        ); // 默认 text
+            resolve_semantic("button", None, false),
+            Some(SemanticKind::Button)
+        );
+        assert_eq!(
+            resolve_semantic("img", None, false),
+            Some(SemanticKind::Image)
+        );
     }
 
     #[test]
-    fn resolve_non_input_tags() {
-        assert_eq!(resolve_semantic("div", None), Some(SemanticKind::Container));
-        assert_eq!(resolve_semantic("button", None), Some(SemanticKind::Button));
-        assert_eq!(resolve_semantic("video", None), None);
+    fn resolve_semantic_legacy_tags_and_unknown() {
+        // Legacy control/list tags still in the fence map by tag (pending retirement).
+        assert_eq!(
+            resolve_semantic("select", None, false),
+            Some(SemanticKind::Dropdown)
+        );
+        assert_eq!(
+            resolve_semantic("progress", None, false),
+            Some(SemanticKind::ProgressBar)
+        );
+        assert_eq!(
+            resolve_semantic("textarea", None, false),
+            Some(SemanticKind::TextArea)
+        );
+        // An unrecognized role falls through to the tag mapping.
+        assert_eq!(
+            resolve_semantic("div", Some("totally-made-up"), false),
+            Some(SemanticKind::Container)
+        );
+        // Unknown tag with no role is None.
+        assert_eq!(resolve_semantic("video", None, false), None);
+        // Hyphenated tag → custom element.
+        assert_eq!(
+            resolve_semantic("my-widget", None, false),
+            Some(SemanticKind::CustomElement)
+        );
     }
 
     // -- TAGS registry --
