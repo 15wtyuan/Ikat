@@ -171,40 +171,23 @@ fn attr(el: &IrElement, name: &str) -> Option<String> {
 
 /// 按 NodeKind 从 HTML 属性提取控件初始值（打包期 bake 进 pkg.bin，instantiate 时读出）。
 ///
-/// 语义：
-/// - ProgressBar：始终产 Some。无 value 属性视为 indeterminate（HTML 语义：浏览器
-///   同样把无 value 的 progress 渲染为旋转动画）；value 缺省 0.0，max 缺省 100.0。
-/// - Slider：无 value 返回 None（运行时用默认值兜底）。
-/// - Toggle/RadioButton：始终产 Some，显式记录勾选状态（checked 缺省 false）。
-///   radio name 缺省空串。
+/// 属性源：**ARIA/data-* 优先，legacy plain 属性兜底**。role 驱动控件
+/// （`<div role="progressbar" aria-valuenow="50">`）把初始值放在 ARIA（`aria-valuenow`、
+/// `aria-checked`、…）或 `data-*`（`data-step`、`data-name`）里——围栏禁止 `<div>` 上出现
+/// plain 属性；legacy 标签控件（`<progress value="50">`、`<input type="range" value="50">`）
+/// 仍用 plain 属性。两条路在 Task 7 下线 legacy 标签前共存，由 [`attr_aria_or_legacy`] /
+/// [`bool_aria_or_legacy`] 统一分派。
 ///
-/// 从 IrTree 中收集某个元素的所有直接文本子节点内容，拼接成单个字符串。
-/// 用于 `<textarea>`：按 HTML 规范 value 来自元素文本内容，非 value 属性。
-fn collect_element_text(ir_idx: usize, tree: &IrTree) -> String {
-    let mut out = String::new();
-    for child_id in &tree.nodes[ir_idx].children {
-        if let IrNodeKind::Text(s) = &tree.nodes[child_id.0].kind {
-            out.push_str(s);
-        }
-    }
-    out
-}
-
-/// 从 value/placeholder/maxlength/readonly 属性构建 EditInit（TextField/NumberField 共用）。
-/// 缺省值与 HTML 一致：value/placeholder 空串、maxlength 0（无限）、readonly false。
-/// 注意 TextArea 不用本函数——其 value 按 HTML 规范取元素文本内容而非 value 属性。
-fn extract_edit_init(el: &IrElement) -> EditInit {
-    EditInit {
-        value: attr(el, "value").unwrap_or_default(),
-        placeholder: attr(el, "placeholder").unwrap_or_default(),
-        max_length: attr(el, "maxlength")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0),
-        readonly: attr(el, "readonly").is_some(),
-    }
-}
-
-/// 非 control 节点返回 None。
+/// 语义：
+/// - ProgressBar：始终产 Some。value 源缺席 = indeterminate（HTML 语义：浏览器把无 value
+///   的 progress 渲染为旋转动画）；value 缺省 0.0，max 缺省 100.0。
+/// - Slider：value 源缺席返回 None（运行时用默认值兜底）。
+/// - Toggle/RadioButton：始终产 Some，显式记录勾选状态（缺省 false）；radio name 缺省空串。
+/// - TextField：value 取元素文本内容（ARIA 无 textbox-value 属性），无文本时兜底 legacy
+///   `value` 属性（void `<input>` 无文本子节点）。
+/// - TextArea：value 取元素文本内容（HTML `<textarea>` 语义）。
+/// - Dropdown：扫子树找首个被选中 option（`aria-selected="true"` 或 legacy `selected`），
+///   无则默认第 0 项；详见 [`dropdown_selected_index`]。
 fn extract_control_init(
     kind: NodeKind,
     el: &IrElement,
@@ -213,13 +196,13 @@ fn extract_control_init(
 ) -> Option<ControlInit> {
     match kind {
         NodeKind::ProgressBar => {
-            // value 缺席 = indeterminate（必须先判 is_some 再 parse，否则 indeterminate 误判 false）。
-            let value_attr = attr(el, "value");
+            // value 源缺席 = indeterminate（先判 is_some 再 parse，否则 indeterminate 误判 false）。
+            let value_attr = attr_aria_or_legacy(el, "aria-valuenow", "value");
             let indeterminate = value_attr.is_none();
             let value = value_attr
                 .and_then(|v| v.parse::<f32>().ok())
                 .unwrap_or(0.0);
-            let max = attr(el, "max")
+            let max = attr_aria_or_legacy(el, "aria-valuemax", "max")
                 .and_then(|v| v.parse::<f32>().ok())
                 .unwrap_or(100.0);
             Some(ControlInit::Progress {
@@ -228,16 +211,16 @@ fn extract_control_init(
                 indeterminate,
             })
         }
-        NodeKind::Slider => attr(el, "value")
+        NodeKind::Slider => attr_aria_or_legacy(el, "aria-valuenow", "value")
             .and_then(|v| v.parse::<f32>().ok())
             .map(|value| {
-                let min = attr(el, "min")
+                let min = attr_aria_or_legacy(el, "aria-valuemin", "min")
                     .and_then(|v| v.parse::<f32>().ok())
                     .unwrap_or(0.0);
-                let max = attr(el, "max")
+                let max = attr_aria_or_legacy(el, "aria-valuemax", "max")
                     .and_then(|v| v.parse::<f32>().ok())
                     .unwrap_or(100.0);
-                let step = attr(el, "step")
+                let step = attr_aria_or_legacy(el, "data-step", "step")
                     .and_then(|v| v.parse::<f32>().ok())
                     .unwrap_or(1.0);
                 ControlInit::Slider {
@@ -248,51 +231,36 @@ fn extract_control_init(
                 }
             }),
         NodeKind::Toggle => Some(ControlInit::Toggle {
-            checked: attr(el, "checked").is_some(),
+            checked: bool_aria_or_legacy(el, "aria-checked", "checked"),
         }),
         NodeKind::RadioButton => Some(ControlInit::Radio {
-            checked: attr(el, "checked").is_some(),
-            name: attr(el, "name").unwrap_or_default(),
+            checked: bool_aria_or_legacy(el, "aria-checked", "checked"),
+            // data-name 承载 radio 分组（ARIA 无「radio 组名」属性）；legacy 兜底 name 属性。
+            name: attr_aria_or_legacy(el, "data-name", "name").unwrap_or_default(),
         }),
-        NodeKind::TextField => Some(ControlInit::TextField(extract_edit_init(el))),
-        NodeKind::TextArea => Some(ControlInit::TextArea(EditInit {
-            // textarea 按 HTML 规范用元素文本内容而非 value 属性（不走 extract_edit_init）。
-            value: collect_element_text(ir_idx, tree),
-            placeholder: attr(el, "placeholder").unwrap_or_default().to_string(),
-            max_length: attr(el, "maxlength")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0),
-            readonly: attr(el, "readonly").is_some(),
-        })),
-        NodeKind::Dropdown => {
-            // 扫 select 的 option 子节点，找带 selected 属性的索引；无则默认 0（首项）。
-            // selected_index 是「第几个 option」，不是「children 里的第几个」——多行
-            // HTML 的 option 之间夹着空白 Text 节点（fence 只剥顶层空白，in-element
-            // 保留），用 children 下标会把 option_b 误算成 3 而非 1。
-            let mut selected_index: u32 = 0;
-            let mut option_index: u32 = 0;
-            for child_id in &tree.nodes[ir_idx].children {
-                if let IrNodeKind::Element(child) = &tree.nodes[child_id.0].kind {
-                    if child.tag == "option" {
-                        if child.attributes.iter().any(|a| a.name == "selected") {
-                            selected_index = option_index;
-                            break;
-                        }
-                        option_index += 1;
-                    }
-                }
-            }
-            Some(ControlInit::Dropdown { selected_index })
-        }
+        NodeKind::TextField => Some(ControlInit::TextField(extract_edit_init_with_value(
+            el,
+            textfield_value(el, ir_idx, tree),
+        ))),
+        NodeKind::TextArea => Some(ControlInit::TextArea(extract_edit_init_with_value(
+            el,
+            collect_element_text(ir_idx, tree),
+        ))),
+        NodeKind::Dropdown => Some(ControlInit::Dropdown {
+            selected_index: dropdown_selected_index(ir_idx, tree),
+        }),
         NodeKind::NumberField => {
-            let edit = extract_edit_init(el);
-            let min = attr(el, "min")
+            let edit = extract_edit_init_with_value(
+                el,
+                attr_aria_or_legacy(el, "aria-valuenow", "value").unwrap_or_default(),
+            );
+            let min = attr_aria_or_legacy(el, "aria-valuemin", "min")
                 .and_then(|v| v.parse::<f32>().ok())
                 .unwrap_or(f32::MIN);
-            let max = attr(el, "max")
+            let max = attr_aria_or_legacy(el, "aria-valuemax", "max")
                 .and_then(|v| v.parse::<f32>().ok())
                 .unwrap_or(f32::MAX);
-            let step = attr(el, "step")
+            let step = attr_aria_or_legacy(el, "data-step", "step")
                 .and_then(|v| v.parse::<f32>().ok())
                 .unwrap_or(0.0);
             Some(ControlInit::NumberField {
@@ -303,6 +271,116 @@ fn extract_control_init(
             })
         }
         _ => None,
+    }
+}
+
+/// Prefer the ARIA/data-* attribute; fall back to the legacy plain attribute.
+///
+/// Role-driven controls carry init values in ARIA (`aria-valuenow`) or `data-*`
+/// (`data-step`) because the fence forbids plain attributes on `<div>`; legacy
+/// tags (`<progress>`/`<input>`/`<select>`) expose the same values via plain
+/// attributes. Both paths stay live until Task 7 retires the legacy tags, so the
+/// bridge reads the ARIA source when present and otherwise falls back.
+fn attr_aria_or_legacy(el: &IrElement, aria: &str, legacy: &str) -> Option<String> {
+    attr(el, aria).or_else(|| attr(el, legacy))
+}
+
+/// Boolean state from ARIA (value `"true"`/`"false"`) with legacy boolean-attribute fallback.
+///
+/// ARIA boolean attributes are value-driven: `aria-checked="true"` is on,
+/// `aria-checked="false"` is off. Legacy HTML boolean attributes (`checked`/
+/// `selected`/`readonly`) are presence-driven: the attribute present means true
+/// regardless of its value. This reconciles the two so control-init extraction
+/// reads the right semantics from either source.
+fn bool_aria_or_legacy(el: &IrElement, aria: &str, legacy: &str) -> bool {
+    if let Some(v) = attr(el, aria) {
+        return v == "true";
+    }
+    attr(el, legacy).is_some()
+}
+
+/// Build EditInit from a caller-supplied value plus the shared
+/// placeholder/maxlength/readonly sources (aria-or-legacy). TextField and
+/// TextArea differ only in where `value` comes from; the other three fields share
+/// one resolution path.
+fn extract_edit_init_with_value(el: &IrElement, value: String) -> EditInit {
+    EditInit {
+        value,
+        placeholder: attr_aria_or_legacy(el, "aria-placeholder", "placeholder").unwrap_or_default(),
+        max_length: attr_aria_or_legacy(el, "data-maxlength", "maxlength")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+        readonly: bool_aria_or_legacy(el, "aria-readonly", "readonly"),
+    }
+}
+
+/// TextField initial value: role-driven `<div role="textbox">` carries its content
+/// as element text children (ARIA has no textbox-value attribute), matching the
+/// TextArea pattern. Legacy `<input value="...">` exposes it via the `value`
+/// attribute instead; void `<input>` has no text children, so falling back to the
+/// legacy attribute when text is empty keeps the legacy path working.
+fn textfield_value(el: &IrElement, ir_idx: usize, tree: &IrTree) -> String {
+    let text = collect_element_text(ir_idx, tree);
+    if !text.is_empty() {
+        text
+    } else {
+        attr(el, "value").unwrap_or_default()
+    }
+}
+
+/// Collect an element's direct text children into one string.
+///
+/// Used for TextArea/TextField initial values: per the HTML `<textarea>` spec the
+/// value comes from element text content, not a `value` attribute.
+fn collect_element_text(ir_idx: usize, tree: &IrTree) -> String {
+    let mut out = String::new();
+    for child_id in &tree.nodes[ir_idx].children {
+        if let IrNodeKind::Text(s) = &tree.nodes[child_id.0].kind {
+            out.push_str(s);
+        }
+    }
+    out
+}
+
+/// Dropdown initial selected option index.
+///
+/// Legacy `<select>` keeps `<option>` as direct children; role-driven combobox
+/// nests `<div role="option">` inside a `role="listbox"` popup (a structural
+/// requirement enforced by control_structure_check), so the options are never
+/// direct children of the combobox. Matching by SemanticKind (OptionItem) covers
+/// both `<option>` and `<div role="option">`, and a subtree walk covers both
+/// layouts in document order. Selection is `aria-selected="true"` (role-driven)
+/// or the legacy `selected` boolean attribute; when none is selected the default
+/// is the first option (index 0).
+fn dropdown_selected_index(dropdown_idx: usize, tree: &IrTree) -> u32 {
+    let mut selected: Option<u32> = None;
+    let mut option_index: u32 = 0;
+    visit_options(dropdown_idx, tree, |el| {
+        if selected.is_none() && bool_aria_or_legacy(el, "aria-selected", "selected") {
+            selected = Some(option_index);
+        }
+        option_index += 1;
+    });
+    selected.unwrap_or(0)
+}
+
+/// Pre-order DFS over descendant OptionItem-semantic elements in document order.
+/// Text children and non-option elements are skipped without advancing the option
+/// counter (the counter lives in the caller's closure).
+fn visit_options(root: usize, tree: &IrTree, mut visit: impl FnMut(&IrElement)) {
+    let mut stack: Vec<usize> = tree.nodes[root]
+        .children
+        .iter()
+        .rev()
+        .map(|c| c.0)
+        .collect();
+    while let Some(idx) = stack.pop() {
+        if let IrNodeKind::Element(el) = &tree.nodes[idx].kind {
+            if el.semantic == Some(SemanticKind::OptionItem) {
+                visit(el);
+            }
+            stack.extend(tree.nodes[idx].children.iter().rev().map(|c| c.0));
+        }
     }
 }
 

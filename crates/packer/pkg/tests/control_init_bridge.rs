@@ -280,3 +280,258 @@ fn bridge_extracts_number_field_min_max_step_value() {
         other => panic!("expected NumberField, got {:?}", other),
     }
 }
+
+// == role-driven extraction (Task 8.5) ==
+//
+// role-driven `<div role="...">` controls carry init values in ARIA
+// (`aria-valuenow`/`aria-checked`/...) and `data-*` (`data-step`/`data-name`)
+// attributes, because the fence forbids plain attributes on `<div>`. These
+// tests lock the bridge's ARIA-first extraction; the legacy-tag tests above
+// lock the fallback path that stays live until Task 7 retires the tags.
+
+/// Like `run_bridge`, but the injected `<style>` targets role selectors so the
+/// control-css contract is satisfied for `<div role="...">` controls. The legacy
+/// helper's tag selectors (`progress`/`input[...]`) do not match divs.
+fn run_bridge_role(html: &str) -> Vec<TemplateNode> {
+    let wrapped = format!(
+        r#"<style>[role="progressbar"],[role="slider"],[role="spinbutton"],[role="switch"],[role="radio"],[role="textbox"],[role="combobox"]{{background:#ddd}}</style>{html}"#
+    );
+    let parsed = loomgui_fence::parse_template(&wrapped, "test.html");
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "parse diags (bridge 行为无意义): {:?}",
+        parsed.diagnostics
+    );
+    bridge(&parsed).expect("bridge ok")
+}
+
+#[test]
+fn bridge_extracts_progress_role_aria_attrs() {
+    // <div role="progressbar" aria-valuenow/min/max> → Progress{value,max,false}.
+    let html = r#"<div role="progressbar" aria-valuenow="780" aria-valuemin="0" aria-valuemax="1000"><div data-slot="fill"></div></div>"#;
+    let node = &run_bridge_role(html)[0];
+    assert_eq!(node.kind, NodeKind::ProgressBar);
+    let init = node.control_init.as_ref().expect("control_init set");
+    assert!(matches!(
+        init,
+        ControlInit::Progress {
+            value: 780.0,
+            max: 1000.0,
+            indeterminate: false
+        }
+    ));
+}
+
+#[test]
+fn bridge_extracts_progress_role_indeterminate_when_no_valuenow() {
+    // role=progressbar without aria-valuenow → indeterminate (mirrors HTML <progress>
+    // semantics: value absent = spinning). aria-valuemin/max still read.
+    let html = r#"<div role="progressbar" aria-valuemin="0" aria-valuemax="100"><div data-slot="fill"></div></div>"#;
+    let node = &run_bridge_role(html)[0];
+    let init = node.control_init.as_ref().expect("control_init set");
+    assert!(matches!(
+        init,
+        ControlInit::Progress {
+            value: 0.0,
+            max: 100.0,
+            indeterminate: true
+        }
+    ));
+}
+
+#[test]
+fn bridge_extracts_slider_role_aria_and_data_attrs() {
+    // role=slider: aria-valuenow/min/max + data-step.
+    let html = r#"<div role="slider" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100" data-step="5"><div data-slot="thumb"></div></div>"#;
+    let node = &run_bridge_role(html)[0];
+    assert_eq!(node.kind, NodeKind::Slider);
+    assert!(matches!(
+        node.control_init,
+        Some(ControlInit::Slider {
+            value: 50.0,
+            min: 0.0,
+            max: 100.0,
+            step: 5.0
+        })
+    ));
+}
+
+#[test]
+fn bridge_extracts_slider_role_without_valuenow_is_none() {
+    // role=slider without aria-valuenow → control_init=None (runtime default),
+    // matching the legacy `<input type=range>` no-value contract.
+    let html = r#"<div role="slider" aria-valuemin="0" aria-valuemax="100"><div data-slot="thumb"></div></div>"#;
+    let node = &run_bridge_role(html)[0];
+    assert_eq!(node.kind, NodeKind::Slider);
+    assert!(
+        node.control_init.is_none(),
+        "Slider without aria-valuenow should yield control_init=None"
+    );
+}
+
+#[test]
+fn bridge_extracts_switch_role_aria_checked() {
+    // role=switch maps to Toggle; aria-checked is a tri-state string ("true"/"false").
+    let on = &run_bridge_role(r#"<div role="switch" aria-checked="true"></div>"#)[0];
+    assert_eq!(on.kind, NodeKind::Toggle);
+    assert!(matches!(
+        on.control_init,
+        Some(ControlInit::Toggle { checked: true })
+    ));
+
+    let off = &run_bridge_role(r#"<div role="switch" aria-checked="false"></div>"#)[0];
+    assert!(matches!(
+        off.control_init,
+        Some(ControlInit::Toggle { checked: false })
+    ));
+}
+
+#[test]
+fn bridge_extracts_radio_role_aria_checked_and_data_name() {
+    // role=radio: aria-checked + data-name (data-name carries the radio group —
+    // ARIA has no group-name attribute, so data-name is the contract).
+    let html = r#"<div role="radio" aria-checked="true" data-name="gender"></div>"#;
+    let node = &run_bridge_role(html)[0];
+    assert_eq!(node.kind, NodeKind::RadioButton);
+    assert!(matches!(
+        node.control_init,
+        Some(ControlInit::Radio {
+            checked: true,
+            ref name
+        }) if name == "gender"
+    ));
+
+    // aria-checked="false" → unchecked, still records the radio.
+    let html2 = r#"<div role="radio" aria-checked="false" data-name="gender"></div>"#;
+    let node2 = &run_bridge_role(html2)[0];
+    assert!(matches!(
+        node2.control_init,
+        Some(ControlInit::Radio {
+            checked: false,
+            ref name
+        }) if name == "gender"
+    ));
+}
+
+#[test]
+fn bridge_extracts_textfield_role_aria_placeholder_and_text_content() {
+    // role=textbox (no aria-multiline) → TextField. ARIA has no textbox-value
+    // attribute, so the value comes from element text content; placeholder and
+    // maxlength come from aria-placeholder / data-maxlength.
+    let html = r#"<div role="textbox" aria-placeholder="name" data-maxlength="20">bob</div>"#;
+    let node = &run_bridge_role(html)[0];
+    assert_eq!(node.kind, NodeKind::TextField);
+    match &node.control_init {
+        Some(ControlInit::TextField(e)) => {
+            assert_eq!(e.value, "bob");
+            assert_eq!(e.placeholder, "name");
+            assert_eq!(e.max_length, 20);
+            assert!(!e.readonly);
+        }
+        other => panic!("expected TextField, got {:?}", other),
+    }
+}
+
+#[test]
+fn bridge_extracts_textfield_role_aria_readonly() {
+    // aria-readonly="true" → readonly flag (tri-state string like aria-checked).
+    let html = r#"<div role="textbox" aria-readonly="true"></div>"#;
+    let node = &run_bridge_role(html)[0];
+    match &node.control_init {
+        Some(ControlInit::TextField(e)) => assert!(e.readonly),
+        other => panic!("expected TextField, got {:?}", other),
+    }
+}
+
+#[test]
+fn bridge_extracts_textarea_role_aria_multiline_value_from_text() {
+    // role=textbox + aria-multiline="true" → TextArea; value from element text
+    // content (HTML <textarea> semantics), placeholder/maxlength from aria/data.
+    let html = r#"<div role="textbox" aria-multiline="true" aria-placeholder="body" data-maxlength="500">hello</div>"#;
+    let node = &run_bridge_role(html)[0];
+    assert_eq!(node.kind, NodeKind::TextArea);
+    match &node.control_init {
+        Some(ControlInit::TextArea(e)) => {
+            assert_eq!(e.value, "hello");
+            assert_eq!(e.placeholder, "body");
+            assert_eq!(e.max_length, 500);
+            assert!(!e.readonly);
+        }
+        other => panic!("expected TextArea, got {:?}", other),
+    }
+}
+
+#[test]
+fn bridge_extracts_numberfield_role_spinbutton_aria_attrs() {
+    // role=spinbutton → NumberField. edit.value from aria-valuenow; min/max/step
+    // from aria-valuemin/aria-valuemax/data-step.
+    let html = r#"<div role="spinbutton" aria-valuenow="32" aria-valuemin="1" aria-valuemax="64" data-step="1"></div>"#;
+    let node = &run_bridge_role(html)[0];
+    assert_eq!(node.kind, NodeKind::NumberField);
+    match &node.control_init {
+        Some(ControlInit::NumberField {
+            edit,
+            min,
+            max,
+            step,
+        }) => {
+            assert_eq!(edit.value, "32");
+            assert_eq!(*min, 1.0);
+            assert_eq!(*max, 64.0);
+            assert_eq!(*step, 1.0);
+        }
+        other => panic!("expected NumberField, got {:?}", other),
+    }
+}
+
+#[test]
+fn bridge_extracts_dropdown_role_aria_selected_index() {
+    // role=combobox > role=listbox > role=option. Options live inside a listbox
+    // popup (a structural requirement), so the bridge must walk the subtree, not
+    // just direct children. aria-selected="true" on the 3rd option → index 2.
+    let html = r#"<div role="combobox"><div role="listbox"><div role="option">A</div><div role="option">B</div><div role="option" aria-selected="true">C</div></div></div>"#;
+    let nodes = run_bridge_role(html);
+    let sel = nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Dropdown)
+        .expect("Dropdown node missing");
+    assert!(matches!(
+        sel.control_init,
+        Some(ControlInit::Dropdown { selected_index: 2 })
+    ));
+}
+
+#[test]
+fn bridge_extracts_dropdown_role_no_aria_selected_defaults_zero() {
+    // No aria-selected on any option → default first option (index 0).
+    let html = r#"<div role="combobox"><div role="listbox"><div role="option">A</div><div role="option">B</div></div></div>"#;
+    let nodes = run_bridge_role(html);
+    let sel = nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Dropdown)
+        .expect("Dropdown node missing");
+    assert!(matches!(
+        sel.control_init,
+        Some(ControlInit::Dropdown { selected_index: 0 })
+    ));
+}
+
+#[test]
+fn bridge_aria_preferred_over_legacy_when_both_present() {
+    // When both the ARIA source and the legacy plain attribute are present,
+    // ARIA wins. Uses <progress> (which legally carries both the global
+    // aria-valuenow and its content-attr value) to lock the precedence.
+    let html =
+        r#"<progress value="999" aria-valuenow="50" max="1000" aria-valuemax="100"></progress>"#;
+    let node = &run_bridge(html)[0];
+    assert_eq!(node.kind, NodeKind::ProgressBar);
+    let init = node.control_init.as_ref().expect("control_init set");
+    assert!(matches!(
+        init,
+        ControlInit::Progress {
+            value: 50.0,
+            max: 100.0,
+            indeterminate: false
+        }
+    ));
+}
