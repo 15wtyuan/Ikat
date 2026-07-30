@@ -1,44 +1,46 @@
-//! 控件视觉子节点注入：instantiate 时给控件节点追加框架内部 `.loom-*` 子节点。
+//! 控件视觉同步：把 ControlState 映射到**作者写的**子节点 inline style。
 //!
-//! 控件即容器模型——ProgressBar 注入 `.loom-fill`，Slider 注入 `track > fill` + thumb
-//! （结构：slider → [track, thumb]，track → [fill]），Toggle/RadioButton 注入 `.loom-check`。
-//! 这些子节点只携带保留 class（无 id_attr），绝不污染用户 id 命名空间（`Get<T>` 作用域查找
-//! 不会误命中框架内部节点）。子节点是普通 Container（div），display 默认按 schema 铺底，
-//! 与用户手写 `<div class="loom-fill">` 实例化结果一致。
+//! 作者用 WAI-ARIA role + data-slot 自写控件结构（spec §2.2）：
+//! - ProgressBar（role=progressbar）：含 `data-slot="fill"` 子节点（width:% 由 value 驱动）。
+//! - Slider（role=slider）：含 `data-slot="fill"`（可选视觉填充）+ `data-slot="thumb"`
+//!   （必需，位移走 transform）。fill 与 thumb 是 slider 的兄弟子节点（无 track 中间层）。
+//! - Toggle（role=switch）/ RadioButton（role=radio）：无必需子节点——作者用
+//!   `[aria-checked="true"]{...}` 属性选择器表达选中态。
+//! - Dropdown（role=combobox）：含 `role="listbox"` 子节点（内含 `role="option"` 列表）+
+//!   `data-slot="value"` 子节点（显示选中项文本，内嵌 TextNode 承载文本）。
+//!
+//! core 不注入任何子节点——结构完全由作者掌控，浏览器预览与 Unity 渲染同源。状态→视觉的
+//! 桥由 [`sync_control_visuals`] 单向驱动：读 ControlState，按 role/data-slot 定位作者子节点，
+//! 写 inline override（HTML 语义最高优先级）。[`find_child_by_role`] / [`find_child_by_slot`]
+//! 只查直接子节点（防误深入用户内容区）；popup 的 listbox 可能非直接子，用
+//! [`find_child_by_role_recursive`] 兜底。
 
 use crate::input::{
     EventRecord, EVT_CHANGE_COMMITTED, EVT_CHECKED_CHANGED, EVT_SELECTION_CHANGED, EVT_SUBMITTED,
     EVT_VALUE_CHANGED, KEY_DOWN, KEY_ESCAPE, KEY_RETURN, KEY_UP,
 };
-use crate::scene::dynamic::{
-    append_child, create_node, remove_child, set_inline_override, set_user_transform,
-};
+use crate::scene::dynamic::{append_child, remove_child, set_inline_override, set_user_transform};
 use crate::scene::node::{
     Composition, ControlState, EditState, NodeFlags, NodeId, NodeKind, Scene,
 };
 use crate::scene::text_cursor::{hit_byte_offset, line_byte_ranges};
 use crate::transform::NodeTransform;
 
-const FILL: &str = "loom-fill";
-const TRACK: &str = "loom-track";
-const THUMB: &str = "loom-thumb";
-const CHECK: &str = "loom-check";
-const VALUE: &str = "loom-value";
-/// Dropdown 浮层容器的保留 class。pub 供 render 层识别 open popup 子树（Task 11
-/// 浮层渲染：open Dropdown 的 .loom-popup 子树跳出正常 DFS，末尾追加，mask=0）。
-pub const POPUP: &str = "loom-popup";
+// WAI-ARIA role + data-slot 标识，替代旧的 `.loom-*` 保留 class。控件结构由作者按 spec §2.2
+// 自写（role 表语义、data-slot 表构造），core 按 role/slot 定位作者子节点。
 
-/// 建一个携带单个框架保留 class 的 Container 子节点（div）。
-///
-/// 无 id_attr：框架内部视觉节点绝不能占用用户 id 命名空间（`Get<T>` 按作用域递归查找，
-/// 若内部节点带 id 会误命中、与用户同名 id 冲突）。复用 `create_node`（div → Container，
-/// 含 display schema 铺底 + slotmap insert + parallel-array resize），保证注入的子节点
-/// 与用户手写 `<div class="loom-*">` 的实例化路径完全一致。
-fn make_child(scene: &mut Scene, class: &str) -> NodeId {
-    let id = create_node(scene, "div", "").expect("\"div\" is in the fence whitelist");
-    scene.get_mut(id).unwrap().classes.push(class.to_string());
-    id
-}
+/// Dropdown（role=combobox）的弹出列表容器 role。open Dropdown 的 listbox 子树走浮层渲染
+/// （render 末尾追加、mask=0 跳出祖先 clip），pub 供 render/hit 层定位 popup 根。
+pub const ROLE_LISTBOX: &str = "listbox";
+/// listbox 内的列表项 role（作者写 `<div role="option">`，core 现按 NodeKind::OptionItem
+/// 识别 option；此常量保留给将来按 role 字符串查询的场景）。
+pub const ROLE_OPTION: &str = "option";
+/// ProgressBar 的填充条 / Slider 的可选视觉填充（`data-slot="fill"`，width:% 由 value 驱动）。
+pub const SLOT_FILL: &str = "fill";
+/// Slider 的滑块头（`data-slot="thumb"`，位移走 transform，拖拽高频）。
+pub const SLOT_THUMB: &str = "thumb";
+/// Dropdown 选中项显示区（`data-slot="value"`，内嵌 TextNode 承载选中 option 文本）。
+pub const SLOT_VALUE: &str = "value";
 
 /// 显示变换：PasswordField 掩码（'•' × 字符数）。其他 kind 原样。
 ///
@@ -159,95 +161,69 @@ pub fn value_byte_to_display_byte(
     char_index_to_byte(display, display_vc)
 }
 
-/// 给控件节点注入框架内部视觉子节点。非控件 NodeKind 为 no-op。
+/// 在 parent 的直接子节点里按 role 找第一个匹配（基于 RoleTable）。无匹配 / parent 不
+/// live → None。
 ///
-/// 在 `create_node_from_template` 填完 `ControlTable` side table 后调用——只有
-/// `control_init.is_some()` 的控件节点才进此路径，普通容器/叶子节点不受影响。
-///
-/// Slider 结构是分层的：slider → [track, thumb]（track 与 thumb 平级），track → [fill]。
-/// 故先挂 track+thumb 到 slider，再把 fill 挂到 track 内部。其余控件是单层单子。
-/// `append_child` 对全新构造的子节点（无 parent）必成功，`.expect` 仅防逻辑漂移。
-pub fn inject_control_children(scene: &mut Scene, id: NodeId, kind: NodeKind) {
-    match kind {
-        NodeKind::ProgressBar => {
-            let fill = make_child(scene, FILL);
-            append_child(scene, id, fill).expect("fresh child has no parent");
-        }
-        NodeKind::Slider => {
-            // slider → [track, thumb]；track → [fill]。
-            // thumb 用 position:absolute 脱离 flex 流（不占 track 的兄弟排列位），锚定 slider
-            // （slider 设 position:relative 作 absolute containing block）。thumb 的 left:0/
-            // top:0 定位到 slider content 左上（= track 左端，因 track flex-grow 占满 content）；
-            // 沿 track 的水平滑动由 sync_control_visuals 走 user_transform（高频、不触发 solve）。
-            // 参考 RmlUi WidgetSlider：bar 为 non-DOM 手动 SetOffset，不参与 box 流。
-            let _ = set_inline_override(scene, id, "position:relative");
-            let track = make_child(scene, TRACK);
-            let thumb = make_child(scene, THUMB);
-            append_child(scene, id, track).expect("fresh child has no parent");
-            append_child(scene, id, thumb).expect("fresh child has no parent");
-            let _ = set_inline_override(scene, thumb, "position:absolute;left:0;top:0");
-            let fill = make_child(scene, FILL);
-            append_child(scene, track, fill).expect("fresh child has no parent");
-        }
-        NodeKind::Toggle | NodeKind::RadioButton => {
-            let check = make_child(scene, CHECK);
-            append_child(scene, id, check).expect("fresh child has no parent");
-        }
-        NodeKind::Dropdown => {
-            // select 设 position:relative 作 absolute containing block（同 Slider 模式），
-            // 锚定 .loom-popup（position:absolute）相对 select 定位。
-            let _ = set_inline_override(scene, id, "position:relative");
-            let value = make_child(scene, VALUE);
-            append_child(scene, id, value).expect("fresh child has no parent");
-            // .loom-value 是 Container（div），文本渲染只对 TextNode 生效（render 按
-            // NodeKind::TextNode 读 text_contents）。故注入一个 TextNode 子节点承载选中项
-            // 文本——与用户手写 `<div class="loom-value"><span>...</span></div>` 同构。
-            // sync_control_visuals 每帧把选中 option 文本写进这个 TextNode 的 text_contents。
-            let value_text =
-                create_node(scene, "span", "").expect("\"span\" is in the fence whitelist");
-            append_child(scene, value, value_text).expect("fresh child has no parent");
-            let popup = make_child(scene, POPUP);
-            append_child(scene, id, popup).expect("fresh child has no parent");
-            // popup 默认收起（display:none），展开由 sync_control_visuals（open=true）移除覆盖。
-            // popup 的位置（出现在 select 正下方）由 sync_control_visuals 用 user_transform
-            // 定位（读 select 的 layout_rect.h 偏移）——不用 CSS top，因为 taffy 对 absolute
-            // 节点的百分比 inset 在 containing-block height measure 时序上解析为 0，靠不住。
-            let _ = set_inline_override(scene, popup, "display:none;position:absolute");
-            // 注意：此处只建空的 popup 容器。用户的 <option> 子节点此时尚未实例化
-            // （instantiate 按 parent_idx 父先于子建树，select 在 option 之前），故 option
-            // 的 reparent 必须在整子树建完后做——见 [`reparent_options_into_popup`]，由
-            // `Stage::instantiate` 在建树循环之后对每个 Dropdown 调一次。
-        }
-        _ => {}
-    }
-}
-
-/// 在 parent 的直接子节点里按 class 找第一个匹配。无匹配 / parent 不 live → None。
-///
-/// 框架内部视觉节点（.loom-fill / .loom-track / .loom-check ...）按 class 定位，不靠 id
-/// （它们不带 id，绝不污染用户命名空间）。控件结构是单层或两层固定深度（ProgressBar 单子、
-/// Slider track > fill），故只查直接子节点即可；不递归（防误深入用户内容区）。
-pub fn find_child_by_class(scene: &Scene, parent: NodeId, class: &str) -> Option<NodeId> {
+/// 控件结构是单层或两层固定深度（combobox → listbox、slider → thumb/fill），只查直接子节点
+/// 即可；不递归——防误深入用户内容区（同旧 class 查找的约束）。
+/// 需要递归定位的场景（popup 的 listbox 可能被作者裹在一层 wrapper 里）用
+/// [`find_child_by_role_recursive`]。
+pub fn find_child_by_role(scene: &Scene, parent: NodeId, role: &str) -> Option<NodeId> {
     let children = scene.get(parent)?.children.clone();
-    children.into_iter().find(|&cid| {
-        scene
-            .get(cid)
-            .is_some_and(|n| n.classes.iter().any(|c| c == class))
-    })
+    children
+        .into_iter()
+        .find(|&cid| scene.roles.role_of(cid) == Some(role))
 }
 
-/// 取 select（Dropdown）的第 `n` 个 option 的文本内容。
+/// 在 parent 的子树里按 role 深度优先找第一个匹配（pre-order）。无匹配 / parent 不 live → None。
 ///
-/// option 经 [`reparent_options_into_popup`] 后是 `.loom-popup` 的直接子节点（spec §4.1
-/// 运行时结构 `<select> > [.loom-value, .loom-popup > [option...]]`），不是 select 的直接
-/// 子节点——故先定位 popup，再在其直接子节点里按 `NodeKind::OptionItem` 取第 n 个。文本可能在
-/// option 自身的 `text_contents`（`<option>B</option>` 打包期把 content 存进 side table），
-/// 也可能在后代 TextNode（`<option><span>B</span></option>`），故递归收集 option 子树所有
-/// TextNode 的文本，与 render 的文本采集口径一致。
+/// 专为 popup listbox 定位：作者可能把 listbox 裹在 wrapper 里（`combobox > wrapper >
+/// listbox`），直接子查找会漏，需递归兜底。pre-order 保证优先取最近层匹配。
+pub fn find_child_by_role_recursive(scene: &Scene, root: NodeId, role: &str) -> Option<NodeId> {
+    // 显式栈 DFS（pre-order）：先把根的直接子节点按声明逆序压栈，pop 时取声明首者先出。
+    let mut stack: Vec<NodeId> = scene
+        .get(root)?
+        .children
+        .clone()
+        .into_iter()
+        .rev()
+        .collect();
+    while let Some(id) = stack.pop() {
+        if scene.roles.role_of(id) == Some(role) {
+            return Some(id);
+        }
+        if let Some(n) = scene.get(id) {
+            for &c in n.children.iter().rev() {
+                stack.push(c);
+            }
+        }
+    }
+    None
+}
+
+/// 在 parent 的直接子节点里按 data-slot 找第一个匹配（基于 RoleTable，key 存在即命中）。
 ///
-/// 越界（n 超过 option 数）/ select 无 popup / 无 option → None。调用方据此显空（.loom-value 清空）。
+/// data-slot 映射成 RoleInfo.slots 的 key（值空串占位，见 stage instantiate），故只判 key 是否
+/// 存在。无匹配 / parent 不 live → None。同 [`find_child_by_role`]，只查直接子节点不递归。
+pub fn find_child_by_slot(scene: &Scene, parent: NodeId, slot: &str) -> Option<NodeId> {
+    let children = scene.get(parent)?.children.clone();
+    children
+        .into_iter()
+        .find(|&cid| scene.roles.slot_of(cid, slot).is_some())
+}
+
+/// 取 combobox（Dropdown）的第 `n` 个 option 的文本内容。
+///
+/// option 是作者写的 `role="listbox"` 子节点里的 `role="option"`（spec §2.2 运行时结构
+/// `combobox > [data-slot=value, role=listbox > [role=option...]]`）。先定位 listbox（递归兜底，
+/// 作者可能裹 wrapper），再在其直接子节点里按 `NodeKind::OptionItem` 取第 n 个。文本可能在
+/// option 自身的 `text_contents`（打包期把 content 存进 side table），也可能在后代 TextNode
+/// （`<div role=option><span>B</span></div>`），故递归收集 option 子树所有文本，与 render 的
+/// 文本采集口径一致。
+///
+/// 越界（n 超过 option 数）/ combobox 无 listbox / 无 option → None。调用方据此显空（value 清空）。
 pub fn nth_option_text(scene: &Scene, select: NodeId, n: usize) -> Option<String> {
-    let popup = find_child_by_class(scene, select, POPUP)?;
+    let popup = find_child_by_role_recursive(scene, select, ROLE_LISTBOX)?;
     let children = scene.get(popup)?.children.clone();
     let opt = children
         .into_iter()
@@ -262,24 +238,22 @@ pub fn nth_option_text(scene: &Scene, select: NodeId, n: usize) -> Option<String
     Some(buf)
 }
 
-/// 把 select 的 `<option>`（`NodeKind::OptionItem`）直接子节点 reparent 进它的
-/// `.loom-popup`，确立 spec §4.1 运行时结构：`<select> > [.loom-value, .loom-popup > [option...]]`。
+/// 把 combobox 的 `role="option"`（`NodeKind::OptionItem`）直接子节点 reparent 进它的
+/// `role="listbox"` 子节点（spec §2.2 运行时结构）。
 ///
-/// 必要性：`inject_control_children` 在 select 实例化时只建空的 popup 容器；用户的 `<option>`
-/// 是模板里 select 的 DOM 子节点（parent_idx = select），`Stage::instantiate` 的建树循环按
-/// 父先于子的顺序把它们先挂到 select 上。若不 reparent，option 就是 select 的直接子节点、与
-/// popup 平级——popup 浮层渲染（Task 11，末尾追加 DFS 从 popup 根展开子树）只能拿到空的 popup，
-/// option 列表在正常 DFS 序里被祖先 `overflow:hidden` 裁掉，展开的 dropdown 是个空浮层。
+/// 必要性：作者正确写法是 `combobox > listbox > option`（option 已在 listbox 内），此时本函数
+/// 为 no-op。但若作者把 option 直接写在 combobox 下（结构契约 Task 6 会报缺 listbox 的 error），
+/// reparent 作兜底把它们挪进 listbox，保证浮层渲染（render 末尾追加 DFS 从 listbox 根展开子树）
+/// 能拿到 option 列表——否则 option 留在 combobox 直接子，会被祖先 `overflow:hidden` 裁掉。
 ///
-/// reparent 把每个 option 从 select 摘下、挂到 popup（保留声明顺序），让 popup 浮层 DFS 能
-/// 遍历到 option 子树并绘制。幂等：select 无 OptionItem 直接子节点（已 reparent 过 / 非控件
-/// Dropdown 无 popup）时为 no-op。由 `Stage::instantiate` 在建树循环后对每个 Dropdown 调一次，
-/// 测试 harness 手搓 dropdown 的 helper 同样调用以与生产结构对齐。
+/// listbox 用 [`find_child_by_role_recursive`] 定位（作者可能裹 wrapper）。无 listbox 时为 no-op
+/// （结构契约报 error，但运行时不 panic）。幂等：option 已在 listbox 里（非 combobox 直接子）
+/// 时无 option 可移，为 no-op。由 `Stage::instantiate` 在建树循环后对每个 Dropdown 调一次。
 pub fn reparent_options_into_popup(scene: &mut Scene, select: NodeId) {
-    // 先定位 popup（不可变借），再收集 option（不可变借），最后 detach/attach（可变借）。
+    // 先定位 listbox（不可变借），再收集 option（不可变借），最后 detach/attach（可变借）。
     // 三阶段分开避免边迭代 select.children 边 mutate 的借用冲突 + 漏项。
-    let Some(popup) = find_child_by_class(scene, select, POPUP) else {
-        return; // 无注入 popup（非 control-init Dropdown）→ 无可 reparent 的目标。
+    let Some(popup) = find_child_by_role_recursive(scene, select, ROLE_LISTBOX) else {
+        return; // 无 listbox（作者漏写 / 非 control-init Dropdown）→ 无可 reparent 的目标。
     };
     let options: Vec<NodeId> = scene
         .get(select)
@@ -326,7 +300,7 @@ fn collect_subtree_text(scene: &Scene, id: NodeId, buf: &mut String) {
 /// popup 的 OptionItem 直接子节点列表，按声明序，附是否 disabled 标志。
 /// 用于键盘 seek（跳 disabled）和点击命中（disabled 不选中）。select 无 popup / 无 option → 空。
 pub(crate) fn dropdown_option_list(scene: &Scene, select: NodeId) -> Vec<(NodeId, bool)> {
-    let Some(popup) = find_child_by_class(scene, select, POPUP) else {
+    let Some(popup) = find_child_by_role_recursive(scene, select, ROLE_LISTBOX) else {
         return Vec::new();
     };
     scene
@@ -377,7 +351,7 @@ pub(crate) fn dropdown_option_at_pos(
 /// toggle 收起」与「open 时点 disabled option / popup 背景 → 不动」（两者 dropdown_option_at_pos
 /// 都返 None，但语义不同）。select 无 popup → false。
 pub(crate) fn pos_in_popup(scene: &Scene, select: NodeId, pos: [f32; 2]) -> bool {
-    let Some(popup) = find_child_by_class(scene, select, POPUP) else {
+    let Some(popup) = find_child_by_role_recursive(scene, select, ROLE_LISTBOX) else {
         return false;
     };
     scene.get(popup).is_some_and(|n| {
@@ -612,21 +586,25 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
     }
 }
 
-/// 把控件状态同步到其框架内部视觉子节点的 inline style。
+/// 把控件状态同步到**作者写的**子节点的 inline style。
 ///
-/// 这是状态→视觉的单向桥：上层逻辑改 `ControlState`（交互/Tween/C# API），core 据此
-/// 写子节点 inline override。inline 是 HTML 语义最高优先级（> 动态规则 > base_style），
-/// 与手写 `<div style="width:70%">` 完全等价——故复用 `set_inline_override` 而非另建并行机制。
+/// 这是状态→视觉的单向桥：上层逻辑改 `ControlState`（交互/Tween/C# API），core 据此按
+/// role/data-slot 定位作者子节点并写 inline override。inline 是 HTML 语义最高优先级
+/// （> 动态规则 > base_style），与手写 `<div style="width:70%">` 完全等价——故复用
+/// `set_inline_override` 而非另建并行机制。
 ///
-/// 各控件映射：
-/// - ProgressBar / Slider：`value / max` → `.loom-fill` 的 `width:%`（Slider 的 fill 在 track 内）。
-/// - Toggle / Radio：`checked` → `.loom-check` 的 `display:flex/none`。
-/// - Slider thumb：`pct` → thumb 的 `user_transform.translate` = `(track_w - thumb_w) × pct`
-///   （水平，扣自身宽的可滑动距离）+ `(track_h - thumb_h)/2`（垂直居中）。渲染/命中层位移，
-///   不触发 solve；track/thumb 几何取上一帧 solve 的 layout_rect，1 帧滞后同 hit_test 标准）。
+/// 各控件映射（spec §2.2 结构）：
+/// - ProgressBar：`value / max` → `data-slot="fill"` 子节点的 `width:%`。
+/// - Slider：`value` → `data-slot="fill"` 的 `width:%`（fill 可选）+ `data-slot="thumb"` 的
+///   `user_transform.translate` = `(slider_w - thumb_w) × pct`（水平，扣自身宽的可滑动距离）
+///   + `(slider_h - thumb_h)/2`（垂直居中）。thumb 几何取 slider 自身的 layout_rect（新结构
+///   无 track 中间层，fill/thumb 是 slider 的兄弟子节点）。渲染/命中层位移，不触发 solve。
+/// - Toggle / Radio：无映射——作者用 `[aria-checked]` 属性选择器表达选中态（Task 4 运行时匹配）。
+/// - Dropdown：`open` → `role="listbox"` 的 `display` + 位置 transform；`selected_index` →
+///   `data-slot="value"` 内嵌 TextNode 的文本。
 ///
 /// 无控件状态（非 control 节点）→ no-op。tick 每帧对所有控件节点调一次（控件稀疏，代价可接受）。
-/// 对找不到子节点的控件（结构未注入）静默跳过——防御性，instantiate 保证子节点就位。
+/// 对找不到子节点的控件（作者漏写某部件）静默跳过——结构契约 Task 6 会在打包期拦下缺夹。
 pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
     let Some(state) = scene.controls.get(id).cloned() else {
         return;
@@ -638,21 +616,14 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
             } else {
                 0.0
             };
-            if let Some(fill) = find_child_by_class(scene, id, FILL) {
-                // width:N% — 用百分比，随 track 宽度自适应（track 尺寸由布局决定）。
+            if let Some(fill) = find_child_by_slot(scene, id, SLOT_FILL) {
+                // width:N% — 用百分比，随 progress 宽度自适应（尺寸由布局决定）。
                 let _ = set_inline_override(scene, fill, &format!("width:{}%", pct * 100.0));
             }
         }
-        ControlState::Toggle { checked } | ControlState::Radio { checked, .. } => {
-            if let Some(check) = find_child_by_class(scene, id, CHECK) {
-                let display = if checked {
-                    "display:flex"
-                } else {
-                    "display:none"
-                };
-                let _ = set_inline_override(scene, check, display);
-            }
-        }
+        // Toggle/Radio：作者用 [aria-checked="true"] 属性选择器表达选中态（spec §2.2），
+        // core 不再 sync check 子节点的 display。运行时 aria-checked 属性匹配见 Task 4。
+        ControlState::Toggle { .. } | ControlState::Radio { .. } => {}
         ControlState::Slider {
             value, min, max, ..
         } => {
@@ -661,36 +632,33 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
             } else {
                 0.0
             };
-            // Slider 结构：slider → [track, thumb]，track → [fill]。
-            if let Some(track) = find_child_by_class(scene, id, TRACK) {
-                if let Some(fill) = find_child_by_class(scene, track, FILL) {
-                    let _ = set_inline_override(scene, fill, &format!("width:{}%", pct * 100.0));
-                }
-                // thumb 沿 track 滑动。thumb 已 position:absolute（inject 设），不参与 flex
-                // 排列，其 layout_rect 锁在 slider content 左上（= track 左端）。水平位移走
-                // user_transform（渲染/命中层，不触发 solve，供高频拖拽每帧写）。公式对齐
-                // RmlUi PositionBar：可滑动距离 = track_w - thumb_w（扣自身宽），位置 = 该距离 × pct。
-                // 垂直方向把 thumb 居中到 track 中心（thumb 绝对定位后 align-items 不生效）。
-                if let Some(thumb) = find_child_by_class(scene, id, THUMB) {
-                    let (track_w, track_h) = scene
-                        .get(track)
-                        .map(|n| (n.layout_rect.w, n.layout_rect.h))
-                        .unwrap_or((0.0, 0.0));
-                    let (thumb_w, thumb_h) = scene
-                        .get(thumb)
-                        .map(|n| (n.layout_rect.w, n.layout_rect.h))
-                        .unwrap_or((0.0, 0.0));
-                    let traversable = (track_w - thumb_w).max(0.0);
-                    let center_y = (track_h - thumb_h) / 2.0;
-                    let _ = set_user_transform(
-                        scene,
-                        thumb,
-                        NodeTransform {
-                            translate: [traversable * pct, center_y],
-                            ..Default::default()
-                        },
-                    );
-                }
+            // fill 可选视觉填充（width:% 反映 value）。
+            if let Some(fill) = find_child_by_slot(scene, id, SLOT_FILL) {
+                let _ = set_inline_override(scene, fill, &format!("width:{}%", pct * 100.0));
+            }
+            // thumb 沿 slider 滑动。新结构无 track 中间层，几何取 slider 自身的 layout_rect。
+            // 水平位移走 user_transform（渲染/命中层，不触发 solve，供高频拖拽每帧写）。公式对齐
+            // RmlUi PositionBar：可滑动距离 = slider_w - thumb_w（扣自身宽），位置 = 该距离 × pct。
+            // 垂直方向把 thumb 居中到 slider 中心（thumb 绝对定位后 align-items 不生效）。
+            if let Some(thumb) = find_child_by_slot(scene, id, SLOT_THUMB) {
+                let (slider_w, slider_h) = scene
+                    .get(id)
+                    .map(|n| (n.layout_rect.w, n.layout_rect.h))
+                    .unwrap_or((0.0, 0.0));
+                let (thumb_w, thumb_h) = scene
+                    .get(thumb)
+                    .map(|n| (n.layout_rect.w, n.layout_rect.h))
+                    .unwrap_or((0.0, 0.0));
+                let traversable = (slider_w - thumb_w).max(0.0);
+                let center_y = (slider_h - thumb_h) / 2.0;
+                let _ = set_user_transform(
+                    scene,
+                    thumb,
+                    NodeTransform {
+                        translate: [traversable * pct, center_y],
+                        ..Default::default()
+                    },
+                );
             }
         }
         // TextField/TextArea: 光标闪烁 timer 已实现（advance_cursor_blink，stage tick 驱动）；
@@ -701,22 +669,21 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
             open,
             ..
         } => {
-            // popup display 切换：open → display:block，收起 → display:none。
+            // listbox display 切换：open → display:block，收起 → display:none。
             // 用 block（标准 CSS 弹出列表语义）而非 flex——option 是 display:block 的列表项，
             // block 容器让它们垂直堆叠（AI/人类可预测的标准 HTML 语义）。若用 flex 默认 row，
-            // option 会横向排列，违背 <select> 弹出列表的预期。position:absolute 不受影响
-            //（set_inline_override 按属性 merge，只动 display 位）。
-            if let Some(popup) = find_child_by_class(scene, id, POPUP) {
+            // option 会横向排列，违背弹出列表的预期。listbox 递归定位（作者可能裹 wrapper）。
+            if let Some(popup) = find_child_by_role_recursive(scene, id, ROLE_LISTBOX) {
                 let decl = if open {
                     "display:block"
                 } else {
                     "display:none"
                 };
                 let _ = set_inline_override(scene, popup, decl);
-                // popup 位置：出现在 select 正下方。taffy 对 absolute 节点的百分比 inset 解析
-                // 不可靠（containing-block height measure 时序），改用 user_transform 把 popup
-                // 偏移 select 自身高度（同 Slider thumb 定位模式：渲染/命中层，进 world_matrix）。
-                // select 的 layout_rect.h 在 solve 后确定，sync 每帧读最新值。
+                // listbox 位置：出现在 combobox 正下方。taffy 对 absolute 节点的百分比 inset
+                // 解析不可靠（containing-block height measure 时序），改用 user_transform 把
+                // listbox 偏移 combobox 自身高度（同 Slider thumb 定位模式：渲染/命中层，进
+                // world_matrix）。combobox 的 layout_rect.h 在 solve 后确定，sync 每帧读最新值。
                 let sel_h = scene.get(id).map(|n| n.layout_rect.h).unwrap_or(0.0);
                 let ty = if open { sel_h } else { 0.0 };
                 let _ = set_user_transform(
@@ -729,8 +696,9 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
                 );
             }
             // value 显示选中 option 的文本：读第 selected_index 个 option 子节点的文本，
-            // 写进 .loom-value 内的 TextNode（inject 时注入）。越界 / 无 option → 清空。
-            if let Some(value) = find_child_by_class(scene, id, VALUE) {
+            // 写进 value slot 内嵌的 TextNode（作者写 `<div data-slot=value><span/></div>`）。
+            // 越界 / 无 option → 清空。
+            if let Some(value) = find_child_by_slot(scene, id, SLOT_VALUE) {
                 let text = nth_option_text(scene, id, selected_index).unwrap_or_default();
                 if let Some(tn) = scene.get(value).and_then(|n| {
                     n.children
@@ -743,8 +711,7 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
                 }
             }
         }
-        // NumberField: visuals injected via inject_control_children;
-        // dynamic value sync (number constraint clamp) pending.
+        // NumberField: 纯数值输入控件，无视觉子节点 sync（数值约束 clamp pending）。
         ControlState::NumberField { .. } => {}
     }
 }
@@ -759,9 +726,9 @@ const CURSOR_BLINK_PERIOD: f32 = 0.7;
 // 这些函数是纯逻辑（读 ControlState + track 几何，写 side table），由 PointerState::process
 // 在 Down/Move/Up 臂调用（命中控件时）。独立于事件仲裁——只改控件状态，不产事件。
 
-/// 从命中节点向上找最近的控件节点。命中常落在控件的内部视觉子节点（.loom-thumb/.loom-fill）
-/// 上，需向上追溯到控件本身（控件是顶层 control 节点，其 loom-* 子节点不是控件）。
-/// 无命中 / 链上无控件 → None。
+/// 从命中节点向上找最近的控件节点。命中常落在控件的内部部件（thumb/fill 等作者写的
+/// data-slot 子节点）上，需向上追溯到控件本身（控件是顶层 control 节点，其部件子节点
+/// 不是控件）。无命中 / 链上无控件 → None。
 pub fn find_control_at(scene: &Scene, hit: Option<NodeId>) -> Option<NodeId> {
     let mut cur = hit;
     while let Some(id) = cur {
@@ -1019,9 +986,10 @@ fn select_radio(scene: &mut Scene, id: NodeId, name: String, out: &mut Vec<Event
     });
 }
 
-/// Slider pos→value：指针 x 投到 track 的 layout_rect，映射到 [min,max]，step 量化 + clamp。
-/// track 几何取 loom-track 子节点的 layout_rect（上一帧 solve 写入，1 帧滞后，同 hit_test 标准）。
-/// track 未注入 / 宽度退化（≤0）/ 节点非 Slider / min>max（畸形配置，正常路径 instantiate 已 sanitize）→ None（调用方 no-op）。
+/// Slider pos→value：指针 x 投到 slider 的 layout_rect，映射到 [min,max]，step 量化 + clamp。
+/// 新结构无 track 中间层，几何取 slider 自身的 layout_rect（上一帧 solve 写入，1 帧滞后，同
+/// hit_test 标准）。宽度退化（≤0）/ 节点非 Slider / min>max（畸形配置，正常路径 instantiate
+/// 已 sanitize）→ None（调用方 no-op）。
 fn slider_pos_to_value(scene: &Scene, slider: NodeId, pos: [f32; 2]) -> Option<f32> {
     let (min, max, step) = match scene.controls.get(slider)? {
         ControlState::Slider { min, max, step, .. } => (*min, *max, *step),
@@ -1032,8 +1000,7 @@ fn slider_pos_to_value(scene: &Scene, slider: NodeId, pos: [f32; 2]) -> Option<f
     if min > max {
         return None;
     }
-    let track = find_child_by_class(scene, slider, TRACK)?;
-    let lr = scene.get(track)?.layout_rect;
+    let lr = scene.get(slider)?.layout_rect;
     if lr.w <= 0.0 {
         return None;
     }
@@ -1465,148 +1432,117 @@ pub fn paste(e: &mut EditState, kind: NodeKind) -> bool {
 mod tests {
     use super::*;
     use crate::scene::dynamic::create_node_from_template;
-    use crate::scene::node::{NodeKind, Scene};
+    use crate::scene::node::{NodeKind, RoleInfo, Scene};
     use crate::style::resolved::ResolvedStyle;
 
-    /// 建一个指定 kind 的控件节点（无 control_init，仅验注入结构）。
+    /// 建一个指定 kind 的控件节点（无 control_init，无子节点——控件结构由作者自写）。
     fn make_control(scene: &mut Scene, kind: NodeKind) -> NodeId {
         create_node_from_template(scene, kind, ResolvedStyle::default(), None)
     }
 
-    #[test]
-    fn progress_injects_fill_child() {
-        let mut scene = Scene::default();
-        let id = make_control(&mut scene, NodeKind::ProgressBar);
-        inject_control_children(&mut scene, id, NodeKind::ProgressBar);
-        let children = scene.get(id).unwrap().children.clone();
-        assert_eq!(children.len(), 1, "ProgressBar gets exactly one fill child");
-        let fill = scene.get(children[0]).unwrap();
-        assert!(fill.classes.iter().any(|c| c == FILL));
-        assert_eq!(fill.kind, NodeKind::Container);
-    }
-
-    #[test]
-    fn slider_injects_track_fill_thumb() {
-        let mut scene = Scene::default();
-        let id = make_control(&mut scene, NodeKind::Slider);
-        inject_control_children(&mut scene, id, NodeKind::Slider);
-        let children = scene.get(id).unwrap().children.clone();
-        assert_eq!(children.len(), 2, "Slider gets track + thumb as siblings");
-        // children[0] = track
-        let track = scene.get(children[0]).unwrap();
-        assert!(track.classes.iter().any(|c| c == TRACK));
-        assert_eq!(track.kind, NodeKind::Container);
-        // children[1] = thumb
-        let thumb = scene.get(children[1]).unwrap();
-        assert!(thumb.classes.iter().any(|c| c == THUMB));
-        assert_eq!(thumb.kind, NodeKind::Container);
-        // track → [fill]
-        let track_children = track.children.clone();
-        assert_eq!(track_children.len(), 1, "track contains the fill");
-        let fill = scene.get(track_children[0]).unwrap();
-        assert!(fill.classes.iter().any(|c| c == FILL));
-        assert_eq!(fill.kind, NodeKind::Container);
-        // fill 的 parent 是 track，不是 slider
-        assert_eq!(fill.parent, Some(children[0]));
-    }
-
-    #[test]
-    fn toggle_injects_check() {
-        let mut scene = Scene::default();
-        let id = make_control(&mut scene, NodeKind::Toggle);
-        inject_control_children(&mut scene, id, NodeKind::Toggle);
-        let children = scene.get(id).unwrap().children.clone();
-        assert_eq!(children.len(), 1);
-        let check = scene.get(children[0]).unwrap();
-        assert!(check.classes.iter().any(|c| c == CHECK));
-        assert_eq!(check.kind, NodeKind::Container);
-    }
-
-    #[test]
-    fn radio_injects_check() {
-        let mut scene = Scene::default();
-        let id = make_control(&mut scene, NodeKind::RadioButton);
-        inject_control_children(&mut scene, id, NodeKind::RadioButton);
-        let children = scene.get(id).unwrap().children.clone();
-        assert_eq!(children.len(), 1);
-        let check = scene.get(children[0]).unwrap();
-        assert!(check.classes.iter().any(|c| c == CHECK));
-        assert_eq!(check.kind, NodeKind::Container);
-    }
-
-    #[test]
-    fn dropdown_injects_value_and_popup() {
-        // select → [.loom-value, .loom-popup]：value 显示选中项文本，popup 是展开列表容器。
-        // 模拟 instantiate：先把 select 加入 controls 表为 Dropdown 状态，再注入视觉子节点。
-        let mut scene = Scene::default();
-        let id = make_control(&mut scene, NodeKind::Dropdown);
-        scene.controls.ensure(
+    /// 建一个 Container 子节点、登记 data-slot 进 RoleTable、挂到 parent。
+    /// 复刻 instantiate 从模板填 RoleTable 的路径（作者写 `<div data-slot="fill">`）。
+    fn make_slot_child(scene: &mut Scene, parent: NodeId, slot: &str) -> NodeId {
+        let id =
+            create_node_from_template(scene, NodeKind::Container, ResolvedStyle::default(), None);
+        append_child(scene, parent, id).expect("fresh child has no parent");
+        scene.roles.insert(
             id,
-            ControlState::Dropdown {
-                selected_index: 0,
-                open: false,
-                value_lock: false,
-                open_selected_index: None,
+            RoleInfo {
+                role: None,
+                slots: [(slot.to_string(), String::new())].into_iter().collect(),
             },
         );
-        inject_control_children(&mut scene, id, NodeKind::Dropdown);
-        let value = find_child_by_class(&scene, id, "loom-value").expect("loom-value injected");
-        let popup = find_child_by_class(&scene, id, "loom-popup").expect("loom-popup injected");
-        assert!(scene
-            .get(value)
-            .unwrap()
-            .classes
-            .iter()
-            .any(|c| c == "loom-value"));
-        assert_eq!(scene.get(value).unwrap().kind, NodeKind::Container);
-        assert!(scene
-            .get(popup)
-            .unwrap()
-            .classes
-            .iter()
-            .any(|c| c == "loom-popup"));
-        assert_eq!(scene.get(popup).unwrap().kind, NodeKind::Container);
-        // 两个子节点都不带 id（不污染用户命名空间）。
-        assert!(scene.get(value).unwrap().id_attr.is_none());
-        assert!(scene.get(popup).unwrap().id_attr.is_none());
+        id
+    }
+
+    /// 建一个 Container 子节点、登记 role 进 RoleTable、挂到 parent。
+    /// 复刻 instantiate 从模板填 RoleTable 的路径（作者写 `<div role="listbox">`）。
+    fn make_role_child(scene: &mut Scene, parent: NodeId, role: &str) -> NodeId {
+        let id =
+            create_node_from_template(scene, NodeKind::Container, ResolvedStyle::default(), None);
+        append_child(scene, parent, id).expect("fresh child has no parent");
+        scene.roles.insert(
+            id,
+            RoleInfo {
+                role: Some(role.to_string()),
+                slots: Default::default(),
+            },
+        );
+        id
     }
 
     #[test]
-    fn non_control_kinds_get_no_children() {
-        // Container / Button / Image 不是控件 —— 注入是 no-op。
+    fn find_child_by_role_matches_direct_child() {
+        // combobox 直接子节点里 role=listbox 命中；未登记的 role → None。只查直接子，不递归。
         let mut scene = Scene::default();
-        let id = make_control(&mut scene, NodeKind::Container);
-        inject_control_children(&mut scene, id, NodeKind::Container);
-        assert!(scene.get(id).unwrap().children.is_empty());
+        let root = make_control(&mut scene, NodeKind::Container);
+        let listbox = make_role_child(&mut scene, root, ROLE_LISTBOX);
+        assert_eq!(
+            find_child_by_role(&scene, root, ROLE_LISTBOX),
+            Some(listbox)
+        );
+        assert_eq!(find_child_by_role(&scene, root, "combobox"), None);
     }
 
     #[test]
-    fn injected_children_carry_no_id_attr() {
-        // 框架内部子节点绝不能带 id（不污染用户 id 命名空间，防 Get<T> 误命中）。
+    fn find_child_by_slot_matches_direct_child() {
+        // slider 直接子节点里 data-slot=thumb / data-slot=fill 各自命中（key 存在即命中）。
         let mut scene = Scene::default();
-        let id = make_control(&mut scene, NodeKind::ProgressBar);
-        inject_control_children(&mut scene, id, NodeKind::ProgressBar);
-        for &child in &scene.get(id).unwrap().children {
-            assert!(
-                scene.get(child).unwrap().id_attr.is_none(),
-                "injected child must not carry an id"
-            );
-        }
+        let root = make_control(&mut scene, NodeKind::Container);
+        let fill = make_slot_child(&mut scene, root, SLOT_FILL);
+        let thumb = make_slot_child(&mut scene, root, SLOT_THUMB);
+        assert_eq!(find_child_by_slot(&scene, root, SLOT_FILL), Some(fill));
+        assert_eq!(find_child_by_slot(&scene, root, SLOT_THUMB), Some(thumb));
+        assert_eq!(find_child_by_slot(&scene, root, SLOT_VALUE), None);
     }
 
-    // ── sync_control_visuals（状态 → 子节点 inline style） ──
+    #[test]
+    fn find_child_by_role_recursive_descends_subtree() {
+        // listbox 不是直接子（裹在 wrapper 里）→ 直接查 None，递归查命中。
+        let mut scene = Scene::default();
+        let combobox = make_control(&mut scene, NodeKind::Container);
+        let wrapper = make_control(&mut scene, NodeKind::Container); // 普通 wrapper（无 role/slot）
+        append_child(&mut scene, combobox, wrapper).expect("wrapper attach");
+        let listbox = make_role_child(&mut scene, wrapper, ROLE_LISTBOX);
+        assert_eq!(
+            find_child_by_role(&scene, combobox, ROLE_LISTBOX),
+            None,
+            "直接子查不递归 → wrapper 挡住 listbox"
+        );
+        assert_eq!(
+            find_child_by_role_recursive(&scene, combobox, ROLE_LISTBOX),
+            Some(listbox),
+            "递归查穿透 wrapper 命中 listbox"
+        );
+    }
+
+    #[test]
+    fn find_child_returns_none_for_dead_parent() {
+        // parent 不 live → None（不 panic，`scene.get(parent)?` 早返）。
+        let scene = Scene::default();
+        assert_eq!(find_child_by_role(&scene, NodeId::INVALID, "x"), None);
+        assert_eq!(find_child_by_slot(&scene, NodeId::INVALID, "x"), None);
+        assert_eq!(
+            find_child_by_role_recursive(&scene, NodeId::INVALID, "x"),
+            None
+        );
+    }
+
+    // ── sync_control_visuals（状态 → 作者子节点 inline style） ──
     //
-    // 控件状态变后由 core 写子节点 inline style（语义优先级 = HTML inline，最高）。
-    // ProgressBar/Slider 写 .loom-fill 的 width:%，Toggle/Radio 切 .loom-check 的 display。
-    // 用真实 ControlInit 建 + ControlState 侧表，再调 sync_control_visuals 验子节点 inline_override。
+    // 控件状态变后由 core 按 role/data-slot 定位作者子节点写 inline style（语义优先级 = HTML
+    // inline，最高）。ProgressBar/Slider 写 fill slot 的 width:%、Slider 写 thumb slot 的
+    // transform；Dropdown 写 listbox role 的 display + value slot 的文本。Toggle/Radio 不 sync
+    // （作者用 [aria-checked] CSS）。用真实 ControlInit 建 + ControlState 侧表 + 作者写的
+    // role/slot 子树（make_slot_child/make_role_child），再调 sync_control_visuals 验子节点 inline_override。
 
     use crate::asset::ControlInit;
-    use crate::style::resolved::DisplayMode;
     use taffy::prelude::Dimension;
 
-    /// 建一个带 ControlInit 的 ProgressBar（state + 注入子节点都就位）。
+    /// 建一个带 ControlInit 的 ProgressBar，并附作者写的 `data-slot="fill"` 子节点。
     fn make_progress(scene: &mut Scene, value: f32, max: f32) -> NodeId {
-        create_node_from_template(
+        let id = create_node_from_template(
             scene,
             NodeKind::ProgressBar,
             ResolvedStyle::default(),
@@ -1615,10 +1551,12 @@ mod tests {
                 max,
                 indeterminate: false,
             }),
-        )
+        );
+        make_slot_child(scene, id, SLOT_FILL);
+        id
     }
 
-    /// 建一个带 ControlInit 的 Toggle（checked 决定 check 是否显示）。
+    /// 建一个带 ControlInit 的 Toggle（无必需子节点——作者用 [aria-checked] CSS）。
     fn make_toggle(scene: &mut Scene, checked: bool) -> NodeId {
         create_node_from_template(
             scene,
@@ -1628,9 +1566,10 @@ mod tests {
         )
     }
 
-    /// 建一个带 ControlInit 的 Slider（track > fill + thumb 都注入）。
+    /// 建一个带 ControlInit 的 Slider，并附作者写的 `data-slot="fill"` + `data-slot="thumb"`
+    /// 兄弟子节点（新结构无 track 中间层）。
     fn make_slider(scene: &mut Scene, value: f32, min: f32, max: f32) -> NodeId {
-        create_node_from_template(
+        let id = create_node_from_template(
             scene,
             NodeKind::Slider,
             ResolvedStyle::default(),
@@ -1640,7 +1579,10 @@ mod tests {
                 max,
                 step: 0.0,
             }),
-        )
+        );
+        make_slot_child(scene, id, SLOT_FILL);
+        make_slot_child(scene, id, SLOT_THUMB);
+        id
     }
 
     #[test]
@@ -1649,7 +1591,7 @@ mod tests {
         let mut scene = Scene::default();
         let id = make_progress(&mut scene, 70.0, 100.0);
         sync_control_visuals(&mut scene, id);
-        let fill = find_child_by_class(&scene, id, FILL).expect("progress has fill child");
+        let fill = find_child_by_slot(&scene, id, SLOT_FILL).expect("progress has fill child");
         let w = scene
             .get(fill)
             .unwrap()
@@ -1673,7 +1615,7 @@ mod tests {
         let mut scene = Scene::default();
         let id = make_progress(&mut scene, 120.0, 100.0);
         sync_control_visuals(&mut scene, id);
-        let fill = find_child_by_class(&scene, id, FILL).unwrap();
+        let fill = find_child_by_slot(&scene, id, SLOT_FILL).unwrap();
         assert_eq!(
             scene
                 .get(fill)
@@ -1688,48 +1630,26 @@ mod tests {
     }
 
     #[test]
-    fn toggle_check_hidden_when_unchecked() {
-        // unchecked → check inline display:none（taffy Display::None + display_mode None）。
+    fn sync_toggle_is_noop_for_children() {
+        // Toggle 无必需子节点：作者用 [aria-checked] CSS 表达选中态，core 不再 sync check 子节点。
+        // 验 sync 不 panic 且不读写任何子节点 inline（无副作用）。
         let mut scene = Scene::default();
         let id = make_toggle(&mut scene, false);
+        // 手动附一个普通子节点（作者可能写图标容器），sync 不应动它。
+        let kid = make_control(&mut scene, NodeKind::Container);
+        append_child(&mut scene, id, kid).expect("kid attach");
         sync_control_visuals(&mut scene, id);
-        let check = find_child_by_class(&scene, id, CHECK).expect("toggle has check child");
-        let n = scene.get(check).unwrap();
-        assert_eq!(
-            n.inline_override.taffy_style.display,
-            taffy::Display::None,
-            "unchecked → display:none"
-        );
-        assert_eq!(
-            n.inline_override.display_mode,
-            DisplayMode::None,
-            "display_mode also None"
-        );
-    }
-
-    #[test]
-    fn toggle_check_shown_when_checked() {
-        // checked → check inline display:flex（可见）。
-        let mut scene = Scene::default();
-        let id = make_toggle(&mut scene, true);
-        sync_control_visuals(&mut scene, id);
-        let check = find_child_by_class(&scene, id, CHECK).expect("toggle has check child");
-        let n = scene.get(check).unwrap();
+        let n = scene.get(kid).unwrap();
         assert_eq!(
             n.inline_override.taffy_style.display,
             taffy::Display::Flex,
-            "checked → display:flex"
-        );
-        assert_eq!(
-            n.inline_override.display_mode,
-            DisplayMode::Flex,
-            "display_mode also Flex"
+            "toggle sync 不改子节点 display（默认 Flex）"
         );
     }
 
     #[test]
-    fn radio_check_hidden_when_unchecked() {
-        // Radio 与 Toggle 共用 check 显示逻辑。
+    fn sync_radio_is_noop_for_children() {
+        // Radio 同 Toggle：无 check 子节点 sync。
         let mut scene = Scene::default();
         let id = create_node_from_template(
             &mut scene,
@@ -1741,28 +1661,18 @@ mod tests {
             }),
         );
         sync_control_visuals(&mut scene, id);
-        let check = find_child_by_class(&scene, id, CHECK).expect("radio has check child");
-        assert_eq!(
-            scene
-                .get(check)
-                .unwrap()
-                .inline_override
-                .taffy_style
-                .display,
-            taffy::Display::None,
-            "unchecked radio → display:none"
-        );
+        // 无 panic、无子节点改动即过（radio 无子节点）。
+        assert!(scene.get(id).unwrap().children.is_empty());
     }
 
     #[test]
     fn slider_fill_width_reflects_value() {
-        // Slider: value=25/min=0/max=100 → track 内 fill width = 25%。
+        // Slider: value=25/min=0/max=100 → fill slot 的 width = 25%（新结构 fill 是 slider 直接子）。
         // thumb 位置走 transform（set_user_transform），本测只验 fill width。
         let mut scene = Scene::default();
         let id = make_slider(&mut scene, 25.0, 0.0, 100.0);
         sync_control_visuals(&mut scene, id);
-        let track = find_child_by_class(&scene, id, TRACK).expect("slider has track child");
-        let fill = find_child_by_class(&scene, track, FILL).expect("track has fill child");
+        let fill = find_child_by_slot(&scene, id, SLOT_FILL).expect("slider has fill child");
         assert_eq!(
             scene
                 .get(fill)
@@ -1778,25 +1688,29 @@ mod tests {
 
     #[test]
     fn slider_thumb_positioned_by_transform() {
-        // value=50/min=0/max=100 → pct=0.5。thumb translate.x = track_w * pct。
-        // track_w 取自 track 的 layout_rect.w——运行时由上一帧 solve 写入（1 帧滞后，同
-        // hit_test 用上帧 world 的标准模式）。此处手动设，以解耦 layout wiring（make_slider
-        // 不入 roots，solve 不会触达），聚焦验 pct→translate 的映射本身。
+        // value=50/min=0/max=100 → pct=0.5。thumb translate.x = slider_w * pct（新结构无 track
+        // 中间层，几何取 slider 自身 layout_rect）。运行时由上一帧 solve 写入（1 帧滞后，同
+        // hit_test 用上帧 world 的标准模式）。此处手动设 slider 的 layout_rect，以解耦 layout
+        // wiring（make_slider 不入 roots，solve 不会触达），聚焦验 pct→translate 的映射本身。
         let mut scene = Scene::default();
         let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
-        let track = find_child_by_class(&scene, id, TRACK).expect("slider has track child");
-        scene.get_mut(track).unwrap().layout_rect.w = 200.0;
+        scene.get_mut(id).unwrap().layout_rect.w = 200.0;
+        scene.get_mut(id).unwrap().layout_rect.h = 20.0;
         sync_control_visuals(&mut scene, id);
-        let thumb = find_child_by_class(&scene, id, THUMB).expect("slider has thumb child");
+        let thumb = find_child_by_slot(&scene, id, SLOT_THUMB).expect("slider has thumb child");
         let tr = scene.get(thumb).unwrap().user_transform;
-        let track_w = scene.get(track).unwrap().layout_rect.w;
-        let expected = track_w * 0.5;
+        let slider_w = scene.get(id).unwrap().layout_rect.w;
+        let expected = slider_w * 0.5;
         assert!(
             (tr.translate[0] - expected).abs() < 1e-4,
-            "thumb x = track_w({track_w}) * pct(0.5) = {expected}, got {}",
+            "thumb x = slider_w({slider_w}) * pct(0.5) = {expected}, got {}",
             tr.translate[0]
         );
-        assert!(tr.translate[1].abs() < 1e-4, "thumb y 保持 0");
+        // thumb 自身宽 0（未设 layout_rect）→ center_y = (20-0)/2 = 10。
+        assert!(
+            (tr.translate[1] - 10.0).abs() < 1e-4,
+            "thumb y 居中到 slider"
+        );
     }
 
     #[test]
@@ -1808,16 +1722,17 @@ mod tests {
         assert!(scene.get(id).unwrap().children.is_empty());
     }
 
-    // ── sync_control_visuals：Dropdown（value 文本 + popup display 切换） ──
+    // ── sync_control_visuals：Dropdown（value 文本 + listbox display 切换） ──
     //
-    // select 的 selected_index → .loom-value 显示对应 option 文本；open → .loom-popup 的
-    // display:flex/none 切换。option 文本取自 option 子树（自身 text_contents 或后代 TextNode）。
-    // .loom-value 是 Container（div），文本落在其内部 TextNode 子节点（inject 时注入）。
+    // combobox 的 selected_index → value slot 显示对应 option 文本；open → listbox role 的
+    // display:block/none 切换。option 文本取自 option 子树（自身 text_contents 或后代 TextNode）。
+    // value slot 是 Container，文本落在其内嵌 TextNode（作者写 `<div data-slot=value><span/></div>`）。
 
-    /// 建一个带 ControlInit 的 Dropdown，并挂 N 个 OptionItem 子节点（每个带文本），
-    /// 随后 reparent option 进 .loom-popup——复刻生产 instantiate 路径的运行时结构
-    /// （spec §4.1：`<select> > [.loom-value, .loom-popup > [option...]]`）。
-    /// 模拟 `<select><option>A</option><option>B</option>...</select>`。
+    /// 建一个带 ControlInit 的 combobox（Dropdown），按 spec §2.2 自写结构：
+    /// `combobox > [data-slot=value > TextNode, role=listbox > [option...]]`。
+    /// 模拟作者写 `<div role=combobox><div data-slot=value><span/></div><div role=listbox>
+    /// <div role=option>A</div>...</div></div>`。reparent 调用复刻生产 Stage::instantiate
+    /// （option 已在 listbox 内时为 no-op，顺带验证幂等）。
     fn make_dropdown_with_options(
         scene: &mut Scene,
         option_texts: &[&str],
@@ -1831,7 +1746,13 @@ mod tests {
                 selected_index: selected,
             }),
         );
-        // 先把 option 挂到 select（模拟 instantiate 按 parent_idx 的挂入），再 reparent 进 popup。
+        // value slot（含 TextNode 承载选中项文本）。
+        let value = make_slot_child(scene, id, SLOT_VALUE);
+        let value_text_node =
+            create_node_from_template(scene, NodeKind::TextNode, ResolvedStyle::default(), None);
+        append_child(scene, value, value_text_node).expect("value text append");
+        // listbox role（option 列表容器）。
+        let listbox = make_role_child(scene, id, ROLE_LISTBOX);
         for &t in option_texts {
             let opt = create_node_from_template(
                 scene,
@@ -1840,16 +1761,16 @@ mod tests {
                 None,
             );
             scene.text_contents.insert(opt, t.to_string());
-            append_child(scene, id, opt).expect("option append");
+            append_child(scene, listbox, opt).expect("option append");
         }
-        // 与 Stage::instantiate 一致：建完后把 option 从 select 移进 .loom-popup。
+        // 与 Stage::instantiate 一致：建完后调 reparent（option 已在 listbox 内 → no-op）。
         reparent_options_into_popup(scene, id);
         id
     }
 
-    /// 取 .loom-value 内的 TextNode 子节点的文本内容（inject 注入的 span）。
+    /// 取 value slot 内 TextNode 子节点的文本内容。
     fn value_text(scene: &Scene, select: NodeId) -> String {
-        let value = find_child_by_class(scene, select, VALUE).expect("loom-value present");
+        let value = find_child_by_slot(scene, select, SLOT_VALUE).expect("value slot present");
         let text_node = scene
             .get(value)
             .unwrap()
@@ -1857,7 +1778,7 @@ mod tests {
             .iter()
             .find(|&&c| scene.get(c).is_some_and(|n| n.kind == NodeKind::TextNode))
             .copied()
-            .expect("loom-value has a TextNode child");
+            .expect("value slot has a TextNode child");
         scene
             .text_contents
             .get(&text_node)
@@ -1867,7 +1788,7 @@ mod tests {
 
     #[test]
     fn sync_dropdown_shows_selected_option_text_in_value() {
-        // selected_index=1 → .loom-value 文本应是第 2 个 option 的文本（"B"）。
+        // selected_index=1 → value slot 文本应是第 2 个 option 的文本（"B"）。
         let mut scene = Scene::default();
         let sel = make_dropdown_with_options(&mut scene, &["A", "B", "C"], 1);
         sync_control_visuals(&mut scene, sel);
@@ -1880,7 +1801,7 @@ mod tests {
 
     #[test]
     fn sync_dropdown_value_text_tracks_selected_index_change() {
-        // 改 selected_index 后再 sync，.loom-value 文本随之更新。
+        // 改 selected_index 后再 sync，value slot 文本随之更新。
         let mut scene = Scene::default();
         let sel = make_dropdown_with_options(&mut scene, &["A", "B", "C"], 0);
         sync_control_visuals(&mut scene, sel);
@@ -1894,7 +1815,7 @@ mod tests {
 
     #[test]
     fn sync_dropdown_selected_index_out_of_range_yields_empty() {
-        // selected_index 越界（无对应 option）→ .loom-value 文本为空（不 panic、不残留旧值语义由
+        // selected_index 越界（无对应 option）→ value slot 文本为空（不 panic、不残留旧值语义由
         // 调用方保证；此处只验不 panic 且文本被写成空串）。
         let mut scene = Scene::default();
         let sel = make_dropdown_with_options(&mut scene, &["A", "B"], 0);
@@ -1919,6 +1840,16 @@ mod tests {
             ResolvedStyle::default(),
             Some(ControlInit::Dropdown { selected_index: 0 }),
         );
+        // 作者结构：value slot + listbox role。
+        let value = make_slot_child(&mut scene, id, SLOT_VALUE);
+        let value_text_node = create_node_from_template(
+            &mut scene,
+            NodeKind::TextNode,
+            ResolvedStyle::default(),
+            None,
+        );
+        append_child(&mut scene, value, value_text_node).expect("value text append");
+        let listbox = make_role_child(&mut scene, id, ROLE_LISTBOX);
         // option > TextNode("Deep")
         let opt = create_node_from_template(
             &mut scene,
@@ -1934,9 +1865,7 @@ mod tests {
         );
         scene.text_contents.insert(txt, "Deep".into());
         append_child(&mut scene, opt, txt).expect("text append");
-        append_child(&mut scene, id, opt).expect("option append");
-        // option 现任 popup（同生产 instantiate 路径）——nth_option_text 扫 popup 子节点。
-        reparent_options_into_popup(&mut scene, id);
+        append_child(&mut scene, listbox, opt).expect("option append");
         sync_control_visuals(&mut scene, id);
         assert_eq!(
             value_text(&scene, id),
@@ -1952,7 +1881,8 @@ mod tests {
         let sel = make_dropdown_with_options(&mut scene, &["A"], 0);
         // 默认 open=false
         sync_control_visuals(&mut scene, sel);
-        let popup = find_child_by_class(&scene, sel, POPUP).expect("loom-popup present");
+        let popup =
+            find_child_by_role_recursive(&scene, sel, ROLE_LISTBOX).expect("listbox present");
         assert_eq!(
             scene
                 .get(popup)
@@ -1980,11 +1910,11 @@ mod tests {
         );
     }
 
-    // ── reparent_options_into_popup：option 移进 .loom-popup（spec §4.1 运行时结构）──
+    // ── reparent_options_into_popup：option 移进 listbox（spec §2.2 兏底）──
     //
-    // 生产路径：Stage::instantiate 建完子树后对每个 Dropdown 调 reparent；测试 helper
-    // make_dropdown_with_options 同样调用。这里直接测原语本身 + 顺序保页 + 幂等 +
-    // nth_option_text 扫 popup。
+    // 生产路径：Stage::instantiate 建完子树后对每个 Dropdown 调 reparent。作者正确写法是
+    // option 已在 listbox 内（本函数 no-op）；这里测「option 直接写在 combobox 下」的兜底移动。
+    // direct/popup option children helper + 原语本身 + 顺序保序 + 幂等 + nth_option_text 扫 listbox。
 
     /// 返回 select 的 OptionItem 直接子节点列表（旧结构：option 是 select 的直接子）。
     fn direct_option_children(scene: &Scene, select: NodeId) -> Vec<NodeId> {
@@ -2001,9 +1931,10 @@ mod tests {
             .collect()
     }
 
-    /// 返回 popup 的 OptionItem 直接子节点列表（新结构：option 是 popup 的直接子）。
+    /// 返回 listbox（role=listbox，递归定位）的 OptionItem 直接子节点列表。
     fn popup_option_children(scene: &Scene, select: NodeId) -> Vec<NodeId> {
-        let popup = find_child_by_class(scene, select, POPUP).expect("loom-popup");
+        let popup =
+            find_child_by_role_recursive(scene, select, ROLE_LISTBOX).expect("listbox present");
         scene
             .get(popup)
             .map(|n| n.children.clone())
@@ -2018,8 +1949,9 @@ mod tests {
     }
 
     #[test]
-    fn reparent_moves_options_from_select_into_popup() {
-        // 建 select + 3 option（先挂 select，未 reparent）：option 是 select 的直接子、popup 为空。
+    fn reparent_moves_options_from_combobox_into_listbox() {
+        // 作者错误结构兜底：option 直接写在 combobox 下（应在 listbox 内）。reparent 把它们
+        // 挪进 listbox role 子节点（递归定位）。
         let mut scene = Scene::default();
         let sel = create_node_from_template(
             &mut scene,
@@ -2027,6 +1959,9 @@ mod tests {
             ResolvedStyle::default(),
             Some(ControlInit::Dropdown { selected_index: 0 }),
         );
+        // listbox role 子（空，待 reparent 填充）。
+        let listbox = make_role_child(&mut scene, sel, ROLE_LISTBOX);
+        // 3 个 option 直接挂 combobox（错误结构）。
         let mut opts = vec![];
         for t in ["A", "B", "C"] {
             let opt = create_node_from_template(
@@ -2039,31 +1974,29 @@ mod tests {
             append_child(&mut scene, sel, opt).unwrap();
             opts.push(opt);
         }
-        // reparent 前：option 是 select 的直接子、popup 为空。
+        // reparent 前：option 是 combobox 直接子、listbox 为空。
         assert_eq!(direct_option_children(&scene, sel), opts);
-        let popup = find_child_by_class(&scene, sel, POPUP).expect("loom-popup");
-        assert!(scene.get(popup).unwrap().children.is_empty());
-        // reparent。
+        assert!(scene.get(listbox).unwrap().children.is_empty());
         reparent_options_into_popup(&mut scene, sel);
-        // reparent 后：select 不再含 option 直接子；popup 含全部 3 个 option、保声明顺序。
+        // reparent 后：combobox 不再含 option 直接子；listbox 含全部 3 个 option、保声明顺序。
         assert!(
             direct_option_children(&scene, sel).is_empty(),
-            "select 不再含 OptionItem 直接子"
+            "combobox 不再含 OptionItem 直接子"
         );
         assert_eq!(
             popup_option_children(&scene, sel),
             opts,
-            "option 移进 popup 且保序"
+            "option 移进 listbox 且保序"
         );
-        // parent 指针指向 popup（不是 select）。
+        // parent 指针指向 listbox（不是 combobox）。
         for &opt in &opts {
-            assert_eq!(scene.get(opt).unwrap().parent, Some(popup));
+            assert_eq!(scene.get(opt).unwrap().parent, Some(listbox));
         }
     }
 
     #[test]
     fn reparent_preserves_option_order() {
-        // 5 个 option reparent 后顺序与声明一致（顺序决定 nth_option_text 取值 + popup 渲染序）。
+        // 5 个 option reparent 后顺序与声明一致（顺序决定 nth_option_text 取值 + listbox 渲染序）。
         let mut scene = Scene::default();
         let sel = create_node_from_template(
             &mut scene,
@@ -2071,6 +2004,7 @@ mod tests {
             ResolvedStyle::default(),
             Some(ControlInit::Dropdown { selected_index: 0 }),
         );
+        make_role_child(&mut scene, sel, ROLE_LISTBOX); // 空 listbox（待填充）
         let texts = ["alpha", "beta", "gamma", "delta", "epsilon"];
         for t in texts {
             let opt = create_node_from_template(
@@ -2111,15 +2045,15 @@ mod tests {
     }
 
     #[test]
-    fn reparent_no_popup_is_noop() {
-        // select 未注入 popup（control_init=None 的裸 Dropdown kind 节点）→ 无可 reparent 目标，
-        // 不 panic、不误移 option。
+    fn reparent_no_listbox_is_noop() {
+        // combobox 无 listbox 子节点（作者漏写）→ 无可 reparent 目标，不 panic、不误移 option。
+        // 结构契约 Task 6 会打包期报 error，但运行时仍须 no-op（不杀进程）。
         let mut scene = Scene::default();
         let sel = create_node_from_template(
             &mut scene,
             NodeKind::Dropdown,
             ResolvedStyle::default(),
-            None, // 无 control_init → inject_control_children 不走、无 popup
+            None,
         );
         let opt = create_node_from_template(
             &mut scene,
@@ -2128,11 +2062,11 @@ mod tests {
             None,
         );
         append_child(&mut scene, sel, opt).unwrap();
-        reparent_options_into_popup(&mut scene, sel); // 无 popup → no-op
+        reparent_options_into_popup(&mut scene, sel); // 无 listbox → no-op
         assert_eq!(
             direct_option_children(&scene, sel),
             vec![opt],
-            "无 popup → option 留在 select（不误移）"
+            "无 listbox → option 留在 combobox（不误移）"
         );
     }
 
@@ -2177,8 +2111,8 @@ mod tests {
     // ── 控件指针交互（on_pointer_down/move/up） ──
     //
     // 直接调交互函数验逻辑（隔离 PointerState 仲裁）：Toggle 翻转、Radio 同名组互斥、
-    // Slider 拖拽改 value + step 量化。track 几何手动设（解耦 solve：测试不把 slider 入 roots，
-    // solve 不触达 track，故手动写 layout_rect，同 slider_thumb_positioned_by_transform 模式）。
+    // Slider 拖拽改 value + step 量化。slider 几何手动设（解耦 solve：测试不把 slider 入 roots，
+    // solve 不触达，故手动写 layout_rect，同 slider_thumb_positioned_by_transform 模式）。
 
     use crate::scene::node::Rect;
 
@@ -2195,10 +2129,10 @@ mod tests {
         )
     }
 
-    /// 手动设 slider 的 loom-track layout_rect（解耦 solve：测试不把 slider 入 roots，solve 不触达）。
-    fn set_track_rect(scene: &mut Scene, slider: NodeId, x: f32, y: f32, w: f32, h: f32) {
-        let track = find_child_by_class(scene, slider, TRACK).expect("slider has track");
-        scene.get_mut(track).unwrap().layout_rect = Rect { x, y, w, h };
+    /// 手动设 slider 自身的 layout_rect（解耦 solve：新结构无 track 中间层，slider_pos_to_value
+    /// 与 sync 都读 slider 自身 layout_rect；测试不把 slider 入 roots，solve 不触达）。
+    fn set_slider_rect(scene: &mut Scene, slider: NodeId, x: f32, y: f32, w: f32, h: f32) {
+        scene.get_mut(slider).unwrap().layout_rect = Rect { x, y, w, h };
     }
 
     #[test]
@@ -2270,7 +2204,7 @@ mod tests {
     fn slider_drag_changes_value() {
         let mut scene = Scene::default();
         let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
-        set_track_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
+        set_slider_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
         // 按下在 track 中间（pos.x=100 → value=50），拖到 75%（pos.x=150 → value=75）
         on_pointer_down(&mut scene, id, [100.0, 10.0]);
         on_pointer_move(&mut scene, id, [150.0, 10.0]);
@@ -2296,7 +2230,7 @@ mod tests {
                 step: 10.0,
             }),
         );
-        set_track_rect(&mut scene, id, 0.0, 0.0, 100.0, 20.0);
+        set_slider_rect(&mut scene, id, 0.0, 0.0, 100.0, 20.0);
         on_pointer_down(&mut scene, id, [73.0, 10.0]);
         let v = match scene.controls.get(id) {
             Some(ControlState::Slider { value, .. }) => *value,
@@ -2309,7 +2243,7 @@ mod tests {
     fn slider_down_sets_dragging_up_clears() {
         let mut scene = Scene::default();
         let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
-        set_track_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
+        set_slider_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
         assert!(matches!(
             scene.controls.get(id),
             Some(ControlState::Slider {
@@ -2337,7 +2271,7 @@ mod tests {
         // 未先 down（dragging=false）直接 move → value 不变。
         let mut scene = Scene::default();
         let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
-        set_track_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
+        set_slider_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
         on_pointer_move(&mut scene, id, [150.0, 10.0]);
         let v = match scene.controls.get(id) {
             Some(ControlState::Slider { value, .. }) => *value,
@@ -2354,7 +2288,7 @@ mod tests {
         // pos 超出 track 左边界 → ratio clamp 0 → value=min=0。
         let mut scene = Scene::default();
         let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
-        set_track_rect(&mut scene, id, 0.0, 0.0, 100.0, 20.0);
+        set_slider_rect(&mut scene, id, 0.0, 0.0, 100.0, 20.0);
         on_pointer_down(&mut scene, id, [-50.0, 10.0]);
         let v = match scene.controls.get(id) {
             Some(ControlState::Slider { value, .. }) => *value,
@@ -2396,7 +2330,7 @@ mod tests {
                 step: 1.0,
             }),
         );
-        set_track_rect(&mut scene, id, 0.0, 0.0, 100.0, 20.0);
+        set_slider_rect(&mut scene, id, 0.0, 0.0, 100.0, 20.0);
         // 不 panic 即过；dragging 仍置（交互被处理）。
         let _ = on_pointer_down(&mut scene, id, [50.0, 10.0]);
         let _ = on_pointer_move(&mut scene, id, [80.0, 10.0]);
@@ -2436,10 +2370,10 @@ mod tests {
 
     #[test]
     fn find_control_at_walks_to_ancestor() {
-        // 命中控件的 loom-thumb 子节点 → 向上找到 Slider 控件本身。
+        // 命中控件的 thumb slot 子节点 → 向上找到 Slider 控件本身。
         let mut scene = Scene::default();
         let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
-        let thumb = find_child_by_class(&scene, id, THUMB).expect("slider has thumb");
+        let thumb = find_child_by_slot(&scene, id, SLOT_THUMB).expect("slider has thumb");
         assert_eq!(find_control_at(&scene, Some(thumb)), Some(id));
         assert_eq!(find_control_at(&scene, Some(id)), Some(id));
         assert_eq!(find_control_at(&scene, None), None);
@@ -2544,7 +2478,7 @@ mod tests {
         // down→move 改 value：move 产 EVT_VALUE_CHANGED，x=新值。
         let mut scene = Scene::default();
         let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
-        set_track_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
+        set_slider_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
         let _ = on_pointer_down(&mut scene, id, [100.0, 10.0]); // value=50，无变化→不发
         let events = on_pointer_move(&mut scene, id, [150.0, 10.0]); // value→75
         let hit = events
@@ -2563,7 +2497,7 @@ mod tests {
         // value 未变（down 命中现值位置）→ 不产 ValueChanged（防误报事件）。
         let mut scene = Scene::default();
         let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
-        set_track_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
+        set_slider_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
         let events = on_pointer_down(&mut scene, id, [100.0, 10.0]); // pos→value=50，与现值同
         assert!(
             events.iter().all(|e| e.event_type != EVT_VALUE_CHANGED),
@@ -2576,7 +2510,7 @@ mod tests {
         // down→move→up：up 产 EVT_CHANGE_COMMITTED，x=最终值。
         let mut scene = Scene::default();
         let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
-        set_track_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
+        set_slider_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
         let _ = on_pointer_down(&mut scene, id, [100.0, 10.0]);
         let _ = on_pointer_move(&mut scene, id, [160.0, 10.0]); // value→80
         let events = on_pointer_up(&mut scene, id);

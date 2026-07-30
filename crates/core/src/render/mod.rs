@@ -202,9 +202,11 @@ fn collect_open_popup_roots(scene: &Scene) -> Vec<NodeId> {
         if !is_open_dropdown {
             continue;
         }
-        if let Some(popup) =
-            crate::scene::control::find_child_by_class(scene, n.id, crate::scene::control::POPUP)
-        {
+        if let Some(popup) = crate::scene::control::find_child_by_role_recursive(
+            scene,
+            n.id,
+            crate::scene::control::ROLE_LISTBOX,
+        ) {
             roots.push(popup);
         }
     }

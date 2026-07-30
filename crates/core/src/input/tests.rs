@@ -4382,8 +4382,9 @@ fn non_text_focused_node_not_routed() {
 /// 返回 (select_id, popup_id, opt0_id, button_id)。
 fn open_dropdown_with_outside_button_scene() -> (Scene, NodeId, NodeId, NodeId, NodeId) {
     use crate::asset::ControlInit;
-    use crate::scene::control::{find_child_by_class, POPUP};
+    use crate::scene::control::ROLE_LISTBOX;
     use crate::scene::dynamic::create_node_from_template;
+    use crate::scene::node::RoleInfo;
     use crate::style::resolved::ResolvedStyle;
 
     let mut root = Node::default();
@@ -4413,15 +4414,25 @@ fn open_dropdown_with_outside_button_scene() -> (Scene, NodeId, NodeId, NodeId, 
         h: 30.0,
     };
 
+    // listbox role 子（作者写的弹出列表容器）。
+    let listbox =
+        create_node_from_template(&mut s, NodeKind::Container, ResolvedStyle::default(), None);
+    crate::scene::dynamic::append_child(&mut s, select, listbox).unwrap();
+    s.roles.insert(
+        listbox,
+        RoleInfo {
+            role: Some(ROLE_LISTBOX.to_string()),
+            slots: Default::default(),
+        },
+    );
     let opt0 =
         create_node_from_template(&mut s, NodeKind::OptionItem, ResolvedStyle::default(), None);
     let opt1 =
         create_node_from_template(&mut s, NodeKind::OptionItem, ResolvedStyle::default(), None);
-    crate::scene::dynamic::append_child(&mut s, select, opt0).unwrap();
-    crate::scene::dynamic::append_child(&mut s, select, opt1).unwrap();
-    crate::scene::control::reparent_options_into_popup(&mut s, select);
+    crate::scene::dynamic::append_child(&mut s, listbox, opt0).unwrap();
+    crate::scene::dynamic::append_child(&mut s, listbox, opt1).unwrap();
 
-    let popup = find_child_by_class(&s, select, POPUP).unwrap();
+    let popup = listbox;
     s.get_mut(popup).unwrap().layout_rect = Rect {
         x: 10.0,
         y: 40.0,
@@ -4589,13 +4600,14 @@ fn pointer_down_outside_closes_only_open_dropdown_not_closed_one() {
 // 照 RmlUi WidgetDropDown：SeekSelection 跳 disabled、CancelSelectBox 回滚 open 时刻值。
 
 use crate::asset::ControlInit;
-use crate::scene::control::{find_child_by_class, POPUP};
+use crate::scene::control::ROLE_LISTBOX;
 use crate::scene::dynamic::create_node_from_template;
+use crate::scene::node::RoleInfo;
 use crate::style::resolved::ResolvedStyle;
 
-/// 建 Dropdown 场景：root > select(Dropdown，selected_index/open 可控)，select 的 popup
-/// 含若干 option（每个 (text, disabled)）。option 经 reparent 进 popup（与生产结构对齐）。
-/// 布局：select @(10,10,120,30)；popup @(10,40,80, n*20)；option_i @(10, 40+i*20, 80, 20)。
+/// 建 Dropdown 场景：root > select(Dropdown，selected_index/open 可控)，select 的 listbox
+/// 含若干 option（每个 (text, disabled)）。作者正确结构：option 直接在 listbox 内。
+/// 布局：select @(10,10,120,30)；listbox @(10,40,80, n*20)；option_i @(10, 40+i*20, 80, 20)。
 /// 返回 (select_id, popup_id, Vec<opt_id>)。
 fn dropdown_scene(
     options: &[(&str, bool)],
@@ -4628,12 +4640,24 @@ fn dropdown_scene(
         h: 30.0,
     };
 
+    // listbox role 子（作者写的弹出列表容器）。
+    let listbox =
+        create_node_from_template(&mut s, NodeKind::Container, ResolvedStyle::default(), None);
+    crate::scene::dynamic::append_child(&mut s, select, listbox).unwrap();
+    s.roles.insert(
+        listbox,
+        RoleInfo {
+            role: Some(ROLE_LISTBOX.to_string()),
+            slots: Default::default(),
+        },
+    );
+
     let mut opt_ids = Vec::new();
     for (i, (text, disabled)) in options.iter().enumerate() {
         let opt =
             create_node_from_template(&mut s, NodeKind::OptionItem, ResolvedStyle::default(), None);
         s.text_contents.insert(opt, (*text).to_string());
-        crate::scene::dynamic::append_child(&mut s, select, opt).unwrap();
+        crate::scene::dynamic::append_child(&mut s, listbox, opt).unwrap();
         if *disabled {
             s.get_mut(opt)
                 .unwrap()
@@ -4642,12 +4666,10 @@ fn dropdown_scene(
                 .insert(NodeFlags::DISABLED);
         }
         opt_ids.push(opt);
-        // 先挂 select（声明序），reparent 后再设 rect（与生产 instantiate 顺序一致）。
         let _ = i;
     }
-    crate::scene::control::reparent_options_into_popup(&mut s, select);
 
-    let popup = find_child_by_class(&s, select, POPUP).expect("popup injected");
+    let popup = listbox;
     let n = options.len() as f32;
     s.get_mut(popup).unwrap().layout_rect = Rect {
         x: 10.0,

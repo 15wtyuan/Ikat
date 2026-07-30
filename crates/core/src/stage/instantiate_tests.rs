@@ -457,13 +457,14 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
 }
 
 #[test]
-fn instantiate_reparents_dropdown_options_into_popup() {
-    // 生产路径回归：模板里 <select><option>A<option>B<option>C</select>，经 load_package +
-    // instantiate 后，option 须是 .loom-popup 的直接子（spec §4.1 运行时结构），而非 select 的
-    // 直接子。这是 popup 浮层能渲染 option 列表的前提（render 末尾追加从 popup 根 DFS）。
+fn instantiate_reparents_dropdown_options_into_listbox() {
+    // 生产路径回归：模板里作者写 `<div role=combobox><div role=listbox><div role=option>A
+    // </div>...</div></div>`（spec §2.2 结构），经 load_package + instantiate 后，option 须是
+    // listbox 的直接子（不是 combobox 的直接子）。这是 listbox 浮层能渲染 option 列表的前提
+    //（render 末尾追加从 listbox 根 DFS）。core 不再注入结构——作者写的即运行时结构。
     use crate::asset::ControlInit;
-    use crate::scene::control::{find_child_by_class, POPUP};
-    // 模板：[0]=select(Dropdown), [1..]=option（parent_idx=0）。
+    use crate::scene::control::{find_child_by_role_recursive, ROLE_LISTBOX};
+    // 模板：[0]=combobox(Dropdown), [1]=listbox(role=listbox), [2..]=option 在 listbox 内。
     let nodes = [
         TemplateNode {
             kind: NodeKind::Dropdown,
@@ -479,16 +480,31 @@ fn instantiate_reparents_dropdown_options_into_popup() {
             role: None,
             data_slot: None,
         },
+        // listbox role 子（作者写的弹出列表容器）。
         TemplateNode {
-            kind: NodeKind::OptionItem,
+            kind: NodeKind::Container,
             style: ResolvedStyle::default(),
             parent_idx: Some(0),
             classes: vec![],
             id_attr: None,
             draggable: false,
             tabindex: None,
+            content: None,
+            src: None,
+            control_init: None,
+            role: Some("listbox".to_string()),
+            data_slot: None,
+        },
+        TemplateNode {
+            kind: NodeKind::OptionItem,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(1),
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
             // OptionItem.content 不跨 pkg 往返（asset 序列化只为 TextNode/Image 存 content/src），
-            // 故生产路径把 option 文本放在子 TextNode（<option><span>A</span></option>），
+            // 故生产路径把 option 文本放在子 TextNode（`<div role=option><span>A</span></div>`），
             // nth_option_text 经 collect_subtree_text 收集。这里复刻该结构。
             content: None,
             src: None,
@@ -496,11 +512,11 @@ fn instantiate_reparents_dropdown_options_into_popup() {
             role: None,
             data_slot: None,
         },
-        // option A 的文本子节点（parent = option index 1）。
+        // option A 的文本子节点（parent = option index 2）。
         TemplateNode {
             kind: NodeKind::TextNode,
             style: ResolvedStyle::default(),
-            parent_idx: Some(1),
+            parent_idx: Some(2),
             classes: vec![],
             id_attr: None,
             draggable: false,
@@ -514,7 +530,7 @@ fn instantiate_reparents_dropdown_options_into_popup() {
         TemplateNode {
             kind: NodeKind::OptionItem,
             style: ResolvedStyle::default(),
-            parent_idx: Some(0),
+            parent_idx: Some(1),
             classes: vec![],
             id_attr: None,
             draggable: false,
@@ -528,7 +544,7 @@ fn instantiate_reparents_dropdown_options_into_popup() {
         TemplateNode {
             kind: NodeKind::TextNode,
             style: ResolvedStyle::default(),
-            parent_idx: Some(3),
+            parent_idx: Some(4),
             classes: vec![],
             id_attr: None,
             draggable: false,
@@ -542,7 +558,7 @@ fn instantiate_reparents_dropdown_options_into_popup() {
         TemplateNode {
             kind: NodeKind::OptionItem,
             style: ResolvedStyle::default(),
-            parent_idx: Some(0),
+            parent_idx: Some(1),
             classes: vec![],
             id_attr: None,
             draggable: false,
@@ -556,7 +572,7 @@ fn instantiate_reparents_dropdown_options_into_popup() {
         TemplateNode {
             kind: NodeKind::TextNode,
             style: ResolvedStyle::default(),
-            parent_idx: Some(5),
+            parent_idx: Some(6),
             classes: vec![],
             id_attr: None,
             draggable: false,
@@ -577,7 +593,7 @@ fn instantiate_reparents_dropdown_options_into_popup() {
     s.load_package("bag", &pkg).unwrap();
     let sel = s.instantiate("bag", "dropdown").unwrap();
     let scene = s.scene.as_ref().unwrap();
-    // select 的直接 OptionItem 子须为 0（全部移进 popup）。
+    // combobox 的直接 OptionItem 子须为 0（option 在 listbox 内，不是 combobox 直接子）。
     let direct_opts: Vec<_> = scene
         .get(sel)
         .unwrap()
@@ -588,10 +604,10 @@ fn instantiate_reparents_dropdown_options_into_popup() {
         .collect();
     assert!(
         direct_opts.is_empty(),
-        "instantiate 后 select 无 OptionItem 直接子（全 reparent 进 popup）"
+        "instantiate 后 combobox 无 OptionItem 直接子（全在 listbox 内）"
     );
-    // popup 含 3 个 option，保声明顺序 A/B/C。
-    let popup = find_child_by_class(scene, sel, POPUP).expect("loom-popup injected");
+    // listbox 含 3 个 option，保声明顺序 A/B/C。
+    let popup = find_child_by_role_recursive(scene, sel, ROLE_LISTBOX).expect("listbox present");
     let popup_opts: Vec<_> = scene
         .get(popup)
         .unwrap()
@@ -600,10 +616,8 @@ fn instantiate_reparents_dropdown_options_into_popup() {
         .copied()
         .filter(|&c| scene.get(c).is_some_and(|n| n.kind == NodeKind::OptionItem))
         .collect();
-    assert_eq!(popup_opts.len(), 3, "popup 含 3 个 option");
-    // 经 nth_option_text（扫 popup 子节点 + collect_subtree_text）验证 option 文本可取、保序。
-    // option 文本在子 TextNode（<option><span>A</span></option>，生产路径——OptionItem.content
-    // 不跨 pkg 往返，故文本须走子节点）。
+    assert_eq!(popup_opts.len(), 3, "listbox 含 3 个 option");
+    // 经 nth_option_text（扫 listbox 子节点 + collect_subtree_text）验证 option 文本可取、保序。
     assert_eq!(
         crate::scene::control::nth_option_text(scene, sel, 0).as_deref(),
         Some("A"),
@@ -619,7 +633,7 @@ fn instantiate_reparents_dropdown_options_into_popup() {
         Some("C"),
         "第 2 个 option 文本 = C"
     );
-    // parent 指针指向 popup。
+    // parent 指针指向 listbox。
     for &o in &popup_opts {
         assert_eq!(scene.get(o).unwrap().parent, Some(popup));
     }
@@ -665,7 +679,8 @@ fn make_test_pkg_with_roles() -> Vec<u8> {
 }
 
 /// instantiate 把 TemplateNode.role/data_slot 填进 Scene.roles side table（稀疏）。
-/// role 驱动后续语义分派 + find_child_by_role/slot 查表。data-slot 映射到 slots["slot"]。
+/// role 驱动后续语义分派 + find_child_by_role/slot 查表。data-slot 映射成 slots 的 key
+/// （Pattern A：slots["thumb"]=""，find_child_by_slot 比对 key 是否存在）。
 #[test]
 fn instantiate_fills_roles_side_table_from_template() {
     let mut s = Stage::new_for_test();
@@ -677,12 +692,15 @@ fn instantiate_fills_roles_side_table_from_template() {
     // root 带 role=slider
     assert_eq!(scene.roles.role_of(root), Some("slider"));
     assert!(
-        scene.roles.slot_of(root, "slot").is_none(),
+        scene.roles.slot_of(root, "thumb").is_none(),
         "root has no data-slot"
     );
-    // thumb 带 data-slot=thumb → slots["slot"]="thumb"
+    // thumb 带 data-slot=thumb → slots["thumb"]=""（key=slot 名，值空串占位）
     assert!(scene.roles.role_of(thumb).is_none(), "thumb has no role");
-    assert_eq!(scene.roles.slot_of(thumb, "slot"), Some("thumb"));
+    assert!(
+        scene.roles.slot_of(thumb, "thumb").is_some(),
+        "thumb 的 data-slot=thumb 映射成 slots[\"thumb\"]"
+    );
 }
 
 /// instantiate 后 remove_node 联动清 RoleTable 槽，防悬空 NodeId 残留。

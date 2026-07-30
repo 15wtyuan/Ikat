@@ -289,9 +289,7 @@ pub fn create_node_from_template(
             },
         };
         scene.controls.ensure(id, state);
-        // 控件即容器：instantiate 后注入框架内部视觉子节点（.loom-fill/.loom-track/...）。
-        // 紧跟 side table 填充之后——控件状态先就位，再挂视觉结构。非控件节点不走此分支。
-        crate::scene::control::inject_control_children(scene, id, kind);
+        // 控件视觉子结构由作者自写（role/data-slot），core 不注入——见 sync_control_visuals。
     }
     id
 }
@@ -1124,9 +1122,9 @@ mod tests {
     }
 
     #[test]
-    fn create_node_from_template_control_init_injects_children() {
-        // 传 control_init 的控件节点：side table 填充 + 视觉子节点注入都要发生。
-        // 验子节点注入接线：create_node_from_template 内部调 inject_control_children。
+    fn create_node_from_template_control_init_fills_side_table() {
+        // 传 control_init 的控件节点：side table 填充发生，但子节点不再注入（控件视觉结构由
+        // 作者按 role/data-slot 自写，core 只填 ControlState + 后续 sync_control_visuals）。
         let mut scene = empty_scene();
         let id = create_node_from_template(
             &mut scene,
@@ -1143,21 +1141,16 @@ mod tests {
             scene.controls.get(id).is_some(),
             "control side table filled"
         );
-        // 视觉子节点注入了（ProgressBar → 1 个 loom-fill 子）
-        let children = scene.get(id).unwrap().children.clone();
-        assert_eq!(children.len(), 1, "ProgressBar injects fill child");
-        assert!(scene
-            .get(children[0])
-            .unwrap()
-            .classes
-            .iter()
-            .any(|c| c == "loom-fill"));
+        // 不再注入子节点（作者自写结构）
+        assert!(
+            scene.get(id).unwrap().children.is_empty(),
+            "control_init 不再注入子节点（作者自写 role/slot 结构）"
+        );
     }
 
     #[test]
     fn create_node_from_template_no_control_init_injects_nothing() {
-        // control_init=None 的节点（即使是控件 kind）不注入子节点。
-        // inject 只在 control_init.is_some() 分支触发。
+        // control_init=None 的节点不填 side table、不注入子节点（控件路径全不走）。
         let mut scene = empty_scene();
         let id = create_node_from_template(
             &mut scene,

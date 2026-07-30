@@ -47,9 +47,9 @@ pub fn hit_scrollbar_grip(scene: &Scene, point: (f32, f32)) -> Option<(NodeId, u
 /// grip 必须可抓。grip 与正常 dropdown popup 几何重叠极少（grip 在滚动容器边缘、popup
 /// 绝对定位浮层），两者互不冲突。返真节点（option/popup）的 NodeId。
 fn hit_open_popups(scene: &Scene, point: (f32, f32)) -> Option<NodeId> {
-    // 先收集所有 open Dropdown 的 popup 根（不可变借），再逐个 hit_subtree（不可变借）。
+    // 先收集所有 open Dropdown 的 listbox 根（不可变借），再逐个 hit_subtree（不可变借）。
     // 两阶段分开避免边迭代 controls 边递归 scene 的复杂借用。收集口径与 render 层
-    // `collect_open_popup_roots` 一致（同源：open Dropdown → .loom-popup 子节点）。
+    // `collect_open_popup_roots` 一致（同源：open Dropdown → role=listbox 子节点，递归定位）。
     let mut popups: Vec<NodeId> = Vec::new();
     for n in scene.nodes.values() {
         let is_open_dropdown = matches!(
@@ -59,9 +59,11 @@ fn hit_open_popups(scene: &Scene, point: (f32, f32)) -> Option<NodeId> {
         if !is_open_dropdown {
             continue;
         }
-        if let Some(popup) =
-            crate::scene::control::find_child_by_class(scene, n.id, crate::scene::control::POPUP)
-        {
+        if let Some(popup) = crate::scene::control::find_child_by_role_recursive(
+            scene,
+            n.id,
+            crate::scene::control::ROLE_LISTBOX,
+        ) {
             popups.push(popup);
         }
     }
@@ -452,14 +454,14 @@ mod tests {
     // ── open popup 前置命中（Task 12）─────────────────────────
 
     /// 建 open Dropdown 场景：root > select(Dropdown,open,120x30 @(10,10))，
-    /// select 的 .loom-popup(80x60 @(10,40)) 内含两个 option（各 80x20，垂直堆叠）。
-    /// 复刻生产运行时结构（spec §4.1：select > [.loom-value, .loom-popup > [option...]]）。
+    /// select 的 listbox(80x60 @(10,40)) 内含两个 option（各 80x20，垂直堆叠）。
+    /// 复刻生产运行时结构（spec §2.2：combobox > [data-slot=value, role=listbox > [option...]]）。
     /// 返回 (select_id, popup_id, opt0_id, opt1_id)。点 opt0 用 (50,50)（opt0 区 40..60）。
     fn open_dropdown_scene() -> (Scene, NodeId, NodeId, NodeId, NodeId) {
         use crate::asset::ControlInit;
-        use crate::scene::control::POPUP;
+        use crate::scene::control::ROLE_LISTBOX;
         use crate::scene::dynamic::create_node_from_template;
-        use crate::scene::node::ControlState;
+        use crate::scene::node::{ControlState, RoleInfo};
         use crate::style::resolved::ResolvedStyle;
 
         let mut root = Node::default();
@@ -472,7 +474,7 @@ mod tests {
         let mut s = Scene::from_nodes(vec![root], vec![]);
         let root_id = s.roots[0];
 
-        // select（Dropdown 控件）—— create_node_from_template 会 inject .loom-value/.loom-popup。
+        // select（Dropdown 控件）—— 作者自写结构（core 不再注入）。
         let select = create_node_from_template(
             &mut s,
             NodeKind::Dropdown,
@@ -491,16 +493,26 @@ mod tests {
             h: 30.0,
         };
 
-        // 两个 option 挂到 select，再 reparent 进 .loom-popup（同生产 instantiate 路径）。
+        // listbox role 子（作者写的弹出列表容器）。登记 role 进 RoleTable。
+        let listbox =
+            create_node_from_template(&mut s, NodeKind::Container, ResolvedStyle::default(), None);
+        crate::scene::dynamic::append_child(&mut s, select, listbox).unwrap();
+        s.roles.insert(
+            listbox,
+            RoleInfo {
+                role: Some(ROLE_LISTBOX.to_string()),
+                slots: Default::default(),
+            },
+        );
+        // 两个 option 直接挂 listbox（作者正确结构）。
         let opt0 =
             create_node_from_template(&mut s, NodeKind::OptionItem, ResolvedStyle::default(), None);
         let opt1 =
             create_node_from_template(&mut s, NodeKind::OptionItem, ResolvedStyle::default(), None);
-        crate::scene::dynamic::append_child(&mut s, select, opt0).unwrap();
-        crate::scene::dynamic::append_child(&mut s, select, opt1).unwrap();
-        crate::scene::control::reparent_options_into_popup(&mut s, select);
+        crate::scene::dynamic::append_child(&mut s, listbox, opt0).unwrap();
+        crate::scene::dynamic::append_child(&mut s, listbox, opt1).unwrap();
 
-        let popup = crate::scene::control::find_child_by_class(&s, select, POPUP).unwrap();
+        let popup = listbox;
         // popup 浮在 select 下方（absolute，相对 select 定位）。
         s.get_mut(popup).unwrap().layout_rect = Rect {
             x: 10.0,

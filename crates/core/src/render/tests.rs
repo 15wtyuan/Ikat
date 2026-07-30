@@ -4430,6 +4430,15 @@ fn make_popup_scene(open: bool) -> (Scene, NodeId, NodeId, NodeId, NodeId, NodeI
         .expect("loom-popup child");
     let option_id = scene.get(popup_id).unwrap().children[0];
     let option_text_id = scene.get(option_id).unwrap().children[0];
+    // 作者自写结构下 listbox 靠 role 定位（render collect_open_popup_roots 按 role=listbox
+    // 查），Scene::build 的 entries 不含 role 字段，这里手动登记 listbox 的 role。
+    scene.roles.insert(
+        popup_id,
+        crate::scene::node::RoleInfo {
+            role: Some(crate::scene::control::ROLE_LISTBOX.to_string()),
+            slots: Default::default(),
+        },
+    );
     // 给所有节点非零 layout_rect（render 按 rect 产几何；0×0 节点会被某些路径跳过）。
     let all_ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
     for nid in all_ids {
@@ -4628,6 +4637,14 @@ fn popup_sort_key_strictly_above_scrollbar_thumb() {
                 .any(|x| x == "loom-popup")
         })
         .expect("loom-popup");
+    // 作者自写结构下 listbox 靠 role 定位（Scene::build entries 不含 role 字段，手动登记）。
+    scene.roles.insert(
+        popup_id,
+        crate::scene::node::RoleInfo {
+            role: Some(crate::scene::control::ROLE_LISTBOX.to_string()),
+            slots: Default::default(),
+        },
+    );
     // outer 设大 viewport，content 更高 → overflow:scroll effective → 产 v-thumb。
     scene.get_mut(outer_id).unwrap().layout_rect = Rect {
         x: 0.0,
@@ -4695,13 +4712,14 @@ fn popup_sort_key_strictly_above_scrollbar_thumb() {
 
 #[test]
 fn open_popup_renders_option_list_via_reparent_path() {
-    // 生产路径回归：select 经 create_node_from_template（注入 .loom-popup）+ option 手挂 select
-    // + reparent_options_into_popup（把 option 移进 popup）+ sync_control_visuals（open=true
-    // 移除 popup 的 display:none）后，render 末尾追加须把 option 文本画进浮层 popup（mask=0，
-    // 跳出祖先 overflow:hidden）。这是 Task 11 popup 渲染的真正生产结构证明：option 是 popup
-    // 的子节点（而非 select 的兄弟），否则 popup 浮层为空、option 被祖先 clip 裁掉。
+    // 生产路径回归：select 经 create_node_from_template（作者自写结构）+ listbox role 子 +
+    // option 在 listbox 内 + sync_control_visuals（open=true 设 listbox 的 display:block）后，
+    // render 末尾追加须把 option 文本画进浮层 listbox（mask=0，跳出祖先 overflow:hidden）。这是
+    // Task 11 popup 渲染的真正生产结构证明：option 是 listbox 的子节点（而非 select 的兄弟），
+    // 否则 listbox 浮层为空、option 被祖先 clip 裁掉。
     use crate::asset::ControlInit;
-    use crate::scene::control::{find_child_by_class, reparent_options_into_popup, POPUP};
+    use crate::scene::control::ROLE_LISTBOX;
+    use crate::scene::node::RoleInfo;
     use crate::style::resolved::OverflowMode;
     let fonts = test_font_table().expect("need test font");
     // outer(overflow:hidden) > select(Dropdown) 。select 不入 roots（隔离 solve，手动设 rect）。
@@ -4713,7 +4731,7 @@ fn open_popup_renders_option_list_via_reparent_path() {
     let outer = crate::scene::dynamic::create_root(&mut scene, "div", "").expect("create root div");
     scene.get_mut(outer).unwrap().base_style = outer_style.clone();
     scene.get_mut(outer).unwrap().style = outer_style;
-    // select：用 create_node_from_template 走注入路径（产 .loom-value + .loom-popup）。
+    // select：用 create_node_from_template（作者自写结构，core 不注入）。
     let sel = crate::scene::dynamic::create_node_from_template(
         &mut scene,
         NodeKind::Dropdown,
@@ -4721,7 +4739,22 @@ fn open_popup_renders_option_list_via_reparent_path() {
         Some(ControlInit::Dropdown { selected_index: 0 }),
     );
     crate::scene::dynamic::append_child(&mut scene, outer, sel).expect("select attach");
-    // 2 个 option，先挂 select（模拟 instantiate 按 parent_idx），再 reparent 进 popup。
+    // listbox role 子（作者写的弹出列表容器）。
+    let popup = crate::scene::dynamic::create_node_from_template(
+        &mut scene,
+        NodeKind::Container,
+        ResolvedStyle::default(),
+        None,
+    );
+    crate::scene::dynamic::append_child(&mut scene, sel, popup).expect("listbox attach");
+    scene.roles.insert(
+        popup,
+        RoleInfo {
+            role: Some(ROLE_LISTBOX.to_string()),
+            slots: Default::default(),
+        },
+    );
+    // 2 个 option 直接挂 listbox（作者正确结构）。
     let mut opt_ids = vec![];
     for t in ["Apple", "Banana"] {
         let opt = crate::scene::dynamic::create_node_from_template(
@@ -4738,12 +4771,9 @@ fn open_popup_renders_option_list_via_reparent_path() {
         );
         scene.text_contents.insert(txt, t.to_string());
         crate::scene::dynamic::append_child(&mut scene, opt, txt).expect("text attach");
-        crate::scene::dynamic::append_child(&mut scene, sel, opt).expect("option attach");
+        crate::scene::dynamic::append_child(&mut scene, popup, opt).expect("option attach");
         opt_ids.push(opt);
     }
-    // 关键：reparent（同 Stage::instantiate 建树后调用）。option 从 select 移进 popup。
-    reparent_options_into_popup(&mut scene, sel);
-    let popup = find_child_by_class(&scene, sel, POPUP).expect("loom-popup");
     // 展开 popup：sync_control_visuals 按 open=true 移除 popup 的 display:none 覆盖。
     scene.controls.ensure(
         sel,

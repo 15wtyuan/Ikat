@@ -745,12 +745,16 @@ impl Stage {
             // role/data-slot：从 TemplateNode 填 RoleTable（role-driven controls 地基）。
             // role 驱动语义分派，data-slot 标识控件视觉部件；运行时 find_child_by_role/slot 查表。
             // RoleTable::insert 自带空 info 过滤——无 role 且无 data-slot 的节点不入表，保持稀疏。
+            //
+            // data-slot 映射成 slots 的 key（值为空串占位）：`data-slot="thumb"` →
+            // slots["thumb"]=""。这样 find_child_by_slot(parent,"thumb") 直接比对 key 是否存在，
+            // 语义直观（slot 名是 key，不是 value）。
             let info = crate::scene::node::RoleInfo {
                 role: tn.role.clone(),
                 slots: tn
                     .data_slot
                     .as_ref()
-                    .map(|s| [("slot".to_string(), s.clone())].into_iter().collect())
+                    .map(|s| [(s.clone(), String::new())].into_iter().collect())
                     .unwrap_or_default(),
             };
             scene.roles.insert(node_id, info);
