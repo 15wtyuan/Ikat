@@ -30,4 +30,6 @@ body {
 .page-title, .section-title, .panel-title, .group-title, .dialog-title, .read-title, .col-title, .side-title, .stage-name { letter-spacing: -0.01em; }
 button { background: none; border: none; color: inherit; font: inherit; padding: 0; cursor: pointer; text-decoration: none; }
 input::placeholder, textarea::placeholder { color: #6c7080; opacity: 1; }
+/* role=textbox placeholder: author writes aria-placeholder; preview JS toggles data-empty when content is blank. */
+[role="textbox"][data-empty]::before { content: attr(aria-placeholder); color: #6c7080; opacity: 1; }
 select option { color: #e0e6ec; background-color: #152433; }
