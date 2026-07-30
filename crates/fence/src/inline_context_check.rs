@@ -19,8 +19,8 @@ use loomgui_core::style::resolved::ResolvedStyle;
 
 /// 文本级 inline 语义豁免。这些标签是“文本片段”（span 终态是 TextRun，main-design §10）
 /// 或结构占位（slot）——它们在 block 容器里的“不一致”要等文本模型（roadmap §4 复合束）
-/// 解决，不是靠强制作者声明 flex 能修的。报错只会逼作者把 `<li><span>x</span></li>` 改成怪结构，
-/// 无益。只拦布局 box（button/input/img/...）。
+/// 解决，不是靠强制作者声明 flex 能修的。报错只会逼作者把 `<div role="listitem"><span>x</span></div>` 改成怪结构，
+/// 无益。只拦布局 box（button/img/...）。
 /// （strong/em/br 已从围栏移除——它们就是 span/\n 的语义糖，不再单独存在。）
 const TEXT_LEVEL_SEMANTICS: &[SemanticKind] = &[SemanticKind::TextElement, SemanticKind::Slot];
 
@@ -73,7 +73,7 @@ fn parent_is_flex(
     has_multi_compound_flex_rule
 }
 
-/// 检查所有 inline 元素是否处于合法上下文（flex 容器或 `<p>`）。返回诊断（error 列表）。
+/// 检查所有 inline 元素是否处于合法上下文（flex 容器）。返回诊断（error 列表）。
 ///
 /// 入参：
 /// - `tree`：IrTree（取元素 tag + 父子链 + semantic）
@@ -112,7 +112,7 @@ pub fn check_inline_context(
             continue;
         };
 
-        // 只查 inline-origin 标签（button/span/img/input/select/textarea/progress）。
+        // 只查 inline-origin 标签（find_tag() 判定 display=Inline，动态读注册表）。
         // block-origin（div）在 block 流里本就撑满竖排，和浏览器一致。
         let Some(spec) = find_tag(&el.tag) else {
             continue;
