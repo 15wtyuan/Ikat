@@ -1,7 +1,7 @@
 //! Stage 6.7：控件必须被 CSS 命中校验。
 //!
 //! LoomGUI 控件（ProgressBar / Slider / Toggle / RadioButton + 文本控件
-//! TextField / PasswordField / SearchField / TextArea）**不带 UA 默认样式**——
+//! TextField / TextArea）**不带 UA 默认样式**——
 //! core 刻意保持纯净，不开「框架自带样式源」先例。代价：写了控件标签却没匹配的 CSS
 //! 规则 = 运行时渲染空白，作者无法察觉（HTML 在浏览器预览里浏览器会套自己的 UA 表，
 //! 看着正常，打包进 LoomGUI 却空）。
@@ -29,7 +29,7 @@ use loomgui_core::style::dynamic::{AttrOp, Compound, DynamicRule, ParsedSelector
 ///   `.loom-*` 视觉子节点（fill/track/thumb/check），作者须为控件本身 + 子节点配 CSS。
 /// - **Dropdown**：core 注入 `.loom-value`/`.loom-popup` 子节点，但**不注入箭头**——
 ///   教学文案单独分支，明确告诉作者需自绘箭头指示器。
-/// - **文本控件型**（TextField/PasswordField/SearchField/TextArea/NumberField）：控件自身渲染
+/// - **文本控件型**（TextField/TextArea/NumberField）：控件自身渲染
 ///   文本和光标，无注入子节点——作者须为控件本身配 background/border + caret-color。
 const CONTROL_KINDS: &[SemanticKind] = &[
     SemanticKind::ProgressBar,
@@ -37,8 +37,6 @@ const CONTROL_KINDS: &[SemanticKind] = &[
     SemanticKind::Toggle,
     SemanticKind::RadioButton,
     SemanticKind::TextField,
-    SemanticKind::PasswordField,
-    SemanticKind::SearchField,
     SemanticKind::TextArea,
     SemanticKind::Dropdown,
     SemanticKind::NumberField,
@@ -228,8 +226,6 @@ pub fn check_control_css(
             SemanticKind::Toggle => "toggle (checkbox)",
             SemanticKind::RadioButton => "radio button",
             SemanticKind::TextField => "text field",
-            SemanticKind::PasswordField => "password field",
-            SemanticKind::SearchField => "search field",
             SemanticKind::TextArea => "text area",
             SemanticKind::Dropdown => "dropdown (select)",
             SemanticKind::NumberField => "number field",

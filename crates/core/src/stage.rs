@@ -383,7 +383,7 @@ impl Stage {
         // display 须与 measure_text_controls 缓存同源（含 composition），否则光标字节偏移对
         // 不上缓存的 ranges。缓存为空（空 value/placeholder/首帧）→ 无法定位，返 None。
         let layout = scene.text_layouts.get(node.index())?.as_ref()?.clone();
-        let (display, comp_range) = display_value(e, n.kind);
+        let (display, comp_range) = display_value(e);
         if display.is_empty() {
             return None;
         }

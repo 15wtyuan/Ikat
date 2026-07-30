@@ -11,10 +11,10 @@ namespace LoomGUI.HeadlessTests
     ///
     /// Task 6 暴露了 get_node_disabled / get_control_readonly / blur 三个读出口 FFI；本测验投影层把
     /// 控件 getter 从 throw NE 改为直读 core 真相（之前 setter 可写、getter 读不到，破坏 round-trip）。
-    /// 覆盖：TextField/PasswordField/SearchField/TextArea/NumberField 的 ReadOnly + Disabled；
+    /// 覆盖：TextField/TextArea/NumberField 的 ReadOnly + Disabled；
     /// Slider/Toggle/RadioButton 的 Disabled；Node.Blur() 调 FFI 不抛。
     ///
-    /// fixture：textfield.pkg.bin（含 tf/pw/sf/ta 四文本控件，共享 EditState）+ controls.pkg.bin
+    /// fixture：textfield.pkg.bin（含 tf/ta 两文本控件，共享 EditState）+ controls.pkg.bin
     /// （含 sld/tggl/rdo）。NumberField 无专用 fixture，走 TextField 的 EditState 共享通道验证
     /// readonly（get_control_readonly 按 node 派发，不分 kind）。
     /// 全部经 headless harness P/Invoke 真 dll，不启 Unity。
@@ -57,36 +57,6 @@ namespace LoomGUI.HeadlessTests
                 Assert.True(ta.ReadOnly);
                 ta.ReadOnly = false;
                 Assert.False(ta.ReadOnly);
-            }
-            finally { StageHarness.Destroy(stage); }
-        }
-
-        /// <summary>
-        /// PasswordField / SearchField ReadOnly round-trip（与 TextField 同 EditState 语义表面）。
-        /// 验 getter 改读 FFI 后 sibling 文本控件一致 round-trip。
-        /// </summary>
-        [Theory]
-        [InlineData("pw", true)]
-        [InlineData("pw", false)]
-        [InlineData("sf", true)]
-        [InlineData("sf", false)]
-        public void sibling_textfields_readonly_roundtrips(string id, bool v)
-        {
-            var (stage, ctx, root) = LoadTextfieldFixture();
-            try
-            {
-                if (id == "pw")
-                {
-                    var pw = root.Get<PasswordField>("pw");
-                    pw.ReadOnly = v;
-                    Assert.Equal(v, pw.ReadOnly);
-                }
-                else
-                {
-                    var sf = root.Get<SearchField>("sf");
-                    sf.ReadOnly = v;
-                    Assert.Equal(v, sf.ReadOnly);
-                }
             }
             finally { StageHarness.Destroy(stage); }
         }

@@ -31,7 +31,5 @@ namespace LoomGUI
         ListItem      = 15,
         Slot          = 16,
         CustomElement = 17,
-        PasswordField = 18,
-        SearchField   = 19,
     }
 }

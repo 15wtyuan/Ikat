@@ -288,58 +288,6 @@ fn text_input_without_css_message_suggests_caret_color() {
     );
 }
 
-// ── PasswordField (input[type=password]) ──
-
-/// 裸 `<input type="password">` 无 CSS → error。
-#[test]
-fn password_without_css_errors() {
-    let html = r#"<input type="password">"#;
-    let result = parse_template(html, "t.html");
-    assert!(
-        has_control_css_diag(&result, "input"),
-        "裸 password input 无 CSS 应报错: {:?}",
-        result.diagnostics
-    );
-}
-
-/// `<input type="password">` + CSS 命中 → 放行。
-#[test]
-fn password_with_css_passes() {
-    let html = r#"<style>input[type="password"]{background:#fff}</style><input type="password">"#;
-    let result = parse_template(html, "t.html");
-    assert!(
-        !has_control_css_diag(&result, "input"),
-        "password + CSS 不应报错: {:?}",
-        result.diagnostics
-    );
-}
-
-// ── SearchField (input[type=search]) ──
-
-/// 裸 `<input type="search">` 无 CSS → error。
-#[test]
-fn search_without_css_errors() {
-    let html = r#"<input type="search">"#;
-    let result = parse_template(html, "t.html");
-    assert!(
-        has_control_css_diag(&result, "input"),
-        "裸 search input 无 CSS 应报错: {:?}",
-        result.diagnostics
-    );
-}
-
-/// `<input type="search">` + CSS 命中 → 放行。
-#[test]
-fn search_with_css_passes() {
-    let html = r#"<style>input[type="search"]{background:#fff}</style><input type="search">"#;
-    let result = parse_template(html, "t.html");
-    assert!(
-        !has_control_css_diag(&result, "input"),
-        "search + CSS 不应报错: {:?}",
-        result.diagnostics
-    );
-}
-
 // ── TextArea (textarea) ──
 
 /// 裸 `<textarea>` 无 CSS → error。

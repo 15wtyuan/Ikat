@@ -4,7 +4,7 @@
 // table，不做 OOP；C# 投影层用 typed 子类（Container/Button/Slider/...）给业务程序员稳定 API 表面。
 // NodeFactory 据 loomgui_stage_get_node_kind 返的 byte，switch 到对应 C# 子类构造。
 //
-// 全 20 NodeKind 变体都需 arm（对照 Projection/NodeKind.cs）。当前 C# 公共类型集已覆盖全部
+// 全 18 NodeKind 变体都需 arm（对照 Projection/NodeKind.cs）。当前 C# 公共类型集已覆盖全部
 // Rust kind——OptionItem/Slot/CustomElement 三容器型变体经本 factory 派发到专用子类（继承
 // Container）；仅 LineBreak 在 Rust 侧尚未实装（kind_from_tag 不产）。
 //
@@ -55,8 +55,6 @@ namespace LoomGUI
 
                 // ── 控件（叶子：私有内部结构）──
                 NodeKind.TextField     => new TextField(ctx, id),
-                NodeKind.PasswordField => new PasswordField(ctx, id),
-                NodeKind.SearchField   => new SearchField(ctx, id),
                 NodeKind.NumberField   => new NumberField(ctx, id),
                 NodeKind.Slider        => new Slider(ctx, id),
                 NodeKind.Toggle        => new Toggle(ctx, id),
@@ -73,7 +71,7 @@ namespace LoomGUI
                 NodeKind.CustomElement  => new CustomElement(ctx, id),
 
                 // ── 兜底：围栏闭合理论不达，防 FFI 异常 byte 崩整树。──
-                // Rust 侧 NodeKind #[repr(u8)] 20 变体（kind_as_u8_is_discriminant 锁），
+                // Rust 侧 NodeKind #[repr(u8)] 18 变体（kind_as_u8_is_discriminant 锁），
                 // 越界 byte 只能来自 ABI 漂移或内存损坏——这种情况下造 Container 不 crash，
                 // 让上层逻辑继续运行（用户看到的是错类型而非进程崩溃，更易诊断）。
                 _ => new Container(ctx, id),

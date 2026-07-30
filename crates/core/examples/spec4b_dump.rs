@@ -144,9 +144,7 @@ fn kind_to_html_tag(k: NodeKind) -> &'static str {
         | NodeKind::NumberField
         | NodeKind::Slider
         | NodeKind::Toggle
-        | NodeKind::RadioButton
-        | NodeKind::PasswordField
-        | NodeKind::SearchField => "input",
+        | NodeKind::RadioButton => "input",
         NodeKind::TextArea => "textarea",
         NodeKind::Dropdown => "select",
         NodeKind::OptionItem => "option",

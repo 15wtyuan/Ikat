@@ -36,12 +36,6 @@ namespace LoomGUI.HeadlessTests
         public void TextFieldIsFive() => Assert.Equal((byte)5, (byte)NodeKind.TextField);
 
         [Fact]
-        public void PasswordFieldIsEighteen() => Assert.Equal((byte)18, (byte)NodeKind.PasswordField);
-
-        [Fact]
-        public void SearchFieldIsNineteen() => Assert.Equal((byte)19, (byte)NodeKind.SearchField);
-
-        [Fact]
         public void NumberFieldIsSix() => Assert.Equal((byte)6, (byte)NodeKind.NumberField);
 
         [Fact]
@@ -84,7 +78,7 @@ namespace LoomGUI.HeadlessTests
         /// 提醒看护 ABI 对齐（同步两侧 enum）。
         /// </summary>
         [Fact]
-        public void VariantCountMatchesRust() => Assert.Equal(20, Enum.GetNames<NodeKind>().Length);
+        public void VariantCountMatchesRust() => Assert.Equal(18, Enum.GetNames<NodeKind>().Length);
 
         /// <summary>
         /// 显式赋值防隐式错位：最大判别值 == 变体数 - 1 验全变体紧凑连续

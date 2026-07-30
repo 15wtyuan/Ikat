@@ -174,11 +174,14 @@ fn bridge_extracts_textarea_attrs() {
 }
 
 #[test]
-fn bridge_extracts_password_attrs() {
+fn bridge_extracts_password_attrs_as_textfield() {
+    // <input type="password"> is web-only; it folds to a plain TextField (games
+    // self-implement masking). Its value/placeholder/maxlength/readonly still
+    // extract via the shared TextField path.
     let html =
         r#"<input type="password" value="secret" placeholder="pwd" maxlength="32" readonly>"#;
     let node = &run_bridge(html)[0];
-    assert_eq!(node.kind, NodeKind::PasswordField);
+    assert_eq!(node.kind, NodeKind::TextField);
     match &node.control_init {
         Some(ControlInit::TextField(e)) => {
             assert_eq!(e.value, "secret");
@@ -186,15 +189,16 @@ fn bridge_extracts_password_attrs() {
             assert_eq!(e.max_length, 32);
             assert!(e.readonly);
         }
-        other => panic!("expected TextField (password variant), got {:?}", other),
+        other => panic!("expected TextField, got {:?}", other),
     }
 }
 
 #[test]
-fn bridge_extracts_search_attrs() {
+fn bridge_extracts_search_attrs_as_textfield() {
+    // <input type="search"> is web-only; it folds to a plain TextField.
     let html = r#"<input type="search" value="query" placeholder="search..." maxlength="100">"#;
     let node = &run_bridge(html)[0];
-    assert_eq!(node.kind, NodeKind::SearchField);
+    assert_eq!(node.kind, NodeKind::TextField);
     match &node.control_init {
         Some(ControlInit::TextField(e)) => {
             assert_eq!(e.value, "query");
@@ -202,7 +206,7 @@ fn bridge_extracts_search_attrs() {
             assert_eq!(e.max_length, 100);
             assert!(!e.readonly);
         }
-        other => panic!("expected TextField (search variant), got {:?}", other),
+        other => panic!("expected TextField, got {:?}", other),
     }
 }
 

@@ -21,10 +21,10 @@ pub fn annotate(tree: &mut IrTree) {
             // Transitional: the `input` tag is being retired in favour of
             // `<div role="...">`. Until it leaves the fence, `<input type="...">`
             // (with no explicit role) maps straight to its legacy SemanticKind so
-            // existing templates keep resolving to the correct control — including
-            // PasswordField/SearchField, which have no WAI-ARIA role and are
-            // removed in a dedicated later task. This whole branch is deleted once
-            // `input` leaves the fence and authors write `role`.
+            // existing templates keep resolving to the correct control. Web-only
+            // input types (password/search) have no WAI-ARIA role and no game-UI
+            // meaning, so they fall back to TextField. This whole branch is deleted
+            // once `input` leaves the fence and authors write `role`.
             el.semantic = if el.tag == "input" && explicit_role.is_none() {
                 legacy_input_semantic(&el.attributes)
             } else {
@@ -49,8 +49,8 @@ fn legacy_input_semantic(attrs: &[IrAttribute]) -> Option<SemanticKind> {
         "checkbox" => SemanticKind::Toggle,
         "radio" => SemanticKind::RadioButton,
         "number" => SemanticKind::NumberField,
-        "password" => SemanticKind::PasswordField,
-        "search" => SemanticKind::SearchField,
+        // password/search are web-only (browser masking / native clear button);
+        // games self-implement, so they resolve to a plain TextField.
         _ => SemanticKind::TextField,
     })
 }
@@ -120,20 +120,20 @@ mod tests {
     }
 
     #[test]
-    fn legacy_input_password_and_search_preserved() {
-        // password/search have no WAI-ARIA role; they are kept verbatim until a
-        // dedicated task removes PasswordField/SearchField.
+    fn legacy_input_password_and_search_resolve_to_textfield() {
+        // password/search are web-only controls with no WAI-ARIA role; games
+        // self-implement masking/search, so they fold back to a plain TextField.
         let mut tree = build_tree("input", &[("type", "password")]);
         annotate(&mut tree);
         assert_eq!(
             semantic_at(&tree, IrNodeId(0)),
-            Some(SemanticKind::PasswordField)
+            Some(SemanticKind::TextField)
         );
         let mut tree = build_tree("input", &[("type", "search")]);
         annotate(&mut tree);
         assert_eq!(
             semantic_at(&tree, IrNodeId(0)),
-            Some(SemanticKind::SearchField)
+            Some(SemanticKind::TextField)
         );
     }
 

@@ -134,8 +134,6 @@ fn map_semantic(el: &IrElement) -> Result<NodeKind, String> {
         Some(SemanticKind::Button) => Ok(NodeKind::Button),
         Some(SemanticKind::Image) => Ok(NodeKind::Image),
         Some(SemanticKind::TextField) => Ok(NodeKind::TextField),
-        Some(SemanticKind::PasswordField) => Ok(NodeKind::PasswordField),
-        Some(SemanticKind::SearchField) => Ok(NodeKind::SearchField),
         Some(SemanticKind::NumberField) => Ok(NodeKind::NumberField),
         Some(SemanticKind::Slider) => Ok(NodeKind::Slider),
         Some(SemanticKind::Toggle) => Ok(NodeKind::Toggle),
@@ -252,9 +250,7 @@ fn extract_control_init(
             checked: attr(el, "checked").is_some(),
             name: attr(el, "name").unwrap_or_default(),
         }),
-        NodeKind::TextField | NodeKind::PasswordField | NodeKind::SearchField => {
-            Some(ControlInit::TextField(extract_edit_init(el)))
-        }
+        NodeKind::TextField => Some(ControlInit::TextField(extract_edit_init(el))),
         NodeKind::TextArea => Some(ControlInit::TextArea(EditInit {
             // textarea 按 HTML 规范用元素文本内容而非 value 属性（不走 extract_edit_init）。
             value: collect_element_text(ir_idx, tree),

@@ -301,7 +301,7 @@ fn thumb_render_node(node_id: u32, rect: Rect, sort_key: u32) -> RenderNode {
 /// `image_sizes` = Stage 持有的 path→(w,h) 尺寸表。九宫格 UV 用此表算 src_w/src_h
 /// 构建 Container 背景/边框/渐变 mesh（不含子节点文字）。
 ///
-/// 从原 `k if k.is_container()` 臂抽出，供 TextField/PasswordField/SearchField/TextArea
+/// 从原 `k if k.is_container()` 臂抽出，供 TextField/TextArea/NumberField
 /// 复用——这些控件需要画背景框（与 Container 一致）并在其上叠加文字。
 /// box-shadow 由调用方在 match 外统一处理（检查 `n.kind.is_container()`）。
 #[allow(clippy::too_many_arguments)]
@@ -1719,11 +1719,7 @@ fn render_one_node(
             );
             return; // 直接推完，跳过末尾的 id_to_pos / push。
         }
-        NodeKind::TextField
-        | NodeKind::PasswordField
-        | NodeKind::SearchField
-        | NodeKind::TextArea
-        | NodeKind::NumberField => {
+        NodeKind::TextField | NodeKind::TextArea | NodeKind::NumberField => {
             // 控件叶子节点：先画背景框（与 Container 相同），再叠加 value/placeholder 文字。
             // 背景 RenderNode 先进 nodes，占住 id_to_pos（供 batch 子节点查找）；
             // 文字走 push_text_meshes 追加，register_id_map=false 避免覆盖背景位置。
@@ -1755,12 +1751,11 @@ fn render_one_node(
             else {
                 return;
             };
-            // 显示文本：value 优先（经 display_value：PasswordField 掩码 + composition
-            // 预提交文本拼接），空时退到 placeholder。display_value 同时给出 composition
-            // 的 display 字节区间（PasswordField 掩码后的真实位置），供下划线对齐预提交文本
-            // 而非误指某个圆点。measure_text_controls 缓存的 TextLayout 与这里 display 同源
-            // （都走 display_value），故文字 mesh 与下划线几何一致。
-            let (dv, comp_range) = crate::scene::control::display_value(e, n.kind);
+            // 显示文本：value 优先（经 display_value 拼接 composition 预提交文本），空时
+            // 退到 placeholder。display_value 同时给出 composition 的 display 字节区间，供
+            // 下划线对齐预提交文本。measure_text_controls 缓存的 TextLayout 与这里 display
+            // 同源（都走 display_value），故文字 mesh 与下划线几何一致。
+            let (dv, comp_range) = crate::scene::control::display_value(e);
             let display = if dv.is_empty() {
                 e.placeholder.clone()
             } else {
@@ -1815,16 +1810,10 @@ fn render_one_node(
             let (sel_b, sel_e) = e.selection_range();
             if sel_b < sel_e {
                 let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
-                // sel_b/sel_e 是 value 字节偏移，PasswordField 掩码后显示串字节布局变了，
-                // 须先换算到显示串字节偏移再取像素几何，否则选区会错位到错误的圆点上。
-                let sel_b_d =
-                    crate::scene::control::value_byte_to_display_byte(e, n.kind, sel_b, &display);
-                let sel_e_d =
-                    crate::scene::control::value_byte_to_display_byte(e, n.kind, sel_e, &display);
-                let (xb, lib) =
-                    crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_b_d);
-                let (xe, lie) =
-                    crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_e_d);
+                // sel_b/sel_e 是 value 字节偏移；显示串与 value 同字节布局（无掩码），
+                // 直接取像素几何。
+                let (xb, lib) = crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_b);
+                let (xe, lie) = crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_e);
                 let sel_color = s.selection_background.unwrap_or([0.0, 0.0, 1.0, 0.5]); // 缺省蓝半透（CSS 未声明 selection-background 时）
                 let mut verts = Vec::new();
                 let mut uvs = Vec::new();
@@ -1895,9 +1884,8 @@ fn render_one_node(
             );
             // composition 下划线：有 composition 时在 composition 段下方画 2px 横线。
             // 区间取 display_value 返回的 comp_range（display 坐标里 composition 的真实字节
-            // 区间），而非 raw comp.pos——PasswordField 掩码改变字节布局，raw comp.pos 会
-            // 落在错误字符（某个圆点）上。comp_range 由 char 计数对齐生成，对所有 kind 都精确
-            // 覆盖预提交文本（包括 PasswordField）。
+            // 区间），而非 raw comp.pos——后者可能落在多字节字符中间，导致下划线错位。
+            // comp_range 由 char 计数对齐生成，精确覆盖预提交文本。
             if let Some((comp_start, comp_end)) = comp_range {
                 if comp_end > comp_start {
                     let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
@@ -1961,14 +1949,10 @@ fn render_one_node(
             // 最上层（sort_key 升序 = 后绘者在上，caret 压在选区/下划线之上）。
             if scene.focused_node == Some(n.id) && !e.readonly && e.cursor_visible {
                 let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
-                // e.cursor 是 value 字节偏移；PasswordField 掩码后显示串字节布局变了，
-                // 须换算到显示串字节偏移再取像素 x，否则末尾光标会落在第一个圆点之后
-                // （value byte 2 指向掩码串 byte 2 = 第一个 '•' 中间）而非第二个之后。
-                let cursor_d = crate::scene::control::value_byte_to_display_byte(
-                    e, n.kind, e.cursor, &display,
-                );
+                // e.cursor 是 value 字节偏移；显示串与 value 同字节布局（无掩码），
+                // 直接取像素 x。
                 let (cx, li) =
-                    crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, cursor_d);
+                    crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, e.cursor);
                 if let Some(line) = layout.lines.get(li) {
                     // cx 是 advance 累计（内容区相对，不含 off_left）；line.y 已含 off_top。
                     let x = rect.x + off_left + cx;

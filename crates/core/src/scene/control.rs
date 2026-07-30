@@ -42,38 +42,22 @@ pub const SLOT_THUMB: &str = "thumb";
 /// Dropdown 选中项显示区（`data-slot="value"`，内嵌 TextNode 承载选中 option 文本）。
 pub const SLOT_VALUE: &str = "value";
 
-/// 显示变换：PasswordField 掩码（'•' × 字符数）。其他 kind 原样。
-///
-/// 掩码保持字符串长度不变，每个 UTF-8 字符映射为一个 '•'（U+2022），
-/// 使密码框渲染为等长圆点行（掩码不透露密码长度之外的任何信息）。
-/// composition 期间 value 仍掩码，但预提交 composition 文本不掩码（见 [`display_value`]）。
-pub fn transform_display_value(kind: NodeKind, value: &str) -> String {
-    match kind {
-        NodeKind::PasswordField => value.chars().map(|_| '•').collect(),
-        _ => value.to_string(),
-    }
-}
-
-/// 返回 measure/render 应用的「显示文本」及其 composition 字节区间：value 经
-/// [`transform_display_value`] 掩码后，把 composition 预提交文本拼到 composition.pos 处
-/// （composition 本身不掩码——用户输拼音须可见）。
+/// 返回 measure/render 应用的「显示文本」及其 composition 字节区间：value 原样，把
+/// composition 预提交文本拼到 composition.pos 处（用户输拼音须可见）。
 ///
 /// 返回 `(String, Option<(usize, usize)>)`：第一个是显示文本，第二个是 composition 在该
 /// 显示文本里的字节区间 `[start, end)`（无 composition 或空 composition 时为 `None`）。
-/// 这个区间是 render 下划线 / 光标几何 / IME 候选窗定位的统一真相源——对 PasswordField
-/// 尤其关键：掩码后字节布局改变（每字符→1 个 '•'），原始 `comp.pos`（value 字节偏移）
-/// 不再落在正确字符上，必须用此返回区间。
+/// 这个区间是 render 下划线 / 光标几何 / IME 候选窗定位的统一真相源。
 ///
 /// 标记子串模型（RmlUi/FairyGUI 共识）：composition 不是独立 buffer，而是拼进显示文本的
-/// 一个段落，作为一个 text run 参与 measure/换行/光标几何。该段落在 render 时由 Task 12
-/// 的 composition 分支按下划线区间绘制。无 composition 时等价于 `transform_display_value`。
+/// 一个段落，作为一个 text run 参与 measure/换行/光标几何。该段落在 render 时由 composition
+/// 分支按下划线区间绘制。无 composition 时显示文本即为 value 原文。
 ///
-/// PasswordField 的 char 对齐：掩码后 value 的字节长度改变（每个字符→1 个 '•'），故
-/// composition.pos（基于原始 value 的字节偏移）不能直接索引掩码串。用字符计数对齐——
-/// composition.pos 落在原始 value 的某字符边界，掩码串同位字符位置 = 该边界前的字符数。
-/// composition 占据掩码串 `[pos_char, pos_char + composition_chars)` 字符位，再换算成字节区间。
-pub fn display_value(e: &EditState, kind: NodeKind) -> (String, Option<(usize, usize)>) {
-    let base = transform_display_value(kind, &e.value);
+/// composition.pos 是基于 value 的字节偏移，可能落在多字节字符中间。插入按字符计数对齐：
+/// pos 落在 value 的某字符边界，显示串同位字符位置 = 该边界前的字符数。composition 占据
+/// 显示串 `[pos_char, pos_char + composition_chars)` 字符位，再换算成字节区间。
+pub fn display_value(e: &EditState) -> (String, Option<(usize, usize)>) {
+    let base = e.value.clone();
     let Some(c) = e.composition.as_ref() else {
         return (base, None);
     };
@@ -84,13 +68,13 @@ pub fn display_value(e: &EditState, kind: NodeKind) -> (String, Option<(usize, u
     while aligned > 0 && !e.value.is_char_boundary(aligned) {
         aligned -= 1;
     }
-    // 掩码改变字节长度（PasswordField 每字符→1 个 '•'），故按字符计数对齐：
-    // value 边界前的字符数 = 掩码串里的对应字符位置。钳到掩码串当前长度内（防 pos 越界）。
+    // composition 插入按字符计数对齐：value 边界前的字符数 = 显示串里的对应字符位置。
+    // 钳到显示串当前长度内（防 pos 越界）。
     let pos_char = e.value[..aligned].chars().count();
     let insert_start_char = pos_char.min(chars.len());
     let comp_chars: Vec<char> = c.text.chars().collect();
     for (i, ch) in comp_chars.iter().enumerate() {
-        // 插入点越界（composition.pos 在掩码串末尾之外）时追加到末尾，不丢字符。
+        // 插入点越界（composition.pos 在显示串末尾之外）时追加到末尾，不丢字符。
         let at = (insert_start_char + i).min(chars.len());
         chars.insert(at, *ch);
     }
@@ -98,9 +82,8 @@ pub fn display_value(e: &EditState, kind: NodeKind) -> (String, Option<(usize, u
     if comp_chars.is_empty() {
         return (display, None);
     }
-    // composition 在 display 串里的真实字节区间 [start, end)。对非 PasswordField 与 raw
-    // comp.pos 等价；对 PasswordField 因掩码改变字节布局而不同——此区间让下划线 / 光标几何
-    // 对齐预提交文本本身（而非误指某个圆点）。
+    // composition 在 display 串里的真实字节区间 [start, end)。render 据此画下划线，
+    // 对齐预提交文本本身。
     let comp_end_char = insert_start_char + comp_chars.len();
     let comp_start_byte = char_index_to_byte(&display, insert_start_char);
     let comp_end_byte = char_index_to_byte(&display, comp_end_char);
@@ -115,50 +98,6 @@ fn char_index_to_byte(s: &str, char_idx: usize) -> usize {
         .nth(char_idx)
         .map(|(b, _)| b)
         .unwrap_or(s.len())
-}
-
-/// 把 `e.value` 的字节偏移换算成 [`display_value`] 返回的显示串里的字节偏移。
-///
-/// 掩码（PasswordField 每字符→'•'）与 composition 拼接都按字符改变字节长度，
-/// 故原始 value 字节偏移不能直接索引显示串——PasswordField value="ab"（2 字节）
-/// 掩码成 "••"（6 字节），末尾光标（value byte 2）必须映射到显示串 byte 6，
-/// 否则光标会落在第一个圆点之后而非第二个圆点之后。
-///
-/// 对齐单位是字符（掩码与拼接都在字符边界操作，绝不拆分多字节字符）：先取 value 的
-/// 字符序号，再按 composition 拼接点平移到显示串字符序号，最后经 [`char_index_to_byte']
-/// 落成字节偏移。非 PasswordField 显示串的 value 段与原值字节相同（identity），
-/// 直接返回原偏移（composition 的下划线几何由 `comp_range` 单独驱动，不经此函数）。
-///
-/// `display` 须为 `display_value(e, kind)` 的第一个返回值（与 measure/render 同源）。
-pub fn value_byte_to_display_byte(
-    e: &EditState,
-    kind: NodeKind,
-    vbyte: usize,
-    display: &str,
-) -> usize {
-    if kind != NodeKind::PasswordField {
-        return vbyte;
-    }
-    let vc = e.value[..vbyte.min(e.value.len())].chars().count();
-    // composition 拼在显示串的 comp.pos 字符位；value 字符序号越过拼接点后须加上
-    // composition 字符数才得到显示串里的对应字符序号（与 display_value 的插入逻辑对齐）。
-    let display_vc = match e.composition.as_ref() {
-        Some(c) => {
-            let mut p = c.pos.min(e.value.len());
-            while p > 0 && !e.value.is_char_boundary(p) {
-                p -= 1;
-            }
-            let splice_char = e.value[..p].chars().count();
-            let comp_chars = c.text.chars().count();
-            if vc <= splice_char {
-                vc
-            } else {
-                vc + comp_chars
-            }
-        }
-        None => vc,
-    };
-    char_index_to_byte(display, display_vc)
 }
 
 /// 在 parent 的直接子节点里按 role 找第一个匹配（基于 RoleTable）。无匹配 / parent 不
@@ -522,7 +461,7 @@ pub(crate) fn on_dropdown_key(
 ///
 /// 在 solve 后调用——此时 `layout_rect.w` 已就位（content width = rect.w - border - padding），
 /// `ControlState` 已在之前步骤同步（值/placeholder 在 sync_control_visuals 无关——TextField
-/// 视觉同步委托给 TextField beam，此处直接用 `transform_display_value` 取显示文本）。
+/// 视觉同步委托给 TextField beam，此处直接用 `display_value` 取显示文本）。
 ///
 /// 写入的 TextLayout 不含 border/padding 偏移——偏移由 render 阶段统一 `bake_content_offset`，
 /// 与正常 TextNode 路径（solve 测原始，render 烤偏移）保持一致。placeholder 场景（value 为空）：
@@ -557,7 +496,7 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
         };
         // display_value 同时返回 composition 的 display 字节区间；measure 只需显示文本本身
         // （区间由 render underline / cursor_rect 消费）。
-        let (display, _comp_range) = display_value(e, n.kind);
+        let (display, _comp_range) = display_value(e);
         // value 为空时跳过缓存——render 阶段会用 placeholder 重测（空串 TextLayout 零高，
         // 缓存后 render 的 unwrap_or_else 不触发，placeholder 无法显示）。
         if display.is_empty() {
@@ -1061,7 +1000,7 @@ fn set_slider_value(scene: &mut Scene, id: NodeId, value: f32, out: &mut Vec<Eve
 // readonly 守卫：insert/delete 在 readonly=true 时 no-op 返 false（照 HTML disabled/readonly）。
 //
 // 单行 vs 多行：sanitize 按 NodeKind 分派——TextArea 保留换行（删 \r/\t），其余
-// （TextField/PasswordField/SearchField/...）删 \n/\r/\t。paste/输入到单行框时换行被滤。
+// （TextField/NumberField/...）删 \n/\r/\t。paste/输入到单行框时换行被滤。
 
 /// 向左找前一个 UTF-8 字符的起始字节（即 idx 左侧那个 char 的开头）。
 ///
@@ -1107,7 +1046,7 @@ fn clamp_boundary(value: &str, idx: usize) -> usize {
 
 /// 按 NodeKind 净化字符串：TextArea 保留 `\n`（多行换行），其余控件删 `\n`/`\r`/`\t`。
 ///
-/// 单行输入框（TextField/PasswordField/SearchField/...）不应含换行/制表符——
+/// 单行输入框（TextField/NumberField/...）不应含换行/制表符——
 /// paste 带换行的多行文本进单行框时滤成单行（照 HTML 单行 input 行为）。
 /// TextArea 保留 `\n`（用户可手动换行）但仍删 `\r`/`\t`（CR 与 TAB 在文本域内无意义）。
 fn sanitize_str(kind: NodeKind, s: &str) -> String {
@@ -1244,7 +1183,7 @@ pub fn emit_value_changed(out: &mut Vec<EventRecord>, node: NodeId) {
 
 /// 回车键处理（单行/多行分派）。
 ///
-/// 单行框（TextField/PasswordField/SearchField/...）→ 不改 value，推一条 EVT_SUBMITTED@node
+/// 单行框（TextField/NumberField/...）→ 不改 value，推一条 EVT_SUBMITTED@node
 /// （照 HTML 单行 input Enter=表单提交语义）。TextArea → 插入 `\n`（insert_text）+
 /// ValueChanged；不发 Submitted（多行框 Enter 是换行，非提交）。
 ///
@@ -2909,31 +2848,12 @@ mod tests {
     // ── composition / display_value（Fix 1/3/4） ──
 
     #[test]
-    fn password_field_composition_display_range_points_at_composition() {
-        // PasswordField value "ab" → 掩码 "••"。composition "中" 插在 pos=1（ab 中间）→
-        // 显示文本 "•中•"（composition 不掩码，用户输入拼音须可见）。composition 的 display
-        // 字节区间必须指向 "中"，而不是某个圆点——这是 Fix 1 的核心：掩码改变字节布局后，
-        // raw comp.pos(=1) 会落在第二个圆点上，下划线 / 光标会误指。
-        let mut e = EditState::from_init("ab".into(), "".into(), 0, false);
-        set_composition(&mut e, "中", 1);
-        assert_eq!(e.composition.as_ref().unwrap().pos, 1);
-        let (display, range) = display_value(&e, NodeKind::PasswordField);
-        assert_eq!(display, "•中•", "masked value + visible composition");
-        let (start, end) = range.expect("composition range present for PasswordField");
-        assert_eq!(
-            &display[start..end],
-            "中",
-            "range points at composition char, not a bullet"
-        );
-    }
-
-    #[test]
     fn display_value_range_normal_field_matches_raw_comp_pos() {
-        // 非 PasswordField：掩码不改变字节布局，display_value 返回的区间 = raw comp.pos..+len。
+        // display_value 返回的区间 = raw comp.pos..+len（value 原样拼接，无字节布局变换）。
         // 回归锁：确保 char 对齐改造未坏掉普通文本框的常见路径。
         let mut e = EditState::from_init("ab".into(), "".into(), 0, false);
         set_composition(&mut e, "ni", 1);
-        let (display, range) = display_value(&e, NodeKind::TextField);
+        let (display, range) = display_value(&e);
         assert_eq!(display, "anib");
         let (start, end) = range.expect("composition range present");
         assert_eq!(&display[start..end], "ni");
@@ -2943,7 +2863,7 @@ mod tests {
     fn display_value_no_composition_returns_none() {
         // 无 composition → range 为 None（render 不画下划线，cursor_rect 退回原始光标）。
         let e = EditState::from_init("ab".into(), "".into(), 0, false);
-        let (display, range) = display_value(&e, NodeKind::TextField);
+        let (display, range) = display_value(&e);
         assert_eq!(display, "ab");
         assert!(range.is_none());
     }
@@ -2958,7 +2878,7 @@ mod tests {
         set_composition(&mut e, "", 1);
         assert!(e.composition.is_none(), "empty text clears composition");
         // display_value 随之返 None 区间（无下划线 / 候选窗）。
-        let (_display, range) = display_value(&e, NodeKind::TextField);
+        let (_display, range) = display_value(&e);
         assert!(range.is_none());
     }
 

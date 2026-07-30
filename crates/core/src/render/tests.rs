@@ -3472,9 +3472,9 @@ fn border_style_none_renders_no_border_even_with_width_and_color() {
     );
 }
 
-// ── TextField / PasswordField / SearchField / TextArea 渲染 ──
+// ── TextField / TextArea / NumberField 渲染 ──
 
-/// 构造一个带控件状态的叶子节点 scene（TextField/PasswordField/SearchField/TextArea）。
+/// 构造一个带控件状态的叶子节点 scene（TextField/TextArea/NumberField）。
 /// node_id=0，layout_rect 200×50，无背景色。
 fn make_scene_with_text_control(kind: NodeKind, state: ControlState) -> (Scene, NodeId) {
     let mut n = Node::default();
@@ -3567,40 +3567,6 @@ fn numberfield_renders_value_text() {
 }
 
 #[test]
-fn password_field_renders_masked_value() {
-    // PasswordField value="ab" → 渲染为 "••"（2 个 '•' 字符）。
-    let (mut scene, id) = make_scene_with_text_control(
-        NodeKind::PasswordField,
-        ControlState::TextField(EditState::from_init("ab".into(), "".into(), 0, false)),
-    );
-    let fonts = test_font_table().expect("need test font");
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    // 掩码后仍产字符（'•' × 2 → 2 个 glyph），program=1。
-    let has_text = frame.nodes.iter().any(|rn| {
-        rn.node_id == id.0
-            && matches!(
-                &rn.payload,
-                NodePayload::Mesh {
-                    program: 1,
-                    verts,
-                    ..
-                } if !verts.is_empty()
-            )
-    });
-    assert!(
-        has_text,
-        "PasswordField value='ab' must render masked glyphs (●●)"
-    );
-}
-
-#[test]
 fn textfield_empty_value_renders_placeholder() {
     // value 为空 → 渲染 placeholder 文字。
     let (mut scene, id) = make_scene_with_text_control(
@@ -3636,39 +3602,6 @@ fn textfield_empty_value_renders_placeholder() {
     assert!(
         has_text,
         "TextField with empty value must render placeholder 'Search...'"
-    );
-}
-
-#[test]
-fn search_field_renders_value_text() {
-    // SearchField 是 TextField 的变体，渲染行为与 TextField 一致。
-    let (mut scene, id) = make_scene_with_text_control(
-        NodeKind::SearchField,
-        ControlState::TextField(EditState::from_init("query".into(), "".into(), 0, false)),
-    );
-    let fonts = test_font_table().expect("need test font");
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    let has_text = frame.nodes.iter().any(|rn| {
-        rn.node_id == id.0
-            && matches!(
-                &rn.payload,
-                NodePayload::Mesh {
-                    program: 1,
-                    verts,
-                    ..
-                } if !verts.is_empty()
-            )
-    });
-    assert!(
-        has_text,
-        "SearchField value='query' must produce text glyph mesh"
     );
 }
 
@@ -4127,24 +4060,7 @@ fn textfield_selection_falls_back_to_default_blue() {
     );
 }
 
-// ===== PasswordField caret / selection position vs masked display (Fix I1) =====
-//
-// 回归保护：PasswordField 掩码后显示串字节布局与 value 不同（'•'=3 字节 vs 原字符），
-// 光标 / 选区的 value 字节偏移必须先换算到显示串字节偏移再取像素几何，否则末尾光标
-// 会落在第一个圆点之后（value byte 2 指向掩码串 byte 2 = 第一个 '•' 中间字节）。
-
-/// 建一个聚焦 PasswordField（value + 可设光标），返回 scene + node id。
-fn make_focused_password(value: &str) -> (Scene, NodeId) {
-    let (mut scene, id) = make_scene_with_text_control(
-        NodeKind::PasswordField,
-        ControlState::TextField(EditState::from_init(value.into(), "".into(), 0, false)),
-    );
-    scene.focused_node = Some(id);
-    if let Some(ControlState::TextField(e)) = scene.controls.get_mut(id) {
-        e.cursor_visible = true;
-    }
-    (scene, id)
-}
+// ===== TextControl caret geometry =====
 
 /// 渲染后取光标 quad 的左边缘 x（纯色 quad，verts 为世界坐标 [x,y] 对；取最小 x）。
 fn caret_left_x(frame: &FrameData, cursor_id: u32) -> Option<f32> {
@@ -4161,79 +4077,8 @@ fn caret_left_x(frame: &FrameData, cursor_id: u32) -> Option<f32> {
     })
 }
 
-/// 渲染后取选区 quad 的水平跨度 [min_x, max_x]（跨行选区也取整体包围）。
-fn selection_x_span(frame: &FrameData, sel_id: u32) -> Option<(f32, f32)> {
-    let mut min_x = f32::INFINITY;
-    let mut max_x = f32::NEG_INFINITY;
-    let mut found = false;
-    for rn in frame.nodes.iter().filter(|rn| rn.node_id == sel_id) {
-        if let NodePayload::Mesh { verts, .. } = &rn.payload {
-            if !verts.is_empty() {
-                found = true;
-                for v in verts {
-                    min_x = min_x.min(v[0]);
-                    max_x = max_x.max(v[0]);
-                }
-            }
-        }
-    }
-    if found {
-        Some((min_x, max_x))
-    } else {
-        None
-    }
-}
-
-/// PasswordField value="ab" 末尾光标（cursor=2）必须落在第二个圆点之后（≈2 倍单圆点宽），
-/// 而非第一个圆点之后。bug 下 value byte 2 被当作掩码串 byte 2（第一个 '•' 中间字节），
-/// 光标停在 1 倍圆点宽处，与 cursor=1 重合。
-#[test]
-fn password_field_caret_at_end_after_two_bullets() {
-    let fonts = test_font_table().expect("need test font");
-    // cursor=1：光标在第 1 个圆点后（1 倍单宽）。
-    let (mut scene1, id1) = make_focused_password("ab");
-    if let Some(ControlState::TextField(e)) = scene1.controls.get_mut(id1) {
-        e.cursor = 1;
-    }
-    crate::scene::transform::compute_world_transforms(&mut scene1);
-    let (frame1, _, _) = build_render_nodes(
-        &scene1,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    let x1 = caret_left_x(&frame1, tf_synth_id(id1.0, TF_CURSOR_SYNTH_BYTE))
-        .expect("cursor=1 must render caret quad");
-    // cursor=2：光标应在第 2 个圆点后（2 倍单宽）。
-    let (mut scene2, id2) = make_focused_password("ab");
-    if let Some(ControlState::TextField(e)) = scene2.controls.get_mut(id2) {
-        e.cursor = 2;
-    }
-    crate::scene::transform::compute_world_transforms(&mut scene2);
-    let (frame2, _, _) = build_render_nodes(
-        &scene2,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    let x2 = caret_left_x(&frame2, tf_synth_id(id2.0, TF_CURSOR_SYNTH_BYTE))
-        .expect("cursor=2 must render caret quad");
-    // 核心回归断言：末尾光标必须比中位光标更靠右。bug 下 x1 == x2（都停 1 倍宽）。
-    assert!(
-        x2 > x1,
-        "PasswordField 末尾光标(cursor=2) x={x2} 必须在中位光标(cursor=1) x={x1} 之后（掩码串偏移换算）"
-    );
-    // 进一步：末尾光标约在第 2 个圆点后 ≈ 2 倍单宽（容忍字体度量误差，1.5 倍门槛足够区分）。
-    assert!(
-        x2 >= x1 * 1.5,
-        "PasswordField 末尾光标 x={x2} 应 ≈2× 单圆点宽(x1={x1})，而非重合于 1×"
-    );
-}
-
-/// TextField 同 value/cursor 下光标不受掩码影响（value 字节 == 显示字节），换算为 identity。
-/// 这条断言锁住「非 PasswordField 不走换算路径」，防止未来把 identity 路径改坏。
+/// TextField 光标几何：cursor=2（"ab" 末尾）必须落在有限正 x（两字符宽之后）。
+/// 回归锁：显示串与 value 同字节布局（无掩码），cursor 字节偏移直接取像素 x。
 #[test]
 fn textfield_caret_unaffected_by_display_remap() {
     let fonts = test_font_table().expect("need test font");
@@ -4255,41 +4100,6 @@ fn textfield_caret_unaffected_by_display_remap() {
     assert!(
         x.is_finite() && x > 0.0,
         "TextField caret x finite and positive: {x}"
-    );
-}
-
-/// PasswordField 选区几何须对齐掩码显示串。value="abcd" 选区 [1,3] → 掩码 "••••"，
-/// 选区应覆盖第 2、3 个圆点（约 2 倍单圆点宽）。bug 下 sel_b=1/sel_e=3 被当作掩码串
-/// 字节偏移：byte 1、byte 3 都落在第一个 '•'（bytes 0..3）内部，选区退化为 0 宽或错位。
-#[test]
-fn password_field_selection_aligned_to_masked_display() {
-    let fonts = test_font_table().expect("need test font");
-    let (mut scene, id) = make_focused_password("abcd");
-    if let Some(ControlState::TextField(e)) = scene.controls.get_mut(id) {
-        // 选区 [1,3)：value 字节偏移，覆盖 "bc" → 掩码后第 2、3 个圆点。
-        e.cursor = 3;
-        e.anchor = 1;
-    }
-    crate::scene::transform::compute_world_transforms(&mut scene);
-    let (frame, _, _) = build_render_nodes(
-        &scene,
-        &fonts,
-        &std::collections::HashMap::new(),
-        &empty_sizes(),
-        &mut test_glyph_atlas(),
-    );
-    let (sel_min, sel_max) = selection_x_span(&frame, tf_synth_id(id.0, TF_SELECTION_SYNTH_BYTE))
-        .expect("PasswordField selection must render quad");
-    let sel_w = sel_max - sel_min;
-    // 选区宽度必须为正（bug 下 sel_b/sel_e 落在同一个 '•' 字节内 → 0 宽或极窄）。
-    assert!(
-        sel_w > 1.0,
-        "PasswordField 选区宽度 sel_w={sel_w} 须为正（约 2 个圆点宽），不可塌缩"
-    );
-    // 选区不应从原点开始（它从第 2 个圆点开始，跳过第 1 个）。
-    assert!(
-        sel_min > 0.0,
-        "PasswordField 选区起点 sel_min={sel_min} 须在第 1 个圆点之后（跳过首个圆点）"
     );
 }
 

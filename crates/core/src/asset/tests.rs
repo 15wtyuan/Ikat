@@ -544,46 +544,6 @@ fn v18_nontrivial_nodekinds_roundtrip() {
     }
 }
 
-/// v20: PasswordField/SearchField 节点经 write_package → read_package 往返后 kind 保真，
-/// 且包版本号 = PKG_FORMAT_VERSION。这两个变体是 v20 从 TextField 拆出的（判别值 23/24），
-/// 本测试锁定 pkg kind_tag 写读映射 + 版本号 bump 的一致性。
-#[test]
-fn v20_password_search_field_roundtrip() {
-    let root = tn(NodeKind::Container);
-    let mut pwd = tn(NodeKind::PasswordField);
-    pwd.parent_idx = Some(0);
-    let mut search = tn(NodeKind::SearchField);
-    search.parent_idx = Some(0);
-    let nodes = [root, pwd, search];
-    let rules = empty_rules();
-    let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
-    };
-    let bytes = write_package(&input);
-
-    // 版本号 = PKG_FORMAT_VERSION（Header 偏移 4..8 是 version 字段）。
-    let ver = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
-    assert_eq!(
-        ver, PKG_FORMAT_VERSION,
-        "pkg format version must match PKG_FORMAT_VERSION"
-    );
-
-    let pkg = read_package(&bytes).expect("roundtrip read ok");
-    let ns = &pkg.components["c"].nodes;
-    assert_eq!(ns.len(), 3);
-    assert_eq!(ns[0].kind, NodeKind::Container);
-    assert_eq!(
-        ns[1].kind,
-        NodeKind::PasswordField,
-        "PasswordField must survive pkg roundtrip (discriminant 23)"
-    );
-    assert_eq!(
-        ns[2].kind,
-        NodeKind::SearchField,
-        "SearchField must survive pkg roundtrip (discriminant 24)"
-    );
-}
-
 /// v24: ControlInit 经 bincode serialize/deserialize 往返保真（pkg.bin 里 control_init
 /// 字段就是 Option<ControlInit> 的 bincode blob）。锁定序列化布局稳定性，防后续重构
 /// 悄悄改 variant 载荷形态破坏 pkg.bin 兼容。

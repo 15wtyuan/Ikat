@@ -7,12 +7,12 @@ using Xunit;
 namespace LoomGUI.HeadlessTests
 {
     /// <summary>
-    /// P2 TextField 投影层验收：TextField/PasswordField/SearchField/TextArea 经 FFI 填实的属性 +
+    /// P2 TextField 投影层验收：TextField/TextArea 经 FFI 填实的属性 +
     /// 文本控件事件 demux（EVT_VALUE_CHANGED / EVT_SUBMITTED）。
     ///
     /// 文本控件的 EditState 是打包期产物（pkg.bin 经 create_node_from_template + ControlInit::TextField
     /// 注入 scene.controls side table），运行时无 control_init setter FFI——故用预构建的
-    /// textfield.pkg.bin fixture（含 tf/pw/sf/ta 四节点）经 LoadPackage+Instantiate 拿到带 EditState 的
+    /// textfield.pkg.bin fixture（含 tf/ta 两节点）经 LoadPackage+Instantiate 拿到带 EditState 的
     /// 文本控件节点，而非 create_root。
     ///
     /// 输入流测试（Submitted/textinput）走核心真实管线：request_focus → set_key_input/set_text_input →
@@ -106,40 +106,6 @@ namespace LoomGUI.HeadlessTests
                 tf.ReadOnly = true;
                 tf.Value = "programmatic";    // readonly 不拦编程 setter（HTML JS 语义）
                 Assert.Equal("programmatic", tf.Value);
-            }
-            finally { StageHarness.Destroy(stage); }
-        }
-
-        /// <summary>
-        /// PasswordField.Value round-trip（Password mask 在 Rust 渲染侧，C# Value 是明文）。
-        /// 验PasswordField 与 TextField 共享 FFI 通道（get/set_control_text）。
-        /// </summary>
-        [Fact]
-        public void passwordfield_value_roundtrips()
-        {
-            var (stage, ctx, root) = LoadTextfieldFixture();
-            try
-            {
-                var pw = root.Get<PasswordField>("pw");
-                pw.Value = "secret";
-                Assert.Equal("secret", pw.Value);
-            }
-            finally { StageHarness.Destroy(stage); }
-        }
-
-        /// <summary>
-        /// SearchField.Value / Placeholder round-trip。验 SearchField 共享 FFI 通道。
-        /// </summary>
-        [Fact]
-        public void searchfield_value_and_placeholder_roundtrip()
-        {
-            var (stage, ctx, root) = LoadTextfieldFixture();
-            try
-            {
-                var sf = root.Get<SearchField>("sf");
-                Assert.Equal("query", sf.Placeholder);
-                sf.Value = "find me";
-                Assert.Equal("find me", sf.Value);
             }
             finally { StageHarness.Destroy(stage); }
         }

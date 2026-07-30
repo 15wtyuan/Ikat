@@ -283,8 +283,6 @@ pub fn compound_matches_node(c: &Compound, node_id: NodeId, scene: &Scene) -> bo
             // input 变体：type 在 parse 期固化为独立 kind，tag 统一为 "input"
             NodeKind::TextField
             | NodeKind::NumberField
-            | NodeKind::PasswordField
-            | NodeKind::SearchField
             | NodeKind::Slider
             | NodeKind::Toggle
             | NodeKind::RadioButton => "input",
@@ -318,7 +316,7 @@ pub fn compound_matches_node(c: &Compound, node_id: NodeId, scene: &Scene) -> bo
 }
 
 /// 运行时属性选择器匹配。Node 不存任意 HTML 属性字面值，按 name 分派到三类来源：
-/// - `[type="x"]`：input 的 type 在 parse 期固化为 NodeKind（PasswordField/SearchField/Slider/...
+/// - `[type="x"]`：input 的 type 在 parse 期固化为 NodeKind（Slider/NumberField/...
 ///   各自独立 kind），selector 值 → NodeKind 精确对应（`type_matches_nodekind`）。
 /// - `[aria-*]`：aria 实时值从 ControlState 合成（`synth_aria_value`），随控件状态变。
 /// - `[role="x"]` / `[data-slot="x"]`：从 RoleTable 查打包期提取的静态值。
@@ -361,8 +359,6 @@ fn type_matches_nodekind(scene: &Scene, id: NodeId, val: &str) -> bool {
     };
     let expected = match val {
         "text" => NodeKind::TextField,
-        "password" => NodeKind::PasswordField,
-        "search" => NodeKind::SearchField,
         "number" => NodeKind::NumberField,
         "range" => NodeKind::Slider,
         "checkbox" => NodeKind::Toggle,
@@ -1457,16 +1453,16 @@ mod tests {
 
     #[test]
     fn attr_selector_type_matches_nodekind_precisely() {
-        // [type="password"] 只匹配 PasswordField，不匹配 TextField
-        let sel = hand_selector(r#"[type="password"]"#);
-        let (s_pw, pw) = single_node_scene(test_node(NodeKind::PasswordField));
+        // [type="text"] 只匹配 TextField，不匹配 NumberField
+        let sel = hand_selector(r#"[type="text"]"#);
         let (s_text, text) = single_node_scene(test_node(NodeKind::TextField));
-        assert!(compound_matches_node(&sel.compound[0], pw, &s_pw));
-        assert!(!compound_matches_node(&sel.compound[0], text, &s_text));
-        // [type="text"] 只匹配 TextField
-        let sel_text = hand_selector(r#"[type="text"]"#);
-        assert!(compound_matches_node(&sel_text.compound[0], text, &s_text));
-        assert!(!compound_matches_node(&sel_text.compound[0], pw, &s_pw));
+        let (s_num, num) = single_node_scene(test_node(NodeKind::NumberField));
+        assert!(compound_matches_node(&sel.compound[0], text, &s_text));
+        assert!(!compound_matches_node(&sel.compound[0], num, &s_num));
+        // [type="number"] 只匹配 NumberField
+        let sel_num = hand_selector(r#"[type="number"]"#);
+        assert!(compound_matches_node(&sel_num.compound[0], num, &s_num));
+        assert!(!compound_matches_node(&sel_num.compound[0], text, &s_text));
     }
 
     #[test]

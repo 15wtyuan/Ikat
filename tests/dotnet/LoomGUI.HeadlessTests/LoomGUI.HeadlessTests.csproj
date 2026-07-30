@@ -49,7 +49,7 @@
     <!-- P2-A fixture: p2-visual-acceptance (border-radius + border / box-shadow) — used by VisualDecorationTests.
          Built from fixtures/p2-visual.workspace via loom-pkg; output copied here as a git-tracked fixture. -->
     <None Include="fixtures\p2-visual.pkg.bin" Link="fixtures\p2-visual.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
-    <!-- P2 TextField projection fixture: textfield.pkg.bin (TextField/Password/Search/TextArea
+    <!-- P2 TextField projection fixture: textfield.pkg.bin (TextField/TextArea
          with baked EditState) — used by TextFieldProjectionTests for value/placeholder/selection
          FFI round-trip + Submitted/textinput via set_key_input/set_text_input. Built from
          fixtures/textfield.workspace via loom-pkg. -->

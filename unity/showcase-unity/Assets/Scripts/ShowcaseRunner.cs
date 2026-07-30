@@ -194,11 +194,11 @@ public class ShowcaseRunner : MonoBehaviour
                 name.ValueChanged += e => Debug.Log($"[Showcase] char-name: \"{e.NewValue}\"");
                 name.Submitted += v => Debug.Log($"[Showcase] char-name submitted: \"{v}\"");
             }
-            // PasswordField.ValueChanged（P2 变体：掩码显示，typed 值仍为明文；证投影类对）。
-            if (page.TryGet<PasswordField>("char-pass", out var pass))
+            // char-pass：<input type="password"> 现折叠为 TextField（web-only 控件，游戏自实现掩码）。
+            if (page.TryGet<TextField>("char-pass", out var pass))
                 pass.ValueChanged += e => Debug.Log($"[Showcase] char-pass changed (len={(e.NewValue?.Length ?? 0)})");
-            // SearchField.ValueChanged（P2 变体类型对）。
-            if (page.TryGet<SearchField>("char-search", out var search))
+            // char-search：<input type="search"> 同样折叠为 TextField。
+            if (page.TryGet<TextField>("char-search", out var search))
                 search.ValueChanged += e => Debug.Log($"[Showcase] char-search: \"{e.NewValue}\"");
             // Dropdown.SelectionChanged（P3：select 弹出列表，typed 事件链）。
             if (page.TryGet<Dropdown>("char-class", out var cls))

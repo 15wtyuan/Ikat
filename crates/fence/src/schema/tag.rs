@@ -63,10 +63,6 @@ pub enum SemanticKind {
     /// the fence.
     InputDispatch,
     TextField,
-    /// `<input type="password">` — split from TextField so attribute selectors can match it.
-    PasswordField,
-    /// `<input type="search">` — split from TextField so attribute selectors can match it.
-    SearchField,
     NumberField,
     Slider,
     Toggle,

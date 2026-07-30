@@ -113,10 +113,6 @@ pub enum NodeKind {
     ListItem,
     Slot,
     CustomElement,
-    /// `<input type="password">` — split from TextField for attribute-selector matching.
-    PasswordField,
-    /// `<input type="search">` — split from TextField for attribute-selector matching.
-    SearchField,
     /// `<template>` — ListView item blueprint. Forced display:none: never laid out,
     /// rendered, hit-tested or cascaded. Lives in the pkg so the runtime can clone
     /// its subtree to produce list slots.
@@ -125,7 +121,7 @@ pub enum NodeKind {
 
 impl NodeKind {
     /// u8 判别值 → NodeKind（pkg.bin kind_tag read 用）。越界返 None。
-    /// 变体只追加到 enum 末尾，保持既有判别值稳定。
+    /// 变体只追加到 enum 末尾，保持既有判别值稳定（pkg 版本门拒旧包，故判别值重排不破跨版本）。
     pub fn from_u8(b: u8) -> Option<NodeKind> {
         match b {
             0 => Some(NodeKind::Container),
@@ -146,9 +142,7 @@ impl NodeKind {
             15 => Some(NodeKind::ListItem),
             16 => Some(NodeKind::Slot),
             17 => Some(NodeKind::CustomElement),
-            18 => Some(NodeKind::PasswordField),
-            19 => Some(NodeKind::SearchField),
-            20 => Some(NodeKind::Template),
+            18 => Some(NodeKind::Template),
             _ => None,
         }
     }
@@ -204,8 +198,6 @@ const _: () = {
             | NodeKind::ListItem
             | NodeKind::Slot
             | NodeKind::CustomElement
-            | NodeKind::PasswordField
-            | NodeKind::SearchField
             | NodeKind::Template => {}
         }
     }
@@ -792,8 +784,7 @@ mod repr_tests {
         assert_eq!(NodeKind::TextNode as u8, 1);
         assert_eq!(NodeKind::Button as u8, 3);
         assert_eq!(NodeKind::Image as u8, 4);
-        assert_eq!(NodeKind::PasswordField as u8, 18);
-        assert_eq!(NodeKind::SearchField as u8, 19);
+        assert_eq!(NodeKind::Template as u8, 18);
     }
 
     #[test]
@@ -817,21 +808,12 @@ mod repr_tests {
             NodeKind::ListItem,
             NodeKind::Slot,
             NodeKind::CustomElement,
-            NodeKind::PasswordField,
-            NodeKind::SearchField,
             NodeKind::Template,
         ];
         for &k in &all {
             assert_eq!(NodeKind::from_u8(k as u8), Some(k));
         }
-        assert_eq!(NodeKind::from_u8(21), None); // 越界（Template=20 是最后合法判别值）
+        assert_eq!(NodeKind::from_u8(19), None); // 越界（Template=18 是最后合法判别值）
         assert_eq!(NodeKind::from_u8(255), None);
-    }
-
-    #[test]
-    fn template_variant_appended_after_searchfield() {
-        // 末尾追加保证既有判别值稳定（旧 pkg.bin kind_tag 不移位）。
-        assert_eq!(NodeKind::from_u8(20), Some(NodeKind::Template));
-        assert_eq!(NodeKind::from_u8(19), Some(NodeKind::SearchField));
     }
 }
