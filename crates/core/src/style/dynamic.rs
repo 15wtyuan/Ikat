@@ -51,7 +51,9 @@ pub enum Combinator {
 }
 
 /// 属性选择器运算符（围栏子集：仅存在性 + 相等；不做 ~=, ^=, $=, *=）。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Copy：无字段枚举，运行时 attr 匹配按值分派（Eq/Exists），Copy 使其在元组 match 等
+/// 场景零成本取用，无需克隆。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AttrOp {
     /// `[attr]` — 属性存在即匹配。
     Exists,
@@ -244,14 +246,15 @@ pub struct ScopedRuleTable {
     pub entries: Vec<ScopedRule>,
 }
 
-use crate::scene::node::{Node, NodeKind};
+use crate::scene::node::{ControlState, NodeKind};
 
 /// 运行时版 compound 匹配（消费 Node 而非 ElementData，运行时无 ElementTree）。
 /// 匹配 tag/classes/id（不含伪类状态——状态由 match_element_with_state 门控）。
 /// id 属性存 Node.id_attr（`id="..."`）；Node.id 是 NodeId 索引身份，二者不同。
 ///
 /// **常驻：**runtime rematch 用，不依赖 parse feature。
-pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
+pub fn compound_matches_node(c: &Compound, node_id: NodeId, scene: &Scene) -> bool {
+    let node = scene.get(node_id).expect("live node");
     if let Some(t) = &c.tag {
         // NodeKind → HTML 标签名：标准元素用其 tag，控件 kind 回溯到作者写的 tag
         // （input/progress），使 `input[type="range"]`、`progress` 等选择器在运行时 rematch
@@ -303,31 +306,60 @@ pub fn compound_matches_node(c: &Compound, node: &Node) -> bool {
             return false;
         }
     }
-    // 属性选择器：Node 不携带任意 HTML 属性字面值，但 [type="x"] 可经 type→NodeKind 映射精确匹配
-    // （input 的 type 在 parse 期已固化为 NodeKind，TextField/PasswordField/SearchField 等各自独立
-    // kind）。其他 attr name 仍不匹配（Node 无对应字面值）。
+    // 属性选择器：attr_matches_node 按 name 分派——[type=] 查 NodeKind、[aria-*] 合成
+    // ControlState 实时值、[role=]/[data-slot=] 查 RoleTable。Node 不携带任意 HTML 属性
+    // 字面值，故非这几类的 attr 不命中。
     for a in &c.attrs {
-        if !attr_matches_node(a, node) {
+        if !attr_matches_node(scene, node_id, a) {
             return false;
         }
     }
     true
 }
 
-/// `[type="x"]` 经 type 值 → NodeKind 精确对应。其他 attr name / `[type]` 存在形式本轮不匹配。
+/// 运行时属性选择器匹配。Node 不存任意 HTML 属性字面值，按 name 分派到三类来源：
+/// - `[type="x"]`：input 的 type 在 parse 期固化为 NodeKind（PasswordField/SearchField/Slider/...
+///   各自独立 kind），selector 值 → NodeKind 精确对应（`type_matches_nodekind`）。
+/// - `[aria-*]`：aria 实时值从 ControlState 合成（`synth_aria_value`），随控件状态变。
+/// - `[role="x"]` / `[data-slot="x"]`：从 RoleTable 查打包期提取的静态值。
 ///
-/// type→NodeKind 映射必须与 `crates/fence/src/schema/tag.rs::resolve_semantic`（input 分支）
-/// 保持一致：那是 parse 期 `<input type=x>` → SemanticKind → NodeKind 的同一份标准 HTML 语义，
-/// 这里是 match 期 selector `[type=x]` → NodeKind 的另一面。两者分歧会导致 `[type="password"]`
-/// 匹配错误 kind。
-fn attr_matches_node(a: &AttrSelector, node: &Node) -> bool {
-    if a.name != "type" {
-        return false;
+/// 其他 attr name 不命中（Node 无对应字面值）。Exists 与 Eq 均支持：Exists 判该 attr 对本
+/// 节点是否有语义（如 `[aria-checked]` 对 Toggle 有、对普通 div 无），Eq 判合成/查表值 == 字面值。
+fn attr_matches_node(scene: &Scene, id: NodeId, a: &AttrSelector) -> bool {
+    let name = a.name.as_str();
+    // aria-* 实时合成（值随 ControlState 变）
+    if let Some(rest) = name.strip_prefix("aria-") {
+        return match a.op {
+            AttrOp::Eq => synth_aria_value(scene, id, rest).as_deref() == a.value.as_deref(),
+            AttrOp::Exists => synth_aria_value(scene, id, rest).is_some(),
+        };
     }
-    let Some(val) = &a.value else {
+    match (name, a.op) {
+        ("role", AttrOp::Eq) => scene.roles.role_of(id) == a.value.as_deref(),
+        ("role", AttrOp::Exists) => scene.roles.role_of(id).is_some(),
+        ("data-slot", AttrOp::Eq) => a
+            .value
+            .as_deref()
+            .is_some_and(|v| scene.roles.slot_of(id, v).is_some()),
+        ("data-slot", AttrOp::Exists) => scene.roles.get(id).is_some_and(|i| !i.slots.is_empty()),
+        ("type", AttrOp::Eq) => match &a.value {
+            Some(val) => type_matches_nodekind(scene, id, val),
+            None => false,
+        },
+        // [type] 存在形式不支持：type 是结构性属性（input 恒有），存在性无匹配意义。
+        ("type", AttrOp::Exists) => false,
+        _ => false,
+    }
+}
+
+/// `[type="x"]` selector 值 → NodeKind 精确匹配。映射须与 fence `resolve_semantic`（input
+/// 分支）一致：parse 期 `<input type=x>` → NodeKind 与 rematch 期 `[type=x]` → NodeKind 是
+/// 同一份标准 HTML 语义的两面，分歧会让 `[type="password"]` 误匹配错误 kind。
+fn type_matches_nodekind(scene: &Scene, id: NodeId, val: &str) -> bool {
+    let Some(node) = scene.get(id) else {
         return false;
-    }; // [type] 存在形式本轮不匹配
-    let expected_kind = match val.as_str() {
+    };
+    let expected = match val {
         "text" => NodeKind::TextField,
         "password" => NodeKind::PasswordField,
         "search" => NodeKind::SearchField,
@@ -337,7 +369,38 @@ fn attr_matches_node(a: &AttrSelector, node: &Node) -> bool {
         "radio" => NodeKind::RadioButton,
         _ => return false,
     };
-    node.kind == expected_kind
+    node.kind == expected
+}
+
+/// 从 ControlState 合成 aria 属性的实时值（运行时随控件状态变）。Node 不存 HTML 属性字面值，
+/// aria-* 的当前值必须由控件状态派生。返回 None = 该 aria 对本节点无语义（选择器不命中）。
+///
+/// - `aria-checked`：Toggle / Radio 的 `checked`（"true"/"false"）。
+/// - `aria-expanded`：Dropdown 的 `open`。
+/// - `aria-valuenow`：Progress / Slider 的 `value`（f32）或 NumberField 的数值文本。
+/// - `aria-multiline`：**静态**，按 NodeKind（TextArea="true"），不查 ControlState——TextArea
+///   与 TextField 共用 EditState，多行属性由标签（textarea vs input）决定而非运行时状态。
+fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
+    // aria-multiline 静态：按 NodeKind 判（TextArea vs TextField），不依赖 ControlState。
+    if aria == "multiline" {
+        return match scene.get(id).map(|n| n.kind) {
+            Some(NodeKind::TextArea) => Some("true".to_string()),
+            _ => None,
+        };
+    }
+    let cs = scene.controls.get(id)?;
+    Some(match (aria, cs) {
+        ("checked", ControlState::Toggle { checked } | ControlState::Radio { checked, .. }) => {
+            checked.to_string()
+        }
+        ("expanded", ControlState::Dropdown { open, .. }) => open.to_string(),
+        ("valuenow", ControlState::Progress { value, .. } | ControlState::Slider { value, .. }) => {
+            // f32 Display 用最短往返表示（50.0→"50"、33.5→"33.5"）。CSS 作者按量化后的值写选择器。
+            value.to_string()
+        }
+        ("valuenow", ControlState::NumberField { edit, .. }) => edit.value.clone(),
+        _ => return None,
+    })
 }
 
 /// 判定 compound 是否匹配 node + 状态门。
@@ -359,7 +422,7 @@ fn compound_matches_with_state(c: &Compound, node_id: NodeId, scene: &Scene) -> 
     if c.pseudo_focus && !node.interaction.flags.contains(NodeFlags::FOCUSED) {
         return false;
     }
-    compound_matches_node(c, node)
+    compound_matches_node(c, node_id, scene)
 }
 
 /// 完整后代链匹配（从右往左，复用 selector.rs `matches` 算法，消费 Node/Scene）。
@@ -758,7 +821,9 @@ fn emit_transition_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::node::{Node, NodeFlags, NodeId, NodeKind, Rect, Scene};
+    use crate::scene::node::{
+        ControlState, EditState, Node, NodeFlags, NodeId, NodeKind, Rect, RoleInfo, Scene,
+    };
     use crate::style::resolved::TransitionSpec;
     use crate::tween::{Ease, TweenProp};
 
@@ -1358,18 +1423,50 @@ mod tests {
         n
     }
 
+    /// 单节点 scene（root = 该节点）。compound_matches_node 现需 scene+id（attr 匹配读
+    /// ControlState/RoleTable），故 attr/tag 测试经此包装。
+    fn single_node_scene(node: Node) -> (Scene, NodeId) {
+        let s = Scene::from_nodes(vec![node], vec![]);
+        let id = s.roots[0];
+        (s, id)
+    }
+
+    /// 单节点 scene + 注入 ControlState（aria 合成测试用）。
+    fn control_scene(kind: NodeKind, state: ControlState) -> (Scene, NodeId) {
+        let mut s = Scene::from_nodes(vec![test_node(kind)], vec![]);
+        let id = s.roots[0];
+        s.controls.ensure(id, state);
+        (s, id)
+    }
+
+    /// 单节点 scene + 注入 RoleInfo（role/data-slot 匹配测试用）。slots 复刻 instantiate
+    /// 路径：key=slot 名，值空串占位（`data-slot="thumb"` → slots["thumb"]=""）。
+    fn role_scene(role: Option<&str>, slots: &[&str]) -> (Scene, NodeId) {
+        let mut s = Scene::from_nodes(vec![test_node(NodeKind::Container)], vec![]);
+        let id = s.roots[0];
+        let info = RoleInfo {
+            role: role.map(String::from),
+            slots: slots
+                .iter()
+                .map(|&k| (k.to_string(), String::new()))
+                .collect(),
+        };
+        s.roles.insert(id, info);
+        (s, id)
+    }
+
     #[test]
     fn attr_selector_type_matches_nodekind_precisely() {
         // [type="password"] 只匹配 PasswordField，不匹配 TextField
         let sel = hand_selector(r#"[type="password"]"#);
-        let pw_node = test_node(NodeKind::PasswordField);
-        assert!(compound_matches_node(&sel.compound[0], &pw_node));
-        let text_node = test_node(NodeKind::TextField);
-        assert!(!compound_matches_node(&sel.compound[0], &text_node));
+        let (s_pw, pw) = single_node_scene(test_node(NodeKind::PasswordField));
+        let (s_text, text) = single_node_scene(test_node(NodeKind::TextField));
+        assert!(compound_matches_node(&sel.compound[0], pw, &s_pw));
+        assert!(!compound_matches_node(&sel.compound[0], text, &s_text));
         // [type="text"] 只匹配 TextField
         let sel_text = hand_selector(r#"[type="text"]"#);
-        assert!(compound_matches_node(&sel_text.compound[0], &text_node));
-        assert!(!compound_matches_node(&sel_text.compound[0], &pw_node));
+        assert!(compound_matches_node(&sel_text.compound[0], text, &s_text));
+        assert!(!compound_matches_node(&sel_text.compound[0], pw, &s_pw));
     }
 
     #[test]
@@ -1389,35 +1486,272 @@ mod tests {
         ];
         for (tag, kind) in cases {
             let sel = hand_selector(tag);
-            let node = test_node(*kind);
+            let (s, id) = single_node_scene(test_node(*kind));
             assert!(
-                compound_matches_node(&sel.compound[0], &node),
+                compound_matches_node(&sel.compound[0], id, &s),
                 "tag 选择器 `{tag}` 应命中 NodeKind::{kind:?}（rematch 路径）"
             );
         }
         // 负向：`ul` 不该命中 Container（防误退回 div 后误匹配）
         let ul_sel = hand_selector("ul");
-        let div_node = test_node(NodeKind::Container);
+        let (s_div, div) = single_node_scene(test_node(NodeKind::Container));
         assert!(
-            !compound_matches_node(&ul_sel.compound[0], &div_node),
+            !compound_matches_node(&ul_sel.compound[0], div, &s_div),
             "`ul` 不应命中 Container"
         );
     }
 
     #[test]
     fn attr_selector_non_type_attr_does_not_match() {
-        // 非 type 属性：本轮不匹配（Node 不携带任意 HTML 属性字面值）
+        // 非已知 attr（type/aria-*/role/data-slot）：不匹配（Node 不携带任意 HTML 属性字面值）
         let sel = hand_selector("[disabled]");
-        let node = test_node(NodeKind::TextField);
-        assert!(!compound_matches_node(&sel.compound[0], &node));
+        let (s, id) = single_node_scene(test_node(NodeKind::TextField));
+        assert!(!compound_matches_node(&sel.compound[0], id, &s));
     }
 
     #[test]
     fn attr_selector_type_exists_form_does_not_match() {
-        // [type] 存在形式（无 = val）：本轮不支持（只走 Eq 精确匹配）
+        // [type] 存在形式（无 = val）：不支持（type 是结构性属性，存在性无匹配意义）
         let sel = hand_selector("[type]");
-        let node = test_node(NodeKind::TextField);
-        assert!(!compound_matches_node(&sel.compound[0], &node));
+        let (s, id) = single_node_scene(test_node(NodeKind::TextField));
+        assert!(!compound_matches_node(&sel.compound[0], id, &s));
+    }
+
+    // ── [aria-*] 合成：值随 ControlState 实时变 ──
+
+    #[test]
+    fn attr_matches_aria_checked_from_toggle() {
+        // Toggle{checked:true} → [aria-checked="true"] 命中；翻成 false → [aria-checked="false"] 命中
+        let (mut s, id) = control_scene(NodeKind::Toggle, ControlState::Toggle { checked: true });
+        let sel_true = hand_selector(r#"[aria-checked="true"]"#);
+        let sel_false = hand_selector(r#"[aria-checked="false"]"#);
+        assert!(
+            compound_matches_node(&sel_true.compound[0], id, &s),
+            "checked:true → [aria-checked=\"true\"] 命中"
+        );
+        assert!(
+            !compound_matches_node(&sel_false.compound[0], id, &s),
+            "checked:true → [aria-checked=\"false\"] 不命中"
+        );
+        // flip → 实时合成值变
+        s.controls
+            .ensure(id, ControlState::Toggle { checked: false });
+        assert!(
+            !compound_matches_node(&sel_true.compound[0], id, &s),
+            "checked:false → [aria-checked=\"true\"] 不命中"
+        );
+        assert!(
+            compound_matches_node(&sel_false.compound[0], id, &s),
+            "checked:false → [aria-checked=\"false\"] 命中"
+        );
+    }
+
+    #[test]
+    fn attr_matches_aria_checked_from_radio() {
+        // Radio{checked:true} → [aria-checked="true"] 命中（与 Toggle 共用 aria-checked）
+        let (s, id) = control_scene(
+            NodeKind::RadioButton,
+            ControlState::Radio {
+                checked: true,
+                name: "grp".into(),
+            },
+        );
+        let sel = hand_selector(r#"[aria-checked="true"]"#);
+        assert!(
+            compound_matches_node(&sel.compound[0], id, &s),
+            "Radio checked → [aria-checked=\"true\"] 命中"
+        );
+    }
+
+    #[test]
+    fn attr_matches_aria_checked_no_state_no_match() {
+        // 无 ControlState 的普通 div → aria-checked 不合成 → Eq / Exists 均不命中
+        let (s, id) = single_node_scene(test_node(NodeKind::Container));
+        let sel_eq = hand_selector(r#"[aria-checked="true"]"#);
+        assert!(!compound_matches_node(&sel_eq.compound[0], id, &s));
+        let sel_exists = hand_selector("[aria-checked]");
+        assert!(
+            !compound_matches_node(&sel_exists.compound[0], id, &s),
+            "[aria-checked] 存在形式：普通 div 无 aria-checked 语义"
+        );
+    }
+
+    #[test]
+    fn attr_matches_aria_expanded_from_dropdown() {
+        // Dropdown{open:true} → [aria-expanded="true"] 命中
+        let (s, id) = control_scene(
+            NodeKind::Dropdown,
+            ControlState::Dropdown {
+                selected_index: 0,
+                open: true,
+                value_lock: false,
+                open_selected_index: None,
+            },
+        );
+        let sel = hand_selector(r#"[aria-expanded="true"]"#);
+        assert!(
+            compound_matches_node(&sel.compound[0], id, &s),
+            "Dropdown open → [aria-expanded=\"true\"] 命中"
+        );
+        let sel_false = hand_selector(r#"[aria-expanded="false"]"#);
+        assert!(!compound_matches_node(&sel_false.compound[0], id, &s));
+    }
+
+    #[test]
+    fn attr_matches_aria_valuenow_from_progress() {
+        // Progress{value:50.0} → [aria-valuenow="50"] 命中（f32 Display：50.0→"50"）
+        let (s, id) = control_scene(
+            NodeKind::ProgressBar,
+            ControlState::Progress {
+                value: 50.0,
+                max: 100.0,
+                indeterminate: false,
+            },
+        );
+        let sel = hand_selector(r#"[aria-valuenow="50"]"#);
+        assert!(
+            compound_matches_node(&sel.compound[0], id, &s),
+            "Progress 50.0 → [aria-valuenow=\"50\"] 命中"
+        );
+    }
+
+    #[test]
+    fn attr_matches_aria_valuenow_from_slider() {
+        // Slider{value:33.5} → [aria-valuenow="33.5"] 命中
+        let (s, id) = control_scene(
+            NodeKind::Slider,
+            ControlState::Slider {
+                value: 33.5,
+                min: 0.0,
+                max: 100.0,
+                step: 0.5,
+                dragging: false,
+            },
+        );
+        let sel = hand_selector(r#"[aria-valuenow="33.5"]"#);
+        assert!(
+            compound_matches_node(&sel.compound[0], id, &s),
+            "Slider 33.5 → [aria-valuenow=\"33.5\"] 命中"
+        );
+    }
+
+    #[test]
+    fn attr_matches_aria_valuenow_from_numberfield() {
+        // NumberField{edit.value="42"} → [aria-valuenow="42"] 命中（数值文本直传）
+        let (s, id) = control_scene(
+            NodeKind::NumberField,
+            ControlState::NumberField {
+                edit: EditState::from_init("42".into(), String::new(), 0, false),
+                min: 0.0,
+                max: 100.0,
+                step: 1.0,
+            },
+        );
+        let sel = hand_selector(r#"[aria-valuenow="42"]"#);
+        assert!(
+            compound_matches_node(&sel.compound[0], id, &s),
+            "NumberField value=42 → [aria-valuenow=\"42\"] 命中"
+        );
+    }
+
+    #[test]
+    fn attr_matches_aria_multiline_from_textarea() {
+        // aria-multiline 静态：TextArea → "true"；TextField → 不合成（单行无 multiline 语义）
+        let (s_ta, ta) = control_scene(
+            NodeKind::TextArea,
+            ControlState::TextArea(EditState::from_init(String::new(), String::new(), 0, false)),
+        );
+        let sel = hand_selector(r#"[aria-multiline="true"]"#);
+        assert!(
+            compound_matches_node(&sel.compound[0], ta, &s_ta),
+            "TextArea → [aria-multiline=\"true\"] 命中"
+        );
+        let (s_tf, tf) = control_scene(
+            NodeKind::TextField,
+            ControlState::TextField(EditState::from_init(String::new(), String::new(), 0, false)),
+        );
+        assert!(
+            !compound_matches_node(&sel.compound[0], tf, &s_tf),
+            "TextField → [aria-multiline=\"true\"] 不命中"
+        );
+    }
+
+    // ── [role=] / [data-slot=]：从 RoleTable 查打包期提取的静态值 ──
+
+    #[test]
+    fn attr_matches_role_eq_and_exists() {
+        let (s, id) = role_scene(Some("switch"), &[]);
+        let sel_eq = hand_selector(r#"[role="switch"]"#);
+        assert!(
+            compound_matches_node(&sel_eq.compound[0], id, &s),
+            "[role=\"switch\"] 命中 role=switch"
+        );
+        let sel_other = hand_selector(r#"[role="slider"]"#);
+        assert!(
+            !compound_matches_node(&sel_other.compound[0], id, &s),
+            "[role=\"slider\"] 不命中 switch"
+        );
+        let sel_exists = hand_selector("[role]");
+        assert!(
+            compound_matches_node(&sel_exists.compound[0], id, &s),
+            "[role] 存在形式命中"
+        );
+        let (s_div, div) = role_scene(None, &[]);
+        assert!(
+            !compound_matches_node(&sel_exists.compound[0], div, &s_div),
+            "无 role 的 div → [role] 不命中"
+        );
+    }
+
+    #[test]
+    fn attr_matches_data_slot_eq_and_exists() {
+        let (s, id) = role_scene(None, &["thumb"]);
+        let sel_eq = hand_selector(r#"[data-slot="thumb"]"#);
+        assert!(
+            compound_matches_node(&sel_eq.compound[0], id, &s),
+            "[data-slot=\"thumb\"] 命中"
+        );
+        let sel_other = hand_selector(r#"[data-slot="fill"]"#);
+        assert!(
+            !compound_matches_node(&sel_other.compound[0], id, &s),
+            "[data-slot=\"fill\"] 不命中 thumb 节点"
+        );
+        let sel_exists = hand_selector("[data-slot]");
+        assert!(
+            compound_matches_node(&sel_exists.compound[0], id, &s),
+            "[data-slot] 存在形式命中"
+        );
+    }
+
+    #[test]
+    fn aria_checked_rematch_drives_style() {
+        // 端到端：Toggle + [aria-checked="true"]{color:red}。checked:true → 染红；翻 false → 回落。
+        let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        let mut s = Scene::from_nodes(vec![root], vec![]);
+        let id = s.roots[0];
+        s.controls
+            .ensure(id, ControlState::Toggle { checked: true });
+        push_global(&mut s, rule(r#"[aria-checked="true"]"#, "color", "#ff0000"));
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(
+            s.get(id).unwrap().style.color,
+            [1.0, 0.0, 0.0, 1.0],
+            "checked:true → [aria-checked=\"true\"] 染红"
+        );
+        s.controls
+            .ensure(id, ControlState::Toggle { checked: false });
+        rematch_pseudo_classes(&mut s);
+        assert_ne!(
+            s.get(id).unwrap().style.color,
+            [1.0, 0.0, 0.0, 1.0],
+            "checked:false → 不再染红"
+        );
     }
 
     // ── transition 请求发射测 ──
