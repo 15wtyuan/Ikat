@@ -46,7 +46,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     None
                 };
                 let control_init = extract_control_init(kind, el, ir_idx, &parsed.tree);
-                // role/data-slot：从 HTML 属性提取，进 pkg 侴 runtime RoleTable 查表。
+                // role/data-slot：从 HTML 属性提取，进 pkg 供 runtime RoleTable 查表。
                 // role 驱动语义分派（combobox/slider/...），data-slot 标识控件视觉部件（fill/thumb）。
                 let role = attr(el, "role");
                 let data_slot = attr(el, "data-slot");
@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn role_and_data_slot_extracted_into_template_node() {
         // role 驱动语义分派 + data-slot 标识控件视觉部件：两个属性都须从 HTML 提取进 TemplateNode，
-        // 侴 runtime RoleTable 查表。验证 bridge 是 HTML→pkg 的唯一入口不丢这两列。
+        // 供 runtime RoleTable 查表。验证 bridge 是 HTML→pkg 的唯一入口不丢这两列。
         let nodes = bridged(r#"<div role="slider"><div data-slot="thumb"></div></div>"#);
         let root = &nodes[0];
         assert_eq!(root.role.as_deref(), Some("slider"));
