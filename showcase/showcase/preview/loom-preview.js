@@ -98,6 +98,7 @@
     wireSliders();
     wireSwitchesAndRadios();
     wireComboboxes();
+    wireSpinbuttons();
     wireTextboxes();
   }
 
@@ -247,6 +248,55 @@
         if (cb.getAttribute('aria-expanded') === 'true') close();
       });
       close(); // start collapsed
+    });
+  }
+
+  // role=spinbutton (NumberField) → render aria-valuenow as text content, support up/down
+  // adjustment (wheel, ArrowUp/ArrowDown, click+type). Mirrors core NumberField semantics.
+  // The author writes aria-valuenow/min/max + data-step; the preview keeps the div's text in sync.
+  function wireSpinbuttons() {
+    document.querySelectorAll('[role="spinbutton"]').forEach(function (sb) {
+      function read() {
+        var min = parseFloat(sb.getAttribute('aria-valuemin')) || 0;
+        var max = parseFloat(sb.getAttribute('aria-valuemax')) || 0;
+        var step = parseFloat(sb.getAttribute('data-step')) || 1;
+        var val = parseFloat(sb.getAttribute('aria-valuenow')) || min;
+        return { min: min, max: max, step: step, val: val };
+      }
+      function render() {
+        var s = read();
+        sb.textContent = String(s.val);
+      }
+      function setVal(v) {
+        var s = read();
+        var nv = s.min + Math.round((v - s.min) / s.step) * s.step;
+        nv = Math.max(s.min, Math.min(s.max, nv));
+        sb.setAttribute('aria-valuenow', String(nv));
+        render();
+        sb.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      render();
+      // wheel adjusts by step
+      sb.addEventListener('wheel', function (e) {
+        e.preventDefault();
+        var s = read();
+        setVal(s.val + (e.deltaY < 0 ? s.step : -s.step));
+      }, { passive: false });
+      // keyboard: ArrowUp/Down, also type digits
+      sb.setAttribute('tabindex', '0');
+      sb.setAttribute('contenteditable', 'true');
+      sb.addEventListener('keydown', function (e) {
+        var s = read();
+        if (e.key === 'ArrowUp') { e.preventDefault(); setVal(s.val + s.step); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); setVal(s.val - s.step); }
+      });
+      // commit typed text on blur/Enter: parse as number, clamp+quantize
+      function commit() {
+        var raw = parseFloat(sb.textContent);
+        if (!isNaN(raw)) setVal(raw); else render();
+      }
+      sb.addEventListener('blur', commit);
+      sb.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); commit(); sb.blur(); } });
     });
   }
 
