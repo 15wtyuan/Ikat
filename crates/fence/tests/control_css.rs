@@ -51,7 +51,7 @@ fn progress_with_css_passes() {
     );
 }
 
-/// 教学文案必须自包含 + 可操作（含控件标签 + CSS 提示 + loom-fill 引导）。
+/// 教学文案必须自包含 + 可操作（含控件标签 + CSS 提示 + data-slot 引导）。
 #[test]
 fn progress_without_css_message_is_actionable() {
     let html = r#"<progress value="70"></progress>"#;
@@ -63,10 +63,16 @@ fn progress_without_css_message_is_actionable() {
         .expect("should emit control-css diagnostic");
     assert!(d.message.contains("progress"), "msg 应含标签名");
     assert!(d.message.contains("CSS"), "msg 应提 CSS");
-    // 引导作者为 loom-* 内部子节点提供样式（控件内部视觉靠框架注入的 .loom-* class）
+    // role 化重构后，旧标签 progress 文案引导作者改用 role=progressbar + data-slot=fill
+    // （不再引用已删除的框架注入 .loom-fill 子节点）
     assert!(
-        d.message.contains("loom"),
-        "msg 应引导 loom-* 子节点样式: {}",
+        d.message.contains("data-slot") && d.message.contains("role="),
+        "msg 应引导 role/data-slot 结构: {}",
+        d.message
+    );
+    assert!(
+        !d.message.contains(".loom-"),
+        "msg 不应再引用已删除的 .loom-* 注入: {}",
         d.message
     );
 }

@@ -38,6 +38,11 @@ pub enum DiagnosticCode {
     /// 未命中 = 运行时渲染空白。强制作者为控件及 `.loom-*` 内部子节点提供 CSS。
     /// 详见 fence.md「控件 CSS 命中校验」。
     FenceControlWithoutCss,
+    /// role 驱动控件缺少 spec §2.2 规定的必需子角色/slot（如 `combobox` 缺
+    /// `role=listbox` 子、`slider` 缺 `data-slot=thumb` 子）。旧模式下框架运行时
+    /// 注入 `.loom-*` 子节点故结构必然完整；新模式由作者自写结构，可能漏写——
+    /// 打包期严格拦截，不依赖运行时 reparent 兜底。详见 fence.md「控件结构契约」。
+    FenceMissingControlChild,
 }
 
 #[derive(Debug, Clone)]

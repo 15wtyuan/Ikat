@@ -1,7 +1,7 @@
 //! Stage 6.7：控件必须被 CSS 命中校验。
 //!
-//! LoomGUI 控件（ProgressBar / Slider / Toggle / RadioButton + 文本控件
-//! TextField / TextArea）**不带 UA 默认样式**——
+//! LoomGUI 控件（ProgressBar / Slider / Toggle / RadioButton / Dropdown /
+//! TextField / TextArea / NumberField）**不带 UA 默认样式**——
 //! core 刻意保持纯净，不开「框架自带样式源」先例。代价：写了控件标签却没匹配的 CSS
 //! 规则 = 运行时渲染空白，作者无法察觉（HTML 在浏览器预览里浏览器会套自己的 UA 表，
 //! 看着正常，打包进 LoomGUI 却空）。
@@ -10,9 +10,10 @@
 //! 任意 `<style>` 规则的选择器命中它本身（tag / class / id / 后代链落地在该节点）。
 //! 完全无命中 → `FenceControlWithoutCss` error + 教学。
 //!
-//! 教学分支：进度/滑块/勾选控件靠框架运行时注入的 `.loom-*` 子节点呈现
-//! （fill/track/thumb/check）→ 教学引导为子节点配样式；文本控件无注入子节点
-//! （文本和光标由控件自身渲染）→ 教学引导为控件本身配 background/border + caret-color。
+//! role 化重构后（spec §2.2），控件结构由作者自写：role 驱动控件（`<div role="...">`）
+//! 和旧标签控件（`<select>`/`<progress>`/`<input>`/`<textarea>`）都走本校验。教学文案
+//! 按 **role/slot** 表述（`data-slot="fill"`、`role="listbox"`、`[aria-checked]` 属性
+//! 选择器），不再引用已删除的框架注入 `.loom-*` 子节点。
 //!
 //! 选择器匹配消费 fence 的 IrTree（解析期产物），不依赖运行时 Node——复用 css_rules
 //! 解析出的 `DynamicRule` 表，按 tag/class/id/attr 字面对照 IrElement 判定。
@@ -22,16 +23,21 @@ use crate::ir::{IrElement, IrNodeKind, IrTree};
 use crate::schema::tag::SemanticKind;
 use loomgui_core::style::dynamic::{AttrOp, Compound, DynamicRule, ParsedSelector};
 
-/// 触发本校验的控件 SemanticKind。
-///
-/// 共同点：core 不带 UA 默认样式——写了标签却无匹配 CSS = 运行时空白。分三类：
-/// - **注入子节点型**（ProgressBar/Slider/Toggle/RadioButton）：core 实例化时注入
-///   `.loom-*` 视觉子节点（fill/track/thumb/check），作者须为控件本身 + 子节点配 CSS。
-/// - **Dropdown**：core 注入 `.loom-value`/`.loom-popup` 子节点，但**不注入箭头**——
-///   教学文案单独分支，明确告诉作者需自绘箭头指示器。
-/// - **文本控件型**（TextField/TextArea/NumberField）：控件自身渲染
-///   文本和光标，无注入子节点——作者须为控件本身配 background/border + caret-color。
-const CONTROL_KINDS: &[SemanticKind] = &[
+/// 触发本校验的控件 role（spec §2.2）。带这些 role 的元素必被检查；`textbox` 同时覆盖
+/// TextField 与 TextArea（后者加 `aria-multiline="true"`）。
+const CONTROL_ROLES: &[&str] = &[
+    "combobox",
+    "slider",
+    "spinbutton",
+    "switch",
+    "radio",
+    "progressbar",
+    "textbox",
+];
+
+/// 旧标签控件 SemanticKind（Task 7 下线这些标签后删除）。role 驱动控件经 Task 2 的
+/// `resolve_semantic` 也落到这些 SemanticKind，但这里仅用于旧标签回退（无 role 属性）。
+const LEGACY_CONTROL_KINDS: &[SemanticKind] = &[
     SemanticKind::ProgressBar,
     SemanticKind::Slider,
     SemanticKind::Toggle,
@@ -42,22 +48,25 @@ const CONTROL_KINDS: &[SemanticKind] = &[
     SemanticKind::NumberField,
 ];
 
-/// 控件是否为「注入子节点型」——core 运行时为其插入 `.loom-*` 视觉子节点。
-/// 文本控件返回 false：它们自身渲染文本，不注入子节点，故教学文案不同。
-fn has_injected_children(semantic: SemanticKind) -> bool {
-    matches!(
-        semantic,
-        SemanticKind::ProgressBar
-            | SemanticKind::Slider
-            | SemanticKind::Toggle
-            | SemanticKind::RadioButton
-            | SemanticKind::Dropdown
-    )
+/// 读元素的 `role` 属性值（若存在）。
+fn node_role(el: &IrElement) -> Option<&str> {
+    el.attributes
+        .iter()
+        .find(|a| a.name == "role")
+        .map(|a| a.value.as_str())
 }
 
-/// 判定 semantic 是否为受校验控件。
-fn is_control(semantic: Option<SemanticKind>) -> bool {
-    semantic.is_some_and(|s| CONTROL_KINDS.contains(&s))
+/// 判定元素是否为受校验控件：role 驱动（role 在 CONTROL_ROLES）或旧标签回退
+/// （SemanticKind 在 LEGACY_CONTROL_KINDS）。两条路径都覆盖同一控件集——前者是
+/// spec §2.2 终态，后者是 showcase 改写前的中间态（Task 7 下线旧标签）。
+fn is_control(el: &IrElement) -> bool {
+    if let Some(r) = node_role(el) {
+        if CONTROL_ROLES.contains(&r) {
+            return true;
+        }
+    }
+    el.semantic
+        .is_some_and(|s| LEGACY_CONTROL_KINDS.contains(&s))
 }
 
 /// compound（单段选择器，无空格）是否匹配 IrElement——tag/class/id/attr 字面对照。
@@ -172,25 +181,107 @@ fn any_rule_matches(rules: &[DynamicRule], tree: &IrTree, node_idx: usize) -> bo
         .any(|r| selector_matches_node(&r.selector, tree, node_idx))
 }
 
-/// 控件标签名（用于教学文案）：progress / input。
-fn control_tag_name(el: &IrElement) -> &str {
-    // input 按 type 细分语义，但标签名统一是 "input"；教学文案用 input 即可
-    // （value 部分 by semantic 单独展开 loom-* 子节点引导）。
-    el.tag.as_str()
+/// 控件的可读名称（教学文案用）。
+fn kind_name_for(el: &IrElement) -> &'static str {
+    // role 驱动优先（终态），旧标签按 SemanticKind 回退（Task 7 下线后删除）。
+    if let Some(r) = node_role(el) {
+        return match r {
+            "combobox" => "dropdown (combobox)",
+            "slider" => "slider",
+            "spinbutton" => "number field (spinbutton)",
+            "switch" => "toggle (switch)",
+            "radio" => "radio button",
+            "progressbar" => "progress bar",
+            "textbox" => "text field",
+            _ => "control",
+        };
+    }
+    match el.semantic {
+        Some(SemanticKind::ProgressBar) => "progress bar",
+        Some(SemanticKind::Slider) => "slider",
+        Some(SemanticKind::Toggle) => "toggle (checkbox)",
+        Some(SemanticKind::RadioButton) => "radio button",
+        Some(SemanticKind::TextField) => "text field",
+        Some(SemanticKind::TextArea) => "text area",
+        Some(SemanticKind::Dropdown) => "dropdown (select)",
+        Some(SemanticKind::NumberField) => "number field",
+        _ => "control",
+    }
 }
 
-/// 按 SemanticKind 给出控件内部 `.loom-*` 子节点提示（教学文案用）。
-fn loom_children_hint(semantic: SemanticKind) -> &'static str {
-    match semantic {
-        // progress 节点本身 = track；fill 子 = 填充条
-        SemanticKind::ProgressBar => "`.loom-fill` (the fill bar)",
-        // track 容器内 fill + thumb
-        SemanticKind::Slider => "`.loom-track`, `.loom-fill`, `.loom-thumb`",
-        // 勾选图标容器
-        SemanticKind::Toggle | SemanticKind::RadioButton => "`.loom-check` (the check mark)",
-        SemanticKind::Dropdown =>
-            "`.loom-value` (shows selected text) and `.loom-popup` (the popup list container); `<option>` children also need CSS",
-        _ => "",
+/// 按控件生成「该怎么配 CSS」教学文案（role/slot 表述，spec §2.2）。
+/// role 驱动优先；旧标签走 legacy 分支（Task 7 下线后删除）。
+fn fix_hint_for(el: &IrElement) -> String {
+    let tag = el.tag.as_str();
+    if let Some(r) = node_role(el) {
+        return match r {
+            "progressbar" => format!(
+                "Provide CSS for <{tag}> (the track — e.g. a background/border) and for its \
+                 `data-slot=\"fill\"` child (the fill bar). Both elements need CSS; without it \
+                 the progress bar renders blank."
+            ),
+            "slider" => format!(
+                "Provide CSS for <{tag}> (the track — e.g. a background/border) and for its \
+                 `data-slot=\"thumb\"` child (the draggable handle). A `data-slot=\"fill\"` \
+                 child is optional for the filled portion. All present elements need CSS."
+            ),
+            "combobox" => format!(
+                "Provide CSS for <{tag}> (background/border so the box is visible), for its \
+                 `role=\"listbox\"` child (the popup list container), and for `role=\"option\"` \
+                 children (each list row). LoomGUI dropdowns have NO built-in arrow indicator — \
+                 if you want one, draw it yourself via CSS (e.g. a background-image on the box, \
+                 or an extra child element)."
+            ),
+            "switch" | "radio" => format!(
+                "Provide CSS for <{tag}> (background/border so the control is visible). Use the \
+                 `[aria-checked]` attribute selector to style checked/unchecked states — there is \
+                 no separate check-mark child element."
+            ),
+            "textbox" => format!(
+                "Provide CSS for <{tag}> (background/border and caret-color so the text field is \
+                 visible). Add `aria-multiline=\"true\"` for a multi-line text area."
+            ),
+            "spinbutton" => format!(
+                "Provide CSS for <{tag}> (background/border and caret-color so the number field is \
+                 visible)."
+            ),
+            _ => format!("Provide CSS for <{tag}> so the control is visible."),
+        };
+    }
+    // legacy 旧标签回退（Task 7 下线后删除）。
+    match el.semantic {
+        Some(SemanticKind::Dropdown) => format!(
+            "Provide CSS for <{tag}> (background/border so the box is visible) and for its \
+             `<option>` children. LoomGUI dropdowns have NO built-in arrow indicator — if you \
+             want one, draw it yourself via CSS. Prefer the role-driven structure `<div \
+             role=\"combobox\">` (see docs/design/fence.md §2.2)."
+        ),
+        Some(SemanticKind::ProgressBar) => format!(
+            "Provide CSS for <{tag}> (e.g. a background/border for the track). Prefer the \
+             role-driven structure `<div role=\"progressbar\">` with a `data-slot=\"fill\"` \
+             child (see docs/design/fence.md §2.2)."
+        ),
+        Some(SemanticKind::Slider) => format!(
+            "Provide CSS for <{tag}> (e.g. a background/border for the track). Prefer the \
+             role-driven structure `<div role=\"slider\">` with a `data-slot=\"thumb\"` \
+             child (see docs/design/fence.md §2.2)."
+        ),
+        Some(SemanticKind::Toggle) | Some(SemanticKind::RadioButton) => format!(
+            "Provide CSS for <{tag}> (e.g. width/height). Use the `[aria-checked]` attribute \
+             selector to style checked/unchecked states. Prefer the role-driven structure \
+             `<div role=\"switch\"`/`role=\"radio\">` (see docs/design/fence.md §2.2)."
+        ),
+        Some(SemanticKind::TextArea) => format!(
+            "Provide CSS for <{tag}> (background/border and caret-color so the text area is \
+             visible). Prefer the role-driven structure `<div role=\"textbox\" \
+             aria-multiline=\"true\">` (see docs/design/fence.md §2.2)."
+        ),
+        Some(SemanticKind::TextField) | Some(SemanticKind::NumberField) => format!(
+            "Provide CSS for <{tag}> (background/border and caret-color so the field is \
+             visible). Prefer the role-driven structure `<div role=\"textbox\"`/`\
+             role=\"spinbutton\">` (see docs/design/fence.md §2.2)."
+        ),
+        _ => format!("Provide CSS for <{tag}> so the control is visible."),
     }
 }
 
@@ -211,50 +302,16 @@ pub fn check_control_css(
         let IrNodeKind::Element(el) = &node.kind else {
             continue;
         };
-        if !is_control(el.semantic) {
+        if !is_control(el) {
             continue;
         }
         if any_rule_matches(dynamic_rules, tree, idx) {
             continue;
         }
 
-        let semantic = el.semantic.unwrap();
-        let tag = control_tag_name(el);
-        let kind_name = match semantic {
-            SemanticKind::ProgressBar => "progress bar",
-            SemanticKind::Slider => "slider",
-            SemanticKind::Toggle => "toggle (checkbox)",
-            SemanticKind::RadioButton => "radio button",
-            SemanticKind::TextField => "text field",
-            SemanticKind::TextArea => "text area",
-            SemanticKind::Dropdown => "dropdown (select)",
-            SemanticKind::NumberField => "number field",
-            _ => "control",
-        };
-        // 教学分支：Dropdown 需专属文案（框架不注入箭头，作者须自绘）；其余注入子节点型
-        // 控件需为 .loom-* 子节点配样式；文本/数值控件无子节点，靠控件本身的
-        // background/border + caret-color 可见。
-        let fix_hint = if semantic == SemanticKind::Dropdown {
-            format!(
-                "Provide CSS for <{tag}> (background/border so the box is visible) and for its \
-                 internal `.loom-value` and `.loom-popup` child elements. LoomGUI dropdowns have \
-                 NO built-in arrow indicator — if you want one, draw it yourself via CSS (e.g. a \
-                 background-image on `.loom-value`, or an extra child element). `<option>` children \
-                 also need CSS (they are normal DOM children of <{tag}>)."
-            )
-        } else if has_injected_children(semantic) {
-            let children = loom_children_hint(semantic);
-            format!(
-                "Provide CSS for <{tag}> (e.g. a background/border for the track or box) \
-                 and for its internal {children} child element(s), which the framework \
-                 injects at runtime."
-            )
-        } else {
-            format!(
-                "Provide CSS for <{tag}> (e.g. a background/border and caret-color so the \
-                 text field is visible)."
-            )
-        };
+        let tag = el.tag.as_str();
+        let kind_name = kind_name_for(el);
+        let fix_hint = fix_hint_for(el);
         diagnostics.push(Diagnostic::error(
             DiagnosticCode::FenceControlWithoutCss,
             format!(
@@ -373,6 +430,88 @@ mod tests {
     fn progress_with_tag_rule_passes() {
         let diags =
             check(r#"<style>progress{background:#ddd}</style><progress value="1"></progress>"#);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    // ── role 驱动控件的文案（spec §2.2）──
+
+    #[test]
+    fn role_progressbar_without_css_errors() {
+        let diags = check(r#"<div role="progressbar"></div>"#);
+        assert_eq!(diags.len(), 1);
+        // 文案应引导 data-slot="fill"（不再引用已删除的 .loom-fill）
+        assert!(
+            diags[0].message.contains("data-slot=\"fill\""),
+            "{}",
+            diags[0].message
+        );
+        assert!(
+            !diags[0].message.contains(".loom-"),
+            "不应再引用 .loom-*: {}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn role_slider_without_css_errors() {
+        let diags = check(r#"<div role="slider"></div>"#);
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0].message.contains("data-slot=\"thumb\""),
+            "{}",
+            diags[0].message
+        );
+        assert!(!diags[0].message.contains(".loom-"), "{}", diags[0].message);
+    }
+
+    #[test]
+    fn role_combobox_without_css_errors() {
+        let diags = check(
+            r#"<div role="combobox"><div role="listbox"><div role="option">A</div></div></div>"#,
+        );
+        assert_eq!(diags.len(), 1);
+        // 文案应引导 role=listbox / role=option + 仍含「NO built-in arrow」教学点
+        assert!(
+            diags[0].message.contains("role=\"listbox\""),
+            "{}",
+            diags[0].message
+        );
+        assert!(
+            diags[0].message.contains("NO built-in arrow"),
+            "{}",
+            diags[0].message
+        );
+        assert!(!diags[0].message.contains(".loom-"), "{}", diags[0].message);
+    }
+
+    #[test]
+    fn role_switch_without_css_errors() {
+        let diags = check(r#"<div role="switch"></div>"#);
+        assert_eq!(diags.len(), 1);
+        // switch / radio 无必需子节点：文案应引导 [aria-checked] 属性选择器
+        assert!(
+            diags[0].message.contains("[aria-checked]"),
+            "{}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn role_textbox_without_css_errors() {
+        let diags = check(r#"<div role="textbox"></div>"#);
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0].message.contains("caret-color"),
+            "{}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn role_control_with_matching_attr_selector_passes() {
+        // [role="slider"] 属性选择器命中 role 驱动控件 → 放行
+        let diags =
+            check(r#"<style>[role="slider"]{background:#ddd}</style><div role="slider"></div>"#);
         assert!(diags.is_empty(), "{diags:?}");
     }
 

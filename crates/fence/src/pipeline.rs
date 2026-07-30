@@ -88,6 +88,15 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
         &line_map,
     ));
 
+    // Stage 6.8: role 驱动控件结构契约（必需子角色）。新模式下作者自写控件结构
+    // （`<div role="combobox"><div role="listbox">...`），可能漏写必需子节点。
+    // 打包期严格拦截，不依赖运行时 reparent 兜底。只校验 role 驱动节点（带 role 属性
+    // 且在契约表中的控件），旧标签控件（select/progress/input/ul）走 legacy tag 映射
+    // 不触发——showcase 在 Task 8 改写前不断。必须在 Annotate 之后（需完整 IrTree）。
+    diagnostics.extend(crate::control_structure_check::check_control_structure(
+        &tree, file, &line_map,
+    ));
+
     // Extract referenced sprites (img src, background-image url)
     let referenced_sprites = extract_sprites(&tree);
 
