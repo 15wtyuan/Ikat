@@ -209,6 +209,9 @@ pub fn inject_control_children(scene: &mut Scene, id: NodeId, kind: NodeKind) {
             let popup = make_child(scene, POPUP);
             append_child(scene, id, popup).expect("fresh child has no parent");
             // popup 默认收起（display:none），展开由 sync_control_visuals（open=true）移除覆盖。
+            // popup 的位置（出现在 select 正下方）由 sync_control_visuals 用 user_transform
+            // 定位（读 select 的 layout_rect.h 偏移）——不用 CSS top，因为 taffy 对 absolute
+            // 节点的百分比 inset 在 containing-block height measure 时序上解析为 0，靠不住。
             let _ = set_inline_override(scene, popup, "display:none;position:absolute");
             // 注意：此处只建空的 popup 容器。用户的 <option> 子节点此时尚未实例化
             // （instantiate 按 parent_idx 父先于子建树，select 在 option 之前），故 option
@@ -698,11 +701,32 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
             open,
             ..
         } => {
-            // popup display 切换：open → display:flex，收起 → display:none。
-            // 与 Toggle/Radio 的 check 切换同机制（inline 最高优先级）。
+            // popup display 切换：open → display:block，收起 → display:none。
+            // 用 block（标准 CSS 弹出列表语义）而非 flex——option 是 display:block 的列表项，
+            // block 容器让它们垂直堆叠（AI/人类可预测的标准 HTML 语义）。若用 flex 默认 row，
+            // option 会横向排列，违背 <select> 弹出列表的预期。position:absolute 不受影响
+            //（set_inline_override 按属性 merge，只动 display 位）。
             if let Some(popup) = find_child_by_class(scene, id, POPUP) {
-                let decl = if open { "display:flex" } else { "display:none" };
+                let decl = if open {
+                    "display:block"
+                } else {
+                    "display:none"
+                };
                 let _ = set_inline_override(scene, popup, decl);
+                // popup 位置：出现在 select 正下方。taffy 对 absolute 节点的百分比 inset 解析
+                // 不可靠（containing-block height measure 时序），改用 user_transform 把 popup
+                // 偏移 select 自身高度（同 Slider thumb 定位模式：渲染/命中层，进 world_matrix）。
+                // select 的 layout_rect.h 在 solve 后确定，sync 每帧读最新值。
+                let sel_h = scene.get(id).map(|n| n.layout_rect.h).unwrap_or(0.0);
+                let ty = if open { sel_h } else { 0.0 };
+                let _ = set_user_transform(
+                    scene,
+                    popup,
+                    NodeTransform {
+                        translate: [0.0, ty],
+                        ..Default::default()
+                    },
+                );
             }
             // value 显示选中 option 的文本：读第 selected_index 个 option 子节点的文本，
             // 写进 .loom-value 内的 TextNode（inject 时注入）。越界 / 无 option → 清空。
@@ -1923,7 +1947,7 @@ mod tests {
 
     #[test]
     fn sync_dropdown_open_toggles_popup_display() {
-        // open=true → popup display:flex；open=false → display:none。
+        // open=true → popup display:block（标准弹出列表语义，option 垂直堆叠）；open=false → display:none。
         let mut scene = Scene::default();
         let sel = make_dropdown_with_options(&mut scene, &["A"], 0);
         // 默认 open=false
@@ -1951,8 +1975,8 @@ mod tests {
                 .inline_override
                 .taffy_style
                 .display,
-            taffy::Display::Flex,
-            "open → display:flex"
+            taffy::Display::Block,
+            "open → display:block"
         );
     }
 

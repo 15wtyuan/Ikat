@@ -157,6 +157,15 @@ public class ShowcaseRunner : MonoBehaviour
             // Toggle.CheckedChanged → 控制台输出（演示 checkbox 事件链）。
             if (page.TryGet<Toggle>("gfx-fullscreen", out var fs))
                 fs.CheckedChanged += e => Debug.Log($"[Showcase] fullscreen = {e.NewValue}");
+            // Dropdown.SelectionChanged（控件束 P3 typed 事件链：select 弹出列表选中）。
+            if (page.TryGet<Dropdown>("gfx-res", out var res))
+                res.SelectionChanged += e => Debug.Log($"[Showcase] gfx-res selected index = {e.NewIndex}");
+            // NumberField.ValueChanged（控件束 P3：数值框，float 值经 min/max clamp + step 量化）。
+            if (page.TryGet<NumberField>("snd-voices", out var voices))
+                voices.ValueChanged += e => Debug.Log($"[Showcase] snd-voices = {e.NewValue}");
+            // TextField.Submitted（控件束 P2：单行框回车提交）。
+            if (page.TryGet<TextField>("key-custom", out var keyCustom))
+                keyCustom.Submitted += v => Debug.Log($"[Showcase] key-custom submitted: \"{v}\"");
         }
 
         if (pageName == "character")
@@ -172,6 +181,31 @@ public class ShowcaseRunner : MonoBehaviour
                     expVal.TextContent = $"{Mathf.RoundToInt(exp.Value)}%";
                 };
             }
+        }
+
+        // form 页（角色创建表单）= 控件束 P2/P3 typed 事件主力验收页：文本框全家 + Dropdown。
+        // 每个变体类型各接一条事件 → Console，证明 C# 投影类的 typed 事件链全通。
+        // 文本框 ValueChanged 逐字符触发（验收时输几个字符看 Console 几条 log）；Submitted 回车触发。
+        if (pageName == "form")
+        {
+            // TextField：ValueChanged（逐字符）+ Submitted（回车提交）。
+            if (page.TryGet<TextField>("char-name", out var name))
+            {
+                name.ValueChanged += e => Debug.Log($"[Showcase] char-name: \"{e.NewValue}\"");
+                name.Submitted += v => Debug.Log($"[Showcase] char-name submitted: \"{v}\"");
+            }
+            // PasswordField.ValueChanged（P2 变体：掩码显示，typed 值仍为明文；证投影类对）。
+            if (page.TryGet<PasswordField>("char-pass", out var pass))
+                pass.ValueChanged += e => Debug.Log($"[Showcase] char-pass changed (len={(e.NewValue?.Length ?? 0)})");
+            // SearchField.ValueChanged（P2 变体类型对）。
+            if (page.TryGet<SearchField>("char-search", out var search))
+                search.ValueChanged += e => Debug.Log($"[Showcase] char-search: \"{e.NewValue}\"");
+            // Dropdown.SelectionChanged（P3：select 弹出列表，typed 事件链）。
+            if (page.TryGet<Dropdown>("char-class", out var cls))
+                cls.SelectionChanged += e => Debug.Log($"[Showcase] char-class selected index = {e.NewIndex}");
+            // TextArea.ValueChanged（P2 多行变体类型对）。
+            if (page.TryGet<TextArea>("char-bio", out var bio))
+                bio.ValueChanged += e => Debug.Log($"[Showcase] char-bio changed (len={(e.NewValue?.Length ?? 0)})");
         }
     }
 }

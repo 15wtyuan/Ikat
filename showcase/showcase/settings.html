@@ -26,7 +26,14 @@
   /* 文本控件无 UA 样式表：必须由 CSS 提供 background/border（Task 17 围栏校验）。
      caret-color = 光标色；selection-background = 选区高亮（围栏无 ::selection 伪元素，用私有属性平铺）。 */
   input[type="number"], input[type="text"], input[type="password"], input[type="search"] { background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; caret-color:#5fb4d4; selection-background:rgba(95,180,212,0.45); width:240px; }
-  select { background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; }
+  /* Dropdown (select)：select 是容器（core 注入 position:relative），core 注入
+     .loom-value（显示选中项文字）+ .loom-popup（弹出列表，position:absolute 浮出）。
+     select 本体显式 block + 固定尺寸（Dropdown 默认 display:flex 会让它坍缩），
+     背景边框沿用 input 风格。注入子节点 + option 必须命中 CSS（fence 强制）。 */
+  select { display:block; width:200px; height:36px; background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; border-radius:4px; }
+  .loom-value { position:absolute; left:0; top:0; width:100%; height:100%; display:flex; align-items:center; padding:0 12px; color:#e0e6ec; font-size:15px; }
+  .loom-popup { width:200px; background-color:rgba(15,24,36,0.96); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; border-radius:4px; padding:4px 0; }
+  option { display:block; width:200px; height:32px; padding:0 12px; color:#e0e6ec; font-size:15px; }
   .checkbox-row {display:flex; flex-direction:row; align-items:center; gap:10px; }
   .radio-group {display:flex; flex-direction:row; gap:20px; }
   .radio-opt {display:flex; flex-direction:row; align-items:center; gap:6px; color:#9aa0b4; font-size:15px; }
