@@ -17,8 +17,8 @@
     overflow: scroll;
     background-color: #222;
   }
-  ul { display: block; }
-  li {
+  [role="list"] { display: block; }
+  [role="listitem"] {
     width: 380px;
     /* height comes from BindItem (per-item inline override, varies by index).
        margin-bottom:8px exercises margin-box backfill. */
@@ -32,9 +32,11 @@
 <body>
   <div class="root">
     <div class="pane" id="pane">
-      <ul id="list">
-        <li id="tpl">template</li>
-      </ul>
+      <!-- ListView（role="list"）：运行时 enter_data_driven 取首个 ListItem 子作模板来源。
+           height auto 是虚拟化不变量（spacers 撑可滚高度）。 -->
+      <div role="list" id="list">
+        <div role="listitem" id="tpl">template</div>
+      </div>
     </div>
   </div>
 </body>

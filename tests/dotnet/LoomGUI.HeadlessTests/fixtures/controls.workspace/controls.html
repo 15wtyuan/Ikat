@@ -11,17 +11,23 @@
 </head>
 <body>
   <div id="root">
-    <!-- inline controls 显式 display:block（围栏 inline-in-block 契约：作者有意块级撑满）。
-         ProgressBar: value + max bake ControlState::Progress (determinate)。 -->
-    <progress id="prog" value="40" max="100" style="display:block"></progress>
-    <!-- Slider: value attr required to bake ControlState::Slider。 -->
-    <input id="sld" type="range" value="50" min="0" max="100" step="5" style="display:block" />
-    <!-- Toggle: checked attr bakes ControlState::Toggle。 -->
-    <input id="tggl" type="checkbox" style="display:block" />
-    <!-- RadioButton。 -->
-    <input id="rdo" type="radio" name="grp" style="display:block" />
-    <!-- NumberField: value+min+max+step bake ControlState::NumberField (min/max/step 约束 + set_number_value 走 clamp+量化)。 -->
-    <input id="nf" type="number" value="0" min="0" max="10" step="2" style="display:block" />
+    <!-- 控件一律 role 驱动（spec §2.2）：value/min/max 走 ARIA，step/name 走 data-*。
+         围栏禁 div 上 plain 属性，故初始值放 aria-valuenow/aria-valuemin/aria-valuemax/data-step。
+         inline controls 显式 display:block（div 默认即 block，保留以明示块级撑满意图）。
+
+         ProgressBar: aria-valuenow + aria-valuemax bake ControlState::Progress (determinate)。
+         结构契约（spec §2.2）：progressbar 需 data-slot="fill" 直接子。 -->
+    <div role="progressbar" id="prog" aria-valuenow="40" aria-valuemax="100" style="display:block"><div data-slot="fill"></div></div>
+    <!-- Slider: aria-valuenow required to bake ControlState::Slider。
+         结构契约：slider 需 data-slot="thumb" 直接子。 -->
+    <div role="slider" id="sld" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100" data-step="5" style="display:block"><div data-slot="thumb"></div></div>
+    <!-- Toggle: aria-checked bakes ControlState::Toggle。 -->
+    <div role="switch" id="tggl" style="display:block"></div>
+    <!-- RadioButton：data-name 承载分组（ARIA 无 radio 组名属性）。 -->
+    <div role="radio" id="rdo" data-name="grp" style="display:block"></div>
+    <!-- NumberField: aria-valuenow+aria-valuemin+aria-valuemax+data-step bake
+         ControlState::NumberField (min/max/step 约束 + set_number_value 走 clamp+量化)。 -->
+    <div role="spinbutton" id="nf" aria-valuenow="0" aria-valuemin="0" aria-valuemax="10" data-step="2" style="display:block"></div>
   </div>
 </body>
 </html>

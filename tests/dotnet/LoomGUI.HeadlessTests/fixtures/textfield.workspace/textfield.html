@@ -11,10 +11,11 @@
 </head>
 <body>
   <div id="root">
-    <!-- TextField（<input type="text">，缺省 type=text 也归 TextField）。 -->
-    <input id="tf" type="text" placeholder="name" style="display:block" />
-    <!-- TextArea（<textarea>）：无 Submitted（Enter 插换行）。 -->
-    <textarea id="ta" placeholder="body" style="display:block"></textarea>
+    <!-- TextField（role="textbox"，缺省单行）。文本控件 value 取元素文本内容（ARIA 无 textbox-value
+         属性），空 div = 空 value。placeholder 走 aria-placeholder。 -->
+    <div role="textbox" id="tf" aria-placeholder="name" style="display:block"></div>
+    <!-- TextArea（role="textbox" + aria-multiline="true"）：无 Submitted（Enter 插换行）。 -->
+    <div role="textbox" id="ta" aria-multiline="true" aria-placeholder="body" style="display:block"></div>
   </div>
 </body>
 </html>
