@@ -24,7 +24,8 @@ bitflags::bitflags! {
         /// 查找边界无关（改读 `LOOKUP_SCOPE`）。
         const SCOPE_ROOT = 1 << 5;
         /// `Get<T>` 查找边界（与 CSS 作用域隔离解耦）：模板实例化根 / 文档根 / ListView slot 根打此位。
-        /// `find_by_id_attr` 在此边界内停止向下穿透嵌套作用域。
+        /// 当前 `find_by_id_attr` 仍全局首匹配；scoped find（在此边界内停止向下穿透嵌套作用域）
+        /// 是未来扩展，slot 根预打此位以备将来。
         /// 与 SCOPE_ROOT 独立：slot 根只打此位（CSS 规则仍按页面根 scope 匹配，页面 CSS 对 item 生效）。
         const LOOKUP_SCOPE = 1 << 6;
     }

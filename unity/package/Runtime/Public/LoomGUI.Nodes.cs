@@ -2824,7 +2824,13 @@ namespace LoomGUI
                 ListItem item = (ListItem)_registry.GetOrCreate(slotNode);
                 item._index = itemIndex;
                 try { lv._bindItem(item, itemIndex); }
-                catch { /* 业务回调抛不阻断其他 slot 绑定；上层应自己捕获 */ }
+                catch (Exception ex)
+                {
+                    // 业务回调抛不阻断其他 slot 绑定（上层应自己捕获）；但静默吞错会让坏的
+                    // BindItem 不可见，这里至少留一条诊断痕迹到 Debug 输出 / Unity player log。
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[LoomGUI] ListView BindItem threw for item {itemIndex} (slot node {slotNode}): {ex}");
+                }
             }
         }
 

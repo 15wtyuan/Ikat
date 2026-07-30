@@ -2661,7 +2661,8 @@ pub extern "C" fn loomgui_list_set_template(
 
 /// 拉取本帧待绑定 slot 列表（SOA）。C# tick 前调：遍历所有 ListView 的 pending_binds，
 /// 拍平成 (node_id[], item_index[]) 两列，cap 限 copy 上限。调用方按 out_nodes[i] 的
-/// node_id 反查其 ListView 祖先实例调 BindItem。取后队列清空（每条 bind 仅触发一次）。
+/// node_id 反查其 ListView 祖先实例调 BindItem。cap 不足时不丢 bind——只取装得下的部分，
+/// 余条留在各 ListView 队列里等下一帧再取（走 `drain_pending_binds_bounded` 而非全取）。
 /// 任一指针 null → -1；out_len 写实际返回条数。各参数 null 句柄 guard 在最前。
 #[no_mangle]
 pub extern "C" fn loomgui_list_take_pending_binds(
@@ -2682,17 +2683,26 @@ pub extern "C" fn loomgui_list_take_pending_binds(
         .as_ref()
         .map(|s| s.lists.0.keys().copied().collect())
         .unwrap_or_default();
-    let mut all: Vec<(u32, i32)> = Vec::new();
+    let cap = cap as usize;
+    let mut all: Vec<(u32, i32)> = Vec::with_capacity(cap);
     let Some(scene) = sh.stage.scene.as_mut() else {
-        return -1;
+        // 无 scene：out_len 仍写 0（调用方按 0 处理）。
+        unsafe {
+            *out_len = 0;
+        }
+        return 0;
     };
     for ul in uls {
-        let binds = loomgui_core::list::take_pending_binds(scene, ul);
+        if all.len() >= cap {
+            break;
+        }
+        // 只取当前剩余容量内的 bind——余条留队列等下帧，避免 cap 溢出时丢 bind。
+        let binds = loomgui_core::list::drain_pending_binds_bounded(scene, ul, cap - all.len());
         for (n, idx) in binds {
             all.push((n.0, idx as i32));
         }
     }
-    let n = all.len().min(cap as usize);
+    let n = all.len();
     unsafe {
         for (i, (node, idx)) in all.iter().take(n).enumerate() {
             *out_nodes.add(i) = *node;

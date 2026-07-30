@@ -844,7 +844,8 @@ namespace LoomGUI.Bindings
         /// <summary>
         ///  拉取本帧待绑定 slot 列表（SOA）。C# tick 前调：遍历所有 ListView 的 pending_binds，
         ///  拍平成 (node_id[], item_index[]) 两列，cap 限 copy 上限。调用方按 out_nodes[i] 的
-        ///  node_id 反查其 ListView 祖先实例调 BindItem。取后队列清空（每条 bind 仅触发一次）。
+        ///  node_id 反查其 ListView 祖先实例调 BindItem。cap 不足时不丢 bind——只取装得下的部分，
+        ///  余条留在各 ListView 队列里等下一帧再取（走 `drain_pending_binds_bounded` 而非全取）。
         ///  任一指针 null → -1；out_len 写实际返回条数。各参数 null 句柄 guard 在最前。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_list_take_pending_binds", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]

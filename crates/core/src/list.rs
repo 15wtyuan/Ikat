@@ -306,6 +306,23 @@ pub fn take_pending_binds(scene: &mut Scene, ul: NodeId) -> Vec<(NodeId, usize)>
         .unwrap_or_default()
 }
 
+/// 取该 ListView 的 pending bind 队列前端的至多 `max` 条（`drain(..n)`），余量留下次调用。
+/// 与 `take_pending_binds` 的全取不同：当调用方缓冲区（cap）装不下整队时，只取装得下的部分，
+/// 余条留在队列里等下一帧再取——保证 cap 不足时不丢 bind。FFI `take_pending_binds` 走此路径。
+pub fn drain_pending_binds_bounded(
+    scene: &mut Scene,
+    ul: NodeId,
+    max: usize,
+) -> Vec<(NodeId, usize)> {
+    match scene.lists.get_mut(ul) {
+        Some(ls) if max > 0 => {
+            let n = ls.pending_binds.len().min(max);
+            ls.pending_binds.drain(..n).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// 同帧推进虚拟化管线（spec §7）：立即跑一次 plan/execute，让本帧滚动后新进入可见区的
 /// item 的 slot 同帧克隆，其 bind 入 `pending_binds` 队列等 C# `DrainPendingBinds` 消费。
 ///
@@ -335,6 +352,13 @@ pub fn drain_now(stage: &mut crate::stage::Stage, ul: NodeId) {
 ///
 /// 目标偏移 = `heights.sum(0..index)`（未测项用 estimate；下帧 collect_heights 回填后
 /// anchoring 会修正偏差）。`set_pos` 按 overlap clamp——虚拟列表 content_size 由 driver 注入。
+///
+/// TODO(Smooth recompute)：上面算出的 target 是一次性的——基于当前 heights 快照。
+/// Instant 路径（behavior==0）同帧 drain_now → 下帧 anchoring 即修正，故正确。
+/// 但 Smooth 路径把 target 喂给 ScrollPane 的 tween 后就不再重算：变高列表滚动过程中
+/// 新可见项陆续测量、overlap 增长，tween 目标却停留在初始 overlap 边界，远距离 Smooth
+/// 滚动会停在偏差位置。spec §5 要求 tween 期间按回填高度重算 target，当前未实现
+/// （测试仅覆盖 Instant 路径）。
 pub fn scroll_to_item(
     stage: &mut crate::stage::Stage,
     ul: NodeId,
@@ -1195,6 +1219,34 @@ mod tests {
         assert_eq!(binds.len(), crate::list::INITIAL_SLOTS);
         let binds2 = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
         assert!(binds2.is_empty(), "second take empty");
+    }
+
+    /// drain_pending_binds_bounded：队列超出 max 时只取前端 max 条，余量留下次调用。
+    /// 这是 FFI cap 不足时的安全网——保证不丢 bind（余条留队列等下帧再取），
+    /// 而非像 take_pending_binds 全取后在 cap 外丢掉。
+    #[test]
+    fn drain_pending_binds_bounded_leaves_remainder_for_next_call() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 5);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let scene = s.scene.as_mut().unwrap();
+        let total = crate::list::INITIAL_SLOTS;
+        // max 小于队列长度：只取 max 条，余条留队列。
+        let first = crate::list::drain_pending_binds_bounded(scene, ul, 2);
+        assert_eq!(first.len(), 2, "bounded drain respects max");
+        // 余条仍在队列：再取剩下的。
+        let rest = crate::list::drain_pending_binds_bounded(scene, ul, total);
+        assert_eq!(rest.len(), total - 2, "remainder stays for next call");
+        // 队列已空。
+        let third = crate::list::drain_pending_binds_bounded(scene, ul, total);
+        assert!(third.is_empty(), "queue drained");
+        // 取出的合起来等于全队，无重复无丢失。
+        let mut all: Vec<usize> = first.into_iter().chain(rest).map(|(_, idx)| idx).collect();
+        all.sort();
+        let expected: Vec<usize> = (0..total).collect();
+        assert_eq!(all, expected, "no bind lost or duplicated");
     }
 
     /// collect_heights：solve 后把 slot 实际 layout_rect.h 回填 HeightCache，
