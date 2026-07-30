@@ -1,11 +1,11 @@
-﻿<!-- stat-bar component fragment: label + progress. character/inventory reuse. -->
+<!-- stat-bar component fragment: label + progress. character/inventory reuse. -->
 <style>
-  /* ProgressBar: 控件本身是轨道，core 注入 .loom-fill 填充条（width:% 由 value 驱动）*/
-  progress { background-color:rgba(26,47,69,0.85); border-radius:3px; overflow:hidden; }
-  .loom-fill { background-color:#5fb4d4; height:100%; }
+  /* ProgressBar：控件本身是轨道（spec §2.2），作者写 data-slot=fill 子节点（width:% 由 value 驱动） */
+  [role="progressbar"] { background-color:rgba(26,47,69,0.85); border-radius:3px; overflow:hidden; }
+  [role="progressbar"] [data-slot="fill"] { background-color:#5fb4d4; height:100%; }
 </style>
 <div class="stat-bar" style="display:flex;flex-direction:row;align-items:center;gap:12px">
   <span style="color:#9aa0b4;font-size:14px;min-width:48px">HP</span>
-  <progress value="780" max="1000" style="flex-grow:1;height:14px;"></progress>
+  <div role="progressbar" aria-valuenow="780" aria-valuemin="0" aria-valuemax="1000" style="flex-grow:1;height:14px;"><div data-slot="fill"></div></div>
   <span style="color:#e0e6ec;font-size:14px;min-width:72px;text-align:right">780 / 1000</span>
 </div>

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh">
 <head>
   <meta charset="utf-8">
@@ -24,9 +24,8 @@
   .loot { color:#d4a44e; font-weight:700; }
   .sys { color:#5fb4d4; font-weight:700; }
   .enemy { color:#c2605a; font-weight:700; }
-  /* 文本控件无 UA 样式表：必须由 CSS 提供 background/border（Task 17 围栏校验）。
-     caret-color = 光标色；selection-background = 选区高亮（围栏无 ::selection 伪元素，用私有属性平铺）。 */
-  textarea { width:100%; height:96px; resize:none; font-family:inherit; background-color:rgba(14,22,32,0.85); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:10px 14px; border-radius:6px; caret-color:#5fb4d4; selection-background:rgba(95,180,212,0.45); }
+  /* TextArea（多行 textbox）：无 UA 样式表，CSS 须提供 background/border + caret-color（围栏 CSS 契约） */
+  [role="textbox"][aria-multiline="true"] { width:100%; height:96px; resize:none; font-family:inherit; background-color:rgba(14,22,32,0.85); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:10px 14px; border-radius:6px; caret-color:#5fb4d4; selection-background:rgba(95,180,212,0.45); }
   .reply-row {display:flex; flex-direction:row; gap:12px; align-items:flex-end; }
   .reply-btn { padding:10px 20px; border-radius:8px; background-color:#d4a44e; color:#0e1620; font-size:14px; font-weight:700; white-space:nowrap; }
   @keyframes breathe { 0%,100%{opacity:1} 50%{opacity:.4} }
@@ -41,14 +40,14 @@
     <div class="body">
       <div class="col-list">
         <div class="col-title">收件箱 · ListView</div>
-        <ul data-fill="6" style="display:flex;flex-direction:column;gap:12px">
+        <div role="list" data-fill="6" style="display:flex;flex-direction:column;gap:12px">
           <template>
-            <li class="mail-item">
+            <div role="listitem" class="mail-item">
               <div class="mail-dot"></div>
               <div class="mail-body"><span class="mail-from">系统奖励</span><span class="mail-sub">每日登录奖励已发放</span></div>
-            </li>
+            </div>
           </template>
-        </ul>
+        </div>
       </div>
       <div class="col-read">
         <div class="read-title">赛季结算奖励</div>
@@ -61,7 +60,7 @@
         </div>
         <div style="display:flex;flex-direction:column;gap:10px;border-width:1px 0 0 0;border-style:solid;border-color:#1a2f45;padding-top:18px">
           <span style="color:#e0e6ec;font-size:15px;font-weight:700">回复（textarea · 多行编辑）</span>
-          <textarea id="mail-reply" placeholder="写下你的回复..." maxlength="200"></textarea>
+          <div role="textbox" id="mail-reply" aria-multiline="true" aria-placeholder="写下你的回复..." data-maxlength="200"></div>
           <div class="reply-row"><button class="reply-btn">发送回复</button><span style="color:#8ec5d8;font-size:13px">按 Ctrl+Enter 发送</span></div>
         </div>
       </div>

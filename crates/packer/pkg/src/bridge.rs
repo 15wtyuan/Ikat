@@ -94,10 +94,12 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
     Ok(nodes)
 }
 
-/// `<template>` 是 ListView item 蓝图：spec §8 要求根为**恰好一个** `<li>`（克隆
-/// 产 slot 根 = ListItem）。主循环按 IrTree 顺序建节点、不好回溯 template→child
-/// 关系，故做成独立前置遍历。零元素（如 `<template>text</template>`）与多元素
-/// （如 `<template><li/><li/></template>`）均拒。
+/// `<template>` 是 ListView item 蓝图：spec §8 要求根为**恰好一个** ListItem
+/// 语义节点。role 驱动后作者可写 `<li>`（legacy 标签）或 `<div role="listitem">`
+/// （WAI-ARIA），两者经 resolve_semantic 都落到 `SemanticKind::ListItem`，故本校验
+/// 按 **semantic** 判定而非字面 tag——与 role 化重构一致。主循环按 IrTree 顺序建节点、
+/// 不好回溯 template→child 关系，故做成独立前置遍历。零元素（如 `<template>text`）
+/// 与多元素（如 `<template><li/><li/></template>`）均拒。
 fn validate_template_children(tree: &IrTree) -> Result<(), String> {
     for node in &tree.nodes {
         let IrNodeKind::Element(el) = &node.kind else {
@@ -106,17 +108,19 @@ fn validate_template_children(tree: &IrTree) -> Result<(), String> {
         if el.semantic != Some(SemanticKind::Template) {
             continue;
         }
-        let element_children: Vec<&str> = node
+        let element_children: Vec<&IrElement> = node
             .children
             .iter()
             .filter_map(|c| match &tree.nodes[c.0].kind {
-                IrNodeKind::Element(cel) => Some(cel.tag.as_str()),
+                IrNodeKind::Element(cel) => Some(cel),
                 _ => None,
             })
             .collect();
-        if element_children.len() != 1 || element_children[0] != "li" {
+        if element_children.len() != 1
+            || element_children[0].semantic != Some(SemanticKind::ListItem)
+        {
             return Err(format!(
-                "<template> 根必须恰好一个 <li>（当前 {} 个元素）",
+                "<template> 根必须恰好一个 ListItem（<li> 或 <div role=\"listitem\">）（当前 {} 个元素）",
                 element_children.len()
             ));
         }
@@ -338,6 +342,31 @@ mod tests {
             "test.html",
         );
         assert!(bridge(&parsed).is_err(), "template 根必须是单个 <li>");
+    }
+
+    #[test]
+    fn template_root_role_listitem_ok() {
+        // role 驱动 ListView：作者写 <div role=list> > template > <div role=listitem>。
+        // validate_template_children 按 semantic（ListItem）判定，不挑字面 tag。
+        let parsed = loomgui_fence::parse_template(
+            r#"<div role="list" data-fill="3"><template><div role="listitem" class="item"><span>x</span></div></template></div>"#,
+            "test.html",
+        );
+        assert!(
+            parsed.diagnostics.is_empty(),
+            "no fence diags: {:?}",
+            parsed.diagnostics
+        );
+        let nodes = bridge(&parsed).expect("role=listitem template root is valid ListItem");
+        assert!(
+            nodes.iter().any(|n| n.kind == NodeKind::ListItem),
+            "ListItem node present: {:?}",
+            nodes.iter().map(|n| n.kind).collect::<Vec<_>>()
+        );
+        assert!(
+            nodes.iter().any(|n| n.kind == NodeKind::ListView),
+            "ListView node present"
+        );
     }
 
     #[test]

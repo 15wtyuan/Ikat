@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh">
 <head>
   <meta charset="utf-8">
@@ -14,27 +14,34 @@
   .group-title { color:#8ec5d8; font-size:18px; font-weight:700; }
   .field {display:flex; flex-direction:column; gap:8px; }
   .field-label { color:#9aa0b4; font-size:14px; }
-  /* 文本控件无 UA 样式表：必须由 CSS 提供 background/border，否则渲染空白（Task 17 围栏校验）。
-     caret-color = 光标色；selection-background = 选区高亮（围栏无 ::selection 伪元素，用私有属性平铺）。 */
-  input[type="text"], input[type="password"], input[type="search"], select, textarea { background-color:rgba(26,47,69,0.85); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:10px 14px; border-radius:6px; caret-color:#5fb4d4; selection-background:rgba(95,180,212,0.45); transition:border-color .15s; }
-  input[type="text"]:focus, input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea:focus { border-color:#5fb4d4; }
-  /* readonly 态：灰底暗字（围栏认 [readonly] 属性选择器；打包期读 readonly 属性设 ControlState.readonly，core edit guard 拒改） */
-  input[readonly], textarea[readonly] { background-color:rgba(40,52,68,0.6); color:#6a7280; border-color:#3a4252; }
-  textarea { width:100%; height:100px; resize:none; font-family:inherit; }
+  /* 文本控件无 UA 样式表：必须由 CSS 提供 background/border，否则渲染空白（围栏 CSS 契约校验）。
+     caret-color = 光标色；selection-background = 选区高亮（围栏无 ::selection 伪元素，用私有属性平铺）。
+     role 驱动：[role=textbox] 覆盖单行/多行文本输入，[role=combobox] 覆盖下拉。 */
+  [role="textbox"], [role="combobox"] { background-color:rgba(26,47,69,0.85); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:10px 14px; border-radius:6px; caret-color:#5fb4d4; selection-background:rgba(95,180,212,0.45); transition:border-color .15s; }
+  [role="textbox"]:focus, [role="combobox"]:focus { border-color:#5fb4d4; }
+  /* readonly 态：灰底暗字（CSS 用 class 表达静态区分；aria-readonly 运行时尚未合成，class 最稳） */
+  [role="textbox"].is-readonly { background-color:rgba(40,52,68,0.6); color:#6a7280; border-color:#3a4252; }
+  /* textarea（多行 textbox）：用 aria-multiline 区分 */
+  [role="textbox"][aria-multiline="true"] { width:100%; height:100px; resize:none; font-family:inherit; }
   .radio-group {display:flex; flex-direction:row; gap:24px; }
   .radio-opt {display:flex; flex-direction:row; align-items:center; gap:8px; color:#9aa0b4; font-size:15px; }
-  /* Toggle/Radio: 控件本身是框，core 注入 .loom-check 勾选图标（display 控制可见）*/
-  input[type="checkbox"], input[type="radio"] { width:18px; height:18px; background-color:rgba(26,47,69,0.85); border-width:2px; border-style:solid; border-color:#2a5a75; border-radius:4px; justify-content:center; align-items:center; }
-  input[type="radio"] { border-radius:9px; }
-  .loom-check { width:8px; height:8px; background-color:#5fb4d4; border-radius:2px; }
-  input[type="radio"] .loom-check { border-radius:4px; }
-  /* Slider: 控件本身是轨道容器，core 注入 .loom-track>.loom-fill + .loom-thumb */
-  input[type="range"] { flex-grow:1; height:6px; background-color:rgba(26,47,69,0.85); border-radius:3px; border-width:0; padding:0; flex-direction:row; align-items:center; }
-  .loom-track { flex-grow:1; height:6px; background-color:rgba(26,47,69,0.85); border-radius:3px; overflow:hidden; }
-  .loom-fill { background-color:#5fb4d4; height:100%; }
-  .loom-thumb { width:16px; height:16px; background-color:#d4a44e; border-radius:8px; }
+  /* Toggle/Switch + Radio：控件本身是框，选中态用 [aria-checked="true"] 属性选择器（运行时由 ControlState 合成） */
+  [role="switch"], [role="radio"] { width:18px; height:18px; background-color:rgba(26,47,69,0.85); border-width:2px; border-style:solid; border-color:#2a5a75; border-radius:4px; justify-content:center; align-items:center; }
+  [role="radio"] { border-radius:9px; }
+  [role="switch"][aria-checked="true"], [role="radio"][aria-checked="true"] { background-color:#5fb4d4; border-color:#5fb4d4; }
+  /* Slider：控件本身是轨道（spec §2.2 无 track 中间层）；fill/thumb 是作者写的 data-slot 子节点，
+     均绝对定位锚到 slider 左上，core sync 按 value 驱动 fill 宽度（%）与 thumb 位移。 */
+  [role="slider"] { position:relative; flex-grow:1; height:6px; background-color:rgba(26,47,69,0.85); border-radius:3px; border-width:0; padding:0; }
+  [role="slider"] [data-slot="fill"] { position:absolute; left:0; top:0; height:100%; background-color:#5fb4d4; border-radius:3px; }
+  [role="slider"] [data-slot="thumb"] { position:absolute; left:0; top:0; width:16px; height:16px; background-color:#d4a44e; border-radius:8px; }
   .slider-field {display:flex; flex-direction:row; align-items:center; gap:16px; }
   .slider-val { color:#d4a44e; font-size:16px; font-weight:700; min-width:40px; }
+  /* Dropdown (combobox)：作者写 data-slot=value（显示选中项文本）+ role=listbox（弹出列表）> role=option。
+     core sync 切换 listbox display + 往 value slot 内 TextNode 写选中项文本。 */
+  [role="combobox"] { position:relative; }
+  [role="combobox"] [data-slot="value"] { color:#e0e6ec; font-size:15px; }
+  [role="combobox"] [role="listbox"] { display:none; position:absolute; left:0; top:100%; width:100%; background-color:rgba(15,24,36,0.96); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; border-radius:4px; padding:4px 0; }
+  [role="combobox"] [role="option"] { display:block; padding:6px 14px; color:#e0e6ec; font-size:15px; }
   .actions {display:flex; flex-direction:row; gap:16px; justify-content:flex-end; }
   .btn { padding:12px 32px; border-radius:10px; font-size:16px; font-weight:700; transition:filter .15s; }
   .btn-create { background-color:#d4a44e; color:#0e1620; }
@@ -52,47 +59,50 @@
       <div class="page-desc">表单控件编排 · 用 div + p 分组（替代 fieldset/legend）</div>
       <div class="group">
         <div class="group-title">基本信息</div>
-        <div class="field"><span class="field-label">角色名（text · 回车提交）</span><input type="text" id="char-name" placeholder="输入角色名后回车" maxlength="12"></div>
-        <div class="field"><span class="field-label">通行密语（password · 掩码显示）</span><input type="password" id="char-pass" placeholder="6-16 位" maxlength="16"></div>
-        <div class="field"><span class="field-label">搜索已有角色（search）</span><input type="search" id="char-search" placeholder="输入关键词搜索"></div>
-        <div class="field"><span class="field-label">角色编号（readonly · 只读锁定）</span><input type="text" id="char-id" value="CHR-2026-0728" readonly></div>
+        <div class="field"><span class="field-label">角色名（text · 回车提交）</span><div role="textbox" id="char-name" aria-placeholder="输入角色名后回车" data-maxlength="12"></div></div>
+        <div class="field"><span class="field-label">通行密语（password · 掩码显示）</span><div role="textbox" id="char-pass" aria-placeholder="6-16 位" data-maxlength="16"></div></div>
+        <div class="field"><span class="field-label">搜索已有角色（search）</span><div role="textbox" id="char-search" aria-placeholder="输入关键词搜索"></div></div>
+        <div class="field"><span class="field-label">角色编号（readonly · 只读锁定）</span><div role="textbox" id="char-id" class="is-readonly" aria-readonly="true"></div></div>
         <div class="field"><span class="field-label">提交反馈</span><div id="name-feedback" style="color:#8ec5d8;font-size:14px;min-height:18px">（输入角色名后回车，此处显示提交结果）</div></div>
       </div>
       <div class="group">
         <div class="group-title">职业与出身</div>
         <div class="field"><span class="field-label">职业</span>
-          <select id="char-class">
-            <option value="ranger">游侠</option>
-            <option value="mage">法师</option>
-            <option value="warrior">战士</option>
-            <option value="assassin">刺客</option>
-          </select>
+          <div role="combobox" id="char-class">
+            <div data-slot="value">游侠</div>
+            <div role="listbox">
+              <div role="option">游侠</div>
+              <div role="option">法师</div>
+              <div role="option">战士</div>
+              <div role="option">刺客</div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="group">
         <div class="group-title">性别与阵营</div>
         <div class="radio-group">
-          <div class="radio-opt"><input type="radio" id="g-m" name="gender" checked><span>男</span></div>
-          <div class="radio-opt"><input type="radio" id="g-f" name="gender"><span>女</span></div>
-          <div class="radio-opt"><input type="radio" id="a-light" name="faction" checked><span>光明阵营</span></div>
-          <div class="radio-opt"><input type="radio" id="a-dark" name="faction"><span>暗影阵营</span></div>
+          <div class="radio-opt"><div role="radio" id="g-m" aria-checked="true" data-name="gender"></div><span>男</span></div>
+          <div class="radio-opt"><div role="radio" id="g-f" aria-checked="false" data-name="gender"></div><span>女</span></div>
+          <div class="radio-opt"><div role="radio" id="a-light" aria-checked="true" data-name="faction"></div><span>光明阵营</span></div>
+          <div class="radio-opt"><div role="radio" id="a-dark" aria-checked="false" data-name="faction"></div><span>暗影阵营</span></div>
         </div>
       </div>
       <div class="group">
         <div class="group-title">初始属性分配</div>
         <div class="field"><span class="field-label">力量</span>
-          <div class="slider-field"><input type="range" id="attr-str" min="0" max="20" value="10"><span class="slider-val">10</span></div>
+          <div class="slider-field"><div role="slider" id="attr-str" aria-valuenow="10" aria-valuemin="0" aria-valuemax="20" data-step="1"><div data-slot="fill"></div><div data-slot="thumb"></div></div><span class="slider-val">10</span></div>
         </div>
         <div class="field"><span class="field-label">敏捷</span>
-          <div class="slider-field"><input type="range" id="attr-agi" min="0" max="20" value="12"><span class="slider-val">12</span></div>
+          <div class="slider-field"><div role="slider" id="attr-agi" aria-valuenow="12" aria-valuemin="0" aria-valuemax="20" data-step="1"><div data-slot="fill"></div><div data-slot="thumb"></div></div><span class="slider-val">12</span></div>
         </div>
         <div class="field"><span class="field-label">智力</span>
-          <div class="slider-field"><input type="range" id="attr-int" min="0" max="20" value="8"><span class="slider-val">8</span></div>
+          <div class="slider-field"><div role="slider" id="attr-int" aria-valuenow="8" aria-valuemin="0" aria-valuemax="20" data-step="1"><div data-slot="fill"></div><div data-slot="thumb"></div></div><span class="slider-val">8</span></div>
         </div>
       </div>
       <div class="group">
         <div class="group-title">背景故事</div>
-        <div class="field"><span class="field-label">简介（textarea）</span><textarea id="char-bio" rows="4" cols="60" maxlength="200" placeholder="一段角色背景故事..."></textarea></div>
+        <div class="field"><span class="field-label">简介（textarea）</span><div role="textbox" id="char-bio" aria-multiline="true" aria-placeholder="一段角色背景故事..." data-maxlength="200"></div></div>
       </div>
       <div class="actions">
         <button class="btn btn-reset">重置</button>

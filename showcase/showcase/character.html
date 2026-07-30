@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh">
 <head>
   <meta charset="utf-8">
@@ -31,9 +31,9 @@
   .skill-name { color:#e0e6ec; font-size:15px; flex-grow:1; }
   .skill-lv { color:#d4a44e; font-size:14px; font-weight:700; }
   @keyframes charge { from{filter:brightness(.7)} to{filter:brightness(1)} }
-  /* ProgressBar: 控件本身是轨道，core 注入 .loom-fill 填充条（width:% 由 value 驱动）*/
-  progress { animation:charge 2s infinite alternate; background-color:rgba(26,47,69,0.85); border-radius:4px; overflow:hidden; }
-  .loom-fill { background-color:#5fb4d4; height:100%; }
+  /* ProgressBar：控件本身是轨道（spec §2.2），作者写 data-slot=fill 子节点（width:% 由 value 驱动） */
+  [role="progressbar"] { animation:charge 2s infinite alternate; background-color:rgba(26,47,69,0.85); border-radius:4px; overflow:hidden; }
+  [role="progressbar"] [data-slot="fill"] { background-color:#5fb4d4; height:100%; }
   </style>
 </head>
 <body>
@@ -50,9 +50,9 @@
           <button id="btn-train" style="background-color:#d4a44e;color:#0e1620;font-size:14px;font-weight:700;padding:6px 16px;border-radius:8px">训练 +EXP</button>
         </div>
         <div class="stat-bars">
-          <div class="stat-row"><span class="stat-label">HP</span><progress value="780" max="1000" style="flex-grow:1;height:16px;"></progress><span class="stat-val">780/1000</span></div>
-          <div class="stat-row"><span class="stat-label">MP</span><progress value="340" max="600" style="flex-grow:1;height:16px;"></progress><span class="stat-val">340/600</span></div>
-          <div class="stat-row"><span class="stat-label">EXP</span><progress id="stat-exp" value="62" max="100" style="flex-grow:1;height:16px;"></progress><span class="stat-val" id="stat-exp-val">62%</span></div>
+          <div class="stat-row"><span class="stat-label">HP</span><div role="progressbar" aria-valuenow="780" aria-valuemin="0" aria-valuemax="1000" style="flex-grow:1;height:16px;"><div data-slot="fill"></div></div><span class="stat-val">780/1000</span></div>
+          <div class="stat-row"><span class="stat-label">MP</span><div role="progressbar" aria-valuenow="340" aria-valuemin="0" aria-valuemax="600" style="flex-grow:1;height:16px;"><div data-slot="fill"></div></div><span class="stat-val">340/600</span></div>
+          <div class="stat-row"><span class="stat-label">EXP</span><div role="progressbar" id="stat-exp" aria-valuenow="62" aria-valuemin="0" aria-valuemax="100" style="flex-grow:1;height:16px;"><div data-slot="fill"></div></div><span class="stat-val" id="stat-exp-val">62%</span></div>
         </div>
       </div>
       <div class="col-side">
@@ -69,12 +69,12 @@
         </div>
         <div class="panel">
           <span class="panel-title">技能（ol 有序列表）</span>
-          <ul style="display:flex;flex-direction:column;gap:4px">
-            <li class="skill"><span class="skill-no">1</span><img class="skill-icon" src="../res/icons/weapon.png" alt="skill"><span class="skill-name">影袭</span><span class="skill-lv">Lv.9</span></li>
-            <li class="skill"><span class="skill-no">2</span><img class="skill-icon" src="../res/icons/skill-spin.png" alt="skill"><span class="skill-name">旋风斩</span><span class="skill-lv">Lv.7</span></li>
-            <li class="skill"><span class="skill-no">3</span><img class="skill-icon" src="../res/icons/skill-eye.png" alt="skill"><span class="skill-name">鹰眼</span><span class="skill-lv">Lv.5</span></li>
-            <li class="skill"><span class="skill-no">4</span><img class="skill-icon" src="../res/icons/skill-step.png" alt="skill"><span class="skill-name">瞬步</span><span class="skill-lv">Lv.8</span></li>
-          </ul>
+          <div role="list" style="display:flex;flex-direction:column;gap:4px">
+            <div role="listitem" class="skill"><span class="skill-no">1</span><img class="skill-icon" src="../res/icons/weapon.png" alt="skill"><span class="skill-name">影袭</span><span class="skill-lv">Lv.9</span></div>
+            <div role="listitem" class="skill"><span class="skill-no">2</span><img class="skill-icon" src="../res/icons/skill-spin.png" alt="skill"><span class="skill-name">旋风斩</span><span class="skill-lv">Lv.7</span></div>
+            <div role="listitem" class="skill"><span class="skill-no">3</span><img class="skill-icon" src="../res/icons/skill-eye.png" alt="skill"><span class="skill-name">鹰眼</span><span class="skill-lv">Lv.5</span></div>
+            <div role="listitem" class="skill"><span class="skill-no">4</span><img class="skill-icon" src="../res/icons/skill-step.png" alt="skill"><span class="skill-name">瞬步</span><span class="skill-lv">Lv.8</span></div>
+          </div>
         </div>
       </div>
     </div>

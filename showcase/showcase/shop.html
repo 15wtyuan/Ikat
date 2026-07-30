@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh">
 <head>
   <meta charset="utf-8">
@@ -26,14 +26,15 @@
   .dialog-title { color:#e0e6ec; font-size:22px; font-weight:700; }
   .dialog-row {display:flex; flex-direction:row; align-items:center; justify-content:space-between; }
   .dialog-label { color:#9aa0b4; font-size:15px; }
-  .qty { background-color:rgba(26,47,69,0.85); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:18px; padding:8px 12px; border-radius:6px; width:90px; text-align:center; }
+  /* NumberField（spinbutton · qty）：无 UA 样式表，CSS 须提供 background/border + caret-color */
+  .qty { background-color:rgba(26,47,69,0.85); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:18px; padding:8px 12px; border-radius:6px; width:90px; text-align:center; caret-color:#5fb4d4; }
   .balance-row {display:flex; flex-direction:row; align-items:center; gap:10px; }
   .dialog-actions {display:flex; flex-direction:row; gap:12px; justify-content:flex-end; }
   .btn-confirm { background-color:#5fb4d4; color:#0e1620; font-size:15px; font-weight:700; padding:10px 24px; border-radius:10px; }
   .btn-cancel { background-color:rgba(26,47,69,0.85); color:#9aa0b4; font-size:15px; padding:10px 24px; border-radius:10px; }
-  /* ProgressBar: 控件本身是轨道，core 注入 .loom-fill 填充条（width:% 由 value 驱动）*/
-  progress { background-color:rgba(26,47,69,0.85); border-radius:4px; overflow:hidden; height:8px; }
-  .loom-fill { background-color:#5fb4d4; height:100%; }
+  /* ProgressBar：控件本身是轨道（spec §2.2），作者写 data-slot=fill 子节点（width:% 由 value 驱动） */
+  [role="progressbar"] { background-color:rgba(26,47,69,0.85); border-radius:4px; overflow:hidden; height:8px; }
+  [role="progressbar"] [data-slot="fill"] { background-color:#5fb4d4; height:100%; }
   </style>
 </head>
 <body>
@@ -49,7 +50,7 @@
           <span class="product-name">新手礼包</span>
           <span class="product-price">¥ 6</span>
           <div class="product-meta">
-            <div class="stock-row"><span class="stock-label">倒计时</span><progress value="35" max="100" style="flex-grow:1;"></progress></div>
+            <div class="stock-row"><span class="stock-label">倒计时</span><div role="progressbar" aria-valuenow="35" aria-valuemin="0" aria-valuemax="100" style="flex-grow:1;"><div data-slot="fill"></div></div></div>
             <button class="link-detail">详情</button>
           </div>
           <button class="btn-buy" data-open-dialog="buy-dialog">购买</button>
@@ -59,7 +60,7 @@
           <span class="product-name">勇者外观包</span>
           <span class="product-price">¥ 30</span>
           <div class="product-meta">
-            <div class="stock-row"><span class="stock-label">库存</span><progress value="72" max="100" style="flex-grow:1;"></progress></div>
+            <div class="stock-row"><span class="stock-label">库存</span><div role="progressbar" aria-valuenow="72" aria-valuemin="0" aria-valuemax="100" style="flex-grow:1;"><div data-slot="fill"></div></div></div>
             <button class="link-detail">详情</button>
           </div>
           <button class="btn-buy" data-open-dialog="buy-dialog">购买</button>
@@ -69,7 +70,7 @@
           <span class="product-name">传说宝箱</span>
           <span class="product-price">¥ 98</span>
           <div class="product-meta">
-            <div class="stock-row"><span class="stock-label">倒计时</span><progress value="8" max="100" style="flex-grow:1;"></progress></div>
+            <div class="stock-row"><span class="stock-label">倒计时</span><div role="progressbar" aria-valuenow="8" aria-valuemin="0" aria-valuemax="100" style="flex-grow:1;"><div data-slot="fill"></div></div></div>
             <button class="link-detail">详情</button>
           </div>
           <button class="btn-buy" data-open-dialog="buy-dialog">购买</button>
@@ -81,11 +82,11 @@
         <span class="dialog-title">确认购买</span>
         <div class="dialog-row">
           <span class="dialog-label">购买数量</span>
-          <input type="number" class="qty" min="1" max="99" step="1" value="1">
+          <div role="spinbutton" class="qty" aria-valuenow="1" aria-valuemin="1" aria-valuemax="99" data-step="1"></div>
         </div>
         <div class="dialog-row balance-row">
           <span class="dialog-label">余额</span>
-          <progress value="4200" max="5000" style="width:200px;"></progress>
+          <div role="progressbar" aria-valuenow="4200" aria-valuemin="0" aria-valuemax="5000" style="width:200px;"><div data-slot="fill"></div></div>
         </div>
         <div class="dialog-actions">
           <button class="btn-cancel" data-close-dialog>取消</button>

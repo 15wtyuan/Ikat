@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh">
 <head>
   <meta charset="utf-8">
@@ -23,30 +23,28 @@
   .field-hint { color:#6c7080; font-size:13px; margin-top:3px; }
   .field-control {display:flex; flex-direction:row; align-items:center; gap:12px; }
   .val { color:#8ec5d8; font-size:14px; min-width:48px; text-align:right; }
-  /* 文本控件无 UA 样式表：必须由 CSS 提供 background/border（Task 17 围栏校验）。
-     caret-color = 光标色；selection-background = 选区高亮（围栏无 ::selection 伪元素，用私有属性平铺）。 */
-  input[type="number"], input[type="text"], input[type="password"], input[type="search"] { background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; caret-color:#5fb4d4; selection-background:rgba(95,180,212,0.45); width:240px; }
-  /* Dropdown (select)：select 是容器（core 注入 position:relative），core 注入
-     .loom-value（显示选中项文字）+ .loom-popup（弹出列表，position:absolute 浮出）。
-     select 本体显式 block + 固定尺寸（Dropdown 默认 display:flex 会让它坍缩），
-     背景边框沿用 input 风格。注入子节点 + option 必须命中 CSS（fence 强制）。 */
-  select { display:block; width:200px; height:36px; background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; border-radius:4px; }
-  .loom-value { position:absolute; left:0; top:0; width:100%; height:100%; display:flex; align-items:center; padding:0 12px; color:#e0e6ec; font-size:15px; }
-  .loom-popup { width:200px; background-color:rgba(15,24,36,0.96); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; border-radius:4px; padding:4px 0; }
-  option { display:block; width:200px; height:32px; padding:0 12px; color:#e0e6ec; font-size:15px; }
+  /* 文本控件无 UA 样式表：必须由 CSS 提供 background/border（围栏 CSS 契约校验）。
+     caret-color = 光标色；selection-background = 选区高亮（私有属性平铺）。
+     role 驱动：[role=textbox] 单/多行、[role=spinbutton] 数值、[role=combobox] 下拉。 */
+  [role="textbox"], [role="spinbutton"], [role="combobox"] { background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:8px 12px; border-radius:4px; caret-color:#5fb4d4; selection-background:rgba(95,180,212,0.45); width:240px; }
+  /* Dropdown (combobox)：作者写 data-slot=value（显示选中项）+ role=listbox（弹出）> role=option。
+     LoomGUI 下拉无内建箭头——如需箭头作者自绘。core sync 切 listbox display + 写 value slot 文本。 */
+  [role="combobox"] { position:relative; display:block; width:200px; height:36px; }
+  [role="combobox"] [data-slot="value"] { position:absolute; left:0; top:0; width:100%; height:100%; display:flex; align-items:center; padding:0 12px; color:#e0e6ec; font-size:15px; }
+  [role="combobox"] [role="listbox"] { display:none; position:absolute; left:0; top:100%; width:200px; background-color:rgba(15,24,36,0.96); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; border-radius:4px; padding:4px 0; }
+  [role="combobox"] [role="option"] { display:block; width:200px; height:32px; padding:0 12px; color:#e0e6ec; font-size:15px; }
   .checkbox-row {display:flex; flex-direction:row; align-items:center; gap:10px; }
   .radio-group {display:flex; flex-direction:row; gap:20px; }
   .radio-opt {display:flex; flex-direction:row; align-items:center; gap:6px; color:#9aa0b4; font-size:15px; }
-  /* Toggle/Radio: 控件本身是框，core 注入 .loom-check 勾选图标（display 控制可见）*/
-  input[type="checkbox"], input[type="radio"] { width:18px; height:18px; background-color:rgba(26,47,69,0.85); border-width:2px; border-style:solid; border-color:#2a5a75; border-radius:4px; justify-content:center; align-items:center; }
-  input[type="radio"] { border-radius:9px; }
-  .loom-check { width:8px; height:8px; background-color:#5fb4d4; border-radius:2px; }
-  input[type="radio"] .loom-check { border-radius:4px; }
-  /* Slider: 控件本身是轨道容器，core 注入 .loom-track>.loom-fill + .loom-thumb */
-  input[type="range"] { width:280px; height:6px; background-color:rgba(26,47,69,0.85); border-radius:3px; border-width:0; padding:0; flex-direction:row; align-items:center; }
-  .loom-track { flex-grow:1; height:6px; background-color:rgba(26,47,69,0.85); border-radius:3px; overflow:hidden; }
-  .loom-fill { background-color:#5fb4d4; height:100%; }
-  .loom-thumb { width:16px; height:16px; background-color:#d4a44e; border-radius:8px; }
+  /* Toggle/Switch + Radio：控件本身是框，选中态用 [aria-checked="true"]（运行时由 ControlState 合成） */
+  [role="switch"], [role="radio"] { width:18px; height:18px; background-color:rgba(26,47,69,0.85); border-width:2px; border-style:solid; border-color:#2a5a75; border-radius:4px; justify-content:center; align-items:center; }
+  [role="radio"] { border-radius:9px; }
+  [role="switch"][aria-checked="true"], [role="radio"][aria-checked="true"] { background-color:#5fb4d4; border-color:#5fb4d4; }
+  /* Slider：控件本身是轨道（spec §2.2 无 track 中间层）；fill/thumb 是 data-slot 子节点，
+     绝对定位锚到 slider 左上，core sync 按 value 驱动 fill 宽度（%）与 thumb 位移。 */
+  [role="slider"] { position:relative; width:280px; height:6px; background-color:rgba(26,47,69,0.85); border-radius:3px; border-width:0; padding:0; }
+  [role="slider"] [data-slot="fill"] { position:absolute; left:0; top:0; height:100%; background-color:#5fb4d4; border-radius:3px; }
+  [role="slider"] [data-slot="thumb"] { position:absolute; left:0; top:0; width:16px; height:16px; background-color:#d4a44e; border-radius:8px; }
   .panel { transition:opacity .2s; }
   </style>
 </head>
@@ -66,84 +64,87 @@
     <div class="main">
       <div role="tabpanel" id="panel-audio" class="panel">
         <div class="page-title">音效</div>
-        <div class="page-desc">input[type=range] · input[type=number]</div>
+        <div class="page-desc">slider · spinbutton</div>
         <div class="field">
           <div><span class="field-label">主音量</span><div class="field-hint">range 0–100</div></div>
-          <div class="field-control"><input type="range" id="vol-master" min="0" max="100" value="80"><span class="val" id="vol-master-val">80</span></div>
+          <div class="field-control"><div role="slider" id="vol-master" aria-valuenow="80" aria-valuemin="0" aria-valuemax="100" data-step="1"><div data-slot="fill"></div><div data-slot="thumb"></div></div><span class="val" id="vol-master-val">80</span></div>
         </div>
         <div class="field">
           <div><span class="field-label">音效音量</span><div class="field-hint">range 0–100</div></div>
-          <div class="field-control"><input type="range" id="vol-sfx" min="0" max="100" value="65"><span class="val">65</span></div>
+          <div class="field-control"><div role="slider" id="vol-sfx" aria-valuenow="65" aria-valuemin="0" aria-valuemax="100" data-step="1"><div data-slot="fill"></div><div data-slot="thumb"></div></div><span class="val">65</span></div>
         </div>
         <div class="field">
-          <div><span class="field-label">最多同时发声数</span><div class="field-hint">input[type=number] min/max/step</div></div>
-          <div class="field-control"><input type="number" id="snd-voices" min="1" max="64" step="1" value="32"><span class="val"> voices</span></div>
+          <div><span class="field-label">最多同时发声数</span><div class="field-hint">spinbutton min/max/step</div></div>
+          <div class="field-control"><div role="spinbutton" id="snd-voices" aria-valuenow="32" aria-valuemin="1" aria-valuemax="64" data-step="1"></div><span class="val"> voices</span></div>
         </div>
       </div>
       <div role="tabpanel" id="panel-graphics" class="panel" style="display:none">
         <div class="page-title">画面</div>
-        <div class="page-desc">range · select/option · checkbox</div>
+        <div class="page-desc">slider · combobox/option · switch</div>
         <div class="field">
           <div><span class="field-label">亮度</span><div class="field-hint">range 0–100</div></div>
-          <div class="field-control"><input type="range" id="gfx-bright" min="0" max="100" value="50"><span class="val">50</span></div>
+          <div class="field-control"><div role="slider" id="gfx-bright" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100" data-step="1"><div data-slot="fill"></div><div data-slot="thumb"></div></div><span class="val">50</span></div>
         </div>
         <div class="field">
-          <div><span class="field-label">分辨率</span><div class="field-hint">select + option</div></div>
+          <div><span class="field-label">分辨率</span><div class="field-hint">combobox + option</div></div>
           <div class="field-control">
-            <select id="gfx-res">
-              <option value="1080">1920×1080</option>
-              <option value="1440">2560×1440</option>
-              <option value="4k">3840×2160</option>
-            </select>
+            <div role="combobox" id="gfx-res">
+              <div data-slot="value">1920×1080</div>
+              <div role="listbox">
+                <div role="option">1920×1080</div>
+                <div role="option">2560×1440</div>
+                <div role="option">3840×2160</div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="field">
           <div><span class="field-label">全屏模式</span></div>
-          <div class="checkbox-row"><input type="checkbox" id="gfx-fullscreen" checked><span>全屏</span></div>
+          <div class="checkbox-row"><div role="switch" id="gfx-fullscreen" aria-checked="true"></div><span>全屏</span></div>
         </div>
         <div class="field">
           <div><span class="field-label">垂直同步</span></div>
-          <div class="checkbox-row"><input type="checkbox" id="gfx-vsync"><span>启用</span></div>
+          <div class="checkbox-row"><div role="switch" id="gfx-vsync" aria-checked="false"></div><span>启用</span></div>
         </div>
       </div>
       <div role="tabpanel" id="panel-controls" class="panel" style="display:none">
         <div class="page-title">操作</div>
-        <div class="page-desc">radio · text · label[for]</div>
+        <div class="page-desc">radio · textbox</div>
         <div class="field">
           <div><span class="field-label">按键方案</span></div>
           <div class="radio-group">
-            <div class="radio-opt"><input type="radio" id="key-default" name="keyscheme" checked><span>默认</span></div>
-            <div class="radio-opt"><input type="radio" id="key-alt" name="keyscheme"><span>备用</span></div>
-            <div class="radio-opt"><input type="radio" id="key-lefty" name="keyscheme"><span>左撇子</span></div>
+            <div class="radio-opt"><div role="radio" id="key-default" aria-checked="true" data-name="keyscheme"></div><span>默认</span></div>
+            <div class="radio-opt"><div role="radio" id="key-alt" aria-checked="false" data-name="keyscheme"></div><span>备用</span></div>
+            <div class="radio-opt"><div role="radio" id="key-lefty" aria-checked="false" data-name="keyscheme"></div><span>左撇子</span></div>
           </div>
         </div>
         <div class="field">
-          <div><span class="field-label">自定义按键</span><div class="field-hint">input[type=text]</div></div>
-          <div class="field-control"><input type="text" id="key-custom" placeholder="按键序列" value="Space"></div>
+          <div><span class="field-label">自定义按键</span><div class="field-hint">textbox</div></div>
+          <div class="field-control"><div role="textbox" id="key-custom" aria-placeholder="按键序列"></div></div>
         </div>
       </div>
       <div role="tabpanel" id="panel-account" class="panel" style="display:none">
         <div class="page-title">账号</div>
-        <div class="page-desc">text · password · checkbox</div>
+        <div class="page-desc">textbox · switch</div>
         <div class="field">
           <div><span class="field-label">账号名</span></div>
-          <div class="field-control"><input type="text" id="acc-name" placeholder="账号" value="player_01"></div>
+          <div class="field-control"><div role="textbox" id="acc-name" aria-placeholder="账号"></div></div>
         </div>
         <div class="field">
           <div><span class="field-label">密码</span></div>
-          <div class="field-control"><input type="password" id="acc-pwd" placeholder="密码" value="secret"></div>
+          <div class="field-control"><div role="textbox" id="acc-pwd" aria-placeholder="密码"></div></div>
         </div>
         <div class="field">
           <div><span class="field-label">记住账号</span></div>
-          <div class="checkbox-row"><input type="checkbox" id="acc-remember" checked><span>记住</span></div>
+          <div class="checkbox-row"><div role="switch" id="acc-remember" aria-checked="true"></div><span>记住</span></div>
         </div>
       </div>
       <div role="tabpanel" id="panel-search" class="panel" style="display:none">
         <div class="page-title">搜索</div>
-        <div class="page-desc">input[type=search]（围栏内 text 第 7 变体）</div>
+        <div class="page-desc">textbox（search 语义折叠进 textbox）</div>
         <div class="field">
           <div><span class="field-label">搜索设置项</span></div>
-          <div class="field-control"><input type="search" id="set-search" placeholder="输入关键词"></div>
+          <div class="field-control"><div role="textbox" id="set-search" aria-placeholder="输入关键词"></div></div>
         </div>
       </div>
     </div>

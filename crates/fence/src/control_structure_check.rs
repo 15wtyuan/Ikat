@@ -56,6 +56,11 @@ fn node_slot(el: &IrElement) -> Option<&str> {
 }
 
 /// 直接子节点中是否存在满足 spec 的节点（按 role 或 data-slot 匹配）。
+///
+/// 数据驱动 ListView 把 item 蓝图写在 `<template>` 子节点里（运行时克隆产 slot），
+/// list 节点本身没有直接 `role="listitem"` 子节点。本校验因此把直接 `<template>`
+/// 子节点的首个元素子节点视同直接子节点一并检查（template 蓝图模式），与 spec §2.2
+/// list→listitem 契约一致——作者两种写法（直接 listitem / template>listitem）都合法。
 fn has_required_child(tree: &IrTree, parent_idx: usize, spec: CheckSpec) -> bool {
     let children: Vec<usize> = tree.nodes[parent_idx]
         .children
@@ -72,6 +77,25 @@ fn has_required_child(tree: &IrTree, parent_idx: usize, spec: CheckSpec) -> bool
         };
         if matched {
             return true;
+        }
+        // template 蓝图模式：直接子是 <template> 时，看其首个元素子节点是否满足 spec
+        // （ListView item 蓝图 `role=list > template > role=listitem`）。
+        if el.tag == "template" {
+            if let Some(&tpl_child) = tree.nodes[child_idx]
+                .children
+                .iter()
+                .find(|c| matches!(tree.nodes[c.0].kind, IrNodeKind::Element(_)))
+            {
+                if let IrNodeKind::Element(tpl_el) = &tree.nodes[tpl_child.0].kind {
+                    let tpl_matched = match spec {
+                        CheckSpec::Role(r) => node_role(tpl_el) == Some(r),
+                        CheckSpec::Slot(s) => node_slot(tpl_el) == Some(s),
+                    };
+                    if tpl_matched {
+                        return true;
+                    }
+                }
+            }
         }
     }
     false
@@ -235,6 +259,29 @@ mod tests {
     fn list_with_listitem_ok() {
         let diags = struct_diags(r#"<div role="list"><div role="listitem">A</div></div>"#);
         assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn list_with_template_listitem_ok() {
+        // 数据驱动 ListView 蓝图模式：role=list > template > role=listitem（运行时克隆产 slot）。
+        // list 无直接 listitem 子节点，但 template 蓝图里的 listitem 满足结构契约。
+        let diags = struct_diags(
+            r#"<div role="list" data-fill="3"><template><div role="listitem" class="item">A</div></template></div>"#,
+        );
+        assert!(
+            diags.is_empty(),
+            "template 蓝图模式应满足 list→listitem: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn list_template_with_non_listitem_root_errors() {
+        // template 存在但根不是 listitem → 仍报 error（防止作者写错蓝图根）
+        let diags = struct_diags(
+            r#"<div role="list"><template><div class="wrong">A</div></template></div>"#,
+        );
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(diags[0].message.contains("listitem"));
     }
 
     #[test]
