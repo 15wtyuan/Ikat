@@ -1,6 +1,6 @@
 // LoomGUI showcase browser preview driver (preview-only — packer consumes body only).
 // Nav + role=tablist switch + dialog display toggle + ListView visual fill + NativeHost placeholder + body letterbox
-// + control visual injection (mirrors core's .loom-* children so the browser preview matches the runtime).
+// + control interaction driver (mirrors runtime control semantics so the browser preview behaves like Unity).
 // Classic script (non-ES module) to avoid file:// CORS.
 (function () {
   'use strict';
@@ -64,22 +64,23 @@
     });
   }
 
-  // Preview-only: rotate item icons across filled rows so the inventory grid
-  // reads as varied items. Runtime ListView is data-driven; this is a visual aid.
+  // Preview-only: clone the <template> child of a role=list[data-fill] so data-driven
+  // ListViews read as filled. Runtime ListView is data-driven; this is a visual aid.
+  // (pivot: was ul[data-fill], now [role="list"][data-fill] per spec §2.2)
   var ITEM_ROTATION = ['item-potion', 'item-chest', 'item-gem', 'item-scroll', 'item-staff', 'item-wand'];
   function fillListViews() {
     var dir = location.href.substring(0, location.href.lastIndexOf('/') + 1) + '../res/icons/';
-    document.querySelectorAll('ul[data-fill]').forEach(function (ul) {
-      var tpl = ul.querySelector('template');
+    document.querySelectorAll('[role="list"][data-fill]').forEach(function (list) {
+      var tpl = list.querySelector('template');
       if (!tpl) return;
-      var count = parseInt(ul.getAttribute('data-fill'), 10) || 8;
+      var count = parseInt(list.getAttribute('data-fill'), 10) || 8;
       for (var i = 1; i < count; i++) {
         var node = tpl.content.cloneNode(true);
         var img = node.querySelector('img');
         if (img && /\/item-/.test(img.getAttribute('src') || '')) {
           img.setAttribute('src', dir + ITEM_ROTATION[i % ITEM_ROTATION.length] + '.png');
         }
-        ul.appendChild(node);
+        list.appendChild(node);
       }
     });
   }
@@ -87,75 +88,187 @@
   // NativeHost slot is now a plain <div> (canvas removed from the fence).
   // A div has no 2D context, so the preview only shows the CSS background;
   // the runtime still projects the real 3D model via FFI onto this element.
-  // Mirrors the runtime: core injects .loom-* visual children into control nodes so CSS
-  // (not the browser UA) decides their look. Without this the browser renders <progress>/<input
-  // type=range> with the green OS UA, which diverges from the Unity output and misleads designers.
-  // We inject the same .loom-* structure (class only — showcase CSS paints it) and neutralize the
-  // native widget via appearance:none. Interactive state (slider drag, toggle click) is wired too,
-  // so the preview stays in sync as the user interacts.
-  function injectControlVisuals() {
-    // progress → append .loom-fill sized by value/max (like core sync_control_visuals).
-    document.querySelectorAll('progress').forEach(function (p) {
-      if (p.querySelector('.loom-fill')) return; // idempotent
-      var max = parseFloat(p.getAttribute('max')) || 100;
-      var val = parseFloat(p.getAttribute('value')) || 0;
-      var fill = document.createElement('div');
-      fill.className = 'loom-fill';
-      fill.style.width = (val / max * 100) + '%';
-      // progress UA fills its own bar; reset so only .loom-fill shows the fill color.
-      p.style.appearance = 'none';
-      p.style.MozAppearance = 'none';
-      p.style.webkitAppearance = 'none';
-      p.appendChild(fill);
-    });
+  //
+  // Post role-pivot: controls are <div role="..."> + author-written children (spec §2.2).
+  // No .loom-* injection anymore — the author already wrote fill/thumb/listbox/option/value
+  // in the HTML. The preview only DRIVES them (fill width, thumb position, aria-checked toggle,
+  // listbox expand, textbox editability) so the browser preview matches runtime behavior.
+  function wireControls() {
+    wireProgressbars();
+    wireSliders();
+    wireSwitchesAndRadios();
+    wireComboboxes();
+    wireTextboxes();
+  }
 
-    // input[type=range] → .loom-track > .loom-fill + sibling .loom-thumb (core inject layout).
-    document.querySelectorAll('input[type="range"]').forEach(function (r) {
-      if (r.querySelector('.loom-track')) return;
-      r.style.appearance = 'none';
-      r.style.MozAppearance = 'none';
-      r.style.webkitAppearance = 'none';
-      var track = document.createElement('div');
-      track.className = 'loom-track';
-      var fill = document.createElement('div');
-      fill.className = 'loom-fill';
-      var thumb = document.createElement('div');
-      thumb.className = 'loom-thumb';
-      track.appendChild(fill);
-      // core structure: slider → [track, thumb]; track → [fill]. thumb is a sibling of track.
-      r.appendChild(track);
-      r.appendChild(thumb);
-      positionRangeThumb(r, track, fill, thumb);
-      r.addEventListener('input', function () { positionRangeThumb(r, track, fill, thumb); });
-    });
-
-    // checkbox/radio → .loom-check (visibility mirrors checked state, like core).
-    document.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach(function (c) {
-      if (c.querySelector('.loom-check')) return;
-      c.style.appearance = 'none';
-      c.style.MozAppearance = 'none';
-      c.style.webkitAppearance = 'none';
-      var check = document.createElement('div');
-      check.className = 'loom-check';
-      check.style.display = c.checked ? '' : 'none';
-      c.appendChild(check);
-      c.addEventListener('change', function () { check.style.display = c.checked ? '' : 'none'; });
+  // role=progressbar → drive [data-slot=fill] width from aria-valuenow/min/max (mirrors core sync).
+  function wireProgressbars() {
+    document.querySelectorAll('[role="progressbar"]').forEach(function (pb) {
+      var fill = pb.querySelector('[data-slot="fill"]');
+      if (!fill) return;
+      var min = parseFloat(pb.getAttribute('aria-valuemin')) || 0;
+      var max = parseFloat(pb.getAttribute('aria-valuemax')) || 100;
+      var val = parseFloat(pb.getAttribute('aria-valuenow')) || 0;
+      var pct = max > min ? (val - min) / (max - min) * 100 : 0;
+      fill.style.width = pct + '%';
     });
   }
 
-  // Position the range thumb like core sync_control_visuals: traversable = track_w - thumb_w,
-  // left = traversable * pct. Reads computed px (after CSS sizing) to stay layout-accurate.
-  function positionRangeThumb(range, track, fill, thumb) {
-    var min = parseFloat(range.getAttribute('min')) || 0;
-    var max = parseFloat(range.getAttribute('max')) || 100;
-    var val = parseFloat(range.getAttribute('value')) || 0;
-    var pct = max > min ? (val - min) / (max - min) : 0;
-    var tw = track.clientWidth || 0;
-    var th = thumb.clientWidth || 0;
-    var traversable = Math.max(tw - th, 0);
-    thumb.style.position = 'absolute';
-    thumb.style.left = (traversable * pct) + 'px';
-    fill.style.width = (pct * 100) + '%';
+  // role=slider → position [data-slot=thumb] + size [data-slot=fill] from aria-valuenow/min/max.
+  // Draggable: pointer drag updates value, clamps to [min,max], quantizes to data-step.
+  // Mirrors core sync_control_visuals geometry (no track layer post-pivot; slider IS the track).
+  function wireSliders() {
+    document.querySelectorAll('[role="slider"]').forEach(function (slider) {
+      var fill = slider.querySelector('[data-slot="fill"]');
+      var thumb = slider.querySelector('[data-slot="thumb"]');
+      if (!fill && !thumb) return;
+
+      function read() {
+        var min = parseFloat(slider.getAttribute('aria-valuemin')) || 0;
+        var max = parseFloat(slider.getAttribute('aria-valuemax')) || 100;
+        var step = parseFloat(slider.getAttribute('data-step')) || 0;
+        var val = parseFloat(slider.getAttribute('aria-valuenow')) || min;
+        return { min: min, max: max, step: step, val: val };
+      }
+
+      function render() {
+        var s = read();
+        var pct = s.max > s.min ? (s.val - s.min) / (s.max - s.min) : 0;
+        if (fill) fill.style.width = (pct * 100) + '%';
+        if (thumb) {
+          var sw = slider.clientWidth || 0;
+          var tw = thumb.clientWidth || thumb.offsetWidth || 0;
+          // center thumb vertically on the slider bar
+          thumb.style.position = 'absolute';
+          thumb.style.top = '50%';
+          thumb.style.transform = 'translateY(-50%)';
+          thumb.style.left = (Math.max(sw - tw, 0) * pct) + 'px';
+        }
+      }
+
+      function setValueFromX(clientX) {
+        var rect = slider.getBoundingClientRect();
+        var ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
+        ratio = Math.max(0, Math.min(1, ratio));
+        var s = read();
+        var val = s.min + ratio * (s.max - s.min);
+        if (s.step > 0) val = s.min + Math.round((val - s.min) / s.step) * s.step;
+        val = Math.max(s.min, Math.min(s.max, val));
+        slider.setAttribute('aria-valuenow', String(val));
+        render();
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+
+      var dragging = false;
+      slider.addEventListener('pointerdown', function (e) {
+        dragging = true;
+        slider.setPointerCapture(e.pointerId);
+        setValueFromX(e.clientX);
+        e.preventDefault();
+      });
+      slider.addEventListener('pointermove', function (e) {
+        if (!dragging) return;
+        setValueFromX(e.clientX);
+      });
+      slider.addEventListener('pointerup', function (e) {
+        dragging = false;
+        try { slider.releasePointerCapture(e.pointerId); } catch (_) {}
+      });
+      render();
+    });
+  }
+
+  // role=switch / role=radio → click toggles aria-checked. Radio also clears same-name siblings
+  // (data-name group). Mirrors core Toggle/RadioButton state semantics.
+  function wireSwitchesAndRadios() {
+    document.querySelectorAll('[role="switch"]').forEach(function (sw) {
+      sw.addEventListener('click', function () {
+        var on = sw.getAttribute('aria-checked') === 'true';
+        sw.setAttribute('aria-checked', on ? 'false' : 'true');
+        sw.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    });
+    document.querySelectorAll('[role="radio"]').forEach(function (radio) {
+      radio.addEventListener('click', function () {
+        var name = radio.getAttribute('data-name');
+        if (name) {
+          // clear siblings in the same group, then check this one
+          document.querySelectorAll('[role="radio"][data-name="' + cssEsc(name) + '"]').forEach(function (s) {
+            s.setAttribute('aria-checked', 'false');
+          });
+        }
+        radio.setAttribute('aria-checked', 'true');
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    });
+  }
+
+  // role=combobox → click/Enter toggles aria-expanded; selecting an option writes its text into
+  // [data-slot=value] and collapses. Mirrors core Dropdown open/select/close.
+  function wireComboboxes() {
+    document.querySelectorAll('[role="combobox"]').forEach(function (cb) {
+      var valueEl = cb.querySelector('[data-slot="value"]');
+      var listbox = cb.querySelector('[role="listbox"]');
+      if (!listbox) return;
+
+      function open() {
+        cb.setAttribute('aria-expanded', 'true');
+        listbox.style.display = 'block';
+      }
+      function close() {
+        cb.setAttribute('aria-expanded', 'false');
+        listbox.style.display = 'none';
+      }
+      function select(opt) {
+        if (valueEl) valueEl.textContent = opt.textContent;
+        cb.querySelectorAll('[role="option"]').forEach(function (o) {
+          o.setAttribute('aria-selected', o === opt ? 'true' : 'false');
+        });
+        close();
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      // the whole combobox is the click target (value slot is a transparent overlay);
+      // clicking anywhere on the combobox toggles, clicking an option selects.
+      cb.addEventListener('click', function (e) {
+        // let option clicks bubble separately (they stopPropagation)
+        if (e.target.closest('[role="option"]')) return;
+        e.stopPropagation();
+        if (cb.getAttribute('aria-expanded') === 'true') close(); else open();
+      });
+      listbox.querySelectorAll('[role="option"]').forEach(function (opt) {
+        opt.addEventListener('click', function (e) {
+          e.stopPropagation();
+          select(opt);
+        });
+      });
+      // outside click closes
+      document.addEventListener('click', function () {
+        if (cb.getAttribute('aria-expanded') === 'true') close();
+      });
+      close(); // start collapsed
+    });
+  }
+
+  // role=textbox → make it editable in the browser. <div role=textbox> is not editable by default,
+  // so we set contentEditable. placeholder (aria-placeholder) shows when empty (CSS :empty).
+  // Number (role=spinbutton) stays read-only display (author writes value as text content).
+  function wireTextboxes() {
+    document.querySelectorAll('[role="textbox"]').forEach(function (tb) {
+      tb.setAttribute('contenteditable', 'true');
+      // placeholder via data attribute + CSS [data-empty]: toggle on input
+      function syncEmpty() {
+        if (tb.textContent.trim() === '') tb.setAttribute('data-empty', 'true');
+        else tb.removeAttribute('data-empty');
+      }
+      tb.addEventListener('input', syncEmpty);
+      syncEmpty();
+    });
+  }
+
+  // minimal CSS.escape polyfill for radio data-name selectors (names are simple identifiers here)
+  function cssEsc(s) {
+    return String(s).replace(/["\\]/g, '\\$&');
   }
 
   function fillNativeHost() {
@@ -182,7 +295,7 @@
     wireDialogs();
     fillListViews();
     fillNativeHost();
-    injectControlVisuals();
+    wireControls();
     fitScale();
     window.addEventListener('resize', fitScale);
   }
