@@ -46,6 +46,10 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     None
                 };
                 let control_init = extract_control_init(kind, el, ir_idx, &parsed.tree);
+                // role/data-slot：从 HTML 属性提取，进 pkg 侴 runtime RoleTable 查表。
+                // role 驱动语义分派（combobox/slider/...），data-slot 标识控件视觉部件（fill/thumb）。
+                let role = attr(el, "role");
+                let data_slot = attr(el, "data-slot");
                 nodes.push(TemplateNode {
                     kind,
                     style: parsed.styles.get(ir_idx).cloned().unwrap_or_default(),
@@ -57,6 +61,8 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     content: None,
                     src,
                     control_init,
+                    role,
+                    data_slot,
                 });
             }
             IrNodeKind::Text(s) => {
@@ -74,6 +80,8 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     content: Some(s.clone()),
                     src: None,
                     control_init: None,
+                    role: None,
+                    data_slot: None,
                 });
             }
         }
@@ -426,6 +434,21 @@ mod tests {
         let nodes = bridged(r#"<div><button tabindex="2" style="display:block">b</button></div>"#);
         let btn = nodes.iter().find(|n| n.kind == NodeKind::Button).unwrap();
         assert_eq!(btn.tabindex, Some(2));
+    }
+
+    #[test]
+    fn role_and_data_slot_extracted_into_template_node() {
+        // role 驱动语义分派 + data-slot 标识控件视觉部件：两个属性都须从 HTML 提取进 TemplateNode，
+        // 侴 runtime RoleTable 查表。验证 bridge 是 HTML→pkg 的唯一入口不丢这两列。
+        let nodes = bridged(r#"<div role="slider"><div data-slot="thumb"></div></div>"#);
+        let root = &nodes[0];
+        assert_eq!(root.role.as_deref(), Some("slider"));
+        assert!(root.data_slot.is_none(), "root has no data-slot");
+        let thumb = nodes
+            .iter()
+            .find(|n| n.data_slot.as_deref() == Some("thumb"))
+            .expect("data-slot=thumb node bridged");
+        assert!(thumb.role.is_none(), "thumb has no role");
     }
 
     #[test]

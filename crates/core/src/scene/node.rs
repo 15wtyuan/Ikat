@@ -496,6 +496,68 @@ impl ControlTable {
     }
 }
 
+/// 节点的 role/data-slot 信息（打包期从 HTML 提取，运行时只读查表）。
+/// role 驱动语义分派 + 控件结构定位（find_child_by_role / find_child_by_slot）。
+/// 稀疏：只有带 role/data-slot 的节点进表。运行时态，不进 pkg（pkg 的
+/// TemplateNode 携带 role/data_slot 字符串，instantiate 时填进此表）。
+///
+/// 注：aria-* 属性**不进 RoleInfo**——决策定为运行时从 ControlState 合成
+/// （避免打包期初始值与运行时实时值双源）。aria-multiline 等派发提示在
+/// fence 阶段用完即弃，不进 pkg、不进此表。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RoleInfo {
+    /// WAI-ARIA role（如 "combobox"/"slider"/"textbox"）。None = 普通 div，无控件语义。
+    pub role: Option<String>,
+    /// data-slot 值（如 "fill"/"thumb"）。ARIA 不覆盖控件内部视觉构造，用 HTML 标准的
+    /// data-* 私有扩展机制表达「这是控件的哪个部件」。
+    pub slots: std::collections::HashMap<String, String>,
+}
+
+impl RoleInfo {
+    /// 是否有任何 role/slot 信息（无则不入表，保持 RoleTable 稀疏）。
+    pub fn is_empty(&self) -> bool {
+        self.role.is_none() && self.slots.is_empty()
+    }
+}
+
+/// 每节点 role/data-slot 信息表（`HashMap<NodeId, RoleInfo>`）。结构与访问约定同
+/// `ControlTable`/`AnimTable`（见 AnimTable doc：用 HashMap 而非 SecondaryMap 的理由）。
+/// instantiate 时从 TemplateNode 填、`remove_node` 时联动清，防悬空 NodeId 残留。
+#[derive(Debug, Clone, Default)]
+pub struct RoleTable(std::collections::HashMap<NodeId, RoleInfo>);
+
+impl RoleTable {
+    pub fn get(&self, id: NodeId) -> Option<&RoleInfo> {
+        self.0.get(&id)
+    }
+    pub fn get_mut(&mut self, id: NodeId) -> Option<&mut RoleInfo> {
+        self.0.get_mut(&id)
+    }
+    /// 写入该节点的 role/slot 信息。空 info（无 role 无 slot）不入表，保持稀疏。
+    pub fn insert(&mut self, id: NodeId, info: RoleInfo) {
+        if !info.is_empty() {
+            self.0.insert(id, info);
+        }
+    }
+    /// 删该节点 role/slot 槽（`remove_node` 联动调，防悬空 NodeId 残留）。
+    pub fn remove(&mut self, id: NodeId) {
+        self.0.remove(&id);
+    }
+    /// 取节点 role 字符串（find_child_by_role 等查询用）。
+    pub fn role_of(&self, id: NodeId) -> Option<&str> {
+        self.0.get(&id).and_then(|i| i.role.as_deref())
+    }
+    /// 取节点某 data-slot 值（find_child_by_slot 等查询用）。
+    pub fn slot_of(&self, id: NodeId, slot: &str) -> Option<&str> {
+        self.0
+            .get(&id)
+            .and_then(|i| i.slots.get(slot).map(|s| s.as_str()))
+    }
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Scene {
     pub roots: Vec<NodeId>,
@@ -522,6 +584,10 @@ pub struct Scene {
     pub lists: crate::list::ListTable,
     /// 每节点控件状态（instantiate 从 `ControlInit` 填、交互改）。运行时态，不进 pkg。
     pub controls: ControlTable,
+    /// 每节点 role/data-slot（instantiate 从 TemplateNode 填）。运行时态，不进 pkg。
+    /// 稀疏：仅带 role/data-slot 的节点入表。供后续 role 驱动的语义分派 + 控件部件
+    /// 定位（find_child_by_role / find_child_by_slot）查表。
+    pub roles: RoleTable,
     /// 每节点 text 测量结果（layout solve 填，render 复用——消除双测量不一致）。
     /// index = NodeId.index()，仅 Text 节点 Some。运行时态，不进 pkg。
     ///

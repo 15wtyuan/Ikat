@@ -576,6 +576,7 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
     scene.anim.clear_node(id);
     scene.scroll.remove(id);
     scene.controls.remove(id);
+    scene.roles.remove(id);
     // ListView 模板是游离子树（parent=None、不在 roots、不在任何父的 children），
     // remove_node 的递归删子够不到它。删 ul 前先取 template_root，随 ul 一并递归释放，
     // 否则 ListState 条目被清后该游离子树成孤儿、slotmap 槽永久泄漏。

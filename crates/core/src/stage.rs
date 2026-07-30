@@ -742,6 +742,18 @@ impl Stage {
             if let Some(src) = &tn.src {
                 scene.image_srcs.insert(node_id, src.clone());
             }
+            // role/data-slot：从 TemplateNode 填 RoleTable（role-driven controls 地基）。
+            // role 驱动语义分派，data-slot 标识控件视觉部件；运行时 find_child_by_role/slot 查表。
+            // RoleTable::insert 自带空 info 过滤——无 role 且无 data-slot 的节点不入表，保持稀疏。
+            let info = crate::scene::node::RoleInfo {
+                role: tn.role.clone(),
+                slots: tn
+                    .data_slot
+                    .as_ref()
+                    .map(|s| [("slot".to_string(), s.clone())].into_iter().collect())
+                    .unwrap_or_default(),
+            };
+            scene.roles.insert(node_id, info);
             id_map[i] = Some(node_id);
             // 记 Dropdown，供建树后 reparent option 进 popup（见下方 reparent 循环）。
             if tn.kind == NodeKind::Dropdown {

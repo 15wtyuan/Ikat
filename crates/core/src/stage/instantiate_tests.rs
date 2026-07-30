@@ -24,6 +24,8 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             content: None,
             src: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -36,6 +38,8 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             content: None,
             src: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -104,6 +108,8 @@ fn instantiate_missing_pkg_or_comp_errors() {
         content: None,
         src: None,
         control_init: None,
+        role: None,
+        data_slot: None,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -135,6 +141,8 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             content: None,
             src: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -147,6 +155,8 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             content: None,
             src: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -258,6 +268,8 @@ fn pkg_with_root_rule(pkg_name: &str, flex_dir_val: &str) -> (String, Vec<u8>) {
         content: None,
         src: None,
         control_init: None,
+        role: None,
+        data_slot: None,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable {
         rules: vec![class_rule("root", "flex-direction", flex_dir_val)],
@@ -340,6 +352,8 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
             content: None,
             src: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -352,6 +366,8 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
             content: None,
             src: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         },
     ];
     let outer_rules = crate::style::dynamic::DynamicRuleTable {
@@ -387,6 +403,8 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
         content: None,
         src: None,
         control_init: None,
+        role: None,
+        data_slot: None,
     }];
     let inner_rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -458,6 +476,8 @@ fn instantiate_reparents_dropdown_options_into_popup() {
             content: None,
             src: None,
             control_init: Some(ControlInit::Dropdown { selected_index: 0 }),
+            role: None,
+            data_slot: None,
         },
         TemplateNode {
             kind: NodeKind::OptionItem,
@@ -473,6 +493,8 @@ fn instantiate_reparents_dropdown_options_into_popup() {
             content: None,
             src: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         },
         // option A 的文本子节点（parent = option index 1）。
         TemplateNode {
@@ -486,6 +508,8 @@ fn instantiate_reparents_dropdown_options_into_popup() {
             content: Some("A".to_string()),
             src: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         },
         TemplateNode {
             kind: NodeKind::OptionItem,
@@ -498,6 +522,8 @@ fn instantiate_reparents_dropdown_options_into_popup() {
             content: None,
             src: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         },
         TemplateNode {
             kind: NodeKind::TextNode,
@@ -510,6 +536,8 @@ fn instantiate_reparents_dropdown_options_into_popup() {
             content: Some("B".to_string()),
             src: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         },
         TemplateNode {
             kind: NodeKind::OptionItem,
@@ -522,6 +550,8 @@ fn instantiate_reparents_dropdown_options_into_popup() {
             content: None,
             src: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         },
         TemplateNode {
             kind: NodeKind::TextNode,
@@ -534,6 +564,8 @@ fn instantiate_reparents_dropdown_options_into_popup() {
             content: Some("C".to_string()),
             src: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -591,4 +623,82 @@ fn instantiate_reparents_dropdown_options_into_popup() {
     for &o in &popup_opts {
         assert_eq!(scene.get(o).unwrap().parent, Some(popup));
     }
+}
+
+/// 辅助：建带 role/data-slot 的 pkg（comp = root(role=slider) + thumb(data-slot=thumb)）。
+fn make_test_pkg_with_roles() -> Vec<u8> {
+    let nodes = [
+        TemplateNode {
+            kind: NodeKind::Container,
+            style: ResolvedStyle::default(),
+            parent_idx: None,
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: None,
+            src: None,
+            control_init: None,
+            role: Some("slider".into()),
+            data_slot: None,
+        },
+        TemplateNode {
+            kind: NodeKind::Container,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(0),
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: None,
+            src: None,
+            control_init: None,
+            role: None,
+            data_slot: Some("thumb".into()),
+        },
+    ];
+    let rules = crate::style::dynamic::DynamicRuleTable::default();
+    let input = PackageInput {
+        components: vec![("comp", &nodes, &rules)],
+    };
+    crate::asset::write_package(&input)
+}
+
+/// instantiate 把 TemplateNode.role/data_slot 填进 Scene.roles side table（稀疏）。
+/// role 驱动后续语义分派 + find_child_by_role/slot 查表。data-slot 映射到 slots["slot"]。
+#[test]
+fn instantiate_fills_roles_side_table_from_template() {
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("bag", &make_test_pkg_with_roles()).unwrap();
+    let root = s.instantiate("bag", "comp").unwrap();
+    let scene = s.scene.as_ref().unwrap();
+    let thumb = scene.get(root).unwrap().children[0];
+    // root 带 role=slider
+    assert_eq!(scene.roles.role_of(root), Some("slider"));
+    assert!(
+        scene.roles.slot_of(root, "slot").is_none(),
+        "root has no data-slot"
+    );
+    // thumb 带 data-slot=thumb → slots["slot"]="thumb"
+    assert!(scene.roles.role_of(thumb).is_none(), "thumb has no role");
+    assert_eq!(scene.roles.slot_of(thumb, "slot"), Some("thumb"));
+}
+
+/// instantiate 后 remove_node 联动清 RoleTable 槽，防悬空 NodeId 残留。
+#[test]
+fn remove_node_clears_roles_side_table() {
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("bag", &make_test_pkg_with_roles()).unwrap();
+    let root = s.instantiate("bag", "comp").unwrap();
+    let scene = s.scene.as_ref().unwrap();
+    let thumb = scene.get(root).unwrap().children[0];
+    assert!(scene.roles.get(root).is_some(), "root role 在表");
+    assert!(scene.roles.get(thumb).is_some(), "thumb slot 在表");
+    // 删 root（递归删 thumb 子树）→ 两槽都清。
+    s.remove_node(root);
+    let scene = s.scene.as_ref().unwrap();
+    assert!(scene.roles.get(root).is_none(), "删后 root role 清了");
+    assert!(scene.roles.get(thumb).is_none(), "删后 thumb slot 清了");
 }

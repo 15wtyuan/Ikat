@@ -13,6 +13,8 @@ fn tn(kind: NodeKind) -> TemplateNode {
         content: None,
         src: None,
         control_init: None,
+        role: None,
+        data_slot: None,
     }
 }
 
@@ -42,6 +44,8 @@ fn write_package_panics_when_string_table_exhausted() {
             draggable: false,
             tabindex: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         });
     }
     let rules = empty_rules();
@@ -328,10 +332,11 @@ fn read_rejects_cross_component_parent() {
     // 布局（v19）：ComponentTable(2 条目 × 14B = 28B) + NodeBlock（无 RichRunsArena 段）。
     let ct_off = comp_table_offset(&bytes);
     let nodeblock_off = ct_off + 2 * 14;
-    // 节点布局（v19）：parent_idx(4) + kind(1) + style_len(4) + style_blob + text_idx(2) + src_idx(2)
+    // 节点布局（v28）：parent_idx(4) + kind(1) + style_len(4) + style_blob + text_idx(2) + src_idx(2)
     //   + class_count(2) + class_idx[] + id_idx(2) + flags(1) + tabindex(4)
     //   固定部分 = 22B + style_blob_len + 2*class_count（v19 删 dc_idx 2B，v18 的 24B 减 2B）。
     //   v24 加 control_init_len(4) + control_init_blob（None = 1B），故固定部分 +5B。
+    //   v28 加 role_idx(2) + data_slot_idx(2) 于 control_init_blob 后，固定部分再 +4B。
     let style_len_0 = u32::from_le_bytes(
         bytes[nodeblock_off + 5..nodeblock_off + 9]
             .try_into()
@@ -343,7 +348,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node0_size = 22 + style_len_0 + 2 * class_count_0 + 5;
+    let node0_size = 22 + style_len_0 + 2 * class_count_0 + 5 + 4;
     let node1_off = nodeblock_off + node0_size;
     let style_len_1 =
         u32::from_le_bytes(bytes[node1_off + 5..node1_off + 9].try_into().unwrap()) as usize;
@@ -352,7 +357,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node1_size = 22 + style_len_1 + 2 * class_count_1 + 5;
+    let node1_size = 22 + style_len_1 + 2 * class_count_1 + 5 + 4;
     let node2_off = nodeblock_off + node0_size + node1_size;
     // 篡改节点 2（comp_b root）的 parent_idx 从 -1 → 0（< base=2，跨组件）
     let mut patched = bytes.clone();
@@ -462,6 +467,8 @@ fn template_node_content_src_roundtrip_via_pkg() {
         content: None,
         src: Some("icon.png".into()),
         control_init: None,
+        role: None,
+        data_slot: None,
     };
     let nodes = [text, img];
     let rules = empty_rules();
@@ -520,6 +527,8 @@ fn v18_nontrivial_nodekinds_roundtrip() {
             content: None,
             src: None,
             control_init: None,
+            role: None,
+            data_slot: None,
         };
         let empty_rules = DynamicRuleTable { rules: vec![] };
         let input = PackageInput {
@@ -776,5 +785,63 @@ fn pkg_v27_rejects_v26() {
     assert!(
         matches!(err, Err(PkgError::TooOld(26))),
         "v26 pkg must be rejected as TooOld after v27 bump, got {err:?}"
+    );
+}
+
+// ── v28: role / data-slot ─────────────────────────────────────────
+
+/// v28: role/data-slot 经完整 pkg.bin 路径（write_package → read_package）往返保真。
+/// 这是 role-driven controls 地基：TemplateNode 携带 role/data_slot 字符串列，
+/// serialize/deserialize 必须保真，否则后续 find_child_by_role/slot 查表会丢失语义。
+#[test]
+fn pkg_v28_roundtrip_with_role() {
+    assert_eq!(
+        PKG_FORMAT_VERSION, 28,
+        "pkg format version must be 28 after role/data-slot bump"
+    );
+    let mut node = tn(NodeKind::Container);
+    node.role = Some("slider".into());
+    node.data_slot = Some("thumb".into());
+    let nodes = [node];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules)],
+    };
+    let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
+    let back = &pkg.components["c"].nodes[0];
+    assert_eq!(back.role.as_deref(), Some("slider"));
+    assert_eq!(back.data_slot.as_deref(), Some("thumb"));
+}
+
+/// v28: role/data-slot 均缺省（None）也须往返保真（NULL_IDX 哨兵路径，多数节点走此分支）。
+#[test]
+fn pkg_v28_roundtrip_without_role_defaults_none() {
+    let node = tn(NodeKind::Container); // role/data_slot 均默认 None
+    let nodes = [node];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules)],
+    };
+    let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
+    let back = &pkg.components["c"].nodes[0];
+    assert!(back.role.is_none(), "no role attr → None after roundtrip");
+    assert!(
+        back.data_slot.is_none(),
+        "no data-slot attr → None after roundtrip"
+    );
+}
+
+/// v28: version=27 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=28，无迁移器）。
+/// TemplateNode 新增 role/data-slot 列改变 NodeBlock 布局，旧 v27 fixture 不能半读半坏
+/// （role_idx/data_slot_idx 缺失致后续读错位）。
+#[test]
+fn pkg_v28_rejects_v27() {
+    let mut bad = vec![];
+    bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
+    bad.extend_from_slice(&27u32.to_le_bytes()); // v27 < MIN_VERSION=28
+    let err = read_package(&bad);
+    assert!(
+        matches!(err, Err(PkgError::TooOld(27))),
+        "v27 pkg must be rejected as TooOld after v28 bump, got {err:?}"
     );
 }

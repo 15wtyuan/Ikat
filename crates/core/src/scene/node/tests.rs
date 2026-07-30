@@ -3,6 +3,27 @@ use super::*;
 use crate::scene::node::NodeFlags;
 
 #[test]
+fn role_table_get_insert_remove() {
+    // 稀疏 side table：空 info 不入表，role_of/slot_of 查无槽节点返 None。
+    let mut t = RoleTable::default();
+    let id = NodeId(7);
+    assert!(t.get(id).is_none());
+    assert_eq!(t.role_of(id), None);
+    let info = RoleInfo {
+        role: Some("slider".into()),
+        slots: [("thumb".into(), "".into())].into_iter().collect(),
+    };
+    t.insert(id, info.clone());
+    assert_eq!(t.role_of(id), Some("slider"));
+    assert_eq!(t.slot_of(id, "thumb"), Some(""));
+    // 空 info 不入表（保持稀疏：普通 div 无 role/data-slot 不占槽）。
+    t.insert(NodeId(8), RoleInfo::default());
+    assert!(t.get(NodeId(8)).is_none());
+    t.remove(id);
+    assert!(t.get(id).is_none());
+}
+
+#[test]
 fn lookup_scope_flag_exists_distinct_from_scope_root() {
     assert!(NodeFlags::LOOKUP_SCOPE.contains(NodeFlags::LOOKUP_SCOPE));
     assert!(!NodeFlags::LOOKUP_SCOPE.contains(NodeFlags::SCOPE_ROOT));
