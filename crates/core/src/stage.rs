@@ -775,11 +775,10 @@ impl Stage {
         }
         let root = root_id.ok_or("component has no root node (parent_idx=None missing)")?;
 
-        // Reparent 每个 Dropdown 的 <option> 子节点进其 .loom-popup（spec §4.1 运行时结构）。
-        // option 在建树循环里按 parent_idx 先挂到 select（其模板父），这里移到 popup 内，
-        // 使展开时浮层 DFS（render 末尾追加）能遍历到 option 列表并跳出祖先 overflow:hidden。
+        // Reparent 直接挂在 combobox 下的 option 进其 listbox（作者通常已把 option 放 listbox
+        // 内则 no-op；兜底防错位）。spec §2.2 运行时结构，详见 reparent_options_into_popup doc。
         // 在 SCOPE_ROOT / dynamic_rules 装载之前做：reparent 只改 parent 指针 + children 列表，
-        // 不影响作用域边界（option 仍在 select 实例子树内）。
+        // 不影响作用域边界（option 仍在 combobox 实例子树内）。
         for sel in &dropdown_ids {
             crate::scene::control::reparent_options_into_popup(scene, *sel);
         }

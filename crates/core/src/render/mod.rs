@@ -181,9 +181,9 @@ fn collect_display_none_subtree(scene: &Scene) -> std::collections::HashSet<Node
     pruned
 }
 
-/// 收集所有 open Dropdown 的 `.loom-popup` 根 NodeId（供末尾浮层追加 DFS 用）。
+/// 收集所有 open Dropdown 的 `role="listbox"` 根 NodeId（供末尾浮层追加 DFS 用）。
 ///
-/// 浮层渲染（Task 11，套 scrollbar thumb 末尾追加模式）：open Dropdown 的 `.loom-popup`
+/// 浮层渲染（Task 11，套 scrollbar thumb 末尾追加模式）：open Dropdown 的 `role="listbox"`
 /// 子树跳出正常 DFS 渲染序——正常 DFS 跳过它（不进 id_to_pos），merge 后末尾追加，
 /// sort_key 续 max_sort+1，mask_context=MaskContext(0) 跳出祖先 overflow:hidden clip
 /// （dropdown 常出现在 scroll 容器/固定高度面板里，展开列表要溢出父边界显示，同 scrollbar
