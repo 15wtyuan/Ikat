@@ -276,7 +276,7 @@ fn ancestor_chain(scene: &Scene, target: Option<NodeId>) -> Vec<NodeId> {
 
 /// `target` 是否在 `ancestor` 的子树内（含 target==ancestor）。沿 parent 链上行，
 /// 命中 ancestor 返 true。target=None → false。供 outside-click close 判定点击是否
-/// 落在某 open Dropdown 的 select 子树内（select 本身 + .loom-value/.loom-popup 后代）。
+/// 落在某 open Dropdown 的 combobox 子树内（combobox 本身 + value 文本 / role=listbox 后代）。
 fn is_in_subtree(scene: &Scene, target: Option<NodeId>, ancestor: NodeId) -> bool {
     let mut cur = target;
     while let Some(id) = cur {
@@ -288,9 +288,9 @@ fn is_in_subtree(scene: &Scene, target: Option<NodeId>, ancestor: NodeId) -> boo
     false
 }
 
-/// outside-click close：pointer-down 命中不在任何 open Dropdown 的 select 子树内 → 收起那些
-/// dropdown。select 子树 = select 本身 + .loom-value/.loom-popup（含 option）后代。点击
-/// option（popup 内）不算 outside → 不收起（option 选中由其 click EVT 驱动）。点击 select
+/// outside-click close：pointer-down 命中不在任何 open Dropdown 的 combobox 子树内 → 收起那些
+/// dropdown。combobox 子树 = combobox 本身 + value 文本 / role=listbox（含 option）后代。点击
+/// option（listbox 内）不算 outside → 不收起（option 选中由其 click EVT 驱动）。点击 combobox
 /// header 同理不收起（header 点击是 toggle）。
 ///
 /// 收起走 close_dropdown（取消语义）：open=false + 把 selected_index 回滚到展开时刻快照
@@ -1095,7 +1095,7 @@ impl PointerState {
                         }
                         slot.scroll_testing = slot.scroll_candidate.is_some();
                     }
-                    // 控件交互：命中（含 .loom-* 子）向上找控件 → on_pointer_down。
+                    // 控件交互：命中（含控件 role/data-slot 子树）向上找控件 → on_pointer_down。
                     // Slider 占据手势：抑制 scroll（拖 thumb 不让祖先滚动）+ 记 control_target。
                     if let Some(cid) = crate::scene::control::find_control_at(scene, hit) {
                         slot.control_target = Some(cid);

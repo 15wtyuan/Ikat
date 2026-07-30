@@ -297,16 +297,22 @@ pub fn create_node_from_template(
 /// 递归克隆子树：返回游离新根（parent=None，不挂树，调用方 append_child 挂载）。
 ///
 /// side table 判定（list spec §6）：
-/// 拷贝：kind/classes/id_attr/base_style/text_contents/image_srcs（模板化数据，克隆出新实例）。
+/// 拷贝：kind/classes/id_attr/base_style/text_contents/image_srcs/roles（模板化数据，克隆出新实例）。
+///   roles = RoleTable 条目（role/data-slot 标注），role-driven 控件部件定位 + 语义分派用；
+///   不克隆则 list item 模板里的 progressbar fill 等部件丢失定位 → 渲染回退默认。
 /// 不拷贝：scroll/anim/tweens/EditState/text_layouts/focused_node/事件订阅（运行时状态——
 /// 克隆是干净模板，由调用方按需重设）。
 ///
 /// 控件初值传 None：create_node_from_template 的 control_init 分支建控件视觉子树 + ControlState。
 /// 列表 slot 场景下，控件值由 driver bind 后 `set_control_value` 显式设（slot 复用时 reset）。
+///
+/// **ControlState 克隆是 separate pre-existing gap**：control_init=None 意味着克隆节点不建
+/// 控件槽（scene.controls），控件运行时值（progressbar.value/slider.value 等）不随克隆迁移。
+/// RoleTable 复制只解锁 role/slot 定位路径；完整视觉正确性需后续补 ControlState 克隆/re-init。
 pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
     // 先取出源节点的不可变快照（kind/base_style/classes/id_attr/text/image_srcs），
     // drop 借后再可变借建新节点——避免边读边写 scene 的借用冲突。
-    let (kind, base_style, classes, id_attr, content, src_path) = {
+    let (kind, base_style, classes, id_attr, content, src_path, role_info) = {
         let n = scene.get(src).expect("live src");
         (
             n.kind,
@@ -315,6 +321,7 @@ pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
             n.id_attr.clone(),
             scene.text_contents.get(&src).cloned(),
             scene.image_srcs.get(&src).cloned(),
+            scene.roles.get(src).cloned(),
         )
     };
     let new_id = create_node_from_template(scene, kind, base_style, None);
@@ -328,6 +335,13 @@ pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
     }
     if let Some(sp) = src_path {
         scene.image_srcs.insert(new_id, sp);
+    }
+    // role/data-slot：克隆 RoleTable 条目（role-driven 控件部件定位 + 语义分派用）。
+    // 克隆出的子树必须保留 role/slot 标注——否则 list item 模板里的 progressbar fill 等
+    // 部件丢失定位 → 渲染回退默认（fill 撑满 100% 而非按 value 宽）。
+    // ControlState 克隆是 separate pre-existing gap（见函数 doc），此处只解锁 role/slot 路径。
+    if let Some(info) = role_info {
+        scene.roles.insert(new_id, info);
     }
     // 递归克隆子（先 clone children，避免边迭代边改 slotmap 的借用冲突）。
     let children = scene.get(src).expect("live src").children.clone();
@@ -1469,5 +1483,58 @@ mod tests {
             s.scene.as_ref().unwrap().scroll.get(cloned).is_none(),
             "scroll 运行时状态不得克隆"
         );
+    }
+
+    #[test]
+    fn clone_subtree_propagates_role_table() {
+        // I1 regression：clone_node_recursive 必须复制 RoleTable 条目。list item 模板里的
+        // role/slot 标注（如 progressbar 的 fill 部件）若不随克隆迁移 → 部件定位失败 →
+        // 渲染回退默认（fill 撑满 100% 而非按 value 宽）。复刻 instantiate 从模板填
+        // RoleTable 的路径（stage.rs：role/data-slot → RoleTable.insert）。
+        let mut s = crate::stage::Stage::new_for_test();
+        let root = s.create_root("div", "").unwrap();
+        // 作者写的控件视觉结构：root → bar(role=progressbar) → fill(data-slot=fill)。
+        let bar = s.create_node("div", "").unwrap();
+        s.append_child(root, bar).unwrap();
+        let fill = s.create_node("div", "").unwrap();
+        s.append_child(bar, fill).unwrap();
+        {
+            let scene = s.scene.as_mut().unwrap();
+            scene.roles.insert(
+                bar,
+                crate::scene::node::RoleInfo {
+                    role: Some("progressbar".into()),
+                    slots: std::collections::HashMap::new(),
+                },
+            );
+            scene.roles.insert(
+                fill,
+                crate::scene::node::RoleInfo {
+                    role: None,
+                    slots: [("fill".to_string(), String::new())].into_iter().collect(),
+                },
+            );
+        }
+        let cloned = s.clone_subtree(root).unwrap();
+        let scene = s.scene.as_ref().unwrap();
+        // 结构同源：克隆子树的 bar/fill 按 DFS 序定位（root → bar → fill）。
+        let cloned_bar = scene.get(cloned).unwrap().children[0];
+        let cloned_fill = scene.get(cloned_bar).unwrap().children[0];
+        // role 条目复制到新 NodeId，内容一致。
+        let bar_info = scene.roles.get(cloned_bar).expect("克隆节点 role 条目存在");
+        assert_eq!(bar_info.role.as_deref(), Some("progressbar"));
+        // data-slot 条目也复制到新 NodeId。
+        assert!(
+            scene
+                .roles
+                .get(cloned_fill)
+                .unwrap()
+                .slots
+                .contains_key("fill"),
+            "data-slot 条目复制到克隆节点"
+        );
+        // 源条目未丢失（克隆不是移动）。
+        let src_bar = scene.get(root).unwrap().children[0];
+        assert!(scene.roles.get(src_bar).is_some(), "源 role 条目未丢失");
     }
 }

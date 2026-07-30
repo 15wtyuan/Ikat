@@ -709,8 +709,8 @@ impl Stage {
         // id_map[模板 idx] = live NodeId（slotmap 分配）。
         let mut id_map: Vec<Option<NodeId>> = vec![None; template.nodes.len()];
         let mut root_id: Option<NodeId> = None;
-        // Dropdown NodeId 收集：建树循环后 reparent 其 <option> 子节点进 .loom-popup
-        // （spec §4.1 运行时结构；option 是模板里 select 的 DOM 子节点，先被挂到 select）。
+        // Dropdown NodeId 收集：建树循环后 reparent 其 option 子节点进 role=listbox
+        // （spec §2.3 运行时结构；option 是模板里 combobox 的 DOM 子节点，先被挂到 combobox）。
         let mut dropdown_ids: Vec<NodeId> = Vec::new();
         // no-panic 契约：parent_idx 来自 pkg.bin（运行时读，可能 corrupt），不能信任"父先于子"。
         // pidx >= i 同时覆盖前向引用（父排在子后）与越界（pidx >= len，因 i < len）→ Err，不 panic。

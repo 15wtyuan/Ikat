@@ -511,7 +511,7 @@ pub fn build_render_nodes(
     // 直接逐节点构造真 RenderNode。change_level 先占 Full，末尾统一定级。
     // 先剪 display:none 子树——display:none 节点 + 后代不产 RenderNode（CSS 语义）。
     let mut pruned = collect_display_none_subtree(scene);
-    // open Dropdown 的 .loom-popup 子树也跳过正常 DFS：末尾以浮层模式追加（sort_key 续号、
+    // open Dropdown 的 role=listbox 浮层子树也跳过正常 DFS：末尾以浮层模式追加（sort_key 续号、
     // mask=0 跳出祖先 clip）。收集根列表供末尾 DFS 用，同时把整子树并入 pruned。
     let open_popup_roots = collect_open_popup_roots(scene);
     prune_subtrees(scene, &open_popup_roots, &mut pruned);
@@ -583,7 +583,7 @@ pub fn build_render_nodes(
             }
         }
     }
-    // open Dropdown 的 .loom-popup 浮层子树：跳出正常 DFS（已在主遍历剪枝），末尾追加。
+    // open Dropdown 的 role=listbox 浮层子树：跳出正常 DFS（已在主遍历剪枝），末尾追加。
     // 模式同 scrollbar thumb（上方），但追加整子树 DFS 而非单 quad。sort_key 续 scrollbar
     // thumb 之后（重算 max——thumb 刚 push 进 nodes，占用了 max_sort+1 槽位），mask_context
     // =MaskContext(0) 跳出祖先 overflow:hidden clip（dropdown 常在 scroll 容器/固定高度面板
@@ -1571,10 +1571,10 @@ fn render_one_node(
     let alpha = anim.and_then(|a| a.opacity).unwrap_or(n.style.opacity);
     let color_tint = anim.and_then(|a| a.text_color).unwrap_or(n.style.color);
     let rn = match n.kind {
-        // Dropdown/OptionItem 是控件（不在 is_container：子节点是框架注入的 .loom-*，
-        // 非用户排列），但渲染上需要一个背景框（select 外壳 / option 列表项），故与
-        // Container 同路径 build_container_mesh。文字由各自的 TextNode 子节点画
-        //（Dropdown .loom-value 内的 TextNode、OptionItem 的子文本），本臂不叠加文字。
+        // Dropdown/OptionItem 是控件（不在 is_container），但渲染上需要一个背景框
+        // （combobox 外壳 / option 列表项），故与 Container 同路径 build_container_mesh。
+        // 控件视觉子结构由作者按 role/data-slot 自写（§2.3，core 不注入），文字由各自的
+        // TextNode 子节点画（combobox value 文本、option 的子文本），本臂不叠加文字。
         k if k.is_container() || matches!(k, NodeKind::Dropdown | NodeKind::OptionItem) => {
             build_container_mesh(
                 n,
