@@ -1,30 +1,30 @@
 //! 控件必须被 CSS 命中校验（端到端）。
 //!
-//! LoomGUI 控件（ProgressBar/Slider/Toggle/RadioButton）不带 UA 默认样式——
-//! 写了控件标签却没匹配的 CSS 规则 = 运行时空白。本测试覆盖打包期校验：
+//! LoomGUI 控件（role 驱动：progressbar/slider/switch/radio/textbox/...）不带 UA
+//! 默认样式——写了控件却没匹配的 CSS 规则 = 运行时空白。本测试覆盖打包期校验：
 //! 有匹配 CSS → 静默通过；完全无 CSS 命中 → `FenceControlWithoutCss` error + 教学。
 
 use loomgui_fence::diagnostic::{DiagnosticCode, Severity};
 use loomgui_fence::pipeline::parse_template;
 
-/// 判定是否含「控件缺 CSS」诊断（按 code + message 含控件标签名）。
-fn has_control_css_diag(result: &loomgui_fence::pipeline::ParsedTemplate, tag: &str) -> bool {
+/// 判定是否含「控件缺 CSS」诊断（按 code + message 含控件可读名片段）。
+fn has_control_css_diag(result: &loomgui_fence::pipeline::ParsedTemplate, needle: &str) -> bool {
     result
         .diagnostics
         .iter()
-        .any(|d| d.code == DiagnosticCode::FenceControlWithoutCss && d.message.contains(tag))
+        .any(|d| d.code == DiagnosticCode::FenceControlWithoutCss && d.message.contains(needle))
 }
 
-// ── ProgressBar ──
+// ── ProgressBar (role=progressbar) ──
 
-/// 裸 `<progress>` 无 CSS → error（控件空白）。
+/// 裸 `role=progressbar` 无 CSS → error（控件空白）。
 #[test]
-fn progress_without_css_errors() {
-    let html = r#"<progress value="70" max="100"></progress>"#;
+fn progressbar_without_css_errors() {
+    let html = r#"<div role="progressbar" aria-valuenow="70" aria-valuemax="100"></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        has_control_css_diag(&result, "progress"),
-        "裸 progress 无 CSS 应报错: {:?}",
+        has_control_css_diag(&result, "progress bar"),
+        "裸 progressbar 无 CSS 应报错: {:?}",
         result.diagnostics
     );
     // 必须是 error 级（空白控件是破坏性 bug，应阻断打包）
@@ -32,42 +32,40 @@ fn progress_without_css_errors() {
         result.diagnostics.iter().any(|d| {
             d.code == DiagnosticCode::FenceControlWithoutCss
                 && d.severity == Severity::Error
-                && d.message.contains("progress")
+                && d.message.contains("progress bar")
         }),
         "应为 Error 级: {:?}",
         result.diagnostics
     );
 }
 
-/// `<progress>` + tag 选择器 CSS → 放行（控件已被命中）。
+/// `role=progressbar` + 属性选择器 CSS → 放行（控件已被命中）。
 #[test]
-fn progress_with_css_passes() {
-    let html = r#"<style>progress{background:#ddd} .loom-fill{background:#4a9}</style><progress value="70"></progress>"#;
+fn progressbar_with_css_passes() {
+    let html = r#"<style>[role="progressbar"]{background:#ddd}</style><div role="progressbar" aria-valuenow="70"></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        !has_control_css_diag(&result, "progress"),
-        "progress + tag 选择器 CSS 不应报错: {:?}",
+        !has_control_css_diag(&result, "progress bar"),
+        "progressbar + CSS 不应报错: {:?}",
         result.diagnostics
     );
 }
 
-/// 教学文案必须自包含 + 可操作（含控件标签 + CSS 提示 + data-slot 引导）。
+/// 教学文案必须自包含 + 可操作（含 data-slot 引导）。
 #[test]
-fn progress_without_css_message_is_actionable() {
-    let html = r#"<progress value="70"></progress>"#;
+fn progressbar_without_css_message_is_actionable() {
+    let html = r#"<div role="progressbar" aria-valuenow="70"></div>"#;
     let result = parse_template(html, "t.html");
     let d = result
         .diagnostics
         .iter()
         .find(|d| d.code == DiagnosticCode::FenceControlWithoutCss)
         .expect("should emit control-css diagnostic");
-    assert!(d.message.contains("progress"), "msg 应含标签名");
+    assert!(d.message.contains("progress bar"), "msg 应含控件名");
     assert!(d.message.contains("CSS"), "msg 应提 CSS");
-    // role 化重构后，旧标签 progress 文案引导作者改用 role=progressbar + data-slot=fill
-    // （不再引用已删除的框架注入 .loom-fill 子节点）
     assert!(
-        d.message.contains("data-slot") && d.message.contains("role="),
-        "msg 应引导 role/data-slot 结构: {}",
+        d.message.contains("data-slot=\"fill\""),
+        "msg 应引导 data-slot=fill: {}",
         d.message
     );
     assert!(
@@ -77,79 +75,79 @@ fn progress_without_css_message_is_actionable() {
     );
 }
 
-// ── Slider (input[type=range]) ──
+// ── Slider (role=slider) ──
 
-/// 裸 `<input type="range">` 无 CSS → error。
+/// 裸 `role=slider` 无 CSS → error。
 #[test]
 fn slider_without_css_errors() {
-    let html = r#"<input type="range" value="50">"#;
+    let html = r#"<div role="slider" aria-valuenow="50"></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        has_control_css_diag(&result, "input"),
-        "裸 range 无 CSS 应报错: {:?}",
+        has_control_css_diag(&result, "slider"),
+        "裸 slider 无 CSS 应报错: {:?}",
         result.diagnostics
     );
 }
 
-/// `<input type="range">` + class 选择器 CSS → 放行。
+/// `role=slider` + class 选择器 CSS → 放行。
 #[test]
 fn slider_with_css_passes() {
-    let html = r#"<style>.vol { display:block; background:#ddd } input[type="range"]{width:200px}</style><input type="range" class="vol" value="50">"#;
+    let html = r#"<style>.vol { display:block; background:#ddd }</style><div role="slider" aria-valuenow="50" class="vol"><div data-slot="thumb"></div></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        !has_control_css_diag(&result, "input"),
-        "range + class CSS 不应报错: {:?}",
+        !has_control_css_diag(&result, "slider"),
+        "slider + class CSS 不应报错: {:?}",
         result.diagnostics
     );
 }
 
-// ── Toggle (checkbox) ──
+// ── Toggle (role=switch) ──
 
-/// 裸 `<input type="checkbox">` 无 CSS → error。
+/// 裸 `role=switch` 无 CSS → error。
 #[test]
 fn toggle_without_css_errors() {
-    let html = r#"<input type="checkbox" checked>"#;
+    let html = r#"<div role="switch" aria-checked="true"></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        has_control_css_diag(&result, "input"),
-        "裸 checkbox 无 CSS 应报错: {:?}",
+        has_control_css_diag(&result, "toggle"),
+        "裸 switch 无 CSS 应报错: {:?}",
         result.diagnostics
     );
 }
 
-/// `<input type="checkbox">` + CSS 命中 → 放行。
+/// `role=switch` + CSS 命中 → 放行。
 #[test]
 fn toggle_with_css_passes() {
-    let html = r#"<style>input[type="checkbox"]{width:24px;height:24px}</style><input type="checkbox" checked>"#;
+    let html = r#"<style>[role="switch"]{width:24px;height:24px}</style><div role="switch" aria-checked="true"></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        !has_control_css_diag(&result, "input"),
-        "checkbox + 属性选择器 CSS 不应报错: {:?}",
+        !has_control_css_diag(&result, "toggle"),
+        "switch + 属性选择器 CSS 不应报错: {:?}",
         result.diagnostics
     );
 }
 
-// ── RadioButton ──
+// ── RadioButton (role=radio) ──
 
-/// 裸 `<input type="radio">` 无 CSS → error。
+/// 裸 `role=radio` 无 CSS → error。
 #[test]
 fn radio_without_css_errors() {
-    let html = r#"<input type="radio" name="grp">"#;
+    let html = r#"<div role="radio" aria-checked="true" data-name="grp"></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        has_control_css_diag(&result, "input"),
+        has_control_css_diag(&result, "radio"),
         "裸 radio 无 CSS 应报错: {:?}",
         result.diagnostics
     );
 }
 
-/// `<input type="radio">` + class 选择器 CSS → 放行。
+/// `role=radio` + class 选择器 CSS → 放行。
 #[test]
 fn radio_with_css_passes() {
-    let html = r#"<style>.opt{display:block;width:20px;height:20px}</style><input type="radio" name="grp" class="opt">"#;
+    let html = r#"<style>.opt{display:block;width:20px;height:20px}</style><div role="radio" aria-checked="true" data-name="grp" class="opt"></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        !has_control_css_diag(&result, "input"),
+        !has_control_css_diag(&result, "radio"),
         "radio + class CSS 不应报错: {:?}",
         result.diagnostics
     );
@@ -157,13 +155,13 @@ fn radio_with_css_passes() {
 
 // ── 选择器形态覆盖 ──
 
-/// 后代选择器命中控件也算（`.bar progress`）。
+/// 后代选择器命中控件也算（`.bar [role="progressbar"]`）。
 #[test]
 fn descendant_selector_on_control_counts() {
-    let html = r#"<style>.bar progress{background:#ddd}</style><div class="bar"><progress value="1"></progress></div>"#;
+    let html = r#"<style>.bar [role="progressbar"]{background:#ddd}</style><div class="bar"><div role="progressbar" aria-valuenow="1"></div></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        !has_control_css_diag(&result, "progress"),
+        !has_control_css_diag(&result, "progress bar"),
         "后代选择器命中控件应放行: {:?}",
         result.diagnostics
     );
@@ -172,10 +170,10 @@ fn descendant_selector_on_control_counts() {
 /// id 选择器命中控件也算（`#hp`）。
 #[test]
 fn id_selector_on_control_counts() {
-    let html = r#"<style>#hp{background:#ddd}</style><progress id="hp" value="1"></progress>"#;
+    let html = r#"<style>#hp{background:#ddd}</style><div role="progressbar" aria-valuenow="1" id="hp"></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        !has_control_css_diag(&result, "progress"),
+        !has_control_css_diag(&result, "progress bar"),
         "id 选择器命中控件应放行: {:?}",
         result.diagnostics
     );
@@ -196,32 +194,31 @@ fn non_control_no_css_not_flagged() {
     );
 }
 
-/// 同一 progress 被多条规则命中（含 :hover 伪类）→ 仍放行（用户在样式控件）。
+/// 同一控件被多条规则命中（含 :hover 伪类）→ 仍放行（用户在样式控件）。
 #[test]
 fn pseudo_class_rule_still_counts() {
-    let html = r#"<style>progress{background:#ddd} progress:hover{background:#fff}</style><progress value="1"></progress>"#;
+    let html = r#"<style>[role="progressbar"]{background:#ddd} [role="progressbar"]:hover{background:#fff}</style><div role="progressbar" aria-valuenow="1"></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        !has_control_css_diag(&result, "progress"),
-        "progress{{}} 已命中，:hover 规则不影响: {:?}",
+        !has_control_css_diag(&result, "progress bar"),
+        "[role=progressbar]{{}} 已命中，:hover 规则不影响: {:?}",
         result.diagnostics
     );
 }
 
-// ── TextField (input[type=text] / bare input) ──
+// ── TextField / TextArea (role=textbox) ──
 //
-// 文本输入控件同样不带 UA 默认样式：浏览器给 <input>/textarea 套自带外观
-// （边框/底色/光标），但 LoomGUI core 无 UA 表——打包后运行时空白。本组覆盖
-// Stage 6.7 校验扩到文本控件后的行为（Task 17）。
+// 文本输入控件同样不带 UA 默认样式：浏览器给 textbox 套自带外观
+// （边框/底色/光标），但 LoomGUI core 无 UA 表——打包后运行时空白。
 
-/// 裸 `<input type="text">` 无 CSS → error。
+/// 裸 `role=textbox` 无 CSS → error。
 #[test]
 fn text_input_without_css_errors() {
-    let html = r#"<input type="text" value="x">"#;
+    let html = r#"<div role="textbox"></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        has_control_css_diag(&result, "input"),
-        "裸 text input 无 CSS 应报错: {:?}",
+        has_control_css_diag(&result, "text field"),
+        "裸 textbox 无 CSS 应报错: {:?}",
         result.diagnostics
     );
     // 必须是 error 级（空白文本框是破坏性 bug，应阻断打包）
@@ -229,64 +226,38 @@ fn text_input_without_css_errors() {
         result.diagnostics.iter().any(|d| {
             d.code == DiagnosticCode::FenceControlWithoutCss
                 && d.severity == Severity::Error
-                && d.message.contains("input")
+                && d.message.contains("text field")
                 && d.message.contains("CSS")
         }),
-        "应为 Error 级且 message 含 input/CSS: {:?}",
+        "应为 Error 级且 message 含 text field/CSS: {:?}",
         result.diagnostics
     );
 }
 
-/// 裸 `<input>`（默认 type=text）无 CSS → error。
-#[test]
-fn bare_input_without_css_errors() {
-    let html = r#"<input value="x">"#;
-    let result = parse_template(html, "t.html");
-    assert!(
-        has_control_css_diag(&result, "input"),
-        "裸 input（默认 text）无 CSS 应报错: {:?}",
-        result.diagnostics
-    );
-}
-
-/// `<input type="text">` + tag 选择器 CSS → 放行。
+/// `role=textbox` + 属性选择器 CSS → 放行。
 #[test]
 fn text_input_with_css_passes() {
-    let html = r#"<style>input{background:#fff;border:1px solid #888;caret-color:#000}</style><input type="text" value="x">"#;
+    let html = r#"<style>[role="textbox"]{background:#fff;border:1px solid #888;caret-color:#000}</style><div role="textbox"></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        !has_control_css_diag(&result, "input"),
-        "text input + tag 选择器 CSS 不应报错: {:?}",
+        !has_control_css_diag(&result, "text field"),
+        "textbox + 属性选择器 CSS 不应报错: {:?}",
         result.diagnostics
     );
 }
 
-/// `<input type="text">` + 属性选择器 CSS → 放行（属性选择器也算命中）。
-#[test]
-fn text_input_with_attr_selector_passes() {
-    let html = r#"<style>input[type="text"]{background:#fff}</style><input type="text" value="x">"#;
-    let result = parse_template(html, "t.html");
-    assert!(
-        !has_control_css_diag(&result, "input"),
-        "text input + 属性选择器 CSS 不应报错: {:?}",
-        result.diagnostics
-    );
-}
-
-/// 教学文案：文本框无 .loom-* 子节点，应引导 background/border + caret-color
-/// （而非 progress/slider 的 loom-fill/loom-thumb）。
+/// 教学文案：文本框应引导 background/border + caret-color（输入光标可见）。
 #[test]
 fn text_input_without_css_message_suggests_caret_color() {
-    let html = r#"<input type="text" value="x">"#;
+    let html = r#"<div role="textbox"></div>"#;
     let result = parse_template(html, "t.html");
     let d = result
         .diagnostics
         .iter()
         .find(|d| d.code == DiagnosticCode::FenceControlWithoutCss)
         .expect("should emit control-css diagnostic");
-    assert!(d.message.contains("input"), "msg 应含标签名");
+    assert!(d.message.contains("text field"), "msg 应含控件名");
     assert!(d.message.contains("CSS"), "msg 应提 CSS");
-    // 文本框靠 caret-color 可见（输入光标），框架不注入 loom-* 子节点
     assert!(
         d.message.contains("caret-color"),
         "msg 应建议 caret-color: {}",
@@ -294,37 +265,14 @@ fn text_input_without_css_message_suggests_caret_color() {
     );
 }
 
-// ── TextArea (textarea) ──
-
-/// 裸 `<textarea>` 无 CSS → error。
+/// `role=textbox` + aria-multiline → text area（仍走同一 textbox 校验路径）。
 #[test]
 fn textarea_without_css_errors() {
-    let html = r#"<textarea></textarea>"#;
+    let html = r#"<div role="textbox" aria-multiline="true"></div>"#;
     let result = parse_template(html, "t.html");
     assert!(
-        has_control_css_diag(&result, "textarea"),
-        "裸 textarea 无 CSS 应报错: {:?}",
-        result.diagnostics
-    );
-    assert!(
-        result.diagnostics.iter().any(|d| {
-            d.code == DiagnosticCode::FenceControlWithoutCss
-                && d.severity == Severity::Error
-                && d.message.contains("textarea")
-        }),
-        "应为 Error 级: {:?}",
-        result.diagnostics
-    );
-}
-
-/// `<textarea>` + tag 选择器 CSS → 放行。
-#[test]
-fn textarea_with_css_passes() {
-    let html = r#"<style>textarea{background:#fff}</style><textarea></textarea>"#;
-    let result = parse_template(html, "t.html");
-    assert!(
-        !has_control_css_diag(&result, "textarea"),
-        "textarea + tag 选择器 CSS 不应报错: {:?}",
+        has_control_css_diag(&result, "text field"),
+        "裸 aria-multiline textbox 无 CSS 应报错: {:?}",
         result.diagnostics
     );
 }

@@ -6,10 +6,6 @@
 //! 必需子节点。本 pass 在打包期（annotate 之后）严格拦截这种缺陷：缺必需子角色
 //! = `FenceMissingControlChild` error，不依赖运行时 reparent 兜底。
 //!
-//! 只校验 **role 驱动的节点**（带 `role` 属性且 role 在契约表中的元素）。旧标签
-//! 控件（`<select>`/`<progress>`/`<input>`/`<ul>`）走 legacy `resolve_semantic`
-//! tag 映射，不触发本校验——showcase 在 Task 8 改写为 role 结构前不断。
-//!
 //! 契约表见 spec §2.2：combobox→listbox、listbox→option、slider→data-slot=thumb、
 //! progressbar→data-slot=fill、list→listitem。textbox/spinbutton/switch/radio
 //! 无必需子角色（不校验）。校验只看**直接子节点**，与 spec §2.2 结构字面对齐。
@@ -143,8 +139,7 @@ pub fn check_control_structure(tree: &IrTree, file: &str, line_map: &LineMap) ->
         let IrNodeKind::Element(el) = &node.kind else {
             continue;
         };
-        // 只校验 role 驱动节点（带 role 属性）。旧标签控件走 legacy tag 映射，
-        // 不触发——showcase 在 Task 8 改写前不断。
+        // 只校验 role 驱动节点（带 role 属性）。
         let Some(role) = node_role(el) else {
             continue;
         };
@@ -289,16 +284,6 @@ mod tests {
         // textbox / spinbutton / switch / radio 无必需子角色，裸节点不报错
         let diags = struct_diags(
             r#"<div role="textbox"></div><div role="spinbutton"></div><div role="switch"></div><div role="radio"></div>"#,
-        );
-        assert!(diags.is_empty(), "{diags:?}");
-    }
-
-    #[test]
-    fn legacy_tags_not_checked() {
-        // 旧标签控件走 legacy tag 映射（无 role 属性）→ 不触发结构契约
-        // showcase 在 Task 8 改写前不断
-        let diags = struct_diags(
-            r#"<select><option value="a">A</option></select><progress value="1"></progress>"#,
         );
         assert!(diags.is_empty(), "{diags:?}");
     }

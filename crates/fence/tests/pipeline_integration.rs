@@ -5,15 +5,16 @@ use loomgui_fence::schema::tag::SemanticKind;
 
 #[test]
 fn complex_template_parses_clean() {
-    let html = r#"<style>input[type="range"]{width:100%}</style><div id="root" class="panel">
+    // role-driven controls + data-driven list (template blueprint). Controls need
+    // a matching CSS rule (no UA defaults), so a `[role]` selector covers them.
+    let html = r#"<style>[role="slider"],[role="list"]{background:#ddd} [data-slot="thumb"]{background:#444}</style><div id="root" class="panel">
         <div><my-title>Title</my-title>
             <button class="close" style="display:block">X</button>
         </div>
-        <ul>
-            <li><span>Item 1</span></li>
-            <li><span>Item 2</span></li>
-        </ul>
-        <input type="range" min="0" max="100" style="display:block">
+        <div role="list" data-fill="3">
+            <template><div role="listitem" class="item"><span>Item</span></div></template>
+        </div>
+        <div role="slider" aria-valuenow="50" data-step="1"><div data-slot="thumb"></div></div>
     </div>"#;
     let result = parse_template(html, "complex.html");
     let errors: Vec<_> = result
@@ -31,13 +32,22 @@ fn complex_template_parses_clean() {
         Some(SemanticKind::Container)
     );
 
-    // Find the input and check it's a Slider
+    // Find the role-driven controls and check their semantics
     for node in &result.tree.nodes {
         if let IrNodeKind::Element(el) = &node.kind {
-            if el.tag == "input" {
+            if el.tag == "div"
+                && el
+                    .attributes
+                    .iter()
+                    .any(|a| a.name == "role" && a.value == "slider")
+            {
                 assert_eq!(el.semantic, Some(SemanticKind::Slider));
             }
-            if el.tag == "ul" {
+            if el
+                .attributes
+                .iter()
+                .any(|a| a.name == "role" && a.value == "list")
+            {
                 assert_eq!(el.semantic, Some(SemanticKind::ListView));
             }
         }

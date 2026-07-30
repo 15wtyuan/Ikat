@@ -237,13 +237,13 @@ mod tests {
         );
     }
 
-    /// <p> 内的 <a>（文本流）→ 放行。
+    /// 文本级语义（span/slot）在 block 容器里 → 放行（行内混排要等文本模型，不是 flex 能修的）。
     #[test]
-    fn inline_in_text_block_ok() {
-        let result = parse_template(r##"<p>点此<a href="#">领取</a>奖励</p>"##, "t.html");
+    fn text_level_semantic_in_block_ok() {
+        let result = parse_template(r#"<div><span>x</span></div>"#, "t.html");
         assert!(
-            !has_block_context_diag(&result, "a"),
-            "<p> 内的 <a> 不应报错（文本流）: {:?}",
+            !has_block_context_diag(&result, "span"),
+            "block div 里的 span 不应报错（文本级语义豁免）: {:?}",
             result.diagnostics
         );
     }

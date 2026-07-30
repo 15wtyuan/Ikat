@@ -6,13 +6,13 @@ use super::attr::AttrSpec;
 /// to the four variants that matter for game UI).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Category {
-    /// Void / self-closing (img, br, input).
+    /// Void / self-closing (img).
     Void,
-    /// Inline text-level (span, strong, em, label, a, -- .
+    /// Inline text-level (span).
     Phrasing,
-    /// Block-level structural (div, header, nav, p, ul, -- .
+    /// Block-level structural (div).
     Block,
-    /// Transparent -- adopts parent's content model (a, slot).
+    /// Transparent -- adopts parent's content model (slot).
     Transparent,
 }
 
@@ -56,12 +56,6 @@ pub enum SemanticKind {
     TextElement,
     Button,
     Image,
-    /// Vestigial placeholder for the legacy `<input>` tag. No longer produced: the
-    /// annotator now resolves `<input>` straight to its concrete kind (legacy
-    /// `type` map) or via `role`. Retained only so the bridge can reject it as an
-    /// internal error if it ever surfaces; removed when the `input` tag leaves
-    /// the fence.
-    InputDispatch,
     TextField,
     NumberField,
     Slider,
@@ -121,11 +115,10 @@ const ROLE_TO_SEMANTIC: &[(&str, SemanticKind)] = &[
 /// its WAI-ARIA `role`.
 ///
 /// `role` takes precedence over the tag: `<div role="slider">` is a Slider
-/// regardless of the `div` tag. An unrecognized role falls through to the
-/// tag-based mapping. Legacy control/list tags (`select`, `progress`, ...) are
-/// still mapped here while they remain in the fence; `<input>` has no tag-level
-/// default because its semantics historically came from the `type` attribute,
-/// which the annotator resolves directly (see `annotate::legacy_input_semantic`).
+/// regardless of the `div` tag. Without a role the base tags (`div`/`span`/
+/// `button`/`img`/`template`/`slot`) map to their default kind. Controls and
+/// lists have no dedicated tag -- authors express them with `role` on a `div`
+/// (e.g. `<div role="slider">`, `<div role="list">`).
 pub fn resolve_semantic(
     tag: &str,
     role: Option<&str>,
@@ -150,12 +143,6 @@ pub fn resolve_semantic(
         "span" => Some(SemanticKind::TextElement),
         "button" => Some(SemanticKind::Button),
         "img" => Some(SemanticKind::Image),
-        "textarea" => Some(SemanticKind::TextArea),
-        "select" => Some(SemanticKind::Dropdown),
-        "option" => Some(SemanticKind::OptionItem),
-        "progress" => Some(SemanticKind::ProgressBar),
-        "ul" => Some(SemanticKind::ListView),
-        "li" => Some(SemanticKind::ListItem),
         "template" => Some(SemanticKind::Template),
         "slot" => Some(SemanticKind::Slot),
         _ if tag.contains('-') => Some(SemanticKind::CustomElement),
@@ -178,7 +165,7 @@ pub fn is_shell_tag(name: &str) -> bool {
 
 // ── TAGS registry ───────────────────────────────────────────────────
 
-/// All 13 runtime fence tags with full Category × ContentModel mapping.
+/// All 6 runtime fence tags with full Category × ContentModel mapping.
 pub static TAGS: &[TagSpec] = &[
     TagSpec {
         name: "div",
@@ -219,96 +206,6 @@ pub static TAGS: &[TagSpec] = &[
         void: true,
         structural_attrs: &[],
         content_attrs: &["src", "alt", "width", "height"],
-    },
-    TagSpec {
-        name: "input",
-        semantic: SemanticKind::InputDispatch,
-        display: DisplayDefault::Inline,
-        category: Category::Void,
-        content: ContentModel::None,
-        void: true,
-        structural_attrs: &[],
-        content_attrs: &[
-            "value",
-            "min",
-            "max",
-            "step",
-            "placeholder",
-            "readonly",
-            "disabled",
-            "checked",
-            "name",
-            "pattern",
-            "maxlength",
-        ],
-    },
-    TagSpec {
-        name: "textarea",
-        semantic: SemanticKind::TextArea,
-        display: DisplayDefault::Inline,
-        category: Category::Phrasing,
-        content: ContentModel::Text,
-        void: false,
-        structural_attrs: &[],
-        content_attrs: &[
-            "placeholder",
-            "readonly",
-            "disabled",
-            "name",
-            "rows",
-            "cols",
-            "maxlength",
-        ],
-    },
-    TagSpec {
-        name: "select",
-        semantic: SemanticKind::Dropdown,
-        display: DisplayDefault::Inline,
-        category: Category::Phrasing,
-        content: ContentModel::Only(&["option"]),
-        void: false,
-        structural_attrs: &[],
-        content_attrs: &["name", "disabled"],
-    },
-    TagSpec {
-        name: "option",
-        semantic: SemanticKind::OptionItem,
-        display: DisplayDefault::Block,
-        category: Category::Block,
-        content: ContentModel::Text,
-        void: false,
-        structural_attrs: &[],
-        content_attrs: &["value", "selected", "disabled"],
-    },
-    TagSpec {
-        name: "progress",
-        semantic: SemanticKind::ProgressBar,
-        display: DisplayDefault::Inline,
-        category: Category::Phrasing,
-        content: ContentModel::Phrasing,
-        void: false,
-        structural_attrs: &[],
-        content_attrs: &["value", "max"],
-    },
-    TagSpec {
-        name: "ul",
-        semantic: SemanticKind::ListView,
-        display: DisplayDefault::Block,
-        category: Category::Block,
-        content: ContentModel::Only(&["li", "template"]),
-        void: false,
-        structural_attrs: &[],
-        content_attrs: &[],
-    },
-    TagSpec {
-        name: "li",
-        semantic: SemanticKind::ListItem,
-        display: DisplayDefault::Block,
-        category: Category::Block,
-        content: ContentModel::Flow,
-        void: false,
-        structural_attrs: &[],
-        content_attrs: &[],
     },
     TagSpec {
         name: "template",
@@ -405,20 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_semantic_legacy_tags_and_unknown() {
-        // Legacy control/list tags still in the fence map by tag (pending retirement).
-        assert_eq!(
-            resolve_semantic("select", None, false),
-            Some(SemanticKind::Dropdown)
-        );
-        assert_eq!(
-            resolve_semantic("progress", None, false),
-            Some(SemanticKind::ProgressBar)
-        );
-        assert_eq!(
-            resolve_semantic("textarea", None, false),
-            Some(SemanticKind::TextArea)
-        );
+    fn resolve_semantic_unknown_role_falls_back_and_unknown_tag_is_none() {
         // An unrecognized role falls through to the tag mapping.
         assert_eq!(
             resolve_semantic("div", Some("totally-made-up"), false),
@@ -437,13 +321,11 @@ mod tests {
 
     #[test]
     fn all_runtime_tags_present() {
-        let expected = [
-            "div", "span", "button", "img", "input", "textarea", "select", "option", "progress",
-            "ul", "li", "template", "slot",
-        ];
-        // 被移除的 10 个标签（p/header/nav/ol/canvas/strong/em/br/label/a）现在应 not found。
+        let expected = ["div", "span", "button", "img", "template", "slot"];
+        // 被移除的标签现在应 not found：旧 block 文本标签 + 旧控件/列表标签。
         for removed in [
-            "p", "header", "nav", "ol", "canvas", "strong", "em", "br", "label", "a",
+            "p", "header", "nav", "ol", "canvas", "strong", "em", "br", "label", "a", "input",
+            "textarea", "select", "option", "progress", "ul", "li",
         ] {
             assert!(find_tag(removed).is_none(), "<{removed}> 应已从围栏移除");
         }
@@ -454,7 +336,9 @@ mod tests {
 
     #[test]
     fn shell_tags_recognized() {
-        for name in ["html", "head", "body", "title", "meta", "style", "link"] {
+        for name in [
+            "html", "head", "body", "title", "meta", "style", "link", "script",
+        ] {
             assert!(is_shell_tag(name), "<{}> should be a shell tag", name);
         }
         assert!(!is_shell_tag("div"));
@@ -471,9 +355,6 @@ mod tests {
         assert_eq!(find_tag("div").unwrap().content, ContentModel::Flow);
         assert_eq!(find_tag("span").unwrap().category, Category::Phrasing);
         assert!(find_tag("img").unwrap().void);
-        assert_eq!(
-            find_tag("select").unwrap().content,
-            ContentModel::Only(&["option"])
-        );
+        assert_eq!(find_tag("slot").unwrap().content, ContentModel::Transparent);
     }
 }

@@ -13,28 +13,13 @@ pub enum AttrValueDomain {
 
 /// Schema entry for a structural attribute (validated, immutable).
 /// Structural attributes influence the element's type or core behaviour
-/// and are validated at fence-gate time.  Examples: `label[for]`,
-/// `a[href]`.
+/// and are validated at fence-gate time.
 #[derive(Debug, Clone)]
 pub struct AttrSpec {
     pub name: &'static str,
     pub values: AttrValueDomain,
     pub required: bool,
 }
-
-/// Structural attributes for `<label>` -- `for` binds to a control's ID.
-pub static LABEL_STRUCTURAL: &[AttrSpec] = &[AttrSpec {
-    name: "for",
-    values: AttrValueDomain::IdRef,
-    required: false,
-}];
-
-/// Structural attributes for `<a>` -- `href` is the link target.
-pub static A_STRUCTURAL: &[AttrSpec] = &[AttrSpec {
-    name: "href",
-    values: AttrValueDomain::FreeText,
-    required: false,
-}];
 
 /// Global attributes accepted on every element.
 pub fn is_global_attr(name: &str) -> bool {

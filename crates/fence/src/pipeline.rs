@@ -61,9 +61,9 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
     // Stage 6: Annotate (fill SemanticKind)
     annotate(&mut tree);
 
-    // Stage 6.5: inline 元素布局上下文检查。LoomGUI 没有 <p>/flex 之外的 inline flow——
+    // Stage 6.5: inline 元素布局上下文检查。LoomGUI 没有 flex 之外的 inline flow——
     // block 容器里的裸 inline 元素会被当 block-level（撑满+竖排），和浏览器不一致。
-    // 必须在 Annotate 之后（需 TextBlock 语义判定 <p> 豁免）+ Stage 4（inline style display）
+    // 必须在 Annotate 之后（需 TextBlock 语义判定豁免）+ Stage 4（inline style display）
     // + Stage 4.5（class 规则 display）之后——parent 是 block 还是 flex 要合并两个来源。
     diagnostics.extend(check_inline_context(
         &tree,
@@ -88,11 +88,10 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
         &line_map,
     ));
 
-    // Stage 6.8: role 驱动控件结构契约（必需子角色）。新模式下作者自写控件结构
+    // Stage 6.8: role 驱动控件结构契约（必需子角色）。作者自写控件结构
     // （`<div role="combobox"><div role="listbox">...`），可能漏写必需子节点。
     // 打包期严格拦截，不依赖运行时 reparent 兜底。只校验 role 驱动节点（带 role 属性
-    // 且在契约表中的控件），旧标签控件（select/progress/input/ul）走 legacy tag 映射
-    // 不触发——showcase 在 Task 8 改写前不断。必须在 Annotate 之后（需完整 IrTree）。
+    // 且在契约表中的控件）。必须在 Annotate 之后（需完整 IrTree）。
     diagnostics.extend(crate::control_structure_check::check_control_structure(
         &tree, file, &line_map,
     ));
@@ -173,19 +172,6 @@ mod tests {
             .expect("span under div");
         let span_el = result.tree.element(span_id).unwrap();
         assert_eq!(span_el.semantic, Some(SemanticKind::TextElement));
-    }
-
-    #[test]
-    fn pipeline_input_semantic() {
-        // range 控件需 CSS 命中（控件不带 UA 默认样式），否则触发 FenceControlWithoutCss。
-        // 本测试聚焦 semantic 标注，故加规则满足前置条件。
-        let result = parse_template(
-            r#"<style>input[type="range"]{width:100px}</style><input type="range">"#,
-            "form.html",
-        );
-        assert!(result.diagnostics.is_empty());
-        let el = result.tree.element(result.tree.roots[0]).unwrap();
-        assert_eq!(el.semantic, Some(SemanticKind::Slider));
     }
 
     #[test]

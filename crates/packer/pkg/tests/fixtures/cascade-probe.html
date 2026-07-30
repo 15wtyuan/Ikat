@@ -8,15 +8,14 @@
 
   Deliberately stays inside what the current selector parser + cascade engine
   already support, so it round-trips HTML -> pkg -> Stage -> layout today.
-  Selector subset : class / tag / id / descendant / pseudo-class (hover/active/disabled/focus)
+  Selector subset : class / tag / id / descendant / pseudo-class (hover/active/disabled/focus) / attribute [role=..]
   Property subset: display / flex-direction / width / height / color / font-size
-  Out of scope (parser returns None -> pack error if used):
-    attribute selectors [..], comma lists, child >, adjacent +/~, :nth-child,
-    @keyframes/animation, background-image/gradient/filter/box-shadow/transform/transition.
+  Controls are role-driven (spec §2.2): <div role="...">. Each control needs a
+  matching CSS rule (controls carry no UA default style) and its required child
+  structure (control_structure_check, spec §2.2).
 
-  What the Stage public API can assert today: rect / visible / find_node_by_id.
-  What it CANNOT assert yet (cascade-finalization must add query exits):
-    inherited font-size/color, computed style, node-kind fidelity.
+  What the Stage public API can assert today: rect / visible / find_node_by_id /
+  get_node_computed_style / get_node_kind.
 -->
 <style>
 div { display: flex; flex-direction: column; }
@@ -31,10 +30,11 @@ button:hover { color: #dddddd; }
 button:active { color: #ffeeaa; }
 button:disabled { color: #666666; }
 button:focus { color: #aaffff; }
-input { width: 200px; }
-progress { width: 160px; height: 8px; }
-select { width: 200px; }
-option { color: #222222; }
+[role="slider"] { width: 200px; }
+[role="progressbar"] { width: 160px; height: 8px; }
+[role="combobox"] { width: 200px; }
+[role="option"] { color: #222222; }
+[role="switch"] { width: 24px; height: 24px; }
 .hidden { display: none; }
 </style>
 </head>
@@ -43,24 +43,26 @@ option { color: #222222; }
   <div class="title" id="title">音量设置</div>
   <div class="row" id="row-vol">
     <span class="lbl" id="lbl-master">主音量</span>
-    <input type="range" id="vol" min="0" max="100">
+    <div role="slider" id="vol" aria-valuenow="80" aria-valuemin="0" aria-valuemax="100" data-step="1"><div data-slot="thumb"></div></div>
     <span class="muted" id="vol-val">80</span>
   </div>
   <div class="row" id="row-mute">
-    <input type="checkbox" id="mute">
+    <div role="switch" id="mute" aria-checked="false"></div>
     <span>静音</span>
   </div>
-  <progress id="pb" value="50" max="100"></progress>
+  <div role="progressbar" id="pb" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100"><div data-slot="fill"></div></div>
   <div class="row" id="row-quality">
-    <select id="quality">
-      <option value="low">低</option>
-      <option value="high" selected>高</option>
-    </select>
+    <div role="combobox" id="quality">
+      <div role="listbox">
+        <div role="option" aria-selected="false">低</div>
+        <div role="option" aria-selected="true">高</div>
+      </div>
+    </div>
   </div>
-  <ul id="hints">
-    <li id="li1">提示一</li>
-    <li>提示二</li>
-  </ul>
+  <div role="list" id="hints">
+    <div role="listitem" id="li1">提示一</div>
+    <div role="listitem">提示二</div>
+  </div>
   <div class="row" id="row-actions">
     <button id="save">保存</button>
     <button id="cancel" disabled>取消</button>

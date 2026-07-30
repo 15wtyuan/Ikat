@@ -2,31 +2,50 @@ use loomgui_fence::schema::attr::is_global_attr;
 use loomgui_fence::schema::css::{find_css_prop, find_shorthand, CssValueParser};
 use loomgui_fence::schema::tag::{find_tag, is_shell_tag, Category, ContentModel, DisplayDefault};
 
+/// The 6 runtime fence tags (div/span/button/img/template/slot). Controls and
+/// lists have no dedicated tag -- authors express them with `role` on a `div`.
 #[test]
-fn all_13_runtime_tags_have_specs() {
-    let tags = [
-        "div", "span", "button", "img", "input", "textarea", "select", "option", "progress", "ul",
-        "li", "template", "slot",
-    ];
+fn all_6_runtime_tags_have_specs() {
+    let tags = ["div", "span", "button", "img", "template", "slot"];
     for t in tags {
         assert!(find_tag(t).is_some(), "<{t}> must be in TAGS");
     }
-    assert_eq!(tags.len(), 13);
-    // 被移除的 10 个标签现应 not found
-    for removed in [
-        "p", "header", "nav", "ol", "canvas", "strong", "em", "br", "label", "a",
-    ] {
-        assert!(find_tag(removed).is_none(), "<{removed}> 应已从围栏移除");
-    }
+    assert_eq!(tags.len(), 6);
 }
 
+/// The 8 document-shell tags (html/head/body/title/meta/style/link/script).
+/// `script` was previously omitted from the assertion even though it is in
+/// SHELL_TAGS; this locks all eight.
 #[test]
-fn shell_tags_are_seven() {
-    let shells = ["html", "head", "body", "title", "meta", "style", "link"];
+fn shell_tags_are_eight() {
+    let shells = [
+        "html", "head", "body", "title", "meta", "style", "link", "script",
+    ];
     for s in shells {
-        assert!(is_shell_tag(s));
+        assert!(is_shell_tag(s), "<{s}> should be a shell tag");
     }
-    assert_eq!(shells.len(), 7);
+    assert_eq!(shells.len(), 8);
+    assert_eq!(
+        loomgui_fence::schema::tag::SHELL_TAGS.len(),
+        8,
+        "SHELL_TAGS registry must hold exactly 8 entries"
+    );
+}
+
+/// Retired control/list tags must be rejected by the fence (find_tag is None).
+#[test]
+fn removed_tags_rejected() {
+    for removed in [
+        // old block/text tags (retired earlier)
+        "p", "header", "nav", "ol", "canvas", "strong", "em", "br", "label", "a",
+        // control/list tags retired in favour of `role` (spec §2.2)
+        "input", "textarea", "select", "option", "progress", "ul", "li",
+    ] {
+        assert!(
+            find_tag(removed).is_none(),
+            "<{removed}> must not be in TAGS (retired)"
+        );
+    }
 }
 
 #[test]
@@ -34,14 +53,6 @@ fn content_model_table_matches_spec() {
     assert_eq!(find_tag("div").unwrap().content, ContentModel::Flow);
     assert_eq!(find_tag("span").unwrap().content, ContentModel::Phrasing);
     assert_eq!(find_tag("img").unwrap().content, ContentModel::None);
-    assert_eq!(
-        find_tag("select").unwrap().content,
-        ContentModel::Only(&["option"])
-    );
-    assert_eq!(
-        find_tag("ul").unwrap().content,
-        ContentModel::Only(&["li", "template"])
-    );
     assert_eq!(find_tag("slot").unwrap().content, ContentModel::Transparent);
 }
 
@@ -55,7 +66,6 @@ fn display_defaults_match_spec() {
 #[test]
 fn void_elements() {
     assert!(find_tag("img").unwrap().void);
-    assert!(find_tag("input").unwrap().void);
     assert!(!find_tag("div").unwrap().void);
 }
 
@@ -120,7 +130,6 @@ fn global_attr_detection() {
     assert!(is_global_attr("id"));
     assert!(is_global_attr("data-anything"));
     assert!(is_global_attr("aria-label"));
-    // `type` is a plain global attribute now that input[type] structural
-    // dispatch is retired.
+    // `type` is a plain global attribute (control semantics come from `role`).
     assert!(is_global_attr("type"));
 }

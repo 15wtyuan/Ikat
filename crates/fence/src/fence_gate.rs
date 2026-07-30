@@ -198,31 +198,4 @@ mod tests {
             errors
         );
     }
-
-    #[test]
-    fn input_type_is_freeform_global() {
-        // `type` is now a plain global attribute (the structural input[type]
-        // dispatch was retired for WAI-ARIA role-driven controls), so any value
-        // is accepted at the fence gate.
-        let diags = gate(r#"<input type="bogus">"#);
-        let errors: Vec<_> = diags
-            .iter()
-            .filter(|d| d.severity == crate::diagnostic::Severity::Error)
-            .collect();
-        assert!(
-            errors.is_empty(),
-            "type is a free-form global attr: {:?}",
-            errors
-        );
-    }
-
-    #[test]
-    fn valid_input_type_accepted() {
-        let diags = gate(r#"<input type="range">"#);
-        let errors: Vec<_> = diags
-            .iter()
-            .filter(|d| d.severity == crate::diagnostic::Severity::Error)
-            .collect();
-        assert!(errors.is_empty(), "type=range is valid: {:?}", errors);
-    }
 }

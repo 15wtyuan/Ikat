@@ -18,7 +18,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 
 这是围栏的核心原则：
 
-- **标签 + 不可变结构属性决定稳定对象类型**。`<input type="range">` 永远是 Slider，`<button>` 永远是 Button。
+- **标签 + 不可变结构属性决定稳定对象类型**。`<button>` 永远是 Button，`<div role="slider">` 永远是 Slider。
 - **CSS（class、伪类、computed style）永远不改变对象类型**。`display:flex` 选择内部布局 Strategy，`overflow:auto` 选择滚动 Strategy。策略切换不重建节点、不丢状态。
 - 这条原则让围栏设计在许多设计模式（Strategy、State）上自然落地，后续工作变得顺畅。
 
@@ -47,12 +47,12 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 
 这些标签在 `tree_builder` 阶段被消费，不产生运行时对象。
 
-### 2.2 运行时标签（13 个）
+### 2.2 运行时标签（6 个）
 
-下表是完整的运行时标签注册表。列含义：
+下表是完整的运行时标签注册表。控件与列表没有专属标签——作者在 `<div>` 上写 WAI-ARIA `role` 表达（spec §2.2），如 `<div role="slider">`、`<div role="list">`。列含义：
 
-- **SemanticKind**：打包期标注的稳定语义类型。`InputDispatch` 表示需根据 `type` 属性进一步分派。
-- **Display**：不写 CSS `display` 时的默认显示值。**注意：LoomGUI 运行时不实现 CSS inline flow**——`Inline` 标签运行时被当作 block-level flex（撑满父宽、竖向堆叠），与浏览器的横向 inline 行为不同。为防止 AI 先验错误，inline 布局 box（button/a/label/input/img/...）**必须放进 flex 容器或 `<p>`**，不能裸放在 block 容器里，否则打包报错（见阶段 6.5）。文本级 `span/strong/em` 豁免（其行内混排要等文本模型，roadmap §4）。
+- **SemanticKind**：打包期标注的稳定语义类型（base 标签按 tag、控件/列表按 `role`）。
+- **Display**：不写 CSS `display` 时的默认显示值。**注意：LoomGUI 运行时不实现 CSS inline flow**——`Inline` 标签运行时被当作 block-level flex（撑满父宽、竖向堆叠），与浏览器的横向 inline 行为不同。为防止 AI 先验错误，inline 布局 box（button/img）**必须放进 flex 容器**，不能裸放在 block 容器里，否则打包报错（见阶段 6.5）。文本级 `span` 豁免（其行内混排要等文本模型，roadmap §4）。
 - **Category**：HTML 分类简化为四值——Block（块级结构）、Phrasing（行内文本级）、Void（自闭合）、Transparent（透明，继承父级）。
 - **ContentModel**：允许的子内容——None（无子内容）、Text（仅文本）、Phrasing（行内元素+文本）、Flow（任意）、Transparent（继承父级）、Only([...])（仅列出的子标签）。
 
@@ -62,17 +62,30 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `span` | TextElement | Inline | Phrasing | Phrasing | |
 | `button` | Button | Inline | Phrasing | Phrasing | |
 | `img` | Image | Inline | Void | None | ✓ |
-| `input` | InputDispatch | Inline | Void | None | ✓ |
-| `textarea` | TextArea | Inline | Phrasing | Text | |
-| `select` | Dropdown | Inline | Phrasing | Only([`option`]) | |
-| `option` | OptionItem | Block | Block | Text | |
-| `progress` | ProgressBar | Inline | Phrasing | Phrasing | |
-| `ul` | ListView | Block | Block | Only([`li`, `template`]) | |
-| `li` | ListItem | Block | Block | Flow | |
 | `template` | Template | None | Phrasing | Flow | |
 | `slot` | Slot | Inline | Transparent | Transparent | |
 
-### 2.3 自定义元素
+### 2.3 控件与列表：role 驱动
+
+控件与列表没有专属标签。作者在 `<div>`（或其他 base 标签）上写 WAI-ARIA `role` 表达，打包期 `resolve_semantic` 把 `role` 映射到对应 `SemanticKind`：
+
+| role | SemanticKind | 必需子结构（打包期校验，阶段 6.8） |
+|---|---|---|
+| `combobox` | Dropdown | `role=listbox` 子（内含 `role=option`） |
+| `listbox` | Container | ≥1 `role=option` 子 |
+| `option` | OptionItem | — |
+| `slider` | Slider | `data-slot=thumb` 子 |
+| `spinbutton` | NumberField | — |
+| `switch` | Toggle | — |
+| `radio` | RadioButton | — |
+| `progressbar` | ProgressBar | `data-slot=fill` 子 |
+| `textbox` | TextField（默认）/ TextArea（`aria-multiline=true`） | — |
+| `list` | ListView | `role=listitem` 子（或 `template > role=listitem` 蓝图） |
+| `listitem` | ListItem | — |
+
+控件初始值放 ARIA（`aria-valuenow`/`aria-checked`/...）或 `data-*`（`data-step`/`data-name`）属性里——围栏禁止 `<div>` 上出现 plain 控件属性。
+
+### 2.4 自定义元素
 
 标签名含 `-`（如 `<my-widget>`）识别为 CustomElement（`SemanticKind::CustomElement`）。围栏放行含 hyphen 的标签名通过 Fence Gate；注册验证（`customElements.define()` 注册表）defer 到 R3。
 
@@ -82,7 +95,9 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 
 对象类型由不可变签名决定，实例化后不能改变。
 
-### 3.1 签名 = tag + 不可变结构属性
+### 3.1 签名 = tag + role
+
+Base 标签按 tag 映射；控件/列表按 `role` 映射（`role` 优先于 tag）。
 
 | 签名 | SemanticKind |
 |---|---|
@@ -90,24 +105,22 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `span` | TextElement |
 | `button` | Button |
 | `img` | Image |
-| `input[type=text]`（默认） | TextField |
-| `input[type=password]` | PasswordField |
-| `input[type=search]` | SearchField |
-| `input[type=number]` | NumberField |
-| `input[type=range]` | Slider |
-| `input[type=checkbox]` | Toggle |
-| `input[type=radio]` | RadioButton |
-| `textarea` | TextArea |
-| `select` | Dropdown |
-| `option` | OptionItem |
-| `progress` | ProgressBar |
-| `ul` | ListView |
-| `li` | ListItem |
+| `div role=slider` | Slider |
+| `div role=spinbutton` | NumberField |
+| `div role=switch` | Toggle |
+| `div role=radio` | RadioButton |
+| `div role=textbox` | TextField |
+| `div role=textbox aria-multiline=true` | TextArea |
+| `div role=combobox` | Dropdown |
+| `div role=option` | OptionItem |
+| `div role=progressbar` | ProgressBar |
+| `div role=list` | ListView |
+| `div role=listitem` | ListItem |
 | `template` | Template |
 | `slot` | Slot |
 | `tag-name`（含 hyphen） | CustomElement |
 
-`type`（input）是结构属性，在 Fence Gate 阶段校验取值，在 Annotate 阶段决定最终类型。
+`resolve_semantic(tag, role, aria_multiline)`：`role` 优先，未识别的 role 回退到 tag 映射。CSS（class/伪类/computed style）永远不改变 SemanticKind。
 
 ### 3.2 CSS 不改变类型
 
@@ -134,25 +147,17 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 
 ### 4.2 结构属性（影响类型/核心行为，Fence Gate 校验值域）
 
-| 元素 | 属性 | 值域 | 必填 |
-|---|---|---|---|
-| `input` | `type` | `range` / `checkbox` / `radio` / `text` / `password` / `number` / `search` | 否（默认 `text`） |
-| `label` | `for` | IdRef（指向同作用域内控件 ID） | 否 |
-| `a` | `href` | FreeText（链接目标） | 否 |
+当前运行时标签无专属结构属性（控件语义由全局 `role` 驱动，见 §2.3）。
 
 ### 4.3 内容属性（初始值透传，Fence Gate 校验属性名）
 
 | 元素 | 内容属性 |
 |---|---|
 | `img` | `src`, `alt`, `width`, `height` |
-| `canvas` | `width`, `height` |
-| `input` | `value`, `min`, `max`, `step`, `placeholder`, `readonly`, `disabled`, `checked`, `name`, `pattern`, `maxlength` |
-| `textarea` | `placeholder`, `readonly`, `disabled`, `name`, `rows`, `cols`, `maxlength` |
-| `select` | `name`, `disabled` |
-| `option` | `value`, `selected`, `disabled` |
-| `progress` | `value`, `max` |
 | `button` | `disabled` |
 | `slot` | `name` |
+
+控件初始值不走内容属性——role 驱动控件把初始值放 ARIA（`aria-valuenow`/`aria-checked`/...）或 `data-*`（`data-step`/`data-name`）里（见 §2.3）。
 
 ---
 
@@ -305,11 +310,12 @@ CSS 在围栏中以三个正交维度建模：
 - **Content Model**：子节点的 Category 必须被父节点的 ContentModel 允许。如 `<div>` 中放任何 Flow 内容合法，但 `<span>` 中放 `<div>`（Block inside Phrasing）报错。
 - **文本内容**：ContentModel 为 `None` 或 `Only([...])` 的元素不接受文本子节点（空白文本节点跳过）。
 - **ID 唯一性**：同一模板作用域内重复 `id` → `DuplicateId`。
-- **Deferred 验证**（后续阶段新增）：ARIA 关系（`aria-controls` / `aria-labelledby` 的 IdRef 目标存在）、template 根（`<ul>`/`<ol>` 内 `<template>` 根必须是 `<li>`）、`label[for]` 目标存在。
+- **Deferred 验证**（后续阶段新增）：ARIA 关系（`aria-controls` / `aria-labelledby` 的 IdRef 目标存在）。
+  （`label[for]` 与 `ul/ol` 内 `template` 根校验随 `label`/`ul`/`ol`/`li` 标签下线而移除——列表结构契约改由阶段 6.8 按 `role` 校验。）
 
 ### 阶段 6：Annotate（语义类型填充）
 
-对每个元素调用 `resolve_semantic(tag, input_type)`，填充 `IrElement.semantic`。这是确定性的：同样的 tag + input[type] 永远产生同样的 SemanticKind。
+对每个元素调用 `resolve_semantic(tag, role, aria_multiline)`，填充 `IrElement.semantic`。`role` 优先于 tag；这是确定性的：同样的 tag + role 永远产生同样的 SemanticKind。
 
 ### 阶段 6.5：inline 元素布局上下文检查
 
@@ -317,30 +323,26 @@ CSS 在围栏中以三个正交维度建模：
 
 在 **block 容器**里（裸 `<div>` 等），LoomGUI 把 inline 标签当 block-level（撑满 + 竖排），和浏览器的 inline 行为（收缩 + 横排）必然不一致。放任这种写法会让 AI 按浏览器先验预期横排、运行时却竖排 → 渲染不可预测 → 返工。
 
-**规则**：inline 布局 box（button/a/label/input/select/textarea/img/canvas/progress）若**直接在 block 容器里**（parent 是 block、不在 `<p>` 内、元素自己未显式 `display:block`）→ `FenceInlineElementInBlockContext` error，打包失败。错误信息教学三种改法（三选一）：
+**规则**：inline 布局 box（button/img）若**直接在 block 容器里**（parent 是 block、元素自己未显式 `display:block`）→ `FenceInlineElementInBlockContext` error，打包失败。错误信息教学两种改法（二选一）：
 1. 父容器加 `display:flex`（多元素横排加 `flex-wrap:wrap`）。
 2. 元素显式 `display:block`（有意当块级撑满）。
-3. 文本级内容（a/span/strong/em）放进 `<p>`。
 
 **豁免**：
-- `span/strong/em`（TextElement）/`br`/`slot`：文本级或结构占位，其行内混排要等文本模型（roadmap §4），不是 flex 能修的。
+- `span`（TextElement）/`slot`：文本级或结构占位，其行内混排要等文本模型（roadmap §4），不是 flex 能修的。
 - 元素显式 `display:block`：作者有意当块级（撑满），浏览器也撑满，两边一致。
-- **文本上下文豁免**：祖先链含 `<p>`（TextBlock）的 inline 元素走文本流（LinkRun/TextRun）。
 - parent 是 flex（inline style / tag 默认 / `<style>` class 规则声明 `display:flex`）。
 
 **parent display 判定**：stage 4 css_resolve 只烘 inline style + tag 默认 display；`<style>` class 规则的 display 在 dynamic_rules（运行时 rematch）。检查合并两个来源判定 parent 是 block 还是 flex：class 匹配用单 compound 选择器（`.tab`/`button.tab`/`.btn.primary`）；多 compound（后代/子代）声明 flex 时保守放行（避免假阳性）。
 
 ### 阶段 6.7：控件 CSS 命中校验
 
-**根因**：LoomGUI 控件（`<progress>` / `<input type="range|checkbox|radio">` / 文本控件 `<input type="text|password|search">` / `<textarea>`）**不带 UA 默认样式**——core 刻意保持纯净，不开「框架自带样式源」先例。写了控件标签却没匹配的 CSS 规则 = 运行时渲染空白。浏览器会套自己的 UA 样式表，预览看着正常，打包进 LoomGUI 却空——作者无法从预览察觉。本检查在打包期拦下，明确告诉作者差异。
+**根因**：LoomGUI 控件（role 驱动：`progressbar`/`slider`/`switch`/`radio`/`textbox`/`spinbutton`/`combobox`）**不带 UA 默认样式**——core 刻意保持纯净，不开「框架自带样式源」先例。写了控件却没匹配的 CSS 规则 = 运行时渲染空白。浏览器会套自己的 UA 样式表，预览看着正常，打包进 LoomGUI 却空——作者无法从预览察觉。本检查在打包期拦下，明确告诉作者差异。
 
-**规则**：受校验控件（ProgressBar / Slider / Toggle / RadioButton 四种 SemanticKind，加文本控件 TextField / PasswordField / SearchField / TextArea / NumberField 五种，加 Dropdown）若**无任何 `<style>` 规则的选择器命中它本身** → `FenceControlWithoutCss` error，打包失败。tag / class / id / 后代选择器落地在该节点都算命中；伪类（`:hover` 等）不门控（带状态规则同样表明作者在样式控件）。**只有完全无命中才报错**。
+**规则**：受校验控件（`role` 在控件 role 白名单）若**无任何 `<style>` 规则的选择器命中它本身** → `FenceControlWithoutCss` error，打包失败。tag / class / id / 后代 / 属性选择器落地在该节点都算命中；伪类（`:hover` 等）不门控（带状态规则同样表明作者在样式控件）。**只有完全无命中才报错**。
 
 **选择器匹配**：复用 stage 4.5 解析出的 `dynamic_rules`，按 tag/class/id/attr 字面对照 IrElement 判定（fence-local，不依赖运行时 Node）。后代选择器沿祖先链逐层尝试（fence 子集只有后代组合空格，拒 `>` `+` `~`）。
 
-**教学文案**：指出控件无内置默认样式，再按控件类型给出修复指引：
-- **注入子节点型**（ProgressBar/Slider/Toggle/RadioButton/**Dropdown**）：core 运行时注入 `.loom-*` 内部视觉子节点（ProgressBar/Slider 的 `.loom-fill`/`.loom-track`/`.loom-thumb`，Toggle/RadioButton 的 `.loom-check`，Dropdown 的 `.loom-value`/`.loom-popup`）→ 教学引导为控件本身（轨道/框）和子节点配 CSS。**Dropdown 无内置下拉箭头**（游戏 UI dropdown 形态多样——图标选择器/卡片列表/轮盘很多没箭头），作者要箭头自己用 CSS 画（如 `.loom-value` 的 background-image 或加个子元素）。
-- **文本控件型**（TextField/PasswordField/SearchField/TextArea/**NumberField**）：控件自身渲染文本和光标，无注入子节点 → 教学引导为控件本身配 background/border + caret-color。
+**教学文案**：指出控件无内置默认样式，再按 role 给出修复指引（`data-slot` 子节点型：progressbar/slider 引导为控件本身 + `data-slot=fill`/`thumb` 子配 CSS；switch/radio 引导 `[aria-checked]` 属性选择器；combobox 引导控件本身 + `role=listbox`/`role=option` 子；textbox/spinbutton 引导 background/border + caret-color）。
 
 ### 流水线特性
 
@@ -362,15 +364,13 @@ CSS 在围栏中以三个正交维度建模：
 | `DuplicateId` | 同一模板作用域内 ID 重复 |
 | `UnclosedTag` | 标签未闭合 |
 | `InvalidContentModel` | 子元素不满足父元素的 ContentModel |
-| `InvalidIdRef` | `label[for]` 指向的 ID 不存在 |
-| `InvalidTemplateRoot` | ListView 内 template 根不是 `<li>` |
 | `UnregisteredCustomElement` | 自定义元素未注册（defer 到 R3） |
 | `InvalidAriaRelation` | `aria-controls` / `aria-labelledby` 目标不存在 |
 | `TokenizerError` | html5gum tokenizer 遇到无法恢复的词法错误 |
-| `FenceInlineElementInBlockContext` | inline 布局 box（button/a/label/input/img/...）裸放在 block 容器里（非 flex、非 `<p>`）；LoomGUI 无 `<p>`/flex 之外的 inline flow，撑满竖排会和浏览器不一致 |
+| `FenceInlineElementInBlockContext` | inline 布局 box（button/img）裸放在 block 容器里（非 flex）；LoomGUI 无 flex 之外的 inline flow，撑满竖排会和浏览器不一致 |
 | `FenceBorderWithoutStyle` | **warning**：`border-width` 已声明但 `border-style` 缺省（CSS initial=none，浏览器不画边框，LoomGUI 会画）；预览 ≠ 运行时 |
 | `FenceBgImageWithoutSize` | **warning**：`background-image` 已声明但 `background-size` 缺省（CSS 默认 auto=原始尺寸，LoomGUI 默认 stretch=拉伸填满）；预览 ≠ 运行时 |
-| `FenceControlWithoutCss` | 控件（`<progress>` / `<input type="range\|checkbox\|radio\|number\|text\|password\|search">` / `<textarea>` / `<select>`）无任何 `<style>` 规则命中。控件不带 UA 默认样式，无 CSS = 运行时空白；须为控件提供 CSS（注入子节点型控件另需为 `.loom-*` 子节点配样式；文本控件建议 background/border + caret-color；Dropdown 无内置箭头，作者自绘） |
+| `FenceControlWithoutCss` | role 驱动控件（`progressbar`/`slider`/`switch`/`radio`/`textbox`/`spinbutton`/`combobox`）无任何 `<style>` 规则命中。控件不带 UA 默认样式，无 CSS = 运行时空白；须为控件及其 `data-slot` 子节点提供 CSS（详见阶段 6.7） |
 
 ---
 
@@ -380,7 +380,7 @@ CSS 在围栏中以三个正交维度建模：
 
 围栏的所有规则以 `crates/fence/src/schema/` 下的 Rust const 表为唯一真相源：
 
-- `tag.rs` → `TAGS`（23 运行时标签注册表）+ `SHELL_TAGS`
+- `tag.rs` → `TAGS`（6 运行时标签注册表）+ `SHELL_TAGS`（8 壳标签）
 - `attr.rs` → 全局属性、结构属性、内容属性定义
 - `css.rs` → `CSS_PROPS`（属性白名单）+ `CSS_SHORTHANDS`（简写展开）
 

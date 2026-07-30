@@ -95,11 +95,10 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
 }
 
 /// `<template>` 是 ListView item 蓝图：spec §8 要求根为**恰好一个** ListItem
-/// 语义节点。role 驱动后作者可写 `<li>`（legacy 标签）或 `<div role="listitem">`
-/// （WAI-ARIA），两者经 resolve_semantic 都落到 `SemanticKind::ListItem`，故本校验
-/// 按 **semantic** 判定而非字面 tag——与 role 化重构一致。主循环按 IrTree 顺序建节点、
-/// 不好回溯 template→child 关系，故做成独立前置遍历。零元素（如 `<template>text`）
-/// 与多元素（如 `<template><li/><li/></template>`）均拒。
+/// 语义节点。作者写 `<div role="listitem">`（WAI-ARIA），经 resolve_semantic 落到
+/// `SemanticKind::ListItem`，故本校验按 **semantic** 判定而非字面 tag。主循环按
+/// IrTree 顺序建节点、不好回溯 template→child 关系，故做成独立前置遍历。零元素
+/// （如 `<template>text`）与多元素（如 `<template><div/><div/></template>`）均拒。
 fn validate_template_children(tree: &IrTree) -> Result<(), String> {
     for node in &tree.nodes {
         let IrNodeKind::Element(el) = &node.kind else {
@@ -120,7 +119,7 @@ fn validate_template_children(tree: &IrTree) -> Result<(), String> {
             || element_children[0].semantic != Some(SemanticKind::ListItem)
         {
             return Err(format!(
-                "<template> 根必须恰好一个 ListItem（<li> 或 <div role=\"listitem\">）（当前 {} 个元素）",
+                "<template> 根必须恰好一个 ListItem（<div role=\"listitem\">）（当前 {} 个元素）",
                 element_children.len()
             ));
         }
@@ -129,7 +128,6 @@ fn validate_template_children(tree: &IrTree) -> Result<(), String> {
 }
 
 /// SemanticKind → NodeKind（total，非静默）。
-/// InputDispatch 不进 IrTree（annotate 已分派）；
 /// None = 未识别标签 → Err（围栏门应已挡，防御性兜底）。
 fn map_semantic(el: &IrElement) -> Result<NodeKind, String> {
     match el.semantic {
@@ -150,10 +148,6 @@ fn map_semantic(el: &IrElement) -> Result<NodeKind, String> {
         Some(SemanticKind::ListItem) => Ok(NodeKind::ListItem),
         Some(SemanticKind::Slot) => Ok(NodeKind::Slot),
         Some(SemanticKind::CustomElement) => Ok(NodeKind::CustomElement),
-        Some(SemanticKind::InputDispatch) => Err(format!(
-            "InternalError: InputDispatch reached bridge (annotate should have dispatched) on <{}>",
-            el.tag
-        )),
         Some(SemanticKind::Template) => Ok(NodeKind::Template),
         None => Err(format!(
             "未识别标签 <{}>（semantic=None；围栏门应已挡）",
@@ -171,23 +165,19 @@ fn attr(el: &IrElement, name: &str) -> Option<String> {
 
 /// 按 NodeKind 从 HTML 属性提取控件初始值（打包期 bake 进 pkg.bin，instantiate 时读出）。
 ///
-/// 属性源：**ARIA/data-* 优先，legacy plain 属性兜底**。role 驱动控件
-/// （`<div role="progressbar" aria-valuenow="50">`）把初始值放在 ARIA（`aria-valuenow`、
-/// `aria-checked`、…）或 `data-*`（`data-step`、`data-name`）里——围栏禁止 `<div>` 上出现
-/// plain 属性；legacy 标签控件（`<progress value="50">`、`<input type="range" value="50">`）
-/// 仍用 plain 属性。两条路在 Task 7 下线 legacy 标签前共存，由 [`attr_aria_or_legacy`] /
-/// [`bool_aria_or_legacy`] 统一分派。
+/// 属性源：**ARIA/data-***。控件一律 role 驱动（spec §2.2），`<div role="progressbar"
+/// aria-valuenow="50">` 把初始值放在 ARIA（`aria-valuenow`、`aria-checked`、…）或
+/// `data-*`（`data-step`、`data-name`）里——围栏禁止 `<div>` 上出现 plain 属性。
 ///
 /// 语义：
 /// - ProgressBar：始终产 Some。value 源缺席 = indeterminate（HTML 语义：浏览器把无 value
 ///   的 progress 渲染为旋转动画）；value 缺省 0.0，max 缺省 100.0。
 /// - Slider：value 源缺席返回 None（运行时用默认值兜底）。
 /// - Toggle/RadioButton：始终产 Some，显式记录勾选状态（缺省 false）；radio name 缺省空串。
-/// - TextField：value 取元素文本内容（ARIA 无 textbox-value 属性），无文本时兜底 legacy
-///   `value` 属性（void `<input>` 无文本子节点）。
-/// - TextArea：value 取元素文本内容（HTML `<textarea>` 语义）。
-/// - Dropdown：扫子树找首个被选中 option（`aria-selected="true"` 或 legacy `selected`），
-///   无则默认第 0 项；详见 [`dropdown_selected_index`]。
+/// - TextField：value 取元素文本内容（ARIA 无 textbox-value 属性）。
+/// - TextArea：value 取元素文本内容。
+/// - Dropdown：扫子树找首个被选中 option（`aria-selected="true"`），无则默认第 0 项；
+///   详见 [`dropdown_selected_index`]。
 fn extract_control_init(
     kind: NodeKind,
     el: &IrElement,
@@ -197,12 +187,12 @@ fn extract_control_init(
     match kind {
         NodeKind::ProgressBar => {
             // value 源缺席 = indeterminate（先判 is_some 再 parse，否则 indeterminate 误判 false）。
-            let value_attr = attr_aria_or_legacy(el, "aria-valuenow", "value");
+            let value_attr = attr(el, "aria-valuenow");
             let indeterminate = value_attr.is_none();
             let value = value_attr
                 .and_then(|v| v.parse::<f32>().ok())
                 .unwrap_or(0.0);
-            let max = attr_aria_or_legacy(el, "aria-valuemax", "max")
+            let max = attr(el, "aria-valuemax")
                 .and_then(|v| v.parse::<f32>().ok())
                 .unwrap_or(100.0);
             Some(ControlInit::Progress {
@@ -211,16 +201,16 @@ fn extract_control_init(
                 indeterminate,
             })
         }
-        NodeKind::Slider => attr_aria_or_legacy(el, "aria-valuenow", "value")
+        NodeKind::Slider => attr(el, "aria-valuenow")
             .and_then(|v| v.parse::<f32>().ok())
             .map(|value| {
-                let min = attr_aria_or_legacy(el, "aria-valuemin", "min")
+                let min = attr(el, "aria-valuemin")
                     .and_then(|v| v.parse::<f32>().ok())
                     .unwrap_or(0.0);
-                let max = attr_aria_or_legacy(el, "aria-valuemax", "max")
+                let max = attr(el, "aria-valuemax")
                     .and_then(|v| v.parse::<f32>().ok())
                     .unwrap_or(100.0);
-                let step = attr_aria_or_legacy(el, "data-step", "step")
+                let step = attr(el, "data-step")
                     .and_then(|v| v.parse::<f32>().ok())
                     .unwrap_or(1.0);
                 ControlInit::Slider {
@@ -231,16 +221,16 @@ fn extract_control_init(
                 }
             }),
         NodeKind::Toggle => Some(ControlInit::Toggle {
-            checked: bool_aria_or_legacy(el, "aria-checked", "checked"),
+            checked: bool_attr(el, "aria-checked"),
         }),
         NodeKind::RadioButton => Some(ControlInit::Radio {
-            checked: bool_aria_or_legacy(el, "aria-checked", "checked"),
-            // data-name 承载 radio 分组（ARIA 无「radio 组名」属性）；legacy 兜底 name 属性。
-            name: attr_aria_or_legacy(el, "data-name", "name").unwrap_or_default(),
+            checked: bool_attr(el, "aria-checked"),
+            // data-name 承载 radio 分组（ARIA 无「radio 组名」属性）。
+            name: attr(el, "data-name").unwrap_or_default(),
         }),
         NodeKind::TextField => Some(ControlInit::TextField(extract_edit_init_with_value(
             el,
-            textfield_value(el, ir_idx, tree),
+            collect_element_text(ir_idx, tree),
         ))),
         NodeKind::TextArea => Some(ControlInit::TextArea(extract_edit_init_with_value(
             el,
@@ -250,17 +240,15 @@ fn extract_control_init(
             selected_index: dropdown_selected_index(ir_idx, tree),
         }),
         NodeKind::NumberField => {
-            let edit = extract_edit_init_with_value(
-                el,
-                attr_aria_or_legacy(el, "aria-valuenow", "value").unwrap_or_default(),
-            );
-            let min = attr_aria_or_legacy(el, "aria-valuemin", "min")
+            let edit =
+                extract_edit_init_with_value(el, attr(el, "aria-valuenow").unwrap_or_default());
+            let min = attr(el, "aria-valuemin")
                 .and_then(|v| v.parse::<f32>().ok())
                 .unwrap_or(f32::MIN);
-            let max = attr_aria_or_legacy(el, "aria-valuemax", "max")
+            let max = attr(el, "aria-valuemax")
                 .and_then(|v| v.parse::<f32>().ok())
                 .unwrap_or(f32::MAX);
-            let step = attr_aria_or_legacy(el, "data-step", "step")
+            let step = attr(el, "data-step")
                 .and_then(|v| v.parse::<f32>().ok())
                 .unwrap_or(0.0);
             Some(ControlInit::NumberField {
@@ -274,64 +262,34 @@ fn extract_control_init(
     }
 }
 
-/// Prefer the ARIA/data-* attribute; fall back to the legacy plain attribute.
-///
-/// Role-driven controls carry init values in ARIA (`aria-valuenow`) or `data-*`
-/// (`data-step`) because the fence forbids plain attributes on `<div>`; legacy
-/// tags (`<progress>`/`<input>`/`<select>`) expose the same values via plain
-/// attributes. Both paths stay live until Task 7 retires the legacy tags, so the
-/// bridge reads the ARIA source when present and otherwise falls back.
-fn attr_aria_or_legacy(el: &IrElement, aria: &str, legacy: &str) -> Option<String> {
-    attr(el, aria).or_else(|| attr(el, legacy))
-}
-
-/// Boolean state from ARIA (value `"true"`/`"false"`) with legacy boolean-attribute fallback.
+/// Boolean state from an ARIA attribute (value `"true"`/`"false"`).
 ///
 /// ARIA boolean attributes are value-driven: `aria-checked="true"` is on,
-/// `aria-checked="false"` is off. Legacy HTML boolean attributes (`checked`/
-/// `selected`/`readonly`) are presence-driven: the attribute present means true
-/// regardless of its value. This reconciles the two so control-init extraction
-/// reads the right semantics from either source.
-fn bool_aria_or_legacy(el: &IrElement, aria: &str, legacy: &str) -> bool {
-    if let Some(v) = attr(el, aria) {
-        return v == "true";
-    }
-    attr(el, legacy).is_some()
+/// `aria-checked="false"` is off. Absent or any other value means false.
+fn bool_attr(el: &IrElement, aria: &str) -> bool {
+    attr(el, aria).is_some_and(|v| v == "true")
 }
 
 /// Build EditInit from a caller-supplied value plus the shared
-/// placeholder/maxlength/readonly sources (aria-or-legacy). TextField and
-/// TextArea differ only in where `value` comes from; the other three fields share
-/// one resolution path.
+/// placeholder/maxlength/readonly sources (ARIA/data-*). TextField and TextArea
+/// differ only in where `value` comes from; the other three fields share one
+/// resolution path.
 fn extract_edit_init_with_value(el: &IrElement, value: String) -> EditInit {
     EditInit {
         value,
-        placeholder: attr_aria_or_legacy(el, "aria-placeholder", "placeholder").unwrap_or_default(),
-        max_length: attr_aria_or_legacy(el, "data-maxlength", "maxlength")
+        placeholder: attr(el, "aria-placeholder").unwrap_or_default(),
+        max_length: attr(el, "data-maxlength")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0),
-        readonly: bool_aria_or_legacy(el, "aria-readonly", "readonly"),
-    }
-}
-
-/// TextField initial value: role-driven `<div role="textbox">` carries its content
-/// as element text children (ARIA has no textbox-value attribute), matching the
-/// TextArea pattern. Legacy `<input value="...">` exposes it via the `value`
-/// attribute instead; void `<input>` has no text children, so falling back to the
-/// legacy attribute when text is empty keeps the legacy path working.
-fn textfield_value(el: &IrElement, ir_idx: usize, tree: &IrTree) -> String {
-    let text = collect_element_text(ir_idx, tree);
-    if !text.is_empty() {
-        text
-    } else {
-        attr(el, "value").unwrap_or_default()
+        readonly: bool_attr(el, "aria-readonly"),
     }
 }
 
 /// Collect an element's direct text children into one string.
 ///
-/// Used for TextArea/TextField initial values: per the HTML `<textarea>` spec the
-/// value comes from element text content, not a `value` attribute.
+/// Used for TextArea/TextField initial values: role-driven `<div role="textbox">`
+/// carries its content as element text children (ARIA has no textbox-value
+/// attribute), matching the HTML `<textarea>` semantics.
 fn collect_element_text(ir_idx: usize, tree: &IrTree) -> String {
     let mut out = String::new();
     for child_id in &tree.nodes[ir_idx].children {
@@ -344,19 +302,17 @@ fn collect_element_text(ir_idx: usize, tree: &IrTree) -> String {
 
 /// Dropdown initial selected option index.
 ///
-/// Legacy `<select>` keeps `<option>` as direct children; role-driven combobox
-/// nests `<div role="option">` inside a `role="listbox"` popup (a structural
-/// requirement enforced by control_structure_check), so the options are never
-/// direct children of the combobox. Matching by SemanticKind (OptionItem) covers
-/// both `<option>` and `<div role="option">`, and a subtree walk covers both
-/// layouts in document order. Selection is `aria-selected="true"` (role-driven)
-/// or the legacy `selected` boolean attribute; when none is selected the default
-/// is the first option (index 0).
+/// A role-driven combobox nests `<div role="option">` inside a `role="listbox"`
+/// popup (a structural requirement enforced by control_structure_check), so the
+/// options are never direct children of the combobox. Matching by SemanticKind
+/// (OptionItem) and a subtree walk covers the layout in document order. Selection
+/// is `aria-selected="true"`; when none is selected the default is the first
+/// option (index 0).
 fn dropdown_selected_index(dropdown_idx: usize, tree: &IrTree) -> u32 {
     let mut selected: Option<u32> = None;
     let mut option_index: u32 = 0;
     visit_options(dropdown_idx, tree, |el| {
-        if selected.is_none() && bool_aria_or_legacy(el, "aria-selected", "selected") {
+        if selected.is_none() && bool_attr(el, "aria-selected") {
             selected = Some(option_index);
         }
         option_index += 1;
@@ -407,19 +363,19 @@ mod tests {
     #[test]
     fn template_subtree_enters_pkg() {
         let nodes = bridged(
-            r#"<ul><template><li class="row"><span class="title">x</span></li></template></ul>"#,
+            r#"<div role="list" data-fill="3"><template><div role="listitem" class="row"><span class="title">x</span></div></template></div>"#,
         );
         assert!(nodes.iter().any(|n| n.kind == NodeKind::Template));
         assert!(nodes.iter().any(|n| n.kind == NodeKind::ListItem));
     }
 
     #[test]
-    fn template_root_not_li_errors() {
+    fn template_root_not_listitem_errors() {
         let parsed = loomgui_fence::parse_template(
-            r#"<ul><template><div>x</div></template></ul>"#,
+            r#"<div role="list"><template><div>x</div></template></div>"#,
             "test.html",
         );
-        assert!(bridge(&parsed).is_err(), "template 根必须是单个 <li>");
+        assert!(bridge(&parsed).is_err(), "template 根必须是单个 ListItem");
     }
 
     #[test]
@@ -448,20 +404,20 @@ mod tests {
     }
 
     #[test]
-    fn template_with_two_li_errors() {
-        // spec §8：template 根必须恰好一个 <li>，两个是契约违反。
+    fn template_with_two_listitem_errors() {
+        // spec §8：template 根必须恰好一个 ListItem，两个是契约违反。
         let parsed = loomgui_fence::parse_template(
-            r#"<ul><template><li>a</li><li>b</li></template></ul>"#,
+            r#"<div role="list"><template><div role="listitem">a</div><div role="listitem">b</div></template></div>"#,
             "test.html",
         );
-        assert!(bridge(&parsed).is_err(), "template 根不能是两个 <li>");
+        assert!(bridge(&parsed).is_err(), "template 根不能是两个 ListItem");
     }
 
     #[test]
     fn template_with_only_text_errors() {
-        // 零元素（纯文本）也拒：根必须是 <li>。
+        // 零元素（纯文本）也拒：根必须是 ListItem。
         let parsed = loomgui_fence::parse_template(
-            r#"<ul><template>just text</template></ul>"#,
+            r#"<div role="list"><template>just text</template></div>"#,
             "test.html",
         );
         assert!(bridge(&parsed).is_err(), "template 根不能是纯文本");
@@ -491,22 +447,6 @@ mod tests {
     }
 
     #[test]
-    fn input_dispatch_to_concrete_kinds() {
-        let nodes = bridged(
-            r#"<style>input[type="range"],input[type="checkbox"]{width:100px}</style><div><input type="range" style="display:block"><input type="checkbox" style="display:block"></div>"#,
-        );
-        let kinds: Vec<_> = nodes.iter().map(|n| n.kind).collect();
-        assert!(
-            kinds.contains(&NodeKind::Slider),
-            "Slider missing: {kinds:?}"
-        );
-        assert!(
-            kinds.contains(&NodeKind::Toggle),
-            "Toggle missing: {kinds:?}"
-        );
-    }
-
-    #[test]
     fn multi_root_errors() {
         let parsed = loomgui_fence::parse_template(r#"<div>a</div><div>b</div>"#, "t.html");
         assert!(bridge(&parsed).is_err(), "multi-root should error");
@@ -514,8 +454,8 @@ mod tests {
 
     #[test]
     fn template_element_enters_nodes() {
-        // v27：template 子树是真实 pkg 节点（运行时克隆源），不再打包期丢弃。
-        let nodes = bridged(r#"<div><template><li>x</li></template></div>"#);
+        // template 子树是真实 pkg 节点（运行时克隆源），不再打包期丢弃。
+        let nodes = bridged(r#"<div><template><div role="listitem">x</div></template></div>"#);
         assert_eq!(nodes[0].kind, NodeKind::Container);
         assert_eq!(nodes[1].kind, NodeKind::Template);
         assert_eq!(nodes[1].parent_idx, Some(0));
@@ -559,7 +499,7 @@ mod tests {
     #[test]
     fn template_as_root_produces_template_node() {
         // 根是 <template> 不再产空——它是合法节点，只是 display:none 不渲染。
-        let nodes = bridged(r#"<template><li>x</li></template>"#);
+        let nodes = bridged(r#"<template><div role="listitem">x</div></template>"#);
         assert_eq!(nodes[0].kind, NodeKind::Template);
         assert_eq!(nodes[0].parent_idx, None);
     }

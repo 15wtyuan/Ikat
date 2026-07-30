@@ -14,15 +14,13 @@ pub enum DiagnosticCode {
     DuplicateId,
     UnclosedTag,
     InvalidContentModel,
-    InvalidIdRef,
-    InvalidTemplateRoot,
     UnregisteredCustomElement,
     InvalidAriaRelation,
     TokenizerError,
-    /// inline 元素直接放在 block 容器里（非 flex、非 `<p>`）。
-    /// LoomGUI 没有 `<p>`/flex 之外的 inline flow：inline 标签在 block 上下文里被当 block-level
+    /// inline 元素直接放在 block 容器里（非 flex）。
+    /// LoomGUI 没有 flex 之外的 inline flow：inline 标签在 block 上下文里被当 block-level
     /// （撑满父宽 + 竖排），和浏览器的 inline 行为（按内容收缩 + 横排流）不一致 → 渲染不可预测。
-    /// 强制作者把 inline 元素放进 flex 容器或 `<p>`，让布局意图显式。
+    /// 强制作者把 inline 元素放进 flex 容器，让布局意图显式。
     /// 详见 fence.md「inline 元素布局上下文」。
     FenceInlineElementInBlockContext,
     /// border-width 已声明但 border-style 缺省（CSS initial=none）。
@@ -33,9 +31,9 @@ pub enum DiagnosticCode {
     /// CSS 默认 `auto`（原始尺寸），LoomGUI 默认 `stretch`（拉伸填满）→ 预览 ≠ 运行时。
     /// 详见 fence.md「围栏内一致性 warning」。
     FenceBgImageWithoutSize,
-    /// LoomGUI 控件（progress / input[type=range|checkbox|radio]）无任何 CSS 规则命中。
+    /// LoomGUI 控件（role 驱动：`role="progressbar"`/`role="slider"`/...）无任何 CSS 规则命中。
     /// 控件不带 UA 默认样式（core 保持纯净，不开「框架自带样式源」先例），
-    /// 未命中 = 运行时渲染空白。强制作者为控件及 `.loom-*` 内部子节点提供 CSS。
+    /// 未命中 = 运行时渲染空白。强制作者为控件及其内部 slot 子节点提供 CSS。
     /// 详见 fence.md「控件 CSS 命中校验」。
     FenceControlWithoutCss,
     /// role 驱动控件缺少 spec §2.2 规定的必需子角色/slot（如 `combobox` 缺

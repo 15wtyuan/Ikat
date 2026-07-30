@@ -9,9 +9,7 @@ use std::collections::HashSet;
 /// - Content model: child Category must be allowed by parent's ContentModel
 /// - Text children rejected by parents that don't accept text
 /// - ID uniqueness within the template scope
-/// - label[for] target exists within the template scope
 /// - ARIA IdRef attributes (aria-controls, aria-labelledby) reference existing IDs
-/// - `<template>` root inside ul/ol must be `<li>`
 pub fn run_structural(tree: &IrTree, file: &str, line_map: &LineMap) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     validate_content_model(tree, file, line_map, &mut diagnostics);
@@ -19,9 +17,7 @@ pub fn run_structural(tree: &IrTree, file: &str, line_map: &LineMap) -> Vec<Diag
 
     // Deferred validation: reference checks need the full ID set.
     let all_ids = collect_all_ids(tree);
-    validate_label_for(tree, file, line_map, &all_ids, &mut diagnostics);
     validate_aria_relations(tree, file, line_map, &all_ids, &mut diagnostics);
-    validate_template_root(tree, file, line_map, &mut diagnostics);
     diagnostics
 }
 
@@ -139,34 +135,6 @@ fn collect_all_ids(tree: &IrTree) -> HashSet<String> {
     ids
 }
 
-/// Validate `label[for]` -- the target ID must exist in the template scope.
-fn validate_label_for(
-    tree: &IrTree,
-    file: &str,
-    line_map: &LineMap,
-    all_ids: &HashSet<String>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for id in tree.all_element_ids() {
-        let el = match &tree.nodes[id.0].kind {
-            IrNodeKind::Element(e) if e.tag == "label" => e,
-            _ => continue,
-        };
-        if let Some(for_attr) = el.attributes.iter().find(|a| a.name == "for") {
-            if !all_ids.contains(&for_attr.value) {
-                diagnostics.push(Diagnostic::error(
-                    DiagnosticCode::InvalidIdRef,
-                    format!(
-                        "label[for=\"{}\"] references an ID that does not exist",
-                        for_attr.value
-                    ),
-                    loc(file, for_attr.span.start, line_map),
-                ));
-            }
-        }
-    }
-}
-
 /// ARIA attributes whose values are space-separated token lists of element IDs.
 /// Each token must resolve to an existing element within the template scope.
 const ARIA_IDREF_ATTRS: &[&str] = &["aria-controls", "aria-labelledby"];
@@ -197,62 +165,6 @@ fn validate_aria_relations(
                             attr.name, attr.value, token
                         ),
                         loc(file, attr.span.start, line_map),
-                    ));
-                }
-            }
-        }
-    }
-}
-
-/// Validate `<template>` children of `<ul>`/`<ol>` -- the template's first
-/// element child must be `<li>`.
-fn validate_template_root(
-    tree: &IrTree,
-    file: &str,
-    line_map: &LineMap,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for id in tree.all_element_ids() {
-        let parent_tag = match &tree.nodes[id.0].kind {
-            IrNodeKind::Element(e) if e.tag == "ul" || e.tag == "ol" => e.tag.as_str(),
-            _ => continue,
-        };
-        for &child_id in &tree.nodes[id.0].children {
-            let template_node = &tree.nodes[child_id.0];
-            if !matches!(
-                &template_node.kind,
-                IrNodeKind::Element(e) if e.tag == "template"
-            ) {
-                continue;
-            }
-            // Find the first element child of the template.
-            let first_el_child = template_node
-                .children
-                .iter()
-                .find(|&&cid| matches!(&tree.nodes[cid.0].kind, IrNodeKind::Element(_)));
-            match first_el_child {
-                Some(&fcid) => {
-                    if let IrNodeKind::Element(child_el) = &tree.nodes[fcid.0].kind {
-                        if child_el.tag != "li" {
-                            diagnostics.push(Diagnostic::error(
-                                DiagnosticCode::InvalidTemplateRoot,
-                                format!(
-                                    "<template> root element inside <{}> must be <li>, found <{}>",
-                                    parent_tag, child_el.tag
-                                ),
-                                loc(file, template_node.span.start, line_map),
-                            ));
-                        }
-                    }
-                }
-                None => {
-                    diagnostics.push(Diagnostic::error(
-                        DiagnosticCode::InvalidTemplateRoot,
-                        format!(
-                            "<template> inside <{}> must have <li> as its root element",
-                            parent_tag
-                        ),
-                        loc(file, template_node.span.start, line_map),
                     ));
                 }
             }
@@ -296,23 +208,5 @@ mod tests {
     fn duplicate_id_reported() {
         let diags = structural(r#"<div id="x"></div><div id="x"></div>"#);
         assert!(diags.iter().any(|d| d.code == DiagnosticCode::DuplicateId));
-    }
-
-    #[test]
-    fn select_only_accepts_option() {
-        let diags = structural(r#"<select><option>a</option></select>"#);
-        let errors: Vec<_> = diags
-            .iter()
-            .filter(|d| d.severity == Severity::Error)
-            .collect();
-        assert!(errors.is_empty(), "select > option is valid: {:?}", errors);
-    }
-
-    #[test]
-    fn select_rejects_div() {
-        let diags = structural(r#"<select><div>x</div></select>"#);
-        assert!(diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::InvalidContentModel));
     }
 }

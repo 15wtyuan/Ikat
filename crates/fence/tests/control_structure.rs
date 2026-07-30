@@ -1,8 +1,8 @@
 //! 控件结构契约校验（Stage 6.8，端到端）。
 //!
-//! role 化重构后（spec §2.2），作者自写控件结构——可能漏写必需子节点。打包期
-//! `FenceMissingControlChild` error 严格拦截，不依赖运行时 reparent 兜底。本测试覆盖
-//! 端到端 parse_template：role 驱动控件缺必需子 → error；旧标签控件不触发。
+//! role 驱动控件自写结构（spec §2.2），作者可能漏写必需子节点。打包期
+//! `FenceMissingControlChild` error 严格拦截，不依赖运行时 reparent 兜底。本测试
+//! 覆盖端到端 parse_template：role 驱动控件缺必需子 → error。
 
 use loomgui_fence::diagnostic::{DiagnosticCode, Severity};
 use loomgui_fence::pipeline::parse_template;
@@ -104,18 +104,6 @@ fn controls_without_required_children_not_checked() {
         r#"<div role="textbox"></div><div role="spinbutton"></div><div role="switch"></div><div role="radio"></div>"#,
     );
     assert!(msgs.is_empty(), "{msgs:?}");
-}
-
-// ── 旧标签控件不触发（showcase 中间态）──
-
-#[test]
-fn legacy_control_tags_not_checked() {
-    // select / progress / input：走 legacy tag 映射（无 role 属性）→ 不触发结构契约
-    // （它们仍走 control_css_check，但本测试只过滤结构契约 code）
-    let msgs = struct_errors(
-        r#"<select><option value="a">A</option></select><progress value="1"></progress><input type="range">"#,
-    );
-    assert!(msgs.is_empty(), "旧标签不应触发结构契约: {msgs:?}");
 }
 
 // ── 必需子必须是直接子 ──

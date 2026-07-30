@@ -1,5 +1,9 @@
-//! Contract tests for deferred structural validation:
-//! ARIA references, template root inside list views, and label[for].
+//! Contract tests for deferred structural validation: ARIA IdRef references.
+//!
+//! `label[for]` and `<template>`-root-inside-list checks were retired with the
+//! `label`/`ul`/`ol`/`li` tags: `label` left the fence earlier, and list→listitem
+//! structure is now validated by `control_structure_check` via `role`. Only the
+//! ARIA IdRef relation check (aria-controls / aria-labelledby) remains here.
 
 use loomgui_fence::diagnostic::{Diagnostic, DiagnosticCode, LineMap, Severity};
 use loomgui_fence::structural::run_structural;
@@ -16,59 +20,6 @@ fn errors(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
         .iter()
         .filter(|d| d.severity == Severity::Error)
         .collect()
-}
-
-// ---------------------------------------------------------------------------
-// label[for]
-// ---------------------------------------------------------------------------
-
-#[test]
-fn label_for_valid_target() {
-    let diags = structural(r#"<label for="name">Name</label><input id="name" type="text">"#);
-    assert!(
-        errors(&diags).is_empty(),
-        "valid label[for] should pass: {:?}",
-        diags
-    );
-}
-
-#[test]
-fn label_for_missing_target() {
-    let diags = structural(r#"<label for="ghost">Name</label>"#);
-    let idref = diags
-        .iter()
-        .find(|d| d.code == DiagnosticCode::InvalidIdRef);
-    assert!(
-        idref.is_some(),
-        "should report InvalidIdRef for label[for] with missing target: {:?}",
-        diags
-    );
-    let d = idref.unwrap();
-    assert!(
-        d.message.contains("ghost"),
-        "message should mention the missing id: {}",
-        d.message
-    );
-}
-
-#[test]
-fn label_for_empty_value() {
-    let diags = structural(r#"<label for="">Name</label>"#);
-    assert!(
-        diags.iter().any(|d| d.code == DiagnosticCode::InvalidIdRef),
-        "empty for value should be reported: {:?}",
-        diags
-    );
-}
-
-#[test]
-fn label_without_for_passes() {
-    let diags = structural(r#"<label>Name</label>"#);
-    assert!(
-        errors(&diags).is_empty(),
-        "label without for should be fine: {:?}",
-        diags
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -148,81 +99,6 @@ fn aria_non_idref_attr_not_checked() {
     assert!(
         errors(&diags).is_empty(),
         "aria-label should not be treated as IdRef: {:?}",
-        diags
-    );
-}
-
-// ---------------------------------------------------------------------------
-// template root inside ul/ol
-// ---------------------------------------------------------------------------
-
-#[test]
-fn template_root_li_in_ul_valid() {
-    let diags = structural(r#"<ul><template><li>item</li></template></ul>"#);
-    assert!(
-        errors(&diags).is_empty(),
-        "template with li root in ul is valid: {:?}",
-        diags
-    );
-}
-
-#[test]
-fn template_root_li_in_ol_valid() {
-    let diags = structural(r#"<ol><template><li>item</li></template></ol>"#);
-    assert!(
-        errors(&diags).is_empty(),
-        "template with li root in ol is valid: {:?}",
-        diags
-    );
-}
-
-#[test]
-fn template_root_not_li_in_ul() {
-    let diags = structural(r#"<ul><template><div>item</div></template></ul>"#);
-    let troot = diags
-        .iter()
-        .find(|d| d.code == DiagnosticCode::InvalidTemplateRoot);
-    assert!(
-        troot.is_some(),
-        "should report InvalidTemplateRoot when template root is not li: {:?}",
-        diags
-    );
-    let d = troot.unwrap();
-    assert!(
-        d.message.contains("li"),
-        "message should suggest li: {}",
-        d.message
-    );
-    assert!(
-        d.message.contains("div"),
-        "message should mention the actual root tag: {}",
-        d.message
-    );
-}
-
-#[test]
-fn template_no_element_children_in_ul() {
-    let diags = structural(r#"<ul><template></template></ul>"#);
-    assert!(
-        diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::InvalidTemplateRoot),
-        "empty template in ul should be reported: {:?}",
-        diags
-    );
-}
-
-#[test]
-fn template_outside_list_not_checked() {
-    // template outside ul/ol doesn't need li root
-    let diags = structural(r#"<div><template><div>card</div></template></div>"#);
-    assert!(
-        diags
-            .iter()
-            .filter(|d| d.code == DiagnosticCode::InvalidTemplateRoot)
-            .count()
-            == 0,
-        "template outside list should not be checked: {:?}",
         diags
     );
 }

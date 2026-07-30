@@ -1,11 +1,12 @@
-use crate::ir::{IrAttribute, IrNodeKind, IrTree};
-use crate::schema::tag::{resolve_semantic, SemanticKind};
+use crate::ir::{IrNodeKind, IrTree};
+use crate::schema::tag::resolve_semantic;
 
 /// Run Stage 6 (Annotate): fill in `IrElement.semantic` for all elements.
 ///
 /// Semantics are role-driven: a WAI-ARIA `role` attribute takes precedence and
-/// maps to the corresponding `SemanticKind`; without a role, the tag itself maps
-/// to a kind. CSS class or computed style never changes the result.
+/// maps to the corresponding `SemanticKind`; without a role the tag itself maps
+/// to a kind. CSS class or computed style never changes the result. Controls and
+/// lists have no dedicated tag -- authors express them with `role` on a `div`.
 pub fn annotate(tree: &mut IrTree) {
     for node in &mut tree.nodes {
         if let IrNodeKind::Element(el) = &mut node.kind {
@@ -18,41 +19,9 @@ pub fn annotate(tree: &mut IrTree) {
                 .attributes
                 .iter()
                 .any(|a| a.name == "aria-multiline" && a.value == "true");
-            // Transitional: the `input` tag is being retired in favour of
-            // `<div role="...">`. Until it leaves the fence, `<input type="...">`
-            // (with no explicit role) maps straight to its legacy SemanticKind so
-            // existing templates keep resolving to the correct control. Web-only
-            // input types (password/search) have no WAI-ARIA role and no game-UI
-            // meaning, so they fall back to TextField. This whole branch is deleted
-            // once `input` leaves the fence and authors write `role`.
-            el.semantic = if el.tag == "input" && explicit_role.is_none() {
-                legacy_input_semantic(&el.attributes)
-            } else {
-                resolve_semantic(&el.tag, explicit_role, aria_multiline)
-            };
+            el.semantic = resolve_semantic(&el.tag, explicit_role, aria_multiline);
         }
     }
-}
-
-/// Resolve the SemanticKind of a legacy `<input>` from its `type` attribute.
-///
-/// The HTML default for a missing `type` is `text`. Unrecognised values also
-/// fall back to `text`, matching the prior structural-dispatch behaviour.
-fn legacy_input_semantic(attrs: &[IrAttribute]) -> Option<SemanticKind> {
-    let input_type = attrs
-        .iter()
-        .find(|a| a.name == "type")
-        .map(|a| a.value.as_str())
-        .unwrap_or("text");
-    Some(match input_type {
-        "range" => SemanticKind::Slider,
-        "checkbox" => SemanticKind::Toggle,
-        "radio" => SemanticKind::RadioButton,
-        "number" => SemanticKind::NumberField,
-        // password/search are web-only (browser masking / native clear button);
-        // games self-implement, so they resolve to a plain TextField.
-        _ => SemanticKind::TextField,
-    })
 }
 
 #[cfg(test)]
@@ -65,7 +34,7 @@ mod tests {
         let mut tree = IrTree::default();
         let attributes = attrs
             .iter()
-            .map(|(k, v)| IrAttribute {
+            .map(|(k, v)| crate::ir::IrAttribute {
                 name: (*k).into(),
                 value: (*v).into(),
                 span: Span::default(),
@@ -111,36 +80,18 @@ mod tests {
     }
 
     #[test]
-    fn legacy_input_type_range_still_resolves_to_slider() {
-        // Transitional: `<input type="range">` keeps resolving to Slider while
-        // the input tag is being retired.
-        let mut tree = build_tree("input", &[("type", "range")]);
+    fn role_takes_precedence_and_unknown_role_falls_back() {
+        // role takes precedence over the tag.
+        let mut tree = build_tree("button", &[("role", "slider")]);
         annotate(&mut tree);
         assert_eq!(semantic_at(&tree, IrNodeId(0)), Some(SemanticKind::Slider));
-    }
 
-    #[test]
-    fn legacy_input_password_and_search_resolve_to_textfield() {
-        // password/search are web-only controls with no WAI-ARIA role; games
-        // self-implement masking/search, so they fold back to a plain TextField.
-        let mut tree = build_tree("input", &[("type", "password")]);
+        // An unrecognized role falls back to the tag mapping.
+        let mut tree = build_tree("div", &[("role", "totally-made-up")]);
         annotate(&mut tree);
         assert_eq!(
             semantic_at(&tree, IrNodeId(0)),
-            Some(SemanticKind::TextField)
+            Some(SemanticKind::Container)
         );
-        let mut tree = build_tree("input", &[("type", "search")]);
-        annotate(&mut tree);
-        assert_eq!(
-            semantic_at(&tree, IrNodeId(0)),
-            Some(SemanticKind::TextField)
-        );
-    }
-
-    #[test]
-    fn explicit_role_wins_over_input_type() {
-        let mut tree = build_tree("input", &[("type", "text"), ("role", "switch")]);
-        annotate(&mut tree);
-        assert_eq!(semantic_at(&tree, IrNodeId(0)), Some(SemanticKind::Toggle));
     }
 }

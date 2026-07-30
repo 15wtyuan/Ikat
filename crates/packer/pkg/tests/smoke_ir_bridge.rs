@@ -76,8 +76,8 @@ fn smoke_main_gate_class_hit_displaynone_flex() {
 
 #[test]
 fn smoke_control_kinds_load_without_crash() {
-    // 控件全家（input dispatch 5 种 + select）— instantiate 不 panic = 链通。
+    // 控件全家（role 驱动：textbox/slider/switch/radio/combobox）— instantiate 不 panic = 链通。
     // kind 保真（不塌 Container）由 pkg roundtrip + bridge map unit test 覆盖。
-    let html = r#"<!DOCTYPE html><html><head><style>input[type="text"],input[type="range"],input[type="checkbox"],input[type="radio"]{width:80px}select{width:80px}option{color:#222222}</style></head><body><div style="display:flex"><input type="text"><input type="range"><input type="checkbox"><input type="radio"><select><option></option></select></div></body></html>"#;
+    let html = r#"<!DOCTYPE html><html><head><style>[role="textbox"],[role="slider"],[role="switch"],[role="radio"],[role="combobox"]{width:80px}[role="option"]{color:#222222}</style></head><body><div style="display:flex"><div role="textbox"></div><div role="slider"><div data-slot="thumb"></div></div><div role="switch" aria-checked="false"></div><div role="radio" aria-checked="false" data-name="g"></div><div role="combobox"><div role="listbox"><div role="option"></div></div></div></div></body></html>"#;
     let _ = build_stage(html); // 不 panic = 通过
 }
