@@ -61,7 +61,7 @@
 > **公共层暴露语义和意图；内部层实现变化。只有业务真正拥有决策权的策略才进入公共 API。**
 
 - Composite：Node/Container 对象树。
-- Abstract Factory：根据稳定 HTML 语义签名（tag + 结构属性）创建控件。
+- Abstract Factory：根据稳定 HTML 语义签名（base 标签按 tag；控件/列表按 `role`）创建控件。
 - Strategy + State：CSS 在不改变对象类型的前提下切换 Block/Flex、Overflow 等行为。策略只持算法，不持节点状态。
 - Observer + 路由链：控件语义事件与捕获/冒泡事件。
 - Bridge/Adapter：隔离 core、FFI 和具体引擎后端。
@@ -83,8 +83,8 @@
 **用标准 HTML 元素**：AI 训练数据海量、浏览器原生渲染。不自创框架 Widget 标签（如 `<scroll-view>`）——已有的标准 HTML/CSS 能力（如 `overflow`）不用自定义标签重复。
 
 **标准布局语义**：
-- `div/header/nav/p/ul/ol/li/option` 默认 `display:block`（标准浏览器默认）。
-- `span/strong/em/label/button/a/img/canvas/input/textarea/select/progress/template/slot` 默认 inline。
+- `div` 默认 `display:block`（标准浏览器默认）；`button/img` 默认 inline（必须放进 flex 容器，见 fence §6.5）；`span` 是文本级行内元素；`template` 默认 `display:none`；`slot` 透明继承父级。
+- 控件与列表无专属标签——作者在 `<div>` 上写 WAI-ARIA `role` 表达（`role=slider`/`role=list`/...），视觉部件用 `data-slot`（`data-slot=fill`/`thumb`）。详见 [fence.md](fence.md) §2.3。
 - `display:flex` 默认 `flex-direction:row`（标准 CSS 默认）。
 - 需要纵向堆叠明确写 `display:flex; flex-direction:column`。
 - `display:block/flex/none` 选择内部布局 Strategy，**不改变节点类型**。
@@ -92,64 +92,57 @@
 
 ### 3.2 围栏元素
 
+围栏 14 标签 = 8 shell + 6 runtime（真相源 = [fence.md](fence.md) §2）。控件与列表无专属标签，用 `role` 表达：
+
 | 类别 | 元素 | 公共类型/语义 |
 |---|---|---|
-| 文档与样式 | `html/head/body/title/meta/style/link[rel=stylesheet]` | 打包和 authoring 元数据，不进入实时树 |
-| 结构 | `div/header/nav` | `Container`（block 默认） |
-| 文本 | `p/span/strong/em/br` | `TextBlock/TextElement/LineBreak` |
-| 关联文本 | `label` | `Label` |
-| 操作 | `button/a` | `Button/Link` |
-| 图片与绘制 | `img/canvas` | `Image/Canvas` |
-| 输入 | `input[type]` | `TextField/PasswordField/SearchField/NumberField/Slider/Toggle/RadioButton` |
-| 输入 | `textarea/select/option` | `TextArea/Dropdown/OptionItem` |
-| 列表 | `ul/ol/li` | `ListView/ListItem` |
+| 文档与样式 | `html/head/body/title/meta/style/link[rel=stylesheet]/script` | 打包和 authoring 元数据，不进入实时树 |
+| 结构 | `div` | `Container`（block 默认） |
+| 文本 | `span` | `TextElement` |
+| 操作 | `button` | `Button` |
+| 图片 | `img` | `Image` |
+| 控件 | `div role=...` | `Slider`/`Toggle`/`RadioButton`/`TextField`/`TextArea`/`NumberField`/`ProgressBar`/`Dropdown`（见 [fence.md](fence.md) §2.3） |
+| 列表 | `div role=list` / `div role=listitem` / `div role=option` | `ListView`/`ListItem`/`OptionItem` |
 | 模板 | `template` | 惰性 `UITemplate`，不进入实时树 |
 | 内容投影 | `slot` | Custom Element 的标准 Slot |
-
-`script` 不属于运行时围栏。
+| 自定义元素 | `tag-name`（含 hyphen） | `CustomElement`（R3 注册验证） |
 
 ### 3.3 稳定语义签名
 
-> **节点类型由稳定 HTML 语义签名决定：tag + 不可变结构属性。CSS 永远不决定类型。**
+> **节点类型由稳定 HTML 语义签名决定：base 标签按 tag；控件/列表按 WAI-ARIA `role` + `aria-*`。CSS 永远不决定类型。**
 
-完整签名表见 [fence.md](fence.md) §3.1。类型分派只看 tag + `input[type]`：
+完整签名表见 [fence.md](fence.md) §3.1。`resolve_semantic(tag, role, aria_multiline)`：`role` 优先于 tag，未识别的 role 回退到 tag 映射：
 
-- `<div>` / `<header>` / `<nav>` → `Container`
-- `<p>` → `TextBlock`；`<span>` / `<strong>` / `<em>` → `TextElement`
-- `<button>` → `Button`；`<a>` → `Link`；`<label>` → `Label`
-- `<img>` → `Image`；`<canvas>` → `Canvas`；`<br>` → `LineBreak`
-- `<input type="text">` → `TextField`（默认 type）
-- `<input type="password">` → `PasswordField`
-- `<input type="search">` → `SearchField`
-- `<input type="number">` → `NumberField`
-- `<input type="range">` → `Slider`
-- `<input type="checkbox">` → `Toggle`；`<input type="radio">` → `RadioButton`
-- `<textarea>` → `TextArea`；`<select>` → `Dropdown`；`<option>` → `OptionItem`
-- `<ul>` / `<ol>` → `ListView`；`<li>` → `ListItem`
-- `<progress>` → `ProgressBar`；`<template>` → `Template`；`<slot>` → `Slot`
+- `<div>` → `Container`；`<span>` → `TextElement`；`<button>` → `Button`；`<img>` → `Image`
+- `<div role="slider">` → `Slider`；`<div role="switch">` → `Toggle`；`<div role="radio">` → `RadioButton`
+- `<div role="textbox">` → `TextField`（默认）；`<div role="textbox" aria-multiline="true">` → `TextArea`
+- `<div role="spinbutton">` → `NumberField`；`<div role="progressbar">` → `ProgressBar`
+- `<div role="combobox">` → `Dropdown`；`<div role="option">` → `OptionItem`
+- `<div role="list">` → `ListView`；`<div role="listitem">` → `ListItem`
+- `<template>` → `Template`；`<slot>` → `Slot`
 - 含 `-` 的标签名 → `CustomElement`（R3 注册验证）
 
-`input[type]` 是结构属性（Fence Gate 校验值域，Annotate 阶段决定最终类型），实例化后不能改成另一种控件类型。普通动态状态（`checked/selected/disabled`）可变。`role` / `aria-*` 是全局属性（Fence Gate 校验白名单值域），但不参与当前的 SemanticKind 分派——ARIA 复合控件类型是后续阶段（§3.4）。
+`role` + `aria-multiline` 是打包期确定类型的不变量，实例化后不能改成另一种控件类型。普通动态状态（`checked/selected/disabled`，以 `aria-checked`/`aria-expanded` 等表达）可变。控件初始值放 ARIA（`aria-valuenow`/`aria-checked`/...）或 `data-*`（`data-step`/`data-name`）属性。
 
 ### 3.4 WAI-ARIA 复合控件
 
-HTML 没有原生 Tabs、Tree 等标签。此类控件采用白名单内的标准 WAI-ARIA Pattern，不使用 `data-widget` 或 `data-controller`：
+控件与列表用白名单内的标准 WAI-ARIA Pattern（`role=slider`/`role=list`/`role=combobox`/...），不使用 `data-widget` 或 `data-controller`，也不自创私有 role 名。控件视觉部件用 `data-slot`（`data-slot=fill`/`thumb`）表达——ARIA 把 progressbar/slider 当原子控件，内部构造无 ARIA 语义，`data-*` 是 HTML 为私有扩展预留的标准机制：
 
 ```html
-<div role="tablist" aria-label="设置">
-    <button role="tab" aria-controls="graphics-panel" aria-selected="true">画面</button>
+<div role="slider" aria-valuenow="50" class="slider">
+    <div data-slot="fill"></div>
+    <div data-slot="thumb"></div>
 </div>
-<div role="tabpanel" aria-labelledby="graphics-tab">...</div>
 ```
 
-框架负责输入导航、`aria-selected`、`hidden` 同步。打包器验证 role 组合与 ARIA 关系。
+框架负责输入导航、`aria-selected`/`aria-checked`/`aria-expanded` 状态同步。打包器验证 role 组合与必需子结构（fence §6.8）+ ARIA 关系。
 
 ### 3.5 失败策略
 
 围栏外输入明确失败，不静默降级：
 
 - 围栏外标签、属性、CSS 属性或属性值 → 打包期报错。
-- 不支持的 `input[type]` 或 ARIA role → 打包期报错。
+- 不支持的 `role` 或 ARIA 属性值 → 打包期报错。
 - `display:grid` 在真正实现前留在围栏外，不能降级成 Flex。
 - 围栏外 CSS 不静默忽略。
 
@@ -167,22 +160,26 @@ HTML 没有原生 Tabs、Tree 等标签。此类控件采用白名单内的标�
 
 ```text
 Node
-├── Container（内容模型 = 用户可编排的子节点）
+├── Container（子树 = 用户内容，运行时可编排）
 │   ├── AbsolutePanel（语法糖，子节点自动 absolute）
-│   ├── TextBlock（p）/ TextElement（span/strong/em）
-│   ├── Label / Button / Link / Canvas
-│   └── ListView（ul/ol）/ ListItem（li）
-├── TextNode / Image / ProgressBar
-├── TextField / PasswordField / SearchField / NumberField / Slider / Toggle / RadioButton
-├── TextArea / Dropdown
-├── LineBreak（br）/ OptionItem（option）/ Slot / CustomElement
+│   ├── TextElement（span）
+│   ├── Button（button）
+│   ├── ListView（role=list）/ ListItem（role=listitem）
+│   ├── OptionItem（role=option，从属 Dropdown）
+│   ├── Slot / CustomElement
+├── TextNode / Image（叶子：内容 / 绘制）
+└── 控件（叶子：子树 = 控件构造，公共 API 不暴露编排）
+    ├── TextField（role=textbox）/ TextArea（role=textbox + aria-multiline）
+    ├── NumberField（role=spinbutton）
+    ├── Slider（role=slider）/ ProgressBar（role=progressbar）
+    ├── Toggle（role=switch）/ RadioButton（role=radio）
+    └── Dropdown（role=combobox）
 ```
-> 注：`LineBreak`、`OptionItem`、`Slot`、`CustomElement` 在 Rust `NodeKind` 中已有对应变体，C# 投影类待后续控件束/复合束落地（当前 `NodeFactory` fallback 到 `Container`）。
 
+- **Container vs Node 叶子的划线**：Container = 子树是「用户内容」（运行时可编排）；Node 叶子 = 子树是「控件构造」（设计期写定，框架管理，公共 API 不暴露编排）。控件仍是 `: Node` 叶子（不是 Container）——role 化改的是**谁写结构**（框架注入 → 作者写），没改**谁管结构**（仍是框架）。`OptionItem`/`ListItem` 是 Container（装用户内容），其从属关系在文档说明，不做类型层次强化。详见 [public-api.md](public-api.md) §2。
 - `Container` 才暴露子节点增删；叶子类没有 `AddChild()`。
-- `Button`、`Link` 等可包含图标和文本，因此属于容器。
+- `Button` 可包含图标和文本，因此属于容器。
 - 公共对象持有稳定身份，内部句柄（NodeId）不暴露。
-- `input[type]` 是不可变结构属性（决定控件类型）；`role` / `aria-*` 是全局属性（不参与当前类型分派，见 §3.3）。
 - **无 Panel/Component 类型**：作用域是运行时标记（`IsScopeRoot`），非类型；`Instantiate` 返回模板根真实类型。完整层级与划线见 [public-api.md](public-api.md) §2。
 
 ### 4.2 顶层上下文
@@ -277,24 +274,21 @@ panel.Style.OverflowY = Overflow.Auto;
 
 ## 6. 标准控件
 
-HTML 属性提供初始值；C# 属性表示实时状态。用户输入和代码修改走同一状态通道。
+控件用 `<div role="...">` 表达（§3.3）；ARIA 属性提供初始值，C# 属性表示实时状态。用户输入和代码修改走同一状态通道。视觉部件用 `data-slot`（如 slider 的 `data-slot=thumb`、progressbar 的 `data-slot=fill`）。
 
-| HTML | 公共类型 | 主要实时 API |
+| HTML（role） | 公共类型 | 主要实时 API |
 |---|---|---|
 | `button` | `Button` | `Disabled`, `Clicked` |
-| `a[href]` | `Link` | `Href`, `Activated` |
-| `input[type=text]` | `TextField` | `Value`, `Placeholder`, `ReadOnly`, `ValueChanged`, `Submitted` |
-| `input[type=password]` | `PasswordField` | `Value`, `Placeholder`, `ReadOnly`, `ValueChanged`, `Submitted` |
-| `input[type=search]` | `SearchField` | `Value`, `Placeholder`, `ReadOnly`, `ValueChanged`, `Submitted` |
-| `input[type=number]` | `NumberField` | `Value`, `Min`, `Max`, `Step`, `Disabled`, `ValueChanged` |
-| `input[type=range]` | `Slider` | `Value`, `Min`, `Max`, `Step`, `Disabled`, `ValueChanged`, `ChangeCommitted` |
-| `input[type=checkbox]` | `Toggle` | `IsChecked`, `Disabled`, `CheckedChanged` |
-| `input[type=radio]` | `RadioButton` | `IsChecked`, `Name`, `Disabled`, `CheckedChanged` |
-| `textarea` | `TextArea` | `Value`, `Placeholder`, `Selection`, `ReadOnly`, `Disabled`, `ValueChanged` |
-| `select/option` | `Dropdown` | `SelectedIndex`, `SelectedValue`, `Disabled`, `SelectionChanged` |
-| `progress` | `ProgressBar` | `Value`, `Max`, `IsIndeterminate` |
+| `div role=textbox` | `TextField` | `Value`, `Placeholder`, `ReadOnly`, `ValueChanged`, `Submitted` |
+| `div role=textbox aria-multiline=true` | `TextArea` | `Value`, `Placeholder`, `Selection`, `ReadOnly`, `Disabled`, `ValueChanged` |
+| `div role=spinbutton` | `NumberField` | `Value`, `Min`, `Max`, `Step`, `Disabled`, `ValueChanged` |
+| `div role=slider` | `Slider` | `Value`, `Min`, `Max`, `Step`, `Disabled`, `ValueChanged`, `ChangeCommitted` |
+| `div role=switch` | `Toggle` | `IsChecked`, `Disabled`, `CheckedChanged` |
+| `div role=radio` | `RadioButton` | `IsChecked`, `Name`, `Disabled`, `CheckedChanged` |
+| `div role=combobox` | `Dropdown` | `SelectedIndex`, `SelectedValue`, `Disabled`, `SelectionChanged` |
+| `div role=progressbar` | `ProgressBar` | `Value`, `Max`, `IsIndeterminate` |
 
-伪类 `:checked/:disabled/:focus` 匹配实时状态。RadioButton 同 `name` 组框架自动互斥（只新选中项触发 `CheckedChanged`）；按 name 聚合的 RadioGroup 是逻辑层积木，作用域边界由 `IsScopeRoot` 标记决定。控件数值（Slider/NumberField/ProgressBar）用 `float`。完整控件契约见 [public-api.md](public-api.md) §7。
+伪类 `:checked/:disabled/:focus` 匹配实时状态；Toggle/RadioButton 也可用属性选择器 `[aria-checked="true"]` 表达选中态。RadioButton 同 `name`（或 `data-name`）组框架自动互斥（只新选中项触发 `CheckedChanged`）；按 name 聚合的 RadioGroup 是逻辑层积木，作用域边界由 `IsScopeRoot` 标记决定。控件数值（Slider/NumberField/ProgressBar）用 `float`。完整控件契约见 [public-api.md](public-api.md) §7。
 
 `ValueChanged` 表示实时变化；`ChangeCommitted` 表示拖动结束、回车或失焦确认。所有控件仍保留通用路由事件（`node.On<PointerDownEvent>(...)`）。
 
@@ -309,14 +303,14 @@ HTML 属性提供初始值；C# 属性表示实时状态。用户输入和代码
 ### 7.2 内联模板
 
 ```html
-<ul id="mails">
+<div role="list" id="mails">
     <template id="normal-mail">
-        <li class="mail"><span id="title"></span></li>
+        <div role="listitem" class="mail"><span id="title"></span></div>
     </template>
-</ul>
+</div>
 ```
 
-内联 `<template>` 只属于当前组件。打包期验证 item template 根是 `<li>`。
+内联 `<template>` 只属于当前组件。打包期验证 list item template 根是 `role=listitem`。
 
 ### 7.3 包级共享模板
 
@@ -347,13 +341,13 @@ UITemplate item = common.GetTemplate("templates/mail-item");
 
 ## 8. ListView
 
-声明使用标准 `ul/ol/li/template`：
+声明使用 `role=list` + `role=listitem` + `<template>`：
 
 ```html
-<ul id="mails">
-    <template id="normal-mail"><li>...</li></template>
-    <template id="reward-mail"><li>...</li></template>
-</ul>
+<div role="list" id="mails">
+    <template id="normal-mail"><div role="listitem">...</div></template>
+    <template id="reward-mail"><div role="listitem">...</div></template>
+</div>
 ```
 
 ```csharp
@@ -369,9 +363,9 @@ mails.BindItem = (item, index) => {
 ```
 
 契约：
-- `ul/ol` → `ListView`，`li` → `ListItem`。
-- 虚拟化是运行时实现决策（不进 HTML）；首次设 `ItemCount`/`ItemTemplate`/`BindItem` 即数据驱动 + 清空设计期 li。静态/数据驱动强制互斥（越界抛 `UIContractException`）。
-- item 模板来源优先级：显式 `ItemTemplate`/`TemplateSelector` > 设计期 `<template id>` > 第一个 li 兜底。未设且 ul 下单个 `<template>` 自动用、多个 `<template>` 抛 `UIContractException`。
+- `role=list` → `ListView`，`role=listitem` → `ListItem`。
+- 虚拟化是运行时实现决策（不进 HTML）；首次设 `ItemCount`/`ItemTemplate`/`BindItem` 即数据驱动 + 清空设计期 listitem。静态/数据驱动强制互斥（越界抛 `UIContractException`）。
+- item 模板来源优先级：显式 `ItemTemplate`/`TemplateSelector` > 设计期 `<template id>` > 第一个 listitem 兜底。未设且 list 下单个 `<template>` 自动用、多个 `<template>` 抛 `UIContractException`。
 - `TemplateSelector` 是纯 `Func<int, UITemplate>`；用户 `view.GetTemplate("name")` 取 template 后塞 lambda 闭包按 index 选，框架不自动收集。
 - `TemplateSelector` 返回 `UITemplate` 对象，不返回字符串。
 - ListView 按模板分别池化。
@@ -429,27 +423,27 @@ bool hit = ui.IsPointerOnUI;
 
 ### 10.1 正常 HTML 子树
 
-删除旧 `display:block` RichText desugar 暗号和特殊公共 `RichText` 类型。富文本就是正常 HTML 子树：
+删除旧 `display:block` RichText desugar 暗号和特殊公共 `RichText` 类型。富文本就是正常 HTML 子树（`<div>` + `<span>` + `<img>` + 裸文本）：
 
 ```html
-<p id="description">
-    对敌人造成 <strong id="damage">120</strong> 点伤害
+<div id="description">
+    对敌人造成 <span id="damage">120</span> 点伤害
     <img src="fire.png" alt="火焰">
-    <a id="details" href="skill://fireball">详情</a>
-</p>
+    <span id="details">详情</span>
+</div>
 ```
 
 ### 10.2 公共对象树
 
-公共树保留 `TextNode/TextElement/Image/Link` 的 ID、样式和事件。
+公共树保留 `TextNode/TextElement/Image` 的 ID、样式和事件。
 
 ### 10.3 内部文本布局
 
-内部文本布局将最近 Inline Formatting Context 编译成 TextRun、ImageRun 和 LinkRun，用于统一换行、baseline、测量与几何构建。
+内部文本布局将最近 Inline Formatting Context 编译成 TextRun、ImageRun，用于统一换行、baseline、测量与几何构建。
 
 - 裸文本形成叶子 `TextNode`。
-- inline 元素是语义容器。
-- `p` 建立文本 block。
+- inline 元素（`span`）是语义容器。
+- `div` 建立文本 block。
 - `TextContent` 与 DOM 一样，用纯文本替换当前全部子内容。
 - 修改 inline 子树只使最近文本上下文失效。
 
@@ -477,7 +471,7 @@ taffy 对"尺寸取决于内容"的节点回调 `MeasureFunc(known_dimensions) -
 
 场景图 Container 树 ↔ taffy 节点树一一对应。增删 Container 同步增删 taffy 节点；改 style 同步改 taffy style 并标记子树 layout dirty。
 
-taffy 0.12 同时支持 Flex 和 Block 布局算法。`display:block` 使用 `compute_block_layout`，`display:flex` 使用 `compute_flexbox_layout`。裸 block 默认标签（div/header/nav/p/ul/ol/li/option）和显式 `display:block` 都设 `taffy_style.display = Display::Block`；inline 标签和显式 `display:flex` 设 `Display::Flex`（inline 走 Flex Row）。
+taffy 0.12 同时支持 Flex 和 Block 布局算法。`display:block` 使用 `compute_block_layout`，`display:flex` 使用 `compute_flexbox_layout`。裸 block 默认标签（当前围栏里 `div`）和显式 `display:block` 都设 `taffy_style.display = Display::Block`；inline 标签和显式 `display:flex` 设 `Display::Flex`（inline 走 Flex Row）。
 
 ### 11.3 尺寸模型 → 映射
 

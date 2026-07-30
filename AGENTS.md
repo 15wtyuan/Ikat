@@ -90,7 +90,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 - **引擎后端**：输入采集、渲染树→原生镜像、资源加载。不解析 HTML/CSS、不算布局、不生成几何。
 
 **新范式架构不变量**（违反 = 隐 bug）：
-- **标准 HTML 语义决定类型**：节点类型由稳定 HTML 语义签名（tag + 不可变结构属性如 `input[type]`、`role`）决定。CSS（class、伪类、computed style）永远不改变 C# 对象类型。
+- **标准 HTML 语义决定类型**：节点类型由稳定 HTML 语义签名（base 标签按 tag；控件/列表按 WAI-ARIA `role` + `aria-*`）决定。CSS（class、伪类、computed style）永远不改变 C# 对象类型。
 - **CSS 赋予行为能力，不改变类型**：`display:block/flex/none` 选择内部布局 Strategy；`overflow:auto/scroll` 选择滚动 Strategy。策略切换不重建节点、不丢状态。
 - **组件作用域 ID 查找**：`Get<T>("id")` 在当前组件实例内递归查找，不穿透嵌套组件/List item 边界。同一模板作用域内重复 ID 打包期报错。
 - **transform 是渲染/命中层，不进布局**：改 transform 不触发 solve，只刷新命中几何 + world_matrix。
@@ -98,20 +98,20 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 - **所有布局帧末一致**：每帧一次 solve。
 - **单一动画时钟**：`TweenManager::update(dt)` 是唯一时钟。ScrollPane 物理是例外（自维护 tween）。
 - **坐标系**：核心 = 左上原点、y 向下。y-flip 是后端根一次性变换。
-- **公共语义树与内部渲染树可以不同**：文本在公共层是正常 HTML 子树（TextNode/TextElement/Link），内部扁平化为 runs。
+- **公共语义树与内部渲染树可以不同**：文本在公共层是正常 HTML 子树（TextNode/TextElement），内部扁平化为 runs。
 
 ### 旧范式（v1 残留——摸黑+三束重构中逐步消除）
 
 > 以下不变量描述的是**尚未完全重构的当前代码**。碰到下面的代码，提醒用户重构或清理。
 
-- ~~**`<div>` 永远是 flex 容器**~~（**P1 C2 已消除**）：`display:block` 和裸 block 默认标签（div/header/nav/p/ul/ol/li/option）现在都设 `taffy_style.display = taffy::Display::Block`（真 CSS 块流，垂直堆叠且忽略子 flex-grow），不再走 flex-column 伪 block。显式 `display:flex`/`display:none` 仍覆盖。两处赋值：`crates/fence/src/css_resolve.rs` 铺默认、`crates/core/src/style/mapping.rs` 应用显式声明。
-- **`NodeKind` enum + 代际 NodeId**：`NodeId(pub u32)` 对外透明句柄。已扩容到 22 变体（档位2）+ C# 类型化投影层（Node/Container/Button/...）已落地，但 Rust 侧 NodeKind/NodeId 仍在核心所有热路径中活跃。→ 类型化用户表面已兑现；内部表示重构在复合束推进时逐段迁移。
+- ~~**`<div>` 永远是 flex 容器**~~（**P1 C2 已消除**）：`display:block` 和裸 block 默认标签现在都设 `taffy_style.display = taffy::Display::Block`（真 CSS 块流，垂直堆叠且忽略子 flex-grow），不再走 flex-column 伪 block。显式 `display:flex`/`display:none` 仍覆盖。（历史上 block 默认标签含 div/header/nav/p/ul/ol/li/option；控件 role 化重构后多数下线，当前围栏里 `div` 是唯一 block 默认 runtime 标签。）两处赋值：`crates/fence/src/css_resolve.rs` 铺默认、`crates/core/src/style/mapping.rs` 应用显式声明。
+- **`NodeKind` enum + 代际 NodeId**：`NodeId(pub u32)` 对外透明句柄。19 变体（控件 role 化重构后）+ C# 类型化投影层（Node/Container/Button/...）已落地，但 Rust 侧 NodeKind/NodeId 仍在核心所有热路径中活跃。→ 类型化用户表面已兑现；内部表示重构在复合束推进时逐段迁移。
 - **`FindNodeById` 全局首匹配**：C# `Get<T>("id")` 已存在但底层仍调全局 `find_node_by_id` + subtree check。完整 `IsScopeRoot` 边界未实现（Nodes.cs:190 gap）。→ 复合束加完整作用域查找 FFI 时替换。
 - **虚拟列表 = 层 B'（核心不认识"列表"）**：driver 管 slot 映射/可见区间/不等高补偿。reuse_key 是场景级全局命名空间。→ 复合束 ListView 吸收。
 
 ### 围栏
 
-面向游戏 UI 的标准 HTML 子集（31 标签 = 8 shell + 23 runtime）。围栏外输入打包期报错，不静默降级。单一真相源 = crates/fence/src/schema/ Rust const 表。防漂移门：cargo test -p loomgui_fence。权威文档：docs/design/fence.md。
+面向游戏 UI 的标准 HTML 子集（14 标签 = 8 shell + 6 runtime）。控件与列表无专属标签，作者在 `<div>` 上写 WAI-ARIA `role` 表达（`role=slider`/`role=list`/...），视觉部件用 `data-slot`。围栏外输入打包期报错，不静默降级。单一真相源 = crates/fence/src/schema/ Rust const 表。防漂移门：cargo test -p loomgui_fence（含文档↔schema 交叉校验）。权威文档：docs/design/fence.md。
 
 ## 在本仓库怎么干活
 
@@ -140,7 +140,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 **core dump 复现 Unity solve**：PlayMode layout/视觉 bug 先编码机用 `spec4b_dump` / 对应 dump_*.rs example 喂同样的 pkg.bin 复现 core solve，定位 bug 在 core（dump 错）还是 Unity 后端（dump 对、渲染错）。core 和 Unity 是同一份 solve 的两面，dump 取证再改，别静态猜反复试。
 
-**围栏真相源 = `crates/fence/src/schema/` Rust const 表，`docs/design/fence.md` 是人类可读权威副本**：围栏最终形态 = schema 注册表（31 标签 + CSS 子集 + `@keyframes`/`animation` 终态），fence.md 是它的可读镜像（改 schema 必同步 fence.md，防漂移门 `cargo test -p loomgui_fence`）。roadmap 决策「终点线2 scope 用哪些」（如 `:nth-child` / 多 selector / @keyframes runtime 驱动 留 §4 视觉束）。代码往围栏最终形态靠，围栏外的 showcase bug 跟围栏最终形态（showcase 整体打包挂留专门 task）。
+**围栏真相源 = `crates/fence/src/schema/` Rust const 表，`docs/design/fence.md` 是人类可读权威副本**：围栏最终形态 = schema 注册表（14 标签 = 8 shell + 6 runtime + role 驱动控件 + CSS 子集 + `@keyframes`/`animation` 终态），fence.md 是它的可读镜像（改 schema 必同步 fence.md，防漂移门 `cargo test -p loomgui_fence` 含「文档↔schema 交叉校验」测试 `doc_schema_sync.rs`）。roadmap 决策「终点线2 scope 用哪些」（如 `:nth-child` / 多 selector / @keyframes runtime 驱动 留 §4 视觉束）。代码往围栏最终形态靠，围栏外的 showcase bug 跟围栏最终形态（showcase 整体打包挂留专门 task）。
 
 **GUI exe 绑 fence crate**：fence 改动后必须重编 GUI exe（`loomgui_gui.exe` 静态链入 fence），否则 GUI stale 误报围栏外（pkg bump 时也触发，坑 158 同源）。打包器 exe 闭环见上方「GUI 打包器 exe 闭环」段。
 

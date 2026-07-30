@@ -344,6 +344,24 @@ CSS 在围栏中以三个正交维度建模：
 
 **教学文案**：指出控件无内置默认样式，再按 role 给出修复指引（`data-slot` 子节点型：progressbar/slider 引导为控件本身 + `data-slot=fill`/`thumb` 子配 CSS；switch/radio 引导 `[aria-checked]` 属性选择器；combobox 引导控件本身 + `role=listbox`/`role=option` 子；textbox/spinbutton 引导 background/border + caret-color）。
 
+### 阶段 6.8：控件结构契约校验（必需子角色）
+
+**根因**：role 化重构后（§2.2）控件结构由**作者写**，不再由框架运行时注入。作者可能漏写必需子角色（`<div role="slider">` 缺 `data-slot=thumb`、`<div role="combobox">` 缺 `role=listbox`）。把这种保证留到运行时 = 拿确定性换自由度，违背「围栏外输入打包期报错」的项目原则。本 pass 在 Annotate 之后严格拦截。
+
+**规则**：带必需子角色的控件（见 §2.3 表）若**直接子节点**中缺对应 role / data-slot → `FenceMissingControlChild` error，打包失败。契约：
+
+- `combobox` → 直接子含 `role=listbox`（listbox 再要求含 `role=option`，递归校验）
+- `listbox` → 直接子含 ≥1 个 `role=option`
+- `slider` → 直接子含 `data-slot=thumb`
+- `progressbar` → 直接子含 `data-slot=fill`
+- `list` → 直接子含 `role=listitem`
+
+`textbox`/`spinbutton`/`switch`/`radio`/`option`/`listitem` 无必需子角色（不校验）。
+
+**直接子字面**：校验只看**直接子节点**，与 §2.2 结构字面对齐——把必需子角色嵌进 wrapper div（如 `slider > div.wrap > data-slot=thumb`）不算满足契约，仍报 error。唯一例外是 **`list` 的 template 蓝图模式**：数据驱动 ListView 把 item 蓝图写在 `<template>` 子节点里（运行时克隆产 slot），`role=list > template > role=listitem` 视同满足 list→listitem 契约（template 的首个元素子节点被当成 listitem 检查）。
+
+**教学文案**：诊断 message 按 role 给出作者应写的完整结构（如 combobox 引导 `role=listbox` 子 + `role=option` 孙；slider 引导 `data-slot=thumb` 子），取代旧 `.loom-*` 「照着填」的提示载体。
+
 ### 流水线特性
 
 - **Collect-all**：所有阶段的 diagnostic 汇总到一个 `Vec<Diagnostic>` 输出，不 fail-fast。
@@ -371,6 +389,7 @@ CSS 在围栏中以三个正交维度建模：
 | `FenceBorderWithoutStyle` | **warning**：`border-width` 已声明但 `border-style` 缺省（CSS initial=none，浏览器不画边框，LoomGUI 会画）；预览 ≠ 运行时 |
 | `FenceBgImageWithoutSize` | **warning**：`background-image` 已声明但 `background-size` 缺省（CSS 默认 auto=原始尺寸，LoomGUI 默认 stretch=拉伸填满）；预览 ≠ 运行时 |
 | `FenceControlWithoutCss` | role 驱动控件（`progressbar`/`slider`/`switch`/`radio`/`textbox`/`spinbutton`/`combobox`）无任何 `<style>` 规则命中。控件不带 UA 默认样式，无 CSS = 运行时空白；须为控件及其 `data-slot` 子节点提供 CSS（详见阶段 6.7） |
+| `FenceMissingControlChild` | role 驱动控件缺必需子角色/slot（`combobox` 缺 `role=listbox`、`listbox` 缺 `role=option`、`slider` 缺 `data-slot=thumb`、`progressbar` 缺 `data-slot=fill`、`list` 缺 `role=listitem`）。控件结构由作者写，漏写 = 运行时半残控件；详见阶段 6.8 |
 
 ---
 
@@ -391,10 +410,11 @@ CSS 在围栏中以三个正交维度建模：
 ```bash
 cargo test -p loomgui_fence                                # 全部围栏测试
 cargo test -p loomgui_fence --test schema_contract         # schema 注册表契约
+cargo test -p loomgui_fence --test doc_schema_sync         # 文档↔schema 交叉校验（防描述层漂移）
 cargo test -p loomgui_fence --test pipeline_integration    # 端到端流水线
 ```
 
-改围栏后必跑。测试 fail = 围栏契约被破坏。
+改围栏后必跑。测试 fail = 围栏契约被破坏。`doc_schema_sync` 从本文档主表解析标签清单与 schema 注册表比对，防止「代码改了文档没跟上」的描述层漂移。
 
 ### 8.3 消费者
 

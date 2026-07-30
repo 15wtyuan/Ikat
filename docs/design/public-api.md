@@ -41,32 +41,38 @@ CSS-flow 布局中心。Node 三分模型：
 
 ## 2. 对象层级
 
-按 [fence.md](fence.md) 的 ContentModel 分容器与叶子：
+按子树归属分容器与叶子（Container = 子树是用户内容；Node 叶子 = 子树是控件构造，见 §2.1）：
 
 ```text
 Node
-+-- Container（内容模型 = 用户可编排的子节点）
++-- Container（子树 = 用户内容，运行时可编排）
 |   +-- AbsolutePanel（语法糖，子节点自动 absolute）
-|   +-- TextBlock（p）/ TextElement（span/strong/em）
-|   +-- Label / Button / Link / Canvas
-|   +-- ListView（ul）/ ListItem（li）
-+-- TextNode / Image                          （叶子：内容/绘制）
-+-- TextField / NumberField / Slider  （叶子：私有内部结构）
-+-- Toggle / RadioButton / TextArea / Dropdown / ProgressBar
+|   +-- TextElement（span）
+|   +-- Button（button）
+|   +-- ListView（role=list）/ ListItem（role=listitem）
+|   +-- OptionItem（role=option，从属 Dropdown）
+|   +-- Slot / CustomElement
++-- TextNode / Image                          （叶子：内容 / 绘制）
++-- 控件（叶子：子树 = 控件构造，公共 API 不暴露编排）
+    +-- TextField（role=textbox）/ TextArea（role=textbox + aria-multiline）
+    +-- NumberField（role=spinbutton）
+    +-- Slider（role=slider）/ ProgressBar（role=progressbar）
+    +-- Toggle（role=switch）/ RadioButton（role=radio）
+    +-- Dropdown（role=combobox）
 ```
 
 ### 2.1 容器 vs 叶子的划线（不变量）
 
-这条线 = HTML 的 content model：
+这条线 = **子树归属**（不是 HTML content model——role 化重构后所有控件的子节点都是作者写的，content model 不再区分）：
 
-- **Container 子类 = 内容模型是「用户可编排的子节点」的元素**：`<div>`、`<button>`、`<a>`、`<p>`、`<span>`、`<label>`、`<li>`、`<ul>`。子树设计期写、运行时可增删。
-- **Node 叶子 = 内容模型是「框架私有内部结构」的元素**：`<input>` 全家、`<select>`、`<textarea>`、`<progress>`、`<img>`。视觉上可能有层次（滑块的轨道/handle），但那是框架实现，公共 API 只给语义属性。
+- **Container 子类 = 子树是「用户内容」的节点**：`<div>`、`<button>`、`<span>`、`role=listitem`、`role=option`。子树设计期写、运行时可增删。
+- **Node 叶子 = 子树是「控件构造」的节点**：`role=slider`/`progressbar`/`combobox`/`textbox`/`spinbutton`/`switch`/`radio` + `<img>`。视觉上可能有层次（slider 的 thumb、progressbar 的 fill），那是控件构造，框架管理，公共 API 只给语义属性。
 
-`<button>` 可有子节点（`<button><img/><span/></button>` 合法）；`<input>`/`<img>` 是 void/replaced element，无子内容。这与 AI 的 HTML 先验对齐。
+控件保持 `: Node` 叶子（不改 `: Container`、不引入 `Control` 中间层）：role 化改的是**谁写结构**（框架注入 → 作者写），没改**谁管结构**（仍是框架）。运行时让用户 `slider.Children.Remove(thumb)` 无合理用例，只会制造半残控件。`OptionItem`/`ListItem` 是 Container（装用户内容），其从属关系（服务于父控件）在文档说明，不做类型层次强化。
 
 ### 2.2 稳定语义签名
 
-节点类型由稳定 HTML 语义签名决定：tag + 不可变结构属性（如 `input[type]`、`role`）。CSS（class、伪类、computed style）永远不改变 C# 对象类型。
+节点类型由稳定 HTML 语义签名决定：base 标签按 tag；控件/列表按 WAI-ARIA `role` + `aria-*`（如 `role=slider`、`role=textbox + aria-multiline`）。CSS（class、伪类、computed style）永远不改变 C# 对象类型。
 
 ### 2.3 无 Panel 类型
 
@@ -289,28 +295,24 @@ Node node = ui.Pick(globalPoint);   // 命中测试：返回该点最上层可�
 
 ## 7. 标准控件
 
-| HTML | 类型 | 主要 API |
+| HTML（role） | 类型 | 主要 API |
 |---|---|---|
 | button | Button : Container | Disabled, Clicked（文本走 Container.TextContent） |
-| a | Link : Container | Href（仅存字符串，不自动导航）, Activated |
-| input[text] | TextField : Node | Value, Placeholder, Selection, ReadOnly, Disabled, ValueChanged, Submitted |
-| input[number] | NumberField : Node | Value, Min, Max, Step（float）, Disabled, ValueChanged |
-| input[range] | Slider : Node | Value, Min, Max, Step（float）, Disabled, ValueChanged, ChangeCommitted |
-| input[checkbox] | Toggle : Node | IsChecked, Disabled, CheckedChanged |
-| input[radio] | RadioButton : Node | IsChecked, Name（只读）, Disabled, CheckedChanged |
-| textarea | TextArea : Node | Value, Placeholder, Selection, ReadOnly, Disabled, ValueChanged |
-| select | Dropdown : Node | SelectedIndex, SelectedValue, Disabled, SelectionChanged |
-| progress | ProgressBar : Node | Value, Max（float，0 基底）, IsIndeterminate |
+| div role=textbox | TextField : Node | Value, Placeholder, Selection, ReadOnly, Disabled, ValueChanged, Submitted |
+| div role=textbox aria-multiline=true | TextArea : Node | Value, Placeholder, Selection, ReadOnly, Disabled, ValueChanged |
+| div role=spinbutton | NumberField : Node | Value, Min, Max, Step（float）, Disabled, ValueChanged |
+| div role=slider | Slider : Node | Value, Min, Max, Step（float）, Disabled, ValueChanged, ChangeCommitted |
+| div role=switch | Toggle : Node | IsChecked, Disabled, CheckedChanged |
+| div role=radio | RadioButton : Node | IsChecked, Name（只读）, Disabled, CheckedChanged |
+| div role=combobox | Dropdown : Node | SelectedIndex, SelectedValue, Disabled, SelectionChanged |
+| div role=progressbar | ProgressBar : Node | Value, Max（float，0 基底）, IsIndeterminate |
 
 **不变量**：
 - 控件数值（Slider/NumberField/ProgressBar 的 Value/Min/Max/Step）用 `float`，与几何/引擎统一。大数精度需求归业务层。
-- `Link.Href` 仅携带字符串数据，框架不自动导航；`Activated` 触发后用户自理（外链/切页归业务层）。
-- `Label` 退化为语义容器（不加 `For`、不自动聚焦）；点标签聚焦用 `label.On<ClickEvent>(_ => input.Focus())` 积木。
-- `Canvas` 是引擎渲染挂载点（3D/粒子），无绘图 API；集成层 `Query<Canvas>()` + 读 `Geometry.WorldRect` 摆摄像机/RenderTexture，绑定不进公共层（见 §11）。
 - RadioButton 同 `Name` 组框架自动互斥；只有新选中项触发 `CheckedChanged`（对齐 web，不触发被取消项）。RadioGroup（按 name 聚合、读选中 index）是逻辑层积木，不进公共层。
 - 通用事件类型：`ValueChangedEvent<T>`, `SelectionChangedEvent`, `TextSelection`。
 
-WAI-ARIA 复合控件（TabList 等）使用白名单 role，单独立项（`role` / `aria-*` 已作为全局属性进入围栏 fence §4.1；复合控件的类型分派与行为实现是后续阶段）。
+控件与列表的类型由 `role` 分派（见 [fence.md](fence.md) §2.3、§3.1）；控件视觉部件用 `data-slot`（如 slider 的 `data-slot=thumb`、progressbar 的 `data-slot=fill`）。未来 WAI-ARIA 复合控件（TabList/Tree 等）沿用同一 `role` 机制，单独立项。
 
 ---
 
@@ -332,19 +334,19 @@ public class ListView : Container {
 }
 ```
 
-**契约**：`ul → ListView`，`li → ListItem`。布局走 CSS。虚拟化全内部。
+**契约**：`role=list → ListView`，`role=listitem → ListItem`。布局走 CSS。虚拟化全内部。
 
 **静态 vs 数据驱动（运行时隐式锁定，强制互斥）**：
 - 虚拟化是**运行时实现决策**（程序员按数据规模定），不进 HTML——它不改变渲染结果，不属 AI 可预测性范围。
-- 首次设 `ItemCount`/`ItemTemplate`/`BindItem` 任一 → 进入数据驱动模式：清空设计期 li（预览占位）、虚拟化接管。此后 `AddChild`/`InsertChild`/`RemoveChild` 抛 `UIContractException`；`ChildCount` = `ItemCount`；`Children` 抛 `UIContractException`（虚拟化下无法返回全部实例化节点）。
+- 首次设 `ItemCount`/`ItemTemplate`/`BindItem` 任一 → 进入数据驱动模式：清空设计期 listitem（预览占位）、虚拟化接管。此后 `AddChild`/`InsertChild`/`RemoveChild` 抛 `UIContractException`；`ChildCount` = `ItemCount`；`Children` 抛 `UIContractException`（虚拟化下无法返回全部实例化节点）。
 - 不碰数据驱动属性 → 静态模式：li 是真内容，走容器 API。
 
 **item 模板来源（优先级从高到低）**：
 1. 运行时显式赋 `ItemTemplate`（单模板）或 `TemplateSelector`（多模板）——程序员完全控制。
-2. 设计期 `<template id>` 声明（[fence.md](fence.md) 允许 `ul` 含 `template`，打包期校验 template 根是 `li`）。多模板时配合 `TemplateSelector`：用户 `view.GetTemplate("name")` 取出 `UITemplate` 后塞进 lambda 闭包按 index 选（`TemplateSelector` 是纯 `Func<int, UITemplate>`，框架不自动收集 ul 下 template）。
+2. 设计期 `<template id>` 声明（[fence.md](fence.md) 允许 `role=list` 含 `template`，打包期校验 template 根是 `role=listitem`）。多模板时配合 `TemplateSelector`：用户 `view.GetTemplate("name")` 取出 `UITemplate` 后塞进 lambda 闭包按 index 选（`TemplateSelector` 是纯 `Func<int, UITemplate>`，框架不自动收集 list 下 template）。
 3. 都没有 → 设计期第一个 li 结构兜底当模板（instantiate 时先捕获再清空）。
 
-**自动/报错规则**：未设 `ItemTemplate`/`TemplateSelector` 时——ul 下有**单个** `<template id>` → 自动用它；有**多个** `<template id>` → 抛 `UIContractException`（有多个模板却没说怎么选）。`<template>` 与运行时 virtual 开关不冲突：virtual 管是否虚拟化，`<template>` 管 item 模板长什么样。
+**自动/报错规则**：未设 `ItemTemplate`/`TemplateSelector` 时——list 下有**单个** `<template id>` → 自动用它；有**多个** `<template id>` → 抛 `UIContractException`（有多个模板却没说怎么选）。`<template>` 与运行时 virtual 开关不冲突：virtual 管是否虚拟化，`<template>` 管 item 模板长什么样。
 
 **退场动画**：`ItemExitClass` 设定后，`NotifyRemoved` 的 item 先加 class 等 `AnimationEnd` 再回收。
 
@@ -478,7 +480,7 @@ public sealed class UITemplate {
 - **UIContext 是「获取而非创建」**：无公共构造，由集成层创建、持有、驱动。业务程序员从集成层暴露的入口获取一个已跑起来的 UIContext。
 - **tick / 输入采集 / 渲染产出**：集成层每帧驱动 tick、采集引擎输入喂入、把渲染树交后端镜像。
 - **纹理注册**：`Image.Src` 是字符串 key（包内 or 运行时注册）。动态纹理的注册（`byte[]→Texture` 解码 + 注册 key）是引擎后端契约（Unity 侧 `SpriteResolver.Register(key, Texture2D)` 一类），用户自己解码塞入。查不到 key = 静默 error 态 + 警告一次，不抛。**每个引擎后端必须提供 runtime key 注册能力。**
-- **Canvas 渲染挂载**：集成层 `Query<Canvas>()` + 读 `Geometry.WorldRect` 摆摄像机/RenderTexture。
+- **原生渲染挂载**：3D 模型/粒子等非 UI 渲染挂载是引擎后端契约（Unity 侧 NativeHost），不进公共 API；集成层自行桥接。
 
 模板根、作用域根用 `IsScopeRoot` 运行时标记（非类型），`Get<T>` 边界据此判定。
 
@@ -530,14 +532,14 @@ dismissButton.Clicked += () => {
 4. 类型化对象树，HTML 语义决定类型；CSS 不改类型。
 5. Node 三分：Style（inline override 层）/Transform（渲染层）/Geometry（布局产物，滞后一帧）。
 6. 运行时移动走 Transform；尺寸走 Style；读位置走 Geometry。
-7. Container=可编排子节点 / Node 叶子=私有内部结构（= HTML content model）。
+7. Container=子树是用户内容 / Node 叶子=子树是控件构造（按子树归属划线，见 §2.1）。
 8. 无 Panel 类型；作用域是运行时标记（IsScopeRoot），Instantiate 返回真实根类型。
 9. AbsolutePanel：语法糖，子节点自动 absolute。
 10. 动画全 CSS，无命令式 tween；三种触发 + hook 双锚；class 切换下帧 rematch 生效、上帧 computed 做 transition 基线。
 11. 拖拽：注册事件即参与仲裁；drop 靠 `ui.Pick` + 积木。
 12. 焦点：每 UIContext 一个；不做自动 Tab 导航；`Focusable` 运行时可改。
 13. 坐标查询走 Geometry。
-14. 引擎中立：tick/输入/渲染/纹理注册/Canvas 绑定归集成层，不进公共 API。
+14. 引擎中立：tick/输入/渲染/纹理注册/原生渲染挂载归集成层，不进公共 API。
 15. 不提供异步加载、data 挂载点、!important、GetVar、ForceLayout、命令式 tween。
 16. StyleSheet 逃生舱：`Add` 返回 IDisposable 句柄。
 17. ListView：虚拟化运行时隐式锁定，静态/数据驱动强制互斥；ItemExitClass 退场动画。

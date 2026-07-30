@@ -316,8 +316,7 @@ pub fn compound_matches_node(c: &Compound, node_id: NodeId, scene: &Scene) -> bo
 }
 
 /// 运行时属性选择器匹配。Node 不存任意 HTML 属性字面值，按 name 分派到三类来源：
-/// - `[type="x"]`：input 的 type 在 parse 期固化为 NodeKind（Slider/NumberField/...
-///   各自独立 kind），selector 值 → NodeKind 精确对应（`type_matches_nodekind`）。
+/// - `[type="x"]`：role 化重构后控件由 `role` 驱动，但 `[type=...]` 选择器作为便利层保留——selector 值 → NodeKind 精确对应（`type_matches_nodekind`），如 `[type="checkbox"]` 命中 Toggle。
 /// - `[aria-*]`：aria 实时值从 ControlState 合成（`synth_aria_value`），随控件状态变。
 /// - `[role="x"]` / `[data-slot="x"]`：从 RoleTable 查打包期提取的静态值。
 ///
@@ -344,15 +343,19 @@ fn attr_matches_node(scene: &Scene, id: NodeId, a: &AttrSelector) -> bool {
             Some(val) => type_matches_nodekind(scene, id, val),
             None => false,
         },
-        // [type] 存在形式不支持：type 是结构性属性（input 恒有），存在性无匹配意义。
+        // [type] 存在形式不支持：type 不再是结构性属性（input 已下线，控件走 role），
+        // 且 Node 不存 type 字面值，存在性无匹配意义。
         ("type", AttrOp::Exists) => false,
         _ => false,
     }
 }
 
-/// `[type="x"]` selector 值 → NodeKind 精确匹配。映射须与 fence `resolve_semantic`（input
-/// 分支）一致：parse 期 `<input type=x>` → NodeKind 与 rematch 期 `[type=x]` → NodeKind 是
-/// 同一份标准 HTML 语义的两面，分歧会让 `[type="password"]` 误匹配错误 kind。
+/// `[type="x"]` selector 值 → NodeKind 精确匹配（runtime 选择器便利层）。
+///
+/// role 化重构后控件由 `role` 驱动（`<div role="switch">` → Toggle），但作者仍可写
+/// `[type="checkbox"]` 这类属性选择器——本函数把选择器值映射到对应 NodeKind（`checkbox` →
+/// Toggle、`range` → Slider、`text` → TextField ...）与节点实际 kind 比对。映射表是 selector
+/// 便利层，不再与 fence `resolve_semantic`（已无 input 分支）耦合。
 fn type_matches_nodekind(scene: &Scene, id: NodeId, val: &str) -> bool {
     let Some(node) = scene.get(id) else {
         return false;

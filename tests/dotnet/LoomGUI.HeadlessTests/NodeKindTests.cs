@@ -26,7 +26,7 @@ namespace LoomGUI.HeadlessTests
         [Fact]
         public void ImageIsFour() => Assert.Equal((byte)4, (byte)NodeKind.Image);
 
-        // ── 全变体逐个验判别值（显式声明的 Rust 顺序 0..19）──────────────
+        // ── 全变体逐个验判别值（显式声明的 Rust 顺序 0..18）──────────────
         // 任何变体名抄错 / 顺序错位 / 判别值漂移 → 对应 Fact 红。
 
         [Fact]
@@ -74,7 +74,7 @@ namespace LoomGUI.HeadlessTests
         // ── 结构不变量：变体数 + 紧凑 0..N-1（无空洞、无跳号）──────────
 
         /// <summary>
-        /// Rust node.rs 当前 20 变体。若 Rust 加/删变体未同步 C# → 此测红，
+        /// Rust node.rs 当前 18 个公共变体（C# 投影；Rust 侧额外的 `Template` 不进公共类型树）。若 Rust 加/删变体未同步 C# → 此测红，
         /// 提醒看护 ABI 对齐（同步两侧 enum）。
         /// </summary>
         [Fact]
