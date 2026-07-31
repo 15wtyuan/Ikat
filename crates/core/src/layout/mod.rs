@@ -152,12 +152,59 @@ pub fn solve(
         }
         let self_overflow = node.style.overflow_x != OverflowMode::Visible
             || node.style.overflow_y != OverflowMode::Visible;
-        // 叶子：Text/Image 装 MeasureContext。
+        // 叶子：Text/Image/文本控件装 MeasureContext。
+        // TextField/TextArea/NumberField 是控件叶子（value/placeholder 存 ControlState，
+        // 非 text_contents），须装 Text measure——否则 taffy content=0、高度只剩 padding，
+        // 文字不参与布局（pivot 后空 div 形态暴露：高度塌成 padding-only）。
         let ctx: Option<MeasureContext> = match &node.kind {
             NodeKind::TextNode => {
                 let s = &node.style;
                 Some(MeasureContext::Text {
                     content: scene.text_contents.get(&id).cloned().unwrap_or_default(),
+                    font_size: s.font_size,
+                    line_height: s.line_height,
+                    letter_spacing: s.letter_spacing,
+                    align: s.text_align,
+                    nowrap: s.white_space_nowrap,
+                    family: s.font_family.clone(),
+                    color: s.color,
+                    font_weight: s.font_weight,
+                    h_inset: lp(s.taffy_style.padding.left)
+                        + lp(s.taffy_style.padding.right)
+                        + lp(s.taffy_style.border.left)
+                        + lp(s.taffy_style.border.right),
+                })
+            }
+            NodeKind::TextField | NodeKind::TextArea | NodeKind::NumberField => {
+                let s = &node.style;
+                // value 优先，空时用 placeholder（与 render 显示一致）；measure 用显示文本
+                // 算 intrinsic size，taffy 再加 padding/border → border-box 高度含文字行高。
+                let content = scene
+                    .controls
+                    .get(id)
+                    .and_then(|cs| match cs {
+                        crate::scene::node::ControlState::TextField(e)
+                        | crate::scene::node::ControlState::TextArea(e) => {
+                            let dv = crate::scene::control::display_value(e).0;
+                            Some(if dv.is_empty() {
+                                e.placeholder.clone()
+                            } else {
+                                dv
+                            })
+                        }
+                        crate::scene::node::ControlState::NumberField { edit, .. } => {
+                            let dv = crate::scene::control::display_value(edit).0;
+                            Some(if dv.is_empty() {
+                                edit.placeholder.clone()
+                            } else {
+                                dv
+                            })
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                Some(MeasureContext::Text {
+                    content,
                     font_size: s.font_size,
                     line_height: s.line_height,
                     letter_spacing: s.letter_spacing,

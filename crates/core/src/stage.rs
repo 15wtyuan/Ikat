@@ -1068,9 +1068,11 @@ mod tests {
     }
 
     #[test]
-    fn tick_skips_empty_textfield_placeholder_at_layout() {
-        // value 为空时不缓存 TextLayout——render 阶段 lazy fallback 会测 placeholder。
-        // 若缓存空串 layout，render 的 unwrap_or_else 不触发，placeholder 无法显示。
+    fn tick_empty_textfield_measures_placeholder_height() {
+        // 空 value TextField 用 placeholder 做 layout measure（intrinsic size 含 placeholder
+        // 文字行高，不是 padding-only）。layout measure 闭包缓存 placeholder TextLayout，
+        // render 直接复用（不再 lazy fallback）。这在 pivot 后空 div 形态尤其重要：
+        // 无 measure 则 taffy content=0、高度塌成 padding-only，文字不参与布局。
         let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
         let mut stage = Stage::new((200.0, 100.0)).unwrap();
         stage
@@ -1095,9 +1097,16 @@ mod tests {
         crate::scene::dynamic::append_child(scene, root, tf).unwrap();
         stage.tick_and_render();
         let scene = stage.scene.as_ref().unwrap();
+        // placeholder TextLayout 被缓存（layout measure 用 placeholder 算 intrinsic size）
         assert!(
-            scene.text_layouts[tf.index()].is_none(),
-            "empty value TextField should NOT cache TextLayout — render lazy fallback handles placeholder"
+            scene.text_layouts[tf.index()].is_some(),
+            "空 value TextField 应缓存 placeholder TextLayout（layout measure 用它算高度）"
+        );
+        // 高度含 placeholder 文字行高（default style padding=0，h≈文字行高 > 0）
+        let h = scene.get(tf).unwrap().layout_rect.h;
+        assert!(
+            h > 1.0,
+            "空 TextField 高度应含 placeholder 文字行高（h={:.1}），非 0", h
         );
     }
 }
