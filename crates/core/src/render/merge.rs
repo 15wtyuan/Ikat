@@ -22,7 +22,16 @@ fn hash_color_matrix(m: &[f32; 20]) -> u64 {
 /// DrawState 键（image_path, program, mask_context, alpha_bits, color_matrix_hash）。
 /// program=0/1 Mesh 才参与合并。含 color_matrix 哈希——不同 color filter（如 grayscale vs sepia）
 /// 不能合批，否则 filter 数据在 merge_batch 中被清零丢失。
-fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32, u64)> {
+///
+/// 控件 node_id（control_ids）强制返回 None：merge 会把被合并者的 node_id 吞成 anchor，
+/// 控件必须保留独立 node_id 供 Unity 后端建交互实体（hit test / 状态 / 镜像 GameObject）。
+fn mesh_key(
+    control_ids: &std::collections::HashSet<u32>,
+    rn: &RenderNode,
+) -> Option<(Option<String>, u32, u32, u32, u64)> {
+    if control_ids.contains(&rn.node_id) {
+        return None; // 控件保留独立 node_id，不参与合并
+    }
     if rn.node_id & crate::render::BACK_LAYER_FLAG != 0 {
         return None; // back-layer 合成节点（如 box-shadow）不合批
     }
@@ -51,8 +60,11 @@ fn mesh_key(rn: &RenderNode) -> Option<(Option<String>, u32, u32, u32, u64)> {
 }
 
 /// 按 sort_key 扫描，连续同 DrawState 的 Mesh 节点合并成单个 merged Mesh payload。
-/// merged node_id = batch 内最小原始 node_id（锚）。
-pub fn merge_meshes(nodes: Vec<RenderNode>) -> Vec<RenderNode> {
+/// merged node_id = batch 内最小原始 node_id（锚）。控件 node_id（control_ids）排除合并。
+pub fn merge_meshes(
+    control_ids: &std::collections::HashSet<u32>,
+    nodes: Vec<RenderNode>,
+) -> Vec<RenderNode> {
     // 1. 按 sort_key 排序（重排后序）。
     let mut order: Vec<usize> = (0..nodes.len()).collect();
     order.sort_by_key(|&i| nodes[i].sort_key);
@@ -61,9 +73,9 @@ pub fn merge_meshes(nodes: Vec<RenderNode>) -> Vec<RenderNode> {
     let mut i = 0;
     while i < order.len() {
         let idx = order[i];
-        let key = mesh_key(&nodes[idx]);
+        let key = mesh_key(control_ids, &nodes[idx]);
         if key.is_none() {
-            // Text：原样。
+            // Text / 控件：原样保留独立 node_id。
             out.push(nodes[idx].clone());
             i += 1;
             continue;
@@ -73,7 +85,7 @@ pub fn merge_meshes(nodes: Vec<RenderNode>) -> Vec<RenderNode> {
         // key 含 Option<String>（非 Copy），用 ref 比较避免 move。
         let mut batch_idx: Vec<usize> = vec![idx];
         let mut j = i + 1;
-        while j < order.len() && mesh_key(&nodes[order[j]]).as_ref() == Some(&key) {
+        while j < order.len() && mesh_key(control_ids, &nodes[order[j]]).as_ref() == Some(&key) {
             batch_idx.push(order[j]);
             j += 1;
         }
@@ -201,7 +213,7 @@ mod tests {
             mesh_node(5, Some("a.png"), 0, 1.0, 0.0),
             mesh_node(3, Some("a.png"), 1, 1.0, 100.0), // 同 alpha
         ];
-        let out = merge_meshes(nodes);
+        let out = merge_meshes(&Default::default(), nodes);
         assert_eq!(out.len(), 1, "2 同 DrawState → 1 merged");
         match &out[0].payload {
             NodePayload::Mesh {
@@ -236,7 +248,7 @@ mod tests {
             mesh_node(2, Some("a.png"), 1, 1.0, 50.0),
             mesh_node(3, Some("a.png"), 2, 1.0, 100.0),
         ];
-        let out = merge_meshes(nodes);
+        let out = merge_meshes(&Default::default(), nodes);
         assert_eq!(out.len(), 1);
         if let NodePayload::Mesh { indices, .. } = &out[0].payload {
             // 第一组 [0,1,2,0,2,3]，第二组 +4 [4,5,6,4,6,7]，第三组 +8 [8,9,10,8,10,11]。
@@ -256,7 +268,7 @@ mod tests {
             mesh_node(1, Some("a.png"), 0, 1.0, 0.0),
             mesh_node(2, Some("b.png"), 1, 1.0, 100.0),
         ];
-        let out = merge_meshes(nodes);
+        let out = merge_meshes(&Default::default(), nodes);
         assert_eq!(out.len(), 2, "不同 image_path → 各自独立");
     }
 
@@ -267,7 +279,7 @@ mod tests {
         let mut a = mesh_node(1, Some("a.png"), 0, 1.0, 0.0);
         a.world_matrix = transform::from_rotate(0.5); // 非纯平移
         let b = mesh_node(2, Some("a.png"), 1, 1.0, 100.0); // 纯平移（IDENTITY）
-        let out = merge_meshes(vec![a, b]);
+        let out = merge_meshes(&Default::default(), vec![a, b]);
         assert_eq!(out.len(), 2, "非纯平移节点 break merge");
     }
 
@@ -295,7 +307,7 @@ mod tests {
             program: 1,
             color_matrix: [0.0; 20],
         };
-        let out = merge_meshes(vec![t1, t2]);
+        let out = merge_meshes(&Default::default(), vec![t1, t2]);
         assert_eq!(out.len(), 1, "两同 atlas text 节点 → 1 merged");
         match &out[0].payload {
             NodePayload::Mesh { verts, .. } => {
@@ -331,7 +343,7 @@ mod tests {
             program: 1,
             color_matrix: [0.0; 20],
         };
-        let out = merge_meshes(vec![t1, t2]);
+        let out = merge_meshes(&Default::default(), vec![t1, t2]);
         assert_eq!(out.len(), 1, "两同 atlas text 节点 → 1 merged");
         match &out[0].payload {
             NodePayload::Mesh {
@@ -357,7 +369,7 @@ mod tests {
             mesh_node(1, Some("a.png"), 0, 1.0, 0.0),
             mesh_node(2, Some("a.png"), 1, 0.5, 100.0), // 不同 alpha
         ];
-        let out = merge_meshes(nodes);
+        let out = merge_meshes(&Default::default(), nodes);
         assert_eq!(out.len(), 2, "不同 alpha → 不合并");
     }
 
@@ -368,7 +380,7 @@ mod tests {
             mesh_node(1, Some("a.png"), 0, 0.5, 0.0),
             mesh_node(2, Some("a.png"), 1, 0.5, 100.0),
         ];
-        let out = merge_meshes(nodes);
+        let out = merge_meshes(&Default::default(), nodes);
         assert_eq!(out.len(), 1, "同 alpha 合并");
         if let NodePayload::Mesh { colors, .. } = &out[0].payload {
             for c in colors {
@@ -421,8 +433,8 @@ mod tests {
 
         let n1 = make_node(1, grayscale);
         let n2 = make_node(2, sepia);
-        let k1 = mesh_key(&n1);
-        let k2 = mesh_key(&n2);
+        let k1 = mesh_key(&Default::default(), &n1);
+        let k2 = mesh_key(&Default::default(), &n2);
         assert_ne!(k1, k2, "不同 color_matrix → 不同 mesh_key，不合并");
     }
 
@@ -465,7 +477,7 @@ mod tests {
         };
 
         let nodes = vec![make_node(1, 0), make_node(2, 1)];
-        let out = merge_meshes(nodes);
+        let out = merge_meshes(&Default::default(), nodes);
         assert_eq!(out.len(), 1, "同 color_matrix 仍可合并");
 
         // merged batch must inherit the non-zero color_matrix, not zero it out.
@@ -483,5 +495,29 @@ mod tests {
             }
             _ => panic!("expected Mesh"),
         }
+    }
+
+    #[test]
+    fn control_node_id_excluded_from_merge() {
+        // 控件节点（control_ids）必须保留独立 node_id：Unity 后端按 node_id 建交互实体
+        // （hit test / 状态 / 镜像 GameObject）。即便与邻居同 DrawState 相邻，也排除合并——
+        // 否则 merge 把控件 node_id 吞成 anchor，Unity 丢失控件实体（不渲染、不可交互）。
+        // 复现：pivot 后 Toggle/RadioButton 是空 div，自身 background mesh 走 program=0，
+        // 与相邻纯色背景同 DrawState，被合并后 node_id 消失。
+        let nodes = vec![
+            mesh_node(10, None, 0, 1.0, 0.0),  // 控件
+            mesh_node(11, None, 1, 1.0, 100.0), // 同 DrawState 邻居
+        ];
+        let control_ids: std::collections::HashSet<u32> = [10u32].iter().copied().collect();
+        let out = merge_meshes(&control_ids, nodes);
+        assert_eq!(out.len(), 2, "控件排除合并 → 控件与邻居各自独立");
+        assert!(
+            out.iter().any(|rn| rn.node_id == 10),
+            "控件 node_id 10 保留（未被吞成 anchor）"
+        );
+        assert!(
+            out.iter().any(|rn| rn.node_id == 11),
+            "邻居 node_id 11 保留"
+        );
     }
 }
