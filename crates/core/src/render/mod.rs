@@ -559,7 +559,32 @@ pub fn build_render_nodes(
     propagate_back_layer_sort_keys(&mut nodes, &back_layer_pairs);
     propagate_inline_image_sort_keys(&mut nodes, &inline_image_pairs);
     batch::reorder_for_batching(scene, &mut nodes);
-    let mut nodes = merge::merge_meshes(nodes);
+    // 控件节点必须保留独立 node_id（Unity 按 node_id 建交互实体/镜像 GameObject）。
+    // merge 会把相邻同 DrawState 节点合并成单个（node_id 取 anchor），吞掉被合并者的
+    // node_id —— 控件被吞 = Unity 丢失控件实体（不渲染、不可交互）。故控件排除出合并。
+    let control_ids: std::collections::HashSet<u32> = scene
+        .nodes
+        .iter()
+        .filter_map(|(_, n)| {
+            if matches!(
+                n.kind,
+                NodeKind::Toggle
+                    | NodeKind::RadioButton
+                    | NodeKind::Slider
+                    | NodeKind::ProgressBar
+                    | NodeKind::Dropdown
+                    | NodeKind::OptionItem
+                    | NodeKind::TextField
+                    | NodeKind::TextArea
+                    | NodeKind::NumberField
+            ) {
+                Some(n.id.0)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let mut nodes = merge::merge_meshes(&control_ids, nodes);
     // post-merge 最大 sort_key：scrollbar thumb / open popup 末尾追加续号用。须在
     // reorder + merge 之后算——reorder 重赋全序 sort_key、merge 可能吞空 mesh entry，
     // pre-merge 的 max 会过期（popup 末尾追加若用过期值，sort_key 会与正常节点交错，
@@ -1571,11 +1596,24 @@ fn render_one_node(
     let alpha = anim.and_then(|a| a.opacity).unwrap_or(n.style.opacity);
     let color_tint = anim.and_then(|a| a.text_color).unwrap_or(n.style.color);
     let rn = match n.kind {
-        // Dropdown/OptionItem 是控件（不在 is_container），但渲染上需要一个背景框
-        // （combobox 外壳 / option 列表项），故与 Container 同路径 build_container_mesh。
-        // 控件视觉子结构由作者按 role/data-slot 自写（§2.3，core 不注入），文字由各自的
-        // TextNode 子节点画（combobox value 文本、option 的子文本），本臂不叠加文字。
-        k if k.is_container() || matches!(k, NodeKind::Dropdown | NodeKind::OptionItem) => {
+        // 控件外壳节点（不在 is_container）但渲染上需要一个背景框：
+        // - Dropdown/OptionItem：combobox 外壳 / 选项列表项
+        // - Toggle/RadioButton：空 div，勾选样式靠自身 [role]/[aria-checked] 的 background
+        // - Slider/ProgressBar：轨道 / 底色（fill/thumb 子节点另自渲染）
+        // pivot 后控件视觉子结构由作者按 role/data-slot 自写（§2.3，core 不注入），
+        // 这些控件自身必须画 background（否则空 div 形态的 Toggle/Radio 完全不可见）。
+        // 文字由各自的 TextNode 子节点画，本臂不叠加文字。
+        k if k.is_container()
+            || matches!(
+                k,
+                NodeKind::Dropdown
+                    | NodeKind::OptionItem
+                    | NodeKind::Toggle
+                    | NodeKind::RadioButton
+                    | NodeKind::Slider
+                    | NodeKind::ProgressBar
+            ) =>
+        {
             build_container_mesh(
                 n,
                 node_id,
