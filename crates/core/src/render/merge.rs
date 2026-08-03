@@ -505,7 +505,7 @@ mod tests {
         // 复现：pivot 后 Toggle/RadioButton 是空 div，自身 background mesh 走 program=0，
         // 与相邻纯色背景同 DrawState，被合并后 node_id 消失。
         let nodes = vec![
-            mesh_node(10, None, 0, 1.0, 0.0),  // 控件
+            mesh_node(10, None, 0, 1.0, 0.0),   // 控件
             mesh_node(11, None, 1, 1.0, 100.0), // 同 DrawState 邻居
         ];
         let control_ids: std::collections::HashSet<u32> = [10u32].iter().copied().collect();
