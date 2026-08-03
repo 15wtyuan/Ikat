@@ -3566,6 +3566,87 @@ fn numberfield_renders_value_text() {
     );
 }
 
+// ── 控件外壳背景渲染（Toggle/RadioButton/Slider/ProgressBar）──
+// 39d0a8d 回归守卫：这四种控件是「空 div」——视觉全靠自身 background（不像 Slider/ProgressBar
+// 的 data-slot 子节点能兑底，Toggle/RadioButton 连子节点都没有）。修复前它们不在 is_container()
+// 也无专门 render arm，落入 `_ => 空 mesh`，在 Unity PlayMode 完全不渲染/不可交互。
+// 本组测试固化「控件外壳画自身 background」不变量。
+
+/// 构造一个控件外壳叶子节点 scene（带 background + ControlState）。
+fn make_control_shell_scene(kind: NodeKind, state: ControlState, bg: [f32; 4]) -> (Scene, NodeId) {
+    let mut n = Node::default();
+    n.id = NodeId(0);
+    n.kind = kind;
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 40.0,
+        h: 40.0,
+    };
+    n.style.background_color = Some(bg);
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let root = scene.roots[0];
+    scene.controls.ensure(root, state);
+    (scene, root)
+}
+
+#[test]
+fn control_shell_paints_own_background() {
+    // 每种空 div 控件必产一个 program=0、非空 verts、node_id 命中的背景 Mesh。
+    // 若某控件从 build_container_mesh arm 脱落（如当年 Toggle/RadioButton），会落入 `_ =>` 空
+    // mesh，本断言即失败——直接编码「控件外壳画自身 background」不变量。
+    let bg = [0.2, 0.6, 0.9, 1.0];
+    let cases: Vec<(NodeKind, ControlState)> = vec![
+        (NodeKind::Toggle, ControlState::Toggle { checked: false }),
+        (
+            NodeKind::RadioButton,
+            ControlState::Radio {
+                checked: false,
+                name: "g".into(),
+            },
+        ),
+        (
+            NodeKind::Slider,
+            ControlState::Slider {
+                value: 0.0,
+                min: 0.0,
+                max: 1.0,
+                step: 0.1,
+                dragging: false,
+            },
+        ),
+        (
+            NodeKind::ProgressBar,
+            ControlState::Progress {
+                value: 0.5,
+                max: 1.0,
+                indeterminate: false,
+            },
+        ),
+    ];
+    let fonts = test_font_table().expect("need test font");
+    for (kind, state) in cases {
+        let (mut scene, id) = make_control_shell_scene(kind, state, bg);
+        crate::scene::transform::compute_world_transforms(&mut scene);
+        let (frame, _, _) = build_render_nodes(
+            &scene,
+            &fonts,
+            &std::collections::HashMap::new(),
+            &empty_sizes(),
+            &mut test_glyph_atlas(),
+        );
+        let has_bg = frame.nodes.iter().any(|rn| {
+            rn.node_id == id.0
+                && matches!(&rn.payload, NodePayload::Mesh { program: 0, verts, .. } if !verts.is_empty())
+        });
+        assert!(
+            has_bg,
+            "{:?} 控件外壳必须画自身 background（program=0 非空 Mesh，node_id 命中）",
+            kind
+        );
+    }
+}
+
 #[test]
 fn textfield_empty_value_renders_placeholder() {
     // value 为空 → 渲染 placeholder 文字。
