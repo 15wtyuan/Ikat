@@ -48,8 +48,8 @@ pub enum DisplayDefault {
 // ── SemanticKind ────────────────────────────────────────────────────
 
 /// Stable semantic type assigned to an element at annotate time.
-/// Determined by tag name + immutable structural attributes (e.g.
-/// `input[type]`), never by CSS class or computed style.
+/// Determined by tag name + WAI-ARIA `role` (e.g. `<div role="slider">` → Slider),
+/// never by CSS class or computed style. See `resolve_semantic`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SemanticKind {
     Container,

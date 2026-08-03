@@ -242,7 +242,7 @@ pub fn check_control_css(
             format!(
                 "LoomGUI {kind_name} element <{tag}> has no matching CSS rule. \
                  Controls have NO built-in default style — without CSS they render blank. \
-                 {fix_hint} See docs/design/fence.md §control-css."
+                 {fix_hint} See docs/design/fence.md §6.7."
             ),
             line_map.source_location(node.span.start, file.to_string()),
         ));

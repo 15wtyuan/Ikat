@@ -1110,4 +1110,73 @@ mod tests {
             h
         );
     }
+
+    #[test]
+    fn tick_textarea_and_numberfield_measure_intrinsic_height() {
+        // d455652 回归守卫：measure MeasureContext arm 覆盖 TextField | TextArea | NumberField。
+        // tick_empty_textfield_measures_placeholder_height 只测 TextField；TextArea/NumberField
+        // 的 measure arm 若脱落（退回 padding-only 高度），文字不参与布局，本断言即失败。
+        let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+        let cases: Vec<(
+            crate::scene::node::NodeKind,
+            crate::asset::ControlInit,
+            &str,
+        )> = vec![
+            (
+                crate::scene::node::NodeKind::TextArea,
+                crate::asset::ControlInit::TextArea(crate::asset::EditInit {
+                    value: "multi\nline".into(),
+                    placeholder: String::new(),
+                    max_length: 0,
+                    readonly: false,
+                }),
+                "TextArea",
+            ),
+            (
+                crate::scene::node::NodeKind::NumberField,
+                crate::asset::ControlInit::NumberField {
+                    edit: crate::asset::EditInit {
+                        value: "42".into(),
+                        placeholder: String::new(),
+                        max_length: 0,
+                        readonly: false,
+                    },
+                    min: 0.0,
+                    max: 100.0,
+                    step: 1.0,
+                },
+                "NumberField",
+            ),
+        ];
+        for (kind, init, label) in cases {
+            let mut stage = Stage::new((200.0, 100.0)).unwrap();
+            stage
+                .register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+                .unwrap();
+            stage.ensure_scene();
+            let scene = stage.scene.as_mut().unwrap();
+            let root = crate::scene::dynamic::create_root(scene, "div", "").unwrap();
+            let node = crate::scene::dynamic::create_node_from_template(
+                scene,
+                kind,
+                crate::style::resolved::ResolvedStyle::default(),
+                Some(init),
+            );
+            crate::scene::dynamic::append_child(scene, root, node).unwrap();
+            stage.tick_and_render();
+            let scene = stage.scene.as_ref().unwrap();
+            assert!(
+                scene.text_layouts[node.index()].is_some(),
+                "{} TextLayout must be measured at layout stage (after solve)",
+                label
+            );
+            let h = scene.get(node).unwrap().layout_rect.h;
+            assert!(
+                h > 1.0,
+                "{} 高度应含文字行高（h={:.1}），非 padding-only 塌缩",
+                label,
+                h
+            );
+        }
+    }
 }
