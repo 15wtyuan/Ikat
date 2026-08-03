@@ -1106,7 +1106,8 @@ mod tests {
         let h = scene.get(tf).unwrap().layout_rect.h;
         assert!(
             h > 1.0,
-            "空 TextField 高度应含 placeholder 文字行高（h={:.1}），非 0", h
+            "空 TextField 高度应含 placeholder 文字行高（h={:.1}），非 0",
+            h
         );
     }
 }
