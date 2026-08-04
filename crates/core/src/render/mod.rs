@@ -886,14 +886,18 @@ fn propagate_text_sub_page_sort_keys(
 ) {
     // 收集附属 mesh（子页 + 文字首页 + 编辑反馈），按 primary 分组。
     // 遍历 nodes 按 push 序收集 → synth_ids 保 push 序（= 绘制层序）。
+    // 同一遍历建 synth_id→位置 映射，供下方赋 sort_key O(1) 查找（合成 id 有意
+    // 不进 id_to_pos，见 push_text_sub_pages 注释）。
     let mut groups: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
-    for rn in nodes.iter() {
+    let mut synth_pos: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    for (i, rn) in nodes.iter().enumerate() {
         if is_text_sub_page(rn.node_id)
             || is_tf_text_synth(rn.node_id)
             || is_tf_edit_synth(rn.node_id)
         {
             let primary = text_sub_primary_id(rn.node_id);
             groups.entry(primary).or_default().push(rn.node_id);
+            synth_pos.insert(rn.node_id, i);
         }
     }
     if groups.is_empty() {
@@ -939,12 +943,9 @@ fn propagate_text_sub_page_sort_keys(
         let primary_sk = nodes[pos].sort_key;
         let primary_mask = nodes[pos].mask_context;
         for (offset, &synth_id) in synth_ids.iter().enumerate() {
-            for rn in nodes.iter_mut() {
-                if rn.node_id == synth_id {
-                    rn.sort_key = primary_sk + 1 + offset as u32;
-                    rn.mask_context = primary_mask;
-                    break;
-                }
+            if let Some(&i) = synth_pos.get(&synth_id) {
+                nodes[i].sort_key = primary_sk + 1 + offset as u32;
+                nodes[i].mask_context = primary_mask;
             }
         }
     }
@@ -1414,7 +1415,14 @@ fn push_text_meshes(
             mask_context: MaskContext(0),
             sort_key: 0,
             change_level: ChangeLevel::Full,
-            reuse_key: n.reuse_key,
+            // 与下方非空首页同规则：合成 id 模式（文本控件：背景已占真 node_id）→
+            // reuse_key=0；真 id 模式（普通 TextNode）→ 继承 n.reuse_key。空占位 mesh
+            // 同样按 node_id keying 独立 GO，虚拟列表 slot 内不与背景按 reuse_key 冲突。
+            reuse_key: if text_primary_id == node_id {
+                n.reuse_key
+            } else {
+                0
+            },
             effect,
             payload: NodePayload::Mesh {
                 verts: vec![],

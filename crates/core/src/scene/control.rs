@@ -853,10 +853,7 @@ pub fn on_text_pointer_down(scene: &mut Scene, id: NodeId, local_x: f32, local_y
         // 钳到 value.len() + char 边界：offset 来自 text_layouts 的 layout，value 空时
         // layout 基于 placeholder（layout solve 缓存 display 文本），offset 可达 placeholder
         // 字节数 > value.len()=0 → cursor 越界 → insert_str panic（is_char_boundary 断言失败）。
-        let mut safe = offset.min(value.len());
-        while !value.is_char_boundary(safe) {
-            safe -= 1;
-        }
+        let safe = clamp_boundary(&value, offset);
         e.cursor = safe;
         e.anchor = safe;
         e.cursor_visible = true;
@@ -2814,6 +2811,18 @@ mod tests {
         }
         // 点击 placeholder 中部（content-local）：hit_byte_offset 返 placeholder 字节偏移（>0），
         // 但 value 空 → 修复前 cursor 越界，修复后须钳到 0。
+        // 先验前置条件：raw offset 须 > value.len()=0，否则测试平凡通过没真正测到 clamp 路径
+        // （依赖 DejaVuSans 首字形宽度，x=50 须落在首字之后）。
+        {
+            let layout = scene.text_layouts[id.index()].as_ref().unwrap();
+            let value = "";
+            let ranges = line_byte_ranges(layout, value);
+            let raw = hit_byte_offset(layout, &ranges, 50.0, 5.0);
+            assert!(
+                raw > 0,
+                "前置条件：raw offset={raw} 须 > value.len()=0，否则测试未真正触发 clamp"
+            );
+        }
         on_text_pointer_down(&mut scene, id, 50.0, 5.0);
         let cursor = get_cursor(&scene, id);
         assert_eq!(
