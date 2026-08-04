@@ -1,4 +1,5 @@
-//! 包格式（.pkg.bin，当前 version=28）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=29）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! v29：TemplateNode 加 aria_controls 列（TabList tab→panel 跨树关联的 panel id）。
 //! v28：TemplateNode 加 role/data-slot 列（role-driven controls 地基）。
 //! v27：<template> 子树进 pkg（NodeKind::Template 新增，旧 v26 pkg 加载报 TooOld）。
 //! v26：ControlInit 加 Dropdown/NumberField 变体（bincode 布局变，旧 v25 pkg 加载报 TooOld）。
@@ -22,9 +23,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 28; // v28: TemplateNode role/data-slot columns (role-driven controls)
-pub(crate) const MIN_VERSION: u32 = 28;
-pub(crate) const MAX_VERSION: u32 = 28;
+pub const PKG_FORMAT_VERSION: u32 = 29; // v29: TemplateNode.aria_controls (TabList panel linkage)
+pub(crate) const MIN_VERSION: u32 = 29;
+pub(crate) const MAX_VERSION: u32 = 29;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────
@@ -112,6 +113,9 @@ pub struct TemplateNode {
     pub role: Option<String>,
     /// data-slot 值（"fill"/"thumb"）。控件视觉部件标识（HTML data-* 私有扩展机制）。
     pub data_slot: Option<String>,
+    /// WAI-ARIA `aria-controls`（TabList tab→panel 跨树关联的 panel id）。None = 非关联节点。
+    /// 运行时由 instantiate 拷进 RoleInfo.aria_controls，sync_control_visuals 据此 find_node_by_id 解析 panel。
+    pub aria_controls: Option<String>,
 }
 
 /// write_package 的输入（打包器构造，已归一化：path 已相对、style 已 bake）。
@@ -175,7 +179,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     // 每组件：(name_idx, root_node_idx, node_count, dynamic_blob)
     // 全局 NodeBlock 由各组件节点顺次拼接，root_node_idx = 该组件首节点在全局的位置。
     let mut comp_records: Vec<(u16, u32, u32, Vec<u8>)> = Vec::with_capacity(component_count);
-    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, control_init_blob, role_idx, data_slot_idx)
+    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, control_init_blob, role_idx, data_slot_idx, aria_controls_idx)
     let mut node_records: Vec<(
         i32,
         u8,
@@ -187,6 +191,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         u8,
         i32,
         Vec<u8>,
+        u16,
         u16,
         u16,
     )> = Vec::new();
@@ -256,6 +261,12 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 .as_ref()
                 .map(|s| intern(s, &mut strings, &mut idx_of))
                 .unwrap_or(NULL_IDX);
+            // aria_controls：Option<String> → StringTable 索引（同 role/data_slot 模式，NULL_IDX 表 None）。
+            let aria_controls_idx = tn
+                .aria_controls
+                .as_ref()
+                .map(|s| intern(s, &mut strings, &mut idx_of))
+                .unwrap_or(NULL_IDX);
             node_records.push((
                 parent_global,
                 kind_tag,
@@ -269,6 +280,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 control_init_blob,
                 role_idx,
                 data_slot_idx,
+                aria_controls_idx,
             ));
         }
         let node_count = nodes.len() as u32;
@@ -300,7 +312,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     }
     // NodeBlock: 每节点 {parent_idx(i32), kind_tag(u8), style_len(u32)+style_blob, text_idx(u16), src_idx(u16),
     //   class_count(u16)+class_idx[], id_idx(u16), flags(u8), tabindex(i32), control_init_len(u32)+control_init_blob,
-    //   role_idx(u16), data_slot_idx(u16)}
+    //   role_idx(u16), data_slot_idx(u16), aria_controls_idx(u16)}
     for (
         parent_idx,
         kind_tag,
@@ -314,6 +326,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         control_init_blob,
         role_idx,
         data_slot_idx,
+        aria_controls_idx,
     ) in &node_records
     {
         out.extend_from_slice(&parent_idx.to_le_bytes());
@@ -333,6 +346,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         out.extend_from_slice(control_init_blob);
         out.extend_from_slice(&role_idx.to_le_bytes());
         out.extend_from_slice(&data_slot_idx.to_le_bytes());
+        out.extend_from_slice(&aria_controls_idx.to_le_bytes());
     }
     // PerComponentDynamicRules：每组件 dynamic_blob（同 ComponentTable 顺序）。read 按同序逐组件读。
     for (_, _, _, dynamic_blob) in &comp_records {
@@ -410,9 +424,10 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         let control_init_len = r.u32("control_init_len")? as usize;
         let control_init: Option<ControlInit> =
             bincode::deserialize(r.take(control_init_len, "control_init_blob")?)?;
-        // role/data-slot：StringTable 索引（同 id_attr，NULL_IDX 表 None）。
+        // role/data-slot/aria_controls：StringTable 索引（同 id_attr，NULL_IDX 表 None）。
         let role_idx = r.u16("role_idx")?;
         let data_slot_idx = r.u16("data_slot_idx")?;
+        let aria_controls_idx = r.u16("aria_controls_idx")?;
         let role = if role_idx == NULL_IDX {
             None
         } else {
@@ -422,6 +437,11 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             None
         } else {
             Some(string_at(&strings, data_slot_idx)?)
+        };
+        let aria_controls = if aria_controls_idx == NULL_IDX {
+            None
+        } else {
+            Some(string_at(&strings, aria_controls_idx)?)
         };
         // 存盘 parent_idx 是 NodeBlock 全局位置（-1=组件根）；先存全局，待切分组件时减 base 转局部
         let parent_global = if pidx < 0 { None } else { Some(pidx as usize) };
@@ -460,6 +480,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             control_init,
             role,
             data_slot,
+            aria_controls,
         });
     }
     // PerComponentDynamicRules: 每组件 dynamic_blob（按 ComponentTable 序）

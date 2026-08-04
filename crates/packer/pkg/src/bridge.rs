@@ -63,6 +63,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     control_init,
                     role,
                     data_slot,
+                    aria_controls: None, // placeholder：aria-controls 属性提取待控件束接入（TabList tab→panel）
                 });
             }
             IrNodeKind::Text(s) => {
@@ -82,6 +83,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     control_init: None,
                     role: None,
                     data_slot: None,
+                    aria_controls: None,
                 });
             }
         }

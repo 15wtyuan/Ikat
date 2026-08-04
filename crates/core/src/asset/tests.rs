@@ -15,6 +15,7 @@ fn tn(kind: NodeKind) -> TemplateNode {
         control_init: None,
         role: None,
         data_slot: None,
+        aria_controls: None,
     }
 }
 
@@ -46,6 +47,7 @@ fn write_package_panics_when_string_table_exhausted() {
             control_init: None,
             role: None,
             data_slot: None,
+            aria_controls: None,
         });
     }
     let rules = empty_rules();
@@ -337,6 +339,7 @@ fn read_rejects_cross_component_parent() {
     //   固定部分 = 22B + style_blob_len + 2*class_count（v19 删 dc_idx 2B，v18 的 24B 减 2B）。
     //   v24 加 control_init_len(4) + control_init_blob（None = 1B），故固定部分 +5B。
     //   v28 加 role_idx(2) + data_slot_idx(2) 于 control_init_blob 后，固定部分再 +4B。
+    //   v29 加 aria_controls_idx(2)（TabList），固定部分再 +2B。
     let style_len_0 = u32::from_le_bytes(
         bytes[nodeblock_off + 5..nodeblock_off + 9]
             .try_into()
@@ -348,7 +351,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node0_size = 22 + style_len_0 + 2 * class_count_0 + 5 + 4;
+    let node0_size = 22 + style_len_0 + 2 * class_count_0 + 5 + 6;
     let node1_off = nodeblock_off + node0_size;
     let style_len_1 =
         u32::from_le_bytes(bytes[node1_off + 5..node1_off + 9].try_into().unwrap()) as usize;
@@ -357,7 +360,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node1_size = 22 + style_len_1 + 2 * class_count_1 + 5 + 4;
+    let node1_size = 22 + style_len_1 + 2 * class_count_1 + 5 + 6;
     let node2_off = nodeblock_off + node0_size + node1_size;
     // 篡改节点 2（comp_b root）的 parent_idx 从 -1 → 0（< base=2，跨组件）
     let mut patched = bytes.clone();
@@ -469,6 +472,7 @@ fn template_node_content_src_roundtrip_via_pkg() {
         control_init: None,
         role: None,
         data_slot: None,
+        aria_controls: None,
     };
     let nodes = [text, img];
     let rules = empty_rules();
@@ -529,6 +533,7 @@ fn v18_nontrivial_nodekinds_roundtrip() {
             control_init: None,
             role: None,
             data_slot: None,
+            aria_controls: None,
         };
         let empty_rules = DynamicRuleTable { rules: vec![] };
         let input = PackageInput {
@@ -748,20 +753,22 @@ fn pkg_v27_rejects_v26() {
     );
 }
 
-// ── v28: role / data-slot ─────────────────────────────────────────
+// ── v29: aria_controls（TabList tab→panel 跨树关联）────────────────
 
-/// v28: role/data-slot 经完整 pkg.bin 路径（write_package → read_package）往返保真。
-/// 这是 role-driven controls 地基：TemplateNode 携带 role/data_slot 字符串列，
-/// serialize/deserialize 必须保真，否则后续 find_child_by_role/slot 查表会丢失语义。
+/// v29: role/data-slot/aria_controls 三个 StringTable interning 字符串列经完整 pkg.bin
+/// 路径（write_package → read_package）往返保真。aria_controls 是 TabList 地基：
+/// 打包期提取 HTML aria-controls 属性，runtime instantiate 拷进 RoleInfo.aria_controls，
+/// sync_control_visuals 据此 find_node_by_id 解析 panel。
 #[test]
-fn pkg_v28_roundtrip_with_role() {
+fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 28,
-        "pkg format version must be 28 after role/data-slot bump"
+        PKG_FORMAT_VERSION, 29,
+        "pkg format version must be 29 after aria_controls bump"
     );
     let mut node = tn(NodeKind::Container);
-    node.role = Some("slider".into());
+    node.role = Some("tab".into());
     node.data_slot = Some("thumb".into());
+    node.aria_controls = Some("panel-audio".into());
     let nodes = [node];
     let rules = empty_rules();
     let input = PackageInput {
@@ -769,14 +776,15 @@ fn pkg_v28_roundtrip_with_role() {
     };
     let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
     let back = &pkg.components["c"].nodes[0];
-    assert_eq!(back.role.as_deref(), Some("slider"));
+    assert_eq!(back.role.as_deref(), Some("tab"));
     assert_eq!(back.data_slot.as_deref(), Some("thumb"));
+    assert_eq!(back.aria_controls.as_deref(), Some("panel-audio"));
 }
 
-/// v28: role/data-slot 均缺省（None）也须往返保真（NULL_IDX 哨兵路径，多数节点走此分支）。
+/// v29: 三个字符串列均缺省（None）也须往返保真（NULL_IDX 哨兵路径，多数节点走此分支）。
 #[test]
-fn pkg_v28_roundtrip_without_role_defaults_none() {
-    let node = tn(NodeKind::Container); // role/data_slot 均默认 None
+fn pkg_v29_roundtrip_without_strings_defaults_none() {
+    let node = tn(NodeKind::Container); // role/data_slot/aria_controls 均默认 None
     let nodes = [node];
     let rules = empty_rules();
     let input = PackageInput {
@@ -789,19 +797,23 @@ fn pkg_v28_roundtrip_without_role_defaults_none() {
         back.data_slot.is_none(),
         "no data-slot attr → None after roundtrip"
     );
+    assert!(
+        back.aria_controls.is_none(),
+        "no aria-controls attr → None after roundtrip"
+    );
 }
 
-/// v28: version=27 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=28，无迁移器）。
-/// TemplateNode 新增 role/data-slot 列改变 NodeBlock 布局，旧 v27 fixture 不能半读半坏
-/// （role_idx/data_slot_idx 缺失致后续读错位）。
+/// v29: version=28 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=29，无迁移器）。
+/// TemplateNode 新增 aria_controls_idx 列改变 NodeBlock 布局，旧 v28 fixture 不能半读半坏
+/// （aria_controls_idx 缺失致后续读错位）。
 #[test]
-fn pkg_v28_rejects_v27() {
+fn pkg_v29_rejects_v28() {
     let mut bad = vec![];
     bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
-    bad.extend_from_slice(&27u32.to_le_bytes()); // v27 < MIN_VERSION=28
+    bad.extend_from_slice(&28u32.to_le_bytes()); // v28 < MIN_VERSION=29
     let err = read_package(&bad);
     assert!(
-        matches!(err, Err(PkgError::TooOld(27))),
-        "v27 pkg must be rejected as TooOld after v28 bump, got {err:?}"
+        matches!(err, Err(PkgError::TooOld(28))),
+        "v28 pkg must be rejected as TooOld after v29 bump, got {err:?}"
     );
 }

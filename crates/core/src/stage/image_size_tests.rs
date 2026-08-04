@@ -24,6 +24,7 @@ fn make_pkg_with_image(src: &str) -> Vec<u8> {
             control_init: None,
             role: None,
             data_slot: None,
+            aria_controls: None,
         },
         TemplateNode {
             kind: NodeKind::Image,
@@ -38,6 +39,7 @@ fn make_pkg_with_image(src: &str) -> Vec<u8> {
             control_init: None,
             role: None,
             data_slot: None,
+            aria_controls: None,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -139,6 +141,7 @@ fn css_length_overrides_real_image_size() {
             control_init: None,
             role: None,
             data_slot: None,
+            aria_controls: None,
         },
         TemplateNode {
             kind: NodeKind::Image,
@@ -153,6 +156,7 @@ fn css_length_overrides_real_image_size() {
             control_init: None,
             role: None,
             data_slot: None,
+            aria_controls: None,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
