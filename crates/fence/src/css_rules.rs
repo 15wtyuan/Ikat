@@ -6,9 +6,10 @@
 //! 越界（nth-child、+ ~ 组合子等）返 None，由调用方报错。
 //!
 //! @keyframes at-rule（对齐 public-api.md §9「动画定义全在 CSS」终态）：fence 解析
-//! `@keyframes <name> { <stop-selector> { decls } ... }` 产 `KeyframesRule`。runtime
-//! 驱动（tween 发射）在 §4 视觉束实现（v1.10）；本轮 fence 接受语法 + bridge 静默丢弃——
-//! pkg.bin 格式不变（runtime 收不到 keyframes；animation 属性走 cascade 静默跳过）。
+//! `@keyframes <name> { <stop-selector> { decls } ... }` 产 `KeyframesRule`。pkg v30 起
+//! core 有同形类型并序列化进 pkg.bin；fence → core 的类型转换（declarations →
+//! AnimatableProps）在 M2 Phase 1 实现——当前 bridge 仍丢弃（keyframes 不进 pkg，
+//! animation 属性走 cascade 静默跳过）。
 use crate::css_resolve::unsupported_hint;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
 use crate::schema::css::{find_css_prop, find_shorthand};

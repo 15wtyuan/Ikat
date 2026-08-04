@@ -23,7 +23,7 @@ fn make_test_pkg_bytes(component: &str) -> Vec<u8> {
     }];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![(component, nodes.as_slice(), &rules)],
+        components: vec![(component, nodes.as_slice(), &rules, &[])],
     };
     loomgui_core::asset::write_package(&input)
 }
@@ -332,7 +332,7 @@ fn find_node_by_id_round_trip() {
     }];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let pkg = loomgui_core::asset::write_package(&PackageInput {
-        components: vec![("comp1", nodes.as_slice(), &rules)],
+        components: vec![("comp1", nodes.as_slice(), &rules, &[])],
     });
     assert_eq!(
         loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len()),
@@ -935,7 +935,7 @@ fn a6_get_children_capacity_contract() {
     ];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let pkg = loomgui_core::asset::write_package(&PackageInput {
-        components: vec![("comp1", nodes.as_slice(), &rules)],
+        components: vec![("comp1", nodes.as_slice(), &rules, &[])],
     });
     assert_eq!(
         loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len()),

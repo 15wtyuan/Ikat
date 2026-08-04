@@ -12,6 +12,7 @@ use crate::bridge::bridge;
 use crate::runtime::{RuntimeFont, RuntimeManifest, RUNTIME_FILE};
 use crate::workspace::{load_workspace, PackageCfg};
 use loomgui_core::asset::{write_package, PackageInput, TemplateNode};
+use loomgui_core::scene::KeyframesRule;
 use loomgui_core::style::dynamic::DynamicRuleTable;
 use std::path::Path;
 
@@ -187,9 +188,11 @@ pub fn pack_components(components: &[Component]) -> Result<PackResult, String> {
             return Err(format!("duplicate component name `{name}` in package"));
         }
     }
-    let comp_refs: Vec<(&str, &[TemplateNode], &DynamicRuleTable)> = built
+    let comp_refs: Vec<(&str, &[TemplateNode], &DynamicRuleTable, &[KeyframesRule])> = built
         .iter()
-        .map(|(n, nodes, dr)| (n.as_str(), nodes.as_slice(), dr))
+        // keyframes 转换（fence KeyframesRule → core AnimatableProps）在 M2 Phase 1
+        // fence 解析 task 接入；当前传空表（保持旧行为：keyframes 不进 pkg）。
+        .map(|(n, nodes, dr)| (n.as_str(), nodes.as_slice(), dr, &[] as &[KeyframesRule]))
         .collect();
     let bytes = write_package(&PackageInput {
         components: comp_refs,

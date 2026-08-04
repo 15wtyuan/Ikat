@@ -23,6 +23,56 @@ pub struct TransitionSpec {
     pub delay: f32,
 }
 
+/// CSS `animation-direction`。`#[repr(u8)]` 保 FFI/序列化稳定，Default = Normal。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum AnimationDirection {
+    #[default]
+    Normal = 0,
+    Reverse = 1,
+    Alternate = 2,
+    AlternateReverse = 3,
+}
+
+/// CSS `animation-fill-mode`。`#[repr(u8)]` 保 FFI/序列化稳定，Default = None。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum AnimationFillMode {
+    #[default]
+    None = 0,
+    Forwards = 1,
+    Backwards = 2,
+    Both = 3,
+}
+
+/// CSS `animation-play-state`。`#[repr(u8)]` 保 FFI/序列化稳定，Default = Running。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum AnimationPlayState {
+    #[default]
+    Running = 0,
+    Paused = 1,
+}
+
+/// CSS animation 声明（单条；`animation` 简写逗号分隔展开为多条）。
+/// `name` 引用 Scene.keyframes 全局表（CSS `@keyframes` 全局查找语义）。
+/// 镜像 TransitionSpec 模式：同 derive、同序列化路径（ResolvedStyle bincode blob）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnimationSpec {
+    pub name: String,
+    /// 动画时长（秒）
+    pub duration: f32,
+    /// 延迟（秒）
+    pub delay: f32,
+    /// None = infinite（CSS `iteration-count: infinite`）
+    pub iteration_count: Option<u32>,
+    pub direction: AnimationDirection,
+    pub fill_mode: AnimationFillMode,
+    /// easing 函数（复用 tween::Ease，含 steps() 的 Step 变体）
+    pub timing_function: crate::tween::Ease,
+    pub play_state: AnimationPlayState,
+}
+
 /// CSS overflow 轴模式。
 /// `#[repr(u8)]` 保证 FFI/序列化稳定，`Default = Visible`。
 /// Scroll/Auto 的物理/手势由 scroll 模块实现；本 enum 仅承载语义值。
@@ -236,6 +286,9 @@ pub struct ResolvedStyle {
     pub box_shadow: Option<BoxShadow>,
     /// CSS transition 声明。None=未设（默认无过渡动画）。
     pub transition: Vec<TransitionSpec>,
+    /// CSS animation 声明（`animation` 简写，逗号分隔多声明）。name 引用 Scene.keyframes
+    /// 全局表。空 = 无动画。与 transition 并列（base_style bake，进 pkg bincode blob）。
+    pub animation: Vec<AnimationSpec>,
     /// 文字效果（text-shadow / -webkit-text-stroke / font-effect 等）。
     /// CSS INHERITED 属性：父元素声明则作用于所有后代文字，故挂 style 而非 per-run。
     /// build 期按 effect 类型分 Back/Front 层注入字形渲染。空 = 无效果。
@@ -326,6 +379,7 @@ impl Default for ResolvedStyle {
             border_image_slice: None,
             box_shadow: None,
             transition: Vec::new(),
+            animation: Vec::new(),
             text_effects: Vec::new(),
             inherited_set: InheritedSet::default(),
             inline_declared: 0,
@@ -456,6 +510,16 @@ mod tests {
             ease: crate::tween::Ease::Linear,
             delay: 0.0,
         }];
+        s.animation = vec![AnimationSpec {
+            name: "fadeIn".into(),
+            duration: 0.5,
+            delay: 0.1,
+            iteration_count: None,
+            direction: AnimationDirection::AlternateReverse,
+            fill_mode: AnimationFillMode::Both,
+            timing_function: crate::tween::Ease::Step { start: true },
+            play_state: AnimationPlayState::Paused,
+        }];
         s.text_effects = vec![crate::text::font_effect::FontEffect::Shadow {
             ox: 2.0,
             oy: 2.0,
@@ -467,6 +531,22 @@ mod tests {
         let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
 
         assert_eq!(back, s, "全字段经 bincode round-trip 应相等");
+    }
+
+    #[test]
+    fn animation_enums_are_one_byte() {
+        // FFI / 序列化稳定不变量：#[repr(u8)] enum 占 1 字节（与 OverflowMode 同模式）。
+        assert_eq!(std::mem::size_of::<AnimationDirection>(), 1);
+        assert_eq!(std::mem::size_of::<AnimationFillMode>(), 1);
+        assert_eq!(std::mem::size_of::<AnimationPlayState>(), 1);
+    }
+
+    #[test]
+    fn animation_enums_defaults_are_semantic() {
+        // Default 按 CSS 语义：direction=Normal / fill-mode=None / play-state=Running。
+        assert_eq!(AnimationDirection::default(), AnimationDirection::Normal);
+        assert_eq!(AnimationFillMode::default(), AnimationFillMode::None);
+        assert_eq!(AnimationPlayState::default(), AnimationPlayState::Running);
     }
 
     #[test]
