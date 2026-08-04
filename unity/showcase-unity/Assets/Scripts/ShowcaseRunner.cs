@@ -81,6 +81,7 @@ public class ShowcaseRunner : MonoBehaviour
         WireNav(_current, page);
         WireControls(_current, page);
         WireSettingsTabs(_current, page);
+        WireListViews(_current, page);
         Debug.Log($"[Showcase] Instantiate showcase/{page} = OK");
     }
 
@@ -206,6 +207,49 @@ public class ShowcaseRunner : MonoBehaviour
             // TextArea.ValueChanged（P2 多行变体类型对）。
             if (page.TryGet<TextArea>("char-bio", out var bio))
                 bio.ValueChanged += e => Debug.Log($"[Showcase] char-bio changed (len={(e.NewValue?.Length ?? 0)})");
+        }
+    }
+
+    /// ListView 虚拟化驱动：背包 / 邮件左侧列表。
+    /// runtime ListView 是数据驱动的——data-fill 只供浏览器 preview 克隆（loom-preview.js），
+    /// runtime 必须业务侧设 ItemCount + BindItem 才克隆 slot 渲染 item（见 LoomGUI.Nodes ListView）。
+    /// 图标走打包期 src（runtime Image.Src 不可变），每个 slot 图标相同；按 index 区分 badge 数量 +
+    /// 耐久（背包）/ 发件人 + 主题（邮件）。子节点用 Query&lt;T&gt; 按类型取：template 蓝图克隆后
+    /// N 个 slot 子节点 id 重复，Get&lt;T&gt; 全局首匹配只命中首个 slot（Nodes.cs Get gap），故不用 id。
+    /// BindItem 须先于 ItemCount 设：ItemCount setter 首次会 drain_now + DrainPendingBinds 触发 BindItem。
+    void WireListViews(Container page, string pageName)
+    {
+        if (pageName == "inventory" && page.TryGet<ListView>("inv-list", out var invList))
+        {
+            invList.BindItem = (item, i) =>
+            {
+                var dur = item.Query<ProgressBar>();
+                if (dur.Count > 0) dur[0].Value = (i * 7) % 100;
+                var spans = item.Query<TextElement>();
+                if (spans.Count > 0) spans[0].TextContent = "x" + ((i * 13) % 99 + 1);
+            };
+            invList.ItemCount = 120;
+        }
+
+        if (pageName == "mail" && page.TryGet<ListView>("mail-list", out var mailList))
+        {
+            string[] senders = { "系统奖励", "竞技场", "公会战报", "好友留言", "商会通知", "赛季手册" };
+            string[] subjects =
+            {
+                "每日登录奖励已发放", "本赛季排名结算完毕", "公会贡献度更新",
+                "你的基地被探访了", "本周交易汇总已生成", "新赛季手册已解锁",
+                "限时活动即将开启", "背包已满请及时清理"
+            };
+            mailList.BindItem = (item, i) =>
+            {
+                var spans = item.Query<TextElement>();
+                if (spans.Count >= 2)
+                {
+                    spans[0].TextContent = senders[i % senders.Length];
+                    spans[1].TextContent = subjects[i % subjects.Length];
+                }
+            };
+            mailList.ItemCount = 100;
         }
     }
 }
