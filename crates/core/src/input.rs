@@ -576,9 +576,14 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                 // TabList 键盘路由（automatic-activation）：焦点在 TabList 子树（Tab 是
                 // focusable per T3，TabList 自身不聚焦）→ 向上找 ControlState::TabList 祖先，
                 // 方向键按 flex-direction 选轴移动 selected_index（clamp 不 wrap）+ 发
-                // SelectionChanged。互斥于 TextField（is_text 已先消费方向键移光标）+ Dropdown
-                // （二者非 TabList）。panel 跨树（非 TabList 子），焦点在 panel 内控件向上走
-                // 不会撞 TabList，故不误触发。
+                // SelectionChanged。互斥于 Dropdown（Dropdown 非 TabList）。
+                //
+                // 与 TextField 的隔离靠 panel 跨树不变量，而非 is_text 消费方向键：单行文本
+                // 编辑器只 match Left/Right 移光标（无 Up/Down arm），故 is_text 不消费
+                // Up/Down。真正保证「焦点在文本控件上时 TabList 路由不误触发」的是：panel
+                // 内容跨树（非 TabList 子，靠 aria-controls 关联）→ 从 panel 内控件向上走
+                // find_tablist_ancestor 返回 None。将来若加 TextArea Up/Down 跨行导航，须在
+                // 文本编辑器路由里先消费 Up/Down（routed=true），否则会落到本路由。
                 if ke.is_down {
                     if let Some(tl) = crate::scene::control::find_tablist_ancestor(scene, Some(fid))
                     {

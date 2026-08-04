@@ -5226,6 +5226,82 @@ fn tablist_column_direction_uses_up_down() {
     assert_eq!(tablist_selected(&s, tl), 1, "Up → index 1");
 }
 
+#[test]
+fn tablist_row_reverse_inverts_horizontal_arrows() {
+    // row-reverse：Left/Right 的 delta 符号翻转——Right 递减、Left 递增（镜像 row）。
+    // 起始 selected_index=1（中段），避免边界 clamp 掩盖符号方向。
+    // 该分支独立于 row/column 路径，按分支覆盖纪律单独锁符号。
+    let (mut s, tl, tabs) = tablist_keyboard_scene(3, 1, taffy::FlexDirection::RowReverse);
+    focus_node(&mut s, Some(tabs[0]), &mut Vec::new());
+    let mut out = Vec::new();
+
+    // Right → 递减（row 方向本是递增，reverse 翻号）。1 → 0。
+    process_keys(&mut s, &[key_down(KEY_RIGHT)], &mut out);
+    assert_eq!(
+        tablist_selected(&s, tl),
+        0,
+        "row-reverse: Right 应递减（1→0）"
+    );
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_SELECTION_CHANGED && e.node_id == tl.0 && e.touch_id == 0),
+        "row-reverse: Right 递减应发 SelectionChanged@tablist，touch_id=0"
+    );
+
+    // Left → 递增（row 方向本是递减，reverse 翻号）。0 → 1 → 2。
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_LEFT)], &mut out);
+    assert_eq!(
+        tablist_selected(&s, tl),
+        1,
+        "row-reverse: Left 应递增（0→1）"
+    );
+    process_keys(&mut s, &[key_down(KEY_LEFT)], &mut out);
+    assert_eq!(
+        tablist_selected(&s, tl),
+        2,
+        "row-reverse: Left 应递增（1→2）"
+    );
+}
+
+#[test]
+fn tablist_column_reverse_inverts_vertical_arrows() {
+    // column-reverse：Up/Down 的 delta 符号翻转——Down 递减、Up 递增（镜像 column）。
+    // 起始 selected_index=1（中段），避免边界 clamp 掩盖符号方向。
+    // 该分支独立于 row/column 路径，按分支覆盖纪律单独锁符号。
+    let (mut s, tl, tabs) = tablist_keyboard_scene(3, 1, taffy::FlexDirection::ColumnReverse);
+    focus_node(&mut s, Some(tabs[0]), &mut Vec::new());
+    let mut out = Vec::new();
+
+    // Down → 递减（column 方向本是递增，reverse 翻号）。1 → 0。
+    process_keys(&mut s, &[key_down(KEY_DOWN)], &mut out);
+    assert_eq!(
+        tablist_selected(&s, tl),
+        0,
+        "column-reverse: Down 应递减（1→0）"
+    );
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_SELECTION_CHANGED && e.node_id == tl.0 && e.touch_id == 0),
+        "column-reverse: Down 递减应发 SelectionChanged@tablist，touch_id=0"
+    );
+
+    // Up → 递增（column 方向本是递减，reverse 翻号）。0 → 1 → 2。
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_UP)], &mut out);
+    assert_eq!(
+        tablist_selected(&s, tl),
+        1,
+        "column-reverse: Up 应递增（0→1）"
+    );
+    process_keys(&mut s, &[key_down(KEY_UP)], &mut out);
+    assert_eq!(
+        tablist_selected(&s, tl),
+        2,
+        "column-reverse: Up 应递增（1→2）"
+    );
+}
+
 // ── Task 15：NumberField 字符输入 guard（filter 非数字） ───────────────
 //
 // NumberField 是文本类控件（EditState.value 是数字的字符串形式），但字符输入通道
