@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output_dir": "../tablist-ws-out",
+  "packages": [
+    {
+      "name": "tablist",
+      "dirs": ["."],
+      "html": ["tablist.html"]
+    }
+  ],
+  "atlases": [],
+  "fonts": []
+}

@@ -71,26 +71,36 @@ namespace LoomGUI.HeadlessTests
         [Fact]
         public void CustomElementIsSeventeen() => Assert.Equal((byte)17, (byte)NodeKind.CustomElement);
 
+        [Fact]
+        public void TabListIsNineteen() => Assert.Equal((byte)19, (byte)NodeKind.TabList);
+
+        [Fact]
+        public void TabIsTwenty() => Assert.Equal((byte)20, (byte)NodeKind.Tab);
+
         // ── 结构不变量：变体数 + 紧凑 0..N-1（无空洞、无跳号）──────────
 
         /// <summary>
-        /// Rust node.rs 当前 18 个公共变体（C# 投影；Rust 侧额外的 `Template` 不进公共类型树）。若 Rust 加/删变体未同步 C# → 此测红，
-        /// 提醒看护 ABI 对齐（同步两侧 enum）。
+        /// C# 投影当前 20 个公共变体（Rust 侧另有 Template=18 不进公共类型树）。Rust 加/删变体未同步
+        /// C# → 此测红，提醒看护 ABI 对齐（同步两侧 enum）。
         /// </summary>
         [Fact]
-        public void VariantCountMatchesRust() => Assert.Equal(18, Enum.GetNames<NodeKind>().Length);
+        public void VariantCountMatchesRust() => Assert.Equal(20, Enum.GetNames<NodeKind>().Length);
 
         /// <summary>
-        /// 显式赋值防隐式错位：最大判别值 == 变体数 - 1 验全变体紧凑连续
-        /// （无重复赋值、无空洞）。配合上面逐变体 Fact，双重锁拷写正确性。
+        /// 显式赋值防隐式错位。Template=18 在 Rust 存在但 C# 不暴露（display:none 蓝图，不实例化为 live
+        /// node）——故 C# 判别值集是 {0..17, 19, 20}（19/20 显式跳过 18，与 Rust #[repr(u8)] 一一对应）。
+        /// 本测验该集紧凑无重复、无越界 byte——捕获隐式错位、重复赋值、未同步新增变体三类漂移。
         /// </summary>
         [Fact]
-        public void AllValuesContiguousFromZero()
+        public void AllValuesMatchExpectedDiscriminants()
         {
             var values = (byte[])Enum.GetValuesAsUnderlyingType<NodeKind>();
+            // 期望判别值集：0..17 + 19 + 20（Template=18 故意跳过）。
+            var expected = new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20 };
+            Assert.Equal(expected.Length, values.Length);
             Array.Sort(values);
-            for (int i = 0; i < values.Length; i++)
-                Assert.Equal(i, values[i]);
+            for (int i = 0; i < expected.Length; i++)
+                Assert.Equal(expected[i], values[i]);
         }
     }
 }

@@ -58,6 +58,11 @@
          slot + custom-element) — used by OptionItemDispatchTests for NodeFactory dispatch to
          OptionItem/Slot/CustomElement (vs Container fallback). Built from fixtures/dropdown.workspace. -->
     <None Include="fixtures\dropdown.pkg.bin" Link="fixtures\dropdown.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
+    <!-- M3 Task 9 tablist projection fixture: tablist.pkg.bin (div role=tablist with tab children +
+         tabpanel siblings) — used by TabListProjectionTests for SelectedIndex FFI round-trip +
+         NodeFactory dispatch (TabList/Tab) + SelectionChanged via demux. Built from
+         fixtures/tablist.workspace via loom-pkg. -->
+    <None Include="fixtures\tablist.pkg.bin" Link="fixtures\tablist.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
     <!-- M1 ListView virtualization fixture: virtualization.pkg.bin (overflow:scroll pane > ul > li
          template) — used by VirtualizationTests for the no-growth render-node-count assertion.
          Built from fixtures/virtualization.workspace via loom-pkg. -->

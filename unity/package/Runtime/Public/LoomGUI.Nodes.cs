@@ -2096,6 +2096,117 @@ namespace LoomGUI
         internal CustomElement(UIContext ctx, uint id) : base(ctx, id) { }
     }
 
+    // TabList = <div role="tablist"> 的 typed 投影（WAI-ARIA tablist 容器，持若干 <button role=tab> 子）。
+    // 继承 Container（同 ListView，因持有 tab 子节点——非 Dropdown 那样的叶子控件）。
+    //
+    // ControlState::TabList{selected_index}：selected_index 由打包期 aria-selected="true" 烘焙初值
+    // （core T2-T3），运行时交互（click / 方向键）与本 setter 改写（core T5-T6 合成 aria-selected 到各 tab，
+    // T7 触发 SelectionChanged）。SelectionChanged 复用 Dropdown 同源 ControlSelectionChangedEvent +
+    // 公共 SelectionChangedEvent（core 侧同一 EVT_SELECTION_CHANGED=26，touch_id=新 index）——零新增
+    // event struct / demux arm。
+    public unsafe class TabList : Container
+    {
+        internal TabList(UIContext ctx, uint id) : base(ctx, id) { }
+
+        // SelectedIndex：直转 FFI get/set_tablist_selected_index（Task 8）。uint* 出参，公共签名用 int
+        // （index 不会超 int 正区）——边界 cast。rc!=0（节点非 TabList / 不 live）升 InvalidOperationException
+        // 不吞（ThrowIfDisposed 后正常路径不该达）。
+        public int SelectedIndex
+        {
+            get { ThrowIfDisposed(); return (int)GetTabListSelectedIndex(); }
+            set { ThrowIfDisposed(); SetTabListSelectedIndex((uint)value); }
+        }
+        // Disabled：伪类源 + active/click 抑制（set_node_disabled）。getter 读 NodeFlags::DISABLED
+        // （通用 node flag 通道，与 Dropdown / Slider 一致）。
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
+
+        // SelectionChanged：选中 tab 变更事件。与 Dropdown.SelectionChanged 同源 backing-dict 模式——
+        // 订阅 internal ControlSelectionChangedEvent（demux 解 EVT_SELECTION_CHANGED=26 后派），翻译为公共
+        // SelectionChangedEvent（NewIndex 取 demux 解出的 index；OldIndex=-1 sentinel，core 不携旧值）。
+        [NonSerialized] Dictionary<Action<SelectionChangedEvent>, EventRegistration> _selectionChangedBacking;
+        public event Action<SelectionChangedEvent> SelectionChanged
+        {
+            add
+            {
+                if (value == null) return;
+                if (_selectionChangedBacking == null)
+                    _selectionChangedBacking = new Dictionary<Action<SelectionChangedEvent>, EventRegistration>();
+                if (_selectionChangedBacking.ContainsKey(value)) return;
+                var reg = On<ControlSelectionChangedEvent>(e => value(new SelectionChangedEvent { _oldIndex = -1, _newIndex = e.NewIndex }));
+                _selectionChangedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_selectionChangedBacking != null && _selectionChangedBacking.TryGetValue(value, out var reg))
+                {
+                    _selectionChangedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
+
+        // ── FFI 转调 ────────────────────────────────────────────────────────
+        StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
+        uint GetTabListSelectedIndex()
+        {
+            StageHandle* h = Handle();
+            uint v = 0; int rc = Native.loomgui_stage_get_tablist_selected_index(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_tablist_selected_index failed (node {_id})");
+            return v;
+        }
+        void SetTabListSelectedIndex(uint v)
+        {
+            StageHandle* h = Handle();
+            int rc = Native.loomgui_stage_set_tablist_selected_index(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_tablist_selected_index failed (node {_id})");
+        }
+        void SetNodeDisabled(bool v)
+        {
+            StageHandle* h = Handle();
+            Native.loomgui_stage_set_node_disabled(h, _id, v);
+        }
+        bool GetNodeDisabled()
+        {
+            StageHandle* h = Handle();
+            byte b = 0;
+            Native.loomgui_stage_get_node_disabled(h, _id, &b);
+            return b != 0;
+        }
+    }
+
+    // Tab = <button role="tab"> 的 typed 投影（TabList 的子项）。结构上是容器型节点（围栏 content=text，
+    // 可持 label / 图标子），继承 Container（同 OptionItem 模式）。
+    //
+    // Selected：从父 TabList.selected_index 派生（core T5 synth_aria_value 合成 aria-selected，无 per-tab
+    // selected getter FFI）——取值经父 TabList.SelectedIndex 比对 self.Index，本类不提供（throw，同
+    // OptionItem.Selected gap）。Disabled 读 NodeFlags::DISABLED（通用 node flag，与 OptionItem 一致）。
+    public unsafe class Tab : Container
+    {
+        internal Tab(UIContext ctx, uint id) : base(ctx, id) { }
+
+        // TODO(tab-ffi): selected 由父 TabList.selected_index 派生（core 合成 aria-selected），无 per-tab
+        // getter FFI。业务经父 TabList.SelectedIndex 判定，或 demux SelectionChanged。待 tab 投影补齐后填。
+        public bool Selected { get { throw NE(); } }
+        // Disabled：伪类源（NodeFlags::DISABLED）。setter 直 FFI；getter 读 node flag（与 OptionItem 等一致）。
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
+
+        // ── FFI 转调（disabled 经通用 node flag 通道；Selected 待 tab FFI）──────────
+        StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
+        void SetNodeDisabled(bool v)
+        {
+            StageHandle* h = Handle();
+            Native.loomgui_stage_set_node_disabled(h, _id, v);
+        }
+        bool GetNodeDisabled()
+        {
+            StageHandle* h = Handle();
+            byte b = 0;
+            Native.loomgui_stage_get_node_disabled(h, _id, &b);
+            return b != 0;
+        }
+        static NotImplementedException NE() => new NotImplementedException();
+    }
+
     public unsafe class ProgressBar : Node
     {
         internal ProgressBar(UIContext ctx, uint id) : base(ctx, id) { }

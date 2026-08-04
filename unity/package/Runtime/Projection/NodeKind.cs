@@ -31,5 +31,10 @@ namespace LoomGUI
         ListItem      = 15,
         Slot          = 16,
         CustomElement = 17,
+        // Template=18 在 Rust 存在（display:none 蓝图，instantiate 时 clone 为 ListItem）但 C# 不暴露——
+        // 它不实例化为 live node，get_node_kind 理论不返此 byte（NodeFactory 命中兜底臂回落 Container）。
+        // 显式跳号（而非隐式连号）保 C# 判别值与 Rust #[repr(u8)] 一一对应，防后续插变体错位。
+        TabList = 19,
+        Tab     = 20,
     }
 }
