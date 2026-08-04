@@ -209,7 +209,7 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 >
 > **Dropdown 的前置 = overlay 渲染通道（渲染管线级新基建）**：对照 RmlUi（`temp/RmlUi/Source/Core/Elements/WidgetDropDown.cpp`）实证——RmlUi 靠 `z-index:1` + `visibility:hidden` + `clip:none` 浮层，**LoomGUI 围栏三者全拒**，且 DFS 出序渲染（sort_key = 全局出现计数器，`render/batch.rs`）做不到真正 topmost（popup 溢出父边界会被祖先后续兄弟遮住）。方案：open 的 popup 从正常 DFS 摘出，整树画完后**追加一轮渲染**画最上（不动 z-index 概念，只加「open popups 最后画」规则）。RmlUi 其余机制（双选中态：option.selected + select.value；option 即 select 子节点；Up/Down seek 跳过 disabled；OnValueChange 发 change）可直接迁移。**这是以后所有浮层（tooltip/context-menu/dialog）的公共基建**，不只 Dropdown 用。blitz（`tmp/blitz`）连 select 都没实现（纯 TODO），无参考价值。
 >
-> **P4 = WAI-ARIA 复合控件（TabList/Tree）**。**TabList 已落地（M3，2026-08，编码端 DONE）**：spec `docs/superpowers/specs/2026-08-04-m3-tablist-design.md`、plan `docs/superpowers/plans/2026-08-04-m3-tablist.md`。原「技术线独立」的前提（① Node 不存属性 ② role 不分派 ③ attr_matches_node 硬编码）已被控件束 P1-P3 关掉前两条（见 tech-debt `[aria-selected]` 条 RESOLVED），M3 按 α 路线（特定属性 RoleInfo.aria_controls 存储，不做通用 attrs 仓库 β）落地 TabList 复合控件。**Tree 推迟**（按需）。
+> **P4 = WAI-ARIA 复合控件（TabList/Tree）**。**TabList 已落地（M3，2026-08，编码端 DONE）**：spec `docs/superpowers/specs/2026-08-04-m3-tablist-design.md`、plan `docs/superpowers/plans/2026-08-04-m3-tablist.md`。原「技术线独立」的前提（① Node 不存属性 ② role 不分派 ③ attr_matches_node 硬编码）已被控件束 P1-P3 关掉后两条（见 tech-debt `[aria-selected]` 条 RESOLVED），M3 按 α 路线（特定属性 RoleInfo.aria_controls 存储，不做通用 attrs 仓库 β）落地 TabList 复合控件。**Tree 推迟**（按需）。
 - 吸收旧 v1.9（TextInput/IME）、v1.12（滑块/进度条）、v1.13（DragDrop/Window/Popup）大部分功能。
 
 **复合束**（三块各是硬骨头，独立推进，不挤一片）：

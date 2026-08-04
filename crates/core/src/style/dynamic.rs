@@ -75,6 +75,7 @@ pub struct Specificity(pub u32, pub u32, pub u32); // (id 数, class 数, tag �
 
 // ── 动态规则表（DynamicRule 持有 ParsedSelector + Declarations，均 bincode 可序列化）──
 
+use crate::scene::control::ROLE_TAB;
 use crate::scene::node::{NodeFlags, NodeId, Scene};
 use crate::style::mapping::apply_decl;
 use crate::style::resolved::{ResolvedStyle, TransitionSpec};
@@ -429,7 +430,7 @@ fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
             .get(tablist_id)?
             .children
             .iter()
-            .filter(|&&c| scene.roles.role_of(c) == Some("tab"))
+            .filter(|&&c| scene.roles.role_of(c) == Some(ROLE_TAB))
             .position(|&c| c == id)?;
         return Some((my_index == selected_index).to_string());
     }
