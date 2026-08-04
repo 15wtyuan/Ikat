@@ -103,6 +103,13 @@ pub struct ListState {
     pub list_ordinal: u32,
     pub anchoring_active: bool,
     pub dirty: bool,
+    /// wrap 网格虚拟化（spec §311）：ul.style 为 flex-row+wrap 时 true，按行虚拟化、行内全量。
+    /// 单列（含 flex-column、block）为 false，走原有 1D item 路径。
+    pub grid: bool,
+    /// 网格每行列数（grid=true 时首帧 solve 后测得；0=尚未测，退化为冷启动定数）。
+    pub columns: usize,
+    /// 行距 = item_h + gap_y（grid 测得 columns 时一并填）。单列不用。
+    pub row_pitch: f32,
 }
 
 impl Default for ListState {
@@ -120,6 +127,9 @@ impl Default for ListState {
             list_ordinal: 0,
             anchoring_active: false,
             dirty: true,
+            grid: false,
+            columns: 0,
+            row_pitch: 0.0,
         }
     }
 }
@@ -220,6 +230,9 @@ pub fn enter_data_driven(
         list_ordinal,
         anchoring_active: false,
         dirty: true,
+        grid: false,
+        columns: 0,
+        row_pitch: 0.0,
     };
     stage.scene.as_mut().unwrap().lists.0.insert(ul, ls);
     Ok(())
@@ -680,6 +693,161 @@ pub struct PendingOps {
     pub spacer_tail_h: f32,
 }
 
+/// 网格检测（一次性）：class 样式（如 .grid）在 solve 时才解析进 node.style，故在 plan_one
+/// （首帧 solve 后）检测。首次命中 flex-row+wrap 时标 ls.grid 并把 spacer 改全宽（独占行，
+/// 作纵向推力；否则进列流致后续行左偏）。后续帧 ls.grid 已 true 直接跳过。
+fn ensure_grid_detected(scene: &mut Scene, ul: NodeId) {
+    if scene.lists.get(ul).map(|ls| ls.grid).unwrap_or(false) {
+        return;
+    }
+    let is_grid = scene
+        .get(ul)
+        .map(|n| {
+            let ts = &n.style.taffy_style;
+            ts.flex_direction == taffy::style::FlexDirection::Row
+                && ts.flex_wrap == taffy::style::FlexWrap::Wrap
+        })
+        .unwrap_or(false);
+    if !is_grid {
+        return;
+    }
+    let spacers = scene
+        .lists
+        .get(ul)
+        .map(|ls| (ls.head_spacer, ls.tail_spacer));
+    if let Some(ls) = scene.lists.get_mut(ul) {
+        ls.grid = true;
+    }
+    if let Some((h, t)) = spacers {
+        for spacer in [h, t] {
+            if let Some(n) = scene.get_mut(spacer) {
+                let full = taffy::style::Dimension::percent(1.0);
+                n.base_style.taffy_style.size.width = full;
+                n.style.taffy_style.size.width = full;
+                n.dirty_mesh = true;
+            }
+        }
+    }
+}
+
+/// 测网格列数 + 行距（首帧 solve 后调）。slot0 已布局，从 ul.style 读 gap/padding。
+/// 列数 = floor((content_w + gap_x) / (item_w + gap_x))；行距 = item_h + gap_y。
+fn measure_grid(scene: &Scene, ul: NodeId, slot0: NodeId) -> Option<(usize, f32)> {
+    let slot = scene.get(slot0)?;
+    let uln = scene.get(ul)?;
+    let ts = &uln.style.taffy_style;
+    let gap_x = crate::render::resolve_lp(ts.gap.width);
+    let gap_y = crate::render::resolve_lp(ts.gap.height);
+    let pad_l = crate::render::resolve_lp(ts.padding.left);
+    let pad_r = crate::render::resolve_lp(ts.padding.right);
+    let content_w = (uln.layout_rect.w - pad_l - pad_r).max(0.0);
+    let item_w = slot.layout_rect.w.max(1.0);
+    let columns = ((content_w + gap_x) / (item_w + gap_x)).floor().max(1.0) as usize;
+    let row_pitch = slot.layout_rect.h + gap_y;
+    Some((columns, row_pitch))
+}
+
+/// 网格按行可见区 + spacer 高度（spec §311：按行虚拟化、行内全量）。
+/// 行 r 占 [r*row_pitch, r*row_pitch+row_h]；BUFFER 行；spacer 高含 gap_y 补偿
+/// （首 slot 行位置 = spacer_h + gap_y，对齐非虚拟基准 r*row_pitch）。
+fn grid_visible_spacers(
+    item_count: usize,
+    columns: usize,
+    row_h: f32,
+    gap_y: f32,
+    scroll_y: f32,
+    ul_y: f32,
+    viewport_h: f32,
+) -> (std::ops::Range<usize>, f32, f32) {
+    if item_count == 0 || columns == 0 {
+        return (0..0, 0.0, 0.0);
+    }
+    let total_rows = item_count.div_ceil(columns);
+    let row_pitch = row_h + gap_y;
+    if viewport_h <= 0.0 || row_pitch <= 0.0 {
+        // 冷启动 / 行距未就绪：前 BUFFER 行（整行），供下帧测量与全量填充。
+        let r = BUFFER.min(total_rows);
+        return (0..(r * columns).min(item_count), 0.0, 0.0);
+    }
+    let top = scroll_y - ul_y;
+    let view_bottom = top + viewport_h;
+    // first = 首个底边越过 top 的行（至少部分在视口内）。
+    let mut first = 0usize;
+    for r in 0..total_rows {
+        if r as f32 * row_pitch + row_h > top {
+            first = r;
+            break;
+        }
+    }
+    // last = 首个顶边抵达视口底的行（exclusive）。
+    let mut last = total_rows;
+    for r in 0..total_rows {
+        if r as f32 * row_pitch >= view_bottom {
+            last = r;
+            break;
+        }
+    }
+    let start_row = first.saturating_sub(BUFFER);
+    let end_row = (last + BUFFER).min(total_rows);
+    let start_item = start_row * columns;
+    let end_item = (end_row * columns).min(item_count);
+    let hidden_head = start_row;
+    let hidden_tail = total_rows - end_row;
+    let spacer_head_h =
+        (hidden_head as f32 * row_h + hidden_head.saturating_sub(1) as f32 * gap_y).max(0.0);
+    let spacer_tail_h =
+        (hidden_tail as f32 * row_h + hidden_tail.saturating_sub(1) as f32 * gap_y).max(0.0);
+    (start_item..end_item, spacer_head_h, spacer_tail_h)
+}
+
+/// 可见 item 区间 + head/tail spacer 高度。网格（grid）走按行路径；单列 / block 走 1D item 路径。
+fn compute_visible_spacers(
+    ls: &ListState,
+    scene: &Scene,
+    ul: NodeId,
+    columns: usize,
+    row_pitch: f32,
+    scroll_y: f32,
+    ul_y: f32,
+    viewport_h: f32,
+) -> (std::ops::Range<usize>, f32, f32) {
+    if ls.grid {
+        let gap_y = crate::render::resolve_lp(scene.get(ul).unwrap().style.taffy_style.gap.height);
+        let row_h = (row_pitch - gap_y).max(0.0);
+        return grid_visible_spacers(
+            ls.item_count,
+            columns,
+            row_h,
+            gap_y,
+            scroll_y,
+            ul_y,
+            viewport_h,
+        );
+    }
+    // 单列 1D（原路径）。
+    let gap = if matches!(
+        scene.get(ul).unwrap().base_style.taffy_style.display,
+        taffy::Display::Flex
+    ) {
+        crate::render::resolve_lp(scene.get(ul).unwrap().base_style.taffy_style.gap.height)
+    } else {
+        0.0
+    };
+    let visible = compute_visible_range(ls.item_count, scroll_y, ul_y, viewport_h, &ls.heights);
+    // Gap accounting for flex+gap uls: [head_spacer, slot.., tail_spacer]，可见 slot 在 head spacer
+    // 后一个 gap。为对齐非虚拟基准（item[k].top = sum(0..k) + k*gap），head spacer 须保留
+    // sum(0..start) + (start-1)*gap：slot.top = spacer.h + gap = sum + count*gap。tail 对称。
+    // count=0 → saturating_sub(1)=0（空 spacer 无 gap）。block ul 的 gap=0，本项 no-op。
+    let head_count = visible.start;
+    let tail_count = ls.item_count.saturating_sub(visible.end);
+    let spacer_head_h =
+        (ls.heights.sum(0..visible.start) + (head_count.saturating_sub(1) as f32) * gap).max(0.0);
+    let spacer_tail_h = (ls.heights.sum(visible.end..ls.item_count)
+        + (tail_count.saturating_sub(1) as f32) * gap)
+        .max(0.0);
+    (visible, spacer_head_h, spacer_tail_h)
+}
+
 /// plan 阶段：算可见区、回收离开的 slot 入 free 池、产待克隆 index 列表。**只借 scene**
 /// （clone_subtree 不在此调）。tick_and_render 先调 plan_visible 再调 execute_visible。
 pub fn plan_visible(scene: &mut Scene) -> Vec<PendingOps> {
@@ -695,6 +863,8 @@ pub fn plan_visible(scene: &mut Scene) -> Vec<PendingOps> {
 }
 
 fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
+    // 网格检测（首帧 solve 后 style 已解析；一次性）。
+    ensure_grid_detected(scene, ul);
     // Phase A：单次不可变借完成所有只读计算——可见区（Copy 的 Range）+ spacer 高度 + gap。
     // spacer 高需 heights.sum，故一并在此算出，避免后续跨可变借再 clone heights。
     let (scroll_y, viewport_h, ul_y) = {
@@ -702,36 +872,30 @@ fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
         let uy = scene.get(ul).map(|n| n.layout_rect.y).unwrap_or(0.0);
         (sy, vh, uy)
     };
-    let (visible, spacer_head_h, spacer_tail_h) = {
+    let (visible, spacer_head_h, spacer_tail_h, measured) = {
         let ls = scene.lists.get(ul)?;
-        let gap = if matches!(
-            scene.get(ul).unwrap().base_style.taffy_style.display,
-            taffy::Display::Flex
-        ) {
-            crate::render::resolve_lp(scene.get(ul).unwrap().base_style.taffy_style.gap.height)
+        // 网格且未测列数：据已布局 slot[0] + ul 几何测 columns/row_pitch（首帧 solve 后）。
+        let measured = if ls.grid && ls.columns == 0 {
+            ls.slots
+                .first()
+                .map(|s| s.node)
+                .and_then(|s| measure_grid(scene, ul, s))
         } else {
-            0.0
+            None
         };
-        let visible = compute_visible_range(ls.item_count, scroll_y, ul_y, viewport_h, &ls.heights);
-        // Gap accounting for flex+gap uls. The virtualized ul's flex children are
-        // [head_spacer, slot, ..., slot, tail_spacer], so a visible slot sits one gap
-        // past the head spacer. For a visible slot (bound to item visible.start) to match
-        // the non-virtualized reference position (item[k].top = sum(0..k) + k*gap), the
-        // head spacer must reserve sum(0..visible.start) + (visible.start - 1)*gap:
-        //   slot.top = head_spacer.h + gap = sum + (count-1)*gap + gap = sum + count*gap. ✓
-        // The tail is symmetric. count = hidden items in each spacer's range. count=0 →
-        // saturating_sub(1)=0 → no gap contribution (spacer empty). Block uls have gap=0
-        // so this is a no-op for them.
-        let head_count = visible.start;
-        let tail_count = ls.item_count.saturating_sub(visible.end);
-        let spacer_head_h = (ls.heights.sum(0..visible.start)
-            + (head_count.saturating_sub(1) as f32) * gap)
-            .max(0.0);
-        let spacer_tail_h = (ls.heights.sum(visible.end..ls.item_count)
-            + (tail_count.saturating_sub(1) as f32) * gap)
-            .max(0.0);
-        (visible, spacer_head_h, spacer_tail_h)
+        let (columns, row_pitch) = measured.unwrap_or((ls.columns, ls.row_pitch));
+        let res = compute_visible_spacers(
+            ls, scene, ul, columns, row_pitch, scroll_y, ul_y, viewport_h,
+        );
+        (res.0, res.1, res.2, measured)
     };
+    // 测得则回写 ListState（上方块借已释放）。
+    if let Some((c, rp)) = measured {
+        if let Some(ls) = scene.lists.get_mut(ul) {
+            ls.columns = c;
+            ls.row_pitch = rp;
+        }
+    }
     // Phase B：可变借回收离开的 slot。被回收的 NodeId 仅暂存（不在此 detach——detach 需借 scene
     // 建树函数，与本处 ls 可变借冲突），待 Phase A/B 借释放后再处理。to_clone 也在此算出。
     let new_set: std::collections::HashSet<usize> = visible.clone().collect();
@@ -1027,6 +1191,43 @@ mod tests {
     fn visible_range_cold_start_viewport_zero() {
         let r = compute_visible_range(1000, 0.0, 0.0, 0.0, &uniform_heights(1000, 10.0));
         assert_eq!(r, 0..INITIAL_SLOTS);
+    }
+
+    #[test]
+    fn grid_visible_full_rows_and_spacers() {
+        // 200 项 × 5 列，row_h=120 gap_y=12（row_pitch=132）。视口 965 ≈ 7.3 行。
+        // first=0，last=8（8*132=1056≥965），BUFFER→start 0 end 10 → 整 10 行 = 50 项。
+        let (r, head, tail) = grid_visible_spacers(200, 5, 120.0, 12.0, 0.0, 0.0, 965.0);
+        assert_eq!(r, 0..50, "full rows 0..10");
+        approx_eq(head, 0.0);
+        // tail = 30 hidden rows * 120 + 29 * 12 = 3948
+        approx_eq(tail, 3948.0);
+    }
+
+    #[test]
+    fn grid_visible_advances_by_rows_on_scroll() {
+        // scroll=1000：first=7（7*132+120=1044>1000）→start_row 5；last=15→end_row 17。
+        let (r, head, _tail) = grid_visible_spacers(200, 5, 120.0, 12.0, 1000.0, 0.0, 965.0);
+        assert_eq!(r, 25..85, "rows 5..17 = items 25..85");
+        // head = 5 rows * 120 + 4 * 12 = 648
+        approx_eq(head, 648.0);
+    }
+
+    #[test]
+    fn grid_visible_clamps_partial_last_row() {
+        // 47 项 × 5 列 = 10 行（末行 2 项）。整页可见时 end 须 clamp 到 47（不超 item_count）。
+        let (r, _h, _t) = grid_visible_spacers(47, 5, 120.0, 12.0, 0.0, 0.0, 965.0);
+        assert_eq!(r.start, 0);
+        assert_eq!(r.end, 47, "end clamps to item_count (partial last row)");
+    }
+
+    #[test]
+    fn grid_visible_cold_start_returns_buffer_rows() {
+        // viewport<=0 → 冷启动返前 BUFFER 整行，spacer 为 0（供下帧测列数 + 全量填充）。
+        let (r, head, tail) = grid_visible_spacers(200, 5, 120.0, 12.0, 0.0, 0.0, 0.0);
+        assert_eq!(r, 0..(BUFFER * 5), "BUFFER rows worth of items");
+        approx_eq(head, 0.0);
+        approx_eq(tail, 0.0);
     }
 
     fn uniform_heights(n: usize, h: f32) -> HeightCache {
