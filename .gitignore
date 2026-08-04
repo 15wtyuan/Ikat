@@ -91,3 +91,6 @@ crates/packer/gui/src-tauri/gen/
 tests/dotnet/LoomGUI.HeadlessTests/fixtures/*-ws-out/
 node_modules
 tmp
+
+# SDD worktrees (local isolation)
+.worktrees/
