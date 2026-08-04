@@ -1204,6 +1204,28 @@ fn make_dropdown_stage(selected: usize, open: bool) -> (*mut StageHandle, u32) {
     (h, node)
 }
 
+/// 测试辅助：建根 div 子节点并注入 TabList 状态。aria-selected 只读合成，无 value_lock。
+fn make_tablist_stage(selected: usize) -> (*mut StageHandle, u32) {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(node, 0xFFFF_FFFF, "create tablist node ok");
+    loomgui_stage_append_child(h, root, node);
+    let sh = unsafe { &mut *h };
+    let scene = sh.stage.scene.as_mut().expect("scene built");
+    scene.controls.ensure(
+        NodeId(node),
+        ControlState::TabList {
+            selected_index: selected,
+        },
+    );
+    if let Some(n) = scene.get_mut(NodeId(node)) {
+        n.kind = NodeKind::TabList;
+    }
+    (h, node)
+}
+
 /// 测试辅助：建根 div 子节点并注入 NumberField 状态。value 是数字的文本形式。
 fn make_number_stage(value: &str, min: f32, max: f32, step: f32) -> (*mut StageHandle, u32) {
     let h = stage_new_with_dejavu(200.0, 100.0);
@@ -1395,6 +1417,36 @@ fn ffi_dropdown_open_roundtrip() {
     let mut open: u8 = 0;
     assert_eq!(loomgui_stage_get_dropdown_open(h2, t, &mut open), -1);
     assert_eq!(loomgui_stage_set_dropdown_open(h2, t, 1), -1);
+    loomgui_stage_free(h);
+    loomgui_stage_free(h2);
+}
+
+/// get/set_tablist_selected_index round-trip + 非 TabList → -1。aria-selected 只读合成，
+/// 故 setter 不设 value_lock（与 Dropdown 不同）。事件发射在 tick（on_pointer_down/键盘），
+/// setter 只改态。
+#[test]
+fn ffi_tablist_selected_index_roundtrip() {
+    let (h, tl) = make_tablist_stage(0);
+    let mut idx: u32 = 99;
+    let rc = loomgui_stage_get_tablist_selected_index(h, tl, &mut idx);
+    assert_eq!(rc, 0, "get rc");
+    assert_eq!(idx, 0, "initial selected_index");
+    // set 2
+    let rc = loomgui_stage_set_tablist_selected_index(h, tl, 2);
+    assert_eq!(rc, 0, "set rc");
+    // 读回
+    let mut idx: u32 = 99;
+    let rc = loomgui_stage_get_tablist_selected_index(h, tl, &mut idx);
+    assert_eq!(rc, 0);
+    assert_eq!(idx, 2, "read back updated index");
+    // 非 TabList（Slider）→ -1
+    let (h2, s) = make_slider_stage(50.0, 0.0, 100.0, 1.0);
+    let mut idx: u32 = 0;
+    assert_eq!(
+        loomgui_stage_get_tablist_selected_index(h2, s, &mut idx),
+        -1
+    );
+    assert_eq!(loomgui_stage_set_tablist_selected_index(h2, s, 0), -1);
     loomgui_stage_free(h);
     loomgui_stage_free(h2);
 }

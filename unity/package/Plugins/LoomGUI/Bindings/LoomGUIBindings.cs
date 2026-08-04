@@ -789,6 +789,25 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_set_dropdown_selected_index(StageHandle* h, uint node_id, uint index);
 
         /// <summary>
+        ///  读 TabList 当前选中项索引（`ControlState::TabList.selected_index`）。
+        ///  非 TabList / null 句柄 / 节点缺失 / null out → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_tablist_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_tablist_selected_index(StageHandle* h, uint node_id, uint* @out);
+
+        /// <summary>
+        ///  设 TabList 选中项。TabList 无 `value_lock`（aria-selected 是只读合成属性，无 cascade
+        ///  回写环，与 Dropdown 不同）。事件发射（EVT_SELECTION_CHANGED）在 tick（on_pointer_down/键盘），
+        ///  非此处——本 setter 仅 host 驱动的程序化改态。非 TabList / null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_tablist_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_tablist_selected_index(StageHandle* h, uint node_id, uint index);
+
+        /// <summary>
         ///  读 Dropdown popup 是否展开（`ControlState::Dropdown.open`）。
         ///  非 Dropdown / null 句柄 / 节点缺失 / null out → -1。
         ///

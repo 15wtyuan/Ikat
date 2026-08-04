@@ -2461,6 +2461,59 @@ pub extern "C" fn loomgui_stage_set_dropdown_selected_index(
     }
 }
 
+/// 读 TabList 当前选中项索引（`ControlState::TabList.selected_index`）。
+/// 非 TabList / null 句柄 / 节点缺失 / null out → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_tablist_selected_index(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u32,
+) -> i32 {
+    if h.is_null() || out.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::TabList { selected_index }) => {
+            unsafe { *out = *selected_index as u32 };
+            0
+        }
+        _ => -1,
+    }
+}
+
+/// 设 TabList 选中项。TabList 无 `value_lock`（aria-selected 是只读合成属性，无 cascade
+/// 回写环，与 Dropdown 不同）。事件发射（EVT_SELECTION_CHANGED）在 tick（on_pointer_down/键盘），
+/// 非此处——本 setter 仅 host 驱动的程序化改态。非 TabList / null 句柄 / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_tablist_selected_index(
+    h: *mut StageHandle,
+    node_id: u32,
+    index: u32,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let Some(scene) = sh.stage.scene.as_mut() else {
+        return -1;
+    };
+    if let Some(ControlState::TabList { selected_index }) = scene.controls.get_mut(NodeId(node_id))
+    {
+        *selected_index = index as usize;
+        0
+    } else {
+        -1
+    }
+}
+
 /// 读 Dropdown popup 是否展开（`ControlState::Dropdown.open`）。
 /// 非 Dropdown / null 句柄 / 节点缺失 / null out → -1。
 ///
