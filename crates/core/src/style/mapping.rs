@@ -1318,14 +1318,17 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
 ///
 /// 逗号分隔多 spec（如 `background-color 0.3s, color 0.3s`）。每段由 `parse_one_transition`
 /// 解析。空输入返回空 Vec（未声明 transition）。
-fn parse_transition(value: &str) -> Vec<crate::style::resolved::TransitionSpec> {
+///
+/// `pub` 供 fence css_resolve 复用（打包期 inline 与运行时 rematch 同一真相源，
+/// 防 spec §8.3 ease 对齐表漂移）。
+pub fn parse_transition(value: &str) -> Vec<crate::style::resolved::TransitionSpec> {
     value.split(',').filter_map(parse_one_transition).collect()
 }
 
 /// 解析单个 transition spec（逗号分隔的一段）。
-/// 空格切 token：第 1 个 = 属性名（all/opacity/color/background-color）；含 's' 的 =
-/// duration/delay（首遇 duration，次遇 delay）；其余 = ease 关键字。缺省补默认
-/// （dur=0s, ease=Linear, delay=0s）。空段返回 None（被 filter_map 丢弃）。
+/// 空格切 token：prop 关键字（all/opacity/color/background-color）→ TweenProp 映射；
+/// time（`<n>s`/`<n>ms`）首遇 = duration、次遇 = delay；其余 = ease 关键字（§8.3 对齐表）。
+/// 缺省补默认（dur=0s, ease=CubicOut=CSS 初始 ease, delay=0s）。空段返回 None。
 fn parse_one_transition(part: &str) -> Option<crate::style::resolved::TransitionSpec> {
     use crate::style::resolved::TransitionSpec;
     use crate::tween::{Ease, TweenProp};
@@ -1336,33 +1339,28 @@ fn parse_one_transition(part: &str) -> Option<crate::style::resolved::Transition
     let mut prop = None;
     let mut duration = 0.0f32;
     let mut delay = 0.0f32;
-    let mut ease = Ease::Linear;
+    let mut ease = Ease::CubicOut; // CSS transition 默认 timing-function = ease（§8.3）
+    let mut time_count = 0;
     for t in tokens {
-        if t == "all" {
-            prop = None;
-        } else if t == "opacity" {
-            prop = Some(TweenProp::Opacity);
-        } else if t == "color" {
-            prop = Some(TweenProp::TextColor);
-        } else if t == "background-color" {
-            prop = Some(TweenProp::BgColor);
-        } else if t.ends_with('s') {
-            let n = t.trim_end_matches('s').parse::<f32>().unwrap_or(0.0);
-            if duration == 0.0 {
-                duration = n;
-            } else {
-                delay = n;
+        match t {
+            "all" => prop = None,
+            "opacity" => prop = Some(TweenProp::Opacity),
+            "color" => prop = Some(TweenProp::TextColor),
+            "background-color" => prop = Some(TweenProp::BgColor),
+            _ => {
+                if let Some(secs) = parse_time_seconds(t) {
+                    // 首遇 = duration，次遇 = delay（CSS 语义；time_count 防 0s duration 被吞）
+                    if time_count == 0 {
+                        duration = secs;
+                    } else {
+                        delay = secs;
+                    }
+                    time_count += 1;
+                } else if let Some(e) = css_ease_keyword(t) {
+                    ease = e;
+                }
+                // 未知 token 忽略（transition 零校验宽松语义，与 fence 一致）
             }
-        } else {
-            // ease 关键字（CSS 标准名 → 内 Ease 变体）
-            ease = match t {
-                "linear" => Ease::Linear,
-                "ease" => Ease::QuadOut,
-                "ease-in" => Ease::QuadIn,
-                "ease-out" => Ease::QuadOut,
-                "ease-in-out" => Ease::QuadInOut,
-                _ => Ease::Linear,
-            };
         }
     }
     Some(TransitionSpec {
@@ -1370,6 +1368,29 @@ fn parse_one_transition(part: &str) -> Option<crate::style::resolved::Transition
         duration,
         ease,
         delay,
+    })
+}
+
+/// `<n>s` / `<n>ms` → 秒（None = 非 time token）。
+fn parse_time_seconds(tok: &str) -> Option<f32> {
+    if let Some(num) = tok.strip_suffix("ms") {
+        return num.parse::<f32>().ok().map(|n| n / 1000.0);
+    }
+    tok.strip_suffix('s')?.parse::<f32>().ok()
+}
+
+/// CSS timing-function 关键字 → Ease（spec §8.3 对齐表；fence/css_resolve 共用）。
+fn css_ease_keyword(kw: &str) -> Option<crate::tween::Ease> {
+    use crate::tween::Ease;
+    Some(match kw {
+        "linear" => Ease::Linear,
+        "ease" => Ease::CubicOut,
+        "ease-in" => Ease::QuadIn,
+        "ease-out" => Ease::QuadOut,
+        "ease-in-out" => Ease::QuadInOut,
+        "step-start" => Ease::Step { start: true },
+        "step-end" => Ease::Step { start: false },
+        _ => return None,
     })
 }
 

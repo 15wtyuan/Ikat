@@ -215,7 +215,7 @@ CSS 在围栏中以三个正交维度建模：
 
 **动画**
 
-`animation`——`<name> <duration> [easing] [iteration-count|infinite] [fill-mode] [direction] [play-state] [delay]` 简写。对齐 public-api.md「动画定义全在 CSS」终态契约：fence 接受语法 + 校验拼写错误。当前仅简写存在，标准 CSS 的 8 个长划子属性（`animation-name`/`animation-duration` 等）未加入；runtime 驱动（@keyframes 表查询 + tween 发射）在 §4 视觉束（v1.10）实现。`transition` 属性已注册但解析器为空壳（`CssValueParser::Transition` 未实现校验逻辑），接受任意值不报错但不生效。
+`animation`——`<name> <duration> [easing] [iteration-count|infinite] [fill-mode] [direction] [play-state] [delay]` 简写。对齐 public-api.md「动画定义全在 CSS」终态契约：fence 校验拼写错误并解析存值（逗号多声明 → 多个 `AnimationSpec` bake 进 `base_style.animation`）。当前仅简写存在，标准 CSS 的 8 个长划子属性（`animation-name`/`animation-duration` 等）未加入；runtime 驱动（@keyframes 表查询 + 时间轴播放器）在 M2 @keyframes 里程碑实现。`transition`——`<prop?> <dur> <ease?> <delay?>` 简写，逗号多 spec 解析存值（bake 进 `base_style.transition`，core transition 引擎消费）；ease 关键字按 spec §8.3 对齐（`ease`→CubicOut 等）。
 
 `@keyframes <name> { <stop> { decls } ... }` at-rule——`<style>` 内定义命名关键帧。stop 选择器子集：`from` / `to` / `<N>%`（0..=100 整数）；逗号多 stop（`0%,100%{...}`）按 CSS 语义展开为多条 stop（共享同声明块）。其他 at-rule（`@media` / `@font-face` 等）不在围栏子集，整块丢弃 + 诊断。
 
@@ -241,8 +241,8 @@ CSS 在围栏中以三个正交维度建模：
 | `Filter` | grayscale / brightness / contrast / saturate / hue-rotate / invert / sepia |
 | `BoxShadow` | `ox oy [blur] [spread] color` |
 | `TextShadow` | `ox oy [blur] color` |
-| `Transition` | `property duration easing` |
-| `Animation` | `<name> <duration> [easing/count/fill/direction/play-state/delay]` 简写——结构校验，runtime 驱动 §4 视觉束实现 |
+| `Transition` | `property duration easing delay` 简写→`TransitionSpec`（逗号多 spec；ease 按 spec §8.3） |
+| `Animation` | `<name> <duration> [easing/count/fill/direction/play-state/delay]` 简写→`AnimationSpec`（逗号多声明；ease 按 spec §8.3） |
 | `Gradient2` | `linear-gradient(to dir, hex, hex)` |
 | `TextEffect` | `glow(w color)` / `blur(w)` |
 | `TextStroke` | `width color` |

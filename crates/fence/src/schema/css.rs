@@ -1,3 +1,8 @@
+use loomgui_core::style::resolved::{
+    AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec, TransitionSpec,
+};
+use loomgui_core::tween::Ease;
+
 // == CssPropSpec ==
 
 /// Compile-time schema entry for one CSS property.
@@ -589,18 +594,25 @@ pub fn find_shorthand(name: &str) -> Option<&'static ShorthandSpec> {
 /// - `<name> <duration> [remainder...]` —— 至少 name + 一个 time 值（`<n>s` 或 `<n>ms`）；
 ///   remainder tokens 可任意顺序，每 token 须落入已知关键字类（easing / iteration-count /
 ///   fill-mode / direction / play-state / time）。
-///
-/// runtime 驱动在 §4 视觉束实现；本轮仅语法校验，不存值（apply_decl 不识别 `animation` →
-/// resolve 阶段静默跳过）。语法合法但 runtime 不跑动画，符合「收到规则但 §4 没实现 → 静默忽略」。
+/// - 逗号多声明（`a .3s, b .5s infinite`）——每段独立校验（CSS 标准语法）。
 pub fn validate_animation_value(value: &str) -> bool {
     let v = value.trim();
     if v.is_empty() {
         return false;
     }
-    if v.eq_ignore_ascii_case("none") {
+    v.split(',')
+        .all(|decl| validate_one_animation_decl(decl.trim()))
+}
+
+/// 单条 animation 声明（逗号分隔的一段）的结构校验。`none` 段合法（= 无动画）。
+fn validate_one_animation_decl(decl: &str) -> bool {
+    if decl.is_empty() {
+        return false;
+    }
+    if decl.eq_ignore_ascii_case("none") {
         return true;
     }
-    let mut tokens = v.split_whitespace();
+    let mut tokens = decl.split_whitespace();
     // 首 token = animation-name（标识符；不允许数字开头、不允许含特殊字符）
     let Some(name) = tokens.next() else {
         return false;
@@ -618,6 +630,112 @@ pub fn validate_animation_value(value: &str) -> bool {
         }
     }
     saw_time
+}
+
+/// 解析 `animation` 简写值 → AnimationSpec 列表（逗号分隔多声明展开为多条）。
+///
+/// 语义对齐 spec §8.2/§8.3：首个 time=duration、次个 time=delay；ease 关键字按
+/// §8.3 对齐表映射（`ease`→CubicOut，`ease-in/out/in-out`→Quad*，`step-start/end`→Step）。
+/// 缺省值 = CSS initial（direction=normal / fill=none / play-state=running /
+/// iteration-count=1 / timing=ease）。越界输入（validate 门已拦）防御性返回空。
+pub fn parse_animation_value(value: &str) -> Vec<AnimationSpec> {
+    value
+        .split(',')
+        .filter_map(|decl| parse_one_animation_decl(decl.trim()))
+        .collect()
+}
+
+/// 单条 animation 声明（逗号分隔的一段）→ AnimationSpec。`none` / 空 / 非法 name → None。
+fn parse_one_animation_decl(decl: &str) -> Option<AnimationSpec> {
+    if decl.is_empty() || decl.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    let mut tokens = decl.split_whitespace();
+    let name = tokens.next()?;
+    if !is_valid_animation_name(name) {
+        return None;
+    }
+    // CSS initial 值起步；显式关键字覆盖对应字段。
+    let mut spec = AnimationSpec {
+        name: name.to_string(),
+        duration: 0.0,
+        delay: 0.0,
+        iteration_count: Some(1), // CSS initial iteration-count = 1（None = infinite）
+        direction: AnimationDirection::Normal,
+        fill_mode: AnimationFillMode::None,
+        timing_function: Ease::CubicOut, // CSS animation 默认 ease（§8.3 对齐表）
+        play_state: AnimationPlayState::Running,
+    };
+    let mut time_count = 0;
+    for tok in tokens {
+        if is_time_token(tok) {
+            // 首个 time = duration，次个 time = delay（§8.2，修旧「粗糙处理」）
+            let secs = time_token_to_seconds(tok);
+            if time_count == 0 {
+                spec.duration = secs;
+            } else {
+                spec.delay = secs;
+            }
+            time_count += 1;
+        } else if tok.eq_ignore_ascii_case("infinite") {
+            spec.iteration_count = None;
+        } else if tok.chars().all(|c| c.is_ascii_digit()) {
+            spec.iteration_count = tok.parse::<u32>().ok();
+        } else if let Some(e) = ease_from_keyword(tok) {
+            spec.timing_function = e;
+        } else {
+            match tok.to_ascii_lowercase().as_str() {
+                "normal" => spec.direction = AnimationDirection::Normal,
+                "reverse" => spec.direction = AnimationDirection::Reverse,
+                "alternate" => spec.direction = AnimationDirection::Alternate,
+                "alternate-reverse" => spec.direction = AnimationDirection::AlternateReverse,
+                "none" => spec.fill_mode = AnimationFillMode::None,
+                "forwards" => spec.fill_mode = AnimationFillMode::Forwards,
+                "backwards" => spec.fill_mode = AnimationFillMode::Backwards,
+                "both" => spec.fill_mode = AnimationFillMode::Both,
+                "running" => spec.play_state = AnimationPlayState::Running,
+                "paused" => spec.play_state = AnimationPlayState::Paused,
+                _ => {} // 未知 token 忽略（validate 门已拦）
+            }
+        }
+    }
+    // 与 validate 一致：缺 time（duration）的声明无效。
+    if time_count == 0 {
+        return None;
+    }
+    Some(spec)
+}
+
+/// 解析 `transition` 简写值 → TransitionSpec 列表（逗号分隔多 spec）。
+///
+/// 委托 core `mapping::parse_transition`——打包期 inline 与运行时 rematch（`<style>` 规则
+/// 走 apply_decl）共用同一解析器，防 spec §8.3 ease 对齐表漂移（该函数已按 §8.3 对齐）。
+/// 语义：prop 映射 opacity→Opacity / color→TextColor / background-color→BgColor /
+/// all+缺省→None；首 time=duration、次 time=delay；ease 缺省 = CSS initial ease→CubicOut。
+pub fn parse_transition_value(value: &str) -> Vec<TransitionSpec> {
+    loomgui_core::style::mapping::parse_transition(value)
+}
+fn time_token_to_seconds(tok: &str) -> f32 {
+    if let Some(num) = tok.strip_suffix("ms") {
+        return num.parse::<f32>().unwrap_or(0.0) / 1000.0;
+    }
+    tok.strip_suffix('s')
+        .and_then(|n| n.parse::<f32>().ok())
+        .unwrap_or(0.0)
+}
+
+/// fence timing-function 关键字 → core Ease（spec §8.3 对齐表，勿自创）。
+fn ease_from_keyword(kw: &str) -> Option<Ease> {
+    Some(match kw.to_ascii_lowercase().as_str() {
+        "linear" => Ease::Linear,
+        "ease" => Ease::CubicOut,
+        "ease-in" => Ease::QuadIn,
+        "ease-out" => Ease::QuadOut,
+        "ease-in-out" => Ease::QuadInOut,
+        "step-start" => Ease::Step { start: true },
+        "step-end" => Ease::Step { start: false },
+        _ => return None,
+    })
 }
 
 /// animation-name 接受 CSS 自定义标识符（字母/-/_/数字，非数字开头；不允许 `--` 前缀）。
