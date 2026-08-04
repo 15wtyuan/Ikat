@@ -35,6 +35,12 @@ pub const ROLE_LISTBOX: &str = "listbox";
 /// listbox 内的列表项 role（作者写 `<div role="option">`，core 现按 NodeKind::OptionItem
 /// 识别 option；此常量保留给将来按 role 字符串查询的场景）。
 pub const ROLE_OPTION: &str = "option";
+/// TabList 容器 role（`role="tablist"`，含 `role=tab` 子节点）。持有 ControlState::TabList
+/// { selected_index }，子 tab 的 aria-selected 由 synth_aria_value 合成。
+pub const ROLE_TABLIST: &str = "tablist";
+/// TabList 内的单个 tab role（`role="tab"`）。带 `aria-controls="<panel-id>"` 指向其关联
+/// panel（跨树，非 tablist 子）；sync_control_visuals 据此 find_by_id_attr 解析 panel 切显隐。
+pub const ROLE_TAB: &str = "tab";
 /// ProgressBar 的填充条 / Slider 的可选视觉填充（`data-slot="fill"`，width:% 由 value 驱动）。
 pub const SLOT_FILL: &str = "fill";
 /// Slider 的滑块头（`data-slot="thumb"`，位移走 transform，拖拽高频）。
@@ -652,9 +658,38 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
         }
         // NumberField: 纯数值输入控件，无视觉子节点 sync（数值约束 clamp pending）。
         ControlState::NumberField { .. } => {}
-        // TabList: aria-selected 由 synth_aria_value（T5）合成、panel 显隐由 T6 据
-        // RoleInfo.aria_controls 切换——本 Task 先占位 no-op，逻辑留给 T6/T7。
-        ControlState::TabList { .. } => {}
+        // TabList: aria-selected 由 synth_aria_value（T5）合成；panel 显隐据 selected_index
+        // + 各 tab 的 RoleInfo.aria_controls（panel id 串）切换——本 arm 实现 panel display。
+        // panel 跨树（非 tablist 子，靠 aria-controls + id 关联），区别于 Dropdown listbox
+        // （combobox 直接子）。复用 display:none 剪枝：激活 panel "display:block" 覆盖作者
+        // 可能的 display:none（如 settings.html 初始隐藏 panel），非激活 "display:none" 强制隐藏。
+        ControlState::TabList { selected_index } => {
+            // 按 DOM 序遍历 role=tab 子节点（selected_index 是 tab 的序号）。clone children
+            // 释放不可变借，供循环内 set_inline_override 取 &mut scene。
+            let tab_ids: Vec<NodeId> = scene
+                .get(id)
+                .map(|n| n.children.clone())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|&c| scene.roles.role_of(c) == Some(ROLE_TAB))
+                .collect();
+            for (i, &tab) in tab_ids.iter().enumerate() {
+                // aria_controls 是 String，clone 出来释放对 roles 的不可变借，再 find_by_id_attr。
+                let Some(panel_id_str) = scene.roles.get(tab).and_then(|r| r.aria_controls.clone())
+                else {
+                    continue; // tab 未写 aria-controls：无 panel 可切（R1 容错）
+                };
+                let Some(panel) = scene.find_by_id_attr(&panel_id_str) else {
+                    continue; // panel id 解析不到（R1 容错；fence 期已校验 idref 存在，运行时动态缺则跳）
+                };
+                let decl = if i == selected_index {
+                    "display:block" // 激活 panel：覆盖作者可能的 display:none
+                } else {
+                    "display:none" // 非激活 panel：强制隐藏
+                };
+                let _ = set_inline_override(scene, panel, decl);
+            }
+        }
     }
 }
 
@@ -1859,6 +1894,110 @@ mod tests {
                 .display,
             taffy::Display::Block,
             "open → display:block"
+        );
+    }
+
+    // ── sync_control_visuals：TabList（panel 显隐随 selected_index 切） ──
+    //
+    // TabList 的 panel 跨树（非 tablist 子，靠 tab 的 aria-controls + panel 的 id 关联），
+    // 区别于 Dropdown 的 listbox（combobox 直接子）。selected_index=0 → 第 1 个 tab 的 panel
+    // display:block，其余 display:none。非激活 panel 即使作者设为可见也被强制 none（display:none
+    // 剪枝同 Dropdown listbox）。改 selected_index 再 sync → 反转。
+
+    /// 建一个 role=tab 子节点（带 aria-controls 指向 panel id 串），挂到 parent（tablist）。
+    /// 复刻 instantiate 从模板填 RoleTable 的路径（作者写 `<div role=tab aria-controls=pa>`）。
+    fn make_tab_child(scene: &mut Scene, parent: NodeId, aria_controls: &str) -> NodeId {
+        let id = create_node_from_template(scene, NodeKind::Tab, ResolvedStyle::default(), None);
+        append_child(scene, parent, id).expect("fresh tab has no parent");
+        scene.roles.insert(
+            id,
+            RoleInfo {
+                role: Some(ROLE_TAB.to_string()),
+                slots: Default::default(),
+                aria_controls: Some(aria_controls.to_string()),
+            },
+        );
+        id
+    }
+
+    /// 建一个游离 Container 节点并设 id_attr（模拟作者在 tablist 同层或别处写的 panel），
+    /// find_by_id_attr 靠 id_attr 扫全树解析（与树位置无关）。
+    fn make_panel(scene: &mut Scene, id_str: &str) -> NodeId {
+        let id =
+            create_node_from_template(scene, NodeKind::Container, ResolvedStyle::default(), None);
+        scene.get_mut(id).unwrap().id_attr = Some(id_str.to_string());
+        id
+    }
+
+    #[test]
+    fn tablist_panel_display_follows_selected_index() {
+        // selected_index=0 → pa 激活 display:block、pb 非激活 display:none。改 selected_index=1
+        // 再 sync → 反转。panel 跨树（非 tablist 子，靠 aria-controls + id 关联）。
+        let mut scene = Scene::default();
+        let tl = create_node_from_template(
+            &mut scene,
+            NodeKind::TabList,
+            ResolvedStyle::default(),
+            Some(ControlInit::TabList { selected_index: 0 }),
+        );
+        let _t0 = make_tab_child(&mut scene, tl, "pa");
+        let _t1 = make_tab_child(&mut scene, tl, "pb");
+        let pa = make_panel(&mut scene, "pa");
+        let pb = make_panel(&mut scene, "pb");
+
+        sync_control_visuals(&mut scene, tl);
+        assert_eq!(
+            scene.get(pa).unwrap().inline_override.taffy_style.display,
+            taffy::Display::Block,
+            "selected_index=0 → pa 激活 visible"
+        );
+        assert_eq!(
+            scene.get(pb).unwrap().inline_override.taffy_style.display,
+            taffy::Display::None,
+            "selected_index=0 → pb 非激活 hidden"
+        );
+
+        // 切到第 2 个 tab，再 sync：显隐反转。
+        if let Some(ControlState::TabList { selected_index }) = scene.controls.get_mut(tl) {
+            *selected_index = 1;
+        }
+        sync_control_visuals(&mut scene, tl);
+        assert_eq!(
+            scene.get(pa).unwrap().inline_override.taffy_style.display,
+            taffy::Display::None,
+            "selected_index=1 → pa 非激活 hidden"
+        );
+        assert_eq!(
+            scene.get(pb).unwrap().inline_override.taffy_style.display,
+            taffy::Display::Block,
+            "selected_index=1 → pb 激活 visible"
+        );
+    }
+
+    #[test]
+    fn tablist_r1_missing_aria_controls_and_missing_panel_skip_cleanly() {
+        // R1 容错：tab 未写 aria-controls（role 在但 aria_controls=None）→ 跳；tab 有 aria-controls
+        // 但 panel id 解析不到（panel 未建）→ 跳。两者均不 panic，且不影响合法 panel 的显隐切换。
+        let mut scene = Scene::default();
+        let tl = create_node_from_template(
+            &mut scene,
+            NodeKind::TabList,
+            ResolvedStyle::default(),
+            Some(ControlInit::TabList { selected_index: 0 }),
+        );
+        // tab0：role=tab 但无 aria-controls（make_role_child 只设 role）→ 跳过。
+        let _t_no_controls = make_role_child(&mut scene, tl, ROLE_TAB);
+        // tab1：aria-controls="ghost"，但 panel "ghost" 从未建 → find_by_id_attr 返 None → 跳过。
+        let _t_ghost = make_tab_child(&mut scene, tl, "ghost");
+        // tab2：合法 aria-controls="ok"，panel 存在；selected_index=0 → 非激活 → display:none。
+        let _t_ok = make_tab_child(&mut scene, tl, "ok");
+        let ok = make_panel(&mut scene, "ok");
+
+        sync_control_visuals(&mut scene, tl); // 不 panic
+        assert_eq!(
+            scene.get(ok).unwrap().inline_override.taffy_style.display,
+            taffy::Display::None,
+            "合法非激活 panel 仍切 none（前两个 tab 的 R1 跳过不影响它）"
         );
     }
 
