@@ -2707,8 +2707,7 @@ fn propagate_inline_image_sort_keys_stacks_above_text_layers() {
 }
 
 /// 哨兵：合成 node_id 硬上限文档。
-/// 验证 synth_text_node_id / is_text_sub_page / text_sub_primary_id / text_sub_page_idx
-/// 的编码/解码一致性。
+/// 验证 synth_text_node_id / is_text_sub_page / text_sub_primary_id 的编码/解码一致性。
 #[test]
 fn synth_text_node_id_roundtrip() {
     let primary = 0x0000_0123u32;
@@ -2716,13 +2715,11 @@ fn synth_text_node_id_roundtrip() {
     assert!(is_text_sub_page(sub));
     assert!(!is_text_sub_page(primary));
     assert_eq!(text_sub_primary_id(sub), primary & 0x00FF_FFFF);
-    assert_eq!(text_sub_page_idx(sub), 5);
 
     // 边界：page=15（不与 BACK_LAYER_FLAG bit 28 冲突的最大子页号）。
     // page>=16 会设置 bit 28（BACK_LAYER_FLAG），is_text_sub_page 据此排除 shadow 节点——
     // 故 sub_page 编码实际可用范围是 1..15（atlas 跨页远不到此上限）。
     let max_sub = synth_text_node_id(0, 15);
-    assert_eq!(text_sub_page_idx(max_sub), 15);
     assert!(is_text_sub_page(max_sub));
 
     // page=16 设置 BACK_LAYER_FLAG → is_text_sub_page 返 false（shadow 节点语义）。
@@ -3507,18 +3504,11 @@ fn textfield_renders_value_text() {
         &empty_sizes(),
         &mut test_glyph_atlas(),
     );
-    // TextField 产背景(program=0) + 文字(program=1) 两个 RenderNode。
-    // 验证文字节点存在且非空：node_id=0 且 program=1 的 Mesh。
+    // 文字 mesh 用合成 id（TF_TEXT_SYNTH_BYTE，与背景区分），primary 仍 = id.0。
+    // 验文字节点存在且非空：text_sub_primary_id 命中真节点且 program=1 的 Mesh。
     let has_text = frame.nodes.iter().any(|rn| {
-        rn.node_id == id.0
-            && matches!(
-                &rn.payload,
-                NodePayload::Mesh {
-                    program: 1,
-                    verts,
-                    ..
-                } if !verts.is_empty()
-            )
+        text_sub_primary_id(rn.node_id) == id.0
+            && matches!(&rn.payload, NodePayload::Mesh { program: 1, verts, .. } if !verts.is_empty())
     });
     assert!(
         has_text,
@@ -3548,21 +3538,154 @@ fn numberfield_renders_value_text() {
         &empty_sizes(),
         &mut test_glyph_atlas(),
     );
-    // 与 textfield_renders_value_text 同断言：node_id 命中且 program=1 的 Mesh 非空。
+    // 与 textfield_renders_value_text 同断言：文字 mesh 用合成 id，primary 命中真节点且
+    // program=1 的 Mesh 非空。
     let has_text = frame.nodes.iter().any(|rn| {
-        rn.node_id == id.0
-            && matches!(
-                &rn.payload,
-                NodePayload::Mesh {
-                    program: 1,
-                    verts,
-                    ..
-                } if !verts.is_empty()
-            )
+        text_sub_primary_id(rn.node_id) == id.0
+            && matches!(&rn.payload, NodePayload::Mesh { program: 1, verts, .. } if !verts.is_empty())
     });
     assert!(
         has_text,
         "NumberField value='42' must produce non-empty text glyph mesh (program=1)"
+    );
+}
+
+#[test]
+fn text_control_background_and_text_mesh_have_distinct_node_ids() {
+    // 回归：TextField/TextArea/NumberField 的背景框 mesh 与文字 mesh 必须用不同 node_id。
+    // 修复前两者共享真 node_id → C# MirrorPool 按 node_id 唯一索引 GO，第二个 mesh 覆盖
+    // 第一个 → 控件渲染残缺/不可见（settings showcase 的 spinbutton “无法渲染” 根因）。
+    // 修复后文字 mesh 用合成 node_id（tf_synth_id，high byte=TF_TEXT_SYNTH_BYTE），
+    // primary 关联仍 = 真节点 id（text_sub_primary_id 可还原）。
+    let (mut scene, id) = make_scene_with_text_control(
+        NodeKind::NumberField,
+        ControlState::NumberField {
+            edit: EditState::from_init("42".into(), "".into(), 0, false),
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+        },
+    );
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // 背景 mesh：program=0，node_id = 真节点 id（控件主体，在 id_to_pos 注册）。
+    let bg = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            rn.node_id == id.0 && matches!(&rn.payload, NodePayload::Mesh { program: 0, .. })
+        })
+        .expect("background mesh (program=0) exists");
+    // 文字 mesh：program=1，非空 verts（字形）。
+    let text = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            matches!(&rn.payload, NodePayload::Mesh { program: 1, verts, .. } if !verts.is_empty())
+        })
+        .expect("non-empty text mesh (program=1) exists");
+    // ① 核心：背景与文字 node_id 不同 → C# MirrorPool 各自独立 GO，互不覆盖。
+    assert_ne!(
+        bg.node_id, text.node_id,
+        "background and text mesh must have distinct node_ids (else C# MirrorPool conflict)"
+    );
+    // ② 文字 mesh 的合成 id 可还原回真节点 id（sort_key 传播 / 调试反查依赖此）。
+    assert_eq!(
+        text_sub_primary_id(text.node_id),
+        id.0,
+        "text mesh synth id must decode back to the real node id"
+    );
+    // ③ 文字 mesh 在背景之上绘制（sort_key 更大），否则被不透明背景遮挡。
+    assert!(
+        text.sort_key > bg.sort_key,
+        "text mesh sort_key ({}) must be > background sort_key ({}) so text draws on top",
+        text.sort_key,
+        bg.sort_key
+    );
+}
+
+#[test]
+fn text_control_text_mesh_sort_key_follows_background_in_multi_node_scene() {
+    // 多节点场景回归：NumberField 不是首节点时，文字 mesh（合成 id）sort_key 必须紧跟
+    // 背景之后。修复前 assign_sort_keys 不给合成 id 赋值（初始 sk=0），reorder 把它排到
+    // 所有真节点之前 → 文字绘制在背景之下被不透明背景遮挡（settings showcase spinbutton
+    // 文字不可见的多节点根因）。单节点场景 reorder 巧合让文字 sk=1 > 背景 sk=0，掩盖此 bug。
+    let mut root = Node::default();
+    root.kind = NodeKind::Container;
+    root.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 400.0,
+        h: 200.0,
+    };
+    let mut before = Node::default();
+    before.kind = NodeKind::Container;
+    before.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 50.0,
+    };
+    let mut nf = Node::default();
+    nf.kind = NodeKind::NumberField;
+    nf.layout_rect = Rect {
+        x: 0.0,
+        y: 100.0,
+        w: 200.0,
+        h: 50.0,
+    };
+    let mut scene = Scene::from_nodes(vec![root, before, nf], vec![(0, 1), (0, 2)]);
+    let nf_id = scene
+        .nodes
+        .iter()
+        .find(|(_, n)| n.kind == NodeKind::NumberField)
+        .map(|(_, n)| n.id)
+        .expect("NumberField node");
+    scene.controls.ensure(
+        nf_id,
+        ControlState::NumberField {
+            edit: EditState::from_init("42".into(), "".into(), 0, false),
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+        },
+    );
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let bg = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            rn.node_id == nf_id.0 && matches!(&rn.payload, NodePayload::Mesh { program: 0, .. })
+        })
+        .expect("背景 mesh 存在");
+    let text = frame
+        .nodes
+        .iter()
+        .find(|rn| {
+            is_tf_text_synth(rn.node_id)
+                && matches!(&rn.payload, NodePayload::Mesh { program: 1, verts, .. } if !verts.is_empty())
+        })
+        .expect("文字 mesh 存在");
+    assert!(
+        text.sort_key > bg.sort_key,
+        "文字 sort_key ({}) 必须 > 背景 sort_key ({})，否则文字被背景遮挡",
+        text.sort_key,
+        bg.sort_key
     );
 }
 
@@ -3668,17 +3791,10 @@ fn textfield_empty_value_renders_placeholder() {
         &empty_sizes(),
         &mut test_glyph_atlas(),
     );
-    // placeholder 文字也应产 glyph mesh。
+    // placeholder 文字也应产 glyph mesh（文字 mesh 用合成 id，primary 命中真节点）。
     let has_text = frame.nodes.iter().any(|rn| {
-        rn.node_id == id.0
-            && matches!(
-                &rn.payload,
-                NodePayload::Mesh {
-                    program: 1,
-                    verts,
-                    ..
-                } if !verts.is_empty()
-            )
+        text_sub_primary_id(rn.node_id) == id.0
+            && matches!(&rn.payload, NodePayload::Mesh { program: 1, verts, .. } if !verts.is_empty())
     });
     assert!(
         has_text,
@@ -3708,15 +3824,8 @@ fn textarea_renders_value_text() {
         &mut test_glyph_atlas(),
     );
     let has_text = frame.nodes.iter().any(|rn| {
-        rn.node_id == id.0
-            && matches!(
-                &rn.payload,
-                NodePayload::Mesh {
-                    program: 1,
-                    verts,
-                    ..
-                } if !verts.is_empty()
-            )
+        text_sub_primary_id(rn.node_id) == id.0
+            && matches!(&rn.payload, NodePayload::Mesh { program: 1, verts, .. } if !verts.is_empty())
     });
     assert!(
         has_text,
@@ -3982,12 +4091,12 @@ fn textfield_editing_mesh_sort_key_order() {
     let bg_sk = sk(id.0);
     let sel_sk = sk(tf_synth_id(id.0, TF_SELECTION_SYNTH_BYTE));
     let cur_sk = sk(tf_synth_id(id.0, TF_CURSOR_SYNTH_BYTE));
-    // 找文字 mesh（node_id=id.0 且 program=1，非空 verts）。
+    // 找文字 mesh（合成 id TF_TEXT_SYNTH_BYTE，program=1，非空 verts）。
     let text_sk = frame
         .nodes
         .iter()
         .find(|rn| {
-            rn.node_id == id.0
+            is_tf_text_synth(rn.node_id)
                 && matches!(&rn.payload, NodePayload::Mesh { program: 1, verts, .. } if !verts.is_empty())
         })
         .map(|rn| rn.sort_key)

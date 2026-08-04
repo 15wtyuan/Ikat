@@ -481,6 +481,22 @@ fn ffi_text_input_inserts_into_focused_textfield() {
     loomgui_stage_free(h);
 }
 
+/// 中文（多字节 UTF-8）textinput → insert → tick（measure + render）不 panic。
+/// 回归：showcase TextField 拼音选字崩溃调查——验证 core 端到端处理中文安全。
+#[test]
+fn ffi_text_input_chinese_into_focused_textfield() {
+    let (h, tf) = make_stage_with_focused_textfield("");
+    let cps = ['你' as u32, '好' as u32];
+    assert_eq!(
+        loomgui_stage_set_text_input(h, cps.as_ptr(), 2),
+        0,
+        "set_text_input 中文 rc"
+    );
+    loomgui_stage_tick(h, 0.0); // process_text_input + measure + render
+    assert_eq!(textfield_value(h, tf), "你好");
+    loomgui_stage_free(h);
+}
+
 /// null/len=0 → 清空 pending（no-op），不 UB。返 0。
 #[test]
 fn ffi_set_text_input_null_is_noop() {
@@ -593,6 +609,36 @@ fn get_cursor_rect_returns_finite_rect() {
     assert!(rect.x.is_finite(), "cursor rect x finite");
     assert!(rect.y.is_finite(), "cursor rect y finite");
     assert!(rect.h > 0.0, "cursor rect h = line height > 0");
+    loomgui_stage_free(h);
+}
+
+/// 回归：cursor_rect 曾对已绝对的 layout_rect 再 apply_point(wm) → x = wm[4] + layout_rect.x
+/// （双重计数），IME 候选窗偏到屏外（showcase settings 输入框 world x=3323 实际是 1661 翻倍）。
+/// 修复后纯平移用 wm[4] 作原点（与 render arm 光标同源），cursor_rect.x = wm[4] + off_left + cx，
+/// 不含 layout_rect.x。设 layout_rect.x=500 + wm=IDENTITY(wm[4]=0)，修复前 rect.x≈500+（含
+/// layout_rect.x），修复后 rect.x≈小（off_left+cx，不含 500）。
+#[test]
+fn get_cursor_rect_pure_translation_no_double_count() {
+    let (h, tf) = make_stage_with_focused_textfield("hello");
+    loomgui_stage_tick(h, 0.0);
+    let n_id = NodeId(tf);
+    {
+        let sh = unsafe { &mut *h };
+        let scene = sh.stage.scene.as_mut().expect("scene built");
+        // 设 layout_rect.x=500（非 0，使双重 bug 可观测）+ world_transform=IDENTITY（wm[4]=0）。
+        scene.get_mut(n_id).expect("node").layout_rect.x = 500.0;
+        scene.world_transforms[n_id.index()] = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    }
+    let mut rect = CursorRectRepr::default();
+    let rc = loomgui_stage_get_cursor_rect(h, tf, &mut rect);
+    assert_eq!(rc, 0, "get_cursor_rect rc");
+    // 修复前：rect.x = wm[4](0) + layout_rect.x(500) + off_left + cx ≈ 500+（双重）。
+    // 修复后：rect.x = wm[4](0) + off_left + cx ≈ 小（不含 layout_rect.x=500）。
+    assert!(
+        rect.x < 100.0,
+        "纯平移 wm[4]=0 时 cursor_rect.x 不应含 layout_rect.x（双重 bug），实际 rect.x={}",
+        rect.x
+    );
     loomgui_stage_free(h);
 }
 

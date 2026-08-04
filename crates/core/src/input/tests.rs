@@ -5317,6 +5317,29 @@ fn number_field_delete_key_works() {
 }
 
 #[test]
+fn delete_key_routes_with_unity_keycode_value() {
+    // Unity KeyCode.Delete == 323（C# CollectKeys 传 (uint)KeyCode）。core KEY_DELETE 须匹配此值，
+    // 否则 C# 传 323、core 期望 127 → Delete 键不路由（showcase NumberField 删除键失效根因）。
+    let (mut s, nf) = focused_numberfield_scene("123");
+    if let Some(ControlState::NumberField { edit, .. }) = s.controls.get_mut(nf) {
+        edit.cursor = 0;
+        edit.anchor = 0;
+    }
+    let mut out = Vec::new();
+    process_keys(
+        &mut s,
+        &[KeyEvent {
+            key_code: 323, // Unity KeyCode.Delete（C# 实传值，非 core 常量）
+            modifiers: 0,
+            is_down: true,
+            pad: [0, 0],
+        }],
+        &mut out,
+    );
+    assert_eq!(nf_edit(&s, nf).value, "23", "Unity Delete(323) 删首位 '1'");
+}
+
+#[test]
 fn number_field_arrow_keys_move_cursor() {
     // NumberField value="123"(cursor=3 末尾)，Left → cursor=2、anchor=2（无 shift 折叠）。
     let (mut s, nf) = focused_numberfield_scene("123");

@@ -704,6 +704,14 @@ fn synth_text_node_id(primary_id: u32, sub_page: u32) -> u32 {
 const TF_CURSOR_SYNTH_BYTE: u32 = 32;
 const TF_SELECTION_SYNTH_BYTE: u32 = 33;
 const TF_COMPOSITION_SYNTH_BYTE: u32 = 34;
+/// 文本控件（TextField/TextArea/NumberField）的文字主体 mesh 合成 id 标签。
+/// 这些控件先 push 背景框 mesh（占真 node_id），再 push 文字 mesh；若文字也用真
+/// node_id，则 C# MirrorPool 按 node_id 唯一索引 GO 时第二个 mesh 覆盖第一个
+/// → 控件渲染残缺/不可见（settings showcase 的 spinbutton “无法渲染” 根因）。
+/// 文字 mesh 改用此合成 id 与背景区分，C# 各自独立 GO；primary 关联仍 = 真节点 id
+///（text_sub_primary_id 可还原），供 sort_key 传播与调试反查。选 35：与子页 1..=15、
+/// BACK_LAYER_FLAG 区间、retired 232..=255 均不撞（同 32..=34 安全区间）。
+const TF_TEXT_SYNTH_BYTE: u32 = 35;
 
 /// 生成 TextField 编辑反馈 mesh 的合成 node_id（high byte = tag，低 24 位 = primary）。
 /// 编码同 `synth_text_node_id`，仅 high-byte 标签语义不同（编辑反馈 vs 跨页子页）。
@@ -719,6 +727,13 @@ pub(crate) fn is_tf_edit_synth(node_id: u32) -> bool {
     (TF_CURSOR_SYNTH_BYTE as u8..=TF_COMPOSITION_SYNTH_BYTE as u8).contains(&hi)
 }
 
+/// 判断 node_id 是否为文本控件（TextField/TextArea/NumberField）的文字主体 mesh 合成 id
+///（high byte = 35）。这些 mesh 须独立保留：sort_key 由 propagate_text_sub_page_sort_keys
+/// 按 primary 传播（紧跟背景之后），merge::mesh_key 据此排除合批（保持独立 GO）。
+pub(crate) fn is_tf_text_synth(node_id: u32) -> bool {
+    (node_id >> 24) as u8 == TF_TEXT_SYNTH_BYTE as u8
+}
+
 /// 判断 node_id 是否为跨页 text 子页（high byte 在 1..=15，即 bits [31:24] 值 1-15）。
 /// BACK_LAYER_FLAG（bit 28，对应 high byte >= 16）和 INLINE_IMG_SYNTH_ID_BASE（high byte
 /// = 232..=255）均不在此范围——各自的 propagate 函数单独传播 sort_key，不走子页传播。
@@ -730,11 +745,6 @@ fn is_text_sub_page(node_id: u32) -> bool {
 /// 提取跨页 text 子页对应的主节点 id。
 fn text_sub_primary_id(node_id: u32) -> u32 {
     node_id & 0x00FF_FFFF
-}
-
-/// 提取跨页 text 子页的页号（1 基）。
-fn text_sub_page_idx(node_id: u32) -> u32 {
-    node_id >> 24
 }
 
 /// box-shadow 合成节点 sort_key 调整：阴影节点继承主节点 sort_key，
@@ -853,50 +863,65 @@ fn propagate_inline_image_sort_keys(nodes: &mut [RenderNode], images: &[(u32, u3
     }
 }
 
-/// 跨页 text 子页 sort_key 传播 + 后续真节点 sort_key 后移。
+/// Text 附属 mesh sort_key 传播 + 后续真节点 sort_key 后移。
 ///
-/// assign_sort_keys 只给 `id_to_pos` 中的真 scene 节点赋 sort_key；合成子页保持 0。
+/// assign_sort_keys 只给 `id_to_pos` 中的真 scene 节点赋 sort_key；合成附属 mesh 保持 0。
+/// 附属 mesh 有三类（都按 primary = low 24 bit 关联真节点）：
+/// - 跨页子页（high byte 1..=15）：多页文字的后续页。
+/// - 文本控件文字首页（high byte 35）：TextField/TextArea/NumberField 的文字主体
+///   （背景框 mesh 占真 node_id，文字用合成 id 区分，见 TF_TEXT_SYNTH_BYTE）。
+/// - 编辑反馈 mesh（high byte 32..=34）：光标 / 选区背景 / composition 下划线。
+///
 /// 此函数：
-/// 1. 统计每对 (primary_sort_key, num_sub_pages)
-/// 2. 后续真节点 sort_key 后移 num_sub_pages
-/// 3. 子页 sort_key = primary.sort_key + page_idx, mask_context = primary.mask_context
+/// 1. 按 primary 分组统计附属 mesh（遍历 nodes 按 push 序收集 → synth_ids 保 push 序）。
+/// 2. 后续真节点 sort_key 后移（按每个 primary 的附属总数）。
+/// 3. 附属 sort_key = primary.sort_key + 1 + 序号，mask_context = primary.mask_context。
+///    按 nodes 出现序（= push 序 = 绘制层序：选区→文字→composition→光标；子页紧跟首页）
+///    依次赋 offset，保留 push 层序且紧跟 primary 之后。
 ///
-/// 步骤 2 保证子页 sort_key 嵌入 primary 与下一个真节点之间，保持单调连续。
+/// 步骤 2 保证附属 sort_key 嵌入 primary 与下一个真节点之间，保持单调连续。
 fn propagate_text_sub_page_sort_keys(
     nodes: &mut [RenderNode],
     id_to_pos: &std::collections::HashMap<NodeId, usize>,
 ) {
-    // 统计：真 node_id 为 key 的 primary text 节点及其子页数。
-    let mut sub_counts: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    // 收集附属 mesh（子页 + 文字首页 + 编辑反馈），按 primary 分组。
+    // 遍历 nodes 按 push 序收集 → synth_ids 保 push 序（= 绘制层序）。
+    let mut groups: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
     for rn in nodes.iter() {
-        if is_text_sub_page(rn.node_id) {
+        if is_text_sub_page(rn.node_id)
+            || is_tf_text_synth(rn.node_id)
+            || is_tf_edit_synth(rn.node_id)
+        {
             let primary = text_sub_primary_id(rn.node_id);
-            *sub_counts.entry(primary).or_default() += 1;
+            groups.entry(primary).or_default().push(rn.node_id);
         }
     }
-    if sub_counts.is_empty() {
+    if groups.is_empty() {
         return;
     }
-    // 按 primary sort_key 排序（从小到大），保证 shift 按序累积。
-    let mut shifts: Vec<(u32, u32)> = sub_counts
+    // 按 primary sort_key 排序（从小到大），count = 该 primary 的附属总数。
+    let mut shifts: Vec<(u32, u32)> = groups
         .iter()
-        .filter_map(|(&primary, &count)| {
+        .filter_map(|(&primary, synth_ids)| {
             id_to_pos
                 .get(&NodeId(primary))
-                .map(|&pos| (nodes[pos].sort_key, count))
+                .map(|&pos| (nodes[pos].sort_key, synth_ids.len() as u32))
         })
         .collect();
     shifts.sort_by_key(|&(sk, _)| sk);
     // 后移后续真节点 sort_key。使用累积偏移避免 stale primary_sk：shifts 中的
-    // primary_sk 是排序前采集的快照；当存在多个带子页的 text 节点时，先处理的节点
-    // 已把后续节点（含后面的 text 节点）的 sort_key 向后推，此时再用原始 primary_sk
+    // primary_sk 是排序前采集的快照；当存在多个带附属的节点时，先处理的节点已把
+    // 后续节点（含后面的 text 节点）的 sort_key 向后推，此时再用原始 primary_sk
     // 比较会误判区间，造成 sort_key tie。
     let mut cum_shift: u32 = 0;
     for (primary_sk, n) in &shifts {
         let adjusted_sk = *primary_sk + cum_shift;
         cum_shift += *n;
         for rn in nodes.iter_mut() {
-            if is_text_sub_page(rn.node_id) {
+            if is_text_sub_page(rn.node_id)
+                || is_tf_text_synth(rn.node_id)
+                || is_tf_edit_synth(rn.node_id)
+            {
                 continue;
             }
             if rn.sort_key > adjusted_sk {
@@ -904,19 +929,22 @@ fn propagate_text_sub_page_sort_keys(
             }
         }
     }
-    // 传播子页 sort_key + mask_context。
-    for &primary in sub_counts.keys() {
+    // 传播附属 sort_key + mask_context：按 synth_ids 序（nodes 出现序 = push 序 = 绘制层序）
+    // 依次赋 primary_sk+1, +2, ...。push 序即层序，保留即得正确绘制层序。
+    for (&primary, synth_ids) in &groups {
         let pos = match id_to_pos.get(&NodeId(primary)) {
             Some(&p) => p,
             None => continue,
         };
         let primary_sk = nodes[pos].sort_key;
         let primary_mask = nodes[pos].mask_context;
-        for rn in nodes.iter_mut() {
-            if text_sub_primary_id(rn.node_id) == primary && is_text_sub_page(rn.node_id) {
-                let page = text_sub_page_idx(rn.node_id);
-                rn.sort_key = primary_sk + page;
-                rn.mask_context = primary_mask;
+        for (offset, &synth_id) in synth_ids.iter().enumerate() {
+            for rn in nodes.iter_mut() {
+                if rn.node_id == synth_id {
+                    rn.sort_key = primary_sk + 1 + offset as u32;
+                    rn.mask_context = primary_mask;
+                    break;
+                }
             }
         }
     }
@@ -1419,7 +1447,15 @@ fn push_text_meshes(
             mask_context: MaskContext(0),
             sort_key: 0,
             change_level: ChangeLevel::Full,
-            reuse_key: n.reuse_key,
+            // 合成 id 模式（文本控件：背景已占真 node_id）→ reuse_key=0：C# MirrorPool
+            // 按 node_id keying 独立 GO，不继承主节点 reuse_key（否则虚拟列表 slot 内按
+            // reuse_key keying 仍与背景同 GO 冲突）。真 id 模式（普通 TextNode：文字是
+            // 唯一 mesh）→ 继承 n.reuse_key（虚拟列表 slot 复用走 reuse_key keying）。
+            reuse_key: if text_primary_id == node_id {
+                n.reuse_key
+            } else {
+                0
+            },
             effect,
             payload: NodePayload::Mesh {
                 verts: verts0.clone(),
@@ -1916,8 +1952,21 @@ fn render_one_node(
                 n.style.background_gradient,
                 n.style.background_clip_text,
             );
+            // 文字 mesh 用合成 id（TF_TEXT_SYNTH_BYTE）：背景框 mesh 已占真 node_id，若
+            // 文字也用真 node_id 则 C# MirrorPool 同 node_id 唯一 GO 把文字覆盖背景（控件
+            // 渲染残缺）。合成 id 让文字独立 GO；primary（low 24 bit）仍 = node_id，供
+            // sort_key 传播还原。register_id_map=false：背景已注册 n.id → id_to_pos。
             push_text_meshes(
-                nodes, id_to_pos, meshes, n, node_id, node_id, parent_id, alpha, text_color, wm,
+                nodes,
+                id_to_pos,
+                meshes,
+                n,
+                node_id,
+                tf_synth_id(node_id, TF_TEXT_SYNTH_BYTE),
+                parent_id,
+                alpha,
+                text_color,
+                wm,
                 false, // 背景已注册 n.id → id_to_pos，文字不重复注册
             );
             // composition 下划线：有 composition 时在 composition 段下方画 2px 横线。

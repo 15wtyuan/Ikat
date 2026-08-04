@@ -38,6 +38,11 @@ fn mesh_key(
     if crate::render::is_tf_edit_synth(rn.node_id) {
         return None; // TextField 编辑反馈 mesh（光标/选区/composition）须独立保留
     }
+    if crate::render::is_tf_text_synth(rn.node_id) {
+        return None; // 文本控件文字主体 mesh（合成 id）须独立保留：背景与文字已拆为两个
+                     // node_id（见 TF_TEXT_SYNTH_BYTE），合批会把文字并入别的 GO，
+                     // 破坏 C# MirrorPool 按 node_id 的 dirty/change_level 跟踪。
+    }
     match &rn.payload {
         NodePayload::Mesh {
             image_path,

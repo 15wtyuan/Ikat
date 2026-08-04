@@ -50,6 +50,29 @@ namespace LoomGUI
             return new UnityEngine.Vector2(dx, dy);
         }
 
+        /// design→screen 映射，ScreenToDesign 的逆（同一 sf/offX/offYTop 公式）。
+        /// design 左上原点(y-down) → screen 左下原点(y-up)。用于 IME 候选窗定位
+        /// （核心 cursor_rect 是 design 空间，Unity compositionCursorPos 是 screen 像素）。
+        public static UnityEngine.Vector2 DesignToScreen(UnityEngine.Vector2 design, Vector2Int screenSize, UnityEngine.Vector2 rootSize, UnityEngine.Rect area, bool useSafeArea)
+        {
+            float sw = screenSize.x > 0 ? screenSize.x : 1;
+            float sh = screenSize.y > 0 ? screenSize.y : 1;
+            UnityEngine.Rect a = useSafeArea ? area : new UnityEngine.Rect(0, 0, sw, sh);
+            if (a.width <= 0f || a.height <= 0f) a = new UnityEngine.Rect(0, 0, sw, sh);
+            float dw = rootSize.x > 0 ? rootSize.x : 1;
+            float dh = rootSize.y > 0 ? rootSize.y : 1;
+            float sf = Mathf.Min(a.width / dw, a.height / dh);
+            sf = sf > 0 ? sf : 1f;
+            float offX = a.x + (a.width - dw * sf) * 0.5f;
+            // compositionCursorPos 在 Editor 中是左上原点 y-down（OS 屏幕语义，与 Input.mousePosition
+            // 左下原点相反——IME 候选窗定位实测：默认 (0,0) 显示在编辑器左上）。design 也是左上
+            // y-down，直接映射不 y-flip。design root 居中在 area：顶部偏移 (area.h - root*sf)/2。
+            float offY = a.y + (a.height - dh * sf) * 0.5f;
+            float screenX = offX + design.x * sf;
+            float screenY = offY + design.y * sf;
+            return new UnityEngine.Vector2(screenX, screenY);
+        }
+
         /// 采集本帧指针（鼠标+触摸）→ set_input。鼠标 touch_id=-1（slot0），触摸 touch_id=fingerId（slot1-4）。
         /// 鼠标+触摸可同帧共存（带触摸屏桌面）；EditMode 无 Touchscreen 跳过触摸。
         public void Collect(System.IntPtr stage, UnityEngine.Vector2 rootSize, bool useSafeArea)
@@ -150,6 +173,82 @@ namespace LoomGUI
             }
         }
 
+        /// 采集本帧字符输入 → set_text_input（UTF-32 codepoints）。Input.inputString 返本帧键入的
+        /// 已映射可打印字符（数字/字母/符号；IME composition 走 host set_composition 另通道）。
+        /// 空串 → set_text_input(null,0)（core 无字符输入）。与 CollectKeys 互补：
+        /// keydown 通道走物理键（控制键 Backspace/Delete/方向/翻页），textinput 通道走映射好的字符。
+        public void CollectText(System.IntPtr stage)
+        {
+            if (stage == System.IntPtr.Zero) return;
+            string s = UnityEngine.Input.inputString;
+            if (string.IsNullOrEmpty(s))
+            {
+                Native.loomgui_stage_set_text_input((Bindings.StageHandle*)stage, null, 0);
+                return;
+            }
+            // string → UTF-32 codepoints（代理对占 2 char → 1 codepoint）。
+            var cps = new System.Collections.Generic.List<uint>();
+            for (int i = 0; i < s.Length; )
+            {
+                int code = char.ConvertToUtf32(s, i);
+                cps.Add((uint)code);
+                i += char.IsSurrogatePair(s, i) ? 2 : 1;
+            }
+            var arr = cps.ToArray();
+            fixed (uint* p = arr)
+            {
+                Native.loomgui_stage_set_text_input((Bindings.StageHandle*)stage, p, (nuint)arr.Length);
+            }
+        }
+
+        /// 采集本帧 IME composition（系统输入法预编辑串）→ set_composition（UTF-8）。
+        /// Unity Input.compositionString 是 IME 组字串（组字中非空，组字完成变空，结果字符进
+        /// inputString 由 CollectText insert）。聚焦文本框时显式开 IME（Unity IME Auto 模式
+        /// 基于 UnityEngine.GUI TextField，LoomGUI 自绘不触发，故须显式 On），失焦关 IME。
+        /// 核心用 e.cursor 定位组字插入点（FFI pos 参数忽略，C# 传 0）。
+        public void CollectComposition(System.IntPtr stage)
+        {
+            if (stage == System.IntPtr.Zero) return;
+            Bindings.StageHandle* h = (Bindings.StageHandle*)stage;
+            uint focused = Native.loomgui_stage_focused_node(h);
+            const uint NONE = 0xFFFF_FFFFu;
+            if (focused == NONE)
+            {
+                // 无聚焦文本框：关 IME（字母键走普通 inputString，不组字）。
+                UnityEngine.Input.imeCompositionMode = UnityEngine.IMECompositionMode.Off;
+                return;
+            }
+            // 聚焦文本框：开 IME（字母键交给系统输入法组字，不进 inputString）。
+            UnityEngine.Input.imeCompositionMode = UnityEngine.IMECompositionMode.On;
+            // IME 候选窗定位：读光标世界矩形（design 空间，左上原点）→ screen（Unity 左下原点）。
+            // 候选窗跟随光标，定位在光标底部（r.y + r.h，候选窗在下方显示）。
+            Bindings.CursorRectRepr r;
+            if (Native.loomgui_stage_get_cursor_rect(h, focused, &r) == 0)
+            {
+                var ss = new Vector2Int(Screen.width, Screen.height);
+                UnityEngine.Rect sa = Screen.safeArea;
+                var screenPos = DesignToScreen(
+                    new UnityEngine.Vector2(r.x, r.y + r.h),
+                    ss, this.DesignSize, sa, this.UseSafeArea);
+                UnityEngine.Input.compositionCursorPos = screenPos;
+            }
+            // compositionString → set_composition。组字中设预编辑串（核心 display 拼组字显示），
+            // 组字完成（空串）清预编辑（CollectText 同帧 insert 结果字符）。
+            string comp = UnityEngine.Input.compositionString;
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(comp ?? "");
+            if (bytes.Length == 0)
+            {
+                Native.loomgui_stage_set_composition(h, focused, null, 0, 0);
+            }
+            else
+            {
+                fixed (byte* p = bytes)
+                {
+                    Native.loomgui_stage_set_composition(h, focused, p, (nuint)bytes.Length, 0);
+                }
+            }
+        }
+
         /// 采集本帧滚轮 → set_wheel_input。tick 前调；累积式（多次调合并）。
         /// 新旧输入系统双路径：滚轮用旧 Input.mouseScrollDelta 或新 Mouse.current.scroll。
         /// 归一 delta → ±1/格：旧 Input.mouseScrollDelta 已 ≈ ±1/格；新系统 120 像素/格除 120。
@@ -209,8 +308,12 @@ namespace LoomGUI
         /// 显式白名单而非全枚举——绝大多数键业务不关心，白名单够用且省 CPU。
         static readonly UnityEngine.KeyCode[] KeyList = {
             UnityEngine.KeyCode.Tab,
+            // 编辑控制键：Backspace/Delete（删字符）+ Home/End（行首/尾）。core KEY_DELETE=323
+            // 须与此处 KeyCode.Delete(323) 一致；缺失则文本控件无法删字符。
+            UnityEngine.KeyCode.Backspace, UnityEngine.KeyCode.Delete,
             UnityEngine.KeyCode.Return, UnityEngine.KeyCode.Space, UnityEngine.KeyCode.Escape,
             UnityEngine.KeyCode.LeftArrow, UnityEngine.KeyCode.RightArrow, UnityEngine.KeyCode.UpArrow, UnityEngine.KeyCode.DownArrow,
+            UnityEngine.KeyCode.Home, UnityEngine.KeyCode.End,
             UnityEngine.KeyCode.A, UnityEngine.KeyCode.B, UnityEngine.KeyCode.C, UnityEngine.KeyCode.D, UnityEngine.KeyCode.E,
             UnityEngine.KeyCode.F, UnityEngine.KeyCode.G, UnityEngine.KeyCode.H, UnityEngine.KeyCode.I, UnityEngine.KeyCode.J,
             UnityEngine.KeyCode.K, UnityEngine.KeyCode.L, UnityEngine.KeyCode.M, UnityEngine.KeyCode.N, UnityEngine.KeyCode.O,

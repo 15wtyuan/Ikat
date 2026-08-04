@@ -49,6 +49,130 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
     crate::asset::write_package(&input)
 }
 
+/// 辅助：建单节点控件 pkg（tabindex=None，模拟 HTML 未写 tabindex）。
+fn make_control_pkg(kind: NodeKind, control_init: crate::asset::ControlInit) -> Vec<u8> {
+    let nodes = [TemplateNode {
+        kind,
+        style: ResolvedStyle::default(),
+        parent_idx: None,
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        content: None,
+        src: None,
+        control_init: Some(control_init),
+        role: None,
+        data_slot: None,
+    }];
+    let rules = crate::style::dynamic::DynamicRuleTable::default();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules)],
+    };
+    crate::asset::write_package(&input)
+}
+
+#[test]
+fn instantiate_focusable_control_gets_default_tabindex_zero() {
+    // HTML/ARIA 语义：可聚焦控件（input/textarea/select/button 及 role=textbox/spinbutton/
+    // slider/switch/radio/combobox）隐式 tabindex=0。pkg 里 tabindex=None（HTML 未写）时，
+    // runtime 应补默认 Some(0)，否则 click-to-focus / Tab 链无法命中控件
+    // （showcase NumberField 点击不进输入模式根因）。
+    let pkg = make_control_pkg(
+        NodeKind::NumberField,
+        crate::asset::ControlInit::NumberField {
+            edit: crate::asset::EditInit {
+                value: "42".into(),
+                placeholder: String::new(),
+                max_length: 0,
+                readonly: false,
+            },
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+        },
+    );
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("bag", &pkg).unwrap();
+    let id = s.instantiate("bag", "c").unwrap();
+    let scene = s.scene.as_ref().unwrap();
+    let n = scene.get(id).expect("node");
+    assert_eq!(
+        n.interaction.tabindex,
+        Some(0),
+        "NumberField 无显式 tabindex → 默认 Some(0)（可聚焦）"
+    );
+}
+
+#[test]
+fn instantiate_explicit_tabindex_minus_one_is_respected() {
+    // 显式 tabindex="-1" 不被默认覆盖（作者明确排除出 Tab 链 / click-to-focus）。
+    let nodes = [TemplateNode {
+        kind: NodeKind::NumberField,
+        style: ResolvedStyle::default(),
+        parent_idx: None,
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: Some(-1),
+        content: None,
+        src: None,
+        control_init: Some(crate::asset::ControlInit::NumberField {
+            edit: crate::asset::EditInit {
+                value: "42".into(),
+                placeholder: String::new(),
+                max_length: 0,
+                readonly: false,
+            },
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+        }),
+        role: None,
+        data_slot: None,
+    }];
+    let rules = crate::style::dynamic::DynamicRuleTable::default();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules)],
+    };
+    let pkg = crate::asset::write_package(&input);
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("bag", &pkg).unwrap();
+    let id = s.instantiate("bag", "c").unwrap();
+    let scene = s.scene.as_ref().unwrap();
+    let n = scene.get(id).expect("node");
+    assert_eq!(
+        n.interaction.tabindex,
+        Some(-1),
+        "显式 tabindex=-1 不被默认覆盖"
+    );
+}
+
+#[test]
+fn instantiate_non_focusable_progress_stays_no_tabindex() {
+    // ProgressBar 只读不可聚焦 → 不补默认 tabindex。
+    let pkg = make_control_pkg(
+        NodeKind::ProgressBar,
+        crate::asset::ControlInit::Progress {
+            value: 0.0,
+            max: 100.0,
+            indeterminate: false,
+        },
+    );
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("bag", &pkg).unwrap();
+    let id = s.instantiate("bag", "c").unwrap();
+    let scene = s.scene.as_ref().unwrap();
+    let n = scene.get(id).expect("node");
+    assert_eq!(
+        n.interaction.tabindex, None,
+        "ProgressBar 只读 → 不补默认 tabindex"
+    );
+}
+
 #[test]
 fn instantiate_clones_subtree_returns_orphan_root() {
     let mut s = Stage::new_for_test();

@@ -55,7 +55,7 @@ pub const KEY_TAB: u32 = 9;
 pub const KEY_BACKSPACE: u32 = 8;
 pub const KEY_RETURN: u32 = 13; // Unity KeyCode.Return（主回车；KeypadEnter=271 另算）
 pub const KEY_ESCAPE: u32 = 27;
-pub const KEY_DELETE: u32 = 127; // 前向删（Unity KeyCode.Delete）
+pub const KEY_DELETE: u32 = 323; // Unity KeyCode.Delete（C# CollectKeys 传 (uint)KeyCode；旧值 127=ASCII DEL 与 Unity 不匹配 → Delete 键失效）
 pub const KEY_LEFT: u32 = 276; // LeftArrow
 pub const KEY_RIGHT: u32 = 275; // RightArrow
 pub const KEY_UP: u32 = 273; // UpArrow

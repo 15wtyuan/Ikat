@@ -850,8 +850,15 @@ pub fn on_text_pointer_down(scene: &mut Scene, id: NodeId, local_x: f32, local_y
         | ControlState::NumberField { edit: e, .. },
     ) = scene.controls.get_mut(id)
     {
-        e.cursor = offset;
-        e.anchor = offset;
+        // 钳到 value.len() + char 边界：offset 来自 text_layouts 的 layout，value 空时
+        // layout 基于 placeholder（layout solve 缓存 display 文本），offset 可达 placeholder
+        // 字节数 > value.len()=0 → cursor 越界 → insert_str panic（is_char_boundary 断言失败）。
+        let mut safe = offset.min(value.len());
+        while !value.is_char_boundary(safe) {
+            safe -= 1;
+        }
+        e.cursor = safe;
+        e.anchor = safe;
         e.cursor_visible = true;
         e.cursor_timer = 0.0;
     }
@@ -1050,12 +1057,14 @@ fn clamp_boundary(value: &str, idx: usize) -> usize {
 /// paste 带换行的多行文本进单行框时滤成单行（照 HTML 单行 input 行为）。
 /// TextArea 保留 `\n`（用户可手动换行）但仍删 `\r`/`\t`（CR 与 TAB 在文本域内无意义）。
 fn sanitize_str(kind: NodeKind, s: &str) -> String {
+    // 过滤控制字符（C0 < 0x20 + DEL 0x7f）：IME 通道偶发把 backspace(\b)/其他控制字符
+    // 塞进文本输入，不过滤会进 value 渲染成 tofu。TextArea 保留 \n（多行换行）。
     match kind {
-        NodeKind::TextArea => s.chars().filter(|&c| c != '\r' && c != '\t').collect(),
-        _ => s
+        NodeKind::TextArea => s
             .chars()
-            .filter(|&c| !matches!(c, '\n' | '\r' | '\t'))
+            .filter(|&c| c == '\n' || (c >= ' ' && c != '\u{7f}'))
             .collect(),
+        _ => s.chars().filter(|&c| c >= ' ' && c != '\u{7f}').collect(),
     }
 }
 
@@ -2762,6 +2771,54 @@ mod tests {
         assert_ne!(
             insensitive, expected,
             "[target, target+6] 跨 glyph 中点：减法错误会翻转 offset（测试非退化）"
+        );
+    }
+
+    #[test]
+    fn on_text_pointer_down_clamps_cursor_to_value_len_when_layout_exceeds_value() {
+        // 回归：layout solve 对空 value 控件用 placeholder measure 并缓存到 text_layouts
+        //（layout/mod.rs value 空时 display 退到 placeholder）。on_text_pointer_down 用
+        // raw value（空）+ 该 layout 算 cursor → hit_byte_offset 返 placeholder 字节数 > 0，
+        // 但 value.len()=0 → cursor 越界 → insert_str panic（is_char_boundary 断言失败，
+        // showcase TextField 拼音输入崩溃根因）。cursor 须钳到 value.len() + char 边界。
+        let (mut scene, id) = make_scene_with_textfield_inset("");
+        // 覆盖 text_layouts：模拟 layout solve 缓存 placeholder layout（多 glyph；value 空时
+        // layout 实际由 placeholder measure 产生）。make_scene_with_textfield_inset("") 对
+        // 空串 measure 产零 glyph layout，这里手动换成有 glyph 的，复现 layout/value 不一致。
+        {
+            let style = scene.get(id).unwrap().style.clone();
+            let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+            let font_data = std::fs::read(font_path).unwrap();
+            let mut fonts = crate::text::layout::FontTable::new();
+            fonts.register("DejaVu", font_data, true).unwrap();
+            let stack = fonts.stack_for(style.font_family.as_deref());
+            let lr = scene.get(id).unwrap().layout_rect;
+            let off_left = crate::render::resolve_lp(style.taffy_style.border.left)
+                + crate::render::resolve_lp(style.taffy_style.padding.left);
+            let off_right = crate::render::resolve_lp(style.taffy_style.border.right)
+                + crate::render::resolve_lp(style.taffy_style.padding.right);
+            let content_w = (lr.w - off_left - off_right).max(0.0);
+            let layout = crate::text::layout::measure_text(
+                "abcd",
+                style.font_size,
+                style.line_height,
+                style.letter_spacing,
+                style.text_align,
+                style.white_space_nowrap,
+                Some(content_w),
+                &stack,
+                style.color,
+                crate::text::rich::weight_from_font_weight(style.font_weight),
+            );
+            scene.text_layouts[id.index()] = Some(layout);
+        }
+        // 点击 placeholder 中部（content-local）：hit_byte_offset 返 placeholder 字节偏移（>0），
+        // 但 value 空 → 修复前 cursor 越界，修复后须钳到 0。
+        on_text_pointer_down(&mut scene, id, 50.0, 5.0);
+        let cursor = get_cursor(&scene, id);
+        assert_eq!(
+            cursor, 0,
+            "value 空 → cursor 须钳到 value.len()=0（不越界），实际 cursor={cursor}"
         );
     }
 

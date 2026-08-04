@@ -218,7 +218,7 @@ impl Stage {
     ///
     /// NumberField 也接受 composition（预编辑期**不**过滤——composition 是 provisional，
     /// 用户可能还在组字；过滤发生在 [`commit_composition`] 落定时）。
-    pub fn set_composition(&mut self, node: NodeId, text: &str, pos: usize) {
+    pub fn set_composition(&mut self, node: NodeId, text: &str, _pos: usize) {
         use crate::scene::node::ControlState;
         let Some(scene) = self.scene.as_mut() else {
             return;
@@ -232,7 +232,9 @@ impl Stage {
             | ControlState::NumberField { edit: e, .. },
         ) = scene.controls.get_mut(node)
         {
-            crate::scene::control::set_composition(e, text, pos);
+            // composition 插入点 = 当前光标（IME 组字在光标处）。FFI 的 pos 参数由 C# 后端
+            // 传 0 忽略——后端不知道 cursor byte offset，core 用 e.cursor 最准。
+            crate::scene::control::set_composition(e, text, e.cursor);
         }
     }
 
@@ -397,23 +399,34 @@ impl Stage {
         };
         let (cx, li) = cursor_pixel_x(&layout, &ranges, cur);
         let line = layout.lines.get(li)?;
-        let rect = n.layout_rect;
         let off_left = resolve_lp(n.style.taffy_style.border.left)
             + resolve_lp(n.style.taffy_style.padding.left);
-        // layout 空间 caret 矩形（与 render arm 同公式）。
-        let lx = rect.x + off_left + cx;
-        let ly = rect.y + line.y;
-        let lw = 1.0_f32;
-        let lh = line.height;
-        // 投到世界：左右上角经 world transform。纯平移时 transform 不改宽高；
-        // scale/rotate 时宽高由两点差值吸收（近似矩形，够 IME 候选窗定位用）。
         let wm = scene
             .world_transforms
             .get(node.index())
             .copied()
             .unwrap_or(crate::transform::IDENTITY);
-        let (x0, y0) = crate::transform::apply_point(&wm, lx, ly);
-        let (x1, y1) = crate::transform::apply_point(&wm, lx + lw, ly + lh);
+        // 与 render arm 光标（render/mod.rs:1611,2044）同源：纯平移用 wm[4,5] 作 rect 世界原点
+        // （layout_rect 已是绝对 design 坐标，再 apply_point 会双重计数 → x 翻倍，IME 候选窗
+        // 偏到屏外）；scale/rotate 用局部原点（0,0）后 apply_point 投世界（render arm 走 push
+        // 的 wm transform，MirrorPool scale/rotate 进 _ObjectMatrix）。
+        let pure = crate::transform::is_pure_translation(&wm);
+        let (rx, ry) = if pure { (wm[4], wm[5]) } else { (0.0, 0.0) };
+        // layout 空间 caret 矩形（与 render arm 同公式）。
+        let lx = rx + off_left + cx;
+        let ly = ry + line.y;
+        let lw = 1.0_f32;
+        let lh = line.height;
+        let (x0, y0) = if pure {
+            (lx, ly)
+        } else {
+            crate::transform::apply_point(&wm, lx, ly)
+        };
+        let (x1, y1) = if pure {
+            (lx + lw, ly + lh)
+        } else {
+            crate::transform::apply_point(&wm, lx + lw, ly + lh)
+        };
         Some(crate::scene::node::Rect {
             x: x0.min(x1),
             y: y0.min(y1),
@@ -735,7 +748,21 @@ impl Stage {
             n.classes = tn.classes.clone();
             n.id_attr = tn.id_attr.clone();
             n.interaction.draggable = tn.draggable;
-            n.interaction.tabindex = tn.tabindex;
+            // tabindex：显式值优先（含 -1 排除）；None 时按 HTML/ARIA 语义给可聚焦控件补
+            // 默认 0（input/textarea/select/button 及 role=textbox/spinbutton/slider/switch/
+            // radio/combobox 隐式可聚焦），否则 click-to-focus / Tab 链无法命中控件。
+            // ProgressBar 只读不聚焦；OptionItem 焦点由父 Dropdown 管理。
+            n.interaction.tabindex = tn.tabindex.or(match tn.kind {
+                NodeKind::Button
+                | NodeKind::TextField
+                | NodeKind::TextArea
+                | NodeKind::NumberField
+                | NodeKind::Dropdown
+                | NodeKind::Slider
+                | NodeKind::Toggle
+                | NodeKind::RadioButton => Some(0),
+                _ => None,
+            });
             if let Some(c) = &tn.content {
                 scene.text_contents.insert(node_id, c.clone());
             }
