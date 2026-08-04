@@ -2177,20 +2177,22 @@ namespace LoomGUI
     // Tab = <button role="tab"> 的 typed 投影（TabList 的子项）。结构上是容器型节点（围栏 content=text，
     // 可持 label / 图标子），继承 Container（同 OptionItem 模式）。
     //
-    // Selected：从父 TabList.selected_index 派生（core T5 synth_aria_value 合成 aria-selected，无 per-tab
-    // selected getter FFI）——取值经父 TabList.SelectedIndex 比对 self.Index，本类不提供（throw，同
-    // OptionItem.Selected gap）。Disabled 读 NodeFlags::DISABLED（通用 node flag，与 OptionItem 一致）。
+    // Selected：本类不提供（throw，by design）。Tab 选中态是**派生量**——从父 TabList.SelectedIndex +
+    // core synth_aria_value 合成 aria-selected 派生，不存在也不需要 per-tab 的 selected 存储 / getter FFI。
+    // 业务经父 TabList.SelectedIndex 比对 self.Index 判定，或订阅 TabList.SelectionChanged（payload=新 index）。
+    // Disabled 读 NodeFlags::DISABLED（通用 node flag，与 OptionItem 一致）。
     public unsafe class Tab : Container
     {
         internal Tab(UIContext ctx, uint id) : base(ctx, id) { }
 
-        // TODO(tab-ffi): selected 由父 TabList.selected_index 派生（core 合成 aria-selected），无 per-tab
-        // getter FFI。业务经父 TabList.SelectedIndex 判定，或 demux SelectionChanged。待 tab 投影补齐后填。
+        // Selected：by design 不提供（throw）。Tab 选中态是派生量（父 TabList.SelectedIndex +
+        // core aria-selected synth），无 per-tab getter FFI 也不会加。经父 TabList.SelectedIndex
+        // 比对 self.Index 判定，或 demux TabList.SelectionChanged。
         public bool Selected { get { throw NE(); } }
         // Disabled：伪类源（NodeFlags::DISABLED）。setter 直 FFI；getter 读 node flag（与 OptionItem 等一致）。
         public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
 
-        // ── FFI 转调（disabled 经通用 node flag 通道；Selected 待 tab FFI）──────────
+        // ── FFI 转调（disabled 经通用 node flag 通道；Selected 派生无 FFI）──────────
         StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
         void SetNodeDisabled(bool v)
         {

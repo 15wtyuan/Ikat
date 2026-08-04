@@ -13,8 +13,7 @@
   .tablist { display:flex; flex-wrap:wrap; gap:4px; }
   .tab { text-align:left; color:#9aa0b4; font-size:16px; padding:12px 16px; border-radius:10px; }
   .tab:hover { background-color:rgba(26,47,69,0.85); }
-  /* TODO(roadmap §4 tech-debt aria-selected): state-attr selector + tab 控件 defer to 控件束 TabList. */
-  /* .tab[aria-selected="true"] { background-color:rgba(26,47,69,0.85); color:#5fb4d4; font-weight:700; } */
+  .tab[aria-selected="true"] { background-color:rgba(26,47,69,0.85); color:#5fb4d4; font-weight:700; }
   .main {display:flex;flex-direction:column; flex-grow:1; padding:48px; gap:32px; overflow-y:auto; }
   .page-title { color:#e0e6ec; font-size:36px; font-weight:700; }
   .page-desc { color:#9aa0b4; font-size:15px; }

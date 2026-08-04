@@ -29,7 +29,7 @@ M0 验收 ─┤                  │                  ├──► M6 showcase 
 | M0 | P3 家里机验收 + IME 接线 | — | M1/M2/M3 进入 | 几天 | ⏳ 编码端 DONE，验收 defer |
 | M1 | ListView 虚拟化 | M0 | M4, M6 | 2–3 周 | ❌ 未开 |
 | M2 | @keyframes runtime + transition | M0 | M5, M6 | 1–2 周 | ❌ fence DSL 就绪，runtime 未开 |
-| M3 | TabList（P4）| M0 | M6 | ~1 周 | ❌ 未开 |
+| M3 | TabList（P4）| M0 | M6 | ~1 周 | ⏳ 编码端 DONE，Unity 验收 defer |
 | M4 | 文本模型回归标准子树 | M1 | M6 | 2–3 周 | ❌ 未开 |
 | M5 | 视觉束（精简版）| M2（部分）| M6 | ~2 周 | ❌ 未开（scope 已砍）|
 | M6 | showcase 收口 + tech-debt 扫除 | M1–M5 | 可对外演示 | 1–2 周 | ❌ |
@@ -94,15 +94,21 @@ M0 验收 ─┤                  │                  ├──► M6 showcase 
 ## M3 · TabList（P4，WAI-ARIA 复合控件先行）
 
 > settings 页硬卡 TabList。它动 cascade 主路径，独立 spec 干净，别和渲染管线改动混（roadmap 自己也这么定）。
+>
+> **状态：编码端 DONE（2026-08，10 tasks SDD）；Unity PlayMode 验收 defer 家里机**。spec `docs/superpowers/specs/2026-08-04-m3-tablist-design.md`、plan `docs/superpowers/plans/2026-08-04-m3-tablist.md`。§4 tech-debt `[aria-selected]` 条同步标 RESOLVED。
+>
+> **实现期发现**：原 exit criteria 的「Node attrs 存储」「attr_matches_node 扩展」「role dispatch」三条前置里，后两条早在控件束 P1-P3 做掉（commit `0a7373d` / `a797840`）；第一条未走通用 attrs 仓库（β），改 α 路线——`RoleInfo.aria_controls` 特定存储。故 M3 真实工作远比原列窄。
 
 - **进入判据**：M0 绿；建议挑 cascade 主路径无其他改动的窗口。
 - **退出判据**：
-  - [ ] **Node attrs 存储**：`scene/node.rs` 的 `Node` 加 `attrs`（aria-/data-* parse 期落盘，当前透传后丢弃）。
-  - [ ] **attr_matches_node 扩展**：不再硬编码 `[type=...]`（`style/dynamic.rs:323`），改查 `Node.attrs`。
-  - [ ] **role dispatch**：`tablist/tab/tabpanel` → 对应控件语义（对照 blitz：role 默认只做 a11y 输出，仅复合控件显式读 role）。
-  - [ ] **`[aria-selected="true"]` selector** 运行时可匹配（showcase `settings.html` 已注释待解）。
-  - [ ] **C# 投影**：TabList / Tab / TabPanel（当前无）。
-  - [ ] **showcase**：settings tab 切换真机绿 + `[aria-selected]` CSS 命中。
+  - [x] **pkg v29 bump**（`TemplateNode.aria_controls` 字段，TabList tab→panel 跨树关联）。
+  - [x] **TabList/Tab 投影类**（`NodeKind::TabList/Tab` + `SemanticKind` + `ControlState::TabList{selected_index}` + packer bridge `map_semantic` + C# `TabList`/`Tab`）。
+  - [x] **`[aria-selected="true"]` selector** 运行时可匹配（`synth_aria_value` 跨节点合成 aria-selected，从父 TabList.selected_index 派生）。
+  - [x] **panel 显隐 P1**（`sync_control_visuals` 据 `RoleInfo.aria_controls` 每帧 `find_by_id_attr` 解析 + `set_inline_override` display:block/none）。
+  - [x] **键盘导航 K1**（方向键移动 selected_index，水平/垂直分派）。
+  - [x] **SelectionChanged** 复用（typed 事件层 demux）。
+  - [x] **showcase settings**：`.tab[aria-selected="true"]` CSS 规则解注释，pkg 重打 v29。
+  - [ ] **Unity PlayMode settings 页**：点 tab → 高亮 + panel 切换；方向键切 tab；`SelectionChanged` 真机接（家里机验收窗口）。
 - **依赖**：M0。与 M1/M2 独立可并行。
 - **阻塞**：M6（settings 页）。
 - **估时**：~1 周。

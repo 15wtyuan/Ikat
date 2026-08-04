@@ -53,7 +53,7 @@ tab 高亮 + 面板切换在写标准 HTML 的前提下「写了就自动切」�
 ### 3.2 K1：键盘导航纳入（方向键移动选中）
 
 镜像 Dropdown 的 Up/Down/Enter/Esc。TabList 做左/右（水平）/上/下（垂直）方向键移动
-`active_index`，自动激活模型（焦点即选中，WAI-ARIA 最简模型）。**不做 roving tabindex
+`selected_index`，自动激活模型（焦点即选中，WAI-ARIA 最简模型）。**不做 roving tabindex
 焦点管理**（重 a11y，游戏 UI 不需要，defer）。
 
 ### 3.3 P1：panel 显隐复用 display:none 剪枝
@@ -68,14 +68,14 @@ TabList 的每个维度都对齐已有 Dropdown（`role=combobox`）的机制，
 
 | 维度 | TabList 决定 | 镜像的 Dropdown |
 |---|---|---|
-| **NodeKind** | 新增 `TabList` + `Tab`；`tabpanel` 保持 Container（role 透传） | Dropdown + OptionItem；listbox=Container |
-| **ControlState** | `TabList { active_index, panel_ids }` 挂 tablist 节点；**Tab 无状态**（选中态从父 active_index 派生） | Dropdown{selected_index,open,...}；OptionItem 无状态 |
-| **role 分派** | `ROLE_TO_SEMANTIC` 加 `tablist→TabList`、`tab→Tab`（tabpanel 不加） | combobox/option 已在表 |
-| **aria 合成** | `synth_aria_value` 加分支：节点是 Tab → 查父 TabList.active_index + 自身序号 → 相等 "true" | checked/expanded/valuenow 查自身 |
-| **click** | pointer-down 命中 Tab → active_index = 该 tab 序号 | pointer-down → open=true |
-| **键盘** | 方向键移动 active_index（K1） | Up/Down seek + Enter/Esc |
+| **NodeKind** | 新增 `SemanticKind::TabList/Tab`（fence 枚举）+ `NodeKind::TabList/Tab`（core 枚举），packer bridge `map_semantic` 1:1 映射；`tabpanel` 保持 Container（role 透传） | Dropdown + OptionItem；listbox=Container |
+| **ControlState** | `TabList { selected_index }` 挂 tablist 节点（仅选中序号，命名镜像 Dropdown；panel 不在此缓存）；**Tab 无状态**（选中态从父 selected_index 派生） | Dropdown{selected_index,open,...}；OptionItem 无状态 |
+| **role 分派** | `ROLE_TO_SEMANTIC` 加 `tablist→TabList`、`tab→Tab`（tabpanel 不加），`resolve_semantic` 先查 role | combobox/option 已在表 |
+| **aria 合成** | `synth_aria_value` 加分支：节点是 Tab → 查父 TabList.selected_index + 自身序号 → 相等 "true" | checked/expanded/valuenow 查自身 |
+| **click** | pointer-down 命中 Tab → selected_index = 该 tab 序号 | pointer-down → open=true |
+| **键盘** | 方向键移动 selected_index（K1） | Up/Down seek + Enter/Esc |
 | **显隐** | 非激活 panel 生效 display=none（P1） | open 时 listbox overlay；closed 跳过 |
-| **事件** | active_index 变 → `SelectionChanged`（复用 `EVT_SELECTION_CHANGED`，payload=新 index） | Dropdown SelectionChanged |
+| **事件** | selected_index 变 → `SelectionChanged`（复用 `EVT_SELECTION_CHANGED`，payload=新 index） | Dropdown SelectionChanged |
 
 ### 4.1 唯一结构差异：panel 跨树关联
 
@@ -83,8 +83,10 @@ Dropdown 的 listbox 是 **combobox 子节点**，按 role 定位 + 整棵子树
 TabList 的 panel **不是 tablist 子节点**（settings.html 里 panel 在 `.main` 容器，与 tablist
 分置两处），靠 `aria-controls="panel-x"` ↔ `id="panel-x"` 跨树关联——这是标准 WAI-ARIA 模式。
 
-后果：panel 显隐不能照搬「跳过子树」，得靠 `active_index` + 登记的 `panel_ids` 在
-control-update pass 里翻各 panel 的生效 display（§5.7）。
+后果：panel 显隐不能照搬「跳过子树」，得靠 `selected_index` + 各 tab 的 `RoleInfo.aria_controls`
+（panel id 字符串）在 control-update pass（`sync_control_visuals`）里每帧 `find_by_id_attr`
+解析 panel 再翻其生效 display（§5.7）。panel id 不缓存在 ControlState——按需每帧解析（与
+Dropdown listbox 直接子定位的区别）。
 
 ### 4.2 Tab 无状态，aria-selected 跨节点合成
 
@@ -95,7 +97,7 @@ ControlState，其 `[aria-selected]` 由 `synth_aria_value` 跨节点合成：
 synth_aria_value(id, "selected"):
   if node[id].kind == Tab:
     parent = find_parent_with_kind(id, TabList)?
-    active = ControlState[parent].active_index
+    active = ControlState[parent].selected_index
     my_index = index of id among parent's role=tab children
     return Some("true") if my_index == active else Some("false")
   ...existing arms
@@ -105,29 +107,37 @@ synth_aria_value(id, "selected"):
 
 ## 5. 各改动点
 
-### 5.1 NodeKind + role 分派（fence + core）
+### 5.1 语义枚举链 + role 分派（fence + core，两枚举）
 
-- `crates/core/src/scene/node.rs:96` `NodeKind` 加 `TabList`、`Tab` 两个 unit 变体（derives Copy，
-  照 Spec-2 既有模式）。`NodeKind::from_u8` / 逆映射 `kind_tag`（dynamic.rs:88 附近）同步。
-- `crates/fence/src/schema/tag.rs:101` `ROLE_TO_SEMANTIC` 加 `("tablist", TabList)`、
-  `("tab", Tab)`。`tabpanel` **不加**（走 div→Container 透传，像 listbox）。
+> 实现细化：新增 TabList/Tab 需动**两个枚举**——fence 侧 `SemanticKind`（role 驱动的语义分类）
+> 和 core 侧 `NodeKind`（运行时节点类型），由 packer bridge 的 `map_semantic` 1:1 映射。
+> spec 原文只提 `NodeKind`，此处补全链条。
+
+- `crates/fence/src/schema/tag.rs`：`SemanticKind` 枚举加 `TabList`、`Tab` 两个变体；`ROLE_TO_SEMANTIC`
+  表加 `("tablist", TabList)`、`("tab", Tab)`；`resolve_semantic` 先查 role（既有 role 优先逻辑）
+  天然分派。`tabpanel` **不加**（走 div→Container 透传，像 listbox）。
+- `crates/packer/pkg/src/bridge.rs:136` `map_semantic` 加 `SemanticKind::TabList => NodeKind::TabList`、
+  `SemanticKind::Tab => NodeKind::Tab` 两个 1:1 arm（与现有 22 可映射语义同一模式）。
+- `crates/core/src/scene/node.rs` `NodeKind` 加 `TabList`、`Tab` 两个 unit 变体（derives Copy，
+  照 Spec-2 既有模式）。`NodeKind::from_u8` / 逆映射 `kind_tag` 同步。
 - fence `control_structure_check.rs`：加 tablist 结构契约（含 tab 子节点；tabpanel 可选、可跨树）。
   对照现有 combobox 契约写。
 
 ### 5.2 ControlState::TabList
 
-`crates/core/src/scene/node.rs:416` `ControlState` 加：
+`crates/core/src/scene/node.rs` `ControlState` 加：
 
 ```rust
 TabList {
-    active_index: usize,
-    /// 按 tab 子序号对应的 panel NodeId（instantiate 期从 aria-controls 解析，§5.4）。
-    /// 运行时态，不进 pkg（ControlInit::TabList 只载 active_index）。
-    panel_ids: Vec<NodeId>,
+    selected_index: usize, // 命名镜像 Dropdown.selected_index（一致性决策）
 }
 ```
 
-`ControlInit`（pkg 载入侧）加 `TabList { active_index }`；`panel_ids` 运行时填。
+> 实现细化：spec 原文草拟过 `panel_ids: Vec<NodeId>` 字段缓存 panel，**被推翻**——panel 不在
+> ControlState 缓存，改由 `RoleInfo.aria_controls` 存原始 panel id 字符串，`sync_control_visuals`
+> 每帧 `find_by_id_attr` 解析（§5.4）。ControlState::TabList 只有 `selected_index`。
+
+`ControlInit`（pkg 载入侧）加 `TabList { selected_index }`（与 pkg 字段对齐）。
 
 ### 5.3 aria-selected 跨节点合成
 
@@ -141,16 +151,19 @@ TabList {
 字符串保存到 pkg。
 
 **方案**（α 精神：特定属性特定存储，不做通用 attrs 仓库）：
-- `crates/core/src/asset/mod.rs:99` `TemplateNode` 加 `pub aria_controls: Option<String>`。
+- `crates/core/src/asset/mod.rs` `TemplateNode` 加 `pub aria_controls: Option<String>`。
 - fence extract 阶段把 tab 节点的 `aria-controls` 抽进 `ParsedTemplate` → packer bridge 写入
   `TemplateNode.aria_controls`。
-- **初始 `active_index`** 在 packer bridge 派生（不进 pkg 存 aria-selected）：bridge 扫 tablist
-  的 role=tab 子，找到 `aria-selected="true"` 的那个 → `ControlInit::TabList.active_index = 其序号`；
+- **初始 `selected_index`** 在 packer bridge 派生（不进 pkg 存 aria-selected）：bridge 扫 tablist
+  的 role=tab 子，找到 `aria-selected="true"` 的那个 → `ControlInit::TabList.selected_index = 其序号`；
   无声明或多于一个 true → 默认 0（取首个）。故 aria-selected 本身**不存进 pkg**——它是运行时从
-  active_index 经 §5.3 synth 派生的值，初始值反由它在 HTML 的声明决定。
-- core `instantiate`：TabList 控件 init 时，遍历自己的 role=tab 子节点，读 `aria_controls`
-  字符串 → `find_node_by_id` 解析成 panel NodeId → 填进 `ControlState::TabList.panel_ids`。
-  按 tab 子序号对齐 panel_ids（tab[i].aria_controls → panel_ids[i]）。
+  selected_index 经 §5.3 synth 派生的值，初始值反由它在 HTML 的声明决定。
+- **panel 关联的运行时存储 = `RoleInfo.aria_controls`**（实现细化，推翻 spec 原草拟的
+  `ControlState::TabList.panel_ids` 字段）：`instantiate` 时把 tab 子节点的
+  `TemplateNode.aria_controls` 字符串拷进对应 `RoleInfo.aria_controls`（随模板迁移的纯数据，
+  同 role/data-slot 模式）。**不**在 ControlState 缓存解析后的 panel NodeId——panel 解析推迟到
+  `sync_control_visuals`（§5.7）每帧按需 `find_by_id_attr(aria_controls)` 动态查（面板可被
+  add/remove，缓存会 stale）。
 
 **pkg 版本**：v28 → v29（TemplateNode 布局变）。加 bincode 稳定性测试（序列化形状变就红，
 勿撞运行时 BadKind）。`MIN=MAX=29`，一刀切不向后兼容（个人项目惯例）。
@@ -161,7 +174,7 @@ settings.html 结构 + 违反 WAI-ARIA 标准（panel 可任意位置）。
 ### 5.5 click 激活
 
 `crates/core/src/input.rs`：pointer-down 命中 `NodeKind::Tab` → 找父 TabList → 设
-`active_index = 该 tab 序号`。镜像 Dropdown 的「pointer-down → open=true」落点。
+`selected_index = 该 tab 序号`。镜像 Dropdown 的「pointer-down → open=true」落点。
 （Tab 是独立 NodeKind，非 Button 变体——命中层按 `NodeKind::Tab` 分派，不误走 Button 逻辑；
 详见 §10 R2。）
 
@@ -169,7 +182,7 @@ settings.html 结构 + 违反 WAI-ARIA 标准（panel 可任意位置）。
 
 `crates/core/src/input.rs:563` 附近（Dropdown 键盘路由同处）加 TabList 键盘路由：
 当焦点在 TabList 子树内，方向键（水平 tablist 用 Left/Right、垂直用 Up/Down——按 tablist
-的 flex-direction 判）移动 active_index（clamp 到 tab 数），自动激活。
+的 flex-direction 判）移动 selected_index（clamp 到 tab 数），自动激活。
 **不做** Tab/Shift+Tab 焦点链、不做 Home/End、不做 roving tabindex（defer §9）。
 
 方向判定：tablist 的 `flex-direction:row/column`（默认 row）。垂直 tablist（column）用 Up/Down。
@@ -178,10 +191,11 @@ settings.html 结构 + 违反 WAI-ARIA 标准（panel 可任意位置）。
 
 **不变量**：复用 display:none layout 剪枝；不加 hidden 字段；不动作者 CSS。
 
-**机制**：control-update pass（Dropdown 管 open/selected_index 的同阶段）里，TabList 按
-`active_index` 遍历 `panel_ids`：
-- `i == active_index` → 该 panel 的 resolved display 置回自然值（清掉 control 强制的 none）。
-- `i != active_index` → 该 panel 的 resolved display = none。
+**机制**：control-update pass（`sync_control_visuals`，Dropdown 管 open/selected_index 的同阶段）里，
+TabList 按 `selected_index` 遍历自己的 role=tab 子节点，对每个 tab 读其 `RoleInfo.aria_controls`
+（panel id 字符串）→ `find_by_id_attr` 解析 panel NodeId（每帧动态查，不缓存）→ 切该 panel 的 display：
+- tab 序号 == selected_index → 该 panel 的 resolved display 置回自然值（清掉 control 强制的 none）。
+- tab 序号 != selected_index → 该 panel 的 resolved display = none。
 
 （「resolved display」= ResolvedStyle 里 layout 实际读的 display 值，区别于 CSS 声明的 display；
 control 只写 resolved 层，不进 base_style，与 rematch 每帧从 base_style 重起不冲突。）
@@ -190,24 +204,24 @@ control 只写 resolved 层，不进 base_style，与 rematch 每帧从 base_sty
 落点）：control 驱动的 display 写入 resolved style，让 solve 的 display:none 剪枝天然吃掉。
 两种候选：
 - (a) control-update pass 直接写 panel 的 resolved `display`（新方向：control 影响 style）。
-- (b) rematch 阶段 panel resolve display 时查 controller back-ref 的 active_index。
+- (b) rematch 阶段 panel resolve display 时查 controller back-ref 的 selected_index。
 
 推荐 (a)（control-update 已是 Dropdown 改 open 的地方，集中；back-ref 需 panel 知道自己的
-controller，额外维护）。实现时核实 pipeline 顺序约束后定。
+controller，额外维护）。实现采用 (a)，通过 `set_inline_override(scene, panel, "display:block/none")`。
 
 ### 5.8 事件
 
-active_index 变 → 发 `EVT_SELECTION_CHANGED`（复用 Dropdown 的，`input.rs:111`），
-payload `touch_id = 新 active_index`（usize→i32，tab 数远小于 i32 范围）。
+selected_index 变 → 发 `EVT_SELECTION_CHANGED`（复用 Dropdown 的，`input.rs:111`），
+payload `touch_id = 新 selected_index`（usize→i32，tab 数远小于 i32 范围）。
 C# 侧 `TabList.SelectionChanged`（typed 事件层 demux，见 §5.9）。
 
 ### 5.9 C# 投影
 
 - 新增 `LoomGUI.Nodes.cs`（或对应文件）`TabList` / `Tab` public class（projection-layer 模式）。
-  `TabList.SelectedIndex`（get/set，FFI 读写 active_index）+ `SelectionChanged` typed 事件。
+  `TabList.SelectedIndex`（get/set，FFI 读写 selected_index）+ `SelectionChanged` typed 事件。
   `Tab` 暂无额外 API（无状态）。
 - `NodeFactory` dispatch 加 TabList/Tab 分支（照 Dropdown/OptionItem 模式）。
-- FFI：加 `loomgui_stage_get/set_tablist_active_index`（或复用通用 control-state getter/setter，
+- FFI：加 `loomgui_stage_get/set_tablist_selected_index`（或复用通用 control-state getter/setter，
   核实现有 Dropdown selected_index 的 FFI 路径是否可复用）。
 
 ## 6. 文档对齐（本 spec 同步修，不另开 task）
@@ -234,12 +248,12 @@ C# 侧 `TabList.SelectionChanged`（typed 事件层 demux，见 §5.9）。
 ### 8.1 core 单测（`crates/core/src/`）
 
 - `resolve_semantic`：`div+role=tablist→TabList`、`button/div+role=tab→Tab`、`div+role=tabpanel→Container`。
-- `synth_aria_value`：Tab 的 aria-selected 随父 active_index 翻（active=true、其余=false、Exists op）。
+- `synth_aria_value`：Tab 的 aria-selected 随父 selected_index 翻（selected=true、其余=false、Exists op）。
 - `attr_matches_node`：`[aria-selected="true"]` 命中当前激活 tab，不命中非激活 tab 与普通 div。
-- control-update：切 active_index 后，非激活 panel 生效 display=none、激活 panel 自然值（§5.7）。
-- click：pointer-down 命中 Tab → active_index 更新 + SelectionChanged 发出。
-- 键盘：方向键移动 active_index（clamp、水平/垂直分派）。
-- instantiate：aria-controls 字符串 → panel_ids NodeId 解析（含找不到 panel 的容错）。
+- control-update：切 selected_index 后，非激活 panel 生效 display=none、激活 panel 自然值（§5.7）。
+- click：pointer-down 命中 Tab → selected_index 更新 + SelectionChanged 发出。
+- 键盘：方向键移动 selected_index（clamp、水平/垂直分派）。
+- sync_control_visuals：aria-controls 字符串 → find_by_id_attr 解析 panel（含找不到 panel 的容错，不缓存 NodeId）。
 
 ### 8.2 fence 单测（`crates/fence/`）
 
@@ -268,8 +282,8 @@ C# 侧 `TabList.SelectionChanged`（typed 事件层 demux，见 §5.9）。
 ## 9. 实现顺序（建议）
 
 1. **pkg v29 + aria_controls 字段**：TemplateNode 加字段 + fence extract + packer bridge + bincode 测试 + 重打 fixture。先把数据通路铺好。
-2. **NodeKind + role 分派**：TabList/Tab 变体 + ROLE_TO_SEMANTIC + kind_tag/from_u8 + fence 结构契约。
-3. **ControlState::TabList + instantiate panel_ids 解析**。
+2. **语义枚举链 + role 分派**：SemanticKind 变体 + ROLE_TO_SEMANTIC + map_semantic + NodeKind 变体 + kind_tag/from_u8 + fence 结构契约。
+3. **ControlState::TabList{selected_index} + RoleInfo.aria_controls（instantiate 拷贝）**。
 4. **aria-selected 跨节点合成** + attr_matches_node 集成（headless 断言 `[aria-selected]` 命中）。
 5. **panel 显隐 P1**（control-update pass 翻 display）。
 6. **click 激活 + 事件**。
@@ -283,7 +297,7 @@ C# 侧 `TabList.SelectionChanged`（typed 事件层 demux，见 §5.9）。
 ## 10. 风险与缓解
 
 - **R1 · aria-controls 解析失败**：tab 写了 aria-controls 但找不到对应 id 的 panel。
-  容错：panel_ids 该位填 None，该 tab 选中时无 panel 可显隐（不 panic）；fence 结构契约给 warning。
+  容错：`sync_control_visuals` 中 `find_by_id_attr` 返 None 时 `continue` 跳过该 tab（该 tab 选中时无 panel 可显隐，不 panic）；fence 期已校验 idref 存在，运行时动态缺则静默跳。
 - **R2 · Tab 的 NodeKind 与 button tag**：settings.html 用 `<button role=tab>`。resolve_semantic
   现在 role 优先于 tag，故 button+role=tab → Tab（非 Button）。核实命中层按 NodeKind::Tab 分派
   click（不误走 Button 逻辑）。tab 也可写在 `<div role=tab>` 上——两种 tag 统一映射 Tab。
@@ -293,7 +307,7 @@ C# 侧 `TabList.SelectionChanged`（typed 事件层 demux，见 §5.9）。
 - **R4 · 垂直/水平 tablist 方向误判**：flex-direction 缺省/异常时键盘方向退化（默认 row）。
   低风险，单测覆盖 row/column 两态。
 - **R5 · clone_node_recursive**（List item 模板内含 tablist 时）：RoleTable 已克隆（commit
-  `582ba8c`），但 ControlState + panel_ids 克隆/re-init 需核实（dynamic.rs:311 注释警告
+  `582ba8c`），但 ControlState::TabList{selected_index} 克隆/re-init 需核实（dynamic.rs:311 注释警告
   「RoleTable 复制只解锁 role/slot 定位；完整视觉正确性需补 ControlState 克隆」）。tablist
   在 list item 模板里出现的概率低，若 showcase 不触发则 defer。
 
