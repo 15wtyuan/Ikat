@@ -1337,4 +1337,34 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 
 **教训**：fence CSS 子集 ≠ 完整 CSS——复杂值（data-URI、calc()、多层 background 逗号带括号）当前不支持或静默损坏。控件视觉装饰用最简围栏内表达（纯色/边框/外部 sprite url），别用 data-URI/CSS tricks。验收页踩到的 fence 限制是 tech-debt 信号，记 pitfalls 防后人重踏。诊断：CSS 值打包报错或装饰没显示 → 查 fence CssValueParser 是否支持该值类型。
 
+### 坑 176：SDD plan task 序 ≠ 编译依赖序（M3 TabList）
+
+**症状**：SDD 按 plan task 编号顺序执行，某 task 编译失败——它消费的类型/变体定义在更后面的 task（T2 bridge 写 `ControlInit::TabList`，但该变体是 T4 定义；T2 bridge 写 `NodeKind::TabList`，T3 才定义）。
+
+**根因**：plan task 编号按「数据流 / 逻辑分组」排，不保证「定义先于消费」的编译序。
+
+**解决**：plan 写完做一次 pre-flight 扫描，标出跨 task 编译依赖，按依赖序执行（本例重排 T1→T3→T4→T2→…）；或把强耦合的「定义 + 第一个消费者」合进一个 task。
+
+**教训**：plan task 顺序是给人读的，编译器按定义序——SDD 开工前按编译依赖重排一次，别盲按编号走。
+
+### 坑 177：pkg bump + dll 重编的 fixture staleness 在 consumer-test task 才暴露（M3 TabList）
+
+**症状**：某 task 升 pkg 格式（MIN=MAX）+ 重编 .dll（T8 v28→v29），该 task 自验只跑 `cargo test`（Rust 测试内存构造 TemplateNode，不读 pkg 文件）→ 全绿；下一 consumer-test task（T9 `dotnet test`）跑时，v28 fixture 被 v29 dll 拒 → 红一片。
+
+**根因**：bump task 的自测覆盖不到下游 fixture 消费者；三向同步（dll/fixture/pkg.bin，坑 158/66 同源）的「fixture」那一向在另一个 task。
+
+**解决**：bump + dll-rebuild task 要么同 task 内重打所有 fixture，要么在下游 consumer-test task 的 dispatch 里显式写「先 repack fixture 再跑测试」。
+
+**教训**：SDD 多 task 切分下，pkg 三向同步的 staleness 永远在「下一个跑 consumer 测试的 task」才暴露——bump task 别只验自己 crate，把 fixture repack 责任写明在哪个 task。
+
+### 坑 178：加字段到带稀疏谓词的 struct 漏更新 → 纯新字段节点被静默丢（M3 TabList RoleInfo）
+
+**症状**：给 `RoleInfo` 加 `aria_controls` 字段后，一个只带 aria_controls（无 role/slot）的节点被 `RoleTable::insert` 当空丢弃（`is_empty()` 没算新字段）。
+
+**根因**：`RoleTable` 靠 `is_empty()` 保持稀疏（空 info 不入表）；加字段没同步谓词。
+
+**解决**：加字段到 struct 时 grep 该 struct 的 `is_empty()`/谓词/序列化/`..Default` 构造，逐一同步（同「加变体 grep 全 dispatch」纪律，但这里是谓词不是 match）。
+
+**教训**：RoleTable 稀疏性靠 is_empty 守，新字段若能单独占住一个 info 就必须进 is_empty；加字段的所有消费者（dispatch / 谓词 / 序列化 / 构造）都要 grep，不只 dispatch。
+
 

@@ -103,6 +103,7 @@
 | 图片 | `img` | `Image` |
 | 控件 | `div role=...` | `Slider`/`Toggle`/`RadioButton`/`TextField`/`TextArea`/`NumberField`/`ProgressBar`/`Dropdown`（见 [fence.md](fence.md) §2.3） |
 | 列表 | `div role=list` / `div role=listitem` / `div role=option` | `ListView`/`ListItem`/`OptionItem` |
+| 复合控件 | `div role=tablist` / `div role=tab` | `TabList`/`Tab`（panel `role=tabpanel` 不分派，走 div→Container，靠 `aria-controls` 跨树关联） |
 | 模板 | `template` | 惰性 `UITemplate`，不进入实时树 |
 | 内容投影 | `slot` | Custom Element 的标准 Slot |
 | 自定义元素 | `tag-name`（含 hyphen） | `CustomElement`（R3 注册验证） |
@@ -119,6 +120,7 @@
 - `<div role="spinbutton">` → `NumberField`；`<div role="progressbar">` → `ProgressBar`
 - `<div role="combobox">` → `Dropdown`；`<div role="option">` → `OptionItem`
 - `<div role="list">` → `ListView`；`<div role="listitem">` → `ListItem`
+- `<div role="tablist">` → `TabList`；`<button role="tab">` / `<div role="tab">` → `Tab`（panel `role=tabpanel` 不分派，走 div→Container）
 - `<template>` → `Template`；`<slot>` → `Slot`
 - 含 `-` 的标签名 → `CustomElement`（R3 注册验证）
 
@@ -136,6 +138,8 @@
 ```
 
 框架负责输入导航、`aria-selected`/`aria-checked`/`aria-expanded` 状态同步。打包器验证 role 组合与必需子结构（fence §6.8）+ ARIA 关系。
+
+首个落地的复合控件是 **TabList**（M3，2026-08）：tab 高亮靠 `[aria-selected="true"]` 属性选择器（aria-selected 不是字面存储，由 `synth_aria_value` 从父 `TabList.selected_index` 跨节点合成——Tab 无 ControlState，像 OptionItem 从父 Dropdown 派生选中态）；panel 显隐靠 `aria-controls="panelX"` ↔ `id="panelX"` 跨树关联（panel 非 tablist 子节点，靠 `RoleInfo.aria_controls` 存 linkage 字符串，`sync_control_visuals` 每帧 `find_by_id_attr` 解析 + `set_inline_override` 切 display 复用 display:none 剪枝）。设计 spec 见 `docs/superpowers/specs/2026-08-04-m3-tablist-design.md`。
 
 ### 3.5 失败策略
 
@@ -286,6 +290,7 @@ panel.Style.OverflowY = Overflow.Auto;
 | `div role=switch` | `Toggle` | `IsChecked`, `Disabled`, `CheckedChanged` |
 | `div role=radio` | `RadioButton` | `IsChecked`, `Name`, `Disabled`, `CheckedChanged` |
 | `div role=combobox` | `Dropdown` | `SelectedIndex`, `SelectedValue`, `Disabled`, `SelectionChanged` |
+| `div role=tablist` | `TabList` | `SelectedIndex`, `Disabled`, `SelectionChanged`（panel 靠 `aria-controls` 关联，`role=tab` 是 `Tab` 容器节点，无独立控件 API） |
 | `div role=progressbar` | `ProgressBar` | `Value`, `Max`, `IsIndeterminate` |
 
 伪类 `:checked/:disabled/:focus` 匹配实时状态；Toggle/RadioButton 也可用属性选择器 `[aria-checked="true"]` 表达选中态。RadioButton 同 `name`（或 `data-name`）组框架自动互斥（只新选中项触发 `CheckedChanged`）；按 name 聚合的 RadioGroup 是逻辑层积木，作用域边界由 `IsScopeRoot` 标记决定。控件数值（Slider/NumberField/ProgressBar）用 `float`。完整控件契约见 [public-api.md](public-api.md) §7。
