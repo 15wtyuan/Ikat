@@ -22,6 +22,10 @@ namespace LoomGUI
         internal UnityEngine.Vector2 DesignSize { get; set; }
         internal bool UseSafeArea { get; set; }
 
+        /// 上帧聚焦节点缓存：IME mode 仅在焦点真正转换时切换，避免每帧重设（移动端/
+        /// WebGL IME 状态切换昂贵）。0xFFFFFFFF = 无聚焦。
+        private uint _lastFocused = 0xFFFF_FFFFu;
+
         /// screen→design 映射，与 LoomStageDriver.ConfigureTransforms 逐项逆（同一 sf 居中公式）。
         /// 前向（design→screen，见 Driver 的根变换注释）：
         ///   screen.x = offX    + dx*sf     其中 offX = area.x + (area.width  - dw*sf)*0.5
@@ -50,9 +54,13 @@ namespace LoomGUI
             return new UnityEngine.Vector2(dx, dy);
         }
 
-        /// design→screen 映射，ScreenToDesign 的逆（同一 sf/offX/offYTop 公式）。
-        /// design 左上原点(y-down) → screen 左下原点(y-up)。用于 IME 候选窗定位
-        /// （核心 cursor_rect 是 design 空间，Unity compositionCursorPos 是 screen 像素）。
+        /// design→screen 映射，用于 IME 候选窗定位（compositionCursorPos）。
+        /// 注意：与 ScreenToDesign 逆映射公式不同——compositionCursorPos 的坐标系因平台而异
+        /// （Unity Editor 实测为左上原点 y-down，与 Input.mousePosition 左下原点相反），
+        /// 与 design 同为左上 y-down，故直接线性映射不 y-flip，Y 偏移用 root 居中式
+        /// (offY = area.y + (area.h - dh*sf)*0.5) 而非 ScreenToDesign 的 offYTop。
+        /// ⚠ 若目标 Player 平台 compositionCursorPos 改用左下原点 y-up（与 mousePosition 同），
+        /// 则需改为 offYTop - design.y*sf（加 y-flip）——发布前须在目标 Player 实测确认。
         public static UnityEngine.Vector2 DesignToScreen(UnityEngine.Vector2 design, Vector2Int screenSize, UnityEngine.Vector2 rootSize, UnityEngine.Rect area, bool useSafeArea)
         {
             float sw = screenSize.x > 0 ? screenSize.x : 1;
@@ -214,12 +222,21 @@ namespace LoomGUI
             const uint NONE = 0xFFFF_FFFFu;
             if (focused == NONE)
             {
-                // 无聚焦文本框：关 IME（字母键走普通 inputString，不组字）。
-                UnityEngine.Input.imeCompositionMode = UnityEngine.IMECompositionMode.Off;
+                // 无聚焦文本框：仅在从聚焦转出时关 IME（避免每帧重设，移动端/WebGL IME
+                // 状态切换昂贵）。
+                if (_lastFocused != NONE)
+                {
+                    UnityEngine.Input.imeCompositionMode = UnityEngine.IMECompositionMode.Off;
+                    _lastFocused = NONE;
+                }
                 return;
             }
-            // 聚焦文本框：开 IME（字母键交给系统输入法组字，不进 inputString）。
-            UnityEngine.Input.imeCompositionMode = UnityEngine.IMECompositionMode.On;
+            // 聚焦文本框：仅在从无聚焦（或换节点）转入时开 IME。
+            if (_lastFocused != focused)
+            {
+                UnityEngine.Input.imeCompositionMode = UnityEngine.IMECompositionMode.On;
+                _lastFocused = focused;
+            }
             // IME 候选窗定位：读光标世界矩形（design 空间，左上原点）→ screen（Unity 左下原点）。
             // 候选窗跟随光标，定位在光标底部（r.y + r.h，候选窗在下方显示）。
             Bindings.CursorRectRepr r;
