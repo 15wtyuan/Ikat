@@ -5074,6 +5074,158 @@ fn enter_after_keyboard_nav_commits() {
     );
 }
 
+// ── TabList 键盘路由（T7：方向键移动 selected_index，K1 clamp 不 wrap） ──
+//
+// 焦点在 TabList 子树（Tab 是 focusable per T3，TabList 本身不聚焦）→ 向上找
+// ControlState::TabList 祖先。方向键按 flex-direction 选轴：row→Left/Right、column→
+// Up/Down；row-reverse/column-reverse 翻转 delta 符号。clamp 到 [0, tab_count-1]（不 wrap）。
+// 自动激活：每改 selected_index 即发 SelectionChanged（与 Dropdown 的 seek 不提交不同——
+// TabList 无「展开/提交」语义，方向键即时生效，镜像 WAI-ARIA tablist automatic-activation）。
+
+use crate::scene::control::{ROLE_TAB, ROLE_TABLIST};
+use crate::scene::dynamic::append_child;
+
+/// 建 TabList + N 个 role=tab 子节点，flex-direction 设为 flex_dir。返回
+/// (scene, tablist_id, [tab_id,...])。布局不需（方向键路由只读 flex-direction + tab_count，
+// 不读 layout_rect）。tablist 角色设 ROLE_TABLIST、tab 设 ROLE_TAB 以匹配 role_of 过滤。
+fn tablist_keyboard_scene(
+    num_tabs: usize,
+    selected_index: usize,
+    flex_dir: taffy::FlexDirection,
+) -> (Scene, NodeId, Vec<NodeId>) {
+    let mut root = Node::default();
+    root.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 400.0,
+        h: 60.0,
+    };
+    let mut s = Scene::from_nodes(vec![root], vec![]);
+    let root_id = s.roots[0];
+    let tl = create_node_from_template(
+        &mut s,
+        NodeKind::TabList,
+        ResolvedStyle::default(),
+        Some(ControlInit::TabList {
+            selected_index: selected_index as u32,
+        }),
+    );
+    append_child(&mut s, root_id, tl).expect("tl attach");
+    s.roles.insert(
+        tl,
+        RoleInfo {
+            role: Some(ROLE_TABLIST.to_string()),
+            slots: Default::default(),
+            aria_controls: None,
+        },
+    );
+    s.get_mut(tl).unwrap().style.taffy_style.flex_direction = flex_dir;
+    let mut tabs = Vec::new();
+    for _ in 0..num_tabs {
+        let tab = create_node_from_template(&mut s, NodeKind::Tab, ResolvedStyle::default(), None);
+        append_child(&mut s, tl, tab).expect("tab attach");
+        s.roles.insert(
+            tab,
+            RoleInfo {
+                role: Some(ROLE_TAB.to_string()),
+                slots: Default::default(),
+                aria_controls: None,
+            },
+        );
+        tabs.push(tab);
+    }
+    compute_world_transforms(&mut s);
+    (s, tl, tabs)
+}
+
+/// 取 TabList 的 selected_index。
+fn tablist_selected(scene: &Scene, tl: NodeId) -> usize {
+    match scene.controls.get(tl) {
+        Some(ControlState::TabList { selected_index }) => *selected_index,
+        _ => panic!("not a TabList"),
+    }
+}
+
+#[test]
+fn arrow_key_moves_tablist_selected_index() {
+    // TabList(row, selected_index=0) + 3 tabs。焦点在 tab0（T3：Tab 是 focusable 元素）。
+    // Right → 1（发 SelectionChanged@tablist touch_id=1）；再 Right → 2；再 Right → clamp 2
+    // （不发事件——changed-guard）；Left → 1。
+    let (mut s, tl, tabs) = tablist_keyboard_scene(3, 0, taffy::FlexDirection::Row);
+    focus_node(&mut s, Some(tabs[0]), &mut Vec::new());
+    let mut out = Vec::new();
+
+    process_keys(&mut s, &[key_down(KEY_RIGHT)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 1, "Right → index 1");
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_SELECTION_CHANGED && e.node_id == tl.0 && e.touch_id == 1),
+        "Right 发 SelectionChanged@tablist，payload touch_id=新 index 1"
+    );
+
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_RIGHT)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 2, "Right → index 2");
+
+    // clamp：selected_index 已 2（末），再 Right 不超过 tab_count-1=2。
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_RIGHT)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 2, "Right clamp 在末（不 wrap）");
+    assert!(
+        !out.iter().any(|e| e.event_type == EVT_SELECTION_CHANGED),
+        "clamp 未变 → 不发事件"
+    );
+
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_LEFT)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 1, "Left → index 1");
+}
+
+#[test]
+fn tablist_left_clamps_at_zero() {
+    // selected_index=0，Left → clamp 0（不 wrap 到末）、不发事件。
+    let (mut s, tl, tabs) = tablist_keyboard_scene(3, 0, taffy::FlexDirection::Row);
+    focus_node(&mut s, Some(tabs[0]), &mut Vec::new());
+    let mut out = Vec::new();
+    process_keys(&mut s, &[key_down(KEY_LEFT)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 0, "Left clamp 在 0（不 wrap）");
+    assert!(
+        !out.iter().any(|e| e.event_type == EVT_SELECTION_CHANGED),
+        "clamp 未变 → 不发事件"
+    );
+}
+
+#[test]
+fn tablist_column_direction_uses_up_down() {
+    // column 方向：Up/Down 移动 selected_index，Left/Right 不路由（不改）。镜像 WAI-ARIA：
+    // 轴由 flex-direction 决定。
+    let (mut s, tl, tabs) = tablist_keyboard_scene(3, 0, taffy::FlexDirection::Column);
+    focus_node(&mut s, Some(tabs[0]), &mut Vec::new());
+    let mut out = Vec::new();
+
+    // Left/Right 在 column 方向不路由：不改 selected_index（透传为普通 keydown）。
+    process_keys(&mut s, &[key_down(KEY_RIGHT)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 0, "column 方向 Right 不路由");
+
+    // Down → 1、再 Down → 2、Down → clamp 2。
+    process_keys(&mut s, &[key_down(KEY_DOWN)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 1, "Down → index 1");
+    process_keys(&mut s, &[key_down(KEY_DOWN)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 2, "Down → index 2");
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_DOWN)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 2, "Down clamp 在末");
+    assert!(
+        !out.iter().any(|e| e.event_type == EVT_SELECTION_CHANGED),
+        "clamp 不发事件"
+    );
+
+    // Up → 1。
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_UP)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 1, "Up → index 1");
+}
+
 // ── Task 15：NumberField 字符输入 guard（filter 非数字） ───────────────
 //
 // NumberField 是文本类控件（EditState.value 是数字的字符串形式），但字符输入通道

@@ -17,7 +17,7 @@
 
 use crate::input::{
     EventRecord, EVT_CHANGE_COMMITTED, EVT_CHECKED_CHANGED, EVT_SELECTION_CHANGED, EVT_SUBMITTED,
-    EVT_VALUE_CHANGED, KEY_DOWN, KEY_ESCAPE, KEY_RETURN, KEY_UP,
+    EVT_VALUE_CHANGED, KEY_DOWN, KEY_ESCAPE, KEY_LEFT, KEY_RETURN, KEY_RIGHT, KEY_UP,
 };
 use crate::scene::dynamic::{append_child, remove_child, set_inline_override, set_user_transform};
 use crate::scene::node::{
@@ -305,6 +305,36 @@ pub(crate) fn pos_in_popup(scene: &Scene, select: NodeId, pos: [f32; 2]) -> bool
     })
 }
 
+/// 设 TabList 的 selected_index，并在净变时发 EVT_SELECTION_CHANGED@tablist（payload
+/// touch_id=新 index）。click 命中 tab（T7）与方向键导航（K1）共用——仅当 new_index 与当前
+/// 值不同时发事件，镜像 [`commit_dropdown_selection`] 的「仅净变才发」语义（HTML change 语义：
+/// 点已激活 tab / 方向键移到原位不发 change）。tablist 非 TabList 控件态 → no-op。
+fn set_tablist_selected_index(
+    scene: &mut Scene,
+    tablist: NodeId,
+    new_index: usize,
+    out: &mut Vec<EventRecord>,
+) {
+    let changed = match scene.controls.get(tablist) {
+        Some(ControlState::TabList { selected_index }) => *selected_index != new_index,
+        _ => false, // 防御：控件态消失 → 不改、不发
+    };
+    if let Some(ControlState::TabList { selected_index }) = scene.controls.get_mut(tablist) {
+        *selected_index = new_index;
+    }
+    if changed {
+        out.push(EventRecord {
+            node_id: tablist.0,
+            event_type: EVT_SELECTION_CHANGED,
+            click_count: 0,
+            pad: [0, 0],
+            touch_id: new_index as i32, // payload = 新 selected_index
+            x: 0.0,
+            y: 0.0,
+        });
+    }
+}
+
 /// 提交选中：设 selected_index=idx + value_lock=true（防反馈环）+ open=false + 清
 /// open_selected_index，并发 EVT_SELECTION_CHANGED@select（payload touch_id=新 index）。
 /// 仅在 idx 与「展开时刻提交值」（open_selected_index；无快照退回现 selected_index）不同时发
@@ -457,6 +487,79 @@ pub(crate) fn on_dropdown_key(
         }
         _ => false,
     }
+}
+
+/// 从 start 向上找最近的 `ControlState::TabList` 祖先（含 start 自身）。供键盘路由定位
+/// TabList：T3 决策 Tab 是 focusable 元素（roving-tabindex-lite，活动 tab 持焦点）、
+/// TabList 本身不聚焦，故焦点落在 Tab 上时须向上走到 TabList 才能改 selected_index。
+/// 显式限定 TabList 类型（不通用化 find_control_at），避免被其它控件祖先误命中（如包了
+/// TabList 的 Dropdown）。panel 跨树（非 TabList 子，靠 aria-controls 关联）→ 从 panel 内容
+/// 向上走不会撞到 TabList，故焦点在 panel 内的控件上时不会误触发 TabList 路由。无 → None。
+pub(crate) fn find_tablist_ancestor(scene: &Scene, start: Option<NodeId>) -> Option<NodeId> {
+    let mut cur = start;
+    while let Some(id) = cur {
+        if matches!(scene.controls.get(id), Some(ControlState::TabList { .. })) {
+            return Some(id);
+        }
+        cur = scene.get(id).and_then(|n| n.parent);
+    }
+    None
+}
+
+/// TabList 键盘交互路由（automatic-activation）。返回是否消费了该键（消费 → 不发普通 keydown）。
+///
+/// - 方向键按 TabList 的 `flex-direction` 选轴：row/row-reverse → Left/Right，
+///   column/column-reverse → Up/Down；row-reverse/column-reverse 翻转 delta 符号。
+/// - clamp 到 `[0, tab_count-1]`，**不 wrap**（照 plan K1）。
+/// - 改变 selected_index 即发 SelectionChanged（automatic-activation：方向键即时提交，
+///   与 Dropdown 的 seek 不提交不同——TabList 无展开/提交语义）。
+///
+/// 非 TabList / 非路由键（含跨轴键，如 row 方向按 Up）/ 0 tab → false（让调用方走普通 keydown）。
+/// 由 `process_keys` 在焦点落在 TabList 子树时调用。
+pub(crate) fn on_tablist_key(
+    scene: &mut Scene,
+    tablist: NodeId,
+    key_code: u32,
+    out: &mut Vec<EventRecord>,
+) -> bool {
+    // 读当前 selected_index + flex_direction（一次不可变借，释放后再改）。
+    let (current, flex_dir) = match scene.get(tablist) {
+        Some(n) => {
+            let cur = match scene.controls.get(tablist) {
+                Some(ControlState::TabList { selected_index }) => *selected_index,
+                _ => return false, // 非 TabList 控件态 → 不路由
+            };
+            (cur, n.style.taffy_style.flex_direction)
+        }
+        None => return false, // 控件不 live → 不路由
+    };
+    // 按 flex-direction 选轴 + 方向。row-reverse/column-reverse 翻转 delta 符号。
+    let delta: i64 = match (flex_dir, key_code) {
+        (taffy::FlexDirection::Row, KEY_LEFT) => -1,
+        (taffy::FlexDirection::Row, KEY_RIGHT) => 1,
+        (taffy::FlexDirection::RowReverse, KEY_LEFT) => 1,
+        (taffy::FlexDirection::RowReverse, KEY_RIGHT) => -1,
+        (taffy::FlexDirection::Column, KEY_UP) => -1,
+        (taffy::FlexDirection::Column, KEY_DOWN) => 1,
+        (taffy::FlexDirection::ColumnReverse, KEY_UP) => 1,
+        (taffy::FlexDirection::ColumnReverse, KEY_DOWN) => -1,
+        _ => return false, // 跨轴键 / 非方向键 → 不路由
+    };
+    // 按 DOM 序数 role=tab 直接子（与 sync_control_visuals / aria-selected 同口径）。
+    let tab_count = scene
+        .get(tablist)
+        .map(|n| n.children.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|&c| scene.roles.role_of(c) == Some(ROLE_TAB))
+        .count();
+    if tab_count == 0 {
+        return false; // 无 tab → 不消费（让普通 keydown 透传）
+    }
+    // clamp 到 [0, tab_count-1]（不 wrap）。
+    let new = (current as i64 + delta).max(0).min(tab_count as i64 - 1) as usize;
+    set_tablist_selected_index(scene, tablist, new, out);
+    true
 }
 
 /// 在 layout 阶段提前 measure 文本控件的显示文本 TextLayout，写入 `scene.text_layouts`。
@@ -814,8 +917,30 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
                 open_dropdown(scene, id);
             }
         }
-        // TabList: 点击 tab 切换 selected_index 由 T7 实现（本 Task 先占位 no-op）。
-        ControlState::TabList { .. } => {}
+        // TabList（T7）：点 role=tab 子 → 设 selected_index = 该 tab 的序号 + 发
+        // SelectionChanged。find_control_at 从命中节点向上找最近 ControlState：Tab 无
+        // ControlState、TabList 有 → id 是 TabList，pos 是点击世界坐标。按声明序遍历 role=tab
+        // 子，rect-contains 命中第一个含 pos 的 tab（镜像 dropdown_option_at_pos 命中模式，
+        // layout_rect 取上一帧 solve）。pos 不落任一 tab（点 tablist padding）→ no-op。
+        ControlState::TabList { .. } => {
+            let tab_ids: Vec<NodeId> = scene
+                .get(id)
+                .map(|n| n.children.clone())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|&c| scene.roles.role_of(c) == Some(ROLE_TAB))
+                .collect();
+            for (i, &tab) in tab_ids.iter().enumerate() {
+                if let Some(n) = scene.get(tab) {
+                    let r = n.layout_rect;
+                    if pos[0] >= r.x && pos[0] <= r.x + r.w && pos[1] >= r.y && pos[1] <= r.y + r.h
+                    {
+                        set_tablist_selected_index(scene, id, i, &mut out);
+                        break;
+                    }
+                }
+            }
+        }
     }
     out
 }
@@ -1998,6 +2123,102 @@ mod tests {
             scene.get(ok).unwrap().inline_override.taffy_style.display,
             taffy::Display::None,
             "合法非激活 panel 仍切 none（前两个 tab 的 R1 跳过不影响它）"
+        );
+    }
+
+    // ── on_pointer_down：TabList（T7 点击激活 + SelectionChanged） ──
+    //
+    // find_control_at 从命中节点向上找最近有 ControlState 的节点：Tab 无 ControlState、
+    // TabList 有 → 点 tab 命中的 id 是父 TabList。on_pointer_down 的 TabList 臂收
+    // (id=TabList, pos)，须判定 pos 落在哪个 role=tab 子的 layout_rect 内，设其序号为
+    // selected_index。镜像 Dropdown 的 dropdown_option_at_pos 命中模式（rect-contains）。
+
+    /// 建 TabList + N 个 role=tab 子节点，每个 tab 占 80×30 矩形横向铺开：
+    /// tab_i @(i*80, 0, 80, 30)。复刻 layout_rect 由上一帧 solve 写入的标准（点击命中靠
+    /// layout_rect）。返回 (scene, tablist_id, [tab_id,...])。无 root——同现有 TabList 测
+    /// 模式（layout_rect 手设，点击测不需 solve/world_matrix）。
+    fn tablist_click_scene(num_tabs: usize, selected_index: usize) -> (Scene, NodeId, Vec<NodeId>) {
+        let mut s = Scene::default();
+        let tl = create_node_from_template(
+            &mut s,
+            NodeKind::TabList,
+            ResolvedStyle::default(),
+            Some(ControlInit::TabList {
+                selected_index: selected_index as u32,
+            }),
+        );
+        let mut tab_ids = Vec::new();
+        for i in 0..num_tabs {
+            // make_tab_child 建 role=tab 子（带 aria_controls 占位，本测不关心 panel）。
+            let tab = make_tab_child(&mut s, tl, &format!("p{i}"));
+            s.get_mut(tab).unwrap().layout_rect = Rect {
+                x: (i as f32) * 80.0,
+                y: 0.0,
+                w: 80.0,
+                h: 30.0,
+            };
+            tab_ids.push(tab);
+        }
+        (s, tl, tab_ids)
+    }
+
+    #[test]
+    fn click_tab_sets_selected_index_and_emits() {
+        // TabList(selected_index=0) + 2 tabs。点 tab1 区（x=100 在 [80,160)）→ selected_index=1
+        // + 发 EVT_SELECTION_CHANGED@tablist，payload touch_id=1。on_pointer_down 收的 id 是
+        // TabList（find_control_at 向上找到 ControlState::TabList）。
+        let (mut s, tl, _tabs) = tablist_click_scene(2, 0);
+        let events = on_pointer_down(&mut s, tl, [100.0, 15.0]);
+        assert!(
+            matches!(
+                s.controls.get(tl),
+                Some(ControlState::TabList { selected_index: 1 })
+            ),
+            "点 tab1 → selected_index=1"
+        );
+        assert!(
+            events.iter().any(|e| e.event_type == EVT_SELECTION_CHANGED
+                && e.node_id == tl.0
+                && e.touch_id == 1),
+            "发 SelectionChanged@tablist，payload touch_id=新 index 1"
+        );
+    }
+
+    #[test]
+    fn click_active_tab_emits_no_event() {
+        // selected_index=0，点 tab0（已激活）→ 不改 selected_index、不发 SelectionChanged
+        // （changed-guard，镜像 commit_dropdown_selection 的「仅净变才发」）。
+        let (mut s, tl, _tabs) = tablist_click_scene(2, 0);
+        let events = on_pointer_down(&mut s, tl, [40.0, 15.0]);
+        assert!(
+            matches!(
+                s.controls.get(tl),
+                Some(ControlState::TabList { selected_index: 0 })
+            ),
+            "点已激活 tab0 → selected_index 不变（仍 0）"
+        );
+        assert!(
+            !events.iter().any(|e| e.event_type == EVT_SELECTION_CHANGED),
+            "点已激活 tab → 不发 SelectionChanged（changed-guard）"
+        );
+    }
+
+    #[test]
+    fn click_tablist_padding_noop() {
+        // 点在 TabList 自身矩形内但不在任一 tab 子矩形内（tablist padding）→ no-op，不改
+        // selected_index、不发事件。
+        let (mut s, tl, _tabs) = tablist_click_scene(2, 0);
+        let events = on_pointer_down(&mut s, tl, [300.0, 40.0]);
+        assert!(
+            matches!(
+                s.controls.get(tl),
+                Some(ControlState::TabList { selected_index: 0 })
+            ),
+            "点 tablist padding → selected_index 不变"
+        );
+        assert!(
+            !events.iter().any(|e| e.event_type == EVT_SELECTION_CHANGED),
+            "点 padding → 不发事件"
         );
     }
 

@@ -573,6 +573,20 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                 {
                     continue; // 路由键被消费，不发 keydown
                 }
+                // TabList 键盘路由（automatic-activation）：焦点在 TabList 子树（Tab 是
+                // focusable per T3，TabList 自身不聚焦）→ 向上找 ControlState::TabList 祖先，
+                // 方向键按 flex-direction 选轴移动 selected_index（clamp 不 wrap）+ 发
+                // SelectionChanged。互斥于 TextField（is_text 已先消费方向键移光标）+ Dropdown
+                // （二者非 TabList）。panel 跨树（非 TabList 子），焦点在 panel 内控件向上走
+                // 不会撞 TabList，故不误触发。
+                if ke.is_down {
+                    if let Some(tl) = crate::scene::control::find_tablist_ancestor(scene, Some(fid))
+                    {
+                        if crate::scene::control::on_tablist_key(scene, tl, ke.key_code, out) {
+                            continue; // 路由键被消费，不发 keydown
+                        }
+                    }
+                }
             }
         }
         // 普通 keydown/up：有焦点才发（无焦点丢弃）
