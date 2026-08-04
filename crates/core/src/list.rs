@@ -152,33 +152,50 @@ pub fn enter_data_driven(
     ul: NodeId,
     list_ordinal: u32,
 ) -> Result<(), String> {
-    // 短期不可变借：校验 kind + height + 收集设计期 li（含模板候选）。
-    // 不能跨 clone_subtree 持有 scene 借（clone_subtree 也要 &mut stage）。
-    let (first_li, lis): (Option<NodeId>, Vec<NodeId>) = {
+    // 短期不可变借：校验 kind + height + 解析模板来源（spec §6.3：<template> 子优先，
+    // 兜底设计期 li）。不能跨 clone_subtree 持有 scene 借（clone_subtree 也要 &mut stage）。
+    let (blueprint, all_children): (Option<NodeId>, Vec<NodeId>) = {
         let scene = stage.scene.as_ref().ok_or("no scene")?;
         if scene.get(ul).map(|n| n.kind) != Some(NodeKind::ListView) {
             return Err("enter_data_driven: node is not a ListView".into());
         }
         check_ul_height_auto(scene, ul)?;
         let ul_node = scene.get(ul).unwrap();
-        let first_li = ul_node
+        // <template> 子（NodeKind::Template）：spec §6.3 要求恰好一个，多个是契约违反。
+        let templates: Vec<NodeId> = ul_node
             .children
             .iter()
             .copied()
-            .find(|&c| scene.get(c).map(|cn| cn.kind) == Some(NodeKind::ListItem));
-        let lis: Vec<NodeId> = ul_node
-            .children
-            .iter()
-            .copied()
-            .filter(|&c| scene.get(c).map(|cn| cn.kind) == Some(NodeKind::ListItem))
+            .filter(|&c| scene.get(c).map(|cn| cn.kind) == Some(NodeKind::Template))
             .collect();
-        (first_li, lis)
+        if templates.len() > 1 {
+            return Err("ListView 下有多个 <template>：自动采用要求恰好一个（spec §6.3）".into());
+        }
+        // 蓝图 = <template> 内的首个 ListItem（packer 保留 template 子树，fence 已校验恰一个）。
+        let blueprint = templates.first().and_then(|&tpl| {
+            scene.get(tpl).and_then(|tn| {
+                tn.children
+                    .iter()
+                    .copied()
+                    .find(|&c| scene.get(c).map(|cn| cn.kind) == Some(NodeKind::ListItem))
+            })
+        });
+        // 兜底：ul 直接 ListItem 子（设计期 li 写法）。
+        let blueprint = blueprint.or_else(|| {
+            ul_node
+                .children
+                .iter()
+                .copied()
+                .find(|&c| scene.get(c).map(|cn| cn.kind) == Some(NodeKind::ListItem))
+        });
+        (blueprint, ul_node.children.clone())
     };
-    // 先 clone 模板（需 &mut stage，此时无 scene 借），再清空原 li。
-    let template_root = if let Some(li) = first_li {
-        let cloned = stage.clone_subtree(li)?;
-        for li in &lis {
-            stage.remove_node(*li);
+    // 先 clone 蓝图到游离态（需 &mut stage，此时无 scene 借），再清空 ul 全部设计期子
+    // （adopted <template> 子树 + 设计期 li + 标签间空白 TextNode），使 ul 仅剩 spacer+slot。
+    let template_root = if let Some(bp) = blueprint {
+        let cloned = stage.clone_subtree(bp)?;
+        for child in &all_children {
+            stage.remove_node(*child);
         }
         Some(cloned)
     } else {
@@ -1073,6 +1090,81 @@ mod tests {
             ls.template_root.is_some(),
             "design-time li backed up as template"
         );
+    }
+
+    /// 作者写 `<div role=list><template><div role=listitem>…</div></template></div>`：
+    /// packer 把 `<template>` 保留为 NodeKind::Template 子（v27+），其下 ListItem 才是蓝图。
+    /// enter_data_driven 须采用 template 内的 ListItem 作模板源（spec §6.3 step 2）。
+    fn stage_with_ul_template_li() -> (crate::stage::Stage, NodeId) {
+        use crate::scene::node::{Node, NodeKind};
+        let ul = Node {
+            kind: NodeKind::ListView,
+            ..Node::default()
+        };
+        let tpl = Node {
+            kind: NodeKind::Template,
+            ..Node::default()
+        };
+        let li = Node {
+            kind: NodeKind::ListItem,
+            ..Node::default()
+        };
+        let scene = crate::scene::node::Scene::from_nodes(vec![ul, tpl, li], vec![(0, 1), (1, 2)]);
+        let ul = scene.roots[0];
+        let mut s = crate::stage::Stage::new_for_test();
+        s.scene = Some(scene);
+        (s, ul)
+    }
+
+    #[test]
+    fn enter_data_driven_adopts_template_child() {
+        let (mut s, ul) = stage_with_ul_template_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        let scene = s.scene.as_ref().unwrap();
+        let ul_node = scene.get(ul).unwrap();
+        // ul 仅剩 head+tail spacer：adopted <template> 子树已清。
+        assert_eq!(ul_node.children.len(), 2, "ul has head+tail spacer only");
+        let ls = scene.lists.get(ul).expect("list state created");
+        assert!(
+            ls.template_root.is_some(),
+            "template blueprint (ListItem inside <template>) adopted as template source"
+        );
+    }
+
+    #[test]
+    fn enter_data_driven_rejects_multiple_templates() {
+        // spec §6.3：ul 下恰好一个 <template> 才自动采用；多个是契约违反。
+        use crate::scene::node::{Node, NodeKind};
+        let ul = Node {
+            kind: NodeKind::ListView,
+            ..Node::default()
+        };
+        let tpl1 = Node {
+            kind: NodeKind::Template,
+            ..Node::default()
+        };
+        let li1 = Node {
+            kind: NodeKind::ListItem,
+            ..Node::default()
+        };
+        let tpl2 = Node {
+            kind: NodeKind::Template,
+            ..Node::default()
+        };
+        let li2 = Node {
+            kind: NodeKind::ListItem,
+            ..Node::default()
+        };
+        let scene = crate::scene::node::Scene::from_nodes(
+            vec![ul, tpl1, li1, tpl2, li2],
+            vec![(0, 1), (1, 2), (0, 3), (3, 4)],
+        );
+        let ul = scene.roots[0];
+        let mut s = crate::stage::Stage::new_for_test();
+        s.scene = Some(scene);
+        let err = crate::list::enter_data_driven(&mut s, ul, 0)
+            .expect_err("multiple <template> should be rejected");
+        assert!(err.contains("多个 <template>"), "got: {err}");
     }
 
     #[test]
