@@ -154,6 +154,8 @@ fn kind_to_html_tag(k: NodeKind) -> &'static str {
         NodeKind::Slot => "slot",
         NodeKind::CustomElement => "custom",
         NodeKind::Template => "template",
+        NodeKind::TabList => "div",
+        NodeKind::Tab => "button",
     }
 }
 
@@ -167,6 +169,8 @@ fn print_diagnostic_row(n: &Node, scene: &Scene, s: &Stage) {
         NodeKind::Button => "btn",
         NodeKind::TextElement => "span",
         NodeKind::TextNode => "#text",
+        NodeKind::TabList => "tablist",
+        NodeKind::Tab => "tab",
         _ => "?",
     };
     let class = n.classes.join(",");

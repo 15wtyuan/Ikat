@@ -117,6 +117,12 @@ pub enum NodeKind {
     /// rendered, hit-tested or cascaded. Lives in the pkg so the runtime can clone
     /// its subtree to produce list slots.
     Template,
+    /// WAI-ARIA `role="tablist"` — tab 容器。ControlState::TabList{selected_index}。
+    /// 子节点是 role=tab；panel 跨树靠 aria-controls 关联（RoleInfo.aria_controls）。
+    TabList,
+    /// WAI-ARIA `role="tab"` — 单个 tab。无 ControlState，aria-selected 从父 TabList.selected_index 派生。
+    /// 容器型（持 label 子节点），镜像 Button。
+    Tab,
 }
 
 impl NodeKind {
@@ -143,6 +149,8 @@ impl NodeKind {
             16 => Some(NodeKind::Slot),
             17 => Some(NodeKind::CustomElement),
             18 => Some(NodeKind::Template),
+            19 => Some(NodeKind::TabList),
+            20 => Some(NodeKind::Tab),
             _ => None,
         }
     }
@@ -160,6 +168,8 @@ impl NodeKind {
                 | Self::ListItem
                 | Self::Slot
                 | Self::CustomElement
+                | Self::TabList
+                | Self::Tab
         )
     }
 
@@ -198,7 +208,9 @@ const _: () = {
             | NodeKind::ListItem
             | NodeKind::Slot
             | NodeKind::CustomElement
-            | NodeKind::Template => {}
+            | NodeKind::Template
+            | NodeKind::TabList
+            | NodeKind::Tab => {}
         }
     }
 };
@@ -785,6 +797,8 @@ mod repr_tests {
         assert_eq!(NodeKind::Button as u8, 3);
         assert_eq!(NodeKind::Image as u8, 4);
         assert_eq!(NodeKind::Template as u8, 18);
+        assert_eq!(NodeKind::TabList as u8, 19);
+        assert_eq!(NodeKind::Tab as u8, 20);
     }
 
     #[test]
@@ -809,11 +823,27 @@ mod repr_tests {
             NodeKind::Slot,
             NodeKind::CustomElement,
             NodeKind::Template,
+            NodeKind::TabList,
+            NodeKind::Tab,
         ];
         for &k in &all {
             assert_eq!(NodeKind::from_u8(k as u8), Some(k));
         }
-        assert_eq!(NodeKind::from_u8(19), None); // 越界（Template=18 是最后合法判别值）
+        assert_eq!(NodeKind::from_u8(21), None); // 越界（Tab=20 是最后合法判别值）
         assert_eq!(NodeKind::from_u8(255), None);
+    }
+
+    #[test]
+    fn tablist_tab_kind_roundtrip_and_container() {
+        // T3：TabList=19、Tab=20 追加到 enum 末尾，判别值稳定（pkg 版本门保跨版本）。
+        assert_eq!(NodeKind::TabList as u8, 19);
+        assert_eq!(NodeKind::Tab as u8, 20);
+        assert_eq!(NodeKind::from_u8(19), Some(NodeKind::TabList));
+        assert_eq!(NodeKind::from_u8(20), Some(NodeKind::Tab));
+        // TabList（持 tab 子，镜像 ListView）+ Tab（持 label 子，镜像 Button）都是容器。
+        assert!(NodeKind::TabList.is_container());
+        assert!(NodeKind::Tab.is_container());
+        assert!(!NodeKind::TabList.is_leaf());
+        assert!(!NodeKind::Tab.is_leaf());
     }
 }

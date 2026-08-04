@@ -760,7 +760,11 @@ impl Stage {
                 | NodeKind::Dropdown
                 | NodeKind::Slider
                 | NodeKind::Toggle
-                | NodeKind::RadioButton => Some(0),
+                | NodeKind::RadioButton
+                // Tab 镜像 Button：role=tab 隐式可聚焦（WAI-ARIA），补默认 tabindex=0
+                // 让 click-to-focus / 键盘 Tab 链能命中（T7 箭头键导航依赖）。
+                // TabList 是容器（镜像 ListView），自身不聚焦 → 落 _ => None。
+                | NodeKind::Tab => Some(0),
                 _ => None,
             });
             if let Some(c) = &tn.content {

@@ -46,6 +46,10 @@ pub fn dump_scene_json(scene: &Scene) -> String {
             NodeKind::Slot => ("slot", "Slot".into()),
             NodeKind::CustomElement => ("div", "CustomElement".into()),
             NodeKind::Template => ("template", "Template".into()),
+            // role 驱动控件：逆映射 tag 同 kind_tag（TabList→div、Tab→button），
+            // kind_str 用变体名（诊断可读）。
+            NodeKind::TabList => ("div", "TabList".into()),
+            NodeKind::Tab => ("button", "Tab".into()),
         };
         let id = json_escape(n.id_attr.as_deref().unwrap_or(""));
         let classes = n

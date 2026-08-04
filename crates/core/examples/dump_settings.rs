@@ -189,6 +189,8 @@ fn kind_short(k: NodeKind) -> &'static str {
         NodeKind::Slot => "Slot",
         NodeKind::CustomElement => "Custom",
         NodeKind::Template => "Template",
+        NodeKind::TabList => "TabList",
+        NodeKind::Tab => "Tab",
     }
 }
 

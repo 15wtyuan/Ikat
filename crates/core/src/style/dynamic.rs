@@ -280,6 +280,12 @@ pub fn compound_matches_node(c: &Compound, node_id: NodeId, scene: &Scene) -> bo
             NodeKind::Slot => "slot",
             // <template> 已进场景树（强制 display:none），保留逆映射使 `template` tag 选择器可命中。
             NodeKind::Template => "template",
+            // role 驱动控件（TabList/Tab）无专属 tag，逆映射取最接近的宿主 tag：
+            //  - TabList → div（容器宿主，与 ListView 同）；
+            //  - Tab → button（settings.html 用 <button role=tab>，点击语义同 Button）。
+            // 作者几乎不靠 tag 选择器选 tab，role/class 选择器不受影响。
+            NodeKind::TabList => "div",
+            NodeKind::Tab => "button",
             // input 变体：type 在 parse 期固化为独立 kind，tag 统一为 "input"
             NodeKind::TextField
             | NodeKind::NumberField
