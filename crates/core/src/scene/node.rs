@@ -468,6 +468,13 @@ pub enum ControlState {
         max: f32,
         step: f32,
     },
+    /// WAI-ARIA `role="tablist"`。selected_index=当前激活 tab 序号（aria-selected 不存储于
+    /// 各 Tab 子节点，由 synth_aria_value 从父 selected_index 派生，见 T5）。无 value_lock
+    /// （aria-selected 是只读合成，无回写环——区别于 Dropdown）。panel 显隐由 T6 据
+    /// RoleInfo.aria_controls 解析 panel id 后切换，不在此枚举存 panel_ids。
+    TabList {
+        selected_index: usize,
+    },
 }
 
 /// 每节点控件状态表（`HashMap<NodeId, ControlState>`）。结构与访问约定同 `AnimTable`/
@@ -505,9 +512,11 @@ impl ControlTable {
 /// 稀疏：只有带 role/data-slot 的节点进表。运行时态，不进 pkg（pkg 的
 /// TemplateNode 携带 role/data_slot 字符串，instantiate 时填进此表）。
 ///
-/// 注：aria-* 属性**不进 RoleInfo**——决策定为运行时从 ControlState 合成
+/// 注：aria-* 属性**大多不进 RoleInfo**——决策定为运行时从 ControlState 合成
 /// （避免打包期初始值与运行时实时值双源）。aria-multiline 等派发提示在
-/// fence 阶段用完即弃，不进 pkg、不进此表。
+/// fence 阶段用完即弃，不进 pkg、不进此表。**例外**：`aria-controls`（TabList
+/// tab→panel 跨树关联字符串）不是从控件实时状态可派生的量，故作纯数据随模板
+/// 迁移：TemplateNode.aria_controls → RoleInfo.aria_controls（instantiate 拷贝）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RoleInfo {
     /// WAI-ARIA role（如 "combobox"/"slider"/"textbox"）。None = 普通 div，无控件语义。
@@ -515,6 +524,10 @@ pub struct RoleInfo {
     /// data-slot 值（如 "fill"/"thumb"）。ARIA 不覆盖控件内部视觉构造，用 HTML 标准的
     /// data-* 私有扩展机制表达「这是控件的哪个部件」。
     pub slots: std::collections::HashMap<String, String>,
+    /// WAI-ARIA `aria-controls`（TabList tab→panel 跨树关联的 panel id 字符串）。
+    /// None = 非关联节点。instantiate 从 TemplateNode.aria_controls 拷入；sync_control_visuals
+    /// （T6）据此 find_node_by_id 解析 panel 切换显隐。
+    pub aria_controls: Option<String>,
 }
 
 impl RoleInfo {

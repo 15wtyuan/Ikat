@@ -287,6 +287,9 @@ pub fn create_node_from_template(
                 max,
                 step,
             },
+            ControlInit::TabList { selected_index } => ControlState::TabList {
+                selected_index: selected_index as usize,
+            },
         };
         scene.controls.ensure(id, state);
         // 控件视觉子结构由作者自写（role/data-slot），core 不注入——见 sync_control_visuals。
@@ -1505,6 +1508,7 @@ mod tests {
                 crate::scene::node::RoleInfo {
                     role: Some("progressbar".into()),
                     slots: std::collections::HashMap::new(),
+                    aria_controls: None,
                 },
             );
             scene.roles.insert(
@@ -1512,6 +1516,7 @@ mod tests {
                 crate::scene::node::RoleInfo {
                     role: None,
                     slots: [("fill".to_string(), String::new())].into_iter().collect(),
+                    aria_controls: None,
                 },
             );
         }

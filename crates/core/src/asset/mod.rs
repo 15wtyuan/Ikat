@@ -92,6 +92,11 @@ pub enum ControlInit {
         max: f32,
         step: f32,
     },
+    /// `role="tablist"` 初始激活 tab 序号（打包期扫 role=tab 子的 aria-selected="true"
+    /// 算出，无则 0）。运行时映成 ControlState::TabList{selected_index}。
+    TabList {
+        selected_index: u32,
+    },
 }
 
 /// 模板节点：序列化态（instantiate 时 build 成 live Node）。

@@ -502,6 +502,7 @@ mod tests {
             RoleInfo {
                 role: Some(ROLE_LISTBOX.to_string()),
                 slots: Default::default(),
+                aria_controls: None,
             },
         );
         // 两个 option 直接挂 listbox（作者正确结构）。

@@ -865,3 +865,65 @@ fn remove_node_clears_roles_side_table() {
     assert!(scene.roles.get(root).is_none(), "删后 root role 清了");
     assert!(scene.roles.get(thumb).is_none(), "删后 thumb slot 清了");
 }
+
+/// T4：ControlInit::TabList{selected_index} 经 create_node_from_template 映射成
+/// ControlState::TabList{selected_index}（usize，u32→usize 转换）。镜像 Dropdown
+/// 同类映射的测试模式。
+#[test]
+fn instantiate_tablist_control_init_maps_to_state() {
+    use crate::scene::node::ControlState;
+    let pkg = make_control_pkg(
+        NodeKind::TabList,
+        crate::asset::ControlInit::TabList { selected_index: 2 },
+    );
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("bag", &pkg).unwrap();
+    let id = s.instantiate("bag", "c").unwrap();
+    let scene = s.scene.as_ref().unwrap();
+    assert!(
+        matches!(
+            scene.controls.get(id),
+            Some(ControlState::TabList { selected_index: 2 })
+        ),
+        "ControlInit::TabList{{selected_index:2}} → ControlState::TabList{{selected_index:2}}"
+    );
+}
+
+/// T4：instantiate 把 TemplateNode.aria_controls 拷进 RoleInfo.aria_controls（运行时
+/// TabList tab→panel 跨树关联的字符串）。打包期 bridge（T2）尚未填 aria_controls，
+/// 故真实 run 值为 None；本测试手灌 TemplateNode.aria_controls=Some 验 instantiate 拷贝路径。
+#[test]
+fn instantiate_copies_aria_controls_into_role_info() {
+    let nodes = [TemplateNode {
+        kind: NodeKind::TabList,
+        style: ResolvedStyle::default(),
+        parent_idx: None,
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        content: None,
+        src: None,
+        control_init: Some(crate::asset::ControlInit::TabList { selected_index: 0 }),
+        role: Some("tablist".to_string()),
+        data_slot: None,
+        aria_controls: Some("panel-1".to_string()),
+    }];
+    let rules = crate::style::dynamic::DynamicRuleTable::default();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules)],
+    };
+    let pkg = crate::asset::write_package(&input);
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("bag", &pkg).unwrap();
+    let id = s.instantiate("bag", "c").unwrap();
+    let scene = s.scene.as_ref().unwrap();
+    let info = scene.roles.get(id).expect("role=tablist → RoleInfo 入表");
+    assert_eq!(
+        info.aria_controls.as_deref(),
+        Some("panel-1"),
+        "instantiate 拷 TemplateNode.aria_controls 进 RoleInfo.aria_controls"
+    );
+}

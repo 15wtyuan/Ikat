@@ -1455,6 +1455,7 @@ mod tests {
                 .iter()
                 .map(|&k| (k.to_string(), String::new()))
                 .collect(),
+            aria_controls: None,
         };
         s.roles.insert(id, info);
         (s, id)

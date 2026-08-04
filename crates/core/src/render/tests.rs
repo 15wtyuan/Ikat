@@ -4437,6 +4437,7 @@ fn make_popup_scene(open: bool) -> (Scene, NodeId, NodeId, NodeId, NodeId, NodeI
         crate::scene::node::RoleInfo {
             role: Some(crate::scene::control::ROLE_LISTBOX.to_string()),
             slots: Default::default(),
+            aria_controls: None,
         },
     );
     // 给所有节点非零 layout_rect（render 按 rect 产几何；0×0 节点会被某些路径跳过）。
@@ -4643,6 +4644,7 @@ fn popup_sort_key_strictly_above_scrollbar_thumb() {
         crate::scene::node::RoleInfo {
             role: Some(crate::scene::control::ROLE_LISTBOX.to_string()),
             slots: Default::default(),
+            aria_controls: None,
         },
     );
     // outer 设大 viewport，content 更高 → overflow:scroll effective → 产 v-thumb。
@@ -4752,6 +4754,7 @@ fn open_popup_renders_option_list_via_reparent_path() {
         RoleInfo {
             role: Some(ROLE_LISTBOX.to_string()),
             slots: Default::default(),
+            aria_controls: None,
         },
     );
     // 2 个 option 直接挂 listbox（作者正确结构）。

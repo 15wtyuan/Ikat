@@ -652,6 +652,9 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
         }
         // NumberField: 纯数值输入控件，无视觉子节点 sync（数值约束 clamp pending）。
         ControlState::NumberField { .. } => {}
+        // TabList: aria-selected 由 synth_aria_value（T5）合成、panel 显隐由 T6 据
+        // RoleInfo.aria_controls 切换——本 Task 先占位 no-op，逻辑留给 T6/T7。
+        ControlState::TabList { .. } => {}
     }
 }
 
@@ -776,6 +779,8 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
                 open_dropdown(scene, id);
             }
         }
+        // TabList: 点击 tab 切换 selected_index 由 T7 实现（本 Task 先占位 no-op）。
+        ControlState::TabList { .. } => {}
     }
     out
 }
@@ -1396,6 +1401,7 @@ mod tests {
             RoleInfo {
                 role: None,
                 slots: [(slot.to_string(), String::new())].into_iter().collect(),
+                aria_controls: None,
             },
         );
         id
@@ -1412,6 +1418,7 @@ mod tests {
             RoleInfo {
                 role: Some(role.to_string()),
                 slots: Default::default(),
+                aria_controls: None,
             },
         );
         id

@@ -4423,6 +4423,7 @@ fn open_dropdown_with_outside_button_scene() -> (Scene, NodeId, NodeId, NodeId, 
         RoleInfo {
             role: Some(ROLE_LISTBOX.to_string()),
             slots: Default::default(),
+            aria_controls: None,
         },
     );
     let opt0 =
@@ -4649,6 +4650,7 @@ fn dropdown_scene(
         RoleInfo {
             role: Some(ROLE_LISTBOX.to_string()),
             slots: Default::default(),
+            aria_controls: None,
         },
     );
 
