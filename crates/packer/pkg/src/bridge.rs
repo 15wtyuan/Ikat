@@ -50,6 +50,8 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                 // role 驱动语义分派（combobox/slider/...），data-slot 标识控件视觉部件（fill/thumb）。
                 let role = attr(el, "role");
                 let data_slot = attr(el, "data-slot");
+                // aria-controls：tab→panel 跨树关联的 panel id（TabList 专属）。None = 非关联节点。
+                let aria_controls = attr(el, "aria-controls");
                 nodes.push(TemplateNode {
                     kind,
                     style: parsed.styles.get(ir_idx).cloned().unwrap_or_default(),
@@ -63,7 +65,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     control_init,
                     role,
                     data_slot,
-                    aria_controls: None, // placeholder：aria-controls 属性提取待控件束接入（TabList tab→panel）
+                    aria_controls,
                 });
             }
             IrNodeKind::Text(s) => {
@@ -148,6 +150,8 @@ fn map_semantic(el: &IrElement) -> Result<NodeKind, String> {
         Some(SemanticKind::ProgressBar) => Ok(NodeKind::ProgressBar),
         Some(SemanticKind::ListView) => Ok(NodeKind::ListView),
         Some(SemanticKind::ListItem) => Ok(NodeKind::ListItem),
+        Some(SemanticKind::TabList) => Ok(NodeKind::TabList),
+        Some(SemanticKind::Tab) => Ok(NodeKind::Tab),
         Some(SemanticKind::Slot) => Ok(NodeKind::Slot),
         Some(SemanticKind::CustomElement) => Ok(NodeKind::CustomElement),
         Some(SemanticKind::Template) => Ok(NodeKind::Template),
@@ -240,6 +244,15 @@ fn extract_control_init(
         ))),
         NodeKind::Dropdown => Some(ControlInit::Dropdown {
             selected_index: dropdown_selected_index(ir_idx, tree),
+        }),
+        NodeKind::TabList => Some(ControlInit::TabList {
+            // 初始选中项 = 首个 aria-selected="true" 的 role=tab 直接子的序号；
+            // 无则默认第 0 项（与 Dropdown 默认选项同语义）。多重 aria-selected=true 取首个
+            // （作者失误，运行时不崩；T5 选中态从 selected_index 派生，与 aria-selected 解耦）。
+            selected_index: tab_children(ir_idx, tree)
+                .iter()
+                .position(|t| bool_attr(t, "aria-selected"))
+                .unwrap_or(0) as u32,
         }),
         NodeKind::NumberField => {
             let edit =
@@ -340,6 +353,21 @@ fn visit_options(root: usize, tree: &IrTree, mut visit: impl FnMut(&IrElement)) 
             stack.extend(tree.nodes[idx].children.iter().rev().map(|c| c.0));
         }
     }
+}
+
+/// role=tab 直接子元素（TabList 结构契约要求 tablist 直接子里有 role=tab）。
+///
+/// 返回 IrElement 引用列表，按文档序——供初始 selected_index 推导按位置取序号。
+/// 只看直接子，与 control_structure_check 的 tablist→tab 契约字面对齐。
+fn tab_children(parent_idx: usize, tree: &IrTree) -> Vec<&IrElement> {
+    tree.nodes[parent_idx]
+        .children
+        .iter()
+        .filter_map(|c| match &tree.nodes[c.0].kind {
+            IrNodeKind::Element(el) if attr(el, "role").as_deref() == Some("tab") => Some(el),
+            _ => None,
+        })
+        .collect()
 }
 
 fn extract_classes(el: &IrElement) -> Vec<String> {
@@ -504,5 +532,63 @@ mod tests {
         let nodes = bridged(r#"<template><div role="listitem">x</div></template>"#);
         assert_eq!(nodes[0].kind, NodeKind::Template);
         assert_eq!(nodes[0].parent_idx, None);
+    }
+
+    #[test]
+    fn tablist_aria_controls_and_initial_selected_extracted() {
+        // M3 TabList：role=tablist 初始 selected_index 从 aria-selected="true" 的 tab 派生；
+        // 每个 role=tab 的 aria-controls 提取进 TemplateNode（runtime 据此关联 panel）。
+        let nodes = bridged(
+            r#"<style>[role="tab"][aria-selected="true"]{color:red}</style>
+            <div>
+              <div role="tablist" style="display:flex">
+                <button role="tab" aria-controls="pa" aria-selected="false">A</button>
+                <button role="tab" aria-controls="pb" aria-selected="true">B</button>
+              </div>
+              <div id="pa"></div><div id="pb"></div>
+            </div>"#,
+        );
+        let tablist = nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::TabList)
+            .expect("TabList node bridged");
+        assert_eq!(
+            tablist.control_init,
+            Some(ControlInit::TabList { selected_index: 1 })
+        );
+        // 每个 tab 的 aria_controls 落到各自 TemplateNode（按 aria-controls 值定位，避免 DFS 序硬编码）。
+        let tab_a = nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Tab && n.aria_controls.as_deref() == Some("pa"))
+            .expect("tab A bridged with aria-controls=pa");
+        assert_eq!(tab_a.role.as_deref(), Some("tab"));
+        let tab_b = nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Tab && n.aria_controls.as_deref() == Some("pb"))
+            .expect("tab B bridged with aria-controls=pb");
+        assert_eq!(tab_b.role.as_deref(), Some("tab"));
+    }
+
+    #[test]
+    fn tablist_initial_selected_defaults_to_zero_when_none_marked_true() {
+        // 无 aria-selected="true" → 默认第 0 项选中（与 Dropdown 默认选项同语义）。
+        let nodes = bridged(
+            r#"<style>[role="tab"]{color:red}</style>
+            <div>
+              <div role="tablist" style="display:flex">
+                <button role="tab" aria-controls="pa">A</button>
+                <button role="tab" aria-controls="pb">B</button>
+              </div>
+              <div id="pa"></div><div id="pb"></div>
+            </div>"#,
+        );
+        let tablist = nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::TabList)
+            .expect("TabList node bridged");
+        assert_eq!(
+            tablist.control_init,
+            Some(ControlInit::TabList { selected_index: 0 })
+        );
     }
 }

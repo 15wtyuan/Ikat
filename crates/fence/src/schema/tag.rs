@@ -67,6 +67,11 @@ pub enum SemanticKind {
     ProgressBar,
     ListView,
     ListItem,
+    /// WAI-ARIA `role="tablist"` — tab 容器（→ NodeKind::TabList）。
+    TabList,
+    /// WAI-ARIA `role="tab"` — 单个 tab（→ NodeKind::Tab）。无状态，选中态从
+    /// 父 TabList.selected_index 派生（aria-selected 是只读 synth，见 ControlState）。
+    Tab,
     Template,
     Slot,
     /// Custom element -- tag name contains a hyphen (e.g. `<my-widget>`).
@@ -97,7 +102,9 @@ pub struct TagSpec {
 /// TextField, which a flat value table cannot express, so it is handled inline
 /// in [`resolve_semantic`]. `listbox` maps to a plain Container because it is the
 /// popup list inside a `combobox` and has no dedicated NodeKind; the runtime
-/// addresses it by role.
+/// addresses it by role. `tabpanel` is likewise intentionally absent: a panel is
+/// a plain `<div>` Container that a tab links via `aria-controls` (cross-tree
+/// association), not a distinct NodeKind.
 const ROLE_TO_SEMANTIC: &[(&str, SemanticKind)] = &[
     ("combobox", SemanticKind::Dropdown),
     ("option", SemanticKind::OptionItem),
@@ -109,6 +116,8 @@ const ROLE_TO_SEMANTIC: &[(&str, SemanticKind)] = &[
     ("progressbar", SemanticKind::ProgressBar),
     ("list", SemanticKind::ListView),
     ("listitem", SemanticKind::ListItem),
+    ("tablist", SemanticKind::TabList),
+    ("tab", SemanticKind::Tab),
 ];
 
 /// Resolve the [`SemanticKind`] of an element from its tag and, when present,
@@ -298,6 +307,24 @@ mod tests {
         assert_eq!(
             resolve_semantic("img", None, false),
             Some(SemanticKind::Image)
+        );
+    }
+
+    #[test]
+    fn resolve_semantic_tablist_tab() {
+        // role=tablist/tab → TabList/Tab SemanticKind (WAI-ARIA, M3 TabList).
+        assert_eq!(
+            resolve_semantic("div", Some("tablist"), false),
+            Some(SemanticKind::TabList)
+        );
+        assert_eq!(
+            resolve_semantic("button", Some("tab"), false),
+            Some(SemanticKind::Tab)
+        );
+        // tabpanel 不分派：走 div → Container（panel 靠 aria-controls 关联，不靠 role 分派）。
+        assert_eq!(
+            resolve_semantic("div", Some("tabpanel"), false),
+            Some(SemanticKind::Container)
         );
     }
 

@@ -33,6 +33,7 @@ const REQUIRED_CHILDREN: &[(&str, &[CheckSpec])] = &[
     ("slider", &[CheckSpec::Slot("thumb")]),
     ("progressbar", &[CheckSpec::Slot("fill")]),
     ("list", &[CheckSpec::Role("listitem")]),
+    ("tablist", &[CheckSpec::Role("tab")]),
 ];
 
 /// 读元素的 `role` 属性值（若存在）。
@@ -124,6 +125,7 @@ fn structure_hint(role: &str) -> Option<&'static str> {
             (the fill bar); the progress element itself acts as the track"
         }
         "list" => "a `<div role=\"list\">` needs at least one `role=\"listitem\"` child",
+        "tablist" => "a `<div role=\"tablist\">` needs at least one `role=\"tab\"` child (panels link via aria-controls)",
         _ => return None,
     })
 }
@@ -227,6 +229,26 @@ mod tests {
         let diags = struct_diags(r#"<div role="list"></div>"#);
         assert_eq!(diags.len(), 1, "{diags:?}");
         assert!(diags[0].message.contains("listitem"));
+    }
+
+    #[test]
+    fn tablist_without_tab_child_is_error() {
+        // role=tablist 无 role=tab 子 → error（M3 TabList 结构契约）
+        let diags = struct_diags(r#"<div role="tablist"></div>"#);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(diags[0].message.contains("tab"));
+    }
+
+    #[test]
+    fn tablist_with_tab_child_passes() {
+        // role=tablist 含 role=tab 子 → 无 error（panel 靠 aria-controls 关联，不需在此校验）
+        let diags = struct_diags(
+            r#"<div role="tablist"><button role="tab" aria-controls="p1">A</button></div><div id="p1"></div>"#,
+        );
+        assert!(
+            diags.is_empty(),
+            "tablist with tab child should pass: {diags:?}"
+        );
     }
 
     #[test]

@@ -531,9 +531,9 @@ pub struct RoleInfo {
 }
 
 impl RoleInfo {
-    /// 是否有任何 role/slot 信息（无则不入表，保持 RoleTable 稀疏）。
+    /// 是否有任何 role/slot/aria-controls 信息（无则不入表，保持 RoleTable 稀疏）。
     pub fn is_empty(&self) -> bool {
-        self.role.is_none() && self.slots.is_empty()
+        self.role.is_none() && self.slots.is_empty() && self.aria_controls.is_none()
     }
 }
 
