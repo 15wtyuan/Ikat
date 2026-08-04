@@ -385,6 +385,10 @@ fn type_matches_nodekind(scene: &Scene, id: NodeId, val: &str) -> bool {
 /// - `aria-valuenow`：Progress / Slider 的 `value`（f32）或 NumberField 的数值文本。
 /// - `aria-multiline`：**静态**，按 NodeKind（TextArea="true"），不查 ControlState——TextArea
 ///   与 TextField 共用 EditState，多行属性由标签（textarea vs input）决定而非运行时状态。
+/// - `aria-selected`：**跨节点**——Tab 无自身 ControlState，选中态从父 TabList.selected_index
+///   派生（Tab 在 TabList 的 role=tab 子里的 0 基序号 == selected_index → "true"，否则 "false"）。
+///   这是首个跨节点 aria 合成（其它 aria 都直读本节点 ControlState）；分支须在下面
+///   `let cs = scene.controls.get(id)?` 之前，否则 Tab 因无 cs 直接返 None。
 fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
     // aria-multiline 静态：按 NodeKind 判（TextArea vs TextField），不依赖 ControlState。
     if aria == "multiline" {
@@ -392,6 +396,42 @@ fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
             Some(NodeKind::TextArea) => Some("true".to_string()),
             _ => None,
         };
+    }
+    // aria-selected：Tab 的选中态从父 TabList.selected_index 跨节点派生。Tab 无自身
+    // ControlState（与 OptionItem 同是无状态条目），故本分支必须在下面 `let cs = ...` 之前。
+    // 非 Tab 节点：aria-selected 无语义（返 None）。
+    if aria == "selected" {
+        let node = scene.get(id)?;
+        if node.kind != NodeKind::Tab {
+            return None;
+        }
+        // 向上走父链找最近 TabList 祖先（Tab 的语义父）。无 → aria-selected 对此 Tab 无语义。
+        let mut tablist_id = None;
+        let mut cur = node.parent;
+        while let Some(p) = cur {
+            match scene.get(p) {
+                Some(pn) if pn.kind == NodeKind::TabList => {
+                    tablist_id = Some(p);
+                    break;
+                }
+                Some(pn) => cur = pn.parent,
+                None => break,
+            }
+        }
+        let tablist_id = tablist_id?;
+        let selected_index = match scene.controls.get(tablist_id) {
+            Some(ControlState::TabList { selected_index }) => *selected_index,
+            _ => return None,
+        };
+        // 本 Tab 在父 TabList 的 role=tab 子里的 0 基序号（与 selected_index 同尺度）。
+        // 只数 role=tab 子，忽略非 tab 中间结构（如 label 包裹），保持与 T3 解析一致。
+        let my_index = scene
+            .get(tablist_id)?
+            .children
+            .iter()
+            .filter(|&&c| scene.roles.role_of(c) == Some("tab"))
+            .position(|&c| c == id)?;
+        return Some((my_index == selected_index).to_string());
     }
     let cs = scene.controls.get(id)?;
     Some(match (aria, cs) {
@@ -2219,6 +2259,139 @@ mod tests {
             s.get(leaf_id).unwrap().style.color,
             base_color,
             "页面根作用域的 .leaf 规则不应命中实例内节点（作用域隔离：leaf scope = 实例根 ≠ 页面根）"
+        );
+    }
+
+    // ── aria-selected 跨节点合成（T5）：Tab 无 ControlState，从父 TabList.selected_index 派生 ──
+
+    /// 构造 TabList + N 个 role=tab 子节点的 scene（复刻 TabList 实例化形态）。
+    /// 返回 (scene, tablist_id, [tab_id,...])。
+    fn tablist_scene(num_tabs: usize, selected_index: usize) -> (Scene, NodeId, Vec<NodeId>) {
+        let mut tl = Node::default();
+        tl.kind = NodeKind::TabList;
+        let mut tabs = Vec::with_capacity(num_tabs);
+        for _ in 0..num_tabs {
+            let mut t = Node::default();
+            t.kind = NodeKind::Tab;
+            tabs.push(t);
+        }
+        let mut nodes = vec![tl];
+        nodes.extend(tabs);
+        let edges: Vec<(usize, usize)> = (0..num_tabs).map(|i| (0, i + 1)).collect();
+        let mut s = Scene::from_nodes(nodes, edges);
+        let tl_id = s.roots[0];
+        let tab_ids: Vec<NodeId> = s.get(tl_id).unwrap().children.clone();
+        for &tid in &tab_ids {
+            s.roles.insert(
+                tid,
+                RoleInfo {
+                    role: Some("tab".into()),
+                    ..Default::default()
+                },
+            );
+        }
+        s.controls
+            .ensure(tl_id, ControlState::TabList { selected_index });
+        (s, tl_id, tab_ids)
+    }
+
+    #[test]
+    fn tab_aria_selected_synth_from_parent_tablist() {
+        // TabList(selected_index=1) + 2 个 Tab 子。t0=false、t1=true、tablist=None（非 Tab）。
+        let (s, tl, tabs) = tablist_scene(2, 1);
+        let t0 = tabs[0];
+        let t1 = tabs[1];
+        assert_eq!(
+            synth_aria_value(&s, t0, "selected"),
+            Some("false".into()),
+            "t0 不是激活 tab → aria-selected=false"
+        );
+        assert_eq!(
+            synth_aria_value(&s, t1, "selected"),
+            Some("true".into()),
+            "t1 是激活 tab → aria-selected=true"
+        );
+        assert_eq!(
+            synth_aria_value(&s, tl, "selected"),
+            None,
+            "TabList 非 Tab → aria-selected 无语义"
+        );
+    }
+
+    #[test]
+    fn tab_aria_selected_no_tablist_ancestor_returns_none() {
+        // Tab 无 TabList 父（孤立 Tab）→ aria-selected 无语义。
+        let s = Scene::from_nodes(vec![test_node(NodeKind::Tab)], vec![]);
+        let id = s.roots[0];
+        assert_eq!(
+            synth_aria_value(&s, id, "selected"),
+            None,
+            "无 TabList 父的孤立 Tab → aria-selected 无语义"
+        );
+    }
+
+    #[test]
+    fn tab_aria_selected_parent_not_tablist_returns_none() {
+        // Tab 的父是普通 Container（不是 TabList）→ 向上找不到 TabList → None。
+        let mut parent = Node::default();
+        parent.kind = NodeKind::Container;
+        let tab = test_node(NodeKind::Tab);
+        let mut s = Scene::from_nodes(vec![parent, tab], vec![(0, 1)]);
+        let tab_id = s.get(s.roots[0]).unwrap().children[0];
+        s.roles.insert(
+            tab_id,
+            RoleInfo {
+                role: Some("tab".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            synth_aria_value(&s, tab_id, "selected"),
+            None,
+            "Tab 父非 TabList → aria-selected 无语义"
+        );
+    }
+
+    #[test]
+    fn attr_selector_aria_selected_hits_active_tab() {
+        // [aria-selected="true"] 命中激活 tab（t1），不命中非激活 tab（t0）。
+        let (s, _tl, tabs) = tablist_scene(2, 1);
+        let t0 = tabs[0];
+        let t1 = tabs[1];
+        let sel_true = hand_selector(r#"[aria-selected="true"]"#);
+        let sel_false = hand_selector(r#"[aria-selected="false"]"#);
+        assert!(
+            !compound_matches_node(&sel_true.compound[0], t0, &s),
+            "t0 → [aria-selected=\"true\"] 不命中"
+        );
+        assert!(
+            compound_matches_node(&sel_true.compound[0], t1, &s),
+            "t1 → [aria-selected=\"true\"] 命中"
+        );
+        // 反向：[aria-selected="false"] 命中 t0，不命中 t1
+        assert!(
+            compound_matches_node(&sel_false.compound[0], t0, &s),
+            "t0 → [aria-selected=\"false\"] 命中"
+        );
+        assert!(
+            !compound_matches_node(&sel_false.compound[0], t1, &s),
+            "t1 → [aria-selected=\"false\"] 不命中"
+        );
+    }
+
+    #[test]
+    fn attr_selector_aria_selected_exists_matches_tab() {
+        // [aria-selected] 存在形式：Tab 节点合成值非 None → Exists 命中；非 Tab → None → 不命中。
+        let (s, tl, tabs) = tablist_scene(2, 0);
+        let t0 = tabs[0];
+        let sel = hand_selector("[aria-selected]");
+        assert!(
+            compound_matches_node(&sel.compound[0], t0, &s),
+            "Tab → [aria-selected] Exists 命中"
+        );
+        assert!(
+            !compound_matches_node(&sel.compound[0], tl, &s),
+            "TabList → [aria-selected] Exists 不命中"
         );
     }
 }
