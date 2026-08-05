@@ -2604,4 +2604,103 @@ mod tests {
             );
         }
     }
+
+    /// reuse_key 出生即定、永不旋转（坑182 子因②根治）。
+    /// slot[0] 的 key 在 enter_data_driven 预分配时设定，经历 park→unpark 往返后不变。
+    #[test]
+    fn reuse_key_stable_across_scroll_frames() {
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 1000);
+        // 20px/项 + 视口 200 → 可见 ~10 项 + BUFFER。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..1000 {
+                ls.heights.set(i, 20.0);
+            }
+            let st = scene.scroll.ensure(pane);
+            st.viewport_size = (1000.0, 200.0);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        // 第一帧：实例化初始 slot，拿 slot[0] 的 reuse_key 当基线。
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let key_of_slot0 = {
+            let scene = s.scene.as_ref().unwrap();
+            let ls = scene.lists.get(ul).unwrap();
+            assert!(!ls.slots.is_empty(), "slot[0] exists");
+            scene.get(ls.slots[0].node).unwrap().reuse_key
+        };
+        assert_ne!(key_of_slot0, 0, "slot[0] has a non-zero reuse_key at birth");
+
+        // 滚到 item 500：slot[0] 离开可见区→park，之后可能 unpark 换绑给新 item。
+        {
+            let st = s.scene.as_mut().unwrap().scroll.ensure(pane);
+            st.scroll_pos = (0.0, 500.0 * 20.0); // scroll to ~item 500
+        }
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        crate::list::collect_heights(s.scene.as_mut().unwrap());
+
+        // 再滚回顶部：slot[0] 可能被 unpark 并换绑回低序号 item。
+        {
+            let st = s.scene.as_mut().unwrap().scroll.ensure(pane);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+
+        // slot[0] 是同一个 NodeId（slots vec 永缩、无移除），其 reuse_key 跨帧不变。
+        let key_after_scroll = {
+            let scene = s.scene.as_ref().unwrap();
+            let ls = scene.lists.get(ul).unwrap();
+            scene.get(ls.slots[0].node).unwrap().reuse_key
+        };
+        assert_eq!(
+            key_after_scroll, key_of_slot0,
+            "reuse_key permanent — never rotated across park/unpark/rebind"
+        );
+    }
+
+    /// 所有 slot 的 reuse_key 必须 >0（0 = MirrorPool"无 key"）且互不重复。
+    #[test]
+    fn reuse_key_pairwise_distinct_and_positive() {
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 100);
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..100 {
+                ls.heights.set(i, 20.0);
+            }
+            let st = scene.scroll.ensure(pane);
+            st.viewport_size = (1000.0, 200.0);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+
+        // 滚一次让一些 slot park/unpark，触发 rebind。
+        {
+            let st = s.scene.as_mut().unwrap().scroll.ensure(pane);
+            st.scroll_pos = (0.0, 500.0);
+        }
+        let ops2 = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops2);
+
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        assert!(!ls.slots.is_empty(), "at least one slot");
+        let mut keys = std::collections::HashSet::new();
+        for slot in &ls.slots {
+            let key = scene.get(slot.node).unwrap().reuse_key;
+            assert_ne!(key, 0, "each slot has a positive reuse_key");
+            assert!(
+                keys.insert(key),
+                "each slot has a distinct reuse_key; duplicate: {key}"
+            );
+        }
+    }
 }
