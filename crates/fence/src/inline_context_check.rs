@@ -57,6 +57,7 @@ fn parent_is_flex(
             && !comp.pseudo_active
             && !comp.pseudo_disabled
             && !comp.pseudo_focus
+            && comp.pseudo_nth_child.is_none() // 结构伪类同样条件化命中，不能当无条件静态 flex
             && comp.attrs.is_empty();
         if !tag_ok || !no_pseudo || comp.id.is_some() {
             continue;

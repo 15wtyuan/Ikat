@@ -11,13 +11,15 @@
 ```
         ┌──► M1 ListView ──┬──► M4 文本模型 ──┐
 M0 验收 ─┤                  │                  ├──► M6 showcase 收口 ──► M∞ 解耦项
-        ├──► M2 keyframes ──┼──► M5 视觉精简 ──┤
-        └──► M3 TabList ────┘                  │
-                                               └─（M1–M5 齐备后收口）
+        ├──► M2 keyframes ──┼──► M2.5 动画引擎终态 ──┤
+        │                  └──► M5 视觉精简 ──┤
+        └──► M3 TabList ──────────────────────┘
+                                               └─（M1–M5 + M2.5 齐备后收口）
 ```
 
 - **M1/M2/M3 互不依赖**，M0 后可并行或任选顺序（下方按推荐节奏排）。
-- **关键路径**（到可演示的最长链）= `M0 → M1 → M4 → M6`，约 6–8 周；M2/M3/M5 是侧支，喂进 M6。
+- **M2.5**（动画引擎终态）依赖 M2，阻塞 M6（视觉动效深度）。（NodeTransform 升级是 M2.5 的进入判据之一 #2，M5 仍自有 NodeTransform 退出判据，非被 M2.5 阻塞。）
+- **关键路径**（到可演示的最长链）= `M0 → M1 → M4 → M6`，约 6–8 周；M2/M3/M5/M2.5 是侧支，喂进 M6。
 - M∞ 与 runtime 解耦，另条命，不计入。
 
 ---
@@ -28,11 +30,12 @@ M0 验收 ─┤                  │                  ├──► M6 showcase 
 |----|------|------|------|------|------|
 | M0 | P3 家里机验收 + IME 接线 | — | M1/M2/M3 进入 | 几天 | ⏳ 编码端 DONE，验收 defer |
 | M1 | ListView 虚拟化 | M0 | M4, M6 | 2–3 周 | ❌ 未开 |
-| M2 | @keyframes runtime + transition | M0 | M5, M6 | 1–2 周 | ❌ fence DSL 就绪，runtime 未开 |
+| M2 | @keyframes runtime + transition | M0 | M2.5, M5, M6 | 1–2 周 | ⏳ 编码端 DONE，Unity 验收 defer |
 | M3 | TabList（P4）| M0 | M6 | ~1 周 | ⏳ 编码端 DONE，Unity 验收 defer |
 | M4 | 文本模型回归标准子树 | M1 | M6 | 2–3 周 | ❌ 未开 |
 | M5 | 视觉束（精简版）| M2（部分）| M6 | ~2 周 | ❌ 未开（scope 已砍）|
-| M6 | showcase 收口 + tech-debt 扫除 | M1–M5 | 可对外演示 | 1–2 周 | ❌ |
+| M2.5 | 动画引擎终态（池化/缓动全集/layout 动画）| M2 | M6 | 2–3 周 | ❌ 未开（触发判据见下）|
+| M6 | showcase 收口 + tech-debt 扫除 | M1–M5 + M2.5 | 可对外演示 | 1–2 周 | ❌ |
 | M∞ | Custom Element / 平台移植 / 编辑器闭环 | — | — | 不计入 | 按需 |
 
 ---
@@ -74,20 +77,45 @@ M0 验收 ─┤                  │                  ├──► M6 showcase 
 ## M2 · @keyframes runtime + transition（爽点 + 闭环 fence）
 
 > fence DSL 已就绪，只欠 runtime。home 入场动画 = 演示的那一秒，体感回报高，刻意从 roadmap 表"三束后"拉前。
+>
+> **状态：编码端 DONE（2026-08，15 tasks SDD）；Unity PlayMode 验收 defer 家里机**。spec `docs/superpowers/specs/2026-08-04-m2-keyframes-runtime-design.md`、plan `docs/superpowers/plans/2026-08-04-m2-keyframes-runtime.md`。§4 tech-debt「keyframes runtime」+「动画系统终态」条同步更新。动画引擎终态从「悬置」→ **M2.5 立项**（见下）。
 
 - **进入判据**：M0 绿。fence `@keyframes` at-rule + `animation` 简写 DSL 已完成（commit `e2e2812`）。
 - **退出判据**：
-  - [ ] **pkg**：`KeyframesTable` 进 pkg（v26 → v27 bump）+ bridge 序列化（当前 packer bridge 静默丢弃）。
-  - [ ] **core**：`ResolvedStyle.animation` 字段 + tween 发射（ease / iteration / fill-mode / delay）。
-  - [ ] **transition 真生效**（当前 `CssValueParser::Transition` 空壳，接受任意值不报错但不跑）。
-  - [ ] **动画句柄**：`Node.Play(name)` + `Animation` 类基础版（`IsPlaying` / `Time` / `Pause` / `Resume` / `Stop` / `OnStart` / `OnEnd` / `OnKey` / `OnHook`，当前全 `NE`）。
-  - [ ] **`:nth-child(N)` selector** + `animation-delay` 错峰（home 导航卡入场依赖）。
-  - [ ] **headless**：keyframes 定义的属性在 t=0 / 0.5 / 1s 取值正确（确定性断言）。
-  - [ ] **showcase**：home 入场动画真机绿。
+  - [x] **pkg**：`KeyframesTable` 进 pkg（v30 → v31 bump）+ bridge 序列化（v30 起含 keyframes 类型定义）。
+  - [x] **core**：`ResolvedStyle.animation` 字段 + `KeyframePlayer`（路线甲：独立 player 不翻译成 Tween 序列；ease / iteration / fill-mode / delay / direction / per-segment timing-function）。
+  - [x] **transition 真生效**（fence 解析存值 + core transition 引擎消费，共用 core `parse_transition`）。
+  - [x] **动画句柄 L3 全套**：`Node.Play(name)` + `Animation` 类（`IsPlaying` / `Time` / `Pause` / `Resume` / `Stop` / `OnStart` / `OnEnd` / `OnKey` / `OnHook`）+ 事件 START/END/ITERATION/KEY/HOOK + TransitionEnd 双路由。
+  - [x] **`:nth-child(An+B|odd|even|N)` selector** + `animation-delay` 错峰（home 导航卡入场依赖）。
+  - [x] **`@loom-hook` 锦点** + **opacity 父级累积传播**（顺手做掉）。
+  - [x] **headless**：keyframes 定义的属性在 t=0 / 0.5 / 1s 取值正确（确定性断言，core 集成测）。
+  - [ ] **showcase home**：入场动画真机绿（家里机验收窗口）。
 - **依赖**：M0。与 M1/M3 可并行。
-- **阻塞**：M5（视觉动效载体）、M6（home 活起来）。
+- **阻塞**：M2.5（引擎终态）、M5（视觉动效载体）、M6（home 活起来）。
 - **估时**：1–2 周。
-- **备注**：动画系统终态（池化 Tween + 28+ 缓动 + 链式 builder + prop_type 分层）可只做"够 keyframes 跑"的子集，终态推 M5 或更后。
+- **备注**：动画系统终态（池化 Tween + 缓动全集 + 链式 builder + layout 动画 prop_type 分层）做"够 keyframes 跑"的子集，终态推 **M2.5**（不再悬置）。
+
+---
+
+## M2.5 · 动画引擎终态（明确归宿，触发判据启动）
+
+> M2 交付功能完整但引擎内部用"够 keyframes 跑"的实现。以下归 M2.5，触发判据明确，不再悬置。
+
+- **进入判据**（任一满足即启动）：
+  1. 第一个需要 layout 动画的 showcase 页出现（如 character 技能面板 accordion 展开 / 用 width 而非 scaleX 的进度条）。
+  2. M5 视觉束的 `NodeTransform` 替代 Affine2 升级时合并做（都动 render 数据结构，合做省一次 pkg bump）。
+  3. 动画实例并发量使单 Vec TweenManager 出现性能抖动（profiling 实证）。
+- **退出判据**：
+  - [ ] **池化 Tween**：`TweenManager { active, pool }` 替换单 Vec。
+  - [ ] **缓动全集**：cubic-bezier / Elastic / Bounce / Custom + per-stop timing-function（结构化 `EasingFunction`）。
+  - [ ] **链式 builder API**：`.tween().delay().ease().repeat(,yoyo).on_complete()`，替换位置参数 `tween()`。
+  - [ ] **layout 动画 / prop_type 分层**：动 width/height/flex，tick 时序重构 + `layout_dirty` + solve 重入。
+  - [ ] **player 与 Tween 插值原语统一**：共享 `TweenValue{x,y,z,w,d}` + value_size(1..6)。
+  - [ ] **`animation` 长划子属性**：8 个标准 CSS 长划属性（`animation-name`/`-duration`/`-delay`/`-iteration-count`/`-direction`/`-fill-mode`/`-play-state`/`-timing-function`）。
+- **依赖**：M2。
+- **阻塞**：M6（视觉动效深度）。（NodeTransform 升级是进入判据 #2 的 trigger——M5 触发 M2.5 合做，非 M2.5 阻塞 M5；M5 自有 NodeTransform 退出判据。）
+- **估时**：2–3 周。
+- **备注**：不是"动画能用"（M2 已交付），是"引擎内部终态"——无硬阻塞 showcase 页面，按需启动。详细范围见 main-design §13.2 M2.5 标记 + §13.6。
 
 ---
 
@@ -148,7 +176,7 @@ M0 验收 ─┤                  │                  ├──► M6 showcase 
   - radial / conic（要新 shader，编码机验不了）
   - 多层 background（99% 单层够，ROI 低）
   - 高级 filter / BlendMode 12 种
-  - 动画系统终态（池化 + 28+ 缓动 + 链式 builder）
+  - 动画引擎终态（池化 + 缓动全集 + 链式 builder + layout 动画）→ **已独立立项 M2.5**（见上），不再压在 M5
 - **依赖**：M2（部分）。
 - **阻塞**：M6（home/shop 好看）。
 - **估时**：~2 周。
@@ -159,13 +187,13 @@ M0 验收 ─┤                  │                  ├──► M6 showcase 
 
 > 到这步所有能力齐备，把页面逐个捅绿 + 把零散债清掉。
 
-- **进入判据**：M1–M5 绿。
+- **进入判据**：M1–M5 + M2.5 绿（M2.5 按需启动，不硬阻塞 M6）。
 - **退出判据**：
   - [ ] **代表页真机全绿**（建议 4–5 页够证明能力，不必死磕 8 页）：home + settings + mail + inventory（+ shop 视精力）。每页布局与浏览器 rect 比对一致（护城河判据）。
   - [ ] **零散 `NE` 清零或显式 defer**：`StyleSheet.Add/Clear`、`Container.ScrollTo`、`Image.Src`、`Node.Play`、`SetVar/RemoveVar`、`ZIndex/Visibility/Touchable/Focusable`、`OnUpdate`、source-less 事件（`ScrollChanged`/`AnimationStart|Iteration`）。
   - [ ] **tech-debt 归零或显式 defer**：`Scene::build` dead `data_controller` 参数、add_class null check、GUI exe 拷贝流程、loom.runtime.json stomping。
   - [ ] **门全绿**：`cargo fmt --check` + `cargo clippy -D warnings` + `cargo test`（全 workspace）+ PublicApi 编译门。
-- **依赖**：M1–M5。
+- **依赖**：M1–M5（+ M2.5 若已启动）。
 - **阻塞**：可对外演示终态。
 - **估时**：1–2 周。
 
@@ -192,6 +220,7 @@ M0 验收 ─┤                  │                  ├──► M6 showcase 
 | W7 | M3 TabList | settings 解锁 |
 | W8–10 | M4 文本模型 | form/mail 富文本 |
 | W11–12 | M5 视觉精简 | 好看够用 |
+| 按需 | M2.5 动画引擎终态 | 触发判据满足时启动（不阻塞可演示）|
 | W13 | M6 收口 | 可演示 |
 
 - 上面是"精简路径"约 3 个月到可演示。**再省**：M4 砍到只做 block 文本不做 inline 富链接、M5 砍到只 grayed + linear，可压到 ~2 个月。

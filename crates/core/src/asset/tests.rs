@@ -52,7 +52,7 @@ fn write_package_panics_when_string_table_exhausted() {
     }
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", nodes.as_slice(), &rules)],
+        components: vec![("c", nodes.as_slice(), &rules, &[])],
     };
     let _ = write_package(&input);
 }
@@ -70,8 +70,8 @@ fn write_read_multi_component_roundtrip() {
     let rules = empty_rules();
     let input = PackageInput {
         components: vec![
-            ("comp1", comp1_nodes.as_slice(), &rules),
-            ("comp2", comp2_nodes.as_slice(), &rules),
+            ("comp1", comp1_nodes.as_slice(), &rules, &[]),
+            ("comp2", comp2_nodes.as_slice(), &rules, &[]),
         ],
     };
     let bytes = write_package(&input);
@@ -119,7 +119,7 @@ fn read_rejects_too_new_version() {
     let nodes = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let mut bytes = write_package(&input);
     bytes[4..8].copy_from_slice(&(MAX_VERSION + 1).to_le_bytes());
@@ -132,7 +132,7 @@ fn header_is_20_bytes_no_root_size() {
     let nodes = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let bytes = write_package(&input);
     let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
@@ -163,7 +163,7 @@ fn multi_component_parent_idx_is_component_local() {
     let comp_b = [root_b, child_b];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("a", &comp_a, &rules), ("b", &comp_b, &rules)],
+        components: vec![("a", &comp_a, &rules, &[]), ("b", &comp_b, &rules, &[])],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     assert_eq!(pkg.components["a"].nodes[1].parent_idx, Some(0));
@@ -183,7 +183,7 @@ fn all_node_kinds_roundtrip() {
     let nodes = [tn(NodeKind::Container), tn(NodeKind::Button), img, txt];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     let ns = &pkg.components["c"].nodes;
@@ -206,7 +206,7 @@ fn classes_id_attr_draggable_tabindex_roundtrip() {
     let nodes = [root, btn];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     let ns = &pkg.components["c"].nodes;
@@ -228,7 +228,7 @@ fn style_blob_roundtrips_baked_resolved_style() {
     let nodes = [n];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let pkg = read_package(&write_package(&input)).unwrap();
     let n2 = &pkg.components["c"].nodes[0];
@@ -248,7 +248,10 @@ fn stringtable_dedups_across_components() {
     let c2_nodes = [n2];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c1", &c1_nodes, &rules), ("c2", &c2_nodes, &rules)],
+        components: vec![
+            ("c1", &c1_nodes, &rules, &[]),
+            ("c2", &c2_nodes, &rules, &[]),
+        ],
     };
     let bytes = write_package(&input);
     let sc = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
@@ -301,7 +304,7 @@ fn two_comp_pkg_bytes() -> Vec<u8> {
     let comp_b = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("a", &comp_a, &rules), ("b", &comp_b, &rules)],
+        components: vec![("a", &comp_a, &rules, &[]), ("b", &comp_b, &rules, &[])],
     };
     write_package(&input)
 }
@@ -398,7 +401,7 @@ fn read_rejects_unknown_kind_tag() {
     let nodes = [tn(NodeKind::Container)];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let bytes = write_package(&input);
 
@@ -448,7 +451,7 @@ fn write_rejects_non_root_nodes_zero() {
     let nodes = [root];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let _ = write_package(&input);
 }
@@ -477,7 +480,7 @@ fn template_node_content_src_roundtrip_via_pkg() {
     let nodes = [text, img];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let buf = write_package(&input);
     let pkg = read_package(&buf).unwrap();
@@ -537,7 +540,7 @@ fn v18_nontrivial_nodekinds_roundtrip() {
         };
         let empty_rules = DynamicRuleTable { rules: vec![] };
         let input = PackageInput {
-            components: vec![("c", std::slice::from_ref(&one), &empty_rules)],
+            components: vec![("c", std::slice::from_ref(&one), &empty_rules, &[])],
         };
         let bytes = write_package(&input);
         let pkg = read_package(&bytes).unwrap();
@@ -578,7 +581,7 @@ fn pkg_v24_control_init_roundtrip_via_pkg() {
     let nodes = [node];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
     let back = &pkg.components["c"].nodes[0];
@@ -691,7 +694,7 @@ fn pkg_v26_dropdown_init_via_pkg() {
     let nodes = [node];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
     let back = &pkg.components["c"].nodes[0];
@@ -719,7 +722,7 @@ fn pkg_v26_number_field_init_via_pkg() {
     let nodes = [node];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
     let back = &pkg.components["c"].nodes[0];
@@ -762,8 +765,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 29,
-        "pkg format version must be 29 after aria_controls bump"
+        PKG_FORMAT_VERSION, 31,
+        "pkg format version must be 31 after nth-child bump (v29 aria_controls feature persists)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -772,7 +775,7 @@ fn pkg_v29_roundtrip_with_aria_controls() {
     let nodes = [node];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
     let back = &pkg.components["c"].nodes[0];
@@ -788,7 +791,7 @@ fn pkg_v29_roundtrip_without_strings_defaults_none() {
     let nodes = [node];
     let rules = empty_rules();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
     let back = &pkg.components["c"].nodes[0];
@@ -815,5 +818,107 @@ fn pkg_v29_rejects_v28() {
     assert!(
         matches!(err, Err(PkgError::TooOld(28))),
         "v28 pkg must be rejected as TooOld after v29 bump, got {err:?}"
+    );
+}
+
+// ── v30: keyframes 表 + animation 声明（@keyframes runtime 地基）───────────────
+
+/// v30: keyframes 表（含 hook）+ animation 声明经完整 pkg.bin 路径（write_package →
+/// read_package）往返保真。keyframes 是手动编码段（rule.name / stop.hook 走 StringTable
+/// intern），animation 走 ResolvedStyle bincode blob——两条路径都须保真。
+#[test]
+fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
+    assert_eq!(
+        PKG_FORMAT_VERSION, 31,
+        "pkg format version must be 31 after nth-child bump"
+    );
+    use crate::scene::animation::{
+        AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
+    };
+    use crate::style::resolved::{
+        AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
+    };
+    // 节点带 animation 声明（fill_mode=Both + iteration_count=None + Step easing）
+    let mut node = tn(NodeKind::Container);
+    node.style.animation = vec![AnimationSpec {
+        name: "fadeIn".into(),
+        duration: 0.5,
+        delay: 0.1,
+        iteration_count: None,
+        direction: AnimationDirection::AlternateReverse,
+        fill_mode: AnimationFillMode::Both,
+        timing_function: crate::tween::Ease::Step { start: true },
+        play_state: AnimationPlayState::Running,
+    }];
+    // 组件 keyframes 表：From → 50%（含 transform + bg_color + hook）→ To
+    let kf = [KeyframesRule {
+        name: "fadeIn".into(),
+        stops: vec![
+            KeyframeStop {
+                selector: KeyframeStopSelector::From,
+                props: AnimatableProps {
+                    opacity: Some(0.0),
+                    ..Default::default()
+                },
+                hook: None,
+            },
+            KeyframeStop {
+                selector: KeyframeStopSelector::Percent(50),
+                props: AnimatableProps {
+                    transform: Some(TransformAnim {
+                        translate: Some([10.0, 20.0]),
+                        scale: None,
+                        rotate: Some(0.5),
+                    }),
+                    bg_color: Some([1.0, 0.0, 0.0, 1.0]),
+                    ..Default::default()
+                },
+                hook: Some("done".into()),
+            },
+            KeyframeStop {
+                selector: KeyframeStopSelector::To,
+                props: AnimatableProps {
+                    opacity: Some(1.0),
+                    text_color: Some([0.0, 1.0, 0.0, 1.0]),
+                    ..Default::default()
+                },
+                hook: None,
+            },
+        ],
+    }];
+    let nodes = [node];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &kf)],
+    };
+    let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
+    let ct = &pkg.components["c"];
+    // brief 断言：stops[1].hook == Some("done") + animation[0].fill_mode == Both + iteration_count == None
+    assert_eq!(ct.keyframes[0].stops[1].hook.as_deref(), Some("done"));
+    assert_eq!(
+        ct.nodes[0].style.animation[0].fill_mode,
+        AnimationFillMode::Both
+    );
+    assert_eq!(ct.nodes[0].style.animation[0].iteration_count, None);
+    // 全字段保真（KeyframesRule 整体 + AnimationSpec 整体）
+    assert_eq!(ct.keyframes[0], kf[0], "keyframes rule full roundtrip");
+    assert_eq!(
+        ct.nodes[0].style.animation[0], nodes[0].style.animation[0],
+        "animation spec full roundtrip"
+    );
+}
+
+/// v31: version=30 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=31，无迁移器）。
+/// Compound 加 pseudo_nth_child 字段改变 dynamic_rules bincode blob 布局，旧 v30 fixture
+/// 不能半读半坏。
+#[test]
+fn pkg_v31_rejects_v30() {
+    let mut bad = vec![];
+    bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
+    bad.extend_from_slice(&30u32.to_le_bytes()); // v30 < MIN_VERSION=31
+    let err = read_package(&bad);
+    assert!(
+        matches!(err, Err(PkgError::TooOld(30))),
+        "v30 pkg must be rejected as TooOld after v31 bump, got {err:?}"
     );
 }

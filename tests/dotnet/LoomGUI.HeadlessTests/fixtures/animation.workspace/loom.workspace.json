@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output_dir": "../animation-ws-out",
+  "packages": [
+    {
+      "name": "animation",
+      "dirs": ["."],
+      "html": ["animation.html"]
+    }
+  ],
+  "atlases": [],
+  "fonts": []
+}

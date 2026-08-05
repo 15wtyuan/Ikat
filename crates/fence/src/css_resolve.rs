@@ -1,6 +1,9 @@
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::ir::{IrNodeKind, IrTree};
-use crate::schema::css::{find_css_prop, find_shorthand, validate_animation_value, CssValueParser};
+use crate::schema::css::{
+    find_css_prop, find_shorthand, parse_animation_value, parse_transition_value,
+    validate_animation_value, CssValueParser,
+};
 use crate::schema::tag::{find_tag, DisplayDefault, SemanticKind};
 use loomgui_core::style::mapping::apply_decl;
 use loomgui_core::style::resolved::{DisplayMode, ResolvedStyle, TextAlign};
@@ -146,8 +149,11 @@ pub fn resolve_inline_styles_with_diags(
                             }
                         }
                         CssValueParser::Animation => {
-                            // animation 简写语法校验（捕捉拼写错误）。runtime 驱动留 §4 视觉束，
-                            // 本轮不存值——apply_decl 不识别 "animation"，跳过避免误报 FenceBadCssValue。
+                            // animation 简写：先校验（捕捉拼写错误），合法则解析存值
+                            // （M2 runtime KeyframePlayer 消费 base_style.animation）。
+                            // 不调 apply_decl：fence 要先跑 validate 门（apply_decl 宽松解析无诊断），
+                            // 解析本身委托 core `parse_animation`（与运行时 rematch 的 apply_decl
+                            // "animation" arm 同一真相源，防 §8.2/§8.3 漂移）。
                             if !validate_animation_value(value) {
                                 diagnostics.push(Diagnostic::error(
                                     DiagnosticCode::FenceBadCssValue,
@@ -157,8 +163,17 @@ pub fn resolve_inline_styles_with_diags(
                                     ),
                                     line_map.source_location(node.span.start, file.to_string()),
                                 ));
+                            } else {
+                                styles[idx].animation = parse_animation_value(value);
                             }
-                            continue; // 校验过即可，不调 apply_decl（runtime 不存 animation）
+                            continue;
+                        }
+                        CssValueParser::Transition => {
+                            // transition 简写解析存值（core transition 引擎读 base_style.transition）。
+                            // 零校验宽松语义（parse 忽略未知 token，保持现状 transition 值不报错）；
+                            // 不走 apply_decl——fence 解析器是打包期真相源（§8.3 ease 对齐表）。
+                            styles[idx].transition = parse_transition_value(value);
+                            continue;
                         }
                         _ => {}
                     }

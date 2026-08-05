@@ -97,6 +97,8 @@ pub const EVT_KEY_UP: u8 = 13;
 pub const EVT_FOCUS_IN: u8 = 14;
 pub const EVT_FOCUS_OUT: u8 = 15;
 pub const EVT_TWEEN_COMPLETE: u8 = 16;
+// 动画事件（18/19/20 + 27/28）定义在 event.rs（EVT_ANIMATION_*，payload 走事件字符串表）
+// ——与输入事件共用 EventRecord，字段复用模式一致（见 event.rs 模块文档）。
 
 // 控件交互事件（22+）。payload 复用 EventRecord 现有字段（不扩 struct，ABI 安全）：
 // - VALUE_CHANGED：x 装新 float 值（Slider 拖拽中逐值）。

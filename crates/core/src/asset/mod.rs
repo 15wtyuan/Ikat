@@ -1,4 +1,6 @@
-//! 包格式（.pkg.bin，当前 version=29）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=31）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! v31：Compound 加 pseudo_nth_child 字段（:nth-child selector，bincode 布局变）。
+//! v30：ComponentTemplate 加 keyframes 表（@keyframes runtime 地基）+ ResolvedStyle 加 animation。
 //! v29：TemplateNode 加 aria_controls 列（TabList tab→panel 跨树关联的 panel id）。
 //! v28：TemplateNode 加 role/data-slot 列（role-driven controls 地基）。
 //! v27：<template> 子树进 pkg（NodeKind::Template 新增，旧 v26 pkg 加载报 TooOld）。
@@ -7,25 +9,33 @@
 //! v24：TemplateNode 加 control_init 字段（bincode 布局变，旧 v23 pkg 加载报 TooOld）。
 //!
 //! 多组件格式：一个 pkg.bin = 多个具名组件（ComponentTable 切分）。
-//! 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponent(DynamicRules)。
+//! 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponent(DynamicRules)
+//!   + PerComponent(Keyframes)。
 //!   - Header 不含 root_w/root_h（root_size 归 Stage）+ 不含 atlas 引用（图集归 Unity）。
-//!   - StringTable：组件名 / text content / img path / classes / id_attr 共用一张表（intern 去重）。
+//!   - StringTable：组件名 / text content / img path / classes / id_attr / keyframes 名 /
+//!     hook 名共用一张表（intern 去重）。
 //!   - ComponentTable：每组件 {name_idx, root_node_idx, node_count, dynamic_rules_blob_len}。
 //!   - NodeBlock：所有组件节点平铺，parent_idx 用 -1 表组件根（全局位置索引）。
 //!   - PerComponentDynamicRules：每组件 dynamic_rules 的 bincode blob（紧跟 ComponentTable 段）。
-//! style 字段 = bincode(ResolvedStyle，已 bake)。img src 指向归一化 path 字符串（非 atlas sprite）。
+//!   - PerComponentKeyframes：每组件 keyframes 手动编码 blob（紧跟 DynamicRules 段，
+//!     每 blob 前有 u32 长度；rule.name / stop.hook 走 StringTable intern）。
+//! style 字段 = bincode(ResolvedStyle，已 bake，含 animation 声明)。img src 指向归一化 path
+//! 字符串（非 atlas sprite）。
 //!
 //! 核心不知图集（运行时纹理/UV 归 Unity）。图尺寸由 Stage.set_image_sizes 在运行时灌入
 //! （来自 atlas.json），不再进 pkg.bin。
 
+use crate::scene::animation::{
+    AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
+};
 use crate::scene::NodeKind;
 use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 29; // v29: TemplateNode.aria_controls (TabList panel linkage)
-pub(crate) const MIN_VERSION: u32 = 29;
-pub(crate) const MAX_VERSION: u32 = 29;
+pub const PKG_FORMAT_VERSION: u32 = 31; // v31: Compound.pseudo_nth_child (:nth-child selector)
+pub(crate) const MIN_VERSION: u32 = 31;
+pub(crate) const MAX_VERSION: u32 = 31;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────
@@ -43,6 +53,9 @@ pub struct ComponentTemplate {
     pub name: String,
     pub nodes: Vec<TemplateNode>,
     pub dynamic_rules: DynamicRuleTable,
+    /// @keyframes 规则表（打包期从组件 `<style>` 提取，spec §3.5）。instantiate 时合并进
+    /// Scene.keyframes 全局表（CSS 全局查找语义）。
+    pub keyframes: Vec<KeyframesRule>,
 }
 
 /// 文本控件初始值（TextField/TextArea 共用，从 HTML value/placeholder 属性 bake）。
@@ -124,8 +137,14 @@ pub struct TemplateNode {
 }
 
 /// write_package 的输入（打包器构造，已归一化：path 已相对、style 已 bake）。
+/// 每组件 4 元组：(name, nodes, dynamic_rules, keyframes)。
 pub struct PackageInput<'a> {
-    pub components: Vec<(&'a str, &'a [TemplateNode], &'a DynamicRuleTable)>,
+    pub components: Vec<(
+        &'a str,
+        &'a [TemplateNode],
+        &'a DynamicRuleTable,
+        &'a [KeyframesRule],
+    )>,
 }
 
 #[derive(Debug)]
@@ -137,6 +156,7 @@ pub enum PkgError {
     OobString(u16),
     Bincode(bincode::Error),
     BadKind(u8),
+    BadKeyframeSelector(u8),
     DupComponent(String),
 }
 
@@ -154,6 +174,9 @@ impl std::fmt::Display for PkgError {
             PkgError::OobString(i) => write!(f, "string index {i} out of range"),
             PkgError::Bincode(e) => write!(f, "style bincode: {e}"),
             PkgError::BadKind(k) => write!(f, "bad node kind tag {k}"),
+            PkgError::BadKeyframeSelector(t) => {
+                write!(f, "bad keyframe stop selector tag {t}")
+            }
             PkgError::DupComponent(n) => {
                 write!(f, "duplicate component name in package: {n}")
             }
@@ -181,9 +204,10 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     let mut idx_of: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
 
     let component_count = input.components.len();
-    // 每组件：(name_idx, root_node_idx, node_count, dynamic_blob)
+    // 每组件：(name_idx, root_node_idx, node_count, dynamic_blob, keyframes_blob)
     // 全局 NodeBlock 由各组件节点顺次拼接，root_node_idx = 该组件首节点在全局的位置。
-    let mut comp_records: Vec<(u16, u32, u32, Vec<u8>)> = Vec::with_capacity(component_count);
+    let mut comp_records: Vec<(u16, u32, u32, Vec<u8>, Vec<u8>)> =
+        Vec::with_capacity(component_count);
     // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, control_init_blob, role_idx, data_slot_idx, aria_controls_idx)
     let mut node_records: Vec<(
         i32,
@@ -201,7 +225,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         u16,
     )> = Vec::new();
     let mut global_node_offset: u32 = 0;
-    for (name, nodes, dynamic_rules) in &input.components {
+    for (name, nodes, dynamic_rules, keyframes) in &input.components {
         let name_idx = intern(name, &mut strings, &mut idx_of);
         let comp_base = global_node_offset;
         // spec 约定 nodes[0]=组件根（parent=None)。debug_assert：write 输入由打包器控制，
@@ -291,7 +315,16 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         let node_count = nodes.len() as u32;
         let dynamic_blob =
             bincode::serialize(dynamic_rules).expect("DynamicRuleTable serializable");
-        comp_records.push((name_idx, comp_base, node_count, dynamic_blob));
+        // keyframes blob：手动编码（rule.name / stop.hook 走 StringTable intern，同
+        // role/data_slot 模式；其余字段定长 LE 直写）。interning 必须在 header 写前完成。
+        let keyframes_blob = encode_keyframes(keyframes, &mut strings, &mut idx_of);
+        comp_records.push((
+            name_idx,
+            comp_base,
+            node_count,
+            dynamic_blob,
+            keyframes_blob,
+        ));
         global_node_offset += node_count;
     }
 
@@ -309,7 +342,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         out.extend_from_slice(bytes);
     }
     // ComponentTable: 每组件 {name_idx(u16), root_node_idx(u32), node_count(u32), dynamic_rules_blob_len(u32)}
-    for (name_idx, root_node_idx, node_count, dynamic_blob) in &comp_records {
+    for (name_idx, root_node_idx, node_count, dynamic_blob, _) in &comp_records {
         out.extend_from_slice(&name_idx.to_le_bytes());
         out.extend_from_slice(&root_node_idx.to_le_bytes());
         out.extend_from_slice(&node_count.to_le_bytes());
@@ -354,8 +387,14 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         out.extend_from_slice(&aria_controls_idx.to_le_bytes());
     }
     // PerComponentDynamicRules：每组件 dynamic_blob（同 ComponentTable 顺序）。read 按同序逐组件读。
-    for (_, _, _, dynamic_blob) in &comp_records {
+    for (_, _, _, dynamic_blob, _) in &comp_records {
         out.extend_from_slice(dynamic_blob);
+    }
+    // PerComponentKeyframes：每组件 keyframes blob（u32 len + blob，同 ComponentTable 顺序）。
+    // 紧随 DynamicRules 段（ComponentTable 记录不含此长度，保持记录尺寸 14B 不变）。
+    for (_, _, _, _, keyframes_blob) in &comp_records {
+        out.extend_from_slice(&(keyframes_blob.len() as u32).to_le_bytes());
+        out.extend_from_slice(keyframes_blob);
     }
     out
 }
@@ -523,8 +562,21 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
                 name,
                 nodes,
                 dynamic_rules,
+                keyframes: Vec::new(), // PerComponentKeyframes 段在下方第二遍读回后填
             },
         );
+    }
+    // PerComponentKeyframes: 每组件 keyframes blob（u32 len + blob，同 ComponentTable 序）。
+    // 流位置在所有 dynamic blob 之后（write 时紧随 DynamicRules 段），故组件循环后单独读。
+    for (name_idx, _, _, _) in &comp_table {
+        let name = string_at(&strings, *name_idx)?;
+        let kf_len = r.u32("comp_keyframes_len")? as usize;
+        let kf_bytes = r.take(kf_len, "comp_keyframes_blob")?;
+        let keyframes = decode_keyframes(kf_bytes, &strings)?;
+        // 组件已在上方循环插入（同名唯一性已由 DupComponent 保证）；if-let 防御不可达态。
+        if let Some(ct) = components.get_mut(&name) {
+            ct.keyframes = keyframes;
+        }
     }
     Ok(Package {
         name: String::new(),
@@ -556,7 +608,7 @@ fn intern(
     if strings.len() >= NULL_IDX as usize {
         panic!(
             "string table overflow: StringTable holds {} distinct strings (u16 index, \
-             NULL_IDX=0xFFFF reserved); component/text/src/class/id/manifest share this table",
+             NULL_IDX=0xFFFF reserved); component/text/src/class/id/manifest/keyframes share this table",
             strings.len()
         );
     }
@@ -564,6 +616,186 @@ fn intern(
     strings.push(s.to_string());
     idx_of.insert(s.to_string(), i);
     i
+}
+
+/// 手动编码组件 keyframes 表（v30 pkg 格式，spec §4.2）。
+/// 布局：u16 rule_count + 逐 rule { u16 name_idx, u16 stop_count, 逐 stop }。
+/// stop 布局：selector_tag(u8: 0=From/1=To/2=Percent) [+pct(u8)] + 4 个可动画字段
+/// （每字段 flag(u8)+载荷；transform 内部 TRS 三分量各自 flag）+ hook_idx(u16)。
+/// rule.name / stop.hook 走 StringTable intern（同 role/data_slot 模式，NULL_IDX 表 None）。
+fn encode_keyframes(
+    keyframes: &[KeyframesRule],
+    strings: &mut Vec<String>,
+    idx_of: &mut std::collections::HashMap<String, u16>,
+) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
+    out.extend_from_slice(&(keyframes.len() as u16).to_le_bytes());
+    for rule in keyframes {
+        let name_idx = intern(&rule.name, strings, idx_of);
+        out.extend_from_slice(&name_idx.to_le_bytes());
+        out.extend_from_slice(&(rule.stops.len() as u16).to_le_bytes());
+        for stop in &rule.stops {
+            // KeyframeStopSelector 带数据变体，与 #[repr(u8)] 不兼容 → 手动 match 判别值。
+            match stop.selector {
+                KeyframeStopSelector::From => out.push(0),
+                KeyframeStopSelector::To => out.push(1),
+                KeyframeStopSelector::Percent(pct) => {
+                    out.push(2);
+                    out.push(pct);
+                }
+            }
+            // 每个可动画字段：flag(u8) + 载荷（flag=0 即 None，无载荷）。
+            match stop.props.opacity {
+                Some(v) => {
+                    out.push(1);
+                    out.extend_from_slice(&v.to_le_bytes());
+                }
+                None => out.push(0),
+            }
+            match stop.props.transform {
+                Some(t) => {
+                    out.push(1);
+                    match t.translate {
+                        Some([x, y]) => {
+                            out.push(1);
+                            out.extend_from_slice(&x.to_le_bytes());
+                            out.extend_from_slice(&y.to_le_bytes());
+                        }
+                        None => out.push(0),
+                    }
+                    match t.scale {
+                        Some([x, y]) => {
+                            out.push(1);
+                            out.extend_from_slice(&x.to_le_bytes());
+                            out.extend_from_slice(&y.to_le_bytes());
+                        }
+                        None => out.push(0),
+                    }
+                    match t.rotate {
+                        Some(r) => {
+                            out.push(1);
+                            out.extend_from_slice(&r.to_le_bytes());
+                        }
+                        None => out.push(0),
+                    }
+                }
+                None => out.push(0),
+            }
+            match stop.props.bg_color {
+                Some(c) => {
+                    out.push(1);
+                    for v in c {
+                        out.extend_from_slice(&v.to_le_bytes());
+                    }
+                }
+                None => out.push(0),
+            }
+            match stop.props.text_color {
+                Some(c) => {
+                    out.push(1);
+                    for v in c {
+                        out.extend_from_slice(&v.to_le_bytes());
+                    }
+                }
+                None => out.push(0),
+            }
+            let hook_idx = stop
+                .hook
+                .as_ref()
+                .map(|h| intern(h, strings, idx_of))
+                .unwrap_or(NULL_IDX);
+            out.extend_from_slice(&hook_idx.to_le_bytes());
+        }
+    }
+    out
+}
+
+/// 手动解码组件 keyframes blob（encode_keyframes 的逆）。name/hook 索引经 StringTable 解析。
+fn decode_keyframes(bytes: &[u8], strings: &[String]) -> Result<Vec<KeyframesRule>, PkgError> {
+    let mut r = Reader::new(bytes);
+    let rule_count = r.u16("kf_rule_count")? as usize;
+    let mut rules: Vec<KeyframesRule> = Vec::with_capacity(rule_count);
+    for _ in 0..rule_count {
+        let name = string_at(strings, r.u16("kf_name_idx")?)?;
+        let stop_count = r.u16("kf_stop_count")? as usize;
+        let mut stops: Vec<KeyframeStop> = Vec::with_capacity(stop_count);
+        for _ in 0..stop_count {
+            let selector = match r.u8("kf_selector_tag")? {
+                0 => KeyframeStopSelector::From,
+                1 => KeyframeStopSelector::To,
+                2 => KeyframeStopSelector::Percent(r.u8("kf_selector_pct")?),
+                t => return Err(PkgError::BadKeyframeSelector(t)),
+            };
+            // 每个可动画字段：flag(u8) + 载荷（flag=0 即 None）。
+            let opacity = if r.u8("kf_opacity_flag")? != 0 {
+                Some(r.f32("kf_opacity")?)
+            } else {
+                None
+            };
+            let transform = if r.u8("kf_transform_flag")? != 0 {
+                let translate = if r.u8("kf_translate_flag")? != 0 {
+                    Some([r.f32("kf_translate_x")?, r.f32("kf_translate_y")?])
+                } else {
+                    None
+                };
+                let scale = if r.u8("kf_scale_flag")? != 0 {
+                    Some([r.f32("kf_scale_x")?, r.f32("kf_scale_y")?])
+                } else {
+                    None
+                };
+                let rotate = if r.u8("kf_rotate_flag")? != 0 {
+                    Some(r.f32("kf_rotate")?)
+                } else {
+                    None
+                };
+                Some(TransformAnim {
+                    translate,
+                    scale,
+                    rotate,
+                })
+            } else {
+                None
+            };
+            let bg_color = if r.u8("kf_bg_color_flag")? != 0 {
+                Some([
+                    r.f32("kf_bg_color_0")?,
+                    r.f32("kf_bg_color_1")?,
+                    r.f32("kf_bg_color_2")?,
+                    r.f32("kf_bg_color_3")?,
+                ])
+            } else {
+                None
+            };
+            let text_color = if r.u8("kf_text_color_flag")? != 0 {
+                Some([
+                    r.f32("kf_text_color_0")?,
+                    r.f32("kf_text_color_1")?,
+                    r.f32("kf_text_color_2")?,
+                    r.f32("kf_text_color_3")?,
+                ])
+            } else {
+                None
+            };
+            let hook_idx = r.u16("kf_hook_idx")?;
+            let hook = if hook_idx == NULL_IDX {
+                None
+            } else {
+                Some(string_at(strings, hook_idx)?)
+            };
+            stops.push(KeyframeStop {
+                selector,
+                props: AnimatableProps {
+                    opacity,
+                    transform,
+                    bg_color,
+                    text_color,
+                },
+                hook,
+            });
+        }
+        rules.push(KeyframesRule { name, stops });
+    }
+    Ok(rules)
 }
 
 /// 极简游标 reader：定长小端读取 + 截断保护。
@@ -594,6 +826,9 @@ impl<'a> Reader<'a> {
     }
     fn i32(&mut self, ctx: &'static str) -> Result<i32, PkgError> {
         Ok(i32::from_le_bytes(self.need(4, ctx)?.try_into().unwrap()))
+    }
+    fn f32(&mut self, ctx: &'static str) -> Result<f32, PkgError> {
+        Ok(f32::from_le_bytes(self.need(4, ctx)?.try_into().unwrap()))
     }
     fn take(&mut self, n: usize, ctx: &'static str) -> Result<&'a [u8], PkgError> {
         self.need(n, ctx)

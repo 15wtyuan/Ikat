@@ -1792,6 +1792,7 @@ dependencies = [
  "bincode",
  "bitflags 2.13.0",
  "etagere",
+ "loomgui_pkg",
  "serde",
  "serde_json",
  "slotmap",

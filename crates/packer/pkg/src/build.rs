@@ -8,10 +8,11 @@ use serde::Serialize;
 
 use crate::atlas::collect::collect_pngs;
 use crate::atlas::pack::pack_atlas;
-use crate::bridge::bridge;
+use crate::bridge::{bridge, translate_keyframes};
 use crate::runtime::{RuntimeFont, RuntimeManifest, RUNTIME_FILE};
 use crate::workspace::{load_workspace, PackageCfg};
 use loomgui_core::asset::{write_package, PackageInput, TemplateNode};
+use loomgui_core::scene::KeyframesRule;
 use loomgui_core::style::dynamic::DynamicRuleTable;
 use std::path::Path;
 
@@ -106,7 +107,12 @@ pub struct PackResult {
 /// fence Error 级 diagnostic → Err（不静默降级；Warning 级不阻断打包，收集进返回值
 /// `warnings` 供 CLI/GUI 呈现）。bridge 多根 → Err（不静默产森林）。
 pub fn pack_components(components: &[Component]) -> Result<PackResult, String> {
-    let mut built: Vec<(String, Vec<TemplateNode>, DynamicRuleTable)> = Vec::new();
+    let mut built: Vec<(
+        String,
+        Vec<TemplateNode>,
+        DynamicRuleTable,
+        Vec<KeyframesRule>,
+    )> = Vec::new();
     let mut refs: Vec<String> = Vec::new();
     let mut warnings: Vec<PackWarning> = Vec::new();
     for comp in components {
@@ -172,6 +178,7 @@ pub fn pack_components(components: &[Component]) -> Result<PackResult, String> {
             DynamicRuleTable {
                 rules: parsed.dynamic_rules,
             },
+            translate_keyframes(&parsed.keyframes),
         ));
         // img src 相对 HTML 文件；归一化为 sprite_key（相对 workspace_root，正斜杠），
         // 否则与 atlas collect 的 sprite_key 前缀不匹配 → 交叉验证挂。
@@ -182,14 +189,14 @@ pub fn pack_components(components: &[Component]) -> Result<PackResult, String> {
     // 同名组件：write_package 不查（返回 Vec<u8> 无 Result），read_package 运行时才
     // DupComponent 拒绝——产物是静默坏包。构建期 fail fast，给最早反馈。
     let mut seen = std::collections::HashSet::new();
-    for (name, _, _) in &built {
+    for (name, _, _, _) in &built {
         if !seen.insert(name.as_str()) {
             return Err(format!("duplicate component name `{name}` in package"));
         }
     }
-    let comp_refs: Vec<(&str, &[TemplateNode], &DynamicRuleTable)> = built
+    let comp_refs: Vec<(&str, &[TemplateNode], &DynamicRuleTable, &[KeyframesRule])> = built
         .iter()
-        .map(|(n, nodes, dr)| (n.as_str(), nodes.as_slice(), dr))
+        .map(|(n, nodes, dr, keyframes)| (n.as_str(), nodes.as_slice(), dr, keyframes.as_slice()))
         .collect();
     let bytes = write_package(&PackageInput {
         components: comp_refs,

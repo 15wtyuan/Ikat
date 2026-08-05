@@ -619,6 +619,18 @@ pub struct Scene {
     /// 本帧 transition 请求（rematch 检测 data-page 通道变化时推入；Stage tick drain 后
     /// kill 旧 tween + 提交新 tween，见 Phase E）。运行时态，不进 pkg。
     pub pending_transitions: Vec<crate::tween::TransitionRequest>,
+    /// 全局 @keyframes 查找表（CSS `@keyframes` 全局语义，spec §3.5）。instantiate 时
+    /// 组件 keyframes 合并进来（同名后实例化覆盖）；KeyframePlayer 按 `AnimationSpec.name`
+    /// 查此表。运行时态，不进 pkg（pkg 按组件存于 ComponentTemplate.keyframes）。
+    pub keyframes: std::collections::HashMap<String, crate::scene::animation::KeyframesRule>,
+    /// 活跃 @keyframes player（slotmap 稳定 Key = 未来 C# Animation 句柄）。
+    /// 运行时态，不进 pkg。M2.5 池化时再优化（spec §4.3）。
+    pub players:
+        SlotMap<crate::scene::animation::PlayerKey, crate::scene::animation::KeyframePlayer>,
+    /// 事件字符串表（动画事件 name/hook_name payload，spec §7.5）。持久 intern：索引跨
+    /// tick 稳定，装 EventRecord 的 24-bit 槽（click_count+pad），C# demux（T11）按索引
+    /// 读回字符串。运行时态，不进 pkg。
+    pub event_strs: crate::event::EventStrTable,
 }
 
 impl Scene {

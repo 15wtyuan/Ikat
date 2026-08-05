@@ -46,7 +46,7 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("comp1", &nodes, &rules)],
+        components: vec![("comp1", &nodes, &rules, &[])],
     };
     crate::asset::write_package(&input)
 }
@@ -70,7 +70,7 @@ fn make_control_pkg(kind: NodeKind, control_init: crate::asset::ControlInit) -> 
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     crate::asset::write_package(&input)
 }
@@ -138,7 +138,7 @@ fn instantiate_explicit_tabindex_minus_one_is_respected() {
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let pkg = crate::asset::write_package(&input);
     let mut s = Stage::new_for_test();
@@ -242,7 +242,7 @@ fn instantiate_missing_pkg_or_comp_errors() {
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("c1", &nodes, &rules)],
+        components: vec![("c1", &nodes, &rules, &[])],
     };
     s.load_package("bag", &crate::asset::write_package(&input))
         .unwrap();
@@ -292,7 +292,7 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("c1", &nodes, &rules)],
+        components: vec![("c1", &nodes, &rules, &[])],
     };
     s.load_package("bag", &crate::asset::write_package(&input))
         .unwrap();
@@ -337,6 +337,7 @@ fn single_selector(raw: &str) -> ParsedSelector {
         pseudo_active: false,
         pseudo_disabled: false,
         pseudo_focus: false,
+        pseudo_nth_child: None,
         attrs: Vec::new(),
     };
     let mut rest = raw;
@@ -407,7 +408,7 @@ fn pkg_with_root_rule(pkg_name: &str, flex_dir_val: &str) -> (String, Vec<u8>) {
         rules: vec![class_rule("root", "flex-direction", flex_dir_val)],
     };
     let input = PackageInput {
-        components: vec![(pkg_name, &nodes, &rules)],
+        components: vec![(pkg_name, &nodes, &rules, &[])],
     };
     (pkg_name.to_string(), crate::asset::write_package(&input))
 }
@@ -544,8 +545,8 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
     let inner_rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
         components: vec![
-            ("outer", &outer_nodes, &outer_rules),
-            ("inner", &inner_nodes, &inner_rules),
+            ("outer", &outer_nodes, &outer_rules, &[]),
+            ("inner", &inner_nodes, &inner_rules, &[]),
         ],
     };
     let pkg = crate::asset::write_package(&input);
@@ -729,7 +730,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let pkg = crate::asset::write_package(&PackageInput {
-        components: vec![("dropdown", &nodes, &rules)],
+        components: vec![("dropdown", &nodes, &rules, &[])],
     });
     let mut s = Stage::new_for_test();
     s.create_root("div", "").unwrap();
@@ -818,7 +819,7 @@ fn make_test_pkg_with_roles() -> Vec<u8> {
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("comp", &nodes, &rules)],
+        components: vec![("comp", &nodes, &rules, &[])],
     };
     crate::asset::write_package(&input)
 }
@@ -912,7 +913,7 @@ fn instantiate_copies_aria_controls_into_role_info() {
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("c", &nodes, &rules)],
+        components: vec![("c", &nodes, &rules, &[])],
     };
     let pkg = crate::asset::write_package(&input);
     let mut s = Stage::new_for_test();

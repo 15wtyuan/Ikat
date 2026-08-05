@@ -275,7 +275,34 @@ namespace LoomGUI
             return result;
         }
 
-        public Animation Play(string name) { throw NE(); }
+        /// <summary>
+        /// 程序化播放 @keyframes 动画（spec §7.3 / public-api §9.1 触发 2）。返 Animation 句柄。
+        ///
+        /// 建 programmatic player（core <c>play_programmatic</c>，不受 class 声明管）：
+        /// 默认 1s / 无 delay / 单次迭代 / normal / fill both / cubic-out，立即写首帧。
+        /// 结束用句柄 <see cref="Animation.OnEnd"/> 或 <c>On&lt;AnimationEndEvent&gt;()</c>；
+        /// class 触发的动画无句柄（声明式，只需知结束走 EventBus 订阅）。
+        ///
+        /// 未知动画名（keyframes 表无此 name）抛 <see cref="UIContractException"/>（调用方
+        /// 写错——同 Get&lt;T&gt; 未命中语义）；null name 抛 ArgumentNullException。
+        /// </summary>
+        public Animation Play(string name)
+        {
+            ThrowIfDisposed();
+            if (name == null) throw new ArgumentNullException(nameof(name));
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte[] nb = Encoding.UTF8.GetBytes(name);
+            fixed (byte* np = nb)
+            {
+                ulong key = Native.loomgui_stage_play_animation(h, _id, np, (nuint)nb.Length);
+                if (key == 0)
+                    throw new UIContractException(
+                        $"Play(\"{name}\"): no @keyframes with this name (keyframes table lookup failed)");
+                var anim = new Animation(this, key, name);
+                _ctx.RegisterAnimation(anim);
+                return anim;
+            }
+        }
 
         // 编程聚焦节点（照 fgui RequestFocus）。直转 FFI request_focus（记 pending_focus_request，
         // 下 tick 最前消费写 scene.focused_node + 产 FocusIn/FocusOut）。文本框聚焦后才能接收
@@ -2483,19 +2510,236 @@ namespace LoomGUI
 
     // ── 动画 ────────────────────────────────────────────────────────
     // Animation 句柄非长期对象，生命周期 = 那次播放；播放结束句柄失效、hook 自动释放。
-    public sealed class Animation
+    //
+    // 生命周期不变量（spec §7.6 / public-api §9.2）：
+    // - END 事件（demux 触发 onEnd 后）/ Stop()（scene 层终态）→ _disposed=true +
+    //   UIContext 注销注册表条目；此后成员调用全部 no-op（不抛——§7.6「调用 no-op」）。
+    // - 循环动画（infinite）句柄存活到 Stop()。
+    // - class 触发的动画无句柄，只走 EventBus 广播（On<AnimationEndEvent> 等）。
+    //
+    // 回调路由（spec §7.4）：OnStart/OnEnd/OnHook 纯 C#（core 本就 emit 事件，demux 按
+    // playerKey 查本实例触发）；OnKey 半 FFI（cb 留本类，pct 经 animation_on_key 注册到 core
+    // ——core 才知道检测哪些百分比跨越，注册须在 Play 之后、key 有效时）。
+    //
+    // 事件载荷解码（T9 event.rs payload 编码）：demux 把 EventRecord 的 touch_id(低 32)/x(高 32)
+    // 拼回 PlayerKey u64，按 key 查 UIContext._animations 命中本实例。
+    public sealed unsafe class Animation
     {
-        public string Name { get { throw NE(); } }
-        public bool IsPlaying { get { throw NE(); } }
-        public float Time { get { throw NE(); } set { throw NE(); } }
-        public void Pause() { throw NE(); }
-        public void Resume() { throw NE(); }
-        public void Stop() { throw NE(); }
-        public Animation OnStart(Action cb) { throw NE(); }
-        public Animation OnEnd(Action cb) { throw NE(); }
-        public Animation OnKey(float pct, Action cb) { throw NE(); }
-        public Animation OnHook(string n, Action cb) { throw NE(); }
-        static NotImplementedException NE() => new NotImplementedException();
+        /// <summary>core PlayerKey（slotmap 稳定句柄，u64；0 = 无效哨兵）。</summary>
+        internal readonly ulong _playerKey;
+        /// <summary>播放目标节点（经其 _ctx 转调 FFI + 注销注册表）。</summary>
+        internal readonly Node _node;
+        /// <summary>动画名（Play 时传入；事件流同源，字符串表读回值一致）。</summary>
+        internal readonly string _name;
+        /// <summary>句柄失效标记（END / Stop 后置 true，成员调用 no-op）。</summary>
+        internal bool _disposed;
+
+        internal List<Action> _onStart;
+        internal List<Action> _onEnd;
+        internal List<(float pct, Action cb)> _onKeys;
+        internal List<(string name, Action cb)> _onHooks;
+
+        /// <summary>投影层内部：Node.Play 经 FFI play_animation 成功后构造 + 注册。</summary>
+        internal Animation(Node node, ulong playerKey, string name)
+        {
+            _node = node;
+            _playerKey = playerKey;
+            _name = name;
+        }
+
+        /// <summary>动画名（Play(name) 参数）。</summary>
+        public string Name => _name;
+
+        /// <summary>
+        /// 是否播放中（core PlayerPlayState::Playing）。句柄失效（END/Stop/player 回收）
+        /// 返 false；顺带把已失效但未收到 END 的句柄（如节点销毁回收）注销出注册表。
+        /// </summary>
+        public bool IsPlaying
+        {
+            get
+            {
+                if (_disposed) return false;
+                if (_node._disposed)
+                {
+                    // 节点已销毁：core 静默回收悬空 player 且不发 END（remove_node 不清
+                    // scene.players，update_all 直接回收）——此处惰性失效，防注册表
+                    // 强引用悬挂（UIContext→Animation→Node→用户回调全链）。
+                    Invalidate();
+                    return false;
+                }
+                StageHandle* h = (StageHandle*)_node._ctx._stage.ToPointer();
+                byte state = Native.loomgui_stage_get_animation_state(h, _playerKey);
+                if (state == 255)
+                {
+                    // player 已被 core 回收（Stop / 悬空节点 / Completed+fill none）——
+                    // 惰性失效：句柄标记 disposed + 注销，防注册表悬挂条目。
+                    Invalidate();
+                    return false;
+                }
+                return state == 0;
+            }
+        }
+
+        /// <summary>
+        /// 时间轴位置（elapsed——含 delay 计时的唯一时间源头，spec §5.3）。setter = seek：
+        /// 下一帧按新位置采样。句柄失效后 get 返 0 / set no-op。
+        /// </summary>
+        public float Time
+        {
+            get
+            {
+                if (_disposed || _node._disposed) return 0f;
+                StageHandle* h = (StageHandle*)_node._ctx._stage.ToPointer();
+                return Native.loomgui_stage_get_animation_time(h, _playerKey);
+            }
+            set
+            {
+                if (_disposed || _node._disposed) return;
+                StageHandle* h = (StageHandle*)_node._ctx._stage.ToPointer();
+                Native.loomgui_stage_set_animation_time(h, _playerKey, value);
+            }
+        }
+
+        /// <summary>暂停（Playing → Paused，位置冻结；可 Resume）。句柄失效后 no-op。</summary>
+        public void Pause()
+        {
+            if (_disposed || _node._disposed) return;
+            StageHandle* h = (StageHandle*)_node._ctx._stage.ToPointer();
+            Native.loomgui_stage_pause_animation(h, _playerKey);
+        }
+
+        /// <summary>恢复（Paused → Playing；Completed/Stopped 是终态不可恢复）。失效后 no-op。</summary>
+        public void Resume()
+        {
+            if (_disposed || _node._disposed) return;
+            StageHandle* h = (StageHandle*)_node._ctx._stage.ToPointer();
+            Native.loomgui_stage_resume_animation(h, _playerKey);
+        }
+
+        /// <summary>
+        /// 停止（scene 层终态，不可恢复，勿当暂停——T6 review Minor 1 钉死）。core 下帧
+        /// 回收 player（不发 END 事件），故本方法同步失效句柄 + 注销注册表。
+        /// </summary>
+        public void Stop()
+        {
+            if (_disposed || _node._disposed) return;
+            StageHandle* h = (StageHandle*)_node._ctx._stage.ToPointer();
+            Native.loomgui_stage_stop_animation(h, _playerKey);
+            Invalidate();
+        }
+
+        /// <summary>链式注册播放启动回调（START 事件按 playerKey 命中时触发）。</summary>
+        public Animation OnStart(Action cb)
+        {
+            if (cb == null) throw new ArgumentNullException(nameof(cb));
+            if (_disposed || _node._disposed) return this;
+            (_onStart ??= new List<Action>()).Add(cb);
+            return this;
+        }
+
+        /// <summary>链式注册播放完成回调（完成后句柄失效，onEnd 先触发再失效）。</summary>
+        public Animation OnEnd(Action cb)
+        {
+            if (cb == null) throw new ArgumentNullException(nameof(cb));
+            if (_disposed || _node._disposed) return this;
+            (_onEnd ??= new List<Action>()).Add(cb);
+            return this;
+        }
+
+        /// <summary>
+        /// 链式注册百分比跨越回调（spec §7.4 半 FFI：cb 留 C#，pct 注册进 core 检测阈值）。
+        /// 须在 key 有效时调（Play 之后；链式 <c>Play(name).OnKey(.5, cb)</c> 是标准用法）。
+        /// 同 pct 重复注册去重（core register_on_key 去重，cb 仍各存各发）。
+        /// </summary>
+        public Animation OnKey(float pct, Action cb)
+        {
+            if (cb == null) throw new ArgumentNullException(nameof(cb));
+            if (_disposed || _node._disposed) return this;
+            StageHandle* h = (StageHandle*)_node._ctx._stage.ToPointer();
+            Native.loomgui_stage_animation_on_key(h, _playerKey, pct);
+            var list = _onKeys ??= new List<(float, Action)>();
+            // cb 不去重（同 pct 多 cb 各自触发）；pct 去重由 core 保证。
+            list.Add((pct, cb));
+            return this;
+        }
+
+        /// <summary>
+        /// 链式注册 @loom-hook 锚点回调（spec §7.4 纯 C#：core emit HOOK 带 hook_name，
+        /// demux 按 name 匹配触发；无需 FFI 注册）。
+        /// </summary>
+        public Animation OnHook(string name, Action cb)
+        {
+            if (name == null) throw new ArgumentNullException(nameof(name));
+            if (cb == null) throw new ArgumentNullException(nameof(cb));
+            if (_disposed || _node._disposed) return this;
+            (_onHooks ??= new List<(string, Action)>()).Add((name, cb));
+            return this;
+        }
+
+        // ── 投影层内部：demux 句柄路由入口（spec §7.1）────────────────────
+        // 回调是 Action（无事件参数），触发时只传载荷（pct / hook_name）。
+
+        /// <summary>START 事件 → onStart 回调。</summary>
+        internal void FireStart()
+        {
+            if (_onStart == null) return;
+            var cbs = _onStart.ToArray();   // snapshot：回调内再注册不影响本次遍历
+            for (int i = 0; i < cbs.Length; i++) cbs[i]();
+        }
+
+        /// <summary>END 事件 → onEnd 回调 + 句柄失效（§7.6：播放结束句柄失效）。</summary>
+        internal void FireEnd()
+        {
+            try
+            {
+                if (_onEnd != null)
+                {
+                    var cbs = _onEnd.ToArray();
+                    for (int i = 0; i < cbs.Length; i++) cbs[i]();
+                }
+            }
+            finally
+            {
+                // 回调抛异常也须失效（异常向上传播，不吞——finally 只保证失效执行）。
+                Invalidate();
+            }
+        }
+
+        /// <summary>KEY 事件 → 匹配 pct 的 onKey 回调（core 按阈值逐个发，pct 是同一 f32 值，精确相等）。</summary>
+        internal void FireKey(float percent)
+        {
+            if (_onKeys == null) return;
+            var keys = _onKeys.ToArray();
+            for (int i = 0; i < keys.Length; i++)
+            {
+                if (keys[i].pct == percent) keys[i].cb();
+            }
+        }
+
+        /// <summary>HOOK 事件 → 匹配 name 的 onHook 回调。</summary>
+        internal void FireHook(string hookName)
+        {
+            if (_onHooks == null) return;
+            var hooks = _onHooks.ToArray();
+            for (int i = 0; i < hooks.Length; i++)
+            {
+                if (hooks[i].name == hookName) hooks[i].cb();
+            }
+        }
+
+        /// <summary>
+        /// 标记失效 + 从 UIContext 注册表注销（END / Stop / IsPlaying 检出回收）。
+        /// 幂等。此后成员调用 no-op（§7.6「player 回收 → 句柄失效 → 调用 no-op」）。
+        ///
+        /// 节点已 dispose 时调用也安全：只碰 <c>_node._ctx</c>（readonly，Node ctor 赋，
+        /// Dispose 不清）做纯 C# 字典注销，无 FFI 调用——死节点不阻塞清理。
+        /// </summary>
+        internal void Invalidate()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _node._ctx.UnregisterAnimation(_playerKey);
+        }
     }
 
     // ── 样式辅助 ────────────────────────────────────────────────────
@@ -2690,6 +2934,12 @@ namespace LoomGUI
         // 所属 ListView 实例、调其 BindItem。公共 API 不见本字段。
         internal readonly Dictionary<uint, ListView> _listViews = new Dictionary<uint, ListView>();
 
+        // M2（T11）：PlayerKey → Animation 实例注册表（demux 句柄路由查用，spec §7.1/§7.6）。
+        // 强引用：句柄生命周期 = 那次播放（END/Stop 时 Animation.Invalidate 注销）。
+        // 循环动画存活到 Stop（§7.6）——用户持有句柄期间注册表保留引用，结束自动释放。
+        // player 被 core 静默回收（节点销毁）的悬挂条目由 IsPlaying 惰性失效清理。
+        internal readonly Dictionary<ulong, Animation> _animations = new Dictionary<ulong, Animation>();
+
         // E1：lazy 创建的 StyleSheet 实例。同 Node.Style/Node.Transform 模式——未访问过 = null，
         // 首次访问构造并挂本 context。StyleSheet.Add/Clear 方法体本身仍 throw NE（core 未接通）。
         StyleSheet _styleSheet;
@@ -2726,6 +2976,14 @@ namespace LoomGUI
         internal void RegisterListView(ListView lv) => _listViews[lv._id] = lv;
         /// <summary>该 NodeId 是否已注册为 ListView（数据驱动模式已激活）。</summary>
         internal bool IsListViewRegistered(uint id) => _listViews.ContainsKey(id);
+
+        /// <summary>注册 Animation 句柄（Node.Play 成功后调；demux 按 playerKey 路由）。</summary>
+        internal void RegisterAnimation(Animation a) => _animations[a._playerKey] = a;
+        /// <summary>按 playerKey 查 Animation 实例（demux 句柄路由；未命中 = class 触发/已失效 → null）。</summary>
+        internal Animation ResolveAnimation(ulong playerKey) =>
+            _animations.TryGetValue(playerKey, out var a) ? a : null;
+        /// <summary>注销 Animation（END / Stop / 惰性失效时调）。幂等。</summary>
+        internal void UnregisterAnimation(ulong playerKey) => _animations.Remove(playerKey);
 
         /// <summary>
         /// 排空 core pending_binds 并分发到对应 ListView 的 BindItem。集成层 Step 开头 /

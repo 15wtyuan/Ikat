@@ -1,20 +1,24 @@
 //! `<style>` 选择器解析 + 规则表产物（fence = 纯解析器）。
 //!
 //! 路径 c：手搓解析器，直产 core 的 ParsedSelector/Compound（fence 已依赖 core）。
-//! 子集：class / tag / id / 后代组合（空格）/ 伪类（hover/active/disabled/focus/checked）
-//! / 属性选择器（[attr] / [attr="val"]，仅 Exists + Eq）。
-//! 越界（nth-child、+ ~ 组合子等）返 None，由调用方报错。
+//! 子集：class / tag / id / 后代组合（空格）/ 伪类（hover/active/disabled/focus/checked/
+//! nth-child(An+B|odd|even|N)）/ 属性选择器（[attr] / [attr="val"]，仅 Exists + Eq）。
+//! 越界（nth-of-type 等、+ ~ 组合子等）返 None，由调用方报错。
 //!
 //! @keyframes at-rule（对齐 public-api.md §9「动画定义全在 CSS」终态）：fence 解析
-//! `@keyframes <name> { <stop-selector> { decls } ... }` 产 `KeyframesRule`。runtime
-//! 驱动（tween 发射）在 §4 视觉束实现（v1.10）；本轮 fence 接受语法 + bridge 静默丢弃——
-//! pkg.bin 格式不变（runtime 收不到 keyframes；animation 属性走 cascade 静默跳过）。
+//! `@keyframes <name> { <stop-selector> { decls } ... }` 产 `KeyframesRule`。stop 声明块内
+//! 或块之间的 `/* @loom-hook name */` 注释解析为锚点（挂在前一个 stop 上，供 player
+//! 播放到该 stop 时发事件）。pkg v30 起 core 有同形类型并序列化进 pkg.bin；fence → core
+//! 的类型转换（declarations → AnimatableProps）由打包器 bridge 完成。
+//!
+//! @loom-hook 的特殊处理：`parse_style_block` 将合法锚点注释替换为不可见 marker，普通
+//! CSS 注释仍被剥除；`parse_keyframes_rule` 消费 marker 并将锚点挂到对应 stop。
 use crate::css_resolve::unsupported_hint;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
 use crate::schema::css::{find_css_prop, find_shorthand};
 use loomgui_core::style::dynamic::{
-    AttrOp, AttrSelector, Combinator, Compound, Declaration, DynamicRule, ParsedSelector,
-    Specificity,
+    AttrOp, AttrSelector, Combinator, Compound, Declaration, DynamicRule, NthChildExpr,
+    ParsedSelector, Specificity,
 };
 
 // ── @keyframes 类型（fence-local；pkg.bin 暂不序列化）──────────────────────────
@@ -28,11 +32,14 @@ pub enum KeyframeStopSelector {
     Percent(u8),
 }
 
-/// `@keyframes` 内一条 stop：选择器位置 + 声明块（如 `from { opacity:0 }`）。
+/// `@keyframes` 内一条 stop：选择器位置 + 声明块 + 锚点（如 `from { opacity:0 }`）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeyframeStop {
     pub selector: KeyframeStopSelector,
     pub declarations: Vec<Declaration>,
+    /// `/* @loom-hook name */` 锚点：写在 stop 块后/块内，挂在该 stop 上。
+    /// player 播放到该 stop 的百分比时发事件。None = 无锚点。
+    pub hook: Option<String>,
 }
 
 /// `@keyframes <name> { ... }` 整体规则。stops 按 source 顺序保留（runtime 按需插值）。
@@ -47,13 +54,15 @@ pub struct KeyframesRule {
 /// 子集：空格分隔的若干 compound（后代组合）；每个 compound =
 /// tag? + (class/id/pseudo/attr)*。
 /// 越界：Child `>`、相邻 `+`/`~`、逗号多选（逗号在 parse_style_block 预切分）→ None。
+/// 注意 `+`/`-` 在 `:nth-child(...)` 括号内合法（An+B），组合子判定按括号深度排除。
 pub fn parse_selector(raw: &str) -> Option<ParsedSelector> {
     let raw = raw.trim();
     if raw.is_empty() {
         return None;
     }
-    // 越界字符快速判定：逗号 / > + ~ 组合子不在本子集（属性选择器 `[...]` 已支持，见 parse_compound）。
-    if raw.contains(',') || raw.contains('>') || raw.contains('+') || raw.contains('~') {
+    // 越界字符快速判定：逗号 / > + ~ 组合子不在本子集（属性选择器 `[...]` 已支持，见
+    // parse_compound；`:nth-child(2n+1)` 的 `+` 在括号内合法，按深度排除）。
+    if has_out_of_subset_combinator(raw) {
         return None;
     }
 
@@ -62,7 +71,29 @@ pub fn parse_selector(raw: &str) -> Option<ParsedSelector> {
     let mut specificity_c = 0u32; // tag 数
     let mut compounds: Vec<Compound> = Vec::new();
 
-    for part in raw.split_whitespace() {
+    // 按括号深度切分 compound：`split_whitespace` 会拆坏括号内空格
+    // （`:nth-child(2n + 1)` 的 `+` 两侧空格合法，CSS An+B 语法允许）。
+    let mut parts: Vec<&str> = Vec::new();
+    let mut depth: i32 = 0;
+    let mut start = 0usize;
+    for (idx, ch) in raw.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ if ch.is_whitespace() && depth == 0 => {
+                if idx > start {
+                    parts.push(&raw[start..idx]);
+                }
+                start = idx + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    if start < raw.len() {
+        parts.push(&raw[start..]);
+    }
+
+    for part in parts {
         let (c, a, b, cc) = parse_compound(part)?;
         specificity_a += a;
         specificity_b += b;
@@ -83,6 +114,21 @@ pub fn parse_selector(raw: &str) -> Option<ParsedSelector> {
     })
 }
 
+/// 组合子越界扫描：逗号 / `>` / `+` / `~` 在括号外出现即越界。
+/// `:nth-child(An+B)` 的参数里 `+`/`-` 是合法语法（如 `2n+1`），括号内不判。
+fn has_out_of_subset_combinator(raw: &str) -> bool {
+    let mut depth: i32 = 0;
+    for ch in raw.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' | '>' | '+' | '~' if depth == 0 => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 /// 解析单个 compound（无空格的一段）。返 (compound, a, b, c) specificity 贡献。
 fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
     let mut c = Compound {
@@ -94,6 +140,7 @@ fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
         pseudo_active: false,
         pseudo_disabled: false,
         pseudo_focus: false,
+        pseudo_nth_child: None,
         attrs: Vec::new(),
     };
     let mut a = 0u32;
@@ -121,18 +168,39 @@ fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
         } else if let Some(r) = rest.strip_prefix(':') {
             let (name, next) = take_ident(r);
             match name {
-                "hover" => c.pseudo_hover = true,
-                "active" => c.pseudo_active = true,
-                "disabled" => c.pseudo_disabled = true,
-                "focus" => c.pseudo_focus = true,
+                "hover" => {
+                    c.pseudo_hover = true;
+                    rest = next;
+                }
+                "active" => {
+                    c.pseudo_active = true;
+                    rest = next;
+                }
+                "disabled" => {
+                    c.pseudo_disabled = true;
+                    rest = next;
+                }
+                "focus" => {
+                    c.pseudo_focus = true;
+                    rest = next;
+                }
                 "checked" => {
                     // core 的 Compound 无 pseudo_checked 字段：checked 是控件态，由控件束处理（Spec-4）。
                     // 本轮仅计 specificity（b+=1 在下方统一加），不存状态门。
+                    rest = next;
                 }
-                _ => return None, // 未知伪类越界（含 nth-child 等）
+                "nth-child" => {
+                    // 参数化伪类：`:nth-child(An+B|odd|even|N)`（spec §8.5）。
+                    // 解析括号内 An+B → NthChildExpr；语法越界（无括号/缺 `)`/坏参数）→ None。
+                    let after = next.strip_prefix('(')?;
+                    let close = after.find(')')?;
+                    let (a, b) = parse_nth_arg(&after[..close])?;
+                    c.pseudo_nth_child = Some(NthChildExpr { a, b });
+                    rest = &after[close + 1..];
+                }
+                _ => return None, // 未知伪类越界（含 nth-of-type 等）
             }
             b += 1; // 伪类算 class 级
-            rest = next;
         } else if let Some(r) = rest.strip_prefix('[') {
             // 属性选择器：[attr] / [attr="val"] / [attr=val]。仅 Eq + Exists；高阶运算符
             // (^= ~= $= *= |=) 不在围栏子集 → 返 None 让 parse_style_block 报错。
@@ -187,6 +255,48 @@ fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
     Some((c, a, b, cc))
 }
 
+/// 解析 `:nth-child(...)` 参数 → (a, b)（spec §8.5）。
+///
+/// 语法：`odd`=`2n+1`、`even`=`2n`、纯整数 `N`=`0n+N`、`An+B`。
+/// An+B 按正则 `^(\d*)n\s*([+-]\s*\d+)?$` 手搓解析（零正则依赖）：
+/// A 缺省（`n`）= 1，B 缺省 = 0，B 必须带符号（`2n1` 非法）。
+/// 参数大小写不敏感（CSS 关键字 ASCII 大小写不敏感）。
+fn parse_nth_arg(arg: &str) -> Option<(i32, i32)> {
+    let t = arg.trim();
+    if t.eq_ignore_ascii_case("odd") {
+        return Some((2, 1));
+    }
+    if t.eq_ignore_ascii_case("even") {
+        return Some((2, 0));
+    }
+    // 纯整数 N（可带符号，如 `-3`/`+3` 合法但恒不命中，index ≥ 1）
+    if let Ok(n) = t.parse::<i32>() {
+        return Some((0, n));
+    }
+    // An+B：先找 `n`，其前为 A（缺省 = 1），其后为带符号 B
+    let lower = t.to_ascii_lowercase();
+    let n_pos = lower.find('n')?;
+    let a_part = lower[..n_pos].trim();
+    let a: i32 = if a_part.is_empty() {
+        1
+    } else {
+        a_part.parse().ok()?
+    };
+    let b_rest = lower[n_pos + 1..].trim();
+    let b: i32 = if b_rest.is_empty() {
+        0
+    } else {
+        // B 必须带符号（如 `2n1` 非法）：± 前缀 + 数字，缺符号或空数字 → 整体拒绝
+        let signed = b_rest
+            .strip_prefix('+')
+            .or_else(|| b_rest.strip_prefix('-'))
+            .filter(|d| !d.trim().is_empty())?;
+        let sign = if b_rest.starts_with('-') { -1 } else { 1 };
+        sign * signed.trim().parse::<i32>().ok()?
+    };
+    Some((a, b))
+}
+
 /// 取一个标识符（字母/数字/`-`/`_`），返回 (标识符, 剩余)。
 fn take_ident(s: &str) -> (&str, &str) {
     let end = s
@@ -205,8 +315,7 @@ fn take_ident(s: &str) -> (&str, &str) {
 /// - 越界 selector / at-rule → 丢弃 + 诊断；声明 prop 名不在 schema（find_css_prop/find_shorthand）
 ///   → 诊断（与 css_resolve 一致）。
 ///
-/// @keyframes 解析后产出 KeyframesRule；打包器 bridge 当前**静默丢弃**（pkg.bin 格式与
-/// runtime §4 视觉束 v1.10 一同落地，本轮不序列化以避免 pkg 版本 bump + dll 重编）。
+/// @keyframes 解析后产出 KeyframesRule；packer bridge 将它翻译并序列化进 pkg.bin v30。
 pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Vec<Diagnostic>) {
     let stripped = strip_comments(css);
     // 诊断定位用（粗略）：strip_comments 后 offset 已不对应原文，但行号近似可用。
@@ -222,6 +331,7 @@ pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Ve
         };
         let brace_open = pos + brace_open_rel;
         let prelude = stripped[pos..brace_open].trim();
+        let (prelude, _) = remove_hook_markers(prelude);
         let after_open = brace_open + 1;
         let sel_start = pos;
 
@@ -256,6 +366,7 @@ pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Ve
             break;
         };
         let body = &stripped[after_open..after_open + brace_close_rel];
+        let (body, _) = remove_hook_markers(body);
         pos = after_open + brace_close_rel + 1;
 
         if prelude.is_empty() {
@@ -264,7 +375,7 @@ pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Ve
         // <style> 内无精确 per-token span —— 定位用选择器起点近似。
         let loc = line_map.source_location(sel_start, "<style>".to_string());
         // 声明块只解析一次，逗号 selector list 的每段共享同一 declarations（clone）。
-        let declarations = parse_declarations(body, &loc, &mut diagnostics);
+        let declarations = parse_declarations(&body, &loc, &mut diagnostics);
         if declarations.is_empty() {
             continue;
         }
@@ -328,6 +439,11 @@ fn split_at_keyword(s: &str) -> (String, String) {
 /// body 文法：`<stop-selector-list> { decl_list }` 重复，stop-selector-list = 逗号分隔的
 /// `from` / `to` / `<N>%`。逗号多 stop（`0%,100%{...}`）展开为多个 KeyframeStop 共享同声明块。
 /// 任一 stop-selector 非法 → 整个 @keyframes 块丢弃 + 诊断（CSS 严格失败模式）。
+///
+/// `strip_comments` 会把合法的 `/* @loom-hook name */` 替换成不可见 marker，避免普通
+/// CSS 解析丢失锚点。本函数在 stop 前导（通常是上一个 stop 块之后）和声明块内部消费
+/// marker：前导注释挂前一个 stop，声明块内注释挂当前 stop。这样既支持 brief 的
+/// `from{...}/* @loom-hook start */ to{...}`，也支持更直观的 `from{/* @loom-hook start */ ...}`。
 fn parse_keyframes_rule(
     name: &str,
     body: &str,
@@ -342,13 +458,23 @@ fn parse_keyframes_rule(
         ));
     }
     let mut stops: Vec<KeyframeStop> = Vec::new();
+    let mut pending_hooks: Vec<String> = Vec::new();
     let mut pos = 0;
     while pos < body.len() {
         let Some(brace_open_rel) = body[pos..].find('{') else {
             break;
         };
         let brace_open = pos + brace_open_rel;
-        let stop_sel_raw = body[pos..brace_open].trim();
+        let (stop_sel_clean, leading_hooks) = remove_hook_markers(&body[pos..brace_open]);
+        if !leading_hooks.is_empty() {
+            if let Some(previous) = stops.last_mut() {
+                previous.hook = leading_hooks.last().cloned();
+            } else {
+                // A hook before the first stop is most naturally associated with that stop.
+                pending_hooks.extend(leading_hooks);
+            }
+        }
+        let stop_sel_raw = stop_sel_clean.trim();
         let after_open = brace_open + 1;
         let Some((inner, end_pos)) = find_matching_brace(body, after_open) else {
             break;
@@ -363,13 +489,21 @@ fn parse_keyframes_rule(
             let s = parse_stop_selector(raw.trim(), loc)?;
             sel_parsed.push(s);
         }
-        let decls = parse_declarations(inner, loc, &mut Vec::new()); // stops 内 prop 名错误 tolerable
+        let (inner_clean, inner_hooks) = remove_hook_markers(inner);
+        let decls = parse_declarations(&inner_clean, loc, &mut Vec::new()); // stops 内 prop 名错误 tolerable
+        let hook = inner_hooks.last().cloned().or_else(|| pending_hooks.pop());
         for sel in sel_parsed {
             stops.push(KeyframeStop {
                 selector: sel,
                 declarations: decls.clone(),
+                hook: hook.clone(),
             });
         }
+    }
+    // A marker after the final `}` has no next selector to consume; attach it to the final stop.
+    let (_, trailing_hooks) = remove_hook_markers(&body[pos..]);
+    if let (Some(previous), Some(hook)) = (stops.last_mut(), trailing_hooks.last()) {
+        previous.hook = Some(hook.clone());
     }
     if stops.is_empty() {
         return Err(Diagnostic::error(
@@ -421,21 +555,77 @@ fn parse_stop_selector(
 
 /// 剥除 CSS 注释 `/* ... */`。UTF-8 安全：在 `&str` 上用 `find`（ASCII 针的偏移恒为 char 边界）。
 /// 不能逐字节 `u8 as char`——会损坏非 ASCII（CJK font-family、content 文本）。
+/// 合法 `@loom-hook` 注释保留为内部 marker，供 keyframes stop 解析；普通注释照常移除。
+/// marker 在声明/选择器解析前由 `remove_hook_markers` 清掉。
+const LOOM_HOOK_MARKER_START: char = '\u{1}';
+const LOOM_HOOK_MARKER_END: char = '\u{2}';
+
 fn strip_comments(css: &str) -> String {
     let mut out = String::with_capacity(css.len());
     let mut rest = css;
     while let Some(start) = rest.find("/*") {
         out.push_str(&rest[..start]);
         match rest[start + 2..].find("*/") {
-            Some(end) => rest = &rest[start + 2 + end + 2..],
+            Some(end) => {
+                let comment = &rest[start + 2..start + 2 + end];
+                if let Some(name) = parse_loom_hook_comment(comment) {
+                    out.push(LOOM_HOOK_MARKER_START);
+                    out.push_str(name);
+                    out.push(LOOM_HOOK_MARKER_END);
+                }
+                rest = &rest[start + 2 + end + 2..];
+            }
             None => {
+                // An unclosed comment consumes the remainder, as before. It cannot contain a
+                // complete `@loom-hook` comment and therefore must not produce a marker.
                 rest = "";
                 break;
-            } // 未闭合注释 → 丢到末尾
+            }
         }
     }
     out.push_str(rest);
     out
+}
+
+/// Parse exactly `@loom-hook <name>` from a comment body. The name is one non-whitespace
+/// token (`\\S+`); a missing separator or trailing token is not a hook comment.
+fn parse_loom_hook_comment(comment: &str) -> Option<&str> {
+    let comment = comment.trim();
+    let rest = comment.strip_prefix("@loom-hook")?;
+    if !rest.chars().next().is_some_and(char::is_whitespace) {
+        return None;
+    }
+    let mut tokens = rest.split_whitespace();
+    let name = tokens.next()?;
+    tokens.next().is_none().then_some(name)
+}
+
+/// Remove retained hook markers from a selector/declaration slice and collect their names in
+/// source order. Markers only occur when they came from a syntactically closed CSS comment.
+fn remove_hook_markers(s: &str) -> (String, Vec<String>) {
+    let mut clean = String::with_capacity(s.len());
+    let mut hooks = Vec::new();
+    let mut rest = s;
+    loop {
+        let Some(start) = rest.find(LOOM_HOOK_MARKER_START) else {
+            clean.push_str(rest);
+            break;
+        };
+        clean.push_str(&rest[..start]);
+        let after_start = start + LOOM_HOOK_MARKER_START.len_utf8();
+        let Some(end_rel) = rest[after_start..].find(LOOM_HOOK_MARKER_END) else {
+            // Defensive: markers are generated as a pair, but preserve malformed text rather
+            // than silently dropping source bytes if this helper is reused later.
+            clean.push_str(&rest[start..]);
+            break;
+        };
+        let name = &rest[after_start..after_start + end_rel];
+        if !name.is_empty() && !name.chars().any(char::is_whitespace) {
+            hooks.push(name.to_string());
+        }
+        rest = &rest[after_start + end_rel + LOOM_HOOK_MARKER_END.len_utf8()..];
+    }
+    (clean, hooks)
 }
 
 /// 解析声明块体 → Vec<Declaration>。prop 名校验同 css_resolve（find_css_prop/find_shorthand）。
@@ -547,14 +737,14 @@ mod tests {
     #[test]
     fn out_of_subset_returns_none() {
         // 属性选择器现已支持（[attr]/[attr="val"]）；逗号在 parse_style_block 预切分，
-        // parse_selector 自身仍拒；> + ~ 组合子、nth-child 仍越界。
+        // parse_selector 自身仍拒；> + ~ 组合子仍越界（`+` 在 :nth-child 括号内合法）。
         assert!(parse_selector(r#"[type="text"]"#).is_some());
         assert!(parse_selector(".a, .b").is_none());
         assert!(parse_selector(".a > .b").is_none()); // Child 组合子本轮不做（仅后代空格）
         assert!(parse_selector(".a + .b").is_none());
-        assert!(parse_selector(":nth-child(2)").is_none());
-        // 属性选择器越界形态须显式拒（防静默降级：否则坏 selector 会被默默吞，
-        // 用户 CSS 静默失效）。仅支持 = / 裸 [attr]；修饰符操作符 / 空名 / 缺 ] 均拒。
+        assert!(parse_selector(":nth-of-type(2)").is_none()); // 其他 nth-* 不在子集
+                                                              // 属性选择器越界形态须显式拒（防静默降级：否则坏 selector 会被默默吞，
+                                                              // 用户 CSS 静默失效）。仅支持 = / 裸 [attr]；修饰符操作符 / 空名 / 缺 ] 均拒。
         assert!(parse_selector("[a^=b]").is_none()); // 修饰符操作符 ^= 越界
         assert!(parse_selector("[a~=b]").is_none()); // 修饰符操作符 ~= 越界
         assert!(parse_selector("[=x]").is_none()); // 空名（Eq 形）
@@ -715,6 +905,62 @@ mod tests {
         assert_eq!(keyframes[0].name, "fadeIn");
         assert_eq!(rules.len(), 1, "普通 selector 规则照常解析");
         assert_eq!(rules[0].selector.raw, ".nav-card");
+    }
+
+    #[test]
+    fn hook_comment_outside_keyframes_is_inert_in_declarations() {
+        let (rules, keyframes, diags) = parse_style_block(".card { /* @loom-hook x */ color:red }");
+        assert!(keyframes.is_empty());
+        assert!(
+            diags.is_empty(),
+            "normal-rule hook comment must not create diagnostics: {diags:?}"
+        );
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].selector.raw, ".card");
+        assert_eq!(rules[0].declarations.len(), 1);
+        assert_eq!(rules[0].declarations[0].prop, "color");
+        assert_eq!(rules[0].declarations[0].value, "red");
+    }
+
+    #[test]
+    fn hook_comment_before_normal_rule_is_inert_in_selector() {
+        let (rules, keyframes, diags) = parse_style_block("/* @loom-hook x */\n.card{color:red}");
+        assert!(keyframes.is_empty());
+        assert!(
+            diags.is_empty(),
+            "leading normal-rule hook comment must not create diagnostics: {diags:?}"
+        );
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].selector.raw, ".card");
+        assert_eq!(rules[0].declarations[0].prop, "color");
+    }
+
+    #[test]
+    fn parse_style_block_keyframes_hook_after_stop_attaches_to_previous_stop() {
+        let css = "@keyframes slideIn{from{opacity:0}/* @loom-hook start */ to{opacity:1}}";
+        let (_rules, keyframes, diags) = parse_style_block(css);
+        assert!(diags.is_empty(), "diags: {diags:?}");
+        assert_eq!(keyframes.len(), 1);
+        assert_eq!(keyframes[0].stops[0].hook.as_deref(), Some("start"));
+        assert_eq!(keyframes[0].stops[1].hook, None);
+    }
+
+    #[test]
+    fn parse_style_block_keyframes_hook_inside_stop_attaches_to_current_stop() {
+        let css = "@keyframes slideIn{from{/* @loom-hook start */ opacity:0}to{opacity:1}}";
+        let (_rules, keyframes, diags) = parse_style_block(css);
+        assert!(diags.is_empty(), "diags: {diags:?}");
+        assert_eq!(keyframes[0].stops[0].hook.as_deref(), Some("start"));
+        assert_eq!(keyframes[0].stops[0].declarations[0].prop, "opacity");
+    }
+
+    #[test]
+    fn parse_style_block_ignores_non_hook_comments() {
+        let css = "@keyframes slideIn{from{opacity:0}/* ordinary */to{opacity:1}}";
+        let (_rules, keyframes, diags) = parse_style_block(css);
+        assert!(diags.is_empty(), "diags: {diags:?}");
+        assert_eq!(keyframes[0].stops[0].hook, None);
+        assert_eq!(keyframes[0].stops[1].hook, None);
     }
 
     #[test]

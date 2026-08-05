@@ -44,7 +44,7 @@ fn make_pkg_with_image(src: &str) -> Vec<u8> {
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("comp1", &nodes, &rules)],
+        components: vec![("comp1", &nodes, &rules, &[])],
     };
     crate::asset::write_package(&input)
 }
@@ -161,7 +161,7 @@ fn css_length_overrides_real_image_size() {
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
-        components: vec![("comp1", &nodes, &rules)],
+        components: vec![("comp1", &nodes, &rules, &[])],
     };
     let pkg_bytes = crate::asset::write_package(&input);
 

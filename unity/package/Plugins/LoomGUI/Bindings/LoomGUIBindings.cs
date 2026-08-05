@@ -121,6 +121,20 @@ namespace LoomGUI.Bindings
         internal static extern byte* loomgui_stage_borrow_events(StageHandle* h, nuint* out_len);
 
         /// <summary>
+        ///  读事件字符串表条目（spec §7.5：动画事件 name/hook_name 的 24-bit 索引载体，C# demux
+        ///  按索引读回字符串）。表是 Scene 级持久 intern（只增），索引跨 tick 稳定。
+        ///
+        ///  return-code + out-param（ptr+len）双调法（同 get_control_text）：
+        ///  buf_cap 足够 → rc=0，写入 buf[..*out_len]；buf_cap 不够（含 0 探大小）→ rc=-2，
+        ///  *out_len = 所需字节数（caller 扩容重调）；null 句柄 / 无 scene / 索引越界 → rc=-1，
+        ///  *out_len=0（越界是防御分支——正常路径索引恒由 intern 产生）。
+        ///
+        ///  **常驻（不 gate）：**事件是 runtime 稳定入口。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_event_string", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_event_string(StageHandle* h, uint idx, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
         ///  UI 挡住时游戏不响应点击（§10.6）。= 任一活跃槽 last_hit 非空且非根（多指：鼠标 slot0 + 已分配触摸槽）。
         ///  null 句柄 → false。
         ///
@@ -423,6 +437,69 @@ namespace LoomGUI.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_clear_anim_prop", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void loomgui_stage_clear_anim_prop(StageHandle* h, uint node_id, uint prop);
+
+        /// <summary>
+        ///  程序化启动 @keyframes 动画（spec §7.3 `play_animation`）。
+        ///  node = 目标节点 NodeId；name = UTF-8 字节（指针+len）。返 PlayerKey u64；失败返 0
+        ///  （null 句柄 / 非 UTF-8 / 无 scene / 节点无效 / keyframes 表无此 name）。
+        ///
+        ///  建 **programmatic** player（sync_animation_players 完全跳过，不受 class 声明管）：
+        ///  spec 默认 = 1s / 无 delay / 单次迭代 / normal / fill both / cubic-out
+        ///  （C# `Play(name)` 无时长参数，默认由 core `play_programmatic` 定，T13 测试钉死）。
+        ///  立即写首帧（spec §5.2：不等下帧 step b，防 delay 期闪 base）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_play_animation", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong loomgui_stage_play_animation(StageHandle* h, uint node, byte* name, nuint name_len);
+
+        /// <summary>
+        ///  暂停 player（Playing → Paused，elapsed 冻结位置保持）。key 无效 / 非 Playing → no-op。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_pause_animation", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_pause_animation(StageHandle* h, ulong key);
+
+        /// <summary>
+        ///  恢复播放（Paused → Playing）。key 无效 / 非 Paused → no-op
+        ///  （Completed 是粘性完成态、Stopped 是终态，均不可恢复）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_resume_animation", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_resume_animation(StageHandle* h, ulong key);
+
+        /// <summary>
+        ///  停止 player（T6 review Minor 1 钉死：scene 层**终态**，不可恢复，勿当暂停）。
+        ///  只标记 Stopped：下帧 update_all 清本 player 通道 + 从 players 表移除，PlayerKey 失效。
+        ///  此后 get_animation_state 恒 255（无效）。key 无效 → no-op。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_stop_animation", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_stop_animation(StageHandle* h, ulong key);
+
+        /// <summary>
+        ///  读 player 时间轴位置（elapsed——含 delay 计时的唯一时间源头，spec §5.3）。
+        ///  key 无效 / 无 scene → 0.0（不 panic）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_animation_time", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern float loomgui_stage_get_animation_time(StageHandle* h, ulong key);
+
+        /// <summary>
+        ///  seek：设 player.elapsed，下一帧 step b 按新位置采样（C# `Animation.Time` setter）。
+        ///  时间源头单一是 elapsed，不校验范围（负值 = 仍在 delay 阶段之前）。key 无效 → no-op。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_animation_time", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_set_animation_time(StageHandle* h, ulong key, float time);
+
+        /// <summary>
+        ///  读 player 运行状态。Playing=0 / Paused=1 / Completed=2；Invalid=255（key 不存在 /
+        ///  无 scene / Stopped——Stopped 是终态，下帧即回收，语义等同无效）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_animation_state", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte loomgui_stage_get_animation_state(StageHandle* h, ulong key);
+
+        /// <summary>
+        ///  注册 OnKey 百分比阈值（spec §7.3 `animation_on_key`；C# `Animation.OnKey(pct, cb)` 走此 FFI，
+        ///  回调本身留 C# 按 playerKey 匹配触发）。pct 应 ∈ [0,1]（progress 域外永不触发，注册无害）。
+        ///  重复注册同 pct 去重（register_on_key）。key 无效 → no-op。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_animation_on_key", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_animation_on_key(StageHandle* h, ulong key, float pct);
 
         /// <summary>
         ///  建根节点并设为 roots[0]。kind/css = UTF-8 字节。返 NodeId；0xFFFF_FFFF = 失败。

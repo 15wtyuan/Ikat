@@ -1,3 +1,4 @@
+use crate::scene::animation::TransformAnim;
 use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
     BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, Gradient2,
@@ -447,6 +448,82 @@ pub fn parse_transform(value: &str) -> LocalTransform {
 }
 
 /// 拆 "translate(10px,20px) rotate(45deg)" → [("translate","10px,20px"),("rotate","45deg")]。
+/// Parse a keyframe transform into its lossless TRS representation.
+///
+/// Keyframe transforms deliberately do not use the static-transform matrix path: the runtime
+/// interpolates each component independently. The fence transform subset is translate/scale/
+/// rotate, so this preserves every supported function without matrix decomposition. Any unknown
+/// function or malformed argument returns `None` rather than silently dropping part of a value.
+/// `translateX`/`translateY` are accepted as the one-axis CSS conveniences used by showcase CSS;
+/// `none` is the identity transform and returns an empty `TransformAnim`.
+/// The decomposition assumes the canonical T→R→S order: repeated components are last-wins,
+/// and other composition orders (for example `rotate translate`) are not preserved.
+pub fn parse_transform_trs(value: &str) -> Option<TransformAnim> {
+    let value = value.trim();
+    if value == "none" {
+        return Some(TransformAnim::default());
+    }
+    let funcs = iter_transform_funcs(value);
+    if funcs.is_empty() {
+        return None;
+    }
+    let mut out = TransformAnim::default();
+    for (name, args) in funcs {
+        let parts: Vec<&str> = args.split(',').map(str::trim).collect();
+        match name {
+            "translate" => {
+                if parts.len() > 2 || parts.is_empty() {
+                    return None;
+                }
+                let x = parse_px(parts[0])?;
+                let y = if let Some(y) = parts.get(1) {
+                    parse_px(y)?
+                } else {
+                    0.0
+                };
+                out.translate = Some([x, y]);
+            }
+            "translateX" => {
+                if parts.len() != 1 {
+                    return None;
+                }
+                out.translate = Some([parse_px(parts[0])?, 0.0]);
+            }
+            "translateY" => {
+                if parts.len() != 1 {
+                    return None;
+                }
+                out.translate = Some([0.0, parse_px(parts[0])?]);
+            }
+            "scale" => {
+                if parts.len() != 1 && parts.len() != 2 {
+                    return None;
+                }
+                let sx = parts[0].parse::<f32>().ok()?;
+                let sy = if let Some(y) = parts.get(1) {
+                    y.parse::<f32>().ok()?
+                } else {
+                    sx
+                };
+                out.scale = Some([sx, sy]);
+            }
+            "rotate" => {
+                if parts.len() != 1 {
+                    return None;
+                }
+                let deg = parts[0]
+                    .trim_end_matches("deg")
+                    .trim()
+                    .parse::<f32>()
+                    .ok()?;
+                out.rotate = Some(deg.to_radians());
+            }
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
 fn iter_transform_funcs(s: &str) -> Vec<(&str, &str)> {
     let mut out = Vec::new();
     let bytes = s.as_bytes();
@@ -1250,6 +1327,13 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.transition = parse_transition(value);
             true
         }
+        "animation" => {
+            // class 规则运行时 rematch 走此 arm（spec §5.2 class 触发）：动态规则的
+            // animation 声明叠加进 computed style.animation，sync_animation_players (g')
+            // 据此启停 player。打包期 inline 走 fence 的 validate + parse（同一 parse_animation）。
+            style.animation = parse_animation(value);
+            true
+        }
         "text-shadow" => {
             // CSS text-shadow: ox oy [blur] color，逗号分隔多阴影。
             // 每段 → FontEffect::Shadow{ox, oy, blur, color}，叠进 text_effects（INHERITED）。
@@ -1314,18 +1398,127 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
     }
 }
 
+/// 解析 CSS `animation` 简写值 → AnimationSpec 列表（逗号分隔多声明展开为多条）。
+///
+/// 与 `parse_transition` 同构：core 是解析真相源（运行时 rematch 的 apply_decl "animation"
+/// arm 调用），fence 打包期 inline 路径委托本函数（fence `parse_animation_value`），
+/// 防两份解析器漂移（spec §8.2/§8.3 对齐表唯一真相源 = `css_ease_keyword`）。
+///
+/// 语义：首个 time=duration、次个 time=delay；ease 关键字按 §8.3 对齐表映射
+/// （`ease`→CubicOut，`ease-in/out/in-out`→Quad*，`step-start/end`→Step）；缺省值 =
+/// CSS initial（direction=normal / fill=none / play-state=running / iteration-count=1 /
+/// timing=ease）。非法段（空 / `none` / 非法 name / 缺 duration）静默丢弃（filter_map）。
+pub fn parse_animation(value: &str) -> Vec<crate::style::resolved::AnimationSpec> {
+    use crate::style::resolved::AnimationSpec;
+    value
+        .split(',')
+        .filter_map(|decl| parse_one_animation(decl.trim()))
+        .collect::<Vec<AnimationSpec>>()
+}
+
+/// 单条 animation 声明（逗号分隔的一段）→ AnimationSpec。`none` / 空 / 非法 name → None。
+/// 与 fence `validate_one_animation_decl`（打包期严格门）语义对齐；此处宽松（filter_map
+/// 丢弃），运行时值已过打包期 validate，越界输入防御性返 None。
+fn parse_one_animation(decl: &str) -> Option<crate::style::resolved::AnimationSpec> {
+    use crate::style::resolved::{
+        AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
+    };
+    if decl.is_empty() || decl.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    let mut tokens = decl.split_whitespace();
+    let name = tokens.next()?;
+    if !is_valid_animation_name(name) {
+        return None;
+    }
+    // CSS initial 值起步；显式关键字覆盖对应字段。
+    let mut spec = AnimationSpec {
+        name: name.to_string(),
+        duration: 0.0,
+        delay: 0.0,
+        iteration_count: Some(1), // CSS initial iteration-count = 1（None = infinite）
+        direction: AnimationDirection::Normal,
+        fill_mode: AnimationFillMode::None,
+        timing_function: crate::tween::Ease::CubicOut, // CSS animation 默认 ease（§8.3）
+        play_state: AnimationPlayState::Running,
+    };
+    let mut time_count = 0;
+    for tok in tokens {
+        if let Some(secs) = parse_time_seconds(tok) {
+            // 首个 time = duration，次个 time = delay（§8.2）。
+            if time_count == 0 {
+                spec.duration = secs;
+            } else {
+                spec.delay = secs;
+            }
+            time_count += 1;
+        } else if tok.eq_ignore_ascii_case("infinite") {
+            spec.iteration_count = None;
+        } else if tok.chars().all(|c| c.is_ascii_digit()) {
+            spec.iteration_count = tok.parse::<u32>().ok();
+        } else if let Some(e) = css_ease_keyword(tok) {
+            spec.timing_function = e;
+        } else {
+            match tok.to_ascii_lowercase().as_str() {
+                "normal" => spec.direction = AnimationDirection::Normal,
+                "reverse" => spec.direction = AnimationDirection::Reverse,
+                "alternate" => spec.direction = AnimationDirection::Alternate,
+                "alternate-reverse" => spec.direction = AnimationDirection::AlternateReverse,
+                "none" => spec.fill_mode = AnimationFillMode::None,
+                "forwards" => spec.fill_mode = AnimationFillMode::Forwards,
+                "backwards" => spec.fill_mode = AnimationFillMode::Backwards,
+                "both" => spec.fill_mode = AnimationFillMode::Both,
+                "running" => spec.play_state = AnimationPlayState::Running,
+                "paused" => spec.play_state = AnimationPlayState::Paused,
+                _ => {} // 未知 token 忽略（validate 门已拦）
+            }
+        }
+    }
+    // 与 validate 一致：缺 time（duration）的声明无效。
+    if time_count == 0 {
+        return None;
+    }
+    Some(spec)
+}
+
+/// animation-name 接受 CSS 自定义标识符（字母/-/_/数字，非数字开头；不允许 `--` 前缀）。
+/// 与 fence `is_valid_animation_name` 同语义（fence validate 门打包期拦，此处运行时防御）。
+fn is_valid_animation_name(s: &str) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_' || first == '-') {
+        return false;
+    }
+    if first == '-' {
+        // `-name` 允许；`--name` 是 CSS 变量，不是动画名。
+        match chars.next() {
+            Some('-') => return false,
+            Some(c) if !(c.is_ascii_alphanumeric() || c == '_' || c == '-') => return false,
+            None => return false,
+            _ => {}
+        }
+    }
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 /// 解析 CSS `transition` 声明值 → TransitionSpec 列表。
 ///
 /// 逗号分隔多 spec（如 `background-color 0.3s, color 0.3s`）。每段由 `parse_one_transition`
 /// 解析。空输入返回空 Vec（未声明 transition）。
-fn parse_transition(value: &str) -> Vec<crate::style::resolved::TransitionSpec> {
+///
+/// `pub` 供 fence css_resolve 复用（打包期 inline 与运行时 rematch 同一真相源，
+/// 防 spec §8.3 ease 对齐表漂移）。
+pub fn parse_transition(value: &str) -> Vec<crate::style::resolved::TransitionSpec> {
     value.split(',').filter_map(parse_one_transition).collect()
 }
 
 /// 解析单个 transition spec（逗号分隔的一段）。
-/// 空格切 token：第 1 个 = 属性名（all/opacity/color/background-color）；含 's' 的 =
-/// duration/delay（首遇 duration，次遇 delay）；其余 = ease 关键字。缺省补默认
-/// （dur=0s, ease=Linear, delay=0s）。空段返回 None（被 filter_map 丢弃）。
+/// 空格切 token：prop 关键字（all/opacity/color/background-color）→ TweenProp 映射；
+/// time（`<n>s`/`<n>ms`）首遇 = duration、次遇 = delay；其余 = ease 关键字（§8.3 对齐表）。
+/// 缺省补默认（dur=0s, ease=CubicOut=CSS 初始 ease, delay=0s）。空段返回 None。
 fn parse_one_transition(part: &str) -> Option<crate::style::resolved::TransitionSpec> {
     use crate::style::resolved::TransitionSpec;
     use crate::tween::{Ease, TweenProp};
@@ -1336,33 +1529,28 @@ fn parse_one_transition(part: &str) -> Option<crate::style::resolved::Transition
     let mut prop = None;
     let mut duration = 0.0f32;
     let mut delay = 0.0f32;
-    let mut ease = Ease::Linear;
+    let mut ease = Ease::CubicOut; // CSS transition 默认 timing-function = ease（§8.3）
+    let mut time_count = 0;
     for t in tokens {
-        if t == "all" {
-            prop = None;
-        } else if t == "opacity" {
-            prop = Some(TweenProp::Opacity);
-        } else if t == "color" {
-            prop = Some(TweenProp::TextColor);
-        } else if t == "background-color" {
-            prop = Some(TweenProp::BgColor);
-        } else if t.ends_with('s') {
-            let n = t.trim_end_matches('s').parse::<f32>().unwrap_or(0.0);
-            if duration == 0.0 {
-                duration = n;
-            } else {
-                delay = n;
+        match t {
+            "all" => prop = None,
+            "opacity" => prop = Some(TweenProp::Opacity),
+            "color" => prop = Some(TweenProp::TextColor),
+            "background-color" => prop = Some(TweenProp::BgColor),
+            _ => {
+                if let Some(secs) = parse_time_seconds(t) {
+                    // 首遇 = duration，次遇 = delay（CSS 语义；time_count 防 0s duration 被吞）
+                    if time_count == 0 {
+                        duration = secs;
+                    } else {
+                        delay = secs;
+                    }
+                    time_count += 1;
+                } else if let Some(e) = css_ease_keyword(t) {
+                    ease = e;
+                }
+                // 未知 token 忽略（transition 零校验宽松语义，与 fence 一致）
             }
-        } else {
-            // ease 关键字（CSS 标准名 → 内 Ease 变体）
-            ease = match t {
-                "linear" => Ease::Linear,
-                "ease" => Ease::QuadOut,
-                "ease-in" => Ease::QuadIn,
-                "ease-out" => Ease::QuadOut,
-                "ease-in-out" => Ease::QuadInOut,
-                _ => Ease::Linear,
-            };
         }
     }
     Some(TransitionSpec {
@@ -1370,6 +1558,33 @@ fn parse_one_transition(part: &str) -> Option<crate::style::resolved::Transition
         duration,
         ease,
         delay,
+    })
+}
+
+/// `<n>s` / `<n>ms` → 秒（None = 非 time token）。
+fn parse_time_seconds(tok: &str) -> Option<f32> {
+    if let Some(num) = tok.strip_suffix("ms") {
+        return num.parse::<f32>().ok().map(|n| n / 1000.0);
+    }
+    tok.strip_suffix('s')?.parse::<f32>().ok()
+}
+
+/// CSS timing-function 关键字 → Ease（spec §8.3 对齐表；唯一真相源）。
+///
+/// `pub` 供 fence 委托（transition 侧经 `parse_transition`、animation 侧直接调用），
+/// 打包期与运行时共用一张表，防双份白名单漂移。本表按小写精确匹配；fence animation
+/// 侧 validate 门大小写不敏感，查表前自行 lowercase（见 fence css.rs `ease_from_keyword`）。
+pub fn css_ease_keyword(kw: &str) -> Option<crate::tween::Ease> {
+    use crate::tween::Ease;
+    Some(match kw {
+        "linear" => Ease::Linear,
+        "ease" => Ease::CubicOut,
+        "ease-in" => Ease::QuadIn,
+        "ease-out" => Ease::QuadOut,
+        "ease-in-out" => Ease::QuadInOut,
+        "step-start" => Ease::Step { start: true },
+        "step-end" => Ease::Step { start: false },
+        _ => return None,
     })
 }
 

@@ -29,6 +29,14 @@ pub struct ParsedSelector {
     pub specificity: Specificity,
 }
 
+/// `:nth-child(An+B)` 表达式参数：`odd`=`(2,1)`、`even`=`(2,0)`、纯整数 N=`(0,N)`、
+/// `An+B`=`(A,B)`。`a == 0` 时仅匹配第 `b` 个子节点（纯整数形态）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NthChildExpr {
+    pub a: i32,
+    pub b: i32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Compound {
     pub tag: Option<String>,
@@ -39,6 +47,9 @@ pub struct Compound {
     pub pseudo_active: bool,
     pub pseudo_disabled: bool,
     pub pseudo_focus: bool,
+    /// `:nth-child(...)` 参数（None = 未声明）。结构伪类：匹配依赖节点在父
+    /// `children` 的位置（1-based index），见 `nth_child_matches`。
+    pub pseudo_nth_child: Option<NthChildExpr>,
     /// 属性选择器（`[attr]` / `[attr="val"]`）。出现属性选择器即把规则划入动态规则表
     /// （运行时按节点 attrs 匹配，静态 cascade 无法预判），由 compound_matches_node 匹配。
     pub attrs: Vec<AttrSelector>,
@@ -78,7 +89,7 @@ pub struct Specificity(pub u32, pub u32, pub u32); // (id 数, class 数, tag �
 use crate::scene::control::ROLE_TAB;
 use crate::scene::node::{NodeFlags, NodeId, Scene};
 use crate::style::mapping::apply_decl;
-use crate::style::resolved::{ResolvedStyle, TransitionSpec};
+use crate::style::resolved::{AnimationSpec, ResolvedStyle, TransitionSpec};
 use std::collections::HashMap;
 
 /// cascade 期 transient：节点显式声明了哪些可继承属性（bitmask）。
@@ -319,7 +330,38 @@ pub fn compound_matches_node(c: &Compound, node_id: NodeId, scene: &Scene) -> bo
             return false;
         }
     }
+    // :nth-child 结构匹配：节点在父 children 的 1-based index（spec §8.5）。
+    if let Some(expr) = &c.pseudo_nth_child {
+        if !nth_child_matches(scene, node_id, expr) {
+            return false;
+        }
+    }
     true
+}
+
+/// `:nth-child(An+B)` 匹配（spec §8.5）：节点在父 `children` 的 1-based index `i`，
+/// `a == 0` 时 `i == b`；否则 `(i - b) % a == 0 && (i - b) / a >= 0`。
+/// 根节点（无父）不匹配任何 :nth-child。
+fn nth_child_matches(scene: &Scene, node_id: NodeId, expr: &NthChildExpr) -> bool {
+    let parent = match scene.get(node_id).and_then(|n| n.parent) {
+        Some(p) => p,
+        None => return false,
+    };
+    let i = match scene
+        .get(parent)
+        .and_then(|p| p.children.iter().position(|&c| c == node_id))
+    {
+        Some(pos) => pos as i32 + 1, // 0-based → 1-based
+        None => return false,
+    };
+    let a = expr.a;
+    let b = expr.b;
+    if a == 0 {
+        i == b
+    } else {
+        let d = i - b;
+        d % a == 0 && d / a >= 0
+    }
 }
 
 /// 运行时属性选择器匹配。Node 不存任意 HTML 属性字面值，按 name 分派到三类来源：
@@ -452,7 +494,7 @@ fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
 /// 判定 compound 是否匹配 node + 状态门。
 ///
 /// 状态门：伪类（hovered / active / disabled / focused）。
-/// 通过后调 compound_matches_node 做字面匹配（tag/classes/id_attr）。
+/// 通过后调 compound_matches_node 做字面匹配（tag/classes/id_attr + :nth-child 结构位置）。
 fn compound_matches_with_state(c: &Compound, node_id: NodeId, scene: &Scene) -> bool {
     // 伪类状态门
     let node = scene.get(node_id).expect("live node");
@@ -603,14 +645,14 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
     // set-ness：每节点显式声明了哪些可继承属性。cascade 期收集，继承 pass 消费。
     let mut set_map: HashMap<NodeId, InheritedSet> = HashMap::new();
     for node_id in node_ids {
-        // 捕获旧级联值 + cascaded_once + transition 声明（写新 style 前留快照）。
-        // transition 读自 base_style（打包期烘焙的静态声明，rematch 不改 base_style）。
-        let (old_style, cascaded_once, transition_decl) = {
+        // 捕获旧级联值 + cascaded_once（写新 style 前留快照）。
+        // transition 声明在下方级联完成后从 new_style 读（覆盖 base/inline +
+        // 动态 class 规则两源），此处只留 old_style 供通道变化比较。
+        let (old_style, cascaded_once) = {
             let n = scene.get(node_id).expect("live node");
             (
                 n.style.clone(),
                 n.interaction.flags.contains(NodeFlags::CASCALED),
-                n.base_style.transition.clone(),
             )
         };
         // 从 base_style 重起
@@ -672,6 +714,9 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
             }
         }
         set_map.insert(node_id, inh);
+        // transition 声明读自级联结果（new_style）：base/inline 烘焙经
+        // base_style.clone 进入，动态 class 规则经 apply_decl 写入——两源统一。
+        let transition_decl = new_style.transition.clone();
         // transition 检测：仅 cascaded_once 后（首次 cascade 即时生效不动画），
         // 且声明了非零 duration 的 transition 时，比较可动画通道变化推请求。
         for ts in &transition_decl {
@@ -797,6 +842,139 @@ fn propagate_inherited_rec(
         // 根节点：无父继承，effective = 自己 style，直接向下传
         for c in children {
             propagate_inherited_rec(scene, c, Some(my_style.clone()), set_map);
+        }
+    }
+}
+
+/// 声明式动画启停（tick step g'，spec §5.2 class 触发）。rematch(f) 之后、solve(i) 之前
+/// 调用：读节点 computed `style.animation`（rematch 已把动态规则的 animation 声明叠加进
+/// style），与节点活跃 player 比对，只增删不推进时间轴（推进是 step b update_all 的事）。
+///
+/// 决策规则（与 T6 `update_all` 的 Completed 保留设计衔接）：
+/// - **声明出现（新 name）** → 建 player：从 `Scene.keyframes` 全局表按 name 拷 KeyframesRule；
+///   fill backwards/both 立即算首帧写 NodeAnim（spec §5.2，防 delay 期闪 base）；
+///   `animation-play-state: paused` 声明的建 Paused player。未知 name → 跳过（CSS 语义=无动画）。
+/// - **声明消失** → 回收 player（含 fill forwards/both 的 Completed player，spec §6.3）：
+///   清它持有的通道回 None → tween/base 接管。同节点多 player 共享通道时，只清"移除者持有
+///   且无剩余 player 持有"的通道（防误清仍在播的动画）。
+/// - **同名参数变**（duration/delay/iteration/fill 等）→ kill 旧 + 建新（合法重播）。
+/// - **同名已存在（含 Completed）** → 不重播（防 fill none 的结束标记被无限重启，T6 衔接点 1）。
+/// - **`programmatic` player**（node.Play 建，T10）→ 完全跳过：不回收、不算已存在
+///   （同名声明出现时另建 class player，二者独立）。
+///
+/// 多 animation（`animation: a .3s, b .5s`）：每条声明独立建 player；update_all 按插入序
+/// 写，后声明覆盖同通道（spec §6.4）。
+pub fn sync_animation_players(scene: &mut Scene) {
+    use crate::scene::animation::{
+        clear_channels, owned_channels, write_frame, KeyframePlayer, PlayerKey, PlayerPlayState,
+    };
+    use crate::style::resolved::{AnimationFillMode, AnimationPlayState};
+    use std::collections::HashSet;
+
+    // 按节点分组现有 player（slotmap 迭代 + 克隆 spec，避免跨可变借）。
+    // 悬空节点（节点已删，update_all 同款双保险）：直接回收，不进分组。
+    let mut node_players: HashMap<NodeId, Vec<(PlayerKey, AnimationSpec, bool)>> = HashMap::new();
+    let mut dead_keys: Vec<PlayerKey> = Vec::new();
+    for (k, p) in &scene.players {
+        if scene.nodes.contains_key(p.node.to_key()) {
+            node_players
+                .entry(p.node)
+                .or_default()
+                .push((k, p.spec.clone(), p.programmatic));
+        } else {
+            dead_keys.push(k);
+        }
+    }
+
+    let node_ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
+    let mut remove_keys: Vec<PlayerKey> = dead_keys;
+    let mut insert_specs: Vec<(NodeId, AnimationSpec)> = Vec::new();
+
+    for node in node_ids {
+        let declared = scene
+            .get(node)
+            .map(|n| n.style.animation.clone())
+            .unwrap_or_default();
+        let existing = node_players.remove(&node).unwrap_or_default();
+        if declared.is_empty() && existing.is_empty() {
+            continue;
+        }
+        // 每条声明匹配一个未占用的非 programmatic player：
+        //  - 同名同参（含 Completed）→ 保留；
+        //  - 同名异参 → kill 旧 + 重播（参数变 = 合法重启）；
+        //  - 无同名 → 新建。
+        let mut used: HashSet<PlayerKey> = HashSet::new();
+        for spec in &declared {
+            match existing
+                .iter()
+                .find(|(k, ps, prog)| !prog && !used.contains(k) && ps.name == spec.name)
+            {
+                Some((k, ps, _)) => {
+                    used.insert(*k);
+                    if ps != spec {
+                        remove_keys.push(*k);
+                        insert_specs.push((node, spec.clone()));
+                    }
+                }
+                None => insert_specs.push((node, spec.clone())),
+            }
+        }
+        // 声明消失的非 programmatic player（含 Completed）→ 回收。
+        for (k, _, prog) in &existing {
+            if !prog && !used.contains(k) {
+                remove_keys.push(*k);
+            }
+        }
+    }
+
+    // 应用：先移除（清通道掩码 = 移除者持有 ∩ 无剩余持有，防共享通道误清），
+    // 再插入（backwards/both 立即写首帧；paused 声明建 Paused player）。
+    for k in &remove_keys {
+        let Some(p) = scene.players.remove(*k) else {
+            continue;
+        };
+        let own = owned_channels(&p);
+        let remaining =
+            scene
+                .players
+                .values()
+                .filter(|q| q.node == p.node)
+                .fold([false; 4], |acc, q| {
+                    let m = owned_channels(q);
+                    [
+                        acc[0] || m[0],
+                        acc[1] || m[1],
+                        acc[2] || m[2],
+                        acc[3] || m[3],
+                    ]
+                });
+        clear_channels(
+            &mut scene.anim,
+            p.node,
+            [
+                own[0] && !remaining[0],
+                own[1] && !remaining[1],
+                own[2] && !remaining[2],
+                own[3] && !remaining[3],
+            ],
+        );
+    }
+    for (node, spec) in insert_specs {
+        let Some(rule) = scene.keyframes.get(&spec.name).cloned() else {
+            continue; // 未知 animation-name：CSS 语义 = 无动画（打包期 validate 应已拦，防御）
+        };
+        let mut player = KeyframePlayer::new(node, spec.clone(), rule);
+        if spec.play_state == AnimationPlayState::Paused {
+            player.play_state = PlayerPlayState::Paused;
+        }
+        // 首帧立即写（spec §5.2）：不等下帧 step b，防 delay 期闪 base。
+        let first = player.advance(0.0);
+        scene.players.insert(player);
+        if matches!(
+            spec.fill_mode,
+            AnimationFillMode::Backwards | AnimationFillMode::Both
+        ) {
+            write_frame(&mut scene.anim, node, first.props);
         }
     }
 }
@@ -937,6 +1115,7 @@ mod tests {
                 pseudo_active: false,
                 pseudo_disabled: false,
                 pseudo_focus: false,
+                pseudo_nth_child: None,
                 attrs: Vec::new(),
             };
             let mut rest = part;

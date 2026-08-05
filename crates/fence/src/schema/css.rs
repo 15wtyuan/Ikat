@@ -1,3 +1,5 @@
+use loomgui_core::style::resolved::{AnimationSpec, TransitionSpec};
+
 // == CssPropSpec ==
 
 /// Compile-time schema entry for one CSS property.
@@ -501,8 +503,9 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         parser: CssValueParser::Transition,
     },
     // animation: name duration [easing] [iteration-count|infinite] [fill-mode] [direction] [play-state] [delay].
-    // 对齐 public-api.md「动画定义全在 CSS」终态契约。runtime 驱动（@keyframes 表 + tween
-    // 发射）在 §4 视觉束实现（v1.10）；本轮 fence 接受语法 + 静默忽略（不报错、不跑动画）。
+    // 对齐 public-api.md「动画定义全在 CSS」终态契约。runtime 驱动：class 规则经
+    // apply_decl "animation" arm 进 computed style → sync_animation_players (g') 启停
+    // player（M2 keyframes runtime，spec §5.2）；打包期 inline 走 validate + 同一解析器。
     CssPropSpec {
         name: "animation",
         default: "none",
@@ -589,18 +592,25 @@ pub fn find_shorthand(name: &str) -> Option<&'static ShorthandSpec> {
 /// - `<name> <duration> [remainder...]` —— 至少 name + 一个 time 值（`<n>s` 或 `<n>ms`）；
 ///   remainder tokens 可任意顺序，每 token 须落入已知关键字类（easing / iteration-count /
 ///   fill-mode / direction / play-state / time）。
-///
-/// runtime 驱动在 §4 视觉束实现；本轮仅语法校验，不存值（apply_decl 不识别 `animation` →
-/// resolve 阶段静默跳过）。语法合法但 runtime 不跑动画，符合「收到规则但 §4 没实现 → 静默忽略」。
+/// - 逗号多声明（`a .3s, b .5s infinite`）——每段独立校验（CSS 标准语法）。
 pub fn validate_animation_value(value: &str) -> bool {
     let v = value.trim();
     if v.is_empty() {
         return false;
     }
-    if v.eq_ignore_ascii_case("none") {
+    v.split(',')
+        .all(|decl| validate_one_animation_decl(decl.trim()))
+}
+
+/// 单条 animation 声明（逗号分隔的一段）的结构校验。`none` 段合法（= 无动画）。
+fn validate_one_animation_decl(decl: &str) -> bool {
+    if decl.is_empty() {
+        return false;
+    }
+    if decl.eq_ignore_ascii_case("none") {
         return true;
     }
-    let mut tokens = v.split_whitespace();
+    let mut tokens = decl.split_whitespace();
     // 首 token = animation-name（标识符；不允许数字开头、不允许含特殊字符）
     let Some(name) = tokens.next() else {
         return false;
@@ -620,7 +630,28 @@ pub fn validate_animation_value(value: &str) -> bool {
     saw_time
 }
 
+/// 解析 `animation` 简写值 → AnimationSpec 列表（逗号分隔多声明展开为多条）。
+///
+/// 委托 core `mapping::parse_animation`——打包期 inline 与运行时 rematch（class 规则走
+/// apply_decl "animation" arm）共用同一解析器，防 spec §8.2/§8.3 语义漂移（transition 侧
+/// 已同模式委托 `parse_transition_value`）。越界输入由 `validate_animation_value` 门拦截，
+/// 此处防御性返回空。
+pub fn parse_animation_value(value: &str) -> Vec<AnimationSpec> {
+    loomgui_core::style::mapping::parse_animation(value)
+}
+
+/// 解析 `transition` 简写值 → TransitionSpec 列表（逗号分隔多 spec）。
+///
+/// 委托 core `mapping::parse_transition`——打包期 inline 与运行时 rematch（`<style>` 规则
+/// 走 apply_decl）共用同一解析器，防 spec §8.3 ease 对齐表漂移（该函数已按 §8.3 对齐）。
+/// 语义：prop 映射 opacity→Opacity / color→TextColor / background-color→BgColor /
+/// all+缺省→None；首 time=duration、次 time=delay；ease 缺省 = CSS initial ease→CubicOut。
+pub fn parse_transition_value(value: &str) -> Vec<TransitionSpec> {
+    loomgui_core::style::mapping::parse_transition(value)
+}
+
 /// animation-name 接受 CSS 自定义标识符（字母/-/_/数字，非数字开头；不允许 `--` 前缀）。
+/// validate 门专用（解析统一走 core `parse_animation` 内置同名校验）。
 fn is_valid_animation_name(s: &str) -> bool {
     let mut chars = s.chars();
     let Some(first) = chars.next() else {

@@ -1367,4 +1367,32 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 
 **教训**：RoleTable 稀疏性靠 is_empty 守，新字段若能单独占住一个 info 就必须进 is_empty；加字段的所有消费者（dispatch / 谓词 / 序列化 / 构造）都要 grep，不只 dispatch。
 
+### 坑 179：`enter_data_driven` 只扫 ul 直接 ListItem 子，漏 `<template>` 子采纳（M1 ListView）
+
+**症状**：首次设 `ItemCount` 抛「ListView 无模板来源」，inventory/mail 两个列表都进不去（`list_set_item_count` 返 -1）。
+**根因**：spec §6.3 step 2（ul 下单个 `<template>` 子自动采用）未实现。packer 把 `<template>` 保留为 `NodeKind::Template`（v27+），其下才是 ListItem 蓝图；但 enter 只找 ul 的直接 ListItem 子，找不到 → 报无模板来源。spec 分步契约（step 1 显式 ItemTemplate / step 2 `<template>` 子 / step 3 设计期 li）只做了兜底 step 3。
+**解决**：enter 须 descend 进单个 `<template>` 子取其首个 ListItem 作蓝图（多个 template → 契约错）；克隆后清空 ul **全部**设计期子（template 子树 + li + 标签间空白 TextNode），使 ul 仅剩 spacer+slot。（commit `cbf9aa4`）
+**教训**：spec 分步契约实现时逐 step 核对，别只做兜底；改 enter/模板逻辑后必重打 pkg（`Node.base_style` 是打包期产物）+ dump 验证 tree 结构。
+
+### 坑 180：class 样式（.grid 等）在 solve 时才解析进 `node.style`，enter/early 阶段读不到
+
+**症状**：在 `enter_data_driven` 里检测 `ul.style.flex_wrap == Wrap` 永远 false（实际 .grid 是 wrap）。
+**根因**：class 规则**不烘进 base_style**（base_style 只含 inline + UA），运行时由 solve 把 class 规则解析进 `node.style`。enter 在首帧 solve **之前**调，此时 node.style 还是默认值（Block/NoWrap）。
+**解决**：运行时样式检测（flex-direction/wrap/gap/overflow）懒到 `plan_one`（首帧 solve 后）做；读 `node.style`（resolved），不读 `base_style`。（A1 网格检测采此路径）
+**教训**：任何「读节点运行时样式做分派/检测」的代码必须在 solve 之后跑；class 样式不在 base_style 里——读样式水远看 `node.style`。
+
+### 坑 181：容器节点（div/ListItem 无背景）不总出 render node → dump 数 slot 根 id 是测量陷阱
+
+**症状**：dump 发现「一个 slot 根（ListItem）不在 `frame.nodes`」，误判为「slot 渲染缺失」bug，耗费大量时间查根因（最后发现是测量假象）。
+**根因**：容器节点（无 background/border/image）不直接出 render node，只其文本/图叶子出；ListItem 根是容器，本就不在 frame.nodes。数 slot 根 id 会看到「缺失」实为正常。
+**解决**：dump 验 slot 是否渲染要数其**文本/图叶子**（TextElement/TextNode/Image）的 node_id，不数容器根。
+**教训**：render node 以叶子为主；诊断 slot 可见性看叶子 id 是否在 frame.nodes，别看容器根（容器不出是正常的）。
+
+### 坑 182：M1 虚拟列表 slot GO churn（mail 滚动消失+卡顿）未解（坑 109 的新形态）
+
+**症状**：mail（单列、可变高度文本）滚动时上面 item 逐个消失 + 明显卡顿；inventory（固定高度图标网格，A1 后）不消失。MirrorPool churn log 见 created/tornDown 2-7 GO/帧。core 列表状态全验正确（dump：slot 数/可见区/spacer/裁剪都对）。
+**根因**：① core 的 `reuse_key` 只挂 slot 根（ListItem 容器），**不到渲染叶子**（叶子 reuse_key=0）→ MirrorPool 按 node_id 池化（非 reuse_key）；② slot 回收走 **detach/free 池模型**（remove_child → parent=None → 下帧 reuse），free 池期间 slot **不在 render 输出** → MirrorPool 销毁 GO，reuse 时重建 = churn。mail 文本 mesh 重建慢 → 1 帧 gap 可见（消失）；inventory 图标 mesh 快 → 不可见。与坑 109 同质（reuse_key 复用失效），但 M1 重写后是新形态。
+**解决（未果）**：parking（slot 离场移到离屏 0 尺寸 overflow:hidden 根，而非 parent=None）实测无效——同帧 park+unpark 但 churn 依旧，已回退。
+**教训**：churn 是 detach/free 池模型的固有副作用；正解是**持久 slot 池**（slot 永不离树，滚动换绑 item_index + spacer 重定位，node_id 恒定 → MirrorPool 复用 GO）。跨层 GO 生命周期 bug 光 core dump 定不了，需 Unity Profiler。详见 roadmap tech-debt。
+
 

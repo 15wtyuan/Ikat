@@ -40,7 +40,7 @@ pub fn prop_value_size(prop: TweenProp) -> u8 {
     }
 }
 
-/// easing 子集（10 个）。u8 值与 FFI / C# enum 对齐。
+/// easing 子集（11 个）。u8 值与 FFI / C# enum 对齐。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Ease {
@@ -54,10 +54,16 @@ pub enum Ease {
     BackIn = 7,
     BackOut = 8,
     BackInOut = 9,
+    /// CSS `steps(start|end)` 阶跃函数。start=true → steps(start)（跳变在区间起点），
+    /// false → steps(end)（末尾跳变）。追加到末尾保持既有判别值（0..9）稳定。
+    Step {
+        start: bool,
+    },
 }
 
 impl Ease {
     /// u32 → Ease（FFI 校验用）。越界 → None。判别值与 C# enum / FFI u32 对齐。
+    /// Step 变体带数据（start），u32 无法表达 → 不入 FFI 映射（动画 FFI 走独立通道）。
     pub fn try_from(v: u32) -> Option<Self> {
         match v {
             0 => Some(Self::Linear),
@@ -135,6 +141,15 @@ impl Ease {
                 } else {
                     let t = t - 2.0;
                     0.5 * (t * t * ((s + 1.0) * t + s) + 2.0)
+                }
+            }
+            // CSS steps()：单步阶跃。steps(start) → t=0 即 1.0；steps(end) → 保持 0.0
+            // 直到 t>=dur 跳 1.0（evaluate 入口已处理 dur<=0 返 1.0）。
+            Ease::Step { start } => {
+                if start || t >= dur {
+                    1.0
+                } else {
+                    0.0
                 }
             }
         }
@@ -344,6 +359,19 @@ mod tests {
     #[test]
     fn ease_dur_zero_returns_1() {
         assert_eq!(Ease::Linear.evaluate(0.5, 0.0), 1.0);
+    }
+
+    #[test]
+    fn ease_step_jumps_at_start_or_end() {
+        // CSS steps()：steps(start) → t=0 即 1.0；steps(end) → 0.0 直到 t>=dur 跳 1.0。
+        let dur = 1.0;
+        assert_eq!(Ease::Step { start: true }.evaluate(0.0, dur), 1.0);
+        assert_eq!(Ease::Step { start: true }.evaluate(0.5, dur), 1.0);
+        assert_eq!(Ease::Step { start: false }.evaluate(0.0, dur), 0.0);
+        assert_eq!(Ease::Step { start: false }.evaluate(0.5, dur), 0.0);
+        assert_eq!(Ease::Step { start: false }.evaluate(dur, dur), 1.0);
+        // dur<=0 入口统一返 1（与其它 ease 一致，防除零）
+        assert_eq!(Ease::Step { start: false }.evaluate(0.0, 0.0), 1.0);
     }
 
     #[test]

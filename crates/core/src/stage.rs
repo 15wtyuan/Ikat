@@ -9,7 +9,7 @@ use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
 use crate::scene::node::{NodeFlags, NodeId, NodeKind, Rect, Scene};
-use crate::style::dynamic::{rematch_pseudo_classes, ScopedRule};
+use crate::style::dynamic::{rematch_pseudo_classes, sync_animation_players, ScopedRule};
 use crate::style::resolved::OverflowMode;
 use crate::text::layout::FontTable;
 
@@ -825,6 +825,14 @@ impl Stage {
             .flags
             .insert(NodeFlags::SCOPE_ROOT | NodeFlags::LOOKUP_SCOPE);
 
+        // 组件级 @keyframes 进场景全局表：animation 声明只保存 name，player 在 tick
+        // 时按该表查规则。后实例化的组件覆盖同名规则，保持 CSS 全局查找语义。
+        for keyframes in &template.keyframes {
+            scene
+                .keyframes
+                .insert(keyframes.name.clone(), keyframes.clone());
+        }
+
         // 模板规则包装成 ScopedRule（scope_root = 实例根），push 进 scene 动态规则表。
         // 不再按 selector 去重：同模板多实例各带独立 scope_root，rematch 按 scope 隔离匹配，
         // 互不干扰（旧实现的 selector-only 去重会把不同组件同名 class 规则误判为重复丢弃——坑）。
@@ -872,6 +880,7 @@ impl Stage {
     /// ①tween ②focus_request ③process（仲裁+拖拽写 scroll_pos；hit_test 读上帧 world，1帧延迟已认）
     /// ④scroll update ⑤process_keys ⑥rematch_pseudo_classes（提到 solve 前：改 layout/transform/colors
     /// 三类，本帧 solve+compute 全消费）⑥.5 transition drain（rematch 产请求 → kill 旧 tween + 提交新）
+    /// ⑥.6 sync_animation_players（rematch 后启停 player：class 触发声明式动画，spec §5.2 g'）
     /// ⑦solve（读 rematch 后 taffy_style）
     /// ⑧refresh_content_sizes ⑨compute_world_transforms（读 rematch 后 transform+scroll_pos）
     /// ⑩build_render_nodes
@@ -899,6 +908,9 @@ impl Stage {
         let dt = self.pending_dt;
         self.pending_dt = 0.0;
         self.tweens.update(dt, scene, &mut out);
+        // player 推进（写 scene.anim）。在 tweens.update **之后** = 写入顺序即优先级：
+        // animation 覆盖 transition 同通道（spec §6.1）。须在 solve/compute_world_transforms 前。
+        crate::scene::animation::update_all(scene, dt, &mut out);
         // 光标闪烁 timer（单一动画时钟：与 tweens 同 dt，每帧 tick 推进一步）。
         crate::scene::control::advance_cursor_blink(scene, dt);
         // 消费 pending_focus_request（编程聚焦/清焦点，tick 外 request_focus/blur 记）。
@@ -955,7 +967,12 @@ impl Stage {
                 TRANSITION_TAG,
             );
         }
-        // 4.6 控件状态→视觉同步：ControlState 变化后把 fill width / check display 写进
+        // 4.6 animation 声明同步（spec §5.2 step g'）：rematch 后读 computed style.animation
+        //     启停 player。新 player 的 backwards 首帧立即写 NodeAnim，本帧 solve+render 消费；
+        //     回收时通道回 None（tween/base 下帧接管）。在 transition drain 之后：两者都只读
+        //     computed style、写各自运行时态，互不干扰（spec §6.5 检测独立）。
+        sync_animation_players(scene);
+        // 4.7 控件状态→视觉同步：ControlState 变化后把 fill width / check display 写进
         //     子节点 inline_override。须在 solve 前（inline 影响布局：fill width 决定 bar 宽度）。
         //     每帧对所有控件节点扫一次（控件稀疏，代价可接受）。读 controls.0.keys() 克隆
         //     避免与 sync_control_visuals 的可变借冲突。

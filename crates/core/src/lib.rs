@@ -16,6 +16,7 @@
 
 pub mod asset;
 pub mod dump;
+pub mod event;
 pub mod hit;
 pub mod input;
 pub mod layout;
