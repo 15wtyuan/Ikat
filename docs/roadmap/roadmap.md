@@ -250,6 +250,7 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
 - **GUI exe 拷贝滞后**（编码机工作流）：GUI exe 重出后编码机忙没拷 `unity/package/Editor/Tools/loomgui_gui.exe`，编码机关 GUI 后拷。不影响 runtime，影响打包器版本（pkg bump 时触发，坑 158 同源 stale exe 链）。
 - **loom.runtime.json stomping**（P3.2 concern 1，多 workspace 共享 output_dir）：多 workspace 共享同一 output_dir 时 packer 重写 `loom.runtime.json` 互相覆盖。处置：每 workspace 独立 output_dir（`loom.workspace.json` 配），或 packer 加 namespace 隔离。
 - ✅ **showcase src/key packer bug — RESOLVED**（showcase-package-unblock Task 8）：`normalize_sprite_key`（crates/packer/pkg/src/build.rs）把 HTML 相对 img src 归一为 workspace-root 相对 sprite_key；showcase img src + spec4b img-src 深度修对后 referenced_sprites ↔ atlas 校验过。
+- **M1 虚拟列表 slot GO churn（mail 滚动 item 消失+卡顿）**（复合束 ListView，2026-08 查证未解）：mail（单列、可变高度文本）滚动时上面 item 逐个消失 + 明显卡顿；inventory（固定高度图标网格）A1 后不消失。MirrorPool churn 2-7 GO/帧，core 列表状态全验正确。**根因**：① core reuse_key 只挂 slot 根（ListItem 容器）不到渲染叶子 → MirrorPool 按 node_id 池化；② slot 回收走 detach/free 池（remove_child→parent=None→下帧 reuse），free 池期间 slot 不在 render 输出 → MirrorPool 销毁 GO、reuse 重建 = churn；mail 文本 mesh 重建慢 → 1 帧 gap 可见（消失），inventory 图标快 → 不可见。同坑 109 的新形态（M1 重写后）。**parking 尝试失败**（slot 离场移离屏 0 尺寸根而非 parent=None）实测无效，已回退。**处置路标**：正解是**持久 slot 池**——slot 一旦创建永不离树（不 detach），滚动时换绑 item_index + 靠 head/tail spacer 重定位，node_id 恒定 → MirrorPool 始终复用 GO → 零 churn。复用 fgui GList 范式（`temp/FairyGUI-unity/Scripts/UI/GList.cs:1975` 槽位稳定 + 换绑数据：`ii.obj = ii2.obj` 搬对象不销毁）。需配合 Unity Profiler 实测（GO 创建/渲染耗时分布）定位，光 core dump 不够。坑 182。
 
 ### main-design.md 校验发现的 deferred 项（2026-07-20 review）
 
