@@ -627,6 +627,10 @@ pub struct Scene {
     /// 运行时态，不进 pkg。M2.5 池化时再优化（spec §4.3）。
     pub players:
         SlotMap<crate::scene::animation::PlayerKey, crate::scene::animation::KeyframePlayer>,
+    /// 事件字符串表（动画事件 name/hook_name payload，spec §7.5）。持久 intern：索引跨
+    /// tick 稳定，装 EventRecord 的 24-bit 槽（click_count+pad），C# demux（T11）按索引
+    /// 读回字符串。运行时态，不进 pkg。
+    pub event_strs: crate::event::EventStrTable,
 }
 
 impl Scene {

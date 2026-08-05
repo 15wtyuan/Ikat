@@ -136,6 +136,9 @@ pub struct KeyframePlayer {
     pub on_key_percents: Vec<f32>,
     /// 已触发的阈值（防同 iteration 重复触发）。
     pub fired_keys: Vec<f32>,
+    /// 已触发的 hook stop 百分比（防同 iteration 重复；与 fired_keys 分离——
+    /// OnKey 与同百分点 hook 可各自独立触发）。
+    pub fired_hooks: Vec<f32>,
     pub fired_start: bool,
 }
 
@@ -153,6 +156,7 @@ impl KeyframePlayer {
             programmatic: false,
             on_key_percents: Vec::new(),
             fired_keys: Vec::new(),
+            fired_hooks: Vec::new(),
             fired_start: false,
         }
     }
@@ -424,6 +428,33 @@ fn lerp_arr4(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
     ]
 }
 
+/// PlayerKey → u64（slotmap `KeyData::as_ffi`：`(version << 32) | idx`）。
+/// 事件 payload 编码（拆 2×u32 装 touch_id/x）+ T10 FFI 的 C# ulong 句柄共用。
+pub fn player_key_as_u64(key: PlayerKey) -> u64 {
+    slotmap::Key::data(&key).as_ffi()
+}
+
+/// u64 → PlayerKey（`from_ffi` 逆变换；任意值安全但 unspecified，消费方用
+/// `Scene.players.get` 校验——非法 key 查不到即 no-op）。
+pub fn player_key_from_u64(v: u64) -> PlayerKey {
+    PlayerKey::from(slotmap::KeyData::from_ffi(v))
+}
+
+/// FFI 注册 OnKey 百分比阈值（spec §7.3 `animation_on_key`）：push 进
+/// `player.on_key_percents`，update_all 每帧检测跨越。同 pct 重复注册去重。
+pub fn register_on_key(scene: &mut Scene, key: PlayerKey, pct: f32) {
+    if let Some(p) = scene.players.get_mut(key) {
+        if !p.on_key_percents.contains(&pct) {
+            p.on_key_percents.push(pct);
+        }
+    }
+}
+
+/// 阈值跨越判定：prev→cur 单调扫过 pct（双向——reverse/alternate 反向迭代也触发）。
+fn crossed(prev: f32, cur: f32, pct: f32) -> bool {
+    (prev < pct && cur >= pct) || (prev > pct && cur <= pct)
+}
+
 /// 每 tick 推进所有活跃 player 并写 NodeAnim（tick step b，spec §5.1）。
 ///
 /// 在 `TweenManager.update` **之后**调用——写入顺序即优先级：animation 同通道覆盖
@@ -440,8 +471,22 @@ fn lerp_arr4(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
 /// - Stopped（显式 Stop）：清通道 + 从 players 表移除；
 /// - 悬空 NodeId（节点已删）：同 Stopped 移除（与 tween.rs 同款双保险）。
 ///
-/// `out` 预留给事件层（T9 发 START/END/ITERATION/KEY/HOOK），本阶段不 emit。
-pub fn update_all(scene: &mut Scene, dt: f32, _out: &mut Vec<EventRecord>) {
+/// 事件（spec §7.1/§7.5，advance 后按 PlayerFrame + player 状态判定，emit 进 `out`）：
+/// - START：首帧 advance 一次（`fired_start` 防重）；
+/// - ITERATION：iteration 边界跨越（`PlayerFrame.iteration_boundary`，报刚结束的 0-based
+///   迭代序号）。完成帧跨界只在跨越进 iteration>1（count≥2）时发——count=1 完成只发
+///   END（CSS 规定，T5 concern 1）；
+/// - END：完成转变帧一次（`frame.completed && !was_completed`；fill 续写帧不重发）；
+/// - KEY：`on_key_percents` 跨越（`fired_keys` 防同 iteration 重；iteration 边界清表，
+///   下一 iteration 重新可发）；
+/// - HOOK：keyframes stop 的 `hook` 锚点跨越（`fired_hooks` 同 KEY 语义）。
+///
+/// KEY/HOOK 跨越基准 prev 的选取：首帧/出 delay 帧从 t=0 的 directed progress 起算
+/// （reverse/alternate-reverse 起点是 1.0，用 last_progress 初始 0.0 会首帧误发）；
+/// 迭代边界帧从新 iteration 起点（`apply_direction(direction, iteration, 0)`）起算
+/// （progress 回绕不误判为跨越）；其余帧用上帧 sampled progress。delay 期 progress
+/// 冻结（elapsed < delay），不发 KEY/HOOK。
+pub fn update_all(scene: &mut Scene, dt: f32, out: &mut Vec<EventRecord>) {
     if scene.players.is_empty() {
         return;
     }
@@ -468,7 +513,86 @@ pub fn update_all(scene: &mut Scene, dt: f32, _out: &mut Vec<EventRecord>) {
         }
         // 完成转变检测（一次性）：本帧前非 Completed、本帧到达完成态。
         let was_completed = p.play_state == PlayerPlayState::Completed;
+        // 事件判定快照（advance 覆写 last_progress/iteration/play_state）。
+        let prev_sample = p.last_progress;
+        let was_in_delay = p.elapsed < p.spec.delay;
         let frame = p.advance(dt);
+
+        // ── 动画事件 emit（spec §7.1/§7.5）──
+        let first_advance = !p.fired_start;
+        p.fired_start = true;
+        let completion = frame.completed && !was_completed;
+        if first_advance {
+            out.push(crate::event::animation_start(
+                &mut scene.event_strs,
+                p.node,
+                k,
+                &p.spec.name,
+            ));
+        }
+        if let Some(i) = frame.iteration_boundary {
+            // count=1 完成帧的跨界（i=0）只发 END；count≥2 完成跨界（i>0）ITERATION+END。
+            if !completion || i > 0 {
+                out.push(crate::event::animation_iteration(
+                    &mut scene.event_strs,
+                    p.node,
+                    k,
+                    &p.spec.name,
+                    i,
+                ));
+            }
+        }
+        // KEY/HOOK 跨越检测（delay 期 progress 冻结，不发）。
+        if p.elapsed >= p.spec.delay {
+            let seed = if first_advance || was_in_delay {
+                apply_direction(p.spec.direction, 0, 0.0)
+            } else if frame.iteration_boundary.is_some() {
+                apply_direction(p.spec.direction, p.iteration, 0.0)
+            } else {
+                prev_sample
+            };
+            let cur = p.last_progress;
+            if frame.iteration_boundary.is_some() {
+                p.fired_keys.clear();
+                p.fired_hooks.clear();
+            }
+            for &pct in &p.on_key_percents {
+                if crossed(seed, cur, pct) && !p.fired_keys.contains(&pct) {
+                    p.fired_keys.push(pct);
+                    out.push(crate::event::animation_key(
+                        &mut scene.event_strs,
+                        p.node,
+                        k,
+                        &p.spec.name,
+                        pct,
+                    ));
+                }
+            }
+            for stop in &p.keyframes.stops {
+                if let Some(hook) = &stop.hook {
+                    let hp = stop.selector.percent();
+                    if crossed(seed, cur, hp) && !p.fired_hooks.contains(&hp) {
+                        p.fired_hooks.push(hp);
+                        out.push(crate::event::animation_hook(
+                            &mut scene.event_strs,
+                            p.node,
+                            k,
+                            &p.spec.name,
+                            hook,
+                        ));
+                    }
+                }
+            }
+        }
+        if completion {
+            // END 在 KEY/HOOK 之后：完成帧上阈值跨越发生在完成之前的进度段，时序更接近真实。
+            out.push(crate::event::animation_end(
+                &mut scene.event_strs,
+                p.node,
+                k,
+                &p.spec.name,
+            ));
+        }
         if frame.completed
             && !was_completed
             && !matches!(
