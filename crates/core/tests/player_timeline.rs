@@ -227,7 +227,7 @@ fn step_ease_jumps_at_segment_boundary() {
 /// fill none：完成帧即回退 base（props 全 None），completed=true。
 #[test]
 fn fill_none_completion_returns_no_override() {
-    let mut s = spec();
+    let s = spec();
     let mut p = player(s, opacity_fade());
     p.advance(0.0);
     p.advance(0.2);
@@ -257,7 +257,7 @@ fn completed_forwards_keeps_end_value() {
 /// Paused：跳过推进（elapsed 不变），返回当前时刻帧。
 #[test]
 fn paused_does_not_advance() {
-    let mut s = spec();
+    let s = spec();
     let mut p = player(s, opacity_fade());
     p.advance(0.0);
     let before = p.advance(0.2);
@@ -273,7 +273,7 @@ fn paused_does_not_advance() {
 /// Stopped：同 Paused 不推进；恢复 Playing 从原位置继续。
 #[test]
 fn stopped_does_not_advance() {
-    let mut s = spec();
+    let s = spec();
     let mut p = player(s, opacity_fade());
     p.advance(0.0);
     p.play_state = PlayerPlayState::Stopped;
@@ -308,7 +308,7 @@ fn iteration_boundary_reported_on_crossing() {
 /// TRS 分量级 lerp：translate [0,20]→[0,0]；to 缺 scale/rotate 分量 → identity（[1,1]/0）lerp。
 #[test]
 fn transform_trs_component_lerp_with_identity() {
-    let mut s = spec();
+    let s = spec();
     let kf = KeyframesRule {
         name: "slide".into(),
         stops: vec![
@@ -352,7 +352,7 @@ fn transform_trs_component_lerp_with_identity() {
 /// rotate 弧度 lerp：0 → π/2，中点 π/4。
 #[test]
 fn rotate_lerps_radians() {
-    let mut s = spec();
+    let s = spec();
     let kf = KeyframesRule {
         name: "spin".into(),
         stops: vec![
@@ -388,7 +388,7 @@ fn rotate_lerps_radians() {
 /// bg_color [f32;4] 逐通道 lerp。
 #[test]
 fn bg_color_lerps_per_channel() {
-    let mut s = spec();
+    let s = spec();
     let kf = KeyframesRule {
         name: "hue".into(),
         stops: vec![
@@ -432,7 +432,7 @@ fn zero_duration_completes_immediately() {
 /// 同 percent 重复 stop（fence 的 `from, 0%` 会展开出同位 stop）：后者胜（CSS 语义）。
 #[test]
 fn duplicate_percent_later_stop_wins() {
-    let mut s = spec();
+    let s = spec();
     let kf = KeyframesRule {
         name: "dup".into(),
         stops: vec![

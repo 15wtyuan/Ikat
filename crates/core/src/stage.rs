@@ -899,6 +899,9 @@ impl Stage {
         let dt = self.pending_dt;
         self.pending_dt = 0.0;
         self.tweens.update(dt, scene, &mut out);
+        // player 推进（写 scene.anim）。在 tweens.update **之后** = 写入顺序即优先级：
+        // animation 覆盖 transition 同通道（spec §6.1）。须在 solve/compute_world_transforms 前。
+        crate::scene::animation::update_all(scene, dt, &mut out);
         // 光标闪烁 timer（单一动画时钟：与 tweens 同 dt，每帧 tick 推进一步）。
         crate::scene::control::advance_cursor_blink(scene, dt);
         // 消费 pending_focus_request（编程聚焦/清焦点，tick 外 request_focus/blur 记）。

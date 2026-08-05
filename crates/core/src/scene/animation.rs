@@ -9,8 +9,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::scene::node::NodeId;
+use crate::input::EventRecord;
+use crate::scene::node::{AnimTable, NodeId, Scene};
 use crate::style::resolved::{AnimationDirection, AnimationFillMode, AnimationSpec};
+use crate::transform::{self, Affine2, Affine2Ext};
 use crate::tween::Ease;
 
 /// `@keyframes` 一条 stop 的选择器位置。CSS 标准：`from`=`0%`，`to`=`100%`。
@@ -415,4 +417,120 @@ fn lerp_arr4(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
         a[2] + (b[2] - a[2]) * t,
         a[3] + (b[3] - a[3]) * t,
     ]
+}
+
+/// 每 tick 推进所有活跃 player 并写 NodeAnim（tick step b，spec §5.1）。
+///
+/// 在 `TweenManager.update` **之后**调用——写入顺序即优先级：animation 同通道覆盖
+/// transition（spec §6.1）。
+///
+/// 状态处理（spec §5.4 / §6.3）：
+/// - Playing/Paused：写本帧帧值（Paused elapsed 不推进，位置保持）；
+/// - Completed + fill forwards/both：每帧续写末值，**不回收**（player 是"动画已结束"的
+///   标记，sync_animation_players 靠它防止声明仍存在时重启）；
+/// - Completed + fill none/backwards：**完成转变帧一次性**清掉本 player 自己持有的通道
+///   （NodeAnim 回 None → 下帧 tween/base 接管），其后 player 惰性保留在 Completed 态
+///   （不再写也不再清，回收由 sync/Stop 负责）；
+/// - Stopped（显式 Stop）：清通道 + 从 players 表移除；
+/// - 悬空 NodeId（节点已删）：同 Stopped 移除（与 tween.rs 同款双保险）。
+///
+/// `out` 预留给事件层（T9 发 START/END/ITERATION/KEY/HOOK），本阶段不 emit。
+pub fn update_all(scene: &mut Scene, dt: f32, _out: &mut Vec<EventRecord>) {
+    if scene.players.is_empty() {
+        return;
+    }
+    scene.players.retain(|_, p| {
+        if p.play_state == PlayerPlayState::Stopped || !scene.nodes.contains_key(p.node.to_key()) {
+            // Stopped / 悬空：清本 player 的通道（回退 tween/base）+ 回收。
+            clear_owned_channels(&mut scene.anim, p);
+            return false;
+        }
+        // 完成转变检测（一次性）：本帧前非 Completed、本帧到达完成态。
+        let was_completed = p.play_state == PlayerPlayState::Completed;
+        let frame = p.advance(dt);
+        if frame.completed
+            && !was_completed
+            && !matches!(
+                p.spec.fill_mode,
+                AnimationFillMode::Forwards | AnimationFillMode::Both
+            )
+        {
+            // fill none/backwards 完成：帧 props 已全 None，清掉本 player 持有的通道，
+            // 下帧起 tween/base 接管（spec §6.3）。player 保留 Completed 态（防 sync 重启）。
+            clear_owned_channels(&mut scene.anim, p);
+        } else if !frame.completed
+            || matches!(
+                p.spec.fill_mode,
+                AnimationFillMode::Forwards | AnimationFillMode::Both
+            )
+        {
+            // 播放中 / Paused 位置保持 / Completed+forwards 续写末值。
+            write_frame(&mut scene.anim, p.node, frame.props);
+        }
+        // 其余（Completed + fill none 的后续 tick）：惰性，不写不清。
+        true
+    });
+}
+
+/// 按帧值写 NodeAnim 四通道。通道 None = 本帧无 override（不动该通道）。
+fn write_frame(anim: &mut AnimTable, node: NodeId, props: AnimatableProps) {
+    let a = anim.ensure(node);
+    if let Some(v) = props.opacity {
+        a.opacity = Some(v);
+    }
+    if let Some(m) = props.transform.and_then(compose_transform) {
+        a.transform = Some(m);
+    }
+    if let Some(v) = props.bg_color {
+        a.bg_color = Some(v);
+    }
+    if let Some(v) = props.text_color {
+        a.text_color = Some(v);
+    }
+}
+
+/// TransformAnim TRS → Affine2（SRT：点先 scale 再 rotate 再 translate，缩放旋转绕自身
+/// 原点，图形学标准）。缺分量用 identity（translate [0,0] / scale [1,1] / rotate 0）。
+/// 全 None → None（不 override base transform）。
+fn compose_transform(ta: TransformAnim) -> Option<Affine2> {
+    if ta.translate.is_none() && ta.scale.is_none() && ta.rotate.is_none() {
+        return None;
+    }
+    let t = ta.translate.unwrap_or([0.0, 0.0]);
+    let s = ta.scale.unwrap_or([1.0, 1.0]);
+    let r = ta.rotate.unwrap_or(0.0);
+    Some(
+        transform::from_translate(t[0], t[1])
+            .mul(transform::from_rotate(r))
+            .mul(transform::from_scale(s[0], s[1])),
+    )
+}
+
+/// 清该 player 的 keyframes 声明的通道（stops props 的 Some 通道并集）。只动自己持有的
+/// 通道——动画没声明的通道（tween/base 在写）不动。
+fn clear_owned_channels(anim: &mut AnimTable, p: &KeyframePlayer) {
+    let (mut opacity, mut transform, mut bg, mut text) = (false, false, false, false);
+    for stop in &p.keyframes.stops {
+        opacity |= stop.props.opacity.is_some();
+        transform |= stop.props.transform.is_some();
+        bg |= stop.props.bg_color.is_some();
+        text |= stop.props.text_color.is_some();
+    }
+    if let Some(a) = anim.0.get_mut(&p.node) {
+        if opacity {
+            a.opacity = None;
+        }
+        if transform {
+            a.transform = None;
+        }
+        if bg {
+            a.bg_color = None;
+        }
+        if text {
+            a.text_color = None;
+        }
+        if a.is_empty() {
+            anim.0.remove(&p.node);
+        }
+    }
 }
