@@ -825,6 +825,14 @@ impl Stage {
             .flags
             .insert(NodeFlags::SCOPE_ROOT | NodeFlags::LOOKUP_SCOPE);
 
+        // 组件级 @keyframes 进场景全局表：animation 声明只保存 name，player 在 tick
+        // 时按该表查规则。后实例化的组件覆盖同名规则，保持 CSS 全局查找语义。
+        for keyframes in &template.keyframes {
+            scene
+                .keyframes
+                .insert(keyframes.name.clone(), keyframes.clone());
+        }
+
         // 模板规则包装成 ScopedRule（scope_root = 实例根），push 进 scene 动态规则表。
         // 不再按 selector 去重：同模板多实例各带独立 scope_root，rematch 按 scope 隔离匹配，
         // 互不干扰（旧实现的 selector-only 去重会把不同组件同名 class 规则误判为重复丢弃——坑）。

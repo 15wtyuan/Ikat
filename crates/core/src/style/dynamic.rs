@@ -645,14 +645,14 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
     // set-ness：每节点显式声明了哪些可继承属性。cascade 期收集，继承 pass 消费。
     let mut set_map: HashMap<NodeId, InheritedSet> = HashMap::new();
     for node_id in node_ids {
-        // 捕获旧级联值 + cascaded_once + transition 声明（写新 style 前留快照）。
-        // transition 读自 base_style（打包期烘焙的静态声明，rematch 不改 base_style）。
-        let (old_style, cascaded_once, transition_decl) = {
+        // 捕获旧级联值 + cascaded_once（写新 style 前留快照）。
+        // transition 声明在下方级联完成后从 new_style 读（覆盖 base/inline +
+        // 动态 class 规则两源），此处只留 old_style 供通道变化比较。
+        let (old_style, cascaded_once) = {
             let n = scene.get(node_id).expect("live node");
             (
                 n.style.clone(),
                 n.interaction.flags.contains(NodeFlags::CASCALED),
-                n.base_style.transition.clone(),
             )
         };
         // 从 base_style 重起
@@ -714,6 +714,9 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
             }
         }
         set_map.insert(node_id, inh);
+        // transition 声明读自级联结果（new_style）：base/inline 烘焙经
+        // base_style.clone 进入，动态 class 规则经 apply_decl 写入——两源统一。
+        let transition_decl = new_style.transition.clone();
         // transition 检测：仅 cascaded_once 后（首次 cascade 即时生效不动画），
         // 且声明了非零 duration 的 transition 时，比较可动画通道变化推请求。
         for ts in &transition_decl {
