@@ -33,6 +33,9 @@ namespace LoomGUI.HeadlessTests
             typeof(ScrollChangedEvent),
             typeof(AnimationStartEvent), typeof(AnimationEndEvent),
             typeof(AnimationIterationEvent), typeof(TransitionEndEvent),
+            // M2 动画句柄私有事件（T11）：OnKey 跨越 / @loom-hook 跨越。不广播 EventBus——
+            // demux 按 playerKey 查 Animation 实例直接触发回调；struct 作载荷载体。
+            typeof(AnimationKeyEvent), typeof(AnimationHookEvent),
             // 控件交互事件（internal route struct，P1 控件束）：携 payload 经 EventBus，控件类
             // 翻译为公共 ValueChangedEvent<*>。这 4 个 internal struct 同样实现 IRouteEvent +
             // 持 _core 首 field + 声明 EventType，故被本门覆盖。
@@ -175,6 +178,9 @@ namespace LoomGUI.HeadlessTests
             yield return new object[] { typeof(AnimationEndEvent),       (byte)EventType.AnimationEnd };
             yield return new object[] { typeof(AnimationIterationEvent), (byte)EventType.AnimationIteration };
             yield return new object[] { typeof(TransitionEndEvent),      (byte)EventType.TransitionEnd };
+            // M2 动画句柄私有事件（T11，core event.rs EVT_ANIMATION_KEY=27 / EVT_ANIMATION_HOOK=28）。
+            yield return new object[] { typeof(AnimationKeyEvent),       (byte)EventType.AnimationKey };
+            yield return new object[] { typeof(AnimationHookEvent),      (byte)EventType.AnimationHook };
             // 控件交互事件（22+，core EVT_*）。route struct 的 EventType 与 Rust EVT_ 常量一致。
             yield return new object[] { typeof(ControlValueChangedEvent),     (byte)EventType.ValueChanged };
             yield return new object[] { typeof(ControlCheckedChangedEvent),   (byte)EventType.CheckedChanged };

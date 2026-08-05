@@ -1781,3 +1781,43 @@ fn ffi_animation_on_key_registers_dedup() {
     loomgui_stage_animation_on_key(h, 0, 0.5);
     loomgui_stage_free(h);
 }
+
+/// get_event_string：事件字符串表读取（spec §7.5，C# demux 按 24-bit 索引读回 name）。
+/// 动画事件 tick 后 intern "fadeIn" → 双调法读回；索引越界 / 无 scene → -1；小 buffer → -2。
+#[test]
+fn ffi_get_event_string_reads_animation_name() {
+    let (h, root) = make_anim_stage();
+    let key = loomgui_stage_play_animation(h, root, b"fadeIn".as_ptr(), 6);
+    assert_ne!(key, 0);
+    // tick 一帧 → START 事件（EVT_ANIMATION_START=18）入 last_events，name intern 进表。
+    loomgui_stage_tick(h, 0.016);
+    let evs = drain_events(h);
+    let start = evs
+        .iter()
+        .find(|e| e.event_type == loomgui_core::event::EVT_ANIMATION_START)
+        .expect("START emitted on first tick");
+    // 24-bit 小端索引：click_count | pad[0]<<8 | pad[1]<<16。
+    let idx =
+        start.click_count as u32 | ((start.pad[0] as u32) << 8) | ((start.pad[1] as u32) << 16);
+    // 探大小（buf_cap=0）→ -2 + 所需 len。
+    let mut needed = 0usize;
+    let rc = loomgui_stage_get_event_string(h, idx, std::ptr::null_mut(), 0, &mut needed);
+    assert_eq!(rc, -2, "probe returns -2");
+    assert_eq!(needed, b"fadeIn".len(), "probe reports needed len");
+    // 真读。
+    let mut buf = vec![0u8; needed];
+    let rc = loomgui_stage_get_event_string(h, idx, buf.as_mut_ptr(), buf.len(), &mut needed);
+    assert_eq!(rc, 0, "read ok");
+    assert_eq!(&buf[..needed], b"fadeIn", "string round-trip");
+    // 索引越界 → -1（防御分支）。
+    let mut n = 0usize;
+    let rc = loomgui_stage_get_event_string(h, 0xFFFF_FFFF, std::ptr::null_mut(), 0, &mut n);
+    assert_eq!(rc, -1, "out-of-range index");
+    assert_eq!(n, 0);
+    // null 句柄 / null out_len → -1。
+    let rc = loomgui_stage_get_event_string(std::ptr::null(), idx, std::ptr::null_mut(), 0, &mut n);
+    assert_eq!(rc, -1, "null handle");
+    let rc = loomgui_stage_get_event_string(h, idx, std::ptr::null_mut(), 0, std::ptr::null_mut());
+    assert_eq!(rc, -1, "null out_len");
+    loomgui_stage_free(h);
+}

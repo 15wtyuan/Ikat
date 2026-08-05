@@ -121,6 +121,20 @@ namespace LoomGUI.Bindings
         internal static extern byte* loomgui_stage_borrow_events(StageHandle* h, nuint* out_len);
 
         /// <summary>
+        ///  读事件字符串表条目（spec §7.5：动画事件 name/hook_name 的 24-bit 索引载体，C# demux
+        ///  按索引读回字符串）。表是 Scene 级持久 intern（只增），索引跨 tick 稳定。
+        ///
+        ///  return-code + out-param（ptr+len）双调法（同 get_control_text）：
+        ///  buf_cap 足够 → rc=0，写入 buf[..*out_len]；buf_cap 不够（含 0 探大小）→ rc=-2，
+        ///  *out_len = 所需字节数（caller 扩容重调）；null 句柄 / 无 scene / 索引越界 → rc=-1，
+        ///  *out_len=0（越界是防御分支——正常路径索引恒由 intern 产生）。
+        ///
+        ///  **常驻（不 gate）：**事件是 runtime 稳定入口。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_event_string", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_event_string(StageHandle* h, uint idx, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
         ///  UI 挡住时游戏不响应点击（§10.6）。= 任一活跃槽 last_hit 非空且非根（多指：鼠标 slot0 + 已分配触摸槽）。
         ///  null 句柄 → false。
         ///

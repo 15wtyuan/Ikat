@@ -35,11 +35,11 @@ namespace LoomGUI
         // tween 完成（core 产，C# 直派）。click_count 复用装 prop、touch_id 复用装 tag。
         TweenComplete = 16,
         // ── typed event struct 关联（D1，spec §3.4）──────────────────────────
-        // 下列值不出现在 LoomEvent stream（demux 不产）——仅供 typed event struct 的
-        // internal static byte EventType 属性返回，作 D2 EventBus 订阅表的 key。
-        // D3 接线时为这些类型分别接源（ScrollChanged←ScrollPane 物理；
-        // AnimationStart/Iteration←tween 回调；AnimationEnd/TransitionEnd←TweenComplete
-        // 按 prop 名分流）。
+        // 下列值中 17/21 不出现在 LoomEvent stream（demux 不产 typed struct）——仅供 typed
+        // event struct 的 internal static byte EventType 属性返回，作 D2 EventBus 订阅表的 key。
+        // D3 接线时为其接源（ScrollChanged←ScrollPane 物理；TransitionEnd←TweenComplete）。
+        // 18/19/20 是 M2 真 core 事件源（crates/core/src/event.rs EVT_ANIMATION_*，T9）——
+        // demux 直接读 stream 产 typed struct（class 触发 + node.Play 都发）。
         ScrollChanged = 17,
         AnimationStart = 18,
         AnimationIteration = 19,
@@ -60,5 +60,10 @@ namespace LoomGUI
         /// payload = 新 selected_index（装 EventRecord.touch_id:i32，见 control.rs:422——commit_dropdown_selection
         /// 把新 index 写 touch_id，与 Slider 装新值到 x 不同）。core 不携 OldIndex（同 change 语义只报新值）。
         SelectionChanged = 26,
+        // ── M2 动画句柄私有事件（core event.rs EVT_ANIMATION_KEY=27 / EVT_ANIMATION_HOOK=28）──
+        // 走 playerKey 句柄路由（demux 按 key 查 Animation 实例触发 OnKey/OnHook，spec §7.5），
+        // 不广播 EventBus——枚举值仅供 typed struct 关联 + 文档完整（不参与 D2 订阅表）。
+        AnimationKey = 27,
+        AnimationHook = 28,
     }
 }

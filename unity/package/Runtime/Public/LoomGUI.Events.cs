@@ -297,6 +297,9 @@ namespace LoomGUI
     }
 
     // Animation lifecycle
+    // 18/19/20 = M2 真 core 事件源（crates/core/src/event.rs，T9）：class 触发 + node.Play
+    // 都发，demux 直读 stream 填 AnimationName（字符串表索引读回）。END 另兼容 v1 的
+    // TweenComplete（type=16）→ AnimationEnd 分流（transition 旧路径，既有测试锁定）。
     public struct AnimationStartEvent : IRouteEvent
     {
         internal RouteEventCore _core;
@@ -342,6 +345,42 @@ namespace LoomGUI
         internal static byte EventType => (byte)LoomEventType.AnimationIteration;
         public string AnimationName { get { return _animationName; } }
         public int IterationCount { get { return _iterationCount; } }
+    }
+
+    // ── Animation 句柄私有事件（spec §7.5）──────────────────────────────
+    // OnKey 跨越 / @loom-hook 跨越。不广播 EventBus——demux 按 playerKey 查 Animation 实例
+    // 直接触发 OnKey(pct)/OnHook(name) 回调（回调是 Action，无事件参数）；struct 仅作载荷
+    // 载体（字段供句柄路由读取 / 调试）。同其它 typed event struct 保持 _core 首字段约定。
+    public struct AnimationKeyEvent : IRouteEvent
+    {
+        internal RouteEventCore _core;
+        internal string _animationName;
+        internal float _percent;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.AnimationKey;
+        public string AnimationName { get { return _animationName; } }
+        public float Percent { get { return _percent; } }
+    }
+
+    public struct AnimationHookEvent : IRouteEvent
+    {
+        internal RouteEventCore _core;
+        internal string _animationName;
+        internal string _hookName;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        internal static byte EventType => (byte)LoomEventType.AnimationHook;
+        public string AnimationName { get { return _animationName; } }
+        public string HookName { get { return _hookName; } }
     }
 
     public struct TransitionEndEvent : IRouteEvent
