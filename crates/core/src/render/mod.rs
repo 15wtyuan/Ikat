@@ -483,6 +483,52 @@ fn build_container_mesh(
     }
 }
 
+/// 每帧算每节点累积 alpha（CSS opacity 父级累积：子整体乘父 alpha，spec §3.3）。
+/// 返回 Vec 按 NodeId.index() 索引（1 基，len = capacity+1，idx 0 占位——同 world_transforms；
+/// 容量而非存活数，remove_node 后槽位可复用但 idx 不变）。roots 不可达的游离节点
+/// （父被删的孤儿）兜底 = own alpha（parent_alpha=1.0 的根语义）。
+fn accumulate_alpha(scene: &Scene) -> Vec<f32> {
+    let cap = scene.nodes.capacity();
+    let mut alphas: Vec<f32> = vec![1.0; cap + 1];
+    let mut visited: Vec<bool> = vec![false; cap + 1];
+    for root in scene.roots.clone() {
+        alpha_rec(scene, root, 1.0, &mut alphas, &mut visited);
+    }
+    for n in scene.nodes.values() {
+        if !visited[n.id.index()] {
+            alphas[n.id.index()] = own_opacity(scene, n);
+        }
+    }
+    alphas
+}
+
+/// DFS 累积：node_alpha = parent_alpha × own；进子树时把 node_alpha 作为子的 parent_alpha。
+/// 同 compute_world_transforms 的遍历方式（roots 起按 children 递归，递归深度 = 树深）。
+fn alpha_rec(
+    scene: &Scene,
+    id: NodeId,
+    parent_alpha: f32,
+    alphas: &mut [f32],
+    visited: &mut [bool],
+) {
+    let node = scene.get(id).expect("live node");
+    let acc = parent_alpha * own_opacity(scene, node);
+    alphas[id.index()] = acc;
+    visited[id.index()] = true;
+    for c in node.children.clone() {
+        alpha_rec(scene, c, acc, alphas, visited);
+    }
+}
+
+/// 单节点 own opacity：anim override 优先（动画 player 写 NodeAnim.opacity），None 退回 CSS。
+fn own_opacity(scene: &Scene, n: &crate::scene::node::Node) -> f32 {
+    scene
+        .anim
+        .get(n.id)
+        .and_then(|a| a.opacity)
+        .unwrap_or(n.style.opacity)
+}
+
 /// （slice_px / src_px）。path 缺失或 w/h=0 → 64×64 兜底。
 pub fn build_render_nodes(
     scene: &Scene,
@@ -516,6 +562,9 @@ pub fn build_render_nodes(
     let open_popup_roots = collect_open_popup_roots(scene);
     prune_subtrees(scene, &open_popup_roots, &mut pruned);
     let mut nodes: Vec<RenderNode> = Vec::new();
+    // 累积 alpha 预计算（父 opacity 逐层乘入子）：RenderNode.alpha 存累积值，后端画时直接用。
+    // 主循环是平铺遍历（slotmap 序），父未必先于子，故单独 DFS 一遍把每节点累积值算好。
+    let alphas = accumulate_alpha(scene);
     // back-layer 合成 RenderNode 追踪：(主节点 node_id, 下层合成 node_id)。
     // 当前唯一使用者 box-shadow；未来"独立 quad 下层"复用。
     let mut back_layer_pairs: Vec<(u32, u32)> = Vec::new();
@@ -543,6 +592,7 @@ pub fn build_render_nodes(
             &mut id_to_pos,
             &mut back_layer_pairs,
             true,
+            alphas[n.id.index()],
         );
     }
     // batch / merge / thumb
@@ -642,6 +692,7 @@ pub fn build_render_nodes(
                 &mut id_to_pos,
                 &mut back_layer_pairs,
                 false,
+                alphas[nid.index()],
             );
             for rn in &mut nodes[start..] {
                 rn.sort_key = popup_counter;
@@ -1599,6 +1650,9 @@ fn push_solid_mesh(
 /// push_text_meshes 的 register_id_map 参数透传本函数入参，与主调用同语义。
 ///
 /// 不跳过任何节点：调用方负责 pruned / 空白 text 过滤（主 DFS）或 popup 子树枚举（浮层）。
+///
+/// `alpha` 是**累积值**（父链 opacity 逐层乘入，由调用方从 `accumulate_alpha` 表取）——
+/// CSS opacity 语义下子节点整体乘父 alpha，后端画时直接用累积值，不做二次累积。
 #[allow(clippy::too_many_arguments)]
 fn render_one_node(
     scene: &Scene,
@@ -1610,6 +1664,7 @@ fn render_one_node(
     id_to_pos: &mut std::collections::HashMap<NodeId, usize>,
     back_layer_pairs: &mut Vec<(u32, u32)>,
     register_id_map: bool,
+    alpha: f32,
 ) {
     let anim = scene.anim.get(n.id);
     let wm = scene
@@ -1637,7 +1692,6 @@ fn render_one_node(
     let color_matrix = n.style.color_filter.unwrap_or([0.0; 20]);
     let node_id = n.id.0;
     let parent_id = n.parent.map(|p| p.0);
-    let alpha = anim.and_then(|a| a.opacity).unwrap_or(n.style.opacity);
     let color_tint = anim.and_then(|a| a.text_color).unwrap_or(n.style.color);
     let rn = match n.kind {
         // 控件外壳节点（不在 is_container）但渲染上需要一个背景框：
