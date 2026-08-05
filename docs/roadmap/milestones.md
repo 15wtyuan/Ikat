@@ -18,7 +18,7 @@ M0 验收 ─┤                  │                  ├──► M6 showcase 
 ```
 
 - **M1/M2/M3 互不依赖**，M0 后可并行或任选顺序（下方按推荐节奏排）。
-- **M2.5**（动画引擎终态）依赖 M2，阻塞 M6（视觉动效深度）与 M5（NodeTransform 升级合并）。
+- **M2.5**（动画引擎终态）依赖 M2，阻塞 M6（视觉动效深度）。（NodeTransform 升级是 M2.5 的进入判据之一 #2，M5 仍自有 NodeTransform 退出判据，非被 M2.5 阻塞。）
 - **关键路径**（到可演示的最长链）= `M0 → M1 → M4 → M6`，约 6–8 周；M2/M3/M5/M2.5 是侧支，喂进 M6。
 - M∞ 与 runtime 解耦，另条命，不计入。
 
@@ -34,7 +34,7 @@ M0 验收 ─┤                  │                  ├──► M6 showcase 
 | M3 | TabList（P4）| M0 | M6 | ~1 周 | ⏳ 编码端 DONE，Unity 验收 defer |
 | M4 | 文本模型回归标准子树 | M1 | M6 | 2–3 周 | ❌ 未开 |
 | M5 | 视觉束（精简版）| M2（部分）| M6 | ~2 周 | ❌ 未开（scope 已砍）|
-| M2.5 | 动画引擎终态（池化/缓动全集/layout 动画）| M2 | M5（NodeTransform 合并）, M6 | 2–3 周 | ❌ 未开（触发判据见下）|
+| M2.5 | 动画引擎终态（池化/缓动全集/layout 动画）| M2 | M6 | 2–3 周 | ❌ 未开（触发判据见下）|
 | M6 | showcase 收口 + tech-debt 扫除 | M1–M5 + M2.5 | 可对外演示 | 1–2 周 | ❌ |
 | M∞ | Custom Element / 平台移植 / 编辑器闭环 | — | — | 不计入 | 按需 |
 
@@ -113,7 +113,7 @@ M0 验收 ─┤                  │                  ├──► M6 showcase 
   - [ ] **player 与 Tween 插值原语统一**：共享 `TweenValue{x,y,z,w,d}` + value_size(1..6)。
   - [ ] **`animation` 长划子属性**：8 个标准 CSS 长划属性（`animation-name`/`-duration`/`-delay`/`-iteration-count`/`-direction`/`-fill-mode`/`-play-state`/`-timing-function`）。
 - **依赖**：M2。
-- **阻塞**：M5（NodeTransform 升级合并）、M6（视觉动效深度）。
+- **阻塞**：M6（视觉动效深度）。（NodeTransform 升级是进入判据 #2 的 trigger——M5 触发 M2.5 合做，非 M2.5 阻塞 M5；M5 自有 NodeTransform 退出判据。）
 - **估时**：2–3 周。
 - **备注**：不是"动画能用"（M2 已交付），是"引擎内部终态"——无硬阻塞 showcase 页面，按需启动。详细范围见 main-design §13.2 M2.5 标记 + §13.6。
 

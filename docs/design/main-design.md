@@ -620,7 +620,7 @@ a. TweenManager.update(dt)        ← transition 的 opacity/bg_color/text_color
 
 ### 13.4 opacity 父级累积传播
 
-渲染 DFS 累积：`node_alpha = parent_alpha × own_opacity`（`render/mod.rs::accumulate_opacity`），进子树时把 node_alpha 当作子的 parent_alpha。parent 半透明会按比例衰减子树——与浏览器 opacity 合成语义一致。
+渲染 DFS 累积：`node_alpha = parent_alpha × own_opacity`（`render/mod.rs::accumulate_alpha`），进子树时把 node_alpha 当作子的 parent_alpha。parent 半透明会按比例衰减子树——与浏览器 opacity 合成语义一致。
 
 ### 13.5 Timers
 
