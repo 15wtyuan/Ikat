@@ -1205,11 +1205,14 @@ fn blob_column_lengths_match_node_count_times_stride() {
     let node_count = u32::from_le_bytes(blob[8..12].try_into().unwrap()) as usize;
     assert_eq!(node_count, 2, "2 render nodes");
 
-    let strides: [usize; 21] = [4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128];
+    let strides: [usize; 21] = [
+        4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128,
+    ];
     // column offsets 从 header byte 12 开始
     let mut col_off = [0usize; 21];
     for k in 0..21 {
-        col_off[k] = u32::from_le_bytes(blob[12 + k * 4..12 + k * 4 + 4].try_into().unwrap()) as usize;
+        col_off[k] =
+            u32::from_le_bytes(blob[12 + k * 4..12 + k * 4 + 4].try_into().unwrap()) as usize;
     }
     // first arena offset（mesh_arena_off）在 12 + 21*4 = 96 处
     let arena_off = u32::from_le_bytes(blob[96..100].try_into().unwrap()) as usize;
