@@ -7,14 +7,20 @@ use loomgui_core::render::node::{
     BlendMode, ChangeLevel, EffectBlock, MaskContext, NodePayload, RenderNode,
 };
 use loomgui_core::render::FrameData;
+use loomgui_core::scene::node::Scene;
 use loomgui_core::transform;
 
 /// magic = "LOOM" little-endian。
 const MAGIC: u32 = 0x4D4F4F4C;
 const VERSION: u32 = 11; // v11：加 effect_block 列（SDF effect 参数，照 color_matrix 先例），列数 20→21
 
-/// 入口：FrameData（nodes + clip 表）→ blob 字节。
-pub fn build_blob(frame: &FrameData) -> Vec<u8> {
+/// 入口：FrameData（nodes + clip 表）+ Scene（parked slot 池）→ blob 字节。
+///
+/// 产两类条目：render 管线的 active 条目（全字段），以及每个 parked list slot 的
+/// keepalive 条目（极简：node_id + reuse_key + visible 字节 bit1）。keepalive 让
+/// 后端镜像池知道「这个对象只是休眠，别销毁」——parked slot 走 display:none，本就
+/// 不进 render 管线，条目缺席会被后端当成「已消失」而回收。
+pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
     let nodes = &frame.nodes;
     let clips = &frame.clips;
     let n = nodes.len();
@@ -170,6 +176,43 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
         }
     }
 
+    // parked keepalive 段：每个休眠 slot 追加一条极简条目（21 列都填，值极简）。
+    // visible 字节双用：bit0=要渲染（0），bit1=parked（1）——零列扩展、零 version bump。
+    // reuse_key 是 slot 出生即定的永久 ordinal，后端据它认出同一个镜像对象。
+    let mut parked_count = 0usize;
+    for ls in scene.lists.0.values() {
+        for s in ls.slots.iter().filter(|s| s.parked) {
+            // slot 节点已被删（组件销毁竞态）→ 跳过，不产悬空条目。
+            let Some(node) = scene.get(s.node) else {
+                continue;
+            };
+            col_node_id.extend_from_slice(&s.node.0.to_le_bytes());
+            col_parent_id.extend_from_slice(&(-1i32).to_le_bytes()); // 不参与父子渲染关系
+            col_visible.push(0b10); // bit1=parked，bit0=不可见
+            col_alpha.extend_from_slice(&0f32.to_le_bytes());
+            col_sort_key.extend_from_slice(&0u32.to_le_bytes());
+            col_mask.extend_from_slice(&0u32.to_le_bytes());
+            // 单位矩阵：后端不读 parked 条目的 header，写单位值避免脏值语义。
+            col_ma.extend_from_slice(&1f32.to_le_bytes());
+            col_mb.extend_from_slice(&0f32.to_le_bytes());
+            col_mc.extend_from_slice(&0f32.to_le_bytes());
+            col_md.extend_from_slice(&1f32.to_le_bytes());
+            col_mtx.extend_from_slice(&0f32.to_le_bytes());
+            col_mty.extend_from_slice(&0f32.to_le_bytes());
+            col_kind.push(0); // 无 mesh
+            col_mesh_off.extend_from_slice(&0u32.to_le_bytes());
+            col_mesh_len.extend_from_slice(&0u32.to_le_bytes());
+            col_path_idx.extend_from_slice(&0u32.to_le_bytes());
+            col_program.push(0);
+            col_color_matrix.extend_from_slice(&[0u8; 80]); // [f32;20] 全零
+            col_change_level.push(0); // Skip：无 header/mesh 上传
+            col_reuse_key.extend_from_slice(&node.reuse_key.to_le_bytes());
+            col_effect_block.extend_from_slice(&[0u8; EffectBlock::SIZE]);
+            parked_count += 1;
+        }
+    }
+    let node_count = n + parked_count;
+
     let col_bufs: Vec<(&str, &Vec<u8>)> = vec![
         ("node_id", &col_node_id),
         ("parent_id", &col_parent_id),
@@ -239,7 +282,7 @@ pub fn build_blob(frame: &FrameData) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&MAGIC.to_le_bytes());
     out.extend_from_slice(&VERSION.to_le_bytes());
-    out.extend_from_slice(&(n as u32).to_le_bytes());
+    out.extend_from_slice(&(node_count as u32).to_le_bytes());
     for o in &col_offsets {
         out.extend_from_slice(&o.to_le_bytes());
     }

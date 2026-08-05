@@ -200,7 +200,17 @@ pub extern "C" fn loomgui_stage_tick(h: *mut StageHandle, dt: f32) {
     let sh = unsafe { &mut *h };
     sh.stage.advance_time(dt);
     let frame = sh.stage.tick_and_render();
-    sh.frame_blob = blob::build_blob(&frame);
+    // parked slot keepalive 需读 scene（list 池状态）——tick 产完 FrameData 后 scene 可重新不可变借用。
+    // scene=None（load 前）：仍产结构合法的空 blob（node_count=0），与旧行为逐字节一致。
+    let empty;
+    let scene = match sh.stage.scene.as_ref() {
+        Some(s) => s,
+        None => {
+            empty = loomgui_core::scene::node::Scene::default();
+            &empty
+        }
+    };
+    sh.frame_blob = blob::build_blob(&frame, scene);
 }
 
 /// 借出最近一帧 blob：写 len 到 out_len，返回 Rust 拥有缓存指针（下 tick 失效）。

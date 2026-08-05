@@ -3,6 +3,12 @@ use loomgui_core::render::ClipEntry;
 use loomgui_core::scene::node::Rect;
 use loomgui_core::transform::Affine2Ext;
 
+/// 测试层 build_blob：多数用例不涉 list 池，用空 Scene（无 parked slot → 无 keepalive 段）。
+/// 本层名遮蔽 glob 导入的 `super::build_blob`；parked 用例直调 `super::build_blob(frame, scene)`。
+fn build_blob(frame: &FrameData) -> Vec<u8> {
+    super::build_blob(frame, &Scene::default())
+}
+
 /// 把 nodes 包成无 clip 的 FrameData（多数 blob 测试不需要 clip 表）。
 fn frame(nodes: &[RenderNode]) -> FrameData {
     FrameData {
@@ -145,6 +151,119 @@ fn rounded_rect_mesh_round_trips_n_verts() {
         cx,
         cy
     );
+}
+
+/// §3.1 双类条目：build_blob 在 render 条目后追加每个 parked slot 的 keepalive 条目。
+/// parked slot 走 display:none 不进 render 管线，靠这段告诉后端镜像池「休眠别销毁」。
+/// 契约：node_count = render 条目数 + parked 数；parked 条目 visible 字节 = 0b10
+/// （bit1 置位、bit0 清）、reuse_key > 0（永久 ordinal）、mesh_len = 0（无 mesh）。
+#[test]
+fn blob_emits_parked_keepalive_entries() {
+    use loomgui_core::list::{ListState, Slot};
+    use loomgui_core::scene::dynamic;
+
+    // 场景：ul + 3 个 slot，其中 2 个 parked、1 个 active（active 不产 keepalive 条目）。
+    let mut scene = Scene::default();
+    let ul = dynamic::create_root(&mut scene, "div", "").unwrap();
+    let mut slots = Vec::new();
+    for (i, parked) in [true, false, true].into_iter().enumerate() {
+        let node = dynamic::create_node(&mut scene, "div", "").unwrap();
+        dynamic::append_child(&mut scene, ul, node).unwrap();
+        dynamic::set_reuse_key(&mut scene, node, 0x0001_0000 | (i as u32));
+        slots.push(Slot {
+            node,
+            item_index: i,
+            parked,
+        });
+    }
+    let mut want: Vec<u32> = slots
+        .iter()
+        .filter(|s| s.parked)
+        .map(|s| s.node.0)
+        .collect();
+    want.sort_unstable();
+    scene.lists.0.insert(
+        ul,
+        ListState {
+            slots,
+            ..Default::default()
+        },
+    );
+
+    // render 条目 2 个（active 管线产物，reuse_key=0 的普通节点）。
+    let blob = super::build_blob(
+        &frame(&[
+            mesh_node(1, None, 0.0, 0.0, 5.0, 5.0),
+            mesh_node(2, None, 0.0, 0.0, 5.0, 5.0),
+        ]),
+        &scene,
+    );
+    let view = TestView::parse(&blob);
+    assert_eq!(
+        view.node_count(),
+        2 + 2,
+        "node_count = render 条目 2 + parked keepalive 2"
+    );
+    assert_eq!(
+        view.version(),
+        11,
+        "parked 复用 visible 字节 bit1，不 bump version"
+    );
+
+    let parked: Vec<usize> = (0..view.node_count() as usize)
+        .filter(|&i| view.parked(i))
+        .collect();
+    assert_eq!(parked.len(), 2, "恰 2 条 parked keepalive");
+    for &i in &parked {
+        assert!(!view.visible(i), "parked 条目 bit0 必清（不渲染）");
+        assert!(
+            view.reuse_key(i) > 0,
+            "parked 条目带非零 reuse_key（后端据此认镜像对象）"
+        );
+        assert_eq!(view.mesh_len_col(i), 0, "parked 无 mesh");
+        assert_eq!(view.payload_kind(i), 0, "parked payload_kind=0");
+        assert_eq!(view.change_level(i), 0, "parked change_level=Skip");
+        assert_eq!(view.parent_id(i), -1, "parked 不参与父子渲染关系");
+    }
+    let mut got: Vec<u32> = parked.iter().map(|&i| view.node_id(i)).collect();
+    got.sort_unstable();
+    assert_eq!(got, want, "keepalive 条目的 node_id 即 parked slot 节点");
+
+    // active 条目（前 2 条）不受影响：bit0 置位、bit1 清。
+    for i in 0..2 {
+        assert!(view.visible(i), "render 条目 bit0 置位");
+        assert!(!view.parked(i), "render 条目 bit1 必清");
+    }
+}
+
+/// 无 parked slot 时零追加：全 active 的 list 不产 keepalive 条目（node_count 不胀）。
+#[test]
+fn blob_no_keepalive_when_all_slots_active() {
+    use loomgui_core::list::{ListState, Slot};
+    use loomgui_core::scene::dynamic;
+
+    let mut scene = Scene::default();
+    let ul = dynamic::create_root(&mut scene, "div", "").unwrap();
+    let node = dynamic::create_node(&mut scene, "div", "").unwrap();
+    dynamic::append_child(&mut scene, ul, node).unwrap();
+    dynamic::set_reuse_key(&mut scene, node, 0x0001_0000);
+    scene.lists.0.insert(
+        ul,
+        ListState {
+            slots: vec![Slot {
+                node,
+                item_index: 0,
+                parked: false,
+            }],
+            ..Default::default()
+        },
+    );
+
+    let blob = super::build_blob(&frame(&[mesh_node(1, None, 0.0, 0.0, 5.0, 5.0)]), &scene);
+    let view = TestView::parse(&blob);
+    assert_eq!(view.node_count(), 1, "无 parked slot → 零追加");
+    assert!(!view.parked(0));
+    assert!(view.visible(0));
 }
 
 #[test]
@@ -390,6 +509,19 @@ impl<'a> TestView<'a> {
     fn parent_id(&self, i: usize) -> i32 {
         let o = self.col_off[1] + i * 4;
         i32::from_le_bytes(self.buf[o..o + 4].try_into().unwrap())
+    }
+    /// 第 1 列 node_id（u32）。
+    fn node_id(&self, i: usize) -> u32 {
+        let o = self.col_off[0] + i * 4;
+        u32::from_le_bytes(self.buf[o..o + 4].try_into().unwrap())
+    }
+    /// 第 3 列 visible 字节 bit0：本帧要渲染（镐 C# FrameBlob.Visible）。
+    fn visible(&self, i: usize) -> bool {
+        self.buf[self.col_off[2] + i] & 0x01 != 0
+    }
+    /// 第 3 列 visible 字节 bit1：parked keepalive（留镜像对象、不渲染，镐 C# FrameBlob.Parked）。
+    fn parked(&self, i: usize) -> bool {
+        self.buf[self.col_off[2] + i] & 0x02 != 0
     }
     /// 读节点 i 的 mesh 顶点（arena 段：vert_count, idx_count, verts[], uvs[], colors[], indices[]）。
     fn mesh_verts(&self, i: usize) -> Vec<[f32; 2]> {
