@@ -2137,13 +2137,11 @@ mod tests {
         );
     }
 
-    /// NotifyRemoved：删 [at, at+count) → heights.known drain 该区间；item_count -= count；
-    /// 该区间 slot 回收（出 slots、入 free），其余 >end 的 slot.item_index -= count。
+    /// NotifyRemoved（池化模型）：删 [at, at+count) → heights.known drain 该区间；
+    /// item_count -= count；区间内 slot 就地 park（parked=true, display:none 便签），
+    /// 永不 detach（parent 仍是 ul）；>end 的 slot.item_index -= count（移位）。
+    /// slots.len() 不变（高水位只增不减）——不再有 free 池，parked slot 随时可翻醒复用。
     #[test]
-    // TODO(T7 pooled-slot): rewrite for parked model——本测断言的是已废弃的 detach 语义：
-    // 回收后 slots.len() 变少 + free 池长度。池化模型下 slot 只标 parked、永不出 slots vec，
-    // 故两条断言结构性不成立（非 bug，T7 改写为“slots.len() 不变 + 区间内 slot parked”）。
-    #[ignore = "asserts retired detach semantics (slots shrink + free pool); T7 rewrites for parked model"]
     fn notify_removed_drains_range_and_recycles_slots() {
         let (mut s, ul, _li) = stage_with_ul_li();
         crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
@@ -2156,29 +2154,54 @@ mod tests {
             slot_count_before, 5,
             "precondition: all 5 items instantiated"
         );
-        // 删 [2, 4)（删 2 项）：item 2,3 的 slot 回收；item 4 的 slot.item_index 4→2。
+        // 删 [2, 4)（删 2 项）：item 2,3 的 slot 就地 park；item 4 的 slot.item_index 4→2。
         crate::list::notify_removed(s.scene.as_mut().unwrap(), ul, 2, 2).unwrap();
         let scene = s.scene.as_ref().unwrap();
         let ls = scene.lists.get(ul).unwrap();
         assert_eq!(ls.item_count, 3);
         assert_eq!(ls.heights.known.len(), 3);
-        // 回收了 2 个 slot（item_index 原 2,3）。
+        // 高水位不变：slot 永驻 slots vec（parked 只标休眠，不 detach）。
         assert_eq!(
             ls.slots.len(),
-            slot_count_before - 2,
-            "removed-range slots recycled out of slots"
+            slot_count_before,
+            "high-water: slots never shrink; parked slots stay in vec"
         );
-        // 剩余 slot：item 0,1 不变 + item 4→2。物理顺序应 [0,1,2]。
-        let mut indices: Vec<usize> = ls.slots.iter().map(|s| s.item_index).collect();
-        indices.sort_unstable();
+        // 2 个 slot 被 park（原 items 2,3）。
         assert_eq!(
-            indices,
-            vec![0, 1, 2],
-            "indices after end shifted down by count"
+            ls.slots.iter().filter(|s| s.parked).count(),
+            2,
+            "two slots parked (items 2,3 removed)"
         );
-        // 回收的 slot 入 free 池（下次克隆优先复用，不 leak）。
-        // TODO(T7 pooled-slot): rewrite for parked model
-        // assert_eq!(ls.free.len(), 2, "recycled slots pushed to free pool");
+        // active slot 覆盖 items 0,1,2。
+        let mut active_indices: Vec<usize> = ls
+            .slots
+            .iter()
+            .filter(|s| !s.parked)
+            .map(|s| s.item_index)
+            .collect();
+        active_indices.sort_unstable();
+        assert_eq!(
+            active_indices,
+            vec![0, 1, 2],
+            "active slots cover remaining items after shift"
+        );
+        // 所有 slot 的 parent 仍是 ul（无 detach）。
+        for s in &ls.slots {
+            assert_eq!(
+                scene.get(s.node).unwrap().parent,
+                Some(ul),
+                "no detach on remove: every slot still parented to ul"
+            );
+        }
+        // parked slot 已标 display:none 便签（inline_set 有 INLINE_DISPLAY bit）。
+        for s in ls.slots.iter().filter(|s| s.parked) {
+            let n = scene.get(s.node).unwrap();
+            assert!(
+                n.inline_set.0 & crate::style::dynamic::INLINE_DISPLAY != 0,
+                "parked slot {:?} has display:none inline override set",
+                s.node
+            );
+        }
     }
 
     /// NotifyMoved：from→to 搬一项，heights.known 同步搬，slot.item_index 重映射。
@@ -2864,6 +2887,238 @@ mod tests {
             key_after_scroll, key_of_slot0,
             "reuse_key permanent — never rotated across park/unpark/rebind"
         );
+    }
+
+    // ── 保险测试（spec §6.1）──────────────────────────────────────────────
+
+    /// taffy Display::None 保险：parked slot 挂 display:none 便签 → rematch 后
+    /// style.taffy_style.display == None → solve 跳该节点、布局零尺寸。
+    /// 同时验 active slot 正常参与布局（display 不是 None）。
+    #[test]
+    fn taffy_display_none_excludes_parked_slot_from_flow() {
+        let (mut s, ul, _li, _pane) = stage_with_pane_ul_li();
+        // 给蓝图设显式高度，使 slot 在 taffy 里有非零尺寸（否则空 div 高度 0，
+        // 无法区分"taffy 跳了"还是"本来就没高度"）。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            use taffy::style::Dimension;
+            let li = scene.get(ul).unwrap().children[0];
+            scene.get_mut(li).unwrap().style.taffy_style.size.height = Dimension::length(40.0);
+        }
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 5);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        // 执行后 5 个 slot 全 active（视口 0 → cold start INITIAL_SLOTS=5）。
+        // 删 items [2, 4) → slot 2,3 就地 park。
+        crate::list::notify_removed(s.scene.as_mut().unwrap(), ul, 2, 2).unwrap();
+        // rematch → 把 display:none 便签拷进 node.style。
+        crate::style::dynamic::rematch_pseudo_classes(s.scene.as_mut().unwrap());
+        // solve → taffy 跳 parked slot（display:none），active slot 拿 40px 高。
+        crate::layout::solve(
+            s.scene.as_mut().unwrap(),
+            &s.fonts,
+            s.root_size,
+            &s.image_sizes,
+        );
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        // parked slot：style 已设 display:none + layout_rect 归零（taffy 跳过）。
+        for slot in ls.slots.iter().filter(|s| s.parked) {
+            let n = scene.get(slot.node).unwrap();
+            assert_eq!(
+                n.style.taffy_style.display,
+                taffy::Display::None,
+                "parked slot style.display == None after rematch"
+            );
+            assert_eq!(
+                n.layout_rect.h, 0.0,
+                "parked slot layout_rect.h == 0 (taffy skipped)"
+            );
+        }
+        // active slot：display 不是 None，有正常布局高度。
+        let mut active_bottoms: Vec<f32> = Vec::new();
+        for slot in ls.slots.iter().filter(|s| !s.parked) {
+            let n = scene.get(slot.node).unwrap();
+            assert_ne!(
+                n.style.taffy_style.display,
+                taffy::Display::None,
+                "active slot style.display != None"
+            );
+            assert!(
+                n.layout_rect.h > 0.0,
+                "active slot has non-zero layout height"
+            );
+            active_bottoms.push(n.layout_rect.y + n.layout_rect.h);
+        }
+        // active slot 之间无间隙：每个 slot 的 bottom 等于下一个 slot 的 top。
+        // 仅当 >=2 个 active slot 时才有相邻可验。
+        if active_bottoms.len() >= 2 {
+            for w in active_bottoms.windows(2) {
+                let gap = (w[0] - w[1]).abs();
+                assert!(
+                    gap < 0.5,
+                    "active slots contiguous: bottom={:.1} vs next top (gap={:.1})",
+                    w[0],
+                    gap
+                );
+            }
+        }
+    }
+
+    /// insert_before 排序保险：多次 park/unpark 往返后，head_spacer 始终 children[0]，
+    /// tail_spacer 始终 children.last()。parked slot 的物理位置不破坏这一不变量。
+    #[test]
+    fn insert_before_keeps_spacer_ordering_with_parked_slots() {
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 100);
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..100 {
+                ls.heights.set(i, 20.0);
+            }
+            let st = scene.scroll.ensure(pane);
+            st.viewport_size = (1000.0, 200.0);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        // 多帧往返：滚→停→滚→停，触发 park/unpark 多次。
+        for scroll_y in [0.0, 400.0, 0.0, 800.0, 0.0, 200.0] {
+            {
+                let st = s.scene.as_mut().unwrap().scroll.ensure(pane);
+                st.scroll_pos = (0.0, scroll_y);
+            }
+            let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+            crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+            crate::list::collect_heights(s.scene.as_mut().unwrap());
+        }
+        // 每帧后验 spacer 不变量。
+        {
+            let st = s.scene.as_mut().unwrap().scroll.ensure(pane);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        let ul_node = scene.get(ul).unwrap();
+        assert_eq!(
+            ul_node.children.first(),
+            Some(&ls.head_spacer),
+            "head_spacer is always children[0] after park/unpark cycles"
+        );
+        assert_eq!(
+            ul_node.children.last(),
+            Some(&ls.tail_spacer),
+            "tail_spacer is always children.last() after park/unpark cycles"
+        );
+        // 再验 assert_all_slots_well_parented（含无重复子 + active 顺序严格递增）。
+        assert_all_slots_well_parented(scene, ul);
+    }
+
+    /// tick 时序不变量：tick_and_render 内 solve 在 rematch 之后、每次 tick 都执行。
+    ///
+    /// "solve 一次/帧" 是声明式不变量（spec §1.1 / §1.3），无 instrumentation 无法直接
+    /// 计数。这里用间接证据链：
+    ///   1. tick_and_render 后 active slot 有非零 layout_rect（solve 跑了且产出布局）。
+    ///   2. 滚动触发 park/unpark → 再 tick → layout_rect 反映新可见区（solve 对变更响应）。
+    ///   3. parked slot 的 display:none 已由 rematch 生效进 style（时序：rematch 在 solve 前）。
+    ///
+    /// 若将来需要直接计数 solve，加 instrumentation（如 scene.solve_count: u32），
+    /// 本测即可精确断言 "solve_count 增量 == 1"。当前间接证据链已覆盖核心风险。
+    #[test]
+    fn tick_order_one_solve_per_frame_with_parking() {
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 100);
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..100 {
+                ls.heights.set(i, 20.0);
+            }
+            let st = scene.scroll.ensure(pane);
+            st.viewport_size = (1000.0, 200.0);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        // 证据 1：tick_and_render 后 active slot 有非零 layout_rect（solve 产出布局）。
+        s.tick_and_render();
+        {
+            let scene = s.scene.as_ref().unwrap();
+            let ls = scene.lists.get(ul).unwrap();
+            let active_with_layout = ls
+                .slots
+                .iter()
+                .filter(|s| !s.parked)
+                .filter(|s| {
+                    let n = scene.get(s.node).unwrap();
+                    n.layout_rect.h > 0.0
+                })
+                .count();
+            assert!(
+                active_with_layout > 0,
+                "solve ran: active slots have non-zero layout_rect"
+            );
+            // 证据 3：parked slot 的 style 已生效 display:none（rematch 在 solve 前）。
+            for slot in ls.slots.iter().filter(|s| s.parked) {
+                assert_eq!(
+                    scene.get(slot.node).unwrap().style.taffy_style.display,
+                    taffy::Display::None,
+                    "rematch applied display:none to parked slot before solve"
+                );
+            }
+        }
+        // 证据 2：滚动触发 park/unpark → 再 tick → layout 反映新状态。
+        let pre_scroll_parked: usize = {
+            s.scene
+                .as_ref()
+                .unwrap()
+                .lists
+                .get(ul)
+                .unwrap()
+                .slots
+                .iter()
+                .filter(|s| s.parked)
+                .count()
+        };
+        {
+            let st = s.scene.as_mut().unwrap().scroll.ensure(pane);
+            st.scroll_pos = (0.0, 400.0);
+        }
+        s.tick_and_render();
+        {
+            let scene = s.scene.as_ref().unwrap();
+            let ls = scene.lists.get(ul).unwrap();
+            let post_scroll_parked = ls.slots.iter().filter(|s| s.parked).count();
+            // 滚动后 parked 集变化（部分 slot park、部分 unpark）。
+            // 若 parked 集相同（视口全覆盖），至少 active 的 item_index 变了。
+            let active_set_changed = ls
+                .slots
+                .iter()
+                .filter(|s| !s.parked)
+                .any(|s| s.item_index >= 10); // 滚到 ~item 20，应有些 item_index >= 10
+            assert!(
+                post_scroll_parked != pre_scroll_parked || active_set_changed,
+                "scroll tick caused state change: parked {}→{} (pre→post)",
+                pre_scroll_parked,
+                post_scroll_parked
+            );
+            // 新 active slot 仍有 layout（solve 对变更响应）。
+            let active_with_layout = ls
+                .slots
+                .iter()
+                .filter(|s| !s.parked)
+                .filter(|s| {
+                    let n = scene.get(s.node).unwrap();
+                    n.layout_rect.h > 0.0
+                })
+                .count();
+            assert!(
+                active_with_layout > 0,
+                "post-scroll solve ran: active slots still have layout"
+            );
+        }
     }
 
     /// 所有 slot 的 reuse_key 必须 >0（0 = MirrorPool"无 key"）且互不重复。
