@@ -228,6 +228,7 @@ pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Ve
         };
         let brace_open = pos + brace_open_rel;
         let prelude = stripped[pos..brace_open].trim();
+        let (prelude, _) = remove_hook_markers(prelude);
         let after_open = brace_open + 1;
         let sel_start = pos;
 
@@ -262,6 +263,7 @@ pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Ve
             break;
         };
         let body = &stripped[after_open..after_open + brace_close_rel];
+        let (body, _) = remove_hook_markers(body);
         pos = after_open + brace_close_rel + 1;
 
         if prelude.is_empty() {
@@ -270,7 +272,7 @@ pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Ve
         // <style> 内无精确 per-token span —— 定位用选择器起点近似。
         let loc = line_map.source_location(sel_start, "<style>".to_string());
         // 声明块只解析一次，逗号 selector list 的每段共享同一 declarations（clone）。
-        let declarations = parse_declarations(body, &loc, &mut diagnostics);
+        let declarations = parse_declarations(&body, &loc, &mut diagnostics);
         if declarations.is_empty() {
             continue;
         }
@@ -800,6 +802,34 @@ mod tests {
         assert_eq!(keyframes[0].name, "fadeIn");
         assert_eq!(rules.len(), 1, "普通 selector 规则照常解析");
         assert_eq!(rules[0].selector.raw, ".nav-card");
+    }
+
+    #[test]
+    fn hook_comment_outside_keyframes_is_inert_in_declarations() {
+        let (rules, keyframes, diags) = parse_style_block(".card { /* @loom-hook x */ color:red }");
+        assert!(keyframes.is_empty());
+        assert!(
+            diags.is_empty(),
+            "normal-rule hook comment must not create diagnostics: {diags:?}"
+        );
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].selector.raw, ".card");
+        assert_eq!(rules[0].declarations.len(), 1);
+        assert_eq!(rules[0].declarations[0].prop, "color");
+        assert_eq!(rules[0].declarations[0].value, "red");
+    }
+
+    #[test]
+    fn hook_comment_before_normal_rule_is_inert_in_selector() {
+        let (rules, keyframes, diags) = parse_style_block("/* @loom-hook x */\n.card{color:red}");
+        assert!(keyframes.is_empty());
+        assert!(
+            diags.is_empty(),
+            "leading normal-rule hook comment must not create diagnostics: {diags:?}"
+        );
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].selector.raw, ".card");
+        assert_eq!(rules[0].declarations[0].prop, "color");
     }
 
     #[test]

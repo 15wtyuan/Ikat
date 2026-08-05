@@ -456,6 +456,8 @@ pub fn parse_transform(value: &str) -> LocalTransform {
 /// function or malformed argument returns `None` rather than silently dropping part of a value.
 /// `translateX`/`translateY` are accepted as the one-axis CSS conveniences used by showcase CSS;
 /// `none` is the identity transform and returns an empty `TransformAnim`.
+/// The decomposition assumes the canonical T→R→S order: repeated components are last-wins,
+/// and other composition orders (for example `rotate translate`) are not preserved.
 pub fn parse_transform_trs(value: &str) -> Option<TransformAnim> {
     let value = value.trim();
     if value == "none" {
