@@ -1843,6 +1843,57 @@ mod tests {
         let _ = pane;
     }
 
+    /// 回归：parked slot（display:none → layout_rect.h=0）不更新 HeightCache。
+    /// parked slot 的 item_index 是 stale 复用参考——若不加跳过，会把 0.0 写成对应
+    /// item 的 known 高度，污染下帧可见区计算（坑 182 侧效应）。
+    #[test]
+    fn collect_heights_skips_parked_slots() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 5);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        // 每 slot 给一个可区分的布局高度：item 0→10, 1→20, 2→30, 3→40, 4→50。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get(ul).unwrap();
+            let slots: Vec<(NodeId, usize)> =
+                ls.slots.iter().map(|s| (s.node, s.item_index)).collect();
+            for (node, idx) in slots {
+                let n = scene.get_mut(node).unwrap();
+                n.layout_rect.h = (idx as f32 + 1.0) * 10.0;
+            }
+        }
+        // 首轮回填：缓存 5 项真实高度（10/20/30/40/50）。
+        crate::list::collect_heights(s.scene.as_mut().unwrap());
+        // 手动 park 第 3 个 slot（item_index=2），layout_rect.h 坠零（模拟 display:none 后 solve）。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let node = scene.lists.get(ul).unwrap().slots[2].node;
+            // 分两次可变借：先改 slot 状态，再改 node 的 layout_rect。
+            scene.lists.get_mut(ul).unwrap().slots[2].parked = true;
+            scene.get_mut(node).unwrap().layout_rect.h = 0.0;
+        }
+        // 二轮回填：parked 跳过 → known[2] 不应被污染为 0。
+        crate::list::collect_heights(s.scene.as_mut().unwrap());
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        assert!(
+            ls.heights.height_of(2) > 0.0,
+            "parked slot should not overwrite height cache with zero"
+        );
+        assert_eq!(
+            ls.heights.height_of(2),
+            30.0,
+            "parked slot should leave existing known height unchanged"
+        );
+        // 其余 active slot 真高度不变。
+        assert_eq!(ls.heights.height_of(0), 10.0);
+        assert_eq!(ls.heights.height_of(1), 20.0);
+        assert_eq!(ls.heights.height_of(3), 40.0);
+        assert_eq!(ls.heights.height_of(4), 50.0);
+    }
+
     /// anchoring 补偿：本帧回填修正了 estimate → head 区间（仍用 estimate 的未测项）
     /// 总和变化，delta≠0 → 同帧把祖先 ScrollPane.scroll_pos.y += delta（内容不动）。
     /// 触发路径：head 区间项未测（用 estimate），visible 区 slot 本帧首次实测 →
