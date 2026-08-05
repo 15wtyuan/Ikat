@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::input::EventRecord;
 use crate::scene::node::{AnimTable, NodeId, Scene};
-use crate::style::resolved::{AnimationDirection, AnimationFillMode, AnimationSpec};
+use crate::style::resolved::{
+    AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
+};
 use crate::transform::{self, Affine2, Affine2Ext};
 use crate::tween::Ease;
 
@@ -86,7 +88,8 @@ pub enum PlayerPlayState {
     /// 完成（iteration 跑满 count）。fill forwards/both 持续写末值不回收；
     /// fill none/backwards 由消费方回收回退 base。
     Completed = 2,
-    /// 显式 Stop：消费方回收。
+    /// 显式 Stop：scene 层**终态**（T6 review Minor 1 钉死）——update_all 下帧清通道并
+    /// 回收 player，PlayerKey 失效，不可恢复（勿当可恢复暂停）。
     Stopped = 3,
 }
 
@@ -163,7 +166,9 @@ impl KeyframePlayer {
 
     /// 推进时间轴一帧（spec §5.3 纯函数：不写 NodeAnim、不 emit 事件）。
     ///
-    /// Paused/Stopped 跳过推进（elapsed 不变，返回当前时刻帧）。
+    /// Paused 跳过推进（elapsed 不变，返回当前时刻帧，幂等）。Stopped 是 scene 层**终态**：
+    /// 本函数仅不推进（幂等），消费方 update_all 下帧清通道 + 回收 player——不可恢复，
+    /// 勿当"可恢复暂停"（T6 review Minor 1 钉死）。
     pub fn advance(&mut self, dt: f32) -> PlayerFrame {
         if matches!(
             self.play_state,
@@ -448,6 +453,44 @@ pub fn register_on_key(scene: &mut Scene, key: PlayerKey, pct: f32) {
             p.on_key_percents.push(pct);
         }
     }
+}
+
+/// 程序化启动 @keyframes player（`node.Play` FFI 用，spec §5.2）。
+///
+/// 查 `Scene.keyframes` 全局表（CSS `@keyframes` 全局语义）建 **programmatic** player
+/// （`sync_animation_players` 完全跳过：声明消失不回收、同名不视为已启动，靠 Stop/句柄回收）。
+/// C# `Play(name)` 无时长参数 → spec 默认：**1s / 无 delay / 单次迭代 / normal / fill both /
+/// cubic-out**（CSS 默认 ease）。fill both = 播放结束停终态（与 home `animation:fadeIn .4s both`
+/// 同语义）；改默认须同步 T13 C# 测试。
+///
+/// 立即算首帧写 NodeAnim（spec §5.2：不等下帧 step b，防 delay 期闪 base）。
+/// 返 PlayerKey；name 未找到 / 节点悬空 → None（调用方转 FFI 无效 key）。
+pub fn play_programmatic(scene: &mut Scene, node: NodeId, name: &str) -> Option<PlayerKey> {
+    if !scene.nodes.contains_key(node.to_key()) {
+        return None;
+    }
+    let rule = scene.keyframes.get(name)?.clone();
+    let spec = AnimationSpec {
+        name: name.to_string(),
+        duration: 1.0,
+        delay: 0.0,
+        iteration_count: Some(1),
+        direction: AnimationDirection::Normal,
+        fill_mode: AnimationFillMode::Both,
+        timing_function: Ease::CubicOut,
+        play_state: AnimationPlayState::Running,
+    };
+    let mut player = KeyframePlayer::new(node, spec.clone(), rule);
+    player.programmatic = true;
+    let first = player.advance(0.0);
+    let key = scene.players.insert(player);
+    if matches!(
+        spec.fill_mode,
+        AnimationFillMode::Backwards | AnimationFillMode::Both
+    ) {
+        write_frame(&mut scene.anim, node, first.props);
+    }
+    Some(key)
 }
 
 /// 阈值跨越判定：prev→cur 单调扫过 pct（双向——reverse/alternate 反向迭代也触发）。

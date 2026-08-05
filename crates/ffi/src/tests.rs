@@ -1563,3 +1563,221 @@ fn ffi_set_control_min_max_step_number_field_unsupported() {
     );
     loomgui_stage_free(h);
 }
+
+// ===== @keyframes player FFI（M2 spec §7.3：play/pause/resume/stop/time/state/on-key） =====
+
+/// 测试辅助：建根 div + 往 scene.keyframes 注入 opacity 0→1 两 stop 的 "fadeIn" 规则。
+/// keyframes 表是 runtime 全局表（instantiate 合并产物），测试侧手工注入（同 controls 惯例）。
+fn make_anim_stage() -> (*mut StageHandle, u32) {
+    use loomgui_core::scene::animation::{
+        AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule,
+    };
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    let sh = unsafe { &mut *h };
+    let scene = sh.stage.scene.as_mut().expect("scene built");
+    scene.keyframes.insert(
+        "fadeIn".into(),
+        KeyframesRule {
+            name: "fadeIn".into(),
+            stops: vec![
+                KeyframeStop {
+                    selector: KeyframeStopSelector::From,
+                    props: AnimatableProps {
+                        opacity: Some(0.0),
+                        ..Default::default()
+                    },
+                    hook: None,
+                },
+                KeyframeStop {
+                    selector: KeyframeStopSelector::To,
+                    props: AnimatableProps {
+                        opacity: Some(1.0),
+                        ..Default::default()
+                    },
+                    hook: None,
+                },
+            ],
+        },
+    );
+    (h, root)
+}
+
+/// play_animation：返有效 PlayerKey(>0)，建 programmatic player，立即写首帧（fill both → opacity 0）。
+/// 未知 name / 无效节点 / 非 UTF-8 → 0（无效 key 哨兵）。
+#[test]
+fn ffi_play_animation_creates_programmatic_player() {
+    let (h, root) = make_anim_stage();
+    let key = loomgui_stage_play_animation(h, root, b"fadeIn".as_ptr(), 6);
+    assert_ne!(key, 0, "play returns valid PlayerKey");
+    let sh = unsafe { &mut *h };
+    let scene = sh.stage.scene.as_mut().unwrap();
+    let p = scene
+        .players
+        .get(loomgui_core::scene::animation::player_key_from_u64(key))
+        .expect("player inserted");
+    assert!(p.programmatic, "node.Play 建的 player 必须 programmatic");
+    assert_eq!(p.spec.name, "fadeIn");
+    assert_eq!(p.spec.duration, 1.0, "Play 默认时长 1s");
+    assert_eq!(p.node, loomgui_core::scene::NodeId(root));
+    // 首帧立即写（spec §5.2）：fill both → progress 0 采样 opacity 0。
+    let a = scene
+        .anim
+        .get(loomgui_core::scene::NodeId(root))
+        .expect("first frame written");
+    assert_eq!(a.opacity, Some(0.0), "first frame opacity");
+    // 状态 Playing。
+    assert_eq!(
+        loomgui_stage_get_animation_state(h, key),
+        0,
+        "state == Playing(0)"
+    );
+    // 未知 name → 0。
+    assert_eq!(
+        loomgui_stage_play_animation(h, root, b"nope".as_ptr(), 4),
+        0,
+        "unknown name"
+    );
+    // 无效节点 → 0。
+    assert_eq!(
+        loomgui_stage_play_animation(h, 0xFFFF_FFFF, b"fadeIn".as_ptr(), 6),
+        0,
+        "invalid node"
+    );
+    // null name 指针 → 0（from_raw_parts(null,..) UB 防御）。
+    assert_eq!(
+        loomgui_stage_play_animation(h, root, std::ptr::null(), 0),
+        0,
+        "null name"
+    );
+    loomgui_stage_free(h);
+}
+
+/// pause → state Paused(1)；重复 pause 幂等；resume → Playing(0)。
+#[test]
+fn ffi_pause_resume_animation_state() {
+    let (h, root) = make_anim_stage();
+    let key = loomgui_stage_play_animation(h, root, b"fadeIn".as_ptr(), 6);
+    assert_ne!(key, 0);
+    loomgui_stage_pause_animation(h, key);
+    assert_eq!(loomgui_stage_get_animation_state(h, key), 1, "paused");
+    loomgui_stage_pause_animation(h, key); // 已 Paused 再 pause：幂等
+    assert_eq!(loomgui_stage_get_animation_state(h, key), 1);
+    loomgui_stage_resume_animation(h, key);
+    assert_eq!(loomgui_stage_get_animation_state(h, key), 0, "resumed");
+    // 无效 key 全部 no-op（不 panic）。
+    loomgui_stage_pause_animation(h, 0);
+    loomgui_stage_resume_animation(h, 0xDEAD_BEEF);
+    loomgui_stage_free(h);
+}
+
+/// set_animation_time → get_animation_time 一致（seek 走 elapsed 单一时间源头）。
+/// 无效 key：get 返 0.0，set no-op。
+#[test]
+fn ffi_set_get_animation_time_roundtrip() {
+    let (h, root) = make_anim_stage();
+    let key = loomgui_stage_play_animation(h, root, b"fadeIn".as_ptr(), 6);
+    assert_ne!(key, 0);
+    assert_eq!(
+        loomgui_stage_get_animation_time(h, key),
+        0.0,
+        "fresh player time 0"
+    );
+    loomgui_stage_set_animation_time(h, key, 0.25);
+    assert_eq!(
+        loomgui_stage_get_animation_time(h, key),
+        0.25,
+        "seek roundtrip"
+    );
+    // 无效 key：get → 0.0；set → no-op（无 panic）。
+    assert_eq!(
+        loomgui_stage_get_animation_time(h, 0),
+        0.0,
+        "invalid key time 0"
+    );
+    loomgui_stage_set_animation_time(h, 0xDEAD_BEEF, 0.5);
+    loomgui_stage_free(h);
+}
+
+/// stop = scene 层终态（T6 review Minor 1 钉死）：state 立即 255（Stopped 语义等同无效）；
+/// resume 不可恢复；下帧 update_all 清通道 + 回收 player（players 表空）。
+#[test]
+fn ffi_stop_animation_is_terminal() {
+    let (h, root) = make_anim_stage();
+    let key = loomgui_stage_play_animation(h, root, b"fadeIn".as_ptr(), 6);
+    assert_ne!(key, 0);
+    loomgui_stage_stop_animation(h, key);
+    assert_eq!(
+        loomgui_stage_get_animation_state(h, key),
+        255,
+        "stopped == invalid(255)"
+    );
+    loomgui_stage_resume_animation(h, key); // Stopped 不可恢复
+    assert_eq!(loomgui_stage_get_animation_state(h, key), 255);
+    // 下帧 update_all：回收 player + 清通道（NodeAnim 回 None）。
+    loomgui_stage_tick(h, 1.0 / 60.0);
+    let sh = unsafe { &mut *h };
+    let scene = sh.stage.scene.as_mut().unwrap();
+    assert_eq!(
+        scene.players.len(),
+        0,
+        "stopped player recycled by update_all"
+    );
+    assert_eq!(
+        scene
+            .anim
+            .get(loomgui_core::scene::NodeId(root))
+            .map(|a| a.opacity),
+        None,
+        "channels cleared"
+    );
+    assert_eq!(
+        loomgui_stage_get_animation_time(h, key),
+        0.0,
+        "dead key time 0"
+    );
+    loomgui_stage_free(h);
+}
+
+/// 播完（1s 单次迭代，fill both）→ state Completed(2)，player 保留（续写末值）。
+#[test]
+fn ffi_animation_state_completed_after_duration() {
+    let (h, root) = make_anim_stage();
+    let key = loomgui_stage_play_animation(h, root, b"fadeIn".as_ptr(), 6);
+    assert_ne!(key, 0);
+    loomgui_stage_tick(h, 1.1); // 越过 1s 时长
+    assert_eq!(loomgui_stage_get_animation_state(h, key), 2, "completed");
+    let sh = unsafe { &mut *h };
+    let scene = sh.stage.scene.as_mut().unwrap();
+    assert_eq!(scene.players.len(), 1, "fill both Completed player 保留");
+    // fill both：末值持续写（opacity 1）。
+    assert_eq!(
+        scene
+            .anim
+            .get(loomgui_core::scene::NodeId(root))
+            .map(|a| a.opacity),
+        Some(Some(1.0))
+    );
+    loomgui_stage_free(h);
+}
+
+/// animation_on_key：注册进 on_key_percents；同 pct 重复注册去重。无效 key no-op。
+#[test]
+fn ffi_animation_on_key_registers_dedup() {
+    let (h, root) = make_anim_stage();
+    let key = loomgui_stage_play_animation(h, root, b"fadeIn".as_ptr(), 6);
+    assert_ne!(key, 0);
+    loomgui_stage_animation_on_key(h, key, 0.5);
+    loomgui_stage_animation_on_key(h, key, 0.5); // 去重
+    let sh = unsafe { &mut *h };
+    let scene = sh.stage.scene.as_mut().unwrap();
+    let p = scene
+        .players
+        .get(loomgui_core::scene::animation::player_key_from_u64(key))
+        .unwrap();
+    assert_eq!(p.on_key_percents, vec![0.5], "registered once (dedup)");
+    // 无效 key no-op（不 panic）。
+    loomgui_stage_animation_on_key(h, 0, 0.5);
+    loomgui_stage_free(h);
+}
