@@ -583,23 +583,52 @@ enum NodePayload {
 
 ## 13. 动画（单时钟）
 
-### 13.1 TweenManager
+动画系统分两层：**功能层**（M2 已交付，功能完整）+ **引擎终态**（M2.5，触发判据明确，见 roadmap milestones）。本节描述 M2 实现现状；带「M2.5」标记的条目是 deferred 的引擎终态。
 
-整个核心只有一个动画时钟 `TweenManager::update(dt)`。
+### 13.1 单一时钟
 
-- `TweenManager { active, pool }`，池化。
-- `Tweener`：统一 `TweenValue{x,y,z,w,d}` + `value_size(1..6)`。
-- 链式 builder：`tween(start,end,dur).delay().ease().repeat(,yoyo).on_complete()`。
-- 缓动：Linear/Sine/.../Elastic/Back/Bounce 的 In/Out/InOut + Custom。
-- `prop_type` 分层：tween 写属性区分 "transform 属性"（x/y/scale/rotation，置 `transform_dirty`，不 solve）vs "layout 属性"（width/height/flex，置 `layout_dirty` 触发 solve）。
+整个核心只有一个动画时钟。每帧 tick step **a** 并列推进两个写入者（`render` 读 `NodeAnim` 时 `anim.unwrap_or(style)` 天然优先于 base style）：
 
-### 13.2 Transition
+```
+a. TweenManager.update(dt)        ← transition 的 opacity/bg_color/text_color 先写
+   KeyframePlayer.update(dt)      ← animation 的 transform/opacity/bg_color/text_color 后写（同通道覆盖）
+```
 
-纯数据 `items: Vec<TransitionItem>`。`Play()` 把每个 item 翻译成 Tweener 提交 TweenManager。与控件状态（如 Toggle 切换、TabList 切换）正交，由状态变化触发。
+写入顺序即优先级——天然实现 CSS **animation 优先于 transition**，无需占用标记。ScrollPane 物理是唯一例外（自维护 tween）。
 
-### 13.3 Timers
+### 13.2 KeyframePlayer（路线甲：独立 player，不翻译成 Tween 序列）
 
-独立通用周期/延时回调（unscaled_dt），与动画解耦。`CallLater`（下一帧）、`AddUpdate`（每帧）。
+`@keyframes` 表（组件级打包、Scene 级查找）+ `AnimationSpec`（fence `animation` 简写解析）驱动独立的 `KeyframePlayer`，slotmap 稳定句柄（`PlayerKey: u64`）。player 推进时间轴（delay/iteration/direction/fill/ease + per-segment timing-function + TRS lerp），直接写 `NodeAnim` 的 transform/opacity/bg_color/text_color 四通道，不翻译成 Tween 序列。
+
+**tick step g' `sync_animation_players`**（rematch 后、solve 前）检测 computed `animation` 声明变化启停 class 触发的 player：新增 name → 启 player；消失 → 停；参数变 → 重启。`node.Play("name")`（程序化）走 FFI 立即建 player，不等 rematch。
+
+**写入通道独占**：`transform` 是 player 独占（transition 不支持 transform）；`opacity/bg_color/text_color` player 与 tween 都可能写，player 后写覆盖。
+
+**fill-mode 完成态**：`forwards`/`both` → Completed 态不回收，每帧持续写末值（直到声明消失/Stop）；`none`/`backwards`（默认）→ 回收 player，通道回 None，下帧 tween/base 接管。**backwards/both 首帧 backwards fill**：启动时立即算一次首帧值写 NodeAnim，不等下帧 update，避免 delay 期间闪 base。
+
+**多 animation 并存**：`animation: fadeIn .4s, spin 2s` → 一节点 N 个 player；同通道冲突时后声明的赢（CSS 标准，列表后者优先），player 按 `animation: Vec` 顺序写。
+
+**ITERATION CSS 语义**：最后一次 iteration 结束的完成帧**只发 END，不发 ITERATION**（对齐浏览器 `animationiteration` 不因最后一次迭代触发）；非完成的 iteration 边界跨越才发 ITERATION。
+
+**Animation 句柄 L3 全套**（见 [public-api.md](public-api.md) §9）：`Node.Play(name)` 返回 `Animation` 句柄，事件 `AnimationStart`/`End`/`Iteration`/`Key`/`Hook` + `TransitionEnd` 经 `borrow_events` 双路由（全局 `On<T>` + 句柄 `player_key` 私有回调）。
+
+> **M2.5（引擎终态）**：池化 Tween（`TweenManager { active, pool }` 替换单 Vec）+ 缓动全集（cubic-bezier/Elastic/Bounce/Custom + per-stop timing-function 结构化）+ 链式 builder API（替位置参数 `tween()`）+ player 与 Tween 插值原语统一（共享 `TweenValue{x,y,z,w,d}` + `value_size(1..6)`）。当前 TweenManager 是单 `Vec<Tween>` + flat `tween()` + 7 keyword ease + value_size max=4——够 keyframes 跑，触发判据见 milestones M2.5。
+
+### 13.3 Transition
+
+纯数据 `items: Vec<TransitionSpec>`。class/typed style 变化在下一帧 tick step **f** rematch 生效后，step **g** transition drain 比较 computed style 变化（基线 = 上帧 computed，不含 NodeAnim），把每个 item 翻译成 Tweener 提交 TweenManager。与控件状态（Toggle 切换、TabList 切换）正交，由状态变化触发。transition 与 animation 检测独立——animation 播放期间 computed style 不变，transition 不误触发。
+
+### 13.4 opacity 父级累积传播
+
+渲染 DFS 累积：`node_alpha = parent_alpha × own_opacity`（`render/mod.rs::accumulate_opacity`），进子树时把 node_alpha 当作子的 parent_alpha。parent 半透明会按比例衰减子树——与浏览器 opacity 合成语义一致。
+
+### 13.5 Timers
+
+独立通用周期/延时回调（unscaled_dt），与动画解耦。`CallLater`（下一帧）、`CallNextFrame`、`OnUpdate`（每帧 recurring，返 IDisposable）。OnUpdate 是逻辑驱动每帧钩子，非动画系统。
+
+### 13.6 M2.5 layout 动画（deferred）
+
+当前 player/tween 只动**渲染层属性**（transform/opacity/bg_color/text_color），不动布局。layout 动画（动 width/height/flex）需要 `prop_type` 分层（transform 属性置 `transform_dirty` 不 solve vs layout 属性置 `layout_dirty` 触发 solve 重入）+ tick 时序重构，归 M2.5（进入判据：第一个需 layout 动画的 showcase 页 / M5 NodeTransform 升级合并 / 动画并发使单 Vec 抖动）。详见 roadmap milestones M2.5。
 
 ---
 
@@ -676,13 +705,14 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
   1. set_input()                       ← 后端采集指针/键/触摸/IME
   2. flush 脏属性回写                   ← C# 投影层：攒批的 Style(css 串)/Transform(数值) 推 Rust（tick 前）
   3. context.tick(dt) — 显式依赖拓扑：
-     a. TweenManager.update(dt)        ← 唯一动画时钟（ScrollPane 物理是例外，自维护 tween）
+     a. TweenManager.update(dt) + KeyframePlayer.update(dt)   ← 唯一动画时钟（transition 先写、animation 后写同通道覆盖；ScrollPane 物理是例外，自维护 tween）
      b. 消费 pending_focus_request
      c. process 指针输入               ← 多槽命中测试（用上帧 world）+ 拖拽/滚动/点击仲裁
      d. scroll.update + 消费 wheel      ← 惯性/回弹物理
      e. process_keys                    ← keydown/up（无自动 Tab 导航——方向键/手柄导航是逻辑层积木）
      f. rematch                         ← 伪类 :hover/:active/:focus/:disabled/:checked 重 cascade（class/style 变更下帧生效）
      g. transition drain                ← 消费 transition 请求，提交 tween（基线 = 上帧 computed）
+     g'. sync_animation_players         ← 检测 computed animation 声明变化启停 KeyframePlayer（class 触发；rematch 后、solve 前）
      h. solve                           ← Block/Flex 各自算法（每帧一次，帧末一致）
      i. refresh_content_sizes           ← scroll content_size 刷新
      j. compute_world_transforms        ← DFS 累计 world matrix（含 Transform 渲染偏移，不触发 solve）
@@ -696,8 +726,8 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
 - **rematch 在 solve 和 compute 之前**——伪类/class/style 变更当帧全部生效。class 切换驱动动画的下帧 rematch + 上帧 computed 做 transition 基线见 [public-api.md](public-api.md) §9.1。
 - **hit_test 用上帧 world_transforms**（1 帧延迟）；scroll_pos 同帧进 world。
 - **事件回调里改的布局属性延迟到下帧 solve**（避免反馈环）；Geometry 读的是最近完成的 solve（滞后一帧，同 web reflow）。
-- **单一动画时钟**：TweenManager.update(dt) 是唯一时钟；OnUpdate 是逻辑驱动每帧钩子（非动画系统）。
-- transform 动画不改布局，不触发 solve。
+- **单一动画时钟**：TweenManager.update(dt) + KeyframePlayer.update(dt) 同在 step a 并列推进（transition 先写、animation 后写覆盖，天然 animation 优先于 transition）；OnUpdate 是逻辑驱动每帧钩子（非动画系统）。动画全貌见 §13。
+- transform 动画不改布局，不触发 solve（layout 动画 deferred 到 M2.5，见 §13.6）。
 
 ---
 

@@ -366,6 +366,8 @@ public class ListView : Container {
 
 `Play`（触发 2）与 class 切换（触发 1）分工：Play 用于「程序化、要句柄控制」；class 用于「声明式、只需知结束」。class 触发不产 `Animation` 句柄，结束统一走 `AnimationEndEvent`。
 
+**`:nth-child(An+B|odd|even|N)` selector**（M2）配合 `animation-delay` 实现错峰入场——同一规则按子序号算 delay，常用于导航卡/列表项依次淡入（showcase `home.html` 7 条 `.nav-card:nth-child(N){animation-delay:...}`）。
+
 ### 9.2 Animation 句柄
 
 ```csharp
@@ -382,6 +384,19 @@ public sealed class Animation {
 ```
 
 **生命周期不变量**：Animation 句柄非长期对象，生命周期 = 那次播放。播放结束句柄失效、hook 自动释放（循环动画 `Stop()` 时释放）。
+
+**事件双路由**（M2）：core `player.update` 检测阈值后 emit EventRecord，`borrow_events` 到 C# 双路由——
+
+| typed 事件 | 句柄回调 | 触发 |
+|---|---|---|
+| `AnimationStartEvent` | `OnStart` | 播放开始（首个非 delay 帧）|
+| `AnimationEndEvent` | `OnEnd` | 完成（最后一次 iteration 结束帧；class 触发也走此）|
+| `AnimationIterationEvent` | — | 非最后一次的 iteration 边界跨越（最后一次只发 End，对齐浏览器 `animationiteration`）|
+| `AnimationKeyEvent` | `OnKey(float pct)` | 时间轴跨越注册的百分比键 |
+| `AnimationHookEvent` | `OnHook(string name)` | 时间轴跨越 `@loom-hook` 命名键（见 §9.3）|
+| `TransitionEndEvent` | — | transition 完成后发（type=TweenComplete 分流）|
+
+class 触发的动画无句柄，只走 EventBus 全局 `On<T>` 广播；`Play` 触发的动画句柄回调与全局广播并存（同一事件两路由都触发）。
 
 ### 9.3 @loom-hook
 
