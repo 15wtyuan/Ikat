@@ -209,20 +209,20 @@ fn iteration_events_on_every_boundary_infinite() {
     );
 }
 
-/// 测 3：count=2——非完成边界 ITERATION(0)；完成帧跨界（iteration>1）发 ITERATION(1) + END。
+/// 测 3：count=2——iter0 结束（非完成）发 ITERATION(0)；iter1 结束 = 完成帧只发 END
+/// （CSS：animationiteration 不因最后一次 iteration 触发）。
 #[test]
-fn iteration_emitted_on_completion_when_count_gt_1() {
+fn iteration_not_emitted_on_completion_frame() {
     let (mut scene, node) = scene_with_1_node();
     let mut s = spec();
     s.iteration_count = Some(2);
     insert_player(&mut scene, node, s, opacity_fade());
-    let all = tick_n(&mut scene, 0.1, 8); // t=0.1..0.8，边界 @0.4、完成 @0.8
+    let all = tick_n(&mut scene, 0.1, 8); // t=0.1..0.8，iter0 结束 @0.4、完成 @0.8
 
     let iters = by_type(&all, EVT_ANIMATION_ITERATION);
-    assert_eq!(iters.len(), 2, "两个边界各一次");
+    assert_eq!(iters.len(), 1, "仅非完成边界（iter0 结束）发 ITERATION");
     assert_eq!(iters[0].y.to_bits(), 0);
-    assert_eq!(iters[1].y.to_bits(), 1);
-    assert_eq!(by_type(&all, EVT_ANIMATION_END).len(), 1);
+    assert_eq!(by_type(&all, EVT_ANIMATION_END).len(), 1, "完成帧只发 END");
     assert_eq!(by_type(&all, EVT_ANIMATION_START).len(), 1);
 }
 

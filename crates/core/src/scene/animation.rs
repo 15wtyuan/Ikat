@@ -474,12 +474,13 @@ fn crossed(prev: f32, cur: f32, pct: f32) -> bool {
 /// 事件（spec §7.1/§7.5，advance 后按 PlayerFrame + player 状态判定，emit 进 `out`）：
 /// - START：首帧 advance 一次（`fired_start` 防重）；
 /// - ITERATION：iteration 边界跨越（`PlayerFrame.iteration_boundary`，报刚结束的 0-based
-///   迭代序号）。完成帧跨界只在跨越进 iteration>1（count≥2）时发——count=1 完成只发
-///   END（CSS 规定，T5 concern 1）；
+///   迭代序号）。完成帧不发 ITERATION——CSS：最后一次 iteration 结束只发 END
+///   （animationiteration 不因最后一次 iteration 触发）；非完成边界跨越才发。
 /// - END：完成转变帧一次（`frame.completed && !was_completed`；fill 续写帧不重发）；
 /// - KEY：`on_key_percents` 跨越（`fired_keys` 防同 iteration 重；iteration 边界清表，
 ///   下一 iteration 重新可发）；
-/// - HOOK：keyframes stop 的 `hook` 锚点跨越（`fired_hooks` 同 KEY 语义）。
+/// - HOOK：keyframes stop 的 `hook` 锚点跨越（`fired_hooks` 同 KEY 语义）。0% (From)
+///   hook 不触发——crossing 语义下起点即 0.0 恒无跨越，与 100% 不对称，已知取舍。
 ///
 /// KEY/HOOK 跨越基准 prev 的选取：首帧/出 delay 帧从 t=0 的 directed progress 起算
 /// （reverse/alternate-reverse 起点是 1.0，用 last_progress 初始 0.0 会首帧误发）；
@@ -531,8 +532,9 @@ pub fn update_all(scene: &mut Scene, dt: f32, out: &mut Vec<EventRecord>) {
             ));
         }
         if let Some(i) = frame.iteration_boundary {
-            // count=1 完成帧的跨界（i=0）只发 END；count≥2 完成跨界（i>0）ITERATION+END。
-            if !completion || i > 0 {
+            // CSS：animationiteration 不因最后一次 iteration 触发——完成帧只发 END，
+            // 非完成 iteration 边界跨越才发 ITERATION（count=1 完成帧同理只发 END）。
+            if !completion {
                 out.push(crate::event::animation_iteration(
                     &mut scene.event_strs,
                     p.node,

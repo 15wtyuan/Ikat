@@ -24,7 +24,8 @@ use crate::scene::node::NodeId;
 /// 动画启动（player 首次 update；class 触发 + node.Play 都发，spec §7.5）。
 /// 值对齐 C# `EventType.AnimationStart`（LoomGUI.EventType.cs，公共 API 冻结值）。
 pub const EVT_ANIMATION_START: u8 = 18;
-/// 迭代结束（每个 iteration 边界；count=1 完成帧只发 END 不发本事件，CSS 规定）。
+/// 迭代结束（每个 iteration 边界；完成帧不发——CSS：最后一次 iteration 结束只发 END，
+/// animationiteration 不因最后一次 iteration 触发）。
 /// 值对齐 C# `EventType.AnimationIteration`。
 pub const EVT_ANIMATION_ITERATION: u8 = 19;
 /// 动画完成（PlayerFrame.completed 转变帧一次；fill forwards/both 持续完成态不重发）。
