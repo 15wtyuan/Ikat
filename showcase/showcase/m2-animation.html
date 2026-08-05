@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="preview/preview-base.css">
+  <script src="preview/loom-preview.js"></script>
+  <title>LoomGUI 靶子冻结 Showcase · M2 动画验收</title>
+  <style>
+  .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; }
+  .body {display:flex;flex-direction:column; flex-grow:1; padding:32px 56px; gap:22px; overflow-y:auto; }
+  .page-title { color:#e0e6ec; font-size:30px; font-weight:700; }
+  .page-desc { color:#9aa0b4; font-size:14px; }
+  .section {display:flex;flex-direction:column; background-color:#152433; border-radius:12px; padding:22px; gap:12px; }
+  .section-title { color:#8ec5d8; font-size:19px; font-weight:700; }
+  .section-desc { color:#9aa0b4; font-size:13px; }
+  .stage {display:flex; flex-direction:row; gap:28px; align-items:center; flex-wrap:wrap; background-color:#0e1620; border-radius:8px; padding:18px 22px; min-height:92px; }
+  .stage-col {display:flex;flex-direction:column; gap:6px; }
+  .label { color:#6c7080; font-size:12px; }
+  .label-strong { color:#8ec5d8; font-size:12px; font-weight:700; }
+  .box { width:60px; height:60px; border-radius:8px; background-color:#5fb4d4; }
+  .note { color:#6c7080; font-size:12px; }
+
+  /* ── #1 淡入滑入：opacity 0→1 + translateY(20→0)，.5s fill both ── */
+  @keyframes m2-fadeIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+  .b1 { animation:m2-fadeIn .5s both; }
+
+  /* ── #2 脉冲缩放：scale 1↔1.1，3-stop，infinite alternate ── */
+  @keyframes m2-pulse { from { transform:scale(1); } 50% { transform:scale(1.1); } to { transform:scale(1); } }
+  .b2 { animation:m2-pulse 1.2s ease-in-out infinite alternate; }
+
+  /* ── #3 旋转：rotate 0→360，infinite linear ── */
+  @keyframes m2-spin { from { transform:rotate(0); } to { transform:rotate(360deg); } }
+  .b3 { animation:m2-spin 2s linear infinite; }
+
+  /* ── #4 颜色渐变：bg-color A→B→A，3-stop color lerp，infinite ── */
+  @keyframes m2-hue { from { background-color:#5fb4d4; } 50% { background-color:#d4a44e; } to { background-color:#5fb4d4; } }
+  .b4 { animation:m2-hue 2s linear infinite; }
+
+  /* ── #5 错峰入场：nth-child + animation-delay 区分（delay 进 animation 简写） ── */
+  @keyframes m2-slide { from { opacity:0; transform:translateX(-24px); } to { opacity:1; transform:translateX(0); } }
+  .b5-row {display:flex; flex-direction:row; gap:12px; }
+  .b5-item:nth-child(1){animation:m2-slide .4s .0s both}
+  .b5-item:nth-child(2){animation:m2-slide .4s .1s both}
+  .b5-item:nth-child(3){animation:m2-slide .4s .2s both}
+  .b5-item:nth-child(4){animation:m2-slide .4s .3s both}
+  .b5-item:nth-child(5){animation:m2-slide .4s .4s both}
+
+  /* ── #6 fill-mode 对比：4 个一次性，none/forwards/backwards/both ──
+     base opacity=.5（class 显式声明），动画 0→1 / .6s / delay .8s。
+     - none/forwards：delay 期显 base(.5)；完成后 none 回 base(.5)，forwards 留末值(1)
+     - backwards/both：delay 期显首帧(0)；完成后 backwards 回 base(.5)，both 留末值(1) */
+  @keyframes m2-fill { from { opacity:0; } to { opacity:1; } }
+  .b6-base { opacity:.5; }
+  .b6-none { animation:m2-fill .6s .8s none; }
+  .b6-forwards { animation:m2-fill .6s .8s forwards; }
+  .b6-backwards { animation:m2-fill .6s .8s backwards; }
+  .b6-both { animation:m2-fill .6s .8s both; }
+
+  /* ── #7 direction 对比：normal/reverse/alternate，infinite（持续可观察） ── */
+  @keyframes m2-rot { from { transform:rotate(0); } to { transform:rotate(180deg); } }
+  .b7-normal { animation:m2-rot 1.6s linear infinite normal; }
+  .b7-reverse { animation:m2-rot 1.6s linear infinite reverse; }
+  .b7-alternate { animation:m2-rot 1.6s linear infinite alternate; }
+
+  /* ── #8 ease 对比：同动画 × linear/ease/step-start，infinite alternate ── */
+  @keyframes m2-x { from { transform:translateX(0); } to { transform:translateX(120px); } }
+  .b8-track { width:200px; height:60px; }
+  .b8-linear { animation:m2-x 2s linear infinite alternate; }
+  .b8-ease { animation:m2-x 2s ease infinite alternate; }
+  .b8-step { animation:m2-x 2s step-start infinite alternate; }
+
+  /* ── #9 transition：background-color .3s，:hover 触发 class 变化 ── */
+  .b9 { width:120px; height:48px; border-radius:8px; background-color:#5fb4d4; transition:background-color .3s; }
+  .b9:hover { background-color:#d4a44e; }
+
+  /* ── #10 父级 opacity 累积：父 fadeIn 0→1→0 循环，子文字 alpha 传播 ── */
+  @keyframes m2-parent-fade { from { opacity:0; } 50% { opacity:1; } to { opacity:0; } }
+  .b10-parent {display:flex; flex-direction:row; align-items:center; gap:14px; animation:m2-parent-fade 3s linear infinite; }
+  .b10-child { color:#e0e6ec; font-size:18px; font-weight:700; }
+
+  /* ── #11 / #12 driver 占位：node.Play + OnKey/OnHook + 句柄 L3 控制 ──
+     @keyframes 表 + 目标 div 就位；Play / Pause / Resume / Stop / seek / OnKey / OnHook
+     由 driver C# 驱动（spec §5.2 程序化触发），showcase 页只到 HTML 结构。 */
+  @keyframes m2-play-fade { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes m2-hookanim {
+    from { opacity:0; }
+    50% { opacity:.5; } /* @loom-hook half */
+    to { opacity:1; }
+  }
+  .b-target { width:120px; height:48px; border-radius:8px; background-color:#2a5a75; color:#e0e6ec; font-size:14px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:18px 32px;background-color:#152433;border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
+      <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">M2 动画验收矩阵</span><span style="color:#6c7080;font-size:13px">spec §10 · 12 块</span>
+    </div>
+    <div class="body">
+      <div class="page-title">M2 keyframes runtime · 12 块验收</div>
+      <div class="page-desc">#1-8 纯 HTML/CSS（class 触发）· #9-10 transition / 父级累积 · #11-12 driver 占位（node.Play + 句柄）· 真机视觉验收，确定性断言在 headless fixture</div>
+
+      <div class="section">
+        <div class="section-title">1 · 淡入滑入（opacity + translateY，.5s both）</div>
+        <div class="section-desc">opacity 0→1 + translateY(20→0)，fill both 保留末值。基础属性 + fill both + class 触发。</div>
+        <div class="stage"><div class="box b1"></div><span class="note">入场播放一次（.5s），both 保留末态</span></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">2 · 脉冲缩放（scale 1↔1.1，infinite alternate）</div>
+        <div class="section-desc">scale 分量 + 3-stop keyframe + infinite + alternate 方向。</div>
+        <div class="stage"><div class="box b2"></div><span class="note">1.2s 周期，alternate 来回缩放</span></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">3 · 旋转（rotate 0→360，infinite linear）</div>
+        <div class="section-desc">rotate 分量 + linear 计时 + infinite 迭代。</div>
+        <div class="stage"><div class="box b3"></div><span class="note">2s/圈匀速旋转</span></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">4 · 颜色渐变（bg-color A→B→A，infinite）</div>
+        <div class="section-desc">background-color 通道 + 3-stop color lerp + infinite。</div>
+        <div class="stage"><div class="box b4"></div><span class="note">#5fb4d4 ↔ #d4a44e 循环</span></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">5 · 错峰入场（nth-child + animation-delay）</div>
+        <div class="section-desc">.b5-item:nth-child(N) 各延迟 N×0.1s，5 元素错峰入场。home.html nav-card 同源机制。</div>
+        <div class="stage">
+          <div class="b5-row">
+            <div class="box b5-item"></div>
+            <div class="box b5-item"></div>
+            <div class="box b5-item"></div>
+            <div class="box b5-item"></div>
+            <div class="box b5-item"></div>
+          </div>
+          <span class="note">delay 0/.1/.2/.3/.4s 错峰</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">6 · fill-mode 对比（none / forwards / backwards / both）</div>
+        <div class="section-desc">同动画 opacity 0→1 / .6s / delay .8s，base opacity=.5。delay 期：none/forwards 显 base，backwards/both 显首帧(0)；完成后：none/backwards 回 base(.5)，forwards/both 留末值(1)。</div>
+        <div class="stage">
+          <div class="stage-col"><span class="label">none</span><div class="box b6-base b6-none"></div></div>
+          <div class="stage-col"><span class="label">forwards</span><div class="box b6-base b6-forwards"></div></div>
+          <div class="stage-col"><span class="label">backwards</span><div class="box b6-base b6-backwards"></div></div>
+          <div class="stage-col"><span class="label">both</span><div class="box b6-base b6-both"></div></div>
+          <span class="note">刷新页面观察 delay 期 + 完成态差异</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">7 · direction 对比（normal / reverse / alternate）</div>
+        <div class="section-desc">同 rotate 0→180° / 1.6s / linear / infinite。normal 匀速顺时针、reverse 匀速逆时针、alternate 来回摆。</div>
+        <div class="stage">
+          <div class="stage-col"><span class="label">normal</span><div class="box b7-normal"></div></div>
+          <div class="stage-col"><span class="label">reverse</span><div class="box b7-reverse"></div></div>
+          <div class="stage-col"><span class="label">alternate</span><div class="box b7-alternate"></div></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">8 · ease 对比（linear / ease / step-start）</div>
+        <div class="section-desc">同 translateX 0→120px / 2s / infinite alternate。linear 匀速、ease 缓入缓出、step-start 瞬跳末值。</div>
+        <div class="stage">
+          <div class="stage-col"><span class="label">linear</span><div class="box b8-linear b8-track"></div></div>
+          <div class="stage-col"><span class="label">ease</span><div class="box b8-ease b8-track"></div></div>
+          <div class="stage-col"><span class="label">step-start</span><div class="box b8-step b8-track"></div></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">9 · transition（background-color .3s，:hover 触发）</div>
+        <div class="section-desc">.b9{transition:background-color .3s}，:hover 改背景色 → .3s 平滑过渡。transition + class 变化平滑。</div>
+        <div class="stage"><div class="b9"></div><span class="note">悬停观察 .3s 颜色过渡</span></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">10 · 父级 opacity 累积（父 fadeIn，子文字 alpha 传播）</div>
+        <div class="section-desc">父 .b10-parent opacity 0→1→0 循环，子文字 RenderNode.alpha = 父 opacity × own。opacity 父级累积传播。</div>
+        <div class="stage">
+          <div class="b10-parent">
+            <div class="box"></div>
+            <span class="b10-child">子文字随父 alpha 累积</span>
+          </div>
+          <span class="note">3s 周期，父透明度循环</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">11 · node.Play + OnKey / OnHook（driver 占位）</div>
+        <div class="section-desc">@keyframes m2-play-fade（程序化 Play 目标）+ m2-hookanim（50% stop 带 /* @loom-hook half */ 锚点）。Play/OnKey(.5)/OnHook("half") 由 driver C# 驱动，本页只到 HTML 结构。</div>
+        <div class="stage">
+          <div class="stage-col"><span class="label">Play("m2-play-fade")</span><div id="b11-target" class="b-target">target</div></div>
+          <div class="stage-col"><span class="label">OnHook("half")</span><div id="b11-hook" class="b-target">hook</div></div>
+          <span class="note">driver: node.Play + Animation.OnKey(.5) + OnHook("half")</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">12 · 句柄 L3 控制（Play + Pause/Resume/Stop/seek，driver 占位）</div>
+        <div class="section-desc">Play 返回句柄，driver 按钮 Pause/Resume/Stop/Time seek 演示 L3 生命周期控制。本页只到目标结构，按钮由 driver C# 接。</div>
+        <div class="stage">
+          <div id="b12-target" class="b-target">handle</div>
+          <span class="note">driver: Pause / Resume / Stop / set Time seek（句柄 L3 全套）</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

@@ -35,12 +35,14 @@
   .foot-strong { color:#8ec5d8; font-weight:700; }
   @keyframes fadeIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
   .nav-card { animation:fadeIn .4s both; }
-  /* TODO(roadmap §4 tech-debt nth-child): :nth-child(N) selector + animation runtime defer to §4 视觉束.
-  .nav-card:nth-child(1){animation-delay:.05s}.nav-card:nth-child(2){animation-delay:.1s}
-  .nav-card:nth-child(3){animation-delay:.15s}.nav-card:nth-child(4){animation-delay:.2s}
-  .nav-card:nth-child(5){animation-delay:.25s}.nav-card:nth-child(6){animation-delay:.3s}
-  .nav-card:nth-child(7){animation-delay:.35s}
-  */
+  /* nth-child 错峰入场（M2 运行时 :nth-child 已就绪；delay 进 animation 简写第 2 个 time token） */
+  .nav-card:nth-child(1){animation:fadeIn .4s .05s both}
+  .nav-card:nth-child(2){animation:fadeIn .4s .1s both}
+  .nav-card:nth-child(3){animation:fadeIn .4s .15s both}
+  .nav-card:nth-child(4){animation:fadeIn .4s .2s both}
+  .nav-card:nth-child(5){animation:fadeIn .4s .25s both}
+  .nav-card:nth-child(6){animation:fadeIn .4s .3s both}
+  .nav-card:nth-child(7){animation:fadeIn .4s .35s both}
   </style>
 </head>
 <body>

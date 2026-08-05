@@ -237,7 +237,7 @@ Rust 侧**不做**"每标签一 struct / trait object"。理由是合理性，�
   - **keyframes 内不支持 per-stop 缓动**：标准 CSS 每个 stop 可带 `animation-timing-function`，当前不支持。
   - **无 `@loom-hook`**：public-api.md §9.3 描述的 `/* @loom-hook name */` 注释锚点，fence 未解析。
 - ✅ **showcase 围栏违规 — RESOLVED**（showcase-package-unblock 2026-07-21）：原 blocker（home `:nth-child` + form/settings 逗号/属性 selector + `resize` 围栏外）已由 fence 扩围（逗号 list / 属性 selector / resize noop）+ showcase nth-child/aria-selected defer 注释解决，`cargo run -p loomgui_pkg -- build showcase` exit 0、8 组件 showcase.pkg.bin 产出。剩余 nth-child / aria-selected / keyframes runtime 见下专门条目。
-- **`:nth-child(N)` selector + `animation-delay` 错峰**（§4 视觉束）：fence 选择器子集本轮不收 `:nth-child(N)`，相关错峰规则 defer 到视觉束与 keyframes runtime 一同落地（pkg v20→v21 reserved）。showcase `home.html` 7 条 `.nav-card:nth-child(N){animation-delay:...}` 已注释（见 home.html TODO）。
+- ✅ **`:nth-child(N)` selector + `animation-delay` 错峰 — RESOLVED**（M2 keyframes runtime，2026-08）：fence 收了 `:nth-child(An+B|odd|even|N)`，core 动画运行时落地 `animation-delay`。showcase `home.html` 7 条 `.nav-card:nth-child(N){animation-delay:...}` 已解注释生效（M2 验收页 `m2-animation.html` §5 块同源）。
 - ✅ **`[aria-selected]` state-attr selector + role dispatch — RESOLVED**（M3 TabList，2026-08）：原列三条串连前置缺口，两条在控件束 P1-P3 已做掉，第三条 M3 按 α 路线落地——
   - **① Node 不存任意 HTML 属性**：M3 未走通用 `attrs` 仓库（β），改 α 路线——特定属性特定存储：`RoleInfo.aria_controls: Option<String>`（TabList tab→panel 跨树关联的纯数据，instantiate 从 `TemplateNode.aria_controls` 拷入，随模板迁移同 role/data-slot 模式）。通用 attrs 仓库等 Tree/Accordion 等第二个非控件状态属性用例出现再补（spec §3.1 α vs β 决策）。
   - ✅ **② attr_matches_node 扩展 — DONE**（控件束 P1-P3，commit `0a7373d`）：`style/dynamic.rs` `attr_matches_node` 已分派 `[aria-*]`(synth)/`[role]`/`[data-slot]`/`[type]` 四类，不再硬编码 `[type=...]`。
