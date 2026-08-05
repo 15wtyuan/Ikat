@@ -1193,3 +1193,36 @@ fn blob_column_count_is_21() {
         mesh_arena_off
     );
 }
+
+/// v11：每列的字节长度 = node_count × stride[k]（21 列）。
+/// 读到 col_off[k+1] - col_off[k] 或 (first arena offset) - col_off[20] 断言等于预期。
+#[test]
+fn blob_column_lengths_match_node_count_times_stride() {
+    let blob = build_blob(&frame(&[
+        mesh_node(0, None, 0.0, 0.0, 1.0, 1.0),
+        mesh_node(1, None, 2.0, 2.0, 3.0, 3.0),
+    ]));
+    let node_count = u32::from_le_bytes(blob[8..12].try_into().unwrap()) as usize;
+    assert_eq!(node_count, 2, "2 render nodes");
+
+    let strides: [usize; 21] = [4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128];
+    // column offsets 从 header byte 12 开始
+    let mut col_off = [0usize; 21];
+    for k in 0..21 {
+        col_off[k] = u32::from_le_bytes(blob[12 + k * 4..12 + k * 4 + 4].try_into().unwrap()) as usize;
+    }
+    // first arena offset（mesh_arena_off）在 12 + 21*4 = 96 处
+    let arena_off = u32::from_le_bytes(blob[96..100].try_into().unwrap()) as usize;
+
+    for k in 0..21 {
+        let start = col_off[k];
+        let end = if k < 20 { col_off[k + 1] } else { arena_off };
+        let actual_len = end - start;
+        let expected = node_count * strides[k];
+        assert_eq!(
+            actual_len, expected,
+            "col {} len: {} (expected {} = {} * {})",
+            k, actual_len, expected, node_count, strides[k]
+        );
+    }
+}

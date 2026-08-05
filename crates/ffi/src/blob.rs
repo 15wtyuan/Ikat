@@ -179,6 +179,7 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
     // parked keepalive 段：每个休眠 slot 追加一条极简条目（21 列都填，值极简）。
     // visible 字节双用：bit0=要渲染（0），bit1=parked（1）——零列扩展、零 version bump。
     // reuse_key 是 slot 出生即定的永久 ordinal，后端据它认出同一个镜像对象。
+    // 注意：scene.lists 是 HashMap，迭代顺序跨帧不保证——keepalive 条目在 blob 中的排列无稳定序。
     let mut parked_count = 0usize;
     for ls in scene.lists.0.values() {
         for s in ls.slots.iter().filter(|s| s.parked) {

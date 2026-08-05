@@ -62,7 +62,10 @@ namespace LoomGUI
 
         public uint NodeId(int i) => ReadU32(ColOff(0) + i * 4);
         public int ParentId(int i) => (int)ReadU32(ColOff(1) + i * 4);
-        public bool Visible(int i) => _buf[ColOff(2) + i] != 0;
+        /// visible 字节双用：bit0=本帧渲染，bit1=parked keepalive（留 GO 不渲染）。
+        /// MirrorPool.Sync 用 Parked(i) 识别 keepalive 条目，留镜像对象、跳过渲染上传。
+        public bool Visible(int i) => (_buf[ColOff(2) + i] & 0x01) != 0;
+        public bool Parked(int i)  => (_buf[ColOff(2) + i] & 0x02) != 0;
         public float Alpha(int i) => ReadF32(ColOff(3) + i * 4);
         public uint SortKey(int i) => ReadU32(ColOff(4) + i * 4);
         public uint MaskContext(int i) => ReadU32(ColOff(5) + i * 4);
