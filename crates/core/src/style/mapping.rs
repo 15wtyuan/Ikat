@@ -1379,8 +1379,12 @@ fn parse_time_seconds(tok: &str) -> Option<f32> {
     tok.strip_suffix('s')?.parse::<f32>().ok()
 }
 
-/// CSS timing-function 关键字 → Ease（spec §8.3 对齐表；fence/css_resolve 共用）。
-fn css_ease_keyword(kw: &str) -> Option<crate::tween::Ease> {
+/// CSS timing-function 关键字 → Ease（spec §8.3 对齐表；唯一真相源）。
+///
+/// `pub` 供 fence 委托（transition 侧经 `parse_transition`、animation 侧直接调用），
+/// 打包期与运行时共用一张表，防双份白名单漂移。本表按小写精确匹配；fence animation
+/// 侧 validate 门大小写不敏感，查表前自行 lowercase（见 fence css.rs `ease_from_keyword`）。
+pub fn css_ease_keyword(kw: &str) -> Option<crate::tween::Ease> {
     use crate::tween::Ease;
     Some(match kw {
         "linear" => Ease::Linear,

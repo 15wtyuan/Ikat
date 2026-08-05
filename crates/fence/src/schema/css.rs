@@ -724,18 +724,13 @@ fn time_token_to_seconds(tok: &str) -> f32 {
         .unwrap_or(0.0)
 }
 
-/// fence timing-function 关键字 → core Ease（spec §8.3 对齐表，勿自创）。
+/// fence animation timing-function 关键字 → core Ease。
+///
+/// 委托 core `mapping::css_ease_keyword`（§8.3 对齐表唯一真相源；transition 侧已委托，
+/// animation 侧不再自持副本）。validate 门（`is_animation_keyword`）大小写不敏感放行，
+/// 故查表前先归一化小写，与既有行为一致（core 表按小写精确匹配）。
 fn ease_from_keyword(kw: &str) -> Option<Ease> {
-    Some(match kw.to_ascii_lowercase().as_str() {
-        "linear" => Ease::Linear,
-        "ease" => Ease::CubicOut,
-        "ease-in" => Ease::QuadIn,
-        "ease-out" => Ease::QuadOut,
-        "ease-in-out" => Ease::QuadInOut,
-        "step-start" => Ease::Step { start: true },
-        "step-end" => Ease::Step { start: false },
-        _ => return None,
-    })
+    loomgui_core::style::mapping::css_ease_keyword(&kw.to_ascii_lowercase())
 }
 
 /// animation-name 接受 CSS 自定义标识符（字母/-/_/数字，非数字开头；不允许 `--` 前缀）。
