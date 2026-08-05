@@ -2470,7 +2470,7 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 删除通知（spec §10）：删 [i, i+c)。区间内已物化 slot 回收入 free 池；区间后的 slot.item_index 前移。
+        /// 删除通知（spec §10）：删 [i, i+c)。区间内已物化 slot 就地休眠（parked，留挂列表待复用）；区间后的 slot.item_index 前移。
         /// i/c 越界 → UIContractException。同步更新 _itemCount 缓存。
         /// </summary>
         public void NotifyRemoved(int i, int c = 1)

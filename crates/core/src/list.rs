@@ -220,10 +220,9 @@ pub fn enter_data_driven(
     // 预分配初始 batch：INITIAL_SLOTS 个 slot 现在就克隆好、挂在 head/tail spacer 之间，
     // 全部 parked（display:none）。slot 从此永驻 ul 子树，只翻 display + 换绑，永不 detach
     // ——后端 GO 随稳定 reuse_key 永驻，滞后一帧的重建闪烁随之消失。
-    let tpl = template_root;
     let mut slots = Vec::with_capacity(INITIAL_SLOTS);
     for ordinal in 0..INITIAL_SLOTS {
-        let node = stage.clone_subtree(tpl)?;
+        let node = stage.clone_subtree(template_root)?;
         stage.insert_before(ul, node, tail)?;
         let scene = stage.scene.as_mut().ok_or("no scene")?;
         // LOOKUP_SCOPE（不打 SCOPE_ROOT：spec §6.2，slot 根 CSS 规则仍按页面根 scope 匹配）。
@@ -475,10 +474,12 @@ pub fn notify_inserted(
     ls.item_count += count;
     // 移位 + 重排队：item_index >= at 的 slot 移位后语义指向新 item，需重新 bind。
     // 收集移位 slot 的 (node, new_idx) 再 push（iter_mut 借 ls.slots 与 push ls.pending_binds 同借冲突）。
+    // parked slot 的 item_index 只是复用参考（stale），不可入 bind 队列——否则驱动会对
+    // 一个 display:none 的隐形 slot 跑 BindItem（无谓回调 + 业务数据写进看不见的节点）。
     let to_rebind: Vec<(NodeId, usize)> = ls
         .slots
         .iter()
-        .filter(|s| s.item_index >= at)
+        .filter(|s| s.item_index >= at && !s.parked)
         .map(|s| (s.node, s.item_index + count))
         .collect();
     for s in ls.slots.iter_mut() {
@@ -488,6 +489,8 @@ pub fn notify_inserted(
     }
     ls.pending_binds.extend(to_rebind);
     ls.dirty = true;
+    // 移位后 active slot 的物理顺序须仍按 item_index 升序。
+    reorder_active_slots(scene, ul);
     Ok(())
 }
 
@@ -516,38 +519,48 @@ pub fn notify_removed(
         end
     };
     // Phase A：可变借 ls —— drain heights + 算回收 / 移位分区（记 NodeId）。
-    let (to_recycle, to_shift): (Vec<NodeId>, Vec<(NodeId, usize)>) = {
+    // 用 HashSet/HashMap 而非 Vec 线性查：slots 是只增的高水位池，Phase B 的成员判定
+    // 必须 O(1)，否则每次 notify_removed 都是 O(高水位²)。
+    // 待重排队的 bind 只收 active slot——parked slot 的 item_index 是 stale 复用参考，
+    // 入队会让驱动对隐形（display:none）slot 跑 BindItem。
+    let (to_recycle, to_shift, shift_binds): (
+        std::collections::HashSet<NodeId>,
+        std::collections::HashMap<NodeId, usize>,
+        Vec<(NodeId, usize)>,
+    ) = {
         let ls = scene.lists.get_mut(ul).unwrap();
         let end = end.min(ls.heights.known.len());
         ls.heights.known.drain(at..end);
         ls.item_count -= count;
-        let mut recycle = Vec::new();
-        let mut shift = Vec::new();
+        let mut recycle = std::collections::HashSet::new();
+        let mut shift = std::collections::HashMap::new();
+        let mut binds = Vec::new();
         for s in ls.slots.iter() {
             if s.item_index >= at && s.item_index < end {
-                recycle.push(s.node);
+                recycle.insert(s.node);
             } else if s.item_index >= end {
-                shift.push((s.node, s.item_index - count));
+                let new_idx = s.item_index - count;
+                shift.insert(s.node, new_idx);
+                if !s.parked {
+                    binds.push((s.node, new_idx));
+                }
             }
         }
-        (recycle, shift)
+        (recycle, shift, binds)
     };
-    // Phase B：可变借 ls —— 从 slots 剔除回收项 + 重写移位项 index + 重排队移位 slot（重新 bind）。
+    // Phase B：可变借 ls —— park 回收项 + 重写移位项 index + 重排队移位的 active slot。
     {
         let ls = scene.lists.get_mut(ul).unwrap();
         // 回收 = 就地 park（slot 永驻 slots vec 与 ul 子树，只标休眠）。
         for s in ls.slots.iter_mut() {
             if to_recycle.contains(&s.node) {
                 s.parked = true;
-            }
-        }
-        for s in ls.slots.iter_mut() {
-            if let Some((_, new_idx)) = to_shift.iter().find(|(n, _)| *n == s.node) {
-                s.item_index = *new_idx;
+            } else if let Some(&new_idx) = to_shift.get(&s.node) {
+                s.item_index = new_idx;
             }
         }
         // 移位 slot 现指向新 item_index → 重新 bind（业务数据跟到新序号）。
-        ls.pending_binds.extend(to_shift);
+        ls.pending_binds.extend(shift_binds);
         ls.dirty = true;
     }
     // Phase C：不再 detach——离开可见区的 slot 就地 park（留挂 ul + display:none 便签），
@@ -555,6 +568,8 @@ pub fn notify_removed(
     for node in &to_recycle {
         let _ = crate::scene::dynamic::set_inline_override(scene, *node, "display:none");
     }
+    // park/shift 后 active slot 的物理顺序须仍按 item_index 升序（ul.children 即视觉顺序）。
+    reorder_active_slots(scene, ul);
     Ok(())
 }
 
@@ -603,6 +618,8 @@ pub fn notify_moved(scene: &mut Scene, ul: NodeId, from: usize, to: usize) -> Re
         ls.dirty = true;
     }
     let _ = max;
+    // 重映射后 active slot 的物理顺序须仍按 item_index 升序。
+    reorder_active_slots(scene, ul);
     Ok(())
 }
 
@@ -657,8 +674,14 @@ pub fn collect_heights(scene: &mut Scene) {
         .0
         .iter()
         .map(|(ul, ls)| {
-            let slots: Vec<(NodeId, usize)> =
-                ls.slots.iter().map(|s| (s.node, s.item_index)).collect();
+            // 跳过 parked slot：display:none → layout_rect.h 恒 0，且 item_index 是 stale
+            // 复用参考——快照它会把 0.0 盖到别的（可能可见的）item 的缓存高度上。
+            let slots: Vec<(NodeId, usize)> = ls
+                .slots
+                .iter()
+                .filter(|s| !s.parked)
+                .map(|s| (s.node, s.item_index))
+                .collect();
             let old_head_sum = ls.heights.sum(0..ls.visible.start);
             let pane = ancestor_pane(scene, *ul);
             (*ul, slots, old_head_sum, pane)
@@ -1033,6 +1056,10 @@ fn execute_one(scene: &mut Scene, op: PendingOps) {
             ls.pending_binds.push((node, *item_index));
         }
     }
+    // active slot 在 ul.children 里的顺序就是视觉顺序（CSS 流在 head/tail spacer 之间排）。
+    // unpark 是就地复用（不搬运节点），被复用的 slot 会停在旧位——故每帧末重排一次，
+    // 保证 active slot 按 item_index 升序。
+    reorder_active_slots(scene, op.list_ul);
     // 写 spacer 高度 + 记录本帧 visible。
     let (head, tail) = {
         let ls = scene.lists.get_mut(op.list_ul).unwrap();
@@ -1047,6 +1074,71 @@ fn execute_one(scene: &mut Scene, op: PendingOps) {
 /// 恒 ≠ 0（list_ordinal+1 ≥ 1）。场景级全局命名空间（同 ordinal 的 slot 跨帧复用）。
 fn encode_reuse_key(list_ordinal: u32, slot_idx: usize) -> u32 {
     ((list_ordinal + 1) << 16) | ((slot_idx as u32) & 0xFFFF)
+}
+
+/// 按 item_index 升序重排 ul.children 里的 **active** slot。
+///
+/// 池化模型下 slot 永不 detach，unpark 只翻 display + 换绑，节点会留在上次的物理位置。
+/// 而 active slot 由 CSS 流在 head/tail spacer 之间依序排布——`ul.children` 顺序 **即视觉顺序**，
+/// 不重排则被复用的 slot 渲染到错位（滞后的 item 翻到前面）。
+///
+/// parked slot（display:none）不占布局，物理位置任意——统一挡在 active 之后、tail spacer 之前。
+/// head/tail spacer 位置不变（首子 / 末子）；非 slot 的意外子保序附在末尾。
+/// 只改 `children` 排列，parent 不变（无需 remove_child/insert_before 的摘挂往返）。
+fn reorder_active_slots(scene: &mut Scene, ul: NodeId) {
+    let (head, tail, active_rank, parked): (
+        NodeId,
+        NodeId,
+        std::collections::HashMap<NodeId, usize>,
+        std::collections::HashSet<NodeId>,
+    ) = match scene.lists.get(ul) {
+        Some(ls) => (
+            ls.head_spacer,
+            ls.tail_spacer,
+            ls.slots
+                .iter()
+                .filter(|s| !s.parked)
+                .map(|s| (s.node, s.item_index))
+                .collect(),
+            ls.slots
+                .iter()
+                .filter(|s| s.parked)
+                .map(|s| s.node)
+                .collect(),
+        ),
+        None => return,
+    };
+    let Some(ul_node) = scene.get_mut(ul) else {
+        return;
+    };
+    let mut actives: Vec<NodeId> = Vec::with_capacity(active_rank.len());
+    let mut parked_children: Vec<NodeId> = Vec::with_capacity(parked.len());
+    let mut others: Vec<NodeId> = Vec::new();
+    for &c in &ul_node.children {
+        if c == head || c == tail {
+            continue;
+        }
+        if active_rank.contains_key(&c) {
+            actives.push(c);
+        } else if parked.contains(&c) {
+            parked_children.push(c);
+        } else {
+            others.push(c);
+        }
+    }
+    // stable sort：同 item_index 的（不应出现）保持原相对序。
+    actives.sort_by_key(|c| active_rank[c]);
+    let mut new_children = Vec::with_capacity(ul_node.children.len());
+    if ul_node.children.contains(&head) {
+        new_children.push(head);
+    }
+    new_children.append(&mut actives);
+    new_children.append(&mut parked_children);
+    new_children.append(&mut others);
+    if ul_node.children.contains(&tail) {
+        new_children.push(tail);
+    }
+    ul_node.children = new_children;
 }
 
 /// 沿祖先链找最近滚动容器，返 (scroll_pos.y, viewport.h)。无祖先 ScrollPane → (0,0)
@@ -1292,8 +1384,10 @@ mod tests {
     }
 
     /// 断言所有 slot 都正确接在 ul 树上：每个 slot 的 parent==Some(ul)、且在 ul.children
-    /// 中位于 head_spacer 之后 / tail_spacer 之前、按 item_index 严格递增（复用未 detach
-    /// 会让被复用 slot 停在旧位、顺序乱掉）。同时检 ul.children 无重复 NodeId。
+    /// 中位于 head_spacer 之后 / tail_spacer 之前。**active** slot 须按 item_index 严格递增
+    /// （ul.children 顺序即 CSS 流的视觉顺序，复用后不重排会让 slot 渲染错位）；
+    /// parked slot 是 display:none，不占布局，物理位置任意（spec §2.9）。
+    /// 同时检 ul.children 无重复 NodeId。
     fn assert_all_slots_well_parented(scene: &crate::scene::node::Scene, ul: NodeId) {
         let ls = scene.lists.get(ul).expect("list state");
         let head = ls.head_spacer;
@@ -1307,24 +1401,32 @@ mod tests {
         for &c in &ul_node.children {
             assert!(seen.insert(c), "duplicate child in ul.children");
         }
-        // slot → item_index 映射。
-        let item_of: std::collections::HashMap<NodeId, usize> =
-            ls.slots.iter().map(|s| (s.node, s.item_index)).collect();
-        // 逐 slot：parent 正确 + 在 head/tail 之间。并收集物理顺序的 item_index。
+        // active slot → item_index 映射（parked 的 item_index 是 stale 复用参考，不参与定序）。
+        let active_of: std::collections::HashMap<NodeId, usize> = ls
+            .slots
+            .iter()
+            .filter(|s| !s.parked)
+            .map(|s| (s.node, s.item_index))
+            .collect();
+        let all_slots: std::collections::HashSet<NodeId> =
+            ls.slots.iter().map(|s| s.node).collect();
+        // 逐 slot：parent 正确 + 在 head/tail 之间。并收集 active 的物理顺序。
         let mut physical_order: Vec<usize> = Vec::new();
         for &c in &ul_node.children[1..ul_node.children.len() - 1] {
             let cn = scene.get(c).unwrap();
             assert_eq!(cn.parent, Some(ul), "slot parent must be ul");
-            let idx = *item_of.get(&c).expect("child maps to a slot item");
-            physical_order.push(idx);
+            assert!(all_slots.contains(&c), "child maps to a slot");
+            if let Some(&idx) = active_of.get(&c) {
+                physical_order.push(idx);
+            }
         }
-        // 物理顺序严格递增（复用未 detach 会让旧位 slot 的 item_index 乱序）。
+        // active slot 的物理顺序严格递增（unpark 就地复用后未重排会让顺序漂移、渲染错位）。
         let mut sorted = physical_order.clone();
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(
             physical_order, sorted,
-            "slot physical order must match sorted item_index (no drift)"
+            "active slot physical order must match sorted item_index (no drift)"
         );
     }
 
@@ -1518,11 +1620,11 @@ mod tests {
         );
     }
 
-    /// 回收路径回归：滚后部分 slot 离开可见区→进 free 池，下一帧需复用时 insert_before
-    /// 因未 detach 旧父会 Err 被吞、slot 停在旧位、ul.children 顺序漂移。此测模拟两次帧。
+    /// 复用路径回归：滚后部分 slot 离开可见区→park，下一帧被 unpark 复用给新 item。
+    /// unpark 是就地复用（不搬运节点），若不重排 ul.children，被复用 slot 会停在旧位——
+    /// 而 active slot 由 CSS 流在 head/tail spacer 之间排布，物理顺序即视觉顺序，乱序 = 渲染错位。
+    /// 此测模拟两次帧，每帧断言 active slot 仍按 item_index 升序。
     #[test]
-    // TODO(T7 pooled-slot): rewrite for parked model
-    #[ignore = "free-pool/detach semantics; T7 rewrites for parked model"]
     fn update_visible_recycles_slots_across_frames() {
         use crate::scene::node::{Node, NodeKind};
         // 3 层树：scroll_ancestor(Container) → ul(ListView) → li(ListItem)。
@@ -1568,11 +1670,9 @@ mod tests {
         let scene = s.scene.as_ref().unwrap();
         let ls = scene.lists.get(ul).unwrap();
         assert_eq!(ls.slots.len(), 7, "first frame: visible 0..7 → 7 slots");
-        // TODO(T7 pooled-slot): rewrite for parked model
-        // assert_eq!(ls.free.len(), 0, "no recycle yet");
         assert_all_slots_well_parented(scene, ul);
 
-        // 第二帧：滚下 100px（~5 项）→ 可见 3..12。items 0,1,2 离开→进 free 池，复用给 7,8,9。
+        // 第二帧：滚下 100px（~5 项）→ 可见 3..12。items 0,1,2 离开→park，被 unpark 复用给 7,8,9。
         {
             let scene = s.scene.as_mut().unwrap();
             let st = scene.scroll.ensure(ancestor_id);
@@ -1969,8 +2069,10 @@ mod tests {
     /// NotifyRemoved：删 [at, at+count) → heights.known drain 该区间；item_count -= count；
     /// 该区间 slot 回收（出 slots、入 free），其余 >end 的 slot.item_index -= count。
     #[test]
-    // TODO(T7 pooled-slot): rewrite for parked model
-    #[ignore = "free-pool/detach semantics; T7 rewrites for parked model"]
+    // TODO(T7 pooled-slot): rewrite for parked model——本测断言的是已废弃的 detach 语义：
+    // 回收后 slots.len() 变少 + free 池长度。池化模型下 slot 只标 parked、永不出 slots vec，
+    // 故两条断言结构性不成立（非 bug，T7 改写为“slots.len() 不变 + 区间内 slot parked”）。
+    #[ignore = "asserts retired detach semantics (slots shrink + free pool); T7 rewrites for parked model"]
     fn notify_removed_drains_range_and_recycles_slots() {
         let (mut s, ul, _li) = stage_with_ul_li();
         crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
