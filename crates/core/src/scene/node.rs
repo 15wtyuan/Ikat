@@ -784,11 +784,13 @@ impl Scene {
             .map(|(_, n)| n.id)
     }
 
-    /// 在 root 子树内 DFS 查找 id 属性匹配的首个节点（root inclusive）。
-    /// 纯结构遍历——不检查 display:none。供 FFI 子树作用域 id 查找，
-    /// 替代"全局首匹配 + 父链后过滤"。
+    /// 在 root 子树内 DFS 查找 id 属性匹配的首个节点（self-exclusive：从 root
+    /// 的直接子开始，root 自身的 id_attr 不被命中）。与 DOM querySelectorAll / Query<T>
+    /// 一致——在元素上调 query 只查后代不含自身。纯结构遍历，不检查 display:none。
+    /// 供 FFI 子树作用域 id 查找，替代"全局首匹配 + 父链后过滤"。
     pub fn find_node_by_id_in_subtree(&self, root: NodeId, id: &str) -> Option<NodeId> {
-        let mut stack = vec![root];
+        let node = self.get(root)?;
+        let mut stack: Vec<NodeId> = node.children.iter().rev().copied().collect();
         while let Some(nid) = stack.pop() {
             let n = self.get(nid)?;
             if n.id_attr.as_deref() == Some(id) {

@@ -180,10 +180,9 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 按 id 在本节点子树内查找 typed T（经 find_node_by_id_in_subtree FFI，_id 子树 DFS）。
-        /// 不含 self（与 <see cref="Query{T}"/> 一致）：仅查 _id 的后代，自身 id_attr 不被命中——
-        /// 即使本节点声明了 id 等于查询值也返 miss。子树 DFS root inclusive 但 TryGet 传 _id 由此节点
-        /// 自身不符合类型也会进 check（实际上 root 自身 id 很少等于查询 id，且类型 check 独立）。
+        /// 按 id 在本节点子树内查找 typed T（经 find_node_by_id_in_subtree FFI，DFS 从 _id 的
+        /// 直接子开始——self-exclusive，与 <see cref="Query{T}"/> / DOM querySelectorAll 一致：
+        /// 仅查后代，自身 id_attr 不被命中。即使本节点声明了 id 等于查询值也返 miss）。
         /// 未命中（无 id / 不在子树 / 类型不符）抛 <see cref="UIContractException"/>。null/empty id 直接抛
         /// （DOM getElementById 习惯：空 id 是调用方写错）。
         ///
@@ -204,8 +203,8 @@ namespace LoomGUI
         /// TryGet 是 Get 的 bool-out 版：找到且类型符 → true + out；否则 false（不抛）。
         /// 找到但类型不符（found is not T）也算 miss（false），与 Get 共享一致命中判定。
         /// null/empty id 直接返 false（与 Get 的「抛」互补——TryGet 是宽松查询路径）。
-        /// 查找经 find_node_by_id_in_subtree FFI（_id 子树 DFS，root inclusive），
-        /// 不再走全局首匹配 + 父链后过滤。
+        /// 查找经 find_node_by_id_in_subtree FFI（_id 子树 DFS，self-exclusive：
+        /// 从 _id 的直接子开始，自身 id_attr 不被命中），不再走全局首匹配 + 父链后过滤。
         /// </summary>
         public bool TryGet<T>(string id, out T node) where T : Node
         {

@@ -47,15 +47,15 @@ fn find_by_id_attr_global_match_unaffected_by_flag_split() {
 }
 
 #[test]
-fn find_node_by_id_in_subtree_hits_root_self() {
+fn find_node_by_id_in_subtree_self_exclusive() {
     use crate::scene::dynamic;
     let mut scene = Scene::default();
     let root = dynamic::create_root(&mut scene, "div", "").unwrap();
     scene.get_mut(root).unwrap().id_attr = Some("me".into());
     assert_eq!(
         scene.find_node_by_id_in_subtree(root, "me"),
-        Some(root),
-        "root self should be hit (root inclusive)"
+        None,
+        "root self should NOT be hit (self-exclusive; only descendants)"
     );
 }
 
@@ -64,23 +64,32 @@ fn find_node_by_id_in_subtree_hits_descendant_not_others() {
     use crate::scene::dynamic;
     let mut scene = Scene::default();
     let root = dynamic::create_root(&mut scene, "div", "").unwrap();
-    let child = dynamic::create_node(&mut scene, "div", "").unwrap();
-    let other = dynamic::create_node(&mut scene, "div", "").unwrap();
-    dynamic::append_child(&mut scene, root, child).unwrap();
-    dynamic::append_child(&mut scene, root, other).unwrap();
-    scene.get_mut(child).unwrap().id_attr = Some("badge".into());
-    scene.get_mut(other).unwrap().id_attr = Some("badge".into());
-    // 全局 find 返第一个（非确定性）
-    // 子树 find 在 child 子树找到 child 自身
+    let parent_a = dynamic::create_node(&mut scene, "div", "").unwrap();
+    let parent_b = dynamic::create_node(&mut scene, "div", "").unwrap();
+    dynamic::append_child(&mut scene, root, parent_a).unwrap();
+    dynamic::append_child(&mut scene, root, parent_b).unwrap();
+    let badge_a = dynamic::create_node(&mut scene, "div", "").unwrap();
+    let badge_b = dynamic::create_node(&mut scene, "div", "").unwrap();
+    dynamic::append_child(&mut scene, parent_a, badge_a).unwrap();
+    dynamic::append_child(&mut scene, parent_b, badge_b).unwrap();
+    scene.get_mut(badge_a).unwrap().id_attr = Some("badge".into());
+    scene.get_mut(badge_b).unwrap().id_attr = Some("badge".into());
+    // parent_a's subtree find hits its own descendant badge_a
     assert_eq!(
-        scene.find_node_by_id_in_subtree(child, "badge"),
-        Some(child),
-        "subtree find from child should hit child itself"
+        scene.find_node_by_id_in_subtree(parent_a, "badge"),
+        Some(badge_a),
+        "subtree find from parent_a should hit badge_a (descendant)"
     );
     assert_eq!(
-        scene.find_node_by_id_in_subtree(other, "badge"),
-        Some(other),
-        "subtree find from other should hit other itself"
+        scene.find_node_by_id_in_subtree(parent_b, "badge"),
+        Some(badge_b),
+        "subtree find from parent_b should hit badge_b (descendant)"
+    );
+    // self-exclusive: parent_b does not match itself if it had id="badge"
+    assert_eq!(
+        scene.find_node_by_id_in_subtree(badge_a, "badge"),
+        None,
+        "badge_a has no descendants; self-exclusive returns None"
     );
 }
 
@@ -92,7 +101,7 @@ fn find_node_by_id_in_subtree_returns_none_for_foreign() {
     let child = dynamic::create_node(&mut scene, "div", "").unwrap();
     dynamic::append_child(&mut scene, root, child).unwrap();
     scene.get_mut(child).unwrap().id_attr = Some("badge".into());
-    // root 子树内无 "badge"（child 不在 root 子树？child 在！所以换个角度：用别的 root 查）
+    // root 子树内无 "badge"——badge 是 child 的后代，不在 other_root 子树内
     let other_root = dynamic::create_root(&mut scene, "div", "").unwrap();
     assert_eq!(
         scene.find_node_by_id_in_subtree(other_root, "badge"),

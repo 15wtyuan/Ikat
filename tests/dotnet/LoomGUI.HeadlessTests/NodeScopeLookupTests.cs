@@ -400,16 +400,40 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>
-        /// 全局命中但不在本子树 → scope-check 拦，TryGet 返 false。
-        /// 4a 可间接验 scope-check 工作：建两棵独立 root（root2 不在 root1 子树），root2 的 id（如设）
-        /// 不应被 root1.Get 看到。但 4a 无 set_id FFI——只能间接：find_node_by_id 全局返首个匹配节点，
-        /// 若它在另一棵子树，root1 的 TryGet 应 scope-check 拦下。具体正路径 defer E2；此测试占位说明语义。
-        /// **占位测试**：当前 4a 无 set_id FFI，无法在 C# 造 id_attr；保留占位防忘，E2 fixture pkg 落地后补真实数据。
+        /// L1 子树 DFS 天然隔离：root1 的 Get 查不到 root2 子树内的节点。
+        /// **需要 T12 .dll 重编译**（含 loomgui_make_test_pkg + find_node_by_id_in_subtree FFI）。
+        /// T12 后移除 Skip 即可运行。
         /// </summary>
-        [Fact(Skip = "scope-boundary 正路径需 set_id FFI / fixture pkg（E2）。4a 仅 IsInSubtree 父链实现已就位，" +
-                     "待 E2 fixture pkg 落地后补真实数据 + 启用本测试。")]
+        [Fact(Skip = "需要 T12 .dll 重编译（含 loomgui_make_test_pkg + find_node_by_id_in_subtree FFI）。" +
+                     "T12 后移除 Skip 即可运行。")]
 
-        public void TryGetScopeCheckRejectsOutOfSubtreeMatch() { }
+        public unsafe void GetOnRoot1CannotSeeRoot2SubtreeNode()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                StageHandle* h = (StageHandle*)stage.ToPointer();
+                byte[] compName = Encoding.UTF8.GetBytes("slot");
+                nuint outLen1, outLen2;
+                byte* pkgPtr1;
+                byte* pkgPtr2;
+                fixed (byte* cp = compName)
+                {
+                    pkgPtr1 = Native.loomgui_make_test_pkg(cp, (nuint)compName.Length, &outLen1);
+                    pkgPtr2 = Native.loomgui_make_test_pkg(cp, (nuint)compName.Length, &outLen2);
+                }
+                // Create two independent root containers, each with id="badge" child
+                Container root1 = ctx._registry.CreateChild(h, RootSentinel, pkgPtr1, outLen1, null);
+                Container root2 = ctx._registry.CreateChild(h, RootSentinel, pkgPtr2, outLen2, null);
+                // root1.Get("badge") should NOT see root2's "badge" child
+                var badge1 = root1.Get<Container>("badge");
+                var badge2 = root2.Get<Container>("badge");
+                Assert.NotEqual(badge1.Id, badge2.Id);
+                // root1 subtree find never crosses into root2
+                Assert.False(root1.TryGet<Container>("nonexistent", out _));
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
 
         // ── L1 subtree find（find_node_by_id_in_subtree + Get/TryGet）──────
 
