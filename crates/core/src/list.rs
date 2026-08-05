@@ -645,7 +645,7 @@ pub fn refresh_items(
         }
         ls.slots
             .iter()
-            // parked slot 的 item_index 是 stale 复用参考，可能偻落在刷新区间内——入队会让
+            // parked slot 的 item_index 是 stale 复用参考，可能恰好落在刷新区间内——入队会让
             // 驱动对一个 display:none 的隐形 slot 跑 BindItem（无谓回调 + 数据写进看不见的节点）。
             .filter(|s| !s.parked && s.item_index >= start && s.item_index < end)
             .map(|s| (s.node, s.item_index))
@@ -2256,7 +2256,7 @@ mod tests {
         };
         // 清 bind 队列，验 plan 自身不入队。
         let _ = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
-        // 第二帧：滚 60px → 可见 1..10。item 0 离开（→park），items 1..6 留任（active），
+        // 第二帧：滚 60px → 可见 1..10。item 0 离开（→park），items 1..6 留在区内（active），
         // items 7,8,9 尚无 active slot（→to_bind）。**只 plan，不 execute**。
         {
             let st = s.scene.as_mut().unwrap().scroll.ensure(pane);
@@ -2295,7 +2295,7 @@ mod tests {
                 "slot still a child of ul"
             );
         }
-        // 分区正确：离开可见区的 park、留任的仍 active。
+        // 分区正确：离开可见区的 park、留在区内的仍 active。
         let parked: Vec<usize> = ls
             .slots
             .iter()
@@ -2332,6 +2332,23 @@ mod tests {
         assert!(
             ls.pending_binds.is_empty(),
             "plan must not queue binds (execute does)"
+        );
+
+        // 第三帧：滚回顶部 → 可见回 0..7。此时池里那个 parked slot 的 item_index 仍是 0
+        // （stale 复用参考）——若把它当「已绑」，item 0 会漏出 to_bind，execute 就永远不会
+        // unpark 它，item 0 在界面上永久隐形。故「已绑」只算 active slot。
+        {
+            let st = s.scene.as_mut().unwrap().scroll.ensure(pane);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        let op = &ops[0];
+        assert_eq!(op.new_visible, 0..7, "frame 3 scrolled back to top");
+        assert!(
+            op.to_bind.contains(&0),
+            "item 0 must be re-bound: its slot is parked, and a parked slot's stale \
+             item_index never counts as bound (to_bind={:?})",
+            op.to_bind
         );
     }
 }
