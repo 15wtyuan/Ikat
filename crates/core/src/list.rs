@@ -1034,6 +1034,9 @@ fn execute_one(scene: &mut Scene, op: PendingOps) {
             // 无 parked 可用 → 克隆扩容（高水位只增）。
             None => {
                 let node = crate::scene::dynamic::clone_node_recursive(scene, tpl);
+                // clone_node_recursive 不复制 inline_override / inline_set——grown slot 从模板
+                // 的"干净态"开始，无 display:none 泄漏风险（对比 unpark 路径复用 parked slot 时
+                // 显式 unset_inline_override 清 display 便签）。
                 // 标 LOOKUP_SCOPE（不打 SCOPE_ROOT：spec §6.2，slot 根 CSS 规则仍按页面根 scope 匹配）。
                 if let Some(n) = scene.get_mut(node) {
                     n.interaction.flags.insert(NodeFlags::LOOKUP_SCOPE);
@@ -2212,6 +2215,93 @@ mod tests {
         assert!(crate::list::notify_inserted(s.scene.as_mut().unwrap(), ul, 6, 1).is_err());
         assert!(crate::list::notify_removed(s.scene.as_mut().unwrap(), ul, 0, 6).is_err());
         assert!(crate::list::notify_moved(s.scene.as_mut().unwrap(), ul, 5, 0).is_err());
+    }
+
+    /// notify_removed：pooled-slot-lifecycle 模型下，删 item 不 detach slot——
+    /// 受影响 slot 就地 park（parent 仍是 ul），item_index > end 的移位，parked slot
+    /// 不入 pending_binds。slot 总数不变（高水位只增不减）。
+    #[test]
+    fn notify_removed_parks_not_detaches() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        // 冷启动 INITIAL_SLOTS=5（视口高度 0 → 退化为定数）。
+        crate::list::set_item_count(&mut s, ul, 5);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        // 清空 execute 产的 initial binds（只看 notify_removed 新增的）。
+        let _ = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
+        // 5 个 slot 全 active，绑 items 0..5。
+        assert_eq!(
+            s.scene.as_ref().unwrap().lists.get(ul).unwrap().slots.len(),
+            5,
+            "precondition: 5 slots instantiated"
+        );
+        // 删 [3, 5)（删 items 3,4）。此时无 >end 的 slot 需移位（end=5 全覆盖）。
+        crate::list::notify_removed(s.scene.as_mut().unwrap(), ul, 3, 2).unwrap();
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        assert_eq!(ls.item_count, 3, "item_count reduced by 2");
+        // 所有 slot 的 parent 仍是 ul（无 detach）。
+        for s in &ls.slots {
+            assert_eq!(
+                scene.get(s.node).unwrap().parent,
+                Some(ul),
+                "no detach on remove: slot still parented to ul"
+            );
+        }
+        // 有两 slot 被 park（原 items 3,4）。
+        assert_eq!(
+            ls.slots.iter().filter(|s| s.parked).count(),
+            2,
+            "two slots parked (items 3,4 removed)"
+        );
+        // active slot 覆盖 items 0,1,2。
+        let active_indices: Vec<usize> = ls
+            .slots
+            .iter()
+            .filter(|s| !s.parked)
+            .map(|s| s.item_index)
+            .collect();
+        let mut sorted = active_indices.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, vec![0, 1, 2], "active slots cover remaining items");
+        // 高水位不变：slots.len() == 5。
+        let slot_count = ls.slots.len();
+        assert_eq!(slot_count, 5, "high-water pool: slots never shrink");
+        // 注：此场景无移位（count=5, end=5 全覆盖），故 notify_removed 不生 bind。
+        // parked slot 的 stale idx=3/4 未入 pending_binds。
+    }
+
+    /// notify_inserted：池化模型下，插入 item 只做 index 移位，不 detach slot。
+    #[test]
+    fn notify_inserted_shifts_indices_no_detach() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 5);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        // 在 at=2 插入 2 项。
+        crate::list::notify_inserted(s.scene.as_mut().unwrap(), ul, 2, 2).unwrap();
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        assert_eq!(ls.item_count, 7, "item_count grown by 2");
+        // 所有 slot 的 parent 仍是 ul。
+        for s in &ls.slots {
+            assert_eq!(
+                scene.get(s.node).unwrap().parent,
+                Some(ul),
+                "no detach on insert"
+            );
+        }
+        // 原 item_index >= 2 的 slot 已移位 +2。排除 parked（无），验 active index 集。
+        let indices: Vec<usize> = ls.slots.iter().map(|s| s.item_index).collect();
+        let mut sorted = indices.clone();
+        sorted.sort_unstable();
+        assert_eq!(
+            sorted,
+            vec![0, 1, 4, 5, 6],
+            "indices shifted: 0,1 stay; 2→4, 3→5, 4→6"
+        );
     }
 
     /// refresh_items：把 [start, start+count) 内已物化的 slot 重新入 pending_binds 队列，
