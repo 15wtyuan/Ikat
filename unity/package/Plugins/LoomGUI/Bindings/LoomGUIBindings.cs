@@ -172,8 +172,8 @@ namespace LoomGUI.Bindings
 
         /// <summary>
         ///  在 root 子树内 DFS 查找 id 属性匹配的首个节点（root inclusive）。
-        ///  root = 搜索根节点 NodeId；id = UTF-8 字节（指针+len）。
-        ///  返 node_id；null 句柄/非 UTF-8/无匹配 → 0xFFFF_FFFF（sentinel）。
+        ///  root、id = UTF-8 字节（指针+len）。返 node_id；null 句柄/非 UTF-8/无匹配 → 0xFFFF_FFFF（sentinel）。
+        ///  替代"全局首匹配 + 父链后过滤"——C# TryGet/Get 用此入口避免 list slot 间 id 碰撞。
         ///
         ///  **常驻（不 gate）：**runtime 稳定入口。
         /// </summary>
@@ -182,9 +182,11 @@ namespace LoomGUI.Bindings
 
         /// <summary>
         ///  构造最小测试包（headless test fixture helper）。
-        ///  组件名 = comp 的 UTF-8 前缀（comp_len 长度），含单 Container 节点 id="badge"。
-        ///  返 pkg bytes 指针；out_len 写长度。失败返 null。
-        ///  用完后调 loomgui_bytes_free 释放。
+        ///  组件名=comp_spec UTF-8 前缀（取 comp_len 长度），含单 Container 节点 id="badge"。
+        ///  返 pkg bytes 指针+长度；失败返 null（空字符串/格式错）。
+        ///  调用方用完后调 loomgui_bytes_free 释放。
+        ///
+        ///  **测试 helper（不 gate）。**
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_make_test_pkg", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte* loomgui_make_test_pkg(byte* comp, nuint comp_len, nuint* out_len);
@@ -981,7 +983,8 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_list_drain_now(StageHandle* h, uint node);
 
         /// <summary>
-        ///  刷新指定区间已物化的 slot（重新入 pending_binds，C# 下帧重新 BindItem）。
+        ///  刷新指定区间当前可见（active）的 slot（重新入 pending_binds，C# 下帧重新 BindItem）。
+        ///  休眠（parked）slot 不刷——它进可见区时由 execute 的 unpark 路径重新 bind。
         ///  start/count：负值拒（越界）。0=ok，-1=err（null 句柄 / 非 ListView / 越界）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_list_refresh", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]

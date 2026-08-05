@@ -498,21 +498,40 @@ pub extern "C" fn loomgui_make_test_pkg(
     if comp_name.is_empty() {
         return std::ptr::null_mut();
     }
-    let nodes = [TemplateNode {
-        kind: NodeKind::Container,
-        style: ResolvedStyle::default(),
-        parent_idx: None,
-        classes: vec![],
-        id_attr: Some("badge".to_string()),
-        draggable: false,
-        tabindex: None,
-        content: None,
-        src: None,
-        control_init: None,
-        role: None,
-        data_slot: None,
-        aria_controls: None,
-    }];
+    // Two-node component: root container (no id) with a child container id="badge".
+    // The child id allows tests to verify subtree-scoped id lookup (find_node_by_id_in_subtree).
+    let nodes = [
+        TemplateNode {
+            kind: NodeKind::Container,
+            style: ResolvedStyle::default(),
+            parent_idx: None,
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: None,
+            src: None,
+            control_init: None,
+            role: None,
+            data_slot: None,
+            aria_controls: None,
+        },
+        TemplateNode {
+            kind: NodeKind::Container,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(0),
+            classes: vec![],
+            id_attr: Some("badge".to_string()),
+            draggable: false,
+            tabindex: None,
+            content: None,
+            src: None,
+            control_init: None,
+            role: None,
+            data_slot: None,
+            aria_controls: None,
+        },
+    ];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let pkg = write_package(&PackageInput {
         components: vec![(comp_name, nodes.as_slice(), &rules, &[])],
