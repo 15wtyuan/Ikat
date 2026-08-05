@@ -10,6 +10,7 @@ pub mod text_cursor;
 pub mod transform;
 
 pub use animation::{
-    AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
+    AnimatableProps, KeyframePlayer, KeyframeStop, KeyframeStopSelector, KeyframesRule,
+    PlayerFrame, PlayerPlayState, TransformAnim,
 };
 pub use node::{is_whitespace_only_text, Node, NodeId, NodeKind, Rect, Scene};
