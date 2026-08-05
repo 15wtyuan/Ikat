@@ -9,6 +9,26 @@ fn parse_length_px_pct_auto() {
 /// `width:auto` 必须解析成 `Dimension::auto()`（fit-content），
 /// 不能 fallback 到 `Length(0.0)`（→ img rect=(0,0) 不渲染）。
 #[test]
+fn parse_transform_trs_decomposes_supported_functions() {
+    let trs = parse_transform_trs("translate(10px,20px) scale(2,.5) rotate(90deg)")
+        .expect("TRS transform");
+    assert_eq!(trs.translate, Some([10.0, 20.0]));
+    assert_eq!(trs.scale, Some([2.0, 0.5]));
+    assert!((trs.rotate.unwrap() - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+    assert_eq!(
+        parse_transform_trs("translateY(20px)").unwrap().translate,
+        Some([0.0, 20.0])
+    );
+    assert_eq!(parse_transform_trs("none"), Some(Default::default()));
+}
+
+#[test]
+fn parse_transform_trs_rejects_non_trs_functions() {
+    assert_eq!(parse_transform_trs("skewX(10deg)"), None);
+    assert_eq!(parse_transform_trs("matrix(1,0,0,1,0,0)"), None);
+}
+
+#[test]
 fn parse_dimension_auto_is_auto_not_zero() {
     use taffy::style::Dimension;
     assert!(parse_dimension("auto").is_auto(), "auto → Auto");

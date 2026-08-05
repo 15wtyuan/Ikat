@@ -18,9 +18,9 @@ pub struct ParsedTemplate {
     pub styles: Vec<ResolvedStyle>,
     pub dynamic_rules: Vec<DynamicRule>,
     /// @keyframes 规则（对齐 public-api.md「动画全在 CSS」终态契约）。
-    /// pkg v30 起 core 类型已就绪（crate::scene::animation），但 fence → core 转换
-    /// （declarations → AnimatableProps）在 M2 Phase 1 实现——当前 bridge 仍丢弃，
-    /// 动画不跑。fence 接受语法、runtime 不报错。
+    /// pkg v30 起 core 类型已就绪（crate::scene::animation）；packer bridge 负责将
+    /// fence declarations 转成 AnimatableProps，并把规则写入 ComponentTemplate.keyframes。
+    /// player 运行时驱动留后续 M2 task。
     pub keyframes: Vec<KeyframesRule>,
     pub diagnostics: Vec<Diagnostic>,
     pub referenced_sprites: Vec<String>,

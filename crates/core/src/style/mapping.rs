@@ -1,3 +1,4 @@
+use crate::scene::animation::TransformAnim;
 use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
     BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, Gradient2,
@@ -447,6 +448,80 @@ pub fn parse_transform(value: &str) -> LocalTransform {
 }
 
 /// 拆 "translate(10px,20px) rotate(45deg)" → [("translate","10px,20px"),("rotate","45deg")]。
+/// Parse a keyframe transform into its lossless TRS representation.
+///
+/// Keyframe transforms deliberately do not use the static-transform matrix path: the runtime
+/// interpolates each component independently. The fence transform subset is translate/scale/
+/// rotate, so this preserves every supported function without matrix decomposition. Any unknown
+/// function or malformed argument returns `None` rather than silently dropping part of a value.
+/// `translateX`/`translateY` are accepted as the one-axis CSS conveniences used by showcase CSS;
+/// `none` is the identity transform and returns an empty `TransformAnim`.
+pub fn parse_transform_trs(value: &str) -> Option<TransformAnim> {
+    let value = value.trim();
+    if value == "none" {
+        return Some(TransformAnim::default());
+    }
+    let funcs = iter_transform_funcs(value);
+    if funcs.is_empty() {
+        return None;
+    }
+    let mut out = TransformAnim::default();
+    for (name, args) in funcs {
+        let parts: Vec<&str> = args.split(',').map(str::trim).collect();
+        match name {
+            "translate" => {
+                if parts.len() > 2 || parts.is_empty() {
+                    return None;
+                }
+                let x = parse_px(parts[0])?;
+                let y = if let Some(y) = parts.get(1) {
+                    parse_px(y)?
+                } else {
+                    0.0
+                };
+                out.translate = Some([x, y]);
+            }
+            "translateX" => {
+                if parts.len() != 1 {
+                    return None;
+                }
+                out.translate = Some([parse_px(parts[0])?, 0.0]);
+            }
+            "translateY" => {
+                if parts.len() != 1 {
+                    return None;
+                }
+                out.translate = Some([0.0, parse_px(parts[0])?]);
+            }
+            "scale" => {
+                if parts.len() != 1 && parts.len() != 2 {
+                    return None;
+                }
+                let sx = parts[0].parse::<f32>().ok()?;
+                let sy = if let Some(y) = parts.get(1) {
+                    y.parse::<f32>().ok()?
+                } else {
+                    sx
+                };
+                out.scale = Some([sx, sy]);
+            }
+            "rotate" => {
+                if parts.len() != 1 {
+                    return None;
+                }
+                let deg = parts[0]
+                    .trim_end_matches("deg")
+                    .trim()
+                    .parse::<f32>()
+                    .ok()?;
+                out.rotate = Some(deg.to_radians());
+            }
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
 fn iter_transform_funcs(s: &str) -> Vec<(&str, &str)> {
     let mut out = Vec::new();
     let bytes = s.as_bytes();

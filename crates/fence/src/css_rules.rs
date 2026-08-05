@@ -6,10 +6,13 @@
 //! 越界（nth-child、+ ~ 组合子等）返 None，由调用方报错。
 //!
 //! @keyframes at-rule（对齐 public-api.md §9「动画定义全在 CSS」终态）：fence 解析
-//! `@keyframes <name> { <stop-selector> { decls } ... }` 产 `KeyframesRule`。pkg v30 起
-//! core 有同形类型并序列化进 pkg.bin；fence → core 的类型转换（declarations →
-//! AnimatableProps）在 M2 Phase 1 实现——当前 bridge 仍丢弃（keyframes 不进 pkg，
-//! animation 属性走 cascade 静默跳过）。
+//! `@keyframes <name> { <stop-selector> { decls } ... }` 产 `KeyframesRule`。stop 声明块内
+//! 或块之间的 `/* @loom-hook name */` 注释解析为锚点（挂在前一个 stop 上，供 player
+//! 播放到该 stop 时发事件）。pkg v30 起 core 有同形类型并序列化进 pkg.bin；fence → core
+//! 的类型转换（declarations → AnimatableProps）由打包器 bridge 完成。
+//!
+//! @loom-hook 的特殊处理：`parse_style_block` 将合法锚点注释替换为不可见 marker，普通
+//! CSS 注释仍被剥除；`parse_keyframes_rule` 消费 marker 并将锚点挂到对应 stop。
 use crate::css_resolve::unsupported_hint;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
 use crate::schema::css::{find_css_prop, find_shorthand};
@@ -29,11 +32,14 @@ pub enum KeyframeStopSelector {
     Percent(u8),
 }
 
-/// `@keyframes` 内一条 stop：选择器位置 + 声明块（如 `from { opacity:0 }`）。
+/// `@keyframes` 内一条 stop：选择器位置 + 声明块 + 锚点（如 `from { opacity:0 }`）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeyframeStop {
     pub selector: KeyframeStopSelector,
     pub declarations: Vec<Declaration>,
+    /// `/* @loom-hook name */` 锚点：写在 stop 块后/块内，挂在该 stop 上。
+    /// player 播放到该 stop 的百分比时发事件。None = 无锚点。
+    pub hook: Option<String>,
 }
 
 /// `@keyframes <name> { ... }` 整体规则。stops 按 source 顺序保留（runtime 按需插值）。
@@ -206,8 +212,7 @@ fn take_ident(s: &str) -> (&str, &str) {
 /// - 越界 selector / at-rule → 丢弃 + 诊断；声明 prop 名不在 schema（find_css_prop/find_shorthand）
 ///   → 诊断（与 css_resolve 一致）。
 ///
-/// @keyframes 解析后产出 KeyframesRule；打包器 bridge 当前**静默丢弃**（pkg.bin 格式与
-/// runtime §4 视觉束 v1.10 一同落地，本轮不序列化以避免 pkg 版本 bump + dll 重编）。
+/// @keyframes 解析后产出 KeyframesRule；packer bridge 将它翻译并序列化进 pkg.bin v30。
 pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Vec<Diagnostic>) {
     let stripped = strip_comments(css);
     // 诊断定位用（粗略）：strip_comments 后 offset 已不对应原文，但行号近似可用。
@@ -329,6 +334,11 @@ fn split_at_keyword(s: &str) -> (String, String) {
 /// body 文法：`<stop-selector-list> { decl_list }` 重复，stop-selector-list = 逗号分隔的
 /// `from` / `to` / `<N>%`。逗号多 stop（`0%,100%{...}`）展开为多个 KeyframeStop 共享同声明块。
 /// 任一 stop-selector 非法 → 整个 @keyframes 块丢弃 + 诊断（CSS 严格失败模式）。
+///
+/// `strip_comments` 会把合法的 `/* @loom-hook name */` 替换成不可见 marker，避免普通
+/// CSS 解析丢失锚点。本函数在 stop 前导（通常是上一个 stop 块之后）和声明块内部消费
+/// marker：前导注释挂前一个 stop，声明块内注释挂当前 stop。这样既支持 brief 的
+/// `from{...}/* @loom-hook start */ to{...}`，也支持更直观的 `from{/* @loom-hook start */ ...}`。
 fn parse_keyframes_rule(
     name: &str,
     body: &str,
@@ -343,13 +353,23 @@ fn parse_keyframes_rule(
         ));
     }
     let mut stops: Vec<KeyframeStop> = Vec::new();
+    let mut pending_hooks: Vec<String> = Vec::new();
     let mut pos = 0;
     while pos < body.len() {
         let Some(brace_open_rel) = body[pos..].find('{') else {
             break;
         };
         let brace_open = pos + brace_open_rel;
-        let stop_sel_raw = body[pos..brace_open].trim();
+        let (stop_sel_clean, leading_hooks) = remove_hook_markers(&body[pos..brace_open]);
+        if !leading_hooks.is_empty() {
+            if let Some(previous) = stops.last_mut() {
+                previous.hook = leading_hooks.last().cloned();
+            } else {
+                // A hook before the first stop is most naturally associated with that stop.
+                pending_hooks.extend(leading_hooks);
+            }
+        }
+        let stop_sel_raw = stop_sel_clean.trim();
         let after_open = brace_open + 1;
         let Some((inner, end_pos)) = find_matching_brace(body, after_open) else {
             break;
@@ -364,13 +384,21 @@ fn parse_keyframes_rule(
             let s = parse_stop_selector(raw.trim(), loc)?;
             sel_parsed.push(s);
         }
-        let decls = parse_declarations(inner, loc, &mut Vec::new()); // stops 内 prop 名错误 tolerable
+        let (inner_clean, inner_hooks) = remove_hook_markers(inner);
+        let decls = parse_declarations(&inner_clean, loc, &mut Vec::new()); // stops 内 prop 名错误 tolerable
+        let hook = inner_hooks.last().cloned().or_else(|| pending_hooks.pop());
         for sel in sel_parsed {
             stops.push(KeyframeStop {
                 selector: sel,
                 declarations: decls.clone(),
+                hook: hook.clone(),
             });
         }
+    }
+    // A marker after the final `}` has no next selector to consume; attach it to the final stop.
+    let (_, trailing_hooks) = remove_hook_markers(&body[pos..]);
+    if let (Some(previous), Some(hook)) = (stops.last_mut(), trailing_hooks.last()) {
+        previous.hook = Some(hook.clone());
     }
     if stops.is_empty() {
         return Err(Diagnostic::error(
@@ -422,21 +450,77 @@ fn parse_stop_selector(
 
 /// 剥除 CSS 注释 `/* ... */`。UTF-8 安全：在 `&str` 上用 `find`（ASCII 针的偏移恒为 char 边界）。
 /// 不能逐字节 `u8 as char`——会损坏非 ASCII（CJK font-family、content 文本）。
+/// 合法 `@loom-hook` 注释保留为内部 marker，供 keyframes stop 解析；普通注释照常移除。
+/// marker 在声明/选择器解析前由 `remove_hook_markers` 清掉。
+const LOOM_HOOK_MARKER_START: char = '\u{1}';
+const LOOM_HOOK_MARKER_END: char = '\u{2}';
+
 fn strip_comments(css: &str) -> String {
     let mut out = String::with_capacity(css.len());
     let mut rest = css;
     while let Some(start) = rest.find("/*") {
         out.push_str(&rest[..start]);
         match rest[start + 2..].find("*/") {
-            Some(end) => rest = &rest[start + 2 + end + 2..],
+            Some(end) => {
+                let comment = &rest[start + 2..start + 2 + end];
+                if let Some(name) = parse_loom_hook_comment(comment) {
+                    out.push(LOOM_HOOK_MARKER_START);
+                    out.push_str(name);
+                    out.push(LOOM_HOOK_MARKER_END);
+                }
+                rest = &rest[start + 2 + end + 2..];
+            }
             None => {
+                // An unclosed comment consumes the remainder, as before. It cannot contain a
+                // complete `@loom-hook` comment and therefore must not produce a marker.
                 rest = "";
                 break;
-            } // 未闭合注释 → 丢到末尾
+            }
         }
     }
     out.push_str(rest);
     out
+}
+
+/// Parse exactly `@loom-hook <name>` from a comment body. The name is one non-whitespace
+/// token (`\\S+`); a missing separator or trailing token is not a hook comment.
+fn parse_loom_hook_comment(comment: &str) -> Option<&str> {
+    let comment = comment.trim();
+    let rest = comment.strip_prefix("@loom-hook")?;
+    if !rest.chars().next().is_some_and(char::is_whitespace) {
+        return None;
+    }
+    let mut tokens = rest.split_whitespace();
+    let name = tokens.next()?;
+    tokens.next().is_none().then_some(name)
+}
+
+/// Remove retained hook markers from a selector/declaration slice and collect their names in
+/// source order. Markers only occur when they came from a syntactically closed CSS comment.
+fn remove_hook_markers(s: &str) -> (String, Vec<String>) {
+    let mut clean = String::with_capacity(s.len());
+    let mut hooks = Vec::new();
+    let mut rest = s;
+    loop {
+        let Some(start) = rest.find(LOOM_HOOK_MARKER_START) else {
+            clean.push_str(rest);
+            break;
+        };
+        clean.push_str(&rest[..start]);
+        let after_start = start + LOOM_HOOK_MARKER_START.len_utf8();
+        let Some(end_rel) = rest[after_start..].find(LOOM_HOOK_MARKER_END) else {
+            // Defensive: markers are generated as a pair, but preserve malformed text rather
+            // than silently dropping source bytes if this helper is reused later.
+            clean.push_str(&rest[start..]);
+            break;
+        };
+        let name = &rest[after_start..after_start + end_rel];
+        if !name.is_empty() && !name.chars().any(char::is_whitespace) {
+            hooks.push(name.to_string());
+        }
+        rest = &rest[after_start + end_rel + LOOM_HOOK_MARKER_END.len_utf8()..];
+    }
+    (clean, hooks)
 }
 
 /// 解析声明块体 → Vec<Declaration>。prop 名校验同 css_resolve（find_css_prop/find_shorthand）。
@@ -716,6 +800,34 @@ mod tests {
         assert_eq!(keyframes[0].name, "fadeIn");
         assert_eq!(rules.len(), 1, "普通 selector 规则照常解析");
         assert_eq!(rules[0].selector.raw, ".nav-card");
+    }
+
+    #[test]
+    fn parse_style_block_keyframes_hook_after_stop_attaches_to_previous_stop() {
+        let css = "@keyframes slideIn{from{opacity:0}/* @loom-hook start */ to{opacity:1}}";
+        let (_rules, keyframes, diags) = parse_style_block(css);
+        assert!(diags.is_empty(), "diags: {diags:?}");
+        assert_eq!(keyframes.len(), 1);
+        assert_eq!(keyframes[0].stops[0].hook.as_deref(), Some("start"));
+        assert_eq!(keyframes[0].stops[1].hook, None);
+    }
+
+    #[test]
+    fn parse_style_block_keyframes_hook_inside_stop_attaches_to_current_stop() {
+        let css = "@keyframes slideIn{from{/* @loom-hook start */ opacity:0}to{opacity:1}}";
+        let (_rules, keyframes, diags) = parse_style_block(css);
+        assert!(diags.is_empty(), "diags: {diags:?}");
+        assert_eq!(keyframes[0].stops[0].hook.as_deref(), Some("start"));
+        assert_eq!(keyframes[0].stops[0].declarations[0].prop, "opacity");
+    }
+
+    #[test]
+    fn parse_style_block_ignores_non_hook_comments() {
+        let css = "@keyframes slideIn{from{opacity:0}/* ordinary */to{opacity:1}}";
+        let (_rules, keyframes, diags) = parse_style_block(css);
+        assert!(diags.is_empty(), "diags: {diags:?}");
+        assert_eq!(keyframes[0].stops[0].hook, None);
+        assert_eq!(keyframes[0].stops[1].hook, None);
     }
 
     #[test]

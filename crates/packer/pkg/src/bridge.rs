@@ -2,7 +2,11 @@
 //! fence parse_template 停在 IrTree；本模块是第一处把 IrTree 翻译成 core 打包结构的代码。
 
 use loomgui_core::asset::{ControlInit, EditInit, TemplateNode};
-use loomgui_core::scene::NodeKind;
+use loomgui_core::scene::{AnimatableProps, KeyframeStopSelector, KeyframesRule, NodeKind};
+use loomgui_core::style::mapping::{parse_color, parse_transform_trs};
+use loomgui_fence::css_rules::{
+    KeyframeStopSelector as FenceKeyframeStopSelector, KeyframesRule as FenceKeyframesRule,
+};
 use loomgui_fence::ir::{IrElement, IrNodeKind, IrTree};
 use loomgui_fence::schema::tag::SemanticKind;
 use loomgui_fence::ParsedTemplate;
@@ -96,6 +100,53 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
         return Err("组件无可实例化节点，产物为空".into());
     }
     Ok(nodes)
+}
+
+/// Translate fence-local keyframes into the core/pkg representation. Unsupported declarations
+/// remain intentionally absent from `AnimatableProps`; the fence accepts a broader visual CSS
+/// subset than the M2 animation channels, while malformed supported values are not invented.
+pub fn translate_keyframes(fence_kfs: &[FenceKeyframesRule]) -> Vec<KeyframesRule> {
+    fence_kfs
+        .iter()
+        .map(|fence_kf| KeyframesRule {
+            name: fence_kf.name.clone(),
+            stops: fence_kf
+                .stops
+                .iter()
+                .map(|fence_stop| {
+                    let mut props = AnimatableProps::default();
+                    for declaration in &fence_stop.declarations {
+                        match declaration.prop.as_str() {
+                            "opacity" => {
+                                props.opacity = declaration.value.parse::<f32>().ok();
+                            }
+                            "transform" => {
+                                props.transform = parse_transform_trs(&declaration.value);
+                            }
+                            "background-color" => {
+                                props.bg_color = parse_color(&declaration.value);
+                            }
+                            "color" => {
+                                props.text_color = parse_color(&declaration.value);
+                            }
+                            _ => {}
+                        }
+                    }
+                    loomgui_core::scene::KeyframeStop {
+                        selector: match fence_stop.selector {
+                            FenceKeyframeStopSelector::From => KeyframeStopSelector::From,
+                            FenceKeyframeStopSelector::To => KeyframeStopSelector::To,
+                            FenceKeyframeStopSelector::Percent(pct) => {
+                                KeyframeStopSelector::Percent(pct)
+                            }
+                        },
+                        props,
+                        hook: fence_stop.hook.clone(),
+                    }
+                })
+                .collect(),
+        })
+        .collect()
 }
 
 /// `<template>` 是 ListView item 蓝图：spec §8 要求根为**恰好一个** ListItem
