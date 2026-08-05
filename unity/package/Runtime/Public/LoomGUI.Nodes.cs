@@ -2558,7 +2558,15 @@ namespace LoomGUI
         {
             get
             {
-                if (_disposed || _node._disposed) return false;
+                if (_disposed) return false;
+                if (_node._disposed)
+                {
+                    // 节点已销毁：core 静默回收悬空 player 且不发 END（remove_node 不清
+                    // scene.players，update_all 直接回收）——此处惰性失效，防注册表
+                    // 强引用悬挂（UIContext→Animation→Node→用户回调全链）。
+                    Invalidate();
+                    return false;
+                }
                 StageHandle* h = (StageHandle*)_node._ctx._stage.ToPointer();
                 byte state = Native.loomgui_stage_get_animation_state(h, _playerKey);
                 if (state == 255)
@@ -2624,7 +2632,7 @@ namespace LoomGUI
         public Animation OnStart(Action cb)
         {
             if (cb == null) throw new ArgumentNullException(nameof(cb));
-            if (_disposed) return this;
+            if (_disposed || _node._disposed) return this;
             (_onStart ??= new List<Action>()).Add(cb);
             return this;
         }
@@ -2633,7 +2641,7 @@ namespace LoomGUI
         public Animation OnEnd(Action cb)
         {
             if (cb == null) throw new ArgumentNullException(nameof(cb));
-            if (_disposed) return this;
+            if (_disposed || _node._disposed) return this;
             (_onEnd ??= new List<Action>()).Add(cb);
             return this;
         }
@@ -2646,7 +2654,7 @@ namespace LoomGUI
         public Animation OnKey(float pct, Action cb)
         {
             if (cb == null) throw new ArgumentNullException(nameof(cb));
-            if (_disposed) return this;
+            if (_disposed || _node._disposed) return this;
             StageHandle* h = (StageHandle*)_node._ctx._stage.ToPointer();
             Native.loomgui_stage_animation_on_key(h, _playerKey, pct);
             var list = _onKeys ??= new List<(float, Action)>();
@@ -2663,7 +2671,7 @@ namespace LoomGUI
         {
             if (name == null) throw new ArgumentNullException(nameof(name));
             if (cb == null) throw new ArgumentNullException(nameof(cb));
-            if (_disposed) return this;
+            if (_disposed || _node._disposed) return this;
             (_onHooks ??= new List<(string, Action)>()).Add((name, cb));
             return this;
         }
@@ -2722,6 +2730,9 @@ namespace LoomGUI
         /// <summary>
         /// 标记失效 + 从 UIContext 注册表注销（END / Stop / IsPlaying 检出回收）。
         /// 幂等。此后成员调用 no-op（§7.6「player 回收 → 句柄失效 → 调用 no-op」）。
+        ///
+        /// 节点已 dispose 时调用也安全：只碰 <c>_node._ctx</c>（readonly，Node ctor 赋，
+        /// Dispose 不清）做纯 C# 字典注销，无 FFI 调用——死节点不阻塞清理。
         /// </summary>
         internal void Invalidate()
         {
