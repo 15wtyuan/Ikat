@@ -340,4 +340,329 @@ namespace LoomGUI.Tests
             }
         }
     }
+
+    /// MirrorPool parked keepalive lifecycle 测试。
+    /// 验 parked→active 过渡：parked 保留 GO 并 SetActive(false)、reactivate 恢复、
+    /// lazy（无历史 GO 不创建）、稳态零 churn。
+    /// 需要 Unity Editor（EditMode tests），构造 v11 blob 驱动 MirrorPool.Sync。
+    public class MirrorPoolParkedLifecycleTests
+    {
+        /// 构造 v11 blob，支持 active + parked 混合条目。
+        /// 每条目 (visByte, nodeId, reuseKey)。
+        ///   visByte 0x01 = active → 自动设 changeLevel=2, payloadKind=1, 附加 quad mesh。
+        ///   visByte 0x02 = parked → 自动设 changeLevel=0, payloadKind=0, 无 mesh。
+        ///   其他列填零/identity。
+        static byte[] BuildV11Blob(params (byte visByte, uint nodeId, uint reuseKey)[] entries)
+        {
+            int N = entries.Length;
+            var b = new List<byte>();
+
+            // header: magic, version=11, node_count
+            b.AddRange(System.BitConverter.GetBytes(0x4D4F4F4Cu));
+            b.AddRange(System.BitConverter.GetBytes(11u));
+            b.AddRange(System.BitConverter.GetBytes((uint)N));
+
+            // v11: 21 col strides (bytes per entry)
+            int[] stride = { 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128 };
+
+            // col offsets (SOA): header 120B then each col = prev + stride[prev] * N
+            const int headerLen = 120;
+            int off = headerLen;
+            for (int i = 0; i < 21; i++)
+            {
+                b.AddRange(System.BitConverter.GetBytes((uint)off));
+                off += stride[i] * N;
+            }
+            // arena headers: mesh/clip/path — will fill after building arenas
+            int colEnd = off; // end of SOA data, start of arenas
+            // reserve arena header slots (6 × u32 = 24B), fill after
+            int arenaHeaderPos = b.Count;
+            for (int k = 0; k < 6; k++) b.AddRange(System.BitConverter.GetBytes(0u));
+
+            // Build column data + mesh arena
+            var meshArena = new List<byte>();
+            byte[] meshOffVals = new byte[N * 4];  // col 13: mesh_off per entry (write after arena)
+            byte[] meshLenVals = new byte[N * 4];  // col 14: mesh_len per entry
+
+            // Pre-compute mesh offsets: only for active entries (visByte & 1)
+            for (int i = 0; i < N; i++)
+            {
+                bool active = (entries[i].visByte & 0x01) != 0;
+                if (active)
+                {
+                    uint mOff = (uint)meshArena.Count;
+                    System.Buffer.BlockCopy(System.BitConverter.GetBytes(mOff), 0, meshOffVals, i * 4, 4);
+                    // simple quad: 10×10 at origin
+                    meshArena.AddRange(System.BitConverter.GetBytes(4u));  // vert_count
+                    meshArena.AddRange(System.BitConverter.GetBytes(6u));  // idx_count
+                    // verts (4 × vec2)
+                    AppendV2(meshArena, 0f, 0f); AppendV2(meshArena, 10f, 0f);
+                    AppendV2(meshArena, 10f, 10f); AppendV2(meshArena, 0f, 10f);
+                    // uvs (4 × vec2, [0,1] full-image)
+                    AppendV2(meshArena, 0f, 0f); AppendV2(meshArena, 1f, 0f);
+                    AppendV2(meshArena, 1f, 1f); AppendV2(meshArena, 0f, 1f);
+                    // colors (4 × RGBA, white)
+                    for (int v = 0; v < 4; v++)
+                    {
+                        meshArena.AddRange(System.BitConverter.GetBytes(1f));
+                        meshArena.AddRange(System.BitConverter.GetBytes(1f));
+                        meshArena.AddRange(System.BitConverter.GetBytes(1f));
+                        meshArena.AddRange(System.BitConverter.GetBytes(1f));
+                    }
+                    // indices (6 × u32, two triangles)
+                    meshArena.AddRange(System.BitConverter.GetBytes(0u));
+                    meshArena.AddRange(System.BitConverter.GetBytes(1u));
+                    meshArena.AddRange(System.BitConverter.GetBytes(2u));
+                    meshArena.AddRange(System.BitConverter.GetBytes(0u));
+                    meshArena.AddRange(System.BitConverter.GetBytes(2u));
+                    meshArena.AddRange(System.BitConverter.GetBytes(3u));
+                    uint mLen = (uint)(meshArena.Count - (int)mOff);
+                    System.Buffer.BlockCopy(System.BitConverter.GetBytes(mLen), 0, meshLenVals, i * 4, 4);
+                }
+                // parked entries: mesh_off=0, mesh_len=0 (stays zero-initialized)
+            }
+
+            // Write SOA columns
+            // col 0: node_id
+            for (int i = 0; i < N; i++)
+                b.AddRange(System.BitConverter.GetBytes(entries[i].nodeId));
+            // col 1: parent_id (-1 = none)
+            for (int i = 0; i < N; i++)
+                b.AddRange(System.BitConverter.GetBytes(-1));
+            // col 2: visible byte
+            for (int i = 0; i < N; i++)
+                b.Add(entries[i].visByte);
+            // col 3: alpha (1.0)
+            for (int i = 0; i < N; i++)
+                b.AddRange(System.BitConverter.GetBytes(1f));
+            // col 4: sort_key (0)
+            for (int i = 0; i < N; i++)
+                b.AddRange(System.BitConverter.GetBytes(0u));
+            // col 5: mask_context (0)
+            for (int i = 0; i < N; i++)
+                b.AddRange(System.BitConverter.GetBytes(0u));
+            // col 6-11: identity 2×2 + (0,0) translate
+            for (int i = 0; i < N; i++) b.AddRange(System.BitConverter.GetBytes(1f));  // m_a
+            for (int i = 0; i < N; i++) b.AddRange(System.BitConverter.GetBytes(0f));  // m_b
+            for (int i = 0; i < N; i++) b.AddRange(System.BitConverter.GetBytes(0f));  // m_c
+            for (int i = 0; i < N; i++) b.AddRange(System.BitConverter.GetBytes(1f));  // m_d
+            for (int i = 0; i < N; i++) b.AddRange(System.BitConverter.GetBytes(0f));  // m_tx
+            for (int i = 0; i < N; i++) b.AddRange(System.BitConverter.GetBytes(0f));  // m_ty
+            // col 12: payload_kind (1 for active, 0 for parked)
+            for (int i = 0; i < N; i++)
+                b.Add((byte)((entries[i].visByte & 0x01) != 0 ? 1 : 0));
+            // col 13: mesh_off
+            b.AddRange(meshOffVals);
+            // col 14: mesh_len
+            b.AddRange(meshLenVals);
+            // col 15: path_idx (0)
+            for (int i = 0; i < N; i++)
+                b.AddRange(System.BitConverter.GetBytes(0u));
+            // col 16: program (0)
+            for (int i = 0; i < N; i++) b.Add((byte)0);
+            // col 17: color_matrix (80B zeros per entry)
+            for (int i = 0; i < N; i++)
+                for (int j = 0; j < 80; j++) b.Add((byte)0);
+            // col 18: change_level (2=Full for active, 0=Skip for parked)
+            for (int i = 0; i < N; i++)
+                b.Add((byte)((entries[i].visByte & 0x01) != 0 ? 2 : 0));
+            // col 19: reuse_key
+            for (int i = 0; i < N; i++)
+                b.AddRange(System.BitConverter.GetBytes(entries[i].reuseKey));
+            // col 20: effect_block (128B zeros per entry)
+            for (int i = 0; i < N; i++)
+                for (int j = 0; j < 128; j++) b.Add((byte)0);
+
+            // Now fill arena headers: mesh_arena at colEnd
+            int meshArenaStart = colEnd;
+            int meshArenaEnd = meshArenaStart + meshArena.Count;
+            // clip_table: just clip_count=0 (4B)
+            int clipStart = meshArenaEnd;
+            int clipLen = 4;
+            // path_table: just path_count=0 (4B)
+            int pathStart = clipStart + clipLen;
+            int pathLen = 4;
+
+            // Write arena headers into reserved slot (arenaHeaderPos)
+            byte[] arenaHeaderBytes = new byte[24];
+            System.Buffer.BlockCopy(System.BitConverter.GetBytes((uint)meshArenaStart), 0, arenaHeaderBytes, 0, 4);
+            System.Buffer.BlockCopy(System.BitConverter.GetBytes((uint)meshArena.Count), 0, arenaHeaderBytes, 4, 4);
+            System.Buffer.BlockCopy(System.BitConverter.GetBytes((uint)clipStart), 0, arenaHeaderBytes, 8, 4);
+            System.Buffer.BlockCopy(System.BitConverter.GetBytes((uint)clipLen), 0, arenaHeaderBytes, 12, 4);
+            System.Buffer.BlockCopy(System.BitConverter.GetBytes((uint)pathStart), 0, arenaHeaderBytes, 16, 4);
+            System.Buffer.BlockCopy(System.BitConverter.GetBytes((uint)pathLen), 0, arenaHeaderBytes, 20, 4);
+            // Overwrite reserved arena header bytes
+            for (int k = 0; k < 24; k++) b[arenaHeaderPos + k] = arenaHeaderBytes[k];
+
+            // Append arena data
+            b.AddRange(meshArena);
+            b.AddRange(System.BitConverter.GetBytes(0u));  // clip_count=0
+            b.AddRange(System.BitConverter.GetBytes(0u));  // path_count=0
+
+            return b.ToArray();
+
+            static void AppendV2(List<byte> a, float x, float y)
+            {
+                a.AddRange(System.BitConverter.GetBytes(x));
+                a.AddRange(System.BitConverter.GetBytes(y));
+            }
+        }
+
+        [Test]
+        public void ParkedKeepalive_KeepsGo_Inactive()
+        {
+            var root = new GameObject("root");
+            var shader = Shader.Find("LoomGUI/Unlit");
+            var mm = new MaterialManager(shader);
+            var pool = new MirrorPool();
+            var fallback = Texture2D.whiteTexture;
+
+            try
+            {
+                // Frame 1: active entry creates GO
+                var blob1 = new FrameBlob(BuildV11Blob(
+                    (0x01, nodeId: 100, reuseKey: 5)));
+                Assert.That(blob1.IsValid, Is.True, "v11 blob valid");
+                pool.Sync(blob1, root.transform, mm, null, fallback);
+                Assert.That(pool.Count, Is.EqualTo(1), "frame1: GO created");
+
+                // Get the GO via reflection
+                var poolByReuseField = typeof(MirrorPool).GetField("_poolByReuse",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var poolByReuse = (System.Collections.IDictionary)poolByReuseField.GetValue(pool);
+                var ro = poolByReuse[5u];
+                var goField = ro.GetType().GetField("Go",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                var go = (GameObject)goField.GetValue(ro);
+                Assert.That(go.activeSelf, Is.True, "frame1: GO active");
+
+                // Frame 2: same slot now parked
+                var blob2 = new FrameBlob(BuildV11Blob(
+                    (0x02, nodeId: 100, reuseKey: 5)));
+                Assert.That(blob2.IsValid, Is.True);
+                Assert.That(blob2.Parked(0), Is.True, "blob2.Parked=true");
+                Assert.That(blob2.Visible(0), Is.False, "blob2.Visible=false");
+                pool.Sync(blob2, root.transform, mm, null, fallback);
+
+                Assert.That(pool.Count, Is.EqualTo(1), "frame2: GO kept, not destroyed");
+                Assert.That(go.activeSelf, Is.False, "frame2: GO SetActive(false)");
+            }
+            finally
+            {
+                pool.Clear();
+                mm.Clear();
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        [Test]
+        public void Reactivate_SetsActive_AfterParked()
+        {
+            var root = new GameObject("root");
+            var shader = Shader.Find("LoomGUI/Unlit");
+            var mm = new MaterialManager(shader);
+            var pool = new MirrorPool();
+            var fallback = Texture2D.whiteTexture;
+
+            try
+            {
+                // Frame 1: active → creates GO
+                pool.Sync(new FrameBlob(BuildV11Blob(
+                    (0x01, nodeId: 100, reuseKey: 5))),
+                    root.transform, mm, null, fallback);
+                Assert.That(pool.Count, Is.EqualTo(1));
+
+                // Get GO reference
+                var poolByReuseField = typeof(MirrorPool).GetField("_poolByReuse",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var poolByReuse = (System.Collections.IDictionary)poolByReuseField.GetValue(pool);
+                var ro = poolByReuse[5u];
+                var goField = ro.GetType().GetField("Go",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                var go = (GameObject)goField.GetValue(ro);
+
+                // Frame 2: parked → GO kept, inactive
+                pool.Sync(new FrameBlob(BuildV11Blob(
+                    (0x02, nodeId: 100, reuseKey: 5))),
+                    root.transform, mm, null, fallback);
+                Assert.That(pool.Count, Is.EqualTo(1), "parked: GO kept");
+                Assert.That(go.activeSelf, Is.False, "parked: GO inactive");
+
+                // Frame 3: reactivated → GO SetActive(true) again
+                pool.Sync(new FrameBlob(BuildV11Blob(
+                    (0x01, nodeId: 200, reuseKey: 5))),
+                    root.transform, mm, null, fallback);
+                Assert.That(pool.Count, Is.EqualTo(1), "reactivate: GO still kept");
+                Assert.That(go.activeSelf, Is.True, "reactivate: GO active again");
+            }
+            finally
+            {
+                pool.Clear();
+                mm.Clear();
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        [Test]
+        public void ParkedNoPriorGo_DoesNotCreate()
+        {
+            var root = new GameObject("root");
+            var shader = Shader.Find("LoomGUI/Unlit");
+            var mm = new MaterialManager(shader);
+            var pool = new MirrorPool();
+            var fallback = Texture2D.whiteTexture;
+
+            try
+            {
+                // Parked blob with no prior GO
+                var blob = new FrameBlob(BuildV11Blob(
+                    (0x02, nodeId: 100, reuseKey: 5)));
+                Assert.That(blob.IsValid, Is.True);
+                pool.Sync(blob, root.transform, mm, null, fallback);
+
+                Assert.That(pool.Count, Is.EqualTo(0), "lazy: no GO created for parked-only entry");
+                Assert.That(root.transform.childCount, Is.EqualTo(0), "no child GO");
+            }
+            finally
+            {
+                pool.Clear();
+                mm.Clear();
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        [Test]
+        public void SteadyState_ZeroChurn()
+        {
+            var root = new GameObject("root");
+            var shader = Shader.Find("LoomGUI/Unlit");
+            var mm = new MaterialManager(shader);
+            var pool = new MirrorPool();
+            var fallback = Texture2D.whiteTexture;
+
+            try
+            {
+                // Frame 1: active → creates GO
+                var blobActive = new FrameBlob(BuildV11Blob(
+                    (0x01, nodeId: 100, reuseKey: 5)));
+                pool.Sync(blobActive, root.transform, mm, null, fallback);
+                Assert.That(pool.Count, Is.EqualTo(1), "frame1: GO created");
+                var go1 = root.transform.GetChild(0).gameObject;
+
+                // Frame 2: same active entry, change_level=2 again (steady state)
+                pool.Sync(blobActive, root.transform, mm, null, fallback);
+
+                Assert.That(pool.Count, Is.EqualTo(1), "frame2: still 1 GO");
+                Assert.That(root.transform.childCount, Is.EqualTo(1), "frame2: still 1 child");
+                var go2 = root.transform.GetChild(0).gameObject;
+                Assert.That(ReferenceEquals(go1, go2), Is.True, "same GO reused, not recreated");
+            }
+            finally
+            {
+                pool.Clear();
+                mm.Clear();
+                Object.DestroyImmediate(root);
+            }
+        }
+    }
 }

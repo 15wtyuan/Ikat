@@ -69,6 +69,22 @@ namespace LoomGUI
             int n = blob.NodeCount;
             for (int i = 0; i < n; i++)
             {
+                // parked keepalive: preserve GO but hide it (SetActive false).
+                // Must be before visible check AND before level==0 early-out,
+                // because parked entries carry visible=0 and change_level=0.
+                // Lazy: no prior GO → skip, don't create.
+                bool parked = blob.Parked(i);
+                if (parked)
+                {
+                    uint pkKey = blob.ReuseKey(i);
+                    if (pkKey != 0 && _poolByReuse.TryGetValue(pkKey, out var roP))
+                    {
+                        roP.Stale = false;
+                        if (roP.Go.activeSelf) roP.Go.SetActive(false);
+                    }
+                    continue;
+                }
+
                 if (!blob.Visible(i)) continue;
                 byte kind = blob.PayloadKind(i);
                 byte level = blob.ChangeLevel(i);   // 0=Skip 1=Header 2=Full
@@ -111,6 +127,7 @@ namespace LoomGUI
                 }
                 ro.LastNodeId = id; // 新建 + 复用均更新（slot 换绑时 node_id 变）
                 ro.Stale = false;
+                if (!ro.Go.activeSelf) ro.Go.SetActive(true); // reactivate parked→active
 
                 UpdateHeader(ro, blob, i, root, mm, kind, look, tex);
                 if (level == 2) UploadMeshOrText(ro, blob, i, look);
@@ -352,7 +369,7 @@ namespace LoomGUI
                     var cb = m.GetVector("_ClipBox");
                     matInfo = $" clip={clipped} cb=({cb.x:F2},{cb.y:F2},{cb.z:F3},{cb.w:F3})";
                 }
-                sb.AppendLine($"  [{tag}{kv.Key}] nid={ro.LastNodeId} sort={sort} pos=({p.x:F0},{p.y:F0}) mb=(({b.center.x:F0},{b.center.y:F0}),({b.size.x:F0},{b.size.y:F0})) active={ro.Go.activeInHierarchy}{matInfo}");
+                sb.AppendLine($"  [{tag}{kv.Key}] nid={ro.LastNodeId} sort={sort} pos=({p.x:F0},{p.y:F0}) mb=(({b.center.x:F0},{b.center.y:F0}),({b.size.x:F0},{b.size.y:F0})) active={ro.Go.activeSelf}{matInfo}");
             }
         }
 
