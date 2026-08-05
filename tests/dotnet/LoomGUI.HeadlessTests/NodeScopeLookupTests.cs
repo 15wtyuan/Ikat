@@ -411,6 +411,127 @@ namespace LoomGUI.HeadlessTests
 
         public void TryGetScopeCheckRejectsOutOfSubtreeMatch() { }
 
+        // ── L1 subtree find（find_node_by_id_in_subtree + Get/TryGet）──────
+
+        /// <summary>
+        /// N slot 各含内部 id="badge" 节点——每个 slot.Get&lt;Container&gt;("badge") 命中自己的。
+        /// 旧全局首匹配会撞到第一个 slot 的 badge；子树 DFS 修正此 bug。
+        ///
+        /// **需要 T12 .dll 重编译**（含 loomgui_make_test_pkg + loomgui_stage_find_node_by_id_in_subtree
+        /// 两个新 FFI）。T12 前本测试 Skip。
+        /// </summary>
+        [Fact(Skip = "需要 T12 .dll 重编译（含 loomgui_make_test_pkg + find_node_by_id_in_subtree FFI）。" +
+                     "T12 后移除 Skip 即可运行。")]
+        public unsafe void GetOnSlotHitsOwnBadgeNotOtherSlotsBadge()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                StageHandle* h = (StageHandle*)stage.ToPointer();
+                byte[] compName = Encoding.UTF8.GetBytes("slot");
+                nuint outLen;
+                byte* pkgPtr;
+                fixed (byte* cp = compName)
+                {
+                    pkgPtr = Native.loomgui_make_test_pkg(cp, (nuint)compName.Length, &outLen);
+                    if (pkgPtr == null)
+                        throw new InvalidOperationException("make_test_pkg returned null");
+                    try
+                    {
+                        // 加载包 + 实例化 N 个 slot
+                        int rc = Native.loomgui_stage_load_package(h,
+                            cp, (nuint)compName.Length, pkgPtr, outLen);
+                        Assert.Equal(0, rc);
+
+                        uint root = CreateRoot(stage, "div");
+                        Container rootNode = (Container)ctx._registry.GetOrCreate(root);
+
+                        const int N = 2;
+                        uint[] slots = new uint[N];
+                        for (int i = 0; i < N; i++)
+                        {
+                            slots[i] = Native.loomgui_stage_instantiate(h,
+                                cp, (nuint)compName.Length,
+                                cp, (nuint)compName.Length);
+                            Assert.NotEqual(InvalidNodeId, slots[i]);
+                            AppendChild(stage, root, slots[i]);
+                        }
+
+                        // 每个 slot 子树内 Get<Container>("badge") 应命中自己的 badge
+                        for (int i = 0; i < N; i++)
+                        {
+                            Node slotNode = ctx._registry.GetOrCreate(slots[i]);
+                            Container badge = slotNode.Get<Container>("badge");
+                            Assert.NotNull(badge);
+                            // 验证 badge 是该 slot 的后代（父链验证）
+                            uint parent = Native.loomgui_node_parent(h, badge._id);
+                            Assert.Equal(slots[i], parent);
+                        }
+
+                        // 各 slot 的 badge id 互不相同
+                        Container badge0 = ctx._registry.GetOrCreate(slots[0])
+                            .Get<Container>("badge");
+                        Container badge1 = ctx._registry.GetOrCreate(slots[1])
+                            .Get<Container>("badge");
+                        Assert.NotEqual(badge0._id, badge1._id);
+
+                        // root.Get 也命中（根子树 DFS 会找到第一个 badge）
+                        Container anyBadge = rootNode.Get<Container>("badge");
+                        Assert.NotNull(anyBadge);
+                    }
+                    finally
+                    {
+                        Native.loomgui_bytes_free(pkgPtr, outLen);
+                    }
+                }
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// TryGet 子树命中——与 GetOnSlotHitsOwnBadge 对应的宽松路径。
+        /// **需要 T12 .dll 重编译。**
+        /// </summary>
+        [Fact(Skip = "需要 T12 .dll 重编译。")]
+        public unsafe void TryGetOnSlotHitsOwnBadge()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                StageHandle* h = (StageHandle*)stage.ToPointer();
+                byte[] compName = Encoding.UTF8.GetBytes("slot");
+                nuint outLen;
+                byte* pkgPtr;
+                fixed (byte* cp = compName)
+                {
+                    pkgPtr = Native.loomgui_make_test_pkg(cp, (nuint)compName.Length, &outLen);
+                    if (pkgPtr == null)
+                        throw new InvalidOperationException("make_test_pkg returned null");
+                    try
+                    {
+                        int rc = Native.loomgui_stage_load_package(h,
+                            cp, (nuint)compName.Length, pkgPtr, outLen);
+                        Assert.Equal(0, rc);
+
+                        uint root = CreateRoot(stage, "div");
+                        uint slot0 = Native.loomgui_stage_instantiate(h,
+                            cp, (nuint)compName.Length, cp, (nuint)compName.Length);
+                        AppendChild(stage, root, slot0);
+
+                        bool ok = ctx._registry.GetOrCreate(slot0)
+                            .TryGet<Container>("badge", out var badge);
+                        Assert.True(ok);
+                        Assert.NotNull(badge);
+                    }
+                    finally
+                    {
+                        Native.loomgui_bytes_free(pkgPtr, outLen);
+                    }
+                }
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
         // ── Dispose 闸门（C1 ThrowIfDisposed 套用到 C7 新入口）──────────
 
         /// <summary>

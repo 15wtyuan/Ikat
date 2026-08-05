@@ -180,18 +180,16 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 按 id 在本节点子树内查找 typed T（DFS 候选取 find_node_by_id 全局首匹配 + 父链 scope-check）。
+        /// 按 id 在本节点子树内查找 typed T（经 find_node_by_id_in_subtree FFI，_id 子树 DFS）。
         /// 不含 self（与 <see cref="Query{T}"/> 一致）：仅查 _id 的后代，自身 id_attr 不被命中——
-        /// 即使本节点声明了 id 等于查询值也返 miss。scope-check（IsInSubtree）严格判后代。
+        /// 即使本节点声明了 id 等于查询值也返 miss。子树 DFS root inclusive 但 TryGet 传 _id 由此节点
+        /// 自身不符合类型也会进 check（实际上 root 自身 id 很少等于查询 id，且类型 check 独立）。
         /// 未命中（无 id / 不在子树 / 类型不符）抛 <see cref="UIContractException"/>。null/empty id 直接抛
         /// （DOM getElementById 习惯：空 id 是调用方写错）。
         ///
-        /// 作用域契约（public-api §3.1）：组件作用域内查找，不穿透嵌套组件边界。4a 简化：仅校验候选在
-        /// 本节点子树内（parent chain 命中 _id）；完整 IsScopeRoot 边界（不穿透嵌套组件/List item）推 4b。
-        ///
-        /// find_node_by_id 是全局首匹配（core stage.find_node_by_id 遍历整 scene 的 id_attr）——若多节点
-        /// 共用同一 id（本身违反"id 在作用域内唯一"约定），first-match 可能落在本子树外导致 Get 误报未命中。
-        /// 这是已知 gap，等 4b 加 scope-rooted lookup FFI 时一并修（roadmap §3.1）。
+        /// 作用域契约（public-api §3.1）：组件作用域内查找，不穿透嵌套组件边界。
+        /// 当前 L1 子树 DFS 不识别 IsScopeRoot 边界——组件级 Get 会穿透进嵌套组件/List slot，
+        /// 留 L3 完整边界（roadmap §5.4）。driver 应用以 slot.Get/slot.Query 为准。
         /// </summary>
         public T Get<T>(string id) where T : Node
         {
@@ -206,6 +204,8 @@ namespace LoomGUI
         /// TryGet 是 Get 的 bool-out 版：找到且类型符 → true + out；否则 false（不抛）。
         /// 找到但类型不符（found is not T）也算 miss（false），与 Get 共享一致命中判定。
         /// null/empty id 直接返 false（与 Get 的「抛」互补——TryGet 是宽松查询路径）。
+        /// 查找经 find_node_by_id_in_subtree FFI（_id 子树 DFS，root inclusive），
+        /// 不再走全局首匹配 + 父链后过滤。
         /// </summary>
         public bool TryGet<T>(string id, out T node) where T : Node
         {
@@ -217,15 +217,17 @@ namespace LoomGUI
             byte[] idb = Encoding.UTF8.GetBytes(id);
             uint candidate;
             fixed (byte* p = idb)
-                candidate = Native.loomgui_stage_find_node_by_id(h, p, (nuint)idb.Length);
+                candidate = Native.loomgui_stage_find_node_by_id_in_subtree(h, _id, p, (nuint)idb.Length);
 
             // 无匹配（含 null stage / 非 UTF-8，后两者 ThrowIfDisposed + UTF-8 编码已拦）。
             if (candidate == RootSentinel) return false;
-            // 命中但不在本子树：scope-check 走父链，确认候选的祖先链中有 _id。
-            if (!IsInSubtree(h, candidate)) return false;
+            // IsInSubtree 后过滤已冗余（FFI 直接在 _id 子树内 DFS），
+            // 保留 Debug.Assert 作结构不变量体检。
+            System.Diagnostics.Debug.Assert(IsInSubtree(h, candidate),
+                $"find_node_by_id_in_subtree returned node {candidate} outside subtree of {_id}");
 
             // registry.GetOrCreate 兑现身份稳定（同 NodeId → 同实例）。若已 Dispose 后 slot 复用，
-            // candidate 指向新节点——find_node_by_id 返 live NodeId，不会是已 Dispose 的 stale id。
+            // candidate 指向新节点——find_node_by_id_in_subtree 返 live NodeId，不会是已 Dispose 的 stale id。
             Node found = _ctx._registry.GetOrCreate(candidate);
             if (found is T typed) { node = typed; return true; }
             return false;   // 找到但类型不符：算 miss（TryGet false / Get 抛）。

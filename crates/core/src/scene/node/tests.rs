@@ -47,6 +47,94 @@ fn find_by_id_attr_global_match_unaffected_by_flag_split() {
 }
 
 #[test]
+fn find_node_by_id_in_subtree_hits_root_self() {
+    use crate::scene::dynamic;
+    let mut scene = Scene::default();
+    let root = dynamic::create_root(&mut scene, "div", "").unwrap();
+    scene.get_mut(root).unwrap().id_attr = Some("me".into());
+    assert_eq!(
+        scene.find_node_by_id_in_subtree(root, "me"),
+        Some(root),
+        "root self should be hit (root inclusive)"
+    );
+}
+
+#[test]
+fn find_node_by_id_in_subtree_hits_descendant_not_others() {
+    use crate::scene::dynamic;
+    let mut scene = Scene::default();
+    let root = dynamic::create_root(&mut scene, "div", "").unwrap();
+    let child = dynamic::create_node(&mut scene, "div", "").unwrap();
+    let other = dynamic::create_node(&mut scene, "div", "").unwrap();
+    dynamic::append_child(&mut scene, root, child).unwrap();
+    dynamic::append_child(&mut scene, root, other).unwrap();
+    scene.get_mut(child).unwrap().id_attr = Some("badge".into());
+    scene.get_mut(other).unwrap().id_attr = Some("badge".into());
+    // 全局 find 返第一个（非确定性）
+    // 子树 find 在 child 子树找到 child 自身
+    assert_eq!(
+        scene.find_node_by_id_in_subtree(child, "badge"),
+        Some(child),
+        "subtree find from child should hit child itself"
+    );
+    assert_eq!(
+        scene.find_node_by_id_in_subtree(other, "badge"),
+        Some(other),
+        "subtree find from other should hit other itself"
+    );
+}
+
+#[test]
+fn find_node_by_id_in_subtree_returns_none_for_foreign() {
+    use crate::scene::dynamic;
+    let mut scene = Scene::default();
+    let root = dynamic::create_root(&mut scene, "div", "").unwrap();
+    let child = dynamic::create_node(&mut scene, "div", "").unwrap();
+    dynamic::append_child(&mut scene, root, child).unwrap();
+    scene.get_mut(child).unwrap().id_attr = Some("badge".into());
+    // root 子树内无 "badge"（child 不在 root 子树？child 在！所以换个角度：用别的 root 查）
+    let other_root = dynamic::create_root(&mut scene, "div", "").unwrap();
+    assert_eq!(
+        scene.find_node_by_id_in_subtree(other_root, "badge"),
+        None,
+        "foreign subtree should return None"
+    );
+    assert_eq!(
+        scene.find_node_by_id_in_subtree(child, "nonexistent"),
+        None,
+        "missing id should return None"
+    );
+}
+
+#[test]
+fn find_node_by_id_in_subtree_n_slots_same_internal_id() {
+    use crate::scene::dynamic;
+    let mut scene = Scene::default();
+    let root = dynamic::create_root(&mut scene, "div", "").unwrap();
+    let mut slots = Vec::new();
+    for _ in 0..3 {
+        let slot = dynamic::create_node(&mut scene, "div", "").unwrap();
+        scene.get_mut(slot).unwrap().id_attr = Some("slot".into());
+        let badge = dynamic::create_node(&mut scene, "div", "").unwrap();
+        scene.get_mut(badge).unwrap().id_attr = Some("badge".into());
+        dynamic::append_child(&mut scene, slot, badge).unwrap();
+        dynamic::append_child(&mut scene, root, slot).unwrap();
+        slots.push((slot, badge));
+    }
+    // each slot's subtree should find its own badge
+    for &(slot, badge) in &slots {
+        assert_eq!(
+            scene.find_node_by_id_in_subtree(slot, "badge"),
+            Some(badge),
+            "each slot should find its own badge"
+        );
+    }
+    // badges should not be equal to each other
+    assert_ne!(slots[0].1, slots[1].1);
+    assert_ne!(slots[1].1, slots[2].1);
+}
+
+#[test]
 fn node_id_index_and_gen_decode() {
     // 高 20 bit index + 低 12 bit gen
     let id = NodeId((5 << 12) | 7);

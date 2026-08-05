@@ -444,6 +444,98 @@ pub extern "C" fn loomgui_stage_find_node_by_id(
     }
 }
 
+/// 在 root 子树内 DFS 查找 id 属性匹配的首个节点（root inclusive）。
+/// root、id = UTF-8 字节（指针+len）。返 node_id；null 句柄/非 UTF-8/无匹配 → 0xFFFF_FFFF（sentinel）。
+/// 替代"全局首匹配 + 父链后过滤"——C# TryGet/Get 用此入口避免 list slot 间 id 碰撞。
+///
+/// **常驻（不 gate）：**runtime 稳定入口。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_find_node_by_id_in_subtree(
+    h: *const StageHandle,
+    root: u32,
+    id: *const u8,
+    id_len: usize,
+) -> u32 {
+    const NOT_FOUND: u32 = 0xFFFF_FFFF;
+    if h.is_null() || id.is_null() {
+        return NOT_FOUND;
+    }
+    let sh = unsafe { &*h };
+    let bytes = unsafe { std::slice::from_raw_parts(id, id_len) };
+    let id_str = match std::str::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(_) => return NOT_FOUND,
+    };
+    match sh.stage.find_node_by_id_in_subtree(NodeId(root), id_str) {
+        Some(nid) => nid.0 as u32,
+        None => NOT_FOUND,
+    }
+}
+
+/// 构造最小测试包（headless test fixture helper）。
+/// 组件名=comp_spec UTF-8 前缀（取 comp_len 长度），含单 Container 节点 id="badge"。
+/// 返 pkg bytes 指针+长度；失败返 null（空字符串/格式错）。
+/// 调用方用完后调 loomgui_bytes_free 释放。
+///
+/// **测试 helper（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_make_test_pkg(
+    comp: *const u8,
+    comp_len: usize,
+    out_len: *mut usize,
+) -> *mut u8 {
+    use loomgui_core::asset::{write_package, PackageInput, TemplateNode};
+    use loomgui_core::scene::NodeKind;
+    use loomgui_core::style::resolved::ResolvedStyle;
+    if comp.is_null() || out_len.is_null() {
+        return std::ptr::null_mut();
+    }
+    let comp_name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(comp, comp_len) })
+    {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    if comp_name.is_empty() {
+        return std::ptr::null_mut();
+    }
+    let nodes = [TemplateNode {
+        kind: NodeKind::Container,
+        style: ResolvedStyle::default(),
+        parent_idx: None,
+        classes: vec![],
+        id_attr: Some("badge".to_string()),
+        draggable: false,
+        tabindex: None,
+        content: None,
+        src: None,
+        control_init: None,
+        role: None,
+        data_slot: None,
+        aria_controls: None,
+    }];
+    let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
+    let pkg = write_package(&PackageInput {
+        components: vec![(comp_name, nodes.as_slice(), &rules, &[])],
+    });
+    let len = pkg.len();
+    let ptr = pkg.as_ptr() as *mut u8;
+    std::mem::forget(pkg);
+    unsafe {
+        *out_len = len;
+    }
+    ptr
+}
+
+/// 释放 loomgui_make_test_pkg 返回的 bytes。
+#[no_mangle]
+pub extern "C" fn loomgui_bytes_free(ptr: *mut u8, len: usize) {
+    if !ptr.is_null() {
+        unsafe {
+            drop(Vec::from_raw_parts(ptr, len, len));
+        }
+    }
+}
+
 /// 加 touch monitor（C# CaptureTouch 后调）。核心把 node 加进 touch_id 对应槽的 touch_monitors（去重）。
 /// touch_id=-1 → 鼠标主指槽；找不到槽 → no-op。null 句柄 → no-op。
 ///

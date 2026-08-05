@@ -783,6 +783,21 @@ impl Scene {
             .find(|(_, n)| n.id_attr.as_deref() == Some(id))
             .map(|(_, n)| n.id)
     }
+
+    /// 在 root 子树内 DFS 查找 id 属性匹配的首个节点（root inclusive）。
+    /// 纯结构遍历——不检查 display:none。供 FFI 子树作用域 id 查找，
+    /// 替代"全局首匹配 + 父链后过滤"。
+    pub fn find_node_by_id_in_subtree(&self, root: NodeId, id: &str) -> Option<NodeId> {
+        let mut stack = vec![root];
+        while let Some(nid) = stack.pop() {
+            let n = self.get(nid)?;
+            if n.id_attr.as_deref() == Some(id) {
+                return Some(nid);
+            }
+            stack.extend(n.children.iter().rev());
+        }
+        None
+    }
 }
 
 /// 纯空白 TextNode 判定（HTML 元素源码里 tag 之间的换行+缩进）。
