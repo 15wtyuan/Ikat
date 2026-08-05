@@ -3010,7 +3010,8 @@ const NOTIFY_INSERTED: u8 = 0;
 const NOTIFY_REMOVED: u8 = 1;
 const NOTIFY_MOVED: u8 = 2;
 
-/// 刷新指定区间已物化的 slot（重新入 pending_binds，C# 下帧重新 BindItem）。
+/// 刷新指定区间当前可见（active）的 slot（重新入 pending_binds，C# 下帧重新 BindItem）。
+/// 休眠（parked）slot 不刷——它进可见区时由 execute 的 unpark 路径重新 bind。
 /// start/count：负值拒（越界）。0=ok，-1=err（null 句柄 / 非 ListView / 越界）。
 #[no_mangle]
 pub extern "C" fn loomgui_list_refresh(

@@ -2422,7 +2422,7 @@ namespace LoomGUI
             _ctx.DrainPendingBinds();
         }
 
-        /// <summary>刷新单个已物化 item（重新 BindItem）。未物化的静默跳过。</summary>
+        /// <summary>刷新单个当前可见的 item（重新 BindItem）。不在可见区的静默跳过。</summary>
         public void RefreshItem(int i)
         {
             ThrowIfDisposed();
@@ -2437,7 +2437,7 @@ namespace LoomGUI
             _ctx.DrainPendingBinds();
         }
 
-        /// <summary>刷新全部已物化 item（重新 BindItem）。count=ItemCount 覆盖全部可见 slot。</summary>
+        /// <summary>刷新全部当前可见 item（重新 BindItem）。count=ItemCount 覆盖全部可见 slot。</summary>
         public void RefreshItems()
         {
             ThrowIfDisposed();

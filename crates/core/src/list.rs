@@ -623,9 +623,10 @@ pub fn notify_moved(scene: &mut Scene, ul: NodeId, from: usize, to: usize) -> Re
     Ok(())
 }
 
-/// 刷新通知（spec §10 RefreshItems）：把 [start, start+count) 内**已物化**的 slot
+/// 刷新通知（spec §10 RefreshItems）：把 [start, start+count) 内**当前 active**的 slot
 /// 重新入 pending_binds 队列，让 C# 下帧重新 BindItem（业务数据刷新）。
-/// 未物化的 slot（不在 slots 中）无法刷新——静默跳过（不报错）。越界（start >= item_count）→ Err。
+/// 区间内无 active slot 的 item（不在可见区）无需刷新——静默跳过（不报错），它们进
+/// 可见区时由 execute 的 unpark 路径重新 bind。越界（start >= item_count）→ Err。
 pub fn refresh_items(
     scene: &mut Scene,
     ul: NodeId,
@@ -644,7 +645,9 @@ pub fn refresh_items(
         }
         ls.slots
             .iter()
-            .filter(|s| s.item_index >= start && s.item_index < end)
+            // parked slot 的 item_index 是 stale 复用参考，可能偻落在刷新区间内——入队会让
+            // 驱动对一个 display:none 的隐形 slot 跑 BindItem（无谓回调 + 数据写进看不见的节点）。
+            .filter(|s| !s.parked && s.item_index >= start && s.item_index < end)
             .map(|s| (s.node, s.item_index))
             .collect()
     };
@@ -733,8 +736,9 @@ pub fn collect_heights(scene: &mut Scene) {
 /// plan 的 &mut Scene 借用冲突）。单个 ListView 一条。
 pub struct PendingOps {
     pub list_ul: NodeId,
-    /// 本帧需新克隆的 item 序号（visible − 当前已有 slot）。
-    pub to_clone: Vec<usize>,
+    /// 本帧需绑定的 item 序号（visible − 已有 active slot 绑的）。execute 优先 unpark 复用
+    /// 池里的 parked slot，池空才克隆扩容——故是「待绑定」而非「待克隆」。
+    pub to_bind: Vec<usize>,
     pub new_visible: std::ops::Range<usize>,
     pub spacer_head_h: f32,
     pub spacer_tail_h: f32,
@@ -895,8 +899,9 @@ fn compute_visible_spacers(
     (visible, spacer_head_h, spacer_tail_h)
 }
 
-/// plan 阶段：算可见区、把离开可见区的 slot 标 parked、产待绑定 index 列表。**只借 scene**
-/// （clone_subtree 不在此调）。tick_and_render 先调 plan_visible 再调 execute_visible。
+/// plan 阶段：算可见区、把离开可见区的 slot 标 parked（就地休眠，不 detach）、产待绑定
+/// item 列表（`to_bind`）。**只借 scene**（clone_subtree 不在此调），不建树、不入 bind 队列
+/// ——那是 execute 的活。tick_and_render 先调 plan_visible 再调 execute_visible。
 pub fn plan_visible(scene: &mut Scene) -> Vec<PendingOps> {
     // 收集所有 ListView 节点的 NodeId（避免在借 scene.lists 时借 scene.nodes）。
     let uls: Vec<NodeId> = scene.lists.0.keys().copied().collect();
@@ -944,9 +949,9 @@ fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
         }
     }
     // Phase B：可变借标记离开可见区的 slot（park 而非 detach）。display:none 便签在 Phase C
-    // 写（set_inline_override 另借 scene，与本处 ls 可变借冲突）。to_clone 也在此算出。
+    // 写（set_inline_override 另借 scene，与本处 ls 可变借冲突）。to_bind 也在此算出。
     let new_set: std::collections::HashSet<usize> = visible.clone().collect();
-    let (to_clone, to_park): (Vec<usize>, Vec<NodeId>) = {
+    let (to_bind, to_park): (Vec<usize>, Vec<NodeId>) = {
         let ls = scene.lists.get_mut(ul)?;
         let mut to_park = Vec::new();
         for s in ls.slots.iter_mut() {
@@ -955,15 +960,19 @@ fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
                 to_park.push(s.node);
             }
         }
-        // 待克隆 = visible − 已有 active slot 的 indices（parked slot 不算已绑）。
-        let have: std::collections::HashSet<usize> = ls
+        // 待绑定 = visible − 已有 active slot 绑的 indices。parked slot 的 item_index 是 stale
+        // 复用参考，不算「已绑」——它得等 execute unpark 后才重新 bind。
+        let bound_items: std::collections::HashSet<usize> = ls
             .slots
             .iter()
             .filter(|s| !s.parked)
             .map(|s| s.item_index)
             .collect();
-        let to_clone = visible.clone().filter(|i| !have.contains(i)).collect();
-        (to_clone, to_park)
+        let to_bind = visible
+            .clone()
+            .filter(|i| !bound_items.contains(i))
+            .collect();
+        (to_bind, to_park)
     };
     // Phase C：给刚 park 的 slot 写 display:none 便签——留挂 ul（NodeId/parent/reuse_key 不变），
     // 同帧 rematch 拷进 node.style → taffy 跳、render 剪枝。不再有 detach/free 池。
@@ -972,7 +981,7 @@ fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
     }
     Some(PendingOps {
         list_ul: ul,
-        to_clone,
+        to_bind,
         new_visible: visible,
         spacer_head_h,
         spacer_tail_h,
@@ -1000,7 +1009,7 @@ fn execute_one(scene: &mut Scene, op: PendingOps) {
         Some(t) => t,
         None => return,
     };
-    for item_index in &op.to_clone {
+    for item_index in &op.to_bind {
         // 优先复用 parked slot（留挂 ul，只翻 display + 换绑，零克隆零重建）；
         // 同 item 的 parked slot 最优（内容本就对得上），否则任取一个。
         let parked_pos = scene.lists.get(op.list_ul).and_then(|ls| {
@@ -2174,6 +2183,155 @@ mod tests {
             idxs,
             vec![1, 2],
             "refresh re-queues only in-range instantiated slots"
+        );
+    }
+
+    /// refresh_items 只刷 **active** slot。parked slot 的 `item_index` 是 stale 复用参考——
+    /// 它可能仍落在刷新区间内，但那个 slot 是 display:none 的隐形节点，入队会让驱动对看不见的
+    /// 节点跑 BindItem（无谓回调 + 业务数据写进隐形节点）。同 notify_inserted/notify_removed 的
+    /// bind 过滤规则。
+    #[test]
+    fn refresh_items_skips_parked_slots() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 10);
+        // 冷启动（无滚动祖先 → viewport.h=0）visible=[0,5) → 5 个 slot 绑 items 0..5。
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        // 删 [3,5)：绑 items 3、4 的 slot 就地 park（item_index 保留 3/4 作复用参考）。
+        crate::list::notify_removed(s.scene.as_mut().unwrap(), ul, 3, 2).unwrap();
+        {
+            let ls = s.scene.as_ref().unwrap().lists.get(ul).unwrap();
+            assert_eq!(ls.slots.len(), 5, "high-water pool keeps all 5 slots");
+            assert_eq!(
+                ls.slots.iter().filter(|s| s.parked).count(),
+                2,
+                "precondition: removed-range slots parked (still item_index 3/4)"
+            );
+        }
+        // 清掉此前累积的 binds，只看 refresh 入队的。
+        let _ = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
+        // 刷全表 [0,8)：parked slot 的 stale item_index 3/4 也落在区间内，但不该入队。
+        crate::list::refresh_items(s.scene.as_mut().unwrap(), ul, 0, 8).unwrap();
+        let binds = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
+        let mut idxs: Vec<usize> = binds.iter().map(|(_, i)| *i).collect();
+        idxs.sort_unstable();
+        assert_eq!(
+            idxs,
+            vec![0, 1, 2],
+            "only active slots re-queued (parked slots' stale item_index must not bind)"
+        );
+    }
+
+    /// plan 阶段的池化契约（spec §2.3）：**只标记不搬树**。
+    ///
+    /// 离开可见区的 slot 就地标 `parked` + 写 display:none 便签，NodeId/parent/reuse_key 全保留
+    /// （无 detach、无 remove_child、无 free 池）；留在可见区的 slot 保持 active；可见区内还没
+    /// active slot 绑的 item 收进 `to_bind` 供 execute 复用/扩容。plan 自身不 bind、不建树。
+    #[test]
+    fn plan_visible_marks_park_no_detach() {
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 100);
+        // 均匀 20px/项 + 视口 100 → 可见区可精确预期（避免 estimate=0 退化为冷启动定数）。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..100 {
+                ls.heights.set(i, 20.0);
+            }
+            let st = scene.scroll.ensure(pane);
+            st.viewport_size = (1000.0, 100.0);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        // 第一帧（plan+execute）：可见 0..7 → 7 个 active slot 绑 items 0..6。
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let (slots_before, children_before) = {
+            let scene = s.scene.as_ref().unwrap();
+            let ls = scene.lists.get(ul).unwrap();
+            assert_eq!(ls.visible, 0..7, "frame 1 visible");
+            assert!(ls.slots.iter().all(|s| !s.parked), "frame 1: all active");
+            (ls.slots.len(), scene.get(ul).unwrap().children.len())
+        };
+        // 清 bind 队列，验 plan 自身不入队。
+        let _ = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
+        // 第二帧：滚 60px → 可见 1..10。item 0 离开（→park），items 1..6 留任（active），
+        // items 7,8,9 尚无 active slot（→to_bind）。**只 plan，不 execute**。
+        {
+            let st = s.scene.as_mut().unwrap().scroll.ensure(pane);
+            st.scroll_pos = (0.0, 60.0);
+        }
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        assert_eq!(ops.len(), 1, "one ListView planned");
+        let op = &ops[0];
+        assert_eq!(op.new_visible, 1..10, "frame 2 visible");
+        let mut to_bind = op.to_bind.clone();
+        to_bind.sort_unstable();
+        assert_eq!(
+            to_bind,
+            vec![7, 8, 9],
+            "visible items lacking an active slot collected for execute"
+        );
+
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        // 池不缩、树不动：slot 数与 ul.children 数一字不变，每个 slot 仍挂在 ul 下。
+        assert_eq!(
+            ls.slots.len(),
+            slots_before,
+            "high-water pool never shrinks"
+        );
+        assert_eq!(
+            scene.get(ul).unwrap().children.len(),
+            children_before,
+            "no slot removed from ul.children"
+        );
+        for slot in &ls.slots {
+            let n = scene.get(slot.node).expect("slot node still live");
+            assert_eq!(n.parent, Some(ul), "no slot detached");
+            assert!(
+                scene.get(ul).unwrap().children.contains(&slot.node),
+                "slot still a child of ul"
+            );
+        }
+        // 分区正确：离开可见区的 park、留任的仍 active。
+        let parked: Vec<usize> = ls
+            .slots
+            .iter()
+            .filter(|s| s.parked)
+            .map(|s| s.item_index)
+            .collect();
+        let mut active: Vec<usize> = ls
+            .slots
+            .iter()
+            .filter(|s| !s.parked)
+            .map(|s| s.item_index)
+            .collect();
+        active.sort_unstable();
+        assert_eq!(
+            parked,
+            vec![0],
+            "off-range slot parked (item 0 scrolled out)"
+        );
+        assert_eq!(active, vec![1, 2, 3, 4, 5, 6], "in-range slots stay active");
+        // parked slot 已写 display:none 便签（下帧 rematch 拷进 style → taffy 跳 + render 剪枝）。
+        let parked_node = ls.slots.iter().find(|s| s.parked).unwrap().node;
+        let pn = scene.get(parked_node).unwrap();
+        assert_ne!(
+            pn.inline_set.0 & crate::style::dynamic::INLINE_DISPLAY,
+            0,
+            "parked slot carries the display inline override bit"
+        );
+        assert_eq!(
+            pn.inline_override.taffy_style.display,
+            taffy::Display::None,
+            "parked slot's override value is display:none"
+        );
+        // plan 不 bind（bind 是 execute 的活）。
+        assert!(
+            ls.pending_binds.is_empty(),
+            "plan must not queue binds (execute does)"
         );
     }
 }
