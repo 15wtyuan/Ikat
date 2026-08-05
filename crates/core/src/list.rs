@@ -2351,4 +2351,257 @@ mod tests {
             op.to_bind
         );
     }
+
+    /// execute 阶段的池化契约（spec §2.4）：**unpark + bind**。
+    ///
+    /// 滚动后 plan 标 park / 收 to_bind，execute 把池里的 parked slot 翻回 active 绑给新 item：
+    /// 每个可见 item 恰有一个 active slot 绑它、离开可见区的 slot 留 display:none 便签、
+    /// 本帧新绑的全进 pending_binds。零 detach、零重建。
+    #[test]
+    fn execute_unparks_and_binds_visible_items() {
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 100);
+        // 均匀 20px/项 + 视口 100 → 可见区可精确预期。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..100 {
+                ls.heights.set(i, 20.0);
+            }
+            let st = scene.scroll.ensure(pane);
+            // 首帧大视口（400）：把池撑到 22 个 slot，给下一帧留出富余 parked 库存。
+            st.viewport_size = (1000.0, 400.0);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        // 第一帧：可见 0..22 → 池长到 22。
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let _ = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
+        // 第二帧：视口缩到 100 + 滚到 500px → 可见 23..32（九项，与首帧 0..22 无交集）。
+        // 高水位池不缩：旧 slot 全部 park，其中九个被 unpark 换绑新 item——零克隆零重建。
+        {
+            let st = s.scene.as_mut().unwrap().scroll.ensure(pane);
+            st.viewport_size = (1000.0, 100.0);
+            st.scroll_pos = (0.0, 500.0);
+        }
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        let visible = ls.visible.clone();
+        assert_eq!(visible, 23..32, "frame 2 visible");
+        // active slot 全绑可见 item，且可见区每项恰有一个 active slot。
+        let mut active: Vec<usize> = ls
+            .slots
+            .iter()
+            .filter(|s| !s.parked)
+            .map(|s| s.item_index)
+            .collect();
+        active.sort_unstable();
+        assert_eq!(
+            active,
+            visible.clone().collect::<Vec<_>>(),
+            "active slots bind exactly the visible items (one each)"
+        );
+        // 离开可见区的 slot 是 parked，且带 display:none 便签（不占布局、不渲染）。
+        let parked_count = ls.slots.iter().filter(|s| s.parked).count();
+        assert!(
+            parked_count > 0,
+            "scrolled-out slots stay in pool as parked"
+        );
+        for slot in ls.slots.iter().filter(|s| s.parked) {
+            let n = scene.get(slot.node).expect("parked slot still live");
+            assert_ne!(
+                n.inline_set.0 & crate::style::dynamic::INLINE_DISPLAY,
+                0,
+                "parked slot carries the display inline override bit"
+            );
+            assert_eq!(
+                n.inline_override.taffy_style.display,
+                taffy::Display::None,
+                "parked slot's override value is display:none"
+            );
+            assert_eq!(n.parent, Some(ul), "parked slot never detached");
+        }
+        // 本帧新绑的 item 全部入队（等 C# DrainPendingBinds → BindItem）。
+        let mut bound: Vec<usize> = ls.pending_binds.iter().map(|(_, i)| *i).collect();
+        bound.sort_unstable();
+        assert_eq!(
+            bound,
+            visible.clone().collect::<Vec<_>>(),
+            "every newly-unparked slot queued a bind for its item"
+        );
+        // 池只增不减：九项可见区全由首帧的 22 个 slot 复用，未新增克隆。
+        assert_eq!(
+            ls.slots.len(),
+            22,
+            "pool reused in place (no clone, no shrink)"
+        );
+        assert_all_slots_well_parented(scene, ul);
+    }
+
+    /// execute 扩容契约（spec §2.2/§2.4）：池里无 parked slot 可复用时克隆模板扩容。
+    ///
+    /// 高水位只增不减——扩容后即便滚回去也不缩（无驱逐，约束 e）。新 slot 挂 ul
+    /// （head/tail spacer 之间），parent 与 NodeId 从此永驻。
+    #[test]
+    fn execute_grows_by_cloning_when_no_parked_slot() {
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 1000);
+        // 20px/项 + 视口 400 → 可见约 20 项 + BUFFER，远超预分配的 INITIAL_SLOTS。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..1000 {
+                ls.heights.set(i, 20.0);
+            }
+            let st = scene.scroll.ensure(pane);
+            st.viewport_size = (1000.0, 400.0);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        let before = {
+            let ls = s.scene.as_ref().unwrap().lists.get(ul).unwrap();
+            assert_eq!(
+                ls.slots.len(),
+                crate::list::INITIAL_SLOTS,
+                "precondition: only the pre-allocated batch exists"
+            );
+            ls.slots.len()
+        };
+        // 可见项数 > 池容量 → 池耗尽后克隆扩容。
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let after = {
+            let scene = s.scene.as_ref().unwrap();
+            let ls = scene.lists.get(ul).unwrap();
+            let visible_len = ls.visible.len();
+            assert!(
+                visible_len > before,
+                "precondition: visible ({visible_len}) exceeds pool ({before})"
+            );
+            assert_eq!(ls.slots.len(), visible_len, "grew to cover visible range");
+            // 新 slot 也挂在 ul 下（永驻子树），reuse_key 非 0（出生即定）。
+            for slot in &ls.slots {
+                let n = scene.get(slot.node).expect("slot live");
+                assert_eq!(n.parent, Some(ul), "cloned slot parented to ul");
+                assert_ne!(n.reuse_key, 0, "cloned slot got a reuse_key at birth");
+            }
+            assert_all_slots_well_parented(scene, ul);
+            ls.slots.len()
+        };
+        assert!(after > before, "grew by cloning");
+        // 滚回顶部（可见区回到少量项）→ 池只增不减，绝不驱逐。
+        {
+            let st = s.scene.as_mut().unwrap().scroll.ensure(pane);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let scene = s.scene.as_ref().unwrap();
+        assert_eq!(
+            scene.lists.get(ul).unwrap().slots.len(),
+            after,
+            "high-water pool never shrinks (no eviction)"
+        );
+    }
+
+    /// unpark 必须 **清** display 便签（`unset_inline_override`），不能写 `display:block`
+    /// （spec §2.6）——后者会盖掉作者样式（`li { display:flex }` 的 item 会塌成块流）。
+    ///
+    /// 观测点：unpark 后 slot 的 `inline_set` display bit 必须被清零，cascade 回落到
+    /// base_style 的真实 display。写 `display:block` 的实现会留着 bit（值 Block），此测红。
+    #[test]
+    fn execute_unpark_clears_display_bit_not_sets_block() {
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 100);
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..100 {
+                ls.heights.set(i, 20.0);
+            }
+            let st = scene.scroll.ensure(pane);
+            st.viewport_size = (1000.0, 100.0);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        // 预分配的 slot 全 parked（display:none 便签已置）——unpark 前的基线。
+        {
+            let scene = s.scene.as_ref().unwrap();
+            let ls = scene.lists.get(ul).unwrap();
+            assert!(
+                ls.slots.iter().all(|s| s.parked),
+                "precondition: all parked"
+            );
+            for slot in &ls.slots {
+                assert_ne!(
+                    scene.get(slot.node).unwrap().inline_set.0
+                        & crate::style::dynamic::INLINE_DISPLAY,
+                    0,
+                    "precondition: pre-allocated slot carries display:none note"
+                );
+            }
+        }
+        // 第一帧：unpark 预分配的 slot 绑 items 0..N。
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let frame1_active: std::collections::HashMap<NodeId, usize> = {
+            let scene = s.scene.as_ref().unwrap();
+            let ls = scene.lists.get(ul).unwrap();
+            for slot in ls.slots.iter().filter(|s| !s.parked) {
+                let n = scene.get(slot.node).unwrap();
+                assert_eq!(
+                    n.inline_set.0 & crate::style::dynamic::INLINE_DISPLAY,
+                    0,
+                    "unpark must CLEAR the display bit (unset_inline_override), \
+                     not set a display:block override"
+                );
+                assert_ne!(
+                    n.inline_override.taffy_style.display,
+                    taffy::Display::Block,
+                    "unpark must not stamp display:block over the author's style"
+                );
+            }
+            ls.slots
+                .iter()
+                .filter(|s| !s.parked)
+                .map(|s| (s.node, s.item_index))
+                .collect()
+        };
+        // 再滚一帧走 park→unpark 往返：同一 slot 被复用给新 item 后 bit 仍是清的。
+        {
+            let st = s.scene.as_mut().unwrap().scroll.ensure(pane);
+            st.scroll_pos = (0.0, 200.0);
+        }
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        // 真·往返：至少一个首帧的 slot 节点被 park 后又 unpark 换绑到了别的 item
+        // （同 NodeId、新 item_index）——否则本段只是重复验首帧的清 bit 路径。
+        let recycled = ls
+            .slots
+            .iter()
+            .filter(|s| !s.parked)
+            .filter(|s| {
+                frame1_active
+                    .get(&s.node)
+                    .is_some_and(|&old| old != s.item_index)
+            })
+            .count();
+        assert!(
+            recycled > 0,
+            "some slots round-tripped park→unpark and re-bound to a new item"
+        );
+        for slot in ls.slots.iter().filter(|s| !s.parked) {
+            assert_eq!(
+                scene.get(slot.node).unwrap().inline_set.0 & crate::style::dynamic::INLINE_DISPLAY,
+                0,
+                "re-unparked slot's display bit cleared again (park→unpark round-trip)"
+            );
+        }
+    }
 }
