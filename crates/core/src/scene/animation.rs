@@ -435,7 +435,8 @@ fn lerp_arr4(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
 ///   标记，sync_animation_players 靠它防止声明仍存在时重启）；
 /// - Completed + fill none/backwards：**完成转变帧一次性**清掉本 player 自己持有的通道
 ///   （NodeAnim 回 None → 下帧 tween/base 接管），其后 player 惰性保留在 Completed 态
-///   （不再写也不再清，回收由 sync/Stop 负责）；
+///   （不再写也不再清，回收由 sync/Stop 负责）。完成清带掩码（own ∩ ¬同节点其他活跃
+///   player 持有）——多 animation 共享通道时保留他人本帧已写的值，防一帧闪 base；
 /// - Stopped（显式 Stop）：清通道 + 从 players 表移除；
 /// - 悬空 NodeId（节点已删）：同 Stopped 移除（与 tween.rs 同款双保险）。
 ///
@@ -444,11 +445,26 @@ pub fn update_all(scene: &mut Scene, dt: f32, _out: &mut Vec<EventRecord>) {
     if scene.players.is_empty() {
         return;
     }
-    scene.players.retain(|_, p| {
+    // 完成清通道的掩码要查"同节点其他 player 的推进后状态"（谁本帧完成、谁仍活跃），
+    // 而推进必须按槽序交错写/清（写入顺序即优先级，spec §6.1）——拆两阶段：
+    // 1) 按槽序推进全部 player，原位写帧、原位清 Stopped/悬空通道，记录 fill-none 完成转变；
+    // 2) 全部推进后，按其他 player 的最终状态算清掩码（与 sync 回收侧同款，见 dynamic.rs）；
+    // 3) 回收 Stopped/悬空。全程不 drain/重插 slotmap——PlayerKey 稳定（T9/T10 C# 句柄）。
+    let keys: Vec<PlayerKey> = scene.players.keys().collect();
+    let mut remove_keys: Vec<PlayerKey> = Vec::new();
+    // 本帧 fill-none 完成转变的 player：(node, 自有通道掩码)。
+    // （不需要 key：清掩码按"同节点其他活跃 player 的推进后状态"算，状态足以排除自己——
+    //   完成者已是 Completed-fill-none，`holds_channels` 为 false。）
+    let mut completions: Vec<(NodeId, [bool; 4])> = Vec::new();
+    for k in keys {
+        let Some(p) = scene.players.get_mut(k) else {
+            continue; // 防御：key 集合快照内理论不可达
+        };
         if p.play_state == PlayerPlayState::Stopped || !scene.nodes.contains_key(p.node.to_key()) {
             // Stopped / 悬空：清本 player 的通道（回退 tween/base）+ 回收。
             clear_owned_channels(&mut scene.anim, p);
-            return false;
+            remove_keys.push(k);
+            continue;
         }
         // 完成转变检测（一次性）：本帧前非 Completed、本帧到达完成态。
         let was_completed = p.play_state == PlayerPlayState::Completed;
@@ -462,7 +478,8 @@ pub fn update_all(scene: &mut Scene, dt: f32, _out: &mut Vec<EventRecord>) {
         {
             // fill none/backwards 完成：帧 props 已全 None，清掉本 player 持有的通道，
             // 下帧起 tween/base 接管（spec §6.3）。player 保留 Completed 态（防 sync 重启）。
-            clear_owned_channels(&mut scene.anim, p);
+            // 清动作推迟到全部推进后（掩码须按他人推进后状态算）。
+            completions.push((p.node, owned_channels(p)));
         } else if !frame.completed
             || matches!(
                 p.spec.fill_mode,
@@ -473,8 +490,54 @@ pub fn update_all(scene: &mut Scene, dt: f32, _out: &mut Vec<EventRecord>) {
             write_frame(&mut scene.anim, p.node, frame.props);
         }
         // 其余（Completed + fill none 的后续 tick）：惰性，不写不清。
-        true
-    });
+    }
+    // 完成清通道（掩码镜像 sync 回收侧 dynamic.rs）：others = 同节点其他"活跃"player
+    // （播放中 / Paused / Completed+forwards 每帧写值者，`holds_channels`）的持有并集。
+    // 只清"本 player 持有且无活跃他人持有"的通道：共享通道保留他人本帧已写的值（不闪
+    // base）；同帧全部完成时（他人已变 Completed-fill-none 惰性）通道回 None（base 接管）。
+    for (node, own) in completions {
+        let mut others = [false; 4];
+        for q in scene.players.values() {
+            if q.node == node && holds_channels(q) {
+                let m = owned_channels(q);
+                others = [
+                    others[0] || m[0],
+                    others[1] || m[1],
+                    others[2] || m[2],
+                    others[3] || m[3],
+                ];
+            }
+        }
+        clear_channels(
+            &mut scene.anim,
+            node,
+            [
+                own[0] && !others[0],
+                own[1] && !others[1],
+                own[2] && !others[2],
+                own[3] && !others[3],
+            ],
+        );
+    }
+    // 回收（Stopped / 悬空）：通道已在槽序原位清过（与写入交错，语义同 retain）。
+    for k in remove_keys {
+        scene.players.remove(k);
+    }
+}
+
+/// 该 player 是否"活跃持有"通道（完成清通道掩码的"其他活跃 player"判定）：播放中 /
+/// Paused 每帧写帧值；Completed + fill forwards/both 每帧续写末值——这些 player 的通道
+/// 不可清（清了丢值/闪 base）。Completed + fill none/backwards 是惰性结束标记（不写不清，
+/// 通道由 base 接管）→ 不算持有；Stopped 本帧即回收 → 不算持有。
+fn holds_channels(p: &KeyframePlayer) -> bool {
+    match p.play_state {
+        PlayerPlayState::Playing | PlayerPlayState::Paused => true,
+        PlayerPlayState::Completed => matches!(
+            p.spec.fill_mode,
+            AnimationFillMode::Forwards | AnimationFillMode::Both
+        ),
+        PlayerPlayState::Stopped => false,
+    }
 }
 
 /// 按帧值写 NodeAnim 四通道。通道 None = 本帧无 override（不动该通道）。

@@ -345,6 +345,105 @@ fn fill_none_completion_only_clears_player_owned_channels() {
     assert!(anim.transform.is_none(), "player 自己的通道已清");
 }
 
+/// 测 4c（T7 review Important）：多 animation 共享通道——fill-none 完成清通道带掩码，
+/// 完成帧保留同节点其他活跃 player 本帧已写的值（不闪 base）；独占通道照常回 None。
+#[test]
+fn fill_none_completion_keeps_other_players_shared_channel_value() {
+    let (mut scene, node) = scene_with_1_node();
+    // pulse：opacity 0.2→1.0 (.6s, fill forwards)，长动画本测试内不完成。
+    let mut pulse = spec();
+    pulse.name = "pulse".into();
+    pulse.duration = 0.6;
+    pulse.fill_mode = AnimationFillMode::Forwards;
+    insert_player(
+        &mut scene,
+        node,
+        pulse,
+        KeyframesRule {
+            name: "pulse".into(),
+            stops: vec![
+                stop(
+                    KeyframeStopSelector::From,
+                    AnimatableProps {
+                        opacity: Some(0.2),
+                        ..Default::default()
+                    },
+                ),
+                stop(
+                    KeyframeStopSelector::To,
+                    AnimatableProps {
+                        opacity: Some(1.0),
+                        ..Default::default()
+                    },
+                ),
+            ],
+        },
+    );
+    // flash：opacity 0.9→0.3 + translate 0→10（.2s, fill none）——与 pulse 共享 opacity、
+    // 独占 transform。插入在后（槽序靠后）：本帧 pulse 先写、flash 完成清——修前
+    // 无条件清会把 pulse 本帧已写的值一起清掉（一帧闪 base）。
+    let mut flash = spec();
+    flash.name = "flash".into();
+    flash.duration = 0.2;
+    flash.fill_mode = AnimationFillMode::None;
+    insert_player(
+        &mut scene,
+        node,
+        flash,
+        KeyframesRule {
+            name: "flash".into(),
+            stops: vec![
+                stop(
+                    KeyframeStopSelector::From,
+                    AnimatableProps {
+                        opacity: Some(0.9),
+                        transform: Some(TransformAnim {
+                            translate: Some([0.0, 10.0]),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ),
+                stop(
+                    KeyframeStopSelector::To,
+                    AnimatableProps {
+                        opacity: Some(0.3),
+                        transform: Some(TransformAnim {
+                            translate: Some([0.0, 0.0]),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ),
+            ],
+        },
+    );
+
+    // flash 完成帧（0.2s）：pulse 先写 opacity = 0.2 + 0.8*(0.2/0.6) = 0.4667；
+    // flash 完成清通道 → 共享 opacity 保留（掩码），独占 transform 回 None。
+    tick(&mut scene, 0.2);
+    assert_eq!(
+        scene.players.len(),
+        2,
+        "两个 player 都保留（flash 为 Completed 结束标记）"
+    );
+    let anim = scene.anim.get(node).expect("pulse 仍在写");
+    assert_close_msg(
+        anim.opacity.expect("opacity"),
+        0.2 + 0.8 * (0.2 / 0.6),
+        "共享通道保留 pulse 本帧值（不闪 base）",
+    );
+    assert!(
+        anim.transform.is_none(),
+        "flash 独占通道回 None（base 接管）"
+    );
+
+    // 下一帧：pulse 继续写（0.3s → 0.6），flash 惰性（Completed 不写不清）。
+    tick(&mut scene, 0.1);
+    let anim = scene.anim.get(node).expect("anim");
+    assert_close_msg(anim.opacity.unwrap(), 0.6, "pulse 持续可见");
+}
+
 /// 测 5：Stopped（显式 Stop 标记）→ 清通道 + 从 players 表回收。
 #[test]
 fn stopped_player_clears_channels_and_is_removed() {

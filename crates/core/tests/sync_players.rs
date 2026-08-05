@@ -351,6 +351,81 @@ fn backwards_fill_writes_first_frame_immediately_on_sync() {
     );
 }
 
+/// name 指定的 2-stop opacity keyframes（from→to，测 8 专用）。
+fn opacity_ramp(name: &str, from: f32, to: f32) -> KeyframesRule {
+    KeyframesRule {
+        name: name.into(),
+        stops: vec![
+            stop(
+                KeyframeStopSelector::From,
+                AnimatableProps {
+                    opacity: Some(from),
+                    ..Default::default()
+                },
+            ),
+            stop(
+                KeyframeStopSelector::To,
+                AnimatableProps {
+                    opacity: Some(to),
+                    ..Default::default()
+                },
+            ),
+        ],
+    }
+}
+
+/// 测 8（T7 review Minor 1）：sync 移除其一 player 时，共享通道保留另一 player 的值——
+/// 回收掩码 = own ∩ ¬(剩余 player 持有)（dynamic.rs 已实现，本测试锁死防回归）。
+#[test]
+fn sync_remove_keeps_remaining_players_shared_channel_value() {
+    let (mut scene, id) = scene_with_node();
+    scene
+        .keyframes
+        .insert("a".into(), opacity_ramp("a", 0.0, 1.0));
+    scene
+        .keyframes
+        .insert("b".into(), opacity_ramp("b", 0.2, 0.6));
+    let spec_a = AnimationSpec {
+        name: "a".into(),
+        duration: 0.4,
+        delay: 0.0,
+        iteration_count: Some(1),
+        direction: AnimationDirection::Normal,
+        fill_mode: AnimationFillMode::None,
+        timing_function: loomgui_core::tween::Ease::Linear,
+        play_state: AnimationPlayState::Running,
+    };
+    let spec_b = AnimationSpec {
+        name: "b".into(),
+        duration: 0.4,
+        delay: 0.0,
+        iteration_count: Some(1),
+        direction: AnimationDirection::Normal,
+        fill_mode: AnimationFillMode::None,
+        timing_function: loomgui_core::tween::Ease::Linear,
+        play_state: AnimationPlayState::Running,
+    };
+    // 声明 a + b → sync 建 2 player；tick 一帧：两者都写 opacity（b 后写赢 = 0.4）。
+    scene.get_mut(id).unwrap().style.animation = vec![spec_a.clone(), spec_b.clone()];
+    sync_animation_players(&mut scene);
+    assert_eq!(scene.players.len(), 2);
+    update_all(&mut scene, 0.2, &mut Vec::new());
+    assert_close(
+        scene.anim.get(id).expect("anim").opacity.expect("opacity"),
+        0.4,
+    );
+
+    // 声明只剩 b → sync 移除 a → 共享通道 opacity 保留 b 的值（回收掩码不清）。
+    scene.get_mut(id).unwrap().style.animation = vec![spec_b];
+    sync_animation_players(&mut scene);
+    assert_eq!(scene.players.len(), 1, "a 回收、b 保留");
+    assert_eq!(scene.players.values().next().unwrap().spec.name, "b");
+    assert_close(
+        scene.anim.get(id).expect("anim").opacity.expect("opacity"),
+        0.4,
+    );
+}
+
 /// 测 7（stage 接线）：tick step g'（rematch 后、solve 前）调 sync_animation_players——
 /// 加 class 后下一 tick 启 player，backwards 首帧同帧可见。
 #[test]
