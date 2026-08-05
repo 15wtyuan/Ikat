@@ -600,18 +600,26 @@ pub fn notify_moved(scene: &mut Scene, ul: NodeId, from: usize, to: usize) -> Re
         //   from<to：原 (from,to] 的项前移 1（item_index-1）；
         //   from>to：原 [to,from) 的项后移 1（item_index+1）。
         // 同时收 集受影响 slot 重新 bind（item_index 变 → 业务数据需跟到新序号）。
+        // parked slot 的 item_index 是 stale 复用参考，不可入 bind 队列——否则驱动会对
+        // 一个 display:none 的隐形 slot 跑 BindItem（无谓回调 + 业务数据写进看不见的节点）。
         let mut to_rebind: Vec<(NodeId, usize)> = Vec::new();
         for s in ls.slots.iter_mut() {
             let i = s.item_index;
             if i == from {
                 s.item_index = to;
-                to_rebind.push((s.node, to));
+                if !s.parked {
+                    to_rebind.push((s.node, to));
+                }
             } else if from < to && i > from && i <= to {
                 s.item_index = i - 1;
-                to_rebind.push((s.node, s.item_index));
+                if !s.parked {
+                    to_rebind.push((s.node, s.item_index));
+                }
             } else if from > to && i >= to && i < from {
                 s.item_index = i + 1;
-                to_rebind.push((s.node, s.item_index));
+                if !s.parked {
+                    to_rebind.push((s.node, s.item_index));
+                }
             }
         }
         ls.pending_binds.extend(to_rebind);
@@ -2301,6 +2309,60 @@ mod tests {
             sorted,
             vec![0, 1, 4, 5, 6],
             "indices shifted: 0,1 stay; 2→4, 3→5, 4→6"
+        );
+    }
+
+    /// notify_moved：parked slot 不入 pending_binds（与 notify_inserted/notify_removed 一致）。
+    /// 序列：先删一些 item 产生 parked slot，再插，再 move——验证 move 的 bind 队列不含 parked。
+    #[test]
+    fn notify_moved_filters_parked_from_binds() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 5);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        // 清空冷启动 binds。
+        let _ = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
+        // Step 1: 删 items [3,5) → slot 3,4 parked（stale idx 3,4）。
+        crate::list::notify_removed(s.scene.as_mut().unwrap(), ul, 3, 2).unwrap();
+        let _ = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
+        // Step 2: 在 at=3 插入 1 项 → 原 slot 3,4 的 stale idx 4,5 移位后成 5,6（仍 parked）。
+        crate::list::notify_inserted(s.scene.as_mut().unwrap(), ul, 3, 1).unwrap();
+        let _ = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
+        // Step 3: move item 0 → 2。parked slot 的 stale idx 碰巧落在 [0,2] 区间，
+        // 但 notify_moved 应过滤 parked slot，不让它进 bind 队列。
+        crate::list::notify_moved(s.scene.as_mut().unwrap(), ul, 0, 2).unwrap();
+        let binds = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
+        let ls = s.scene.as_ref().unwrap().lists.get(ul).unwrap();
+        // 找到所有 parked slot 的 node。
+        let parked_nodes: std::collections::HashSet<NodeId> = ls
+            .slots
+            .iter()
+            .filter(|s| s.parked)
+            .map(|s| s.node)
+            .collect();
+        assert!(
+            !parked_nodes.is_empty(),
+            "there must be parked slots in the pool"
+        );
+        for (node, _idx) in &binds {
+            assert!(
+                !parked_nodes.contains(node),
+                "parked slot {:?} leaked into bind queue",
+                node
+            );
+        }
+        // 同时验证 active slot 在 to_rebind 中。
+        let active_nodes: std::collections::HashSet<NodeId> = ls
+            .slots
+            .iter()
+            .filter(|s| !s.parked)
+            .map(|s| s.node)
+            .collect();
+        let in_bind: std::collections::HashSet<NodeId> = binds.iter().map(|(n, _)| *n).collect();
+        assert_eq!(
+            in_bind, active_nodes,
+            "all active (non-parked) slots must appear in bind queue"
         );
     }
 
