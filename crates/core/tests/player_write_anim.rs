@@ -252,6 +252,11 @@ fn tick_step_b_animation_overrides_transition_same_channel() {
     s.fill_mode = AnimationFillMode::Both;
     {
         let scene = stage.scene.as_mut().unwrap();
+        // g' sync_animation_players 只管有声明（computed style.animation）的 player——
+        // 手工插入的 player 须有声明，否则下个 tick 的 g' 视为"声明消失"回收。
+        // 声明须进 base_style：rematch 每帧从 base_style 重起 cascade 重建 style，
+        // 直接写 style.animation 会被 rematch 覆盖（打包期 inline/静态规则即此路径）。
+        scene.get_mut(node).unwrap().base_style.animation = vec![s.clone()];
         insert_player(scene, node, s, opacity_fade());
     }
     stage.advance_time(0.2);

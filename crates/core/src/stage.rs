@@ -9,7 +9,7 @@ use crate::layout::solve;
 use crate::render::build_render_nodes;
 use crate::render::FrameData;
 use crate::scene::node::{NodeFlags, NodeId, NodeKind, Rect, Scene};
-use crate::style::dynamic::{rematch_pseudo_classes, ScopedRule};
+use crate::style::dynamic::{rematch_pseudo_classes, sync_animation_players, ScopedRule};
 use crate::style::resolved::OverflowMode;
 use crate::text::layout::FontTable;
 
@@ -872,6 +872,7 @@ impl Stage {
     /// ①tween ②focus_request ③process（仲裁+拖拽写 scroll_pos；hit_test 读上帧 world，1帧延迟已认）
     /// ④scroll update ⑤process_keys ⑥rematch_pseudo_classes（提到 solve 前：改 layout/transform/colors
     /// 三类，本帧 solve+compute 全消费）⑥.5 transition drain（rematch 产请求 → kill 旧 tween + 提交新）
+    /// ⑥.6 sync_animation_players（rematch 后启停 player：class 触发声明式动画，spec §5.2 g'）
     /// ⑦solve（读 rematch 后 taffy_style）
     /// ⑧refresh_content_sizes ⑨compute_world_transforms（读 rematch 后 transform+scroll_pos）
     /// ⑩build_render_nodes
@@ -958,7 +959,12 @@ impl Stage {
                 TRANSITION_TAG,
             );
         }
-        // 4.6 控件状态→视觉同步：ControlState 变化后把 fill width / check display 写进
+        // 4.6 animation 声明同步（spec §5.2 step g'）：rematch 后读 computed style.animation
+        //     启停 player。新 player 的 backwards 首帧立即写 NodeAnim，本帧 solve+render 消费；
+        //     回收时通道回 None（tween/base 下帧接管）。在 transition drain 之后：两者都只读
+        //     computed style、写各自运行时态，互不干扰（spec §6.5 检测独立）。
+        sync_animation_players(scene);
+        // 4.7 控件状态→视觉同步：ControlState 变化后把 fill width / check display 写进
         //     子节点 inline_override。须在 solve 前（inline 影响布局：fill width 决定 bar 宽度）。
         //     每帧对所有控件节点扫一次（控件稀疏，代价可接受）。读 controls.0.keys() 克隆
         //     避免与 sync_control_visuals 的可变借冲突。

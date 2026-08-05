@@ -128,6 +128,10 @@ pub struct KeyframePlayer {
     /// 当前（0-based）迭代序号（每帧从 elapsed 推导后回写）。
     pub iteration: u32,
     pub play_state: PlayerPlayState,
+    /// 程序化 player（node.Play 建，T10 设 true）：sync_animation_players 完全跳过
+    /// （不受 class 声明管——声明消失不回收、同名不视为已启动），靠 Stop/句柄回收。
+    /// class 声明触发的 player = false。
+    pub programmatic: bool,
     /// FFI 注册的 OnKey 百分比阈值（事件层检测用）。
     pub on_key_percents: Vec<f32>,
     /// 已触发的阈值（防同 iteration 重复触发）。
@@ -146,6 +150,7 @@ impl KeyframePlayer {
             last_progress: 0.0,
             iteration: 0,
             play_state: PlayerPlayState::Playing,
+            programmatic: false,
             on_key_percents: Vec::new(),
             fired_keys: Vec::new(),
             fired_start: false,
@@ -473,7 +478,8 @@ pub fn update_all(scene: &mut Scene, dt: f32, _out: &mut Vec<EventRecord>) {
 }
 
 /// 按帧值写 NodeAnim 四通道。通道 None = 本帧无 override（不动该通道）。
-fn write_frame(anim: &mut AnimTable, node: NodeId, props: AnimatableProps) {
+/// `pub(crate)`：sync_animation_players 启动时立即写首帧（spec §5.2 backwards fill）用。
+pub(crate) fn write_frame(anim: &mut AnimTable, node: NodeId, props: AnimatableProps) {
     let a = anim.ensure(node);
     if let Some(v) = props.opacity {
         a.opacity = Some(v);
@@ -506,9 +512,10 @@ fn compose_transform(ta: TransformAnim) -> Option<Affine2> {
     )
 }
 
-/// 清该 player 的 keyframes 声明的通道（stops props 的 Some 通道并集）。只动自己持有的
-/// 通道——动画没声明的通道（tween/base 在写）不动。
-fn clear_owned_channels(anim: &mut AnimTable, p: &KeyframePlayer) {
+/// 该 player 的 keyframes 声明的通道掩码（stops props 的 Some 通道并集）。
+/// 顺序固定：[opacity, transform, bg_color, text_color]。
+/// `pub(crate)`：sync_animation_players（dynamic.rs）回收 player 时算"谁还持有该通道"用。
+pub(crate) fn owned_channels(p: &KeyframePlayer) -> [bool; 4] {
     let (mut opacity, mut transform, mut bg, mut text) = (false, false, false, false);
     for stop in &p.keyframes.stops {
         opacity |= stop.props.opacity.is_some();
@@ -516,21 +523,37 @@ fn clear_owned_channels(anim: &mut AnimTable, p: &KeyframePlayer) {
         bg |= stop.props.bg_color.is_some();
         text |= stop.props.text_color.is_some();
     }
-    if let Some(a) = anim.0.get_mut(&p.node) {
-        if opacity {
+    [opacity, transform, bg, text]
+}
+
+/// 按通道掩码清 NodeAnim（None = 回退 tween/base）。全 false 掩码 no-op；清空后整条
+/// anim 条目移除。`pub(crate)`：sync_animation_players 回收 player 时按"持有 ∩ 无剩余
+/// 持有"掩码调用（多 player 共享通道时只清真正没人写的）。
+pub(crate) fn clear_channels(anim: &mut AnimTable, node: NodeId, mask: [bool; 4]) {
+    if !mask.iter().any(|&b| b) {
+        return;
+    }
+    if let Some(a) = anim.0.get_mut(&node) {
+        if mask[0] {
             a.opacity = None;
         }
-        if transform {
+        if mask[1] {
             a.transform = None;
         }
-        if bg {
+        if mask[2] {
             a.bg_color = None;
         }
-        if text {
+        if mask[3] {
             a.text_color = None;
         }
         if a.is_empty() {
-            anim.0.remove(&p.node);
+            anim.0.remove(&node);
         }
     }
+}
+
+/// 清该 player 的 keyframes 声明的通道（stops props 的 Some 通道并集）。只动自己持有的
+/// 通道——动画没声明的通道（tween/base 在写）不动。
+fn clear_owned_channels(anim: &mut AnimTable, p: &KeyframePlayer) {
+    clear_channels(anim, p.node, owned_channels(p));
 }

@@ -13,8 +13,8 @@
 //! - 已知「表示不同但语义等价」的属性进 skip 列表，逐条标注根因（见
 //!   `REPRESENTATION_DIFF_PROPS`）。改 schema default 使之不再落入该语义 →
 //!   测试红，强制 review。
-//! - apply_decl 不识别其 default 值的属性（如 `animation`/`resize`，core 本就
-//!   noop）进 `UNCONSUMED_DEFAULT_PROPS`，集合被锁——新增此类属性须显式登记，
+//! - apply_decl 不识别其 default 值的属性（如 `resize`，core 本就 noop）进
+//!   `UNCONSUMED_DEFAULT_PROPS`，集合被锁——新增此类属性须显式登记，
 //!   避免悄悄累积「schema 接受但 core 丢弃」的缺口。
 //! - 关键属性（background/border/overflow/color/opacity 等）另做单字段精确断言，
 //!   作为 skip 推理错误的第二道防线。
@@ -62,8 +62,9 @@ const REPRESENTATION_DIFF_PROPS: &[&str] = &[
 ///   - `border-image-slice`/`background-image`/`box-shadow`/`text-shadow`/
 ///     `-webkit-text-stroke`/`font-effect`：default `none`/`0 transparent` → None，
 ///     与 resolved 默认 None 一致。
-///   - `animation`/`resize`：fence 注册并做语法校验，但 core 故意不存值（runtime
-///     不消费，见 schema 注释）。
+///   - `animation`/`resize`：fence 注册并做语法校验。`animation` 已由 apply_decl
+///     "animation" arm 消费（M2：class 规则 → computed style → sync_animation_players，
+///     default `none` → 空 Vec == resolved 默认，走主断言）；`resize` 仍不消费。
 /// - **apply 完整性缺口（独立 bug，非 default 漂移，见报告顾虑）**：default 值本应
 ///   被 apply 识别却返 false：
 ///   - `background-size`：schema 广告 `stretch` 为合法值，但 apply 仅认 `100%`，
@@ -78,7 +79,6 @@ const UNCONSUMED_DEFAULT_PROPS: &[&str] = &[
     "text-shadow",
     "-webkit-text-stroke",
     "font-effect",
-    "animation",
 ];
 
 /// 对每个非例外 CSS_PROP：apply 其 default 值到空 ResolvedStyle，断言结果仍 == 全

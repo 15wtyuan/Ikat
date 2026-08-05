@@ -89,7 +89,7 @@ pub struct Specificity(pub u32, pub u32, pub u32); // (id 数, class 数, tag �
 use crate::scene::control::ROLE_TAB;
 use crate::scene::node::{NodeFlags, NodeId, Scene};
 use crate::style::mapping::apply_decl;
-use crate::style::resolved::{ResolvedStyle, TransitionSpec};
+use crate::style::resolved::{AnimationSpec, ResolvedStyle, TransitionSpec};
 use std::collections::HashMap;
 
 /// cascade 期 transient：节点显式声明了哪些可继承属性（bitmask）。
@@ -839,6 +839,139 @@ fn propagate_inherited_rec(
         // 根节点：无父继承，effective = 自己 style，直接向下传
         for c in children {
             propagate_inherited_rec(scene, c, Some(my_style.clone()), set_map);
+        }
+    }
+}
+
+/// 声明式动画启停（tick step g'，spec §5.2 class 触发）。rematch(f) 之后、solve(i) 之前
+/// 调用：读节点 computed `style.animation`（rematch 已把动态规则的 animation 声明叠加进
+/// style），与节点活跃 player 比对，只增删不推进时间轴（推进是 step b update_all 的事）。
+///
+/// 决策规则（与 T6 `update_all` 的 Completed 保留设计衔接）：
+/// - **声明出现（新 name）** → 建 player：从 `Scene.keyframes` 全局表按 name 拷 KeyframesRule；
+///   fill backwards/both 立即算首帧写 NodeAnim（spec §5.2，防 delay 期闪 base）；
+///   `animation-play-state: paused` 声明的建 Paused player。未知 name → 跳过（CSS 语义=无动画）。
+/// - **声明消失** → 回收 player（含 fill forwards/both 的 Completed player，spec §6.3）：
+///   清它持有的通道回 None → tween/base 接管。同节点多 player 共享通道时，只清"移除者持有
+///   且无剩余 player 持有"的通道（防误清仍在播的动画）。
+/// - **同名参数变**（duration/delay/iteration/fill 等）→ kill 旧 + 建新（合法重播）。
+/// - **同名已存在（含 Completed）** → 不重播（防 fill none 的结束标记被无限重启，T6 衔接点 1）。
+/// - **`programmatic` player**（node.Play 建，T10）→ 完全跳过：不回收、不算已存在
+///   （同名声明出现时另建 class player，二者独立）。
+///
+/// 多 animation（`animation: a .3s, b .5s`）：每条声明独立建 player；update_all 按插入序
+/// 写，后声明覆盖同通道（spec §6.4）。
+pub fn sync_animation_players(scene: &mut Scene) {
+    use crate::scene::animation::{
+        clear_channels, owned_channels, write_frame, KeyframePlayer, PlayerKey, PlayerPlayState,
+    };
+    use crate::style::resolved::{AnimationFillMode, AnimationPlayState};
+    use std::collections::HashSet;
+
+    // 按节点分组现有 player（slotmap 迭代 + 克隆 spec，避免跨可变借）。
+    // 悬空节点（节点已删，update_all 同款双保险）：直接回收，不进分组。
+    let mut node_players: HashMap<NodeId, Vec<(PlayerKey, AnimationSpec, bool)>> = HashMap::new();
+    let mut dead_keys: Vec<PlayerKey> = Vec::new();
+    for (k, p) in &scene.players {
+        if scene.nodes.contains_key(p.node.to_key()) {
+            node_players
+                .entry(p.node)
+                .or_default()
+                .push((k, p.spec.clone(), p.programmatic));
+        } else {
+            dead_keys.push(k);
+        }
+    }
+
+    let node_ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
+    let mut remove_keys: Vec<PlayerKey> = dead_keys;
+    let mut insert_specs: Vec<(NodeId, AnimationSpec)> = Vec::new();
+
+    for node in node_ids {
+        let declared = scene
+            .get(node)
+            .map(|n| n.style.animation.clone())
+            .unwrap_or_default();
+        let existing = node_players.remove(&node).unwrap_or_default();
+        if declared.is_empty() && existing.is_empty() {
+            continue;
+        }
+        // 每条声明匹配一个未占用的非 programmatic player：
+        //  - 同名同参（含 Completed）→ 保留；
+        //  - 同名异参 → kill 旧 + 重播（参数变 = 合法重启）；
+        //  - 无同名 → 新建。
+        let mut used: HashSet<PlayerKey> = HashSet::new();
+        for spec in &declared {
+            match existing
+                .iter()
+                .find(|(k, ps, prog)| !prog && !used.contains(k) && ps.name == spec.name)
+            {
+                Some((k, ps, _)) => {
+                    used.insert(*k);
+                    if ps != spec {
+                        remove_keys.push(*k);
+                        insert_specs.push((node, spec.clone()));
+                    }
+                }
+                None => insert_specs.push((node, spec.clone())),
+            }
+        }
+        // 声明消失的非 programmatic player（含 Completed）→ 回收。
+        for (k, _, prog) in &existing {
+            if !prog && !used.contains(k) {
+                remove_keys.push(*k);
+            }
+        }
+    }
+
+    // 应用：先移除（清通道掩码 = 移除者持有 ∩ 无剩余持有，防共享通道误清），
+    // 再插入（backwards/both 立即写首帧；paused 声明建 Paused player）。
+    for k in &remove_keys {
+        let Some(p) = scene.players.remove(*k) else {
+            continue;
+        };
+        let own = owned_channels(&p);
+        let remaining =
+            scene
+                .players
+                .values()
+                .filter(|q| q.node == p.node)
+                .fold([false; 4], |acc, q| {
+                    let m = owned_channels(q);
+                    [
+                        acc[0] || m[0],
+                        acc[1] || m[1],
+                        acc[2] || m[2],
+                        acc[3] || m[3],
+                    ]
+                });
+        clear_channels(
+            &mut scene.anim,
+            p.node,
+            [
+                own[0] && !remaining[0],
+                own[1] && !remaining[1],
+                own[2] && !remaining[2],
+                own[3] && !remaining[3],
+            ],
+        );
+    }
+    for (node, spec) in insert_specs {
+        let Some(rule) = scene.keyframes.get(&spec.name).cloned() else {
+            continue; // 未知 animation-name：CSS 语义 = 无动画（打包期 validate 应已拦，防御）
+        };
+        let mut player = KeyframePlayer::new(node, spec.clone(), rule);
+        if spec.play_state == AnimationPlayState::Paused {
+            player.play_state = PlayerPlayState::Paused;
+        }
+        // 首帧立即写（spec §5.2）：不等下帧 step b，防 delay 期闪 base。
+        let first = player.advance(0.0);
+        scene.players.insert(player);
+        if matches!(
+            spec.fill_mode,
+            AnimationFillMode::Backwards | AnimationFillMode::Both
+        ) {
+            write_frame(&mut scene.anim, node, first.props);
         }
     }
 }

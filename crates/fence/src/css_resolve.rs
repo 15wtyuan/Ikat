@@ -151,7 +151,9 @@ pub fn resolve_inline_styles_with_diags(
                         CssValueParser::Animation => {
                             // animation 简写：先校验（捕捉拼写错误），合法则解析存值
                             // （M2 runtime KeyframePlayer 消费 base_style.animation）。
-                            // 不调 apply_decl——core 无 animation arm，调了会误报 FenceBadCssValue。
+                            // 不调 apply_decl：fence 要先跑 validate 门（apply_decl 宽松解析无诊断），
+                            // 解析本身委托 core `parse_animation`（与运行时 rematch 的 apply_decl
+                            // "animation" arm 同一真相源，防 §8.2/§8.3 漂移）。
                             if !validate_animation_value(value) {
                                 diagnostics.push(Diagnostic::error(
                                     DiagnosticCode::FenceBadCssValue,
