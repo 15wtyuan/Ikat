@@ -71,6 +71,11 @@
          height:auto + margin-bottom) — used by VirtualizationTests.VariableHeight_NoDrift for the
          anchoring no-drift assertion. Built from fixtures/varheight.workspace via loom-pkg. -->
     <None Include="fixtures\varheight.pkg.bin" Link="fixtures\varheight.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
+    <!-- M2 Task 13 animation handle fixture: animation.pkg.bin (@keyframes fade + hookanim with
+         @loom-hook "half" on the 50% stop) — used by AnimationHandleTests for the programmatic
+         node.Play L3 suite (Play/Pause/Resume/Stop/Time + OnStart/OnEnd/OnKey/OnHook +
+         On<AnimationEndEvent>). Built from fixtures/animation.workspace via loom-pkg. -->
+    <None Include="fixtures\animation.pkg.bin" Link="fixtures\animation.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
     <!-- E2 fixture font for text layout (tick panics without a default font) -->
     <None Include="fixtures\fonts\DejaVuSans.ttf" Link="fixtures\fonts\DejaVuSans.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
