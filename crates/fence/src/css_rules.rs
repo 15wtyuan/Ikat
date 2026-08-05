@@ -1,9 +1,9 @@
 //! `<style>` 选择器解析 + 规则表产物（fence = 纯解析器）。
 //!
 //! 路径 c：手搓解析器，直产 core 的 ParsedSelector/Compound（fence 已依赖 core）。
-//! 子集：class / tag / id / 后代组合（空格）/ 伪类（hover/active/disabled/focus/checked）
-//! / 属性选择器（[attr] / [attr="val"]，仅 Exists + Eq）。
-//! 越界（nth-child、+ ~ 组合子等）返 None，由调用方报错。
+//! 子集：class / tag / id / 后代组合（空格）/ 伪类（hover/active/disabled/focus/checked/
+//! nth-child(An+B|odd|even|N)）/ 属性选择器（[attr] / [attr="val"]，仅 Exists + Eq）。
+//! 越界（nth-of-type 等、+ ~ 组合子等）返 None，由调用方报错。
 //!
 //! @keyframes at-rule（对齐 public-api.md §9「动画定义全在 CSS」终态）：fence 解析
 //! `@keyframes <name> { <stop-selector> { decls } ... }` 产 `KeyframesRule`。stop 声明块内
@@ -17,8 +17,8 @@ use crate::css_resolve::unsupported_hint;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
 use crate::schema::css::{find_css_prop, find_shorthand};
 use loomgui_core::style::dynamic::{
-    AttrOp, AttrSelector, Combinator, Compound, Declaration, DynamicRule, ParsedSelector,
-    Specificity,
+    AttrOp, AttrSelector, Combinator, Compound, Declaration, DynamicRule, NthChildExpr,
+    ParsedSelector, Specificity,
 };
 
 // ── @keyframes 类型（fence-local；pkg.bin 暂不序列化）──────────────────────────
@@ -54,13 +54,15 @@ pub struct KeyframesRule {
 /// 子集：空格分隔的若干 compound（后代组合）；每个 compound =
 /// tag? + (class/id/pseudo/attr)*。
 /// 越界：Child `>`、相邻 `+`/`~`、逗号多选（逗号在 parse_style_block 预切分）→ None。
+/// 注意 `+`/`-` 在 `:nth-child(...)` 括号内合法（An+B），组合子判定按括号深度排除。
 pub fn parse_selector(raw: &str) -> Option<ParsedSelector> {
     let raw = raw.trim();
     if raw.is_empty() {
         return None;
     }
-    // 越界字符快速判定：逗号 / > + ~ 组合子不在本子集（属性选择器 `[...]` 已支持，见 parse_compound）。
-    if raw.contains(',') || raw.contains('>') || raw.contains('+') || raw.contains('~') {
+    // 越界字符快速判定：逗号 / > + ~ 组合子不在本子集（属性选择器 `[...]` 已支持，见
+    // parse_compound；`:nth-child(2n+1)` 的 `+` 在括号内合法，按深度排除）。
+    if has_out_of_subset_combinator(raw) {
         return None;
     }
 
@@ -69,7 +71,29 @@ pub fn parse_selector(raw: &str) -> Option<ParsedSelector> {
     let mut specificity_c = 0u32; // tag 数
     let mut compounds: Vec<Compound> = Vec::new();
 
-    for part in raw.split_whitespace() {
+    // 按括号深度切分 compound：`split_whitespace` 会拆坏括号内空格
+    // （`:nth-child(2n + 1)` 的 `+` 两侧空格合法，CSS An+B 语法允许）。
+    let mut parts: Vec<&str> = Vec::new();
+    let mut depth: i32 = 0;
+    let mut start = 0usize;
+    for (idx, ch) in raw.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ if ch.is_whitespace() && depth == 0 => {
+                if idx > start {
+                    parts.push(&raw[start..idx]);
+                }
+                start = idx + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    if start < raw.len() {
+        parts.push(&raw[start..]);
+    }
+
+    for part in parts {
         let (c, a, b, cc) = parse_compound(part)?;
         specificity_a += a;
         specificity_b += b;
@@ -90,6 +114,21 @@ pub fn parse_selector(raw: &str) -> Option<ParsedSelector> {
     })
 }
 
+/// 组合子越界扫描：逗号 / `>` / `+` / `~` 在括号外出现即越界。
+/// `:nth-child(An+B)` 的参数里 `+`/`-` 是合法语法（如 `2n+1`），括号内不判。
+fn has_out_of_subset_combinator(raw: &str) -> bool {
+    let mut depth: i32 = 0;
+    for ch in raw.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' | '>' | '+' | '~' if depth == 0 => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 /// 解析单个 compound（无空格的一段）。返 (compound, a, b, c) specificity 贡献。
 fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
     let mut c = Compound {
@@ -101,6 +140,7 @@ fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
         pseudo_active: false,
         pseudo_disabled: false,
         pseudo_focus: false,
+        pseudo_nth_child: None,
         attrs: Vec::new(),
     };
     let mut a = 0u32;
@@ -128,18 +168,39 @@ fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
         } else if let Some(r) = rest.strip_prefix(':') {
             let (name, next) = take_ident(r);
             match name {
-                "hover" => c.pseudo_hover = true,
-                "active" => c.pseudo_active = true,
-                "disabled" => c.pseudo_disabled = true,
-                "focus" => c.pseudo_focus = true,
+                "hover" => {
+                    c.pseudo_hover = true;
+                    rest = next;
+                }
+                "active" => {
+                    c.pseudo_active = true;
+                    rest = next;
+                }
+                "disabled" => {
+                    c.pseudo_disabled = true;
+                    rest = next;
+                }
+                "focus" => {
+                    c.pseudo_focus = true;
+                    rest = next;
+                }
                 "checked" => {
                     // core 的 Compound 无 pseudo_checked 字段：checked 是控件态，由控件束处理（Spec-4）。
                     // 本轮仅计 specificity（b+=1 在下方统一加），不存状态门。
+                    rest = next;
                 }
-                _ => return None, // 未知伪类越界（含 nth-child 等）
+                "nth-child" => {
+                    // 参数化伪类：`:nth-child(An+B|odd|even|N)`（spec §8.5）。
+                    // 解析括号内 An+B → NthChildExpr；语法越界（无括号/缺 `)`/坏参数）→ None。
+                    let after = next.strip_prefix('(')?;
+                    let close = after.find(')')?;
+                    let (a, b) = parse_nth_arg(&after[..close])?;
+                    c.pseudo_nth_child = Some(NthChildExpr { a, b });
+                    rest = &after[close + 1..];
+                }
+                _ => return None, // 未知伪类越界（含 nth-of-type 等）
             }
             b += 1; // 伪类算 class 级
-            rest = next;
         } else if let Some(r) = rest.strip_prefix('[') {
             // 属性选择器：[attr] / [attr="val"] / [attr=val]。仅 Eq + Exists；高阶运算符
             // (^= ~= $= *= |=) 不在围栏子集 → 返 None 让 parse_style_block 报错。
@@ -192,6 +253,48 @@ fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
         }
     }
     Some((c, a, b, cc))
+}
+
+/// 解析 `:nth-child(...)` 参数 → (a, b)（spec §8.5）。
+///
+/// 语法：`odd`=`2n+1`、`even`=`2n`、纯整数 `N`=`0n+N`、`An+B`。
+/// An+B 按正则 `^(\d*)n\s*([+-]\s*\d+)?$` 手搓解析（零正则依赖）：
+/// A 缺省（`n`）= 1，B 缺省 = 0，B 必须带符号（`2n1` 非法）。
+/// 参数大小写不敏感（CSS 关键字 ASCII 大小写不敏感）。
+fn parse_nth_arg(arg: &str) -> Option<(i32, i32)> {
+    let t = arg.trim();
+    if t.eq_ignore_ascii_case("odd") {
+        return Some((2, 1));
+    }
+    if t.eq_ignore_ascii_case("even") {
+        return Some((2, 0));
+    }
+    // 纯整数 N（可带符号，如 `-3`/`+3` 合法但恒不命中，index ≥ 1）
+    if let Ok(n) = t.parse::<i32>() {
+        return Some((0, n));
+    }
+    // An+B：先找 `n`，其前为 A（缺省 = 1），其后为带符号 B
+    let lower = t.to_ascii_lowercase();
+    let n_pos = lower.find('n')?;
+    let a_part = lower[..n_pos].trim();
+    let a: i32 = if a_part.is_empty() {
+        1
+    } else {
+        a_part.parse().ok()?
+    };
+    let b_rest = lower[n_pos + 1..].trim();
+    let b: i32 = if b_rest.is_empty() {
+        0
+    } else {
+        // B 必须带符号（如 `2n1` 非法）：± 前缀 + 数字，缺符号或空数字 → 整体拒绝
+        let signed = b_rest
+            .strip_prefix('+')
+            .or_else(|| b_rest.strip_prefix('-'))
+            .filter(|d| !d.trim().is_empty())?;
+        let sign = if b_rest.starts_with('-') { -1 } else { 1 };
+        sign * signed.trim().parse::<i32>().ok()?
+    };
+    Some((a, b))
 }
 
 /// 取一个标识符（字母/数字/`-`/`_`），返回 (标识符, 剩余)。
@@ -634,14 +737,14 @@ mod tests {
     #[test]
     fn out_of_subset_returns_none() {
         // 属性选择器现已支持（[attr]/[attr="val"]）；逗号在 parse_style_block 预切分，
-        // parse_selector 自身仍拒；> + ~ 组合子、nth-child 仍越界。
+        // parse_selector 自身仍拒；> + ~ 组合子仍越界（`+` 在 :nth-child 括号内合法）。
         assert!(parse_selector(r#"[type="text"]"#).is_some());
         assert!(parse_selector(".a, .b").is_none());
         assert!(parse_selector(".a > .b").is_none()); // Child 组合子本轮不做（仅后代空格）
         assert!(parse_selector(".a + .b").is_none());
-        assert!(parse_selector(":nth-child(2)").is_none());
-        // 属性选择器越界形态须显式拒（防静默降级：否则坏 selector 会被默默吞，
-        // 用户 CSS 静默失效）。仅支持 = / 裸 [attr]；修饰符操作符 / 空名 / 缺 ] 均拒。
+        assert!(parse_selector(":nth-of-type(2)").is_none()); // 其他 nth-* 不在子集
+                                                              // 属性选择器越界形态须显式拒（防静默降级：否则坏 selector 会被默默吞，
+                                                              // 用户 CSS 静默失效）。仅支持 = / 裸 [attr]；修饰符操作符 / 空名 / 缺 ] 均拒。
         assert!(parse_selector("[a^=b]").is_none()); // 修饰符操作符 ^= 越界
         assert!(parse_selector("[a~=b]").is_none()); // 修饰符操作符 ~= 越界
         assert!(parse_selector("[=x]").is_none()); // 空名（Eq 形）

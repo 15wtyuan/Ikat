@@ -29,6 +29,14 @@ pub struct ParsedSelector {
     pub specificity: Specificity,
 }
 
+/// `:nth-child(An+B)` 表达式参数：`odd`=`(2,1)`、`even`=`(2,0)`、纯整数 N=`(0,N)`、
+/// `An+B`=`(A,B)`。`a == 0` 时仅匹配第 `b` 个子节点（纯整数形态）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NthChildExpr {
+    pub a: i32,
+    pub b: i32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Compound {
     pub tag: Option<String>,
@@ -39,6 +47,9 @@ pub struct Compound {
     pub pseudo_active: bool,
     pub pseudo_disabled: bool,
     pub pseudo_focus: bool,
+    /// `:nth-child(...)` 参数（None = 未声明）。结构伪类：匹配依赖节点在父
+    /// `children` 的位置（1-based index），见 `nth_child_matches`。
+    pub pseudo_nth_child: Option<NthChildExpr>,
     /// 属性选择器（`[attr]` / `[attr="val"]`）。出现属性选择器即把规则划入动态规则表
     /// （运行时按节点 attrs 匹配，静态 cascade 无法预判），由 compound_matches_node 匹配。
     pub attrs: Vec<AttrSelector>,
@@ -319,7 +330,38 @@ pub fn compound_matches_node(c: &Compound, node_id: NodeId, scene: &Scene) -> bo
             return false;
         }
     }
+    // :nth-child 结构匹配：节点在父 children 的 1-based index（spec §8.5）。
+    if let Some(expr) = &c.pseudo_nth_child {
+        if !nth_child_matches(scene, node_id, expr) {
+            return false;
+        }
+    }
     true
+}
+
+/// `:nth-child(An+B)` 匹配（spec §8.5）：节点在父 `children` 的 1-based index `i`，
+/// `a == 0` 时 `i == b`；否则 `(i - b) % a == 0 && (i - b) / a >= 0`。
+/// 根节点（无父）不匹配任何 :nth-child。
+fn nth_child_matches(scene: &Scene, node_id: NodeId, expr: &NthChildExpr) -> bool {
+    let parent = match scene.get(node_id).and_then(|n| n.parent) {
+        Some(p) => p,
+        None => return false,
+    };
+    let i = match scene
+        .get(parent)
+        .and_then(|p| p.children.iter().position(|&c| c == node_id))
+    {
+        Some(pos) => pos as i32 + 1, // 0-based → 1-based
+        None => return false,
+    };
+    let a = expr.a;
+    let b = expr.b;
+    if a == 0 {
+        i == b
+    } else {
+        let d = i - b;
+        d % a == 0 && d / a >= 0
+    }
 }
 
 /// 运行时属性选择器匹配。Node 不存任意 HTML 属性字面值，按 name 分派到三类来源：
@@ -452,7 +494,7 @@ fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
 /// 判定 compound 是否匹配 node + 状态门。
 ///
 /// 状态门：伪类（hovered / active / disabled / focused）。
-/// 通过后调 compound_matches_node 做字面匹配（tag/classes/id_attr）。
+/// 通过后调 compound_matches_node 做字面匹配（tag/classes/id_attr + :nth-child 结构位置）。
 fn compound_matches_with_state(c: &Compound, node_id: NodeId, scene: &Scene) -> bool {
     // 伪类状态门
     let node = scene.get(node_id).expect("live node");
@@ -937,6 +979,7 @@ mod tests {
                 pseudo_active: false,
                 pseudo_disabled: false,
                 pseudo_focus: false,
+                pseudo_nth_child: None,
                 attrs: Vec::new(),
             };
             let mut rest = part;

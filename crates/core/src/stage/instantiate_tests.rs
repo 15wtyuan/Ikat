@@ -337,6 +337,7 @@ fn single_selector(raw: &str) -> ParsedSelector {
         pseudo_active: false,
         pseudo_disabled: false,
         pseudo_focus: false,
+        pseudo_nth_child: None,
         attrs: Vec::new(),
     };
     let mut rest = raw;

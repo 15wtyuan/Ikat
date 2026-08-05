@@ -1,4 +1,5 @@
-//! 包格式（.pkg.bin，当前 version=30）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=31）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! v31：Compound 加 pseudo_nth_child 字段（:nth-child selector，bincode 布局变）。
 //! v30：ComponentTemplate 加 keyframes 表（@keyframes runtime 地基）+ ResolvedStyle 加 animation。
 //! v29：TemplateNode 加 aria_controls 列（TabList tab→panel 跨树关联的 panel id）。
 //! v28：TemplateNode 加 role/data-slot 列（role-driven controls 地基）。
@@ -32,9 +33,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 30; // v30: ComponentTemplate.keyframes + ResolvedStyle.animation
-pub(crate) const MIN_VERSION: u32 = 30;
-pub(crate) const MAX_VERSION: u32 = 30;
+pub const PKG_FORMAT_VERSION: u32 = 31; // v31: Compound.pseudo_nth_child (:nth-child selector)
+pub(crate) const MIN_VERSION: u32 = 31;
+pub(crate) const MAX_VERSION: u32 = 31;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────

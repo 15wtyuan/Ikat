@@ -765,8 +765,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 30,
-        "pkg format version must be 30 after keyframes bump (v29 aria_controls feature persists)"
+        PKG_FORMAT_VERSION, 31,
+        "pkg format version must be 31 after nth-child bump (v29 aria_controls feature persists)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -829,8 +829,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 30,
-        "pkg format version must be 30 after keyframes bump"
+        PKG_FORMAT_VERSION, 31,
+        "pkg format version must be 31 after nth-child bump"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -908,17 +908,17 @@ fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     );
 }
 
-/// v30: version=29 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=30，无迁移器）。
-/// ComponentTemplate 加 keyframes 段 + ResolvedStyle 加 animation 字段改变布局，旧 v29
-/// fixture 不能半读半坏。
+/// v31: version=30 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=31，无迁移器）。
+/// Compound 加 pseudo_nth_child 字段改变 dynamic_rules bincode blob 布局，旧 v30 fixture
+/// 不能半读半坏。
 #[test]
-fn pkg_v30_rejects_v29() {
+fn pkg_v31_rejects_v30() {
     let mut bad = vec![];
     bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
-    bad.extend_from_slice(&29u32.to_le_bytes()); // v29 < MIN_VERSION=30
+    bad.extend_from_slice(&30u32.to_le_bytes()); // v30 < MIN_VERSION=31
     let err = read_package(&bad);
     assert!(
-        matches!(err, Err(PkgError::TooOld(29))),
-        "v29 pkg must be rejected as TooOld after v30 bump, got {err:?}"
+        matches!(err, Err(PkgError::TooOld(30))),
+        "v30 pkg must be rejected as TooOld after v31 bump, got {err:?}"
     );
 }
