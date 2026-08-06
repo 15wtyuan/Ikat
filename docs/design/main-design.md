@@ -689,7 +689,7 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
 ### 15.4 渲染对象镜像生命周期
 
 - Rust 核心拥有场景图 + 渲染状态（真相源）；后端拥有渲染对象镜像（派生缓存）。
-- 每帧脏增量同步：全标 stale → 遍历 render_nodes 按复用键查池 → 命中清 stale 并按 change_level 更新 → 仍 stale 的销毁。
+- 每帧脏增量同步（三态）：全标 stale → 遍历 blob 节点 → **active** 命中清 stale 并按 change_level 更新；**parked**（虚拟列表离场 slot，`visible` 字节 bit1）清 stale 但 `SetActive(false)` 留 GO、不渲染（持久池，fgui dormant 模式）；仍 stale 的（**gone**）销毁。parked keepalive 条目由 build_blob 追加（render 管线不动）。
 - 无 double-free/use-after-free：Rust 只持整数 id。
 
 ### 15.5 原生库分发

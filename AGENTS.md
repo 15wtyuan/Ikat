@@ -106,8 +106,8 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 - ~~**`<div>` 永远是 flex 容器**~~（**P1 C2 已消除**）：`display:block` 和裸 block 默认标签现在都设 `taffy_style.display = taffy::Display::Block`（真 CSS 块流，垂直堆叠且忽略子 flex-grow），不再走 flex-column 伪 block。显式 `display:flex`/`display:none` 仍覆盖。（历史上 block 默认标签含 div/header/nav/p/ul/ol/li/option；控件 role 化重构后多数下线，当前围栏里 `div` 是唯一 block 默认 runtime 标签。）两处赋值：`crates/fence/src/css_resolve.rs` 铺默认、`crates/core/src/style/mapping.rs` 应用显式声明。
 - **`NodeKind` enum + 代际 NodeId**：`NodeId(pub u32)` 对外透明句柄。19 变体（控件 role 化重构后）+ C# 类型化投影层（Node/Container/Button/...）已落地，但 Rust 侧 NodeKind/NodeId 仍在核心所有热路径中活跃。→ 类型化用户表面已兑现；内部表示重构在复合束推进时逐段迁移。
-- **`FindNodeById` 全局首匹配**：C# `Get<T>("id")` 已存在但底层仍调全局 `find_node_by_id` + subtree check。完整 `IsScopeRoot` 边界未实现（Nodes.cs:190 gap）。→ 复合束加完整作用域查找 FFI 时替换。
-- **虚拟列表 = 层 B'（核心不认识"列表"）**：driver 管 slot 映射/可见区间/不等高补偿。reuse_key 是场景级全局命名空间。→ 复合束 ListView 吸收。
+- **`Get<T>("id")` 子树查找（L1 已落，L3 defer）**：`find_node_by_id_in_subtree`（self-exclusive DFS，从 root 直接子起，root 自身不匹配）已替换全局首匹配，修虚拟列表 slot 内部 id 命中。但完整 `IsScopeRoot` 边界（嵌套组件/list item 不穿透）仍 defer（复合束 L3，roadmap §4）；`component.Get` 仍会穿透进 list item——driver 用 `slot.Get`/`slot.Query`。
+- **虚拟列表 slot 模型（parked-but-attached，已落）**：slot 永驻 ul 子树，离场 `display:none` 标记（parked，不 detach 到 free 池）；reuse_key 永久 ordinal；MirrorPool parked keepalive 持久 GO 池（仅 gone 才销毁）。坑 182 已解。driver 仍管 slot 映射/可见区间/不等高补偿（核心仍不完整“认识列表”，完整吸收留复合束 ListView）。
 
 ### 围栏
 
@@ -149,6 +149,10 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 **SDD long-running worktree 要防 main 漂移**：反向 merge（`git merge main` 进 feature 分支解冲突），合超集签名，用对方分支的测试当合并验收标准。
 
 **subagent 撞 API 限流被 kill 不回滚代码**：先 `git status` + `cargo build` + `cargo test` 核实代码完整度，别假设白干。
+
+**SDD 模型选型（本 repo 校准）**：`claude-opus-5` 在本 repo 反复撑爆 subagent 输出上限（过度读大文件 list.rs/blob.rs 触发，单次跑 3 次撞墙），改用 `deepseek-v4-pro` 跑多数 implementer + 几乎全部 reviewer——速度快且抓到真问题（notify 漏过滤 / DFS root-inclusive 误用 / FFI 文档漂移 / fence 副本漏 cp）。SDD 默认 deepseek 起步，opus 仅 escalard（撞输出上限就换模型，别硬重试）。
+
+**SDD task 切分别太细（强耦合重构）**：删一个共享字段（如 `ListState.free`）必然牵连所有消费者（plan/execute/notify），“最小 struct only” task 的 bridge 编辑会引入回归（T1 删 free 的 bridge 导致 active slot 乱序，reviewer 抓到）。强耦合重构的 task 边界要么包含被牵连函数，要么预期 bridge 多一轮 fix。
 
 **偶现/时序 bug**光读代码定位不了——加诊断 log 运行时取证，别静态猜根因反复改。
 

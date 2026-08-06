@@ -1404,4 +1404,11 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 
 **设计文档**：`docs/superpowers/specs/2026-08-05-pooled-slot-lifecycle-design.md`；实现 plan：`docs/superpowers/plans/2026-08-05-pooled-slot-lifecycle.md`。
 
+### 坑 183：fence.md 源 vs 随包副本字节漂移（doc_schema_sync 门）
+
+**症状**：改 `docs/design/fence.md` 后 `cargo test -p loomgui_fence --test doc_schema_sync` 红（`shipped_fence_md_matches_source_of_truth` 断言源 ≠ 随包副本）。
+**根因**：fence.md 双份——源 `docs/design/fence.md` + 随包副本 `unity/package/Editor/Resources/LoomGUI/skill/references/fence.md`（Unity 包内 skill AI 参考）。doc_schema_sync 门要求两者字节相等（防随包副本漂到旧围栏世界）。改源忘 cp 到副本即触发。
+**解决**：改源 fence.md 后必 `cp docs/design/fence.md unity/package/Editor/Resources/LoomGUI/skill/references/fence.md`。
+**教训**：fence.md 双份，改任一份必同步另一份 + 跑 `cargo test -p loomgui_fence`（含 doc_schema_sync 字节相等门）。SDD 文档类 task 改 fence.md 后收尾必跑此门兜底（final review 只审 diff 不跑 fence 门，会漏）。
+
 
