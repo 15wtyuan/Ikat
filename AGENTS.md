@@ -2,6 +2,10 @@
 
 本文件为在本仓库工作的 AI 编码代理（Claude Code / Codex 等）提供指引。
 
+## ⚠️ 模型禁令（硬规则，违者罚钱）
+
+**subagent 严禁使用 `netease-codemaker/*` 系列模型**（如 `netease-codemaker/claude-opus-5`、`netease-codemaker/deepseek-v4-pro`、`netease-codemaker/glm-5.2` 等）——这是**公司账号**，乱用要罚钱。dispatch 任何 subagent（Agent 工具的 `model` 参数）必须避开整个 `netease-codemaker/` 前缀，改用直连 provider 的可用模型：`DeepSeek/deepseek-v4-pro`、`DeepSeek/deepseek-v4-flash`、`Zhipu/glm-5.2` 等。撞输出上限就换 provider/换更小模型，**绝不**退回 netease-codemaker。
+
 ## 这是什么
 
 LoomGUI = 跨引擎游戏 UI 框架。标准 HTML/CSS 子集作设计期 DSL，类型化对象树作运行时 API，自绘渲染。核心目的：**AI 驱动的界面拼装**——标准 HTML 作 DSL，让 AI 既能编辑（文本）又能预测渲染结果（AI 对 HTML/CSS 有强先验）。
@@ -150,7 +154,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 **subagent 撞 API 限流被 kill 不回滚代码**：先 `git status` + `cargo build` + `cargo test` 核实代码完整度，别假设白干。
 
-**SDD 模型选型（本 repo 校准）**：`claude-opus-5` 在本 repo 反复撑爆 subagent 输出上限（过度读大文件 list.rs/blob.rs 触发，单次跑 3 次撞墙），改用 `deepseek-v4-pro` 跑多数 implementer + 几乎全部 reviewer——速度快且抓到真问题（notify 漏过滤 / DFS root-inclusive 误用 / FFI 文档漂移 / fence 副本漏 cp）。SDD 默认 deepseek 起步，opus 仅 escalard（撞输出上限就换模型，别硬重试）。
+**SDD 模型选型（本 repo 校准）**：opus 级模型在本 repo 反复撑爆 subagent 输出上限（过度读大文件 list.rs/blob.rs 触发，单次跑 3 次撞墙），改用 deepseek 级跑多数 implementer + 几乎全部 reviewer——速度快且抓到真问题（notify 漏过滤 / DFS root-inclusive 误用 / FFI 文档漂移 / fence 副本漏 cp）。SDD 默认 `DeepSeek/deepseek-v4-pro`（直连；**禁用 netease-codemaker 系列**，见顶部模型禁令）起步，opus 级仅 escalard（撞输出上限就换模型，别硬重试）。
 
 **SDD task 切分别太细（强耦合重构）**：删一个共享字段（如 `ListState.free`）必然牵连所有消费者（plan/execute/notify），“最小 struct only” task 的 bridge 编辑会引入回归（T1 删 free 的 bridge 导致 active slot 乱序，reviewer 抓到）。强耦合重构的 task 边界要么包含被牵连函数，要么预期 bridge 多一轮 fix。
 
