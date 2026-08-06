@@ -170,7 +170,8 @@ impl Stage {
         self.scene.as_ref().and_then(|s| s.find_by_id_attr(id))
     }
 
-    /// 在 root 子树内 DFS 查找 id 属性匹配的首个节点（root inclusive）。
+    /// 在 root 子树内 DFS 查找 id 属性匹配的首个节点（self-exclusive：从 root 的直接子开始，
+    /// root 自身 id_attr 不参与匹配，与 DOM querySelectorAll/Query<T> 一致）。
     /// 供 FFI find_node_by_id_in_subtree：组件/slot 内部作用域 id 查找。
     pub fn find_node_by_id_in_subtree(&self, root: NodeId, id: &str) -> Option<NodeId> {
         self.scene
