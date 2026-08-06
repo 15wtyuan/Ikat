@@ -171,7 +171,7 @@ namespace LoomGUI.Bindings
         internal static extern uint loomgui_stage_find_node_by_id(StageHandle* h, byte* id, nuint id_len);
 
         /// <summary>
-        ///  在 root 子树内 DFS 查找 id 属性匹配的首个节点（root inclusive）。
+        ///  在 root 子树内 DFS 查找 id 属性匹配的首个节点（self-exclusive：从 root 的直接子开始 DFS，root 自身 id_attr 不参与匹配，与 DOM querySelectorAll/Query&lt;T&gt; 一致）。
         ///  root、id = UTF-8 字节（指针+len）。返 node_id；null 句柄/非 UTF-8/无匹配 → 0xFFFF_FFFF（sentinel）。
         ///  替代"全局首匹配 + 父链后过滤"——C# TryGet/Get 用此入口避免 list slot 间 id 碰撞。
         ///

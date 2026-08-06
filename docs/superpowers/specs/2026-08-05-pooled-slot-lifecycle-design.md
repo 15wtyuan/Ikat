@@ -403,7 +403,7 @@ L1 是**纯子树 DFS，不识别 scope 边界**。两个残留 L3 才彻底解�
 | 测点 | 性质 |
 |---|---|
 | **parked keepalive → SetActive(false) 留 GO** | park 后 GO active=false、pool 不缩 |
-| **reactivate → SetActive(true) + mesh Full 重传** | park→active 帧 mesh 重上传 |
+| **reactivate → SetActive(true)；内容变→Full mesh 重传，内容不变→Skip（GO 保留 mesh，见 §4.3）** | park→active 帧；仅内容变时 mesh 重上传 |
 | **lazy：parked 无现有 GO 不预建** | 初始 batch 全 parked 时 GO 数=0 |
 | **稳态滚动零 churn** | active/parked 集合稳定帧，NewRenderObj/TearDown 计数=0（坑 182 单元级验收） |
 | **DumpState active 列** | F8 诊断输出含 active 标志 |
