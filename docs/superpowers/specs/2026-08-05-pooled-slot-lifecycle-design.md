@@ -291,7 +291,7 @@ parked keepalive 若 `_poolByReuse` 里没对应 GO → **不创建**，直接 `
 
 slot 从 parked 翻 active 那帧：
 - **MirrorPool 侧**：active 分支找到现有休眠 GO → `SetActive(true)` + 走 UpdateHeader（位置可能变了）+ UploadMesh（若 Full）。
-- **core 侧契约**：**parked→active 转换帧，change_level 必须 = Full**。保证机制：parked keepalive 条目 mesh_off=0/len=0（无 mesh），reactivate 帧 active 条目带真 mesh → mesh payload hash 必变 → build_blob 自然算出 Full。**实现 plan 加断言**：reactivate 帧 change_level ≠ Full 即 panic（防 regression）。
+- **core 侧契约**：reactivate 时 MirrorPool 将 GO `SetActive(true)` + 走 UpdateHeader；Mesh 重上传仅当内容变化时（change_level=Full）。parked keepalive 条目不参与 `prev_node_hashes`（mesh_off=0/len=0），因此 reactivate 且内容未变时 change_level 可能保持 Skip——这是**正确的**（GO 在休眠期间保留了其 Mesh，无需重传）。内容变化时（Binding 换 item_index 触发内容重写→hash 变）会自然得 Full。**不强制 panic/断言**——Skip reactivate 是 benign 且正确的（GO 保留 mesh，就是 parked keepalive 的设计目的）。
 - GO 的 Mesh/4×List buffer 在休眠期间原样保留，reactivate 后 UploadMesh 走 Clear+fill 复用（零新 alloc）。
 
 ### 4.4 不变的部分
@@ -320,13 +320,14 @@ slot 从 parked 翻 active 那帧：
 
 **问题**：`TryGet<T>`（`Nodes.cs:210`）调全局 `find_node_by_id`（scene.nodes 首匹配）→ 可能命中别的 slot 的同名 id → `IsInSubtree` 后过滤失败 → 抛 "not found"。blessed 的 `Query<T>()`（子树 DFS）没这问题，但 `Get<T>("id")` 有。
 
-**修法**：加子树起点查找 FFI，DFS 只搜 root 子树：
+**修法**：加子树起点查找 FFI，**self-exclusive** DFS：从 root 的直接子开始遍历，root 自身的 `id_attr` 不参与匹配（与 DOM `querySelectorAll` / `Query<T>` 惯例一致）。caller 在 slot 上调 `Get<T>` 时 root=slot 自身 → 只搜 slot 内部，不匹配 slot 根。
 
 ```rust
 // crates/core/src/stage/ 或 scene/ — 新增
 pub fn find_node_by_id_in_subtree(scene: &Scene, root: NodeId, id: &str) -> Option<NodeId> {
-    // DFS from root through children；命中 root 自身或任一后代的 id_attr 即返
+    // DFS from root's direct children（self-exclusive）；root 自身的 id_attr 不参与匹配
     // 纯结构遍历，不判 display:none（slot.Get 时不管目标 display 状态）
+    // 行为对齐 DOM querySelectorAll / Query<T> 惯例（子树从 root 子开始）
 }
 ```
 
@@ -393,9 +394,9 @@ L1 是**纯子树 DFS，不识别 scope 边界**。两个残留 L3 才彻底解�
 
 | 测点 | 层 |
 |---|---|
-| `find_node_by_id_in_subtree` 命中 root 自身/后代/外子树返 None | core 单测 |
+| `find_node_by_id_in_subtree` 命中 root 的后代 / 外子树返 None（self-exclusive：root 自身不匹配） | core 单测 |
 | N slot 同名内部 id，`slot[i].Get<T>("id")` 各命中本 slot | headless（Spec-4a harness） |
-| reactivate 帧 change_level=Full 断言（§4.3 契约） | core（防 regression） |
+| reactivate 后 Mesh 正确（内容变→Full，内容不变→Skip 且 GO 保留 mesh） | core（§4.3） |
 
 ### 6.4 Unity MirrorPool 测（`MirrorPoolTests.cs`，Unity EditMode，编码机）
 

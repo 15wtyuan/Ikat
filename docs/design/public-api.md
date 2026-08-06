@@ -116,6 +116,8 @@ public abstract class Node {
 
 **不变量**：
 - `Get<T>`/`Query` 在当前作用域内查找，不穿透嵌套作用域根（Panel/List item 边界）。
+  - **L1 已知残留**：`Get<T>("id")` 在列表 slot 上调用时，搜索该 slot 子树（L1 self-exclusive 子树 DFS），正确命中 slot 内部 id。但 `component.Get<T>("id")` 会穿透进所有 list item（含 parked）返回首个匹配——这是 L1 纯子树 DFS 不识别 IsScopeRoot 边界所致，留 L3（roadmap §4 复合束）完整隔离。driver 代码应用 `slot.Get`/`slot.Query`，不在组件级 Get slot 内部 id。
+  - **虚拟化 `<ul>` 禁止 `:nth-child`**：parked slot 留挂 ul 子树按 CSS 仍计 child count → `:nth-child` 序数不可控。用 item-index / `data-*` 属性替代。
 - `Query<T>()` / `Query(selector)` 返回**文档序且稳定**（前序遍历）——逻辑层按序聚合（如自建 RadioGroup）依赖此。
 - 已销毁节点上的操作抛 `ObjectDisposedException`。
 - `OnUpdate`/`On<T>` 订阅随 `Dispose` 自动清理；`RemoveFromParent` 不清理。

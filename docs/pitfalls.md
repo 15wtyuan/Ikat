@@ -1388,11 +1388,20 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：dump 验 slot 是否渲染要数其**文本/图叶子**（TextElement/TextNode/Image）的 node_id，不数容器根。
 **教训**：render node 以叶子为主；诊断 slot 可见性看叶子 id 是否在 frame.nodes，别看容器根（容器不出是正常的）。
 
-### 坑 182：M1 虚拟列表 slot GO churn（mail 滚动消失+卡顿）未解（坑 109 的新形态）
+### 坑 182：M1 虚拟列表 slot GO churn（mail 滚动消失+卡顿）—— **已解决** ✅
 
-**症状**：mail（单列、可变高度文本）滚动时上面 item 逐个消失 + 明显卡顿；inventory（固定高度图标网格，A1 后）不消失。MirrorPool churn log 见 created/tornDown 2-7 GO/帧。core 列表状态全验正确（dump：slot 数/可见区/spacer/裁剪都对）。
-**根因**：① core 的 `reuse_key` 只挂 slot 根（ListItem 容器），**不到渲染叶子**（叶子 reuse_key=0）→ MirrorPool 按 node_id 池化（非 reuse_key）；② slot 回收走 **detach/free 池模型**（remove_child → parent=None → 下帧 reuse），free 池期间 slot **不在 render 输出** → MirrorPool 销毁 GO，reuse 时重建 = churn。mail 文本 mesh 重建慢 → 1 帧 gap 可见（消失）；inventory 图标 mesh 快 → 不可见。与坑 109 同质（reuse_key 复用失效），但 M1 重写后是新形态。
-**解决（未果）**：parking（slot 离场移到离屏 0 尺寸 overflow:hidden 根，而非 parent=None）实测无效——同帧 park+unpark 但 churn 依旧，已回退。
-**教训**：churn 是 detach/free 池模型的固有副作用；正解是**持久 slot 池**（slot 永不离树，滚动换绑 item_index + spacer 重定位，node_id 恒定 → MirrorPool 复用 GO）。跨层 GO 生命周期 bug 光 core dump 定不了，需 Unity Profiler。详见 roadmap tech-debt。
+**症状**：mail（单列、可变高度文本）滚动时上面 item 逐个消失 + 明显卡顿；inventory（固定高度图标网格，A1 后）不消失。MirrorPool churn log 见 created/tornDown 2-7 GO/帧。
+
+**根因**：① core 的 `reuse_key` 只挂 slot 根（ListItem 容器），**不到渲染叶子**（叶子 reuse_key=0）→ MirrorPool 按 node_id 池化（非 reuse_key）；② slot 回收走 **detach/free 池模型**（remove_child → parent=None → 下帧 reuse），free 池期间 slot **不在 render 输出** → MirrorPool 销毁 GO，reuse 时重建 = churn；③ `reuse_key` 用 `slots.len()` 作 slot_idx，回收/重插时位置变 → key 旋转；④ Unity MirrorPool stale=destroy：游离/失配 GO 被销毁，下次 reuse 重建。
+
+**解决**：pooled-slot-lifecycle 重构（`pool-slot-lifecycle` 分支）：
+- **parked-but-attached**：slot 永驻 ul 子树，离场设 `display:none`（不 detach）→ node_id/parent 永不变。
+- **reuse_key 永久 ordinal**：slot 创建时分配 slots vec index，跨帧跨滚动不旋转。
+- **Unity MirrorPool 持久 GO 池**：parked GO `SetActive(false)` 保留，永不 destroy（只有 gone 才 TearDown）；reactivate 时唤醒 + UpdateHeader/UploadMesh。
+- **L1 subtree find**：`find_node_by_id_in_subtree` 替代全局首匹配，`Get<T>("id")` 在 slot 内正确命中本 slot。
+
+**验收**：稳态滚动零 GO create/destroy（Profiler 证），mail item 不消失、不卡顿。
+
+**设计文档**：`docs/superpowers/specs/2026-08-05-pooled-slot-lifecycle-design.md`；实现 plan：`docs/superpowers/plans/2026-08-05-pooled-slot-lifecycle.md`。
 
 

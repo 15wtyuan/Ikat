@@ -223,6 +223,8 @@ CSS 在围栏中以三个正交维度建模：
 
 **:nth-child(An+B|odd|even|N) 选择器**——参数化伪类，`<style>` 规则选择器接受。括号内 An+B 语法（`2n+1`/`2n`/`odd`/`even`/`<N>`）解析为 `NthChildExpr{a,b}`，命中条件 = 子序号 i 满足 `i = a*k + b`（1-based）。常配合 `animation-delay` 实现错峰入场（同一规则按子序号算 delay，如 `.nav-card:nth-child(N){animation-delay:...}`）。语法越界（无括号/缺 `)`/坏参数）→ 选择器不匹配；组合子 `>` `+` `~` 仍越界（注意 `+`/`-` 在 `:nth-child(...)` 括号内是 An+B 合法语法，不判为组合子）。
 
+> **⚠️ 虚拟化列表禁止 `:nth-child`**：虚拟化 `<ul>`（`role=list`）的 parked slot 留挂 ul 子树（`display:none`），按 CSS 仍计入 child count。`:nth-child` 的序数包含 parked slot → item 序号不可控。用 item-index / `data-*` 属性 + 属性选择器替代（如 `[data-index="0"]`）。详见 pool-slot-lifecycle design §2.9、§5.4。
+
 **溢出**
 
 `overflow-x`, `overflow-y`

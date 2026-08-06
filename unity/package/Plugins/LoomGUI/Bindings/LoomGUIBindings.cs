@@ -182,7 +182,7 @@ namespace LoomGUI.Bindings
 
         /// <summary>
         ///  构造最小测试包（headless test fixture helper）。
-        ///  组件名=comp_spec UTF-8 前缀（取 comp_len 长度），含单 Container 节点 id="badge"。
+        ///  组件名=comp_spec UTF-8 前缀（取 comp_len 长度），含两个 Container 节点：根容器 + 子容器 id="badge"（2-node，配合 self-exclusive 子树查找）。
         ///  返 pkg bytes 指针+长度；失败返 null（空字符串/格式错）。
         ///  调用方用完后调 loomgui_bytes_free 释放。
         ///
