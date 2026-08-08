@@ -1412,3 +1412,13 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **教训**：fence.md 双份，改任一份必同步另一份 + 跑 `cargo test -p loomgui_fence`（含 doc_schema_sync 字节相等门）。SDD 文档类 task 改 fence.md 后收尾必跑此门兜底（final review 只审 diff 不跑 fence 门，会漏）。
 
 
+
+### 坑 184：parked keepalive 只保 slot 根，子树渲染 GO（文本 mesh）仍 churn
+
+**症状**：坑 182「已解决」后 mail 滚动 item **仍**逐个消失 + 掉帧。core 单测全绿、MirrorPool parked 分支正确，但 PlayMode 症状未除。
+
+**根因**：pooled-slot 设计（§3.1/§4.3）只指定了 **slot 根 GO** 保留——build_blob 的 keepalive 循环只遍历 `ls.slots`（根），每个 parked slot 发 **1 条**条目。但 slot 子树叶子（mail-from/mail-sub 文本 mesh）`reuse_key=0`，在 MirrorPool 里按 `node_id` 进 `_poolByNodeId`。park 时 `collect_display_none_subtree` 剪**整子树** → 叶子从 blob active 段消失、又不在 keepalive → 标 stale → **销毁**；reactivate 时重建 GO + 重传文本 mesh。每帧滚动 park/reactivate 周期都 churn = item 闪没 + 掉帧。典型的「跨层缺口 per-task review 必漏」（AGENTS.md）：core / blob / MirrorPool 各层单测全绿，但 end-to-end（blob keepalive 段 ↔ MirrorPool 子树 GO 保留）的契约漏了子树。
+
+**解决**：keepalive 扩到整子树——`Scene::parked_keepalive_nodes` 走每个 parked slot 子树返 `(node_id, reuse_key)` 超集（根 + 非自身 display:none、非纯空白文本的后代）；build_blob 据此发条目；MirrorPool parked 分支对 `reuse_key=0` 的 keepalive 回退按 `node_id` 在 `_poolByNodeId` 清 stale + `SetActive(false)`。整子树 GO 全保留，稳态滚动零 churn。多发条目无害（后端 lookup miss 即 no-op），漏发才 churn。
+
+**教训**：池化 keepalive 的「保留粒度」必须对齐 MirrorPool 的 GO 持有粒度——MirrorPool 是**扁平**模型（每个渲染叶子独立 GO，按 node_id/reuse_key 池化），keepalive 只保逻辑 slot 根保不住叶子 GO。设计 keepalive 时要问「park 时哪些 GO 会从 blob 消失」= 整个被剪子树，keepalive 必须全覆盖。坑 182 的「已解决」标记需 PlayMode + Profiler 实测 churn=0 才算数（编码机单测验不了这层集成）。

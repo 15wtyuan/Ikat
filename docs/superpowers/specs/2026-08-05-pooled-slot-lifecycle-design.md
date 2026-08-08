@@ -193,6 +193,8 @@ build_blob 产**两类**条目，node_count 含两者：
 | **active**（正常） | render_nodes（现有管线） | 全字段：mesh/header/transform/... | 正常渲染 |
 | **parked keepalive**（新增） | `scene.lists` 遍历 `slot.parked==true` | 极简：`node_id` + `reuse_key` + parked bit；mesh_off=0/len=0；其余零 | 找 reuse_key 对应 GO → `SetActive(false)`、清 stale、跳过 header/mesh 上传 |
 
+> **实现修订（坑 184）**：keepalive 的保留粒度必须对齐 MirrorPool 的 GO 持有粒度。MirrorPool 是扁平模型——slot 子树叶子（文本 mesh 等）`reuse_key=0`，按 `node_id` 独立池化，不是挂在 slot 根 GO 下。所以 keepalive 只发 slot 根保不住叶子：park 剪整子树后叶子从 blob 消失 → stale → 销毁 → reactivate 重建 → 滚动 churn。**实现把 keepalive 扩到整子树**：`Scene::parked_keepalive_nodes` 走每个 parked slot 子树返 `(node_id, reuse_key)` 超集（根 + 非自身 display:none、非纯空白文本的后代），build_blob 据此发条目，MirrorPool parked 分支对 `reuse_key=0` 的条目回退按 `node_id` 在 `_poolByNodeId` 清 stale。上表「来源」列实为「每个 parked slot 的整子树」，非仅根。
+
 build_blob 在现有 render_nodes 循环后**追加一段 parked keepalive 循环**（~10 行），遍历各 list 的 parked slot，读 `node.reuse_key`（create 时 set 的稳定值），push 极简条目。render 管线**完全不动**（display:none 照常剪 parked slot 的 mesh）。
 
 职责分离：layout=display:none（taffy 跳）；render=剪 mesh（正确）；blob=keepalive 让 MirrorPool 留 GO；pooling 决策在 core（约束 d）。
