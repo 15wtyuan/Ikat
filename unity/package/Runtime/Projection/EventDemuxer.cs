@@ -189,7 +189,7 @@ namespace LoomGUI
                                 {
                                     _core = NewCore(nodeId),
                                     _animationName = name,
-                                    _iterationCount = unchecked((int)BitConverter.SingleToUInt32Bits(evt.y)),
+                                    _iterationCount = unchecked((int)FloatBitsToUInt(evt.y)),
                                 });
                         }
                         break;
@@ -299,6 +299,13 @@ namespace LoomGUI
             return new RouteEventCore { Target = target };
         }
 
+        /// <summary>
+        /// float bit-pattern → uint：替代 <c>BitConverter.SingleToUInt32Bits</c>
+        /// （该 API 自 .NET Core 2.0 才有，Unity Mono 运行时无——headless net10.0 测试
+        /// 能编过但 Unity 报 CS0117）。类已 unsafe，指针重解释零分配、保留逐 bit 语义。
+        /// </summary>
+        static uint FloatBitsToUInt(float v) => *(uint*)&v;
+
         // ── M2 动画事件 payload 解码（T9 event.rs 编码的逆）────────────────
 
         /// <summary>
@@ -307,7 +314,7 @@ namespace LoomGUI
         /// <c>KeyData::as_ffi</c>：<c>(version &lt;&lt; 32) | idx</c>）互逆。
         /// </summary>
         static ulong PlayerKeyOf(RawEventRecord evt) =>
-            ((ulong)(uint)evt.touchId) | ((ulong)BitConverter.SingleToUInt32Bits(evt.x) << 32);
+            ((ulong)(uint)evt.touchId) | ((ulong)FloatBitsToUInt(evt.x) << 32);
 
         /// <summary>
         /// 解码动画名表索引（24-bit 小端：click_count @5 | pad[0]&lt;&lt;8 | pad[1]&lt;&lt;16；
@@ -316,7 +323,7 @@ namespace LoomGUI
         static uint NameIndex(RawEventRecord evt) => evt.clickCount | ((uint)evt._pad << 8);
 
         /// <summary>HOOK 载荷：hook_name 的表索引（f32 bits，T9 event.rs）。</summary>
-        static uint HookIndex(RawEventRecord evt) => BitConverter.SingleToUInt32Bits(evt.y);
+        static uint HookIndex(RawEventRecord evt) => FloatBitsToUInt(evt.y);
 
         /// <summary>
         /// 按表索引读回字符串（spec §7.5 EventStrTable；loomgui_stage_get_event_string
