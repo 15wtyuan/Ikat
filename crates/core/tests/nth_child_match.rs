@@ -36,6 +36,14 @@ fn container() -> Node {
     }
 }
 
+/// 匿名文本叶（元素间空白 / 裸文本）。CSS 视为非元素，:nth-child 不应计数。
+fn text_node() -> Node {
+    Node {
+        kind: NodeKind::TextNode,
+        ..Default::default()
+    }
+}
+
 /// root 下挂 3 个 div 子节点。返 (scene, 3 个子 NodeId)。
 fn scene_with_3_children() -> (Scene, Vec<NodeId>) {
     let nodes: Vec<Node> = std::iter::once(container())
@@ -99,4 +107,51 @@ fn nth_child_root_node_never_matches() {
         scene.roots[0],
         &scene
     ));
+}
+
+#[test]
+fn nth_child_counts_only_element_children_ignores_text_nodes() {
+    // CSS 规范：:nth-child 只数元素子，匿名文本叶（TextNode，如元素间空白）不计。
+    // 复现 home.html nav-grid 的真实结构：[text, div, text, div, text, div]——
+    // bug 现状下 div 落在 2/4/6（被文本节点挤偏），:nth-child(1..3) 失配。
+    // 修后 div 应为元素序列的 1/2/3。
+    let nodes: Vec<Node> = std::iter::once(container())
+        .chain([
+            text_node(),
+            container(),
+            text_node(),
+            container(),
+            text_node(),
+            container(),
+        ])
+        .collect();
+    let edges: Vec<(usize, usize)> = [1, 2, 3, 4, 5, 6].iter().map(|i| (0, *i)).collect();
+    let scene = Scene::from_nodes(nodes, edges);
+    let root = scene.get(scene.roots[0]).expect("root");
+    // 三个 Container 在 children[1]/[3]/[5]（被 TextNode 隔开）
+    let divs: Vec<NodeId> = [1usize, 3, 5].iter().map(|i| root.children[*i]).collect();
+
+    // :nth-child(1) → 第一个元素子（children[1] 的 div），不是开头的 TextNode
+    let sel1 = nth_selector(0, 1);
+    assert!(
+        compound_matches_node(&sel1.compound[0], divs[0], &scene),
+        "首个元素子是 :nth-child(1)，文本节点不占位"
+    );
+    assert!(!compound_matches_node(&sel1.compound[0], divs[1], &scene));
+
+    // :nth-child(2) → 第二个元素子（children[3]）
+    let sel2 = nth_selector(0, 2);
+    assert!(compound_matches_node(&sel2.compound[0], divs[1], &scene));
+    assert!(!compound_matches_node(&sel2.compound[0], divs[0], &scene));
+    assert!(!compound_matches_node(&sel2.compound[0], divs[2], &scene));
+
+    // :nth-child(3) → 第三个元素子（children[5]）
+    let sel3 = nth_selector(0, 3);
+    assert!(compound_matches_node(&sel3.compound[0], divs[2], &scene));
+
+    // odd = 2n+1 → 元素子 1/3（不是被文本节点撑成偶数的那些）
+    let odd = nth_selector(2, 1);
+    assert!(compound_matches_node(&odd.compound[0], divs[0], &scene));
+    assert!(!compound_matches_node(&odd.compound[0], divs[1], &scene));
+    assert!(compound_matches_node(&odd.compound[0], divs[2], &scene));
 }

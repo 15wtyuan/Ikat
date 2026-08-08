@@ -347,10 +347,15 @@ fn nth_child_matches(scene: &Scene, node_id: NodeId, expr: &NthChildExpr) -> boo
         Some(p) => p,
         None => return false,
     };
-    let i = match scene
-        .get(parent)
-        .and_then(|p| p.children.iter().position(|&c| c == node_id))
-    {
+    // CSS :nth-child 只数元素子。匿名文本叶（TextNode，如元素间换行/空白）不是元素，
+    // 计入会让后续元素整体偏位、:nth-child(N) 失配（home nav-grid 实例：按钮间空白把
+    // 7 张 card 挤到 2/4/6/8/10/12/14，:nth-child(1..7) 只命中 3 张）。
+    let i = match scene.get(parent).and_then(|p| {
+        p.children
+            .iter()
+            .filter(|&&c| scene.get(c).is_some_and(|n| n.kind != NodeKind::TextNode))
+            .position(|&c| c == node_id)
+    }) {
         Some(pos) => pos as i32 + 1, // 0-based → 1-based
         None => return false,
     };
