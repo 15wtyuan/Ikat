@@ -172,6 +172,25 @@ namespace LoomGUI
         // ── 释放 ──────────────────────────────────────────────────────────────────
 
         /// <summary>
+        /// dump 整树 JSON（调 <see cref="Native.loomgui_stage_dump_scene"/>，UTF-8 marshal）。
+        /// Rust 侧拥有 C 串、下 tick 失效——立即消费。未 instantiate（scene=None）/ 已 Dispose → "[]"。
+        /// dev 调试桥用（unity-cli-loop execute-dynamic-code 经 Showcase.LoomBridge 调），非冻结公共签名。
+        /// </summary>
+        public string DumpSceneJson()
+        {
+            if (_stage == null) return "[]";
+            nuint len = 0;
+            byte* ptr = Native.loomgui_stage_dump_scene(_stage, &len);
+            if (ptr == null || len == 0) return "[]";
+            int n = (int)len;
+            var buf = new byte[n];
+            Marshal.Copy((IntPtr)ptr, buf, 0, n);
+            // FFI out_len 含尾部 NUL（as_bytes_with_nul）——剥掉，避免 JSON 末尾多 \0。
+            if (n > 0 && buf[n - 1] == 0) n--;
+            return Encoding.UTF8.GetString(buf, 0, n);
+        }
+
+        /// <summary>
         /// 释放 Stage 句柄（Rust 侧 drop Stage + 拥有的所有内存：scene/atlas/tween table）。
         /// 引擎资源（MirrorPool GO/MaterialManager 等）归 backend 自管，本方法不递归——
         /// Driver.OnDestroy 调本方法后，backend 资源由 Driver 额外清理（或 backend 自己 Dispose）。
