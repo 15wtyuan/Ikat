@@ -73,6 +73,9 @@ namespace LoomGUI
                 // Must be before visible check AND before level==0 early-out,
                 // because parked entries carry visible=0 and change_level=0.
                 // Lazy: no prior GO → skip, don't create.
+                // 条目可能是 slot 根（reuse_key>0）或其后代（reuse_key=0，按 node_id 池化）
+                // ——两者都要保留：park 剪整子树，若只保根，后代 GO（文本 mesh 等）被 stale
+                // 销毁，reactivate 重建，每帧滚动 churn（item 闪没 + 掉帧）。
                 bool parked = blob.Parked(i);
                 if (parked)
                 {
@@ -81,6 +84,15 @@ namespace LoomGUI
                     {
                         roP.Stale = false;
                         if (roP.Go.activeSelf) roP.Go.SetActive(false);
+                    }
+                    else
+                    {
+                        uint nid = blob.NodeId(i);
+                        if (_poolByNodeId.TryGetValue(nid, out var roC))
+                        {
+                            roC.Stale = false;
+                            if (roC.Go.activeSelf) roC.Go.SetActive(false);
+                        }
                     }
                     continue;
                 }

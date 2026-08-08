@@ -800,6 +800,39 @@ impl Scene {
         }
         None
     }
+
+    /// 每个休眠 list slot 子树里「active 时会成为渲染节点」的超集，供 build_blob 发
+    /// keepalive——后端镜像池据 node_id / reuse_key 保留整子树 GO，不止 slot 根。
+    ///
+    /// 不发的话：slot park 时 display:none 剪掉整子树，子节点（文本 mesh 等）GO 被
+    /// 当 stale 销毁，reactivate 时重建，每帧滚动 churn（item 闪没 + 掉帧）。
+    ///
+    /// 条目集是超集（多发无害）：slot 根 + 所有非自身 display:none、非纯空白文本的后代。
+    /// 被 merge 吃掉 / 无 mesh 的节点后端 lookup miss 即 no-op；漏发才会 churn。slot 根
+    /// 自身的 display:none 是 park override（active 时渲染），照发；其余后代若自身
+    /// display:none（嵌套隐藏）则整子树跳过。
+    pub fn parked_keepalive_nodes(&self) -> Vec<(NodeId, u32)> {
+        let mut out: Vec<(NodeId, u32)> = Vec::new();
+        for ls in self.lists.0.values() {
+            for slot in ls.slots.iter().filter(|s| s.parked) {
+                let mut stack = vec![slot.node];
+                while let Some(nid) = stack.pop() {
+                    let Some(n) = self.get(nid) else {
+                        continue;
+                    };
+                    let nested_hidden = nid != slot.node
+                        && matches!(n.style.taffy_style.display, taffy::style::Display::None);
+                    if !nested_hidden && !is_whitespace_only_text(self, nid) {
+                        out.push((nid, n.reuse_key));
+                    }
+                    if !nested_hidden {
+                        stack.extend(n.children.iter().rev());
+                    }
+                }
+            }
+        }
+        out
+    }
 }
 
 /// 纯空白 TextNode 判定（HTML 元素源码里 tag 之间的换行+缩进）。

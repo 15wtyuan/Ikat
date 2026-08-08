@@ -236,6 +236,69 @@ fn blob_emits_parked_keepalive_entries() {
     }
 }
 
+/// parked slot 的 keepalive 必须覆盖整子树（根 + 后代），不止根。否则 park 剪子树后
+/// 后代 GO（文本 mesh 等）被后端 stale 销毁，reactivate 重建，每帧滚动 churn。
+#[test]
+fn blob_emits_parked_keepalive_for_slot_subtree() {
+    use loomgui_core::list::{ListState, Slot};
+    use loomgui_core::scene::dynamic;
+
+    // 场景：1 个 parked slot，子树含 2 个 div 后代（模拟 mail-item 的 dot + body）。
+    let mut scene = Scene::default();
+    let ul = dynamic::create_root(&mut scene, "div", "").unwrap();
+    let slot = dynamic::create_node(&mut scene, "div", "").unwrap();
+    dynamic::append_child(&mut scene, ul, slot).unwrap();
+    dynamic::set_reuse_key(&mut scene, slot, 0x0001_0000); // 根 reuse_key（永久 ordinal）
+    let dot = dynamic::create_node(&mut scene, "div", "").unwrap();
+    dynamic::append_child(&mut scene, slot, dot).unwrap();
+    let body = dynamic::create_node(&mut scene, "div", "").unwrap();
+    dynamic::append_child(&mut scene, slot, body).unwrap();
+    // 后代不挂 reuse_key（runtime 只挂 slot 根）
+
+    scene.lists.0.insert(
+        ul,
+        ListState {
+            slots: vec![Slot {
+                node: slot,
+                item_index: 0,
+                parked: true,
+            }],
+            ..Default::default()
+        },
+    );
+
+    let blob = super::build_blob(&frame(&[]), &scene); // 无 active render 节点
+    let view = TestView::parse(&blob);
+
+    let mut parked_ids: Vec<u32> = (0..view.node_count() as usize)
+        .filter(|&i| view.parked(i))
+        .map(|i| view.node_id(i))
+        .collect();
+    parked_ids.sort_unstable();
+    let mut want = [slot.0, dot.0, body.0];
+    want.sort_unstable();
+    assert_eq!(
+        parked_ids.len(),
+        3,
+        "keepalive 覆盖整子树（根 + 2 后代），不止根"
+    );
+    assert_eq!(parked_ids, want, "根 + 两后代都发 keepalive");
+
+    // 根带 reuse_key，后代 reuse_key=0（后端按 node_id 保留）
+    for i in 0..view.node_count() as usize {
+        if !view.parked(i) {
+            continue;
+        }
+        let nid = view.node_id(i);
+        let rk = view.reuse_key(i);
+        if nid == slot.0 {
+            assert_eq!(rk, 0x0001_0000, "slot 根带永久 reuse_key");
+        } else {
+            assert_eq!(rk, 0, "后代 reuse_key=0（后端按 node_id 池化）");
+        }
+    }
+}
+
 /// 无 parked slot 时零追加：全 active 的 list 不产 keepalive 条目（node_count 不胀）。
 #[test]
 fn blob_no_keepalive_when_all_slots_active() {

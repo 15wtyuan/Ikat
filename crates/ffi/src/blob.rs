@@ -176,41 +176,40 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
         }
     }
 
-    // parked keepalive 段：每个休眠 slot 追加一条极简条目（21 列都填，值极简）。
-    // visible 字节双用：bit0=要渲染（0），bit1=parked（1）——零列扩展、零 version bump。
-    // reuse_key 是 slot 出生即定的永久 ordinal，后端据它认出同一个镜像对象。
+    // parked keepalive 段：每个休眠 slot 的渲染子树（根 + 后代）都发一条极简条目
+    // （21 列都填，值极简）。visible 字节双用：bit0=要渲染（0），bit1=parked（1）——
+    // 零列扩展、零 version bump。slot 根 reuse_key 是出生即定的永久 ordinal；后代
+    // reuse_key=0（后端按 node_id 保留）。
+    //
+    // 子树全发（非仅根）：slot park 时 display:none 剪整子树，若只保根，后代 GO（文本
+    // mesh 等）被 stale 销毁，reactivate 重建——每帧滚动 churn（item 闪没 + 掉帧）。
+    // 条目集是超集（多发无害，后端 lookup miss 即 no-op）。
     // 注意：scene.lists 是 HashMap，迭代顺序跨帧不保证——keepalive 条目在 blob 中的排列无稳定序。
     let mut parked_count = 0usize;
-    for ls in scene.lists.0.values() {
-        for s in ls.slots.iter().filter(|s| s.parked) {
-            // slot 节点已被删（组件销毁竞态）→ 跳过，不产悬空条目。
-            let Some(node) = scene.get(s.node) else {
-                continue;
-            };
-            col_node_id.extend_from_slice(&s.node.0.to_le_bytes());
-            col_parent_id.extend_from_slice(&(-1i32).to_le_bytes()); // 不参与父子渲染关系
-            col_visible.push(0b10); // bit1=parked，bit0=不可见
-            col_alpha.extend_from_slice(&0f32.to_le_bytes());
-            col_sort_key.extend_from_slice(&0u32.to_le_bytes());
-            col_mask.extend_from_slice(&0u32.to_le_bytes());
-            // 单位矩阵：后端不读 parked 条目的 header，写单位值避免脏值语义。
-            col_ma.extend_from_slice(&1f32.to_le_bytes());
-            col_mb.extend_from_slice(&0f32.to_le_bytes());
-            col_mc.extend_from_slice(&0f32.to_le_bytes());
-            col_md.extend_from_slice(&1f32.to_le_bytes());
-            col_mtx.extend_from_slice(&0f32.to_le_bytes());
-            col_mty.extend_from_slice(&0f32.to_le_bytes());
-            col_kind.push(0); // 无 mesh
-            col_mesh_off.extend_from_slice(&0u32.to_le_bytes());
-            col_mesh_len.extend_from_slice(&0u32.to_le_bytes());
-            col_path_idx.extend_from_slice(&0u32.to_le_bytes());
-            col_program.push(0);
-            col_color_matrix.extend_from_slice(&[0u8; 80]); // [f32;20] 全零
-            col_change_level.push(0); // Skip：无 header/mesh 上传
-            col_reuse_key.extend_from_slice(&node.reuse_key.to_le_bytes());
-            col_effect_block.extend_from_slice(&[0u8; EffectBlock::SIZE]);
-            parked_count += 1;
-        }
+    for (slot_node, reuse_key) in scene.parked_keepalive_nodes() {
+        col_node_id.extend_from_slice(&slot_node.0.to_le_bytes());
+        col_parent_id.extend_from_slice(&(-1i32).to_le_bytes()); // 不参与父子渲染关系
+        col_visible.push(0b10); // bit1=parked，bit0=不可见
+        col_alpha.extend_from_slice(&0f32.to_le_bytes());
+        col_sort_key.extend_from_slice(&0u32.to_le_bytes());
+        col_mask.extend_from_slice(&0u32.to_le_bytes());
+        // 单位矩阵：后端不读 parked 条目的 header，写单位值避免脏值语义。
+        col_ma.extend_from_slice(&1f32.to_le_bytes());
+        col_mb.extend_from_slice(&0f32.to_le_bytes());
+        col_mc.extend_from_slice(&0f32.to_le_bytes());
+        col_md.extend_from_slice(&1f32.to_le_bytes());
+        col_mtx.extend_from_slice(&0f32.to_le_bytes());
+        col_mty.extend_from_slice(&0f32.to_le_bytes());
+        col_kind.push(0); // 无 mesh
+        col_mesh_off.extend_from_slice(&0u32.to_le_bytes());
+        col_mesh_len.extend_from_slice(&0u32.to_le_bytes());
+        col_path_idx.extend_from_slice(&0u32.to_le_bytes());
+        col_program.push(0);
+        col_color_matrix.extend_from_slice(&[0u8; 80]); // [f32;20] 全零
+        col_change_level.push(0); // Skip：无 header/mesh 上传
+        col_reuse_key.extend_from_slice(&reuse_key.to_le_bytes());
+        col_effect_block.extend_from_slice(&[0u8; EffectBlock::SIZE]);
+        parked_count += 1;
     }
     let node_count = n + parked_count;
 
