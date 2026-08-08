@@ -164,6 +164,8 @@ DumpScene 取证节点树 → （虚拟列表问题）DumpMirrorPool →
 simulate-mouse-ui 点 → DumpScene 再取证 → 断言
 ```
 
+**Skills（详细工具文档）**：17 个 uloop 工具的细粒度 SKILL.md 在 `.agents/skills/uloop-*`（pi）与 `.claude/skills/uloop-*`（Claude Code）——compile/screenshot/simulate-*/run-tests/get-hierarchy 等每个工具的参数/示例/输出格式。需细用法时读对应 skill 的 `SKILL.md` + `references/*.md`。这些是 `uloop skills install` 生成后手动搬到仓库根（pi 读仓库根 `.agents/`）；更新 unity-cli-loop 后重跑 install 再搬。
+
 与下方 dump_*.rs 互补：dump_*.rs 喂 pkg.bin 在编码机复现 core solve（离线）；本桥取 Unity PlayMode 实时状态（在线）。同一份 solve 的两面，两边 dump 取证再改，别静态猜反复试。
 
 ---
