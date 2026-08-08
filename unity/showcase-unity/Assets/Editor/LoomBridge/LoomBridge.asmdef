@@ -1,0 +1,15 @@
+{
+    "name": "Showcase.LoomBridge",
+    "rootNamespace": "Showcase.LoomBridge",
+    "references": [
+        "LoomGUI.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "autoReferenced": true,
+    "versionDefines": [],
+    "noEngineReferences": false
+}

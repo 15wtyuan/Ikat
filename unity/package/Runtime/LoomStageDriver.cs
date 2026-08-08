@@ -433,6 +433,13 @@ namespace LoomGUI
             catch (Exception e) { Debug.LogWarning($"[DumpF8] file write failed: {e.Message}"); }
         }
 
+        /// <summary>
+        /// dev 调试桥用：返回 MirrorPool 状态文本（转发 <see cref="UnityLoomBackend.DumpMirrorState"/>，
+        /// 同 F8 诊断源）。PlayMode 下有活跃 backend；无 driver/backend 时返提示串。被
+        /// Showcase.LoomBridge.DumpMirrorPool 经 unity-cli-loop execute-dynamic-code 调。
+        /// </summary>
+        public string DumpMirrorPoolState() => _backend != null ? _backend.DumpMirrorState() : "backend null";
+
         void LateUpdate()
         {
             if (_host == null) return;

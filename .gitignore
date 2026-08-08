@@ -14,6 +14,10 @@ Cargo.lock
 [Uu]ser[Ss]ettings/
 [Mm]emoryCaptures/
 [Rr]ecordings/
+# unity-cli-loop 运行产物（CLI 缓存/工具注册/输出）；团队共享配置按需取消注释保留
+**/.uloop/*
+!**/.uloop/settings.permissions.json
+!**/.uloop/settings.tools.json
 # Unity 生成的 meta 保留（资产需要）；以下为不应入库的产物
 *.unitypackage
 *.apk
