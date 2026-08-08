@@ -131,45 +131,6 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 ## 调试技巧
 
-### Unity 调试桥（unity-cli-loop + LoomBridge）——运行时动态取证
-
-showcase-unity 装了 [unity-cli-loop](https://github.com/hatayama/unity-cli-loop)（TCP），pi 经 `uloop` CLI 从仓库根驱动 Unity 运行时，动态取证 LoomGUI 状态，免重编/手点 PlayMode。设计见 `docs/superpowers/specs/2026-08-08-unity-debug-bridge-design.md`。
-
-**前置**：showcase-unity 这个 Unity 工程必须打开（TCP server 随 Unity 启停）。未开则 `uloop` 报 `UserSettings/UnityMcpSettings.json not found`。
-
-**调用约定（硬规则）**：从仓库根跑，**每条 `uloop` 命令必带 `--project-path unity/showcase-unity`**（cwd 是仓库根，省略会探测失败）。
-
-**坑：`uloop compile` 后 Domain Reload 断连几秒**——Unity 域重载强断 C# TCP server，期间连接必失败。compile 后要重试/等待，勿立即判失败。
-
-**常用命令**（都带 `--project-path unity/showcase-unity`）：
-```bash
-uloop compile                          # 编译（后断连几秒，重试）
-uloop control-play-mode --action Play   # Play/Stop/Pause
-uloop screenshot --window Game          # 截图；加 --capture-mode rendering 标注可点坐标
-uloop execute-dynamic-code --code "..."  # 任意 C#（主入口）
-uloop simulate-mouse-ui --action Click --x <i> --y <i>   # 坐标取自 rendering 截图标注
-uloop get-hierarchy / find-game-objects / get-logs      # 场景/对象/日志
-```
-
-**LoomBridge 速查**（showcase helper，`execute-dynamic-code` 内调）：
-- `Showcase.LoomBridge.LoomBridge.DumpScene()` — 整树 JSON（node_id/tag/id/classes/kind/layout/world_matrix/anim）
-- `Showcase.LoomBridge.LoomBridge.DumpMirrorPool()` — MirrorPool active/parked slot（虚拟列表/pooled-slot 调试）
-- 找控件：grep DumpScene 文本按 id/class 定位；改状态直接写 C# 调公共 Node API（`driver.Context`）。
-- 包内同源诊断口：`LoomHost.DumpSceneJson()` / `LoomStageDriver.DumpMirrorPoolState()`（F8 诊断亦同源）。
-
-**调试闭环模板**：
-```
-compile（等断连恢复）→ control-play-mode Play → screenshot 看画面 →
-DumpScene 取证节点树 → （虚拟列表问题）DumpMirrorPool →
-simulate-mouse-ui 点 → DumpScene 再取证 → 断言
-```
-
-**Skills（详细工具文档）**：17 个 uloop 工具的细粒度 SKILL.md 在 `.agents/skills/uloop-*`（pi）与 `.claude/skills/uloop-*`（Claude Code）——compile/screenshot/simulate-*/run-tests/get-hierarchy 等每个工具的参数/示例/输出格式。需细用法时读对应 skill 的 `SKILL.md` + `references/*.md`。这些是 `uloop skills install` 生成后手动搬到仓库根（pi 读仓库根 `.agents/`）；更新 unity-cli-loop 后重跑 install 再搬。
-
-与下方 dump_*.rs 互补：dump_*.rs 喂 pkg.bin 在编码机复现 core solve（离线）；本桥取 Unity PlayMode 实时状态（在线）。同一份 solve 的两面，两边 dump 取证再改，别静态猜反复试。
-
----
-
 **dump_*.rs 诊断 example**（pkg.bin 路径，验 core 实际状态而非猜代码）：
 - `dump_text` — 文本换行（验 known.width 来源、行数、pen 坐标）
 - `dump_img` — 图片尺寸（css.w/h、rect、tex、闭包 `known.w`）
