@@ -285,12 +285,17 @@ fn configure_spacer(stage: &mut crate::stage::Stage, spacer: NodeId) {
 
 /// 计算可见项区间 [start, end)（含 BUFFER）。viewport.h==0 → 冷启动返 INITIAL_SLOTS。
 /// top = scroll_pos.y - listview_offset（ul 相对 pane 的偏移）。
+///
+/// `gap`：flex 列表项间 gap（px）。**必须计入**累积位——实际布局（spacer + taffy flex+gap）
+/// 把 item i 放在 sum(h[0..i]) + i*gap，若此处漏算 gap 会低估值位置 → start 偏晚 →
+/// 视口顶部空白（mail gap:12 实例：scroll 5000 时差 ~458px）。block ul gap=0 no-op。
 pub fn compute_visible_range(
     item_count: usize,
     scroll_pos_y: f32,
     listview_offset: f32,
     viewport_h: f32,
     heights: &HeightCache,
+    gap: f32,
 ) -> std::ops::Range<usize> {
     if item_count == 0 {
         return 0..0;
@@ -304,13 +309,14 @@ pub fn compute_visible_range(
         return 0..INITIAL_SLOTS.min(item_count);
     }
     let top = scroll_pos_y - listview_offset;
-    // first = 首个顶边超过 top 的项（累积后判）。若全项顶边 ≤ top（内容短于视口），
+    // first = 首个底边超过 top 的项（累积后判，含 gap）。若全项底边 ≤ top（内容短于视口），
     // 循环不 break，first 保持 0 → start 经 BUFFER 回退到 0，整列可见。
+    // bottom(i) = sum(h[0..i+1]) + i*gap（i 个 gap 在 item i 之前）。
     let mut acc = 0.0;
     let mut first = 0usize;
     for i in 0..item_count {
         acc += heights.height_of(i);
-        if acc > top {
+        if acc + (i as f32) * gap > top {
             first = i;
             break;
         }
@@ -320,7 +326,7 @@ pub fn compute_visible_range(
     let mut last = item_count;
     for j in 0..item_count {
         acc2 += heights.height_of(j);
-        if acc2 >= target {
+        if acc2 + (j as f32) * gap >= target {
             last = j + 1;
             break;
         }
@@ -892,7 +898,8 @@ fn compute_visible_spacers(
     } else {
         0.0
     };
-    let visible = compute_visible_range(ls.item_count, scroll_y, ul_y, viewport_h, &ls.heights);
+    let visible =
+        compute_visible_range(ls.item_count, scroll_y, ul_y, viewport_h, &ls.heights, gap);
     // Gap accounting for flex+gap uls: [head_spacer, slot.., tail_spacer]，可见 slot 在 head spacer
     // 后一个 gap。为对齐非虚拟基准（item[k].top = sum(0..k) + k*gap），head spacer 须保留
     // sum(0..start) + (start-1)*gap：slot.top = spacer.h + gap = sum + count*gap。tail 对称。
@@ -1325,32 +1332,50 @@ mod tests {
 
     #[test]
     fn visible_range_basic() {
-        let r = compute_visible_range(100, 0.0, 0.0, 100.0, &uniform_heights(100, 10.0));
+        let r = compute_visible_range(100, 0.0, 0.0, 100.0, &uniform_heights(100, 10.0), 0.0);
         assert_eq!(r, 0..12);
     }
 
     #[test]
+    fn visible_range_counts_flex_gap_in_item_positions() {
+        // 复现 mail 覆盖缺口：flex gap:12 把 item 撑开（item i 顶边 = sum(h[0..i]) + i*gap），
+        // compute_visible_range 漏算 gap 会低估值位置 → start 偏晚 → 视口顶部空白。
+        // 100 item × h75 + gap12，scroll 到 item 50 顶边（= 50*75 + 50*12 = 4350）。
+        let h = uniform_heights(100, 75.0);
+        let gap = 12.0_f32;
+        let top = 50.0 * 75.0 + 50.0 * gap; // item 50 顶边
+        let r = compute_visible_range(100, top, 0.0, 965.0, &h, gap);
+        // item 50 顶边 == top，其底边(4425) > top → 部分可见 → first=50 → start=48(BUFFER)。
+        // 漏 gap 时 first 会到 58（start 56）——这就是 live mail 顶部空白的根因。
+        assert!(
+            (48..=50).contains(&r.start),
+            "gap 计入后 start 应 ~48，got {} (漏 gap 会给 56)",
+            r.start
+        );
+    }
+
+    #[test]
     fn visible_range_scrolled_mid() {
-        let r = compute_visible_range(100, 50.0, 0.0, 100.0, &uniform_heights(100, 10.0));
+        let r = compute_visible_range(100, 50.0, 0.0, 100.0, &uniform_heights(100, 10.0), 0.0);
         assert_eq!(r, 3..17);
     }
 
     #[test]
     fn visible_range_clamps_to_count() {
-        let r = compute_visible_range(5, 50.0, 0.0, 100.0, &uniform_heights(5, 10.0));
+        let r = compute_visible_range(5, 50.0, 0.0, 100.0, &uniform_heights(5, 10.0), 0.0);
         assert_eq!(r.start, 0);
         assert_eq!(r.end, 5);
     }
 
     #[test]
     fn visible_range_empty_count() {
-        let r = compute_visible_range(0, 0.0, 0.0, 100.0, &HeightCache::new(0, 10.0));
+        let r = compute_visible_range(0, 0.0, 0.0, 100.0, &HeightCache::new(0, 10.0), 0.0);
         assert_eq!(r, 0..0);
     }
 
     #[test]
     fn visible_range_cold_start_viewport_zero() {
-        let r = compute_visible_range(1000, 0.0, 0.0, 0.0, &uniform_heights(1000, 10.0));
+        let r = compute_visible_range(1000, 0.0, 0.0, 0.0, &uniform_heights(1000, 10.0), 0.0);
         assert_eq!(r, 0..INITIAL_SLOTS);
     }
 
