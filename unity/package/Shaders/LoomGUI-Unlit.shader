@@ -259,8 +259,10 @@ Shader "LoomGUI/Unlit"
                 float2 p = i.uv;
                 float qx = abs(p.x) - _ShadowHalfSize.x + _ShadowRadius;
                 float qy = abs(p.y) - _ShadowHalfSize.y + _ShadowRadius;
-                float sdf = length(max(float2(qx, qy), 0.0)) + min(max(qx, qy), 0.0) - _ShadowRadius;
-                float d = (_ShadowInset > 0.5) ? -sdf : sdf;
+                // 命名 shadowSdf（非 sdf）：CLIPPED_ROUNDED 块也声明 sdf，I1 路径（shadow 在圆角
+                // overflow 容器）两 keyword 共启 → 同名 redefinition 编译错。两块各用专名避撞。
+                float shadowSdf = length(max(float2(qx, qy), 0.0)) + min(max(qx, qy), 0.0) - _ShadowRadius;
+                float d = (_ShadowInset > 0.5) ? -shadowSdf : shadowSdf;
                 float sig = max(_ShadowSigma, 0.0001);
                 float g = max(d, 0.0);
                 col.a *= exp(-(g * g) / (2.0 * sig * sig));
