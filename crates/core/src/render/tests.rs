@@ -3271,7 +3271,7 @@ fn box_shadow_blur_uses_sdf_program_and_params() {
         ox: 0.0,
         oy: 0.0,
         spread: 0.0,
-        blur: 8.0, // σ=4
+        blur: 8.0, // σ=8（半宽=blur）
         color: [0.0, 0.0, 0.0, 0.5],
         inset: false,
     }];
@@ -3297,10 +3297,10 @@ fn box_shadow_blur_uses_sdf_program_and_params() {
         }
         _ => panic!("expected Mesh"),
     }
-    // shadow_params[3] = sigma = blur/2 = 4.0
+    // shadow_params[3] = sigma = blur = 8.0（半宽，shader smoothstep(-σ,σ)）
     assert!(
-        (shadow.shadow_params[3] - 4.0).abs() < 1e-3,
-        "shadow_params.sigma = blur/2 = 4.0，得 {}",
+        (shadow.shadow_params[3] - 8.0).abs() < 1e-3,
+        "shadow_params.sigma = blur = 8.0（半宽），得 {}",
         shadow.shadow_params[3]
     );
     // inset_flag = 0（outer）

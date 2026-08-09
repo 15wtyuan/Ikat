@@ -2254,8 +2254,8 @@ fn render_one_node(
         let radii = n.style.border_radius.as_corners(rect.w, rect.h);
         // outer（back）层：CSS 序 push。
         for (i, sh) in shadows.iter().filter(|s| !s.inset).enumerate() {
-            // blur<0.5 → σ=0.5（1px AA 硬边）；否则 σ=blur/2（RmlUi 映射）。
-            let sigma = if sh.blur < 0.5 { 0.5 } else { sh.blur * 0.5 };
+            // σ = blur 半宽（shader smoothstep(-σ,σ) 的软边半宽）；blur<0.5 取 0.5 做 1px AA。
+            let sigma = if sh.blur < 0.5 { 0.5 } else { sh.blur };
             let sid = back_shadow_id(node_id, i as u32);
             let (v, uvc, col, idx, params) =
                 crate::render::border::shadow_quad(rect, &radii, sh, sigma);
@@ -2295,8 +2295,8 @@ fn render_one_node(
             .filter(|(_, s)| s.inset)
             .collect();
         for &(css_idx, sh) in inset_layers.iter().rev() {
-            // blur<0.5 → σ=0.5（1px AA 硬边）；否则 σ=blur/2（RmlUi 映射）。
-            let sigma = if sh.blur < 0.5 { 0.5 } else { sh.blur * 0.5 };
+            // σ = blur 半宽（shader smoothstep(-σ,σ) 的软边半宽）；blur<0.5 取 0.5 做 1px AA。
+            let sigma = if sh.blur < 0.5 { 0.5 } else { sh.blur };
             // inset idx = 该 primary 内 inset 层的 CSS 序（0-based，区别于混合序）。
             let inset_idx = shadows.iter().take(css_idx).filter(|s| s.inset).count() as u32;
             let sid = front_shadow_id(node_id, inset_idx);

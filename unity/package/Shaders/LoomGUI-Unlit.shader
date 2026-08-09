@@ -254,10 +254,10 @@ Shader "LoomGUI/Unlit"
                 // Box-shadow（program=5）：像素空间圆角矩形 SDF + smoothstep 双侧软边。
                 // i.uv 由 core 几何编码为「顶点 − 形状中心」（像素量纲），故 _ShadowHalfSize.xy/_ShadowRadius
                 // 亦取像素；SDF 公式同 CLIPPED_ROUNDED（归一化半宽 1 换成 _ShadowHalfSize.xy）。
-                // smoothstep(-1.5σ,1.5σ,sdf) = 「模糊指示函数」：形状深处 → 0(内)/1(外)、边缘 → 0.5、
-                // 过渡带 ≈3σ。比旧 exp(-max(d,0)²/2σ²)（单侧、边缘满 opacity → 发黑）更贴 CSS/RmlUi
-                // 真高斯糊掉实心形状的视觉（边缘 ~50%、两侧软）。inset 翻 a 取外侧（内环 + 向心软边）；
-                // inset 的元素圆角裁剪由 core 几何（元素自身 rounded_rect mesh）完成，shader 不再裁。
+                // smoothstep(-σ,σ,sdf) = 「模糊指示函数」：形状深处 → 0(内)/1(外)、边缘 → 0.5。
+                // σ = blur 半宽（core 传，blur<0.5 取 0.5 做 1px AA）：可见外扩 ≈blur，贴 CSS
+                // 模糊半径。比旧 exp(-max(d,0)²/2σ²)（单侧、边缘满 opacity → 发黑）更准。inset 翻 a
+                // 取外侧（内环 + 向心软边）；inset 元素圆角裁剪由 core 几何（rounded_rect mesh）完成。
                 float2 p = i.uv;
                 float qx = abs(p.x) - _ShadowHalfSize.x + _ShadowRadius;
                 float qy = abs(p.y) - _ShadowHalfSize.y + _ShadowRadius;
@@ -265,8 +265,7 @@ Shader "LoomGUI/Unlit"
                 // overflow 容器）两 keyword 共启 → 同名 redefinition 编译错。两块各用专名避撞。
                 float shadowSdf = length(max(float2(qx, qy), 0.0)) + min(max(qx, qy), 0.0) - _ShadowRadius;
                 float sig = max(_ShadowSigma, 0.0001);
-                float k = 1.5 * sig;
-                float a = smoothstep(-k, k, shadowSdf); // 0 形状内 → 1 形状外，边缘 0.5
+                float a = smoothstep(-sig, sig, shadowSdf); // 0 形状内 → 1 形状外，边缘 0.5
                 col.a *= (_ShadowInset > 0.5) ? a : (1.0 - a);
                 #endif
                 return col;
