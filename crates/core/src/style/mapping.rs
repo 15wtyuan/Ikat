@@ -1315,12 +1315,14 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 .get(color_idx)
                 .and_then(|s| parse_color(s))
                 .unwrap_or([0.0, 0.0, 0.0, 0.3]);
-            style.box_shadow = Some(BoxShadow {
+            style.box_shadow = vec![BoxShadow {
                 ox,
                 oy,
                 spread: spread_val,
+                blur: 0.0,
                 color,
-            });
+                inset: false,
+            }];
             true
         }
         "transition" => {

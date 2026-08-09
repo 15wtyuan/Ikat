@@ -279,6 +279,7 @@ fn thumb_render_node(node_id: u32, rect: Rect, sort_key: u32) -> RenderNode {
         change_level: ChangeLevel::Full,
         reuse_key: 0,
         effect: EffectBlock::default(),
+        shadow_params: [0.0; 6],
         payload: NodePayload::Mesh {
             verts: v,
             uvs: uvc,
@@ -471,6 +472,7 @@ fn build_container_mesh(
         change_level: ChangeLevel::Full,
         reuse_key: n.reuse_key,
         effect: EffectBlock::default(),
+        shadow_params: [0.0; 6],
         payload: NodePayload::Mesh {
             verts: v,
             uvs: uvc,
@@ -1475,6 +1477,7 @@ fn push_text_meshes(
                 0
             },
             effect,
+            shadow_params: [0.0; 6],
             payload: NodePayload::Mesh {
                 verts: vec![],
                 uvs: vec![],
@@ -1516,6 +1519,7 @@ fn push_text_meshes(
                 0
             },
             effect,
+            shadow_params: [0.0; 6],
             payload: NodePayload::Mesh {
                 verts: verts0.clone(),
                 uvs: uvs0.clone(),
@@ -1549,6 +1553,7 @@ fn push_text_meshes(
             reuse_key: 0,
             // 同一文字节点所有页共享同一 effect 配置：fragment shader 按页独立重建效果。
             effect,
+            shadow_params: [0.0; 6],
             payload: NodePayload::Mesh {
                 verts: verts.clone(),
                 uvs: uvs.clone(),
@@ -1624,6 +1629,7 @@ fn push_solid_mesh(
         change_level: ChangeLevel::Full,
         reuse_key,
         effect: EffectBlock::default(),
+        shadow_params: [0.0; 6],
         payload: NodePayload::Mesh {
             verts,
             uvs,
@@ -1781,6 +1787,7 @@ fn render_one_node(
                 change_level: ChangeLevel::Full,
                 reuse_key: n.reuse_key,
                 effect: EffectBlock::default(),
+                shadow_params: [0.0; 6],
                 payload: NodePayload::Mesh {
                     verts: v,
                     uvs: uvc,
@@ -2136,6 +2143,7 @@ fn render_one_node(
             change_level: ChangeLevel::Full,
             reuse_key: n.reuse_key,
             effect: EffectBlock::default(),
+            shadow_params: [0.0; 6],
             payload: NodePayload::Mesh {
                 verts: vec![],
                 uvs: vec![],
@@ -2150,7 +2158,7 @@ fn render_one_node(
     // box-shadow：独立 RenderNode 画在节点下层（sort_key 更小 = 先绘 = 在下）。
     // 阴影节点不入 id_to_pos（不在场景树中），sort_key 在 assign_sort_keys 后
     // 由 propagate_back_layer_sort_keys 调整为主节点 sort_key（主节点后移一位）。
-    if let Some(shadow) = n.style.box_shadow.as_ref() {
+    if let Some(shadow) = n.style.box_shadow.first() {
         if n.kind.is_container() {
             let rw = rect.w;
             let rh = rect.h;
@@ -2183,6 +2191,7 @@ fn render_one_node(
                     change_level: ChangeLevel::Full,
                     reuse_key: 0,
                     effect: EffectBlock::default(),
+                    shadow_params: [0.0; 6],
                     payload: NodePayload::Mesh {
                         verts: v,
                         uvs: uvc,

@@ -142,6 +142,9 @@ pub struct RenderNode {
     /// （全 0 → shader 纯 face）。进 FFI effect_block 列 + header_hash（effect 变 = Header 级，
     /// C# 只更 MPB uniform，不重建 mesh）。
     pub effect: EffectBlock,
+    /// box-shadow SDF 参数（halfSize.x, halfSize.y, radius, σ, inset_flag, _pad）。
+    /// 非 shadow 节点 = [0.0;6]（blob 写全零）。进 FFI shadow_params 列。
+    pub shadow_params: [f32; 6],
     pub payload: NodePayload,
 }
 
@@ -164,6 +167,7 @@ mod serde_smoke_tests {
             change_level: ChangeLevel::Full,
             reuse_key: 0,
             effect: EffectBlock::default(),
+            shadow_params: [0.0; 6],
             payload: NodePayload::Mesh {
                 verts: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
                 uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],

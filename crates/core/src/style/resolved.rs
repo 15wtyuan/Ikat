@@ -282,8 +282,9 @@ pub struct ResolvedStyle {
     pub color_filter: Option<[f32; 20]>,
     /// CSS border-image-slice 四边切片（源图像素）。None=无九宫格。
     pub border_image_slice: Option<SliceInsets>,
-    /// CSS box-shadow 几何近似（无 blur）。独立 RenderNode 画在节点下层。None=无投影。
-    pub box_shadow: Option<BoxShadow>,
+    /// CSS box-shadow 列表（源序）。空 Vec = 无投影。每层独立 RenderNode：outer 画在节点
+    /// 下层、inset 画在节点上层；blur>0 走 SDF 高斯边 shader。blur/inset/多层语义见各层渲染。
+    pub box_shadow: Vec<BoxShadow>,
     /// CSS transition 声明。None=未设（默认无过渡动画）。
     pub transition: Vec<TransitionSpec>,
     /// CSS animation 声明（`animation` 简写，逗号分隔多声明）。name 引用 Scene.keyframes
@@ -313,14 +314,17 @@ pub struct ResolvedStyle {
     pub inline_declared: u32,
 }
 
-/// box-shadow 几何近似（无 blur，真实 blur 推 v1.14+ 离屏 RT）。
-/// MVP 用 spread=0（偏移+颜色硬边投影）；圆角阴影随圆角 SDF task 补。
+/// 单层 CSS box-shadow。多声明逗号分隔各成一层（`ResolvedStyle.box_shadow: Vec`，CSS 源序）。
+/// blur=0 硬边（实心圆角矩形）；blur>0 走 SDF 高斯边（σ=blur/2 运行时算）。inset 画在节点内。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BoxShadow {
     pub ox: f32,
     pub oy: f32,
     pub spread: f32,
+    /// blur_radius（CSS px）。运行时 σ=blur/2。
+    pub blur: f32,
     pub color: [f32; 4],
+    pub inset: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -377,7 +381,7 @@ impl Default for ResolvedStyle {
             transform: LocalTransform::default(),
             color_filter: None,
             border_image_slice: None,
-            box_shadow: None,
+            box_shadow: Vec::new(),
             transition: Vec::new(),
             animation: Vec::new(),
             text_effects: Vec::new(),

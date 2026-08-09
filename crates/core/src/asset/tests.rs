@@ -765,8 +765,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 31,
-        "pkg format version must be 31 after nth-child bump (v29 aria_controls feature persists)"
+        PKG_FORMAT_VERSION, 32,
+        "pkg format version must be 32 after box-shadow Vec bump (v29 aria_controls feature persists)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -829,8 +829,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 31,
-        "pkg format version must be 31 after nth-child bump"
+        PKG_FORMAT_VERSION, 32,
+        "pkg format version must be 32 after box-shadow Vec bump"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -920,5 +920,44 @@ fn pkg_v31_rejects_v30() {
     assert!(
         matches!(err, Err(PkgError::TooOld(30))),
         "v30 pkg must be rejected as TooOld after v31 bump, got {err:?}"
+    );
+}
+
+// ── v32: box-shadow Option<BoxShadow>→Vec<BoxShadow> + blur/inset ────────────────
+
+/// v32: ResolvedStyle.box_shadow 改 Vec<BoxShadow> + BoxShadow 加 blur/inset 字段。
+/// bincode 布局随之变（空 Vec 取代 None，元素增两字段）。锁定新布局的 serialize/deserialize
+/// 保真，防后续重构悄悄改字段顺序/类型破坏 pkg.bin 兼容。
+#[test]
+fn box_shadow_vec_roundtrips_v32() {
+    use crate::style::resolved::BoxShadow;
+    let mut s = ResolvedStyle::default();
+    s.box_shadow = vec![BoxShadow {
+        ox: 1.0,
+        oy: 2.0,
+        spread: 3.0,
+        blur: 4.0,
+        color: [0.1, 0.2, 0.3, 0.4],
+        inset: true,
+    }];
+    let bytes = bincode::serialize(&s).expect("ResolvedStyle serializable");
+    let back: ResolvedStyle = bincode::deserialize(&bytes).expect("ResolvedStyle deserializable");
+    assert_eq!(back.box_shadow.len(), 1);
+    assert!(back.box_shadow[0].inset);
+    assert_eq!(back.box_shadow[0].blur, 4.0);
+}
+
+/// v32: version=31 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=32，无迁移器）。
+/// ResolvedStyle.box_shadow 从 Option<BoxShadow> 改 Vec<BoxShadow> 改变 style bincode blob
+/// 布局，旧 v31 fixture 不能半读半坏。
+#[test]
+fn pkg_v32_rejects_v31() {
+    let mut bad = vec![];
+    bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
+    bad.extend_from_slice(&31u32.to_le_bytes()); // v31 < MIN_VERSION=32
+    let err = read_package(&bad);
+    assert!(
+        matches!(err, Err(PkgError::TooOld(31))),
+        "v31 pkg must be rejected as TooOld after v32 bump, got {err:?}"
     );
 }

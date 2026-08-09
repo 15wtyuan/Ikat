@@ -146,6 +146,7 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
         change_level: crate::render::node::ChangeLevel::Full,
         reuse_key: 0,
         effect: crate::render::node::EffectBlock::default(),
+        shadow_params: [0.0; 6],
         payload: NodePayload::Mesh {
             verts,
             uvs,
@@ -193,6 +194,7 @@ mod tests {
             change_level: ChangeLevel::Full,
             reuse_key: 0,
             effect: crate::render::node::EffectBlock::default(),
+            shadow_params: [0.0; 6],
             payload: NodePayload::Mesh {
                 verts: vec![
                     [rect_off, 0.0],
@@ -425,6 +427,7 @@ mod tests {
             change_level: ChangeLevel::Full,
             reuse_key: 0,
             effect: crate::render::node::EffectBlock::default(),
+            shadow_params: [0.0; 6],
             payload: NodePayload::Mesh {
                 verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
                 uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
@@ -465,6 +468,7 @@ mod tests {
             change_level: ChangeLevel::Full,
             reuse_key: 0,
             effect: crate::render::node::EffectBlock::default(),
+            shadow_params: [0.0; 6],
             payload: NodePayload::Mesh {
                 verts: vec![
                     [sk as f32 * 50.0, 0.0],

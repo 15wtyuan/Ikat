@@ -2587,6 +2587,7 @@ fn propagate_text_sub_page_sort_keys_cumulative_shift_no_ties() {
         change_level: ChangeLevel::Full,
         reuse_key: 0,
         effect: crate::render::node::EffectBlock::default(),
+        shadow_params: [0.0; 6],
         payload: empty_mesh.clone(),
     };
 
@@ -2667,6 +2668,7 @@ fn propagate_inline_image_sort_keys_stacks_above_text_layers() {
         change_level: ChangeLevel::Full,
         reuse_key: 0,
         effect: crate::render::node::EffectBlock::default(),
+        shadow_params: [0.0; 6],
         payload: empty_mesh.clone(),
     };
 
@@ -2870,12 +2872,14 @@ fn box_shadow_emits_node_with_offset_and_sort_key() {
         },
         Some([1.0, 0.0, 0.0, 1.0]),
     );
-    n.style.box_shadow = Some(BoxShadow {
+    n.style.box_shadow = vec![BoxShadow {
         ox: 2.0,
         oy: 3.0,
         spread: 0.0,
+        blur: 0.0,
         color: [0.0, 0.0, 0.0, 0.5],
-    });
+        inset: false,
+    }];
     let mut scene = Scene::from_nodes(vec![n], vec![]);
 
     let fonts = test_font_table().expect("need test font");
@@ -2991,12 +2995,14 @@ fn box_shadow_back_layer_inherits_clip_mask_context() {
         }, // 在 root 外（溢出）
         Some([0.1, 0.1, 0.1, 1.0]),
     );
-    chip.style.box_shadow = Some(BoxShadow {
+    chip.style.box_shadow = vec![BoxShadow {
         ox: 0.0,
         oy: 0.0,
         spread: 0.0,
+        blur: 0.0,
         color: [0.0, 0.0, 0.0, 1.0],
-    });
+        inset: false,
+    }];
     let mut scene = Scene::from_nodes(vec![root, chip], vec![(0, 1)]);
     // root 开 clip（overflow）→ assign_sort_keys DFS 给 root + 后代开 mask_context
     let root_id = *scene.roots.first().unwrap();
