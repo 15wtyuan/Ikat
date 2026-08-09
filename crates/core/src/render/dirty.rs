@@ -59,12 +59,14 @@ pub fn payload_hash(rn: &RenderNode) -> u64 {
 }
 
 /// 表头轴 hash：world_matrix + visible + alpha + sort_key + mask_context + color_tint + blend +
-/// reuse_key + parent_id + effect。廉价属性——变了 C# 只需改 GO transform / 材质
-/// （SetPropertyBlock _Alpha / SDF effect uniforms），不碰 mesh。
+/// reuse_key + parent_id + effect + shadow_params。廉价属性——变了 C# 只需改 GO transform / 材质
+/// （SetPropertyBlock _Alpha / SDF effect / shadow uniforms），不碰 mesh。
 /// reuse_key 进 header_hash——同 NodeId 换 reuse_key 时需触发 Header 级变更刷新 GO
 /// 绑定（理论上 driver 不该这么用，但 hash 该覆盖所有身份字段，避免漏）。
 /// effect 进 header_hash——SDF effect 参数（outline/underlay/glow/blur）变只更 MPB uniform，
 /// 不重建几何（effect 是渲染层属性，非 mesh 几何）。
+/// shadow_params 进 header_hash——box-shadow SDF 参数（halfSize/radius/sigma/inset）变只更
+/// MPB uniform（_ShadowHalfSize 等），不重建几何（照 effect 同路径，渲染层属性非 mesh 几何）。
 pub fn header_hash(rn: &RenderNode) -> u64 {
     let mut h = DefaultHasher::new();
     for &v in rn.world_matrix.iter() {
@@ -84,6 +86,10 @@ pub fn header_hash(rn: &RenderNode) -> u64 {
     rn.reuse_key.hash(&mut h);
     rn.parent_id.hash(&mut h);
     rn.effect.to_bytes().hash(&mut h); // SDF effect 参数：变 → Header 级（只更 MPB uniform）
+                                       // box-shadow SDF 参数：变 → Header 级（只更 MPB uniform，照 effect 路径，不重建 mesh）。
+    for &v in rn.shadow_params.iter() {
+        v.to_le_bytes().hash(&mut h);
+    }
     h.finish()
 }
 
@@ -234,6 +240,35 @@ mod tests {
             payload_hash(&a),
             payload_hash(&b),
             "effect 不进 payload_hash（非几何，effect 归 header 轴）"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // shadow_params 进 header_hash（box-shadow SDF 参数变 = Header 级，只更 MPB uniform，
+    // 不重建 mesh）。payload_hash 不采样 shadow_params（shadow 非几何）。
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn header_hash_includes_shadow_params() {
+        let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        let mut b = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        b.shadow_params[2] = 5.0; // box-shadow radius 变
+        assert_ne!(
+            header_hash(&a),
+            header_hash(&b),
+            "shadow_params 变 → header_hash 变（HEADER 级，只更 MPB）"
+        );
+    }
+
+    #[test]
+    fn payload_hash_ignores_shadow_params() {
+        let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        let mut b = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
+        b.shadow_params[2] = 5.0;
+        assert_eq!(
+            payload_hash(&a),
+            payload_hash(&b),
+            "shadow_params 不进 payload_hash（非几何，归 header 轴）"
         );
     }
 }

@@ -45,6 +45,7 @@ namespace LoomGUI
                 if (program == 2) mat.EnableKeyword("BG_COMPOSITE"); // Container+bg-image: CSS 合成（图透明区显 bg-color）
                 if (program == 3) mat.EnableKeyword("COLOR_FILTER"); // filter + tex*vcol base（Image+filter / Container+filter 无 bg-image）
                 if (program == 4) { mat.EnableKeyword("COLOR_FILTER"); mat.EnableKeyword("BG_COMPOSITE"); } // filter + bg-image base（Container+bg-image+filter，spec §3.2 双 keyword）
+                if (program == 5) mat.EnableKeyword("SHADOW_BLUR"); // box-shadow blur：纹理无关圆角矩形 SDF（shader 自含，不采 _MainTex）
                 _cache[key] = mat;
             }
             return mat;

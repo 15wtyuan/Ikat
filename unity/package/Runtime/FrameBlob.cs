@@ -6,15 +6,16 @@ namespace LoomGUI
 {
     /// 帧 blob 托管解析视图。解析 Rust build_blob 产出的 little-endian blob。
     ///
-    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v11）：
-    ///   header (120B): magic(u32 LE), version(u32)=11, node_count(u32),
-    ///                 21× col_offset(u32, byte offset from blob start),
+    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v12）：
+    ///   header (128B): magic(u32 LE), version(u32)=12, node_count(u32),
+    ///                 22× col_offset(u32, byte offset from blob start),
     ///                 mesh_arena_off(u32), mesh_arena_len(u32),
     ///                 clip_table_off(u32), clip_table_len(u32),
     ///                 path_table_off(u32), path_table_len(u32)
-    ///   21 列 SOA（顺序见 ColOff 注释），随后 mesh_arena / clip_table / path_table 段。
+    ///   22 列 SOA（顺序见 ColOff 注释），随后 mesh_arena / clip_table / path_table 段。
     ///   v10：text_arena 已删（文本字形塌进 mesh_arena，核心自产 atlas），列 text_off/text_len 删除（22→20 列）。
     ///   v11：加 effect_block 列（[f32;32]=128B，per-text-node SDF effect 参数），列数 20→21。
+    ///   v12：加 shadow_params 列（[f32;6]=24B，box-shadow SDF 参数），列数 21→22。
     /// C# on Windows 是 little-endian，BitConverter 直读无需 byte swap。
     public readonly struct FrameBlob
     {
@@ -22,7 +23,8 @@ namespace LoomGUI
         /// blob 版本。magic+version 校验在 IsValid。
         /// v10：删 text_arena + text_off/text_len 列（22→20），文本字形塌进 mesh_arena。
         /// v11：加 effect_block 列（SDF effect 参数，照 color_matrix 先例），列数 20→21。
-        public const uint ExpectedVersion = 11;
+        /// v12：加 shadow_params 列（box-shadow SDF 参数 [f32;6]，照 color_matrix/effect_block 先例），列数 21→22。
+        public const uint ExpectedVersion = 12;
 
         readonly byte[] _buf;
 
@@ -33,7 +35,7 @@ namespace LoomGUI
         public uint Version => ReadU32(4);
         public int NodeCount => (int)ReadU32(8);
 
-        // 列 offset 在 header[12 .. 12+21*4)。顺序同 Rust columns：
+        // 列 offset 在 header[12 .. 12+22*4)。顺序同 Rust columns：
         //   0=node_id(u32) 1=parent_id(i32,-1=none) 2=visible(u8) 3=alpha(f32)
         //   4=sort_key(u32) 5=mask_context(u32)
         //   6=m_a(f32) 7=m_b(f32) 8=m_c(f32) 9=m_d(f32) 10=m_tx(f32) 11=m_ty(f32)
@@ -41,24 +43,27 @@ namespace LoomGUI
         //   12=payload_kind(u8, 1=Mesh；0 不产生——变更级别由 change_level 列表达)
         //   13=mesh_off(u32) 14=mesh_len(u32)
         //   15=path_idx(u32)  ← v7：path 表 1-based 索引，0=纯色无图
-        //   16=program(u8, 0=img/无图 1=Text 2=Container+bg-image 3=filter无bg-image 4=filter+bg-image)
+        //   16=program(u8, 0=img/无图 1=Text 2=Container+bg-image 3=filter无bg-image 4=filter+bg-image 5=box-shadow blur)
         //   17=color_matrix([f32;20], 80B)
         //   18=change_level(u8, 0=Skip 1=Header 2=Full)
         //   19=reuse_key(u32, 0=无复用 >0=slot 复用键)
         //   20=effect_block([f32;32], 128B)  ← v11：SDF 文字效果参数（outline/underlay×3/glow/blur）
+        //   21=shadow_params([f32;6], 24B)   ← v12：box-shadow SDF 参数（halfSize.xy,radius,σ,inset,_pad）
         //   v10：删 text_off(u32)/text_len(u32) 列（原第 15-16 列），其后列统一前移 2。
         //   v11：加 effect_block 列（新第 20 列，不动 v10 前移结果）。
+        //   v12：加 shadow_params 列（新第 21 列，列数 21→22，arena header 起点同步后移 4 字节）。
         int ColOff(int idx) => (int)ReadU32(12 + idx * 4);
 
-        // 三 arena header offset。21 列 col_offset 之后：mesh(2), clip(2), path(2) 各 off+len。
+        // 三 arena header offset。22 列 col_offset 之后：mesh(2), clip(2), path(2) 各 off+len。
         //   v10：text_arena 已删，arena header 由 8 项缩为 6 项。
         //   v11：col_offset 段扩到 21 项，arena header 起点 12+20*4 → 12+21*4（移后 4 字节）。
-        int MeshArenaOff => (int)ReadU32(12 + 21 * 4);
-        int MeshArenaLen => (int)ReadU32(12 + 21 * 4 + 4);
-        int ClipTableOff => (int)ReadU32(12 + 21 * 4 + 2 * 4);
-        int ClipTableLen => (int)ReadU32(12 + 21 * 4 + 2 * 4 + 4);
-        int PathTableOff => (int)ReadU32(12 + 21 * 4 + 4 * 4);
-        int PathTableLen => (int)ReadU32(12 + 21 * 4 + 4 * 4 + 4);
+        //   v12：col_offset 段扩到 22 项，arena header 起点 12+21*4 → 12+22*4（再移后 4 字节）。
+        int MeshArenaOff => (int)ReadU32(12 + 22 * 4);
+        int MeshArenaLen => (int)ReadU32(12 + 22 * 4 + 4);
+        int ClipTableOff => (int)ReadU32(12 + 22 * 4 + 2 * 4);
+        int ClipTableLen => (int)ReadU32(12 + 22 * 4 + 2 * 4 + 4);
+        int PathTableOff => (int)ReadU32(12 + 22 * 4 + 4 * 4);
+        int PathTableLen => (int)ReadU32(12 + 22 * 4 + 4 * 4 + 4);
 
         public uint NodeId(int i) => ReadU32(ColOff(0) + i * 4);
         public int ParentId(int i) => (int)ReadU32(ColOff(1) + i * 4);
@@ -85,7 +90,7 @@ namespace LoomGUI
         /// Mesh→path 表 1-based 索引（0=纯色无图）。MirrorPool 读 path_idx → ReadPath(idx) 取 path → 查 Sprite。
         public uint PathIdx(int i) => ReadU32(ColOff(15) + i * 4);
         /// 节点 i 的 program（u8 列，ColOff(16) + i）。v10 前移至第 16 列（原第 18 列）。
-        /// 0=img/无图 Container，1=Text（文本现走 mesh 路径，核心产 atlas），2=Container+bg-image，3=filter无bg-image，4=filter+bg-image。
+        /// 0=img/无图 Container，1=Text（文本现走 mesh 路径，核心产 atlas），2=Container+bg-image，3=filter无bg-image，4=filter+bg-image，5=box-shadow blur（SHADOW_BLUR）。
         public byte Program(int i) => _buf[ColOff(16) + i];
 
         /// 节点 i 的 color_matrix（[f32;20]，ColOff(17) + i*80）。v10 前移至第 17 列（原第 19 列）。
@@ -113,6 +118,23 @@ namespace LoomGUI
                 eb[j] = BitConverter.ToSingle(_buf, off + j * 4);
             }
             return eb;
+        }
+
+        /// v12：shadow_params 列（第 22 列，index 21）。6 × f32 = 24B/节点。
+        /// box-shadow SDF 参数（halfSize.xy, radius, σ, inset, _pad）。非 shadow 节点 default 全零。
+        /// MirrorPool 仅 program==5 时读此 → per-renderer MPB（_ShadowHalfSize/_ShadowRadius/
+        /// _ShadowSigma/_ShadowInset），shader SHADOW_BLUR 变体消费。用 BitConverter.ToSingle
+        /// （Unity Mono 无 BitConverter.SingleToUInt32Bits）。
+        public float[] ShadowParams(int i) {
+            int off = ColOff(21) + i * 24;
+            return new float[6] {
+                BitConverter.ToSingle(_buf, off),
+                BitConverter.ToSingle(_buf, off + 4),
+                BitConverter.ToSingle(_buf, off + 8),
+                BitConverter.ToSingle(_buf, off + 12),
+                BitConverter.ToSingle(_buf, off + 16),
+                BitConverter.ToSingle(_buf, off + 20),
+            };
         }
 
         /// v10：change_level 前移至第 18 列（原第 20 列）。0=Skip 1=Header 2=Full。MirrorPool 三分支用。

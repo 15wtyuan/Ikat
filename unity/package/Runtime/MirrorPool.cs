@@ -258,6 +258,18 @@ namespace LoomGUI
                 ro.Mpb.SetVector("_GlowColor", new Vector4(eb[27], eb[28], eb[29], eb[30]));
                 ro.Mpb.SetFloat("_BlurWidth", eb[31]);
             }
+            // box-shadow blur（program=5 SHADOW_BLUR）：读 shadow_params 列 → per-renderer MPB。
+            // shadow_params = [halfSize.xy, radius, σ, inset, _pad]。非 shadow 节点全零，
+            // 故仅 program==5 时设（避免给非 shadow 节点误设全零 uniform）。参数变化经
+            // header_hash 走 ChangeLevel::Header（不重建 mesh，仅刷新 MPB，照 effect 同路径）。
+            if (blob.Program(i) == 5)
+            {
+                float[] sp = blob.ShadowParams(i);
+                ro.Mpb.SetVector("_ShadowHalfSize", new Vector4(sp[0], sp[1], 0, 0));
+                ro.Mpb.SetFloat("_ShadowRadius", sp[2]);
+                ro.Mpb.SetFloat("_ShadowSigma", sp[3]);
+                ro.Mpb.SetFloat("_ShadowInset", sp[4]);
+            }
             ro.Mpb.SetFloat("_Alpha", alpha);
             ro.Mr.SetPropertyBlock(ro.Mpb);
         }
