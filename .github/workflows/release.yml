@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # 创建 GitHub Release 需要
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: verify tag matches package version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          PKG_VER=$(jq -r .version unity/package/package.json)
+          echo "tag=$TAG pkg_version=$PKG_VER"
+          if [ "v$PKG_VER" != "$TAG" ]; then
+            echo "ERROR: tag $TAG != package version v$PKG_VER"
+            exit 1
+          fi
+
+      - name: cargo test --workspace (exclude GUI; release 不依赖 Tauri)
+        run: cargo test --workspace --exclude loomgui_gui
+
+      - name: release-check
+        run: cargo run -p xtask -- release-check
+
+      - name: extract changelog section for this version
+        id: cl
+        shell: bash
+        run: |
+          PKG_VER=$(jq -r .version unity/package/package.json)
+          # 截取 `## [<ver>]` 到下一个 `## [` 之间（含标题行）。
+          BODY=$(awk -v v="$PKG_VER" '
+            $0 ~ "^## \\[" v "\\]"     { p=1 }
+            /^## \[/ && p && $0 !~ "^## \\[" v "\\]" { p=0 }
+            p { print }
+          ' unity/package/CHANGELOG.md)
+          {
+            echo "BODY<<EOF"
+            echo "$BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: create github release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.cl.outputs.BODY }}
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
