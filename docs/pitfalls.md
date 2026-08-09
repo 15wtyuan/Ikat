@@ -1536,3 +1536,23 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：(1) 恢复工作树：`git checkout -- .`（恢复 tracked 到 HEAD）+ 手清 feature 新增的 untracked 残留（`rm -rf <feature 新文件>`，ff 成功后会重建）。确认 ref 没动 + 工作树干净。(2) **关 Unity**。(3) 重试 `git merge --ff-only <feature>`，这次过。
 
 **教训**：任何会换 `loomgui_ffi_c.dll` 的 git 操作（ff/merge/checkout 切到 dll 不同的分支）**前必须关 Unity**。撞锁 abort 后别慌——ref 不动 = 可恢复：`git checkout -- .` + 清 untracked + 关 Unity + 重试。预防：换 dll 的操作（merge/checkout/手 copy）统一在 Unity 关闭时做。
+
+### 坑 195：Rust release 构建的 dll 字节非确定性 → release-check staleness 不可用字节比较
+
+**症状**：release-check 用「target/release dll vs 入库 dll 字节比较」判入库 dll 是否落后。源码没变、重编 dll 后 md5 与入库不同 → 误报 DllStale（false positive）。
+
+**根因**：Rust release 构建（Windows MSVC 链接器）字节非确定性——时间戳/PDB 路径/链接器增量产物让相同源码产出不同字节。任何「用产物字节比较判断源码是否变」的设计都不可靠。
+
+**解决**：release-check 改**存在性检查**（dll 在即可），去掉 staleness 字节比较。防「编了 dll 忘 commit」靠发版流程第 1 步纪律（`cargo build -p loomgui_ffi_c --release` → cp → commit），release-check 不再兜底。
+
+**教训**：判断产物是否落后于源码，用源码指纹（hash 源码文件）或 git 历史（源码最后改动 commit vs 产物最后改动 commit），别用产物字节；或干脆只查存在性 + 靠流程纪律。
+
+### 坑 196：UPM 包内新建文件漏 `.meta`（Unity 打开后才生成）
+
+**症状**：Task 新建 `unity/package/CHANGELOG.md` 后提交，漏 `CHANGELOG.md.meta`。包内其他 `.md` 都带 `.meta`，唯独新建的漏——消费方 import 时 Unity 重生成 `.meta`（GUID 漂移）、每次打开报 meta missing。
+
+**根因**：Unity 为包内资产生成 `.meta`，但 `.meta` 是 Unity 打开工程后才落盘——task 建文件那一刻 `.meta` 不存在，plan/agent 容易漏。
+
+**解决**：新建 `unity/package/` 下任何 Unity 可识别资产（`.md`/`.cs`/`.png`/`.mat` 等）后，开一次 Unity 让 `.meta` 落盘，连 `.meta` 一起提交。
+
+**教训**：UPM 包内新建文件 task 的验收要含「生成并提交 `.meta`」，或 plan 步骤显式提醒；对比包内同类资产是否都有 `.meta` 能快速发现遗漏。

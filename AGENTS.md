@@ -161,6 +161,8 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 **SDD task 切分别太细（强耦合重构）**：删一个共享字段（如 `ListState.free`）必然牵连所有消费者（plan/execute/notify），“最小 struct only” task 的 bridge 编辑会引入回归（T1 删 free 的 bridge 导致 active slot 乱序，reviewer 抓到）。强耦合重构的 task 边界要么包含被牵连函数，要么预期 bridge 多一轮 fix。
 
+**SDD 工作区隔离（pi harness 适配）**：pi 的 subagent 共享 controller cwd——建独立 worktree 目录会让 subagent 仍在主 checkout 编辑、路径错位（与 harness 对抗，违背 "Never fight the harness"）。用 **feature 分支在主 checkout 隔离**（commit 层面保护 main），不用独立 worktree 目录。用户可能在分支上并行 commit 非 task 工作（如 showcase）→ 每个 task 的 review BASE 必须用 **task commit 的实际 parent**（`git rev-parse <taskhead>^`），而非 dispatch 前记录的 HEAD，否则 review 范围混入用户 commit。
+
 **偶现/时序 bug**光读代码定位不了——加诊断 log 运行时取证，别静态猜根因反复改。
 
 **改 parse-time 逻辑必重打 pkg**：`Node.base_style` 是打包期产物。改 cascade/mapping/parse 只重编 .dll 不够，须 `cargo run -p loomgui_pkg` 重打 pkg。纯 runtime 改 .dll 即可。
