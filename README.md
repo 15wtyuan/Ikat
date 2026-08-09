@@ -37,6 +37,18 @@ cargo build -p loomgui_ffi_c
 
 Unity 后端：Unity 6.5 打开 `unity/showcase-unity/`，PlayMode 加载 `.pkg.bin`。
 
+## 在其他 Unity 项目中使用
+
+LoomGUI 以 UPM 包发布，通过 git URL 安装。在目标工程的 `Packages/manifest.json` 加一行：
+
+```json
+"com.loomgui.unity": "https://github.com/15wtyuan/LoomGUI.git?path=/unity/package#v0.0.1"
+```
+
+升级：把 `#v0.0.1` 改成目标 tag，或在 Unity 的 Package Manager 窗口选新版本。
+
+> 当前仅 Windows（native dll 仅含 Windows）。发版流程与多平台计划见 [发布设计](docs/superpowers/specs/2026-08-09-loomgui-release-design.md)。
+
 ## 文档
 
 - [主设计](docs/design/main-design.md) — 总体架构与渲染管线
