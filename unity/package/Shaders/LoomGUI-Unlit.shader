@@ -129,7 +129,13 @@ Shader "LoomGUI/Unlit"
                 o.pos = TransformWorldToHClip(worldPos);
                 float2 clipWorldXY = worldPos.xy;
                 o.color = v.color;
+                // SHADOW_BLUR：core 把 uv 编码为「顶点本地坐标 − 形状中心」（像素量纲，无纹理），
+                // 须直通 raw uv；TRANSFORM_TEX 会叠 _MainTex_ST 缩放/偏移 → SDF 坐标错位（静默依赖 _MainTex_ST==1,1,0,0）。
+#if defined(SHADOW_BLUR)
+                o.uv = v.uv;
+#else
                 o.uv = TRANSFORM_TEX(v.uv, _MainTex);
+#endif
 #if defined(CLIPPED) || defined(CLIPPED_ROUNDED)
                 o.clipPos = clipWorldXY * _ClipBox.zw + _ClipBox.xy;
 #endif
