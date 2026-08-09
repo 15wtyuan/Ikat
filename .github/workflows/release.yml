@@ -9,6 +9,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
   release:
@@ -56,4 +57,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body: ${{ steps.cl.outputs.BODY }}
+          # 当前 `v0.` 把全部 0.x 判为 prerelease；发布 0.1.0 稳定点前需收窄为
+          # `startsWith(github.ref_name, 'v0.0.')`，否则 0.1.0 会被误标 prerelease。
           prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
