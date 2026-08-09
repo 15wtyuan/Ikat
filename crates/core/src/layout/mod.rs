@@ -283,6 +283,14 @@ pub fn solve(
         }
     }
     let mut text_layouts: Vec<Option<TextLayout>> = vec![None; scene.nodes.capacity() + 1];
+    // measure memo：跨帧 carry-over。mem::take 出 scene（期间 scene.text_measure_cache 空），
+    // 闭包用完在末尾写回——与 text_layouts 同模式，避 borrow 冲突（build 已在上方借过 scene）。
+    let mut measure_cache: Vec<Option<crate::text::layout::TextMeasureCache>> =
+        std::mem::take(&mut scene.text_measure_cache);
+    let cap_need = scene.nodes.capacity() + 1;
+    if measure_cache.len() < cap_need {
+        measure_cache.resize(cap_need, None);
+    }
 
     // 设根 size：覆盖为调用方给的 root_size（viewport）。
     // Style.size 字段类型是 Size<Dimension>（不是 LengthPercentageAuto）。
@@ -369,26 +377,69 @@ pub fn solve(
                         // taffy 传 known.width = 节点 border-box 宽（含 padding/border）；
                         // 文字在 content area（known - h_inset）内换行 + 对齐，否则吃到 padding 超框。
                         let mw = known.width.map(|w| (w - *h_inset).max(0.0));
-                        let layout = measure_text(
+                        let sid_opt = taffy_to_scene.get(&nid).copied();
+                        // measure memo（坑 186）：fingerprint 命中 → 复用 TextLayout 跳过 shaping。
+                        // 两槽：mw=None→intrinsic（max-content），mw=Some→constrained（换行）。
+                        // fingerprint 含 content hash → set_text / slot 换内容自动 miss。
+                        let fp = crate::text::layout::text_fingerprint(
                             content,
                             *font_size,
                             *line_height,
                             *letter_spacing,
                             *align,
                             *nowrap,
+                            *font_weight,
+                            family.as_deref(),
                             mw,
-                            &stack,
-                            *color,
-                            crate::text::rich::weight_from_font_weight(*font_weight),
                         );
-                        // 存 TextLayout 供 render 复用。Some（available 测量）优先——
+                        let layout = if let Some(sid) = sid_opt {
+                            let entry = measure_cache[sid.index()]
+                                .get_or_insert_with(crate::text::layout::TextMeasureCache::default);
+                            let slot = if mw.is_none() {
+                                &mut entry.intrinsic
+                            } else {
+                                &mut entry.constrained
+                            };
+                            if slot.as_ref().is_some_and(|(f, _)| *f == fp) {
+                                slot.as_ref().unwrap().1.clone()
+                            } else {
+                                let l = measure_text(
+                                    content,
+                                    *font_size,
+                                    *line_height,
+                                    *letter_spacing,
+                                    *align,
+                                    *nowrap,
+                                    mw,
+                                    &stack,
+                                    *color,
+                                    crate::text::rich::weight_from_font_weight(*font_weight),
+                                );
+                                *slot = Some((fp, l.clone()));
+                                l
+                            }
+                        } else {
+                            // 无 scene 节点映射（文本过滤/边角）：不缓存。
+                            measure_text(
+                                content,
+                                *font_size,
+                                *line_height,
+                                *letter_spacing,
+                                *align,
+                                *nowrap,
+                                mw,
+                                &stack,
+                                *color,
+                                crate::text::rich::weight_from_font_weight(*font_weight),
+                            )
+                        };
+                        // render 槽：存 TextLayout 供 render 复用。Some（available 测量）优先——
                         // 短文本 taffy 只传 None（max-content ≤ available，不换行），长文本传
-                        // Some(available)（换行）。一旦存了 Some，后续 None 不覆盖（taffy 末尾
-                        // 可能补测 None）。
-                        if let Some(sid) = taffy_to_scene.get(&nid) {
-                            let slot = &mut text_layouts[sid.index()];
-                            if slot.is_none() || known.width.is_some() {
-                                *slot = Some(layout.clone());
+                        // Some(available)（换行）。一旦存了 Some，后续 None 不覆盖。
+                        if let Some(sid) = sid_opt {
+                            let rslot = &mut text_layouts[sid.index()];
+                            if rslot.is_none() || known.width.is_some() {
+                                *rslot = Some(layout.clone());
                             }
                         }
                         Size {
@@ -473,6 +524,8 @@ pub fn solve(
     write_back(scene, &taffy_tree, &taffy_ids, scene.roots[0], (0.0, 0.0));
     // layout 阶段 TextLayout 缓存交还 scene，供 render 复用（不重测）。
     scene.text_layouts = text_layouts;
+    // measure memo 写回（跨帧持久）。
+    scene.text_measure_cache = measure_cache;
 }
 
 #[cfg(test)]

@@ -348,6 +348,60 @@ fn glyph_advance(face: &Face<'_>, gid_opt: Option<ttf_parser::GlyphId>, font_siz
     }
 }
 
+/// 跨帧 measure_text memo：每节点两槽，各带 fingerprint。命中（fingerprint 匹配）→ 复用
+/// TextLayout，跳过 shaping。intrinsic = `max_width=None` 的 max-content 测量（短文本唯一 pass；
+/// 长文本 taffy 先测一次 max-content）；constrained = `max_width=Some(w)` 的换行测量。
+///
+/// fingerprint 含 content hash → set_text / slot 换内容自动 miss；style 改、约束宽变（量化桶）
+/// 也 miss。设计为后续增量布局的地基：fingerprint 源可从 content-hash 换成 dirty-version
+/// 而本结构（每节点两槽 + fingerprint 比对）不变（见 docs/pitfalls.md 坑 186）。
+#[derive(Clone, Debug, Default)]
+pub struct TextMeasureCache {
+    /// max_width=None 的测量结果 + 其 fingerprint。
+    pub intrinsic: Option<(u64, TextLayout)>,
+    /// max_width=Some(w) 的测量结果 + 其 fingerprint（约束宽量化进 fingerprint）。
+    pub constrained: Option<(u64, TextLayout)>,
+}
+
+/// 文本测量 fingerprint：content + style + 约束宽（0.25px 量化）→ u64。同 fp → measure_text
+/// 结果同 → 可复用。`mw` None/Some 区分 intrinsic/constrained 两槽（discriminator 进 hash）。
+///
+/// 用 `DefaultHasher::new()`（固定 key，跨进程确定性）——不能用 `RandomState`（每进程随机 →
+/// 持久缓存跨 tick 失效）。CJK content 是主要成本，hash ~µs/节点，vs shaping ~100µs/节点。
+#[allow(clippy::too_many_arguments)]
+pub fn text_fingerprint(
+    content: &str,
+    font_size: f32,
+    line_height: f32,
+    letter_spacing: f32,
+    align: crate::style::resolved::TextAlign,
+    nowrap: bool,
+    font_weight: u16,
+    family: Option<&str>,
+    mw: Option<f32>,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    content.hash(&mut h);
+    font_size.to_bits().hash(&mut h);
+    line_height.to_bits().hash(&mut h);
+    letter_spacing.to_bits().hash(&mut h);
+    align.hash(&mut h);
+    nowrap.hash(&mut h);
+    font_weight.hash(&mut h);
+    family.hash(&mut h);
+    match mw {
+        // None/Some 用 discriminator 区分；Some 的 w 量化到 0.25px 桶——静止时 max_width
+        // 稳定（tween 不动 layout），桶稳定 → 命中；resize 时桶短暂漂移后收敛。
+        None => 0u32.hash(&mut h),
+        Some(w) => {
+            1u32.hash(&mut h);
+            ((w * 4.0).round() as i64).hash(&mut h);
+        }
+    }
+    h.finish()
+}
+
 /// 测量并布局文本。
 ///
 /// - `line_height`：倍数，`0.0` = normal（= ascent - descent + line_gap）。
@@ -936,6 +990,134 @@ mod tests {
             env!("CARGO_MANIFEST_DIR")
         );
         Font::from_path(&p).ok()
+    }
+
+    #[test]
+    fn fingerprint_deterministic_for_same_inputs() {
+        let a = text_fingerprint(
+            "hello",
+            16.0,
+            1.5,
+            0.0,
+            TextAlign::Left,
+            false,
+            400,
+            None,
+            None,
+        );
+        let b = text_fingerprint(
+            "hello",
+            16.0,
+            1.5,
+            0.0,
+            TextAlign::Left,
+            false,
+            400,
+            None,
+            None,
+        );
+        assert_eq!(a, b, "同输入必同 fingerprint（DefaultHasher 固定 key）");
+    }
+
+    #[test]
+    fn fingerprint_differs_on_content() {
+        let a = text_fingerprint(
+            "alice",
+            16.0,
+            1.5,
+            0.0,
+            TextAlign::Left,
+            false,
+            400,
+            None,
+            None,
+        );
+        let b = text_fingerprint(
+            "bob",
+            16.0,
+            1.5,
+            0.0,
+            TextAlign::Left,
+            false,
+            400,
+            None,
+            None,
+        );
+        assert_ne!(
+            a, b,
+            "content 变 → fingerprint 变（set_text/slot 换内容失效靠这个）"
+        );
+    }
+
+    #[test]
+    fn fingerprint_differs_on_style() {
+        let base =
+            |fs| text_fingerprint("hi", fs, 1.5, 0.0, TextAlign::Left, false, 400, None, None);
+        assert_ne!(base(16.0), base(18.0), "font_size 变 → fp 变");
+        let w = |fw| text_fingerprint("hi", 16.0, 1.5, 0.0, TextAlign::Left, false, fw, None, None);
+        assert_ne!(w(400), w(700), "font_weight 变 → fp 变");
+    }
+
+    #[test]
+    fn fingerprint_intrinsic_vs_constrained_differ() {
+        let intrinsic = text_fingerprint(
+            "hi",
+            16.0,
+            1.5,
+            0.0,
+            TextAlign::Left,
+            false,
+            400,
+            None,
+            None,
+        );
+        let constrained = text_fingerprint(
+            "hi",
+            16.0,
+            1.5,
+            0.0,
+            TextAlign::Left,
+            false,
+            400,
+            None,
+            Some(200.0),
+        );
+        assert_ne!(intrinsic, constrained, "None vs Some 必区分（两槽各自键）");
+    }
+
+    #[test]
+    fn fingerprint_quantizes_max_width_to_quarter_px_bucket() {
+        let base = |w| {
+            text_fingerprint(
+                "hi",
+                16.0,
+                1.5,
+                0.0,
+                TextAlign::Left,
+                false,
+                400,
+                None,
+                Some(w),
+            )
+        };
+        // 同 0.25px 桶内（w*4 round 同值）→ 同 fp（避免亚像素抖动 thrash 缓存）
+        // 桶边界：round(w*4)=800 ⟺ w*4∈[799.5,800.5) ⟺ w∈[199.875,200.125)
+        assert_eq!(
+            base(200.0),
+            base(200.1),
+            "200.0(800) 与 200.1(800.4→800) 同桶"
+        );
+        assert_eq!(base(200.0), base(200.12), "200.12(800.48→800) 仍同桶");
+        // 跨桶 → 不同 fp
+        assert_ne!(base(200.0), base(200.2), "200.2(800.8→801) 跨桶");
+        assert_ne!(base(200.0), base(201.0), "201.0 跨桶");
+    }
+
+    #[test]
+    fn measure_cache_default_both_slots_none() {
+        let c = TextMeasureCache::default();
+        assert!(c.intrinsic.is_none());
+        assert!(c.constrained.is_none());
     }
 
     #[test]

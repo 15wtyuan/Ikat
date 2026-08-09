@@ -323,7 +323,7 @@ pub struct BoxShadow {
     pub color: [f32; 4],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TextAlign {
     Left,
     Center,

@@ -81,6 +81,9 @@ fn resize_parallel_arrays(scene: &mut Scene) {
     if scene.text_layouts.len() < need {
         scene.text_layouts.resize(need, None);
     }
+    if scene.text_measure_cache.len() < need {
+        scene.text_measure_cache.resize(need, None);
+    }
 }
 
 /// 建节点：kind_from_tag + apply_css 填 base_style + slotmap insert + 回填 node.id。

@@ -1439,9 +1439,11 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 
 **症状**：showcase 任一页（home/mail/…）即使不滚动也明显低于 60fps（mail 实测 dt≈20ms）。滚动时更甚。
 
-**根因**：`solve()`（layout/mod.rs）**每帧** `TaffyTree::new()` 从头建整棵布局树 + `compute_layout_with_measure` 对**每个文本叶子**调 `measure_text`（完整 shaping，CJK 尤贵），**零缓存**。showcase 237 节点 / ~100 文本节点 ≈ 11ms/帧（阶段实测：solve=11ms，其余 phase <0.5ms）。节点涨到 1739（mail 滚穿后）更慢。这是 v1 布局架构限制，非 bug——增量/缓存布局是后续工作。
+**根因**：`solve()`（layout/mod.rs）**每帧** `TaffyTree::new()` 从头建整棵布局树 + `compute_layout_with_measure` 对**每个文本叶子**调 `measure_text`（完整 shaping，CJK 尤贵），**零缓存**。showcase 237 节点 / ~100 文本节点 ≈ 11ms/帧（阶段实测：solve=11ms，其余 phase <0.5ms）。节点涨到 1739（mail 滚穿后）更慢。
 
-**暂未修**：需 layout 缓存（脏子树重排）+ 文本测量 memoize（text+font+size+约束 → 缓存 shaping 结果）。后者收益大、改动集中（text/layout.rs），是优先项。
+**已修（文本测量 memo）**：给 `measure_text` 加跨帧 memo——`scene.text_measure_cache[nid]` 每节点两槽（intrinsic=max-content / constrained=换行），各带 fingerprint（content hash + style + 量化 max_width）。solve 闭包命中 fingerprint → 复用 TextLayout 跳过 shaping。dump_mail 实测命中率 **97.5%**（181876 hits / 4732 misses），mail tick 从 ~11ms 降到 **~2.4ms/帧**，home ~3.2ms。设计为后续增量布局地基：fingerprint 源可从 content-hash 换成 dirty-version 而每节点两槽结构不变（见 text/layout.rs `TextMeasureCache`）。
+
+**未修（下一档）**：taffy 树本身仍每帧重建 + style 拷贝（237 节点 ~1ms）——那是增量布局（脏子树重排）的活，需 dirty 传播全审计，scope 更大，留布局动画需求（design M2.5）触发时再做。
 
 **取证**：`dump_mail`（编码机 headless）阶段计时——临时给 tick_and_render 插桩（Stopwatch per phase）测出 solve 独占 ~11ms，breathe 动画只占 0.1ms（排除），render/build <0.5ms。
 

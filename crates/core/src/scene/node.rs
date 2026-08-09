@@ -612,6 +612,10 @@ pub struct Scene {
     /// 不换行；长文本 → Some(available) 换行），render 若用 rect.w（stretch 后的 available 整数宽）
     /// 重测，短文本因 intrinsic 亚像素超 available 误判换行。故 render 复用 layout 结果，不重测。
     pub text_layouts: Vec<Option<crate::text::layout::TextLayout>>,
+    /// 跨帧 measure_text memo（每节点两槽 intrinsic/constrained，带 fingerprint）。
+    /// solve 闭包命中 fingerprint → 复用 TextLayout 跳过 shaping（解坑 186 低帧）。详见
+    /// text::layout::TextMeasureCache。render 不读此（读 text_layouts render 槽）。
+    pub text_measure_cache: Vec<Option<crate::text::layout::TextMeasureCache>>,
     /// TextNode content (only TextNode nodes have entries).
     pub text_contents: std::collections::HashMap<NodeId, String>,
     /// Image src paths (only Image nodes have entries).
@@ -729,6 +733,7 @@ impl Scene {
         // **容量而非存活数**：按 id.index() 索引，remove_node 后 idx 不变但存活数减，
         // 按 len 分配会越界。capacity+1（1 基索引，idx 0 占位）。
         scene.text_layouts = vec![None; scene.nodes.capacity() + 1];
+        scene.text_measure_cache = vec![None; scene.nodes.capacity() + 1];
         scene
     }
 
@@ -758,6 +763,7 @@ impl Scene {
             }
         }
         scene.text_layouts = vec![None; scene.nodes.capacity() + 1];
+        scene.text_measure_cache = vec![None; scene.nodes.capacity() + 1];
         scene
     }
 
