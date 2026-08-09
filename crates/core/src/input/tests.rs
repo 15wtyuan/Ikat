@@ -2986,15 +2986,16 @@ fn click_to_focus_focusable_node() {
 }
 
 #[test]
-fn click_non_focusable_no_blur() {
-    // 焦点 A，pointer-down 不可聚焦节点（btn 无 tabindex）→ 不夺焦（不发 FocusOut）
+fn click_non_focusable_blurs_per_dom() {
+    // DOM 语义：焦点 root，pointer-down 不可聚焦节点（btn 无 tabindex）→ blur root
+    // （focus 移到 body 等价——点空白/非聚焦区让聚焦的输入框失焦，是 Web 标准行为）。
     let mut s = one_button_scene(); // btn 无 tabindex，root 无 tabindex
     let root_id = s.roots[0];
     let mut ps = PointerState::new();
-    // 先聚焦 root（编程模拟）——root 无 tabindex，但 focus_node 可强制（测 click-to-focus 不夺焦）
+    // 先聚焦 root（编程模拟）——root 无 tabindex，但 focus_node 可强制
     let mut tmp = Vec::new();
     focus_node(&mut s, Some(root_id), &mut tmp);
-    // down@btn（不可聚焦）→ 不应 FocusOut root
+    // down@btn（不可聚焦）→ 照 DOM 应 FocusOut root + 清焦点
     let out = ps.process(
         &mut s,
         &[PointerEvent {
@@ -3007,10 +3008,11 @@ fn click_non_focusable_no_blur() {
         }],
     );
     assert!(
-        out.iter().all(|e| e.event_type != EVT_FOCUS_OUT),
-        "down 不可聚焦节点 → 不夺焦（无 FocusOut）"
+        out.iter()
+            .any(|e| e.event_type == EVT_FOCUS_OUT && e.node_id == root_id.0),
+        "down 不可聚焦节点 → 照 DOM blur 焦点（FocusOut@root）"
     );
-    assert_eq!(s.focused_node, Some(root_id), "焦点保持 root");
+    assert_eq!(s.focused_node, None, "焦点清空（focus→body 等价）");
 }
 
 #[test]

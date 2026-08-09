@@ -658,11 +658,18 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
     }
 }
 
-/// content box 尺寸。简化：用 border box（layout_rect 尺寸）。
-/// 已声明 padding 简化（建议 scroll 容器 padding:0）；padding 边缘处理 defer。
+/// content box 尺寸（border box 扣 padding）。滚动容器的 viewport 须用 content box：
+/// content_size 是子节点 AABB extent（不含容器 padding），viewport 也须扣 padding 才能让
+/// overlap = content − viewport 正确反映可滚动范围。历史上返回 border box（含 padding），
+/// 导致带 padding 的滚动容器（如 form .body padding:40 64）overlap 偏小、底部内容滚不到。
 fn content_box_size(node: &Node) -> (f32, f32) {
     let lr = node.layout_rect;
-    (lr.w, lr.h)
+    let ts = &node.style.taffy_style;
+    let pl = crate::render::resolve_lp(ts.padding.left);
+    let pr = crate::render::resolve_lp(ts.padding.right);
+    let pt = crate::render::resolve_lp(ts.padding.top);
+    let pb = crate::render::resolve_lp(ts.padding.bottom);
+    ((lr.w - pl - pr).max(0.0), (lr.h - pt - pb).max(0.0))
 }
 
 /// 该 pane 是否正被某个 anchoring 活跃的 ListView 补偿（其祖先链含 pane）。

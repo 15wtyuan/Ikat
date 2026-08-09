@@ -1468,3 +1468,51 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：改用指针重解释 `static uint FloatBitsToUInt(float v) => *(uint*)&v;`（类已 unsafe，零分配、逐 bit 等价）。绕开版本门控 API。
 
 **教训**：**headless net10.0 测试通过 ≠ Unity Mono 能编**。任何 .NET 版本门控 API（BitConverter 新方法、Span 等）在 Unity Mono 侧都可能缺失。改完 C# 别只跑 headless——家里机 Unity 编译是独立门（公司机编码无 Unity 验不了这层）。优先用版本无关的等价写法（指针重解释、手动位运算）。
+
+### 坑 189：文本控件 per-run 色在 layout solve 期烘焙进缓存 TextLayout → render 单独改色被静默绕过（Bug2 占位符色）
+
+**症状**：想让 `role=textbox` 的 placeholder 灰化（对齐浏览器 `::placeholder`），在 render 的 TextField/TextArea/NumberField 臂里把 `text_color` alpha×0.5 传给 `measure_text`。core 单测/编过，但 **dump 取证占位词 mesh 顶点色仍是全色 alpha=1.0**，真机占位符仍白。
+
+**根因**：占位词的文字色**不是 render 决定的**。`layout/mod.rs` 控件 measure（`NodeKind::TextField/TextArea/NumberField` 臂）用 `color: s.color` 调 `measure_text`，**把 per-run 色烘焙进了缓存的 `scene.text_layouts[nid]`**（solve 闭包末尾写回）。render 臂 `cached.unwrap_or_else(measure_text)` 命中缓存就直接用，**完全绕过 render 传的 text_color**——只有 cached=None（measure_text_controls 跳过空 value 占位场景之外的路径）才走 fallback。结果：render 改色是无效补丁，真机不生效。
+
+**解决（placeholder-color 完整版，5 处一致）**：
+1. `ResolvedStyle.placeholder_color: Option<[f32;4]>` 字段；
+2. `apply_decl` 加 `"placeholder-color"`（`parse_color`，不可解析静默落 None）；
+3. fence schema `css.rs` 注册 `placeholder-color`（inherited，Color）；
+4. **`layout/mod.rs` 控件 measure 追踪 `is_placeholder`，占位时 `color = placeholder_render_color(s.placeholder_color, s.color)`——颜色在此进缓存**（关键）；
+5. `render/mod.rs` fallback 用同一公式（与缓存同色）。
+默认 = 文字色折半（浏览器 ::placeholder UA 默认 ~opacity 0.5），作者可写 `placeholder-color:#888` 覆盖。与 caret-color / selection-background / selection-color 一个套路。
+
+**取证**：`dump_form_textbox`——渲染 form 页，按 node_id 过滤 textbox 的 mesh，读 `NodePayload::Mesh.colors` 首顶点色。修前 alpha=1.0，修后 alpha=0.5。
+
+**教训**：**文本控件的 per-run 色是 layout solve 期的产物（烘焙进缓存 TextLayout），不是 render 期的**。凡是要按运行时条件改文本控件文字色（placeholder / readonly 灰字 / 校验红字等），必须在 **layout/mod.rs 的控件 measure** 和 **render fallback** 两处用同一公式，单改 render 会被缓存静默覆盖、真机无效。同理：任何 `scene.text_layouts` 缓存的色源变更都要双处对齐。
+
+### 坑 190：clone_node_recursive 不建克隆控件 ControlState → set_control_value 静默失败（背包列表进度条全相同）
+
+**症状**：虚拟列表（role=list）每 slot 的 ProgressBar 值全相同（满条），driver 的 `BindItem` 按 index 设 `dur.Value=...` 无效；core dump 见每槽 `scene.controls[pb] == None`、fill 宽恒满 80px。
+
+**根因**：`clone_node_recursive`（dynamic.rs）克隆 slot 时调 `create_node_from_template(.., None)`——`control_init` 传 None，克隆控件节点**不建 ControlState**（代码注释自承 "pre-existing gap"）。FFI `set_control_value` 在 `scene.controls.get(id)==None` 时 `return -1` 静默失败；`sync_control_visuals` 也早退。driver 按 index 写的值全丢。
+
+**解决**：Scene 加运行时缓存 `control_inits: HashMap<NodeId, ControlInit>`（instantiate 时 `create_node_from_template` 顺存）；`clone_node_recursive` 读源 init 传 `Some(..)` 重建**全新默认 ControlState**（不搬运行时值，尊重"值不随克隆迁移"意图）。`remove_node` 联动清。
+
+**教训**：克隆子树的控件节点默认无 ControlState——凡在克隆子树（ListView slot / 手动 clone_subtree）里改控件值的，先确认 ControlState 已建。`set_control_value` 返 -1 是静默失败信号，C# 侧不抛——driver 写值"没生效"时优先怀疑此。
+
+### 坑 191：C# 投影层 `throw NE()` 是 stub，非"by-design 不可变"（背包图标 Image.Src）
+
+**症状**：虚拟列表每 slot 图标全相同；demo 注释写"runtime Image.Src 不可变，每个 slot 图标相同"，以为 by-design 差点放过。
+
+**根因**：C# `Image.Src { get{throw NE();} set{throw NE();} }` 是**未接线的 stub**。但底层全通：core `set_src`（dynamic.rs）+ FFI `loomgui_stage_set_src`（ffi/lib.rs）+ render 读 `image_srcs` 出 mesh image_path + Unity MirrorPool 每帧 `GetSprite(path)→RemapUV`。注释"不可变"是 C# 没接的**自我实现**，非真限制。
+
+**解决**：`Image` 类加 `unsafe` + `Src` setter 调 `Native.loomgui_stage_set_src`（照 TextNode.Text 模式）；demo `BindItem` 加 `img.Src="res/icons/"+icons[i%6]+".png"`。纯 C# 改动，不重编 dll/pkg。
+
+**教训**：`LoomGUI.Nodes.cs` 里 get/set 都 `throw NotImplementedException()` 的 API（Image.Src / Touchable / Focusable / OnUpdate…）是 stub。遇注释/demo 写"不可变/by-design"**先查 `crates/ffi/src/lib.rs` + core 源码**确认底层是否已支持，别信注释。判断框架能力看 core+FFI，不看 C# wrapper。
+
+### 坑 192：transform 两条解析路径须同步——func_to_matrix（静态）vs parse_transform_trs（关键帧）
+
+**症状**：`.product:hover{transform:translateY(-6px)}` hover 无效（解成 identity 矩阵），关键帧里的 `translateY` 却正常。
+
+**根因**：transform 解析有**两条独立路径**：`func_to_matrix`（mapping.rs，静态 transform 声明→矩阵）和 `parse_transform_trs`（关键帧轴变体）。前者只认 translate/rotate/scale，**不认轴变体** translateX/translateY/scaleX/scaleY（静默丢→identity）；后者已支持。加 CSS transform 函数只更一处→另一处静默退化。
+
+**解决**：给 `func_to_matrix` 补 translateX/Y/scaleX/Y 4 分支，与 `parse_transform_trs` 对齐。
+
+**教训**：加新 CSS transform 函数（skew/matrix()/3d 等）**两处同步**（func_to_matrix + parse_transform_trs），grep 确认无第三处。同坑 189 的"两处须一致"模式：静态声明路径与关键帧路径分立写、独立测，漏一处 = 静默 identity 不报错。

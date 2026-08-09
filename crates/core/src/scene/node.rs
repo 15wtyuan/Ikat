@@ -601,6 +601,11 @@ pub struct Scene {
     pub lists: crate::list::ListTable,
     /// 每节点控件状态（instantiate 从 `ControlInit` 填、交互改）。运行时态，不进 pkg。
     pub controls: ControlTable,
+    /// 每节点控件初值缓存（instantiate 从 pkg `ControlInit` 填）。运行时态，不进 pkg。
+    /// 供 `clone_node_recursive` 重建克隆控件的 ControlState——否则克隆控件无 ControlState，
+    /// `set_control_value` 静默失败 + `sync_control_visuals` 早退（虚拟列表每槽控件全相同的根因）。
+    /// 稀疏：仅控件节点入表。
+    pub control_inits: std::collections::HashMap<NodeId, crate::asset::ControlInit>,
     /// 每节点 role/data-slot（instantiate 从 TemplateNode 填）。运行时态，不进 pkg。
     /// 稀疏：仅带 role/data-slot 的节点入表。供后续 role 驱动的语义分派 + 控件部件
     /// 定位（find_child_by_role / find_child_by_slot）查表。
