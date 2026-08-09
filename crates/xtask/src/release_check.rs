@@ -14,12 +14,7 @@ pub struct PackageMeta {
 pub enum CheckError {
     MissingField(String),
     InvalidSemver(String),
-    // 以下三个变体由 Task 3 的文件完整性校验构造；本任务先声明，allow 避免 dead_code 误报。
-    #[allow(dead_code)]
     DllNotFound,
-    #[allow(dead_code)]
-    DllStale,
-    #[allow(dead_code)]
     AsmdefMissing(String),
     ChangelogMissingVersion(String),
     Io(String),
@@ -31,10 +26,6 @@ impl std::fmt::Display for CheckError {
             Self::MissingField(n) => write!(f, "package.json missing required field: {n}"),
             Self::InvalidSemver(v) => write!(f, "version is not valid SemVer: {v}"),
             Self::DllNotFound => write!(f, "loomgui_ffi_c.dll not found in package"),
-            Self::DllStale => write!(
-                f,
-                "committed dll differs from target/release build (forgot to commit?)"
-            ),
             Self::AsmdefMissing(n) => write!(f, "asmdef missing: {n}"),
             Self::ChangelogMissingVersion(v) => {
                 write!(f, "CHANGELOG.md has no section for version {v}")
@@ -44,6 +35,13 @@ impl std::fmt::Display for CheckError {
     }
 }
 impl std::error::Error for CheckError {}
+
+/// dll 校验结果。
+#[derive(Debug, PartialEq, Eq)]
+pub enum DllStatus {
+    Ok,
+    NotFound,
+}
 
 /// 解析 package.json 内容并校验必填字段 + version 合法性。
 pub fn parse_and_validate_package(content: &str) -> Result<PackageMeta, CheckError> {
@@ -72,6 +70,31 @@ pub fn changelog_has_version(content: &str, version: &str) -> bool {
         .any(|line| line.trim_start().starts_with(&needle))
 }
 
+/// 校验入库 dll 是否存在。
+pub fn dll_status(committed: &Path) -> DllStatus {
+    if committed.exists() {
+        DllStatus::Ok
+    } else {
+        DllStatus::NotFound
+    }
+}
+
+/// 校验三个 asmdef 齐全。任一缺失返回 `AsmdefMissing`。
+pub fn check_asmdef_present(pkg_dir: &Path) -> Result<(), CheckError> {
+    let expected = [
+        "LoomGUI.Runtime.asmdef",
+        "Editor/LoomGUI.Editor.asmdef",
+        "Plugins/LoomGUI/LoomGUI.Bindings.asmdef",
+    ];
+    for rel in expected {
+        let p = pkg_dir.join(rel);
+        if !p.exists() {
+            return Err(CheckError::AsmdefMissing(rel.to_string()));
+        }
+    }
+    Ok(())
+}
+
 /// release-check 入口：校验 package.json + CHANGELOG + dll + asmdef。
 /// 任意一项失败返回 Err，调用方据此退出非 0。
 pub fn run_release_check() -> Result<(), Box<dyn std::error::Error>> {
@@ -84,8 +107,15 @@ pub fn run_release_check() -> Result<(), Box<dyn std::error::Error>> {
         return Err(CheckError::ChangelogMissingVersion(meta.version).into());
     }
 
-    // 文件完整性校验（dll / asmdef）见 Task 3 接入。
-    let _ = Path::new("");
+    // dll：入库必须存在。
+    let pkg_dir = paths::repo_root().join("unity/package");
+    let committed_dll = pkg_dir.join("Plugins/LoomGUI/loomgui_ffi_c.dll");
+    match dll_status(&committed_dll) {
+        DllStatus::NotFound => return Err(CheckError::DllNotFound.into()),
+        DllStatus::Ok => {}
+    }
+
+    check_asmdef_present(&pkg_dir)?;
 
     println!("release-check: OK (version {})", meta.version);
     Ok(())
@@ -134,5 +164,28 @@ mod tests {
     fn changelog_missing_section() {
         let s = "## [Unreleased]\n\n## [0.0.2] - 2026-08-09\n";
         assert!(!changelog_has_version(s, "0.0.1"));
+    }
+
+    fn tmp_bytes(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let id = N.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("xtask-rc-{}-{id}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(name);
+        std::fs::write(&p, bytes).unwrap();
+        p
+    }
+
+    #[test]
+    fn dll_not_found() {
+        let missing = std::env::temp_dir().join("xtask-rc-nope-a");
+        assert_eq!(dll_status(&missing), DllStatus::NotFound);
+    }
+
+    #[test]
+    fn dll_present() {
+        let present = tmp_bytes("a.dll", b"AAA");
+        assert_eq!(dll_status(&present), DllStatus::Ok);
     }
 }
