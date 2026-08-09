@@ -26,24 +26,61 @@ use node::*;
 
 use taffy::style::LengthPercentage;
 
-/// 合成 node_id 标志位：主节点的"下层"合成 RenderNode（独立 draw call 画在主节点之下，
-/// sort_key < primary，经 propagate_back_layer_sort_keys 调整）。按语义命名（back-layer
-/// marker），不按当前唯一使用者 box-shadow 命名——未来新增"独立 quad 下层"需求复用此位。
+/// box-shadow 合成 RenderNode 的 high-byte 标签区。
 ///
-/// 0x1000_0000（bit 28），不与 V_THUMB_FLAG（0x4000_0000）、H_THUMB_FLAG（0x2000_0000）、
-/// 跨页 text 子页（bits [31:24]，实际值 1..~10）冲突。
+/// 每层 box-shadow 产一个合成 RenderNode（独立 draw call），其 node_id =
+/// `(primary & 0x00FF_FFFF) | (synth_byte << 24)`，high byte 编码层类型 + 层内 idx：
+/// - 外阴影（outer）：画在 primary 之下（sort_key < primary）。high byte = 44 + idx
+///   （最多 4 层/primary，44..=47）。
+/// - 内阴影（inset）：画在 primary 之上、子节点之下。high byte = 36 + idx
+///   （最多 8 层/primary，36..=43）。
 ///
-/// 边界：bg-color-under-texture（Image/Container 底色透图）不走此机制——由 shader
-/// BG_COMPOSITE（program 2/4）的 source-over 合成处理（单 quad，GPU 合成），无需独立 RenderNode。
-/// 仅"独立 quad 下层"（当前：box-shadow 的偏移阴影 quad）走此位。
-pub(crate) const BACK_LAYER_FLAG: u32 = 0x1000_0000;
+/// 选 high-byte 编码（非 bit flag）的理由：bit 空间已挤（V/H_THUMB_FLAG 占 bit 30/29），
+/// 且 outer 多层需在 id 内编码层内 idx 以保证唯一——bit flag 无法编 idx。high byte
+/// 36..=47 全落在安全区：bit 28（旧 BACK_LAYER_FLAG 位）清零、不在跨页子页 1..=15、
+/// 不在 retired INLINE_IMG 232..=255、不在 TF synth 32..=35。故彻底弃用旧
+/// BACK_LAYER_FLAG bit（box-shadow 是其唯一使用者，现已迁出）。
+const FRONT_SHADOW_SYNTH_BYTE: u32 = 36;
+const BACK_SHADOW_SYNTH_BYTE: u32 = 44;
+
+/// 生成 inset box-shadow 合成 node_id（high byte = 36 + idx）。idx = 该 primary 内
+/// inset 层的 CSS 序号（保 id 唯一；sort_key 由 propagate 按 push 序另算）。
+fn front_shadow_id(primary: u32, idx: u32) -> u32 {
+    (primary & 0x00FF_FFFF) | ((FRONT_SHADOW_SYNTH_BYTE + idx) << 24)
+}
+
+/// 生成 outer box-shadow 合成 node_id（high byte = 44 + idx）。idx = 该 primary 内
+/// outer 层的 CSS 序号。
+fn back_shadow_id(primary: u32, idx: u32) -> u32 {
+    (primary & 0x00FF_FFFF) | ((BACK_SHADOW_SYNTH_BYTE + idx) << 24)
+}
+
+/// 判断 node_id 是否为 inset box-shadow 合成节点（high byte 36..=43）。
+/// propagate_text_sub_page_sort_keys 据此把它们排到 primary 之上（紧随 primary）。
+pub(crate) fn is_front_shadow_synth(node_id: u32) -> bool {
+    let hi = (node_id >> 24) as u8;
+    (FRONT_SHADOW_SYNTH_BYTE as u8..=43).contains(&hi)
+}
+
+/// 判断 node_id 是否为 outer box-shadow 合成节点（high byte 44..=47）。
+pub(crate) fn is_back_shadow_synth(node_id: u32) -> bool {
+    let hi = (node_id >> 24) as u8;
+    (BACK_SHADOW_SYNTH_BYTE as u8..=47).contains(&hi)
+}
+
+/// 判断 node_id 是否为任一 box-shadow 合成节点（inset 36..=43 ∪ outer 44..=47）。
+/// merge::mesh_key / batch::is_mergeable_mesh 据此排除合批——box-shadow 合成 mesh
+/// 须保持独立 node_id（C# MirrorPool 按 node_id 建独立 GO，合批会吞 id）。
+pub(crate) fn is_shadow_synth(node_id: u32) -> bool {
+    is_front_shadow_synth(node_id) || is_back_shadow_synth(node_id)
+}
 
 /// 富文本行内图（inline `<img>`）合成 node_id 子页基址。每个行内图一个独立 RenderNode
 /// （image shader + image_path=src），须叠在 primary 文字层之上：sort_key 由
 /// `propagate_inline_image_sort_keys` 设为 primary 文字层 max + img_idx + 1。
 /// synth_text_node_id 编码后 high byte = (1000 + idx) & 0xFF = 232..=255，不与跨页子页
-/// （1..=15）或 BACK_LAYER_FLAG（high byte 16）撞——靠 `inline_image_pairs` 显式配对
-/// 传播 sort_key，不凭 high byte 判别。
+/// （1..=15）或 box-shadow synth（high byte 36..=47）撞——靠 `inline_image_pairs` 显式
+/// 配对传播 sort_key，不凭 high byte 判别。
 #[allow(dead_code)] // RichText retired in Spec-2; kept for compound-bundle text model.
 pub(crate) const INLINE_IMG_SYNTH_ID_BASE: u32 = 1000;
 
@@ -567,8 +604,8 @@ pub fn build_render_nodes(
     // 累积 alpha 预计算（父 opacity 逐层乘入子）：RenderNode.alpha 存累积值，后端画时直接用。
     // 主循环是平铺遍历（slotmap 序），父未必先于子，故单独 DFS 一遍把每节点累积值算好。
     let alphas = accumulate_alpha(scene);
-    // back-layer 合成 RenderNode 追踪：(主节点 node_id, 下层合成 node_id)。
-    // 当前唯一使用者 box-shadow；未来"独立 quad 下层"复用。
+    // box-shadow outer 阴影合成 RenderNode 追踪：(primary node_id, outer 阴影合成 node_id)。
+    // inset 阴影不经此表——由 propagate_text_sub_page_sort_keys 按 high-byte 自动收集。
     let mut back_layer_pairs: Vec<(u32, u32)> = Vec::new();
     // 富文本行内图 RenderNode 追踪：(主节点 node_id, 行内图合成 node_id)。
     let inline_image_pairs: Vec<(u32, u32)> = Vec::new();
@@ -608,7 +645,7 @@ pub fn build_render_nodes(
     // 不认识合成子页。此处把子页 sort_key 设为 primary.sort_key + page_idx，并把后续真节点
     // 的 sort_key 后移子页个数，保持单调连续。
     propagate_text_sub_page_sort_keys(&mut nodes, &id_to_pos);
-    propagate_back_layer_sort_keys(&mut nodes, &back_layer_pairs);
+    propagate_back_shadow_sort_keys(&mut nodes, &back_layer_pairs);
     propagate_inline_image_sort_keys(&mut nodes, &inline_image_pairs);
     batch::reorder_for_batching(scene, &mut nodes);
     // 控件节点必须保留独立 node_id（Unity 按 node_id 建交互实体/镜像 GameObject）。
@@ -745,15 +782,13 @@ fn synth_text_node_id(primary_id: u32, sub_page: u32) -> u32 {
 // 这些 mesh 是逐帧重算的动态反馈（光标闪烁、选区随拖拽变），绝不能与静态背景/文字
 // 合批——否则（1）光标闪烁会连累背景每帧重传；（2）cursor 与 composition 变化节奏
 // 不同，合批会让 composition 的 node_id 随光标可见性跳变，dirty-tracking 抖动。故
-// [`is_tf_edit_synth`] 在 batch/merge 里显式排除它们（不靠 BACK_LAYER_FLAG 滥位）。
+// [`is_tf_edit_synth`] 在 batch/merge 里显式排除它们（靠显式谓词，不靠 high-byte 滥位）。
 //
 // high-byte 取值约束（须同时满足）：
 //   1. 不在 text 跨页子页范围（1..=15），否则 is_text_sub_page 误判；
-//   2. BACK_LAYER_FLAG 清零——该位是 bit 28，即 high byte 的 bit-4（值 0x10），故
-//      high byte 取 16-31/48-63/... 都会置位。high byte 必须落在 32-47 区间
-//      （仅 bit-5 置位，bit-4 清零），才保证 BACK_LAYER_FLAG 不被置位；
+//   2. 不在 box-shadow synth 区间（36..=47），否则 is_shadow_synth 误排除合批；
 //   3. 不与 retired INLINE_IMG_SYNTH_ID_BASE（high byte 232..=255）撞。
-// 选 32/33/34，满足全部约束；is_text_sub_page 对此区间返 false。
+// 选 32/33/34，满足全部约束；is_text_sub_page / is_shadow_synth 对此区间均返 false。
 const TF_CURSOR_SYNTH_BYTE: u32 = 32;
 const TF_SELECTION_SYNTH_BYTE: u32 = 33;
 const TF_COMPOSITION_SYNTH_BYTE: u32 = 34;
@@ -763,7 +798,7 @@ const TF_COMPOSITION_SYNTH_BYTE: u32 = 34;
 /// → 控件渲染残缺/不可见（settings showcase 的 spinbutton “无法渲染” 根因）。
 /// 文字 mesh 改用此合成 id 与背景区分，C# 各自独立 GO；primary 关联仍 = 真节点 id
 ///（text_sub_primary_id 可还原），供 sort_key 传播与调试反查。选 35：与子页 1..=15、
-/// BACK_LAYER_FLAG 区间、retired 232..=255 均不撞（同 32..=34 安全区间）。
+/// box-shadow synth 区间（36..=47）、retired 232..=255 均不撞（同 32..=34 安全区间）。
 const TF_TEXT_SYNTH_BYTE: u32 = 35;
 
 /// 生成 TextField 编辑反馈 mesh 的合成 node_id（high byte = tag，低 24 位 = primary）。
@@ -788,7 +823,7 @@ pub(crate) fn is_tf_text_synth(node_id: u32) -> bool {
 }
 
 /// 判断 node_id 是否为跨页 text 子页（high byte 在 1..=15，即 bits [31:24] 值 1-15）。
-/// BACK_LAYER_FLAG（bit 28，对应 high byte >= 16）和 INLINE_IMG_SYNTH_ID_BASE（high byte
+/// box-shadow synth（high byte 36..=47）和 INLINE_IMG_SYNTH_ID_BASE（high byte
 /// = 232..=255）均不在此范围——各自的 propagate 函数单独传播 sort_key，不走子页传播。
 fn is_text_sub_page(node_id: u32) -> bool {
     let page = (node_id >> 24) as u8;
@@ -800,65 +835,73 @@ fn text_sub_primary_id(node_id: u32) -> u32 {
     node_id & 0x00FF_FFFF
 }
 
-/// box-shadow 合成节点 sort_key 调整：阴影节点继承主节点 sort_key，
-/// 主节点及后续节点后移一位（阴影在背景层之下 = sort_key 更小 = 先绘）。
+/// outer box-shadow 合成节点 sort_key 调整：每个 primary 的 outer 阴影层排在 primary 之下
+///（sort_key < primary），CSS 首层最高（最贴 primary 下 = 最后绘 = 最上层）。
 ///
-/// assign_sort_keys 只给 id_to_pos 中的真 scene 节点赋 sort_key；
-/// back-layer 合成节点不在场景树中，初始 sort_key=0。此函数将其调整到
-/// 主节点 sort_key 位置，保证下层（当前：box-shadow）在主节点之前渲染。
+/// assign_sort_keys 只给 id_to_pos 中的真 scene 节点赋 sort_key；outer 阴影合成节点不在
+/// 场景树中，初始 sort_key=0。此函数按 primary 分组调整：每组 B 个阴影，把 sort_key
+/// >= primary 的节点后移 B，再逆 CSS 序赋 primary_sk - 1（首层）.. primary_sk - B（末层）。
 ///
-/// 处理多个下层节点时从最大 sort_key 开始（降序），避免累积偏移后的 stale 值。
-fn propagate_back_layer_sort_keys(
+/// 多 primary 按 main_sk DESC 处理，避免累积偏移后的 stale 值污染小 key 比较。
+fn propagate_back_shadow_sort_keys(
     nodes: &mut [RenderNode],
-    shadows: &[(u32, u32)], // (main_node_id, shadow_node_id)
+    shadow_pairs: &[(u32, u32)], // (primary_node_id, shadow_node_id)，CSS push 序
 ) {
-    if shadows.is_empty() {
+    if shadow_pairs.is_empty() {
         return;
     }
-    // 构建 (main_sort_key_on_entry, main_id, shadow_id) 三元组。
-    // 按 main_sort_key DESC 处理，避免先处理大 key 的移位影响后续小 key 比较。
-    let mut triples: Vec<(u32, u32, u32)> = shadows
-        .iter()
-        .map(|&(main_id, shadow_id)| {
-            // 在 nodes 中查找主节点 sort_key（shadow 在 nodes 中排在主节点之前，
-            // 且主节点已由 assign_sort_keys 赋过值）。
+    // 按 primary 分组 outer 阴影（保 push 序 = CSS 序——outer 按 CSS 序 push）。
+    let mut groups: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    for &(primary, shadow_id) in shadow_pairs {
+        groups.entry(primary).or_default().push(shadow_id);
+    }
+    // 每组采集 main_sk（primary 当前 sort_key），按 DESC 排序处理。
+    let mut entries: Vec<(u32, u32, Vec<u32>)> = groups
+        .into_iter()
+        .map(|(primary, shadow_ids)| {
             let main_sk = nodes
                 .iter()
-                .find(|n| n.node_id == main_id)
+                .find(|n| n.node_id == primary)
                 .map(|n| n.sort_key)
                 .unwrap_or(0);
-            (main_sk, main_id, shadow_id)
+            (main_sk, primary, shadow_ids)
         })
         .collect();
-    triples.sort_by_key(|&(sk, _, _)| std::cmp::Reverse(sk)); // descending
-    for &(main_sk, _main_id, shadow_id) in &triples {
-        // 移位：所有 sort_key >= main_sk 且非本阴影的节点 +1。
-        // 降序遍历保证大 sort_key 区域的移位不会污染小 key 的原始值。
+    entries.sort_by_key(|&(sk, _, _)| std::cmp::Reverse(sk)); // DESC
+                                                              // Loop 1（移位）：每组把 sort_key >= main_sk 且非本组阴影的节点 += B。
+                                                              // 降序保证大 key 区移位不污染小 key 原始值。阴影节点当前 sort_key=0，一般 < main_sk
+                                                              // 自然排除；显式 set 检查兼底 main_sk=0 的首节点情形（避免阴影被误移位）。
+    for &(main_sk, _primary, ref shadow_ids) in &entries {
+        let b = shadow_ids.len() as u32;
+        let id_set: std::collections::HashSet<u32> = shadow_ids.iter().copied().collect();
         for rn in nodes.iter_mut() {
-            if rn.node_id != shadow_id && rn.sort_key >= main_sk {
-                rn.sort_key += 1;
+            if !id_set.contains(&rn.node_id) && rn.sort_key >= main_sk {
+                rn.sort_key += b;
             }
         }
     }
-    // 设阴影 sort_key = 主节点原始 sort_key。
-    // 上述降序移位后主节点已后移 +1（每个经过它的阴影对其移了一次），
-    // 阴影节点初始 sort_key=0。
-    // 后处理：对每个 shadow，找它的主节点（现在 sort_key = 原始 + 经过的阴影数），
-    // 设为 主_sk - 1。
-    for &(main_id, shadow_id) in shadows {
-        if let (Some(main_pos), Some(shadow_pos)) = (
-            nodes.iter().position(|n| n.node_id == main_id),
-            nodes.iter().position(|n| n.node_id == shadow_id),
-        ) {
-            let main_sk = nodes[main_pos].sort_key;
-            if main_sk > 0 {
-                nodes[shadow_pos].sort_key = main_sk - 1;
+    // Loop 2（赋值 + mask 传播）：每组读 primary 移位后 sort_key，逆 CSS 序赋
+    // primary_sk - 1（首层最高=最贴 primary）.. primary_sk - B（末层最低）。
+    for &(_main_sk, primary, ref shadow_ids) in &entries {
+        let Some(main_pos) = nodes.iter().position(|n| n.node_id == primary) else {
+            continue;
+        };
+        let main_sk = nodes[main_pos].sort_key;
+        let main_mask = nodes[main_pos].mask_context;
+        for (i, &shadow_id) in shadow_ids.iter().enumerate() {
+            let Some(shadow_pos) = nodes.iter().position(|n| n.node_id == shadow_id) else {
+                continue;
+            };
+            if main_sk > i as u32 {
+                nodes[shadow_pos].sort_key = main_sk - 1 - i as u32;
+            } else {
+                // primary 在 DFS 首位且层数超过 main_sk：无法全排在 primary 之下不重叠。
+                // 兑底赋 0（与 primary 同 key，靠 push 序——shadow 先 push——解析为下层）。
+                nodes[shadow_pos].sort_key = 0;
             }
-            // box-shadow back layer 继承主节点的 mask_context（clip 上下文）：
-            // 阴影是节点的视觉一部分（inset 环/外阴影），overflow 容器裁剪时阴影须与主节点同裁。
-            // 旧实现 push 时硬编码 mask=0（坑：overflow:auto 容器内子节点的 inset box-shadow
-            // 不被裁，溢出到容器外，UI 上表现为「黑底没被裁剪」）。此处补传播。
-            nodes[shadow_pos].mask_context = nodes[main_pos].mask_context;
+            // 外阴影继承主节点 mask_context（clip 上下文）：阴影是节点的视觉一部分，
+            // overflow 容器裁剪时须与主节点同裁（旧实现 push 时硬编码 0 → 不裁、溢出）。
+            nodes[shadow_pos].mask_context = main_mask;
         }
     }
 }
@@ -919,11 +962,13 @@ fn propagate_inline_image_sort_keys(nodes: &mut [RenderNode], images: &[(u32, u3
 /// Text 附属 mesh sort_key 传播 + 后续真节点 sort_key 后移。
 ///
 /// assign_sort_keys 只给 `id_to_pos` 中的真 scene 节点赋 sort_key；合成附属 mesh 保持 0。
-/// 附属 mesh 有三类（都按 primary = low 24 bit 关联真节点）：
+/// 附属 mesh 有四类（都按 primary = low 24 bit 关联真节点）：
 /// - 跨页子页（high byte 1..=15）：多页文字的后续页。
 /// - 文本控件文字首页（high byte 35）：TextField/TextArea/NumberField 的文字主体
 ///   （背景框 mesh 占真 node_id，文字用合成 id 区分，见 TF_TEXT_SYNTH_BYTE）。
 /// - 编辑反馈 mesh（high byte 32..=34）：光标 / 选区背景 / composition 下划线。
+/// - inset box-shadow（high byte 36..=43）：内阴影层，画在 primary 之上、子节点之下。
+///   render_one_node 按 CSS 逆序 push，使首层 CSS 得最大 offset（画在最上）。
 ///
 /// 此函数：
 /// 1. 按 primary 分组统计附属 mesh（遍历 nodes 按 push 序收集 → synth_ids 保 push 序）。
@@ -947,6 +992,7 @@ fn propagate_text_sub_page_sort_keys(
         if is_text_sub_page(rn.node_id)
             || is_tf_text_synth(rn.node_id)
             || is_tf_edit_synth(rn.node_id)
+            || is_front_shadow_synth(rn.node_id)
         {
             let primary = text_sub_primary_id(rn.node_id);
             groups.entry(primary).or_default().push(rn.node_id);
@@ -978,6 +1024,7 @@ fn propagate_text_sub_page_sort_keys(
             if is_text_sub_page(rn.node_id)
                 || is_tf_text_synth(rn.node_id)
                 || is_tf_edit_synth(rn.node_id)
+                || is_front_shadow_synth(rn.node_id)
             {
                 continue;
             }
@@ -1436,8 +1483,8 @@ fn emit_deco_segments(
 ///
 /// base 字形走跨页子页机制：首页（page 0）用真 node_id，后续页用 `synth_text_node_id` 合成 id。
 /// SDF 改造后文字效果（shadow/stroke/glow/blur）改由 shader uniform 实现——`meshes.effect`
-/// 直接塞进 base/子页/占位 RenderNode.effect，不再产 back/front layer 合成节点（原 BACK_LAYER_FLAG
-/// + TEXT_STROKE_FRONT_FLAG 双层机制全废；BACK_LAYER_FLAG 留给 div box-shadow 单独使用）。
+/// 直接塞进 base/子页/占位 RenderNode.effect，不再产 back/front layer 合成节点（原
+/// 双层合成机制全废；box-shadow 现走专属 high-byte synth，不走此路径）。
 fn push_text_meshes(
     nodes: &mut Vec<RenderNode>,
     id_to_pos: &mut std::collections::HashMap<NodeId, usize>,
@@ -2155,54 +2202,97 @@ fn render_one_node(
             },
         },
     };
-    // box-shadow：独立 RenderNode 画在节点下层（sort_key 更小 = 先绘 = 在下）。
-    // 阴影节点不入 id_to_pos（不在场景树中），sort_key 在 assign_sort_keys 后
-    // 由 propagate_back_layer_sort_keys 调整为主节点 sort_key（主节点后移一位）。
-    if let Some(shadow) = n.style.box_shadow.first() {
-        if n.kind.is_container() {
-            let rw = rect.w;
-            let rh = rect.h;
-            let radii = n.style.border_radius.as_corners(rw, rh);
-            let shadow_rect = Rect {
-                x: rect.x + shadow.ox,
-                y: rect.y + shadow.oy,
-                w: rect.w,
-                h: rect.h,
-            };
-            let (v, uvc, col, idx) = crate::render::border::box_shadow_quad(
-                &shadow_rect,
-                &radii,
-                shadow.spread,
-                shadow.color,
-            );
-            if !v.is_empty() {
-                let sid = node_id | BACK_LAYER_FLAG;
-                back_layer_pairs.push((node_id, sid));
-                nodes.push(RenderNode {
-                    node_id: sid,
-                    parent_id,
-                    visible: true,
-                    alpha,
-                    color_tint,
-                    world_matrix: wm,
-                    blend: BlendMode::Normal,
-                    mask_context: MaskContext(0),
-                    sort_key: 0, // assign_sort_keys 后重调
-                    change_level: ChangeLevel::Full,
-                    reuse_key: 0,
-                    effect: EffectBlock::default(),
-                    shadow_params: [0.0; 6],
-                    payload: NodePayload::Mesh {
-                        verts: v,
-                        uvs: uvc,
-                        colors: col,
-                        indices: idx,
-                        image_path: None,
-                        program: 0,
-                        color_matrix: [0.0; 20],
-                    },
-                });
+    // box-shadow：每层一个合成 RenderNode。outer（外阴影）画在 primary 之下（sort_key
+    // < primary，经 propagate_back_shadow_sort_keys 调整）；inset（内阴影）画在 primary
+    // 之上、子节点之下（经 propagate_text_sub_page_sort_keys 调整）。blur>0 走 SDF
+    // 路径（program=5 + shadow_params + pad quad），blur=0 退化实心圆角矩形（program=0）。
+    //
+    // CSS 层序：同一 primary 内，先列出的 outer 层画在最顶（最贴 primary 下），先列出的
+    // inset 层画在最顶（最离 primary 上）。outer 按 CSS 序 push（propagate_back_shadow
+    // 按 CSS 序赋最高=primary-1 给首层）；inset 按 CSS 逆序 push（propagate_text_sub_page
+    // 按 push 序赋 offset，逆序 push 使首层得最大 offset=最上）。
+    let shadows = &n.style.box_shadow;
+    if n.kind.is_container() && !shadows.is_empty() {
+        let radii = n.style.border_radius.as_corners(rect.w, rect.h);
+        // outer（back）层：CSS 序 push。
+        for (i, sh) in shadows.iter().filter(|s| !s.inset).enumerate() {
+            let sigma = (sh.blur * 0.5).max(0.0);
+            let blur_on = sh.blur >= 0.5;
+            let sid = back_shadow_id(node_id, i as u32);
+            let (v, uvc, col, idx, params) =
+                crate::render::border::shadow_quad(rect, &radii, sh, blur_on, sigma);
+            if v.is_empty() {
+                continue;
             }
+            back_layer_pairs.push((node_id, sid));
+            nodes.push(RenderNode {
+                node_id: sid,
+                parent_id,
+                visible: true,
+                alpha,
+                color_tint,
+                world_matrix: wm,
+                blend: BlendMode::Normal,
+                mask_context: MaskContext(0),
+                sort_key: 0, // propagate_back_shadow_sort_keys 后重调
+                change_level: ChangeLevel::Full,
+                reuse_key: 0,
+                effect: EffectBlock::default(),
+                shadow_params: params,
+                payload: NodePayload::Mesh {
+                    verts: v,
+                    uvs: uvc,
+                    colors: col,
+                    indices: idx,
+                    image_path: None,
+                    program: if blur_on { 5 } else { 0 },
+                    color_matrix: [0.0; 20],
+                },
+            });
+        }
+        // inset（front）层：CSS 逆序 push。idx 仍用 CSS 序（保 id 唯一 + 可调试反查）。
+        let inset_layers: Vec<(usize, &crate::style::resolved::BoxShadow)> = shadows
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.inset)
+            .collect();
+        for &(css_idx, sh) in inset_layers.iter().rev() {
+            let sigma = (sh.blur * 0.5).max(0.0);
+            let blur_on = sh.blur >= 0.5;
+            // inset idx = 该 primary 内 inset 层的 CSS 序（0-based，区别于混合序）。
+            let inset_idx = shadows.iter().take(css_idx).filter(|s| s.inset).count() as u32;
+            let sid = front_shadow_id(node_id, inset_idx);
+            let (v, uvc, col, idx, params) =
+                crate::render::border::shadow_quad(rect, &radii, sh, blur_on, sigma);
+            if v.is_empty() {
+                continue;
+            }
+            // front 层不经 back_layer_pairs——由 propagate_text_sub_page_sort_keys 按
+            // is_front_shadow_synth 自动收集并赋 sort_key（嵌入 primary 之后、下一真节点之前）。
+            nodes.push(RenderNode {
+                node_id: sid,
+                parent_id,
+                visible: true,
+                alpha,
+                color_tint,
+                world_matrix: wm,
+                blend: BlendMode::Normal,
+                mask_context: MaskContext(0),
+                sort_key: 0, // propagate_text_sub_page_sort_keys 后重调
+                change_level: ChangeLevel::Full,
+                reuse_key: 0,
+                effect: EffectBlock::default(),
+                shadow_params: params,
+                payload: NodePayload::Mesh {
+                    verts: v,
+                    uvs: uvc,
+                    colors: col,
+                    indices: idx,
+                    image_path: None,
+                    program: if blur_on { 5 } else { 0 },
+                    color_matrix: [0.0; 20],
+                },
+            });
         }
     }
     if register_id_map {

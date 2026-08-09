@@ -221,6 +221,120 @@ pub fn box_shadow_quad(
     crate::render::mesh::rounded_rect(&outer, color, &spread_radii, [0.0, 0.0], [0.0, 0.0])
 }
 
+/// box-shadow 单层几何 + SDF 参数：形状 = rect 经 (ox,oy) 偏移后按 spread 外扩（outer）
+/// 或内缩（inset），每角半径同步 ±spread。blur_on 时形状外再 pad ≈ 3σ 收高斯尾，
+/// uv 存顶点到形状中心的像素偏移（fragment shader 据此算 SDF 距离）；blur_on=false
+/// 退化成实心圆角矩形（复用 `box_shadow_quad`，program=0）。
+///
+/// 返回 (verts, uvs, colors, indices, params)，params = [half.x, half.y, radius, sigma,
+/// inset_flag, 0.0]，供 program=5 的 SDF box-shadow shader（后续 task）使用。
+#[allow(clippy::type_complexity)]
+pub fn shadow_quad(
+    rect: &Rect,
+    radii: &[(f32, f32); 4],
+    sh: &crate::style::resolved::BoxShadow,
+    blur_on: bool,
+    sigma: f32,
+) -> (
+    Vec<[f32; 2]>,
+    Vec<[f32; 2]>,
+    Vec<[f32; 4]>,
+    Vec<u32>,
+    [f32; 6],
+) {
+    // 形状 rect（SDF 形状）：outer 外扩 spread / inset 内缩 spread，均再偏移 (ox,oy)。
+    // per-corner 半径同步 ±spread（CSS box-shadow：每角半径随 spread 外扩/内缩）。
+    let (shape_rect, shape_radii) = if sh.inset {
+        let r = Rect {
+            x: rect.x + sh.ox + sh.spread,
+            y: rect.y + sh.oy + sh.spread,
+            w: rect.w - 2.0 * sh.spread,
+            h: rect.h - 2.0 * sh.spread,
+        };
+        let sr = [
+            (
+                (radii[0].0 - sh.spread).max(0.0),
+                (radii[0].1 - sh.spread).max(0.0),
+            ),
+            (
+                (radii[1].0 - sh.spread).max(0.0),
+                (radii[1].1 - sh.spread).max(0.0),
+            ),
+            (
+                (radii[2].0 - sh.spread).max(0.0),
+                (radii[2].1 - sh.spread).max(0.0),
+            ),
+            (
+                (radii[3].0 - sh.spread).max(0.0),
+                (radii[3].1 - sh.spread).max(0.0),
+            ),
+        ];
+        (r, sr)
+    } else {
+        let r = Rect {
+            x: rect.x + sh.ox - sh.spread,
+            y: rect.y + sh.oy - sh.spread,
+            w: rect.w + 2.0 * sh.spread,
+            h: rect.h + 2.0 * sh.spread,
+        };
+        let sr = [
+            (radii[0].0 + sh.spread, radii[0].1 + sh.spread),
+            (radii[1].0 + sh.spread, radii[1].1 + sh.spread),
+            (radii[2].0 + sh.spread, radii[2].1 + sh.spread),
+            (radii[3].0 + sh.spread, radii[3].1 + sh.spread),
+        ];
+        (r, sr)
+    };
+    if shape_rect.w <= 0.0 || shape_rect.h <= 0.0 {
+        return (Vec::new(), Vec::new(), Vec::new(), Vec::new(), [0.0; 6]);
+    }
+    let center = [
+        shape_rect.x + shape_rect.w * 0.5,
+        shape_rect.y + shape_rect.h * 0.5,
+    ];
+    // SDF 参数：half = 形状半尺寸，radius = 四角取 max（per-corner SDF 留 spec 细化），
+    // sigma = blur σ（blur_on=false 为 0），inset_flag 区分内外阴影 shader 分支。
+    let half = [shape_rect.w * 0.5, shape_rect.h * 0.5];
+    let radius = shape_radii.iter().map(|&(rx, _)| rx).fold(0.0f32, f32::max);
+    let params = [
+        half[0],
+        half[1],
+        radius,
+        if blur_on { sigma } else { 0.0 },
+        if sh.inset { 1.0 } else { 0.0 },
+        0.0,
+    ];
+    if !blur_on {
+        // 硬边：复用 box_shadow_quad 实心圆角矩形（shape 已含 spread，传 spread=0 避免二次外扩）。
+        let (v, uv, c, idx) = box_shadow_quad(&shape_rect, &shape_radii, 0.0, sh.color);
+        return (v, uv, c, idx, params);
+    }
+    // blur_on：pad ≈ 3σ 外扩 quad 收高斯尾，uv = 顶点本地坐标 − 形状中心（fragment
+    // 拿到像素空间偏移 p，算 rounded-rect SDF = |p - clamp(p, ±half)| − r，再高斯衰减）。
+    let pad = 3.0 * sigma;
+    let padded = Rect {
+        x: shape_rect.x - pad,
+        y: shape_rect.y - pad,
+        w: shape_rect.w + 2.0 * pad,
+        h: shape_rect.h + 2.0 * pad,
+    };
+    let v = vec![
+        [padded.x, padded.y],
+        [padded.x + padded.w, padded.y],
+        [padded.x + padded.w, padded.y + padded.h],
+        [padded.x, padded.y + padded.h],
+    ];
+    let uv = vec![
+        [v[0][0] - center[0], v[0][1] - center[1]],
+        [v[1][0] - center[0], v[1][1] - center[1]],
+        [v[2][0] - center[0], v[2][1] - center[1]],
+        [v[3][0] - center[0], v[3][1] - center[1]],
+    ];
+    let colors = vec![sh.color; 4];
+    let indices = vec![0, 1, 2, 0, 2, 3];
+    (v, uv, colors, indices, params)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,6 +467,93 @@ mod tests {
         let radii = [(0.0, 0.0); 4];
         let (v, _u, _c, i) = box_shadow_quad(&r, &radii, 0.0, [1.0; 4]);
         assert!(v.is_empty() && i.is_empty(), "退化 rect → 空输出");
+    }
+
+    #[test]
+    fn shadow_quad_outer_no_blur_reuses_solid() {
+        // outer + blur=0：形状 = rect 外扩 spread + 偏移 (ox,oy)，产实心圆角矩形 + sigma=0 params。
+        use crate::style::resolved::BoxShadow;
+        let r = Rect {
+            x: 10.0,
+            y: 20.0,
+            w: 80.0,
+            h: 40.0,
+        };
+        let sh = BoxShadow {
+            ox: 2.0,
+            oy: 3.0,
+            spread: 5.0,
+            blur: 0.0,
+            color: [0.0, 0.0, 0.0, 0.5],
+            inset: false,
+        };
+        let (v, _uv, colors, idx, params) = shadow_quad(&r, &[(0.0, 0.0); 4], &sh, false, 0.0);
+        assert!(!v.is_empty(), "外扩后非空");
+        // 形状 = rect+(2,3) 外扩 5：x_min = 10+2-5 = 7
+        let x_min = v.iter().map(|p| p[0]).fold(f32::MAX, f32::min);
+        assert!((x_min - 7.0).abs() < 1e-3, "outer x_min = rect.x+ox-spread");
+        // sigma=0（blur 关）
+        assert!(params[3].abs() < 1e-6, "blur_off → params.sigma=0");
+        assert!((params[4]).abs() < 1e-6, "outer → inset_flag=0");
+        assert!(colors.iter().all(|c| *c == [0.0, 0.0, 0.0, 0.5]));
+        assert!(!idx.is_empty());
+    }
+
+    #[test]
+    fn shadow_quad_inset_blur_pads_and_uv_is_center_offset() {
+        // inset + blur>0：形状内缩 spread，quad 外扩 pad=3σ；uv = vert - center。
+        use crate::style::resolved::BoxShadow;
+        let r = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        let sigma = 4.0;
+        let sh = BoxShadow {
+            ox: 0.0,
+            oy: 0.0,
+            spread: 10.0,
+            blur: sigma * 2.0,
+            color: [1.0; 4],
+            inset: true,
+        };
+        let (v, uv, colors, idx, params) = shadow_quad(&r, &[(0.0, 0.0); 4], &sh, true, sigma);
+        // 形状 = rect 内缩 10：center = (50,50)，half = (40,40)。
+        // pad = 12：quad x_min = shape.x - pad = 10 - 12 = -2
+        assert_eq!(v.len(), 4, "blur quad = 4 顶点");
+        assert_eq!(idx, vec![0, 1, 2, 0, 2, 3]);
+        let x_min = v.iter().map(|p| p[0]).fold(f32::MAX, f32::min);
+        assert!((x_min - (-2.0)).abs() < 1e-3, "quad x_min = shape.x - 3σ");
+        // uv = vert - center(50,50)：TL vert (-2,-2) → uv (-52,-52)
+        assert!((uv[0][0] - (-52.0)).abs() < 1e-3 && (uv[0][1] - (-52.0)).abs() < 1e-3);
+        // params: half=40, radius=0（无圆角），sigma=4，inset=1
+        assert!((params[0] - 40.0).abs() < 1e-3, "half.x=40");
+        assert!((params[3] - sigma).abs() < 1e-3, "params.sigma=σ");
+        assert!((params[4] - 1.0).abs() < 1e-3, "inset_flag=1");
+        assert!(colors.iter().all(|c| *c == [1.0; 4]));
+    }
+
+    #[test]
+    fn shadow_quad_inset_negative_size_empty() {
+        // inset spread > rect 半尺寸 → shape 负宽高 → 空输出（不 panic）。
+        use crate::style::resolved::BoxShadow;
+        let r = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        };
+        let sh = BoxShadow {
+            ox: 0.0,
+            oy: 0.0,
+            spread: 20.0,
+            blur: 0.0,
+            color: [1.0; 4],
+            inset: true,
+        };
+        let (v, _uv, _c, idx, _params) = shadow_quad(&r, &[(0.0, 0.0); 4], &sh, false, 0.0);
+        assert!(v.is_empty() && idx.is_empty(), "内缩到负尺寸 → 空输出");
     }
 
     #[test]

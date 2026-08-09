@@ -32,8 +32,8 @@ fn mesh_key(
     if control_ids.contains(&rn.node_id) {
         return None; // 控件保留独立 node_id，不参与合并
     }
-    if rn.node_id & crate::render::BACK_LAYER_FLAG != 0 {
-        return None; // back-layer 合成节点（如 box-shadow）不合批
+    if crate::render::is_shadow_synth(rn.node_id) {
+        return None; // box-shadow 合成节点（inset high byte 36.. / outer 44..）不合批
     }
     if crate::render::is_tf_edit_synth(rn.node_id) {
         return None; // TextField 编辑反馈 mesh（光标/选区/composition）须独立保留

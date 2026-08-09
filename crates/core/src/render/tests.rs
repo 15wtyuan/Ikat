@@ -2718,18 +2718,15 @@ fn synth_text_node_id_roundtrip() {
     assert!(!is_text_sub_page(primary));
     assert_eq!(text_sub_primary_id(sub), primary & 0x00FF_FFFF);
 
-    // 边界：page=15（不与 BACK_LAYER_FLAG bit 28 冲突的最大子页号）。
-    // page>=16 会设置 bit 28（BACK_LAYER_FLAG），is_text_sub_page 据此排除 shadow 节点——
+    // 边界：page=15 是子页上限（high byte 1..=15）。
+    // page>=16 不再被 is_text_sub_page 识别（超出 1..=15 范围）——
     // 故 sub_page 编码实际可用范围是 1..15（atlas 跨页远不到此上限）。
     let max_sub = synth_text_node_id(0, 15);
     assert!(is_text_sub_page(max_sub));
 
-    // page=16 设置 BACK_LAYER_FLAG → is_text_sub_page 返 false（shadow 节点语义）。
+    // page=16 超出子页范围 → is_text_sub_page 返 false。
     let shadow_like = synth_text_node_id(0, 16);
-    assert!(
-        !is_text_sub_page(shadow_like),
-        "page=16 触发 BACK_LAYER_FLAG"
-    );
+    assert!(!is_text_sub_page(shadow_like), "page=16 超出子页范围");
 
     // 真实 node index=4095（bits[23:12]=4095）不应被误判为子页
     let high_index = (4095u32 << 12) | 1; // index=4095, gen=1
@@ -2857,7 +2854,7 @@ fn build_image_with_bg_color_and_filter_uses_program_4() {
 
 // ── box-shadow 集成测试 ───────────────────────────
 
-/// box-shadow:2px 3px #000000 → 阴影节点 node_id = main_id|BACK_LAYER_FLAG、
+/// box-shadow:2px 3px #000000 → 阴影节点 node_id = back_shadow_id(main_id,0)、
 /// sort_key < main sort_key、阴影 verts x 偏移 ox=2、y 偏移 oy=3。
 #[test]
 fn box_shadow_emits_node_with_offset_and_sort_key() {
@@ -2901,19 +2898,19 @@ fn box_shadow_emits_node_with_offset_and_sort_key() {
     let shadow_rn = frame
         .nodes
         .iter()
-        .find(|rn| rn.node_id & BACK_LAYER_FLAG != 0)
-        .expect("应存在 box-shadow RenderNode（node_id 带 BACK_LAYER_FLAG）");
+        .find(|rn| is_back_shadow_synth(rn.node_id))
+        .expect("应存在 box-shadow RenderNode（back_shadow_synth）");
     let main_rn = frame
         .nodes
         .iter()
-        .find(|rn| rn.node_id & BACK_LAYER_FLAG == 0)
+        .find(|rn| !is_shadow_synth(rn.node_id))
         .expect("应存在主节点 RenderNode");
 
-    // 阴影 node_id = main_id | BACK_LAYER_FLAG
+    // 阴影 node_id = back_shadow_id(main_id, 0)
     assert_eq!(
         shadow_rn.node_id,
-        main_rn.node_id | BACK_LAYER_FLAG,
-        "阴影 node_id = main_id | BACK_LAYER_FLAG"
+        back_shadow_id(main_rn.node_id, 0),
+        "阴影 node_id = back_shadow_id(main_id, 0)"
     );
 
     // 阴影 sort_key < main sort_key（阴影绘在主节点之下）
@@ -3031,7 +3028,7 @@ fn box_shadow_back_layer_inherits_clip_mask_context() {
     let chip_shadow = frame
         .nodes
         .iter()
-        .find(|rn| rn.node_id == (chip_id.0 | BACK_LAYER_FLAG))
+        .find(|rn| rn.node_id == back_shadow_id(chip_id.0, 0))
         .expect("chip 阴影节点");
     assert!(
         chip_main.mask_context.0 > 0,
@@ -3041,6 +3038,273 @@ fn box_shadow_back_layer_inherits_clip_mask_context() {
         chip_shadow.mask_context, chip_main.mask_context,
         "box-shadow 背层须继承主节点的 mask_context（旧实现硬编码 0 → overflow 容器内 inset shadow 不被裁）"
     );
+}
+
+// ── box-shadow 多层 + inset 集成测试（Task 3）───────────────────────────
+
+/// div 带 outer + inset 两层 box-shadow → primary + 1 back-layer + 1 front-layer，
+/// sort_key: back < primary < front（outer 在下、inset 在上）。这是 Task 3 的核心验收。
+#[test]
+fn box_shadow_emits_back_and_front_layers() {
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 10.0,
+            y: 20.0,
+            w: 100.0,
+            h: 50.0,
+        },
+        Some([1.0, 0.0, 0.0, 1.0]),
+    );
+    n.style.box_shadow = vec![
+        // outer 层（画在 primary 之下）
+        BoxShadow {
+            ox: 2.0,
+            oy: 3.0,
+            spread: 0.0,
+            blur: 0.0,
+            color: [0.0, 0.0, 0.0, 0.5],
+            inset: false,
+        },
+        // inset 层（画在 primary 之上、子节点之下）
+        BoxShadow {
+            ox: 0.0,
+            oy: 0.0,
+            spread: 0.0,
+            blur: 0.0,
+            color: [0.0, 0.0, 0.0, 0.3],
+            inset: true,
+        },
+    ];
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let back_count = frame
+        .nodes
+        .iter()
+        .filter(|rn| is_back_shadow_synth(rn.node_id))
+        .count();
+    let front_count = frame
+        .nodes
+        .iter()
+        .filter(|rn| is_front_shadow_synth(rn.node_id))
+        .count();
+    assert_eq!(back_count, 1, "1 outer 层 → 1 back-layer synth");
+    assert_eq!(front_count, 1, "1 inset 层 → 1 front-layer synth");
+
+    let back = frame
+        .nodes
+        .iter()
+        .find(|rn| is_back_shadow_synth(rn.node_id))
+        .unwrap();
+    let primary = frame
+        .nodes
+        .iter()
+        .find(|rn| !is_shadow_synth(rn.node_id))
+        .unwrap();
+    let front = frame
+        .nodes
+        .iter()
+        .find(|rn| is_front_shadow_synth(rn.node_id))
+        .unwrap();
+    assert!(
+        back.sort_key < primary.sort_key,
+        "outer 阴影画在 primary 之下（back sk={} >= primary sk={}）",
+        back.sort_key,
+        primary.sort_key
+    );
+    assert!(
+        primary.sort_key < front.sort_key,
+        "inset 阴影画在 primary 之上（primary sk={} >= front sk={}）",
+        primary.sort_key,
+        front.sort_key
+    );
+}
+
+/// 多 outer 层 + 多 inset 层的 CSS 层序：先列出的 outer 最贴 primary（最高 back sk），
+/// 先列出的 inset 最离 primary（最高 front sk）。验多层 id 唯一 + 逆 CSS 赋值。
+#[test]
+fn box_shadow_multi_layer_css_order() {
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        },
+        Some([1.0, 1.0, 1.0, 1.0]),
+    );
+    n.style.box_shadow = vec![
+        // outer A（先列）应在 outer B（后列）之上（更贴 primary）
+        BoxShadow {
+            ox: 0.0,
+            oy: 0.0,
+            spread: 0.0,
+            blur: 0.0,
+            color: [1.0, 0.0, 0.0, 1.0],
+            inset: false,
+        },
+        BoxShadow {
+            ox: 0.0,
+            oy: 0.0,
+            spread: 0.0,
+            blur: 0.0,
+            color: [0.0, 1.0, 0.0, 1.0],
+            inset: false,
+        },
+        // inset C（先列）应在 inset D（后列）之上（更离 primary）
+        BoxShadow {
+            ox: 0.0,
+            oy: 0.0,
+            spread: 0.0,
+            blur: 0.0,
+            color: [0.0, 0.0, 1.0, 1.0],
+            inset: true,
+        },
+        BoxShadow {
+            ox: 0.0,
+            oy: 0.0,
+            spread: 0.0,
+            blur: 0.0,
+            color: [1.0, 1.0, 0.0, 1.0],
+            inset: true,
+        },
+    ];
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let primary = frame
+        .nodes
+        .iter()
+        .find(|rn| !is_shadow_synth(rn.node_id))
+        .unwrap();
+    let primary_sk = primary.sort_key;
+    // 两 outer + 两 inset，id 唯一
+    let back_ids: Vec<u32> = frame
+        .nodes
+        .iter()
+        .filter(|rn| is_back_shadow_synth(rn.node_id))
+        .map(|rn| rn.node_id)
+        .collect();
+    assert_eq!(back_ids.len(), 2, "2 outer 层");
+    assert_eq!(
+        back_ids.len(),
+        back_ids
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        "back id 唯一"
+    );
+    let front_ids: Vec<u32> = frame
+        .nodes
+        .iter()
+        .filter(|rn| is_front_shadow_synth(rn.node_id))
+        .map(|rn| rn.node_id)
+        .collect();
+    assert_eq!(front_ids.len(), 2, "2 inset 层");
+    assert_eq!(
+        front_ids.len(),
+        front_ids
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        "front id 唯一"
+    );
+    // outer A (CSS 0) 应 > outer B (CSS 1)：A 更贴 primary（更高 back sk）
+    let outer_a = back_shadow_id(primary.node_id, 0);
+    let outer_b = back_shadow_id(primary.node_id, 1);
+    let sk_of = |id: u32| {
+        frame
+            .nodes
+            .iter()
+            .find(|rn| rn.node_id == id)
+            .unwrap()
+            .sort_key
+    };
+    assert!(
+        sk_of(outer_a) > sk_of(outer_b),
+        "outer 首层 (A) sk 高于末层 (B)"
+    );
+    assert!(sk_of(outer_a) < primary_sk, "所有 outer < primary");
+    // inset C (CSS 0) 应 > inset D (CSS 1)：C 更离 primary（更高 front sk）
+    let inset_c = front_shadow_id(primary.node_id, 0);
+    let inset_d = front_shadow_id(primary.node_id, 1);
+    assert!(
+        sk_of(inset_c) > sk_of(inset_d),
+        "inset 首层 (C) sk 高于末层 (D)"
+    );
+    assert!(sk_of(inset_c) > primary_sk, "所有 inset > primary");
+}
+
+/// blur>0 outer 阴影 → program=5 + shadow_params 非零（sigma）+ pad quad（顶点数=4）。
+#[test]
+fn box_shadow_blur_uses_sdf_program_and_params() {
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        },
+        Some([1.0; 4]),
+    );
+    n.style.box_shadow = vec![BoxShadow {
+        ox: 0.0,
+        oy: 0.0,
+        spread: 0.0,
+        blur: 8.0, // σ=4
+        color: [0.0, 0.0, 0.0, 0.5],
+        inset: false,
+    }];
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let shadow = frame
+        .nodes
+        .iter()
+        .find(|rn| is_back_shadow_synth(rn.node_id))
+        .expect("blur outer 阴影节点");
+    match &shadow.payload {
+        NodePayload::Mesh { program, verts, .. } => {
+            assert_eq!(*program, 5, "blur>0 → program=5 (SDF)");
+            assert_eq!(verts.len(), 4, "blur quad = 4 顶点（pad 后）");
+        }
+        _ => panic!("expected Mesh"),
+    }
+    // shadow_params[3] = sigma = blur/2 = 4.0
+    assert!(
+        (shadow.shadow_params[3] - 4.0).abs() < 1e-3,
+        "shadow_params.sigma = blur/2 = 4.0，得 {}",
+        shadow.shadow_params[3]
+    );
+    // inset_flag = 0（outer）
+    assert!(shadow.shadow_params[4].abs() < 1e-6, "outer → inset_flag=0");
 }
 
 // ── resolve_slice_percent ───────────────────────────
@@ -4052,14 +4316,13 @@ fn tf_synth_ids_are_distinct() {
     assert!(!is_text_sub_page(c));
     assert!(!is_text_sub_page(s));
     assert!(!is_text_sub_page(u));
-    // 不与 BACK_LAYER_FLAG（bit 28 = high byte bit-4）撞——撞了会被 batch.rs
-    // is_mergeable_mesh / merge.rs mesh_key 当 box-shadow 下层节点排除，导致这些 mesh
-    // 永不 merge-batch（坑：synth byte 20/21/22 = high byte 0x14/0x15/0x16，bit-4 置位）。
+    // 不被误判为 box-shadow 合成节点（high byte 36..=47）——撞了会被 batch.rs
+    // is_mergeable_mesh / merge.rs mesh_key 当 box-shadow 合成节点排除，导致这些 mesh
+    // 永不 merge-batch（TF synth byte 32..=35 在安全区，不撞 36..=47）。
     for id in [c, s, u] {
-        assert_eq!(
-            id & BACK_LAYER_FLAG,
-            0,
-            "edit synth id must not collide with back-layer flag"
+        assert!(
+            !is_shadow_synth(id),
+            "edit synth id must not collide with box-shadow synth range"
         );
     }
 }
