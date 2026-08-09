@@ -59,9 +59,11 @@ const REPRESENTATION_DIFF_PROPS: &[&str] = &[
 /// 分两类（均非遗漏 default 漂移）：
 /// - **合理的 noop default**：default 本就是「无」语义，apply 不存值但字段默认态已
 ///   正确（None / 空）：
-///   - `border-image-slice`/`background-image`/`box-shadow`/`text-shadow`/
+///   - `border-image-slice`/`background-image`/`text-shadow`/
 ///     `-webkit-text-stroke`/`font-effect`：default `none`/`0 transparent` → None，
 ///     与 resolved 默认 None 一致。
+///   - `box-shadow` default `none` 现由 core apply_decl 正确消费（apply=true，
+///     清空 Vec == resolved 默认），走主断言，不在此列表。
 ///   - `animation`/`resize`：fence 注册并做语法校验。`animation` 已由 apply_decl
 ///     "animation" arm 消费（M2：class 规则 → computed style → sync_animation_players，
 ///     default `none` → 空 Vec == resolved 默认，走主断言）；`resize` 仍不消费。
@@ -74,7 +76,6 @@ const UNCONSUMED_DEFAULT_PROPS: &[&str] = &[
     "border-image-slice",
     "background-image",
     "background-size",
-    "box-shadow",
     "resize",
     "text-shadow",
     "-webkit-text-stroke",

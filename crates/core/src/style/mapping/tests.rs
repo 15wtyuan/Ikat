@@ -1668,3 +1668,65 @@ fn caret_selection_bad_color_falls_to_none() {
     assert!(s.caret_color.is_none(), "bad color → None");
     assert!(s.selection_background.is_none(), "bad color → None");
 }
+
+// box-shadow: 括号感知 tokenizer（多层 / inset / blur / spread / spaced rgba）。
+// 逗号在括号深度 0 切层；rgba(...) 内部的空格/逗号不能切层。
+#[test]
+fn box_shadow_multilayer_inset_blur() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(
+        &mut s,
+        "box-shadow",
+        "0 0 0 1px rgba(95,180,212,0.5), inset 0 1px 0 rgba(255,255,255,0.06)"
+    ));
+    assert_eq!(s.box_shadow.len(), 2);
+    // layer 0 outer
+    assert!(!s.box_shadow[0].inset);
+    assert_eq!(s.box_shadow[0].spread, 1.0);
+    assert_eq!(s.box_shadow[0].blur, 0.0);
+    assert_eq!(
+        s.box_shadow[0].color,
+        [95.0 / 255.0, 180.0 / 255.0, 212.0 / 255.0, 0.5]
+    );
+    // layer 1 inset
+    assert!(s.box_shadow[1].inset);
+    assert_eq!(s.box_shadow[1].oy, 1.0);
+    assert_eq!(s.box_shadow[1].blur, 0.0);
+}
+
+#[test]
+fn box_shadow_blur_spread_spaced_rgba() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(
+        &mut s,
+        "box-shadow",
+        "0 8px 26px rgba(95, 180, 212, 0.5)"
+    ));
+    assert_eq!(s.box_shadow.len(), 1);
+    assert_eq!(s.box_shadow[0].blur, 26.0);
+    assert_eq!(s.box_shadow[0].spread, 0.0);
+    assert_eq!(
+        s.box_shadow[0].color,
+        [95.0 / 255.0, 180.0 / 255.0, 212.0 / 255.0, 0.5]
+    );
+}
+
+#[test]
+fn box_shadow_inset_trailing_keyword() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "box-shadow", "0 0 0 1px #fff inset"));
+    assert!(s.box_shadow[0].inset);
+}
+
+#[test]
+fn box_shadow_illegal_returns_false() {
+    let mut s = ResolvedStyle::default();
+    assert!(!apply_decl(&mut s, "box-shadow", "10px"), "<2 数值 → false");
+    // parse_color 把任何 3/6/8 位 hex 串当合法颜色（#abc = #aabbcc），
+    // 故 "abc" 实为合法 3 位 hex；此处用 parse_color 必拒的非 hex 记号验证非法路径。
+    assert!(
+        !apply_decl(&mut s, "box-shadow", "0 0 0 notacolor"),
+        "bad color → false"
+    );
+    assert!(s.box_shadow.is_empty());
+}

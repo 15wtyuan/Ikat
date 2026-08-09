@@ -1284,46 +1284,20 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             }
         }
         "box-shadow" => {
-            // CSS: ox oy [blur] [spread] color。blur 静默忽略，spread 解析。
-            // ponytail: blur 静默忽略（真实 blur 需离屏 RT，排 v1.14+）。
-            let parts: Vec<&str> = value.split_whitespace().collect();
-            if parts.len() < 3 {
-                return false;
-            }
-            // parse_number 不剥 "px" 后缀，此处手动剥。
-            let ox = parse_number(parts[0].trim_end_matches("px")).unwrap_or(0.0);
-            let oy = parse_number(parts[1].trim_end_matches("px")).unwrap_or(0.0);
-            // 第 3 段可能是 blur（数值）或 color；若是数值且后一段也数值则分别为 blur+spread。
-            let mut color_idx = 2;
-            let mut spread_val = 0.0f32;
-            if parts[2].trim_end_matches("px").parse::<f32>().is_ok() {
-                if parts.len() < 4 {
-                    return false;
+            // 括号感知 tokenizer：多层 / inset / blur / spread / spaced rgba()。
+            // 非法输入返 false（fence 委托 _=>{} 走 apply_decl，自动报 FenceBadCssValue）。
+            match parse_box_shadow(value) {
+                Some(list) if !list.is_empty() => {
+                    style.box_shadow = list;
+                    true
                 }
-                if parts[3].trim_end_matches("px").parse::<f32>().is_ok() {
-                    // parts[3] is spread
-                    spread_val = parse_number(parts[3].trim_end_matches("px")).unwrap_or(0.0);
-                    color_idx = 4;
-                    if parts.len() < 5 {
-                        return false;
-                    }
-                } else {
-                    color_idx = 3;
+                Some(_) => {
+                    // "none" / 空 → 清空（合法，表示无阴影；覆盖任何先前声明）。
+                    style.box_shadow = Vec::new();
+                    true
                 }
+                None => false,
             }
-            let color = parts
-                .get(color_idx)
-                .and_then(|s| parse_color(s))
-                .unwrap_or([0.0, 0.0, 0.0, 0.3]);
-            style.box_shadow = vec![BoxShadow {
-                ox,
-                oy,
-                spread: spread_val,
-                blur: 0.0,
-                color,
-                inset: false,
-            }];
-            true
         }
         "transition" => {
             style.transition = parse_transition(value);
@@ -1632,6 +1606,101 @@ fn parse_one_text_shadow(spec: &str) -> Option<crate::text::font_effect::FontEff
         oy,
         blur,
         color,
+    })
+}
+
+/// CSS `box-shadow`：括号深度 0 按逗号切多层，每层走 [`parse_one_box_shadow`]。
+/// `none` / 空 → 空 Vec（合法，表示无阴影）；任一层非法 → None（apply_decl 据此返 false，
+/// fence 委托链自动报 FenceBadCssValue）。括号深度计数保证 `rgba(r,g,b,a)` 内部逗号不分层。
+fn parse_box_shadow(value: &str) -> Option<Vec<BoxShadow>> {
+    if value.trim() == "none" {
+        return Some(Vec::new());
+    }
+    let mut layers: Vec<String> = vec![String::new()];
+    let mut depth = 0;
+    for ch in value.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                layers.last_mut().unwrap().push(ch);
+            }
+            ')' => {
+                depth -= 1;
+                layers.last_mut().unwrap().push(ch);
+            }
+            ',' if depth == 0 => layers.push(String::new()),
+            _ => layers.last_mut().unwrap().push(ch),
+        }
+    }
+    let mut out = Vec::new();
+    for layer in &layers {
+        // trim() 使纯空白层（如尾随逗号）→ ""，parse_one_box_shadow 返 None → 整体非法。
+        let bs = parse_one_box_shadow(layer.trim())?;
+        out.push(bs);
+    }
+    Some(out)
+}
+
+/// 解析单层 box-shadow。tokenize 时括号内不切空白（保护 `rgba(95, 180, 212, 0.5)`
+/// 不被拆成多 token）。token 顺序自由：`inset`（前/后置均可）、≥2 个数值（ox oy [blur] [spread]）、
+/// 可选 color。color 省略 → 默认半透明黑（CSS currentColor 围栏不追）。
+/// 非 inset / 非 color / 非数值 → None；ox/oy 缺省 → None（CSS 强制 ≥2 数值）。
+/// blur < 0 不合法（CSS spec），clamp 到 0 防运行时 σ 为负。
+fn parse_one_box_shadow(s: &str) -> Option<BoxShadow> {
+    let mut tokens: Vec<String> = vec![String::new()];
+    let mut depth = 0;
+    for ch in s.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                tokens.last_mut().unwrap().push(ch);
+            }
+            ')' => {
+                depth -= 1;
+                tokens.last_mut().unwrap().push(ch);
+            }
+            c if c.is_whitespace() && depth == 0 => tokens.push(String::new()),
+            _ => tokens.last_mut().unwrap().push(ch),
+        }
+    }
+    let tokens: Vec<&str> = tokens
+        .iter()
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .collect();
+    let mut inset = false;
+    let mut nums: Vec<f32> = Vec::new();
+    let mut color: Option<[f32; 4]> = None;
+    for t in &tokens {
+        if t.eq_ignore_ascii_case("inset") {
+            inset = true;
+            continue;
+        }
+        if let Some(c) = parse_color(t) {
+            color = Some(c);
+            continue;
+        }
+        // 数值（剥 "px"；box-shadow 长度单位固定 px，围栏外单位交 fence 报错）。
+        match t.trim_end_matches("px").parse::<f32>() {
+            Ok(v) => nums.push(v),
+            Err(_) => return None, // 非 inset/color/数值 = 非法 token
+        }
+    }
+    if nums.len() < 2 {
+        return None; // CSS 强制 ox oy
+    }
+    let ox = nums[0];
+    let oy = nums[1];
+    let blur = *nums.get(2).unwrap_or(&0.0);
+    let spread = *nums.get(3).unwrap_or(&0.0);
+    let color = color.unwrap_or([0.0, 0.0, 0.0, 0.3]);
+    Some(BoxShadow {
+        ox,
+        oy,
+        spread,
+        blur: blur.max(0.0),
+        color,
+        inset,
     })
 }
 
