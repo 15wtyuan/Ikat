@@ -9,3 +9,5 @@ path = "src/main.rs"
 
 [dependencies]
 csbindgen = "1"
+serde_json = "1"
+semver = "1"
