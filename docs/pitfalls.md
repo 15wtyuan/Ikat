@@ -1413,12 +1413,36 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 
 
 
-### 坑 184：parked keepalive 只保 slot 根，子树渲染 GO（文本 mesh）仍 churn
+### 坑 184：parked keepalive 保留粒度——只保 slot 根保不住子树叶子 GO（防御性修复）
 
-**症状**：坑 182「已解决」后 mail 滚动 item **仍**逐个消失 + 掉帧。core 单测全绿、MirrorPool parked 分支正确，但 PlayMode 症状未除。
+**背景**：pooled-slot 设计（§3.1/§4.3）只指定了 **slot 根 GO** 保留——build_blob 的 keepalive 循环只遍历 `ls.slots`（根），每个 parked slot 发 **1 条**条目。但 slot 子树叶子（文本 mesh 等）`reuse_key=0`，在 MirrorPool 里按 `node_id` 进 `_poolByNodeId`。若只发根：park 时 `collect_display_none_subtree` 剪整子树 → 叶子从 blob active 段消失、又不在 keepalive → 标 stale → 销毁；reactivate 重建。理论上每帧滚动 park/reactivate 周期子树叶子会 churn。
 
-**根因**：pooled-slot 设计（§3.1/§4.3）只指定了 **slot 根 GO** 保留——build_blob 的 keepalive 循环只遍历 `ls.slots`（根），每个 parked slot 发 **1 条**条目。但 slot 子树叶子（mail-from/mail-sub 文本 mesh）`reuse_key=0`，在 MirrorPool 里按 `node_id` 进 `_poolByNodeId`。park 时 `collect_display_none_subtree` 剪**整子树** → 叶子从 blob active 段消失、又不在 keepalive → 标 stale → **销毁**；reactivate 时重建 GO + 重传文本 mesh。每帧滚动 park/reactivate 周期都 churn = item 闪没 + 掉帧。典型的「跨层缺口 per-task review 必漏」（AGENTS.md）：core / blob / MirrorPool 各层单测全绿，但 end-to-end（blob keepalive 段 ↔ MirrorPool 子树 GO 保留）的契约漏了子树。
+**解决**：keepalive 扩到整子树——`Scene::parked_keepalive_nodes` 走每个 parked slot 子树返 `(node_id, reuse_key)` 超集（根 + 非自身 display:none、非纯空白文本的后代）；build_blob 据此发条目；MirrorPool parked 分支对 `reuse_key=0` 的 keepalive 回退按 `node_id` 在 `_poolByNodeId` 清 stale + `SetActive(false)`。
 
-**解决**：keepalive 扩到整子树——`Scene::parked_keepalive_nodes` 走每个 parked slot 子树返 `(node_id, reuse_key)` 超集（根 + 非自身 display:none、非纯空白文本的后代）；build_blob 据此发条目；MirrorPool parked 分支对 `reuse_key=0` 的 keepalive 回退按 `node_id` 在 `_poolByNodeId` 清 stale + `SetActive(false)`。整子树 GO 全保留，稳态滚动零 churn。多发条目无害（后端 lookup miss 即 no-op），漏发才 churn。
+**⚠️ 重要纠偏**：此 fix 曾被误当作「mail item 消失」的根因，但 **live PlayMode 实测推翻**——MirrorPool 实测 parked slot 子树 GO 都在保留（byReuse/byNodeId 单调涨，无 churn），active slot 文本全在。mail 空白的真根因是 **坑 185**（compute_visible_range 漏算 flex gap），修 gap 才真正解决。本条保留为 keepalive 保留粒度的**防御性正确性修复**（理论上防子树叶子 churn），但不是 mail 空白的病因。
 
-**教训**：池化 keepalive 的「保留粒度」必须对齐 MirrorPool 的 GO 持有粒度——MirrorPool 是**扁平**模型（每个渲染叶子独立 GO，按 node_id/reuse_key 池化），keepalive 只保逻辑 slot 根保不住叶子 GO。设计 keepalive 时要问「park 时哪些 GO 会从 blob 消失」= 整个被剪子树，keepalive 必须全覆盖。坑 182 的「已解决」标记需 PlayMode + Profiler 实测 churn=0 才算数（编码机单测验不了这层集成）。
+**教训**：池化 keepalive 的「保留粒度」要对齐 MirrorPool 的 GO 持有粒度（扁平模型，叶子独立 GO）。但更要记住：**code-reading 推出的「跨层缺口」未必是 live 症状的根因**——必须 live 取证（MirrorPool dump + headless 复现）才能定根因，别拿理论 gap 当确诊（本会话绕弯路的学费）。
+
+### 坑 185：compute_visible_range 漏算 flex gap → 虚拟列表视口顶部空白（mail 真根因）
+
+**症状**：mail 列表（flex-column + `gap:12px`，variable-height 文本 item）滚动后，**视口顶部有 item 没渲染**（一片空白），且空白随滚动距离增大；item_count 多滚几下后尤其明显。掉帧是另一回事（见坑 186）。
+
+**根因**：`compute_visible_range`（list.rs）累积 item 高度时**漏算 flex `gap`**——只用 `acc += heights.height_of(i)`，但实际布局（head/tail spacer + taffy flex+gap）把 item i 放在 `sum(h[0..i]) + i*gap`。于是 range 低估了 item 位置 → 算出的 `start` **偏晚** → 首个 active slot 落在视口顶之下，视口顶部 `[scroll .. item_start 位]` 一段无 slot 覆盖 = 空白，且偏移随 `start` 累积（≈ `start × gap`，mail scroll 5000 时差 ~458px）。讽刺的是 spacer 那边本来就算了 gap（带注释），唯独 range 这一处漏——一处对了一处漏了。
+
+**解决**：`compute_visible_range` 加 `gap: f32` 参数，累积判据改 `acc + i*gap > top` / `acc2 + j*gap >= target`（bottom(i) = sum(h[0..i+1]) + i*gap，i 个 gap 在 item i 之前）。block ul 传 gap=0 no-op。plan_one 已算好 gap（读 `ul.base_style.taffy_style.gap.height`），直接传进去。
+
+**取证**：`dump_mail_scroll`（编码机 headless，set_scroll_pos 驱动）实测 scroll 5000：修前 gap_top=458px（顶部空白），修后 20px（亚 item，无空白）。live PlayMode 确认空白消失。
+
+**教训**：variable-height 虚拟列表的「可见区算法」与「实际布局」必须在**同一个坐标约定**下（都含/都不含 gap）。spacer 和 range 分两处算、一处漏 gap，单测各自绿但集成错位——典型的「分步契约一处漏」。诊断时别只读代码猜——`dump_mail_scroll` 喂 pkg.bin 在编码机复现 solve，gap_top 直接量化空白，比静态读代码快且准。
+
+### 坑 186：solve() 每帧重建 taffy 树 + 重测所有文本（showcase 全页低帧根因）
+
+**症状**：showcase 任一页（home/mail/…）即使不滚动也明显低于 60fps（mail 实测 dt≈20ms）。滚动时更甚。
+
+**根因**：`solve()`（layout/mod.rs）**每帧** `TaffyTree::new()` 从头建整棵布局树 + `compute_layout_with_measure` 对**每个文本叶子**调 `measure_text`（完整 shaping，CJK 尤贵），**零缓存**。showcase 237 节点 / ~100 文本节点 ≈ 11ms/帧（阶段实测：solve=11ms，其余 phase <0.5ms）。节点涨到 1739（mail 滚穿后）更慢。这是 v1 布局架构限制，非 bug——增量/缓存布局是后续工作。
+
+**暂未修**：需 layout 缓存（脏子树重排）+ 文本测量 memoize（text+font+size+约束 → 缓存 shaping 结果）。后者收益大、改动集中（text/layout.rs），是优先项。
+
+**取证**：`dump_mail`（编码机 headless）阶段计时——临时给 tick_and_render 插桩（Stopwatch per phase）测出 solve 独占 ~11ms，breathe 动画只占 0.1ms（排除），render/build <0.5ms。
+
+**教训**：性能问题别静态猜热点——临时 phase 插桩 + headless 计时 5 分钟定位，比反复读代码快。CJK 文本 shaping 是隐形大头，文本测量必须跨帧缓存。
