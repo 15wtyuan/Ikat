@@ -110,7 +110,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Adheres to [SemVer](htt
 1. `package.json` 存在、可解析、必填字段齐全（name/version/unity/displayName）。
 2. `version` 符合 SemVer。
 3. dll 存在于 `unity/package/Plugins/LoomGUI/loomgui_ffi_c.dll`。
-4. **dll 是否最新**：若 `target/release/loomgui_ffi_c.dll` 存在，比较两者 hash，不一致报错（防"编了 dll 忘 commit"）；无 target 产物则跳过（CI 场景）。
+4. **dll 是否存在**：校验 `unity/package/Plugins/LoomGUI/loomgui_ffi_c.dll` 存在。不校验字节 staleness（Rust release 构建非确定性，不可靠）。
 5. 三 asmdef 齐全（LoomGUI.Runtime / LoomGUI.Editor / LoomGUI.Bindings）。
 6. `CHANGELOG.md` 存在且含当前 version 段落。
 7. 退出码：全部通过 0，任一失败非 0（CI 据此判绿红）。
@@ -132,7 +132,7 @@ tag `v*` 触发；`runs-on: windows-latest`；`permissions: contents: write`（�
 ## 验收标准
 1. 打 `v0.0.1` tag push 后，CI 绿，GitHub Releases 出现 `v0.0.1` 且正文 = CHANGELOG `[0.0.1]` 段落。
 2. 在一个干净的 Unity 工程里，manifest.json 加上述 git URL 行，能成功导入 `com.loomgui.unity`，dll 加载正常，Editor 菜单 `LoomGUI > Open Packer` 可见。
-3. `release-check` 在"忘 commit dll"（target 与入库 hash 不一致）场景下报错退出；在 dll 一致时通过。
+3. `release-check` 在入库 dll 缺失时报错退出（**存在性检查**，不校验字节 staleness——Rust release 构建字节非确定性，比较不可靠）；dll 存在则通过。
 
 ## 不在本期范围（备忘）
 - OpenUPM registry 接入（v0.5+ 稳定后）。

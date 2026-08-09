@@ -377,7 +377,7 @@ git commit -m "feat(xtask): add release-check subcommand (package metadata valid
 
 ## Task 3: release-check — 文件完整性校验（dll + asmdef，TDD）
 
-**Files:**
+> **Design change (commit 8a84920):** 原设计的 dll 字节 staleness 比较因 Rust release 构建非确定性不可靠（相同源码重编 md5 不同），已改为**存在性检查**——`DllStatus` 只剩 `Ok`/`NotFound`，移除 `Stale`/`BuiltMissing` 和 built-dll 字节比较。下方 Step 1-6 代码片段是原始字节比较设计，实际实现以 commit `8a84920` 为准。
 - Modify: `crates/xtask/src/release_check.rs`（加文件类校验函数 + 测试 + 接入 `run_release_check`）
 
 **Interfaces:**
@@ -661,6 +661,6 @@ git commit -m "docs: add installation section for consuming LoomGUI via git URL"
 1. `cargo run -p xtask -- release-check` 本地通过。
 2. `git tag v0.0.1 && git push --tags`，GitHub Actions `Release` 跑绿，Releases 页出现 `v0.0.1`，正文 = CHANGELOG `[0.0.1]` 段落。
 3. 在一个干净 Unity 工程的 `manifest.json` 加 git URL 行，能导入 `com.loomgui.unity`，dll 加载正常，`LoomGUI > Open Packer` 菜单可见。
-4. （回归）改入库 dll 内容后 `release-check` 报 `dll differs`。
+4. （回归）删除入库 dll 后 `release-check` 报 `DllNotFound`；恢复后通过。
 
 对应 spec 验收标准的 1/2/3 条均由以上覆盖。
