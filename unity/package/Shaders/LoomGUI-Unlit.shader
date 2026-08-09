@@ -25,6 +25,13 @@ Shader "LoomGUI/Unlit"
         _CFOff ("CFOff", Vector) = (0,0,0,0)
         _Alpha ("Alpha", Float) = 1
         _CornerRadius ("CornerRadius", Float) = 0
+        // Box-shadow blur（program=5 / SHADOW_BLUR）：像素空间圆角矩形 SDF + 高斯边 alpha。
+        // _ShadowHalfSize.xy=像素半宽高（zw 空），_ShadowRadius=像素圆角半径，_ShadowSigma=高斯 σ（core 算），
+        // _ShadowInset=0/1（inset 翻 SDF 符号做内阴影）。per-renderer MPB 覆盖。
+        _ShadowHalfSize("Shadow HalfSize", Vector) = (0,0,0,0)
+        _ShadowRadius("Shadow Radius", Float) = 0
+        _ShadowSigma("Shadow Sigma", Float) = 0
+        _ShadowInset("Shadow Inset", Float) = 0
         _FaceDilate("Face Dilate", Range(-1,1)) = 0   // 0=标准字形边缘（threshold=0.5）；正值增粗，负值变细
         _GradientScale("Gradient Scale", Float) = 13     // = SPREAD(12)+1，distance→屏幕换算（对标 TMP _GradientScale=atlasPadding+1）
         // SDF 文字效果（per-renderer MPB，program=1 ALPHA_MASK 用；参数=0 = 该 effect 不启用）。
@@ -56,7 +63,8 @@ Shader "LoomGUI/Unlit"
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile _ CLIPPED
-            #pragma multi_compile _ CLIPPED_ROUNDED
+            // SHADOW_BLUR 与 CLIPPED_ROUNDED 同 multi_compile 行 → 互斥变体（shadow 节点自算圆角 alpha，无需 clip 裁剪）。
+            #pragma multi_compile _ CLIPPED_ROUNDED SHADOW_BLUR
             #pragma multi_compile _ OBJECT_MATRIX
             #pragma multi_compile _ ALPHA_MASK
             #pragma multi_compile _ BG_COMPOSITE
@@ -82,6 +90,11 @@ Shader "LoomGUI/Unlit"
                 float4 _CFOff;
                 float _Alpha;
                 float _CornerRadius;   // 归一化圆角半径（design_radius / min_half_size），CLIPPED_ROUNDED 用
+                // Box-shadow blur uniforms（Properties 对应，SRP batcher 须入 CBUFFER；per-renderer MPB 覆盖）。
+                float4 _ShadowHalfSize;
+                float _ShadowRadius;
+                float _ShadowSigma;
+                float _ShadowInset;
                 float _FaceDilate;
                 float _GradientScale;
                 // SDF 文字效果 uniforms（Properties 对应，MPB per-renderer 覆盖；参数=0 = 该 effect 不启用）。
@@ -225,6 +238,21 @@ Shader "LoomGUI/Unlit"
                 #elif defined(CLIPPED)
                 float2 f = abs(i.clipPos);
                 col.a *= step(max(f.x, f.y), 1.0);
+                #endif
+                #ifdef SHADOW_BLUR
+                // Box-shadow blur（program=5）：像素空间圆角矩形 SDF + 高斯边 alpha 衰减。
+                // i.uv 由 core 几何编码为「顶点本地坐标 − 形状中心」，量纲=像素；故 _ShadowHalfSize.xy/_ShadowRadius
+                // 亦取像素，SDF 公式同 CLIPPED_ROUNDED（半宽/半径改像素量纲，归一化半宽 1 换成 _ShadowHalfSize.xy）。
+                // σ=_ShadowSigma（core 从 CSS blur 算好，shader 不重算）；inset 翻 SDF 符号 → 取内侧衰减做内阴影。
+                // exp(-d²/2σ²) 而非 erfc（HLSL 无 erfc 内建）；max(d,0) 只衰减外（outset）/内侧（inset）半边。
+                float2 p = i.uv;
+                float qx = abs(p.x) - _ShadowHalfSize.x + _ShadowRadius;
+                float qy = abs(p.y) - _ShadowHalfSize.y + _ShadowRadius;
+                float sdf = length(max(float2(qx, qy), 0.0)) + min(max(qx, qy), 0.0) - _ShadowRadius;
+                float d = (_ShadowInset > 0.5) ? -sdf : sdf;
+                float sig = max(_ShadowSigma, 0.0001);
+                float g = max(d, 0.0);
+                col.a *= exp(-(g * g) / (2.0 * sig * sig));
                 #endif
                 return col;
             }
