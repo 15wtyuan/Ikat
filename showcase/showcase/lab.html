@@ -46,6 +46,22 @@
   .ov-scroll { overflow-y:scroll; }
   .ov-auto { overflow-y:auto; }
   .ov-hidden { overflow:hidden; }
+  /* box-shadow 标本矩阵 */
+  .bs { width:90px; height:60px; background-color:#1a2f45; border-radius:8px; }
+  .bs-outer-hard { box-shadow:0 4px 0 #000a; }                                  /* blur=0 硬边（program=0 实心）*/
+  .bs-outer-sm   { box-shadow:0 4px 6px #000a; }                                /* 小 blur（SDF program=5）*/
+  .bs-outer-lg   { box-shadow:0 12px 48px #000c; }                             /* 大 blur 48px（SDF 高斯尾）*/
+  .bs-inset-hard { box-shadow:inset 0 0 0 2px #5fb4d4; }                       /* inset 硬边内描边（front-layer program=0）*/
+  .bs-inset-blur { box-shadow:inset 0 4px 12px #000a; }                        /* inset blur（front-layer program=5）*/
+  .bs-multi      { box-shadow:0 0 0 2px #5fb4d4, 0 8px 24px #000a; }           /* 多层 outer（CSS 先列在上）*/
+  .bs-mixed      { box-shadow:inset 0 0 0 1px #5fb4d4, 0 6px 16px #000a; }     /* inset+outer 混（back+front 同节点）*/
+  .bs-spread-neg { box-shadow:0 8px 16px -4px #000a; }                         /* 负 spread（收紧 shadow 形状）*/
+  .bs-spread-pos { box-shadow:0 0 0 8px rgba(95,180,212,0.3); }                /* 正 spread 外扩 */
+  .bs-offset     { box-shadow:8px 8px 12px #000a; }                            /* 右下偏移 */
+  .bs-radius     { border-radius:24px; box-shadow:0 8px 20px #000a; }          /* 大圆角 + shadow */
+  /* I1：blur shadow 在圆角 overflow 容器内（SHADOW_BLUR ∩ CLIPPED_ROUNDED 合成——final-review 修复路径）*/
+  .bs-i1-clip    { width:220px; height:64px; background-color:#1a2f45; border-radius:16px; overflow:hidden; padding:8px; }
+  .bs-i1-inner   { width:120px; height:40px; background-color:#2a5a75; border-radius:8px; box-shadow:0 10px 24px #000c; }
   </style>
 </head>
 <body>
@@ -158,6 +174,30 @@
             <slot name="ic-desc"><span style="color:#9aa0b4;font-size:13px;align-self:center">默认描述</span></slot>
           </item-card>
           <span style="color:#6c7080;font-size:13px;align-self:center">含 hyphen 标签名 = CustomElement；&lt;slot&gt; 接投影（运行时由组件系统填充）</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">11 · box-shadow 全语义（多层 / inset / blur / spread / offset / clip）</div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:20px;flex-wrap:wrap;align-items:center">
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">outer 硬边 blur=0</span><div class="bs bs-outer-hard"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">outer blur 6px</span><div class="bs bs-outer-sm"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">outer blur 48px</span><div class="bs bs-outer-lg"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">inset 硬边内描边</span><div class="bs bs-inset-hard"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">inset blur</span><div class="bs bs-inset-blur"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">多层 outer</span><div class="bs bs-multi"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">inset+outer 混</span><div class="bs bs-mixed"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">负 spread</span><div class="bs bs-spread-neg"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">正 spread 外扩</span><div class="bs bs-spread-pos"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">offset 右下</span><div class="bs bs-offset"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">大圆角+shadow</span><div class="bs bs-radius"></div></div>
+        </div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:16px;align-items:center">
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span style="color:#9aa0b4;font-size:12px">I1: blur shadow 在圆角 overflow 容器（SHADOW_BLUR ∩ CLIPPED_ROUNDED 合成）</span>
+            <div class="bs-i1-clip"><div class="bs-i1-inner"></div></div>
+          </div>
+          <span style="color:#6c7080;font-size:13px;max-width:320px">内层卡片 blur shadow 须被外层圆角 overflow 正确裁剪，且 blur 仍渲染——不被 CLIPPED_ROUNDED keyword 吞（final-review 修复的 I1 路径）。</span>
         </div>
       </div>
 
