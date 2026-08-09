@@ -1730,3 +1730,21 @@ fn box_shadow_illegal_returns_false() {
     );
     assert!(s.box_shadow.is_empty());
 }
+
+// CSS 级联覆盖：`box-shadow: 0 8px 4px #000; box-shadow: none;` → 后写者胜，清空。
+// apply_decl 的 `Some(_)` 分支显式清 `style.box_shadow = Vec::new()`（而非保留旧值），
+// 否则 `none` 会被静默忽略，导致设计稿里 "先建后删" 的盒阴影残留在渲染中。
+// 同时验证 `none` 大小写不敏感（CSS 关键字 case-insensitive，与 inset 同口径）。
+#[test]
+fn box_shadow_none_clears_prior() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "box-shadow", "0 8px 4px #000"));
+    assert_eq!(s.box_shadow.len(), 1);
+    assert!(apply_decl(&mut s, "box-shadow", "none"));
+    assert!(s.box_shadow.is_empty(), "none clears prior shadows");
+    // CSS 关键字大小写不敏感。
+    assert!(apply_decl(&mut s, "box-shadow", "0 4px 2px #000"));
+    assert_eq!(s.box_shadow.len(), 1);
+    assert!(apply_decl(&mut s, "box-shadow", "NONE"));
+    assert!(s.box_shadow.is_empty(), "NONE clears prior shadows");
+}

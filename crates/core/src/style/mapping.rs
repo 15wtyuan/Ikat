@@ -1613,7 +1613,8 @@ fn parse_one_text_shadow(spec: &str) -> Option<crate::text::font_effect::FontEff
 /// `none` / 空 → 空 Vec（合法，表示无阴影）；任一层非法 → None（apply_decl 据此返 false，
 /// fence 委托链自动报 FenceBadCssValue）。括号深度计数保证 `rgba(r,g,b,a)` 内部逗号不分层。
 fn parse_box_shadow(value: &str) -> Option<Vec<BoxShadow>> {
-    if value.trim() == "none" {
+    // CSS keywords are case-insensitive (matches how `inset` is matched below).
+    if value.trim().eq_ignore_ascii_case("none") {
         return Some(Vec::new());
     }
     let mut layers: Vec<String> = vec![String::new()];
