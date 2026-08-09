@@ -17,7 +17,13 @@ pub enum CheckError {
     DllNotFound,
     AsmdefMissing(String),
     ChangelogMissingVersion(String),
-    Io(String),
+    /// package.json 解析失败（非合法 JSON）。
+    PackageJsonInvalid(String),
+    /// 文件读取失败，携带路径上下文（避免裸 `io: No such file...` 没有指明是哪个文件）。
+    ReadFailed {
+        path: String,
+        source: String,
+    },
 }
 
 impl std::fmt::Display for CheckError {
@@ -30,7 +36,10 @@ impl std::fmt::Display for CheckError {
             Self::ChangelogMissingVersion(v) => {
                 write!(f, "CHANGELOG.md has no section for version {v}")
             }
-            Self::Io(e) => write!(f, "io error: {e}"),
+            Self::PackageJsonInvalid(e) => write!(f, "package.json is not valid JSON: {e}"),
+            Self::ReadFailed { path, source } => {
+                write!(f, "failed to read {path}: {source}")
+            }
         }
     }
 }
@@ -46,7 +55,7 @@ pub enum DllStatus {
 /// 解析 package.json 内容并校验必填字段 + version 合法性。
 pub fn parse_and_validate_package(content: &str) -> Result<PackageMeta, CheckError> {
     let v: serde_json::Value =
-        serde_json::from_str(content).map_err(|e| CheckError::Io(e.to_string()))?;
+        serde_json::from_str(content).map_err(|e| CheckError::PackageJsonInvalid(e.to_string()))?;
     for field in ["name", "version", "unity", "displayName"] {
         let missing = v.get(field).map(|x| x.is_null()).unwrap_or(true);
         if missing {
@@ -68,6 +77,14 @@ pub fn changelog_has_version(content: &str, version: &str) -> bool {
     content
         .lines()
         .any(|line| line.trim_start().starts_with(&needle))
+}
+
+/// 读取文件，失败时把路径带入错误上下文。
+fn read_file(path: &Path) -> Result<String, CheckError> {
+    std::fs::read_to_string(path).map_err(|e| CheckError::ReadFailed {
+        path: path.to_string_lossy().into_owned(),
+        source: e.to_string(),
+    })
 }
 
 /// 校验入库 dll 是否存在。
@@ -99,10 +116,10 @@ pub fn check_asmdef_present(pkg_dir: &Path) -> Result<(), CheckError> {
 /// 任意一项失败返回 Err，调用方据此退出非 0。
 pub fn run_release_check() -> Result<(), Box<dyn std::error::Error>> {
     let pkg = paths::repo_root().join("unity/package/package.json");
-    let meta = parse_and_validate_package(&std::fs::read_to_string(&pkg)?)?;
+    let meta = parse_and_validate_package(&read_file(&pkg)?)?;
 
     let cl = paths::repo_root().join("unity/package/CHANGELOG.md");
-    let cl_content = std::fs::read_to_string(&cl)?;
+    let cl_content = read_file(&cl)?;
     if !changelog_has_version(&cl_content, &meta.version) {
         return Err(CheckError::ChangelogMissingVersion(meta.version).into());
     }
@@ -175,6 +192,45 @@ mod tests {
         let p = dir.join(name);
         std::fs::write(&p, bytes).unwrap();
         p
+    }
+
+    /// 创建一个唯名的临时 "pkg dir"，用于 asmdef 校验测试。
+    fn tmp_pkg_dir() -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static M: AtomicU64 = AtomicU64::new(0);
+        let id = M.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("xtask-rc-asmdef-{}-{id}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// 在 dir 下写相对路径文件（自动创建父目录）。
+    fn write_rel(dir: &std::path::Path, rel: &str, bytes: &[u8]) {
+        let p = dir.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, bytes).unwrap();
+    }
+
+    #[test]
+    fn asmdef_present_ok() {
+        let dir = tmp_pkg_dir();
+        write_rel(&dir, "LoomGUI.Runtime.asmdef", b"{}");
+        write_rel(&dir, "Editor/LoomGUI.Editor.asmdef", b"{}");
+        write_rel(&dir, "Plugins/LoomGUI/LoomGUI.Bindings.asmdef", b"{}");
+        assert!(check_asmdef_present(&dir).is_ok());
+    }
+
+    #[test]
+    fn asmdef_present_missing() {
+        let dir = tmp_pkg_dir();
+        write_rel(&dir, "LoomGUI.Runtime.asmdef", b"{}");
+        write_rel(&dir, "Editor/LoomGUI.Editor.asmdef", b"{}");
+        // 故意不写 Plugins/LoomGUI/LoomGUI.Bindings.asmdef
+        assert!(matches!(
+            check_asmdef_present(&dir),
+            Err(CheckError::AsmdefMissing(n))
+                if n == "Plugins/LoomGUI/LoomGUI.Bindings.asmdef"
+        ));
     }
 
     #[test]
