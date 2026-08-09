@@ -1279,12 +1279,33 @@ namespace LoomGUI
             }
         }
     }
-    public class Image : Node
+    public unsafe class Image : Node
     {
         internal Image(UIContext ctx, uint id) : base(ctx, id) { }
+        string _src = "";   // setter 写穿 core 后镜像；无 get_src FFI，getter 读镜像
 
-        public string Src { get { throw NE(); } set { throw NE(); } }   // 字符串 key（包内 or 运行时注册）；动态纹理注册归引擎后端
-        static NotImplementedException NE() => new NotImplementedException();
+        /// <summary>
+        /// 图片资源 key（atlas sprite_key，如 "res/icons/item-potion.png"）。setter 写穿 core：
+        /// set_src 标 dirty_mesh → 下帧 render 重读 image_srcs 出 mesh image_path → Unity MirrorPool
+        /// 查 atlas manifest 重映射 UV——故运行时换图有效（前提：新 key 是已打包进 atlas 的 sprite）。
+        /// getter 读镜像（初始空串，set 后反映写入值）。null 当空串。Dispose 后访问抛 ObjectDisposedException。
+        /// </summary>
+        public string Src
+        {
+            get { ThrowIfDisposed(); return _src; }
+            set
+            {
+                ThrowIfDisposed();
+                string v = value ?? "";
+                _src = v;
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                byte[] b = Encoding.UTF8.GetBytes(v);
+                fixed (byte* p = b)
+                {
+                    _ = Native.loomgui_stage_set_src(h, _id, p, (nuint)b.Length);
+                }
+            }
+        }
     }
 
     // ── 容器类文本/标签（TextContent 走 Container 继承）──

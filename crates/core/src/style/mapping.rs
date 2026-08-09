@@ -449,7 +449,9 @@ use crate::style::resolved::LocalTransform;
 use crate::transform::{self, Affine2};
 
 /// 解析 CSS `transform` 声明值为累积 Affine2 矩阵。
-/// 支持 translate(px,px)/rotate(deg)/scale(num[,num])；skew/matrix()/%/3D 静默跳过。
+/// 支持 translate/translateX/translateY(px)/rotate(deg)/scale/scaleX/scaleY(num[,num])；
+/// skew/matrix()/%/3D 静默跳过。一轴变体（translateX/Y、scaleX/Y）与 `parse_transform_trs`
+/// （关键帧路径）保持一致——showcase CSS 用 `translateY(-6px)` 表达 hover 上浮。
 /// 多函数从左到右 = 矩阵左乘累积（CSS 语义：最左函数最外层）。
 pub fn parse_transform(value: &str) -> LocalTransform {
     let mut m = transform::IDENTITY;
@@ -587,6 +589,15 @@ fn func_to_matrix(name: &str, args: &str) -> Option<Affine2> {
             let y = parse_px(parts.get(1).copied().unwrap_or("0"))?;
             Some(transform::from_translate(x, y))
         }
+        // 一轴便捷写法（CSS 标准）：translateX/Y 只动单轴，另一轴 0。
+        "translateX" => {
+            let x = parse_px(parts.first().copied().unwrap_or("0"))?;
+            Some(transform::from_translate(x, 0.0))
+        }
+        "translateY" => {
+            let y = parse_px(parts.first().copied().unwrap_or("0"))?;
+            Some(transform::from_translate(0.0, y))
+        }
         "rotate" => {
             let deg = parts.first().copied().unwrap_or("0");
             let deg = deg.trim_end_matches("deg").trim().parse::<f32>().ok()?;
@@ -601,6 +612,15 @@ fn func_to_matrix(name: &str, args: &str) -> Option<Affine2> {
                 .parse::<f32>()
                 .ok()?;
             Some(transform::from_scale(sx, sy))
+        }
+        // 一轴缩放：另一轴保持 1。
+        "scaleX" => {
+            let sx = parts.first().copied().unwrap_or("1").parse::<f32>().ok()?;
+            Some(transform::from_scale(sx, 1.0))
+        }
+        "scaleY" => {
+            let sy = parts.first().copied().unwrap_or("1").parse::<f32>().ok()?;
+            Some(transform::from_scale(1.0, sy))
         }
         _ => None, // skew/matrix3d/... 围栏外
     }
@@ -1194,6 +1214,13 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         }
         "selection-color" => {
             style.selection_color = parse_color(value);
+            true
+        }
+        // LoomGUI 私有属性（CSS 用 ::placeholder 伪元素，围栏无伪元素选择器，故平铺 prop）。
+        // None = render/layout 回退到 color 折半（对齐浏览器 ::placeholder UA 默认）。
+        // 不可解析色静默落 None（与 selection-color 同口径，不报错）。
+        "placeholder-color" => {
+            style.placeholder_color = parse_color(value);
             true
         }
         "font-size" => {

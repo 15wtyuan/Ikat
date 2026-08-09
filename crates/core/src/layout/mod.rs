@@ -179,26 +179,28 @@ pub fn solve(
                 let s = &node.style;
                 // value 优先，空时用 placeholder（与 render 显示一致）；measure 用显示文本
                 // 算 intrinsic size，taffy 再加 padding/border → border-box 高度含文字行高。
-                let content = scene
+                // 追踪 is_placeholder：颜色用占位色（placeholder_render_color），与 render 一致
+                // ——颜色在此烘焙进缓存 TextLayout 的 per-run 色，render 复用缓存，故两处须同色。
+                let (content, is_placeholder) = scene
                     .controls
                     .get(id)
                     .and_then(|cs| match cs {
                         crate::scene::node::ControlState::TextField(e)
                         | crate::scene::node::ControlState::TextArea(e) => {
                             let dv = crate::scene::control::display_value(e).0;
-                            Some(if dv.is_empty() {
-                                e.placeholder.clone()
+                            if dv.is_empty() {
+                                Some((e.placeholder.clone(), true))
                             } else {
-                                dv
-                            })
+                                Some((dv, false))
+                            }
                         }
                         crate::scene::node::ControlState::NumberField { edit, .. } => {
                             let dv = crate::scene::control::display_value(edit).0;
-                            Some(if dv.is_empty() {
-                                edit.placeholder.clone()
+                            if dv.is_empty() {
+                                Some((edit.placeholder.clone(), true))
                             } else {
-                                dv
-                            })
+                                Some((dv, false))
+                            }
                         }
                         _ => None,
                     })
@@ -211,7 +213,14 @@ pub fn solve(
                     align: s.text_align,
                     nowrap: s.white_space_nowrap,
                     family: s.font_family.clone(),
-                    color: s.color,
+                    color: if is_placeholder {
+                        crate::style::resolved::placeholder_render_color(
+                            s.placeholder_color,
+                            s.color,
+                        )
+                    } else {
+                        s.color
+                    },
                     font_weight: s.font_weight,
                     h_inset: lp(s.taffy_style.padding.left)
                         + lp(s.taffy_style.padding.right)

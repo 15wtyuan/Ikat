@@ -263,6 +263,11 @@ pub struct ResolvedStyle {
     /// CSS `selection-color`（选中文本的文字色）。None = 缺省回退白色（render arm fallback）。
     /// 同 `selection_background`，LoomGUI 私有属性（CSS `::selection { color }`）。
     pub selection_color: Option<[f32; 4]>,
+    /// 占位符渲染色（CSS `::placeholder { color }`，围栏无伪元素选择器，故平铺 prop）。
+    /// None = 缺省把 `color` alpha 折半（对齐浏览器 ::placeholder UA 默认 ~opacity 0.5）。
+    /// 颜色在 layout solve 期烘焙进缓存 TextLayout 的 per-run 色，故 layout 与 render 须
+    /// 一致用此字段（见 `placeholder_render_color`）——render 单独改色会被缓存覆盖。
+    pub placeholder_color: Option<[f32; 4]>,
     pub font_size: f32,
     pub font_family: Option<String>,
     pub font_weight: u16,
@@ -334,6 +339,21 @@ pub enum TextAlign {
     Right,
 }
 
+/// 占位符渲染色：声明了 `placeholder-color` 用之，否则把传入的 `text_color` alpha 折半
+/// （对齐浏览器 ::placeholder UA 默认 ~opacity 0.5）。layout（控件 measure）与 render
+/// （文本控件臂）共用，保证缓存 TextLayout 的 per-run 色与 render fallback 一致。
+/// `text_color` 由调用方决定（layout 传 style.color；render 可传 anim 覆盖后的色）。
+pub fn placeholder_render_color(declared: Option<[f32; 4]>, text_color: [f32; 4]) -> [f32; 4] {
+    declared.unwrap_or_else(|| {
+        [
+            text_color[0],
+            text_color[1],
+            text_color[2],
+            text_color[3] * 0.5,
+        ]
+    })
+}
+
 impl Default for ResolvedStyle {
     fn default() -> Self {
         // CSS spec: flex-direction initial value is `row`. taffy Style::DEFAULT
@@ -369,6 +389,7 @@ impl Default for ResolvedStyle {
             caret_color: None,
             selection_background: None,
             selection_color: None,
+            placeholder_color: None,
             font_size: 16.0,
             font_family: None,
             font_weight: 400,

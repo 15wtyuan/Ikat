@@ -405,6 +405,15 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         inherited: false,
         parser: CssValueParser::Color,
     },
+    // LoomGUI 私有属性：占位符色（::placeholder { color }）。None = render/layout 回退
+    // 到 color 折半（浏览器 ::placeholder UA 默认 ~opacity 0.5）。inherited：跟 color 一致，
+    // 文本框未显式声明时从父继承的 color 折半作占位色。
+    CssPropSpec {
+        name: "placeholder-color",
+        default: "transparent",
+        inherited: true,
+        parser: CssValueParser::Color,
+    },
     CssPropSpec {
         name: "box-shadow",
         default: "none",

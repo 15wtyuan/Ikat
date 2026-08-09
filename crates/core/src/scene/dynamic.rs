@@ -226,6 +226,10 @@ pub fn create_node_from_template(
     // f32::clamp(min,max)，它在 min>max 时 debug 断言 abort——FFI 边界 panic = 杀宿主进程。
     // 在此单一入口建立不变量（max≥0、min≤max、value∈[lo,hi]、step≥0），下游方可无守卫 clamp。
     if let Some(init) = control_init {
+        // 缓存 init 供 clone_node_recursive 重建克隆控件的 ControlState（虚拟列表每槽控件
+        // 全相同的根因：克隆控件无 ControlState → set_control_value 静默失败、sync_control_visuals
+        // 早退）。clone 时从缓存取，重建全新默认态（不搬运行时值，尊重“值不随克隆迁移”意图）。
+        scene.control_inits.insert(id, init.clone());
         let state = match init {
             ControlInit::Progress {
                 value,
@@ -318,7 +322,7 @@ pub fn create_node_from_template(
 pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
     // 先取出源节点的不可变快照（kind/base_style/classes/id_attr/text/image_srcs），
     // drop 借后再可变借建新节点——避免边读边写 scene 的借用冲突。
-    let (kind, base_style, classes, id_attr, content, src_path, role_info) = {
+    let (kind, base_style, classes, id_attr, content, src_path, role_info, control_init) = {
         let n = scene.get(src).expect("live src");
         (
             n.kind,
@@ -328,9 +332,10 @@ pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
             scene.text_contents.get(&src).cloned(),
             scene.image_srcs.get(&src).cloned(),
             scene.roles.get(src).cloned(),
+            scene.control_inits.get(&src).cloned(),
         )
     };
-    let new_id = create_node_from_template(scene, kind, base_style, None);
+    let new_id = create_node_from_template(scene, kind, base_style, control_init);
     {
         let n = scene.get_mut(new_id).unwrap();
         n.classes = classes;
@@ -345,7 +350,8 @@ pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
     // role/data-slot：克隆 RoleTable 条目（role-driven 控件部件定位 + 语义分派用）。
     // 克隆出的子树必须保留 role/slot 标注——否则 list item 模板里的 progressbar fill 等
     // 部件丢失定位 → 渲染回退默认（fill 撑满 100% 而非按 value 宽）。
-    // ControlState 克隆是 separate pre-existing gap（见函数 doc），此处只解锁 role/slot 路径。
+    // ControlState：上方 control_init 缓存已让 create_node_from_template 为克隆控件建
+    // 全新默认态（gap 已补）——不再依赖此处的 role/slot 路径，但二者协同。
     if let Some(info) = role_info {
         scene.roles.insert(new_id, info);
     }
@@ -594,6 +600,7 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
     scene.anim.clear_node(id);
     scene.scroll.remove(id);
     scene.controls.remove(id);
+    scene.control_inits.remove(&id);
     scene.roles.remove(id);
     // ListView 模板是游离子树（parent=None、不在 roots、不在任何父的 children），
     // remove_node 的递归删子够不到它。删 ul 前先取 template_root，随 ul 一并递归释放，

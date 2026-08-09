@@ -1946,14 +1946,26 @@ fn render_one_node(
             // 下划线对齐预提交文本。measure_text_controls 缓存的 TextLayout 与这里 display
             // 同源（都走 display_value），故文字 mesh 与下划线几何一致。
             let (dv, comp_range) = crate::scene::control::display_value(e);
-            let display = if dv.is_empty() {
+            let is_placeholder = dv.is_empty();
+            let display = if is_placeholder {
                 e.placeholder.clone()
             } else {
                 dv
             };
             let s = &n.style;
             let stack = fonts.stack_for(s.font_family.as_deref());
-            let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
+            let base_text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
+            // placeholder 用占位色（声明的 placeholder-color，否则文字色折半，对齐浏览器
+            // ::placeholder UA 默认）。与 layout solve 同公式——颜色在 layout 期烘焙进缓存
+            // TextLayout，此处 fallback 须同色（见 placeholder_render_color）。
+            let text_color = if is_placeholder {
+                crate::style::resolved::placeholder_render_color(
+                    s.placeholder_color,
+                    base_text_color,
+                )
+            } else {
+                base_text_color
+            };
             let off_left =
                 resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
             let off_right =

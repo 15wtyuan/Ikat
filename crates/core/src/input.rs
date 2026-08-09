@@ -1130,9 +1130,10 @@ impl PointerState {
                             [ev.x, ev.y],
                         ));
                     }
-                    // click-to-focus：pointer-down 命中 tabindex>=0 节点 → 聚焦（照 DOM）。
+                    // click-to-focus（照 DOM mousedown）：pointer-down 命中 tabindex>=0 节点 → 聚焦它；
+                    // 命中无可聚焦目标（空白 / disabled / tabindex<0）→ 清焦点（focus→body，输入框 blur）。
+                    // 真实 DOM：点页面空白会让聚焦的 <input> blur（focus 移到 body），正是此行为。
                     // 沿 down_targets（leaf 优先，同 drag_target 模式）找最近可聚焦非 disabled 节点。
-                    // 不可聚焦/`-1` → 不夺焦（照 DOM：点空白不 blur）。
                     let focus_target = slot
                         .down_targets
                         .iter()
@@ -1143,9 +1144,7 @@ impl PointerState {
                             })
                         })
                         .copied();
-                    if let Some(t) = focus_target {
-                        focus_node(scene, Some(t), &mut out);
-                    }
+                    focus_node(scene, focus_target, &mut out);
                     if let Some(n) = hit {
                         if scene.get(n).is_some_and(|node| {
                             !node.interaction.flags.contains(NodeFlags::DISABLED)

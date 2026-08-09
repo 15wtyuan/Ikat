@@ -213,6 +213,12 @@ CSS 在围栏中以三个正交维度建模：
 
 `color`（继承）, `font-size`（继承）, `font-family`（继承）, `font-weight`（继承）, `text-align`（继承）, `line-height`（继承）, `letter-spacing`（继承）, `white-space`（继承）, `text-shadow`（继承）, `-webkit-text-stroke`（继承）, `font-effect`（继承，LoomGUI 私有扩展）, `transition`
 
+**文本控件私有属性**（CSS 用伪元素表达，围栏无伪元素选择器，故平铺 prop；`None` = render 回退到缺省色）
+
+- `caret-color`（继承，`::selection` 光标色；缺省回退 `color`）
+- `selection-background` / `selection-color`（`::selection` 选区背景/文字色；缺省蓝半透 / 白）
+- `placeholder-color`（继承，`::placeholder` 占位符色；缺省把 `color` alpha 折半，对齐浏览器 `::placeholder` UA 默认 ~opacity 0.5）
+
 **动画**
 
 `animation`——`<name> <duration> [easing] [iteration-count|infinite] [fill-mode] [direction] [play-state] [delay]` 简写。对齐 public-api.md「动画定义全在 CSS」终态契约：fence 校验拼写错误并解析存值（逗号多声明 → 多个 `AnimationSpec` bake 进 `base_style.animation`，委托 core `parse_animation` 共用同一解析器防 spec §8.2/§8.3 语义漂移）。当前仅简写存在，标准 CSS 的 8 个长划子属性（`animation-name`/`animation-duration` 等）未加入；runtime 驱动（@keyframes 表查询 + KeyframePlayer 时间轴）**M2 已交付**（见 main-design §13）。`transition`——`<prop?> <dur> <ease?> <delay?>` 简写，逗号多 spec 解析存值（bake 进 `base_style.transition`，core transition 引擎消费）；ease 关键字按 spec §8.3 对齐（`ease`→CubicOut 等）。
