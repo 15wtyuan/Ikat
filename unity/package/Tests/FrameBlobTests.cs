@@ -3,30 +3,30 @@ using NUnit.Framework;
 
 namespace LoomGUI.Tests
 {
-    /// FrameBlob Visible/Parked bit accessor 单元测试（v11 blob，21 列 SOA）。
+    /// FrameBlob Visible/Parked bit accessor 单元测试（v12 blob，22 列 SOA）。
     /// 焦点：active 条目 bit0=1 bit1=0；parked keepalive 条目 bit0=0 bit1=1。
     public class FrameBlobVisibleParkedTests
     {
-        /// 构造 v11 blob（21 列）。active 条目 + parked keepalive 条目。
+        /// 构造 v12 blob（22 列）。active 条目 + parked keepalive 条目。
         /// col_visible 数组填每节点的 visible 字节值：
         ///   0b01 = active（bit0=可见）
         ///   0b10 = parked（bit1=keepalive）
-        static byte[] BuildBlobV11(byte[] colVisible)
+        static byte[] BuildBlobV12(byte[] colVisible)
         {
             int nodeCount = colVisible.Length;
             var b = new List<byte>();
 
             // header: magic, version, node_count
             b.AddRange(System.BitConverter.GetBytes(0x4D4F4F4Cu));
-            b.AddRange(System.BitConverter.GetBytes(11u));
+            b.AddRange(System.BitConverter.GetBytes(12u));
             b.AddRange(System.BitConverter.GetBytes((uint)nodeCount));
 
-            // v11: 21 列 stride（bytes per entry）：col 0..20
-            int[] stride = { 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128 };
-            // 21 col offsets（SOA），header 总长 120
-            const int headerLen = 120;
+            // v12: 22 列 stride（bytes per entry）：col 0..21
+            int[] stride = { 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24 };
+            // 22 col offsets（SOA），header 总长 124
+            const int headerLen = 124;
             int off = headerLen;
-            for (int i = 0; i < 21; i++)
+            for (int i = 0; i < 22; i++)
             {
                 b.AddRange(System.BitConverter.GetBytes((uint)off));
                 off += stride[i] * nodeCount;
@@ -48,8 +48,8 @@ namespace LoomGUI.Tests
             // col 2: visible byte
             for (int i = 0; i < nodeCount; i++)
                 b.Add(colVisible[i]);
-            // cols 3-20: fill zero (MirrorPool won't read these in parked path)
-            int[] strideTail = { 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128 };
+            // cols 3-21: fill zero (MirrorPool won't read these in parked path)
+            int[] strideTail = { 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24 };
             foreach (int s in strideTail)
                 for (int i = 0; i < nodeCount; i++)
                     for (int j = 0; j < s; j++)
@@ -67,12 +67,12 @@ namespace LoomGUI.Tests
         public void ParkedBit_RoundTrips()
         {
             // 3 active (0b01) + 2 parked keepalive (0b10)
-            var blob = new FrameBlob(BuildBlobV11(new byte[] {
+            var blob = new FrameBlob(BuildBlobV12(new byte[] {
                 0b01, 0b01, 0b01,  // active
                 0b10, 0b10         // parked
             }));
 
-            Assert.That(blob.IsValid, Is.True, "v11 blob IsValid");
+            Assert.That(blob.IsValid, Is.True, "v12 blob IsValid");
             Assert.That(blob.NodeCount, Is.EqualTo(5), "3 active + 2 parked = 5");
 
             // 前 3 条：Visible=true, Parked=false
@@ -94,7 +94,7 @@ namespace LoomGUI.Tests
         [Test]
         public void AllActive_VisibleAllTrue_ParkedAllFalse()
         {
-            var blob = new FrameBlob(BuildBlobV11(new byte[] { 0b01, 0b01, 0b01, 0b01 }));
+            var blob = new FrameBlob(BuildBlobV12(new byte[] { 0b01, 0b01, 0b01, 0b01 }));
             Assert.That(blob.NodeCount, Is.EqualTo(4));
 
             for (int i = 0; i < 4; i++)
@@ -108,7 +108,7 @@ namespace LoomGUI.Tests
         [Test]
         public void ZeroVisibleByte_IsNotVisibleAndNotParked()
         {
-            var blob = new FrameBlob(BuildBlobV11(new byte[] { 0x00 }));
+            var blob = new FrameBlob(BuildBlobV12(new byte[] { 0x00 }));
             Assert.That(blob.NodeCount, Is.EqualTo(1));
             Assert.That(blob.Visible(0), Is.False);
             Assert.That(blob.Parked(0), Is.False);

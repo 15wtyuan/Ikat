@@ -6,16 +6,16 @@ namespace LoomGUI.Tests.Core
 {
     public class FrameBlobTests
     {
-        // 构造 v11 blob（镜像 loomgui_ffi_c/src/blob.rs::VERSION=11 + FrameBlob.cs）。
-        // v11 = v10 + 第 21 列 effect_block([f32;32]=128B)，列数 20→21，列数据起点 116→120。
+        // 构造 v12 blob（镜像 loomgui_ffi_c/src/blob.rs::VERSION=12 + FrameBlob.cs）。
+        // v12 = v11 + 第 22 列 shadow_params([f32;6]=24B)，列数 21→22，列数据起点 120→124。
         static byte[] BuildBlob(int nodeCount, byte[][] columnData, byte[] meshArena = null, byte[] clipTable = null, byte[] pathTable = null)
         {
             meshArena ??= [];
             clipTable ??= [];
             pathTable ??= [];
 
-            // 21 列元素字节大小（须与 FrameBlob.cs ColOff 注释一一对应）。末列 effect_block=128B。
-            int[] elemSizes = { 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128 };
+            // 22 列元素字节大小（须与 FrameBlob.cs ColOff 注释一一对应）。末列 effect_block=128B，shadow_params=24B。
+            int[] elemSizes = { 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24 };
             int numCols = elemSizes.Length;
             // header = magic+version+node_count(12) + numCols×col_offset + 3 arena ×(off,len)=24 → 列数据起点。
             int colOff = 12 + numCols * 4 + 24;
@@ -27,7 +27,7 @@ namespace LoomGUI.Tests.Core
 
             var b = new List<byte>();
             b.AddRange(BitConverter.GetBytes(0x4D4F4F4Cu)); // magic
-            b.AddRange(BitConverter.GetBytes(11u));          // version = 11
+            b.AddRange(BitConverter.GetBytes(12u));          // version = 12
             b.AddRange(BitConverter.GetBytes((uint)nodeCount));
             foreach (var o in offs) b.AddRange(BitConverter.GetBytes(o));
             b.AddRange(BitConverter.GetBytes(meshArenaOff));
@@ -62,14 +62,14 @@ namespace LoomGUI.Tests.Core
         [Fact]
         public void IsValid_GoodBlob_ReturnsTrue()
         {
-            var blob = new FrameBlob(BuildBlob(0, new byte[21][]));
+            var blob = new FrameBlob(BuildBlob(0, new byte[22][]));
             Assert.True(blob.IsValid);
         }
 
         [Fact]
         public void IsValid_BadMagic_ReturnsFalse()
         {
-            var b = BuildBlob(0, new byte[21][]);
+            var b = BuildBlob(0, new byte[22][]);
             b[0] = 0xFF;
             var blob = new FrameBlob(b);
             Assert.False(blob.IsValid);
@@ -78,7 +78,7 @@ namespace LoomGUI.Tests.Core
         [Fact]
         public void IsValid_BadVersion_ReturnsFalse()
         {
-            var b = BuildBlob(0, new byte[21][]);
+            var b = BuildBlob(0, new byte[22][]);
             BitConverter.GetBytes(99u).CopyTo(b, 4);
             var blob = new FrameBlob(b);
             Assert.False(blob.IsValid);
@@ -87,14 +87,14 @@ namespace LoomGUI.Tests.Core
         [Fact]
         public void NodeCount_ReturnsCorrectValue()
         {
-            var blob = new FrameBlob(BuildBlob(3, new byte[21][]));
+            var blob = new FrameBlob(BuildBlob(3, new byte[22][]));
             Assert.Equal(3, blob.NodeCount);
         }
 
         [Fact]
         public void ColumnAccessors_ReadCorrectValues()
         {
-            var cols = new byte[21][];
+            var cols = new byte[22][];
             cols[0] = U32(42);          // node_id
             cols[1] = I32(-1);          // parent_id
             cols[2] = U8(1);            // visible
@@ -144,7 +144,7 @@ namespace LoomGUI.Tests.Core
             var eb = new byte[128];
             BitConverter.GetBytes(3f).CopyTo(eb, 0);        // eb[0]  outline_width = 3
             BitConverter.GetBytes(7f).CopyTo(eb, 31 * 4);   // eb[31] blur_width     = 7
-            var cols = new byte[21][];
+            var cols = new byte[22][];
             cols[20] = eb;
 
             var blob = new FrameBlob(BuildBlob(1, cols));
@@ -157,7 +157,7 @@ namespace LoomGUI.Tests.Core
         [Fact]
         public void IsPureTranslation_Identity_ReturnsTrue()
         {
-            var cols = new byte[21][];
+            var cols = new byte[22][];
             cols[6] = F32(1f); cols[7] = F32(0f); cols[8] = F32(0f); cols[9] = F32(1f);
             var blob = new FrameBlob(BuildBlob(1, cols));
             Assert.True(blob.IsPureTranslation(0));
@@ -166,7 +166,7 @@ namespace LoomGUI.Tests.Core
         [Fact]
         public void IsPureTranslation_Rotated_ReturnsFalse()
         {
-            var cols = new byte[21][];
+            var cols = new byte[22][];
             cols[6] = F32(0.7f); cols[7] = F32(0.7f); cols[8] = F32(-0.7f); cols[9] = F32(0.7f);
             var blob = new FrameBlob(BuildBlob(1, cols));
             Assert.False(blob.IsPureTranslation(0));
@@ -175,7 +175,7 @@ namespace LoomGUI.Tests.Core
         [Fact]
         public void ReadPath_IndexZero_ReturnsNull()
         {
-            var blob = new FrameBlob(BuildBlob(0, new byte[21][]));
+            var blob = new FrameBlob(BuildBlob(0, new byte[22][]));
             Assert.Null(blob.ReadPath(0));
         }
 
@@ -190,7 +190,7 @@ namespace LoomGUI.Tests.Core
             pathTable.AddRange(U32(3));                       // len=3
             pathTable.AddRange(System.Text.Encoding.UTF8.GetBytes("a/b"));
 
-            var blob = new FrameBlob(BuildBlob(0, new byte[21][], pathTable: pathTable.ToArray()));
+            var blob = new FrameBlob(BuildBlob(0, new byte[22][], pathTable: pathTable.ToArray()));
             Assert.Equal(2, blob.PathCount);
             Assert.Equal("res/icon.png", blob.ReadPath(1));
             Assert.Equal("a/b", blob.ReadPath(2));
@@ -203,7 +203,7 @@ namespace LoomGUI.Tests.Core
             pathTable.AddRange(U32(1));
             pathTable.AddRange(U32(3));
             pathTable.AddRange(System.Text.Encoding.UTF8.GetBytes("abc"));
-            var blob = new FrameBlob(BuildBlob(0, new byte[21][], pathTable: pathTable.ToArray()));
+            var blob = new FrameBlob(BuildBlob(0, new byte[22][], pathTable: pathTable.ToArray()));
             Assert.Null(blob.ReadPath(5));
         }
 
@@ -225,7 +225,7 @@ namespace LoomGUI.Tests.Core
             clipTable.AddRange(F32(3f)); clipTable.AddRange(F32(4f));
             for (int i = 0; i < 8; i++) clipTable.AddRange(F32(0f));    // 全 0 半径
 
-            var blob = new FrameBlob(BuildBlob(0, new byte[21][], clipTable: clipTable.ToArray()));
+            var blob = new FrameBlob(BuildBlob(0, new byte[22][], clipTable: clipTable.ToArray()));
             Assert.Equal(2, blob.ClipCount);
 
             Assert.True(blob.ClipRect(5, out float x, out float y, out float w, out float h, out float r));
@@ -251,14 +251,14 @@ namespace LoomGUI.Tests.Core
             clipTable.AddRange(U32(5)); clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(0f));
             clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(0f));
 
-            var blob = new FrameBlob(BuildBlob(0, new byte[21][], clipTable: clipTable.ToArray()));
+            var blob = new FrameBlob(BuildBlob(0, new byte[22][], clipTable: clipTable.ToArray()));
             Assert.False(blob.ClipRect(99, out _, out _, out _, out _, out _));
         }
 
         [Fact]
         public void MultiNode_EachHasDistinctValues()
         {
-            var cols = new byte[21][];
+            var cols = new byte[22][];
             cols[0] = U32(100); // node 0: id=100
             var b0 = new List<byte>(); b0.AddRange(cols[0]); b0.AddRange(U32(200)); // node 1: id=200
             cols[0] = b0.ToArray();

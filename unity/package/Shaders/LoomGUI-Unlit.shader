@@ -63,8 +63,13 @@ Shader "LoomGUI/Unlit"
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile _ CLIPPED
-            // SHADOW_BLUR 与 CLIPPED_ROUNDED 同 multi_compile 行 → 互斥变体（shadow 节点自算圆角 alpha，无需 clip 裁剪）。
-            #pragma multi_compile _ CLIPPED_ROUNDED SHADOW_BLUR
+            // CLIPPED_ROUNDED（祖先 overflow clip 圆角遮罩）与 SHADOW_BLUR（box-shadow 自身 SDF 圆角 + 高斯边）
+            // 拆独立 multi_compile 行：同 Material 可同时启用（blur shadow 落在 rounded-overflow 容器内），
+            // 同行时 Unity 只选首个声明变体（CLIPPED_ROUNDED 赢）→ SHADOW_BLUR 块不执行 → 阴影塌成硬裁剪块。
+            // 两块独立（各自 col.a *= …），同时启用正确叠加。shadow 自身圆角走 SDF，但仍经 mask_context
+            // 受祖先 overflow clip 约束（非“无需 clip”）。
+            #pragma multi_compile _ CLIPPED_ROUNDED
+            #pragma multi_compile _ SHADOW_BLUR
             #pragma multi_compile _ OBJECT_MATRIX
             #pragma multi_compile _ ALPHA_MASK
             #pragma multi_compile _ BG_COMPOSITE

@@ -908,7 +908,7 @@ fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     );
 }
 
-/// v31: version=30 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=31，无迁移器）。
+/// v31: version=30 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=32，无迁移器）。
 /// Compound 加 pseudo_nth_child 字段改变 dynamic_rules bincode blob 布局，旧 v30 fixture
 /// 不能半读半坏。
 #[test]

@@ -388,7 +388,7 @@ fn program_column_round_trips() {
 fn blob_header_has_text_and_clip_arena_fields() {
     let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
 
-    // magic + version==11。
+    // magic + version==12。
     assert_eq!(u32::from_le_bytes(blob[0..4].try_into().unwrap()), MAGIC);
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),

@@ -7,7 +7,7 @@ namespace LoomGUI
     /// 帧 blob 托管解析视图。解析 Rust build_blob 产出的 little-endian blob。
     ///
     /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v12）：
-    ///   header (128B): magic(u32 LE), version(u32)=12, node_count(u32),
+    ///   header (124B): magic(u32 LE), version(u32)=12, node_count(u32),
     ///                 22× col_offset(u32, byte offset from blob start),
     ///                 mesh_arena_off(u32), mesh_arena_len(u32),
     ///                 clip_table_off(u32), clip_table_len(u32),
