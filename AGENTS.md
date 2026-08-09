@@ -167,6 +167,8 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件。
 
+**C# 投影层 `throw NE()` 是 stub，非真限制**：`LoomGUI.Nodes.cs` 里 get/set 都 `throw NotImplementedException()` 的 API（`Image.Src`/`Touchable`/`Focusable`/`OnUpdate`…）是**未接线 stub**，底层 core + FFI 多半已支持。遇注释/demo 写"运行时不可变 / by-design"先查 `crates/ffi/src/lib.rs` + core 源码确认，别信注释（坑 191：背包图标"不可变"实为 C# 没接 `set_src`，core+FFI+Unity MirrorPool 全通）。判断框架能力看 core+FFI，不看 C# wrapper。
+
 ## API 适配方法论
 
 **plan/草稿的 API 常与 crate 实际不符**——遇编译错按 crate 实际源码调，**勿硬改依赖版本**。具体 crate 差异见 `docs/pitfalls.md` §3。
