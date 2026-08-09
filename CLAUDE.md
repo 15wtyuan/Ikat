@@ -139,6 +139,9 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 - `dump_nativehost_slot` — NativeHost FFI 查询
 - `spec4b_dump` — Spec-4b 验收用：dump 全节点 layout_rect + img src + text metrics + glyph probe（验 core solve 跟 PlayMode 一致，定位 layout bug 在 core 还是 Unity 后端）
 - `dump_shop` — showcase/shop 命中/层叠诊断：dump 全节点 layout_rect/display/touchable + hit_test 探针（定位点击被谁接走、inline vs class cascade 谁赢）
+- `dump_mail` — showcase/mail 帧计时 + 阶段拆分（定位低帧热点：solve/render/build 谁独占；验虚拟列表 slot 数不随 ItemCount 涨）
+- `dump_mail_scroll` — 虚拟列表覆盖诊断：set_scroll_pos 驱动 + 量化视口顶部空白 gap_top（定位 active slot 是否覆盖视口顶，漏 flex gap 会留空）
+- `dump_home_anim` — 入场交错动画延迟取证（验 `:nth-child` 步进延迟是否正确，漏 TextNode 计数会全 0）
 
 **跨层特性 PlayMode 报错**先 example 实测 core 状态再改，避免盲改物理掩盖 layout 根因。
 
@@ -169,6 +172,8 @@ csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件�
 **plan/草稿的 API 常与 crate 实际不符**——遇编译错按 crate 实际源码调，**勿硬改依赖版本**。具体 crate 差异见 `docs/pitfalls.md` §3。
 
 **Unity API 同理别信记忆/草稿**——查 Unity 安装目录 `Editor/Data/Managed/UnityEditor.xml`。
+
+**Unity Mono 运行时 API surface 落后于 .NET / net10.0**——`BitConverter.SingleToUInt32Bits`、新 `Span` API 等版本门控 API，headless `dotnet test`（net10.0）能编过但 Unity Mono 缺 → Unity 编 CS0117。改 C# 别只跑 headless；优先版本无关等价写法（指针重解释 `*(uint*)&v`、手动位运算）。见坑 188。
 
 **FFI 边界 C-like enum 必须 `#[repr(uN)]`**。永远 `size_of::<T>()` 断言 ABI struct 尺寸。
 

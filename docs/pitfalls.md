@@ -1448,3 +1448,23 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **取证**：`dump_mail`（编码机 headless）阶段计时——临时给 tick_and_render 插桩（Stopwatch per phase）测出 solve 独占 ~11ms，breathe 动画只占 0.1ms（排除），render/build <0.5ms。
 
 **教训**：性能问题别静态猜热点——临时 phase 插桩 + headless 计时 5 分钟定位，比反复读代码快。CJK 文本 shaping 是隐形大头，文本测量必须跨帧缓存。
+
+### 坑 187：`:nth-child` 匹配器把 TextNode（元素间空白）也计数 → 交错动画延迟全乱
+
+**症状**：home 页 `:nth-child` 驱动的入场交错动画（stagger）延迟不对——本该 0.05s 步进变成一堆 0 后突变，视觉上动画"没有交错感"。
+
+**根因**：`nth_child_matches`（style/dynamic.rs）统计 `:nth-child` 时遍历父的**所有**子节点含 TextNode。HTML 元素间的空白（换行/缩进）是 TextNode，CSS 规范 `:nth-child` **只数元素兄弟**（element siblings），TextNode 不算。多一个 TextNode 就把后续元素的 nth 偏移 +1，交错延迟整体错位。
+
+**解决**：`nth_child_matches` 遍历时跳过 `NodeKind::TextNode`（只数元素子）。dump_home_anim 实测延迟从 0/0/0/0/0.1/0.2/0.3（错）→ 0.05/0.1/0.15/...（正）。
+
+**教训**：CSS 伪类语义移植要逐条对规范——`:nth-child` 的 "child" 是 element child，不含 text node。空白折叠（whitespace-only TextNode 不入 flex item，坑见 layout/mod.rs `is_whitespace_only_text`）和 nth-child 计数是两回事，别混。
+
+### 坑 188：Unity Mono 运行时缺 `BitConverter.SingleToUInt32Bits` → headless net10.0 绿、Unity 编 CS0117
+
+**症状**：C# 用 `BitConverter.SingleToUInt32Bits(float)`（.NET Core 2.0+ API）编 EventDemuxer。`dotnet test`（net10.0）全绿，但家里机 `git pull` 后 Unity 编译报 **CS0117** `'BitConverter' does not contain a definition for 'SingleToUInt32Bits'`。
+
+**根因**：Unity Mono 运行时追的 .NET API surface 远落后于 .NET Core / net10.0。`BitConverter.SingleToUInt32Bits` 自 .NET Core 2.0 才有，Unity Mono 无。headless 测试跑在真 .NET（net10.0）上所以编过——掩盖了 Unity 侧的 API 缺失。
+
+**解决**：改用指针重解释 `static uint FloatBitsToUInt(float v) => *(uint*)&v;`（类已 unsafe，零分配、逐 bit 等价）。绕开版本门控 API。
+
+**教训**：**headless net10.0 测试通过 ≠ Unity Mono 能编**。任何 .NET 版本门控 API（BitConverter 新方法、Span 等）在 Unity Mono 侧都可能缺失。改完 C# 别只跑 headless——家里机 Unity 编译是独立门（公司机编码无 Unity 验不了这层）。优先用版本无关的等价写法（指针重解释、手动位运算）。
