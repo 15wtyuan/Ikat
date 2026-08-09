@@ -1516,3 +1516,23 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：给 `func_to_matrix` 补 translateX/Y/scaleX/Y 4 分支，与 `parse_transform_trs` 对齐。
 
 **教训**：加新 CSS transform 函数（skew/matrix()/3d 等）**两处同步**（func_to_matrix + parse_transform_trs），grep 确认无第三处。同坑 189 的"两处须一致"模式：静态声明路径与关键帧路径分立写、独立测，漏一处 = 静默 identity 不报错。
+
+### 坑 193：合并（reverse-merge / 任何序列化布局变更）后必须重打所有 headless fixtures——文本 auto-merge 干净 + cargo 全绿 ≠ C# HeadlessTests 绿
+
+**症状**：feature 分支反向 merge main（`git merge main` 进 feature worktree）解冲突后，`cargo test --workspace` 全绿、`Tests.Core`（合成 blob 纯 C#）绿，但 `LoomGUI.HeadlessTests` **72 红**，全 `UIPackageException : load_package '<fixture>' failed (malformed pkg.bin / duplicate pkg id / missing resources)`。
+
+**根因**：合并改了序列化输出（即便 resolved.rs/mapping.rs/render/mod.rs 文本 auto-merge 干净无冲突标记——两分支改的是同文件不同区域，git 三方合并文本层通过）。但 **.pkg.bin 是 bincode 序列化的 baked ResolvedStyle**，布局变了 → feature 侧 fixture（旧布局）对合并后的 reader（新布局）过期 = malformed。cargo 测试用的是 Rust 侧 roundtrip（自己写自己读，自洽），**测不到"磁盘上旧 fixture 对新 reader 不兼容"**——只有 C# HeadlessTests（P/Invoke 真 dll 读磁盘 fixture）才暴露。
+
+**解决**：合并后循环重打所有 fixture：每个 `tests/dotnet/LoomGUI.HeadlessTests/fixtures/<name>.workspace` 跑 `cargo run -p loomgui_pkg -- build <ws>`，把产出的 `<name>-ws-out/ui/<name>.pkg.bin` copy 回 `fixtures/<name>.pkg.bin`。重打后 HeadlessTests 回 378 绿。
+
+**教训**：坑 177（pkg bump staleness）的**合并期新形态**——不只是 `PKG_FORMAT_VERSION` bump，**任何 ResolvedStyle 序列化布局变更**（加字段、改 enum、BoxShadow Option→Vec 等）都让磁盘 fixture 过期。合并/重构后必跑 `LoomGUI.HeadlessTests`（不只是 cargo），红了就重打 fixture。SDD per-task loop 跑 HeadlessTests 但 reverse-merge 这一步没纳入 per-task 门——**merge 本身要当一步独立验**。
+
+### 坑 194：`git merge --ff-only` 撞 Unity 锁 dll 半途 abort——partial-apply 工作树、ref 不动、恢复法
+
+**症状**：feature 分支反向 merge main 后，主检出（main checkout）跑 `git merge --ff-only <feature>` 想快进 main。报 `error: unable to unlink old 'unity/package/Plugins/LoomGUI/loomgui_ffi_c.dll': Invalid argument`，**中途 abort**：ref 没动（main 仍在原 commit），但工作树被部分改脏（tracked 文件改了 + feature 新增文件留 untracked）。
+
+**根因**：Unity 编辑器开着时锁 `loomgui_ffi_c.dll`（AGENTS.md 明示"拷贝时 Unity 必须关着"）。ff 要把 main 的旧 dll 换成 feature 的新 dll，需先 unlink 旧 dll → 锁住 → abort。git ff 不原子（Windows 文件锁下），abort 前已 apply 的文件留下，abort 后没回滚 → 工作树半脏。
+
+**解决**：(1) 恢复工作树：`git checkout -- .`（恢复 tracked 到 HEAD）+ 手清 feature 新增的 untracked 残留（`rm -rf <feature 新文件>`，ff 成功后会重建）。确认 ref 没动 + 工作树干净。(2) **关 Unity**。(3) 重试 `git merge --ff-only <feature>`，这次过。
+
+**教训**：任何会换 `loomgui_ffi_c.dll` 的 git 操作（ff/merge/checkout 切到 dll 不同的分支）**前必须关 Unity**。撞锁 abort 后别慌——ref 不动 = 可恢复：`git checkout -- .` + 清 untracked + 关 Unity + 重试。预防：换 dll 的操作（merge/checkout/手 copy）统一在 Unity 关闭时做。
