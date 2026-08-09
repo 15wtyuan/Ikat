@@ -146,6 +146,16 @@ Shader "LoomGUI/Unlit"
 #endif
                 return o;
             }
+            // erfc 近似（Abramowitz-Stegun 7.1.26，精度 ~1.5e-7）。box-shadow blur 用真高斯模糊
+            // 指示函数 0.5·erfc(sdf/(σ√2))（长尾、不截断），替 smoothstep 硬截断——匹配浏览器
+            // box-shadow 的柔和长尾（更淡、偏移被模糊稀释到不显）。
+            float erfc_approx(float x) {
+                float z = abs(x);
+                float t = 1.0 / (1.0 + 0.3275911 * z);
+                float r = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+                float y = exp(-z * z) * r;
+                return (x >= 0.0) ? y : 2.0 - y;
+            }
             half4 frag(Vary i) : SV_Target {
                 // vertex color 来自 CSS（sRGB 编码）；Linear 项目 Unity 不自动转 vertex color → 须手动 sRGB→linear，
                 // 否则颜色偏浅/灰蒙蒙（#1a1d2e sRGB 0.10 当 linear 显示 ~0.35）。texture 是 sRGB format 自动转，不重复。alpha 线性不转。
@@ -254,10 +264,9 @@ Shader "LoomGUI/Unlit"
                 // Box-shadow（program=5）：像素空间圆角矩形 SDF + smoothstep 双侧软边。
                 // i.uv 由 core 几何编码为「顶点 − 形状中心」（像素量纲），故 _ShadowHalfSize.xy/_ShadowRadius
                 // 亦取像素；SDF 公式同 CLIPPED_ROUNDED（归一化半宽 1 换成 _ShadowHalfSize.xy）。
-                // smoothstep(-σ,σ,sdf) = 「模糊指示函数」：形状深处 → 0(内)/1(外)、边缘 → 0.5。
-                // σ = blur 半宽（core 传，blur<0.5 取 0.5 做 1px AA）：可见外扩 ≈blur，贴 CSS
-                // 模糊半径。比旧 exp(-max(d,0)²/2σ²)（单侧、边缘满 opacity → 发黑）更准。inset 翻 a
-                // 取外侧（内环 + 向心软边）；inset 元素圆角裁剪由 core 几何（rounded_rect mesh）完成。
+                // 真高斯模糊指示 ind=0.5·erfc(sdf/(σ√2))（σ=blur/2，RmlUi）：1 形状内 → 0 外、边缘 0.5、
+                // 长尾不截断。比 smoothstep 硬截断更贴浏览器 box-shadow（柔散、偏移被模糊稀释）。
+                // inset 翻 ind 取外侧（内环 + 向心软边）；inset 元素圆角裁剪由 core 几何（rounded_rect mesh）完成。
                 float2 p = i.uv;
                 float qx = abs(p.x) - _ShadowHalfSize.x + _ShadowRadius;
                 float qy = abs(p.y) - _ShadowHalfSize.y + _ShadowRadius;
@@ -265,8 +274,9 @@ Shader "LoomGUI/Unlit"
                 // overflow 容器）两 keyword 共启 → 同名 redefinition 编译错。两块各用专名避撞。
                 float shadowSdf = length(max(float2(qx, qy), 0.0)) + min(max(qx, qy), 0.0) - _ShadowRadius;
                 float sig = max(_ShadowSigma, 0.0001);
-                float a = smoothstep(-sig, sig, shadowSdf); // 0 形状内 → 1 形状外，边缘 0.5
-                col.a *= (_ShadowInset > 0.5) ? a : (1.0 - a);
+                // ind=0.5·erfc(sdf/(σ√2))：1 形状内 → 0 外、边缘 0.5、高斯长尾不截断。
+                float ind = 0.5 * erfc_approx(shadowSdf / (sig * 1.41421356));
+                col.a *= (_ShadowInset > 0.5) ? (1.0 - ind) : ind;
                 #endif
                 return col;
             }
