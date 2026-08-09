@@ -239,13 +239,13 @@ CSS 在围栏中以三个正交维度建模：
 | `Length` | 长度值（px） |
 | `LengthPercent` | 长度或百分比 |
 | `LengthPercentAuto` | 长度、百分比或 auto |
-| `Color` | 颜色值（围栏仅校验属性名，值格式交 core `parse_color`：`#rgb`/`#rrggbb`/`#rrggbbaa` hex、`rgb()`/`rgba()` 函数式） |
+| `Color` | 颜色值（围栏仅校验属性名，值格式交 core `parse_color`：`#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa` hex、`rgb()`/`rgba()` 函数式） |
 | `Number` | 数字 |
 | `Integer` | 整数 |
 | `Overflow` | `visible` / `hidden` / `scroll` / `auto` |
 | `Transform` | translate / rotate / scale |
 | `Filter` | grayscale / brightness / contrast / saturate / hue-rotate / invert / sepia |
-| `BoxShadow` | `ox oy [blur] [spread] color` |
+| `BoxShadow` | `[inset] ox oy [blur] [spread] color`，逗号分隔多层（首层最贴盒子） |
 | `TextShadow` | `ox oy [blur] color` |
 | `Transition` | `property duration easing delay` 简写→`TransitionSpec`（逗号多 spec；ease 按 spec §8.3） |
 | `Animation` | `<name> <duration> [easing/count/fill/direction/play-state/delay]` 简写→`AnimationSpec`（逗号多声明；ease 按 spec §8.3） |

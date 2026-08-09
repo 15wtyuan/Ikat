@@ -205,6 +205,37 @@ fn color_rgb_alpha_via_slash() {
     assert!((c[3] - 0.5).abs() < 1e-5);
 }
 
+// CSS Color Module Level 4：`#rgba` 4 位 hex（3 位色的 alpha 简写）。
+// 与 3 位 hex 同构（digit d → d*17），末位为 alpha。box-shadow / overlay 常用，
+// showcase lab/shop 即写 #000a / #000c。补 3/8-hex 之间的缺口。
+#[test]
+fn color_hex_4_alpha_short() {
+    // #000a = 黑色 α=0xaa/ff ≈ 0.667（digit a → a*17=0xaa=170）。
+    let c = parse_color("#000a").unwrap();
+    assert_eq!(c[0], 0.0);
+    assert_eq!(c[1], 0.0);
+    assert_eq!(c[2], 0.0);
+    assert!((c[3] - 170.0 / 255.0).abs() < 1e-5, "alpha = 0xaa/255");
+}
+
+#[test]
+fn color_hex_4_equivalent_to_8() {
+    // #rgba 4 位与展开的 #rrggbbaa 8 位等价（#000a ≡ #000000aa）。
+    assert_eq!(
+        parse_color("#000a").unwrap(),
+        parse_color("#000000aa").unwrap()
+    );
+    // 不透明：#f00f ≡ #ff0000ff ≡ #ff0000。
+    assert_eq!(
+        parse_color("#f00f").unwrap(),
+        parse_color("#ff0000ff").unwrap()
+    );
+    assert_eq!(
+        parse_color("#f00f").unwrap(),
+        parse_color("#ff0000").unwrap()
+    );
+}
+
 // CSS Color Module Level 4：`#rrggbbaa` 8 位 hex（第 7-8 位为 alpha）。
 // StyleMirror（Spec-4a C3）会把 color flush 成此形式，core parse_color 必须收。
 #[test]

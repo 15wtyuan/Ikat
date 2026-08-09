@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>box-shadow fixture (headless blob assertion)</title>
+  <style>
+    /* Focused fixture for BoxShadowTests: exercises the full box-shadow pipeline
+       (parse → cascade → render → blob) with a deterministic layer count so the
+       headless blob assertion can pin exact expectations.
+
+       Layer breakdown for #card (CSS order, all on one primary node):
+         1. outer  0 8px 26px rgba(0,0,0,0.5)   blur=26 ≥ 0.5 → SDF program=5 (back synth, idx 0)
+         2. inset  0 4px 16px rgba(0,0,0,0.4)   blur=16 ≥ 0.5 → SDF program=5 (front synth, idx 0)
+         3. inset  0 0 0 1px #fff               blur=0  < 0.5 → solid program=0 (front synth, idx 1)
+
+       Expected synth RenderNodes in the frame blob: 3 (1 outer + 2 inset),
+       of which 2 carry program=5 (the blur layers) and carry non-zero
+       shadow_params (half.x, half.y, radius all > 0). */
+    .root { width: 400px; height: 320px; background-color: #111; }
+    .card {
+      width: 200px;
+      height: 120px;
+      border-radius: 12px;
+      background-color: #224466;
+      box-shadow: 0 8px 26px rgba(0,0,0,0.5), inset 0 4px 16px rgba(0,0,0,0.4), inset 0 0 0 1px #fff;
+      margin: 40px;
+    }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="card" id="card"></div>
+  </div>
+</body>
+</html>

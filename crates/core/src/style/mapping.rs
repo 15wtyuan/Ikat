@@ -289,6 +289,20 @@ pub fn parse_color(s: &str) -> Option<[f32; 4]> {
             b as f32 / 255.0,
             a as f32 / 255.0,
         ])
+    } else if s.len() == 4 {
+        // CSS Color Module Level 4 `#rgba`：3 位 hex 色的 alpha 简写（#000a = 黑色 α=0xaa/ff）。
+        // 与 3 位 hex 同构（digit d → d*17），末位为 alpha。补全 3/8 位 hex 之间的缺口——
+        // box-shadow / overlay 常用半透明色，缺失会令合法 CSS 被围栏拒收。
+        let r = u8::from_str_radix(&s[0..1], 16).ok()?;
+        let g = u8::from_str_radix(&s[1..2], 16).ok()?;
+        let b = u8::from_str_radix(&s[2..3], 16).ok()?;
+        let a = u8::from_str_radix(&s[3..4], 16).ok()?;
+        Some([
+            (r * 17) as f32 / 255.0,
+            (g * 17) as f32 / 255.0,
+            (b * 17) as f32 / 255.0,
+            (a * 17) as f32 / 255.0,
+        ])
     } else if s.len() == 3 {
         // CSS 3 位 hex：每数字重复（#rgb → #rrggbb，如 #888 = #888888）。
         // digit d → d*17（d*16+d）：0→0、f→255，与 6 位展开一致。

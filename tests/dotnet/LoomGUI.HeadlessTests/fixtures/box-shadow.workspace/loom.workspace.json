@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output_dir": "../box-shadow-ws-out",
+  "packages": [
+    {
+      "name": "box-shadow",
+      "dirs": ["."],
+      "html": ["box-shadow-acceptance.html"]
+    }
+  ],
+  "atlases": [],
+  "fonts": []
+}
