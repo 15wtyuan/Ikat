@@ -646,6 +646,8 @@ pub fn build_render_nodes(
     // 的 sort_key 后移子页个数，保持单调连续。
     propagate_text_sub_page_sort_keys(&mut nodes, &id_to_pos);
     propagate_back_shadow_sort_keys(&mut nodes, &back_layer_pairs);
+    // box-shadow synth 节点继承 primary 的 mask_context（overflow 裁剪传播，spec §4.6）。
+    propagate_shadow_mask_context(&mut nodes);
     propagate_inline_image_sort_keys(&mut nodes, &inline_image_pairs);
     batch::reorder_for_batching(scene, &mut nodes);
     // 控件节点必须保留独立 node_id（Unity 按 node_id 建交互实体/镜像 GameObject）。
@@ -833,6 +835,29 @@ fn is_text_sub_page(node_id: u32) -> bool {
 /// 提取跨页 text 子页对应的主节点 id。
 fn text_sub_primary_id(node_id: u32) -> u32 {
     node_id & 0x00FF_FFFF
+}
+
+/// box-shadow synth 节点继承 primary 的 mask_context（overflow 裁剪传播）。
+///
+/// assign_sort_keys 按 scene 树 DFS 赋 mask_context，synth 节点（high-byte 假 id）不在
+/// scene 树 → 默认 0（不裁）。本 post-pass 按 synth node_id 的 low-24 位找 primary，拷其
+/// mask_context，使 shadow 在 overflow 容器内被正确裁剪（spec §4.6：shadow 继承主节点
+/// mask_context，outer/inset 同传播）。
+fn propagate_shadow_mask_context(nodes: &mut [RenderNode]) {
+    // primary node_id → mask_context（一遍扫描，避 O(N²)：多层 shadow 共享同 primary 查表）。
+    let ctx_by_id: std::collections::HashMap<u32, MaskContext> = nodes
+        .iter()
+        .filter(|n| !is_shadow_synth(n.node_id))
+        .map(|n| (n.node_id, n.mask_context))
+        .collect();
+    for rn in nodes.iter_mut() {
+        if is_shadow_synth(rn.node_id) {
+            let primary = rn.node_id & 0x00FF_FFFF;
+            if let Some(mc) = ctx_by_id.get(&primary) {
+                rn.mask_context = *mc;
+            }
+        }
+    }
 }
 
 /// outer box-shadow 合成节点 sort_key 调整：每个 primary 的 outer 阴影层排在 primary 之下
@@ -2216,8 +2241,9 @@ fn render_one_node(
     };
     // box-shadow：每层一个合成 RenderNode。outer（外阴影）画在 primary 之下（sort_key
     // < primary，经 propagate_back_shadow_sort_keys 调整）；inset（内阴影）画在 primary
-    // 之上、子节点之下（经 propagate_text_sub_page_sort_keys 调整）。blur>0 走 SDF
-    // 路径（program=5 + shadow_params + pad quad），blur=0 退化实心圆角矩形（program=0）。
+    // 之上、子节点之下（经 propagate_text_sub_page_sort_keys 调整）。统一 SDF 路径
+    // （program=5 + shadow_params）：inset 用元素自身 rounded_rect mesh 几何裁圆角，
+    // outer 用 shape+3σ pad quad；shader smoothstep 双侧软边。
     //
     // CSS 层序：同一 primary 内，先列出的 outer 层画在最顶（最贴 primary 下），先列出的
     // inset 层画在最顶（最离 primary 上）。outer 按 CSS 序 push（propagate_back_shadow
@@ -2228,11 +2254,11 @@ fn render_one_node(
         let radii = n.style.border_radius.as_corners(rect.w, rect.h);
         // outer（back）层：CSS 序 push。
         for (i, sh) in shadows.iter().filter(|s| !s.inset).enumerate() {
-            let sigma = (sh.blur * 0.5).max(0.0);
-            let blur_on = sh.blur >= 0.5;
+            // blur<0.5 → σ=0.5（1px AA 硬边）；否则 σ=blur/2（RmlUi 映射）。
+            let sigma = if sh.blur < 0.5 { 0.5 } else { sh.blur * 0.5 };
             let sid = back_shadow_id(node_id, i as u32);
             let (v, uvc, col, idx, params) =
-                crate::render::border::shadow_quad(rect, &radii, sh, blur_on, sigma);
+                crate::render::border::shadow_quad(rect, &radii, sh, sigma);
             if v.is_empty() {
                 continue;
             }
@@ -2257,7 +2283,7 @@ fn render_one_node(
                     colors: col,
                     indices: idx,
                     image_path: None,
-                    program: if blur_on { 5 } else { 0 },
+                    program: 5,
                     color_matrix: [0.0; 20],
                 },
             });
@@ -2269,13 +2295,13 @@ fn render_one_node(
             .filter(|(_, s)| s.inset)
             .collect();
         for &(css_idx, sh) in inset_layers.iter().rev() {
-            let sigma = (sh.blur * 0.5).max(0.0);
-            let blur_on = sh.blur >= 0.5;
+            // blur<0.5 → σ=0.5（1px AA 硬边）；否则 σ=blur/2（RmlUi 映射）。
+            let sigma = if sh.blur < 0.5 { 0.5 } else { sh.blur * 0.5 };
             // inset idx = 该 primary 内 inset 层的 CSS 序（0-based，区别于混合序）。
             let inset_idx = shadows.iter().take(css_idx).filter(|s| s.inset).count() as u32;
             let sid = front_shadow_id(node_id, inset_idx);
             let (v, uvc, col, idx, params) =
-                crate::render::border::shadow_quad(rect, &radii, sh, blur_on, sigma);
+                crate::render::border::shadow_quad(rect, &radii, sh, sigma);
             if v.is_empty() {
                 continue;
             }
@@ -2301,7 +2327,7 @@ fn render_one_node(
                     colors: col,
                     indices: idx,
                     image_path: None,
-                    program: if blur_on { 5 } else { 0 },
+                    program: 5,
                     color_matrix: [0.0; 20],
                 },
             });

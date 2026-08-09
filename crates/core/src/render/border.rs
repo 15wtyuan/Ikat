@@ -191,49 +191,27 @@ pub fn border_ring(
     (verts, uvs, colors, indices)
 }
 
-/// box-shadow 几何近似：比 rect 外扩 spread 的圆角矩形（CSS box-shadow：每角半径 + spread）。
-/// 无 blur（真实 blur 需离屏 RT，排 v1.14+）。独立 RenderNode 画在节点下层。
-/// ponytail: 软边 alpha 衰减未实现 — 当前产纯色圆角 quad（rounded_rect 顶点同色），
-///   无边缘 alpha falloff。升级路径：外 rect + inset vertex ring 带 alpha falloff →
-///   v1.14+ 离屏 RT。
-pub fn box_shadow_quad(
-    rect: &Rect,
-    radii: &[(f32, f32); 4],
-    spread: f32,
-    color: [f32; 4],
-) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
-    let outer = Rect {
-        x: rect.x - spread,
-        y: rect.y - spread,
-        w: rect.w + 2.0 * spread,
-        h: rect.h + 2.0 * spread,
-    };
-    if outer.w <= 0.0 || outer.h <= 0.0 {
-        return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-    }
-    // 圆角随 spread 外扩（CSS box-shadow：每角半径 + spread）。rounded_rect 内部再 CSS 缩放。
-    let spread_radii = [
-        (radii[0].0 + spread, radii[0].1 + spread),
-        (radii[1].0 + spread, radii[1].1 + spread),
-        (radii[2].0 + spread, radii[2].1 + spread),
-        (radii[3].0 + spread, radii[3].1 + spread),
-    ];
-    crate::render::mesh::rounded_rect(&outer, color, &spread_radii, [0.0, 0.0], [0.0, 0.0])
-}
-
-/// box-shadow 单层几何 + SDF 参数：形状 = rect 经 (ox,oy) 偏移后按 spread 外扩（outer）
-/// 或内缩（inset），每角半径同步 ±spread。blur_on 时形状外再 pad ≈ 3σ 收高斯尾，
-/// uv 存顶点到形状中心的像素偏移（fragment shader 据此算 SDF 距离）；blur_on=false
-/// 退化成实心圆角矩形（复用 `box_shadow_quad`，program=0）。
+/// box-shadow 单层几何 + SDF 参数（统一 SDF 路径：inset/outer × blur=0/>0 全走 program=5）。
 ///
-/// 返回 (verts, uvs, colors, indices, params)，params = [half.x, half.y, radius, sigma,
-/// inset_flag, 0.0]，供 program=5 的 SDF box-shadow shader（后续 task）使用。
+/// 形状 = rect 经 (ox,oy) 偏移后按 spread 外扩（outer）/内缩（inset），每角半径同步
+/// ±spread。fragment shader 据此形状算圆角矩形 SDF，再 `smoothstep` 双侧软边衰减 alpha
+/// （≈ CSS 高斯糊掉实心形状的视觉：边缘 ~50% 而非满 opacity，外侧软衰减）。
+///
+/// pad quad 覆盖范围按层方向取：
+/// - **outer**：形状外 pad ≈ 3σ 收软边尾（元素盖住形状内部，只露外侧衰减）。
+/// - **inset**：直接用元素自身 `rounded_rect` mesh —— 几何天然裁到元素圆角，免 shader
+///   再算 element clip。inset 可见区（形状外的内环 + 向心软边）全在元素内，mesh 覆盖即可。
+///
+/// `uv` = 顶点 − 形状中心（像素偏移），fragment 据此算与 transform 无关的 SDF。
+///
+/// 返回 (verts, uvs, colors, indices, params)；params = [half.x, half.y, radius, σ,
+/// inset_flag, 0]，供 program=5 SHADOW_BLUR shader 用。σ 由调用方算（blur<0.5 取 0.5 做
+/// 1px AA 硬边，否则 blur/2，RmlUi 映射）。
 #[allow(clippy::type_complexity)]
 pub fn shadow_quad(
     rect: &Rect,
     radii: &[(f32, f32); 4],
     sh: &crate::style::resolved::BoxShadow,
-    blur_on: bool,
     sigma: f32,
 ) -> (
     Vec<[f32; 2]>,
@@ -292,47 +270,48 @@ pub fn shadow_quad(
         shape_rect.x + shape_rect.w * 0.5,
         shape_rect.y + shape_rect.h * 0.5,
     ];
-    // SDF 参数：half = 形状半尺寸，radius = 四角取 max（per-corner SDF 留 spec 细化），
-    // sigma = blur σ（blur_on=false 为 0），inset_flag 区分内外阴影 shader 分支。
+    // SDF 参数：half/radius = 形状半尺寸/四角最大半径（fragment 算 rounded-rect SDF 用），
+    // sigma = blur σ，inset_flag 区分内外阴影（flip 软边方向）。
     let half = [shape_rect.w * 0.5, shape_rect.h * 0.5];
     let radius = shape_radii.iter().map(|&(rx, _)| rx).fold(0.0f32, f32::max);
     let params = [
         half[0],
         half[1],
         radius,
-        if blur_on { sigma } else { 0.0 },
+        sigma,
         if sh.inset { 1.0 } else { 0.0 },
         0.0,
     ];
-    if !blur_on {
-        // 硬边：复用 box_shadow_quad 实心圆角矩形（shape 已含 spread，传 spread=0 避免二次外扩）。
-        let (v, uv, c, idx) = box_shadow_quad(&shape_rect, &shape_radii, 0.0, sh.color);
-        return (v, uv, c, idx, params);
+    // uv = 顶点 − 形状中心（像素偏移），fragment 据此算 rounded-rect SDF。
+    let to_uv = |p: &[f32; 2]| [p[0] - center[0], p[1] - center[1]];
+
+    if sh.inset {
+        // inset：padded = 元素自身 rounded_rect mesh（几何裁到元素圆角）。可见区（形状外
+        // 内环 + 向心软边）全在元素内 → mesh 覆盖即可；环/软边由 SDF 在 fragment 算。
+        let (verts, _tex_uv, colors, indices) =
+            crate::render::mesh::rounded_rect(rect, sh.color, radii, [0.0, 0.0], [0.0, 0.0]);
+        let uvs: Vec<[f32; 2]> = verts.iter().map(to_uv).collect();
+        (verts, uvs, colors, indices, params)
+    } else {
+        // outer：pad ≈ 3σ 外扩 quad 收软边尾（元素盖住形状内部，只露外侧衰减）。
+        let pad = 3.0 * sigma;
+        let padded = Rect {
+            x: shape_rect.x - pad,
+            y: shape_rect.y - pad,
+            w: shape_rect.w + 2.0 * pad,
+            h: shape_rect.h + 2.0 * pad,
+        };
+        let verts = vec![
+            [padded.x, padded.y],
+            [padded.x + padded.w, padded.y],
+            [padded.x + padded.w, padded.y + padded.h],
+            [padded.x, padded.y + padded.h],
+        ];
+        let uvs: Vec<[f32; 2]> = verts.iter().map(to_uv).collect();
+        let colors = vec![sh.color; 4];
+        let indices = vec![0, 1, 2, 0, 2, 3];
+        (verts, uvs, colors, indices, params)
     }
-    // blur_on：pad ≈ 3σ 外扩 quad 收高斯尾，uv = 顶点本地坐标 − 形状中心（fragment
-    // 拿到像素空间偏移 p，算 rounded-rect SDF = |p - clamp(p, ±half)| − r，再高斯衰减）。
-    let pad = 3.0 * sigma;
-    let padded = Rect {
-        x: shape_rect.x - pad,
-        y: shape_rect.y - pad,
-        w: shape_rect.w + 2.0 * pad,
-        h: shape_rect.h + 2.0 * pad,
-    };
-    let v = vec![
-        [padded.x, padded.y],
-        [padded.x + padded.w, padded.y],
-        [padded.x + padded.w, padded.y + padded.h],
-        [padded.x, padded.y + padded.h],
-    ];
-    let uv = vec![
-        [v[0][0] - center[0], v[0][1] - center[1]],
-        [v[1][0] - center[0], v[1][1] - center[1]],
-        [v[2][0] - center[0], v[2][1] - center[1]],
-        [v[3][0] - center[0], v[3][1] - center[1]],
-    ];
-    let colors = vec![sh.color; 4];
-    let indices = vec![0, 1, 2, 0, 2, 3];
-    (v, uv, colors, indices, params)
 }
 
 #[cfg(test)]
@@ -438,40 +417,8 @@ mod tests {
     }
 
     #[test]
-    fn box_shadow_spreads_outward() {
-        // spread 生效：ox/oy 偏移由 caller 负责（offset rect 后再传 box_shadow_quad）。
-        let r = Rect {
-            x: 10.0,
-            y: 10.0,
-            w: 80.0,
-            h: 40.0,
-        };
-        let radii = [(0.0, 0.0); 4];
-        let (verts, _uvs, colors, _idx) = box_shadow_quad(&r, &radii, 5.0, [0.0, 0.0, 0.0, 0.5]);
-        // 外扩 spread=5：角从 (10,10)/(90,10)/(90,50)/(10,50) → (5,5)/(95,5)/(95,55)/(5,55)
-        let xs: Vec<f32> = verts.iter().map(|v| v[0]).collect();
-        assert!(xs.contains(&5.0) && xs.contains(&95.0), "外扩 spread");
-        // 边缘顶点 alpha 渐隐（MVP 纯色外扩 quad）
-        assert!(colors.iter().all(|c| c[3] == 0.5));
-    }
-
-    #[test]
-    fn box_shadow_degenerate_empty() {
-        // rect w≤0 且 spread=0 时 outer 退化 → 空输出。
-        let r = Rect {
-            x: 0.0,
-            y: 0.0,
-            w: 0.0,
-            h: 0.0,
-        };
-        let radii = [(0.0, 0.0); 4];
-        let (v, _u, _c, i) = box_shadow_quad(&r, &radii, 0.0, [1.0; 4]);
-        assert!(v.is_empty() && i.is_empty(), "退化 rect → 空输出");
-    }
-
-    #[test]
-    fn shadow_quad_outer_no_blur_reuses_solid() {
-        // outer + blur=0：形状 = rect 外扩 spread + 偏移 (ox,oy)，产实心圆角矩形 + sigma=0 params。
+    fn shadow_quad_outer_pads_3sigma_and_uv_is_center_offset() {
+        // outer：形状 = rect+(ox,oy) 外扩 spread；padded = shape + 3σ；uv = vert - shape_center。
         use crate::style::resolved::BoxShadow;
         let r = Rect {
             x: 10.0,
@@ -487,21 +434,30 @@ mod tests {
             color: [0.0, 0.0, 0.0, 0.5],
             inset: false,
         };
-        let (v, _uv, colors, idx, params) = shadow_quad(&r, &[(0.0, 0.0); 4], &sh, false, 0.0);
-        assert!(!v.is_empty(), "外扩后非空");
-        // 形状 = rect+(2,3) 外扩 5：x_min = 10+2-5 = 7
+        let sigma = 0.5; // blur=0 → 1px AA σ（调用方算）
+        let (v, uv, colors, idx, params) = shadow_quad(&r, &[(0.0, 0.0); 4], &sh, sigma);
+        // 形状 = rect+(2,3) 外扩 5：x=7,y=18,w=90,h=50 → center=(52,43)
+        // padded = shape + 3σ(=1.5)：x_min = 7 - 1.5 = 5.5
+        assert_eq!(v.len(), 4, "outer padded quad = 4 顶点");
+        assert_eq!(idx, vec![0, 1, 2, 0, 2, 3]);
         let x_min = v.iter().map(|p| p[0]).fold(f32::MAX, f32::min);
-        assert!((x_min - 7.0).abs() < 1e-3, "outer x_min = rect.x+ox-spread");
-        // sigma=0（blur 关）
-        assert!(params[3].abs() < 1e-6, "blur_off → params.sigma=0");
-        assert!((params[4]).abs() < 1e-6, "outer → inset_flag=0");
+        assert!((x_min - 5.5).abs() < 1e-3, "outer x_min = shape.x - 3σ");
+        // uv = vert - center(52,43)：TL vert (5.5,16.5) → uv.x = 5.5-52 = -46.5
+        assert!(
+            (uv[0][0] - (-46.5)).abs() < 1e-3,
+            "uv = vert - shape_center"
+        );
+        // params: half=(45,25), radius=0, sigma=0.5, inset=0
+        assert!((params[0] - 45.0).abs() < 1e-3, "half.x = shape.w/2 = 45");
+        assert!((params[3] - sigma).abs() < 1e-3, "params.sigma = σ");
+        assert!(params[4].abs() < 1e-6, "outer → inset_flag=0");
         assert!(colors.iter().all(|c| *c == [0.0, 0.0, 0.0, 0.5]));
-        assert!(!idx.is_empty());
     }
 
     #[test]
-    fn shadow_quad_inset_blur_pads_and_uv_is_center_offset() {
-        // inset + blur>0：形状内缩 spread，quad 外扩 pad=3σ；uv = vert - center。
+    fn shadow_quad_inset_uses_element_mesh_and_uv_is_center_offset() {
+        // inset：padded = 元素自身 rounded_rect mesh（几何裁圆角）；uv = vert - shape_center。
+        // 可见区（形状外内环 + 向心软边）全在元素内，mesh 覆盖即可。
         use crate::style::resolved::BoxShadow;
         let r = Rect {
             x: 0.0,
@@ -518,20 +474,25 @@ mod tests {
             color: [1.0; 4],
             inset: true,
         };
-        let (v, uv, colors, idx, params) = shadow_quad(&r, &[(0.0, 0.0); 4], &sh, true, sigma);
-        // 形状 = rect 内缩 10：center = (50,50)，half = (40,40)。
-        // pad = 12：quad x_min = shape.x - pad = 10 - 12 = -2
-        assert_eq!(v.len(), 4, "blur quad = 4 顶点");
-        assert_eq!(idx, vec![0, 1, 2, 0, 2, 3]);
+        let (v, uv, colors, idx, params) = shadow_quad(&r, &[(0.0, 0.0); 4], &sh, sigma);
+        // 形状 = rect 内缩 10：center=(50,50)，half=(40,40)。
+        // inset padded = 元素 rect（非 shape+pad）：x_min = rect.x = 0
         let x_min = v.iter().map(|p| p[0]).fold(f32::MAX, f32::min);
-        assert!((x_min - (-2.0)).abs() < 1e-3, "quad x_min = shape.x - 3σ");
-        // uv = vert - center(50,50)：TL vert (-2,-2) → uv (-52,-52)
-        assert!((uv[0][0] - (-52.0)).abs() < 1e-3 && (uv[0][1] - (-52.0)).abs() < 1e-3);
-        // params: half=40, radius=0（无圆角），sigma=4，inset=1
+        assert!(
+            (x_min - 0.0).abs() < 1e-3,
+            "inset padded = 元素 rect，x_min=0"
+        );
+        // uv = vert - shape_center(50,50)：TL vert (0,0) → uv (-50,-50)（顶点序不保证，查集合）
+        let uv_has_tl = uv
+            .iter()
+            .any(|p| (p[0] - (-50.0)).abs() < 1e-3 && (p[1] - (-50.0)).abs() < 1e-3);
+        assert!(uv_has_tl, "uv 集合含 TL = vert - shape_center");
+        // params: half=40, radius=0, sigma=4, inset=1
         assert!((params[0] - 40.0).abs() < 1e-3, "half.x=40");
         assert!((params[3] - sigma).abs() < 1e-3, "params.sigma=σ");
         assert!((params[4] - 1.0).abs() < 1e-3, "inset_flag=1");
         assert!(colors.iter().all(|c| *c == [1.0; 4]));
+        assert!(!idx.is_empty());
     }
 
     #[test]
@@ -552,7 +513,7 @@ mod tests {
             color: [1.0; 4],
             inset: true,
         };
-        let (v, _uv, _c, idx, _params) = shadow_quad(&r, &[(0.0, 0.0); 4], &sh, false, 0.0);
+        let (v, _uv, _c, idx, _params) = shadow_quad(&r, &[(0.0, 0.0); 4], &sh, 0.0);
         assert!(v.is_empty() && idx.is_empty(), "内缩到负尺寸 → 空输出");
     }
 

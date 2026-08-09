@@ -2933,11 +2933,11 @@ fn box_shadow_emits_node_with_offset_and_sort_key() {
 
     // 主节点 bg quad x_min = rect.x = 10.0
     let main_x_min = main_verts.iter().map(|v| v[0]).fold(f32::MAX, f32::min);
-    // 阴影 quad x_min = shadow_rect.x - spread = (10+2) - 0 = 12.0
+    // outer + blur=0 → σ=0.5 → padded = shape + 3σ(1.5)：x_min = main + ox - 1.5
     let shadow_x_min = shadow_verts.iter().map(|v| v[0]).fold(f32::MAX, f32::min);
     assert!(
-        (shadow_x_min - (main_x_min + 2.0)).abs() < 1e-3,
-        "阴影 x_min({}) = main x_min({}) + ox(2.0)",
+        (shadow_x_min - (main_x_min + 2.0 - 1.5)).abs() < 1e-3,
+        "阴影 x_min({}) = main x_min({}) + ox(2.0) - 3σ pad(1.5)",
         shadow_x_min,
         main_x_min
     );
@@ -2945,8 +2945,8 @@ fn box_shadow_emits_node_with_offset_and_sort_key() {
     let main_y_min = main_verts.iter().map(|v| v[1]).fold(f32::MAX, f32::min);
     let shadow_y_min = shadow_verts.iter().map(|v| v[1]).fold(f32::MAX, f32::min);
     assert!(
-        (shadow_y_min - (main_y_min + 3.0)).abs() < 1e-3,
-        "阴影 y_min({}) = main y_min({}) + oy(3.0)",
+        (shadow_y_min - (main_y_min + 3.0 - 1.5)).abs() < 1e-3,
+        "阴影 y_min({}) = main y_min({}) + oy(3.0) - 3σ pad(1.5)",
         shadow_y_min,
         main_y_min
     );
