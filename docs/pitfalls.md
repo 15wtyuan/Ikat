@@ -1556,3 +1556,30 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **解决**：新建 `unity/package/` 下任何 Unity 可识别资产（`.md`/`.cs`/`.png`/`.mat` 等）后，开一次 Unity 让 `.meta` 落盘，连 `.meta` 一起提交。
 
 **教训**：UPM 包内新建文件 task 的验收要含「生成并提交 `.meta`」，或 plan 步骤显式提醒；对比包内同类资产是否都有 `.meta` 能快速发现遗漏。
+
+### 坑 197：Unity Linear 项目半透明颜色偏亮发白——CSS 合成在 sRGB、Unity blend 在 linear
+
+**症状**：彩色（蓝）box-shadow / rgba 半透明背景在 Unity 比 HTML 浏览器明显偏亮发白；黑色投影差别小（lab §11 不暴露，home 蓝色投影暴露）。不透明色（#5FB4D4）两边一致，只有 alpha<1 的合成偏。
+**根因**：CSS 半透明合成在 sRGB 编码空间（`0.06×sRGB蓝+0.94×sRGB底`）；Unity Linear 项目 sRGB render target 的硬件 alpha blend 在 linear 空间（自动 sRGB↔linear）。同一 CSS 算出不同值（btn-ghost rgba(95,180,212,0.06) over #0e1620：浏览器 #131F2A，Unity Linear #1B3441）。
+**解决**：LoomGUI-Unlit.shader 用 `UNITY_COLORSPACE_GAMMA` 宏守卫——Gamma 项目 vcol 保持 sRGB 编码值（blend 在 sRGB 空间，匹配 CSS）；Linear 项目 vcol sRGB→linear（与 fgui/TMP 一致，接受偏亮）。COLOR_FILTER 同步自适配。showcase 纯 UI → 改 Gamma color space，颜色完全匹配浏览器。
+**教训**：颜色「发白/偏亮」先想 color space（linear vs sRGB 合成空间）。fgui/UI Toolkit/TextMeshPro 在 Linear 项目都没解决此问题（agent 确认）。真实游戏项目（3D+UI 必须 Linear）半透明仍偏亮，纯 UI 项目用 Gamma 完美。诊断铁证：Chrome headless 取浏览器像素 + PowerShell 读 hex 对比 Unity uloop screenshot 像素。
+
+### 坑 198：URP 17 相机 targetTexture + 手动 Camera.Render() 不画 mesh（误判死路）
+
+**症状**：UI 相机 targetTexture=RT，csx 里手动 `cam.Render()` 后 RT 只 clear 不画 mesh（连内置 Cube 都不画），误判「URP targetTexture 不支持」。
+**根因**：手动 `Camera.Render()` 脱离 URP pipeline frame loop（时序）；URP 17 源码实际完全支持 targetTexture（`ShouldUseIntermediateTexture` 有 `isOffscreenRender = cameraData.targetTexture != null` 分支），官方 API 是 `RenderPipeline.SubmitRenderRequest(cam, new UniversalRenderer.SingleCameraRequest{ destination = rt })`。
+**解决**：用 `SubmitRenderRequest` 替代手动 Render；或让 URP 自动渲染（相机 enabled，每帧 URP 渲到 targetTexture）。
+**教训**：csx 里手动 `Camera.Render()` 在 URP 下时序不可靠，别据此判 URP 能力；查 URP 源码（`UniversalRenderer.ShouldUseIntermediateTexture` / `UniversalCameraData.requireSrgbConversion`）确认真实支持面，别静态猜「URP 不支持」。
+
+### 坑 199：uloop csx 的 `Type.GetType` 被 Security violations 禁
+
+**症状**：uloop execute-dynamic-code 脚本用 `Type.GetType("UnityEngine.Rendering.Universal.UniversalAdditionalCameraData, ...")` 反射 URP 类型 → `Security violations detected DangerousApiCall: Type.GetType`，脚本静默返回空 Result（无报错，Result 字段空）。
+**解决**：用实例 `GetType()`（`comp.GetType()` / `host.GetType()`) + `GetProperties()`/`GetFields()`/`GetMethod()` 反射，不走 `Type.GetType` 静态。列 GameObject 组件用 `GetComponents<Component>()` 后读 `.GetType().Name`。
+**教训**：uloop csx 有 API 白名单（禁 `Type.GetType` 等 dangerous API）；反射 URP 类型走实例方法。Result 空先查 ErrorMessage 字段（"Security violations"）别以为脚本没跑。
+
+### 坑 200：Unity ProjectSettings 改 color space 必须重启编辑器才生效
+
+**症状**：改 `m_ActiveColorSpace`（Linear↔Gamma）文件后，Unity 进程还用旧 color space（运行时状态），不重启看不出效果，反复验证「改了没反应」。
+**根因**：color space 是 Unity 编辑器启动时读的，运行时不热更；改文件只改磁盘，进程内存仍用启动时的值。
+**解决**：改 color space 后完全重启 Unity（`Stop-Process -Name Unity -Force` + `uloop launch`），别指望热生效。shader 里 `UNITY_COLORSPACE_GAMMA` 宏也是编译期按 color space 定义，改后 shader 会重编译。
+**教训**：ProjectSettings 的启动期配置（color space 等）改完必重启验证；改 color space 同时影响 shader 宏 + 渲染管线状态，重启是唯一可靠生效方式。
