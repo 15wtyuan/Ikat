@@ -157,12 +157,16 @@ Shader "LoomGUI/Unlit"
                 return (x >= 0.0) ? y : 2.0 - y;
             }
             half4 frag(Vary i) : SV_Target {
-                // vertex color 来自 CSS（sRGB 编码）；Linear 项目 Unity 不自动转 vertex color → 须手动 sRGB→linear，
-                // 否则颜色偏浅/灰蒙蒙（#1a1d2e sRGB 0.10 当 linear 显示 ~0.35）。texture 是 sRGB format 自动转，不重复。alpha 线性不转。
+                // vertex color 来自 CSS（sRGB 编码）。自适配项目 color space：
+                // - Linear：须手动 sRGB→linear（Unity 不自动转 vertex color；与 fgui 一致）。半透明 alpha blend 落在
+                //   linear 空间而 CSS 合成在 sRGB → 偏亮发白（业界通病，fgui 同样不解决）。
+                // - Gamma：vcol 保持 sRGB 编码值，blend 在 sRGB 空间（匹配 CSS，颜色准）。
+                // texture 是 sRGB format 自动转，不重复。alpha 线性不转。
                 half4 vcol = i.color;
-                // sRGB → linear（精确 sRGB 公式；CSS 颜色 sRGB，Linear 项目 Unity 不自动转 vertex color）。
+                #if !defined(UNITY_COLORSPACE_GAMMA)
                 half3 sc = vcol.rgb;
                 vcol.rgb = (sc <= 0.04045) ? sc / 12.92 : pow((sc + 0.055) / 1.055, 2.4);
+                #endif
                 half4 tex = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv);
                 #if defined(ALPHA_MASK)
                 // SDF：tex.r 是 encoded distance（中心 0.5、inside>0.5）。
@@ -236,15 +240,20 @@ Shader "LoomGUI/Unlit"
                 half4 col = tex * vcol;
                 #endif
                 #if defined(COLOR_FILTER)
-                // CSS filter 定义在 sRGB 空间（矩阵 offset 如 contrast -0.25 = sRGB 中点 0.5 的偏移）。
-                // col.rgb 当前 linear → linear→sRGB → 矩阵 → sRGB→linear，中点/色相才与浏览器对齐。
-                // max(.,0) 防 pow 负底数 NaN（矩阵可出负值或超 1，最终 Blend 输出时再裁）。cfs 避免与上方 sc 重名。
+                // CSS filter 矩阵定义在 sRGB 空间（contrast -0.25 = sRGB 中点 0.5 偏移）。
+                #if !defined(UNITY_COLORSPACE_GAMMA)
+                // Linear：col 是 linear → lin→sRGB → 矩阵 → sRGB→linear。max 防 pow 负底数 NaN。
                 half3 cfs = col.rgb;
                 cfs = (cfs <= 0.0031308) ? cfs * 12.92 : 1.055 * pow(max(cfs, 0.0), 1.0 / 2.4) - 0.055;
                 float4x4 cfM = float4x4(_CF0, _CF1, _CF2, _CF3);
                 cfs = mul(cfM, float4(cfs, 1.0)).rgb + _CFOff.rgb;
                 cfs = (cfs <= 0.04045) ? cfs / 12.92 : pow(max((cfs + 0.055) / 1.055, 0.0), 2.4);
                 col.rgb = cfs;
+                #else
+                // Gamma：col 已是 sRGB 编码值，直接施加矩阵。
+                float4x4 cfMg = float4x4(_CF0, _CF1, _CF2, _CF3);
+                col.rgb = mul(cfMg, float4(col.rgb, 1.0)).rgb + _CFOff.rgb;
+                #endif
                 #endif
                 // 节点 opacity（从顶点色剥离，per-renderer MPB）。alpha 剥离后 colors.a 不含节点 alpha。
                 col.a *= _Alpha;
