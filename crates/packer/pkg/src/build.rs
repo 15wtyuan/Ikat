@@ -529,10 +529,12 @@ mod package_tests {
     #[test]
     fn pack_components_roundtrip_single() {
         // html_rel 放 workspace_root 顶层 → src 原样进 refs（base 为空）。
+        // 根 div 设 display:flex：子是 flex item（不走 rich-text inline/block 分类），
+        // 避免 T1 FenceMixedInlineBlock 拒载（div 块子 + img 语义 inline 子 = mixed）。
         let comps = vec![Component {
             name: "home".to_string(),
             src:
-                r#"<div class="root"><div>hi</div><img src="icons/a.png" style="display:block"></div>"#
+                r#"<div class="root" style="display:flex"><div>hi</div><img src="icons/a.png" style="display:block"></div>"#
                     .to_string(),
             html_rel: "home.html".to_string(),
         }];

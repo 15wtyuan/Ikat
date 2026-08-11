@@ -27,6 +27,7 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -42,6 +43,7 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -67,6 +69,7 @@ fn make_control_pkg(kind: NodeKind, control_init: crate::asset::ControlInit) -> 
         role: None,
         data_slot: None,
         aria_controls: None,
+        rich_text_block: false,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -135,6 +138,7 @@ fn instantiate_explicit_tabindex_minus_one_is_respected() {
         role: None,
         data_slot: None,
         aria_controls: None,
+        rich_text_block: false,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -239,6 +243,7 @@ fn instantiate_missing_pkg_or_comp_errors() {
         role: None,
         data_slot: None,
         aria_controls: None,
+        rich_text_block: false,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -273,6 +278,7 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -288,6 +294,7 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -403,6 +410,7 @@ fn pkg_with_root_rule(pkg_name: &str, flex_dir_val: &str) -> (String, Vec<u8>) {
         role: None,
         data_slot: None,
         aria_controls: None,
+        rich_text_block: false,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable {
         rules: vec![class_rule("root", "flex-direction", flex_dir_val)],
@@ -488,6 +496,7 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -503,6 +512,7 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
     ];
     let outer_rules = crate::style::dynamic::DynamicRuleTable {
@@ -541,6 +551,7 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
         role: None,
         data_slot: None,
         aria_controls: None,
+        rich_text_block: false,
     }];
     let inner_rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -616,6 +627,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
         // listbox role 子（作者写的弹出列表容器）。
         TemplateNode {
@@ -632,6 +644,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             role: Some("listbox".to_string()),
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
         TemplateNode {
             kind: NodeKind::OptionItem,
@@ -650,6 +663,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
         // option A 的文本子节点（parent = option index 2）。
         TemplateNode {
@@ -666,6 +680,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
         TemplateNode {
             kind: NodeKind::OptionItem,
@@ -681,6 +696,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
         TemplateNode {
             kind: NodeKind::TextNode,
@@ -696,6 +712,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
         TemplateNode {
             kind: NodeKind::OptionItem,
@@ -711,6 +728,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
         TemplateNode {
             kind: NodeKind::TextNode,
@@ -726,6 +744,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -800,6 +819,7 @@ fn make_test_pkg_with_roles() -> Vec<u8> {
             role: Some("slider".into()),
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -815,6 +835,7 @@ fn make_test_pkg_with_roles() -> Vec<u8> {
             role: None,
             data_slot: Some("thumb".into()),
             aria_controls: None,
+            rich_text_block: false,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -910,6 +931,7 @@ fn instantiate_copies_aria_controls_into_role_info() {
         role: Some("tablist".to_string()),
         data_slot: None,
         aria_controls: Some("panel-1".to_string()),
+        rich_text_block: false,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {

@@ -16,6 +16,7 @@ fn tn(kind: NodeKind) -> TemplateNode {
         role: None,
         data_slot: None,
         aria_controls: None,
+        rich_text_block: false,
     }
 }
 
@@ -48,6 +49,7 @@ fn write_package_panics_when_string_table_exhausted() {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         });
     }
     let rules = empty_rules();
@@ -476,6 +478,7 @@ fn template_node_content_src_roundtrip_via_pkg() {
         role: None,
         data_slot: None,
         aria_controls: None,
+        rich_text_block: false,
     };
     let nodes = [text, img];
     let rules = empty_rules();
@@ -537,6 +540,7 @@ fn v18_nontrivial_nodekinds_roundtrip() {
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         };
         let empty_rules = DynamicRuleTable { rules: vec![] };
         let input = PackageInput {
@@ -765,8 +769,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 32,
-        "pkg format version must be 32 after box-shadow Vec bump (v29 aria_controls feature persists)"
+        PKG_FORMAT_VERSION, 33,
+        "pkg format version must be 33 after rich_text_block flag bump (v29 aria_controls feature persists)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -829,8 +833,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 32,
-        "pkg format version must be 32 after box-shadow Vec bump"
+        PKG_FORMAT_VERSION, 33,
+        "pkg format version must be 33 after rich_text_block flag bump"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -947,17 +951,66 @@ fn box_shadow_vec_roundtrips_v32() {
     assert_eq!(back.box_shadow[0].blur, 4.0);
 }
 
-/// v32: version=31 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=32，无迁移器）。
+/// v32: version=31 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=33，无迁移器）。
 /// ResolvedStyle.box_shadow 从 Option<BoxShadow> 改 Vec<BoxShadow> 改变 style bincode blob
 /// 布局，旧 v31 fixture 不能半读半坏。
 #[test]
 fn pkg_v32_rejects_v31() {
     let mut bad = vec![];
     bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
-    bad.extend_from_slice(&31u32.to_le_bytes()); // v31 < MIN_VERSION=32
+    bad.extend_from_slice(&31u32.to_le_bytes()); // v31 < MIN_VERSION=33
     let err = read_package(&bad);
     assert!(
         matches!(err, Err(PkgError::TooOld(31))),
         "v31 pkg must be rejected as TooOld after v32 bump, got {err:?}"
+    );
+}
+
+// ── v33: TemplateNode.rich_text_block flag（rich-text-block 容器根标记）──────────────
+
+/// v33: TemplateNode.rich_text_block 经完整 pkg.bin 路径（write_package → read_package）
+/// 往返保真。flag 打包进 NodeBlock flags 字节（与 draggable 同字节，bit 0x02），故 true
+/// 与 false 两条路径都须验证（false 是多数节点的常态）。
+#[test]
+fn pkg_v33_roundtrip_preserves_rich_text_block() {
+    assert_eq!(
+        PKG_FORMAT_VERSION, 33,
+        "pkg format version must be 33 after rich_text_block flag bump"
+    );
+    // 根节点 rich_text_block=true（rich-text-block 容器根），子节点 flag=false（叶子）。
+    let mut root = tn(NodeKind::Container);
+    root.rich_text_block = true;
+    let mut child = tn(NodeKind::TextNode);
+    child.content = Some("hi".into());
+    child.parent_idx = Some(0);
+    let nodes = [root, child];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+    };
+    let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
+    let ns = &pkg.components["c"].nodes;
+    assert!(
+        ns[0].rich_text_block,
+        "root rich_text_block=true must survive roundtrip"
+    );
+    assert!(
+        !ns[1].rich_text_block,
+        "child rich_text_block=false must survive roundtrip"
+    );
+}
+
+/// v33: version=32 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=33，无迁移器）。
+/// TemplateNode flags 字节新增 rich_text_block 位（bit 0x02），旧 v32 reader 会误读该 bit
+/// 为 draggable 残留 → 不能半读半坏，一刀切拒载。
+#[test]
+fn pkg_v33_rejects_v32() {
+    let mut bad = vec![];
+    bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
+    bad.extend_from_slice(&32u32.to_le_bytes()); // v32 < MIN_VERSION=33
+    let err = read_package(&bad);
+    assert!(
+        matches!(err, Err(PkgError::TooOld(32))),
+        "v32 pkg must be rejected as TooOld after v33 bump, got {err:?}"
     );
 }

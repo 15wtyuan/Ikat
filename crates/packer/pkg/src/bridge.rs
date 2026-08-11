@@ -70,6 +70,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     role,
                     data_slot,
                     aria_controls,
+                    rich_text_block: parsed.rich_text_blocks.contains(&ir_idx),
                 });
             }
             IrNodeKind::Text(s) => {
@@ -90,6 +91,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     role: None,
                     data_slot: None,
                     aria_controls: None,
+                    rich_text_block: false,
                 });
             }
         }
@@ -506,8 +508,10 @@ mod tests {
 
     #[test]
     fn div_container_text_img_mapping_and_structure() {
+        // 根 div 设 display:flex：子是 flex item（不走 rich-text inline/block 分类），
+        // 避免 T1 FenceMixedInlineBlock 拒载（div 块子 + img 语义 inline 子 = mixed）。
         let nodes = bridged(
-            r#"<div class="root" id="r"><div class="t">hi</div><img src="a.png" style="display:block"></div>"#,
+            r#"<div class="root" id="r" style="display:flex"><div class="t">hi</div><img src="a.png" style="display:block"></div>"#,
         );
         // [0] div Container root (parent=None, class=root, id=r)
         assert_eq!(nodes[0].kind, NodeKind::Container);

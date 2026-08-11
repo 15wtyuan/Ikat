@@ -133,6 +133,7 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         inline_override: ResolvedStyle::default(),
         inline_set: InlineSet(0),
         user_transform: crate::transform::NodeTransform::default(),
+        rich_text_block: false,
     };
     let key = scene.nodes.insert(node);
     resize_parallel_arrays(scene);
@@ -207,6 +208,7 @@ pub fn create_node_from_template(
         inline_override: ResolvedStyle::default(),
         inline_set: InlineSet(0),
         user_transform: crate::transform::NodeTransform::default(),
+        rich_text_block: false,
     };
     let key = scene.nodes.insert(node);
     resize_parallel_arrays(scene);
@@ -320,9 +322,19 @@ pub fn create_node_from_template(
 /// 控件槽（scene.controls），控件运行时值（progressbar.value/slider.value 等）不随克隆迁移。
 /// RoleTable 复制只解锁 role/slot 定位路径；完整视觉正确性需后续补 ControlState 克隆/re-init。
 pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
-    // 先取出源节点的不可变快照（kind/base_style/classes/id_attr/text/image_srcs），
+    // 先取出源节点的不可变快照（kind/base_style/classes/id_attr/text/image_srcs/rich_text_block），
     // drop 借后再可变借建新节点——避免边读边写 scene 的借用冲突。
-    let (kind, base_style, classes, id_attr, content, src_path, role_info, control_init) = {
+    let (
+        kind,
+        base_style,
+        classes,
+        id_attr,
+        content,
+        src_path,
+        role_info,
+        control_init,
+        rich_text_block,
+    ) = {
         let n = scene.get(src).expect("live src");
         (
             n.kind,
@@ -333,6 +345,7 @@ pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
             scene.image_srcs.get(&src).cloned(),
             scene.roles.get(src).cloned(),
             scene.control_inits.get(&src).cloned(),
+            n.rich_text_block,
         )
     };
     let new_id = create_node_from_template(scene, kind, base_style, control_init);
@@ -340,6 +353,7 @@ pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
         let n = scene.get_mut(new_id).unwrap();
         n.classes = classes;
         n.id_attr = id_attr;
+        n.rich_text_block = rich_text_block;
     }
     if let Some(c) = content {
         scene.text_contents.insert(new_id, c);

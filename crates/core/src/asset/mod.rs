@@ -1,4 +1,5 @@
-//! 包格式（.pkg.bin，当前 version=32）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=33）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! v33：TemplateNode flags 字节新增 rich_text_block 位（rich-text-block 容器根标记，bit 0x02）。
 //! v32：ResolvedStyle.box_shadow Option<BoxShadow>→Vec<BoxShadow> + blur/inset 字段（box-shadow 全语义，bincode 布局变）。
 //! v31：Compound 加 pseudo_nth_child 字段（:nth-child selector，bincode 布局变）。
 //! v30：ComponentTemplate 加 keyframes 表（@keyframes runtime 地基）+ ResolvedStyle 加 animation。
@@ -34,9 +35,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 32; // v32: ResolvedStyle.box_shadow Option→Vec + blur/inset
-pub(crate) const MIN_VERSION: u32 = 32;
-pub(crate) const MAX_VERSION: u32 = 32;
+pub const PKG_FORMAT_VERSION: u32 = 33; // v33: TemplateNode.rich_text_block flag（flags 字节 bit 0x02）
+pub(crate) const MIN_VERSION: u32 = 33;
+pub(crate) const MAX_VERSION: u32 = 33;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────
@@ -115,7 +116,7 @@ pub enum ControlInit {
 
 /// 模板节点：序列化态（instantiate 时 build 成 live Node）。
 /// 与 live Node 区别：无 NodeId（instantiate 时 slotmap 分配）、无 taffy_id（每帧 solve 重建）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TemplateNode {
     pub kind: NodeKind,
     pub style: ResolvedStyle,      // base_style（已 bake）
@@ -135,6 +136,11 @@ pub struct TemplateNode {
     /// WAI-ARIA `aria-controls`（TabList tab→panel 跨树关联的 panel id）。None = 非关联节点。
     /// 运行时由 instantiate 拷进 RoleInfo.aria_controls，sync_control_visuals 据此 find_node_by_id 解析 panel。
     pub aria_controls: Option<String>,
+    /// rich-text-block 容器根标记：`display:block` 容器且其直接子全是 inline 级
+    /// （text/span/img）。打包期由 fence `rich_text_blocks`（ir_idx 集合）烘入，运行时
+    /// compiler/solve/render 读此 flag 把 inline 子拍平成 RichRun 走 inline flow
+    /// （见 main-design 文本模型）。Text 节点与 block 容器永远 false。
+    pub rich_text_block: bool,
 }
 
 /// write_package 的输入（打包器构造，已归一化：path 已相对、style 已 bake）。
@@ -278,7 +284,8 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 .as_ref()
                 .map(|id| intern(id, &mut strings, &mut idx_of))
                 .unwrap_or(NULL_IDX);
-            let flags: u8 = if tn.draggable { 0x01 } else { 0x00 };
+            let flags: u8 = (if tn.draggable { 0x01 } else { 0x00 })
+                | (if tn.rich_text_block { 0x02 } else { 0x00 });
             let tabindex = tn.tabindex.unwrap_or(i32::MIN);
             // role/data-slot：Option<String> → StringTable 索引（同 id_attr 模式，NULL_IDX 表 None）。
             let role_idx = tn
@@ -460,6 +467,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         };
         let flags = r.u8("flags")?;
         let draggable = (flags & 0x01) != 0;
+        let rich_text_block = (flags & 0x02) != 0;
         let tab_raw = r.i32("tabindex")?;
         let tabindex = if tab_raw == i32::MIN {
             None
@@ -526,6 +534,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             role,
             data_slot,
             aria_controls,
+            rich_text_block,
         });
     }
     // PerComponentDynamicRules: 每组件 dynamic_blob（按 ComponentTable 序）

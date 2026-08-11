@@ -30,9 +30,7 @@ const TEXT_LEVEL_SEMANTICS: &[SemanticKind] = &[SemanticKind::TextElement, Seman
 /// 命中判定贵且需完整 cascade，无法在打包期静态断言 → 返回 `has_multi_compound_flex_rule`
 /// 保守标志，调用方据此「视为 flex」放行（避免假阳性）。Stage 6.4（rich-text-block 分类）
 /// 与 6.5（inline 上下文检查）共享此提取，保证两阶段对「parent 是不是 flex」判定一致。
-pub(crate) fn collect_flex_class_rules(
-    dynamic_rules: &[DynamicRule],
-) -> (Vec<&Compound>, bool) {
+pub(crate) fn collect_flex_class_rules(dynamic_rules: &[DynamicRule]) -> (Vec<&Compound>, bool) {
     let mut single_compound_flex_rules: Vec<&Compound> = Vec::new();
     let mut has_multi_compound_flex_rule = false;
     for rule in dynamic_rules {

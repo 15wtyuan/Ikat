@@ -259,6 +259,11 @@ pub struct Node {
     /// transform 同层：渲染/命中层）。default = identity。供高频拖拽（slider thumb）等
     /// 运行时定位用。纯运行时 transient，不进 pkg.bin。
     pub user_transform: crate::transform::NodeTransform,
+    /// rich-text-block 容器根标记（同 TemplateNode.rich_text_block）：instantiate 时从
+    /// 模板烘入。solve/render 读此 flag 走 inline flow（拍平 inline 子成 RichRun）。
+    /// 非 rich-text-block 容器根 / TextNode / 叶子节点永远 false。solve/render 读写 →
+    /// 必须是 Node 字段，不能是 NodeFlag bit（NodeFlag 只被 process/rematch 触碰）。
+    pub rich_text_block: bool,
 }
 
 impl Default for Node {
@@ -290,6 +295,7 @@ impl Default for Node {
             inline_override: ResolvedStyle::default(),
             inline_set: InlineSet(0),
             user_transform: crate::transform::NodeTransform::default(),
+            rich_text_block: false,
         }
     }
 }
@@ -708,6 +714,7 @@ impl Scene {
                 inline_override: ResolvedStyle::default(),
                 inline_set: InlineSet(0),
                 user_transform: crate::transform::NodeTransform::default(),
+                rich_text_block: false,
             };
             let key = scene.nodes.insert(node);
             let id = NodeId::from_key(key);

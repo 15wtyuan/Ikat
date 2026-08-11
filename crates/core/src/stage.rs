@@ -756,6 +756,7 @@ impl Stage {
             let n = scene.get_mut(node_id).unwrap();
             n.classes = tn.classes.clone();
             n.id_attr = tn.id_attr.clone();
+            n.rich_text_block = tn.rich_text_block;
             n.interaction.draggable = tn.draggable;
             // tabindex：显式值优先（含 -1 排除）；None 时按 HTML/ARIA 语义给可聚焦控件补
             // 默认 0（input/textarea/select/button 及 role=textbox/spinbutton/slider/switch/

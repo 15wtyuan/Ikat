@@ -515,6 +515,7 @@ pub extern "C" fn loomgui_make_test_pkg(
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -530,6 +531,7 @@ pub extern "C" fn loomgui_make_test_pkg(
             role: None,
             data_slot: None,
             aria_controls: None,
+            rich_text_block: false,
         },
     ];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
