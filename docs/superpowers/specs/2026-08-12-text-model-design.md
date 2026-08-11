@@ -83,7 +83,9 @@ runtime render
 | 位置 | 改动 | 代码位置 |
 |---|---|---|
 | `TemplateNode` | +`rich_text_block: bool` | `crates/core/src/asset/mod.rs:119` |
-| `NodeFlags`（u8 bitflags） | +`RICH_TEXT_BLOCK` bit（instantiate 从 TemplateNode 烘入） | `crates/core/src/scene/node.rs:16` |
+| `Node` struct | +`rich_text_block: bool` 字段（instantiate 从 TemplateNode 烘入；solve/render 读） | `crates/core/src/scene/node.rs:227` |
+
+> **不入 `NodeFlags`**：NodeFlags（`node.rs:16`）是交互态，注释明说「solve/world/build skip entirely」（只 process/rematch 碰）。RICH_TEXT_BLOCK 被 solve+render 读，必须独立 `Node` 字段，不进 NodeFlags。
 | `RichRun` | +`source: NodeId`（命中测试 run→节点）；runs 改 runtime 编译、退出 pkg → 摘 serde | `crates/core/src/text/rich.rs:89` |
 | `MeasureContext::RichText` | 摘 `#[allow(dead_code)]`，重新接通 | `crates/core/src/layout/mod.rs:87` |
 | pkg format | v32 → **v33**，MIN_VERSION bump | `crates/core/src/asset/mod.rs:37` |
@@ -140,7 +142,7 @@ for child in scene.children(parent):
 
 ## 7. solve 折叠（`layout/mod.rs`）
 
-`build()` 遍历到 rich-text-block 节点（查 `NodeFlags::RICH_TEXT_BLOCK`）：
+`build()` 遍历到 rich-text-block 节点（查 `node.rich_text_block`）：
 - 编译 runs（§6）
 - 构造 `MeasureContext::RichText { runs, line_height, align, family, h_inset }`
 - `tree.new_leaf_with_context(style, mctx)`——**叶子**
@@ -157,7 +159,7 @@ measure 闭包现有 RichText arm（`layout/mod.rs:459`）摘 `dead_code`：
 ## 8. render 新 arm（`render/mod.rs`）
 
 现有文本渲染按 `NodeKind::TextNode` 分派（`render/mod.rs:1886`）。rich-text-block 是 `NodeKind::Container`——**Container 分派内前置 flag 特判**：
-- if `NodeFlags::RICH_TEXT_BLOCK`：
+- if `node.rich_text_block`：
   - 读 `scene.text_layouts[parent_id]`
   - `build_text_mesh(layout)` → 多 run mesh（per-run 色 + image placement）
   - 复用 `is_text_sub_page` / synth_text_node_id 多页拆分
@@ -195,7 +197,7 @@ measure 闭包现有 RichText arm（`layout/mod.rs:459`）摘 `dead_code`：
 
 - pkg format version v32 → **v33**（`crates/core/src/asset/mod.rs:37`），`MIN_VERSION` bump。
 - 旧 pkg 不兼容 → 重打 showcase.pkg.bin（`cargo run -p loomgui_pkg -- build ...`）。
-- `NodeFlags` +`RICH_TEXT_BLOCK` bit。
+- `Node` +`rich_text_block: bool` 字段（不入 NodeFlags——NodeFlags 是交互态 solve/build skip）。
 - csbindgen：FFI 新增 `loomgui_hit_test_rich` → `cargo run -p xtask -- sync-bindings` 同步 C# 绑定。
 
 ---
