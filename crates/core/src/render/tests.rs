@@ -3307,6 +3307,29 @@ fn box_shadow_blur_uses_sdf_program_and_params() {
     assert!(shadow.shadow_params[4].abs() < 1e-6, "outer → inset_flag=0");
 }
 
+// shadow_sigma 必须单调（blur 越大 σ 越大）且全程 ≥ 0.5（1px AA 下限）。
+// 回归门：旧的 `if blur<0.5 {0.5} else {blur*0.5}` 在 blur=0.5 处 σ 从 0.5 掉到 0.25
+//（blur↑ 但 σ↓），且 blur∈[0.5,1.0] 区间 σ<0.5 违反 AA 下限。
+#[test]
+fn shadow_sigma_is_monotonic_and_floored() {
+    let samples = [0.0, 0.3, 0.49, 0.5, 0.6, 1.0, 2.0, 8.0];
+    let mut prev = 0.0f32;
+    for &blur in &samples {
+        let sigma = super::shadow_sigma(blur);
+        assert!(sigma >= 0.5, "blur={blur}: σ={sigma} 低于 0.5 AA 下限");
+        assert!(
+            sigma >= prev,
+            "blur={blur}: σ={sigma} < 前一样本 σ={prev}（非单调）"
+        );
+        prev = sigma;
+    }
+    // 旧 bug 的直接复现：blur 增大 σ 反而变小。
+    assert!(
+        super::shadow_sigma(0.6) >= super::shadow_sigma(0.3),
+        "blur↑ 但 σ↓"
+    );
+}
+
 // ── resolve_slice_percent ───────────────────────────
 
 #[test]

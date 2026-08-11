@@ -837,6 +837,14 @@ fn text_sub_primary_id(node_id: u32) -> u32 {
     node_id & 0x00FF_FFFF
 }
 
+/// box-shadow 的 CSS blur radius → 高斯 σ（RmlUi 映射 σ = blur/2）。
+///
+/// σ 全程 ≥ 0.5：blur≤1px 时退化为 1px AA 下限，且 blur→σ 单调（blur 越大越糊）。
+/// shader erfc 长尾外扩 ≈3σ = 1.5×blur。
+fn shadow_sigma(blur: f32) -> f32 {
+    (blur * 0.5).max(0.5)
+}
+
 /// box-shadow synth 节点继承 primary 的 mask_context（overflow 裁剪传播）。
 ///
 /// assign_sort_keys 按 scene 树 DFS 赋 mask_context，synth 节点（high-byte 假 id）不在
@@ -844,6 +852,10 @@ fn text_sub_primary_id(node_id: u32) -> u32 {
 /// mask_context，使 shadow 在 overflow 容器内被正确裁剪（spec §4.6：shadow 继承主节点
 /// mask_context，outer/inset 同传播）。
 fn propagate_shadow_mask_context(nodes: &mut [RenderNode]) {
+    // 无 shadow synth 节点时早退：绝大多数 UI 帧无 box-shadow，避免每帧分配 HashMap。
+    if !nodes.iter().any(|n| is_shadow_synth(n.node_id)) {
+        return;
+    }
     // primary node_id → mask_context（一遍扫描，避 O(N²)：多层 shadow 共享同 primary 查表）。
     let ctx_by_id: std::collections::HashMap<u32, MaskContext> = nodes
         .iter()
@@ -2254,8 +2266,7 @@ fn render_one_node(
         let radii = n.style.border_radius.as_corners(rect.w, rect.h);
         // outer（back）层：CSS 序 push。
         for (i, sh) in shadows.iter().filter(|s| !s.inset).enumerate() {
-            // σ = blur/2（RmlUi 高斯 σ；shader erfc 长尾外扩 ≈3σ=1.5×blur）；blur<0.5 取 0.5 做 1px AA。
-            let sigma = if sh.blur < 0.5 { 0.5 } else { sh.blur * 0.5 };
+            let sigma = shadow_sigma(sh.blur);
             let sid = back_shadow_id(node_id, i as u32);
             let (v, uvc, col, idx, params) =
                 crate::render::border::shadow_quad(rect, &radii, sh, sigma);
@@ -2295,8 +2306,7 @@ fn render_one_node(
             .filter(|(_, s)| s.inset)
             .collect();
         for &(css_idx, sh) in inset_layers.iter().rev() {
-            // σ = blur/2（RmlUi 高斯 σ；shader erfc 长尾外扩 ≈3σ=1.5×blur）；blur<0.5 取 0.5 做 1px AA。
-            let sigma = if sh.blur < 0.5 { 0.5 } else { sh.blur * 0.5 };
+            let sigma = shadow_sigma(sh.blur);
             // inset idx = 该 primary 内 inset 层的 CSS 序（0-based，区别于混合序）。
             let inset_idx = shadows.iter().take(css_idx).filter(|s| s.inset).count() as u32;
             let sid = front_shadow_id(node_id, inset_idx);
