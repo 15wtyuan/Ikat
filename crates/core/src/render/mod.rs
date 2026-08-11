@@ -618,6 +618,12 @@ pub fn build_render_nodes(
         if crate::scene::node::is_whitespace_only_text(scene, n.id) {
             continue;
         }
+        // rich-text-block 的 inline 子（TextNode/TextElement/Image，含嵌套 span 子树）在
+        // solve 期已折进父的单段 inline flow（T6），render 画进父 mesh（上方 rich arm）。
+        // 它们 layout_rect=0、独立画=原点垃圾，跳过。
+        if is_folded_into_rich_text(scene, n.id) {
+            continue;
+        }
         // 主 DFS 走正常路径：register_id_map=true（登记 id_to_pos 供 assign_sort_keys /
         // NativeHost FFI 查询）。open popup 子树末尾另走 render_one_node(register=false) +
         // 浮层 sort_key/mask 重赋（见下方 popup 追加块）。
@@ -720,6 +726,10 @@ pub fn build_render_nodes(
                 // 仍需递归子节点（空白 text 无子，此分支实际不进）。
                 continue;
             }
+            // rich-text-block inline 子同样跳过（同主 DFS：已折进父 mesh，独立画=原点垃圾）。
+            if is_folded_into_rich_text(scene, nid) {
+                continue;
+            }
             // 记录 push 前位置——render_one_node 可能 push 多个（跨页 text 子页 / 编辑反馈），
             // 全部需重赋浮层 sort_key + mask。
             let start = nodes.len();
@@ -794,10 +804,14 @@ fn synth_text_node_id(primary_id: u32, sub_page: u32) -> u32 {
 const TF_CURSOR_SYNTH_BYTE: u32 = 32;
 const TF_SELECTION_SYNTH_BYTE: u32 = 33;
 const TF_COMPOSITION_SYNTH_BYTE: u32 = 34;
-/// 文本控件（TextField/TextArea/NumberField）的文字主体 mesh 合成 id 标签。
-/// 这些控件先 push 背景框 mesh（占真 node_id），再 push 文字 mesh；若文字也用真
-/// node_id，则 C# MirrorPool 按 node_id 唯一索引 GO 时第二个 mesh 覆盖第一个
-/// → 控件渲染残缺/不可见（settings showcase 的 spinbutton “无法渲染” 根因）。
+/// 文字 mesh 合成 id 标签：背景已占真 node_id 时，文字主体 mesh 用此合成 id 区分。
+/// 两类节点复用：
+/// - 文本控件（TextField/TextArea/NumberField）：先 push 背景框 mesh（真 node_id），
+///   再 push 文字 mesh；
+/// - rich-text-block 容器（design §8）：先 push 背景 mesh（真 node_id），再 push
+///   多 run 文字 mesh。
+/// 若文字也用真 node_id，则 C# MirrorPool 按 node_id 唯一索引 GO 时第二个 mesh 覆盖
+/// 第一个 → 渲染残缺/不可见（settings showcase 的 spinbutton “无法渲染” 根因）。
 /// 文字 mesh 改用此合成 id 与背景区分，C# 各自独立 GO；primary 关联仍 = 真节点 id
 ///（text_sub_primary_id 可还原），供 sort_key 传播与调试反查。选 35：与子页 1..=15、
 /// box-shadow synth 区间（36..=47）、retired 232..=255 均不撞（同 32..=34 安全区间）。
@@ -1726,6 +1740,24 @@ fn push_solid_mesh(
     });
 }
 
+/// 节点是否被折进某个 rich-text-block 祖先的 inline flow（T6 折叠、T7 渲进父 mesh）。
+///
+/// rich-text-block 容器的 inline 子树（TextNode / TextElement(span) / Image，span 可嵌套）
+/// 在 solve 期不进 taffy（layout_rect 保持默认 0），在 render 期不独立画——整段折进父
+/// 的单条 inline flow mesh（父走 rich_text_block Container arm 读 text_layouts[父]）。
+/// 本谓词向上查 parent 链：任一严格祖先 rich_text_block=true 即该节点已折叠，主 render
+/// 遍历与 popup 浮层遍历须跳过它（否则在原点画 0 尺寸垃圾 mesh）。
+fn is_folded_into_rich_text(scene: &Scene, mut id: NodeId) -> bool {
+    while let Some(parent) = scene.get(id).and_then(|n| n.parent) {
+        match scene.get(parent) {
+            Some(pn) if pn.rich_text_block => return true,
+            Some(_) => id = parent,
+            None => break,
+        }
+    }
+    false
+}
+
 /// 渲染单个 Scene 节点为一个或多个 RenderNode 并推入 `nodes`（共享于主 DFS 与 open popup
 /// 末尾追加 DFS）。
 ///
@@ -1802,6 +1834,86 @@ fn render_one_node(
                     | NodeKind::ProgressBar
             ) =>
         {
+            // rich-text-block 容器：背景框 + 文字 mesh 同帧推，提前返回（同 TextField
+            // 文字控件模式）。背景占真 node_id（供 id_to_pos / sort_key 传播 / NativeHost
+            // 查询），文字用 TF_TEXT_SYNTH_BYTE 合成 id 区分（C# MirrorPool 按 node_id
+            // keying 独立 GO，不与背景互盖）。inline 子不在此递归（render 是平铺遍历），
+            // 由主循环 is_folded_into_rich_text 跳过——它们已在 solve 期折进父的单段
+            // inline flow（T6），此处画进父 mesh 即它们的全部视觉。design §8。
+            if n.rich_text_block {
+                let bg = build_container_mesh(
+                    n,
+                    node_id,
+                    parent_id,
+                    rect,
+                    wm,
+                    alpha,
+                    color_tint,
+                    has_filter,
+                    color_matrix,
+                    anim,
+                    image_sizes,
+                );
+                nodes.push(bg);
+                if register_id_map {
+                    id_to_pos.insert(n.id, nodes.len() - 1);
+                }
+                // 读 solve 期存的 TextLayout（T6 填）；缺则现编译 runs + measure_rich_text
+                // 兜底（post-T6 罕见，同 TextNode arm 的 measure_text 兜底防御）。
+                let s = &n.style;
+                let stack = fonts.stack_for(s.font_family.as_deref());
+                let off_left =
+                    resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
+                let off_right = resolve_lp(s.taffy_style.border.right)
+                    + resolve_lp(s.taffy_style.padding.right);
+                let off_top =
+                    resolve_lp(s.taffy_style.border.top) + resolve_lp(s.taffy_style.padding.top);
+                // max_width 用 content width（rect.w - 左右 border/padding），与 TextNode arm
+                // 同公式：文字在 content area 内断行 + 对齐，不溢出 box。
+                let content_w = (rect.w - off_left - off_right).max(0.0);
+                let mut layout = scene
+                    .text_layouts
+                    .get(n.id.index())
+                    .cloned()
+                    .flatten()
+                    .unwrap_or_else(|| {
+                        let runs =
+                            crate::text::rich_compile::compile_rich_runs(scene, n.id, image_sizes);
+                        crate::text::layout::measure_rich_text(
+                            &runs,
+                            Some(content_w),
+                            s.line_height,
+                            s.text_align,
+                            &stack,
+                        )
+                    });
+                if off_left != 0.0 || off_top != 0.0 {
+                    bake_content_offset(&mut layout, off_left, off_top);
+                }
+                let meshes = build_text_mesh(
+                    &layout,
+                    atlas,
+                    fonts,
+                    rect,
+                    &n.style.text_effects,
+                    n.style.background_gradient,
+                    n.style.background_clip_text,
+                );
+                push_text_meshes(
+                    nodes,
+                    id_to_pos,
+                    meshes,
+                    n,
+                    node_id,
+                    tf_synth_id(node_id, TF_TEXT_SYNTH_BYTE),
+                    parent_id,
+                    alpha,
+                    color_tint,
+                    wm,
+                    false, // 背景已登记 n.id → id_to_pos，文字不重复注册
+                );
+                return; // 背景 + 文字已推，跳过末尾 id_to_pos / push；inline 子由主循环跳过。
+            }
             build_container_mesh(
                 n,
                 node_id,

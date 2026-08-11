@@ -1551,6 +1551,202 @@ fn render_long_text_still_wraps_with_layout_reuse() {
     );
 }
 
+// ── rich-text-block render arm（T7）─────────────────────────
+
+/// rich-text-block Container 在 render 期读 `scene.text_layouts[div]` 产文字 mesh：
+/// - 背景 RenderNode（真 div node_id，program=0）；
+/// - 文字 RenderNode（tf_text_synth 合成 id，program=1，含字形顶点）；
+/// - 折叠的 inline TextNode 子**不**单独产 RenderNode（T6 跳过 taffy → layout_rect=0，
+///   T7 跳过 render 子遍历）。
+#[test]
+fn rich_text_block_renders_text_mesh() {
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    // root(structural Container, 固定宽 200) > div(rich_text_block, 显式宽 100) > TextNode
+    // 长文本。div 显式宽驱动 measure_rich_text 换行（作 root 固定尺寸叶子测不到约束宽）。
+    let mut root_s = ResolvedStyle::default();
+    root_s.taffy_style.size.width = Dimension::length(200.0);
+    let mut div_s = ResolvedStyle::default();
+    div_s.taffy_style.size.width = Dimension::length(100.0);
+    div_s.font_size = 16.0;
+    let entries = vec![
+        (
+            None,
+            NodeKind::Container,
+            root_s,
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            Some(0),
+            NodeKind::Container,
+            div_s,
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            Some(1),
+            NodeKind::TextNode,
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            Some("The quick brown fox jumps over the lazy dog".into()),
+            None,
+        ),
+    ];
+    let mut scene = Scene::build(&entries);
+    let div = scene.get(scene.roots[0]).unwrap().children[0];
+    let tn = scene.get(div).unwrap().children[0];
+    scene.get_mut(div).unwrap().rich_text_block = true;
+    crate::layout::solve(
+        &mut scene,
+        &fonts,
+        (200.0, 1000.0),
+        &std::collections::HashMap::new(),
+    );
+    // T6 契约：text_layouts[div] 已填，inline 子 layout_rect=0。
+    assert!(
+        scene.text_layouts[div.index()].is_some(),
+        "solve 应为 rich-text-block div 填 text_layouts[div]"
+    );
+    let tn_rect = scene.get(tn).unwrap().layout_rect;
+    assert!(
+        tn_rect.w.abs() < 0.1 && tn_rect.h.abs() < 0.1,
+        "folded inline child 应无独立 layout_rect，got {:?}",
+        tn_rect
+    );
+
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+
+    // 文字 RenderNode：tf_text_synth 合成 id（背景占真 div node_id，文字用合成 id 区分），
+    // program=1，含字形顶点（>=1 字形 = 4 verts）。合成 id 经 is_tf_text_synth 排除合批，
+    // 不会被 merge 吞掉——是 rich-text-block arm 运行的稳定信号。
+    // 背景同时由同 arm 产（真 div node_id，program=0），但透明/兄弟 bg quad 可能被
+    // merge_meshes 合并丢 node_id，故不在帧上断言背景 node_id；文字 mesh 存在即证明
+    // 同 arm 已先 push 背景（同一代码路径）。
+    let text_div_synth = tf_synth_id(div.0, TF_TEXT_SYNTH_BYTE);
+    let text_verts = frame
+        .nodes
+        .iter()
+        .find_map(|rn| {
+            if rn.node_id == text_div_synth {
+                match &rn.payload {
+                    NodePayload::Mesh { verts, program, .. } if *program == 1 => Some(verts.len()),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    assert!(
+        text_verts >= 4,
+        "rich-text-block div 应产文字 mesh（tf_text_synth id，program=1，>=4 verts），实 {} verts",
+        text_verts
+    );
+
+    // 折叠的 inline TextNode 子不单独产 RenderNode：遍历全帧无 rn.node_id == tn.0。
+    let tn_leaked = frame.nodes.iter().any(|rn| rn.node_id == tn.0);
+    assert!(
+        !tn_leaked,
+        "folded inline TextNode 不应单独产 RenderNode（应折进父 mesh）"
+    );
+}
+
+/// 回归守卫：rich_text_block=false 的普通 Container 仍走原 Container 路径——
+/// 其 TextNode 子节点独立测 + 独立渲染（产自己的 RenderNode，不折进父）。
+/// 与上一个 rich 测试互为正反。
+#[test]
+fn non_rich_container_renders_text_child_separately() {
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    let mut root_s = ResolvedStyle::default();
+    root_s.taffy_style.size.width = Dimension::length(200.0);
+    let mut text_s = ResolvedStyle::default();
+    text_s.font_size = 16.0;
+    let entries = vec![
+        (
+            None,
+            NodeKind::Container,
+            root_s,
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            Some(0),
+            NodeKind::TextNode,
+            text_s,
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            Some("Buy".into()),
+            None,
+        ),
+    ];
+    let mut scene = Scene::build(&entries);
+    crate::layout::solve(
+        &mut scene,
+        &fonts,
+        (200.0, 1000.0),
+        &std::collections::HashMap::new(),
+    );
+    let tn = scene.get(scene.roots[0]).unwrap().children[0];
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    // 非 rich Container 的 TextNode 子独立产 RenderNode（真 node_id，program=1）。
+    let tn_rendered = frame.nodes.iter().any(|rn| {
+        rn.node_id == tn.0
+            && matches!(&rn.payload, NodePayload::Mesh { program, .. } if *program == 1)
+    });
+    assert!(
+        tn_rendered,
+        "非 rich Container 的 TextNode 子应独立产文字 RenderNode（program=1）"
+    );
+}
+
 // ── change_level 三级测试 ─────────────────────────
 
 #[test]
