@@ -1141,7 +1141,12 @@ namespace LoomGUI
             Node cb = GetChildAt(b);
             SwapChildren(ca, cb);
         }
-        public void ScrollTo(Vector2 p, ScrollBehavior b = ScrollBehavior.Smooth) { throw NE(); }
+        public void ScrollTo(Vector2 p, ScrollBehavior b = ScrollBehavior.Smooth)
+        {
+            ThrowIfDisposed();
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_set_scroll_pos(h, _id, p.X, p.Y, (byte)(b == ScrollBehavior.Smooth ? 1 : 0));
+        }
         // ScrollChanged source 待补：ScrollPane 物理自维护 tween，无 borrow_scroll_events FFI。
         // D3 defer——event 签名冻结（PublicApi 编译门已含此字段），add/remove 推后到 source 补齐。
         public event Action<ScrollChangedEvent> Scrolled;
@@ -1323,11 +1328,13 @@ namespace LoomGUI
     }
 
     // ── 控件（叶子：私有内部结构）──
-    public class Button : Container
+    public unsafe class Button : Container
     {
         internal Button(UIContext ctx, uint id) : base(ctx, id) { }
 
-        public bool Disabled { get { throw NE(); } set { throw NE(); } }
+        public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
+        void SetNodeDisabled(bool v) { StageHandle* h = (StageHandle*)_ctx._stage.ToPointer(); Native.loomgui_stage_set_node_disabled(h, _id, v); }
+        bool GetNodeDisabled() { StageHandle* h = (StageHandle*)_ctx._stage.ToPointer(); byte b = 0; Native.loomgui_stage_get_node_disabled(h, _id, &b); return b != 0; }
         // 文本走 Container.TextContent（删原 TextContent 特例）
 
         // D3 semantic sugar：Action 参数无类型——handler 形参与 ClickEvent 解耦，对齐 UGUI Button.onClick。
@@ -2401,6 +2408,12 @@ namespace LoomGUI
             get { ThrowIfDisposed(); return _bindItem; }
             set { ThrowIfDisposed(); _bindItem = value; _ctx.RegisterListView(this); }
         }
+
+        /// <summary>
+        /// ListView 虚拟化：Children 不可枚举（拿到的是随滚动变的可见 slot 子集，语义混乱易误用）。
+        /// 操作项用 BindItem/ItemTemplate/ScrollToItem。对齐 public-api 契约（Container.Children 非虚，用 new 隐藏）。
+        /// </summary>
+        public new IReadOnlyList<Node> Children => throw new UIContractException("ListView 是虚拟化列表，Children 不可枚举——用 BindItem/ItemTemplate/ScrollToItem 操作项。");
 
         /// <summary>
         /// 数据驱动模式下返 ItemCount（不直走 get_child_count——core ul 的真子是

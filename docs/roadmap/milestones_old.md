@@ -1,6 +1,8 @@
-# LoomGUI 里程碑 Backlog（摸黑后 → 可演示）
+# LoomGUI 里程碑 Backlog（归档：摸黑后 → 可演示 纪元执行计划）
 
-> 本文件是 `roadmap.md` §4「三束加宽」的**可执行切片**：把三束 + 收尾重排成单人节奏的有序 backlog，每个里程碑带**进入判据 / 退出判据 / 依赖 / 阻塞 / 估时**。状态与 roadmap.md 同步；历史决策记录仍留在 roadmap.md §8。
+> **⚠️ 本文件已归档**（2026-08-11）。这是**旧 roadmap（现 `roadmap_old.md`）§4「三束加宽」的可执行切片**——M0–M6 + M∞ 的进入/退出判据 / 依赖图 / 周节奏表。该纪元已完工（M1–M3 编码端 DONE、视觉束大半交付），向前里程碑规划见新 `docs/roadmap/roadmap.md`，defer 项见 `docs/roadmap/deferred.md`。
+>
+> 下方内容 stale（如 M1 标「❌ 未开」实际已完工），保留作历史决策记录。**M2.5 / M5 作为 spec 术语**仍被 `deferred.md` 和各 spec 引用，定义见本文件对应小节。
 >
 > 排序原则见 `roadmap.md` §3 + 上一轮 grill 结论：先关已开的锅 → 趁新鲜啃最大风险 → 中间插爽点保持士气 → 低 ROI 狠砍。
 

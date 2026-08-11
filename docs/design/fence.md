@@ -60,7 +60,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 |---|---|---|---|---|---|
 | `div` | Container | Block | Block | Flow | |
 | `span` | TextElement | Inline | Phrasing | Phrasing | |
-| `button` | Button | Inline | Phrasing | Phrasing | |
+| `button` | Button | Inline | Phrasing | Flow | |
 | `img` | Image | Inline | Void | None | ✓ |
 | `template` | Template | None | Phrasing | Flow | |
 | `slot` | Slot | Inline | Transparent | Transparent | |
@@ -84,7 +84,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `listitem` | ListItem | — |
 | `tablist` | TabList | `role=tab` 子（panel 靠 `aria-controls` 关联，非 role） |
 | `tab` | Tab | — |
-| `tabpanel` | Container | — |
+| `tabpanel` | Container（`div` tag 回退，非 role 分派） | — |
 
 控件初始值放 ARIA（`aria-valuenow`/`aria-checked`/...）或 `data-*`（`data-step`/`data-name`）属性里——围栏禁止 `<div>` 上出现 plain 控件属性。
 
@@ -146,6 +146,7 @@ Base 标签按 tag 映射；控件/列表按 `role` 映射（`role` 优先于 ta
 | `slot` | 投影到父组件的具名 slot |
 | `hidden` | 隐藏元素 |
 | `tabindex` | 焦点顺序 |
+| `type` | 通用类型提示（`input[type]` 结构分派已退役，现作普通全局属性透传） |
 | `role` | WAI-ARIA 角色（白名单，影响复合控件语义） |
 | `aria-*` | WAI-ARIA 状态/属性（打包期校验 IdRef 关系） |
 | `data-*` | 自定义数据属性（透传，不做结构验证） |
@@ -184,7 +185,7 @@ CSS 在围栏中以三个正交维度建模：
 **布局**
 
 - `display`（`block` / `flex` / `none` / `inline`，**不含 `grid`**）
-- `flex-direction`（默认 `row`——标准 CSS 默认），`flex-wrap`, `flex-grow`, `flex-shrink`, `flex-basis`, `gap`, `row-gap`, `column-gap`
+- `flex-direction`（默认 `row`——标准 CSS 默认），`flex-wrap`（`wrap`/`nowrap`；`wrap-reverse` 围栏拒绝），`flex-grow`, `flex-shrink`, `flex-basis`, `gap`, `row-gap`, `column-gap`
 - `justify-content`, `align-items`, `align-content`, `align-self`
 - `order`, `aspect-ratio`
 
@@ -196,6 +197,8 @@ CSS 在围栏中以三个正交维度建模：
 **盒模型**
 
 `padding-top/right/bottom/left`, `margin-top/right/bottom/left`
+
+> **UA 默认 / noop**：`button` UA 默认 `text-align:center` + `justify-content:center` + `align-items:center`（内容居中，`css_resolve.rs`）；`resize`（`none`/`both`/`horizontal`/`vertical`）fence 接受但 core 不消费（noop，避免 textarea 报 prop 名错）。
 
 **边框**
 
@@ -211,7 +214,7 @@ CSS 在围栏中以三个正交维度建模：
 
 **文本**
 
-`color`（继承）, `font-size`（继承）, `font-family`（继承）, `font-weight`（继承）, `text-align`（继承）, `line-height`（继承）, `letter-spacing`（继承）, `white-space`（继承）, `text-shadow`（继承）, `-webkit-text-stroke`（继承）, `font-effect`（继承，LoomGUI 私有扩展）, `transition`
+`color`（继承）, `font-size`（继承）, `font-family`（继承）, `font-weight`（继承）, `text-align`（继承）, `line-height`（继承）, `letter-spacing`（继承）, `white-space`（继承）, `text-shadow`（继承）, `-webkit-text-stroke`（继承）, `font-effect`（继承，LoomGUI 私有扩展）
 
 **文本控件私有属性**（CSS 用伪元素表达，围栏无伪元素选择器，故平铺 prop；`None` = render 回退到缺省色）
 
@@ -227,7 +230,7 @@ CSS 在围栏中以三个正交维度建模：
 
 `/* @loom-hook <name> */` 注释锦点——写在 keyframes 的 stop 声明块内或块间（如 `from{...}/* @loom-hook start */ to{...}` 或 `from{/* @loom-hook start */ ...} to{...}`），挂在该 stop 上。合法锦点注释保留为内部 marker 供 stop 解析，普通注释照常移除；纯文本 `@loom-hook`（非注释上下文）不识别。运行时 player 跨越该 stop 百分比时 emit `AnimationHookEvent`，C# 经 `Animation.OnHook(name)` 或 `On<AnimationHookEvent>` 路由（见 public-api §9.3）。
 
-**:nth-child(An+B|odd|even|N) 选择器**——参数化伪类，`<style>` 规则选择器接受。括号内 An+B 语法（`2n+1`/`2n`/`odd`/`even`/`<N>`）解析为 `NthChildExpr{a,b}`，命中条件 = 子序号 i 满足 `i = a*k + b`（1-based）。常配合 `animation-delay` 实现错峰入场（同一规则按子序号算 delay，如 `.nav-card:nth-child(N){animation-delay:...}`）。语法越界（无括号/缺 `)`/坏参数）→ 选择器不匹配；组合子 `>` `+` `~` 仍越界（注意 `+`/`-` 在 `:nth-child(...)` 括号内是 An+B 合法语法，不判为组合子）。
+**:nth-child(An+B|odd|even|N) 选择器**——参数化伪类，`<style>` 规则选择器接受。括号内 An+B 语法（`2n+1`/`2n`/`odd`/`even`/`<N>`）解析为 `NthChildExpr{a,b}`，命中条件 = 子序号 i 满足 `i = a*k + b`（1-based）。常配合 `animation` 简写实现错峰入场（delay 作简写第 2 个 time token，如 `.nav-card:nth-child(N){animation:fadeIn .4s .05s both}`——`animation-delay` 非独立注册属性，须进简写）。语法越界（无括号/缺 `)`/坏参数）→ 选择器不匹配；组合子 `>` `+` `~` 仍越界（注意 `+`/`-` 在 `:nth-child(...)` 括号内是 An+B 合法语法，不判为组合子）。
 
 > **⚠️ 虚拟化列表禁止 `:nth-child`**：虚拟化 `<ul>`（`role=list`）的 parked slot 留挂 ul 子树（`display:none`），按 CSS 仍计入 child count。`:nth-child` 的序数包含 parked slot → item 序号不可控。用 item-index / `data-*` 属性 + 属性选择器替代（如 `[data-index="0"]`）。详见 pool-slot-lifecycle design §2.9、§5.4。
 

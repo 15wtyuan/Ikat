@@ -139,7 +139,6 @@ public sealed class NodeStyle {
     public int ZIndex { get; set; }
     public Color BackgroundColor/Color { get; set; }
     public float Opacity { get; set; }
-    public Visibility Visibility { get; set; }
     public void SetVar(string name, Length/Color/float/string value);
     public void RemoveVar(string name);
 }
@@ -150,7 +149,7 @@ public sealed class NodeStyle {
 - getter **只反映 C# setter 写过的属性**；未写过的返回 `Unset` 哨兵（`Length.Unset()` / `Color.Unset` / enum 的 `Unset` 成员）。要 computed 值走 `Geometry`。
 - setter 写 `Unset` = 撤销该属性的 inline override，回落 CSS cascade。单属性撤销即用 `Style.X = Unset()`，无 `Clear`/`Reset`。
 - `SetVar`/`RemoveVar` 管 CSS 自定义属性 `--*`；`--*` 跨作用域根传递。不提供 `GetVar`（var 不当状态存储读回）。
-- 隐藏节点用 `Display = None`（不占位、不渲染、不命中，等同 fgui `visible=false`）；`Visibility.Hidden` 是占位隐藏。
+- 隐藏节点用 `Display = None`（不占位、不渲染、不命中，等同 fgui `visible=false`）；占位隐藏（保留布局空间）用 `Opacity = 0`。（`Visibility` API 已移除——fence CSS 子集无 `visibility` prop，无后盾；占位隐藏 `opacity:0` 覆盖。）
 
 ### 3.2 Transform（可写，渲染层，不触发 solve）
 
@@ -222,7 +221,7 @@ buy.Get<TextElement>("price").TextContent = "200";   // 只动 span，兄弟 img
 | 手段 | 效果 | 用途 |
 |---|---|---|
 | `Style.Display = None` | 隐藏 + 不占位 + 不渲染 + 不命中 | 日常开关（窗口/面板反复显隐） |
-| `Style.Visibility = Hidden` | 隐藏 + 占位 | 占位隐藏（防布局跳动） |
+| `Style.Opacity = 0` | 隐藏 + 占位（加 `pointer-events:none` 不命中） | 占位隐藏（防布局跳动） |
 | `Dispose()` | 永久销毁、释放 | 这个 UI 这辈子不再要了 |
 
 频繁开关的窗口用 `Display = None`，不用 Dispose。
@@ -308,13 +307,15 @@ Node node = ui.Pick(globalPoint);   // 命中测试：返回该点最上层可�
 | div role=radio | RadioButton : Node | IsChecked, Name（只读）, Disabled, CheckedChanged |
 | div role=combobox | Dropdown : Node | SelectedIndex, SelectedValue, Disabled, SelectionChanged |
 | div role=progressbar | ProgressBar : Node | Value, Max（float，0 基底）, IsIndeterminate |
+| div role=tablist | TabList : Container | SelectedIndex, SelectionChanged（方向键/click 切换；panel 靠 `aria-controls` 关联） |
+| div role=tab | Tab : Container | （`aria-selected` 由父 TabList.SelectedIndex 跨节点合成，非字面存储） |
 
 **不变量**：
 - 控件数值（Slider/NumberField/ProgressBar 的 Value/Min/Max/Step）用 `float`，与几何/引擎统一。大数精度需求归业务层。
 - RadioButton 同 `Name` 组框架自动互斥；只有新选中项触发 `CheckedChanged`（对齐 web，不触发被取消项）。RadioGroup（按 name 聚合、读选中 index）是逻辑层积木，不进公共层。
 - 通用事件类型：`ValueChangedEvent<T>`, `SelectionChangedEvent`, `TextSelection`。
 
-控件与列表的类型由 `role` 分派（见 [fence.md](fence.md) §2.3、§3.1）；控件视觉部件用 `data-slot`（如 slider 的 `data-slot=thumb`、progressbar 的 `data-slot=fill`）。未来 WAI-ARIA 复合控件（TabList/Tree 等）沿用同一 `role` 机制，单独立项。
+控件与列表的类型由 `role` 分派（见 [fence.md](fence.md) §2.3、§3.1）；控件视觉部件用 `data-slot`（如 slider 的 `data-slot=thumb`、progressbar 的 `data-slot=fill`）。WAI-ARIA 复合控件沿用同一 `role` 机制：**TabList/Tab 已落地**（见上表）；Tree 等按需单独立项。
 
 ---
 

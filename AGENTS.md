@@ -12,7 +12,7 @@ LoomGUI = 跨引擎游戏 UI 框架。标准 HTML/CSS 子集作设计期 DSL，�
 
 对标 FairyGUI、RmlUi、Unity UI Toolkit（参考实现在 `temp/FairyGUI-unity/`、`temp/RmlUi/`，只读）。差异化：标准 HTML/CSS（vs fgui 的 `.fui` 二进制 AI 看不懂）、类型化对象树（标准 HTML 元素决定稳定类型）、Rust 跨引擎共享核心、围栏验证器。
 
-**当前状态**：正在进入 API 范式重构。设计契约见 `docs/design/main-design.md`；**公共 API 终态契约见 `docs/design/public-api.md` C# 投影层机制见 `docs/design/projection-layer.md`（真身在 Rust，C# 是 OOP 投影 + 攒批回写）**；重构路线见 `docs/roadmap/roadmap.md`；早期探索 spec 见 `docs/superpowers/specs/2026-07-13-api-refactor-design.md`（历史草稿，大部分已吸收进上述 design，非活契约）。公共签名冻结在 `unity/package/Runtime/Public/LoomGUI.*.cs`，编译校验门 `tests/dotnet/LoomGUI.PublicApi`。
+**当前状态**：API 范式重构（摸黑 + 三束）已完工，进入「完全体」阶段（能力补全 / 验收发布 / 跨引擎）。设计契约见 `docs/design/main-design.md`；**公共 API 终态契约见 `docs/design/public-api.md` C# 投影层机制见 `docs/design/projection-layer.md`（真身在 Rust，C# 是 OOP 投影 + 攒批回写）**；重构路线见 `docs/roadmap/roadmap.md`；早期探索 spec 见 `docs/superpowers/specs/2026-07-13-api-refactor-design.md`（历史草稿，大部分已吸收进上述 design，非活契约）。公共签名冻结在 `unity/package/Runtime/Public/LoomGUI.*.cs`，编译校验门 `tests/dotnet/LoomGUI.PublicApi`。
 
 ## 构建 / 测试命令
 
@@ -110,7 +110,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 - ~~**`<div>` 永远是 flex 容器**~~（**P1 C2 已消除**）：`display:block` 和裸 block 默认标签现在都设 `taffy_style.display = taffy::Display::Block`（真 CSS 块流，垂直堆叠且忽略子 flex-grow），不再走 flex-column 伪 block。显式 `display:flex`/`display:none` 仍覆盖。（历史上 block 默认标签含 div/header/nav/p/ul/ol/li/option；控件 role 化重构后多数下线，当前围栏里 `div` 是唯一 block 默认 runtime 标签。）两处赋值：`crates/fence/src/css_resolve.rs` 铺默认、`crates/core/src/style/mapping.rs` 应用显式声明。
 - **`NodeKind` enum + 代际 NodeId**：`NodeId(pub u32)` 对外透明句柄。19 变体（控件 role 化重构后）+ C# 类型化投影层（Node/Container/Button/...）已落地，但 Rust 侧 NodeKind/NodeId 仍在核心所有热路径中活跃。→ 类型化用户表面已兑现；内部表示重构在复合束推进时逐段迁移。
-- **`Get<T>("id")` 子树查找（L1 已落，L3 defer）**：`find_node_by_id_in_subtree`（self-exclusive DFS，从 root 直接子起，root 自身不匹配）已替换全局首匹配，修虚拟列表 slot 内部 id 命中。但完整 `IsScopeRoot` 边界（嵌套组件/list item 不穿透）仍 defer（复合束 L3，roadmap §4）；`component.Get` 仍会穿透进 list item——driver 用 `slot.Get`/`slot.Query`。
+- **`Get<T>("id")` 子树查找（L1 已落，L3 defer）**：`find_node_by_id_in_subtree`（self-exclusive DFS，从 root 直接子起，root 自身不匹配）已替换全局首匹配，修虚拟列表 slot 内部 id 命中。但完整 `IsScopeRoot` 边界（嵌套组件/list item 不穿透）仍 defer（复合束 L3，见 `docs/roadmap/roadmap.md` T1）；`component.Get` 仍会穿透进 list item——driver 用 `slot.Get`/`slot.Query`。
 - **虚拟列表 slot 模型（parked-but-attached，已落）**：slot 永驻 ul 子树，离场 `display:none` 标记（parked，不 detach 到 free 池）；reuse_key 永久 ordinal；MirrorPool parked keepalive 持久 GO 池（仅 gone 才销毁）。坑 182 已解。driver 仍管 slot 映射/可见区间/不等高补偿（核心仍不完整“认识列表”，完整吸收留复合束 ListView）。
 
 ### 围栏
@@ -120,7 +120,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 ## 在本仓库怎么干活
 
 - **实现任何机制前，先对照 FairyGUI 源码和 RmlUi 源码**（`temp/FairyGUI-unity/` 和 `temp/RmlUi/`，只读）。LoomGUI 的渲染/对象模型/批合/事件/动画/资源管线全面借鉴 fgui，文本/布局借鉴 RmlUi/UITK。先读对应源码看它怎么做，再定设计。
-- **设计文档 vs 踩坑**：`docs/design/main-design.md`（总体架构与渲染管线）、`docs/design/fence.md`（围栏）、`docs/design/public-api.md`（公共 API 终态契约）、`docs/design/projection-layer.md`（C# 投影层机制：真身在 Rust，C# 是 OOP 投影 + 攒批回写）、`docs/roadmap/roadmap.md`（重构路线：摸黑打通 + 三束加宽 + 机制草稿）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配）。
+- **设计文档 vs 踩坑**：`docs/design/main-design.md`（总体架构与渲染管线）、`docs/design/fence.md`（围栏）、`docs/design/public-api.md`（公共 API 终态契约）、`docs/design/projection-layer.md`（C# 投影层机制：真身在 Rust，C# 是 OOP 投影 + 攒批回写）、`docs/roadmap/roadmap.md`（路线图：完全体 north star + tracks + 里程碑；旧纪元史见 `docs/roadmap/roadmap_old.md`）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配）。
 - **Rust edition 2021**，依赖钉版本：`taffy 0.12`、`ttf-parser 0.20`、`slotmap 1.1`、`csbindgen 1`。CSS 选择器解析器手搓（零新依赖，spike 阶段推翻了"接 cssparser"前提）。旧版 snapshot 测试用 `insta` 已移除，换自维护。
 - `Cargo.lock` 入库（根级，尽管 `.gitignore` 有通用 `Cargo.lock` 行——它是被追踪的）。
 - 设计师工作区是独立磁盘目录（含 `loom.workspace.json`、HTML/CSS 源文件、res 资源、design-systems 组件库）。打包用独立打包器 GUI（Tauri `loomgui_gui`）或 CLI `loom-pkg build <workspace>`。运行时引导由 `loom.runtime.json` 统管。
@@ -149,7 +149,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 **Unity 渲染 vs HTML 浏览器颜色对比（Chrome headless 取证）**：颜色「发白/偏亮/偏色」问题不能盲信「渲染对得上 CSS」——CSS 半透明合成在 sRGB 编码空间，Unity Linear 项目在 linear 空间（见坑 197），同一 CSS 算出不同值。取证：Chrome headless 截 HTML（`"/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --disable-gpu --force-color-profile=srgb --force-device-scale-factor=1 --window-size=1920,1080 --screenshot=out.png "file:///abs/path.html"`）→ PowerShell `System.Drawing.Bitmap.GetPixel(x,y)` 读像素 hex → 和 Unity uloop `screenshot --capture-mode rendering` 像素逐字节对比。**控制实验先校准**：截纯色 `#hex` HTML 确认 Chrome 截图对纯色准（暗部可能偏），坐标用 PNG top-left = design 坐标。这是定位「颜色对不上」类问题的铁证方法，比静态猜强。
 
-**围栏真相源 = `crates/fence/src/schema/` Rust const 表，`docs/design/fence.md` 是人类可读权威副本**：围栏最终形态 = schema 注册表（14 标签 = 8 shell + 6 runtime + role 驱动控件 + CSS 子集 + `@keyframes`/`animation` 终态），fence.md 是它的可读镜像（改 schema 必同步 fence.md，防漂移门 `cargo test -p loomgui_fence` 含「文档↔schema 交叉校验」测试 `doc_schema_sync.rs`）。roadmap 决策「终点线2 scope 用哪些」（如 `:nth-child` / 多 selector / @keyframes runtime 驱动 留 §4 视觉束）。代码往围栏最终形态靠，围栏外的 showcase bug 跟围栏最终形态（showcase 整体打包挂留专门 task）。
+**围栏真相源 = `crates/fence/src/schema/` Rust const 表，`docs/design/fence.md` 是人类可读权威副本**：围栏最终形态 = schema 注册表（14 标签 = 8 shell + 6 runtime + role 驱动控件 + CSS 子集 + `@keyframes`/`animation` 终态），fence.md 是它的可读镜像（改 schema 必同步 fence.md，防漂移门 `cargo test -p loomgui_fence` 含「文档↔schema 交叉校验」测试 `doc_schema_sync.rs`）。roadmap 决策「终点线2 scope 用哪些」（`:nth-child` / 多 selector / @keyframes runtime 已交付；剩余视觉缺口见 `docs/roadmap/roadmap.md` T1）。代码往围栏最终形态靠，围栏外的 showcase bug 跟围栏最终形态（showcase 整体打包挂留专门 task）。
 
 **GUI exe 绑 fence crate**：fence 改动后必须重编 GUI exe（`loomgui_gui.exe` 静态链入 fence），否则 GUI stale 误报围栏外（pkg bump 时也触发，坑 158 同源）。打包器 exe 闭环见上方「GUI 打包器 exe 闭环」段。
 

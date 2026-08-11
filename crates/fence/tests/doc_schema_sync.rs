@@ -120,3 +120,65 @@ fn shipped_fence_md_matches_source_of_truth() {
          unity/package/Editor/Resources/LoomGUI/skill/references/fence.md"
     );
 }
+
+/// 关键 CSS 属性必须在 fence.md 提及（防「schema 新增非标准/私有属性，文档没跟上」）。
+///
+/// 非全量 CSS_PROPS 覆盖——标准 CSS longhand（padding/margin/border 四向）靠作者/AI 的
+/// CSS 先验，fence.md 用合并写法 `padding-top/right/bottom/left` 表达即可；本门只锁
+/// 「LoomGUI 特有 / 易漂移 / 漏了会坑 AI」的关键属性（resize noop、动画、文本控件私有、
+/// 九宫格、filter/transform/box-shadow 等非直觉项）。新增此类属性时须同步 fence.md。
+#[test]
+fn fence_md_covers_critical_css_props() {
+    let md = include_str!("../../../docs/design/fence.md");
+    const CRITICAL: &[&str] = &[
+        "resize",
+        "animation",
+        "transition",
+        "box-shadow",
+        "filter",
+        "transform",
+        "overflow",
+        "overflow-x",
+        "overflow-y",
+        "flex-wrap",
+        "background-clip",
+        "-webkit-background-clip",
+        "-webkit-text-stroke",
+        "font-effect",
+        "caret-color",
+        "placeholder-color",
+        "selection-background",
+        "selection-color",
+        "border-image-slice",
+        "aspect-ratio",
+        "pointer-events",
+    ];
+    for &name in CRITICAL {
+        let independent = format!("`{}`", name);
+        assert!(
+            md.contains(&independent),
+            "关键 CSS 属性 `{}` 未在 fence.md 提及（文档漂移）",
+            name
+        );
+    }
+}
+
+/// 具体全局属性（`is_global_attr` 白名单里的非通配项）必须在 fence.md 提及。
+///
+/// 通配前缀（`aria-*` / `data-*` / `--*`）靠先验，不在机械检查范围；只锁具体名（含 `type`，
+/// 它在 input[type] 结构分派退役后变普通全局属性，易漏文档）。
+#[test]
+fn fence_md_covers_global_attrs() {
+    let md = include_str!("../../../docs/design/fence.md");
+    const CONCRETE_GLOBAL: &[&str] = &[
+        "id", "class", "style", "slot", "hidden", "tabindex", "role", "type",
+    ];
+    for &name in CONCRETE_GLOBAL {
+        let independent = format!("`{}`", name);
+        assert!(
+            md.contains(&independent),
+            "全局属性 `{}` 未在 fence.md 提及（文档漂移）",
+            name
+        );
+    }
+}

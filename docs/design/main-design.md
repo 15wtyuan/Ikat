@@ -88,7 +88,7 @@
 - `display:flex` 默认 `flex-direction:row`（标准 CSS 默认）。
 - 需要纵向堆叠明确写 `display:flex; flex-direction:column`。
 - `display:block/flex/none` 选择内部布局 Strategy，**不改变节点类型**。
-- `box-sizing:border-box` 作为 UA 样式例外（游戏 UI 友好），待 fence 补入 CSS 属性表并实现。
+- `box-sizing`：LoomGUI **border-box 专属**（width 含 padding+border，游戏 UI 友好），作者声明被 fence 拒绝并提示移除（`css_resolve.rs`）——已定决策，非待实现。
 
 ### 3.2 围栏元素
 
@@ -476,7 +476,7 @@ taffy 对"尺寸取决于内容"的节点回调 `MeasureFunc(known_dimensions) -
 
 场景图 Container 树 ↔ taffy 节点树一一对应。增删 Container 同步增删 taffy 节点；改 style 同步改 taffy style 并标记子树 layout dirty。
 
-taffy 0.12 同时支持 Flex 和 Block 布局算法。`display:block` 使用 `compute_block_layout`，`display:flex` 使用 `compute_flexbox_layout`。裸 block 默认标签（当前围栏里 `div`）和显式 `display:block` 都设 `taffy_style.display = Display::Block`；inline 标签和显式 `display:flex` 设 `Display::Flex`（inline 走 Flex Row）。
+taffy 0.12 同时支持 Flex 和 Block 布局算法。统一走 `compute_layout_with_measure`（内部按节点 `taffy_style.display = Display::Block/Flex` 分派；不再分别调 `compute_block_layout`/`compute_flexbox_layout`）。裸 block 默认标签（当前围栏里 `div`）和显式 `display:block` 都设 `Display::Block`；inline 标签和显式 `display:flex` 设 `Display::Flex`（inline 走 Flex Row）。
 
 ### 11.3 尺寸模型 → 映射
 
@@ -566,6 +566,7 @@ struct RenderNode {
     change_level: ChangeLevel,        // Skip=0 / Header=1 / Full=2
     reuse_key: u32,                   // MirrorPool GO 复用键
     effect: EffectBlock,              // 文字效果参数（128B 定长）
+    shadow_params: [f32; 6],         // box-shadow SDF 参数（blur 半径/偏移/扩缩/圆角；v12 blob 列）
     payload: NodePayload,
 }
 
@@ -612,7 +613,7 @@ a. TweenManager.update(dt)        ← transition 的 opacity/bg_color/text_color
 
 **Animation 句柄 L3 全套**（见 [public-api.md](public-api.md) §9）：`Node.Play(name)` 返回 `Animation` 句柄，事件 `AnimationStart`/`End`/`Iteration`/`Key`/`Hook` + `TransitionEnd` 经 `borrow_events` 双路由（全局 `On<T>` + 句柄 `player_key` 私有回调）。
 
-> **M2.5（引擎终态）**：池化 Tween（`TweenManager { active, pool }` 替换单 Vec）+ 缓动全集（cubic-bezier/Elastic/Bounce/Custom + per-stop timing-function 结构化）+ 链式 builder API（替位置参数 `tween()`）+ player 与 Tween 插值原语统一（共享 `TweenValue{x,y,z,w,d}` + `value_size(1..6)`）。当前 TweenManager 是单 `Vec<Tween>` + flat `tween()` + 7 keyword ease + value_size max=4——够 keyframes 跑，触发判据见 milestones M2.5。
+> **M2.5(引擎终态)**:池化 Tween(`TweenManager { active, pool }` 替换单 Vec)+ 缓动全集(cubic-bezier/Elastic/Bounce/Custom + per-stop timing-function 结构化)+ 链式 builder API(替位置参数 `tween()`)+ player 与 Tween 插值原语统一(共享 `TweenValue{x,y,z,w,d}` + `value_size(1..6)`)。当前 TweenManager 是单 `Vec<Tween>` + flat `tween()` + Ease enum 10 keyword 变体（Linear/Quad×3/Cubic×3/Back×3；缺 cubic-bezier/Elastic/Bounce/Custom）+ value_size max=4——够 keyframes 跑，触发判据见 milestones M2.5。
 
 ### 13.3 Transition
 
@@ -721,6 +722,8 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
   4. 后端 borrow_frame → MirrorPool 同步镜像；borrow_events → 事件路由 → 业务回调
 ```
 
+> 注：a–l 是主轴，`Stage::tick_and_render` 实际还在这些位置插入：`advance_cursor_blink`（a 后）、`process_text_input`（e 后，UTF-32 字符通道）、ListView `plan_visible`+`execute_visible`（f 前，虚拟化 slot 换绑）、`sync_control_visuals`（h 前，控件态→子 inline_override）、`measure_text_controls`（h 后）、`list::collect_heights`（ListView 高度缓存回写）。
+
 关键：
 - **flush 在 tick 前**：C# 投影层攒批的属性写（Style/Transform）在 tick 之前一次性推 Rust，与 set_input 合并过桥。见 [projection-layer.md](projection-layer.md) §2.1。
 - **rematch 在 solve 和 compute 之前**——伪类/class/style 变更当帧全部生效。class 切换驱动动画的下帧 rematch + 上帧 computed 做 transition 基线见 [public-api.md](public-api.md) §9.1。
@@ -747,7 +750,7 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
   LoomStageDriver (MonoBehaviour)  ← 瘦宿主：Unity 生命周期 + 资源 IO + 创建 Host/Backend
 ```
 
-- **LoomHost（引擎无关，`Runtime/Host/`）**：持 stage handle (IntPtr) + UIContext + LoomBackend。零 `using UnityEngine`。每帧驱动 `Step(dt)` 严格按 §16 五步序：(1) `backend.CollectInput(stage)` → set_input；(2) `UIContext.FlushPendingWrites()` 攒批过桥脏属性（StyleMirror + NodeTransform，标脏不即时）；(3) `loomgui_stage_tick` FFI；(4) `borrow_frame` FFI → `backend.SyncFrame(stage, framePtr, frameLen)`；(5) `borrow_events` FFI → EventDemuxer → EventBus typed `On<T>` 路由。资源 FFI 引擎中立（RegisterFont / SetImageSizes / SetFallbackFamilies）放此层。`borrow_frame` 的 FFI 调用归 LoomHost（产生引擎特定镜像对象的 FFI 仍归引擎无关驱动核心），backend 只消费 blob 做镜像。
+- **LoomHost(引擎无关,`Runtime/Host/`)**:持 stage handle (IntPtr) + UIContext + LoomBackend。零 `using UnityEngine`。每帧驱动 `Step(dt)` 严格按 §16 五步序:(1) `backend.CollectInput(stage)` → set_input;(2) `UIContext.FlushPendingWrites()` 攒批过桥脏属性（StyleMirror + NodeTransform，标脏不即时）；(2.5) `ctx.DrainPendingBinds()` ListView bind 排空；(3) `loomgui_stage_tick` FFI;(4) `borrow_frame` FFI → `backend.SyncFrame(stage, framePtr, frameLen)`;(5) `borrow_events` FFI → EventDemuxer → EventBus typed `On<T>` 路由。资源 FFI 引擎中立(RegisterFont / SetImageSizes / SetFallbackFamilies)放此层。`borrow_frame` 的 FFI 调用归 LoomHost(产生引擎特定镜像对象的 FFI 仍归引擎无关驱动核心),backend 只消费 blob 做镜像。
 - **LoomBackend（引擎无关抽象契约，`Runtime/Host/`）**：契约 = 2 个 abstract 方法——`CollectInput(stage)` / `SyncFrame(stage, framePtr, frameLen)`。`set_input` FFI 在 backend（采集引擎特定但 FFI 引擎中立，省一次交互）。资源对象上传（如 Texture2D 上传 atlas 页）是引擎特定实现细节，不进入抽象契约（由 `UnityLoomBackend` 内部方法如 `InitSprites`/`SyncFontAtlas` 承担）。
 - **UnityLoomBackend : LoomBackend**：持 MirrorPool + MaterialManager + NativeHostManager + SpriteResolver + InputCollector（零改复用，从退役的 LoomStage 搬过来）。NativeHost（GameObject 绑定 3D 模型）作为 UnityLoomBackend 额外方法，不进通用契约（Unity 专属概念）。
 - **LoomStageDriver（Unity MonoBehaviour，瘦宿主）**：Awake 创建 UnityLoomBackend（注入 Unity 组件）→ `new LoomHost(designSize, backend)` → 读 .ttf/atlas 喂 `host.RegisterFont`/资源 → `ctx.LoadPackage`。Update 调 `host.Step(Time.unscaledDeltaTime)`。保留 Unity 特定（相机 / safeArea / 输入钩子 / 设计分辨率 / NativeHost 根 transform）。
