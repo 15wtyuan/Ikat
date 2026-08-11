@@ -10,6 +10,8 @@ use std::sync::Arc;
 
 use ttf_parser::Face;
 
+use crate::scene::node::NodeId;
+
 /// CSS `line-height: normal` 的渲染倍数。
 ///
 /// 不用字体的自然行高（ascent - descent + line_gap）——它因字体而异且常偏小，
@@ -89,6 +91,27 @@ pub struct RichImagePlacement {
     pub h: f32,
 }
 
+/// 单个 input `RichRun` 在某行的命中矩形（content 相对坐标，与 glyph 同坐标系）。
+///
+/// 命中测试（spec §10）用它把 rich-text-block 内的点细化到 source inline 节点
+/// （span/TextNode/image）。跨行 run 拆多条 rect（每行一条）；image run 直接用
+/// `RichImagePlacement`。key 粒度 = input `RichRun`（不是渲染层合并后的 `GlyphRun`）——
+/// 同 style 相邻 run 渲染合并进一个 GlyphRun，但命中须保留各 run 独立 source。
+/// 非序列化：rich-text 运行时产物（同 `RichRun`，不进 pkg.bin）。
+#[derive(Debug, Clone)]
+pub struct RichRunRect {
+    /// 左上角 x（已含 text-align 偏移）。
+    pub x: f32,
+    /// 左上角 y（= 所在行的行顶）。
+    pub y: f32,
+    /// 该 run 在本行的宽（glyph advance 跨度）。
+    pub w: f32,
+    /// 该 run 所在行的行高（命中垂直覆盖整行）。
+    pub h: f32,
+    /// 产此 rect 的 input `RichRun.source`（inline 节点 NodeId）。
+    pub source: NodeId,
+}
+
 /// 文本布局结果（SOA 三表：lines/runs/glyphs）。
 #[derive(Debug, Clone)]
 pub struct TextLayout {
@@ -97,6 +120,9 @@ pub struct TextLayout {
     pub lines: Vec<Line>,
     /// 行内图位置（measure_rich_text 填充，measure_text 为空）。
     pub images: Vec<RichImagePlacement>,
+    /// 每 input `RichRun` 每行的命中矩形（measure_rich_text 填充；measure_text 为空，
+    /// plain TextNode 整块即命中目标，无需细化）。见 `RichRunRect`。
+    pub run_rects: Vec<RichRunRect>,
 }
 
 /// 封装一个 ttf 字体（进程级单字体，无 fallback）。
@@ -623,6 +649,7 @@ pub fn measure_text(
         text_height,
         lines: out_lines,
         images: Vec::new(),
+        run_rects: Vec::new(),
     }
 }
 
@@ -663,6 +690,8 @@ pub fn measure_rich_text(
     };
 
     let mut out_images: Vec<RichImagePlacement> = Vec::new();
+    // 命中 rect 累加器（每 input run 每行一条）。见 `RichRunRect`。
+    let mut run_rects: Vec<RichRunRect> = Vec::new();
 
     // 1. 扁平 token 流（token = 子串 + 所属 run 索引 + 宽度 + 是否强制换行）。
     //    CJK 逐字、Latin 逐词（空白分词）。用 char_indices 取字节范围切片（非 unsafe）。
@@ -806,6 +835,11 @@ pub fn measure_rich_text(
         let mut prev: Option<(ttf_parser::GlyphId, &Font)> = None;
         // 记本行 image 起点：text-align 偏移时连同 image 一起平移（image 无行号，靠区间定位）。
         let img_start = out_images.len();
+        // 命中 rect 累加器（本行）：text 按 input run_idx 记 x 跨度（pre-dx），image 记完整 rect。
+        // key=run_idx 而非 source——同一 source（如 span 多 TextNode 子）的多个 run 仍独立，
+        // 保留 span 内夹 image 时的命中粒度（左 text / image / 右 text 三段不合并）。
+        let mut text_extents: Vec<(usize, f32, f32)> = Vec::new(); // (run_idx, x0, x1)
+        let mut img_extents: Vec<(usize, f32, f32, f32, f32)> = Vec::new(); // (run_idx, x, y, w, h)
         for &ti in line_toks {
             let r = &runs[tokens[ti].run_idx];
             match &r.kind {
@@ -848,6 +882,22 @@ pub fn measure_rich_text(
                         });
                         pen_x += adv;
                         prev = Some((gid, f));
+                    }
+                    // 命中 rect：记本 run 在本行的 x 跨度（pre-align-dx，末尾统一加 dx）。
+                    // 渲染层下方会把同 style 相邻 run 合并进一个 GlyphRun，但这里按 input
+                    // run_idx 独立记账——保留命中粒度（点落左 run → 其 source，右 run → 其 source）。
+                    if let (Some(first), Some(last)) = (glyphs.first(), glyphs.last()) {
+                        let (x0, x1) = (first.x, last.x + last.advance);
+                        match text_extents
+                            .iter_mut()
+                            .find(|(ri, _, _)| *ri == tokens[ti].run_idx)
+                        {
+                            Some(slot) => {
+                                slot.1 = slot.1.min(x0);
+                                slot.2 = slot.2.max(x1);
+                            }
+                            None => text_extents.push((tokens[ti].run_idx, x0, x1)),
+                        }
                     }
                     // 同 run 相邻 token 合并（per-run 样式一致）；否则新 run。
                     let merged = runs_out.last_mut().filter(|gr: &&mut GlyphRun| {
@@ -898,6 +948,8 @@ pub fn measure_rich_text(
                         w: img_w,
                         h: img_h,
                     });
+                    // 命中 rect：image run 直接用 placement（pre-dx，末尾统一加 dx）。
+                    img_extents.push((tokens[ti].run_idx, pen_x, y + y_top, img_w, img_h));
                     pen_x += img_w;
                 }
             }
@@ -925,6 +977,26 @@ pub fn measure_rich_text(
                 img.x += dx;
             }
         }
+        // 推本行 run_rects（text + image），dx 已统一应用。source 取 input run 的 source
+        // （span 子 TextNode → span.id；rich-text-block 直接 TextNode 子 → TextNode.id）。
+        for (run_idx, x0, x1) in text_extents {
+            run_rects.push(RichRunRect {
+                x: x0 + dx,
+                y,
+                w: (x1 - x0).max(0.0),
+                h,
+                source: runs[run_idx].source,
+            });
+        }
+        for (run_idx, ix, iy, iw, ih) in img_extents {
+            run_rects.push(RichRunRect {
+                x: ix + dx,
+                y: iy,
+                w: iw,
+                h: ih,
+                source: runs[run_idx].source,
+            });
+        }
         out_lines.push(Line {
             y,
             height: h,
@@ -942,6 +1014,7 @@ pub fn measure_rich_text(
         text_height,
         lines: out_lines,
         images: out_images,
+        run_rects,
     }
 }
 
@@ -1953,6 +2026,171 @@ mod tests {
         assert_eq!(glyphs[1].codepoint, '中' as u32);
         assert_eq!(glyphs[1].font_id, 1, "中文用回退字体 id");
         assert_ne!(glyphs[1].glyph_id, 0, "中 走回退应得真字形，非 .notdef");
+    }
+
+    /// `run_rects`：单 run 跨行换行 → 拆 ≥2 rect（每行一个），source 全等于输入 run 的
+    /// source，几何 sane（w/h>0、y 落在行顶、y+h ≤ text_height）。见 spec §6/§10。
+    #[test]
+    fn rich_run_rects_populated_for_wrapped_text() {
+        let font = match test_font() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip: no test font");
+                return;
+            }
+        };
+        // "aaaa bbbb cccc" @24px in 30px → 换行（与 rich_wraps_on_max_width 同输入）。
+        let runs = vec![RichRun::text(
+            "aaaa bbbb cccc",
+            [1.0, 1.0, 1.0, 1.0],
+            0,
+            24,
+            NodeId(5),
+        )];
+        let lay = measure_rich_text(
+            &runs,
+            Some(30.0),
+            1.2,
+            TextAlign::Left,
+            &FontStack::single(&font, 0),
+        );
+        assert!(
+            lay.lines.len() >= 2,
+            "前置：窄宽应换行 ≥2 行，实际 {}",
+            lay.lines.len()
+        );
+        assert!(!lay.run_rects.is_empty(), "run_rects 应非空");
+        // 跨行单 run → ≥2 rect（每行一个）。
+        assert!(
+            lay.run_rects.len() >= 2,
+            "跨行 run 应拆 ≥2 rect，实际 {}",
+            lay.run_rects.len()
+        );
+        // 所有 rect 的 source = 输入 run 的 source。
+        for r in &lay.run_rects {
+            assert_eq!(r.source, NodeId(5), "rect source 应为输入 run 的 source");
+            assert!(r.w > 0.0, "rect 宽 > 0（got {}）", r.w);
+            assert!(r.h > 0.0, "rect 高 > 0（got {}）", r.h);
+            assert!(r.x >= -0.01, "rect x 非负（left align 起于 0）");
+            assert!(
+                r.y >= -0.01 && r.y + r.h <= lay.text_height + 0.5,
+                "rect y={} h={} 应落在 [0, text_height={}]",
+                r.y,
+                r.h,
+                lay.text_height
+            );
+        }
+        // 跨行 rect 落在不同行 → 至少 2 个不同的 y。
+        let distinct_ys: std::collections::BTreeSet<u32> =
+            lay.run_rects.iter().map(|r| r.y.to_bits()).collect();
+        assert!(
+            distinct_ys.len() >= 2,
+            "跨行 run 的 rect 应跨 ≥2 个不同 y（行），实际 {}",
+            distinct_ys.len()
+        );
+    }
+
+    /// `run_rects`：image run → rect 直接用 RichImagePlacement（x/y/w/h），source 为 image run
+    /// 的 source。验证 w/h 精确匹配、y 等于 placement.y（baseline 对齐已烤进）。
+    #[test]
+    fn rich_run_rects_image_uses_placement() {
+        let font = match test_font() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip: no test font");
+                return;
+            }
+        };
+        let runs = vec![RichRun {
+            kind: RichKind::Image {
+                src: "icon".into(),
+                w: 20.0,
+                h: 16.0,
+                valign: crate::text::rich::RichVAlign::default(),
+            },
+            color: [1.0; 4],
+            font_id: 0,
+            size_px: 24,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+            link_id: None,
+            source: NodeId(9),
+        }];
+        let lay = measure_rich_text(
+            &runs,
+            Some(1000.0),
+            1.2,
+            TextAlign::Left,
+            &FontStack::single(&font, 0),
+        );
+        assert_eq!(lay.run_rects.len(), 1, "单个 image run → 1 rect");
+        assert_eq!(lay.images.len(), 1, "前置：应有 1 个 image placement");
+        let r = &lay.run_rects[0];
+        assert_eq!(r.source, NodeId(9), "image rect source = image run source");
+        assert!(
+            (r.w - 20.0).abs() < 0.01,
+            "image rect w 应=20（got {}）",
+            r.w
+        );
+        assert!(
+            (r.h - 16.0).abs() < 0.01,
+            "image rect h 应=16（got {}）",
+            r.h
+        );
+        assert!(
+            (r.x - lay.images[0].x).abs() < 0.01,
+            "image rect x 应=placement.x"
+        );
+        assert!(
+            (r.y - lay.images[0].y).abs() < 0.01,
+            "image rect y 应=placement.y（baseline 对齐烤进）"
+        );
+    }
+
+    /// `run_rects`：同行多 run（不同 source）→ 各自独立 rect（即使 style 相同被渲染合并
+    /// 进一个 GlyphRun，命中粒度仍按 input run 保留）。source 一一对应。
+    #[test]
+    fn rich_run_rects_multi_run_keep_per_source_granularity() {
+        let font = match test_font() {
+            Some(f) => f,
+            None => {
+                eprintln!("skip: no test font");
+                return;
+            }
+        };
+        // 两个同色同字号 run（不同 source），不换行 → 同行相邻。
+        // 渲染层会因 style 相同把它们合并进一个 GlyphRun，但 run_rects 必须保留两条
+        // （命中点落在左半 → source=2，右半 → source=7）。
+        let runs = vec![
+            RichRun::text("left", [0.0, 0.0, 0.0, 1.0], 0, 24, NodeId(2)),
+            RichRun::text("right", [0.0, 0.0, 0.0, 1.0], 0, 24, NodeId(7)),
+        ];
+        let lay = measure_rich_text(
+            &runs,
+            Some(1000.0),
+            1.2,
+            TextAlign::Left,
+            &FontStack::single(&font, 0),
+        );
+        assert_eq!(lay.lines.len(), 1, "前置：宽约束单行");
+        assert_eq!(
+            lay.run_rects.len(),
+            2,
+            "两个 input run → 2 rect（即便渲染合并）"
+        );
+        // source 一一对应，且按 x 升序（left 在前）。
+        let mut rects = lay.run_rects.clone();
+        rects.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap());
+        assert_eq!(rects[0].source, NodeId(2), "左 rect source=left run");
+        assert_eq!(rects[1].source, NodeId(7), "右 rect source=right run");
+        // 两 rect 在 x 上衔接（不重叠、不空隙）：left.x1 ≈ right.x0。
+        assert!(
+            (rects[0].x + rects[0].w - rects[1].x).abs() < 0.5,
+            "相邻 run rect 应 x 衔接：left.x+w={} right.x={}",
+            rects[0].x + rects[0].w,
+            rects[1].x
+        );
     }
 
     /// 无回退时：主字体缺字 → .notdef（glyph_id=0），font_id 仍主字体。退化行为锁定。
