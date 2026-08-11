@@ -3,9 +3,14 @@
 //! 富文本是一个叶子 NodeKind（非围栏标签），inline flow 封装在其 measure/build 里。
 //! per-run 多色多字号（v1.6 atlas key 已含 font_id/size_px，per-run color 走 per-vertex）。
 //! 简化模型：扁平 run 流 + 单遍断行 + max-baseline-per-line（非完整 CSS IFC）。
+//!
+//! Runs 是纯运行时产物：由 inline-flow 编译器（T4）在 solve/measure 阶段从 inline 子树现造，
+//! 不进 pkg.bin（v1.7 RichText 暗号序列化路径已随 Spec-2 退休）。故本模块所有类型不再 Serde。
+
+use crate::scene::node::NodeId;
 
 /// 加粗。MVP 合成（build 期几何加粗，非字体变体）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum RichWeight {
     #[default]
@@ -25,7 +30,7 @@ pub fn weight_from_font_weight(w: u16) -> RichWeight {
 }
 
 /// 斜体。MVP 合成（build 期 quad skew）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum RichStyle {
     #[default]
@@ -34,7 +39,7 @@ pub enum RichStyle {
 }
 
 /// 装饰线位标记（可组合：underline | line-through | overline）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(transparent)]
 pub struct TextDecoLines(pub u8);
 impl TextDecoLines {
@@ -54,7 +59,7 @@ impl TextDecoLines {
 }
 
 /// 装饰线样式（CSS text-decoration-style）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum TextDecoStyle {
     #[default]
@@ -65,7 +70,7 @@ pub enum TextDecoStyle {
 }
 
 /// 装饰线（v1.8：CSS3 text-decoration shorthand）。
-#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct RichDeco {
     pub lines: TextDecoLines,
     pub style: TextDecoStyle,
@@ -74,7 +79,7 @@ pub struct RichDeco {
 }
 
 /// 行内图垂直对齐（简化：baseline 默认底边贴基线）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum RichVAlign {
     #[default]
@@ -85,7 +90,7 @@ pub enum RichVAlign {
 }
 
 /// 一段同样式富文本。per-glyph 多色靠多个相邻 run（非 per-glyph 字段）。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct RichRun {
     pub kind: RichKind,
     pub color: [f32; 4],
@@ -96,9 +101,12 @@ pub struct RichRun {
     pub deco: RichDeco,
     /// 属于某超链接（`<a>` 内）；命中查 fragment 矩形时返此 id。None=非链接。
     pub link_id: Option<u32>,
+    /// 本 run 编译来源的 inline 节点（TextNode/TextElement/span/...）。
+    /// 命中测试用它把 span/TextNode 级事件路由回原节点（见 main-design 文本模型）。
+    pub source: NodeId,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub enum RichKind {
     Text {
         text: String,
@@ -114,7 +122,14 @@ pub enum RichKind {
 
 impl RichRun {
     /// 纯文本 run 的便捷构造（继承 base 色/字体）。
-    pub fn text(text: impl Into<String>, color: [f32; 4], font_id: u32, size_px: u16) -> Self {
+    /// `source` = 编译此 run 的 inline 节点 NodeId（编译器总知道，命中路由用）。
+    pub fn text(
+        text: impl Into<String>,
+        color: [f32; 4],
+        font_id: u32,
+        size_px: u16,
+        source: NodeId,
+    ) -> Self {
         RichRun {
             kind: RichKind::Text { text: text.into() },
             color,
@@ -124,6 +139,7 @@ impl RichRun {
             style: RichStyle::Normal,
             deco: RichDeco::default(),
             link_id: None,
+            source,
         }
     }
 }
@@ -153,62 +169,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rich_run_serde_roundtrip() {
+    fn rich_run_carries_source_node() {
         let r = RichRun {
             kind: RichKind::Text { text: "hi".into() },
-            color: [1.0, 0.0, 0.0, 1.0],
-            font_id: 2,
-            size_px: 24,
-            weight: RichWeight::Bold,
-            style: RichStyle::Italic,
-            deco: RichDeco {
-                lines: TextDecoLines::UNDERLINE,
-                style: TextDecoStyle::Solid,
-                color: None,
-                thickness: None,
-            },
-            link_id: Some(7),
-        };
-        let bytes = bincode::serialize(&r).unwrap();
-        let back: RichRun = bincode::deserialize(&bytes).unwrap();
-        assert_eq!(back.font_id, 2);
-        assert_eq!(back.weight, RichWeight::Bold);
-        assert_eq!(back.link_id, Some(7));
-    }
-
-    #[test]
-    fn rich_run_image_serde_roundtrip() {
-        let r = RichRun {
-            kind: RichKind::Image {
-                src: "icons/emote.png".into(),
-                w: 16.0,
-                h: 16.0,
-                valign: RichVAlign::Bottom,
-            },
-            color: [1.0, 1.0, 1.0, 1.0],
+            color: [0., 0., 0., 1.],
             font_id: 0,
-            size_px: 16,
+            size_px: 14,
             weight: RichWeight::Normal,
             style: RichStyle::Normal,
             deco: RichDeco::default(),
             link_id: None,
+            source: NodeId(7),
         };
-        let bytes = bincode::serialize(&r).unwrap();
-        let back: RichRun = bincode::deserialize(&bytes).unwrap();
-        match &back.kind {
-            RichKind::Image { src, w, h, valign } => {
-                assert_eq!(src, "icons/emote.png");
-                assert_eq!(*w, 16.0);
-                assert_eq!(*h, 16.0);
-                assert_eq!(*valign, RichVAlign::Bottom);
-            }
-            RichKind::Text { .. } => panic!("expected Image"),
-        }
+        assert_eq!(r.source, NodeId(7));
     }
 
     #[test]
     fn rich_text_helper_constructs_text_run() {
-        let r = RichRun::text("hello", [0.0, 0.0, 0.0, 1.0], 1, 14);
+        let r = RichRun::text("hello", [0.0, 0.0, 0.0, 1.0], 1, 14, NodeId(3));
         match &r.kind {
             RichKind::Text { text } => assert_eq!(text, "hello"),
             RichKind::Image { .. } => panic!("expected Text"),
@@ -216,28 +194,6 @@ mod tests {
         assert_eq!(r.font_id, 1);
         assert_eq!(r.size_px, 14);
         assert_eq!(r.weight, RichWeight::Normal);
-    }
-
-    /// runs Vec<RichRun> 的整段 bincode 序列化往返——验证 pkg 序列化通道。
-    #[test]
-    fn runs_vec_serde_roundtrip() {
-        let runs = vec![
-            RichRun::text("a", [1.0, 0.0, 0.0, 1.0], 0, 12),
-            RichRun {
-                kind: RichKind::Text { text: "b".into() },
-                color: [0.0, 1.0, 0.0, 1.0],
-                font_id: 0,
-                size_px: 12,
-                weight: RichWeight::Bold,
-                style: RichStyle::Normal,
-                deco: RichDeco::default(),
-                link_id: Some(3),
-            },
-        ];
-        let bytes = bincode::serialize(&runs).unwrap();
-        let back: Vec<RichRun> = bincode::deserialize(&bytes).unwrap();
-        assert_eq!(back.len(), 2);
-        assert_eq!(back[1].link_id, Some(3));
-        assert_eq!(back[1].weight, RichWeight::Bold);
+        assert_eq!(r.source, NodeId(3));
     }
 }

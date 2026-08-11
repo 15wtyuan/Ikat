@@ -8,7 +8,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use serde::Serialize;
 use ttf_parser::Face;
 
 /// CSS `line-height: normal` 的渲染倍数。
@@ -21,7 +20,7 @@ use ttf_parser::Face;
 const NORMAL_LINE_HEIGHT: f32 = 1.31;
 
 /// 单个字形。坐标为绝对坐标（pen 位 = glyph.x/y + bearing）。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct Glyph {
     pub glyph_id: u16,
     /// 该字形实际来源字体的稳定 id（atlas key 用）。
@@ -47,7 +46,7 @@ pub struct Glyph {
 
 /// 单 run：一组连续字形 + 该 run 的完整样式。统一 plain 与 rich 走同一条
 /// measure→build 链：plain text = 单 run（默认色/Normal 样式），rich text = 多 run。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct GlyphRun {
     pub font_size: f32,
     /// 字体 id（atlas key + image_path 合成用）。MVP 单字体：所有 run 填
@@ -65,7 +64,7 @@ pub struct GlyphRun {
 }
 
 /// 一行文本。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct Line {
     /// 行顶 y（相对布局原点）。
     pub y: f32,
@@ -79,7 +78,7 @@ pub struct Line {
 }
 
 /// 行内图位置（measure 期记，build 期产 image quad）。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct RichImagePlacement {
     pub src: String,
     /// 左上角 x（content 相对坐标，align 后）。
@@ -91,7 +90,7 @@ pub struct RichImagePlacement {
 }
 
 /// 文本布局结果（SOA 三表：lines/runs/glyphs）。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct TextLayout {
     pub text_width: f32,
     pub text_height: f32,
@@ -968,6 +967,7 @@ fn strut_height(line_height: f32, size: f32, _ascent: f32, _descent: f32, _line_
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scene::node::NodeId;
     use crate::style::resolved::TextAlign;
     use crate::text::rich::{
         RichDeco, RichKind, RichRun, RichStyle, RichWeight, TextDecoLines, TextDecoStyle,
@@ -1646,6 +1646,7 @@ mod tests {
                 style: RichStyle::Normal,
                 deco: RichDeco::default(),
                 link_id: None,
+                source: NodeId(0),
             },
             RichRun {
                 kind: RichKind::Text {
@@ -1658,6 +1659,7 @@ mod tests {
                 style: RichStyle::Normal,
                 deco: RichDeco::default(),
                 link_id: None,
+                source: NodeId(0),
             },
         ];
         let lay = measure_rich_text(
@@ -1695,6 +1697,7 @@ mod tests {
             style: RichStyle::Normal,
             deco: RichDeco::default(),
             link_id: None,
+            source: NodeId(0),
         }];
         // 窄宽度强制换行（拉丁按词）。
         let lay = measure_rich_text(
@@ -1732,6 +1735,7 @@ mod tests {
             style: RichStyle::Normal,
             deco: RichDeco::default(),
             link_id: None,
+            source: NodeId(0),
         }];
         // 极窄宽度 → CJK 每字独占一行（4 字 ≥ 4 行）。
         let lay = measure_rich_text(
@@ -1770,6 +1774,7 @@ mod tests {
                 style: RichStyle::Normal,
                 deco: RichDeco::default(),
                 link_id: None,
+                source: NodeId(0),
             },
             RichRun {
                 kind: RichKind::Text { text: "\n".into() },
@@ -1780,6 +1785,7 @@ mod tests {
                 style: RichStyle::Normal,
                 deco: RichDeco::default(),
                 link_id: None,
+                source: NodeId(0),
             },
             RichRun {
                 kind: RichKind::Text {
@@ -1792,6 +1798,7 @@ mod tests {
                 style: RichStyle::Normal,
                 deco: RichDeco::default(),
                 link_id: None,
+                source: NodeId(0),
             },
         ];
         let lay = measure_rich_text(
@@ -1830,6 +1837,7 @@ mod tests {
                 thickness: None,
             },
             link_id: Some(3),
+            source: NodeId(0),
         }];
         let lay = measure_rich_text(
             &runs,
@@ -1868,6 +1876,7 @@ mod tests {
             style: RichStyle::Normal,
             deco: RichDeco::default(),
             link_id: None,
+            source: NodeId(0),
         }];
         let stack = FontStack::single(&font, 0);
         // 容器远宽于文本（1000 vs ~20px）→ center/right 应把字形推到右侧。
