@@ -2,6 +2,7 @@
 
 pub mod atlas;
 pub mod font_effect;
+pub mod hit_test;
 pub mod layout;
 pub mod rich;
 pub mod rich_compile;

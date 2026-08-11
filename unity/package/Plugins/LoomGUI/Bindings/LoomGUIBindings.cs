@@ -1008,6 +1008,26 @@ namespace LoomGUI.Bindings
         [DllImport(__DllName, EntryPoint = "loomgui_list_scroll_to", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_list_scroll_to(StageHandle* h, uint node, int index, byte behavior);
 
+        /// <summary>
+        ///  Rich-text-block 子节点命中细化（spec §10）。
+        ///
+        ///  在 [`loomgui_stage_get_node_layout_rect`] / [`loomgui_stage_is_pointer_on_ui`] 已定出命中
+        ///  目标是 rich-text-block 容器之后，用本函数把容器内的点细化到源 inline 节点
+        ///  （span / TextNode / Image），供后端 firing span 级点击事件。
+        ///
+        ///  - `node_id`：rich-text-block 容器（须 `rich_text_block=true`，且 solve 已为其填
+        ///    `scene.text_layouts[node_id]`）。
+        ///  - `x`/`y`：相对该容器 border-box 左上的 block-local 点（与 hit_test world_to_local 后
+        ///    的本地坐标同空间）。
+        ///  - `out_source`：命中时写 source inline 节点的 NodeId(u32)；未命中不写。null 安全。
+        ///
+        ///  返 `true` = 命中（`*out_source` 已写）；`false` = 未命中 / null 句柄 / 无 scene /
+        ///  `node_id` 非 rich-text-block / 无 layout（`*out_source` 未动）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_hit_test_rich", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        [return: MarshalAs(UnmanagedType.U1)]
+        internal static extern bool loomgui_hit_test_rich(StageHandle* h, uint node_id, float x, float y, uint* out_source);
+
 
     }
 
