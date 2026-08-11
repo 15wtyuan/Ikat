@@ -83,11 +83,13 @@ enum MeasureContext {
     /// RichText 叶子（v1.7）：inline flow 封装在 measure_rich_text。
     /// runs owned（parse 期产的扁平 run 流，含 per-run 样式）。
     /// `align` 传入 measure_rich_text（每行容器内偏移）；`nowrap` 暂未接线（rich 不支持）。
-    #[allow(dead_code)]
     RichText {
         runs: Vec<crate::text::rich::RichRun>,
         line_height: f32,
         align: TextAlign,
+        /// 暂未接线：rich 还未支持 white-space:nowrap。先携值（来自节点 style），待 measure_rich_text
+        /// 加 nowrap 路径后此字段即被读，避免加/删字段的连带改动。
+        #[allow(dead_code)]
         nowrap: bool,
         /// 节点的 font_family。None 表示用 FontTable 的 default。
         family: Option<String>,
@@ -156,107 +158,134 @@ pub fn solve(
         // TextField/TextArea/NumberField 是控件叶子（value/placeholder 存 ControlState，
         // 非 text_contents），须装 Text measure——否则 taffy content=0、高度只剩 padding，
         // 文字不参与布局（pivot 后空 div 形态暴露：高度塌成 padding-only）。
-        let ctx: Option<MeasureContext> = match &node.kind {
-            NodeKind::TextNode => {
-                let s = &node.style;
-                Some(MeasureContext::Text {
-                    content: scene.text_contents.get(&id).cloned().unwrap_or_default(),
-                    font_size: s.font_size,
-                    line_height: s.line_height,
-                    letter_spacing: s.letter_spacing,
-                    align: s.text_align,
-                    nowrap: s.white_space_nowrap,
-                    family: s.font_family.clone(),
-                    color: s.color,
-                    font_weight: s.font_weight,
-                    h_inset: lp(s.taffy_style.padding.left)
-                        + lp(s.taffy_style.padding.right)
-                        + lp(s.taffy_style.border.left)
-                        + lp(s.taffy_style.border.right),
-                })
-            }
-            NodeKind::TextField | NodeKind::TextArea | NodeKind::NumberField => {
-                let s = &node.style;
-                // value 优先，空时用 placeholder（与 render 显示一致）；measure 用显示文本
-                // 算 intrinsic size，taffy 再加 padding/border → border-box 高度含文字行高。
-                // 追踪 is_placeholder：颜色用占位色（placeholder_render_color），与 render 一致
-                // ——颜色在此烘焙进缓存 TextLayout 的 per-run 色，render 复用缓存，故两处须同色。
-                let (content, is_placeholder) = scene
-                    .controls
-                    .get(id)
-                    .and_then(|cs| match cs {
-                        crate::scene::node::ControlState::TextField(e)
-                        | crate::scene::node::ControlState::TextArea(e) => {
-                            let dv = crate::scene::control::display_value(e).0;
-                            if dv.is_empty() {
-                                Some((e.placeholder.clone(), true))
-                            } else {
-                                Some((dv, false))
-                            }
-                        }
-                        crate::scene::node::ControlState::NumberField { edit, .. } => {
-                            let dv = crate::scene::control::display_value(edit).0;
-                            if dv.is_empty() {
-                                Some((edit.placeholder.clone(), true))
-                            } else {
-                                Some((dv, false))
-                            }
-                        }
-                        _ => None,
+        //
+        // rich-text-block 容器：编译 inline 子树成 RichRun，作 RichText 叶子测——inline
+        // 子折进父的单段 inline flow（不递归进 taffy）。build 下方 children_ids 对
+        // rich_text_block 返空 Vec 实现「不递归」。design §7。
+        let ctx: Option<MeasureContext> = if node.rich_text_block {
+            let s = &node.style;
+            let runs = crate::text::rich_compile::compile_rich_runs(scene, id, image_sizes);
+            Some(MeasureContext::RichText {
+                runs,
+                line_height: s.line_height,
+                align: s.text_align,
+                nowrap: s.white_space_nowrap,
+                family: s.font_family.clone(),
+                h_inset: lp(s.taffy_style.padding.left)
+                    + lp(s.taffy_style.padding.right)
+                    + lp(s.taffy_style.border.left)
+                    + lp(s.taffy_style.border.right),
+            })
+        } else {
+            match &node.kind {
+                NodeKind::TextNode => {
+                    let s = &node.style;
+                    Some(MeasureContext::Text {
+                        content: scene.text_contents.get(&id).cloned().unwrap_or_default(),
+                        font_size: s.font_size,
+                        line_height: s.line_height,
+                        letter_spacing: s.letter_spacing,
+                        align: s.text_align,
+                        nowrap: s.white_space_nowrap,
+                        family: s.font_family.clone(),
+                        color: s.color,
+                        font_weight: s.font_weight,
+                        h_inset: lp(s.taffy_style.padding.left)
+                            + lp(s.taffy_style.padding.right)
+                            + lp(s.taffy_style.border.left)
+                            + lp(s.taffy_style.border.right),
                     })
-                    .unwrap_or_default();
-                Some(MeasureContext::Text {
-                    content,
-                    font_size: s.font_size,
-                    line_height: s.line_height,
-                    letter_spacing: s.letter_spacing,
-                    align: s.text_align,
-                    nowrap: s.white_space_nowrap,
-                    family: s.font_family.clone(),
-                    color: if is_placeholder {
-                        crate::style::resolved::placeholder_render_color(
-                            s.placeholder_color,
-                            s.color,
-                        )
-                    } else {
-                        s.color
-                    },
-                    font_weight: s.font_weight,
-                    h_inset: lp(s.taffy_style.padding.left)
-                        + lp(s.taffy_style.padding.right)
-                        + lp(s.taffy_style.border.left)
-                        + lp(s.taffy_style.border.right),
-                })
+                }
+                NodeKind::TextField | NodeKind::TextArea | NodeKind::NumberField => {
+                    let s = &node.style;
+                    // value 优先，空时用 placeholder（与 render 显示一致）；measure 用显示文本
+                    // 算 intrinsic size，taffy 再加 padding/border → border-box 高度含文字行高。
+                    // 追踪 is_placeholder：颜色用占位色（placeholder_render_color），与 render 一致
+                    // ——颜色在此烘焙进缓存 TextLayout 的 per-run 色，render 复用缓存，故两处须同色。
+                    let (content, is_placeholder) = scene
+                        .controls
+                        .get(id)
+                        .and_then(|cs| match cs {
+                            crate::scene::node::ControlState::TextField(e)
+                            | crate::scene::node::ControlState::TextArea(e) => {
+                                let dv = crate::scene::control::display_value(e).0;
+                                if dv.is_empty() {
+                                    Some((e.placeholder.clone(), true))
+                                } else {
+                                    Some((dv, false))
+                                }
+                            }
+                            crate::scene::node::ControlState::NumberField { edit, .. } => {
+                                let dv = crate::scene::control::display_value(edit).0;
+                                if dv.is_empty() {
+                                    Some((edit.placeholder.clone(), true))
+                                } else {
+                                    Some((dv, false))
+                                }
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    Some(MeasureContext::Text {
+                        content,
+                        font_size: s.font_size,
+                        line_height: s.line_height,
+                        letter_spacing: s.letter_spacing,
+                        align: s.text_align,
+                        nowrap: s.white_space_nowrap,
+                        family: s.font_family.clone(),
+                        color: if is_placeholder {
+                            crate::style::resolved::placeholder_render_color(
+                                s.placeholder_color,
+                                s.color,
+                            )
+                        } else {
+                            s.color
+                        },
+                        font_weight: s.font_weight,
+                        h_inset: lp(s.taffy_style.padding.left)
+                            + lp(s.taffy_style.padding.right)
+                            + lp(s.taffy_style.border.left)
+                            + lp(s.taffy_style.border.right),
+                    })
+                }
+                NodeKind::Image => {
+                    // Look up real intrinsic dims via the node's image src (Spec-2 side table).
+                    // 借引用查 image_sizes——src 仅用于查表，无需每帧每图节点克隆 String。
+                    let src = scene.image_srcs.get(&id).map(String::as_str).unwrap_or("");
+                    let s = &node.style.taffy_style;
+                    let (iw, ih) = image_sizes
+                        .get(src)
+                        .filter(|(w, h)| *w != 0 && *h != 0)
+                        .map(|&(w, h)| (w as f32, h as f32))
+                        .unwrap_or((64.0, 64.0));
+                    Some(MeasureContext::Image {
+                        iw,
+                        ih,
+                        w_dim: s.size.width,
+                        h_dim: s.size.height,
+                    })
+                }
+                _ => None,
             }
-            NodeKind::Image => {
-                // Look up real intrinsic dims via the node's image src (Spec-2 side table).
-                // 借引用查 image_sizes——src 仅用于查表，无需每帧每图节点克隆 String。
-                let src = scene.image_srcs.get(&id).map(String::as_str).unwrap_or("");
-                let s = &node.style.taffy_style;
-                let (iw, ih) = image_sizes
-                    .get(src)
-                    .filter(|(w, h)| *w != 0 && *h != 0)
-                    .map(|&(w, h)| (w as f32, h as f32))
-                    .unwrap_or((64.0, 64.0));
-                Some(MeasureContext::Image {
-                    iw,
-                    ih,
-                    w_dim: s.size.width,
-                    h_dim: s.size.height,
-                })
-            }
-            _ => None,
         };
         // 递归子节点（先建子，再建父以便 new_with_children）。
         // 过滤纯空白 TextNode（HTML tag 间换行+缩进）——它们不应成 flex item 撑开父容器
         // 主轴或挤压兄弟（HTML 标准空白折叠行为）。被过滤的节点 taffy_ids[id.index()]
         // 保持 None，write_back 跳过、layout_rect 保持默认 0。
-        let children_ids: Vec<taffy::NodeId> = node
-            .children
-            .iter()
-            .filter(|c| !is_whitespace_only_text(scene, **c))
-            .map(|c| build(scene, tree, taffy_ids, *c, self_overflow, image_sizes))
-            .collect();
+        //
+        // rich-text-block：inline 子已被 compile_rich_runs 折进 RichText 叶子测，
+        // **不递归进 taffy**——它们的 taffy_ids 保持 None，write_back 跳过、layout_rect
+        // 保持默认 0（它们渲染进父 mesh，无独立 box；T7 render 消费 text_layouts[父]）。
+        let children_ids: Vec<taffy::NodeId> = if node.rich_text_block {
+            Vec::new()
+        } else {
+            node.children
+                .iter()
+                .filter(|c| !is_whitespace_only_text(scene, **c))
+                .map(|c| build(scene, tree, taffy_ids, *c, self_overflow, image_sizes))
+                .collect()
+        };
 
         let tid = if let Some(mctx) = ctx {
             // min-width=0 让 flex-shrink 生效：taffy 默认 min-size:auto 会把 measure(None) 的
@@ -469,15 +498,53 @@ pub fn solve(
                         let stack = fonts.stack_for(family.as_deref());
                         // 同 Text：content area = known.width（border-box）- h_inset。
                         let mw = known.width.map(|w| (w - *h_inset).max(0.0));
-                        let layout = crate::text::layout::measure_rich_text(
+                        let sid_opt = taffy_to_scene.get(&nid).copied();
+                        // 指纹 memo（坑 186 同源）：runs 每帧现编译（便宜，O(inline 子)），
+                        // 算指纹命中缓存跳过贵的 measure_rich_text（shaping）。span 换色/换内容
+                        // → runs 变 → fp 变 → 自动 miss 重测（不依赖 dirty_text 传播）。
+                        // 两槽 intrinsic/constrained（同 Text）：mw=None 走 intrinsic，
+                        // mw=Some 走 constrained；约束宽量化进 fp 避亚像素抖动 thrash。
+                        let fp = crate::text::layout::rich_text_fingerprint(
                             runs,
-                            mw,
                             *line_height,
                             *align,
-                            &stack,
+                            family.as_deref(),
+                            mw,
                         );
-                        // 存 TextLayout 供 render 复用（同 Text 的 Some 优先策略）。
-                        if let Some(sid) = taffy_to_scene.get(&nid) {
+                        let layout = if let Some(sid) = sid_opt {
+                            let entry = measure_cache[sid.index()]
+                                .get_or_insert_with(crate::text::layout::TextMeasureCache::default);
+                            let slot = if mw.is_none() {
+                                &mut entry.intrinsic
+                            } else {
+                                &mut entry.constrained
+                            };
+                            if slot.as_ref().is_some_and(|(f, _)| *f == fp) {
+                                slot.as_ref().unwrap().1.clone()
+                            } else {
+                                let l = crate::text::layout::measure_rich_text(
+                                    runs,
+                                    mw,
+                                    *line_height,
+                                    *align,
+                                    &stack,
+                                );
+                                *slot = Some((fp, l.clone()));
+                                l
+                            }
+                        } else {
+                            // 无 scene 节点映射（边角）：不缓存，直接测。
+                            crate::text::layout::measure_rich_text(
+                                runs,
+                                mw,
+                                *line_height,
+                                *align,
+                                &stack,
+                            )
+                        };
+                        // render 槽：存 TextLayout 供 render 复用（同 Text 的 Some 优先策略：
+                        // 已存 Some 且本次 None 不覆盖；本次 Some 则覆盖）。
+                        if let Some(sid) = sid_opt {
                             let slot = &mut text_layouts[sid.index()];
                             if slot.is_none() || known.width.is_some() {
                                 *slot = Some(layout.clone());
@@ -945,6 +1012,144 @@ mod tests {
             "非空白 text 应正常测出尺寸，got w={} h={}",
             r.w,
             r.h
+        );
+    }
+
+    /// rich-text-block 容器在 solve 期折叠 inline 子为单段 inline flow：build() 编译 runs
+    /// → `MeasureContext::RichText` 叶子（子不递归进 taffy）→ measure 闭包走 RichText arm
+    /// 调 `measure_rich_text` → TextLayout 存 `scene.text_layouts[div]`。
+    ///
+    /// 验收：长 ASCII 文本在窄宽（100px）下换行 → text_height / layout_rect.h 反映多行
+    /// （远大于单行行高）；inline 子（TextNode）保持默认 layout_rect（无独立 box）。
+    /// T6 solve 折叠的核心契约。
+    #[test]
+    fn rich_text_block_measures_as_leaf_with_wrapping() {
+        // root(structural Container) > div(rich_text_block, explicit width 100) > TextNode
+        // 长文本。div 显式宽 100 → taffy 以 known.width=Some(100) 测 → measure_rich_text
+        // 换行 → 多行。作 root 固定尺寸叶子测不到约束宽（taffy 不重测固定尺寸），故
+        // 必须作子+显式宽驱动。
+        let mut div_style = ResolvedStyle::default();
+        div_style.taffy_style.size.width = Dimension::length(100.0);
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                div_style,
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(1),
+                NodeKind::TextNode,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                Some("The quick brown fox jumps over the lazy dog".into()),
+                None,
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        let div = scene.get(scene.roots[0]).unwrap().children[0];
+        scene.get_mut(div).unwrap().rich_text_block = true;
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (300.0, 1000.0), &empty_sizes());
+        let layout = scene.text_layouts[div.index()]
+            .as_ref()
+            .expect("rich-text-block solve 应填 text_layouts[div]");
+        // 单行行高（font 16 × NORMAL_LINE_HEIGHT 1.31 ≈ 21）。多行 text_height 远大于此。
+        let single_line_h = 16.0 * 1.31;
+        assert!(
+            layout.text_height > single_line_h * 2.0,
+            "rich text 应换行多行，text_height={:.1} 应 > 2×单行({:.1})",
+            layout.text_height,
+            single_line_h * 2.0
+        );
+        // layout_rect.h（taffy 解出的 border-box 高）= measure 返的 height，同样反映多行。
+        let r = &scene.get(div).unwrap().layout_rect;
+        assert!(
+            r.h > single_line_h * 2.0,
+            "div layout_rect.h={:.1} 应 > 2×单行({:.1})，反映多行换行",
+            r.h,
+            single_line_h * 2.0
+        );
+        // 折叠的 inline 子（TextNode）保持默认 layout_rect（不进 taffy，无独立 box；
+        // write_back 跳过 taffy_ids=None 的节点）。
+        let tn = scene.get(div).unwrap().children[0];
+        let tn_rect = scene.get(tn).unwrap().layout_rect;
+        assert!(
+            tn_rect.w.abs() < 0.1 && tn_rect.h.abs() < 0.1,
+            "folded inline child 应无独立 layout_rect（保持默认 0），got {:?}",
+            tn_rect
+        );
+    }
+
+    /// 回归守卫：rich_text_block=false 的 Container 仍走 `new_with_children`，
+    /// 子 TextNode 正常进 taffy 测 + 走 Text measure arm（不被 rich 分支误伤）。
+    /// 与上一个 rich 测试互为正反：rich 折叠 / 非 rich 正常递归。
+    #[test]
+    fn non_rich_text_container_recurses_children_into_taffy() {
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::TextNode,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                Some("Buy".into()),
+                None,
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        // rich_text_block 保持默认 false → 子 TextNode 走原 Text measure（独立 box）。
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (300.0, 300.0), &empty_sizes());
+        let text_id = scene.get(scene.roots[0]).unwrap().children[0];
+        let r = scene.get(text_id).unwrap().layout_rect;
+        assert!(
+            r.w > 1.0 && r.h > 1.0,
+            "structural container 子 TextNode 应正常测出尺寸，got w={} h={}",
+            r.w,
+            r.h
+        );
+        // TextNode 走 Text measure arm → 有独立 text_layouts 条目（非父 div 的 RichText 槽）。
+        assert!(
+            scene.text_layouts[text_id.index()].is_some(),
+            "structural TextNode 应有独立 text_layouts 条目（走 Text arm，非 fold）"
         );
     }
 

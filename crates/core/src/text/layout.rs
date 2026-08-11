@@ -427,6 +427,96 @@ pub fn text_fingerprint(
     h.finish()
 }
 
+/// 富文本测量 fingerprint：runs + base style + 约束宽（0.25px 量化）→ u64。同 fp →
+/// `measure_rich_text` 结果同 → 可复用 TextLayout（跳过 shaping，同 `text_fingerprint`）。
+///
+/// runs 是每帧现编译的（`compile_rich_runs` 便宜，O(inline 子)），故指纹键是 runs 全量
+/// 而非单个 content 字符串。每 run 进 hash 的字段：kind 判别（Text/Image 0/1）+ payload
+/// （Text:text；Image:src+w+h+valign）+ color bits + font_id + size_px + weight + style
+/// + deco 全子字段 + link_id + **source NodeId**。
+///
+/// `source`（NodeId）必须进 hash：两个不同 span 文本相同也不应共享缓存（命中路由会错），
+/// span 换色/换内容 → runs 变 → fp 变 → 自动 miss 重测。不依赖 dirty_text 传播（现仅标
+/// 文本节点自身，无 "span 改色标父" 路径——指纹 memo 闭环更干净，见 design §9）。
+///
+/// `mw` 同 `text_fingerprint`：None/Some 用 discriminator 区分两槽（intrinsic/constrained），
+/// Some 量化到 0.25px 桶避亚像素抖动 thrash 缓存。
+pub fn rich_text_fingerprint(
+    runs: &[crate::text::rich::RichRun],
+    line_height: f32,
+    align: crate::style::resolved::TextAlign,
+    family: Option<&str>,
+    mw: Option<f32>,
+) -> u64 {
+    use crate::text::rich::RichKind;
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    runs.len().hash(&mut h);
+    for r in runs {
+        // kind 判别 + payload。Text vs Image 用 0/1 区分；Image 的 f32 用 to_bits 哈希
+        // （f32 不 impl Hash）。
+        match &r.kind {
+            RichKind::Text { text } => {
+                0u8.hash(&mut h);
+                text.hash(&mut h);
+            }
+            RichKind::Image {
+                src,
+                w,
+                h: ih,
+                valign,
+            } => {
+                1u8.hash(&mut h);
+                src.hash(&mut h);
+                w.to_bits().hash(&mut h);
+                ih.to_bits().hash(&mut h);
+                valign.hash(&mut h);
+            }
+        }
+        // per-run 样式通道。color 是 [f32;4] → 逐通道 to_bits（f32 不 impl Hash）。
+        for c in r.color.iter() {
+            c.to_bits().hash(&mut h);
+        }
+        r.font_id.hash(&mut h);
+        r.size_px.hash(&mut h);
+        r.weight.hash(&mut h);
+        r.style.hash(&mut h);
+        // RichDeco 子字段：lines/style 整数 backed 可 Hash；color/thickness 含 f32 → 手动
+        // （Option<...> 用 0/1 discriminator 区分 Some/None，防两档碰撞）。
+        r.deco.lines.hash(&mut h);
+        r.deco.style.hash(&mut h);
+        match r.deco.color {
+            Some(c) => {
+                1u8.hash(&mut h);
+                for v in c.iter() {
+                    v.to_bits().hash(&mut h);
+                }
+            }
+            None => 0u8.hash(&mut h),
+        }
+        match r.deco.thickness {
+            Some(t) => {
+                1u8.hash(&mut h);
+                t.to_bits().hash(&mut h);
+            }
+            None => 0u8.hash(&mut h),
+        }
+        r.link_id.hash(&mut h);
+        r.source.hash(&mut h);
+    }
+    line_height.to_bits().hash(&mut h);
+    align.hash(&mut h);
+    family.hash(&mut h);
+    match mw {
+        None => 0u32.hash(&mut h),
+        Some(w) => {
+            1u32.hash(&mut h);
+            ((w * 4.0).round() as i64).hash(&mut h);
+        }
+    }
+    h.finish()
+}
+
 /// 测量并布局文本。
 ///
 /// - `line_height`：倍数，`0.0` = normal（= ascent - descent + line_gap）。

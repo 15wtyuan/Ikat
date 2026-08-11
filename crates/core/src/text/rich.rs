@@ -10,7 +10,7 @@
 use crate::scene::node::NodeId;
 
 /// 加粗。MVP 合成（build 期几何加粗，非字体变体）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum RichWeight {
     #[default]
@@ -30,7 +30,7 @@ pub fn weight_from_font_weight(w: u16) -> RichWeight {
 }
 
 /// 斜体。MVP 合成（build 期 quad skew）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum RichStyle {
     #[default]
@@ -39,7 +39,7 @@ pub enum RichStyle {
 }
 
 /// 装饰线位标记（可组合：underline | line-through | overline）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(transparent)]
 pub struct TextDecoLines(pub u8);
 impl TextDecoLines {
@@ -59,7 +59,7 @@ impl TextDecoLines {
 }
 
 /// 装饰线样式（CSS text-decoration-style）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum TextDecoStyle {
     #[default]
@@ -79,7 +79,7 @@ pub struct RichDeco {
 }
 
 /// 行内图垂直对齐（简化：baseline 默认底边贴基线）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum RichVAlign {
     #[default]
