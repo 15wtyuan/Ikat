@@ -24,6 +24,34 @@ use loomgui_core::style::resolved::ResolvedStyle;
 /// （strong/em/br 已从围栏移除——它们就是 span/\n 的语义糖，不再单独存在。）
 const TEXT_LEVEL_SEMANTICS: &[SemanticKind] = &[SemanticKind::TextElement, SemanticKind::Slot];
 
+/// 从 dynamic_rules 预提取声明 `display:flex` 的规则，按 selector compound 数分组。
+///
+/// 单 compound 规则可廉价精确匹配元素的 class/tag；多 compound（后代/子代组合）
+/// 命中判定贵且需完整 cascade，无法在打包期静态断言 → 返回 `has_multi_compound_flex_rule`
+/// 保守标志，调用方据此「视为 flex」放行（避免假阳性）。Stage 6.4（rich-text-block 分类）
+/// 与 6.5（inline 上下文检查）共享此提取，保证两阶段对「parent 是不是 flex」判定一致。
+pub(crate) fn collect_flex_class_rules(
+    dynamic_rules: &[DynamicRule],
+) -> (Vec<&Compound>, bool) {
+    let mut single_compound_flex_rules: Vec<&Compound> = Vec::new();
+    let mut has_multi_compound_flex_rule = false;
+    for rule in dynamic_rules {
+        let declares_flex = rule
+            .declarations
+            .iter()
+            .any(|d| d.prop == "display" && d.value.trim() == "flex");
+        if !declares_flex {
+            continue;
+        }
+        if rule.selector.compound.len() == 1 {
+            single_compound_flex_rules.push(&rule.selector.compound[0]);
+        } else {
+            has_multi_compound_flex_rule = true;
+        }
+    }
+    (single_compound_flex_rules, has_multi_compound_flex_rule)
+}
+
 /// 判定 parent 是否为 flex 上下文。
 ///
 /// stage 4 css_resolve 只烘 inline `style=""` + tag 默认 display 进 styles——`<style>` class 规则
@@ -31,7 +59,7 @@ const TEXT_LEVEL_SEMANTICS: &[SemanticKind] = &[SemanticKind::TextElement, Seman
 /// (1) parent 的解析后 display（inline style 或 tag 默认）是 Flex，或
 /// (2) 匹配 parent class 的单 compound 规则声明了 display:flex。
 /// 多 compound（后代/子代）规则无法廉价判定命中 → 保守视为 flex（不报，避免假阳性）。
-fn parent_is_flex(
+pub(crate) fn is_flex_context(
     parent_el: &IrElement,
     parent_style: &ResolvedStyle,
     single_compound_flex_rules: &[&Compound],
@@ -85,27 +113,16 @@ pub fn check_inline_context(
     tree: &IrTree,
     styles: &[ResolvedStyle],
     dynamic_rules: &[DynamicRule],
+    // Stage 6.4 产出的 rich-text-block ir_idx 集合。img 的 parent 在此集合里 → 豁免
+    // （img 作为 inline run 走 rich-text inline flow）；button 不豁免（非 inline 级）。
+    rich_text_blocks: &[usize],
     file: &str,
     line_map: &LineMap,
 ) -> Vec<Diagnostic> {
     // 预提取“声明了 display:flex 的单 compound 规则”，避免每个元素全量扫描。
     // 多 compound flex 规则 → has_multi_compound_flex_rule（保守放行）。
-    let mut single_compound_flex_rules: Vec<&Compound> = Vec::new();
-    let mut has_multi_compound_flex_rule = false;
-    for rule in dynamic_rules {
-        let declares_flex = rule
-            .declarations
-            .iter()
-            .any(|d| d.prop == "display" && d.value.trim() == "flex");
-        if !declares_flex {
-            continue;
-        }
-        if rule.selector.compound.len() == 1 {
-            single_compound_flex_rules.push(&rule.selector.compound[0]);
-        } else {
-            has_multi_compound_flex_rule = true;
-        }
-    }
+    let (single_compound_flex_rules, has_multi_compound_flex_rule) =
+        collect_flex_class_rules(dynamic_rules);
 
     let mut diagnostics = Vec::new();
     for (idx, node) in tree.nodes.iter().enumerate() {
@@ -146,12 +163,19 @@ pub fn check_inline_context(
         };
 
         // parent 是 flex（inline style / tag 默认 / class 规则）→ flex item，放行。
-        if parent_is_flex(
+        if is_flex_context(
             parent_el,
             &styles[parent_id.0],
             &single_compound_flex_rules,
             has_multi_compound_flex_rule,
         ) {
+            continue;
+        }
+
+        // parent 是 rich-text-block（Stage 6.4 判定：block 容器 + 直接子全 inline 级）
+        // → img 作为 inline run 走 rich-text inline flow，与浏览器一致 → 豁免。
+        // button 不豁免：button 是控件非 phrasing，不进 inline 级集合，仍报。
+        if el.semantic == Some(SemanticKind::Image) && rich_text_blocks.contains(&parent_id.0) {
             continue;
         }
 

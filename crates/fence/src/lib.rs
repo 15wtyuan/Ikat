@@ -9,6 +9,7 @@ pub mod fence_gate;
 pub mod inline_context_check;
 pub mod ir;
 pub mod pipeline;
+pub mod rich_text_classify;
 pub mod schema;
 pub mod structural;
 pub mod tree_builder;

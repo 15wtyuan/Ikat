@@ -23,6 +23,14 @@ pub enum DiagnosticCode {
     /// 强制作者把 inline 元素放进 flex 容器，让布局意图显式。
     /// 详见 fence.md「inline 元素布局上下文」。
     FenceInlineElementInBlockContext,
+    /// block 容器（display:block，非 flex）的直接子既有 inline 级（text/span/img）又有 block 级
+    /// （div/控件/template）。
+    /// rich-text-block（Stage 6.4）要求直接子**全**是 inline 级才会触发 inline flow；
+    /// 混入 block 子会让 inline flow 不可定义（一部分要横排流、一部分要撑满竖排，同一 formatting
+    /// context 里无解）。属「fail-loud 不静默降级」原则——作者须显式选边：要么 inline 子全裹进
+    /// 一个子 div（让外层变全 block），要么把容器改 display:flex（让所有子变 flex item）。
+    /// 详见 fence.md「rich-text-block 分类（阶段 6.4）」。
+    FenceMixedInlineBlock,
     /// border-width 已声明但 border-style 缺省（CSS initial=none）。
     /// 浏览器按 CSS 规范不画边框，而 LoomGUI 历史实现会画 → 预览 ≠ 运行时。
     /// 详见 fence.md「围栏内一致性 warning」。

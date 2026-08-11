@@ -6,6 +6,7 @@ use crate::diagnostic::{Diagnostic, LineMap};
 use crate::fence_gate::run_fence_gate;
 use crate::inline_context_check::check_inline_context;
 use crate::ir::{IrNodeKind, IrTree};
+use crate::rich_text_classify::classify_rich_text;
 use crate::structural::run_structural;
 use crate::tree_builder::parse_html_to_ir_named;
 use loomgui_core::style::dynamic::DynamicRule;
@@ -22,6 +23,11 @@ pub struct ParsedTemplate {
     /// fence declarations 转成 AnimatableProps，并把规则写入 ComponentTemplate.keyframes。
     /// player 运行时驱动留后续 M2 task。
     pub keyframes: Vec<KeyframesRule>,
+    /// Stage 6.4 产物：rich-text-block 根的 ir_idx 集合（block 容器 + 直接子全 inline 级）。
+    /// packer bridge 据此烘 TemplateNode.rich_text_block flag，runtime 把这些 inline 子
+    /// 拍平成 RichRun 走 inline flow（见 main-design 文本模型）。display:flex 容器不在此列
+    /// （其子是 flex item，走 flex 排版）。Stage 6.5 读此集合豁免 img（仍报 button）。
+    pub rich_text_blocks: Vec<usize>,
     pub diagnostics: Vec<Diagnostic>,
     pub referenced_sprites: Vec<String>,
 }
@@ -62,14 +68,23 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
     // Stage 6: Annotate (fill SemanticKind)
     annotate(&mut tree);
 
+    // Stage 6.4: rich-text-block 分类 + mixed inline/block 报错。须在 6.5 之前：
+    // (a) 需 Annotate 已填 semantic（判定 span=TextElement / img=Image）；
+    // (b) 6.5 读本阶段产出的 rich_text_blocks 豁免 img。display 判定复用 6.5 的 helper
+    // （inline style + tag 默认 + 单 compound class flex 规则；多 compound 保守）。
+    let (rich_text_blocks, rich_diags) =
+        classify_rich_text(&tree, &styles, &dynamic_rules, file, &line_map);
+    diagnostics.extend(rich_diags);
+
     // Stage 6.5: inline 元素布局上下文检查。LoomGUI 没有 flex 之外的 inline flow——
     // block 容器里的裸 inline 元素会被当 block-level（撑满+竖排），和浏览器不一致。
     // 必须在 Annotate 之后（需 TextBlock 语义判定豁免）+ Stage 4（inline style display）
-    // + Stage 4.5（class 规则 display）之后——parent 是 block 还是 flex 要合并两个来源。
+    // + Stage 4.5（class 规则 display）+ Stage 6.4（rich_text_blocks img 豁免）之后。
     diagnostics.extend(check_inline_context(
         &tree,
         &styles,
         &dynamic_rules,
+        &rich_text_blocks,
         file,
         &line_map,
     ));
@@ -105,6 +120,7 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
         styles,
         dynamic_rules,
         keyframes,
+        rich_text_blocks,
         diagnostics,
         referenced_sprites,
     }

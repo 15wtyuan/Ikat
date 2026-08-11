@@ -338,6 +338,25 @@ CSS 在围栏中以三个正交维度建模：
 
 对每个元素调用 `resolve_semantic(tag, role, aria_multiline)`，填充 `IrElement.semantic`。`role` 优先于 tag；这是确定性的：同样的 tag + role 永远产生同样的 SemanticKind。
 
+### 阶段 6.4：rich-text-block 分类 + mixed 报错
+
+**根因**：LoomGUI 运行时只在一种上下文里实现浏览器式 inline flow——**rich-text-block**：`display:block` 容器且其直接子**全是 inline 级**（text / `span`(TextElement) / `img`(Image)）。runtime 把这些 inline 子拍平成 `RichRun` 走 `measure_rich_text`（见 main-design 文本模型），与浏览器预览一致。若 block 容器的直接子**既有 inline 级又有 block 级**（`<div><span>x</span><div>y</div></div>`），inline flow 不可定义（一部分要横排流、一部分要纵向堆叠，同一 formatting context 无解）。本阶段在打包期分类 + 拦下这种混合。
+
+**规则**：每个 `display:block` 容器（tag 默认或 inline style 烘入；**非 flex**——flex 子是 flex item，走 flex 排版）的直接子（过滤纯空白文本后）：
+- 全是 inline 级且 ≥1 个 → 标 rich-text-block（记进 `ParsedTemplate.rich_text_blocks` 的 ir_idx 集合，packer bridge 据此烘 flag）
+- inline 级 + block 级混合 → `FenceMixedInlineBlock` error，打包失败。错误信息教学两种改法（二选一）：
+  1. inline 子裹进一个子 `<div>`（让外层直接子全 block）。
+  2. 容器改 `display:flex`（让所有子变 flex item）。
+- 全 block 子 / 空子 / 仅纯空白 → 不分类
+
+**inline 级集合**：`IrText`（非纯空白）/ `span`(TextElement) / `img`(Image)。其余元素子（`div`(Container) / 控件 / `template` / 自定义元素）为 block 级。`button` 是控件非 phrasing，**不进 inline 级**。
+
+**空白折叠**：纯空白文本子（缩进/换行，块间装饰空白）视为**中性**——既不算 inline 也不算 block。否则任何缩进的 block 模板都会被误判成 mixed。与浏览器块间空白折叠语义一致。
+
+**display 判定**：复用阶段 6.5 的 parent-display 判定 helper（inline style + tag 默认 + 单 compound class flex 规则；多 compound 后代/子代规则保守放行）——两阶段对「parent 是 block 还是 flex」结论一致，避免 showcase 的 `.row { display:flex }` 等布局被误判。
+
+**须在 6.5 之前跑**：6.5 的 img 豁免读本阶段产出的 `rich_text_blocks`。
+
 ### 阶段 6.5：inline 元素布局上下文检查
 
 **根因**：taffy 0.12 不支持 CSS inline flow（inline 元素自动横排换行）。LoomGUI 只在一种上下文里让 inline 元素和浏览器一致：**flex 容器内**——inline 元素是 flex item，按 flex 规则排（两边行为相同）。
@@ -352,6 +371,7 @@ CSS 在围栏中以三个正交维度建模：
 - `span`（TextElement）/`slot`：文本级或结构占位，其行内混排要等文本模型（roadmap §4），不是 flex 能修的。
 - 元素显式 `display:block`：作者有意当块级（撑满），浏览器也撑满，两边一致。
 - parent 是 flex（inline style / tag 默认 / `<style>` class 规则声明 `display:flex`）。
+- **parent 是 rich-text-block**（阶段 6.4 判定）时 `img` 豁免：img 作为 inline run 走 rich-text inline flow，与浏览器一致。`button` 不豁免——button 是控件非 phrasing，不进 inline 级集合。
 
 **parent display 判定**：stage 4 css_resolve 只烘 inline style + tag 默认 display；`<style>` class 规则的 display 在 dynamic_rules（运行时 rematch）。检查合并两个来源判定 parent 是 block 还是 flex：class 匹配用单 compound 选择器（`.tab`/`button.tab`/`.btn.primary`）；多 compound（后代/子代）声明 flex 时保守放行（避免假阳性）。
 
@@ -408,6 +428,7 @@ CSS 在围栏中以三个正交维度建模：
 | `InvalidAriaRelation` | `aria-controls` / `aria-labelledby` 目标不存在 |
 | `TokenizerError` | html5gum tokenizer 遇到无法恢复的词法错误 |
 | `FenceInlineElementInBlockContext` | inline 布局 box（button/img）裸放在 block 容器里（非 flex）；LoomGUI 无 flex 之外的 inline flow，撑满竖排会和浏览器不一致 |
+| `FenceMixedInlineBlock` | `display:block` 容器（非 flex）的直接子既有 inline 级（text/span/img）又有 block 级（div/控件/template）；rich-text inline flow 要求全 inline，混合不可定义。详见阶段 6.4 |
 | `FenceBorderWithoutStyle` | **warning**：`border-width` 已声明但 `border-style` 缺省（CSS initial=none，浏览器不画边框，LoomGUI 会画）；预览 ≠ 运行时 |
 | `FenceBgImageWithoutSize` | **warning**：`background-image` 已声明但 `background-size` 缺省（CSS 默认 auto=原始尺寸，LoomGUI 默认 stretch=拉伸填满）；预览 ≠ 运行时 |
 | `FenceControlWithoutCss` | role 驱动控件（`progressbar`/`slider`/`switch`/`radio`/`textbox`/`spinbutton`/`combobox`）无任何 `<style>` 规则命中。控件不带 UA 默认样式，无 CSS = 运行时空白；须为控件及其 `data-slot` 子节点提供 CSS（详见阶段 6.7） |
