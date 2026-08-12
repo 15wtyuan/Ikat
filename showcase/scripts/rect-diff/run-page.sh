@@ -7,8 +7,12 @@
 # Exit: diff.mjs's (0=aligned, 1=diffs/unmatched, 2=usage) — 报告产出为主门，exit 1 ≠ 任务失败
 set -euo pipefail
 
-PAGE="${1:?usage: run-page.sh <page> [--tol-box=N] [--tol-text=N]}"
-shift || true
+if [ $# -lt 1 ]; then
+  echo "usage: run-page.sh <page> [--tol-box=N] [--tol-text=N]" >&2
+  exit 2
+fi
+PAGE="$1"
+shift
 TOL_BOX=1
 TOL_TEXT=3
 for a in "$@"; do
