@@ -13,6 +13,7 @@
 //! DFS 序与浏览器 `querySelectorAll('body *')` 的 DOM 序近似——核心侧含 TextNode 等
 //! 非元素节点，配对以 id 为主（domIndex 仅作辅助索引）。
 
+use loomgui_core::dump::kind_to_html_tag;
 use loomgui_core::scene::dynamic::append_child;
 use loomgui_core::scene::node::{Node, NodeId, NodeKind, Scene};
 use loomgui_core::stage::Stage;
@@ -127,35 +128,6 @@ fn collect_dfs_rec(scene: &Scene, id: NodeId, out: &mut Vec<NodeId>) {
         .unwrap_or_default();
     for c in children {
         collect_dfs_rec(scene, c, out);
-    }
-}
-
-/// `NodeKind` → 浏览器侧 `tagName.toLowerCase()` 对应 tag 串。
-/// 用于 rect-diff 跨侧配对（同 id + 同 tag 二级校验）。
-/// 控件类（Slider/Toggle/...）HTML 源都是 `<input>`，统一映射保持 diff 可比对。
-fn kind_to_html_tag(k: NodeKind) -> &'static str {
-    match k {
-        NodeKind::Container => "div",
-        NodeKind::TextNode => "#text",
-        NodeKind::TextElement => "span",
-        NodeKind::Button => "button",
-        NodeKind::Image => "img",
-        NodeKind::TextField
-        | NodeKind::NumberField
-        | NodeKind::Slider
-        | NodeKind::Toggle
-        | NodeKind::RadioButton => "input",
-        NodeKind::TextArea => "textarea",
-        NodeKind::Dropdown => "select",
-        NodeKind::OptionItem => "option",
-        NodeKind::ProgressBar => "progress",
-        NodeKind::ListView => "ul",
-        NodeKind::ListItem => "li",
-        NodeKind::Slot => "slot",
-        NodeKind::CustomElement => "custom",
-        NodeKind::Template => "template",
-        NodeKind::TabList => "div",
-        NodeKind::Tab => "button",
     }
 }
 
