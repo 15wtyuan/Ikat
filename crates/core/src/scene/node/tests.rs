@@ -143,6 +143,89 @@ fn find_node_by_id_in_subtree_n_slots_same_internal_id() {
     assert_ne!(slots[1].1, slots[2].1);
 }
 
+/// §3 不变式回归守卫：public 语义树 ≠ internal taffy/render 树。
+/// rich-text-block 容器的 inline 子（TextNode / span=TextElement）在 solve 期被折出 taffy
+/// （`layout::solve::build` 对 rich_text_block 不递归子进 taffy → 它们 layout_rect 塌成 0），
+/// 但仍留在 Scene 树里——故 `find_node_by_id_in_subtree` 仍能按 id 找到 span，`Get<T>("id")`
+/// 语义不破。此前仅 `dump_rich_text` example 证据此性质，此处固化为自动测试防回归
+/// （若有人在折叠路径上误从 `scene.children` 移除 inline 子，此测试即失败）。
+#[test]
+fn rich_text_block_inline_children_remain_in_scene_tree_after_solve() {
+    use crate::text::layout::FontTable;
+    // DejaVu 测试字体（与 render tests 同源，仓库内 fixtures）；缺则跳过——保持跨机可跑。
+    let path = format!(
+        "{}/tests/fixtures/DejaVuSans.ttf",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let bytes = match std::fs::read(&path).ok() {
+        Some(b) => b,
+        None => {
+            eprintln!("skip: no test font at {}", path);
+            return;
+        }
+    };
+    let mut fonts = FontTable::new();
+    fonts
+        .register("DejaVu", bytes, true)
+        .expect("DejaVu fixture 字体注册");
+
+    // 结构（镜像 rich_compile 的 span_text_run_source_is_span_not_textnode）。
+    //   0:root(Container) > 1:div(rich_text_block) > 2:TextNode "hello "（直接 inline 子）
+    //                                              > 3:span(TextElement, id="x") > 4:TextNode "world"
+    let mk = |kind: NodeKind| Node {
+        kind,
+        ..Default::default()
+    };
+    let mut root = mk(NodeKind::Container);
+    root.style.taffy_style.size.width = taffy::style::Dimension::length(200.0);
+    let mut div = mk(NodeKind::Container);
+    div.style.taffy_style.size.width = taffy::style::Dimension::length(100.0);
+    let mut scene = Scene::from_nodes(
+        vec![
+            root,
+            div,
+            mk(NodeKind::TextNode),
+            mk(NodeKind::TextElement),
+            mk(NodeKind::TextNode),
+        ],
+        vec![(0, 1), (1, 2), (1, 3), (3, 4)],
+    );
+    let root = scene.roots[0];
+    let div = scene.get(root).unwrap().children[0]; // node 1
+    let outer_tn = scene.get(div).unwrap().children[0]; // node 2
+    let span = scene.get(div).unwrap().children[1]; // node 3（TextElement）
+    let inner_tn = *scene.get(span).unwrap().children.first().unwrap(); // node 4
+    scene.text_contents.insert(outer_tn, "hello ".into());
+    scene.text_contents.insert(inner_tn, "world".into());
+    scene.get_mut(span).unwrap().id_attr = Some("x".into());
+    scene.get_mut(div).unwrap().rich_text_block = true;
+
+    // solve：rich_text_block → build 不递归 inline 子进 taffy → 它们 layout_rect 保持 0。
+    let image_sizes: crate::layout::ImageSizeTable = std::collections::HashMap::new();
+    crate::layout::solve(&mut scene, &fonts, (200.0, 1000.0), &image_sizes);
+
+    // 折叠证据：span 及其内外 TextNode layout_rect 塌成 0（不在 taffy 树里 = 无独立几何）。
+    let span_rect = scene.get(span).unwrap().layout_rect;
+    assert!(
+        span_rect.w.abs() < 0.1 && span_rect.h.abs() < 0.1,
+        "folded inline span 应无独立 layout_rect，got {:?}",
+        span_rect
+    );
+    let outer_tn_rect = scene.get(outer_tn).unwrap().layout_rect;
+    assert!(
+        outer_tn_rect.w.abs() < 0.1 && outer_tn_rect.h.abs() < 0.1,
+        "folded inline TextNode 应无独立 layout_rect，got {:?}",
+        outer_tn_rect
+    );
+
+    // §3 不变式：尽管被折出 taffy/render，inline span 仍在 Scene 树里 → find 仍命中。
+    assert_eq!(
+        scene.find_node_by_id_in_subtree(div, "x"),
+        Some(span),
+        "rich-text-block 的 inline span 须留在 Scene 树供 Get<T>(\"x\") 查找（public 树 ≠ internal 树）"
+    );
+}
+
 #[test]
 fn node_id_index_and_gen_decode() {
     // 高 20 bit index + 低 12 bit gen

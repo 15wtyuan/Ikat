@@ -1678,6 +1678,115 @@ fn rich_text_block_renders_text_mesh() {
     );
 }
 
+/// rich-text-block Container 带 box-shadow 时应同时产阴影 RenderNode：该 arm 推完
+/// 背景 + 文字后提前 return，若不在 return 前补推阴影层，阴影会被静默丢弃（背景 +
+/// 文字画了但无阴影）。守护 rich-text-block arm 内的 push_container_shadows 调用。
+#[test]
+fn rich_text_block_div_emits_box_shadow() {
+    let fonts = match test_font_table() {
+        Some(f) => f,
+        None => {
+            eprintln!("skip: no test font");
+            return;
+        }
+    };
+    // root(structural Container, 固定宽 200) > div(rich_text_block + box-shadow, 显式宽 100)
+    // > TextNode 长文本。box-shadow 单 outer 层（与 box_shadow_emits_node_with_offset 同参数）。
+    let mut root_s = ResolvedStyle::default();
+    root_s.taffy_style.size.width = Dimension::length(200.0);
+    let mut div_s = ResolvedStyle::default();
+    div_s.taffy_style.size.width = Dimension::length(100.0);
+    div_s.font_size = 16.0;
+    div_s.box_shadow = vec![BoxShadow {
+        ox: 2.0,
+        oy: 3.0,
+        spread: 0.0,
+        blur: 0.0,
+        color: [0.0, 0.0, 0.0, 0.5],
+        inset: false,
+    }];
+    let entries = vec![
+        (
+            None,
+            NodeKind::Container,
+            root_s,
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            Some(0),
+            NodeKind::Container,
+            div_s,
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            Some(1),
+            NodeKind::TextNode,
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            Some("The quick brown fox jumps over the lazy dog".into()),
+            None,
+        ),
+    ];
+    let mut scene = Scene::build(&entries);
+    let div = scene.get(scene.roots[0]).unwrap().children[0];
+    scene.get_mut(div).unwrap().rich_text_block = true;
+    crate::layout::solve(
+        &mut scene,
+        &fonts,
+        (200.0, 1000.0),
+        &std::collections::HashMap::new(),
+    );
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+
+    // rich-text-block div 应产 box-shadow RenderNode（back_shadow_synth，program=5，半透明黑）。
+    // 早 return 漏推阴影时此查找失败——这是该 arm 推阴影的直接证据。
+    let shadow_rn = frame
+        .nodes
+        .iter()
+        .find(|rn| is_back_shadow_synth(rn.node_id))
+        .expect("rich-text-block div 应产 box-shadow RenderNode（back_shadow_synth）");
+    assert_eq!(
+        shadow_rn.node_id,
+        back_shadow_id(div.0, 0),
+        "阴影 node_id = back_shadow_id(div, 0)"
+    );
+    match &shadow_rn.payload {
+        NodePayload::Mesh {
+            program, colors, ..
+        } => {
+            assert_eq!(*program, 5, "阴影走 SDF 路径 program=5");
+            assert!(
+                colors.iter().all(|c| *c == [0.0, 0.0, 0.0, 0.5]),
+                "阴影顶点色应为半透明黑"
+            );
+        }
+        _ => panic!("阴影节点应为 Mesh"),
+    }
+}
+
 /// 回归守卫：rich_text_block=false 的普通 Container 仍走原 Container 路径——
 /// 其 TextNode 子节点独立测 + 独立渲染（产自己的 RenderNode，不折进父）。
 /// 与上一个 rich 测试互为正反。

@@ -1912,7 +1912,23 @@ fn render_one_node(
                     wm,
                     false, // 背景已登记 n.id → id_to_pos，文字不重复注册
                 );
-                return; // 背景 + 文字已推，跳过末尾 id_to_pos / push；inline 子由主循环跳过。
+                // box-shadow：rich-text-block 容器提前 return，须在此补推阴影层，否则
+                // 背景 + 文字画了但阴影丢（功能缺失，同 Container 正常路径的 post-match 块）。
+                if n.kind.is_container() && !n.style.box_shadow.is_empty() {
+                    push_container_shadows(
+                        nodes,
+                        back_layer_pairs,
+                        node_id,
+                        parent_id,
+                        rect,
+                        wm,
+                        alpha,
+                        color_tint,
+                        &n.style.box_shadow,
+                        &n.style.border_radius,
+                    );
+                }
+                return; // 背景 + 文字 + 阴影已推，跳过末尾 id_to_pos / push；inline 子由主循环跳过。
             }
             build_container_mesh(
                 n,
@@ -2373,92 +2389,127 @@ fn render_one_node(
     // inset 层画在最顶（最离 primary 上）。outer 按 CSS 序 push（propagate_back_shadow
     // 按 CSS 序赋最高=primary-1 给首层）；inset 按 CSS 逆序 push（propagate_text_sub_page
     // 按 push 序赋 offset，逆序 push 使首层得最大 offset=最上）。
-    let shadows = &n.style.box_shadow;
-    if n.kind.is_container() && !shadows.is_empty() {
-        let radii = n.style.border_radius.as_corners(rect.w, rect.h);
-        // outer（back）层：CSS 序 push。
-        for (i, sh) in shadows.iter().filter(|s| !s.inset).enumerate() {
-            let sigma = shadow_sigma(sh.blur);
-            let sid = back_shadow_id(node_id, i as u32);
-            let (v, uvc, col, idx, params) =
-                crate::render::border::shadow_quad(rect, &radii, sh, sigma);
-            if v.is_empty() {
-                continue;
-            }
-            back_layer_pairs.push((node_id, sid));
-            nodes.push(RenderNode {
-                node_id: sid,
-                parent_id,
-                visible: true,
-                alpha,
-                color_tint,
-                world_matrix: wm,
-                blend: BlendMode::Normal,
-                mask_context: MaskContext(0),
-                sort_key: 0, // propagate_back_shadow_sort_keys 后重调
-                change_level: ChangeLevel::Full,
-                reuse_key: 0,
-                effect: EffectBlock::default(),
-                shadow_params: params,
-                payload: NodePayload::Mesh {
-                    verts: v,
-                    uvs: uvc,
-                    colors: col,
-                    indices: idx,
-                    image_path: None,
-                    program: 5,
-                    color_matrix: [0.0; 20],
-                },
-            });
-        }
-        // inset（front）层：CSS 逆序 push。idx 仍用 CSS 序（保 id 唯一 + 可调试反查）。
-        let inset_layers: Vec<(usize, &crate::style::resolved::BoxShadow)> = shadows
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.inset)
-            .collect();
-        for &(css_idx, sh) in inset_layers.iter().rev() {
-            let sigma = shadow_sigma(sh.blur);
-            // inset idx = 该 primary 内 inset 层的 CSS 序（0-based，区别于混合序）。
-            let inset_idx = shadows.iter().take(css_idx).filter(|s| s.inset).count() as u32;
-            let sid = front_shadow_id(node_id, inset_idx);
-            let (v, uvc, col, idx, params) =
-                crate::render::border::shadow_quad(rect, &radii, sh, sigma);
-            if v.is_empty() {
-                continue;
-            }
-            // front 层不经 back_layer_pairs——由 propagate_text_sub_page_sort_keys 按
-            // is_front_shadow_synth 自动收集并赋 sort_key（嵌入 primary 之后、下一真节点之前）。
-            nodes.push(RenderNode {
-                node_id: sid,
-                parent_id,
-                visible: true,
-                alpha,
-                color_tint,
-                world_matrix: wm,
-                blend: BlendMode::Normal,
-                mask_context: MaskContext(0),
-                sort_key: 0, // propagate_text_sub_page_sort_keys 后重调
-                change_level: ChangeLevel::Full,
-                reuse_key: 0,
-                effect: EffectBlock::default(),
-                shadow_params: params,
-                payload: NodePayload::Mesh {
-                    verts: v,
-                    uvs: uvc,
-                    colors: col,
-                    indices: idx,
-                    image_path: None,
-                    program: 5,
-                    color_matrix: [0.0; 20],
-                },
-            });
-        }
+    if n.kind.is_container() && !n.style.box_shadow.is_empty() {
+        push_container_shadows(
+            nodes,
+            back_layer_pairs,
+            node_id,
+            parent_id,
+            rect,
+            wm,
+            alpha,
+            color_tint,
+            &n.style.box_shadow,
+            &n.style.border_radius,
+        );
     }
     if register_id_map {
         id_to_pos.insert(n.id, nodes.len());
     }
     nodes.push(rn);
+}
+
+/// Emit one synthetic RenderNode per box-shadow layer (outer back-layers + inset front-layers)
+/// for a container. Shared by the normal Container arm (called after the match) and the
+/// rich-text-block arm (called before its early `return`, which otherwise skips the post-match
+/// shadow block). Each layer is a single SDF shadow quad (program=5 + shadow_params); sort_key
+/// stays 0 here and is reassigned later by propagate_back_shadow_sort_keys (outer) and
+/// propagate_text_sub_page_sort_keys (inset). No-op when `shadows` is empty.
+///
+/// CSS 层序：outer 按 CSS 序 push（首层最贴 primary 下）；inset 按 CSS 逆序 push（首层
+/// 最离 primary 上）。outer 层进 back_layer_pairs 供 back-shadow sort_key 传播；inset 层
+/// 不进（由 front-shadow 传播按 is_front_shadow_synth 自动收集）。
+fn push_container_shadows(
+    nodes: &mut Vec<RenderNode>,
+    back_layer_pairs: &mut Vec<(u32, u32)>,
+    node_id: u32,
+    parent_id: Option<u32>,
+    rect: &Rect,
+    wm: crate::transform::Affine2,
+    alpha: f32,
+    color_tint: [f32; 4],
+    shadows: &[crate::style::resolved::BoxShadow],
+    border_radius: &crate::style::resolved::BorderRadius,
+) {
+    let radii = border_radius.as_corners(rect.w, rect.h);
+    // outer（back）层：CSS 序 push。
+    for (i, sh) in shadows.iter().filter(|s| !s.inset).enumerate() {
+        let sigma = shadow_sigma(sh.blur);
+        let sid = back_shadow_id(node_id, i as u32);
+        let (v, uvc, col, idx, params) =
+            crate::render::border::shadow_quad(rect, &radii, sh, sigma);
+        if v.is_empty() {
+            continue;
+        }
+        back_layer_pairs.push((node_id, sid));
+        nodes.push(RenderNode {
+            node_id: sid,
+            parent_id,
+            visible: true,
+            alpha,
+            color_tint,
+            world_matrix: wm,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: 0, // propagate_back_shadow_sort_keys 后重调
+            change_level: ChangeLevel::Full,
+            reuse_key: 0,
+            effect: EffectBlock::default(),
+            shadow_params: params,
+            payload: NodePayload::Mesh {
+                verts: v,
+                uvs: uvc,
+                colors: col,
+                indices: idx,
+                image_path: None,
+                program: 5,
+                color_matrix: [0.0; 20],
+            },
+        });
+    }
+    // inset（front）层：CSS 逆序 push。idx 仍用 CSS 序（保 id 唯一 + 可调试反查）。
+    let inset_layers: Vec<(usize, &crate::style::resolved::BoxShadow)> = shadows
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.inset)
+        .collect();
+    for &(css_idx, sh) in inset_layers.iter().rev() {
+        let sigma = shadow_sigma(sh.blur);
+        // inset idx = 该 primary 内 inset 层的 CSS 序（0-based，区别于混合序）。
+        let inset_idx = shadows.iter().take(css_idx).filter(|s| s.inset).count() as u32;
+        let sid = front_shadow_id(node_id, inset_idx);
+        let (v, uvc, col, idx, params) =
+            crate::render::border::shadow_quad(rect, &radii, sh, sigma);
+        if v.is_empty() {
+            continue;
+        }
+        // front 层不经 back_layer_pairs——由 propagate_text_sub_page_sort_keys 按
+        // is_front_shadow_synth 自动收集并赋 sort_key（嵌入 primary 之后、下一真节点之前）。
+        nodes.push(RenderNode {
+            node_id: sid,
+            parent_id,
+            visible: true,
+            alpha,
+            color_tint,
+            world_matrix: wm,
+            blend: BlendMode::Normal,
+            mask_context: MaskContext(0),
+            sort_key: 0, // propagate_text_sub_page_sort_keys 后重调
+            change_level: ChangeLevel::Full,
+            reuse_key: 0,
+            effect: EffectBlock::default(),
+            shadow_params: params,
+            payload: NodePayload::Mesh {
+                verts: v,
+                uvs: uvc,
+                colors: col,
+                indices: idx,
+                image_path: None,
+                program: 5,
+                color_matrix: [0.0; 20],
+            },
+        });
+    }
 }
 #[cfg(test)]
 mod tests;

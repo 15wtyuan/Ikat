@@ -312,7 +312,7 @@ mod tests {
 
         let sizes = ImageSizeTable::new();
         let runs = compile_rich_runs(&scene, div, &sizes);
-        // 纯空白 TextNode 未被过滤 → 3 runs（空白 run + span run）。
+        // 纯空白 TextNode 未被过滤 → 2 runs（空白 run + span run）。
         assert_eq!(runs.len(), 2, "纯空白 TextNode 保留为 run");
         match &runs[0].kind {
             RichKind::Text { text } => assert_eq!(text, " ", "空白原文保留（折叠在 measure 阶段）"),
