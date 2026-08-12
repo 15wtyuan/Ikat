@@ -19,9 +19,9 @@
 |---|---|---|
 | `showcase/scripts/rect-diff/browser-rect.mjs` | ✅ Playwright/Chromium 1920×1080 导出 DOM rect `{domIndex,tag,id,classes,x,y,w,h}` | 无 |
 | `showcase/scripts/rect-diff/diff.mjs` | ✅ id 主配对 + tag/class 桶回退，`--tol-box`/`--tol-text`，exit 0/1/2 | 无 |
-| `crates/core/examples/spec4b_dump.rs --json` | ✅ 输出形状与 diff.mjs 对齐，`kind_to_html_tag` 映射齐全 | **硬编码 spec4b 包/组件**，stage 1280×720 |
+| `crates/core/examples/spec4b_dump.rs --json` | 输出形状与 diff.mjs 对齐，`kind_to_html_tag` 映射齐全 | **硬编码 spec4b 包/组件，且 spec4b-acceptance.pkg.bin / HTML 已不在库（三束加宽时清掉）→ 当前不可运行**（仅编译）；stage 1280×720 |
 | `crates/core/examples/dump_page.rs` | ✅ 任意 showcase 页，stage 1920×1080，字体/图标尺寸正确 | **无 `--json` 模式** |
-| `crates/core/src/dump.rs` | `dump_scene_json` 内有 kind→tag 逆映射（`TabList→div`、`Tab→button`） | 非 pub，spec4b_dump 里是私有拷贝 |
+| `crates/core/src/dump.rs` | `dump_scene_json` 内有 kind→tag **诊断**映射（TextNode→`span`、ListView→`div`、CustomElement→`div`） | **与 spec4b_dump 的配对映射三处不同**（TextNode/ListView/CustomElement），非 pub |
 | `LoomHost.DumpSceneJson` | ✅ 已实现 + `LoomHostDumpTests.cs` | 输出形状 ≠ diff.mjs；home-machine 事 |
 
 **结论**：任务 2 的「一页产比对报告」在编码机 headless 全闭环可行。缺的只有两小块：core 侧 8 页通用的 `--json` 出口 + 三步串联的 runner。
@@ -65,9 +65,9 @@ showcase.pkg.bin ──────► dump_page --json（新）    ──► co
 1. **`crates/core/examples/dump_page.rs` 加 `--json <out>`**：
    - 照 spec4b_dump 的发射器：DFS 收集 + `kind_to_html_tag` + `layout_rect` → `{domIndex,tag,id,classes,x,y,w,h}`（serde_json 输出，与 diff.mjs 形状对齐）。
    - 复用其已有 showcase 配置（stage 1920×1080、LXGW+wqy 字体、icon_sizes），零新增配置。
-2. **`kind_to_html_tag` 提取为 `dump.rs` 的 `pub fn`**：
-   - `dump.rs` 的 `dump_scene_json` 已有同款 kind→tag 逆映射，提取为 pub fn 共用；spec4b_dump 和 dump_page 都改用它——消除三处拷贝漂移。
-   - spec4b_dump 的迁移是 2 行改动，**其 `--json` 行为不变**（映射语义相同），spec4b 重跑即为迁移回归守卫。
+2. **新增 `dump.rs` 的 `pub fn kind_to_html_tag`**（以 spec4b_dump 私有版为准，浏览器配对语义）：
+   - ⚠ 与 `dump_scene_json` 的诊断映射**不是同款**（TextNode: `#text` vs `span`；ListView: `ul` vs `div`；CustomElement: `custom` vs `div`）——`kind_to_html_tag` 是配对语义（TextNode 在浏览器 `querySelectorAll('body *')` 无元素，diff.mjs 按 `#text` 过滤），`dump_scene_json` 保留自己的诊断近似映射（职责不同，注释说明，**不动**——避免破坏 `LoomHost.DumpSceneJson` 消费者）。
+   - spec4b_dump 迁移 = 删私有拷贝 + 改 import（2 行改动），**其 `--json` 行为逐字节不变**（同一份函数体搬进 lib）；正确性由 dump.rs 全表单测兜底（spec4b pkg 已清，无法运行验证，仅编译）。
 3. **新 runner `showcase/scripts/rect-diff/run-page.sh`**（bash，`set -e`）：
    - `run-page.sh <page>`：① browser-rect.mjs → ② `cargo run -p loomgui_core --example dump_page -- <page> --json` → ③ diff.mjs（`--tol-box=1 --tol-text=3`，与 spec4b 先例一致）。
    - 产物 JSON 落 `showcase/scripts/rect-diff/out/<page>/`；`.gitignore` 加 `out/`（暂态不入库；入库的只有报告 md）。
@@ -94,7 +94,7 @@ showcase.pkg.bin ──────► dump_page --json（新）    ──► co
 
 ## 5. 测试与验收门
 
-1. **前置 sanity：spec4b triad 重跑**（最先）——`kind_to_html_tag` 提取的回归守卫：fresh browser-rect + `spec4b_dump --json` + diff.mjs，应回到 ~0 box diffs（文本漂移容忍内，对照 snapshot-2026-07-21）。
+1. **前置验证（sanity 替代）**：`kind_to_html_tag` 提取的回归守卫 = dump.rs **全表单测**（全部 21 kind → tag 断言，TDD 先写）+ spec4b_dump 迁移后**编译通过**。⚠ spec4b-acceptance pkg/HTML 已不在库，spec4b_dump 无法运行——不做运行回归（snapshot-2026-07-21 的 spec4b 结果是历史基线，不可复跑）；spec4b_dump 指向死 pkg 的现状记入报告 triage 表。
 2. **主门：`run-page.sh settings` 产报告**——`snapshot-2026-08-12-settings.md` 入库。
 3. **已知容差**：settings label/value 文本多 → 预期少量 text diff 在 `--tol-text=3` 内，不是门失败（spec4b 先例）。
 4. **风险预案**：browser-rect 注入 reset.css 覆盖 UA 默认（input 控件盒模型）；settings 控件密集，若控件 rect 出现**系统性**偏移，先查是否 reset 引入的假 diff，再判真 bug。
@@ -107,4 +107,4 @@ showcase.pkg.bin ──────► dump_page --json（新）    ──► co
 - **Unity half**（browser vs Unity `DumpSceneJson`）：家里机任务 4；`DumpSceneJson` 输出形状 ≠ diff.mjs，届时需适配（归任务 4 设计）。
 - **8 页 dashboard**：任务 4（runner 已参数化，届时循环 + 逐页修 bug）。
 - **world-rect 发射**：动画页（home）需要，任务 4 升级。
-- **spec4b_dump 泛化 / 合并**：维持原样（spec4b 专用诊断）。
+- **spec4b_dump 泛化 / 合并**：维持原样（spec4b 专用诊断；其指向已清 pkg 的死引用记 triage，不在本轮修）。
