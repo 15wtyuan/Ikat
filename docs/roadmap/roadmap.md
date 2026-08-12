@@ -99,7 +99,7 @@
 
 ## 近期任务（里程碑 1 展开）
 
-> 里程碑 1「Unity 收官」拆成 5 个有依赖序的可执行任务。**任务 1 文本模型已 done（代码侧）**，Unity 视觉 QA 留家里机；**下一件事 = 任务 2 rect-diff 工具链**。
+> 里程碑 1「Unity 收官」拆成 5 个有依赖序的可执行任务。**任务 1 文本模型已 done（代码侧）**，Unity 视觉 QA 留家里机；**任务 2 rect-diff 工具链 settings 页已就绪（🟡，Unity rect 半留任务 4）；下一件事 = 任务 3（渐变）/任务 4（逐页修）并行**。
 
 **任务 1 · 文本模型回归标准子树（inline flow）**【✅ done · 2026-08-12】
 - **落地**：fence 6.4 分类（rich-text-block + mixed 报错 + img 豁免）→ pkg v33 + `Node.rich_text_block` → run 编译器（`compile_rich_runs`）→ solve 折叠（RichText leaf + `rich_text_fingerprint` memo）→ render Container+flag arm（多 run mesh + box-shadow）→ `hit_test_rich` + FFI。详见 spec `docs/superpowers/specs/2026-08-12-text-model-design.md` + plan `docs/superpowers/plans/2026-08-12-text-model.md`（9 task SDD，全部 per-task + final review APPROVED）。
@@ -107,7 +107,7 @@
 - **门**：✅ 代码侧全绿。⏳ Unity PlayMode 视觉 QA（form/mail inline flow 浏览器对齐 + span click via hit_test_rich + rect-diff）留家里机。
 
 **任务 2 · rect-diff 工具链打通一页**【🟡 工具链就绪 · 2026-08-12】
-- browser rect 已有（`showcase/scripts/rect-diff/browser-rect.mjs`，headless Chrome 导出 DOM rect；2026-07-21 跑过有 snapshot）；Unity rect 待接（`DumpSceneJson` debug accessor 导出 render rect）+ `diff.mjs` 比对。选一页端到端跑通。
+- browser rect 已有（`showcase/scripts/rect-diff/browser-rect.mjs`，headless Chrome 导出 DOM rect）；core dump 路径已打通（`dump_page --json` 接 `diff.mjs` 比对）。Unity rect（`DumpSceneJson` debug accessor 导出 render rect）半留任务 4。
 - **门**：rect-diff 在一页产比对报告。（工具链可先搭，但结果要等任务 1 文本对了才有意义。）
 - **进度（2026-08-12）**：settings 页端到端跑通——browser-rect → **core dump（`dump_page --json`，非 Unity rect 路径）** → diff.mjs 三步 runner（`run-page.sh`）产报告 `snapshot-2026-08-12-settings.md`，门「报告产出」✅ 达成。4 处工具链修复（合成根 DFS / 0-size 原点 / preview letterbox）剔 206 假 diff，剩 12 残余（slider thumb transform 发射缺口 / CJK 字宽 / sub-2px 级联）全归类为 Task 4 燃料，**settings 零 core 布局 bug**。Unity rect 半（原 `DumpSceneJson` 路径）仍未接；12 残余随 Task 4 逐页修。
 
