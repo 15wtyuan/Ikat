@@ -202,7 +202,23 @@ fn main() {
     }
 
     if let Some(out_path) = json_out {
-        let dfs = collect_dfs(scene, root_id);
+        // DFS from the synthetic Stage root's CHILDREN, skipping the root
+        // itself: the root (create_root) has no browser-side counterpart
+        // (browser enumerates `body *`, which never includes the Stage
+        // wrapper). Including it injects a 1920x1080 plain-div into the
+        // `div|` bucket that mispairs with a real browser plain-div and
+        // surfaces false huge-rect diffs.
+        let dfs = {
+            let roots_children: Vec<NodeId> = scene
+                .get(root_id)
+                .map(|n| n.children.clone())
+                .unwrap_or_default();
+            let mut v = Vec::new();
+            for child in roots_children {
+                collect_dfs_rec(scene, child, &mut v);
+            }
+            v
+        };
         let nodes_json: Vec<serde_json::Value> = dfs
             .iter()
             .enumerate()
@@ -310,14 +326,10 @@ fn parse_json_out_arg() -> Option<String> {
     None
 }
 
-/// DFS 先序收集节点 id（含 root）。与浏览器 `body *` 的 DOM 序同源——子树按子节点出现
-/// 顺序递归展开。核心 Scene 只存 `Node.children: Vec<NodeId>`，无需父→子索引构建。
-fn collect_dfs(scene: &Scene, root: NodeId) -> Vec<NodeId> {
-    let mut out = Vec::new();
-    collect_dfs_rec(scene, root, &mut out);
-    out
-}
-
+/// DFS 先序收集 `id` 的后代（不含 `id` 自身）。与浏览器 `body *` 的 DOM 序同源——子树
+/// 按子节点出现顺序递归展开。核心 Scene 只存 `Node.children: Vec<NodeId>`，无需父→子
+/// 索引构建。调用方选起始层（合成 Stage 根的子节点），使输出与浏览器侧 `body *` 枚举
+/// 对齐——Stage 根本身无浏览器对应物，混入会污染 idless 桶配对。
 fn collect_dfs_rec(scene: &Scene, id: NodeId, out: &mut Vec<NodeId>) {
     out.push(id);
     // 拷 children 出去再递归——避开 scene.nodes 的不可变借用跨递归调用。
