@@ -1583,3 +1583,10 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **根因**：color space 是 Unity 编辑器启动时读的，运行时不热更；改文件只改磁盘，进程内存仍用启动时的值。
 **解决**：改 color space 后完全重启 Unity（`Stop-Process -Name Unity -Force` + `uloop launch`），别指望热生效。shader 里 `UNITY_COLORSPACE_GAMMA` 宏也是编译期按 color space 定义，改后 shader 会重编译。
 **教训**：ProjectSettings 的启动期配置（color space 等）改完必重启验证；改 color space 同时影响 shader 宏 + 渲染管线状态，重启是唯一可靠生效方式。
+
+### 坑 201：SDD per-task 只跑本 crate 测试，漏下游 crate fixture 回归
+
+**症状**：T1（fence 加 `FenceMixedInlineBlock`）只跑 `cargo test -p loomgui_fence` 全绿，但弄红了 packer 的 2 个 fixture 测（bridge/build 用的 mixed HTML 被新规则拒）——T2 才发现 + 修。
+**根因**：per-task global constraint 只指定本 crate 测试。fence 的诊断输出是 packer（bridge）的消费输入，规则一变，packer fixture 依赖的旧行为就崩。
+**解决**：SDD dispatch 的 global constraints 加 `cargo test --workspace` 绿门（或至少受影响 crate + 依赖者）。
+**教训**：改 A crate 的公共输出（fence 诊断 / pkg 格式 / FFI / Node 字段 / 公共 enum）必跑 workspace 测试——下游 fixture 可能依赖旧行为。per-task review 只审本 task diff，跨 crate 回归要靠 workspace 测试门兜（SDD task 割裂的固有盲区）。

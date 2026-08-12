@@ -102,6 +102,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 - **所有布局帧末一致**：每帧一次 solve。
 - **单一动画时钟**：`TweenManager::update(dt)` 是唯一时钟。ScrollPane 物理是例外（自维护 tween）。
 - **坐标系**：核心 = 左上原点、y 向下。y-flip 是后端根一次性变换。
+- **NodeFlags 是交互态**（process/rematch only，solve/world/build skip）：被 solve/render 读的字段（如 `rich_text_block`）用独立 `Node` 字段，不进 NodeFlags bit。
 - **公共语义树与内部渲染树可以不同**：文本在公共层是正常 HTML 子树（TextNode/TextElement），内部扁平化为 runs。
 
 ### 旧范式（v1 残留——摸黑+三束重构中逐步消除）
@@ -133,6 +134,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 **dump_*.rs 诊断 example**（pkg.bin 路径，验 core 实际状态而非猜代码）：
 - `dump_text` — 文本换行（验 known.width 来源、行数、pen 坐标）
+- `dump_rich_text` — rich-text-block inline flow（验 inline 子折进父一崽测、runs/lines、folded rect=0、公共树 ID 保留）
 - `dump_img` — 图片尺寸（css.w/h、rect、tex、闭包 `known.w`）
 - `dump_scroll` — 滚动（overlap、scroll_pos、content_size）
 - `dump_bg` — 节点 base_style（验是否进 pkg）

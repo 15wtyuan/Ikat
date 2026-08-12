@@ -99,13 +99,12 @@
 
 ## 近期任务（里程碑 1 展开）
 
-> 里程碑 1「Unity 收官」拆成 5 个有依赖序的可执行任务。**第一件事 = 任务 1 文本渲染修复**——文本在每一页，渲染不对会让 rect-diff / 逐页验收全失准（文字 rect 错位），先修文本再谈验收标尺。
+> 里程碑 1「Unity 收官」拆成 5 个有依赖序的可执行任务。**任务 1 文本模型已 done（代码侧）**，Unity 视觉 QA 留家里机；**下一件事 = 任务 2 rect-diff 工具链**。
 
-**任务 1 · 文本模型回归标准子树（inline flow）**【第一件事 · 复合束级】
-- **症状**：showcase 文本经常被换行/错位——根因 fence.md §2.2 自述「LoomGUI 运行时不实现 CSS inline flow，Inline 标签当 block-level flex」，本该 inline 流动的文本（段落、span 混排）被当 flex item。
-- **范围**：inline run 编译（TextRun / ImageRun / LinkRun）+ 公共树保留 TextNode/TextElement/Image/Link 的 ID 和事件（公共语义树 ≠ 内部渲染树）+ 复用 v1.6 字体自绘 / v1.8 文字效果 / `measure_rich_text` 原语。`display:block` RichText 暗号已退役。
-- **规模**：复合束级（roadmap_old M4，~2-3 周），**需新 design spec**（旧 v1.7-rich-text spec 是退役暗号的，新范式要重写）。
-- **门**：showcase 文本 inline 流动 + 换行对齐浏览器（form/mail 富文本块绿）。
+**任务 1 · 文本模型回归标准子树（inline flow）**【✅ done · 2026-08-12】
+- **落地**：fence 6.4 分类（rich-text-block + mixed 报错 + img 豁免）→ pkg v33 + `Node.rich_text_block` → run 编译器（`compile_rich_runs`）→ solve 折叠（RichText leaf + `rich_text_fingerprint` memo）→ render Container+flag arm（多 run mesh + box-shadow）→ `hit_test_rich` + FFI。详见 spec `docs/superpowers/specs/2026-08-12-text-model-design.md` + plan `docs/superpowers/plans/2026-08-12-text-model.md`（9 task SDD，全部 per-task + final review APPROVED）。
+- **实证**：packer showcase 0 mixed；`dump_rich_text` 实测 mail 正文 7 inline 子→1 行（非竖排），公共树 ID 保留。workspace 1506 测全绿。
+- **门**：✅ 代码侧全绿。⏳ Unity PlayMode 视觉 QA（form/mail inline flow 浏览器对齐 + span click via hit_test_rich + rect-diff）留家里机。
 
 **任务 2 · rect-diff 工具链打通一页**
 - browser rect 已有（`showcase/scripts/rect-diff/browser-rect.mjs`，headless Chrome 导出 DOM rect；2026-07-21 跑过有 snapshot）；Unity rect 待接（`DumpSceneJson` debug accessor 导出 render rect）+ `diff.mjs` 比对。选一页端到端跑通。
@@ -128,10 +127,10 @@
 
 ---
 
-## 当前快照（2026-08-11，时点状态）
+## 当前快照（2026-08-12，时点状态）
 
 - 摸黑打通 + 三束加宽纪元已完工（详见 `roadmap_old.md`）：Unity 端到端可用，21 控件全栈、cascade / 动画 / 虚拟列表 / box-shadow / 文字特效 / transform / filter 矩阵已交付，release CI 就绪。
-- **近期优先**：进入**里程碑 1**，第一件事 = **任务 1 文本渲染修复**（文本阻塞所有验收；详见上节「近期任务」）。
+- **近期优先**：**里程碑 1 任务 1（文本模型 inline flow）代码侧 done**（commit `5a9cfafc` + `458d8ce9` GUI exe）；Unity 视觉 QA 留家里机。下一件事 = **任务 2 rect-diff 工具链**（详见上节「近期任务」）。
 - **悬置判据项**：动画引擎终态（等 layout 动画需求）、Godot / 编辑器（等里程碑 1、2）。
 
 ---
