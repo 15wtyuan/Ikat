@@ -99,16 +99,17 @@
 
 ## 近期任务（里程碑 1 展开）
 
-> 里程碑 1「Unity 收官」拆成 5 个有依赖序的可执行任务。**任务 1 文本模型已 done（代码侧）**，Unity 视觉 QA 留家里机；**下一件事 = 任务 2 rect-diff 工具链**。
+> 里程碑 1「Unity 收官」拆成 5 个有依赖序的可执行任务。**任务 1 文本模型已 done（代码侧）**，Unity 视觉 QA 留家里机；**任务 2 rect-diff 工具链 settings 页已就绪（🟡，Unity rect 半留任务 4）；下一件事 = 任务 3（渐变）/任务 4（逐页修）并行**。
 
 **任务 1 · 文本模型回归标准子树（inline flow）**【✅ done · 2026-08-12】
 - **落地**：fence 6.4 分类（rich-text-block + mixed 报错 + img 豁免）→ pkg v33 + `Node.rich_text_block` → run 编译器（`compile_rich_runs`）→ solve 折叠（RichText leaf + `rich_text_fingerprint` memo）→ render Container+flag arm（多 run mesh + box-shadow）→ `hit_test_rich` + FFI。详见 spec `docs/superpowers/specs/2026-08-12-text-model-design.md` + plan `docs/superpowers/plans/2026-08-12-text-model.md`（9 task SDD，全部 per-task + final review APPROVED）。
 - **实证**：packer showcase 0 mixed；`dump_rich_text` 实测 mail 正文 7 inline 子→1 行（非竖排），公共树 ID 保留。workspace 1506 测全绿。
 - **门**：✅ 代码侧全绿。⏳ Unity PlayMode 视觉 QA（form/mail inline flow 浏览器对齐 + span click via hit_test_rich + rect-diff）留家里机。
 
-**任务 2 · rect-diff 工具链打通一页**
-- browser rect 已有（`showcase/scripts/rect-diff/browser-rect.mjs`，headless Chrome 导出 DOM rect；2026-07-21 跑过有 snapshot）；Unity rect 待接（`DumpSceneJson` debug accessor 导出 render rect）+ `diff.mjs` 比对。选一页端到端跑通。
+**任务 2 · rect-diff 工具链打通一页**【🟡 工具链就绪 · 2026-08-12】
+- browser rect 已有（`showcase/scripts/rect-diff/browser-rect.mjs`，headless Chrome 导出 DOM rect）；core dump 路径已打通（`dump_page --json` 接 `diff.mjs` 比对）。Unity rect（`DumpSceneJson` debug accessor 导出 render rect）半留任务 4。
 - **门**：rect-diff 在一页产比对报告。（工具链可先搭，但结果要等任务 1 文本对了才有意义。）
+- **进度（2026-08-12）**：settings 页端到端跑通——browser-rect → **core dump（`dump_page --json`，非 Unity rect 路径）** → diff.mjs 三步 runner（`run-page.sh`）产报告 `snapshot-2026-08-12-settings.md`，门「报告产出」✅ 达成。4 处工具链修复（合成根 DFS / 0-size 原点 / preview letterbox）剔 206 假 diff，剩 12 残余（slider thumb transform 发射缺口 / CJK 字宽 / sub-2px 级联）全归类为 Task 4 燃料，**settings 零 core 布局 bug**。Unity rect 半（原 `DumpSceneJson` 路径）仍未接；12 残余随 Task 4 逐页修。
 
 **任务 3 · 渐变补齐（home radial 光晕 + 多 stop）**
 - fence 接 `radial-gradient` + `linear-gradient` 多 stop / 任意角度（现仅 linear 2 色 4 正交方向）；core render；radial 需 Unity shader program（per-vertex 做不了）。
@@ -130,7 +131,7 @@
 ## 当前快照（2026-08-12，时点状态）
 
 - 摸黑打通 + 三束加宽纪元已完工（详见 `roadmap_old.md`）：Unity 端到端可用，21 控件全栈、cascade / 动画 / 虚拟列表 / box-shadow / 文字特效 / transform / filter 矩阵已交付，release CI 就绪。
-- **近期优先**：**里程碑 1 任务 1（文本模型 inline flow）代码侧 done**（commit `5a9cfafc` + `458d8ce9` GUI exe）；Unity 视觉 QA 留家里机。下一件事 = **任务 2 rect-diff 工具链**（详见上节「近期任务」）。
+- **近期优先**：**里程碑 1 任务 1（文本模型 inline flow）代码侧 done**（commit `5a9cfafc` + `458d8ce9` GUI exe）；**任务 2 rect-diff 工具链 settings 页端到端跑通**（core-dump 路径，报告入库，2026-08-12）—— 12 残余 + Unity rect 半留 Task 4。下一件事 = **任务 3（渐变补齐，home 依赖）与任务 4（逐页修）并行推进**。
 - **悬置判据项**：动画引擎终态（等 layout 动画需求）、Godot / 编辑器（等里程碑 1、2）。
 
 ---

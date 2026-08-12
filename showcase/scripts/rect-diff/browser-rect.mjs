@@ -24,7 +24,13 @@ try {
   // Inject reset AFTER load so it overrides UA defaults before measurement;
   // showcase <style> rules still win where they specify values.
   await page.addStyleTag({ content: reset });
-  await page.waitForTimeout(100); // let reset reflow settle
+  // loom-preview.js fitScale() sets body.style.zoom to letterbox the 1920x1080
+  // .root inside the preview window — a preview-only transform with no core
+  // counterpart that uniformly shrinks every rect ~4.5% and cascades into
+  // hundreds of false width/position diffs. Clear it so the measurement
+  // reflects the true 1:1 layout core produces.
+  await page.evaluate(() => { document.body.style.zoom = ''; });
+  await page.waitForTimeout(100); // let reset + zoom-clear reflow settle
 
   const rects = await page.evaluate(() => {
     const els = document.querySelectorAll('body *');

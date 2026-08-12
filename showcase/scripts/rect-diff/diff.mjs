@@ -1,13 +1,12 @@
 // rect-diff: compare browser rect JSON (browser-rect.mjs) vs core rect JSON
-// (spec4b_dump --json). Both arrays have the same element shape
+// (dump_page --json). Both arrays have the same element shape
 // {domIndex, tag, id, classes, x, y, w, h}, but the two enumerations are NOT
 // index-aligned, so domIndex alone is unreliable as a pairing key.
 //
-// Why domIndex misaligns: core DFS emits the implicit root + a component
-// wrapper before the user tree, so core's element N typically sits at domIndex
-// ~N+2 vs browser's element N. Browser `querySelectorAll('body *')` also
-// excludes TextNodes, while core DFS includes inter-element whitespace
-// TextNodes (~20 of them in spec4b). Both gaps would generate false positives
+// Why domIndex misaligns: core DFS may still differ from browser
+// `querySelectorAll('body *')` — component wrappers injected around the user
+// tree, TextNodes that core emits but `body *` excludes, and other
+// enumeration-order quirks. Any such offset would generate false positives
 // under naive domIndex pairing.
 //
 // Pairing strategy:
@@ -21,7 +20,7 @@
 //   --tol-box  (default 1) rect tolerance for non-text elements
 //   --tol-text (default 3) rect tolerance for span / #text (font-metric drift)
 // Exit code: 1 if any diff / unmatched, else 0 (idless-unpaired is informational —
-// core's implicit root + component wrappers always appear core-side only).
+// core's component wrappers always appear core-side only).
 
 import { readFileSync } from 'fs';
 
@@ -110,7 +109,14 @@ function comparePair(bEl, cEl) {
   const isText = cEl.tag === 'span' || cEl.tag === '#text';
   const tol = isText ? textTol : boxTol;
   const tag = label(bEl, 'b');
+  // A 0x0 box (display:none / collapsed) has no meaningful position: Chromium
+  // reports origin (0,0) while core reports the parent content-box origin.
+  // Skip x/y when either side is 0-size; w/h is always compared so a genuine
+  // visible-vs-hidden collapse still surfaces as a real diff.
+  const bEmpty = bEl.w === 0 && bEl.h === 0;
+  const cEmpty = cEl.w === 0 && cEl.h === 0;
   for (const f of FIELDS) {
+    if ((f === 'x' || f === 'y') && (bEmpty || cEmpty)) continue;
     const bv = bEl[f];
     const cv = cEl[f];
     if (typeof bv !== 'number' || typeof cv !== 'number') continue;
@@ -161,7 +167,7 @@ if (idlessUnpairedLines.length) {
 }
 
 // Exit code deliberately excludes idless-unpaired: a non-zero count there is
-// structurally expected (core's implicit root + component wrappers, domIndex
+// structurally expected (core's component wrappers, domIndex
 // offset) and is reported as informational, not a gate failure. Only rect
 // DIFFS on paired elements and id-mismatched UNMATCHED entries fail the gate.
 const failing = diffCount + unmatchedLines.length;

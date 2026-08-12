@@ -7,14 +7,17 @@
 //! 重点取证：.root / .sidebar / .main 等关键容器的 display_mode 与 layout_rect，
 //! 对照 HTML 预期（settings 应左右布局、home 应纵向 flex 等）。
 
+use loomgui_core::dump::kind_to_html_tag;
 use loomgui_core::scene::dynamic::append_child;
-use loomgui_core::scene::node::{Node, NodeId, NodeKind};
+use loomgui_core::scene::node::{Node, NodeId, NodeKind, Scene};
 use loomgui_core::stage::Stage;
 
 fn main() {
     let page = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "home".to_string());
+
+    let json_out = parse_json_out_arg();
 
     let root = env!("CARGO_MANIFEST_DIR");
     let pkg_path = format!(
@@ -197,6 +200,47 @@ fn main() {
             }
         }
     }
+
+    if let Some(out_path) = json_out {
+        // DFS from the synthetic Stage root's CHILDREN, skipping the root
+        // itself: the root (create_root) has no browser-side counterpart
+        // (browser enumerates `body *`, which never includes the Stage
+        // wrapper). Including it injects a 1920x1080 plain-div into the
+        // `div|` bucket that mispairs with a real browser plain-div and
+        // surfaces false huge-rect diffs.
+        let dfs = {
+            let roots_children: Vec<NodeId> = scene
+                .get(root_id)
+                .map(|n| n.children.clone())
+                .unwrap_or_default();
+            let mut v = Vec::new();
+            for child in roots_children {
+                collect_dfs_rec(scene, child, &mut v);
+            }
+            v
+        };
+        let nodes_json: Vec<serde_json::Value> = dfs
+            .iter()
+            .enumerate()
+            .map(|(i, nid)| {
+                let n = scene.get(*nid).expect("DFS node must exist");
+                let r = n.layout_rect;
+                serde_json::json!({
+                    "domIndex": i,
+                    "tag": kind_to_html_tag(n.kind),
+                    "id": n.id_attr.clone(),
+                    "classes": n.classes.clone(),
+                    "x": r.x,
+                    "y": r.y,
+                    "w": r.w,
+                    "h": r.h,
+                })
+            })
+            .collect();
+        let json_str = serde_json::to_string_pretty(&nodes_json).expect("serialize json");
+        std::fs::write(&out_path, json_str).expect("write json");
+        eprintln!("wrote {} DFS nodes -> {}", dfs.len(), out_path);
+    }
 }
 
 fn print_row(n: &Node) {
@@ -268,4 +312,32 @@ fn icon_sizes() -> Vec<(String, u32, u32)> {
     .iter()
     .map(|n| (format!("res/icons/{}.png", n), 128, 128))
     .collect()
+}
+
+/// 从 `std::env::args` 解析 `--json <path>`。无该参 → None。
+/// 不接 clap（零新依赖，CLI 表面极小，手写足够）。
+fn parse_json_out_arg() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--json" {
+            return Some(args.next().expect("--json requires a <path> argument"));
+        }
+    }
+    None
+}
+
+/// DFS 先序收集 `id` 的后代（不含 `id` 自身）。与浏览器 `body *` 的 DOM 序同源——子树
+/// 按子节点出现顺序递归展开。核心 Scene 只存 `Node.children: Vec<NodeId>`，无需父→子
+/// 索引构建。调用方选起始层（合成 Stage 根的子节点），使输出与浏览器侧 `body *` 枚举
+/// 对齐——Stage 根本身无浏览器对应物，混入会污染 idless 桶配对。
+fn collect_dfs_rec(scene: &Scene, id: NodeId, out: &mut Vec<NodeId>) {
+    out.push(id);
+    // 拷 children 出去再递归——避开 scene.nodes 的不可变借用跨递归调用。
+    let children: Vec<NodeId> = scene
+        .get(id)
+        .map(|n| n.children.clone())
+        .unwrap_or_default();
+    for c in children {
+        collect_dfs_rec(scene, c, out);
+    }
 }
