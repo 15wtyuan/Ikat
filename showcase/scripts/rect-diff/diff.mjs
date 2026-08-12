@@ -110,7 +110,14 @@ function comparePair(bEl, cEl) {
   const isText = cEl.tag === 'span' || cEl.tag === '#text';
   const tol = isText ? textTol : boxTol;
   const tag = label(bEl, 'b');
+  // A 0x0 box (display:none / collapsed) has no meaningful position: Chromium
+  // reports origin (0,0) while core reports the parent content-box origin.
+  // Skip x/y when either side is 0-size; w/h is always compared so a genuine
+  // visible-vs-hidden collapse still surfaces as a real diff.
+  const bEmpty = bEl.w === 0 && bEl.h === 0;
+  const cEmpty = cEl.w === 0 && cEl.h === 0;
   for (const f of FIELDS) {
+    if ((f === 'x' || f === 'y') && (bEmpty || cEmpty)) continue;
     const bv = bEl[f];
     const cv = cEl[f];
     if (typeof bv !== 'number' || typeof cv !== 'number') continue;
