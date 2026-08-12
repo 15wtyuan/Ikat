@@ -18,6 +18,37 @@ pub fn json_escape(s: &str) -> String {
     out
 }
 
+/// NodeKind → 浏览器侧 `tagName.toLowerCase()` 对应 tag 串（rect-diff 配对语义）。
+/// 与 `dump_scene_json` 的诊断 tag 映射**不同**（TextNode: `#text` vs `span`；ListView:
+/// `ul` vs `div`；CustomElement: `custom` vs `div`）——本函数服务于浏览器 rect 配对
+/// （TextNode 在浏览器 `querySelectorAll('body *')` 无元素，diff.mjs 按 `#text` 过滤），
+/// 诊断 dump 保留自己的近似映射。全部 21 kind 由单测断言覆盖（防漂移）。
+pub fn kind_to_html_tag(k: NodeKind) -> &'static str {
+    match k {
+        NodeKind::Container => "div",
+        NodeKind::TextNode => "#text",
+        NodeKind::TextElement => "span",
+        NodeKind::Button => "button",
+        NodeKind::Image => "img",
+        NodeKind::TextField
+        | NodeKind::NumberField
+        | NodeKind::Slider
+        | NodeKind::Toggle
+        | NodeKind::RadioButton => "input",
+        NodeKind::TextArea => "textarea",
+        NodeKind::Dropdown => "select",
+        NodeKind::OptionItem => "option",
+        NodeKind::ProgressBar => "progress",
+        NodeKind::ListView => "ul",
+        NodeKind::ListItem => "li",
+        NodeKind::Slot => "slot",
+        NodeKind::CustomElement => "custom",
+        NodeKind::Template => "template",
+        NodeKind::TabList => "div",
+        NodeKind::Tab => "button",
+    }
+}
+
 /// 整树 JSON：每节点 {node_id, parent, tag, id, classes, kind, layout, world_matrix, visible}。
 pub fn dump_scene_json(scene: &Scene) -> String {
     let mut s = String::from("[");
@@ -129,5 +160,30 @@ mod tests {
             "id 中的引号被转义：{}",
             json
         );
+    }
+
+    #[test]
+    fn kind_to_html_tag_matches_browser_pairing_semantics() {
+        assert_eq!(kind_to_html_tag(NodeKind::Container), "div");
+        assert_eq!(kind_to_html_tag(NodeKind::TextNode), "#text");
+        assert_eq!(kind_to_html_tag(NodeKind::TextElement), "span");
+        assert_eq!(kind_to_html_tag(NodeKind::Button), "button");
+        assert_eq!(kind_to_html_tag(NodeKind::Image), "img");
+        assert_eq!(kind_to_html_tag(NodeKind::TextField), "input");
+        assert_eq!(kind_to_html_tag(NodeKind::NumberField), "input");
+        assert_eq!(kind_to_html_tag(NodeKind::Slider), "input");
+        assert_eq!(kind_to_html_tag(NodeKind::Toggle), "input");
+        assert_eq!(kind_to_html_tag(NodeKind::RadioButton), "input");
+        assert_eq!(kind_to_html_tag(NodeKind::TextArea), "textarea");
+        assert_eq!(kind_to_html_tag(NodeKind::Dropdown), "select");
+        assert_eq!(kind_to_html_tag(NodeKind::OptionItem), "option");
+        assert_eq!(kind_to_html_tag(NodeKind::ProgressBar), "progress");
+        assert_eq!(kind_to_html_tag(NodeKind::ListView), "ul");
+        assert_eq!(kind_to_html_tag(NodeKind::ListItem), "li");
+        assert_eq!(kind_to_html_tag(NodeKind::Slot), "slot");
+        assert_eq!(kind_to_html_tag(NodeKind::CustomElement), "custom");
+        assert_eq!(kind_to_html_tag(NodeKind::Template), "template");
+        assert_eq!(kind_to_html_tag(NodeKind::TabList), "div");
+        assert_eq!(kind_to_html_tag(NodeKind::Tab), "button");
     }
 }
