@@ -83,7 +83,7 @@
 **用标准 HTML 元素**：AI 训练数据海量、浏览器原生渲染。不自创框架 Widget 标签（如 `<scroll-view>`）——已有的标准 HTML/CSS 能力（如 `overflow`）不用自定义标签重复。
 
 **标准布局语义**：
-- `div` 默认 `display:block`（标准浏览器默认）；`button/img` 默认 inline（必须放进 flex 容器，见 fence §6.5）；`span` 是文本级行内元素；`template` 默认 `display:none`；`slot` 透明继承父级。
+- `div` 默认 `display:block`（标准浏览器默认）；`button/img` 默认 inline（必须放进 flex 容器，见 fence §6.5）；`span` 是文本级行内元素（**默认归 rich_text_block**——含文字时走 inline flow 整体测量 text+padding，而非 inline→flex 容器；显式 `display:flex` 才留 flex，见坑 202）；`template` 默认 `display:none`；`slot` 透明继承父级。
 - 控件与列表无专属标签——作者在 `<div>` 上写 WAI-ARIA `role` 表达（`role=slider`/`role=list`/...），视觉部件用 `data-slot`（`data-slot=fill`/`thumb`）。详见 [fence.md](fence.md) §2.3。
 - `display:flex` 默认 `flex-direction:row`（标准 CSS 默认）。
 - 需要纵向堆叠明确写 `display:flex; flex-direction:column`。

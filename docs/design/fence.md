@@ -206,7 +206,7 @@ CSS 在围栏中以三个正交维度建模：
 
 **背景**
 
-`background-color`, `background-image`, `background-size`（`cover` / `contain` / `100%` / `stretch`）, `background-clip`, `-webkit-background-clip`
+`background-color`, `background-image`, `background-size`（`cover` / `contain` / `100%` / `stretch`）, `background-repeat`（`repeat` / `no-repeat` / `repeat-x` / `repeat-y`，默认 `repeat`）, `background-clip`, `-webkit-background-clip`
 
 **视觉**
 

@@ -546,6 +546,9 @@ bug1 小拖松手回原位；bug2 快速拖到顶/底"先露空白再突然回�
 **症状**：§1.6 `.bg-demo` 在浏览器直接打开，`contain` 行（983×64 容器装 64×64 home.png）平铺出 ~15 个图标，非预期单图居中。
 **根因**：CSS 默认 `background-repeat:repeat`，`.bg-demo`/`.br-demo` 未显式 `no-repeat`。LoomGUI **不支持 `background-repeat` 属性**（解析器忽略未知属性，render 只画单图），故 Unity 端 contain 本就单图——浏览器（平铺）与 Unity（单图）渲染不一致，破坏"浏览器=ground truth"假设。
 **解决**：`style.css` `.bg-demo`/`.br-demo` 加 `background-repeat:no-repeat`（`5f01bbb` 后续 fix）。LoomGUI 忽略此属性对 Unity 无影响（无害冗余），但让浏览器对齐 Unity + AI 心智模型（contain=单图居中）。
+
+> **2026-08 更新**：本 session **实现了 `background-repeat`**（围栏 CSS_PROPS + `ResolvedStyle.background_repeat` + render `tile_image` 平铺，默认 `repeat` per CSS）。现在 Unity 也平铺（与浏览器一致）；标本馆 `.bg-cover`/`.bg-contain` 显式 `no-repeat`（单图演示 contain/cover）。**测量 background-size 渲染时务必加 `no-repeat`**——默认 repeat 会把 contain 缩后的图（80×80）平铺填满盒，测量到的是平铺结果（看似 fill/intrinsic），本 session 因此误判「Chrome 忽略 background-size」很久，实则 repeat 平铺。
+
 **教训**：showcase 是引擎无关 DSL 范例源，**浏览器渲染须与 Unity 语义一致**——LomGUI 不支持的 CSS 属性若浏览器默认值会改变渲染（如 repeat），showcase 必须显式声明对齐值。AI 可预测性：AI 看 showcase 学 contain 应配 no-repeat，三端（浏览器/Unity/AI 心智）一致。**别假设浏览器=ground truth 自动对齐 Unity**——LoomGUI 围栏外的属性浏览器按 CSS 默认走，可能发散。
 
 ### 坑 81：showcase bg-demo 容器 983×64 极端扁宽 → cover/100% 把 64×64 图拉成认不出横带，"图看不出"
@@ -1590,3 +1593,17 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **根因**：per-task global constraint 只指定本 crate 测试。fence 的诊断输出是 packer（bridge）的消费输入，规则一变，packer fixture 依赖的旧行为就崩。
 **解决**：SDD dispatch 的 global constraints 加 `cargo test --workspace` 绿门（或至少受影响 crate + 依赖者）。
 **教训**：改 A crate 的公共输出（fence 诊断 / pkg 格式 / FFI / Node 字段 / 公共 enum）必跑 workspace 测试——下游 fixture 可能依赖旧行为。per-task review 只审本 task diff，跨 crate 回归要靠 workspace 测试门兜（SDD task 割裂的固有盲区）。
+
+### 坑 202：span(inline→flex)+padding+文字子 → taffy flex 容器丢文字测量，宽度退化成 padding 值
+
+**症状**：`<span style="padding:10px 16px">A</span>` 在 LoomGUI 测成 64 宽（content=32=padding 值），浏览器 ~41（text 9 + padding 32）。无 padding 的 span 正常（量成 text 宽）；div+padding+文字 也正常。
+**根因**：LoomGUI 无 inline 布局，`span`(inline) 在 css_resolve 被映射成 `display:flex`（"inline→flex for taffy compatibility"）→ span 成 flex 容器 + TextNode flex 子。**带 padding 的 flex 容器 + 被测量的叶子子节点 → taffy 0.12 算容器 content 时忽略子节点测量尺寸**（measure_text 实测 "A"=8.97 正确，但 flex 容器没用它）。probe 四组对照定位：span+padding=64(bug)，span 无 padding=11(ok)，div+padding=43(ok)，span display:block+padding=43(ok)。
+**解决**：`rich_text_classify::is_block_container` 让 span（TextElement）**默认归 rich_text_block**（text+padding 作为整体用 measure_rich_text 量，与 div 同路径），从根上消除 flex 容器+padding+被测文字子的病态组合。仅当作者**显式 `display:flex`** 才保留 flex（`has_explicit_display_flex` 查 inline style 串区分"默认 inline→flex hack"与"作者显式 flex"）。
+**教训**：inline 级元素（span）含文字时本就该走 inline flow 整体测量，不该被 hack 成 flex 容器 + 单独文字 flex 子。"inline→flex" 是 taffy 无 inline 的兼容 hack，但对"span+文字"产生了测量病态——rich_text_block 才是 inline 文本容器的正确归宿。
+
+### 坑 203：class 规则的 background-image:url() 走 dynamic_rules，打包器漏归一 → Unity 白块
+
+**症状**：标本馆 `.bg-cover`/`.bg-contain`（class 规则里 `background-image:url("../res/icons/lab.png")`）在 Unity 渲染成白块（图没显示），SpriteResolver 无 warning 但回退白纹理。
+**根因**：CSS url() 出现在**两处**——inline style（烘进 base_style.background_image，已提取成路径）和 `<style>` 块 class 规则（存进 `DynamicRule.declarations` 的原始 url 值串，runtime rematch 用 apply_decl 应用）。打包器 build.rs 只归一 `<img src>` + base_style，**漏 dynamic_rules 里的 bg-image** → runtime 节点拿到原始 HTML 相对路径 `../res/icons/lab.png`，SpriteResolver key 是 `res/icons/lab.png`（workspace 相对）→ miss → 白纹理。inline bg-image 不白（base_style 归一了）只加剧迷惑性。
+**解决**：build.rs 抽 `normalize_bg_ref(html_rel, path, refs)` helper，**同时归一 base_style.background_image（inline）和 dynamic_rules 的 background-image/background 声明值**（class 规则），并都补进 refs（atlas 交叉验证）。`extract_sprites` 只扫 inline style，class 规则 bg-image 不进 referenced_sprites——必须单独归一+登记。
+**教训**：CSS 声明值有两套生命周期——inline（打包期烘进 base_style，pkg 静态字段）和 class 规则（dynamic_rules，runtime rematch 用原始值串重放）。任何"路径/引用归一化"（url、src）两处都要覆盖，否则 inline 对、class 错。诊断：bg-image 白块先 dump `n.style.background_image` 看是 HTML 相对（`../`）还是 workspace 相对（`res/`），前者=漏归一。

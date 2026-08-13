@@ -143,6 +143,7 @@ fn fence_md_covers_critical_css_props() {
         "flex-wrap",
         "background-clip",
         "-webkit-background-clip",
+        "background-repeat",
         "-webkit-text-stroke",
         "font-effect",
         "caret-color",
