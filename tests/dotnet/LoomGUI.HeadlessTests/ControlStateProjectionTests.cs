@@ -257,6 +257,35 @@ namespace LoomGUI.HeadlessTests
             finally { StageHarness.Destroy(stage); }
         }
 
+        /// <summary>
+        /// Node.Touchable round-trip（原 throw NE）+ Pick 联动：untouchable 节点自身
+        /// 不参与命中（点落到父），恢复后命中回归。CSS pointer-events 的运行时面。
+        /// </summary>
+        [Fact]
+        public void node_touchable_roundtrip_and_pick()
+        {
+            var (stage, ctx, root) = LoadControlsFixture();
+            try
+            {
+                var sld = root.Get<Slider>("sld");
+                Assert.True(sld.Touchable, "default touchable");
+                Assert.True(root.Touchable, "root default touchable");
+                // slider 区域中心点当前命中 sld（或其 thumb 子）——先取基线命中者。
+                // 控件子节点多为 0 高空盒（fixture 无内容），(100,50) 的命中者是 root
+                // 自身（子全 miss 后 fallback）。对 root 开关 touchable 验整树命中门。
+                Node before = ctx.Pick(new Vector2(100f, 50f));
+                Assert.Same(root, before);
+                root.Touchable = false;
+                Assert.False(root.Touchable);
+                // 外层 scene root（fixture harness 造的包装 div）仍可命中——本节点被跳过。
+                Assert.NotSame(root, ctx.Pick(new Vector2(100f, 50f)));
+                root.Touchable = true;
+                Assert.True(root.Touchable);
+                Assert.Same(root, ctx.Pick(new Vector2(100f, 50f)));
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
         // ── fixture 加载 helpers（仿 TextFieldProjectionTests / ControlProjectionTests）──
 
         static (IntPtr stage, UIContext ctx, Container root) LoadTextfieldFixture()

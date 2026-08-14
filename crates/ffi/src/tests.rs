@@ -1993,3 +1993,62 @@ fn ffi_stage_hit_test_basic() {
     );
     loomgui_stage_free(h);
 }
+
+/// set/get_node_touchable round-trip + hit_test 联动：untouchable 节点自身不命中
+/// （子节点照常——CSS pointer-events 透传语义），恢复后命中回归。
+#[test]
+fn ffi_node_touchable_roundtrip_and_hit() {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(node, 0xFFFF_FFFF);
+    loomgui_stage_append_child(h, root, node);
+    {
+        let sh = unsafe { &mut *h };
+        let scene = sh.stage.scene.as_mut().expect("scene built");
+        let r = scene.get_mut(NodeId(root)).unwrap();
+        r.layout_rect = loomgui_core::scene::node::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 100.0,
+        };
+        let c = scene.get_mut(NodeId(node)).unwrap();
+        c.layout_rect = loomgui_core::scene::node::Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 50.0,
+            h: 50.0,
+        };
+        loomgui_core::scene::transform::compute_world_transforms(scene);
+    }
+    // 初始默认 touchable。
+    let mut b = 9u8;
+    assert_eq!(loomgui_stage_get_node_touchable(h, node, &mut b), 0);
+    assert_eq!(b, 1, "default touchable");
+    // 命中子节点。
+    let mut out = 0xFFFF_FFFFu32;
+    assert_eq!(loomgui_stage_hit_test(h, 20.0, 20.0, &mut out), 0);
+    assert_eq!(out, node);
+    // set false → 自身不命中，点落到 root（父 fallback）。
+    loomgui_stage_set_node_touchable(h, node, false);
+    assert_eq!(loomgui_stage_get_node_touchable(h, node, &mut b), 0);
+    assert_eq!(b, 0, "untouchable now");
+    assert_eq!(loomgui_stage_hit_test(h, 20.0, 20.0, &mut out), 0);
+    assert_eq!(out, root, "untouchable node skipped, hit falls to root");
+    // 恢复 → 命中回归。
+    loomgui_stage_set_node_touchable(h, node, true);
+    assert_eq!(loomgui_stage_hit_test(h, 20.0, 20.0, &mut out), 0);
+    assert_eq!(out, node, "touchable restored");
+    // 越界节点 / null out → -1。
+    let mut n2 = 0u8;
+    assert_eq!(
+        loomgui_stage_get_node_touchable(h, 0xFFFF_FFFF, &mut n2),
+        -1
+    );
+    assert_eq!(
+        loomgui_stage_get_node_touchable(h, node, std::ptr::null_mut()),
+        -1
+    );
+    loomgui_stage_free(h);
+}

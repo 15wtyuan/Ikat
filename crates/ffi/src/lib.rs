@@ -396,6 +396,50 @@ pub extern "C" fn loomgui_stage_set_node_disabled(
     sh.stage.set_node_disabled(NodeId(node_id), disabled);
 }
 
+/// 设节点 touchable（公共 Node.Touchable 的后端；CSS `pointer-events` 的运行时面）。
+/// false = 本节点不参与命中（子节点照常——透传语义）。写 interaction（hit 判据）+
+/// base_style（rematch 重起源）。null 句柄 / 节点缺失 → no-op。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_node_touchable(
+    h: *mut StageHandle,
+    node_id: u32,
+    touchable: bool,
+) {
+    if h.is_null() {
+        return;
+    }
+    let sh = unsafe { &mut *h };
+    sh.stage.set_node_touchable(NodeId(node_id), touchable);
+}
+
+/// 读节点 touchable（interaction.touchable，hit_test 同源）。null 句柄 / 无 scene /
+/// 节点缺失 → -1（不与 false 混淆）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_touchable(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+) -> i32 {
+    if h.is_null() || out.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match scene.get(NodeId(node_id)) {
+        Some(n) => {
+            unsafe { *out = u8::from(n.interaction.touchable) };
+            0
+        }
+        None => -1,
+    }
+}
+
 /// 返 parent node_id（C# 事件路由沿链用，spec §4.2）。根/越界/无 scene → 0xFFFF_FFFF（sentinel）。
 ///
 /// **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。

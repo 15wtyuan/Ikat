@@ -199,7 +199,8 @@
 **公共 API NE stub 接线（public-api audit triage，2026-08-11）** — `Public/LoomGUI.*.cs` 残留 `throw NE()` 的公共 API，按 core/FFI 支持分档处置（详情见 public-api audit）。
 - ✅ **已接（2026-08-11）**：`Container.ScrollTo`、`Button.Disabled`（FFI 已有，C# 漏接，坑 191 模式）。
 - ✅ **已接（2026-08-14，FFI 批）**：`NumberField.Min/Max/Step` setter（FFI arm 扩 NumberField，改界后 value 文本重约束）、`ProgressBar.IsIndeterminate`（新 get/set FFI，纯状态位）、`RadioButton.Name`（新 get_radio_name 双调法 FFI）、`UIContext.Pick`（新 loomgui_stage_hit_test，thumb sentinel decode 回容器）。dll/bindings 已同步入库。
-- 🟡 **按域 defer**（core 也没，真 feature）：`Touchable`/`ZIndex`（扩 inline_bit 表，归 T1）、`Focusable`（runtime tabindex setter，T1）、`Dropdown.SelectedValue`（option `value` 存储，T1）、`SetVar`/`RemoveVar` + `StyleSheet.Add`/`Clear`（custom props 系统 + runtime CSS parser，归 T1 运行时 CSS 大件）、`OnUpdate` + `CallLater`/`CallNextFrame`（per-frame hook + 延迟回调队列，归 T× 框架基础设施）、`UnloadPackage`（包生命周期，归 T2）、`GetTemplate`（归 T1 Custom Element 组件系统）、`ListView.ItemExitClass`（归 T1 list 进出场动画）。
+- ✅ **已接（2026-08-14，Touchable）**：`Node.Touchable`（CSS `pointer-events` 运行时面；core apply_decl 早有分支，补 Stage::set_node_touchable 双写 interaction+base_style + FFI + C#）。
+- 🟡 **按域 defer**（core 也没，真 feature）：`ZIndex`（core 无 stacking 语义——`order` 只是 flex 排序；inline_bit 表已满（1<<31），真做需 sort_key 公共化设计，T1 视觉层推进时）、`Focusable`（runtime tabindex setter，T1）、`Dropdown.SelectedValue`（option `value` 存储，T1）、`SetVar`/`RemoveVar` + `StyleSheet.Add`/`Clear`（custom props 系统 + runtime CSS parser，归 T1 运行时 CSS 大件）、`OnUpdate` + `CallLater`/`CallNextFrame`（per-frame hook + 延迟回调队列，归 T× 框架基础设施）、`UnloadPackage`（包生命周期，归 T2）、`GetTemplate`（归 T1 Custom Element 组件系统）、`ListView.ItemExitClass`（归 T1 list 进出场动画）。
 - ✅ **已删（2026-08-14）**：`NodeStyle.Visibility`（fence CSS 子集无 `visibility` prop，`opacity:0` 覆盖占位隐藏）——C# enum / NodeStyle property / CssValueConvert 分支 / 相关测试全部移除，公共 API 与契约对齐。
 - 判据：按域 defer 随各自 track 推进。
 - 来源：public-api.md audit（2026-08-11，triage agent）。

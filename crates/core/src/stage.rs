@@ -164,6 +164,19 @@ impl Stage {
         }
     }
 
+    /// 业务设节点 touchable（CSS `pointer-events` 的运行时面：false = 本节点不参与
+    /// 命中，子节点照常可命中——透传语义同 CSS）。写两处：interaction.touchable 是
+    /// hit_test 的判据（立即生效）；base_style.touchable 是 rematch 的重起源（不写则
+    /// 下次伪类重匹配会把它冲回打包期 CSS 值）。悬空 NodeId 静默跳过。
+    pub fn set_node_touchable(&mut self, node_id: NodeId, touchable: bool) {
+        if let Some(scene) = self.scene.as_mut() {
+            if let Some(n) = scene.get_mut(node_id) {
+                n.interaction.touchable = touchable;
+                n.base_style.touchable = touchable;
+            }
+        }
+    }
+
     /// 按 CSS id 属性查节点（首个匹配）。无 scene / 无匹配 → None。
     /// 供 FFI find_node_by_id：业务用 id 定位节点（注册 listener / 设 disabled）。
     pub fn find_node_by_id(&self, id: &str) -> Option<NodeId> {

@@ -120,7 +120,14 @@ namespace LoomGUI
             }
         }
 
-        public bool Touchable { get { throw NE(); } set { throw NE(); } }
+        // Touchable（CSS `pointer-events` 的运行时面）：false = 本节点不参与命中（子节点
+        // 照常——透传语义）。setter 直 FFI（写 interaction + base_style 双处，rematch 存活）；
+        // getter 读 interaction.touchable（hit_test 同源）。
+        public bool Touchable
+        {
+            get { ThrowIfDisposed(); return GetNodeTouchable(); }
+            set { ThrowIfDisposed(); SetNodeTouchable(value); }
+        }
         public bool Focusable { get { throw NE(); } set { throw NE(); } }   // 运行时改可获焦性（对齐 fgui focusable）
 
         // 投影层（C5）：lazy 造 ClassList 挂本 Node。同 Style/Transform 模式：同一 Node 多次访问
@@ -498,6 +505,21 @@ namespace LoomGUI
         }
 
         static NotImplementedException NE() => new NotImplementedException();
+
+        // ── Touchable FFI 转调（Node 基类，所有子类共享）──────────────────
+        void SetNodeTouchable(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_set_node_touchable(h, _id, v);
+        }
+        bool GetNodeTouchable()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte b = 0;
+            int rc = Native.loomgui_stage_get_node_touchable(h, _id, &b);
+            if (rc != 0) throw new InvalidOperationException($"get_node_touchable failed (node {_id})");
+            return b != 0;
+        }
     }
 
     // Style = inline override 层（最高优先级），不是 cascade 读取窗口。
