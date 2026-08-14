@@ -320,7 +320,14 @@ fn parse_json_out_arg() -> Option<String> {
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         if a == "--json" {
-            return Some(args.next().expect("--json requires a <path> argument"));
+            // 用法错误统一 exit 2（与 run-page.sh / diff.mjs 的 2=usage 契约对齐），不 panic。
+            return match args.next() {
+                Some(path) => Some(path),
+                None => {
+                    eprintln!("error: --json requires a <path> argument");
+                    std::process::exit(2);
+                }
+            };
         }
     }
     None

@@ -4,7 +4,8 @@
 # Usage: run-page.sh <page> [--tol-box=N] [--tol-text=N]
 #   page ∈ home/settings/inventory/mail/shop/character/form/lab
 # Artifacts: out/<page>/browser-<page>.json + core-<page>.json (gitignored)
-# Exit: diff.mjs's (0=aligned, 1=diffs/unmatched, 2=usage) — 报告产出为主门，exit 1 ≠ 任务失败
+# Exit: 0/1/2 = diff.mjs passthrough (2 also usage here); 3 = infra failure
+# (browser-rect or core dump step crashed — NOT a layout regression) — 报告产出为主门，exit 1 ≠ 任务失败
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
@@ -35,10 +36,16 @@ if [ ! -f "$HTML_PATH" ]; then
 fi
 
 echo "==> 1/3 browser rect ($PAGE)"
-node "$SCRIPT_DIR/browser-rect.mjs" "$HTML_PATH" "$OUT_DIR/browser-$PAGE.json"
+node "$SCRIPT_DIR/browser-rect.mjs" "$HTML_PATH" "$OUT_DIR/browser-$PAGE.json" || {
+  echo "error: browser-rect step failed" >&2
+  exit 3
+}
 
 echo "==> 2/3 core dump ($PAGE)"
-(cd "$REPO_ROOT" && cargo run -q -p loomgui_core --example dump_page -- "$PAGE" --json "$OUT_DIR/core-$PAGE.json")
+(cd "$REPO_ROOT" && cargo run -q -p loomgui_core --example dump_page -- "$PAGE" --json "$OUT_DIR/core-$PAGE.json") || {
+  echo "error: core dump step failed" >&2
+  exit 3
+}
 
 echo "==> 3/3 diff (tol-box=$TOL_BOX tol-text=$TOL_TEXT)"
 node "$SCRIPT_DIR/diff.mjs" "$OUT_DIR/browser-$PAGE.json" "$OUT_DIR/core-$PAGE.json" --tol-box="$TOL_BOX" --tol-text="$TOL_TEXT"

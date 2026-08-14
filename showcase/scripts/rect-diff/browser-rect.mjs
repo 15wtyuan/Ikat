@@ -27,12 +27,12 @@ try {
   // loom-preview.js fitScale() sets body.style.zoom to letterbox the 1920x1080
   // .root inside the preview window — a preview-only transform with no core
   // counterpart that uniformly shrinks every rect ~4.5% and cascades into
-  // hundreds of false width/position diffs. Clear it so the measurement
-  // reflects the true 1:1 layout core produces.
-  await page.evaluate(() => { document.body.style.zoom = ''; });
-  await page.waitForTimeout(100); // let reset + zoom-clear reflow settle
+  // hundreds of false width/position diffs. Cleared inside the measurement
+  // evaluate below so no resize event can re-apply it between clear and measure.
+  await page.waitForTimeout(100); // let reset reflow settle
 
   const rects = await page.evaluate(() => {
+    document.body.style.zoom = '';
     const els = document.querySelectorAll('body *');
     return Array.from(els).map((el, i) => {
       const r = el.getBoundingClientRect();
