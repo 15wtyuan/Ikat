@@ -89,7 +89,7 @@ jobs:
           retention-days: 7
 
   dotnet-test:
-    name: dotnet test (tests/dotnet)
+    name: dotnet test (pure managed, tests/dotnet)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,3 +98,37 @@ jobs:
           dotnet-version: '10.0.x'
       - name: dotnet test
         run: dotnet test tests/dotnet/LoomGUI.Tests.Core.csproj
+
+  # HeadlessTests（P/Invoke 真 native）+ PublicApi 编译门。此前 CI 只跑纯 managed 的
+  # Tests.Core，HeadlessTests 曾随 pkg 版本漂移静默腐烂（fixture v24 vs core v34）无人
+  # 知——此 job 补上盲区：runner 现场编 Linux .so，替换输出目录（入库的 Windows dll
+  # 仅 Windows P/Invoke 解析命中，Linux 解析 __DllName="loomgui_ffi_c" 走 .so）。
+  dotnet-headless:
+    name: dotnet headless (P/Invoke native)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: build native lib (linux .so)
+        run: cargo build -p loomgui_ffi_c --release
+      - name: build headless tests
+        run: dotnet build tests/dotnet/LoomGUI.HeadlessTests/LoomGUI.HeadlessTests.csproj
+      - name: stage linux native lib into test output dir
+        run: cp target/release/libloomgui_ffi_c.so tests/dotnet/LoomGUI.HeadlessTests/bin/Debug/net10.0/
+      - name: dotnet test (no-build)
+        run: dotnet test tests/dotnet/LoomGUI.HeadlessTests/LoomGUI.HeadlessTests.csproj --no-build
+
+  dotnet-publicapi:
+    name: dotnet public-api compile gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      # 公共 API 冻结签名编译校验（无测试用例）：0 警告 0 错误 = 过。
+      - run: dotnet build tests/dotnet/LoomGUI.PublicApi/LoomGUI.PublicApi.csproj -warnaserror

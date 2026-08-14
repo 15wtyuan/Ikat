@@ -133,6 +133,7 @@
 
 - 摸黑打通 + 三束加宽纪元已完工（详见 `roadmap_old.md`）：Unity 端到端可用，21 控件全栈、cascade / 动画 / 虚拟列表 / box-shadow / 文字特效 / transform / filter 矩阵已交付，release CI 就绪。
 - **近期优先**：**里程碑 1 任务 1（文本模型）+ 任务 3（渐变补齐：radial + 多 stop + 任意角度，program=6/7 shader）代码侧均 done**（任务 3：commit 见 spec `2026-08-14-gradient-radial-multistop-design.md`，pkg v34 + blob v13 + dll/GUI exe 已同步入库）；**任务 2 rect-diff 工具链 settings 页端到端跑通**（core-dump 路径，2026-08-12）—— 12 残余 + Unity rect 半留 Task 4。**下一件事 = 任务 4（逐页修，1+2+3 依赖已齐）与任务 5（清验收债，独立）**。
+- **横切收尾（2026-08-14）**：公共 API FFI 批四件接通（NumberField bounds setter / ProgressBar.IsIndeterminate / RadioButton.Name / UIContext.Pick，见延期表）；CI 补 dotnet 门（HeadlessTests 现场 Linux .so 跑 P/Invoke 全套 + PublicApi 编译门——此前 CI 只跑纯 managed 31 测，HeadlessTests 曾随 pkg 版本漂移静默腐烂无人知）。
 - **悬置判据项**：动画引擎终态（等 layout 动画需求）、Godot / 编辑器（等里程碑 1、2）。
 
 ---
@@ -193,11 +194,11 @@
 - 来源：`2026-08-04-m3-tablist` §3.2、§11。
 
 **公共 API NE stub 接线（public-api audit triage，2026-08-11）** — `Public/LoomGUI.*.cs` 残留 `throw NE()` 的公共 API，按 core/FFI 支持分档处置（详情见 public-api audit）。
-- ✅ **已接（本轮）**：`Container.ScrollTo`、`Button.Disabled`（FFI 已有，C# 漏接，坑 191 模式）。
-- 🔧 **FFI 批**（core 有数据，补 FFI + C#，小活，一批做）：`NumberField.Min/Max/Step setter`（FFI arm 漏 NumberField）、`ProgressBar.IsIndeterminate`、`RadioButton.Name`（get）、`UIContext.Pick`（core hit_test FFI 包装）。
+- ✅ **已接（2026-08-11）**：`Container.ScrollTo`、`Button.Disabled`（FFI 已有，C# 漏接，坑 191 模式）。
+- ✅ **已接（2026-08-14，FFI 批）**：`NumberField.Min/Max/Step` setter（FFI arm 扩 NumberField，改界后 value 文本重约束）、`ProgressBar.IsIndeterminate`（新 get/set FFI，纯状态位）、`RadioButton.Name`（新 get_radio_name 双调法 FFI）、`UIContext.Pick`（新 loomgui_stage_hit_test，thumb sentinel decode 回容器）。dll/bindings 已同步入库。
 - 🟡 **按域 defer**（core 也没，真 feature）：`Touchable`/`ZIndex`（扩 inline_bit 表，归 T1）、`Focusable`（runtime tabindex setter，T1）、`Dropdown.SelectedValue`（option `value` 存储，T1）、`SetVar`/`RemoveVar` + `StyleSheet.Add`/`Clear`（custom props 系统 + runtime CSS parser，归 T1 运行时 CSS 大件）、`OnUpdate` + `CallLater`/`CallNextFrame`（per-frame hook + 延迟回调队列，归 T× 框架基础设施）、`UnloadPackage`（包生命周期，归 T2）、`GetTemplate`（归 T1 Custom Element 组件系统）、`ListView.ItemExitClass`（归 T1 list 进出场动画）。
 - 🔴 **砍出契约**：`NodeStyle.Visibility`（fence CSS 子集无 `visibility` prop，`opacity:0` 覆盖占位隐藏；public-api.md 已删，C# enum/property 代码删除 follow-up）。
-- 判据：FFI 批下次一轮做；按域 defer 随各自 track 推进。
+- 判据：按域 defer 随各自 track 推进。
 - 来源：public-api.md audit（2026-08-11，triage agent）。
 
 ### T2 · 验收 + 发布
