@@ -173,6 +173,17 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_get_node_touchable(StageHandle* h, uint node_id, byte* @out);
 
         /// <summary>
+        ///  读节点 LOOKUP_SCOPE 查找边界标记（组件展开域 host / ListView slot 根 / 实例根打此位）。
+        ///  C# Query&amp;lt;T&amp;gt;/Query(selector) 的 DFS 剪枝用——遇此标记的子节点 visit 后不下钻
+        /// （Get/TryGet 走 core find_node_by_id_in_subtree 已内置剪枝，本 FFI 补 Query 的 C# 侧路径）。
+        ///  null 句柄 / 无 scene / 节点缺失 → -1（不与 false 混淆）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_node_is_lookup_scope", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_node_is_lookup_scope(StageHandle* h, uint node_id);
+
+        /// <summary>
         ///  读 CustomElement 原始 hyphen 标签名（`&lt;game-item-card&gt;` → "game-item-card"；打包期展开
         ///  保留，tag 选择器 + 诊断用）。双调法：首次 buf_cap 不足返 -2 + out_len 写所需字节数，
         ///  调用方二次调用取串。非 CustomElement / null 句柄 / 无 scene / 节点缺失 → -1。

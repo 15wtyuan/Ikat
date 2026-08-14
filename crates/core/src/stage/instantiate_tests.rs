@@ -1254,3 +1254,73 @@ fn clone_subtree_preserves_component_scope() {
         "original anchored rules kept"
     );
 }
+
+/// L3 查找边界：页面级 find_node_by_id_in_subtree 不穿透组件展开域内部；
+/// host 自身 id 可命中；host 内部 Get 照常。find_node_by_id_in_own_scope 多实例不串。
+#[test]
+fn lookup_boundary_l3_component_scope() {
+    // 组件树带 id：host id="card"，inner id="inner-badge"
+    let page_rules: Vec<DynamicRule> = vec![];
+    let scope_rules: Vec<DynamicRule> = vec![];
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    let pkg = component_scope_pkg(&page_rules, &scope_rules);
+    s.load_package("bag", &pkg).unwrap();
+    let root = s.instantiate("bag", "page").unwrap();
+    let host = s.scene.as_ref().unwrap().get(root).unwrap().children[0];
+    let inner = s.scene.as_ref().unwrap().get(host).unwrap().children[0];
+    s.scene.as_mut().unwrap().get_mut(host).unwrap().id_attr = Some("card".into());
+    s.scene.as_mut().unwrap().get_mut(inner).unwrap().id_attr = Some("inner-badge".into());
+    let scene = s.scene.as_ref().unwrap();
+    // 页面级：host 自身可命中（Shadow DOM：host 在 light tree）
+    assert_eq!(
+        scene.find_node_by_id_in_subtree(root, "card"),
+        Some(host),
+        "host itself is page-visible"
+    );
+    // 页面级：内部 id 不穿透
+    assert_eq!(
+        scene.find_node_by_id_in_subtree(root, "inner-badge"),
+        None,
+        "page-level find must NOT pierce component host"
+    );
+    // host 内部：正常命中
+    assert_eq!(
+        scene.find_node_by_id_in_subtree(host, "inner-badge"),
+        Some(inner),
+        "inside-scope find works"
+    );
+}
+
+/// find_node_by_id_in_own_scope 多实例不串：同模板两实例共享内部 id，
+/// 各自从 host 解析命中本实例的节点（aria-controls 的多实例安全地基）。
+#[test]
+fn own_scope_lookup_multi_instance_no_cross_talk() {
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    let pkg = component_scope_pkg(&[], &[]);
+    s.load_package("bag", &pkg).unwrap();
+    let root1 = s.instantiate("bag", "page").unwrap();
+    let root2 = s.instantiate("bag", "page").unwrap();
+    let inner1 = {
+        let scene = s.scene.as_mut().unwrap();
+        let host1 = scene.get(root1).unwrap().children[0];
+        scene.get_mut(host1).unwrap().id_attr = Some("card".into());
+        let i1 = scene.get(host1).unwrap().children[0];
+        scene.get_mut(i1).unwrap().id_attr = Some("dup-badge".into());
+        let host2 = scene.get(root2).unwrap().children[0];
+        scene.get_mut(host2).unwrap().id_attr = Some("card2".into());
+        let i2 = scene.get(host2).unwrap().children[0];
+        scene.get_mut(i2).unwrap().id_attr = Some("dup-badge".into());
+        i1
+    };
+    let scene = s.scene.as_ref().unwrap();
+    let host2 = scene.get(root2).unwrap().children[0];
+    // 从实例 2 的 host 解析 "dup-badge" → 实例 2 的 inner（不是全局首匹配的实例 1）
+    assert_eq!(
+        scene.find_node_by_id_in_own_scope(host2, "dup-badge"),
+        Some(scene.get(host2).unwrap().children[0]),
+        "own-scope resolution must hit the SAME instance, not global first match"
+    );
+    let _ = inner1;
+}

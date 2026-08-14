@@ -812,10 +812,31 @@ impl Scene {
             .map(|(_, n)| n.id)
     }
 
+    /// 在 node 所属查找作用域内解析 id：沿父链找最近 LOOKUP_SCOPE 根（含自身），
+    /// 在其子树内查（不穿透嵌套作用域）。跨树 id 关联（aria-controls）的多实例安全
+    /// 解析用——同组件展开多实例时，各实例的 tab 只命中本实例的 panel，不串到首个
+    /// 全局匹配。无 LOOKUP_SCOPE 祖先（防御：detached 节点）退化全局首匹配。
+    pub fn find_node_by_id_in_own_scope(&self, node: NodeId, id: &str) -> Option<NodeId> {
+        let mut cur = Some(node);
+        while let Some(nid) = cur {
+            let n = self.get(nid)?;
+            if n.interaction.flags.contains(NodeFlags::LOOKUP_SCOPE) {
+                return self.find_node_by_id_in_subtree(nid, id);
+            }
+            cur = n.parent;
+        }
+        self.find_by_id_attr(id)
+    }
+
     /// 在 root 子树内 DFS 查找 id 属性匹配的首个节点（self-exclusive：从 root
     /// 的直接子开始，root 自身的 id_attr 不被命中）。与 DOM querySelectorAll / Query<T>
     /// 一致——在元素上调 query 只查后代不含自身。纯结构遍历，不检查 display:none。
     /// 供 FFI 子树作用域 id 查找，替代"全局首匹配 + 父链后过滤"。
+    ///
+    /// **L3 查找边界**：遇 `LOOKUP_SCOPE` 子节点（组件展开域 host / ListView slot 根）
+    /// 检查其自身 id 后**不再下钻**——嵌套作用域内部 id 只归该作用域自己的 Get 查找
+    /// （main-design §4.3「不穿透嵌套组件边界」）。作用域根自身仍可被外层命中（同
+    /// Shadow DOM：host 元素在 light tree，shadow 内部不在）。
     pub fn find_node_by_id_in_subtree(&self, root: NodeId, id: &str) -> Option<NodeId> {
         let node = self.get(root)?;
         let mut stack: Vec<NodeId> = node.children.iter().rev().copied().collect();
@@ -824,7 +845,10 @@ impl Scene {
             if n.id_attr.as_deref() == Some(id) {
                 return Some(nid);
             }
-            stack.extend(n.children.iter().rev());
+            // L3 边界剪枝：查找边界子节点的内部 id 不可见，跳过其子树。
+            if !n.interaction.flags.contains(NodeFlags::LOOKUP_SCOPE) {
+                stack.extend(n.children.iter().rev());
+            }
         }
         None
     }

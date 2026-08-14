@@ -777,12 +777,14 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
                 .filter(|&c| scene.roles.role_of(c) == Some(ROLE_TAB))
                 .collect();
             for (i, &tab) in tab_ids.iter().enumerate() {
-                // aria_controls 是 String，clone 出来释放对 roles 的不可变借，再 find_by_id_attr。
+                // aria_controls 是 String，clone 出来释放对 roles 的不可变借，再 scope 内解析。
+                // 多实例安全：组件展开多份时各实例的 tab 只命中本实例的 panel
+                //（nearest LOOKUP_SCOPE 根内查找，不串全局首匹配）。
                 let Some(panel_id_str) = scene.roles.get(tab).and_then(|r| r.aria_controls.clone())
                 else {
                     continue; // tab 未写 aria-controls：无 panel 可切（R1 容错）
                 };
-                let Some(panel) = scene.find_by_id_attr(&panel_id_str) else {
+                let Some(panel) = scene.find_node_by_id_in_own_scope(tab, &panel_id_str) else {
                     continue; // panel id 解析不到（R1 容错；fence 期已校验 idref 存在，运行时动态缺则跳）
                 };
                 let decl = if i == selected_index {

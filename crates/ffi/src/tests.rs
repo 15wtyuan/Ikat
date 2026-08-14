@@ -2094,3 +2094,35 @@ fn ffi_get_custom_tag_two_call() {
     );
     loomgui_stage_free(h);
 }
+
+/// loomgui_node_is_lookup_scope：实例根 = 查找边界（1）；普通节点 = 0；越界 = -1。
+/// C# Query<T> DFS 剪枝的数据源（L3 查找边界）。
+#[test]
+fn ffi_node_is_lookup_scope() {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    loomgui_stage_append_child(h, root, node);
+    // create_root 打 LOOKUP_SCOPE（scene 根）；动态 create_node 不打。
+    assert_eq!(
+        loomgui_node_is_lookup_scope(h, root),
+        1,
+        "scene root is lookup scope"
+    );
+    assert_eq!(
+        loomgui_node_is_lookup_scope(h, node),
+        0,
+        "plain node is not"
+    );
+    assert_eq!(
+        loomgui_node_is_lookup_scope(h, 0xFFFF_FFFF),
+        -1,
+        "oob node -> -1"
+    );
+    assert_eq!(
+        loomgui_node_is_lookup_scope(std::ptr::null(), root),
+        -1,
+        "null handle -> -1"
+    );
+    loomgui_stage_free(h);
+}

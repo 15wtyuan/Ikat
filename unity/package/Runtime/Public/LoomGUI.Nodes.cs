@@ -194,8 +194,9 @@ namespace LoomGUI
         /// （DOM getElementById 习惯：空 id 是调用方写错）。
         ///
         /// 作用域契约（public-api §3.1）：组件作用域内查找，不穿透嵌套组件边界。
-        /// 当前 L1 子树 DFS 不识别 IsScopeRoot 边界——组件级 Get 会穿透进嵌套组件/List slot，
-        /// 留 L3 完整边界（roadmap §5.4）。driver 应用以 slot.Get/slot.Query 为准。
+        /// L3 已完整：core DFS 遇 LOOKUP_SCOPE 子节点（组件展开域 host / List slot 根）
+        /// 检查其自身 id 后不再下钻——组件级 Get 不再穿透 list item / 嵌套组件。
+        /// 要访问嵌套作用域内部：先 Get 作用域根（host/slot），再在其上 Get。
         /// </summary>
         public T Get<T>(string id) where T : Node
         {
@@ -389,6 +390,10 @@ namespace LoomGUI
         /// 文档序 pre-order DFS：从本节点的直系子开始，依次 visit 每个子 + 递归子的子树。
         /// 不 visit self（与 DOM querySelectorAll 语义一致——element.query 不含 element 自身）。
         /// 非 Container 节点无 Children —— no-op（Query 在叶子节点上返空 list）。
+        ///
+        /// L3 查找边界：遇 LOOKUP_SCOPE 子节点（组件展开域 host / ListView slot 根）visit 后
+        /// 不再下钻——Query 与 Get/TryGet 同口径，嵌套作用域内部节点不进结果（main-design §4.3）。
+        /// 作用域根自身照常入结果（同 Shadow DOM：host 在 light tree）。
         /// </summary>
         private void DfsPreOrder(Action<Node> visit)
         {
@@ -399,9 +404,20 @@ namespace LoomGUI
                 foreach (Node child in c.Children)
                 {
                     visit(child);
-                    child.DfsPreOrder(visit);
+                    if (!child.IsLookupScopeBoundary())
+                        child.DfsPreOrder(visit);
                 }
             }
+        }
+
+        /// <summary>
+        /// 节点是否为查找作用域边界（core NodeFlags::LOOKUP_SCOPE：实例根 / 组件展开域
+        /// host / ListView slot 根）。Query 剪枝内部用；FFI 读失败（-1）按非边界处理（防御）。
+        /// </summary>
+        internal bool IsLookupScopeBoundary()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            return Native.loomgui_node_is_lookup_scope(h, _id) == 1;
         }
 
         /// <summary>
