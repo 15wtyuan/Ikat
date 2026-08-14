@@ -769,6 +769,7 @@ impl Stage {
             let n = scene.get_mut(node_id).unwrap();
             n.classes = tn.classes.clone();
             n.id_attr = tn.id_attr.clone();
+            n.custom_tag = tn.custom_tag.clone();
             n.rich_text_block = tn.rich_text_block;
             n.interaction.draggable = tn.draggable;
             // tabindex：显式值优先（含 -1 排除）；None 时按 HTML/ARIA 语义给可聚焦控件补
@@ -848,6 +849,21 @@ impl Stage {
             .flags
             .insert(NodeFlags::SCOPE_ROOT | NodeFlags::LOOKUP_SCOPE);
 
+        // 组件展开域（Custom Element 打包期展开实例）：host 打三重标记——对后代是 CSS +
+        // 查找边界（SCOPE_ROOT|LOOKUP_SCOPE），自身归外层页面作用域（HOST_IN_PARENT_SCOPE，
+        // 页面规则可样式化 host 本体，shadow 树归 host 域）。
+        for (i, tn) in template.nodes.iter().enumerate() {
+            if tn.component_scope {
+                if let Some(nid) = id_map[i] {
+                    scene.get_mut(nid).unwrap().interaction.flags.insert(
+                        NodeFlags::SCOPE_ROOT
+                            | NodeFlags::LOOKUP_SCOPE
+                            | NodeFlags::HOST_IN_PARENT_SCOPE,
+                    );
+                }
+            }
+        }
+
         // 组件级 @keyframes 进场景全局表：animation 声明只保存 name，player 在 tick
         // 时按该表查规则。后实例化的组件覆盖同名规则，保持 CSS 全局查找语义。
         for keyframes in &template.keyframes {
@@ -864,6 +880,22 @@ impl Stage {
                 rule: rule.clone(),
                 scope_root: root,
             });
+        }
+
+        // 组件展开域锚定规则：每展开实例一条 (anchor_idx, 组件模板自带规则)，按
+        // scope_root=锚节点（host）包装——组件内部选择器只在该展开域内匹配（main-design §5.4）。
+        // host 自身因 HOST_IN_PARENT_SCOPE 归外层作用域，组件规则不落在 host 上（同 DOM
+        // shadow 规则不样式化 host，:host 才行）。
+        for (anchor_idx, rules) in &template.component_scopes {
+            let Some(anchor) = id_map[*anchor_idx] else {
+                continue; // 防御 malformed（read 侧已校验 anchor < node_count，理论不可达）
+            };
+            for rule in &rules.rules {
+                scene.dynamic_rules.entries.push(ScopedRule {
+                    rule: rule.clone(),
+                    scope_root: anchor,
+                });
+            }
         }
         Ok(root)
     }

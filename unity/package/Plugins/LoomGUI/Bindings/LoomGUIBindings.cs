@@ -173,6 +173,16 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_get_node_touchable(StageHandle* h, uint node_id, byte* @out);
 
         /// <summary>
+        ///  读 CustomElement 原始 hyphen 标签名（`&lt;game-item-card&gt;` → "game-item-card"；打包期展开
+        ///  保留，tag 选择器 + 诊断用）。双调法：首次 buf_cap 不足返 -2 + out_len 写所需字节数，
+        ///  调用方二次调用取串。非 CustomElement / null 句柄 / 无 scene / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_custom_tag", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_custom_tag(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
         ///  返 parent node_id（C# 事件路由沿链用，spec §4.2）。根/越界/无 scene → 0xFFFF_FFFF（sentinel）。
         ///
         ///  **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。

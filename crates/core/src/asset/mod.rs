@@ -1,4 +1,6 @@
-//! 包格式（.pkg.bin，当前 version=34）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=35）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! v35：TemplateNode 加 custom_tag 列 + component_scope 位（flags bit 0x04）+ PerComponentScopes
+//!   段（组件展开域锚定规则表；Custom Element 打包期展开产物，见 component-system spec）。
 //! v34：ResolvedStyle.background_gradient Option<Gradient2>→Option<Gradient>（radial + 多 stop + 任意角度，bincode 布局变）。
 //! v33：TemplateNode flags 字节新增 rich_text_block 位（rich-text-block 容器根标记，bit 0x02）。
 //! v32：ResolvedStyle.box_shadow Option<BoxShadow>→Vec<BoxShadow> + blur/inset 字段（box-shadow 全语义，bincode 布局变）。
@@ -36,9 +38,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 34; // v34: background_gradient → Gradient（radial + 多 stop）
-pub(crate) const MIN_VERSION: u32 = 34;
-pub(crate) const MAX_VERSION: u32 = 34;
+pub const PKG_FORMAT_VERSION: u32 = 35; // v35: custom_tag + component_scope + PerComponentScopes
+pub(crate) const MIN_VERSION: u32 = 35;
+pub(crate) const MAX_VERSION: u32 = 35;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────
@@ -59,6 +61,10 @@ pub struct ComponentTemplate {
     /// @keyframes 规则表（打包期从组件 `<style>` 提取，spec §3.5）。instantiate 时合并进
     /// Scene.keyframes 全局表（CSS 全局查找语义）。
     pub keyframes: Vec<KeyframesRule>,
+    /// 组件展开域（Custom Element 打包期展开的实例）锚定规则：每实例一条
+    /// (锚节点 idx, 组件模板自带动态规则)。instantiate 时按 scope_root=锚节点包装
+    /// （组件内部选择器只在该展开域内匹配，main-design §5.4）。
+    pub component_scopes: Vec<(usize, DynamicRuleTable)>,
 }
 
 /// 文本控件初始值（TextField/TextArea 共用，从 HTML value/placeholder 属性 bake）。
@@ -142,6 +148,21 @@ pub struct TemplateNode {
     /// compiler/solve/render 读此 flag 把 inline 子拍平成 RichRun 走 inline flow
     /// （见 main-design 文本模型）。Text 节点与 block 容器永远 false。
     pub rich_text_block: bool,
+    /// CustomElement 的原始 hyphen 标签名（`<game-item-card>` → "game-item-card"）。
+    /// 打包期展开保留字面量（tag 选择器 rematch 匹配 + dump 发射用）。非 CustomElement None。
+    pub custom_tag: Option<String>,
+    /// 组件展开域根标记（CustomElement host）：instantiate 时打
+    /// SCOPE_ROOT | LOOKUP_SCOPE | HOST_IN_PARENT_SCOPE（对后代是 CSS/查找边界，
+    /// 自身归外层页面作用域）。打包期由组件展开器烘入。
+    pub component_scope: bool,
+}
+
+/// write_package_with_scopes 的展开域条目：锚节点（组件内局部 idx）+ 组件模板动态规则。
+#[derive(Clone, Copy)]
+pub struct ComponentScopeInput<'a> {
+    pub component: &'a str,
+    pub anchor_idx: usize,
+    pub rules: &'a DynamicRuleTable,
 }
 
 /// write_package 的输入（打包器构造，已归一化：path 已相对、style 已 bake）。
@@ -200,12 +221,18 @@ impl From<bincode::Error> for PkgError {
     }
 }
 
-/// 序列化 PackageInput → .pkg.bin bytes（多组件格式）。
+/// 序列化 PackageInput → .pkg.bin bytes（多组件格式，无组件展开域）。
+pub fn write_package(input: &PackageInput) -> Vec<u8> {
+    write_package_with_scopes(input, &[])
+}
+
+/// 序列化 PackageInput → .pkg.bin bytes（多组件格式 + 组件展开域锚定规则）。
 ///
-/// 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponent(DynamicRules)。
+/// 布局：Header(20B) + StringTable + ComponentTable + NodeBlock + PerComponent(DynamicRules)
+///   + PerComponent(Keyframes) + PerComponent(Scopes)。
 /// 所有字符串（组件名 / text / img path / classes / id_attr）
 /// 共用同一 StringTable（intern 去重）。`input` 须已归一化（path 相对、style bake）。
-pub fn write_package(input: &PackageInput) -> Vec<u8> {
+pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeInput]) -> Vec<u8> {
     // 1. intern 全部字符串（组件名 + 每节点 text/src/classes/id_attr）。
     //    所有 intern 必须在写 header(string_count) 之前完成。
     let mut strings: Vec<String> = Vec::new();
@@ -216,7 +243,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     // 全局 NodeBlock 由各组件节点顺次拼接，root_node_idx = 该组件首节点在全局的位置。
     let mut comp_records: Vec<(u16, u32, u32, Vec<u8>, Vec<u8>)> =
         Vec::with_capacity(component_count);
-    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, control_init_blob, role_idx, data_slot_idx, aria_controls_idx)
+    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, control_init_blob, role_idx, data_slot_idx, aria_controls_idx, custom_tag_idx)
     let mut node_records: Vec<(
         i32,
         u8,
@@ -228,6 +255,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         u8,
         i32,
         Vec<u8>,
+        u16,
         u16,
         u16,
         u16,
@@ -286,7 +314,8 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 .map(|id| intern(id, &mut strings, &mut idx_of))
                 .unwrap_or(NULL_IDX);
             let flags: u8 = (if tn.draggable { 0x01 } else { 0x00 })
-                | (if tn.rich_text_block { 0x02 } else { 0x00 });
+                | (if tn.rich_text_block { 0x02 } else { 0x00 })
+                | (if tn.component_scope { 0x04 } else { 0x00 });
             let tabindex = tn.tabindex.unwrap_or(i32::MIN);
             // role/data-slot：Option<String> → StringTable 索引（同 id_attr 模式，NULL_IDX 表 None）。
             let role_idx = tn
@@ -305,6 +334,12 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 .as_ref()
                 .map(|s| intern(s, &mut strings, &mut idx_of))
                 .unwrap_or(NULL_IDX);
+            // custom_tag：CustomElement 原始 hyphen 标签（同 role/data_slot/aria_controls 模式）。
+            let custom_tag_idx = tn
+                .custom_tag
+                .as_ref()
+                .map(|s| intern(s, &mut strings, &mut idx_of))
+                .unwrap_or(NULL_IDX);
             node_records.push((
                 parent_global,
                 kind_tag,
@@ -319,6 +354,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
                 role_idx,
                 data_slot_idx,
                 aria_controls_idx,
+                custom_tag_idx,
             ));
         }
         let node_count = nodes.len() as u32;
@@ -359,7 +395,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     }
     // NodeBlock: 每节点 {parent_idx(i32), kind_tag(u8), style_len(u32)+style_blob, text_idx(u16), src_idx(u16),
     //   class_count(u16)+class_idx[], id_idx(u16), flags(u8), tabindex(i32), control_init_len(u32)+control_init_blob,
-    //   role_idx(u16), data_slot_idx(u16), aria_controls_idx(u16)}
+    //   role_idx(u16), data_slot_idx(u16), aria_controls_idx(u16), custom_tag_idx(u16)}
     for (
         parent_idx,
         kind_tag,
@@ -374,6 +410,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         role_idx,
         data_slot_idx,
         aria_controls_idx,
+        custom_tag_idx,
     ) in &node_records
     {
         out.extend_from_slice(&parent_idx.to_le_bytes());
@@ -394,6 +431,7 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
         out.extend_from_slice(&role_idx.to_le_bytes());
         out.extend_from_slice(&data_slot_idx.to_le_bytes());
         out.extend_from_slice(&aria_controls_idx.to_le_bytes());
+        out.extend_from_slice(&custom_tag_idx.to_le_bytes());
     }
     // PerComponentDynamicRules：每组件 dynamic_blob（同 ComponentTable 顺序）。read 按同序逐组件读。
     for (_, _, _, dynamic_blob, _) in &comp_records {
@@ -404,6 +442,20 @@ pub fn write_package(input: &PackageInput) -> Vec<u8> {
     for (_, _, _, _, keyframes_blob) in &comp_records {
         out.extend_from_slice(&(keyframes_blob.len() as u32).to_le_bytes());
         out.extend_from_slice(keyframes_blob);
+    }
+    // PerComponentScopes：每组件（同 ComponentTable 顺序）{scope_count(u32),
+    //   每条 [anchor_idx(u32) + rules_blob_len(u32) + rules_blob]}。组件展开域锚定规则
+    //   （Custom Element 打包期展开产物）；无展开域的组件写 count=0（统一布局，无省略歧义）。
+    for (name, _, _, _) in &input.components {
+        let comp_scopes: Vec<&ComponentScopeInput> =
+            scopes.iter().filter(|sc| sc.component == *name).collect();
+        out.extend_from_slice(&(comp_scopes.len() as u32).to_le_bytes());
+        for sc in comp_scopes {
+            out.extend_from_slice(&(sc.anchor_idx as u32).to_le_bytes());
+            let blob = bincode::serialize(sc.rules).expect("DynamicRuleTable serializable");
+            out.extend_from_slice(&(blob.len() as u32).to_le_bytes());
+            out.extend_from_slice(&blob);
+        }
     }
     out
 }
@@ -469,6 +521,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         let flags = r.u8("flags")?;
         let draggable = (flags & 0x01) != 0;
         let rich_text_block = (flags & 0x02) != 0;
+        let component_scope = (flags & 0x04) != 0;
         let tab_raw = r.i32("tabindex")?;
         let tabindex = if tab_raw == i32::MIN {
             None
@@ -482,6 +535,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         let role_idx = r.u16("role_idx")?;
         let data_slot_idx = r.u16("data_slot_idx")?;
         let aria_controls_idx = r.u16("aria_controls_idx")?;
+        let custom_tag_idx = r.u16("custom_tag_idx")?;
         let role = if role_idx == NULL_IDX {
             None
         } else {
@@ -496,6 +550,11 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             None
         } else {
             Some(string_at(&strings, aria_controls_idx)?)
+        };
+        let custom_tag = if custom_tag_idx == NULL_IDX {
+            None
+        } else {
+            Some(string_at(&strings, custom_tag_idx)?)
         };
         // 存盘 parent_idx 是 NodeBlock 全局位置（-1=组件根）；先存全局，待切分组件时减 base 转局部
         let parent_global = if pidx < 0 { None } else { Some(pidx as usize) };
@@ -536,6 +595,8 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             data_slot,
             aria_controls,
             rich_text_block,
+            custom_tag,
+            component_scope,
         });
     }
     // PerComponentDynamicRules: 每组件 dynamic_blob（按 ComponentTable 序）
@@ -574,6 +635,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
                 nodes,
                 dynamic_rules,
                 keyframes: Vec::new(), // PerComponentKeyframes 段在下方第二遍读回后填
+                component_scopes: Vec::new(), // PerComponentScopes 段在下方第三遍读回后填
             },
         );
     }
@@ -587,6 +649,28 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         // 组件已在上方循环插入（同名唯一性已由 DupComponent 保证）；if-let 防御不可达态。
         if let Some(ct) = components.get_mut(&name) {
             ct.keyframes = keyframes;
+        }
+    }
+    // PerComponentScopes: 每组件（同 ComponentTable 序）{scope_count(u32),
+    //   每条 [anchor_idx(u32) + rules_blob_len(u32) + rules_blob]}。
+    // anchor_idx 是组件内局部 TemplateNode idx（instantiate 的 id_map 直接可用）。
+    for (name_idx, _, node_count, _) in &comp_table {
+        let name = string_at(&strings, *name_idx)?;
+        let scope_count = r.u32("comp_scope_count")? as usize;
+        let mut scopes = Vec::with_capacity(scope_count);
+        for _ in 0..scope_count {
+            let anchor_idx = r.u32("comp_scope_anchor")? as usize;
+            let blob_len = r.u32("comp_scope_blob_len")? as usize;
+            let rules: DynamicRuleTable =
+                bincode::deserialize(r.take(blob_len, "comp_scope_blob")?)?;
+            // 防御 malformed：anchor 越界 → Truncated（避免 instantiate 索引 panic）。
+            if anchor_idx >= *node_count as usize {
+                return Err(PkgError::Truncated("comp_scope_anchor_oob"));
+            }
+            scopes.push((anchor_idx, rules));
+        }
+        if let Some(ct) = components.get_mut(&name) {
+            ct.component_scopes = scopes;
         }
     }
     Ok(Package {

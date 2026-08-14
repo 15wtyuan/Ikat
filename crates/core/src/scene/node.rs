@@ -28,6 +28,11 @@ bitflags::bitflags! {
         /// 是未来扩展，slot 根预打此位以备将来。
         /// 与 SCOPE_ROOT 独立：slot 根只打此位（CSS 规则仍按页面根 scope 匹配，页面 CSS 对 item 生效）。
         const LOOKUP_SCOPE = 1 << 6;
+        /// 组件展开域 host 自身归属外层 CSS 作用域（Shadow DOM host 语义：host 元素在 light
+        /// 域、shadow 树在 host 域）。host 同时打 SCOPE_ROOT（对后代是边界）+ 本位（对自己
+        /// 不是边界）——compute_scope_map 对起始节点自身命中 SCOPE_ROOT+本位时跳过自己继续
+        /// 向上，后代不受影响。只打在打包期展开的 CustomElement host 上。
+        const HOST_IN_PARENT_SCOPE = 1 << 7;
     }
 }
 
@@ -245,6 +250,9 @@ pub struct Node {
     pub classes: Vec<String>,
     /// 运行时 id（建树时从 ElementData.id 填；供动态规则 id 选择器匹配）。
     pub id_attr: Option<String>,
+    /// CustomElement 的原始 hyphen 标签（`<game-item-card>` → "game-item-card"）。
+    /// tag 选择器 rematch 匹配 + dump 发射用；非 CustomElement 恒 None。
+    pub custom_tag: Option<String>,
     pub interaction: NodeInteraction,
     pub reuse_key: u32,
     /// 运行时 inline override（便签层）。C# Style.X=v 经 set_inline_override 写入；
@@ -285,6 +293,7 @@ impl Default for Node {
             base_style: ResolvedStyle::default(),
             classes: Vec::new(),
             id_attr: None,
+            custom_tag: None,
             interaction: NodeInteraction {
                 flags: NodeFlags::empty(),
                 touchable: true,
@@ -704,6 +713,7 @@ impl Scene {
                 dirty_text: matches!(kind, NodeKind::TextNode),
                 classes: classes.clone(),
                 id_attr: id_attr.clone(),
+                custom_tag: None,
                 interaction: NodeInteraction {
                     flags: NodeFlags::empty(),
                     touchable: style.touchable,

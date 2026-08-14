@@ -440,6 +440,49 @@ pub extern "C" fn loomgui_stage_get_node_touchable(
     }
 }
 
+/// 读 CustomElement 原始 hyphen 标签名（`<game-item-card>` → "game-item-card"；打包期展开
+/// 保留，tag 选择器 + 诊断用）。双调法：首次 buf_cap 不足返 -2 + out_len 写所需字节数，
+/// 调用方二次调用取串。非 CustomElement / null 句柄 / 无 scene / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_custom_tag(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+    buf_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    if h.is_null() || out_len.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    let Some(tag) = scene
+        .get(NodeId(node_id))
+        .and_then(|n| n.custom_tag.as_deref())
+    else {
+        return -1;
+    };
+    let bytes = tag.as_bytes();
+    let needed = bytes.len();
+    unsafe { *out_len = needed };
+    if needed > buf_cap {
+        return -2;
+    }
+    if needed > 0 {
+        if out.is_null() {
+            return -2;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, needed);
+        }
+    }
+    0
+}
+
 /// 返 parent node_id（C# 事件路由沿链用，spec §4.2）。根/越界/无 scene → 0xFFFF_FFFF（sentinel）。
 ///
 /// **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
@@ -560,6 +603,8 @@ pub extern "C" fn loomgui_make_test_pkg(
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -576,6 +621,8 @@ pub extern "C" fn loomgui_make_test_pkg(
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
     ];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();

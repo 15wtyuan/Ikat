@@ -2052,3 +2052,45 @@ fn ffi_node_touchable_roundtrip_and_hit() {
     );
     loomgui_stage_free(h);
 }
+
+/// get_custom_tag 双调法 round-trip：CustomElement 节点读出 hyphen 标签；buf 不足返 -2 +
+/// 所需长度；非 CustomElement / 越界节点 → -1。custom_tag 由 pkg instantiate 拷入
+/// （编码机侧由打包器组件展开烘入，见 component-system spec）。
+#[test]
+fn ffi_get_custom_tag_two_call() {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    loomgui_stage_append_child(h, root, node);
+    {
+        let sh = unsafe { &mut *h };
+        let scene = sh.stage.scene.as_mut().expect("scene built");
+        scene.get_mut(NodeId(node)).unwrap().custom_tag = Some("game-item-card".into());
+    }
+    // 第一调：buf 0 → -2 + 所需长度
+    let mut needed = 0usize;
+    assert_eq!(
+        loomgui_stage_get_custom_tag(h, node, std::ptr::null_mut(), 0, &mut needed),
+        -2
+    );
+    assert_eq!(needed, "game-item-card".len());
+    // 第二调：足量 buf → 0 + 字节
+    let mut buf = vec![0u8; needed];
+    assert_eq!(
+        loomgui_stage_get_custom_tag(h, node, buf.as_mut_ptr(), buf.len(), &mut needed),
+        0
+    );
+    assert_eq!(buf, b"game-item-card");
+    // 非 CustomElement（custom_tag=None）→ -1
+    let mut n2 = 0usize;
+    assert_eq!(
+        loomgui_stage_get_custom_tag(h, root, std::ptr::null_mut(), 0, &mut n2),
+        -1
+    );
+    // 越界节点 → -1
+    assert_eq!(
+        loomgui_stage_get_custom_tag(h, 0xFFFF_FFFF, std::ptr::null_mut(), 0, &mut n2),
+        -1
+    );
+    loomgui_stage_free(h);
+}

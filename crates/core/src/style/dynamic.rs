@@ -596,10 +596,24 @@ fn parent_in_scope(scene: &Scene, node: NodeId, scope_bound: NodeId) -> Option<N
 /// 计算每节点的所属作用域根（沿父链最近的 SCOPE_ROOT，含自身）。无作用域根祖先 → INVALID。
 /// 每帧 rematch 调一次，O(节点 × 深度)；scope 校验快路径用此表 O(1) 查。
 /// 根节点通常由 create_root/instantiate 打 SCOPE_ROOT，故多数节点能命中某作用域根。
+/// 例外：组件展开域 host（SCOPE_ROOT + HOST_IN_PARENT_SCOPE）对自己的边界不生效——
+/// 起步就跳到父节点（host 归外层页面作用域，页面规则可样式化 host 本体；后代不受影响，
+/// 它们沿父链首个命中的仍是 host）。
 fn compute_scope_map(scene: &Scene, node_ids: &[NodeId]) -> HashMap<NodeId, NodeId> {
     let mut map = HashMap::with_capacity(node_ids.len());
     for &id in node_ids {
-        let mut cur = Some(id);
+        // 起始节点自身是 host → 自己的 SCOPE_ROOT 不算，从父链续走。
+        let start = match scene.get(id) {
+            Some(n)
+                if n.interaction
+                    .flags
+                    .contains(NodeFlags::SCOPE_ROOT | NodeFlags::HOST_IN_PARENT_SCOPE) =>
+            {
+                n.parent
+            }
+            _ => Some(id),
+        };
+        let mut cur = start;
         let mut found = NodeId::INVALID;
         while let Some(nid) = cur {
             if let Some(n) = scene.get(nid) {

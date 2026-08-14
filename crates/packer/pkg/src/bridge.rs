@@ -71,6 +71,8 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     data_slot,
                     aria_controls,
                     rich_text_block: parsed.rich_text_blocks.contains(&ir_idx),
+                    custom_tag: None,
+                    component_scope: false,
                 });
             }
             IrNodeKind::Text(s) => {
@@ -92,6 +94,8 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     data_slot: None,
                     aria_controls: None,
                     rich_text_block: false,
+                    custom_tag: None,
+                    component_scope: false,
                 });
             }
         }
