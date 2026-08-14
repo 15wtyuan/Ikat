@@ -48,7 +48,11 @@ core dump 输出 `<template>`/组件模板内部节点（slot 0×0），browser 
 
 ## 留给任务 4（Unity 机）
 
-- Unity rect 半（`DumpSceneJson` 路径）接 run-page.sh 第三数据源（Unity render rect vs core rect）。
-- mail/inventory 的 driver 驱动列表虚拟化（ItemCount + slot 覆盖）PlayMode 验收。
+- **PlayMode 运行时 rect 比对已接**（`run-page.sh --scene=`，本轮交付）：Unity 机上导出 DumpSceneJson → 编码机侧或 Unity 机侧跑比对。操作序列：
+  1. Unity PlayMode 打开目标页（driver 已跑、动画入场完成）。
+  2. uloop `execute-dynamic-code`：`System.IO.File.WriteAllText(@"<path>\scene-<page>.json", showcase.Editor.LoomBridge.LoomBridge.DumpScene())`。
+  3. `./run-page.sh <page> --scene=<path>\scene-<page>.json` → browser 基线 vs PlayMode 运行时 core 状态（driver 驱动的列表、动画末态都在内）。
+  归一脚本 `normalize-dump-scene.mjs` 按 `kind` 字段决断语义 tag（诊断 tag 的 ListView→div / CustomElement→div / TextNode→span 三处分歧不泄漏）。编码机已用 core dump 反造样本 round-trip 自测（与 core-dump 路径 summary 完全一致）。
+- mail/inventory 的 driver 驱动列表虚拟化（ItemCount + slot 覆盖）PlayMode 验收（--scene 模式正是为此准备的路径）。
 - lab/home 容差定标（A 类在 Unity 渲染下的可视影响）。
 - 任务 3 渐变视觉验收（lab section 12 + home 光晕 + 渐变字；GRADIENT shader 首次真编译）。

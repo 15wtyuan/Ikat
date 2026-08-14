@@ -106,10 +106,10 @@
 - **实证**：packer showcase 0 mixed；`dump_rich_text` 实测 mail 正文 7 inline 子→1 行（非竖排），公共树 ID 保留。workspace 1506 测全绿。
 - **门**：✅ 代码侧全绿。⏳ Unity PlayMode 视觉 QA（form/mail inline flow 浏览器对齐 + span click via hit_test_rich + rect-diff）留家里机。
 
-**任务 2 · rect-diff 工具链打通一页**【🟢 编码机半场全绿 · 2026-08-14】
-- browser rect 已有（`showcase/scripts/rect-diff/browser-rect.mjs`，headless Chrome 导出 DOM rect）；core dump 路径已打通（`dump_page --json` 接 `diff.mjs` 比对）。Unity rect（`DumpSceneJson` debug accessor 导出 render rect）半留任务 4。
+**任务 2 · rect-diff 工具链打通一页**【🟢 编码机侧全通 · 2026-08-14】
+- browser rect 已有（`showcase/scripts/rect-diff/browser-rect.mjs`，headless Chrome 导出 DOM rect）；core dump 路径已打通（`dump_page --json` 接 `diff.mjs` 比对）。**Unity PlayMode 运行时 rect 路径已接**（`run-page.sh --scene=`：Unity 机 `LoomBridge.DumpScene()` 导出 → `normalize-dump-scene.mjs` 归一 → diff；编码机 round-trip 自测通过，待 Unity 机首跑）。
 - **门**：rect-diff 在一页产比对报告。（工具链可先搭，但结果要等任务 1 文本对了才有意义。）
-- **进度（2026-08-12）**：settings 页端到端跑通——browser-rect → **core dump（`dump_page --json`，非 Unity rect 路径）** → diff.mjs 三步 runner（`run-page.sh`）产报告 `snapshot-2026-08-12-settings.md`，门「报告产出」✅ 达成。4 处工具链修复（合成根 DFS / 0-size 原点 / preview letterbox）剔 206 假 diff，剩 12 残余（slider thumb transform 发射缺口 / CJK 字宽 / sub-2px 级联）全归类为 Task 4 燃料，**settings 零 core 布局 bug**。Unity rect 半（原 `DumpSceneJson` 路径）仍未接；12 残余随 Task 4 逐页修。
+- **进度（2026-08-12）**：settings 页端到端跑通——browser-rect → **core dump（`dump_page --json`，非 Unity rect 路径）** → diff.mjs 三步 runner（`run-page.sh`）产报告 `snapshot-2026-08-12-settings.md`，门「报告产出」✅ 达成。4 处工具链修复（合成根 DFS / 0-size 原点 / preview letterbox）剔 206 假 diff，剩 12 残余（slider thumb transform 发射缺口 / CJK 字宽 / sub-2px 级联）全归类为 Task 4 燃料，**settings 零 core 布局 bug**。
 - **进度（2026-08-14，8 页全量）**：全部 8 页 core-dump 路径跑通（报告 `snapshot-2026-08-14-8pages.md`），工具链再净化 5 处（tag 词汇表归一 / preview JS 保留但撤销 data-fill 克隆 / 0×0 不进配对桶 / FOLDED 类别 / preview-base.css 补 workspace 字体）——unpaired 噪声 106→2。**8 页 0 unmatched、无结构性分歧、零疑似 core 布局 bug**；475 残余全归四类（文本测量精度差 / TextElement inline 盒宽语义 / slider thumb transform 发射缺口 / template 枚举差），A 类容差定标与 B 类潜在视觉风险留任务 4 / dogfood 逼出再定。
 
 **任务 3 · 渐变补齐（home radial 光晕 + 多 stop）**【✅ 代码侧 done · 2026-08-14】
@@ -119,7 +119,7 @@
 
 **任务 4 · 逐页 Unity PlayMode 真机 + rect-diff（8 页）**
 - 依赖任务 1（文本）+ 2（工具链）+ 3（渐变，home 要）——三者代码侧均已 done。按依赖排：先静态页（settings/character/shop/form/lab）→ 再虚拟列表页（mail/inventory）→ home（动画 + 渐变）。
-- **编码机半场（2026-08-14）已完工**：8 页 core-dump 路径 rect-diff 全绿收敛（见任务 2 进度）——**core 侧零布局 bug**，残余全归工具链无关的度量/语义类别。Unity 机剩：每页 PlayMode 跑通 + Unity rect（第三数据源接入 run-page.sh）+ driver 列表虚拟化验收 + lab/home 容差定标。
+- **编码机半场（2026-08-14）已完工**：8 页 core-dump 路径 rect-diff 全绿收敛（见任务 2 进度）——**core 侧零布局 bug**，残余全归工具链无关的度量/语义类别；PlayMode 运行时比对路径（`--scene=`）也已接好待 Unity 机首跑。Unity 机剩：每页 PlayMode 跑通 + `--scene=` 导出比对 + driver 列表虚拟化验收 + lab/home 容差定标。
 - 每页：PlayMode 跑通 → rect-diff 比对 → 修 bug → 下一页。
 - **门**：8 页真机全绿 + rect-diff 通过。
 
