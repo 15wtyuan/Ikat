@@ -106,10 +106,11 @@
 - **实证**：packer showcase 0 mixed；`dump_rich_text` 实测 mail 正文 7 inline 子→1 行（非竖排），公共树 ID 保留。workspace 1506 测全绿。
 - **门**：✅ 代码侧全绿。⏳ Unity PlayMode 视觉 QA（form/mail inline flow 浏览器对齐 + span click via hit_test_rich + rect-diff）留家里机。
 
-**任务 2 · rect-diff 工具链打通一页**【🟡 工具链就绪 · 2026-08-12】
+**任务 2 · rect-diff 工具链打通一页**【🟢 编码机半场全绿 · 2026-08-14】
 - browser rect 已有（`showcase/scripts/rect-diff/browser-rect.mjs`，headless Chrome 导出 DOM rect）；core dump 路径已打通（`dump_page --json` 接 `diff.mjs` 比对）。Unity rect（`DumpSceneJson` debug accessor 导出 render rect）半留任务 4。
 - **门**：rect-diff 在一页产比对报告。（工具链可先搭，但结果要等任务 1 文本对了才有意义。）
 - **进度（2026-08-12）**：settings 页端到端跑通——browser-rect → **core dump（`dump_page --json`，非 Unity rect 路径）** → diff.mjs 三步 runner（`run-page.sh`）产报告 `snapshot-2026-08-12-settings.md`，门「报告产出」✅ 达成。4 处工具链修复（合成根 DFS / 0-size 原点 / preview letterbox）剔 206 假 diff，剩 12 残余（slider thumb transform 发射缺口 / CJK 字宽 / sub-2px 级联）全归类为 Task 4 燃料，**settings 零 core 布局 bug**。Unity rect 半（原 `DumpSceneJson` 路径）仍未接；12 残余随 Task 4 逐页修。
+- **进度（2026-08-14，8 页全量）**：全部 8 页 core-dump 路径跑通（报告 `snapshot-2026-08-14-8pages.md`），工具链再净化 5 处（tag 词汇表归一 / preview JS 保留但撤销 data-fill 克隆 / 0×0 不进配对桶 / FOLDED 类别 / preview-base.css 补 workspace 字体）——unpaired 噪声 106→2。**8 页 0 unmatched、无结构性分歧、零疑似 core 布局 bug**；475 残余全归四类（文本测量精度差 / TextElement inline 盒宽语义 / slider thumb transform 发射缺口 / template 枚举差），A 类容差定标与 B 类潜在视觉风险留任务 4 / dogfood 逼出再定。
 
 **任务 3 · 渐变补齐（home radial 光晕 + 多 stop）**【✅ 代码侧 done · 2026-08-14】
 - **落地**：`Gradient` 数据模型（linear 任意角度 + 多 stop ≤8 / radial 全形）替换 `Gradient2`（pkg v34）；渲染统一 program=6/7 per-fragment 渐变 shader（blob v13 grad_params 列 208B；premultiplied 插值 + bg-color 垫底 source-over 合成）；文本渐变 CPU 采样与 shader 同一套 t 数学；fence `<style>` 渐变值探针（坏渐变打包期报）。spec 见 `docs/superpowers/specs/2026-08-14-gradient-radial-multistop-design.md`。
@@ -118,6 +119,7 @@
 
 **任务 4 · 逐页 Unity PlayMode 真机 + rect-diff（8 页）**
 - 依赖任务 1（文本）+ 2（工具链）+ 3（渐变，home 要）——三者代码侧均已 done。按依赖排：先静态页（settings/character/shop/form/lab）→ 再虚拟列表页（mail/inventory）→ home（动画 + 渐变）。
+- **编码机半场（2026-08-14）已完工**：8 页 core-dump 路径 rect-diff 全绿收敛（见任务 2 进度）——**core 侧零布局 bug**，残余全归工具链无关的度量/语义类别。Unity 机剩：每页 PlayMode 跑通 + Unity rect（第三数据源接入 run-page.sh）+ driver 列表虚拟化验收 + lab/home 容差定标。
 - 每页：PlayMode 跑通 → rect-diff 比对 → 修 bug → 下一页。
 - **门**：8 页真机全绿 + rect-diff 通过。
 
@@ -134,6 +136,7 @@
 - 摸黑打通 + 三束加宽纪元已完工（详见 `roadmap_old.md`）：Unity 端到端可用，21 控件全栈、cascade / 动画 / 虚拟列表 / box-shadow / 文字特效 / transform / filter 矩阵已交付，release CI 就绪。
 - **近期优先**：**里程碑 1 任务 1（文本模型）+ 任务 3（渐变补齐：radial + 多 stop + 任意角度，program=6/7 shader）代码侧均 done**（任务 3：commit 见 spec `2026-08-14-gradient-radial-multistop-design.md`，pkg v34 + blob v13 + dll/GUI exe 已同步入库）；**任务 2 rect-diff 工具链 settings 页端到端跑通**（core-dump 路径，2026-08-12）—— 12 残余 + Unity rect 半留 Task 4。**下一件事 = 任务 4（逐页修，1+2+3 依赖已齐）与任务 5（清验收债，独立）**。
 - **横切收尾（2026-08-14）**：公共 API FFI 批四件接通（NumberField bounds setter / ProgressBar.IsIndeterminate / RadioButton.Name / UIContext.Pick，见延期表）；CI 补 dotnet 门（HeadlessTests 现场 Linux .so 跑 P/Invoke 全套 + PublicApi 编译门——此前 CI 只跑纯 managed 31 测，HeadlessTests 曾随 pkg 版本漂移静默腐烂无人知）。
+- **rect-diff 8 页全量（2026-08-14）**：任务 2/4 编码机半场完工——8 页 core-dump 路径 0 unmatched / 零疑似 core 布局 bug（报告 `snapshot-2026-08-14-8pages.md`），工具链净化 5 处（tag 归一 / data-fill 撤销 / 0×0 桶 / FOLDED / workspace 字体）。**Unity 机剩任务 4 的真机半 + 任务 5 验收债 + 任务 3 渐变视觉验收。**
 - **悬置判据项**：动画引擎终态（等 layout 动画需求）、Godot / 编辑器（等里程碑 1、2）。
 
 ---
