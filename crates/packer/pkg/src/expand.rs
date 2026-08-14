@@ -488,9 +488,9 @@ impl<'a> Walker<'a> {
         self.scopes.push((host_idx, def.dynamic_rules.clone()));
         self.extra_keyframes.extend(def.keyframes.iter().cloned());
 
-        // id 帧：组件模板 id 预填 + light 子 id 进帧时查撞车。
-        let frame = collect_ids(&def.parsed.tree);
-        self.id_frames.push(frame);
+        // id 帧：组件模板元素与投影 light 子都在 emit 时入帧（双向撞车任一顺序可检；
+        // 不预填模板 id——预填会让模板自身元素的 insert 撞自己，凡带 id 的组件必误报）。
+        self.id_frames.push(HashSet::new());
 
         self.stack.push(tag.clone());
         // def（registry 不可变借）在本调用后不再使用——NLL 下借用在 mark_used 前结束，
@@ -627,19 +627,6 @@ fn scan_slots(
         rec(tree, r, &mut out)?;
     }
     Ok(out)
-}
-
-/// 收集树里全部元素 id（展开域 id 帧的预填集）。
-fn collect_ids(tree: &IrTree) -> HashSet<String> {
-    let mut out = HashSet::new();
-    for node in &tree.nodes {
-        if let IrNodeKind::Element(el) = &node.kind {
-            if let Some(id) = attr(el, "id") {
-                out.insert(id);
-            }
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -898,7 +885,7 @@ mod tests {
     fn scope_id_collision_errors() {
         let (reg, _) = ComponentRegistry::from_sources(&[(
             "game-item-card".to_string(),
-            r#"<div class="gic"><slot name="title"><span id="shared">默认</span></slot></div>"#
+            r#"<div class="gic" style="display:flex"><span id="shared">常驻</span><slot name="title"></slot></div>"#
                 .to_string(),
             "components/game-item-card.html".to_string(),
         )])

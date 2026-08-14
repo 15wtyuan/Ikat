@@ -1,11 +1,14 @@
-<!-- stat-bar component fragment: label + progress. character/inventory reuse. -->
 <style>
-  /* ProgressBar：控件本身是轨道（spec §2.2），作者写 data-slot=fill 子节点（width:% 由 value 驱动） */
-  [role="progressbar"] { background-color:rgba(26,47,69,0.85); border-radius:3px; overflow:hidden; }
-  [role="progressbar"] [data-slot="fill"] { background-color:#5fb4d4; height:100%; }
+  /* 属性条组件：label / bar / val 三 slot。投影进来的 progressbar 也归本组件域——
+     scoped 规则直接样式化投影内容（硬墙模型的补偿语义）。 */
+  .sb-root { display:flex; flex-direction:row; align-items:center; gap:12px; }
+  .sb-root [role="progressbar"] { background-color:rgba(26,47,69,0.85); border-radius:3px; overflow:hidden; }
+  .sb-root [data-slot="fill"] { background-color:#5fb4d4; height:100%; }
+  .sb-label { color:#9aa0b4; font-size:14px; min-width:52px; }
+  .sb-val { color:#e0e6ec; font-size:14px; min-width:90px; text-align:right; }
 </style>
-<div class="stat-bar" style="display:flex;flex-direction:row;align-items:center;gap:12px">
-  <span style="color:#9aa0b4;font-size:14px;min-width:48px">HP</span>
-  <div role="progressbar" aria-valuenow="780" aria-valuemin="0" aria-valuemax="1000" style="flex-grow:1;height:14px;"><div data-slot="fill"></div></div>
-  <span style="color:#e0e6ec;font-size:14px;min-width:72px;text-align:right">780 / 1000</span>
+<div class="sb-root" style="display:flex;flex-direction:row;align-items:center;gap:12px">
+  <slot name="label"><span class="sb-label" style="color:#9aa0b4;font-size:14px;min-width:52px">属性</span></slot>
+  <slot name="bar"><div role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="flex-grow:1;height:16px"><div data-slot="fill"></div></div></slot>
+  <slot name="val"><span class="sb-val" style="color:#e0e6ec;font-size:14px;min-width:90px;text-align:right">0/100</span></slot>
 </div>

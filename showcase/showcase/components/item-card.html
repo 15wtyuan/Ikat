@@ -1,6 +1,12 @@
-﻿<!-- item-card custom element + slot projection example. Hyphenated tag = CustomElement. -->
-<item-card style="display:flex;flex-direction:column;gap:8px;width:160px;background-color:rgba(21,36,51,0.72);border-radius:10px;padding:16px">
-  <img src="../res/icons/item-gem.png" alt="item" style="width:64px;height:64px;align-self:center">
-  <slot name="item-name"><span style="color:#e0e6ec;font-size:16px;font-weight:700;align-self:center">物品名</span></slot>
-  <slot name="item-meta"><span style="color:#9aa0b4;font-size:13px;align-self:center">描述</span></slot>
-</item-card>
+<style>
+  /* 物品卡组件：icon / ic-name / ic-desc 三 slot（icon slot 的 fallback 带默认图）。 */
+  .ic-root { display:flex; flex-direction:column; gap:8px; width:160px; background-color:#1a2f45;
+             border-radius:10px; padding:16px; }
+  .ic-name { color:#e0e6ec; font-size:16px; font-weight:700; align-self:center; }
+  .ic-desc { color:#9aa0b4; font-size:13px; align-self:center; }
+</style>
+<div class="ic-root" style="display:flex;flex-direction:column;gap:8px;width:160px;background-color:#1a2f45;border-radius:10px;padding:16px">
+  <slot name="icon"><img src="../../res/icons/item-chest.png" alt="item" style="width:64px;height:64px;align-self:center"></slot>
+  <slot name="ic-name"><span class="ic-name" style="color:#e0e6ec;font-size:16px;font-weight:700;align-self:center">默认名</span></slot>
+  <slot name="ic-desc"><span class="ic-desc" style="color:#9aa0b4;font-size:13px;align-self:center">默认描述</span></slot>
+</div>

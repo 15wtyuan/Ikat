@@ -1,7 +1,7 @@
 # 组件系统：Custom Element + `<slot>` 投影 + scope 三件套（复合束）
 
 - 日期：2026-08-14
-- 状态：**实施中**（feat/component-system 分支，T0–T7 分 task 推进）
+- 状态：**已实施**（8 task 全绿合入；cargo 1567 / dotnet 384+31 / PublicApi / fmt / clippy 严门全过；showcase 6 变更页 rect-diff 0 unmatched。Unity 真机验收（ShowcaseRunner 两跳路径编译 + 逐页）留家里机）
 - 契约依据：main-design §4.3（Get 不穿透组件边界）、§5.4（Shadow DOM 样式边界）、§7.4（Package 注册表承担 `customElements.define()` 角色；未注册元素、无效 slot 打包期报错）；public-api §2（Slot/CustomElement 是 Container 子类；IsScopeRoot 是运行时标记非类型）；fence.md §2.4 hyphen 标签 + §6 `slot` 表。
 - 参考对照：RmlUi 模板 = parse 期注入 + `content` 属性单 slot 投影（`Template.cpp:83-110`）；FairyGUI 无投影、组件实例 ID 查找按实例内 scan（`GComponent.GetChildById`）——两者合并成「打包期展开 + 实例内作用域查找」。
 

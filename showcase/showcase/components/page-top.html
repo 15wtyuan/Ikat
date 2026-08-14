@@ -1,0 +1,11 @@
+<style>
+  /* 页顶栏组件：6 页共用（back-home + 标题 slot）。样式走组件 scoped 规则 +
+     根 inline（宿主页面可用 tag/class 选择器覆盖 host 本体的尺寸定位）。 */
+  .pt-root { display:flex; flex-direction:row; align-items:center; gap:12px; padding:20px 32px;
+             background-color:rgba(21,36,51,0.72); border-width:0 0 1px 0; border-style:solid; border-color:#2a5a75; }
+  .pt-title { color:#e0e6ec; font-size:20px; font-weight:700; }
+</style>
+<div class="pt-root" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
+  <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button>
+  <slot name="title"><span class="pt-title" style="color:#e0e6ec;font-size:20px;font-weight:700">页面标题</span></slot>
+</div>

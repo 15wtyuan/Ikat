@@ -38,9 +38,7 @@
 </head>
 <body>
   <div class="root">
-    <div class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:rgba(21,36,51,0.72);border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
-      <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">角色</span>
-    </div>
+    <page-top id="page-top"><span slot="title" class="pt-title" style="color:#e0e6ec;font-size:20px;font-weight:700">角色</span></page-top>
     <div class="body">
       <div class="col-stage">
         <div class="native-slot" id="native-slot" style="width:720px;height:680px"></div>
@@ -50,9 +48,9 @@
           <button id="btn-train" style="background-color:#d4a44e;color:#0e1620;font-size:14px;font-weight:700;padding:6px 16px;border-radius:8px">训练 +EXP</button>
         </div>
         <div class="stat-bars">
-          <div class="stat-row"><span class="stat-label">HP</span><div role="progressbar" aria-valuenow="780" aria-valuemin="0" aria-valuemax="1000" style="flex-grow:1;height:16px;"><div data-slot="fill"></div></div><span class="stat-val">780/1000</span></div>
-          <div class="stat-row"><span class="stat-label">MP</span><div role="progressbar" aria-valuenow="340" aria-valuemin="0" aria-valuemax="600" style="flex-grow:1;height:16px;"><div data-slot="fill"></div></div><span class="stat-val">340/600</span></div>
-          <div class="stat-row"><span class="stat-label">EXP</span><div role="progressbar" id="stat-exp" aria-valuenow="62" aria-valuemin="0" aria-valuemax="100" style="flex-grow:1;height:16px;"><div data-slot="fill"></div></div><span class="stat-val" id="stat-exp-val">62%</span></div>
+          <stat-bar><span slot="label" class="sb-label" style="color:#9aa0b4;font-size:14px;min-width:52px">HP</span><div slot="bar" role="progressbar" aria-valuenow="780" aria-valuemin="0" aria-valuemax="1000" style="flex-grow:1;height:16px"><div data-slot="fill"></div></div><span slot="val" class="sb-val" style="color:#e0e6ec;font-size:14px;min-width:90px;text-align:right">780/1000</span></stat-bar>
+          <stat-bar><span slot="label" class="sb-label" style="color:#9aa0b4;font-size:14px;min-width:52px">MP</span><div slot="bar" role="progressbar" aria-valuenow="340" aria-valuemin="0" aria-valuemax="600" style="flex-grow:1;height:16px"><div data-slot="fill"></div></div><span slot="val" class="sb-val" style="color:#e0e6ec;font-size:14px;min-width:90px;text-align:right">340/600</span></stat-bar>
+          <stat-bar id="exp-bar"><span slot="label" class="sb-label" style="color:#9aa0b4;font-size:14px;min-width:52px">EXP</span><div slot="bar" role="progressbar" id="stat-exp" aria-valuenow="62" aria-valuemin="0" aria-valuemax="100" style="flex-grow:1;height:16px"><div data-slot="fill"></div></div><span slot="val" class="sb-val" id="stat-exp-val" style="color:#e0e6ec;font-size:14px;min-width:90px;text-align:right">62%</span></stat-bar>
         </div>
       </div>
       <div class="col-side">

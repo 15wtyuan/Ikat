@@ -86,9 +86,7 @@
 </head>
 <body>
   <div class="root">
-    <div class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:#152433;border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
-      <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">CSS 标本馆</span>
-    </div>
+    <page-top id="page-top"><span slot="title" class="pt-title" style="color:#e0e6ec;font-size:20px;font-weight:700">CSS 标本馆</span></page-top>
     <div class="body">
       <div class="page-title">CSS 全属性标本馆</div>
       <div class="page-desc">围栏 §5.1 全白名单逐组 specimen · 小枚举全值，大枚举代表值 + 矩阵</div>
@@ -188,12 +186,9 @@
       <div class="section">
         <div class="section-title">10 · custom-element + slot 投影</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:16px">
-          <item-card style="display:flex;flex-direction:column;gap:8px;width:160px;background-color:#1a2f45;border-radius:10px;padding:16px">
-            <img src="../res/icons/item-chest.png" alt="item" style="width:64px;height:64px;align-self:center">
-            <slot name="ic-name"><span style="color:#e0e6ec;font-size:16px;font-weight:700;align-self:center">默认名</span></slot>
-            <slot name="ic-desc"><span style="color:#9aa0b4;font-size:13px;align-self:center">默认描述</span></slot>
-          </item-card>
-          <span style="color:#6c7080;font-size:13px;align-self:center">含 hyphen 标签名 = CustomElement；&lt;slot&gt; 接投影（运行时由组件系统填充）</span>
+          <item-card><img slot="icon" src="../res/icons/item-gem.png" alt="item" style="width:64px;height:64px;align-self:center"><span slot="ic-name" class="ic-name" style="color:#e0e6ec;font-size:16px;font-weight:700;align-self:center">宝石残片</span><span slot="ic-desc" class="ic-desc" style="color:#9aa0b4;font-size:13px;align-self:center">投影：icon/名/描述全覆盖</span></item-card>
+          <item-card></item-card>
+          <span style="color:#6c7080;font-size:13px;align-self:center">components/item-card.html 注册组件：左 = slot 投影全覆盖，右 = 全 fallback；打包期展开（spec §2）</span>
         </div>
       </div>
 

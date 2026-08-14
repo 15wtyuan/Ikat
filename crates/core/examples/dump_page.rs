@@ -290,7 +290,10 @@ fn main() {
                 });
                 serde_json::json!({
                     "domIndex": i,
-                    "tag": kind_to_html_tag(n.kind),
+                    // CustomElement 发 custom_tag 字面量（与浏览器侧 tagName 原文配对；
+                    // 其余 kind 走 kind_to_html_tag 语义映射）。
+                    "tag": n.custom_tag.as_deref().map(str::to_string)
+                        .unwrap_or_else(|| kind_to_html_tag(n.kind).to_string()),
                     "id": n.id_attr.clone(),
                     "classes": n.classes.clone(),
                     "x": r.x,

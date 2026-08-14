@@ -37,8 +37,8 @@
 把围栏 CSS 子集 + 公共 API 补到与设计契约对齐。缺口：
 
 - **视觉**：~~渐变（现仅 linear 2 色 4 方向）~~ **radial + 多 stop + 任意角度已交付（2026-08-14，program=6/7 per-fragment shader + blob v13 grad_params）**；剩余 defer：conic、repeating-\*、渐变×圆角/边框共存（见延期项表）。`filter: blur()`（需离屏 RT 基建，非小缺口）、`grayed` 渲染（现借 `filter: grayscale(1)`）照旧。
-- **复合 · scope 三件套**：`Get<T>` 的 `IsScopeRoot` 边界（现裸 DFS，穿透嵌套组件 / list item）、per-scope ID 去重（现全模板级）、Shadow DOM 样式隔离（现仅 dynamic rule 按 scope 过滤，非完整 cascade scoping）。
-- **复合 · 组件系统**：Custom Element + `<slot>` 内容投影（现空壳——fence 认 hyphen 标签 + `<slot>`，C# 有空类；无 `customElements.define` 注册表 / 投影 / 生命周期）。
+- ~~**复合 · scope 三件套**~~ **已交付（2026-08-14，组件系统）**：`Get<T>`/`Query` 按 `LOOKUP_SCOPE` 剪枝（不穿透嵌套组件/list item）、per-scope ID 去重（fence per-file + 展开域撞车检查）、Shadow DOM 样式隔离（pkg v35 锚定规则按展开实例包装；host 经 `HOST_IN_PARENT_SCOPE` 归页面域）。
+- ~~**复合 · 组件系统**~~ **已交付（2026-08-14，打包期展开）**：Custom Element 打包期展开（components/ 注册表 = `customElements.define` 角色）+ `<slot>` 投影（拼接位消费，产物无 Slot 节点）+ `CustomElement.Tag` typed 投影。C# 类绑定 / 生命周期回调 defer（见延期表）。spec：`docs/superpowers/specs/2026-08-14-component-system-design.md`。
 - **控件**：Tree（`role=tree`，无）。
 - **动画引擎终态**：池化 Tween + 缓动全集（cubic-bezier / Elastic / Bounce / per-stop timing）+ 链式 builder + layout 动画 prop_type 分层。进入判据：第一个需 layout 动画的页面，或动画并发使单 `Vec<Tween>` 抖动。
 - **文本模型收尾**：inline run 编译（TextRun / ImageRun / LinkRun），公共树保留 TextNode / TextElement / Image / Link 的 ID 和事件；`display:block` RichText 暗号已退役，收尾表达层。
@@ -137,6 +137,7 @@
 - **近期优先**：**里程碑 1 任务 1（文本模型）+ 任务 3（渐变补齐：radial + 多 stop + 任意角度，program=6/7 shader）代码侧均 done**（任务 3：commit 见 spec `2026-08-14-gradient-radial-multistop-design.md`，pkg v34 + blob v13 + dll/GUI exe 已同步入库）；**任务 2 rect-diff 工具链 settings 页端到端跑通**（core-dump 路径，2026-08-12）—— 12 残余 + Unity rect 半留 Task 4。**下一件事 = 任务 4（逐页修，1+2+3 依赖已齐）与任务 5（清验收债，独立）**。
 - **横切收尾（2026-08-14）**：公共 API FFI 批四件接通（NumberField bounds setter / ProgressBar.IsIndeterminate / RadioButton.Name / UIContext.Pick，见延期表）；CI 补 dotnet 门（HeadlessTests 现场 Linux .so 跑 P/Invoke 全套 + PublicApi 编译门——此前 CI 只跑纯 managed 31 测，HeadlessTests 曾随 pkg 版本漂移静默腐烂无人知）。
 - **rect-diff 8 页全量（2026-08-14）**：任务 2/4 编码机半场完工——8 页 core-dump 路径 0 unmatched / 零疑似 core 布局 bug（报告 `snapshot-2026-08-14-8pages.md`），工具链净化 5 处（tag 归一 / data-fill 撤销 / 0×0 桶 / FOLDED / workspace 字体）。**Unity 机剩任务 4 的真机半 + 任务 5 验收债 + 任务 3 渐变视觉验收。**
+- **复合束组件系统（2026-08-14，8 task SDD 全绿）**：Custom Element 打包期展开落地——components/ 注册表（Package 注册表 = `customElements.define` 角色）+ slot 投影（编译期糖，产物无 Slot 节点）+ 硬墙作用域（host 归页面域 / 投影内容归组件域，pkg v35 PerComponentScopes 锚定规则）+ L3 查找边界（Get/Query 不穿透，aria-controls 多实例安全）+ `CustomElement.Tag`。showcase 落地：page-top ×6 页 + stat-bar ×3 + item-card（lab）；6 变更页 rect-diff 0 unmatched / 0 idless-unpaired。里程碑 2 门「scope 三件套完成」判据已满足；剩 C# 类绑定 defer（dogfood 触发）。
 - **悬置判据项**：动画引擎终态（等 layout 动画需求）、Godot / 编辑器（等里程碑 1、2）。
 
 ---
@@ -160,13 +161,9 @@
 - 判据：将来需要时，与 `aria-controls` 同机制一并补。
 - 来源：`2026-08-04-m3-tablist` §11。
 
-**组件封装三件套（L2 + L3）** — `Get<T>` 的 `IsScopeRoot` 完整边界（不穿透嵌套组件 / list item）+ per-scope ID 去重（真嵌套组件语义）+ Shadow DOM 样式隔离（模板内选择器作用域）。三者同一套系统。
-- 判据：第一个嵌套组件 / 需样式隔离的组件系统。
-- 来源：`2026-08-05-pooled-slot-lifecycle` §5.1、§5.4、§8。
-
-**Slot / CustomElement 投影 + 注册机制** — 复合束 `<slot>` 内容投影 + `customElements.define` 注册表 + 生命周期（C# 投影类已是空壳占位）。
-- 判据：复合束组件系统推进时。
-- 来源：`2026-07-28-controls-debt-and-dropdown` §3.3、§11。
+**组件 C# 类绑定 + 生命周期回调** — `UIContext.RegisterComponent<T>("tag")`（fgui extensionCreator 等价）+ OnConnected/OnDisconnected 回调 + 实例化时 eager 构造 wrapper。打包期展开已交付（tag→typed CustomElement 投影 + 硬墙作用域 + slot 投影），类绑定是运行时绑定层，契约未承诺（public-api 无 RegisterComponent）。
+- 判据：dogfood 小游戏逼出（组件行为逻辑重复到值得 typed 子类时）。
+- 来源：component-system spec §2.8（2026-08-14）。
 
 **layout 动画 / prop_type 分层** — 动画 layout 属性（width/height/flex，非只渲染层 transform/opacity/color）——需 `prop_type` 分层（`transform_dirty` vs `layout_dirty`）+ tick 时序重构 + solve 重入。
 - 判据：第一个需 layout 动画的页面（如 accordion 展开 / 用 width 而非 scaleX 的进度条）。
