@@ -1585,13 +1585,12 @@ namespace LoomGUI
             set { ThrowIfDisposed(); SetNumberValue(value); }
         }
         // Min/Max/Step：core ControlState::NumberField 存了 min/max/step（打包期 ControlInit 烘焙，
-        // set_number_value 据此 clamp+量化）。getter 复用 Slider 的 get_control_min/max/step FFI——FFI 侧
-        // pattern-match 已扩到 NumberField（见 c55389d）。三者打包期冻结、运行时不可变：core 无 NumberField
-        // 专用 setter（value 存 EditState 文本，setter 须 parse→clamp→quantize→re-format，留待后续），
-        // 故 getter 通、setter throw NE，与 Slider 同 get+set 形状但 setter 锁住只读语义（同 RadioButton.Name）。
-        public float Min { get { ThrowIfDisposed(); return GetControlMin(); } set { throw NE(); } }
-        public float Max { get { ThrowIfDisposed(); return GetControlMax(); } set { throw NE(); } }
-        public float Step { get { ThrowIfDisposed(); return GetControlStep(); } set { throw NE(); } }
+        // set_number_value 据此 clamp+量化）。getter 复用 get_control_min/max/step；setter 直转
+        // set_control_min/max/step（FFI arm 已扩到 NumberField）：改界后 core 侧把 value 文本
+        // parse→clamp→量化→re-format，C# 只透传，不做 clamp/量化。
+        public float Min { get { ThrowIfDisposed(); return GetControlMin(); } set { ThrowIfDisposed(); SetControlMin(value); } }
+        public float Max { get { ThrowIfDisposed(); return GetControlMax(); } set { ThrowIfDisposed(); SetControlMax(value); } }
+        public float Step { get { ThrowIfDisposed(); return GetControlStep(); } set { ThrowIfDisposed(); SetControlStep(value); } }
         // ReadOnly：NumberField 与 TextField/TextArea 共享 EditState（get_control_readonly 按 node 派发）。
         // setter 直转 FFI；getter 读 EditState.readonly（与 set 对称）。
         public bool ReadOnly
@@ -1671,6 +1670,25 @@ namespace LoomGUI
             float v = 0f; int rc = Native.loomgui_stage_get_control_step(h, _id, &v);
             if (rc != 0) throw new InvalidOperationException($"get_control_step failed (node {_id})");
             return v;
+        }
+        // setter：core 侧改界后把 value 文本重约束（parse→clamp→量化→re-format）。
+        void SetControlMin(float v)
+        {
+            StageHandle* h = Handle();
+            int rc = Native.loomgui_stage_set_control_min(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_min failed (node {_id})");
+        }
+        void SetControlMax(float v)
+        {
+            StageHandle* h = Handle();
+            int rc = Native.loomgui_stage_set_control_max(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_max failed (node {_id})");
+        }
+        void SetControlStep(float v)
+        {
+            StageHandle* h = Handle();
+            int rc = Native.loomgui_stage_set_control_step(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_step failed (node {_id})");
         }
     }
 
@@ -1894,9 +1912,18 @@ namespace LoomGUI
             get { ThrowIfDisposed(); return GetControlChecked(); }
             set { ThrowIfDisposed(); SetControlChecked(value); }
         }
-        // Name = radio 分组名（HTML name 属性，结构性，决定互斥语义）。core 无 node-attribute getter FFI
-        // ——暂留 throw，待打包期属性镜像或 side query 暴露后填。
-        public string Name { get { throw NE(); } }
+        // Name = radio 分组名（HTML name 语义，决定互斥分组；打包期 data-name bake 进
+        // ControlState::Radio）。只读——分组是结构性属性，运行时改名会破坏互斥不变量。
+        public string Name
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                return TextControlFFI.ReadText(h, _id,
+                    (hp, buf, cap, len) => Native.loomgui_stage_get_radio_name(hp, _id, buf, cap, len));
+            }
+        }
         // disabled setter 直 FFI；getter 读 NodeFlags::DISABLED（get_node_disabled）。
         public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
 
@@ -1923,7 +1950,6 @@ namespace LoomGUI
                 }
             }
         }
-        static NotImplementedException NE() => new NotImplementedException();
 
         // ── FFI 转调 ────────────────────────────────────────────────────────
         bool GetControlChecked()
@@ -2281,10 +2307,30 @@ namespace LoomGUI
             get { ThrowIfDisposed(); return GetControlMax(); }
             set { ThrowIfDisposed(); SetControlMax(value); }
         }
-        // indeterminate 是打包期 control_init 字段（core 无 runtime setter / 无 getter FFI）——
-        // 设计期产物，运行时不可变。getter 暂留 throw：待 core 暴露 side query 或打包期镜像后再填。
-        public bool IsIndeterminate { get { throw NE(); } set { throw NE(); } }
+        // indeterminate（不确定进度态）：FFI 读写 Progress 状态位（get/set_control_indeterminate）。
+        // 纯状态——视觉切换走作者 CSS 选择器（core 不做 marquee 渲染）。value/max 不受扰动。
+        public bool IsIndeterminate
+        {
+            get { ThrowIfDisposed(); return GetControlIndeterminate(); }
+            set { ThrowIfDisposed(); SetControlIndeterminate(value); }
+        }
         static NotImplementedException NE() => new NotImplementedException();
+
+        // ── FFI 转调 ────────────────────────────────────────────────────────
+        bool GetControlIndeterminate()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte b = 0;
+            int rc = Native.loomgui_stage_get_control_indeterminate(h, _id, &b);
+            if (rc != 0) throw new InvalidOperationException($"get_control_indeterminate failed (node {_id})");
+            return b != 0;
+        }
+        void SetControlIndeterminate(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.loomgui_stage_set_control_indeterminate(h, _id, v ? (byte)1 : (byte)0);
+            if (rc != 0) throw new InvalidOperationException($"set_control_indeterminate failed (node {_id})");
+        }
 
         // float out 经 local + &local（同 GetWorldMatrix 局部取址模式，不用 fixed）。rc<0 升异常不吞。
         float GetControlValue()
@@ -3219,22 +3265,19 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 命中测试：返回 globalPoint 处最上层可 Touchable 节点。
-        /// ponytail: lib.rs 无 hit_test / pick FFI。core hit_test 走 Node::hit_test 递归，
-        /// 依赖上帧 world_matrix，但未暴露为 FFI。待 Rust 侧加 loomgui_stage_hit_test(h, x, y) → NodeId
-        /// 后接通。现阶段 C# 业务可走 Geometry.WorldRect + 手工 Contains 做近似命中（简陋但有）。
+        /// 命中测试：返回 globalPoint 处最上层可 Touchable 节点；未命中返回 null。
+        /// 直转 loomgui_stage_hit_test（core hit::hit_test，上帧 world_transforms；结构
+        /// 变更帧的新节点本帧未命中，1 帧延迟语义）。scrollbar thumb 命中 → 容器节点
+        /// （FFI 侧 decode sentinel flag；公共树无 thumb 节点）。拖放 drop target 查找靠它。
         /// </summary>
         public Node Pick(Vector2 globalPoint)
         {
-            // ponytail: no loomgui_stage_hit_test FFI.
-            // When Rust adds Stage::hit_test(x,y) → Option<NodeId>, wire:
-            //   StageHandle* h = (StageHandle*)_stage.ToPointer();
-            //   uint id = Native.loomgui_stage_hit_test(h, globalPoint.X, globalPoint.Y);
-            //   if (id == Node.RootSentinel) return null;
-            //   return _registry.GetOrCreate(id);
-            throw new NotImplementedException(
-                "Pick: no loomgui_stage_hit_test FFI yet (ponytail defer). " +
-                "Will wire when Rust side adds Stage::hit_test.");
+            StageHandle* h = (StageHandle*)_stage.ToPointer();
+            uint id = 0;
+            int rc = Native.loomgui_stage_hit_test(h, globalPoint.X, globalPoint.Y, &id);
+            if (rc == 1) return null;
+            if (rc != 0) throw new InvalidOperationException($"hit_test failed rc={rc} at ({globalPoint.X},{globalPoint.Y})");
+            return _registry.GetOrCreate(id);
         }
 
         /// <summary>

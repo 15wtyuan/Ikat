@@ -21,7 +21,7 @@ use loomgui_core::input::{EventRecord, KeyEvent, PointerEvent};
 use loomgui_core::scene::animation::{
     player_key_as_u64, player_key_from_u64, register_on_key, PlayerPlayState,
 };
-use loomgui_core::scene::node::ControlState;
+use loomgui_core::scene::node::{ControlState, EditState};
 use loomgui_core::scene::{dynamic, NodeId};
 use loomgui_core::stage::Stage;
 use loomgui_core::style::computed::ComputedNodeStyle;
@@ -2075,7 +2075,7 @@ pub extern "C" fn loomgui_stage_get_control_checked(
     }
 }
 
-/// 设控件 max（ProgressBar / Slider）。null 句柄 / 非值控件 / 节点缺失 → -1。
+/// 设控件 max（ProgressBar / Slider / NumberField）。null 句柄 / 非值控件 / 节点缺失 → -1。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -2138,6 +2138,19 @@ pub extern "C" fn loomgui_stage_set_control_max(
                 dragging,
             }
         }
+        ControlState::NumberField {
+            edit, min, step, ..
+        } => {
+            let max = max.max(min);
+            let mut edit = edit;
+            renumber_edit_value(&mut edit, min, max, step);
+            ControlState::NumberField {
+                edit,
+                min,
+                max,
+                step,
+            }
+        }
         _ => return -1,
     };
     scene.controls.ensure(id, new_state);
@@ -2173,7 +2186,7 @@ pub extern "C" fn loomgui_stage_get_control_max(
     }
 }
 
-/// 设控件 min（Slider 独有；ProgressBar 无 min 语义 → -1）。
+/// 设控件 min（Slider / NumberField；ProgressBar 无 min 语义 → -1）。
 /// null 句柄 / 节点缺失 → -1。改 min 后 value 重新 clamp。
 ///
 /// **常驻（不 gate）。**
@@ -2213,6 +2226,19 @@ pub extern "C" fn loomgui_stage_set_control_min(
                 dragging,
             }
         }
+        ControlState::NumberField {
+            edit, max, step, ..
+        } => {
+            let min = min.min(max);
+            let mut edit = edit;
+            renumber_edit_value(&mut edit, min, max, step);
+            ControlState::NumberField {
+                edit,
+                min,
+                max,
+                step,
+            }
+        }
         _ => return -1,
     };
     scene.controls.ensure(id, new_state);
@@ -2244,8 +2270,9 @@ pub extern "C" fn loomgui_stage_get_control_min(
     }
 }
 
-/// 设控件 step（Slider 独有；ProgressBar 无 step 语义 → -1）。
-/// null 句柄 / 节点缺失 → -1。
+/// 设控件 step（Slider / NumberField；ProgressBar 无 step 语义 → -1）。
+/// null 句柄 / 节点缺失 → -1。改 step 不重量化 value（对齐 Slider arm：量化只在
+/// set value 时发生，改步长只影响后续写入）。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -2287,10 +2314,42 @@ pub extern "C" fn loomgui_stage_set_control_step(
                 dragging,
             }
         }
+        ControlState::NumberField { edit, min, max, .. } => {
+            // 同 Slider：负 / NaN 拒绝（set_number_value 的量化分支同样假设 step>0）。
+            if !step.is_finite() || step < 0.0 {
+                return -1;
+            }
+            ControlState::NumberField {
+                edit,
+                min,
+                max,
+                step,
+            }
+        }
         _ => return -1,
     };
     scene.controls.ensure(id, new_state);
     0
+}
+
+/// NumberField value 文本按 [min,max] 重约束：parse → clamp → step 量化 → re-format 写回
+/// （与 set_number_value 同口径，value 在 NumberField 存文本）。改界后 value 可能越出新区间，
+/// 必须重写文本保持一致；文本非数值（用户手输中）时不动 value——界只约束后续写入。
+/// value 长度变化后 cursor/anchor 收缩到新 len（字节偏移不可越界）。
+fn renumber_edit_value(edit: &mut EditState, min: f32, max: f32, step: f32) {
+    let Ok(v) = edit.value.parse::<f32>() else {
+        return;
+    };
+    // clamp：min>max 时 swap，保 clamp 闭区间不 panic（同 set_number_value 纵深守卫）。
+    let (lo, hi) = if min <= max { (min, max) } else { (max, min) };
+    let quantized = if step > 0.0 {
+        ((v.clamp(lo, hi) - lo) / step).round() * step + lo
+    } else {
+        v.clamp(lo, hi)
+    };
+    edit.value = format_number(quantized.clamp(lo, hi));
+    edit.cursor = edit.cursor.min(edit.value.len());
+    edit.anchor = edit.anchor.min(edit.value.len());
 }
 
 /// 读控件 step（Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
@@ -2316,6 +2375,99 @@ pub extern "C" fn loomgui_stage_get_control_step(
         }
         _ => -1,
     }
+}
+
+/// 读 ProgressBar indeterminate（不确定进度态）。非 Progress / null out / 节点缺失 → -1。
+/// 纯状态位（视觉由作者 CSS 表达，core 不做 marquee 渲染）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_control_indeterminate(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+) -> i32 {
+    if h.is_null() || out.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::Progress { indeterminate, .. }) => {
+            unsafe { *out = u8::from(*indeterminate) };
+            0
+        }
+        _ => -1,
+    }
+}
+
+/// 设 ProgressBar indeterminate。写状态位（value/max 不动——不确定态下 value 语义由
+/// caller 自定，CSS 视觉切换走作者选择器）。非 Progress / null 句柄 / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_control_indeterminate(
+    h: *mut StageHandle,
+    node_id: u32,
+    v: u8,
+) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let Some(scene) = sh.stage.scene.as_mut() else {
+        return -1;
+    };
+    // 原地改（get_mut），不重建 ControlState（保 variant 口径，同 set_number_value）。
+    match scene.controls.get_mut(NodeId(node_id)) {
+        Some(ControlState::Progress { indeterminate, .. }) => {
+            *indeterminate = v != 0;
+            0
+        }
+        _ => -1,
+    }
+}
+
+/// 读 RadioButton 分组名（HTML name 语义：同名组互斥，打包期从 data-name bake）。
+/// return-code + out-param（ptr+len）双调法，同 get_control_text：buf_cap 足够 → rc=0；
+/// 不够 → rc=-2 + *out_len=所需（caller 扩容重调）；非 Radio / null 句柄 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_radio_name(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+    buf_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    if h.is_null() || out_len.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    let name = match scene.controls.get(NodeId(node_id)) {
+        Some(ControlState::Radio { name, .. }) => name.as_bytes(),
+        _ => return -1,
+    };
+    let needed = name.len();
+    unsafe { *out_len = needed };
+    if needed > buf_cap {
+        return -2;
+    }
+    if needed > 0 {
+        if out.is_null() {
+            return -2;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(name.as_ptr(), out, needed);
+        }
+    }
+    0
 }
 
 /// 设文本控件 value（TextField / TextArea）。直接替换 EditState.value + 光标/anchor 移到
@@ -3224,6 +3376,38 @@ pub extern "C" fn loomgui_list_scroll_to(
 ///
 /// 返 `true` = 命中（`*out_source` 已写）；`false` = 未命中 / null 句柄 / 无 scene /
 /// `node_id` 非 rich-text-block / 无 layout（`*out_source` 未动）。
+/// 命中测试（公共 Pick 的后端）：(x,y) 最上层可 touchable 节点。rc=0 命中（out_node 写
+/// NodeId u32）；rc=1 未命中；-1 = null 句柄 / 无 scene / null out。坐标 = design 像素
+/// （左上原点，同 process 输入）。core hit_test 走上帧 world_transforms（结构变更帧的
+/// 新节点本帧未命中，1 帧延迟语义）。scrollbar thumb sentinel id（V/H_THUMB_FLAG 位）
+/// decode 回容器 id——公共语义树无 thumb 节点，thumb 命中即容器命中（同
+/// apply_wheel_to_hit 口径）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_hit_test(
+    h: *const StageHandle,
+    x: f32,
+    y: f32,
+    out_node: *mut u32,
+) -> i32 {
+    if h.is_null() || out_node.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match loomgui_core::hit::hit_test(scene, (x, y)) {
+        Some(id) => {
+            // sentinel thumb flag（bit 29/30）strip——见 scroll.rs V/H_THUMB_FLAG。
+            unsafe { *out_node = id.0 & !0x6000_0000 };
+            0
+        }
+        None => 1,
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn loomgui_hit_test_rich(
     h: *const StageHandle,

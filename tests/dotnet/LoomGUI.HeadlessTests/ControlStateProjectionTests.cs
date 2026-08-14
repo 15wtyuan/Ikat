@@ -162,6 +162,101 @@ namespace LoomGUI.HeadlessTests
             finally { StageHarness.Destroy(stage); }
         }
 
+        // ── 公共 API FFI 批（2026-08-14）：NumberField bounds setter / ProgressBar
+        //    indeterminate / RadioButton.Name / UIContext.Pick——四处原 throw NE，本轮接通。──
+
+        /// <summary>
+        /// NumberField.Min/Max/Step setter round-trip：改界后 core 侧把 value 文本
+        /// parse→clamp→量化→re-format（set_number_value 同口径）。fixture nf：
+        /// value=0 min=0 max=10 step=2（aria-valuenow/min/max + data-step bake）。
+        /// </summary>
+        [Fact]
+        public void numberfield_bounds_setters_roundtrip()
+        {
+            var (stage, ctx, root) = LoadControlsFixture();
+            try
+            {
+                var nf = root.Get<NumberField>("nf");
+                Assert.Equal(0f, nf.Min);
+                Assert.Equal(10f, nf.Max);
+                Assert.Equal(2f, nf.Step);
+                // Max 10→4：后续写入 clamp 进 [0,4]。
+                nf.Max = 4f;
+                Assert.Equal(4f, nf.Max);
+                nf.Value = 9f;
+                Assert.Equal(4f, nf.Value);
+                // Min 0→1 + Step 2→1：量化到 1 的倍数。
+                nf.Min = 1f;
+                Assert.Equal(1f, nf.Min);
+                nf.Step = 1f;
+                Assert.Equal(1f, nf.Step);
+                nf.Value = 3.6f;
+                Assert.Equal(4f, nf.Value);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// ProgressBar.IsIndeterminate round-trip（原 getter+setter 双 throw NE）。
+        /// 纯状态位：value/max 不受扰动（视觉切换走作者 CSS）。
+        /// </summary>
+        [Fact]
+        public void progressbar_indeterminate_roundtrip()
+        {
+            var (stage, ctx, root) = LoadControlsFixture();
+            try
+            {
+                var prog = root.Get<ProgressBar>("prog");
+                Assert.False(prog.IsIndeterminate);
+                Assert.Equal(40f, prog.Value);
+                prog.IsIndeterminate = true;
+                Assert.True(prog.IsIndeterminate);
+                Assert.Equal(40f, prog.Value);
+                prog.IsIndeterminate = false;
+                Assert.False(prog.IsIndeterminate);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// RadioButton.Name 读分组名（原 throw NE）。fixture rdo data-name="grp" bake。
+        /// 只读——分组是结构性属性（互斥语义源）。
+        /// </summary>
+        [Fact]
+        public void radiobutton_name_reads_group()
+        {
+            var (stage, ctx, root) = LoadControlsFixture();
+            try
+            {
+                var rdo = root.Get<RadioButton>("rdo");
+                Assert.Equal("grp", rdo.Name);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        /// <summary>
+        /// UIContext.Pick（原 throw NE）：命中点返回子树内节点（沿 Parent 链可回溯到
+        /// fixture root），画布外返回 null。core hit::hit_test 走上帧 world_transforms
+        /// （fixture 加载已 Tick 一帧，layout 就绪）。
+        /// </summary>
+        [Fact]
+        public void uicontext_pick_hits_and_misses()
+        {
+            var (stage, ctx, root) = LoadControlsFixture();
+            try
+            {
+                Node hit = ctx.Pick(new Vector2(100f, 50f));
+                Assert.NotNull(hit);
+                // 命中者必在 fixture root 子树内。
+                Node n = hit;
+                while (n != null && !ReferenceEquals(n, root)) n = n.Parent;
+                Assert.Same(root, n);
+                // 画布外 → null。
+                Assert.Null(ctx.Pick(new Vector2(999f, 999f)));
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
         // ── fixture 加载 helpers（仿 TextFieldProjectionTests / ControlProjectionTests）──
 
         static (IntPtr stage, UIContext ctx, Container root) LoadTextfieldFixture()

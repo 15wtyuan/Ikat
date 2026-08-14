@@ -709,7 +709,7 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_get_control_checked(StageHandle* h, uint node_id, bool* @out);
 
         /// <summary>
-        ///  设控件 max（ProgressBar / Slider）。null 句柄 / 非值控件 / 节点缺失 → -1。
+        ///  设控件 max（ProgressBar / Slider / NumberField）。null 句柄 / 非值控件 / 节点缺失 → -1。
         ///
         ///  **常驻（不 gate）。**
         /// </summary>
@@ -725,7 +725,7 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_get_control_max(StageHandle* h, uint node_id, float* @out);
 
         /// <summary>
-        ///  设控件 min（Slider 独有；ProgressBar 无 min 语义 → -1）。
+        ///  设控件 min（Slider / NumberField；ProgressBar 无 min 语义 → -1）。
         ///  null 句柄 / 节点缺失 → -1。改 min 后 value 重新 clamp。
         ///
         ///  **常驻（不 gate）。**
@@ -742,8 +742,9 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_get_control_min(StageHandle* h, uint node_id, float* @out);
 
         /// <summary>
-        ///  设控件 step（Slider 独有；ProgressBar 无 step 语义 → -1）。
-        ///  null 句柄 / 节点缺失 → -1。
+        ///  设控件 step（Slider / NumberField；ProgressBar 无 step 语义 → -1）。
+        ///  null 句柄 / 节点缺失 → -1。改 step 不重量化 value（对齐 Slider arm：量化只在
+        ///  set value 时发生，改步长只影响后续写入）。
         ///
         ///  **常驻（不 gate）。**
         /// </summary>
@@ -757,6 +758,34 @@ namespace LoomGUI.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_step", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_get_control_step(StageHandle* h, uint node_id, float* @out);
+
+        /// <summary>
+        ///  读 ProgressBar indeterminate（不确定进度态）。非 Progress / null out / 节点缺失 → -1。
+        ///  纯状态位（视觉由作者 CSS 表达，core 不做 marquee 渲染）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_indeterminate", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_indeterminate(StageHandle* h, uint node_id, byte* @out);
+
+        /// <summary>
+        ///  设 ProgressBar indeterminate。写状态位（value/max 不动——不确定态下 value 语义由
+        ///  caller 自定，CSS 视觉切换走作者选择器）。非 Progress / null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_indeterminate", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_indeterminate(StageHandle* h, uint node_id, byte v);
+
+        /// <summary>
+        ///  读 RadioButton 分组名（HTML name 语义：同名组互斥，打包期从 data-name bake）。
+        ///  return-code + out-param（ptr+len）双调法，同 get_control_text：buf_cap 足够 → rc=0；
+        ///  不够 → rc=-2 + *out_len=所需（caller 扩容重调）；非 Radio / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_radio_name", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_radio_name(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
 
         /// <summary>
         ///  设文本控件 value（TextField / TextArea）。直接替换 EditState.value + 光标/anchor 移到
@@ -1023,7 +1052,18 @@ namespace LoomGUI.Bindings
         ///
         ///  返 `true` = 命中（`*out_source` 已写）；`false` = 未命中 / null 句柄 / 无 scene /
         ///  `node_id` 非 rich-text-block / 无 layout（`*out_source` 未动）。
+        ///  命中测试（公共 Pick 的后端）：(x,y) 最上层可 touchable 节点。rc=0 命中（out_node 写
+        ///  NodeId u32）；rc=1 未命中；-1 = null 句柄 / 无 scene / null out。坐标 = design 像素
+        ///  （左上原点，同 process 输入）。core hit_test 走上帧 world_transforms（结构变更帧的
+        ///  新节点本帧未命中，1 帧延迟语义）。scrollbar thumb sentinel id（V/H_THUMB_FLAG 位）
+        ///  decode 回容器 id——公共语义树无 thumb 节点，thumb 命中即容器命中（同
+        ///  apply_wheel_to_hit 口径）。
+        ///
+        ///  **常驻（不 gate）。**
         /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_hit_test", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_hit_test(StageHandle* h, float x, float y, uint* out_node);
+
         [DllImport(__DllName, EntryPoint = "loomgui_hit_test_rich", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         [return: MarshalAs(UnmanagedType.U1)]
         internal static extern bool loomgui_hit_test_rich(StageHandle* h, uint node_id, float x, float y, uint* out_source);

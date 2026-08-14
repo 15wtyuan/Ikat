@@ -371,13 +371,16 @@ namespace LoomGUI.HeadlessTests
             finally { StageHarness.Destroy(stage); }
         }
 
+        // （原 PickThrowsNe 已改——Pick 已接通 loomgui_stage_hit_test。空 stage（无 scene）
+        //  rc=-1 升 InvalidOperationException，与其它 FFI 转调口径一致；命中/未命中语义
+        //  见 ControlStateProjectionTests.uicontext_pick_hits_and_misses。）
         [Fact]
-        public void PickThrowsNe()
+        public void PickOnEmptyStageThrowsInvalidOp()
         {
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                Assert.Throws<NotImplementedException>(() => ctx.Pick(new Vector2(100, 100)));
+                Assert.Throws<InvalidOperationException>(() => ctx.Pick(new Vector2(100, 100)));
             }
             finally { StageHarness.Destroy(stage); }
         }

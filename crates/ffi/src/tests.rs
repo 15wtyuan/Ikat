@@ -1533,36 +1533,8 @@ fn ffi_get_control_min_max_step_number_field() {
     loomgui_stage_free(h);
 }
 
-/// NumberField set_control_min/max/step 目前是 Slider 独有（重 clamp value）→ -1。
-/// NumberField 的 value 存为 EditState 文本，setter 须 parse→clamp→quantize→re-format，
-/// 留待后续（运行时改约束较少见，读约束才是 C# 投影层 gap）。锁住当前 -1 行为防漂移。
-#[test]
-fn ffi_set_control_min_max_step_number_field_unsupported() {
-    let (h, n) = make_number_stage("5", 0.0, 10.0, 2.0);
-    assert_eq!(
-        loomgui_stage_set_control_min(h, n, 1.0),
-        -1,
-        "set_control_min on NumberField not yet supported"
-    );
-    assert_eq!(
-        loomgui_stage_set_control_max(h, n, 20.0),
-        -1,
-        "set_control_max on NumberField not yet supported"
-    );
-    assert_eq!(
-        loomgui_stage_set_control_step(h, n, 1.0),
-        -1,
-        "set_control_step on NumberField not yet supported"
-    );
-    // 原值未被改动
-    let mut out = -999.0f32;
-    assert_eq!(loomgui_stage_get_control_max(h, n, &mut out), 0);
-    assert!(
-        (out - 10.0).abs() < 0.001,
-        "max unchanged after rejected set"
-    );
-    loomgui_stage_free(h);
-}
+// （原 ffi_set_control_min_max_step_number_field_unsupported 已删——NumberField bounds
+//  setter 已接通（parse→clamp→量化→re-format），覆盖见 ffi_set_control_bounds_numberfield。）
 
 // ===== @keyframes player FFI（M2 spec §7.3：play/pause/resume/stop/time/state/on-key） =====
 
@@ -1819,5 +1791,205 @@ fn ffi_get_event_string_reads_animation_name() {
     assert_eq!(rc, -1, "null handle");
     let rc = loomgui_stage_get_event_string(h, idx, std::ptr::null_mut(), 0, std::ptr::null_mut());
     assert_eq!(rc, -1, "null out_len");
+    loomgui_stage_free(h);
+}
+
+// ── 公共 API FFI 批：NumberField bounds setter / Progress indeterminate / Radio name / hit_test ──
+
+/// 测试辅助：建根 div 后注入 Radio 状态（name = 分组名，打包期 data-name bake）。
+fn make_radio_stage(name: &str) -> (*mut StageHandle, u32) {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    let sh = unsafe { &mut *h };
+    let scene = sh.stage.scene.as_mut().expect("scene built");
+    scene.controls.ensure(
+        NodeId(root),
+        ControlState::Radio {
+            checked: false,
+            name: name.into(),
+        },
+    );
+    (h, root)
+}
+
+/// set_control_max/min 对 NumberField：改界后 value 文本重约束（parse→clamp→量化→re-format），
+/// step setter 换步长；非法 step（负/NaN）拒绝。三者原只有 Slider/Progress arm（NumberField → -1）。
+#[test]
+fn ffi_set_control_bounds_numberfield() {
+    // value=5, min=0, max=10, step=2。
+    let (h, n) = make_number_stage("5", 0.0, 10.0, 2.0);
+    // max 10→4：value 5 clamp 到 4，量化 round(4/2)*2=4 → "4"。
+    assert_eq!(loomgui_stage_set_control_max(h, n, 4.0), 0);
+    let mut out = -999.0f32;
+    assert_eq!(loomgui_stage_get_number_value(h, n, &mut out), 0);
+    assert!(
+        (out - 4.0).abs() < 0.001,
+        "value re-clamped into [0,4], got {out}"
+    );
+    // max 低于 min → guard 到 min（不 panic，同 Slider arm）。
+    assert_eq!(loomgui_stage_set_control_max(h, n, -1.0), 0);
+    assert_eq!(loomgui_stage_get_control_max(h, n, &mut out), 0);
+    assert!((out - 0.0).abs() < 0.001, "max guard to min 0, got {out}");
+    // min 0→3：先恢复 max（guard 测试已把 max 压到 0，min 会被 min.min(max) clamp）。
+    assert_eq!(loomgui_stage_set_control_max(h, n, 10.0), 0);
+    assert_eq!(loomgui_stage_set_control_min(h, n, 3.0), 0);
+    assert_eq!(loomgui_stage_get_control_min(h, n, &mut out), 0);
+    assert!((out - 3.0).abs() < 0.001, "min stored");
+    // step 换 1：合法。
+    assert_eq!(loomgui_stage_set_control_step(h, n, 1.0), 0);
+    assert_eq!(loomgui_stage_get_control_step(h, n, &mut out), 0);
+    assert!((out - 1.0).abs() < 0.001, "step stored");
+    // 非法 step（负 / NaN）→ -1，不落脏值。
+    assert_eq!(loomgui_stage_set_control_step(h, n, -2.0), -1);
+    assert_eq!(loomgui_stage_set_control_step(h, n, f32::NAN), -1);
+    // 非数值文本（用户正手输 "abc"）时改界：不 panic，value 文本原样保留。
+    let sh = unsafe { &mut *h };
+    if let Some(ControlState::NumberField { edit, .. }) =
+        sh.stage.scene.as_mut().unwrap().controls.get_mut(NodeId(n))
+    {
+        edit.value = "abc".into();
+    }
+    assert_eq!(loomgui_stage_set_control_max(h, n, 8.0), 0);
+    let mut buf = [0u8; 16];
+    let mut len = 0usize;
+    assert_eq!(
+        loomgui_stage_get_control_text(h, n, buf.as_mut_ptr(), 16, &mut len),
+        -1,
+        "get_control_text 不认 NumberField（口径不变）"
+    );
+    let _ = len;
+    let sh = unsafe { &mut *h };
+    match sh.stage.scene.as_ref().unwrap().controls.get(NodeId(n)) {
+        Some(ControlState::NumberField { edit, max, .. }) => {
+            assert_eq!(edit.value, "abc", "非数值文本不被动");
+            assert!((*max - 8.0).abs() < 0.001, "max 仍生效");
+        }
+        _ => panic!("numberfield state lost"),
+    }
+    loomgui_stage_free(h);
+}
+
+/// ProgressBar indeterminate get/set round-trip（Progress arm 独占；非 Progress → -1）。
+#[test]
+fn ffi_progress_indeterminate_roundtrip() {
+    let (h, p) = make_progress_stage(40.0, 100.0);
+    let mut b = 2u8;
+    assert_eq!(loomgui_stage_get_control_indeterminate(h, p, &mut b), 0);
+    assert_eq!(b, 0, "初始 determinate");
+    assert_eq!(loomgui_stage_set_control_indeterminate(h, p, 1), 0);
+    assert_eq!(loomgui_stage_get_control_indeterminate(h, p, &mut b), 0);
+    assert_eq!(b, 1, "set true → get true");
+    assert_eq!(loomgui_stage_set_control_indeterminate(h, p, 0), 0);
+    assert_eq!(loomgui_stage_get_control_indeterminate(h, p, &mut b), 0);
+    assert_eq!(b, 0, "set false → get false");
+    // value/max 不被扰动。
+    let mut v = -1.0f32;
+    assert_eq!(loomgui_stage_get_control_value(h, p, &mut v), 0);
+    assert!((v - 40.0).abs() < 0.001);
+    // 非 Progress（Slider）→ -1。
+    let (h2, s) = make_slider_stage(50.0, 0.0, 100.0, 1.0);
+    assert_eq!(loomgui_stage_set_control_indeterminate(h2, s, 1), -1);
+    assert_eq!(loomgui_stage_get_control_indeterminate(h2, s, &mut b), -1);
+    loomgui_stage_free(h);
+    loomgui_stage_free(h2);
+}
+
+/// get_radio_name：双调法读分组名（buf_cap 不够 → -2 + 所需 len）。非 Radio → -1。
+#[test]
+fn ffi_get_radio_name() {
+    let (h, r) = make_radio_stage("difficulty");
+    // 探大小。
+    let mut needed = 0usize;
+    assert_eq!(
+        loomgui_stage_get_radio_name(h, r, std::ptr::null_mut(), 0, &mut needed),
+        -2
+    );
+    assert_eq!(needed, 10, "name len bytes");
+    // 真读。
+    let mut buf = vec![0u8; needed];
+    let mut written = 0usize;
+    assert_eq!(
+        loomgui_stage_get_radio_name(h, r, buf.as_mut_ptr(), buf.len(), &mut written),
+        0
+    );
+    assert_eq!(&buf[..written], b"difficulty");
+    // 恰好等容也通过（needed == cap）。
+    let mut cap_buf = vec![0u8; 10];
+    let mut n2 = 0usize;
+    assert_eq!(
+        loomgui_stage_get_radio_name(h, r, cap_buf.as_mut_ptr(), 10, &mut n2),
+        0
+    );
+    assert_eq!(n2, 10);
+    // 空 name 合法（无 data-name 的裸 radio）。
+    let (h2, r2) = make_radio_stage("");
+    let mut n3 = 99usize;
+    assert_eq!(
+        loomgui_stage_get_radio_name(h2, r2, std::ptr::null_mut(), 0, &mut n3),
+        0,
+        "空串 rc=0（cap 0 >= needed 0）"
+    );
+    assert_eq!(n3, 0);
+    // 非 Radio（Slider）→ -1。
+    let (h3, s) = make_slider_stage(50.0, 0.0, 100.0, 1.0);
+    let mut n4 = 0usize;
+    assert_eq!(
+        loomgui_stage_get_radio_name(h3, s, std::ptr::null_mut(), 0, &mut n4),
+        -1
+    );
+    loomgui_stage_free(h);
+    loomgui_stage_free(h2);
+    loomgui_stage_free(h3);
+}
+
+/// loomgui_stage_hit_test：坐标命中最上层 touchable 节点（rc=0 + out id）；
+/// 未命中 rc=1；null 句柄 -1。scrollbar thumb sentinel id 须 decode 回容器 id
+/// （公共树无 thumb 节点，thumb 命中 = 容器命中，同 apply_wheel_to_hit 口径）。
+#[test]
+fn ffi_stage_hit_test_basic() {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(node, 0xFFFF_FFFF);
+    loomgui_stage_append_child(h, root, node);
+    {
+        let sh = unsafe { &mut *h };
+        let scene = sh.stage.scene.as_mut().expect("scene built");
+        let r = scene.get_mut(NodeId(root)).unwrap();
+        r.layout_rect = loomgui_core::scene::node::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 100.0,
+        };
+        let c = scene.get_mut(NodeId(node)).unwrap();
+        c.layout_rect = loomgui_core::scene::node::Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 50.0,
+            h: 50.0,
+        };
+        loomgui_core::scene::transform::compute_world_transforms(scene);
+    }
+    // 命中子节点。
+    let mut out = 0xFFFF_FFFFu32;
+    assert_eq!(loomgui_stage_hit_test(h, 20.0, 20.0, &mut out), 0);
+    assert_eq!(out, node, "子节点区域命中子");
+    // 子外 root 区域 → root。
+    assert_eq!(loomgui_stage_hit_test(h, 150.0, 90.0, &mut out), 0);
+    assert_eq!(out, root, "root 区域命中 root");
+    // 画布外 → rc=1。
+    assert_eq!(loomgui_stage_hit_test(h, 500.0, 500.0, &mut out), 1);
+    // null out 指针（防御）→ -1。
+    assert_eq!(
+        loomgui_stage_hit_test(h, 20.0, 20.0, std::ptr::null_mut()),
+        -1
+    );
+    // null 句柄 → -1。
+    assert_eq!(
+        loomgui_stage_hit_test(std::ptr::null(), 20.0, 20.0, std::ptr::null_mut()),
+        -1
+    );
     loomgui_stage_free(h);
 }
