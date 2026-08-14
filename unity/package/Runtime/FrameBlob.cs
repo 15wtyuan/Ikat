@@ -6,16 +6,17 @@ namespace LoomGUI
 {
     /// 帧 blob 托管解析视图。解析 Rust build_blob 产出的 little-endian blob。
     ///
-    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v12）：
-    ///   header (124B): magic(u32 LE), version(u32)=12, node_count(u32),
-    ///                 22× col_offset(u32, byte offset from blob start),
+    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v13）：
+    ///   header (128B): magic(u32 LE), version(u32)=13, node_count(u32),
+    ///                 23× col_offset(u32, byte offset from blob start),
     ///                 mesh_arena_off(u32), mesh_arena_len(u32),
     ///                 clip_table_off(u32), clip_table_len(u32),
     ///                 path_table_off(u32), path_table_len(u32)
-    ///   22 列 SOA（顺序见 ColOff 注释），随后 mesh_arena / clip_table / path_table 段。
+    ///   23 列 SOA（顺序见 ColOff 注释），随后 mesh_arena / clip_table / path_table 段。
     ///   v10：text_arena 已删（文本字形塌进 mesh_arena，核心自产 atlas），列 text_off/text_len 删除（22→20 列）。
     ///   v11：加 effect_block 列（[f32;32]=128B，per-text-node SDF effect 参数），列数 20→21。
     ///   v12：加 shadow_params 列（[f32;6]=24B，box-shadow SDF 参数），列数 21→22。
+    ///   v13：加 grad_params 列（[f32;52]=208B，背景渐变像素参数），列数 22→23。
     /// C# on Windows 是 little-endian，BitConverter 直读无需 byte swap。
     public readonly struct FrameBlob
     {
@@ -24,7 +25,8 @@ namespace LoomGUI
         /// v10：删 text_arena + text_off/text_len 列（22→20），文本字形塌进 mesh_arena。
         /// v11：加 effect_block 列（SDF effect 参数，照 color_matrix 先例），列数 20→21。
         /// v12：加 shadow_params 列（box-shadow SDF 参数 [f32;6]，照 color_matrix/effect_block 先例），列数 21→22。
-        public const uint ExpectedVersion = 12;
+        /// v13：加 grad_params 列（渐变像素参数 [f32;52]，照 effect_block 先例），列数 22→23。
+        public const uint ExpectedVersion = 13;
 
         readonly byte[] _buf;
 
@@ -49,21 +51,24 @@ namespace LoomGUI
         //   19=reuse_key(u32, 0=无复用 >0=slot 复用键)
         //   20=effect_block([f32;32], 128B)  ← v11：SDF 文字效果参数（outline/underlay×3/glow/blur）
         //   21=shadow_params([f32;6], 24B)   ← v12：box-shadow SDF 参数（halfSize.xy,radius,σ,inset,_pad）
+        //   22=grad_params([f32;52], 208B)   ← v13：背景渐变像素参数（program=6/7 门控读取）
         //   v10：删 text_off(u32)/text_len(u32) 列（原第 15-16 列），其后列统一前移 2。
         //   v11：加 effect_block 列（新第 20 列，不动 v10 前移结果）。
         //   v12：加 shadow_params 列（新第 21 列，列数 21→22，arena header 起点同步后移 4 字节）。
+        //   v13：加 grad_params 列（新第 22 列，列数 22→23，arena header 起点同步后移 4 字节）。
         int ColOff(int idx) => (int)ReadU32(12 + idx * 4);
 
-        // 三 arena header offset。22 列 col_offset 之后：mesh(2), clip(2), path(2) 各 off+len。
+        // 三 arena header offset。23 列 col_offset 之后：mesh(2), clip(2), path(2) 各 off+len。
         //   v10：text_arena 已删，arena header 由 8 项缩为 6 项。
         //   v11：col_offset 段扩到 21 项，arena header 起点 12+20*4 → 12+21*4（移后 4 字节）。
         //   v12：col_offset 段扩到 22 项，arena header 起点 12+21*4 → 12+22*4（再移后 4 字节）。
-        int MeshArenaOff => (int)ReadU32(12 + 22 * 4);
-        int MeshArenaLen => (int)ReadU32(12 + 22 * 4 + 4);
-        int ClipTableOff => (int)ReadU32(12 + 22 * 4 + 2 * 4);
-        int ClipTableLen => (int)ReadU32(12 + 22 * 4 + 2 * 4 + 4);
-        int PathTableOff => (int)ReadU32(12 + 22 * 4 + 4 * 4);
-        int PathTableLen => (int)ReadU32(12 + 22 * 4 + 4 * 4 + 4);
+        //   v13：col_offset 段扩到 23 项，arena header 起点 12+22*4 → 12+23*4（再移后 4 字节）。
+        int MeshArenaOff => (int)ReadU32(12 + 23 * 4);
+        int MeshArenaLen => (int)ReadU32(12 + 23 * 4 + 4);
+        int ClipTableOff => (int)ReadU32(12 + 23 * 4 + 2 * 4);
+        int ClipTableLen => (int)ReadU32(12 + 23 * 4 + 2 * 4 + 4);
+        int PathTableOff => (int)ReadU32(12 + 23 * 4 + 4 * 4);
+        int PathTableLen => (int)ReadU32(12 + 23 * 4 + 4 * 4 + 4);
 
         public uint NodeId(int i) => ReadU32(ColOff(0) + i * 4);
         public int ParentId(int i) => (int)ReadU32(ColOff(1) + i * 4);
@@ -90,7 +95,7 @@ namespace LoomGUI
         /// Mesh→path 表 1-based 索引（0=纯色无图）。MirrorPool 读 path_idx → ReadPath(idx) 取 path → 查 Sprite。
         public uint PathIdx(int i) => ReadU32(ColOff(15) + i * 4);
         /// 节点 i 的 program（u8 列，ColOff(16) + i）。v10 前移至第 16 列（原第 18 列）。
-        /// 0=img/无图 Container，1=Text（文本现走 mesh 路径，核心产 atlas），2=Container+bg-image，3=filter无bg-image，4=filter+bg-image，5=box-shadow blur（SHADOW_BLUR）。
+        /// 0=img/无图 Container，1=Text（文本现走 mesh 路径，核心产 atlas），2=Container+bg-image，3=filter无bg-image，4=filter+bg-image，5=box-shadow blur（SHADOW_BLUR），6=背景渐变（GRADIENT），7=渐变+filter（GRADIENT+COLOR_FILTER）。
         public byte Program(int i) => _buf[ColOff(16) + i];
 
         /// 节点 i 的 color_matrix（[f32;20]，ColOff(17) + i*80）。v10 前移至第 17 列（原第 19 列）。
@@ -135,6 +140,24 @@ namespace LoomGUI
                 BitConverter.ToSingle(_buf, off + 16),
                 BitConverter.ToSingle(_buf, off + 20),
             };
+        }
+
+        /// v13：grad_params 列（第 23 列，index 22）。52 × f32 = 208B/节点。
+        /// 背景渐变像素参数（镜像 Rust GradientParams::to_bytes）：
+        ///   gp[0]=kind(0=linear,1=radial)  gp[1]=angle_deg
+        ///   gp[2..4]=dir(xy)  gp[4]=t0  gp[5]=inv_span       （linear）
+        ///   gp[6..8]=center(xy)  gp[8..10]=radii(xy)         （radial）
+        ///   gp[10]=stop_count  gp[11]=reserved
+        ///   gp[12..52]=stops[8] × {r,g,b,a,pos}
+        /// 非渐变节点 default 全零。MirrorPool 仅 program==6/7 时读此 → MPB（_Grad* uniforms），
+        /// shader GRADIENT 变体消费。
+        public float[] GradParams(int i) {
+            int off = ColOff(22) + i * 208;
+            float[] gp = new float[52];
+            for (int j = 0; j < 52; j++) {
+                gp[j] = BitConverter.ToSingle(_buf, off + j * 4);
+            }
+            return gp;
         }
 
         /// v10：change_level 前移至第 18 列（原第 20 列）。0=Skip 1=Header 2=Full。MirrorPool 三分支用。

@@ -270,6 +270,32 @@ namespace LoomGUI
                 ro.Mpb.SetFloat("_ShadowSigma", sp[3]);
                 ro.Mpb.SetFloat("_ShadowInset", sp[4]);
             }
+            // 背景渐变（program=6 GRADIENT / 7 GRADIENT+COLOR_FILTER）：读 grad_params 列 →
+            // per-renderer MPB。stops 拆 8 组 Vector4(rgba) + Float(pos)——MPB 只覆盖 Properties
+            // 声明过的属性（_ObjectMatrix 踩坑同源），ShaderLab 不支持数组属性，故逐槽
+            // SetVector/SetFloat（照 _Underlay* 编号属性先例）。未用槽填「末 stop 色 @pos=1」
+            // ——shader 无需 count uniform，8 槽段搜索自然退化到末 stop。
+            if (blob.Program(i) == 6 || blob.Program(i) == 7)
+            {
+                float[] gp = blob.GradParams(i);
+                int n = Mathf.Min((int)gp[10], 8);
+                if (n < 1) n = 1;
+                ro.Mpb.SetFloat("_GradKind", gp[0]);
+                ro.Mpb.SetVector("_GradGeom", new Vector4(gp[2], gp[3], gp[4], gp[5]));
+                ro.Mpb.SetVector("_GradGeom2", new Vector4(gp[6], gp[7], gp[8], gp[9]));
+                // 末 stop（未用槽的填充源；radial 远端 / linear clamp 端点色）。
+                int last = 12 + (n - 1) * 5;
+                Vector4 lastCol = new Vector4(gp[last], gp[last + 1], gp[last + 2], gp[last + 3]);
+                for (int s = 0; s < 8; s++)
+                {
+                    int b = 12 + s * 5;
+                    bool used = s < n;
+                    ro.Mpb.SetVector("_GradStop" + s, used
+                        ? new Vector4(gp[b], gp[b + 1], gp[b + 2], gp[b + 3])
+                        : lastCol);
+                    ro.Mpb.SetFloat("_GradPos" + s, used ? gp[b + 4] : 1f);
+                }
+            }
             ro.Mpb.SetFloat("_Alpha", alpha);
             ro.Mr.SetPropertyBlock(ro.Mpb);
         }
