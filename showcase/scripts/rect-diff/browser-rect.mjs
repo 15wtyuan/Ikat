@@ -6,7 +6,8 @@
 // waits briefly for reflow, then captures per-element rects.
 
 import { chromium } from 'playwright';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, readdirSync, writeFileSync } from 'fs';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 
@@ -35,6 +36,20 @@ try {
   // C# driver to set ItemCount, so the cloned items have no core counterpart.
   // Driver-driven list virtualization is verified on the Unity machine
   // (roadmap task 4); the core-dump path here only checks static layout.
+  // Component registry (packer components/ dir, same auto-scan rule): inject as
+  // window.__LOOM_COMPONENTS__ so loom-preview.js expandComponents() can mirror the
+  // pack-time Custom Element expansion (host + slot projection). Manual file://
+  // double-click preview has no injection source and leaves components unexpanded
+  // (accepted degradation — this Playwright path is the alignment gate).
+  const components = {};
+  const compDir = join(dirname(htmlPath), 'components');
+  try {
+    for (const f of readdirSync(compDir)) {
+      if (f.endsWith('.html')) components[f.replace(/\.html$/, '')] = readFileSync(join(compDir, f), 'utf8');
+    }
+  } catch { /* no components dir = no components */ }
+  await page.addInitScript((regs) => { window.__LOOM_COMPONENTS__ = regs; }, components);
+
   await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'networkidle' });
   await page.addStyleTag({ content: reset });
   await page.waitForTimeout(100); // let reset reflow settle
@@ -89,9 +104,9 @@ try {
         if (roleTags[role]) return roleTags[role];
       }
       const t = el.tagName.toLowerCase();
-      // Hyphenated custom elements (<item-card> ...) map to core's
-      // NodeKind::CustomElement -> "custom".
-      return t.includes('-') ? 'custom' : t;
+      // Hyphenated custom elements: core's dump emits the custom_tag literal
+      // (pkg v35), so the browser side pairs on the literal tagName too.
+      return t;
     }
   });
 

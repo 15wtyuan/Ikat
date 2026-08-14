@@ -48,7 +48,13 @@ const KIND_TAG = {
 const nodes = JSON.parse(readFileSync(inPath, 'utf8'));
 const out = nodes.map((n, i) => ({
   domIndex: i,
-  tag: KIND_TAG[n.kind] ?? n.tag ?? 'div',
+  // CustomElement：dump 的 tag 字段是 custom_tag hyphen 字面量（pkg v35 展开保留），
+  // 与浏览器侧 tagName 原文配对；其余 kind 走 KIND_TAG（dump 的诊断 tag 有三处偏离）。
+  tag:
+    (n.kind === 'CustomElement' ? n.tag : undefined) ??
+    KIND_TAG[n.kind] ??
+    n.tag ??
+    'div',
   id: n.id || null,
   classes: (n.classes ?? '').split(/\s+/).filter(Boolean),
   x: n.layout?.x ?? 0,
