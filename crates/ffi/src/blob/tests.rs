@@ -32,6 +32,7 @@ fn mesh_node(id: u32, parent: Option<u32>, x: f32, y: f32, w: f32, h: f32) -> Re
         reuse_key: 0,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
+        gradient: loomgui_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             // 父坐标系顶点：(x,y)(x+w,y)(x+w,y+h)(x,y+h)
             verts: vec![[x, y], [x + w, y], [x + w, y + h], [x, y + h]],
@@ -78,6 +79,7 @@ fn mesh_node_tinted(id: u32, tint: [f32; 4], alpha: f32, bg: [f32; 4]) -> Render
         reuse_key: 0,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
+        gradient: loomgui_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
@@ -107,6 +109,7 @@ fn mesh_node_raw(verts: Vec<[f32; 2]>, indices: Vec<u32>, tx: f32, ty: f32) -> R
         reuse_key: 0,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
+        gradient: loomgui_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             verts,
             uvs: vec![[0.0, 0.0]; n],
@@ -209,7 +212,7 @@ fn blob_emits_parked_keepalive_entries() {
     );
     assert_eq!(
         view.version(),
-        12,
+        13,
         "parked 复用 visible 字节 bit1，不 bump version"
     );
 
@@ -338,9 +341,47 @@ fn build_blob_has_magic_and_count() {
     assert_eq!(&blob[0..4], &MAGIC.to_le_bytes());
     let v = u32::from_le_bytes(blob[4..8].try_into().unwrap());
     assert_eq!(v, VERSION);
-    assert_eq!(v, 12, "blob 版本应为 12（v12：加 shadow_params 列）");
+    assert_eq!(v, 13, "blob 版本应为 13（v13：加 grad_params 列）");
     let n = u32::from_le_bytes(blob[8..12].try_into().unwrap());
     assert_eq!(n, 1);
+}
+
+/// v13：grad_params 列（第 23 列，[u8;208]）round-trip——program=6 渐变节点参数
+/// 全量保真，非渐变节点恒全零。
+#[test]
+fn grad_params_column_round_trips() {
+    let mut grad = loomgui_core::render::gradient::GradientParams {
+        kind: 1,
+        angle_deg: 137.0,
+        dir: [0.68, -0.73],
+        t0: -70.7,
+        inv_span: 0.00707,
+        center: [1574.4, -129.6],
+        radii: [1100.0, 560.0],
+        stop_count: 3,
+        ..Default::default()
+    };
+    grad.stops[0] = [0.37, 0.71, 0.83, 0.1, 0.0];
+    grad.stops[1] = [0.1, 0.2, 0.3, 0.5, 0.6];
+    grad.stops[2] = [0.0, 0.0, 0.0, 0.0, 1.0];
+
+    let mut grad_node = mesh_node_with_program(0, 6);
+    grad_node.gradient = grad;
+    let plain = mesh_node_with_program(1, 0);
+
+    let blob = build_blob(&frame(&[grad_node, plain]));
+    let view = TestView::parse(&blob);
+    // 渐变节点：208B 列 round-trip 全保真（from_bytes 对照）。
+    let off = view.col_off[22];
+    let back =
+        loomgui_core::render::gradient::GradientParams::from_bytes(&view.buf[off..off + 208]);
+    assert_eq!(back, grad, "grad_params 208B 列 round-trip");
+    // 非渐变节点：列偏移 + stride 后仍全零（default 序列化 = 全零字节）。
+    let off1 = view.col_off[22] + 208;
+    assert!(
+        view.buf[off1..off1 + 208].iter().all(|&b| b == 0),
+        "非渐变节点 grad_params 恒全零"
+    );
 }
 
 /// path_idx 列（第 18 列，u32，v7）round-trip。
@@ -375,13 +416,13 @@ fn program_column_round_trips() {
         mesh_node_with_program(2, 0),           // 无图 Container / Image
     ]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 12, "VERSION=12（v12：加 shadow_params 列）");
+    assert_eq!(view.version(), 13, "VERSION=13（v13：加 grad_params 列）");
     assert_eq!(view.program(0), 2, "Mesh program=2 round-trip");
     assert_eq!(view.program(1), 0, "Mesh program=0 占位");
     assert_eq!(view.program(2), 0, "Mesh program=0 round-trip");
 }
 
-/// §4.1 v12 header：22 col offsets + mesh/clip/path 三 arena header。
+/// §4.1 v13 header：23 col offsets + mesh/clip/path 三 arena header。
 /// 无 clip 时 clip 表仅 4B clip_count=0，
 /// 无 image_path 时 path table 仅 4B path_count=0。
 #[test]
@@ -392,14 +433,14 @@ fn blob_header_has_text_and_clip_arena_fields() {
     assert_eq!(u32::from_le_bytes(blob[0..4].try_into().unwrap()), MAGIC);
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        12,
-        "version=12"
+        13,
+        "version=13"
     );
 
-    // 22 col offset @ [12 .. 12+22*4)。每 col_offset 非零且单调递增。
-    let header_len = 12 + 22 * 4; // = 100
+    // 23 col offset @ [12 .. 12+23*4)。每 col_offset 非零且单调递增。
+    let header_len = 12 + 23 * 4; // = 104
     let mut prev = header_len;
-    for i in 0..22usize {
+    for i in 0..23usize {
         let o = 12 + i * 4;
         let off = u32::from_le_bytes(blob[o..o + 4].try_into().unwrap()) as usize;
         assert!(
@@ -412,14 +453,14 @@ fn blob_header_has_text_and_clip_arena_fields() {
         prev = off;
     }
 
-    // mesh_arena header @ [100..108)：off/len（mesh 节点有内容，len>0）。
-    let mesh_arena_off = u32::from_le_bytes(blob[100..104].try_into().unwrap()) as usize;
-    let mesh_arena_len = u32::from_le_bytes(blob[104..108].try_into().unwrap()) as usize;
+    // mesh_arena header @ [104..112)：off/len（mesh 节点有内容，len>0）。
+    let mesh_arena_off = u32::from_le_bytes(blob[104..108].try_into().unwrap()) as usize;
+    let mesh_arena_len = u32::from_le_bytes(blob[108..112].try_into().unwrap()) as usize;
     assert!(mesh_arena_len > 0, "单 mesh 节点：mesh_arena_len 应 > 0");
 
-    // clip_table header @ [108..116)：clip 紧跟 mesh。无 clip 时仅 4B clip_count=0。
-    let clip_table_off = u32::from_le_bytes(blob[108..112].try_into().unwrap()) as usize;
-    let clip_table_len = u32::from_le_bytes(blob[112..116].try_into().unwrap());
+    // clip_table header @ [112..120)：clip 紧跟 mesh。无 clip 时仅 4B clip_count=0。
+    let clip_table_off = u32::from_le_bytes(blob[112..116].try_into().unwrap()) as usize;
+    let clip_table_len = u32::from_le_bytes(blob[116..120].try_into().unwrap());
     assert_eq!(
         clip_table_len, 4,
         "clip 表至少含 clip_count(u32)=0，故 len=4"
@@ -433,9 +474,9 @@ fn blob_header_has_text_and_clip_arena_fields() {
         u32::from_le_bytes(blob[clip_table_off..clip_table_off + 4].try_into().unwrap());
     assert_eq!(clip_count, 0, "clip_count=0");
 
-    // v7 path_table header @ [116..124)：无 image_path 时仅 4B path_count=0。
-    let path_table_off = u32::from_le_bytes(blob[116..120].try_into().unwrap()) as usize;
-    let path_table_len = u32::from_le_bytes(blob[120..124].try_into().unwrap());
+    // v7 path_table header @ [120..128)：无 image_path 时仅 4B path_count=0。
+    let path_table_off = u32::from_le_bytes(blob[120..124].try_into().unwrap()) as usize;
+    let path_table_len = u32::from_le_bytes(blob[124..128].try_into().unwrap());
     assert_eq!(
         path_table_len, 4,
         "无 image_path：path table 仅 path_count=0，len=4"
@@ -463,7 +504,7 @@ fn test_view_parses_layout_and_text_placeholders() {
     let view = TestView::parse(&blob);
     assert_eq!(view.clip_count(), 0, "clip_count=0");
     assert_eq!(view.payload_kind(0), 1, "Mesh payload_kind=1");
-    assert_eq!(view.version(), 12, "VERSION=12");
+    assert_eq!(view.version(), 13, "VERSION=13");
 }
 
 #[test]
@@ -531,11 +572,11 @@ fn mesh_colors_no_longer_bake_alpha() {
 //              12=payload_kind 13=mesh_off 14=mesh_len
 //              15=path_idx (v7) 16=program (v5) 17=color_matrix (v6)
 //              18=change_level (v8) 19=reuse_key (v9) 20=effect_block (v11)
-//              21=shadow_params (v12)
-// v12：加 shadow_params 列（21→22）。
+//              21=shadow_params (v12) 22=grad_params (v13)
+// v13：加 grad_params 列（22→23）。
 struct TestView<'a> {
     buf: &'a [u8],
-    col_off: [usize; 22],
+    col_off: [usize; 23],
     mesh_arena_off: usize,
     clip_table_off: usize,
     clip_table_len: u32,
@@ -545,9 +586,9 @@ struct TestView<'a> {
 impl<'a> TestView<'a> {
     fn parse(buf: &'a [u8]) -> Self {
         assert_eq!(&buf[0..4], &MAGIC.to_le_bytes());
-        let mut col_off = [0usize; 22];
+        let mut col_off = [0usize; 23];
         let mut h = 12;
-        for i in 0..22 {
+        for i in 0..23 {
             col_off[i] = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
             h += 4;
         }
@@ -956,6 +997,7 @@ fn merged_mesh_blob_keeps_absolute_verts_and_no_double_alpha() {
         reuse_key: 0,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
+        gradient: loomgui_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             // 顶点已是绝对 design 坐标（merge 不 re-base）；re-base 减 transform(0) = 不变。
             verts: vec![
@@ -1030,6 +1072,7 @@ fn blob_world_matrix_roundtrip() {
         reuse_key: 0,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
+        gradient: loomgui_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
             uvs: vec![[0.0, 0.0]; 4],
@@ -1048,11 +1091,11 @@ fn blob_world_matrix_roundtrip() {
         nodes: vec![pure, skew],
         clips: vec![],
     });
-    // version=12（v12：22 列，加 shadow_params）
+    // version=13（v13：23 列，加 grad_params）
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        12,
-        "VERSION=12"
+        13,
+        "VERSION=13"
     );
     // 字节数合理（2 节点 × 22 列 + mesh arena + header）
     assert!(blob.len() > 100);
@@ -1077,8 +1120,8 @@ fn blob_pure_mesh_kind_is_one() {
     assert_eq!(view.program(0), 0, "纯色 mesh program=0");
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        12,
-        "VERSION=12"
+        13,
+        "VERSION=13"
     );
 }
 
@@ -1103,6 +1146,7 @@ fn blob_color_matrix_column_round_trips() {
         reuse_key: 0,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
+        gradient: loomgui_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
             uvs: vec![[0.0, 0.0]; 4],
@@ -1118,7 +1162,7 @@ fn blob_color_matrix_column_round_trips() {
         clips: vec![],
     });
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 12, "VERSION=12（v12：加 shadow_params 列）");
+    assert_eq!(view.version(), 13, "VERSION=13（v13：加 grad_params 列）");
     assert_eq!(view.program(0), 3, "program=3 round-trip");
     let m = view.color_matrix(0);
     for i in 0..20 {
@@ -1142,7 +1186,7 @@ fn change_level_column_round_trips() {
     full.change_level = ChangeLevel::Full;
     let blob = build_blob(&frame(&[skip, header, full]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 12, "VERSION=12");
+    assert_eq!(view.version(), 13, "VERSION=13");
     assert_eq!(view.change_level(0), 0, "Skip=0");
     assert_eq!(view.change_level(1), 1, "Header=1");
     assert_eq!(view.change_level(2), 2, "Full=2");
@@ -1169,6 +1213,7 @@ fn blob_v9_round_trips_reuse_key() {
         reuse_key: 42, // v9 新字段
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
+        gradient: loomgui_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             verts: vec![[0.0, 0.0]; 4],
             uvs: vec![[0.0, 0.0]; 4],
@@ -1181,7 +1226,7 @@ fn blob_v9_round_trips_reuse_key() {
     };
     let blob = build_blob(&frame(&[rn]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 12, "blob VERSION=12");
+    assert_eq!(view.version(), 13, "blob VERSION=13");
     assert_eq!(view.reuse_key(0), 42, "reuse_key round-trip");
 }
 
@@ -1274,23 +1319,23 @@ fn blob_writes_shadow_params_column() {
     }
 }
 
-/// v12：blob SOA 列数 = 22（加 shadow_params 列）。读 header 的 col_offset 表长度断言。
+/// v13：blob SOA 列数 = 23（加 grad_params 列）。读 header 的 col_offset 表长度断言。
 /// header layout：magic(4)+version(4)+node_count(4) + N×col_offset(4) + 3 arena pair。
-/// mesh_arena_off 字段位于 header offset `12 + N*4`。对 N=22 → offset 100；N=21 → 96。
+/// mesh_arena_off 字段位于 header offset `12 + N*4`。对 N=23 → offset 104。
 #[test]
-fn blob_column_count_is_22() {
+fn blob_column_count_is_23() {
     let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        12,
-        "VERSION=12（v12：加 shadow_params 列）"
+        13,
+        "VERSION=13（v13：加 grad_params 列）"
     );
-    // mesh_arena_off 字段位置 = 12 + N*4。N=22 → offset 100（读出一个 >= header_len 的值）。
-    // 反推列数 N = (mesh_arena_off_field_position - 12) / 4 = (100 - 12) / 4 = 22。
-    let mesh_arena_off_field_at = 12 + 22 * 4;
+    // mesh_arena_off 字段位置 = 12 + N*4。N=23 → offset 104（读出一个 >= header_len 的值）。
+    // 反推列数 N = (mesh_arena_off_field_position - 12) / 4 = (104 - 12) / 4 = 23。
+    let mesh_arena_off_field_at = 12 + 23 * 4;
     assert_eq!(
-        mesh_arena_off_field_at, 100,
-        "v12 header：N=22 列 → mesh_arena_off @ 100"
+        mesh_arena_off_field_at, 104,
+        "v13 header：N=23 列 → mesh_arena_off @ 104"
     );
     let mesh_arena_off = u32::from_le_bytes(
         blob[mesh_arena_off_field_at..mesh_arena_off_field_at + 4]
