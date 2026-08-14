@@ -171,12 +171,36 @@ pub fn pack_components(components: &[Component]) -> Result<PackResult, String> {
             if let Some(s) = n.src.take() {
                 n.src = Some(normalize_sprite_key(html_rel, &s));
             }
+            // background-image: url(...) 同样归一为 sprite_key。inline style 的 bg-image
+            // 经 css_resolve 烘进 base_style（路径为 HTML 原相对值如 ../res/icons/x.png），
+            // runtime SpriteResolver 拿未归一路径查 atlas（key 是 res/icons/...）会 miss
+            // → 后端回退白纹理。class 规则 bg-image 走 dynamic_rules（见下），不进这里。
+            if let Some(bg) = n.style.background_image.take() {
+                n.style.background_image = Some(normalize_bg_ref(html_rel, &bg, &mut refs));
+            }
+        }
+        // <style> 块 class 规则的 background-image / background url() 同样归一——runtime
+        // rematch 拿 declarations 的原始 url 值调 apply_decl，未归一会让 SpriteResolver miss
+        // （标本馆 .bg-cover/.bg-contain 白块根因：bg-image 在 class 规则里，不在 base_style）。
+        // linear-gradient 值无 url()，跳过（与 url 互斥）。
+        let mut dynamic_rules = parsed.dynamic_rules;
+        for r in dynamic_rules.iter_mut() {
+            for d in r.declarations.iter_mut() {
+                if (d.prop == "background-image" || d.prop == "background")
+                    && !d.value.trim().starts_with("linear-gradient(")
+                {
+                    if let Some(path) = loomgui_core::style::mapping::parse_url(&d.value) {
+                        let norm = normalize_bg_ref(html_rel, &path, &mut refs);
+                        d.value = format!("url(\"{norm}\")");
+                    }
+                }
+            }
         }
         built.push((
             name.clone(),
             nodes,
             DynamicRuleTable {
-                rules: parsed.dynamic_rules,
+                rules: dynamic_rules,
             },
             translate_keyframes(&parsed.keyframes),
         ));
@@ -261,6 +285,15 @@ fn stem(path: &str) -> String {
 /// 且返绝对路径；这里只做纯字符串词法归约（HTML src 可能指向尚未收集的图）。
 /// `Component`-based 归约跨平台（Windows `\` 与 `/` 都正确迭代），输出统一正斜杠
 /// 与 `atlas/collect.rs` 的 sprite_key 口径一致（`replace('\\', "/")`）。
+/// 归一 background-image 路径为 sprite_key 并登记进 refs（atlas 交叉验证）。
+/// inline（base_style 已提取的路径）与 class 规则（url() 串里 parse_url 出的路径）共用——
+/// 抽出此 helper 避免两处各写 normalize_sprite_key + refs.push。
+fn normalize_bg_ref(html_rel: &str, path: &str, refs: &mut Vec<String>) -> String {
+    let norm = normalize_sprite_key(html_rel, path);
+    refs.push(norm.clone());
+    norm
+}
+
 fn normalize_sprite_key(html_rel: &str, src: &str) -> String {
     let base = Path::new(html_rel)
         .parent()

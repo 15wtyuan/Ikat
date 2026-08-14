@@ -13,8 +13,15 @@
   .section {display:flex;flex-direction:column; background-color:#152433; border-radius:12px; padding:28px; gap:16px; }
   .section-title { color:#8ec5d8; font-size:20px; font-weight:700; }
   .specimen {display:flex;flex-direction:column; background-color:#0e1620; border-radius:8px; padding:16px; gap:12px; }
-  .fx-demo {display:flex; flex-direction:row; gap:8px; background-color:#1a2f45; padding:10px; border-radius:6px; }
-  .fx-item { background-color:#2a5a75; color:#e0e6ec; padding:10px 16px; border-radius:4px; font-size:13px; }
+  /* fx-demo 固定宽：留出多余空间让 justify-content / align-items 的分布效果肉眼可见
+     （content-sized 容器无富余空间，justify 无区别——标本馆 v1 看不懂的根因）。 */
+  .fx-demo {display:flex; flex-direction:row; gap:8px; background-color:#1a2f45; padding:10px; border-radius:6px; width:300px; }
+  /* fx-item：自然 span+padding（无显式 display/尺寸）。A 修复后 span 走 rich_text_block，
+     text+padding 作为整体正确测量（≈浏览器 inline span），不再是 flex 容器丢测量的变形方块。 */
+  .fx-item { background-color:#2a5a75; color:#e0e6ec; padding:12px 18px; border-radius:4px; font-size:16px; }
+  .fx-col { display:flex; flex-direction:column; gap:6px; }
+  .fx-label { color:#9aa0b4; font-size:12px; }
+  .section-desc { color:#9aa0b4; font-size:13px; }
   .box-pad { background-color:#2a5a75; padding:20px; }
   .box-pad-inner { background-color:#d4a44e; padding:12px; color:#0e1620; font-size:13px; }
   .box-margin { background-color:#1a2f45; padding:4px; }
@@ -23,8 +30,8 @@
   .brd-1 { border-radius:8px; border-color:#5fb4d4; }
   .brd-2 { border-radius:16px 4px; border-color:#d4a44e; }
   .brd-3 { border-radius:50%; border-color:#c2605a; }
-  .bg-cover { width:120px; height:80px; background-image:url("../res/icons/lab.png"); background-size:cover; border-radius:6px; }
-  .bg-contain { width:120px; height:80px; background-image:url("../res/icons/lab.png"); background-size:contain; background-color:#1a2f45; border-radius:6px; }
+  .bg-cover { width:120px; height:80px; background-image:url("../res/icons/lab.png"); background-size:cover; background-repeat:no-repeat; border-radius:6px; }
+  .bg-contain { width:120px; height:80px; background-image:url("../res/icons/lab.png"); background-size:contain; background-repeat:no-repeat; background-color:#1a2f45; border-radius:6px; }
   .bg-grad { width:120px; height:80px; background-image:linear-gradient(to right,#5fb4d4,#d4a44e); border-radius:6px; }
   .txt div { color:#dfe4ec; }
   .txt-serif { font-family:"DejaVuSans",serif; font-size:18px; }
@@ -75,21 +82,24 @@
 
       <div class="section">
         <div class="section-title">1 · flex 全参数</div>
+        <div class="section-desc">容器固定 300px 宽、方块固定 52×52 —— 留出多余空间，让主轴对齐 justify / 交叉轴对齐 align / 拉伸 grow 的效果一目了然。</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:16px;flex-wrap:wrap">
-          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">row + gap</span><div class="fx-demo"><span class="fx-item">A</span><span class="fx-item">B</span><span class="fx-item">C</span></div></div>
-          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">justify flex-end</span><div class="fx-demo" style="justify-content:flex-end"><span class="fx-item">A</span><span class="fx-item">B</span></div></div>
-          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">justify space-between</span><div class="fx-demo" style="justify-content:space-between"><span class="fx-item">A</span><span class="fx-item">B</span><span class="fx-item">C</span></div></div>
-          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">align center</span><div class="fx-demo" style="align-items:center"><span class="fx-item" style="height:40px">A</span><span class="fx-item">B</span></div></div>
-          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">flex-grow</span><div class="fx-demo"><span class="fx-item" style="flex-grow:1">grow</span><span class="fx-item">B</span></div></div>
+          <div class="fx-col"><span class="fx-label">默认 flex-start</span><div class="fx-demo"><span class="fx-item">A</span><span class="fx-item">B</span><span class="fx-item">C</span></div></div>
+          <div class="fx-col"><span class="fx-label">justify flex-end</span><div class="fx-demo" style="justify-content:flex-end"><span class="fx-item">A</span><span class="fx-item">B</span></div></div>
+          <div class="fx-col"><span class="fx-label">justify center</span><div class="fx-demo" style="justify-content:center"><span class="fx-item">A</span><span class="fx-item">B</span></div></div>
+          <div class="fx-col"><span class="fx-label">justify space-between</span><div class="fx-demo" style="justify-content:space-between"><span class="fx-item">A</span><span class="fx-item">B</span><span class="fx-item">C</span></div></div>
+          <div class="fx-col"><span class="fx-label">align-items center（交叉轴）</span><div class="fx-demo" style="height:84px;align-items:center"><span class="fx-item">A</span><span class="fx-item">B</span></div></div>
+          <div class="fx-col"><span class="fx-label">flex-grow（A 拉伸填满）</span><div class="fx-demo"><span class="fx-item" style="flex-grow:1">A</span><span class="fx-item">B</span></div></div>
         </div>
       </div>
 
       <div class="section">
         <div class="section-title">2 · 尺寸单位</div>
-        <div class="specimen" style="display:flex;flex-direction:row;gap:16px">
-          <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">width:200px</span><div style="width:200px;height:50px;background-color:#2a5a75;border-radius:4px"></div></div>
-          <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">width:50%</span><div style="width:50%;height:50px;background-color:#2a5a75;border-radius:4px"></div></div>
-          <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">aspect-ratio 16/9</span><div style="width:160px;aspect-ratio:16/9;background-color:#d4a44e;border-radius:4px"></div></div>
+        <div class="section-desc">px 绝对像素；% 相对父容器宽；aspect-ratio 由一轴按比例算另一轴。</div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:24px;align-items:flex-start;flex-wrap:wrap">
+          <div class="fx-col"><span class="fx-label">width:240px height:60px（px 绝对）</span><div style="width:240px;height:60px;background-color:#2a5a75;border-radius:4px"></div></div>
+          <div class="fx-col"><span class="fx-label">width:50%（父 360 的一半 = 180）</span><div style="width:360px;height:60px;background-color:#1a2f45;border-radius:4px;padding:4px"><div style="width:50%;height:52px;background-color:#2a5a75;border-radius:4px"></div></div></div>
+          <div class="fx-col"><span class="fx-label">width:180px aspect-ratio:16/9（高 = 101）</span><div style="width:180px;aspect-ratio:16/9;background-color:#d4a44e;border-radius:4px"></div></div>
         </div>
       </div>
 
@@ -113,11 +123,13 @@
 
       <div class="section">
         <div class="section-title">5 · 背景（color / image / size / clip）</div>
-        <div class="specimen" style="display:flex;flex-direction:row;gap:16px;align-items:center">
-          <div class="bg-cover"></div>
-          <div class="bg-contain"></div>
-          <div class="bg-grad"></div>
-          <span class="fx-grad">渐变字</span>
+        <div class="section-desc">纯色、背景图（cover 填满裁切 / contain 完整留白）、线性渐变（带圆角）、渐变字（background-clip:text）。</div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:20px;align-items:flex-start;flex-wrap:wrap">
+          <div class="fx-col"><span class="fx-label">纯色</span><div style="width:120px;height:80px;background-color:#2a5a75;border-radius:6px"></div></div>
+          <div class="fx-col"><span class="fx-label">背景图 cover（填满裁切）</span><div class="bg-cover"></div></div>
+          <div class="fx-col"><span class="fx-label">背景图 contain（完整留白）</span><div class="bg-contain"></div></div>
+          <div class="fx-col"><span class="fx-label">linear-gradient + 圆角</span><div class="bg-grad"></div></div>
+          <div class="fx-col"><span class="fx-label">渐变字 background-clip:text</span><div class="fx-grad">渐变字</div></div>
         </div>
       </div>
 
@@ -138,7 +150,7 @@
           <span class="fx-glow">发光</span>
           <span class="fx-stroke">描边</span>
           <span class="fx-shadow">投影</span>
-          <span class="fx-grad">流光渐变</span>
+          <div class="fx-grad">流光渐变</div>
         </div>
       </div>
 

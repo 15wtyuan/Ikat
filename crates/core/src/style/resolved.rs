@@ -97,6 +97,19 @@ pub enum BackgroundSize {
     Contain = 2, // 完整放入留白（scale=min，UV 外扩，子区外透明透出底色）
 }
 
+/// CSS `background-repeat`。默认 Repeat（CSS 初始值）——图小于盒时平铺填满；
+/// NoRepeat 单张；RepeatX/RepeatY 仅横向/纵向。此前 core 渲染单张（等价 NoRepeat），
+/// 与 CSS 默认 Repeat 分歧（标本馆 bg-contain HTML 平铺填盒、Unity 单张 80×80 根因）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum BackgroundRepeat {
+    #[default]
+    Repeat = 0,
+    NoRepeat = 1,
+    RepeatX = 2,
+    RepeatY = 3,
+}
+
 /// 2 色线性渐变方向。围栏仅支持 4 正向（to right/left/top/bottom）；
 /// 多 stop / 斜角度（45deg 等）由 mapping 静默忽略（apply_decl 返 false），与现有围栏外 CSS 语义一致。
 /// `#[repr(u8)]` 保证 FFI/序列化稳定（与 BackgroundSize/OverflowMode 同模式）。
@@ -234,6 +247,8 @@ pub struct ResolvedStyle {
     pub background_image: Option<String>,
     /// CSS background-size 模式。默认 Stretch。
     pub background_size: BackgroundSize,
+    /// CSS background-repeat（默认 Repeat）。render 对图小于盒时按此平铺。
+    pub background_repeat: BackgroundRepeat,
     /// CSS `background: linear-gradient(...)` 2 色渐变（4 正向）。None=纯色背景。
     /// 渐变与 background_image 互斥渲染（gradient 走 quad_gradient 顶点色插值，无纹理采样）。
     pub background_gradient: Option<Gradient2>,
@@ -377,6 +392,7 @@ impl Default for ResolvedStyle {
             background_color: None,
             background_image: None,
             background_size: BackgroundSize::Stretch,
+            background_repeat: BackgroundRepeat::Repeat,
             background_gradient: None,
             background_clip_text: false,
             border_radius: BorderRadius::default(),

@@ -1779,3 +1779,31 @@ fn box_shadow_none_clears_prior() {
     assert!(apply_decl(&mut s, "box-shadow", "NONE"));
     assert!(s.box_shadow.is_empty(), "NONE clears prior shadows");
 }
+
+#[test]
+fn aspect_ratio_parses_ratio_and_number_and_auto() {
+    // CSS <ratio> 三形态。taffy 原生消费 width/height 比。
+    let mut s = ResolvedStyle::default();
+
+    // `16/9` —— showcase 用法，此前被 parse::<f32>() 吞掉 → 节点缺高度不可见。
+    assert!(apply_decl(&mut s, "aspect-ratio", "16/9"));
+    assert!((s.taffy_style.aspect_ratio.unwrap() - 16.0 / 9.0).abs() < 1e-4);
+
+    // 纯数字（CSS 也接受 ratio 写成单 number）。
+    assert!(apply_decl(&mut s, "aspect-ratio", "1.5"));
+    assert!((s.taffy_style.aspect_ratio.unwrap() - 1.5).abs() < 1e-4);
+
+    // auto —— 显式清除比值。
+    assert!(apply_decl(&mut s, "aspect-ratio", "1"));
+    assert!(apply_decl(&mut s, "aspect-ratio", "auto"));
+    assert!(s.taffy_style.aspect_ratio.is_none());
+}
+
+#[test]
+fn aspect_ratio_rejects_garbage_not_silent() {
+    // 不可解析值必须返 false，让围栏打包期报 FenceBadCssValue（不静默降级）。
+    let mut s = ResolvedStyle::default();
+    assert!(!apply_decl(&mut s, "aspect-ratio", "abc"));
+    assert!(!apply_decl(&mut s, "aspect-ratio", "16/0")); // 分母 0
+    assert!(s.taffy_style.aspect_ratio.is_none());
+}

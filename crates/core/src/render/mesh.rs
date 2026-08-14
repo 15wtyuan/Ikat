@@ -39,6 +39,86 @@ pub fn quad(
     (verts, uvs, colors, indices)
 }
 
+/// 背景图平铺（CSS background-repeat）。`area` = 平铺区域（盒 content box）；
+/// `tile_w`/`tile_h` = 单张尺寸（background-size 后，如 contain 的 80×80）；
+/// 每砖块独立 quad + UV 分数（裁剪到 area 边界，边沿砖块 UV 取子区），与单张 image
+/// quad 同 UV 口径（v 翻转）。repeat/repeat-x/repeat-y/no-repeat 按 CSS 平铺。
+#[allow(clippy::type_complexity)]
+pub fn tile_image(
+    area: &Rect,
+    tile_w: f32,
+    tile_h: f32,
+    repeat: crate::style::resolved::BackgroundRepeat,
+    color: [f32; 4],
+    uv_min: [f32; 2],
+    uv_max: [f32; 2],
+) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
+    use crate::style::resolved::BackgroundRepeat as R;
+    let tw = tile_w.max(1.0);
+    let th = tile_h.max(1.0);
+    let (umin, vmin) = (uv_min[0], uv_min[1]);
+    let (umax, vmax) = (uv_max[0], uv_max[1]);
+    let du = umax - umin;
+    let dv = vmax - vmin;
+    let x_tiled = matches!(repeat, R::Repeat | R::RepeatX);
+    let y_tiled = matches!(repeat, R::Repeat | R::RepeatY);
+    // 从 area 左上起铺，步长 = 单张尺寸；ceil 覆盖到 area 右下，边沿砖块裁剪。
+    let nx = if x_tiled {
+        ((area.w / tw).ceil() as i32).max(1)
+    } else {
+        1
+    };
+    let ny = if y_tiled {
+        ((area.h / th).ceil() as i32).max(1)
+    } else {
+        1
+    };
+    let mut verts: Vec<[f32; 2]> = Vec::new();
+    let mut uvs: Vec<[f32; 2]> = Vec::new();
+    let mut colors: Vec<[f32; 4]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    for iy in 0..ny {
+        for ix in 0..nx {
+            let tx0 = area.x + ix as f32 * tw;
+            let ty0 = area.y + iy as f32 * th;
+            // 裁剪到 area（CSS repeat 不越出背景绘制区）。
+            let cx0 = tx0.max(area.x);
+            let cx1 = (tx0 + tw).min(area.x + area.w);
+            let cy0 = ty0.max(area.y);
+            let cy1 = (ty0 + th).min(area.y + area.h);
+            if cx1 <= cx0 || cy1 <= cy0 {
+                continue;
+            }
+            // 砖块在单张内的分数 → UV 子区。
+            let fx0 = (cx0 - tx0) / tw;
+            let fx1 = (cx1 - tx0) / tw;
+            let fy0 = (cy0 - ty0) / th;
+            let fy1 = (cy1 - ty0) / th;
+            let u_lo = umin + du * fx0;
+            let u_hi = umin + du * fx1;
+            let v_lo = vmin + dv * fy0;
+            let v_hi = vmin + dv * fy1;
+            let q = quad(
+                &Rect {
+                    x: cx0,
+                    y: cy0,
+                    w: cx1 - cx0,
+                    h: cy1 - cy0,
+                },
+                color,
+                [u_lo, v_hi],
+                [u_hi, v_lo],
+            );
+            let base = verts.len() as u32;
+            verts.extend(q.0);
+            uvs.extend(q.1);
+            colors.extend(q.2);
+            indices.extend(q.3.iter().map(|i| i + base));
+        }
+    }
+    (verts, uvs, colors, indices)
+}
+
 /// 生成 4 角独立色 quad 的 verts/uvs/colors/indices（SOA 四表，与 `quad` 同形）。
 ///
 /// - 顶点序、UV、索引与 `quad` 完全一致（TL → TR → BR → BL，CCW）。
@@ -125,9 +205,23 @@ pub fn rounded_rect(
     uv_min: [f32; 2],
     uv_max: [f32; 2],
 ) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
+    rounded_rect_colored(rect, radii, uv_min, uv_max, |_, _| color)
+}
+
+/// 圆角矩形几何（CSS 圆角钳制 + 中心三角扇）。fill 与 shape 解耦：纯色/渐变由
+/// `color_fn(tx, ty)` 决定（tx,ty = 顶点在 rect 内归一化位置），消除「圆角排斥渐变」
+/// 的 fill×shape 耦合。退化（w/h≤0）走 quad，颜色取 color_fn(0,0)（纯色=color，渐变=TL角色）。
+#[allow(clippy::type_complexity)]
+fn rounded_rect_colored<C: Fn(f32, f32) -> [f32; 4]>(
+    rect: &Rect,
+    radii: &[(f32, f32); 4],
+    uv_min: [f32; 2],
+    uv_max: [f32; 2],
+    color_fn: C,
+) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
     let (w, h) = (rect.w, rect.h);
     if w <= 0.0 || h <= 0.0 {
-        return quad(rect, color, uv_min, uv_max);
+        return quad(rect, color_fn(0.0, 0.0), uv_min, uv_max);
     }
     // CSS 按边缩放钳制（vs fgui per-corner min）。两邻角半径和不超过边长，等比缩放；
     // 只缩不放（min(1.0) 兜底）；防负 max(0.0)。
@@ -152,7 +246,7 @@ pub fn rounded_rect(
     let cy = rect.y + h / 2.0;
     verts.push([cx, cy]);
     uvs.push([lerp(umin, umax, 0.5), lerp(vmin, vmax, 0.5)]);
-    colors.push(color);
+    colors.push(color_fn(0.5, 0.5));
 
     // 角序 TL→TR→BR→BL（CSS 视觉序）。
     // 起始角 TL=π, TR=-π/2, BR=0, BL=π/2（逆时针 design y-down）。圆心 = 角顶点内缩 (rx,ry)。
@@ -191,12 +285,10 @@ pub fn rounded_rect(
     for (rx, ry, center, start, corner) in corners {
         if rx <= 0.0 || ry <= 0.0 {
             // 直角：单顶点 = 该角矩形顶点（ry>0 时圆心+方向会偏移，故直接用 corner）。
+            let (tx_c, ty_c) = ((corner[0] - rect.x) / w, (corner[1] - rect.y) / h);
             verts.push(corner);
-            uvs.push([
-                lerp(umin, umax, (corner[0] - rect.x) / w),
-                lerp(vmin, vmax, (corner[1] - rect.y) / h),
-            ]);
-            colors.push(color);
+            uvs.push([lerp(umin, umax, tx_c), lerp(vmin, vmax, ty_c)]);
+            colors.push(color_fn(tx_c, ty_c));
             continue;
         }
         // 自适应分段：ceil(π·max(rx,ry)/4)+1，最小 2（每 ~4px 弧长一段，加密自 fgui /8 消圆角毛刺）
@@ -210,12 +302,10 @@ pub fn rounded_rect(
             };
             let px = center[0] + a.cos() * rx;
             let py = center[1] + a.sin() * ry;
+            let (tx, ty) = ((px - rect.x) / w, (py - rect.y) / h);
             verts.push([px, py]);
-            uvs.push([
-                lerp(umin, umax, (px - rect.x) / w),
-                lerp(vmin, vmax, (py - rect.y) / h),
-            ]);
-            colors.push(color);
+            uvs.push([lerp(umin, umax, tx), lerp(vmin, vmax, ty)]);
+            colors.push(color_fn(tx, ty));
         }
     }
     // 三角扇：(0, i, i+1)，末尾回 1 闭合
@@ -226,6 +316,30 @@ pub fn rounded_rect(
         indices.extend_from_slice(&[0, i, next]);
     }
     (verts, uvs, colors, indices)
+}
+
+/// 圆角矩形 + 线性渐变填充：薄封装 [`rounded_rect_colored`]，每顶点色按归一化位置
+/// (tx,ty) 对 4 角色双线性插值（与直角 [`quad_gradient`] 同 4 角色口径 [TL,TR,BR,BL]）。
+/// 修复 background_gradient + border-radius 共存（此前 use_gradient 门判 all_zero 才绘渐变）。
+pub fn rounded_rect_gradient(
+    rect: &Rect,
+    corner_colors: [[f32; 4]; 4],
+    radii: &[(f32, f32); 4],
+    uv_min: [f32; 2],
+    uv_max: [f32; 2],
+) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
+    let [tl, tr, br, bl] = corner_colors;
+    let lerp_c = |a: [f32; 4], b: [f32; 4], t: f32| {
+        [
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+            a[3] + (b[3] - a[3]) * t,
+        ]
+    };
+    rounded_rect_colored(rect, radii, uv_min, uv_max, move |tx, ty| {
+        lerp_c(lerp_c(tl, tr, tx), lerp_c(bl, br, tx), ty)
+    })
 }
 
 /// 生成九宫格切片矩形的 verts/uvs/colors/indices（照搬 fgui Image.cs SliceFill）。

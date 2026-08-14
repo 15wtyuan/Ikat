@@ -1137,6 +1137,16 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             };
             true
         }
+        "background-repeat" => {
+            style.background_repeat = match value.trim() {
+                "repeat" => crate::style::resolved::BackgroundRepeat::Repeat,
+                "no-repeat" => crate::style::resolved::BackgroundRepeat::NoRepeat,
+                "repeat-x" => crate::style::resolved::BackgroundRepeat::RepeatX,
+                "repeat-y" => crate::style::resolved::BackgroundRepeat::RepeatY,
+                _ => return false,
+            };
+            true
+        }
         "border-color" => {
             style.border_color = parse_color(value);
             true
@@ -1263,9 +1273,31 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "aspect-ratio" => {
-            if let Ok(v) = value.trim().parse::<f32>() {
-                ts.aspect_ratio = Some(v);
+            // CSS <ratio>: `auto` | <number> | <number>/<number>。taffy 原生消费
+            // width/height 比值（Some 时约束缺省轴）。不可解析值返 false 让围栏报错，
+            // 不静默降级（避免 `16/9` 被吞 → 节点缺高度不可见却无诊断）。
+            let v = value.trim();
+            if v.eq_ignore_ascii_case("auto") {
+                ts.aspect_ratio = None;
+                return true;
             }
+            let ratio = match v.split_once('/') {
+                Some((a, b)) => {
+                    let (a, b): (f32, f32) = match (a.trim().parse(), b.trim().parse()) {
+                        (Ok(a), Ok(b)) => (a, b),
+                        _ => return false,
+                    };
+                    if b == 0.0 {
+                        return false;
+                    }
+                    a / b
+                }
+                None => match v.parse::<f32>() {
+                    Ok(n) => n,
+                    Err(_) => return false,
+                },
+            };
+            ts.aspect_ratio = Some(ratio);
             true
         }
         "order" => {

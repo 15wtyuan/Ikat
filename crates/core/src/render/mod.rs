@@ -356,9 +356,16 @@ fn build_container_mesh(
     anim: Option<&crate::scene::node::NodeAnim>,
     image_sizes: &ImageSizeTable,
 ) -> RenderNode {
-    let color = anim
-        .and_then(|a| a.bg_color)
-        .unwrap_or(n.style.background_color.unwrap_or([0.0, 0.0, 0.0, 0.0]));
+    // background-clip:text：背景裁剪到文字形状。build_text_mesh 已用渐变文字色画字形
+    // （gradient_glyph_colors），这里不能再画背景填充——否则文字下面叠一层渐变色矩形
+    // （标本馆 fx-grad "渐变字" 下层渐变背景根因）。clip_text 时背景色与渐变都抑制。
+    let clip_text = n.style.background_clip_text;
+    let color = if clip_text {
+        [0.0, 0.0, 0.0, 0.0]
+    } else {
+        anim.and_then(|a| a.bg_color)
+            .unwrap_or(n.style.background_color.unwrap_or([0.0, 0.0, 0.0, 0.0]))
+    };
     let (image_path, src_w, src_h) = match &n.style.background_image {
         Some(url) => {
             let (sw, sh) = src_size(image_sizes, url);
@@ -373,11 +380,14 @@ fn build_container_mesh(
     let radii = n.style.border_radius.as_corners(rw, rh);
     let all_zero = radii.iter().all(|&(rx, ry)| rx <= 0.0 || ry <= 0.0);
     let has_slice = n.style.border_image_slice.is_some();
-    // 渐变背景仅在没有背景图（互斥）、没有九宫格切片、直角 quad 时启用——
-    // quad_gradient 是 4 角独立色 quad，GPU 顶点色插值得 2 色线性渐变。
-    // 与圆角 / 切片共存需 gradient + rounded_rect/slice 混合 mesh，留待后续 task。
-    let use_gradient =
-        !has_image && !has_slice && all_zero && n.style.background_gradient.is_some();
+    // 渐变背景仅在没有背景图 / 九宫格切片时启用（三者互斥），不再要求直角——
+    // 有圆角时走 rounded_rect_gradient（圆角 + 每顶点双色插）。此前 all_zero 门判
+    // 导致 background_gradient + border-radius 共存时渐变被丢（标本馆 .bg-grad 根因）。
+    let grad = if !has_image && !has_slice && !clip_text {
+        n.style.background_gradient
+    } else {
+        None
+    };
     let draw_rect = if !has_slice
         && matches!(
             n.style.background_size,
@@ -393,14 +403,48 @@ fn build_container_mesh(
     } else {
         *rect
     };
-    let (mut v, mut uvc, mut col, mut idx) = if use_gradient {
-        let g = n.style.background_gradient.expect("use_gradient 已校验");
-        crate::render::mesh::quad_gradient(
-            &draw_rect,
-            gradient_corner_colors(g),
+    // background-repeat 平铺：图（background-size 后）小于盒时按 repeat/repeat-x/repeat-y
+    // 平铺填满（CSS 默认 repeat）。此前 core 只画单张（等价 no-repeat）→ 与浏览器默认
+    // repeat 分歧（标本馆 bg-contain：HTML 平铺填盒、Unity 单张 80×80）。圆角+repeat 退回
+    // 单张（圆角裁剪+平铺混合 mesh 留待后续；标本用 no-repeat 规避）。
+    let repeat = n.style.background_repeat;
+    let do_tile = has_image
+        && !has_slice
+        && !clip_text
+        && all_zero
+        && repeat != crate::style::resolved::BackgroundRepeat::NoRepeat
+        && (draw_rect.w < rect.w - 0.5 || draw_rect.h < rect.h - 0.5);
+    let (mut v, mut uvc, mut col, mut idx) = if do_tile {
+        crate::render::mesh::tile_image(
+            rect,
+            draw_rect.w,
+            draw_rect.h,
+            repeat,
+            color,
             [u_min[0], u_max[1]],
             [u_max[0], u_min[1]],
         )
+    } else if let Some(g) = grad {
+        // 渐变填充（与背景图 / 九宫格切片互斥）。直角 quad_gradient；有圆角走
+        // rounded_rect_gradient（圆角三角扇 + 每顶点位置双线性插 4 角色），修复
+        // background_gradient + border-radius 共存（此前 all_zero 门判丢了渐变）。
+        let gcolors = gradient_corner_colors(g);
+        if all_zero {
+            crate::render::mesh::quad_gradient(
+                &draw_rect,
+                gcolors,
+                [u_min[0], u_max[1]],
+                [u_max[0], u_min[1]],
+            )
+        } else {
+            crate::render::mesh::rounded_rect_gradient(
+                &draw_rect,
+                gcolors,
+                &radii,
+                [u_min[0], u_max[1]],
+                [u_max[0], u_min[1]],
+            )
+        }
     } else {
         match (has_slice, all_zero) {
             (false, true) => crate::render::mesh::quad(

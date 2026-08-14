@@ -1,9 +1,10 @@
 //! T2：bridge 把 fence `rich_text_blocks`（ir_idx 集合）烘成 TemplateNode.rich_text_block flag。
 //!
-//! rich-text-block = `display:block` 容器且其直接子全是 inline 级（text/span/img）——运行时
-//! 把这些 inline 子拍平成 RichRun 走 inline flow（见 main-design 文本模型）。bridge 是
-//! fence ir_idx → core TemplateNode 的唯一翻译入口，flag 必须在此烘入，供后续
-//! compiler/solve/render 读取。
+//! rich-text-block = block 容器（div 等）或 inline 级文本容器（span）且其直接子全是
+//! inline 级（text/span/img）——运行时把这些 inline 子拍平成 RichRun 走 inline flow
+//! （见 main-design 文本模型）。span 默认归入（inline→flex 是 taffy 兼容 hack，且
+//! flex 容器+padding+被测文字子会丢测量），使 span+padding+文字 走 text+padding 整体测量。
+//! bridge 是 fence ir_idx → core TemplateNode 的唯一翻译入口，flag 必须在此烘入。
 
 use loomgui_core::asset::TemplateNode;
 use loomgui_core::scene::node::NodeKind;
@@ -31,15 +32,28 @@ fn bridge_sets_rich_text_block_flag() {
         nodes[0].rich_text_block,
         "root rich-text-block container must carry the flag"
     );
-    // 内层 span(TextElement) + text 不是 rich-text-block 容器根 → flag=false。
+    // 内层 span(TextElement)+text 现在也归 rich_text_block（span 是 inline 级文本容器，
+    // A 修复：span+padding+文字 走 text+padding 整体测量，不再变形）。它被折叠进根的
+    // inline flow，flag 虽设但运行时由根 consumed——这里仅校验 TextNode 叶子不持 flag。
     let non_root: Vec<&TemplateNode> = nodes.iter().skip(1).collect();
     assert!(
-        non_root.iter().all(|n| !n.rich_text_block),
-        "non-root nodes must not carry the flag: {:?}",
+        non_root
+            .iter()
+            .all(|n| n.kind != NodeKind::TextNode || !n.rich_text_block),
+        "TextNode 叶子不应持 rich_text_block flag: {:?}",
         non_root
             .iter()
             .map(|n| (n.kind, n.rich_text_block))
             .collect::<Vec<_>>()
+    );
+    // 内层 span 本身应是 rich_text_block（A 修复后的预期）。
+    let inner_span = non_root
+        .iter()
+        .find(|n| n.kind == NodeKind::TextElement)
+        .expect("inner span exists");
+    assert!(
+        inner_span.rich_text_block,
+        "内层 span+text 应归 rich_text_block（A 修复）"
     );
 }
 

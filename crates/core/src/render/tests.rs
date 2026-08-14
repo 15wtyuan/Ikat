@@ -2039,6 +2039,8 @@ fn build_container_bg_image_contain_shrinks_geometry() {
     );
     n.style.background_image = Some("a.png".into());
     n.style.background_size = BackgroundSize::Contain;
+    // no-repeat：验 contain 单张缩放（默认 repeat 会平铺，另测）。
+    n.style.background_repeat = crate::style::resolved::BackgroundRepeat::NoRepeat;
     let mut scene = Scene::from_nodes(vec![n], vec![]);
 
     let fonts = test_font_table().expect("need font");
@@ -2055,6 +2057,47 @@ fn build_container_bg_image_contain_shrinks_geometry() {
         assert!(
             (xmax - 100.0).abs() < 1e-2,
             "contain 子矩形 xmax=100（src 64 兜底缩放宽，右留白），got {}",
+            xmax
+        );
+    } else {
+        panic!("expected Mesh");
+    }
+}
+
+#[test]
+fn build_container_bg_image_contain_repeat_tiles_box() {
+    // contain + 默认 repeat：图小于盒时平铺填满（CSS background-repeat 默认 repeat）。
+    // 200×100 盒，src 64 兜底 contain → 单张 100×100；repeat 横向铺 2 块 → xmax=200（填满，无留白）。
+    use crate::style::resolved::BackgroundRepeat;
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 100.0,
+        },
+        None,
+    );
+    n.style.background_image = Some("a.png".into());
+    n.style.background_size = BackgroundSize::Contain;
+    n.style.background_repeat = BackgroundRepeat::Repeat; // 默认值，显式写明意图
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let fonts = test_font_table().expect("need font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    if let NodePayload::Mesh { verts, .. } = &frame.nodes[0].payload {
+        let xmax = verts.iter().map(|v| v[0]).fold(f32::MIN, f32::max);
+        assert!(
+            (xmax - 200.0).abs() < 1e-2,
+            "repeat 应平铺填满盒 xmax=200，got {}",
             xmax
         );
     } else {

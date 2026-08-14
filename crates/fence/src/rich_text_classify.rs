@@ -55,8 +55,13 @@ fn classify_child(kind: &IrNodeKind) -> ChildRole {
     }
 }
 
-/// 节点是否为 rich-text 分类意义上的 block 容器：`display:block`（tag 默认或 inline style
-/// 烘入 styles）且未被 class 规则改成 flex。复用 6.5 的 flex 判定，保证两阶段同向保守。
+/// 节点是否为 rich-text 分类候选：block 容器（div 等）或 inline 级文本容器（span）。
+///
+/// - div 等：须 `display:block` 且未被 class 规则改成 flex（复用 6.5 的 flex 判定）。
+/// - span（TextElement）：inline 级文本容器，默认走 rich_text inline flow（text+padding
+///   整体测量）。LoomGUI 的 inline→flex 是 taffy 兼容 hack，但「flex 容器 + padding +
+///   被测文字子」会丢子节点测量（span+padding+文字 变形 bug），故 span 默认归
+///   rich_text_block。仅当作者显式 `display:flex` 才保留 flex（作者要 flex 排版）。
 fn is_block_container(
     idx: usize,
     tree: &IrTree,
@@ -67,8 +72,12 @@ fn is_block_container(
     let IrNodeKind::Element(el) = &tree.nodes[idx].kind else {
         return false;
     };
-    // css_resolve 已把 tag 默认 + inline style 的 display 烘进 taffy_style.display。
-    // 只 Block 参与（Flex → flex item；None(template) → 不排版）。
+    // span：inline 级文本容器，默认 rich_text 候选（除非作者显式 display:flex）。
+    if matches!(el.semantic, Some(SemanticKind::TextElement)) {
+        return !has_explicit_display_flex(el);
+    }
+    // 非 span（div 等）：css_resolve 已把 tag 默认 + inline style 的 display 烘进
+    // taffy_style.display。只 Block 参与（Flex → flex item；None(template) → 不排版）。
     if styles[idx].taffy_style.display != taffy::Display::Block {
         return false;
     }
@@ -79,6 +88,30 @@ fn is_block_container(
         single_compound_flex_rules,
         has_multi_compound_flex_rule,
     )
+}
+
+/// 元素的 inline style 是否显式声明 `display:flex`（作者要 flex 排版，非 inline 默认 hack）。
+/// 用于区分 span 的「默认 inline→flex」（应归 rich_text）与「作者显式 flex」（保留 flex）。
+/// 粗扫 style 串里 `display:` 后跟 `flex`（容空白/大小写）——围栏值已规范化，无需全解析。
+fn has_explicit_display_flex(el: &crate::ir::IrElement) -> bool {
+    let Some(style) = el.attributes.iter().find(|a| a.name == "style") else {
+        return false;
+    };
+    for decl in style.value.split(';') {
+        let mut parts = decl.split(':');
+        if parts
+            .next()
+            .map(|p| p.trim().eq_ignore_ascii_case("display"))
+            .unwrap_or(false)
+        {
+            if let Some(v) = parts.next() {
+                if v.trim().eq_ignore_ascii_case("flex") {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// 分类所有 block 容器：全 inline 直接子 → rich-text-block；inline+block 混合 → error。

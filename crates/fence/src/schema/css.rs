@@ -346,6 +346,12 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         parser: CssValueParser::Keyword(&["cover", "contain", "100%", "stretch"]),
     },
     CssPropSpec {
+        name: "background-repeat",
+        default: "repeat",
+        inherited: false,
+        parser: CssValueParser::Keyword(&["repeat", "no-repeat", "repeat-x", "repeat-y"]),
+    },
+    CssPropSpec {
         name: "background-clip",
         default: "border-box",
         inherited: false,
