@@ -97,25 +97,58 @@ pub enum BackgroundSize {
     Contain = 2, // 完整放入留白（scale=min，UV 外扩，子区外透明透出底色）
 }
 
-/// 2 色线性渐变方向。围栏仅支持 4 正向（to right/left/top/bottom）；
-/// 多 stop / 斜角度（45deg 等）由 mapping 静默忽略（apply_decl 返 false），与现有围栏外 CSS 语义一致。
-/// `#[repr(u8)]` 保证 FFI/序列化稳定（与 BackgroundSize/OverflowMode 同模式）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(u8)]
-pub enum GradientDir {
-    ToRight = 0,
-    ToLeft = 1,
-    ToTop = 2,
-    ToBottom = 3,
+/// 渐变 stop。`pos` 在解析期按 CSS 规则烘成 0..1 定位（首 0 / 末 1 / 中间相邻已定位
+/// stop 的中点），并钳成单调不减——渲染层无需再处理默认位置。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GradientStop {
+    pub color: [f32; 4],
+    pub pos: f32,
 }
 
-/// 2 色线性渐变（背景填充）。color_a 是首 stop（渐变起点），color_b 是末 stop（终点）；
-/// 起点/终点由 `dir` 决定（to right → 左为 a 右为 b，与 CSS 语义一致）。
+/// radial 渐变的尺寸。关键字在渲染期按 box 解析；显式长度（单长度=正圆、双长度=椭圆）
+/// 已是像素。围栏子集不含 `<percentage>` 尺寸（CSS 规范允许但游戏 UI 无场景）。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Gradient2 {
-    pub color_a: [f32; 4],
-    pub color_b: [f32; 4],
-    pub dir: GradientDir,
+pub enum RadialExtent {
+    ClosestSide,
+    FarthestSide,
+    ClosestCorner,
+    FarthestCorner,
+    Explicit(Option<f32>, Option<f32>),
+}
+
+/// radial 圆心单轴坐标。Pct 按 box 尺寸解析（CSS `at 82% -12%`），Px 为像素。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum GradCoord {
+    Pct(f32),
+    Px(f32),
+}
+
+/// CSS 渐变（背景填充 + background-clip:text 文本渐变共用）。
+/// Linear 的方向在解析期归一化为角度（0deg=to top 顺时针；`to right`=90）。
+/// 渲染期按当帧 box 解析成像素参数（`render::gradient::GradientParams`）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Gradient {
+    Linear {
+        angle_deg: f32,
+        stops: Vec<GradientStop>,
+    },
+    Radial {
+        extent: RadialExtent,
+        center: [GradCoord; 2],
+        stops: Vec<GradientStop>,
+    },
+}
+
+/// 渐变 stop 上限（FFI grad_params 列定长 8 槽；超出打包期拒收）。
+pub const GRADIENT_MAX_STOPS: usize = 8;
+
+impl Gradient {
+    /// stop 列表访问器（linear/radial 同构）。
+    pub fn stops(&self) -> &[GradientStop] {
+        match self {
+            Gradient::Linear { stops, .. } | Gradient::Radial { stops, .. } => stops,
+        }
+    }
 }
 
 /// LoomGUI display 旁路字段（与 taffy_style.display 并行设置）。
@@ -234,9 +267,9 @@ pub struct ResolvedStyle {
     pub background_image: Option<String>,
     /// CSS background-size 模式。默认 Stretch。
     pub background_size: BackgroundSize,
-    /// CSS `background: linear-gradient(...)` 2 色渐变（4 正向）。None=纯色背景。
-    /// 渐变与 background_image 互斥渲染（gradient 走 quad_gradient 顶点色插值，无纹理采样）。
-    pub background_gradient: Option<Gradient2>,
+    /// CSS `background: <gradient>` 渐变（linear/radial，多 stop + 任意角度）。
+    /// None=纯色背景。与 background_image 互斥渲染（gradient 走 program=6 渐变 shader）。
+    pub background_gradient: Option<Gradient>,
     /// CSS `background-clip: text` / `-webkit-background-clip: text`。
     /// 三件套文案（background:linear-gradient + background-clip:text + color:transparent 推荐）
     /// 触发渐变字形渲染：字形 quad 顶点色用 gradient 4 角色（替代 run.color）。
@@ -751,33 +784,73 @@ mod tests {
 
     #[test]
     fn background_gradient_bincode_roundtrip() {
-        // 4 方向 × 2 色经 bincode round-trip 等值（pkg 字段，序列化稳定）。
-        for dir in [
-            GradientDir::ToRight,
-            GradientDir::ToLeft,
-            GradientDir::ToTop,
-            GradientDir::ToBottom,
-        ] {
+        // linear（角度 + 多 stop）与 radial（extent + at 坐标 + 多 stop）经 bincode
+        // round-trip 等值（pkg 字段，序列化稳定）。
+        let cases = vec![
+            Gradient::Linear {
+                angle_deg: 137.0,
+                stops: vec![
+                    GradientStop {
+                        color: [0.1, 0.2, 0.3, 0.4],
+                        pos: 0.0,
+                    },
+                    GradientStop {
+                        color: [0.5, 0.6, 0.7, 0.8],
+                        pos: 1.0,
+                    },
+                ],
+            },
+            Gradient::Linear {
+                angle_deg: 0.0,
+                stops: vec![
+                    GradientStop {
+                        color: [1.0, 0.0, 0.0, 1.0],
+                        pos: 0.0,
+                    },
+                    GradientStop {
+                        color: [0.0, 1.0, 0.0, 0.5],
+                        pos: 0.25,
+                    },
+                    GradientStop {
+                        color: [0.0, 0.0, 1.0, 1.0],
+                        pos: 1.0,
+                    },
+                ],
+            },
+            Gradient::Radial {
+                extent: RadialExtent::Explicit(Some(1100.0), Some(560.0)),
+                center: [GradCoord::Pct(0.82), GradCoord::Pct(-0.12)],
+                stops: vec![
+                    GradientStop {
+                        color: [0.37, 0.71, 0.83, 0.1],
+                        pos: 0.0,
+                    },
+                    GradientStop {
+                        color: [0.0; 4],
+                        pos: 0.6,
+                    },
+                ],
+            },
+            Gradient::Radial {
+                extent: RadialExtent::ClosestSide,
+                center: [GradCoord::Pct(0.5), GradCoord::Px(40.0)],
+                stops: vec![GradientStop {
+                    color: [0.9, 0.9, 0.1, 1.0],
+                    pos: 0.5,
+                }],
+            },
+        ];
+        for g in cases {
             let mut s = ResolvedStyle::default();
-            s.background_gradient = Some(Gradient2 {
-                color_a: [0.1, 0.2, 0.3, 0.4],
-                color_b: [0.5, 0.6, 0.7, 0.8],
-                dir,
-            });
+            s.background_gradient = Some(g);
             let bytes = bincode::serialize(&s).expect("serialize");
             let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
             assert_eq!(
                 back.background_gradient, s.background_gradient,
-                "dir={dir:?} round-trip"
+                "gradient round-trip"
             );
             assert_eq!(back, s, "全字段 round-trip 仍相等");
         }
-    }
-
-    #[test]
-    fn gradient_dir_is_one_byte() {
-        // FFI / 序列化稳定不变量：#[repr(u8)] enum 占 1 字节。
-        assert_eq!(std::mem::size_of::<GradientDir>(), 1);
     }
 
     #[test]

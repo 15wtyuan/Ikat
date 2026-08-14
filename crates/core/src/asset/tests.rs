@@ -769,8 +769,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 33,
-        "pkg format version must be 33 after rich_text_block flag bump (v29 aria_controls feature persists)"
+        PKG_FORMAT_VERSION, 34,
+        "pkg format version must be 34 after gradient model bump (v29 aria_controls feature persists)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -833,8 +833,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 33,
-        "pkg format version must be 33 after rich_text_block flag bump"
+        PKG_FORMAT_VERSION, 34,
+        "pkg format version must be 34 after gradient model bump"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -974,8 +974,8 @@ fn pkg_v32_rejects_v31() {
 #[test]
 fn pkg_v33_roundtrip_preserves_rich_text_block() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 33,
-        "pkg format version must be 33 after rich_text_block flag bump"
+        PKG_FORMAT_VERSION, 34,
+        "pkg format version must be 34 after gradient model bump"
     );
     // 根节点 rich_text_block=true（rich-text-block 容器根），子节点 flag=false（叶子）。
     let mut root = tn(NodeKind::Container);
@@ -1012,5 +1012,82 @@ fn pkg_v33_rejects_v32() {
     assert!(
         matches!(err, Err(PkgError::TooOld(32))),
         "v32 pkg must be rejected as TooOld after v33 bump, got {err:?}"
+    );
+}
+
+// ── v34: background_gradient → Gradient（radial + 多 stop + 任意角度）──────
+
+/// v34: 新 Gradient 模型（linear 多 stop 任意角度 / radial 显式椭圆 + at 负百分比）经完整
+/// pkg.bin 路径（write_package → read_package）往返保真。style_blob 是整个 ResolvedStyle
+/// 的 bincode，Gradient 布局变（Gradient2 → enum）即 pkg bump 根因。
+#[test]
+fn pkg_v34_roundtrip_preserves_gradient() {
+    assert_eq!(
+        PKG_FORMAT_VERSION, 34,
+        "pkg format version must be 34 after gradient model bump"
+    );
+    use crate::style::resolved::{GradCoord, Gradient, GradientStop, RadialExtent};
+    let mut root = tn(NodeKind::Container);
+    root.style.background_gradient = Some(Gradient::Radial {
+        extent: RadialExtent::Explicit(Some(1100.0), Some(560.0)),
+        center: [GradCoord::Pct(0.82), GradCoord::Pct(-0.12)],
+        stops: vec![
+            GradientStop {
+                color: [0.373, 0.706, 0.831, 0.1],
+                pos: 0.0,
+            },
+            GradientStop {
+                color: [0.0; 4],
+                pos: 0.6,
+            },
+        ],
+    });
+    let mut child = tn(NodeKind::Container);
+    child.style.background_gradient = Some(Gradient::Linear {
+        angle_deg: 137.0,
+        stops: vec![
+            GradientStop {
+                color: [1.0, 0.0, 0.0, 1.0],
+                pos: 0.0,
+            },
+            GradientStop {
+                color: [0.0, 1.0, 0.0, 0.5],
+                pos: 0.25,
+            },
+            GradientStop {
+                color: [0.0, 0.0, 1.0, 1.0],
+                pos: 1.0,
+            },
+        ],
+    });
+    child.parent_idx = Some(0);
+    let nodes = [root, child];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+    };
+    let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
+    let ns = &pkg.components["c"].nodes;
+    assert_eq!(
+        ns[0].style.background_gradient, nodes[0].style.background_gradient,
+        "radial（home 光晕原句参数）round-trip 保真"
+    );
+    assert_eq!(
+        ns[1].style.background_gradient, nodes[1].style.background_gradient,
+        "linear 多 stop + 任意角度 round-trip 保真"
+    );
+}
+
+/// v34: version=33 的 pkg 加载报 TooOld（MIN=MAX=34，无迁移器——ResolvedStyle bincode
+/// 布局变，旧 reader 半读半坏不如拒载）。v34 bump 后 showcase 须重打。
+#[test]
+fn pkg_v34_rejects_v33() {
+    let mut bad = vec![];
+    bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
+    bad.extend_from_slice(&33u32.to_le_bytes()); // v33 < MIN_VERSION=34
+    let err = read_package(&bad);
+    assert!(
+        matches!(err, Err(PkgError::TooOld(33))),
+        "v33 pkg must be rejected as TooOld after v34 bump, got {err:?}"
     );
 }

@@ -14,6 +14,7 @@
 pub mod batch;
 pub mod border; // 彩色边框环形 mesh + box-shadow 外扩 quad
 pub mod dirty; // dirty hash（header_hash + payload_hash 双轴，跨帧比决定 ChangeLevel）
+pub mod gradient; // 渐变像素参数（resolve/sample，shader 与文本渐变 CPU 采样共用）
 pub mod merge;
 pub mod mesh;
 pub mod node;
@@ -91,75 +92,23 @@ pub(crate) fn font_atlas_path(page: usize) -> String {
     format!("loomgui://font-atlas/p{page}")
 }
 
-/// 把 2 色线性渐变映射到 quad 4 角顶点色（顶点序 TL, TR, BR, BL）。
-///
-/// GPU 顶点色光栅插值在 4 角间线性过渡——将 2 色 (a, b) 按方向放到对应的"起点/终点"角，
-/// 整个 quad 内即呈现线性渐变。映射严格遵循 CSS `to <dir>` 语义：a 是渐变起点色，b 是终点色。
-///
-/// - ToRight: 左 a 右 b → [TL=a, TR=b, BR=b, BL=a]
-/// - ToLeft:  右 a 左 b → [TL=b, TR=a, BR=a, BL=b]
-/// - ToTop:   下 a 上 b → [TL=b, TR=b, BR=a, BL=a]
-/// - ToBottom:上 a 下 b → [TL=a, TR=a, BR=b, BL=b]
-fn gradient_corner_colors(g: crate::style::resolved::Gradient2) -> [[f32; 4]; 4] {
-    let (a, b) = (g.color_a, g.color_b);
-    use crate::style::resolved::GradientDir as G;
-    match g.dir {
-        G::ToRight => [a, b, b, a],
-        G::ToLeft => [b, a, a, b],
-        G::ToTop => [b, b, a, a],
-        G::ToBottom => [a, a, b, b],
-    }
-}
-
-/// gradient text（background-clip:text）每字 quad 的 4 角色：按字在文本块的位置插值
-/// color_a→color_b，使整段文字作为一个整体渐变——而非每字独立 a→b（否则 N 字 = N 个
-/// 小渐变，每字各自从首色到末色）。水平方向跨行宽（每行各自 a→b），垂直跨文本块高。
+/// gradient text（background-clip:text）每字 quad 的 4 角色：按字形角在文本块 box 内的
+/// 坐标采样渐变（`sample_gradient`，与 shader 同一套 t 数学），整段文字作为整体渐变
+/// ——而非每字独立全谱渐变。box 取节点 rect（CSS：渐变横跨元素背景区），
+/// 字形坐标为文本块局部坐标（与 rect 左上对齐）。
 /// 返回 [BL, BR, TR, TL]（quad 顶点序，与 base 字形 push 顺序一致）。
 fn gradient_glyph_colors(
-    g: &crate::style::resolved::Gradient2,
+    g: &crate::render::gradient::GradientParams,
     glyph_x: f32,
     glyph_advance: f32,
-    line_width: f32,
-    line_y: f32,
-    line_height: f32,
-    text_height: f32,
+    glyph_top: f32,
+    glyph_bottom: f32,
 ) -> [[f32; 4]; 4] {
-    let a = g.color_a;
-    let b = g.color_b;
-    let lerp = |t: f32| {
-        let t = t.clamp(0.0, 1.0);
-        [
-            a[0] + (b[0] - a[0]) * t,
-            a[1] + (b[1] - a[1]) * t,
-            a[2] + (b[2] - a[2]) * t,
-            a[3] + (b[3] - a[3]) * t,
-        ]
-    };
-    let lw = line_width.max(1.0);
-    let th = text_height.max(1.0);
-    let x_l = glyph_x / lw;
-    let x_r = (glyph_x + glyph_advance) / lw;
-    let y_t = line_y / th;
-    let y_b = (line_y + line_height) / th;
-    use crate::style::resolved::GradientDir as G;
-    match g.dir {
-        G::ToRight => {
-            let (cl, cr) = (lerp(x_l), lerp(x_r));
-            [cl, cr, cr, cl]
-        }
-        G::ToLeft => {
-            let (cl, cr) = (lerp(1.0 - x_l), lerp(1.0 - x_r));
-            [cl, cr, cr, cl]
-        }
-        G::ToBottom => {
-            let (ct, cb) = (lerp(y_t), lerp(y_b));
-            [cb, cb, ct, ct]
-        }
-        G::ToTop => {
-            let (ct, cb) = (lerp(1.0 - y_t), lerp(1.0 - y_b));
-            [cb, cb, ct, ct]
-        }
-    }
+    let bl = crate::render::gradient::sample_gradient(g, glyph_x, glyph_bottom);
+    let br = crate::render::gradient::sample_gradient(g, glyph_x + glyph_advance, glyph_bottom);
+    let tr = crate::render::gradient::sample_gradient(g, glyph_x + glyph_advance, glyph_top);
+    let tl = crate::render::gradient::sample_gradient(g, glyph_x, glyph_top);
+    [bl, br, tr, tl]
 }
 
 /// 查图尺寸表取 src_w/src_h（fallback 64×64）。
@@ -317,6 +266,7 @@ fn thumb_render_node(node_id: u32, rect: Rect, sort_key: u32) -> RenderNode {
         reuse_key: 0,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
+        gradient: crate::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             verts: v,
             uvs: uvc,
@@ -374,11 +324,13 @@ fn build_container_mesh(
     let all_zero = radii.iter().all(|&(rx, ry)| rx <= 0.0 || ry <= 0.0);
     let has_slice = n.style.border_image_slice.is_some();
     // 渐变背景仅在没有背景图（互斥）、没有九宫格切片、直角 quad 时启用——
-    // quad_gradient 是 4 角独立色 quad，GPU 顶点色插值得 2 色线性渐变。
-    // 与圆角 / 切片共存需 gradient + rounded_rect/slice 混合 mesh，留待后续 task。
+    // program=6/7 per-fragment 渐变 shader（多 stop 分段函数 / radial 非 affine，
+    // 顶点色不可表达）。与圆角 / 切片共存需 gradient + rounded_rect/slice 混合 mesh，
+    // 留待后续 task；与边框共存需边框独立 draw call（同 bg-image 先例），一并 defer。
     let use_gradient =
         !has_image && !has_slice && all_zero && n.style.background_gradient.is_some();
-    let draw_rect = if !has_slice
+    let draw_rect = if !use_gradient
+        && !has_slice
         && matches!(
             n.style.background_size,
             crate::style::resolved::BackgroundSize::Contain
@@ -393,14 +345,26 @@ fn build_container_mesh(
     } else {
         *rect
     };
-    let (mut v, mut uvc, mut col, mut idx) = if use_gradient {
-        let g = n.style.background_gradient.expect("use_gradient 已校验");
-        crate::render::mesh::quad_gradient(
-            &draw_rect,
-            gradient_corner_colors(g),
-            [u_min[0], u_max[1]],
-            [u_max[0], u_min[1]],
-        )
+    // 渐变像素参数（渲染期按当帧 box 解析 %/关键字）；非渐变节点 None → 全零列。
+    let grad_params = if use_gradient {
+        let g = n
+            .style
+            .background_gradient
+            .as_ref()
+            .expect("use_gradient 已校验");
+        Some(crate::render::gradient::resolve_gradient(
+            g,
+            draw_rect.w,
+            draw_rect.h,
+        ))
+    } else {
+        None
+    };
+    let (mut v, mut uvc, mut col, mut idx) = if grad_params.is_some() {
+        // uv = box 局部像素坐标（左上原点；shader GRADIENT 分支照 SHADOW_BLUR 的
+        // raw-uv 直通先例）。顶点色仍承载 background-color——shader 内做
+        // 渐变 over 底色的 source-over 合成（CSS：background-color 垫在渐变下）。
+        crate::render::mesh::quad(&draw_rect, color, [0.0, 0.0], [draw_rect.w, draw_rect.h])
     } else {
         match (has_slice, all_zero) {
             (false, true) => crate::render::mesh::quad(
@@ -456,8 +420,10 @@ fn build_container_mesh(
     // 顶点色），单 draw call，边框三角序在背景之后——重叠的边框环区边框覆盖背景，
     // 内部仅背景，视觉正确。filter（program=3）也走此路：filter 应作用于整元素含边框。
     // ponytail: 有背景图（program=2/4）时边框需独立 draw call（边框纯色 vs 背景采样
-    // 图），本 task 不做——留待 border + bg-image 共存场景单独处理。
-    if !has_image {
+    // 图），本 task 不做——留待 border + bg-image 共存场景单独处理。渐变（program=6/7）
+    // 同理：GRADIENT 分支的 per-fragment 着色会吃掉边框环的顶点色，共存需边框独立
+    // draw call，同 bg-image 一起 defer。
+    if !has_image && !use_gradient {
         // CSS border-style 默认 none：none 即便 border-width/color 已声明也不渲染边框。
         if n.style.border_style != crate::style::resolved::BorderStyle::None {
             if let Some(border_col) = n.style.border_color {
@@ -485,7 +451,15 @@ fn build_container_mesh(
             }
         }
     }
-    let program = if has_filter {
+    // program：0 纯色 / 2 bg-image / 3 filter / 4 filter+bg-image / 5 box-shadow SDF
+    // （调用方合成节点）→ 6 渐变 / 7 渐变+filter。渐变与背景图互斥（6/7 不与 2 组合）。
+    let program = if use_gradient {
+        if has_filter {
+            7u32
+        } else {
+            6u32
+        }
+    } else if has_filter {
         if has_image {
             4u32
         } else {
@@ -510,6 +484,7 @@ fn build_container_mesh(
         reuse_key: n.reuse_key,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
+        gradient: grad_params.unwrap_or_default(),
         payload: NodePayload::Mesh {
             verts: v,
             uvs: uvc,
@@ -1233,10 +1208,13 @@ fn build_text_mesh(
     fonts: &crate::text::layout::FontTable,
     rect: &crate::scene::node::Rect,
     text_effects: &[crate::text::font_effect::FontEffect],
-    background_gradient: Option<crate::style::resolved::Gradient2>,
+    background_gradient: Option<&crate::style::resolved::Gradient>,
     background_clip_text: bool,
 ) -> TextMeshes {
     use std::collections::BTreeMap;
+    // 渐变字参数一次解析（box = 节点 rect，CSS：渐变横跨元素背景区）。
+    let grad_params =
+        background_gradient.map(|g| crate::render::gradient::resolve_gradient(g, rect.w, rect.h));
     // effect 一次打包，base/子页/占位共享——shader 据此 uniform 重建 outline/underlay/glow/blur。
     let effect = pack_effects(text_effects);
     // bearing 来自 glyph bbox，px_w/px_h/UV 含 pad：位图原点 = bbox 原点外扩 pad，
@@ -1307,19 +1285,15 @@ fn build_text_mesh(
                         p.1.push([r.u1, r.v1]);
                         p.1.push([r.u1, r.v0]);
                         p.1.push([r.u0, r.v0]);
-                        // 顶点色：渐变字（background-clip:text）按字在文本块的位置插值
-                        // color_a→color_b，整段作为一个整体渐变；否则 run.color。
+                        // 顶点色：渐变字（background-clip:text）按字形角在文本块 box 内
+                        // 采样渐变（整段整体渐变）；否则 run.color。
                         let quad_colors: [[f32; 4]; 4] = if background_clip_text {
-                            if let Some(grad) = background_gradient {
-                                gradient_glyph_colors(
-                                    &grad,
-                                    g.x,
-                                    g.advance,
-                                    line.width,
-                                    line.y,
-                                    line.height,
-                                    layout.text_height,
-                                )
+                            if let Some(p) = grad_params.as_ref() {
+                                let gx0 = g.x + g.bearing_x - pad_scaled;
+                                let gx1 = gx0 + r.px_w as f32 * scale;
+                                let gy0 = line.baseline - g.bearing_y - pad_scaled;
+                                let gy1 = gy0 + r.px_h as f32 * scale;
+                                gradient_glyph_colors(p, gx0, gx1 - gx0, gy0, gy1)
                             } else {
                                 [run.color; 4]
                             }
@@ -1576,6 +1550,7 @@ fn push_text_meshes(
             },
             effect,
             shadow_params: [0.0; 6],
+            gradient: crate::render::gradient::GradientParams::default(),
             payload: NodePayload::Mesh {
                 verts: vec![],
                 uvs: vec![],
@@ -1618,6 +1593,7 @@ fn push_text_meshes(
             },
             effect,
             shadow_params: [0.0; 6],
+            gradient: crate::render::gradient::GradientParams::default(),
             payload: NodePayload::Mesh {
                 verts: verts0.clone(),
                 uvs: uvs0.clone(),
@@ -1652,6 +1628,7 @@ fn push_text_meshes(
             // 同一文字节点所有页共享同一 effect 配置：fragment shader 按页独立重建效果。
             effect,
             shadow_params: [0.0; 6],
+            gradient: crate::render::gradient::GradientParams::default(),
             payload: NodePayload::Mesh {
                 verts: verts.clone(),
                 uvs: uvs.clone(),
@@ -1728,6 +1705,7 @@ fn push_solid_mesh(
         reuse_key,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
+        gradient: crate::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             verts,
             uvs,
@@ -1896,7 +1874,7 @@ fn render_one_node(
                     fonts,
                     rect,
                     &n.style.text_effects,
-                    n.style.background_gradient,
+                    n.style.background_gradient.as_ref(),
                     n.style.background_clip_text,
                 );
                 push_text_meshes(
@@ -2000,6 +1978,7 @@ fn render_one_node(
                 reuse_key: n.reuse_key,
                 effect: EffectBlock::default(),
                 shadow_params: [0.0; 6],
+                gradient: crate::render::gradient::GradientParams::default(),
                 payload: NodePayload::Mesh {
                     verts: v,
                     uvs: uvc,
@@ -2056,7 +2035,7 @@ fn render_one_node(
                 fonts,
                 rect,
                 &n.style.text_effects,
-                n.style.background_gradient,
+                n.style.background_gradient.as_ref(),
                 n.style.background_clip_text,
             );
             push_text_meshes(
@@ -2242,7 +2221,7 @@ fn render_one_node(
                 fonts,
                 rect,
                 &n.style.text_effects,
-                n.style.background_gradient,
+                n.style.background_gradient.as_ref(),
                 n.style.background_clip_text,
             );
             // 文字 mesh 用合成 id（TF_TEXT_SYNTH_BYTE）：背景框 mesh 已占真 node_id，若
@@ -2368,6 +2347,7 @@ fn render_one_node(
             reuse_key: n.reuse_key,
             effect: EffectBlock::default(),
             shadow_params: [0.0; 6],
+            gradient: crate::render::gradient::GradientParams::default(),
             payload: NodePayload::Mesh {
                 verts: vec![],
                 uvs: vec![],
@@ -2456,6 +2436,7 @@ fn push_container_shadows(
             reuse_key: 0,
             effect: EffectBlock::default(),
             shadow_params: params,
+            gradient: crate::render::gradient::GradientParams::default(),
             payload: NodePayload::Mesh {
                 verts: v,
                 uvs: uvc,
@@ -2499,6 +2480,7 @@ fn push_container_shadows(
             reuse_key: 0,
             effect: EffectBlock::default(),
             shadow_params: params,
+            gradient: crate::render::gradient::GradientParams::default(),
             payload: NodePayload::Mesh {
                 verts: v,
                 uvs: uvc,

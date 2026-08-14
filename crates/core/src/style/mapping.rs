@@ -1,8 +1,9 @@
 use crate::scene::animation::TransformAnim;
 use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
-    BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, Gradient2,
-    GradientDir, OverflowMode, ResolvedStyle, SliceInsets, TextAlign,
+    BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, GradCoord,
+    Gradient, GradientStop, OverflowMode, RadialExtent, ResolvedStyle, SliceInsets, TextAlign,
+    GRADIENT_MAX_STOPS,
 };
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, LengthPercentage, LengthPercentageAuto};
@@ -408,41 +409,321 @@ pub fn parse_url(value: &str) -> Option<String> {
     }
 }
 
-/// 解析 `linear-gradient(...)` 内部串（已去外层 `linear-gradient(` `)`）。
-///
-/// 围栏子集：方向仅 `to right/left/top/bottom` 4 正向 + 恰好 2 色 stop（用 `parse_color`，
-/// 即 6 位 hex）。多 stop / 斜角度（`45deg` 等）/未知方向/不可解析色 → 返 `false`
-/// （apply_decl 静默忽略，与 clip-path 等围栏外 CSS 同模式——CSS 合法但 LoomGUI 不支持该形态，
-/// 渲染时不绘渐变，AI 不可预测性弱于报错）。
-///
-/// 形如：`"to right, #ff0000, #0000ff"` → `Gradient2 { a=red, b=blue, dir=ToRight }`。
-fn parse_linear_gradient_2(style: &mut ResolvedStyle, inner: &str) -> bool {
-    let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
-    // 至少 3 段：方向 + 2 色。多于 3 段（多 stop）拒收。
-    if parts.len() != 3 {
-        return false;
+/// 解析 `linear-gradient(...)` / `radial-gradient(...)` 声明值（含函数名）。
+/// 成功 → `Gradient`；围栏外（conic / repeating-* / 坏语法 / 超 8 stops）→ None
+/// （apply_decl 返 false，inline style 打包期报错，`<style>` 规则运行时忽略）。
+/// fence 的 `<style>` 探针也走此函数（单一解析真相源）。
+pub fn parse_gradient(value: &str) -> Option<Gradient> {
+    let v = value.trim();
+    if let Some(inner) = v
+        .strip_prefix("linear-gradient(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        return parse_linear_gradient(inner);
     }
-    let dir = match parts[0] {
-        "to right" => GradientDir::ToRight,
-        "to left" => GradientDir::ToLeft,
-        "to top" => GradientDir::ToTop,
-        "to bottom" => GradientDir::ToBottom,
-        _ => return false, // 斜角度 / 未知方向 → 围栏外
+    if let Some(inner) = v
+        .strip_prefix("radial-gradient(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        return parse_radial_gradient(inner);
+    }
+    None
+}
+
+/// 按顶层逗号切分（括号内逗号不属于分隔符——rgba(95,180,212,0.1) 内含逗号）。
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(s[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(s[start..].trim());
+    parts
+}
+
+/// 按顶层空白切分（括号内空白属于当前 token——`rgba(0, 0, 0, 0.5) 60%` 切成两 token）。
+fn split_top_level_ws(s: &str) -> Vec<String> {
+    let mut toks = Vec::new();
+    let mut cur = String::new();
+    let mut depth = 0usize;
+    for ch in s.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                cur.push(ch);
+            }
+            ')' => {
+                depth = depth.saturating_sub(1);
+                cur.push(ch);
+            }
+            c if c.is_whitespace() && depth == 0 => {
+                if !cur.is_empty() {
+                    toks.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        toks.push(cur);
+    }
+    toks
+}
+
+/// 线性方向 → CSS 角度（0deg=to top，顺时针）。角点方向（to top right）defer → None。
+fn linear_dir_angle(tok: &str) -> Option<f32> {
+    match tok {
+        "to top" => Some(0.0),
+        "to right" => Some(90.0),
+        "to bottom" => Some(180.0),
+        "to left" => Some(270.0),
+        _ => tok
+            .strip_suffix("deg")
+            .and_then(|n| n.trim().parse::<f32>().ok()),
+    }
+}
+
+/// stop 位置：`60%` → 0.6；`0` → 0（CSS 唯一合法裸数）。其他裸数/单位 → None。
+fn stop_pos(tok: &str) -> Option<f32> {
+    if let Some(pct) = tok.strip_suffix('%') {
+        return pct.trim().parse::<f32>().ok().map(|v| v / 100.0);
+    }
+    if tok == "0" {
+        return Some(0.0);
+    }
+    None
+}
+
+/// stop 色：hex/rgb()/rgba() + `transparent` 关键字（渐变专属——parse_color 全局收
+/// transparent 会令 schema 默认值 `background-color:transparent` 表示层漂移 None→Some）。
+/// 其余命名色围栏外。
+fn stop_color(tok: &str) -> Option<[f32; 4]> {
+    if tok.eq_ignore_ascii_case("transparent") {
+        return Some([0.0, 0.0, 0.0, 0.0]);
+    }
+    parse_color(tok)
+}
+
+/// 解析 stop 列表（每项 `color [pos]`），烘默认位置 + 钳单调。1..=8 项，否则 None。
+fn parse_gradient_stops(parts: &[&str]) -> Option<Vec<GradientStop>> {
+    if parts.is_empty() || parts.len() > GRADIENT_MAX_STOPS {
+        return None;
+    }
+    let mut raw: Vec<([f32; 4], Option<f32>)> = Vec::with_capacity(parts.len());
+    for p in parts {
+        let toks = split_top_level_ws(p);
+        if toks.is_empty() || toks.len() > 2 {
+            return None;
+        }
+        let color = stop_color(&toks[0])?;
+        let pos = match toks.get(1) {
+            Some(t) => Some(stop_pos(t)?),
+            None => None,
+        };
+        raw.push((color, pos));
+    }
+    // CSS 默认位置算法：全缺省 → 0..1 等分；否则首缺省 0 / 末缺省 1 /
+    // 中段缺省取两侧最近已定位 stop 的等分插值。随后钳单调不减（乱序 stop 提到前 stop 位置）。
+    let n = raw.len();
+    let mut pos: Vec<f32> = raw.iter().map(|(_, p)| p.unwrap_or(f32::NAN)).collect();
+    if n == 1 {
+        pos[0] = if pos[0].is_nan() { 0.0 } else { pos[0] };
+    } else if pos.iter().all(|v| v.is_nan()) {
+        for (k, v) in pos.iter_mut().enumerate() {
+            *v = k as f32 / (n - 1) as f32;
+        }
+    } else {
+        // 前导缺省 → 0（首个已定位 stop 之前）。
+        for v in pos.iter_mut() {
+            if v.is_nan() {
+                *v = 0.0;
+            } else {
+                break;
+            }
+        }
+        // 末尾缺省 → 1。
+        for v in pos.iter_mut().rev() {
+            if v.is_nan() {
+                *v = 1.0;
+            } else {
+                break;
+            }
+        }
+        // 中段缺省 run：[i..j) 夹在已定位的 i-1 与 j 之间等分。
+        let mut i = 0;
+        while i < n {
+            if pos[i].is_nan() {
+                let mut j = i;
+                while j < n && pos[j].is_nan() {
+                    j += 1;
+                }
+                let a = if i > 0 { pos[i - 1] } else { 0.0 };
+                let b = if j < n { pos[j] } else { 1.0 };
+                let run = j - i;
+                for (k, v) in pos.iter_mut().enumerate().take(j).skip(i) {
+                    *v = a + (b - a) * (k - i + 1) as f32 / (run + 1) as f32;
+                }
+                i = j;
+            } else {
+                i += 1;
+            }
+        }
+    }
+    let mut prev = f32::NEG_INFINITY;
+    let stops = raw
+        .into_iter()
+        .zip(pos)
+        .map(|((color, _), mut p)| {
+            p = p.max(prev);
+            prev = p;
+            GradientStop { color, pos: p }
+        })
+        .collect();
+    Some(stops)
+}
+
+/// 解析 `linear-gradient` 内部串（已去函数名/外括号）。
+/// `[angle | to-dir]? , stop [, stop]*`；缺省方向 = to bottom（CSS 默认 180deg）。
+fn parse_linear_gradient(inner: &str) -> Option<Gradient> {
+    let parts = split_top_level_commas(inner);
+    if parts.len() < 2 {
+        return None; // 至少 1 stop；纯 `linear-gradient(color)` 不合法
+    }
+    let (angle_deg, stop_parts) = match linear_dir_angle(parts[0]) {
+        Some(a) => (a, &parts[1..]),
+        None => (180.0, &parts[..]),
     };
-    let color_a = match parse_color(parts[1]) {
-        Some(c) => c,
-        None => return false,
+    let stops = parse_gradient_stops(stop_parts)?;
+    Some(Gradient::Linear { angle_deg, stops })
+}
+
+/// radial 尺寸关键字 → RadialExtent。
+fn radial_size_keyword(tok: &str) -> Option<RadialExtent> {
+    match tok {
+        "closest-side" => Some(RadialExtent::ClosestSide),
+        "farthest-side" => Some(RadialExtent::FarthestSide),
+        "closest-corner" => Some(RadialExtent::ClosestCorner),
+        "farthest-corner" => Some(RadialExtent::FarthestCorner),
+        _ => None,
+    }
+}
+
+/// 长度 token（`100px` / 裸数）→ px。
+fn grad_px(tok: &str) -> Option<f32> {
+    tok.strip_suffix("px")
+        .unwrap_or(tok)
+        .trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|v| v.is_finite())
+}
+
+/// radial 坐标：`82%` → Pct(0.82)；`-12%` → Pct(-0.12)；`40px`/裸数 → Px。
+fn grad_coord(tok: &str) -> Option<GradCoord> {
+    if let Some(pct) = tok.strip_suffix('%') {
+        return pct
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .map(|v| GradCoord::Pct(v / 100.0));
+    }
+    grad_px(tok).map(GradCoord::Px)
+}
+
+/// 解析 radial 配置段（`circle closest-side at 82% -12%`）。
+/// shape / size 任意序（CSS `||` 语法），`at` 后恰 2 坐标。None = 不是合法配置段。
+fn parse_radial_config(s: &str) -> Option<(RadialExtent, [GradCoord; 2])> {
+    let toks = split_top_level_ws(s);
+    if toks.is_empty() {
+        return None;
+    }
+    let mut shape: Option<&str> = None;
+    let mut extent: Option<RadialExtent> = None;
+    let mut len1: Option<f32> = None;
+    let mut len2: Option<f32> = None;
+    let mut center = [GradCoord::Pct(0.5), GradCoord::Pct(0.5)];
+    let mut i = 0usize;
+    while i < toks.len() {
+        let t = toks[i].as_str();
+        if t == "circle" || t == "ellipse" {
+            if shape.is_some() {
+                return None;
+            }
+            shape = Some(t);
+            i += 1;
+        } else if let Some(kw) = radial_size_keyword(t) {
+            if extent.is_some() || len1.is_some() {
+                return None;
+            }
+            extent = Some(kw);
+            i += 1;
+        } else if t == "at" {
+            // at 后必须恰有 2 个坐标（get 越界 / 坐标不可解析 → 整体 None）。
+            let cx = toks.get(i + 1).and_then(|t| grad_coord(t))?;
+            let cy = toks.get(i + 2).and_then(|t| grad_coord(t))?;
+            center = [cx, cy];
+            i += 3;
+            if i != toks.len() {
+                return None; // at 坐标必须是段尾
+            }
+        } else {
+            let v = grad_px(t)?;
+            if extent.is_some() || len1.is_some() && len2.is_some() {
+                return None;
+            }
+            if len1.is_none() {
+                len1 = Some(v);
+            } else {
+                len2 = Some(v);
+            }
+            i += 1;
+        }
+    }
+    // shape 与显式长度的合法性：circle 恰 1 长度（或 0）；ellipse 0/2 长度。
+    match shape {
+        Some("circle") if len2.is_some() => return None,
+        Some("ellipse") if len1.is_some() != len2.is_some() => return None,
+        _ => {}
+    }
+    let extent = match (extent, len1, len2) {
+        (Some(kw), None, None) => kw,
+        (None, None, None) => RadialExtent::FarthestCorner,
+        (None, Some(a), b) => RadialExtent::Explicit(Some(a), b),
+        _ => return None, // 尺寸关键字与显式长度混用 → 非法
     };
-    let color_b = match parse_color(parts[2]) {
-        Some(c) => c,
-        None => return false,
+    Some((extent, center))
+}
+
+/// 解析 `radial-gradient` 内部串（已去函数名/外括号）。
+/// `[shape || size]? [at position]? , stop [, stop]*`；缺省 = ellipse farthest-corner 50% 50%。
+fn parse_radial_gradient(inner: &str) -> Option<Gradient> {
+    let parts = split_top_level_commas(inner);
+    if parts.len() < 2 {
+        return None;
+    }
+    let (extent, center, stop_parts) = match parse_radial_config(parts[0]) {
+        Some((e, c)) => (e, c, &parts[1..]),
+        None => (
+            RadialExtent::FarthestCorner,
+            [GradCoord::Pct(0.5), GradCoord::Pct(0.5)],
+            &parts[..],
+        ),
     };
-    style.background_gradient = Some(Gradient2 {
-        color_a,
-        color_b,
-        dir,
-    });
-    true
+    let stops = parse_gradient_stops(stop_parts)?;
+    Some(Gradient::Radial {
+        extent,
+        center,
+        stops,
+    })
 }
 
 use crate::style::resolved::LocalTransform;
@@ -1096,27 +1377,22 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "background-image" => {
-            // `background-image: linear-gradient(...)` 走 2 色渐变；否则走现有 url() 解析。
-            // 渐变与 url() 互斥（gradient 走 quad_gradient 顶点色，无纹理采样）。
-            let v = value.trim();
-            if let Some(rest) = v
-                .strip_prefix("linear-gradient(")
-                .and_then(|s| s.strip_suffix(')'))
-            {
-                return parse_linear_gradient_2(style, rest);
+            // `background-image: <gradient>` 走渐变；否则走现有 url() 解析。
+            // 渐变与 url() 互斥（gradient 走 program=6 渐变 shader，无纹理采样）。
+            if let Some(g) = parse_gradient(value.trim()) {
+                style.background_gradient = Some(g);
+                return true;
             }
             style.background_image = parse_url(value);
             style.background_image.is_some()
         }
         "background" => {
-            // `background` shorthand：按 CSS 优先级依次试 linear-gradient → url() → 纯色。
-            // 三者互斥（gradient 走顶点色无采样；url() 走纹理；纯色写 background_color）。
+            // `background` shorthand：按 CSS 优先级依次试 gradient → url() → 纯色。
+            // 三者互斥（gradient 走渐变 shader；url() 走纹理；纯色写 background_color）。
             let v = value.trim();
-            if let Some(rest) = v
-                .strip_prefix("linear-gradient(")
-                .and_then(|s| s.strip_suffix(')'))
-            {
-                return parse_linear_gradient_2(style, rest);
+            if let Some(g) = parse_gradient(v) {
+                style.background_gradient = Some(g);
+                return true;
             }
             if v.starts_with("url(") {
                 style.background_image = parse_url(v);
@@ -1370,8 +1646,8 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         }
         "-webkit-background-clip" | "background-clip" => {
             // 渐变字三件套之一：background-clip:text 将背景渐变裁剪到文字形状。
-            // 与 background: linear-gradient + color:transparent（推荐）组合触发
-            // per-glyph vertex gradient（build_text_mesh 内 gradient_corner_colors）。
+            // 与 background: <gradient> + color:transparent（推荐）组合触发
+            // per-glyph 渐变采样（build_text_mesh 内 gradient_glyph_colors）。
             // 残缺（有 clip 无 gradient）静默回退普通文本，不报错。
             style.background_clip_text = value.trim() == "text";
             true

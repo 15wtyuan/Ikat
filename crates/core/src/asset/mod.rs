@@ -1,4 +1,5 @@
-//! 包格式（.pkg.bin，当前 version=33）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前 version=34）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! v34：ResolvedStyle.background_gradient Option<Gradient2>→Option<Gradient>（radial + 多 stop + 任意角度，bincode 布局变）。
 //! v33：TemplateNode flags 字节新增 rich_text_block 位（rich-text-block 容器根标记，bit 0x02）。
 //! v32：ResolvedStyle.box_shadow Option<BoxShadow>→Vec<BoxShadow> + blur/inset 字段（box-shadow 全语义，bincode 布局变）。
 //! v31：Compound 加 pseudo_nth_child 字段（:nth-child selector，bincode 布局变）。
@@ -35,9 +36,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 33; // v33: TemplateNode.rich_text_block flag（flags 字节 bit 0x02）
-pub(crate) const MIN_VERSION: u32 = 33;
-pub(crate) const MAX_VERSION: u32 = 33;
+pub const PKG_FORMAT_VERSION: u32 = 34; // v34: background_gradient → Gradient（radial + 多 stop）
+pub(crate) const MIN_VERSION: u32 = 34;
+pub(crate) const MAX_VERSION: u32 = 34;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────
