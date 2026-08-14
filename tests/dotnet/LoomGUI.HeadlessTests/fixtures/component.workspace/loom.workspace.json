@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output_dir": "../component-ws-out",
+  "packages": [
+    {
+      "name": "component",
+      "dirs": ["."],
+      "html": ["component.html"]
+    }
+  ],
+  "atlases": [],
+  "fonts": []
+}

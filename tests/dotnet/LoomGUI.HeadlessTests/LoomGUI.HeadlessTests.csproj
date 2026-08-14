@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -82,6 +82,10 @@
     <None Include="fixtures\animation.pkg.bin" Link="fixtures\animation.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
     <!-- E2 fixture font for text layout (tick panics without a default font) -->
     <None Include="fixtures\fonts\DejaVuSans.ttf" Link="fixtures\fonts\DejaVuSans.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Component system fixture: component.pkg.bin (page with 2 expanded game-item-card hosts +
+         slot-projected buttons; components/game-item-card.html carries its own <style>). Built from
+         fixtures/component.workspace via loom-pkg (components/ registry expansion, pkg v35). -->
+    <None Include="fixtures\component.pkg.bin" Link="fixtures\component.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

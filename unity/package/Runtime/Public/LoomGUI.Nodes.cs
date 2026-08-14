@@ -2198,20 +2198,38 @@ namespace LoomGUI
         static NotImplementedException NE() => new NotImplementedException();
     }
 
-    // Slot = <slot> 的 typed 投影（模板插槽占位）。结构上是容器型节点，继承 Container。
-    // 完整插槽投影机制（按 name 填充 / fallback content）是 composite bundle 工作，本类先落 class
-    // shell 让 NodeFactory 派发到正确类型（替代之前的 Container 回落）。
+    // Slot = <slot> 的 typed 投影。**打包期投影后产物中不再有 Slot 节点**（slot 在拼接位被
+    // 消费：light 子替换或 fallback 原位拼接，见 CustomElement 注释）——本类仅为 kind 派发
+    // 保留的 typed shell（动态建树路径的完备性），正常 pkg 实例化不产生本类实例。
     public class Slot : Container
     {
         internal Slot(UIContext ctx, uint id) : base(ctx, id) { }
     }
 
-    // CustomElement = 带连字符的自定义标签（<my-widget>）的 typed 投影。围栏把未知 tag（含连字符）
-    // 归为 CustomElement。结构上是容器型节点，继承 Container。投影机制（自定义元素注册 / 生命周期
-    // 钩子）是 composite bundle 工作，本类先落 class shell 让 NodeFactory 派发到正确类型。
-    public class CustomElement : Container
+    // CustomElement = 带连字符的自定义标签（<my-widget>）的 typed 投影。打包期由组件系统展开：
+    // host 节点 kind=CustomElement（保留原始 tag 字面量），组件模板子树挂 host 下，<slot> 投影
+    // 在拼接位消费（产物无 Slot 节点）。host 是硬墙作用域——投影内容归组件域（Get/Query 不穿透），
+    // host 自身归页面域。组件注册 = 打包器 components/ 目录（Package 注册表承担
+    // customElements.define() 角色，main-design §7.4）。
+    public unsafe class CustomElement : Container
     {
         internal CustomElement(UIContext ctx, uint id) : base(ctx, id) { }
+
+        /// <summary>
+        /// 原始 hyphen 标签名（`<game-item-card>` → "game-item-card"；pkg v35 展开保留字面量，
+        /// 打包期烘入）。非 CustomElement 节点不会构成本类实例。读失败（理论不可达）抛
+        /// InvalidOperationException（双调法 FFI，同 RadioButton.Name 口径）。
+        /// </summary>
+        public string Tag
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                return TextControlFFI.ReadText(h, _id,
+                    (hp, buf, cap, len) => Native.loomgui_stage_get_custom_tag(hp, _id, buf, cap, len));
+            }
+        }
     }
 
     // TabList = <div role="tablist"> 的 typed 投影（WAI-ARIA tablist 容器，持若干 <button role=tab> 子）。
