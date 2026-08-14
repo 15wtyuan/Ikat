@@ -200,7 +200,7 @@
 - ✅ **已接（2026-08-11）**：`Container.ScrollTo`、`Button.Disabled`（FFI 已有，C# 漏接，坑 191 模式）。
 - ✅ **已接（2026-08-14，FFI 批）**：`NumberField.Min/Max/Step` setter（FFI arm 扩 NumberField，改界后 value 文本重约束）、`ProgressBar.IsIndeterminate`（新 get/set FFI，纯状态位）、`RadioButton.Name`（新 get_radio_name 双调法 FFI）、`UIContext.Pick`（新 loomgui_stage_hit_test，thumb sentinel decode 回容器）。dll/bindings 已同步入库。
 - 🟡 **按域 defer**（core 也没，真 feature）：`Touchable`/`ZIndex`（扩 inline_bit 表，归 T1）、`Focusable`（runtime tabindex setter，T1）、`Dropdown.SelectedValue`（option `value` 存储，T1）、`SetVar`/`RemoveVar` + `StyleSheet.Add`/`Clear`（custom props 系统 + runtime CSS parser，归 T1 运行时 CSS 大件）、`OnUpdate` + `CallLater`/`CallNextFrame`（per-frame hook + 延迟回调队列，归 T× 框架基础设施）、`UnloadPackage`（包生命周期，归 T2）、`GetTemplate`（归 T1 Custom Element 组件系统）、`ListView.ItemExitClass`（归 T1 list 进出场动画）。
-- 🔴 **砍出契约**：`NodeStyle.Visibility`（fence CSS 子集无 `visibility` prop，`opacity:0` 覆盖占位隐藏；public-api.md 已删，C# enum/property 代码删除 follow-up）。
+- ✅ **已删（2026-08-14）**：`NodeStyle.Visibility`（fence CSS 子集无 `visibility` prop，`opacity:0` 覆盖占位隐藏）——C# enum / NodeStyle property / CssValueConvert 分支 / 相关测试全部移除，公共 API 与契约对齐。
 - 判据：按域 defer 随各自 track 推进。
 - 来源：public-api.md audit（2026-08-11，triage agent）。
 

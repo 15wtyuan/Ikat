@@ -134,14 +134,6 @@ namespace LoomGUI
             _ => throw BadEnum(v),
         };
 
-        internal static string ToCss(Visibility v) => v switch
-        {
-            Visibility.Unset   => null,
-            Visibility.Visible => "visible",
-            Visibility.Hidden  => "hidden",
-            _ => throw BadEnum(v),
-        };
-
         // ── dispatch：供 C3 StyleMirror（属性值是 object 装箱）─────────
 
         internal static string ToCss(object value) => value switch
@@ -157,7 +149,6 @@ namespace LoomGUI
             AlignItems v     => ToCss(v),
             Overflow v       => ToCss(v),
             PositionMode v   => ToCss(v),
-            Visibility v     => ToCss(v),
             null             => throw new ArgumentNullException(nameof(value)),
             _                => throw new ArgumentException($"unsupported css value type: {value.GetType()}", nameof(value)),
         };

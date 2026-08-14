@@ -507,7 +507,7 @@ namespace LoomGUI
     // C3：每个 typed 属性的 setter/getter 走 _mirror（StyleMirror）。CSS prop 名严格对照 core
     // inline_bit 表（crates/core/src/style/dynamic.rs）+ apply_decl（mapping.rs）——表外的 prop
     // 经 set_inline_override 会被 bit 检查前置静默丢弃（ghost-state 防护），故本类只接 24 个
-    // inline_bit 表内 prop；ZIndex / Visibility / SetVar / RemoveVar 暂 ponytail defer
+    // inline_bit 表内 prop；ZIndex / SetVar / RemoveVar 暂 ponytail defer
     // （core apply_decl 未实现，throw NE + 注释）。
     public sealed class NodeStyle
     {
@@ -660,12 +660,10 @@ namespace LoomGUI
         // ── ponytail defer：core apply_decl / inline_bit 表未实现的 prop ──
         // ZIndex（z-index）：core apply_decl 处理 "order"（mapping.rs:829）但未给 inline_bit —
         // set_inline_override 会被 bit 检查前置跳过（打包期 CSS order:N 仍生效）。
-        // Visibility（visibility）：core apply_decl 无 "visibility" 分支（display:none 是围栏闭合的隐藏语义）。
         // SetVar/RemoveVar（--xxx）：core apply_decl 不处理 CSS 自定义属性；custom-property 通道待加。
         // 保留 throw NE 防止静默丢：调用方期望 round-trip，prop-name 不在 inline_bit 表经 set_inline_override
         // 会被 bit 检查前置静默忽略（ghost-state 防护）。补 core 支持后把这些 setter 接 _mirror 即可。
         public int ZIndex { get { throw NE(); } set { throw NE(); } }
-        public Visibility Visibility { get { throw NE(); } set { throw NE(); } }
         public void SetVar(string n, Length v) { throw NE(); }
         public void SetVar(string n, Color v) { throw NE(); }
         public void SetVar(string n, float v) { throw NE(); }
