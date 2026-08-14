@@ -96,8 +96,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 **新范式架构不变量**（违反 = 隐 bug）：
 - **标准 HTML 语义决定类型**：节点类型由稳定 HTML 语义签名（base 标签按 tag；控件/列表按 WAI-ARIA `role` + `aria-*`）决定。CSS（class、伪类、computed style）永远不改变 C# 对象类型。
 - **CSS 赋予行为能力，不改变类型**：`display:block/flex/none` 选择内部布局 Strategy；`overflow:auto/scroll` 选择滚动 Strategy。策略切换不重建节点、不丢状态。
-- **组件作用域 ID 查找（L3 已完整）**：`Get<T>("id")`/`Query` 在当前组件实例内递归查找，遇 `LOOKUP_SCOPE` 边界（实例根/组件 host/List slot 根）不再下钻；边界根自身仍可被外层命中。访问嵌套作用域内部：先 Get 作用域根，再在其上 Get。
-- **Custom Element 是打包期展开（编译期糖）**：hyphen 标签由打包器查 `components/` 注册表（Package 注册表 = `customElements.define` 角色，main-design §7.4）展开成 host（CustomElement kind + `custom_tag` + `component_scope`）+ 组件模板子树；`<slot>` 投影在拼接位消费，产物无 Slot 节点。未注册 / 无效 slot / 页面裸 `<slot>` / 展开环 / 同域 id 撞车 = 打包错误。host 是**硬墙作用域**：投影内容归组件域（CSS/查找/id），host 自身归页面域（`HOST_IN_PARENT_SCOPE`），组件内部选择器经 pkg v35 锚定规则按展开实例隔离。spec：`docs/superpowers/specs/2026-08-14-component-system-design.md`。
+- **组件作用域 ID 查找**：`Get<T>("id")` 在当前组件实例内递归查找，不穿透嵌套组件/List item 边界。同一模板作用域内重复 ID 打包期报错。
 - **transform 是渲染/命中层，不进布局**：改 transform 不触发 solve，只刷新命中几何 + world_matrix。
 - **tick 时序 = 显式依赖拓扑**：`process(hit 用上帧 world) → rematch → solve → refresh_content → compute_world_transforms → build`。rematch 在 solve/compute 前。
 - **所有布局帧末一致**：每帧一次 solve。
@@ -112,7 +111,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 - ~~**`<div>` 永远是 flex 容器**~~（**P1 C2 已消除**）：`display:block` 和裸 block 默认标签现在都设 `taffy_style.display = taffy::Display::Block`（真 CSS 块流，垂直堆叠且忽略子 flex-grow），不再走 flex-column 伪 block。显式 `display:flex`/`display:none` 仍覆盖。（历史上 block 默认标签含 div/header/nav/p/ul/ol/li/option；控件 role 化重构后多数下线，当前围栏里 `div` 是唯一 block 默认 runtime 标签。）两处赋值：`crates/fence/src/css_resolve.rs` 铺默认、`crates/core/src/style/mapping.rs` 应用显式声明。
 - **`NodeKind` enum + 代际 NodeId**：`NodeId(pub u32)` 对外透明句柄。19 变体（控件 role 化重构后）+ C# 类型化投影层（Node/Container/Button/...）已落地，但 Rust 侧 NodeKind/NodeId 仍在核心所有热路径中活跃。→ 类型化用户表面已兑现；内部表示重构在复合束推进时逐段迁移。
-- ~~**`Get<T>("id")` 子树查找（L1 已落，L3 defer）**~~（**L3 已消除**）：DFS 现按 `LOOKUP_SCOPE` 剪枝，嵌套组件/list item 不穿透；`aria-controls` 解析改 scope 内查找（多实例不串）。
+- **`Get<T>("id")` 子树查找（L1 已落，L3 defer）**：`find_node_by_id_in_subtree`（self-exclusive DFS，从 root 直接子起，root 自身不匹配）已替换全局首匹配，修虚拟列表 slot 内部 id 命中。但完整 `IsScopeRoot` 边界（嵌套组件/list item 不穿透）仍 defer（复合束 L3，见 `docs/roadmap/roadmap.md` T1）；`component.Get` 仍会穿透进 list item——driver 用 `slot.Get`/`slot.Query`。
 - **虚拟列表 slot 模型（parked-but-attached，已落）**：slot 永驻 ul 子树，离场 `display:none` 标记（parked，不 detach 到 free 池）；reuse_key 永久 ordinal；MirrorPool parked keepalive 持久 GO 池（仅 gone 才销毁）。坑 182 已解。driver 仍管 slot 映射/可见区间/不等高补偿（核心仍不完整“认识列表”，完整吸收留复合束 ListView）。
 
 ### 围栏
