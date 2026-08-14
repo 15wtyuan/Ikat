@@ -36,7 +36,7 @@
 
 把围栏 CSS 子集 + 公共 API 补到与设计契约对齐。缺口：
 
-- **视觉**：渐变（现仅 linear 2 色 4 方向；缺多 stop / 任意角度 / radial / conic；注 `background-clip:text` 机制已实现，受限于底层渐变）、`filter: blur()`（需离屏 RT 基建，非小缺口）、`grayed` 渲染（现借 `filter: grayscale(1)`）。
+- **视觉**：~~渐变（现仅 linear 2 色 4 方向）~~ **radial + 多 stop + 任意角度已交付（2026-08-14，program=6/7 per-fragment shader + blob v13 grad_params）**；剩余 defer：conic、repeating-\*、渐变×圆角/边框共存（见延期项表）。`filter: blur()`（需离屏 RT 基建，非小缺口）、`grayed` 渲染（现借 `filter: grayscale(1)`）照旧。
 - **复合 · scope 三件套**：`Get<T>` 的 `IsScopeRoot` 边界（现裸 DFS，穿透嵌套组件 / list item）、per-scope ID 去重（现全模板级）、Shadow DOM 样式隔离（现仅 dynamic rule 按 scope 过滤，非完整 cascade scoping）。
 - **复合 · 组件系统**：Custom Element + `<slot>` 内容投影（现空壳——fence 认 hyphen 标签 + `<slot>`，C# 有空类；无 `customElements.define` 注册表 / 投影 / 生命周期）。
 - **控件**：Tree（`role=tree`，无）。
@@ -78,7 +78,7 @@
 > 序列哲学：**先验证再扩展**（老 roadmap 核心教训）。T1 喂 T2（能力够才验收），T2 验过才 T3（核心稳了才铺第二引擎），T3 跑通才发版。
 
 - **里程碑 1 · Unity 收官** — 证明框架在 Unity 上完整可用。
-  - 视觉束补齐到 showcase 够用：渐变（radial + 多 stop，解 home 光晕等）。（`filter: blur()` 需离屏 RT 基建、非 showcase 阻塞，留后续。）
+  - 视觉束补齐到 showcase 够用：渐变（radial + 多 stop）✅ 代码侧 done（2026-08-14，Unity 视觉验收随任务 4 逐页过）。（`filter: blur()` 需离屏 RT 基建、非 showcase 阻塞，留后续。）
   - 8 页 showcase Unity 真机全跑通 + rect-diff 对齐浏览器。
   - 清家里机 PlayMode 验收债。
   - **门**：8 页真机全绿 + home radial 渐变可见 + rect-diff 通过。
@@ -99,7 +99,7 @@
 
 ## 近期任务（里程碑 1 展开）
 
-> 里程碑 1「Unity 收官」拆成 5 个有依赖序的可执行任务。**任务 1 文本模型已 done（代码侧）**，Unity 视觉 QA 留家里机；**任务 2 rect-diff 工具链 settings 页已就绪（🟡，Unity rect 半留任务 4）；下一件事 = 任务 3（渐变）/任务 4（逐页修）并行**。
+> 里程碑 1「Unity 收官」拆成 5 个有依赖序的可执行任务。**任务 1 文本模型已 done（代码侧）**，Unity 视觉 QA 留家里机；**任务 2 rect-diff 工具链 settings 页已就绪（🟡，Unity rect 半留任务 4）；任务 3 渐变补齐代码侧 done（Unity 视觉验收留家里机）；下一件事 = 任务 4（逐页修，依赖 1+2+3 已齐）+ 任务 5（独立可插）**。
 
 **任务 1 · 文本模型回归标准子树（inline flow）**【✅ done · 2026-08-12】
 - **落地**：fence 6.4 分类（rich-text-block + mixed 报错 + img 豁免）→ pkg v33 + `Node.rich_text_block` → run 编译器（`compile_rich_runs`）→ solve 折叠（RichText leaf + `rich_text_fingerprint` memo）→ render Container+flag arm（多 run mesh + box-shadow）→ `hit_test_rich` + FFI。详见 spec `docs/superpowers/specs/2026-08-12-text-model-design.md` + plan `docs/superpowers/plans/2026-08-12-text-model.md`（9 task SDD，全部 per-task + final review APPROVED）。
@@ -111,12 +111,13 @@
 - **门**：rect-diff 在一页产比对报告。（工具链可先搭，但结果要等任务 1 文本对了才有意义。）
 - **进度（2026-08-12）**：settings 页端到端跑通——browser-rect → **core dump（`dump_page --json`，非 Unity rect 路径）** → diff.mjs 三步 runner（`run-page.sh`）产报告 `snapshot-2026-08-12-settings.md`，门「报告产出」✅ 达成。4 处工具链修复（合成根 DFS / 0-size 原点 / preview letterbox）剔 206 假 diff，剩 12 残余（slider thumb transform 发射缺口 / CJK 字宽 / sub-2px 级联）全归类为 Task 4 燃料，**settings 零 core 布局 bug**。Unity rect 半（原 `DumpSceneJson` 路径）仍未接；12 残余随 Task 4 逐页修。
 
-**任务 3 · 渐变补齐（home radial 光晕 + 多 stop）**
-- fence 接 `radial-gradient` + `linear-gradient` 多 stop / 任意角度（现仅 linear 2 色 4 正交方向）；core render；radial 需 Unity shader program（per-vertex 做不了）。
-- **门**：home radial 光晕 Unity 可见 + 多 stop 渐变 rect 对齐浏览器。可与任务 1-2 并行。
+**任务 3 · 渐变补齐（home radial 光晕 + 多 stop）**【✅ 代码侧 done · 2026-08-14】
+- **落地**：`Gradient` 数据模型（linear 任意角度 + 多 stop ≤8 / radial 全形）替换 `Gradient2`（pkg v34）；渲染统一 program=6/7 per-fragment 渐变 shader（blob v13 grad_params 列 208B；premultiplied 插值 + bg-color 垫底 source-over 合成）；文本渐变 CPU 采样与 shader 同一套 t 数学；fence `<style>` 渐变值探针（坏渐变打包期报）。spec 见 `docs/superpowers/specs/2026-08-14-gradient-radial-multistop-design.md`。
+- **实证**：cargo workspace 1533 测全绿（clippy/fmt 严门过）；dotnet 三套 410 测全绿（fixture 重打 v34 + 顺手修了 test.workspace 撞 fence 6.4 的存量问题）；`dump_page` 渐变参数 dump——lab 页 20 节点（角度归一/多 stop 等分/显式位置/radial 各形）+ home 光晕（c=1574.4,-129.6 / 1100×560 / 0.1→transparent@0.6）全部正确；Chrome 基准截图 3 张入库 `showcase/scripts/gradient-baseline/`。
+- **门**：✅ 代码侧全绿（多 stop rect 对齐浏览器留 rect-diff 逐页跑，归任务 4）。⏳ Unity PlayMode 视觉验收（lab section 12 标本矩阵 + home 光晕 + 渐变字）留家里机——shader 纸面设计，GRADIENT 变体首次编译在 Unity 机。
 
 **任务 4 · 逐页 Unity PlayMode 真机 + rect-diff（8 页）**
-- 依赖任务 1（文本）+ 2（工具链）+ 3（渐变，home 要）。按依赖排：先静态页（settings/character/shop/form/lab）→ 再虚拟列表页（mail/inventory）→ home（动画 + 渐变）。
+- 依赖任务 1（文本）+ 2（工具链）+ 3（渐变，home 要）——三者代码侧均已 done。按依赖排：先静态页（settings/character/shop/form/lab）→ 再虚拟列表页（mail/inventory）→ home（动画 + 渐变）。
 - 每页：PlayMode 跑通 → rect-diff 比对 → 修 bug → 下一页。
 - **门**：8 页真机全绿 + rect-diff 通过。
 
@@ -128,10 +129,10 @@
 
 ---
 
-## 当前快照（2026-08-12，时点状态）
+## 当前快照（2026-08-14，时点状态）
 
 - 摸黑打通 + 三束加宽纪元已完工（详见 `roadmap_old.md`）：Unity 端到端可用，21 控件全栈、cascade / 动画 / 虚拟列表 / box-shadow / 文字特效 / transform / filter 矩阵已交付，release CI 就绪。
-- **近期优先**：**里程碑 1 任务 1（文本模型 inline flow）代码侧 done**（commit `5a9cfafc` + `458d8ce9` GUI exe）；**任务 2 rect-diff 工具链 settings 页端到端跑通**（core-dump 路径，报告入库，2026-08-12）—— 12 残余 + Unity rect 半留 Task 4。下一件事 = **任务 3（渐变补齐，home 依赖）与任务 4（逐页修）并行推进**。
+- **近期优先**：**里程碑 1 任务 1（文本模型）+ 任务 3（渐变补齐：radial + 多 stop + 任意角度，program=6/7 shader）代码侧均 done**（任务 3：commit 见 spec `2026-08-14-gradient-radial-multistop-design.md`，pkg v34 + blob v13 + dll/GUI exe 已同步入库）；**任务 2 rect-diff 工具链 settings 页端到端跑通**（core-dump 路径，2026-08-12）—— 12 残余 + Unity rect 半留 Task 4。**下一件事 = 任务 4（逐页修，1+2+3 依赖已齐）与任务 5（清验收债，独立）**。
 - **悬置判据项**：动画引擎终态（等 layout 动画需求）、Godot / 编辑器（等里程碑 1、2）。
 
 ---
@@ -167,9 +168,9 @@
 - 判据：第一个需 layout 动画的页面（如 accordion 展开 / 用 width 而非 scaleX 的进度条）。
 - 来源：`2026-08-04-m2-keyframes-runtime` §1.3、§3.2、§12。
 
-**视觉：渐变补全** — radial-gradient（现静默丢弃）+ 多 stop / 任意角度（现仅 linear 2 色 4 正交方向）+ conic。
-- 判据：showcase home radial 光晕 / 真有渐变 UI 需求（里程碑 1 已拉）。
-- 来源：`2026-08-09-box-shadow-multilayer-inset-blur` §1.1、§2.2。
+**视觉：渐变剩余形态** — radial + 多 stop + 任意角度已交付（2026-08-14，见里程碑 1 任务 3）。剩余 defer：`conic-gradient` / `repeating-linear/radial-gradient`（围栏打包期拒收，判据：第一个真需要的 UI）；渐变 × 圆角 / 九宫格 / 边框共存（`use_gradient` 门互斥，共存需混合 mesh 或边框独立 draw call，判据：第一个圆角渐变按钮 UI）；`to top right` 角点方向关键字；>8 stops（FFI grad_params 列定长 8 槽）。
+- 判据：上述形态被 showcase / dogfood 逼出时。
+- 来源：`2026-08-14-gradient-radial-multistop-design.md` §2/§10。
 
 **视觉：`filter:blur()` 任意内容模糊（需离屏 RT 基建）** — 任意内容模糊需离屏 RenderTexture 基建；box-shadow 的 SDF 模糊只覆盖圆角矩形形状，覆盖不了任意内容。
 - 判据：真有内容模糊 / 视觉后处理需求（基建级，非小缺口）。
