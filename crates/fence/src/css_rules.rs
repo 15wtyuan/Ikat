@@ -659,6 +659,25 @@ fn parse_declarations(
             ));
             continue;
         }
+        // 渐变值探针：`<style>` 规则的值不逐条校验（非关键字值运行时 apply_decl 才
+        // 解析），但渐变子集是结构化值（stop 数上限 / radial 配置段语法），坏值静默
+        // 到运行时丢背景太晚——打包期用 core `parse_gradient`（与运行时同一真相源）
+        // 探测，失败即报。任何 `*-gradient(` 前缀值都必须过探针（conic / repeating-*
+        // 是 parse_gradient 不认的围栏外形态，返 None 即报）；url()/纯色走原宽松路径。
+        if (prop == "background-image" || prop == "background")
+            && value.contains("-gradient(")
+            && loomgui_core::style::mapping::parse_gradient(value).is_none()
+        {
+            diagnostics.push(Diagnostic::error(
+                DiagnosticCode::FenceBadCssValue,
+                format!(
+                    "value \"{}\" is not valid for CSS property \"{}\" (gradient subset: see docs/design/fence.md)",
+                    value, prop
+                ),
+                loc.clone(),
+            ));
+            continue;
+        }
         decls.push(Declaration {
             prop: prop.to_string(),
             value: value.to_string(),

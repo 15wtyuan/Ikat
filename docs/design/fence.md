@@ -208,6 +208,13 @@ CSS 在围栏中以三个正交维度建模：
 
 `background-color`, `background-image`, `background-size`（`cover` / `contain` / `100%` / `stretch`）, `background-clip`, `-webkit-background-clip`
 
+**渐变**（`background-image` / `background` 值域，core `parse_gradient` 单一真相源）
+
+- `linear-gradient([angle|to-dir], stop[, stop]*)`：角度 `<N>deg`（0=to top 顺时针，任意值）或 4 正向关键字（`to top/right/bottom/left`）；缺省 `to bottom`。stop = `color [pos%]`，1..=8 个（超出打包期报错）；色支持 hex/`rgb()`/`rgba()`/`transparent`；位置缺省按 CSS 规则烘（首 0% / 末 100% / 中间相邻中点）。
+- `radial-gradient([shape||size][at pos], stop[, stop]*)`：shape = `circle`/`ellipse`（缺省 ellipse）；size = `closest-side`/`farthest-side`/`closest-corner`/`farthest-corner`/1~2 个长度（单长度=正圆、双长度=椭圆；缺省 farthest-corner）；`at cx cy`（`%`/px，支持负值；缺省 `50% 50%`）。stop 同 linear。
+- 越界（`conic-gradient` / `repeating-*` / 角点方向 `to top right` / 命名色 / >8 stops / 坏语法）→ 打包期 `FenceBadCssValue`（inline 与 `<style>` 规则都报——`<style>` 侧有渐变值探针）。
+- 渲染：program=6/7 per-fragment shader（premultiplied alpha 插值；`background-color` 垫底合成）；`background-clip:text` 文本渐变共享同一套采样数学。
+
 **视觉**
 
 `opacity`, `box-shadow`, `pointer-events`, `transform`, `filter`
@@ -258,11 +265,10 @@ CSS 在围栏中以三个正交维度建模：
 | `TextShadow` | `ox oy [blur] color` |
 | `Transition` | `property duration easing delay` 简写→`TransitionSpec`（逗号多 spec；ease 按 spec §8.3） |
 | `Animation` | `<name> <duration> [easing/count/fill/direction/play-state/delay]` 简写→`AnimationSpec`（逗号多声明；ease 按 spec §8.3） |
-| `Gradient2` | `linear-gradient(to dir, hex, hex)` |
+| `BackgroundImage` | `background-image` 值域：`none` / `url()` / `linear-gradient()` / `radial-gradient()`（渐变子集交 core `parse_gradient` 探针） |
 | `TextEffect` | `glow(w color)` / `blur(w)` |
 | `TextStroke` | `width color` |
 | `BackgroundClipText` | `text` 触发渐变字形 |
-| `Url` | `url("path")` |
 | `BorderRadius` | 1-4 值 px/% + `/` 垂直值 |
 | `FourSidedPx` | 1-4 值 px（九宫格等） |
 | `FourSidedMargin` | 1-4 值 px/%/auto |
