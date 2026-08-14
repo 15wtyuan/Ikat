@@ -93,9 +93,11 @@ namespace LoomGUI.HeadlessTests
 
                 // Three CSS layers → three synth nodes.
                 Assert.Equal(3, synthCount);
-                // Two blur layers (outer 26px + inset 16px) → SDF shader; one hard-edge inset → solid.
-                Assert.Equal(2, sdfProgramCount);
-                Assert.Equal(1, solidProgramCount);
+                // 18337b3d rewrite unifies ALL shadows on SDF (program=5): blur=0 hard-edge
+                // inset uses sigma=0.5 AA edge (program=0 solid fill is only correct for
+                // outer shadows; for inset it covered the whole element → washed buttons).
+                Assert.Equal(3, sdfProgramCount);
+                Assert.Equal(0, solidProgramCount);
                 Assert.Equal(0, nodesWithZeroParams);
             }
             finally { StageHarness.Destroy(stage); }

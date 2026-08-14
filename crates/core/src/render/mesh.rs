@@ -119,36 +119,6 @@ pub fn tile_image(
     (verts, uvs, colors, indices)
 }
 
-/// 生成 4 角独立色 quad 的 verts/uvs/colors/indices（SOA 四表，与 `quad` 同形）。
-///
-/// - 顶点序、UV、索引与 `quad` 完全一致（TL → TR → BR → BL，CCW）。
-/// - 唯一区别：`colors` 是 4 角独立色（per-vertex），GPU 顶点色插值出 2 色线性渐变。
-///   `quad` 是 4 顶点同色（单色块）。
-///
-/// 用于 `background: linear-gradient(...)`：render 期按 `GradientDir` 把 2 色 (a, b)
-/// 映射成 4 角色（如 ToRight → [a,b,b,a]，左 a 右 b），传入本函数产 mesh。
-/// program=0（顶点色 × 白 1×1 纹理）即出渐变——无需 gradient shader。
-#[allow(clippy::type_complexity)]
-pub fn quad_gradient(
-    rect: &Rect,
-    colors: [[f32; 4]; 4],
-    uv_min: [f32; 2],
-    uv_max: [f32; 2],
-) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
-    let verts = vec![
-        [rect.x, rect.y],
-        [rect.x + rect.w, rect.y],
-        [rect.x + rect.w, rect.y + rect.h],
-        [rect.x, rect.y + rect.h],
-    ];
-    let (umin, vmin) = (uv_min[0], uv_min[1]);
-    let (umax, vmax) = (uv_max[0], uv_max[1]);
-    let uvs = vec![[umin, vmin], [umax, vmin], [umax, vmax], [umin, vmax]];
-    let colors = colors.to_vec();
-    let indices = vec![0, 1, 2, 0, 2, 3];
-    (verts, uvs, colors, indices)
-}
-
 /// CSS border-radius 邻角和缩放因子(只缩不放,防负)。两邻角半径和 ≤ 边长,等比缩。
 /// `rounded_rect`(背景填充)与 `border::border_ring`(边框环)共用,保证两者圆角一致。
 pub fn radius_scale(radii: &[(f32, f32); 4], w: f32, h: f32) -> f32 {
@@ -205,23 +175,9 @@ pub fn rounded_rect(
     uv_min: [f32; 2],
     uv_max: [f32; 2],
 ) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
-    rounded_rect_colored(rect, radii, uv_min, uv_max, |_, _| color)
-}
-
-/// 圆角矩形几何（CSS 圆角钳制 + 中心三角扇）。fill 与 shape 解耦：纯色/渐变由
-/// `color_fn(tx, ty)` 决定（tx,ty = 顶点在 rect 内归一化位置），消除「圆角排斥渐变」
-/// 的 fill×shape 耦合。退化（w/h≤0）走 quad，颜色取 color_fn(0,0)（纯色=color，渐变=TL角色）。
-#[allow(clippy::type_complexity)]
-fn rounded_rect_colored<C: Fn(f32, f32) -> [f32; 4]>(
-    rect: &Rect,
-    radii: &[(f32, f32); 4],
-    uv_min: [f32; 2],
-    uv_max: [f32; 2],
-    color_fn: C,
-) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
     let (w, h) = (rect.w, rect.h);
     if w <= 0.0 || h <= 0.0 {
-        return quad(rect, color_fn(0.0, 0.0), uv_min, uv_max);
+        return quad(rect, color, uv_min, uv_max);
     }
     // CSS 按边缩放钳制（vs fgui per-corner min）。两邻角半径和不超过边长，等比缩放；
     // 只缩不放（min(1.0) 兜底）；防负 max(0.0)。
@@ -246,7 +202,7 @@ fn rounded_rect_colored<C: Fn(f32, f32) -> [f32; 4]>(
     let cy = rect.y + h / 2.0;
     verts.push([cx, cy]);
     uvs.push([lerp(umin, umax, 0.5), lerp(vmin, vmax, 0.5)]);
-    colors.push(color_fn(0.5, 0.5));
+    colors.push(color);
 
     // 角序 TL→TR→BR→BL（CSS 视觉序）。
     // 起始角 TL=π, TR=-π/2, BR=0, BL=π/2（逆时针 design y-down）。圆心 = 角顶点内缩 (rx,ry)。
@@ -285,10 +241,12 @@ fn rounded_rect_colored<C: Fn(f32, f32) -> [f32; 4]>(
     for (rx, ry, center, start, corner) in corners {
         if rx <= 0.0 || ry <= 0.0 {
             // 直角：单顶点 = 该角矩形顶点（ry>0 时圆心+方向会偏移，故直接用 corner）。
-            let (tx_c, ty_c) = ((corner[0] - rect.x) / w, (corner[1] - rect.y) / h);
             verts.push(corner);
-            uvs.push([lerp(umin, umax, tx_c), lerp(vmin, vmax, ty_c)]);
-            colors.push(color_fn(tx_c, ty_c));
+            uvs.push([
+                lerp(umin, umax, (corner[0] - rect.x) / w),
+                lerp(vmin, vmax, (corner[1] - rect.y) / h),
+            ]);
+            colors.push(color);
             continue;
         }
         // 自适应分段：ceil(π·max(rx,ry)/4)+1，最小 2（每 ~4px 弧长一段，加密自 fgui /8 消圆角毛刺）
@@ -302,10 +260,12 @@ fn rounded_rect_colored<C: Fn(f32, f32) -> [f32; 4]>(
             };
             let px = center[0] + a.cos() * rx;
             let py = center[1] + a.sin() * ry;
-            let (tx, ty) = ((px - rect.x) / w, (py - rect.y) / h);
             verts.push([px, py]);
-            uvs.push([lerp(umin, umax, tx), lerp(vmin, vmax, ty)]);
-            colors.push(color_fn(tx, ty));
+            uvs.push([
+                lerp(umin, umax, (px - rect.x) / w),
+                lerp(vmin, vmax, (py - rect.y) / h),
+            ]);
+            colors.push(color);
         }
     }
     // 三角扇：(0, i, i+1)，末尾回 1 闭合
@@ -316,30 +276,6 @@ fn rounded_rect_colored<C: Fn(f32, f32) -> [f32; 4]>(
         indices.extend_from_slice(&[0, i, next]);
     }
     (verts, uvs, colors, indices)
-}
-
-/// 圆角矩形 + 线性渐变填充：薄封装 [`rounded_rect_colored`]，每顶点色按归一化位置
-/// (tx,ty) 对 4 角色双线性插值（与直角 [`quad_gradient`] 同 4 角色口径 [TL,TR,BR,BL]）。
-/// 修复 background_gradient + border-radius 共存（此前 use_gradient 门判 all_zero 才绘渐变）。
-pub fn rounded_rect_gradient(
-    rect: &Rect,
-    corner_colors: [[f32; 4]; 4],
-    radii: &[(f32, f32); 4],
-    uv_min: [f32; 2],
-    uv_max: [f32; 2],
-) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>) {
-    let [tl, tr, br, bl] = corner_colors;
-    let lerp_c = |a: [f32; 4], b: [f32; 4], t: f32| {
-        [
-            a[0] + (b[0] - a[0]) * t,
-            a[1] + (b[1] - a[1]) * t,
-            a[2] + (b[2] - a[2]) * t,
-            a[3] + (b[3] - a[3]) * t,
-        ]
-    };
-    rounded_rect_colored(rect, radii, uv_min, uv_max, move |tx, ty| {
-        lerp_c(lerp_c(tl, tr, tx), lerp_c(bl, br, tx), ty)
-    })
 }
 
 /// 生成九宫格切片矩形的 verts/uvs/colors/indices（照搬 fgui Image.cs SliceFill）。
@@ -1652,42 +1588,5 @@ mod tests {
             "scale = 100/120 ≈ 0.8333, got {}",
             s
         );
-    }
-
-    #[test]
-    fn quad_gradient_four_corner_colors() {
-        // 4 角独立色：顶点序与 quad 同（TL, TR, BR, BL），每角色独立。
-        let r = Rect {
-            x: 0.0,
-            y: 0.0,
-            w: 10.0,
-            h: 10.0,
-        };
-        let cols = [
-            [1.0, 0.0, 0.0, 1.0], // TL 红
-            [0.0, 1.0, 0.0, 1.0], // TR 绿
-            [0.0, 0.0, 1.0, 1.0], // BR 蓝
-            [1.0, 1.0, 0.0, 1.0], // BL 黄
-        ];
-        let (verts, _uvs, colors, idx) = quad_gradient(&r, cols, [0.0, 0.0], [1.0, 1.0]);
-        assert_eq!(verts.len(), 4, "4 顶点");
-        assert_eq!(colors, cols.to_vec(), "四角独立色按顶点序回放");
-        assert_eq!(idx, vec![0, 1, 2, 0, 2, 3], "两三角形与 quad 同");
-    }
-
-    #[test]
-    fn quad_gradient_verts_match_quad() {
-        // 顶点位置 / UV 应与 quad 一致（同 4 角几何），仅颜色表不同。
-        let r = Rect {
-            x: 5.0,
-            y: 6.0,
-            w: 20.0,
-            h: 30.0,
-        };
-        let cols = [[0.5; 4]; 4];
-        let (gv, guvs, _, _) = quad_gradient(&r, cols, [0.25, 0.5], [0.75, 1.0]);
-        let (qv, quvs, _, _) = quad(&r, [0.5; 4], [0.25, 0.5], [0.75, 1.0]);
-        assert_eq!(gv, qv, "顶点位置与 quad 同");
-        assert_eq!(guvs, quvs, "UV 与 quad 同");
     }
 }

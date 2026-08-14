@@ -91,7 +91,14 @@ public class ShowcaseRunner : MonoBehaviour
     /// 闭包捕获的 page/target 是 per-iteration 局部，每次 Show 重新订阅当前页实例。
     void WireNav(Container page, string pageName)
     {
-        if (page.TryGet<Button>("back-home", out var back))
+        // back-home 两处形态：settings 侧栏（页面域直 Get）；其余 6 页在 <page-top> 组件内
+        //（打包期展开 + 硬墙作用域——组件内 id 须经 host 两跳，L3 查找边界）。
+        if (!page.TryGet<Button>("back-home", out var back)
+            && page.TryGet<CustomElement>("page-top", out var top))
+        {
+            top.TryGet<Button>("back-home", out back);
+        }
+        if (back != null)
             back.Clicked += () => Show("home");
         if (pageName == "home")
         {
@@ -172,9 +179,20 @@ public class ShowcaseRunner : MonoBehaviour
         if (pageName == "character")
         {
             // Button.Clicked → ProgressBar.Value += 10（clamp 由 core 做），并刷新百分比标签。
-            if (page.TryGet<Button>("btn-train", out var train)
-                && page.TryGet<ProgressBar>("stat-exp", out var exp)
-                && page.TryGet<TextElement>("stat-exp-val", out var expVal))
+            // EXP 条在 <stat-bar id="exp-bar"> 组件展开域内（投影内容归组件域）——两跳获取。
+            ProgressBar exp = null;
+            TextElement expVal = null;
+            if (page.TryGet<ProgressBar>("stat-exp", out var expDirect))
+            {
+                exp = expDirect;   // 兼容未组件化的直排形态
+                page.TryGet<TextElement>("stat-exp-val", out expVal);
+            }
+            else if (page.TryGet<CustomElement>("exp-bar", out var expBar))
+            {
+                expBar.TryGet<ProgressBar>("stat-exp", out exp);
+                expBar.TryGet<TextElement>("stat-exp-val", out expVal);
+            }
+            if (page.TryGet<Button>("btn-train", out var train) && exp != null && expVal != null)
             {
                 train.Clicked += () =>
                 {

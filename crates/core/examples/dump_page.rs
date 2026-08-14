@@ -169,6 +169,55 @@ fn main() {
         mismatch,
         orphan
     );
+
+    // 渐变参数取证：program=6/7 节点的 grad_params（kind/角度/几何/stops）。
+    // Unity 侧视觉不对时，对照此输出定位 core 参数错 vs shader 错。
+    println!("\n── 渐变节点 grad_params（program=6/7）──");
+    let mut grad_count = 0;
+    for rn in &frame.nodes {
+        // NodePayload 单一 Mesh 变体（v10 起文本也塌进 mesh），直接解构。
+        let loomgui_core::render::node::NodePayload::Mesh { program, .. } = &rn.payload;
+        if *program == 6 || *program == 7 {
+            grad_count += 1;
+            let g = &rn.gradient;
+            let stops: Vec<String> = g.stops[..g.stop_count.min(8) as usize]
+                .iter()
+                .map(|s| {
+                    format!(
+                        "rgba({:.2},{:.2},{:.2},{:.2})@{:.2}",
+                        s[0], s[1], s[2], s[3], s[4]
+                    )
+                })
+                .collect();
+            match g.kind {
+                1 => println!(
+                    "    nid={} prog={} radial c=({:.1},{:.1}) r=({:.1},{:.1}) stops=[{}]",
+                    rn.node_id,
+                    program,
+                    g.center[0],
+                    g.center[1],
+                    g.radii[0],
+                    g.radii[1],
+                    stops.join(", ")
+                ),
+                _ => println!(
+                    "    nid={} prog={} linear {}deg dir=({:.3},{:.3}) t0={:.1} span={:.4} stops=[{}]",
+                    rn.node_id,
+                    program,
+                    g.angle_deg,
+                    g.dir[0],
+                    g.dir[1],
+                    g.t0,
+                    g.inv_span,
+                    stops.join(", ")
+                ),
+            }
+        }
+    }
+    if grad_count == 0 {
+        println!("    （无渐变节点）");
+    }
+
     for s in &samples {
         println!("    ⚠ {}", s);
     }
@@ -225,15 +274,33 @@ fn main() {
             .map(|(i, nid)| {
                 let n = scene.get(*nid).expect("DFS node must exist");
                 let r = n.layout_rect;
+                // 渐变节点附带解析后参数（--json 侧取证；rect-diff 主流程不读此字段）。
+                let gradient_json = n.style.background_gradient.as_ref().map(|g| {
+                    let p = loomgui_core::render::gradient::resolve_gradient(g, r.w, r.h);
+                    serde_json::json!({
+                        "kind": if p.kind == 1 { "radial" } else { "linear" },
+                        "angleDeg": p.angle_deg,
+                        "dir": p.dir,
+                        "t0": p.t0,
+                        "invSpan": p.inv_span,
+                        "center": p.center,
+                        "radii": p.radii,
+                        "stops": p.stops[..p.stop_count.min(8) as usize],
+                    })
+                });
                 serde_json::json!({
                     "domIndex": i,
-                    "tag": kind_to_html_tag(n.kind),
+                    // CustomElement 发 custom_tag 字面量（与浏览器侧 tagName 原文配对；
+                    // 其余 kind 走 kind_to_html_tag 语义映射）。
+                    "tag": n.custom_tag.as_deref().map(str::to_string)
+                        .unwrap_or_else(|| kind_to_html_tag(n.kind).to_string()),
                     "id": n.id_attr.clone(),
                     "classes": n.classes.clone(),
                     "x": r.x,
                     "y": r.y,
                     "w": r.w,
                     "h": r.h,
+                    "gradient": gradient_json,
                 })
             })
             .collect();
@@ -320,7 +387,14 @@ fn parse_json_out_arg() -> Option<String> {
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         if a == "--json" {
-            return Some(args.next().expect("--json requires a <path> argument"));
+            // 用法错误统一 exit 2（与 run-page.sh / diff.mjs 的 2=usage 契约对齐），不 panic。
+            return match args.next() {
+                Some(path) => Some(path),
+                None => {
+                    eprintln!("error: --json requires a <path> argument");
+                    std::process::exit(2);
+                }
+            };
         }
     }
     None

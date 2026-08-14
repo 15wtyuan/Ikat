@@ -67,6 +67,8 @@ pub fn payload_hash(rn: &RenderNode) -> u64 {
 /// 不重建几何（effect 是渲染层属性，非 mesh 几何）。
 /// shadow_params 进 header_hash——box-shadow SDF 参数（halfSize/radius/sigma/inset）变只更
 /// MPB uniform（_ShadowHalfSize 等），不重建几何（照 effect 同路径，渲染层属性非 mesh 几何）。
+/// gradient 进 header_hash——渐变参数（角度/stops/radial 几何）变只更 MPB uniform，不重建
+/// mesh（uv 局部坐标在 box 尺寸变时由 payload_hash 兜住）。
 pub fn header_hash(rn: &RenderNode) -> u64 {
     let mut h = DefaultHasher::new();
     for &v in rn.world_matrix.iter() {
@@ -90,6 +92,8 @@ pub fn header_hash(rn: &RenderNode) -> u64 {
     for &v in rn.shadow_params.iter() {
         v.to_le_bytes().hash(&mut h);
     }
+    // 渐变参数：变 → Header 级（只更 MPB uniform，照 shadow_params 路径）。
+    rn.gradient.to_bytes().hash(&mut h);
     h.finish()
 }
 
@@ -116,6 +120,7 @@ mod tests {
             reuse_key: 0,
             effect: crate::render::node::EffectBlock::default(),
             shadow_params: [0.0; 6],
+            gradient: crate::render::gradient::GradientParams::default(),
             payload: NodePayload::Mesh {
                 verts: vec![[0.0, 0.0]; 4],
                 uvs: vec![[0.0, 0.0]; 4],

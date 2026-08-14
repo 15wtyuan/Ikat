@@ -69,13 +69,31 @@
   /* I1：blur shadow 在圆角 overflow 容器内（SHADOW_BLUR ∩ CLIPPED_ROUNDED 合成——final-review 修复路径）*/
   .bs-i1-clip    { width:220px; height:64px; background-color:#1a2f45; border-radius:16px; overflow:hidden; padding:8px; }
   .bs-i1-inner   { width:120px; height:40px; background-color:#2a5a75; border-radius:8px; box-shadow:0 10px 24px #000c; }
+  /* 渐变标本矩阵（linear 多 stop / 任意角度 / radial 全形——v34 program=6 per-fragment shader）。
+     注意：无 border-radius——渐变与圆角目前互斥（use_gradient 门），带圆角会静默丢渐变。 */
+  .grad { width:120px; height:80px; }
+  .grad-l2   { background-image:linear-gradient(to right,#5fb4d4,#d4a44e); }                    /* 2 色基线（回归锚点）*/
+  .grad-l3   { background-image:linear-gradient(to right,#5fb4d4,#8ec5d8,#d4a44e); }             /* 3 stop（中间默认中点）*/
+  .grad-l5   { background-image:linear-gradient(to right,#0e1620,#2a5a75,#5fb4d4,#8ec5d8,#d4a44e); } /* 5 stop 色带 */
+  .grad-pos  { background-image:linear-gradient(to right,#5fb4d4 20%,#d4a44e 60%); }             /* 显式位置：20%-60% 过渡带 */
+  .grad-0    { background-image:linear-gradient(0deg,#5fb4d4,#d4a44e); }                         /* 0deg = to top */
+  .grad-45   { background-image:linear-gradient(45deg,#5fb4d4,#d4a44e); }                        /* 对角 45°（BL→TR）*/
+  .grad-137  { background-image:linear-gradient(137deg,#5fb4d4,#d4a44e); }                       /* 任意角 */
+  .grad-270  { background-image:linear-gradient(270deg,#5fb4d4,#d4a44e); }                       /* 270deg = to left */
+  .grad-def  { background-image:linear-gradient(#5fb4d4,#d4a44e); }                              /* 缺省方向 to bottom */
+  .grad-rad-def { background-image:radial-gradient(#5fb4d4,#0e1620); }                           /* 默认 ellipse farthest-corner 50% 50% */
+  .grad-rad-cs  { background-image:radial-gradient(circle closest-side,#5fb4d4,#0e1620); }       /* circle + closest-side */
+  .grad-rad-fs  { background-image:radial-gradient(ellipse farthest-side,#5fb4d4,#0e1620); }     /* ellipse + farthest-side */
+  .grad-rad-el  { background-image:radial-gradient(120px 60px at 30% 30%,#5fb4d4,#0e1620); }     /* 显式椭圆 + at 百分比 */
+  .grad-rad-px  { background-image:radial-gradient(circle 60px at 80px 20px,#5fb4d4,#0e1620); }  /* 正圆半径 + at px 定位 */
+  .grad-alpha   { background-image:linear-gradient(to bottom,rgba(95,180,212,1),transparent); }  /* rgba→transparent（premultiplied 无灰边）*/
+  .grad-under   { background-color:#3a2a1a; background-image:radial-gradient(circle at 50% 100%,rgba(212,164,78,0.9),rgba(212,164,78,0)); } /* bg-color 垫底合成 */
+  .grad-txt3 { font-size:28px; font-weight:700; background-image:linear-gradient(137deg,#5fb4d4,#8ec5d8,#d4a44e); -webkit-background-clip:text; background-clip:text; color:#00000000; } /* 多 stop 任意角渐变字 */
   </style>
 </head>
 <body>
   <div class="root">
-    <div class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:20px 32px;background-color:#152433;border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
-      <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">CSS 标本馆</span>
-    </div>
+    <page-top id="page-top"><span slot="title" class="pt-title" style="color:#e0e6ec;font-size:20px;font-weight:700">CSS 标本馆</span></page-top>
     <div class="body">
       <div class="page-title">CSS 全属性标本馆</div>
       <div class="page-desc">围栏 §5.1 全白名单逐组 specimen · 小枚举全值，大枚举代表值 + 矩阵</div>
@@ -180,12 +198,9 @@
       <div class="section">
         <div class="section-title">10 · custom-element + slot 投影</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:16px">
-          <item-card style="display:flex;flex-direction:column;gap:8px;width:160px;background-color:#1a2f45;border-radius:10px;padding:16px">
-            <img src="../res/icons/item-chest.png" alt="item" style="width:64px;height:64px;align-self:center">
-            <slot name="ic-name"><span style="color:#e0e6ec;font-size:16px;font-weight:700;align-self:center">默认名</span></slot>
-            <slot name="ic-desc"><span style="color:#9aa0b4;font-size:13px;align-self:center">默认描述</span></slot>
-          </item-card>
-          <span style="color:#6c7080;font-size:13px;align-self:center">含 hyphen 标签名 = CustomElement；&lt;slot&gt; 接投影（运行时由组件系统填充）</span>
+          <item-card><img slot="icon" src="../res/icons/item-gem.png" alt="item" style="width:64px;height:64px;align-self:center"><span slot="ic-name" class="ic-name" style="color:#e0e6ec;font-size:16px;font-weight:700;align-self:center">宝石残片</span><span slot="ic-desc" class="ic-desc" style="color:#9aa0b4;font-size:13px;align-self:center">投影：icon/名/描述全覆盖</span></item-card>
+          <item-card></item-card>
+          <span style="color:#6c7080;font-size:13px;align-self:center">components/item-card.html 注册组件：左 = slot 投影全覆盖，右 = 全 fallback；打包期展开（spec §2）</span>
         </div>
       </div>
 
@@ -210,6 +225,36 @@
             <div class="bs-i1-clip"><div class="bs-i1-inner"></div></div>
           </div>
           <span style="color:#6c7080;font-size:13px;max-width:320px">内层卡片 blur shadow 须被外层圆角 overflow 正确裁剪，且 blur 仍渲染——不被 CLIPPED_ROUNDED keyword 吞（final-review 修复的 I1 路径）。</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">12 · 渐变（linear 多 stop / 任意角度 / radial 全形）</div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:20px;flex-wrap:wrap;align-items:center">
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">2 色基线（回归）</span><div class="grad grad-l2"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">3 stop</span><div class="grad grad-l3"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">5 stop 色带</span><div class="grad grad-l5"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">显式位置 20%→60%</span><div class="grad grad-pos"></div></div>
+        </div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:20px;flex-wrap:wrap;align-items:center">
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">0deg (to top)</span><div class="grad grad-0"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">45deg 对角</span><div class="grad grad-45"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">137deg 任意角</span><div class="grad grad-137"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">270deg (to left)</span><div class="grad grad-270"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">缺省 to bottom</span><div class="grad grad-def"></div></div>
+        </div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:20px;flex-wrap:wrap;align-items:center">
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">radial 默认</span><div class="grad grad-rad-def"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">circle closest-side</span><div class="grad grad-rad-cs"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">ellipse farthest-side</span><div class="grad grad-rad-fs"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">椭圆 120×60 at 30% 30%</span><div class="grad grad-rad-el"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">circle 60px at 80px 20px</span><div class="grad grad-rad-px"></div></div>
+        </div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:20px;flex-wrap:wrap;align-items:center">
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">rgba→transparent（premultiplied）</span><div class="grad grad-alpha"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">bg-color 垫底合成</span><div class="grad grad-under"></div></div>
+          <span class="grad-txt3">多stop渐变字</span>
+          <span style="color:#6c7080;font-size:13px;max-width:320px">radial 过渡半径应与浏览器一致（closest/farthest/side/corner 语义）；transparent 渐变中段无灰边（premultiplied 插值）；垫底格的暗棕底色须从渐变透明区透出。</span>
         </div>
       </div>
 

@@ -1,6 +1,8 @@
 use super::*;
 use crate::asset::{PackageInput, TemplateNode};
+use crate::scene::node::{NodeFlags, NodeId};
 use crate::scene::NodeKind;
+use crate::style::dynamic::rematch_pseudo_classes;
 use crate::style::dynamic::{
     Combinator, Compound, Declaration, DynamicRule, ParsedSelector, Specificity,
 };
@@ -28,6 +30,8 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -44,6 +48,8 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -70,6 +76,8 @@ fn make_control_pkg(kind: NodeKind, control_init: crate::asset::ControlInit) -> 
         data_slot: None,
         aria_controls: None,
         rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -139,6 +147,8 @@ fn instantiate_explicit_tabindex_minus_one_is_respected() {
         data_slot: None,
         aria_controls: None,
         rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -244,6 +254,8 @@ fn instantiate_missing_pkg_or_comp_errors() {
         data_slot: None,
         aria_controls: None,
         rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -279,6 +291,8 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -295,6 +309,8 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -411,6 +427,8 @@ fn pkg_with_root_rule(pkg_name: &str, flex_dir_val: &str) -> (String, Vec<u8>) {
         data_slot: None,
         aria_controls: None,
         rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable {
         rules: vec![class_rule("root", "flex-direction", flex_dir_val)],
@@ -497,6 +515,8 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -513,6 +533,8 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
     ];
     let outer_rules = crate::style::dynamic::DynamicRuleTable {
@@ -552,6 +574,8 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
         data_slot: None,
         aria_controls: None,
         rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
     }];
     let inner_rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -628,6 +652,8 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         // listbox role 子（作者写的弹出列表容器）。
         TemplateNode {
@@ -645,6 +671,8 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         TemplateNode {
             kind: NodeKind::OptionItem,
@@ -664,6 +692,8 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         // option A 的文本子节点（parent = option index 2）。
         TemplateNode {
@@ -681,6 +711,8 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         TemplateNode {
             kind: NodeKind::OptionItem,
@@ -697,6 +729,8 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         TemplateNode {
             kind: NodeKind::TextNode,
@@ -713,6 +747,8 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         TemplateNode {
             kind: NodeKind::OptionItem,
@@ -729,6 +765,8 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         TemplateNode {
             kind: NodeKind::TextNode,
@@ -745,6 +783,8 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -820,6 +860,8 @@ fn make_test_pkg_with_roles() -> Vec<u8> {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -836,6 +878,8 @@ fn make_test_pkg_with_roles() -> Vec<u8> {
             data_slot: Some("thumb".into()),
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
     ];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
@@ -932,6 +976,8 @@ fn instantiate_copies_aria_controls_into_role_info() {
         data_slot: None,
         aria_controls: Some("panel-1".to_string()),
         rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
     }];
     let rules = crate::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -949,4 +995,332 @@ fn instantiate_copies_aria_controls_into_role_info() {
         Some("panel-1"),
         "instantiate 拷 TemplateNode.aria_controls 进 RoleInfo.aria_controls"
     );
+}
+
+// ── 组件展开域（Custom Element 打包期展开，component-system spec）────────────────
+//
+// 树形：root(0, SCOPE_ROOT) + host(1, component_scope + custom_tag + class card-host)
+// + inner(2, class gic-body)。页面规则包装 scope_root=root；展开域规则锚 host。
+
+/// 组件展开域测试 pkg：页面规则 + 锚定规则都参数化，覆盖隔离正反面。
+fn component_scope_pkg(page_rules: &[DynamicRule], scope_rules: &[DynamicRule]) -> Vec<u8> {
+    let root_node = TemplateNode {
+        kind: NodeKind::Container,
+        style: ResolvedStyle::default(),
+        parent_idx: None,
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        content: None,
+        src: None,
+        control_init: None,
+        role: None,
+        data_slot: None,
+        aria_controls: None,
+        rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
+    };
+    let host = TemplateNode {
+        kind: NodeKind::CustomElement,
+        style: ResolvedStyle::default(),
+        parent_idx: Some(0),
+        classes: vec!["card-host".to_string()],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        content: None,
+        src: None,
+        control_init: None,
+        role: None,
+        data_slot: None,
+        aria_controls: None,
+        rich_text_block: false,
+        custom_tag: Some("game-item-card".to_string()),
+        component_scope: true,
+    };
+    let inner = TemplateNode {
+        kind: NodeKind::Container,
+        style: ResolvedStyle::default(),
+        parent_idx: Some(1),
+        classes: vec!["gic-body".to_string()],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        content: None,
+        src: None,
+        control_init: None,
+        role: None,
+        data_slot: None,
+        aria_controls: None,
+        rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
+    };
+    let nodes = [root_node, host, inner];
+    let page_table = crate::style::dynamic::DynamicRuleTable {
+        rules: page_rules.to_vec(),
+    };
+    let scope_table = crate::style::dynamic::DynamicRuleTable {
+        rules: scope_rules.to_vec(),
+    };
+    let input = PackageInput {
+        components: vec![("page", &nodes, &page_table, &[])],
+    };
+    let scopes = [crate::asset::ComponentScopeInput {
+        component: "page",
+        anchor_idx: 1,
+        rules: &scope_table,
+    }];
+    crate::asset::write_package_with_scopes(&input, &scopes)
+}
+
+/// 建 stage + instantiate，返回 (Stage, 实例根, host, inner)。
+fn component_scope_stage4(
+    page_rules: &[DynamicRule],
+    scope_rules: &[DynamicRule],
+) -> (Stage, NodeId, NodeId, NodeId) {
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    let pkg = component_scope_pkg(page_rules, scope_rules);
+    s.load_package("bag", &pkg).unwrap();
+    let root = s.instantiate("bag", "page").unwrap();
+    let host = s.scene.as_ref().unwrap().get(root).unwrap().children[0];
+    let inner = s.scene.as_ref().unwrap().get(host).unwrap().children[0];
+    (s, root, host, inner)
+}
+
+/// host 打三重标记：SCOPE_ROOT（后代 CSS 边界）+ LOOKUP_SCOPE（查找边界）
+/// + HOST_IN_PARENT_SCOPE（自身归外层页面作用域）。
+#[test]
+fn instantiate_marks_component_host_scope_flags() {
+    let (s, root, host, _) = component_scope_stage4(&[], &[]);
+    let flags = s
+        .scene
+        .as_ref()
+        .unwrap()
+        .get(host)
+        .unwrap()
+        .interaction
+        .flags;
+    assert!(flags.contains(NodeFlags::SCOPE_ROOT));
+    assert!(flags.contains(NodeFlags::LOOKUP_SCOPE));
+    assert!(flags.contains(NodeFlags::HOST_IN_PARENT_SCOPE));
+    // 实例根照旧只有 SCOPE_ROOT|LOOKUP_SCOPE（无 HOST_IN_PARENT_SCOPE）
+    let rf = s
+        .scene
+        .as_ref()
+        .unwrap()
+        .get(root)
+        .unwrap()
+        .interaction
+        .flags;
+    assert!(rf.contains(NodeFlags::SCOPE_ROOT));
+    assert!(!rf.contains(NodeFlags::HOST_IN_PARENT_SCOPE));
+}
+
+/// custom_tag 从 TemplateNode 拷进 live Node（FFI get_custom_tag / rematch tag 选择器用）。
+#[test]
+fn instantiate_copies_custom_tag() {
+    let (s, _root, host, inner) = component_scope_stage4(&[], &[]);
+    let scene = s.scene.as_ref().unwrap();
+    assert_eq!(
+        scene.get(host).unwrap().custom_tag.as_deref(),
+        Some("game-item-card")
+    );
+    // 内部子非 CustomElement → None
+    assert!(scene.get(inner).unwrap().custom_tag.is_none());
+}
+
+/// 展开域锚定规则进 scene.dynamic_rules，scope_root = host NodeId（不是实例根）。
+#[test]
+fn component_scope_rules_anchor_to_host() {
+    let (s, root, host, _) = component_scope_stage4(
+        &[class_rule("card-host", "background-color", "#00ff00")],
+        &[class_rule("gic-body", "background-color", "#0000ff")],
+    );
+    let entries = &s.scene.as_ref().unwrap().dynamic_rules.entries;
+    let page_anchored = entries.iter().filter(|e| e.scope_root == root).count();
+    let host_anchored = entries.iter().filter(|e| e.scope_root == host).count();
+    assert_eq!(page_anchored, 1, "page rule wraps scope_root=instance root");
+    assert_eq!(host_anchored, 1, "scope rule anchors scope_root=host");
+}
+
+/// 页面规则样式化 host 本体（HOST_IN_PARENT_SCOPE：host 归页面作用域），
+/// 且组件锚定规则不落在 host 上（shadow 规则不样式化 host，同 DOM :host 才行）。
+#[test]
+fn page_rules_style_host_but_scope_rules_do_not() {
+    // 页面规则 .card-host 绿 + 锚定规则 .card-host 蓝（锚 host）——host 只吃页面绿
+    let (mut s, _root, host, _) = component_scope_stage4(
+        &[class_rule("card-host", "background-color", "#00ff00")],
+        &[class_rule("card-host", "background-color", "#0000ff")],
+    );
+    rematch_pseudo_classes(s.scene.as_mut().unwrap());
+    let bg = s
+        .scene
+        .as_ref()
+        .unwrap()
+        .get(host)
+        .unwrap()
+        .style
+        .background_color;
+    assert_eq!(
+        bg,
+        Some([0.0, 1.0, 0.0, 1.0]),
+        "host styled by PAGE rule (green), not scope rule (blue)"
+    );
+}
+
+/// 展开域内部子被锚定规则样式化（蓝），页面规则穿透不进（隔离正面 + 反面）。
+#[test]
+fn scope_rules_style_internals_page_rules_isolated() {
+    // 正面：锚定 .gic-body 蓝 → inner 蓝
+    let (mut s, _root, _host, inner) = component_scope_stage4(
+        &[],
+        &[class_rule("gic-body", "background-color", "#0000ff")],
+    );
+    rematch_pseudo_classes(s.scene.as_mut().unwrap());
+    let bg = s
+        .scene
+        .as_ref()
+        .unwrap()
+        .get(inner)
+        .unwrap()
+        .style
+        .background_color;
+    assert_eq!(
+        bg,
+        Some([0.0, 0.0, 1.0, 1.0]),
+        "anchored rule styles internals"
+    );
+
+    // 反面：页面 .gic-body 红（scope_root=实例根）→ inner 不命中（scope=host ≠ root）
+    let (mut s2, _r2, _h2, inner2) = component_scope_stage4(
+        &[class_rule("gic-body", "background-color", "#ff0000")],
+        &[],
+    );
+    rematch_pseudo_classes(s2.scene.as_mut().unwrap());
+    let bg2 = s2
+        .scene
+        .as_ref()
+        .unwrap()
+        .get(inner2)
+        .unwrap()
+        .style
+        .background_color;
+    assert_eq!(bg2, None, "page rule must NOT pierce component boundary");
+}
+
+/// clone_subtree 保真组件展开域：scope 三标记 + custom_tag 拷贝，锚定规则重锚到克隆 host。
+#[test]
+fn clone_subtree_preserves_component_scope() {
+    let (mut s, root, host_orig, _) = component_scope_stage4(
+        &[],
+        &[class_rule("gic-body", "background-color", "#0000ff")],
+    );
+    let clone_root = s.clone_subtree(root).unwrap();
+    let host_clone = s.scene.as_ref().unwrap().get(clone_root).unwrap().children[0];
+    assert_ne!(host_orig, host_clone, "clone host is a distinct node");
+    // 标记 + custom_tag
+    let flags = s
+        .scene
+        .as_ref()
+        .unwrap()
+        .get(host_clone)
+        .unwrap()
+        .interaction
+        .flags;
+    assert!(flags.contains(NodeFlags::SCOPE_ROOT));
+    assert!(flags.contains(NodeFlags::HOST_IN_PARENT_SCOPE));
+    assert_eq!(
+        s.scene
+            .as_ref()
+            .unwrap()
+            .get(host_clone)
+            .unwrap()
+            .custom_tag
+            .as_deref(),
+        Some("game-item-card")
+    );
+    // 锚定规则重锚：克隆 host 有自己的规则副本，与源实例隔离
+    let entries = &s.scene.as_ref().unwrap().dynamic_rules.entries;
+    assert!(
+        entries.iter().any(|e| e.scope_root == host_clone),
+        "scoped rules re-anchored to clone host"
+    );
+    assert!(
+        entries.iter().any(|e| e.scope_root == host_orig),
+        "original anchored rules kept"
+    );
+}
+
+/// L3 查找边界：页面级 find_node_by_id_in_subtree 不穿透组件展开域内部；
+/// host 自身 id 可命中；host 内部 Get 照常。find_node_by_id_in_own_scope 多实例不串。
+#[test]
+fn lookup_boundary_l3_component_scope() {
+    // 组件树带 id：host id="card"，inner id="inner-badge"
+    let page_rules: Vec<DynamicRule> = vec![];
+    let scope_rules: Vec<DynamicRule> = vec![];
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    let pkg = component_scope_pkg(&page_rules, &scope_rules);
+    s.load_package("bag", &pkg).unwrap();
+    let root = s.instantiate("bag", "page").unwrap();
+    let host = s.scene.as_ref().unwrap().get(root).unwrap().children[0];
+    let inner = s.scene.as_ref().unwrap().get(host).unwrap().children[0];
+    s.scene.as_mut().unwrap().get_mut(host).unwrap().id_attr = Some("card".into());
+    s.scene.as_mut().unwrap().get_mut(inner).unwrap().id_attr = Some("inner-badge".into());
+    let scene = s.scene.as_ref().unwrap();
+    // 页面级：host 自身可命中（Shadow DOM：host 在 light tree）
+    assert_eq!(
+        scene.find_node_by_id_in_subtree(root, "card"),
+        Some(host),
+        "host itself is page-visible"
+    );
+    // 页面级：内部 id 不穿透
+    assert_eq!(
+        scene.find_node_by_id_in_subtree(root, "inner-badge"),
+        None,
+        "page-level find must NOT pierce component host"
+    );
+    // host 内部：正常命中
+    assert_eq!(
+        scene.find_node_by_id_in_subtree(host, "inner-badge"),
+        Some(inner),
+        "inside-scope find works"
+    );
+}
+
+/// find_node_by_id_in_own_scope 多实例不串：同模板两实例共享内部 id，
+/// 各自从 host 解析命中本实例的节点（aria-controls 的多实例安全地基）。
+#[test]
+fn own_scope_lookup_multi_instance_no_cross_talk() {
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    let pkg = component_scope_pkg(&[], &[]);
+    s.load_package("bag", &pkg).unwrap();
+    let root1 = s.instantiate("bag", "page").unwrap();
+    let root2 = s.instantiate("bag", "page").unwrap();
+    let inner1 = {
+        let scene = s.scene.as_mut().unwrap();
+        let host1 = scene.get(root1).unwrap().children[0];
+        scene.get_mut(host1).unwrap().id_attr = Some("card".into());
+        let i1 = scene.get(host1).unwrap().children[0];
+        scene.get_mut(i1).unwrap().id_attr = Some("dup-badge".into());
+        let host2 = scene.get(root2).unwrap().children[0];
+        scene.get_mut(host2).unwrap().id_attr = Some("card2".into());
+        let i2 = scene.get(host2).unwrap().children[0];
+        scene.get_mut(i2).unwrap().id_attr = Some("dup-badge".into());
+        i1
+    };
+    let scene = s.scene.as_ref().unwrap();
+    let host2 = scene.get(root2).unwrap().children[0];
+    // 从实例 2 的 host 解析 "dup-badge" → 实例 2 的 inner（不是全局首匹配的实例 1）
+    assert_eq!(
+        scene.find_node_by_id_in_own_scope(host2, "dup-badge"),
+        Some(scene.get(host2).unwrap().children[0]),
+        "own-scope resolution must hit the SAME instance, not global first match"
+    );
+    let _ = inner1;
 }

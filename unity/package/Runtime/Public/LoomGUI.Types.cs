@@ -86,7 +86,6 @@ namespace LoomGUI
     public enum AlignItems { Unset, Stretch, FlexStart, FlexEnd, Center, Baseline }
     public enum Overflow { Unset, Visible, Clip, Auto, Scroll }
     public enum PositionMode { Unset, Static, Relative, Absolute }
-    public enum Visibility { Unset, Visible, Hidden }
     public enum ScrollBehavior { Instant, Smooth }   // 方法参数，非 Style 属性，无需 Unset
 
     // 指针键：对齐 web MouseEvent.button（0=左/1=中/2=右）但用枚举自解释。

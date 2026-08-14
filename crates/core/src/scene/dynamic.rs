@@ -18,7 +18,7 @@ use crate::asset::ControlInit;
 use crate::scene::node::{
     ControlState, EditState, Node, NodeFlags, NodeId, NodeInteraction, NodeKind, Rect, Scene,
 };
-use crate::style::dynamic::{inline_bit, InlineSet};
+use crate::style::dynamic::{inline_bit, InlineSet, ScopedRule};
 use crate::style::mapping::apply_decl;
 use crate::style::resolved::{DisplayMode, OverflowMode, ResolvedStyle};
 use crate::tween::TweenManager;
@@ -123,6 +123,7 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         dirty_text,
         classes: Vec::new(),
         id_attr: None,
+        custom_tag: None,
         interaction: NodeInteraction {
             flags: NodeFlags::empty(),
             touchable,
@@ -198,6 +199,7 @@ pub fn create_node_from_template(
         dirty_text,
         classes: Vec::new(),
         id_attr: None,
+        custom_tag: None,
         interaction: NodeInteraction {
             flags: NodeFlags::empty(),
             touchable,
@@ -309,7 +311,9 @@ pub fn create_node_from_template(
 /// 递归克隆子树：返回游离新根（parent=None，不挂树，调用方 append_child 挂载）。
 ///
 /// side table 判定（list spec §6）：
-/// 拷贝：kind/classes/id_attr/base_style/text_contents/image_srcs/roles（模板化数据，克隆出新实例）。
+/// 拷贝：kind/classes/id_attr/custom_tag/base_style/text_contents/image_srcs/roles + 作用域三标记
+///   （SCOPE_ROOT/LOOKUP_SCOPE/HOST_IN_PARENT_SCOPE，结构语义；交互态位不拷）+ 子树内锚定的
+///   ScopedRule 重锚到克隆对应节点（组件展开域规则随实例走）。
 ///   roles = RoleTable 条目（role/data-slot 标注），role-driven 控件部件定位 + 语义分派用；
 ///   不克隆则 list item 模板里的 progressbar fill 等部件丢失定位 → 渲染回退默认。
 /// 不拷贝：scroll/anim/tweens/EditState/text_layouts/focused_node/事件订阅（运行时状态——
@@ -322,6 +326,33 @@ pub fn create_node_from_template(
 /// 控件槽（scene.controls），控件运行时值（progressbar.value/slider.value 等）不随克隆迁移。
 /// RoleTable 复制只解锁 role/slot 定位路径；完整视觉正确性需后续补 ControlState 克隆/re-init。
 pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
+    let mut id_map: std::collections::HashMap<NodeId, NodeId> = std::collections::HashMap::new();
+    let new_root = clone_node_inner(scene, src, &mut id_map);
+    // 组件展开域规则重锚：源子树内锚定的 ScopedRule（scope_root ∈ 子树，即展开 host 的组件
+    // 内部规则）按 id_map 克隆到新子树对应 host——克隆出的组件实例与源实例 scope 隔离。
+    // 全局规则（scope_root=INVALID）与子树外锚定规则（如页面根）不在 map，天然跳过：
+    // 后者对克隆节点依旧按外层 scope 匹配，语义不变。
+    let extra: Vec<ScopedRule> = scene
+        .dynamic_rules
+        .entries
+        .iter()
+        .filter_map(|sr| {
+            id_map.get(&sr.scope_root).map(|&new_anchor| ScopedRule {
+                rule: sr.rule.clone(),
+                scope_root: new_anchor,
+            })
+        })
+        .collect();
+    scene.dynamic_rules.entries.extend(extra);
+    new_root
+}
+
+/// clone_node_recursive 的递归体：id_map 记录 源NodeId → 克隆NodeId（规则重锚用）。
+fn clone_node_inner(
+    scene: &mut Scene,
+    src: NodeId,
+    id_map: &mut std::collections::HashMap<NodeId, NodeId>,
+) -> NodeId {
     // 先取出源节点的不可变快照（kind/base_style/classes/id_attr/text/image_srcs/rich_text_block），
     // drop 借后再可变借建新节点——避免边读边写 scene 的借用冲突。
     let (
@@ -329,6 +360,8 @@ pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
         base_style,
         classes,
         id_attr,
+        custom_tag,
+        scope_flags,
         content,
         src_path,
         role_info,
@@ -336,11 +369,17 @@ pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
         rich_text_block,
     ) = {
         let n = scene.get(src).expect("live src");
+        // 只拷贝作用域三标记（结构语义，克隆子树应与源同构）：HOVERED 等交互态位不拷
+        //（克隆是干净模板，运行时态由调用方重设——与 EditState/scroll 同口径）。
+        let scope_flags = n.interaction.flags
+            & (NodeFlags::SCOPE_ROOT | NodeFlags::LOOKUP_SCOPE | NodeFlags::HOST_IN_PARENT_SCOPE);
         (
             n.kind,
             n.base_style.clone(),
             n.classes.clone(),
             n.id_attr.clone(),
+            n.custom_tag.clone(),
+            scope_flags,
             scene.text_contents.get(&src).cloned(),
             scene.image_srcs.get(&src).cloned(),
             scene.roles.get(src).cloned(),
@@ -353,7 +392,9 @@ pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
         let n = scene.get_mut(new_id).unwrap();
         n.classes = classes;
         n.id_attr = id_attr;
+        n.custom_tag = custom_tag;
         n.rich_text_block = rich_text_block;
+        n.interaction.flags.insert(scope_flags);
     }
     if let Some(c) = content {
         scene.text_contents.insert(new_id, c);
@@ -369,10 +410,11 @@ pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
     if let Some(info) = role_info {
         scene.roles.insert(new_id, info);
     }
+    id_map.insert(src, new_id);
     // 递归克隆子（先 clone children，避免边迭代边改 slotmap 的借用冲突）。
     let children = scene.get(src).expect("live src").children.clone();
     for child in children {
-        let new_child = clone_node_recursive(scene, child);
+        let new_child = clone_node_inner(scene, child, id_map);
         scene.get_mut(new_id).unwrap().children.push(new_child);
         scene.get_mut(new_child).unwrap().parent = Some(new_id);
     }

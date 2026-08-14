@@ -951,12 +951,12 @@ fn text_shadow_empty_value_rejected() {
 
 #[test]
 fn background_linear_gradient_2_stops_four_dirs() {
-    // 4 正向 × 2 色 → 返 true 且 background_gradient 已设。
-    for (val, expected_dir) in [
-        ("to right", GradientDir::ToRight),
-        ("to left", GradientDir::ToLeft),
-        ("to top", GradientDir::ToTop),
-        ("to bottom", GradientDir::ToBottom),
+    // 4 正向关键字 × 2 色 → 归一化为角度（to top=0 / right=90 / bottom=180 / left=270）。
+    for (val, expected_angle) in [
+        ("to right", 90.0),
+        ("to left", 270.0),
+        ("to top", 0.0),
+        ("to bottom", 180.0),
     ] {
         let mut s = ResolvedStyle::default();
         let decl = format!("linear-gradient({val}, #ff0000, #0000ff)");
@@ -964,10 +964,17 @@ fn background_linear_gradient_2_stops_four_dirs() {
             apply_decl(&mut s, "background", &decl),
             "background: {decl} 应返回 true"
         );
-        let g = s.background_gradient.expect("gradient 已设");
-        assert_eq!(g.dir, expected_dir, "方向匹配 {val}");
-        assert_eq!(g.color_a, [1.0, 0.0, 0.0, 1.0], "color_a=红 (#ff0000)");
-        assert_eq!(g.color_b, [0.0, 0.0, 1.0, 1.0], "color_b=蓝 (#0000ff)");
+        let Gradient::Linear { angle_deg, stops } = s.background_gradient.expect("gradient 已设")
+        else {
+            panic!("关键字方向必须是 Linear");
+        };
+        assert!(
+            (angle_deg - expected_angle).abs() < 1e-4,
+            "{val} → {angle_deg}"
+        );
+        assert_eq!(stops.len(), 2);
+        assert_eq!(stops[0].color, [1.0, 0.0, 0.0, 1.0], "首 stop=红 (#ff0000)");
+        assert_eq!(stops[1].color, [0.0, 0.0, 1.0, 1.0], "末 stop=蓝 (#0000ff)");
     }
 }
 
@@ -983,61 +990,288 @@ fn background_image_linear_gradient_also_accepted() {
         ),
         "background-image: linear-gradient 应被接受"
     );
-    let g = s.background_gradient.expect("gradient 已设");
-    assert_eq!(g.dir, GradientDir::ToTop);
-    assert_eq!(g.color_a, [0.0, 1.0, 0.0, 1.0]);
+    let Gradient::Linear { angle_deg, .. } = s.background_gradient.as_ref().expect("gradient 已设")
+    else {
+        panic!()
+    };
+    assert!((angle_deg - 0.0).abs() < 1e-4);
+    assert_eq!(
+        s.background_gradient.as_ref().unwrap().stops()[0].color,
+        [0.0, 1.0, 0.0, 1.0]
+    );
 }
 
 #[test]
-fn background_linear_gradient_multi_stop_rejected() {
-    // >2 色 stop → 静默忽略（返 false），不设 gradient。
+fn background_linear_gradient_multi_stop_accepted() {
+    // 3+ stop（含显式位置 + rgba）→ 接受；位置默认值按 CSS 规则烘。
     let mut s = ResolvedStyle::default();
     assert!(
-        !apply_decl(
+        apply_decl(
             &mut s,
             "background",
-            "linear-gradient(to right, #ff0000, #00ff00, #0000ff)"
+            "linear-gradient(to right, #ff0000, rgba(0,255,0,0.5) 25%, #0000ff)"
         ),
-        "3 色 stop 围栏外 → false"
+        "多 stop 应被接受"
     );
-    assert!(s.background_gradient.is_none(), "多 stop 不设 gradient");
+    let Gradient::Linear { stops, .. } = s.background_gradient.expect("gradient 已设") else {
+        panic!()
+    };
+    assert_eq!(stops.len(), 3);
+    assert_eq!(stops[0].pos, 0.0, "首 stop 默认 0%");
+    assert!((stops[1].pos - 0.25).abs() < 1e-5, "显式 25%");
+    assert_eq!(stops[1].color, [0.0, 1.0, 0.0, 0.5]);
+    assert_eq!(stops[2].pos, 1.0, "末 stop 默认 100%");
 }
 
 #[test]
-fn background_linear_gradient_diagonal_angle_rejected() {
-    // 斜角度（45deg 等）→ 静默忽略（返 false）。
+fn background_linear_gradient_middle_defaults_to_midpoint() {
+    // 中间 stop 无位置 → 相邻已定位 stop 的中点（CSS 规范默认位置算法）。
     let mut s = ResolvedStyle::default();
-    assert!(
-        !apply_decl(
-            &mut s,
-            "background",
-            "linear-gradient(45deg, #ff0000, #0000ff)"
-        ),
-        "斜角度围栏外 → false"
-    );
-    assert!(s.background_gradient.is_none(), "斜角度不设 gradient");
+    assert!(apply_decl(
+        &mut s,
+        "background",
+        "linear-gradient(to bottom, #ff0000 20%, #00ff00, #0000ff 60%)"
+    ));
+    let Gradient::Linear { stops, .. } = s.background_gradient.expect("gradient 已设") else {
+        panic!()
+    };
+    assert_eq!(stops.len(), 3);
+    assert!((stops[0].pos - 0.2).abs() < 1e-5);
+    assert!((stops[1].pos - 0.4).abs() < 1e-5, "20% 与 60% 的中点 = 40%");
+    assert!((stops[2].pos - 0.6).abs() < 1e-5);
+}
+
+#[test]
+fn background_linear_gradient_diagonal_angle_accepted() {
+    // 任意角度（45deg / 137deg / 负角）→ 接受，归一化保存。
+    for (decl_val, expect) in [("45deg", 45.0), ("137deg", 137.0), ("-90deg", -90.0)] {
+        let mut s = ResolvedStyle::default();
+        assert!(
+            apply_decl(
+                &mut s,
+                "background",
+                &format!("linear-gradient({decl_val}, #ff0000, #0000ff)")
+            ),
+            "{decl_val} 应被接受"
+        );
+        let Gradient::Linear { angle_deg, .. } = s.background_gradient.expect("gradient 已设")
+        else {
+            panic!()
+        };
+        assert!(
+            (angle_deg - expect).abs() < 1e-4,
+            "{decl_val} → {angle_deg}"
+        );
+    }
+}
+
+#[test]
+fn background_linear_gradient_default_direction_is_to_bottom() {
+    // 无方向首参 → CSS 默认 to bottom（180deg）。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(
+        &mut s,
+        "background",
+        "linear-gradient(#ff0000, #0000ff)"
+    ));
+    let Gradient::Linear { angle_deg, .. } = s.background_gradient.expect("gradient 已设") else {
+        panic!()
+    };
+    assert!((angle_deg - 180.0).abs() < 1e-4);
+}
+
+#[test]
+fn background_gradient_transparent_keyword() {
+    // `transparent`（home 光晕用法）= rgba(0,0,0,0)。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(
+        &mut s,
+        "background",
+        "linear-gradient(to right, #ff0000, transparent)"
+    ));
+    let stops = &s.background_gradient.as_ref().unwrap().stops();
+    assert_eq!(stops[1].color, [0.0, 0.0, 0.0, 0.0]);
 }
 
 #[test]
 fn background_linear_gradient_named_color_rejected() {
-    // parse_color 仅认 hex（3/6/8 位）；命名色（red/blue）→ 解析失败 → 整体返 false。
+    // parse_color 仅认 hex/rgb()/transparent；命名色（red/blue）→ 整体返 false。
     let mut s = ResolvedStyle::default();
     assert!(
         !apply_decl(&mut s, "background", "linear-gradient(to right, red, blue)"),
-        "命名色围栏外（仅 #rrggbb）→ false"
+        "命名色围栏外 → false"
     );
     assert!(s.background_gradient.is_none());
 }
 
 #[test]
-fn background_linear_gradient_one_stop_rejected() {
-    // 仅 1 色 stop → 段数 < 3 → 拒收。
+fn background_linear_gradient_one_stop_accepted_as_solid() {
+    // 单 stop = 纯色填充（CSS 合法语义），pos=0。
     let mut s = ResolvedStyle::default();
+    assert!(apply_decl(
+        &mut s,
+        "background",
+        "linear-gradient(to right, #ff0000)"
+    ));
+    let Gradient::Linear { stops, .. } = s.background_gradient.expect("gradient 已设") else {
+        panic!()
+    };
+    assert_eq!(stops.len(), 1);
+    assert_eq!(stops[0].pos, 0.0);
+}
+
+#[test]
+fn background_linear_gradient_nine_stops_rejected() {
+    // > GRADIENT_MAX_STOPS（8）→ 拒收（FFI grad_params 列定长 8 槽）。
+    let mut s = ResolvedStyle::default();
+    let stops = (0..9)
+        .map(|i| format!("#0000{}0f", i))
+        .collect::<Vec<_>>()
+        .join(", ");
     assert!(
-        !apply_decl(&mut s, "background", "linear-gradient(to right, #ff0000)"),
-        "1 色 stop 围栏外 → false"
+        !apply_decl(
+            &mut s,
+            "background",
+            &format!("linear-gradient(to right, {stops})")
+        ),
+        "9 stops 围栏外 → false"
     );
     assert!(s.background_gradient.is_none());
+}
+
+#[test]
+fn background_linear_gradient_corner_keyword_rejected() {
+    // `to top right` 角点方向 defer → 拒收（围栏外显式 false，非静默错向）。
+    let mut s = ResolvedStyle::default();
+    assert!(!apply_decl(
+        &mut s,
+        "background",
+        "linear-gradient(to top right, #ff0000, #0000ff)"
+    ));
+    assert!(s.background_gradient.is_none());
+}
+
+#[test]
+fn background_radial_default_shape() {
+    // 无配置首参 → ellipse + farthest-corner + 50% 50%（CSS 默认）。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(
+        &mut s,
+        "background",
+        "radial-gradient(#ff0000, #0000ff)"
+    ));
+    let Gradient::Radial {
+        extent,
+        center,
+        stops,
+    } = s.background_gradient.expect("gradient 已设")
+    else {
+        panic!("radial-gradient 必须解析成 Radial")
+    };
+    assert!(matches!(extent, RadialExtent::FarthestCorner));
+    assert_eq!(center, [GradCoord::Pct(0.5), GradCoord::Pct(0.5)]);
+    assert_eq!(stops.len(), 2);
+    assert_eq!(stops[0].pos, 0.0);
+    assert_eq!(stops[1].pos, 1.0);
+}
+
+#[test]
+fn background_radial_shape_and_size_keywords() {
+    for (cfg, expect) in [
+        ("circle", RadialExtent::FarthestCorner),
+        ("circle closest-side", RadialExtent::ClosestSide),
+        ("ellipse farthest-side", RadialExtent::FarthestSide),
+        ("closest-corner", RadialExtent::ClosestCorner),
+    ] {
+        let mut s = ResolvedStyle::default();
+        assert!(
+            apply_decl(
+                &mut s,
+                "background",
+                &format!("radial-gradient({cfg}, #ff0000, #0000ff)")
+            ),
+            "{cfg} 应被接受"
+        );
+        let Gradient::Radial { extent, .. } = s.background_gradient.expect("gradient 已设")
+        else {
+            panic!()
+        };
+        assert_eq!(extent, expect, "{cfg}");
+    }
+}
+
+#[test]
+fn background_radial_home_halo_syntax() {
+    // home .root 光晕原句：双长度椭圆 + at 负百分比 + 带位置 stop + transparent。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(
+        &mut s,
+        "background-image",
+        "radial-gradient(1100px 560px at 82% -12%, rgba(95,180,212,0.10), transparent 60%)"
+    ));
+    let Gradient::Radial {
+        extent,
+        center,
+        stops,
+    } = s.background_gradient.expect("gradient 已设")
+    else {
+        panic!()
+    };
+    assert_eq!(extent, RadialExtent::Explicit(Some(1100.0), Some(560.0)));
+    assert_eq!(center, [GradCoord::Pct(0.82), GradCoord::Pct(-0.12)]);
+    assert_eq!(stops.len(), 2);
+    assert_eq!(
+        stops[0].color,
+        [95.0 / 255.0, 180.0 / 255.0, 212.0 / 255.0, 0.10]
+    );
+    assert_eq!(stops[1].color, [0.0; 4]);
+    assert!((stops[1].pos - 0.6).abs() < 1e-5);
+}
+
+#[test]
+fn background_radial_single_length_is_circle() {
+    // 单长度 = 正圆半径（rx=ry）。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(
+        &mut s,
+        "background",
+        "radial-gradient(100px at 30% 40px, #ff0000, #0000ff)"
+    ));
+    let Gradient::Radial { extent, center, .. } = s.background_gradient.expect("gradient 已设")
+    else {
+        panic!()
+    };
+    assert_eq!(extent, RadialExtent::Explicit(Some(100.0), None));
+    assert_eq!(center, [GradCoord::Pct(0.3), GradCoord::Px(40.0)]);
+}
+
+#[test]
+fn background_radial_malformed_rejected() {
+    // 坏语法：未知关键字 / 残缺 at / 位置不是 % 或 0 → false。
+    for bad in [
+        "radial-gradient(to right, #ff0000, #0000ff)", // to 方向是 linear 语法
+        "radial-gradient(circle at, #ff0000, #0000ff)", // at 残缺
+        "radial-gradient(circle 50%, #ff0000, #0000ff)", // 百分比尺寸围栏外
+        "radial-gradient(#ff0000, red)",               // 命名色
+    ] {
+        let mut s = ResolvedStyle::default();
+        assert!(!apply_decl(&mut s, "background", bad), "{bad} → false");
+        assert!(s.background_gradient.is_none(), "{bad} 不设 gradient");
+    }
+}
+
+#[test]
+fn background_conic_and_repeating_rejected() {
+    // conic / repeating-* 显式 defer → 拒收。
+    for bad in [
+        "conic-gradient(#ff0000, #0000ff)",
+        "repeating-linear-gradient(to right, #ff0000, #0000ff)",
+        "repeating-radial-gradient(#ff0000, #0000ff)",
+    ] {
+        let mut s = ResolvedStyle::default();
+        assert!(!apply_decl(&mut s, "background", bad), "{bad} → false");
+        assert!(s.background_gradient.is_none());
+    }
 }
 
 #[test]

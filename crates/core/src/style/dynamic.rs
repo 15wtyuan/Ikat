@@ -274,39 +274,39 @@ pub fn compound_matches_node(c: &Compound, node_id: NodeId, scene: &Scene) -> bo
         // fence 列出的、且在运行时成为 Node 的每个 tag 都有对应 arm，使任何通过围栏的 tag
         // 选择器在 rematch 仍命中。
         //
-        // 例外：
-        //  - CustomElement：作者写的自定义元素 tag 含连字符（如 `<my-widget>`），NodeKind 只记
-        //    CustomElement 一个判别值、丢弃原始 tag 名，无法逆推。因此带连字符的自定义 tag
-        //    选择器在 rematch 不会命中（围栏放行，运行时退回 div）。要支持需在 NodeKind 侧保留
-        //    原始 tag 字面值，属于已知限制，非本映射 bug。
-        let kind_tag = match node.kind {
-            NodeKind::Container => "div",
-            NodeKind::Button => "button",
-            NodeKind::Image => "img",
-            NodeKind::TextNode | NodeKind::TextElement => "span",
-            NodeKind::TextArea => "textarea",
-            NodeKind::Dropdown => "select",
-            NodeKind::OptionItem => "option",
-            NodeKind::ListItem => "li",
-            NodeKind::ListView => "ul",
-            NodeKind::Slot => "slot",
-            // <template> 已进场景树（强制 display:none），保留逆映射使 `template` tag 选择器可命中。
-            NodeKind::Template => "template",
-            // role 驱动控件（TabList/Tab）无专属 tag，逆映射取最接近的宿主 tag：
-            //  - TabList → div（容器宿主，与 ListView 同）；
-            //  - Tab → button（settings.html 用 <button role=tab>，点击语义同 Button）。
-            // 作者几乎不靠 tag 选择器选 tab，role/class 选择器不受影响。
-            NodeKind::TabList => "div",
-            NodeKind::Tab => "button",
-            // input 变体：type 在 parse 期固化为独立 kind，tag 统一为 "input"
-            NodeKind::TextField
-            | NodeKind::NumberField
-            | NodeKind::Slider
-            | NodeKind::Toggle
-            | NodeKind::RadioButton => "input",
-            NodeKind::ProgressBar => "progress",
-            // CustomElement：原始带连字符 tag 已在 NodeKind 中丢失，无法逆推（见上方注释）。
-            NodeKind::CustomElement => "div",
+        // tag 匹配值：CustomElement 有 custom_tag 时用原始 hyphen 字面值（pkg v35 组件展开
+        // 保留；`game-item-card { ... }` 选择器命中 host），否则按 kind 逆映射。
+        let kind_tag = match node.custom_tag.as_deref() {
+            Some(tag) => tag,
+            None => match node.kind {
+                NodeKind::Container => "div",
+                NodeKind::Button => "button",
+                NodeKind::Image => "img",
+                NodeKind::TextNode | NodeKind::TextElement => "span",
+                NodeKind::TextArea => "textarea",
+                NodeKind::Dropdown => "select",
+                NodeKind::OptionItem => "option",
+                NodeKind::ListItem => "li",
+                NodeKind::ListView => "ul",
+                NodeKind::Slot => "slot",
+                // <template> 已进场景树（强制 display:none），保留逆映射使 `template` tag 选择器可命中。
+                NodeKind::Template => "template",
+                // role 驱动控件（TabList/Tab）无专属 tag，逆映射取最接近的宿主 tag：
+                //  - TabList → div（容器宿主，与 ListView 同）；
+                //  - Tab → button（settings.html 用 <button role=tab>，点击语义同 Button）。
+                // 作者几乎不靠 tag 选择器选 tab，role/class 选择器不受影响。
+                NodeKind::TabList => "div",
+                NodeKind::Tab => "button",
+                // input 变体：type 在 parse 期固化为独立 kind，tag 统一为 "input"
+                NodeKind::TextField
+                | NodeKind::NumberField
+                | NodeKind::Slider
+                | NodeKind::Toggle
+                | NodeKind::RadioButton => "input",
+                NodeKind::ProgressBar => "progress",
+                // CustomElement 无 custom_tag（动态建树等未带字面值路径）退回 div 宿主。
+                NodeKind::CustomElement => "div",
+            },
         };
         if kind_tag != t.as_str() {
             return false;
@@ -596,10 +596,24 @@ fn parent_in_scope(scene: &Scene, node: NodeId, scope_bound: NodeId) -> Option<N
 /// 计算每节点的所属作用域根（沿父链最近的 SCOPE_ROOT，含自身）。无作用域根祖先 → INVALID。
 /// 每帧 rematch 调一次，O(节点 × 深度)；scope 校验快路径用此表 O(1) 查。
 /// 根节点通常由 create_root/instantiate 打 SCOPE_ROOT，故多数节点能命中某作用域根。
+/// 例外：组件展开域 host（SCOPE_ROOT + HOST_IN_PARENT_SCOPE）对自己的边界不生效——
+/// 起步就跳到父节点（host 归外层页面作用域，页面规则可样式化 host 本体；后代不受影响，
+/// 它们沿父链首个命中的仍是 host）。
 fn compute_scope_map(scene: &Scene, node_ids: &[NodeId]) -> HashMap<NodeId, NodeId> {
     let mut map = HashMap::with_capacity(node_ids.len());
     for &id in node_ids {
-        let mut cur = Some(id);
+        // 起始节点自身是 host → 自己的 SCOPE_ROOT 不算，从父链续走。
+        let start = match scene.get(id) {
+            Some(n)
+                if n.interaction
+                    .flags
+                    .contains(NodeFlags::SCOPE_ROOT | NodeFlags::HOST_IN_PARENT_SCOPE) =>
+            {
+                n.parent
+            }
+            _ => Some(id),
+        };
+        let mut cur = start;
         let mut found = NodeId::INVALID;
         while let Some(nid) = cur {
             if let Some(n) = scene.get(nid) {
@@ -1193,6 +1207,47 @@ mod tests {
                 value: val.to_string(),
             }],
         }
+    }
+
+    /// CustomElement tag 选择器：`game-item-card { ... }` 命中带 custom_tag 字面值的 host
+    ///（pkg v35 组件展开保留）；`div` 不命中（tag 匹配走字面值而非 kind 逆映射）。
+    #[test]
+    fn custom_tag_selector_matches_host() {
+        let mut s = btn_scene();
+        let hid = btn_id(&s);
+        {
+            let n = s.get_mut(hid).unwrap();
+            n.kind = NodeKind::CustomElement;
+            n.custom_tag = Some("game-item-card".to_string());
+        }
+        push_global(
+            &mut s,
+            rule("game-item-card", "background-color", "#0000ff"),
+        );
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(
+            s.get(hid).unwrap().style.background_color,
+            Some([0.0, 0.0, 1.0, 1.0]),
+            "hyphen tag selector matches custom_tag literal"
+        );
+    }
+
+    #[test]
+    fn custom_tag_selector_div_does_not_match_host() {
+        let mut s = btn_scene();
+        let hid = btn_id(&s);
+        {
+            let n = s.get_mut(hid).unwrap();
+            n.kind = NodeKind::CustomElement;
+            n.custom_tag = Some("game-item-card".to_string());
+        }
+        push_global(&mut s, rule("div", "background-color", "#ff0000"));
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(
+            s.get(hid).unwrap().style.background_color,
+            None,
+            "div selector must NOT match a tagged CustomElement"
+        );
     }
 
     #[test]

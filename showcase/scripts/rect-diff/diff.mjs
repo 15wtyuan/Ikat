@@ -63,6 +63,24 @@ const browserAll = JSON.parse(readFileSync(browserPath, 'utf8'))
 const coreAll = JSON.parse(readFileSync(corePath, 'utf8'))
   .filter((e) => e && e.tag !== '#text');
 
+// 0x0 boxes (display:none / parked template slots / collapsed) are enumerated
+// differently per side — the browser lists every DOM element including hidden
+// ones, core only emits what it laid out — so feeding them into the idless
+// index-aligned buckets misaligns every later pair in the bucket (one extra
+// hidden option in the browser shifts all real pairs). Drop browser-side 0x0
+// entirely; on the core side keep 0x0 spans — those are rich-text folded
+// inlines (public tree keeps the node, rect collapses to 0x0 by design) that
+// must still pair with the browser's real inline box so comparePair can
+// classify them as FOLDED instead of leaving them unpaired.
+const bZero = browserAll.filter((e) => e.w === 0 && e.h === 0 && !e.id);
+const cZero = coreAll.filter(
+  (e) => e.w === 0 && e.h === 0 && !e.id && e.tag !== 'span'
+);
+const browserPairable = browserAll.filter((e) => !(e.w === 0 && e.h === 0 && !e.id));
+const corePairable = coreAll.filter(
+  (e) => !(e.w === 0 && e.h === 0 && !e.id && e.tag !== 'span')
+);
+
 // Partition into id-keyed map and idless buckets keyed by tag+sorted-classes.
 // Classes are sorted so {row,card} and {card,row} collapse to the same bucket.
 const bucketKey = (e) => `${e.tag}|${[...(e.classes ?? [])].sort().join(',')}`;
@@ -82,8 +100,8 @@ function partition(els) {
   return { byId, idless };
 }
 
-const b = partition(browserAll);
-const c = partition(coreAll);
+const b = partition(browserPairable);
+const c = partition(corePairable);
 
 const FIELDS = ['x', 'y', 'w', 'h'];
 
@@ -100,9 +118,19 @@ function label(e, side) {
 const diffLines = [];
 const unmatchedLines = [];
 const idlessUnpairedLines = [];
+const foldedLines = [];
 let diffCount = 0;
 
 function comparePair(bEl, cEl) {
+  // Rich-text inline spans fold into the parent block run in core (task-1 text
+  // model): the public tree keeps the span's id but its rect is 0x0 by design
+  // — the browser measures it as a real inline box. Report as informational
+  // FOLDED, not a diff; there is nothing to align.
+  const coreEmpty = cEl.w === 0 && cEl.h === 0;
+  if (coreEmpty && (cEl.tag === 'span' || cEl.tag === '#text')) {
+    foldedLines.push(`${label(bEl, 'b')}: folded inline span (core rect 0x0 by design, browser ${Math.round(bEl.w)}x${Math.round(bEl.h)})`);
+    return;
+  }
   // Text elements (span = TextElement, the visible-text container; #text is
   // pre-filtered but kept here defensively) get the wider text tolerance to
   // absorb font-metric drift between browser fonts and LoomGUI runtime shaping.
@@ -114,9 +142,8 @@ function comparePair(bEl, cEl) {
   // Skip x/y when either side is 0-size; w/h is always compared so a genuine
   // visible-vs-hidden collapse still surfaces as a real diff.
   const bEmpty = bEl.w === 0 && bEl.h === 0;
-  const cEmpty = cEl.w === 0 && cEl.h === 0;
   for (const f of FIELDS) {
-    if ((f === 'x' || f === 'y') && (bEmpty || cEmpty)) continue;
+    if ((f === 'x' || f === 'y') && (bEmpty || coreEmpty)) continue;
     const bv = bEl[f];
     const cv = cEl[f];
     if (typeof bv !== 'number' || typeof cv !== 'number') continue;
@@ -149,7 +176,13 @@ for (const k of allBuckets) {
   const bRem = bList.slice(pairCount);
   const cRem = cList.slice(pairCount);
   for (const e of bRem) idlessUnpairedLines.push(`${label(e, 'b')}: browser-only (idless bucket ${k})`);
-  for (const e of cRem) idlessUnpairedLines.push(`${label(e, 'c')}: core-only (idless bucket ${k})`);
+  // Core-side 0x0 remainders stay silent: they are hidden-panel / parked /
+  // folded spans whose browser counterparts were already excluded by the 0x0
+  // filter above, so an unpaired line here is structural, not layout signal.
+  for (const e of cRem) {
+    if (e.w === 0 && e.h === 0) continue;
+    idlessUnpairedLines.push(`${label(e, 'c')}: core-only (idless bucket ${k})`);
+  }
 }
 
 // Grouped output for readability.
@@ -165,6 +198,13 @@ if (idlessUnpairedLines.length) {
   console.log('--- IDLESS-UNPAIRED (no id; tag+classes bucket count mismatch) ---');
   for (const l of idlessUnpairedLines) console.log(l);
 }
+if (foldedLines.length) {
+  console.log('--- FOLDED (core rich-text inline spans; rect 0x0 by design) ---');
+  for (const l of foldedLines) console.log(l);
+}
+if (bZero.length || cZero.length) {
+  console.log(`(0x0 idless boxes excluded from pairing: browser ${bZero.length}, core ${cZero.length})`);
+}
 
 // Exit code deliberately excludes idless-unpaired: a non-zero count there is
 // structurally expected (core's component wrappers, domIndex
@@ -172,6 +212,6 @@ if (idlessUnpairedLines.length) {
 // DIFFS on paired elements and id-mismatched UNMATCHED entries fail the gate.
 const failing = diffCount + unmatchedLines.length;
 console.log(
-  `\nsummary: ${diffCount} rect diffs, ${unmatchedLines.length} unmatched, ${idlessUnpairedLines.length} idless-unpaired`
+  `\nsummary: ${diffCount} rect diffs, ${unmatchedLines.length} unmatched, ${idlessUnpairedLines.length} idless-unpaired, ${foldedLines.length} folded`
 );
 process.exit(failing > 0 ? 1 : 0);

@@ -38,11 +38,12 @@ pub enum CssValueParser {
     TextShadow,
     Transition,
     Animation,
-    Gradient2,
+    /// `background-image` 值域：`none` / `url()` / `linear-gradient()` / `radial-gradient()`。
+    /// 渐变子集校验走 core `parse_gradient` 探针（单一解析真相源，见 css_resolve）。
+    BackgroundImage,
     TextEffect,
     TextStroke,
     BackgroundClipText,
-    Url,
     Raw,
 }
 
@@ -337,7 +338,7 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         name: "background-image",
         default: "none",
         inherited: false,
-        parser: CssValueParser::Url,
+        parser: CssValueParser::BackgroundImage,
     },
     CssPropSpec {
         name: "background-size",

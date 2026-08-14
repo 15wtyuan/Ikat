@@ -108,7 +108,15 @@ pub fn dump_scene_json(scene: &Scene) -> String {
         s.push_str(&format!(
             r#"{{"node_id":{},"parent":{},"tag":"{}","id":"{}","classes":"{}","kind":"{}","layout":{{"x":{},"y":{},"w":{},"h":{}}},"world_matrix":[{},{},{},{},{},{}],"anim_tr":{},"anim_op":{},"visible":{}}}"#,
             n.id.0, n.parent.map(|p| p.0.to_string()).unwrap_or("-1".into()),
-            tag, id, classes, kind_str,
+            // CustomElement：tag 用 custom_tag 字面值（rect-diff 与浏览器侧 hyphen 原文配对；
+            // normalize-dump-scene KIND_TAG 同口径），无字面值退逆映射。
+            match n.kind {
+                NodeKind::CustomElement => {
+                    json_escape(n.custom_tag.as_deref().unwrap_or(tag))
+                }
+                _ => tag.to_string(),
+            },
+            id, classes, kind_str,
             n.layout_rect.x, n.layout_rect.y, n.layout_rect.w, n.layout_rect.h,
             wm[0], wm[1], wm[2], wm[3], wm[4], wm[5],
             anim_tr, op_str,

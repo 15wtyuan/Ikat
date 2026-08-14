@@ -1,4 +1,7 @@
 use super::*;
+use crate::style::dynamic::{
+    Combinator, Compound, Declaration, DynamicRule, ParsedSelector, Specificity,
+};
 
 /// 辅助：构造一个最小 TemplateNode（默认值）。
 fn tn(kind: NodeKind) -> TemplateNode {
@@ -17,6 +20,8 @@ fn tn(kind: NodeKind) -> TemplateNode {
         data_slot: None,
         aria_controls: None,
         rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
     }
 }
 
@@ -50,6 +55,8 @@ fn write_package_panics_when_string_table_exhausted() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         });
     }
     let rules = empty_rules();
@@ -345,6 +352,7 @@ fn read_rejects_cross_component_parent() {
     //   v24 加 control_init_len(4) + control_init_blob（None = 1B），故固定部分 +5B。
     //   v28 加 role_idx(2) + data_slot_idx(2) 于 control_init_blob 后，固定部分再 +4B。
     //   v29 加 aria_controls_idx(2)（TabList），固定部分再 +2B。
+    //   v35 加 custom_tag_idx(2)（CustomElement 标签），固定部分再 +2B。
     let style_len_0 = u32::from_le_bytes(
         bytes[nodeblock_off + 5..nodeblock_off + 9]
             .try_into()
@@ -356,7 +364,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node0_size = 22 + style_len_0 + 2 * class_count_0 + 5 + 6;
+    let node0_size = 22 + 2 + style_len_0 + 2 * class_count_0 + 5 + 6;
     let node1_off = nodeblock_off + node0_size;
     let style_len_1 =
         u32::from_le_bytes(bytes[node1_off + 5..node1_off + 9].try_into().unwrap()) as usize;
@@ -365,7 +373,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node1_size = 22 + style_len_1 + 2 * class_count_1 + 5 + 6;
+    let node1_size = 22 + 2 + style_len_1 + 2 * class_count_1 + 5 + 6;
     let node2_off = nodeblock_off + node0_size + node1_size;
     // 篡改节点 2（comp_b root）的 parent_idx 从 -1 → 0（< base=2，跨组件）
     let mut patched = bytes.clone();
@@ -479,6 +487,8 @@ fn template_node_content_src_roundtrip_via_pkg() {
         data_slot: None,
         aria_controls: None,
         rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
     };
     let nodes = [text, img];
     let rules = empty_rules();
@@ -541,6 +551,8 @@ fn v18_nontrivial_nodekinds_roundtrip() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         };
         let empty_rules = DynamicRuleTable { rules: vec![] };
         let input = PackageInput {
@@ -769,8 +781,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 33,
-        "pkg format version must be 33 after rich_text_block flag bump (v29 aria_controls feature persists)"
+        PKG_FORMAT_VERSION, 35,
+        "pkg format version must be 35 after component-system bump (v29 aria_controls feature persists)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -833,8 +845,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 33,
-        "pkg format version must be 33 after rich_text_block flag bump"
+        PKG_FORMAT_VERSION, 35,
+        "pkg format version must be 35 after component-system bump"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -974,8 +986,8 @@ fn pkg_v32_rejects_v31() {
 #[test]
 fn pkg_v33_roundtrip_preserves_rich_text_block() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 33,
-        "pkg format version must be 33 after rich_text_block flag bump"
+        PKG_FORMAT_VERSION, 35,
+        "pkg format version must be 35 after component-system bump"
     );
     // 根节点 rich_text_block=true（rich-text-block 容器根），子节点 flag=false（叶子）。
     let mut root = tn(NodeKind::Container);
@@ -1012,5 +1024,224 @@ fn pkg_v33_rejects_v32() {
     assert!(
         matches!(err, Err(PkgError::TooOld(32))),
         "v32 pkg must be rejected as TooOld after v33 bump, got {err:?}"
+    );
+}
+
+// ── v34: background_gradient → Gradient（radial + 多 stop + 任意角度）──────
+
+/// v34: 新 Gradient 模型（linear 多 stop 任意角度 / radial 显式椭圆 + at 负百分比）经完整
+/// pkg.bin 路径（write_package → read_package）往返保真。style_blob 是整个 ResolvedStyle
+/// 的 bincode，Gradient 布局变（Gradient2 → enum）即 pkg bump 根因。
+#[test]
+fn pkg_v34_roundtrip_preserves_gradient() {
+    assert_eq!(
+        PKG_FORMAT_VERSION, 35,
+        "pkg format version must be 35 after component-system bump"
+    );
+    use crate::style::resolved::{GradCoord, Gradient, GradientStop, RadialExtent};
+    let mut root = tn(NodeKind::Container);
+    root.style.background_gradient = Some(Gradient::Radial {
+        extent: RadialExtent::Explicit(Some(1100.0), Some(560.0)),
+        center: [GradCoord::Pct(0.82), GradCoord::Pct(-0.12)],
+        stops: vec![
+            GradientStop {
+                color: [0.373, 0.706, 0.831, 0.1],
+                pos: 0.0,
+            },
+            GradientStop {
+                color: [0.0; 4],
+                pos: 0.6,
+            },
+        ],
+    });
+    let mut child = tn(NodeKind::Container);
+    child.style.background_gradient = Some(Gradient::Linear {
+        angle_deg: 137.0,
+        stops: vec![
+            GradientStop {
+                color: [1.0, 0.0, 0.0, 1.0],
+                pos: 0.0,
+            },
+            GradientStop {
+                color: [0.0, 1.0, 0.0, 0.5],
+                pos: 0.25,
+            },
+            GradientStop {
+                color: [0.0, 0.0, 1.0, 1.0],
+                pos: 1.0,
+            },
+        ],
+    });
+    child.parent_idx = Some(0);
+    let nodes = [root, child];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+    };
+    let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
+    let ns = &pkg.components["c"].nodes;
+    assert_eq!(
+        ns[0].style.background_gradient, nodes[0].style.background_gradient,
+        "radial（home 光晕原句参数）round-trip 保真"
+    );
+    assert_eq!(
+        ns[1].style.background_gradient, nodes[1].style.background_gradient,
+        "linear 多 stop + 任意角度 round-trip 保真"
+    );
+}
+
+/// v34: version=33 的 pkg 加载报 TooOld（MIN=MAX=34，无迁移器——ResolvedStyle bincode
+/// 布局变，旧 reader 半读半坏不如拒载）。v34 bump 后 showcase 须重打。
+#[test]
+fn pkg_v34_rejects_v33() {
+    let mut bad = vec![];
+    bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
+    bad.extend_from_slice(&33u32.to_le_bytes()); // v33 < MIN_VERSION=34
+    let err = read_package(&bad);
+    assert!(
+        matches!(err, Err(PkgError::TooOld(33))),
+        "v33 pkg must be rejected as TooOld after v34 bump, got {err:?}"
+    );
+}
+
+// ── v35: custom_tag + component_scope + PerComponentScopes（组件展开域）────────────────
+
+/// v35: 手选 class 选择器（asset 测试无 parse 依赖路径，最小 Compound 构造）。
+fn v35_class_rule(class: &str, prop: &str, val: &str) -> DynamicRule {
+    DynamicRule {
+        selector: ParsedSelector {
+            raw: format!(".{class}"),
+            compound: vec![Compound {
+                tag: None,
+                classes: vec![class.to_string()],
+                id: None,
+                combinator: Combinator::Descendant,
+                pseudo_hover: false,
+                pseudo_active: false,
+                pseudo_disabled: false,
+                pseudo_focus: false,
+                pseudo_nth_child: None,
+                attrs: vec![],
+            }],
+            specificity: Specificity(0, 1, 0),
+        },
+        declarations: vec![Declaration {
+            prop: prop.to_string(),
+            value: val.to_string(),
+        }],
+    }
+}
+
+/// v35: TemplateNode.custom_tag / component_scope + ComponentTemplate.component_scopes
+/// 经完整 pkg.bin 路径（write_package_with_scopes → read_package）往返保真。
+/// 这是 Custom Element 打包期展开的数据地基（component-system spec §3）。
+#[test]
+fn pkg_v35_roundtrip_custom_tag_and_scopes() {
+    // 组件树：root(0) + host(1, component_scope + custom_tag) + host 内部子(2)
+    let root = tn(NodeKind::Container);
+    let mut host = tn(NodeKind::CustomElement);
+    host.parent_idx = Some(0);
+    host.custom_tag = Some("game-item-card".into());
+    host.component_scope = true;
+    let mut inner = tn(NodeKind::Container);
+    inner.parent_idx = Some(1);
+    inner.classes = vec!["gic-body".into()];
+    let nodes = [root, host, inner];
+    let empty = empty_rules();
+    // 页面规则表（空）+ 展开域锚定规则（组件内部规则，锚 host idx=1）
+    let scope_rules = DynamicRuleTable {
+        rules: vec![v35_class_rule("gic-body", "background-color", "#ff0000")],
+    };
+    let scope = ComponentScopeInput {
+        component: "page",
+        anchor_idx: 1,
+        rules: &scope_rules,
+    };
+    let input = PackageInput {
+        components: vec![("page", &nodes, &empty, &[])],
+    };
+    let pkg =
+        read_package(&write_package_with_scopes(&input, &[scope])).expect("roundtrip read ok");
+    let ct = &pkg.components["page"];
+    let back_host = &ct.nodes[1];
+    assert_eq!(back_host.kind, NodeKind::CustomElement);
+    assert_eq!(back_host.custom_tag.as_deref(), Some("game-item-card"));
+    assert!(
+        back_host.component_scope,
+        "host component_scope bit survives"
+    );
+    assert_eq!(ct.component_scopes.len(), 1);
+    let (anchor, rules) = &ct.component_scopes[0];
+    assert_eq!(*anchor, 1, "scope anchor idx roundtrips");
+    assert_eq!(rules.rules.len(), 1);
+    assert_eq!(rules.rules[0].selector.raw, ".gic-body");
+}
+
+/// v35: 无展开域组件（write_package 旧路径）读回空 component_scopes——统一布局 count=0 分支。
+#[test]
+fn pkg_v35_no_scopes_reads_empty() {
+    let node = tn(NodeKind::Container);
+    let nodes = [node];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+    };
+    let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
+    assert!(
+        pkg.components["c"].component_scopes.is_empty(),
+        "no scopes written → empty vec read back"
+    );
+}
+
+/// v35: 同组件两条展开域 + 第二组件零条（多组件混合布局的 section 顺序正确性）。
+#[test]
+fn pkg_v35_multi_scope_layout() {
+    let n0 = tn(NodeKind::Container);
+    let mut n1 = tn(NodeKind::CustomElement);
+    n1.parent_idx = Some(0);
+    n1.component_scope = true;
+    let mut n2 = tn(NodeKind::CustomElement);
+    n2.parent_idx = Some(0);
+    n2.component_scope = true;
+    let m0 = tn(NodeKind::Container);
+    let page_nodes = [n0, n1, n2];
+    let other_nodes = [m0];
+    let empty = empty_rules();
+    let input = PackageInput {
+        components: vec![
+            ("page", &page_nodes, &empty, &[]),
+            ("other", &other_nodes, &empty, &[]),
+        ],
+    };
+    let scopes = [
+        ComponentScopeInput {
+            component: "page",
+            anchor_idx: 1,
+            rules: &empty,
+        },
+        ComponentScopeInput {
+            component: "page",
+            anchor_idx: 2,
+            rules: &empty,
+        },
+    ];
+    let pkg = read_package(&write_package_with_scopes(&input, &scopes)).expect("roundtrip read ok");
+    let page = &pkg.components["page"];
+    assert_eq!(page.component_scopes.len(), 2);
+    assert_eq!(page.component_scopes[0].0, 1);
+    assert_eq!(page.component_scopes[1].0, 2);
+    assert!(pkg.components["other"].component_scopes.is_empty());
+}
+
+/// v35: version=34 的 pkg 加载报 TooOld（一刀切升，MIN=MAX=35，无迁移器）。
+#[test]
+fn pkg_v35_rejects_v34() {
+    let mut bad = vec![];
+    bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
+    bad.extend_from_slice(&34u32.to_le_bytes()); // v34 < MIN_VERSION=35
+    let err = read_package(&bad);
+    assert!(
+        matches!(err, Err(PkgError::TooOld(34))),
+        "v34 pkg must be rejected as TooOld after v35 bump, got {err:?}"
     );
 }

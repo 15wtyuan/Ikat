@@ -36,9 +36,9 @@
 
 把围栏 CSS 子集 + 公共 API 补到与设计契约对齐。缺口：
 
-- **视觉**：渐变（现仅 linear 2 色 4 方向；缺多 stop / 任意角度 / radial / conic；注 `background-clip:text` 机制已实现，受限于底层渐变）、`filter: blur()`（需离屏 RT 基建，非小缺口）、`grayed` 渲染（现借 `filter: grayscale(1)`）。
-- **复合 · scope 三件套**：`Get<T>` 的 `IsScopeRoot` 边界（现裸 DFS，穿透嵌套组件 / list item）、per-scope ID 去重（现全模板级）、Shadow DOM 样式隔离（现仅 dynamic rule 按 scope 过滤，非完整 cascade scoping）。
-- **复合 · 组件系统**：Custom Element + `<slot>` 内容投影（现空壳——fence 认 hyphen 标签 + `<slot>`，C# 有空类；无 `customElements.define` 注册表 / 投影 / 生命周期）。
+- **视觉**：~~渐变（现仅 linear 2 色 4 方向）~~ **radial + 多 stop + 任意角度已交付（2026-08-14，program=6/7 per-fragment shader + blob v13 grad_params）**；剩余 defer：conic、repeating-\*、渐变×圆角/边框共存（见延期项表）。`filter: blur()`（需离屏 RT 基建，非小缺口）、`grayed` 渲染（现借 `filter: grayscale(1)`）照旧。
+- ~~**复合 · scope 三件套**~~ **已交付（2026-08-14，组件系统）**：`Get<T>`/`Query` 按 `LOOKUP_SCOPE` 剪枝（不穿透嵌套组件/list item）、per-scope ID 去重（fence per-file + 展开域撞车检查）、Shadow DOM 样式隔离（pkg v35 锚定规则按展开实例包装；host 经 `HOST_IN_PARENT_SCOPE` 归页面域）。
+- ~~**复合 · 组件系统**~~ **已交付（2026-08-14，打包期展开）**：Custom Element 打包期展开（components/ 注册表 = `customElements.define` 角色）+ `<slot>` 投影（拼接位消费，产物无 Slot 节点）+ `CustomElement.Tag` typed 投影。C# 类绑定 / 生命周期回调 defer（见延期表）。spec：`docs/superpowers/specs/2026-08-14-component-system-design.md`。
 - **控件**：Tree（`role=tree`，无）。
 - **动画引擎终态**：池化 Tween + 缓动全集（cubic-bezier / Elastic / Bounce / per-stop timing）+ 链式 builder + layout 动画 prop_type 分层。进入判据：第一个需 layout 动画的页面，或动画并发使单 `Vec<Tween>` 抖动。
 - **文本模型收尾**：inline run 编译（TextRun / ImageRun / LinkRun），公共树保留 TextNode / TextElement / Image / Link 的 ID 和事件；`display:block` RichText 暗号已退役，收尾表达层。
@@ -78,7 +78,7 @@
 > 序列哲学：**先验证再扩展**（老 roadmap 核心教训）。T1 喂 T2（能力够才验收），T2 验过才 T3（核心稳了才铺第二引擎），T3 跑通才发版。
 
 - **里程碑 1 · Unity 收官** — 证明框架在 Unity 上完整可用。
-  - 视觉束补齐到 showcase 够用：渐变（radial + 多 stop，解 home 光晕等）。（`filter: blur()` 需离屏 RT 基建、非 showcase 阻塞，留后续。）
+  - 视觉束补齐到 showcase 够用：渐变（radial + 多 stop）✅ 代码侧 done（2026-08-14，Unity 视觉验收随任务 4 逐页过）。（`filter: blur()` 需离屏 RT 基建、非 showcase 阻塞，留后续。）
   - 8 页 showcase Unity 真机全跑通 + rect-diff 对齐浏览器。
   - 清家里机 PlayMode 验收债。
   - **门**：8 页真机全绿 + home radial 渐变可见 + rect-diff 通过。
@@ -99,24 +99,27 @@
 
 ## 近期任务（里程碑 1 展开）
 
-> 里程碑 1「Unity 收官」拆成 5 个有依赖序的可执行任务。**任务 1 文本模型已 done（代码侧）**，Unity 视觉 QA 留家里机；**任务 2 rect-diff 工具链 settings 页已就绪（🟡，Unity rect 半留任务 4）；下一件事 = 任务 3（渐变）/任务 4（逐页修）并行**。
+> 里程碑 1「Unity 收官」拆成 5 个有依赖序的可执行任务。**任务 1 文本模型已 done（代码侧）**，Unity 视觉 QA 留家里机；**任务 2 rect-diff 工具链 settings 页已就绪（🟡，Unity rect 半留任务 4）；任务 3 渐变补齐代码侧 done（Unity 视觉验收留家里机）；下一件事 = 任务 4（逐页修，依赖 1+2+3 已齐）+ 任务 5（独立可插）**。
 
 **任务 1 · 文本模型回归标准子树（inline flow）**【✅ done · 2026-08-12】
 - **落地**：fence 6.4 分类（rich-text-block + mixed 报错 + img 豁免）→ pkg v33 + `Node.rich_text_block` → run 编译器（`compile_rich_runs`）→ solve 折叠（RichText leaf + `rich_text_fingerprint` memo）→ render Container+flag arm（多 run mesh + box-shadow）→ `hit_test_rich` + FFI。详见 spec `docs/superpowers/specs/2026-08-12-text-model-design.md` + plan `docs/superpowers/plans/2026-08-12-text-model.md`（9 task SDD，全部 per-task + final review APPROVED）。
 - **实证**：packer showcase 0 mixed；`dump_rich_text` 实测 mail 正文 7 inline 子→1 行（非竖排），公共树 ID 保留。workspace 1506 测全绿。
 - **门**：✅ 代码侧全绿。⏳ Unity PlayMode 视觉 QA（form/mail inline flow 浏览器对齐 + span click via hit_test_rich + rect-diff）留家里机。
 
-**任务 2 · rect-diff 工具链打通一页**【🟡 工具链就绪 · 2026-08-12】
-- browser rect 已有（`showcase/scripts/rect-diff/browser-rect.mjs`，headless Chrome 导出 DOM rect）；core dump 路径已打通（`dump_page --json` 接 `diff.mjs` 比对）。Unity rect（`DumpSceneJson` debug accessor 导出 render rect）半留任务 4。
+**任务 2 · rect-diff 工具链打通一页**【🟢 编码机侧全通 · 2026-08-14】
+- browser rect 已有（`showcase/scripts/rect-diff/browser-rect.mjs`，headless Chrome 导出 DOM rect）；core dump 路径已打通（`dump_page --json` 接 `diff.mjs` 比对）。**Unity PlayMode 运行时 rect 路径已接**（`run-page.sh --scene=`：Unity 机 `LoomBridge.DumpScene()` 导出 → `normalize-dump-scene.mjs` 归一 → diff；编码机 round-trip 自测通过，待 Unity 机首跑）。
 - **门**：rect-diff 在一页产比对报告。（工具链可先搭，但结果要等任务 1 文本对了才有意义。）
-- **进度（2026-08-12）**：settings 页端到端跑通——browser-rect → **core dump（`dump_page --json`，非 Unity rect 路径）** → diff.mjs 三步 runner（`run-page.sh`）产报告 `snapshot-2026-08-12-settings.md`，门「报告产出」✅ 达成。4 处工具链修复（合成根 DFS / 0-size 原点 / preview letterbox）剔 206 假 diff，剩 12 残余（slider thumb transform 发射缺口 / CJK 字宽 / sub-2px 级联）全归类为 Task 4 燃料，**settings 零 core 布局 bug**。Unity rect 半（原 `DumpSceneJson` 路径）仍未接；12 残余随 Task 4 逐页修。
+- **进度（2026-08-12）**：settings 页端到端跑通——browser-rect → **core dump（`dump_page --json`，非 Unity rect 路径）** → diff.mjs 三步 runner（`run-page.sh`）产报告 `snapshot-2026-08-12-settings.md`，门「报告产出」✅ 达成。4 处工具链修复（合成根 DFS / 0-size 原点 / preview letterbox）剔 206 假 diff，剩 12 残余（slider thumb transform 发射缺口 / CJK 字宽 / sub-2px 级联）全归类为 Task 4 燃料，**settings 零 core 布局 bug**。
+- **进度（2026-08-14，8 页全量）**：全部 8 页 core-dump 路径跑通（报告 `snapshot-2026-08-14-8pages.md`），工具链再净化 5 处（tag 词汇表归一 / preview JS 保留但撤销 data-fill 克隆 / 0×0 不进配对桶 / FOLDED 类别 / preview-base.css 补 workspace 字体）——unpaired 噪声 106→2。**8 页 0 unmatched、无结构性分歧、零疑似 core 布局 bug**；475 残余全归四类（文本测量精度差 / TextElement inline 盒宽语义 / slider thumb transform 发射缺口 / template 枚举差），A 类容差定标与 B 类潜在视觉风险留任务 4 / dogfood 逼出再定。
 
-**任务 3 · 渐变补齐（home radial 光晕 + 多 stop）**
-- fence 接 `radial-gradient` + `linear-gradient` 多 stop / 任意角度（现仅 linear 2 色 4 正交方向）；core render；radial 需 Unity shader program（per-vertex 做不了）。
-- **门**：home radial 光晕 Unity 可见 + 多 stop 渐变 rect 对齐浏览器。可与任务 1-2 并行。
+**任务 3 · 渐变补齐（home radial 光晕 + 多 stop）**【✅ 代码侧 done · 2026-08-14】
+- **落地**：`Gradient` 数据模型（linear 任意角度 + 多 stop ≤8 / radial 全形）替换 `Gradient2`（pkg v34）；渲染统一 program=6/7 per-fragment 渐变 shader（blob v13 grad_params 列 208B；premultiplied 插值 + bg-color 垫底 source-over 合成）；文本渐变 CPU 采样与 shader 同一套 t 数学；fence `<style>` 渐变值探针（坏渐变打包期报）。spec 见 `docs/superpowers/specs/2026-08-14-gradient-radial-multistop-design.md`。
+- **实证**：cargo workspace 1533 测全绿（clippy/fmt 严门过）；dotnet 三套 410 测全绿（fixture 重打 v34 + 顺手修了 test.workspace 撞 fence 6.4 的存量问题）；`dump_page` 渐变参数 dump——lab 页 20 节点（角度归一/多 stop 等分/显式位置/radial 各形）+ home 光晕（c=1574.4,-129.6 / 1100×560 / 0.1→transparent@0.6）全部正确；Chrome 基准截图 3 张入库 `showcase/scripts/gradient-baseline/`。
+- **门**：✅ 代码侧全绿（多 stop rect 对齐浏览器留 rect-diff 逐页跑，归任务 4）。⏳ Unity PlayMode 视觉验收（lab section 12 标本矩阵 + home 光晕 + 渐变字）留家里机——shader 纸面设计，GRADIENT 变体首次编译在 Unity 机。
 
 **任务 4 · 逐页 Unity PlayMode 真机 + rect-diff（8 页）**
-- 依赖任务 1（文本）+ 2（工具链）+ 3（渐变，home 要）。按依赖排：先静态页（settings/character/shop/form/lab）→ 再虚拟列表页（mail/inventory）→ home（动画 + 渐变）。
+- 依赖任务 1（文本）+ 2（工具链）+ 3（渐变，home 要）——三者代码侧均已 done。按依赖排：先静态页（settings/character/shop/form/lab）→ 再虚拟列表页（mail/inventory）→ home（动画 + 渐变）。
+- **编码机半场（2026-08-14）已完工**：8 页 core-dump 路径 rect-diff 全绿收敛（见任务 2 进度）——**core 侧零布局 bug**，残余全归工具链无关的度量/语义类别；PlayMode 运行时比对路径（`--scene=`）也已接好待 Unity 机首跑。Unity 机剩：每页 PlayMode 跑通 + `--scene=` 导出比对 + driver 列表虚拟化验收 + lab/home 容差定标。
 - 每页：PlayMode 跑通 → rect-diff 比对 → 修 bug → 下一页。
 - **门**：8 页真机全绿 + rect-diff 通过。
 
@@ -128,10 +131,13 @@
 
 ---
 
-## 当前快照（2026-08-12，时点状态）
+## 当前快照（2026-08-14，时点状态）
 
 - 摸黑打通 + 三束加宽纪元已完工（详见 `roadmap_old.md`）：Unity 端到端可用，21 控件全栈、cascade / 动画 / 虚拟列表 / box-shadow / 文字特效 / transform / filter 矩阵已交付，release CI 就绪。
-- **近期优先**：**里程碑 1 任务 1（文本模型 inline flow）代码侧 done**（commit `5a9cfafc` + `458d8ce9` GUI exe）；**任务 2 rect-diff 工具链 settings 页端到端跑通**（core-dump 路径，报告入库，2026-08-12）—— 12 残余 + Unity rect 半留 Task 4。下一件事 = **任务 3（渐变补齐，home 依赖）与任务 4（逐页修）并行推进**。
+- **近期优先**：**里程碑 1 任务 1（文本模型）+ 任务 3（渐变补齐：radial + 多 stop + 任意角度，program=6/7 shader）代码侧均 done**（任务 3：commit 见 spec `2026-08-14-gradient-radial-multistop-design.md`，pkg v34 + blob v13 + dll/GUI exe 已同步入库）；**任务 2 rect-diff 工具链 settings 页端到端跑通**（core-dump 路径，2026-08-12）—— 12 残余 + Unity rect 半留 Task 4。**下一件事 = 任务 4（逐页修，1+2+3 依赖已齐）与任务 5（清验收债，独立）**。
+- **横切收尾（2026-08-14）**：公共 API FFI 批四件接通（NumberField bounds setter / ProgressBar.IsIndeterminate / RadioButton.Name / UIContext.Pick，见延期表）；CI 补 dotnet 门（HeadlessTests 现场 Linux .so 跑 P/Invoke 全套 + PublicApi 编译门——此前 CI 只跑纯 managed 31 测，HeadlessTests 曾随 pkg 版本漂移静默腐烂无人知）。
+- **rect-diff 8 页全量（2026-08-14）**：任务 2/4 编码机半场完工——8 页 core-dump 路径 0 unmatched / 零疑似 core 布局 bug（报告 `snapshot-2026-08-14-8pages.md`），工具链净化 5 处（tag 归一 / data-fill 撤销 / 0×0 桶 / FOLDED / workspace 字体）。**Unity 机剩任务 4 的真机半 + 任务 5 验收债 + 任务 3 渐变视觉验收。**
+- **复合束组件系统（2026-08-14，8 task SDD 全绿）**：Custom Element 打包期展开落地——components/ 注册表（Package 注册表 = `customElements.define` 角色）+ slot 投影（编译期糖，产物无 Slot 节点）+ 硬墙作用域（host 归页面域 / 投影内容归组件域，pkg v35 PerComponentScopes 锚定规则）+ L3 查找边界（Get/Query 不穿透，aria-controls 多实例安全）+ `CustomElement.Tag`。showcase 落地：page-top ×6 页 + stat-bar ×3 + item-card（lab）；6 变更页 rect-diff 0 unmatched / 0 idless-unpaired。里程碑 2 门「scope 三件套完成」判据已满足；剩 C# 类绑定 defer（dogfood 触发）。
 - **悬置判据项**：动画引擎终态（等 layout 动画需求）、Godot / 编辑器（等里程碑 1、2）。
 
 ---
@@ -155,21 +161,17 @@
 - 判据：将来需要时，与 `aria-controls` 同机制一并补。
 - 来源：`2026-08-04-m3-tablist` §11。
 
-**组件封装三件套（L2 + L3）** — `Get<T>` 的 `IsScopeRoot` 完整边界（不穿透嵌套组件 / list item）+ per-scope ID 去重（真嵌套组件语义）+ Shadow DOM 样式隔离（模板内选择器作用域）。三者同一套系统。
-- 判据：第一个嵌套组件 / 需样式隔离的组件系统。
-- 来源：`2026-08-05-pooled-slot-lifecycle` §5.1、§5.4、§8。
-
-**Slot / CustomElement 投影 + 注册机制** — 复合束 `<slot>` 内容投影 + `customElements.define` 注册表 + 生命周期（C# 投影类已是空壳占位）。
-- 判据：复合束组件系统推进时。
-- 来源：`2026-07-28-controls-debt-and-dropdown` §3.3、§11。
+**组件 C# 类绑定 + 生命周期回调** — `UIContext.RegisterComponent<T>("tag")`（fgui extensionCreator 等价）+ OnConnected/OnDisconnected 回调 + 实例化时 eager 构造 wrapper。打包期展开已交付（tag→typed CustomElement 投影 + 硬墙作用域 + slot 投影），类绑定是运行时绑定层，契约未承诺（public-api 无 RegisterComponent）。
+- 判据：dogfood 小游戏逼出（组件行为逻辑重复到值得 typed 子类时）。
+- 来源：component-system spec §2.8（2026-08-14）。
 
 **layout 动画 / prop_type 分层** — 动画 layout 属性（width/height/flex，非只渲染层 transform/opacity/color）——需 `prop_type` 分层（`transform_dirty` vs `layout_dirty`）+ tick 时序重构 + solve 重入。
 - 判据：第一个需 layout 动画的页面（如 accordion 展开 / 用 width 而非 scaleX 的进度条）。
 - 来源：`2026-08-04-m2-keyframes-runtime` §1.3、§3.2、§12。
 
-**视觉：渐变补全** — radial-gradient（现静默丢弃）+ 多 stop / 任意角度（现仅 linear 2 色 4 正交方向）+ conic。
-- 判据：showcase home radial 光晕 / 真有渐变 UI 需求（里程碑 1 已拉）。
-- 来源：`2026-08-09-box-shadow-multilayer-inset-blur` §1.1、§2.2。
+**视觉：渐变剩余形态** — radial + 多 stop + 任意角度已交付（2026-08-14，见里程碑 1 任务 3）。剩余 defer：`conic-gradient` / `repeating-linear/radial-gradient`（围栏打包期拒收，判据：第一个真需要的 UI）；渐变 × 圆角 / 九宫格 / 边框共存（`use_gradient` 门互斥，共存需混合 mesh 或边框独立 draw call，判据：第一个圆角渐变按钮 UI）；`to top right` 角点方向关键字；>8 stops（FFI grad_params 列定长 8 槽）。
+- 判据：上述形态被 showcase / dogfood 逼出时。
+- 来源：`2026-08-14-gradient-radial-multistop-design.md` §2/§10。
 
 **视觉：`filter:blur()` 任意内容模糊（需离屏 RT 基建）** — 任意内容模糊需离屏 RenderTexture 基建；box-shadow 的 SDF 模糊只覆盖圆角矩形形状，覆盖不了任意内容。
 - 判据：真有内容模糊 / 视觉后处理需求（基建级，非小缺口）。
@@ -192,11 +194,12 @@
 - 来源：`2026-08-04-m3-tablist` §3.2、§11。
 
 **公共 API NE stub 接线（public-api audit triage，2026-08-11）** — `Public/LoomGUI.*.cs` 残留 `throw NE()` 的公共 API，按 core/FFI 支持分档处置（详情见 public-api audit）。
-- ✅ **已接（本轮）**：`Container.ScrollTo`、`Button.Disabled`（FFI 已有，C# 漏接，坑 191 模式）。
-- 🔧 **FFI 批**（core 有数据，补 FFI + C#，小活，一批做）：`NumberField.Min/Max/Step setter`（FFI arm 漏 NumberField）、`ProgressBar.IsIndeterminate`、`RadioButton.Name`（get）、`UIContext.Pick`（core hit_test FFI 包装）。
-- 🟡 **按域 defer**（core 也没，真 feature）：`Touchable`/`ZIndex`（扩 inline_bit 表，归 T1）、`Focusable`（runtime tabindex setter，T1）、`Dropdown.SelectedValue`（option `value` 存储，T1）、`SetVar`/`RemoveVar` + `StyleSheet.Add`/`Clear`（custom props 系统 + runtime CSS parser，归 T1 运行时 CSS 大件）、`OnUpdate` + `CallLater`/`CallNextFrame`（per-frame hook + 延迟回调队列，归 T× 框架基础设施）、`UnloadPackage`（包生命周期，归 T2）、`GetTemplate`（归 T1 Custom Element 组件系统）、`ListView.ItemExitClass`（归 T1 list 进出场动画）。
-- 🔴 **砍出契约**：`NodeStyle.Visibility`（fence CSS 子集无 `visibility` prop，`opacity:0` 覆盖占位隐藏；public-api.md 已删，C# enum/property 代码删除 follow-up）。
-- 判据：FFI 批下次一轮做；按域 defer 随各自 track 推进。
+- ✅ **已接（2026-08-11）**：`Container.ScrollTo`、`Button.Disabled`（FFI 已有，C# 漏接，坑 191 模式）。
+- ✅ **已接（2026-08-14，FFI 批）**：`NumberField.Min/Max/Step` setter（FFI arm 扩 NumberField，改界后 value 文本重约束）、`ProgressBar.IsIndeterminate`（新 get/set FFI，纯状态位）、`RadioButton.Name`（新 get_radio_name 双调法 FFI）、`UIContext.Pick`（新 loomgui_stage_hit_test，thumb sentinel decode 回容器）。dll/bindings 已同步入库。
+- ✅ **已接（2026-08-14，Touchable）**：`Node.Touchable`（CSS `pointer-events` 运行时面；core apply_decl 早有分支，补 Stage::set_node_touchable 双写 interaction+base_style + FFI + C#）。
+- 🟡 **按域 defer**（core 也没，真 feature）：`ZIndex`（core 无 stacking 语义——`order` 只是 flex 排序；inline_bit 表已满（1<<31），真做需 sort_key 公共化设计，T1 视觉层推进时）、`Focusable`（runtime tabindex setter，T1）、`Dropdown.SelectedValue`（option `value` 存储，T1）、`SetVar`/`RemoveVar` + `StyleSheet.Add`/`Clear`（custom props 系统 + runtime CSS parser，归 T1 运行时 CSS 大件）、`OnUpdate` + `CallLater`/`CallNextFrame`（per-frame hook + 延迟回调队列，归 T× 框架基础设施）、`UnloadPackage`（包生命周期，归 T2）、`GetTemplate`（归 T1 Custom Element 组件系统）、`ListView.ItemExitClass`（归 T1 list 进出场动画）。
+- ✅ **已删（2026-08-14）**：`NodeStyle.Visibility`（fence CSS 子集无 `visibility` prop，`opacity:0` 覆盖占位隐藏）——C# enum / NodeStyle property / CssValueConvert 分支 / 相关测试全部移除，公共 API 与契约对齐。
+- 判据：按域 defer 随各自 track 推进。
 - 来源：public-api.md audit（2026-08-11，triage agent）。
 
 ### T2 · 验收 + 发布

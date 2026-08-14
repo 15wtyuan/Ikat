@@ -5,6 +5,24 @@
   src: url('../../res/fonts/LXGWWenKai.ttf') format('truetype');
   font-display: block;
 }
+/* Workspace font families pages reference by name (loom.workspace.json fonts):
+   without these the browser preview silently falls back to system fonts,
+   and rect-diff baselines diverge from core's real-font measurements. */
+@font-face {
+  font-family: 'JetBrainsMono';
+  src: url('../../res/fonts/JetBrainsMono.ttf') format('truetype');
+  font-display: block;
+}
+@font-face {
+  font-family: 'PressStart2P';
+  src: url('../../res/fonts/PressStart2P.ttf') format('truetype');
+  font-display: block;
+}
+@font-face {
+  font-family: 'DejaVuSans';
+  src: url('../../res/fonts/DejaVuSans.ttf') format('truetype');
+  font-display: block;
+}
 /* No tag-level display polyfill: fence DisplayDefault matches the browser
    (div/ul/li -> block, span/button/... -> inline), and the
    runtime resolves inline -> Flex+Row. Authors must declare display:flex

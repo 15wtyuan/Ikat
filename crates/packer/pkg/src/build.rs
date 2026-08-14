@@ -8,10 +8,13 @@ use serde::Serialize;
 
 use crate::atlas::collect::collect_pngs;
 use crate::atlas::pack::pack_atlas;
-use crate::bridge::{bridge, translate_keyframes};
+use crate::bridge::translate_keyframes;
+use crate::expand::{bridge_with_components, ComponentRegistry};
 use crate::runtime::{RuntimeFont, RuntimeManifest, RUNTIME_FILE};
 use crate::workspace::{load_workspace, PackageCfg};
-use loomgui_core::asset::{write_package, PackageInput, TemplateNode};
+use loomgui_core::asset::{
+    write_package_with_scopes, ComponentScopeInput, PackageInput, TemplateNode,
+};
 use loomgui_core::scene::KeyframesRule;
 use loomgui_core::style::dynamic::DynamicRuleTable;
 use std::path::Path;
@@ -107,12 +110,34 @@ pub struct PackResult {
 /// fence Error 级 diagnostic → Err（不静默降级；Warning 级不阻断打包，收集进返回值
 /// `warnings` 供 CLI/GUI 呈现）。bridge 多根 → Err（不静默产森林）。
 pub fn pack_components(components: &[Component]) -> Result<PackResult, String> {
-    let mut built: Vec<(
-        String,
-        Vec<TemplateNode>,
-        DynamicRuleTable,
-        Vec<KeyframesRule>,
-    )> = Vec::new();
+    pack_components_inner(components, &ComponentRegistry::empty())
+}
+
+/// 带 Custom Element 注册表的打包：hyphen 标签在打包期展开（slot 投影 + 展开域锚定
+/// 规则），见 expand.rs / component-system spec。注册表通常来自 build() 的
+/// components/ 目录扫描（scan_component_registry）；空注册表时退化为旧行为
+///（页面级 `<slot>` 仍报错）。
+pub fn pack_components_with_registry(
+    components: &[Component],
+    registry: &ComponentRegistry,
+) -> Result<PackResult, String> {
+    pack_components_inner(components, registry)
+}
+
+/// pack_components_inner 的累积条目：一个已 bridge 的页面组件（+ 组件展开域锚定规则）。
+struct BuiltComponent {
+    name: String,
+    nodes: Vec<TemplateNode>,
+    rules: DynamicRuleTable,
+    keyframes: Vec<KeyframesRule>,
+    scopes: Vec<(usize, DynamicRuleTable)>,
+}
+
+fn pack_components_inner(
+    components: &[Component],
+    registry: &ComponentRegistry,
+) -> Result<PackResult, String> {
+    let mut built: Vec<BuiltComponent> = Vec::new();
     let mut refs: Vec<String> = Vec::new();
     let mut warnings: Vec<PackWarning> = Vec::new();
     for comp in components {
@@ -160,50 +185,53 @@ pub fn pack_components(components: &[Component]) -> Result<PackResult, String> {
                     .map(|n| n.text.clone()),
             });
         }
-        // bridge 错误带组件名：多组件包里，否则 "多根" 之类错误无法定位是哪个组件。
-        let mut nodes =
-            bridge(&parsed).map_err(|e| format!("bridge error in component {name}: {e}"))?;
-        // pkg Image.src 归一为 sprite_key（workspace_root 相对，与 atlas key 口径一致）。
-        // bridge 存的是 HTML 原 src（如 ../res/icons/x.png），runtime SpriteResolver 拿原 src
-        // 查 atlas（key 是 res/icons/...）会 miss。refs（atlas 交叉验证）已归一；这里补 pkg
-        // src 字段本身——同一 normalize_sprite_key + html_rel，保 pkg 字段与 atlas key 一致。
-        for n in nodes.iter_mut() {
-            if let Some(s) = n.src.take() {
-                n.src = Some(normalize_sprite_key(html_rel, &s));
-            }
-            // background-image: url(...) 同样归一为 sprite_key。inline style 的 bg-image
-            // 经 css_resolve 烘进 base_style（路径为 HTML 原相对值如 ../res/icons/x.png），
-            // runtime SpriteResolver 拿未归一路径查 atlas（key 是 res/icons/...）会 miss
-            // → 后端回退白纹理。class 规则 bg-image 走 dynamic_rules（见下），不进这里。
-            if let Some(bg) = n.style.background_image.take() {
-                n.style.background_image = Some(normalize_bg_ref(html_rel, &bg, &mut refs));
+        // 组件展开 bridge（registry 为空时除页面级 <slot> 报错外与旧 bridge 等价）：
+        // 展开 CustomElement host + slot 投影 + 收集展开域锚定规则与组件动画。
+        let out = bridge_with_components(&parsed, html_rel, registry)
+            .map_err(|e| format!("bridge error in component {name}: {e}"))?;
+        // Image.src 归一化已在 walker emit 时按各文件 html_rel 完成（页面文件 + 展开的
+        // 组件文件各归各的——组件 src 相对组件文件，不能再按页面 html_rel 二次归一）。
+        // 组件 @keyframes 合并：宿主（页面文件）优先，展开引入的组件动画按名去重，
+        // 同名碰撞 → warning（页面与组件对同名动画意图不同，作者应显式改名）。
+        let mut keyframes = translate_keyframes(&parsed.keyframes);
+        let mut kf_names: std::collections::HashSet<String> =
+            keyframes.iter().map(|k| k.name.clone()).collect();
+        for kf in out.extra_keyframes {
+            if kf_names.insert(kf.name.clone()) {
+                keyframes.push(kf);
+            } else {
+                warnings.push(PackWarning {
+                    component: name.clone(),
+                    file: html_rel.clone(),
+                    line: 1,
+                    column: 1,
+                    code: "ComponentKeyframesNameCollision".to_string(),
+                    message: format!(
+                        "组件动画 `@keyframes {}` 与宿主（或先展开组件）同名——宿主优先，\
+                         组件侧被忽略；如需同时生效请改名",
+                        kf.name
+                    ),
+                    help: None,
+                });
             }
         }
-        // <style> 块 class 规则的 background-image / background url() 同样归一——runtime
+        // 页面文件 <style> class 规则的 background-image / background url() 归一——runtime
         // rematch 拿 declarations 的原始 url 值调 apply_decl，未归一会让 SpriteResolver miss
-        // （标本馆 .bg-cover/.bg-contain 白块根因：bg-image 在 class 规则里，不在 base_style）。
-        // linear-gradient 值无 url()，跳过（与 url 互斥）。
-        let mut dynamic_rules = parsed.dynamic_rules;
-        for r in dynamic_rules.iter_mut() {
-            for d in r.declarations.iter_mut() {
-                if (d.prop == "background-image" || d.prop == "background")
-                    && !d.value.trim().starts_with("linear-gradient(")
-                {
-                    if let Some(path) = loomgui_core::style::mapping::parse_url(&d.value) {
-                        let norm = normalize_bg_ref(html_rel, &path, &mut refs);
-                        d.value = format!("url(\"{norm}\")");
-                    }
-                }
-            }
-        }
-        built.push((
-            name.clone(),
-            nodes,
-            DynamicRuleTable {
-                rules: dynamic_rules,
-            },
-            translate_keyframes(&parsed.keyframes),
-        ));
+        // （坑 203：标本馆 .bg-cover/.bg-contain 白块——bg-image 在 class 规则里）。inline
+        // bg-image 与展开组件文件的规则已在 walker emit 时按各自 html_rel 归一（expand.rs），
+        // refs 收进 out.bg_refs。
+        let mut dynamic_rules = DynamicRuleTable {
+            rules: parsed.dynamic_rules,
+        };
+        normalize_bg_rules(&mut dynamic_rules, html_rel, &mut refs);
+        refs.extend(out.bg_refs);
+        built.push(BuiltComponent {
+            name: name.clone(),
+            nodes: out.nodes,
+            rules: dynamic_rules,
+            keyframes,
+            scopes: out.scopes,
+        });
         // img src 相对 HTML 文件；归一化为 sprite_key（相对 workspace_root，正斜杠），
         // 否则与 atlas collect 的 sprite_key 前缀不匹配 → 交叉验证挂。
         for img_src in &parsed.referenced_sprites {
@@ -213,18 +241,38 @@ pub fn pack_components(components: &[Component]) -> Result<PackResult, String> {
     // 同名组件：write_package 不查（返回 Vec<u8> 无 Result），read_package 运行时才
     // DupComponent 拒绝——产物是静默坏包。构建期 fail fast，给最早反馈。
     let mut seen = std::collections::HashSet::new();
-    for (name, _, _, _) in &built {
-        if !seen.insert(name.as_str()) {
-            return Err(format!("duplicate component name `{name}` in package"));
+    for b in &built {
+        if !seen.insert(b.name.as_str()) {
+            return Err(format!("duplicate component name `{}` in package", b.name));
         }
     }
     let comp_refs: Vec<(&str, &[TemplateNode], &DynamicRuleTable, &[KeyframesRule])> = built
         .iter()
-        .map(|(n, nodes, dr, keyframes)| (n.as_str(), nodes.as_slice(), dr, keyframes.as_slice()))
+        .map(|b| {
+            (
+                b.name.as_str(),
+                b.nodes.as_slice(),
+                &b.rules,
+                b.keyframes.as_slice(),
+            )
+        })
         .collect();
-    let bytes = write_package(&PackageInput {
-        components: comp_refs,
-    });
+    let scopes: Vec<ComponentScopeInput> = built
+        .iter()
+        .flat_map(|b| {
+            b.scopes.iter().map(|(anchor, rules)| ComponentScopeInput {
+                component: b.name.as_str(),
+                anchor_idx: *anchor,
+                rules,
+            })
+        })
+        .collect();
+    let bytes = write_package_with_scopes(
+        &PackageInput {
+            components: comp_refs,
+        },
+        &scopes,
+    );
     Ok(PackResult {
         bytes,
         referenced_sprites: refs,
@@ -286,15 +334,38 @@ fn stem(path: &str) -> String {
 /// `Component`-based 归约跨平台（Windows `\` 与 `/` 都正确迭代），输出统一正斜杠
 /// 与 `atlas/collect.rs` 的 sprite_key 口径一致（`replace('\\', "/")`）。
 /// 归一 background-image 路径为 sprite_key 并登记进 refs（atlas 交叉验证）。
-/// inline（base_style 已提取的路径）与 class 规则（url() 串里 parse_url 出的路径）共用——
-/// 抽出此 helper 避免两处各写 normalize_sprite_key + refs.push。
-fn normalize_bg_ref(html_rel: &str, path: &str, refs: &mut Vec<String>) -> String {
+/// inline（base_style 已提取的路径，walker emit 调）与 class 规则（url() 串里
+/// parse_url 出的路径，normalize_bg_rules 调）共用。pub(crate)：expand.rs walker 也调。
+pub(crate) fn normalize_bg_ref(html_rel: &str, path: &str, refs: &mut Vec<String>) -> String {
     let norm = normalize_sprite_key(html_rel, path);
     refs.push(norm.clone());
     norm
 }
 
-fn normalize_sprite_key(html_rel: &str, src: &str) -> String {
+/// 动态规则表里 background-image / background url() 声明值归一为 sprite_key（坑 203：
+/// class 规则 bg-image 走 dynamic_rules，runtime rematch 用原始值重放，未归一
+/// SpriteResolver miss → 白块）。linear-gradient 值无 url()，跳过（与 url 互斥）。
+/// 页面 <style>（build.rs）与展开组件 scope 规则（expand.rs）共用。
+pub(crate) fn normalize_bg_rules(
+    table: &mut DynamicRuleTable,
+    html_rel: &str,
+    refs: &mut Vec<String>,
+) {
+    for r in table.rules.iter_mut() {
+        for d in r.declarations.iter_mut() {
+            if (d.prop == "background-image" || d.prop == "background")
+                && !d.value.trim().starts_with("linear-gradient(")
+            {
+                if let Some(path) = loomgui_core::style::mapping::parse_url(&d.value) {
+                    let norm = normalize_bg_ref(html_rel, &path, refs);
+                    d.value = format!("url(\"{norm}\")");
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn normalize_sprite_key(html_rel: &str, src: &str) -> String {
     let base = Path::new(html_rel)
         .parent()
         .unwrap_or_else(|| Path::new(""));
@@ -416,6 +487,12 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
     // R3 rebuild: 重建 d8fe705 删掉的 HTML→pkg.bin 编排。fence + bridge 现已存在。
     // 必须在 Runtime manifest 之前：runtime.packages = report.packages.clone()，
     // 故先填 report.packages 再序列化 runtime（brief 原排序会让 runtime.packages 恒空）。
+    //
+    // Custom Element 注册表（components/ 目录扫描，main-design §7.4「Package 注册表承担
+    // customElements.define() 的角色」）：hyphen 标签打包期展开。组件文件 warning 一并呈现。
+    let (registry, comp_warnings) =
+        crate::expand::scan_component_registry(workspace_root, &ws.packages)?;
+    report.warnings.extend(comp_warnings);
     let mut all_refs: Vec<String> = Vec::new();
     for pkg in &ws.packages {
         let html_files = resolve_html_list(workspace_root, pkg)?;
@@ -441,7 +518,7 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
             bytes,
             referenced_sprites: refs,
             warnings: pkg_warnings,
-        } = pack_components(&comps)?;
+        } = pack_components_with_registry(&comps, &registry)?;
         let pkg_path = ui_dir.join(format!("{}.pkg.bin", pkg.name));
         std::fs::write(&pkg_path, &bytes)
             .map_err(|e| format!("write {}: {e}", pkg_path.display()))?;
@@ -455,6 +532,8 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
         ));
         all_refs.extend(refs);
     }
+    // 展开用到的组件的 sprite 引用并入交叉验证（未用组件是设计期存货，缺图不阻断）。
+    all_refs.extend(registry.used_refs());
 
     // ---------- Cross-validate: HTML refs must all be in some atlas ----------
     // 单向：html 引用的图必须在某 atlas；atlas 未引用的图合法（运行时动态图标）。

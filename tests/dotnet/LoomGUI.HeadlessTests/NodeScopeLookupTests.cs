@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Text;
 using LoomGUI.Bindings;
 using Xunit;
@@ -474,9 +474,12 @@ namespace LoomGUI.HeadlessTests
                             .Get<Container>("badge");
                         Assert.NotEqual(badge0._id, badge1._id);
 
-                        // root.Get 也命中（根子树 DFS 会找到第一个 badge）
-                        Container anyBadge = rootNode.Get<Container>("badge");
-                        Assert.NotNull(anyBadge);
+                        // L3 边界：root.Get 不再穿透 slot 根（LOOKUP_SCOPE）——badge 只能
+                        // 经 slot 根两跳访问（契约 public-api §3.1，旧行为是穿透返首个）。
+                        Assert.Throws<UIContractException>(() => rootNode.Get<Container>("badge"));
+                        Container viaSlot = ctx._registry.GetOrCreate(slots[0])
+                            .Get<Container>("badge");
+                        Assert.NotNull(viaSlot);
                     }
                     finally
                     {
@@ -587,5 +590,62 @@ namespace LoomGUI.HeadlessTests
                 throw new InvalidOperationException(
                     $"append_child(parent={parent}, child={child}) failed rc={rc}");
         }
+
+        /// <summary>
+        /// L3 查找边界（Query 侧）：instance root 带 LOOKUP_SCOPE——页面级 Query&lt;T&gt;
+        /// visit 后不下钻（badge 不进结果）；slot 根自身 Query 照常见内部。
+        /// 与 Get/TryGet（core DFS 剪枝）同口径（main-design §4.3）。
+        /// </summary>
+        [Fact]
+        public void QueryPrunesAtLookupScopeBoundary()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                StageHandle* h = (StageHandle*)stage.ToPointer();
+                byte[] compName = Encoding.UTF8.GetBytes("slot");
+                nuint outLen;
+                byte* pkgPtr;
+                fixed (byte* cp = compName)
+                {
+                    pkgPtr = Native.loomgui_make_test_pkg(cp, (nuint)compName.Length, &outLen);
+                    Assert.NotEqual(IntPtr.Zero, (IntPtr)pkgPtr);
+                    try
+                    {
+                        int rc = Native.loomgui_stage_load_package(h,
+                            cp, (nuint)compName.Length, pkgPtr, outLen);
+                        Assert.Equal(0, rc);
+
+                        uint root = CreateRoot(stage, "div");
+                        Container rootNode = (Container)ctx._registry.GetOrCreate(root);
+                        uint slot = Native.loomgui_stage_instantiate(h,
+                            cp, (nuint)compName.Length, cp, (nuint)compName.Length);
+                        Assert.NotEqual(InvalidNodeId, slot);
+                        AppendChild(stage, root, slot);
+
+                        // 页面级 Query：结果含 slot 根自身，不含其内部 badge
+                        //（registry 身份稳定——同 NodeId 同实例，引用相等即同一节点）。
+                        Node slotNode = ctx._registry.GetOrCreate(slot);
+                        Container badge = slotNode.Get<Container>("badge");
+                        var pageResults = rootNode.Query<Node>();
+                        Assert.Contains(slotNode, pageResults);
+                        Assert.DoesNotContain(badge, pageResults);
+
+                        // slot 根自身 Query：照常命中内部 badge。
+                        var slotResults = slotNode.Query<Node>();
+                        Assert.Contains(badge, slotResults);
+                    }
+                    finally
+                    {
+                        Native.loomgui_bytes_free(pkgPtr, outLen);
+                    }
+                }
+            }
+            finally
+            {
+                StageHarness.Destroy(stage);
+            }
+        }
+
     }
 }

@@ -1,0 +1,16 @@
+<style>
+.page-root { display: flex; flex-direction: column; }
+.gic { display: flex; flex-direction: column; }
+.gic-title { display: block; }
+.gic-body { display: block; }
+.equip-btn { display: block; }
+</style>
+<div class="page-root" style="display:flex;flex-direction:column">
+    <game-item-card id="card">
+        <button slot="action" id="equip" class="equip-btn" style="display:block">装备</button>
+    </game-item-card>
+    <game-item-card id="card2">
+        <button slot="action" id="equip2" class="equip-btn" style="display:block">装备2</button>
+    </game-item-card>
+    <div id="outside" class="gic-body" style="display:block">页面普通节点</div>
+</div>

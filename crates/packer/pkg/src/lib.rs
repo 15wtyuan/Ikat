@@ -3,5 +3,6 @@
 pub mod atlas;
 pub mod bridge;
 pub mod build;
+pub mod expand;
 pub mod runtime;
 pub mod workspace;

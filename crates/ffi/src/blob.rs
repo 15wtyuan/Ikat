@@ -12,7 +12,7 @@ use loomgui_core::transform;
 
 /// magic = "LOOM" little-endian。
 const MAGIC: u32 = 0x4D4F4F4C;
-const VERSION: u32 = 12; // v12：加 shadow_params 列（[f32;6]=24B，box-shadow SDF 参数），列数 21→22
+const VERSION: u32 = 13; // v13：加 grad_params 列（[u8;208]，渐变像素参数），列数 22→23
 
 /// 入口：FrameData（nodes + clip 表）+ Scene（parked slot 池）→ blob 字节。
 ///
@@ -24,11 +24,13 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
     let nodes = &frame.nodes;
     let clips = &frame.clips;
     let n = nodes.len();
-    // 列名 + 每元素字节数。v12：加 shadow_params 列（[f32;6]=24B，box-shadow SDF 参数），22 列。
+    // 列名 + 每元素字节数。v13：加 grad_params 列（[u8;208]，渐变像素参数），23 列。
     //   path_idx 占 4B（path 表 1-based 索引，0=纯色无图）。
     //   v6：加 color_matrix 列（[f32;20]，80B，原第 20 列→现第 17 列）——ColorFilter。
     //   v11：加 effect_block 列（[u8;128]，per-text-node SDF effect 参数块，照 color_matrix 先例）。
     //   v12：加 shadow_params 列（[f32;6]，box-shadow SDF 参数，照 color_matrix/effect_block 先例）。
+    //   v13：加 grad_params 列（GradientParams::SIZE=208B，program=6/7 渐变 shader 参数，
+    //        照 effect_block/shadow_params 先例；非渐变节点恒全零，C# 按 program 门控读取）。
     let columns: &[(&str, usize)] = &[
         ("node_id", 4),
         ("parent_id", 4),
@@ -52,8 +54,9 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
         ("reuse_key", 4),      // v9：渲染复用键（虚拟列表 slot key），现第 19 列
         ("effect_block", 128), // v11：SDF effect 参数块（EffectBlock::SIZE，照 color_matrix 先例）
         ("shadow_params", 24), // v12：box-shadow SDF 参数（[f32;6]，照 color_matrix/effect_block 先例）
+        ("grad_params", 208),  // v13：渐变像素参数（GradientParams::SIZE，照 effect_block 先例）
     ];
-    let num_col_offsets = columns.len(); // 22
+    let num_col_offsets = columns.len(); // 23
     let header_len = 3 * 4                          // magic, version, node_count
         + num_col_offsets * 4                       // 列 offset（22）
         + 2 * 4                                     // mesh_arena off + len
@@ -92,6 +95,7 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
     let mut col_reuse_key = Vec::<u8>::new();
     let mut col_effect_block = Vec::<u8>::new();
     let mut col_shadow_params = Vec::<u8>::new();
+    let mut col_grad_params = Vec::<u8>::new();
 
     for rn in nodes {
         col_node_id.extend_from_slice(&rn.node_id.to_le_bytes());
@@ -118,6 +122,9 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
         for &v in rn.shadow_params.iter() {
             col_shadow_params.extend_from_slice(&v.to_le_bytes());
         }
+        // v13：grad_params per-node（GradientParams::SIZE=208B）。非渐变节点 default 全零
+        // （照 effect_block/shadow_params 写出模式；C# 按 program==6/7 门控读取）。
+        col_grad_params.extend_from_slice(&rn.gradient.to_bytes());
         let write_arena = matches!(rn.change_level, ChangeLevel::Full);
 
         match &rn.payload {
@@ -218,6 +225,8 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
         col_reuse_key.extend_from_slice(&reuse_key.to_le_bytes());
         col_effect_block.extend_from_slice(&[0u8; EffectBlock::SIZE]);
         col_shadow_params.extend_from_slice(&[0u8; 24]); // v12：[f32;6] 全零
+        col_grad_params
+            .extend_from_slice(&[0u8; loomgui_core::render::gradient::GradientParams::SIZE]); // v13
         parked_count += 1;
     }
     let node_count = n + parked_count;
@@ -245,6 +254,7 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
         ("reuse_key", &col_reuse_key),
         ("effect_block", &col_effect_block), // v11：effect 参数列
         ("shadow_params", &col_shadow_params), // v12：box-shadow SDF 参数列
+        ("grad_params", &col_grad_params),   // v13：渐变参数列
     ];
 
     // 算各列 offset。

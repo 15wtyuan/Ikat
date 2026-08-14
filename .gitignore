@@ -98,3 +98,6 @@ tmp
 
 # SDD worktrees (local isolation)
 .worktrees/
+
+# ZCode harness session state
+.zcode/

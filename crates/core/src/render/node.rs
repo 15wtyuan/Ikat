@@ -145,6 +145,9 @@ pub struct RenderNode {
     /// box-shadow SDF 参数（halfSize.x, halfSize.y, radius, σ, inset_flag, _pad）。
     /// 非 shadow 节点 = [0.0;6]（blob 写全零）。进 FFI shadow_params 列。
     pub shadow_params: [f32; 6],
+    /// 渐变像素参数（program=6/7 背景渐变）。非渐变节点 = default（全零，
+    /// blob 照写 208B）。进 FFI grad_params 列；Unity shader GRADIENT 变体消费。
+    pub gradient: crate::render::gradient::GradientParams,
     pub payload: NodePayload,
 }
 
@@ -168,6 +171,7 @@ mod serde_smoke_tests {
             reuse_key: 0,
             effect: EffectBlock::default(),
             shadow_params: [0.0; 6],
+            gradient: crate::render::gradient::GradientParams::default(),
             payload: NodePayload::Mesh {
                 verts: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
                 uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],

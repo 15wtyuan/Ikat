@@ -1,0 +1,9 @@
+<style>
+.gic { display: flex; flex-direction: column; }
+.gic-title { display: block; }
+.gic-body { display: block; }
+</style>
+<div class="gic" style="display:flex;flex-direction:column">
+    <slot name="title"><span class="gic-title" style="display:block">默认标题</span></slot>
+    <slot name="action"></slot>
+</div>

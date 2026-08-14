@@ -6,16 +6,16 @@ namespace LoomGUI.Tests.Core
 {
     public class FrameBlobTests
     {
-        // 构造 v12 blob（镜像 loomgui_ffi_c/src/blob.rs::VERSION=12 + FrameBlob.cs）。
-        // v12 = v11 + 第 22 列 shadow_params([f32;6]=24B)，列数 21→22，列数据起点 120→124。
+        // 构造 v13 blob（镜像 loomgui_ffi_c/src/blob.rs::VERSION=13 + FrameBlob.cs）。
+        // v13 = v12 + 第 23 列 grad_params([f32;52]=208B)，列数 22→23，列数据起点 124→128。
         static byte[] BuildBlob(int nodeCount, byte[][] columnData, byte[] meshArena = null, byte[] clipTable = null, byte[] pathTable = null)
         {
             meshArena ??= [];
             clipTable ??= [];
             pathTable ??= [];
 
-            // 22 列元素字节大小（须与 FrameBlob.cs ColOff 注释一一对应）。末列 effect_block=128B，shadow_params=24B。
-            int[] elemSizes = { 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24 };
+            // 23 列元素字节大小（须与 FrameBlob.cs ColOff 注释一一对应）。末列 grad_params=208B。
+            int[] elemSizes = { 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24, 208 };
             int numCols = elemSizes.Length;
             // header = magic+version+node_count(12) + numCols×col_offset + 3 arena ×(off,len)=24 → 列数据起点。
             int colOff = 12 + numCols * 4 + 24;
@@ -27,7 +27,7 @@ namespace LoomGUI.Tests.Core
 
             var b = new List<byte>();
             b.AddRange(BitConverter.GetBytes(0x4D4F4F4Cu)); // magic
-            b.AddRange(BitConverter.GetBytes(12u));          // version = 12
+            b.AddRange(BitConverter.GetBytes(13u));          // version = 13
             b.AddRange(BitConverter.GetBytes((uint)nodeCount));
             foreach (var o in offs) b.AddRange(BitConverter.GetBytes(o));
             b.AddRange(BitConverter.GetBytes(meshArenaOff));
@@ -37,11 +37,12 @@ namespace LoomGUI.Tests.Core
             b.AddRange(BitConverter.GetBytes(pathTableOff));
             b.AddRange(BitConverter.GetBytes(pathTable.Length));
 
-            // column data: caller provides full nodeCount * elemSize bytes per column, or null for zeros
+            // column data: caller provides full nodeCount * elemSize bytes per column, or null for zeros.
+            // 越过调用方数组长度的列（v13 新增 grad_params 等未更新的旧用例）补零。
             for (int c = 0; c < numCols; c++)
             {
                 int expected = elemSizes[c] * nodeCount;
-                var data = columnData[c];
+                var data = c < columnData.Length ? columnData[c] : null;
                 if (data != null)
                     b.AddRange(data);
                 else
@@ -152,6 +153,34 @@ namespace LoomGUI.Tests.Core
             Assert.Equal(3f, result[0]);
             Assert.Equal(7f, result[31]);
             Assert.Equal(0f, result[1]);   // outline_color R 默认 0（未写）
+        }
+
+        [Fact]
+        public void GradParams_ReadsCorrectValues()
+        {
+            // v13 新列 grad_params（第 23 列，index 22，[f32;52]=208B）。
+            // gp[0]=kind gp[6..8]=center gp[8..10]=radii gp[10]=stop_count gp[12..17]=stop0。
+            var gp = new byte[208];
+            BitConverter.GetBytes(1f).CopyTo(gp, 0);           // kind = radial
+            BitConverter.GetBytes(1574.4f).CopyTo(gp, 6 * 4);  // cx
+            BitConverter.GetBytes(-129.6f).CopyTo(gp, 7 * 4);  // cy
+            BitConverter.GetBytes(1100f).CopyTo(gp, 8 * 4);    // rx
+            BitConverter.GetBytes(560f).CopyTo(gp, 9 * 4);     // ry
+            BitConverter.GetBytes(2f).CopyTo(gp, 10 * 4);      // stop_count
+            BitConverter.GetBytes(0.6f).CopyTo(gp, 16 * 4);    // stop1 pos = 0.6
+            var cols = new byte[23][];
+            cols[22] = gp;
+
+            var blob = new FrameBlob(BuildBlob(1, cols));
+            Assert.True(blob.IsValid);
+            float[] r = blob.GradParams(0);
+            Assert.Equal(1f, r[0]);
+            Assert.Equal(1574.4f, r[6]);
+            Assert.Equal(-129.6f, r[7]);
+            Assert.Equal(1100f, r[8]);
+            Assert.Equal(560f, r[9]);
+            Assert.Equal(2f, r[10]);
+            Assert.Equal(0.6f, r[16]);
         }
 
         [Fact]

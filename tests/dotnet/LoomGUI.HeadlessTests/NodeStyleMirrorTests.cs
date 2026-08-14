@@ -348,13 +348,12 @@ namespace LoomGUI.HeadlessTests
         // ── ponytail defer：未实现的 prop throw NE（不静默丢）──────────────
 
         /// <summary>
-        /// ZIndex/Visibility/SetVar(4 overloads)/RemoveVar 在 core apply_decl 未实现（不在 inline_bit 表），
+        /// ZIndex/SetVar(4 overloads)/RemoveVar 在 core apply_decl 未实现（不在 inline_bit 表），
         /// 调用必须抛 NotImplementedException（ponytail defer 显式失败，不静默丢）。
         /// SetVar 4 overloads 逐个覆盖：保护未来把任一 overload 接上 mirror 时能被此门抓住。
         /// </summary>
         [Theory]
         [InlineData(0)]
-        [InlineData(1)]
         [InlineData(2)]
         [InlineData(3)]
         [InlineData(4)]
@@ -369,7 +368,6 @@ namespace LoomGUI.HeadlessTests
                 switch (which)
                 {
                     case 0: Assert.Throws<NotImplementedException>(() => n.Style.ZIndex = 5); break;
-                    case 1: Assert.Throws<NotImplementedException>(() => n.Style.Visibility = Visibility.Hidden); break;
                     case 2: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--x", Length.Px(10))); break;
                     case 3: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--c", new Color(1f, 0f, 0f, 1f))); break;
                     case 4: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--f", 0.5f)); break;

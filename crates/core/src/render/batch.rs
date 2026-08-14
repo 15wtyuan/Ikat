@@ -316,6 +316,7 @@ mod tests {
             reuse_key: 0,
             effect: crate::render::node::EffectBlock::default(),
             shadow_params: [0.0; 6],
+            gradient: crate::render::gradient::GradientParams::default(),
             payload: NodePayload::Mesh {
                 verts: vec![[0.0, 0.0]; 4],
                 uvs: vec![[0.0, 0.0]; 4],
@@ -697,6 +698,7 @@ mod tests {
             reuse_key: 0,
             effect: crate::render::node::EffectBlock::default(),
             shadow_params: [0.0; 6],
+            gradient: crate::render::gradient::GradientParams::default(),
             payload: NodePayload::Mesh {
                 verts: vec![
                     [rect.x, rect.y],

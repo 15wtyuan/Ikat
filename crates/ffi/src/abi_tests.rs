@@ -21,6 +21,8 @@ fn make_test_pkg_bytes(component: &str) -> Vec<u8> {
         data_slot: None,
         aria_controls: None,
         rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
     }];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let input = PackageInput {
@@ -331,6 +333,8 @@ fn find_node_by_id_round_trip() {
         data_slot: None,
         aria_controls: None,
         rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
     }];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
     let pkg = loomgui_core::asset::write_package(&PackageInput {
@@ -904,6 +908,8 @@ fn a6_get_children_capacity_contract() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -920,6 +926,8 @@ fn a6_get_children_capacity_contract() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
         TemplateNode {
             kind: NodeKind::Container,
@@ -936,6 +944,8 @@ fn a6_get_children_capacity_contract() {
             data_slot: None,
             aria_controls: None,
             rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
         },
     ];
     let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();

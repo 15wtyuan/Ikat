@@ -18,6 +18,111 @@
   function $(id) { return document.getElementById(id); }
   function bind(id, type, fn) { var el = $(id); if (el) el.addEventListener(type, fn); }
 
+
+  // Custom Element expansion (mirrors the packer's pack-time expansion so the
+  // browser preview shows the same tree core lays out). Registry comes from
+  // window.__LOOM_COMPONENTS__ (injected by rect-diff's browser-rect.mjs from
+  // the components/ dir). Manual file:// preview has no injection source and
+  // leaves components unexpanded (accepted degradation).
+  //
+  // Semantics (component-system spec): host keeps its place/attrs; the component
+  // template root is appended under it; <slot name=x> is REPLACED at its splice
+  // position by the host light children with slot="x" (fallback children kept
+  // when nothing is assigned); whitespace-only light children are dropped.
+  // Nested components (inside templates or projected content) expand in further
+  // passes until fixpoint.
+  function expandComponents() {
+    var reg = window.__LOOM_COMPONENTS__;
+    if (!reg) return;
+    var passes = 0;
+    while (passes++ < 16) {
+      var hosts = Array.prototype.filter.call(
+        document.querySelectorAll('*'),
+        function (el) {
+          var name = el.tagName.toLowerCase();
+          return name.indexOf('-') >= 0 && reg[name] && !el.hasAttribute('data-loom-expanded');
+        }
+      );
+      if (!hosts.length) return;
+      hosts.forEach(function (host) {
+        host.setAttribute('data-loom-expanded', '');
+        var name = host.tagName.toLowerCase();
+        var doc = new DOMParser().parseFromString(reg[name], 'text/html');
+        Array.prototype.forEach.call(doc.querySelectorAll('style'), function (st) {
+          injectComponentStyle(name, st.textContent);
+          st.remove();
+        });
+        var root = doc.body.firstElementChild;
+        if (!root) return;
+        root.setAttribute('data-loom-comp', name);
+        // Slot assignment from host light children (slot attr; whitespace text
+        // dropped). Nodes are detached by projection (insertBefore moves them).
+        var assign = {};
+        var defaults = [];
+        Array.prototype.slice.call(host.childNodes).forEach(function (ch) {
+          if (ch.nodeType === 3) {
+            if (ch.textContent.trim()) defaults.push(ch);
+            return;
+          }
+          if (ch.nodeType !== 1) return;
+          var sn = ch.getAttribute && ch.getAttribute('slot');
+          if (sn) (assign[sn] = assign[sn] || []).push(ch);
+          else defaults.push(ch);
+        });
+        var imported = document.importNode(root, true);
+        projectSlots(imported, assign, defaults);
+        host.appendChild(imported);
+        // Unassigned leftovers (invalid slot — packer errors at build time):
+        // re-attach to host so they stay measurable in the degraded preview.
+        Object.keys(assign).forEach(function (k) {
+          assign[k].forEach(function (n) {
+            if (!n.parentNode) host.appendChild(n);
+          });
+        });
+      });
+    }
+  }
+
+  // Replace <slot> elements under root with assigned light children (LIVE nodes
+  // move — listeners/state preserved), or with the slot's fallback children when
+  // unassigned. assign: {name: [nodes]}, defaults: [nodes].
+  function projectSlots(root, assign, defaults) {
+    Array.prototype.forEach.call(root.querySelectorAll('slot'), function (slot) {
+      var name = slot.getAttribute('name');
+      var kids = name != null ? assign[name] || [] : defaults;
+      var parent = slot.parentNode;
+      if (!parent) return;
+      if (kids.length) {
+        kids.forEach(function (k) { parent.insertBefore(k, slot); });
+      } else {
+        Array.prototype.slice.call(slot.childNodes).forEach(function (c) {
+          parent.insertBefore(c, slot);
+        });
+      }
+      slot.remove();
+    });
+  }
+
+  // Component <style> with per-component selector prefix ([data-loom-comp="name"]) —
+  // preview-side scope emulation (core scopes rules per expansion instance).
+  // @-rules pass through untouched (no element selectors to prefix).
+  function injectComponentStyle(name, css) {
+    if (!css || !css.trim()) return;
+    var out = css.replace(/([^{}]+)\{/g, function (m, sel) {
+      var trimmed = sel.trim();
+      if (trimmed.charAt(0) === '@') return m;
+      var prefixed = trimmed
+        .split(',')
+        .map(function (part) { return '[data-loom-comp="' + name + '"] ' + part.trim(); })
+        .join(', ');
+      return prefixed + ' {';
+    });
+    var st = document.createElement('style');
+    st.setAttribute('data-loom-comp-style', name);
+    st.textContent = out;
+    document.head.appendChild(st);
+  }
+
   function goPage(name) {
     var dir = location.href.substring(0, location.href.lastIndexOf('/') + 1);
     location.href = dir + name + '.html';
@@ -340,6 +445,7 @@
     init();
   }
   function init() {
+    expandComponents();
     wireNav();
     wireTabs();
     wireDialogs();

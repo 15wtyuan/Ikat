@@ -156,16 +156,6 @@ namespace LoomGUI.HeadlessTests
         [Fact]
         public void PositionModeUnsetIsNull() => Assert.Null(CssValueConvert.ToCss(PositionMode.Unset));
 
-        // ── Visibility ───────────────────────────────────────────────
-        [Fact]
-        public void VisibilityHidden() => Assert.Equal("hidden", CssValueConvert.ToCss(Visibility.Hidden));
-
-        [Fact]
-        public void VisibilityVisible() => Assert.Equal("visible", CssValueConvert.ToCss(Visibility.Visible));
-
-        [Fact]
-        public void VisibilityUnsetIsNull() => Assert.Null(CssValueConvert.ToCss(Visibility.Unset));
-
         // ── ToCss(object) dispatch ───────────────────────────────────
         [Fact]
         public void ObjectDispatchLength() => Assert.Equal("100px", CssValueConvert.ToCss((object)Length.Px(100)));

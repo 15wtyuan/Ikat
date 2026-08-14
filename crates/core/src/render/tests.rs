@@ -2936,6 +2936,7 @@ fn propagate_text_sub_page_sort_keys_cumulative_shift_no_ties() {
         reuse_key: 0,
         effect: crate::render::node::EffectBlock::default(),
         shadow_params: [0.0; 6],
+        gradient: crate::render::gradient::GradientParams::default(),
         payload: empty_mesh.clone(),
     };
 
@@ -3017,6 +3018,7 @@ fn propagate_inline_image_sort_keys_stacks_above_text_layers() {
         reuse_key: 0,
         effect: crate::render::node::EffectBlock::default(),
         shadow_params: [0.0; 6],
+        gradient: crate::render::gradient::GradientParams::default(),
         payload: empty_mesh.clone(),
     };
 
@@ -3780,7 +3782,7 @@ fn build_container_slice_percent_resolves_in_render() {
 #[test]
 fn gradient_text_spans_whole_text_not_per_glyph() {
     use crate::render::node::NodePayload;
-    use crate::style::resolved::{Gradient2, GradientDir};
+    use crate::style::resolved::{Gradient, GradientStop};
     let fonts = match test_font_table() {
         Some(f) => f,
         None => {
@@ -3793,15 +3795,23 @@ fn gradient_text_spans_whole_text_not_per_glyph() {
     n.style.font_size = 16.0;
     n.style.text_align = TextAlign::Left;
     n.style.background_clip_text = true;
-    n.style.background_gradient = Some(Gradient2 {
-        color_a: [1.0, 0.0, 0.0, 1.0], // 红（左端）
-        color_b: [0.0, 1.0, 0.0, 1.0], // 绿（右端）
-        dir: GradientDir::ToRight,
+    n.style.background_gradient = Some(Gradient::Linear {
+        angle_deg: 90.0, // to right
+        stops: vec![
+            GradientStop {
+                color: [1.0, 0.0, 0.0, 1.0],
+                pos: 0.0,
+            }, // 红（左端）
+            GradientStop {
+                color: [0.0, 1.0, 0.0, 1.0],
+                pos: 1.0,
+            }, // 绿（右端）
+        ],
     });
     n.layout_rect = Rect {
         x: 0.0,
         y: 0.0,
-        w: 100.0,
+        w: 32.0, // box 贴近文本宽（渐变 box = 元素 rect，CSS 语义）
         h: 30.0,
     };
     let mut scene = Scene::from_nodes(vec![n], vec![]);
@@ -3833,6 +3843,172 @@ fn gradient_text_spans_whole_text_not_per_glyph() {
         "整体渐变下右侧字左角色应更偏绿（G 差={:.2}）；每字独立渐变时两字左角色都=a，差=0",
         b_left_g - a_left_g
     );
+}
+
+// ── 背景渐变 program=6/7（per-fragment shader 路径）──
+
+/// Container 背景渐变：program=6 + uv=box 局部坐标 + grad_params 已解析 + 顶点色=底色。
+#[test]
+fn background_gradient_emits_program6_local_uv_and_params() {
+    use crate::render::node::NodePayload;
+    use crate::style::resolved::{Gradient, GradientStop, RadialExtent};
+    let mut n = Node::default();
+    n.kind = NodeKind::Container;
+    n.style.background_color = Some([0.1, 0.2, 0.3, 1.0]);
+    n.style.background_gradient = Some(Gradient::Radial {
+        extent: RadialExtent::Explicit(Some(1100.0), Some(560.0)),
+        center: [
+            crate::style::resolved::GradCoord::Pct(0.82),
+            crate::style::resolved::GradCoord::Pct(-0.12),
+        ],
+        stops: vec![
+            GradientStop {
+                color: [0.37, 0.71, 0.83, 0.1],
+                pos: 0.0,
+            },
+            GradientStop {
+                color: [0.0; 4],
+                pos: 0.6,
+            },
+        ],
+    });
+    n.layout_rect = Rect {
+        x: 10.0,
+        y: 20.0,
+        w: 1920.0,
+        h: 1080.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &test_font_table().unwrap_or_default(),
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let rn = frame
+        .nodes
+        .iter()
+        .find(|rn| matches!(&rn.payload, NodePayload::Mesh { program, .. } if *program == 6))
+        .expect("radial 渐变容器应产出 program=6");
+    match &rn.payload {
+        NodePayload::Mesh { uvs, colors, .. } => {
+            // uv = box 局部像素坐标（TL=(0,0)，BR=(1920,1080)），供 shader 算 t。
+            assert!(
+                (uvs[0][0]).abs() < 1e-3 && (uvs[0][1]).abs() < 1e-3,
+                "{:?}",
+                uvs[0]
+            );
+            assert!((uvs[2][0] - 1920.0).abs() < 1e-3 && (uvs[2][1] - 1080.0).abs() < 1e-3);
+            // 顶点色仍承载 background-color（shader 内渐变 over 底色合成）。
+            assert_eq!(colors[0], [0.1, 0.2, 0.3, 1.0]);
+        }
+        _ => unreachable!(),
+    }
+    // grad_params：home 光晕几何（cx=1574.4, cy=-129.6, 1100×560）。
+    let g = &rn.gradient;
+    assert_eq!(g.kind, 1);
+    assert!((g.center[0] - 1574.4).abs() < 0.2);
+    assert!((g.center[1] + 129.6).abs() < 0.2);
+    assert!((g.radii[0] - 1100.0).abs() < 1e-3 && (g.radii[1] - 560.0).abs() < 1e-3);
+    assert_eq!(g.stop_count, 2);
+    assert!((g.stops[1][4] - 0.6).abs() < 1e-5);
+}
+
+/// 渐变 + filter（program=3 路径的渐变版）→ program=7（GRADIENT + COLOR_FILTER 双变体）。
+#[test]
+fn background_gradient_with_filter_emits_program7() {
+    use crate::render::node::NodePayload;
+    use crate::style::resolved::{Gradient, GradientStop};
+    let mut n = Node::default();
+    n.kind = NodeKind::Container;
+    n.style.background_gradient = Some(Gradient::Linear {
+        angle_deg: 45.0,
+        stops: vec![
+            GradientStop {
+                color: [1.0, 0.0, 0.0, 1.0],
+                pos: 0.0,
+            },
+            GradientStop {
+                color: [0.0, 0.0, 1.0, 1.0],
+                pos: 1.0,
+            },
+        ],
+    });
+    n.style.color_filter = Some(crate::style::color_filter::grayscale());
+    n.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    };
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &test_font_table().unwrap_or_default(),
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let has7 = frame
+        .nodes
+        .iter()
+        .any(|rn| matches!(&rn.payload, NodePayload::Mesh { program, .. } if *program == 7));
+    assert!(has7, "渐变 + filter → program=7");
+}
+
+/// 渐变节点非几何参数变（stops 色变、box 不变）→ Header 级（只更 MPB 不重建 mesh）。
+#[test]
+fn gradient_params_change_is_header_level() {
+    use crate::style::resolved::{Gradient, GradientStop};
+    let mk = |c: [f32; 4]| {
+        let mut n = Node::default();
+        n.kind = NodeKind::Container;
+        n.style.background_gradient = Some(Gradient::Linear {
+            angle_deg: 90.0,
+            stops: vec![
+                GradientStop { color: c, pos: 0.0 },
+                GradientStop {
+                    color: [0.0, 0.0, 1.0, 1.0],
+                    pos: 1.0,
+                },
+            ],
+        });
+        n.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        n
+    };
+    let mut scene_a = Scene::from_nodes(vec![mk([1.0, 0.0, 0.0, 1.0])], vec![]);
+    let mut scene_b = Scene::from_nodes(vec![mk([0.0, 1.0, 0.0, 1.0])], vec![]);
+    crate::scene::transform::compute_world_transforms(&mut scene_a);
+    crate::scene::transform::compute_world_transforms(&mut scene_b);
+    let ha = {
+        let (frame, _, _) = build_render_nodes(
+            &scene_a,
+            &test_font_table().unwrap_or_default(),
+            &std::collections::HashMap::new(),
+            &empty_sizes(),
+            &mut test_glyph_atlas(),
+        );
+        crate::render::dirty::header_hash(&frame.nodes[0])
+    };
+    let hb = {
+        let (frame, _, _) = build_render_nodes(
+            &scene_b,
+            &test_font_table().unwrap_or_default(),
+            &std::collections::HashMap::new(),
+            &empty_sizes(),
+            &mut test_glyph_atlas(),
+        );
+        crate::render::dirty::header_hash(&frame.nodes[0])
+    };
+    assert_ne!(ha, hb, "stops 色变 → header_hash 变（Header 级）");
 }
 
 /// effect 打包：FontEffect → EffectBlock 槽位映射。

@@ -32,6 +32,28 @@ Shader "LoomGUI/Unlit"
         _ShadowRadius("Shadow Radius", Float) = 0
         _ShadowSigma("Shadow Sigma", Float) = 0
         _ShadowInset("Shadow Inset", Float) = 0
+        // 背景渐变（program=6/7 GRADIENT，per-renderer MPB 覆盖；未用 stop 槽由 C# 填
+        // 「末 stop 色 @pos=1」→ shader 无需 count uniform，8 槽段搜索自然退化到末 stop）。
+        // _GradGeom = linear（dir.xy, t0, inv_span）；_GradGeom2 = radial（center.xy, radii.xy）。
+        _GradKind("Grad Kind", Float) = 0
+        _GradGeom("Grad Geom", Vector) = (1,0,0,1)
+        _GradGeom2("Grad Geom 2", Vector) = (0,0,1,1)
+        _GradStop0("Grad Stop 0", Vector) = (1,1,1,1)
+        _GradPos0("Grad Pos 0", Float) = 0
+        _GradStop1("Grad Stop 1", Vector) = (1,1,1,1)
+        _GradPos1("Grad Pos 1", Float) = 1
+        _GradStop2("Grad Stop 2", Vector) = (1,1,1,1)
+        _GradPos2("Grad Pos 2", Float) = 1
+        _GradStop3("Grad Stop 3", Vector) = (1,1,1,1)
+        _GradPos3("Grad Pos 3", Float) = 1
+        _GradStop4("Grad Stop 4", Vector) = (1,1,1,1)
+        _GradPos4("Grad Pos 4", Float) = 1
+        _GradStop5("Grad Stop 5", Vector) = (1,1,1,1)
+        _GradPos5("Grad Pos 5", Float) = 1
+        _GradStop6("Grad Stop 6", Vector) = (1,1,1,1)
+        _GradPos6("Grad Pos 6", Float) = 1
+        _GradStop7("Grad Stop 7", Vector) = (1,1,1,1)
+        _GradPos7("Grad Pos 7", Float) = 1
         _FaceDilate("Face Dilate", Range(-1,1)) = 0   // 0=标准字形边缘（threshold=0.5）；正值增粗，负值变细
         _GradientScale("Gradient Scale", Float) = 13     // = SPREAD(12)+1，distance→屏幕换算（对标 TMP _GradientScale=atlasPadding+1）
         // SDF 文字效果（per-renderer MPB，program=1 ALPHA_MASK 用；参数=0 = 该 effect 不启用）。
@@ -74,6 +96,9 @@ Shader "LoomGUI/Unlit"
             #pragma multi_compile _ ALPHA_MASK
             #pragma multi_compile _ BG_COMPOSITE
             #pragma multi_compile _ COLOR_FILTER
+            // 背景渐变（program=6/7）：kind 走 uniform 分支（per-draw 一致，无 GPU 代价），
+            // 单变体避免与 COLOR_FILTER/CLIPPED 组合爆炸。
+            #pragma multi_compile _ GRADIENT
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
             struct Attr { float4 pos : POSITION; float4 color : COLOR; float2 uv : TEXCOORD0; };
@@ -100,6 +125,18 @@ Shader "LoomGUI/Unlit"
                 float _ShadowRadius;
                 float _ShadowSigma;
                 float _ShadowInset;
+                // 背景渐变 uniforms（Properties 对应，MPB per-renderer 覆盖；SRP batcher 须入 CBUFFER）。
+                float _GradKind;
+                float4 _GradGeom;
+                float4 _GradGeom2;
+                float4 _GradStop0; float _GradPos0;
+                float4 _GradStop1; float _GradPos1;
+                float4 _GradStop2; float _GradPos2;
+                float4 _GradStop3; float _GradPos3;
+                float4 _GradStop4; float _GradPos4;
+                float4 _GradStop5; float _GradPos5;
+                float4 _GradStop6; float _GradPos6;
+                float4 _GradStop7; float _GradPos7;
                 float _FaceDilate;
                 float _GradientScale;
                 // SDF 文字效果 uniforms（Properties 对应，MPB per-renderer 覆盖；参数=0 = 该 effect 不启用）。
@@ -134,13 +171,14 @@ Shader "LoomGUI/Unlit"
                 o.pos = TransformWorldToHClip(worldPos);
                 float2 clipWorldXY = worldPos.xy;
                 o.color = v.color;
-                // SHADOW_BLUR：core 把 uv 编码为「顶点本地坐标 − 形状中心」（像素量纲，无纹理），
-                // 须直通 raw uv；TRANSFORM_TEX 会叠 _MainTex_ST 缩放/偏移 → SDF 坐标错位（静默依赖 _MainTex_ST==1,1,0,0）。
-#if defined(SHADOW_BLUR)
+                // SHADOW_BLUR / GRADIENT：core 把几何编码进 uv（SHADOW_BLUR = 顶点 − 形状中心；
+                // GRADIENT = box 局部像素坐标，左上原点），须直通 raw uv；TRANSFORM_TEX 会叠
+                // _MainTex_ST 缩放/偏移 → 坐标错位（静默依赖 _MainTex_ST==1,1,0,0）。
+            #if defined(SHADOW_BLUR) || defined(GRADIENT)
                 o.uv = v.uv;
-#else
+            #else
                 o.uv = TRANSFORM_TEX(v.uv, _MainTex);
-#endif
+            #endif
 #if defined(CLIPPED) || defined(CLIPPED_ROUNDED)
                 o.clipPos = clipWorldXY * _ClipBox.zw + _ClipBox.xy;
 #endif
@@ -235,6 +273,44 @@ Shader "LoomGUI/Unlit"
                 float bgA = tex.a + vcol.a * (1.0 - tex.a);
                 float3 bgRgb = ((float3)tex.rgb * tex.a + (float3)vcol.rgb * vcol.a * (1.0 - tex.a)) / max(bgA, 1e-6);
                 half4 col = half4(bgRgb, bgA);
+                #elif defined(GRADIENT)
+                // 背景渐变（program:6/7）：i.uv = box 局部像素坐标（core 编码，raw 直通）。
+                // t：linear = (dot(p,dir) − t0)×inv_span（4 角投影归一，CSS 渐变线语义）；
+                //     radial = 椭圆归一化距离 sqrt((dx/rx)²+(dy/ry)²)。
+                // stops 分段 premultiplied lerp 再反预乘（CSS 渐变插值语义，rgba→transparent 无灰边；
+                // 公式与 core sample_gradient 逐字对齐——改一侧必须同步另一侧）。未用槽由 C# 填
+                // 末 stop 色 @pos=1 → 段搜索退化正确，无需 count uniform。
+                // 末步与 vcol（background-color）source-over 合成：底色垫在渐变下（同 BG_COMPOSITE 公式）。
+                float2 gp0 = i.uv;
+                float gt;
+                if (_GradKind > 0.5) {
+                    float2 gd = (gp0 - _GradGeom2.xy) / max(_GradGeom2.zw, float2(1e-4, 1e-4));
+                    gt = length(gd);
+                } else {
+                    gt = saturate((dot(gp0, _GradGeom.xy) - _GradGeom.z) * _GradGeom.w);
+                }
+                float4 gv = _GradStop0;
+                #define GRAD_SEG(A, B) \
+                    if (gt >= _GradPos##A && gt < _GradPos##B) { \
+                        float gf = saturate((gt - _GradPos##A) / max(_GradPos##B - _GradPos##A, 1e-5)); \
+                        float4 gpa = float4(_GradStop##A.rgb * _GradStop##A.a, _GradStop##A.a); \
+                        float4 gpb = float4(_GradStop##B.rgb * _GradStop##B.a, _GradStop##B.a); \
+                        float4 gpm = lerp(gpa, gpb, gf); \
+                        gv = float4(gpm.rgb / max(gpm.a, 1e-4), gpm.a); \
+                    }
+                GRAD_SEG(0,1) GRAD_SEG(1,2) GRAD_SEG(2,3) GRAD_SEG(3,4)
+                GRAD_SEG(4,5) GRAD_SEG(5,6) GRAD_SEG(6,7)
+                #undef GRAD_SEG
+                if (gt >= _GradPos7) gv = _GradStop7;
+                // stops 是 CSS sRGB 值（浏览器在 sRGB 空间插值）；linear 项目与 vcol 同步转 linear。
+                #if !defined(UNITY_COLORSPACE_GAMMA)
+                half3 gs = gv.rgb;
+                gs = (gs <= 0.04045) ? gs / 12.92 : pow((gs + 0.055) / 1.055, 2.4);
+                gv.rgb = gs;
+                #endif
+                float gA = gv.a + vcol.a * (1.0 - gv.a);
+                float3 gRgb = ((float3)gv.rgb * gv.a + (float3)vcol.rgb * vcol.a * (1.0 - gv.a)) / max(gA, 1e-6);
+                half4 col = half4(gRgb, gA);
                 #else
                 // image/mesh（program:0）：彩色 texture → tex.rgb × vcol。
                 half4 col = tex * vcol;

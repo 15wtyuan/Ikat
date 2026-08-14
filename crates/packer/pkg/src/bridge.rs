@@ -71,6 +71,8 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     data_slot,
                     aria_controls,
                     rich_text_block: parsed.rich_text_blocks.contains(&ir_idx),
+                    custom_tag: None,
+                    component_scope: false,
                 });
             }
             IrNodeKind::Text(s) => {
@@ -92,6 +94,8 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     data_slot: None,
                     aria_controls: None,
                     rich_text_block: false,
+                    custom_tag: None,
+                    component_scope: false,
                 });
             }
         }
@@ -156,7 +160,7 @@ pub fn translate_keyframes(fence_kfs: &[FenceKeyframesRule]) -> Vec<KeyframesRul
 /// `SemanticKind::ListItem`，故本校验按 **semantic** 判定而非字面 tag。主循环按
 /// IrTree 顺序建节点、不好回溯 template→child 关系，故做成独立前置遍历。零元素
 /// （如 `<template>text`）与多元素（如 `<template><div/><div/></template>`）均拒。
-fn validate_template_children(tree: &IrTree) -> Result<(), String> {
+pub(crate) fn validate_template_children(tree: &IrTree) -> Result<(), String> {
     for node in &tree.nodes {
         let IrNodeKind::Element(el) = &node.kind else {
             continue;
@@ -186,7 +190,7 @@ fn validate_template_children(tree: &IrTree) -> Result<(), String> {
 
 /// SemanticKind → NodeKind（total，非静默）。
 /// None = 未识别标签 → Err（围栏门应已挡，防御性兜底）。
-fn map_semantic(el: &IrElement) -> Result<NodeKind, String> {
+pub(crate) fn map_semantic(el: &IrElement) -> Result<NodeKind, String> {
     match el.semantic {
         Some(SemanticKind::Container) => Ok(NodeKind::Container),
         Some(SemanticKind::TextElement) => Ok(NodeKind::TextElement),
@@ -215,7 +219,7 @@ fn map_semantic(el: &IrElement) -> Result<NodeKind, String> {
     }
 }
 
-fn attr(el: &IrElement, name: &str) -> Option<String> {
+pub(crate) fn attr(el: &IrElement, name: &str) -> Option<String> {
     el.attributes
         .iter()
         .find(|a| a.name == name)
@@ -237,7 +241,7 @@ fn attr(el: &IrElement, name: &str) -> Option<String> {
 /// - TextArea：value 取元素文本内容。
 /// - Dropdown：扫子树找首个被选中 option（`aria-selected="true"`），无则默认第 0 项；
 ///   详见 [`dropdown_selected_index`]。
-fn extract_control_init(
+pub(crate) fn extract_control_init(
     kind: NodeKind,
     el: &IrElement,
     ir_idx: usize,
@@ -423,7 +427,7 @@ fn tab_children(parent_idx: usize, tree: &IrTree) -> Vec<&IrElement> {
         .collect()
 }
 
-fn extract_classes(el: &IrElement) -> Vec<String> {
+pub(crate) fn extract_classes(el: &IrElement) -> Vec<String> {
     attr(el, "class")
         .map(|c| c.split_whitespace().map(String::from).collect())
         .unwrap_or_default()
