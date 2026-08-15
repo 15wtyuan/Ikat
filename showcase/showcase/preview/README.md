@@ -69,5 +69,8 @@ TweenManager 逐曲线 ease、虚拟列表 slot 复用/不等高补偿、NativeH
 
 ## Maintenance
 - 改 showcase HTML：刷新浏览器。
+- 改 `components/*.html`（或增删组件）后跑 `python showcase/scripts/gen-preview-registry.py`
+  重生成 `preview/components-registry.js` 并入库——手动 file:// 预览靠它展开 Custom Element
+  （rect-diff 的 browser-rect 注入优先，不受影响）。
 - 改后跑 `coverage-check.py` + `dump_showcase` 确认围栏 diagnostics=0。
 - NAV 表在 loom-preview.js 顶部，新页加那里。

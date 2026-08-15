@@ -22,8 +22,8 @@
   // Custom Element expansion (mirrors the packer's pack-time expansion so the
   // browser preview shows the same tree core lays out). Registry comes from
   // window.__LOOM_COMPONENTS__ (injected by rect-diff's browser-rect.mjs from
-  // the components/ dir). Manual file:// preview has no injection source and
-  // leaves components unexpanded (accepted degradation).
+  // the components/ dir; manual file:// preview bootstraps it from the
+  // generated preview/components-registry.js — see ensureRegistry below).
   //
   // Semantics (component-system spec): host keeps its place/attrs; the component
   // template root is appended under it; <slot name=x> is REPLACED at its splice
@@ -445,14 +445,30 @@
     init();
   }
   function init() {
-    expandComponents();
-    wireNav();
-    wireTabs();
-    wireDialogs();
-    fillListViews();
-    fillNativeHost();
-    wireControls();
-    fitScale();
-    window.addEventListener('resize', fitScale);
+    ensureRegistry(function () {
+      expandComponents();
+      wireNav();
+      wireTabs();
+      wireDialogs();
+      fillListViews();
+      fillNativeHost();
+      wireControls();
+      fitScale();
+      window.addEventListener('resize', fitScale);
+    });
+  }
+
+  // Manual file:// preview has no rect-diff injection; load the generated
+  // components-registry.js (next to this script) before expanding. A missing
+  // registry file degrades to the old unexpanded preview.
+  function ensureRegistry(done) {
+    if (window.__LOOM_COMPONENTS__) return done();
+    var base = (document.currentScript && document.currentScript.src) ||
+      document.querySelector('script[src*="loom-preview.js"]').src;
+    var s = document.createElement('script');
+    s.src = base.replace(/[^/]*$/, 'components-registry.js');
+    s.onload = done;
+    s.onerror = done;
+    document.head.appendChild(s);
   }
 })();
