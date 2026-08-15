@@ -55,8 +55,18 @@ pub fn resolve_inline_styles_with_diags(
 
         // Apply DisplayDefault from schema (overrides ResolvedStyle::default,
         // whose display fields stay Flex — taffy's own DEFAULT is Flex).
-        if let Some(spec) = find_tag(&el.tag) {
-            match spec.display {
+        // Custom elements (hyphenated tags, not in TAGS) default to Block like
+        // div: falling through to the Flex default makes the host a flex-row
+        // container, so template roots without explicit width shrink to content
+        // (browser block-level template roots fill the page instead).
+        let spec = find_tag(&el.tag);
+        let display_default = match (spec, el.tag.contains('-')) {
+            (Some(spec), _) => Some(spec.display),
+            (None, true) => Some(DisplayDefault::Block),
+            (None, false) => None,
+        };
+        if let Some(display_default) = display_default {
+            match display_default {
                 DisplayDefault::Block => {
                     styles[idx].display_mode = DisplayMode::Block;
                     // Schema-level default for block tags (div/header/nav/p/...).
@@ -90,7 +100,7 @@ pub fn resolve_inline_styles_with_diags(
             // 同时 set INH_TEXT_ALIGN bit，把 UA 默认视为"显式声明"——防
             // propagate_inherited 用父（卡片/列表项）的 text-align 覆盖 button。
             // 用户显式 text-align 声明仍走 inline apply_decl 分支覆盖（CSS 级联）。
-            if spec.semantic == SemanticKind::Button {
+            if spec.is_some_and(|s| s.semantic == SemanticKind::Button) {
                 styles[idx].text_align = TextAlign::Center;
                 if let Some(bit) = loomgui_core::style::dynamic::inherited_bit("text-align") {
                     styles[idx].inherited_set.0 |= bit;

@@ -76,6 +76,11 @@ fn is_block_container(
     if matches!(el.semantic, Some(SemanticKind::TextElement)) {
         return !has_explicit_display_flex(el);
     }
+    // CustomElement host：light 子在打包期被投影进组件 slot（component-system spec），
+    // host 最终子树来自组件模板——页面文件里的 light 子混排不是 inline-flow 上下文。
+    if matches!(el.semantic, Some(SemanticKind::CustomElement)) {
+        return false;
+    }
     // 非 span（div 等）：css_resolve 已把 tag 默认 + inline style 的 display 烘进
     // taffy_style.display。只 Block 参与（Flex → flex item；None(template) → 不排版）。
     if styles[idx].taffy_style.display != taffy::Display::Block {

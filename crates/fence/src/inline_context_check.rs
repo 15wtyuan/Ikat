@@ -161,12 +161,20 @@ pub fn check_inline_context(
         };
 
         // parent 是 flex（inline style / tag 默认 / class 规则）→ flex item，放行。
+        // （CustomElement host 的判定走下方豁免——light 子打包期投影，不构成布局上下文。）
         if is_flex_context(
             parent_el,
             &styles[parent_id.0],
             &single_compound_flex_rules,
             has_multi_compound_flex_rule,
         ) {
+            continue;
+        }
+
+        // parent 是 CustomElement host：light 子在打包期被投影进组件 slot
+        // （component-system spec），host 最终子树来自组件模板——页面文件里的
+        // light 子不构成 host 的布局上下文，混排检查对它是误报。
+        if parent_el.semantic == Some(SemanticKind::CustomElement) {
             continue;
         }
 
