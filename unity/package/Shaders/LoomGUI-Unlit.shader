@@ -334,12 +334,16 @@ Shader "LoomGUI/Unlit"
                 // 节点 opacity（从顶点色剥离，per-renderer MPB）。alpha 剥离后 colors.a 不含节点 alpha。
                 col.a *= _Alpha;
                 #ifdef CLIPPED_ROUNDED
-                // 圆角矩形 SDF 裁剪：clipPos 在 _ClipBox 归一化空间（|x|,|y|<=1 在直角矩形内）。
-                // rounded-box SDF：q = abs(p) - half + r（half=1 归一化），sdf = length(max(q,0)) + min(max(q.x,q.y),0) - r。
-                // sdf<0 内，>0 外。smoothstep 抗锯齿（1px 过渡带，与 clipPos 归一化空间分辨率匹配）。
-                float r = _CornerRadius;
-                float2 q = abs(i.clipPos) - 1.0 + r;
-                float sdf = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+                // 圆角矩形 SDF 裁剪（像素空间）：clipPos 是 _ClipBox 归一化坐标（|x|,|y|<=1 在
+                // 直角矩形内），但归一化空间 x/y 像素当量不同（宽条 x 半宽数百 px、y 半宽数 px）——
+                // 直接在归一化空间做 SDF 会让 smoothstep 边带横跨整个半宽（3px 圆角被糊没）
+                // 且各向异性把圆角变椭圆。换算回像素：halfPx=1/_ClipBox.zw，rPx=归一半径×min半边。
+                // sdf<0 内，>0 外；smoothstep(0,1,sdf) = 1 design px 抗锯齿带。
+                float2 halfPx = 1.0 / _ClipBox.zw;
+                float rPx = _CornerRadius * min(halfPx.x, halfPx.y);
+                float2 pPx = i.clipPos * halfPx;
+                float2 q = abs(pPx) - halfPx + rPx;
+                float sdf = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rPx;
                 col.a *= 1.0 - smoothstep(0.0, 1.0, sdf);
                 #elif defined(CLIPPED)
                 float2 f = abs(i.clipPos);
