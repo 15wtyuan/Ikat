@@ -52,6 +52,13 @@
           injectComponentStyle(name, st.textContent);
           st.remove();
         });
+        // 模板内相对 URL（src/href）按组件文件位置（components/<name>.html）解析成绝对
+        // URL——镜像打包器的 html_rel 归一。不重写则按页面位置解析，fallback 图 404。
+        var compBase = new URL('components/' + name + '.html', document.baseURI);
+        Array.prototype.forEach.call(doc.querySelectorAll('[src],[href]'), function (el) {
+          var attr = el.hasAttribute('src') ? 'src' : 'href';
+          el.setAttribute(attr, new URL(el.getAttribute(attr), compBase).href);
+        });
         var root = doc.body.firstElementChild;
         if (!root) return;
         root.setAttribute('data-loom-comp', name);
