@@ -261,10 +261,14 @@ namespace LoomGUI
                 // 关键不变量：Dispatch 的 Unsafe.As<T, RouteEventCore>(ref evt) 要求 _core 是 T
                 // 的首 field（别名为 ref RouteEventCore 读 offset 0）。每个封闭类型的静态 ctor 跑一次，
                 // 此处断言摊到类型加载期——运行时偏移错（有人误把 _core 放非首位）立刻 fail-fast，
-                // 而非静默读错字段。T 必须是 struct（IRouteEvent 全是 struct）+ 默认 LayoutKind.Sequential
-                // （C# struct 默认，Marshal.OffsetOf 读此 layout）。
+                // 而非静默读错字段。用反射读声明序首字段而非 Marshal.OffsetOf：event struct 含
+                // 引用字段（_core 本身是 class），OffsetOf 要求可封送布局，在 Linux runtime 直接抛
+                // ArgumentException——声明序首字段即托管布局首字段（struct 无 box 头），跨平台成立。
+                var fields = typeof(T).GetFields(
+                    BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance);
                 if (!typeof(T).IsValueType ||
-                    Marshal.OffsetOf<T>("_core") != IntPtr.Zero)
+                    fields.Length == 0 || fields[0].Name != "_core" ||
+                    fields[0].FieldType != typeof(RouteEventCore))
                     throw new InvalidOperationException(
                         $"event struct {typeof(T).Name}: _core must be the first field " +
                         "(EventBus.Dispatch Unsafe.As<T, RouteEventCore> reads offset 0)");

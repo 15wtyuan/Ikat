@@ -23,8 +23,8 @@
         <div role="option" id="opt-c" data-value="c" aria-disabled="true">Gamma</div>
       </div>
     </div>
-    <!-- slot / custom-element shell：NodeFactory 派发到 Slot / CustomElement。 -->
-    <slot id="sl">fallback</slot>
+    <!-- slot / custom-element shell：NodeFactory 派发到 Slot / CustomElement。
+         裸 <slot> 只允许出现在组件模板里（围栏），故经注册组件 my-widget 承载。 -->
     <my-widget id="cw">custom</my-widget>
   </div>
 </body>

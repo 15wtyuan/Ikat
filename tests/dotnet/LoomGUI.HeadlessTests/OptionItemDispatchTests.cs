@@ -7,7 +7,8 @@ using Xunit;
 namespace LoomGUI.HeadlessTests
 {
     /// <summary>
-    /// Task 8 验收：NodeFactory 把 OptionItem/Slot/CustomElement 三 NodeKind 派发到专用 C# 子类
+    /// Task 8 验收：NodeFactory 把 OptionItem/CustomElement NodeKind 派发到专用 C# 子类。
+    /// （Slot 派发测试已删：组件系统打包期展开后产物不再有 NodeKind::Slot 节点，slot 是编译期糖。）
     /// （替代之前的 Container 回落）。
     ///
     /// 改前 NodeFactory 对这三 kind 回落 Container（NodeFactory.cs:65-67）——业务 Get&lt;OptionItem&gt;()
@@ -41,23 +42,9 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>
-        /// &lt;slot&gt; 节点派发到 Slot 实例（非 Container）。
-        /// </summary>
-        [Fact]
-        public void slot_node_dispatches_to_slot_class()
-        {
-            var (stage, ctx, root) = LoadDropdownFixture();
-            try
-            {
-                var sl = root.Get<Slot>("sl");
-                Assert.IsType<Slot>(sl);
-            }
-            finally { StageHarness.Destroy(stage); }
-        }
-
         /// <summary>
         /// 自定义标签 &lt;my-widget&gt;（含连字符）派发到 CustomElement 实例（非 Container）。
-        /// 围栏把含连字符的未知 tag 归为 CustomElement kind。
+        /// 含连字符的标签须在 components/ 注册（围栏），实例根投影为 CustomElement。
         /// </summary>
         [Fact]
         public void custom_element_dispatches_to_customelement_class()
