@@ -292,7 +292,11 @@ pub fn solve(
             // max-content 当 min-content，阻止 shrink → 长文本不收缩、超框。设 0 放开宽度。
             // 只设宽度：文本不纵向 shrink，min-height=0 无收益却有副作用——让 flex column 父
             // 容器主轴尺寸算大（按钮等容器被撑高、底图下沿往下拉），所以 height 保留 Auto。
-            style.min_size.width = taffy::style::Dimension::length(0.0);
+            // 作者显式声明的 min-width 保留（如 stat-bar 的 label/val 固定列宽）——只在
+            // 未声明（Auto）时才放开 shrink。
+            if style.min_size.width == taffy::style::Dimension::AUTO {
+                style.min_size.width = taffy::style::Dimension::length(0.0);
+            }
             // 叶子：装测量上下文。children 应为空（Text/Image 是叶子）。
             tree.new_leaf_with_context(style, mctx).unwrap()
         } else {
