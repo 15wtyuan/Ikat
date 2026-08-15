@@ -48,7 +48,9 @@ impl GradientParams {
                 o += 4;
             };
         }
-        wf!(self.kind);
+        // kind/stop_count 按 f32 语义写（0.0/1.0、n.0），不当 u32 位模式——C# 列读成
+        // float：位模式会读成 denormal（stop_count=2 → 2.8e-45 → (int)=0 → 单色渐变）。
+        wf!(self.kind as f32);
         wf!(self.angle_deg);
         wf!(self.dir[0]);
         wf!(self.dir[1]);
@@ -58,7 +60,7 @@ impl GradientParams {
         wf!(self.center[1]);
         wf!(self.radii[0]);
         wf!(self.radii[1]);
-        wf!(self.stop_count);
+        wf!(self.stop_count as f32);
         wf!(0f32); // reserved（8 字节对齐补位，恒 0）
         for s in &self.stops {
             for &v in s {
@@ -72,7 +74,6 @@ impl GradientParams {
     pub fn from_bytes(buf: &[u8]) -> Self {
         assert_eq!(buf.len(), Self::SIZE, "grad_params 列定长 208B");
         let rf = |o: usize| f32::from_le_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]]);
-        let ru = |o: usize| u32::from_le_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]]);
         let mut stops = [[0f32; 5]; 8];
         for (i, s) in stops.iter_mut().enumerate() {
             let base = 48 + i * 20;
@@ -85,14 +86,14 @@ impl GradientParams {
             ];
         }
         Self {
-            kind: ru(0),
+            kind: rf(0) as u32,
             angle_deg: rf(4),
             dir: [rf(8), rf(12)],
             t0: rf(16),
             inv_span: rf(20),
             center: [rf(24), rf(28)],
             radii: [rf(32), rf(36)],
-            stop_count: ru(40),
+            stop_count: rf(40) as u32,
             stops,
         }
     }
