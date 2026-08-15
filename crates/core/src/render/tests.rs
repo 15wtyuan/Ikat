@@ -3857,6 +3857,7 @@ fn background_gradient_emits_program6_local_uv_and_params() {
     n.style.background_color = Some([0.1, 0.2, 0.3, 1.0]);
     n.style.background_gradient = Some(Gradient::Radial {
         extent: RadialExtent::Explicit(Some(1100.0), Some(560.0)),
+        shape: crate::style::resolved::RadialShape::Ellipse,
         center: [
             crate::style::resolved::GradCoord::Pct(0.82),
             crate::style::resolved::GradCoord::Pct(-0.12),

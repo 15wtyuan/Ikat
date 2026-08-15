@@ -1162,6 +1162,7 @@ fn background_radial_default_shape() {
     ));
     let Gradient::Radial {
         extent,
+        shape,
         center,
         stops,
     } = s.background_gradient.expect("gradient 已设")
@@ -1169,6 +1170,7 @@ fn background_radial_default_shape() {
         panic!("radial-gradient 必须解析成 Radial")
     };
     assert!(matches!(extent, RadialExtent::FarthestCorner));
+    assert_eq!(shape, RadialShape::Ellipse, "无 shape 关键字 → ellipse");
     assert_eq!(center, [GradCoord::Pct(0.5), GradCoord::Pct(0.5)]);
     assert_eq!(stops.len(), 2);
     assert_eq!(stops[0].pos, 0.0);
@@ -1211,6 +1213,7 @@ fn background_radial_home_halo_syntax() {
     ));
     let Gradient::Radial {
         extent,
+        shape,
         center,
         stops,
     } = s.background_gradient.expect("gradient 已设")
@@ -1218,6 +1221,7 @@ fn background_radial_home_halo_syntax() {
         panic!()
     };
     assert_eq!(extent, RadialExtent::Explicit(Some(1100.0), Some(560.0)));
+    assert_eq!(shape, RadialShape::Ellipse, "双长度显式椭圆");
     assert_eq!(center, [GradCoord::Pct(0.82), GradCoord::Pct(-0.12)]);
     assert_eq!(stops.len(), 2);
     assert_eq!(

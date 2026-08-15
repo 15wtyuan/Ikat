@@ -1042,6 +1042,7 @@ fn pkg_v34_roundtrip_preserves_gradient() {
     let mut root = tn(NodeKind::Container);
     root.style.background_gradient = Some(Gradient::Radial {
         extent: RadialExtent::Explicit(Some(1100.0), Some(560.0)),
+        shape: crate::style::resolved::RadialShape::Ellipse,
         center: [GradCoord::Pct(0.82), GradCoord::Pct(-0.12)],
         stops: vec![
             GradientStop {

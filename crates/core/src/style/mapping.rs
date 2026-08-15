@@ -2,8 +2,8 @@ use crate::scene::animation::TransformAnim;
 use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
     BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, GradCoord,
-    Gradient, GradientStop, OverflowMode, RadialExtent, ResolvedStyle, SliceInsets, TextAlign,
-    GRADIENT_MAX_STOPS,
+    Gradient, GradientStop, OverflowMode, RadialExtent, RadialShape, ResolvedStyle, SliceInsets,
+    TextAlign, GRADIENT_MAX_STOPS,
 };
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, LengthPercentage, LengthPercentageAuto};
@@ -641,7 +641,7 @@ fn grad_coord(tok: &str) -> Option<GradCoord> {
 
 /// 解析 radial 配置段（`circle closest-side at 82% -12%`）。
 /// shape / size 任意序（CSS `||` 语法），`at` 后恰 2 坐标。None = 不是合法配置段。
-fn parse_radial_config(s: &str) -> Option<(RadialExtent, [GradCoord; 2])> {
+fn parse_radial_config(s: &str) -> Option<(RadialShape, RadialExtent, [GradCoord; 2])> {
     let toks = split_top_level_ws(s);
     if toks.is_empty() {
         return None;
@@ -700,7 +700,11 @@ fn parse_radial_config(s: &str) -> Option<(RadialExtent, [GradCoord; 2])> {
         (None, Some(a), b) => RadialExtent::Explicit(Some(a), b),
         _ => return None, // 尺寸关键字与显式长度混用 → 非法
     };
-    Some((extent, center))
+    let shape = match shape {
+        Some("circle") => RadialShape::Circle,
+        _ => RadialShape::Ellipse,
+    };
+    Some((shape, extent, center))
 }
 
 /// 解析 `radial-gradient` 内部串（已去函数名/外括号）。
@@ -710,9 +714,10 @@ fn parse_radial_gradient(inner: &str) -> Option<Gradient> {
     if parts.len() < 2 {
         return None;
     }
-    let (extent, center, stop_parts) = match parse_radial_config(parts[0]) {
-        Some((e, c)) => (e, c, &parts[1..]),
+    let (shape, extent, center, stop_parts) = match parse_radial_config(parts[0]) {
+        Some((sh, e, c)) => (sh, e, c, &parts[1..]),
         None => (
+            RadialShape::Ellipse,
             RadialExtent::FarthestCorner,
             [GradCoord::Pct(0.5), GradCoord::Pct(0.5)],
             &parts[..],
@@ -721,6 +726,7 @@ fn parse_radial_gradient(inner: &str) -> Option<Gradient> {
     let stops = parse_gradient_stops(stop_parts)?;
     Some(Gradient::Radial {
         extent,
+        shape,
         center,
         stops,
     })

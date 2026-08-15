@@ -147,9 +147,21 @@ pub enum Gradient {
     },
     Radial {
         extent: RadialExtent,
+        /// circle 收敛为单一半径（closest/farthest 语义与椭圆逐轴不同）。
+        /// serde default（ellipse）保持旧 pkg 反序列化兼容，不加版本号。
+        #[serde(default)]
+        shape: RadialShape,
         center: [GradCoord; 2],
         stops: Vec<GradientStop>,
     },
+}
+
+/// radial 渐变形状（CSS `circle` / `ellipse`；缺省 ellipse）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum RadialShape {
+    #[default]
+    Ellipse,
+    Circle,
 }
 
 /// 渐变 stop 上限（FFI grad_params 列定长 8 槽；超出打包期拒收）。
@@ -835,6 +847,7 @@ mod tests {
             },
             Gradient::Radial {
                 extent: RadialExtent::Explicit(Some(1100.0), Some(560.0)),
+                shape: RadialShape::Ellipse,
                 center: [GradCoord::Pct(0.82), GradCoord::Pct(-0.12)],
                 stops: vec![
                     GradientStop {
@@ -849,6 +862,7 @@ mod tests {
             },
             Gradient::Radial {
                 extent: RadialExtent::ClosestSide,
+                shape: RadialShape::Circle,
                 center: [GradCoord::Pct(0.5), GradCoord::Px(40.0)],
                 stops: vec![GradientStop {
                     color: [0.9, 0.9, 0.1, 1.0],

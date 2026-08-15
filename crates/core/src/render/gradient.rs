@@ -126,7 +126,12 @@ pub fn resolve_gradient(g: &Gradient, w: f32, h: f32) -> GradientParams {
             p.t0 = tmin;
             p.inv_span = 1.0 / (tmax - tmin).max(1e-6);
         }
-        Gradient::Radial { extent, center, .. } => {
+        Gradient::Radial {
+            extent,
+            shape,
+            center,
+            ..
+        } => {
             p.kind = 1;
             let resolve_c = |c: &GradCoord, side: f32| match *c {
                 GradCoord::Pct(v) => v * side,
@@ -144,9 +149,27 @@ pub fn resolve_gradient(g: &Gradient, w: f32, h: f32) -> GradientParams {
                     d1.min(d2)
                 }
             };
+            let is_circle = *shape == crate::style::resolved::RadialShape::Circle;
             let (mut rx, mut ry) = match *extent {
-                RadialExtent::ClosestSide => (side(false, w, cx), side(false, h, cy)),
-                RadialExtent::FarthestSide => (side(true, w, cx), side(true, h, cy)),
+                RadialExtent::ClosestSide => {
+                    let (sx, sy) = (side(false, w, cx), side(false, h, cy));
+                    // circle 单一半径 = 四边最近距离（逐轴椭圆值曾让 circle 渲染成椭圆）。
+                    if is_circle {
+                        let r = sx.min(sy);
+                        (r, r)
+                    } else {
+                        (sx, sy)
+                    }
+                }
+                RadialExtent::FarthestSide => {
+                    let (sx, sy) = (side(true, w, cx), side(true, h, cy));
+                    if is_circle {
+                        let r = sx.max(sy);
+                        (r, r)
+                    } else {
+                        (sx, sy)
+                    }
+                }
                 RadialExtent::ClosestCorner | RadialExtent::FarthestCorner => {
                     let far = matches!(*extent, RadialExtent::FarthestCorner);
                     let (sx, sy) = (side(far, w, cx), side(far, h, cy));
@@ -158,9 +181,14 @@ pub fn resolve_gradient(g: &Gradient, w: f32, h: f32) -> GradientParams {
                             best_d = d;
                         }
                     }
-                    // CSS：corner 尺寸 = side 椭圆按 f = d/sqrt(sx²+sy²) 缩放穿过该角。
-                    let f = best_d / (sx * sx + sy * sy).sqrt().max(1e-6);
-                    (sx * f, sy * f)
+                    if is_circle {
+                        // circle corner = 圆心到最近/最远角距离（单值）。
+                        (best_d, best_d)
+                    } else {
+                        // CSS：corner 尺寸 = side 椭圆按 f = d/sqrt(sx²+sy²) 缩放穿过该角。
+                        let f = best_d / (sx * sx + sy * sy).sqrt().max(1e-6);
+                        (sx * f, sy * f)
+                    }
                 }
                 RadialExtent::Explicit(a, b) => {
                     let r1 = a.unwrap_or(0.0);
@@ -280,6 +308,7 @@ mod tests {
         // 100x80 box 居中：farthest-corner 椭圆 rx=50, ry=40（side 椭圆本就穿过角）。
         let g = Gradient::Radial {
             extent: RadialExtent::FarthestCorner,
+            shape: crate::style::resolved::RadialShape::Ellipse,
             center: [GradCoord::Pct(0.5), GradCoord::Pct(0.5)],
             stops: vec![GradientStop {
                 color: [1.0, 0.0, 0.0, 1.0],
@@ -303,9 +332,10 @@ mod tests {
 
     #[test]
     fn radial_closest_side_offset_center() {
-        // 圆心偏移 (30,40) 在 100x100：closest-side rx=min(30,70)=30, ry=min(40,60)=40。
+        // 椭圆逐轴：圆心偏移 (30,40) 在 100x100 → rx=min(30,70)=30, ry=min(40,60)=40。
         let g = Gradient::Radial {
             extent: RadialExtent::ClosestSide,
+            shape: crate::style::resolved::RadialShape::Ellipse,
             center: [GradCoord::Px(30.0), GradCoord::Px(40.0)],
             stops: vec![GradientStop {
                 color: [1.0; 4],
@@ -318,10 +348,34 @@ mod tests {
     }
 
     #[test]
+    fn radial_circle_keyword_single_radius() {
+        // circle + 关键字 = 单一半径（CSS 单值语义），不是逐轴椭圆：
+        // - closest-side 120x80 居中：r = min(60,40) = 40
+        // - farthest-side：r = max(60,40) = 60
+        // - farthest-corner：r = 圆心到角距离 sqrt(60²+40²) ≈ 72.11
+        let mk = |extent| Gradient::Radial {
+            extent,
+            shape: crate::style::resolved::RadialShape::Circle,
+            center: [GradCoord::Pct(0.5), GradCoord::Pct(0.5)],
+            stops: vec![GradientStop {
+                color: [1.0; 4],
+                pos: 0.0,
+            }],
+        };
+        let p = resolve_gradient(&mk(RadialExtent::ClosestSide), 120.0, 80.0);
+        assert!((p.radii[0] - 40.0).abs() < 1e-3 && (p.radii[1] - 40.0).abs() < 1e-3);
+        let p = resolve_gradient(&mk(RadialExtent::FarthestSide), 120.0, 80.0);
+        assert!((p.radii[0] - 60.0).abs() < 1e-3 && (p.radii[1] - 60.0).abs() < 1e-3);
+        let p = resolve_gradient(&mk(RadialExtent::FarthestCorner), 120.0, 80.0);
+        assert!((p.radii[0] - 72.111).abs() < 1e-2, "got {}", p.radii[0]);
+    }
+
+    #[test]
     fn radial_home_halo_params() {
         // home：1100x560 椭圆 at 82%,-12% 在 1920x1080 → cx=1574.4, cy=-129.6。
         let g = Gradient::Radial {
             extent: RadialExtent::Explicit(Some(1100.0), Some(560.0)),
+            shape: crate::style::resolved::RadialShape::Ellipse,
             center: [GradCoord::Pct(0.82), GradCoord::Pct(-0.12)],
             stops: vec![
                 GradientStop {
