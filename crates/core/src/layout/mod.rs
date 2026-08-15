@@ -357,11 +357,19 @@ pub fn solve(
             root_tid,
             Size::MAX_CONTENT,
             |known: Size<Option<f32>>,
-             _avail: Size<AvailableSpace>,
+             avail: Size<AvailableSpace>,
              nid: taffy::NodeId,
              node_ctx: Option<&mut MeasureContext>,
              _style: &Style|
              -> Size<f32> {
+                // 定宽容器里 auto 宽文本子（flex column 的 span 等）：taffy 传
+                // known=None + avail=Definite(容器内容宽)。只用 known 会按 max-content
+                // 量出单行超框（浏览器按可用宽换行）。known 缺席时回退 avail 的 Definite 宽
+                // 作换行约束；MaxContent/MinContent 保持 None（走 intrinsic 测量）。
+                let wrap_width = known.width.or(match avail.width {
+                    AvailableSpace::Definite(w) => Some(w),
+                    _ => None,
+                });
                 match node_ctx {
                     None => Size::ZERO,
                     Some(MeasureContext::Image {
@@ -417,8 +425,8 @@ pub fn solve(
                     }) => {
                         let stack = fonts.stack_for(family.as_deref());
                         // taffy 传 known.width = 节点 border-box 宽（含 padding/border）；
-                        // 文字在 content area（known - h_inset）内换行 + 对齐，否则吃到 padding 超框。
-                        let mw = known.width.map(|w| (w - *h_inset).max(0.0));
+                        // 文字在 content area（wrap 宽 - h_inset）内换行 + 对齐，否则吃到 padding 超框。
+                        let mw = wrap_width.map(|w| (w - *h_inset).max(0.0));
                         let sid_opt = taffy_to_scene.get(&nid).copied();
                         // measure memo（坑 186）：fingerprint 命中 → 复用 TextLayout 跳过 shaping。
                         // 两槽：mw=None→intrinsic（max-content），mw=Some→constrained（换行）。
@@ -500,8 +508,8 @@ pub fn solve(
                         // RichText 走 measure_rich_text（简化 inline flow）。
                         // 回退走 FontStack（per-glyph 选字体）；run.font_id 仍是主字体 id。
                         let stack = fonts.stack_for(family.as_deref());
-                        // 同 Text：content area = known.width（border-box）- h_inset。
-                        let mw = known.width.map(|w| (w - *h_inset).max(0.0));
+                        // 同 Text：content area = wrap 宽（border-box）- h_inset。
+                        let mw = wrap_width.map(|w| (w - *h_inset).max(0.0));
                         let sid_opt = taffy_to_scene.get(&nid).copied();
                         // 指纹 memo（坑 186 同源）：runs 每帧现编译（便宜，O(inline 子)），
                         // 算指纹命中缓存跳过贵的 measure_rich_text（shaping）。span 换色/换内容
