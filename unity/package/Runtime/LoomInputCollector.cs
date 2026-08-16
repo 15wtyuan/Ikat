@@ -25,9 +25,8 @@ namespace LoomGUI
         /// <summary>
         /// 滚轮手感倍率（默认 1 = 浏览器同档基准）：滚轮 delta 的最终乘数，PlayMode 中
         /// Inspector 实时调。基准依据：Windows 一格 3 行文本 ≈ 60-75px、Chrome ≈ 100-120px；
-        /// 1920×1080 设计视口下 100 design px/格 ≈ 10 格滚完一屏。个人/设备手感差异在此调
-        /// （注意：高分辨率滚轮流经下方 ×0.5 折算后每台设备密度不同，倍率是逐设备手感值，
-        /// 不作为跨设备默认）。
+        /// 1920×1080 设计视口下 100 design px/格 ≈ 10 格滚完一屏。设备事件密度不同导致
+        /// 的手感差异在此调（逐设备手感值，不作为跨设备默认）。
         /// </summary>
         [Tooltip("滚轮手感倍率：1 = 一格约 100 design px（浏览器同档）。个人手感在此调。")]
         [SerializeField] float _wheelScrollSpeed = 1f;
@@ -293,13 +292,14 @@ namespace LoomGUI
             float dy = 0f;
 #if ENABLE_INPUT_SYSTEM
             var v = UnityEngine.InputSystem.Mouse.current?.scroll?.ReadValue() ?? UnityEngine.Vector2.zero;
-            // 双模映射（免定标）：单事件 |raw|≥60 视为经典 notch 鼠标（120/格 → ±1 格）；
-            // 小事件流（触控板/精滚轮，实测 ~1.5-2/格）按 2 raw ≈ 1 格当量直接折算——
-            // 逐事件小步进（core 侧 clamp+tween 链动，等效连续滚动）。
+            // 双模映射（免定标）：单事件 |raw|≥60 视为经典 notch 鼠标（120 raw = 1 格）；
+            // 小事件流（精滚轮驱动，实测每格 raw≈1.5-2）直接透传——1 raw = 1 格当量，
+            // 逐事件小步进（core 侧 clamp+tween 链动，等效连续滚动）。两档语义统一为
+            // 「dy 单位 = 格，core 每 100 design px/格」。
             if (Mathf.Abs(v.y) >= 60f)
                 dy = Mathf.Round(v.y / 120f);
             else if (!Mathf.Approximately(v.y, 0f))
-                dy = v.y * 0.5f;
+                dy = v.y;
             dy *= ctx.WheelScrollSpeed;
 #else
             dy = Input.mouseScrollDelta.y;  // 旧系统已 ≈ ±1/格
