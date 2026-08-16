@@ -18,6 +18,8 @@ Cargo.lock
 **/.uloop/*
 !**/.uloop/settings.permissions.json
 !**/.uloop/settings.tools.json
+# uloop 截图/取证输出（session-local）
+.uloop-acc/
 # Unity 生成的 meta 保留（资产需要）；以下为不应入库的产物
 *.unitypackage
 *.apk
