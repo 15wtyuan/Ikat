@@ -761,6 +761,61 @@ pub(crate) fn owned_channels(p: &KeyframePlayer) -> [bool; 4] {
 /// 按通道掩码清 NodeAnim（None = 回退 tween/base）。全 false 掩码 no-op；清空后整条
 /// anim 条目移除。`pub(crate)`：sync_animation_players 回收 player 时按"持有 ∩ 无剩余
 /// 持有"掩码调用（多 player 共享通道时只清真正没人写的）。
+/// 重启子树内全部声明式（class 触发）动画：programmatic player（node.Play 句柄持有）
+/// 不受影响。实现 = 按通道回收语义移除既有 player——下一帧 `sync_animation_players`
+/// 依 base_style.animation 声明原样重建（backwards/both 立即写首帧，delay 重新计时）。
+/// 与「销毁重实例化」的差别：节点身份、滚动位置、控件值、事件订阅全保留。
+pub fn restart_animations(scene: &mut Scene, root: NodeId) {
+    // 收集子树节点集（含 root 自身）。
+    let mut subtree = std::collections::HashSet::new();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if !subtree.insert(id) {
+            continue;
+        }
+        if let Some(n) = scene.nodes.get(id.to_key()) {
+            stack.extend(n.children.iter().copied());
+        }
+    }
+    // 移除子树内全部非 programmatic player（通道清理由 survivors 再持有的通道保留）。
+    let remove: Vec<_> = scene
+        .players
+        .iter()
+        .filter(|(_, p)| !p.programmatic && subtree.contains(&p.node))
+        .map(|(k, _)| k)
+        .collect();
+    for k in remove {
+        let Some(p) = scene.players.remove(k) else {
+            continue;
+        };
+        let own = owned_channels(&p);
+        let remaining =
+            scene
+                .players
+                .values()
+                .filter(|q| q.node == p.node)
+                .fold([false; 4], |acc, q| {
+                    let m = owned_channels(q);
+                    [
+                        acc[0] || m[0],
+                        acc[1] || m[1],
+                        acc[2] || m[2],
+                        acc[3] || m[3],
+                    ]
+                });
+        clear_channels(
+            &mut scene.anim,
+            p.node,
+            [
+                own[0] && !remaining[0],
+                own[1] && !remaining[1],
+                own[2] && !remaining[2],
+                own[3] && !remaining[3],
+            ],
+        );
+    }
+}
+
 pub(crate) fn clear_channels(anim: &mut AnimTable, node: NodeId, mask: [bool; 4]) {
     if !mask.iter().any(|&b| b) {
         return;
@@ -788,4 +843,97 @@ pub(crate) fn clear_channels(anim: &mut AnimTable, node: NodeId, mask: [bool; 4]
 /// 通道——动画没声明的通道（tween/base 在写）不动。
 fn clear_owned_channels(anim: &mut AnimTable, p: &KeyframePlayer) {
     clear_channels(anim, p.node, owned_channels(p));
+}
+
+#[cfg(test)]
+mod restart_tests {
+    use super::*;
+    use crate::scene::node::{Node, NodeKind, Scene};
+    use crate::style::resolved::{
+        AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
+    };
+
+    fn spec() -> AnimationSpec {
+        AnimationSpec {
+            name: "fade".into(),
+            duration: 0.5,
+            delay: 0.0,
+            iteration_count: Some(1),
+            direction: AnimationDirection::Normal,
+            fill_mode: AnimationFillMode::Both,
+            timing_function: crate::tween::Ease::Linear,
+            play_state: AnimationPlayState::Running,
+        }
+    }
+
+    fn rule() -> KeyframesRule {
+        KeyframesRule {
+            name: "fade".into(),
+            stops: vec![
+                KeyframeStop {
+                    selector: KeyframeStopSelector::From,
+                    props: AnimatableProps {
+                        opacity: Some(0.0),
+                        ..Default::default()
+                    },
+                    hook: None,
+                },
+                KeyframeStop {
+                    selector: KeyframeStopSelector::To,
+                    props: AnimatableProps {
+                        opacity: Some(1.0),
+                        ..Default::default()
+                    },
+                    hook: None,
+                },
+            ],
+        }
+    }
+
+    fn scene_with_animated_nodes(n: usize) -> (Scene, Vec<crate::scene::node::NodeId>) {
+        let mut nodes: Vec<Node> = Vec::new();
+        for _ in 0..n {
+            let mut node = Node::default();
+            node.kind = NodeKind::Container;
+            node.style.animation = vec![spec()];
+            nodes.push(node);
+        }
+        let scene = Scene::from_nodes(nodes, vec![]);
+        let ids = scene.roots.clone();
+        (scene, ids)
+    }
+
+    #[test]
+    fn restart_removes_players_and_sync_rebuilds_from_zero() {
+        let (mut scene, ids) = scene_with_animated_nodes(1);
+        scene.keyframes.insert("fade".into(), rule());
+        crate::style::dynamic::sync_animation_players(&mut scene);
+        assert_eq!(scene.players.len(), 1, "sync 建 player");
+        crate::scene::animation::update_all(&mut scene, 1.0, &mut Vec::new());
+        assert_eq!(
+            scene.players.len(),
+            1,
+            "Completed player 保留（fill both 持末值）"
+        );
+
+        restart_animations(&mut scene, ids[0]);
+        assert_eq!(scene.players.len(), 0, "restart 清掉声明式 player");
+
+        crate::style::dynamic::sync_animation_players(&mut scene);
+        assert_eq!(scene.players.len(), 1, "sync 依声明重建");
+        let p = scene.players.values().next().unwrap();
+        assert_eq!(p.elapsed, 0.0, "重建后 elapsed 归零（delay 重计）");
+        assert_eq!(p.play_state, PlayerPlayState::Playing);
+    }
+
+    #[test]
+    fn restart_scoped_to_subtree() {
+        let (mut scene, ids) = scene_with_animated_nodes(2);
+        scene.keyframes.insert("fade".into(), rule());
+        crate::style::dynamic::sync_animation_players(&mut scene);
+        assert_eq!(scene.players.len(), 2);
+        restart_animations(&mut scene, ids[0]); // 只重启 ids[0] 子树
+        assert_eq!(scene.players.len(), 1, "子树外 player 保留");
+        assert_eq!(scene.players.values().next().unwrap().node, ids[1]);
+    }
 }

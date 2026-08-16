@@ -637,6 +637,16 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_set_text(StageHandle* h, uint node, byte* text, nuint len);
 
         /// <summary>
+        ///  重启子树内声明式动画（class 触发 keyframes；programmatic node.Play player 不动）。
+        ///  下帧 sync 依声明重建 player（delay 重计、backwards/both 立即写首帧）。
+        ///  0=ok，-1=err（null 句柄 / node 不 live / 无 scene）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_restart_animations", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_restart_animations(StageHandle* h, uint node_id);
+
+        /// <summary>
         ///  改 Image 节点 src + 标 dirty_mesh。src = UTF-8 字节。0=ok，-1=err。
         ///  非 Image 节点 → -1。null 句柄 → -1。
         ///

@@ -1177,6 +1177,17 @@ namespace LoomGUI
             Node cb = GetChildAt(b);
             SwapChildren(ca, cb);
         }
+        /// 重启本子树内全部声明式动画（class 触发的 `animation` keyframes）。
+        /// player 原地重建：delay 重新计时、backwards/both 立即写首帧；
+        /// `node.Play` 的程序化 player（句柄持有）不受影响。
+        /// 与销毁重实例化的差别：节点身份、滚动位置、控件值、事件订阅全部保留。
+        public void RestartAnimations()
+        {
+            ThrowIfDisposed();
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_restart_animations(h, _id);
+        }
+
         /// 当前滚动位置（本节点为滚动容器时；非滚动容器返 (0,0)）。
         /// 与 <see cref="ScrollTo"/> 成对：读经 get_scroll_pos FFI（ScrollPane 物理量，
         /// 含未 settle 的惯性位移）。重实例化/换页前读出、solve 就绪后 ScrollTo(Instant) 回填。

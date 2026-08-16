@@ -119,50 +119,9 @@ public class ShowcaseRunner : MonoBehaviour
     /// 重播后 Wire* 由 Show() 重新接线（订阅随旧页 Dispose 一并清除）。
     void ReplayCurrentPage()
     {
-        if (_current == null) return;
-        string page = _shown;
-        // 重播保滚动位置：12 块标本多数在滚动容器下方，重实例化会把视口重置回顶端。
-        // dispose 前读出 ScrollPos，重实例化后等 solve/content_size 就绪再 Instant 回填。
-        Container scroller = null;
-        Vector2 sp = Vector2.Zero;
-        if (page == "m2-animation" && _current.TryGet<Container>("anim-body", out var body))
-        {
-            scroller = body;
-            sp = body.ScrollPos;
-        }
-        _current.Dispose();
-        _current = null;
-        _shown = null;
-        Show(page);
-        if (scroller != null && _current != null && _current.TryGet<Container>("anim-body", out var newBody))
-        {
-            _restoreScrollNode = newBody;
-            _restoreScrollPos = sp;
-            _restoreCountdown = 3;   // Instantiate 帧 + 2 帧：rematch/solve/content_size 就绪余量
-        }
-    }
-
-    // 重播后的滚动恢复（ReplayCurrentPage 排程，Update 逐帧倒计时）。
-    Container _restoreScrollNode;
-    Vector2 _restoreScrollPos;
-    int _restoreCountdown = -1;
-
-    void Update()
-    {
-        if (_restoreScrollNode == null) return;
-        if (--_restoreCountdown > 0) return;
-        try
-        {
-            _restoreScrollNode.ScrollTo(_restoreScrollPos, ScrollBehavior.Instant);
-        }
-        catch (System.ObjectDisposedException)
-        {
-            // 恢复窗口内用户又导航走了（节点已 Dispose）——放弃恢复
-        }
-        finally
-        {
-            _restoreScrollNode = null;
-        }
+        // 原地重启声明式动画（Container.RestartAnimations）：player 重建、delay 重计，
+        // 节点/滚动/控件值/订阅全保留——不再走销毁重实例化。
+        _current?.RestartAnimations();
     }
 
     /// settings 页 tab 切换：HTML 的 role=tab/tabpanel 模式依赖运行时 JS 改 panel display，

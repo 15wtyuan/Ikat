@@ -1813,6 +1813,23 @@ pub extern "C" fn loomgui_stage_set_text(
         .unwrap_or(-1)
 }
 
+/// 重启子树内声明式动画（class 触发 keyframes；programmatic node.Play player 不动）。
+/// 下帧 sync 依声明重建 player（delay 重计、backwards/both 立即写首帧）。
+/// 0=ok，-1=err（null 句柄 / node 不 live / 无 scene）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_restart_animations(h: *mut StageHandle, node_id: u32) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    match sh.stage.restart_animations(NodeId(node_id)) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
+}
+
 /// 改 Image 节点 src + 标 dirty_mesh。src = UTF-8 字节。0=ok，-1=err。
 /// 非 Image 节点 → -1。null 句柄 → -1。
 ///

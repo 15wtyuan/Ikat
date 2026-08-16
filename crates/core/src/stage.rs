@@ -652,6 +652,16 @@ impl Stage {
         crate::scene::dynamic::set_text(self.scene.as_mut().ok_or("no scene")?, node, text)
     }
 
+    /// 重启子树内声明式动画（class 触发 keyframes）。node 不 live → Err。
+    pub fn restart_animations(&mut self, node: NodeId) -> Result<(), String> {
+        let scene = self.scene.as_mut().ok_or("no scene")?;
+        if !scene.nodes.contains_key(node.to_key()) {
+            return Err("node not live".into());
+        }
+        crate::scene::animation::restart_animations(scene, node);
+        Ok(())
+    }
+
     /// 改 Image 节点 src + 标 dirty_mesh。
     pub fn set_src(&mut self, node: NodeId, src: &str) -> Result<(), String> {
         crate::scene::dynamic::set_src(self.scene.as_mut().ok_or("no scene")?, node, src)

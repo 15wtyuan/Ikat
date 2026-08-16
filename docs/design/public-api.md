@@ -197,6 +197,7 @@ public class Container : Node {
     public void SwapChildren(Node a, Node b);
     public void SwapChildrenAt(int indexA, int indexB);
     public Vector2 ScrollPos { get; }   // 滚动容器当前滚动位置（非滚动容器返 (0,0)）；与 ScrollTo 成对
+    public void RestartAnimations();     // 重启子树内声明式（class 触发）keyframes：player 原地重建，节点状态全保留；node.Play 程序化 player 不受影响
     public void ScrollTo(Vector2 pos, ScrollBehavior behavior = ScrollBehavior.Smooth);
     public event Action<ScrollChangedEvent> Scrolled;
     public UITemplate GetTemplate(string name);          // 取内联 template
