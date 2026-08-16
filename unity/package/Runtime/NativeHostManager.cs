@@ -206,13 +206,18 @@ namespace LoomGUI
                 wrapper.transform.localRotation = Quaternion.Euler(0, 0, rot);
                 wrapper.transform.localScale = new Vector3(sx, sy, sf > 0.0001f ? 1.0f / sf : 1.0f);
 
-                // 用户 GO sortingOrder = 节点 sort_key
+                // 用户 GO sortingOrder = 节点 sort_key + 1：须盖过宿主节点自身的渲染内容。
+                // UI 侧经 merge_meshes 合并后 blob sort_key 编号与 node DFS 序不同——slot
+                // 区域上层的合并背景块 key 可远大于宿主 key，严格按 sortingOrder 排序会把
+                // GO 整个压在底下（z 无关，Unity 跨 sortingOrder 不做距离 tiebreak）。
+                // +1000：跨过 merge_meshes 重组的本地合并块（合并组 key 可远超宿主 key，曾把整个展位罩住）；
+                // 宿主 slot 内无后续兄弟 UI，不会误遮（有重叠弹层需求的场景再收紧为精确穿插）。
                 uint sk = 0;
                 Native.loomgui_stage_get_node_sort_key(stage, id, &sk);
                 // includeInactive=true：刚恢复显示那帧 go.activeSelf 仍为 false（下一行才 SetActive(true)），
                 // 不含 inactive 子节点则其 Renderer sortingOrder 漏更新一帧。
                 foreach (var r in go.GetComponentsInChildren<Renderer>(true))
-                    if (r != null) r.sortingOrder = (int)sk;
+                    if (r != null) r.sortingOrder = (int)sk + 1000;
                 if (!go.activeSelf) go.SetActive(true);
             }
         }

@@ -47,6 +47,18 @@ public class ShowcaseRunner : MonoBehaviour
     Container _current;
     string _shown;
 
+    // ── character 页 3D 展位（NativeHost 同屏渲染验证） ──
+    Container _nativeSlot;         // 绑定目标（native-slot div；Unbind 需同节点）
+    GameObject _characterModel;    // NativeHost 持位根（挂 wrapper 下）
+    Transform _figureSpin;         // 旋转体（模型本体）
+    const float FigureSpinDegPerSec = 40f;
+
+    void Update()
+    {
+        if (_figureSpin != null)
+            _figureSpin.Rotate(Vector3.up, FigureSpinDegPerSec * Time.deltaTime, Space.Self);
+    }
+
     void Start()
     {
         _driver = GetComponent<LoomStageDriver>();
@@ -67,6 +79,7 @@ public class ShowcaseRunner : MonoBehaviour
     void Show(string page)
     {
         if (_shown == page) return;
+        TeardownCharacterStage();   // 上一页若是 character：解绑 NativeHost + 销毁模型
         if (_current != null)
         {
             _current.Dispose();   // 递归销毁旧页 + 清旧页事件订阅（Rust remove_node + 后端镜像下帧清）
@@ -83,6 +96,7 @@ public class ShowcaseRunner : MonoBehaviour
         WireControls(_current, page);
         WireSettingsTabs(_current, page);
         WireListViews(_current, page);
+        WireCharacterStage(_current, page);
         Debug.Log($"[Showcase] Instantiate showcase/{page} = OK");
     }
 
@@ -177,6 +191,242 @@ public class ShowcaseRunner : MonoBehaviour
         // 原地重启声明式动画（Container.RestartAnimations）：player 重建、delay 重计，
         // 节点/滚动/控件值/订阅全保留——不再走销毁重实例化。
         _current?.RestartAnimations();
+    }
+
+    // ── character 页 3D 展位：NativeHost 把引擎 GO 嵌进 UI 层级 ──
+    //
+    // 验证目标：UI（自绘 mesh）与引擎原生渲染（3D 模型 + 光照）同屏 interleaved——
+    // 模型 sortingOrder = native-slot 节点 sort_key（NativeHostManager.Sync 每帧写），
+    // 与 UI 同 Transparent 队列按 UI 绘制序穿插；模型跟随节点 world transform。
+    // 模型用基元拼装（无外部资产依赖）：机甲 + 剑 + 自发光基座 + 点光（ shading 证明
+    // 走的是引擎光照而非 UI 自绘）。尺寸按 design px：holder scale 100 → 1 unit = 100px。
+
+    void WireCharacterStage(Container page, string pageName)
+    {
+        if (pageName != "character") return;
+        if (!page.TryGet<Container>("native-slot", out var slot)) return;
+        _nativeSlot = slot;
+        _characterModel = BuildCharacterModel(out _figureSpin);
+        _driver.BindNativeHost(slot, _characterModel);
+        // 帧延迟对齐：build 时（Animator 未评估）的 bounds 与真实播放 pose 有偏差（曾整体高出
+        // 展位数百 px）——等动画跑 2 帧后按世界包围盒重新归一：高 520、中心对齐展位中心。
+        StartCoroutine(AlignModelAfterAnimEval(_characterModel.transform));
+        Debug.Log("[Showcase] character native-slot bound to 3D model (NativeHost)");
+    }
+
+    /// 帧延迟对齐：build 时（Animator 未评估）的 bounds 与真实播放 pose 有偏差——模型
+    /// 曾整体高出展位数百万至更多 px（脚底钉在展位中心、身高向上溢出展位顶）。
+    /// 等 2 帧动画真实评估后按世界包围盒重新归一：高 520、中心对齐展位中心（持位原点）。
+    System.Collections.IEnumerator AlignModelAfterAnimEval(Transform modelRoot)
+    {
+        yield return null;
+        yield return null;
+        var rends = modelRoot.GetComponentsInChildren<Renderer>();
+        if (rends.Length == 0) yield break;
+        var b = rends[0].bounds;
+        foreach (var r in rends) b.Encapsulate(r.bounds);
+        if (b.size.y < 0.001f || b.size.y > 10000f) yield break;
+        float s = 520f / b.size.y;
+        modelRoot.localScale *= s;
+        // 缩放后包围盒随 localScale 变化——重测一次再对齐（两步收敛）。
+        b = rends[0].bounds;
+        foreach (var r in rends) b.Encapsulate(r.bounds);
+        // 中心对齐到 modelRoot（holder）自身位置 = 展位中心（不是 wrapper 原点 = slot 左上）。
+        Vector3 worldOffset = modelRoot.position - b.center;
+        modelRoot.position += worldOffset;
+        // 观察向（z）压扁 + 抬到 UI 平面前：模型原生 z 深 ~±135px，超出 UI 相机视景
+        // （near z=-9.9 / far z=90）会被远近裁剪面各切一刀（视觉"被 UI 平面切成两半，
+        // 只剩后半"）。holder（不随自转）压 z 至 ~1/4 并整体 z+=20 → z∈[20..87]，
+        // 全程在裁剪区间内、位于 UI 平面（z=0）之前。
+        Vector3 ls = modelRoot.localScale;
+        modelRoot.localScale = new Vector3(ls.x, ls.y, ls.z * 0.25f);
+        Vector3 pos = modelRoot.position;
+        modelRoot.position = new Vector3(pos.x, pos.y, pos.z + 20f);
+        Debug.Log($"[Showcase] model aligned: size={b.size} center={b.center} rootPos={modelRoot.position}");
+    }
+
+    void TeardownCharacterStage()
+    {
+        if (_nativeSlot != null)
+        {
+            _driver.UnbindNativeHost(_nativeSlot);   // 销毁 wrapper（GO 先 reparent 出来）
+            _nativeSlot = null;
+        }
+        if (_characterModel != null)
+        {
+            Destroy(_characterModel);
+            _characterModel = null;
+        }
+        _figureSpin = null;
+    }
+
+    /// 展位模型：优先 FBX 资产（Animated Human prefab，含 Animator controller 自动播
+    /// 骨骼动画——验证 NativeHost 带真实 SkinnedMeshRenderer + 动画同屏渲染）；资产缺失
+    /// （built player / 路径变动）回落程序化基元机甲。两者都做归一化：骨架/渲染包围盒
+    /// 缩放到 ~520 design px、脚底对齐持位点、水平居中，模型细节与资产原始尺寸解耦。
+    static GameObject BuildCharacterModel(out Transform spin)
+    {
+#if UNITY_EDITOR
+        var prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+            "Assets/Models/quaternius_animatedman/Animated Human.prefab");
+        if (prefab != null)
+        {
+            // 归一化期间 holder 必须留在原点：bounds 是世界系读数，holder 若已带 slot 偏移
+            // （360,-340），偏移会被当几何中心反向"归位"——模型被甩出数万单位（曾现）。
+            // 量完再挪到展位中心。
+            var holder = new GameObject("NativeCharacter");
+
+            var inst = Instantiate(prefab, holder.transform);
+            inst.transform.localPosition = Vector3.zero;
+            inst.transform.localRotation = Quaternion.identity;
+            inst.transform.localScale = Vector3.one;
+            // 骨骼动画 pose 决定 skinned bounds——先评估首帧再量。骨架 AABB 一并封装
+            //（蒙皮渲染的真值；SMR.bounds 在 skinning 首评估前可能是陈旧的小盒）。
+            var animator = inst.GetComponentInChildren<Animator>();
+            if (animator != null)
+            {
+                animator.applyRootMotion = false;
+                animator.Rebind();
+                animator.Update(0f);
+            }
+            var rends = inst.GetComponentsInChildren<Renderer>();
+            bool have = false;
+            var b = new Bounds();
+            foreach (var r in rends)
+            {
+                if (!have) { b = r.bounds; have = true; }
+                else b.Encapsulate(r.bounds);
+            }
+            foreach (var smr in inst.GetComponentsInChildren<SkinnedMeshRenderer>())
+            {
+                smr.updateWhenOffscreen = true;   // 骨架驱动世界 bounds，杜绝误剔除
+                foreach (var bone in smr.bones)
+                    if (bone != null)
+                    {
+                        if (!have) { b = new Bounds(bone.position, Vector3.zero); have = true; }
+                        else b.Encapsulate(bone.position);
+                    }
+            }
+            if (have && b.size.y > 0.001f && b.size.y < 10000f)
+            {
+                float s = 520f / b.size.y;
+                inst.transform.localScale = Vector3.one * s;
+                // 脚底对齐 + 水平/纵深居中（旋转 pivot = 脚底中心）。
+                inst.transform.localPosition = new Vector3(
+                    -b.center.x * s, -b.min.y * s, -b.center.z * s);
+                // z 微前：与 slot 自身底色同 sort_key 时以距离赢 tiebreak（近者后画）。
+                inst.transform.localPosition += new Vector3(0f, 0f, 0.5f);
+            }
+            // wrapper 原点 = native-slot 左上角（design 坐标 y 下 → container y-up 空间取负）。
+            // slot 720x680 → 持位居中、脚底落在中心点。
+            holder.transform.localPosition = new Vector3(360f, -340f, 0f);
+
+
+            var lightGo = new GameObject("rimLight");
+            lightGo.transform.SetParent(holder.transform, false);
+            lightGo.transform.localPosition = Vector3.zero;
+            // 平行光（无距离衰减；design px 尺度的模型下点光衰减到近黑）+ 暖色斜照。
+            var pl = lightGo.AddComponent<Light>();
+            pl.type = LightType.Directional;
+            pl.transform.localRotation = Quaternion.Euler(50f, -30f, 0f);
+            pl.color = new UnityEngine.Color(1f, 0.94f, 0.85f);
+            pl.intensity = 2.2f;
+            // 正面补光（贴图深色系，纯侧逆光太暗）：从相机方向低强度补。
+            var fillGo = new GameObject("fillLight");
+            fillGo.transform.SetParent(holder.transform, false);
+            var fl = fillGo.AddComponent<Light>();
+            fl.type = LightType.Directional;
+            fl.transform.localRotation = Quaternion.Euler(10f, 190f, 0f);
+            fl.color = new UnityEngine.Color(0.85f, 0.92f, 1f);
+            fl.intensity = 0.9f;
+            Debug.Log($"[Showcase] native-slot model = FBX prefab（Animator={animator != null}）");
+            spin = inst.transform;
+            return holder;
+        }
+        Debug.LogWarning("[Showcase] Animated Human.prefab not found — fallback to primitive mech");
+#endif
+        return BuildPrimitiveMech(out spin);
+    }
+
+    /// 程序化机甲（FBX 缺失时的 fallback）：躯干/头/肩/臂 capsule+cube，右手发光剑，
+    /// 脚下发光基座环，一点光。
+    static GameObject BuildPrimitiveMech(out Transform spin)
+    {
+        var holder = new GameObject("NativeCharacter");
+        // wrapper 原点 = native-slot 左上角（design 坐标 y 下 → container y-up 空间取负）。
+        // slot 720x680 → 持位居中。figure z +0.01：与 slot 自身底色同 sort_key 时以 z
+        // 近者后画赢 tiebreak，保证模型画在底色之上。
+        holder.transform.localPosition = new Vector3(360f, -340f, 0f);
+        holder.transform.localScale = Vector3.one * 100f;
+
+        var figure = new GameObject("figure");
+        figure.transform.SetParent(holder.transform, false);
+        figure.transform.localPosition = new Vector3(0f, 0f, 0.01f);
+
+        var steel = new UnityEngine.Color(0.55f, 0.62f, 0.70f);
+        var armor = new UnityEngine.Color(0.16f, 0.30f, 0.42f);
+
+        Prim(figure.transform, PrimitiveType.Capsule, "torso",
+            new Vector3(0f, 1.05f, 0f), new Vector3(0.55f, 0.50f, 0.42f), armor);
+        Prim(figure.transform, PrimitiveType.Sphere, "head",
+            new Vector3(0f, 1.74f, 0f), new Vector3(0.34f, 0.32f, 0.34f), steel);
+        // 面甲：自发光青条（朝相机面 z+）。
+        Prim(figure.transform, PrimitiveType.Cube, "visor",
+            new Vector3(0f, 1.78f, 0.30f), new Vector3(0.26f, 0.07f, 0.05f),
+            new UnityEngine.Color(0f, 0f, 0f), new UnityEngine.Color(0.37f, 0.71f, 0.83f) * 3f);
+        Prim(figure.transform, PrimitiveType.Cube, "shoulderL",
+            new Vector3(-0.44f, 1.42f, 0f), new Vector3(0.26f, 0.18f, 0.30f), armor);
+        Prim(figure.transform, PrimitiveType.Cube, "shoulderR",
+            new Vector3(0.44f, 1.42f, 0f), new Vector3(0.26f, 0.18f, 0.30f), armor);
+        Prim(figure.transform, PrimitiveType.Capsule, "armL",
+            new Vector3(-0.46f, 1.02f, 0f), new Vector3(0.13f, 0.32f, 0.13f), steel);
+        Prim(figure.transform, PrimitiveType.Capsule, "armR",
+            new Vector3(0.46f, 1.02f, 0f), new Vector3(0.13f, 0.32f, 0.13f), steel);
+        // 剑：右手竖持，自发光金刃 + 小幅倾斜。
+        var sword = Prim(figure.transform, PrimitiveType.Cube, "sword",
+            new Vector3(0.62f, 1.25f, 0.08f), new Vector3(0.07f, 1.15f, 0.13f),
+            new UnityEngine.Color(0f, 0f, 0f), new UnityEngine.Color(0.83f, 0.64f, 0.31f) * 2.5f);
+        sword.transform.localRotation = Quaternion.Euler(0f, 0f, 10f);
+        // 基座环：自发光青（对称体，随 figure 旋转不可见）。
+        Prim(figure.transform, PrimitiveType.Cylinder, "baseRing",
+            new Vector3(0f, 0.02f, 0f), new Vector3(1.0f, 0.015f, 1.0f),
+            new UnityEngine.Color(0f, 0f, 0f), new UnityEngine.Color(0.37f, 0.71f, 0.83f) * 1.6f);
+
+        var lightGo = new GameObject("rimLight");
+        lightGo.transform.SetParent(figure.transform, false);
+        lightGo.transform.localPosition = new Vector3(0.8f, 2.3f, 1.4f);
+        var pl = lightGo.AddComponent<Light>();
+        pl.type = LightType.Point;
+        pl.color = new UnityEngine.Color(1f, 0.9f, 0.75f);
+        pl.intensity = 1.6f;
+        pl.range = 4f;
+
+        spin = figure.transform;
+        return holder;
+    }
+
+    /// 基元快捷构造：挂父、定位、缩放、赋 lit 材质（可选自发光），剥 Collider（UI 层无物理）。
+    static GameObject Prim(Transform parent, PrimitiveType type, string name,
+        Vector3 localPos, Vector3 localScale, UnityEngine.Color color, UnityEngine.Color? emission = null)
+    {
+        var go = GameObject.CreatePrimitive(type);
+        go.name = name;
+        var col = go.GetComponent<Collider>();
+        if (col != null) Destroy(col);
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = localPos;
+        go.transform.localScale = localScale;
+        var shader = Shader.Find("Universal Render Pipeline/Lit");
+        if (shader == null) shader = Shader.Find("Standard");
+        var m = new Material(shader);
+        m.color = color;
+        if (emission.HasValue)
+        {
+            m.EnableKeyword("_EMISSION");
+            m.SetColor("_EmissionColor", emission.Value);
+        }
+        go.GetComponent<Renderer>().sharedMaterial = m;
+        return go;
     }
 
     /// settings 页 tab 切换：HTML 的 role=tab/tabpanel 模式依赖运行时 JS 改 panel display，
@@ -281,7 +531,8 @@ public class ShowcaseRunner : MonoBehaviour
                 name.ValueChanged += e => Debug.Log($"[Showcase] char-name: \"{e.NewValue}\"");
                 name.Submitted += v => Debug.Log($"[Showcase] char-name submitted: \"{v}\"");
             }
-            // char-pass：<input type="password"> 现折叠为 TextField（web-only 控件，游戏自实现掩码）。
+            // char-pass：password 掩码由 CSS -webkit-text-security:disc 声明（core 显示层
+            // 变换，value 原文不变）；这里只 log 长度证明 value 未被掩码污染。
             if (page.TryGet<TextField>("char-pass", out var pass))
                 pass.ValueChanged += e => Debug.Log($"[Showcase] char-pass changed (len={(e.NewValue?.Length ?? 0)})");
             // char-search：<input type="search"> 同样折叠为 TextField。
@@ -290,6 +541,19 @@ public class ShowcaseRunner : MonoBehaviour
             // Dropdown.SelectionChanged（P3：select 弹出列表，typed 事件链）。
             if (page.TryGet<Dropdown>("char-class", out var cls))
                 cls.SelectionChanged += e => Debug.Log($"[Showcase] char-class selected index = {e.NewIndex}");
+            // 初始属性分配 slider：ValueChanged → 旁边数字标签（同 settings vol-master 模式）。
+            // label 的 id 在 form.html 里（attr-str-val / attr-agi-val / attr-int-val）。
+            string[] attrSliders = { "attr-str", "attr-agi", "attr-int" };
+            foreach (string sid in attrSliders)
+            {
+                if (page.TryGet<Slider>(sid, out var attr)
+                    && page.TryGet<TextElement>(sid + "-val", out var attrVal))
+                {
+                    Slider s = attr;
+                    TextElement v = attrVal;
+                    s.ValueChanged += e => v.TextContent = Mathf.RoundToInt(e.NewValue).ToString();
+                }
+            }
             // TextArea.ValueChanged（P2 多行变体类型对）。
             if (page.TryGet<TextArea>("char-bio", out var bio))
                 bio.ValueChanged += e => Debug.Log($"[Showcase] char-bio changed (len={(e.NewValue?.Length ?? 0)})");

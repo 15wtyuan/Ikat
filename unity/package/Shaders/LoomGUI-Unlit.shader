@@ -243,15 +243,19 @@ Shader "LoomGUI/Unlit"
                 UNDERLAY_PASS(1)
                 UNDERLAY_PASS(2)
                 #undef UNDERLAY_PASS
-                // outline（stroke：edge 外侧 halfW 宽环，over 合成画 face 下——face 覆盖内侧半环，
-                // 外侧半环露出描边色）。旧代码把 _OutlineWidth(px) 直接加进 d（1 d 单位≈24px）→
-                // outer/inner 双 saturate → 整个 glyph 填描边色盖掉字色，看不出描边。
+                // outline（stroke）：居中描边，对齐浏览器 -webkit-text-stroke——edge 为带
+                // 中心，总可见宽 = 声明宽（±halfW）+ 1px AA（cov = saturate(halfW + 0.5 - |edge|)，
+                // 单一坡道，带宽精确）。外半环（edge<0，face 外）over 合成补 alpha；内半环
+                // （edge>0，face 内）描边色盖字面（浏览器行为——内半吃进字形）。
+                // 旧版用两条 saturate 差分做带——每侧自带 1px 坡道互相叠加，1px 描边实际
+                // 渲出 ~2.5px 宽软带（观感"只剩黄色描边、过大"）。
                 if (_OutlineWidth > 0.001) {
                     float halfW = _OutlineWidth * 0.5;
-                    float om = saturate(edge + halfW + 0.5) - saturate(edge + 0.5);
-                    float oa = om * _OutlineColor.a;
-                    rgb = lerp(rgb, _OutlineColor.rgb, oa * (1.0 - a));
-                    a += oa * (1.0 - a);
+                    float cov = saturate(halfW + 0.5 - abs(edge));
+                    float oa = cov * _OutlineColor.a;
+                    rgb = lerp(rgb, _OutlineColor.rgb, oa);             // 内半环：盖字面色
+                    rgb = lerp(rgb, _OutlineColor.rgb, oa * (1.0 - a)); // face 外：外半环
+                    a += oa * (1.0 - a) * saturate(0.5 - edge);         // 只在 face 外补 alpha
                 }
                 // glow（edge 外晕开，_GlowPower=晕开半径 px，曲线衰减）。旧 `gm=1-face` 远离字形处
                 // face→0 → gm→1 → glow 满 quad；改 outDist 仅取外侧距离，到 glowExt 衰减到 0。
@@ -339,12 +343,20 @@ Shader "LoomGUI/Unlit"
                 // 直接在归一化空间做 SDF 会让 smoothstep 边带横跨整个半宽（3px 圆角被糊没）
                 // 且各向异性把圆角变椭圆。换算回像素：halfPx=1/_ClipBox.zw，rPx=归一半径×min半边。
                 // sdf<0 内，>0 外；smoothstep(0,1,sdf) = 1 design px 抗锯齿带。
+                // SafeBlank（零面积 clip，_ClipBox.zw=(0,0)）显式置 0：像素空间的 1/zw 会产生
+                // inf→inf−inf=NaN，smoothstep(0,1,NaN) 在常见驱动返 0 → alpha×1 = 完全不裁剪
+                // （SafeBlank「clipPos 恒 (-2,-2) → step 全 discard」契约只对 CLIPPED 的 step
+                // 路径成立，像素空间 SDF 须自带守卫——否则滚出视口的圆角 clip 子树整条漏出）。
+                if (_ClipBox.z * _ClipBox.w <= 0.0) {
+                    col.a = 0.0;
+                } else {
                 float2 halfPx = 1.0 / _ClipBox.zw;
                 float rPx = _CornerRadius * min(halfPx.x, halfPx.y);
                 float2 pPx = i.clipPos * halfPx;
                 float2 q = abs(pPx) - halfPx + rPx;
                 float sdf = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rPx;
                 col.a *= 1.0 - smoothstep(0.0, 1.0, sdf);
+                }
                 #elif defined(CLIPPED)
                 float2 f = abs(i.clipPos);
                 col.a *= step(max(f.x, f.y), 1.0);

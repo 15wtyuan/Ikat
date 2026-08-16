@@ -362,6 +362,30 @@ namespace LoomGUI
             return inst;
         }
 
+        // ===== NativeHost（引擎对象嵌入 UI 层级） =====
+
+        /// <summary>
+        /// 把外部 GameObject 绑定到 UI 节点（NativeHost）：GO 挂 per-node wrapper，每帧 Sync
+        /// 跟随节点的 world transform / 显隐（display:none→SetActive(false)）/ 排序
+        /// （sortingOrder = 节点 sort_key，与 UI mesh 同队列 interleaved 渲染）。典型用途：
+        /// 3D 模型 / 粒子嵌进 UI 卡面（如角色展示位）。GO 自身 transform（含 scale）不被
+        /// Sync 覆盖。材质自动 clone 转 URP Transparent（renderQueue=3000 与 UI 一致）。
+        /// 节点 Dispose 后 visible=0 → GO 自动隐藏；重绑同节点先解旧绑。
+        /// </summary>
+        public void BindNativeHost(Node node, GameObject go)
+        {
+            if (node == null || go == null) return;
+            _backend?.NativeHost.Bind(node._id, go);
+            NativeHostManager.ConfigureTransparentMaterials(go);
+        }
+
+        /// <summary>解绑 NativeHost（<see cref="BindNativeHost"/> 的逆操作）。GO 不销毁，归还调用方管理。</summary>
+        public void UnbindNativeHost(Node node)
+        {
+            if (node == null) return;
+            _backend?.NativeHost.Unbind(node._id);
+        }
+
         // ===== Font registration (from runtime.json) =====
 
         /// <summary>

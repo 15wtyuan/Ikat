@@ -22,6 +22,15 @@ namespace LoomGUI
         internal UnityEngine.Vector2 DesignSize { get; set; }
         internal bool UseSafeArea { get; set; }
 
+        /// <summary>
+        /// 滚轮手感倍率（默认 3.5，实测手感校准值）：滚轮 delta 的最终乘数，PlayMode 中
+        /// Inspector 实时调。基准 = 一格 ~100 design px × 倍率（经典 notch 鼠标）。
+        /// </summary>
+        [Tooltip("滚轮手感倍率：1 = 一格约 100 design px。默认 3.5（实测手感）。")]
+        [SerializeField] float _wheelScrollSpeed = 3.5f;
+        /// <summary>滚轮手感倍率（<see cref="_wheelScrollSpeed"/> 的只读出口）。</summary>
+        public float WheelScrollSpeed => _wheelScrollSpeed;
+
         /// 上帧聚焦节点缓存：IME mode 仅在焦点真正转换时切换，避免每帧重设（移动端/
         /// WebGL IME 状态切换昂贵）。0xFFFFFFFF = 无聚焦。
         private uint _lastFocused = 0xFFFF_FFFFu;
@@ -281,7 +290,14 @@ namespace LoomGUI
             float dy = 0f;
 #if ENABLE_INPUT_SYSTEM
             var v = UnityEngine.InputSystem.Mouse.current?.scroll?.ReadValue() ?? UnityEngine.Vector2.zero;
-            dy = v.y / 120f;  // 归一：新系统 ~120 像素/格 → ±1/格
+            // 双模映射（免定标）：单事件 |raw|≥60 视为经典 notch 鼠标（120/格 → ±1 格）；
+            // 小事件流（触控板/精滚轮，实测 ~1.5-2/格）按 2 raw ≈ 1 格当量直接折算——
+            // 逐事件小步进（core 侧 clamp+tween 链动，等效连续滚动）。
+            if (Mathf.Abs(v.y) >= 60f)
+                dy = Mathf.Round(v.y / 120f);
+            else if (!Mathf.Approximately(v.y, 0f))
+                dy = v.y * 0.5f;
+            dy *= ctx.WheelScrollSpeed;
 #else
             dy = Input.mouseScrollDelta.y;  // 旧系统已 ≈ ±1/格
 #endif

@@ -188,10 +188,11 @@
 
       <div class="section">
         <div class="section-title">9 · 溢出（overflow-x/y scroll/auto/hidden）</div>
-        <div class="specimen" style="display:flex;flex-direction:row;gap:16px">
-          <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">scroll</span><div class="ov-box ov-scroll"><div style="color:#9aa0b4;font-size:12px">行1\n行2\n行3\n行4\n行5\n行6\n行7\n行8</div></div></div>
-          <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">auto</span><div class="ov-box ov-auto"><div style="color:#9aa0b4;font-size:12px">行1\n行2\n行3\n行4\n行5\n行6\n行7\n行8</div></div></div>
-          <div style="display:flex;flex-direction:column;gap:4px"><span style="color:#9aa0b4;font-size:12px">hidden</span><div class="ov-box ov-hidden"><div style="color:#9aa0b4;font-size:12px">行1\n行2\n行3\n行4\n行5\n行6\n行7\n行8</div></div></div>
+        <div class="section-desc">每个盒 280×80，内装 8 行内容（超出盒高）。scroll：常显滚动条，可滚；auto：溢出才显示滚动条（此处同样溢出，可滚）；hidden：直接裁掉，滚轮无效。把滚轮放在三个盒上分别试——前两个能滚动，第三个纹丝不动。</div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:16px;align-items:flex-start">
+          <div class="fx-col"><span class="fx-label">overflow-y:scroll</span><div class="ov-box ov-scroll" style="color:#9aa0b4;font-size:12px"><div>行 1 · 溢出内容（超出盒高）</div><div>行 2 · 溢出内容（超出盒高）</div><div>行 3 · 溢出内容（超出盒高）</div><div>行 4 · 溢出内容（超出盒高）</div><div>行 5 · 溢出内容（超出盒高）</div><div>行 6 · 溢出内容（超出盒高）</div><div>行 7 · 溢出内容（超出盒高）</div><div>行 8 · 溢出内容（超出盒高）</div></div></div>
+          <div class="fx-col"><span class="fx-label">overflow-y:auto</span><div class="ov-box ov-auto" style="color:#9aa0b4;font-size:12px"><div>行 1 · 溢出内容（超出盒高）</div><div>行 2 · 溢出内容（超出盒高）</div><div>行 3 · 溢出内容（超出盒高）</div><div>行 4 · 溢出内容（超出盒高）</div><div>行 5 · 溢出内容（超出盒高）</div><div>行 6 · 溢出内容（超出盒高）</div><div>行 7 · 溢出内容（超出盒高）</div><div>行 8 · 溢出内容（超出盒高）</div></div></div>
+          <div class="fx-col"><span class="fx-label">overflow-y:hidden</span><div class="ov-box ov-hidden" style="color:#9aa0b4;font-size:12px"><div>行 1 · 溢出内容（超出盒高）</div><div>行 2 · 溢出内容（超出盒高）</div><div>行 3 · 溢出内容（超出盒高）</div><div>行 4 · 溢出内容（超出盒高）</div><div>行 5 · 溢出内容（超出盒高）</div><div>行 6 · 溢出内容（超出盒高）</div><div>行 7 · 溢出内容（超出盒高）</div><div>行 8 · 溢出内容（超出盒高）</div></div></div>
         </div>
       </div>
 
