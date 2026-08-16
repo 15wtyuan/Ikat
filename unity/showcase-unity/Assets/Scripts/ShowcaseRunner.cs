@@ -103,6 +103,8 @@ public class ShowcaseRunner : MonoBehaviour
             back.Clicked += () => Show("home");
         if (pageName == "m2-animation" && page.TryGet<Button>("btn-replay", out var replay))
             replay.Clicked += ReplayCurrentPage;
+        if (pageName == "m2-animation")
+            WireM2AnimationDrivers(page);
         if (pageName == "home")
         {
             foreach (var (cardId, target) in NAV_CARDS)
@@ -114,9 +116,62 @@ public class ShowcaseRunner : MonoBehaviour
         }
     }
 
-    /// m2-animation 页「↻ 重播」：dispose + 重新实例化当前页——class 触发的 keyframes
-    /// （入场/错峰/fill-mode 等一次性标本）随 instantiate 重放；循环标本无感重启。
-    /// 重播后 Wire* 由 Show() 重新接线（订阅随旧页 Dispose 一并清除）。
+    /// m2-animation #11/#12：程序化动画（node.Play + 句柄 L3）的 driver 接线。
+    /// #11 点盒子 Play（OnKey/OnHook 回调进 Console）；#12 按钮排控制同一句柄的
+    /// Pause/Resume/Stop/Time seek。Play 每次新建 programmatic player（句柄换新）。
+    void WireM2AnimationDrivers(Container page)
+    {
+        if (page.TryGet<Container>("b11-target", out var playTarget))
+        {
+            playTarget.On<ClickEvent>(_ =>
+                playTarget.Play("m2-play-fade")
+                    .OnEnd(() => Debug.Log("[Showcase] m2 #11 Play("m2-play-fade") end")));
+        }
+        if (page.TryGet<Container>("b11-hook", out var hookTarget))
+        {
+            hookTarget.On<ClickEvent>(_ =>
+                hookTarget.Play("m2-hookanim")
+                    .OnKey(0.5f, () => Debug.Log("[Showcase] m2 #11 OnKey(0.5) fired"))
+                    .OnHook("half", () => Debug.Log("[Showcase] m2 #11 OnHook(half) fired")));
+        }
+        if (!page.TryGet<Container>("b12-target", out var handleTarget))
+            return;
+        Animation handle = null;
+        if (page.TryGet<Button>("btn-h-play", out var bPlay))
+            bPlay.Clicked += () =>
+            {
+                handle = handleTarget.Play("m2-play-fade");
+                Debug.Log("[Showcase] m2 #12 Play -> new handle");
+            };
+        if (page.TryGet<Button>("btn-h-pause", out var bPause))
+            bPause.Clicked += () =>
+            {
+                handle?.Pause();
+                Debug.Log($"[Showcase] m2 #12 Pause @ t={handle?.Time:F2}s");
+            };
+        if (page.TryGet<Button>("btn-h-resume", out var bResume))
+            bResume.Clicked += () =>
+            {
+                handle?.Resume();
+                Debug.Log("[Showcase] m2 #12 Resume");
+            };
+        if (page.TryGet<Button>("btn-h-stop", out var bStop))
+            bStop.Clicked += () =>
+            {
+                handle?.Stop();
+                Debug.Log("[Showcase] m2 #12 Stop（句柄失效）");
+            };
+        if (page.TryGet<Button>("btn-h-seek", out var bSeek))
+            bSeek.Clicked += () =>
+            {
+                if (handle == null) return;
+                handle.Time = 0.5f;
+                Debug.Log("[Showcase] m2 #12 seek Time=0.5s");
+            };
+    }
+
+    /// m2-animation 页「↻ 重播」：原地重启声明式动画（Container.RestartAnimations）——
+    /// player 重建、delay 重计，节点/滚动/控件值/订阅全保留。
     void ReplayCurrentPage()
     {
         // 原地重启声明式动画（Container.RestartAnimations）：player 重建、delay 重计，

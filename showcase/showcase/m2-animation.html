@@ -88,6 +88,7 @@
     to { opacity:1; }
   }
   .b-target { width:120px; height:48px; border-radius:8px; background-color:#2a5a75; color:#e0e6ec; font-size:14px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+  .hbtn { color:#8ec5d8; font-size:13px; font-weight:600; padding:8px 14px; border-radius:8px; background-color:rgba(95,180,212,0.06); box-shadow:inset 0 0 0 1px rgba(95,180,212,0.22); }
   </style>
 </head>
 <body>
@@ -193,18 +194,23 @@
         <div class="section-title">11 · node.Play + OnKey / OnHook（driver 占位）</div>
         <div class="section-desc">@keyframes m2-play-fade（程序化 Play 目标）+ m2-hookanim（50% stop 带 /* @loom-hook half */ 锚点）。Play/OnKey(.5)/OnHook("half") 由 driver C# 驱动，本页只到 HTML 结构。</div>
         <div class="stage">
-          <div class="stage-col"><span class="label">Play("m2-play-fade")</span><div id="b11-target" class="b-target">target</div></div>
-          <div class="stage-col"><span class="label">OnHook("half")</span><div id="b11-hook" class="b-target">hook</div></div>
+          <div class="stage-col"><span class="label">Play("m2-play-fade") · 点击盒子触发</span><div id="b11-target" class="b-target">target</div></div>
+          <div class="stage-col"><span class="label">OnKey(.5) + OnHook("half") · 点击盒子触发</span><div id="b11-hook" class="b-target">hook</div></div>
           <span class="note">driver: node.Play + Animation.OnKey(.5) + OnHook("half")</span>
         </div>
       </div>
 
       <div class="section">
         <div class="section-title">12 · 句柄 L3 控制（Play + Pause/Resume/Stop/seek，driver 占位）</div>
-        <div class="section-desc">Play 返回句柄，driver 按钮 Pause/Resume/Stop/Time seek 演示 L3 生命周期控制。本页只到目标结构，按钮由 driver C# 接。</div>
+        <div class="section-desc">Play 返回句柄，按钮 Pause/Resume/Stop/Time seek 演示 L3 生命周期控制（Play 每次新建句柄，可反复开）。</div>
         <div class="stage">
           <div id="b12-target" class="b-target">handle</div>
-          <span class="note">driver: Pause / Resume / Stop / set Time seek（句柄 L3 全套）</span>
+          <button id="btn-h-play" class="hbtn">Play</button>
+          <button id="btn-h-pause" class="hbtn">Pause</button>
+          <button id="btn-h-resume" class="hbtn">Resume</button>
+          <button id="btn-h-stop" class="hbtn">Stop</button>
+          <button id="btn-h-seek" class="hbtn">Seek .5</button>
+          <span class="note">Unity 运行时驱动（浏览器预览无程序化动画，按钮仅 Unity 生效）</span>
         </div>
       </div>
 
