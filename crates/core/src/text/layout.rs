@@ -21,6 +21,13 @@ use crate::scene::node::NodeId;
 /// 想调 normal 倍数只改这一处。
 const NORMAL_LINE_HEIGHT: f32 = 1.31;
 
+/// 断行装填的亚像素容差（design px）。贪心累加（token/段 求和）与行宽（glyph 逐字
+/// pen 累加）的浮点加法顺序不同——非结合性使两侧在"恰好装满"边界可差 ~1e-5，无容差的
+/// `<=` 会把最后一个 token 挤到下一行（flex item 定宽 = max-content 的场景必现：
+/// item 宽 = max-content，重测约束 = 同值，边界比较必失败）。0.05px 远低于任何可见
+/// glyph 碎片，只吃掉浮点噪声。
+const WRAP_FIT_EPS: f32 = 0.05;
+
 /// 单个字形。坐标为绝对坐标（pen 位 = glyph.x/y + bearing）。
 #[derive(Debug, Clone)]
 pub struct Glyph {
@@ -444,6 +451,7 @@ pub fn text_fingerprint(
 pub fn rich_text_fingerprint(
     runs: &[crate::text::rich::RichRun],
     line_height: f32,
+    letter_spacing: f32,
     align: crate::style::resolved::TextAlign,
     family: Option<&str>,
     mw: Option<f32>,
@@ -451,6 +459,7 @@ pub fn rich_text_fingerprint(
     use crate::text::rich::RichKind;
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
+    letter_spacing.to_bits().hash(&mut h);
     runs.len().hash(&mut h);
     for r in runs {
         // kind 判别 + payload。Text vs Image 用 0/1 区分；Image 的 f32 用 to_bits 哈希
@@ -561,24 +570,28 @@ pub fn measure_text(
     let baseline = (line_h + ascent - descent) / 2.0 - descent.abs();
 
     // 度量一段文本的宽度（含字距）。per-char 按 stack 选字体——回退字形的 advance
-    // 用其来源字体算，否则行宽估错导致断行位置偏。
-    // kerning 仅相邻同字体才查（跨字体无 kern 表可言）。
-    let measure_width = |s: &str| -> f32 {
+    // 用其来源字体算，否则行宽估错导致断行位置偏。kerning 仅相邻同字体才查（跨字体
+    // 无 kern 表可言）。
+    //
+    // `prev` 传（可变引用）行内前一字符的 (gid, font_id)：段首与行内前段的跨段 kern 也
+    // 计入。贪心累加必须与 glyph 生成（对整行文本连续算 kern）完全同参——否则 max-content
+    // 宽度作约束重测时两侧差一个 kern 量，最后一字被挤到下一行（flex item 定宽 =
+    // max-content 的场景必现）。font_id 等值即同字体（id 全局唯一），kern 查表用当前字体。
+    let measure_width = |s: &str, prev: &mut Option<(ttf_parser::GlyphId, u32)>| -> f32 {
         let mut pen = 0.0f32;
-        let mut prev: Option<(ttf_parser::GlyphId, &Font)> = None;
         for ch in s.chars() {
-            let (f, _) = stack.pick(ch);
+            let (f, fid) = stack.pick(ch);
             let gid_opt = f.face.glyph_index(ch);
             let gid = gid_opt.unwrap_or_default();
-            if let Some((p, pf)) = prev {
-                if std::ptr::eq(pf, f) {
+            if let Some((p, pf)) = *prev {
+                if pf == fid {
                     if let Some(k) = kerning_value(&f.face, p, gid) {
                         pen += k as f32 / f.face.units_per_em() as f32 * font_size;
                     }
                 }
             }
             pen += glyph_advance(&f.face, gid_opt, font_size) + letter_spacing;
-            prev = Some((gid, f));
+            *prev = Some((gid, fid));
         }
         pen
     };
@@ -610,13 +623,23 @@ pub fn measure_text(
         segments.push((&content[prev..], BreakOpportunity::Allowed));
     }
 
-    // 3. 贪心填行。
+    // 3. 贪心填行。cur_prev 跟踪行内末字符（跨段 kern）；换行重置（新行段首无 kern）。
     let mut lines: Vec<(String, f32)> = Vec::new(); // (text, width)
     let mut cur = String::new();
     let mut cur_w = 0.0f32;
+    let mut cur_prev: Option<(ttf_parser::GlyphId, u32)> = None;
     let mut buf = [0u8; 4];
     for (seg, btype) in &segments {
-        let seg_w = measure_width(seg);
+        // mandatory 段自含尾 \n：换行语义由下方 flush 表达，\n 本身不进文本/宽度/glyph
+        // 流（送进 shaper 会落 .notdef 字形 = tofu）。rich 路径对 \n token 同此处理。
+        let seg = if *btype == BreakOpportunity::Mandatory {
+            seg.strip_suffix('\n').unwrap_or(seg)
+        } else {
+            seg
+        };
+        // probe 不提交：换行时段首 kern 重置，需以无前段状态重测。
+        let mut probe = cur_prev;
+        let seg_w = measure_width(seg, &mut probe);
         let seg_chars = seg.chars().count();
 
         // 超长词边界：segment 本身超 max_w 且多字符 → 逐字填。
@@ -625,32 +648,49 @@ pub fn measure_text(
             if !cur.is_empty() {
                 lines.push((std::mem::take(&mut cur), cur_w));
                 cur_w = 0.0;
+                cur_prev = None;
             }
             for ch in seg.chars() {
-                let cw = measure_width(ch.encode_utf8(&mut buf));
-                if !cur.is_empty() && cur_w + cw > max_w {
+                let ch_s = ch.encode_utf8(&mut buf);
+                let mut probe = cur_prev;
+                let mut cw = measure_width(ch_s, &mut probe);
+                if !cur.is_empty() && cur_w + cw > max_w + WRAP_FIT_EPS {
                     lines.push((std::mem::take(&mut cur), cur_w));
                     cur_w = 0.0;
+                    let mut fresh = None;
+                    cw = measure_width(ch_s, &mut fresh);
+                    probe = fresh;
                 }
                 cur.push(ch);
                 cur_w += cw;
+                cur_prev = probe;
             }
-        } else if nowrap || cur.is_empty() || cur_w + seg_w <= max_w {
+        } else if nowrap || cur.is_empty() || cur_w + seg_w <= max_w + WRAP_FIT_EPS {
             cur.push_str(seg);
             cur_w += seg_w;
+            cur_prev = probe;
         } else {
             lines.push((std::mem::take(&mut cur), cur_w));
             cur.push_str(seg);
-            cur_w = seg_w;
+            let mut fresh = None;
+            cur_w = measure_width(seg, &mut fresh);
+            cur_prev = fresh;
         }
 
-        // Mandatory break（\n）强制结束当前行（nowrap 下忽略）。
-        if !nowrap && *btype == BreakOpportunity::Mandatory && !cur.is_empty() {
+        // Mandatory break（\n）强制结束当前行（nowrap 下忽略）。无条件 push：连续 \n
+        // 产空行（cur 已剥 \n 可能为空），空行仍占行高（与 rich 路径 break token 一致）。
+        if !nowrap && *btype == BreakOpportunity::Mandatory {
             lines.push((std::mem::take(&mut cur), cur_w));
             cur_w = 0.0;
+            cur_prev = None;
         }
     }
-    if !cur.is_empty() {
+    // 内容以 \n 结尾（"abc\n"）：mandatory flush 已结束末行，还须补一个空行承载
+    // 换行后的光标/后续输入（编辑器语义：回车后 caret 落在新空行）。nowrap 不适用。
+    // 注意 unicode-linebreak 把文本末尾也产一个 Mandatory 哨兵断点——不能拿「末段
+    // btype==Mandatory」判定（"abc" 也会命中），须看内容本身是否以 \n 结尾。
+    let ends_mandatory = !nowrap && content.ends_with('\n');
+    if !cur.is_empty() || ends_mandatory {
         lines.push((cur, cur_w));
     }
     if lines.is_empty() {
@@ -759,22 +799,25 @@ pub fn measure_text(
 ///
 /// MVP 单字体：所有 run 共用传入的 `font`（节点 font_family 选的）+ `default_font_id`；
 /// `GlyphRun.font_id` 填 `default_font_id`（run.font_id 字段保留但不用于选 face）。
+#[allow(clippy::too_many_arguments)]
 pub fn measure_rich_text(
     runs: &[crate::text::rich::RichRun],
     max_width: Option<f32>,
     base_line_height: f32,
+    letter_spacing: f32,
     align: crate::style::resolved::TextAlign,
     stack: &FontStack<'_>,
 ) -> TextLayout {
     let font = stack.primary;
 
     // per-char 按 stack 选字体的 advance 和（token 宽度用）。回退字形 advance 用来源字体算。
+    // 含 letter_spacing（与 glyph 定位累加同参）。
     let stack_str_advance = |s: &str, size_px: f32| -> f32 {
         let mut pen = 0.0f32;
         for ch in s.chars() {
             let (f, _) = stack.pick(ch);
             let gid = f.face.glyph_index(ch);
-            pen += glyph_advance(&f.face, gid, size_px);
+            pen += glyph_advance(&f.face, gid, size_px) + letter_spacing;
         }
         pen
     };
@@ -866,22 +909,55 @@ pub fn measure_rich_text(
 
     // 2. 贪心断行：token 累加超 max_width → 开新行；is_break（\n）强制换行。
     //    首个 token 不论宽度都入行（防零宽 token 死循环）。
+    //    line_prev 跟踪行内末字符 (gid, font_id)：token 首字符与行内前 token 末字符的跨
+    //    token kern 计入累加（glyph 定位对整行连续算 kern）——否则 max-content 宽度作
+    //    约束重测时两侧差一个 kern 量，token 被提前挤到下一行（flex item 定宽场景必现）。
     let mut lines: Vec<Vec<usize>> = vec![Vec::new()];
     let mut cur_w = 0.0f32;
+    let mut line_prev: Option<(ttf_parser::GlyphId, u32)> = None;
     for (ti, tok) in tokens.iter().enumerate() {
         if tok.is_break {
             lines.push(Vec::new());
             cur_w = 0.0;
+            line_prev = None;
             continue;
         }
-        let fits =
-            max_width.is_none_or(|mw| cur_w + tok.w <= mw || lines.last().unwrap().is_empty());
+        // token 首字符的跨 token kern（按 token 所属 run 字号缩放，与 glyph 定位同参）。
+        let kern0 = match (line_prev, tok.text.chars().next()) {
+            (Some((p, pf)), Some(ch)) => {
+                let (f, fid) = stack.pick(ch);
+                let gid = f.face.glyph_index(ch).unwrap_or_default();
+                if pf == fid {
+                    kerning_value(&f.face, p, gid)
+                        .map(|k| {
+                            k as f32 / f.face.units_per_em() as f32
+                                * runs[tok.run_idx].size_px as f32
+                        })
+                        .unwrap_or(0.0)
+                } else {
+                    0.0
+                }
+            }
+            _ => 0.0,
+        };
+        let mut eff = tok.w + kern0;
+        // WRAP_FIT_EPS：见常量注释——贪心累加与 glyph pen 累加的浮点顺序差。
+        let fits = max_width
+            .is_none_or(|mw| cur_w + eff <= mw + WRAP_FIT_EPS || lines.last().unwrap().is_empty());
         if !fits {
             lines.push(Vec::new());
             cur_w = 0.0;
+            line_prev = None;
+            eff = tok.w; // 行首 token 无前段 kern。
         }
         lines.last_mut().unwrap().push(ti);
-        cur_w += tok.w;
+        cur_w += eff;
+        // 行内末字符 (gid, font_id)；image token（空 text）保持 prev 不变（glyph 定位同此）。
+        if let Some(last_ch) = tok.text.chars().next_back() {
+            let (f, fid) = stack.pick(last_ch);
+            let gid = f.face.glyph_index(last_ch).unwrap_or_default();
+            line_prev = Some((gid, fid));
+        }
     }
 
     // 3+4. 每行 baseline/高度 + 字形定位（pen x 累加 advance + kern）。
@@ -904,7 +980,10 @@ pub fn measure_rich_text(
             line_descent,
             line_gap,
         );
-        let baseline = line_ascent; // 行顶到 baseline。
+        // baseline：half-leading 居中（与 plain measure_text 同公式）。此前直接取 ascent
+        // 会忽略 line-height 倍数——同一 flex 行里 span（rich 路径）与匿名文本（plain
+        // 路径）基线差数 px，视觉上不齐。
+        let baseline = (h + line_ascent - line_descent) / 2.0 - line_descent.abs();
 
         if line_toks.is_empty() {
             // 空行（如 <br><br> 间）仍占行高。
@@ -970,7 +1049,7 @@ pub fn measure_rich_text(
                             bearing_y: by,
                             advance: adv,
                         });
-                        pen_x += adv;
+                        pen_x += adv + letter_spacing;
                         prev = Some((gid, f));
                     }
                     // 命中 rect：记本 run 在本行的 x 跨度（pre-align-dx，末尾统一加 dx）。
@@ -1153,6 +1232,205 @@ mod tests {
             env!("CARGO_MANIFEST_DIR")
         );
         Font::from_path(&p).ok()
+    }
+
+    // ── \n 剥离（tofu 修复）：mandatory 段尾 \n 不进 glyph 流 ──
+
+    #[test]
+    fn newline_produces_line_break_not_tofu_glyph() {
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        // "a\nb" → 2 行，glyph 只含 a/b（\n 落 .notdef = tofu 是旧 bug）。
+        let l = measure_text(
+            "a\nb",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(l.lines.len(), 2);
+        let cps: Vec<u32> = l
+            .lines
+            .iter()
+            .flat_map(|li| li.runs.iter())
+            .flat_map(|r| r.glyphs.iter())
+            .map(|g| g.codepoint)
+            .collect();
+        assert!(
+            !cps.contains(&('\n' as u32)),
+            "newline must not become a glyph (tofu): {cps:?}"
+        );
+        assert_eq!(cps, vec!['a' as u32, 'b' as u32]);
+    }
+
+    #[test]
+    fn trailing_newline_yields_empty_caret_line() {
+        // 编辑器语义：value 以 \n 结尾（回车后）→ 光标落在新空行（须有该空行承载）。
+        // unicode-linebreak 末尾 Mandatory 哨兵断点不算（"abc" 不得多出空行）。
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        let l = measure_text(
+            "a\n",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(l.lines.len(), 2);
+        let plain = measure_text(
+            "abc",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(plain.lines.len(), 1);
+        // caret 在 value 末字节 → 落第 2 行行首。
+        let ranges = crate::scene::text_cursor::line_byte_ranges(&l, "a\n");
+        assert_eq!(ranges, vec![(0, 2), (2, 2)]);
+        let (_, li) = crate::scene::text_cursor::cursor_pixel_x(&l, &ranges, 2);
+        assert_eq!(li, 1);
+    }
+
+    #[test]
+    fn consecutive_newlines_produce_empty_lines() {
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        // "a\n\nb" → 3 行（中间空行占行高），value 的 \n 由 caret 映射补消费。
+        let l = measure_text(
+            "a\n\nb",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(l.lines.len(), 3);
+        assert!(l.lines[1].runs.iter().all(|r| r.glyphs.is_empty()));
+        let ranges = crate::scene::text_cursor::line_byte_ranges(&l, "a\n\nb");
+        assert_eq!(ranges, vec![(0, 2), (2, 3), (3, 4)]);
+    }
+
+    #[test]
+    fn plain_remeasure_at_max_content_width_never_wraps() {
+        // 边界回归（WRAP_FIT_EPS）：max-content 宽作约束重测必须仍单行——
+        // flex item 定宽 = max-content 场景，浮点顺序差会挤掉末 token。
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        let text = "ab cd ef gh";
+        let l = measure_text(
+            text,
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        let l2 = measure_text(
+            text,
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            false,
+            Some(l.text_width),
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(
+            l2.lines.len(),
+            1,
+            "re-measure at own max-content width must not wrap"
+        );
+    }
+
+    #[test]
+    fn rich_baseline_applies_half_leading_for_line_height() {
+        // rich 路径 baseline 与 plain 同公式（half-leading 居中）：line-height 倍数
+        // 必须把 baseline 压低 (line_h - (A+D))/2，而非钉在 ascent——否则同 flex 行里
+        // span（rich）与匿名文本（plain）基线错位数 px。
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        let runs = vec![crate::text::rich::RichRun {
+            kind: crate::text::rich::RichKind::Text { text: "x".into() },
+            color: [1.0; 4],
+            font_id: 0,
+            size_px: 16,
+            weight: Default::default(),
+            style: crate::text::rich::RichStyle::Normal,
+            deco: Default::default(),
+            link_id: None,
+            source: NodeId(0),
+        }];
+        let lh = 2.0f32;
+        let plain = measure_text(
+            "x",
+            16.0,
+            lh,
+            0.0,
+            TextAlign::Left,
+            false,
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        let rich = measure_rich_text(&runs, None, lh, 0.0, TextAlign::Left, &stack);
+        assert_eq!(plain.lines[0].baseline, rich.lines[0].baseline);
+        let ascent = f.ascent(16.0);
+        assert!(
+            rich.lines[0].baseline > ascent,
+            "baseline {:.2} should exceed raw ascent {:.2} (half-leading)",
+            rich.lines[0].baseline,
+            ascent
+        );
+    }
+
+    #[test]
+    fn rich_letter_spacing_widens_layout() {
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        let runs = vec![crate::text::rich::RichRun {
+            kind: crate::text::rich::RichKind::Text { text: "abc".into() },
+            color: [1.0; 4],
+            font_id: 0,
+            size_px: 16,
+            weight: Default::default(),
+            style: crate::text::rich::RichStyle::Normal,
+            deco: Default::default(),
+            link_id: None,
+            source: NodeId(0),
+        }];
+        let w0 = measure_rich_text(&runs, None, 0.0, 0.0, TextAlign::Left, &stack).text_width;
+        let w5 = measure_rich_text(&runs, None, 0.0, 5.0, TextAlign::Left, &stack).text_width;
+        assert!(
+            w5 > w0 + 14.0,
+            "letter-spacing 5px x3 chars should widen by ~15: {w0} -> {w5}"
+        );
     }
 
     #[test]
@@ -1829,6 +2107,7 @@ mod tests {
             &runs,
             Some(1000.0),
             1.2,
+            0.0,
             TextAlign::Left,
             &FontStack::single(&font, 0),
         );
@@ -1867,6 +2146,7 @@ mod tests {
             &runs,
             Some(30.0),
             1.2,
+            0.0,
             TextAlign::Left,
             &FontStack::single(&font, 0),
         );
@@ -1905,6 +2185,7 @@ mod tests {
             &runs,
             Some(10.0),
             1.2,
+            0.0,
             TextAlign::Left,
             &FontStack::single(&font, 0),
         );
@@ -1968,6 +2249,7 @@ mod tests {
             &runs,
             Some(1000.0),
             1.2,
+            0.0,
             TextAlign::Left,
             &FontStack::single(&font, 0),
         );
@@ -2006,6 +2288,7 @@ mod tests {
             &runs,
             Some(1000.0),
             1.2,
+            0.0,
             TextAlign::Left,
             &FontStack::single(&font, 7),
         );
@@ -2043,9 +2326,9 @@ mod tests {
         }];
         let stack = FontStack::single(&font, 0);
         // 容器远宽于文本（1000 vs ~20px）→ center/right 应把字形推到右侧。
-        let left = measure_rich_text(&runs, Some(1000.0), 1.2, TextAlign::Left, &stack);
-        let center = measure_rich_text(&runs, Some(1000.0), 1.2, TextAlign::Center, &stack);
-        let right = measure_rich_text(&runs, Some(1000.0), 1.2, TextAlign::Right, &stack);
+        let left = measure_rich_text(&runs, Some(1000.0), 1.2, 0.0, TextAlign::Left, &stack);
+        let center = measure_rich_text(&runs, Some(1000.0), 1.2, 0.0, TextAlign::Center, &stack);
+        let right = measure_rich_text(&runs, Some(1000.0), 1.2, 0.0, TextAlign::Right, &stack);
         let first_x = |lay: &TextLayout| lay.lines[0].runs[0].glyphs[0].x;
         let w = left.lines[0].width;
         assert!(first_x(&left) == 0.0, "left 首字 x=0");
@@ -2141,6 +2424,7 @@ mod tests {
             &runs,
             Some(30.0),
             1.2,
+            0.0,
             TextAlign::Left,
             &FontStack::single(&font, 0),
         );
@@ -2211,6 +2495,7 @@ mod tests {
             &runs,
             Some(1000.0),
             1.2,
+            0.0,
             TextAlign::Left,
             &FontStack::single(&font, 0),
         );
@@ -2260,6 +2545,7 @@ mod tests {
             &runs,
             Some(1000.0),
             1.2,
+            0.0,
             TextAlign::Left,
             &FontStack::single(&font, 0),
         );

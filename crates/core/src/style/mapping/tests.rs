@@ -2045,3 +2045,23 @@ fn aspect_ratio_rejects_garbage_not_silent() {
     assert!(!apply_decl(&mut s, "aspect-ratio", "16/0")); // 分母 0
     assert!(s.taffy_style.aspect_ratio.is_none());
 }
+
+#[test]
+fn font_family_takes_first_name_stripping_quotes() {
+    // CSS 逗号列表 + 引号形式须取首个 family 名——整串存会让 FontTable 精确匹配失配。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(
+        &mut s,
+        "font-family",
+        "\"JetBrainsMono\",monospace"
+    ));
+    assert_eq!(s.font_family.as_deref(), Some("JetBrainsMono"));
+    assert!(apply_decl(&mut s, "font-family", "serif"));
+    assert_eq!(s.font_family.as_deref(), Some("serif"));
+    assert!(apply_decl(
+        &mut s,
+        "font-family",
+        "'PressStart2P' , monospace"
+    ));
+    assert_eq!(s.font_family.as_deref(), Some("PressStart2P"));
+}

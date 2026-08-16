@@ -1902,6 +1902,7 @@ fn render_one_node(
                             &runs,
                             Some(content_w),
                             s.line_height,
+                            s.letter_spacing,
                             s.text_align,
                             &stack,
                         )
@@ -2126,11 +2127,13 @@ fn render_one_node(
             else {
                 return;
             };
-            // 显示文本：value 优先（经 display_value 拼接 composition 预提交文本），空时
-            // 退到 placeholder。display_value 同时给出 composition 的 display 字节区间，供
-            // 下划线对齐预提交文本。measure_text_controls 缓存的 TextLayout 与这里 display
-            // 同源（都走 display_value），故文字 mesh 与下划线几何一致。
-            let (dv, comp_range) = crate::scene::control::display_value(e);
+            // 显示文本：value 优先（经 display_value 拼接 composition 预提交文本；掩码经
+            // display_value_masked 逐字符替换），空时退到 placeholder。display_value 同时给出
+            // composition 的 display 字节区间，供下划线对齐预提交文本。measure_text_controls
+            // 缓存的 TextLayout 与这里 display 同源（同掩码变体），故文字 mesh 与下划线几何一致。
+            let mask = n.style.text_security.map(crate::scene::control::mask_char);
+            let (dv, comp_range) = crate::scene::control::display_value_masked(e, mask);
+            let value_plain = e.value.clone();
             let is_placeholder = dv.is_empty();
             let display = if is_placeholder {
                 e.placeholder.clone()
@@ -2197,10 +2200,16 @@ fn render_one_node(
             let (sel_b, sel_e) = e.selection_range();
             if sel_b < sel_e {
                 let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
-                // sel_b/sel_e 是 value 字节偏移；显示串与 value 同字节布局（无掩码），
-                // 直接取像素几何。
-                let (xb, lib) = crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_b);
-                let (xe, lie) = crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_e);
+                // sel_b/sel_e 是 value 字节偏移；掩码下显示串字节空间 ≠ value（1 char:1 char
+                // 但字节宽变），按字符数换算后取像素几何（无掩码时换算恒等）。
+                let sel_b_d =
+                    crate::scene::control::value_to_display_byte(&value_plain, &display, sel_b);
+                let sel_e_d =
+                    crate::scene::control::value_to_display_byte(&value_plain, &display, sel_e);
+                let (xb, lib) =
+                    crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_b_d);
+                let (xe, lie) =
+                    crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, sel_e_d);
                 let sel_color = s.selection_background.unwrap_or([0.0, 0.0, 1.0, 0.5]); // 缺省蓝半透（CSS 未声明 selection-background 时）
                 let mut verts = Vec::new();
                 let mut uvs = Vec::new();
@@ -2349,10 +2358,12 @@ fn render_one_node(
             // 最上层（sort_key 升序 = 后绘者在上，caret 压在选区/下划线之上）。
             if scene.focused_node == Some(n.id) && !e.readonly && e.cursor_visible {
                 let ranges = crate::scene::text_cursor::line_byte_ranges(&layout, &display);
-                // e.cursor 是 value 字节偏移；显示串与 value 同字节布局（无掩码），
-                // 直接取像素 x。
+                // e.cursor 是 value 字节偏移；掩码下显示串字节空间 ≠ value，按字符数
+                // 换算（无掩码/无 composition 时恒等）。
+                let cursor_d =
+                    crate::scene::control::value_to_display_byte(&value_plain, &display, e.cursor);
                 let (cx, li) =
-                    crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, e.cursor);
+                    crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, cursor_d);
                 if let Some(line) = layout.lines.get(li) {
                     // cx 是 advance 累计（内容区相对，不含 off_left）；line.y 已含 off_top。
                     let x = rect.x + off_left + cx;

@@ -9,6 +9,17 @@ pub struct InheritedSet(pub u16);
 use taffy::style::LengthPercentage;
 use taffy::style::Style as TaffyStyle;
 
+/// CSS `-webkit-text-security` 的掩码形状（password 类输入的显示变换）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TextSecurity {
+    /// 实心圆点 `●`（浏览器 disc 默认形态）。
+    Disc,
+    /// 空心圆 `○`。
+    Circle,
+    /// 实心方块 `■`。
+    Square,
+}
+
 /// CSS transition 声明（单属性）。prop: None = all（任一通道变化触发）。
 /// 围栏先支持 opacity/color/background-color/all 映射到 TweenProp。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -328,6 +339,9 @@ pub struct ResolvedStyle {
     /// 颜色在 layout solve 期烘焙进缓存 TextLayout 的 per-run 色，故 layout 与 render 须
     /// 一致用此字段（见 `placeholder_render_color`）——render 单独改色会被缓存覆盖。
     pub placeholder_color: Option<[f32; 4]>,
+    /// CSS `-webkit-text-security`（掩码显示，password 类输入）。None = 不掩码。
+    /// 作用于文本控件的显示串（`display_value_masked`），不改变 value 本身。
+    pub text_security: Option<TextSecurity>,
     pub font_size: f32,
     pub font_family: Option<String>,
     pub font_weight: u16,
@@ -451,6 +465,7 @@ impl Default for ResolvedStyle {
             selection_background: None,
             selection_color: None,
             placeholder_color: None,
+            text_security: None,
             font_size: 16.0,
             font_family: None,
             font_weight: 400,

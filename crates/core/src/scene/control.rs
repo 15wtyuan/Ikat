@@ -106,6 +106,61 @@ fn char_index_to_byte(s: &str, char_idx: usize) -> usize {
         .unwrap_or(s.len())
 }
 
+/// `-webkit-text-security` 的掩码字符（disc ● / circle ○ / square ■）。
+pub fn mask_char(sec: crate::style::resolved::TextSecurity) -> char {
+    match sec {
+        crate::style::resolved::TextSecurity::Disc => '●',
+        crate::style::resolved::TextSecurity::Circle => '○',
+        crate::style::resolved::TextSecurity::Square => '■',
+    }
+}
+
+/// [`display_value`] 的掩码变体：显示字符逐个替换为掩码字符（换行保留），1 char : 1 char
+/// ——字符数不变、字节宽变化。`comp_range` 照常返回，但换算到掩码串的字节空间。
+pub fn display_value_masked(e: &EditState, mask: Option<char>) -> (String, Option<(usize, usize)>) {
+    let (display, comp) = display_value(e);
+    let Some(m) = mask else {
+        return (display, comp);
+    };
+    let masked: String = display
+        .chars()
+        .map(|c| if c == '\n' { c } else { m })
+        .collect();
+    // comp 区间按字符数换算（display 与 masked 同字符数，字节宽不同）。
+    let comp_masked = comp.map(|(s, end)| {
+        let cs = display[..s].chars().count();
+        let ce = display[..end].chars().count();
+        (
+            char_index_to_byte(&masked, cs),
+            char_index_to_byte(&masked, ce),
+        )
+    });
+    (masked, comp_masked)
+}
+
+/// value 字节偏移 → 掩码显示串字节偏移（按字符数换算；掩码 1:1 保字符数）。
+/// 越界/中间字节输入钳到最近字符边界（调用方 cursor/selection 按构造已对齐，防御性兜底）。
+/// composition 拼进 display 时映射按字符数近似（password 字段 IME 组合期是边角；
+/// 有 composition 的 caret 定位走 comp_range 锚点路径，不经此换算）。
+pub fn value_to_display_byte(value: &str, display: &str, off: usize) -> usize {
+    let mut c = off.min(value.len());
+    while !value.is_char_boundary(c) {
+        c -= 1;
+    }
+    let n = value[..c].chars().count();
+    char_index_to_byte(display, n)
+}
+
+/// 掩码显示串字节偏移 → value 字节偏移（[`value_to_display_byte`] 的反向）。
+pub fn display_to_value_byte(display: &str, value: &str, off: usize) -> usize {
+    let mut c = off.min(display.len());
+    while !display.is_char_boundary(c) {
+        c -= 1;
+    }
+    let n = display[..c].chars().count();
+    char_index_to_byte(value, n)
+}
+
 /// 在 parent 的直接子节点里按 role 找第一个匹配（基于 RoleTable）。无匹配 / parent 不
 /// live → None。
 ///
@@ -604,8 +659,10 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
             continue;
         };
         // display_value 同时返回 composition 的 display 字节区间；measure 只需显示文本本身
-        // （区间由 render underline / cursor_rect 消费）。
-        let (display, _comp_range) = display_value(e);
+        // （区间由 render underline / cursor_rect 消费）。-webkit-text-security 在此掩码
+        // （缓存 layout 与 render 显示同源，掩码下 caret/hit 走 display 字节空间 + 换算）。
+        let mask = n.style.text_security.map(mask_char);
+        let (display, _comp_range) = display_value_masked(e, mask);
         // value 为空时跳过缓存——render 阶段会用 placeholder 重测（空串 TextLayout 零高，
         // 缓存后 render 的 unwrap_or_else 不触发，placeholder 无法显示）。
         if display.is_empty() {
@@ -730,10 +787,21 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
                 let _ = set_inline_override(scene, popup, decl);
                 // listbox 位置：出现在 combobox 正下方。taffy 对 absolute 节点的百分比 inset
                 // 解析不可靠（containing-block height measure 时序），改用 user_transform 把
-                // listbox 偏移 combobox 自身高度（同 Slider thumb 定位模式：渲染/命中层，进
-                // world_matrix）。combobox 的 layout_rect.h 在 solve 后确定，sync 每帧读最新值。
-                let sel_h = scene.get(id).map(|n| n.layout_rect.h).unwrap_or(0.0);
-                let ty = if open { sel_h } else { 0.0 };
+                // listbox 偏移到 combobox 底边（同 Slider thumb 定位模式：渲染/命中层，进
+                // world_matrix）。CSS `top:100%` 被围栏丢弃后 absolute 节点回落 taffy 静态
+                // 位置（≈ value 行之后；layout_rect.y 已含该偏移，且是页面绝对坐标）——
+                // ty = 目标（combo_y + sel_h）− 静态 y，同空间相减；把静态 y 当父相对值
+                // 去减会把弹层甩到页面顶端。
+                let (combo_y, sel_h) = scene
+                    .get(id)
+                    .map(|n| (n.layout_rect.y, n.layout_rect.h))
+                    .unwrap_or((0.0, 0.0));
+                let static_y = scene.get(popup).map(|n| n.layout_rect.y).unwrap_or(0.0);
+                let ty = if open {
+                    combo_y + sel_h - static_y
+                } else {
+                    0.0
+                };
                 let _ = set_user_transform(
                     scene,
                     popup,
@@ -1009,8 +1077,26 @@ pub fn on_text_pointer_down(scene: &mut Scene, id: NodeId, local_x: f32, local_y
     let Some(layout) = scene.text_layouts[id.index()].as_ref().cloned() else {
         return;
     };
-    let ranges = line_byte_ranges(&layout, &value);
-    let offset = hit_byte_offset(&layout, &ranges, local_x, local_y);
+    // 缓存 layout 的 glyphs 是显示串（掩码下 ≠ value 字节）——ranges/hit 都在显示串
+    // 字节空间，命中后再换算回 value 字节（e.cursor 是 value 偏移）。
+    let display = {
+        let mask = scene
+            .get(id)
+            .and_then(|n| n.style.text_security)
+            .map(mask_char);
+        match scene.controls.get(id) {
+            Some(
+                ControlState::TextField(e)
+                | ControlState::TextArea(e)
+                | ControlState::NumberField { edit: e, .. },
+            ) => display_value_masked(e, mask).0,
+            _ => return,
+        }
+    };
+    let ranges = line_byte_ranges(&layout, &display);
+    let display_off = hit_byte_offset(&layout, &ranges, local_x, local_y);
+    // 无掩码/无 composition 时 display == value，换算即恒等。
+    let offset = display_to_value_byte(&display, &value, display_off);
     if let Some(
         ControlState::TextField(e)
         | ControlState::TextArea(e)
@@ -3301,6 +3387,54 @@ mod tests {
         let (display, range) = display_value(&e);
         assert_eq!(display, "ab");
         assert!(range.is_none());
+    }
+
+    // ── -webkit-text-security 掩码 ──
+
+    #[test]
+    fn display_value_masked_replaces_chars_keeps_count() {
+        // 掩码 1 char : 1 char（字符数不变、字节宽变）；换行保留（TextArea 多行）。
+        let e = EditState::from_init("ab密码".into(), "".into(), 0, false);
+        let (masked, range) = display_value_masked(&e, Some('●'));
+        assert_eq!(masked, "●●●●");
+        assert_eq!(masked.chars().count(), "ab密码".chars().count());
+        assert!(range.is_none());
+    }
+
+    #[test]
+    fn display_value_masked_none_passthrough() {
+        let e = EditState::from_init("ab".into(), "".into(), 0, false);
+        let (display, _) = display_value_masked(&e, None);
+        assert_eq!(display, "ab");
+    }
+
+    #[test]
+    fn display_value_masked_composition_range_remap() {
+        // comp 区间按字符数换算到掩码串字节空间：掩码点即预提交文本位置。
+        let mut e = EditState::from_init("ab".into(), "".into(), 0, false);
+        set_composition(&mut e, "ni", 1);
+        let (masked, range) = display_value_masked(&e, Some('●'));
+        assert_eq!(masked, "●●●●");
+        let (start, end) = range.expect("composition range present");
+        assert_eq!(&masked[start..end], "●●");
+    }
+
+    #[test]
+    fn mask_byte_conversions_roundtrip() {
+        // value↔display 字节换算：掩码下字节宽不同（ASCII 1B vs ● 3B），按字符数映射。
+        let value = "ab密码";
+        let (display, _) = display_value_masked(
+            &EditState::from_init(value.into(), "".into(), 0, false),
+            Some('●'),
+        );
+        for off in [0, 1, 2, 5, 8, value.len()] {
+            let d = value_to_display_byte(value, &display, off);
+            let back = display_to_value_byte(&display, value, d);
+            assert_eq!(back, off, "off {off} roundtrip");
+        }
+        // '密' 的 value 字节 2..5 → display 字节 6..9（前 2 个掩码字符）。
+        assert_eq!(value_to_display_byte(value, &display, 2), 6);
+        assert_eq!(value_to_display_byte(value, &display, 5), 9);
     }
 
     #[test]

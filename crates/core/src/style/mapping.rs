@@ -3,7 +3,7 @@ use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
     BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, GradCoord,
     Gradient, GradientStop, OverflowMode, RadialExtent, RadialShape, ResolvedStyle, SliceInsets,
-    TextAlign, GRADIENT_MAX_STOPS,
+    TextAlign, TextSecurity, GRADIENT_MAX_STOPS,
 };
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, LengthPercentage, LengthPercentageAuto};
@@ -1515,12 +1515,23 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.placeholder_color = parse_color(value);
             true
         }
+        // CSS -webkit-text-security：password 类输入的掩码显示（disc/circle/square）。
+        // `none`（CSS 初始值）与不可识别值 → None（不掩码）。
+        "-webkit-text-security" => {
+            style.text_security = match value.trim() {
+                "disc" => Some(TextSecurity::Disc),
+                "circle" => Some(TextSecurity::Circle),
+                "square" => Some(TextSecurity::Square),
+                _ => None,
+            };
+            true
+        }
         "font-size" => {
             style.font_size = parse_px(value).unwrap_or(style.font_size);
             true
         }
         "font-family" => {
-            style.font_family = Some(value.trim().to_string());
+            style.font_family = first_font_family(value);
             true
         }
         "font-weight" => {
@@ -2099,6 +2110,20 @@ fn parse_px(s: &str) -> Option<f32> {
         return None;
     }
     s.trim_end_matches("px").trim().parse::<f32>().ok()
+}
+
+/// font-family 逗号列表取首个 family 名（MVP 每节点单字体）：剥引号、trim。
+/// 整串存（如 `"JetBrainsMono",monospace`）会让 FontTable 精确匹配必失配 → 回落默认
+/// 字体，等宽/像素字体 specimen 全部失效。泛型关键字（monospace/serif）无注册映射，
+/// 不命中同样回落默认（围栏内 CSS 由 workspace 注册字体表决定可用字体）。
+fn first_font_family(value: &str) -> Option<String> {
+    let first = value.split(',').next()?.trim();
+    let unquoted = first.trim_matches(|c| c == '"' || c == '\'');
+    if unquoted.is_empty() {
+        None
+    } else {
+        Some(unquoted.to_string())
+    }
 }
 
 fn parse_justify(v: &str) -> taffy::JustifyContent {

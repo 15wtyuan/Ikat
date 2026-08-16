@@ -48,8 +48,9 @@ pub const TWEEN_TIME_DEFAULT: f32 = 0.3;
 pub const PULL_RATIO: f32 = 0.5;
 /// 回弹触发阈值（越界 abs > 20 才回弹，否则 snap）。
 pub const BOUNCE_THRESHOLD: f32 = 20.0;
-/// 滚轮步进（每 delta 单位位移 px）。
-pub const SCROLL_STEP: f32 = 25.0;
+/// 滚轮步进（每 delta 单位位移 design px）。对齐浏览器/OS 惯例：一格 ≈ 3 行文本
+/// ≈ 100px @1920×1080 设计分辨率；旧值 25 在千像素级滚动页上体感极慢。
+pub const SCROLL_STEP: f32 = 100.0;
 /// scrollbar 轨道厚度（px）。
 pub const SCROLLBAR_TRACK_THICKNESS: f32 = 8.0;
 /// scrollbar thumb 最小尺寸（px，防 content 过长时 thumb 缩到不可见）。

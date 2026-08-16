@@ -104,9 +104,21 @@ pub fn hit_test(scene: &Scene, point: (f32, f32)) -> Option<NodeId> {
 /// 递归测某子树。先测子（逆等效序，顶层先），子命中返回子的；子都不命中→自身 fallback。
 fn hit_subtree(scene: &Scene, id: NodeId, point: (f32, f32)) -> Option<NodeId> {
     let node = scene.get(id).expect("live node");
-    // clip 门控：有 clip_rect 且点不在 clip 内 → 整个子树不命中
+    // bounds guard：world_transforms 可能未对齐（结构变更帧新增节点本帧 world_transforms
+    // 未算，或首帧 world_transforms 空）→ 越界返 None（1 帧延迟语义：本帧未命中）。
+    // sentinel id（thumb flag）不会进 hit_subtree（hit_test 在 hit_scrollbar_grip 命中后
+    // 早 return），故此处 id 必为 live 节点 NodeId，index() 不会因 flag bit 失真。
+    let wm = scene.world_transforms.get(id.index())?;
+    let inv = crate::transform::inverse(wm);
+    // 点逆投到节点本地空间（box 判定的 (0,0,w,h) 系）。
+    let (lx, ly) = crate::transform::apply_point(&inv, point.0, point.1);
+    let lr = node.layout_rect;
+    // clip 门控：clip_rect 是页面绝对坐标矩形（渲染侧同语义：clip−scroll 与屏幕点比）。
+    // 本地点 + layout_rect 偏移 = 补回祖先滚动后的页面坐标（wm 的 inv 已含滚动逆变换）
+    // ——与 clip 同空间比较。拿屏幕点直接比页面 clip 会在祖先滚动下失配（嵌套滚动场景
+    // 整棵子树不可命中，滚轮/点击穿透到外层）。
     if let Some(clip) = node.clip_rect {
-        if !point_in_rect(point, clip) {
+        if !point_in_rect((lx + lr.x, ly + lr.y), clip) {
             return None;
         }
     }
@@ -118,18 +130,8 @@ fn hit_subtree(scene: &Scene, id: NodeId, point: (f32, f32)) -> Option<NodeId> {
     }
     // 子都不命中 → 自身 fallback：touchable + 点经 world matrix 逆投到本地 box
     // world_to_local：点经 world matrix 逆投到本地，判本地 box (0,0,w,h)
-    if node.interaction.touchable {
-        // bounds guard：world_transforms 可能未对齐（结构变更帧新增节点本帧 world_transforms
-        // 未算，或首帧 world_transforms 空）→ 越界返 None（1 帧延迟语义：本帧未命中）。
-        // sentinel id（thumb flag）不会进 hit_subtree（hit_test 在 hit_scrollbar_grip 命中后
-        // 早 return），故此处 id 必为 live 节点 NodeId，index() 不会因 flag bit 失真。
-        let wm = scene.world_transforms.get(id.index())?;
-        let inv = crate::transform::inverse(wm);
-        let (lx, ly) = crate::transform::apply_point(&inv, point.0, point.1);
-        let lr = node.layout_rect;
-        if lx >= 0.0 && lx <= lr.w && ly >= 0.0 && ly <= lr.h {
-            return Some(id);
-        }
+    if node.interaction.touchable && lx >= 0.0 && lx <= lr.w && ly >= 0.0 && ly <= lr.h {
+        return Some(id);
     }
     None
 }
@@ -237,6 +239,53 @@ mod tests {
         assert_eq!(hit_test(&s, (90.0, 90.0)), None);
         // 点 (70,70) 在 clip 内 + 在 b 内 → 命中 b
         assert_eq!(hit_test(&s, (70.0, 70.0)), Some(b));
+    }
+
+    #[test]
+    fn hit_test_clip_survives_ancestor_scroll() {
+        // 嵌套滚动回归（lab §9）：root 是滚动容器（自身 clip=视口），子 inner 是
+        // clip 节点（页面绝对坐标 far 处）。root 滚动后，inner 出现在屏幕上——屏幕点
+        // 必须命中 inner 子树；旧实现拿屏幕点直接比页面绝对 clip（无滚动补偿）→ 整棵
+        // 子树不可命中，滚轮/点击穿透到外层容器。
+        let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
+        root.clip_rect = Some(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        });
+        let mut inner = Node::default();
+        // inner 页面绝对位置 y=1000；root 滚动 900 后出现在屏幕 y≈100。
+        inner.layout_rect = Rect {
+            x: 10.0,
+            y: 1000.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        inner.clip_rect = Some(Rect {
+            x: 10.0,
+            y: 1000.0,
+            w: 100.0,
+            h: 100.0,
+        });
+        inner.interaction.touchable = true;
+        let mut s = Scene::from_nodes(vec![root, inner], vec![(0, 1)]);
+        let root_id = s.roots[0];
+        let inner_id = s.get_mut(root_id).unwrap().children[0];
+        // root 进入 scroll 表并滚 900。
+        s.scroll.ensure(root_id).scroll_pos = (0.0, 900.0);
+        compute_world_transforms(&mut s);
+        // 屏幕点 (60, 1050)：无滚动时 page=(60,1050) 在 inner 内——root 滚 900 后
+        // inner 的屏幕位置 = 1000-900=100..200 → 屏幕点 (60, 150) 命中 inner。
+        assert_eq!(hit_test(&s, (60.0, 150.0)), Some(inner_id));
+        // 屏幕点在 root 视口但不在 inner（inner 屏幕 y 100..200，取 y=50）→ 不命中 inner。
+        assert_ne!(hit_test(&s, (60.0, 50.0)), Some(inner_id));
     }
 
     #[test]

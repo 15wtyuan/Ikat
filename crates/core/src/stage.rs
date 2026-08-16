@@ -393,7 +393,7 @@ impl Stage {
     /// 非文本控件 / 节点无效 / scene 未建 → None。
     pub fn cursor_rect(&self, node: NodeId) -> Option<crate::scene::node::Rect> {
         use crate::render::resolve_lp;
-        use crate::scene::control::display_value;
+        use crate::scene::control::{display_value_masked, value_to_display_byte};
         use crate::scene::node::ControlState;
         use crate::scene::text_cursor::{cursor_pixel_x, line_byte_ranges};
         let scene = self.scene.as_ref()?;
@@ -404,20 +404,22 @@ impl Stage {
             | ControlState::NumberField { edit: e, .. } => e,
             _ => return None,
         };
-        // display 须与 measure_text_controls 缓存同源（含 composition），否则光标字节偏移对
-        // 不上缓存的 ranges。缓存为空（空 value/placeholder/首帧）→ 无法定位，返 None。
+        // display 须与 measure_text_controls 缓存同源（含 composition + 掩码），否则光标字节
+        // 偏移对不上缓存的 ranges。缓存为空（空 value/placeholder/首帧）→ 无法定位，返 None。
         let layout = scene.text_layouts.get(node.index())?.as_ref()?.clone();
-        let (display, comp_range) = display_value(e);
+        let mask = n.style.text_security.map(crate::scene::control::mask_char);
+        let (display, comp_range) = display_value_masked(e, mask);
         if display.is_empty() {
             return None;
         }
         let ranges = line_byte_ranges(&layout, &display);
         // IME 候选窗锁在 composition 处（而非原始光标字节偏移）——composition 拼进 display 后
         // 光标的 display 偏移会随 comp.text.len() 平移，按原始 e.cursor 取位会偏早。有
-        // composition 时用其 display 起点（comp_range），无 composition 时退回光标。
+        // composition 时用其 display 起点（comp_range），无 composition 时退回光标（掩码下经
+        // 字符数换算进 display 字节空间）。
         let cur = match comp_range {
             Some((start, _)) => start,
-            None => e.cursor.min(display.len()),
+            None => value_to_display_byte(&e.value, &display, e.cursor),
         };
         let (cx, li) = cursor_pixel_x(&layout, &ranges, cur);
         let line = layout.lines.get(li)?;

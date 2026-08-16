@@ -86,6 +86,8 @@ enum MeasureContext {
     RichText {
         runs: Vec<crate::text::rich::RichRun>,
         line_height: f32,
+        /// CSS letter-spacing（px）。rich inline flow 的 token 宽/glyph 定位均计入。
+        letter_spacing: f32,
         align: TextAlign,
         /// 暂未接线：rich 还未支持 white-space:nowrap。先携值（来自节点 style），待 measure_rich_text
         /// 加 nowrap 路径后此字段即被读，避免加/删字段的连带改动。
@@ -168,6 +170,7 @@ pub fn solve(
             Some(MeasureContext::RichText {
                 runs,
                 line_height: s.line_height,
+                letter_spacing: s.letter_spacing,
                 align: s.text_align,
                 nowrap: s.white_space_nowrap,
                 family: s.font_family.clone(),
@@ -208,7 +211,12 @@ pub fn solve(
                         .and_then(|cs| match cs {
                             crate::scene::node::ControlState::TextField(e)
                             | crate::scene::node::ControlState::TextArea(e) => {
-                                let dv = crate::scene::control::display_value(e).0;
+                                // 掩码与 measure_text_controls/render 同源（-webkit-text-security）。
+                                let dv = crate::scene::control::display_value_masked(
+                                    e,
+                                    s.text_security.map(crate::scene::control::mask_char),
+                                )
+                                .0;
                                 if dv.is_empty() {
                                     Some((e.placeholder.clone(), true))
                                 } else {
@@ -216,7 +224,11 @@ pub fn solve(
                                 }
                             }
                             crate::scene::node::ControlState::NumberField { edit, .. } => {
-                                let dv = crate::scene::control::display_value(edit).0;
+                                let dv = crate::scene::control::display_value_masked(
+                                    edit,
+                                    s.text_security.map(crate::scene::control::mask_char),
+                                )
+                                .0;
                                 if dv.is_empty() {
                                     Some((edit.placeholder.clone(), true))
                                 } else {
@@ -500,6 +512,7 @@ pub fn solve(
                     Some(MeasureContext::RichText {
                         runs,
                         line_height,
+                        letter_spacing,
                         align,
                         family,
                         h_inset,
@@ -519,6 +532,7 @@ pub fn solve(
                         let fp = crate::text::layout::rich_text_fingerprint(
                             runs,
                             *line_height,
+                            *letter_spacing,
                             *align,
                             family.as_deref(),
                             mw,
@@ -538,6 +552,7 @@ pub fn solve(
                                     runs,
                                     mw,
                                     *line_height,
+                                    *letter_spacing,
                                     *align,
                                     &stack,
                                 );
@@ -550,6 +565,7 @@ pub fn solve(
                                 runs,
                                 mw,
                                 *line_height,
+                                *letter_spacing,
                                 *align,
                                 &stack,
                             )

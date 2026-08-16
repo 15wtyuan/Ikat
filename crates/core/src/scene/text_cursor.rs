@@ -9,12 +9,13 @@ use crate::text::layout::TextLayout;
 ///
 /// `byte_end` = 该行最后一个 glyph 之后的字节位置（即 `line[i+1].first_glyph` 的 byte_off）。
 /// 使用 `Glyph.codepoint` 恢复每个 glyph 对应的字节宽度（`char::len_utf8`），而非重新 parse value，
-/// 因为 layout 已对 value 做了断行处理（\n 被消化为 mandatory break 并在 glyph 流中存在），
-/// glyph↔char 对齐基于 measure 顺序而非 value 的原始断点。
+/// 因为 layout 已对 value 做了断行处理，glyph↔char 对齐基于 measure 顺序而非 value 的原始断点。
+/// `\n` 不产 glyph（measure 把它消化为换行，plain 剥行尾 / rich 走 break token）——每行
+/// glyph 消费完后补吃 value 里残留的 `\n`，维持对齐。
 pub fn line_byte_ranges(layout: &TextLayout, value: &str) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
     let mut byte_pos = 0usize;
-    let mut chars = value.chars();
+    let mut chars = value.chars().peekable();
     for line in &layout.lines {
         let start = byte_pos;
         for run in &line.runs {
@@ -23,6 +24,12 @@ pub fn line_byte_ranges(layout: &TextLayout, value: &str) -> Vec<(usize, usize)>
                     byte_pos += ch.len_utf8();
                 }
             }
+        }
+        // 行尾 \n 不产 glyph（measure 把它消化为换行，plain 剥行尾 / rich 走 break token）
+        // ——每行补吃**一个**终结该行的 \n（连续 \n 的后续 \n 属于空行自己），维持对齐。
+        if matches!(chars.peek(), Some('\n')) {
+            chars.next();
+            byte_pos += 1;
         }
         ranges.push((start, byte_pos));
     }
