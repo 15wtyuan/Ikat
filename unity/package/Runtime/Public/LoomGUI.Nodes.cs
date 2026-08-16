@@ -1177,6 +1177,21 @@ namespace LoomGUI
             Node cb = GetChildAt(b);
             SwapChildren(ca, cb);
         }
+        /// 当前滚动位置（本节点为滚动容器时；非滚动容器返 (0,0)）。
+        /// 与 <see cref="ScrollTo"/> 成对：读经 get_scroll_pos FFI（ScrollPane 物理量，
+        /// 含未 settle 的惯性位移）。重实例化/换页前读出、solve 就绪后 ScrollTo(Instant) 回填。
+        public Vector2 ScrollPos
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                float x = 0f, y = 0f;
+                Native.loomgui_stage_get_scroll_pos(h, _id, &x, &y);
+                return new Vector2(x, y);
+            }
+        }
+
         public void ScrollTo(Vector2 p, ScrollBehavior b = ScrollBehavior.Smooth)
         {
             ThrowIfDisposed();
