@@ -185,9 +185,11 @@ pub fn resolve_gradient(g: &Gradient, w: f32, h: f32) -> GradientParams {
                         // circle corner = 圆心到最近/最远角距离（单值）。
                         (best_d, best_d)
                     } else {
-                        // CSS：corner 尺寸 = side 椭圆按 f = d/sqrt(sx²+sy²) 缩放穿过该角。
-                        let f = best_d / (sx * sx + sy * sy).sqrt().max(1e-6);
-                        (sx * f, sy * f)
+                        // CSS（css-images-3，Chrome 实测对齐）：ellipse corner 关键字 =
+                        // 逐轴 side 距离 × √2 —— 椭圆精确穿过该角（corner 在归一化
+                        // (1/√2,1/√2) 处，模长恰 1）。曾误用 f=角距/√(sx²+sy²) 缩放，
+                        // 居中盒算出 f=1 → farthest-corner 塌成 farthest-side。
+                        (sx * std::f32::consts::SQRT_2, sy * std::f32::consts::SQRT_2)
                     }
                 }
                 RadialExtent::Explicit(a, b) => {
@@ -305,7 +307,8 @@ mod tests {
 
     #[test]
     fn radial_farthest_corner_default() {
-        // 100x80 box 居中：farthest-corner 椭圆 rx=50, ry=40（side 椭圆本就穿过角）。
+        // 100x80 box 居中：farthest-corner 椭圆 = side×√2（Chrome 实测）：
+        // rx=50√2≈70.71, ry=40√2≈56.57 —— 椭圆精确穿过最远角。
         let g = Gradient::Radial {
             extent: RadialExtent::FarthestCorner,
             shape: crate::style::resolved::RadialShape::Ellipse,
@@ -319,13 +322,13 @@ mod tests {
         assert_eq!(p.kind, 1);
         assert!((p.center[0] - 50.0).abs() < 1e-4 && (p.center[1] - 40.0).abs() < 1e-4);
         assert!(
-            (p.radii[0] - 50.0).abs() < 1e-3,
-            "rx≈50, got {}",
+            (p.radii[0] - 50.0 * std::f32::consts::SQRT_2).abs() < 1e-3,
+            "rx≈70.71, got {}",
             p.radii[0]
         );
         assert!(
-            (p.radii[1] - 40.0).abs() < 1e-3,
-            "ry≈40, got {}",
+            (p.radii[1] - 40.0 * std::f32::consts::SQRT_2).abs() < 1e-3,
+            "ry≈56.57, got {}",
             p.radii[1]
         );
     }
