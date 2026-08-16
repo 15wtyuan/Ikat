@@ -125,7 +125,7 @@ public class ShowcaseRunner : MonoBehaviour
         {
             playTarget.On<ClickEvent>(_ =>
                 playTarget.Play("m2-play-fade")
-                    .OnEnd(() => Debug.Log("[Showcase] m2 #11 Play("m2-play-fade") end")));
+                    .OnEnd(() => Debug.Log("[Showcase] m2 #11 Play(m2-play-fade) end")));
         }
         if (page.TryGet<Container>("b11-hook", out var hookTarget))
         {
@@ -136,7 +136,7 @@ public class ShowcaseRunner : MonoBehaviour
         }
         if (!page.TryGet<Container>("b12-target", out var handleTarget))
             return;
-        Animation handle = null;
+        LoomGUI.Animation handle = null;
         if (page.TryGet<Button>("btn-h-play", out var bPlay))
             bPlay.Clicked += () =>
             {
@@ -147,7 +147,7 @@ public class ShowcaseRunner : MonoBehaviour
             bPause.Clicked += () =>
             {
                 handle?.Pause();
-                Debug.Log($"[Showcase] m2 #12 Pause @ t={handle?.Time:F2}s");
+                Debug.Log($"[Showcase] m2 #12 Pause @ t={(handle?.Time ?? -1f):F2}s");
             };
         if (page.TryGet<Button>("btn-h-resume", out var bResume))
             bResume.Clicked += () =>
