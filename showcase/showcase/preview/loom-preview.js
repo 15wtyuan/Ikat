@@ -12,7 +12,8 @@
     'nav-shop': 'shop',
     'nav-character': 'character',
     'nav-form': 'form',
-    'nav-lab': 'lab'
+    'nav-lab': 'lab',
+    'nav-anim': 'm2-animation'
   };
 
   function $(id) { return document.getElementById(id); }
@@ -461,8 +462,29 @@
       fillNativeHost();
       wireControls();
       fitScale();
+      installAnimReplay();
       window.addEventListener('resize', fitScale);
     });
+  }
+
+  // 「重播动画」悬浮按钮（preview-only）：把页面上所有 CSS animation 重置重播——
+  // 入场/fill-mode/delay 标本验收时反复对比用。restart 手法：内联 animation:none →
+  // 强制 reflow → 移除内联，浏览器按原 class 声明重新起播。
+  function installAnimReplay() {
+    var btn = document.createElement('button');
+    btn.id = 'loom-anim-replay';
+    btn.textContent = '↻ 重播动画';
+    btn.addEventListener('click', function () {
+      var els = document.querySelectorAll('.root, .root *');
+      Array.prototype.forEach.call(els, function (el) {
+        if (getComputedStyle(el).animationName !== 'none') {
+          el.style.animation = 'none';
+          void el.offsetWidth;
+          el.style.animation = '';
+        }
+      });
+    });
+    document.body.appendChild(btn);
   }
 
   // Manual file:// preview has no rect-diff injection; load the generated

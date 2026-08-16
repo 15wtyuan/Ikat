@@ -51,3 +51,13 @@ input::placeholder, textarea::placeholder { color: #6c7080; opacity: 1; }
 /* role=textbox placeholder: author writes aria-placeholder; preview JS toggles data-empty when content is blank. */
 [role="textbox"][data-empty]::before { content: attr(aria-placeholder); color: #6c7080; opacity: 1; }
 select option { color: #e0e6ec; background-color: #152433; }
+
+/* 「重播动画」按钮（loom-preview.js 注入，preview-only） */
+#loom-anim-replay {
+  position: fixed; right: 18px; bottom: 16px; z-index: 9999;
+  padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer;
+  background: rgba(21, 36, 51, 0.85); color: #8ec5d8;
+  font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+  box-shadow: inset 0 0 0 1px rgba(95, 180, 212, 0.22);
+}
+#loom-anim-replay:hover { background: rgba(26, 47, 69, 0.95); color: #cfe8f2; }

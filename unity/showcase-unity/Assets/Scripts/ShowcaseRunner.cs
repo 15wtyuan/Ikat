@@ -28,6 +28,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-character", "character"),
         ("nav-form", "form"),
         ("nav-lab", "lab"),
+        ("nav-anim", "m2-animation"),
     };
 
     // settings 页 tab → panel 配对（HTML 标准 role=tab/tabpanel 模式）。
