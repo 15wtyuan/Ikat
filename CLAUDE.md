@@ -4,15 +4,13 @@
 
 ## ⚠️ 模型禁令（硬规则，违者罚钱）
 
-**subagent 严禁使用 `netease-codemaker/*` 系列模型**（如 `netease-codemaker/claude-opus-5`、`netease-codemaker/deepseek-v4-pro`、`netease-codemaker/glm-5.2` 等）——这是**公司账号**，乱用要罚钱。dispatch 任何 subagent（Agent 工具的 `model` 参数）必须避开整个 `netease-codemaker/` 前缀，改用直连 provider 的可用模型：`DeepSeek/deepseek-v4-pro`、`DeepSeek/deepseek-v4-flash`、`Zhipu/glm-5.2` 等。撞输出上限就换 provider/换更小模型，**绝不**退回 netease-codemaker。
+**subagent 严禁使用 `netease-codemaker/*` 系列模型**（如 `netease-codemaker/claude-opus-5`、`netease-codemaker/deepseek-v4-pro`、`netease-codemaker/glm-5.2` 等）。dispatch 任何 subagent（Agent 工具的 `model` 参数）必须避开整个 `netease-codemaker/` 前缀，改用直连 provider 的可用模型：`DeepSeek/deepseek-v4-pro`、`DeepSeek/deepseek-v4-flash`、`Zhipu/glm-5.2` 等。撞输出上限就换 provider/换更小模型，**绝不**退回 netease-codemaker。
 
 ## 这是什么
 
 LoomGUI = 跨引擎游戏 UI 框架。标准 HTML/CSS 子集作设计期 DSL，类型化对象树作运行时 API，自绘渲染。核心目的：**AI 驱动的界面拼装**——标准 HTML 作 DSL，让 AI 既能编辑（文本）又能预测渲染结果（AI 对 HTML/CSS 有强先验）。
 
 对标 FairyGUI、RmlUi、Unity UI Toolkit（参考实现在 `temp/FairyGUI-unity/`、`temp/RmlUi/`，只读）。差异化：标准 HTML/CSS（vs fgui 的 `.fui` 二进制 AI 看不懂）、类型化对象树（标准 HTML 元素决定稳定类型）、Rust 跨引擎共享核心、围栏验证器。
-
-**当前状态**：API 范式重构（摸黑 + 三束）已完工，进入「完全体」阶段（能力补全 / 验收发布 / 跨引擎）。设计契约见 `docs/design/main-design.md`；**公共 API 终态契约见 `docs/design/public-api.md` C# 投影层机制见 `docs/design/projection-layer.md`（真身在 Rust，C# 是 OOP 投影 + 攒批回写）**；重构路线见 `docs/roadmap/roadmap.md`；早期探索 spec 见 `docs/superpowers/specs/2026-07-13-api-refactor-design.md`（历史草稿，大部分已吸收进上述 design，非活契约）。公共签名冻结在 `unity/package/Runtime/Public/LoomGUI.*.cs`，编译校验门 `tests/dotnet/LoomGUI.PublicApi`。
 
 ## 构建 / 测试命令
 
@@ -47,7 +45,7 @@ cargo test -p loomgui_fence                              # ← 围栏契约门
 
 **CI 门禁**（`.github/workflows/rust-ci.yml`，push main / PR 触发）：fmt 严（`cargo fmt --all -- --check`）+ clippy 严（`cargo clippy --all-targets -- -D warnings`）+ Win/Ubuntu matrix test + feature-gate check（`--no-default-features --all-targets`）+ Windows `.dll` artifact（release build）。**push 前本地跑 `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`**，否则 CI 红。clippy 各 crate root 有 `#![allow]` 放行可辩护的测试/FFI 模式 lint（`field_reassign_with_default` / `not_unsafe_ptr_arg_deref` / `too_many_arguments` 等，带理由注释），勿误清——新增可辩护模式 lint 在那里加。
 
-**发版（tag 触发 Release workflow）**：流程 7 步见 `docs/superpowers/specs/2026-08-09-loomgui-release-design.md`「Release 流程」。硬门：tag 名 == `unity/package/package.json` 的 version，且 CHANGELOG 有对应 `## [<ver>]` 段落——**打 tag 前先 bump + 补段落 + `cargo run -p xtask -- release-check`**。git-URL 装包的版本号解析自 tag 指向 commit 的 package.json，漏 bump = 消费者装错版本号（不止 CI 红）；tag 已推但 Release 未产出时，bump 后 `git tag -fa` 重指 + force push 补救（坑 215）。
+**发版（tag 触发 Release workflow）**：硬门：tag 名 == `unity/package/package.json` 的 version，且 CHANGELOG 有对应 `## [<ver>]` 段落——**打 tag 前先 bump + 补段落 + `cargo run -p xtask -- release-check`**。git-URL 装包的版本号解析自 tag 指向 commit 的 package.json，漏 bump = 消费者装错版本号（不止 CI 红）。
 
 ### Rust → Unity .dll 闭环（Windows 本机是唯一的编码机）
 
@@ -78,7 +76,7 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 > **当前状态**：摸黑结束（Spec-4b DONE），进入三束加宽阶段。下方同时列出**新范式（目标）**和**旧范式（v1 残留）**的架构不变量。以新范式为准；触碰尚未重构的旧代码时以旧范式为准。
 
-### 新范式（目标——权威读 main-design.md）
+### 范式（目标——权威读 main-design.md）
 
 **分层、单向数据流、引擎对象不进核心：**
 ```
@@ -107,28 +105,18 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 - **NodeFlags 是交互态**（process/rematch only，solve/world/build skip）：被 solve/render 读的字段（如 `rich_text_block`）用独立 `Node` 字段，不进 NodeFlags bit。
 - **公共语义树与内部渲染树可以不同**：文本在公共层是正常 HTML 子树（TextNode/TextElement），内部扁平化为 runs。
 
-### 旧范式（v1 残留——摸黑+三束重构中逐步消除）
-
-> 以下不变量描述的是**尚未完全重构的当前代码**。碰到下面的代码，提醒用户重构或清理。
-
-- ~~**`<div>` 永远是 flex 容器**~~（**P1 C2 已消除**）：`display:block` 和裸 block 默认标签现在都设 `taffy_style.display = taffy::Display::Block`（真 CSS 块流，垂直堆叠且忽略子 flex-grow），不再走 flex-column 伪 block。显式 `display:flex`/`display:none` 仍覆盖。（历史上 block 默认标签含 div/header/nav/p/ul/ol/li/option；控件 role 化重构后多数下线，当前围栏里 `div` 是唯一 block 默认 runtime 标签。）两处赋值：`crates/fence/src/css_resolve.rs` 铺默认、`crates/core/src/style/mapping.rs` 应用显式声明。
-- **`NodeKind` enum + 代际 NodeId**：`NodeId(pub u32)` 对外透明句柄。19 变体（控件 role 化重构后）+ C# 类型化投影层（Node/Container/Button/...）已落地，但 Rust 侧 NodeKind/NodeId 仍在核心所有热路径中活跃。→ 类型化用户表面已兑现；内部表示重构在复合束推进时逐段迁移。
-- **`Get<T>("id")` 子树查找（L1 已落，L3 defer）**：`find_node_by_id_in_subtree`（self-exclusive DFS，从 root 直接子起，root 自身不匹配）已替换全局首匹配，修虚拟列表 slot 内部 id 命中。但完整 `IsScopeRoot` 边界（嵌套组件/list item 不穿透）仍 defer（复合束 L3，见 `docs/roadmap/roadmap.md` T1）；`component.Get` 仍会穿透进 list item——driver 用 `slot.Get`/`slot.Query`。
-- **虚拟列表 slot 模型（parked-but-attached，已落）**：slot 永驻 ul 子树，离场 `display:none` 标记（parked，不 detach 到 free 池）；reuse_key 永久 ordinal；MirrorPool parked keepalive 持久 GO 池（仅 gone 才销毁）。坑 182 已解。driver 仍管 slot 映射/可见区间/不等高补偿（核心仍不完整“认识列表”，完整吸收留复合束 ListView）。
-
 ### 围栏
 
 面向游戏 UI 的标准 HTML 子集（14 标签 = 8 shell + 6 runtime）。控件与列表无专属标签，作者在 `<div>` 上写 WAI-ARIA `role` 表达（`role=slider`/`role=list`/...），视觉部件用 `data-slot`。围栏外输入打包期报错，不静默降级。单一真相源 = crates/fence/src/schema/ Rust const 表。防漂移门：cargo test -p loomgui_fence（含文档↔schema 交叉校验）。权威文档：docs/design/fence.md。
 
 ## 在本仓库怎么干活
 
-- **实现任何机制前，先对照 FairyGUI 源码和 RmlUi 源码**（`temp/FairyGUI-unity/` 和 `temp/RmlUi/`，只读）。LoomGUI 的渲染/对象模型/批合/事件/动画/资源管线全面借鉴 fgui，文本/布局借鉴 RmlUi/UITK。先读对应源码看它怎么做，再定设计。
-- **设计文档 vs 踩坑**：`docs/design/main-design.md`（总体架构与渲染管线）、`docs/design/fence.md`（围栏）、`docs/design/public-api.md`（公共 API 终态契约）、`docs/design/projection-layer.md`（C# 投影层机制：真身在 Rust，C# 是 OOP 投影 + 攒批回写）、`docs/roadmap/roadmap.md`（路线图：完全体 north star + tracks + 里程碑；旧纪元史见 `docs/roadmap/roadmap_old.md`）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配）。
-- **Rust edition 2021**，依赖钉版本：`taffy 0.12`、`ttf-parser 0.20`、`slotmap 1.1`、`csbindgen 1`。CSS 选择器解析器手搓（零新依赖，spike 阶段推翻了"接 cssparser"前提）。旧版 snapshot 测试用 `insta` 已移除，换自维护。
+- **设计文档 vs 踩坑**：`docs/design/main-design.md`（总体架构与渲染管线）、`docs/design/fence.md`（围栏）、`docs/design/public-api.md`（公共 API 终态契约）、`docs/roadmap/roadmap.md`（路线图）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配）。
+- **Rust edition 2021**，依赖钉版本：`taffy 0.12`、`ttf-parser 0.20`、`slotmap 1.1`、`csbindgen 1`。CSS 选择器解析器手搓（零新依赖，spike 阶段推翻了"接 cssparser"前提）。
 - `Cargo.lock` 入库（根级，尽管 `.gitignore` 有通用 `Cargo.lock` 行——它是被追踪的）。
 - 设计师工作区是独立磁盘目录（含 `loom.workspace.json`、HTML/CSS 源文件、res 资源、design-systems 组件库）。打包用独立打包器 GUI（Tauri `loomgui_gui`）或 CLI `loom-pkg build <workspace>`。运行时引导由 `loom.runtime.json` 统管。
 - 用户只读中文——问答/选项/总结用中文；代码/commit 照旧英文。
-- **代码注释写上线品质**：自包含、精简（说 WHY）、不引用内部编号或暗语。坑号只属于 `docs/pitfalls.md`，不进代码。
+- **代码注释写上线品质**：自包含、精简（说 WHY）、不引用内部编号或暗语、不引用任何文档，如有引用文档必要，直接把文本拷贝上去。坑号只属于 `docs/pitfalls.md`，不进代码。也不要写任何plan、spec的文档编号。
 - **修根因，别贴补偿参数**：去源头修，别在下游加参数补偿。
 - **防文档漂移**：文档写定性不写数字；关键 claim 加可执行测试；改代码后搜 docs/ 是否引用了改动的 struct/函数/列数。
 
@@ -199,4 +187,4 @@ csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件�
 
 ## 坑索引
 
-完整踩坑记录见 `docs/pitfalls.md`（v1.x 坑记录，摸黑重写后部分失效）。新踩坑继续编号递增，写法：症状/根因/解决/教训。
+完整踩坑记录见 `docs/pitfalls.md`。新踩坑继续编号递增，写法：症状/根因/解决/教训。
