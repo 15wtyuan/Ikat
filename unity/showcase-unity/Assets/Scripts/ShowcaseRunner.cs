@@ -101,6 +101,8 @@ public class ShowcaseRunner : MonoBehaviour
         }
         if (back != null)
             back.Clicked += () => Show("home");
+        if (pageName == "m2-animation" && page.TryGet<Button>("btn-replay", out var replay))
+            replay.Clicked += ReplayCurrentPage;
         if (pageName == "home")
         {
             foreach (var (cardId, target) in NAV_CARDS)
@@ -110,6 +112,19 @@ public class ShowcaseRunner : MonoBehaviour
                     card.Clicked += () => Show(p);
             }
         }
+    }
+
+    /// m2-animation 页「↻ 重播」：dispose + 重新实例化当前页——class 触发的 keyframes
+    /// （入场/错峰/fill-mode 等一次性标本）随 instantiate 重放；循环标本无感重启。
+    /// 重播后 Wire* 由 Show() 重新接线（订阅随旧页 Dispose 一并清除）。
+    void ReplayCurrentPage()
+    {
+        if (_current == null) return;
+        string page = _shown;
+        _current.Dispose();
+        _current = null;
+        _shown = null;
+        Show(page);
     }
 
     /// settings 页 tab 切换：HTML 的 role=tab/tabpanel 模式依赖运行时 JS 改 panel display，

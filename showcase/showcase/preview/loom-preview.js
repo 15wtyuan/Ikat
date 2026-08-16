@@ -141,6 +141,18 @@
       bind(id, 'click', function () { goPage(NAV[id]); });
     });
     bind('back-home', 'click', function () { goPage('home'); });
+    // m2-animation 页内「↻ 重播」：浏览器侧等价语义 = 原地重启全部 CSS 动画
+    // （Unity 侧走 dispose + 重实例化；预览不重导航，避免打断对照观察）。
+    bind('btn-replay', 'click', function () {
+      var els = document.querySelectorAll('.root, .root *');
+      Array.prototype.forEach.call(els, function (el) {
+        if (getComputedStyle(el).animationName !== 'none') {
+          el.style.animation = 'none';
+          void el.offsetWidth;
+          el.style.animation = '';
+        }
+      });
+    });
   }
 
   function wireTabs() {
