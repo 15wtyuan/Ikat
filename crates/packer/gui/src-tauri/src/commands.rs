@@ -1,25 +1,32 @@
 //! Tauri commands: workspace 读写、recent 列表、HTML 扫描、构建。
 
 use crate::recent;
+use crate::recent::StateDir;
 use loomgui_pkg::build::{build, BuildReport};
 use loomgui_pkg::workspace::{load_workspace, save_workspace as write_workspace, Workspace};
 use std::fs;
 use std::path::Path;
 
 #[tauri::command]
-pub fn recent_workspaces() -> Vec<String> {
-    recent::load_recent()
+pub fn recent_workspaces(state: tauri::State<StateDir>) -> Vec<String> {
+    recent::load_recent(state.0.as_deref())
+}
+
+/// 从最近列表移除一条（只删记录，不删工作区目录）。
+#[tauri::command]
+pub fn remove_recent(path: String, state: tauri::State<StateDir>) {
+    recent::remove_recent(state.0.as_deref(), &path);
 }
 
 #[tauri::command]
-pub fn open_workspace(path: String) -> Result<Workspace, String> {
+pub fn open_workspace(path: String, state: tauri::State<StateDir>) -> Result<Workspace, String> {
     let ws = load_workspace(Path::new(&path))?;
-    recent::push_recent(&path);
+    recent::push_recent(state.0.as_deref(), &path);
     Ok(ws)
 }
 
 #[tauri::command]
-pub fn create_workspace(path: String) -> Result<Workspace, String> {
+pub fn create_workspace(path: String, state: tauri::State<StateDir>) -> Result<Workspace, String> {
     let ws = Workspace {
         version: 1,
         output_dir: String::new(),
@@ -40,7 +47,7 @@ pub fn create_workspace(path: String) -> Result<Workspace, String> {
     let skill_md = include_str!("../templates/skill/SKILL.md");
     fs::write(skill_dir.join("SKILL.md"), skill_md).map_err(|e| format!("write SKILL.md: {e}"))?;
 
-    recent::push_recent(&path);
+    recent::push_recent(state.0.as_deref(), &path);
     Ok(ws)
 }
 

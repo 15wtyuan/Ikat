@@ -123,6 +123,21 @@ html, body {
   font-size: 12px;
   color: #606070;
 }
+/* hover 才浮现（visibility 保占位，避免布局跳动）；只删列表记录不删工作区 */
+.recent-card-remove {
+  margin-left: auto;
+  visibility: hidden;
+  border: none;
+  background: none;
+  color: #606070;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.recent-card:hover .recent-card-remove { visibility: visible; }
+.recent-card-remove:hover { color: #fc5c7c; }
 
 /* ── Start actions ── */
 .start-actions {

@@ -8,10 +8,15 @@ mod commands;
 mod recent;
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let state_dir = recent::state_dir_from_args(&args);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(recent::StateDir(state_dir))
         .invoke_handler(tauri::generate_handler![
             commands::recent_workspaces,
+            commands::remove_recent,
             commands::open_workspace,
             commands::create_workspace,
             commands::save_workspace,

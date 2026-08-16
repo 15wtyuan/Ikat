@@ -21,7 +21,21 @@ namespace LoomGUI.Editor
                     "  拷 target/release/loomgui_gui.exe → loomgui_unity_package/Editor/Tools/");
                 return;
             }
-            Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo(exe)
+            {
+                UseShellExecute = true,
+                // 引擎无关的持久化契约：GUI 把最近工作区列表等状态写进这里。
+                // Unity 侧落在 UserSettings/LoomGUI（per-user，默认 .gitignore 已忽略）。
+                Arguments = "--state-dir \"" + ResolveStateDir() + "\"",
+            });
+        }
+
+        /// GUI 状态目录：<Project>/UserSettings/LoomGUI。目录不存在由 GUI 侧自建。
+        static string ResolveStateDir()
+        {
+            // Application.dataPath = <Project>/Assets，取上级即工程根。
+            string projectRoot = Path.GetDirectoryName(Application.dataPath);
+            return Path.Combine(projectRoot, "UserSettings", "LoomGUI");
         }
 
         /// 定位 GUI 可执行文件。

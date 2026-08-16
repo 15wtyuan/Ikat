@@ -73,10 +73,26 @@
       nameEl.className = "recent-card-name";
       nameEl.textContent = name;
 
+      // 移除按钮：只从列表删记录，不删工作区目录。无破坏性，不弹确认。
+      var removeBtn = document.createElement("button");
+      removeBtn.className = "recent-card-remove";
+      removeBtn.type = "button";
+      removeBtn.title = "从列表移除（不删除工作区）";
+      removeBtn.textContent = "×";
+      removeBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        invoke("remove_recent", { path: p })
+          .then(loadRecent)
+          .catch(function (err) {
+            alert("移除失败: " + err);
+          });
+      });
+
       info.appendChild(pathEl);
       info.appendChild(nameEl);
       card.appendChild(icon);
       card.appendChild(info);
+      card.appendChild(removeBtn);
       recentList.appendChild(card);
     });
   }
