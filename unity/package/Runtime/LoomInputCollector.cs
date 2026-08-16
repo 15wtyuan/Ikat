@@ -23,11 +23,14 @@ namespace LoomGUI
         internal bool UseSafeArea { get; set; }
 
         /// <summary>
-        /// 滚轮手感倍率（默认 3.5，实测手感校准值）：滚轮 delta 的最终乘数，PlayMode 中
-        /// Inspector 实时调。基准 = 一格 ~100 design px × 倍率（经典 notch 鼠标）。
+        /// 滚轮手感倍率（默认 1 = 浏览器同档基准）：滚轮 delta 的最终乘数，PlayMode 中
+        /// Inspector 实时调。基准依据：Windows 一格 3 行文本 ≈ 60-75px、Chrome ≈ 100-120px；
+        /// 1920×1080 设计视口下 100 design px/格 ≈ 10 格滚完一屏。个人/设备手感差异在此调
+        /// （注意：高分辨率滚轮流经下方 ×0.5 折算后每台设备密度不同，倍率是逐设备手感值，
+        /// 不作为跨设备默认）。
         /// </summary>
-        [Tooltip("滚轮手感倍率：1 = 一格约 100 design px。默认 3.5（实测手感）。")]
-        [SerializeField] float _wheelScrollSpeed = 3.5f;
+        [Tooltip("滚轮手感倍率：1 = 一格约 100 design px（浏览器同档）。个人手感在此调。")]
+        [SerializeField] float _wheelScrollSpeed = 1f;
         /// <summary>滚轮手感倍率（<see cref="_wheelScrollSpeed"/> 的只读出口）。</summary>
         public float WheelScrollSpeed => _wheelScrollSpeed;
 
