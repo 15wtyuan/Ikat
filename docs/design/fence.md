@@ -228,6 +228,7 @@ CSS 在围栏中以三个正交维度建模：
 - `caret-color`（继承，`::selection` 光标色；缺省回退 `color`）
 - `selection-background` / `selection-color`（`::selection` 选区背景/文字色；缺省蓝半透 / 白）
 - `placeholder-color`（继承，`::placeholder` 占位符色；缺省把 `color` alpha 折半，对齐浏览器 `::placeholder` UA 默认 ~opacity 0.5）
+- `-webkit-text-security`（继承，password 类输入掩码显示：`disc` `●` / `circle` `○` / `square` `■` / `none`；作用于文本控件显示串，`value` 不变——Chrome 同名属性，HTML 预览同步掩码）
 
 **动画**
 

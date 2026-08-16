@@ -90,7 +90,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 
 ### 2.4 自定义元素
 
-标签名含 `-`（如 `<my-widget>`）识别为 CustomElement（`SemanticKind::CustomElement`）。围栏放行含 hyphen 的标签名通过 Fence Gate；**注册验证在打包器**（R3 已落地）：每个 package dir 下 `components/<tag>.html` 即该标签的注册（Package 注册表承担 `customElements.define()` 角色，main-design §7.4），打包期见 hyphen 标签即查注册表展开（slot 投影 + 展开域锚定规则），未注册 → `UnregisteredCustomElement` 打包错误。`<slot>` 只在组件模板内合法（页面级 `<slot>` 打包错误）；无效 slot（light 子的 `slot` 属性无对应位 / 无默认 slot 却有游离子）同样打包期报错。见 component-system spec `docs/superpowers/specs/2026-08-14-component-system-design.md`。
+标签名含 `-`（如 `<my-widget>`）识别为 CustomElement（`SemanticKind::CustomElement`），**display 默认 Block（同 div）**——连字符标签不在 TAGS 注册表，须在 css_resolve 显式铺默认，漏铺会落到 taffy Flex Row（模板根无显式宽时被内容收缩，浏览器块级根则撑满）。围栏放行含 hyphen 的标签名通过 Fence Gate；**注册验证在打包器**（R3 已落地）：每个 package dir 下 `components/<tag>.html` 即该标签的注册（Package 注册表承担 `customElements.define()` 角色，main-design §7.4），打包期见 hyphen 标签即查注册表展开（slot 投影 + 展开域锚定规则），未注册 → `UnregisteredCustomElement` 打包错误。`<slot>` 只在组件模板内合法（页面级 `<slot>` 打包错误）；无效 slot（light 子的 `slot` 属性无对应位 / 无默认 slot 却有游离子）同样打包期报错。见 component-system spec `docs/superpowers/specs/2026-08-14-component-system-design.md`。
 
 ---
 
@@ -228,6 +228,7 @@ CSS 在围栏中以三个正交维度建模：
 - `caret-color`（继承，`::selection` 光标色；缺省回退 `color`）
 - `selection-background` / `selection-color`（`::selection` 选区背景/文字色；缺省蓝半透 / 白）
 - `placeholder-color`（继承，`::placeholder` 占位符色；缺省把 `color` alpha 折半，对齐浏览器 `::placeholder` UA 默认 ~opacity 0.5）
+- `-webkit-text-security`（继承，password 类输入掩码显示：`disc` `●` / `circle` `○` / `square` `■` / `none`；作用于文本控件显示串，`value` 不变——Chrome 同名属性，HTML 预览同步掩码）
 
 **动画**
 

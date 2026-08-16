@@ -421,6 +421,14 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         inherited: true,
         parser: CssValueParser::Color,
     },
+    // -webkit-text-security：password 类输入的掩码显示（disc ●/circle ○/square ■，none 不掩码）。
+    // Chrome 同名属性，HTML 预览同步掩码；作用于显示串（display_value_masked），value 不变。
+    CssPropSpec {
+        name: "-webkit-text-security",
+        default: "none",
+        inherited: true,
+        parser: CssValueParser::Keyword(&["none", "disc", "circle", "square"]),
+    },
     CssPropSpec {
         name: "box-shadow",
         default: "none",
