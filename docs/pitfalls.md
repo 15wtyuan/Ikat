@@ -1607,3 +1607,80 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **根因**：CSS url() 出现在**两处**——inline style（烘进 base_style.background_image，已提取成路径）和 `<style>` 块 class 规则（存进 `DynamicRule.declarations` 的原始 url 值串，runtime rematch 用 apply_decl 应用）。打包器 build.rs 只归一 `<img src>` + base_style，**漏 dynamic_rules 里的 bg-image** → runtime 节点拿到原始 HTML 相对路径 `../res/icons/lab.png`，SpriteResolver key 是 `res/icons/lab.png`（workspace 相对）→ miss → 白纹理。inline bg-image 不白（base_style 归一了）只加剧迷惑性。
 **解决**：build.rs 抽 `normalize_bg_ref(html_rel, path, refs)` helper，**同时归一 base_style.background_image（inline）和 dynamic_rules 的 background-image/background 声明值**（class 规则），并都补进 refs（atlas 交叉验证）。`extract_sprites` 只扫 inline style，class 规则 bg-image 不进 referenced_sprites——必须单独归一+登记。
 **教训**：CSS 声明值有两套生命周期——inline（打包期烘进 base_style，pkg 静态字段）和 class 规则（dynamic_rules，runtime rematch 用原始值串重放）。任何"路径/引用归一化"（url、src）两处都要覆盖，否则 inline 对、class 错。诊断：bg-image 白块先 dump `n.style.background_image` 看是 HTML 相对（`../`）还是 workspace 相对（`res/`），前者=漏归一。
+
+### 坑 204：f32 数组列里按 u32 位模式写整数（渐变全变纯色块）
+
+**症状**：所有背景渐变渲染成单色块；Unity 探针见 stop0==stop1、`_GradKind=1.4e-45`。
+**根因**：`GradientParams::to_bytes` 把 kind/stop_count 按 u32 原始位写进 `[f32;52]` blob 列，C# 按 BitConverter.ToSingle 读——`stop_count=2` 变 `2.8e-45`，`(int)` 得 0 → MirrorPool 钳到 1 stop、8 槽填同色。
+**解决**：跨界整数统一按 f32 语义写（0.0/1.0/n.0），from_bytes 对称解码；C# 侧零改动。
+**教训**：FFI blob 的 f32 定长列是传输容器不是 reinterpret 缓冲——整数字段要么走专用 u32 列，要么按 f32 值语义编码。位模式跨语言读出来是 denormal，错误静默（不崩、只是值全错）。
+
+### 坑 205：Marshal.OffsetOf 对含引用字段的 struct 在 Linux 运行时抛异常
+
+**症状**：CI 新 dotnet-headless job 全挂 `TypeInitializationException`（EventTypeCache），Windows 本机却全绿。
+**根因**：event struct 持引用字段（`RouteEventCore _core` 是 class），`Marshal.OffsetOf<T>` 要求可封送布局——Linux .NET 运行时直接抛 ArgumentException，Windows 容忍。
+**解决**：改反射读声明序首字段（`GetFields` 第一个 == `_core` 且类型匹配），语义等价跨平台。
+**教训**：「Windows headless 绿」≠「Linux 绿」；managed struct 的 offset 断言用反射声明序，不借道 marshal 层。
+
+### 坑 206：taffy measure 闭包只读 known.width 忽略 available_space → 定宽容器内文本不换行
+
+**症状**：组件卡片描述文字单行溢出（152px 文本挤在 128px 内容区），浏览器正确折两行；core dump 见 span 宽 = max-content。
+**根因**：taffy 对「定宽容器的 auto 宽文本子」传 `known=None + avail=Definite(内容宽)`；闭包只消费 known → 走 max-content 测量。
+**解决**：`known.width.or(avail 的 Definite 值)` 作换行约束；MaxContent/MinContent 仍走 None（intrinsic）。
+**教训**：taffy 0.12 的测量契约是 known/avail 双通道——叶子测量两处 mw 推导（Text/RichText）都要吃到 avail；改后 rect-diff 八页复核 + stash 对照排除既有差异归因。
+
+### 坑 207：CLIPPED_ROUNDED 的 SDF 在归一化空间算 → 圆角视觉消失
+
+**症状**：`overflow:hidden`+`border-radius` 的进度条 fill 渲染成直角；材质关键字/参数全对。
+**根因**：SDF 在 _ClipBox 归一化空间（半宽=1）做，`smoothstep(0,1,sdf)` 的过渡带横跨整个半宽——宽条 x 半宽 273px vs y 8px，3px 圆角落到带内只降 ~7% alpha，且各向异性把角剪成椭圆。
+**解决**：SDF 换回像素空间（`halfPx=1/_ClipBox.zw`，`rPx=归一半径×min(halfPx)`），AA 带 1 design px。
+**教训**：SDF/抗锯齿带宽必须在像素均匀的空间算；归一化空间只可用于等比缩放的形状。另：小圆角视觉判断用像素级取样+数学验证（像素中心到角圆心距离），别信目测或视觉模型。
+
+### 坑 208：CSS radial ellipse corner 关键字 = 逐轴 side 距离 ×√2（不是角距缩放）
+
+**症状**：默认 radial（farthest-corner）渲染与 farthest-side 完全相同；用户对照 HTML 见「方块 vs 椭圆」。
+**根因**：实现按记忆写了 `f = 角距/√(sx²+sy²)` 缩放——居中盒恰好 f=1 塌成 farthest-side。
+**解决**：Chrome Playwright 像素取样两轮实证（居中 120×80 → rx=84.9=60√2；400×300 偏移中心 → rx=418≈300√2）：**ellipse corner = 逐轴 side 距离 ×√2**（角点落在归一化 (1/√2,1/√2)，模长恰 1，椭圆精确穿角）。circle corner 仍是角点距离单值。
+**教训**：CSS 规范公式记不准就先跑浏览器取证实验（Playwright + 阈值反推有效半径），别按记忆实现再靠肉眼验收。
+
+### 坑 209：Gradient::Radial 缺 shape 字段 → circle 关键字按椭圆逐轴解
+
+**症状**：`circle closest-side` 渲染成 [60,40] 椭圆（应 r=40 正圆）；`circle at 50% 100%` 垫底合成同样错。
+**根因**：解析器认识 circle/ellipse 关键字但 Gradient enum 没有字段承载，resolve 阶段一律逐轴椭圆语义。
+**解决**：加 `RadialShape` 字段（`#[serde(default)]` 保旧 pkg 反序列化，免格式版本级联）；circle 的 side 类 extent 收敛 min/max、corner 类用角距。
+**教训**：给「关键字影响解析结果」的 CSS 特性建 enum 时，先把**所有**关键字映射到数据结构再写 resolve；serde default 是加字段的免版本升级手段。
+
+### 坑 210：PlayMode 期间触发编译 → domain reload 打裂原生 stage 句柄（DumpScene 全零/渲染正常的裂脑）
+
+**症状**：Unity 里页面渲染正常，但 DumpScene 全树 layout 0×0（除 stage 根）；换页后偶发全黑。standalone core 同序列完全复现不了。
+**根因**：在 PlayMode 运行中改 C#/触发 uloop compile → domain reload 重建 C# 侧状态但原生 stage 撕裂，dump 读到分裂态。渲染侧 change-detection 判 Skip 保留旧 mesh，掩盖损坏。
+**解决**：干净重启编辑器后一切正常；探针 dll（write_back 落盘日志）全程零命中证明非产品路径。
+**教训**：**PlayMode 验收期间绝不编译**；「dump 数据自相矛盾」先怀疑编辑器会话状态（重启复测）再怀疑产品。真机无 domain reload，此类裂脑不是产品 bug。
+
+### 坑 211：uloop launch 超时会再起一个 Unity 实例 → 取证打到不同实例
+
+**症状**：截图显示页面正常、运行时探针却读到空状态；同会话数据反复自相矛盾。
+**根因**：首次 `uloop launch` 超时（"Waiting for Unity..."）实际已启动进程；再次 launch 又起一个，两个实例都活着，CLI 命令轮流命中不同实例。
+**解决**：`tasklist | grep Unity.exe` 数实例，`taskkill //IM Unity.exe //F` 清场后只起一个。
+**教训**：uloop 取证自相矛盾时第一步查实例数；launch 超时不代表启动失败。
+
+### 坑 212：showcase 项目没配 testables → 包内 EditMode 测试静默不收集（腐烂无人知）
+
+**症状**：配 `testables: ["com.loomgui.unity"]` 后首跑暴露 10 个失败——全是旧测试手搓 v10 blob（已演进 v13）从未被发现。
+**根因**：Unity 默认不收集 package 内测试；测试从写完那天起就没在项目里跑过。
+**解决**：manifest.json 加 testables；存量 v10 harness 修复列入债（同类：HeadlessTests 曾静默腐烂）。
+**教训**：「测试文件存在」≠「测试在跑」——新测试类型（包测试/PlayMode 测试）接入时先证明它能被发现（故意写个 fail 的探针测试）。
+
+### 坑 213：layout 的 min-width=0 逃生舱无条件清掉作者显式声明
+
+**症状**：stat-bar 的 label/val `min-width:52px` 不生效（塌成文字宽 18px），bar（flex-grow:1）顶到文字。
+**根因**：叶子测量节点为让长文本可 shrink 把 `min_size.width` 无条件置 0，把 inline 显式声明一并清掉。
+**解决**：只在未声明（Auto）时置 0。
+**教训**：「为让 X 生效而强制覆盖」的逃生舱必须判「作者是否显式声明过」——同型于 padding/边距默认值与显式值之争，逃生舱永远让位于显式声明。
+
+### 坑 214：Assembly-CSharp 里 LoomGUI 类型与 UnityEngine 撞名 + 插值 null 条件格式说明符非法
+
+**症状**：`Animation handle` 报 CS0104 ambiguous；`{handle?.Time:F2}` 报 CS1003。
+**根因**：showcase 业务脚本里 `using LoomGUI` + UnityEngine 双命名空间，`Animation` 两边都有；C# 语法禁止 null 条件访问后直接跟 `:format`（冒号被解析为格式分隔符）。
+**解决**：限定 `LoomGUI.Animation`；插值改 `{(handle?.Time ?? -1f):F2}`。
+**教训**：showcase 业务侧写 LoomGUI 类型一律带命名空间限定（Animation/Scene/Random 都是雷）；插值格式化 null 条件必须括号包 ?? 兜底。另：字符串里嵌函数名带引号（`Play("name")`）记得转义——三连伤一次编译全暴露。

@@ -603,6 +603,8 @@ a. TweenManager.update(dt)        ← transition 的 opacity/bg_color/text_color
 
 **tick step g' `sync_animation_players`**（rematch 后、solve 前）检测 computed `animation` 声明变化启停 class 触发的 player：新增 name → 启 player；消失 → 停；参数变 → 重启。`node.Play("name")`（程序化）走 FFI 立即建 player，不等 rematch。
 
+**`Container.RestartAnimations()`（声明式动画运行时重启）**：清子树内全部 class 触发 player（按通道所有权回收，幸存 player 的通道不误清；programmatic player 不动），下一帧 g' 依 `base_style.animation` 声明原样重建（delay 重计、backwards/both 立即写首帧）。与销毁重实例化的差别：节点身份/滚动位置/控件值/事件订阅全保留。
+
 **写入通道独占**：`transform` 是 player 独占（transition 不支持 transform）；`opacity/bg_color/text_color` player 与 tween 都可能写，player 后写覆盖。
 
 **fill-mode 完成态**：`forwards`/`both` → Completed 态不回收，每帧持续写末值（直到声明消失/Stop）；`none`/`backwards`（默认）→ 回收 player，通道回 None，下帧 tween/base 接管。**backwards/both 首帧 backwards fill**：启动时立即算一次首帧值写 NodeAnim，不等下帧 update，避免 delay 期间闪 base。
