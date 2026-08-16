@@ -47,6 +47,8 @@ cargo test -p loomgui_fence                              # ← 围栏契约门
 
 **CI 门禁**（`.github/workflows/rust-ci.yml`，push main / PR 触发）：fmt 严（`cargo fmt --all -- --check`）+ clippy 严（`cargo clippy --all-targets -- -D warnings`）+ Win/Ubuntu matrix test + feature-gate check（`--no-default-features --all-targets`）+ Windows `.dll` artifact（release build）。**push 前本地跑 `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`**，否则 CI 红。clippy 各 crate root 有 `#![allow]` 放行可辩护的测试/FFI 模式 lint（`field_reassign_with_default` / `not_unsafe_ptr_arg_deref` / `too_many_arguments` 等，带理由注释），勿误清——新增可辩护模式 lint 在那里加。
 
+**发版（tag 触发 Release workflow）**：流程 7 步见 `docs/superpowers/specs/2026-08-09-loomgui-release-design.md`「Release 流程」。硬门：tag 名 == `unity/package/package.json` 的 version，且 CHANGELOG 有对应 `## [<ver>]` 段落——**打 tag 前先 bump + 补段落 + `cargo run -p xtask -- release-check`**。git-URL 装包的版本号解析自 tag 指向 commit 的 package.json，漏 bump = 消费者装错版本号（不止 CI 红）；tag 已推但 Release 未产出时，bump 后 `git tag -fa` 重指 + force push 补救（坑 215）。
+
 ### Rust → Unity .dll 闭环（Windows 本机是唯一的编码机）
 
 按记忆/工作流：**任何** Rust 改动后必须重编 + commit `.dll`，否则测不了。

@@ -1684,3 +1684,10 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **根因**：showcase 业务脚本里 `using LoomGUI` + UnityEngine 双命名空间，`Animation` 两边都有；C# 语法禁止 null 条件访问后直接跟 `:format`（冒号被解析为格式分隔符）。
 **解决**：限定 `LoomGUI.Animation`；插值改 `{(handle?.Time ?? -1f):F2}`。
 **教训**：showcase 业务侧写 LoomGUI 类型一律带命名空间限定（Animation/Scene/Random 都是雷）；插值格式化 null 条件必须括号包 ?? 兜底。另：字符串里嵌函数名带引号（`Play("name")`）记得转义——三连伤一次编译全暴露。
+
+### 坑 215：推 tag 发版漏 bump package.json + 漏补 CHANGELOG 段落
+
+**症状**：推 v0.0.2/v0.0.3 后 Release workflow 第一步「verify tag matches package version」红（tag=v0.0.3 pkg_version=0.0.1），GitHub Release 不产出。
+**根因**：发版 runbook（`docs/superpowers/specs/2026-08-09-loomgui-release-design.md`「Release 流程」）第 5/6 步（补 CHANGELOG 段落 + bump package.json）被跳过，tag 打在未 bump 的 commit 上。
+**解决**：bump version + 回填 CHANGELOG → `cargo run -p xtask -- release-check` 验绿 → commit → `git tag -fa <tag>` 重指 + `git push --force origin <tag>` → workflow 重跑全绿出 Release。
+**教训**：git-URL UPM 安装的版本号解析自 tag 指向 commit 的 package.json——tag 里版本错 = 消费者装到错误版本号（Unity 可拒绝升级），不止 CI 红。打 tag 前必跑 release-check；tag 已推但 Release 未产出时重指 tag 是安全补救。连发多 tag 先 `git diff --stat <t1> <t2> -- unity/package`——包内容相同则旧 tag 不必补发 Release。
