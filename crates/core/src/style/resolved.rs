@@ -159,7 +159,9 @@ pub enum Gradient {
     Radial {
         extent: RadialExtent,
         /// circle 收敛为单一半径（closest/farthest 语义与椭圆逐轴不同）。
-        /// serde default（ellipse）保持旧 pkg 反序列化兼容，不加版本号。
+        /// pkg 走 bincode（非自描述）：字段增删必 bump PKG_FORMAT_VERSION，
+        /// `#[serde(default)]` 对 bincode 反序列化不生效（无缺字段路径），
+        /// 仅对 JSON 类自描述格式有用。
         #[serde(default)]
         shape: RadialShape,
         center: [GradCoord; 2],

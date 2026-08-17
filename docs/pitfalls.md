@@ -1647,8 +1647,8 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 
 **症状**：`circle closest-side` 渲染成 [60,40] 椭圆（应 r=40 正圆）；`circle at 50% 100%` 垫底合成同样错。
 **根因**：解析器认识 circle/ellipse 关键字但 Gradient enum 没有字段承载，resolve 阶段一律逐轴椭圆语义。
-**解决**：加 `RadialShape` 字段（`#[serde(default)]` 保旧 pkg 反序列化，免格式版本级联）；circle 的 side 类 extent 收敛 min/max、corner 类用角距。
-**教训**：给「关键字影响解析结果」的 CSS 特性建 enum 时，先把**所有**关键字映射到数据结构再写 resolve；serde default 是加字段的免版本升级手段。
+**解决**：加 `RadialShape` 字段；circle 的 side 类 extent 收敛 min/max、corner 类用角距。（原文记「`#[serde(default)]` 保旧 pkg 反序列化、免格式版本级联」——**错**，pkg 走 bincode 非自描述格式，default 不参与反序列化，字段增删必须 bump `PKG_FORMAT_VERSION`；见坑 216。）
+**教训**：给「关键字影响解析结果」的 CSS 特性建 enum 时，先把**所有**关键字映射到数据结构再写 resolve；进 bincode 布局的字段增删没有免版本升级手段。
 
 ### 坑 210：PlayMode 期间触发编译 → domain reload 打裂原生 stage 句柄（DumpScene 全零/渲染正常的裂脑）
 
@@ -1691,3 +1691,11 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **根因**：发版 runbook（`docs/superpowers/specs/2026-08-09-loomgui-release-design.md`「Release 流程」）第 5/6 步（补 CHANGELOG 段落 + bump package.json）被跳过，tag 打在未 bump 的 commit 上。
 **解决**：bump version + 回填 CHANGELOG → `cargo run -p xtask -- release-check` 验绿 → commit → `git tag -fa <tag>` 重指 + `git push --force origin <tag>` → workflow 重跑全绿出 Release。
 **教训**：git-URL UPM 安装的版本号解析自 tag 指向 commit 的 package.json——tag 里版本错 = 消费者装到错误版本号（Unity 可拒绝升级），不止 CI 红。打 tag 前必跑 release-check；tag 已推但 Release 未产出时重指 tag 是安全补救。连发多 tag 先 `git diff --stat <t1> <t2> -- unity/package`——包内容相同则旧 tag 不必补发 Release。
+
+### 坑 216：改 ResolvedStyle/ControlInit 等 bincode 布局不 bump pkg 版本 → 旧 pkg 全变「tag for enum is not valid」
+
+**症状**：CI `dotnet headless` job 79 个测试连挂 `load_package failed (malformed pkg.bin ...)`；Windows 本机复现同数；core/ffi 单测却全绿（它们现场构造数据，不吃磁盘 fixtures）。
+**根因**：`ResolvedStyle` 进 pkg.bin 的 style 段是 bincode（非自描述）。周末给 `ResolvedStyle` 加 `text_security`、给 `Gradient::Radial` 加 `shape`，字段一变字节布局就变；`PKG_FORMAT_VERSION` 仍是 35，新旧互认版本号、字节错位——反序列化在某个 enum tag 处炸出 `tag for enum is not valid, found 144`，错误既不指字段也不指结构。且改布局的 commit 只重编了 .dll 没重打 fixtures（fixtures 停在两天前的 v35），声称的「serde default 保兼容」在 bincode 下不生效（default 只在自描述格式的缺字段路径参与）。
+**取证**：写临时 example 直接 `loomgui_core::asset::read_package(&fs::read(fixture))` 打印真实错误（比 C# 侧笼统文案快）；`git log -1 -- <fixture>` 对比 `git log -1 -- <dll>` 看 last-touch 是否脱节。
+**解决**：bump `PKG_FORMAT_VERSION` 35→36（MIN/MAX 同步，单版本硬门）+ 重打全部 headless fixtures（12 个 workspace 各跑 `loom-pkg build`）+ 重打 showcase bundle + 重编 .dll；修正坑 209 里「serde default 免版本升级」的错误教训。
+**教训**：bincode 布局的任何字段增删/重排 = 格式版本变化，必须 bump `PKG_FORMAT_VERSION` 并重打所有入库 pkg（fixtures + showcase bundle + .dll 同一 commit）。改动若触及序列化结构，验收必跑**吃磁盘 fixture 的** headless 套件，core 单测绿不覆盖这条。诊断顺序：先疑环境（CI/平台）不如先本机复现——本机能复现就与平台无关。
