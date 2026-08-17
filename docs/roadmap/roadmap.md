@@ -41,7 +41,7 @@
 - ~~**复合 · 组件系统**~~ **已交付（2026-08-14，打包期展开）**：Custom Element 打包期展开（components/ 注册表 = `customElements.define` 角色）+ `<slot>` 投影（拼接位消费，产物无 Slot 节点）+ `CustomElement.Tag` typed 投影。C# 类绑定 / 生命周期回调 defer（见延期表）。spec：`docs/superpowers/specs/2026-08-14-component-system-design.md`。
 - **控件**：Tree（`role=tree`，无）。
 - **动画引擎终态**：池化 Tween + 缓动全集（cubic-bezier / Elastic / Bounce / per-stop timing）+ 链式 builder + layout 动画 prop_type 分层。进入判据：第一个需 layout 动画的页面，或动画并发使单 `Vec<Tween>` 抖动。
-- **文本模型收尾**：inline run 编译（TextRun / ImageRun / LinkRun），公共树保留 TextNode / TextElement / Image / Link 的 ID 和事件；`display:block` RichText 暗号已退役，收尾表达层。
+- ~~**文本模型收尾**~~ 已交付（2026-08-12，里程碑 1 任务 1：`compile_rich_runs` Text/Image run + source 事件路由 + 公共树 ID 保留；原 bullet 内容即任务 1 交付物）。
 - **公共 API 扫尾**：扫 `unity/package/Runtime/Public/LoomGUI.*.cs` 残留 `throw NE()`，逐个接通或显式标注 by-design。（2026-08-11 audit 已 triage 全部 NE stub——`ScrollTo`/`Button.Disabled` 已接、`Visibility` 砍出契约，其余详见「延期项登记表」公共 API NE stub 条目。）
 - **运行时 CSS**：`StyleSheet.Add` 解析路径接通 + `UIStyleException` 抛出（异常类已定义，路径未接）。
 
@@ -49,9 +49,9 @@
 
 证明框架完整可用并推向发版。
 
-- **showcase 收官**：8 页（home / settings / mail / inventory / shop / character / form / lab）Unity 真机全跑通 + headless Chrome rect-diff 对齐（工具链 `showcase/scripts/rect-diff/` 已就绪）。
-- **清家里机验收债**：ListView / 动画 / TabList / Dropdown 的 Unity PlayMode 四门（验收页 + pkg + checklist 已备）集中跑过。
-- **dogfood**：做一个小游戏（验收载体，非 roadmap 主线）逼出真实需求、反哺 T1。
+- ~~**showcase 收官**~~ ✅ 2026-08-16（里程碑 1 任务 4：8 页真机全跑通 + rect-diff 对齐，工具链 `showcase/scripts/rect-diff/`）。
+- ~~**清家里机验收债**~~ ✅ 2026-08-16（里程碑 1 任务 5：ListView / 动画 / TabList / Dropdown 四门全绿）。
+- **dogfood**：做一个小游戏逼出真实需求、反哺 T1（里程碑 2 主体，当前方向）。
 - **文档**：公共文档 + quickstart + tutorial。
 - **发版**：v1.0——公共 API 冻结 + 契约版本化 + tag。
 
@@ -77,14 +77,12 @@
 
 > 序列哲学：**先验证再扩展**（老 roadmap 核心教训）。T1 喂 T2（能力够才验收），T2 验过才 T3（核心稳了才铺第二引擎），T3 跑通才发版。
 
-- **里程碑 1 · Unity 收官** — 证明框架在 Unity 上完整可用。
-  - 视觉束补齐到 showcase 够用：渐变（radial + 多 stop）✅ 代码侧 done（2026-08-14，Unity 视觉验收随任务 4 逐页过）。（`filter: blur()` 需离屏 RT 基建、非 showcase 阻塞，留后续。）
-  - 8 页 showcase Unity 真机全跑通 + rect-diff 对齐浏览器。
-  - 清家里机 PlayMode 验收债。
-  - **门**：8 页真机全绿 + home radial 渐变可见 + rect-diff 通过。
+- **里程碑 1 · Unity 收官**【✅ 完工 · 2026-08-16】— 证明框架在 Unity 上完整可用。
+  - 渐变补齐（radial + 多 stop）、8 页 showcase 真机跑通 + rect-diff、四门验收债全部清完（展开见下「近期任务」）。`filter: blur()` 留后续（需离屏 RT 基建）。
+  - **门**：✅ 8 页真机全绿 + home radial 渐变可见 + rect-diff 通过（2026-08-15/16 真机验收轮收口）。
 
 - **里程碑 2 · Dogfood** — 证明能拿来做事，逼出真实需求。
-  - 小游戏 demo 可玩；按 demo 逼出的需求排 T1 剩余（scope 三件套 / Custom Element / Tree / 动画引擎终态）。
+  - 小游戏 demo 可玩；按 demo 逼出的需求排 T1 剩余（Tree / 动画引擎终态 / 运行时 CSS / 组件 C# 类绑定——scope 三件套与 Custom Element 打包期展开已交付）。
   - **门**：demo 可玩 + scope 三件套完成（组件封装真正成立）+ demo 逼出的 feature 全绿。
 
 - **里程碑 3 · 跨引擎** — 兑现跨引擎赌注 + 工具链 / 平台铺开。
@@ -99,14 +97,14 @@
 
 ## 近期任务（里程碑 1 展开）
 
-> 里程碑 1「Unity 收官」拆成 5 个有依赖序的可执行任务。**任务 1 文本模型已 done（代码侧）**，Unity 视觉 QA 留家里机；**任务 2 rect-diff 工具链 settings 页已就绪（🟡，Unity rect 半留任务 4）；任务 3 渐变补齐代码侧 done（Unity 视觉验收留家里机）；下一件事 = 任务 4（逐页修，依赖 1+2+3 已齐）+ 任务 5（独立可插）**。
+> 里程碑 1「Unity 收官」拆成 5 个有依赖序的可执行任务——**五任务全部 done，里程碑 1 完工（2026-08-15/16 真机验收轮收口）**。下一环节 = 里程碑 2（dogfood）。
 
 **任务 1 · 文本模型回归标准子树（inline flow）**【✅ done · 2026-08-12】
 - **落地**：fence 6.4 分类（rich-text-block + mixed 报错 + img 豁免）→ pkg v33 + `Node.rich_text_block` → run 编译器（`compile_rich_runs`）→ solve 折叠（RichText leaf + `rich_text_fingerprint` memo）→ render Container+flag arm（多 run mesh + box-shadow）→ `hit_test_rich` + FFI。详见 spec `docs/superpowers/specs/2026-08-12-text-model-design.md` + plan `docs/superpowers/plans/2026-08-12-text-model.md`（9 task SDD，全部 per-task + final review APPROVED）。
 - **实证**：packer showcase 0 mixed；`dump_rich_text` 实测 mail 正文 7 inline 子→1 行（非竖排），公共树 ID 保留。workspace 1506 测全绿。
-- **门**：✅ 代码侧全绿。⏳ Unity PlayMode 视觉 QA（form/mail inline flow 浏览器对齐 + span click via hit_test_rich + rect-diff）留家里机。
+- **门**：✅ 全绿——代码侧 2026-08-12；Unity 视觉 QA（form/mail inline flow + span click）随 2026-08-15/16 真机验收轮过。
 
-**任务 2 · rect-diff 工具链打通一页**【🟢 编码机侧全通 · 2026-08-14】
+**任务 2 · rect-diff 工具链打通一页**【✅ done · 2026-08-16】
 - browser rect 已有（`showcase/scripts/rect-diff/browser-rect.mjs`，headless Chrome 导出 DOM rect）；core dump 路径已打通（`dump_page --json` 接 `diff.mjs` 比对）。**Unity PlayMode 运行时 rect 路径已接**（`run-page.sh --scene=`：Unity 机 `LoomBridge.DumpScene()` 导出 → `normalize-dump-scene.mjs` 归一 → diff；编码机 round-trip 自测通过，待 Unity 机首跑）。
 - **门**：rect-diff 在一页产比对报告。（工具链可先搭，但结果要等任务 1 文本对了才有意义。）
 - **进度（2026-08-12）**：settings 页端到端跑通——browser-rect → **core dump（`dump_page --json`，非 Unity rect 路径）** → diff.mjs 三步 runner（`run-page.sh`）产报告 `snapshot-2026-08-12-settings.md`，门「报告产出」✅ 达成。4 处工具链修复（合成根 DFS / 0-size 原点 / preview letterbox）剔 206 假 diff，剩 12 残余（slider thumb transform 发射缺口 / CJK 字宽 / sub-2px 级联）全归类为 Task 4 燃料，**settings 零 core 布局 bug**。
@@ -115,30 +113,27 @@
 **任务 3 · 渐变补齐（home radial 光晕 + 多 stop）**【✅ 代码侧 done · 2026-08-14】
 - **落地**：`Gradient` 数据模型（linear 任意角度 + 多 stop ≤8 / radial 全形）替换 `Gradient2`（pkg v34）；渲染统一 program=6/7 per-fragment 渐变 shader（blob v13 grad_params 列 208B；premultiplied 插值 + bg-color 垫底 source-over 合成）；文本渐变 CPU 采样与 shader 同一套 t 数学；fence `<style>` 渐变值探针（坏渐变打包期报）。spec 见 `docs/superpowers/specs/2026-08-14-gradient-radial-multistop-design.md`。
 - **实证**：cargo workspace 1533 测全绿（clippy/fmt 严门过）；dotnet 三套 410 测全绿（fixture 重打 v34 + 顺手修了 test.workspace 撞 fence 6.4 的存量问题）；`dump_page` 渐变参数 dump——lab 页 20 节点（角度归一/多 stop 等分/显式位置/radial 各形）+ home 光晕（c=1574.4,-129.6 / 1100×560 / 0.1→transparent@0.6）全部正确；Chrome 基准截图 3 张入库 `showcase/scripts/gradient-baseline/`。
-- **门**：✅ 代码侧全绿（多 stop rect 对齐浏览器留 rect-diff 逐页跑，归任务 4）。⏳ Unity PlayMode 视觉验收（lab section 12 标本矩阵 + home 光晕 + 渐变字）留家里机——shader 纸面设计，GRADIENT 变体首次编译在 Unity 机。
+- **门**：✅ 全绿——代码侧 2026-08-14；Unity PlayMode 视觉验收（lab 标本矩阵 + home 光晕 + 渐变字，GRADIENT 变体真机首编译）随 2026-08-15/16 真机验收轮过。
 
-**任务 4 · 逐页 Unity PlayMode 真机 + rect-diff（8 页）**
-- 依赖任务 1（文本）+ 2（工具链）+ 3（渐变，home 要）——三者代码侧均已 done。按依赖排：先静态页（settings/character/shop/form/lab）→ 再虚拟列表页（mail/inventory）→ home（动画 + 渐变）。
-- **编码机半场（2026-08-14）已完工**：8 页 core-dump 路径 rect-diff 全绿收敛（见任务 2 进度）——**core 侧零布局 bug**，残余全归工具链无关的度量/语义类别；PlayMode 运行时比对路径（`--scene=`）也已接好待 Unity 机首跑。Unity 机剩：每页 PlayMode 跑通 + `--scene=` 导出比对 + driver 列表虚拟化验收 + lab/home 容差定标。
-- 每页：PlayMode 跑通 → rect-diff 比对 → 修 bug → 下一页。
-- **门**：8 页真机全绿 + rect-diff 通过。
+**任务 4 · 逐页 Unity PlayMode 真机 + rect-diff（8 页）**【✅ done · 2026-08-16】
+- 编码机半场（2026-08-14）完工：8 页 core-dump 路径 rect-diff 全绿收敛、core 侧零布局 bug；`--scene=` 运行时比对路径就绪。
+- 真机半场（2026-08-15/16 验收轮）完工：8 页 PlayMode 全跑通 + `--scene=` 运行态导出比对，真机侧 bug 逐个修（渐变/布局/shader、滚轮手感、NativeHost GO 排序、nested-scroll hit、dropdown、text pipeline 等）。
+- **门**：✅ 8 页真机全绿 + rect-diff 通过。
 
-**任务 5 · 清家里机验收债**
-- ListView / 动画 / TabList / Dropdown 的 Unity PlayMode 四门（验收页 + pkg + checklist 已备，编码端全 DONE）。
-- **门**：四门全绿。独立可随时插。
+**任务 5 · 清家里机验收债**【✅ done · 2026-08-16】
+- ListView / 动画 / TabList / Dropdown 四门真机清完；动画门载体 m2-animation 验收页同期建设（入场动画 / replay / `RestartAnimations` / `ScrollPos`，程序化动画 driver 接通）。
+- **门**：✅ 四门全绿。
 
-> 任务 1 是阻塞项（最先）；任务 2-3 可并行；任务 4 依赖 1+2+3；任务 5 独立。做完 5 个 = 里程碑 1 完工，进里程碑 2（dogfood）。
+> 依赖序回顾：任务 1 最先；2-3 并行；4 依赖 1+2+3；5 独立。五任务 done = 里程碑 1 完工（2026-08-16），进里程碑 2（dogfood）。
 
 ---
 
-## 当前快照（2026-08-14，时点状态）
+## 当前快照（2026-08-17，时点状态）
 
-- 摸黑打通 + 三束加宽纪元已完工（详见 `roadmap_old.md`）：Unity 端到端可用，21 控件全栈、cascade / 动画 / 虚拟列表 / box-shadow / 文字特效 / transform / filter 矩阵已交付，release CI 就绪。
-- **近期优先**：**里程碑 1 任务 1（文本模型）+ 任务 3（渐变补齐：radial + 多 stop + 任意角度，program=6/7 shader）代码侧均 done**（任务 3：commit 见 spec `2026-08-14-gradient-radial-multistop-design.md`，pkg v34 + blob v13 + dll/GUI exe 已同步入库）；**任务 2 rect-diff 工具链 settings 页端到端跑通**（core-dump 路径，2026-08-12）—— 12 残余 + Unity rect 半留 Task 4。**下一件事 = 任务 4（逐页修，1+2+3 依赖已齐）与任务 5（清验收债，独立）**。
-- **横切收尾（2026-08-14）**：公共 API FFI 批四件接通（NumberField bounds setter / ProgressBar.IsIndeterminate / RadioButton.Name / UIContext.Pick，见延期表）；CI 补 dotnet 门（HeadlessTests 现场 Linux .so 跑 P/Invoke 全套 + PublicApi 编译门——此前 CI 只跑纯 managed 31 测，HeadlessTests 曾随 pkg 版本漂移静默腐烂无人知）。
-- **rect-diff 8 页全量（2026-08-14）**：任务 2/4 编码机半场完工——8 页 core-dump 路径 0 unmatched / 零疑似 core 布局 bug（报告 `snapshot-2026-08-14-8pages.md`），工具链净化 5 处（tag 归一 / data-fill 撤销 / 0×0 桶 / FOLDED / workspace 字体）。**Unity 机剩任务 4 的真机半 + 任务 5 验收债 + 任务 3 渐变视觉验收。**
-- **复合束组件系统（2026-08-14，8 task SDD 全绿）**：Custom Element 打包期展开落地——components/ 注册表（Package 注册表 = `customElements.define` 角色）+ slot 投影（编译期糖，产物无 Slot 节点）+ 硬墙作用域（host 归页面域 / 投影内容归组件域，pkg v35 PerComponentScopes 锚定规则）+ L3 查找边界（Get/Query 不穿透，aria-controls 多实例安全）+ `CustomElement.Tag`。showcase 落地：page-top ×6 页 + stat-bar ×3 + item-card（lab）；6 变更页 rect-diff 0 unmatched / 0 idless-unpaired。里程碑 2 门「scope 三件套完成」判据已满足；剩 C# 类绑定 defer（dogfood 触发）。
-- **悬置判据项**：动画引擎终态（等 layout 动画需求）、Godot / 编辑器（等里程碑 1、2）。
+- **里程碑 1「Unity 收官」完工（2026-08-15/16 真机验收轮收口）**：五任务全 done——文本模型 / rect-diff 工具链 / 渐变补齐 / 8 页真机逐页 / 四门验收债（展开见「近期任务」段）。验收轮同期交付 `Container.RestartAnimations`、`Container.ScrollPos` getter、`-webkit-text-security`、m2-animation 验收页；v0.0.3 发版。摸黑 + 三束纪元史见 `roadmap_old.md`。
+- **复合束组件系统已交付（2026-08-14）**：Custom Element 打包期展开 + slot 投影 + 硬墙作用域 + L3 查找边界 + `CustomElement.Tag`；里程碑 2 门「scope 三件套完成」判据已满足，C# 类绑定 defer（判据：dogfood 逼出）。
+- **下一件事 = 里程碑 2 · Dogfood**：小游戏 demo 逼出真实需求、反哺 T1 剩余排序（Tree / 动画引擎终态 / 运行时 CSS / 组件 C# 类绑定等，多数在等 dogfood 触发）。
+- **悬置判据项**：动画引擎终态（等 layout 动画需求）、Godot / 编辑器（里程碑 2 起）。
 
 ---
 
