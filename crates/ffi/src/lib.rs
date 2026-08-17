@@ -159,6 +159,29 @@ pub extern "C" fn loomgui_stage_load_package(
     }
 }
 
+/// 卸载包：从 Rust stage 移除模板注册（prefab 删除语义——已实例化活节点不受影响）。
+/// atlas 纹理/字体不在此列（workspace 级共享 / driver 级注册，皆不隶属包）。
+/// 0=ok；-1=err（null 句柄 / 非 UTF-8 / 包未加载）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_unload_package(
+    h: *mut StageHandle,
+    name: *const u8,
+    name_len: usize,
+) -> i32 {
+    if h.is_null() || name.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &mut *h };
+    let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, name_len) }) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    match sh.stage.unload_package(name) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
+}
+
 /// 从包克隆一个组件进当前 scene，返组件根 NodeId（u32）。
 /// pkg/comp = UTF-8 字节（指针+len）。失败返 0xFFFF_FFFF（INVALID，同 create_root 失败语义）。
 /// scene 必须已存在（create_root 先建），否则 Err→sentinel。null 句柄 → sentinel。
@@ -2598,6 +2621,138 @@ pub extern "C" fn loomgui_stage_get_radio_name(
         }
         unsafe {
             std::ptr::copy_nonoverlapping(name.as_ptr(), out, needed);
+        }
+    }
+    0
+}
+
+/// 读 Dropdown 当前选中项的 value（`value` 属性优先，缺席回落该项文本——HTML 语义）。
+/// return-code + out-param（ptr+len）双调法，同 get_radio_name：buf_cap 足够 → rc=0；
+/// 不够 → rc=-2 + *out_len=所需；非 Dropdown / null 句柄 → -1；无选项（value 为 null
+/// 语义）→ rc=1（*out_len=0，不写 buf）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_dropdown_selected_value(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+    buf_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    let value = match read_control_string(h, node_id, out, buf_cap, out_len, |scene, id| {
+        loomgui_core::scene::control::dropdown_selected_value(scene, id)
+    }) {
+        Ok(v) => v,
+        Err(rc) => return rc,
+    };
+    match value {
+        Some(v) => write_out_string(&v, out, buf_cap, out_len),
+        None => {
+            unsafe { *out_len = 0 };
+            1
+        }
+    }
+}
+
+/// 读单个 option 的 value（同 dropdown_selected_value 的 fallback 语义，按 option
+/// 自身序号取）。双调法同上；非 option / 上溯无 Dropdown / null 句柄 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_option_value(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+    buf_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    let value = match read_control_string(h, node_id, out, buf_cap, out_len, |scene, id| {
+        loomgui_core::scene::control::option_value(scene, id)
+    }) {
+        Ok(v) => v,
+        Err(rc) => return rc,
+    };
+    match value {
+        Some(v) => write_out_string(&v, out, buf_cap, out_len),
+        None => -1,
+    }
+}
+
+/// option 是否为所属 Dropdown 的当前选中项（合成：序号 == 父 selected_index）。
+/// 1=选中，0=未选中，-1=非 option / 上溯无 Dropdown / null 句柄。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_is_option_selected(h: *const StageHandle, node_id: u32) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match loomgui_core::scene::control::option_selected(scene, NodeId(node_id)) {
+        Some(true) => 1,
+        Some(false) => 0,
+        None => -1,
+    }
+}
+
+/// tab 是否为所属 TabList 的当前激活项（合成：序号 == 父 selected_index，与
+/// aria-selected 派生同源）。1=激活，0=未激活，-1=非 tab / 上溯无 TabList / null 句柄。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_is_tab_selected(h: *const StageHandle, node_id: u32) -> i32 {
+    if h.is_null() {
+        return -1;
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return -1;
+    };
+    match loomgui_core::scene::control::tab_selected(scene, NodeId(node_id)) {
+        Some(true) => 1,
+        Some(false) => 0,
+        None => -1,
+    }
+}
+
+/// 控件派生字符串读的公共骨架：校验句柄 + 取 scene + 跑派生闭包。
+/// Ok(Some(v)) = 有值（由调用方写 buf）；Ok(None) = 语义空值；Err(rc) = 直接返回的错码。
+fn read_control_string(
+    h: *const StageHandle,
+    node_id: u32,
+    _out: *mut u8,
+    _buf_cap: usize,
+    out_len: *mut usize,
+    f: impl Fn(&loomgui_core::scene::Scene, NodeId) -> Option<String>,
+) -> Result<Option<String>, i32> {
+    if h.is_null() || out_len.is_null() {
+        return Err(-1);
+    }
+    let sh = unsafe { &*h };
+    let Some(scene) = sh.stage.scene.as_ref() else {
+        return Err(-1);
+    };
+    Ok(f(scene, NodeId(node_id)))
+}
+
+/// 把派生字符串写进 out（ptr+len 双调法收尾）：够 → rc=0；不够 → rc=-2 + *out_len=所需。
+fn write_out_string(v: &str, out: *mut u8, buf_cap: usize, out_len: *mut usize) -> i32 {
+    let bytes = v.as_bytes();
+    let needed = bytes.len();
+    unsafe { *out_len = needed };
+    if needed > buf_cap {
+        return -2;
+    }
+    if needed > 0 {
+        if out.is_null() {
+            return -2;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, needed);
         }
     }
     0

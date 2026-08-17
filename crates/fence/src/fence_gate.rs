@@ -1,9 +1,12 @@
 use crate::css_resolve::unsupported_hint;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
 use crate::ir::{IrElement, IrNode, IrNodeKind, IrTree, Span};
-use crate::schema::attr::{find_structural_attr, is_content_attr, is_global_attr, AttrValueDomain};
+use crate::schema::attr::{
+    find_structural_attr, is_content_attr, is_global_attr, is_semantic_content_attr,
+    AttrValueDomain,
+};
 use crate::schema::css::{find_css_prop, find_shorthand};
-use crate::schema::tag::{find_tag, is_shell_tag};
+use crate::schema::tag::{find_tag, is_shell_tag, resolve_semantic};
 
 /// Run Stage 3 (Fence Gate): validate every element against the schema.
 ///
@@ -48,6 +51,18 @@ fn validate_element(
 
     // 2. Attribute validation
     let tag_spec = find_tag(tag);
+    // Resolved control semantic (tag + role), for semantic-scoped content attrs.
+    let role = element
+        .attributes
+        .iter()
+        .find(|a| a.name == "role")
+        .map(|a| a.value.as_str());
+    let aria_multiline = element
+        .attributes
+        .iter()
+        .find(|a| a.name == "aria-multiline")
+        .is_some_and(|a| a.value == "true");
+    let semantic = resolve_semantic(tag, role, aria_multiline);
     for attr in &element.attributes {
         // Global attrs are always accepted
         if is_global_attr(&attr.name) {
@@ -74,6 +89,14 @@ fn validate_element(
         // Content attrs -- just check name is in the tag's whitelist
         if let Some(ts) = tag_spec {
             if is_content_attr(ts, &attr.name) {
+                continue;
+            }
+        }
+
+        // Semantic-scoped content attrs -- legal only on the role that carries
+        // the control semantic (e.g. `value` on role=option), not on the bare tag.
+        if let Some(kind) = semantic {
+            if is_semantic_content_attr(kind, &attr.name) {
                 continue;
             }
         }
@@ -183,6 +206,32 @@ mod tests {
         assert!(diags.iter().any(
             |d| d.code == DiagnosticCode::FenceUnknownAttr && d.message.contains("bogus-attr")
         ));
+    }
+
+    #[test]
+    fn option_value_attr_accepted_on_role_option_only() {
+        // `value` 是 semantic-scoped 内容属性：只在 role=option 上合法（镜像原生
+        // <option value> 语义），普通 div 上仍是未知属性。
+        let ok = gate(
+            r#"<div role="combobox"><div role="listbox"><div role="option" value="en">English</div></div></div>"#,
+        );
+        let value_errors: Vec<_> = ok
+            .iter()
+            .filter(|d| {
+                d.severity == crate::diagnostic::Severity::Error
+                    && d.code == DiagnosticCode::FenceUnknownAttr
+                    && d.message.contains("value")
+            })
+            .collect();
+        assert!(
+            value_errors.is_empty(),
+            "value on role=option must pass: {value_errors:?}"
+        );
+
+        let bad = gate(r#"<div value="x"></div>"#);
+        assert!(bad
+            .iter()
+            .any(|d| d.code == DiagnosticCode::FenceUnknownAttr && d.message.contains("value")));
     }
 
     #[test]

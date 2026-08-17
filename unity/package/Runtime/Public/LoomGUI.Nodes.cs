@@ -182,6 +182,7 @@ namespace LoomGUI
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
             Native.loomgui_stage_remove_node(h, _id);
 
+            _ctx.RemoveUpdateHooks(_id);   // 契约：OnUpdate 订阅随 Dispose 自动清理
             _ctx._registry.Remove(_id);
             _disposed = true;
         }
@@ -332,7 +333,15 @@ namespace LoomGUI
             Native.loomgui_stage_blur(h);
         }
 
-        public IDisposable OnUpdate(Action<float> cb) { throw NE(); }   // 逻辑驱动每帧更新钩子（返回句柄，Dispose 撤销）
+        public IDisposable OnUpdate(Action<float> cb)
+        {
+            ThrowIfDisposed();
+            if (cb == null) throw new ArgumentNullException(nameof(cb));
+            // 逻辑驱动的每帧更新钩子（数据插值、跟随、状态响应），非命令式动画系统——
+            // 预定义视觉动画走 CSS/Play。回调由 UIContext.PumpLogic 帧头泵（本帧 solve 生效），
+            // 订阅随本节点 Dispose 自动清理（RemoveFromParent 不清理）。dt 即 Step 收到的帧时长。
+            return _ctx.RegisterUpdateHook(_id, cb);
+        }
         /// <summary>
         /// 订阅 typed 路由事件（DOM addEventListener 等价）。
         ///
@@ -1212,7 +1221,48 @@ namespace LoomGUI
         // ScrollChanged source 待补：ScrollPane 物理自维护 tween，无 borrow_scroll_events FFI。
         // D3 defer——event 签名冻结（PublicApi 编译门已含此字段），add/remove 推后到 source 补齐。
         public event Action<ScrollChangedEvent> Scrolled;
-        public UITemplate GetTemplate(string name) { throw NE(); }   // 取内联 template（原 Panel.GetTemplate 上移）
+        public UITemplate GetTemplate(string name)
+        {
+            ThrowIfDisposed();
+            if (string.IsNullOrEmpty(name)) throw new ArgumentNullException(nameof(name));
+            // 取设计期 <template id="name">（ListView 多模板故事的配套：取出后塞进
+            // TemplateSelector lambda 按 index 选）。作用域内按 id 找 Template 节点（与
+            // Get<T> 同一作用域边界 DFS），蓝图 = template 的单个元素子（围栏校验 template
+            // 根恰一个 role=listitem），克隆目标取该子（SceneSubtree 变体 UITemplate）。
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte[] idb = Encoding.UTF8.GetBytes(name);
+            uint candidate;
+            fixed (byte* p = idb)
+                candidate = Native.loomgui_stage_find_node_by_id_in_subtree(h, _id, p, (nuint)idb.Length);
+            const byte NodeKindTemplate = 18; // Rust NodeKind::Template（ListView item 蓝图，不进 typed 投影）
+            const byte NodeKindTextNode = 1;  // 模板源 HTML 的缩进空白是 TextNode 子，蓝图须取首个元素子
+            if (candidate == RootSentinel)
+                throw new UIContractException(
+                    $"node with id '{name}' not found in scope of ({GetType().Name} id={_id}) (missing template)");
+            byte kind = 0;
+            Native.loomgui_stage_get_node_kind(h, candidate, &kind);
+            if (kind != NodeKindTemplate)
+                throw new UIContractException(
+                    $"node with id '{name}' in scope of ({GetType().Name} id={_id}) is not a <template> " +
+                    "(GetTemplate takes <template id> only)");
+            int count = Native.loomgui_stage_get_child_count(h, candidate);
+            uint[] children = new uint[Math.Max(count, 0)];
+            uint child = RootSentinel;
+            fixed (uint* cp = children)
+                Native.loomgui_stage_get_children(h, candidate, cp, (nuint)children.Length);
+            foreach (uint c in children)
+            {
+                byte k = 0;
+                Native.loomgui_stage_get_node_kind(h, c, &k);
+                if (k == NodeKindTextNode) continue;
+                child = c;
+                break;
+            }
+            if (child == RootSentinel)
+                throw new UIContractException(
+                    $"<template id='{name}'> has no element child (fence requires exactly one role=listitem)");
+            return new UITemplate(_ctx, child);
+        }
 
         // ── helpers ─────────────────────────────────────────────────────
 
@@ -1525,6 +1575,30 @@ namespace LoomGUI
             {
                 nuint written = 0;
                 int rc = fn(h, hbp, (nuint)heapBuf.Length, &written);
+                if (rc != 0) throw new InvalidOperationException($"read text retry failed rc={rc} (node {id})");
+                return Encoding.UTF8.GetString(heapBuf, 0, (int)written);
+            }
+        }
+
+        // ReadText 的可空变体：rc=1 是「语义空值」（如 Dropdown 无选项的 SelectedValue），
+        // 返 null 而非抛。其余 rc 语义同 ReadText（0=有值 / -2 扩容重调 / 其他=抛）。
+        internal static string ReadTextOrNull(StageHandle* h, uint id, ReadTextFn fn)
+        {
+            nuint needed = 0;
+            Span<byte> stackBuf = stackalloc byte[256];
+            fixed (byte* sbp = stackBuf)
+            {
+                int rc = fn(h, sbp, (nuint)stackBuf.Length, &needed);
+                if (rc == 1) return null;
+                if (rc == 0) return Encoding.UTF8.GetString(stackBuf.Slice(0, (int)needed));
+                if (rc != -2) throw new InvalidOperationException($"read text failed rc={rc} (node {id})");
+            }
+            byte[] heapBuf = new byte[(int)needed];
+            fixed (byte* hbp = heapBuf)
+            {
+                nuint written = 0;
+                int rc = fn(h, hbp, (nuint)heapBuf.Length, &written);
+                if (rc == 1) return null;
                 if (rc != 0) throw new InvalidOperationException($"read text retry failed rc={rc} (node {id})");
                 return Encoding.UTF8.GetString(heapBuf, 0, (int)written);
             }
@@ -2123,10 +2197,18 @@ namespace LoomGUI
             get { ThrowIfDisposed(); return (int)GetDropdownSelectedIndex(); }
             set { ThrowIfDisposed(); SetDropdownSelectedIndex((uint)value); }
         }
-        // SelectedValue：选中 option 的 value 属性。core 无 per-option value getter FFI（option value 在
-        // 打包期进 Dropdown.options side table，运行时未暴露——见 OptionItem.Value 同源 gap）。只读——
-        // HTML 语义上 value 由选中项派生，业务经 SelectedIndex 改选即可。待 option-value FFI 补后填。
-        public string SelectedValue { get { throw NE(); } }
+        // SelectedValue：选中 option 的 value（`value` 内容属性，HTML 语义——缺席回落该项文本；
+        // 无选项返 null）。只读——value 由选中项派生，业务经 SelectedIndex 改选。rc=1 = 无选项。
+        public string SelectedValue
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                return TextControlFFI.ReadTextOrNull(h, _id,
+                    (hp, buf, cap, len) => Native.loomgui_stage_get_dropdown_selected_value(hp, _id, buf, cap, len));
+            }
+        }
         // Disabled：伪类源 + active/click 抑制（set_node_disabled）。getter 读 NodeFlags::DISABLED（通用
         // node flag 通道，与 Slider/Toggle 一致）。
         public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
@@ -2191,19 +2273,37 @@ namespace LoomGUI
     // 可被渲染当文本块），故继承 Container（同 ListItem 模式）。NodeFactory 据 NodeKind.OptionItem
     // 派发到本类（替代之前的 Container 回落）。
     //
-    // Value/Selected：core 尚无 option-value / option-selected 的 side query FFI（option 的 value 属性
-    // 在打包期进 ControlInit::Dropdown.options，运行时无 per-option getter）——暂留 throw，待
-    // Dropdown 完整投影（composite bundle）落地后填。Disabled 读 NodeFlags::DISABLED（通用 node flag）。
+    // Value：option 的 `value` 内容属性（打包期静态配置，缺席回落自身文本——HTML 语义）。
+    // Selected：父 Dropdown 当前选中项的合成判定（上溯 + 声明序对位，非字面存储）。
+    // Disabled 读 NodeFlags::DISABLED（通用 node flag）。
     public unsafe class OptionItem : Container
     {
         internal OptionItem(UIContext ctx, uint id) : base(ctx, id) { }
 
-        // TODO(option-ffi): core 无 per-option value getter（option value 在打包期进 Dropdown.options
-        // side table，运行时未暴露）。待 Dropdown 完整投影补 get_option_value FFI 后填。
-        public string Value { get { throw NE(); } }
-        // TODO(option-ffi): selected 由父 Dropdown.selected_index 派生，无 per-option selected getter。
-        // 待 Dropdown 投影补齐后，OptionItem 可回查父 Dropdown 的 selected_index == self.Index 判定。
-        public bool Selected { get { throw NE(); } }
+        // value 内容属性优先；缺席回落 option 文本（与 Dropdown.SelectedValue 同源同口径）。
+        public string Value
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                return TextControlFFI.ReadText(h, _id,
+                    (hp, buf, cap, len) => Native.loomgui_stage_get_option_value(hp, _id, buf, cap, len));
+            }
+        }
+        // 序号 == 父 Dropdown.selected_index 的合成值（core 侧上溯派生，改选即跟随）。
+        public bool Selected
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                int rc = Native.loomgui_stage_is_option_selected(h, _id);
+                if (rc < 0)
+                    throw new InvalidOperationException($"is_option_selected failed (node {_id}: not an option / no dropdown ancestor)");
+                return rc == 1;
+            }
+        }
         // Disabled：伪类源（NodeFlags::DISABLED）。setter 直 FFI；getter 读 node flag（与 Slider 等一致）。
         public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
 
@@ -2339,18 +2439,26 @@ namespace LoomGUI
     // Tab = <button role="tab"> 的 typed 投影（TabList 的子项）。结构上是容器型节点（围栏 content=text，
     // 可持 label / 图标子），继承 Container（同 OptionItem 模式）。
     //
-    // Selected：本类不提供（throw，by design）。Tab 选中态是**派生量**——从父 TabList.SelectedIndex +
-    // core synth_aria_value 合成 aria-selected 派生，不存在也不需要 per-tab 的 selected 存储 / getter FFI。
-    // 业务经父 TabList.SelectedIndex 比对 self.Index 判定，或订阅 TabList.SelectionChanged（payload=新 index）。
+    // Selected：父 TabList.SelectedIndex + 自身 DOM 序的合成判定（core 侧上溯派生，与
+    // aria-selected synth 同源——非字面存储）。或订阅 TabList.SelectionChanged（payload=新 index）。
     // Disabled 读 NodeFlags::DISABLED（通用 node flag，与 OptionItem 一致）。
     public unsafe class Tab : Container
     {
         internal Tab(UIContext ctx, uint id) : base(ctx, id) { }
 
-        // Selected：by design 不提供（throw）。Tab 选中态是派生量（父 TabList.SelectedIndex +
-        // core aria-selected synth），无 per-tab getter FFI 也不会加。经父 TabList.SelectedIndex
-        // 比对 self.Index 判定，或 demux TabList.SelectionChanged。
-        public bool Selected { get { throw NE(); } }
+        // 序号 == 父 TabList.selected_index 的合成值（core 侧上溯派生，切换即跟随）。
+        public bool Selected
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                int rc = Native.loomgui_stage_is_tab_selected(h, _id);
+                if (rc < 0)
+                    throw new InvalidOperationException($"is_tab_selected failed (node {_id}: not a tab / no tablist ancestor)");
+                return rc == 1;
+            }
+        }
         // Disabled：伪类源（NodeFlags::DISABLED）。setter 直 FFI；getter 读 node flag（与 OptionItem 等一致）。
         public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
 
@@ -3063,6 +3171,28 @@ namespace LoomGUI
 
     // ── 顶层上下文 ──────────────────────────────────────────────────
     // UIContext 是「获取而非创建」：无公共构造，由引擎集成层创建/驱动。业务程序员从集成层获取。
+    /// OnUpdate 订阅句柄：Dispose 撤销单个订阅（不触其他订阅）。节点 Dispose 时其全部
+    /// 订阅由 UIContext 联动清（公共契约：订阅随 Dispose 自动清理，RemoveFromParent 不清理）。
+    internal sealed class UpdateSubscription : IDisposable
+    {
+        UIContext _ctx;
+        uint _nodeId;
+        Action<float> _cb;
+        bool _disposed;
+        internal UpdateSubscription(UIContext ctx, uint nodeId, Action<float> cb)
+        {
+            _ctx = ctx; _nodeId = nodeId; _cb = cb;
+        }
+        internal Action<float> Callback => _cb;
+        internal bool IsDisposed => _disposed;
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _ctx?.RemoveUpdateHook(_nodeId, this);
+        }
+    }
+
     public sealed unsafe class UIContext
     {
         // B3：headless harness / 引擎集成层建 UIContext 时持有的 Stage 句柄（raw FFI handle）。
@@ -3105,6 +3235,16 @@ namespace LoomGUI
         // 首次访问构造并挂本 context。StyleSheet.Add/Clear 方法体本身仍 throw NE（core 未接通）。
         StyleSheet _styleSheet;
 
+        // ── 逻辑调度（OnUpdate / CallLater / CallNextFrame，投影层内建）──
+        // 回调是 C# 闭包，core 的 C ABI 存不了——调度器整体住在投影层，PumpLogic 由
+        // LoomHost.Step 帧头泵（CollectInput 后、FlushPendingWrites 前）：回调内改
+        // Style/数据经既有 flush seam 过桥，本帧 solve 生效（零延迟语义）。
+        // 计时与 Step 同一 dt 累积（同源不双钟；TweenManager 单一动画时钟不受影响）。
+        // headless 测试在 tick 前手动调 PumpLogic（同 FlushPendingWrites 模式）。
+        internal readonly Dictionary<uint, List<UpdateSubscription>> _updateHooks = new();
+        internal readonly List<(float Due, Action Cb)> _timers = new();
+        internal readonly Queue<Action> _nextFrame = new();
+
         // B3：headless harness 工厂构造。public API 无构造（业务从集成层拿现成 instance）。
         // 建 NodeRegistry 持有自身反向引用（registry 转调 FFI 时需 stage handle）。
         // 建 EventBus + EventDemuxer 同持自身反向引用。
@@ -3126,6 +3266,98 @@ namespace LoomGUI
             _registry.FlushDirtyStyles();
             _registry.FlushDirtyTransforms();
         }
+
+        // ── 逻辑调度泵 ──────────────────────────────────────────────────
+
+        /// <summary>
+        /// 帧头逻辑泵：排空上帧入队的 next-frame 回调 → 逐节点 OnUpdate(dt) → 到期 timer。
+        /// LoomHost.Step 在 CollectInput 后、FlushPendingWrites 前调——回调内改 Style 走
+        /// 既有 flush seam，本帧 solve 生效。单回调抛异常被 catch + Debug 诊断，不阻断
+        /// 其他回调与后续帧（同 DrainPendingBinds 对 BindItem 的隔离策略）。回调内再注册
+        /// 的 hook/timer/next-frame 下次泵起效（快照遍历，不炸正在进行的遍历）。
+        /// </summary>
+        internal void PumpLogic(float dt)
+        {
+            if (_nextFrame.Count > 0)
+            {
+                Action[] due = _nextFrame.ToArray();
+                _nextFrame.Clear();
+                foreach (var cb in due) InvokeLogicGuarded(cb);
+            }
+            if (_updateHooks.Count > 0)
+            {
+                // 快照容量 = 订阅总数（节点数 × 各自 list 长度之和），非节点数。
+                var snapshot = new List<UpdateSubscription>();
+                foreach (var list in _updateHooks.Values)
+                    snapshot.AddRange(list);
+                for (int i = 0; i < snapshot.Count; i++)
+                {
+                    var sub = snapshot[i];
+                    // 先前回调里 Dispose 掉的订阅跳过（快照定格早于本行执行）。
+                    if (sub.IsDisposed) continue;
+                    InvokeLogicGuarded(() => sub.Callback(dt));
+                }
+            }
+            if (_timers.Count > 0)
+            {
+                // 就地递减；到期的收集后在注册序 fire（倒序移除保序）。本轮执行中新增的
+                // timer 不参与本轮（fire 列表在递减阶段定格）。
+                List<Action> fired = null;
+                for (int i = _timers.Count - 1; i >= 0; i--)
+                {
+                    var t = _timers[i];
+                    if (t.Due - dt <= 0f)
+                    {
+                        _timers.RemoveAt(i);
+                        (fired ??= new List<Action>()).Add(t.Cb);
+                    }
+                    else
+                    {
+                        _timers[i] = (t.Due - dt, t.Cb);
+                    }
+                }
+                if (fired != null)
+                    for (int i = fired.Count - 1; i >= 0; i--)
+                        InvokeLogicGuarded(fired[i]);
+            }
+        }
+
+        void InvokeLogicGuarded(Action cb)
+        {
+            try { cb(); }
+            catch (Exception ex)
+            {
+                // 业务回调抛不阻断调度器（上层应自己捕获）；静默吞错会让坏回调不可见，
+                // 留诊断痕迹到 Debug 输出 / Unity player log。
+                System.Diagnostics.Debug.WriteLine($"[LoomGUI] logic callback threw: {ex}");
+            }
+        }
+
+        /// <summary>注册 per-node 每帧回调（Node.OnUpdate 调）。异常隔离见 PumpLogic。</summary>
+        internal UpdateSubscription RegisterUpdateHook(uint nodeId, Action<float> cb)
+        {
+            if (!_updateHooks.TryGetValue(nodeId, out var list))
+            {
+                list = new List<UpdateSubscription>();
+                _updateHooks[nodeId] = list;
+            }
+            var sub = new UpdateSubscription(this, nodeId, cb);
+            list.Add(sub);
+            return sub;
+        }
+
+        /// <summary>撤销单个订阅（UpdateSubscription.Dispose 调）。</summary>
+        internal void RemoveUpdateHook(uint nodeId, UpdateSubscription sub)
+        {
+            if (_updateHooks.TryGetValue(nodeId, out var list))
+            {
+                list.Remove(sub);
+                if (list.Count == 0) _updateHooks.Remove(nodeId);
+            }
+        }
+
+        /// <summary>清节点的全部订阅（Node.Dispose 联动调——契约：订阅随 Dispose 自动清理）。</summary>
+        internal void RemoveUpdateHooks(uint nodeId) => _updateHooks.Remove(nodeId);
 
         // ── ListView 虚拟化 tick-drain（Task 5）───────────────────────
         // ListView.ItemCount/BindItem setter 调 RegisterListView 进本表；DrainPendingBinds
@@ -3278,23 +3510,30 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 卸载包：从 Rust stage 移除模板注册。已实例化的活节点独立副本不受影响
-        /// （同 Unity prefab：删 prefab 不删已实例化的 GO）。
-        /// ponytail: lib.rs 无 unload_package FFI——待 Rust 侧加 Stage::unload_package 后接通。
-        /// 届时 C# 侧只需加一句 Native.loomgui_stage_unload_package(h, name) + _loadedPackages.Remove。
+        /// 卸载包：从 Rust stage 移除模板注册（Unity prefab 删除语义——已实例化的活节点是
+        /// 独立副本不受影响；持有旧 UITemplate 再 Instantiate 抛 UIPackageException）。
+        /// 卸载后可重新 LoadPackage 同名包。
+        ///
+        /// 只动模板注册表，不触碰 atlas 纹理与字体：atlas 是 workspace 级共享资源
+        /// （runtime.json 的 atlases 列表跨包并行、SpriteResolver 全局懒缓存，与包注册表
+        /// 解耦——重载同名包不重载纹理），字体是 driver 级 RegisterFont 注册、不隶属任何包。
+        /// 未加载的包名抛 UIContractException（与 LoadPackage 同名重复抛异常对称，不静默）。
         /// </summary>
         public void UnloadPackage(string name)
         {
-            // ponytail: no loomgui_stage_unload_package FFI yet.
-            // When Rust side adds Stage::unload_package(name), wire here:
-            //   StageHandle* h = (StageHandle*)_stage.ToPointer();
-            //   byte[] nb = Encoding.UTF8.GetBytes(name ?? "");
-            //   fixed (byte* np = nb)
-            //       Native.loomgui_stage_unload_package(h, np, (nuint)nb.Length);
-            //   _loadedPackages.Remove(name);
-            throw new NotImplementedException(
-                "UnloadPackage: no loomgui_stage_unload_package FFI yet (ponytail defer). " +
-                "Will wire when Rust side adds Stage::unload_package.");
+            if (string.IsNullOrEmpty(name))
+                throw new ArgumentNullException(nameof(name));
+            if (!_loadedPackages.Contains(name))
+                throw new UIContractException($"package '{name}' is not loaded. Load it first.");
+
+            StageHandle* h = (StageHandle*)_stage.ToPointer();
+            byte[] nb = Encoding.UTF8.GetBytes(name);
+            int rc;
+            fixed (byte* np = nb)
+                rc = Native.loomgui_stage_unload_package(h, np, (nuint)nb.Length);
+            if (rc != 0)
+                throw new UIPackageException($"unload_package '{name}' failed (stage null / non-UTF-8)");
+            _loadedPackages.Remove(name);
         }
 
         /// <summary>
@@ -3362,26 +3601,24 @@ namespace LoomGUI
 
         /// <summary>
         /// 延迟回调（秒）。同 DOM setTimeout——d 秒后调 cb（不精确，帧级粒度）。
-        /// ponytail: core 无 call_later / timer queue。动画时钟仅 TweenManager::update(dt)，
-        /// 无通用延迟回调基础设施。待 Rust 侧加 timer 队列后接通。
+        /// d≤0 视为下一帧（同 setTimeout(0) 宏任务语义，CallNextFrame 队列）。
+        /// 计时由 PumpLogic 用 Step 同一 dt 累积。one-shot；cb 抛异常被隔离（Debug 诊断）。
         /// </summary>
         public void CallLater(float d, Action cb)
         {
-            // ponytail: no timer queue in Rust yet.
-            throw new NotImplementedException(
-                "CallLater: no timer queue FFI yet (ponytail defer). " +
-                "Will wire when Rust side adds Stage::call_later(dt, cb).");
+            if (cb == null) throw new ArgumentNullException(nameof(cb));
+            if (d <= 0f) { _nextFrame.Enqueue(cb); return; }
+            _timers.Add((d, cb));
         }
 
         /// <summary>
-        /// 下帧回调（帧末 fire，先于 render）。ponytail defer——理由同 CallLater。
+        /// 下帧回调（one-shot）。下一次 PumpLogic 开头 fire（帧头语义）——回调内改 Style 走
+        /// 当帧 flush seam，当帧 solve 生效。cb 抛异常被隔离（Debug 诊断）。
         /// </summary>
         public void CallNextFrame(Action cb)
         {
-            // ponytail: no per-frame deferred callback queue in Rust yet.
-            throw new NotImplementedException(
-                "CallNextFrame: no next-frame queue FFI yet (ponytail defer). " +
-                "Will wire when Rust side adds Stage::call_next_frame.");
+            if (cb == null) throw new ArgumentNullException(nameof(cb));
+            _nextFrame.Enqueue(cb);
         }
 
         /// <summary>

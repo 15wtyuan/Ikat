@@ -675,7 +675,10 @@ fn pkg_v25_rejects_v24() {
 /// 锁定序列化布局稳定性，防后续重构破坏 pkg.bin 兼容。
 #[test]
 fn pkg_v26_dropdown_init_roundtrip() {
-    let init = ControlInit::Dropdown { selected_index: 1 };
+    let init = ControlInit::Dropdown {
+        selected_index: 1,
+        option_values: Vec::new(),
+    };
     let bytes = bincode::serialize(&init).expect("ControlInit::Dropdown serializable");
     let back: ControlInit =
         bincode::deserialize(&bytes).expect("ControlInit::Dropdown deserializable");
@@ -706,7 +709,10 @@ fn pkg_v26_number_field_init_roundtrip() {
 #[test]
 fn pkg_v26_dropdown_init_via_pkg() {
     let mut node = tn(NodeKind::Dropdown);
-    node.control_init = Some(ControlInit::Dropdown { selected_index: 1 });
+    node.control_init = Some(ControlInit::Dropdown {
+        selected_index: 1,
+        option_values: Vec::new(),
+    });
     let nodes = [node];
     let rules = empty_rules();
     let input = PackageInput {
@@ -716,7 +722,10 @@ fn pkg_v26_dropdown_init_via_pkg() {
     let back = &pkg.components["c"].nodes[0];
     assert_eq!(
         back.control_init,
-        Some(ControlInit::Dropdown { selected_index: 1 })
+        Some(ControlInit::Dropdown {
+            selected_index: 1,
+            option_values: Vec::new()
+        })
     );
 }
 
@@ -781,8 +790,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 36,
-        "pkg format version must be 36 after bincode-layout bump (text_security + radial shape; v29 aria_controls feature persists)"
+        PKG_FORMAT_VERSION, 37,
+        "pkg format version must be 37 after option_values bump (v29 aria_controls feature persists)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -845,8 +854,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 36,
-        "pkg format version must be 36 after bincode-layout bump (text_security + radial shape)"
+        PKG_FORMAT_VERSION, 37,
+        "pkg format version must be 37 after option_values bump"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -986,8 +995,8 @@ fn pkg_v32_rejects_v31() {
 #[test]
 fn pkg_v33_roundtrip_preserves_rich_text_block() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 36,
-        "pkg format version must be 36 after bincode-layout bump (text_security + radial shape)"
+        PKG_FORMAT_VERSION, 37,
+        "pkg format version must be 37 after option_values bump"
     );
     // 根节点 rich_text_block=true（rich-text-block 容器根），子节点 flag=false（叶子）。
     let mut root = tn(NodeKind::Container);
@@ -1035,8 +1044,8 @@ fn pkg_v33_rejects_v32() {
 #[test]
 fn pkg_v34_roundtrip_preserves_gradient() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 36,
-        "pkg format version must be 36 after bincode-layout bump (text_security + radial shape)"
+        PKG_FORMAT_VERSION, 37,
+        "pkg format version must be 37 after option_values bump"
     );
     use crate::style::resolved::{GradCoord, Gradient, GradientStop, RadialExtent};
     let mut root = tn(NodeKind::Container);

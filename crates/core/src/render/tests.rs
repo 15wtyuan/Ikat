@@ -5275,6 +5275,7 @@ fn make_popup_scene(open: bool) -> (Scene, NodeId, NodeId, NodeId, NodeId, NodeI
             open,
             value_lock: false,
             open_selected_index: None,
+            option_values: Vec::new(),
         },
     );
     crate::scene::transform::compute_world_transforms(&mut scene);
@@ -5497,6 +5498,7 @@ fn popup_sort_key_strictly_above_scrollbar_thumb() {
             open: true,
             value_lock: false,
             open_selected_index: None,
+            option_values: Vec::new(),
         },
     );
     crate::scene::transform::compute_world_transforms(&mut scene);
@@ -5555,7 +5557,10 @@ fn open_popup_renders_option_list_via_reparent_path() {
         &mut scene,
         NodeKind::Dropdown,
         ResolvedStyle::default(),
-        Some(ControlInit::Dropdown { selected_index: 0 }),
+        Some(ControlInit::Dropdown {
+            selected_index: 0,
+            option_values: Vec::new(),
+        }),
     );
     crate::scene::dynamic::append_child(&mut scene, outer, sel).expect("select attach");
     // listbox role 子（作者写的弹出列表容器）。
@@ -5602,6 +5607,7 @@ fn open_popup_renders_option_list_via_reparent_path() {
             open: true,
             value_lock: false,
             open_selected_index: None,
+            option_values: Vec::new(),
         },
     );
     crate::scene::control::sync_control_visuals(&mut scene, sel);

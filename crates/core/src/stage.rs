@@ -128,6 +128,20 @@ impl Stage {
         Ok(())
     }
 
+    /// 卸载包：从资源池移除模板注册（Unity prefab 删除语义——已实例化的活节点是
+    /// 独立副本，不受影响；持有旧模板句柄再实例化会报「组件不在包内」）。
+    ///
+    /// 只动模板注册表。atlas 纹理与字体不在此列：atlas 是 workspace 级共享资源
+    /// （runtime.json 的 atlases 列表跨包并行、SpriteResolver 全局懒缓存），字体是
+    /// driver 级注册，二者都不隶属任何包——卸载单个包既无可释放也无可破坏的资源。
+    /// 未加载的包名 → Err。
+    pub fn unload_package(&mut self, name: &str) -> Result<(), String> {
+        self.packages
+            .remove(name)
+            .map(|_| ())
+            .ok_or_else(|| format!("package `{name}` is not loaded"))
+    }
+
     /// 查图尺寸（path → (w, h) 像素）。供 layout/render 用。
     /// path 缺失或 w/h=0 → None（调用方 fallback 64×64）。
     pub fn image_size(&self, path: &str) -> Option<(u32, u32)> {

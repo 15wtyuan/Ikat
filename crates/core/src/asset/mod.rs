@@ -38,9 +38,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 36; // v36: ResolvedStyle.text_security + Gradient::Radial.shape（bincode 布局变化）
-pub(crate) const MIN_VERSION: u32 = 36;
-pub(crate) const MAX_VERSION: u32 = 36;
+pub const PKG_FORMAT_VERSION: u32 = 37; // v37: ControlInit::Dropdown 增加 option_values（bincode 布局变化）
+pub(crate) const MIN_VERSION: u32 = 37;
+pub(crate) const MAX_VERSION: u32 = 37;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────
@@ -103,9 +103,12 @@ pub enum ControlInit {
     TextField(EditInit),
     /// 多行文本输入（TextArea）。EditInit 含 value/placeholder/max_length/readonly。
     TextArea(EditInit),
-    /// `<select>` 初始选中项索引（打包期扫 option[selected] 算出，无 selected 则 0）。
+    /// `<select>` 初始选中项索引（打包期扫 option[selected] 算出，无 selected 则 0）+
+    /// 逐项 `value` 属性值（HTML 语义：`role=option` 的 `value` 内容属性；缺席项 = None，
+    /// 运行时 SelectedValue 回落该项文本）。声明序与 selected_index 同口径。
     Dropdown {
         selected_index: u32,
+        option_values: Vec<Option<String>>,
     },
     /// `<input type="number">`。edit 是 value/placeholder/maxlength/readonly；min/max/step 数值约束。
     NumberField {

@@ -62,6 +62,9 @@
          slot + custom-element) — used by OptionItemDispatchTests for NodeFactory dispatch to
          OptionItem/Slot/CustomElement (vs Container fallback). Built from fixtures/dropdown.workspace. -->
     <None Include="fixtures\dropdown.pkg.bin" Link="fixtures\dropdown.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Named-template fixture: templates.pkg.bin (container with <template id="row-tpl"> blueprint) —
+         used by SchedulerAndLifecycleTests for Container.GetTemplate → UITemplate.Instantiate cloning. -->
+    <None Include="fixtures\templates.pkg.bin" Link="fixtures\templates.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
     <!-- M3 Task 9 tablist projection fixture: tablist.pkg.bin (div role=tablist with tab children +
          tabpanel siblings) — used by TabListProjectionTests for SelectedIndex FFI round-trip +
          NodeFactory dispatch (TabList/Tab) + SelectionChanged via demux. Built from

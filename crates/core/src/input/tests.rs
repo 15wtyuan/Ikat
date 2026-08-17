@@ -4403,7 +4403,10 @@ fn open_dropdown_with_outside_button_scene() -> (Scene, NodeId, NodeId, NodeId, 
         &mut s,
         NodeKind::Dropdown,
         ResolvedStyle::default(),
-        Some(ControlInit::Dropdown { selected_index: 0 }),
+        Some(ControlInit::Dropdown {
+            selected_index: 0,
+            option_values: Vec::new(),
+        }),
     );
     crate::scene::dynamic::append_child(&mut s, root_id, select).unwrap();
     if let Some(ControlState::Dropdown { open, .. }) = s.controls.get_mut(select) {
@@ -4564,7 +4567,10 @@ fn pointer_down_outside_closes_only_open_dropdown_not_closed_one() {
         &mut s,
         NodeKind::Dropdown,
         ResolvedStyle::default(),
-        Some(ControlInit::Dropdown { selected_index: 0 }),
+        Some(ControlInit::Dropdown {
+            selected_index: 0,
+            option_values: Vec::new(),
+        }),
     );
     crate::scene::dynamic::append_child(&mut s, root_id, select_closed).unwrap();
     s.get_mut(select_closed).unwrap().layout_rect = Rect {
@@ -4633,6 +4639,7 @@ fn dropdown_scene(
         ResolvedStyle::default(),
         Some(ControlInit::Dropdown {
             selected_index: selected_index as u32,
+            option_values: Vec::new(),
         }),
     );
     crate::scene::dynamic::append_child(&mut s, root_id, select).unwrap();

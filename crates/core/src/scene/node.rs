@@ -468,12 +468,14 @@ pub enum ControlState {
     /// `<select>` 下拉。selected_index=当前选中项（键盘 Up/Down 直接移动它作高亮，不另存高亮态）；
     /// open=popup 是否展开；value_lock 防反馈环；open_selected_index=展开时刻的 selected_index
     /// 快照（Esc 回滚用，仅 open 期间 Some，收起时清 None）。open/open_selected_index 是运行时态，
-    /// 不进 pkg（ControlInit::Dropdown 只载 selected_index）。
+    /// 不进 pkg（ControlInit::Dropdown 载 selected_index + option_values 静态配置）。
+    /// option_values=逐项 `value` 属性（instantiate 拷入，运行时只读；缺席项 None → 回落文本）。
     Dropdown {
         selected_index: usize,
         open: bool,
         value_lock: bool,
         open_selected_index: Option<usize>,
+        option_values: Vec<Option<String>>,
     },
     /// `<input type="number">`。edit 复用 EditState（value 是数字的文本形式）；
     /// min/max/step 是数值约束，读写门做 clamp + 量化。

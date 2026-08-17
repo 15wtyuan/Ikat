@@ -47,6 +47,23 @@ pub fn is_content_attr(tag_spec: &super::tag::TagSpec, attr_name: &str) -> bool 
     tag_spec.content_attrs.contains(&attr_name)
 }
 
+/// Content attributes legal only on elements that resolve to a specific
+/// control semantic. Role-based controls (`<div role="option">` etc.) have no
+/// literal tag of their own, so their non-global attributes cannot live in a
+/// TagSpec (keyed by literal tag). Each entry mirrors the standard-HTML
+/// attribute of the same name on the native control; values are free-form
+/// text (no value-domain validation).
+pub const SEMANTIC_CONTENT_ATTRS: &[(super::tag::SemanticKind, &[&str])] =
+    &[(super::tag::SemanticKind::OptionItem, &["value"])];
+
+/// Check an attribute name against the semantic-scoped content-attr table.
+/// `semantic` is the element's resolved SemanticKind (tag + role).
+pub fn is_semantic_content_attr(semantic: super::tag::SemanticKind, attr_name: &str) -> bool {
+    SEMANTIC_CONTENT_ATTRS
+        .iter()
+        .any(|(kind, attrs)| *kind == semantic && attrs.contains(&attr_name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

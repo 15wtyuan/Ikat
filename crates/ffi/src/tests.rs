@@ -1196,6 +1196,7 @@ fn make_dropdown_stage(selected: usize, open: bool) -> (*mut StageHandle, u32) {
             open,
             open_selected_index: if open { Some(selected) } else { None },
             value_lock: false,
+            option_values: Vec::new(),
         },
     );
     if let Some(n) = scene.get_mut(NodeId(node)) {

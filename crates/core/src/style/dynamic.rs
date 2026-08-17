@@ -1872,6 +1872,7 @@ mod tests {
                 open: true,
                 value_lock: false,
                 open_selected_index: None,
+                option_values: Vec::new(),
             },
         );
         let sel = hand_selector(r#"[aria-expanded="true"]"#);

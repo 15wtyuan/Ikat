@@ -647,7 +647,10 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             tabindex: None,
             content: None,
             src: None,
-            control_init: Some(ControlInit::Dropdown { selected_index: 0 }),
+            control_init: Some(ControlInit::Dropdown {
+                selected_index: 0,
+                option_values: Vec::new(),
+            }),
             role: None,
             data_slot: None,
             aria_controls: None,
@@ -1323,4 +1326,34 @@ fn own_scope_lookup_multi_instance_no_cross_talk() {
         "own-scope resolution must hit the SAME instance, not global first match"
     );
     let _ = inner1;
+}
+
+#[test]
+fn unload_package_removes_templates_but_not_instances() {
+    // prefab 删除语义：卸载移除模板注册（再 instantiate 报错），已实例化活节点不受影响；
+    // 未加载卸载 → Err；重载同名包 → 恢复可用（新实例 NodeId 不同）。
+    let pkg = make_test_pkg_with_subtree();
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("p", &pkg).unwrap();
+    let inst = s.instantiate("p", "comp1").unwrap();
+
+    s.unload_package("p").unwrap();
+    assert!(
+        s.instantiate("p", "comp1").is_err(),
+        "templates gone after unload"
+    );
+    assert!(
+        s.scene.as_ref().unwrap().get(inst).is_some(),
+        "live instance survives unload"
+    );
+
+    assert!(
+        s.unload_package("p").is_err(),
+        "double unload → Err (not loaded)"
+    );
+
+    s.load_package("p", &pkg).unwrap();
+    let inst2 = s.instantiate("p", "comp1").unwrap();
+    assert_ne!(inst, inst2, "reloaded package instantiates fresh nodes");
 }

@@ -410,10 +410,12 @@ class 触发的动画无句柄，只走 EventBus 全局 `On<T>` 广播；`Play` 
 ### 9.4 调度
 
 ```csharp
-ui.CallLater(float delay, Action cb);    // one-shot 延迟
+ui.CallLater(float delay, Action cb);    // one-shot 延迟（秒，帧级粒度；d≤0 视为下一帧）
 ui.CallNextFrame(Action cb);             // one-shot 下一帧
-node.OnUpdate(Action<float> cb);         // recurring 每帧（返回 IDisposable）
+node.OnUpdate(Action<float> cb);         // recurring 每帧（返回 IDisposable；dt = Step 帧时长）
 ```
+
+**泵点与帧内时序**：调度器住在引擎投影层（`UIContext`），集成层 `Step` 帧头泵（输入采集后、攒批回写前）——回调内改 `Style`/数据走既有 flush seam，**当帧 solve 生效**。`CallNextFrame` = 下一次泵的开头 fire。计时与 `Step` 用同一帧时长累积（逻辑时钟与动画时钟同源不双钟）。单回调抛异常被隔离（诊断日志，不阻断其他回调与后续帧）。headless 测试手动泵一次（同 flush seam 模式）。
 
 ---
 

@@ -528,7 +528,10 @@ mod tests {
             &mut s,
             NodeKind::Dropdown,
             ResolvedStyle::default(),
-            Some(ControlInit::Dropdown { selected_index: 0 }),
+            Some(ControlInit::Dropdown {
+                selected_index: 0,
+                option_values: Vec::new(),
+            }),
         );
         crate::scene::dynamic::append_child(&mut s, root_id, select).unwrap();
         // 设 open=true（create 默认 open=false）。

@@ -291,6 +291,119 @@ fn collect_subtree_text(scene: &Scene, id: NodeId, buf: &mut String) {
     }
 }
 
+// ── Option/Tab 合成 getter（运行时从父控件状态派生，公共 API 只读面）──
+//
+// option 的 value/selected、tab 的 selected 都不字面存储（HTML 语义：`value` 是
+// 打包期静态配置，selected 是父控件 selected_index + 自身序号的合成值）。这里统一
+// 提供「上溯找父控件 + 按声明序对位」的派生读，供 FFI getter 调用。
+
+/// 从 `from` 沿 parent 链上溯找最近的 Dropdown 控件节点（结构契约：
+/// combobox > listbox > option；从 option 或其后代起调）。限深防环。
+fn dropdown_owner(scene: &Scene, from: NodeId) -> Option<NodeId> {
+    let mut cur = scene.get(from)?.parent?;
+    for _ in 0..100_000 {
+        let n = scene.get(cur)?;
+        if matches!(scene.controls.get(cur), Some(ControlState::Dropdown { .. })) {
+            return Some(cur);
+        }
+        cur = n.parent?;
+    }
+    None
+}
+
+/// 从 `from` 沿 parent 链上溯找最近的 TabList 控件节点。tab 是 tablist 直接子
+/// （结构契约），从 tab 或其后代起调一次即命中；限深防环。
+fn tablist_owner(scene: &Scene, from: NodeId) -> Option<NodeId> {
+    let mut cur = scene.get(from)?.parent?;
+    for _ in 0..100_000 {
+        let n = scene.get(cur)?;
+        if matches!(scene.controls.get(cur), Some(ControlState::TabList { .. })) {
+            return Some(cur);
+        }
+        cur = n.parent?;
+    }
+    None
+}
+
+/// option 在其所属 Dropdown 里的声明序（与 selected_index / `nth_option_text` 同口径：
+/// listbox 的 OptionItem 直接子按文档序计数）。返回 (所属 combobox, 序号)；
+/// 上溯无 Dropdown / 不在 option 列表内 → None。
+pub fn option_index(scene: &Scene, option: NodeId) -> Option<(NodeId, usize)> {
+    let owner = dropdown_owner(scene, option)?;
+    let idx = dropdown_option_list(scene, owner)
+        .iter()
+        .position(|&(cid, _)| cid == option)?;
+    Some((owner, idx))
+}
+
+/// tab 在其所属 TabList 里的 DOM 序（role=tab 直接子按文档序——与键盘路由 /
+/// aria-selected 合成同口径）。返回 (所属 tablist, 序号)；上溯无 TabList /
+/// 自身不带 tab role → None。
+pub fn tab_index(scene: &Scene, tab: NodeId) -> Option<(NodeId, usize)> {
+    if scene.roles.role_of(tab) != Some(ROLE_TAB) {
+        return None;
+    }
+    let owner = tablist_owner(scene, tab)?;
+    let idx = scene
+        .get(owner)?
+        .children
+        .iter()
+        .filter(|&&c| scene.roles.role_of(c) == Some(ROLE_TAB))
+        .position(|&c| c == tab)?;
+    Some((owner, idx))
+}
+
+/// Dropdown 当前选中项的 value：`value` 属性值（打包期静态配置）优先，缺席回落
+/// 该项文本（HTML 语义：无 value 的 option 提交其文本）。无选项 / 非 Dropdown → None。
+pub fn dropdown_selected_value(scene: &Scene, select: NodeId) -> Option<String> {
+    let (selected_index, option_values) = match scene.controls.get(select) {
+        Some(ControlState::Dropdown {
+            selected_index,
+            option_values,
+            ..
+        }) => (*selected_index, option_values),
+        _ => return None,
+    };
+    if let Some(Some(v)) = option_values.get(selected_index) {
+        return Some(v.clone());
+    }
+    nth_option_text(scene, select, selected_index)
+}
+
+/// 单个 option 的 value：同 `dropdown_selected_value` 的 fallback 语义，按 option
+/// 自身序号取。非 option / 上溯无 Dropdown → None。
+pub fn option_value(scene: &Scene, option: NodeId) -> Option<String> {
+    let (owner, idx) = option_index(scene, option)?;
+    if let Some(ControlState::Dropdown { option_values, .. }) = scene.controls.get(owner) {
+        if let Some(Some(v)) = option_values.get(idx) {
+            return Some(v.clone());
+        }
+    }
+    let mut buf = String::new();
+    collect_subtree_text(scene, option, &mut buf);
+    Some(buf)
+}
+
+/// option 是否为所属 Dropdown 的当前选中项（合成：序号 == 父 selected_index）。
+/// 非 option / 上溯无 Dropdown → None。
+pub fn option_selected(scene: &Scene, option: NodeId) -> Option<bool> {
+    let (owner, idx) = option_index(scene, option)?;
+    match scene.controls.get(owner) {
+        Some(ControlState::Dropdown { selected_index, .. }) => Some(*selected_index == idx),
+        _ => None,
+    }
+}
+
+/// tab 是否为所属 TabList 的当前激活项（合成：序号 == 父 selected_index，
+/// 与 aria-selected 派生同源）。非 tab / 上溯无 TabList → None。
+pub fn tab_selected(scene: &Scene, tab: NodeId) -> Option<bool> {
+    let (owner, idx) = tab_index(scene, tab)?;
+    match scene.controls.get(owner) {
+        Some(ControlState::TabList { selected_index, .. }) => Some(*selected_index == idx),
+        _ => None,
+    }
+}
+
 // ── Dropdown 交互辅助（Task 13：点 option 选中 / seek 跳 disabled）─
 //
 // option 的索引语义与 `nth_option_text` 一致：在 popup 的 OptionItem 直接子节点里按声明序
@@ -416,6 +529,7 @@ fn commit_dropdown_selection(
         open,
         value_lock,
         open_selected_index,
+        ..
     }) = scene.controls.get_mut(select)
     {
         *selected_index = idx;
@@ -1944,6 +2058,7 @@ mod tests {
             ResolvedStyle::default(),
             Some(ControlInit::Dropdown {
                 selected_index: selected,
+                option_values: Vec::new(),
             }),
         );
         // value slot（含 TextNode 承载选中项文本）。
@@ -2038,7 +2153,10 @@ mod tests {
             &mut scene,
             NodeKind::Dropdown,
             ResolvedStyle::default(),
-            Some(ControlInit::Dropdown { selected_index: 0 }),
+            Some(ControlInit::Dropdown {
+                selected_index: 0,
+                option_values: Vec::new(),
+            }),
         );
         // 作者结构：value slot + listbox role。
         let value = make_slot_child(&mut scene, id, SLOT_VALUE);
@@ -2357,7 +2475,10 @@ mod tests {
             &mut scene,
             NodeKind::Dropdown,
             ResolvedStyle::default(),
-            Some(ControlInit::Dropdown { selected_index: 0 }),
+            Some(ControlInit::Dropdown {
+                selected_index: 0,
+                option_values: Vec::new(),
+            }),
         );
         // listbox role 子（空，待 reparent 填充）。
         let listbox = make_role_child(&mut scene, sel, ROLE_LISTBOX);
@@ -2402,7 +2523,10 @@ mod tests {
             &mut scene,
             NodeKind::Dropdown,
             ResolvedStyle::default(),
-            Some(ControlInit::Dropdown { selected_index: 0 }),
+            Some(ControlInit::Dropdown {
+                selected_index: 0,
+                option_values: Vec::new(),
+            }),
         );
         make_role_child(&mut scene, sel, ROLE_LISTBOX); // 空 listbox（待填充）
         let texts = ["alpha", "beta", "gamma", "delta", "epsilon"];
@@ -2492,7 +2616,10 @@ mod tests {
             &mut scene,
             NodeKind::Dropdown,
             ResolvedStyle::default(),
-            Some(ControlInit::Dropdown { selected_index: 0 }),
+            Some(ControlInit::Dropdown {
+                selected_index: 0,
+                option_values: Vec::new(),
+            }),
         );
         let opt = create_node_from_template(
             &mut scene,
@@ -2506,6 +2633,71 @@ mod tests {
             nth_option_text(&scene, sel, 0).is_none(),
             "option 不在 popup 里 → nth_option_text 返 None（严格扫 popup）"
         );
+    }
+
+    #[test]
+    fn option_value_and_selected_derive_from_parent_state() {
+        // value 语义：打包期静态配置优先（opts[0]="en"、opts[2]="ja"），缺席回落该项文本
+        // （opts[1]="中文"，HTML 无 value 的 option 提交其文本）；selected 是父
+        // selected_index + 序号的合成值（selected=2 → opts[2] 选中）。
+        let mut scene = Scene::default();
+        let sel = make_dropdown_with_options(&mut scene, &["English", "中文", "日本語"], 2);
+        if let Some(ControlState::Dropdown { option_values, .. }) = scene.controls.get_mut(sel) {
+            *option_values = vec![Some("en".into()), None, Some("ja".into())];
+        }
+        let opts: Vec<NodeId> = find_child_by_role_recursive(&scene, sel, ROLE_LISTBOX)
+            .and_then(|lb| scene.get(lb).map(|n| n.children.clone()))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|&c| scene.get(c).is_some_and(|n| n.kind == NodeKind::OptionItem))
+            .collect();
+        assert_eq!(opts.len(), 3);
+
+        assert_eq!(dropdown_selected_value(&scene, sel).as_deref(), Some("ja"));
+        assert_eq!(option_value(&scene, opts[0]).as_deref(), Some("en"));
+        assert_eq!(
+            option_value(&scene, opts[1]).as_deref(),
+            Some("中文"),
+            "absent value → falls back to option text"
+        );
+        assert_eq!(option_selected(&scene, opts[0]), Some(false));
+        assert_eq!(option_selected(&scene, opts[2]), Some(true));
+
+        // 非 Dropdown / 非 option 节点 → None（不 panic）。
+        assert!(dropdown_selected_value(&scene, opts[0]).is_none());
+        assert!(option_value(&scene, sel).is_none());
+        assert!(option_selected(&scene, sel).is_none());
+    }
+
+    #[test]
+    fn dropdown_selected_value_falls_back_to_text_without_values() {
+        // option_values 全缺席（未写 value 属性的包）→ 整体回落文本语义。
+        let mut scene = Scene::default();
+        let sel = make_dropdown_with_options(&mut scene, &["A", "B"], 1);
+        assert_eq!(dropdown_selected_value(&scene, sel).as_deref(), Some("B"));
+    }
+
+    #[test]
+    fn tab_selected_derives_from_parent_tablist() {
+        let mut scene = Scene::default();
+        let tl = create_node_from_template(
+            &mut scene,
+            NodeKind::TabList,
+            ResolvedStyle::default(),
+            Some(ControlInit::TabList { selected_index: 1 }),
+        );
+        let t0 = make_role_child(&mut scene, tl, ROLE_TAB);
+        let t1 = make_role_child(&mut scene, tl, ROLE_TAB);
+        assert_eq!(tab_selected(&scene, t0), Some(false));
+        assert_eq!(tab_selected(&scene, t1), Some(true));
+        // 切换父 selected_index → 合成值跟随（非字面存储）。
+        if let Some(ControlState::TabList { selected_index }) = scene.controls.get_mut(tl) {
+            *selected_index = 0;
+        }
+        assert_eq!(tab_selected(&scene, t0), Some(true));
+        assert_eq!(tab_selected(&scene, t1), Some(false));
+        // 非 tab / 无 TabList 祖先 → None。
+        assert!(tab_selected(&scene, tl).is_none());
     }
 
     // ── 控件指针交互（on_pointer_down/move/up） ──

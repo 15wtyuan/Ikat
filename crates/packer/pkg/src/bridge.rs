@@ -301,6 +301,7 @@ pub(crate) fn extract_control_init(
         ))),
         NodeKind::Dropdown => Some(ControlInit::Dropdown {
             selected_index: dropdown_selected_index(ir_idx, tree),
+            option_values: dropdown_option_values(ir_idx, tree),
         }),
         NodeKind::TabList => Some(ControlInit::TabList {
             // 初始选中项 = 首个 aria-selected="true" 的 role=tab 直接子的序号；
@@ -390,6 +391,16 @@ fn dropdown_selected_index(dropdown_idx: usize, tree: &IrTree) -> u32 {
         option_index += 1;
     });
     selected.unwrap_or(0)
+}
+
+/// Per-option `value` content attribute, in declaration order (same traversal
+/// as `dropdown_selected_index`). Absent attribute → `None` slot: the runtime
+/// SelectedValue/OptionItem.Value falls back to the option text (HTML
+/// semantics: an option without `value` submits its text).
+fn dropdown_option_values(dropdown_idx: usize, tree: &IrTree) -> Vec<Option<String>> {
+    let mut values = Vec::new();
+    visit_options(dropdown_idx, tree, |el| values.push(attr(el, "value")));
+    values
 }
 
 /// Pre-order DFS over descendant OptionItem-semantic elements in document order.

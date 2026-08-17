@@ -276,11 +276,15 @@ pub fn create_node_from_template(
                 e.max_length,
                 e.readonly,
             )),
-            ControlInit::Dropdown { selected_index } => ControlState::Dropdown {
+            ControlInit::Dropdown {
+                selected_index,
+                option_values,
+            } => ControlState::Dropdown {
                 selected_index: selected_index as usize,
                 open: false,
                 value_lock: false,
                 open_selected_index: None,
+                option_values,
             },
             ControlInit::NumberField {
                 edit,

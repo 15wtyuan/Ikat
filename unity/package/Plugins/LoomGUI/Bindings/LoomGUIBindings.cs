@@ -73,6 +73,14 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_load_package(StageHandle* h, byte* name, nuint name_len, byte* bytes, nuint bytes_len);
 
         /// <summary>
+        ///  卸载包：从 Rust stage 移除模板注册（prefab 删除语义——已实例化活节点不受影响）。
+        ///  atlas 纹理/字体不在此列（workspace 级共享 / driver 级注册，皆不隶属包）。
+        ///  0=ok；-1=err（null 句柄 / 非 UTF-8 / 包未加载）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_unload_package", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_unload_package(StageHandle* h, byte* name, nuint name_len);
+
+        /// <summary>
         ///  从包克隆一个组件进当前 scene，返组件根 NodeId（u32）。
         ///  pkg/comp = UTF-8 字节（指针+len）。失败返 0xFFFF_FFFF（INVALID，同 create_root 失败语义）。
         ///  scene 必须已存在（create_root 先建），否则 Err→sentinel。null 句柄 → sentinel。
@@ -836,6 +844,44 @@ namespace LoomGUI.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_get_radio_name", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_get_radio_name(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  读 Dropdown 当前选中项的 value（`value` 属性优先，缺席回落该项文本——HTML 语义）。
+        ///  return-code + out-param（ptr+len）双调法，同 get_radio_name：buf_cap 足够 → rc=0；
+        ///  不够 → rc=-2 + *out_len=所需；非 Dropdown / null 句柄 → -1；无选项（value 为 null
+        ///  语义）→ rc=1（*out_len=0，不写 buf）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_dropdown_selected_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_dropdown_selected_value(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  读单个 option 的 value（同 dropdown_selected_value 的 fallback 语义，按 option
+        ///  自身序号取）。双调法同上；非 option / 上溯无 Dropdown / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_option_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_option_value(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  option 是否为所属 Dropdown 的当前选中项（合成：序号 == 父 selected_index）。
+        ///  1=选中，0=未选中，-1=非 option / 上溯无 Dropdown / null 句柄。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_is_option_selected", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_is_option_selected(StageHandle* h, uint node_id);
+
+        /// <summary>
+        ///  tab 是否为所属 TabList 的当前激活项（合成：序号 == 父 selected_index，与
+        ///  aria-selected 派生同源）。1=激活，0=未激活，-1=非 tab / 上溯无 TabList / null 句柄。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_is_tab_selected", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_is_tab_selected(StageHandle* h, uint node_id);
 
         /// <summary>
         ///  设文本控件 value（TextField / TextArea）。直接替换 EditState.value + 光标/anchor 移到

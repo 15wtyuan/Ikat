@@ -995,6 +995,7 @@ fn control_state_dropdown_variant() {
         open: false,
         value_lock: false,
         open_selected_index: None,
+        option_values: Vec::new(),
     };
     assert!(matches!(
         s,

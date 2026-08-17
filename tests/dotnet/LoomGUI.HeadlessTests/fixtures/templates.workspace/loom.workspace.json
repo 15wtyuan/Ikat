@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output_dir": "../templates-ws-out",
+  "packages": [
+    {
+      "name": "templates",
+      "dirs": ["."],
+      "html": ["templates.html"]
+    }
+  ],
+  "atlases": [],
+  "fonts": []
+}

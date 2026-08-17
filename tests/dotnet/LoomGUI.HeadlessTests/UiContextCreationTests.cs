@@ -12,7 +12,7 @@ namespace LoomGUI.HeadlessTests
     /// Root (create_root + _rootId), FocusedNode (FFI round-trip), IsPointerOnUI (FFI).
     ///
     /// LoadPackage / Instantiate end-to-end tests deferred to E2/E3 (fixture pkg.bin dependency).
-    /// UnloadPackage / Pick / CallLater / CallNextFrame deferred (no FFI).
+    /// UnloadPackage / CallLater / CallNextFrame 已接通（投影层内建调度 + core unload FFI）。
     /// </summary>
     public unsafe class UiContextCreationTests
     {
@@ -358,15 +358,16 @@ namespace LoomGUI.HeadlessTests
             // but ctor is internal. Skip for now — E2 fixture will cover this path.
         }
 
-        // ── Deferred methods ───────────────────────────────────────────
+        // ── 调度 / 包生命周期（NE stub 已接通；完整行为见 SchedulerAndLifecycleTests）──
 
         [Fact]
-        public void UnloadPackageThrowsNe()
+        public void UnloadPackageNotLoadedThrowsContract()
         {
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                Assert.Throws<NotImplementedException>(() => ctx.UnloadPackage("foo"));
+                // 与 LoadPackage 同名重复抛 UIContractException 对称——不静默。
+                Assert.Throws<UIContractException>(() => ctx.UnloadPackage("foo"));
             }
             finally { StageHarness.Destroy(stage); }
         }
@@ -386,23 +387,35 @@ namespace LoomGUI.HeadlessTests
         }
 
         [Fact]
-        public void CallLaterThrowsNe()
+        public void CallLaterFiresWhenDtAccumulates()
         {
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                Assert.Throws<NotImplementedException>(() => ctx.CallLater(1f, () => { }));
+                int fired = 0;
+                ctx.CallLater(0.5f, () => fired++);
+                ctx.PumpLogic(0.3f);            // 0.3 < 0.5 → 未到期
+                Assert.Equal(0, fired);
+                ctx.PumpLogic(0.3f);            // 累计 0.6 ≥ 0.5 → fire 恰一次
+                Assert.Equal(1, fired);
+                ctx.PumpLogic(1f);              // one-shot：不再 fire
+                Assert.Equal(1, fired);
             }
             finally { StageHarness.Destroy(stage); }
         }
 
         [Fact]
-        public void CallNextFrameThrowsNe()
+        public void CallNextFrameFiresExactlyAtNextPumpHead()
         {
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                Assert.Throws<NotImplementedException>(() => ctx.CallNextFrame(() => { }));
+                int fired = 0;
+                ctx.CallNextFrame(() => fired++);
+                ctx.PumpLogic(0.016f);          // 下一次泵开头 fire（帧头语义）
+                Assert.Equal(1, fired);
+                ctx.PumpLogic(0.016f);          // one-shot
+                Assert.Equal(1, fired);
             }
             finally { StageHarness.Destroy(stage); }
         }

@@ -4,7 +4,7 @@
 // - 持 stage handle（StageHandle*）+ UIContext（4a 业务表面）+ LoomBackend（Unity/Godot 实现）。
 // - 构造：loomgui_stage_new → UIContext(stage)（复用 4a internal UIContext(IntPtr)）。
 //   不重新建 EventDemuxer——UIContext 构造时已建并接到自身 _eventBus（单一实例，单一事件入口）。
-// - 每帧 Step(dt)：backend.CollectInput → tick → borrow_frame → backend.SyncFrame → borrow_events → demuxer.Pump。
+// - 每帧 Step(dt)：backend.CollectInput → 逻辑泵（OnUpdate/CallLater/CallNextFrame）→ flush → tick → borrow_frame → backend.SyncFrame → borrow_events → demuxer.Pump。
 //   borrow_frame FFI 在此（backend 只消费 blob，避免二次 borrow）；set_input FFI 由 backend 调（引擎中立）。
 // - 资源 FFI（register_font/set_fallback_families/set_image_sizes）引擎中立，byte[]/描述过桥，放此。
 // - Dispose：loomgui_stage_free。
@@ -76,6 +76,10 @@ namespace LoomGUI
 
             // 1. 输入采集 → set_input 系 FFI（backend 调引擎中立 FFI，不破坏 LoomHost 引擎无关性）。
             _backend.CollectInput((IntPtr)_stage);
+
+            // 1.5 逻辑泵：OnUpdate / 到期 CallLater / CallNextFrame（UIContext 投影层内建调度器）。
+            //     帧头 fire——回调内改 Style 走下述 flush seam 过桥，本帧 solve 生效。
+            _ctx.PumpLogic(dt);
 
             // 2. 帧末 flush seam：攒批回写（Task 9）。把帧内标脏的 StyleMirror（set_inline_override）
             //    + NodeTransform（set_transform）一次性过桥，在 tick 前保证 core 拿到最新 inline/transform。

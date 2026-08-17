@@ -219,7 +219,10 @@ fn bridge_extracts_dropdown_role_aria_selected_index() {
         .expect("Dropdown node missing");
     assert!(matches!(
         sel.control_init,
-        Some(ControlInit::Dropdown { selected_index: 2 })
+        Some(ControlInit::Dropdown {
+            selected_index: 2,
+            ..
+        })
     ));
 }
 
@@ -234,8 +237,35 @@ fn bridge_extracts_dropdown_role_no_aria_selected_defaults_zero() {
         .expect("Dropdown node missing");
     assert!(matches!(
         sel.control_init,
-        Some(ControlInit::Dropdown { selected_index: 0 })
+        Some(ControlInit::Dropdown {
+            selected_index: 0,
+            ..
+        })
     ));
+}
+
+#[test]
+fn bridge_extracts_dropdown_option_values() {
+    // Per-option `value` content attribute, declaration order, absent → None slot
+    // (runtime falls back to the option text). Same subtree walk as selected_index.
+    let html = r#"<div role="combobox"><div role="listbox"><div role="option" value="en">English</div><div role="option">中文</div><div role="option" value="ja" aria-selected="true">日本語</div></div></div>"#;
+    let nodes = run_bridge(html);
+    let sel = nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Dropdown)
+        .expect("Dropdown node missing");
+    match &sel.control_init {
+        Some(ControlInit::Dropdown {
+            selected_index: 2,
+            option_values,
+        }) => {
+            assert_eq!(option_values.len(), 3);
+            assert_eq!(option_values[0].as_deref(), Some("en"));
+            assert_eq!(option_values[1], None, "absent value → None slot");
+            assert_eq!(option_values[2].as_deref(), Some("ja"));
+        }
+        other => panic!("expected Dropdown init, got {other:?}"),
+    }
 }
 
 #[test]
@@ -252,6 +282,9 @@ fn bridge_extracts_dropdown_selected_index_ignores_whitespace_text_children() {
         .expect("Dropdown node missing");
     assert!(matches!(
         sel.control_init,
-        Some(ControlInit::Dropdown { selected_index: 1 })
+        Some(ControlInit::Dropdown {
+            selected_index: 1,
+            ..
+        })
     ));
 }

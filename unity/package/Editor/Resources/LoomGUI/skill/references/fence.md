@@ -164,7 +164,9 @@ Base 标签按 tag 映射；控件/列表按 `role` 映射（`role` 优先于 ta
 | `button` | `disabled` |
 | `slot` | `name` |
 
-控件初始值不走内容属性——role 驱动控件把初始值放 ARIA（`aria-valuenow`/`aria-checked`/...）或 `data-*`（`data-step`/`data-name`）里（见 §2.3）。
+**语义限定内容属性**（按 resolve 后的控件语义放行，不按字面 tag）：`div role=option` 可带 `value`（镜像原生 `<option value>` 语义；运行时 `SelectedValue`/`OptionItem.Value` 优先取它，缺席回落该项文本）。普通 `div` 带 `value` 仍报 `FenceUnknownAttr`。
+
+控件初始值不走内容属性——role 驱动控件把初始值放 ARIA（`aria-valuenow`/`aria-checked`/...）或 `data-*`（`data-step`/`data-name`）里（见 §2.3；option 的 `value` 是例外，见上）。
 
 ---
 
