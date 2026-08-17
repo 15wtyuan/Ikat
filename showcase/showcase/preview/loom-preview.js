@@ -13,7 +13,8 @@
     'nav-character': 'character',
     'nav-form': 'form',
     'nav-lab': 'lab',
-    'nav-anim': 'm2-animation'
+    'nav-anim': 'm2-animation',
+    'nav-infra': 'api-infra'
   };
 
   function $(id) { return document.getElementById(id); }

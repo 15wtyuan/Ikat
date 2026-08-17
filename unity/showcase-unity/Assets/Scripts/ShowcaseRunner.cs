@@ -62,6 +62,9 @@ public class ShowcaseRunner : MonoBehaviour
 
     void Start()
     {
+        // 编辑器验收防冻：编辑器窗口失焦（看 Console/切窗）时播放器循环会被挂起，
+        // 表现为「游戏只剩一两帧」。Run In Background 让循环失焦持续跑（真机默认行为）。
+        Application.runInBackground = true;
         _driver = GetComponent<LoomStageDriver>();
         if (_driver == null)
         {
@@ -197,8 +200,10 @@ public class ShowcaseRunner : MonoBehaviour
         var ui = _driver.Context;
 
         // ── #1 OnUpdate 逻辑时钟：dt 累积逐帧刷新 + 帧计数；按钮 Dispose / 重订阅句柄。 ──
-        if (page.TryGet<TextNode>("infra-clock", out var clock) &&
-            page.TryGet<TextNode>("infra-frames", out var frames))
+        // span 打包后是 TextElement（SemanticKind::TextElement；运行时 create_node("span")
+        // 才产 TextNode——两路径不同型，TryGet 按 C# 类型精确匹配，写错型整块静默跳过）。
+        if (page.TryGet<TextElement>("infra-clock", out var clock) &&
+            page.TryGet<TextElement>("infra-frames", out var frames))
         {
             float elapsed = 0f;
             long pumps = 0;
@@ -206,8 +211,8 @@ public class ShowcaseRunner : MonoBehaviour
             {
                 elapsed += dt;
                 pumps++;
-                clock.Text = elapsed.ToString("F1") + " s";
-                frames.Text = pumps + " 帧";
+                clock.TextContent = elapsed.ToString("F1") + " s";
+                frames.TextContent = pumps + " 帧";
             }
             var sub = page.OnUpdate(Tick);
             if (page.TryGet<Button>("btn-clock-toggle", out var toggle))
@@ -322,6 +327,13 @@ public class ShowcaseRunner : MonoBehaviour
                 win.Style.Height = Length.Px(88);
                 win.Style.OverflowX = Overflow.Clip;
                 win.Style.OverflowY = Overflow.Clip;
+                // 微缩窗 88px 高只露出顶栏，正文整棵被 clip 不可见——却照付全额 solve 成本
+                //（solve 每帧全量重建 taffy 树，每 mini ≈ +7.7ms/帧，几个窗口就把帧率拖垮）。
+                // display:none 让 solve 跳过该子树（taffy 语义），视觉零变化。
+                foreach (var c in win.Query<Container>())
+                {
+                    if (c.Classes.Contains("body")) { c.Style.Display = DisplayMode.None; break; }
+                }
                 ulStage.AddChild(win);
                 return win;
             }

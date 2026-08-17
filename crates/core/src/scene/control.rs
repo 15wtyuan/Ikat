@@ -437,9 +437,30 @@ pub(crate) fn dropdown_option_list(scene: &Scene, select: NodeId) -> Vec<(NodeId
         .collect()
 }
 
+/// 世界坐标 rect-contains：节点盒经 world_transforms 映到世界 AABB 再判。
+/// `layout_rect` 是页面内容坐标（未扣祖先滚动），`pos` 是世界坐标（已扣滚动）——
+/// 祖先未滚动时两者相等（既有行为），滚动/缩放下必须经世界矩阵换算。
+/// 平移/缩放精确；旋转取 AABB 近似（与 hit_test 逆变换判定同量级）。
+/// 无世界矩阵条目（scene 从未跑 compute_world_transforms，如裸 Scene 单测）→ 回退
+/// layout 坐标判定（根级场景 layout 即世界，旧语义）。
+pub(crate) fn world_rect_contains(scene: &Scene, node: NodeId, pos: [f32; 2]) -> bool {
+    let Some(n) = scene.get(node) else {
+        return false;
+    };
+    let r = n.layout_rect;
+    match scene.world_transforms.get(node.index()).copied() {
+        Some(wt) => {
+            let (x0, y0) = crate::transform::apply_point(&wt, 0.0, 0.0);
+            let (x1, y1) = crate::transform::apply_point(&wt, r.w, r.h);
+            pos[0] >= x0 && pos[0] <= x1 && pos[1] >= y0 && pos[1] <= y1
+        }
+        None => pos[0] >= r.x && pos[0] <= r.x + r.w && pos[1] >= r.y && pos[1] <= r.y + r.h,
+    }
+}
+
 /// 点中 `pos` 所在的**非 disabled** option 的索引（按 OptionItem 序）。pos 不在任一 enabled
-/// option 矩形内 / select 无 popup / 无 option → None。layout_rect 取上一帧 solve（与 hit_test
-/// 同口径，1 帧滞后），option 互不重叠故 pos-矩形判定与实际 hit 一致。
+/// option 矩形内 / select 无 popup / 无 option → None。世界 AABB 取上一帧 solve+world
+/// （与 hit_test 同口径，1 帧滞后），option 互不重叠故 pos-矩形判定与实际 hit 一致。
 pub(crate) fn dropdown_option_at_pos(
     scene: &Scene,
     select: NodeId,
@@ -451,11 +472,8 @@ pub(crate) fn dropdown_option_at_pos(
             idx += 1;
             continue;
         }
-        if let Some(n) = scene.get(cid) {
-            let r = n.layout_rect;
-            if pos[0] >= r.x && pos[0] <= r.x + r.w && pos[1] >= r.y && pos[1] <= r.y + r.h {
-                return Some(idx);
-            }
+        if world_rect_contains(scene, cid, pos) {
+            return Some(idx);
         }
         idx += 1;
     }
@@ -469,10 +487,7 @@ pub(crate) fn pos_in_popup(scene: &Scene, select: NodeId, pos: [f32; 2]) -> bool
     let Some(popup) = find_child_by_role_recursive(scene, select, ROLE_LISTBOX) else {
         return false;
     };
-    scene.get(popup).is_some_and(|n| {
-        let r = n.layout_rect;
-        pos[0] >= r.x && pos[0] <= r.x + r.w && pos[1] >= r.y && pos[1] <= r.y + r.h
-    })
+    world_rect_contains(scene, popup, pos)
 }
 
 /// 设 TabList 的 selected_index，并在净变时发 EVT_SELECTION_CHANGED@tablist（payload
@@ -596,38 +611,44 @@ pub(crate) fn close_dropdown(scene: &mut Scene, select: NodeId) {
 /// 三档：下方放得下 → 正下方（默认）；下方放不下且上方放得下 → 上翻（popup 底贴
 /// select 顶）；两向都放不下 → 收缩（inline `max-height` 钉视口高 + `overflow-y:auto`
 /// 接既有滚动机制，top 贴视口顶）。`viewport_h <= 0` = 无视口约束（恒下方，历史行为）。
-/// popup_h 读上帧 solve 的 layout_rect——open 首帧为陈旧值，次帧收敛（错位帧几何在
-/// 视口外，不可见）。收缩覆写在非收缩档/收起时 unset 回落作者 CSS（core 在 open 期
-/// 拥有 popup inline 覆写是既有模式：display:block 同款）。
+///
+/// **坐标空间**：视口判定用 `combo_world_y`（combobox 顶的世界 y——祖先滚动时 layout y
+/// 与世界 y 劈叉，拿 layout y 判会在滚动页上误翻/误收缩）；返回的 ty 是 layout 空间量
+/// （transform 作用于静态位再随祖先滚动渲染），故目标世界 y 经 `shift = combo_y −
+/// combo_world_y` 折回 layout 空间再减 static_y。popup_h 读上帧 solve 的 layout_rect——
+/// open 首帧为陈旧值，次帧收敛（错位帧几何在视口外，不可见）。收缩覆写在非收缩档/
+/// 收起时 unset 回落作者 CSS（core 在 open 期拥有 popup inline 覆写是既有模式：display:block 同款）。
 fn place_dropdown_popup_ty(
     scene: &mut Scene,
     popup: NodeId,
     combo_y: f32,
+    combo_world_y: f32,
     sel_h: f32,
     static_y: f32,
     viewport_h: f32,
 ) -> f32 {
     let popup_h = scene.get(popup).map(|n| n.layout_rect.h).unwrap_or(0.0);
-    let below_y = combo_y + sel_h;
+    let shift = combo_y - combo_world_y; // world → layout 折回（祖先滚动/变换位移）
+    let below_y = combo_world_y + sel_h;
     if viewport_h <= 0.0 || below_y + popup_h <= viewport_h {
         let _ = unset_inline_override(scene, popup, "max-height");
         let _ = unset_inline_override(scene, popup, "overflow-y");
-        return below_y - static_y;
+        return below_y + shift - static_y;
     }
-    let above_y = combo_y - popup_h;
+    let above_y = combo_world_y - popup_h;
     if above_y >= 0.0 {
         let _ = unset_inline_override(scene, popup, "max-height");
         let _ = unset_inline_override(scene, popup, "overflow-y");
-        return above_y - static_y;
+        return above_y + shift - static_y;
     }
-    // 两向放不下：收缩。max-height 走 inline（solve 可见，次帧 popup_h 收敛到视口高）。
+    // 两向都放不下：收缩。max-height 走 inline（solve 可见，次帧 popup_h 收敛到视口高）。
     let _ = set_inline_override(scene, popup, "overflow-y:auto");
     let _ = set_inline_override(
         scene,
         popup,
         &format!("max-height:{}px", viewport_h.max(0.0)),
     );
-    -static_y
+    shift - static_y
 }
 
 /// Dropdown 键盘交互路由（仅 open 时生效）。返回是否消费了该键（消费 → 不发普通 keydown）。
@@ -948,15 +969,29 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
                 // listbox 偏移到 combobox 底边（同 Slider thumb 定位模式：渲染/命中层，进
                 // world_matrix）。CSS `top:100%` 被围栏丢弃后 absolute 节点回落 taffy 静态
                 // 位置（≈ value 行之后；layout_rect.y 已含该偏移，且是页面绝对坐标）——
-                // ty = 目标（combo_y + sel_h）− 静态 y，同空间相减；把静态 y 当父相对值
-                // 去减会把弹层甩到页面顶端。
+                // ty = 目标（layout 空间）− 静态 y，同空间相减；把静态 y 当父相对值
+                // 去减会把弹层甩到页面顶端。视口翻转判定用世界 y（祖先滚动下 layout≠世界，
+                // 详见 place_dropdown_popup_ty 坐标空间注）。
                 let (combo_y, sel_h) = scene
                     .get(id)
                     .map(|n| (n.layout_rect.y, n.layout_rect.h))
                     .unwrap_or((0.0, 0.0));
+                let combo_world_y = scene
+                    .world_transforms
+                    .get(id.index())
+                    .map(|wt| wt[5])
+                    .unwrap_or(combo_y);
                 let static_y = scene.get(popup).map(|n| n.layout_rect.y).unwrap_or(0.0);
                 let ty = if open {
-                    place_dropdown_popup_ty(scene, popup, combo_y, sel_h, static_y, viewport_h)
+                    place_dropdown_popup_ty(
+                        scene,
+                        popup,
+                        combo_y,
+                        combo_world_y,
+                        sel_h,
+                        static_y,
+                        viewport_h,
+                    )
                 } else {
                     // 收起：清收缩覆写（下轮 open 按当帧视口重判），回零偏移。
                     let _ = unset_inline_override(scene, popup, "max-height");
@@ -1151,8 +1186,8 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
         // TabList（T7）：点 role=tab 子 → 设 selected_index = 该 tab 的序号 + 发
         // SelectionChanged。find_control_at 从命中节点向上找最近 ControlState：Tab 无
         // ControlState、TabList 有 → id 是 TabList，pos 是点击世界坐标。按声明序遍历 role=tab
-        // 子，rect-contains 命中第一个含 pos 的 tab（镜像 dropdown_option_at_pos 命中模式，
-        // layout_rect 取上一帧 solve）。pos 不落任一 tab（点 tablist padding）→ no-op。
+        // 子，世界 AABB rect-contains 命中第一个含 pos 的 tab（镜像 dropdown_option_at_pos
+        // 命中模式，世界矩阵取上一帧 solve+world）。pos 不落任一 tab（点 tablist padding）→ no-op。
         ControlState::TabList { .. } => {
             let tab_ids: Vec<NodeId> = scene
                 .get(id)
@@ -1162,13 +1197,9 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
                 .filter(|&c| scene.roles.role_of(c) == Some(ROLE_TAB))
                 .collect();
             for (i, &tab) in tab_ids.iter().enumerate() {
-                if let Some(n) = scene.get(tab) {
-                    let r = n.layout_rect;
-                    if pos[0] >= r.x && pos[0] <= r.x + r.w && pos[1] >= r.y && pos[1] <= r.y + r.h
-                    {
-                        set_tablist_selected_index(scene, id, i, &mut out);
-                        break;
-                    }
+                if world_rect_contains(scene, tab, pos) {
+                    set_tablist_selected_index(scene, id, i, &mut out);
+                    break;
                 }
             }
         }
@@ -1357,11 +1388,26 @@ fn slider_pos_to_value(scene: &Scene, slider: NodeId, pos: [f32; 2]) -> Option<f
     if min > max {
         return None;
     }
-    let lr = scene.get(slider)?.layout_rect;
-    if lr.w <= 0.0 {
+    // 世界 AABB 轨道几何（pos 是世界坐标；页面滚动/缩放下 layout_rect 与世界坐标劈叉，
+    // 须经 world_transforms 换算——同 world_rect_contains 的坐标口径。无世界矩阵条目
+    // → 根级场景 layout 即世界，旧语义）。
+    let n = scene.get(slider)?;
+    let r = n.layout_rect;
+    if r.w <= 0.0 {
         return None;
     }
-    let ratio = ((pos[0] - lr.x) / lr.w).clamp(0.0, 1.0);
+    let (x0, x1) = match scene.world_transforms.get(slider.index()).copied() {
+        Some(wt) => {
+            let (a, _) = crate::transform::apply_point(&wt, 0.0, 0.0);
+            let (b, _) = crate::transform::apply_point(&wt, r.w, 0.0);
+            (a, b)
+        }
+        None => (r.x, r.x + r.w),
+    };
+    if x1 - x0 <= 0.0 {
+        return None;
+    }
+    let ratio = ((pos[0] - x0) / (x1 - x0)).clamp(0.0, 1.0);
     let raw = min + ratio * (max - min);
     let v = if step > 0.0 {
         min + ((raw - min) / step).round() * step

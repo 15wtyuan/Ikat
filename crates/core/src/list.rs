@@ -936,7 +936,13 @@ fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
     // spacer 高需 heights.sum，故一并在此算出，避免后续跨可变借再 clone heights。
     let (scroll_y, viewport_h, ul_y) = {
         let (sy, vh) = ancestor_scroll_viewport(scene, ul);
-        let uy = scene.get(ul).map(|n| n.layout_rect.y).unwrap_or(0.0);
+        // 自滚模式（ul 自身是 ScrollPane）：top = scroll_pos.y − 0——内容原点即 ul 内容盒，
+        // 不扣 ul 在页面里的偏移。祖先滚动模式：扣 ul 相对 pane 的 layout 偏移。
+        let uy = if scene.scroll.get(ul).is_some() {
+            0.0
+        } else {
+            scene.get(ul).map(|n| n.layout_rect.y).unwrap_or(0.0)
+        };
         (sy, vh, uy)
     };
     let (visible, spacer_head_h, spacer_tail_h, measured) = {
@@ -1168,9 +1174,15 @@ fn reorder_active_slots(scene: &mut Scene, ul: NodeId) {
     ul_node.children = new_children;
 }
 
-/// 沿祖先链找最近滚动容器，返 (scroll_pos.y, viewport.h)。无祖先 ScrollPane → (0,0)
-/// （viewport.h=0 触发冷启动 → INITIAL_SLOTS），保证无滚动容器的测试也能实例化初始 slot。
+/// ListView 的滚动视口来源。**自滚优先**：ul 自身带 ScrollPane（`overflow:auto/scroll`
+/// 直接写在列表上）时用它自己的 scroll_pos/viewport——内容坐标原点就是 ul 内容盒，
+/// 无祖先偏移可扣。否则沿祖先链找最近滚动容器（祖先滚动模式，如 mail 页外层列滚动）。
+/// 无任何 ScrollPane → (0,0)（viewport.h=0 触发冷启动 → INITIAL_SLOTS），
+/// 保证无滚动容器的测试也能实例化初始 slot。
 fn ancestor_scroll_viewport(scene: &Scene, node: NodeId) -> (f32, f32) {
+    if let Some(st) = scene.scroll.get(node) {
+        return (st.scroll_pos.1, st.viewport_size.1);
+    }
     let mut cur = scene.get(node).and_then(|n| n.parent);
     while let Some(pid) = cur {
         if let Some(st) = scene.scroll.get(pid) {
@@ -1181,8 +1193,12 @@ fn ancestor_scroll_viewport(scene: &Scene, node: NodeId) -> (f32, f32) {
     (0.0, 0.0)
 }
 
-/// 沿祖先链找最近滚动容器 NodeId（anchoring 补偿 scroll_pos 用）。无则 None。
+/// 滚动容器 NodeId（anchoring 补偿 / scroll_to_item 设滚动用）。**自滚优先**
+///（同 [`ancestor_scroll_viewport`]）：ul 自身可滚 → 返回 ul。无则 None。
 fn ancestor_pane(scene: &Scene, node: NodeId) -> Option<NodeId> {
+    if scene.scroll.get(node).is_some() {
+        return Some(node);
+    }
     let mut cur = scene.get(node).and_then(|n| n.parent);
     while let Some(pid) = cur {
         if scene.scroll.get(pid).is_some() {

@@ -26,15 +26,23 @@
   .later-label.done { color:#7fd48a; }
   .nf-label { color:#e0e6ec; font-size:16px; font-weight:600; }
 
-  /* #4 dropdown value 链：控件须被 CSS 命中（围栏 control-css 契约）。 */
-  [role="combobox"] { background-color:#101c28; border-radius:8px; box-shadow:inset 0 0 0 1px #2a5a75; width:280px; }
-  [role="option"] { background-color:#152433; color:#c8d4e0; font-size:14px; padding:8px 12px; }
+  /* #4 dropdown value 链：控件须被 CSS 命中（围栏 control-css 契约）。收起态显示
+     选中项文本靠 data-slot=value 子（无它则收起态零内容、高度塌 0 不可见）。
+     listbox 弹层契约（同 form 页）：combobox position:relative 锚点 + listbox
+     display:none 初态 / position:absolute 脱流 / top:100% 基线（core 视口翻转走
+     transform，缺脱流会把容器撑开）。 */
+  [role="combobox"] { position:relative; background-color:#101c28; border-radius:8px; box-shadow:inset 0 0 0 1px #2a5a75; width:280px; padding:10px 14px; }
+  [role="combobox"] [data-slot="value"] { color:#e0e6ec; font-size:14px; }
+  [role="combobox"] [role="listbox"] { display:none; position:absolute; left:0; top:100%; width:100%; background-color:#0f1824; border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; border-radius:4px; padding:4px 0; }
+  [role="combobox"] [role="option"] { display:block; background-color:#152433; color:#c8d4e0; font-size:14px; padding:8px 12px; }
   [role="option"]:hover { background-color:#1d3a52; }
 
-  /* #5 tablist / tab：同 control-css 契约。 */
+  /* #5 tablist / tab：同 control-css 契约。aria-selected 由父状态合成（synth_aria），
+     选中态样式走属性选择器命中它。 */
   [role="tablist"] { background-color:#101c28; border-radius:8px; padding:6px; }
   [role="tab"] { background-color:#152433; color:#9aa0b4; font-size:14px; font-weight:600; padding:8px 18px; border-radius:6px; }
   [role="tab"]:hover { color:#c8d4e0; }
+  [role="tab"][aria-selected="true"] { background-color:#1d3a52; color:#e0e6ec; }
 
   /* #6 具名模板列表：listitem 蓝图 + BindItem 行样式切换（强调行金左条）。浏览器预览
      克隆 template 占位，行样式切换是 Unity 运行时（BindItem）行为。 */
@@ -101,6 +109,7 @@
         <div class="section-desc">三个 option：a 带 value="en"、b 带 value="zh-CN" 且默认选中、c 不带 value（回落文本）。右栏读数随选择刷新——value 属性优先、缺席回落文本、Selected 为父状态合成。</div>
         <div class="stage">
           <div role="combobox" id="infra-dd">
+            <div data-slot="value">简体中文</div>
             <div role="listbox">
               <div role="option" id="opt-lang-a" value="en">English</div>
               <div role="option" id="opt-lang-b" value="zh-CN" aria-selected="true">简体中文</div>
