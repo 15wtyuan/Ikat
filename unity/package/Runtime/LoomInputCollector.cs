@@ -291,12 +291,18 @@ namespace LoomGUI
 
             float dy = 0f;
 #if ENABLE_INPUT_SYSTEM
+            // notch 模式判定阈值（raw）：120（经典 notch 一格的 raw 值）取半——单事件
+            // ≥ 半格即判 notch 类设备。经典 notch 每事件 ±120 或其倍数，不会落在阈值下；
+            // 高分辨率滚轮/触控板常规事件 raw≈1-10、惯性峰值可上百——峰值落入 notch
+            // 模式是有意的：透传当量下峰值 raw 会一步跨几十格，压回 Round(raw/120) 反而
+            // 接近 notch 鼠标的惯性体感。
+            const float notchThresholdRaw = 60f;
             var v = UnityEngine.InputSystem.Mouse.current?.scroll?.ReadValue() ?? UnityEngine.Vector2.zero;
-            // 双模映射（免定标）：单事件 |raw|≥60 视为经典 notch 鼠标（120 raw = 1 格）；
-            // 小事件流（精滚轮驱动，实测每格 raw≈1.5-2）直接透传——1 raw = 1 格当量，
-            // 逐事件小步进（core 侧 clamp+tween 链动，等效连续滚动）。两档语义统一为
+            // 双模映射（免定标）：notch 类（120 raw = 1 格）取整；小事件流（精滚轮驱动，
+            // 实测每格 raw≈1.5-2）直接透传——1 raw = 1 格当量，逐事件小步进（core 侧
+            // clamp+tween 链动，等效连续滚动）。两档语义统一为
             // 「dy 单位 = 格，core 每 100 design px/格」。
-            if (Mathf.Abs(v.y) >= 60f)
+            if (Mathf.Abs(v.y) >= notchThresholdRaw)
                 dy = Mathf.Round(v.y / 120f);
             else if (!Mathf.Approximately(v.y, 0f))
                 dy = v.y;

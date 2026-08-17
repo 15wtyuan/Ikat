@@ -12,7 +12,7 @@ namespace LoomGUI
     /// 渲染顺序：
     ///   - GO + wrapper layer = LoomUILayer（UI 相机渲染）
     ///   - GO（Mesh/SkinnedMesh/ParticleSystem Renderer）material renderQueue=3000（Transparent，跟 UI 同队列）
-    ///   - GO sortingOrder = 节点 sort_key（UI 列表顺序）
+    ///   - GO sortingOrder = 节点 sort_key + HostSortOrderLift（盖过宿主上方的合并 UI 块，见常量注释）
 ///
     /// LoomGUI root localScale=(sf,-sf,sf) 在 transform 做 y-flip。
     /// GO 直挂 root → handedness flip → 3D mesh winding 反 → 被 Cull Back 剔除。
@@ -20,6 +20,15 @@ namespace LoomGUI
     /// </summary>
     internal sealed class NativeHostManager
     {
+        /// GO sortingOrder 在节点 sort_key 之上的抬升量。UI mesh 经 merge_meshes 合并后
+        /// blob 的 sort_key 是合并期重编号、不再是 node DFS 序——宿主节点区域上层的合并
+        /// 背景块 key 可远超宿主 key，严格按 sort_key 排序会把 GO 整个压在底下（Unity 跨
+        /// sortingOrder 不做 z 距离 tiebreak），抬 1000 跨过宿主上方的本地合并块。
+        /// 失效边界：宿主节点绘制序之后再有超过 Lift 个合并渲染块、或宿主 slot 上方
+        /// Lift 序内存在需盖住 GO 的重叠 UI（弹层）时排序不再成立——届时须改为 GO 参与
+        /// 合并编号的精确穿插方案，勿再加大 Lift。
+        internal const int HostSortOrderLift = 1000;
+
         private readonly Dictionary<uint, GameObject> _bindings = new();   // node_id → 用户 GO
         private readonly Dictionary<uint, GameObject> _wrappers = new();   // node_id → wrapper GO（跟随 UI）
         private Transform _root;
@@ -206,18 +215,14 @@ namespace LoomGUI
                 wrapper.transform.localRotation = Quaternion.Euler(0, 0, rot);
                 wrapper.transform.localScale = new Vector3(sx, sy, sf > 0.0001f ? 1.0f / sf : 1.0f);
 
-                // 用户 GO sortingOrder = 节点 sort_key + 1：须盖过宿主节点自身的渲染内容。
-                // UI 侧经 merge_meshes 合并后 blob sort_key 编号与 node DFS 序不同——slot
-                // 区域上层的合并背景块 key 可远大于宿主 key，严格按 sortingOrder 排序会把
-                // GO 整个压在底下（z 无关，Unity 跨 sortingOrder 不做距离 tiebreak）。
-                // +1000：跨过 merge_meshes 重组的本地合并块（合并组 key 可远超宿主 key，曾把整个展位罩住）；
-                // 宿主 slot 内无后续兄弟 UI，不会误遮（有重叠弹层需求的场景再收紧为精确穿插）。
+                // sortingOrder = 宿主 sort_key + HostSortOrderLift：盖过 merge_meshes 重组后
+                // 编号在宿主之上的本地合并块（失效边界见常量注释）。
                 uint sk = 0;
                 Native.loomgui_stage_get_node_sort_key(stage, id, &sk);
                 // includeInactive=true：刚恢复显示那帧 go.activeSelf 仍为 false（下一行才 SetActive(true)），
                 // 不含 inactive 子节点则其 Renderer sortingOrder 漏更新一帧。
                 foreach (var r in go.GetComponentsInChildren<Renderer>(true))
-                    if (r != null) r.sortingOrder = (int)sk + 1000;
+                    if (r != null) r.sortingOrder = (int)sk + HostSortOrderLift;
                 if (!go.activeSelf) go.SetActive(true);
             }
         }
