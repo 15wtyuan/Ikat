@@ -74,7 +74,7 @@
   4. ~~**tick 顺序可执行化 + 分层叙事对齐**~~ ✅ done（2026-08-17）：core `tick_order_gate.rs` 源码级锁定 `tick_and_render` 步骤序列（换序/插入/删除即红，每步恰一次）；main-design §16 步骤清单重写为与登记表一致并声明真相源；§2 补「单向指数据流、非模块依赖」注记。
   5. ~~**Scene 建删节点收口**~~ ✅ done（2026-08-17）：`Scene::alloc_node_slot` / `free_node_slot` 单一入口——建点（`create_node` / `create_node_from_template` / `Scene::build` / `from_nodes`）与删点（`remove_node`）全部迁移；顺带修了审查发现的真缺口：**四张 Vec 索引表（world_transforms / node_sort_keys / text_layouts / text_measure_cache）删除时从不清位**，slotmap 槽位复用窗口内新节点会读到上一任节点的矩阵/缓存——现 free/alloc 双向清初值（world 两表不 resize，保持「未计算 = 本帧不命中」语义）。收口对有直测 + remove_node 集成回归锁。
   - ~~顺手修三处注释/文档撒谎~~ ✅ done（2026-08-17）：`hit.rs` 模块 doc 改为与逆变换实现一致；`asset/mod.rs` 头注释不再硬编码版本号（指向常量 + 布局锁门）；`MirrorPool.LastNodeId` 注释改为如实（仅诊断打印，无复用校验）。
-- **性能**：`solve` 每帧重建 taffy 树（坑 186，文本重测已 memoize 缓解，树重建本身待定）。（攒批回写 flush 已落地——StyleMirror/NodeTransform 帧末 `FlushDirtyStyles`/`FlushTransform` 排空 dirty 集合，`LoomHost` flush seam 驱动。）
+- **性能**：`solve` 每帧重建 taffy 树（坑 186，文本重测已 memoize 缓解，树重建本身待定）。实测放大器：api-infra 微缩窗 demo 8 窗存活即 84ms/帧（solve 独占 72.5ms，2384 节点≈30μs/节点/帧）；过渡手段=被裁剪不可见子树 display:none（坑 222，+0.5ms/窗）。（攒批回写 flush 已落地——StyleMirror/NodeTransform 帧末 `FlushDirtyStyles`/`FlushTransform` 排空 dirty 集合，`LoomHost` flush seam 驱动。）
 - **机制债**：card-img Image bg 合成 node_id 机制（悬置，照 box-shadow 合成 id 模式）；`RenderNode.world_matrix` `Affine2` → `NodeTransform` 升级（TRS 分解对齐公共 API）。
 - **清理 / defer 登记**：有意 defer 的可执行项登记在文末「延期项登记表」（每项带进入判据 + 来源 spec），做完即移除；旧纪元 tech-debt 见 `roadmap_old.md` §4。
 
@@ -153,6 +153,10 @@
 **ListView 多模板逐项切换（TemplateSelector 机制）** — 契约 §8「item 模板来源 2」的多模板半边未交付：`TemplateSelector` 现只是 C# 侧缓存委托（不参与克隆），core `enter_data_driven` 对多个 `<template>` 直接 Err（自动采用要求恰好一个）。逐项切换需 core 按 slot 从不同蓝图克隆（spacer 估高随模板变）。`Container.GetTemplate`（具名取模板喂 ItemTemplate）已交付。
 - 判据：真需要异构行（如邮件置顶/普通两种行结构，非仅 class 差异）时。
 - 来源：2026-08-17 调度/生命周期批 showcase 落地时发现（api-infra 页 #6 降级为单模板 + class 切换）。
+
+**NodeId 拓宽 u64 ABI（12-bit generation 硬上限）** — NodeId(u32) = idx 20 bit + gen 12 bit：单槽复用超 ~4096 次即版本回卷产「幽灵死节点」（坑 220，现 from_key 超限显式 panic 兜底）。C# TextContent 快路径已掐断主要燃烧源（每帧清子重建），常规会话到不了上限。
+- 判据：真实项目出现 from_key 溢出 panic，或 FFI 大版本改动顺带（u32→u64 全链：bindings/镜像 struct/blob）。
+- 来源：2026-08-17 api-infra 验收 FFI panic 取证（坑 220）。
 
 **Tree 复合控件** — WAI-ARIA `role=tree/treeitem` 复合控件（角色技能树 / 背包分类树），镜像 TabList 全套机制（ControlState + synth_aria + role 分派）。
 - 判据：character 技能树 / 背包分类树真需要时。

@@ -1699,3 +1699,52 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **取证**：写临时 example 直接 `loomgui_core::asset::read_package(&fs::read(fixture))` 打印真实错误（比 C# 侧笼统文案快）；`git log -1 -- <fixture>` 对比 `git log -1 -- <dll>` 看 last-touch 是否脱节。
 **解决**：bump `PKG_FORMAT_VERSION` 35→36（MIN/MAX 同步，单版本硬门）+ 重打全部 headless fixtures（12 个 workspace 各跑 `loom-pkg build`）+ 重打 showcase bundle + 重编 .dll；修正坑 209 里「serde default 免版本升级」的错误教训。
 **教训**：bincode 布局的任何字段增删/重排 = 格式版本变化，必须 bump `PKG_FORMAT_VERSION` 并重打所有入库 pkg（fixtures + showcase bundle + .dll 同一 commit）。改动若触及序列化结构，验收必跑**吃磁盘 fixture 的** headless 套件，core 单测绿不覆盖这条。诊断顺序：先疑环境（CI/平台）不如先本机复现——本机能复现就与平台无关。
+
+### 坑 217：坐标空间族——pos 是世界坐标、layout_rect 是页面内容坐标，祖先滚动下劈叉
+
+**症状**：api-infra 真机滚动态点页签无响应、点下拉 option 无效、slider 拖拽值错、下拉弹层不必要上翻/误收缩；C# `WorldRect` 在滚动页位置约两倍错位。
+**根因**：control 分发的 `pos` 已扣祖先滚动（世界坐标），`layout_rect` 是未扣滚动的页面内容坐标——未滚动页面两者相等，掩盖了 6 处混用：T7 tab 命中、`dropdown_option_at_pos`、`pos_in_popup`、`slider_pos_to_value`、弹层翻转 `combo_y` 判定、C# `WorldRect` 把 layout 偏移喂给已含偏移的 world 矩阵（双计）。
+**解决**：core 新增 `world_rect_contains`（经 world_transforms 映 AABB；无矩阵条目回退 layout 判定，兼容裸 Scene 单测），六处全部换用；翻转钩子按世界 y 判定后经 shift 折回 layout 空间设 transform。
+**教训**：任何拿 pos 对 layout_rect 做几何判定的代码都是 latent bug——首屏（未滚动）验收永远发现不了。settings 页 tab 能过纯因 `<button role=tab>` 自带 ControlState 抢先走了 Button 路径，绕开了坏代码；「恰好的页面结构掩盖坐标 bug」比「没测」更危险。
+
+### 坑 218：自滚虚拟列表——overflow 写在列表自身时可见窗口冻死
+
+**症状**：`overflow-y:auto` 直接写在 `role=list` 上的虚拟列表，滚动后旧 slot 滚出视口、无新 slot 补位（大块空白），visible 区间不推进。
+**根因**：`ancestor_scroll_viewport` 从**父节点**开始找滚动容器，从不查列表自身——自滚模式下读到的是外层页面滚动的 scroll_pos（恒定），可见窗口计算输入冻结。
+**解决**：自滚优先（先查节点自身 ScrollPane，无再沿祖先链）；`ancestor_pane` 同口径（scroll_to_item / scroll anchoring 自动跟随）；自滚时 listview_offset=0（内容原点即自身内容盒，不扣页面偏移）。
+**教训**：mail 页（祖先滚动）是唯一被验收过的形态，自滚模式从未有可执行测试路径——同一功能的多种 authoring 形态，每种都要有走到位的验收载体。
+
+### 坑 219：TextContent 每帧清子重建泄漏节点 → 撞 4096 合成子页 id 硬上限 → 渲染静默坏
+
+**症状**：OnUpdate 每帧刷读数的页面长会话节点数线性增长（每帧 +2）；scene 节点破 4096 后，之后克隆的整棵子树（微缩窗等）不渲染，Console 无任何报错。
+**根因**：C# `TextContent` 写=清子（detach「可重挂」语义）+ 建新 TextNode——被清节点永远留在 scene.nodes；而 render 的合成 text 子页 id 方案要求真实节点 index < 4096（`debug_assert` 在 release dll 里被编掉，静默腐坏）。
+**解决**：清子改真释放（remove_node + registry evict）；加快路径：现有直系子恰为单个 TextNode → 就地 set_text（零节点增删，高频改写不烧任何 slotmap generation）。
+**教训**：detach 语义放在高频改写路径=泄漏；「4096 以下一切正常」的隐性上限要配真机长会话验收才暴露。
+
+### 坑 220：NodeId 12-bit generation 截断回卷——幽灵死节点 + 每帧 FFI panic
+
+**症状**：真机点下拉后每帧 `native panic caught by FFI guard`（rematch "live node"），同一 NodeId 反复炸；Rust 侧完整复刻用户操作序列压测无法复现。
+**根因**：`NodeId::from_key` 把 slotmap 32 位版本截断进 12 bit——单槽复用约 4096 次后版本回卷，节点 id 字段（回卷值）与槽位真实版本永久不符，`get(id)` 永久 miss（节点活着却是「幽灵死节点」）；时钟 churn 每帧烧 2 次 generation 是烧穿主力。日志证据：死 id gen=1（回卷值）、free_log 无此 id 释放记录（漏斗记 id 不记版本）。
+**解决**：两段取证法定位（见教训）；C# TextContent 快路径掐断 version 燃烧源；`from_key` 超 12-bit 显式 panic（release 也炸，报错文案带出路）+ 烧穿回归测试。
+**教训**：FFI panic 在 release dll 的行号因内联不可靠——`Scene::get_live`（21 站点标签）+ `Scene::free_log`（释放审计）已常驻入库，是「快照后死亡」类 panic 的标准取证手段；「压测复现不了」先想想量级（几百帧 churn vs 用户几分钟 60fps）。
+
+### 坑 221：下拉弹层结构 CSS 契约缺失——围栏只查「命中」不查「结构」，静默放行到 PlayMode
+
+**症状**：api-infra 下拉点开后弹层留在文档流、把容器撑开；打包、浏览器预览、命中校验全绿。
+**根因**：control-css 契约只验「控件被 ≥1 条规则命中」（防渲染空白），不验结构声明——combobox `position:relative`（翻转定位锚点）+ listbox `position:absolute`（脱流）是 core 运行时行为的硬依赖，只活在 form.html 示范写法里。
+**解决**：fence 新增 Stage 6.7b `FenceControlStructureCss`（表驱动 `STRUCTURE_CSS_CONTRACTS`，教学文案附标准三行），fence.md + skill 副本同步。
+**教训**：「约束靠注释不靠测试」又一例。加新控件时盘一遍「哪些 CSS 声明是行为必需的」（不止视觉），入契约表；照示范页抄 CSS 抄漏结构声明没有任何工具提示。
+
+### 坑 222：overflow:clip 裁掉的内容照付全额 solve 成本（坑 186 放大器）
+
+**症状**：#7 demo 每实例化一个微缩窗 +7.7ms/帧，几次 Load 后 1-2fps；被裁成 88px 高完全看不见的正文（~200 节点/窗）照常进 taffy 全量重建。
+**根因**：solve 每帧全量重建树（坑 186）；clip 是渲染层概念不省布局；demo 实例化整页当载荷。
+**解决**：微缩窗把被裁剪的 `.body` display:none（solve 按 CSS 语义跳过整棵子树，视觉零变化），每窗边际成本 +7.7 → +0.5ms/帧（`dump_perf_stress` 阶段拆分：solve 72.5→6.2ms）。
+**教训**：增量 solve 落地前，「被裁剪不可见的大块动态内容」（弹窗缩略/折叠面板/微缩预览）应 display:none 而非靠 clip——clip 一个像素都不省。
+
+### 坑 223：showcase 加新页要同步两处导航表，漏一处对应端静默失效
+
+**症状**：浏览器预览 home 点「API 基础」无反应（Unity 端正常）。
+**根因**：导航映射存在两份手写表——C# `ShowcaseRunner.NAV_CARDS`（真机）和 `preview/loom-preview.js` 的 `NAV`（浏览器预览），加 api-infra 页时只登记了前者。
+**解决**：JS `NAV` 表补条目；后续加页两表同步（无单一真相源，靠 checklist）。
+**教训**：同一契约的两份手写副本必漂移——showcase 加页 checklist：workspace 目录（自动）、两份导航表、（若有）rect-diff 页清单。

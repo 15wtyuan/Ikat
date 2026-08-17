@@ -208,6 +208,8 @@ public class Container : Node {
 
 对应 DOM `Element.textContent`（web 标准）。**写会清空所有子节点**换成单个文本——若容器内混有元素子节点（如 `<button>` 里的 `<img>`），写 `TextContent` 会一并清掉。要精细控制：把动态文本隔离进带 id 的行内元素，改那个元素：
 
+实现注记：现有直系子恰为单个 TextNode 时走快路径**就地 set_text**（不清子重建，TextNode 句柄保持）——高频改写（OnUpdate 读数刷新）安全，不消耗 slotmap generation；其余形态按上述清子重建语义（真释放）。
+
 ```csharp
 buy.Get<TextElement>("price").TextContent = "200";   // 只动 span，兄弟 img 不受影响
 ```

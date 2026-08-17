@@ -161,6 +161,10 @@ cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Edit
 
 **偶现/时序 bug**光读代码定位不了——加诊断 log 运行时取证，别静态猜根因反复改。
 
+**uloop/CLI 驱动 PlayMode 前先 `Application.runInBackground = true`**：编辑器窗口失焦（终端拿焦点）+ Run In Background 关 = 播放器循环整个冻结——帧率 1-2、OnUpdate 时钟不走、frameCount 钉死，像极了性能崩坏/调度器坏了。先排这个再查真性能（ShowcaseRunner 已内置设置；见坑 219 附近 session）。
+
+**FFI panic 取证用站点标签 + 释放审计，别信 release 行号**：release dll 内联后 panic 行号不可靠。`Scene::get_live`（全库 21 处 live 查取带 `文件:行` 站点标签）+ `Scene::free_log`（最近 32 笔释放审计：死 id 距今几笔、走没走漏斗）已常驻——「快照后死亡」类 panic（如 rematch live node）一行日志定位（坑 220）。Rust 压测复现不了时先算量级差（用户几分钟 60fps churn ≈ 上万次 vs 压测几百次）。
+
 **uloop 取证自相矛盾（截图正常但探针读空 / 同会话数据反复打架）先查编辑器会话状态**：① `tasklist | grep Unity.exe` 数实例——launch 超时会再起一个，命令轮流命中不同实例；② PlayMode 期间触发过编译（domain reload）会把原生 stage 打裂（渲染正常但 DumpScene 全零）——重启编辑器复测再怀疑产品。规矩：**PlayMode 验收期间绝不编译**。另：`File.WriteAllText` 被 uloop 安全策略拦，大 JSON 用 execute-dynamic-code 的 `return` 值带出。
 
 **圆角/小尺寸视觉差异别信目测或视觉模型**——python 像素取样 + 数学验证（如像素中心到角圆心距离 vs 半径）；「渲染出来的圆角比预期小」先算正确视觉该是什么样再下结论。
