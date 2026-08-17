@@ -67,6 +67,13 @@
 
 跨 track 随时插。
 
+- **架构收口批（2026-08-17 全库架构审查产出，插队执行）**：审查结论 = 方向与里程碑排序不变；债的共性是「约束靠注释不靠测试」。五件事按优先级：
+  1. ~~**FFI 统一 panic 边界**~~ ✅ done（2026-08-17）：全部 127 个有体导出包 `ffi_guard`（catch_unwind + 按返回型错误哨兵回退 + `loomgui_ffi_panic_count` 计数导出）；`UnityLoomBackend.SyncFrame` 每帧轮询计数、变化即 LogError；guard 单测入 ffi tests。`loomgui_shutdown` 空体无需包装。
+  2. ~~**pkg.bin schema-hash CI 门**~~ ✅ done（2026-08-17）：packer `schema_lock.rs`——固定 fixture（覆盖 ControlInit 各变体/渐变/阴影/动画/keyframes/nth-child/手编列）打包字节 FNV-1a 锁哈希 + 打包确定性自洽测试；任何改变字节的布局改动 = 哈希翻转 = CI 红。
+  3. **C# 侧布局断言 + golden blob 对拍**：FrameBlob 列布局 / EventRecord 位编码在 C# 侧零断言（magic+version 防整体漂移，防不住列语义错位）；Rust 产 golden blob 入库供 dotnet 测试消费，手补 struct 镜像补 Marshal.SizeOf 断言。
+  4. ~~**tick 顺序可执行化 + 分层叙事对齐**~~ ✅ done（2026-08-17）：core `tick_order_gate.rs` 源码级锁定 `tick_and_render` 步骤序列（换序/插入/删除即红，每步恰一次）；main-design §16 步骤清单重写为与登记表一致并声明真相源；§2 补「单向指数据流、非模块依赖」注记。
+  5. **Scene 建删节点收口**：per-node side table 的建/删联动收成单一入口（现状平行数组一致性靠纪律，坑 190 已付学费）。
+  - ~~顺手修三处注释/文档撒谎~~ ✅ done（2026-08-17）：`hit.rs` 模块 doc 改为与逆变换实现一致；`asset/mod.rs` 头注释不再硬编码版本号（指向常量 + 布局锁门）；`MirrorPool.LastNodeId` 注释改为如实（仅诊断打印，无复用校验）。
 - **性能**：`solve` 每帧重建 taffy 树（坑 186，文本重测已 memoize 缓解，树重建本身待定）。（攒批回写 flush 已落地——StyleMirror/NodeTransform 帧末 `FlushDirtyStyles`/`FlushTransform` 排空 dirty 集合，`LoomHost` flush seam 驱动。）
 - **机制债**：card-img Image bg 合成 node_id 机制（悬置，照 box-shadow 合成 id 模式）；`RenderNode.world_matrix` `Affine2` → `NodeTransform` 升级（TRS 分解对齐公共 API）。
 - **清理 / defer 登记**：有意 defer 的可执行项登记在文末「延期项登记表」（每项带进入判据 + 来源 spec），做完即移除；旧纪元 tech-debt 见 `roadmap_old.md` §4。

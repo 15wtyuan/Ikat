@@ -17,7 +17,7 @@ namespace LoomGUI
         public MeshRenderer Mr;
         public Mesh Mesh;
         public bool Stale;
-        public uint LastNodeId;       // 复用 GO 时校验
+        public uint LastNodeId;       // 诊断：最近绑定的 node_id（DumpState 打印；不做复用校验——复用换绑是 reuse_key 池化的正常行为）
 
         // buffer 复用（500 节点静态压测 GC 缓解）：每 RenderObj 持可复用 List，
         // UploadMesh 每帧 Clear+fill 后用 Mesh.SetVertices(List) 等 overload 上传——
