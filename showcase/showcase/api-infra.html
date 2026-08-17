@@ -148,7 +148,7 @@
 
       <div class="section">
         <div class="section-title">7 · UnloadPackage 包生命周期（prefab 删除语义）</div>
-        <div class="section-desc">「Load 副本 + 实例化」把 showcase 字节以别名 infra-copy 再载一份、实例化 infra-card 组件；「卸载副本包」移除模板注册——已实例化的卡片是独立副本继续存活，且旧句柄再实例化会抛 UIPackageException（读数见证）；卸载后可重载再实例化。</div>
+        <div class="section-desc">「Load 副本 + 实例化」把 showcase 字节以别名 infra-copy 再载一份、实例化本页组件并裁成微缩窗（Style 覆写宽高 + overflow clip）；「卸载副本包」移除模板注册——已实例化的微缩窗是独立副本继续存活，且旧句柄再实例化会抛 UIPackageException（读数见证）；卸载后可重载再实例化。</div>
         <div class="stage">
           <div class="stage-col">
             <div style="display:flex;flex-direction:row;gap:10px">

@@ -307,20 +307,33 @@ public class ShowcaseRunner : MonoBehaviour
             mt.ItemCount = 30;
         }
 
-        // ── #7 UnloadPackage：别名重载 showcase 字节 → 实例化 infra-card → 卸载见存活。 ──
+        // ── #7 UnloadPackage：别名重载 showcase 字节 → 实例化本页微缩窗 → 卸载见存活。
+        //    载荷用 api-infra 组件本身（pkg 可寻址组件粒度 = html 文件，无需另造载荷组件）：
+        //    实例后 Style 覆写宽高 + overflow hidden 裁成小窗。
         if (page.TryGet<Container>("infra-ul-stage", out var ulStage) &&
             page.TryGet<TextElement>("infra-ul-status", out var ulStatus))
         {
             UIPackage copyPkg = null;
+            const string CopyName = "infra-copy";
+            Container InstantiateMiniWindow()
+            {
+                var win = copyPkg.Instantiate("api-infra");
+                win.Style.Width = Length.Px(420);
+                win.Style.Height = Length.Px(88);
+                win.Style.OverflowX = Overflow.Clip;
+                win.Style.OverflowY = Overflow.Clip;
+                ulStage.AddChild(win);
+                return win;
+            }
             if (page.TryGet<Button>("btn-ul-load", out var ulLoad))
                 ulLoad.Clicked += () =>
                 {
                     try
                     {
                         if (copyPkg == null)
-                            copyPkg = ui.LoadPackage("infra-copy", _driver.LoadPackageBytes("showcase"));
-                        ulStage.AddChild(copyPkg.Instantiate("infra-card"));
-                        ulStatus.TextContent = "已实例化（infra-copy · 舞台上 " + ulStage.ChildCount + " 张卡存活）";
+                            copyPkg = ui.LoadPackage(CopyName, _driver.LoadPackageBytes("showcase"));
+                        InstantiateMiniWindow();
+                        ulStatus.TextContent = "已实例化（api-infra 微缩窗 · 舞台上 " + ulStage.ChildCount + " 个存活）";
                     }
                     catch (System.Exception ex)
                     {
@@ -333,12 +346,12 @@ public class ShowcaseRunner : MonoBehaviour
                     if (copyPkg == null) { ulStatus.TextContent = "副本未加载"; return; }
                     try
                     {
-                        ui.UnloadPackage("infra-copy");
+                        ui.UnloadPackage(CopyName);
                         bool staleThrew = false;
-                        try { copyPkg.Instantiate("infra-card"); }
+                        try { copyPkg.Instantiate("api-infra"); }
                         catch (UIPackageException) { staleThrew = true; }
                         ulStatus.TextContent = "模板已卸载 · 旧句柄 Instantiate 抛 = " + (staleThrew ? "✓" : "✗")
-                            + " · 卡片独立存活 = " + (ulStage.ChildCount > 0 ? "✓" : "✗");
+                            + " · 微缩窗独立存活 = " + (ulStage.ChildCount > 0 ? "✓" : "✗");
                         copyPkg = null;   // 下次 Load 重建句柄（重载同名包）
                     }
                     catch (System.Exception ex)
