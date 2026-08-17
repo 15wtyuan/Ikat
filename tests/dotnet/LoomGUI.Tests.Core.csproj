@@ -17,6 +17,9 @@
   <ItemGroup>
 
     <Compile Include="..\..\unity\package\Runtime\FrameBlob.cs" Link="Src\FrameBlob.cs" />
+    <!-- golden 跨语言对拍 fixture（Rust ffi golden_tests 产器落盘；
+         再生成方式见 crates/ffi/src/golden_tests.rs 模块注释） -->
+    <None Include="golden\*.bin" Link="golden\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- 排除独立 csproj 子目录：SDK 默认 **/*.cs glob 会误扫 HeadlessTests / PublicApi，

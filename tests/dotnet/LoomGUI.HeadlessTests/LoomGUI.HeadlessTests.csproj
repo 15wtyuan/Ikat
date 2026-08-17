@@ -89,6 +89,9 @@
          slot-projected buttons; components/game-item-card.html carries its own <style>). Built from
          fixtures/component.workspace via loom-pkg (components/ registry expansion, pkg v35). -->
     <None Include="fixtures\component.pkg.bin" Link="fixtures\component.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
+    <!-- golden 跨语言对拍 fixture（Rust ffi golden_tests 产器落盘的真实 frame blob + 事件流，
+         GoldenEventsAndAbiLayoutTests 消费；再生成方式见 crates/ffi/src/golden_tests.rs 模块注释） -->
+    <None Include="..\golden\*.bin" Link="golden\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

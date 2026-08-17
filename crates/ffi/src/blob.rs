@@ -12,7 +12,7 @@ use loomgui_core::transform;
 
 /// magic = "LOOM" little-endian。
 const MAGIC: u32 = 0x4D4F4F4C;
-const VERSION: u32 = 13; // v13：加 grad_params 列（[u8;208]，渐变像素参数），列数 22→23
+pub(crate) const VERSION: u32 = 13; // v13：加 grad_params 列（[u8;208]，渐变像素参数），列数 22→23
 
 /// 入口：FrameData（nodes + clip 表）+ Scene（parked slot 池）→ blob 字节。
 ///
