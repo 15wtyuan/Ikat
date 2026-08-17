@@ -28,6 +28,32 @@ use loomgui_core::style::computed::ComputedNodeStyle;
 use loomgui_core::style::resolved::TextAlign;
 use loomgui_core::transform::{self, NodeTransform};
 use std::ffi::CString;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// FFI panic 兜底计数：guard 捕获的 panic 累计（0 = 从未）。
+static FFI_PANIC_COUNT: AtomicU32 = AtomicU32::new(0);
+
+/// 全部导出的统一 panic 边界。panic 展开穿越 `extern "C"` 是 UB（实践中直接
+/// abort 宿主进程——本库的宿主是 Unity 编辑器/玩家，不可接受），因此在函数体内
+/// 捕获：计数、返回调用方约定的错误哨兵。panic 消息由默认 panic hook 先行打到
+/// stderr。取舍：panic 点之后 Stage 可能处于半修改状态，继续运行不保证一致——
+/// 但比崩宿主可诊断；后端每帧读 `loomgui_ffi_panic_count`，变化即告警。
+fn ffi_guard<R>(fallback: R, f: impl FnOnce() -> R) -> R {
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(v) => v,
+        Err(_) => {
+            FFI_PANIC_COUNT.fetch_add(1, Ordering::Relaxed);
+            fallback
+        }
+    }
+}
+
+/// 读 FFI panic 兜底累计计数（后端每帧轮询，变化即有 Rust panic 被吞）。
+#[no_mangle]
+pub extern "C" fn loomgui_ffi_panic_count() -> u32 {
+    FFI_PANIC_COUNT.load(Ordering::Relaxed)
+}
 
 /// 版本字符串（C null-terminated `b"v1e\0"`）。
 ///
@@ -35,10 +61,12 @@ use std::ffi::CString;
 /// `*const c_char`（i8），这里 cast 对齐签名。OnceLock 缓存，避免每次分配+泄漏。
 #[no_mangle]
 pub extern "C" fn loomgui_version() -> *const u8 {
-    static VERSION: std::sync::OnceLock<CString> = std::sync::OnceLock::new();
-    VERSION
-        .get_or_init(|| CString::new("v1e").unwrap())
-        .as_ptr() as *const u8
+    ffi_guard(std::ptr::null(), || {
+        static VERSION: std::sync::OnceLock<CString> = std::sync::OnceLock::new();
+        VERSION
+            .get_or_init(|| CString::new("v1e").unwrap())
+            .as_ptr() as *const u8
+    })
 }
 
 /// opaque 句柄：Stage + 缓存的最近一帧 blob（borrow_frame 返回它的指针，下帧 reset）。
@@ -52,15 +80,17 @@ pub struct StageHandle {
 /// 失败返回 null（当前 Stage::new 不返回 Err，保留 null 分支以保持对称）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_new(w: f32, h: f32) -> *mut StageHandle {
-    let stage = match Stage::new((w, h)) {
-        Ok(s) => s,
-        Err(_) => return std::ptr::null_mut(),
-    };
-    Box::into_raw(Box::new(StageHandle {
-        stage,
-        frame_blob: Vec::new(),
-        dump_blob: CString::new("").unwrap(),
-    }))
+    ffi_guard(std::ptr::null_mut(), || {
+        let stage = match Stage::new((w, h)) {
+            Ok(s) => s,
+            Err(_) => return std::ptr::null_mut(),
+        };
+        Box::into_raw(Box::new(StageHandle {
+            stage,
+            frame_blob: Vec::new(),
+            dump_blob: CString::new("").unwrap(),
+        }))
+    })
 }
 
 /// 注册字体进 Stage 字体表。family = UTF-8 字符串（指针+len），bytes = ttf/ttc/otf 字节数据。
@@ -74,20 +104,22 @@ pub extern "C" fn loomgui_stage_register_font(
     bytes_len: usize,
     is_default: u8,
 ) -> i32 {
-    if h.is_null() || family.is_null() || bytes.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let family =
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(family, family_len) }) {
-            Ok(s) => s,
-            Err(_) => return -1,
-        };
-    let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len) }.to_vec();
-    match sh.stage.register_font(family, bytes, is_default != 0) {
-        Ok(()) => 0,
-        Err(_) => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() || family.is_null() || bytes.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let family =
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(family, family_len) }) {
+                Ok(s) => s,
+                Err(_) => return -1,
+            };
+        let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len) }.to_vec();
+        match sh.stage.register_font(family, bytes, is_default != 0) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
 }
 
 /// 设全局字体回退链。text = UTF-8 字符串，family 名以 `\n` 分隔（如 "wqy-microhei\nLXGWWenKai"）。
@@ -100,35 +132,39 @@ pub extern "C" fn loomgui_stage_set_fallback_families(
     text: *const u8,
     text_len: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let families: Vec<String> = if text.is_null() || text_len == 0 {
-        Vec::new()
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, text_len) }) {
-            Ok(s) => s
-                .split('\n')
-                .map(|f| f.trim().to_string())
-                .filter(|f| !f.is_empty())
-                .collect(),
-            Err(_) => return -1,
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
         }
-    };
-    sh.stage.set_fallback_families(&families);
-    0
+        let sh = unsafe { &mut *h };
+        let families: Vec<String> = if text.is_null() || text_len == 0 {
+            Vec::new()
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, text_len) }) {
+                Ok(s) => s
+                    .split('\n')
+                    .map(|f| f.trim().to_string())
+                    .filter(|f| !f.is_empty())
+                    .collect(),
+                Err(_) => return -1,
+            }
+        };
+        sh.stage.set_fallback_families(&families);
+        0
+    })
 }
 
 /// null-safe 释放 Stage 句柄。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_free(h: *mut StageHandle) {
-    if h.is_null() {
-        return;
-    }
-    unsafe {
-        drop(Box::from_raw(h));
-    }
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        unsafe {
+            drop(Box::from_raw(h));
+        }
+    })
 }
 
 /// 装载二进制包（spec §12/§13）。name = 包名（进 packages 字典 key），bytes = .pkg.bin。
@@ -144,19 +180,22 @@ pub extern "C" fn loomgui_stage_load_package(
     bytes: *const u8,
     bytes_len: usize,
 ) -> i32 {
-    if h.is_null() || name.is_null() || bytes.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, name_len) }) {
-        Ok(s) => s,
-        Err(_) => return -1,
-    };
-    let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len) };
-    match sh.stage.load_package(name, bytes) {
-        Ok(()) => 0,
-        Err(_) => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() || name.is_null() || bytes.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, name_len) })
+        {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len) };
+        match sh.stage.load_package(name, bytes) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
 }
 
 /// 卸载包：从 Rust stage 移除模板注册（prefab 删除语义——已实例化活节点不受影响）。
@@ -168,18 +207,21 @@ pub extern "C" fn loomgui_stage_unload_package(
     name: *const u8,
     name_len: usize,
 ) -> i32 {
-    if h.is_null() || name.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, name_len) }) {
-        Ok(s) => s,
-        Err(_) => return -1,
-    };
-    match sh.stage.unload_package(name) {
-        Ok(()) => 0,
-        Err(_) => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() || name.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, name_len) })
+        {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        match sh.stage.unload_package(name) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
 }
 
 /// 从包克隆一个组件进当前 scene，返组件根 NodeId（u32）。
@@ -195,45 +237,50 @@ pub extern "C" fn loomgui_stage_instantiate(
     comp: *const u8,
     comp_len: usize,
 ) -> u32 {
-    const INVALID: u32 = 0xFFFF_FFFF;
-    if h.is_null() || pkg.is_null() || comp.is_null() {
-        return INVALID;
-    }
-    let sh = unsafe { &mut *h };
-    let pkg = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(pkg, pkg_len) }) {
-        Ok(s) => s,
-        Err(_) => return INVALID,
-    };
-    let comp = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(comp, comp_len) }) {
-        Ok(s) => s,
-        Err(_) => return INVALID,
-    };
-    match sh.stage.instantiate(pkg, comp) {
-        Ok(id) => id.0,
-        Err(_) => INVALID,
-    }
+    ffi_guard(u32::MAX, || {
+        const INVALID: u32 = 0xFFFF_FFFF;
+        if h.is_null() || pkg.is_null() || comp.is_null() {
+            return INVALID;
+        }
+        let sh = unsafe { &mut *h };
+        let pkg = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(pkg, pkg_len) }) {
+            Ok(s) => s,
+            Err(_) => return INVALID,
+        };
+        let comp = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(comp, comp_len) })
+        {
+            Ok(s) => s,
+            Err(_) => return INVALID,
+        };
+        match sh.stage.instantiate(pkg, comp) {
+            Ok(id) => id.0,
+            Err(_) => INVALID,
+        }
+    })
 }
 
 /// 跑一帧 tick_and_render → build_blob 写入缓存。dt 累积进 time_s（双击窗口，C# 传 unscaledDeltaTime）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_tick(h: *mut StageHandle, dt: f32) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage.advance_time(dt);
-    let frame = sh.stage.tick_and_render();
-    // parked slot keepalive 需读 scene（list 池状态）——tick 产完 FrameData 后 scene 可重新不可变借用。
-    // scene=None（load 前）：仍产结构合法的空 blob（node_count=0），与旧行为逐字节一致。
-    let empty;
-    let scene = match sh.stage.scene.as_ref() {
-        Some(s) => s,
-        None => {
-            empty = loomgui_core::scene::node::Scene::default();
-            &empty
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
         }
-    };
-    sh.frame_blob = blob::build_blob(&frame, scene);
+        let sh = unsafe { &mut *h };
+        sh.stage.advance_time(dt);
+        let frame = sh.stage.tick_and_render();
+        // parked slot keepalive 需读 scene（list 池状态）——tick 产完 FrameData 后 scene 可重新不可变借用。
+        // scene=None（load 前）：仍产结构合法的空 blob（node_count=0），与旧行为逐字节一致。
+        let empty;
+        let scene = match sh.stage.scene.as_ref() {
+            Some(s) => s,
+            None => {
+                empty = loomgui_core::scene::node::Scene::default();
+                &empty
+            }
+        };
+        sh.frame_blob = blob::build_blob(&frame, scene);
+    })
 }
 
 /// 借出最近一帧 blob：写 len 到 out_len，返回 Rust 拥有缓存指针（下 tick 失效）。
@@ -243,44 +290,48 @@ pub extern "C" fn loomgui_stage_borrow_frame(
     h: *mut StageHandle,
     out_len: *mut usize,
 ) -> *const u8 {
-    if h.is_null() {
-        if !out_len.is_null() {
-            unsafe { *out_len = 0 };
+    ffi_guard(std::ptr::null(), || {
+        if h.is_null() {
+            if !out_len.is_null() {
+                unsafe { *out_len = 0 };
+            }
+            return std::ptr::null();
         }
-        return std::ptr::null();
-    }
-    let sh = unsafe { &*h };
-    // 未 tick 过：frame_blob 是空 Vec，as_ptr() 返回非空悬挂哨兵（违反"未 tick→null"契约）。
-    // 显式判空 → null + len=0，与 null-handle 分支一致。
-    if sh.frame_blob.is_empty() {
-        if !out_len.is_null() {
-            unsafe { *out_len = 0 };
+        let sh = unsafe { &*h };
+        // 未 tick 过：frame_blob 是空 Vec，as_ptr() 返回非空悬挂哨兵（违反"未 tick→null"契约）。
+        // 显式判空 → null + len=0，与 null-handle 分支一致。
+        if sh.frame_blob.is_empty() {
+            if !out_len.is_null() {
+                unsafe { *out_len = 0 };
+            }
+            return std::ptr::null();
         }
-        return std::ptr::null();
-    }
-    if !out_len.is_null() {
-        unsafe { *out_len = sh.frame_blob.len() };
-    }
-    sh.frame_blob.as_ptr()
+        if !out_len.is_null() {
+            unsafe { *out_len = sh.frame_blob.len() };
+        }
+        sh.frame_blob.as_ptr()
+    })
 }
 
 /// dump 整树 JSON（调试）。返 Rust 拥有的 UTF-8 C 串 + len；下 tick 失效。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_dump_scene(h: *mut StageHandle, out_len: *mut usize) -> *const u8 {
-    if h.is_null() || out_len.is_null() {
-        return std::ptr::null();
-    }
-    let handle = unsafe { &mut *h };
-    let json = match &handle.stage.scene {
-        Some(scene) => loomgui_core::dump::dump_scene_json(scene),
-        None => String::from("[]"),
-    };
-    handle.dump_blob = CString::new(json).unwrap_or_else(|_| CString::new("[]").unwrap());
-    let bytes = handle.dump_blob.as_bytes_with_nul();
-    unsafe {
-        *out_len = bytes.len();
-    }
-    handle.dump_blob.as_ptr() as *const u8
+    ffi_guard(std::ptr::null(), || {
+        if h.is_null() || out_len.is_null() {
+            return std::ptr::null();
+        }
+        let handle = unsafe { &mut *h };
+        let json = match &handle.stage.scene {
+            Some(scene) => loomgui_core::dump::dump_scene_json(scene),
+            None => String::from("[]"),
+        };
+        handle.dump_blob = CString::new(json).unwrap_or_else(|_| CString::new("[]").unwrap());
+        let bytes = handle.dump_blob.as_bytes_with_nul();
+        unsafe {
+            *out_len = bytes.len();
+        }
+        handle.dump_blob.as_ptr() as *const u8
+    })
 }
 
 /// 注入本帧指针事件（扁平 PointerEvent 数组）。tick 前调。
@@ -293,16 +344,18 @@ pub extern "C" fn loomgui_stage_set_input(
     events: *const PointerEvent,
     len: usize,
 ) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    if events.is_null() || len == 0 {
-        sh.stage.set_input(&[]);
-        return;
-    }
-    let evs = unsafe { std::slice::from_raw_parts(events, len) };
-    sh.stage.set_input(evs);
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        if events.is_null() || len == 0 {
+            sh.stage.set_input(&[]);
+            return;
+        }
+        let evs = unsafe { std::slice::from_raw_parts(events, len) };
+        sh.stage.set_input(evs);
+    })
 }
 
 /// 拉取本帧事件 SOA（pull，同 borrow_frame 语义）。返 `last_events` 的 `as_ptr` + 写 len。
@@ -315,24 +368,26 @@ pub extern "C" fn loomgui_stage_borrow_events(
     h: *const StageHandle,
     out_len: *mut usize,
 ) -> *const u8 {
-    if h.is_null() {
-        if !out_len.is_null() {
-            unsafe { *out_len = 0 };
+    ffi_guard(std::ptr::null(), || {
+        if h.is_null() {
+            if !out_len.is_null() {
+                unsafe { *out_len = 0 };
+            }
+            return std::ptr::null();
         }
-        return std::ptr::null();
-    }
-    let sh = unsafe { &*h };
-    let events: &[EventRecord] = sh.stage.last_events();
-    if events.is_empty() {
-        if !out_len.is_null() {
-            unsafe { *out_len = 0 };
+        let sh = unsafe { &*h };
+        let events: &[EventRecord] = sh.stage.last_events();
+        if events.is_empty() {
+            if !out_len.is_null() {
+                unsafe { *out_len = 0 };
+            }
+            return std::ptr::null();
         }
-        return std::ptr::null();
-    }
-    if !out_len.is_null() {
-        unsafe { *out_len = events.len() };
-    }
-    events.as_ptr() as *const u8
+        if !out_len.is_null() {
+            unsafe { *out_len = events.len() };
+        }
+        events.as_ptr() as *const u8
+    })
 }
 
 /// 读事件字符串表条目（spec §7.5：动画事件 name/hook_name 的 24-bit 索引载体，C# demux
@@ -352,41 +407,43 @@ pub extern "C" fn loomgui_stage_get_event_string(
     buf_cap: usize,
     out_len: *mut usize,
 ) -> i32 {
-    if h.is_null() || out_len.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let scene = match sh.stage.scene.as_ref() {
-        Some(s) => s,
-        None => {
-            unsafe { *out_len = 0 };
+    ffi_guard(-1, || {
+        if h.is_null() || out_len.is_null() {
             return -1;
         }
-    };
-    let s = match scene.event_strs.get(idx) {
-        Some(s) => s,
-        None => {
-            unsafe { *out_len = 0 };
-            return -1;
-        }
-    };
-    let bytes = s.as_bytes();
-    let needed = bytes.len();
-    unsafe { *out_len = needed };
-    // buf_cap 不够（含 0 探大小）→ -2 + 所需 len（双调法，同 get_control_text）。
-    if needed > buf_cap {
-        return -2;
-    }
-    // buf_cap >= needed > 0：out 必非 null（caller 保证），拷贝。needed=0 时 null out 也合法。
-    if needed > 0 {
-        if out.is_null() {
+        let sh = unsafe { &*h };
+        let scene = match sh.stage.scene.as_ref() {
+            Some(s) => s,
+            None => {
+                unsafe { *out_len = 0 };
+                return -1;
+            }
+        };
+        let s = match scene.event_strs.get(idx) {
+            Some(s) => s,
+            None => {
+                unsafe { *out_len = 0 };
+                return -1;
+            }
+        };
+        let bytes = s.as_bytes();
+        let needed = bytes.len();
+        unsafe { *out_len = needed };
+        // buf_cap 不够（含 0 探大小）→ -2 + 所需 len（双调法，同 get_control_text）。
+        if needed > buf_cap {
             return -2;
         }
-        unsafe {
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, needed);
+        // buf_cap >= needed > 0：out 必非 null（caller 保证），拷贝。needed=0 时 null out 也合法。
+        if needed > 0 {
+            if out.is_null() {
+                return -2;
+            }
+            unsafe {
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, needed);
+            }
         }
-    }
-    0
+        0
+    })
 }
 
 /// UI 挡住时游戏不响应点击（§10.6）。= 任一活跃槽 last_hit 非空且非根（多指：鼠标 slot0 + 已分配触摸槽）。
@@ -395,11 +452,13 @@ pub extern "C" fn loomgui_stage_get_event_string(
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_is_pointer_on_ui(h: *const StageHandle) -> bool {
-    if h.is_null() {
-        return false;
-    }
-    let sh = unsafe { &*h };
-    sh.stage.is_pointer_on_ui()
+    ffi_guard(false, || {
+        if h.is_null() {
+            return false;
+        }
+        let sh = unsafe { &*h };
+        sh.stage.is_pointer_on_ui()
+    })
 }
 
 /// 业务设节点 disabled 状态（伪类源 + active/click 抑制）。NodeId.0 越界静默跳过。
@@ -412,11 +471,13 @@ pub extern "C" fn loomgui_stage_set_node_disabled(
     node_id: u32,
     disabled: bool,
 ) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage.set_node_disabled(NodeId(node_id), disabled);
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage.set_node_disabled(NodeId(node_id), disabled);
+    })
 }
 
 /// 设节点 touchable（公共 Node.Touchable 的后端；CSS `pointer-events` 的运行时面）。
@@ -430,11 +491,13 @@ pub extern "C" fn loomgui_stage_set_node_touchable(
     node_id: u32,
     touchable: bool,
 ) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage.set_node_touchable(NodeId(node_id), touchable);
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage.set_node_touchable(NodeId(node_id), touchable);
+    })
 }
 
 /// 读节点 touchable（interaction.touchable，hit_test 同源）。null 句柄 / 无 scene /
@@ -447,20 +510,22 @@ pub extern "C" fn loomgui_stage_get_node_touchable(
     node_id: u32,
     out: *mut u8,
 ) -> i32 {
-    if h.is_null() || out.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.get(NodeId(node_id)) {
-        Some(n) => {
-            unsafe { *out = u8::from(n.interaction.touchable) };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
         }
-        None => -1,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.get(NodeId(node_id)) {
+            Some(n) => {
+                unsafe { *out = u8::from(n.interaction.touchable) };
+                0
+            }
+            None => -1,
+        }
+    })
 }
 
 /// 读节点 LOOKUP_SCOPE 查找边界标记（组件展开域 host / ListView slot 根 / 实例根打此位）。
@@ -471,21 +536,23 @@ pub extern "C" fn loomgui_stage_get_node_touchable(
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_node_is_lookup_scope(h: *const StageHandle, node_id: u32) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.get(NodeId(node_id)) {
-        Some(n) => i32::from(
-            n.interaction
-                .flags
-                .contains(loomgui_core::scene::node::NodeFlags::LOOKUP_SCOPE),
-        ),
-        None => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.get(NodeId(node_id)) {
+            Some(n) => i32::from(
+                n.interaction
+                    .flags
+                    .contains(loomgui_core::scene::node::NodeFlags::LOOKUP_SCOPE),
+            ),
+            None => -1,
+        }
+    })
 }
 
 /// 读 CustomElement 原始 hyphen 标签名（`<game-item-card>` → "game-item-card"；打包期展开
@@ -501,34 +568,36 @@ pub extern "C" fn loomgui_stage_get_custom_tag(
     buf_cap: usize,
     out_len: *mut usize,
 ) -> i32 {
-    if h.is_null() || out_len.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    let Some(tag) = scene
-        .get(NodeId(node_id))
-        .and_then(|n| n.custom_tag.as_deref())
-    else {
-        return -1;
-    };
-    let bytes = tag.as_bytes();
-    let needed = bytes.len();
-    unsafe { *out_len = needed };
-    if needed > buf_cap {
-        return -2;
-    }
-    if needed > 0 {
-        if out.is_null() {
+    ffi_guard(-1, || {
+        if h.is_null() || out_len.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        let Some(tag) = scene
+            .get(NodeId(node_id))
+            .and_then(|n| n.custom_tag.as_deref())
+        else {
+            return -1;
+        };
+        let bytes = tag.as_bytes();
+        let needed = bytes.len();
+        unsafe { *out_len = needed };
+        if needed > buf_cap {
             return -2;
         }
-        unsafe {
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, needed);
+        if needed > 0 {
+            if out.is_null() {
+                return -2;
+            }
+            unsafe {
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, needed);
+            }
         }
-    }
-    0
+        0
+    })
 }
 
 /// 返 parent node_id（C# 事件路由沿链用，spec §4.2）。根/越界/无 scene → 0xFFFF_FFFF（sentinel）。
@@ -536,21 +605,23 @@ pub extern "C" fn loomgui_stage_get_custom_tag(
 /// **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
 #[no_mangle]
 pub extern "C" fn loomgui_node_parent(h: *const StageHandle, node_id: u32) -> u32 {
-    const ROOT_SENTINEL: u32 = 0xFFFF_FFFF;
-    if h.is_null() {
-        return ROOT_SENTINEL;
-    }
-    let sh = unsafe { &*h };
-    match &sh.stage.scene {
-        Some(scene) => {
-            // NodeId(u32) → slotmap lookup（代际安全）。无效/悬空 NodeId → sentinel。
-            match scene.get(NodeId(node_id)) {
-                Some(n) => n.parent.map(|p| p.0 as u32).unwrap_or(ROOT_SENTINEL),
-                None => ROOT_SENTINEL,
-            }
+    ffi_guard(u32::MAX, || {
+        const ROOT_SENTINEL: u32 = 0xFFFF_FFFF;
+        if h.is_null() {
+            return ROOT_SENTINEL;
         }
-        None => ROOT_SENTINEL,
-    }
+        let sh = unsafe { &*h };
+        match &sh.stage.scene {
+            Some(scene) => {
+                // NodeId(u32) → slotmap lookup（代际安全）。无效/悬空 NodeId → sentinel。
+                match scene.get(NodeId(node_id)) {
+                    Some(n) => n.parent.map(|p| p.0 as u32).unwrap_or(ROOT_SENTINEL),
+                    None => ROOT_SENTINEL,
+                }
+            }
+            None => ROOT_SENTINEL,
+        }
+    })
 }
 
 /// 按 CSS id 属性查节点（业务用 id 定位节点替代硬编码 build 序 id）。
@@ -563,20 +634,22 @@ pub extern "C" fn loomgui_stage_find_node_by_id(
     id: *const u8,
     id_len: usize,
 ) -> u32 {
-    const NOT_FOUND: u32 = 0xFFFF_FFFF;
-    if h.is_null() || id.is_null() {
-        return NOT_FOUND;
-    }
-    let sh = unsafe { &*h };
-    let bytes = unsafe { std::slice::from_raw_parts(id, id_len) };
-    let id_str = match std::str::from_utf8(bytes) {
-        Ok(s) => s,
-        Err(_) => return NOT_FOUND,
-    };
-    match sh.stage.find_node_by_id(id_str) {
-        Some(nid) => nid.0 as u32,
-        None => NOT_FOUND,
-    }
+    ffi_guard(u32::MAX, || {
+        const NOT_FOUND: u32 = 0xFFFF_FFFF;
+        if h.is_null() || id.is_null() {
+            return NOT_FOUND;
+        }
+        let sh = unsafe { &*h };
+        let bytes = unsafe { std::slice::from_raw_parts(id, id_len) };
+        let id_str = match std::str::from_utf8(bytes) {
+            Ok(s) => s,
+            Err(_) => return NOT_FOUND,
+        };
+        match sh.stage.find_node_by_id(id_str) {
+            Some(nid) => nid.0 as u32,
+            None => NOT_FOUND,
+        }
+    })
 }
 
 /// 在 root 子树内 DFS 查找 id 属性匹配的首个节点（self-exclusive：从 root 的直接子开始 DFS，root 自身 id_attr 不参与匹配，与 DOM querySelectorAll/Query<T> 一致）。
@@ -591,20 +664,22 @@ pub extern "C" fn loomgui_stage_find_node_by_id_in_subtree(
     id: *const u8,
     id_len: usize,
 ) -> u32 {
-    const NOT_FOUND: u32 = 0xFFFF_FFFF;
-    if h.is_null() || id.is_null() {
-        return NOT_FOUND;
-    }
-    let sh = unsafe { &*h };
-    let bytes = unsafe { std::slice::from_raw_parts(id, id_len) };
-    let id_str = match std::str::from_utf8(bytes) {
-        Ok(s) => s,
-        Err(_) => return NOT_FOUND,
-    };
-    match sh.stage.find_node_by_id_in_subtree(NodeId(root), id_str) {
-        Some(nid) => nid.0 as u32,
-        None => NOT_FOUND,
-    }
+    ffi_guard(u32::MAX, || {
+        const NOT_FOUND: u32 = 0xFFFF_FFFF;
+        if h.is_null() || id.is_null() {
+            return NOT_FOUND;
+        }
+        let sh = unsafe { &*h };
+        let bytes = unsafe { std::slice::from_raw_parts(id, id_len) };
+        let id_str = match std::str::from_utf8(bytes) {
+            Ok(s) => s,
+            Err(_) => return NOT_FOUND,
+        };
+        match sh.stage.find_node_by_id_in_subtree(NodeId(root), id_str) {
+            Some(nid) => nid.0 as u32,
+            None => NOT_FOUND,
+        }
+    })
 }
 
 /// 构造最小测试包（headless test fixture helper）。
@@ -619,81 +694,85 @@ pub extern "C" fn loomgui_make_test_pkg(
     comp_len: usize,
     out_len: *mut usize,
 ) -> *mut u8 {
-    use loomgui_core::asset::{write_package, PackageInput, TemplateNode};
-    use loomgui_core::scene::NodeKind;
-    use loomgui_core::style::resolved::ResolvedStyle;
-    if comp.is_null() || out_len.is_null() {
-        return std::ptr::null_mut();
-    }
-    let comp_name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(comp, comp_len) })
-    {
-        Ok(s) => s,
-        Err(_) => return std::ptr::null_mut(),
-    };
-    if comp_name.is_empty() {
-        return std::ptr::null_mut();
-    }
-    // Two-node component: root container (no id) with a child container id="badge".
-    // The child id allows tests to verify subtree-scoped id lookup (find_node_by_id_in_subtree).
-    let nodes = [
-        TemplateNode {
-            kind: NodeKind::Container,
-            style: ResolvedStyle::default(),
-            parent_idx: None,
-            classes: vec![],
-            id_attr: None,
-            draggable: false,
-            tabindex: None,
-            content: None,
-            src: None,
-            control_init: None,
-            role: None,
-            data_slot: None,
-            aria_controls: None,
-            rich_text_block: false,
-            custom_tag: None,
-            component_scope: false,
-        },
-        TemplateNode {
-            kind: NodeKind::Container,
-            style: ResolvedStyle::default(),
-            parent_idx: Some(0),
-            classes: vec![],
-            id_attr: Some("badge".to_string()),
-            draggable: false,
-            tabindex: None,
-            content: None,
-            src: None,
-            control_init: None,
-            role: None,
-            data_slot: None,
-            aria_controls: None,
-            rich_text_block: false,
-            custom_tag: None,
-            component_scope: false,
-        },
-    ];
-    let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
-    let pkg = write_package(&PackageInput {
-        components: vec![(comp_name, nodes.as_slice(), &rules, &[])],
-    });
-    let len = pkg.len();
-    let ptr = pkg.as_ptr() as *mut u8;
-    std::mem::forget(pkg);
-    unsafe {
-        *out_len = len;
-    }
-    ptr
+    ffi_guard(std::ptr::null_mut(), || {
+        use loomgui_core::asset::{write_package, PackageInput, TemplateNode};
+        use loomgui_core::scene::NodeKind;
+        use loomgui_core::style::resolved::ResolvedStyle;
+        if comp.is_null() || out_len.is_null() {
+            return std::ptr::null_mut();
+        }
+        let comp_name =
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(comp, comp_len) }) {
+                Ok(s) => s,
+                Err(_) => return std::ptr::null_mut(),
+            };
+        if comp_name.is_empty() {
+            return std::ptr::null_mut();
+        }
+        // Two-node component: root container (no id) with a child container id="badge".
+        // The child id allows tests to verify subtree-scoped id lookup (find_node_by_id_in_subtree).
+        let nodes = [
+            TemplateNode {
+                kind: NodeKind::Container,
+                style: ResolvedStyle::default(),
+                parent_idx: None,
+                classes: vec![],
+                id_attr: None,
+                draggable: false,
+                tabindex: None,
+                content: None,
+                src: None,
+                control_init: None,
+                role: None,
+                data_slot: None,
+                aria_controls: None,
+                rich_text_block: false,
+                custom_tag: None,
+                component_scope: false,
+            },
+            TemplateNode {
+                kind: NodeKind::Container,
+                style: ResolvedStyle::default(),
+                parent_idx: Some(0),
+                classes: vec![],
+                id_attr: Some("badge".to_string()),
+                draggable: false,
+                tabindex: None,
+                content: None,
+                src: None,
+                control_init: None,
+                role: None,
+                data_slot: None,
+                aria_controls: None,
+                rich_text_block: false,
+                custom_tag: None,
+                component_scope: false,
+            },
+        ];
+        let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
+        let pkg = write_package(&PackageInput {
+            components: vec![(comp_name, nodes.as_slice(), &rules, &[])],
+        });
+        let len = pkg.len();
+        let ptr = pkg.as_ptr() as *mut u8;
+        std::mem::forget(pkg);
+        unsafe {
+            *out_len = len;
+        }
+        ptr
+    })
 }
 
 /// 释放 loomgui_make_test_pkg 返回的 bytes。
 #[no_mangle]
 pub extern "C" fn loomgui_bytes_free(ptr: *mut u8, len: usize) {
-    if !ptr.is_null() {
-        unsafe {
-            drop(Vec::from_raw_parts(ptr, len, len));
+    ffi_guard((), || {
+        if !ptr.is_null() {
+            unsafe {
+                drop(Vec::from_raw_parts(ptr, len, len));
+            }
         }
-    }
+    })
 }
 
 /// 加 touch monitor（C# CaptureTouch 后调）。核心把 node 加进 touch_id 对应槽的 touch_monitors（去重）。
@@ -706,11 +785,13 @@ pub extern "C" fn loomgui_stage_add_touch_monitor(
     touch_id: i32,
     node_id: u32,
 ) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage.add_touch_monitor(touch_id, NodeId(node_id));
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage.add_touch_monitor(touch_id, NodeId(node_id));
+    })
 }
 
 /// 移除 touch monitor（C# 主动释放调）。从所有槽移除该 node。null 句柄 → no-op。
@@ -718,22 +799,26 @@ pub extern "C" fn loomgui_stage_add_touch_monitor(
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_remove_touch_monitor(h: *mut StageHandle, node_id: u32) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage.remove_touch_monitor(NodeId(node_id));
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage.remove_touch_monitor(NodeId(node_id));
+    })
 }
 
 /// 外部取消待 click（照 fgui Stage.CancelClick(touchId)）。置对应槽 click_cancelled。
 /// null 句柄 → no-op。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_cancel_click(h: *mut StageHandle, touch_id: i32) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage.cancel_click(touch_id);
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage.cancel_click(touch_id);
+    })
 }
 
 /// 注入本帧键盘事件（扁平 KeyEvent 数组）。tick 前调。null/len=0 = 无键盘输入。
@@ -745,16 +830,18 @@ pub extern "C" fn loomgui_stage_set_key_input(
     keys: *const KeyEvent,
     len: usize,
 ) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    if keys.is_null() || len == 0 {
-        sh.stage.set_key_input(&[]);
-        return;
-    }
-    let ks = unsafe { std::slice::from_raw_parts(keys, len) };
-    sh.stage.set_key_input(ks);
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        if keys.is_null() || len == 0 {
+            sh.stage.set_key_input(&[]);
+            return;
+        }
+        let ks = unsafe { std::slice::from_raw_parts(keys, len) };
+        sh.stage.set_key_input(ks);
+    })
 }
 
 /// 注入本帧字符输入（UTF-32 codepoints 数组，已 shift-mapped 的可打印字符）。tick 前调。
@@ -772,17 +859,19 @@ pub extern "C" fn loomgui_stage_set_text_input(
     codepoints: *const u32,
     len: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    if codepoints.is_null() || len == 0 {
-        sh.stage.set_text_input(&[]);
-        return 0;
-    }
-    let cps = unsafe { std::slice::from_raw_parts(codepoints, len) };
-    sh.stage.set_text_input(cps);
-    0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        if codepoints.is_null() || len == 0 {
+            sh.stage.set_text_input(&[]);
+            return 0;
+        }
+        let cps = unsafe { std::slice::from_raw_parts(codepoints, len) };
+        sh.stage.set_text_input(cps);
+        0
+    })
 }
 
 /// 设文本控件的 IME composition（后端读平台 IME compositionString 回灌）。
@@ -799,21 +888,23 @@ pub extern "C" fn loomgui_stage_set_composition(
     text_len: usize,
     pos: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    // null/零长兜底为空串（composition 可被清空：传空串 = 取消正在进行的 composition）。
-    let s = if text.is_null() || text_len == 0 {
-        String::new()
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, text_len) }) {
-            Ok(s) => s.to_string(),
-            Err(_) => return -1,
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
         }
-    };
-    sh.stage.set_composition(NodeId(node), &s, pos);
-    0
+        let sh = unsafe { &mut *h };
+        // null/零长兜底为空串（composition 可被清空：传空串 = 取消正在进行的 composition）。
+        let s = if text.is_null() || text_len == 0 {
+            String::new()
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, text_len) }) {
+                Ok(s) => s.to_string(),
+                Err(_) => return -1,
+            }
+        };
+        sh.stage.set_composition(NodeId(node), &s, pos);
+        0
+    })
 }
 
 /// 提交文本控件的 composition（落定进 value）。返 1 = 有 composition 且 value 改变；
@@ -823,11 +914,13 @@ pub extern "C" fn loomgui_stage_set_composition(
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_commit_composition(h: *mut StageHandle, node: u32) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage.commit_composition(NodeId(node)) as i32
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage.commit_composition(NodeId(node)) as i32
+    })
 }
 
 /// 注册宿主剪贴板回调。set_fn/get_fn = 后端实现的剪贴板桥（如 Unity
@@ -843,7 +936,9 @@ pub extern "C" fn loomgui_register_clipboard(
     set_fn: Option<unsafe extern "C" fn(*const u8, usize) -> i32>,
     get_fn: Option<unsafe extern "C" fn(*mut *mut u8, *mut usize) -> i32>,
 ) {
-    loomgui_core::scene::control::register_clipboard(set_fn, get_fn);
+    ffi_guard((), || {
+        loomgui_core::scene::control::register_clipboard(set_fn, get_fn);
+    })
 }
 
 /// 读文本控件光标的世界矩形（IME 候选窗定位用，照 Unity Input.compositionCursorPos）。
@@ -859,27 +954,29 @@ pub extern "C" fn loomgui_stage_get_cursor_rect(
     node: u32,
     out: *mut CursorRectRepr,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    if out.is_null() {
-        return 1;
-    }
-    let sh = unsafe { &*h };
-    match sh.stage.cursor_rect(NodeId(node)) {
-        Some(r) => {
-            unsafe {
-                *out = CursorRectRepr {
-                    x: r.x,
-                    y: r.y,
-                    w: r.w,
-                    h: r.h,
-                };
-            }
-            0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
         }
-        None => 1,
-    }
+        if out.is_null() {
+            return 1;
+        }
+        let sh = unsafe { &*h };
+        match sh.stage.cursor_rect(NodeId(node)) {
+            Some(r) => {
+                unsafe {
+                    *out = CursorRectRepr {
+                        x: r.x,
+                        y: r.y,
+                        w: r.w,
+                        h: r.h,
+                    };
+                }
+                0
+            }
+            None => 1,
+        }
+    })
 }
 
 /// 注入本帧滚轮事件（扁平 WheelEvent 数组）。tick 前调；**累积式**（多次调合并）。
@@ -892,15 +989,17 @@ pub extern "C" fn loomgui_stage_set_wheel_input(
     events: *const loomgui_core::scroll::WheelEvent,
     len: usize,
 ) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    if events.is_null() || len == 0 {
-        return;
-    }
-    let evs = unsafe { std::slice::from_raw_parts(events, len) };
-    sh.stage.set_wheel_input(evs);
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        if events.is_null() || len == 0 {
+            return;
+        }
+        let evs = unsafe { std::slice::from_raw_parts(events, len) };
+        sh.stage.set_wheel_input(evs);
+    })
 }
 
 /// driver 启动时把所有 atlas.json 合并出的图尺寸批量灌入（一次调用，非逐条）。
@@ -914,24 +1013,26 @@ pub extern "C" fn loomgui_stage_set_image_sizes(
     hs: *const u32,
     count: usize,
 ) {
-    if h.is_null() || paths_ptr.is_null() || ws.is_null() || hs.is_null() || count == 0 {
-        return;
-    }
-    let handle = unsafe { &mut *h };
-    let paths = unsafe { std::slice::from_raw_parts(paths_ptr, count) };
-    let ws = unsafe { std::slice::from_raw_parts(ws, count) };
-    let hs = unsafe { std::slice::from_raw_parts(hs, count) };
-    let mut sizes: Vec<(String, u32, u32)> = Vec::with_capacity(count);
-    for i in 0..count {
-        if paths[i].is_null() {
-            continue;
+    ffi_guard((), || {
+        if h.is_null() || paths_ptr.is_null() || ws.is_null() || hs.is_null() || count == 0 {
+            return;
         }
-        let cstr = unsafe { std::ffi::CStr::from_ptr(paths[i]) };
-        if let Ok(s) = cstr.to_str() {
-            sizes.push((s.to_string(), ws[i], hs[i]));
+        let handle = unsafe { &mut *h };
+        let paths = unsafe { std::slice::from_raw_parts(paths_ptr, count) };
+        let ws = unsafe { std::slice::from_raw_parts(ws, count) };
+        let hs = unsafe { std::slice::from_raw_parts(hs, count) };
+        let mut sizes: Vec<(String, u32, u32)> = Vec::with_capacity(count);
+        for i in 0..count {
+            if paths[i].is_null() {
+                continue;
+            }
+            let cstr = unsafe { std::ffi::CStr::from_ptr(paths[i]) };
+            if let Ok(s) = cstr.to_str() {
+                sizes.push((s.to_string(), ws[i], hs[i]));
+            }
         }
-    }
-    handle.stage.set_image_sizes(&sizes);
+        handle.stage.set_image_sizes(&sizes);
+    })
 }
 
 /// 编程滚动到指定位置。非 scroll 容器 / 越界 node → no-op（不 panic）。
@@ -944,13 +1045,15 @@ pub extern "C" fn loomgui_stage_set_scroll_pos(
     y: f32,
     animated: u8,
 ) {
-    if h.is_null() {
-        return;
-    }
-    let handle = unsafe { &mut *h };
-    handle
-        .stage
-        .set_scroll_pos(NodeId(node_id), x, y, animated != 0);
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let handle = unsafe { &mut *h };
+        handle
+            .stage
+            .set_scroll_pos(NodeId(node_id), x, y, animated != 0);
+    })
 }
 
 /// driver 注入滚动容器 content_size（虚拟列表）。node 无效/非滚动容器 → no-op。
@@ -962,22 +1065,26 @@ pub extern "C" fn loomgui_stage_set_content_size(
     w: f32,
     height: f32,
 ) {
-    if h.is_null() {
-        return;
-    }
-    let handle = unsafe { &mut *h };
-    handle.stage.set_content_size(NodeId(node_id), w, height);
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let handle = unsafe { &mut *h };
+        handle.stage.set_content_size(NodeId(node_id), w, height);
+    })
 }
 
 /// 清除 driver 注入的 content_size override（列表销毁/退回普通滚动时用）。
 /// null 句柄/无效 node → no-op（不 panic）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_clear_content_size_override(h: *mut StageHandle, node_id: u32) {
-    if h.is_null() {
-        return;
-    }
-    let handle = unsafe { &mut *h };
-    handle.stage.clear_content_size_override(NodeId(node_id));
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let handle = unsafe { &mut *h };
+        handle.stage.clear_content_size_override(NodeId(node_id));
+    })
 }
 
 /// 读 scroll_pos。null 句柄/无效 node → out 填 0（不 panic）。
@@ -989,24 +1096,26 @@ pub extern "C" fn loomgui_stage_get_scroll_pos(
     out_x: *mut f32,
     out_y: *mut f32,
 ) {
-    let (x, y) = if h.is_null() {
-        (0.0, 0.0)
-    } else {
-        let sh = unsafe { &*h };
-        sh.stage
-            .get_scroll_pos(NodeId(node_id))
-            .unwrap_or((0.0, 0.0))
-    };
-    if !out_x.is_null() {
-        unsafe {
-            *out_x = x;
+    ffi_guard((), || {
+        let (x, y) = if h.is_null() {
+            (0.0, 0.0)
+        } else {
+            let sh = unsafe { &*h };
+            sh.stage
+                .get_scroll_pos(NodeId(node_id))
+                .unwrap_or((0.0, 0.0))
+        };
+        if !out_x.is_null() {
+            unsafe {
+                *out_x = x;
+            }
         }
-    }
-    if !out_y.is_null() {
-        unsafe {
-            *out_y = y;
+        if !out_y.is_null() {
+            unsafe {
+                *out_y = y;
+            }
         }
-    }
+    })
 }
 
 /// 读节点 layout_rect。null 句柄/无效 node → out 填 0（不 panic）。
@@ -1019,35 +1128,37 @@ pub extern "C" fn loomgui_stage_get_node_layout_rect(
     out_w: *mut f32,
     out_h: *mut f32,
 ) {
-    let r = if h.is_null() {
-        None
-    } else {
-        let sh = unsafe { &*h };
-        sh.stage.get_node_layout_rect(NodeId(node_id))
-    };
-    let (x, y, w, hh) = r
-        .map(|r| (r.x, r.y, r.w, r.h))
-        .unwrap_or((0.0, 0.0, 0.0, 0.0));
-    if !out_x.is_null() {
-        unsafe {
-            *out_x = x;
+    ffi_guard((), || {
+        let r = if h.is_null() {
+            None
+        } else {
+            let sh = unsafe { &*h };
+            sh.stage.get_node_layout_rect(NodeId(node_id))
+        };
+        let (x, y, w, hh) = r
+            .map(|r| (r.x, r.y, r.w, r.h))
+            .unwrap_or((0.0, 0.0, 0.0, 0.0));
+        if !out_x.is_null() {
+            unsafe {
+                *out_x = x;
+            }
         }
-    }
-    if !out_y.is_null() {
-        unsafe {
-            *out_y = y;
+        if !out_y.is_null() {
+            unsafe {
+                *out_y = y;
+            }
         }
-    }
-    if !out_w.is_null() {
-        unsafe {
-            *out_w = w;
+        if !out_w.is_null() {
+            unsafe {
+                *out_w = w;
+            }
         }
-    }
-    if !out_h.is_null() {
-        unsafe {
-            *out_h = hh;
+        if !out_h.is_null() {
+            unsafe {
+                *out_h = hh;
+            }
         }
-    }
+    })
 }
 
 /// 读节点 world transform（compute_world_transforms 产物）。null/无效 → 写 identity。
@@ -1065,43 +1176,45 @@ pub extern "C" fn loomgui_stage_get_node_world_matrix(
     out_tx: *mut f32,
     out_ty: *mut f32,
 ) {
-    let m = if h.is_null() {
-        None
-    } else {
-        let sh = unsafe { &*h };
-        sh.stage.get_node_world_matrix(NodeId(node_id))
-    }
-    .unwrap_or(transform::IDENTITY); // [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
-    if !out_a.is_null() {
-        unsafe {
-            *out_a = m[0];
+    ffi_guard((), || {
+        let m = if h.is_null() {
+            None
+        } else {
+            let sh = unsafe { &*h };
+            sh.stage.get_node_world_matrix(NodeId(node_id))
         }
-    }
-    if !out_b.is_null() {
-        unsafe {
-            *out_b = m[1];
+        .unwrap_or(transform::IDENTITY); // [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+        if !out_a.is_null() {
+            unsafe {
+                *out_a = m[0];
+            }
         }
-    }
-    if !out_c.is_null() {
-        unsafe {
-            *out_c = m[2];
+        if !out_b.is_null() {
+            unsafe {
+                *out_b = m[1];
+            }
         }
-    }
-    if !out_d.is_null() {
-        unsafe {
-            *out_d = m[3];
+        if !out_c.is_null() {
+            unsafe {
+                *out_c = m[2];
+            }
         }
-    }
-    if !out_tx.is_null() {
-        unsafe {
-            *out_tx = m[4];
+        if !out_d.is_null() {
+            unsafe {
+                *out_d = m[3];
+            }
         }
-    }
-    if !out_ty.is_null() {
-        unsafe {
-            *out_ty = m[5];
+        if !out_tx.is_null() {
+            unsafe {
+                *out_tx = m[4];
+            }
         }
-    }
+        if !out_ty.is_null() {
+            unsafe {
+                *out_ty = m[5];
+            }
+        }
+    })
 }
 
 /// 读节点 sort_key（merge 前快照，DFS 序号）。null/无效 → 写 0。
@@ -1111,18 +1224,20 @@ pub extern "C" fn loomgui_stage_get_node_sort_key(
     node_id: u32,
     out: *mut u32,
 ) {
-    let sk = if h.is_null() {
-        None
-    } else {
-        let sh = unsafe { &*h };
-        sh.stage.get_node_sort_key(NodeId(node_id))
-    }
-    .unwrap_or(0);
-    if !out.is_null() {
-        unsafe {
-            *out = sk;
+    ffi_guard((), || {
+        let sk = if h.is_null() {
+            None
+        } else {
+            let sh = unsafe { &*h };
+            sh.stage.get_node_sort_key(NodeId(node_id))
         }
-    }
+        .unwrap_or(0);
+        if !out.is_null() {
+            unsafe {
+                *out = sk;
+            }
+        }
+    })
 }
 
 /// 读节点可见性（存在 + 非 display:none）。null/无效 → 写 0（false）。
@@ -1132,17 +1247,19 @@ pub extern "C" fn loomgui_stage_get_node_visible(
     node_id: u32,
     out: *mut u8,
 ) {
-    let vis = if h.is_null() {
-        false
-    } else {
-        let sh = unsafe { &*h };
-        sh.stage.get_node_visible(NodeId(node_id))
-    };
-    if !out.is_null() {
-        unsafe {
-            *out = if vis { 1 } else { 0 };
+    ffi_guard((), || {
+        let vis = if h.is_null() {
+            false
+        } else {
+            let sh = unsafe { &*h };
+            sh.stage.get_node_visible(NodeId(node_id))
+        };
+        if !out.is_null() {
+            unsafe {
+                *out = if vis { 1 } else { 0 };
+            }
         }
-    }
+    })
 }
 
 /// 光标世界矩形（IME 候选窗定位用）。#[repr(C)] POD，4 × f32 = 16B。后端读 [`crate::CursorRectRepr`]
@@ -1229,20 +1346,22 @@ pub extern "C" fn loomgui_stage_get_node_kind(
     node_id: u32,
     out: *mut u8,
 ) -> i32 {
-    if h.is_null() {
-        return 1;
-    }
-    let sh = unsafe { &*h };
-    match sh.stage.get_node_kind(NodeId(node_id)) {
-        Some(k) => {
-            if out.is_null() {
-                return 1;
-            }
-            unsafe { *out = k as u8 };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return 1;
         }
-        None => 1,
-    }
+        let sh = unsafe { &*h };
+        match sh.stage.get_node_kind(NodeId(node_id)) {
+            Some(k) => {
+                if out.is_null() {
+                    return 1;
+                }
+                unsafe { *out = k as u8 };
+                0
+            }
+            None => 1,
+        }
+    })
 }
 
 /// 读节点 computed style 快照。return code：0 = ok 且 `*out` 填好；非 0 = 失败（节点不存在
@@ -1253,20 +1372,22 @@ pub extern "C" fn loomgui_stage_get_node_computed_style(
     node_id: u32,
     out: *mut ComputedNodeStyleRepr,
 ) -> i32 {
-    if h.is_null() {
-        return 1;
-    }
-    let sh = unsafe { &*h };
-    match sh.stage.get_node_computed_style(NodeId(node_id)) {
-        Some(c) => {
-            if out.is_null() {
-                return 1;
-            }
-            unsafe { *out = ComputedNodeStyleRepr::from_computed(&c) };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return 1;
         }
-        None => 1,
-    }
+        let sh = unsafe { &*h };
+        match sh.stage.get_node_computed_style(NodeId(node_id)) {
+            Some(c) => {
+                if out.is_null() {
+                    return 1;
+                }
+                unsafe { *out = ComputedNodeStyleRepr::from_computed(&c) };
+                0
+            }
+            None => 1,
+        }
+    })
 }
 
 // ===== font atlas FFI（v1.6 自绘字体 pull 模型） =====
@@ -1278,12 +1399,14 @@ pub extern "C" fn loomgui_stage_font_atlas_dirty_pages(
     out: *mut u32,
     max: usize,
 ) -> usize {
-    if h.is_null() || out.is_null() {
-        return 0;
-    }
-    let sh = unsafe { &*h };
-    let buf = unsafe { std::slice::from_raw_parts_mut(out, max) };
-    sh.stage.font_atlas_dirty_pages(buf)
+    ffi_guard(usize::MAX, || {
+        if h.is_null() || out.is_null() {
+            return 0;
+        }
+        let sh = unsafe { &*h };
+        let buf = unsafe { std::slice::from_raw_parts_mut(out, max) };
+        sh.stage.font_atlas_dirty_pages(buf)
+    })
 }
 
 /// 读某页 R8 像素 + 尺寸。buf_len 不够返所需大小（双调法：先传小 buf 探大小）。
@@ -1297,71 +1420,79 @@ pub extern "C" fn loomgui_stage_font_atlas_page(
     out_buf: *mut u8,
     buf_len: usize,
 ) -> usize {
-    if h.is_null() {
-        return 0;
-    }
-    let sh = unsafe { &*h };
-    // 先探所需大小（传空 buf，不碰 out_buf 指针）
-    let (mut w, mut hgt) = (0u32, 0u32);
-    let needed = sh.stage.font_atlas_page(page, &mut w, &mut hgt, &mut []);
-    if buf_len < needed {
-        return needed; // 双调：caller 扩 buf 重调
-    }
-    if needed == 0 {
-        return 0; // 空页 / 越界 page
-    }
-    // buf_len >= needed > 0：out_buf 必非 null（caller 保证），否则 slice 构造 UB。
-    // 安全侧加防御检查。
-    if out_buf.is_null() {
-        return 0;
-    }
-    let buf = unsafe { std::slice::from_raw_parts_mut(out_buf, buf_len) };
-    let n = sh.stage.font_atlas_page(page, &mut w, &mut hgt, buf);
-    if !out_w.is_null() {
-        unsafe {
-            *out_w = w;
+    ffi_guard(usize::MAX, || {
+        if h.is_null() {
+            return 0;
         }
-    }
-    if !out_h.is_null() {
-        unsafe {
-            *out_h = hgt;
+        let sh = unsafe { &*h };
+        // 先探所需大小（传空 buf，不碰 out_buf 指针）
+        let (mut w, mut hgt) = (0u32, 0u32);
+        let needed = sh.stage.font_atlas_page(page, &mut w, &mut hgt, &mut []);
+        if buf_len < needed {
+            return needed; // 双调：caller 扩 buf 重调
         }
-    }
-    n
+        if needed == 0 {
+            return 0; // 空页 / 越界 page
+        }
+        // buf_len >= needed > 0：out_buf 必非 null（caller 保证），否则 slice 构造 UB。
+        // 安全侧加防御检查。
+        if out_buf.is_null() {
+            return 0;
+        }
+        let buf = unsafe { std::slice::from_raw_parts_mut(out_buf, buf_len) };
+        let n = sh.stage.font_atlas_page(page, &mut w, &mut hgt, buf);
+        if !out_w.is_null() {
+            unsafe {
+                *out_w = w;
+            }
+        }
+        if !out_h.is_null() {
+            unsafe {
+                *out_h = hgt;
+            }
+        }
+        n
+    })
 }
 
 /// 清脏页（backend 拉完后调）。null 句柄 → no-op。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_font_atlas_clear_dirty(h: *mut StageHandle) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage.font_atlas_clear_dirty();
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage.font_atlas_clear_dirty();
+    })
 }
 
 /// 设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_reuse_key(h: *mut StageHandle, node_id: u32, key: u32) {
-    if h.is_null() {
-        return;
-    }
-    let handle = unsafe { &mut *h };
-    handle.stage.set_reuse_key(NodeId(node_id), key);
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let handle = unsafe { &mut *h };
+        handle.stage.set_reuse_key(NodeId(node_id), key);
+    })
 }
 
 /// 克隆场景内子树（游离根，不挂树）。返回新 node_id；0xFFFF_FFFF = err / null 句柄 / 无效 src。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_clone_subtree(h: *mut StageHandle, src: u32) -> u32 {
-    const ERR: u32 = 0xFFFF_FFFF;
-    if h.is_null() {
-        return ERR;
-    }
-    let sh = unsafe { &mut *h };
-    match sh.stage.clone_subtree(NodeId(src)) {
-        Ok(id) => id.0,
-        Err(_) => ERR,
-    }
+    ffi_guard(u32::MAX, || {
+        const ERR: u32 = 0xFFFF_FFFF;
+        if h.is_null() {
+            return ERR;
+        }
+        let sh = unsafe { &mut *h };
+        match sh.stage.clone_subtree(NodeId(src)) {
+            Ok(id) => id.0,
+            Err(_) => ERR,
+        }
+    })
 }
 
 /// 编程聚焦节点（照 fgui RequestFocus）。强制聚焦任意非 disabled 节点
@@ -1370,11 +1501,13 @@ pub extern "C" fn loomgui_stage_clone_subtree(h: *mut StageHandle, src: u32) -> 
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_request_focus(h: *mut StageHandle, node_id: u32) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage.request_focus(NodeId(node_id));
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage.request_focus(NodeId(node_id));
+    })
 }
 
 /// 读当前焦点节点。无焦点/无 scene → 0xFFFF_FFFF（sentinel，同 node_parent）。null 句柄 → sentinel。
@@ -1382,15 +1515,17 @@ pub extern "C" fn loomgui_stage_request_focus(h: *mut StageHandle, node_id: u32)
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_focused_node(h: *const StageHandle) -> u32 {
-    const NONE: u32 = 0xFFFF_FFFF;
-    if h.is_null() {
-        return NONE;
-    }
-    let sh = unsafe { &*h };
-    match &sh.stage.scene {
-        Some(scene) => scene.focused_node.map(|n| n.0 as u32).unwrap_or(NONE),
-        None => NONE,
-    }
+    ffi_guard(u32::MAX, || {
+        const NONE: u32 = 0xFFFF_FFFF;
+        if h.is_null() {
+            return NONE;
+        }
+        let sh = unsafe { &*h };
+        match &sh.stage.scene {
+            Some(scene) => scene.focused_node.map(|n| n.0 as u32).unwrap_or(NONE),
+            None => NONE,
+        }
+    })
 }
 
 /// 全局 shutdown（Domain reload hook）。C# `LoomStage.ResetStatics`（SubsystemRegistration）调用。
@@ -1423,61 +1558,69 @@ pub extern "C" fn loomgui_stage_tween(
     delay: f32,
     tag: u32,
 ) {
-    if h.is_null() || start.is_null() || end.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    let prop = match loomgui_core::tween::TweenProp::try_from(prop) {
-        Some(p) => p,
-        None => return,
-    };
-    let ease = match loomgui_core::tween::Ease::try_from(ease) {
-        Some(e) => e,
-        None => return,
-    };
-    let sz = loomgui_core::tween::prop_value_size(prop) as usize;
-    let st = unsafe { std::slice::from_raw_parts(start, sz) };
-    let en = unsafe { std::slice::from_raw_parts(end, sz) };
-    let mut s = [0.0f32; 4];
-    let mut e = [0.0f32; 4];
-    s[..sz].copy_from_slice(st);
-    e[..sz].copy_from_slice(en);
-    sh.stage
-        .tween(NodeId(node_id), prop, s, e, ease, delay, duration, tag);
+    ffi_guard((), || {
+        if h.is_null() || start.is_null() || end.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        let prop = match loomgui_core::tween::TweenProp::try_from(prop) {
+            Some(p) => p,
+            None => return,
+        };
+        let ease = match loomgui_core::tween::Ease::try_from(ease) {
+            Some(e) => e,
+            None => return,
+        };
+        let sz = loomgui_core::tween::prop_value_size(prop) as usize;
+        let st = unsafe { std::slice::from_raw_parts(start, sz) };
+        let en = unsafe { std::slice::from_raw_parts(end, sz) };
+        let mut s = [0.0f32; 4];
+        let mut e = [0.0f32; 4];
+        s[..sz].copy_from_slice(st);
+        e[..sz].copy_from_slice(en);
+        sh.stage
+            .tween(NodeId(node_id), prop, s, e, ease, delay, duration, tag);
+    })
 }
 
 /// 停该节点该 prop 的 tween（override 保留末值）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_kill_tween(h: *mut StageHandle, node_id: u32, prop: u32) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    if let Some(prop) = loomgui_core::tween::TweenProp::try_from(prop) {
-        sh.stage.kill_tween(NodeId(node_id), prop);
-    }
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        if let Some(prop) = loomgui_core::tween::TweenProp::try_from(prop) {
+            sh.stage.kill_tween(NodeId(node_id), prop);
+        }
+    })
 }
 
 /// 清该节点所有动画 override（回 CSS）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_clear_anim(h: *mut StageHandle, node_id: u32) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage.clear_anim(NodeId(node_id));
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage.clear_anim(NodeId(node_id));
+    })
 }
 
 /// 清该节点某 prop 对应通道（回 CSS）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_clear_anim_prop(h: *mut StageHandle, node_id: u32, prop: u32) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    if let Some(prop) = loomgui_core::tween::TweenProp::try_from(prop) {
-        sh.stage.clear_anim_prop(NodeId(node_id), prop);
-    }
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        if let Some(prop) = loomgui_core::tween::TweenProp::try_from(prop) {
+            sh.stage.clear_anim_prop(NodeId(node_id), prop);
+        }
+    })
 }
 
 // ===== @keyframes player FFI（M2 spec §7.3：play/pause/resume/stop/time/state/on-key） =====
@@ -1502,62 +1645,68 @@ pub extern "C" fn loomgui_stage_play_animation(
     name: *const u8,
     name_len: usize,
 ) -> u64 {
-    const INVALID: u64 = 0;
-    if h.is_null() {
-        return INVALID;
-    }
-    let sh = unsafe { &mut *h };
-    // null/零长兜底为空串（from_raw_parts(null, 0) 是 UB）：空 name 查表失败 → INVALID。
-    let name = if name.is_null() || name_len == 0 {
-        ""
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, name_len) }) {
-            Ok(s) => s,
-            Err(_) => return INVALID,
+    ffi_guard(u64::MAX, || {
+        const INVALID: u64 = 0;
+        if h.is_null() {
+            return INVALID;
         }
-    };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return INVALID;
-    };
-    match loomgui_core::scene::animation::play_programmatic(scene, NodeId(node), name) {
-        Some(k) => player_key_as_u64(k),
-        None => INVALID,
-    }
+        let sh = unsafe { &mut *h };
+        // null/零长兜底为空串（from_raw_parts(null, 0) 是 UB）：空 name 查表失败 → INVALID。
+        let name = if name.is_null() || name_len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, name_len) }) {
+                Ok(s) => s,
+                Err(_) => return INVALID,
+            }
+        };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return INVALID;
+        };
+        match loomgui_core::scene::animation::play_programmatic(scene, NodeId(node), name) {
+            Some(k) => player_key_as_u64(k),
+            None => INVALID,
+        }
+    })
 }
 
 /// 暂停 player（Playing → Paused，elapsed 冻结位置保持）。key 无效 / 非 Playing → no-op。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_pause_animation(h: *mut StageHandle, key: u64) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return;
-    };
-    if let Some(p) = scene.players.get_mut(player_key_from_u64(key)) {
-        if p.play_state == PlayerPlayState::Playing {
-            p.play_state = PlayerPlayState::Paused;
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
         }
-    }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return;
+        };
+        if let Some(p) = scene.players.get_mut(player_key_from_u64(key)) {
+            if p.play_state == PlayerPlayState::Playing {
+                p.play_state = PlayerPlayState::Paused;
+            }
+        }
+    })
 }
 
 /// 恢复播放（Paused → Playing）。key 无效 / 非 Paused → no-op
 /// （Completed 是粘性完成态、Stopped 是终态，均不可恢复）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_resume_animation(h: *mut StageHandle, key: u64) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return;
-    };
-    if let Some(p) = scene.players.get_mut(player_key_from_u64(key)) {
-        if p.play_state == PlayerPlayState::Paused {
-            p.play_state = PlayerPlayState::Playing;
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
         }
-    }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return;
+        };
+        if let Some(p) = scene.players.get_mut(player_key_from_u64(key)) {
+            if p.play_state == PlayerPlayState::Paused {
+                p.play_state = PlayerPlayState::Playing;
+            }
+        }
+    })
 }
 
 /// 停止 player（T6 review Minor 1 钉死：scene 层**终态**，不可恢复，勿当暂停）。
@@ -1565,73 +1714,81 @@ pub extern "C" fn loomgui_stage_resume_animation(h: *mut StageHandle, key: u64) 
 /// 此后 get_animation_state 恒 255（无效）。key 无效 → no-op。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_stop_animation(h: *mut StageHandle, key: u64) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return;
-    };
-    if let Some(p) = scene.players.get_mut(player_key_from_u64(key)) {
-        p.play_state = PlayerPlayState::Stopped;
-    }
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return;
+        };
+        if let Some(p) = scene.players.get_mut(player_key_from_u64(key)) {
+            p.play_state = PlayerPlayState::Stopped;
+        }
+    })
 }
 
 /// 读 player 时间轴位置（elapsed——含 delay 计时的唯一时间源头，spec §5.3）。
 /// key 无效 / 无 scene → 0.0（不 panic）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_animation_time(h: *const StageHandle, key: u64) -> f32 {
-    if h.is_null() {
-        return 0.0;
-    }
-    let sh = unsafe { &*h };
-    match &sh.stage.scene {
-        Some(scene) => scene
-            .players
-            .get(player_key_from_u64(key))
-            .map(|p| p.elapsed)
-            .unwrap_or(0.0),
-        None => 0.0,
-    }
+    ffi_guard(f32::NAN, || {
+        if h.is_null() {
+            return 0.0;
+        }
+        let sh = unsafe { &*h };
+        match &sh.stage.scene {
+            Some(scene) => scene
+                .players
+                .get(player_key_from_u64(key))
+                .map(|p| p.elapsed)
+                .unwrap_or(0.0),
+            None => 0.0,
+        }
+    })
 }
 
 /// seek：设 player.elapsed，下一帧 step b 按新位置采样（C# `Animation.Time` setter）。
 /// 时间源头单一是 elapsed，不校验范围（负值 = 仍在 delay 阶段之前）。key 无效 → no-op。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_animation_time(h: *mut StageHandle, key: u64, time: f32) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return;
-    };
-    if let Some(p) = scene.players.get_mut(player_key_from_u64(key)) {
-        p.elapsed = time;
-    }
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return;
+        };
+        if let Some(p) = scene.players.get_mut(player_key_from_u64(key)) {
+            p.elapsed = time;
+        }
+    })
 }
 
 /// 读 player 运行状态。Playing=0 / Paused=1 / Completed=2；Invalid=255（key 不存在 /
 /// 无 scene / Stopped——Stopped 是终态，下帧即回收，语义等同无效）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_animation_state(h: *const StageHandle, key: u64) -> u8 {
-    const INVALID: u8 = 255;
-    if h.is_null() {
-        return INVALID;
-    }
-    let sh = unsafe { &*h };
-    match &sh.stage.scene {
-        Some(scene) => match scene.players.get(player_key_from_u64(key)) {
-            Some(p) => match p.play_state {
-                PlayerPlayState::Playing => 0,
-                PlayerPlayState::Paused => 1,
-                PlayerPlayState::Completed => 2,
-                PlayerPlayState::Stopped => INVALID,
+    ffi_guard(u8::MAX, || {
+        const INVALID: u8 = 255;
+        if h.is_null() {
+            return INVALID;
+        }
+        let sh = unsafe { &*h };
+        match &sh.stage.scene {
+            Some(scene) => match scene.players.get(player_key_from_u64(key)) {
+                Some(p) => match p.play_state {
+                    PlayerPlayState::Playing => 0,
+                    PlayerPlayState::Paused => 1,
+                    PlayerPlayState::Completed => 2,
+                    PlayerPlayState::Stopped => INVALID,
+                },
+                None => INVALID,
             },
             None => INVALID,
-        },
-        None => INVALID,
-    }
+        }
+    })
 }
 
 /// 注册 OnKey 百分比阈值（spec §7.3 `animation_on_key`；C# `Animation.OnKey(pct, cb)` 走此 FFI，
@@ -1639,14 +1796,16 @@ pub extern "C" fn loomgui_stage_get_animation_state(h: *const StageHandle, key: 
 /// 重复注册同 pct 去重（register_on_key）。key 无效 → no-op。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_animation_on_key(h: *mut StageHandle, key: u64, pct: f32) {
-    if h.is_null() {
-        return;
-    }
-    let sh = unsafe { &mut *h };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return;
-    };
-    register_on_key(scene, player_key_from_u64(key), pct);
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return;
+        };
+        register_on_key(scene, player_key_from_u64(key), pct);
+    })
 }
 
 // ===== 动态树 API FFI（§7.2）：create_root/create_node/append_child/insert_before/
@@ -1667,32 +1826,34 @@ pub extern "C" fn loomgui_stage_create_root(
     css: *const u8,
     css_len: usize,
 ) -> u32 {
-    const FAIL: u32 = 0xFFFF_FFFF;
-    if h.is_null() {
-        return FAIL;
-    }
-    let sh = unsafe { &mut *h };
-    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
-    let kind = if kind.is_null() || kind_len == 0 {
-        ""
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }) {
-            Ok(s) => s,
-            Err(_) => return FAIL,
+    ffi_guard(u32::MAX, || {
+        const FAIL: u32 = 0xFFFF_FFFF;
+        if h.is_null() {
+            return FAIL;
         }
-    };
-    let css = if css.is_null() || css_len == 0 {
-        ""
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }) {
-            Ok(s) => s,
-            Err(_) => return FAIL,
+        let sh = unsafe { &mut *h };
+        // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+        let kind = if kind.is_null() || kind_len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }) {
+                Ok(s) => s,
+                Err(_) => return FAIL,
+            }
+        };
+        let css = if css.is_null() || css_len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }) {
+                Ok(s) => s,
+                Err(_) => return FAIL,
+            }
+        };
+        match sh.stage.create_root(kind, css) {
+            Ok(id) => id.0,
+            Err(_) => FAIL,
         }
-    };
-    match sh.stage.create_root(kind, css) {
-        Ok(id) => id.0,
-        Err(_) => FAIL,
-    }
+    })
 }
 
 /// 建节点（不挂父）。kind/css = UTF-8 字节。返 NodeId；0xFFFF_FFFF = 失败。
@@ -1709,32 +1870,34 @@ pub extern "C" fn loomgui_stage_create_node(
     css: *const u8,
     css_len: usize,
 ) -> u32 {
-    const FAIL: u32 = 0xFFFF_FFFF;
-    if h.is_null() {
-        return FAIL;
-    }
-    let sh = unsafe { &mut *h };
-    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
-    let kind = if kind.is_null() || kind_len == 0 {
-        ""
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }) {
-            Ok(s) => s,
-            Err(_) => return FAIL,
+    ffi_guard(u32::MAX, || {
+        const FAIL: u32 = 0xFFFF_FFFF;
+        if h.is_null() {
+            return FAIL;
         }
-    };
-    let css = if css.is_null() || css_len == 0 {
-        ""
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }) {
-            Ok(s) => s,
-            Err(_) => return FAIL,
+        let sh = unsafe { &mut *h };
+        // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+        let kind = if kind.is_null() || kind_len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(kind, kind_len) }) {
+                Ok(s) => s,
+                Err(_) => return FAIL,
+            }
+        };
+        let css = if css.is_null() || css_len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, css_len) }) {
+                Ok(s) => s,
+                Err(_) => return FAIL,
+            }
+        };
+        match sh.stage.create_node(kind, css) {
+            Ok(id) => id.0,
+            Err(_) => FAIL,
         }
-    };
-    match sh.stage.create_node(kind, css) {
-        Ok(id) => id.0,
-        Err(_) => FAIL,
-    }
+    })
 }
 
 /// 挂子到 parent 末尾。child 必须当前无父。0=ok，-1=err。null 句柄 → -1。
@@ -1742,14 +1905,16 @@ pub extern "C" fn loomgui_stage_create_node(
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_append_child(h: *mut StageHandle, parent: u32, child: u32) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage
-        .append_child(NodeId(parent), NodeId(child))
-        .map(|_| 0)
-        .unwrap_or(-1)
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage
+            .append_child(NodeId(parent), NodeId(child))
+            .map(|_| 0)
+            .unwrap_or(-1)
+    })
 }
 
 /// 在 parent.children 中 ref_id 之前插 child。ref_id=0xFFFF_FFFF（INVALID）→ 末尾追加。
@@ -1763,14 +1928,16 @@ pub extern "C" fn loomgui_stage_insert_before(
     child: u32,
     ref_id: u32,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage
-        .insert_before(NodeId(parent), NodeId(child), NodeId(ref_id))
-        .map(|_| 0)
-        .unwrap_or(-1)
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage
+            .insert_before(NodeId(parent), NodeId(child), NodeId(ref_id))
+            .map(|_| 0)
+            .unwrap_or(-1)
+    })
 }
 
 /// 摘子（不删节点）：从 parent.children 移除 + child.parent=None。节点仍 live 可重挂。
@@ -1779,14 +1946,16 @@ pub extern "C" fn loomgui_stage_insert_before(
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_remove_child(h: *mut StageHandle, parent: u32, child: u32) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage
-        .remove_child(NodeId(parent), NodeId(child))
-        .map(|_| 0)
-        .unwrap_or(-1)
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage
+            .remove_child(NodeId(parent), NodeId(child))
+            .map(|_| 0)
+            .unwrap_or(-1)
+    })
 }
 
 /// 删节点（递归删子 + 联动清 anim/scroll/tween + slotmap remove）。
@@ -1796,12 +1965,14 @@ pub extern "C" fn loomgui_stage_remove_child(h: *mut StageHandle, parent: u32, c
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_remove_node(h: *mut StageHandle, node: u32) -> i32 {
-    if h.is_null() {
-        return 0;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage.remove_node(NodeId(node));
-    0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return 0;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage.remove_node(NodeId(node));
+        0
+    })
 }
 
 /// 改 Text 节点 content + 标 dirty_text。text = UTF-8 字节。0=ok，-1=err。
@@ -1817,23 +1988,25 @@ pub extern "C" fn loomgui_stage_set_text(
     text: *const u8,
     len: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
-    let text = if text.is_null() || len == 0 {
-        ""
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, len) }) {
-            Ok(s) => s,
-            Err(_) => return -1,
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
         }
-    };
-    sh.stage
-        .set_text(NodeId(node), text)
-        .map(|_| 0)
-        .unwrap_or(-1)
+        let sh = unsafe { &mut *h };
+        // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+        let text = if text.is_null() || len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, len) }) {
+                Ok(s) => s,
+                Err(_) => return -1,
+            }
+        };
+        sh.stage
+            .set_text(NodeId(node), text)
+            .map(|_| 0)
+            .unwrap_or(-1)
+    })
 }
 
 /// 重启子树内声明式动画（class 触发 keyframes；programmatic node.Play player 不动）。
@@ -1843,14 +2016,16 @@ pub extern "C" fn loomgui_stage_set_text(
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_restart_animations(h: *mut StageHandle, node_id: u32) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    match sh.stage.restart_animations(NodeId(node_id)) {
-        Ok(()) => 0,
-        Err(_) => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        match sh.stage.restart_animations(NodeId(node_id)) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
 }
 
 /// 改 Image 节点 src + 标 dirty_mesh。src = UTF-8 字节。0=ok，-1=err。
@@ -1866,20 +2041,22 @@ pub extern "C" fn loomgui_stage_set_src(
     src: *const u8,
     len: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
-    let src = if src.is_null() || len == 0 {
-        ""
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(src, len) }) {
-            Ok(s) => s,
-            Err(_) => return -1,
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
         }
-    };
-    sh.stage.set_src(NodeId(node), src).map(|_| 0).unwrap_or(-1)
+        let sh = unsafe { &mut *h };
+        // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+        let src = if src.is_null() || len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(src, len) }) {
+                Ok(s) => s,
+                Err(_) => return -1,
+            }
+        };
+        sh.stage.set_src(NodeId(node), src).map(|_| 0).unwrap_or(-1)
+    })
 }
 
 /// 写 inline override（便签层，优先级 > 动态规则 > base_style）。css = UTF-8 字节。
@@ -1895,23 +2072,25 @@ pub extern "C" fn loomgui_stage_set_inline_override(
     css: *const u8,
     len: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
-    let css = if css.is_null() || len == 0 {
-        ""
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, len) }) {
-            Ok(s) => s,
-            Err(_) => return -1,
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
         }
-    };
-    sh.stage
-        .set_inline_override(NodeId(node), css)
-        .map(|_| 0)
-        .unwrap_or(-1)
+        let sh = unsafe { &mut *h };
+        // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+        let css = if css.is_null() || len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(css, len) }) {
+                Ok(s) => s,
+                Err(_) => return -1,
+            }
+        };
+        sh.stage
+            .set_inline_override(NodeId(node), css)
+            .map(|_| 0)
+            .unwrap_or(-1)
+    })
 }
 
 /// 清 inline override 的某 prop bit。prop = UTF-8 字节。0=ok，-1=err。
@@ -1927,23 +2106,25 @@ pub extern "C" fn loomgui_stage_unset_inline_override(
     prop: *const u8,
     len: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
-    let prop = if prop.is_null() || len == 0 {
-        ""
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(prop, len) }) {
-            Ok(s) => s,
-            Err(_) => return -1,
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
         }
-    };
-    sh.stage
-        .unset_inline_override(NodeId(node), prop)
-        .map(|_| 0)
-        .unwrap_or(-1)
+        let sh = unsafe { &mut *h };
+        // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+        let prop = if prop.is_null() || len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(prop, len) }) {
+                Ok(s) => s,
+                Err(_) => return -1,
+            }
+        };
+        sh.stage
+            .unset_inline_override(NodeId(node), prop)
+            .map(|_| 0)
+            .unwrap_or(-1)
+    })
 }
 
 /// 读节点子节点数。返回 i32：≥0 = 子节点数；-1 = err（null 句柄 / 节点不 live）。
@@ -1951,14 +2132,16 @@ pub extern "C" fn loomgui_stage_unset_inline_override(
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_child_count(h: *const StageHandle, node: u32) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    match sh.stage.get_child_count(NodeId(node)) {
-        Some(c) => c as i32,
-        None => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        match sh.stage.get_child_count(NodeId(node)) {
+            Some(c) => c as i32,
+            None => -1,
+        }
+    })
 }
 
 /// 读节点子节点 NodeId 列表，写入 `out` buffer（u32 per slot）。
@@ -1973,26 +2156,28 @@ pub extern "C" fn loomgui_stage_get_children(
     out: *mut u32,
     cap: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    match sh.stage.get_children(NodeId(node)) {
-        None => -1,
-        Some(kids) => {
-            if kids.len() > cap {
-                return -(kids.len() as i32 + 2);
-            }
-            if !out.is_null() {
-                for (i, k) in kids.iter().enumerate() {
-                    unsafe {
-                        *out.add(i) = k.0;
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        match sh.stage.get_children(NodeId(node)) {
+            None => -1,
+            Some(kids) => {
+                if kids.len() > cap {
+                    return -(kids.len() as i32 + 2);
+                }
+                if !out.is_null() {
+                    for (i, k) in kids.iter().enumerate() {
+                        unsafe {
+                            *out.add(i) = k.0;
+                        }
                     }
                 }
+                kids.len() as i32
             }
-            kids.len() as i32
         }
-    }
+    })
 }
 
 /// 加 class（重复名不重复 push）。name = UTF-8 字节。0=ok，-1=err。
@@ -2006,18 +2191,20 @@ pub extern "C" fn loomgui_stage_add_class(
     name: *const u8,
     len: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, len) }) {
-        Ok(s) => s,
-        Err(_) => return -1,
-    };
-    sh.stage
-        .add_class(NodeId(node), name)
-        .map(|_| 0)
-        .unwrap_or(-1)
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, len) }) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        sh.stage
+            .add_class(NodeId(node), name)
+            .map(|_| 0)
+            .unwrap_or(-1)
+    })
 }
 
 /// 移除 class（全部匹配）。name = UTF-8 字节。0=ok，-1=err。标 dirty_mesh。
@@ -2030,18 +2217,20 @@ pub extern "C" fn loomgui_stage_remove_class(
     name: *const u8,
     len: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, len) }) {
-        Ok(s) => s,
-        Err(_) => return -1,
-    };
-    sh.stage
-        .remove_class(NodeId(node), name)
-        .map(|_| 0)
-        .unwrap_or(-1)
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, len) }) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        sh.stage
+            .remove_class(NodeId(node), name)
+            .map(|_| 0)
+            .unwrap_or(-1)
+    })
 }
 
 /// 查询 class 是否存在。返回 i32：1 = true；0 = false；-1 = err（null 句柄 / 节点不 live）。
@@ -2055,19 +2244,21 @@ pub extern "C" fn loomgui_stage_has_class(
     name: *const u8,
     len: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, len) }) {
-        Ok(s) => s,
-        Err(_) => return -1,
-    };
-    match sh.stage.has_class(NodeId(node), name) {
-        Some(true) => 1,
-        Some(false) => 0,
-        None => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let name = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, len) }) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        match sh.stage.has_class(NodeId(node), name) {
+            Some(true) => 1,
+            Some(false) => 0,
+            None => -1,
+        }
+    })
 }
 
 // ===== control state + transform get/set FFI（C# 投影层控件属性回写出口）=====
@@ -2090,63 +2281,65 @@ pub extern "C" fn loomgui_stage_set_control_value(
     node_id: u32,
     value: f32,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let scene = match sh.stage.scene.as_mut() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let id = NodeId(node_id);
-    let Some(state) = scene.controls.get(id).cloned() else {
-        return -1;
-    };
-    let new_state = match state {
-        ControlState::Progress {
-            max, indeterminate, ..
-        } => {
-            // 存储的 max 来自 ControlInit（instantiate sanitize 到 ≥0）或 set_control_max
-            // （guard 到 ≥0），但 FFI 边界纵深守卫：负 max 会让 clamp(0.0,max) panic。
-            let max = max.max(0.0);
-            let clamped = value.clamp(0.0, max);
-            ControlState::Progress {
-                value: clamped,
-                max,
-                indeterminate,
-            }
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
         }
-        ControlState::Slider {
-            min,
-            max,
-            step,
-            dragging,
-            ..
-        } => {
-            // 同上：clamp(min,max) 在 min>max 时 panic，FFI 边界纵深守卫。
-            let (lo, hi) = if min <= max { (min, max) } else { (max, min) };
-            let clamped = value.clamp(lo, hi);
-            let quantized = if step > 0.0 {
-                // 对齐到最近 step 边界：round((v - min) / step) * step + min
-                ((clamped - lo) / step).round() * step + lo
-            } else {
-                clamped
-            };
-            // 量化可能把值推过 hi（如 lo=0,hi=100,step=6,v=100 → 102），
-            // 重新 clamp 回 [lo,hi]，保证不违反区间契约。
-            let quantized = quantized.clamp(lo, hi);
+        let sh = unsafe { &mut *h };
+        let scene = match sh.stage.scene.as_mut() {
+            Some(s) => s,
+            None => return -1,
+        };
+        let id = NodeId(node_id);
+        let Some(state) = scene.controls.get(id).cloned() else {
+            return -1;
+        };
+        let new_state = match state {
+            ControlState::Progress {
+                max, indeterminate, ..
+            } => {
+                // 存储的 max 来自 ControlInit（instantiate sanitize 到 ≥0）或 set_control_max
+                // （guard 到 ≥0），但 FFI 边界纵深守卫：负 max 会让 clamp(0.0,max) panic。
+                let max = max.max(0.0);
+                let clamped = value.clamp(0.0, max);
+                ControlState::Progress {
+                    value: clamped,
+                    max,
+                    indeterminate,
+                }
+            }
             ControlState::Slider {
-                value: quantized,
-                min: lo,
-                max: hi,
+                min,
+                max,
                 step,
                 dragging,
+                ..
+            } => {
+                // 同上：clamp(min,max) 在 min>max 时 panic，FFI 边界纵深守卫。
+                let (lo, hi) = if min <= max { (min, max) } else { (max, min) };
+                let clamped = value.clamp(lo, hi);
+                let quantized = if step > 0.0 {
+                    // 对齐到最近 step 边界：round((v - min) / step) * step + min
+                    ((clamped - lo) / step).round() * step + lo
+                } else {
+                    clamped
+                };
+                // 量化可能把值推过 hi（如 lo=0,hi=100,step=6,v=100 → 102），
+                // 重新 clamp 回 [lo,hi]，保证不违反区间契约。
+                let quantized = quantized.clamp(lo, hi);
+                ControlState::Slider {
+                    value: quantized,
+                    min: lo,
+                    max: hi,
+                    step,
+                    dragging,
+                }
             }
-        }
-        _ => return -1,
-    };
-    scene.controls.ensure(id, new_state);
-    0
+            _ => return -1,
+        };
+        scene.controls.ensure(id, new_state);
+        0
+    })
 }
 
 /// 读控件 value（ProgressBar / Slider）。rc=0 且 *out 已填；非 value 控件 / null out /
@@ -2159,20 +2352,22 @@ pub extern "C" fn loomgui_stage_get_control_value(
     node_id: u32,
     out: *mut f32,
 ) -> i32 {
-    if h.is_null() || out.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::Progress { value, .. } | ControlState::Slider { value, .. }) => {
-            unsafe { *out = *value };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
         }
-        _ => -1,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::Progress { value, .. } | ControlState::Slider { value, .. }) => {
+                unsafe { *out = *value };
+                0
+            }
+            _ => -1,
+        }
+    })
 }
 
 /// 设控件 checked（Toggle / Radio）。非 check 控件 / null 句柄 / 节点缺失 → -1。
@@ -2184,25 +2379,27 @@ pub extern "C" fn loomgui_stage_set_control_checked(
     node_id: u32,
     checked: bool,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let scene = match sh.stage.scene.as_mut() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let id = NodeId(node_id);
-    let Some(state) = scene.controls.get(id).cloned() else {
-        return -1;
-    };
-    let new_state = match state {
-        ControlState::Toggle { .. } => ControlState::Toggle { checked },
-        ControlState::Radio { name, .. } => ControlState::Radio { checked, name },
-        _ => return -1,
-    };
-    scene.controls.ensure(id, new_state);
-    0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let scene = match sh.stage.scene.as_mut() {
+            Some(s) => s,
+            None => return -1,
+        };
+        let id = NodeId(node_id);
+        let Some(state) = scene.controls.get(id).cloned() else {
+            return -1;
+        };
+        let new_state = match state {
+            ControlState::Toggle { .. } => ControlState::Toggle { checked },
+            ControlState::Radio { name, .. } => ControlState::Radio { checked, name },
+            _ => return -1,
+        };
+        scene.controls.ensure(id, new_state);
+        0
+    })
 }
 
 /// 读控件 checked（Toggle / Radio）。rc=0 且 *out 已填；非 check 控件 / null out /
@@ -2215,20 +2412,22 @@ pub extern "C" fn loomgui_stage_get_control_checked(
     node_id: u32,
     out: *mut bool,
 ) -> i32 {
-    if h.is_null() || out.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::Toggle { checked } | ControlState::Radio { checked, .. }) => {
-            unsafe { *out = *checked };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
         }
-        _ => -1,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::Toggle { checked } | ControlState::Radio { checked, .. }) => {
+                unsafe { *out = *checked };
+                0
+            }
+            _ => -1,
+        }
+    })
 }
 
 /// 设控件 max（ProgressBar / Slider / NumberField）。null 句柄 / 非值控件 / 节点缺失 → -1。
@@ -2240,77 +2439,79 @@ pub extern "C" fn loomgui_stage_set_control_max(
     node_id: u32,
     max: f32,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let scene = match sh.stage.scene.as_mut() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let id = NodeId(node_id);
-    let Some(state) = scene.controls.get(id).cloned() else {
-        return -1;
-    };
-    let new_state = match state {
-        ControlState::Progress {
-            value,
-            indeterminate,
-            ..
-        } => {
-            // Progress 的 max 天然非负；caller 可能传负值，先 guard 到 ≥0 再 clamp。
-            // f32::clamp 在 min > max（即 0.0 > max）时 panic，FFI 不可因 caller
-            // 输入 abort 宿主进程（镜像 Slider arm 的 max.max(min) 守卫）。
-            let max = max.max(0.0);
-            // 改 max 后把 value 重新 clamp 进新区间（避免 value > max 的悬空态）
-            let value = value.clamp(0.0, max);
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let scene = match sh.stage.scene.as_mut() {
+            Some(s) => s,
+            None => return -1,
+        };
+        let id = NodeId(node_id);
+        let Some(state) = scene.controls.get(id).cloned() else {
+            return -1;
+        };
+        let new_state = match state {
             ControlState::Progress {
                 value,
-                max,
                 indeterminate,
+                ..
+            } => {
+                // Progress 的 max 天然非负；caller 可能传负值，先 guard 到 ≥0 再 clamp。
+                // f32::clamp 在 min > max（即 0.0 > max）时 panic，FFI 不可因 caller
+                // 输入 abort 宿主进程（镜像 Slider arm 的 max.max(min) 守卫）。
+                let max = max.max(0.0);
+                // 改 max 后把 value 重新 clamp 进新区间（避免 value > max 的悬空态）
+                let value = value.clamp(0.0, max);
+                ControlState::Progress {
+                    value,
+                    max,
+                    indeterminate,
+                }
             }
-        }
-        ControlState::Slider {
-            value,
-            min,
-            step,
-            dragging,
-            ..
-        } => {
-            let max = max.max(min);
-            let clamped = value.clamp(min, max);
-            // 改 max 后重新量化（与 set_control_value 同口径，维持 step 对齐不变量）。
-            let value = if step > 0.0 {
-                ((clamped - min) / step).round() * step + min
-            } else {
-                clamped
-            }
-            .clamp(min, max);
             ControlState::Slider {
                 value,
                 min,
-                max,
                 step,
                 dragging,
+                ..
+            } => {
+                let max = max.max(min);
+                let clamped = value.clamp(min, max);
+                // 改 max 后重新量化（与 set_control_value 同口径，维持 step 对齐不变量）。
+                let value = if step > 0.0 {
+                    ((clamped - min) / step).round() * step + min
+                } else {
+                    clamped
+                }
+                .clamp(min, max);
+                ControlState::Slider {
+                    value,
+                    min,
+                    max,
+                    step,
+                    dragging,
+                }
             }
-        }
-        ControlState::NumberField {
-            edit, min, step, ..
-        } => {
-            let max = max.max(min);
-            let mut edit = edit;
-            renumber_edit_value(&mut edit, min, max, step);
             ControlState::NumberField {
-                edit,
-                min,
-                max,
-                step,
+                edit, min, step, ..
+            } => {
+                let max = max.max(min);
+                let mut edit = edit;
+                renumber_edit_value(&mut edit, min, max, step);
+                ControlState::NumberField {
+                    edit,
+                    min,
+                    max,
+                    step,
+                }
             }
-        }
-        _ => return -1,
-    };
-    scene.controls.ensure(id, new_state);
-    0
+            _ => return -1,
+        };
+        scene.controls.ensure(id, new_state);
+        0
+    })
 }
 
 /// 读控件 max（ProgressBar / Slider / NumberField）。非值控件 / null out / 节点缺失 → -1。
@@ -2322,24 +2523,26 @@ pub extern "C" fn loomgui_stage_get_control_max(
     node_id: u32,
     out: *mut f32,
 ) -> i32 {
-    if h.is_null() || out.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.controls.get(NodeId(node_id)) {
-        Some(
-            ControlState::Progress { max, .. }
-            | ControlState::Slider { max, .. }
-            | ControlState::NumberField { max, .. },
-        ) => {
-            unsafe { *out = *max };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
         }
-        _ => -1,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(
+                ControlState::Progress { max, .. }
+                | ControlState::Slider { max, .. }
+                | ControlState::NumberField { max, .. },
+            ) => {
+                unsafe { *out = *max };
+                0
+            }
+            _ => -1,
+        }
+    })
 }
 
 /// 设控件 min（Slider / NumberField；ProgressBar 无 min 语义 → -1）。
@@ -2352,53 +2555,55 @@ pub extern "C" fn loomgui_stage_set_control_min(
     node_id: u32,
     min: f32,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let scene = match sh.stage.scene.as_mut() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let id = NodeId(node_id);
-    let Some(state) = scene.controls.get(id).cloned() else {
-        return -1;
-    };
-    let new_state = match state {
-        ControlState::Slider {
-            value,
-            max,
-            step,
-            dragging,
-            ..
-        } => {
-            let min = min.min(max);
-            let value = value.clamp(min, max);
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let scene = match sh.stage.scene.as_mut() {
+            Some(s) => s,
+            None => return -1,
+        };
+        let id = NodeId(node_id);
+        let Some(state) = scene.controls.get(id).cloned() else {
+            return -1;
+        };
+        let new_state = match state {
             ControlState::Slider {
                 value,
-                min,
                 max,
                 step,
                 dragging,
+                ..
+            } => {
+                let min = min.min(max);
+                let value = value.clamp(min, max);
+                ControlState::Slider {
+                    value,
+                    min,
+                    max,
+                    step,
+                    dragging,
+                }
             }
-        }
-        ControlState::NumberField {
-            edit, max, step, ..
-        } => {
-            let min = min.min(max);
-            let mut edit = edit;
-            renumber_edit_value(&mut edit, min, max, step);
             ControlState::NumberField {
-                edit,
-                min,
-                max,
-                step,
+                edit, max, step, ..
+            } => {
+                let min = min.min(max);
+                let mut edit = edit;
+                renumber_edit_value(&mut edit, min, max, step);
+                ControlState::NumberField {
+                    edit,
+                    min,
+                    max,
+                    step,
+                }
             }
-        }
-        _ => return -1,
-    };
-    scene.controls.ensure(id, new_state);
-    0
+            _ => return -1,
+        };
+        scene.controls.ensure(id, new_state);
+        0
+    })
 }
 
 /// 读控件 min（Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
@@ -2410,20 +2615,22 @@ pub extern "C" fn loomgui_stage_get_control_min(
     node_id: u32,
     out: *mut f32,
 ) -> i32 {
-    if h.is_null() || out.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::Slider { min, .. } | ControlState::NumberField { min, .. }) => {
-            unsafe { *out = *min };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
         }
-        _ => -1,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::Slider { min, .. } | ControlState::NumberField { min, .. }) => {
+                unsafe { *out = *min };
+                0
+            }
+            _ => -1,
+        }
+    })
 }
 
 /// 设控件 step（Slider / NumberField；ProgressBar 无 step 语义 → -1）。
@@ -2437,55 +2644,57 @@ pub extern "C" fn loomgui_stage_set_control_step(
     node_id: u32,
     step: f32,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let scene = match sh.stage.scene.as_mut() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let id = NodeId(node_id);
-    let Some(state) = scene.controls.get(id).cloned() else {
-        return -1;
-    };
-    let new_state = match state {
-        ControlState::Slider {
-            value,
-            min,
-            max,
-            dragging,
-            ..
-        } => {
-            // step 语义为正（量化步长）：负值/NaN 无意义，拒绝而非存脏（下游 step>0.0
-            // 守卫虽不 panic，但存负 step 会让 set_control_value 的量化分支走错路径）。
-            if !step.is_finite() || step < 0.0 {
-                return -1;
-            }
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let scene = match sh.stage.scene.as_mut() {
+            Some(s) => s,
+            None => return -1,
+        };
+        let id = NodeId(node_id);
+        let Some(state) = scene.controls.get(id).cloned() else {
+            return -1;
+        };
+        let new_state = match state {
             ControlState::Slider {
                 value,
                 min,
                 max,
-                step,
                 dragging,
+                ..
+            } => {
+                // step 语义为正（量化步长）：负值/NaN 无意义，拒绝而非存脏（下游 step>0.0
+                // 守卫虽不 panic，但存负 step 会让 set_control_value 的量化分支走错路径）。
+                if !step.is_finite() || step < 0.0 {
+                    return -1;
+                }
+                ControlState::Slider {
+                    value,
+                    min,
+                    max,
+                    step,
+                    dragging,
+                }
             }
-        }
-        ControlState::NumberField { edit, min, max, .. } => {
-            // 同 Slider：负 / NaN 拒绝（set_number_value 的量化分支同样假设 step>0）。
-            if !step.is_finite() || step < 0.0 {
-                return -1;
+            ControlState::NumberField { edit, min, max, .. } => {
+                // 同 Slider：负 / NaN 拒绝（set_number_value 的量化分支同样假设 step>0）。
+                if !step.is_finite() || step < 0.0 {
+                    return -1;
+                }
+                ControlState::NumberField {
+                    edit,
+                    min,
+                    max,
+                    step,
+                }
             }
-            ControlState::NumberField {
-                edit,
-                min,
-                max,
-                step,
-            }
-        }
-        _ => return -1,
-    };
-    scene.controls.ensure(id, new_state);
-    0
+            _ => return -1,
+        };
+        scene.controls.ensure(id, new_state);
+        0
+    })
 }
 
 /// NumberField value 文本按 [min,max] 重约束：parse → clamp → step 量化 → re-format 写回
@@ -2517,20 +2726,22 @@ pub extern "C" fn loomgui_stage_get_control_step(
     node_id: u32,
     out: *mut f32,
 ) -> i32 {
-    if h.is_null() || out.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::Slider { step, .. } | ControlState::NumberField { step, .. }) => {
-            unsafe { *out = *step };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
         }
-        _ => -1,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::Slider { step, .. } | ControlState::NumberField { step, .. }) => {
+                unsafe { *out = *step };
+                0
+            }
+            _ => -1,
+        }
+    })
 }
 
 /// 读 ProgressBar indeterminate（不确定进度态）。非 Progress / null out / 节点缺失 → -1。
@@ -2543,20 +2754,22 @@ pub extern "C" fn loomgui_stage_get_control_indeterminate(
     node_id: u32,
     out: *mut u8,
 ) -> i32 {
-    if h.is_null() || out.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::Progress { indeterminate, .. }) => {
-            unsafe { *out = u8::from(*indeterminate) };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
         }
-        _ => -1,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::Progress { indeterminate, .. }) => {
+                unsafe { *out = u8::from(*indeterminate) };
+                0
+            }
+            _ => -1,
+        }
+    })
 }
 
 /// 设 ProgressBar indeterminate。写状态位（value/max 不动——不确定态下 value 语义由
@@ -2569,21 +2782,23 @@ pub extern "C" fn loomgui_stage_set_control_indeterminate(
     node_id: u32,
     v: u8,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return -1;
-    };
-    // 原地改（get_mut），不重建 ControlState（保 variant 口径，同 set_number_value）。
-    match scene.controls.get_mut(NodeId(node_id)) {
-        Some(ControlState::Progress { indeterminate, .. }) => {
-            *indeterminate = v != 0;
-            0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
         }
-        _ => -1,
-    }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return -1;
+        };
+        // 原地改（get_mut），不重建 ControlState（保 variant 口径，同 set_number_value）。
+        match scene.controls.get_mut(NodeId(node_id)) {
+            Some(ControlState::Progress { indeterminate, .. }) => {
+                *indeterminate = v != 0;
+                0
+            }
+            _ => -1,
+        }
+    })
 }
 
 /// 读 RadioButton 分组名（HTML name 语义：同名组互斥，打包期从 data-name bake）。
@@ -2599,31 +2814,33 @@ pub extern "C" fn loomgui_stage_get_radio_name(
     buf_cap: usize,
     out_len: *mut usize,
 ) -> i32 {
-    if h.is_null() || out_len.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    let name = match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::Radio { name, .. }) => name.as_bytes(),
-        _ => return -1,
-    };
-    let needed = name.len();
-    unsafe { *out_len = needed };
-    if needed > buf_cap {
-        return -2;
-    }
-    if needed > 0 {
-        if out.is_null() {
+    ffi_guard(-1, || {
+        if h.is_null() || out_len.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        let name = match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::Radio { name, .. }) => name.as_bytes(),
+            _ => return -1,
+        };
+        let needed = name.len();
+        unsafe { *out_len = needed };
+        if needed > buf_cap {
             return -2;
         }
-        unsafe {
-            std::ptr::copy_nonoverlapping(name.as_ptr(), out, needed);
+        if needed > 0 {
+            if out.is_null() {
+                return -2;
+            }
+            unsafe {
+                std::ptr::copy_nonoverlapping(name.as_ptr(), out, needed);
+            }
         }
-    }
-    0
+        0
+    })
 }
 
 /// 读 Dropdown 当前选中项的 value（`value` 属性优先，缺席回落该项文本——HTML 语义）。
@@ -2640,19 +2857,21 @@ pub extern "C" fn loomgui_stage_get_dropdown_selected_value(
     buf_cap: usize,
     out_len: *mut usize,
 ) -> i32 {
-    let value = match read_control_string(h, node_id, out, buf_cap, out_len, |scene, id| {
-        loomgui_core::scene::control::dropdown_selected_value(scene, id)
-    }) {
-        Ok(v) => v,
-        Err(rc) => return rc,
-    };
-    match value {
-        Some(v) => write_out_string(&v, out, buf_cap, out_len),
-        None => {
-            unsafe { *out_len = 0 };
-            1
+    ffi_guard(-1, || {
+        let value = match read_control_string(h, node_id, out, buf_cap, out_len, |scene, id| {
+            loomgui_core::scene::control::dropdown_selected_value(scene, id)
+        }) {
+            Ok(v) => v,
+            Err(rc) => return rc,
+        };
+        match value {
+            Some(v) => write_out_string(&v, out, buf_cap, out_len),
+            None => {
+                unsafe { *out_len = 0 };
+                1
+            }
         }
-    }
+    })
 }
 
 /// 读单个 option 的 value（同 dropdown_selected_value 的 fallback 语义，按 option
@@ -2667,16 +2886,18 @@ pub extern "C" fn loomgui_stage_get_option_value(
     buf_cap: usize,
     out_len: *mut usize,
 ) -> i32 {
-    let value = match read_control_string(h, node_id, out, buf_cap, out_len, |scene, id| {
-        loomgui_core::scene::control::option_value(scene, id)
-    }) {
-        Ok(v) => v,
-        Err(rc) => return rc,
-    };
-    match value {
-        Some(v) => write_out_string(&v, out, buf_cap, out_len),
-        None => -1,
-    }
+    ffi_guard(-1, || {
+        let value = match read_control_string(h, node_id, out, buf_cap, out_len, |scene, id| {
+            loomgui_core::scene::control::option_value(scene, id)
+        }) {
+            Ok(v) => v,
+            Err(rc) => return rc,
+        };
+        match value {
+            Some(v) => write_out_string(&v, out, buf_cap, out_len),
+            None => -1,
+        }
+    })
 }
 
 /// option 是否为所属 Dropdown 的当前选中项（合成：序号 == 父 selected_index）。
@@ -2685,18 +2906,20 @@ pub extern "C" fn loomgui_stage_get_option_value(
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_is_option_selected(h: *const StageHandle, node_id: u32) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match loomgui_core::scene::control::option_selected(scene, NodeId(node_id)) {
-        Some(true) => 1,
-        Some(false) => 0,
-        None => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match loomgui_core::scene::control::option_selected(scene, NodeId(node_id)) {
+            Some(true) => 1,
+            Some(false) => 0,
+            None => -1,
+        }
+    })
 }
 
 /// tab 是否为所属 TabList 的当前激活项（合成：序号 == 父 selected_index，与
@@ -2705,18 +2928,20 @@ pub extern "C" fn loomgui_stage_is_option_selected(h: *const StageHandle, node_i
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_is_tab_selected(h: *const StageHandle, node_id: u32) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match loomgui_core::scene::control::tab_selected(scene, NodeId(node_id)) {
-        Some(true) => 1,
-        Some(false) => 0,
-        None => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match loomgui_core::scene::control::tab_selected(scene, NodeId(node_id)) {
+            Some(true) => 1,
+            Some(false) => 0,
+            None => -1,
+        }
+    })
 }
 
 /// 控件派生字符串读的公共骨架：校验句柄 + 取 scene + 跑派生闭包。
@@ -2771,52 +2996,55 @@ pub extern "C" fn loomgui_stage_set_control_text(
     text: *const u8,
     len: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
-    let text = if text.is_null() || len == 0 {
-        ""
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, len) }) {
-            Ok(s) => s,
-            Err(_) => return -1,
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
         }
-    };
-    let sh = unsafe { &mut *h };
-    let scene = match sh.stage.scene.as_mut() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let id = NodeId(node_id);
-    let new_value = text.to_string();
-    // 原地改 EditState（get_mut），不重建 ControlState——重建为 TextField 会把 TextArea
-    // 节点改写成 TextField，破坏 ControlState/NodeKind variant 一致性不变量。同 control.rs
-    // on_text_pointer_down 的 in-place 改法。
-    let mut changed = false;
-    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get_mut(id)
-    {
-        // 直接替换 value + 光标/anchor 移到末尾（编程 setter，不走 insert_text 路径）。
-        // readonly 不拦（编程可写，照 JS .value = ... 语义）。同值仍重置光标但不发事件。
-        if e.value != new_value {
-            e.value = new_value.clone();
-            e.cursor_visible = true;
-            e.cursor_timer = 0.0;
-            changed = true;
+        // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
+        let text = if text.is_null() || len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, len) }) {
+                Ok(s) => s,
+                Err(_) => return -1,
+            }
+        };
+        let sh = unsafe { &mut *h };
+        let scene = match sh.stage.scene.as_mut() {
+            Some(s) => s,
+            None => return -1,
+        };
+        let id = NodeId(node_id);
+        let new_value = text.to_string();
+        // 原地改 EditState（get_mut），不重建 ControlState——重建为 TextField 会把 TextArea
+        // 节点改写成 TextField，破坏 ControlState/NodeKind variant 一致性不变量。同 control.rs
+        // on_text_pointer_down 的 in-place 改法。
+        let mut changed = false;
+        if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
+            scene.controls.get_mut(id)
+        {
+            // 直接替换 value + 光标/anchor 移到末尾（编程 setter，不走 insert_text 路径）。
+            // readonly 不拦（编程可写，照 JS .value = ... 语义）。同值仍重置光标但不发事件。
+            if e.value != new_value {
+                e.value = new_value.clone();
+                e.cursor_visible = true;
+                e.cursor_timer = 0.0;
+                changed = true;
+            }
+            e.cursor = new_value.len();
+            e.anchor = e.cursor;
+            // value 被整体替换 → 抹掉正在进行的 composition（旧预提交文本失效）。
+            e.composition = None;
+        } else {
+            return -1;
         }
-        e.cursor = new_value.len();
-        e.anchor = e.cursor;
-        // value 被整体替换 → 抹掉正在进行的 composition（旧预提交文本失效）。
-        e.composition = None;
-    } else {
-        return -1;
-    }
-    // ValueChanged 须在 get_mut 借用结束后产：if-let 块出来后 scene 借用（借 sh.stage.scene）
-    // 由 NLL 释放，方可另借 sh.stage.pending_events（不同字段）。
-    if changed {
-        loomgui_core::scene::control::emit_value_changed(&mut sh.stage.pending_events, id);
-    }
-    0
+        // ValueChanged 须在 get_mut 借用结束后产：if-let 块出来后 scene 借用（借 sh.stage.scene）
+        // 由 NLL 释放，方可另借 sh.stage.pending_events（不同字段）。
+        if changed {
+            loomgui_core::scene::control::emit_value_changed(&mut sh.stage.pending_events, id);
+        }
+        0
+    })
 }
 
 /// 读文本控件 value（TextField / TextArea）。return-code + out-param（ptr+len）双调法：
@@ -2832,33 +3060,35 @@ pub extern "C" fn loomgui_stage_get_control_text(
     buf_cap: usize,
     out_len: *mut usize,
 ) -> i32 {
-    if h.is_null() || out_len.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    let value = match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::TextField(e) | ControlState::TextArea(e)) => e.value.as_bytes(),
-        _ => return -1,
-    };
-    let needed = value.len();
-    unsafe { *out_len = needed };
-    // buf_cap 不够（含 0 探大小）→ -2 + 所需 len（双调法，同 font_atlas_page）。
-    if needed > buf_cap {
-        return -2;
-    }
-    // buf_cap >= needed > 0：out 必非 null（caller 保证），拷贝。needed=0 时 null out 也合法。
-    if needed > 0 {
-        if out.is_null() {
+    ffi_guard(-1, || {
+        if h.is_null() || out_len.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        let value = match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::TextField(e) | ControlState::TextArea(e)) => e.value.as_bytes(),
+            _ => return -1,
+        };
+        let needed = value.len();
+        unsafe { *out_len = needed };
+        // buf_cap 不够（含 0 探大小）→ -2 + 所需 len（双调法，同 font_atlas_page）。
+        if needed > buf_cap {
             return -2;
         }
-        unsafe {
-            std::ptr::copy_nonoverlapping(value.as_ptr(), out, needed);
+        // buf_cap >= needed > 0：out 必非 null（caller 保证），拷贝。needed=0 时 null out 也合法。
+        if needed > 0 {
+            if out.is_null() {
+                return -2;
+            }
+            unsafe {
+                std::ptr::copy_nonoverlapping(value.as_ptr(), out, needed);
+            }
         }
-    }
-    0
+        0
+    })
 }
 
 /// 设文本控件选区 (anchor, cursor)（字节偏移）。反向（anchor>cursor）允许，get_selection
@@ -2874,27 +3104,30 @@ pub extern "C" fn loomgui_stage_set_selection(
     anchor: usize,
     cursor: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let scene = match sh.stage.scene.as_mut() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let id = NodeId(node_id);
-    // 原地改（get_mut），保 variant（重建为 TextField 会把 TextArea 改写成 TextField）。
-    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get_mut(id)
-    {
-        let len = e.value.len();
-        // clamp 到 [0, len]（len 总是合法 char 边界 = 末尾）。中间字节位置若非法 char
-        // 边界，向右退到最近合法边界（避免 UTF-8 切割 panic）。
-        e.anchor = clamp_char_boundary(&e.value, anchor.min(len));
-        e.cursor = clamp_char_boundary(&e.value, cursor.min(len));
-    } else {
-        return -1;
-    }
-    0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let scene = match sh.stage.scene.as_mut() {
+            Some(s) => s,
+            None => return -1,
+        };
+        let id = NodeId(node_id);
+        // 原地改（get_mut），保 variant（重建为 TextField 会把 TextArea 改写成 TextField）。
+        if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
+            scene.controls.get_mut(id)
+        {
+            let len = e.value.len();
+            // clamp 到 [0, len]（len 总是合法 char 边界 = 末尾）。中间字节位置若非法 char
+            // 边界，向右退到最近合法边界（避免 UTF-8 切割 panic）。
+            e.anchor = clamp_char_boundary(&e.value, anchor.min(len));
+            e.cursor = clamp_char_boundary(&e.value, cursor.min(len));
+        } else {
+            return -1;
+        }
+        0
+    })
 }
 
 /// 读文本控件选区。写入 *start/*end（闭区间，min/max 归一）。有选区 start<end，退化
@@ -2908,24 +3141,26 @@ pub extern "C" fn loomgui_stage_get_selection(
     start: *mut usize,
     end: *mut usize,
 ) -> i32 {
-    if h.is_null() || start.is_null() || end.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::TextField(e) | ControlState::TextArea(e)) => {
-            let (b, c) = e.selection_range();
-            unsafe {
-                *start = b;
-                *end = c;
-            }
-            0
+    ffi_guard(-1, || {
+        if h.is_null() || start.is_null() || end.is_null() {
+            return -1;
         }
-        _ => -1,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::TextField(e) | ControlState::TextArea(e)) => {
+                let (b, c) = e.selection_range();
+                unsafe {
+                    *start = b;
+                    *end = c;
+                }
+                0
+            }
+            _ => -1,
+        }
+    })
 }
 
 /// 设文本控件 placeholder（value 为空时渲染它）。非文本控件 / null 句柄 → -1。
@@ -2938,32 +3173,35 @@ pub extern "C" fn loomgui_stage_set_control_placeholder(
     text: *const u8,
     len: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    // null/零长兜底为空串（清 placeholder）：from_raw_parts(null, 0) 是 UB。
-    let text = if text.is_null() || len == 0 {
-        ""
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, len) }) {
-            Ok(s) => s,
-            Err(_) => return -1,
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
         }
-    };
-    let sh = unsafe { &mut *h };
-    let scene = match sh.stage.scene.as_mut() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let id = NodeId(node_id);
-    // 原地改（get_mut），保 variant。
-    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get_mut(id)
-    {
-        e.placeholder = text.to_string();
-    } else {
-        return -1;
-    }
-    0
+        // null/零长兜底为空串（清 placeholder）：from_raw_parts(null, 0) 是 UB。
+        let text = if text.is_null() || len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, len) }) {
+                Ok(s) => s,
+                Err(_) => return -1,
+            }
+        };
+        let sh = unsafe { &mut *h };
+        let scene = match sh.stage.scene.as_mut() {
+            Some(s) => s,
+            None => return -1,
+        };
+        let id = NodeId(node_id);
+        // 原地改（get_mut），保 variant。
+        if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
+            scene.controls.get_mut(id)
+        {
+            e.placeholder = text.to_string();
+        } else {
+            return -1;
+        }
+        0
+    })
 }
 
 /// 读文本控件 placeholder。return-code + out-param（ptr+len）双调法（同 get_control_text）：
@@ -2978,31 +3216,35 @@ pub extern "C" fn loomgui_stage_get_control_placeholder(
     buf_cap: usize,
     out_len: *mut usize,
 ) -> i32 {
-    if h.is_null() || out_len.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    let ph = match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::TextField(e) | ControlState::TextArea(e)) => e.placeholder.as_bytes(),
-        _ => return -1,
-    };
-    let needed = ph.len();
-    unsafe { *out_len = needed };
-    if needed > buf_cap {
-        return -2;
-    }
-    if needed > 0 {
-        if out.is_null() {
+    ffi_guard(-1, || {
+        if h.is_null() || out_len.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        let ph = match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::TextField(e) | ControlState::TextArea(e)) => {
+                e.placeholder.as_bytes()
+            }
+            _ => return -1,
+        };
+        let needed = ph.len();
+        unsafe { *out_len = needed };
+        if needed > buf_cap {
             return -2;
         }
-        unsafe {
-            std::ptr::copy_nonoverlapping(ph.as_ptr(), out, needed);
+        if needed > 0 {
+            if out.is_null() {
+                return -2;
+            }
+            unsafe {
+                std::ptr::copy_nonoverlapping(ph.as_ptr(), out, needed);
+            }
         }
-    }
-    0
+        0
+    })
 }
 
 /// 设文本控件 readonly 标志（true = 用户不可编辑，编程 setter 仍可改 value）。
@@ -3015,28 +3257,30 @@ pub extern "C" fn loomgui_stage_set_control_readonly(
     node_id: u32,
     readonly: bool,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let scene = match sh.stage.scene.as_mut() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let id = NodeId(node_id);
-    // 原地改（get_mut），保 variant。NumberField 共享 EditState.readonly（与
-    // get_control_readonly 三 variant 同口径，保读写对称）。
-    if let Some(
-        ControlState::TextField(e)
-        | ControlState::TextArea(e)
-        | ControlState::NumberField { edit: e, .. },
-    ) = scene.controls.get_mut(id)
-    {
-        e.readonly = readonly;
-    } else {
-        return -1;
-    }
-    0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let scene = match sh.stage.scene.as_mut() {
+            Some(s) => s,
+            None => return -1,
+        };
+        let id = NodeId(node_id);
+        // 原地改（get_mut），保 variant。NumberField 共享 EditState.readonly（与
+        // get_control_readonly 三 variant 同口径，保读写对称）。
+        if let Some(
+            ControlState::TextField(e)
+            | ControlState::TextArea(e)
+            | ControlState::NumberField { edit: e, .. },
+        ) = scene.controls.get_mut(id)
+        {
+            e.readonly = readonly;
+        } else {
+            return -1;
+        }
+        0
+    })
 }
 
 /// 设文本控件 max_length（UTF-8 字符上限；0 = 无限）。非文本控件 / null 句柄 → -1。
@@ -3049,23 +3293,26 @@ pub extern "C" fn loomgui_stage_set_control_maxlength(
     node_id: u32,
     max_length: usize,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let scene = match sh.stage.scene.as_mut() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let id = NodeId(node_id);
-    // 原地改（get_mut），保 variant。
-    if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) = scene.controls.get_mut(id)
-    {
-        e.max_length = max_length;
-    } else {
-        return -1;
-    }
-    0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let scene = match sh.stage.scene.as_mut() {
+            Some(s) => s,
+            None => return -1,
+        };
+        let id = NodeId(node_id);
+        // 原地改（get_mut），保 variant。
+        if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
+            scene.controls.get_mut(id)
+        {
+            e.max_length = max_length;
+        } else {
+            return -1;
+        }
+        0
+    })
 }
 
 /// 把字节偏移 clamp 到 [0, len] 且落到合法 UTF-8 char 边界。idx 可能是非法边界（指向
@@ -3103,24 +3350,26 @@ pub extern "C" fn loomgui_stage_set_transform(
     ox: f32,
     oy: f32,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let scene = match sh.stage.scene.as_mut() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let t = NodeTransform {
-        translate: [tx, ty],
-        scale: [sx, sy],
-        rotation: rot,
-        origin: [ox, oy],
-    };
-    match dynamic::set_user_transform(scene, NodeId(node_id), t) {
-        Ok(()) => 0,
-        Err(_) => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let scene = match sh.stage.scene.as_mut() {
+            Some(s) => s,
+            None => return -1,
+        };
+        let t = NodeTransform {
+            translate: [tx, ty],
+            scale: [sx, sy],
+            rotation: rot,
+            origin: [ox, oy],
+        };
+        match dynamic::set_user_transform(scene, NodeId(node_id), t) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
 }
 
 // ===== get_node_disabled / get_control_readonly / blur / Dropdown / NumberField FFI =====
@@ -3135,17 +3384,19 @@ pub extern "C" fn loomgui_stage_get_node_disabled(
     node_id: u32,
     out: *mut u8,
 ) {
-    let disabled = if h.is_null() {
-        false
-    } else {
-        let sh = unsafe { &*h };
-        sh.stage.get_node_disabled(NodeId(node_id))
-    };
-    if !out.is_null() {
-        unsafe {
-            *out = if disabled { 1 } else { 0 };
+    ffi_guard((), || {
+        let disabled = if h.is_null() {
+            false
+        } else {
+            let sh = unsafe { &*h };
+            sh.stage.get_node_disabled(NodeId(node_id))
+        };
+        if !out.is_null() {
+            unsafe {
+                *out = if disabled { 1 } else { 0 };
+            }
         }
-    }
+    })
 }
 
 /// 读文本控件 readonly（`EditState.readonly`）：TextField / TextArea / NumberField 共享 EditState，
@@ -3158,24 +3409,26 @@ pub extern "C" fn loomgui_stage_get_control_readonly(
     node_id: u32,
     out: *mut u8,
 ) -> i32 {
-    if h.is_null() || out.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.controls.get(NodeId(node_id)) {
-        Some(
-            ControlState::TextField(e)
-            | ControlState::TextArea(e)
-            | ControlState::NumberField { edit: e, .. },
-        ) => {
-            unsafe { *out = if e.readonly { 1 } else { 0 } };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
         }
-        _ => -1,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(
+                ControlState::TextField(e)
+                | ControlState::TextArea(e)
+                | ControlState::NumberField { edit: e, .. },
+            ) => {
+                unsafe { *out = if e.readonly { 1 } else { 0 } };
+                0
+            }
+            _ => -1,
+        }
+    })
 }
 
 /// 清除当前 focus（`Stage::blur` 的 FFI 包装）：记 pending_focus_request = Some(None)，
@@ -3184,12 +3437,14 @@ pub extern "C" fn loomgui_stage_get_control_readonly(
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_blur(h: *mut StageHandle) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    sh.stage.blur();
-    0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage.blur();
+        0
+    })
 }
 
 /// 读 Dropdown 当前选中项索引（`ControlState::Dropdown.selected_index`）。
@@ -3202,20 +3457,22 @@ pub extern "C" fn loomgui_stage_get_dropdown_selected_index(
     node_id: u32,
     out: *mut u32,
 ) -> i32 {
-    if h.is_null() || out.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::Dropdown { selected_index, .. }) => {
-            unsafe { *out = *selected_index as u32 };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
         }
-        _ => -1,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::Dropdown { selected_index, .. }) => {
+                unsafe { *out = *selected_index as u32 };
+                0
+            }
+            _ => -1,
+        }
+    })
 }
 
 /// 设 Dropdown 选中项。置 `value_lock=true` 防本轮 cascade 回写（popup option 子项的
@@ -3229,25 +3486,27 @@ pub extern "C" fn loomgui_stage_set_dropdown_selected_index(
     node_id: u32,
     index: u32,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return -1;
-    };
-    if let Some(ControlState::Dropdown {
-        selected_index,
-        value_lock,
-        ..
-    }) = scene.controls.get_mut(NodeId(node_id))
-    {
-        *selected_index = index as usize;
-        *value_lock = true;
-        0
-    } else {
-        -1
-    }
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return -1;
+        };
+        if let Some(ControlState::Dropdown {
+            selected_index,
+            value_lock,
+            ..
+        }) = scene.controls.get_mut(NodeId(node_id))
+        {
+            *selected_index = index as usize;
+            *value_lock = true;
+            0
+        } else {
+            -1
+        }
+    })
 }
 
 /// 读 TabList 当前选中项索引（`ControlState::TabList.selected_index`）。
@@ -3260,20 +3519,22 @@ pub extern "C" fn loomgui_stage_get_tablist_selected_index(
     node_id: u32,
     out: *mut u32,
 ) -> i32 {
-    if h.is_null() || out.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::TabList { selected_index }) => {
-            unsafe { *out = *selected_index as u32 };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
         }
-        _ => -1,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::TabList { selected_index }) => {
+                unsafe { *out = *selected_index as u32 };
+                0
+            }
+            _ => -1,
+        }
+    })
 }
 
 /// 设 TabList 选中项。TabList 无 `value_lock`（aria-selected 是只读合成属性，无 cascade
@@ -3287,20 +3548,23 @@ pub extern "C" fn loomgui_stage_set_tablist_selected_index(
     node_id: u32,
     index: u32,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return -1;
-    };
-    if let Some(ControlState::TabList { selected_index }) = scene.controls.get_mut(NodeId(node_id))
-    {
-        *selected_index = index as usize;
-        0
-    } else {
-        -1
-    }
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return -1;
+        };
+        if let Some(ControlState::TabList { selected_index }) =
+            scene.controls.get_mut(NodeId(node_id))
+        {
+            *selected_index = index as usize;
+            0
+        } else {
+            -1
+        }
+    })
 }
 
 /// 读 Dropdown popup 是否展开（`ControlState::Dropdown.open`）。
@@ -3313,20 +3577,22 @@ pub extern "C" fn loomgui_stage_get_dropdown_open(
     node_id: u32,
     out: *mut u8,
 ) -> i32 {
-    if h.is_null() || out.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::Dropdown { open, .. }) => {
-            unsafe { *out = if *open { 1 } else { 0 } };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
         }
-        _ => -1,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::Dropdown { open, .. }) => {
+                unsafe { *out = if *open { 1 } else { 0 } };
+                0
+            }
+            _ => -1,
+        }
+    })
 }
 
 /// 设 Dropdown popup 展开态。非 Dropdown / null 句柄 / 节点缺失 → -1。
@@ -3338,19 +3604,23 @@ pub extern "C" fn loomgui_stage_set_dropdown_open(
     node_id: u32,
     open: u8,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return -1;
-    };
-    if let Some(ControlState::Dropdown { open: o, .. }) = scene.controls.get_mut(NodeId(node_id)) {
-        *o = open != 0;
-        0
-    } else {
-        -1
-    }
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return -1;
+        };
+        if let Some(ControlState::Dropdown { open: o, .. }) =
+            scene.controls.get_mut(NodeId(node_id))
+        {
+            *o = open != 0;
+            0
+        } else {
+            -1
+        }
+    })
 }
 
 /// 读 NumberField 数值（解析 `EditState.value` 文本→f32）。解析失败 / 非 NumberField /
@@ -3363,23 +3633,25 @@ pub extern "C" fn loomgui_stage_get_number_value(
     node_id: u32,
     out: *mut f32,
 ) -> i32 {
-    if h.is_null() || out.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match scene.controls.get(NodeId(node_id)) {
-        Some(ControlState::NumberField { edit, .. }) => match edit.value.parse::<f32>() {
-            Ok(v) => {
-                unsafe { *out = v };
-                0
-            }
-            Err(_) => -1,
-        },
-        _ => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::NumberField { edit, .. }) => match edit.value.parse::<f32>() {
+                Ok(v) => {
+                    unsafe { *out = v };
+                    0
+                }
+                Err(_) => -1,
+            },
+            _ => -1,
+        }
+    })
 }
 
 /// 设 NumberField 数值：先 clamp[min,max]（纵深守卫 min>max 不 panic），再 step 量化对齐
@@ -3395,38 +3667,40 @@ pub extern "C" fn loomgui_stage_set_number_value(
     node_id: u32,
     value: f32,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return -1;
-    };
-    let id = NodeId(node_id);
-    let Some(state) = scene.controls.get(id).cloned() else {
-        return -1;
-    };
-    let ControlState::NumberField { min, max, step, .. } = state else {
-        return -1;
-    };
-    // clamp：min>max 时 swap，保 clamp 闭区间不 panic（同 set_control_value 纵深守卫）。
-    let (lo, hi) = if min <= max { (min, max) } else { (max, min) };
-    let clamped = value.clamp(lo, hi);
-    let quantized = if step > 0.0 {
-        ((clamped - lo) / step).round() * step + lo
-    } else {
-        clamped
-    };
-    // 量化可能把值推过 hi，重新 clamp 回区间。
-    let quantized = quantized.clamp(lo, hi);
-    // 写回：原地改 edit.value（get_mut 保 variant，不重建整个 NumberField）。
-    if let Some(ControlState::NumberField { edit, .. }) = scene.controls.get_mut(id) {
-        // 数字文本用 Rust 默认 f32 格式化（如 "8"、"-3.5"）；trimmed 避免尾随 0。
-        edit.value = format_number(quantized);
-    } else {
-        return -1; // 极端竞态：get_mut 返回 None（理论上 cloned 后同槽仍在）
-    }
-    0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return -1;
+        };
+        let id = NodeId(node_id);
+        let Some(state) = scene.controls.get(id).cloned() else {
+            return -1;
+        };
+        let ControlState::NumberField { min, max, step, .. } = state else {
+            return -1;
+        };
+        // clamp：min>max 时 swap，保 clamp 闭区间不 panic（同 set_control_value 纵深守卫）。
+        let (lo, hi) = if min <= max { (min, max) } else { (max, min) };
+        let clamped = value.clamp(lo, hi);
+        let quantized = if step > 0.0 {
+            ((clamped - lo) / step).round() * step + lo
+        } else {
+            clamped
+        };
+        // 量化可能把值推过 hi，重新 clamp 回区间。
+        let quantized = quantized.clamp(lo, hi);
+        // 写回：原地改 edit.value（get_mut 保 variant，不重建整个 NumberField）。
+        if let Some(ControlState::NumberField { edit, .. }) = scene.controls.get_mut(id) {
+            // 数字文本用 Rust 默认 f32 格式化（如 "8"、"-3.5"）；trimmed 避免尾随 0。
+            edit.value = format_number(quantized);
+        } else {
+            return -1; // 极端竞态：get_mut 返回 None（理论上 cloned 后同槽仍在）
+        }
+        0
+    })
 }
 
 /// NumberField 文本格式化：整数去 `.0` 尾，保留小数。避免 EditState.value 出现 "8.0"。
@@ -3455,26 +3729,28 @@ fn format_number(v: f32) -> String {
 /// 这避免 C# 侧需显式调 enter——ItemCount 是业务进入虚拟化的唯一入口。
 #[no_mangle]
 pub extern "C" fn loomgui_list_set_item_count(h: *mut StageHandle, node: u32, count: i32) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let ul = NodeId(node);
-    let needs_enter = sh
-        .stage
-        .scene
-        .as_ref()
-        .map(|s| s.lists.get(ul).is_none())
-        .unwrap_or(true);
-    if needs_enter {
-        let ordinal = sh.stage.next_list_ordinal;
-        sh.stage.next_list_ordinal = sh.stage.next_list_ordinal.wrapping_add(1);
-        if loomgui_core::list::enter_data_driven(&mut sh.stage, ul, ordinal).is_err() {
+    ffi_guard(-1, || {
+        if h.is_null() {
             return -1;
         }
-    }
-    loomgui_core::list::set_item_count(&mut sh.stage, ul, count.max(0) as usize);
-    0
+        let sh = unsafe { &mut *h };
+        let ul = NodeId(node);
+        let needs_enter = sh
+            .stage
+            .scene
+            .as_ref()
+            .map(|s| s.lists.get(ul).is_none())
+            .unwrap_or(true);
+        if needs_enter {
+            let ordinal = sh.stage.next_list_ordinal;
+            sh.stage.next_list_ordinal = sh.stage.next_list_ordinal.wrapping_add(1);
+            if loomgui_core::list::enter_data_driven(&mut sh.stage, ul, ordinal).is_err() {
+                return -1;
+            }
+        }
+        loomgui_core::list::set_item_count(&mut sh.stage, ul, count.max(0) as usize);
+        0
+    })
 }
 
 /// 设 ListView 的模板根（覆盖 enter_data_driven 备份的备用 li）。业务通过
@@ -3485,20 +3761,22 @@ pub extern "C" fn loomgui_list_set_template(
     node: u32,
     template_node: u32,
 ) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return -1;
-    };
-    match scene.lists.get_mut(NodeId(node)) {
-        Some(ls) => {
-            ls.template_root = Some(NodeId(template_node));
-            0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
         }
-        None => -1,
-    }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return -1;
+        };
+        match scene.lists.get_mut(NodeId(node)) {
+            Some(ls) => {
+                ls.template_root = Some(NodeId(template_node));
+                0
+            }
+            None => -1,
+        }
+    })
 }
 
 /// 拉取本帧待绑定 slot 列表（SOA）。C# tick 前调：遍历所有 ListView 的 pending_binds，
@@ -3514,45 +3792,47 @@ pub extern "C" fn loomgui_list_take_pending_binds(
     cap: u32,
     out_len: *mut u32,
 ) -> i32 {
-    if h.is_null() || out_nodes.is_null() || out_indices.is_null() || out_len.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    // 快照所有 ListView 的 NodeId（避免在借 scene.lists 时 mutable 借 take_pending_binds）。
-    let uls: Vec<NodeId> = sh
-        .stage
-        .scene
-        .as_ref()
-        .map(|s| s.lists.0.keys().copied().collect())
-        .unwrap_or_default();
-    let cap = cap as usize;
-    let mut all: Vec<(u32, i32)> = Vec::with_capacity(cap);
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        // 无 scene：out_len 仍写 0（调用方按 0 处理）。
+    ffi_guard(-1, || {
+        if h.is_null() || out_nodes.is_null() || out_indices.is_null() || out_len.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        // 快照所有 ListView 的 NodeId（避免在借 scene.lists 时 mutable 借 take_pending_binds）。
+        let uls: Vec<NodeId> = sh
+            .stage
+            .scene
+            .as_ref()
+            .map(|s| s.lists.0.keys().copied().collect())
+            .unwrap_or_default();
+        let cap = cap as usize;
+        let mut all: Vec<(u32, i32)> = Vec::with_capacity(cap);
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            // 无 scene：out_len 仍写 0（调用方按 0 处理）。
+            unsafe {
+                *out_len = 0;
+            }
+            return 0;
+        };
+        for ul in uls {
+            if all.len() >= cap {
+                break;
+            }
+            // 只取当前剩余容量内的 bind——余条留队列等下帧，避免 cap 溢出时丢 bind。
+            let binds = loomgui_core::list::drain_pending_binds_bounded(scene, ul, cap - all.len());
+            for (n, idx) in binds {
+                all.push((n.0, idx as i32));
+            }
+        }
+        let n = all.len();
         unsafe {
-            *out_len = 0;
+            for (i, (node, idx)) in all.iter().take(n).enumerate() {
+                *out_nodes.add(i) = *node;
+                *out_indices.add(i) = *idx;
+            }
+            *out_len = n as u32;
         }
-        return 0;
-    };
-    for ul in uls {
-        if all.len() >= cap {
-            break;
-        }
-        // 只取当前剩余容量内的 bind——余条留队列等下帧，避免 cap 溢出时丢 bind。
-        let binds = loomgui_core::list::drain_pending_binds_bounded(scene, ul, cap - all.len());
-        for (n, idx) in binds {
-            all.push((n.0, idx as i32));
-        }
-    }
-    let n = all.len();
-    unsafe {
-        for (i, (node, idx)) in all.iter().take(n).enumerate() {
-            *out_nodes.add(i) = *node;
-            *out_indices.add(i) = *idx;
-        }
-        *out_len = n as u32;
-    }
-    0
+        0
+    })
 }
 
 /// 同帧推进虚拟化管线（plan+execute，不取 binds 队列——C# `DrainPendingBinds` 取）。
@@ -3560,12 +3840,14 @@ pub extern "C" fn loomgui_list_take_pending_binds(
 /// 同帧克隆、binds 入队等 C# 消费，避免首帧模板原样。null 句柄 → -1；成功 → 0。
 #[no_mangle]
 pub extern "C" fn loomgui_list_drain_now(h: *mut StageHandle, node: u32) -> i32 {
-    if h.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    loomgui_core::list::drain_now(&mut sh.stage, NodeId(node));
-    0
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        loomgui_core::list::drain_now(&mut sh.stage, NodeId(node));
+        0
+    })
 }
 
 /// notify 操作码（与 C# NotifyOp 对齐）。单 FFI 多 op，避免 C# 端三个导入。
@@ -3583,17 +3865,20 @@ pub extern "C" fn loomgui_list_refresh(
     start: i32,
     count: i32,
 ) -> i32 {
-    if h.is_null() || start < 0 || count < 0 {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return -1;
-    };
-    match loomgui_core::list::refresh_items(scene, NodeId(node), start as usize, count as usize) {
-        Ok(()) => 0,
-        Err(_) => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() || start < 0 || count < 0 {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return -1;
+        };
+        match loomgui_core::list::refresh_items(scene, NodeId(node), start as usize, count as usize)
+        {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
 }
 
 /// 增删搬通知（单 FFI 多 op，spec §10）。a/b 语义随 op：
@@ -3610,24 +3895,28 @@ pub extern "C" fn loomgui_list_notify(
     a: i32,
     b: i32,
 ) -> i32 {
-    if h.is_null() || a < 0 || b < 0 {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    let Some(scene) = sh.stage.scene.as_mut() else {
-        return -1;
-    };
-    let ul = NodeId(node);
-    let res = match op {
-        NOTIFY_INSERTED => loomgui_core::list::notify_inserted(scene, ul, a as usize, b as usize),
-        NOTIFY_REMOVED => loomgui_core::list::notify_removed(scene, ul, a as usize, b as usize),
-        NOTIFY_MOVED => loomgui_core::list::notify_moved(scene, ul, a as usize, b as usize),
-        _ => return -1,
-    };
-    match res {
-        Ok(()) => 0,
-        Err(_) => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() || a < 0 || b < 0 {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return -1;
+        };
+        let ul = NodeId(node);
+        let res = match op {
+            NOTIFY_INSERTED => {
+                loomgui_core::list::notify_inserted(scene, ul, a as usize, b as usize)
+            }
+            NOTIFY_REMOVED => loomgui_core::list::notify_removed(scene, ul, a as usize, b as usize),
+            NOTIFY_MOVED => loomgui_core::list::notify_moved(scene, ul, a as usize, b as usize),
+            _ => return -1,
+        };
+        match res {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
 }
 
 /// 滚动到指定 item。index 越界 / 负值 → -1。behavior：0=Instant，1=Smooth。
@@ -3639,15 +3928,21 @@ pub extern "C" fn loomgui_list_scroll_to(
     index: i32,
     behavior: u8,
 ) -> i32 {
-    if h.is_null() || index < 0 {
-        return -1;
-    }
-    let sh = unsafe { &mut *h };
-    match loomgui_core::list::scroll_to_item(&mut sh.stage, NodeId(node), index as usize, behavior)
-    {
-        Ok(()) => 0,
-        Err(_) => -1,
-    }
+    ffi_guard(-1, || {
+        if h.is_null() || index < 0 {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        match loomgui_core::list::scroll_to_item(
+            &mut sh.stage,
+            NodeId(node),
+            index as usize,
+            behavior,
+        ) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
 }
 
 /// Rich-text-block 子节点命中细化（spec §10）。
@@ -3679,21 +3974,23 @@ pub extern "C" fn loomgui_stage_hit_test(
     y: f32,
     out_node: *mut u32,
 ) -> i32 {
-    if h.is_null() || out_node.is_null() {
-        return -1;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return -1;
-    };
-    match loomgui_core::hit::hit_test(scene, (x, y)) {
-        Some(id) => {
-            // sentinel thumb flag（bit 29/30）strip——见 scroll.rs V/H_THUMB_FLAG。
-            unsafe { *out_node = id.0 & !0x6000_0000 };
-            0
+    ffi_guard(-1, || {
+        if h.is_null() || out_node.is_null() {
+            return -1;
         }
-        None => 1,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match loomgui_core::hit::hit_test(scene, (x, y)) {
+            Some(id) => {
+                // sentinel thumb flag（bit 29/30）strip——见 scroll.rs V/H_THUMB_FLAG。
+                unsafe { *out_node = id.0 & !0x6000_0000 };
+                0
+            }
+            None => 1,
+        }
+    })
 }
 
 #[no_mangle]
@@ -3704,24 +4001,26 @@ pub extern "C" fn loomgui_hit_test_rich(
     y: f32,
     out_source: *mut u32,
 ) -> bool {
-    if h.is_null() {
-        return false;
-    }
-    let sh = unsafe { &*h };
-    let Some(scene) = sh.stage.scene.as_ref() else {
-        return false;
-    };
-    match loomgui_core::text::hit_test::hit_test_rich(scene, NodeId(node_id), (x, y)) {
-        Some(src) => {
-            if !out_source.is_null() {
-                unsafe {
-                    *out_source = src.0;
-                }
-            }
-            true
+    ffi_guard(false, || {
+        if h.is_null() {
+            return false;
         }
-        None => false,
-    }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return false;
+        };
+        match loomgui_core::text::hit_test::hit_test_rich(scene, NodeId(node_id), (x, y)) {
+            Some(src) => {
+                if !out_source.is_null() {
+                    unsafe {
+                        *out_source = src.0;
+                    }
+                }
+                true
+            }
+            None => false,
+        }
+    })
 }
 
 #[cfg(test)]

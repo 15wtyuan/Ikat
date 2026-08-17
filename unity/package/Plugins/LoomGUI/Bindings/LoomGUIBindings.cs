@@ -25,6 +25,12 @@ namespace LoomGUI.Bindings
 
 
         /// <summary>
+        ///  读 FFI panic 兜底累计计数（后端每帧轮询，变化即有 Rust panic 被吞）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_ffi_panic_count", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern uint loomgui_ffi_panic_count();
+
+        /// <summary>
         ///  版本字符串（C null-terminated `b"v1e\0"`）。
         ///
         ///  返回 `*const u8`（csbindgen 映射为 C# `byte*`）；CString::as_ptr 给的是

@@ -31,6 +31,7 @@ namespace LoomGUI
         Transform _renderRoot;               // MirrorPool 镜像 GO + NativeHost container 挂此 root
         byte[] _frameBuf;                    // ArrayPool 租用（搬自 LoomStage.Tick 的复用语义）
         int _lastFrameLen;                   // 诊断：上一帧 blob 实际字节数（_frameBuf 可能 Rent 超长）
+        uint _lastFfiPanicCount;             // Rust FFI guard 兜底计数上次采样（变化即有 panic 被吞）
 
         /// <param name="mm">由 Driver 构造并注入（Shader.Find("LoomGUI/Unlit") 后建）。</param>
         public UnityLoomBackend(MaterialManager mm) { _mm = mm; }
@@ -91,6 +92,7 @@ namespace LoomGUI
         /// </summary>
         public override void SyncFrame(IntPtr stage, IntPtr framePtr, int frameLen)
         {
+            WarnOnNativePanic();
             if (framePtr == IntPtr.Zero || frameLen <= 0 || _renderRoot == null) return;
             StageHandle* h = (StageHandle*)stage.ToPointer();
 
@@ -111,6 +113,19 @@ namespace LoomGUI
         }
 
         // ── SyncFontAtlas（搬自 LoomStage.SyncFontAtlas，零改；_stage → h 参数）──
+
+        /// <summary>
+        /// Rust FFI panic 兜底计数轮询。native 侧全部导出包 catch_unwind（panic 穿越 extern "C"
+        /// 会 abort 宿主进程，不可接受），被吞的 panic 意味着该次调用失败、Stage 可能半修改——
+        /// 必须可见。计数变化即 LogError；panic 位置/消息由 Rust 默认 panic hook 打到 native 日志。
+        /// </summary>
+        void WarnOnNativePanic()
+        {
+            uint count = Native.loomgui_ffi_panic_count();
+            if (count == _lastFfiPanicCount) return;
+            Debug.LogError($"[LoomGUI] native panic caught by FFI guard (total {count}); frame state may be inconsistent — check native log for panic origin");
+            _lastFfiPanicCount = count;
+        }
 
         /// <summary>
         /// 拉取核心字体 atlas 脏页 → 上传 R8 Texture2D → Sprite 包装 → 注册进 SpriteResolver。

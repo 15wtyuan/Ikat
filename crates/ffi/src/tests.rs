@@ -2127,3 +2127,19 @@ fn ffi_node_is_lookup_scope() {
     );
     loomgui_stage_free(h);
 }
+
+/// FFI panic 边界：guard 吞 panic 返回 fallback 哨兵、计数 +1；happy path 直通不计数。
+#[test]
+fn ffi_guard_swallows_panic_returns_fallback_and_counts() {
+    use std::sync::atomic::Ordering;
+    crate::FFI_PANIC_COUNT.store(0, Ordering::Relaxed);
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {})); // 抑制 probe 的 panic 打印噪声
+    let out = ffi_guard(7i32, || panic!("guard probe"));
+    std::panic::set_hook(prev);
+    assert_eq!(out, 7, "panic -> fallback sentinel");
+    assert_eq!(loomgui_ffi_panic_count(), 1, "panic counted once");
+    assert_eq!(ffi_guard(9i32, || 9), 9, "happy path passes through");
+    assert_eq!(loomgui_ffi_panic_count(), 1, "happy path not counted");
+    crate::FFI_PANIC_COUNT.store(0, Ordering::Relaxed);
+}
