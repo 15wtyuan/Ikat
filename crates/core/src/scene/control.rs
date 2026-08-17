@@ -19,7 +19,9 @@ use crate::input::{
     EventRecord, EVT_CHANGE_COMMITTED, EVT_CHECKED_CHANGED, EVT_SELECTION_CHANGED, EVT_SUBMITTED,
     EVT_VALUE_CHANGED, KEY_DOWN, KEY_ESCAPE, KEY_LEFT, KEY_RETURN, KEY_RIGHT, KEY_UP,
 };
-use crate::scene::dynamic::{append_child, remove_child, set_inline_override, set_user_transform};
+use crate::scene::dynamic::{
+    append_child, remove_child, set_inline_override, set_user_transform, unset_inline_override,
+};
 use crate::scene::node::{
     Composition, ControlState, EditState, NodeFlags, NodeId, NodeKind, Scene,
 };
@@ -589,6 +591,45 @@ pub(crate) fn close_dropdown(scene: &mut Scene, select: NodeId) {
     }
 }
 
+/// Dropdown popup 展开位置（视口感知）→ 返回 user_transform 的 ty。
+///
+/// 三档：下方放得下 → 正下方（默认）；下方放不下且上方放得下 → 上翻（popup 底贴
+/// select 顶）；两向都放不下 → 收缩（inline `max-height` 钉视口高 + `overflow-y:auto`
+/// 接既有滚动机制，top 贴视口顶）。`viewport_h <= 0` = 无视口约束（恒下方，历史行为）。
+/// popup_h 读上帧 solve 的 layout_rect——open 首帧为陈旧值，次帧收敛（错位帧几何在
+/// 视口外，不可见）。收缩覆写在非收缩档/收起时 unset 回落作者 CSS（core 在 open 期
+/// 拥有 popup inline 覆写是既有模式：display:block 同款）。
+fn place_dropdown_popup_ty(
+    scene: &mut Scene,
+    popup: NodeId,
+    combo_y: f32,
+    sel_h: f32,
+    static_y: f32,
+    viewport_h: f32,
+) -> f32 {
+    let popup_h = scene.get(popup).map(|n| n.layout_rect.h).unwrap_or(0.0);
+    let below_y = combo_y + sel_h;
+    if viewport_h <= 0.0 || below_y + popup_h <= viewport_h {
+        let _ = unset_inline_override(scene, popup, "max-height");
+        let _ = unset_inline_override(scene, popup, "overflow-y");
+        return below_y - static_y;
+    }
+    let above_y = combo_y - popup_h;
+    if above_y >= 0.0 {
+        let _ = unset_inline_override(scene, popup, "max-height");
+        let _ = unset_inline_override(scene, popup, "overflow-y");
+        return above_y - static_y;
+    }
+    // 两向放不下：收缩。max-height 走 inline（solve 可见，次帧 popup_h 收敛到视口高）。
+    let _ = set_inline_override(scene, popup, "overflow-y:auto");
+    let _ = set_inline_override(
+        scene,
+        popup,
+        &format!("max-height:{}px", viewport_h.max(0.0)),
+    );
+    -static_y
+}
+
 /// Dropdown 键盘交互路由（仅 open 时生效）。返回是否消费了该键（消费 → 不发普通 keydown）。
 ///
 /// - Up/Down：seek 到前一/后一个非 disabled option（移动 selected_index 作高亮，不发事件、
@@ -824,7 +865,10 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
 ///
 /// 无控件状态（非 control 节点）→ no-op。tick 每帧对所有控件节点调一次（控件稀疏，代价可接受）。
 /// 对找不到子节点的控件（作者漏写某部件）静默跳过——结构契约 Task 6 会在打包期拦下缺夹。
-pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
+///
+/// `viewport_h` = stage 视口高（popup 视口感知定位用）。<= 0 = 无视口约束
+/// （headless 测试默认）——popup 恒下方展开（历史行为）。
+pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
     let Some(state) = scene.controls.get(id).cloned() else {
         return;
     };
@@ -912,8 +956,11 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId) {
                     .unwrap_or((0.0, 0.0));
                 let static_y = scene.get(popup).map(|n| n.layout_rect.y).unwrap_or(0.0);
                 let ty = if open {
-                    combo_y + sel_h - static_y
+                    place_dropdown_popup_ty(scene, popup, combo_y, sel_h, static_y, viewport_h)
                 } else {
+                    // 收起：清收缩覆写（下轮 open 按当帧视口重判），回零偏移。
+                    let _ = unset_inline_override(scene, popup, "max-height");
+                    let _ = unset_inline_override(scene, popup, "overflow-y");
                     0.0
                 };
                 let _ = set_user_transform(
@@ -1904,7 +1951,7 @@ mod tests {
         // value=70/max=100 → fill inline width = 70%（Dimension::Percent(0.7)）。
         let mut scene = Scene::default();
         let id = make_progress(&mut scene, 70.0, 100.0);
-        sync_control_visuals(&mut scene, id);
+        sync_control_visuals(&mut scene, id, 0.0);
         let fill = find_child_by_slot(&scene, id, SLOT_FILL).expect("progress has fill child");
         let w = scene
             .get(fill)
@@ -1928,7 +1975,7 @@ mod tests {
         // value 超 max → clamp 到 100%；负值 → 0%。防 layout 出现 110% 溢出。
         let mut scene = Scene::default();
         let id = make_progress(&mut scene, 120.0, 100.0);
-        sync_control_visuals(&mut scene, id);
+        sync_control_visuals(&mut scene, id, 0.0);
         let fill = find_child_by_slot(&scene, id, SLOT_FILL).unwrap();
         assert_eq!(
             scene
@@ -1952,7 +1999,7 @@ mod tests {
         // 手动附一个普通子节点（作者可能写图标容器），sync 不应动它。
         let kid = make_control(&mut scene, NodeKind::Container);
         append_child(&mut scene, id, kid).expect("kid attach");
-        sync_control_visuals(&mut scene, id);
+        sync_control_visuals(&mut scene, id, 0.0);
         let n = scene.get(kid).unwrap();
         assert_eq!(
             n.inline_override.taffy_style.display,
@@ -1974,7 +2021,7 @@ mod tests {
                 name: "g".into(),
             }),
         );
-        sync_control_visuals(&mut scene, id);
+        sync_control_visuals(&mut scene, id, 0.0);
         // 无 panic、无子节点改动即过（radio 无子节点）。
         assert!(scene.get(id).unwrap().children.is_empty());
     }
@@ -1985,7 +2032,7 @@ mod tests {
         // thumb 位置走 transform（set_user_transform），本测只验 fill width。
         let mut scene = Scene::default();
         let id = make_slider(&mut scene, 25.0, 0.0, 100.0);
-        sync_control_visuals(&mut scene, id);
+        sync_control_visuals(&mut scene, id, 0.0);
         let fill = find_child_by_slot(&scene, id, SLOT_FILL).expect("slider has fill child");
         assert_eq!(
             scene
@@ -2010,7 +2057,7 @@ mod tests {
         let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
         scene.get_mut(id).unwrap().layout_rect.w = 200.0;
         scene.get_mut(id).unwrap().layout_rect.h = 20.0;
-        sync_control_visuals(&mut scene, id);
+        sync_control_visuals(&mut scene, id, 0.0);
         let thumb = find_child_by_slot(&scene, id, SLOT_THUMB).expect("slider has thumb child");
         let tr = scene.get(thumb).unwrap().user_transform;
         let slider_w = scene.get(id).unwrap().layout_rect.w;
@@ -2032,7 +2079,7 @@ mod tests {
         // 非 control 节点（无 ControlState 槽）：sync 是 no-op，不 panic。
         let mut scene = Scene::default();
         let id = make_control(&mut scene, NodeKind::Container);
-        sync_control_visuals(&mut scene, id);
+        sync_control_visuals(&mut scene, id, 0.0);
         assert!(scene.get(id).unwrap().children.is_empty());
     }
 
@@ -2106,7 +2153,7 @@ mod tests {
         // selected_index=1 → value slot 文本应是第 2 个 option 的文本（"B"）。
         let mut scene = Scene::default();
         let sel = make_dropdown_with_options(&mut scene, &["A", "B", "C"], 1);
-        sync_control_visuals(&mut scene, sel);
+        sync_control_visuals(&mut scene, sel, 0.0);
         assert_eq!(
             value_text(&scene, sel),
             "B",
@@ -2119,12 +2166,12 @@ mod tests {
         // 改 selected_index 后再 sync，value slot 文本随之更新。
         let mut scene = Scene::default();
         let sel = make_dropdown_with_options(&mut scene, &["A", "B", "C"], 0);
-        sync_control_visuals(&mut scene, sel);
+        sync_control_visuals(&mut scene, sel, 0.0);
         assert_eq!(value_text(&scene, sel), "A");
         if let Some(ControlState::Dropdown { selected_index, .. }) = scene.controls.get_mut(sel) {
             *selected_index = 2;
         }
-        sync_control_visuals(&mut scene, sel);
+        sync_control_visuals(&mut scene, sel, 0.0);
         assert_eq!(value_text(&scene, sel), "C", "re-sync after index change");
     }
 
@@ -2137,7 +2184,7 @@ mod tests {
         if let Some(ControlState::Dropdown { selected_index, .. }) = scene.controls.get_mut(sel) {
             *selected_index = 99;
         }
-        sync_control_visuals(&mut scene, sel);
+        sync_control_visuals(&mut scene, sel, 0.0);
         assert_eq!(
             value_text(&scene, sel),
             "",
@@ -2184,11 +2231,112 @@ mod tests {
         scene.text_contents.insert(txt, "Deep".into());
         append_child(&mut scene, opt, txt).expect("text append");
         append_child(&mut scene, listbox, opt).expect("option append");
-        sync_control_visuals(&mut scene, id);
+        sync_control_visuals(&mut scene, id, 0.0);
         assert_eq!(
             value_text(&scene, id),
             "Deep",
             "collects text from option subtree"
+        );
+    }
+
+    /// popup 视口感知定位三档：下方 / 上翻 / 收缩。几何用 layout_rect 直喂（sync 读上帧
+    /// solve 的约定在测试里 = 直接写值）。
+    #[test]
+    fn dropdown_popup_stays_below_when_fits() {
+        let mut scene = Scene::default();
+        let sel = make_dropdown_with_options(&mut scene, &["A"], 0);
+        let popup = find_child_by_role_recursive(&scene, sel, ROLE_LISTBOX).unwrap();
+        // select y=100 h=30，popup h=80，视口 720：下方 130+80=210 放得下。
+        scene.get_mut(sel).unwrap().layout_rect.h = 30.0;
+        scene.get_mut(sel).unwrap().layout_rect.y = 100.0;
+        scene.get_mut(popup).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 40.0,
+            w: 100.0,
+            h: 80.0,
+        };
+        if let Some(ControlState::Dropdown { open, .. }) = scene.controls.get_mut(sel) {
+            *open = true;
+        }
+        sync_control_visuals(&mut scene, sel, 720.0);
+        let t = scene.get(popup).unwrap().user_transform.translate;
+        assert_eq!(
+            t[1],
+            100.0 + 30.0 - 40.0,
+            "下方展开：ty = combo_y+sel_h-static_y"
+        );
+        // 非收缩档：无 max-height 覆写。
+        assert!(
+            !scene.get(popup).unwrap().inline_set.0 & crate::style::dynamic::INLINE_MAX_HEIGHT != 0
+        );
+    }
+
+    #[test]
+    fn dropdown_popup_flips_up_near_viewport_bottom() {
+        let mut scene = Scene::default();
+        let sel = make_dropdown_with_options(&mut scene, &["A"], 0);
+        let popup = find_child_by_role_recursive(&scene, sel, ROLE_LISTBOX).unwrap();
+        // select y=650 h=30，popup h=100，视口 720：下方 680+100=780 放不下；上方 650-100=550 放得下。
+        scene.get_mut(sel).unwrap().layout_rect.h = 30.0;
+        scene.get_mut(sel).unwrap().layout_rect.y = 650.0;
+        scene.get_mut(popup).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 40.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        if let Some(ControlState::Dropdown { open, .. }) = scene.controls.get_mut(sel) {
+            *open = true;
+        }
+        sync_control_visuals(&mut scene, sel, 720.0);
+        let t = scene.get(popup).unwrap().user_transform.translate;
+        assert_eq!(t[1], 650.0 - 100.0 - 40.0, "上翻：popup 底贴 select 顶");
+    }
+
+    #[test]
+    fn dropdown_popup_shrinks_when_neither_direction_fits() {
+        let mut scene = Scene::default();
+        let sel = make_dropdown_with_options(&mut scene, &["A"], 0);
+        let popup = find_child_by_role_recursive(&scene, sel, ROLE_LISTBOX).unwrap();
+        // select y=360 h=30，popup h=800，视口 720：下方/上方都放不下 → 收缩。
+        scene.get_mut(sel).unwrap().layout_rect.h = 30.0;
+        scene.get_mut(sel).unwrap().layout_rect.y = 360.0;
+        scene.get_mut(popup).unwrap().layout_rect = Rect {
+            x: 0.0,
+            y: 40.0,
+            w: 100.0,
+            h: 800.0,
+        };
+        if let Some(ControlState::Dropdown { open, .. }) = scene.controls.get_mut(sel) {
+            *open = true;
+        }
+        sync_control_visuals(&mut scene, sel, 720.0);
+        let n = scene.get(popup).unwrap();
+        assert_eq!(n.user_transform.translate[1], -40.0, "收缩：top 贴视口顶");
+        let set = n.inline_set.0;
+        assert!(
+            set & crate::style::dynamic::INLINE_MAX_HEIGHT != 0,
+            "max-height 覆写置位"
+        );
+        assert!(
+            set & crate::style::dynamic::INLINE_OVERFLOW_Y != 0,
+            "overflow-y 覆写置位"
+        );
+        // 收起：覆写回落（unset）。
+        if let Some(ControlState::Dropdown { open, .. }) = scene.controls.get_mut(sel) {
+            *open = false;
+        }
+        sync_control_visuals(&mut scene, sel, 720.0);
+        let set = scene.get(popup).unwrap().inline_set.0;
+        assert_eq!(
+            set & crate::style::dynamic::INLINE_MAX_HEIGHT,
+            0,
+            "收起清 max-height"
+        );
+        assert_eq!(
+            set & crate::style::dynamic::INLINE_OVERFLOW_Y,
+            0,
+            "收起清 overflow-y"
         );
     }
 
@@ -2198,7 +2346,7 @@ mod tests {
         let mut scene = Scene::default();
         let sel = make_dropdown_with_options(&mut scene, &["A"], 0);
         // 默认 open=false
-        sync_control_visuals(&mut scene, sel);
+        sync_control_visuals(&mut scene, sel, 0.0);
         let popup =
             find_child_by_role_recursive(&scene, sel, ROLE_LISTBOX).expect("listbox present");
         assert_eq!(
@@ -2215,7 +2363,7 @@ mod tests {
         if let Some(ControlState::Dropdown { open, .. }) = scene.controls.get_mut(sel) {
             *open = true;
         }
-        sync_control_visuals(&mut scene, sel);
+        sync_control_visuals(&mut scene, sel, 0.0);
         assert_eq!(
             scene
                 .get(popup)
@@ -2276,7 +2424,7 @@ mod tests {
         let pa = make_panel(&mut scene, "pa");
         let pb = make_panel(&mut scene, "pb");
 
-        sync_control_visuals(&mut scene, tl);
+        sync_control_visuals(&mut scene, tl, 0.0);
         assert_eq!(
             scene.get(pa).unwrap().inline_override.taffy_style.display,
             taffy::Display::Block,
@@ -2292,7 +2440,7 @@ mod tests {
         if let Some(ControlState::TabList { selected_index }) = scene.controls.get_mut(tl) {
             *selected_index = 1;
         }
-        sync_control_visuals(&mut scene, tl);
+        sync_control_visuals(&mut scene, tl, 0.0);
         assert_eq!(
             scene.get(pa).unwrap().inline_override.taffy_style.display,
             taffy::Display::None,
@@ -2324,7 +2472,7 @@ mod tests {
         let _t_ok = make_tab_child(&mut scene, tl, "ok");
         let ok = make_panel(&mut scene, "ok");
 
-        sync_control_visuals(&mut scene, tl); // 不 panic
+        sync_control_visuals(&mut scene, tl, 0.0); // 不 panic
         assert_eq!(
             scene.get(ok).unwrap().inline_override.taffy_style.display,
             taffy::Display::None,
@@ -2950,7 +3098,7 @@ mod tests {
             }),
         );
         // sync 不 panic（max=0 时 pct=0.0 走 max>0 else 臂）。
-        sync_control_visuals(&mut scene, id);
+        sync_control_visuals(&mut scene, id, 0.0);
         match scene.controls.get(id) {
             Some(ControlState::Progress { value, max, .. }) => {
                 assert!(*max >= 0.0, "max sanitized to >=0, got {max}");

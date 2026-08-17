@@ -105,6 +105,22 @@
         <div class="group-title">背景故事</div>
         <div class="field"><span class="field-label">简介（textarea）</span><div role="textbox" id="char-bio" aria-multiline="true" aria-placeholder="一段角色背景故事..." data-maxlength="200"></div></div>
       </div>
+      <div class="group">
+        <div class="group-title">服务器（popup 视口翻转）</div>
+        <div class="field"><span class="field-label">大区</span>
+          <div role="combobox" id="srv-region">
+            <div data-slot="value">华东一区</div>
+            <div role="listbox">
+              <div role="option">华东一区</div>
+              <div role="option">华东二区</div>
+              <div role="option">华南一区</div>
+              <div role="option">华北一区</div>
+              <div role="option">西南一区</div>
+            </div>
+          </div>
+        </div>
+        <span style="color:#6c7080;font-size:12px">本组贴近页面底部：popup 下方放不下时自动上翻（视口感知定位），上方也放不下时收缩可滚。</span>
+      </div>
       <div class="actions">
         <button class="btn btn-reset">重置</button>
         <button class="btn btn-create">创建角色</button>

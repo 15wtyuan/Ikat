@@ -678,6 +678,20 @@ fn parse_declarations(
             ));
             continue;
         }
+        // 纯整数域属性（z-index/order）严格校验：与 css_resolve inline 路径同门——
+        // apply_decl 宽松降级 0，围栏不静默降级（font-weight 等 Integer parser 属性
+        // 接受关键字，不在此列）。
+        if matches!(prop, "z-index" | "order") && value.parse::<i32>().is_err() {
+            diagnostics.push(Diagnostic::error(
+                DiagnosticCode::FenceBadCssValue,
+                format!(
+                    "value \"{}\" is not valid for CSS property \"{}\" (integer required)",
+                    value, prop
+                ),
+                loc.clone(),
+            ));
+            continue;
+        }
         decls.push(Declaration {
             prop: prop.to_string(),
             value: value.to_string(),

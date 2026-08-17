@@ -304,6 +304,14 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         inherited: false,
         parser: CssValueParser::Integer,
     },
+    // z-index：层叠序——只改同级兄弟绘制/命中顺序（z 升序绘制、子树整体移动），
+    // 不改 flex 排列（那是 order）。整数值域（负数合法），auto 不收（缺省即 0）。
+    CssPropSpec {
+        name: "z-index",
+        default: "0",
+        inherited: false,
+        parser: CssValueParser::Integer,
+    },
     CssPropSpec {
         name: "border-color",
         default: "transparent",
@@ -535,6 +543,58 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         default: "none",
         inherited: false,
         parser: CssValueParser::Animation,
+    },
+    // animation-* 长划（8 个）：单值子集——写入既有简写 spec 的对应字段（无简写时
+    // 创建惰性 spec，name 到位才播）。逗号列表不收（多动画用简写）。校验由 core
+    // apply_animation_longhand 兜底（Raw parser 直落 apply_decl，非法值返 false 报
+    // FenceBadCssValue）。
+    CssPropSpec {
+        name: "animation-name",
+        default: "none",
+        inherited: false,
+        parser: CssValueParser::Raw,
+    },
+    CssPropSpec {
+        name: "animation-duration",
+        default: "0s",
+        inherited: false,
+        parser: CssValueParser::Raw,
+    },
+    CssPropSpec {
+        name: "animation-timing-function",
+        default: "ease",
+        inherited: false,
+        parser: CssValueParser::Raw,
+    },
+    CssPropSpec {
+        name: "animation-delay",
+        default: "0s",
+        inherited: false,
+        parser: CssValueParser::Raw,
+    },
+    CssPropSpec {
+        name: "animation-iteration-count",
+        default: "1",
+        inherited: false,
+        parser: CssValueParser::Raw,
+    },
+    CssPropSpec {
+        name: "animation-direction",
+        default: "normal",
+        inherited: false,
+        parser: CssValueParser::Raw,
+    },
+    CssPropSpec {
+        name: "animation-fill-mode",
+        default: "none",
+        inherited: false,
+        parser: CssValueParser::Raw,
+    },
+    CssPropSpec {
+        name: "animation-play-state",
+        default: "running",
+        inherited: false,
+        parser: CssValueParser::Raw,
     },
 ];
 

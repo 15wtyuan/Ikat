@@ -911,6 +911,27 @@ pub fn is_whitespace_only_text(scene: &Scene, id: NodeId) -> bool {
     }
 }
 
+/// 兄弟绘制序：children 稳定按 `z_index` 升序排（等 z 保持 DOM 序——z 全 0 时
+/// 逐位等于原 children 顺序）。子树整体移动：父的 z 决定整棵子树所在层，子树
+/// 内部再按自身 z 排（DFS 先访问 = 先绘制 = 底层）。
+///
+/// render 主 DFS（batch.rs）与 open popup 末尾追加循环共用，保证两路一致；
+/// hit 侧走 hit.rs `effective_draw_order`（逆序遍历，z 为主键）。
+pub fn paint_order_children(scene: &Scene, parent: NodeId) -> Vec<NodeId> {
+    let mut kids: Vec<NodeId> = match scene.nodes.get(parent.to_key()) {
+        Some(n) => n.children.clone(),
+        None => return Vec::new(),
+    };
+    kids.sort_by_key(|&c| {
+        scene
+            .nodes
+            .get(c.to_key())
+            .map(|n| n.style.z_index)
+            .unwrap_or(0)
+    });
+    kids
+}
+
 #[cfg(test)]
 mod tests;
 

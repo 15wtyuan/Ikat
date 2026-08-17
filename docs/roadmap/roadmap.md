@@ -176,12 +176,9 @@
 - 判据：真有内容模糊 / 视觉后处理需求（基建级，非小缺口）。
 - 来源：`2026-08-09-box-shadow-multilayer-inset-blur` §2.2。
 
-**动画长划子属性（8 个）** — `animation-name/duration/timing-function/delay/iteration-count/direction/fill-mode/play-state`（及 transition 等价）——现只解析简写。
-- 判据：低 ROI（简写语法糖），按需。
-- 来源：`2026-08-04-m2-keyframes-runtime` §8.6。
-
-**控件细化（按需）** — TabList 手动激活模型（方向键只移焦点、Enter 才选中）；Dropdown popup 视口感知定位（上/下/收缩，现只向下）。
+**控件细化（按需）** — TabList 手动激活模型（方向键只移焦点、Enter 才选中）。
 - 判据：真机使用反馈需要时。
+- ~~Dropdown popup 视口感知定位~~ ✅ 2026-08-17 z-index 批交付（下方/上翻/收缩可滚，`place_dropdown_popup_ty`）。
 - 来源：`2026-08-04-m3-tablist` §3.2、§11；`2026-07-28-controls-debt-and-dropdown` §11。
 
 **运行时 CSS 解析（`StyleSheet.Add` + `UIStyleException` 接通）** — 运行时 CSS 解析失败抛 `UIStyleException`（异常类已定义，解析路径未接）。
@@ -196,7 +193,8 @@
 - ✅ **已接（2026-08-11）**：`Container.ScrollTo`、`Button.Disabled`（FFI 已有，C# 漏接，坑 191 模式）。
 - ✅ **已接（2026-08-14，FFI 批）**：`NumberField.Min/Max/Step` setter（FFI arm 扩 NumberField，改界后 value 文本重约束）、`ProgressBar.IsIndeterminate`（新 get/set FFI，纯状态位）、`RadioButton.Name`（新 get_radio_name 双调法 FFI）、`UIContext.Pick`（新 loomgui_stage_hit_test，thumb sentinel decode 回容器）。dll/bindings 已同步入库。
 - ✅ **已接（2026-08-14，Touchable）**：`Node.Touchable`（CSS `pointer-events` 运行时面；core apply_decl 早有分支，补 Stage::set_node_touchable 双写 interaction+base_style + FFI + C#）。
-- 🟡 **按域 defer**（core 也没，真 feature）：`ZIndex`（core 无 stacking 语义——`order` 只是 flex 排序；inline_bit 表已满（1<<31），真做需 sort_key 公共化设计，T1 视觉层推进时）、`Focusable`（runtime tabindex setter，T1）、`SetVar`/`RemoveVar` + `StyleSheet.Add`/`Clear`（custom props 系统 + runtime CSS parser，归 T1 运行时 CSS 大件）、`ListView.ItemExitClass`（归 T1 list 进出场动画）。
+- 🟡 **按域 defer**（core 也没，真 feature）：`Focusable`（runtime tabindex setter，T1）、`SetVar`/`RemoveVar` + `StyleSheet.Add`/`Clear`（custom props 系统 + runtime CSS parser，归 T1 运行时 CSS 大件）、`ListView.ItemExitClass`（归 T1 list 进出场动画）。
+- ✅ **已接（2026-08-17，z-index 批）**：`NodeStyle.ZIndex`（CSS `z-index` 兄弟层叠序：ResolvedStyle.z_index + 三处绘制序消费（render DFS / popup 追加 / hit）；InlineSet 位图 u32→u64（bit 32）；C# 走既有 set_inline_override 通道，无新 FFI；pkg v38）。
 - ✅ **已接（2026-08-17，调度/生命周期/option 批）**：`Node.OnUpdate` + `UIContext.CallLater`/`CallNextFrame`（投影层调度器，`Step` 帧头泵、回调改动当帧 solve 生效）、`UIContext.UnloadPackage`（core unload FFI；atlas 是 workspace 级共享、与包注册解耦，无包级资源可释放）、`Dropdown.SelectedValue`/`OptionItem.Value`（option `value` 内容属性全链：fence semantic-scoped 属性 → pkg v37 `option_values` → FFI，缺席回落文本）+ `OptionItem.Selected`/`Tab.Selected`（父控件状态合成 getter）、`Container.GetTemplate`（设计期 `<template id>` → 子树克隆 UITemplate，ListView 多模板故事收口）。
 - ✅ **已删（2026-08-14）**：`NodeStyle.Visibility`（fence CSS 子集无 `visibility` prop，`opacity:0` 覆盖占位隐藏）——C# enum / NodeStyle property / CssValueConvert 分支 / 相关测试全部移除，公共 API 与契约对齐。
 - 判据：按域 defer 随各自 track 推进。

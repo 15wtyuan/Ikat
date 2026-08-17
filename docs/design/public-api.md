@@ -136,7 +136,7 @@ public sealed class NodeStyle {
     public Overflow OverflowX/OverflowY { get; set; }
     public Length Left/Top/Right/Bottom { get; set; }
     public PositionMode Position { get; set; }
-    public int ZIndex { get; set; }
+    public int ZIndex { get; set; }                   // 兄弟层叠序（CSS z-index）：绘制/命中层，不改 flex 排列
     public Color BackgroundColor/Color { get; set; }
     public float Opacity { get; set; }
     public void SetVar(string name, Length/Color/float/string value);

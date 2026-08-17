@@ -153,6 +153,15 @@ fn fence_md_covers_critical_css_props() {
         "border-image-slice",
         "aspect-ratio",
         "pointer-events",
+        "z-index",
+        "animation-name",
+        "animation-duration",
+        "animation-timing-function",
+        "animation-delay",
+        "animation-iteration-count",
+        "animation-direction",
+        "animation-fill-mode",
+        "animation-play-state",
     ];
     for &name in CRITICAL {
         let independent = format!("`{}`", name);

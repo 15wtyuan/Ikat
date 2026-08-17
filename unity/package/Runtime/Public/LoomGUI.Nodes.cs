@@ -553,9 +553,9 @@ namespace LoomGUI
     //
     // C3：每个 typed 属性的 setter/getter 走 _mirror（StyleMirror）。CSS prop 名严格对照 core
     // inline_bit 表（crates/core/src/style/dynamic.rs）+ apply_decl（mapping.rs）——表外的 prop
-    // 经 set_inline_override 会被 bit 检查前置静默丢弃（ghost-state 防护），故本类只接 24 个
-    // inline_bit 表内 prop；ZIndex / SetVar / RemoveVar 暂 ponytail defer
-    // （core apply_decl 未实现，throw NE + 注释）。
+    // 经 set_inline_override 会被 bit 检查前置静默丢弃（ghost-state 防护），故本类只接
+    // inline_bit 表内 prop（25 个，z-index 在 u64 位图 bit 32）；SetVar / RemoveVar 暂
+    // ponytail defer（core apply_decl 未实现，throw NE + 注释）。
     public sealed class NodeStyle
     {
         // 投影层内部：owner Node + mirror。Node.Style lazy 造时传入 this；StyleMirror 持 owner
@@ -704,13 +704,20 @@ namespace LoomGUI
             set => _mirror.Set("opacity", value);
         }
 
-        // ── ponytail defer：core apply_decl / inline_bit 表未实现的 prop ──
-        // ZIndex（z-index）：core apply_decl 处理 "order"（mapping.rs:829）但未给 inline_bit —
-        // set_inline_override 会被 bit 检查前置跳过（打包期 CSS order:N 仍生效）。
-        // SetVar/RemoveVar（--xxx）：core apply_decl 不处理 CSS 自定义属性；custom-property 通道待加。
+        // ── 层叠序（z-index）：绘制/命中层，不触发 flex 重排 ──────────────
+        // CSS `<integer>`（负数合法）。getter 只反映 setter 写过的值（mirror 稀疏语义，
+        // 同 Opacity）；未写过返 0 = CSS 初始值。CSS 侧 class 规则的 z-index 经打包期
+        // base_style 进核心，与本便签层独立。
+        public int ZIndex
+        {
+            get => _mirror.Get<int>("z-index") ?? 0;
+            set => _mirror.Set("z-index", value);
+        }
+
+        // ── ponytail defer：custom-property 通道待加 ──
+        // SetVar/RemoveVar（--xxx）：core apply_decl 不处理 CSS 自定义属性。
         // 保留 throw NE 防止静默丢：调用方期望 round-trip，prop-name 不在 inline_bit 表经 set_inline_override
         // 会被 bit 检查前置静默忽略（ghost-state 防护）。补 core 支持后把这些 setter 接 _mirror 即可。
-        public int ZIndex { get { throw NE(); } set { throw NE(); } }
         public void SetVar(string n, Length v) { throw NE(); }
         public void SetVar(string n, Color v) { throw NE(); }
         public void SetVar(string n, float v) { throw NE(); }

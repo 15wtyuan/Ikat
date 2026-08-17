@@ -20,7 +20,6 @@ pub(crate) fn unsupported_hint(prop: &str) -> Option<&'static str> {
     Some(match prop {
         "box-sizing" => "LoomGUI uses border-box model exclusively (width includes padding+border). This declaration has no effect — remove it.",
         "visibility" => "LoomGUI has no visibility:hidden. To hide an element use `display:none` (removes layout space) or `opacity:0` (keeps space).",
-        "z-index" => "LoomGUI renders in DOM order; z-index has no effect. Reorder DOM siblings or use `position:absolute` to control stacking.",
         "cursor" | "outline" | "user-select" | "text-decoration" | "object-fit" => {
             "not supported by fence — remove this declaration."
         }
@@ -187,6 +186,21 @@ pub fn resolve_inline_styles_with_diags(
                         }
                         _ => {}
                     }
+                }
+
+                // 纯整数域属性（z-index/order）严格校验：apply_decl 对它们宽松降级 0，
+                // 围栏不静默降级——坏值在打包期报清（font-weight 等 Integer parser 属性
+                // 接受关键字，不在此列）。
+                if matches!(prop, "z-index" | "order") && value.parse::<i32>().is_err() {
+                    diagnostics.push(Diagnostic::error(
+                        DiagnosticCode::FenceBadCssValue,
+                        format!(
+                            "value \"{}\" is not valid for CSS property \"{}\" (integer required)",
+                            value, prop
+                        ),
+                        line_map.source_location(node.span.start, file.to_string()),
+                    ));
+                    continue;
                 }
 
                 // Apply using existing apply_decl.
@@ -480,6 +494,54 @@ mod tests {
             d.message.contains("display:none"),
             "msg should suggest display:none: {}",
             d.message
+        );
+    }
+
+    /// z-index 合法入栏：整数值（含负）通过；auto/垃圾值报 FenceBadCssValue
+    /// （apply_decl 宽松降 0，围栏不静默降级）。
+    #[test]
+    fn z_index_integer_accepted_and_auto_rejected() {
+        let ok = crate::parse_template(
+            r#"<div style="z-index:5"></div><div style="z-index:-3"></div>"#,
+            "t.html",
+        );
+        assert!(
+            ok.diagnostics.is_empty(),
+            "integer z-index should pass: {:?}",
+            ok.diagnostics
+        );
+        let bad = crate::parse_template(r#"<div style="z-index:auto"></div>"#, "t.html");
+        assert!(
+            bad.diagnostics.iter().any(
+                |d| d.code == DiagnosticCode::FenceBadCssValue && d.message.contains("z-index")
+            ),
+            "z-index:auto should error: {:?}",
+            bad.diagnostics
+        );
+    }
+
+    /// animation-* 长划入栏：单值合法通过；逗号列表（简写专属）报错。
+    #[test]
+    fn animation_longhands_accepted_and_list_rejected() {
+        let ok = crate::parse_template(
+            r#"<div style="animation-name:fade; animation-duration:.4s; animation-delay:.1s; animation-timing-function:ease-in; animation-iteration-count:3; animation-direction:alternate; animation-fill-mode:forwards; animation-play-state:running"></div>"#,
+            "t.html",
+        );
+        assert!(
+            ok.diagnostics.is_empty(),
+            "longhands should pass: {:?}",
+            ok.diagnostics
+        );
+        let bad = crate::parse_template(
+            r#"<div style="animation-duration:.4s, .8s"></div>"#,
+            "t.html",
+        );
+        assert!(
+            bad.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::FenceBadCssValue),
+            "comma list in longhand should error: {:?}",
+            bad.diagnostics
         );
     }
 

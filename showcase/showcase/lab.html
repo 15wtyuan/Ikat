@@ -43,6 +43,11 @@
   .fx-grad { font-size:28px; font-weight:700; background-image:linear-gradient(to right,#5fb4d4,#d4a44e); -webkit-background-clip:text; background-clip:text; color:#00000000; background-size:200% auto; animation:shimmer 3s linear infinite; }
   @keyframes shimmer { to { background-position:200% center; } }
   .vf { width:60px; height:60px; background-color:#5fb4d4; border-radius:6px; }
+  .zi-stage { position:relative; width:170px; height:130px; }
+  .zi-chip { position:absolute; width:96px; height:64px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:700; color:#e8edf4; font-size:15px; }
+  .zi-a { left:0; top:0; background-color:#2a5a75; }
+  .zi-b { left:28px; top:32px; background-color:#5fb4d4; color:#10202c; }
+  .zi-c { left:56px; top:64px; background-color:#d4a44e; color:#2c2410; }
   .vf-rot { transform:rotate(15deg); }
   .vf-scale { transform:scale(1.2); }
   .vf-trans { transform:translate(10px,10px); }
@@ -256,6 +261,16 @@
           <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">bg-color 垫底合成</span><div class="grad grad-under"></div></div>
           <span class="grad-txt3">多stop渐变字</span>
           <span style="color:#6c7080;font-size:13px;max-width:320px">radial 过渡半径应与浏览器一致（closest/farthest/side/corner 语义）；transparent 渐变中段无灰边（premultiplied 插值）；垫底格的暗棕底色须从渐变透明区透出。</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">14 · 层叠（z-index）</div>
+        <div class="section-desc">同级兄弟按 z 升序绘制，等 z 保持 DOM 序（后者盖上）；子树整体移动，不改 flex 排列（那是 order）。左：纯 DOM 序，C 盖 B 盖 A。中：A 写 z-index:3 后翻转，A 盖一切。右：点按钮经 NodeStyle.ZIndex 把 B 抬到 4（运行时便签层，回落 CSS 用 unset）。</div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:24px;flex-wrap:wrap;align-items:flex-start">
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">DOM 序（C 顶层）</span><div class="zi-stage"><div class="zi-chip zi-a">A</div><div class="zi-chip zi-b">B</div><div class="zi-chip zi-c">C</div></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">A z-index:3（A 顶层）</span><div class="zi-stage"><div class="zi-chip zi-a" style="z-index:3">A·z3</div><div class="zi-chip zi-b">B</div><div class="zi-chip zi-c">C</div></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">运行时 ZIndex（按钮切换 B）</span><button id="zi-btn" style="align-self:flex-start;background-color:#1a2f45;border-width:0 0 0 2px;border-style:solid;border-color:#2a5a75;color:#8ec5d8;padding:6px 14px;border-radius:4px;font-size:13px">置顶 B</button><div class="zi-stage" id="zi-stage"><div class="zi-chip zi-a">A</div><div class="zi-chip zi-b" id="zi-b">B</div><div class="zi-chip zi-c">C</div></div></div>
         </div>
       </div>
 

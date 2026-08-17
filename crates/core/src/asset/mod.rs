@@ -38,9 +38,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 37; // v37: ControlInit::Dropdown 增加 option_values（bincode 布局变化）
-pub(crate) const MIN_VERSION: u32 = 37;
-pub(crate) const MAX_VERSION: u32 = 37;
+pub const PKG_FORMAT_VERSION: u32 = 38; // v38: ResolvedStyle 增加 z_index、inline_declared u32→u64（bincode 布局变化）
+pub(crate) const MIN_VERSION: u32 = 38;
+pub(crate) const MAX_VERSION: u32 = 38;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────

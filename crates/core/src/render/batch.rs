@@ -219,8 +219,9 @@ pub fn assign_sort_keys(
             scroll_offset
         };
         let child_accumulated = intersected_for_kids;
-        // clone children 避免与 nodes 的 &mut 冲突借（scene 与 nodes 是独立借用）。
-        let kids = node.children.clone();
+        // clone 避免与 nodes 的 &mut 冲突借（scene 与 nodes 是独立借用）。
+        // z-index 层叠：兄弟稳定按 z 升序访问（等 z 保 DOM 序）。
+        let kids = crate::scene::node::paint_order_children(scene, id);
         for c in kids {
             dfs(
                 scene,

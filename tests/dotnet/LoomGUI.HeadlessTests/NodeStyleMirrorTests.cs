@@ -351,9 +351,9 @@ namespace LoomGUI.HeadlessTests
         /// ZIndex/SetVar(4 overloads)/RemoveVar 在 core apply_decl 未实现（不在 inline_bit 表），
         /// 调用必须抛 NotImplementedException（ponytail defer 显式失败，不静默丢）。
         /// SetVar 4 overloads 逐个覆盖：保护未来把任一 overload 接上 mirror 时能被此门抓住。
+        /// （ZIndex 已接 mirror——行为测试见 ZIndexTests，不再属于 defer 集。）
         /// </summary>
         [Theory]
-        [InlineData(0)]
         [InlineData(2)]
         [InlineData(3)]
         [InlineData(4)]
@@ -367,7 +367,6 @@ namespace LoomGUI.HeadlessTests
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
                 switch (which)
                 {
-                    case 0: Assert.Throws<NotImplementedException>(() => n.Style.ZIndex = 5); break;
                     case 2: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--x", Length.Px(10))); break;
                     case 3: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--c", new Color(1f, 0f, 0f, 1f))); break;
                     case 4: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--f", 0.5f)); break;

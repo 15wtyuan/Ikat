@@ -45,6 +45,11 @@ use loomgui_fence::schema::css::CSS_PROPS;
 /// - `transition`：schema default `none`，apply 产 1 条惰性 TransitionSpec
 ///   （prop=None/duration=0），resolved 默认是空 Vec。duration=0 的 spec 是行为
 ///   no-op（瞬完），语义等价于「无过渡」。表示差异，非语义漂移。
+/// - `animation-*` 长划（7 个，name 除外）：apply 其 schema initial（如 `0s`/`ease`/`1`）
+///   经 `apply_animation_longhand` 产 1 条惰性 nameless AnimationSpec，resolved 默认是
+///   空 Vec。空 name 的 spec 不被 sync_animation_players 建成 player，语义等价于
+///   「无动画」（CSS「无 name 不播」）。与 transition 同根因。`animation-name` 的
+///   default `none` 是清空空列表 = no-op，走主断言。
 const REPRESENTATION_DIFF_PROPS: &[&str] = &[
     "display",
     "justify-content",
@@ -53,6 +58,13 @@ const REPRESENTATION_DIFF_PROPS: &[&str] = &[
     "align-self",
     "font-family",
     "transition",
+    "animation-duration",
+    "animation-timing-function",
+    "animation-delay",
+    "animation-iteration-count",
+    "animation-direction",
+    "animation-fill-mode",
+    "animation-play-state",
 ];
 
 /// apply_decl 不消费其 schema default 值的属性（apply 返 false，结构体不变）。

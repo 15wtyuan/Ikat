@@ -354,6 +354,10 @@ pub struct ResolvedStyle {
     /// flex 顺序（CSS `order`）。taffy 0.5 Style 无此字段，存在这里由
     /// layout 在 flex 排序前消费。默认 0 = DOM 顺序。
     pub order: i32,
+    /// 层叠序（CSS `z-index`）：只改同级兄弟间绘制/命中顺序（z 升序绘制、
+    /// 子树整体移动），不改 flex 排列（那是 `order`）。默认 0。消费点：render
+    /// DFS 子迭代 + open popup 追加循环 + hit `effective_draw_order`（三处同步）。
+    pub z_index: i32,
     /// pointer-events:auto=true / none=false（命中门控）。默认 true。
     pub touchable: bool,
     /// CSS transform 解析产物（Affine2 矩阵，含多函数复合剪切）。默认 identity。
@@ -392,7 +396,7 @@ pub struct ResolvedStyle {
     /// applied later at runtime rematch — so without this bitmask a class rule would
     /// overwrite the inline value (priority inverted). rematch skips class declarations
     /// whose `inline_bit` is set here, restoring inline > class.
-    pub inline_declared: u32,
+    pub inline_declared: u64,
 }
 
 /// 单层 CSS box-shadow。多声明逗号分隔各成一层（`ResolvedStyle.box_shadow: Vec`，CSS 源序）。
@@ -476,6 +480,7 @@ impl Default for ResolvedStyle {
             letter_spacing: 0.0,
             white_space_nowrap: false,
             order: 0,
+            z_index: 0,
             touchable: true,
             transform: LocalTransform::default(),
             color_filter: None,

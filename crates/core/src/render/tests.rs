@@ -5610,7 +5610,7 @@ fn open_popup_renders_option_list_via_reparent_path() {
             option_values: Vec::new(),
         },
     );
-    crate::scene::control::sync_control_visuals(&mut scene, sel);
+    crate::scene::control::sync_control_visuals(&mut scene, sel, 0.0);
     assert_eq!(
         scene
             .get(popup)

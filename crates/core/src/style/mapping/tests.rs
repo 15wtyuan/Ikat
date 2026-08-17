@@ -2065,3 +2065,113 @@ fn font_family_takes_first_name_stripping_quotes() {
     ));
     assert_eq!(s.font_family.as_deref(), Some("PressStart2P"));
 }
+
+#[test]
+fn z_index_parses_integer_and_falls_back_to_zero() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "z-index", "5"));
+    assert_eq!(s.z_index, 5);
+    assert!(apply_decl(&mut s, "z-index", "-3"));
+    assert_eq!(s.z_index, -3);
+    // 非法值降级 0（fence 打包期拦 auto/非整数；运行时逃生舱宽松，同 order 策略）。
+    assert!(apply_decl(&mut s, "z-index", "auto"));
+    assert_eq!(s.z_index, 0);
+    assert!(apply_decl(&mut s, "z-index", "bogus"));
+    assert_eq!(s.z_index, 0);
+}
+
+#[test]
+fn animation_longhands_broadcast_and_compose_with_shorthand() {
+    // 简写在先、长划改字段：广播写全部既有 spec。
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "animation", "fade .3s, slide .5s"));
+    assert_eq!(s.animation.len(), 2);
+    assert!(apply_decl(&mut s, "animation-duration", "2s"));
+    assert!(s.animation.iter().all(|a| a.duration == 2.0));
+    assert!(apply_decl(&mut s, "animation-timing-function", "linear"));
+    assert!(s
+        .animation
+        .iter()
+        .all(|a| a.timing_function == crate::tween::Ease::Linear));
+    assert!(apply_decl(&mut s, "animation-iteration-count", "infinite"));
+    assert!(s.animation.iter().all(|a| a.iteration_count.is_none()));
+    assert!(apply_decl(&mut s, "animation-direction", "alternate"));
+    assert!(apply_decl(&mut s, "animation-fill-mode", "forwards"));
+    assert!(apply_decl(&mut s, "animation-play-state", "paused"));
+    assert!(apply_decl(&mut s, "animation-delay", ".1s"));
+    assert_eq!(s.animation[0].delay, 0.1);
+
+    // 长划先于 name：惰性 spec（name 空 = 不播），name 到位补齐。
+    let mut s2 = ResolvedStyle::default();
+    assert!(apply_decl(&mut s2, "animation-duration", ".4s"));
+    assert_eq!(s2.animation.len(), 1);
+    assert_eq!(s2.animation[0].name, "");
+    assert_eq!(s2.animation[0].duration, 0.4);
+    assert!(apply_decl(&mut s2, "animation-name", "pop"));
+    assert_eq!(s2.animation[0].name, "pop");
+
+    // animation-name:none 清空；非法值（逗号列表 / 坏关键字）返 false。
+    assert!(apply_decl(&mut s2, "animation-name", "none"));
+    assert!(s2.animation.is_empty());
+    assert!(!apply_decl(&mut s2, "animation-duration", ".4s, .8s"));
+    assert!(!apply_decl(&mut s2, "animation-direction", "bogus"));
+    assert!(!apply_decl(&mut s2, "animation-name", "123bad"));
+}
+
+#[test]
+fn animation_longhand_nameless_spec_skipped_by_player_sync() {
+    // sync_animation_players 对空 name spec 不建 player（长划惰性声明）；
+    // name 到位的 spec 正常建——一节点两 spec 只产一个 player。
+    use crate::scene::node::{Node, Scene};
+    use crate::style::dynamic::sync_animation_players;
+    use crate::style::resolved::{
+        AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
+    };
+    let initial = |name: &str| AnimationSpec {
+        name: name.to_string(),
+        duration: 0.4,
+        delay: 0.0,
+        iteration_count: Some(1),
+        direction: AnimationDirection::Normal,
+        fill_mode: AnimationFillMode::None,
+        timing_function: crate::tween::Ease::CubicOut,
+        play_state: AnimationPlayState::Running,
+    };
+    let mut root = Node::default();
+    root.style.animation = vec![initial(""), initial("pop")];
+    let mut scene = Scene::from_nodes(vec![root], vec![]);
+    let root_id = scene.roots[0];
+    // keyframes 命名 "pop"（与 initial("") 的空 name 区分——空 name 无 keyframes 可配）。
+    scene.keyframes.insert(
+        "pop".into(),
+        crate::scene::animation::KeyframesRule {
+            name: "pop".into(),
+            stops: vec![
+                crate::scene::animation::KeyframeStop {
+                    selector: crate::scene::animation::KeyframeStopSelector::From,
+                    props: crate::scene::animation::AnimatableProps {
+                        opacity: Some(0.0),
+                        ..Default::default()
+                    },
+                    hook: None,
+                },
+                crate::scene::animation::KeyframeStop {
+                    selector: crate::scene::animation::KeyframeStopSelector::To,
+                    props: crate::scene::animation::AnimatableProps {
+                        opacity: Some(1.0),
+                        ..Default::default()
+                    },
+                    hook: None,
+                },
+            ],
+        },
+    );
+    sync_animation_players(&mut scene);
+    let named: Vec<_> = scene
+        .players
+        .values()
+        .filter(|p| p.node == root_id)
+        .collect();
+    assert_eq!(named.len(), 1, "只建 name=pop 的 player：{:?}", named.len());
+    assert_eq!(named[0].spec.name, "pop");
+}

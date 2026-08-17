@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn pipeline_collects_all_errors() {
         let result = parse_template(
-            r#"<video></video><div bogus="x" style="z-index:5"></div>"#,
+            r#"<video></video><div bogus="x" style="visibility:hidden"></div>"#,
             "bad.html",
         );
         // Should have multiple errors, not just the first

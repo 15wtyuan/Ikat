@@ -1061,3 +1061,42 @@ fn instantiate_fills_textfield_edit_state_from_init() {
         other => panic!("expected TextField, got {:?}", other),
     }
 }
+
+#[test]
+fn paint_order_children_sorts_by_z_stable() {
+    // root 三子 a(z=0) b(z=2) c(z=1) → 绘制序 [a, c, b]（z 升序，b 最后画 = 顶层）。
+    // z 全 0 时稳定排序退化为 children 原序（DOM 序），与历史行为逐位一致。
+    let root = Node::default();
+    let mut a = Node::default();
+    a.style.z_index = 0;
+    let mut b = Node::default();
+    b.style.z_index = 2;
+    let mut c = Node::default();
+    c.style.z_index = 1;
+    let scene = Scene::from_nodes(vec![root, a, b, c], vec![(0, 1), (0, 2), (0, 3)]);
+    let root_id = scene.roots[0];
+    let ids: Vec<NodeId> = scene.get(root_id).unwrap().children.clone();
+    assert_eq!(
+        paint_order_children(&scene, root_id),
+        vec![ids[0], ids[2], ids[1]],
+        "z 升序稳定排：a(0) → c(1) → b(2)"
+    );
+    // 负 z 排最前（最先画 = 最底）
+    let scene2 = Scene::from_nodes(
+        {
+            let mut a = Node::default();
+            a.style.z_index = -5;
+            vec![Node::default(), a, Node::default()]
+        },
+        vec![(0, 1), (0, 2)],
+    );
+    let root2 = scene2.roots[0];
+    let kids2: Vec<NodeId> = scene2.get(root2).unwrap().children.clone();
+    assert_eq!(
+        paint_order_children(&scene2, root2),
+        vec![kids2[0], kids2[1]],
+        "负 z 先画"
+    );
+    // 不存在的节点 → 空（防御）
+    assert!(paint_order_children(&scene, NodeId(0xFFFF_FFFF)).is_empty());
+}

@@ -665,6 +665,21 @@ public class ShowcaseRunner : MonoBehaviour
     /// 元素缺失（本页没该控件）TryGet 返 false 跳过——和 WireNav 同样的宽松查询模式。
     void WireControls(Container page, string pageName)
     {
+        if (pageName == "lab")
+        {
+            // lab #14 运行时 ZIndex：按钮把 B 片在 4（置顶）/ 0（回落 DOM 序）间切换——
+            // 便签层 inline override，下帧绘制序生效（不触发 flex solve）。
+            if (page.TryGet<Button>("zi-btn", out var ziBtn)
+                && page.TryGet<Container>("zi-b", out var ziB))
+            {
+                ziBtn.Clicked += () =>
+                {
+                    bool raised = ziB.Style.ZIndex > 0;
+                    ziB.Style.ZIndex = raised ? 0 : 4;
+                    Debug.Log($"[Showcase] lab #14 B z-index -> {ziB.Style.ZIndex}");
+                };
+            }
+        }
         if (pageName == "settings")
         {
             // Slider.ValueChanged 逐帧拖拽值 → 同步刷新旁边的数值标签。

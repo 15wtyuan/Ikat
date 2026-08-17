@@ -13,10 +13,13 @@ pub(crate) fn point_in_rect(point: (f32, f32), r: Rect) -> bool {
 /// （CSS flexbox `order` 语义：默认 order=0，DOM 序 = 绘制序，后者绘 = 顶层）。
 /// 实现：先反转 children（让后者靠前），再按 `-order` 稳定排——stable 保反转后序，
 /// 即同 order 下后者先测，与 hit_test"顶层优先"一致。
+/// z-index 为主键（后一次稳定排 `-z_index`）：镜像 render DFS 的 (z 升, DOM 升)
+/// 绘制序之逆。等 z 时保持既有 order 行为（本函数的历史近似，render 侧不排 order）。
 fn effective_draw_order(scene: &Scene, parent: NodeId) -> Vec<NodeId> {
     let mut kids: Vec<NodeId> = scene.get(parent).expect("live node").children.clone();
     kids.reverse();
     kids.sort_by_key(|&c| -scene.get(c).expect("live node").style.order); // 负号=降序
+    kids.sort_by_key(|&c| -scene.get(c).expect("live node").style.z_index); // z 主键=降序
     kids
 }
 
@@ -650,5 +653,27 @@ mod tests {
             Some(cover),
             "closed 时正常 DFS，顶层 cover 赢（popup 不前置）"
         );
+    }
+
+    #[test]
+    fn hit_test_prefers_higher_z_index_sibling() {
+        // a 先出现在 DOM、b 后（默认 b 顶层）。给 a z=10 后 z 翻转绘制序——
+        // 重叠区 (75,75) 应命中 a（z 大者顶层，与 render DFS 的 z 升序绘制镜像）。
+        let mut s = overlap_scene();
+        let a_id = overlap_ids(&s).1;
+        s.get_mut(a_id).unwrap().style.z_index = 10;
+        compute_world_transforms(&mut s);
+        assert_eq!(hit_test(&s, (75.0, 75.0)), Some(a_id));
+    }
+
+    #[test]
+    fn hit_test_negative_z_sinks_below_dom_later_sibling() {
+        // a z=-1、b z=0：负 z 沉底，重叠区命中 b（默认 DOM 后者）。
+        let mut s = overlap_scene();
+        let a_id = overlap_ids(&s).1;
+        s.get_mut(a_id).unwrap().style.z_index = -1;
+        compute_world_transforms(&mut s);
+        let (_root, _a, b) = overlap_ids(&s);
+        assert_eq!(hit_test(&s, (75.0, 75.0)), Some(b));
     }
 }

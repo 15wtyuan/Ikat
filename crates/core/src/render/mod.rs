@@ -766,8 +766,9 @@ pub fn build_render_nodes(
                 rn.mask_context = MaskContext(0);
                 popup_counter += 1;
             }
-            // 逆序 push 子节点（stack LIFO → 先序出栈）。
-            let kids = node.children.clone();
+            // 逆序 push 子节点（stack LIFO → 先序出栈）。z-index 层叠与主 DFS 同序
+            //（paint_order_children，等 z 保 DOM 序）——popup 内 z 与 hit 侧一致。
+            let kids = crate::scene::node::paint_order_children(scene, nid);
             for c in kids.into_iter().rev() {
                 stack.push(c);
             }

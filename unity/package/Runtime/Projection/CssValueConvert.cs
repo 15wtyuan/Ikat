@@ -54,6 +54,9 @@ namespace LoomGUI
 
         internal static string ToCss(float f) => f.ToString(CultureInfo.InvariantCulture);
 
+        // z-index（层叠序）用裸 int：CSS `<integer>`，无单位、允许负值。
+        internal static string ToCss(int i) => i.ToString(CultureInfo.InvariantCulture);
+
         // ── enum → CSS keyword（每 enum 的 Unset 都返 null：撤销哨兵）────────
 
         internal static string ToCss(DisplayMode v) => v switch
@@ -142,6 +145,7 @@ namespace LoomGUI
             Color c          => ToCss(c),
             Thickness t      => ToCss(t),
             float f          => ToCss(f),
+            int i            => ToCss(i),
             DisplayMode v    => ToCss(v),
             FlexDirection v  => ToCss(v),
             FlexWrap v       => ToCss(v),

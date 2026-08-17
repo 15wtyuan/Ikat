@@ -18,6 +18,11 @@
   .label { color:#6c7080; font-size:12px; }
   .label-strong { color:#8ec5d8; font-size:12px; font-weight:700; }
   .box { width:60px; height:60px; border-radius:8px; background-color:#5fb4d4; }
+
+  /* ── #13 长划子属性：等价 #2/#4/#5 的简写，全用 animation-* 长划声明 ── */
+  .b13a { animation-name:m2-pulse; animation-duration:1.2s; animation-timing-function:ease-in-out; animation-iteration-count:infinite; animation-direction:alternate; }
+  .b13b { animation-name:m2-hue; animation-duration:2s; animation-delay:.4s; animation-fill-mode:forwards; }
+  .b13c { animation-name:m2-x; animation-duration:1s; animation-timing-function:ease-in; animation-play-state:running; }
   .note { color:#6c7080; font-size:12px; }
 
   /* ── #1 淡入滑入：opacity 0→1 + translateY(20→0)，.5s fill both ── */
@@ -211,6 +216,16 @@
           <button id="btn-h-stop" class="hbtn">Stop</button>
           <button id="btn-h-seek" class="hbtn">Seek .5</button>
           <span class="note">Unity 运行时驱动（浏览器预览无程序化动画，按钮仅 Unity 生效）</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">13 · animation-* 长划子属性（等价简写拆开写）</div>
+        <div class="section-desc">8 个长划单值声明：写入既有 spec 对应字段，无简写时惰性（name 到位才播）。三盒应分别等价 #2（脉冲 alternate）、#4（色相循环）、#8（位移往返）的简写形态。</div>
+        <div class="stage" style="gap:32px;align-items:center">
+          <div class="box b13a"></div>
+          <div class="box b13b"></div>
+          <div class="box b13c"></div>
         </div>
       </div>
 

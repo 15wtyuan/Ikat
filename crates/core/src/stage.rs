@@ -1059,7 +1059,7 @@ impl Stage {
         //     避免与 sync_control_visuals 的可变借冲突。
         let control_ids: Vec<NodeId> = scene.controls.0.keys().copied().collect();
         for cid in control_ids {
-            crate::scene::control::sync_control_visuals(scene, cid);
+            crate::scene::control::sync_control_visuals(scene, cid, self.root_size.1);
         }
         // 5. solve（读 rematch 后的 taffy_style → layout_rect）
         // 核心知图尺寸（打包期 PNG IHDR 静态，存 Stage.image_sizes）。solve 查尺寸表算

@@ -1599,6 +1599,13 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.order = value.trim().parse::<i32>().unwrap_or(0);
             true
         }
+        "z-index" => {
+            // 层叠序：绘制/命中层（render DFS + effective_draw_order 消费），
+            // 不进 layout。与 order 正交：order 管 flex 排列，z-index 管盖上关系。
+            // 非法值降级 0（fence 打包期已拦；运行时 StyleSheet 逃生舱宽松，同 order 策略）。
+            style.z_index = value.trim().parse::<i32>().unwrap_or(0);
+            true
+        }
         "pointer-events" => {
             // auto/默认=true（可命中），none=false（跳过自身，继续测子——CSS 语义）
             style.touchable = value.trim() != "none";
@@ -1676,6 +1683,14 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.animation = parse_animation(value);
             true
         }
+        "animation-name"
+        | "animation-duration"
+        | "animation-timing-function"
+        | "animation-delay"
+        | "animation-iteration-count"
+        | "animation-direction"
+        | "animation-fill-mode"
+        | "animation-play-state" => apply_animation_longhand(style, prop, value.trim()),
         "text-shadow" => {
             // CSS text-shadow: ox oy [blur] color，逗号分隔多阴影。
             // 每段 → FontEffect::Shadow{ox, oy, blur, color}，叠进 text_effects（INHERITED）。
@@ -1756,6 +1771,99 @@ pub fn parse_animation(value: &str) -> Vec<crate::style::resolved::AnimationSpec
         .split(',')
         .filter_map(|decl| parse_one_animation(decl.trim()))
         .collect::<Vec<AnimationSpec>>()
+}
+
+/// animation-* 长划（单值子集）：写入 `style.animation` 全部既有 spec 的对应字段；
+/// 无既有 spec 时创建一条 initial spec。空 name 的 spec 不被 sync_animation_players
+/// 建成 player（见该函数 name 守卫）——长划先于 animation-name 时声明惰性，name
+/// 到位才启播（CSS「无 name 不播」）。`animation-name: none` 清空列表。
+/// 值非法返 false（fence inline 路径报 FenceBadCssValue）。逗号列表不收（简写专属）。
+fn apply_animation_longhand(
+    style: &mut crate::style::resolved::ResolvedStyle,
+    prop: &str,
+    value: &str,
+) -> bool {
+    use crate::style::resolved::{
+        AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
+    };
+    if value.is_empty() || value.contains(',') {
+        return false;
+    }
+    if prop == "animation-name" && value.eq_ignore_ascii_case("none") {
+        style.animation.clear();
+        return true;
+    }
+    if style.animation.is_empty() {
+        style.animation.push(AnimationSpec {
+            name: String::new(),
+            duration: 0.0,
+            delay: 0.0,
+            iteration_count: Some(1),
+            direction: AnimationDirection::Normal,
+            fill_mode: AnimationFillMode::None,
+            timing_function: crate::tween::Ease::CubicOut,
+            play_state: AnimationPlayState::Running,
+        });
+    }
+    let mut ok = true;
+    for spec in &mut style.animation {
+        match prop {
+            "animation-name" => {
+                if is_valid_animation_name(value) {
+                    spec.name = value.to_string();
+                } else {
+                    ok = false;
+                }
+            }
+            "animation-duration" | "animation-delay" => match parse_time_seconds(value) {
+                Some(secs) => {
+                    if prop == "animation-duration" {
+                        spec.duration = secs;
+                    } else {
+                        spec.delay = secs;
+                    }
+                }
+                None => ok = false,
+            },
+            "animation-timing-function" => match css_ease_keyword(value) {
+                Some(e) => spec.timing_function = e,
+                None => ok = false,
+            },
+            "animation-iteration-count" => {
+                if value.eq_ignore_ascii_case("infinite") {
+                    spec.iteration_count = None;
+                } else if value.chars().all(|c| c.is_ascii_digit()) && !value.is_empty() {
+                    match value.parse::<u32>() {
+                        Ok(n) => spec.iteration_count = Some(n),
+                        Err(_) => ok = false,
+                    }
+                } else {
+                    ok = false;
+                }
+            }
+            "animation-direction" => match value.to_ascii_lowercase().as_str() {
+                "normal" => spec.direction = AnimationDirection::Normal,
+                "reverse" => spec.direction = AnimationDirection::Reverse,
+                "alternate" => spec.direction = AnimationDirection::Alternate,
+                "alternate-reverse" => spec.direction = AnimationDirection::AlternateReverse,
+                _ => ok = false,
+            },
+            "animation-fill-mode" => match value.to_ascii_lowercase().as_str() {
+                "none" => spec.fill_mode = AnimationFillMode::None,
+                "forwards" => spec.fill_mode = AnimationFillMode::Forwards,
+                "backwards" => spec.fill_mode = AnimationFillMode::Backwards,
+                "both" => spec.fill_mode = AnimationFillMode::Both,
+                _ => ok = false,
+            },
+            "animation-play-state" => match value.to_ascii_lowercase().as_str() {
+                "running" => spec.play_state = AnimationPlayState::Running,
+                "paused" => spec.play_state = AnimationPlayState::Paused,
+                _ => ok = false,
+            },
+            _ => unreachable!("arm 匹配已限定 8 个长划 prop"),
+        }
+    }
+    ok
 }
 
 /// 单条 animation 声明（逗号分隔的一段）→ AnimationSpec。`none` / 空 / 非法 name → None。
