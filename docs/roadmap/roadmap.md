@@ -72,7 +72,7 @@
   2. ~~**pkg.bin schema-hash CI 门**~~ ✅ done（2026-08-17）：packer `schema_lock.rs`——固定 fixture（覆盖 ControlInit 各变体/渐变/阴影/动画/keyframes/nth-child/手编列）打包字节 FNV-1a 锁哈希 + 打包确定性自洽测试；任何改变字节的布局改动 = 哈希翻转 = CI 红。
   3. **C# 侧布局断言 + golden blob 对拍**：FrameBlob 列布局 / EventRecord 位编码在 C# 侧零断言（magic+version 防整体漂移，防不住列语义错位）；Rust 产 golden blob 入库供 dotnet 测试消费，手补 struct 镜像补 Marshal.SizeOf 断言。
   4. ~~**tick 顺序可执行化 + 分层叙事对齐**~~ ✅ done（2026-08-17）：core `tick_order_gate.rs` 源码级锁定 `tick_and_render` 步骤序列（换序/插入/删除即红，每步恰一次）；main-design §16 步骤清单重写为与登记表一致并声明真相源；§2 补「单向指数据流、非模块依赖」注记。
-  5. **Scene 建删节点收口**：per-node side table 的建/删联动收成单一入口（现状平行数组一致性靠纪律，坑 190 已付学费）。
+  5. ~~**Scene 建删节点收口**~~ ✅ done（2026-08-17）：`Scene::alloc_node_slot` / `free_node_slot` 单一入口——建点（`create_node` / `create_node_from_template` / `Scene::build` / `from_nodes`）与删点（`remove_node`）全部迁移；顺带修了审查发现的真缺口：**四张 Vec 索引表（world_transforms / node_sort_keys / text_layouts / text_measure_cache）删除时从不清位**，slotmap 槽位复用窗口内新节点会读到上一任节点的矩阵/缓存——现 free/alloc 双向清初值（world 两表不 resize，保持「未计算 = 本帧不命中」语义）。收口对有直测 + remove_node 集成回归锁。
   - ~~顺手修三处注释/文档撒谎~~ ✅ done（2026-08-17）：`hit.rs` 模块 doc 改为与逆变换实现一致；`asset/mod.rs` 头注释不再硬编码版本号（指向常量 + 布局锁门）；`MirrorPool.LastNodeId` 注释改为如实（仅诊断打印，无复用校验）。
 - **性能**：`solve` 每帧重建 taffy 树（坑 186，文本重测已 memoize 缓解，树重建本身待定）。（攒批回写 flush 已落地——StyleMirror/NodeTransform 帧末 `FlushDirtyStyles`/`FlushTransform` 排空 dirty 集合，`LoomHost` flush seam 驱动。）
 - **机制债**：card-img Image bg 合成 node_id 机制（悬置，照 box-shadow 合成 id 模式）；`RenderNode.world_matrix` `Affine2` → `NodeTransform` 升级（TRS 分解对齐公共 API）。
