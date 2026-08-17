@@ -566,7 +566,7 @@ fn alpha_rec(
     alphas: &mut [f32],
     visited: &mut [bool],
 ) {
-    let node = scene.get(id).expect("live node");
+    let node = scene.get_live(id, "mod:569");
     let acc = parent_alpha * own_opacity(scene, node);
     alphas[id.index()] = acc;
     visited[id.index()] = true;

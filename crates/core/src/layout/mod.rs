@@ -140,7 +140,7 @@ pub fn solve(
         parent_overflow: bool,
         image_sizes: &ImageSizeTable,
     ) -> taffy::NodeId {
-        let node = scene.get(id).expect("live node");
+        let node = scene.get_live(id, "mod:143");
         let mut style = node.style.taffy_style.clone();
         // overflow != visible → 设 taffy overflow，让 flex automatic min-size=0（CSS flex §4.5）。
         // 不设则 taffy 默认 Visible → min-size=min-content → 容器被 content 撑开（viewport=content）
@@ -606,7 +606,7 @@ pub fn solve(
         let x = parent_origin.0 + layout.location.x;
         let y = parent_origin.1 + layout.location.y;
         let (w, h) = (layout.size.width, layout.size.height);
-        let node = scene.get_mut(id).expect("live node");
+        let node = scene.get_live_mut(id, "mod:609");
         node.layout_rect = Rect { x, y, w, h };
         // clip_rect 按 rematch 后的 style.overflow 重派生（而非仅填充 create 时建的 Some 槽）。
         // 原因：<style> class 规则设的 overflow 走 dynamic_rules 运行时应用，打包期

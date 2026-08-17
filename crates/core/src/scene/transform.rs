@@ -21,7 +21,7 @@ pub fn compute_world_transforms(scene: &mut Scene) {
 }
 
 fn rec(scene: &Scene, anim: &AnimTable, id: NodeId, parent_world: Affine2, worlds: &mut [Affine2]) {
-    let node = scene.get(id).expect("live node");
+    let node = scene.get_live(id, "transform:24");
     let lr = node.layout_rect;
     let pivot = (lr.w / 2.0, lr.h / 2.0);
     let rel = match node.parent {

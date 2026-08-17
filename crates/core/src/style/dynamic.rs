@@ -270,7 +270,7 @@ use crate::scene::node::{ControlState, NodeKind};
 ///
 /// **常驻：**runtime rematch 用，不依赖 parse feature。
 pub fn compound_matches_node(c: &Compound, node_id: NodeId, scene: &Scene) -> bool {
-    let node = scene.get(node_id).expect("live node");
+    let node = scene.get_live(node_id, "dynamic:273");
     if let Some(t) = &c.tag {
         // NodeKind → HTML 标签名：标准元素用其 tag，控件 kind 回溯到作者写的 tag
         // （input/progress），使 `input[type="range"]`、`progress` 等选择器在运行时 rematch
@@ -506,7 +506,7 @@ fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
 /// 通过后调 compound_matches_node 做字面匹配（tag/classes/id_attr + :nth-child 结构位置）。
 fn compound_matches_with_state(c: &Compound, node_id: NodeId, scene: &Scene) -> bool {
     // 伪类状态门
-    let node = scene.get(node_id).expect("live node");
+    let node = scene.get_live(node_id, "dynamic:509");
     if c.pseudo_hover && !node.interaction.flags.contains(NodeFlags::HOVERED) {
         return false;
     }
@@ -672,14 +672,14 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         // transition 声明在下方级联完成后从 new_style 读（覆盖 base/inline +
         // 动态 class 规则两源），此处只留 old_style 供通道变化比较。
         let (old_style, cascaded_once) = {
-            let n = scene.get(node_id).expect("live node");
+            let n = scene.get_live(node_id, "dynamic:675");
             (
                 n.style.clone(),
                 n.interaction.flags.contains(NodeFlags::CASCALED),
             )
         };
         // 从 base_style 重起
-        let mut new_style = scene.get(node_id).expect("live node").base_style.clone();
+        let mut new_style = scene.get_live(node_id, "dynamic:682").base_style.clone();
         // 收集命中规则（按作用域过滤：全局规则 scope_root=INVALID 总匹配；scoped 规则只匹配本作用域节点）
         let node_scope = scope_map.get(&node_id).copied().unwrap_or(NodeId::INVALID);
         let mut matched: Vec<(u32, u32, u32, DynamicRule)> = Vec::new();
@@ -724,7 +724,7 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         // 使 propagate 把含 inline 的父值传给未自设的子、且本节点自身不被父覆盖。
         // inline_set 默认空 → 对没设 inline 的节点 no-op（Spec-3 probe 不回归）。
         {
-            let n_ref = scene.get(node_id).expect("live node");
+            let n_ref = scene.get_live(node_id, "dynamic:727");
             let inline_set = n_ref.inline_set;
             if inline_set.0 != 0 {
                 // 直传 &n_ref.inline_override（不可变借，new_style 是 local 不冲突；
@@ -748,7 +748,7 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
             }
         }
         // 写 style + 标 cascaded_once
-        let node = scene.get_mut(node_id).expect("live node");
+        let node = scene.get_live_mut(node_id, "dynamic:751");
         node.style = new_style;
         node.interaction.flags.insert(NodeFlags::CASCALED);
     }
@@ -832,7 +832,7 @@ fn propagate_inherited_rec(
     set_map: &HashMap<NodeId, InheritedSet>,
 ) {
     let (my_style, children) = {
-        let n = scene.get(id).expect("live node");
+        let n = scene.get_live(id, "dynamic:835");
         (n.style.clone(), n.children.clone())
     };
     // 父 effective = 父传下来的 style 快照（已含父自己的继承结果，因 tree order）
@@ -857,7 +857,7 @@ fn propagate_inherited_rec(
         copy_if_unset!(white_space_nowrap, INH_WHITE_SPACE_NOWRAP);
         // ponytail: per-clone，节点多时换就地改 + 父快照
         let eff_for_children = new_style.clone();
-        scene.get_mut(id).expect("live node").style = new_style;
+        scene.get_live_mut(id, "dynamic:860").style = new_style;
         // 向下传我更新后的 style 作为子 effective
         for c in children {
             propagate_inherited_rec(scene, c, Some(eff_for_children.clone()), set_map);

@@ -79,10 +79,24 @@ impl NodeId {
 
     /// 从 slotmap DefaultKey 构造 NodeId（insert 后回填 Node.id / roots 用）。
     /// 编码：index = key.idx（slotmap 槽位号，1..=capacity），gen = key.version 低 12 bit。
+    ///
+    /// **12-bit gen 截断是硬约束**：单槽复用超过 ~4096 次后版本回卷，产生活着的
+    /// 「幽灵死节点」（节点 id 字段是回卷值，与槽位真实版本不符，get(id) 永久 miss）。
+    /// 超限时显式 panic（非 debug_assert——release 也要炸，静默数据腐坏比崩溃更糟）。
+    /// 高频改写文本须走 TextNode.Text 就地 set_text（C# TextContent 快路径），
+    /// 勿每帧清子重建烧 generation；根治需 NodeId 拓宽 u64 ABI（roadmap）。
     pub fn from_key(k: DefaultKey) -> NodeId {
         let ffi = k.data().as_ffi();
         let idx = (ffi & 0xFFFF_FFFF) as u32;
         let version = (ffi >> 32) as u32;
+        if version > 0xFFF {
+            panic!(
+                "NodeId generation overflow: slot {idx} reused past 12-bit capacity \
+                 (version {version}) — id aliasing would corrupt the scene. \
+                 Reduce per-frame node churn (use TextNode.Text instead of rebuild), \
+                 or widen NodeId ABI (roadmap)."
+            );
+        }
         NodeId((idx << 12) | (version & 0xFFF))
     }
 
@@ -595,6 +609,12 @@ impl RoleTable {
 #[derive(Debug, Clone, Default)]
 pub struct Scene {
     pub roots: Vec<NodeId>,
+    /// 释放审计（诊断用）：free_node_slot 记 (id, 单调序号)，环形 32 笔。
+    /// get_live panic 时按死 id 查释放距离——区分「快照前已死」（id/槽位腐坏）
+    /// 与「循环中途死」（存在绕过快照时点的释放路径）。
+    pub free_log: std::collections::VecDeque<(NodeId, u64)>,
+    /// 释放单调序号（free_log 配套）。
+    pub free_seq: u64,
     /// 节点存储。Vec<Node> → SlotMap<DefaultKey, Node>（动态树 spec §4.1）。
     /// 应用层用 NodeId(u32) 句柄（FFI/C# 透明），经 `Scene::key_for`/`NodeId::to_key` 桥接到 DefaultKey。
     ///
@@ -709,6 +729,11 @@ impl Scene {
     /// 树手术（children/roots/focused_node/dynamic_rules）与 tween kill 归调用方——
     /// 那些不是 per-node 表。与 [`Scene::alloc_node_slot`] 成对维护。
     pub(crate) fn free_node_slot(&mut self, id: NodeId) {
+        self.free_seq += 1;
+        self.free_log.push_back((id, self.free_seq));
+        if self.free_log.len() > 32 {
+            self.free_log.pop_front();
+        }
         let idx = id.index();
         if idx < self.world_transforms.len() {
             self.world_transforms[idx] = crate::transform::IDENTITY;
@@ -870,6 +895,58 @@ impl Scene {
     }
     pub fn get_mut(&mut self, id: NodeId) -> Option<&mut Node> {
         self.nodes.get_mut(id.to_key())
+    }
+
+    /// 带站点标签的 live 查取：死 id 时 panic 消息含 id/index + 副作用表残留
+    /// （controls/lists/scroll 仍在 = 存在绕过 free_node_slot 漏斗的释放路径）。
+    /// release dll 内联行号不可靠，站点标签是定位「快照后死亡」panic 的唯一可靠锚点。
+    pub fn get_live(&self, id: NodeId, site: &str) -> &Node {
+        match self.get(id) {
+            Some(n) => n,
+            None => {
+                let frees: Vec<String> = self
+                    .free_log
+                    .iter()
+                    .rev()
+                    .enumerate()
+                    .filter(|(_, (fid, _))| *fid == id)
+                    .map(|(age, (_, seq))| format!("seq={seq} 距今{age}笔"))
+                    .collect();
+                let tail: Vec<String> = self
+                    .free_log
+                    .iter()
+                    .rev()
+                    .take(4)
+                    .map(|(fid, seq)| format!("{:?}@{seq}", fid))
+                    .collect();
+                panic!(
+                    "live node [{}] id={:?} idx={} side残留 controls={} lists={} scroll={} | 该id释放记录: {} | free_log尾: {} | 现free_seq={}",
+                    site,
+                    id,
+                    id.index(),
+                    self.controls.get(id).is_some(),
+                    self.lists.0.contains_key(&id),
+                    self.scroll.get(id).is_some(),
+                    if frees.is_empty() { "无(>32笔前或未过漏斗)".to_string() } else { frees.join("; ") },
+                    tail.join(" "),
+                    self.free_seq,
+                );
+            }
+        }
+    }
+    pub fn get_live_mut(&mut self, id: NodeId, site: &str) -> &mut Node {
+        if self.get(id).is_none() {
+            panic!(
+                "live node [{}] id={:?} idx={} side残留 controls={} lists={} scroll={}",
+                site,
+                id,
+                id.index(),
+                self.controls.get(id).is_some(),
+                self.lists.0.contains_key(&id),
+                self.scroll.get(id).is_some(),
+            );
+        }
+        self.get_mut(id).expect("live node (recheck)")
     }
 
     /// 按 CSS id 属性查节点（首个匹配）。无匹配 / 空 id → None。

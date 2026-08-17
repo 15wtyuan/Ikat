@@ -153,7 +153,7 @@ pub fn assign_sort_keys(
         if !id_to_pos.contains_key(&id) {
             return;
         }
-        let node = scene.get(id).expect("live node");
+        let node = scene.get_live(id, "batch:156");
         // mask_context + clip 交集：本节点 clip_rect 非空 → 开新层级（计数器+1），
         // 算 own ∩ accumulated；否则继承父层级与 accumulated。
         //

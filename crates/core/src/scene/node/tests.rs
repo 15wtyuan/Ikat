@@ -1100,3 +1100,17 @@ fn paint_order_children_sorts_by_z_stable() {
     // 不存在的节点 → 空（防御）
     assert!(paint_order_children(&scene, NodeId(0xFFFF_FFFF)).is_empty());
 }
+
+#[test]
+#[should_panic(expected = "NodeId generation overflow")]
+fn node_id_gen_overflow_panics_instead_of_aliasing() {
+    // 烧穿 12-bit generation：同槽 insert/remove 循环到版本回卷点，from_key 必须
+    // 显式 panic（静默回卷 = 幽灵死节点：id 字段与槽位真实版本不符，get 永久 miss，
+    // rematch 等全量遍历每帧炸「live node」）。
+    let mut scene = Scene::default();
+    loop {
+        let key = scene.nodes.insert(Node::default());
+        let _ = NodeId::from_key(key); // 超限时 panic
+        scene.nodes.remove(key);
+    }
+}

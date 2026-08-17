@@ -498,8 +498,9 @@ namespace LoomGUI
         /// 经 FFI 递归遍历 Rust 子树，对每个后代 NodeId：若 C# 侧有缓存 wrapper 则标 _disposed
         /// + 从 registry 移除。单次 remove_node（调用方 Dispose 末尾调）清 Rust 侧整棵子树；
         /// 本方法只维护 C# 缓存一致性，不调 remove_node per node。
+        /// internal：Container.TextContent 清子路径（ClearDirectChildrenFFI）同样需要先 evict。
         /// </summary>
-        private void DisposeDescendantsInRegistry(uint subtreeRootId)
+        internal void DisposeDescendantsInRegistry(uint subtreeRootId)
         {
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
 
@@ -816,11 +817,18 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 节点 world AABB（layout_rect 经 world_matrix 变换后的轴对齐外接盒）。
-        /// 直读 get_node_world_matrix FFI（Affine2 = [a,b,c,d,tx,ty]）+ 对 LayoutRect 四角 apply_point + 取 AABB。
-        /// 滞后一帧：本帧 layout/transform 写入下帧才反映。
+        /// 节点 world AABB。world_matrix 已含节点自身 layout 偏移（tx,ty = 节点盒世界原点），
+        /// 故对 (0,0)-(w,h) 盒做变换——再喂 LayoutRect 的 x/y 会把偏移算两次（滚动页上
+        /// 世界位 = 视口位 + 内容位，翻倍错位）。滞后一帧：本帧 layout/transform 写入下帧才反映。
         /// </summary>
-        public Rect WorldRect => LocalToGlobal(LayoutRect);
+        public Rect WorldRect
+        {
+            get
+            {
+                Rect lr = LayoutRect;
+                return LocalToGlobal(new Rect(0, 0, lr.Width, lr.Height));
+            }
+        }
 
         /// <summary>
         /// 本地点 → 世界点（经 world_matrix）。Affine2 列主序：x' = a·x + c·y + tx，y' = b·x + d·y + ty
@@ -960,9 +968,10 @@ namespace LoomGUI
         /// 读侧递归 Container 子树（含 TextBlock/TextElement/Button 等 Container 子类）累加 TextNode._text；
         /// 非 TextNode 叶子（Image / 控件）贡献 0 字符。
         ///
-        /// 写侧 DOM 语义：先清所有当前子（remove_child 各子——DOM 不 Dispose，子可重挂），再建一个
-        /// TextNode（create_node "span" + set_text）+ append_child。多次写值=替换当前 TextNode 文本
-        /// 不重建——但本实现简化为每次写都重建（与 DOM textContent setter 一致：每次写都重建内容树）。
+        /// 写侧 DOM 语义：先清所有当前子（**真释放**——remove_node 递归回收，非 detach；见
+        /// ClearDirectChildrenFFI 注释），再建一个 TextNode（create_node "span" + set_text）
+        /// + append_child。多次写值=替换当前 TextNode 文本不重建——但本实现简化为每次写都重建
+        /// （与 DOM textContent setter 一致：每次写都重建内容树）。
         /// </summary>
         public string TextContent
         {
@@ -979,8 +988,20 @@ namespace LoomGUI
                 StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
                 string text = value ?? "";
 
-                // 1) 清当前直系子（DOM：移除但不 Dispose——子可重挂）。直 FFI 逐个 remove_child，
-                //    跳过 RemoveChild 的 GetChildIndex 校验（snapshot 已确保是直系子，校验纯开销）。
+                // 0) 快路径：现有直系子恰为单个 TextNode → 就地 set_text（TextNode.Text
+                //    自带 _text 缓存同步）。必须走快路径：本 setter 是每帧高频改写路径
+                //    （OnUpdate 读数刷新），清子重建会每帧烧一次 slotmap generation——
+                //    单槽复用 ~4096 次后 NodeId 的 12-bit gen 截断回卷，产生活着的
+                //    「幽灵死节点」（core from_key 版本截断，get(id) 永久 miss）。
+                if (ChildCount == 1 && GetChildAt(0) is TextNode existing)
+                {
+                    existing.Text = text;
+                    return;
+                }
+
+                // 1) 清当前直系子（真释放 remove_node：递归清子 + slotmap 回收 + registry evict）。
+                //    释放而非 detach 是必须的：detach 会无限累积死节点。子树销毁 = DOM
+                //    textContent 替换语义（句柄随之失效）。
                 ClearDirectChildrenFFI(h);
 
                 // 2) 建 TextNode + 写文本 + append。三步 FFI 顺序——建后才有 NodeId，setText 后再挂，
@@ -1322,8 +1343,20 @@ namespace LoomGUI
             if (written < 0) return;
             if (written > buf.Length) written = buf.Length;
 
+            // 真释放（remove_node 递归清子 + slotmap 回收），非 detach。textContent 是高频
+            // 改写路径（OnUpdate 每帧刷新读数）：detach 语义下被清的 TextNode 永远留在
+            // scene.nodes 里，每帧漏节点——长会话把 slotmap index 推过 4096，撞破 render
+            // 合成 text 子页 id 方案的硬上限（真实节点被误判为子页、不进渲染）。
+            // 被清子树对作者语义 = DOM textContent 替换（子树销毁，句柄失效）。
             for (int i = 0; i < written; i++)
-                Native.loomgui_stage_remove_child(h, _id, buf[i]);
+            {
+                uint cid = buf[i];
+                DisposeDescendantsInRegistry(cid);
+                // remove_node 递归清子 + 脱挂 + slotmap 回收（同 Node.Dispose 路径）。
+                Native.loomgui_stage_remove_node(h, cid);
+                _ctx.RemoveUpdateHooks(cid);
+                _ctx._registry.Remove(cid);
+            }
         }
 
         /// <summary>
