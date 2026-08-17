@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>pkg schema lock</title>
+<!--
+  pkg.bin 布局锁 fixture（schema_lock.rs）：刻意覆盖尽可能多的编码路径——
+  bincode 结构（ResolvedStyle 复合字段 / ControlInit 各变体 / DynamicRuleTable 选择器
+  种类）+ 手编列（role/data-slot/aria-controls/tabindex/rich_text_block）+ @keyframes
+  手编 blob。打包字节进 FNV-1a 哈希锁死；改布局 = 改哈希 = 必须版本 bump。
+  只用围栏内语法（围栏外打包报错），语法样例抄自 fence/pipeline_integration 与
+  keyframes_bridge 的合法用例。
+-->
+<style>
+div { display: flex; flex-direction: column; }
+#root { width: 320px; font-size: 14px; z-index: 2; }
+.row { flex-direction: row; }
+.card { background: linear-gradient(137deg, #ff0000, transparent 60%); }
+.halo { background: radial-gradient(1100px 560px at 82% -12%, rgba(95,180,212,0.10), transparent 60%); }
+.shadow { box-shadow: 0 2px 8px rgba(0,0,0,0.35), inset 0 0 4px #ffcc00; }
+.fx { filter: grayscale(1); transform: rotate(8deg) scale(1.1); }
+.fade { transition: opacity .3s ease-in; }
+.anim { animation: slideIn .4s both; }
+.stripe :nth-child(odd) { color: #888888; }
+[role="slider"] { width: 200px; }
+[role="spinbutton"] { width: 120px; }
+[role="textbox"] { width: 180px; }
+[role="combobox"] { width: 200px; }
+[role="option"] { color: #222222; }
+[role="switch"] { width: 24px; height: 24px; }
+[role="tablist"] { flex-direction: row; }
+@keyframes slideIn{from{opacity:0;transform:translateY(20px)}/* @loom-hook start */ to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div id="root">
+  <div class="card shadow" id="card"><span>渐变卡片</span></div>
+  <div class="halo" id="halo"></div>
+  <div class="fx fade" id="fx">滤镜与过渡</div>
+  <div class="anim" id="anim">入场动画</div>
+  <div class="stripe" id="stripe"><div>一</div><div>二</div><div>三</div></div>
+  <div class="row" id="row-vol">
+    <div role="slider" id="vol" aria-valuenow="80" aria-valuemin="0" aria-valuemax="100" data-step="1"><div data-slot="thumb"></div></div>
+  </div>
+  <div role="switch" id="mute" aria-checked="true"></div>
+  <div role="spinbutton" id="num" aria-valuenow="5" aria-valuemin="0" aria-valuemax="10" data-step="1"></div>
+  <div role="textbox" id="name" aria-placeholder="请输入" data-maxlength="8">初始值</div>
+  <div role="textbox" id="memo" aria-multiline="true" aria-placeholder="备注">多行</div>
+  <div class="row" id="row-quality">
+    <div role="combobox" id="quality">
+      <div role="listbox">
+        <div role="option" value="low" aria-selected="false">低</div>
+        <div role="option" value="high" aria-selected="true">高</div>
+      </div>
+    </div>
+  </div>
+  <div role="tablist" id="tabs" tabindex="0">
+    <div role="tab" id="tab1" aria-selected="true" aria-controls="panel1">页一</div>
+    <div role="tab" id="tab2" aria-selected="false" aria-controls="panel2">页二</div>
+  </div>
+  <div id="panel1">面板一</div>
+  <div id="panel2">面板二</div>
+  <div id="desc">对敌人造成 <span id="dmg">120</span> 点伤害</div>
+</div>
+</body>
+</html>

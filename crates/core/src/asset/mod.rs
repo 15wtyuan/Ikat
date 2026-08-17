@@ -1,4 +1,7 @@
-//! 包格式（.pkg.bin，当前 version=35）：Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 包格式（.pkg.bin，当前版本见 `PKG_FORMAT_VERSION` 常量及其行尾 changelog）：
+//! Rust-internal（packager 写、runtime 读，C# 不解析）。
+//! 布局锁：同一 fixture 的打包字节哈希有 CI 门（packer `schema_lock.rs`）——
+//! 任何改变字节的布局改动都会翻转哈希，bump 版本时须同步更新登记值。
 //! v35：TemplateNode 加 custom_tag 列 + component_scope 位（flags bit 0x04）+ PerComponentScopes
 //!   段（组件展开域锚定规则表；Custom Element 打包期展开产物，见 component-system spec）。
 //! v34：ResolvedStyle.background_gradient Option<Gradient2>→Option<Gradient>（radial + 多 stop + 任意角度，bincode 布局变）。
