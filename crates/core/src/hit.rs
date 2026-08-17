@@ -1,6 +1,7 @@
 //! 命中测试：输入 design 坐标点 → 返回命中 NodeId。
 //! 逆等效绘制序遍历（顶层优先），layout_rect AABB + clip 门控 + pointer-events。
-//! 不做 transform world_to_local（无动画故无影响）。
+//! 命中几何 = layout_rect 经累计 world_matrix 逆变换回节点本地空间（transform 动画
+//! 生效；world_transforms 用上帧值，1 帧延迟语义见 hit_subtree bounds guard）。
 
 use crate::scene::node::{ControlState, NodeId, Rect, Scene};
 

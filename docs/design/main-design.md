@@ -48,6 +48,8 @@
 引擎后端（Unity GameObject+MeshRenderer / Godot Node2D+canvas_item）
 ```
 
+> **「单向」指每帧数据流，不指模块依赖**：core 内部各模块（style/scene/layout/render/input/text/scroll/list）共享以 `Scene`（类型化节点树 + per-node 状态表）为中心的读写，模块间存在双向依赖（如选择器引擎遍历 Scene、输入驱动控件编辑原语）。上图箭头是每帧的数据流契约——顺序正确性由 CI 门锁定（§16）；不要把本图读成「模块 import 必须单向」的分层律。
+
 ### 2.2 关键边界
 
 - **公共语义层**：类型化 Node 对象树，是游戏业务程序员的唯一 API 表面。
@@ -707,24 +709,33 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
 引擎 update（C# 投影层 + Rust 核心，见 projection-layer.md）:
   1. set_input()                       ← 后端采集指针/键/触摸/IME
   2. flush 脏属性回写                   ← C# 投影层：攒批的 Style(css 串)/Transform(数值) 推 Rust（tick 前）
-  3. context.tick(dt) — 显式依赖拓扑：
-     a. TweenManager.update(dt) + KeyframePlayer.update(dt)   ← 唯一动画时钟（transition 先写、animation 后写同通道覆盖；ScrollPane 物理是例外，自维护 tween）
-     b. 消费 pending_focus_request
-     c. process 指针输入               ← 多槽命中测试（用上帧 world）+ 拖拽/滚动/点击仲裁
-     d. scroll.update + 消费 wheel      ← 惯性/回弹物理
-     e. process_keys                    ← keydown/up（无自动 Tab 导航——方向键/手柄导航是逻辑层积木）
-     f. rematch                         ← 伪类 :hover/:active/:focus/:disabled/:checked 重 cascade（class/style 变更下帧生效）
-     g. transition drain                ← 消费 transition 请求，提交 tween（基线 = 上帧 computed）
-     g'. sync_animation_players         ← 检测 computed animation 声明变化启停 KeyframePlayer（class 触发；rematch 后、solve 前）
-     h. solve                           ← Block/Flex 各自算法（每帧一次，帧末一致）
-     i. refresh_content_sizes           ← scroll content_size 刷新
-     j. compute_world_transforms        ← DFS 累计 world matrix（含 Transform 渲染偏移，不触发 solve）
-     k. build_render_nodes              ← 剪 display:none + dirty hash + 批合 + sort_key
-     l. 输出 Vec<RenderNode>（SOA blob）
+  3. context.tick(dt) — 显式依赖拓扑（真相源 = stage.rs `tick_and_render`；
+     CI 门 core/tests/tick_order_gate.rs 锁步骤清单与代码一致，改管线先过门）：
+     a.  drain pending_events           ← FFI setter（tick 外调用）产的事件先进本帧
+     b.  TweenManager.update            ← 唯一动画时钟（transition 先写）
+     c.  KeyframePlayer update_all      ← animation 后写同通道覆盖（写入顺序 = 优先级）
+     d.  advance_cursor_blink           ← 光标闪烁 timer
+     e.  消费 pending_focus_request      ← 编程聚焦/清焦点
+     f.  process 指针输入                ← 多槽命中测试（用上帧 world）+ 拖拽/滚动/点击仲裁
+     g.  apply_wheel + scroll advance   ← 惯性/回弹物理
+     h.  process_keys                   ← keydown/up（无自动 Tab 导航——方向键/手柄导航是逻辑层积木）
+     i.  process_text_input             ← UTF-32 字符通道（IME/可打印字符）
+     j.  list plan/execute_visible      ← ListView 虚拟化 slot 换绑（solve 前：新 slot 本帧布局）
+     k.  rematch                        ← 伪类 :hover/:active/:focus/:disabled/:checked 重 cascade（class/style 变更下帧生效）
+     l.  transition drain               ← kill 旧 (node,prop) tween + 提交新 tween（基线 = 上帧 computed）
+     m.  sync_animation_players         ← computed animation 声明变化启停 player（rematch 后、solve 前）
+     n.  sync_control_visuals           ← 控件态→子 inline_override（solve 前：inline 影响布局）
+     o.  solve                          ← Block/Flex 各自算法（每帧一次，帧末一致）
+     p.  measure_text_controls          ← 文本控件显示文本测量（需 solve 产出的 layout_rect.w）
+     q.  list collect_heights           ← ListView 高度回填（refresh_content_sizes 前）
+     r.  refresh_content_sizes          ← scroll content_size 刷新
+     s.  compute_world_transforms       ← DFS 累计 world matrix（含 Transform 渲染偏移，不触发 solve）
+     t.  build_render_nodes             ← 剪 display:none + dirty hash + 批合 + sort_key
+     u.  输出 Vec<RenderNode>（SOA blob）
   4. 后端 borrow_frame → MirrorPool 同步镜像；borrow_events → 事件路由 → 业务回调
 ```
 
-> 注：a–l 是主轴，`Stage::tick_and_render` 实际还在这些位置插入：`advance_cursor_blink`（a 后）、`process_text_input`（e 后，UTF-32 字符通道）、ListView `plan_visible`+`execute_visible`（f 前，虚拟化 slot 换绑）、`sync_control_visuals`（h 前，控件态→子 inline_override）、`measure_text_controls`（h 后）、`list::collect_heights`（ListView 高度缓存回写）。
+> 本清单有 CI 门（`core/tests/tick_order_gate.rs`）锁定：stage.rs 实际调用序列与登记清单不一致（换序/插入/删除）即红。有意改管线 = 同步更新登记清单，本节描述保持与之一致。
 
 关键：
 - **flush 在 tick 前**：C# 投影层攒批的属性写（Style/Transform）在 tick 之前一次性推 Rust，与 set_input 合并过桥。见 [projection-layer.md](projection-layer.md) §2.1。
