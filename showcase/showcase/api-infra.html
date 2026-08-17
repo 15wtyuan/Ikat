@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="preview/preview-base.css">
+  <script src="preview/loom-preview.js"></script>
+  <title>LoomGUI 靶子冻结 Showcase · 公共 API 基础设施验收</title>
+  <style>
+  .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; }
+  .body {display:flex;flex-direction:column; flex-grow:1; padding:32px 56px; gap:22px; overflow-y:auto; }
+  .page-title { color:#e0e6ec; font-size:30px; font-weight:700; }
+  .page-desc { color:#9aa0b4; font-size:14px; }
+  .section {display:flex;flex-direction:column; background-color:#152433; border-radius:12px; padding:22px; gap:12px; }
+  .section-title { color:#8ec5d8; font-size:19px; font-weight:700; }
+  .section-desc { color:#9aa0b4; font-size:13px; }
+  .stage {display:flex; flex-direction:row; gap:28px; align-items:center; flex-wrap:wrap; background-color:#0e1620; border-radius:8px; padding:18px 22px; min-height:92px; }
+  .stage-col {display:flex;flex-direction:column; gap:6px; }
+  .label { color:#6c7080; font-size:12px; }
+  .note { color:#6c7080; font-size:12px; }
+  .readout {display:flex;flex-direction:column;gap:4px;}
+  .readout span { color:#c8d4e0; font-size:13px; }
+  .hbtn { color:#8ec5d8; font-size:13px; font-weight:600; padding:8px 14px; border-radius:8px; background-color:rgba(95,180,212,0.06); box-shadow:inset 0 0 0 1px rgba(95,180,212,0.22); }
+  .clock { color:#e0e6ec; font-size:44px; font-weight:700; font-family:JetBrainsMono, monospace; }
+  .clock-row {display:flex;flex-direction:row;align-items:baseline;gap:16px;}
+  .later-label { color:#e0e6ec; font-size:22px; font-weight:700; min-width:220px; }
+  .later-label.done { color:#7fd48a; }
+  .nf-label { color:#e0e6ec; font-size:16px; font-weight:600; }
+
+  /* #4 dropdown value 链：控件须被 CSS 命中（围栏 control-css 契约）。 */
+  [role="combobox"] { background-color:#101c28; border-radius:8px; box-shadow:inset 0 0 0 1px #2a5a75; width:280px; }
+  [role="option"] { background-color:#152433; color:#c8d4e0; font-size:14px; padding:8px 12px; }
+  [role="option"]:hover { background-color:#1d3a52; }
+
+  /* #5 tablist / tab：同 control-css 契约。 */
+  [role="tablist"] { background-color:#101c28; border-radius:8px; padding:6px; }
+  [role="tab"] { background-color:#152433; color:#9aa0b4; font-size:14px; font-weight:600; padding:8px 18px; border-radius:6px; }
+  [role="tab"]:hover { color:#c8d4e0; }
+
+  /* #6 具名模板列表：listitem 蓝图 + BindItem 行样式切换（强调行金左条）。浏览器预览
+     克隆 template 占位，行样式切换是 Unity 运行时（BindItem）行为。 */
+  [role="list"] { background-color:#101c28; border-radius:8px; }
+  [role="listitem"] { background-color:#152433; }
+  .mt-list {display:flex;flex-direction:column;gap:8px; width:520px; height:340px; overflow-y:auto; padding:10px;}
+  .mt-row {display:flex;flex-direction:row;align-items:center;gap:12px; border-radius:8px; padding:10px 14px;}
+  .mt-idx { color:#6c7080; font-size:12px; font-family:JetBrainsMono, monospace; }
+  .mt-title { color:#c8d4e0; font-size:14px; }
+  .mt-row-accent { background-color:#2a2233; box-shadow:inset 3px 0 0 0 #d4a44e; }
+
+  /* #7 unload 演示舞台。 */
+  .ul-stage {display:flex;flex-direction:row;gap:14px;align-items:center;flex-wrap:wrap; min-height:80px; width:760px; border-radius:8px; background-color:#101c28; padding:14px;}
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:18px 32px;background-color:#152433;border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
+      <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">公共 API 基础设施验收</span><span style="color:#6c7080;font-size:13px">调度 · 生命周期 · 派生 getter · 具名模板</span>
+    </div>
+    <div class="body">
+      <div class="page-title">调度三件套 + UnloadPackage + option/tab 派生 getter + GetTemplate</div>
+      <div class="page-desc">全部由 driver C# 驱动（本页只到 HTML 结构）· 确定性断言在 headless SchedulerAndLifecycleTests · 本页看真机行为</div>
+
+      <div class="section">
+        <div class="section-title">1 · OnUpdate 逻辑时钟（每帧 dt 透传）</div>
+        <div class="section-desc">driver 经 page.OnUpdate 累积 dt 逐帧刷新计时文本——无 CSS 动画参与，文字持续变化即证明帧头泵活着。「暂停/恢复」按钮 Dispose / 重订阅句柄。</div>
+        <div class="stage">
+          <div class="stage-col">
+            <span class="label">逻辑时钟（OnUpdate 累积）</span>
+            <span id="infra-clock" class="clock">0.0 s</span>
+          </div>
+          <div class="stage-col">
+            <span class="label">泵次数</span>
+            <span id="infra-frames" class="nf-label">0 帧</span>
+          </div>
+          <button id="btn-clock-toggle" class="hbtn">暂停订阅</button>
+          <span class="note">暂停后数字冻结、恢复后继续——句柄 Dispose 语义</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">2 · CallLater 延迟回调（秒 · one-shot 链）</div>
+        <div class="section-desc">点击后倒计时 3→2→1→完成，每步一个 CallLater(1s)（链式调度 + dt 累积到期）。</div>
+        <div class="stage">
+          <span id="infra-later" class="later-label">待触发</span>
+          <button id="btn-later" class="hbtn">3 秒倒计时</button>
+          <span class="note">重复点击重启动倒计时</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">3 · CallNextFrame 下一帧回调（帧头 fire）</div>
+        <div class="section-desc">点击当帧只显示「已受理」，回调在下一帧帧头触发改文本——两段文字先后出现即证明延迟一帧语义。</div>
+        <div class="stage">
+          <span id="infra-nf" class="nf-label">待触发</span>
+          <span id="infra-nf-count" class="nf-label">0 次</span>
+          <button id="btn-nf" class="hbtn">下一帧回调</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">4 · Dropdown value 链（SelectedValue / option.Value / option.Selected）</div>
+        <div class="section-desc">三个 option：a 带 value="en"、b 带 value="zh-CN" 且默认选中、c 不带 value（回落文本）。右栏读数随选择刷新——value 属性优先、缺席回落文本、Selected 为父状态合成。</div>
+        <div class="stage">
+          <div role="combobox" id="infra-dd">
+            <div role="listbox">
+              <div role="option" id="opt-lang-a" value="en">English</div>
+              <div role="option" id="opt-lang-b" value="zh-CN" aria-selected="true">简体中文</div>
+              <div role="option" id="opt-lang-c">日本語（无 value 属性）</div>
+            </div>
+          </div>
+          <div class="readout">
+            <span>SelectedValue = <span id="dd-sel">…</span></span>
+            <span>opt-a Value = <span id="dd-va">…</span> · Selected = <span id="dd-sa">…</span></span>
+            <span>opt-b Value = <span id="dd-vb">…</span> · Selected = <span id="dd-sb">…</span></span>
+            <span>opt-c Value = <span id="dd-vc">…</span>（回落文本）· Selected = <span id="dd-sc">…</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">5 · Tab.Selected 合成选中（父 TabList 状态派生）</div>
+        <div class="section-desc">切页签后右栏三行读数刷新——Selected 是「序号 == 父 selected_index」的合成值，切选即跟随、非字面存储。</div>
+        <div class="stage">
+          <div role="tablist" id="infra-tabs" style="display:flex;flex-direction:row;gap:8px">
+            <div role="tab" id="itab-1" aria-selected="true">页签 A</div>
+            <div role="tab" id="itab-2">页签 B</div>
+            <div role="tab" id="itab-3">页签 C</div>
+          </div>
+          <div class="readout">
+            <span>itab-1 Selected = <span id="tab-r1">…</span></span>
+            <span>itab-2 Selected = <span id="tab-r2">…</span></span>
+            <span>itab-3 Selected = <span id="tab-r3">…</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">6 · GetTemplate 具名模板（ListView 蓝图经 API 取用）</div>
+        <div class="section-desc">driver 用 GetTemplate("row-tpl") 具名取出设计期蓝图喂给 ItemTemplate（不从 ul 子里自动采纳），BindItem 按行数据切换样式 class——两种行视觉交替。按 index 自动选多模板（TemplateSelector 逐项切换）是契约已定、机制待后续交付的件，本节不演示。</div>
+        <div class="stage">
+          <div role="list" id="infra-mt-list" class="mt-list" data-fill="6">
+            <template id="row-tpl">
+              <div role="listitem" class="mt-row"><span class="mt-idx">#00</span><span class="mt-title">普通行</span></div>
+            </template>
+          </div>
+          <span class="note">30 项 · 第 3/6/9… 行强调样式（BindItem class 切换）· 列表内滚轮滚动（虚拟化）</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">7 · UnloadPackage 包生命周期（prefab 删除语义）</div>
+        <div class="section-desc">「Load 副本 + 实例化」把 showcase 字节以别名 infra-copy 再载一份、实例化 infra-card 组件；「卸载副本包」移除模板注册——已实例化的卡片是独立副本继续存活，且旧句柄再实例化会抛 UIPackageException（读数见证）；卸载后可重载再实例化。</div>
+        <div class="stage">
+          <div class="stage-col">
+            <div style="display:flex;flex-direction:row;gap:10px">
+              <button id="btn-ul-load" class="hbtn">Load 副本 + 实例化</button>
+              <button id="btn-ul-unload" class="hbtn">卸载副本包</button>
+            </div>
+            <span class="note" id="infra-ul-status">未加载</span>
+          </div>
+          <div id="infra-ul-stage" class="ul-stage"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

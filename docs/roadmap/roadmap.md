@@ -143,6 +143,10 @@
 
 ### T1 · 能力补全
 
+**ListView 多模板逐项切换（TemplateSelector 机制）** — 契约 §8「item 模板来源 2」的多模板半边未交付：`TemplateSelector` 现只是 C# 侧缓存委托（不参与克隆），core `enter_data_driven` 对多个 `<template>` 直接 Err（自动采用要求恰好一个）。逐项切换需 core 按 slot 从不同蓝图克隆（spacer 估高随模板变）。`Container.GetTemplate`（具名取模板喂 ItemTemplate）已交付。
+- 判据：真需要异构行（如邮件置顶/普通两种行结构，非仅 class 差异）时。
+- 来源：2026-08-17 调度/生命周期批 showcase 落地时发现（api-infra 页 #6 降级为单模板 + class 切换）。
+
 **Tree 复合控件** — WAI-ARIA `role=tree/treeitem` 复合控件（角色技能树 / 背包分类树），镜像 TabList 全套机制（ControlState + synth_aria + role 分派）。
 - 判据：character 技能树 / 背包分类树真需要时。
 - 来源：`2026-08-04-m3-tablist` §11；`2026-07-28-controls-debt-and-dropdown` §11；`2026-07-30-control-role-refactor` §3.1。

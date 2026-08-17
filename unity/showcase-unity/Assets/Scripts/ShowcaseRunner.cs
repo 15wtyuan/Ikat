@@ -29,6 +29,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-form", "form"),
         ("nav-lab", "lab"),
         ("nav-anim", "m2-animation"),
+        ("nav-infra", "api-infra"),
     };
 
     // settings 页 tab → panel 配对（HTML 标准 role=tab/tabpanel 模式）。
@@ -119,6 +120,8 @@ public class ShowcaseRunner : MonoBehaviour
             replay.Clicked += ReplayCurrentPage;
         if (pageName == "m2-animation")
             WireM2AnimationDrivers(page);
+        if (pageName == "api-infra")
+            WireInfraDrivers(page);
         if (pageName == "home")
         {
             foreach (var (cardId, target) in NAV_CARDS)
@@ -182,6 +185,183 @@ public class ShowcaseRunner : MonoBehaviour
                 handle.Time = 0.5f;
                 Debug.Log("[Showcase] m2 #12 seek Time=0.5s");
             };
+    }
+
+    /// api-infra 页：公共 API 基础设施验收 driver（调度三件套 / option-tab 派生 getter /
+    /// 多模板列表 / 包生命周期）。页面只到 HTML 结构，行为全部在此接线——真机上看的就是这些
+    /// （确定性断言在 headless SchedulerAndLifecycleTests，本页是行为/视觉面）。
+    /// 切页防御：CallLater/CallNextFrame 挂在 UIContext 上跨页存活，回调里对目标节点
+    /// IsDisposed 短路；OnUpdate 订阅随页 Dispose 自动清理（契约），无需手动拆。
+    void WireInfraDrivers(Container page)
+    {
+        var ui = _driver.Context;
+
+        // ── #1 OnUpdate 逻辑时钟：dt 累积逐帧刷新 + 帧计数；按钮 Dispose / 重订阅句柄。 ──
+        if (page.TryGet<TextNode>("infra-clock", out var clock) &&
+            page.TryGet<TextNode>("infra-frames", out var frames))
+        {
+            float elapsed = 0f;
+            long pumps = 0;
+            void Tick(float dt)
+            {
+                elapsed += dt;
+                pumps++;
+                clock.Text = elapsed.ToString("F1") + " s";
+                frames.Text = pumps + " 帧";
+            }
+            var sub = page.OnUpdate(Tick);
+            if (page.TryGet<Button>("btn-clock-toggle", out var toggle))
+                toggle.Clicked += () =>
+                {
+                    if (sub == null) sub = page.OnUpdate(Tick);
+                    else { sub.Dispose(); sub = null; }
+                };
+        }
+
+        // ── #2 CallLater 倒计时链：每步 1s 延迟，one-shot 链式调度。 ──
+        if (page.TryGet<Button>("btn-later", out var laterBtn) &&
+            page.TryGet<TextElement>("infra-later", out var later))
+        {
+            laterBtn.Clicked += () =>
+            {
+                later.Classes.Remove("done");
+                InfraCountdown(later, ui, 3);
+            };
+        }
+
+        // ── #3 CallNextFrame：点击当帧「已受理」，下一帧帧头改文本。 ──
+        if (page.TryGet<Button>("btn-nf", out var nfBtn) &&
+            page.TryGet<TextElement>("infra-nf", out var nf) &&
+            page.TryGet<TextElement>("infra-nf-count", out var nfCount))
+        {
+            int fired = 0;
+            nfBtn.Clicked += () =>
+            {
+                nf.TextContent = "已点击（本帧受理）→ 等待下一帧…";
+                ui.CallNextFrame(() =>
+                {
+                    if (nf.IsDisposed) return;
+                    fired++;
+                    nf.TextContent = "下一帧回调已触发 ✓（帧头 fire）";
+                    nfCount.TextContent = fired + " 次";
+                });
+            };
+        }
+
+        // ── #4 Dropdown value 链读数：SelectedValue / option.Value / option.Selected。 ──
+        if (page.TryGet<Dropdown>("infra-dd", out var dd) &&
+            page.TryGet<TextElement>("dd-sel", out var ddSel) &&
+            page.TryGet<TextElement>("dd-va", out var va) && page.TryGet<TextElement>("dd-sa", out var sa) &&
+            page.TryGet<TextElement>("dd-vb", out var vb) && page.TryGet<TextElement>("dd-sb", out var sb) &&
+            page.TryGet<TextElement>("dd-vc", out var vc) && page.TryGet<TextElement>("dd-sc", out var sc) &&
+            page.TryGet<OptionItem>("opt-lang-a", out var oa) &&
+            page.TryGet<OptionItem>("opt-lang-b", out var ob) &&
+            page.TryGet<OptionItem>("opt-lang-c", out var oc))
+        {
+            void RefreshDd()
+            {
+                ddSel.TextContent = dd.SelectedValue ?? "(null)";
+                va.TextContent = oa.Value; sa.TextContent = oa.Selected ? "true" : "false";
+                vb.TextContent = ob.Value; sb.TextContent = ob.Selected ? "true" : "false";
+                vc.TextContent = oc.Value; sc.TextContent = oc.Selected ? "true" : "false";
+            }
+            RefreshDd();
+            dd.SelectionChanged += _ => RefreshDd();
+        }
+
+        // ── #5 Tab.Selected 合成读数：切选即跟随（父 TabList 状态派生）。 ──
+        if (page.TryGet<TabList>("infra-tabs", out var tabs) &&
+            page.TryGet<Tab>("itab-1", out var t1) && page.TryGet<Tab>("itab-2", out var t2) &&
+            page.TryGet<Tab>("itab-3", out var t3) &&
+            page.TryGet<TextElement>("tab-r1", out var r1) &&
+            page.TryGet<TextElement>("tab-r2", out var r2) &&
+            page.TryGet<TextElement>("tab-r3", out var r3))
+        {
+            void RefreshTabs()
+            {
+                r1.TextContent = t1.Selected ? "true" : "false";
+                r2.TextContent = t2.Selected ? "true" : "false";
+                r3.TextContent = t3.Selected ? "true" : "false";
+            }
+            RefreshTabs();
+            tabs.SelectionChanged += _ => RefreshTabs();
+        }
+
+        // ── #6 GetTemplate 具名模板：经 API 取蓝图喂 ItemTemplate + BindItem 行样式切换。
+        //    按 index 自动选多模板（TemplateSelector 逐项切换）机制未交付（core
+        //    enter_data_driven 要求恰好一个 template），本节不演示。
+        if (page.TryGet<ListView>("infra-mt-list", out var mt))
+        {
+            mt.ItemTemplate = mt.GetTemplate("row-tpl");
+            mt.BindItem = (item, i) =>
+            {
+                var spans = item.Query<TextElement>();
+                if (spans.Count >= 2)
+                {
+                    spans[0].TextContent = string.Format("#{0:00}", i);
+                    spans[1].TextContent = (i % 3 == 2) ? "强调行（class 切换）" : "普通行";
+                }
+                if (i % 3 == 2) item.Classes.Add("mt-row-accent");
+                else item.Classes.Remove("mt-row-accent");
+            };
+            mt.ItemCount = 30;
+        }
+
+        // ── #7 UnloadPackage：别名重载 showcase 字节 → 实例化 infra-card → 卸载见存活。 ──
+        if (page.TryGet<Container>("infra-ul-stage", out var ulStage) &&
+            page.TryGet<TextElement>("infra-ul-status", out var ulStatus))
+        {
+            UIPackage copyPkg = null;
+            if (page.TryGet<Button>("btn-ul-load", out var ulLoad))
+                ulLoad.Clicked += () =>
+                {
+                    try
+                    {
+                        if (copyPkg == null)
+                            copyPkg = ui.LoadPackage("infra-copy", _driver.LoadPackageBytes("showcase"));
+                        ulStage.AddChild(copyPkg.Instantiate("infra-card"));
+                        ulStatus.TextContent = "已实例化（infra-copy · 舞台上 " + ulStage.ChildCount + " 张卡存活）";
+                    }
+                    catch (System.Exception ex)
+                    {
+                        ulStatus.TextContent = "Load/Instantiate 异常：" + ex.GetType().Name;
+                    }
+                };
+            if (page.TryGet<Button>("btn-ul-unload", out var ulUnload))
+                ulUnload.Clicked += () =>
+                {
+                    if (copyPkg == null) { ulStatus.TextContent = "副本未加载"; return; }
+                    try
+                    {
+                        ui.UnloadPackage("infra-copy");
+                        bool staleThrew = false;
+                        try { copyPkg.Instantiate("infra-card"); }
+                        catch (UIPackageException) { staleThrew = true; }
+                        ulStatus.TextContent = "模板已卸载 · 旧句柄 Instantiate 抛 = " + (staleThrew ? "✓" : "✗")
+                            + " · 卡片独立存活 = " + (ulStage.ChildCount > 0 ? "✓" : "✗");
+                        copyPkg = null;   // 下次 Load 重建句柄（重载同名包）
+                    }
+                    catch (System.Exception ex)
+                    {
+                        ulStatus.TextContent = "Unload 异常：" + ex.GetType().Name;
+                    }
+                };
+        }
+    }
+
+    /// #2 的倒计时链：n→…→1→完成，每步 CallLater(1s)（递归延迟调度）。切页后目标节点
+    /// 已 Dispose 即短路（timer 挂在 UIContext 上跨页存活，不随页清理）。
+    void InfraCountdown(TextElement label, UIContext ui, int n)
+    {
+        if (label.IsDisposed) return;
+        if (n == 0)
+        {
+            label.TextContent = "完成 ✓";
+            label.Classes.Add("done");
+            return;
+        }
+        label.TextContent = n.ToString();
+        ui.CallLater(1f, () => InfraCountdown(label, ui, n - 1));
     }
 
     /// m2-animation 页「↻ 重播」：原地重启声明式动画（Container.RestartAnimations）——
