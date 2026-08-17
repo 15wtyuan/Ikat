@@ -597,6 +597,10 @@ pub struct Scene {
     pub roots: Vec<NodeId>,
     /// 节点存储。Vec<Node> → SlotMap<DefaultKey, Node>（动态树 spec §4.1）。
     /// 应用层用 NodeId(u32) 句柄（FFI/C# 透明），经 `Scene::key_for`/`NodeId::to_key` 桥接到 DefaultKey。
+    ///
+    /// **节点生命周期与下方全部 per-node side table 的联动收口在
+    /// [`Scene::alloc_node_slot`] / [`Scene::free_node_slot`]**——建/删节点必须经它们，
+    /// 新增 per-node 状态表时在两处各加联动，勿在建/删点各自维护。
     pub nodes: SlotMap<DefaultKey, Node>,
     /// 运行时伪类重匹配规则表（带作用域，Shadow DOM 风格）。默认空；instantiate 时填
     /// （模板规则绑定实例根 scope_root），inline 路径空。不进 pkg（pkg 用无 scope 的 DynamicRuleTable）。
@@ -660,6 +664,74 @@ pub struct Scene {
 }
 
 impl Scene {
+    /// 建节点后的 per-node side table 联动——**所有建节点路径的单一入口**：
+    /// text 两表（`text_layouts` / `text_measure_cache`，index = NodeId.index()）对齐
+    /// 容量并清本槽；world 两表（`world_transforms` / `node_sort_keys`）**不 resize**、
+    /// 仅清已覆盖槽位（保持「未计算 = 越界 = 本帧不命中」语义，见 hit bounds guard）；
+    /// 按 kind seed 稀疏内容表（空串占位，调用方可随后覆写实值）。
+    ///
+    /// 新增 per-node 状态表时在此与 [`Scene::free_node_slot`] 各加联动——平行表一致性
+    /// 不靠建点各自维护（漏一处 = 静默错位读错数据）。
+    pub(crate) fn alloc_node_slot(&mut self, id: NodeId, kind: NodeKind) {
+        let need = self.nodes.capacity() + 1;
+        if self.text_layouts.len() < need {
+            self.text_layouts.resize(need, None);
+        }
+        if self.text_measure_cache.len() < need {
+            self.text_measure_cache.resize(need, None);
+        }
+        // 清本槽残留：slotmap 槽位复用时 Vec 索引表不走 remove，上一任节点的值会留到
+        // 下帧 compute/assign 整体覆盖——这个窗口内新节点会读到死节点数据（命中矩阵/
+        // sort_key/文本缓存）。alloc 清一次、free 清一次，任何路径进来都是初值。
+        let idx = id.index();
+        if idx < self.world_transforms.len() {
+            self.world_transforms[idx] = crate::transform::IDENTITY;
+        }
+        if idx < self.node_sort_keys.len() {
+            self.node_sort_keys[idx] = 0;
+        }
+        self.text_layouts[idx] = None;
+        self.text_measure_cache[idx] = None;
+        match kind {
+            NodeKind::TextNode => {
+                self.text_contents.insert(id, String::new());
+            }
+            NodeKind::Image => {
+                self.image_srcs.insert(id, String::new());
+            }
+            _ => {}
+        }
+    }
+
+    /// 删节点的 per-node side table 联动——**所有删节点路径的单一入口**：
+    /// Vec 索引表清初值（不 truncate——len 对齐容量，保持索引不变量）+ 稀疏表
+    /// （anim/scroll/controls/control_inits/roles/lists/text_contents/image_srcs）remove。
+    /// 树手术（children/roots/focused_node/dynamic_rules）与 tween kill 归调用方——
+    /// 那些不是 per-node 表。与 [`Scene::alloc_node_slot`] 成对维护。
+    pub(crate) fn free_node_slot(&mut self, id: NodeId) {
+        let idx = id.index();
+        if idx < self.world_transforms.len() {
+            self.world_transforms[idx] = crate::transform::IDENTITY;
+        }
+        if idx < self.node_sort_keys.len() {
+            self.node_sort_keys[idx] = 0;
+        }
+        if idx < self.text_layouts.len() {
+            self.text_layouts[idx] = None;
+        }
+        if idx < self.text_measure_cache.len() {
+            self.text_measure_cache[idx] = None;
+        }
+        self.anim.clear_node(id);
+        self.scroll.remove(id);
+        self.controls.remove(id);
+        self.control_inits.remove(&id);
+        self.roles.remove(id);
+        self.lists.remove(id);
+        self.text_contents.remove(&id);
+        self.image_srcs.remove(&id);
+    }
+
     /// 从扁平 entries（DFS 先序）建 Node 树。`parent_idx` 指向 entries 下标，`None` = 根。
     /// clip_rect slot / dirty 标志按 style.overflow_x/y（非 Visible 即 clip）/ kind 派生。
     /// 包加载路径（read_package）也走此入口。
@@ -731,6 +803,7 @@ impl Scene {
             let key = scene.nodes.insert(node);
             let id = NodeId::from_key(key);
             scene.nodes.get_mut(key).unwrap().id = id; // 回填
+            scene.alloc_node_slot(id, *kind);
             ids.push(id);
             if let Some(c) = content {
                 scene.text_contents.insert(id, c.clone());
@@ -753,11 +826,6 @@ impl Scene {
                 None => scene.roots.push(ids[i]),
             }
         }
-        // text_layouts 随槽位容量对齐（None 占位，layout::solve / render::build 填）。
-        // **容量而非存活数**：按 id.index() 索引，remove_node 后 idx 不变但存活数减，
-        // 按 len 分配会越界。capacity+1（1 基索引，idx 0 占位）。
-        scene.text_layouts = vec![None; scene.nodes.capacity() + 1];
-        scene.text_measure_cache = vec![None; scene.nodes.capacity() + 1];
         scene
     }
 
@@ -767,9 +835,11 @@ impl Scene {
         let mut scene = Scene::default();
         let mut ids: Vec<NodeId> = Vec::with_capacity(nodes.len());
         for n in nodes {
+            let kind = n.kind;
             let key = scene.nodes.insert(n);
             let id = NodeId::from_key(key);
             scene.nodes.get_mut(key).unwrap().id = id;
+            scene.alloc_node_slot(id, kind);
             ids.push(id);
         }
         for (p, c) in edges {
@@ -786,8 +856,6 @@ impl Scene {
                 scene.roots.push(id);
             }
         }
-        scene.text_layouts = vec![None; scene.nodes.capacity() + 1];
-        scene.text_measure_cache = vec![None; scene.nodes.capacity() + 1];
         scene
     }
 

@@ -73,19 +73,6 @@ pub fn apply_css(style: &mut ResolvedStyle, css: &str) {
     }
 }
 
-/// slotmap insert 后若 capacity 增长，resize parallel arrays 对齐新容量。
-/// parallel arrays（text_layouts）按 NodeId.index() 索引，
-/// 必须至少为 capacity+1（1 基索引，idx 0 占位），否则索引越界 panic。
-fn resize_parallel_arrays(scene: &mut Scene) {
-    let need = scene.nodes.capacity() + 1;
-    if scene.text_layouts.len() < need {
-        scene.text_layouts.resize(need, None);
-    }
-    if scene.text_measure_cache.len() < need {
-        scene.text_measure_cache.resize(need, None);
-    }
-}
-
 /// 建节点：kind_from_tag + apply_css 填 base_style + slotmap insert + 回填 node.id。
 /// base_style = apply_css 结果（源），style 初始 = base_style.clone()（派生，下帧 rematch 从 base 起算）。
 /// clip_rect 按 overflow_x/y（非 Visible）派生 Some(占位)（值由 layout/render 填）。
@@ -137,14 +124,11 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         rich_text_block: false,
     };
     let key = scene.nodes.insert(node);
-    resize_parallel_arrays(scene);
     let id = NodeId::from_key(key);
     scene.nodes.get_mut(key).unwrap().id = id; // 回填
-    if k == NodeKind::TextNode {
-        scene.text_contents.insert(id, String::new());
-    } else if k == NodeKind::Image {
-        scene.image_srcs.insert(id, String::new());
-    }
+                                               // per-node side table 联动单一入口（text 两表 resize+清槽 / world 两表清槽 /
+                                               // TextNode/Image seed 空内容串）。
+    scene.alloc_node_slot(id, k);
     Ok(id)
 }
 
@@ -213,14 +197,10 @@ pub fn create_node_from_template(
         rich_text_block: false,
     };
     let key = scene.nodes.insert(node);
-    resize_parallel_arrays(scene);
     let id = NodeId::from_key(key);
     scene.nodes.get_mut(key).unwrap().id = id; // 回填
-    if kind == NodeKind::TextNode {
-        scene.text_contents.insert(id, String::new());
-    } else if kind == NodeKind::Image {
-        scene.image_srcs.insert(id, String::new());
-    }
+                                               // per-node side table 联动单一入口（同 create_node）。
+    scene.alloc_node_slot(id, kind);
     // 控件状态：按 ControlInit 变体映射填 ControlState（Slider 补运行时独有 dragging:false）。
     // 非 control 节点 control_init=None，不建槽（get 返 None，渲染/交互按无控件处理）。
     //
@@ -656,19 +636,14 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
         }
         None => scene.roots.retain(|&r| r != id),
     }
-    // 3. 联动清持久附属 map（HashMap remove + tween kill），防悬空残留。
-    scene.anim.clear_node(id);
-    scene.scroll.remove(id);
-    scene.controls.remove(id);
-    scene.control_inits.remove(&id);
-    scene.roles.remove(id);
-    // ListView 模板是游离子树（parent=None、不在 roots、不在任何父的 children），
-    // remove_node 的递归删子够不到它。删 ul 前先取 template_root，随 ul 一并递归释放，
-    // 否则 ListState 条目被清后该游离子树成孤儿、slotmap 槽永久泄漏。
+    // 3. per-node side table 联动清（单一入口 free_node_slot：Vec 索引表清初值 +
+    //    anim/scroll/controls/control_inits/roles/lists/text_contents/image_srcs remove。
+    //    新增 per-node 表只改 free_node_slot 一处，不在此逐表列）。
+    //    ListView 模板是游离子树（parent=None、不在 roots、不在任何父的 children），
+    //    remove_node 的递归删子够不到它。删 ul 前先取 template_root，随 ul 一并递归释放，
+    //    否则 ListState 条目被清后该游离子树成孤儿、slotmap 槽永久泄漏。
     let list_template_root = scene.lists.get(id).and_then(|ls| ls.template_root);
-    scene.lists.remove(id);
-    scene.text_contents.remove(&id);
-    scene.image_srcs.remove(&id);
+    scene.free_node_slot(id);
     tweens.kill_node(id);
     // pending_transitions 不清：每帧首由 Stage drain/clear（stage.rs），瞬态，非持久泄漏；
     // 消费方对悬空 NodeId 有 None-check 兜底。
@@ -1011,6 +986,76 @@ mod tests {
         scene.focused_node = Some(grand);
         remove_node(&mut scene, &mut tweens, root);
         assert_eq!(scene.focused_node, None, "递归删焦点子 → focused_node 清");
+    }
+
+    /// 收口对直测：free 清四张 Vec 索引表 + 稀疏表；alloc 在复用槽上兜底再清
+    /// （防上游漏调 free 时残留进新节点）。
+    #[test]
+    fn free_and_alloc_node_slot_clear_vec_side_tables() {
+        let mut scene = empty_scene();
+        let a = create_node(&mut scene, "span", "").unwrap(); // TextNode → 内容表 seed
+        let idx = a.index();
+        scene.text_contents.insert(a, "残留".into());
+        // 模拟运行时态：非 identity world 矩阵 / 非 0 sort_key / 命中过的 measure 缓存。
+        scene
+            .world_transforms
+            .resize(idx + 1, crate::transform::IDENTITY);
+        scene.world_transforms[idx] = [2.0, 0.0, 0.0, 2.0, 9.0, 9.0];
+        scene.node_sort_keys.resize(idx + 1, 0);
+        scene.node_sort_keys[idx] = 42;
+        scene.text_measure_cache[idx] = Some(Default::default());
+
+        scene.free_node_slot(a);
+        assert_eq!(
+            scene.world_transforms[idx],
+            crate::transform::IDENTITY,
+            "free 清 world 矩阵残留"
+        );
+        assert_eq!(scene.node_sort_keys[idx], 0, "free 清 sort_key 残留");
+        assert!(scene.text_layouts[idx].is_none(), "free 清 text_layouts");
+        assert!(
+            scene.text_measure_cache[idx].is_none(),
+            "free 清 measure 缓存"
+        );
+        assert!(!scene.text_contents.contains_key(&a), "free 清文本内容表");
+
+        // 模拟绕过 free 的路径（有人直接删 slotmap 条目），alloc 仍须把槽清成初值。
+        scene.world_transforms[idx] = [2.0, 0.0, 0.0, 2.0, 9.0, 9.0];
+        scene.node_sort_keys[idx] = 7;
+        scene.alloc_node_slot(a, NodeKind::Container);
+        assert_eq!(
+            scene.world_transforms[idx],
+            crate::transform::IDENTITY,
+            "alloc 兜底清残留"
+        );
+        assert_eq!(scene.node_sort_keys[idx], 0, "alloc 兜底清 sort_key");
+    }
+
+    /// remove_node 走收口：删节点后 Vec 索引表无残留；槽位复用起活的新节点读到初值。
+    #[test]
+    fn remove_node_clears_vec_side_tables_for_reuse() {
+        let (mut scene, _root, child, _grand) = build_3level();
+        let mut tweens = TweenManager::new();
+        let idx = child.index();
+        scene
+            .world_transforms
+            .resize(idx + 1, crate::transform::IDENTITY);
+        scene.world_transforms[idx] = [3.0, 0.0, 0.0, 3.0, 5.0, 5.0];
+        scene.node_sort_keys.resize(idx + 1, 0);
+        scene.node_sort_keys[idx] = 99;
+        scene.text_measure_cache[idx] = Some(Default::default());
+
+        remove_node(&mut scene, &mut tweens, child);
+        assert_eq!(scene.world_transforms[idx], crate::transform::IDENTITY);
+        assert_eq!(scene.node_sort_keys[idx], 0);
+        assert!(scene.text_measure_cache[idx].is_none());
+
+        // 槽位复用（无论落哪个空槽）：新节点在首个 compute 前读到的都是初值。
+        let new_id = create_node(&mut scene, "div", "").unwrap();
+        let nidx = new_id.index();
+        assert_eq!(scene.world_transforms[nidx], crate::transform::IDENTITY);
+        assert_eq!(scene.node_sort_keys[nidx], 0);
+        assert!(scene.text_measure_cache[nidx].is_none());
     }
 
     #[test]
