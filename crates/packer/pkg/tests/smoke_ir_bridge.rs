@@ -78,6 +78,6 @@ fn smoke_main_gate_class_hit_displaynone_flex() {
 fn smoke_control_kinds_load_without_crash() {
     // 控件全家（role 驱动：textbox/slider/switch/radio/combobox）— instantiate 不 panic = 链通。
     // kind 保真（不塌 Container）由 pkg roundtrip + bridge map unit test 覆盖。
-    let html = r#"<!DOCTYPE html><html><head><style>[role="textbox"],[role="slider"],[role="switch"],[role="radio"],[role="combobox"]{width:80px}[role="option"]{color:#222222}</style></head><body><div style="display:flex"><div role="textbox"></div><div role="slider"><div data-slot="thumb"></div></div><div role="switch" aria-checked="false"></div><div role="radio" aria-checked="false" data-name="g"></div><div role="combobox"><div role="listbox"><div role="option"></div></div></div></div></body></html>"#;
+    let html = r#"<!DOCTYPE html><html><head><style>[role="textbox"],[role="slider"],[role="switch"],[role="radio"],[role="combobox"]{width:80px;position:relative}[role="combobox"] [role="listbox"]{display:none;position:absolute}[role="option"]{color:#222222}</style></head><body><div style="display:flex"><div role="textbox"></div><div role="slider"><div data-slot="thumb"></div></div><div role="switch" aria-checked="false"></div><div role="radio" aria-checked="false" data-name="g"></div><div role="combobox"><div role="listbox"><div role="option"></div></div></div></div></body></html>"#;
     let _ = build_stage(html); // 不 panic = 通过
 }

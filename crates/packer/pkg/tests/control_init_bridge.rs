@@ -17,7 +17,7 @@ use loomgui_pkg::bridge::bridge;
 /// 非围栏校验本身。
 fn run_bridge(html: &str) -> Vec<TemplateNode> {
     let wrapped = format!(
-        r#"<style>[role="progressbar"],[role="slider"],[role="spinbutton"],[role="switch"],[role="radio"],[role="textbox"],[role="combobox"]{{background:#ddd}}</style>{html}"#
+        r#"<style>[role="progressbar"],[role="slider"],[role="spinbutton"],[role="switch"],[role="radio"],[role="textbox"],[role="combobox"]{{background:#ddd;position:relative}} [role="combobox"] [role="listbox"]{{display:none;position:absolute}}</style>{html}"#
     );
     let parsed = loomgui_fence::parse_template(&wrapped, "test.html");
     assert!(

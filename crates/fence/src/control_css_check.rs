@@ -158,6 +158,140 @@ fn any_rule_matches(rules: &[DynamicRule], tree: &IrTree, node_idx: usize) -> bo
         .any(|r| selector_matches_node(&r.selector, tree, node_idx))
 }
 
+/// 规则在某节点上命中且声明了指定 prop=value。
+fn any_rule_declares(
+    rules: &[DynamicRule],
+    tree: &IrTree,
+    node_idx: usize,
+    prop: &str,
+    value: &str,
+) -> bool {
+    rules.iter().any(|r| {
+        selector_matches_node(&r.selector, tree, node_idx)
+            && r.declarations
+                .iter()
+                .any(|d| d.prop == prop && d.value.trim() == value)
+    })
+}
+
+/// 控件结构 CSS 契约表：控件运行时行为对作者 CSS 的**结构性**依赖。
+///
+/// 与「命中校验」（任何规则命中即可）互补：命中只证明作者在样式这个控件，
+/// 不证明结构声明齐全。缺结构声明的症状在 PlayMode 才可见（弹层撑开容器 /
+/// 定位飞出），正是围栏「不静默降级」要打包期拦截的类别。
+///
+/// 每条契约：控件本体必需声明（如锚点 position:relative）+ 一个弹层后代角色
+/// 的必需声明（如 position:absolute 脱流）。后续控件（slider fill/thumb 绝对
+/// 定位等）在契约核实后于本表扩展，勿散落硬编码。
+struct StructureCssContract {
+    /// 控件 role（字面值，与 REQUIRED_CHILDREN 同口径）。
+    role: &'static str,
+    /// 控件本体必需声明 (prop, value)。
+    control_decl: (&'static str, &'static str),
+    /// 弹层后代 role（子树内递归找）。
+    popup_role: &'static str,
+    /// 弹层必需声明 (prop, value)。
+    popup_decl: (&'static str, &'static str),
+    /// 教学文案：标准写法（可直接抄的 CSS）。
+    canonical: &'static str,
+}
+
+const STRUCTURE_CSS_CONTRACTS: &[StructureCssContract] = &[StructureCssContract {
+    role: "combobox",
+    control_decl: ("position", "relative"),
+    popup_role: "listbox",
+    popup_decl: ("position", "absolute"),
+    canonical: "[role=\"combobox\"] { position:relative; }\n\
+                [role=\"combobox\"] [role=\"listbox\"] { display:none; position:absolute; \
+                left:0; top:100%; width:100%; }",
+}];
+
+/// 递归找子树内带指定 role 的首个元素节点索引。
+fn find_descendant_by_role(tree: &IrTree, root_idx: usize, role: &str) -> Option<usize> {
+    for &child in &tree.nodes[root_idx].children {
+        if let IrNodeKind::Element(el) = &tree.nodes[child.0].kind {
+            if node_role(el) == Some(role) {
+                return Some(child.0);
+            }
+        }
+        if let Some(found) = find_descendant_by_role(tree, child.0, role) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Stage 6.7b：控件结构 CSS 契约校验。表驱动（[`STRUCTURE_CSS_CONTRACTS`]）。
+///
+/// 对每条契约的每个控件节点：本体必需声明 + 弹层后代必需声明，任一缺失即
+/// `FenceControlStructureCss` error。只在 Annotate + Stage 4.5 之后跑（同
+/// [`check_control_css`] 的前置）。
+pub fn check_control_structure_css(
+    tree: &IrTree,
+    dynamic_rules: &[DynamicRule],
+    file: &str,
+    line_map: &LineMap,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for (idx, node) in tree.nodes.iter().enumerate() {
+        let IrNodeKind::Element(el) = &node.kind else {
+            continue;
+        };
+        let role = match node_role(el) {
+            Some(r) => r,
+            None => continue,
+        };
+        let Some(contract) = STRUCTURE_CSS_CONTRACTS.iter().find(|c| c.role == role) else {
+            continue;
+        };
+        if !any_rule_declares(
+            dynamic_rules,
+            tree,
+            idx,
+            contract.control_decl.0,
+            contract.control_decl.1,
+        ) {
+            let loc = line_map.source_location(node.span.start, file.to_string());
+            diagnostics.push(Diagnostic::error(
+                DiagnosticCode::FenceControlStructureCss,
+                format!(
+                    "LoomGUI {role} control is missing `{}`:{} — the popup anchor. \
+                     Without it the popup positions against an outer containing block and \
+                     the viewport-flip placement breaks. Canonical form:\n{}",
+                    contract.control_decl.0, contract.control_decl.1, contract.canonical
+                ),
+                loc,
+            ));
+        }
+        if let Some(popup_idx) = find_descendant_by_role(tree, idx, contract.popup_role) {
+            if !any_rule_declares(
+                dynamic_rules,
+                tree,
+                popup_idx,
+                contract.popup_decl.0,
+                contract.popup_decl.1,
+            ) {
+                let popup_node = &tree.nodes[popup_idx];
+                let loc = line_map.source_location(popup_node.span.start, file.to_string());
+                diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::FenceControlStructureCss,
+                    format!(
+                        "LoomGUI {role} popup (`role=\"{}\"`) is missing `{}:{}` — \
+                         without it the popup stays in flow and expands its container \
+                         when opened. Canonical form:\n{}",
+                        contract.popup_role,
+                        contract.popup_decl.0,
+                        contract.popup_decl.1,
+                        contract.canonical
+                    ),
+                    loc,
+                ));
+            }
+        }
+    }
+    diagnostics
+}
+
 /// 控件的可读名称（教学文案用）。按 `role` 取名（spec §2.2）。
 fn kind_name_for(el: &IrElement) -> &'static str {
     match node_role(el) {
@@ -265,6 +399,66 @@ mod tests {
             "t.html",
             &crate::diagnostic::LineMap::new(html),
         )
+    }
+
+    /// 辅助：同 check，跑结构契约检查（Stage 6.7b）。
+    fn check_structure(html: &str) -> Vec<Diagnostic> {
+        let result = parse_template(html, "t.html");
+        check_control_structure_css(
+            &result.tree,
+            &result.dynamic_rules,
+            "t.html",
+            &crate::diagnostic::LineMap::new(html),
+        )
+    }
+
+    #[test]
+    fn structure_contract_compliant_combobox_passes() {
+        // form/settings 页的标准写法：锚点 + 脱流 + 隐藏初态全齐 → 零诊断。
+        let diags = check_structure(
+            "<div><div role=\"combobox\"><div role=\"listbox\">\
+             <div role=\"option\">a</div></div></div></div>\
+             <style>[role=combobox]{position:relative} \
+             [role=combobox] [role=listbox]{display:none;position:absolute}</style>",
+        );
+        assert!(diags.is_empty(), "diags: {diags:?}");
+    }
+
+    #[test]
+    fn structure_contract_missing_both_declarations_errors() {
+        // api-infra 事故形态：视觉规则命中但结构声明全缺 → 两条 error
+        //（锚点 + 脱流）。「命中校验」（6.7）对此放行——本检查补位。
+        let diags = check_structure(
+            "<div><div role=\"combobox\"><div role=\"listbox\">\
+             <div role=\"option\">a</div></div></div></div>\
+             <style>[role=combobox]{background-color:#101c28;width:280px}</style>",
+        );
+        assert_eq!(diags.len(), 2, "diags: {diags:?}");
+        assert!(diags
+            .iter()
+            .all(|d| d.code == DiagnosticCode::FenceControlStructureCss));
+    }
+
+    #[test]
+    fn structure_contract_popup_absolute_without_anchor_errors_once() {
+        // 弹层脱流了但控件本体没锚点 → 单条锚点 error。
+        let diags = check_structure(
+            "<div><div role=\"combobox\"><div role=\"listbox\">\
+             <div role=\"option\">a</div></div></div></div>\
+             <style>[role=combobox] [role=listbox]{position:absolute}</style>",
+        );
+        assert_eq!(diags.len(), 1, "diags: {diags:?}");
+        assert!(diags[0].message.contains("anchor"));
+    }
+
+    #[test]
+    fn structure_contract_non_combobox_controls_untouched() {
+        // 契约表外的控件（slider 等）不受本检查影响（契约核实后再入表）。
+        let diags = check_structure(
+            "<div><div role=\"slider\"><div data-slot=\"thumb\"></div></div></div>\
+             <style>[role=slider]{width:100px}</style>",
+        );
+        assert!(diags.is_empty(), "diags: {diags:?}");
     }
 
     #[test]

@@ -395,6 +395,16 @@ CSS 在围栏中以三个正交维度建模：
 
 **教学文案**：指出控件无内置默认样式，再按 role 给出修复指引（`data-slot` 子节点型：progressbar/slider 引导为控件本身 + `data-slot=fill`/`thumb` 子配 CSS；switch/radio 引导 `[aria-checked]` 属性选择器；combobox 引导控件本身 + `role=listbox`/`role=option` 子；textbox/spinbutton 引导 background/border + caret-color）。
 
+### 阶段 6.7b：控件结构 CSS 契约校验
+
+**根因**：命中校验只证明「作者在样式这个控件」，不证明**结构声明齐全**。控件的运行时行为对作者 CSS 有结构性依赖——最典型是 Dropdown 弹层：`role=listbox` 必须 `position:absolute` 脱流（缺了展开会把容器撑开）、combobox 本体必须 `position:relative` 做锚点（缺了弹层参照外层 containing block，core 的视口翻转定位数学失效）。这类缺陷在浏览器预览和命中校验里都看不出来（视觉规则照常命中），到 PlayMode 才显形——正是「围栏外输入打包期报错，不静默降级」要拦的类别。
+
+**规则**：表驱动（`crates/fence/src/control_css_check.rs` 的 `STRUCTURE_CSS_CONTRACTS`，单一真相源）。当前契约：
+
+- `combobox`：命中它的规则须声明 `position:relative`；其子树内 `role=listbox` 被命中的规则须声明 `position:absolute`。
+
+任一缺失 → `FenceControlStructureCss` error，打包失败，教学文案附可直接抄的标准写法（`position:relative` 锚点 + `display:none; position:absolute; left:0; top:100%` 弹层）。后续控件的结构契约（如 slider fill/thumb 的绝对定位依赖）在核实后于表内扩展。
+
 ### 阶段 6.8：控件结构契约校验（必需子角色）
 
 **根因**：role 化重构后（§2.2）控件结构由**作者写**，不再由框架运行时注入。作者可能漏写必需子角色（`<div role="slider">` 缺 `data-slot=thumb`、`<div role="combobox">` 缺 `role=listbox`）。把这种保证留到运行时 = 拿确定性换自由度，违背「围栏外输入打包期报错」的项目原则。本 pass 在 Annotate 之后严格拦截。

@@ -44,6 +44,12 @@ pub enum DiagnosticCode {
     /// 未命中 = 运行时渲染空白。强制作者为控件及其内部 slot 子节点提供 CSS。
     /// 详见 fence.md「控件 CSS 命中校验」。
     FenceControlWithoutCss,
+    /// 控件结构 CSS 契约缺失：运行时行为依赖的结构声明（如 combobox 的
+    /// `position:relative` 锚点 + listbox `position:absolute` 脱流）未声明。
+    /// 与「无命中」互补——命中只证明在样式，不证明结构齐全；缺失症状在
+    /// PlayMode 才可见（弹层撑开容器/定位飞出）。表驱动（control_css_check
+    /// `STRUCTURE_CSS_CONTRACTS`），详见 fence.md「控件 CSS 命中校验」。
+    FenceControlStructureCss,
     /// role 驱动控件缺少 spec §2.2 规定的必需子角色/slot（如 `combobox` 缺
     /// `role=listbox` 子、`slider` 缺 `data-slot=thumb` 子）。旧模式下框架运行时
     /// 注入 `.loom-*` 子节点故结构必然完整；新模式由作者自写结构，可能漏写——

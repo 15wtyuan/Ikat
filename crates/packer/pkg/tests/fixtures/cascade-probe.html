@@ -32,7 +32,8 @@ button:disabled { color: #666666; }
 button:focus { color: #aaffff; }
 [role="slider"] { width: 200px; }
 [role="progressbar"] { width: 160px; height: 8px; }
-[role="combobox"] { width: 200px; }
+[role="combobox"] { width: 200px; position: relative; }
+[role="combobox"] [role="listbox"] { display: none; position: absolute; }
 [role="option"] { color: #222222; }
 [role="switch"] { width: 24px; height: 24px; }
 .hidden { display: none; }

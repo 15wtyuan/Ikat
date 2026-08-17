@@ -104,6 +104,16 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
         &line_map,
     ));
 
+    // Stage 6.7b: 控件结构 CSS 契约（锚点/脱流等结构声明）。命中校验只证明作者在
+    // 样式控件；结构声明缺失（如 listbox 漏 position:absolute）在 PlayMode 才显形
+    //（弹层撑开容器/定位飞出）。表驱动，与 6.7 同前置。
+    diagnostics.extend(crate::control_css_check::check_control_structure_css(
+        &tree,
+        &dynamic_rules,
+        file,
+        &line_map,
+    ));
+
     // Stage 6.8: role 驱动控件结构契约（必需子角色）。作者自写控件结构
     // （`<div role="combobox"><div role="listbox">...`），可能漏写必需子节点。
     // 打包期严格拦截，不依赖运行时 reparent 兜底。只校验 role 驱动节点（带 role 属性

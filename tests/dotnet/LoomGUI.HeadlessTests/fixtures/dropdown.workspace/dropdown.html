@@ -8,6 +8,8 @@
   #sel { background: #ddd; display: block; }
   /* option 默认 display:block（围栏 OptionItem::Block）；命中背景验 layout。
      role 选择器替代旧 option tag 选择器。 */
+  [role="combobox"] { position: relative; }
+  [role="combobox"] [role="listbox"] { display: none; position: absolute; }
   [role="option"] { background: #eee; }
 </style>
 </head>

@@ -25,7 +25,8 @@ div { display: flex; flex-direction: column; }
 [role="slider"] { width: 200px; }
 [role="spinbutton"] { width: 120px; }
 [role="textbox"] { width: 180px; }
-[role="combobox"] { width: 200px; }
+[role="combobox"] { width: 200px; position: relative; }
+[role="combobox"] [role="listbox"] { display: none; position: absolute; }
 [role="option"] { color: #222222; }
 [role="switch"] { width: 24px; height: 24px; }
 [role="tablist"] { flex-direction: row; }
