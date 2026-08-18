@@ -103,3 +103,7 @@ tmp
 
 # ZCode harness session state
 .zcode/
+
+# ===== 2021.3 回归工程 =====
+# Bundles 与 unity/showcase-unity 同份产物拷贝（33MB），不重复入库；恢复见该工程 README.md
+unity/showcase-unity-2021/Assets/Bundles/
