@@ -105,7 +105,7 @@ pub struct TagSpec {
 /// addresses it by role. `tabpanel` is likewise intentionally absent: a panel is
 /// a plain `<div>` Container that a tab links via `aria-controls` (cross-tree
 /// association), not a distinct NodeKind.
-const ROLE_TO_SEMANTIC: &[(&str, SemanticKind)] = &[
+pub const ROLE_TO_SEMANTIC: &[(&str, SemanticKind)] = &[
     ("combobox", SemanticKind::Dropdown),
     ("option", SemanticKind::OptionItem),
     ("listbox", SemanticKind::Container),

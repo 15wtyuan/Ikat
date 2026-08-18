@@ -9,5 +9,5 @@ pub use css::{
 };
 pub use tag::{
     find_tag, is_shell_tag, resolve_semantic, Category, ContentModel, DisplayDefault, SemanticKind,
-    TagSpec, SHELL_TAGS, TAGS,
+    TagSpec, ROLE_TO_SEMANTIC, SHELL_TAGS, TAGS,
 };
