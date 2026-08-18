@@ -3,6 +3,7 @@ using UnityEngine;
 using LoomGUI.Bindings;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.LowLevel;
 #endif
 
 namespace LoomGUI
@@ -10,7 +11,10 @@ namespace LoomGUI
     /// 输入采集：Unity 指针（鼠标+触摸）→ PointerEvent[] → loomgui_stage_set_input。
     /// screen→design 映射 + y-flip（Unity 左下原点 → LoomGUI 左上原点 design）。
     /// 兼容新旧输入系统：ENABLE_INPUT_SYSTEM 宏（Player Settings Active Input Handling=New/Both）走
-    /// InputSystem API（Mouse.current / Touchscreen.current.touches），否则走旧 UnityEngine.Input。
+    /// InputSystem API（Mouse/Touchscreen 轮询 + Keyboard 的 onTextInput/onIMECompositionChange 事件），
+    /// 否则走旧 UnityEngine.Input（inputString/compositionString 等）。三种 Active Input Handling
+    /// 配置（Old / New / Both）全支持——键盘族若只走单路径，New-only 工程每帧抛
+    /// InvalidOperationException，开箱即用就断了。
     [ExecuteAlways]
     public unsafe class LoomInputCollector : MonoBehaviour
     {
@@ -36,6 +40,63 @@ namespace LoomGUI
         /// 上帧聚焦节点缓存：IME mode 仅在焦点真正转换时切换，避免每帧重设（移动端/
         /// WebGL IME 状态切换昂贵）。0xFFFFFFFF = 无聚焦。
         private uint _lastFocused = 0xFFFF_FFFFu;
+
+#if ENABLE_INPUT_SYSTEM
+        /// 本帧字符输入缓冲：Keyboard.onTextInput 逐字符事件触发（两帧之间可多次），
+        /// CollectText 每帧消费后清空。替代旧路径 Input.inputString 的帧轮询。
+        readonly System.Text.StringBuilder _textBuf = new System.Text.StringBuilder();
+
+        /// 最新 IME 预编辑串缓存：onIMECompositionChange 每次变更发当前完整串、
+        /// 上屏/重置发空串（与旧 Input.compositionString 同构），CollectComposition 每帧读。
+        string _composition = "";
+
+        /// 已订阅事件的键盘设备。Keyboard.current 是设备实例——热插拔会换新实例，
+        /// 事件挂实例上，须跟随 onDeviceChange 重订，否则换键盘后 text/IME 静默失联。
+        Keyboard _subKb;
+
+        void OnEnable()
+        {
+            InputSystem.onDeviceChange += OnDeviceChange;
+            Subscribe(Keyboard.current);
+        }
+
+        void OnDisable()
+        {
+            InputSystem.onDeviceChange -= OnDeviceChange;
+            Unsubscribe();
+        }
+
+        /// 键盘热插拔/重连：Keyboard.current 换新实例，事件须换挂（旧实例随设备失效）。
+        void OnDeviceChange(InputDevice device, InputDeviceChange change)
+        {
+            if (device is Keyboard)
+            {
+                Unsubscribe();
+                if (change == InputDeviceChange.Added || change == InputDeviceChange.Reconnected)
+                    Subscribe(Keyboard.current);
+            }
+        }
+
+        void Subscribe(Keyboard kb)
+        {
+            if (kb == null) return;
+            kb.onTextInput += OnTextInput;
+            kb.onIMECompositionChange += OnIMEComposition;
+            _subKb = kb;
+        }
+
+        void Unsubscribe()
+        {
+            if (_subKb == null) return;
+            _subKb.onTextInput -= OnTextInput;
+            _subKb.onIMECompositionChange -= OnIMEComposition;
+            _subKb = null;
+        }
+
+        void OnTextInput(char ch) => _textBuf.Append(ch);
+
+        void OnIMEComposition(IMECompositionString composition) => _composition = composition.ToString();
+#endif
 
         /// screen→design 映射，与 LoomStageDriver.ConfigureTransforms 逐项逆（同一 sf 居中公式）。
         /// 前向（design→screen，见 Driver 的根变换注释）：
@@ -163,16 +224,30 @@ namespace LoomGUI
         }
 
         /// 采集本帧键盘 → set_key_input。KeyDown/Up 事件 + modifiers。
-        /// 用 Input.GetKeyDown/Up（KeyCode 直对 core key_code，零转换；工程 Both 模式可用）——不像 Collect 双路径，
-        /// 键盘无 InputSystem 特性需求。本帧无键事件 → set_key_input(null,0)（core 无键盘输入）。
+        /// 新旧输入系统双路径：新路径轮询 Keyboard[Key]（wasPressed/wasReleasedThisFrame，
+        /// 与鼠标按钮同帧时机），旧路径轮询 Input.GetKeyDown/Up。两路径发码统一取
+        /// KeyCode 数值（core key_code=(uint)KeyCode 契约，FFI 语义不随工程输入配置变——
+        /// InputSystem.Key 与 KeyCode 数值不同，不能直发）。本帧无键事件 →
+        /// set_key_input(null,0)（core 无键盘输入）。
         public void CollectKeys(System.IntPtr stage)
         {
             if (stage == System.IntPtr.Zero) return;
             var keys = new System.Collections.Generic.List<Bindings.KeyEvent>();
             byte mods = CurrentModifiers();
-            // 键盘 down/up 用 Input.GetKeyDown/Up（KeyCode）——KeyCode 直接对应 core key_code=(uint)KeyCode，零转换。
-            // 工程 Active Input Handling=Both，旧 Input API 可用；键盘无 InputSystem 特性需求，
-            // 不走 Keyboard[Key]（要 InputSystem.Key 映射，过度复杂）。
+#if ENABLE_INPUT_SYSTEM
+            var kb = Keyboard.current;
+            if (kb != null)
+            {
+                for (int i = 0; i < KeyList.Length; i++)
+                {
+                    var ctrl = kb[NewKeyList[i]];
+                    bool down = ctrl.wasPressedThisFrame;
+                    bool up = ctrl.wasReleasedThisFrame;
+                    if (down || up)
+                        keys.Add(new Bindings.KeyEvent { key_code = (uint)KeyList[i], modifiers = mods, is_down = down, pad0 = 0, pad1 = 0 });
+                }
+            }
+#else
             foreach (UnityEngine.KeyCode kc in KeyList)
             {
                 bool down = UnityEngine.Input.GetKeyDown(kc);
@@ -180,6 +255,7 @@ namespace LoomGUI
                 if (down || up)
                     keys.Add(new Bindings.KeyEvent { key_code = (uint)kc, modifiers = mods, is_down = down, pad0 = 0, pad1 = 0 });
             }
+#endif
             if (keys.Count == 0)
             {
                 Native.loomgui_stage_set_key_input((Bindings.StageHandle*)stage, null, 0);
@@ -192,14 +268,20 @@ namespace LoomGUI
             }
         }
 
-        /// 采集本帧字符输入 → set_text_input（UTF-32 codepoints）。Input.inputString 返本帧键入的
-        /// 已映射可打印字符（数字/字母/符号；IME composition 走 host set_composition 另通道）。
-        /// 空串 → set_text_input(null,0)（core 无字符输入）。与 CollectKeys 互补：
-        /// keydown 通道走物理键（控制键 Backspace/Delete/方向/翻页），textinput 通道走映射好的字符。
+        /// 采集本帧字符输入 → set_text_input（UTF-32 codepoints）。已映射可打印字符
+        /// （数字/字母/符号；IME 上屏结果字符同路）。空串 → set_text_input(null,0)
+        /// （core 无字符输入）。与 CollectKeys 互补：keydown 通道走物理键（控制键
+        /// Backspace/Delete/方向/翻页），textinput 通道走映射好的字符。
+        /// 双路径：新路径消费 OnTextInput 事件缓存（每帧清空），旧路径读 Input.inputString。
         public void CollectText(System.IntPtr stage)
         {
             if (stage == System.IntPtr.Zero) return;
+#if ENABLE_INPUT_SYSTEM
+            string s = _textBuf.Length == 0 ? "" : _textBuf.ToString();
+            _textBuf.Clear();
+#else
             string s = UnityEngine.Input.inputString;
+#endif
             if (string.IsNullOrEmpty(s))
             {
                 Native.loomgui_stage_set_text_input((Bindings.StageHandle*)stage, null, 0);
@@ -221,14 +303,20 @@ namespace LoomGUI
         }
 
         /// 采集本帧 IME composition（系统输入法预编辑串）→ set_composition（UTF-8）。
-        /// Unity Input.compositionString 是 IME 组字串（组字中非空，组字完成变空，结果字符进
-        /// inputString 由 CollectText insert）。聚焦文本框时显式开 IME（Unity IME Auto 模式
-        /// 基于 UnityEngine.GUI TextField，LoomGUI 自绘不触发，故须显式 On），失焦关 IME。
+        /// 组字串语义（两输入系统同构）：组字中非空（完整预编辑串），组字完成变空，
+        /// 结果字符经 CollectText 上屏。聚焦文本框时显式开 IME（IME Auto 模式基于
+        /// UnityEngine.GUI TextField，LoomGUI 自绘不触发，故须显式 On），失焦关 IME。
         /// 核心用 e.cursor 定位组字插入点（FFI pos 参数忽略，C# 传 0）。
+        /// 双路径：新路径 Keyboard.SetIMEEnabled/SetIMECursorPosition（左上原点、像素、
+        /// y 向下——与旧 compositionCursorPos 编辑器语义同坐标系，DesignToScreen 直供）
+        /// + onIMECompositionChange 缓存；旧路径 Input.imeCompositionMode/compositionString。
         public void CollectComposition(System.IntPtr stage)
         {
             if (stage == System.IntPtr.Zero) return;
             Bindings.StageHandle* h = (Bindings.StageHandle*)stage;
+#if ENABLE_INPUT_SYSTEM
+            var kb = Keyboard.current;
+#endif
             uint focused = Native.loomgui_stage_focused_node(h);
             const uint NONE = 0xFFFF_FFFFu;
             if (focused == NONE)
@@ -237,7 +325,11 @@ namespace LoomGUI
                 // 状态切换昂贵）。
                 if (_lastFocused != NONE)
                 {
+#if ENABLE_INPUT_SYSTEM
+                    kb?.SetIMEEnabled(false);
+#else
                     UnityEngine.Input.imeCompositionMode = UnityEngine.IMECompositionMode.Off;
+#endif
                     _lastFocused = NONE;
                 }
                 return;
@@ -245,7 +337,11 @@ namespace LoomGUI
             // 聚焦文本框：仅在从无聚焦（或换节点）转入时开 IME。
             if (_lastFocused != focused)
             {
+#if ENABLE_INPUT_SYSTEM
+                kb?.SetIMEEnabled(true);
+#else
                 UnityEngine.Input.imeCompositionMode = UnityEngine.IMECompositionMode.On;
+#endif
                 _lastFocused = focused;
             }
             // IME 候选窗定位：读光标世界矩形（design 空间，左上原点）→ screen（Unity 左下原点）。
@@ -258,11 +354,19 @@ namespace LoomGUI
                 var screenPos = DesignToScreen(
                     new UnityEngine.Vector2(r.x, r.y + r.h),
                     ss, this.DesignSize, sa, this.UseSafeArea);
+#if ENABLE_INPUT_SYSTEM
+                kb?.SetIMECursorPosition(screenPos);
+#else
                 UnityEngine.Input.compositionCursorPos = screenPos;
+#endif
             }
-            // compositionString → set_composition。组字中设预编辑串（核心 display 拼组字显示），
+            // 组字串 → set_composition。组字中设预编辑串（核心 display 拼组字显示），
             // 组字完成（空串）清预编辑（CollectText 同帧 insert 结果字符）。
+#if ENABLE_INPUT_SYSTEM
+            string comp = _composition;
+#else
             string comp = UnityEngine.Input.compositionString;
+#endif
             byte[] bytes = System.Text.Encoding.UTF8.GetBytes(comp ?? "");
             if (bytes.Length == 0)
             {
@@ -348,7 +452,7 @@ namespace LoomGUI
 
         /// 采集的键白名单（Tab + 字母 + Enter/Space/Esc/方向 + 数字）。避免全 KeyCode 枚举遍历（数百个）开销。
         /// 显式白名单而非全枚举——绝大多数键业务不关心，白名单够用且省 CPU。
-        static readonly UnityEngine.KeyCode[] KeyList = {
+        internal static readonly UnityEngine.KeyCode[] KeyList = {
             UnityEngine.KeyCode.Tab,
             // 编辑控制键：Backspace/Delete（删字符）+ Home/End（行首/尾）。core KEY_DELETE=323
             // 须与此处 KeyCode.Delete(323) 一致；缺失则文本控件无法删字符。
@@ -364,5 +468,27 @@ namespace LoomGUI
             UnityEngine.KeyCode.Alpha0, UnityEngine.KeyCode.Alpha1, UnityEngine.KeyCode.Alpha2, UnityEngine.KeyCode.Alpha3, UnityEngine.KeyCode.Alpha4,
             UnityEngine.KeyCode.Alpha5, UnityEngine.KeyCode.Alpha6, UnityEngine.KeyCode.Alpha7, UnityEngine.KeyCode.Alpha8, UnityEngine.KeyCode.Alpha9,
         };
+
+#if ENABLE_INPUT_SYSTEM
+        /// KeyList 的 InputSystem.Key 平行数组（同下标一一对应）。命名差异对照：
+        /// Alpha0-9↔Digit0-9、Return↔Enter；其余白名单键两枚举同名。CollectKeys 新路径
+        /// 按此轮询，发码仍取 KeyCode 数值（core key_code 契约，见 CollectKeys 注释）。
+        internal static readonly Key[] NewKeyList = {
+            Key.Tab,
+            // 编辑控制键：Backspace/Delete（删字符）+ Home/End（行首/尾）。发码取 KeyList
+            // 同下标 KeyCode 数值（Delete=323 与 core KEY_DELETE 对齐）。
+            Key.Backspace, Key.Delete,
+            Key.Enter, Key.Space, Key.Escape,
+            Key.LeftArrow, Key.RightArrow, Key.UpArrow, Key.DownArrow,
+            Key.Home, Key.End,
+            Key.A, Key.B, Key.C, Key.D, Key.E,
+            Key.F, Key.G, Key.H, Key.I, Key.J,
+            Key.K, Key.L, Key.M, Key.N, Key.O,
+            Key.P, Key.Q, Key.R, Key.S, Key.T,
+            Key.U, Key.V, Key.W, Key.X, Key.Y, Key.Z,
+            Key.Digit0, Key.Digit1, Key.Digit2, Key.Digit3, Key.Digit4,
+            Key.Digit5, Key.Digit6, Key.Digit7, Key.Digit8, Key.Digit9,
+        };
+#endif
     }
 }
