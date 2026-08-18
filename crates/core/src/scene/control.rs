@@ -440,7 +440,8 @@ pub(crate) fn dropdown_option_list(scene: &Scene, select: NodeId) -> Vec<(NodeId
 /// 世界坐标 rect-contains：节点盒经 world_transforms 映到世界 AABB 再判。
 /// `layout_rect` 是页面内容坐标（未扣祖先滚动），`pos` 是世界坐标（已扣滚动）——
 /// 祖先未滚动时两者相等（既有行为），滚动/缩放下必须经世界矩阵换算。
-/// 平移/缩放精确；旋转取 AABB 近似（与 hit_test 逆变换判定同量级）。
+/// 平移/缩放精确；旋转下只映对角两点、非真 AABB（边缘带漏判；hit_test 的逆变换判定
+/// 才是精确的）。控件场景无旋转，此近似足够——若未来控件支持旋转，改四角 AABB 或逆变换。
 /// 无世界矩阵条目（scene 从未跑 compute_world_transforms，如裸 Scene 单测）→ 回退
 /// layout 坐标判定（根级场景 layout 即世界，旧语义）。
 pub(crate) fn world_rect_contains(scene: &Scene, node: NodeId, pos: [f32; 2]) -> bool {

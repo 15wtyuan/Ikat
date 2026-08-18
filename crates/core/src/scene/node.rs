@@ -900,6 +900,8 @@ impl Scene {
     /// 带站点标签的 live 查取：死 id 时 panic 消息含 id/index + 副作用表残留
     /// （controls/lists/scroll 仍在 = 存在绕过 free_node_slot 漏斗的释放路径）。
     /// release dll 内联行号不可靠，站点标签是定位「快照后死亡」panic 的唯一可靠锚点。
+    /// 标签约定：`模块/函数名[: 语义后缀]`（如 `layout/build`、`dynamic/rematch:write`）——
+    /// **勿用行号**，行号随编辑漂移会把取证日志指向错误位置。
     pub fn get_live(&self, id: NodeId, site: &str) -> &Node {
         match self.get(id) {
             Some(n) => n,
@@ -910,7 +912,7 @@ impl Scene {
                     .rev()
                     .enumerate()
                     .filter(|(_, (fid, _))| *fid == id)
-                    .map(|(age, (_, seq))| format!("seq={seq} 距今{age}笔"))
+                    .map(|(age, (_, seq))| format!("seq={seq} age={age}frees-ago"))
                     .collect();
                 let tail: Vec<String> = self
                     .free_log
@@ -920,14 +922,14 @@ impl Scene {
                     .map(|(fid, seq)| format!("{:?}@{seq}", fid))
                     .collect();
                 panic!(
-                    "live node [{}] id={:?} idx={} side残留 controls={} lists={} scroll={} | 该id释放记录: {} | free_log尾: {} | 现free_seq={}",
+                    "live node [{}] id={:?} idx={} side-table residue controls={} lists={} scroll={} | frees of this id: {} | free_log tail: {} | free_seq={}",
                     site,
                     id,
                     id.index(),
                     self.controls.get(id).is_some(),
                     self.lists.0.contains_key(&id),
                     self.scroll.get(id).is_some(),
-                    if frees.is_empty() { "无(>32笔前或未过漏斗)".to_string() } else { frees.join("; ") },
+                    if frees.is_empty() { "none (>32 frees ago or bypassed the free_node_slot funnel)".to_string() } else { frees.join("; ") },
                     tail.join(" "),
                     self.free_seq,
                 );
@@ -937,7 +939,7 @@ impl Scene {
     pub fn get_live_mut(&mut self, id: NodeId, site: &str) -> &mut Node {
         if self.get(id).is_none() {
             panic!(
-                "live node [{}] id={:?} idx={} side残留 controls={} lists={} scroll={}",
+                "live node [{}] id={:?} idx={} side-table residue controls={} lists={} scroll={}",
                 site,
                 id,
                 id.index(),

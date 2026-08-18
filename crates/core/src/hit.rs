@@ -17,10 +17,23 @@ pub(crate) fn point_in_rect(point: (f32, f32), r: Rect) -> bool {
 /// z-index 为主键（后一次稳定排 `-z_index`）：镜像 render DFS 的 (z 升, DOM 升)
 /// 绘制序之逆。等 z 时保持既有 order 行为（本函数的历史近似，render 侧不排 order）。
 fn effective_draw_order(scene: &Scene, parent: NodeId) -> Vec<NodeId> {
-    let mut kids: Vec<NodeId> = scene.get_live(parent, "hit:20").children.clone();
+    let mut kids: Vec<NodeId> = scene
+        .get_live(parent, "hit/effective_draw_order:parent")
+        .children
+        .clone();
     kids.reverse();
-    kids.sort_by_key(|&c| -scene.get_live(c, "hit:22").style.order); // 负号=降序
-    kids.sort_by_key(|&c| -scene.get_live(c, "hit:23").style.z_index); // z 主键=降序
+    kids.sort_by_key(|&c| {
+        -scene
+            .get_live(c, "hit/effective_draw_order:order")
+            .style
+            .order
+    }); // 负号=降序
+    kids.sort_by_key(|&c| {
+        -scene
+            .get_live(c, "hit/effective_draw_order:z")
+            .style
+            .z_index
+    }); // z 主键=降序
     kids
 }
 
@@ -107,7 +120,7 @@ pub fn hit_test(scene: &Scene, point: (f32, f32)) -> Option<NodeId> {
 
 /// 递归测某子树。先测子（逆等效序，顶层先），子命中返回子的；子都不命中→自身 fallback。
 fn hit_subtree(scene: &Scene, id: NodeId, point: (f32, f32)) -> Option<NodeId> {
-    let node = scene.get_live(id, "hit:110");
+    let node = scene.get_live(id, "hit/hit_subtree");
     // bounds guard：world_transforms 可能未对齐（结构变更帧新增节点本帧 world_transforms
     // 未算，或首帧 world_transforms 空）→ 越界返 None（1 帧延迟语义：本帧未命中）。
     // sentinel id（thumb flag）不会进 hit_subtree（hit_test 在 hit_scrollbar_grip 命中后

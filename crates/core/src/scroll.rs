@@ -502,7 +502,7 @@ pub fn v_thumb_rect(scene: &Scene, id: NodeId) -> Option<Rect> {
     if s.overlap.1 <= 0.0 {
         return None;
     }
-    let lr = scene.get_live(id, "scroll:505").layout_rect;
+    let lr = scene.get_live(id, "scroll/v_thumb_rect").layout_rect;
     let track_w = SCROLLBAR_TRACK_THICKNESS;
     let track_h = lr.h;
     let thumb_h = (s.viewport_size.1 * (s.viewport_size.1 / s.content_size.1))
@@ -528,7 +528,7 @@ pub fn h_thumb_rect(scene: &Scene, id: NodeId) -> Option<Rect> {
     if s.overlap.0 <= 0.0 {
         return None;
     }
-    let lr = scene.get_live(id, "scroll:531").layout_rect;
+    let lr = scene.get_live(id, "scroll/h_thumb_rect").layout_rect;
     let track_h = SCROLLBAR_TRACK_THICKNESS;
     let track_w = lr.w;
     let thumb_w = (s.viewport_size.0 * (s.viewport_size.0 / s.content_size.0))
@@ -611,7 +611,9 @@ pub fn refresh_content_sizes(scene: &mut Scene) {
         let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
         let mut counted = 0u32;
         for c in &kids {
-            let r = scene.get_live(*c, "scroll:614").layout_rect;
+            let r = scene
+                .get_live(*c, "scroll/refresh_content_sizes")
+                .layout_rect;
             if r.w == 0.0 && r.h == 0.0 {
                 continue;
             }
@@ -731,7 +733,7 @@ pub fn apply_wheel_to_hit(scene: &mut Scene, w: WheelEvent) {
             // defensive: invalid node id (shouldn't happen after sentinel decode)
             break;
         }
-        pane = scene.get_live(id, "scroll:734").parent;
+        pane = scene.get_live(id, "scroll/apply_wheel_to_hit").parent;
     }
 }
 

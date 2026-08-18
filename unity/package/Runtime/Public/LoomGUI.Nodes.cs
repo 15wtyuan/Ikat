@@ -993,6 +993,9 @@ namespace LoomGUI
                 //    （OnUpdate 读数刷新），清子重建会每帧烧一次 slotmap generation——
                 //    单槽复用 ~4096 次后 NodeId 的 12-bit gen 截断回卷，产生活着的
                 //    「幽灵死节点」（core from_key 版本截断，get(id) 永久 miss）。
+                //    语义偏差（有意的）：复用现有 TextNode 而非替换——若作者是手动 append
+                //    的带样式 TextNode，其 class/style 会保留（DOM 会替换成裸文本节点）。
+                //    本 setter 建的 TextNode 均为裸节点，快路径只在自己产物上命中时无偏差。
                 if (ChildCount == 1 && GetChildAt(0) is TextNode existing)
                 {
                     existing.Text = text;
@@ -1327,9 +1330,11 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 清当前直系子（DOM semantics：移除不 Dispose，子可重挂）。snapshot NodeId 列表 + 逐个
-        /// remove_child FFI——跳过 RemoveChild 的 GetChildIndex 校验（snapshot 保证是直系子，校验纯开销）。
-        /// TextContent setter 用——清后立建新 TextNode。
+        /// 真释放当前直系子（remove_node 递归清子 + slotmap 回收，非 detach）。snapshot NodeId
+        /// 列表后逐个走 Node.Dispose 同款路径：evict 后代 wrapper + remove_node + 清 update
+        /// hooks + evict 自身 wrapper（标 _disposed——调用方持有的子句柄随之失效，公共读抛
+        /// ObjectDisposedException，与 Dispose 契约一致）。跳过 RemoveChild 的 GetChildIndex
+        /// 校验（snapshot 保证是直系子，校验纯开销）。TextContent setter 用——清后立建新 TextNode。
         /// </summary>
         private void ClearDirectChildrenFFI(StageHandle* h)
         {
@@ -1352,6 +1357,11 @@ namespace LoomGUI
             {
                 uint cid = buf[i];
                 DisposeDescendantsInRegistry(cid);
+                // 直系子自身的 wrapper 也要标 _disposed（DisposeDescendantsInRegistry 只管
+                // 后代）：不标则调用方手里的子句柄 _disposed=false 但 Rust 节点已死，
+                // 公共读不抛 ObjectDisposedException 而是静默 no-op，违背 Dispose 契约。
+                if (_ctx._registry.TryGet(cid, out var cachedChild))
+                    cachedChild._disposed = true;
                 // remove_node 递归清子 + 脱挂 + slotmap 回收（同 Node.Dispose 路径）。
                 Native.loomgui_stage_remove_node(h, cid);
                 _ctx.RemoveUpdateHooks(cid);
