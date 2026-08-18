@@ -6,14 +6,13 @@
 // 堆实例——突变经共享堆对象传播，DOM event.stopPropagation() 语义对齐。
 //
 // sealed：防派生。class 默认 LayoutKind.Auto——本类自身字段顺序对投影层不透明（投影层不
-// Unsafe.As 读 RouteEventCore，只经方法调用）。
+// 别名读 RouteEventCore，只经方法调用）。
 //
-// ⚠️ 偏移不变量（EventBus.Dispatch 依赖）：每个 typed event struct（ClickEvent 等）的
-// `RouteEventCore _core` 字段必须是该 struct 的首 field——EventBus.Dispatch 经
-// `Unsafe.As<T, RouteEventCore>(ref evt)` 把 evt 首 field 存储槽别名为 ref RouteEventCore。
-// _core 不在 offset 0 会让 Unsafe.As 读错字段 → 静默内存损坏。此不变量由 EventTypeCache<T>
-// 静态 ctor 的 `Marshal.OffsetOf<T>("_core") == 0` 断言强制（fail-fast）。
-// （与本类 LayoutKind.Auto 无关——本类字段顺序对投影层不透明，无关偏移约束。）
+// ⚠️ 暴露契约（EventBus.Dispatch 依赖）：每个 typed event struct（ClickEvent 等）实现
+// IRouteEventCore.Core 返回 _core 引用，Dispatch<T> 经约束泛型调用取引用（零装箱）。
+// 历史坑：曾用 Unsafe.As/__refvalue 别名 struct 首 field——Unsafe 类 Unity 2021.3 Mono
+// corlib 没有（编译不过）；__refvalue（refanyval）Mono 运行时校验 TypedReference 类型
+// 不符即抛 InvalidCastException。接口约束调用是唯一干净路径，struct 字段顺序不再受约束。
 
 namespace LoomGUI
 {
@@ -54,5 +53,17 @@ namespace LoomGUI
 
         /// <summary>取消默认行为：语义糖据此 flag 决定是否执行默认动作（D3 接线时定）。</summary>
         internal void PreventDefault() => _defaultPrevented = true;
+    }
+
+    /// <summary>
+    /// 投影层内部：typed event struct 暴露共享 core 引用的访问口。
+    /// <see cref="EventBus.Dispatch{T}"/> 经 <c>where T : IRouteEvent, IRouteEventCore</c>
+    /// 约束调用 <see cref="Core"/>（JIT 直呼 struct 实现，零装箱）读共享
+    /// <see cref="RouteEventCore"/> 堆实例——mutation（StopPropagation/CurrentTarget 刷新）
+    /// 经同一实例在 handler 副本与路由循环间传播。
+    /// </summary>
+    internal interface IRouteEventCore
+    {
+        RouteEventCore Core { get; }
     }
 }

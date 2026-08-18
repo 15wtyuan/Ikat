@@ -78,16 +78,20 @@ namespace LoomGUI
         /// <typeparam name="T">typed event struct（D1 的 18 个之一）。</typeparam>
         /// <param name="targetNodeId">命中节点 NodeId（dispatch 全程 Target 不变）。</param>
         /// <param name="evt">typed event——_core.Target 必须已由调用方（D3 / 测试）填。</param>
-        internal void Dispatch<T>(uint targetNodeId, T evt) where T : IRouteEvent
+        internal void Dispatch<T>(uint targetNodeId, T evt) where T : IRouteEvent, IRouteEventCore
         {
-            // D1 契约：每个 typed event struct 首 field = RouteEventCore _core。RouteEventCore 是
+            // D1 契约：每个 typed event struct 持 RouteEventCore _core。RouteEventCore 是
             // sealed class（D2 修订：struct 版下 Action<T> 按值传 handler，StopPropagation 突变副本
             // 不回传路由循环）——_core 字段是引用槽，handler 副本与 Dispatch 局部 evt 共享同一堆实例。
             //
-            // Unsafe.As<T, RouteEventCore>(ref evt) 把 evt 首 field 的存储槽别名为 ref RouteEventCore——
-            // 零分配 mutate _core（CurrentTarget 每节点刷新；_propagationStopped 由 handler 经
-            // StopPropagation 写经共享堆对象传播）。要求 _core 是 T 的首 field（D1 18 struct 全满足）。
-            ref RouteEventCore core = ref Unsafe.As<T, RouteEventCore>(ref evt);
+            // evt.Core 经约束泛型调用读共享 core 引用（JIT 直呼 struct 实现，零装箱）——
+            // CurrentTarget 每节点刷新、_propagationStopped 由 handler 经 StopPropagation
+            // 写入同一堆实例传播。
+            // 历史坑：曾用 Unsafe.As<T, RouteEventCore> 别名首 field——Unity 2021.3 Mono
+            // corlib 无 Unsafe 类（编译不过）；换 __refvalue（refanyval）编译过但 Mono 运行时
+            // 校验 TypedReference 类型不符即抛 InvalidCastException（PlayMode 首个事件即炸，
+            // EditMode 不派发事件测不到）。接口约束调用是唯一零分配且跨版本语义一致的路径。
+            RouteEventCore core = evt.Core;
             byte eventType = EventTypeCache<T>.Value;
 
             // Build ancestor chain [target, ..., root]：逐层 node_parent 上溯直到 RootSentinel。
@@ -258,20 +262,9 @@ namespace LoomGUI
                         $"typed event {typeof(T).Name} missing internal static byte EventType " +
                         "(D1 contract: each IRouteEvent struct declares it as D2 subscription key)");
 
-                // 关键不变量：Dispatch 的 Unsafe.As<T, RouteEventCore>(ref evt) 要求 _core 是 T
-                // 的首 field（别名为 ref RouteEventCore 读 offset 0）。每个封闭类型的静态 ctor 跑一次，
-                // 此处断言摊到类型加载期——运行时偏移错（有人误把 _core 放非首位）立刻 fail-fast，
-                // 而非静默读错字段。用反射读声明序首字段而非 Marshal.OffsetOf：event struct 含
-                // 引用字段（_core 本身是 class），OffsetOf 要求可封送布局，在 Linux runtime 直接抛
-                // ArgumentException——声明序首字段即托管布局首字段（struct 无 box 头），跨平台成立。
-                var fields = typeof(T).GetFields(
-                    BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance);
-                if (!typeof(T).IsValueType ||
-                    fields.Length == 0 || fields[0].Name != "_core" ||
-                    fields[0].FieldType != typeof(RouteEventCore))
+                if (!typeof(T).IsValueType)
                     throw new InvalidOperationException(
-                        $"event struct {typeof(T).Name}: _core must be the first field " +
-                        "(EventBus.Dispatch Unsafe.As<T, RouteEventCore> reads offset 0)");
+                        $"event {typeof(T).Name} must be a struct (D1 contract)");
 
                 return (byte)p.GetValue(null);
             }

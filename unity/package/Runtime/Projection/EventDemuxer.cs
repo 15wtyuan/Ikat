@@ -268,7 +268,7 @@ namespace LoomGUI
         /// Dispatch 内走 ancestor chain（capture→bubble），CurrentTarget 逐节点刷新。
         /// Target=null（NewCore 遇 not-live nodeId）时丢弃该条——节点已销毁，事件无人接收。
         /// </summary>
-        void DispatchTyped<T>(uint targetNodeId, T evt) where T : IRouteEvent
+        void DispatchTyped<T>(uint targetNodeId, T evt) where T : IRouteEvent, IRouteEventCore
         {
             if (evt.Target == null) return;   // not-live node（见 NewCore）：丢弃不崩泵
             _ctx._eventBus.Dispatch(targetNodeId, evt);

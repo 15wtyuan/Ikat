@@ -1,11 +1,12 @@
 // LoomGUI Frozen Public API: Events
 // See docs/design/public-api.md (权威契约) + docs/design/projection-layer.md (投影层机制)
 //
-// ⚠️ 关键不变量——每个 typed event struct 的 `RouteEventCore _core` 字段必须是该 struct 的
-// 首 field（offset 0）。EventBus.Dispatch 经 `Unsafe.As<T, RouteEventCore>(ref evt)` 把 evt
-// 首 field 别名为 ref RouteEventCore；_core 不在首位会让 Unsafe.As 读错字段 → 静默内存损坏。
-// 新增 typed event struct 时必须保持 `internal RouteEventCore _core;` 为首字段。此不变量由
-// EventTypeCache<T> 静态 ctor 的 Marshal.OffsetOf 断言强制（fail-fast）。
+// ⚠️ 关键契约——每个 typed event struct 实现 IRouteEvent + IRouteEventCore（暴露 _core 引用）
+// 并声明 internal static byte EventType 属性（订阅表 key，EventTypeCache<T> 反射解析）。
+// EventBus.Dispatch 经约束泛型调用 evt.Core 读共享 core 引用（零装箱零别名）。
+// 历史坑：曾要求 _core 为首 field 并用 Unsafe.As/__refvalue 做 offset-0 别名——Unsafe 类
+// Unity 2021.3 Mono corlib 没有；__refvalue（refanyval）Mono 校验类型不符抛
+// InvalidCastException。接口约束调用后 struct 字段顺序不再受约束。
 
 using System;
 
@@ -60,9 +61,10 @@ namespace LoomGUI
     }
 
     // Pointer
-    public struct PointerDownEvent : IRouteEvent
+    public struct PointerDownEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal Vector2 _position;
         internal PointerButton _button;
         internal int _touchId;
@@ -79,9 +81,10 @@ namespace LoomGUI
         public int TouchId { get { return _touchId; } }
     }
 
-    public struct PointerUpEvent : IRouteEvent
+    public struct PointerUpEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal Vector2 _position;
         internal PointerButton _button;
         internal int _touchId;
@@ -97,9 +100,10 @@ namespace LoomGUI
         public int TouchId { get { return _touchId; } }
     }
 
-    public struct PointerMoveEvent : IRouteEvent
+    public struct PointerMoveEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal Vector2 _position;
         internal float _deltaX;
         internal float _deltaY;
@@ -117,9 +121,10 @@ namespace LoomGUI
         public int TouchId { get { return _touchId; } }
     }
 
-    public struct PointerEnterEvent : IRouteEvent
+    public struct PointerEnterEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal Vector2 _position;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
@@ -131,9 +136,10 @@ namespace LoomGUI
         public Vector2 Position { get { return _position; } }
     }
 
-    public struct PointerLeaveEvent : IRouteEvent
+    public struct PointerLeaveEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal Vector2 _position;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
@@ -145,9 +151,10 @@ namespace LoomGUI
         public Vector2 Position { get { return _position; } }
     }
 
-    public struct ClickEvent : IRouteEvent
+    public struct ClickEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal Vector2 _position;
         internal int _clickCount;
         public Node Target => _core.Target;
@@ -162,9 +169,10 @@ namespace LoomGUI
     }
 
     // Drag
-    public struct DragStartEvent : IRouteEvent
+    public struct DragStartEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal Vector2 _position;
         internal Vector2 _startPosition;
         public Node Target => _core.Target;
@@ -178,9 +186,10 @@ namespace LoomGUI
         public Vector2 StartPosition { get { return _startPosition; } }
     }
 
-    public struct DragMoveEvent : IRouteEvent
+    public struct DragMoveEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal Vector2 _position;
         internal float _deltaX;
         internal float _deltaY;
@@ -196,9 +205,10 @@ namespace LoomGUI
         public float DeltaY { get { return _deltaY; } }
     }
 
-    public struct DragEndEvent : IRouteEvent
+    public struct DragEndEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal Vector2 _position;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
@@ -211,9 +221,10 @@ namespace LoomGUI
     }
 
     // Keyboard
-    public struct KeyDownEvent : IRouteEvent
+    public struct KeyDownEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal KeyCode _key;
         internal KeyModifiers _modifiers;
         internal bool _repeat;
@@ -229,9 +240,10 @@ namespace LoomGUI
         public bool Repeat { get { return _repeat; } }
     }
 
-    public struct KeyUpEvent : IRouteEvent
+    public struct KeyUpEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal KeyCode _key;
         internal KeyModifiers _modifiers;
         public Node Target => _core.Target;
@@ -246,9 +258,10 @@ namespace LoomGUI
     }
 
     // Focus
-    public struct FocusEvent : IRouteEvent
+    public struct FocusEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal Node _previousFocused;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
@@ -260,9 +273,10 @@ namespace LoomGUI
         public Node PreviousFocused { get { return _previousFocused; } }
     }
 
-    public struct BlurEvent : IRouteEvent
+    public struct BlurEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal Node _newFocused;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
@@ -275,9 +289,10 @@ namespace LoomGUI
     }
 
     // Scroll
-    public struct ScrollChangedEvent : IRouteEvent
+    public struct ScrollChangedEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal float _scrollX;
         internal float _scrollY;
         internal float _deltaScrollX;
@@ -300,9 +315,10 @@ namespace LoomGUI
     // 18/19/20 = M2 真 core 事件源（crates/core/src/event.rs，T9）：class 触发 + node.Play
     // 都发，demux 直读 stream 填 AnimationName（字符串表索引读回）。END 另兼容 v1 的
     // TweenComplete（type=16）→ AnimationEnd 分流（transition 旧路径，既有测试锁定）。
-    public struct AnimationStartEvent : IRouteEvent
+    public struct AnimationStartEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal string _animationName;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
@@ -315,9 +331,10 @@ namespace LoomGUI
         public string AnimationName { get { return _animationName; } }
     }
 
-    public struct AnimationEndEvent : IRouteEvent
+    public struct AnimationEndEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal string _animationName;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
@@ -330,9 +347,10 @@ namespace LoomGUI
         public string AnimationName { get { return _animationName; } }
     }
 
-    public struct AnimationIterationEvent : IRouteEvent
+    public struct AnimationIterationEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal string _animationName;
         internal int _iterationCount;
         public Node Target => _core.Target;
@@ -351,9 +369,10 @@ namespace LoomGUI
     // OnKey 跨越 / @loom-hook 跨越。不广播 EventBus——demux 按 playerKey 查 Animation 实例
     // 直接触发 OnKey(pct)/OnHook(name) 回调（回调是 Action，无事件参数）；struct 仅作载荷
     // 载体（字段供句柄路由读取 / 调试）。同其它 typed event struct 保持 _core 首字段约定。
-    public struct AnimationKeyEvent : IRouteEvent
+    public struct AnimationKeyEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal string _animationName;
         internal float _percent;
         public Node Target => _core.Target;
@@ -367,9 +386,10 @@ namespace LoomGUI
         public float Percent { get { return _percent; } }
     }
 
-    public struct AnimationHookEvent : IRouteEvent
+    public struct AnimationHookEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal string _animationName;
         internal string _hookName;
         public Node Target => _core.Target;
@@ -383,9 +403,10 @@ namespace LoomGUI
         public string HookName { get { return _hookName; } }
     }
 
-    public struct TransitionEndEvent : IRouteEvent
+    public struct TransitionEndEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal string _propertyName;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
@@ -407,9 +428,10 @@ namespace LoomGUI
     // payload 来自 core EVT_* EventRecord：VALUE_CHANGED/CHANGE_COMMITTED 用 x（float），
     // CHECKED_CHANGED 用 pad[0]（0/1）。core stream 不携旧值，故这些 struct 只装新值；
     // 翻译出的 ValueChangedEvent<*>.OldValue 留 default（core 契约同 web change 事件只给新值）。
-    internal struct ControlValueChangedEvent : IRouteEvent
+    internal struct ControlValueChangedEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal float _value;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
@@ -421,9 +443,10 @@ namespace LoomGUI
         internal float Value { get { return _value; } }
     }
 
-    internal struct ControlCheckedChangedEvent : IRouteEvent
+    internal struct ControlCheckedChangedEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal bool _checked;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
@@ -435,9 +458,10 @@ namespace LoomGUI
         internal bool Checked { get { return _checked; } }
     }
 
-    internal struct ControlChangeCommittedEvent : IRouteEvent
+    internal struct ControlChangeCommittedEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal float _value;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
@@ -453,9 +477,10 @@ namespace LoomGUI
     // 提交时的当前 value 由控件类的 Submitted 访问器在触发时回读 get_control_text（文本值不进
     // EventRecord，同 ControlValueChangedEvent 的文本框语义）。TextArea 不订阅此事件（多行框
     // Enter 插换行，不提交）。
-    internal struct ControlSubmittedEvent : IRouteEvent
+    internal struct ControlSubmittedEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
         public bool DefaultPrevented => _core._defaultPrevented;
@@ -469,9 +494,10 @@ namespace LoomGUI
     // payload 经 EventBus 路由；Dropdown.SelectionChanged 订阅它并翻译为公共 SelectionChangedEvent。
     // core stream 不携 OldIndex（同 ControlValueChangedEvent 的「只报新值」语义）——翻译出的
     // SelectionChangedEvent.OldIndex 留 sentinel -1（NewIndex 由 demux 解出的 index 填）。
-    internal struct ControlSelectionChangedEvent : IRouteEvent
+    internal struct ControlSelectionChangedEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
         internal int _newIndex;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
