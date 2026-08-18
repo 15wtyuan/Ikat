@@ -76,7 +76,10 @@ custom property `--*`. `id` must be unique within a template scope.
 ## Role-driven controls and lists
 
 Controls and lists have no dedicated tags. Write them on a `div` with a
-WAI-ARIA `role`; unknown roles fall back to the tag mapping.
+WAI-ARIA `role`. Role values are whitelist-checked: an unrecognized value
+(often a typo, e.g. `role="silder"`) is a build error (`FenceUnknownRole`) —
+otherwise the element would silently degrade to a plain container and skip
+every control validation.
 
 | role | Type | Required direct children (build-checked) |
 |---|---|---|
@@ -264,6 +267,7 @@ attribute selectors instead.
 | `FenceControlWithoutCss` | control element matched by no `<style>` rule |
 | `FenceControlStructureCss` | control structure CSS missing (combobox anchor / popup positioning) |
 | `FenceMissingControlChild` | control missing a required child role or `data-slot` |
+| `FenceUnknownRole` | `role` value not in the role registry (typo guard — copy role names from the table above verbatim) |
 
 ## Preview trust
 

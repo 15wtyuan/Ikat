@@ -8,6 +8,6 @@ pub use css::{
     find_css_prop, find_shorthand, CssPropSpec, CssValueParser, ShorthandKind, ShorthandSpec,
 };
 pub use tag::{
-    find_tag, is_shell_tag, resolve_semantic, Category, ContentModel, DisplayDefault, SemanticKind,
-    TagSpec, ROLE_TO_SEMANTIC, SHELL_TAGS, TAGS,
+    find_tag, is_known_role, is_shell_tag, known_roles_list, resolve_semantic, Category,
+    ContentModel, DisplayDefault, SemanticKind, TagSpec, ROLE_TO_SEMANTIC, SHELL_TAGS, TAGS,
 };

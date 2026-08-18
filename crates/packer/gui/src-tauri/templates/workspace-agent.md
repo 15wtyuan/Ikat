@@ -102,7 +102,9 @@ The complete rulebook is the loomgui-editor skill (see "How to work here"). The 
 
 **Tags.** 8 document-shell tags are consumed at build time: `html`, `head`, `body`, `title`, `meta`, `style`, `link`, `script`. 6 runtime tags enter the object tree: `div`, `span`, `button`, `img`, `template`, `slot`. Tag names containing a hyphen are custom elements; each must have a `components/<tag>.html` registration file in the package directory, otherwise the build fails with `UnregisteredCustomElement`.
 
-**Controls and lists have no tags — they are role-driven.** Write them on a `div`:
+**Controls and lists have no tags — they are role-driven.** Write them on a
+`div` (role values are whitelist-checked; an unrecognized role is a build
+error):
 
 | role | Type | Required children (build-checked) |
 |---|---|---|

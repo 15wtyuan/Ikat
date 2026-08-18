@@ -6,7 +6,9 @@ use crate::schema::attr::{
     AttrValueDomain,
 };
 use crate::schema::css::{find_css_prop, find_shorthand};
-use crate::schema::tag::{find_tag, is_shell_tag, resolve_semantic};
+use crate::schema::tag::{
+    find_tag, is_known_role, is_shell_tag, known_roles_list, resolve_semantic,
+};
 
 /// Run Stage 3 (Fence Gate): validate every element against the schema.
 ///
@@ -68,6 +70,18 @@ fn validate_element(
         if is_global_attr(&attr.name) {
             if attr.name == "style" {
                 validate_inline_style(&attr.value, attr.span, file, line_map, diagnostics);
+            } else if attr.name == "role" && !is_known_role(&attr.value) {
+                diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::FenceUnknownRole,
+                    format!(
+                        "role \"{}\" is not recognized. Known roles: {}. A misspelled role \
+                         would silently turn the element into a plain container and skip all \
+                         control validations, so the fence rejects it here.",
+                        attr.value,
+                        known_roles_list()
+                    ),
+                    loc(file, attr.span.start, line_map),
+                ));
             }
             continue;
         }
@@ -206,6 +220,35 @@ mod tests {
         assert!(diags.iter().any(
             |d| d.code == DiagnosticCode::FenceUnknownAttr && d.message.contains("bogus-attr")
         ));
+    }
+
+    #[test]
+    fn unknown_role_value_reported() {
+        // 拼错的 role 若静默回退成基础标签类型，会跳过全部控件校验——必须报错。
+        let diags = gate(r#"<div role="silder"><div data-slot="thumb"></div></div>"#);
+        assert!(diags
+            .iter()
+            .any(|d| d.code == DiagnosticCode::FenceUnknownRole && d.message.contains("silder")));
+    }
+
+    #[test]
+    fn known_roles_pass_gate() {
+        // 注册表全集 + textbox/tabpanel 两个表外例外都必须放行。
+        let html = "<div role=\"tabpanel\"></div>\
+                    <div role=\"textbox\" aria-multiline=\"true\"></div>\
+                    <div role=\"combobox\"><div role=\"listbox\">\
+                    <div role=\"option\" value=\"en\">English</div></div></div>\
+                    <div role=\"slider\"><div data-slot=\"thumb\"></div></div>";
+        let diags = gate(html);
+        let role_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::FenceUnknownRole)
+            .collect();
+        assert!(
+            role_errors.is_empty(),
+            "known roles must pass the gate: {:?}",
+            role_errors
+        );
     }
 
     #[test]

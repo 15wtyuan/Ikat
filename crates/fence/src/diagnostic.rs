@@ -55,6 +55,12 @@ pub enum DiagnosticCode {
     /// 注入 `.loom-*` 子节点故结构必然完整；新模式由作者自写结构，可能漏写——
     /// 打包期严格拦截，不依赖运行时 reparent 兜底。详见 fence.md「控件结构契约」。
     FenceMissingControlChild,
+    /// `role` 属性值不在 role 注册表内（通常是拼错，如 `role="silder"`）。
+    /// role 在 LoomGUI 是控件类型系统本身：未知值若静默回退成基础标签类型，
+    /// 元素会跳过全部控件校验（必需子结构、CSS 命中、结构 CSS 契约），构建
+    /// 绿灯但运行时得到空白容器——属「不静默降级」原则要拦的典型类别。
+    /// 注册表见 schema::tag::ROLE_TO_SEMANTIC + textbox/tabpanel 例外。
+    FenceUnknownRole,
 }
 
 #[derive(Debug, Clone)]

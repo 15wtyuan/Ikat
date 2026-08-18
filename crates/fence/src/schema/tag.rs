@@ -145,7 +145,9 @@ pub fn resolve_semantic(
         if let Some((_, kind)) = ROLE_TO_SEMANTIC.iter().find(|(k, _)| *k == r) {
             return Some(*kind);
         }
-        // Unrecognized role: fall through to the tag-based mapping below.
+        // Unrecognized role values never reach here in practice: stage 3
+        // (fence gate) rejects them with `FenceUnknownRole`. The fallthrough
+        // below only covers calls outside the gate pipeline.
     }
     match tag {
         "div" => Some(SemanticKind::Container),
@@ -157,6 +159,30 @@ pub fn resolve_semantic(
         _ if tag.contains('-') => Some(SemanticKind::CustomElement),
         _ => None,
     }
+}
+
+/// Whether a `role` attribute value is recognized by the fence.
+///
+/// The role universe is the [`ROLE_TO_SEMANTIC`] registry plus two roles
+/// that are intentionally not in it: `textbox` (its TextArea/TextField
+/// split needs `aria-multiline`, handled inline in `resolve_semantic`) and
+/// `tabpanel` (a plain Container a tab links to via `aria-controls`, not a
+/// distinct kind). Stage 3 rejects anything else with `FenceUnknownRole`:
+/// a typo'd role would otherwise silently degrade the element to its
+/// base-tag type and skip every control validation (required children,
+/// CSS hit, structure CSS), which is exactly the silent-degradation the
+/// fence exists to prevent.
+pub fn is_known_role(role: &str) -> bool {
+    role == "textbox" || role == "tabpanel" || ROLE_TO_SEMANTIC.iter().any(|(r, _)| *r == role)
+}
+
+/// Comma-separated list of every recognized role, for diagnostic messages.
+/// Generated from the registry so it cannot drift from the schema.
+pub fn known_roles_list() -> String {
+    let mut roles: Vec<&str> = ROLE_TO_SEMANTIC.iter().map(|(r, _)| *r).collect();
+    roles.push("textbox");
+    roles.push("tabpanel");
+    roles.join(", ")
 }
 
 // ── Shell tags ──────────────────────────────────────────────────────
