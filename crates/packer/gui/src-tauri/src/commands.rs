@@ -38,15 +38,6 @@ pub fn create_workspace(path: String, state: tauri::State<StateDir>) -> Result<W
     fs::create_dir_all(root).map_err(|e| format!("create dir: {e}"))?;
     write_workspace(root, &ws).map_err(|e| format!("save workspace: {e}"))?;
 
-    // Inject workspace CLAUDE.md and loomgui-editor skill from templates.
-    let claude_md = include_str!("../templates/workspace-CLAUDE.md");
-    fs::write(root.join("CLAUDE.md"), claude_md).map_err(|e| format!("write CLAUDE.md: {e}"))?;
-
-    let skill_dir = root.join(".claude").join("skills").join("loomgui-editor");
-    fs::create_dir_all(&skill_dir).map_err(|e| format!("create skill dir: {e}"))?;
-    let skill_md = include_str!("../templates/skill/SKILL.md");
-    fs::write(skill_dir.join("SKILL.md"), skill_md).map_err(|e| format!("write SKILL.md: {e}"))?;
-
     recent::push_recent(state.0.as_deref(), &path);
     Ok(ws)
 }
@@ -56,21 +47,42 @@ pub fn save_workspace(path: String, ws: Workspace) -> Result<(), String> {
     write_workspace(Path::new(&path), &ws)
 }
 
-/// 补齐 / 更新工作区脚手架（CLAUDE.md + loomgui-editor skill），
-/// 从 templates 覆盖拷入。不碰 workspace.json 和源文件。
+/// 按 agent 类型写入工作区脚手架：`claude` 落 `CLAUDE.md` + `.claude/skills/`，
+/// `agents` 落 `AGENTS.md` + `.agents/skills/`（AGENTS.md 约定的 agent 通用）。
+/// 指令文档共用一份模板，`{{SKILLS_DIR}}` 占位符按目标替换；skill 共用同一份。
+/// 覆盖拷入，不碰 workspace.json 和源文件。
+fn write_agent_scaffold(root: &Path, agents: &[String]) -> Result<(), String> {
+    if agents.is_empty() {
+        return Err("未勾选任何 agent".to_string());
+    }
+    let doc_tpl = include_str!("../templates/workspace-agent.md");
+    let skill_md = include_str!("../templates/skill/SKILL.md");
+    for agent in agents {
+        let (doc_name, skills_dir) = match agent.as_str() {
+            "claude" => ("CLAUDE.md", ".claude/skills"),
+            "agents" => ("AGENTS.md", ".agents/skills"),
+            other => return Err(format!("unknown agent kind: {other}")),
+        };
+        let doc = doc_tpl.replace("{{SKILLS_DIR}}", skills_dir);
+        fs::write(root.join(doc_name), doc).map_err(|e| format!("write {doc_name}: {e}"))?;
+        let skill_dir = root.join(skills_dir).join("loomgui-editor");
+        fs::create_dir_all(&skill_dir).map_err(|e| format!("create skill dir: {e}"))?;
+        fs::write(skill_dir.join("SKILL.md"), skill_md)
+            .map_err(|e| format!("write SKILL.md: {e}"))?;
+    }
+    Ok(())
+}
+
+/// 补齐 / 更新工作区脚手架（agent 指令文档 + loomgui-editor skill），
+/// 从 templates 覆盖拷入，按 `agents` 多选（`claude` / `agents`）。
+/// 不碰 workspace.json 和源文件。
 #[tauri::command]
-pub fn init_workspace(path: String) -> Result<(), String> {
+pub fn init_workspace(path: String, agents: Vec<String>) -> Result<(), String> {
     let root = Path::new(&path);
     if !root.is_dir() {
         return Err(format!("workspace dir not found: {}", root.display()));
     }
-    let claude_md = include_str!("../templates/workspace-CLAUDE.md");
-    fs::write(root.join("CLAUDE.md"), claude_md).map_err(|e| format!("write CLAUDE.md: {e}"))?;
-    let skill_dir = root.join(".claude").join("skills").join("loomgui-editor");
-    fs::create_dir_all(&skill_dir).map_err(|e| format!("create skill dir: {e}"))?;
-    let skill_md = include_str!("../templates/skill/SKILL.md");
-    fs::write(skill_dir.join("SKILL.md"), skill_md).map_err(|e| format!("write SKILL.md: {e}"))?;
-    Ok(())
+    write_agent_scaffold(root, &agents)
 }
 
 #[tauri::command]
@@ -144,4 +156,60 @@ pub fn relativize(root: String, abs: String) -> Result<String, String> {
         out.push(c);
     }
     Ok(out.to_string_lossy().replace('\\', "/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("loomgui_gui_test_{tag}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn scaffold_claude_writes_claude_layout() {
+        let root = temp_root("claude");
+        write_agent_scaffold(&root, &["claude".to_string()]).unwrap();
+        assert!(root.join("CLAUDE.md").is_file());
+        let doc = fs::read_to_string(root.join("CLAUDE.md")).unwrap();
+        assert!(doc.contains("`.claude/skills/loomgui-editor/SKILL.md`"));
+        assert!(!doc.contains("{{SKILLS_DIR}}"));
+        assert!(root
+            .join(".claude/skills/loomgui-editor/SKILL.md")
+            .is_file());
+        assert!(!root.join("AGENTS.md").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn scaffold_agents_writes_agents_layout() {
+        let root = temp_root("agents");
+        write_agent_scaffold(&root, &["agents".to_string()]).unwrap();
+        assert!(root.join("AGENTS.md").is_file());
+        let doc = fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        assert!(doc.contains("`.agents/skills/loomgui-editor/SKILL.md`"));
+        assert!(!doc.contains("{{SKILLS_DIR}}"));
+        assert!(root
+            .join(".agents/skills/loomgui-editor/SKILL.md")
+            .is_file());
+        assert!(!root.join("CLAUDE.md").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn scaffold_multi_and_invalid() {
+        let root = temp_root("multi");
+        write_agent_scaffold(&root, &["claude".to_string(), "agents".to_string()]).unwrap();
+        assert!(root.join("CLAUDE.md").is_file());
+        assert!(root.join("AGENTS.md").is_file());
+
+        assert!(write_agent_scaffold(&root, &[]).is_err());
+        assert!(write_agent_scaffold(&root, &["cursor".to_string()]).is_err());
+        fs::remove_dir_all(&root).unwrap();
+    }
 }

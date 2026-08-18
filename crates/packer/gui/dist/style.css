@@ -44,6 +44,11 @@ html, body {
   padding: 4px 8px;
 }
 .btn-ghost:hover { color: #e0e0e0; }
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn:disabled:active { transform: none; }
 
 /* ── Start screen ── */
 .start-header {
@@ -453,6 +458,70 @@ html, body {
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 
+/* ── Init agent scaffold modal ── */
+.modal-desc {
+  font-size: 12px;
+  color: #9090a0;
+  line-height: 1.6;
+  margin: 4px 0 16px 0;
+}
+.agent-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  background: #2e2e42;
+  border: 1px solid #3e3e54;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.agent-option:hover { border-color: #4a4a66; }
+/* 选中 = 主状态（紫边 + 淡染底），hover 只做中性提示，不抢选中语义 */
+.agent-option:has(input:checked) {
+  border-color: #7c5cfc;
+  background: #322e48;
+}
+.agent-option input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  accent-color: #7c5cfc;
+  cursor: pointer;
+}
+.agent-option input[type="checkbox"]:focus-visible {
+  outline: 2px solid #7c5cfc;
+  outline-offset: 2px;
+}
+.agent-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.agent-option-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e8e8f0;
+}
+.agent-option-path {
+  font-size: 12px;
+  color: #a0a0b8;
+  font-family: "Cascadia Code", "Fira Code", monospace;
+}
+.agent-option-note {
+  font-size: 11px;
+  color: #88889e;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 /* ── Log modal ── */
 .log-modal {
   width: 720px;
@@ -460,8 +529,7 @@ html, body {
   max-height: calc(100vh - 96px);
   display: flex;
   flex-direction: column;
-}
-.modal-header {
+}.modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;

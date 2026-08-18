@@ -74,6 +74,33 @@
       </div>
     </div>
 
+    <!-- Init Agent Scaffold Modal -->
+    <div id="init-overlay" class="modal-overlay hidden">
+      <div class="modal">
+        <h3>初始化 agent 脚手架</h3>
+        <p class="modal-desc">勾选要初始化的 agent（可多选）。同名文件会被覆盖，不碰 workspace.json 和源文件。</p>
+        <label class="agent-option">
+          <input type="checkbox" id="init-check-claude" checked />
+          <div class="agent-option-body">
+            <span class="agent-option-name">Claude</span>
+            <span class="agent-option-path">CLAUDE.md + .claude/skills/</span>
+          </div>
+        </label>
+        <label class="agent-option">
+          <input type="checkbox" id="init-check-agents" checked />
+          <div class="agent-option-body">
+            <span class="agent-option-name">其他</span>
+            <span class="agent-option-path">AGENTS.md + .agents/skills/</span>
+            <span class="agent-option-note">Codex / ZCode 等 AGENTS.md 约定</span>
+          </div>
+        </label>
+        <div class="modal-actions">
+          <button id="btn-init-cancel" class="btn btn-secondary">取消</button>
+          <button id="btn-init-ok" class="btn btn-primary">初始化</button>
+        </div>
+      </div>
+    </div>
+
     <script src="editor.js"></script>
     <script src="app.js"></script>
   </body>

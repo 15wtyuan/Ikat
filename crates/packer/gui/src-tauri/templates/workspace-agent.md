@@ -98,7 +98,7 @@ The packer reports actionable build errors:
 
 ## Fence (supported HTML/CSS subset)
 
-LoomGUI validates HTML/CSS against a schema-driven fence at build time. The authoritative specification is in the LoomGUI repository at `docs/design/fence.md`, and the machine-readable schema lives in `crates/fence/src/schema/`. The loomgui-editor skill (`.claude/skills/loomgui-editor/SKILL.md`) summarizes the key rules.
+LoomGUI validates HTML/CSS against a schema-driven fence at build time. The authoritative specification is in the LoomGUI repository at `docs/design/fence.md`, and the machine-readable schema lives in `crates/fence/src/schema/`. The loomgui-editor skill (`{{SKILLS_DIR}}/loomgui-editor/SKILL.md`) summarizes the key rules.
 
 **Key principle**: Tags determine stable object types; CSS grants behavior capabilities but never changes types. Fence violations cause **build-time errors** (not silent degradation). The packer collects all diagnostics in one pass and reports them together.
 
