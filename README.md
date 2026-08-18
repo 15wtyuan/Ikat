@@ -35,7 +35,7 @@ cargo run   -p loomgui_pkg -- build <workspace-dir>
 cargo build -p loomgui_ffi_c
 ```
 
-Unity 后端：Unity 6.5 打开 `unity/showcase-unity/`，PlayMode 加载 `.pkg.bin`。
+Unity 后端：最低支持 Unity 2021.3 LTS（URP 12.1+）。用 Unity 2021.3 ~ Unity 6 打开 `unity/showcase-unity/`（showcase 工程本身锁定 Unity 6.5），PlayMode 加载 `.pkg.bin`。输入系统三种 Active Input Handling 配置（Input Manager / Input System / Both）全支持——键盘、文本、IME（中文输入法组字）双路径采集，开箱即用无需改 Player Settings。
 
 ## 在其他 Unity 项目中使用
 

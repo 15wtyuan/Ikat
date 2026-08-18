@@ -3,7 +3,7 @@
   "version": "0.0.4",
   "displayName": "LoomGUI",
   "description": "跨引擎游戏 UI 框架——Rust 核心 + HTML/CSS DSL，Unity 后端",
-  "unity": "6000.0",
+  "unity": "2021.3",
   "license": "MIT",
   "author": {
     "name": "15wtyuan",
@@ -15,7 +15,7 @@
   "licensesUrl": "https://github.com/15wtyuan/LoomGUI/blob/main/LICENSE",
   "dependencies": {
     "com.unity.2d.sprite": "1.0.0",
-    "com.unity.inputsystem": "1.19.0",
-    "com.unity.render-pipelines.universal": "17.5.0"
+    "com.unity.inputsystem": "1.7.0",
+    "com.unity.render-pipelines.universal": "12.1.0"
   }
 }
