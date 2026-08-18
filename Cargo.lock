@@ -1802,6 +1802,7 @@ dependencies = [
 name = "loomgui_gui"
 version = "0.1.0"
 dependencies = [
+ "loomgui_fence",
  "loomgui_pkg",
  "serde",
  "serde_json",
