@@ -144,66 +144,6 @@
     });
     row.appendChild(openBtn);
     body.appendChild(row);
-
-    // 更新 agent 脚手架（新建工作区时已全套初始化；此处为模板升级后的手动刷新）
-    var initRow = el("div", "form-row");
-    var initBtn = el("button", "btn btn-secondary", "更新 agent 脚手架");
-    initBtn.title = "按勾选的 agent 覆盖拷贝指令文档 + skills 到工作区（不碰 workspace.json、.loom/ 和源文件）";
-    initBtn.addEventListener("click", function () {
-      openInitModal(function (agents) {
-        initBtn.disabled = true;
-        initBtn.textContent = "更新中...";
-        invoke("init_workspace", { path: wsPath, agents: agents })
-          .then(function () { alert("脚手架已更新"); })
-          .catch(function (err) { alert("初始化失败: " + err); })
-          .finally(function () { initBtn.disabled = false; initBtn.textContent = "更新 agent 脚手架"; });
-      });
-    });
-    initRow.appendChild(initBtn);
-    body.appendChild(initRow);
-  }
-
-  // ── Init agent scaffold modal (multi-select) ──
-  var initConfirmCb = null;
-  function setupInitModal() {
-    var overlay = $("init-overlay");
-    var okBtn = $("btn-init-ok");
-    var cancelBtn = $("btn-init-cancel");
-    var claudeCb = $("init-check-claude");
-    var agentsCb = $("init-check-agents");
-
-    function selectedAgents() {
-      var list = [];
-      if (claudeCb.checked) list.push("claude");
-      if (agentsCb.checked) list.push("agents");
-      return list;
-    }
-    function refreshOk() { okBtn.disabled = selectedAgents().length === 0; }
-    function close() {
-      overlay.classList.add("hidden");
-      initConfirmCb = null;
-    }
-
-    claudeCb.addEventListener("change", refreshOk);
-    agentsCb.addEventListener("change", refreshOk);
-    okBtn.addEventListener("click", function () {
-      var agents = selectedAgents();
-      if (!agents.length) return;
-      var cb = initConfirmCb;
-      close();
-      if (cb) cb(agents);
-    });
-    cancelBtn.addEventListener("click", close);
-    overlay.addEventListener("click", function (e) {
-      if (e.target === overlay) close();
-    });
-  }
-  function openInitModal(onConfirm) {
-    initConfirmCb = onConfirm;
-    $("init-check-claude").checked = true;
-    $("init-check-agents").checked = true;
-    $("btn-init-ok").disabled = false;
-    $("init-overlay").classList.remove("hidden");
   }
 
   // ── 2. Packages section ──
@@ -738,7 +678,6 @@
       setupDragDrop();
       setupLog();
       setupBuild();
-      setupInitModal();
     }
   }
 

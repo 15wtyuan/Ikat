@@ -9,6 +9,7 @@
 //!   loom show <pkg> [--format json]
 //!   loom font add <file> --family <f> [--default] [--fallback]
 //!   loom atlas add <dir> [--name <n>] [--max-size <n>] [--padding <n>] [--standalone]
+//!   loom scaffold [--agent claude|agents]...
 //!   loom version [--format json]
 //!
 //! 输出约定：human 模式（默认）诊断/进度走 stderr；`--format json` 时 stdout 输出单个
@@ -73,6 +74,11 @@ enum Cmd {
         padding: u32,
         standalone: bool,
     },
+    /// 刷新 agent 脚手架（已有工作区的安全入口——不碰 workspace.json / .loom / 源文件；
+    /// 与 init --force 不同，后者会重写 workspace.json 骨架）。
+    Scaffold {
+        agents: Vec<String>,
+    },
     Version {
         format: Format,
     },
@@ -104,12 +110,15 @@ fn usage() -> ! {
     eprintln!(
         "  {bin} atlas add <dir> [--name <n>] [--max-size <n>] [--padding <n>] [--standalone]"
     );
+    eprintln!(
+        "  {bin} scaffold [--agent <kind>]...           refresh agent docs + skills only (safe for existing workspaces)"
+    );
     eprintln!("  {bin} version [--format json]");
     eprintln!();
     eprintln!("exit codes: 0 clean (warnings allowed) · 1 errors / command conflict · 2 usage/config failure");
     eprintln!();
     eprintln!(
-        "`new`/`list`/`show`/`font add`/`atlas add` run in the current directory (workspace root)."
+        "`new`/`list`/`show`/`font add`/`atlas add`/`scaffold` run in the current directory (workspace root)."
     );
     std::process::exit(2);
 }
@@ -272,6 +281,16 @@ fn parse_cmd(args: &[String]) -> Option<Cmd> {
                 standalone: scan.has("--standalone"),
             })
         }
+        "scaffold" => {
+            let agents = scan.values_of("--agent");
+            Some(Cmd::Scaffold {
+                agents: if agents.is_empty() {
+                    vec!["agents".to_string()]
+                } else {
+                    agents
+                },
+            })
+        }
         "version" => Some(Cmd::Version {
             format: parse_format(rest)?,
         }),
@@ -310,6 +329,7 @@ fn main() -> ExitCode {
             padding,
             standalone,
         } => run_atlas_add(dir, name, max_size, padding, standalone),
+        Cmd::Scaffold { agents } => run_scaffold(agents),
         Cmd::Version { format } => {
             let v = VersionInfo::current();
             match format {
@@ -524,6 +544,35 @@ fn print_human_list(json: &serde_json::Value) {
             parts.push(format!("{k}={vv}"));
         }
         println!("{}", parts.join("  "));
+    }
+}
+
+fn run_scaffold(agents: Vec<String>) -> ExitCode {
+    let root = match cwd_root() {
+        Ok(r) => r,
+        Err(f) => return failure_exit("scaffold", &f, Format::Human),
+    };
+    // 当前目录须为工作区根（防止在任意目录散落脚手架）。
+    if !root.join(loomgui_pkg::workspace::WORKSPACE_FILE).is_file() {
+        eprintln!(
+            "scaffold failed: no {} in {} (run inside a workspace, or use `loom init`)",
+            loomgui_pkg::workspace::WORKSPACE_FILE,
+            root.display()
+        );
+        return ExitCode::from(2);
+    }
+    match loomgui_pkg::scaffold::write_agent_scaffold(&root, &agents) {
+        Ok(()) => {
+            eprintln!(
+                "refreshed scaffold for: {} (docs + loomgui-editor/loom skills; workspace.json untouched)",
+                agents.join(", ")
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("scaffold failed: {e}");
+            ExitCode::from(2)
+        }
     }
 }
 

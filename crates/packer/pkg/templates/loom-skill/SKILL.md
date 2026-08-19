@@ -26,10 +26,11 @@ loom list   pkg|atlas|font [--format json]    # summary per entity (one line eac
 loom show   <pkg> [--format json]             # one package's pages + custom components
 loom font add <file> --family <f> [--default] [--fallback]
 loom atlas add <dir> [--name <n>] [--max-size <n>] [--padding <n>] [--standalone]
+loom scaffold [--agent claude|agents]...              # refresh agent docs + skills only (safe on existing workspaces)
 loom version [--format json]
 ```
 
-`new` / `list` / `show` / `font add` / `atlas add` run in the current directory (the workspace root). `check` / `build` / `init` take a directory (default: current).
+`new` / `list` / `show` / `font add` / `atlas add` / `scaffold` run in the current directory (the workspace root). `check` / `build` / `init` take a directory (default: current).
 
 **Editing `loom.workspace.json` always goes through these commands — never hand-edit it.** The workspace holds an entire game's UI (hundreds of packages, thousands of pages/images); hand edits are how configurations break silently.
 

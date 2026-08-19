@@ -147,6 +147,7 @@ fn loom_skill_commands_match_cli_surface() {
         "show",
         "font add",
         "atlas add",
+        "scaffold",
         "version",
     ];
     for cmd in &commands {

@@ -91,18 +91,6 @@ pub fn save_workspace(path: String, ws: Workspace) -> Result<(), String> {
     write_workspace(Path::new(&path), &ws)
 }
 
-/// 补齐 / 更新工作区脚手架（agent 指令文档 + loomgui-editor skill），
-/// 按 `agents` 多选（`claude` / `agents`）。模板由 loomgui_pkg::scaffold 单源提供
-/// （CLI init 与 GUI 共用，防两端口径漂移）。不碰 workspace.json 和源文件。
-#[tauri::command]
-pub fn init_workspace(path: String, agents: Vec<String>) -> Result<(), String> {
-    let root = Path::new(&path);
-    if !root.is_dir() {
-        return Err(format!("workspace dir not found: {}", root.display()));
-    }
-    loomgui_pkg::scaffold::write_agent_scaffold(root, &agents)
-}
-
 #[tauri::command]
 pub fn scan_html(pkg_dir: String) -> Result<Vec<String>, String> {
     let dir = Path::new(&pkg_dir);

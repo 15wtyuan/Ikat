@@ -38,7 +38,6 @@ fn main() {
             commands::open_workspace,
             commands::create_workspace,
             commands::save_workspace,
-            commands::init_workspace,
             commands::scan_html,
             commands::scan_pngs,
             commands::run_build,
