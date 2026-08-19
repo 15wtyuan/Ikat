@@ -28,6 +28,13 @@ const EDITOR_REFERENCES: &[(&str, &str)] = &[
     ),
 ];
 
+/// runtime skill 的深度参考表（渐进披露：SKILL.md 是接线手册，API 查找表按需
+/// 加载）。内容镜像随包 C# 签名契约——消费者 agent 查 API 不需要 LoomGUI 源码仓库。
+const RUNTIME_REFERENCES: &[(&str, &str)] = &[(
+    "references/api-reference.md",
+    include_str!("../templates/runtime/references/api-reference.md"),
+)];
+
 fn skill_artifacts() -> Vec<SkillArtifacts> {
     vec![
         SkillArtifacts {
@@ -40,7 +47,7 @@ fn skill_artifacts() -> Vec<SkillArtifacts> {
         },
         SkillArtifacts {
             dir: "loom",
-            files: vec![(("SKILL.md"), include_str!("../templates/loom/SKILL.md"))],
+            files: vec![("SKILL.md", include_str!("../templates/loom/SKILL.md"))],
         },
     ]
 }
@@ -54,8 +61,9 @@ pub fn write_agent_scaffold(root: &Path, agents: &[String]) -> Result<(), String
         return Err("no agent kind selected (expected `claude` and/or `agents`)".to_string());
     }
     let mut skills = skill_artifacts();
-    // editor skill 的 references/ 并入其产物清单（其余两个 skill 暂无 references）。
+    // references/ 并入对应 skill 的产物清单（editor 三件 + runtime API 查找表）。
     skills[0].files.extend_from_slice(EDITOR_REFERENCES);
+    skills[1].files.extend_from_slice(RUNTIME_REFERENCES);
 
     for agent in agents {
         let skills_dir = match agent.as_str() {
@@ -106,6 +114,12 @@ mod tests {
             assert!(
                 tmp.join(skills).join("loomgui-runtime/SKILL.md").is_file(),
                 "{skills} 的 runtime skill 须落位"
+            );
+            assert!(
+                tmp.join(skills)
+                    .join("loomgui-runtime/references/api-reference.md")
+                    .is_file(),
+                "{skills} 的 runtime references 须落位"
             );
             let loom = std::fs::read_to_string(tmp.join(skills).join("loom/SKILL.md")).unwrap();
             assert!(loom.contains("loom check"), "loom skill 须含命令面");

@@ -118,6 +118,11 @@ public class GameUI : MonoBehaviour
   `driver.Context.LoadPackage(name, bytes)` / `UnloadPackage(name)`
   (prefab semantics: live instances survive the unload).
 
+Full signatures and invariants for everything below (all controls,
+ListView modes, animation hooks, exceptions) are in
+`references/api-reference.md` next to this file — consult it before
+guessing an API name.
+
 ## UI ↔ 3D interop
 
 - **Input gating.** LoomGUI never consumes or blocks input — your 3D
@@ -182,10 +187,11 @@ Subclass `LoomStageDriver` and override the virtual loading hooks
 
 ## Reference consumer
 
-The LoomGUI repository ships `unity/showcase-unity/` — a complete Unity
-project with the driver mounted and nine pages wired from
-`ShowcaseRunner.cs` (navigation, controls, virtualized lists, a
-NativeHost 3D character stage, runtime package load/unload). Treat it as
-the copy-paste source. The full business API contract (nodes, events,
-styles, ListView, animation) is `docs/design/public-api.md` in the
-repository.
+- **Full API contract** (every node/control/event/list/animation
+  signature and invariant): read `references/api-reference.md` next to
+  this file — it mirrors the shipped C# signatures, so you never need
+  the LoomGUI repository.
+- **Complete working example**: `unity/showcase-unity/` in the LoomGUI
+  repository (driver mounted, nine pages wired from
+  `ShowcaseRunner.cs`). Optional copy-paste source, not required
+  reading.

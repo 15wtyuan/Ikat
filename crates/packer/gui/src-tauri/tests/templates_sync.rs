@@ -13,6 +13,8 @@ const EDITOR_SCHEMA_MD: &str =
 const EDITOR_CSS_MD: &str =
     include_str!("../../../pkg/templates/editor/references/css-reference.md");
 const RUNTIME_SKILL_MD: &str = include_str!("../../../pkg/templates/runtime/SKILL.md");
+const RUNTIME_API_MD: &str =
+    include_str!("../../../pkg/templates/runtime/references/api-reference.md");
 const LOOM_SKILL_MD: &str = include_str!("../../../pkg/templates/loom/SKILL.md");
 
 /// 提取锚点区之间的文本（begin/end 均为含 `fence-sync:` 的注释锚点）。
@@ -199,6 +201,40 @@ fn skills_cross_reference_each_other() {
         assert!(
             EDITOR_SKILL_MD.contains(r),
             "editor SKILL.md must point at references/{r}"
+        );
+    }
+    // runtime 的 API 查找表同理；且 skill 不得再把消费者指回 LoomGUI 源码仓库
+    // （消费者装的是 Unity 包 + loom init 工作区，不应被迫 clone 源码翻文档）。
+    assert!(
+        RUNTIME_SKILL_MD.contains("api-reference.md"),
+        "runtime SKILL.md must point at references/api-reference.md"
+    );
+    assert!(
+        !RUNTIME_SKILL_MD.contains("docs/design/public-api.md"),
+        "runtime SKILL.md must not route consumers to the repository's docs — \
+         references/api-reference.md is the shipped contract copy"
+    );
+}
+
+/// runtime API 查找表的控件 role 宇宙 ↔ fence schema 对账：新增 role 只改 schema
+/// 不同步查找表 = 消费者 agent 在表里查不到新控件类型。
+#[test]
+fn runtime_api_reference_covers_role_universe() {
+    let mut roles: Vec<&str> = ROLE_TO_SEMANTIC.iter().map(|(r, _)| *r).collect();
+    roles.push("textbox");
+    roles.push("tabpanel");
+    roles.push("dialog");
+    for role in &roles {
+        assert!(
+            RUNTIME_API_MD.contains(&format!("role={role}")),
+            "api-reference.md missing control role `{role}`"
+        );
+    }
+    // 三个异常/类型关键词抽查（防整段被误删后测试仍绿）。
+    for needle in ["UIContractException", "ItemExitClass", "IsPointerOnUI"] {
+        assert!(
+            RUNTIME_API_MD.contains(needle),
+            "api-reference.md missing key contract `{needle}`"
         );
     }
 }
