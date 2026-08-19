@@ -1,8 +1,9 @@
-//! `loom init`：初始化 UI 工作区——workspace.json 骨架 + agent 脚手架 + CLI 自拷贝
-//! 到 `.loom/` + 反向配置（`.loom/unity.json`，基座链见 unity.rs）。
+//! `loom init`：初始化工作区——会话根上落 agent skills + CLI 自拷贝 + 接线 config
+//! （`.loom/config.json`），ui 目录上落 workspace.json 骨架。
 //!
-//! 产出即自足：游戏仓库的 agent 会话零安装（`.loom/loom(.exe)` 就地可用），
-//! 打开即知道怎么干（AGENTS.md + skills）。
+//! 产出即自足：游戏仓库的 agent 会话零安装（`.loom/loom(.exe)` 就地可用），打开
+//! 即知道怎么干（skills + config 指针）。分离形态（`--ui`）下会话根 ≠ ui 目录，
+//! 单目录形态（无 `--ui`）下根即 ui 工作区——config 的 `ui_root = "."`。
 
 use crate::diag::BuildFailure;
 use crate::workspace::{save_workspace, Workspace};
@@ -21,7 +22,10 @@ pub enum CliSource {
 pub struct InitOptions {
     /// agent 种类（"claude" / "agents"，可多个）。空列表默认 ["agents"]。
     pub agents: Vec<String>,
-    /// Unity 工程根：写入 `.loom/unity.json`（内部相对化；None = 不写，纯本地输出）。
+    /// ui 工作区位置（相对根目录的路径或绝对路径）。None = 单目录形态（根即 ui）。
+    pub ui_dir: Option<PathBuf>,
+    /// Unity 工程根：写入 `.loom/config.json` 的 `unity_root`（内部相对化；None = 不写，
+    /// 本地输出）。
     pub unity_root: Option<PathBuf>,
     /// workspace.json 的 output_dir 初始值。
     pub output_dir: String,
@@ -35,6 +39,7 @@ impl Default for InitOptions {
     fn default() -> Self {
         Self {
             agents: vec!["agents".to_string()],
+            ui_dir: None,
             unity_root: None,
             output_dir: "dist".to_string(),
             force: false,
@@ -46,7 +51,10 @@ impl Default for InitOptions {
 /// init 的产出摘要（CLI 打印后续步骤提示用）。
 #[derive(Debug)]
 pub struct InitOutcome {
+    /// 会话根（`.loom/` 与 skills 所在）。
     pub root: PathBuf,
+    /// ui 工作区（`loom.workspace.json` 所在）。
+    pub ui: PathBuf,
     pub agents: Vec<String>,
     pub unity_root_written: bool,
     pub cli_copied: bool,
@@ -60,11 +68,17 @@ pub fn init(dir: &Path, opts: InitOptions) -> Result<InitOutcome, BuildFailure> 
         )));
     }
     std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
-    // 词法绝对化（相对 cwd 的调用路径）：unity_root 相对化与 InitOutcome.root 都需要
-    // 稳定的绝对基。用 std::path::absolute 而非 canonicalize——后者在 Windows 产
-    // `\\?\` verbatim 前缀，会让 unity_root 的盘符比较失配（相对化静默失效）。
-    let dir: std::path::PathBuf = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
-    let ws_path = dir.join(crate::workspace::WORKSPACE_FILE);
+    // 词法绝对化（相对 cwd 的调用路径）：指针相对化与 InitOutcome 都需要稳定的绝对
+    // 基。用 std::path::absolute 而非 canonicalize——后者在 Windows 产 `\\?\` verbatim
+    // 前缀，会让指针的盘符比较失配（相对化静默失效）。
+    let root: PathBuf = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let ui: PathBuf = match &opts.ui_dir {
+        // 绝对 ui_dir 覆盖 join；相对 ui_dir 基于根解析。
+        Some(u) => std::path::absolute(root.join(u)).unwrap_or_else(|_| root.join(u)),
+        None => root.clone(),
+    };
+    std::fs::create_dir_all(&ui).map_err(|e| format!("create {}: {e}", ui.display()))?;
+    let ws_path = ui.join(crate::workspace::WORKSPACE_FILE);
     if ws_path.exists() && !opts.force {
         return Err(BuildFailure::config(format!(
             "{} already exists; pass --force to overwrite",
@@ -72,9 +86,9 @@ pub fn init(dir: &Path, opts: InitOptions) -> Result<InitOutcome, BuildFailure> 
         )));
     }
 
-    // workspace.json 骨架。
+    // workspace.json 骨架（ui 目录——构建宇宙的路径基准不变）。
     save_workspace(
-        &dir,
+        &ui,
         &Workspace {
             version: 1,
             output_dir: opts.output_dir.clone(),
@@ -84,37 +98,31 @@ pub fn init(dir: &Path, opts: InitOptions) -> Result<InitOutcome, BuildFailure> 
         },
     )?;
 
-    // agent 脚手架（覆盖式——模板升级后重跑 init 即刷新）。
+    // agent skills（会话根——覆盖式，模板升级后重跑 init / scaffold 即刷新）。
     let agents = if opts.agents.is_empty() {
         vec!["agents".to_string()]
     } else {
         opts.agents.clone()
     };
-    crate::scaffold::write_agent_scaffold(&dir, &agents)?;
+    crate::scaffold::write_agent_scaffold(&root, &agents)?;
 
-    // CLI 自拷贝：`.loom/` 与反向配置同住（游戏仓库 gitignore 二进制、保留 unity.json）。
-    let cli_copied = copy_cli_into(&dir, &opts.cli_source);
-
-    // 反向配置（基座）：unity_root 相对化落盘。
-    let unity_root_written = match &opts.unity_root {
-        Some(u) => {
-            crate::unity::write(&dir, u)?;
-            true
-        }
-        None => false,
-    };
+    // CLI 自拷贝 + 接线 config（同住根上 .loom/：整个目录入库，团队 clone 即得）。
+    let cli_copied = copy_cli_into(&root, &opts.cli_source);
+    crate::config::write(&root, &ui, opts.unity_root.as_deref()).map_err(BuildFailure::config)?;
+    let unity_root_written = opts.unity_root.is_some();
 
     Ok(InitOutcome {
-        root: dir,
+        root,
+        ui,
         agents,
         unity_root_written,
         cli_copied,
     })
 }
 
-/// 拷 CLI 二进制到 `<dir>/.loom/`。失败（如 exe 被锁）不阻断 init——工作区已可用
+/// 拷 CLI 二进制到 `<root>/.loom/`。失败（如 exe 被锁）不阻断 init——工作区已可用
 ///（PATH 里的 loom / Release 下载位是兜底），CLI 缺席由调用方提示。
-fn copy_cli_into(dir: &Path, source: &CliSource) -> bool {
+fn copy_cli_into(root: &Path, source: &CliSource) -> bool {
     let src: PathBuf = match source {
         CliSource::Skip => return false,
         CliSource::CurrentExe => match std::env::current_exe() {
@@ -128,7 +136,7 @@ fn copy_cli_into(dir: &Path, source: &CliSource) -> bool {
             p.clone()
         }
     };
-    let loom_dir = dir.join(".loom");
+    let loom_dir = root.join(".loom");
     if std::fs::create_dir_all(&loom_dir).is_err() {
         return false;
     }
@@ -144,20 +152,19 @@ fn copy_cli_into(dir: &Path, source: &CliSource) -> bool {
 mod tests {
     use super::*;
 
-    /// init 全流程：骨架 + 脚手架 + unity.json；重复 init 拒绝、--force 覆盖。
+    /// 分离形态全流程：根上 skills/.loom/config，ui 上 workspace.json；指针相对化。
     #[test]
-    fn init_creates_workspace_and_refuses_without_force() {
-        let tmp = std::env::temp_dir().join(format!("loom_init_test_{}", std::process::id()));
+    fn init_split_layout() {
+        let tmp = std::env::temp_dir().join(format!("loom_init_split_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
-
-        let unity = tmp.parent().unwrap().join("fake-unity");
+        let unity = tmp.join("unity");
         std::fs::create_dir_all(&unity).unwrap();
 
-        let ws_dir = tmp.join("ui");
         let out = init(
-            &ws_dir,
+            &tmp,
             InitOptions {
                 agents: vec!["agents".to_string()],
+                ui_dir: Some(PathBuf::from("ui")),
                 unity_root: Some(unity.clone()),
                 output_dir: "Assets/Bundles".to_string(),
                 force: false,
@@ -165,31 +172,65 @@ mod tests {
             },
         )
         .unwrap();
+        assert_eq!(out.ui, tmp.join("ui"));
+        assert_eq!(out.root, tmp);
         assert!(out.unity_root_written);
-        assert!(ws_dir.join("loom.workspace.json").exists());
-        assert!(ws_dir.join("AGENTS.md").exists());
-        assert!(ws_dir
-            .join(".agents/skills/loomgui-editor/SKILL.md")
-            .exists());
-        assert!(ws_dir.join(".loom/unity.json").exists());
-        // unity_root 相对化落盘（ws = tmp/ui，unity = temp/fake-unity → 上溯两级）。
-        let cfg: crate::unity::UnityConfig = serde_json::from_str(
-            &std::fs::read_to_string(ws_dir.join(".loom/unity.json")).unwrap(),
+        // ui 目录：workspace.json。
+        assert!(tmp.join("ui/loom.workspace.json").exists());
+        // 会话根：skills + config（无指令文档——AGENTS.md 不再生成）。
+        assert!(tmp.join(".agents/skills/loomgui-editor/SKILL.md").exists());
+        assert!(!tmp.join("ui/AGENTS.md").exists());
+        assert!(!tmp.join("AGENTS.md").exists());
+        let cfg: crate::config::LoomConfig = serde_json::from_str(
+            &std::fs::read_to_string(tmp.join(crate::config::CONFIG_FILE)).unwrap(),
         )
         .unwrap();
-        assert_eq!(cfg.unity_root, "../../fake-unity");
+        assert_eq!(cfg.ui_root, "ui");
+        assert_eq!(cfg.unity_root.as_deref(), Some("unity"));
 
-        // 再次 init 拒绝；--force 覆盖。
-        let err = init(&ws_dir, InitOptions::default()).unwrap_err();
+        // 定位：从根、从 ui 目录都解析到同一工作区。
+        let loc = crate::config::locate(&tmp).unwrap();
+        assert_eq!(loc.ui, tmp.join("ui"));
+
+        // 重复 init 拒绝（workspace.json 已在 ui 上）；--force 覆盖。
+        let err = init(
+            &tmp,
+            InitOptions {
+                ui_dir: Some(PathBuf::from("ui")),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
         assert_eq!(err.exit_code, 2);
         init(
-            &ws_dir,
+            &tmp,
             InitOptions {
+                ui_dir: Some(PathBuf::from("ui")),
                 force: true,
                 ..Default::default()
             },
         )
         .unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// 单目录形态（无 --ui）：根即 ui，ui_root = "."，config 就近命中。
+    #[test]
+    fn init_standalone_layout() {
+        let tmp = std::env::temp_dir().join(format!("loom_init_solo_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let out = init(&tmp, InitOptions::default()).unwrap();
+        assert_eq!(out.root, tmp);
+        assert_eq!(out.ui, tmp);
+        assert!(tmp.join("loom.workspace.json").exists());
+        let cfg: crate::config::LoomConfig = serde_json::from_str(
+            &std::fs::read_to_string(tmp.join(crate::config::CONFIG_FILE)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(cfg.ui_root, ".");
+        assert_eq!(cfg.unity_root, None);
+        let loc = crate::config::locate(&tmp).unwrap();
+        assert_eq!(loc.ui, tmp);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

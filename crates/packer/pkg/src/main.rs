@@ -1,9 +1,9 @@
 //! loom CLI：LoomGUI UI 工作区的校验 / 打包 / 初始化 / workspace 编排。
 //!
 //! 用法（详情见 --help）：
-//!   loom check <dir> [--format human|json]
-//!   loom build <dir> [--format human|json]
-//!   loom init <dir> [--agent claude|agents]... [--unity-root <path>] [--output <dir>] [--force]
+//!   loom check [<dir>] [--format human|json]
+//!   loom build [<dir>] [--format human|json]
+//!   loom init <dir> [--ui <dir>] [--agent claude|agents]... [--unity-root <path>] [--output <dir>] [--force]
 //!   loom new <name>
 //!   loom list pkg|atlas|font [--format json]
 //!   loom show <pkg> [--format json]
@@ -14,8 +14,8 @@
 //!
 //! 输出约定：human 模式（默认）诊断/进度走 stderr；`--format json` 时 stdout 输出单个
 //! JSON 文档（数据），进度走 stderr。退出码：0 干净 · 1 有 Error 级诊断 / 写命令冲突 ·
-//! 2 用法/配置/io 错。`new`/`list`/`show`/`font add`/`atlas add` 在当前目录（须为工作区
-//! 根）执行；`check`/`build`/`init` 接目录参数。
+//! 2 用法/配置/io 错。目录解析统一走 config 发现：会话根（含 `.loom/config.json`）、
+//! ui 目录（含 `loom.workspace.json`）、或 ui 的直接子目录都可直接作为 `<dir>` / cwd。
 
 use loomgui_pkg::diag::BuildFailure;
 use loomgui_pkg::report::{CommandOutput, VersionInfo};
@@ -45,6 +45,7 @@ enum Cmd {
     },
     Init {
         root: PathBuf,
+        ui: Option<PathBuf>,
         agents: Vec<String>,
         unity_root: Option<PathBuf>,
         output: String,
@@ -96,10 +97,13 @@ fn usage() -> ! {
         "  {bin} build [<dir>] [--format human|json]     check + write artifacts to output_dir"
     );
     eprintln!(
-        "  {bin} init <dir> [--agent <kind>]... [--unity-root <path>] [--output <dir>] [--force]"
+        "  {bin} init <dir> [--ui <dir>] [--agent <kind>]... [--unity-root <path>] [--output <dir>] [--force]"
     );
     eprintln!(
-        "                                            scaffold workspace + copy CLI to <dir>/.loom/"
+        "                                            scaffold skills + config + CLI at <dir>/.loom/,"
+    );
+    eprintln!(
+        "                                            workspace.json under --ui (default: same dir)"
     );
     eprintln!(
         "  {bin} new <name>                            create ui/<name>/main.html + register package"
@@ -118,7 +122,10 @@ fn usage() -> ! {
     eprintln!("exit codes: 0 clean (warnings allowed) · 1 errors / command conflict · 2 usage/config failure");
     eprintln!();
     eprintln!(
-        "`new`/`list`/`show`/`font add`/`atlas add`/`scaffold` run in the current directory (workspace root)."
+        "`<dir>` (and the cwd for the remaining commands) may be the session root (has .loom/),"
+    );
+    eprintln!(
+        "the ui workspace itself (has loom.workspace.json), or a direct child of the ui workspace."
     );
     std::process::exit(2);
 }
@@ -151,6 +158,7 @@ impl<'a> ArgScan<'a> {
             let a = &self.rest[self.i];
             if a == "--format"
                 || a == "--agent"
+                || a == "--ui"
                 || a == "--unity-root"
                 || a == "--output"
                 || a == "--family"
@@ -226,6 +234,7 @@ fn parse_cmd(args: &[String]) -> Option<Cmd> {
         }
         "init" => Some(Cmd::Init {
             root: PathBuf::from(scan.positional()?),
+            ui: scan.flag_value("--ui").map(PathBuf::from),
             agents: scan.values_of("--agent"),
             unity_root: scan.flag_value("--unity-root").map(PathBuf::from),
             output: scan.flag_value("--output").unwrap_or_else(|| "dist".into()),
@@ -308,11 +317,12 @@ fn main() -> ExitCode {
         Cmd::Build { root, format } => run_build(&root, format),
         Cmd::Init {
             root,
+            ui,
             agents,
             unity_root,
             output,
             force,
-        } => run_init(root, agents, unity_root, output, force),
+        } => run_init(root, ui, agents, unity_root, output, force),
         Cmd::New { name } => run_new(&name),
         Cmd::List { kind, format } => run_list(kind, format),
         Cmd::Show { pkg, format } => run_show(&pkg, format),
@@ -342,7 +352,11 @@ fn main() -> ExitCode {
 }
 
 fn run_check(root: &std::path::Path, format: Format) -> ExitCode {
-    match loomgui_pkg::build::analyze(root) {
+    let ui = match locate_arg(root) {
+        Ok(p) => p,
+        Err(f) => return failure_exit("check", &f, format),
+    };
+    match loomgui_pkg::build::analyze(&ui) {
         Ok(outcome) => {
             // 全量 warning：registry 侧 + 各包侧（与 build 成功时的 BuildReport 同口径）。
             let mut warnings = outcome.warnings;
@@ -367,7 +381,11 @@ fn run_check(root: &std::path::Path, format: Format) -> ExitCode {
 }
 
 fn run_build(root: &std::path::Path, format: Format) -> ExitCode {
-    match loomgui_pkg::build::build(root) {
+    let ui = match locate_arg(root) {
+        Ok(p) => p,
+        Err(f) => return failure_exit("build", &f, format),
+    };
+    match loomgui_pkg::build::build(&ui) {
         Ok(report) => {
             match format {
                 Format::Human => {
@@ -402,6 +420,7 @@ fn run_build(root: &std::path::Path, format: Format) -> ExitCode {
 
 fn run_init(
     root: PathBuf,
+    ui: Option<PathBuf>,
     agents: Vec<String>,
     unity_root: Option<PathBuf>,
     output: String,
@@ -411,6 +430,7 @@ fn run_init(
         &root,
         loomgui_pkg::init::InitOptions {
             agents,
+            ui_dir: ui,
             unity_root,
             output_dir: output,
             force,
@@ -419,10 +439,25 @@ fn run_init(
     ) {
         Ok(out) => {
             // cargo new 风格的后续步骤提示（stderr——stdout 保持数据纯净）。
-            eprintln!("initialized LoomGUI workspace at {}", out.root.display());
+            let split = out.ui != out.root;
+            eprintln!(
+                "initialized LoomGUI workspace (session root: {}, ui workspace: {})",
+                out.root.display(),
+                out.ui.display()
+            );
             eprintln!();
             eprintln!("next steps:");
-            eprintln!("  1. cd into the workspace and open an agent session (AGENTS.md is ready)");
+            if split {
+                eprintln!(
+                    "  1. open ONE agent session at {} — skills + .loom/ are wired there",
+                    out.root.display()
+                );
+            } else {
+                eprintln!(
+                    "  1. open an agent session at {} — skills + .loom/ are wired there",
+                    out.root.display()
+                );
+            }
             eprintln!("  2. loom new <package>          — create the first UI package");
             eprintln!("  3. put fonts somewhere and:    loom font add <file> --family <name>");
             eprintln!("  4. put PNGs under a dir and:   loom atlas add <dir>");
@@ -445,14 +480,21 @@ fn run_init(
     }
 }
 
-/// 当前目录即工作区根（new/list/show/font add/atlas add 的根解析）。
-fn cwd_root() -> Result<PathBuf, BuildFailure> {
-    std::env::current_dir().map_err(|e| BuildFailure::config(format!("current dir: {e}")))
+/// 参数目录 → ui 工作区（config 发现：会话根 / ui 本体 / ui 直接子目录）。
+fn locate_arg(root: &std::path::Path) -> Result<PathBuf, BuildFailure> {
+    Ok(loomgui_pkg::config::locate(root)?.ui)
+}
+
+/// cwd → 工作区定位（new/list/show/font add/atlas add 的根解析；scaffold 另取 root）。
+fn locate_cwd() -> Result<loomgui_pkg::config::Located, BuildFailure> {
+    let cwd =
+        std::env::current_dir().map_err(|e| BuildFailure::config(format!("current dir: {e}")))?;
+    loomgui_pkg::config::locate(&cwd)
 }
 
 fn run_new(name: &str) -> ExitCode {
-    let root = match cwd_root() {
-        Ok(r) => r,
+    let root = match locate_cwd() {
+        Ok(l) => l.ui,
         Err(f) => return failure_exit("new", &f, Format::Human),
     };
     match loomgui_pkg::workspace_cmd::new_pkg(&root, name) {
@@ -469,8 +511,8 @@ fn run_new(name: &str) -> ExitCode {
 }
 
 fn run_list(kind: ListKind, format: Format) -> ExitCode {
-    let root = match cwd_root() {
-        Ok(r) => r,
+    let root = match locate_cwd() {
+        Ok(l) => l.ui,
         Err(f) => return failure_exit("list", &f, format),
     };
     let res: Result<serde_json::Value, BuildFailure> = match kind {
@@ -548,24 +590,16 @@ fn print_human_list(json: &serde_json::Value) {
 }
 
 fn run_scaffold(agents: Vec<String>) -> ExitCode {
-    let root = match cwd_root() {
-        Ok(r) => r,
+    // skills 落会话根（.loom/config.json 所在——分离形态下 ≠ ui 目录）。
+    let root = match locate_cwd() {
+        Ok(l) => l.root,
         Err(f) => return failure_exit("scaffold", &f, Format::Human),
     };
-    // 当前目录须为工作区根（防止在任意目录散落脚手架）。
-    if !root.join(loomgui_pkg::workspace::WORKSPACE_FILE).is_file() {
-        eprintln!(
-            "scaffold failed: no {} in {} (run inside a workspace, or use `loom init`)",
-            loomgui_pkg::workspace::WORKSPACE_FILE,
-            root.display()
-        );
-        return ExitCode::from(2);
-    }
     match loomgui_pkg::scaffold::write_agent_scaffold(&root, &agents) {
         Ok(()) => {
             eprintln!(
-                "refreshed scaffold for: {} (docs + loomgui-editor/loom skills; workspace.json untouched)",
-                agents.join(", ")
+                "refreshed agent skills at {} (loomgui-editor / loomgui-runtime / loom; workspace.json untouched)",
+                root.display()
             );
             ExitCode::SUCCESS
         }
@@ -577,8 +611,8 @@ fn run_scaffold(agents: Vec<String>) -> ExitCode {
 }
 
 fn run_show(pkg: &str, format: Format) -> ExitCode {
-    let root = match cwd_root() {
-        Ok(r) => r,
+    let root = match locate_cwd() {
+        Ok(l) => l.ui,
         Err(f) => return failure_exit("show", &f, format),
     };
     match loomgui_pkg::workspace_cmd::show_pkg(&root, pkg) {
@@ -614,8 +648,8 @@ fn run_font_add(file: PathBuf, family: Option<String>, default: bool, fallback: 
         eprintln!("font add: --family is required (font family name, e.g. --family NotoSansSC)");
         return ExitCode::from(2);
     };
-    let root = match cwd_root() {
-        Ok(r) => r,
+    let root = match locate_cwd() {
+        Ok(l) => l.ui,
         Err(f) => return failure_exit("font add", &f, Format::Human),
     };
     match loomgui_pkg::workspace_cmd::add_font(&root, &file, &family, default, fallback) {
@@ -638,8 +672,8 @@ fn run_atlas_add(
     padding: u32,
     standalone: bool,
 ) -> ExitCode {
-    let root = match cwd_root() {
-        Ok(r) => r,
+    let root = match locate_cwd() {
+        Ok(l) => l.ui,
         Err(f) => return failure_exit("atlas add", &f, Format::Human),
     };
     match loomgui_pkg::workspace_cmd::add_atlas(&root, &dir, name, max_size, padding, standalone) {

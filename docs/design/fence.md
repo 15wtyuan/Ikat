@@ -519,7 +519,7 @@ cargo test -p loomgui_fence --test pipeline_integration    # 端到端流水线
 | 消费者 | 位置 |
 |---|---|
 | 设计契约 | `docs/design/main-design.md` §3 |
-| 设计师工作区 AI 规则 | 打包器模板 `workspace-agent.md`（按 agent 替换 `{{SKILLS_DIR}}`）+ `skill/SKILL.md` |
+| 设计师工作区 AI 规则 | 打包器模板 `editor/references/`（loomgui-editor skill 的渐进披露参考表，scaffold 落各工作区会话根） |
 | 重构路线 | `docs/roadmap/roadmap.md` |
 
 **同步规则**：改 schema 代码 → 检查三处消费者是否需同步。

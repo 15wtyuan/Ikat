@@ -20,7 +20,9 @@ cargo build -p loomgui_core
 cargo test  -p loomgui_core
 
 # loom CLI（HTML+CSS+资源 → .pkg.bin + 自绘图集 + fonts；二进制名 loom，复用核心 parse 层）
-# 命令面：check / build / init / new / list / show / font add / atlas add / version；退出码 0/1/2。
+# 命令面：check / build / init(--ui) / new / list / show / font add / atlas add / scaffold / version；退出码 0/1/2。
+# 工作区拓扑：会话根（.loom/ = exe + config.json 双指针 ui_root/unity_root + skills）≠ ui 目录（loom.workspace.json）；
+# 目录解析统一 config 发现（会话根 / ui 本体 / ui 直接子目录均可作参数或 cwd），详见 pkg/src/config.rs。
 cargo build -p loomgui_pkg
 cargo test  -p loomgui_pkg
 # 运行：cargo run -p loomgui_pkg -- check <workspace-dir>    （loom check <workspace>）

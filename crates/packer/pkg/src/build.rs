@@ -491,9 +491,10 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, BuildFailure> {
     }
     let outcome = analyze(workspace_root)?;
     let ws = outcome.workspace;
-    // 输出基座链：有 .loom/unity.json → output_dir 相对 Unity 工程根解析（直达
-    // Assets）；无 → 相对工作区根（老工作区行为）。路径失效在 resolve 内报 exit 2。
-    let output_dir = crate::unity::resolve_output_base(workspace_root)?
+    // 输出基座链：就近找到的 .loom/config.json 带 unity_root → output_dir 相对 Unity
+    // 工程根解析（直达 Assets）；无 → 相对 ui 工作区（本地输出）。路径失效在 resolve
+    // 内报 exit 2。
+    let output_dir = crate::config::resolve_output_base(workspace_root)?
         .unwrap_or_else(|| workspace_root.to_path_buf())
         .join(&ws.output_dir);
 

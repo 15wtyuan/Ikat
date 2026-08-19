@@ -1,4 +1,4 @@
-//! 打包器模板（workspace-agent.md / skill SKILL.md / loom SKILL.md）↔ 实现交叉校验。
+//! 打包器模板（三个 skill + editor references）↔ 实现交叉校验。
 //!
 //! 模板是给外部工作区 agent 的围栏规则副本，历史上曾整段漂移（虚构 30 标签
 //! 世界、CSS 支持清单乌龙）。真相源是 `crates/fence/src/schema/` 的 const 表；
@@ -7,9 +7,13 @@
 
 use loomgui_fence::schema::{find_css_prop, find_shorthand, ROLE_TO_SEMANTIC, SHELL_TAGS, TAGS};
 
-const AGENT_MD: &str = include_str!("../../../pkg/templates/workspace-agent.md");
-const SKILL_MD: &str = include_str!("../../../pkg/templates/skill/SKILL.md");
-const LOOM_SKILL_MD: &str = include_str!("../../../pkg/templates/loom-skill/SKILL.md");
+const EDITOR_SKILL_MD: &str = include_str!("../../../pkg/templates/editor/SKILL.md");
+const EDITOR_SCHEMA_MD: &str =
+    include_str!("../../../pkg/templates/editor/references/fence-schema.md");
+const EDITOR_CSS_MD: &str =
+    include_str!("../../../pkg/templates/editor/references/css-reference.md");
+const RUNTIME_SKILL_MD: &str = include_str!("../../../pkg/templates/runtime/SKILL.md");
+const LOOM_SKILL_MD: &str = include_str!("../../../pkg/templates/loom/SKILL.md");
 
 /// 提取锚点区之间的文本（begin/end 均为含 `fence-sync:` 的注释锚点）。
 fn section_between(md: &'static str, begin: &str, end: &str) -> &'static str {
@@ -46,10 +50,13 @@ fn runtime_and_shell_tag_lists_match_schema() {
         runtime,
         "`div`, `span`, `button`, `img`, `template`, `slot`"
     );
-    for md in [AGENT_MD, SKILL_MD] {
+    for (name, md) in [
+        ("editor SKILL.md", EDITOR_SKILL_MD),
+        ("fence-schema.md", EDITOR_SCHEMA_MD),
+    ] {
         assert!(
             md.contains(&runtime),
-            "template must list the runtime tags verbatim: {runtime}"
+            "{name} must list the runtime tags verbatim: {runtime}"
         );
     }
 
@@ -62,37 +69,33 @@ fn runtime_and_shell_tag_lists_match_schema() {
         shell,
         "`html`, `head`, `body`, `title`, `meta`, `style`, `link`, `script`"
     );
-    for md in [AGENT_MD, SKILL_MD] {
-        assert!(
-            md.contains(&shell),
-            "template must list the shell tags verbatim: {shell}"
-        );
-    }
+    assert!(
+        EDITOR_SCHEMA_MD.contains(&shell),
+        "fence-schema.md must list the shell tags verbatim: {shell}"
+    );
 }
 
 #[test]
 fn every_registered_role_appears_in_templates() {
     // 表外例外：textbox（resolve_semantic 内联分派）、tabpanel / dialog（纯容器
-    // 语义，div tag 回退）。模板 role 表须覆盖全宇宙。
+    // 语义，div tag 回退）。role 表须覆盖全宇宙。
     let mut roles: Vec<&str> = ROLE_TO_SEMANTIC.iter().map(|(r, _)| *r).collect();
     roles.push("textbox");
     roles.push("tabpanel");
     roles.push("dialog");
     assert_eq!(roles.len(), 15, "role universe changed — update this test");
     for role in &roles {
-        for (name, md) in [("workspace-agent.md", AGENT_MD), ("SKILL.md", SKILL_MD)] {
-            assert!(
-                md.contains(&format!("`{role}`")),
-                "{name} missing registered role `{role}`"
-            );
-        }
+        assert!(
+            EDITOR_SCHEMA_MD.contains(&format!("`{role}`")),
+            "fence-schema.md missing registered role `{role}`"
+        );
     }
 }
 
 #[test]
 fn supported_css_tokens_are_in_whitelist() {
     let section = section_between(
-        SKILL_MD,
+        EDITOR_CSS_MD,
         "fence-sync:css-supported-begin",
         "fence-sync:css-supported-end",
     );
@@ -105,7 +108,7 @@ fn supported_css_tokens_are_in_whitelist() {
     for token in &tokens {
         assert!(
             find_css_prop(token).is_some() || find_shorthand(token).is_some(),
-            "SKILL.md lists `{token}` as supported, but it is in neither \
+            "css-reference.md lists `{token}` as supported, but it is in neither \
              CSS_PROPS nor CSS_SHORTHANDS — fix the doc or the schema drifted"
         );
     }
@@ -114,7 +117,7 @@ fn supported_css_tokens_are_in_whitelist() {
 #[test]
 fn not_supported_css_tokens_are_absent_from_whitelist() {
     let section = section_between(
-        SKILL_MD,
+        EDITOR_CSS_MD,
         "fence-sync:css-not-supported-begin",
         "fence-sync:css-not-supported-end",
     );
@@ -127,7 +130,7 @@ fn not_supported_css_tokens_are_absent_from_whitelist() {
     for token in &tokens {
         assert!(
             find_css_prop(token).is_none() && find_shorthand(token).is_none(),
-            "SKILL.md claims `{token}` is unsupported, but the fence schema \
+            "css-reference.md claims `{token}` is unsupported, but the fence schema \
              DOES register it — the doc is stale, update it"
         );
     }
@@ -156,21 +159,6 @@ fn loom_skill_commands_match_cli_surface() {
             "loom skill must document `loom {cmd}` (CLI implements it)"
         );
     }
-    // workspace-agent.md 的编排段同样教这些命令。
-    for cmd in [
-        "loom new",
-        "loom font add",
-        "loom atlas add",
-        "loom list",
-        "loom show",
-        "loom check",
-        "loom build",
-    ] {
-        assert!(
-            AGENT_MD.contains(cmd),
-            "workspace-agent.md must mention `{cmd}`"
-        );
-    }
     // 退出码三段语义：skill 的表与 CLI 的 exit_code 契约对齐。
     assert!(LOOM_SKILL_MD.contains("| 0 |"), "exit 0 row present");
     assert!(LOOM_SKILL_MD.contains("| 1 |"), "exit 1 row present");
@@ -184,4 +172,33 @@ fn loom_skill_commands_match_cli_surface() {
         LOOM_SKILL_MD.contains("stdout"),
         "skill must teach the stdout=data convention"
     );
+}
+
+/// 三个 skill 的路由互指（Boundaries）：发现机制靠 description 匹配，skill 间
+/// 边界靠互指文本兜底——缺了互指，agent 会用错手册（拿 runtime 手册改 HTML）。
+#[test]
+fn skills_cross_reference_each_other() {
+    assert!(
+        EDITOR_SKILL_MD.contains("loomgui-runtime"),
+        "editor skill must route runtime work to the loomgui-runtime skill"
+    );
+    assert!(
+        RUNTIME_SKILL_MD.contains("loomgui-editor"),
+        "runtime skill must route authoring work to the loomgui-editor skill"
+    );
+    assert!(
+        RUNTIME_SKILL_MD.contains(".loom/config.json"),
+        "runtime skill must teach reading .loom/config.json"
+    );
+    assert!(
+        EDITOR_SKILL_MD.contains(".loom/config.json"),
+        "editor skill must teach reading .loom/config.json"
+    );
+    // editor 的 references/ 三件必须被主文件指名（渐进披露的入口）。
+    for r in ["fence-schema.md", "css-reference.md", "patterns.md"] {
+        assert!(
+            EDITOR_SKILL_MD.contains(r),
+            "editor SKILL.md must point at references/{r}"
+        );
+    }
 }

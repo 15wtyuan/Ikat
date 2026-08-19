@@ -100,27 +100,6 @@ fn fence_md_shell_tags_match_schema() {
     );
 }
 
-/// 随包 fence.md（Unity 包内 skill AI 参考）必须与源 `docs/design/fence.md` 字节一致。
-///
-/// I2 背景：随包副本曾漂移到旧围栏世界（列已下线标签 input/textarea/select/... 、
-/// 幻影 C# 类型 TextBlock/Label/Link/... 、旧「31 标签」计数），而既有 schema 门只
-/// `include_str!` 源 fence.md——随包副本不在覆盖内。AI 助手在 Unity 里读随包副本会
-/// 生成围栏外标签（现打包期拒）并引用不存在的 C# 类型。
-///
-/// 本门把「随包副本 = 源」编码为可执行不变量：改源后须 cp 到 skill/references/。
-/// 字节相等是最强防漂移保证——源已由上面两个表解析门锁住 schema，本门只须保证副本不走样。
-#[test]
-fn shipped_fence_md_matches_source_of_truth() {
-    let source = include_str!("../../../docs/design/fence.md");
-    let shipped =
-        include_str!("../../../unity/package/Editor/Resources/LoomGUI/skill/references/fence.md");
-    assert_eq!(
-        source, shipped,
-        "随包 fence.md 与源 docs/design/fence.md 漂移——改源后须 cp 到 \
-         unity/package/Editor/Resources/LoomGUI/skill/references/fence.md"
-    );
-}
-
 /// 关键 CSS 属性必须在 fence.md 提及（防「schema 新增非标准/私有属性，文档没跟上」）。
 ///
 /// 非全量 CSS_PROPS 覆盖——标准 CSS longhand（padding/margin/border 四向）靠作者/AI 的

@@ -506,7 +506,7 @@ public sealed class UITemplate {
 - **纹理注册**：`Image.Src` 是字符串 key（包内 or 运行时注册）。动态纹理的注册（`byte[]→Texture` 解码 + 注册 key）是引擎后端契约（Unity 侧 `SpriteResolver.Register(key, Texture2D)` 一类），用户自己解码塞入。查不到 key = 静默 error 态 + 警告一次，不抛。**每个引擎后端必须提供 runtime key 注册能力。**
 - **原生渲染挂载**：3D 模型/粒子等非 UI 渲染挂载是引擎后端契约（Unity 侧 NativeHost），不进公共 API；集成层自行桥接。
 
-Unity 集成层的接入手册（LoomStageDriver 挂载、加载钩子覆写、UI↔3D 互通、输入门控）随 Unity 包分发：`unity/package/Editor/Resources/LoomGUI/skill/references/runtime-integration.md`。
+Unity 集成层的接入手册（LoomStageDriver 挂载、加载钩子覆写、UI↔3D 互通、输入门控）随 loom CLI 的 workspace 脚手架分发：`loomgui-runtime` skill（scaffold 落各工作区会话根的 `.agents/skills/` / `.claude/skills/`；模板源在打包器 crate 的 `templates/runtime/SKILL.md`）。
 
 模板根、作用域根用 `IsScopeRoot` 运行时标记（非类型），`Get<T>` 边界据此判定。
 

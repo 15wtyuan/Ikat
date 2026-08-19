@@ -8,12 +8,23 @@ use crate::recent;
 use crate::recent::StateDir;
 use crate::UnityRoot;
 use loomgui_pkg::build::{build, BuildReport};
+use loomgui_pkg::config;
 use loomgui_pkg::diag::BuildFailure;
 use loomgui_pkg::init::{init, CliSource, InitOptions};
 use loomgui_pkg::workspace::{load_workspace, save_workspace as write_workspace, Workspace};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// 打开/新建工作区的返回：workspace + 解析出的 ui 路径。用户给 GUI 的可能是会话
+/// 根（`.loom/config.json` 所在），workspace.json 实际在 `ui_root` 指向处——前端
+/// 后续的 save / scan / build 一律用 `ui_path`。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenedWorkspace {
+    pub ws: Workspace,
+    pub ui_path: String,
+}
 
 #[tauri::command]
 pub fn recent_workspaces(state: tauri::State<StateDir>) -> Vec<String> {
@@ -27,28 +38,38 @@ pub fn remove_recent(path: String, state: tauri::State<StateDir>) {
 }
 
 #[tauri::command]
-pub fn open_workspace(path: String, state: tauri::State<StateDir>) -> Result<Workspace, String> {
-    let ws = load_workspace(Path::new(&path))?;
+pub fn open_workspace(
+    path: String,
+    state: tauri::State<StateDir>,
+) -> Result<OpenedWorkspace, String> {
+    let located = config::locate(Path::new(&path)).map_err(|e| e.message)?;
+    let ws = load_workspace(&located.ui)?;
     recent::push_recent(state.0.as_deref(), &path);
-    Ok(ws)
+    Ok(OpenedWorkspace {
+        ws,
+        ui_path: located.ui.to_string_lossy().into_owned(),
+    })
 }
 
-/// 新建工作区 = 完整 init：workspace 骨架 + agent 脚手架 + loom CLI 拷进 `.loom/` +
-/// 反向配置（`--unity-root` 来自 Unity 菜单拉起时的工程根）。agent 选择由前端弹窗
-/// 传入；已含 workspace.json 的目录拒绝（防误覆盖，走「打开工作区」）。
+/// 新建工作区 = 完整 init：会话根上 skills + CLI + config（`--ui` 分离 ui 目录）+
+/// workspace.json 骨架；`--unity-root` 来自 Unity 菜单拉起时的工程根。agent 选择由
+/// 前端弹窗传入；目标已有 workspace.json 时拒绝（防误覆盖，走「打开工作区」）。
 #[tauri::command]
 pub fn create_workspace(
     path: String,
+    ui_dir: String,
     agents: Vec<String>,
     state: tauri::State<StateDir>,
     unity_root: tauri::State<UnityRoot>,
-) -> Result<Workspace, String> {
+) -> Result<OpenedWorkspace, String> {
     let root = Path::new(&path);
     // 首选子进程（与 agent 会话同一 loom.exe；自拷贝语义天然正确）。
     if let Some(loom) = locate_loom(None) {
         let mut cmd = loom_command(&loom);
         cmd.arg("init")
             .arg(root)
+            .arg("--ui")
+            .arg(&ui_dir)
             .arg("--output")
             .arg("Assets/Bundles");
         for a in &agents {
@@ -75,15 +96,21 @@ pub fn create_workspace(
             .unwrap_or(CliSource::Skip);
         let opts = InitOptions {
             agents,
+            ui_dir: Some(PathBuf::from(&ui_dir)),
             unity_root: unity_root.0.clone(),
             output_dir: "Assets/Bundles".to_string(),
             force: false,
             cli_source,
         };
-        init(root, opts).map_err(|f| format!("init failed: {f}"))?;
+        init(root, opts).map_err(|f| format!("init failed: {}", f.message))?;
     }
     recent::push_recent(state.0.as_deref(), &path);
-    load_workspace(root)
+    let located = config::locate(root).map_err(|e| e.message)?;
+    let ws = load_workspace(&located.ui)?;
+    Ok(OpenedWorkspace {
+        ws,
+        ui_path: located.ui.to_string_lossy().into_owned(),
+    })
 }
 
 #[tauri::command]
@@ -129,15 +156,19 @@ pub fn scan_pngs(pkg_dir: String) -> Result<Vec<String>, String> {
 
 /// 打包走 `loom build` 子进程（stdout JSON → 还原 BuildReport）；失败时 message +
 /// 诊断文本化给前端。找不到 loom.exe（dev 模式 target 目录分离）→ 进程内降级。
+/// 入参 path 接受会话根或 ui 目录（config 发现统一解析）。
 #[tauri::command]
 pub fn run_build(path: String) -> Result<BuildReport, String> {
-    let root = Path::new(&path);
-    let Some(loom) = locate_loom(Some(root)) else {
+    let located = config::locate(Path::new(&path)).map_err(|e| e.message)?;
+    let Some(loom) = locate_loom(Some(&located.root)) else {
         eprintln!("dev fallback: loom.exe not found next to GUI / in .loom/ — in-process build");
-        return build(root).map_err(|f| failure_to_text(&f));
+        return build(&located.ui).map_err(|f| failure_to_text(&f));
     };
     let mut cmd = loom_command(&loom);
-    cmd.arg("build").arg(root).arg("--format").arg("json");
+    cmd.arg("build")
+        .arg(&located.ui)
+        .arg("--format")
+        .arg("json");
     let out = run_capture(cmd).map_err(|e| format!("spawn loom build: {e}"))?;
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     let json: serde_json::Value = serde_json::from_str(&stdout)
@@ -265,45 +296,33 @@ mod tests {
     }
 
     #[test]
-    fn scaffold_claude_writes_claude_layout() {
-        let root = temp_root("claude");
-        loomgui_pkg::scaffold::write_agent_scaffold(&root, &["claude".to_string()]).unwrap();
-        assert!(root.join("CLAUDE.md").is_file());
-        let doc = fs::read_to_string(root.join("CLAUDE.md")).unwrap();
-        assert!(doc.contains("`.claude/skills/loomgui-editor/SKILL.md`"));
-        assert!(!doc.contains("{{SKILLS_DIR}}"));
-        assert!(root
-            .join(".claude/skills/loomgui-editor/SKILL.md")
-            .is_file());
-        assert!(!root.join("AGENTS.md").exists());
-        fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn scaffold_agents_writes_agents_layout() {
-        let root = temp_root("agents");
-        loomgui_pkg::scaffold::write_agent_scaffold(&root, &["agents".to_string()]).unwrap();
-        assert!(root.join("AGENTS.md").is_file());
-        let doc = fs::read_to_string(root.join("AGENTS.md")).unwrap();
-        assert!(doc.contains("`.agents/skills/loomgui-editor/SKILL.md`"));
-        assert!(!doc.contains("{{SKILLS_DIR}}"));
-        assert!(root
-            .join(".agents/skills/loomgui-editor/SKILL.md")
-            .is_file());
-        assert!(!root.join("CLAUDE.md").exists());
-        fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn scaffold_multi_and_invalid() {
-        let root = temp_root("multi");
+    fn scaffold_writes_skills_only_no_instruction_doc() {
+        let root = temp_root("layout");
         loomgui_pkg::scaffold::write_agent_scaffold(
             &root,
             &["claude".to_string(), "agents".to_string()],
         )
         .unwrap();
-        assert!(root.join("CLAUDE.md").is_file());
-        assert!(root.join("AGENTS.md").is_file());
+        for skills in [".claude/skills", ".agents/skills"] {
+            assert!(
+                root.join(skills).join("loomgui-editor/SKILL.md").is_file(),
+                "{skills} 的 editor skill 须落位"
+            );
+            assert!(
+                root.join(skills)
+                    .join("loomgui-editor/references/patterns.md")
+                    .is_file(),
+                "{skills} 的 editor references 须落位"
+            );
+            assert!(
+                root.join(skills).join("loomgui-runtime/SKILL.md").is_file(),
+                "{skills} 的 runtime skill 须落位"
+            );
+            assert!(root.join(skills).join("loom/SKILL.md").is_file());
+        }
+        // 不生成指令文档（AGENTS.md / CLAUDE.md 由用户自持）。
+        assert!(!root.join("AGENTS.md").exists());
+        assert!(!root.join("CLAUDE.md").exists());
 
         assert!(loomgui_pkg::scaffold::write_agent_scaffold(&root, &[]).is_err());
         assert!(

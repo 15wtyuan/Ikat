@@ -104,8 +104,8 @@
   // ── Workspace actions ──
   function openWorkspace(path) {
     invoke("open_workspace", { path: path })
-      .then(function (ws) {
-        renderMain(ws, path);
+      .then(function (res) {
+        renderMain(res.ws, res.uiPath);
       })
       .catch(function (err) {
         alert("打开工作区失败: " + err);
@@ -131,22 +131,27 @@
   }
 
   // ── Event bindings ──
-  // ── New-workspace wizard: pick dir → pick agents → full init (scaffold + CLI + unity binding) ──
+  // ── New-workspace wizard: pick session root → ui dir + agents → full init ──
   // 独立小弹窗（不与 editor.js 的 init-overlay 复用——那个绑定主屏的脚手架更新流程）。
-  function pickAgents(cb) {
+  // 会话根 = agent 会话打开的目录（skills/.loom 落这里）；ui 目录 = UI 工作区
+  // （workspace.json 落这里）。默认 ui（根下子目录），可改成 "."（单目录形态）。
+  function pickLayoutAndAgents(cb) {
     var overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.innerHTML =
       '<div class="modal">' +
-      "<h3>初始化 agent 脚手架</h3>" +
-      '<p class="modal-desc">勾选要初始化的 agent（可多选）。将写入指令文档 + skills，' +
-      "并把 loom CLI 拷进工作区 .loom/（agent 会话零安装）。</p>" +
+      "<h3>初始化工作区</h3>" +
+      '<p class="modal-desc">会话根将获得 skills 与 .loom/（loom CLI + config.json，建议入库）；' +
+      "UI 工作区（loom.workspace.json 与源文件）放在下面的目录。</p>" +
+      '<label class="agent-option"><div class="agent-option-body"><span class="agent-option-name">UI 目录（相对会话根）</span>' +
+      '<input type="text" id="nw-ui-dir" value="ui" style="width:100%;margin-top:4px;" /></div></label>' +
+      '<p class="modal-desc" style="margin-top:12px;">勾选要初始化的 agent（可多选）：</p>' +
       '<label class="agent-option"><input type="checkbox" id="nw-check-claude" checked />' +
       '<div class="agent-option-body"><span class="agent-option-name">Claude</span>' +
-      '<span class="agent-option-path">CLAUDE.md + .claude/skills/</span></div></label>' +
+      '<span class="agent-option-path">.claude/skills/</span></div></label>' +
       '<label class="agent-option"><input type="checkbox" id="nw-check-agents" checked />' +
       '<div class="agent-option-body"><span class="agent-option-name">其他</span>' +
-      '<span class="agent-option-path">AGENTS.md + .agents/skills/</span>' +
+      '<span class="agent-option-path">.agents/skills/</span>' +
       '<span class="agent-option-note">Codex / ZCode 等 AGENTS.md 约定</span></div></label>' +
       '<div class="modal-actions">' +
       '<button id="nw-cancel" class="btn btn-secondary">取消</button>' +
@@ -155,21 +160,22 @@
     function close() { document.body.removeChild(overlay); }
     overlay.querySelector("#nw-cancel").addEventListener("click", close);
     overlay.querySelector("#nw-ok").addEventListener("click", function () {
-      var list = [];
-      if (overlay.querySelector("#nw-check-claude").checked) list.push("claude");
-      if (overlay.querySelector("#nw-check-agents").checked) list.push("agents");
+      var agents = [];
+      if (overlay.querySelector("#nw-check-claude").checked) agents.push("claude");
+      if (overlay.querySelector("#nw-check-agents").checked) agents.push("agents");
+      var uiDir = (overlay.querySelector("#nw-ui-dir").value || "").trim();
       close();
-      cb(list);
+      cb(uiDir || "ui", agents);
     });
   }
 
   btnNew.addEventListener("click", async function () {
-    var path = await pickDirectory("选择新建工作区的目录");
+    var path = await pickDirectory("选择会话根目录（游戏仓库根或任意工作目录）");
     if (!path) return;
-    pickAgents(function (agents) {
-      invoke("create_workspace", { path: path, agents: agents })
-        .then(function (ws) {
-          renderMain(ws, path);
+    pickLayoutAndAgents(function (uiDir, agents) {
+      invoke("create_workspace", { path: path, uiDir: uiDir, agents: agents })
+        .then(function (res) {
+          renderMain(res.ws, res.uiPath);
         })
         .catch(function (err) {
           alert("创建失败: " + err);
