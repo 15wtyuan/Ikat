@@ -45,7 +45,18 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `link` | 外部 CSS 引用（`rel=stylesheet`） |
 | `script` | 脚本（围栏外，打包期报错或跳过） |
 
-这些标签在 `tree_builder` 阶段被消费，不产生运行时对象。
+这些标签在 `tree_builder` 阶段被消费，不产生运行时对象。其中两个承载 CSS 来源语义：
+
+- **`<style>`**：内联 CSS，整块文本交阶段 4.5 解析。
+- **`<link rel="stylesheet" href="...">`**：外部 CSS。href 相对所在 HTML 文件解析（页面与组件文件同规则），文件内容并入同一解析管线——规则、`@keyframes`、诊断与内联完全同待遇；读取失败 → `FenceStylesheetNotFound` error（定位在 `<link>` 标签，报错带解析后的完整路径）。其余 rel 值（icon 等）按文档壳语义静默消费。CSS 内不支持 `@import`（与 `<style>` 内出现未知 at-rule 同待遇：报错）。
+
+**相对路径基准总则**——三处引用各按浏览器语义取基准，全部词法解析、打包期归一为 workspace 相对 sprite key：
+
+| 引用 | 基准 |
+|---|---|
+| `<img src>` | 相对所在 HTML 文件（页面文件或组件文件；组件在 `components/` 子目录，引用外层资源要多爬层级） |
+| `<link rel="stylesheet">` 的 href | 相对所在 HTML 文件 |
+| CSS 内 `url()`（如 background-image） | 内联 `<style>` 相对所在 HTML 文件；外部 CSS 相对**该 CSS 文件**（打包期改写成等价的 HTML 相对路径后统一归一） |
 
 ### 2.2 运行时标签（6 个）
 
@@ -64,6 +75,11 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `img` | Image | Inline | Void | None | ✓ |
 | `template` | Template | None | Phrasing | Flow | |
 | `slot` | Slot | Inline | Transparent | Transparent | |
+
+两个高频踩点：
+
+- **`<slot>` 在模板结构校验里按块级对待**（阶段 6.4 的混排检查）：slot 不与文本/`span` 混排在同一块容器的直接子里。slot 的 fallback 文本放进投影内容（使用处给子），或让 slot 与文本分属不同容器；`<span>` 只包 slot 不夹文本是合法包装。根因是 rich-text inline flow 标志在打包期烘焙，模板期无法预知投影进来的内容是行内还是块级，保守判定防止标志烘错。
+- **没有 `<br>`**：多行文案拆多个块级容器。围栏刻意不做文本内换行标签——一切换行都是结构。
 
 ### 2.3 控件与列表：role 驱动
 
@@ -92,6 +108,13 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 ### 2.4 自定义元素
 
 标签名含 `-`（如 `<my-widget>`）识别为 CustomElement（`SemanticKind::CustomElement`），**display 默认 Block（同 div）**——连字符标签不在 TAGS 注册表，须在 css_resolve 显式铺默认，漏铺会落到 taffy Flex Row（模板根无显式宽时被内容收缩，浏览器块级根则撑满）。围栏放行含 hyphen 的标签名通过 Fence Gate；**注册验证在打包器**（R3 已落地）：每个 package dir 下 `components/<tag>.html` 即该标签的注册（Package 注册表承担 `customElements.define()` 角色，main-design §7.4），打包期见 hyphen 标签即查注册表展开（slot 投影 + 展开域锚定规则），未注册 → `UnregisteredCustomElement` 打包错误。`<slot>` 只在组件模板内合法（页面级 `<slot>` 打包错误）；无效 slot（light 子的 `slot` 属性无对应位 / 无默认 slot 却有游离子）同样打包期报错。见 component-system spec `docs/superpowers/specs/2026-08-14-component-system-design.md`。
+
+**组件隔离模型（Shadow DOM 式硬墙，三面同源）**——组件是自包含单元：
+
+- **样式墙**：组件实例子树的 CSS 宇宙 = 组件文件自己的 `<style>` / `<link>` 外部 CSS；页面规则不进组件子树，组件规则不出组件。页面与组件要共享视觉（design token、公共控件样式），用同一份外部 CSS 文件在两边分别引入——同一文件、两个作用域各自生效。
+- **投影归属**：light 子（`<my-widget><span slot="x">…</span></my-widget>` 里的 span）投影进组件后归组件作用域——给投影内容定样式写在组件文件里，或用内容属性（如 img 的 width/height）自带。
+- **校验自包含**：组件文件独立过全围栏校验（注册期）。组件内控件（`role=slider` 等）必须由组件自己的 CSS 命中，页面 CSS 救不了（阶段 6.7 按组件文件自身的规则集跑）。
+- **id 墙**：运行时 `Get<T>("id")` 不穿透组件实例边界（经 host 节点两跳进组件）。
 
 ---
 
@@ -224,6 +247,8 @@ CSS 在围栏中以三个正交维度建模：
 
 `opacity`, `box-shadow`, `pointer-events`, `transform`, `filter`
 
+> **transform 原点**：`transform-origin` 不在围栏——变换只绕元素**几何中心**（默认原点）。绕非中心点旋转（连线、指针）用「中点定位 + 默认中心旋转」换算等价实现。
+
 **文本**
 
 `color`（继承）, `font-size`（继承）, `font-family`（继承）, `font-weight`（继承）, `text-align`（继承）, `line-height`（继承）, `letter-spacing`（继承）, `white-space`（继承）, `text-shadow`（继承）, `-webkit-text-stroke`（继承）, `font-effect`（继承，LoomGUI 私有扩展）
@@ -334,6 +359,7 @@ CSS 在围栏中以三个正交维度建模：
 ### 阶段 4.5：`<style>` 块解析
 
 - 解析 `<style>` 标签的文本内容为 `DynamicRule` 选择器规则表（class/tag/id/后代空格/属性选择器/伪类 + specificity）。
+- 解析 `<link rel="stylesheet">` 引入的外部 CSS——同一解析器、同一待遇（规则 + `@keyframes` + 诊断 file 落 CSS 路径）；CSS 内 `url()` 相对该 CSS 文件，解析前改写成等价的 HTML 相对路径（见 §2.1 路径基准总则）。
 - 解析 `@keyframes` at-rule 为 `KeyframesRule` 表（`from`/`to`/`N%` stop 选择器）。
 - 产出存入 `ParsedTemplate.dynamic_rules` + `ParsedTemplate.keyframes`。
 - 其他 at-rule（`@media` 等）丢弃 + 诊断。
@@ -457,6 +483,7 @@ CSS 在围栏中以三个正交维度建模：
 | `FenceControlStructureCss` | 控件结构 CSS 契约缺失（当前契约：`combobox` 本体缺 `position:relative`，或其子树内 `role=listbox` 弹层缺 `position:absolute`）。视觉规则命中 ≠ 结构声明齐全，缺锚点/脱流到 PlayMode 才显形；详见阶段 6.7b |
 | `FenceMissingControlChild` | role 驱动控件缺必需子角色/slot（`combobox` 缺 `role=listbox`、`listbox` 缺 `role=option`、`slider` 缺 `data-slot=thumb`、`progressbar` 缺 `data-slot=fill`、`list` 缺 `role=listitem`、`tablist` 缺 `role=tab`）。控件结构由作者写，漏写 = 运行时半残控件；详见阶段 6.8 |
 | `FenceUnknownRole` | `role` 属性值不在 role 注册表（`ROLE_TO_SEMANTIC` + `textbox`/`tabpanel`/`dialog` 例外）。拼错防护：未知 role 若静默回退成基础标签类型，元素会跳过全部控件校验（必需子结构、CSS 命中、结构 CSS），构建绿灯但运行时空白——「不静默降级」原则拒绝此类 |
+| `FenceStylesheetNotFound` | `<link rel="stylesheet">` 的外部 CSS 读取失败（href 相对所在 HTML 文件解析，报错带完整路径；静默丢样式是最难排查的降级形态） |
 
 ---
 

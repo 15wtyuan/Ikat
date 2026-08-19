@@ -30,12 +30,18 @@ diagnostics are reported together (collect-all, with file/line/column).
    packages (`dirs` to place HTML in), atlases (image directories), and
    fonts.
 2. **Write HTML + CSS** using the schema below. Place files under the
-   package `dirs`. `<img src>` is relative to the HTML file. New images not
-   referenced by any `<img>` must be covered by an atlas `dirs` entry.
+   package `dirs`. `<img src>` is relative to the HTML file (component
+   files live in `components/`, so reaching outer assets takes extra
+   `../`). CSS lives inline (`<style>`) or in external files referenced
+   with `<link rel="stylesheet" href="...">` — href relative to the HTML
+   file, `url()` inside a CSS file relative to that CSS file (browser
+   semantics; a missing file is a build error, never a silent drop). New
+   images not referenced by any `<img>` must be covered by an atlas
+   `dirs` entry.
 3. **Build and self-correct.** Build entry points:
    - GUI: open the workspace in the LoomGUI packer app, press Build (打包).
-   - CLI (only inside a LoomGUI repository checkout):
-     `cargo run -p loomgui_pkg -- build <workspace-root>`.
+   - CLI (bundled at `.loom/loom(.exe)`, no LoomGUI checkout needed):
+     `loom check <workspace-root>` → fix everything → `loom build`.
    A failing build lists **all** violations at once. Fix every diagnostic in
    one pass, then rebuild. Zero errors = artifacts are in `output_dir`
    (`ui/*.pkg.bin`, `atlas/*`, `fonts/*.bytes`, `loom.runtime.json`).
@@ -59,14 +65,31 @@ diagnostics are reported together (collect-all, with file/line/column).
 | `slot` | Slot | inline | legal only inside component templates; attr `name` |
 
 Any other tag is a build error (`FenceUnknownTag`) — there is no `p`,
-`header`, `input`, `select`, `ul`, `label`, etc. Use `div` with CSS and, for
-controls, `role`.
+`header`, `input`, `select`, `ul`, `label`, etc. (and no `<br>`: split
+multi-line copy into separate block elements — every line break is
+structure). Use `div` with CSS and, for controls, `role`.
 
 **Custom elements**: a tag name containing `-` (e.g. `<my-widget>`) is a
 CustomElement. It must be registered as `components/<tag>.html` in the
 package directory (this file IS the registration; the packer expands
 instances with slot projection). Unregistered = build error. A `<slot>` at
 page level (outside a component template) is also a build error.
+
+**Component isolation (Shadow-DOM-like, one model with three faces):**
+
+- **Style wall**: the CSS universe of a component instance is the component
+  file's own `<style>` / `<link>` — page rules never reach inside a
+  component, component rules never leak out. To share visuals (design
+  tokens, common control styles), reference the same external CSS file
+  from both the page and the component — same file, each scope applies it
+  independently.
+- **Projected children belong to the component scope**: the elements you
+  put inside `<my-widget>` are styled by the component's CSS, not the
+  page's. Give them content attributes (e.g. `width`/`height` on `img`)
+  or style them inside the component file.
+- **Standalone validation**: a component file is validated on its own —
+  a control inside a component must be matched by the component's own
+  CSS (`FenceControlWithoutCss` otherwise); page CSS cannot save it.
 
 **Global attributes** (every element): `id`, `class`, `style`, `slot`,
 `hidden`, `tabindex`, `type`, `role`, plus any `aria-*`, `data-*`, and CSS
@@ -143,7 +166,11 @@ For `switch` / `radio`, an attribute selector keyed on state reads best:
 - **No mixing inside one block container**: the direct children of a
   `display:block` container must be all inline-level (text / `span` /
   `img` — that combination becomes a rich-text block, laid out like browser
-  inline flow) or all block-level. Mixed = build error. Fix by wrapping the
+  inline flow) or all block-level. `slot` counts as block-level here
+  (projected content is unknowable at build time, so the checker is
+  conservative): put fallback text into the projected content at the usage
+  site, or give the slot its own container — `<span>` wrapping only a slot
+  (no text) is fine. Mixed = build error. Fix by wrapping the
   inline run in a sub-`div`, or switching the container to `display:flex`.
 - `position: absolute | relative` only (`fixed`/`sticky` are build errors).
 - `z-index` reorders **siblings** for drawing and hit-testing; a whole
@@ -200,7 +227,9 @@ Shorthands (expand to the properties above):
 colors). `background-size` accepts `cover` / `contain` / `100%` /
 `stretch`. `filter` accepts grayscale / brightness / contrast / saturate /
 hue-rotate / invert / sepia. `transform` accepts translate / rotate /
-scale.
+scale — rotations pivot around the element's **center** (`transform-origin`
+does not exist); to pivot around a non-center point, position the element
+at the midpoint of the desired arc and rotate.
 
 **Value rejections to remember** (property exists, value does not):
 `display:grid`, `flex-wrap:wrap-reverse`, `position:fixed`,
@@ -231,7 +260,11 @@ Properties that do NOT exist in the fence (using any of these is a
 **Animations.** Define with `@keyframes <name> { from {...} to {...} 50% {...} }`
 inside `<style>`, apply via the `animation` shorthand
 (`<name> <duration> [easing] [count|infinite] [fill-mode] [direction] [delay]`,
-e.g. `animation: fadeIn .4s .05s both`). `:nth-child(An+B | odd | even | N)`
+e.g. `animation: fadeIn .4s .05s both`). Identical duplicate keyframes
+across component instances merge silently; same name with different
+content warns (host wins) — prefer defining shared animations page-level
+or in a shared external CSS and referencing the name from components.
+`:nth-child(An+B | odd | even | N)`
 selectors work in `<style>` rules — handy for staggered entrances. Do not
 use `:nth-child` on virtualized lists (`role=list` bound to data): parked
 slots count as children and skew the index; use `[data-index="N"]`
@@ -269,6 +302,7 @@ attribute selectors instead.
 | `FenceControlStructureCss` | control structure CSS missing (combobox anchor / popup positioning) |
 | `FenceMissingControlChild` | control missing a required child role or `data-slot` |
 | `FenceUnknownRole` | `role` value not in the role registry (typo guard — copy role names from the table above verbatim) |
+| `FenceStylesheetNotFound` | `<link rel="stylesheet">` file missing (href relative to the HTML file; the error carries the resolved path) |
 
 ## Preview trust
 

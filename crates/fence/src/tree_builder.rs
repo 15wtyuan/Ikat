@@ -144,6 +144,15 @@ pub fn tokenize(html: &str) -> Vec<IrToken> {
 
 // == Tree builder ==
 
+/// Stage 1+2 产物：IR 树 + 诊断 + `<style>` 文本（CSS 源）+ `<link
+/// rel="stylesheet">` 声明（href 原始值 + 标签位置，加载归 pipeline——fence 不做 io）。
+pub struct RawParse {
+    pub tree: IrTree,
+    pub diagnostics: Vec<Diagnostic>,
+    pub style_texts: Vec<String>,
+    pub stylesheet_links: Vec<(String, Span)>,
+}
+
 struct TreeBuilder {
     tree: IrTree,
     stack: Vec<IrNodeId>,
@@ -154,6 +163,9 @@ struct TreeBuilder {
     in_head: bool,
     in_style: bool,
     style_texts: Vec<String>,
+    /// `<link rel="stylesheet" href>` 声明（href 原始值 + 标签位置）。加载是
+    /// pipeline 的职责（fence 不做 io），tree_builder 只负责收集。
+    stylesheet_links: Vec<(String, Span)>,
 }
 
 impl TreeBuilder {
@@ -168,6 +180,7 @@ impl TreeBuilder {
             in_head: false,
             in_style: false,
             style_texts: Vec::new(),
+            stylesheet_links: Vec::new(),
         }
     }
 
@@ -228,6 +241,26 @@ impl TreeBuilder {
             // <style/> 的 /> 被忽略，后续仍当 style 内容吞到 </style>（HTML5：style 非 void）。
             // 故 in_style 无条件置 true，让被吞的 raw text 进 style_texts（CSS 源）而非可见文本。
             self.in_style = true;
+            return;
+        }
+        if name == "link" {
+            // <link> 永不进树（head/body 统一消费）。rel=stylesheet 的 href 交 pipeline
+            // 加载外部 CSS；其余 rel 与文档壳标签同待遇——静默消费。
+            let rel = attributes
+                .iter()
+                .find(|a| a.name == "rel")
+                .map(|a| a.value.to_ascii_lowercase());
+            let is_stylesheet = rel
+                .map(|r| r.split_whitespace().any(|t| t == "stylesheet"))
+                .unwrap_or(false);
+            if is_stylesheet {
+                if let Some(href) = attributes.iter().find(|a| a.name == "href") {
+                    let href = href.value.trim();
+                    if !href.is_empty() {
+                        self.stylesheet_links.push((href.to_string(), span));
+                    }
+                }
+            }
             return;
         }
         if name == "body" {
@@ -315,7 +348,7 @@ impl TreeBuilder {
         }
     }
 
-    fn finish(mut self) -> (IrTree, Vec<Diagnostic>, Vec<String>) {
+    fn finish(mut self) -> RawParse {
         for &id in self.stack.iter().rev() {
             let el = self.tree.element(id);
             let tag_name = el.map(|e| e.tag.as_str()).unwrap_or("unknown");
@@ -325,19 +358,26 @@ impl TreeBuilder {
                 self.loc(self.tree.nodes[id.0].span.start),
             ));
         }
-        (self.tree, self.diagnostics, self.style_texts)
+        RawParse {
+            tree: self.tree,
+            diagnostics: self.diagnostics,
+            style_texts: self.style_texts,
+            stylesheet_links: self.stylesheet_links,
+        }
     }
 }
 
 /// Parse HTML source into an IR tree with diagnostics.
 /// This is Stage 1 (Tokenize) + Stage 2 (Tree Build).
 pub fn parse_html_to_ir(html: &str) -> (IrTree, Vec<Diagnostic>) {
-    let (tree, diags, _style_texts) = parse_html_to_ir_named(html, "<inline>".to_string());
-    (tree, diags)
+    let raw = parse_html_to_ir_named(html, "<inline>".to_string());
+    (raw.tree, raw.diagnostics)
 }
 
-/// Same as parse_html_to_ir but with a file name for diagnostics.
-pub fn parse_html_to_ir_named(html: &str, file: String) -> (IrTree, Vec<Diagnostic>, Vec<String>) {
+/// Same as parse_html_to_ir but with a file name for diagnostics. Also returns
+/// the collected `<style>` texts and `<link rel="stylesheet">` hrefs for the
+/// caller (pipeline) to resolve.
+pub fn parse_html_to_ir_named(html: &str, file: String) -> RawParse {
     // 文件首的 UTF-8 BOM (`\u{feff}`) 由 html5gum 当作可见文本产 String token，且
     // Rust `char::is_whitespace` 自 Unicode 3.2 不再认 BOM 为空白——BOM 顶层 Text
     // 节点漏过 ws filter，被 bridge 当成额外顶层根，破坏单根契约。源首一次性剥除。
@@ -428,7 +468,12 @@ mod tests {
     #[test]
     fn style_text_is_captured_not_dropped() {
         let html = r#"<html><head><style>.foo { color: red }</style></head><body><div>hi</div></body></html>"#;
-        let (tree, diags, style_texts) = parse_html_to_ir_named(html, "x.html".into());
+        let RawParse {
+            tree,
+            diagnostics: diags,
+            style_texts,
+            ..
+        } = parse_html_to_ir_named(html, "x.html".into());
         assert!(diags.is_empty(), "unexpected: {diags:?}");
         // <style> 元素本身不进树（shell 标签）
         assert!(
@@ -444,7 +489,12 @@ mod tests {
 
     #[test]
     fn style_in_body_also_captured() {
-        let (tree, _diags, style_texts) = parse_html_to_ir_named(
+        let RawParse {
+            tree,
+            diagnostics: _diags,
+            style_texts,
+            ..
+        } = parse_html_to_ir_named(
             r#"<div><style>.a { width: 10px }</style></div>"#,
             "x.html".into(),
         );

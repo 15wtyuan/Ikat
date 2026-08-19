@@ -184,10 +184,10 @@ fn validate_inline_style(
 mod tests {
     use super::*;
     use crate::diagnostic::LineMap;
-    use crate::tree_builder::parse_html_to_ir_named;
+    use crate::tree_builder::{parse_html_to_ir_named, RawParse};
 
     fn gate(html: &str) -> Vec<Diagnostic> {
-        let (tree, _, _) = parse_html_to_ir_named(html, "test.html".into());
+        let RawParse { tree, .. } = parse_html_to_ir_named(html, "test.html".into());
         let lm = LineMap::new(html);
         run_fence_gate(&tree, "test.html", &lm)
     }

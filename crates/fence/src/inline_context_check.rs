@@ -24,30 +24,79 @@ use loomgui_core::style::resolved::ResolvedStyle;
 /// （strong/em/br 已从围栏移除——它们就是 span/\n 的语义糖，不再单独存在。）
 const TEXT_LEVEL_SEMANTICS: &[SemanticKind] = &[SemanticKind::TextElement, SemanticKind::Slot];
 
-/// 从 dynamic_rules 预提取声明 `display:flex` 的规则，按 selector compound 数分组。
+/// 从 dynamic_rules 预提取声明 `display:<value>` 的规则，按 selector compound 数分组。
 ///
 /// 单 compound 规则可廉价精确匹配元素的 class/tag；多 compound（后代/子代组合）
-/// 命中判定贵且需完整 cascade，无法在打包期静态断言 → 返回 `has_multi_compound_flex_rule`
-/// 保守标志，调用方据此「视为 flex」放行（避免假阳性）。Stage 6.4（rich-text-block 分类）
-/// 与 6.5（inline 上下文检查）共享此提取，保证两阶段对「parent 是不是 flex」判定一致。
-pub(crate) fn collect_flex_class_rules(dynamic_rules: &[DynamicRule]) -> (Vec<&Compound>, bool) {
-    let mut single_compound_flex_rules: Vec<&Compound> = Vec::new();
-    let mut has_multi_compound_flex_rule = false;
+/// 命中判定贵且需完整 cascade，无法在打包期静态断言 → 返回 `has_multi_compound_rule`
+/// 保守标志，调用方据此「视为命中」放行（避免假阳性）。Stage 6.4（rich-text-block
+/// 分类）与 6.5（inline 上下文检查）共享此提取，保证两阶段判定一致。
+pub(crate) fn collect_display_class_rules<'a>(
+    dynamic_rules: &'a [DynamicRule],
+    value: &str,
+) -> (Vec<&'a Compound>, bool) {
+    let mut single_compound_rules: Vec<&Compound> = Vec::new();
+    let mut has_multi_compound_rule = false;
     for rule in dynamic_rules {
-        let declares_flex = rule
+        let declares = rule
             .declarations
             .iter()
-            .any(|d| d.prop == "display" && d.value.trim() == "flex");
-        if !declares_flex {
+            .any(|d| d.prop == "display" && d.value.trim() == value);
+        if !declares {
             continue;
         }
         if rule.selector.compound.len() == 1 {
-            single_compound_flex_rules.push(&rule.selector.compound[0]);
+            single_compound_rules.push(&rule.selector.compound[0]);
         } else {
-            has_multi_compound_flex_rule = true;
+            has_multi_compound_rule = true;
         }
     }
-    (single_compound_flex_rules, has_multi_compound_flex_rule)
+    (single_compound_rules, has_multi_compound_rule)
+}
+
+/// [`collect_display_class_rules`] 的 `display:flex` 特化（Stage 6.4/6.5 共用）。
+pub(crate) fn collect_flex_class_rules(dynamic_rules: &[DynamicRule]) -> (Vec<&Compound>, bool) {
+    collect_display_class_rules(dynamic_rules, "flex")
+}
+
+/// 单 compound 选择器是否无条件命中该元素（tag/class 字面对照；伪类、属性
+/// 选择器、id 条件化命中，不能当无条件静态匹配）。
+fn class_rule_matches_element(comp: &Compound, el: &IrElement) -> bool {
+    let tag_ok = comp
+        .tag
+        .as_ref()
+        .is_none_or(|t| t.eq_ignore_ascii_case(&el.tag));
+    let no_pseudo = !comp.pseudo_hover
+        && !comp.pseudo_active
+        && !comp.pseudo_disabled
+        && !comp.pseudo_focus
+        && comp.pseudo_nth_child.is_none() // 结构伪类同样条件化命中，不能当无条件静态匹配
+        && comp.attrs.is_empty();
+    if !tag_ok || !no_pseudo || comp.id.is_some() {
+        return false;
+    }
+    let classes: Vec<&str> = el
+        .attributes
+        .iter()
+        .find(|a| a.name == "class")
+        .map(|a| a.value.split_whitespace().collect())
+        .unwrap_or_default();
+    comp.classes.iter().all(|c| classes.contains(&c.as_str()))
+}
+
+/// 元素的 class 规则是否声明了指定 display 值。单 compound 静态匹配；存在多
+/// compound 的此类规则时保守视为命中（无法廉价判定，避免假阳性误报）。
+pub(crate) fn class_declares_display(
+    el: &IrElement,
+    rules: &[&Compound],
+    has_multi_compound_rule: bool,
+) -> bool {
+    if rules
+        .iter()
+        .any(|comp| class_rule_matches_element(comp, el))
+    {
+        return true;
+    }
+    has_multi_compound_rule
 }
 
 /// 判定 parent 是否为 flex 上下文。
@@ -68,36 +117,11 @@ pub(crate) fn is_flex_context(
         return true;
     }
     // (2) class 规则声明 display:flex。
-    let parent_classes: Vec<&str> = parent_el
-        .attributes
-        .iter()
-        .find(|a| a.name == "class")
-        .map(|a| a.value.split_whitespace().collect())
-        .unwrap_or_default();
-    for comp in single_compound_flex_rules {
-        let tag_ok = comp
-            .tag
-            .as_ref()
-            .is_none_or(|t| t.eq_ignore_ascii_case(&parent_el.tag));
-        let no_pseudo = !comp.pseudo_hover
-            && !comp.pseudo_active
-            && !comp.pseudo_disabled
-            && !comp.pseudo_focus
-            && comp.pseudo_nth_child.is_none() // 结构伪类同样条件化命中，不能当无条件静态 flex
-            && comp.attrs.is_empty();
-        if !tag_ok || !no_pseudo || comp.id.is_some() {
-            continue;
-        }
-        if comp
-            .classes
-            .iter()
-            .all(|c| parent_classes.contains(&c.as_str()))
-        {
-            return true;
-        }
-    }
-    // 多 compound flex 规则存在 → 保守放行（无法廉价判定命中）。
-    has_multi_compound_flex_rule
+    class_declares_display(
+        parent_el,
+        single_compound_flex_rules,
+        has_multi_compound_flex_rule,
+    )
 }
 
 /// 检查所有 inline 元素是否处于合法上下文（flex 容器）。返回诊断（error 列表）。
@@ -117,10 +141,13 @@ pub fn check_inline_context(
     file: &str,
     line_map: &LineMap,
 ) -> Vec<Diagnostic> {
-    // 预提取“声明了 display:flex 的单 compound 规则”，避免每个元素全量扫描。
-    // 多 compound flex 规则 → has_multi_compound_flex_rule（保守放行）。
+    // 预提取“声明了 display:flex / display:block 的单 compound 规则”，避免每个
+    // 元素全量扫描。flex 判定父上下文；block 判定子元素自身（显式块级）。
+    // 多 compound 规则 → 保守放行。
     let (single_compound_flex_rules, has_multi_compound_flex_rule) =
         collect_flex_class_rules(dynamic_rules);
+    let (single_compound_block_rules, has_multi_compound_block_rule) =
+        collect_display_class_rules(dynamic_rules, "block");
 
     let mut diagnostics = Vec::new();
     for (idx, node) in tree.nodes.iter().enumerate() {
@@ -146,9 +173,17 @@ pub fn check_inline_context(
             continue;
         }
 
-        // 元素自己显式 display:block → 作者有意当块级（撑满），浏览器也撑满，两边一致 → 放行。
+        // 元素自己显式 display:block（inline style 或 class 规则）→ 作者有意当块级
+        // （撑满），浏览器也撑满，两边一致 → 放行。class 规则路径与 flex 判定同源
+        // （css_resolve 只烘 inline style，class 规则的 display 要查 dynamic_rules）。
         // （display:flex 的 inline 元素在浏览器仍 shrink-to-fit，和 LoomGUI 撑满不一致 → 不放行。）
-        if styles[idx].taffy_style.display == taffy::Display::Block {
+        if styles[idx].taffy_style.display == taffy::Display::Block
+            || class_declares_display(
+                el,
+                &single_compound_block_rules,
+                has_multi_compound_block_rule,
+            )
+        {
             continue;
         }
 
@@ -264,6 +299,21 @@ mod tests {
         assert!(
             !has_block_context_diag(&result, "button"),
             "显式 display:block 的 button 不应报错（有意块级）: {:?}",
+            result.diagnostics
+        );
+    }
+
+    /// class 规则声明 display:block（对面反馈：修复建议 (2) 的 class CSS 路径须生效，
+    /// 与 inline style 同待遇）→ 放行。
+    #[test]
+    fn class_display_block_ok() {
+        let result = parse_template(
+            r#"<style>.blk { display: block }</style><div><button class="blk">Full-width</button></div>"#,
+            "t.html",
+        );
+        assert!(
+            !has_block_context_diag(&result, "button"),
+            "class 规则 display:block 的 button 不应报错: {:?}",
             result.diagnostics
         );
     }

@@ -61,6 +61,10 @@ pub enum DiagnosticCode {
     /// 绿灯但运行时得到空白容器——属「不静默降级」原则要拦的典型类别。
     /// 注册表见 schema::tag::ROLE_TO_SEMANTIC + textbox/tabpanel 例外。
     FenceUnknownRole,
+    /// `<link rel="stylesheet" href>` 的外部 CSS 读取失败（文件缺失 / io 错误）。
+    /// href 相对所在 HTML 文件解析；加载失败即 error——静默丢样式是最难排查的
+    /// 降级形态。
+    FenceStylesheetNotFound,
 }
 
 #[derive(Debug, Clone)]

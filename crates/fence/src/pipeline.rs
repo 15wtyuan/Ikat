@@ -1,8 +1,8 @@
 use crate::annotate::annotate;
 use crate::consistency_check::check_consistency;
 use crate::css_resolve::resolve_inline_styles_with_diags;
-use crate::css_rules::{parse_style_block, KeyframesRule};
-use crate::diagnostic::{Diagnostic, LineMap};
+use crate::css_rules::{parse_style_block_named, KeyframesRule};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::fence_gate::run_fence_gate;
 use crate::inline_context_check::check_inline_context;
 use crate::ir::{IrNodeKind, IrTree};
@@ -37,10 +37,24 @@ pub struct ParsedTemplate {
 ///
 /// Collects ALL diagnostics (does not fail-fast).
 pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
+    parse_template_with_css(html, file, &|_| None)
+}
+
+/// [`parse_template`] 带外部样式表加载器：`<link rel="stylesheet" href>` 的 CSS
+/// 由调用方读取（fence 不做 io）。loader 收 workspace 相对路径（href 已按所在
+/// HTML 文件词法归一）、返回文件内容；返回 None = 加载失败（error 诊断定位
+/// `<link>` 标签）。
+pub fn parse_template_with_css(
+    html: &str,
+    file: &str,
+    load_css: &dyn Fn(&str) -> Option<String>,
+) -> ParsedTemplate {
     let line_map = LineMap::new(html);
 
     // Stage 1+2: Tokenize + Tree Build
-    let (mut tree, mut diagnostics, style_texts) = parse_html_to_ir_named(html, file.to_string());
+    let raw = parse_html_to_ir_named(html, file.to_string());
+    let mut tree = raw.tree;
+    let mut diagnostics = raw.diagnostics;
 
     // Stage 3: Fence Gate (per-element validation)
     let gate_diags = run_fence_gate(&tree, file, &line_map);
@@ -51,14 +65,35 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
     diagnostics.extend(css_diags);
 
     // Stage 4.5: <style> → 动态规则表（CSS cascade 规则，运行时 rematch 消费）。
-    // style_texts 由 tree_builder 在 Stage 1 抽出（<style> 元素文本），此处统一解析。
+    // style_texts 由 tree_builder 在 Stage 1 抽出（<style> 元素文本），此处统一解析；
+    // <link rel="stylesheet"> 引入的外部 CSS 同管線（浏览器语义：href 相对 HTML 文件、
+    // CSS 内 url() 相对 CSS 文件——改写成相对 HTML 的等价路径，与内联同基准）。
     let mut dynamic_rules = Vec::new();
     let mut keyframes = Vec::new();
-    for css in &style_texts {
-        let (rules, kf, css_diags) = parse_style_block(css);
+    for css in &raw.style_texts {
+        let (rules, kf, css_diags) = parse_style_block_named(css, file);
         dynamic_rules.extend(rules);
         keyframes.extend(kf);
         diagnostics.extend(css_diags);
+    }
+    for (href, span) in raw.stylesheet_links {
+        let css_rel = lexical_join(parent_dir(file), &href);
+        match load_css(&css_rel) {
+            Some(css) => {
+                let (mut rules, kf, css_diags) = parse_style_block_named(&css, &css_rel);
+                diagnostics.extend(css_diags);
+                rewrite_bg_urls_to_html_base(&mut rules, &css_rel, file);
+                dynamic_rules.extend(rules);
+                keyframes.extend(kf);
+            }
+            None => diagnostics.push(Diagnostic::error(
+                DiagnosticCode::FenceStylesheetNotFound,
+                format!(
+                    "stylesheet `{href}` not found (resolved to `{css_rel}`, relative to {file})"
+                ),
+                line_map.source_location(span.start, file.to_string()),
+            )),
+        }
     }
 
     // Stage 5: Structural (content model, IDs)
@@ -133,6 +168,73 @@ pub fn parse_template(html: &str, file: &str) -> ParsedTemplate {
         rich_text_blocks,
         diagnostics,
         referenced_sprites,
+    }
+}
+
+/// 正斜杠相对路径的目录部分（"ui/game/main.css" → "ui/game"；顶层文件 → ""）。
+fn parent_dir(path: &str) -> &str {
+    match path.rfind('/') {
+        Some(i) => &path[..i],
+        None => "",
+    }
+}
+
+/// 词法拼接并归一（"ui/game" + "../../assets/x.png" → "assets/x.png"）。
+/// 纯字符串栈归一，不触文件系统；上溯越过根的 `..` 被丢弃（与打包器 sprite
+/// key 归一同语义，越界路径由下游资源校验拦截）。
+fn lexical_join(dir: &str, rel: &str) -> String {
+    let mut stack: Vec<&str> = Vec::new();
+    for seg in dir.split('/') {
+        if !seg.is_empty() && seg != "." {
+            stack.push(seg);
+        }
+    }
+    for seg in rel.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                stack.pop();
+            }
+            s => stack.push(s),
+        }
+    }
+    stack.join("/")
+}
+
+/// 把 workspace 相对路径改写成相对 `base_dir` 的等价路径
+/// （"assets/x.png" 相对 "ui/game" → "../../assets/x.png"）。
+fn lexical_relativize(target: &str, base_dir: &str) -> String {
+    let base: Vec<&str> = base_dir.split('/').filter(|s| !s.is_empty()).collect();
+    let tgt: Vec<&str> = target.split('/').filter(|s| !s.is_empty()).collect();
+    let mut common = 0;
+    while common < base.len() && common < tgt.len() && base[common] == tgt[common] {
+        common += 1;
+    }
+    let mut parts: Vec<&str> = vec![".."; base.len() - common];
+    parts.extend(&tgt[common..]);
+    if parts.is_empty() {
+        ".".to_string()
+    } else {
+        parts.join("/")
+    }
+}
+
+/// 外部 CSS 的 url() 相对 CSS 文件（浏览器语义）；而下游 sprite 归一以 HTML 文件
+/// 为基准——这里改写成相对 HTML 的等价路径，让内联 / 外链规则同基准、下游零特判。
+fn rewrite_bg_urls_to_html_base(rules: &mut [DynamicRule], css_rel: &str, html_rel: &str) {
+    let css_dir = parent_dir(css_rel);
+    let html_dir = parent_dir(html_rel);
+    for r in rules.iter_mut() {
+        for d in r.declarations.iter_mut() {
+            if (d.prop == "background-image" || d.prop == "background")
+                && !d.value.trim().starts_with("linear-gradient(")
+            {
+                if let Some(path) = parse_url(&d.value) {
+                    let ws = lexical_join(css_dir, &path);
+                    d.value = format!("url(\"{}\")", lexical_relativize(&ws, html_dir));
+                }
+            }
+        }
     }
 }
 
@@ -221,5 +323,111 @@ mod tests {
         assert!(result
             .referenced_sprites
             .contains(&"icons/home.png".to_string()));
+    }
+
+    #[test]
+    fn link_stylesheet_rules_and_keyframes_load() {
+        let result = parse_template_with_css(
+            r#"<head><link rel="stylesheet" href="theme.css"></head>
+               <div class="card"><button>b</button></div>"#,
+            "ui/game/main.html",
+            &|path| {
+                (path == "ui/game/theme.css").then(|| {
+                    ".card { display: flex }\
+                     @keyframes spin { from { opacity: 1 } to { opacity: 0.5 } }"
+                        .to_string()
+                })
+            },
+        );
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+        assert!(result
+            .dynamic_rules
+            .iter()
+            .any(|r| r.selector.raw.contains("card")));
+        assert!(result.keyframes.iter().any(|k| k.name == "spin"));
+    }
+
+    #[test]
+    fn link_stylesheet_missing_file_errors() {
+        let result = parse_template_with_css(
+            r#"<head><link rel="stylesheet" href="nope.css"></head><div>x</div>"#,
+            "ui/game/main.html",
+            &|_| None,
+        );
+        let d = result
+            .diagnostics
+            .iter()
+            .find(|d| d.code == crate::diagnostic::DiagnosticCode::FenceStylesheetNotFound)
+            .expect("stylesheet-not-found error");
+        assert!(
+            d.location.file.contains("main.html"),
+            "定位在 <link> 所在 HTML"
+        );
+        assert!(
+            d.message.contains("ui/game/nope.css"),
+            "报错带归一后路径: {}",
+            d.message
+        );
+    }
+
+    #[test]
+    fn link_non_stylesheet_rel_is_never_loaded() {
+        let result = parse_template_with_css(
+            r#"<head><link rel="icon" href="favicon.ico"></head><div>x</div>"#,
+            "m.html",
+            &|p| panic!("rel=icon 不得触发加载，got {p}"),
+        );
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn link_css_urls_rewrite_relative_to_html() {
+        // CSS 在 ui/game/style/theme.css，其中 url() 相对 CSS 文件
+        // （../../assets/icon.png → workspace 的 assets/icon.png）→ 改写成相对
+        // HTML（ui/game/）的等价路径 ../assets/icon.png，与内联 <style> 同基准。
+        let result = parse_template_with_css(
+            r#"<head><link rel="stylesheet" href="style/theme.css"></head><div class="bg"></div>"#,
+            "ui/game/main.html",
+            &|path| {
+                (path == "ui/game/style/theme.css")
+                    .then(|| ".bg { background-image: url(../../assets/icon.png) }".to_string())
+            },
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        let rule = result
+            .dynamic_rules
+            .iter()
+            .find(|r| r.selector.raw == ".bg")
+            .unwrap();
+        let bg = rule
+            .declarations
+            .iter()
+            .find(|d| d.prop == "background-image")
+            .unwrap();
+        assert_eq!(bg.value, "url(\"../assets/icon.png\")");
+    }
+
+    #[test]
+    fn lexical_helpers_roundtrip() {
+        assert_eq!(parent_dir("ui/game/main.css"), "ui/game");
+        assert_eq!(parent_dir("main.css"), "");
+        assert_eq!(
+            lexical_join("ui/game", "../../assets/x.png"),
+            "assets/x.png"
+        );
+        assert_eq!(lexical_join("", "./a.css"), "a.css");
+        assert_eq!(
+            lexical_relativize("assets/x.png", "ui/game"),
+            "../../assets/x.png"
+        );
+        assert_eq!(lexical_relativize("ui/game/x.png", "ui/game"), "x.png");
     }
 }

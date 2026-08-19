@@ -65,7 +65,7 @@ pub struct PackResult {
 /// 诊断一次给全）；Warning 级不阻断打包，收集进返回值 `warnings` 供 CLI/GUI 呈现。
 /// bridge 多根 → Err（不静默产森林）。
 pub fn pack_components(components: &[Component]) -> Result<PackResult, BuildFailure> {
-    pack_components_inner(components, &ComponentRegistry::empty())
+    pack_components_inner(components, &ComponentRegistry::empty(), &|_| None)
 }
 
 /// 带 Custom Element 注册表的打包：hyphen 标签在打包期展开（slot 投影 + 展开域锚定
@@ -76,7 +76,18 @@ pub fn pack_components_with_registry(
     components: &[Component],
     registry: &ComponentRegistry,
 ) -> Result<PackResult, BuildFailure> {
-    pack_components_inner(components, registry)
+    pack_components_inner(components, registry, &|_| None)
+}
+
+/// 带 CSS 加载器的打包入口：页面 HTML 里的 `<link rel="stylesheet">` 由调用方按
+/// workspace 相对路径提供 CSS 内容（fence 不做 io）。生产路径（analyze）传工作区根
+/// 读取器；字符串单测走上面对应入口（无外部样式表）。
+pub fn pack_components_with_css(
+    components: &[Component],
+    registry: &ComponentRegistry,
+    load_css: &dyn Fn(&str) -> Option<String>,
+) -> Result<PackResult, BuildFailure> {
+    pack_components_inner(components, registry, load_css)
 }
 
 /// pack_components_inner 的累积条目：一个已 bridge 的页面组件（+ 组件展开域锚定规则）。
@@ -92,6 +103,7 @@ struct BuiltComponent {
 fn pack_components_inner(
     components: &[Component],
     registry: &ComponentRegistry,
+    load_css: &dyn Fn(&str) -> Option<String>,
 ) -> Result<PackResult, BuildFailure> {
     let mut built: Vec<BuiltComponent> = Vec::new();
     let mut refs: Vec<String> = Vec::new();
@@ -104,7 +116,7 @@ fn pack_components_inner(
             src,
             html_rel,
         } = comp;
-        let parsed = loomgui_fence::parse_template(src, name);
+        let parsed = loomgui_fence::parse_template_with_css(src, html_rel, load_css);
         // 该组件全部围栏诊断先进收集（Error+Warning）。Error 存在则跳过 bridge
         //（坏树不值得展开），但循环继续——后续组件的诊断也要给作者。
         let has_error = parsed
@@ -134,25 +146,25 @@ fn pack_components_inner(
         };
         // Image.src 归一化已在 walker emit 时按各文件 html_rel 完成（页面文件 + 展开的
         // 组件文件各归各的——组件 src 相对组件文件，不能再按页面 html_rel 二次归一）。
-        // 组件 @keyframes 合并：宿主（页面文件）优先，展开引入的组件动画按名去重，
-        // 同名碰撞 → warning（页面与组件对同名动画意图不同，作者应显式改名）。
+        // 组件 @keyframes 合并：宿主（页面文件）优先，展开引入的组件动画按名去重。
+        // 同名且内容一致 → 静默去重（同一组件多实例、或不同组件定义了等价动画——
+        // 无分歧不出声，告警只是噪音）；同名且内容不同 → warning（真碰撞：宿主/
+        // 先到者胜出，组件侧被忽略；如需同时生效请改名）。
         let mut keyframes = translate_keyframes(&parsed.keyframes);
-        let mut kf_names: std::collections::HashSet<String> =
-            keyframes.iter().map(|k| k.name.clone()).collect();
         for kf in out.extra_keyframes {
-            if kf_names.insert(kf.name.clone()) {
-                keyframes.push(kf);
-            } else {
-                diagnostics.push(PackDiagnostic::synthetic_warning(
+            match keyframes.iter().find(|k| k.name == kf.name) {
+                None => keyframes.push(kf),
+                Some(existing) if *existing == kf => {}
+                Some(_) => diagnostics.push(PackDiagnostic::synthetic_warning(
                     code::COMPONENT_KEYFRAMES_COLLISION,
                     name,
                     html_rel,
                     format!(
-                        "组件动画 `@keyframes {}` 与宿主（或先展开组件）同名——宿主优先，\
-                         组件侧被忽略；如需同时生效请改名",
+                        "组件动画 `@keyframes {}` 与宿主（或先展开组件）同名且内容不同——\
+                         宿主优先，组件侧被忽略；如需同时生效请改名",
                         kf.name
                     ),
-                ));
+                )),
             }
         }
         // 页面文件 <style> class 规则的 background-image / background url() 归一——runtime
@@ -418,7 +430,9 @@ pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
-        match pack_components_with_registry(&comps, &registry) {
+        // 页面 <link rel="stylesheet"> 的外部 CSS 按 workspace 相对路径读取。
+        let load_css = |css_rel: &str| std::fs::read_to_string(workspace_root.join(css_rel)).ok();
+        match pack_components_with_css(&comps, &registry, &load_css) {
             Ok(pr) => {
                 all_refs.extend(pr.referenced_sprites.iter().cloned());
                 packages.push((pkg.name.clone(), pr));

@@ -317,6 +317,15 @@ fn take_ident(s: &str) -> (&str, &str) {
 ///
 /// @keyframes 解析后产出 KeyframesRule；packer bridge 将它翻译并序列化进 pkg.bin v30。
 pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Vec<Diagnostic>) {
+    parse_style_block_named(css, "<style>")
+}
+
+/// [`parse_style_block`] 带来源文件标签：诊断的 file 字段指向 CSS 来源（内联
+/// `<style>` 或外部 CSS 文件路径），让作者报错能落对文件。
+pub fn parse_style_block_named(
+    css: &str,
+    source_file: &str,
+) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Vec<Diagnostic>) {
     let stripped = strip_comments(css);
     // 诊断定位用（粗略）：strip_comments 后 offset 已不对应原文，但行号近似可用。
     let line_map = LineMap::new(&stripped);
@@ -337,7 +346,7 @@ pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Ve
 
         // At-rule 分支：prelude 以 `@` 开头
         if prelude.starts_with('@') {
-            let loc = line_map.source_location(sel_start, "<style>".to_string());
+            let loc = line_map.source_location(sel_start, source_file.to_string());
             // 找匹配的 `}`（@keyframes 体含嵌套大括号，必须按深度匹配）
             let Some((body, end_pos)) = find_matching_brace(&stripped, after_open) else {
                 break;
@@ -354,7 +363,7 @@ pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Ve
                 },
                 _ => diagnostics.push(Diagnostic::error(
                     DiagnosticCode::FenceBadCssValue,
-                    format!("unsupported at-rule @{at_name} in <style>"),
+                    format!("unsupported at-rule @{at_name} in {source_file}"),
                     loc,
                 )),
             }
@@ -373,7 +382,7 @@ pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Ve
             continue;
         }
         // <style> 内无精确 per-token span —— 定位用选择器起点近似。
-        let loc = line_map.source_location(sel_start, "<style>".to_string());
+        let loc = line_map.source_location(sel_start, source_file.to_string());
         // 声明块只解析一次，逗号 selector list 的每段共享同一 declarations（clone）。
         let declarations = parse_declarations(&body, &loc, &mut diagnostics);
         if declarations.is_empty() {

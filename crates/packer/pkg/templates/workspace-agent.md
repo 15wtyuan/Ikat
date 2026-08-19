@@ -31,6 +31,16 @@ Build outputs are written into `output_dir`, resolved against the Unity project 
 
 A failing build lists every fence violation and asset error together. Common asset errors: `<img src>` pointing at an image not covered by any atlas (missing-image), the same image covered by two atlases (atlas conflict), images not fitting `max_size` (atlas overflow), missing font file.
 
+## Runtime integration (how Unity consumes this workspace)
+
+Build artifacts are not the end of the chain — the game project loads and drives them:
+
+- `LoomStageDriver` (a Unity component) reads `loom.runtime.json` at startup and loads everything it lists: packages, atlases (pages load lazily), fonts. In the editor it reads `Assets/Bundles` by default; in player builds the game serves the same files from StreamingAssets or its own AssetBundle/Addressables pipeline (virtual loading hooks on the driver).
+- Game code shows a page with `driver.Instantiate("<package>", "<page-stem>")` (page stem = HTML filename without `.html`) and wires behavior on typed nodes, e.g. `page.Get<Button>("btn-start").Clicked += ...`.
+- **Ids are the game-code API.** The `id` attributes you write in HTML are exactly what C# code looks up (`Get<T>("id")`). Keep ids of interactive elements stable and semantic (`btn-start`, `hp-fill`); renaming an id silently breaks game code.
+- UI never blocks input by itself — the game gates its own 3D raycasts on `driver.Context.IsPointerOnUI`. Embedding 3D content inside UI (character previews, particles on cards) uses `driver.BindNativeHost`.
+- Full Unity-side guide: `runtime-integration.md` under `Editor/Resources/LoomGUI/skill/references/` in the installed LoomGUI package.
+
 ## Workspace structure
 
 ```
@@ -39,7 +49,7 @@ workspace/
   ui/                       -> HTML/CSS components (one .pkg.bin per package)
     showcase/
       main.html
-      main.css
+      main.css              -> optional external CSS (via <link rel="stylesheet">)
   assets/                   -> image sources for atlases (PNG only)
     icons/
       home.png
@@ -90,14 +100,15 @@ All paths are relative to the workspace root and use forward slashes.
 | `default` | bool | `false` | Whether this is the default font (used when no family is specified) |
 | `fallback` | bool | `false` | Whether this font is used as a fallback (for missing glyphs) |
 
-## img src convention
+## Path conventions
 
-`<img src="...">` is **relative to the HTML file itself** (browser-native):
+All references resolve lexically at build time, browser-style:
 
-- `ui/showcase/main.html` with `<img src="home.png">` resolves to `ui/showcase/home.png`
-- `<img src="images/x.png">` resolves to `ui/showcase/images/x.png`
+- `<img src="...">` — relative to the **HTML file itself** (page or component file; components live in `components/`, so reaching outer assets takes extra `../`).
+- `<link rel="stylesheet" href="...">` — relative to the HTML file. External CSS is fully supported: rules, `@keyframes`, and diagnostics behave exactly like inline `<style>`. A missing file is a build error (never a silent drop).
+- `url()` inside a CSS file — relative to **that CSS file** (browser semantics; the packer rewrites it to the HTML-relative equivalent internally).
 
-The packer converts these to **sprite keys** (image path relative to workspace root, forward slashes). Sprite keys are globally unique across the workspace. Images under `assets/` atlas directories are referenced by their workspace-relative path: `<img src="../../assets/icons/home.png">` -> sprite key `assets/icons/home.png`.
+The packer converts image references to **sprite keys** (workspace-relative paths, forward slashes, globally unique). Images under `assets/` atlas directories are referenced by their workspace-relative path: `<img src="../../assets/icons/home.png">` -> sprite key `assets/icons/home.png`.
 
 ## Fence quick reference
 
@@ -105,7 +116,9 @@ The complete rulebook is the loomgui-editor skill (see "How to work here"). The 
 
 **Principle.** Tags plus `role` decide stable object types; CSS only grants behavior (`display:flex` switches the layout strategy, `overflow:auto` switches scroll). Nothing outside the fence is silently ignored — everything is a build error, reported together.
 
-**Tags.** 8 document-shell tags are consumed at build time: `html`, `head`, `body`, `title`, `meta`, `style`, `link`, `script`. 6 runtime tags enter the object tree: `div`, `span`, `button`, `img`, `template`, `slot`. Tag names containing a hyphen are custom elements; each must have a `components/<tag>.html` registration file in the package directory, otherwise the build fails with `UnregisteredCustomElement`.
+**Tags.** 8 document-shell tags are consumed at build time: `html`, `head`, `body`, `title`, `meta`, `style`, `link`, `script`. `link` carries real semantics for `rel="stylesheet"` (external CSS, see path conventions). 6 runtime tags enter the object tree: `div`, `span`, `button`, `img`, `template`, `slot`. Tag names containing a hyphen are custom elements; each must have a `components/<tag>.html` registration file in the package directory, otherwise the build fails with `UnregisteredCustomElement`. There is no `<br>` — split multi-line copy into separate block elements.
+
+**Custom components are isolated (Shadow-DOM-like).** The CSS universe of a component instance is the component file's own `<style>`/`<link>` — page rules never reach inside, component rules never leak out. Projected children (what you write inside `<my-widget>`) are styled by the component's CSS; style them in the component file or carry sizes as content attributes. Components are validated standalone: a control inside a component must be matched by the component's own CSS. To share design tokens across pages and components, reference the same external CSS file from both sides.
 
 **Controls and lists have no tags — they are role-driven.** Write them on a
 `div` (role values are whitelist-checked; an unrecognized role is a build
@@ -135,9 +148,10 @@ Control initial values go into ARIA attributes (`aria-valuenow`, `aria-checked`,
 
 - `display` accepts `block` / `flex` / `none` / `inline`. **`display:grid` does not exist** — build error.
 - `button` and `img` are inline boxes: they must sit in a `display:flex` parent, or carry an explicit `display:block`. Bare in a block container is a build error (LoomGUI has no CSS inline flow outside flex).
-- A block container's direct children must not mix inline-level (text, `span`, `img`) with block-level elements — wrap the inline run in a sub-`div`, or make the container `display:flex`.
+- A block container's direct children must not mix inline-level (text, `span`, `img`) with block-level elements — wrap the inline run in a sub-`div`, or make the container `display:flex`. `slot` counts as block-level in this check (its projected content is unknowable at build time): put fallback text into the projected content, or give the slot its own container.
 - `position` accepts only `absolute` / `relative`.
 - `z-index` reorders siblings for drawing and hit-testing only (whole subtrees move with their parent); it never affects flex order — that is `order`.
+- `transform` pivots around the element's center only (`transform-origin` does not exist); pivot around a non-center point by positioning at the arc midpoint.
 - **Controls ship with NO default styles.** A control matched by no `<style>` rule is a build error and renders blank. Style the control itself and its `data-slot` children; a `combobox` additionally requires `position:relative` on itself and `position:absolute` on its `role=listbox` popup.
 - Animations: `animation` shorthand, `@keyframes`, and `:nth-child(An+B)` selectors are supported. Do not use `:nth-child` on virtualized lists (parked slots skew the count) — use `[data-index]` attribute selectors.
 

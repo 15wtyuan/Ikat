@@ -62,10 +62,19 @@ impl ComponentRegistry {
     pub fn from_sources(
         sources: &[(String, String, String)],
     ) -> Result<(Self, Vec<crate::diag::PackDiagnostic>), BuildFailure> {
+        Self::from_sources_with_css(sources, &|_| None)
+    }
+
+    /// [`from_sources`] 带外部样式表加载器：组件文件里的 `<link rel="stylesheet">`
+    /// 由调用方按 workspace 相对路径提供内容（fence 不做 io）。
+    pub fn from_sources_with_css(
+        sources: &[(String, String, String)],
+        load_css: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<(Self, Vec<crate::diag::PackDiagnostic>), BuildFailure> {
         let mut reg = ComponentRegistry::empty();
         let mut diagnostics: Vec<crate::diag::PackDiagnostic> = Vec::new();
         for (name, src, html_rel) in sources {
-            reg.register(name.clone(), src, html_rel, &mut diagnostics);
+            reg.register(name.clone(), src, html_rel, load_css, &mut diagnostics);
         }
         if diagnostics
             .iter()
@@ -85,6 +94,7 @@ impl ComponentRegistry {
         file_stem: String,
         src: &str,
         html_rel: &str,
+        load_css: &dyn Fn(&str) -> Option<String>,
         diagnostics: &mut Vec<crate::diag::PackDiagnostic>,
     ) {
         use crate::diag::{code, PackDiagnostic};
@@ -109,7 +119,7 @@ impl ComponentRegistry {
             ));
             return;
         }
-        let parsed = loomgui_fence::parse_template(src, html_rel);
+        let parsed = loomgui_fence::parse_template_with_css(src, html_rel, load_css);
         let has_error = parsed
             .diagnostics
             .iter()
@@ -218,7 +228,9 @@ pub fn scan_component_registry(
             }
         }
     }
-    ComponentRegistry::from_sources(&sources)
+    // 组件文件里的 <link rel="stylesheet"> 同页面待遇：按 workspace 相对路径读取。
+    let load_css = |css_rel: &str| std::fs::read_to_string(workspace_root.join(css_rel)).ok();
+    ComponentRegistry::from_sources_with_css(&sources, &load_css)
 }
 
 /// bridge_with_components 的产出。
@@ -1023,6 +1035,37 @@ mod tests {
         assert!(
             errors.iter().any(|d| d.file == "components/bad-b.html"),
             "修前首错即断会漏掉 bad-b"
+        );
+    }
+
+    /// 同一组件多实例的 keyframes 重复展开：内容一致 → 静默去重，不逐实例告警。
+    #[test]
+    fn keyframes_identical_duplicates_silent() {
+        let (reg, _) = ComponentRegistry::from_sources(&[(
+            "anim-card".to_string(),
+            r#"<style>@keyframes fade { from { opacity: 0 } to { opacity: 1 } }</style>
+<div class="ac"><slot></slot></div>"#
+                .to_string(),
+            "components/anim-card.html".to_string(),
+        )])
+        .unwrap();
+        let pr = pack_page(
+            &reg,
+            r#"<div style="display:flex"><anim-card><span>a</span></anim-card><anim-card><span>b</span></anim-card></div>"#,
+        );
+        assert!(
+            pr.warnings
+                .iter()
+                .all(|w| w.code != "ComponentKeyframesNameCollision"),
+            "内容一致的重复 keyframes 不应告警: {:?}",
+            pr.warnings
+        );
+        let pkg = loomgui_core::asset::read_package(&pr.bytes).unwrap();
+        let comp = pkg.components.get("page").unwrap();
+        assert_eq!(
+            comp.keyframes.iter().filter(|k| k.name == "fade").count(),
+            1,
+            "去重后只保留一份"
         );
     }
 

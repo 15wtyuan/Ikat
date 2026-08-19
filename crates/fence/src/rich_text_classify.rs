@@ -173,10 +173,10 @@ pub fn classify_rich_text(
             diagnostics.push(Diagnostic::error(
                 DiagnosticCode::FenceMixedInlineBlock,
                 format!(
-                    "block container <{tag}> mixes inline children (text/span/img) with block \
-                     children (div/controls). LoomGUI rich-text inline flow requires the direct \
-                     children to be ALL inline; a mix is undefined (some want horizontal flow, \
-                     some want to fill width and stack). Fix (pick one): \
+                    "<{tag}> mixes inline children (text/span/img) with block children \
+                     (div/controls/template/slot). LoomGUI rich-text inline flow requires the \
+                     direct children to be ALL inline; a mix is undefined (some want horizontal \
+                     flow, some want to fill width and stack). Fix (pick one): \
                      (1) wrap the inline children inside a single child <div> so this container's \
                      direct children are all block-level; \
                      (2) set display:flex on this container so every child becomes a flex item.",

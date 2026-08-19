@@ -141,3 +141,81 @@ fn check_reports_uncovered_sprite_reference() {
     );
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// `<link rel="stylesheet">` 端到端：CSS 文件相对 HTML 解析、规则进包、其中
+/// url() 相对 CSS 文件归一成正确的 sprite key（经 atlas 覆盖校验对账）。
+#[test]
+fn check_resolves_link_stylesheet_end_to_end() {
+    let tmp = std::env::temp_dir().join("loom_check_link_css_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    // 页面在 ui/showcase/，CSS 在 ui/showcase/style/theme.css，
+    // CSS 里 url(../../assets/icon.png) 相对 CSS 文件 = workspace assets/icon.png。
+    // 故意不建 atlas：覆盖缺失诊断携带 sprite key，直接对账 url 归一结果。
+    let style_dir = tmp.join("ui/showcase/style");
+    std::fs::create_dir_all(&style_dir).unwrap();
+    std::fs::write(
+        style_dir.join("theme.css"),
+        ".hero { display: flex; background-image: url(../../assets/icon.png) }",
+    )
+    .unwrap();
+    make_workspace(
+        &tmp,
+        r#"<head><link rel="stylesheet" href="style/theme.css"></head>
+           <div class="hero"><button>ok</button></div>"#,
+        "output",
+    );
+
+    // 覆盖缺失是预期失败形态；围栏侧必须零诊断（link 正常加载、规则生效）。
+    let err = match analyze(&tmp) {
+        Err(e) => e,
+        Ok(_) => panic!("uncovered sprite must fail"),
+    };
+    assert!(
+        err.diagnostics
+            .iter()
+            .all(|d| d.code != "FenceStylesheetNotFound"),
+        "link 须正常加载: {:?}",
+        err.diagnostics
+    );
+    let d = err
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "SpriteMissingFromAtlas")
+        .expect("sprite coverage diagnostic");
+    assert!(
+        d.message.contains("assets/icon.png"),
+        "link CSS 的 url() 须归一成 workspace 相对 sprite key: {}",
+        d.message
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// `<link>` 指向不存在的 CSS → error（file 落 CSS 期望路径、定位在 HTML 的 link 标签）。
+#[test]
+fn check_reports_missing_link_stylesheet() {
+    let tmp = std::env::temp_dir().join("loom_check_link_missing_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    make_workspace(
+        &tmp,
+        r#"<head><link rel="stylesheet" href="nope.css"></head><div>x</div>"#,
+        "output",
+    );
+
+    let err = match analyze(&tmp) {
+        Err(e) => e,
+        Ok(_) => panic!("missing stylesheet must fail"),
+    };
+    assert_eq!(err.exit_code, 1);
+    let d = err
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "FenceStylesheetNotFound")
+        .expect("stylesheet-not-found diagnostic");
+    assert_eq!(d.file, "ui/showcase/home.html", "定位在 <link> 所在 HTML");
+    assert!(
+        d.message.contains("ui/showcase/nope.css"),
+        "报错带解析后的 CSS 路径: {}",
+        d.message
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+}

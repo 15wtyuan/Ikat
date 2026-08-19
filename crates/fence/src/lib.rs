@@ -16,5 +16,5 @@ pub mod tree_builder;
 
 pub use diagnostic::Diagnostic;
 pub use ir::{IrElement, IrNode, IrNodeKind, IrTree};
-pub use pipeline::{parse_template, ParsedTemplate};
+pub use pipeline::{parse_template, parse_template_with_css, ParsedTemplate};
 pub use schema::{Category, ContentModel, SemanticKind, TagSpec};

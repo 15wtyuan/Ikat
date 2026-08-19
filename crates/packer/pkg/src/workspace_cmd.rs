@@ -211,8 +211,12 @@ pub fn add_font(
         .ok_or_else(|| BuildFailure::config(format!("invalid font path: {}", src.display())))?;
     let fonts_dir = root.join("fonts");
     std::fs::create_dir_all(&fonts_dir).map_err(|e| format!("create fonts dir: {e}"))?;
-    std::fs::copy(src, fonts_dir.join(basename))
-        .map_err(|e| format!("copy font {}: {e}", src.display()))?;
+    let dst = fonts_dir.join(basename);
+    // 源文件已在 fonts/ 落位（先手动放进 fonts/ 再注册）时跳过拷贝：同源同目标的
+    // fs::copy 在 Windows 报共享冲突，报出来像文件被第三方锁住，极具误导性。
+    if !same_file(src, &dst) {
+        std::fs::copy(src, &dst).map_err(|e| format!("copy font {}: {e}", src.display()))?;
+    }
     let file = format!("fonts/{basename}");
     ws.fonts.push(crate::workspace::FontCfg {
         family: family.to_string(),
@@ -294,6 +298,15 @@ pub fn add_atlas(
 
 fn count_component_files(root: &Path, pkg: &PackageCfg) -> Result<usize, BuildFailure> {
     Ok(component_files(root, pkg)?.len())
+}
+
+/// 两路径是否指向同一文件。canonicalize 优先（解析真实盘上拼写与归一 . / ..），
+/// 任一端不存在时退词法绝对路径比较。
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => std::path::absolute(a).ok() == std::path::absolute(b).ok(),
+    }
 }
 
 /// components/ 目录下的组件 tag 列表（每 package dir 一个 components/ 子目录）。
@@ -406,6 +419,21 @@ mod tests {
         // family 冲突拒绝。
         let err = add_font(&tmp, &src, "NotoSansSC", false, false).unwrap_err();
         assert_eq!(err.exit_code, 1);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn add_font_already_in_fonts_dir_registers_without_copy() {
+        let tmp = tmpdir("font_inplace");
+        make_ws(&tmp);
+        std::fs::create_dir_all(tmp.join("fonts")).unwrap();
+        std::fs::write(tmp.join("fonts/WenKai.ttf"), b"stub font").unwrap();
+        // 源就是 fonts/ 里的目标文件：跳过拷贝直接注册（同源同目标 copy 在
+        // Windows 报共享冲突，形似文件被锁）。
+        let s = add_font(&tmp, &tmp.join("fonts/WenKai.ttf"), "WenKai", true, false).unwrap();
+        assert_eq!(s.file, "fonts/WenKai.ttf");
+        let ws = load_workspace(&tmp).unwrap();
+        assert_eq!(ws.fonts.len(), 1);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

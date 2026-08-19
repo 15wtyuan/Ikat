@@ -70,19 +70,24 @@ pub struct PackDiagnostic {
 impl PackDiagnostic {
     /// fence 诊断 → 打包诊断。
     ///
-    /// file 用 `html_rel`（真实磁盘路径）覆盖而非 `diagnostic.location.file`——后者被
-    /// `parse_template(src, name)` 设成组件名，作者拿组件名定位不到磁盘文件；line/column
-    /// 相对 src 算出，与 html_rel 指向同一份文件，覆盖后仍准确。
+    /// file 优先取诊断自带的 `location.file`：外部 CSS（`<link rel="stylesheet">`）
+    /// 的诊断 file 是 CSS 的 workspace 相对路径（定位到 CSS 文件）；html 侧诊断的
+    /// file 即 html_rel。占位标签（`"<style>"`/`"<inline>"`，字符串单测直接调
+    /// `parse_style_block` 时出现）回落 `html_rel` 参数。
     pub fn from_fence(
         d: &loomgui_fence::diagnostic::Diagnostic,
         component: &str,
         html_rel: &str,
     ) -> Self {
+        let file = match d.location.file.as_str() {
+            "<style>" | "<inline>" => html_rel.to_string(),
+            css_rel => css_rel.to_string(),
+        };
         Self {
             severity: d.severity.into(),
             code: format!("{:?}", d.code),
             component: component.to_string(),
-            file: html_rel.to_string(),
+            file,
             line: d.location.line,
             column: d.location.column,
             message: d.message.clone(),

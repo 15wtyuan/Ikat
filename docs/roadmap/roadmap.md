@@ -150,6 +150,10 @@
 
 ### T1 · 能力补全
 
+**`transform-origin`（非中心变换原点）** — `rotate`/`scale` 目前只绕元素几何中心；指针、雷达扫描、扇形展开等绕非中心点的动画场景必须每帧换算 left/top。实现牵连面：origin 依赖元素尺寸须延迟到布局后解析（Node 存 origin 描述符而非预烘矩阵）、pkg 格式 bump（旧包全失效）、inline/class 两条 CSS 路径、动画帧矩阵组合点。
+- 判据：第一个真绕非中心点的动画需求（Tripawd 地图连线已数学规避不阻塞；指针/扫描类一出现即插队）。
+- 来源：2026-08-19 Tripawd 反馈（LOOMGUI-ISSUES #10，roadmap 前置）。
+
 **ListView 多模板逐项切换（TemplateSelector 机制）** — 契约 §8「item 模板来源 2」的多模板半边未交付：`TemplateSelector` 现只是 C# 侧缓存委托（不参与克隆），core `enter_data_driven` 对多个 `<template>` 直接 Err（自动采用要求恰好一个）。逐项切换需 core 按 slot 从不同蓝图克隆（spacer 估高随模板变）。`Container.GetTemplate`（具名取模板喂 ItemTemplate）已交付。
 - 判据：真需要异构行（如邮件置顶/普通两种行结构，非仅 class 差异）时。
 - 来源：2026-08-17 调度/生命周期批 showcase 落地时发现（api-infra 页 #6 降级为单模板 + class 切换）。

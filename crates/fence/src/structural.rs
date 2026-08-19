@@ -64,10 +64,22 @@ fn validate_content_model(
                     let child_tag = child_el.tag.as_str();
                     let child_cat = find_tag(child_tag).map(|s| s.category);
                     if !is_child_allowed(&parent_spec.content, child_cat, child_tag) {
+                        // 自定义元素（tag 带 '-'）是块级组件根，嵌进 phrasing 容器
+                        // （span 等）必然违规——顺带教学 Web Components 的正确槽位写法。
+                        let hint = if child_tag.contains('-') {
+                            concat!(
+                                " (custom elements are block-level component roots and cannot ",
+                                "nest inside phrasing containers like <span>; to slot content ",
+                                "into a component, put the slot attribute on a direct child: ",
+                                "<my-widget><span slot=\"x\">...</span></my-widget>)"
+                            )
+                        } else {
+                            ""
+                        };
                         diagnostics.push(Diagnostic::error(
                             DiagnosticCode::InvalidContentModel,
                             format!(
-                                "<{}> cannot appear inside <{}> (content model conflict)",
+                                "<{}> cannot appear inside <{}> (content model conflict){hint}",
                                 child_tag, parent_tag
                             ),
                             loc(file, tree.nodes[child_id.0].span.start, line_map),
