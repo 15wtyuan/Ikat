@@ -465,6 +465,72 @@ html, body {
   line-height: 1.6;
   margin: 4px 0 16px 0;
 }
+
+/* ── New-workspace wizard: session-root banner + UI-dir drop field ── */
+.field-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #a0a0b8;
+  margin: 12px 0 6px;
+}
+.field-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: #606070;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nw-root-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-top: 12px;
+  background: #1e1e2e;
+  border: 1px solid #353548;
+  border-radius: 6px;
+  min-width: 0;
+}
+.nw-root-icon { font-size: 14px; flex-shrink: 0; }
+.nw-root-label { font-size: 11px; color: #606070; flex-shrink: 0; }
+.nw-root-path {
+  font-family: "Cascadia Code", "Fira Code", monospace;
+  font-size: 12px;
+  color: #c0c0d0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.nw-ui-row {
+  border: 1px dashed #353548;
+  border-radius: 8px;
+  padding: 10px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.nw-ui-row:hover { border-color: #4a4a66; }
+.nw-ui-row.nw-drop-active {
+  border-color: #7c5cfc;
+  background: rgba(124, 92, 252, 0.08);
+}
+.nw-ui-line { display: flex; gap: 8px; }
+.nw-ui-line .form-input { flex: 1; min-width: 0; }
+.nw-ui-preview {
+  margin-top: 6px;
+  font-family: "Cascadia Code", "Fira Code", monospace;
+  font-size: 11px;
+  color: #606070;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nw-ui-error { margin-top: 6px; font-size: 12px; color: #fc5c7c; }
+.nw-ui-error.nw-hidden { display: none; }
 .agent-option {
   display: flex;
   align-items: flex-start;
