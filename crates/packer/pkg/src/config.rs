@@ -222,7 +222,13 @@ mod tests {
             relativize(Path::new("F:/proj"), Path::new("F:/proj")).unwrap(),
             Path::new(".")
         );
+        // 跨盘 None 是 Windows 盘符前缀语义；其他平台 `C:`/`D:` 只是普通目录名
+        // （无 Prefix 组件，词法相对化仍可算），等价的「基不同 → None」改用
+        // 绝对/相对混用验证。
+        #[cfg(windows)]
         assert!(relativize(Path::new("C:/ui"), Path::new("D:/unity")).is_none());
+        #[cfg(not(windows))]
+        assert!(relativize(Path::new("/ui"), Path::new("rel")).is_none());
     }
 
     /// locate 三形态 + 失败路径。
