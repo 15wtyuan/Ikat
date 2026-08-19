@@ -24,6 +24,11 @@ pub enum CheckError {
         path: String,
         source: String,
     },
+    /// loomgui_pkg crate 版本与 unity 包不同轨（loom CLI 的 `cli == unity` 契约）。
+    PkgCrateVersionMismatch {
+        crate_version: String,
+        package_version: String,
+    },
 }
 
 impl std::fmt::Display for CheckError {
@@ -40,6 +45,15 @@ impl std::fmt::Display for CheckError {
             Self::ReadFailed { path, source } => {
                 write!(f, "failed to read {path}: {source}")
             }
+            Self::PkgCrateVersionMismatch {
+                crate_version,
+                package_version,
+            } => write!(
+                f,
+                "loomgui_pkg crate version {crate_version} != unity package version \
+                 {package_version}; bump crates/packer/pkg/Cargo.toml to align (loom CLI \
+                 reports both from the crate version — a mismatch ships a lying `loom version`)"
+            ),
         }
     }
 }
@@ -112,7 +126,32 @@ pub fn check_asmdef_present(pkg_dir: &Path) -> Result<(), CheckError> {
     Ok(())
 }
 
-/// release-check 入口：校验 package.json + CHANGELOG + dll + asmdef。
+/// 从 crate Cargo.toml 内容抓 `[package]` 段的 `version = "x.y.z"`。
+/// 只在 [package] 声明之后、下一个 section 之前查找（避免误抓 [[bin]] 等段内同名字段）。
+pub fn parse_crate_version(cargo_toml: &str) -> Option<String> {
+    let mut in_package = false;
+    for line in cargo_toml.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            in_package = t == "[package]";
+            continue;
+        }
+        if in_package {
+            if let Some(rest) = t.strip_prefix("version") {
+                let rest = rest.trim_start();
+                if let Some(v) = rest.strip_prefix('=') {
+                    let v = v.trim().trim_matches('"');
+                    if !v.is_empty() {
+                        return Some(v.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// release-check 入口：校验 package.json + CHANGELOG + dll + asmdef + loom crate 版本同轨。
 /// 任意一项失败返回 Err，调用方据此退出非 0。
 pub fn run_release_check() -> Result<(), Box<dyn std::error::Error>> {
     let pkg = paths::repo_root().join("unity/package/package.json");
@@ -134,6 +173,21 @@ pub fn run_release_check() -> Result<(), Box<dyn std::error::Error>> {
 
     check_asmdef_present(&pkg_dir)?;
 
+    // loom CLI 版本同轨：crate 版本 == unity 包版本。链条 tag → package.json →
+    // pkg crate → `loom version`，缺环即消费者装错版本号。
+    let cargo_toml = read_file(&paths::repo_root().join("crates/packer/pkg/Cargo.toml"))?;
+    let crate_version = parse_crate_version(&cargo_toml).ok_or_else(|| CheckError::ReadFailed {
+        path: "crates/packer/pkg/Cargo.toml".into(),
+        source: "no `version` field found in [package]".into(),
+    })?;
+    if crate_version != meta.version {
+        return Err(CheckError::PkgCrateVersionMismatch {
+            crate_version,
+            package_version: meta.version,
+        }
+        .into());
+    }
+
     println!("release-check: OK (version {})", meta.version);
     Ok(())
 }
@@ -150,6 +204,31 @@ mod tests {
             PackageMeta {
                 version: "0.0.1".into()
             }
+        );
+    }
+
+    #[test]
+    fn crate_version_takes_package_section_only() {
+        // version 出现在 [[bin]] 之前（[package] 内）才算；[dependencies] 段内的
+        // version 行不得干扰。
+        let toml = r#"
+[package]
+name = "loomgui_pkg"
+version = "0.0.5"
+edition = "2021"
+
+[[bin]]
+name = "loom"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+"#;
+        assert_eq!(parse_crate_version(toml).as_deref(), Some("0.0.5"));
+        // 无 [package] 段 → None。
+        assert_eq!(
+            parse_crate_version("[dependencies]\nversion = \"9\"\n"),
+            None
         );
     }
 

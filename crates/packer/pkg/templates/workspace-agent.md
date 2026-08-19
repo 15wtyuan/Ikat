@@ -4,20 +4,25 @@ This directory is a LoomGUI UI workspace: the single source of truth for your ga
 
 ## How to work here (for coding agents)
 
-1. Read `loom.workspace.json` first — it defines the packages (HTML/CSS sources), atlases (image inputs), and fonts of this workspace.
+1. Run `loom list pkg` (CLI reference: `{{SKILLS_DIR}}/loom/SKILL.md`) to see what exists; `loom show <pkg>` for one package's pages and components. Do not bulk-scan the workspace.
 2. Read the full fence reference at `{{SKILLS_DIR}}/loomgui-editor/SKILL.md` before writing or editing UI. It is the complete, authoritative rulebook (tags, roles, CSS whitelist, layout rules, build-error catalog).
 3. Put HTML files under the package `dirs`. `<img src>` paths are relative to the HTML file itself (browser-native).
-4. Build and fix ALL reported errors in one pass — diagnostics are collect-all (file/line/column), not fail-fast.
-5. Never edit files under the output directory (`dist/` by default). They are build artifacts and get overwritten on every build.
+4. Validate with `loom check` and fix ALL reported errors in one pass — diagnostics are collect-all (file/line/column), not fail-fast.
+5. Never edit files under the output directory. They are build artifacts and get overwritten on every build.
+
+## Configuring the workspace (`loom` commands — never hand-edit `loom.workspace.json`)
+
+- `loom new <name>` — create `ui/<name>/main.html` and register the package.
+- `loom font add <file> --family <f> [--default] [--fallback]` — register a font (ask the user for the file if none exists yet).
+- `loom atlas add <dir> [--name <n>]` — cover a PNG directory with an atlas.
+- `loom list pkg|atlas|font` / `loom show <pkg>` — inspect current configuration.
 
 ## Building
 
-Two entry points:
+- **CLI** (primary; bundled at `.loom/loom(.exe)`, no LoomGUI checkout needed): `loom check` → fix → `loom build`. Exit codes: 0 clean · 1 errors · 2 usage/config failure. `--format json` prints one machine-readable document to stdout.
+- **GUI** (human-facing): open this workspace in the LoomGUI packer app and press the Build (打包) button. From Unity: menu `LoomGUI > Open Packer`.
 
-- **GUI**: open this workspace in the LoomGUI packer app and press the Build (打包) button. From Unity: menu `LoomGUI > Open Packer`.
-- **CLI** (only available inside a LoomGUI repository checkout): `cargo run -p loomgui_pkg -- build <this-directory>`.
-
-Build outputs (written into `output_dir`, default `dist/`):
+Build outputs are written into `output_dir`, resolved against the Unity project recorded in `.loom/unity.json` when that file exists (typically straight into `Assets/Bundles`), otherwise local `dist/`:
 
 - `ui/*.pkg.bin` — packaged UI, one file per package
 - `atlas/{name}.png` + `{name}.atlas.json` — packed texture atlases with sprite UV maps

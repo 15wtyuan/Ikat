@@ -26,8 +26,17 @@ namespace LoomGUI.Editor
                 UseShellExecute = true,
                 // 引擎无关的持久化契约：GUI 把最近工作区列表等状态写进这里。
                 // Unity 侧落在 UserSettings/LoomGUI（per-user，默认 .gitignore 已忽略）。
-                Arguments = "--state-dir \"" + ResolveStateDir() + "\"",
+                // --unity-root：GUI 新建工作区时写反向配置（.loom/unity.json），让 loom CLI
+                // 的 build 产物直落本工程的 Assets（output_dir 相对工程根解析）。
+                Arguments = "--state-dir \"" + ResolveStateDir() + "\""
+                    + " --unity-root \"" + ResolveProjectRoot() + "\"",
             });
+        }
+
+        /// Unity 工程根（反向配置的基座）：<Project>/Assets 的上级。
+        static string ResolveProjectRoot()
+        {
+            return Path.GetDirectoryName(Application.dataPath);
         }
 
         /// GUI 状态目录：<Project>/UserSettings/LoomGUI。目录不存在由 GUI 侧自建。

@@ -96,9 +96,12 @@ fn build_fails_when_font_file_missing() {
     );
 
     let result = build(&tmp);
+    let err = result.expect_err("build should fail when font file does not exist");
+    assert_eq!(err.exit_code, 1, "字体缺失是内容错误（exit 1）");
     assert!(
-        result.is_err(),
-        "build should fail when font file does not exist"
+        err.diagnostics.iter().any(|d| d.code == "FontFileMissing"),
+        "字体缺失须以合成诊断码暴露: {:?}",
+        err.diagnostics
     );
 
     let _ = std::fs::remove_dir_all(&tmp);
@@ -114,7 +117,8 @@ fn build_fails_when_output_dir_empty() {
     std::fs::write(tmp.join("loom.workspace.json"), json).unwrap();
 
     let result = build(&tmp);
-    assert!(result.is_err(), "build should fail with empty output_dir");
+    let err = result.expect_err("build should fail with empty output_dir");
+    assert_eq!(err.exit_code, 2, "output_dir 未配置是工具性失败（exit 2）");
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

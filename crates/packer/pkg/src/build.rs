@@ -4,11 +4,12 @@
 //! R3: HTML -> .pkg.bin 编排已重建（fence parse_template + bridge + write_package）。
 //! referenced_sprites 回接 atlas 交叉验证（assign_and_validate，缺失 sprite 非静默）。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::atlas::collect::collect_pngs;
 use crate::atlas::pack::pack_atlas;
 use crate::bridge::translate_keyframes;
+use crate::diag::{code, BuildFailure, PackDiagnostic, Severity};
 use crate::expand::{bridge_with_components, ComponentRegistry};
 use crate::runtime::{RuntimeFont, RuntimeManifest, RUNTIME_FILE};
 use crate::workspace::{load_workspace, PackageCfg};
@@ -19,55 +20,8 @@ use loomgui_core::scene::KeyframesRule;
 use loomgui_core::style::dynamic::DynamicRuleTable;
 use std::path::Path;
 
-/// A non-fatal warning surfaced to the author after a successful pack.
-///
-/// 围栏内一致性 warning（W1/W2）：属性本身围栏合法，但漏写或默认值冲突导致 HTML 预览 ≠
-/// 运行时渲染。warning **不阻断打包**（pkg 仍正常产出），只提醒作者补全声明让预览与运行时
-/// 一致。`pack_components` 从 fence diagnostics 收集 Warning 级条目转成本结构，由 CLI 打印
-/// 到 stderr / GUI 呈现。修前这类 warning 被丢弃（`pack_components` 只查 Error 级），作者感知
-/// 不到不一致——本结构让 warning 在 BuildReport 里可见。
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct PackWarning {
-    /// 产生 warning 的组件名（package 内定位来源组件）。
-    pub component: String,
-    /// 源文件相对 workspace_root（正斜杠）。取 `html_rel`（真实磁盘路径，可点击定位），
-    /// 而非 `diagnostic.location.file`（后者被 parse_template 设成组件名，定位不到文件）。
-    pub file: String,
-    /// 1-based 行号。
-    pub line: u32,
-    /// 1-based 列号。
-    pub column: u32,
-    /// warning 短码（`DiagnosticCode` 的 Debug 名，如 `"FenceBorderWithoutStyle"`），
-    /// 便于 CLI/GUI 分类与过滤。
-    pub code: String,
-    /// 人类可读主信息（含问题说明 + 修复引导；W1/W2 的引导 baked 在此字段里）。
-    pub message: String,
-    /// help note 文案（若 diagnostic 带 `NoteKind::Help`）；W1/W2 为 None（引导已在 message）。
-    pub help: Option<String>,
-}
-
-impl PackWarning {
-    /// 渲染成多行 CLI 文本（文件:行:列 定位 + 短码 + message）。CLI 打到 stderr。
-    pub fn render(&self) -> String {
-        let mut out = format!(
-            "warning[{}] in component \"{}\" ({}:{}:{}):",
-            self.code, self.component, self.file, self.line, self.column
-        );
-        // message 含多句说明 + 引导，缩进两格保持与 header 的视觉层级。
-        for line in self.message.lines() {
-            out.push_str("\n  ");
-            out.push_str(line);
-        }
-        if let Some(help) = &self.help {
-            out.push_str("\n  help: ");
-            out.push_str(help);
-        }
-        out
-    }
-}
-
 /// Build report: what was produced.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildReport {
     /// Package names (one per PackageCfg, written to ui/<name>.pkg.bin).
     pub packages: Vec<String>,
@@ -76,7 +30,7 @@ pub struct BuildReport {
     pub log: Vec<String>,
     /// 围栏内一致性 warning（W1/W2）：合法但预览 ≠ 运行时的不一致。不阻断打包，
     /// 供 CLI 打印 / GUI 呈现提醒作者补全声明。空 = 无 warning。
-    pub warnings: Vec<PackWarning>,
+    pub warnings: Vec<PackDiagnostic>,
 }
 
 /// 一个待打包的组件：名字 + HTML 源码 + 该 HTML 相对 workspace_root 的路径（正斜杠）。
@@ -88,8 +42,8 @@ pub struct Component {
     pub html_rel: String,
 }
 
-/// `pack_components` 的产出：pkg.bin 字节 + 引用到的 sprite_key 集合 + 围栏一致性 warning。
-/// 用具名结构体而非裸 3-tuple——`Result<(Vec<u8>, Vec<String>, Vec<PackWarning>), String>`
+/// `pack_components` 的产出：pkg.bin 字节 + 引用到的 sprite_key 集合 + 围栏诊断（warning）。
+/// 用具名结构体而非裸 3-tuple——`Result<(Vec<u8>, Vec<String>, Vec<PackDiagnostic>), BuildFailure>`
 /// 会触发 clippy type_complexity，且调用点 `let (bytes, refs, _w) = ...` 的位置语义不自说明。
 /// 具名后调用点 `let PackResult { bytes, referenced_sprites, warnings } = ...` 清晰可读。
 #[derive(Debug, Clone)]
@@ -100,16 +54,17 @@ pub struct PackResult {
     /// （sprite_key 口径），供 atlas 交叉验证。
     pub referenced_sprites: Vec<String>,
     /// 围栏一致性 warning（W1/W2）：合法但预览≠运行时的不一致，不阻断打包，供 CLI/GUI 呈现。
-    pub warnings: Vec<PackWarning>,
+    pub warnings: Vec<PackDiagnostic>,
 }
 
 /// 打包一个 package：components = [Component]。返 [`PackResult`]。
 /// build() 读文件组装 Component 调本函数；本函数接字符串便于单测。
 ///
 /// 流程：每组件 `parse_template` → `bridge` → 累积；末尾 `write_package` 出 pkg.bin。
-/// fence Error 级 diagnostic → Err（不静默降级；Warning 级不阻断打包，收集进返回值
-/// `warnings` 供 CLI/GUI 呈现）。bridge 多根 → Err（不静默产森林）。
-pub fn pack_components(components: &[Component]) -> Result<PackResult, String> {
+/// fence Error 级 diagnostic 收集后跨组件累积（collect-all：全部组件解析完才失败，
+/// 诊断一次给全）；Warning 级不阻断打包，收集进返回值 `warnings` 供 CLI/GUI 呈现。
+/// bridge 多根 → Err（不静默产森林）。
+pub fn pack_components(components: &[Component]) -> Result<PackResult, BuildFailure> {
     pack_components_inner(components, &ComponentRegistry::empty())
 }
 
@@ -120,13 +75,14 @@ pub fn pack_components(components: &[Component]) -> Result<PackResult, String> {
 pub fn pack_components_with_registry(
     components: &[Component],
     registry: &ComponentRegistry,
-) -> Result<PackResult, String> {
+) -> Result<PackResult, BuildFailure> {
     pack_components_inner(components, registry)
 }
 
 /// pack_components_inner 的累积条目：一个已 bridge 的页面组件（+ 组件展开域锚定规则）。
 struct BuiltComponent {
     name: String,
+    html_rel: String,
     nodes: Vec<TemplateNode>,
     rules: DynamicRuleTable,
     keyframes: Vec<KeyframesRule>,
@@ -136,10 +92,12 @@ struct BuiltComponent {
 fn pack_components_inner(
     components: &[Component],
     registry: &ComponentRegistry,
-) -> Result<PackResult, String> {
+) -> Result<PackResult, BuildFailure> {
     let mut built: Vec<BuiltComponent> = Vec::new();
     let mut refs: Vec<String> = Vec::new();
-    let mut warnings: Vec<PackWarning> = Vec::new();
+    // collect-all：诊断（error + warning）跨组件全量收集，收完才判失败——AI 一轮修全。
+    // 失败时 warning 也随 BuildFailure.diagnostics 一并给出。
+    let mut diagnostics: Vec<PackDiagnostic> = Vec::new();
     for comp in components {
         let Component {
             name,
@@ -147,48 +105,33 @@ fn pack_components_inner(
             html_rel,
         } = comp;
         let parsed = loomgui_fence::parse_template(src, name);
-        // Warning 不阻断打包（围栏内一致性 warning：合法但预览≠运行时，只提醒作者补声明）。
-        // 仅 Error 级 diagnostic 视为 fatal；Warning 级收集进返回值供调用方（CLI/GUI）呈现。
-        if parsed
+        // 该组件全部围栏诊断先进收集（Error+Warning）。Error 存在则跳过 bridge
+        //（坏树不值得展开），但循环继续——后续组件的诊断也要给作者。
+        let has_error = parsed
             .diagnostics
             .iter()
-            .any(|d| d.severity == loomgui_fence::diagnostic::Severity::Error)
-        {
-            return Err(format!(
-                "fence diagnostics in {name}: {:?}",
-                parsed.diagnostics
-            ));
-        }
-        // 收集 Warning 级 diagnostic 转成 PackWarning（带组件名 + 文件位置 + 短码），
-        // 否则 warning 留在局部 parsed 里随循环结束丢弃 → 作者感知不到不一致。
-        //
-        // file 用 html_rel（真实 HTML 相对路径）而非 diagnostic.location.file——后者被
-        // parse_template(src, name) 设成组件名（作者拿组件名定位不到磁盘文件）。location
-        // 的 line/column 是相对 src（即该 HTML 文件内容）算出的，与 html_rel 同一份文件，故
-        // 用 html_rel 覆盖 file 既准确又可点击定位。
-        for d in parsed
-            .diagnostics
-            .iter()
-            .filter(|d| d.severity == loomgui_fence::diagnostic::Severity::Warning)
-        {
-            warnings.push(PackWarning {
-                component: name.clone(),
-                file: html_rel.clone(),
-                line: d.location.line,
-                column: d.location.column,
-                code: format!("{:?}", d.code),
-                message: d.message.clone(),
-                help: d
-                    .notes
-                    .iter()
-                    .find(|n| n.kind == loomgui_fence::diagnostic::NoteKind::Help)
-                    .map(|n| n.text.clone()),
-            });
+            .any(|d| d.severity == loomgui_fence::diagnostic::Severity::Error);
+        diagnostics.extend(
+            parsed
+                .diagnostics
+                .iter()
+                .map(|d| PackDiagnostic::from_fence(d, name, html_rel)),
+        );
+        if has_error {
+            continue;
         }
         // 组件展开 bridge（registry 为空时除页面级 <slot> 报错外与旧 bridge 等价）：
         // 展开 CustomElement host + slot 投影 + 收集展开域锚定规则与组件动画。
-        let out = bridge_with_components(&parsed, html_rel, registry)
-            .map_err(|e| format!("bridge error in component {name}: {e}"))?;
+        // bridge 错误首错即断（展开期无 collect-all 机制），已收集的诊断随失败带出。
+        let out = match bridge_with_components(&parsed, html_rel, registry) {
+            Ok(out) => out,
+            Err(e) => {
+                return Err(BuildFailure::validation(
+                    format!("bridge error in component {name}: {e}"),
+                    diagnostics,
+                ));
+            }
+        };
         // Image.src 归一化已在 walker emit 时按各文件 html_rel 完成（页面文件 + 展开的
         // 组件文件各归各的——组件 src 相对组件文件，不能再按页面 html_rel 二次归一）。
         // 组件 @keyframes 合并：宿主（页面文件）优先，展开引入的组件动画按名去重，
@@ -200,19 +143,16 @@ fn pack_components_inner(
             if kf_names.insert(kf.name.clone()) {
                 keyframes.push(kf);
             } else {
-                warnings.push(PackWarning {
-                    component: name.clone(),
-                    file: html_rel.clone(),
-                    line: 1,
-                    column: 1,
-                    code: "ComponentKeyframesNameCollision".to_string(),
-                    message: format!(
+                diagnostics.push(PackDiagnostic::synthetic_warning(
+                    code::COMPONENT_KEYFRAMES_COLLISION,
+                    name,
+                    html_rel,
+                    format!(
                         "组件动画 `@keyframes {}` 与宿主（或先展开组件）同名——宿主优先，\
                          组件侧被忽略；如需同时生效请改名",
                         kf.name
                     ),
-                    help: None,
-                });
+                ));
             }
         }
         // 页面文件 <style> class 规则的 background-image / background url() 归一——runtime
@@ -227,6 +167,7 @@ fn pack_components_inner(
         refs.extend(out.bg_refs);
         built.push(BuiltComponent {
             name: name.clone(),
+            html_rel: html_rel.clone(),
             nodes: out.nodes,
             rules: dynamic_rules,
             keyframes,
@@ -243,8 +184,24 @@ fn pack_components_inner(
     let mut seen = std::collections::HashSet::new();
     for b in &built {
         if !seen.insert(b.name.as_str()) {
-            return Err(format!("duplicate component name `{}` in package", b.name));
+            diagnostics.push(PackDiagnostic::synthetic_error(
+                code::DUPLICATE_COMPONENT_NAME,
+                &b.name,
+                &b.html_rel,
+                format!("duplicate component name `{}` in package", b.name),
+            ));
         }
+    }
+    // collect-all 收尾：任一 error → 整体失败（exit 1），诊断全量随失败带出。
+    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+        let errors = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .count();
+        return Err(BuildFailure::validation(
+            format!("{errors} error(s) in package"),
+            diagnostics,
+        ));
     }
     let comp_refs: Vec<(&str, &[TemplateNode], &DynamicRuleTable, &[KeyframesRule])> = built
         .iter()
@@ -276,14 +233,16 @@ fn pack_components_inner(
     Ok(PackResult {
         bytes,
         referenced_sprites: refs,
-        warnings,
+        // 到这里 diagnostics 只剩 warning（error 已在上面整体失败返回）。
+        warnings: diagnostics,
     })
 }
 
 /// 把 PackageCfg 解析成 HTML 文件相对路径列表（相对工作区根，正斜杠）。
 /// `html` 非空 = 显式态（锁定文件，原样返回）；空 = 自动态（扫 `dirs` 顶层 `*.html`，排序保稳定）。
 /// 自动态仅扫顶层（非递归）：避免误纳子目录的设计系统/模板片段。
-fn resolve_html_list(workspace_root: &Path, pkg: &PackageCfg) -> Result<Vec<String>, String> {
+/// workspace_cmd（list/show/new）与 build/analyze 共用。
+pub fn resolve_html_list(workspace_root: &Path, pkg: &PackageCfg) -> Result<Vec<String>, String> {
     if !pkg.html.is_empty() {
         return Ok(pkg.html.clone());
     }
@@ -385,24 +344,144 @@ pub(crate) fn normalize_sprite_key(html_rel: &str, src: &str) -> String {
     stack.join("/")
 }
 
+/// analyze 的产出：全部计算结果，**零写入**。`build()` 据此写盘产出 BuildReport；
+/// `check()` 据此直接出诊断报告——校验语义单代码路径，check/build 天然不漂移。
+pub struct AnalyzeOutcome {
+    pub workspace: crate::workspace::Workspace,
+    /// (atlas 名, 打包结果)。pages 尚未编码写盘；manifest 供交叉验证消费。
+    pub atlases: Vec<(String, crate::atlas::pack::PackedAtlas)>,
+    /// (package 名, pkg.bin 字节 + sprite 引用 + warnings)。
+    pub packages: Vec<(String, PackResult)>,
+    /// registry 侧（components/ 组件文件）的一致性 warning。
+    pub warnings: Vec<PackDiagnostic>,
+}
+
+/// 分析工作区：load → 图集收集打包（只算不写）→ 字体存在性 → 组件注册表 →
+/// 逐包解析打包 → 覆盖交叉验证。内容错误（围栏/字体缺失/图集溢出/覆盖缺失冲突）
+/// collect-all：收集全部后统一失败（exit 1，诊断全量）；工具性错误（io/workspace
+/// 解析）即时失败（exit 2）。
+pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
+    let ws = load_workspace(workspace_root)?;
+    let mut diags: Vec<PackDiagnostic> = Vec::new();
+
+    // ---------- Atlases（只算不写）----------
+    // 溢出是内容错误（作者须调 max_size / standalone）：收集成诊断，继续后续图集。
+    let mut atlases: Vec<(String, crate::atlas::pack::PackedAtlas)> = Vec::new();
+    for atlas in &ws.atlases {
+        let images = collect_pngs(workspace_root, atlas)?;
+        match pack_atlas(atlas, &images) {
+            Ok(packed) => atlases.push((atlas.name.clone(), packed)),
+            Err(e) => diags.push(PackDiagnostic::synthetic_error(
+                code::ATLAS_IMAGE_OVERFLOW,
+                "",
+                &atlas.name,
+                e,
+            )),
+        }
+    }
+
+    // ---------- Fonts 存在性（收集化，拷贝在 build 写入段）----------
+    for font in &ws.fonts {
+        if !workspace_root.join(&font.file).exists() {
+            diags.push(PackDiagnostic::synthetic_error(
+                code::FONT_FILE_MISSING,
+                &font.family,
+                &font.file,
+                format!(
+                    "字体文件不存在：{}（fonts[].file 指向的文件不在工作区内）",
+                    font.file
+                ),
+            ));
+        }
+    }
+
+    // ---------- Packages（registry + 逐包解析打包）----------
+    // Custom Element 注册表：components/ 目录扫描，hyphen 标签打包期展开。
+    // 单组件文件错误与 warning 在注册表内 collect-all；包内围栏诊断在
+    // pack_components_with_registry 内 collect-all；跨包错误也进收集池（包不产出）。
+    let (registry, comp_warnings) =
+        crate::expand::scan_component_registry(workspace_root, &ws.packages)?;
+    let mut packages: Vec<(String, PackResult)> = Vec::new();
+    let mut all_refs: Vec<String> = Vec::new();
+    for pkg in &ws.packages {
+        let html_files = resolve_html_list(workspace_root, pkg)?;
+        let comps: Vec<Component> = html_files
+            .iter()
+            .map(|rel| {
+                let path = workspace_root.join(rel);
+                let src = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("read {}: {e}", path.display()))?;
+                Ok(Component {
+                    name: stem(rel),
+                    src,
+                    html_rel: rel.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        match pack_components_with_registry(&comps, &registry) {
+            Ok(pr) => {
+                all_refs.extend(pr.referenced_sprites.iter().cloned());
+                packages.push((pkg.name.clone(), pr));
+            }
+            Err(f) => diags.extend(f.diagnostics),
+        }
+    }
+    // 展开用到的组件的 sprite 引用并入交叉验证（未用组件是设计期存货，缺图不阻断）。
+    all_refs.extend(registry.used_refs());
+
+    // ---------- Cross-validate: HTML refs must all be in some atlas ----------
+    // 单向：html 引用的图必须在某 atlas；atlas 未引用的图合法（运行时动态图标）。
+    // collect 版：每个违规 key 一条诊断。
+    let atlas_refs: Vec<(String, &crate::atlas::AtlasManifest)> = atlases
+        .iter()
+        .map(|(n, p)| (n.clone(), &p.manifest))
+        .collect();
+    diags.extend(crate::atlas::validate::assign_and_validate(
+        &all_refs,
+        &atlas_refs,
+    ));
+
+    if diags.iter().any(|d| d.severity == Severity::Error) {
+        let errors = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .count();
+        return Err(BuildFailure::validation(
+            format!("{errors} error(s) in workspace"),
+            diags,
+        ));
+    }
+    Ok(AnalyzeOutcome {
+        workspace: ws,
+        atlases,
+        packages,
+        warnings: comp_warnings,
+    })
+}
+
 /// Run the full build pipeline for a workspace rooted at workspace_root.
 ///
+/// 失败值 [`BuildFailure`]：exit 1 = 内容错误（围栏/资源/结构，diagnostics collect-all）；
+/// exit 2 = 工具性失败（配置/io）。io 与 workspace 读取类错误经 `From<String>` 统一归 2。
+///
 /// Steps:
-/// 1. load workspace, resolve output_dir, create atlas/fonts/ui dirs
-/// 2. per atlas: collect_pngs -> pack_atlas -> save pages + atlas.json
-/// 3. per font: copy -> fonts/<basename>.bytes
-/// 4. per package: resolve_html_list -> pack_components -> write ui/<name>.pkg.bin
-/// 5. cross-validate HTML referenced_sprites against atlases (non-silent on missing)
-/// 6. write loom.runtime.json (packages field filled from step 4) -> return BuildReport
-pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
-    let ws = load_workspace(workspace_root)?;
-    if ws.output_dir.trim().is_empty() {
-        return Err(
-            "output_dir not configured: set it in the workspace General page before building"
-                .into(),
-        );
+/// 1. output_dir 快速失败检查 → analyze（零写入，见 [`analyze`]）
+/// 2. 写入段：mkdirs / clean stale / atlas pages+manifests / fonts / ui/*.pkg.bin / runtime
+pub fn build(workspace_root: &Path) -> Result<BuildReport, BuildFailure> {
+    // output_dir 检查先于 analyze 的重计算（check 无此检查——它零写入，不关心落点）。
+    let ws_pre = load_workspace(workspace_root)?;
+    if ws_pre.output_dir.trim().is_empty() {
+        return Err(BuildFailure::config(
+            "output_dir not configured: set it in the workspace General page before building",
+        ));
     }
-    let output_dir = workspace_root.join(&ws.output_dir);
+    let outcome = analyze(workspace_root)?;
+    let ws = outcome.workspace;
+    // 输出基座链：有 .loom/unity.json → output_dir 相对 Unity 工程根解析（直达
+    // Assets）；无 → 相对工作区根（老工作区行为）。路径失效在 resolve 内报 exit 2。
+    let output_dir = crate::unity::resolve_output_base(workspace_root)?
+        .unwrap_or_else(|| workspace_root.to_path_buf())
+        .join(&ws.output_dir);
 
     let ui_dir = output_dir.join("ui");
     let atlas_dir = output_dir.join("atlas");
@@ -426,52 +505,33 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
         atlases: Vec::new(),
         fonts: Vec::new(),
         log: Vec::new(),
-        warnings: Vec::new(),
+        warnings: outcome.warnings,
     };
 
-    // ---------- Atlases ----------
-    let mut atlas_manifests: Vec<(String, crate::atlas::AtlasManifest)> = Vec::new();
-    for atlas in &ws.atlases {
-        report.log.push(format!(
-            "collecting atlas {} from {:?}",
-            atlas.name, atlas.dirs
-        ));
-        let images = collect_pngs(workspace_root, atlas)?;
-        report
-            .log
-            .push(format!("  {} pngs collected", images.len()));
-
-        let packed = pack_atlas(atlas, &images)?;
-
-        // Save each page PNG.
+    // ---------- 写图集页 + manifest ----------
+    for (name, packed) in &outcome.atlases {
+        report.log.push(format!("writing atlas {name}"));
         for (i, page_img) in packed.pages.iter().enumerate() {
-            let page_name = crate::atlas::pack::page_file_name(&atlas.name, i);
+            let page_name = crate::atlas::pack::page_file_name(name, i);
             let page_path = atlas_dir.join(&page_name);
             page_img
                 .save(&page_path)
                 .map_err(|e| format!("save atlas page {}: {e}", page_path.display()))?;
         }
-
-        // Write atlas manifest JSON (pretty).
-        let manifest_path = atlas_dir.join(format!("{}.atlas.json", atlas.name));
+        let manifest_path = atlas_dir.join(format!("{name}.atlas.json"));
         let manifest_text = serde_json::to_string_pretty(&packed.manifest)
-            .map_err(|e| format!("serialize atlas manifest {}: {e}", atlas.name))?;
+            .map_err(|e| format!("serialize atlas manifest {name}: {e}"))?;
         std::fs::write(&manifest_path, manifest_text)
             .map_err(|e| format!("write {}: {e}", manifest_path.display()))?;
-
-        report.atlases.push(atlas.name.clone());
+        report.atlases.push(name.clone());
         report
             .log
             .push(format!("  wrote {} page(s) + manifest", packed.pages.len()));
-        atlas_manifests.push((atlas.name.clone(), packed.manifest));
     }
 
-    // ---------- Fonts ----------
+    // ---------- 拷字体（analyze 已确认存在；io 错误属工具性失败）----------
     for font in &ws.fonts {
         let src = workspace_root.join(&font.file);
-        if !src.exists() {
-            return Err(format!("font file not found: {}", src.display()));
-        }
         let basename = Path::new(&font.file)
             .file_name()
             .and_then(|n| n.to_str())
@@ -483,70 +543,23 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, String> {
         report.log.push(format!("copied font {}", dst.display()));
     }
 
-    // ---------- Packages (HTML -> .pkg.bin) ----------
-    // R3 rebuild: 重建 d8fe705 删掉的 HTML→pkg.bin 编排。fence + bridge 现已存在。
-    // 必须在 Runtime manifest 之前：runtime.packages = report.packages.clone()，
-    // 故先填 report.packages 再序列化 runtime（brief 原排序会让 runtime.packages 恒空）。
-    //
-    // Custom Element 注册表（components/ 目录扫描，main-design §7.4「Package 注册表承担
-    // customElements.define() 的角色」）：hyphen 标签打包期展开。组件文件 warning 一并呈现。
-    let (registry, comp_warnings) =
-        crate::expand::scan_component_registry(workspace_root, &ws.packages)?;
-    report.warnings.extend(comp_warnings);
-    let mut all_refs: Vec<String> = Vec::new();
-    for pkg in &ws.packages {
-        let html_files = resolve_html_list(workspace_root, pkg)?;
-        let comps: Vec<Component> = html_files
-            .iter()
-            .map(|rel| {
-                let path = workspace_root.join(rel);
-                let src = std::fs::read_to_string(&path)
-                    .map_err(|e| format!("read {}: {e}", path.display()))?;
-                Ok(Component {
-                    name: stem(rel),
-                    src,
-                    html_rel: rel.clone(),
-                })
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        report.log.push(format!(
-            "packaging {} ({} component html)",
-            pkg.name,
-            comps.len()
-        ));
-        let PackResult {
-            bytes,
-            referenced_sprites: refs,
-            warnings: pkg_warnings,
-        } = pack_components_with_registry(&comps, &registry)?;
-        let pkg_path = ui_dir.join(format!("{}.pkg.bin", pkg.name));
-        std::fs::write(&pkg_path, &bytes)
+    // ---------- 写 ui/*.pkg.bin（bytes 来自 analyze）----------
+    for (name, pr) in &outcome.packages {
+        let pkg_path = ui_dir.join(format!("{name}.pkg.bin"));
+        std::fs::write(&pkg_path, &pr.bytes)
             .map_err(|e| format!("write {}: {e}", pkg_path.display()))?;
-        report.packages.push(pkg.name.clone());
+        report.packages.push(name.clone());
         // warning 聚合进报告（跨 package），供 CLI/GUI 统一呈现。不阻断打包。
-        report.warnings.extend(pkg_warnings);
+        report.warnings.extend(pr.warnings.iter().cloned());
         report.log.push(format!(
-            "  wrote {} ({} bytes)",
+            "wrote {} ({} bytes)",
             pkg_path.display(),
-            bytes.len()
+            pr.bytes.len()
         ));
-        all_refs.extend(refs);
-    }
-    // 展开用到的组件的 sprite 引用并入交叉验证（未用组件是设计期存货，缺图不阻断）。
-    all_refs.extend(registry.used_refs());
-
-    // ---------- Cross-validate: HTML refs must all be in some atlas ----------
-    // 单向：html 引用的图必须在某 atlas；atlas 未引用的图合法（运行时动态图标）。
-    // 复活 atlas/validate.rs 的死代码——缺失 sprite 非静默（build 失败）。
-    if !all_refs.is_empty() {
-        let atlas_refs: Vec<(String, &crate::atlas::AtlasManifest)> = atlas_manifests
-            .iter()
-            .map(|(n, m)| (n.clone(), m))
-            .collect();
-        crate::atlas::validate::assign_and_validate(&all_refs, &atlas_refs)?;
     }
 
     // ---------- Runtime manifest ----------
+    // runtime.packages = report.packages（依赖上一段先填完——排序契约）。
     let runtime = RuntimeManifest {
         version: 1,
         packages: report.packages.clone(),
@@ -729,7 +742,7 @@ mod package_tests {
         }];
         let err = pack_components(&comps).expect_err("multi-root should error");
         assert!(
-            err.contains("component bad"),
+            err.message.contains("component bad"),
             "bridge error should name the component: {err}"
         );
     }
@@ -751,9 +764,82 @@ mod package_tests {
             },
         ];
         let err = pack_components(&comps).expect_err("dup names should error");
+        assert_eq!(err.exit_code, 1, "重名是内容错误（exit 1）");
+        let diag = err
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "DuplicateComponentName")
+            .expect("重名须以合成诊断码暴露");
+        assert_eq!(diag.severity, crate::diag::Severity::Error);
+        assert_eq!(diag.file, "dup2.html", "诊断指向第二次出现的文件");
         assert!(
-            err.contains("duplicate component name") && err.contains("dup"),
-            "dup-name error should be descriptive: {err}"
+            diag.message.contains("duplicate component name") && diag.message.contains("dup"),
+            "诊断 message 应描述性: {}",
+            diag.message
+        );
+    }
+
+    /// collect-all 回归：两个组件各含围栏 Error → 两条 error 诊断都在（修前首错即断，
+    /// 只报第一个组件）。AI 修一轮全改是围栏诊断的契约。
+    #[test]
+    fn pack_components_collects_errors_across_components() {
+        let comps = vec![
+            Component {
+                name: "bad-a".to_string(),
+                // 围栏外标签（14 标签集之外）→ FenceUnknownTag error。
+                src: r#"<p>not in fence</p>"#.to_string(),
+                html_rel: "bad-a.html".to_string(),
+            },
+            Component {
+                name: "bad-b".to_string(),
+                // 未识别 role → error（role 白名单校验）。
+                src: r#"<div role="nope"></div>"#.to_string(),
+                html_rel: "bad-b.html".to_string(),
+            },
+        ];
+        let err = pack_components(&comps).expect_err("two error components should fail");
+        assert_eq!(err.exit_code, 1);
+        let errors: Vec<&crate::diag::PackDiagnostic> = err
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == crate::diag::Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 2, "两个组件的 error 都要报: {err:?}");
+        assert!(
+            errors.iter().any(|d| d.file == "bad-a.html"),
+            "bad-a 的诊断在场"
+        );
+        assert!(
+            errors.iter().any(|d| d.file == "bad-b.html"),
+            "bad-b 的诊断在场（修前首错即断会漏掉它）"
+        );
+    }
+
+    /// collect-all 回归：失败时 warning 也随诊断带出（AI 修 error 一轮顺带处理 warning）。
+    #[test]
+    fn build_failure_carries_warnings_too() {
+        let comps = vec![
+            Component {
+                name: "bad".to_string(),
+                src: r#"<p>not in fence</p>"#.to_string(),
+                html_rel: "bad.html".to_string(),
+            },
+            Component {
+                name: "warn".to_string(),
+                // W1：border-width 有、border-style 缺省。
+                src: r#"<div style="border-width:2px;border-color:#ff0000"></div>"#.to_string(),
+                html_rel: "warn.html".to_string(),
+            },
+        ];
+        let err = pack_components(&comps).expect_err("error component should fail");
+        assert_eq!(err.exit_code, 1);
+        assert!(
+            err.diagnostics
+                .iter()
+                .any(|d| d.severity == crate::diag::Severity::Warning
+                    && d.code == "FenceBorderWithoutStyle"),
+            "失败诊断须携带 warning（修 error 一轮顺带可见）: {:?}",
+            err.diagnostics
         );
     }
 

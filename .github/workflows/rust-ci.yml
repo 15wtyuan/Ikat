@@ -79,13 +79,13 @@ jobs:
           name: loomgui_ffi_c-windows-x64
           path: target/release/loomgui_ffi_c.dll
           retention-days: 7
-      - name: build release exe (loomgui_pkg, bin=loom-pkg)
+      - name: build release exe (loomgui_pkg, bin=loom)
         run: cargo build -p loomgui_pkg --release
-      - name: upload loom-pkg.exe
+      - name: upload loom.exe
         uses: actions/upload-artifact@v4
         with:
-          name: loom-pkg-exe-${{ github.sha }}
-          path: target/release/loom-pkg.exe
+          name: loom-exe-${{ github.sha }}
+          path: target/release/loom.exe
           retention-days: 7
 
   dotnet-test:

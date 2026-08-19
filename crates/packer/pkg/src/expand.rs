@@ -17,6 +17,7 @@ use crate::bridge::{
     attr, extract_classes, extract_control_init, map_semantic, translate_keyframes,
     validate_template_children,
 };
+use crate::diag::BuildFailure;
 use loomgui_core::asset::TemplateNode;
 use loomgui_core::scene::{KeyframesRule, NodeKind};
 use loomgui_core::style::dynamic::DynamicRuleTable;
@@ -54,74 +55,96 @@ impl ComponentRegistry {
     }
 
     /// 从 (名, HTML 源, html_rel) 构建注册表。单测/字符串入口。
+    ///
+    /// collect-all：单个组件的注册错误（fence Error / 命名 / 单根 / 子树校验）收集成
+    /// 诊断、跳过该组件、继续注册后续组件；循环结束若有 error 级诊断则整体失败——
+    /// 此时不会走到页面展开，未注册组件不产生连锁噪音。
     pub fn from_sources(
         sources: &[(String, String, String)],
-    ) -> Result<(Self, Vec<crate::build::PackWarning>), String> {
+    ) -> Result<(Self, Vec<crate::diag::PackDiagnostic>), BuildFailure> {
         let mut reg = ComponentRegistry::empty();
-        let mut warnings = Vec::new();
+        let mut diagnostics: Vec<crate::diag::PackDiagnostic> = Vec::new();
         for (name, src, html_rel) in sources {
-            reg.register(name.clone(), src, html_rel, &mut warnings)?;
+            reg.register(name.clone(), src, html_rel, &mut diagnostics);
         }
-        Ok((reg, warnings))
+        if diagnostics
+            .iter()
+            .any(|d| d.severity == crate::diag::Severity::Error)
+        {
+            return Err(BuildFailure::validation(
+                "component registry has errors",
+                diagnostics,
+            ));
+        }
+        Ok((reg, diagnostics))
     }
 
+    /// 注册一个组件：任何错误 push 进 diagnostics 后返回（组件不注册），不中断循环。
     fn register(
         &mut self,
         file_stem: String,
         src: &str,
         html_rel: &str,
-        warnings: &mut Vec<crate::build::PackWarning>,
-    ) -> Result<(), String> {
+        diagnostics: &mut Vec<crate::diag::PackDiagnostic>,
+    ) {
+        use crate::diag::{code, PackDiagnostic};
         if !file_stem.contains('-') {
-            return Err(format!(
-                "component file `{html_rel}`: name `{file_stem}` must contain a hyphen \
-                 (custom element naming, main-design §7.4)"
+            diagnostics.push(PackDiagnostic::synthetic_error(
+                code::COMPONENT_NAME_REQUIRES_HYPHEN,
+                &file_stem,
+                html_rel,
+                format!(
+                    "component file `{html_rel}`: name `{file_stem}` must contain a hyphen \
+                     (custom element naming)"
+                ),
             ));
+            return;
         }
         if self.defs.contains_key(&file_stem) {
-            return Err(format!(
-                "duplicate component name `{file_stem}` in registry"
+            diagnostics.push(PackDiagnostic::synthetic_error(
+                code::DUPLICATE_COMPONENT_NAME,
+                &file_stem,
+                html_rel,
+                format!("duplicate component name `{file_stem}` in registry"),
             ));
+            return;
         }
         let parsed = loomgui_fence::parse_template(src, html_rel);
-        if parsed
+        let has_error = parsed
             .diagnostics
             .iter()
-            .any(|d| d.severity == loomgui_fence::diagnostic::Severity::Error)
-        {
-            return Err(format!(
-                "fence diagnostics in component {file_stem}: {:?}",
-                parsed.diagnostics
-            ));
-        }
-        for d in parsed
-            .diagnostics
-            .iter()
-            .filter(|d| d.severity == loomgui_fence::diagnostic::Severity::Warning)
-        {
-            warnings.push(crate::build::PackWarning {
-                component: file_stem.clone(),
-                file: html_rel.to_string(),
-                line: d.location.line,
-                column: d.location.column,
-                code: format!("{:?}", d.code),
-                message: d.message.clone(),
-                help: d
-                    .notes
-                    .iter()
-                    .find(|n| n.kind == loomgui_fence::diagnostic::NoteKind::Help)
-                    .map(|n| n.text.clone()),
-            });
+            .any(|d| d.severity == loomgui_fence::diagnostic::Severity::Error);
+        diagnostics.extend(
+            parsed
+                .diagnostics
+                .iter()
+                .map(|d| PackDiagnostic::from_fence(d, &file_stem, html_rel)),
+        );
+        if has_error {
+            return; // 围栏 Error：组件不注册（循环继续，后续组件诊断照常收集）
         }
         // 单根契约（与页面 bridge 同一条规则）：组件模板必须恰好一个根元素。
         if parsed.tree.roots.len() != 1 {
-            return Err(format!(
-                "component `{file_stem}` must have exactly one root element (got {})",
-                parsed.tree.roots.len()
+            diagnostics.push(PackDiagnostic::synthetic_error(
+                code::COMPONENT_MULTIPLE_ROOTS,
+                &file_stem,
+                html_rel,
+                format!(
+                    "component `{file_stem}` must have exactly one root element (got {})",
+                    parsed.tree.roots.len()
+                ),
             ));
+            return;
         }
-        validate_template_children(&parsed.tree)
-            .map_err(|e| format!("component `{file_stem}`: {e}"))?;
+        if let Err(e) = validate_template_children(&parsed.tree) {
+            diagnostics.push(PackDiagnostic::synthetic_error(
+                code::PACK_ERROR,
+                &file_stem,
+                html_rel,
+                format!("component `{file_stem}`: {e}"),
+            ));
+            return;
+        }
         let refs = parsed
             .referenced_sprites
             .iter()
@@ -139,7 +162,6 @@ impl ComponentRegistry {
                 html_rel: html_rel.to_string(),
             },
         );
-        Ok(())
     }
 
     fn lookup(&self, tag: &str) -> Option<&ComponentDef> {
@@ -164,10 +186,11 @@ impl ComponentRegistry {
 }
 
 /// 扫 workspace 所有 package 的 components/ 目录建注册表。目录不存在 = 跳过（可选设施）。
+/// 组件文件读取 io 错误归工具性失败（exit 2）；注册内容错误在 from_sources 内 collect-all。
 pub fn scan_component_registry(
     workspace_root: &Path,
     packages: &[crate::workspace::PackageCfg],
-) -> Result<(ComponentRegistry, Vec<crate::build::PackWarning>), String> {
+) -> Result<(ComponentRegistry, Vec<crate::diag::PackDiagnostic>), BuildFailure> {
     let mut sources: Vec<(String, String, String)> = Vec::new();
     for pkg in packages {
         for dir in &pkg.dirs {
@@ -684,7 +707,7 @@ mod tests {
         .expect("pack ok")
     }
 
-    fn pack_page_err(registry: &ComponentRegistry, page: &str) -> String {
+    fn pack_page_err(registry: &ComponentRegistry, page: &str) -> crate::diag::BuildFailure {
         pack_components_with_registry(
             &[Component {
                 name: "page".to_string(),
@@ -804,7 +827,8 @@ mod tests {
             r#"<div style="display:flex"><ghost-widget></ghost-widget></div>"#,
         );
         assert!(
-            err.contains("UnregisteredCustomElement") && err.contains("ghost-widget"),
+            err.message.contains("UnregisteredCustomElement")
+                && err.message.contains("ghost-widget"),
             "error should name the tag: {err}"
         );
     }
@@ -818,7 +842,7 @@ mod tests {
             r#"<div style="display:flex"><game-item-card><span slot="nope">x</span></game-item-card></div>"#,
         );
         assert!(
-            err.contains("无效 slot") && err.contains("nope"),
+            err.message.contains("无效 slot") && err.message.contains("nope"),
             "got: {err}"
         );
     }
@@ -831,7 +855,7 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><game-item-card><span>游离子</span></game-item-card></div>"#,
         );
-        assert!(err.contains("默认"), "got: {err}");
+        assert!(err.message.contains("默认"), "got: {err}");
     }
 
     /// 页面级（非展开上下文）<slot> → 错误。
@@ -843,7 +867,7 @@ mod tests {
             r#"<div style="display:flex"><slot name="x"></slot></div>"#,
         );
         assert!(
-            err.contains("slot") && err.contains("组件模板"),
+            err.message.contains("slot") && err.message.contains("组件模板"),
             "got: {err}"
         );
     }
@@ -900,7 +924,7 @@ mod tests {
         ])
         .unwrap();
         let err = pack_page_err(&reg, r#"<div style="display:flex"><comp-a></comp-a></div>"#);
-        assert!(err.contains("环"), "got: {err}");
+        assert!(err.message.contains("环"), "got: {err}");
     }
 
     /// 同展开域 id 撞车（light 子 id = 组件模板 id）→ 错误。
@@ -917,10 +941,13 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><game-item-card><span slot="title" id="shared">撞</span></game-item-card></div>"#,
         );
-        assert!(err.contains("撞车") && err.contains("shared"), "got: {err}");
+        assert!(
+            err.message.contains("撞车") && err.message.contains("shared"),
+            "got: {err}"
+        );
     }
 
-    /// 组件文件名无连字符 → 注册表构建错误。
+    /// 组件文件名无连字符 → 注册表构建错误（合成诊断码 + 描述性 message）。
     #[test]
     fn component_name_requires_hyphen() {
         let err = match ComponentRegistry::from_sources(&[(
@@ -931,10 +958,16 @@ mod tests {
             Err(e) => e,
             Ok(_) => panic!("no-hyphen name should error"),
         };
-        assert!(err.contains("hyphen"), "got: {err}");
+        let diag = err
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "ComponentNameRequiresHyphen")
+            .expect("无连字符须以合成诊断码暴露");
+        assert!(diag.message.contains("hyphen"), "got: {}", diag.message);
+        assert_eq!(diag.file, "components/widget.html");
     }
 
-    /// 组件名同名冲突 → 错误。
+    /// 组件名同名冲突 → 错误（合成诊断码 + 描述性 message）。
     #[test]
     fn duplicate_component_names_error() {
         let err = match ComponentRegistry::from_sources(&[
@@ -952,7 +985,45 @@ mod tests {
             Err(e) => e,
             Ok(_) => panic!("dup should error"),
         };
-        assert!(err.contains("duplicate"), "got: {err}");
+        let diag = err
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "DuplicateComponentName")
+            .expect("重名须以合成诊断码暴露");
+        assert!(diag.message.contains("duplicate"), "got: {}", diag.message);
+    }
+
+    /// collect-all 回归：两个组件文件各含围栏 Error → 两条 error 诊断都在（修前首错
+    /// 即断只报第一个）。注册表阶段失败不走到页面展开，无未注册连锁噪音。
+    #[test]
+    fn registry_collects_errors_across_components() {
+        let err = match ComponentRegistry::from_sources(&[
+            (
+                "bad-a".to_string(),
+                r#"<p>not in fence</p>"#.to_string(),
+                "components/bad-a.html".to_string(),
+            ),
+            (
+                "bad-b".to_string(),
+                r#"<div role="nope"></div>"#.to_string(),
+                "components/bad-b.html".to_string(),
+            ),
+        ]) {
+            Err(e) => e,
+            Ok(_) => panic!("two error components should fail"),
+        };
+        assert_eq!(err.exit_code, 1);
+        let errors: Vec<&crate::diag::PackDiagnostic> = err
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == crate::diag::Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 2, "两个组件文件的 error 都要报: {err:?}");
+        assert!(errors.iter().any(|d| d.file == "components/bad-a.html"));
+        assert!(
+            errors.iter().any(|d| d.file == "components/bad-b.html"),
+            "修前首错即断会漏掉 bad-b"
+        );
     }
 
     /// 组件 keyframes 合并：不同名并入宿主；同名宿主胜 + warning。

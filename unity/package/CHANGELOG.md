@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-08-19
+### Added
+- **loom CLI**（打包器 CLI 升格，二进制 loom.exe，随 Release 分发 + Editor/Tools 双 exe）：check（零写入校验，--format json 机读诊断）、build（结构化输出）、init（脚手架 + CLI 自拷贝到 .loom/ + 反向配置）、new / list / show / font add / atlas add（workspace 编排——AI 的主编辑路径）、version。
+- 诊断 collect-all 修复：跨组件/跨包/注册表/资源（字体缺失、图集溢出、覆盖缺失与冲突）全量收集后统一报告，一次给全（修前首个含 Error 的组件即中断）；失败时 warning 一并携带。
+- 退出码契约：0 干净 · 1 Error 级诊断/写命令冲突 · 2 用法/配置/io 错。
+- 反向配置 .loom/unity.json（基座）：output_dir 相对 Unity 工程根解析，AI 在 UI 工作区一步 loom build 直落 Assets/Bundles。
+- 版本同轨：loomgui_pkg crate 版本 == Unity 包版本（release-check 断言），loom version 单一来源。
+
 ## [0.0.4] - 2026-08-18
 ### Added
 - Runtime API：`z-index` 层叠、动画 longhand 属性、dropdown 视口定位（pkg 格式 v38）；调度器三件套、`UnloadPackage`、选项 getter、`GetTemplate`（pkg 格式 v37）。

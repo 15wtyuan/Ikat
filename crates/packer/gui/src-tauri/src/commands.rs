@@ -1,11 +1,19 @@
 //! Tauri commands: workspace 读写、recent 列表、HTML 扫描、构建。
+//!
+//! build / init 语义走 `loom` CLI 子进程（与 agent 会话同一二进制、同一版本——
+//! GUI 不再自带打包语义）；workspace 表单读写仍走库（人类检查 AI 配置的驾驶舱）。
+//! 找不到 loom.exe（dev 模式）时降级进程内调用并注明。
 
 use crate::recent;
 use crate::recent::StateDir;
+use crate::UnityRoot;
 use loomgui_pkg::build::{build, BuildReport};
+use loomgui_pkg::diag::BuildFailure;
+use loomgui_pkg::init::{init, CliSource, InitOptions};
 use loomgui_pkg::workspace::{load_workspace, save_workspace as write_workspace, Workspace};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 #[tauri::command]
 pub fn recent_workspaces(state: tauri::State<StateDir>) -> Vec<String> {
@@ -25,21 +33,57 @@ pub fn open_workspace(path: String, state: tauri::State<StateDir>) -> Result<Wor
     Ok(ws)
 }
 
+/// 新建工作区 = 完整 init：workspace 骨架 + agent 脚手架 + loom CLI 拷进 `.loom/` +
+/// 反向配置（`--unity-root` 来自 Unity 菜单拉起时的工程根）。agent 选择由前端弹窗
+/// 传入；已含 workspace.json 的目录拒绝（防误覆盖，走「打开工作区」）。
 #[tauri::command]
-pub fn create_workspace(path: String, state: tauri::State<StateDir>) -> Result<Workspace, String> {
-    let ws = Workspace {
-        version: 1,
-        output_dir: String::new(),
-        packages: vec![],
-        atlases: vec![],
-        fonts: vec![],
-    };
+pub fn create_workspace(
+    path: String,
+    agents: Vec<String>,
+    state: tauri::State<StateDir>,
+    unity_root: tauri::State<UnityRoot>,
+) -> Result<Workspace, String> {
     let root = Path::new(&path);
-    fs::create_dir_all(root).map_err(|e| format!("create dir: {e}"))?;
-    write_workspace(root, &ws).map_err(|e| format!("save workspace: {e}"))?;
-
+    // 首选子进程（与 agent 会话同一 loom.exe；自拷贝语义天然正确）。
+    if let Some(loom) = locate_loom(None) {
+        let mut cmd = loom_command(&loom);
+        cmd.arg("init")
+            .arg(root)
+            .arg("--output")
+            .arg("Assets/Bundles");
+        for a in &agents {
+            cmd.arg("--agent").arg(a);
+        }
+        if let Some(u) = &unity_root.0 {
+            cmd.arg("--unity-root").arg(u);
+        }
+        let out = run_capture(cmd).map_err(|e| format!("spawn loom init: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "loom init 失败（exit {}）：{}",
+                out.status.code().unwrap_or(-1),
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+    } else {
+        // dev fallback：进程内 init；CLI 源用 GUI 同目录的 loom（若有），否则跳过拷贝。
+        let cli_source = std::env::current_exe()
+            .ok()
+            .and_then(|g| g.parent().map(|d| d.join(loom_file_name())))
+            .filter(|p| p.is_file())
+            .map(CliSource::Explicit)
+            .unwrap_or(CliSource::Skip);
+        let opts = InitOptions {
+            agents,
+            unity_root: unity_root.0.clone(),
+            output_dir: "Assets/Bundles".to_string(),
+            force: false,
+            cli_source,
+        };
+        init(root, opts).map_err(|f| format!("init failed: {f}"))?;
+    }
     recent::push_recent(state.0.as_deref(), &path);
-    Ok(ws)
+    load_workspace(root)
 }
 
 #[tauri::command]
@@ -47,42 +91,16 @@ pub fn save_workspace(path: String, ws: Workspace) -> Result<(), String> {
     write_workspace(Path::new(&path), &ws)
 }
 
-/// 按 agent 类型写入工作区脚手架：`claude` 落 `CLAUDE.md` + `.claude/skills/`，
-/// `agents` 落 `AGENTS.md` + `.agents/skills/`（AGENTS.md 约定的 agent 通用）。
-/// 指令文档共用一份模板，`{{SKILLS_DIR}}` 占位符按目标替换；skill 共用同一份。
-/// 覆盖拷入，不碰 workspace.json 和源文件。
-fn write_agent_scaffold(root: &Path, agents: &[String]) -> Result<(), String> {
-    if agents.is_empty() {
-        return Err("未勾选任何 agent".to_string());
-    }
-    let doc_tpl = include_str!("../templates/workspace-agent.md");
-    let skill_md = include_str!("../templates/skill/SKILL.md");
-    for agent in agents {
-        let (doc_name, skills_dir) = match agent.as_str() {
-            "claude" => ("CLAUDE.md", ".claude/skills"),
-            "agents" => ("AGENTS.md", ".agents/skills"),
-            other => return Err(format!("unknown agent kind: {other}")),
-        };
-        let doc = doc_tpl.replace("{{SKILLS_DIR}}", skills_dir);
-        fs::write(root.join(doc_name), doc).map_err(|e| format!("write {doc_name}: {e}"))?;
-        let skill_dir = root.join(skills_dir).join("loomgui-editor");
-        fs::create_dir_all(&skill_dir).map_err(|e| format!("create skill dir: {e}"))?;
-        fs::write(skill_dir.join("SKILL.md"), skill_md)
-            .map_err(|e| format!("write SKILL.md: {e}"))?;
-    }
-    Ok(())
-}
-
 /// 补齐 / 更新工作区脚手架（agent 指令文档 + loomgui-editor skill），
-/// 从 templates 覆盖拷入，按 `agents` 多选（`claude` / `agents`）。
-/// 不碰 workspace.json 和源文件。
+/// 按 `agents` 多选（`claude` / `agents`）。模板由 loomgui_pkg::scaffold 单源提供
+/// （CLI init 与 GUI 共用，防两端口径漂移）。不碰 workspace.json 和源文件。
 #[tauri::command]
 pub fn init_workspace(path: String, agents: Vec<String>) -> Result<(), String> {
     let root = Path::new(&path);
     if !root.is_dir() {
         return Err(format!("workspace dir not found: {}", root.display()));
     }
-    write_agent_scaffold(root, &agents)
+    loomgui_pkg::scaffold::write_agent_scaffold(root, &agents)
 }
 
 #[tauri::command]
@@ -121,9 +139,96 @@ pub fn scan_pngs(pkg_dir: String) -> Result<Vec<String>, String> {
     Ok(pngs)
 }
 
+/// 打包走 `loom build` 子进程（stdout JSON → 还原 BuildReport）；失败时 message +
+/// 诊断文本化给前端。找不到 loom.exe（dev 模式 target 目录分离）→ 进程内降级。
 #[tauri::command]
 pub fn run_build(path: String) -> Result<BuildReport, String> {
-    build(Path::new(&path))
+    let root = Path::new(&path);
+    let Some(loom) = locate_loom(Some(root)) else {
+        eprintln!("dev fallback: loom.exe not found next to GUI / in .loom/ — in-process build");
+        return build(root).map_err(|f| failure_to_text(&f));
+    };
+    let mut cmd = loom_command(&loom);
+    cmd.arg("build").arg(root).arg("--format").arg("json");
+    let out = run_capture(cmd).map_err(|e| format!("spawn loom build: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|e| format!("parse loom build output: {e}\nstdout: {stdout}"))?;
+    if json["success"].as_bool() == Some(true) {
+        serde_json::from_value(json["report"].clone())
+            .map_err(|e| format!("decode BuildReport: {e}"))
+    } else {
+        let msg = json["message"]
+            .as_str()
+            .unwrap_or("unknown loom build failure");
+        let mut text = msg.to_string();
+        if let Some(diags) = json["diagnostics"].as_array() {
+            for d in diags {
+                let sev = d["severity"].as_str().unwrap_or("error");
+                let code = d["code"].as_str().unwrap_or("?");
+                let file = d["file"].as_str().unwrap_or("?");
+                let line = d["line"].as_u64().unwrap_or(0);
+                let col = d["column"].as_u64().unwrap_or(0);
+                let m = d["message"].as_str().unwrap_or("");
+                text.push_str(&format!("\n{sev}[{code}]: {m} ({file}:{line}:{col})"));
+            }
+        }
+        Err(text)
+    }
+}
+
+/// 把 BuildFailure 文本化（dev fallback 的失败路径与子进程路径同形态）。
+fn failure_to_text(f: &BuildFailure) -> String {
+    let mut text = f.message.clone();
+    for d in &f.diagnostics {
+        text.push('\n');
+        text.push_str(&d.render());
+    }
+    text
+}
+
+fn loom_file_name() -> String {
+    if cfg!(windows) {
+        "loom.exe".to_string()
+    } else {
+        "loom".to_string()
+    }
+}
+
+/// 定位 loom CLI：(1) GUI 同目录（release = Editor/Tools 双 exe，版本配套）
+/// (2) `<workspace>/.loom/`。找不到 = None（dev 模式 target 目录分离，调用方降级）。
+fn locate_loom(workspace: Option<&Path>) -> Option<PathBuf> {
+    let name = loom_file_name();
+    if let Ok(exe) = std::env::current_exe() {
+        let sibling = exe.parent()?.join(&name);
+        if sibling.is_file() {
+            return Some(sibling);
+        }
+    }
+    if let Some(ws) = workspace {
+        let bundled = ws.join(".loom").join(&name);
+        if bundled.is_file() {
+            return Some(bundled);
+        }
+    }
+    None
+}
+
+/// 构造 loom 子进程命令（Windows 下 CREATE_NO_WINDOW 防 GUI 黑窗闪烁）。
+fn loom_command(exe: &Path) -> Command {
+    let mut cmd = Command::new(exe);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// 捕获 stdout/stderr 跑完子进程。
+fn run_capture(mut cmd: Command) -> std::io::Result<std::process::Output> {
+    cmd.output()
 }
 
 /// 将绝对路径转换为相对于 root 的路径（正斜杠）。
@@ -174,7 +279,7 @@ mod tests {
     #[test]
     fn scaffold_claude_writes_claude_layout() {
         let root = temp_root("claude");
-        write_agent_scaffold(&root, &["claude".to_string()]).unwrap();
+        loomgui_pkg::scaffold::write_agent_scaffold(&root, &["claude".to_string()]).unwrap();
         assert!(root.join("CLAUDE.md").is_file());
         let doc = fs::read_to_string(root.join("CLAUDE.md")).unwrap();
         assert!(doc.contains("`.claude/skills/loomgui-editor/SKILL.md`"));
@@ -189,7 +294,7 @@ mod tests {
     #[test]
     fn scaffold_agents_writes_agents_layout() {
         let root = temp_root("agents");
-        write_agent_scaffold(&root, &["agents".to_string()]).unwrap();
+        loomgui_pkg::scaffold::write_agent_scaffold(&root, &["agents".to_string()]).unwrap();
         assert!(root.join("AGENTS.md").is_file());
         let doc = fs::read_to_string(root.join("AGENTS.md")).unwrap();
         assert!(doc.contains("`.agents/skills/loomgui-editor/SKILL.md`"));
@@ -204,12 +309,18 @@ mod tests {
     #[test]
     fn scaffold_multi_and_invalid() {
         let root = temp_root("multi");
-        write_agent_scaffold(&root, &["claude".to_string(), "agents".to_string()]).unwrap();
+        loomgui_pkg::scaffold::write_agent_scaffold(
+            &root,
+            &["claude".to_string(), "agents".to_string()],
+        )
+        .unwrap();
         assert!(root.join("CLAUDE.md").is_file());
         assert!(root.join("AGENTS.md").is_file());
 
-        assert!(write_agent_scaffold(&root, &[]).is_err());
-        assert!(write_agent_scaffold(&root, &["cursor".to_string()]).is_err());
+        assert!(loomgui_pkg::scaffold::write_agent_scaffold(&root, &[]).is_err());
+        assert!(
+            loomgui_pkg::scaffold::write_agent_scaffold(&root, &["cursor".to_string()]).is_err()
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 }

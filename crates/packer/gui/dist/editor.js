@@ -145,18 +145,18 @@
     row.appendChild(openBtn);
     body.appendChild(row);
 
-    // 初始化工作区
+    // 更新 agent 脚手架（新建工作区时已全套初始化；此处为模板升级后的手动刷新）
     var initRow = el("div", "form-row");
-    var initBtn = el("button", "btn btn-secondary", "初始化工作区");
-    initBtn.title = "按勾选的 agent 覆盖拷贝指令文档 + loomgui-editor skill 到工作区（不碰 workspace.json 和源文件）";
+    var initBtn = el("button", "btn btn-secondary", "更新 agent 脚手架");
+    initBtn.title = "按勾选的 agent 覆盖拷贝指令文档 + skills 到工作区（不碰 workspace.json、.loom/ 和源文件）";
     initBtn.addEventListener("click", function () {
       openInitModal(function (agents) {
         initBtn.disabled = true;
-        initBtn.textContent = "初始化中...";
+        initBtn.textContent = "更新中...";
         invoke("init_workspace", { path: wsPath, agents: agents })
           .then(function () { alert("脚手架已更新"); })
           .catch(function (err) { alert("初始化失败: " + err); })
-          .finally(function () { initBtn.disabled = false; initBtn.textContent = "初始化工作区"; });
+          .finally(function () { initBtn.disabled = false; initBtn.textContent = "更新 agent 脚手架"; });
       });
     });
     initRow.appendChild(initBtn);
@@ -684,8 +684,19 @@
     if (report.packages && report.packages.length) html += "<span>包: " + report.packages.join(", ") + "</span>";
     if (report.atlases && report.atlases.length) html += "<span>图集: " + report.atlases.join(", ") + "</span>";
     if (report.fonts && report.fonts.length) html += "<span>字体: " + report.fonts.join(", ") + "</span>";
+    if (report.warnings && report.warnings.length) html += '<span>警告: ' + report.warnings.length + "</span>";
     if (!report.packages || !report.packages.length) html += '<span class="build-err">未发现包</span>';
     html += "</div>";
+    // W1/W2 一致性警告渲染进日志（修前被丢弃——GUI 里从未可见）：
+    // 「合法但预览≠运行时」的不一致，作者须看到以补全声明。
+    if (report.warnings && report.warnings.length) {
+      report.warnings.forEach(function (w) {
+        var loc = (w.file || "?") + ":" + (w.line || 0) + ":" + (w.column || 0);
+        html += '<p class="log-line log-warn">warning[' + escapeHtml(w.code || "?") + "] in \""
+          + escapeHtml(w.component || "?") + "\" (" + escapeHtml(loc) + "): "
+          + escapeHtml(w.message || "") + "</p>";
+      });
+    }
     if (report.log && report.log.length) {
       report.log.forEach(function (line) {
         var cls = "";

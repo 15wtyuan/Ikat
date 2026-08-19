@@ -131,16 +131,50 @@
   }
 
   // ── Event bindings ──
+  // ── New-workspace wizard: pick dir → pick agents → full init (scaffold + CLI + unity binding) ──
+  // 独立小弹窗（不与 editor.js 的 init-overlay 复用——那个绑定主屏的脚手架更新流程）。
+  function pickAgents(cb) {
+    var overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML =
+      '<div class="modal">' +
+      "<h3>初始化 agent 脚手架</h3>" +
+      '<p class="modal-desc">勾选要初始化的 agent（可多选）。将写入指令文档 + skills，' +
+      "并把 loom CLI 拷进工作区 .loom/（agent 会话零安装）。</p>" +
+      '<label class="agent-option"><input type="checkbox" id="nw-check-claude" checked />' +
+      '<div class="agent-option-body"><span class="agent-option-name">Claude</span>' +
+      '<span class="agent-option-path">CLAUDE.md + .claude/skills/</span></div></label>' +
+      '<label class="agent-option"><input type="checkbox" id="nw-check-agents" checked />' +
+      '<div class="agent-option-body"><span class="agent-option-name">其他</span>' +
+      '<span class="agent-option-path">AGENTS.md + .agents/skills/</span>' +
+      '<span class="agent-option-note">Codex / ZCode 等 AGENTS.md 约定</span></div></label>' +
+      '<div class="modal-actions">' +
+      '<button id="nw-cancel" class="btn btn-secondary">取消</button>' +
+      '<button id="nw-ok" class="btn btn-primary">创建</button></div></div>';
+    document.body.appendChild(overlay);
+    function close() { document.body.removeChild(overlay); }
+    overlay.querySelector("#nw-cancel").addEventListener("click", close);
+    overlay.querySelector("#nw-ok").addEventListener("click", function () {
+      var list = [];
+      if (overlay.querySelector("#nw-check-claude").checked) list.push("claude");
+      if (overlay.querySelector("#nw-check-agents").checked) list.push("agents");
+      close();
+      cb(list);
+    });
+  }
+
   btnNew.addEventListener("click", async function () {
     var path = await pickDirectory("选择新建工作区的目录");
     if (!path) return;
-    invoke("create_workspace", { path: path })
-      .then(function (ws) {
-        renderMain(ws, path);
-      })
-      .catch(function (err) {
-        alert("创建失败: " + err);
-      });
+    pickAgents(function (agents) {
+      invoke("create_workspace", { path: path, agents: agents })
+        .then(function (ws) {
+          renderMain(ws, path);
+        })
+        .catch(function (err) {
+          alert("创建失败: " + err);
+        });
+    });
   });
 
   btnOpen.addEventListener("click", async function () {

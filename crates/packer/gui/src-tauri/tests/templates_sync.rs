@@ -1,14 +1,15 @@
-//! 打包器模板（workspace-agent.md / skill SKILL.md）↔ fence schema 交叉校验。
+//! 打包器模板（workspace-agent.md / skill SKILL.md / loom SKILL.md）↔ 实现交叉校验。
 //!
 //! 模板是给外部工作区 agent 的围栏规则副本，历史上曾整段漂移（虚构 30 标签
 //! 世界、CSS 支持清单乌龙）。真相源是 `crates/fence/src/schema/` 的 const 表；
 //! 本测试把模板中的标签/role/CSS 清单拉回与 schema 对账，改 schema 必须同步
-//! 模板，否则这里红。
+//! 模板，否则这里红。loom skill 的命令面/退出码与 CLI main.rs 对账（同一模式）。
 
 use loomgui_fence::schema::{find_css_prop, find_shorthand, ROLE_TO_SEMANTIC, SHELL_TAGS, TAGS};
 
-const AGENT_MD: &str = include_str!("../templates/workspace-agent.md");
-const SKILL_MD: &str = include_str!("../templates/skill/SKILL.md");
+const AGENT_MD: &str = include_str!("../../../pkg/templates/workspace-agent.md");
+const SKILL_MD: &str = include_str!("../../../pkg/templates/skill/SKILL.md");
+const LOOM_SKILL_MD: &str = include_str!("../../../pkg/templates/loom-skill/SKILL.md");
 
 /// 提取锚点区之间的文本（begin/end 均为含 `fence-sync:` 的注释锚点）。
 fn section_between(md: &'static str, begin: &str, end: &str) -> &'static str {
@@ -127,4 +128,56 @@ fn not_supported_css_tokens_are_absent_from_whitelist() {
              DOES register it — the doc is stale, update it"
         );
     }
+}
+
+/// loom skill 命令面 ↔ CLI 实现对账：skill 教的每个子命令必须真实存在（main.rs
+/// 分发表），退出码语义不得漂移。改命令面不同步 skill = agent 照手册撞墙。
+#[test]
+fn loom_skill_commands_match_cli_surface() {
+    // 与 crates/packer/pkg/src/main.rs parse_cmd 的分发集一致。
+    let commands = [
+        "check",
+        "build",
+        "init",
+        "new",
+        "list",
+        "show",
+        "font add",
+        "atlas add",
+        "version",
+    ];
+    for cmd in &commands {
+        assert!(
+            LOOM_SKILL_MD.contains(&format!("loom {cmd}")),
+            "loom skill must document `loom {cmd}` (CLI implements it)"
+        );
+    }
+    // workspace-agent.md 的编排段同样教这些命令。
+    for cmd in [
+        "loom new",
+        "loom font add",
+        "loom atlas add",
+        "loom list",
+        "loom show",
+        "loom check",
+        "loom build",
+    ] {
+        assert!(
+            AGENT_MD.contains(cmd),
+            "workspace-agent.md must mention `{cmd}`"
+        );
+    }
+    // 退出码三段语义：skill 的表与 CLI 的 exit_code 契约对齐。
+    assert!(LOOM_SKILL_MD.contains("| 0 |"), "exit 0 row present");
+    assert!(LOOM_SKILL_MD.contains("| 1 |"), "exit 1 row present");
+    assert!(LOOM_SKILL_MD.contains("| 2 |"), "exit 2 row present");
+    assert!(
+        LOOM_SKILL_MD.contains("format_version"),
+        "skill must document the JSON format_version contract"
+    );
+    // 机读约定：stdout 数据 / stderr 进度。
+    assert!(
+        LOOM_SKILL_MD.contains("stdout"),
+        "skill must teach the stdout=data convention"
+    );
 }
