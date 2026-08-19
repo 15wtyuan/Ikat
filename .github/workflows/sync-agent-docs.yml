@@ -36,18 +36,24 @@ jobs:
             exit 0
           fi
 
-          # 本次 push 改了哪些文件（相对父 commit）。merge commit 取第一父。
-          PARENT=$(git rev-parse --short HEAD^1 2>/dev/null || echo "")
-          if [ -n "$PARENT" ]; then
-            CHANGED_CLAUDE=$(git diff --name-only "$PARENT" HEAD -- CLAUDE.md | wc -l)
-            CHANGED_AGENTS=$(git diff --name-only "$PARENT" HEAD -- AGENTS.md | wc -l)
-          else
-            # 无父 commit（首次提交）——以 CLAUDE.md 为准。
-            CHANGED_CLAUDE=1
-            CHANGED_AGENTS=0
+          # 本次 push 的变更窗口 = push 前 tip（github.event.before）→ push 后 HEAD。
+          # 不能用 HEAD^1：一次 push 携带多个 commit 时，触发文件可能在窗口中段改
+          # 过而 tip diff 为空，两计数为 0 会误入「CLAUDE.md 为准」分支，把过期
+          # 内容回流覆盖 AGENTS.md（发生过一次）。
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            # 新分支 / before 不可得——无从判定方向，不动（宁可不同步也不倒流）。
+            echo "push before 不可得，跳过同步。"
+            exit 0
           fi
+          CHANGED_CLAUDE=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- CLAUDE.md | wc -l)
+          CHANGED_AGENTS=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- AGENTS.md | wc -l)
 
-          if [ "$CHANGED_CLAUDE" -eq 0 ] && [ "$CHANGED_AGENTS" -gt 0 ]; then
+          if [ "$CHANGED_CLAUDE" -eq 0 ] && [ "$CHANGED_AGENTS" -eq 0 ]; then
+            # 窗口内两文件都没改（paths 过滤按整个 push 生效）——不动。
+            echo "窗口内两文件均未变更，跳过同步。"
+            exit 0
+          elif [ "$CHANGED_CLAUDE" -eq 0 ]; then
             # 只改了 AGENTS.md → 用它覆盖 CLAUDE.md
             cp AGENTS.md CLAUDE.md
             echo "只改了 AGENTS.md，已回流到 CLAUDE.md。"
