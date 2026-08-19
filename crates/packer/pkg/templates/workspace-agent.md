@@ -144,15 +144,16 @@ error):
 
 Control initial values go into ARIA attributes (`aria-valuenow`, `aria-checked`, ...) or `data-*` (`data-step`, `data-name`). Plain value attributes on control divs are build errors — `value` is legal only on `role=option`.
 
+**Controls ship with no default styles.** A control matched by no `<style>` rule is a build error (it would render blank) — style the control itself and its `data-slot` children; a `combobox` additionally requires `position:relative` on itself and `position:absolute` on its `role=listbox` popup. `switch` / `radio` have **no framework slot** (no knob slot — the framework only toggles `aria-checked`): visuals live in CSS state selectors, e.g. `[role="switch"][aria-checked="true"] .knob { transform: translateX(20px) }`.
+
 **Layout rules that bite most often:**
 
 - `display` accepts `block` / `flex` / `none` / `inline`. **`display:grid` does not exist** — build error.
 - `button` and `img` are inline boxes: they must sit in a `display:flex` parent, or carry an explicit `display:block`. Bare in a block container is a build error (LoomGUI has no CSS inline flow outside flex).
-- A block container's direct children must not mix inline-level (text, `span`, `img`) with block-level elements — wrap the inline run in a sub-`div`, or make the container `display:flex`. `slot` counts as block-level in this check (its projected content is unknowable at build time): put fallback text into the projected content, or give the slot its own container.
+- A block container's direct children must not mix inline-level (text, `span`, `img`) with block-level elements — wrap the inline run in a sub-`div`, or make the container `display:flex`. `slot` counts as block-level in this check (its projected content is unknowable at build time): put fallback text into the projected content, or give the slot its own container. Decorated frames (absolute-positioned background `img` + foreground content) hit this constantly — write them as `display:flex` + centering on the relative frame.
 - `position` accepts only `absolute` / `relative`.
 - `z-index` reorders siblings for drawing and hit-testing only (whole subtrees move with their parent); it never affects flex order — that is `order`.
 - `transform` pivots around the element's center only (`transform-origin` does not exist); pivot around a non-center point by positioning at the arc midpoint.
-- **Controls ship with NO default styles.** A control matched by no `<style>` rule is a build error and renders blank. Style the control itself and its `data-slot` children; a `combobox` additionally requires `position:relative` on itself and `position:absolute` on its `role=listbox` popup.
 - Animations: `animation` shorthand, `@keyframes`, and `:nth-child(An+B)` selectors are supported. Do not use `:nth-child` on virtualized lists (parked slots skew the count) — use `[data-index]` attribute selectors.
 
 **Browser-difference traps** (the HTML preview lies): `background-image` without `background-size` stretches to fill in LoomGUI (browsers show original size); `border-width` without `border-style` draws a border in LoomGUI (browsers draw nothing); adjacent margins never collapse (prefer `gap` for spacing). `box-sizing`, `cursor`, `text-decoration`, `font-style`, and `text-transform` do not exist in the fence at all.

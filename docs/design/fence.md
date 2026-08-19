@@ -63,7 +63,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 下表是完整的运行时标签注册表。控件与列表没有专属标签——作者在 `<div>` 上写 WAI-ARIA `role` 表达（spec §2.2），如 `<div role="slider">`、`<div role="list">`。列含义：
 
 - **SemanticKind**：打包期标注的稳定语义类型（base 标签按 tag、控件/列表按 `role`）。
-- **Display**：不写 CSS `display` 时的默认显示值。**注意：LoomGUI 运行时不实现 CSS inline flow**——`Inline` 标签运行时被当作 block-level flex（撑满父宽、竖向堆叠），与浏览器的横向 inline 行为不同。为防止 AI 先验错误，inline 布局 box（button/img）**必须放进 flex 容器**，不能裸放在 block 容器里，否则打包报错（见阶段 6.5）。文本级 `span` 豁免（其行内混排要等文本模型，roadmap §4）。
+- **Display**：不写 CSS `display` 时的默认显示值。**注意：LoomGUI 运行时不实现 CSS inline flow**——`Inline` 标签运行时被当作 block-level flex（撑满父宽、竖向堆叠），与浏览器的横向 inline 行为不同。为防止 AI 先验错误，inline 布局 box（button/img）**必须放进 flex 容器**，不能裸放在 block 容器里，否则打包报错（见阶段 6.5）。文本级 `span`/`slot` 豁免（其行内混排要等文本模型，roadmap §4；但阶段 6.4 的混排检查仍把 slot 按 block 级对待——两次保守判定同因：rich-text 标志打包期烘焙）。
 - **Category**：HTML 分类简化为四值——Block（块级结构）、Phrasing（行内文本级）、Void（自闭合）、Transparent（透明，继承父级）。
 - **ContentModel**：允许的子内容——None（无子内容）、Text（仅文本）、Phrasing（行内元素+文本）、Flow（任意）、Transparent（继承父级）、Only([...])（仅列出的子标签）。
 
@@ -104,6 +104,8 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `dialog` | Container（`div` tag 回退，非 role 分派——模态弹层容器） | — |
 
 控件初始值放 ARIA（`aria-valuenow`/`aria-checked`/...）或 `data-*`（`data-step`/`data-name`）属性里——围栏禁止 `<div>` 上出现 plain 控件属性。
+
+`switch` / `radio` 无框架槽位（没有 knob slot）：框架只切换 `aria-checked` 状态、不驱动子节点几何——视觉状态全在 CSS 状态选择器（含旋钮位移：`[role="switch"][aria-checked="true"] .knob { transform: translateX(...) }`，rematch 状态变化自动重评）。
 
 ### 2.4 自定义元素
 
@@ -391,7 +393,7 @@ CSS 在围栏中以三个正交维度建模：
 
 **空白折叠**：纯空白文本子（缩进/换行，块间装饰空白）视为**中性**——既不算 inline 也不算 block。否则任何缩进的 block 模板都会被误判成 mixed。与浏览器块间空白折叠语义一致。
 
-**display 判定**：复用阶段 6.5 的 parent-display 判定 helper（inline style + tag 默认 + 单 compound class flex 规则；多 compound 后代/子代规则保守放行）——两阶段对「parent 是 block 还是 flex」结论一致，避免 showcase 的 `.row { display:flex }` 等布局被误判。
+**display 判定**：复用阶段 6.5 的 parent-display 判定 helper（inline style + tag 默认 + 单 compound 静态可判定选择器——class / id / 静态属性如 `[role="tablist"]`；状态属性选择器（aria-checked 等）与多 compound 后代/子代规则保守放行）——两阶段对「parent 是 block 还是 flex」结论一致，避免 showcase 的 `.row { display:flex }` 等布局被误判。
 
 **须在 6.5 之前跑**：6.5 的 img 豁免读本阶段产出的 `rich_text_blocks`。
 
@@ -408,10 +410,10 @@ CSS 在围栏中以三个正交维度建模：
 **豁免**：
 - `span`（TextElement）/`slot`：文本级或结构占位，其行内混排要等文本模型（roadmap §4），不是 flex 能修的。
 - 元素显式 `display:block`：作者有意当块级（撑满），浏览器也撑满，两边一致。
-- parent 是 flex（inline style / tag 默认 / `<style>` class 规则声明 `display:flex`）。
+- parent 是 flex（inline style / tag 默认 / `<style>` 规则声明 `display:flex`——单 compound 静态可判定选择器：class / id / 静态属性）。
 - **parent 是 rich-text-block**（阶段 6.4 判定）时 `img` 豁免：img 作为 inline run 走 rich-text inline flow，与浏览器一致。`button` 不豁免——button 是控件非 phrasing，不进 inline 级集合。
 
-**parent display 判定**：stage 4 css_resolve 只烘 inline style + tag 默认 display；`<style>` class 规则的 display 在 dynamic_rules（运行时 rematch）。检查合并两个来源判定 parent 是 block 还是 flex：class 匹配用单 compound 选择器（`.tab`/`button.tab`/`.btn.primary`）；多 compound（后代/子代）声明 flex 时保守放行（避免假阳性）。
+**parent display 判定**：stage 4 css_resolve 只烘 inline style + tag 默认 display；`<style>` class 规则的 display 在 dynamic_rules（运行时 rematch）。检查合并两个来源判定 parent 是 block 还是 flex：匹配用单 compound 的**静态可判定**选择器（class / id / 静态属性如 `[role="tablist"]`、`[data-slot="fill"]`；运行时可变状态属性——aria-checked / aria-expanded / hidden / tabindex 等——与伪类属条件化命中，不做静态判定）；多 compound（后代/子代）声明 flex 时保守放行（避免假阳性）。display:block 的子元素显式块级判定同源。
 
 ### 阶段 6.7：控件 CSS 命中校验
 

@@ -14,7 +14,7 @@
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::ir::{IrElement, IrNodeKind, IrTree};
 use crate::schema::tag::{find_tag, DisplayDefault, SemanticKind};
-use loomgui_core::style::dynamic::{Compound, DynamicRule};
+use loomgui_core::style::dynamic::{AttrOp, Compound, DynamicRule};
 use loomgui_core::style::resolved::ResolvedStyle;
 
 /// 文本级 inline 语义豁免。这些标签是“文本片段”（span 终态是 TextRun，main-design §10）
@@ -58,9 +58,25 @@ pub(crate) fn collect_flex_class_rules(dynamic_rules: &[DynamicRule]) -> (Vec<&C
     collect_display_class_rules(dynamic_rules, "flex")
 }
 
-/// 单 compound 选择器是否无条件命中该元素（tag/class 字面对照；伪类、属性
-/// 选择器、id 条件化命中，不能当无条件静态匹配）。
-fn class_rule_matches_element(comp: &Compound, el: &IrElement) -> bool {
+/// 值随运行时状态变化的属性：写这些的选择器（如 `[aria-checked="true"]`）是
+/// 条件化命中——匹配与否取决于运行时状态，不能当无条件的静态 display 来源。
+/// 未列出的属性（role、data-*、type、id ...）字面静态，可安全判定。
+const RUNTIME_MUTABLE_ATTRS: &[&str] = &[
+    "aria-checked",
+    "aria-expanded",
+    "aria-selected",
+    "aria-disabled",
+    "aria-pressed",
+    "aria-valuenow",
+    "aria-activedescendant",
+    "hidden",
+    "tabindex",
+];
+
+/// 单 compound 选择器是否**无条件**命中该元素：tag / id / class 字面对照 +
+/// 静态属性选择器（`[role="tablist"]`、`[data-slot="fill"]` 等）。伪类、结构
+/// 伪类、运行时可变状态属性是条件化命中——含这些的 compound 不做静态判定。
+fn compound_statically_matches(comp: &Compound, el: &IrElement) -> bool {
     let tag_ok = comp
         .tag
         .as_ref()
@@ -69,10 +85,19 @@ fn class_rule_matches_element(comp: &Compound, el: &IrElement) -> bool {
         && !comp.pseudo_active
         && !comp.pseudo_disabled
         && !comp.pseudo_focus
-        && comp.pseudo_nth_child.is_none() // 结构伪类同样条件化命中，不能当无条件静态匹配
-        && comp.attrs.is_empty();
-    if !tag_ok || !no_pseudo || comp.id.is_some() {
+        && comp.pseudo_nth_child.is_none(); // 结构伪类条件化命中，不能当无条件静态匹配
+    if !tag_ok || !no_pseudo {
         return false;
+    }
+    if let Some(id) = &comp.id {
+        let el_id = el
+            .attributes
+            .iter()
+            .find(|a| a.name == "id")
+            .map(|a| a.value.as_str());
+        if el_id != Some(id.as_str()) {
+            return false;
+        }
     }
     let classes: Vec<&str> = el
         .attributes
@@ -80,19 +105,36 @@ fn class_rule_matches_element(comp: &Compound, el: &IrElement) -> bool {
         .find(|a| a.name == "class")
         .map(|a| a.value.split_whitespace().collect())
         .unwrap_or_default();
-    comp.classes.iter().all(|c| classes.contains(&c.as_str()))
+    if !comp.classes.iter().all(|c| classes.contains(&c.as_str())) {
+        return false;
+    }
+    comp.attrs.iter().all(|a| {
+        if RUNTIME_MUTABLE_ATTRS.contains(&a.name.as_str()) {
+            return false; // 条件化 → 本 compound 不做静态判定
+        }
+        let node_attr = el
+            .attributes
+            .iter()
+            .find(|na| na.name.eq_ignore_ascii_case(&a.name));
+        match a.op {
+            AttrOp::Exists => node_attr.is_some(),
+            AttrOp::Eq => {
+                matches!(node_attr, Some(na) if na.value == a.value.as_deref().unwrap_or(""))
+            }
+        }
+    })
 }
 
 /// 元素的 class 规则是否声明了指定 display 值。单 compound 静态匹配；存在多
 /// compound 的此类规则时保守视为命中（无法廉价判定，避免假阳性误报）。
-pub(crate) fn class_declares_display(
+pub(crate) fn statically_declares_display(
     el: &IrElement,
     rules: &[&Compound],
     has_multi_compound_rule: bool,
 ) -> bool {
     if rules
         .iter()
-        .any(|comp| class_rule_matches_element(comp, el))
+        .any(|comp| compound_statically_matches(comp, el))
     {
         return true;
     }
@@ -117,7 +159,7 @@ pub(crate) fn is_flex_context(
         return true;
     }
     // (2) class 规则声明 display:flex。
-    class_declares_display(
+    statically_declares_display(
         parent_el,
         single_compound_flex_rules,
         has_multi_compound_flex_rule,
@@ -178,7 +220,7 @@ pub fn check_inline_context(
         // （css_resolve 只烘 inline style，class 规则的 display 要查 dynamic_rules）。
         // （display:flex 的 inline 元素在浏览器仍 shrink-to-fit，和 LoomGUI 撑满不一致 → 不放行。）
         if styles[idx].taffy_style.display == taffy::Display::Block
-            || class_declares_display(
+            || statically_declares_display(
                 el,
                 &single_compound_block_rules,
                 has_multi_compound_block_rule,
@@ -285,6 +327,50 @@ mod tests {
         assert!(
             !has_block_context_diag(&result, "button"),
             "class 规则 flex 容器里的 button 不应报错: {:?}",
+            result.diagnostics
+        );
+    }
+
+    /// 属性选择器声明的 display:flex（`[role="tablist"]` 静态可判定）→ 放行——
+    /// 结构检查与控件检查的选择器覆盖须一致。
+    #[test]
+    fn inline_in_attr_selector_flex_ok() {
+        let result = parse_template(
+            r#"<style>[role="tablist"] { display:flex }</style><div role="tablist"><button role="tab">a</button><button role="tab">b</button></div>"#,
+            "t.html",
+        );
+        assert!(
+            !has_block_context_diag(&result, "button"),
+            "属性选择器 flex 容器里的 button 不应报错: {:?}",
+            result.diagnostics
+        );
+    }
+
+    /// id 选择器声明的 display:flex（静态字面匹配）→ 放行。
+    #[test]
+    fn inline_in_id_selector_flex_ok() {
+        let result = parse_template(
+            r#"<style>#tabs { display:flex }</style><div id="tabs"><button>x</button></div>"#,
+            "t.html",
+        );
+        assert!(
+            !has_block_context_diag(&result, "button"),
+            "id 选择器 flex 容器里的 button 不应报错: {:?}",
+            result.diagnostics
+        );
+    }
+
+    /// 运行时可变状态属性（aria-checked）声明的 display:flex 是条件化命中——
+    /// 初始态未必 flex，不做静态判定（保守继续报错）。
+    #[test]
+    fn conditional_state_selector_flex_still_errors() {
+        let result = parse_template(
+            r#"<style>[aria-checked="true"] { display:flex }</style><div role="switch" aria-checked="true"><button>x</button></div>"#,
+            "t.html",
+        );
+        assert!(
+            has_block_context_diag(&result, "button"),
+            "条件化 flex（状态属性选择器）不应静态放行: {:?}",
             result.diagnostics
         );
     }

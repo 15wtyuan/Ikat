@@ -179,7 +179,10 @@ pub fn classify_rich_text(
                      flow, some want to fill width and stack). Fix (pick one): \
                      (1) wrap the inline children inside a single child <div> so this container's \
                      direct children are all block-level; \
-                     (2) set display:flex on this container so every child becomes a flex item.",
+                     (2) set display:flex on this container so every child becomes a flex item. \
+                     For decorated frames (absolute-positioned background image behind foreground \
+                     content), the canonical pattern is display:flex + align-items:center + \
+                     justify-content:center on the frame.",
                     tag = el.tag
                 ),
                 line_map.source_location(node.span.start, file.to_string()),

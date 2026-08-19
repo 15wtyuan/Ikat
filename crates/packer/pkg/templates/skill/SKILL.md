@@ -151,8 +151,17 @@ Canonical patterns (adapt colors/sizes):
 [role="combobox"][aria-expanded="true"] [role="listbox"] { display: flex; flex-direction: column; }
 ```
 
-For `switch` / `radio`, an attribute selector keyed on state reads best:
-`[role="switch"][aria-checked="true"] { ... }`.
+For `switch` / `radio` there is **no framework slot** (no
+`data-slot="knob"` — the framework never drives child geometry for these
+controls; it only toggles the `aria-checked` state). Visual state lives
+entirely in CSS via state selectors. A sliding knob is a child you author
+plus a state-selector transform:
+
+```css
+[role="switch"] { position: relative; display: flex; width: 40px; height: 20px; background: #2e2e42; }
+[role="switch"] .knob { position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; background: #fff; transition: transform .15s; }
+[role="switch"][aria-checked="true"] .knob { transform: translateX(20px); }
+```
 
 ## Layout rules
 
@@ -161,8 +170,9 @@ For `switch` / `radio`, an attribute selector keyed on state reads best:
 - **Inline boxes (`button`, `img`) must live in a `display:flex` parent**,
   or carry an explicit `display:block`. Bare in a block container is a
   build error: LoomGUI has no CSS inline flow outside flex, so the element
-  would stack full-width and break browser-trained expectations. `span` and
-  `slot` are exempt (they join rich-text runs).
+  would stack full-width and break browser-trained expectations. `span` is
+  exempt (it joins rich-text runs); `slot` is exempt here too — but the
+  mixing rule below still counts it as block-level.
 - **No mixing inside one block container**: the direct children of a
   `display:block` container must be all inline-level (text / `span` /
   `img` — that combination becomes a rich-text block, laid out like browser
@@ -172,6 +182,11 @@ For `switch` / `radio`, an attribute selector keyed on state reads best:
   site, or give the slot its own container — `<span>` wrapping only a slot
   (no text) is fine. Mixed = build error. Fix by wrapping the
   inline run in a sub-`div`, or switching the container to `display:flex`.
+- **Decorated frames** (an absolute-positioned background `img` behind
+  foreground content — rings, campfire circles, portrait frames) are the
+  most common trigger of the mixing rule. The canonical pattern:
+  `display:flex; align-items:center; justify-content:center` on the
+  relative frame, background image and content both become flex items.
 - `position: absolute | relative` only (`fixed`/`sticky` are build errors).
 - `z-index` reorders **siblings** for drawing and hit-testing; a whole
   subtree moves with its parent; there are no nested stacking contexts. It
