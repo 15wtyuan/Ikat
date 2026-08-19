@@ -233,8 +233,9 @@ mod tests {
 
     #[test]
     fn known_roles_pass_gate() {
-        // 注册表全集 + textbox/tabpanel 两个表外例外都必须放行。
+        // 注册表全集 + textbox/tabpanel/dialog 表外例外都必须放行。
         let html = "<div role=\"tabpanel\"></div>\
+                    <div role=\"dialog\"></div>\
                     <div role=\"textbox\" aria-multiline=\"true\"></div>\
                     <div role=\"combobox\"><div role=\"listbox\">\
                     <div role=\"option\" value=\"en\">English</div></div></div>\

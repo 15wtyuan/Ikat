@@ -102,9 +102,9 @@ pub struct TagSpec {
 /// TextField, which a flat value table cannot express, so it is handled inline
 /// in [`resolve_semantic`]. `listbox` maps to a plain Container because it is the
 /// popup list inside a `combobox` and has no dedicated NodeKind; the runtime
-/// addresses it by role. `tabpanel` is likewise intentionally absent: a panel is
-/// a plain `<div>` Container that a tab links via `aria-controls` (cross-tree
-/// association), not a distinct NodeKind.
+/// addresses it by role. `tabpanel` and `dialog` are likewise intentionally
+/// absent: both are plain `<div>` Containers (a panel a tab links to via
+/// `aria-controls`; a modal overlay layer), not distinct NodeKinds.
 pub const ROLE_TO_SEMANTIC: &[(&str, SemanticKind)] = &[
     ("combobox", SemanticKind::Dropdown),
     ("option", SemanticKind::OptionItem),
@@ -163,17 +163,22 @@ pub fn resolve_semantic(
 
 /// Whether a `role` attribute value is recognized by the fence.
 ///
-/// The role universe is the [`ROLE_TO_SEMANTIC`] registry plus two roles
+/// The role universe is the [`ROLE_TO_SEMANTIC`] registry plus three roles
 /// that are intentionally not in it: `textbox` (its TextArea/TextField
-/// split needs `aria-multiline`, handled inline in `resolve_semantic`) and
-/// `tabpanel` (a plain Container a tab links to via `aria-controls`, not a
-/// distinct kind). Stage 3 rejects anything else with `FenceUnknownRole`:
-/// a typo'd role would otherwise silently degrade the element to its
-/// base-tag type and skip every control validation (required children,
-/// CSS hit, structure CSS), which is exactly the silent-degradation the
-/// fence exists to prevent.
+/// split needs `aria-multiline`, handled inline in `resolve_semantic`),
+/// `tabpanel` (a plain Container a tab links to via `aria-controls`), and
+/// `dialog` (a plain Container for a modal overlay layer — a standard
+/// WAI-ARIA role AI authors reach for naturally; accepting it as a
+/// container beats rejecting standard vocabulary). Stage 3 rejects
+/// anything else with `FenceUnknownRole`: a typo'd role would otherwise
+/// silently degrade the element to its base-tag type and skip every
+/// control validation (required children, CSS hit, structure CSS), which
+/// is exactly the silent-degradation the fence exists to prevent.
 pub fn is_known_role(role: &str) -> bool {
-    role == "textbox" || role == "tabpanel" || ROLE_TO_SEMANTIC.iter().any(|(r, _)| *r == role)
+    role == "textbox"
+        || role == "tabpanel"
+        || role == "dialog"
+        || ROLE_TO_SEMANTIC.iter().any(|(r, _)| *r == role)
 }
 
 /// Comma-separated list of every recognized role, for diagnostic messages.
@@ -182,6 +187,7 @@ pub fn known_roles_list() -> String {
     let mut roles: Vec<&str> = ROLE_TO_SEMANTIC.iter().map(|(r, _)| *r).collect();
     roles.push("textbox");
     roles.push("tabpanel");
+    roles.push("dialog");
     roles.join(", ")
 }
 

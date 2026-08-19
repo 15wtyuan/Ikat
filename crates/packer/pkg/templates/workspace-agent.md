@@ -127,6 +127,7 @@ error):
 | `tablist` | TabList | `role=tab` child (panels link via `aria-controls`) |
 | `tab` | Tab | — |
 | `tabpanel` | plain Container | — (a panel is a div a tab points at via `aria-controls`) |
+| `dialog` | plain Container | — (a modal overlay layer; standard WAI-ARIA vocabulary) |
 
 Control initial values go into ARIA attributes (`aria-valuenow`, `aria-checked`, ...) or `data-*` (`data-step`, `data-name`). Plain value attributes on control divs are build errors — `value` is legal only on `role=option`.
 

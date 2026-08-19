@@ -97,6 +97,7 @@ every control validation.
 | `tablist` | TabList | `role=tab` children |
 | `tab` | Tab | none (may also be written `button role=tab`) |
 | `tabpanel` | plain Container | none — a panel is a div a tab points at via `aria-controls` |
+| `dialog` | plain Container | none — a modal overlay layer |
 
 Required children must be **direct** children (wrapping them in an
 intermediate div fails the check); the only exception is the `list` +

@@ -72,10 +72,13 @@ fn runtime_and_shell_tag_lists_match_schema() {
 
 #[test]
 fn every_registered_role_appears_in_templates() {
-    // `textbox` 由 resolve_semantic 内联分派（aria-multiline 二分），不在表内。
+    // 表外例外：textbox（resolve_semantic 内联分派）、tabpanel / dialog（纯容器
+    // 语义，div tag 回退）。模板 role 表须覆盖全宇宙。
     let mut roles: Vec<&str> = ROLE_TO_SEMANTIC.iter().map(|(r, _)| *r).collect();
     roles.push("textbox");
-    assert_eq!(roles.len(), 13, "role universe changed — update this test");
+    roles.push("tabpanel");
+    roles.push("dialog");
+    assert_eq!(roles.len(), 15, "role universe changed — update this test");
     for role in &roles {
         for (name, md) in [("workspace-agent.md", AGENT_MD), ("SKILL.md", SKILL_MD)] {
             assert!(

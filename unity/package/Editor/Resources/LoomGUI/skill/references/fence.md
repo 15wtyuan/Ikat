@@ -85,6 +85,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `tablist` | TabList | `role=tab` 子（panel 靠 `aria-controls` 关联，非 role） |
 | `tab` | Tab | — |
 | `tabpanel` | Container（`div` tag 回退，非 role 分派） | — |
+| `dialog` | Container（`div` tag 回退，非 role 分派——模态弹层容器） | — |
 
 控件初始值放 ARIA（`aria-valuenow`/`aria-checked`/...）或 `data-*`（`data-step`/`data-name`）属性里——围栏禁止 `<div>` 上出现 plain 控件属性。
 
@@ -122,6 +123,7 @@ Base 标签按 tag 映射；控件/列表按 `role` 映射（`role` 优先于 ta
 | `div role=tablist` | TabList |
 | `div role=tab`（或 `button role=tab`） | Tab |
 | `div role=tabpanel` | Container（panel 靠 `aria-controls` 关联，非 role 分派） |
+| `div role=dialog` | Container（模态弹层容器，非 role 分派） |
 | `template` | Template |
 | `slot` | Slot |
 | `tag-name`（含 hyphen） | CustomElement |
@@ -147,7 +149,7 @@ Base 标签按 tag 映射；控件/列表按 `role` 映射（`role` 优先于 ta
 | `hidden` | 隐藏元素 |
 | `tabindex` | 焦点顺序 |
 | `type` | 通用类型提示（`input[type]` 结构分派已退役，现作普通全局属性透传） |
-| `role` | WAI-ARIA 角色（白名单校验：注册表 12 role + `textbox` + `tabpanel`，未知值报 `FenceUnknownRole`——拼错的 role 静默回退成基础标签类型会跳过全部控件校验，故拒绝） |
+| `role` | WAI-ARIA 角色（白名单校验：注册表 12 role + `textbox` + `tabpanel` + `dialog`，未知值报 `FenceUnknownRole`——拼错的 role 静默回退成基础标签类型会跳过全部控件校验，故拒绝） |
 | `aria-*` | WAI-ARIA 状态/属性（打包期校验 IdRef 关系） |
 | `data-*` | 自定义数据属性（透传，不做结构验证） |
 | `--*` | CSS 自定义属性（透传） |
@@ -454,7 +456,7 @@ CSS 在围栏中以三个正交维度建模：
 | `FenceControlWithoutCss` | role 驱动控件（`progressbar`/`slider`/`switch`/`radio`/`textbox`/`spinbutton`/`combobox`）无任何 `<style>` 规则命中。控件不带 UA 默认样式，无 CSS = 运行时空白；须为控件及其 `data-slot` 子节点提供 CSS（详见阶段 6.7） |
 | `FenceControlStructureCss` | 控件结构 CSS 契约缺失（当前契约：`combobox` 本体缺 `position:relative`，或其子树内 `role=listbox` 弹层缺 `position:absolute`）。视觉规则命中 ≠ 结构声明齐全，缺锚点/脱流到 PlayMode 才显形；详见阶段 6.7b |
 | `FenceMissingControlChild` | role 驱动控件缺必需子角色/slot（`combobox` 缺 `role=listbox`、`listbox` 缺 `role=option`、`slider` 缺 `data-slot=thumb`、`progressbar` 缺 `data-slot=fill`、`list` 缺 `role=listitem`、`tablist` 缺 `role=tab`）。控件结构由作者写，漏写 = 运行时半残控件；详见阶段 6.8 |
-| `FenceUnknownRole` | `role` 属性值不在 role 注册表（`ROLE_TO_SEMANTIC` + `textbox`/`tabpanel` 例外）。拼错防护：未知 role 若静默回退成基础标签类型，元素会跳过全部控件校验（必需子结构、CSS 命中、结构 CSS），构建绿灯但运行时空白——「不静默降级」原则拒绝此类 |
+| `FenceUnknownRole` | `role` 属性值不在 role 注册表（`ROLE_TO_SEMANTIC` + `textbox`/`tabpanel`/`dialog` 例外）。拼错防护：未知 role 若静默回退成基础标签类型，元素会跳过全部控件校验（必需子结构、CSS 命中、结构 CSS），构建绿灯但运行时空白——「不静默降级」原则拒绝此类 |
 
 ---
 
