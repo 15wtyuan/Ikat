@@ -19,11 +19,10 @@ LoomGUI = 跨引擎游戏 UI 框架。标准 HTML/CSS 子集作设计期 DSL，�
 cargo build -p loomgui_core
 cargo test  -p loomgui_core
 
-# loom CLI（HTML+CSS+资源 → .pkg.bin + 自绘图集 + fonts；二进制名 loom，复用核心 parse 层）
-# 命令面：check / build / init / new / list / show / font add / atlas add / version；退出码 0/1/2。
+# 打包器 CLI（HTML+CSS+资源 → .pkg.bin + 自绘图集 + fonts；二进制名 loom-pkg，复用核心 parse 层）
 cargo build -p loomgui_pkg
 cargo test  -p loomgui_pkg
-# 运行：cargo run -p loomgui_pkg -- check <workspace-dir>    （loom check <workspace>）
+# 运行：cargo run -p loomgui_pkg -- build <workspace-dir>    （loom-pkg build <workspace>）
 
 # 独立打包器 GUI（Tauri 桌面应用；出 exe 见下方「GUI 打包器 exe 闭环」段，勿用 cargo build）
 cargo tauri dev                  # 开发热重载（需 tauri-cli）
@@ -59,23 +58,17 @@ cp target/release/loomgui_ffi_c.dll unity/package/Plugins/LoomGUI/loomgui_ffi_c.
 - **拷贝时 Unity 必须关着**（它锁 .dll）。
 - **同步 C# 绑定**：build.rs 不再自动写 Unity 绑定。构建后运行 `cargo run -p xtask -- sync-bindings`，将 csbindgen 生成的 `LoomGUIBindings.cs` 同步到 `unity/package/Plugins/LoomGUI/Bindings/`。
 
-**图集自绘**：图集由打包器自绘（`loom build` 或 GUI 产 `atlas/*.png`+`atlas/*.atlas.json`）
+**图集自绘**：图集由打包器自绘（`loom-pkg build` 或 GUI 产 `atlas/*.png`+`atlas/*.atlas.json`）
 
-### GUI 打包器 + loom CLI 双 exe 闭环（Editor/Tools）
+### GUI 打包器 exe 闭环（loomgui_gui，Tauri 2）
 
-GUI 是 Tauri 2 桌面 app；打包/初始化语义走 `loom` CLI 子进程（定位链：GUI 同目录 → `<workspace>/.loom/` → dev fallback 进程内）。产物双 exe 同放 `unity/package/Editor/Tools/`：`loomgui_gui.exe`（Unity `LoomGUI > Open Packer` 拉起，拉起时传 `--unity-root`）+ `loom.exe`（版本与 GUI 配套）。
+GUI 是 Tauri 2 桌面 app，产物 `unity/package/Editor/Tools/loomgui_gui.exe`（Unity `LoomGUI > Open Packer` 拉起）。任何 GUI 改动、围栏改动后必须重出 exe + 拷贝 + 入库：
 
 ```bash
-cargo build -p loomgui_pkg --release
-cp target/release/loom.exe unity/package/Editor/Tools/loom.exe
-
 npm install -g @tauri-apps/cli                 # 一次性装 tauri-cli（prebuilt，比 cargo install 快得多）
 (cd crates/packer/gui/src-tauri && tauri build --no-bundle)    # 出 exe（必须 tauri CLI！--no-bundle 跳 NSIS/MSI installer）
-# tauri-cli 产物在 workspace 根 target/release/（不在 src-tauri/target/）。
-cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
+cp crates/packer/gui/src-tauri/target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 ```
-
-**重出条件（收窄过）**：fence/pkg 的 build 语义变动、scaffold 模板/skill 内容变动**不要求**重出 GUI exe（build/init 走 loom.exe 子进程、模板嵌在 loom.exe 里）；仍要求重出的：`Workspace` struct（workspace JSON schema）变动、GUI 自身代码（commands/前端）变动。loom.exe 与 GUI exe 同 commit 重出，防版本错配。
 
 - **前端手写 dist（无 npm 构建）**，靠 `app.withGlobalTauri:true` 注入 `window.__TAURI__`（tauri.conf.json）；缩略图靠 `app.security.assetProtocol` + Cargo `tauri` feature `protocol-asset`。
 
@@ -121,7 +114,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 - **设计文档 vs 踩坑**：`docs/design/main-design.md`（总体架构与渲染管线）、`docs/design/fence.md`（围栏）、`docs/design/public-api.md`（公共 API 终态契约）、`docs/roadmap/roadmap.md`（路线图）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配）。
 - **Rust edition 2021**，依赖钉版本：`taffy 0.12`、`ttf-parser 0.20`、`slotmap 1.1`、`csbindgen 1`。CSS 选择器解析器手搓（零新依赖，spike 阶段推翻了"接 cssparser"前提）。
 - `Cargo.lock` 入库（根级，尽管 `.gitignore` 有通用 `Cargo.lock` 行——它是被追踪的）。
-- 设计师工作区是独立磁盘目录（含 `loom.workspace.json`、HTML/CSS 源文件、res 资源、design-systems 组件库）。打包用独立打包器 GUI（Tauri `loomgui_gui`）或 CLI `loom build <workspace>`。运行时引导由 `loom.runtime.json` 统管。
+- 设计师工作区是独立磁盘目录（含 `loom.workspace.json`、HTML/CSS 源文件、res 资源、design-systems 组件库）。打包用独立打包器 GUI（Tauri `loomgui_gui`）或 CLI `loom-pkg build <workspace>`。运行时引导由 `loom.runtime.json` 统管。
 - 用户只读中文——问答/选项/总结用中文；代码/commit 照旧英文。
 - **代码注释写上线品质**：自包含、精简（说 WHY）、不引用内部编号或暗语、不引用任何文档，如有引用文档必要，直接把文本拷贝上去。坑号只属于 `docs/pitfalls.md`，不进代码。也不要写任何plan、spec的文档编号。
 - **修根因，别贴补偿参数**：去源头修，别在下游加参数补偿。
@@ -152,7 +145,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 **围栏真相源 = `crates/fence/src/schema/` Rust const 表，`docs/design/fence.md` 是人类可读权威副本**：围栏最终形态 = schema 注册表（14 标签 = 8 shell + 6 runtime + role 驱动控件 + CSS 子集 + `@keyframes`/`animation` 终态），fence.md 是它的可读镜像（改 schema 必同步 fence.md，防漂移门 `cargo test -p loomgui_fence` 含「文档↔schema 交叉校验」测试 `doc_schema_sync.rs`）。roadmap 决策「终点线2 scope 用哪些」（`:nth-child` / 多 selector / @keyframes runtime 已交付；剩余视觉缺口见 `docs/roadmap/roadmap.md` T1）。代码往围栏最终形态靠，围栏外的 showcase bug 跟围栏最终形态（showcase 整体打包挂留专门 task）。
 
-**loom.exe 与 GUI exe 的重出条件（已收窄）**：fence/pkg 的 build 语义、scaffold 模板变动走 loom.exe（GUI spawn 子进程，不嵌 GUI 字节）；`Workspace` struct 或 GUI 自身代码变动才要求重出 GUI exe。双 exe 闭环见上方「GUI 打包器 + loom CLI 双 exe 闭环」段。
+**GUI exe 绑 fence crate**：fence 改动后必须重编 GUI exe（`loomgui_gui.exe` 静态链入 fence），否则 GUI stale 误报围栏外（pkg bump 时也触发，坑 158 同源）。打包器 exe 闭环见上方「GUI 打包器 exe 闭环」段。
 
 **SDD per-task review 是代码质量门，不是集成正确性门**：单测验不了 CSS 语义集成（display 子树剪枝、继承传播、多 spec 解析）——SDD 后必跑 showcase PlayMode 逐项过。**跨层缺口 per-task review 必漏**：控件束 P3 加 NumberField 时，enum/FFI/C# 各 task 都绿，但 render/measure/cursor 的 type-dispatch arm 漏了 NumberField → 控件运行时不可见（空 mesh），是 final whole-branch review 才抓到。**教训：加新控件类型（新 NodeKind/ControlState 变体）时，强制 grep 所有按 kind/变体 dispatch 的点**（render arm、measure_text_controls、on_pointer_down/on_text_pointer_down、cursor blink、FFI setter or-pattern）逐一确认覆盖，别只验自己 task 的层——各层 dispatch 独立写、独立测，漏一个 = 控件半残/不可见。
 
@@ -176,7 +169,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 **圆角/小尺寸视觉差异别信目测或视觉模型**——python 像素取样 + 数学验证（如像素中心到角圆心距离 vs 半径）；「渲染出来的圆角比预期小」先算正确视觉该是什么样再下结论。
 
-**改 parse-time 逻辑必重打 pkg**：`Node.base_style` 是打包期产物。改 cascade/mapping/parse 只重编 .dll 不够，须 `cargo run -p loomgui_pkg -- build <ws>` 重打 pkg。纯 runtime 改 .dll 即可。
+**改 parse-time 逻辑必重打 pkg**：`Node.base_style` 是打包期产物。改 cascade/mapping/parse 只重编 .dll 不够，须 `cargo run -p loomgui_pkg` 重打 pkg。纯 runtime 改 .dll 即可。
 
 csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件。
 
