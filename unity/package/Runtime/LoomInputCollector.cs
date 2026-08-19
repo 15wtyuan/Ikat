@@ -66,14 +66,16 @@ namespace LoomGUI
             Unsubscribe();
         }
 
-        /// 键盘热插拔/重连：Keyboard.current 换新实例，事件须换挂（旧实例随设备失效）。
+        /// 键盘设备变更（热插拔/重连/切布局等）：Keyboard.current 可能换新实例，事件挂实例上，
+        /// 统一重订到当前键盘（current 为 null 时 Subscribe 内部 no-op）。不能只认
+        /// Added/Reconnected——ConfigurationChanged（Windows 切键盘布局）等变更只退订不重订，
+        /// text/IME 从此静默失联。
         void OnDeviceChange(InputDevice device, InputDeviceChange change)
         {
             if (device is Keyboard)
             {
                 Unsubscribe();
-                if (change == InputDeviceChange.Added || change == InputDeviceChange.Reconnected)
-                    Subscribe(Keyboard.current);
+                Subscribe(Keyboard.current);
             }
         }
 
@@ -327,6 +329,9 @@ namespace LoomGUI
                 {
 #if ENABLE_INPUT_SYSTEM
                     kb?.SetIMEEnabled(false);
+                    // 新路径组字串是自维护缓存（旧路径 compositionString 是 Unity 全局状态，
+                    // IME Off 即被重置）——不清则组字中途失焦、再聚焦下一个文本框时旧串复活。
+                    _composition = "";
 #else
                     UnityEngine.Input.imeCompositionMode = UnityEngine.IMECompositionMode.Off;
 #endif
