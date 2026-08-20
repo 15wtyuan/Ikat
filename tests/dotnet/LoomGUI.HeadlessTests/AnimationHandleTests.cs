@@ -7,7 +7,7 @@ using Xunit;
 namespace LoomGUI.HeadlessTests
 {
     /// <summary>
-    /// M2 Task 13: Animation 句柄 L3 全套 C# 验收（spec §9.1 headless harness + §7.2 class + §7.6 生命周期）。
+    /// M2 Task 13: AnimationHandle 句柄 L3 全套 C# 验收（spec §9.1 headless harness + §7.2 class + §7.6 生命周期）。
     ///
     /// fixture：animation.pkg.bin（@keyframes fade + hookanim，后者带 @loom-hook "half" 锚在 50% stop），
     /// 经 LoadPackage+Instantiate 拿到 #target 节点。node.Play("fade") 走程序化 player

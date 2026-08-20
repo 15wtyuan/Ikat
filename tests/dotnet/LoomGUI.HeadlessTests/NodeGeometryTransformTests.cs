@@ -41,7 +41,7 @@ namespace LoomGUI.HeadlessTests
                 child.Style.Height = Length.Px(50);
 
                 Tick(stage, ctx);
-                Rect lr = child.Geometry.LayoutRect;
+                LoomRect lr = child.Geometry.LayoutRect;
                 Assert.InRange(lr.Width, 99, 101);
                 Assert.InRange(lr.Height, 49, 51);
             }
@@ -98,8 +98,8 @@ namespace LoomGUI.HeadlessTests
                 child.Style.Width = Length.Px(100);
                 Tick(stage, ctx);
 
-                Rect lr1 = child.Geometry.LayoutRect;
-                Rect lr2 = child.Geometry.LayoutRect;
+                LoomRect lr1 = child.Geometry.LayoutRect;
+                LoomRect lr2 = child.Geometry.LayoutRect;
                 // 值相等（同 FFI 数据，两次读应一致）；struct 值语义，等号比较字段。
                 Assert.Equal(lr1.Width, lr2.Width);
                 Assert.InRange(lr1.Width, 99, 101);
@@ -126,7 +126,7 @@ namespace LoomGUI.HeadlessTests
                 Node root = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
                 Tick(stage, ctx);   // compute_world_transforms 跑
 
-                var p = new Vector2(10f, 20f);
+                var p = new LoomVector2(10f, 20f);
                 Assert.Equal(p, root.Geometry.LocalToGlobal(p));
                 Assert.Equal(p, root.Geometry.GlobalToLocal(p));
             }
@@ -138,7 +138,7 @@ namespace LoomGUI.HeadlessTests
 
         /// <summary>
         /// 子节点 world_matrix 至少含父 translate（root 占 viewport 0,0 + 子默认 0,0 → 子 world 应 ≈ local）。
-        /// LocalToGlobal(Vector2) 与 LocalToGlobal(Rect) 一致性：LocalToGlobal(rect).Position == LocalToGlobal(rect.Position)。
+        /// LocalToGlobal(LoomVector2) 与 LocalToGlobal(LoomRect) 一致性：LocalToGlobal(rect).Position == LocalToGlobal(rect.Position)。
         /// </summary>
         [Fact]
         public void GeometryLocalToGlobalRectConsistentWithPoint()
@@ -151,10 +151,10 @@ namespace LoomGUI.HeadlessTests
                 child.Style.Height = Length.Px(30);
                 Tick(stage, ctx);
 
-                Rect lr = child.Geometry.LayoutRect;
-                Rect world = child.Geometry.WorldRect;
+                LoomRect lr = child.Geometry.LayoutRect;
+                LoomRect world = child.Geometry.WorldRect;
                 // WorldRect.Position 应等于 LocalToGlobal(LayoutRect.Position)。
-                Vector2 worldOrigin = child.Geometry.LocalToGlobal(new Vector2(lr.X, lr.Y));
+                LoomVector2 worldOrigin = child.Geometry.LocalToGlobal(new LoomVector2(lr.X, lr.Y));
                 Assert.Equal(worldOrigin.X, world.X, 2);
                 Assert.Equal(worldOrigin.Y, world.Y, 2);
                 // 尺寸在纯 translate 下不变。
@@ -180,8 +180,8 @@ namespace LoomGUI.HeadlessTests
                 Node child = AppendChildDiv(stage, ctx);
                 Tick(stage, ctx);
 
-                var p = new Vector2(123.4f, 567.8f);
-                Vector2 roundTrip = child.Geometry.GlobalToLocal(child.Geometry.LocalToGlobal(p));
+                var p = new LoomVector2(123.4f, 567.8f);
+                LoomVector2 roundTrip = child.Geometry.GlobalToLocal(child.Geometry.LocalToGlobal(p));
                 Assert.Equal(p.X, roundTrip.X, 2);
                 Assert.Equal(p.Y, roundTrip.Y, 2);
             }
@@ -204,7 +204,7 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                var pos = new Vector2(10f, 20f);
+                var pos = new LoomVector2(10f, 20f);
                 n.Transform.Position = pos;
 
                 Assert.Equal(pos, n.Transform.Position);
@@ -226,9 +226,9 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                var pos = new Vector2(1f, 2f);
-                var scale = new Vector2(3f, 4f);
-                var origin = new Vector2(5f, 6f);
+                var pos = new LoomVector2(1f, 2f);
+                var scale = new LoomVector2(3f, 4f);
+                var origin = new LoomVector2(5f, 6f);
                 n.Transform.Position = pos;
                 n.Transform.Scale = scale;
                 n.Transform.Rotation = 0.5f;
@@ -259,10 +259,10 @@ namespace LoomGUI.HeadlessTests
                 Assert.Same(n.Transform, n.Transform);
 
                 // 两次写不同属性经同一 mirror：都能读回（证明同一 NodeTransform 实例）。
-                n.Transform.Position = new Vector2(10f, 20f);
-                n.Transform.Scale = new Vector2(2f, 2f);
-                Assert.Equal(new Vector2(10f, 20f), n.Transform.Position);
-                Assert.Equal(new Vector2(2f, 2f), n.Transform.Scale);
+                n.Transform.Position = new LoomVector2(10f, 20f);
+                n.Transform.Scale = new LoomVector2(2f, 2f);
+                Assert.Equal(new LoomVector2(10f, 20f), n.Transform.Position);
+                Assert.Equal(new LoomVector2(2f, 2f), n.Transform.Scale);
             }
             finally
             {
@@ -281,10 +281,10 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                Assert.Equal(Vector2.Zero, n.Transform.Position);
-                Assert.Equal(Vector2.One, n.Transform.Scale);
+                Assert.Equal(LoomVector2.Zero, n.Transform.Position);
+                Assert.Equal(LoomVector2.One, n.Transform.Scale);
                 Assert.Equal(0f, n.Transform.Rotation);
-                Assert.Equal(Vector2.Zero, n.Transform.Origin);
+                Assert.Equal(LoomVector2.Zero, n.Transform.Origin);
             }
             finally
             {

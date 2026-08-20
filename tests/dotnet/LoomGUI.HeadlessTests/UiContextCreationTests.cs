@@ -381,7 +381,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                Assert.Throws<InvalidOperationException>(() => ctx.Pick(new Vector2(100, 100)));
+                Assert.Throws<InvalidOperationException>(() => ctx.Pick(new LoomVector2(100, 100)));
             }
             finally { StageHarness.Destroy(stage); }
         }

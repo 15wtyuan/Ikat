@@ -34,7 +34,7 @@ namespace LoomGUI
         }
     }
 
-    public readonly struct Color
+    public readonly struct LoomColor
     {
         public float R { get; }
         public float G { get; }
@@ -44,36 +44,36 @@ namespace LoomGUI
 
         // 公共 ctor 强制 IsUnset=false（用户态颜色必然是已设置）；IsUnset=true 仅由 Unset factory 获得，
         // 故另设 private 5-参 ctor 让 Unset 走特化路径而不破公共 ctor 签名。
-        public Color(float r, float g, float b, float a = 1f) : this(r, g, b, a, isUnset: false) { }
-        private Color(float r, float g, float b, float a, bool isUnset)
+        public LoomColor(float r, float g, float b, float a = 1f) : this(r, g, b, a, isUnset: false) { }
+        private LoomColor(float r, float g, float b, float a, bool isUnset)
         {
             R = r; G = g; B = b; A = a; IsUnset = isUnset;
         }
-        public static Color Unset => new Color(0f, 0f, 0f, 0f, isUnset: true);
+        public static LoomColor Unset => new LoomColor(0f, 0f, 0f, 0f, isUnset: true);
     }
 
     // 2D 向量（Position / Scale / Origin / 滚动点等）。值语义：等号按字段比较（struct 默认）。
-    // 业务侧通过 new Vector2(x,y) 构造；Zero/One 是常用常量。投影层（C4 NodeTransform）镜像
+    // 业务侧通过 new LoomVector2(x,y) 构造；Zero/One 是常用常量。投影层（C4 NodeTransform）镜像
     // default 与业务语义对齐：Position/Origin 默认 Zero（不位移）、Scale 默认 One（不缩放）。
-    public readonly struct Vector2
+    public readonly struct LoomVector2
     {
         public float X { get; }
         public float Y { get; }
-        public Vector2(float x, float y) { X = x; Y = y; }
-        public static Vector2 Zero => default;   // (0,0)；default(Vector2) 直接给零值，免 alloc
-        public static Vector2 One => new Vector2(1f, 1f);   // 不缩放 / 不位移语义哨兵
+        public LoomVector2(float x, float y) { X = x; Y = y; }
+        public static LoomVector2 Zero => default;   // (0,0)；default(LoomVector2) 直接给零值，免 alloc
+        public static LoomVector2 One => new LoomVector2(1f, 1f);   // 不缩放 / 不位移语义哨兵
     }
 
     // 矩形（x/y/w/h，左上原点 + y 向下，与核心坐标系一致）。projection §2.5：Geometry.LayoutRect/
     // WorldRect 返此。internal ctor 让同 assembly（NodeGeometry）FFI 读后构造；公共 ctor 留给业务
     // 通过 Geometry 拿到后再传 API 的场景（暂时未加——frozen 公共 ctor 暂留 internal，需要时升级 public）。
-    public readonly struct Rect
+    public readonly struct LoomRect
     {
         public float X { get; }
         public float Y { get; }
         public float Width { get; }
         public float Height { get; }
-        internal Rect(float x, float y, float w, float h)
+        internal LoomRect(float x, float y, float w, float h)
         {
             X = x; Y = y; Width = w; Height = h;
         }
@@ -91,9 +91,9 @@ namespace LoomGUI
     // 指针键：对齐 web MouseEvent.button（0=左/1=中/2=右）但用枚举自解释。
     public enum PointerButton { Left, Middle, Right }
 
-    public enum KeyCode
+    public enum LoomKeyCode
     {
-        // Values match Unity KeyCode enum（raw u32 透传直接 cast；core 不解释语义）。
+        // Values match Unity LoomKeyCode enum（raw u32 透传直接 cast；core 不解释语义）。
         None = 0,
         Enter = 13,
         Escape = 27,

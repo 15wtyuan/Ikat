@@ -12,7 +12,7 @@ namespace LoomGUI
     /// 不是 CSS 标准记忆。两个关键差异已在此处吸收：
     ///  - Overflow.Clip → "hidden"：Rust OverflowMode 没有 Clip 变体（Hidden 是等价语义），
     ///    parse_overflow 只认 "hidden" 不认 "clip"。
-    ///  - Thickness 四值序 TRBL：parse_four 解析 [top, right, bottom, left] → Rect{top, right, bottom, left}。
+    ///  - Thickness 四值序 TRBL：parse_four 解析 [top, right, bottom, left] → LoomRect{top, right, bottom, left}。
     /// </summary>
     internal static class CssValueConvert
     {
@@ -30,10 +30,10 @@ namespace LoomGUI
             }
         }
 
-        internal static string ToCss(Color c)
+        internal static string ToCss(LoomColor c)
         {
             if (c.IsUnset) return null;
-            // 8 位 hex（#rrggbbaa）。Color 字段是 0–1 float，× 255 后取整 clamp 到 byte。
+            // 8 位 hex（#rrggbbaa）。LoomColor 字段是 0–1 float，× 255 后取整 clamp 到 byte。
             // hex 格式化无 culture 依赖，故插值串无需 InvariantCulture。
             byte r = ClampToByte(c.R);
             byte g = ClampToByte(c.G);
@@ -142,7 +142,7 @@ namespace LoomGUI
         internal static string ToCss(object value) => value switch
         {
             Length l         => ToCss(l),
-            Color c          => ToCss(c),
+            LoomColor c          => ToCss(c),
             Thickness t      => ToCss(t),
             float f          => ToCss(f),
             int i            => ToCss(i),

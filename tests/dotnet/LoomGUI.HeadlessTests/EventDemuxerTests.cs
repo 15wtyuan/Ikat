@@ -491,12 +491,12 @@ namespace LoomGUI.HeadlessTests
 
                 using (var buf = new NativeEventBuffer())
                 {
-                    // KeyCode.A = 97 (Unity KeyCode), modifiers = Shift(1)
+                    // LoomKeyCode.A = 97 (Unity LoomKeyCode), modifiers = Shift(1)
                     buf.AddKeyDown(n._id, keyCode: 97, modifiers: 1);
                     ctx._eventDemuxer.Pump(buf.Ptr, buf.Count);
                 }
 
-                Assert.Equal(KeyCode.A, received.Key);
+                Assert.Equal(LoomKeyCode.A, received.Key);
                 Assert.Equal(KeyModifiers.Shift, received.Modifiers);
             }
             finally { StageHarness.Destroy(stage); }
@@ -517,12 +517,12 @@ namespace LoomGUI.HeadlessTests
 
                 using (var buf = new NativeEventBuffer())
                 {
-                    // KeyCode.Enter = 13, modifiers = Ctrl(2) | Alt(4) = 6
+                    // LoomKeyCode.Enter = 13, modifiers = Ctrl(2) | Alt(4) = 6
                     buf.AddKeyUp(n._id, keyCode: 13, modifiers: 6);
                     ctx._eventDemuxer.Pump(buf.Ptr, buf.Count);
                 }
 
-                Assert.Equal(KeyCode.Enter, received.Key);
+                Assert.Equal(LoomKeyCode.Enter, received.Key);
                 Assert.Equal(KeyModifiers.Control | KeyModifiers.Alt, received.Modifiers);
             }
             finally { StageHarness.Destroy(stage); }

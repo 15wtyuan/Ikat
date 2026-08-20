@@ -66,7 +66,7 @@ namespace LoomGUI.HeadlessTests
                 Node child = AppendChildDiv(stage, ctx);
                 child.Style.Width = Length.Px(100);
                 child.Style.Height = Length.Px(50);
-                child.Style.BackgroundColor = new Color(1f, 0f, 0f, 1f);
+                child.Style.BackgroundColor = new LoomColor(1f, 0f, 0f, 1f);
 
                 ctx.FlushPendingWrites();
                 Tick(stage);
@@ -161,7 +161,7 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                n.Transform.Position = new Vector2(10f, 20f);
+                n.Transform.Position = new LoomVector2(10f, 20f);
 
                 ctx.FlushPendingWrites();
                 Tick(stage);   // compute_world_transforms 并入 user_transform
@@ -189,7 +189,7 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                n.Transform.Position = new Vector2(10f, 20f);
+                n.Transform.Position = new LoomVector2(10f, 20f);
 
                 Tick(stage);   // 未 FlushPendingWrites
                 GetWorldMatrix(stage, n._id, out _, out _, out _, out _, out float tx, out float ty);
@@ -217,10 +217,10 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                n.Transform.Position = new Vector2(5f, 7f);
-                n.Transform.Scale = new Vector2(2f, 3f);
+                n.Transform.Position = new LoomVector2(5f, 7f);
+                n.Transform.Scale = new LoomVector2(2f, 3f);
                 n.Transform.Rotation = 0.5f;
-                n.Transform.Origin = new Vector2(1f, 1f);
+                n.Transform.Origin = new LoomVector2(1f, 1f);
 
                 // 未 flush 前：world_matrix = identity（user_transform 未送 core）。
                 Tick(stage);
@@ -258,7 +258,7 @@ namespace LoomGUI.HeadlessTests
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
                 Assert.False(n.Transform._dirty);
 
-                n.Transform.Position = new Vector2(1f, 2f);
+                n.Transform.Position = new LoomVector2(1f, 2f);
                 Assert.True(n.Transform._dirty);
                 Assert.Equal(1, ctx._registry.DirtyTransformCount);
 

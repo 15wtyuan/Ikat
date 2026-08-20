@@ -245,14 +245,14 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx, root) = LoadControlsFixture();
             try
             {
-                Node hit = ctx.Pick(new Vector2(100f, 50f));
+                Node hit = ctx.Pick(new LoomVector2(100f, 50f));
                 Assert.NotNull(hit);
                 // 命中者必在 fixture root 子树内。
                 Node n = hit;
                 while (n != null && !ReferenceEquals(n, root)) n = n.Parent;
                 Assert.Same(root, n);
                 // 画布外 → null。
-                Assert.Null(ctx.Pick(new Vector2(999f, 999f)));
+                Assert.Null(ctx.Pick(new LoomVector2(999f, 999f)));
             }
             finally { StageHarness.Destroy(stage); }
         }
@@ -273,15 +273,15 @@ namespace LoomGUI.HeadlessTests
                 // slider 区域中心点当前命中 sld（或其 thumb 子）——先取基线命中者。
                 // 控件子节点多为 0 高空盒（fixture 无内容），(100,50) 的命中者是 root
                 // 自身（子全 miss 后 fallback）。对 root 开关 touchable 验整树命中门。
-                Node before = ctx.Pick(new Vector2(100f, 50f));
+                Node before = ctx.Pick(new LoomVector2(100f, 50f));
                 Assert.Same(root, before);
                 root.Touchable = false;
                 Assert.False(root.Touchable);
                 // 外层 scene root（fixture harness 造的包装 div）仍可命中——本节点被跳过。
-                Assert.NotSame(root, ctx.Pick(new Vector2(100f, 50f)));
+                Assert.NotSame(root, ctx.Pick(new LoomVector2(100f, 50f)));
                 root.Touchable = true;
                 Assert.True(root.Touchable);
-                Assert.Same(root, ctx.Pick(new Vector2(100f, 50f)));
+                Assert.Same(root, ctx.Pick(new LoomVector2(100f, 50f)));
             }
             finally { StageHarness.Destroy(stage); }
         }

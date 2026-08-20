@@ -156,7 +156,7 @@ public class ShowcaseRunner : MonoBehaviour
         }
         if (!page.TryGet<Container>("b12-target", out var handleTarget))
             return;
-        LoomGUI.Animation handle = null;
+        LoomGUI.AnimationHandle handle = null;
         if (page.TryGet<Button>("btn-h-play", out var bPlay))
             bPlay.Clicked += () =>
             {

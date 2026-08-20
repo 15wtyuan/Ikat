@@ -286,17 +286,17 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 程序化播放 @keyframes 动画（spec §7.3 / public-api §9.1 触发 2）。返 Animation 句柄。
+        /// 程序化播放 @keyframes 动画（spec §7.3 / public-api §9.1 触发 2）。返 AnimationHandle 句柄。
         ///
         /// 建 programmatic player（core <c>play_programmatic</c>，不受 class 声明管）：
         /// 默认 1s / 无 delay / 单次迭代 / normal / fill both / cubic-out，立即写首帧。
-        /// 结束用句柄 <see cref="Animation.OnEnd"/> 或 <c>On&lt;AnimationEndEvent&gt;()</c>；
+        /// 结束用句柄 <see cref="AnimationHandle.OnEnd"/> 或 <c>On&lt;AnimationEndEvent&gt;()</c>；
         /// class 触发的动画无句柄（声明式，只需知结束走 EventBus 订阅）。
         ///
         /// 未知动画名（keyframes 表无此 name）抛 <see cref="UIContractException"/>（调用方
         /// 写错——同 Get&lt;T&gt; 未命中语义）；null name 抛 ArgumentNullException。
         /// </summary>
-        public Animation Play(string name)
+        public AnimationHandle Play(string name)
         {
             ThrowIfDisposed();
             if (name == null) throw new ArgumentNullException(nameof(name));
@@ -308,7 +308,7 @@ namespace LoomGUI
                 if (key == 0)
                     throw new UIContractException(
                         $"Play(\"{name}\"): no @keyframes with this name (keyframes table lookup failed)");
-                var anim = new Animation(this, key, name);
+                var anim = new AnimationHandle(this, key, name);
                 _ctx.RegisterAnimation(anim);
                 return anim;
             }
@@ -686,15 +686,15 @@ namespace LoomGUI
             set => _mirror.Set("position", value);
         }
 
-        // ── 视觉（Color/float）──────────────────────────────────────────
-        public Color BackgroundColor
+        // ── 视觉（LoomColor/float）──────────────────────────────────────────
+        public LoomColor BackgroundColor
         {
-            get => _mirror.Get<Color>("background-color") ?? Color.Unset;
+            get => _mirror.Get<LoomColor>("background-color") ?? LoomColor.Unset;
             set => _mirror.Set("background-color", value);
         }
-        public Color Color
+        public LoomColor LoomColor
         {
-            get => _mirror.Get<Color>("color") ?? Color.Unset;
+            get => _mirror.Get<LoomColor>("color") ?? LoomColor.Unset;
             set => _mirror.Set("color", value);
         }
         // Opacity 无 Unset 哨兵（裸 float）；getter 未写过返 default（0f）+ 不代表"显式 0"。
@@ -720,7 +720,7 @@ namespace LoomGUI
         // 保留 throw NE 防止静默丢：调用方期望 round-trip，prop-name 不在 inline_bit 表经 set_inline_override
         // 会被 bit 检查前置静默忽略（ghost-state 防护）。补 core 支持后把这些 setter 接 _mirror 即可。
         public void SetVar(string n, Length v) { throw NE(); }
-        public void SetVar(string n, Color v) { throw NE(); }
+        public void SetVar(string n, LoomColor v) { throw NE(); }
         public void SetVar(string n, float v) { throw NE(); }
         public void SetVar(string n, string v) { throw NE(); }
         public void RemoveVar(string n) { throw NE(); }   // 撤销 inline var，回落 CSS
@@ -741,23 +741,23 @@ namespace LoomGUI
 
         // 镜像值：setter 写、getter 读。default 按业务语义初始化（Scale=One 不缩放，其它 Zero）。
         // 帧末 flush 前读到的是 C# 侧最近一次写入的快照（getter 不依赖 core 状态）。
-        internal Vector2 _position = Vector2.Zero;
-        internal Vector2 _scale = Vector2.One;
+        internal LoomVector2 _position = LoomVector2.Zero;
+        internal LoomVector2 _scale = LoomVector2.One;
         internal float _rotation;
-        internal Vector2 _origin = Vector2.Zero;
+        internal LoomVector2 _origin = LoomVector2.Zero;
         // dirty 标志：Store 置 true；FlushTransform 末尾置 false。配合 NodeRegistry dirty 集。
         internal bool _dirty;
 
         internal NodeTransform(Node owner) { _owner = owner; }
 
         /// <summary>位移（local 坐标，px）。setter 存镜像 + 标脏（帧末 flush 到 core）。</summary>
-        public Vector2 Position { get => _position; set => Store(ref _position, value); }
+        public LoomVector2 Position { get => _position; set => Store(ref _position, value); }
         /// <summary>缩放（local 基）。default = One（不缩放）；setter 存镜像 + 标脏。</summary>
-        public Vector2 Scale { get => _scale; set => Store(ref _scale, value); }
+        public LoomVector2 Scale { get => _scale; set => Store(ref _scale, value); }
         /// <summary>旋转（弧度，绕 Origin）。setter 存镜像 + 标脏。</summary>
         public float Rotation { get => _rotation; set => Store(ref _rotation, value); }
         /// <summary>旋转/缩放原点（local 坐标，px）。setter 存镜像 + 标脏。</summary>
-        public Vector2 Origin { get => _origin; set => Store(ref _origin, value); }
+        public LoomVector2 Origin { get => _origin; set => Store(ref _origin, value); }
 
         // 统一 setter 路径：写镜像 + 标脏 + 注册 dirty 集（帧末集中 flush）。
         void Store<T>(ref T field, T value)
@@ -802,17 +802,17 @@ namespace LoomGUI
         internal NodeGeometry(UIContext ctx, uint id) { _ctx = ctx; _id = id; }
 
         /// <summary>
-        /// 节点 layout 产物（solve 输出，左上 + w/h）。直读 get_node_layout_rect FFI（x/y/w/h → Rect）。
+        /// 节点 layout 产物（solve 输出，左上 + w/h）。直读 get_node_layout_rect FFI（x/y/w/h → LoomRect）。
         /// 滞后一帧：本帧 Style 写入下帧才反映。
         /// </summary>
-        public Rect LayoutRect
+        public LoomRect LayoutRect
         {
             get
             {
                 StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
                 float x = 0, y = 0, w = 0, hh = 0;
                 Native.loomgui_stage_get_node_layout_rect(h, _id, &x, &y, &w, &hh);
-                return new Rect(x, y, w, hh);
+                return new LoomRect(x, y, w, hh);
             }
         }
 
@@ -821,12 +821,12 @@ namespace LoomGUI
         /// 故对 (0,0)-(w,h) 盒做变换——再喂 LayoutRect 的 x/y 会把偏移算两次（滚动页上
         /// 世界位 = 视口位 + 内容位，翻倍错位）。滞后一帧：本帧 layout/transform 写入下帧才反映。
         /// </summary>
-        public Rect WorldRect
+        public LoomRect WorldRect
         {
             get
             {
-                Rect lr = LayoutRect;
-                return LocalToGlobal(new Rect(0, 0, lr.Width, lr.Height));
+                LoomRect lr = LayoutRect;
+                return LocalToGlobal(new LoomRect(0, 0, lr.Width, lr.Height));
             }
         }
 
@@ -834,33 +834,33 @@ namespace LoomGUI
         /// 本地点 → 世界点（经 world_matrix）。Affine2 列主序：x' = a·x + c·y + tx，y' = b·x + d·y + ty
         /// （crates/core/src/transform.rs:46 apply_point 公式）。
         /// </summary>
-        public Vector2 LocalToGlobal(Vector2 p)
+        public LoomVector2 LocalToGlobal(LoomVector2 p)
         {
             GetWorldMatrix(out float a, out float b, out float c, out float d, out float tx, out float ty);
-            return new Vector2(a * p.X + c * p.Y + tx, b * p.X + d * p.Y + ty);
+            return new LoomVector2(a * p.X + c * p.Y + tx, b * p.X + d * p.Y + ty);
         }
 
         /// <summary>
         /// 世界点 → 本地点（world_matrix 的逆变换）。退化情形（det≈0，如 scale(0)）Rust 侧 inverse
         /// 返 IDENTITY（transform.rs:55），此处逆变换即原 world_matrix 逆——与 hit_test 一致的兜底。
         /// </summary>
-        public Vector2 GlobalToLocal(Vector2 p)
+        public LoomVector2 GlobalToLocal(LoomVector2 p)
         {
             GetWorldMatrix(out float a, out float b, out float c, out float d, out float tx, out float ty);
             InverseAffine(a, b, c, d, tx, ty,
                           out float ia, out float ib, out float ic, out float id, out float itx, out float ity);
-            return new Vector2(ia * p.X + ic * p.Y + itx, ib * p.X + id * p.Y + ity);
+            return new LoomVector2(ia * p.X + ic * p.Y + itx, ib * p.X + id * p.Y + ity);
         }
 
         /// <summary>本地 rect → world AABB：四角 LocalToGlobal + 轴对齐外接盒。</summary>
-        public Rect LocalToGlobal(Rect r)
+        public LoomRect LocalToGlobal(LoomRect r)
         {
             GetWorldMatrix(out float a, out float b, out float c, out float d, out float tx, out float ty);
             return TransformAABB(a, b, c, d, tx, ty, r);
         }
 
         /// <summary>world rect → local AABB：四角 GlobalToLocal + 轴对齐外接盒。</summary>
-        public Rect GlobalToLocal(Rect r)
+        public LoomRect GlobalToLocal(LoomRect r)
         {
             GetWorldMatrix(out float a, out float b, out float c, out float d, out float tx, out float ty);
             InverseAffine(a, b, c, d, tx, ty,
@@ -903,7 +903,7 @@ namespace LoomGUI
         }
 
         // 仿射变换 AABB：取四角变换后的外接盒（轴对齐）。旋转/缩放时 world box > local box。
-        static Rect TransformAABB(float a, float b, float c, float d, float tx, float ty, Rect r)
+        static LoomRect TransformAABB(float a, float b, float c, float d, float tx, float ty, LoomRect r)
         {
             // 四角：min/max × min/max（避免重复算 0 尺寸退化点）。
             float x0 = r.X, y0 = r.Y;
@@ -916,7 +916,7 @@ namespace LoomGUI
             float minY = Math.Min(Math.Min(p0y, p1y), Math.Min(p2y, p3y));
             float maxX = Math.Max(Math.Max(p0x, p1x), Math.Max(p2x, p3x));
             float maxY = Math.Max(Math.Max(p0y, p1y), Math.Max(p2y, p3y));
-            return new Rect(minX, minY, maxX - minX, maxY - minY);
+            return new LoomRect(minX, minY, maxX - minX, maxY - minY);
         }
 
         static void ApplyPoint(float a, float b, float c, float d, float tx, float ty,
@@ -1231,7 +1231,7 @@ namespace LoomGUI
         /// 当前滚动位置（本节点为滚动容器时；非滚动容器返 (0,0)）。
         /// 与 <see cref="ScrollTo"/> 成对：读经 get_scroll_pos FFI（ScrollPane 物理量，
         /// 含未 settle 的惯性位移）。重实例化/换页前读出、solve 就绪后 ScrollTo(Instant) 回填。
-        public Vector2 ScrollPos
+        public LoomVector2 ScrollPos
         {
             get
             {
@@ -1239,11 +1239,11 @@ namespace LoomGUI
                 StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
                 float x = 0f, y = 0f;
                 Native.loomgui_stage_get_scroll_pos(h, _id, &x, &y);
-                return new Vector2(x, y);
+                return new LoomVector2(x, y);
             }
         }
 
-        public void ScrollTo(Vector2 p, ScrollBehavior b = ScrollBehavior.Smooth)
+        public void ScrollTo(LoomVector2 p, ScrollBehavior b = ScrollBehavior.Smooth)
         {
             ThrowIfDisposed();
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
@@ -2535,10 +2535,11 @@ namespace LoomGUI
 
         // 投影层填实：直转 FFI set/get_control_value·set/get_control_max（value clamp [0,max]）。
         // rc<0（非值控件 / 节点缺失）经 ThrowIfDisposed 后不该达——升 InvalidOperationException 不吞。
+        // 动画期间（AnimateValue）get 返缓存目标（数据值），set 显式获胜：取消动画后直写。
         public float Value
         {
-            get { ThrowIfDisposed(); return GetControlValue(); }
-            set { ThrowIfDisposed(); SetControlValue(value); }
+            get { ThrowIfDisposed(); return _animating ? _animTarget : GetControlValue(); }
+            set { ThrowIfDisposed(); if (_animating) FinishAnim(writeFinal: false); SetControlValue(value); }
         }
         public float Max
         {
@@ -2552,6 +2553,59 @@ namespace LoomGUI
             get { ThrowIfDisposed(); return GetControlIndeterminate(); }
             set { ThrowIfDisposed(); SetControlIndeterminate(value); }
         }
+
+        // ── 演出糖：AnimateValue ─────────────────────────────────────────
+        // Value 走 taffy 布局通道每帧离散重算 fill 宽（CSS transition 只覆盖背景/文字/透明
+        // 三通道，布局属性无过渡），演出缓动归 C# 投影层。动画期间 _animTarget 缓存目标：
+        // Value 读回数据值，插值中间值经 FFI 只喂渲染；直接赋 Value 显式获胜（取消动画）。
+        IDisposable _animSub;
+        float _animTarget, _animFrom, _animElapsed, _animDuration;
+        bool _animating;
+
+        /// <summary>
+        /// 演出缓动：在 <paramref name="durationSec"/> 秒内把填充从当前显示值 easeOut
+        /// 趋近 <paramref name="target"/>（clamp 到 [0, Max]）。进行中重复调用重锚——
+        /// 从当前插值位置平滑转向新目标。订阅随节点 Dispose 自动清理（OnUpdate 契约）。
+        /// </summary>
+        public void AnimateValue(float target, float durationSec = 0.4f)
+        {
+            ThrowIfDisposed();
+            if (durationSec <= 0f) { Value = target; return; }
+            float max = GetControlMax();
+            if (max <= 0f) max = 1f;
+            _animFrom = GetControlValue();
+            _animTarget = Math.Max(0f, Math.Min(target, max));
+            _animElapsed = 0f;
+            _animDuration = durationSec;
+            if (!_animating)
+            {
+                _animating = true;
+                _animSub = OnUpdate(AnimateStep);
+            }
+        }
+
+        void AnimateStep(float dt)
+        {
+            if (!_animating) return;
+            _animElapsed += dt;
+            float t = _animElapsed / _animDuration;
+            if (t >= 1f)
+            {
+                FinishAnim(writeFinal: true);
+                return;
+            }
+            float e = 1f - (1f - t) * (1f - t) * (1f - t); // easeOutCubic
+            SetControlValue(_animFrom + (_animTarget - _animFrom) * e);
+        }
+
+        void FinishAnim(bool writeFinal)
+        {
+            _animating = false;
+            _animSub?.Dispose();
+            _animSub = null;
+            if (writeFinal) SetControlValue(_animTarget);
+        }
+
         static NotImplementedException NE() => new NotImplementedException();
 
         // ── FFI 转调 ────────────────────────────────────────────────────────
@@ -2571,7 +2625,8 @@ namespace LoomGUI
         }
 
         // float out 经 local + &local（同 GetWorldMatrix 局部取址模式，不用 fixed）。rc<0 升异常不吞。
-        float GetControlValue()
+        // internal：headless 测试观测动画期间的 FFI 显示值（Value 公共读回是缓存目标）。
+        internal float GetControlValue()
         {
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
             float v = 0f;
@@ -2828,7 +2883,7 @@ namespace LoomGUI
     }
 
     // ── 动画 ────────────────────────────────────────────────────────
-    // Animation 句柄非长期对象，生命周期 = 那次播放；播放结束句柄失效、hook 自动释放。
+    // AnimationHandle 句柄非长期对象，生命周期 = 那次播放；播放结束句柄失效、hook 自动释放。
     //
     // 生命周期不变量（spec §7.6 / public-api §9.2）：
     // - END 事件（demux 触发 onEnd 后）/ Stop()（scene 层终态）→ _disposed=true +
@@ -2842,7 +2897,7 @@ namespace LoomGUI
     //
     // 事件载荷解码（T9 event.rs payload 编码）：demux 把 EventRecord 的 touch_id(低 32)/x(高 32)
     // 拼回 PlayerKey u64，按 key 查 UIContext._animations 命中本实例。
-    public sealed unsafe class Animation
+    public sealed unsafe class AnimationHandle
     {
         /// <summary>core PlayerKey（slotmap 稳定句柄，u64；0 = 无效哨兵）。</summary>
         internal readonly ulong _playerKey;
@@ -2859,7 +2914,7 @@ namespace LoomGUI
         internal List<(string name, Action cb)> _onHooks;
 
         /// <summary>投影层内部：Node.Play 经 FFI play_animation 成功后构造 + 注册。</summary>
-        internal Animation(Node node, ulong playerKey, string name)
+        internal AnimationHandle(Node node, ulong playerKey, string name)
         {
             _node = node;
             _playerKey = playerKey;
@@ -2882,7 +2937,7 @@ namespace LoomGUI
                 {
                     // 节点已销毁：core 静默回收悬空 player 且不发 END（remove_node 不清
                     // scene.players，update_all 直接回收）——此处惰性失效，防注册表
-                    // 强引用悬挂（UIContext→Animation→Node→用户回调全链）。
+                    // 强引用悬挂（UIContext→AnimationHandle→Node→用户回调全链）。
                     Invalidate();
                     return false;
                 }
@@ -2948,7 +3003,7 @@ namespace LoomGUI
         }
 
         /// <summary>链式注册播放启动回调（START 事件按 playerKey 命中时触发）。</summary>
-        public Animation OnStart(Action cb)
+        public AnimationHandle OnStart(Action cb)
         {
             if (cb == null) throw new ArgumentNullException(nameof(cb));
             if (_disposed || _node._disposed) return this;
@@ -2957,7 +3012,7 @@ namespace LoomGUI
         }
 
         /// <summary>链式注册播放完成回调（完成后句柄失效，onEnd 先触发再失效）。</summary>
-        public Animation OnEnd(Action cb)
+        public AnimationHandle OnEnd(Action cb)
         {
             if (cb == null) throw new ArgumentNullException(nameof(cb));
             if (_disposed || _node._disposed) return this;
@@ -2970,7 +3025,7 @@ namespace LoomGUI
         /// 须在 key 有效时调（Play 之后；链式 <c>Play(name).OnKey(.5, cb)</c> 是标准用法）。
         /// 同 pct 重复注册去重（core register_on_key 去重，cb 仍各存各发）。
         /// </summary>
-        public Animation OnKey(float pct, Action cb)
+        public AnimationHandle OnKey(float pct, Action cb)
         {
             if (cb == null) throw new ArgumentNullException(nameof(cb));
             if (_disposed || _node._disposed) return this;
@@ -2986,7 +3041,7 @@ namespace LoomGUI
         /// 链式注册 @loom-hook 锚点回调（spec §7.4 纯 C#：core emit HOOK 带 hook_name，
         /// demux 按 name 匹配触发；无需 FFI 注册）。
         /// </summary>
-        public Animation OnHook(string name, Action cb)
+        public AnimationHandle OnHook(string name, Action cb)
         {
             if (name == null) throw new ArgumentNullException(nameof(name));
             if (cb == null) throw new ArgumentNullException(nameof(cb));
@@ -3275,11 +3330,11 @@ namespace LoomGUI
         // 所属 ListView 实例、调其 BindItem。公共 API 不见本字段。
         internal readonly Dictionary<uint, ListView> _listViews = new Dictionary<uint, ListView>();
 
-        // M2（T11）：PlayerKey → Animation 实例注册表（demux 句柄路由查用，spec §7.1/§7.6）。
-        // 强引用：句柄生命周期 = 那次播放（END/Stop 时 Animation.Invalidate 注销）。
+        // M2（T11）：PlayerKey → AnimationHandle 实例注册表（demux 句柄路由查用，spec §7.1/§7.6）。
+        // 强引用：句柄生命周期 = 那次播放（END/Stop 时 AnimationHandle.Invalidate 注销）。
         // 循环动画存活到 Stop（§7.6）——用户持有句柄期间注册表保留引用，结束自动释放。
         // player 被 core 静默回收（节点销毁）的悬挂条目由 IsPlaying 惰性失效清理。
-        internal readonly Dictionary<ulong, Animation> _animations = new Dictionary<ulong, Animation>();
+        internal readonly Dictionary<ulong, AnimationHandle> _animations = new Dictionary<ulong, AnimationHandle>();
 
         // E1：lazy 创建的 StyleSheet 实例。同 Node.Style/Node.Transform 模式——未访问过 = null，
         // 首次访问构造并挂本 context。StyleSheet.Add/Clear 方法体本身仍 throw NE（core 未接通）。
@@ -3420,12 +3475,12 @@ namespace LoomGUI
         /// <summary>该 NodeId 是否已注册为 ListView（数据驱动模式已激活）。</summary>
         internal bool IsListViewRegistered(uint id) => _listViews.ContainsKey(id);
 
-        /// <summary>注册 Animation 句柄（Node.Play 成功后调；demux 按 playerKey 路由）。</summary>
-        internal void RegisterAnimation(Animation a) => _animations[a._playerKey] = a;
-        /// <summary>按 playerKey 查 Animation 实例（demux 句柄路由；未命中 = class 触发/已失效 → null）。</summary>
-        internal Animation ResolveAnimation(ulong playerKey) =>
+        /// <summary>注册 AnimationHandle 句柄（Node.Play 成功后调；demux 按 playerKey 路由）。</summary>
+        internal void RegisterAnimation(AnimationHandle a) => _animations[a._playerKey] = a;
+        /// <summary>按 playerKey 查 AnimationHandle 实例（demux 句柄路由；未命中 = class 触发/已失效 → null）。</summary>
+        internal AnimationHandle ResolveAnimation(ulong playerKey) =>
             _animations.TryGetValue(playerKey, out var a) ? a : null;
-        /// <summary>注销 Animation（END / Stop / 惰性失效时调）。幂等。</summary>
+        /// <summary>注销 AnimationHandle（END / Stop / 惰性失效时调）。幂等。</summary>
         internal void UnregisterAnimation(ulong playerKey) => _animations.Remove(playerKey);
 
         /// <summary>
@@ -3639,7 +3694,7 @@ namespace LoomGUI
         /// 变更帧的新节点本帧未命中，1 帧延迟语义）。scrollbar thumb 命中 → 容器节点
         /// （FFI 侧 decode sentinel flag；公共树无 thumb 节点）。拖放 drop target 查找靠它。
         /// </summary>
-        public Node Pick(Vector2 globalPoint)
+        public Node Pick(LoomVector2 globalPoint)
         {
             StageHandle* h = (StageHandle*)_stage.ToPointer();
             uint id = 0;

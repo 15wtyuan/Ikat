@@ -102,14 +102,32 @@
   }
 
   // ── Workspace actions ──
+  var wsRootPath = null;
+
   function openWorkspace(path) {
     invoke("open_workspace", { path: path })
       .then(function (res) {
+        wsRootPath = path;
         renderMain(res.ws, res.uiPath);
+        probeWorkspaceUpdate(path);
       })
       .catch(function (err) {
         alert("打开工作区失败: " + err);
       });
+  }
+
+  // 生成物（skills + .loom CLI）落后于 GUI 配套版本 → 亮「更新工作区」。
+  // 一键 = loom scaffold（刷新 skills / CLI / 版本戳；config 与源文件不动）。
+  function probeWorkspaceUpdate(path) {
+    var btn = $("btn-update-ws");
+    btn.classList.add("hidden");
+    invoke("workspace_update_state", { path: path })
+      .then(function (st) {
+        if (!st.stale) return;
+        btn.classList.remove("hidden");
+        btn.textContent = "更新工作区 (" + st.stamped + " → " + st.current + ")";
+      })
+      .catch(function () { /* 探测失败静默——更新入口非关键路径 */ });
   }
 
   // ── Screen transitions ──
@@ -131,6 +149,25 @@
   }
 
   // ── Event bindings ──
+  $("btn-update-ws").addEventListener("click", function () {
+    if (!wsRootPath) return;
+    var btn = $("btn-update-ws");
+    btn.disabled = true;
+    invoke("update_workspace", { path: wsRootPath })
+      .then(function (st) {
+        btn.disabled = false;
+        if (st.stale) {
+          alert("刷新完成，但版本戳仍落后（" + st.stamped + " → " + st.current + "）——请重试或手动跑 loom scaffold。");
+        } else {
+          btn.classList.add("hidden");
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        alert("更新工作区失败: " + err);
+      });
+  });
+
   // ── New-workspace wizard: pick session root → ui dir + agents → full init ──
   // 独立小弹窗（不与 editor.js 的 init-overlay 复用——那个绑定主屏的脚手架更新流程）。
   // 会话根 = agent 会话打开的目录（skills/.loom 落这里）；ui 目录 = UI 工作区

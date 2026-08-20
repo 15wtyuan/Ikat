@@ -61,7 +61,7 @@ namespace LoomGUI
         /// 把新 index 写 touch_id，与 Slider 装新值到 x 不同）。core 不携 OldIndex（同 change 语义只报新值）。
         SelectionChanged = 26,
         // ── M2 动画句柄私有事件（core event.rs EVT_ANIMATION_KEY=27 / EVT_ANIMATION_HOOK=28）──
-        // 走 playerKey 句柄路由（demux 按 key 查 Animation 实例触发 OnKey/OnHook，spec §7.5），
+        // 走 playerKey 句柄路由（demux 按 key 查 AnimationHandle 实例触发 OnKey/OnHook，spec §7.5），
         // 不广播 EventBus——枚举值仅供 typed struct 关联 + 文档完整（不参与 D2 订阅表）。
         AnimationKey = 27,
         AnimationHook = 28,

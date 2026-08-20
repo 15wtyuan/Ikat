@@ -76,7 +76,7 @@ const RUNTIME_MUTABLE_ATTRS: &[&str] = &[
 /// 单 compound 选择器是否**无条件**命中该元素：tag / id / class 字面对照 +
 /// 静态属性选择器（`[role="tablist"]`、`[data-slot="fill"]` 等）。伪类、结构
 /// 伪类、运行时可变状态属性是条件化命中——含这些的 compound 不做静态判定。
-fn compound_statically_matches(comp: &Compound, el: &IrElement) -> bool {
+pub(crate) fn compound_statically_matches(comp: &Compound, el: &IrElement) -> bool {
     let tag_ok = comp
         .tag
         .as_ref()

@@ -20,7 +20,7 @@
 //
 // M2 @keyframes 动画事件（spec §7.1 双路由 / §7.5 payload 编码）：
 // - START/END/ITERATION（18/19/20）：node.EventBus 广播（On<AnimationXxxEvent>，class 触发
-//   也能订阅）+ 按 playerKey 查 Animation 实例触发私有回调（onStart/onEnd）。
+//   也能订阅）+ 按 playerKey 查 AnimationHandle 实例触发私有回调（onStart/onEnd）。
 // - KEY/HOOK（27/28）：只按 playerKey 查句柄触发 onKey(pct)/onHook(name)，不广播 EventBus
 //   （句柄私有）。
 // - payload 解码（T9 event.rs）：name 表索引装 click_count+pad（24-bit LE）；PlayerKey u64
@@ -86,61 +86,61 @@ namespace LoomGUI
                     case (byte)EventType.Down:
                         DispatchTyped(nodeId,
                             new PointerDownEvent { _core = NewCore(nodeId),
-                                _position = new Vector2(evt.x, evt.y), _touchId = evt.touchId });
+                                _position = new LoomVector2(evt.x, evt.y), _touchId = evt.touchId });
                         break;
                     case (byte)EventType.Up:
                         DispatchTyped(nodeId,
                             new PointerUpEvent { _core = NewCore(nodeId),
-                                _position = new Vector2(evt.x, evt.y), _touchId = evt.touchId });
+                                _position = new LoomVector2(evt.x, evt.y), _touchId = evt.touchId });
                         break;
                     case (byte)EventType.Move:
                         DispatchTyped(nodeId,
                             new PointerMoveEvent { _core = NewCore(nodeId),
-                                _position = new Vector2(evt.x, evt.y), _touchId = evt.touchId });
+                                _position = new LoomVector2(evt.x, evt.y), _touchId = evt.touchId });
                         break;
                     case (byte)EventType.RollOver:
                         DispatchTyped(nodeId,
                             new PointerEnterEvent { _core = NewCore(nodeId),
-                                _position = new Vector2(evt.x, evt.y) });
+                                _position = new LoomVector2(evt.x, evt.y) });
                         break;
                     case (byte)EventType.RollOut:
                         DispatchTyped(nodeId,
                             new PointerLeaveEvent { _core = NewCore(nodeId),
-                                _position = new Vector2(evt.x, evt.y) });
+                                _position = new LoomVector2(evt.x, evt.y) });
                         break;
                     case (byte)EventType.Click:
                         DispatchTyped(nodeId,
                             new ClickEvent { _core = NewCore(nodeId),
-                                _position = new Vector2(evt.x, evt.y), _clickCount = evt.clickCount });
+                                _position = new LoomVector2(evt.x, evt.y), _clickCount = evt.clickCount });
                         break;
 
                     // ── Drag 类（bubble 事件）────────────────────────────
                     case (byte)EventType.DragStart:
                         DispatchTyped(nodeId,
                             new DragStartEvent { _core = NewCore(nodeId),
-                                _position = new Vector2(evt.x, evt.y) });
+                                _position = new LoomVector2(evt.x, evt.y) });
                         break;
                     case (byte)EventType.DragMove:
                         DispatchTyped(nodeId,
                             new DragMoveEvent { _core = NewCore(nodeId),
-                                _position = new Vector2(evt.x, evt.y) });
+                                _position = new LoomVector2(evt.x, evt.y) });
                         break;
                     case (byte)EventType.DragEnd:
                         DispatchTyped(nodeId,
                             new DragEndEvent { _core = NewCore(nodeId),
-                                _position = new Vector2(evt.x, evt.y) });
+                                _position = new LoomVector2(evt.x, evt.y) });
                         break;
 
                     // ── Keyboard 类（bubble 事件）────────────────────────
                     case (byte)EventType.KeyDown:
                         DispatchTyped(nodeId,
                             new KeyDownEvent { _core = NewCore(nodeId),
-                                _key = (KeyCode)evt.touchId, _modifiers = (KeyModifiers)(byte)evt._pad });
+                                _key = (LoomKeyCode)evt.touchId, _modifiers = (KeyModifiers)(byte)evt._pad });
                         break;
                     case (byte)EventType.KeyUp:
                         DispatchTyped(nodeId,
                             new KeyUpEvent { _core = NewCore(nodeId),
-                                _key = (KeyCode)evt.touchId, _modifiers = (KeyModifiers)(byte)evt._pad });
+                                _key = (LoomKeyCode)evt.touchId, _modifiers = (KeyModifiers)(byte)evt._pad });
                         break;
 
                     // ── Focus 类（bubble 事件）───────────────────────────
@@ -203,7 +203,7 @@ namespace LoomGUI
                         }
                         break;
                     // KEY/HOOK：句柄私有（spec §7.5），不广播 EventBus——只按 playerKey 查
-                    // Animation 实例触发 onKey(pct)/onHook(name)。回调是 Action（无事件参数），
+                    // AnimationHandle 实例触发 onKey(pct)/onHook(name)。回调是 Action（无事件参数），
                     // struct 不在此构造（无消费方；字段供测试/调试直读）。
                     case (byte)EventType.AnimationKey:
                         _ctx.ResolveAnimation(PlayerKeyOf(evt))?.FireKey(evt.y);

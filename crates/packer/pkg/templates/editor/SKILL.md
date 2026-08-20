@@ -65,6 +65,19 @@ trust the build message.
 10. Components are isolated (Shadow-DOM-like): a component's CSS universe
     is its own `<style>`/`<link>`; page rules never reach inside, component
     rules never leak out; each component is validated standalone.
+    **Slot-projected content belongs to the component universe**: content
+    the page projects into a component `<slot>` is styled by the
+    component's own `<style>` (plain selectors — no `::slotted()`), and
+    page rules targeting it are dead code (build warning). This is the
+    opposite of flattened browser previews, which show page CSS winning —
+    do not trust the preview on projected subtrees.
+10a. Inline text elements (`span`) are folded into the parent's rich-text
+    flow and have **no box of their own**: `width`/`height` on them never
+    apply (same as browsers — the build warns). To make a sized dot/chip,
+    use a flex item (`<div>` child of a `display:flex` row) or `<img>`;
+    `display:inline-block` does not exist. A span that itself gets
+    `display:flex` (class rule) switches to a flex container and its
+    children become sizeable flex items.
 11. Path bases are browser semantics: `<img src>` and `<link href>` are
     relative to the HTML file; `url()` inside a CSS file is relative to
     that CSS file. A missing file is a build error, never a silent drop.
@@ -100,8 +113,10 @@ demand, not upfront.
    colors, gradients subset, `position:absolute`, `border-radius`,
    `@keyframes` timing. Distrust: the browser-difference list in
    `references/css-reference.md` — the build already flags each of those
-   with a warning (W1/W2); if there are no warnings, the preview is
-   honest.
+   with a warning (border without style, bg-image without size,
+   non-transitionable `transition` properties, dead sizing on inline
+   text, page rules over projected content); if there are no warnings,
+   the preview is honest.
 5. **Build on approval.** Ask the user before publishing; then `loom
    build` and report the artifact paths from the report.
 

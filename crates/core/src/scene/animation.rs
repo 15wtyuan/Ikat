@@ -470,6 +470,20 @@ pub fn play_programmatic(scene: &mut Scene, node: NodeId, name: &str) -> Option<
         return None;
     }
     let rule = scene.keyframes.get(name)?.clone();
+    // 同节点同名的既有 programmatic player 先回收（清其持有通道）：Completed+fill-both
+    // 的旧 player 每帧续写末值且 sync 侧永不回收，不替换则叠加写同通道、player 无限
+    // 累积——重复 Play 语义 = 确定性从头重播（CSS 重新触发动画同义）。
+    let stale: Vec<PlayerKey> = scene
+        .players
+        .iter()
+        .filter(|(_, p)| p.programmatic && p.node == node && p.spec.name == name)
+        .map(|(k, _)| k)
+        .collect();
+    for k in stale {
+        if let Some(p) = scene.players.remove(k) {
+            clear_owned_channels(&mut scene.anim, &p);
+        }
+    }
     let spec = AnimationSpec {
         name: name.to_string(),
         duration: 1.0,

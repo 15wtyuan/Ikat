@@ -72,9 +72,18 @@ fn is_block_container(
     let IrNodeKind::Element(el) = &tree.nodes[idx].kind else {
         return false;
     };
-    // span：inline 级文本容器，默认 rich_text 候选（除非作者显式 display:flex）。
+    // span：inline 级文本容器，默认 rich_text 候选。作者要 flex 排版时不折叠——
+    // inline style 显式 flex 或 class 规则 flex 都算（与浏览器 flex item blockify
+    // 对齐）。注意不能走 is_flex_context：它把「tag 默认 Flex」也算 flex，而 span
+    // 的默认恰是 Flex（inline→flex hack），会把所有 span 误判成显式 flex。跨宇宙
+    // （投影内容对组件 CSS）的 flex 由运行时 rematch 翻转兜底。
     if matches!(el.semantic, Some(SemanticKind::TextElement)) {
-        return !has_explicit_display_flex(el);
+        return !has_explicit_display_flex(el)
+            && !crate::inline_context_check::statically_declares_display(
+                el,
+                single_compound_flex_rules,
+                has_multi_compound_flex_rule,
+            );
     }
     // CustomElement host：light 子在打包期被投影进组件 slot（component-system spec），
     // host 最终子树来自组件模板——页面文件里的 light 子混排不是 inline-flow 上下文。
@@ -191,6 +200,113 @@ pub fn classify_rich_text(
     }
 
     (rich, diagnostics)
+}
+
+/// 尺寸声明族（W4 死尺寸判定）。
+const SIZING_PROPS: &[&str] = &[
+    "width",
+    "height",
+    "min-width",
+    "min-height",
+    "max-width",
+    "max-height",
+];
+
+/// 单 compound class 规则中声明了尺寸的集合（W4 用，模式同 collect_flex_class_rules）。
+fn collect_sizing_class_rules(
+    dynamic_rules: &[loomgui_core::style::dynamic::DynamicRule],
+) -> Vec<&loomgui_core::style::dynamic::Compound> {
+    dynamic_rules
+        .iter()
+        .filter(|r| {
+            r.selector.compound.len() == 1
+                && r.declarations
+                    .iter()
+                    .any(|d| SIZING_PROPS.contains(&d.prop.as_str()))
+        })
+        .map(|r| &r.selector.compound[0])
+        .collect()
+}
+
+/// 元素是否声明了尺寸（inline style 或被无条件命中的单 compound class 规则）。
+fn el_declares_sizing(
+    el: &crate::ir::IrElement,
+    sizing_rules: &[&loomgui_core::style::dynamic::Compound],
+) -> bool {
+    if let Some(style) = el.attributes.iter().find(|a| a.name == "style") {
+        if style.value.split(';').any(|d| {
+            d.split(':')
+                .next()
+                .is_some_and(|p| SIZING_PROPS.contains(&p.trim()))
+        }) {
+            return true;
+        }
+    }
+    sizing_rules
+        .iter()
+        .any(|c| crate::inline_context_check::compound_statically_matches(c, el))
+}
+
+/// 节点祖先链上是否有 CustomElement host（投影 light 子标记——组件 `<style>` 的
+/// display:flex 在页面宇宙不可见，运行时 rematch 会翻转折叠，静态不可判死活）。
+fn under_custom_host(mut idx: usize, tree: &IrTree) -> bool {
+    while let Some(p) = tree.nodes[idx].parent {
+        if matches!(
+            tree.nodes[p.0].kind,
+            IrNodeKind::Element(ref el)
+                if matches!(el.semantic, Some(SemanticKind::CustomElement))
+        ) {
+            return true;
+        }
+        idx = p.0;
+    }
+    false
+}
+
+/// W4 第二遍：rich-text-block 子树内的行内元素声明尺寸 → warning。该子树被折进
+/// 父级 inline flow，行内后代无独立盒子——尺寸声明恒无效（与浏览器对 inline 元素
+/// 一致，但先验常以为会生效）。rich 根自身的尺寸有效（RichText 叶子 own box），
+/// 不警告；投影子树（under_custom_host）跳过——组件规则可能运行时解折叠。
+pub(crate) fn warn_inline_sizing(
+    tree: &IrTree,
+    rich: &[usize],
+    dynamic_rules: &[loomgui_core::style::dynamic::DynamicRule],
+    file: &str,
+    line_map: &LineMap,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let sizing_rules = collect_sizing_class_rules(dynamic_rules);
+    let mut stack: Vec<usize> = Vec::new();
+    for &root_idx in rich {
+        if under_custom_host(root_idx, tree) {
+            continue;
+        }
+        stack.extend(tree.nodes[root_idx].children.iter().map(|c| c.0));
+        while let Some(idx) = stack.pop() {
+            if let IrNodeKind::Element(el) = &tree.nodes[idx].kind {
+                if matches!(el.semantic, Some(SemanticKind::TextElement))
+                    && el_declares_sizing(el, &sizing_rules)
+                {
+                    diagnostics.push(Diagnostic::warning(
+                        DiagnosticCode::FenceInlineSizing,
+                        format!(
+                            "<span class=\"{}\"> declares width/height inside a rich-text \
+                             inline flow — inline elements have no box of their own and the \
+                             declaration has no effect (same as browsers). Size it as a flex \
+                             item (a div child of a display:flex container) or use <img>.",
+                            el.attributes
+                                .iter()
+                                .find(|a| a.name == "class")
+                                .map(|a| a.value.as_str())
+                                .unwrap_or("")
+                        ),
+                        line_map.source_location(tree.nodes[idx].span.start, file.to_string()),
+                    ));
+                }
+            }
+            stack.extend(tree.nodes[idx].children.iter().map(|c| c.0));
+        }
+    }
 }
 
 #[cfg(test)]

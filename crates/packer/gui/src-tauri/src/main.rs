@@ -42,6 +42,8 @@ fn main() {
             commands::scan_pngs,
             commands::run_build,
             commands::relativize,
+            commands::workspace_update_state,
+            commands::update_workspace,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

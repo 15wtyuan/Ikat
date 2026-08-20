@@ -32,7 +32,7 @@ pub enum PointerKind {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct KeyEvent {
-    pub key_code: u32, // KeyCode 枚举值（Unity KeyCode 转 u32；core 不解释语义，只透传 + Tab 判定）
+    pub key_code: u32, // LoomKeyCode 枚举值（Unity KeyCode 转 u32；core 不解释语义，只透传 + Tab 判定）
     pub modifiers: u8, // bit0=shift / bit1=ctrl / bit2=alt
     pub is_down: bool, // true=按下→keydown；false=松开→keyup
     pub pad: [u8; 2],

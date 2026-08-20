@@ -54,7 +54,7 @@ loom list   pkg|atlas|font [--format json]    summary per entity (one line each)
 loom show   <pkg> [--format json]             one package's pages + custom components
 loom font add <file> --family <f> [--default] [--fallback]
 loom atlas add <dir> [--name <n>] [--max-size <n>] [--padding <n>] [--standalone]
-loom scaffold [--agent claude|agents]...      refresh agent skills at the session root (safe)
+loom scaffold [--agent claude|agents]...      refresh workspace generated artifacts (skills + .loom CLI + version stamp)
 loom version [--format json]
 ```
 
@@ -148,8 +148,15 @@ loom init <root> [--ui <dir>] [--agent claude|agents]... [--unity-root <path>] [
 - Refuses when the target already has a `loom.workspace.json` unless
   `--force`.
 
-After a template upgrade, `loom scaffold` refreshes the skills at the
-session root without touching workspace.json, sources, or `.loom/`.
+`loom scaffold` refreshes the workspace's **generated artifacts** at the
+session root: the three agent skills, the `.loom/` CLI copy (self-copy
+from whichever loom.exe you run) and `.loom/scaffold.version`. It never
+touches `config.json`, `loom.workspace.json`, or sources. After a
+package/CLI upgrade, run it once — `loom check` warns
+(`StaleScaffold`) when the version stamp is older than the running
+CLI. Without `--agent` it refreshes whichever agent dirs already
+exist (`.agents/skills` and/or `.claude/skills`; default `agents` for
+a first-time scaffold).
 
 ## `loom.workspace.json` fields
 

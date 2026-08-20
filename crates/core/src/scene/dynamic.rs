@@ -518,6 +518,11 @@ pub fn set_inline_override(scene: &mut Scene, node: NodeId, css: &str) -> Result
                 if apply_decl(&mut n.inline_override, prop, val.trim()) {
                     n.inline_set.0 |= bit;
                 }
+                // display:flex 策略翻转（与 rematch 侧同语义）：显式 flex 声明把
+                // rich_text_block 折叠切回 flex 容器布局。
+                if prop == "display" && n.inline_override.display_mode == DisplayMode::Flex {
+                    n.rich_text_block = false;
+                }
             }
         }
     }

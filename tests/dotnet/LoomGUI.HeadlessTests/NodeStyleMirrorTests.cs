@@ -9,11 +9,11 @@ namespace LoomGUI.HeadlessTests
     /// C3 投影层核心机制验收：NodeStyle 稀疏镜像 + FlushInline seam（即时过桥版）。
     ///
     /// 每条 Fact 验一条不变量：
-    /// - getter 读镜像：写过的属性即时读回；未写过返 Unset 哨兵（Length/Color/enum）。
+    /// - getter 读镜像：写过的属性即时读回；未写过返 Unset 哨兵（Length/LoomColor/enum）。
     /// - FlushInline seam：setter 触发 set_inline_override FFI → core rematch → solve，
     ///   下帧 layout_rect / computed_style 反映新值（projection §3.2 即时过桥）。
     /// - Unset 哨兵 setter → unset_inline_override FFI → core bit 清 → 回落 base。
-    /// - Color 8-hex round-trip（#rrggbbaa）：验 parse_color fix（commit 4aa8b3c）+ seam 全链通。
+    /// - LoomColor 8-hex round-trip（#rrggbbaa）：验 parse_color fix（commit 4aa8b3c）+ seam 全链通。
     /// - Style 同一 Node 多次访问返同一实例（projection §2.5 稳定单一实例）。
     ///
     /// 全部经 headless harness P/Invoke 真 dll，不启 Unity。
@@ -68,7 +68,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>
-        /// 未写过的 Color / enum 属性 getter 返 Unset 哨兵。
+        /// 未写过的 LoomColor / enum 属性 getter 返 Unset 哨兵。
         /// </summary>
         [Fact]
         public void StyleUnwrittenColorAndEnumReturnUnset()
@@ -78,7 +78,7 @@ namespace LoomGUI.HeadlessTests
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
                 Assert.True(n.Style.BackgroundColor.IsUnset);
-                Assert.True(n.Style.Color.IsUnset);
+                Assert.True(n.Style.LoomColor.IsUnset);
                 Assert.Equal(DisplayMode.Unset, n.Style.Display);
                 Assert.Equal(FlexDirection.Unset, n.Style.FlexDirection);
                 Assert.Equal(Overflow.Unset, n.Style.OverflowX);
@@ -168,7 +168,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>
-        /// Color 8-hex round-trip：BackgroundColor=red(1,0,0,1) → CssValueConvert 出 #ff0000ff →
+        /// LoomColor 8-hex round-trip：BackgroundColor=red(1,0,0,1) → CssValueConvert 出 #ff0000ff →
         /// core parse_color（8-hex L4 fix）接受 → core rematch 应用 → get_node_computed_style 读回
         /// bg_present=1 且 background_color==[1,0,0,1]。验 parse_color fix（C3 前置 commit 4aa8b3c）
         /// + FlushInline seam 全链通。
@@ -180,7 +180,7 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                n.Style.BackgroundColor = new Color(1f, 0f, 0f, 1f);   // → #ff0000ff
+                n.Style.BackgroundColor = new LoomColor(1f, 0f, 0f, 1f);   // → #ff0000ff
                 Tick(stage, ctx);
 
                 var cs = GetComputedStyle(stage, n._id);
@@ -197,7 +197,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>
-        /// Color 半透明 round-trip：BackgroundColor=(1,1,1,0.5) → #ffffff80 → 解析回 (1,1,1,~0.5)。
+        /// LoomColor 半透明 round-trip：BackgroundColor=(1,1,1,0.5) → #ffffff80 → 解析回 (1,1,1,~0.5)。
         /// 验 alpha 通道经 8-hex 不丢（6-hex 会强 opaque）。
         /// </summary>
         [Fact]
@@ -207,7 +207,7 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                n.Style.BackgroundColor = new Color(1f, 1f, 1f, 0.5f);
+                n.Style.BackgroundColor = new LoomColor(1f, 1f, 1f, 0.5f);
                 Tick(stage, ctx);
 
                 var cs = GetComputedStyle(stage, n._id);
@@ -225,8 +225,8 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>
-        /// Color Unset 哨兵 setter → unset → 下帧 computed_style.bg_present=0（回落 base 无 bg）。
-        /// 验 Color 的 Unset 哨兵分支（Color.IsUnset → Unset(prop)）。
+        /// LoomColor Unset 哨兵 setter → unset → 下帧 computed_style.bg_present=0（回落 base 无 bg）。
+        /// 验 LoomColor 的 Unset 哨兵分支（LoomColor.IsUnset → Unset(prop)）。
         /// </summary>
         [Fact]
         public void StyleColorUnsetClearsBackground()
@@ -235,11 +235,11 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                n.Style.BackgroundColor = new Color(1f, 0f, 0f, 1f);
+                n.Style.BackgroundColor = new LoomColor(1f, 0f, 0f, 1f);
                 Tick(stage, ctx);
                 Assert.Equal(1, GetComputedStyle(stage, n._id).bg_present);
 
-                n.Style.BackgroundColor = Color.Unset;   // IsUnset=true → Unset(prop)
+                n.Style.BackgroundColor = LoomColor.Unset;   // IsUnset=true → Unset(prop)
                 Tick(stage, ctx);
                 Assert.Equal(0, GetComputedStyle(stage, n._id).bg_present);
             }
@@ -325,7 +325,7 @@ namespace LoomGUI.HeadlessTests
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
                 n.Style.Width = Length.Px(100);
-                n.Style.BackgroundColor = new Color(0f, 1f, 0f, 1f);
+                n.Style.BackgroundColor = new LoomColor(0f, 1f, 0f, 1f);
                 n.Style.Opacity = 0.5f;
 
                 Assert.Equal(Length.Px(100), n.Style.Width);
@@ -368,7 +368,7 @@ namespace LoomGUI.HeadlessTests
                 switch (which)
                 {
                     case 2: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--x", Length.Px(10))); break;
-                    case 3: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--c", new Color(1f, 0f, 0f, 1f))); break;
+                    case 3: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--c", new LoomColor(1f, 0f, 0f, 1f))); break;
                     case 4: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--f", 0.5f)); break;
                     case 5: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--s", "literal")); break;
                     case 6: Assert.Throws<NotImplementedException>(() => n.Style.RemoveVar("--x")); break;

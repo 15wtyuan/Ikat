@@ -668,6 +668,41 @@ fn parse_declarations(
             ));
             continue;
         }
+        // 共享值域门：宽松吞值通道（颜色/overflow/filter/transform）+ Keyword 域 +
+        // display:inline 语义警告。此前 `<style>` 规则值不校验——命名色 / overflow:clip /
+        // filter:blur 等在类规则里静默吞值（与 inline 路径不同门），此处统一。
+        if let Some(msg) = crate::value_check::value_error(prop, value) {
+            diagnostics.push(Diagnostic::error(
+                DiagnosticCode::FenceBadCssValue,
+                msg,
+                loc.clone(),
+            ));
+            continue;
+        }
+        if let Some(msg) = crate::value_check::keyword_error(prop, value) {
+            diagnostics.push(Diagnostic::error(
+                DiagnosticCode::FenceBadCssValue,
+                msg,
+                loc.clone(),
+            ));
+            continue;
+        }
+        if let Some(note) = crate::value_check::display_inline_warning(value) {
+            diagnostics.push(Diagnostic::warning(
+                DiagnosticCode::FenceDisplayInline,
+                format!("CSS property \"display\": {note}"),
+                loc.clone(),
+            ));
+        }
+        if prop == "transition" {
+            for msg in crate::value_check::transition_warnings(value) {
+                diagnostics.push(Diagnostic::warning(
+                    DiagnosticCode::FenceTransitionUnsupportedProp,
+                    msg,
+                    loc.clone(),
+                ));
+            }
+        }
         // 渐变值探针：`<style>` 规则的值不逐条校验（非关键字值运行时 apply_decl 才
         // 解析），但渐变子集是结构化值（stop 数上限 / radial 配置段语法），坏值静默
         // 到运行时丢背景太晚——打包期用 core `parse_gradient`（与运行时同一真相源）
@@ -825,7 +860,7 @@ mod tests {
 
     #[test]
     fn parse_style_block_basic() {
-        let css = ".foo { color: red; font-size: 24px }\ndiv.bar { width: 100px }";
+        let css = ".foo { color: #ff0000; font-size: 24px }\ndiv.bar { width: 100px }";
         let (rules, _kf, diags) = parse_style_block(css);
         assert!(diags.is_empty(), "diags: {diags:?}");
         assert_eq!(rules.len(), 2);
@@ -835,7 +870,7 @@ mod tests {
             rules[0].declarations[0],
             Declaration {
                 prop: "color".into(),
-                value: "red".into()
+                value: "#ff0000".into()
             }
         );
         assert_eq!(rules[0].declarations[1].prop, "font-size");
@@ -846,7 +881,8 @@ mod tests {
     #[test]
     fn parse_style_block_skips_unparseable_selector() {
         // .a > .b 越界 → 该规则进 diagnostic，其他规则照常
-        let (rules, _kf, diags) = parse_style_block(".a > .b { color: red }\n.ok { color: blue }");
+        let (rules, _kf, diags) =
+            parse_style_block(".a > .b { color: #ff0000 }\n.ok { color: #0000ff }");
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].selector.raw, ".ok");
         assert!(
@@ -859,7 +895,7 @@ mod tests {
     fn parse_comma_selector_list_expands_to_shared_declarations() {
         // 逗号 selector list：`a, b, c { decls }` → 3 条 DynamicRule 共享同一声明块。
         // 用纯 tag 选择器隔离逗号展开机制本身（属性选择器 [type="..."] 是另一个 task）。
-        let (rules, _, diags) = parse_style_block("input, select, textarea { color: red }");
+        let (rules, _, diags) = parse_style_block("input, select, textarea { color: #ff0000 }");
         assert!(diags.is_empty(), "{diags:?}");
         assert_eq!(rules.len(), 3, "逗号 list 展开为 3 条规则");
         assert_eq!(rules[0].declarations, rules[1].declarations);
@@ -868,7 +904,7 @@ mod tests {
 
     #[test]
     fn parse_style_block_ignores_comments() {
-        let (rules, _kf, _diags) = parse_style_block("/* c */ .x { color: red } /* tail */");
+        let (rules, _kf, _diags) = parse_style_block("/* c */ .x { color: #ff0000 } /* tail */");
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].selector.raw, ".x");
     }
@@ -940,7 +976,8 @@ mod tests {
     #[test]
     fn parse_style_block_keyframes_with_other_rules_interleaved() {
         // home.html 用法：@keyframes 块 + 后续 selector 规则混合
-        let css = "@keyframes fadeIn { from{opacity:0} to{opacity:1} }\n.nav-card { color:red }";
+        let css =
+            "@keyframes fadeIn { from{opacity:0} to{opacity:1} }\n.nav-card { color:#ff0000 }";
         let (rules, keyframes, diags) = parse_style_block(css);
         assert!(diags.is_empty(), "diags: {diags:?}");
         assert_eq!(keyframes.len(), 1, "@keyframes 解析");
@@ -951,7 +988,8 @@ mod tests {
 
     #[test]
     fn hook_comment_outside_keyframes_is_inert_in_declarations() {
-        let (rules, keyframes, diags) = parse_style_block(".card { /* @loom-hook x */ color:red }");
+        let (rules, keyframes, diags) =
+            parse_style_block(".card { /* @loom-hook x */ color:#ff0000 }");
         assert!(keyframes.is_empty());
         assert!(
             diags.is_empty(),
@@ -961,12 +999,13 @@ mod tests {
         assert_eq!(rules[0].selector.raw, ".card");
         assert_eq!(rules[0].declarations.len(), 1);
         assert_eq!(rules[0].declarations[0].prop, "color");
-        assert_eq!(rules[0].declarations[0].value, "red");
+        assert_eq!(rules[0].declarations[0].value, "#ff0000");
     }
 
     #[test]
     fn hook_comment_before_normal_rule_is_inert_in_selector() {
-        let (rules, keyframes, diags) = parse_style_block("/* @loom-hook x */\n.card{color:red}");
+        let (rules, keyframes, diags) =
+            parse_style_block("/* @loom-hook x */\n.card{color:#ff0000}");
         assert!(keyframes.is_empty());
         assert!(
             diags.is_empty(),
@@ -1019,7 +1058,7 @@ mod tests {
     #[test]
     fn parse_style_block_unknown_at_rule_errors() {
         // @media / @font-face 不在围栏子集 → diagnostic
-        let (_rules, _kf, diags) = parse_style_block("@media screen { .x { color:red } }");
+        let (_rules, _kf, diags) = parse_style_block("@media screen { .x { color:#ff0000 } }");
         assert!(
             diags.iter().any(|d| d.message.contains("@media")),
             "未知 at-rule 应报错: {diags:?}"

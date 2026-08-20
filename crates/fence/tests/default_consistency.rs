@@ -87,8 +87,6 @@ const REPRESENTATION_DIFF_PROPS: &[&str] = &[
 const UNCONSUMED_DEFAULT_PROPS: &[&str] = &[
     "border-image-slice",
     "background-image",
-    "background-size",
-    "resize",
     "text-shadow",
     "-webkit-text-stroke",
     "font-effect",

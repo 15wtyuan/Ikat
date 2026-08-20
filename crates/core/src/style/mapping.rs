@@ -1414,7 +1414,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.background_size = match value.trim() {
                 "cover" => BackgroundSize::Cover,
                 "contain" => BackgroundSize::Contain,
-                "100%" => BackgroundSize::Stretch,
+                "100%" | "stretch" => BackgroundSize::Stretch,
                 _ => return false, // 围栏外值（auto/px/两值）静默忽略
             };
             true
@@ -1750,6 +1750,12 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 }
             }
             style.text_effects.len() > prev_len
+        }
+        "resize" => {
+            // 围栏 noop（schema 注册表声明 accepted-as-noop）：textarea 拖拽手柄是
+            // 浏览器 UI 概念，游戏 UI 无此交互——接受声明避免 prop 名报错，不消费。
+            // 值域由 fence Keyword 门校验（none/both/horizontal/vertical）。
+            true
         }
         _ => false, // 装饰属性静默忽略
     }

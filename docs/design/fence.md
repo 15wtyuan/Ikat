@@ -486,6 +486,27 @@ CSS 在围栏中以三个正交维度建模：
 | `FenceMissingControlChild` | role 驱动控件缺必需子角色/slot（`combobox` 缺 `role=listbox`、`listbox` 缺 `role=option`、`slider` 缺 `data-slot=thumb`、`progressbar` 缺 `data-slot=fill`、`list` 缺 `role=listitem`、`tablist` 缺 `role=tab`）。控件结构由作者写，漏写 = 运行时半残控件；详见阶段 6.8 |
 | `FenceUnknownRole` | `role` 属性值不在 role 注册表（`ROLE_TO_SEMANTIC` + `textbox`/`tabpanel`/`dialog` 例外）。拼错防护：未知 role 若静默回退成基础标签类型，元素会跳过全部控件校验（必需子结构、CSS 命中、结构 CSS），构建绿灯但运行时空白——「不静默降级」原则拒绝此类 |
 | `FenceStylesheetNotFound` | `<link rel="stylesheet">` 的外部 CSS 读取失败（href 相对所在 HTML 文件解析，报错带完整路径；静默丢样式是最难排查的降级形态） |
+| `FenceDisplayInline` | **warning**：显式 `display: inline` 声明。围栏没有 inline flow——inline 运行时映射为 flex 容器，与浏览器 inline（收缩宽 + 横排流）语义不同，显式声明多半是先验误用 |
+| `FenceTransitionUnsupportedProp` | **warning**：`transition` 声明了运行时不支持的属性。transition 引擎只驱动 `background-color` / `color` / `opacity` 三通道；布局属性（width/transform 等）声明了也不过渡，浏览器先验会翻车（`transition: all` 同理单独提示） |
+| `FenceInlineSizing` | **warning**：rich-text inline flow 内的行内元素（span 等）声明 `width`/`height` 族。该类元素无独立盒子，尺寸声明恒无效（与浏览器对 inline 元素一致）。可定尺寸路径：flex item div / `<img>` / 显式 `display:flex` |
+| `FencePageRuleProjectedOnly` | **warning**：页面侧纯类规则只可能命中 slot 投射内容。样式墙下页面规则不穿 host 边界，该规则运行时恒为死代码——给投影内容定样式写在组件 `<style>` 里 |
+
+#### 值域门（打包期 error，双路径统一）
+
+行内 `style=""` 与 `<style>` 规则共用同一值域校验（`fence::value_check`）。运行时
+`apply_decl` 对下列通道解析失败仍返回 true（宽松吞值）——浏览器先验里合法、运行时
+恒无效的值一律打包期报 `FenceBadCssValue`：
+
+- **颜色**：命名色（`red`/`blue`/...）在所有颜色属性上无效；`transparent` 仅 `color`
+  接受（core 拦截），其余颜色属性显式清色用 `rgba(0,0,0,0)` / `#00000000`。合法格式：
+  `#rgb` / `#rrggbb` / `#rrggbbaa` / `rgb()` / `rgba()`。
+- **overflow**（简写与 `-x`/`-y`）：仅 `visible` / `hidden` / `scroll` / `auto`；
+  `clip` 等浏览器值运行时静默忽略（等同 visible，无裁剪）。
+- **filter**：仅 `grayscale` / `brightness` / `contrast` / `saturate` / `hue-rotate` /
+  `invert` / `sepia`；`blur` / `drop-shadow` 等被静默跳过。
+- **transform**：仅 `translate(X/Y)` / `rotate` / `scale(X/Y)`；`skew` / `matrix` 等
+  被静默跳过（唯一函数时整条声明退化为 identity）。
+- `<style>` 规则的 Keyword 值域（此前不校验）与行内路径同门。
 
 ---
 

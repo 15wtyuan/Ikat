@@ -434,7 +434,17 @@ namespace LoomGUI
         {
             // 诊断：按 F8 dump 当前 blob（core 视角）+ MirrorPool（Unity 视角）到 console + 文件。
             // 用法：进 play 导航到出问题的页面，按 F8。在「好」「坏」两种布局各按一次，对比两份 dump。
-            if (!Input.GetKeyDown(UnityEngine.KeyCode.F8)) return;
+            // 轮询按 Active Input Handling 分流：InputSystem-only 项目里旧版 Input.GetKeyDown
+            // 每帧抛 InvalidOperationException（Field Notes N3）。
+#if ENABLE_INPUT_SYSTEM
+            bool f8 = UnityEngine.InputSystem.Keyboard.current != null
+                && UnityEngine.InputSystem.Keyboard.current.f8Key.wasPressedThisFrame;
+#elif ENABLE_LEGACY_INPUT_MANAGER
+            bool f8 = Input.GetKeyDown(UnityEngine.KeyCode.F8);
+#else
+            bool f8 = false;
+#endif
+            if (!f8) return;
             DumpDiagnostic();
         }
 

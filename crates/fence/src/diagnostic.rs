@@ -65,6 +65,22 @@ pub enum DiagnosticCode {
     /// href 相对所在 HTML 文件解析；加载失败即 error——静默丢样式是最难排查的
     /// 降级形态。
     FenceStylesheetNotFound,
+    /// `display: inline` 声明（warning）。围栏没有 inline flow——inline 运行时映射为
+    /// flex 容器，与浏览器 inline（收缩宽 + 横排流）语义不同；显式声明多半是先验误用。
+    FenceDisplayInline,
+    /// `transition` 声明了运行时不支持的属性（warning）。transition 引擎只覆盖
+    /// background-color / color / opacity 三通道；布局属性（width/transform 等）
+    /// 声明了也不过渡，浏览器先验会翻车。
+    FenceTransitionUnsupportedProp,
+    /// 行内文本元素（rich-text-block 归类的 span 等）上声明 width/height 族（warning）。
+    /// 该类元素被折进父级 inline flow，无独立盒子——尺寸声明恒无效（与浏览器对
+    /// inline 元素的行为一致，但 AI 先验常以为会生效）。可定尺寸路径：flex item
+    /// div / img / 显式 display:flex。
+    FenceInlineSizing,
+    /// 页面侧 CSS 规则只可能命中 slot 投射内容（warning）。投影内容归组件样式宇宙
+    /// （样式墙：页面规则不穿 host 边界），该规则运行时恒为死代码——给投影内容
+    /// 定样式写在组件文件 `<style>` 里。
+    FencePageRuleProjectedOnly,
 }
 
 #[derive(Debug, Clone)]

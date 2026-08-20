@@ -26,6 +26,61 @@ pub struct OpenedWorkspace {
     pub ui_path: String,
 }
 
+/// 工作区生成物（skills + `.loom/` CLI）新旧状态：打开工作区时探测，stale 时前端
+/// 亮「Update workspace」。版本基准 = GUI 链接的 loomgui_pkg 版本（release 双 exe
+/// 同 commit 配套，库版本即同目录 loom.exe 版本）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceUpdateState {
+    pub stamped: String,
+    pub current: String,
+    pub stale: bool,
+}
+
+#[tauri::command]
+pub fn workspace_update_state(path: String) -> Result<WorkspaceUpdateState, String> {
+    let located = config::locate(Path::new(&path)).map_err(|e| e.message)?;
+    let stamped = fs::read_to_string(
+        located
+            .root
+            .join(".loom")
+            .join(loomgui_pkg::scaffold::VERSION_STAMP),
+    )
+    .map(|s| s.trim().to_string())
+    .unwrap_or_default();
+    let current = loomgui_pkg::scaffold::LOOM_VERSION.to_string();
+    Ok(WorkspaceUpdateState {
+        stale: !stamped.is_empty() && stamped != current,
+        stamped,
+        current,
+    })
+}
+
+/// 「Update workspace」：刷新会话根生成物（三 skill + `.loom/` CLI + 版本戳）。
+/// 首选子进程 `loom scaffold`（与 agent 会话同一 exe）；dev 无 exe 时进程内降级
+/// （exe 拷贝源 = GUI 同目录 loom，无则跳过拷贝——refresh_workspace 同语义）。
+#[tauri::command]
+pub fn update_workspace(path: String) -> Result<WorkspaceUpdateState, String> {
+    let located = config::locate(Path::new(&path)).map_err(|e| e.message)?;
+    if let Some(loom) = locate_loom(Some(&located.root)) {
+        let mut cmd = loom_command(&loom);
+        cmd.arg("scaffold").current_dir(&located.root);
+        let out = run_capture(cmd).map_err(|e| format!("spawn loom scaffold: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "loom scaffold 失败（exit {}）：{}",
+                out.status.code().unwrap_or(-1),
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+    } else {
+        let agents = loomgui_pkg::scaffold::detect_agents(&located.root);
+        loomgui_pkg::scaffold::refresh_workspace(&located.root, &agents)
+            .map_err(|e| format!("refresh failed: {e}"))?;
+    }
+    workspace_update_state(path)
+}
+
 #[tauri::command]
 pub fn recent_workspaces(state: tauri::State<StateDir>) -> Vec<String> {
     recent::load_recent(state.0.as_deref())

@@ -123,7 +123,7 @@ namespace LoomGUI.HeadlessTests
 
                 // ── Criterion 3: Write/Read Geometry ─────────────────────
                 // #root { width: 200px; height: 100px } → after tick, LayoutRect reflects.
-                Rect lr = instRoot.Geometry.LayoutRect;
+                LoomRect lr = instRoot.Geometry.LayoutRect;
                 Assert.InRange(lr.Width, 195, 205);
                 Assert.InRange(lr.Height, 95, 105);
 

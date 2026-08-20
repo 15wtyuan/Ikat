@@ -21,18 +21,18 @@ namespace LoomGUI.HeadlessTests
         [Fact]
         public void LengthUnsetIsNull() => Assert.Null(CssValueConvert.ToCss(Length.Unset()));
 
-        // ── Color ────────────────────────────────────────────────────
+        // ── LoomColor ────────────────────────────────────────────────────
         [Fact]
-        public void ColorHexRedOpaque() => Assert.Equal("#ff0000ff", CssValueConvert.ToCss(new Color(1f, 0f, 0f, 1f)));
+        public void ColorHexRedOpaque() => Assert.Equal("#ff0000ff", CssValueConvert.ToCss(new LoomColor(1f, 0f, 0f, 1f)));
 
         [Fact]
-        public void ColorHexWhiteHalfAlpha() => Assert.Equal("#ffffff80", CssValueConvert.ToCss(new Color(1f, 1f, 1f, 0.5f)));
+        public void ColorHexWhiteHalfAlpha() => Assert.Equal("#ffffff80", CssValueConvert.ToCss(new LoomColor(1f, 1f, 1f, 0.5f)));
 
         [Fact]
-        public void ColorHexBlackTransparent() => Assert.Equal("#00000000", CssValueConvert.ToCss(new Color(0f, 0f, 0f, 0f)));
+        public void ColorHexBlackTransparent() => Assert.Equal("#00000000", CssValueConvert.ToCss(new LoomColor(0f, 0f, 0f, 0f)));
 
         [Fact]
-        public void ColorUnsetIsNull() => Assert.Null(CssValueConvert.ToCss(Color.Unset));
+        public void ColorUnsetIsNull() => Assert.Null(CssValueConvert.ToCss(LoomColor.Unset));
 
         // ── Thickness ────────────────────────────────────────────────
         // 输出顺序 TRBL（top right bottom left）匹配 core parse_four 解析序。
@@ -161,7 +161,7 @@ namespace LoomGUI.HeadlessTests
         public void ObjectDispatchLength() => Assert.Equal("100px", CssValueConvert.ToCss((object)Length.Px(100)));
 
         [Fact]
-        public void ObjectDispatchColor() => Assert.Equal("#ff0000ff", CssValueConvert.ToCss((object)new Color(1f, 0f, 0f, 1f)));
+        public void ObjectDispatchColor() => Assert.Equal("#ff0000ff", CssValueConvert.ToCss((object)new LoomColor(1f, 0f, 0f, 1f)));
 
         [Fact]
         public void ObjectDispatchThickness() => Assert.Equal("10 20 30 40",

@@ -58,7 +58,7 @@ public abstract class Node {
     public IReadOnlyList<T> Query<T>() where T : Node;      // by type, document order
     public IReadOnlyList<Node> Query(string selector);      // ".class" / "tag.class"
 
-    public Animation Play(string name);
+    public AnimationHandle Play(string name);
     public void Focus();
     public void Blur();
 
@@ -114,16 +114,16 @@ public sealed class NodeStyle {
     public Length Left/Top/Right/Bottom { get; set; }
     public PositionMode Position { get; set; }
     public int ZIndex { get; set; }                      // sibling stacking, paint+hit only
-    public Color BackgroundColor/Color { get; set; }
+    public LoomColor BackgroundColor/LoomColor { get; set; }
     public float Opacity { get; set; }
-    public void SetVar(string name, Length/Color/float/string value);
+    public void SetVar(string name, Length/LoomColor/float/string value);
     public void RemoveVar(string name);
 }
 public sealed class NodeTransform {
-    public Vector2 Position { get; set; }
-    public Vector2 Scale { get; set; }
+    public LoomVector2 Position { get; set; }
+    public LoomVector2 Scale { get; set; }
     public float Rotation { get; set; }                  // radians
-    public Vector2 Origin { get; set; }
+    public LoomVector2 Origin { get; set; }
 }
 ```
 
@@ -142,9 +142,9 @@ public class Container : Node {
     public void SetChildIndex(Node child, int index);
     public void SwapChildren(Node a, Node b);
     public void SwapChildrenAt(int indexA, int indexB);
-    public Vector2 ScrollPos { get; }                    // (0,0) on non-scrolling
+    public LoomVector2 ScrollPos { get; }                    // (0,0) on non-scrolling
     public void RestartAnimations();                     // rebuild declarative players, keep node state
-    public void ScrollTo(Vector2 pos, ScrollBehavior behavior = ScrollBehavior.Smooth);
+    public void ScrollTo(LoomVector2 pos, ScrollBehavior behavior = ScrollBehavior.Smooth);
     public event Action<ScrollChangedEvent> Scrolled;
     public UITemplate GetTemplate(string name);
 }
@@ -189,7 +189,7 @@ Two paths, same underlying routing:
 | Keyboard | KeyDown/Up |
 | Focus | Focus/Blur |
 | Scroll | ScrollChanged |
-| Animation | AnimationStart/End/Iteration, TransitionEnd |
+| AnimationHandle | AnimationStart/End/Iteration, TransitionEnd |
 
 Unsubscribing: routed / per-frame / stylesheet return `IDisposable`
 handles (`On<T>`, `OnUpdate`, `StyleSheet.Add`) — dispose to withdraw;
@@ -217,11 +217,23 @@ writable at runtime; no automatic tab-chain navigation (build it with
 | div role=switch | Toggle : Node | IsChecked, Disabled, CheckedChanged |
 | div role=radio | RadioButton : Node | IsChecked, Name (readonly), Disabled, CheckedChanged |
 | div role=combobox | Dropdown : Node | SelectedIndex, SelectedValue, Disabled, SelectionChanged |
-| div role=progressbar | ProgressBar : Node | Value, Max (float, 0-based), IsIndeterminate |
+| div role=progressbar | ProgressBar : Node | Value, Max (float, 0-based), IsIndeterminate, AnimateValue |
 | div role=tablist | TabList : Container | SelectedIndex, SelectionChanged (arrow keys/click; panels linked via `aria-controls`) |
 | div role=tab | Tab : Container | (`aria-selected` synthesized from TabList.SelectedIndex) |
 
 - Numeric control values are `float`.
+- **ProgressBar value domain**: `Value` is raw in `[0, Max]` — NOT
+  normalized 0..1. `Max` defaults to the HTML `aria-valuemax`
+  attribute (fallback 100). The fill width is `Value / Max`
+  internally; write `Value = 70` with `Max = 100` for a 70% bar.
+- **ProgressBar.AnimateValue(target, durationSec = 0.4)** —
+  presentation sugar: eases the fill to `target` (easeOut) instead of
+  snapping. `Value` reads back the target during the animation (the
+  data value); the interpolated display value only feeds rendering.
+  Assigning `Value` directly cancels a running animation and wins.
+  Retargeting mid-animation re-anchors from the current display value.
+  CSS `transition` cannot do this (width is a layout channel); use
+  this for health bars and other value-driven fills.
 - RadioButtons sharing one `Name` auto-exclude; only the newly checked
   one fires `CheckedChanged`. Aggregating by name (RadioGroup) is user
   code, not framework.
@@ -276,7 +288,7 @@ fallback template.
 `ItemExitClass`: when set, `NotifyRemoved` items get the class and are
 recycled after `AnimationEnd`.
 
-## Animation
+## AnimationHandle
 
 All animation is defined in CSS; there is no imperative tween.
 
@@ -284,7 +296,10 @@ Three triggers:
 
 1. Class toggle (declarative): `node.Classes.Add("slide-out")`; watch
    `On<AnimationEndEvent>`.
-2. `node.Play("name")` → `Animation` handle (programmatic, hooks).
+2. `node.Play("name")` → `AnimationHandle` handle (programmatic, hooks).
+   Calling `Play` again with the same name is a deterministic restart
+   from the beginning (replaces the previous playback of that
+   animation on that node); different names coexist.
 3. `Style.SetVar` (dynamic values escape hatch).
 
 Timing invariants: class / typed-style changes take effect at the next
@@ -294,15 +309,15 @@ value. `:nth-child(An+B|odd|even|N)` + `animation-delay` produces
 staggered entrances (list items fading in one by one).
 
 ```csharp
-public sealed class Animation {
+public sealed class AnimationHandle {
     public string Name { get; }
     public bool IsPlaying { get; }
     public float Time { get; set; }
     public void Pause(); public void Resume(); public void Stop();
-    public Animation OnStart(Action cb);
-    public Animation OnEnd(Action cb);
-    public Animation OnKey(float percent, Action cb);
-    public Animation OnHook(string name, Action cb);
+    public AnimationHandle OnStart(Action cb);
+    public AnimationHandle OnEnd(Action cb);
+    public AnimationHandle OnKey(float percent, Action cb);
+    public AnimationHandle OnHook(string name, Action cb);
 }
 ```
 
@@ -360,7 +375,7 @@ public sealed class UIContext {
     public void CallLater(float delay, Action callback);
     public void CallNextFrame(Action callback);
     public bool IsPointerOnUI { get; }
-    public Node Pick(Vector2 globalPoint);
+    public Node Pick(LoomVector2 globalPoint);
 }
 public sealed class UIPackage {
     public string Name { get; }
@@ -384,7 +399,26 @@ public sealed class UITemplate {
   released, live instances survive as independent copies.
 - `Image.Src` is a string key (package-internal or runtime-registered
   via the engine backend, e.g. Unity `SpriteResolver.Register`).
-  Unknown key = silent error state + one warning, no throw.
+  Package-internal keys are workspace-relative asset paths as baked
+  into the atlas manifest, e.g. `"res/icons/item-potion.png"` (the
+  `src` you wrote in HTML). Unknown key = silent error state + one
+  warning per unique key in the console, no throw. To verify a key
+  hit, set a known-good key (one referenced by existing HTML) on the
+  same node and compare.
+
+## LoomStageDriver serialized fields
+
+Programmatic setup (`SerializedObject`) and Inspector scripting use
+these field names (defaults in parentheses):
+
+| Field | Type | Notes |
+|---|---|---|
+| `_designSize` | UnityEngine.Vector2 | authoring resolution; **default (1080,1920) is portrait** — landscape projects must set it explicitly, e.g. (1920,1080) |
+| `_safeArea` | bool | notch-safe letterboxing (true) |
+| `_showFps` | bool | FPS overlay (false) |
+| `_uiCamera` | Camera | null = driver creates `LoomUICamera` |
+| `_inputCollector` | LoomInputCollector | null = `GetComponent` fallback |
+| `_productRoot` | string | empty = Editor `Assets/Bundles` / player StreamingAssets |
 
 ## Exceptions
 

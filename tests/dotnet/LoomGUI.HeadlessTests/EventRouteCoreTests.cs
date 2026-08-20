@@ -34,7 +34,7 @@ namespace LoomGUI.HeadlessTests
             typeof(AnimationStartEvent), typeof(AnimationEndEvent),
             typeof(AnimationIterationEvent), typeof(TransitionEndEvent),
             // M2 动画句柄私有事件（T11）：OnKey 跨越 / @loom-hook 跨越。不广播 EventBus——
-            // demux 按 playerKey 查 Animation 实例直接触发回调；struct 作载荷载体。
+            // demux 按 playerKey 查 AnimationHandle 实例直接触发回调；struct 作载荷载体。
             typeof(AnimationKeyEvent), typeof(AnimationHookEvent),
             // 控件交互事件（internal route struct，P1 控件束）：携 payload 经 EventBus，控件类
             // 翻译为公共 ValueChangedEvent<*>。这 4 个 internal struct 同样实现 IRouteEvent +

@@ -114,7 +114,7 @@ namespace LoomGUI.HeadlessTests
 
                 // instRoot #root has {width:200px;height:100px} → verify after tick.
                 Tick(h, ctx);
-                Rect lr = instRoot.Geometry.LayoutRect;
+                LoomRect lr = instRoot.Geometry.LayoutRect;
                 Assert.InRange(lr.Width, 195, 205);
                 Assert.InRange(lr.Height, 95, 105);
 
@@ -330,7 +330,7 @@ namespace LoomGUI.HeadlessTests
 
         // ═════════════════════════════════════════════════════════════════
         // Criterion 9: Inline inheritance
-        // Parent Style.Color = red → Tick → child computed color = red
+        // Parent Style.LoomColor = red → Tick → child computed color = red
         // (verifies inline_override folded into set_map then propagated by cascade).
         // ═════════════════════════════════════════════════════════════════
 
@@ -345,10 +345,10 @@ namespace LoomGUI.HeadlessTests
                 Container instRoot = InstantiateFixture(h, ctx);
                 Container child = instRoot.Get<Container>("child");
 
-                // Set parent Style.Color to blue (0,0,1,1) via inline override.
+                // Set parent Style.LoomColor to blue (0,0,1,1) via inline override.
                 // This must override the CSS class .highlight{color:red} on root
                 // and propagate to child via cascade inheritance.
-                instRoot.Style.Color = new Color(0, 0, 1, 1);
+                instRoot.Style.LoomColor = new LoomColor(0, 0, 1, 1);
                 Tick(h, ctx);
 
                 ComputedNodeStyleRepr rootCs = GetComputedStyle(h, instRoot._id);

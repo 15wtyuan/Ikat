@@ -9,10 +9,12 @@ pub mod fence_gate;
 pub mod inline_context_check;
 pub mod ir;
 pub mod pipeline;
+pub mod projected_check;
 pub mod rich_text_classify;
 pub mod schema;
 pub mod structural;
 pub mod tree_builder;
+pub mod value_check;
 
 pub use diagnostic::Diagnostic;
 pub use ir::{IrElement, IrNode, IrNodeKind, IrTree};

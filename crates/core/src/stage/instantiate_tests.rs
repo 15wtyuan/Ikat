@@ -1357,3 +1357,115 @@ fn unload_package_removes_templates_but_not_instances() {
     let inst2 = s.instantiate("p", "comp1").unwrap();
     assert_ne!(inst, inst2, "reloaded package instantiates fresh nodes");
 }
+
+/// Field Notes N6：组件 `<style>` 规则必须能样式化 slot 投射的 light 子（fence.md
+/// 「投影归属」语义：给投影内容写样式写在组件文件里）。
+///
+/// 复现结构（skill-slot 投影）：host(.slot-cost) ← 投影 .slot-cost-row span ← 空 .qis span。
+/// 打包期投影 span 在页面宇宙被烘 rich_text_block（页面侧分类看不到组件 CSS 的
+/// display:flex）；运行时组件锚定规则 .slot-cost-row{display:flex} 命中后，display
+/// 必须把该节点切回 flex 容器（架构不变量：display 选择布局 Strategy），.qis 成为
+/// 可定尺寸的 flex item——否则折叠进 inline flow 恒零尺寸不可见（C# 内联绕法之所以
+/// "生效"正是绕过了折叠的 taffy 直写，两条通道行为不一致）。
+#[test]
+fn component_scoped_rules_style_projected_children() {
+    let nodes = [
+        TemplateNode {
+            kind: NodeKind::Container,
+            style: ResolvedStyle::default(),
+            parent_idx: None,
+            classes: vec!["slot-cost".to_string()],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: None,
+            src: None,
+            control_init: None,
+            role: None,
+            data_slot: None,
+            aria_controls: None,
+            rich_text_block: false,
+            custom_tag: None,
+            component_scope: true,
+        },
+        TemplateNode {
+            kind: NodeKind::TextElement,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(0),
+            classes: vec!["slot-cost-row".to_string()],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: None,
+            src: None,
+            control_init: None,
+            role: None,
+            data_slot: None,
+            aria_controls: None,
+            // 页面侧分类所烘（span 默认 rich_text；分类时看不到组件规则 display:flex）。
+            rich_text_block: true,
+            custom_tag: None,
+            component_scope: false,
+        },
+        TemplateNode {
+            kind: NodeKind::TextElement,
+            style: ResolvedStyle::default(),
+            parent_idx: Some(1),
+            classes: vec!["qis".to_string()],
+            id_attr: None,
+            draggable: false,
+            tabindex: None,
+            content: None,
+            src: None,
+            control_init: None,
+            role: None,
+            data_slot: None,
+            aria_controls: None,
+            rich_text_block: true,
+            custom_tag: None,
+            component_scope: false,
+        },
+    ];
+    let comp_rules = crate::style::dynamic::DynamicRuleTable {
+        rules: vec![
+            class_rule("slot-cost-row", "display", "flex"),
+            class_rule("qis", "width", "10px"),
+            class_rule("qis", "height", "10px"),
+        ],
+    };
+    let scopes = [crate::asset::ComponentScopeInput {
+        component: "skill-slot",
+        anchor_idx: 0,
+        rules: &comp_rules,
+    }];
+    let input = PackageInput {
+        components: vec![("skill-slot", &nodes, &comp_rules, &[])],
+    };
+    let pkg = crate::asset::write_package_with_scopes(&input, &scopes);
+
+    let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+    let mut s = Stage::new((400.0, 400.0)).unwrap();
+    s.register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+        .unwrap();
+    let doc = s.create_root("div", "").unwrap();
+    s.load_package("game", &pkg).unwrap();
+    let host = s.instantiate("game", "skill-slot").unwrap();
+    crate::scene::dynamic::append_child(s.scene.as_mut().unwrap(), doc, host).unwrap();
+    s.tick_and_render();
+
+    let scene = s.scene.as_ref().unwrap();
+    let row = scene.get(host).unwrap().children[0];
+    let qis = scene.get(row).unwrap().children[0];
+    // 1. 组件锚定规则命中投影子（scope_root=host，投影子 scope=host）。
+    assert_eq!(
+        scene.get(row).unwrap().style.taffy_style.display,
+        taffy::Display::Flex,
+        "组件规则 .slot-cost-row{{display:flex}} 应命中投影 span"
+    );
+    // 2. display:flex 切换布局 Strategy：不折叠，.qis 成为可定尺寸 flex item。
+    let r = &scene.get(qis).unwrap().layout_rect;
+    assert!(
+        (r.w - 10.0).abs() < 0.01 && (r.h - 10.0).abs() < 0.01,
+        ".qis 应是 10×10 独立盒子（width/height 规则生效），got {r:?}"
+    );
+}

@@ -65,7 +65,7 @@ namespace LoomGUI
     {
         internal RouteEventCore _core;
         RouteEventCore IRouteEventCore.Core => _core;
-        internal Vector2 _position;
+        internal LoomVector2 _position;
         internal PointerButton _button;
         internal int _touchId;
         public Node Target => _core.Target;
@@ -76,7 +76,7 @@ namespace LoomGUI
         public void PreventDefault() => _core.PreventDefault();
         /// <summary>D2 EventBus 订阅表 key（对齐 core <see cref="EventType"/>）。</summary>
         internal static byte EventType => (byte)LoomEventType.Down;
-        public Vector2 Position { get { return _position; } }
+        public LoomVector2 Position { get { return _position; } }
         public PointerButton Button { get { return _button; } }
         public int TouchId { get { return _touchId; } }
     }
@@ -85,7 +85,7 @@ namespace LoomGUI
     {
         internal RouteEventCore _core;
         RouteEventCore IRouteEventCore.Core => _core;
-        internal Vector2 _position;
+        internal LoomVector2 _position;
         internal PointerButton _button;
         internal int _touchId;
         public Node Target => _core.Target;
@@ -95,7 +95,7 @@ namespace LoomGUI
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
         internal static byte EventType => (byte)LoomEventType.Up;
-        public Vector2 Position { get { return _position; } }
+        public LoomVector2 Position { get { return _position; } }
         public PointerButton Button { get { return _button; } }
         public int TouchId { get { return _touchId; } }
     }
@@ -104,7 +104,7 @@ namespace LoomGUI
     {
         internal RouteEventCore _core;
         RouteEventCore IRouteEventCore.Core => _core;
-        internal Vector2 _position;
+        internal LoomVector2 _position;
         internal float _deltaX;
         internal float _deltaY;
         internal int _touchId;
@@ -115,7 +115,7 @@ namespace LoomGUI
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
         internal static byte EventType => (byte)LoomEventType.Move;
-        public Vector2 Position { get { return _position; } }
+        public LoomVector2 Position { get { return _position; } }
         public float DeltaX { get { return _deltaX; } }
         public float DeltaY { get { return _deltaY; } }
         public int TouchId { get { return _touchId; } }
@@ -125,7 +125,7 @@ namespace LoomGUI
     {
         internal RouteEventCore _core;
         RouteEventCore IRouteEventCore.Core => _core;
-        internal Vector2 _position;
+        internal LoomVector2 _position;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
         public bool DefaultPrevented => _core._defaultPrevented;
@@ -133,14 +133,14 @@ namespace LoomGUI
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
         internal static byte EventType => (byte)LoomEventType.RollOver;
-        public Vector2 Position { get { return _position; } }
+        public LoomVector2 Position { get { return _position; } }
     }
 
     public struct PointerLeaveEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
         RouteEventCore IRouteEventCore.Core => _core;
-        internal Vector2 _position;
+        internal LoomVector2 _position;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
         public bool DefaultPrevented => _core._defaultPrevented;
@@ -148,14 +148,14 @@ namespace LoomGUI
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
         internal static byte EventType => (byte)LoomEventType.RollOut;
-        public Vector2 Position { get { return _position; } }
+        public LoomVector2 Position { get { return _position; } }
     }
 
     public struct ClickEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
         RouteEventCore IRouteEventCore.Core => _core;
-        internal Vector2 _position;
+        internal LoomVector2 _position;
         internal int _clickCount;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
@@ -164,7 +164,7 @@ namespace LoomGUI
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
         internal static byte EventType => (byte)LoomEventType.Click;
-        public Vector2 Position { get { return _position; } }
+        public LoomVector2 Position { get { return _position; } }
         public int ClickCount { get { return _clickCount; } }
     }
 
@@ -173,8 +173,8 @@ namespace LoomGUI
     {
         internal RouteEventCore _core;
         RouteEventCore IRouteEventCore.Core => _core;
-        internal Vector2 _position;
-        internal Vector2 _startPosition;
+        internal LoomVector2 _position;
+        internal LoomVector2 _startPosition;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
         public bool DefaultPrevented => _core._defaultPrevented;
@@ -182,15 +182,15 @@ namespace LoomGUI
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
         internal static byte EventType => (byte)LoomEventType.DragStart;
-        public Vector2 Position { get { return _position; } }
-        public Vector2 StartPosition { get { return _startPosition; } }
+        public LoomVector2 Position { get { return _position; } }
+        public LoomVector2 StartPosition { get { return _startPosition; } }
     }
 
     public struct DragMoveEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
         RouteEventCore IRouteEventCore.Core => _core;
-        internal Vector2 _position;
+        internal LoomVector2 _position;
         internal float _deltaX;
         internal float _deltaY;
         public Node Target => _core.Target;
@@ -200,7 +200,7 @@ namespace LoomGUI
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
         internal static byte EventType => (byte)LoomEventType.DragMove;
-        public Vector2 Position { get { return _position; } }
+        public LoomVector2 Position { get { return _position; } }
         public float DeltaX { get { return _deltaX; } }
         public float DeltaY { get { return _deltaY; } }
     }
@@ -209,7 +209,7 @@ namespace LoomGUI
     {
         internal RouteEventCore _core;
         RouteEventCore IRouteEventCore.Core => _core;
-        internal Vector2 _position;
+        internal LoomVector2 _position;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
         public bool DefaultPrevented => _core._defaultPrevented;
@@ -217,7 +217,7 @@ namespace LoomGUI
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
         internal static byte EventType => (byte)LoomEventType.DragEnd;
-        public Vector2 Position { get { return _position; } }
+        public LoomVector2 Position { get { return _position; } }
     }
 
     // Keyboard
@@ -225,7 +225,7 @@ namespace LoomGUI
     {
         internal RouteEventCore _core;
         RouteEventCore IRouteEventCore.Core => _core;
-        internal KeyCode _key;
+        internal LoomKeyCode _key;
         internal KeyModifiers _modifiers;
         internal bool _repeat;
         public Node Target => _core.Target;
@@ -235,7 +235,7 @@ namespace LoomGUI
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
         internal static byte EventType => (byte)LoomEventType.KeyDown;
-        public KeyCode Key { get { return _key; } }
+        public LoomKeyCode Key { get { return _key; } }
         public KeyModifiers Modifiers { get { return _modifiers; } }
         public bool Repeat { get { return _repeat; } }
     }
@@ -244,7 +244,7 @@ namespace LoomGUI
     {
         internal RouteEventCore _core;
         RouteEventCore IRouteEventCore.Core => _core;
-        internal KeyCode _key;
+        internal LoomKeyCode _key;
         internal KeyModifiers _modifiers;
         public Node Target => _core.Target;
         public Node CurrentTarget => _core.CurrentTarget;
@@ -253,7 +253,7 @@ namespace LoomGUI
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
         internal static byte EventType => (byte)LoomEventType.KeyUp;
-        public KeyCode Key { get { return _key; } }
+        public LoomKeyCode Key { get { return _key; } }
         public KeyModifiers Modifiers { get { return _modifiers; } }
     }
 
@@ -311,7 +311,7 @@ namespace LoomGUI
         public float DeltaY { get { return _deltaScrollY; } }
     }
 
-    // Animation lifecycle
+    // AnimationHandle lifecycle
     // 18/19/20 = M2 真 core 事件源（crates/core/src/event.rs，T9）：class 触发 + node.Play
     // 都发，demux 直读 stream 填 AnimationName（字符串表索引读回）。END 另兼容 v1 的
     // TweenComplete（type=16）→ AnimationEnd 分流（transition 旧路径，既有测试锁定）。
@@ -365,8 +365,8 @@ namespace LoomGUI
         public int IterationCount { get { return _iterationCount; } }
     }
 
-    // ── Animation 句柄私有事件（spec §7.5）──────────────────────────────
-    // OnKey 跨越 / @loom-hook 跨越。不广播 EventBus——demux 按 playerKey 查 Animation 实例
+    // ── AnimationHandle 句柄私有事件（spec §7.5）──────────────────────────────
+    // OnKey 跨越 / @loom-hook 跨越。不广播 EventBus——demux 按 playerKey 查 AnimationHandle 实例
     // 直接触发 OnKey(pct)/OnHook(name) 回调（回调是 Action，无事件参数）；struct 仅作载荷
     // 载体（字段供句柄路由读取 / 调试）。同其它 typed event struct 保持 _core 首字段约定。
     public struct AnimationKeyEvent : IRouteEvent, IRouteEventCore

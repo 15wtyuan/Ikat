@@ -5,6 +5,60 @@ All notable changes to `com.loomgui.unity` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.0.6] - 2026-08-20
+
+Tripawd dogfood Field Notes（N 系列）回应批：四个运行时 bug 修复、围栏值域门与
+浏览器先验警告族、公共类型改名、工作区生成物刷新通道。
+
+### Fixed
+- **投影内容样式失效（N5/N6）**：组件 `<style>` 规则现在真正作用于 slot 投射的
+  light 子（文档语义本就如此，运行时未兑现）。根因：投影 span 在页面宇宙被烘
+  `rich_text_block` 折叠标志（页面侧分类看不到组件 CSS 的 `display:flex`），
+  折叠优先于运行时 display。修复：rematch 应用 `display` 声明且终态为 Flex 时
+  翻转布局策略（display 选择 Strategy 的架构不变量兑现）；`set_inline_override`
+  同语义。span 带 class 规则 `display:flex` 也在打包期正确解除折叠。
+- **flex 列居中容器内无宽文本逐字竖排（N7）**：taffy 某些测量轮次传
+  `Definite(0)` 可用宽，首个 0 宽测量经 render 槽「Some 优先」策略钉死成多行
+  布局。修复：退化 0 宽约束按无约束处理（浏览器语义：0 宽盒文本横向溢出）。
+- **重复 `Node.Play` 静默无效（N8/N11）**：programmatic player 不回收——旧
+  Completed+fill-both player 每帧续写末值且永不回收，player 无限累积。修复：
+  `Play` 按「同节点+同名」替换旧 player，重复调用 = 确定性从头重播。
+- **InputSystem-only 项目 F8 诊断每帧抛异常（N3）**：`LoomStageDriver.Update`
+  的 F8 轮询按 `ENABLE_INPUT_SYSTEM` / `ENABLE_LEGACY_INPUT_MANAGER` 分流。
+- `background-size: stretch`（schema 广告的默认值）此前被 core 静默拒（仅认
+  `100%`）；`resize` noop 声明此前误报 `FenceBadCssValue`。
+
+### Added
+- **ProgressBar.AnimateValue(target, durationSec = 0.4)**：演出缓动糖——fill 宽
+  度走布局通道无 CSS 过渡（transition 只支持背景/文字/透明三通道），C# 投影层
+  easeOut 插值。`Value` 动画期间读回目标（数据值），直接赋值显式获胜并取消动画；
+  重定向从当前显示值平滑转向。
+- **围栏值域门（error，双路径统一）**：命名色（`red` 等）与 `transparent`
+  （color 之外）、`overflow: clip` 及拼错值、`filter: blur/drop-shadow`、
+  `transform: skew/matrix` ——运行时恒无效的浏览器合法值全部打包期报错（此前
+  静默吞掉，上线即坏）；`<style>` 规则的 Keyword 值域与行内同门。
+- **浏览器先验警告族（warning）**：`display: inline` 语义偏差（按 flex 处理）；
+  `transition` 属性域外（含 `all`）；rich-text inline flow 内 span 的死
+  width/height；页面侧只可能命中投影内容的类规则（样式墙下恒死代码）。
+- **工作区生成物刷新通道**：`loom scaffold` 现为生成物全刷新（三 skill +
+  `.loom/` CLI 自拷贝 + `.loom/scaffold.version` 版本戳；config/workspace.json/
+  源文件不碰，无 `--agent` 时按在场 agent 目录自动探测）；`loom check` 发现
+  版本戳落后出 `StaleScaffold` 警告；GUI 打开工作区时探测并亮「更新工作区」
+  按钮（一键 = loom scaffold 子进程）。消费端更新流：UPM 更新包（新双 exe 随
+  包落地）→ 跑一次 scaffold 刷新。
+- runtime API reference 补齐：值类型工厂（`Length.Px/Pct`）、`LoomColor` 4 参
+  构造、transition 支持矩阵、ProgressBar 值域（`[0, Max]`，Max 默认
+  aria-valuemax=100）与 AnimateValue、`Image.Src` key 格式与验证手段、
+  LoomStageDriver 序列化字段速查（`_designSize` 默认 1080×1920 竖屏警示）。
+
+### Changed
+- **公共类型改名（breaking，消 CS0104 歧义）**：`Animation` → `AnimationHandle`、
+  `Color` → `LoomColor`、`Vector2` → `LoomVector2`、`Rect` → `LoomRect`、
+  `KeyCode` → `LoomKeyCode`（接线层同时 `using LoomGUI; using UnityEngine;` 时
+  每文件必撞歧义，N10）。C# 侧机械替换；FFI ABI 不变。
+- `box-sizing` 错误引导文案修正为 content-box 事实（此前误称 border-box）；
+  Keyword 值错误消息列出合法值域。
+
 ## [Unreleased]
 ### Added
 - **runtime skill 自足**：新增 `loomgui-runtime` 的 `references/api-reference.md`（随 init 落工作区会话根，完整公共 API 查找表——对象层级、控件 role 全表、事件、ListView、动画、样式、异常）。此前 skill 把「完整 API 契约」指回 LoomGUI 源码仓库的 `docs/design/public-api.md`，逼消费者 agent clone 源码翻文档；现以随包 C# 签名为准镜像成离线参考，skill 不再指路仓库。防漂移门加对账（role 宇宙 ↔ fence schema、skill 必须指名 references、禁止回指 repo 文档）。

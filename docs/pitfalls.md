@@ -1749,3 +1749,37 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **根因**：导航映射存在两份手写表——C# `ShowcaseRunner.NAV_CARDS`（真机）和 `preview/loom-preview.js` 的 `NAV`（浏览器预览），加 api-infra 页时只登记了前者。
 **解决**：JS `NAV` 表补条目；后续加页两表同步（无单一真相源，靠 checklist）。
 **教训**：同一契约的两份手写副本必漂移——showcase 加页 checklist：workspace 目录（自动）、两份导航表、（若有）rect-diff 页清单。
+
+### 坑 224：display 声明才是「作者要 flex」的证据——span 打包期 display 本就是 Flex
+
+**症状**：修「投影 span 的组件规则 display:flex 不生效」时，第一版按「resolved display == Flex 即豁免 rich_text 折叠」改 build()，打翻全部 rich-text 测试（无宽文本竖排、rich 叶子测量全红）。
+**根因**：span 的打包期 display 默认就是 Flex（inline→flex taffy hack，`DisplayDefault::Inline` 写 `DisplayMode::Flex`）——按值判别区分不了「tag 默认 Flex」和「作者显式 flex」，所有 span 都会被误判成显式。
+**解决**：判别器改为**声明事件本身**——rematch 应用 `display` 声明且级联终态为 Flex 时翻转 `rich_text_block`（策略切换不重建节点）；`set_inline_override` 同语义。build() 只认 flag，单一真相源。
+**教训**：「值相同」≠「语义相同」。当默认值和显式值撞在同一字段上，判别依据必须换成「声明是否发生」这类过程性证据。
+
+### 坑 225：taffy 某些 sizing 轮次传 Definite(0)——首个 0 宽测量经 render 槽钉死成竖排
+
+**症状**：flex column + align-items:center 容器内无显式宽的 rich-text 文本运行时逐字竖排（每字一行），浏览器预览横排正常；元素加 `width:100%` 可缓解。
+**根因**：taffy 对 flex item 的某些测量轮次传 `available.width = Definite(0.0)` → `measure_text` 以 `max_w=0` 逐字换行；而 render 槽策略「首个 Some 测量优先、后续 known=None 不覆盖」把这个 7 行布局钉死——后续 Definite(190) 的单行测量全被忽略。
+**解决**：measure 闭包把退化的 0 宽约束（`known=Some(0)` 或 `avail=Definite(0)`）视作无约束（intrinsic 单行）——浏览器语义里 0 宽盒的文本是横向溢出而非竖排。
+**教训**：布局引擎的中间测量轮次可能传退化约束，measure 闭包要按「浏览器在等价盒上会怎么排」做值语义防御；缓存/槽策略要假设任何一次测量都可能是「首次」。
+
+### 坑 226：programmatic 动画 player 不回收——重复 Play 叠加写同通道、静默无效
+
+**症状**：同一节点连续两次 `node.Play("lunge")`（间隔大于动画时长），第二次经常静默无效；同帧 Stop+Play 也时有时无。
+**根因**：`play_programmatic` 不查重——旧 Completed+fill-both player 每帧续写末值且 `sync_animation_players` 完全跳过 programmatic player（永不回收），player 无限累积；slotmap 序决定谁后写谁赢，视觉结果不确定。
+**解决**：`play_programmatic` 按「同节点+同名」先回收旧 programmatic player（清其持有通道）再建新 player——Play 重复调用 = 确定性从头重播（CSS 重新触发动画同义）。
+**教训**：「句柄持有型」资源（programmatic player）不能只靠句柄回收兜底——重入语义必须在入口处定义（替换 or 叠加），否则累积 + 写序两个不确定性叠加。
+
+### 坑 227：skill/文档随 scaffold 分发但无版本戳——升级后静默用旧文档
+
+**症状**：runtime API reference 已随 scaffold 模板发布（715a0742），但 dogfood 工作区的 skill 仍是旧版——末尾还把消费者指向他们没有的 LoomGUI 仓库路径，签名级文档从未送达，AI 靠编译器报错试错。
+**根因**：skill 是 scaffold 时拷贝的静态文件，模板升级后消费者工作区不会跟更新，也没有任何机制发现「工作区文档落后」。
+**解决**：`loom init`/`loom scaffold` 写 `.loom/scaffold.version` 版本戳；`loom check` 发现戳落后于运行 CLI 出 `StaleScaffold` 警告指路 `loom scaffold`（现为生成物全刷新：skills + .loom CLI + 戳）；GUI 打开工作区时探测并亮「更新工作区」按钮。
+**教训**：所有「生成物副本」分发通道都需要 stale 自检——文档改了没送到 = 没改，且比没改更糟（消费者以为是最新的）。版本戳 + 必经命令（check）警告是最小闭环。
+
+### 坑 228：S 系列浏览器先验偏差的验证结论（不改行为，备查）
+
+**症状**：全量清扫「浏览器先验 ↔ 运行时」偏差时两条存疑项。
+**结论**：① `line-height` 围栏默认 `"0"` 不是零行高——运行时把 0 解释为字体内置默认行高（≈1.31×font-size），既有 wrapping 测试（多行高度 = 行数×1.31×16）反证非零，与 CSS `normal` 语义一致，无坑。② `::placeholder` 等伪元素选择器不会静默不命中——`parse_style_block` 对 `::` 前缀报 `FenceBadCssValue: unsupported selector`，有诊断无静默，平铺属性（`placeholder-color`）的正确写法靠错误消息外的事先知晓（skill/css-reference 已列）。
+**教训**：静态断言「有偏差」前先找运行证据（既有测试/探针）——两条存疑一条是虚惊、一条已有兜底。

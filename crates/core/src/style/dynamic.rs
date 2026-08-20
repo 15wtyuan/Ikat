@@ -89,7 +89,7 @@ pub struct Specificity(pub u32, pub u32, pub u32); // (id 数, class 数, tag �
 use crate::scene::control::ROLE_TAB;
 use crate::scene::node::{NodeFlags, NodeId, Scene};
 use crate::style::mapping::apply_decl;
-use crate::style::resolved::{AnimationSpec, ResolvedStyle, TransitionSpec};
+use crate::style::resolved::{AnimationSpec, DisplayMode, ResolvedStyle, TransitionSpec};
 use std::collections::HashMap;
 
 /// cascade 期 transient：节点显式声明了哪些可继承属性（bitmask）。
@@ -704,6 +704,12 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         // new_style is a fresh clone of base_style (not yet modified by apply_decl below),
         // so its inherited_set == base_style.inherited_set at this point.
         let mut inh: InheritedSet = new_style.inherited_set;
+        // display:flex 声明在场标记：span 等行内元素的打包期 display 本就是 Flex
+        //（inline→flex hack），按值差判不了「作者显式要 flex」——只有声明本身是证据。
+        // 级联终态仍为 Flex 时翻转布局策略（rich_text_block 折叠 → flex 容器）：
+        // slot 投射内容在页面宇宙分类，看不到组件 `<style>` 的 display:flex，
+        // 策略切换必须发生在运行时 cascade（架构不变量：display 选择布局 Strategy）。
+        let mut display_decl_seen = false;
         for (_, _, _, r) in &matched {
             for decl in &r.declarations {
                 // CSS inline > class：base_style.inline_declared 标记的属性由打包期 inline
@@ -714,6 +720,9 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
                     if new_style.inline_declared & bit != 0 {
                         continue;
                     }
+                }
+                if decl.prop == "display" {
+                    display_decl_seen = true;
                 }
                 if apply_decl(&mut new_style, &decl.prop, &decl.value) {
                     if let Some(bit) = inherited_bit(&decl.prop) {
@@ -753,6 +762,10 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         // 写 style + 标 cascaded_once
         let node = scene.get_live_mut(node_id, "dynamic/rematch:write");
         node.style = new_style;
+        if display_decl_seen && node.style.display_mode == DisplayMode::Flex && node.rich_text_block
+        {
+            node.rich_text_block = false;
+        }
         node.interaction.flags.insert(NodeFlags::CASCALED);
     }
     // 通用可继承属性传播：每节点从 base_style 独立 cascade（不读父），故继承须 rematch 后

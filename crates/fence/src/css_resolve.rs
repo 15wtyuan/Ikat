@@ -18,7 +18,7 @@ use loomgui_core::style::resolved::{DisplayMode, ResolvedStyle, TextAlign};
 /// `<style>` 块（`css_rules`）三处 `FenceUnknownCssProp` 构造点，保证引导文案一致。
 pub(crate) fn unsupported_hint(prop: &str) -> Option<&'static str> {
     Some(match prop {
-        "box-sizing" => "LoomGUI uses border-box model exclusively (width includes padding+border). This declaration has no effect — remove it.",
+        "box-sizing" => "LoomGUI always uses the content-box model (width is the content width; padding and border add to it). This declaration has no effect — remove it.",
         "visibility" => "LoomGUI has no visibility:hidden. To hide an element use `display:none` (removes layout space) or `opacity:0` (keeps space).",
         "cursor" | "outline" | "user-select" | "text-decoration" | "object-fit" => {
             "not supported by fence — remove this declaration."
@@ -141,6 +141,24 @@ pub fn resolve_inline_styles_with_diags(
                     continue;
                 }
 
+                // 共享值域门（宽松吞值通道：颜色/overflow 简写与 longhand/filter/transform；
+                // value_check 自带 shorthand 域映射）+ display:inline 语义警告。
+                if let Some(msg) = crate::value_check::value_error(prop, value) {
+                    diagnostics.push(Diagnostic::error(
+                        DiagnosticCode::FenceBadCssValue,
+                        msg,
+                        line_map.source_location(node.span.start, file.to_string()),
+                    ));
+                    continue;
+                }
+                if let Some(note) = crate::value_check::display_inline_warning(value) {
+                    diagnostics.push(Diagnostic::warning(
+                        DiagnosticCode::FenceDisplayInline,
+                        format!("CSS property \"display\": {note}"),
+                        line_map.source_location(node.span.start, file.to_string()),
+                    ));
+                }
+
                 // Validate keyword values against schema
                 if let Some(spec) = find_css_prop(prop) {
                     match &spec.parser {
@@ -149,8 +167,10 @@ pub fn resolve_inline_styles_with_diags(
                                 diagnostics.push(Diagnostic::error(
                                     DiagnosticCode::FenceBadCssValue,
                                     format!(
-                                        "value \"{}\" is not valid for CSS property \"{}\"",
-                                        value, prop
+                                        "value \"{}\" is not valid for CSS property \"{}\" (allowed: {})",
+                                        value,
+                                        prop,
+                                        allowed.join(" | ")
                                     ),
                                     line_map.source_location(node.span.start, file.to_string()),
                                 ));
@@ -179,8 +199,16 @@ pub fn resolve_inline_styles_with_diags(
                         }
                         CssValueParser::Transition => {
                             // transition 简写解析存值（core transition 引擎读 base_style.transition）。
-                            // 零校验宽松语义（parse 忽略未知 token，保持现状 transition 值不报错）；
-                            // 不走 apply_decl——fence 解析器是打包期真相源（§8.3 ease 对齐表）。
+                            // 值结构宽松（parse 忽略未知 token），但属性域外声明要警告——
+                            // 引擎只驱动 background-color/color/opacity，其余属性浏览器会
+                            // 过渡、LoomGUI 静默 snap（预览≠运行时）。
+                            for msg in crate::value_check::transition_warnings(value) {
+                                diagnostics.push(Diagnostic::warning(
+                                    DiagnosticCode::FenceTransitionUnsupportedProp,
+                                    msg,
+                                    line_map.source_location(node.span.start, file.to_string()),
+                                ));
+                            }
                             styles[idx].transition = parse_transition_value(value);
                             continue;
                         }
@@ -297,7 +325,7 @@ mod tests {
 
     #[test]
     fn inline_inherited_sets_bit() {
-        let (tree, _) = parse_html_to_ir(r#"<span style="color:blue"></span>"#);
+        let (tree, _) = parse_html_to_ir(r#"<span style="color:#0000ff"></span>"#);
         let styles = resolve_for_test(&tree);
         let id = tree.roots[0];
         let color_bit = loomgui_core::style::dynamic::inherited_bit("color").unwrap();
@@ -471,8 +499,8 @@ mod tests {
             .find(|d| d.code == DiagnosticCode::FenceUnknownCssProp)
             .expect("should error");
         assert!(
-            d.message.contains("border-box"),
-            "msg should explain LoomGUI uses border-box: {}",
+            d.message.contains("content-box"),
+            "msg should explain LoomGUI uses content-box: {}",
             d.message
         );
         assert!(

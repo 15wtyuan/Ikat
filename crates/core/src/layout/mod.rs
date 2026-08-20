@@ -164,6 +164,8 @@ pub fn solve(
         // rich-text-block 容器：编译 inline 子树成 RichRun，作 RichText 叶子测——inline
         // 子折进父的单段 inline flow（不递归进 taffy）。build 下方 children_ids 对
         // rich_text_block 返空 Vec 实现「不递归」。design §7。
+        // display:flex 的策略切换（不折叠）在 rematch 应用 display 声明处翻转本 flag
+        //（见 dynamic.rs rematch_pseudo_classes）——build 只认 flag，单一真相源。
         let ctx: Option<MeasureContext> = if node.rich_text_block {
             let s = &node.style;
             let runs = crate::text::rich_compile::compile_rich_runs(scene, id, image_sizes);
@@ -378,10 +380,16 @@ pub fn solve(
                 // known=None + avail=Definite(容器内容宽)。只用 known 会按 max-content
                 // 量出单行超框（浏览器按可用宽换行）。known 缺席时回退 avail 的 Definite 宽
                 // 作换行约束；MaxContent/MinContent 保持 None（走 intrinsic 测量）。
-                let wrap_width = known.width.or(match avail.width {
-                    AvailableSpace::Definite(w) => Some(w),
-                    _ => None,
-                });
+                // Definite(0)（taffy 某些 sizing 轮次会传）与 known=Some(0) 一律视作
+                // 无约束：0 宽盒内浏览器文本横向溢出而非逐字竖排，且首个 Some(0) 测量
+                // 会经 render 槽 Some-优先策略钉死成多行布局（Field Notes N7）。
+                let wrap_width = known
+                    .width
+                    .or(match avail.width {
+                        AvailableSpace::Definite(w) => Some(w),
+                        _ => None,
+                    })
+                    .filter(|w| *w > f32::EPSILON);
                 match node_ctx {
                     None => Size::ZERO,
                     Some(MeasureContext::Image {
@@ -1241,6 +1249,90 @@ mod tests {
             (r.w - 300.0).abs() < 1e-2 && (r.h - 300.0).abs() < 1e-2,
             "clip_rect 应=root border box (300,300)，got {:?}",
             r
+        );
+    }
+
+    /// Field Notes N7：flex column + align-items:center + 定宽容器内的无宽
+    /// rich-text-block 文本必须单行横排（浏览器一致先验）。
+    ///
+    /// 回归动机：测宽链路曾把可用宽度解析成 0 → `measure_text` 以 max_w=0 逐字换行
+    /// （运行时竖排、浏览器预览横排）。缓解写法 `width:100%` 之所以有效，正是因为它
+    /// 给了确定的 known width 绕开了该链路。
+    #[test]
+    fn flex_column_centered_auto_width_text_stays_single_line() {
+        // root(structural) > .qi-pool(flex column, align-items:center, width:190)
+        //   > .qi-label(rich_text_block, 无显式宽) > TextNode "气 3 / 4"
+        let mut pool_style = ResolvedStyle::default();
+        pool_style.taffy_style.display = taffy::Display::Flex;
+        pool_style.taffy_style.flex_direction = taffy::FlexDirection::Column;
+        pool_style.taffy_style.align_items = Some(taffy::AlignItems::CENTER);
+        pool_style.taffy_style.size.width = Dimension::length(190.0);
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                pool_style,
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(1),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                Some("qi 3 / 4".into()),
+                None,
+            ),
+            (
+                Some(2),
+                NodeKind::TextNode,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                Some("qi 3 / 4".into()),
+                None,
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        let pool = scene.get(scene.roots[0]).unwrap().children[0];
+        let label = scene.get(pool).unwrap().children[0];
+        scene.get_mut(label).unwrap().rich_text_block = true;
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (300.0, 1000.0), &empty_sizes());
+        let layout = scene.text_layouts[label.index()]
+            .as_ref()
+            .expect("rich-text-block solve 应填 text_layouts[label]");
+        let single_line_h = 16.0 * 1.31;
+        assert!(
+            layout.text_height <= single_line_h * 1.5,
+            "无宽文本在 flex column 居中容器下应单行横排，text_height={:.1} \
+             （逐字竖排 ≈ {} 行）",
+            layout.text_height,
+            (layout.text_height / single_line_h).round()
         );
     }
 }

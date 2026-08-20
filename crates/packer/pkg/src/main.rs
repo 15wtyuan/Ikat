@@ -293,11 +293,9 @@ fn parse_cmd(args: &[String]) -> Option<Cmd> {
         "scaffold" => {
             let agents = scan.values_of("--agent");
             Some(Cmd::Scaffold {
-                agents: if agents.is_empty() {
-                    vec!["agents".to_string()]
-                } else {
-                    agents
-                },
+                // 空 = 未显式给 --agent：刷新时按在场 agent 目录自动探测（见
+                // run_scaffold），避免 claude 工作区被默认值漏刷。
+                agents,
             })
         }
         "version" => Some(Cmd::Version {
@@ -362,6 +360,16 @@ fn run_check(root: &std::path::Path, format: Format) -> ExitCode {
             let mut warnings = outcome.warnings;
             for (_, pr) in &outcome.packages {
                 warnings.extend(pr.warnings.iter().cloned());
+            }
+            // 工作区生成物 stale（scaffold 版本戳落后于本 CLI）——文档/工具没送到
+            // 会静默过时（Field Notes 教训），check 是唯一必经门，在此提醒刷新。
+            if let Some(msg) = loomgui_pkg::scaffold::stale_stamp_warning(&ui) {
+                warnings.push(loomgui_pkg::diag::PackDiagnostic::synthetic_warning(
+                    "StaleScaffold",
+                    "workspace",
+                    ".loom/scaffold.version",
+                    msg,
+                ));
             }
             match format {
                 Format::Human => {
@@ -590,16 +598,28 @@ fn print_human_list(json: &serde_json::Value) {
 }
 
 fn run_scaffold(agents: Vec<String>) -> ExitCode {
-    // skills 落会话根（.loom/config.json 所在——分离形态下 ≠ ui 目录）。
+    // skills + .loom CLI 自拷贝 + 版本戳，全会话根（.loom/config.json 所在——分离
+    // 形态下 ≠ ui 目录）。生成物白名单式刷新，config/workspace.json/源文件不动。
     let root = match locate_cwd() {
         Ok(l) => l.root,
         Err(f) => return failure_exit("scaffold", &f, Format::Human),
     };
-    match loomgui_pkg::scaffold::write_agent_scaffold(&root, &agents) {
-        Ok(()) => {
+    let agents = if agents.is_empty() {
+        loomgui_pkg::scaffold::detect_agents(&root)
+    } else {
+        agents
+    };
+    match loomgui_pkg::scaffold::refresh_workspace(&root, &agents) {
+        Ok(out) => {
             eprintln!(
-                "refreshed agent skills at {} (loomgui-editor / loomgui-runtime / loom; workspace.json untouched)",
-                root.display()
+                "refreshed workspace generated artifacts at {} (skills for {}; cli {})",
+                root.display(),
+                out.agents.join(", "),
+                if out.cli_updated {
+                    "updated"
+                } else {
+                    "already current"
+                },
             );
             ExitCode::SUCCESS
         }

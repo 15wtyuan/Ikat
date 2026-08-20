@@ -105,7 +105,7 @@ public abstract class Node {
     public IReadOnlyList<T> Query<T>() where T : Node;       // 按类型，文档序
     public IReadOnlyList<Node> Query(string selector);      // ".class" / "tag.class"，文档序
 
-    public Animation Play(string name);
+    public AnimationHandle Play(string name);
     public void Focus();
     public void Blur();
 
@@ -137,16 +137,16 @@ public sealed class NodeStyle {
     public Length Left/Top/Right/Bottom { get; set; }
     public PositionMode Position { get; set; }
     public int ZIndex { get; set; }                   // 兄弟层叠序（CSS z-index）：绘制/命中层，不改 flex 排列
-    public Color BackgroundColor/Color { get; set; }
+    public LoomColor BackgroundColor/LoomColor { get; set; }
     public float Opacity { get; set; }
-    public void SetVar(string name, Length/Color/float/string value);
+    public void SetVar(string name, Length/LoomColor/float/string value);
     public void RemoveVar(string name);
 }
 ```
 
 **不变量（inline override 层语义）**：
 - Style 是**最高优先级的 inline override 层**，不是 cascade 的读取窗口。
-- getter **只反映 C# setter 写过的属性**；未写过的返回 `Unset` 哨兵（`Length.Unset()` / `Color.Unset` / enum 的 `Unset` 成员）。要 computed 值走 `Geometry`。
+- getter **只反映 C# setter 写过的属性**；未写过的返回 `Unset` 哨兵（`Length.Unset()` / `LoomColor.Unset` / enum 的 `Unset` 成员）。要 computed 值走 `Geometry`。
 - setter 写 `Unset` = 撤销该属性的 inline override，回落 CSS cascade。单属性撤销即用 `Style.X = Unset()`，无 `Clear`/`Reset`。
 - `SetVar`/`RemoveVar` 管 CSS 自定义属性 `--*`；`--*` 跨作用域根传递。不提供 `GetVar`（var 不当状态存储读回）。
 - 隐藏节点用 `Display = None`（不占位、不渲染、不命中，等同 fgui `visible=false`）；占位隐藏（保留布局空间）用 `Opacity = 0`。（`Visibility` API 已移除——fence CSS 子集无 `visibility` prop，无后盾；占位隐藏 `opacity:0` 覆盖。）
@@ -155,10 +155,10 @@ public sealed class NodeStyle {
 
 ```csharp
 public sealed class NodeTransform {
-    public Vector2 Position { get; set; }   // 视觉偏移
-    public Vector2 Scale { get; set; }
+    public LoomVector2 Position { get; set; }   // 视觉偏移
+    public LoomVector2 Scale { get; set; }
     public float Rotation { get; set; }      // 弧度
-    public Vector2 Origin { get; set; }
+    public LoomVector2 Origin { get; set; }
 }
 ```
 
@@ -168,12 +168,12 @@ public sealed class NodeTransform {
 
 ```csharp
 public readonly struct NodeGeometry {
-    public Rect LayoutRect { get; }          // 父坐标系
-    public Rect WorldRect { get; }           // 全局坐标系
-    public Vector2 LocalToGlobal(Vector2 point);
-    public Vector2 GlobalToLocal(Vector2 point);
-    public Rect LocalToGlobal(Rect rect);
-    public Rect GlobalToLocal(Rect rect);
+    public LoomRect LayoutRect { get; }          // 父坐标系
+    public LoomRect WorldRect { get; }           // 全局坐标系
+    public LoomVector2 LocalToGlobal(LoomVector2 point);
+    public LoomVector2 GlobalToLocal(LoomVector2 point);
+    public LoomRect LocalToGlobal(LoomRect rect);
+    public LoomRect GlobalToLocal(LoomRect rect);
 }
 ```
 
@@ -196,9 +196,9 @@ public class Container : Node {
     public void SetChildIndex(Node child, int index);
     public void SwapChildren(Node a, Node b);
     public void SwapChildrenAt(int indexA, int indexB);
-    public Vector2 ScrollPos { get; }   // 滚动容器当前滚动位置（非滚动容器返 (0,0)）；与 ScrollTo 成对
+    public LoomVector2 ScrollPos { get; }   // 滚动容器当前滚动位置（非滚动容器返 (0,0)）；与 ScrollTo 成对
     public void RestartAnimations();     // 重启子树内声明式（class 触发）keyframes：player 原地重建，节点状态全保留；node.Play 程序化 player 不受影响
-    public void ScrollTo(Vector2 pos, ScrollBehavior behavior = ScrollBehavior.Smooth);
+    public void ScrollTo(LoomVector2 pos, ScrollBehavior behavior = ScrollBehavior.Smooth);
     public event Action<ScrollChangedEvent> Scrolled;
     public UITemplate GetTemplate(string name);          // 取内联 template
 }
@@ -366,31 +366,31 @@ public class ListView : Container {
 ### 9.1 三种触发
 
 1. class 切换（声明式）：`node.Classes.Add("slide-out")`，结束用 `On<AnimationEndEvent>`。
-2. `node.Play("name")` 返回 `Animation` 句柄（程序化，带 hook）。
+2. `node.Play("name")` 返回 `AnimationHandle` 句柄（程序化，带 hook）。
 3. `Style.SetVar`（动态值逃生舱）。
 
 **时序不变量**：class/typed style 变更在**下一帧 tick 的 rematch 生效**（不即时 rematch），一帧内多次增删只看帧末最终 class 集合。transition 基线 = 上一帧该属性的 computed 值。
 
-`Play`（触发 2）与 class 切换（触发 1）分工：Play 用于「程序化、要句柄控制」；class 用于「声明式、只需知结束」。class 触发不产 `Animation` 句柄，结束统一走 `AnimationEndEvent`。
+`Play`（触发 2）与 class 切换（触发 1）分工：Play 用于「程序化、要句柄控制」；class 用于「声明式、只需知结束」。class 触发不产 `AnimationHandle` 句柄，结束统一走 `AnimationEndEvent`。
 
 **`:nth-child(An+B|odd|even|N)` selector**（M2）配合 `animation-delay` 实现错峰入场——同一规则按子序号算 delay，常用于导航卡/列表项依次淡入（showcase `home.html` 7 条 `.nav-card:nth-child(N){animation-delay:...}`）。
 
-### 9.2 Animation 句柄
+### 9.2 AnimationHandle 句柄
 
 ```csharp
-public sealed class Animation {
+public sealed class AnimationHandle {
     public string Name { get; }
     public bool IsPlaying { get; }
     public float Time { get; set; }
     public void Pause(); public void Resume(); public void Stop();
-    public Animation OnStart(Action cb);
-    public Animation OnEnd(Action cb);
-    public Animation OnKey(float percent, Action cb);
-    public Animation OnHook(string name, Action cb);
+    public AnimationHandle OnStart(Action cb);
+    public AnimationHandle OnEnd(Action cb);
+    public AnimationHandle OnKey(float percent, Action cb);
+    public AnimationHandle OnHook(string name, Action cb);
 }
 ```
 
-**生命周期不变量**：Animation 句柄非长期对象，生命周期 = 那次播放。播放结束句柄失效、hook 自动释放（循环动画 `Stop()` 时释放）。
+**生命周期不变量**：AnimationHandle 句柄非长期对象，生命周期 = 那次播放。播放结束句柄失效、hook 自动释放（循环动画 `Stop()` 时释放）。
 
 **事件双路由**（M2）：core `player.update` 检测阈值后 emit EventRecord，`borrow_events` 到 C# 双路由——
 
@@ -471,7 +471,7 @@ public sealed class UIContext {
     public void CallLater(float delay, Action callback);
     public void CallNextFrame(Action callback);
     public bool IsPointerOnUI { get; }
-    public Node Pick(Vector2 globalPoint);
+    public Node Pick(LoomVector2 globalPoint);
 }
 
 public sealed class UIPackage {
@@ -527,7 +527,7 @@ inventory.Style.Top = Length.Px(200);
 inventory.Style.ZIndex = 1;
 
 Container mask = ui.Create<Container>();
-mask.Style.BackgroundColor = new Color(0, 0, 0, 0.5f);
+mask.Style.BackgroundColor = new LoomColor(0, 0, 0, 0.5f);
 mask.Touchable = true;
 mask.Style.ZIndex = 0;
 layer.AddChild(mask);

@@ -609,7 +609,7 @@ mod tests {
         // M3 TabList：role=tablist 初始 selected_index 从 aria-selected="true" 的 tab 派生；
         // 每个 role=tab 的 aria-controls 提取进 TemplateNode（runtime 据此关联 panel）。
         let nodes = bridged(
-            r#"<style>[role="tab"][aria-selected="true"]{color:red}</style>
+            r#"<style>[role="tab"][aria-selected="true"]{color:#ff0000}</style>
             <div>
               <div role="tablist" style="display:flex">
                 <button role="tab" aria-controls="pa" aria-selected="false">A</button>
@@ -643,7 +643,7 @@ mod tests {
     fn tablist_initial_selected_defaults_to_zero_when_none_marked_true() {
         // 无 aria-selected="true" → 默认第 0 项选中（与 Dropdown 默认选项同语义）。
         let nodes = bridged(
-            r#"<style>[role="tab"]{color:red}</style>
+            r#"<style>[role="tab"]{color:#ff0000}</style>
             <div>
               <div role="tablist" style="display:flex">
                 <button role="tab" aria-controls="pa">A</button>

@@ -110,6 +110,15 @@ pub fn parse_template_with_css(
     let (rich_text_blocks, rich_diags) =
         classify_rich_text(&tree, &styles, &dynamic_rules, file, &line_map);
     diagnostics.extend(rich_diags);
+    // W4：rich 子树内行内元素的死尺寸声明（width/height 恒无效）。
+    crate::rich_text_classify::warn_inline_sizing(
+        &tree,
+        &rich_text_blocks,
+        &dynamic_rules,
+        file,
+        &line_map,
+        &mut diagnostics,
+    );
 
     // Stage 6.5: inline 元素布局上下文检查。LoomGUI 没有 flex 之外的 inline flow——
     // block 容器里的裸 inline 元素会被当 block-level（撑满+竖排），和浏览器不一致。
@@ -123,6 +132,15 @@ pub fn parse_template_with_css(
         file,
         &line_map,
     ));
+
+    // W5：页面侧只可能命中投影内容的类规则（样式墙下恒死代码）。
+    crate::projected_check::warn_projected_only_rules(
+        &tree,
+        &dynamic_rules,
+        file,
+        &line_map,
+        &mut diagnostics,
+    );
 
     // Stage 6.6: 围栏内属性一致性 warning。属性本身围栏合法，但漏写/默认值冲突致
     // HTML 预览（浏览器按 CSS initial 值）≠ 运行时（LoomGUI 默认值）——不阻断打包，

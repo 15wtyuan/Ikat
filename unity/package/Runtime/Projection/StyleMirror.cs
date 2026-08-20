@@ -2,7 +2,7 @@
 //
 // 投影层契约（docs/design/projection-layer.md §2.3 + §3.2）：
 //   - 只存 setter 写过的属性（稀疏 dict，CSS prop name → typed value）。
-//   - getter 查 mirror：有 → 返 typed 值；无 → 返 Unset 哨兵（Length.Unset / Color.Unset /
+//   - getter 查 mirror：有 → 返 typed 值；无 → 返 Unset 哨兵（Length.Unset / LoomColor.Unset /
 //     enum 的 Unset=0 变体；Thickness/float 无 Unset 概念，getter 走 default）。
 //   - setter 写 Unset 哨兵 → 视为撤销该属性（移除 key + unset_inline_override FFI），不写 Set。
 //
@@ -30,7 +30,7 @@ namespace LoomGUI
     internal sealed unsafe class StyleMirror
     {
         readonly Node _owner;
-        // CSS prop name → typed value（Length/Color/Thickness/float/enum）。未在 dict 的属性 = 未写过。
+        // CSS prop name → typed value（Length/LoomColor/Thickness/float/enum）。未在 dict 的属性 = 未写过。
         readonly Dictionary<string, object> _set = new();
 
         // 攒批 dirty 标志：Set/Unset 置 true；FlushInline 末尾置 false。
@@ -83,13 +83,13 @@ namespace LoomGUI
         }
 
         // ── Unset 哨兵检测 ──────────────────────────────────────────────
-        // Length/Color/enum 各自有 Unset 哨兵（值类型，无 null）。Thickness/float 无 Unset 概念
+        // Length/LoomColor/enum 各自有 Unset 哨兵（值类型，无 null）。Thickness/float 无 Unset 概念
         // （ Thickness 是裸四值结构；Opacity 是裸 float）—— setter 写啥就存啥，不走撤销路径。
         // enum 的 Unsent 变体恒为 0（frozen enum 全部以 Unset=0 开头），Convert.ToInt32 兜底判 0。
         static bool IsUnsetSentinel(object v) => v switch
         {
             Length l  => l.Unit == LengthUnit.Unset,
-            Color c   => c.IsUnset,
+            LoomColor c   => c.IsUnset,
             System.Enum e => System.Convert.ToInt32(e) == 0,
             _ => false,
         };

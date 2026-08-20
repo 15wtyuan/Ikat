@@ -106,8 +106,12 @@ pub fn init(dir: &Path, opts: InitOptions) -> Result<InitOutcome, BuildFailure> 
     };
     crate::scaffold::write_agent_scaffold(&root, &agents)?;
 
-    // CLI 自拷贝 + 接线 config（同住根上 .loom/：整个目录入库，团队 clone 即得）。
+    // CLI 自拷贝 + 接线 config + 版本戳（同住根上 .loom/：整个目录入库，团队 clone 即得）。
     let cli_copied = copy_cli_into(&root, &opts.cli_source);
+    let _ = std::fs::write(
+        root.join(".loom").join(crate::scaffold::VERSION_STAMP),
+        crate::scaffold::LOOM_VERSION,
+    );
     crate::config::write(&root, &ui, opts.unity_root.as_deref()).map_err(BuildFailure::config)?;
     let unity_root_written = opts.unity_root.is_some();
 
