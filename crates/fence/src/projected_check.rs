@@ -62,8 +62,8 @@ pub(crate) fn warn_projected_only_rules(
         // 条件复杂，静态断死容易误报。
         let comp = &rule.selector.compound;
         if comp.len() != 1
-            || !comp[0].tag.is_none()
-            || !comp[0].id.is_none()
+            || comp[0].tag.is_some()
+            || comp[0].id.is_some()
             || !comp[0].attrs.is_empty()
             || comp[0].pseudo_hover
             || comp[0].pseudo_active

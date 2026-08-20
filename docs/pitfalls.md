@@ -1783,3 +1783,10 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **症状**：全量清扫「浏览器先验 ↔ 运行时」偏差时两条存疑项。
 **结论**：① `line-height` 围栏默认 `"0"` 不是零行高——运行时把 0 解释为字体内置默认行高（≈1.31×font-size），既有 wrapping 测试（多行高度 = 行数×1.31×16）反证非零，与 CSS `normal` 语义一致，无坑。② `::placeholder` 等伪元素选择器不会静默不命中——`parse_style_block` 对 `::` 前缀报 `FenceBadCssValue: unsupported selector`，有诊断无静默，平铺属性（`placeholder-color`）的正确写法靠错误消息外的事先知晓（skill/css-reference 已列）。
 **教训**：静态断言「有偏差」前先找运行证据（既有测试/探针）——两条存疑一条是虚惊、一条已有兜底。
+
+### 坑 229：坑 226 修复只回收同名——同节点不同名残留 player 遮蔽后续一切动画
+
+**症状**：dogfood（Tripawd 战斗）同一节点先播 A 动画正常，之后无论重播 A 还是换播 B（防御/闪避）都不动——结算、飘字照常，仅卡体动画消失。
+**根因**：`play_programmatic` 的回收条件是「同节点**同名**」，而 Completed+fill-both player 每帧续写末值且永不回收；战斗 keyframes（lunge/hitShake/brace/sidestep）全抢 transform 通道且末值全为恒等变换，同节点不同名 player 先后累积后，`update_all` 按槽序写入、后者覆盖前者——新 player 落在旧 player 之前的槽位（同名回收复用旧槽；不同名时槽位被声明式 player 的反复删插搅动）时，每帧都被旧末值（单位矩阵）盖掉。坑 226 的根因描述本就写了「累积 + 写序」，但修复收窄到同名，漏了换名情形。
+**解决**：`play_programmatic` 回收条件扩为「同名 **或** 持有与新动画重叠的通道」（不限状态）：新 Play 即接管其所动通道，通道不相交（transform + opacity）仍共存；清通道走幸存者掩码（`remove_player_clearing_channels`，与 `restart_animations` 共用）。回归测试补「完成后换名不遮蔽 / 播放中换名被接管 / 异通道共存」。
+**教训**：按「名字」判重是代理指标——资源真正冲突的单位是**通道**（谁在写哪个值）；入口接管语义要按冲突单位定义，否则换名即绕过。

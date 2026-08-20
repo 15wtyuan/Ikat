@@ -373,6 +373,8 @@ public class ListView : Container {
 
 `Play`（触发 2）与 class 切换（触发 1）分工：Play 用于「程序化、要句柄控制」；class 用于「声明式、只需知结束」。class 触发不产 `AnimationHandle` 句柄，结束统一走 `AnimationEndEvent`。
 
+**`Play` 的接管语义**：同节点再次 `Play` 时，同名旧动画确定性从头重播；旧动画不同名但动了相同通道（如都是 transform）也被新 `Play` 取代（不限旧动画是否播完）；通道不相交的旧动画（如 transform + opacity）共存继续播。即 `Play` 接管它所动的一切通道，不存在两个写同通道的动画叠加。
+
 **`:nth-child(An+B|odd|even|N)` selector**（M2）配合 `animation-delay` 实现错峰入场——同一规则按子序号算 delay，常用于导航卡/列表项依次淡入（showcase `home.html` 7 条 `.nav-card:nth-child(N){animation-delay:...}`）。
 
 ### 9.2 AnimationHandle 句柄

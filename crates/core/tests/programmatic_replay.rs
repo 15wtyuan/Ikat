@@ -1,8 +1,10 @@
-//! `play_programmatic` 重播语义回归：重复 Play = 确定性从头重播。
+//! `play_programmatic` 重播/接管语义回归：重复 Play = 确定性从头重播；同通道的旧
+//! programmatic player（不限名字、不限状态）被新 Play 取代；通道不相交者共存。
 //!
-//! 修复前缺陷：同节点同名 programmatic player 不回收——旧 Completed+fill-both player
-//! 每帧续写末值且 `sync_animation_players` 永不回收 programmatic player，重复 Play 叠加
-//! 写同通道且 player 无限累积，第二次起视觉上"静默无效"。
+//! 历史缺陷：programmatic player 不回收——旧 Completed+fill-both player 每帧续写末值
+//! 且 `sync_animation_players` 永不回收 programmatic player，重复 Play 或同通道换名
+//! Play 都叠加写同通道且 player 无限累积，最终值取决于 slotmap 槽序——第二次起视觉上
+//! "静默无效"。
 
 use loomgui_core::scene::animation::{play_programmatic, update_all};
 use loomgui_core::scene::{
@@ -32,6 +34,25 @@ fn lunge() -> KeyframesRule {
     }
 }
 
+/// 2-stop opacity-only keyframes（与 lunge 通道不相交）。
+fn flash_opacity() -> KeyframesRule {
+    let stop = |sel, o| KeyframeStop {
+        selector: sel,
+        props: AnimatableProps {
+            opacity: Some(o),
+            ..Default::default()
+        },
+        hook: None,
+    };
+    KeyframesRule {
+        name: "flash".into(),
+        stops: vec![
+            stop(KeyframeStopSelector::From, 0.0),
+            stop(KeyframeStopSelector::To, 1.0),
+        ],
+    }
+}
+
 fn scene_with_node() -> (Scene, NodeId) {
     let scene = Scene::from_nodes(
         vec![Node {
@@ -48,6 +69,11 @@ fn anim_translate_x(scene: &Scene, node: NodeId) -> f32 {
     let a = scene.anim.0.get(&node).expect("anim entry");
     let m = a.transform.expect("transform channel");
     m[4]
+}
+
+fn anim_opacity(scene: &Scene, node: NodeId) -> f32 {
+    let a = scene.anim.0.get(&node).expect("anim entry");
+    a.opacity.expect("opacity channel")
 }
 
 fn prog_count(scene: &Scene, node: NodeId, name: &str) -> usize {
@@ -129,19 +155,76 @@ fn same_frame_stop_then_play_is_deterministic() {
     );
 }
 
-/// 不同名动画共存：去重只替换同名，不误伤并行的其他 programmatic player。
+/// 不同名动画、通道不相交（transform vs opacity）：并行共存，互不取代——
+/// 接管语义按通道判重，不能误伤可组合的并行播放。
 #[test]
-fn different_name_players_coexist() {
+fn disjoint_channel_players_coexist() {
     let (mut scene, node) = scene_with_node();
     scene.keyframes.insert("lunge".into(), lunge());
-    let mut flash = lunge();
-    flash.name = "flash".into();
-    scene.keyframes.insert("flash".into(), flash);
+    scene.keyframes.insert("flash".into(), flash_opacity());
 
     let _ = play_programmatic(&mut scene, node, "lunge").expect("lunge");
     let _ = play_programmatic(&mut scene, node, "flash").expect("flash");
-    let _ = play_programmatic(&mut scene, node, "lunge").expect("lunge replay");
     assert_eq!(prog_count(&scene, node, "lunge"), 1);
     assert_eq!(prog_count(&scene, node, "flash"), 1);
-    assert_eq!(scene.players.values().filter(|p| p.programmatic).count(), 2);
+    tick(&mut scene, 0.5);
+    let tx = anim_translate_x(&scene, node);
+    assert!(
+        tx > 0.0 && tx < 100.0,
+        "transform 动画须实际推进，tx = {tx}"
+    );
+    let op = anim_opacity(&scene, node);
+    assert!(op > 0.0 && op < 1.0, "opacity 动画须实际推进，op = {op}");
+}
+
+/// 同通道不同名：后播者取代先播者（不限状态）。修复前缺陷：Completed+fill-both 的
+/// 旧 player 每帧续写末值且 sync 侧永不回收，新旧叠加写同通道，最终值取决于 slotmap
+/// 槽序——旧 player 槽位靠后时新动画每一帧都被末值压掉，视觉上"第二次起不播"
+/// （dogfood 战斗动画 bug 根因，坑 226 修复只覆盖了同名情形）。
+#[test]
+fn completed_different_name_does_not_shadow_new_play() {
+    let (mut scene, node) = scene_with_node();
+    scene.keyframes.insert("lunge".into(), lunge());
+    let mut shake = lunge(); // 同为 translate 通道
+    shake.name = "shake".into();
+    scene.keyframes.insert("shake".into(), shake);
+
+    let _ = play_programmatic(&mut scene, node, "lunge").expect("lunge");
+    tick(&mut scene, 2.0); // 完成；fill both 此后每帧续写末值
+    assert_eq!(anim_translate_x(&scene, node), 100.0);
+
+    let _ = play_programmatic(&mut scene, node, "shake").expect("shake");
+    assert_eq!(
+        prog_count(&scene, node, "lunge"),
+        0,
+        "同通道不同名的旧 player 必须被回收，不得残留遮蔽"
+    );
+    assert_eq!(anim_translate_x(&scene, node), 0.0, "新动画首帧立即生效");
+    tick(&mut scene, 0.5);
+    let mid = anim_translate_x(&scene, node);
+    assert!(
+        mid > 0.0 && mid < 100.0,
+        "新动画中途值不得被旧 player 末值压住，mid = {mid}"
+    );
+}
+
+/// 播放中（非 Completed）的同通道不同名 player 同样被取代：新 Play 即接管，
+/// 不留两个写同一通道的 writer（槽序彩票）。
+#[test]
+fn playing_different_name_same_channel_is_replaced() {
+    let (mut scene, node) = scene_with_node();
+    scene.keyframes.insert("lunge".into(), lunge());
+    let mut shake = lunge();
+    shake.name = "shake".into();
+    scene.keyframes.insert("shake".into(), shake);
+
+    let _ = play_programmatic(&mut scene, node, "lunge").expect("lunge");
+    tick(&mut scene, 0.3); // 半途
+    let _ = play_programmatic(&mut scene, node, "shake").expect("shake");
+    assert_eq!(prog_count(&scene, node, "lunge"), 0);
+    assert_eq!(prog_count(&scene, node, "shake"), 1);
+    assert_eq!(anim_translate_x(&scene, node), 0.0, "接管者从 from 起播");
+    tick(&mut scene, 0.5);
+    let mid = anim_translate_x(&scene, node);
+    assert!(mid > 0.0 && mid < 100.0, "接管者须实际推进，mid = {mid}");
 }

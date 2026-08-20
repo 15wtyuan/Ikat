@@ -23,6 +23,11 @@ Tripawd dogfood Field Notes（N 系列）回应批：四个运行时 bug 修复�
 - **重复 `Node.Play` 静默无效（N8/N11）**：programmatic player 不回收——旧
   Completed+fill-both player 每帧续写末值且永不回收，player 无限累积。修复：
   `Play` 按「同节点+同名」替换旧 player，重复调用 = 确定性从头重播。
+- **同节点换名 `Play` 被旧 player 遮蔽（战斗第二回合起动画不播）**：同名回收
+  之外，不同名但动了相同通道（如都是 transform）的旧 player 仍每帧续写末值，
+  新动画按 slotmap 槽序被静默盖掉。修复：`Play` 接管其所动通道——同名或通道
+  重叠的旧 player（不限状态）一律回收；通道不相交（transform + opacity）仍
+  共存可组合。
 - **InputSystem-only 项目 F8 诊断每帧抛异常（N3）**：`LoomStageDriver.Update`
   的 F8 轮询按 `ENABLE_INPUT_SYSTEM` / `ENABLE_LEGACY_INPUT_MANAGER` 分流。
 - `background-size: stretch`（schema 广告的默认值）此前被 core 静默拒（仅认

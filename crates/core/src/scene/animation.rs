@@ -458,7 +458,8 @@ pub fn register_on_key(scene: &mut Scene, key: PlayerKey, pct: f32) {
 /// 程序化启动 @keyframes player（`node.Play` FFI 用，spec §5.2）。
 ///
 /// 查 `Scene.keyframes` 全局表（CSS `@keyframes` 全局语义）建 **programmatic** player
-/// （`sync_animation_players` 完全跳过：声明消失不回收、同名不视为已启动，靠 Stop/句柄回收）。
+/// （`sync_animation_players` 完全跳过：声明消失不回收、同名不视为已启动；回收靠
+/// Stop/句柄，或下次 Play 的入口接管——同名与同通道旧 player 先回收，见函数体注释）。
 /// C# `Play(name)` 无时长参数 → spec 默认：**1s / 无 delay / 单次迭代 / normal / fill both /
 /// cubic-out**（CSS 默认 ease）。fill both = 播放结束停终态（与 home `animation:fadeIn .4s both`
 /// 同语义）；改默认须同步 T13 C# 测试。
@@ -470,18 +471,30 @@ pub fn play_programmatic(scene: &mut Scene, node: NodeId, name: &str) -> Option<
         return None;
     }
     let rule = scene.keyframes.get(name)?.clone();
-    // 同节点同名的既有 programmatic player 先回收（清其持有通道）：Completed+fill-both
-    // 的旧 player 每帧续写末值且 sync 侧永不回收，不替换则叠加写同通道、player 无限
-    // 累积——重复 Play 语义 = 确定性从头重播（CSS 重新触发动画同义）。
+    // 同节点上会被新动画取代的 programmatic player 先回收：同名者（重复 Play = 确定性
+    // 从头重播，CSS 重新触发动画同义）+ 持有重叠通道者（不限状态、不限名字）。Completed
+    // +fill-both 的旧 player 每帧续写末值且 sync 侧永不回收，Playing 中的旧 player 同样
+    // 每帧写帧值——不回收则新旧叠加写同通道，最终值取决于 slotmap 槽序（旧 player 槽位
+    // 靠后就静默压掉新动画的每一帧）。通道不相交的 player（如 transform 动画 + opacity
+    // 动画）保留，支持并行组合。
+    let new_channels = stops_channels(&rule.stops);
     let stale: Vec<PlayerKey> = scene
         .players
         .iter()
-        .filter(|(_, p)| p.programmatic && p.node == node && p.spec.name == name)
+        .filter(|(_, p)| {
+            p.programmatic
+                && p.node == node
+                && (p.spec.name == name
+                    || owned_channels(p)
+                        .iter()
+                        .zip(new_channels.iter())
+                        .any(|(a, b)| *a && *b))
+        })
         .map(|(k, _)| k)
         .collect();
     for k in stale {
         if let Some(p) = scene.players.remove(k) {
-            clear_owned_channels(&mut scene.anim, &p);
+            remove_player_clearing_channels(scene, p);
         }
     }
     let spec = AnimationSpec {
@@ -762,8 +775,14 @@ fn compose_transform(ta: TransformAnim) -> Option<Affine2> {
 /// 顺序固定：[opacity, transform, bg_color, text_color]。
 /// `pub(crate)`：sync_animation_players（dynamic.rs）回收 player 时算"谁还持有该通道"用。
 pub(crate) fn owned_channels(p: &KeyframePlayer) -> [bool; 4] {
+    stops_channels(&p.keyframes.stops)
+}
+
+/// stops 声明的通道掩码（props 的 Some 通道并集）。顺序固定：
+/// [opacity, transform, bg_color, text_color]。
+fn stops_channels(stops: &[KeyframeStop]) -> [bool; 4] {
     let (mut opacity, mut transform, mut bg, mut text) = (false, false, false, false);
-    for stop in &p.keyframes.stops {
+    for stop in stops {
         opacity |= stop.props.opacity.is_some();
         transform |= stop.props.transform.is_some();
         bg |= stop.props.bg_color.is_some();
@@ -802,31 +821,7 @@ pub fn restart_animations(scene: &mut Scene, root: NodeId) {
         let Some(p) = scene.players.remove(k) else {
             continue;
         };
-        let own = owned_channels(&p);
-        let remaining =
-            scene
-                .players
-                .values()
-                .filter(|q| q.node == p.node)
-                .fold([false; 4], |acc, q| {
-                    let m = owned_channels(q);
-                    [
-                        acc[0] || m[0],
-                        acc[1] || m[1],
-                        acc[2] || m[2],
-                        acc[3] || m[3],
-                    ]
-                });
-        clear_channels(
-            &mut scene.anim,
-            p.node,
-            [
-                own[0] && !remaining[0],
-                own[1] && !remaining[1],
-                own[2] && !remaining[2],
-                own[3] && !remaining[3],
-            ],
-        );
+        remove_player_clearing_channels(scene, p);
     }
 }
 
@@ -857,6 +852,37 @@ pub(crate) fn clear_channels(anim: &mut AnimTable, node: NodeId, mask: [bool; 4]
 /// 通道——动画没声明的通道（tween/base 在写）不动。
 fn clear_owned_channels(anim: &mut AnimTable, p: &KeyframePlayer) {
     clear_channels(anim, p.node, owned_channels(p));
+}
+
+/// 从 players 表移除一个已摘出的 player，并按「持有 ∩ 无幸存者持有」掩码清其通道：
+/// 同节点仍在表中的 player 写着的通道不清（防丢值/闪 base）。调用方须先 `players.remove`
+/// 摘出该 player（掩码计算不得把被移除者自己算作幸存者）。
+fn remove_player_clearing_channels(scene: &mut Scene, p: KeyframePlayer) {
+    let own = owned_channels(&p);
+    let remaining =
+        scene
+            .players
+            .values()
+            .filter(|q| q.node == p.node)
+            .fold([false; 4], |acc, q| {
+                let m = owned_channels(q);
+                [
+                    acc[0] || m[0],
+                    acc[1] || m[1],
+                    acc[2] || m[2],
+                    acc[3] || m[3],
+                ]
+            });
+    clear_channels(
+        &mut scene.anim,
+        p.node,
+        [
+            own[0] && !remaining[0],
+            own[1] && !remaining[1],
+            own[2] && !remaining[2],
+            own[3] && !remaining[3],
+        ],
+    );
 }
 
 #[cfg(test)]
