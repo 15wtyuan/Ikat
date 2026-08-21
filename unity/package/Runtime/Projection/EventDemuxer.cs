@@ -98,15 +98,20 @@ namespace LoomGUI
                             new PointerMoveEvent { _core = NewCore(nodeId),
                                 _position = new LoomVector2(evt.x, evt.y), _touchId = evt.touchId });
                         break;
+                    // Enter/Leave 不沿祖先链路由：core 按悬停链差分逐节点发射（每个进出
+                    // 边界的节点各得一条），冒泡会把「后代退链」误投给祖先订阅——指针仍在
+                    // 祖先子树内，祖先级 hover 处理器被误触发（详见 DispatchTargetOnly）。
                     case (byte)EventType.RollOver:
                         DispatchTyped(nodeId,
                             new PointerEnterEvent { _core = NewCore(nodeId),
-                                _position = new LoomVector2(evt.x, evt.y) });
+                                _position = new LoomVector2(evt.x, evt.y) },
+                            routeChain: false);
                         break;
                     case (byte)EventType.RollOut:
                         DispatchTyped(nodeId,
                             new PointerLeaveEvent { _core = NewCore(nodeId),
-                                _position = new LoomVector2(evt.x, evt.y) });
+                                _position = new LoomVector2(evt.x, evt.y) },
+                            routeChain: false);
                         break;
                     case (byte)EventType.Click:
                         DispatchTyped(nodeId,
@@ -264,14 +269,16 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 调 EventBus.Dispatch：target node 已由 _core.Target 指定（NewCore 已填）。
-        /// Dispatch 内走 ancestor chain（capture→bubble），CurrentTarget 逐节点刷新。
+        /// 调 EventBus：target node 已由 _core.Target 指定（NewCore 已填）。
+        /// routeChain=true 走 Dispatch（ancestor chain capture→bubble，CurrentTarget 逐节点刷新）；
+        /// false 走 DispatchTargetOnly（Enter/Leave 专用，见 EventBus.DispatchTargetOnly）。
         /// Target=null（NewCore 遇 not-live nodeId）时丢弃该条——节点已销毁，事件无人接收。
         /// </summary>
-        void DispatchTyped<T>(uint targetNodeId, T evt) where T : IRouteEvent, IRouteEventCore
+        void DispatchTyped<T>(uint targetNodeId, T evt, bool routeChain = true) where T : IRouteEvent, IRouteEventCore
         {
             if (evt.Target == null) return;   // not-live node（见 NewCore）：丢弃不崩泵
-            _ctx._eventBus.Dispatch(targetNodeId, evt);
+            if (routeChain) _ctx._eventBus.Dispatch(targetNodeId, evt);
+            else _ctx._eventBus.DispatchTargetOnly(targetNodeId, evt);
         }
 
         /// <summary>

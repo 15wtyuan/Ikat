@@ -926,6 +926,22 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
             // RmlUi PositionBar：可滑动距离 = slider_w - thumb_w（扣自身宽），位置 = 该距离 × pct。
             // 垂直方向把 thumb 居中到 slider 中心（thumb 绝对定位后 align-items 不生效）。
             if let Some(thumb) = find_child_by_slot(scene, id, SLOT_THUMB) {
+                // thumb 定位权归控件：inset/margin 逐帧归零，位移全权走下方 user_transform。
+                // 作者给 thumb 写定位（负 top 居中、left 百分比等）会与控件位移叠加成双偏移；
+                // class 规则每帧经 rematch 重放，归零同频执行（本函数时序在 rematch 后、
+                // solve 前）。尺寸与外观声明不受影响；定位声明由打包器出静态警告提示所有权。
+                if let Some(tn) = scene.get_mut(thumb) {
+                    let ts = &mut tn.style.taffy_style;
+                    let zero = taffy::style::LengthPercentageAuto::length(0.0);
+                    ts.inset.top = zero;
+                    ts.inset.right = zero;
+                    ts.inset.bottom = zero;
+                    ts.inset.left = zero;
+                    ts.margin.top = zero;
+                    ts.margin.right = zero;
+                    ts.margin.bottom = zero;
+                    ts.margin.left = zero;
+                }
                 let (slider_w, slider_h) = scene
                     .get(id)
                     .map(|n| (n.layout_rect.w, n.layout_rect.h))
@@ -2119,6 +2135,49 @@ mod tests {
             (tr.translate[1] - 10.0).abs() < 1e-4,
             "thumb y 居中到 slider"
         );
+    }
+
+    #[test]
+    fn slider_thumb_author_positioning_zeroed() {
+        // 作者给 thumb 写定位（浏览器直觉：负 top 居中 + margin 微调）与控件位移叠加会
+        // 双偏移——sync 必须逐帧归零 inset/margin（class 规则每帧经 rematch 重放）。
+        // 尺寸声明不受影响。
+        let mut scene = Scene::default();
+        let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
+        scene.get_mut(id).unwrap().layout_rect.w = 200.0;
+        scene.get_mut(id).unwrap().layout_rect.h = 6.0;
+        let thumb = find_child_by_slot(&scene, id, SLOT_THUMB).expect("slider has thumb child");
+        {
+            let tn = scene.get_mut(thumb).unwrap();
+            let mut s = ResolvedStyle::default();
+            crate::style::mapping::apply_decl(&mut s, "top", "-9px");
+            crate::style::mapping::apply_decl(&mut s, "left", "62%");
+            crate::style::mapping::apply_decl(&mut s, "margin-top", "-12px");
+            crate::style::mapping::apply_decl(&mut s, "width", "24px");
+            tn.style = s;
+        }
+        sync_control_visuals(&mut scene, id, 0.0);
+        let tn = scene.get(thumb).unwrap();
+        use taffy::style::LengthPercentageAuto;
+        assert_eq!(
+            tn.style.taffy_style.inset.top,
+            LengthPercentageAuto::length(0.0)
+        );
+        assert_eq!(
+            tn.style.taffy_style.inset.left,
+            LengthPercentageAuto::length(0.0)
+        );
+        assert_eq!(
+            tn.style.taffy_style.margin.top,
+            LengthPercentageAuto::length(0.0)
+        );
+        // 尺寸/外观保留。
+        assert_eq!(
+            tn.style.taffy_style.size.width,
+            taffy::style::Dimension::length(24.0)
+        );
+        // 垂直居中 transform 不变（thumb_h=0 未设 → (6-0)/2 = 3）。
+        assert!((tn.user_transform.translate[1] - 3.0).abs() < 1e-4);
     }
 
     #[test]

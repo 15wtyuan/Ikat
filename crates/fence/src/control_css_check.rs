@@ -292,6 +292,81 @@ pub fn check_control_structure_css(
     diagnostics
 }
 
+/// thumb 上被控件忽略的定位属性（prop 名字面量）。`position:absolute` 本身不在列——
+/// thumb 需要脱流锚定（showcase 标准写法 `left:0; top:0` 会被归零为 0，语义等价）。
+const THUMB_POSITIONED_PROPS: &[&str] = &[
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "margin",
+    "margin-top",
+    "margin-right",
+    "margin-bottom",
+    "margin-left",
+];
+
+/// Stage 6.7c：slider thumb 定位所有权校验（warning）。
+///
+/// thumb 的位移由控件运行时按 value 全权驱动（水平位移 + 垂直居中，core 每帧把
+/// thumb 的 inset/margin 归零再写 transform）。作者 CSS 给 thumb 写定位（负 `top`
+/// 居中、`left` 百分比等浏览器直觉写法）不生效且与控件位移叠加会双偏移——本检查
+/// 在打包期提示所有权，避免「浏览器预览居中、运行时偏移」的静默分歧。尺寸与
+/// 外观声明不受影响。
+pub fn check_slider_thumb_positioning(
+    tree: &IrTree,
+    dynamic_rules: &[DynamicRule],
+    file: &str,
+    line_map: &LineMap,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for (idx, node) in tree.nodes.iter().enumerate() {
+        let IrNodeKind::Element(el) = &node.kind else {
+            continue;
+        };
+        let is_thumb = el
+            .attributes
+            .iter()
+            .any(|a| a.name == "data-slot" && a.value == "thumb");
+        if !is_thumb {
+            continue;
+        }
+        for rule in dynamic_rules {
+            if !selector_matches_node(&rule.selector, tree, idx) {
+                continue;
+            }
+            let offenders: Vec<&str> = rule
+                .declarations
+                .iter()
+                .filter_map(|d| {
+                    let is_zero = matches!(d.value.trim(), "0" | "0px" | "0%");
+                    THUMB_POSITIONED_PROPS
+                        .iter()
+                        .find(|p| d.prop.eq_ignore_ascii_case(p) && !is_zero)
+                })
+                .copied()
+                .collect();
+            if offenders.is_empty() {
+                continue;
+            }
+            diagnostics.push(Diagnostic::warning(
+                DiagnosticCode::FenceSliderThumbPositioned,
+                format!(
+                    "Slider thumb (`data-slot=\"thumb\"`) declares positioning ({}) — \
+                     the control owns thumb placement: runtime drives horizontal offset by \
+                     value and centers it vertically, zeroing inset/margin every frame. \
+                     Author positioning silently shifts (browser preview centers, runtime \
+                     is offset twice). Keep size/appearance here; for placement write \
+                     `left:0; top:0` (the canonical anchor) or nothing at all.",
+                    offenders.join(", "),
+                ),
+                line_map.source_location(node.span.start, file.to_string()),
+            ));
+        }
+    }
+    diagnostics
+}
+
 /// 控件的可读名称（教学文案用）。按 `role` 取名（spec §2.2）。
 fn kind_name_for(el: &IrElement) -> &'static str {
     match node_role(el) {
@@ -410,6 +485,54 @@ mod tests {
             "t.html",
             &crate::diagnostic::LineMap::new(html),
         )
+    }
+
+    /// 辅助：同 check，跑 thumb 定位所有权检查（Stage 6.7c）。
+    fn check_thumb_pos(html: &str) -> Vec<Diagnostic> {
+        let result = parse_template(html, "t.html");
+        check_slider_thumb_positioning(
+            &result.tree,
+            &result.dynamic_rules,
+            "t.html",
+            &crate::diagnostic::LineMap::new(html),
+        )
+    }
+
+    #[test]
+    fn thumb_nonzero_positioning_warns() {
+        // 浏览器直觉写法（负 top 居中 / left 百分比 / margin 微调）在 thumb 上与控件
+        // 位移叠加双偏移——warning 提示所有权。
+        let diags = check_thumb_pos(
+            "<div><div role=\"slider\"><div data-slot=\"thumb\"></div></div></div>\
+             <style>[role=slider] [data-slot=thumb]{top:-9px;left:62%;margin-top:-12px;\
+             width:24px;height:24px}</style>",
+        );
+        assert_eq!(diags.len(), 1, "diags: {diags:?}");
+        assert_eq!(diags[0].code, DiagnosticCode::FenceSliderThumbPositioned);
+        assert!(diags[0].message.contains("top"), "offender 应列出 prop");
+    }
+
+    #[test]
+    fn thumb_canonical_zero_anchor_and_size_silent() {
+        // 标准写法（left:0; top:0 锚定 + 尺寸/外观）零告警——归零后语义等价。
+        let diags = check_thumb_pos(
+            "<div><div role=\"slider\"><div data-slot=\"thumb\"></div></div></div>\
+             <style>[role=slider] [data-slot=thumb]{position:absolute;left:0;top:0;\
+             width:16px;height:16px;border-radius:8px}</style>",
+        );
+        assert!(diags.is_empty(), "diags: {diags:?}");
+    }
+
+    #[test]
+    fn thumb_positioning_on_unrelated_element_silent() {
+        // 非 thumb 元素的定位声明不受本检查约束。
+        let diags = check_thumb_pos(
+            "<div><div role=\"slider\"><div data-slot=\"thumb\"></div></div>\
+             <div class=\"badge\"></div></div>\
+             <style>[role=slider] [data-slot=thumb]{left:0;top:0}\
+             .badge{top:-9px}</style>",
+        );
+        assert!(diags.is_empty(), "diags: {diags:?}");
     }
 
     #[test]

@@ -1790,3 +1790,17 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 **根因**：`play_programmatic` 的回收条件是「同节点**同名**」，而 Completed+fill-both player 每帧续写末值且永不回收；战斗 keyframes（lunge/hitShake/brace/sidestep）全抢 transform 通道且末值全为恒等变换，同节点不同名 player 先后累积后，`update_all` 按槽序写入、后者覆盖前者——新 player 落在旧 player 之前的槽位（同名回收复用旧槽；不同名时槽位被声明式 player 的反复删插搅动）时，每帧都被旧末值（单位矩阵）盖掉。坑 226 的根因描述本就写了「累积 + 写序」，但修复收窄到同名，漏了换名情形。
 **解决**：`play_programmatic` 回收条件扩为「同名 **或** 持有与新动画重叠的通道」（不限状态）：新 Play 即接管其所动通道，通道不相交（transform + opacity）仍共存；清通道走幸存者掩码（`remove_player_clearing_channels`，与 `restart_animations` 共用）。回归测试补「完成后换名不遮蔽 / 播放中换名被接管 / 异通道共存」。
 **教训**：按「名字」判重是代理指标——资源真正冲突的单位是**通道**（谁在写哪个值）；入口接管语义要按冲突单位定义，否则换名即绕过。
+
+### 坑 230：Enter/Leave 事件统一走冒泡路由——后代退链误杀祖先 hover，成自激振荡
+
+**症状**：dogfood（Tripawd 战斗）悬停卡片图标正常，移到卡内空白（图标/名字间隙、气珠点边界）悬停效果消失；敌卡上小范围移动时 hover 高频闪烁。core 侧一切正常（touchable 默认 true、盒矩形命中、链差分语义都对）。
+**根因**：core 的 RollOver/RollOut 按悬停链差分**逐节点**发射（mouseenter/mouseleave 语义，本就不该冒泡），而 C# EventBus.Dispatch 对所有事件统一走 DOM 三阶段 capture→bubble 祖先链路由——「后代退出悬停链」（如抬升动画把气珠点从指针下移走，命中从气珠点浅化到卡体）的 RollOut 被冒泡投给宿主订阅，宿主级 hover 处理器误收 Leave → 摘 is-hover → 卡片瞬移落回 → 命中变深 → RollOver 又冒泡上来 → **enter→leave 自激振荡**。取证路径：core 离线复现证明链收缩只对退出节点发 RollOut（宿主在链内不发），与实机「宿主收到 Leave」矛盾 → 锁定 C# 派发层。
+**解决**：`EventBus.DispatchTargetOnly`（target 自身订阅表，不沿链路由）；EventDemuxer 对 RollOver/RollOut 走该路径，其余事件维持冒泡。回归测试：祖先 capture/bubble 订阅不收后代 target 的 Leave、target 自身正常收、冒泡事件仍达祖先。
+**教训**：把事件从 core 搬到宿主语言层时，**每个事件族的 DOM 冒泡语义要逐个对齐**（enter/leave/focus 类不冒泡，over/out/click 类冒泡）——统一路由省事但错语义；「逐链节点发射 + 再冒泡」= 同一语义执行两遍，祖先视角必然多收。
+
+### 坑 231：控件子件定位双头所有——thumb 作者定位与控件位移叠加，且 % inset 静默丢弃掩盖真相
+
+**症状**：dogfood（Tripawd 设置页）滑杆 thumb 用负 `top` 居中，浏览器预览居中、运行时整体偏上；换 `top:50%; margin-top:-12px` 等价写法依旧偏。作者推断「负偏移被钳到 0」。
+**根因**：双层叠加。①thumb 位移本由控件全权驱动（水平按 value + 垂直居中 transform，control.rs），作者 CSS 再写定位即双偏移——设计模型「thumb 定位权归控件」只写在 showcase 注释里，而 scaffold 的 patterns.md 自己教的是 `left:50%`（教坏源头）。②`top:50%` 里的 `%` 被 mapping 静默丢弃（注释误称「围栏外」，实际 fence schema 广告的就是 LengthPercentAuto 三态）——静默降级让作者换写法试错，掩盖真因。sidebar：rect-diff 早年挂号的「slider thumb transform 发射缺口」残余类实为本族。
+**解决**：三件套——core：slider sync 逐帧归零 thumb 的 inset/margin（时序在 rematch 后、solve 前，抵抗 class 规则每帧重放）；fence：`FenceSliderThumbPositioned` 警告（非零定位才报，`left:0; top:0` 锚定豁免）+ patterns.md 改教标准写法；mapping：inset `%` 按含块解析兑现语法。combobox 弹层同模型验证无回归（`place_dropdown_popup_ty` 是「绝对目标 − 当前静态位」自校正式，static_y 读实解位置）。
+**教训**：控件与作者共享一个子件时，**定位权必须单头**且写进随包文档——「控件算位置、作者管外观」；凡 schema 广告的值域语法，运行时必须兑现或打包期拦截，静默丢弃会把定位 bug 伪装成「换写法试试」的试错循环。

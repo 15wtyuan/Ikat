@@ -1630,31 +1630,29 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             }
         }
         "top" | "right" | "bottom" | "left" => {
-            // inset 四边。auto 保持默认（不写）；px 写 Length。
-            if let Some(px) = parse_px(value) {
-                let lp = taffy::style::LengthPercentageAuto::length(px);
-                match prop {
-                    "top" => ts.inset.top = lp,
-                    "right" => ts.inset.right = lp,
-                    "bottom" => ts.inset.bottom = lp,
-                    "left" => ts.inset.left = lp,
-                    _ => unreachable!(),
+            // inset 四边。px 写 Length；% 按含块解析（绝对定位居中写法 top:50% 等的
+            // 浏览器语义，百分比相对 containing block 尺寸，由 taffy solve 兑现）；
+            // auto 保持默认（不写）。三态对齐 fence 广告的 LengthPercentAuto 语法。
+            let lp = if let Some(px) = parse_px(value) {
+                taffy::style::LengthPercentageAuto::length(px)
+            } else if let Some(pct) = value.trim().strip_suffix('%') {
+                match pct.trim().parse::<f32>() {
+                    Ok(v) => taffy::style::LengthPercentageAuto::percent(v / 100.0),
+                    Err(_) => return false,
                 }
-                true
             } else if value.trim() == "auto" {
-                // auto 显式置回默认（覆盖之前的 px 值）
-                let lp = taffy::style::LengthPercentageAuto::auto();
-                match prop {
-                    "top" => ts.inset.top = lp,
-                    "right" => ts.inset.right = lp,
-                    "bottom" => ts.inset.bottom = lp,
-                    "left" => ts.inset.left = lp,
-                    _ => unreachable!(),
-                }
-                true
+                taffy::style::LengthPercentageAuto::auto()
             } else {
-                false // 非法值（% 等围栏外）静默忽略
+                return false;
+            };
+            match prop {
+                "top" => ts.inset.top = lp,
+                "right" => ts.inset.right = lp,
+                "bottom" => ts.inset.bottom = lp,
+                "left" => ts.inset.left = lp,
+                _ => unreachable!(),
             }
+            true
         }
         "box-shadow" => {
             // 括号感知 tokenizer：多层 / inset / blur / spread / spaced rgba()。

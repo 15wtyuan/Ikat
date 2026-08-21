@@ -137,6 +137,29 @@ namespace LoomGUI
         }
 
         /// <summary>
+        /// Dispatch 非冒泡事件（DOM mouseenter/mouseleave 语义）：只触发 target 节点自身的
+        /// 订阅（capture 与 bubble 两张表在 target 上都属 target 阶段），不沿祖先链路由。
+        ///
+        /// Enter/Leave（core RollOver/RollOut）必须走本路径：core 按悬停链差分**逐节点**
+        /// 发射——进出边界的每个节点各得一条自己的事件，语义已完备。若再沿祖先链冒泡，
+        /// 「后代退出悬停链」会误投给祖先订阅——指针仍在祖先子树内、祖先并未离链，
+        /// 祖先级 hover 处理器被误触发；与按 enter/leave 切换视觉态（抬升动画改命中几何）
+        /// 的用法叠加会形成 enter→leave 自激振荡（悬停风暴）。
+        /// </summary>
+        /// <typeparam name="T">typed event struct。</typeparam>
+        /// <param name="targetNodeId">事件目标节点 NodeId。</param>
+        /// <param name="evt">typed event——_core.Target 必须已由调用方（D3 / 测试）填。</param>
+        internal void DispatchTargetOnly<T>(uint targetNodeId, T evt) where T : IRouteEvent, IRouteEventCore
+        {
+            RouteEventCore core = evt.Core;
+            byte eventType = EventTypeCache<T>.Value;
+            if (!IsLive(targetNodeId, out var node)) return;
+            core.CurrentTarget = node;
+            InvokeHandlers(targetNodeId, eventType, capture: true, ref evt);
+            InvokeHandlers(targetNodeId, eventType, capture: false, ref evt);
+        }
+
+        /// <summary>
         /// chain 节点是否仍 live。预物化后 live 节点必在 registry 缓存；Dispose 经 registry.Remove 移缓存
         /// + 标 _disposed，故 TryGet 未命中或 _disposed=true 即 not-live——dispatch 路由跳过它，对齐 DOM
         /// 「事件派发中移除的节点不再触发 listener」。out 节点供 CurrentTarget 赋值；not-live 时 null

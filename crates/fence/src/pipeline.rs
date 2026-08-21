@@ -167,6 +167,16 @@ pub fn parse_template_with_css(
         &line_map,
     ));
 
+    // Stage 6.7c: slider thumb 定位所有权（warning）。thumb 位移由控件按 value 全权
+    // 驱动（core 每帧归零 inset/margin 再写 transform），作者定位声明静默不生效且
+    // 叠加双偏移——浏览器预览居中、运行时偏移的典型分歧，打包期提示所有权。
+    diagnostics.extend(crate::control_css_check::check_slider_thumb_positioning(
+        &tree,
+        &dynamic_rules,
+        file,
+        &line_map,
+    ));
+
     // Stage 6.8: role 驱动控件结构契约（必需子角色）。作者自写控件结构
     // （`<div role="combobox"><div role="listbox">...`），可能漏写必需子节点。
     // 打包期严格拦截，不依赖运行时 reparent 兜底。只校验 role 驱动节点（带 role 属性

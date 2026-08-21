@@ -81,6 +81,10 @@ pub enum DiagnosticCode {
     /// （样式墙：页面规则不穿 host 边界），该规则运行时恒为死代码——给投影内容
     /// 定样式写在组件文件 `<style>` 里。
     FencePageRuleProjectedOnly,
+    /// slider 滑块头（`data-slot="thumb"`）上声明定位属性（warning）。thumb 位移由
+    /// 控件按 value 全权驱动（水平位移 + 垂直居中），运行时逐帧归零其 inset/margin
+    /// ——作者的 `top`/`left`/`margin` 定位不生效且叠加会双偏移。尺寸与外观照常。
+    FenceSliderThumbPositioned,
 }
 
 #[derive(Debug, Clone)]

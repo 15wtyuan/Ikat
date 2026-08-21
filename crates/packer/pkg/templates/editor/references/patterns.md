@@ -13,9 +13,13 @@ blank. Canonical patterns:
 [role="progressbar"] { position: relative; width: 200px; height: 8px; background: #2e2e42; }
 [role="progressbar"] [data-slot="fill"] { height: 100%; background: #7c5cfc; }
 
-/* slider */
+/* slider — thumb placement is OWNED by the control: horizontal offset follows
+   the value, vertical is auto-centered on the track. Anchor it with
+   left:0; top:0 and style size/look only; author top/left/margin positioning
+   on the thumb is zeroed at runtime and flagged by check. */
 [role="slider"] { position: relative; width: 200px; height: 4px; background: #2e2e42; }
-[role="slider"] [data-slot="thumb"] { position: absolute; left: 50%; width: 16px; height: 16px; background: #fff; }
+[role="slider"] [data-slot="fill"] { position: absolute; left: 0; top: 0; height: 100%; background: #5fb4d4; }
+[role="slider"] [data-slot="thumb"] { position: absolute; left: 0; top: 0; width: 16px; height: 16px; background: #fff; border-radius: 8px; }
 
 /* combobox — structure contract: the anchor + the popup MUST both be
    declared, otherwise FenceControlStructureCss fails the build */

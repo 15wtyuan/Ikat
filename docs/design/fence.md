@@ -490,6 +490,7 @@ CSS 在围栏中以三个正交维度建模：
 | `FenceTransitionUnsupportedProp` | **warning**：`transition` 声明了运行时不支持的属性。transition 引擎只驱动 `background-color` / `color` / `opacity` 三通道；布局属性（width/transform 等）声明了也不过渡，浏览器先验会翻车（`transition: all` 同理单独提示） |
 | `FenceInlineSizing` | **warning**：rich-text inline flow 内的行内元素（span 等）声明 `width`/`height` 族。该类元素无独立盒子，尺寸声明恒无效（与浏览器对 inline 元素一致）。可定尺寸路径：flex item div / `<img>` / 显式 `display:flex` |
 | `FencePageRuleProjectedOnly` | **warning**：页面侧纯类规则只可能命中 slot 投射内容。样式墙下页面规则不穿 host 边界，该规则运行时恒为死代码——给投影内容定样式写在组件 `<style>` 里 |
+| `FenceSliderThumbPositioned` | **warning**：slider 滑块头（`data-slot="thumb"`）上声明非零定位（`top`/`right`/`bottom`/`left`/`margin` 族）。thumb 位移由控件按 value 全权驱动（水平位移 + 垂直居中，运行时逐帧归零其 inset/margin）——作者定位不生效且叠加双偏移（浏览器预览居中、运行时偏移）。标准写法 `left:0; top:0`（零值锚定）与尺寸/外观声明不受影响 |
 
 #### 值域门（打包期 error，双路径统一）
 

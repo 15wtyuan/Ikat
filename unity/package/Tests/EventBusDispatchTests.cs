@@ -59,5 +59,61 @@ namespace LoomGUI.Tests
                 if (cam != null) Object.DestroyImmediate(cam);
             }
         }
+
+        /// <summary>
+        /// Enter/Leave（RollOver/RollOut）必须 target-only 派发：core 按悬停链差分逐节点
+        /// 发射，祖先冒泡会把「后代退链」误投给祖先订阅——指针仍在祖先子树内，祖先级
+        /// hover 处理器被误触发（历史缺陷：与 enter/leave 驱动的抬升动画叠加成自激振荡，
+        /// 悬停态在卡内闪烁/消失）。回归断言：祖先（capture 与 bubble 两种订阅）不收
+        /// 后代 target 的 Leave；target 自身正常收；对照组——冒泡事件经 Dispatch 仍达祖先。
+        /// </summary>
+        [Test]
+        public void DispatchTargetOnly_EnterLeave_DoesNotReachAncestors()
+        {
+            var go = new GameObject("eventbus_target_only_test");
+            try
+            {
+                var driver = go.AddComponent<LoomStageDriver>();
+                var ctx = driver.Host.Context;
+                var bus = ctx._eventBus;
+
+                var parent = ctx.Create<Container>();
+                var child = ctx.Create<Container>();
+                parent.AddChild(child);
+
+                bool parentBubble = false, parentCapture = false, childFired = false;
+                using (bus.Subscribe<PointerLeaveEvent>(parent._id,
+                           _ => parentBubble = true, false, false))
+                using (bus.Subscribe<PointerLeaveEvent>(parent._id,
+                           _ => parentCapture = true, true, false))
+                using (bus.Subscribe<PointerLeaveEvent>(child._id,
+                           _ => childFired = true, false, false))
+                {
+                    var evt = new PointerLeaveEvent
+                        { _core = new RouteEventCore { Target = child } };
+                    bus.DispatchTargetOnly(child._id, evt);
+                }
+
+                Assert.IsTrue(childFired, "target 自身的订阅必须收到自己的 Leave");
+                Assert.IsFalse(parentBubble, "祖先 bubble 订阅不得收到后代 target 的 Leave（链差分语义）");
+                Assert.IsFalse(parentCapture, "祖先 capture 订阅不得收到后代 target 的 Leave");
+
+                // 对照组：冒泡事件（DOM mouseleave 之外的事件族）仍沿链到祖先。
+                bool ancestorGotBubbling = false;
+                using (bus.Subscribe<TestRouteEvent>(parent._id,
+                           _ => ancestorGotBubbling = true, false, false))
+                {
+                    bus.Dispatch(child._id, new TestRouteEvent
+                        { _core = new RouteEventCore { Target = child } });
+                }
+                Assert.IsTrue(ancestorGotBubbling, "冒泡事件经 Dispatch 仍须达祖先（本测试只豁免 Enter/Leave）");
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+                var cam = GameObject.Find("LoomUICamera");
+                if (cam != null) Object.DestroyImmediate(cam);
+            }
+        }
     }
 }

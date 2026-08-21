@@ -6,6 +6,28 @@ fn parse_length_px_pct_auto() {
     assert_eq!(parse_lp("100px"), LengthPercentage::length(100.0));
     assert_eq!(parse_lp("50%"), LengthPercentage::percent(0.5));
 }
+
+/// inset 四边的三态解析：px / %（含块百分比，绝对定位居中写法 top:50% 的浏览器
+/// 语义）/ auto。% 曾被静默丢弃——fence 广告的 LengthPercentAuto 语法必须兑现。
+#[test]
+fn inset_declares_px_percent_auto() {
+    use taffy::style::LengthPercentageAuto;
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "top", "-9px"));
+    assert_eq!(s.taffy_style.inset.top, LengthPercentageAuto::length(-9.0));
+    assert!(apply_decl(&mut s, "top", "50%"));
+    assert_eq!(s.taffy_style.inset.top, LengthPercentageAuto::percent(0.5));
+    assert!(apply_decl(&mut s, "left", "62%"));
+    assert_eq!(
+        s.taffy_style.inset.left,
+        LengthPercentageAuto::percent(0.62)
+    );
+    assert!(apply_decl(&mut s, "top", "auto"));
+    assert_eq!(s.taffy_style.inset.top, LengthPercentageAuto::auto());
+    // 围栏外语法的值仍不识别（返回 false，不静默改值）。
+    assert!(!apply_decl(&mut s, "top", "1em"));
+    assert_eq!(s.taffy_style.inset.top, LengthPercentageAuto::auto());
+}
 /// `width:auto` 必须解析成 `Dimension::auto()`（fit-content），
 /// 不能 fallback 到 `Length(0.0)`（→ img rect=(0,0) 不渲染）。
 #[test]

@@ -28,6 +28,17 @@ Tripawd dogfood Field Notes（N 系列）回应批：四个运行时 bug 修复�
   新动画按 slotmap 槽序被静默盖掉。修复：`Play` 接管其所动通道——同名或通道
   重叠的旧 player（不限状态）一律回收；通道不相交（transform + opacity）仍
   共存可组合。
+- **滑杆 thumb 偏上（N20）**：作者给 thumb 写定位（负 `top` 居中 / `left` 百分比）
+  与控件自身的居中/位移 transform 叠加成双偏移。修复：thumb 定位权归控件——
+  运行时逐帧归零其 inset/margin，位移全权由控件按 value 驱动；check 新增
+  `FenceSliderThumbPositioned` 警告提示所有权（`left:0; top:0` 锚定与尺寸/外观
+  不受影响）。附带修复：inset 四边的 `%` 值此前被运行时静默丢弃（fence 广告的
+  `LengthPercentAuto` 语法未兑现），现在按含块百分比正确解析。
+- **卡内悬停消失/闪烁（N23）**：C# 事件层曾对 Enter/Leave 统一走 capture→bubble
+  祖先链路由，而 core 的 RollOver/RollOut 按悬停链差分逐节点发射（mouseenter/
+  mouseleave 语义，本不冒泡）——「后代退链」的 Leave 被误投给祖先订阅，与
+  enter/leave 驱动的抬升动画叠加成自激振荡。修复：Enter/Leave 只派发给事件
+  目标节点自身，其余事件维持冒泡。
 - **InputSystem-only 项目 F8 诊断每帧抛异常（N3）**：`LoomStageDriver.Update`
   的 F8 轮询按 `ENABLE_INPUT_SYSTEM` / `ENABLE_LEGACY_INPUT_MANAGER` 分流。
 - `background-size: stretch`（schema 广告的默认值）此前被 core 静默拒（仅认
