@@ -5,6 +5,18 @@
 (function () {
   'use strict';
 
+  // Inject preview-base.css (the browser-side polyfill: @font-face fonts, body
+  // letterbox, box-sizing, button reset). It must ride the script channel: the
+  // fence validates every <link rel="stylesheet"> against the CSS subset, and a
+  // polyfill is intentionally full of out-of-fence declarations. Script tags are
+  // shell-consumed at build time, so the packer never sees this. Appending here
+  // (script sits in <head> before the page <style>) keeps the original cascade
+  // order: polyfill first, page styles after.
+  var link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = 'preview/preview-base.css';
+  document.head.appendChild(link);
+
   var NAV = {
     'nav-settings': 'settings',
     'nav-inventory': 'inventory',

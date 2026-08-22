@@ -9,10 +9,9 @@ showcase 当前是**预览靶子**，还不能直接被 loomgui 运行时渲染�
 1. **打包器（R1.1）不打包 HTML**。`crates/packer/pkg/src/build.rs` 在 R1.1 移除了 HTML→pkg.bin 路径（`packages` 恒空），只产 atlas/fonts/runtime manifest。HTML→pkg 将在 **R3 经 fence crate 重建**。
 2. **fence 只消费 inline style**。fence 的 `css_resolve` 只解析每个 element 的 `style="..."` 属性 + 标签 `DisplayDefault`（div→Block；button/span/img→inline 走 Flex Row）。`<style>` 块和 `<link rel=stylesheet>`（即 preview-base.css）**不进 IR/pkg**。
 
-结论：
-- 各页 `<style>` 块的 class CSS（`.root`/`.nav-card` 等）当前只服务**浏览器预览**。
-- `preview-base.css` 是浏览器预览 polyfill（@font-face 字体、body 居中 letterbox、box-sizing、button reset），不进 pkg。
-- R3 重建打包路径后，若 fence 仍只 inline，class CSS 需转 inline style 才能进 pkg；若 fence 届时支持 `<style>`，则现状即可。这是 R3 决定项。
+结论（R3 后已兑现：fence 消费 `<style>` 与 `<link rel="stylesheet">`，class CSS 正常进 pkg）：
+- 各页 `<style>` 块的 class CSS 参与打包，也服务浏览器预览。
+- `preview-base.css` 是浏览器预览 polyfill（@font-face 字体、body 居中 letterbox、box-sizing、button reset），**走 script 通道加载**（`loom-preview.js` 注入）：fence 会校验每个 `<link rel="stylesheet">` 的围栏符合度，而 polyfill 故意全是围栏外声明；script 标签是 shell 标签、构建期被消费，打包器永远看不见它。页面 HTML 里**不要**直接 `<link>` 它——那会让 `loom build` 报错（历史上踩过：10 页静态链接导致 150 个围栏 error）。
 
 验证围栏符合度（diagnostics 应为 0）：
 ```bash
