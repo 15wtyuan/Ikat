@@ -1034,7 +1034,7 @@ impl Stage {
         //     + 提交新 tween（start = mid-flight override → 无闪烁）。切页 kill 语义。
         //     借用：scene 经 self.scene.as_mut() 借；self.tweens 独立字段（同 tweens.update 访问形）。
         let reqs: Vec<crate::tween::TransitionRequest> =
-            scene.pending_transitions.drain(..).collect();
+            std::mem::take(&mut scene.pending_transitions);
         for r in reqs {
             self.tweens.kill(r.node, r.prop); // override 保留（mid-flight 值）
             self.tweens.tween(
