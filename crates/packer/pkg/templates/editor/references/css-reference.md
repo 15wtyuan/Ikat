@@ -10,7 +10,8 @@ error):
 - `gap` / `row-gap` / `column-gap`
 - `justify-content` / `align-items` / `align-content` / `align-self`
 - `order` / `aspect-ratio` / `z-index` — integer, no `auto`
-- `position` — absolute / relative; with `top` / `right` / `bottom` / `left` (px / % / auto; `%` resolves against the containing block — browser semantics)
+- `position` — absolute / relative / static (initial value `static`); with `top` / `right` / `bottom` / `left` (px / % / auto; `%` resolves against the containing block — browser semantics)
+- **Containing block of an `absolute` element = nearest ancestor with `position: relative` or `absolute`** (browser semantics); if none, the viewport. Known limits: an `absolute` element with all four insets `auto` keeps its direct-parent static position (browser hypothetical-box semantics not implemented); overflow clipping still follows DOM ancestors.
 - `padding-top` / `padding-right` / `padding-bottom` / `padding-left`
 - `margin-top` / `margin-right` / `margin-bottom` / `margin-left`
 - `border-color` / `border-style` / `border-radius` / `border-image-slice`
@@ -57,7 +58,7 @@ Shorthands (expand to the properties above):
   Everything else — layout properties (`width`, `margin`, ...),
   `box-shadow`, `filter` — changes instantly; the build warns per
   property.
-- `position`: `absolute` / `relative` — `fixed` and `sticky` are build
+- `position`: `absolute` / `relative` / `static` — `fixed` and `sticky` are build
   errors.
 - `z-index`: integer only, no `auto`.
 

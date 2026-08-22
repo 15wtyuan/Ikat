@@ -59,6 +59,7 @@ public abstract class Node {
     public IReadOnlyList<Node> Query(string selector);      // ".class" / "tag.class"
 
     public AnimationHandle Play(string name);
+    public AnimationHandle Play(string name, float durationSeconds); // override the 1s default
     public void Focus();
     public void Blur();
 
@@ -114,7 +115,7 @@ public sealed class NodeStyle {
     public Length Left/Top/Right/Bottom { get; set; }
     public PositionMode Position { get; set; }
     public int ZIndex { get; set; }                      // sibling stacking, paint+hit only
-    public LoomColor BackgroundColor/LoomColor { get; set; }
+    public LoomColor BackgroundColor/TextColor { get; set; }   // text color = CSS color channel
     public float Opacity { get; set; }
     public void SetVar(string name, Length/LoomColor/float/string value);
     public void RemoveVar(string name);
@@ -143,7 +144,7 @@ public class Container : Node {
     public void SwapChildren(Node a, Node b);
     public void SwapChildrenAt(int indexA, int indexB);
     public LoomVector2 ScrollPos { get; }                    // (0,0) on non-scrolling
-    public void RestartAnimations();                     // rebuild declarative players, keep node state
+    public void RestartAnimations();                     // rebuild declarative players on this node AND its subtree; programmatic (Play) players untouched; node state kept
     public void ScrollTo(LoomVector2 pos, ScrollBehavior behavior = ScrollBehavior.Smooth);
     public event Action<ScrollChangedEvent> Scrolled;
     public UITemplate GetTemplate(string name);
@@ -300,6 +301,12 @@ Three triggers:
    Calling `Play` again with the same name is a deterministic restart
    from the beginning (replaces the previous playback of that
    animation on that node); different names coexist.
+   Duration: a keyframes block with no `animation:` declaration has no
+   declaration-level duration — `Play(name)` plays it at a fixed **1s**
+   (no delay, single iteration, normal direction, fill both, cubic-out).
+   `Play(name, durationSeconds)` overrides the 1s default.
+   CSS contrast: the `animation` shorthand defaults to 0s — the 1s
+   here is a programmatic-play default, not the CSS initial value.
 3. `Style.SetVar` (dynamic values escape hatch).
 
 Timing invariants: class / typed-style changes take effect at the next
@@ -333,7 +340,10 @@ Scheduling:
 
 ```csharp
 ui.CallLater(float delay, Action cb);   // one-shot, seconds, frame granularity
-ui.CallNextFrame(Action cb);            // one-shot next frame
+ui.CallNextFrame(Action cb);            // one-shot next frame, fires BEFORE solve
+                                        // (fresh subtree Geometry still zero there)
+ui.CallAfterLayout(Action cb);          // one-shot AFTER this frame's solve — Geometry
+                                        // of a just-instantiated subtree is solved & readable
 node.OnUpdate(Action<float> cb);        // recurring, dt = frame step
 ```
 
@@ -374,6 +384,7 @@ public sealed class UIContext {
     public T Create<T>() where T : Node;
     public void CallLater(float delay, Action callback);
     public void CallNextFrame(Action callback);
+    public void CallAfterLayout(Action callback);   // fires after this frame's solve
     public bool IsPointerOnUI { get; }
     public Node Pick(LoomVector2 globalPoint);
 }

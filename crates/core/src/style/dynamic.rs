@@ -816,7 +816,11 @@ fn apply_inline_override(style: &mut ResolvedStyle, inline: &ResolvedStyle, set:
     cpy!(taffy_style.align_items, INLINE_ALIGN_ITEMS);
     cpy!(overflow_x, INLINE_OVERFLOW_X);
     cpy!(overflow_y, INLINE_OVERFLOW_Y);
-    cpy!(taffy_style.position, INLINE_POSITION);
+    // INLINE_POSITION：apply_decl 同时设 taffy_style.position + position_declared，双字段覆盖。
+    if s & INLINE_POSITION != 0 {
+        style.taffy_style.position = inline.taffy_style.position;
+        style.position_declared = inline.position_declared;
+    }
     cpy!(taffy_style.inset.left, INLINE_LEFT);
     cpy!(taffy_style.inset.top, INLINE_TOP);
     cpy!(taffy_style.inset.right, INLINE_RIGHT);

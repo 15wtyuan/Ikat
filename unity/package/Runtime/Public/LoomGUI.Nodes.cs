@@ -314,6 +314,30 @@ namespace LoomGUI
             }
         }
 
+        /// <summary>
+        /// 同 <see cref="Play(string)"/>，显式指定时长（秒）。无 `animation:` 声明绑定的
+        /// keyframes 没有声明层时长可读——无参重载固定按 1s 播（无 delay / 单次 / normal /
+        /// fill both / cubic-out）；本重载让程序化演出的节奏由调用方精确控制。
+        /// durationSeconds ≤ 0 或 NaN 按 1s 处理。
+        /// </summary>
+        public AnimationHandle Play(string name, float durationSeconds)
+        {
+            ThrowIfDisposed();
+            if (name == null) throw new ArgumentNullException(nameof(name));
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte[] nb = Encoding.UTF8.GetBytes(name);
+            fixed (byte* np = nb)
+            {
+                ulong key = Native.loomgui_stage_play_animation_dur(h, _id, np, (nuint)nb.Length, durationSeconds);
+                if (key == 0)
+                    throw new UIContractException(
+                        $"Play(\"{name}\"): no @keyframes with this name (keyframes table lookup failed)");
+                var anim = new AnimationHandle(this, key, name);
+                _ctx.RegisterAnimation(anim);
+                return anim;
+            }
+        }
+
         // 编程聚焦节点（照 fgui RequestFocus）。直转 FFI request_focus（记 pending_focus_request，
         // 下 tick 最前消费写 scene.focused_node + 产 FocusIn/FocusOut）。文本框聚焦后才能接收
         // set_key_input / set_text_input 的输入（core input 只插焦点控件）。
@@ -692,10 +716,18 @@ namespace LoomGUI
             get => _mirror.Get<LoomColor>("background-color") ?? LoomColor.Unset;
             set => _mirror.Set("background-color", value);
         }
-        public LoomColor LoomColor
+        /// <summary>文字颜色（CSS color 通道，内联最高优先级；继承语义同 CSS——子树未显式设色时继承）。与 BackgroundColor 对称。</summary>
+        public LoomColor TextColor
         {
             get => _mirror.Get<LoomColor>("color") ?? LoomColor.Unset;
             set => _mirror.Set("color", value);
+        }
+        /// <summary>旧名（文字颜色）——N10 防 UnityEngine.Color 撞名时误把类型名当属性名，语义不直观。用 <see cref="TextColor"/>。</summary>
+        [System.Obsolete("Use TextColor (same channel, clearer name).")]
+        public LoomColor LoomColor
+        {
+            get => TextColor;
+            set => TextColor = value;
         }
         // Opacity 无 Unset 哨兵（裸 float）；getter 未写过返 default（0f）+ 不代表"显式 0"。
         // 业务语义：CSS opacity 默认 1f，但本 getter 只反映 setter 写过的值（projection §2.3 严格语义）。
@@ -3349,6 +3381,10 @@ namespace LoomGUI
         internal readonly Dictionary<uint, List<UpdateSubscription>> _updateHooks = new();
         internal readonly List<(float Due, Action Cb)> _timers = new();
         internal readonly Queue<Action> _nextFrame = new();
+        // tick 后队列（CallAfterLayout）：LoomHost.Step 在 stage tick 之后泵——新挂载
+        // 子树当帧 solve 已完成，回调里读 Geometry 拿到实测值（CallNextFrame 帧头 fire
+        // 先于 solve，新子树首读必全零）。
+        internal readonly Queue<Action> _afterLayout = new();
 
         // B3：headless harness 工厂构造。public API 无构造（业务从集成层拿现成 instance）。
         // 建 NodeRegistry 持有自身反向引用（registry 转调 FFI 时需 stage handle）。
@@ -3436,6 +3472,20 @@ namespace LoomGUI
                 // 留诊断痕迹到 Debug 输出 / Unity player log。
                 System.Diagnostics.Debug.WriteLine($"[LoomGUI] logic callback threw: {ex}");
             }
+        }
+
+        /// <summary>
+        /// tick 后泵：排空 after-layout 回调。LoomHost.Step 在 stage tick 之后调——
+        /// 本帧（含刚 Instantiate 的新子树）的 solve/world 已完成，回调里读 Geometry
+        /// 是实测值。headless 测试在 raw tick 后手动调（同 PumpLogic 模式）。
+        /// 回调内改 Style 落 mirror dirty，下帧 flush seam 过桥 + solve 生效。
+        /// </summary>
+        internal void PumpAfterLayout()
+        {
+            if (_afterLayout.Count == 0) return;
+            Action[] due = _afterLayout.ToArray();
+            _afterLayout.Clear();
+            foreach (var cb in due) InvokeLogicGuarded(cb);
         }
 
         /// <summary>注册 per-node 每帧回调（Node.OnUpdate 调）。异常隔离见 PumpLogic。</summary>
@@ -3607,8 +3657,23 @@ namespace LoomGUI
             fixed (byte* bp = bytes)
                 rc = Native.loomgui_stage_load_package(h, np, (nuint)nb.Length, bp, (nuint)bytes.Length);
             if (rc != 0)
+            {
+                // 版本错配（rc 1/2）专属文案：Unity 包与 loom.exe CLI 必须同版本同刷——
+                // 只升一侧时旧 CLI 打的 pkg 被新运行时拒载（或反之），报错须点破修法。
+                if (rc == 1 || rc == 2)
+                {
+                    uint pkgVer = Native.loomgui_stage_last_pkg_load_version(h);
+                    uint runtimeVer = Native.loomgui_pkg_format_version();
+                    string dir = rc == 1 ? "older" : "newer";
+                    throw new UIPackageException(
+                        $"load_package '{name}' failed: pkg format v{pkgVer} is {dir} than this " +
+                        $"runtime's v{runtimeVer}. The Unity package and the loom.exe CLI must be " +
+                        $"upgraded together — re-run `loom build` with the loom.exe shipped with this " +
+                        $"package version (check `.loom/loom.exe --version`).");
+                }
                 throw new UIPackageException(
                     $"load_package '{name}' failed (malformed pkg.bin / duplicate pkg id / missing resources)");
+            }
 
             _loadedPackages.Add(name);
             return new UIPackage(this, name);
@@ -3719,11 +3784,25 @@ namespace LoomGUI
         /// <summary>
         /// 下帧回调（one-shot）。下一次 PumpLogic 开头 fire（帧头语义）——回调内改 Style 走
         /// 当帧 flush seam，当帧 solve 生效。cb 抛异常被隔离（Debug 诊断）。
+        /// 注意：帧头 fire 先于 solve——刚 Instantiate 的子树在本回调里读 Geometry 仍是
+        /// 全零（首帧尚未解算）；要「挂载后拿实测几何」用 <see cref="CallAfterLayout"/>。
         /// </summary>
         public void CallNextFrame(Action cb)
         {
             if (cb == null) throw new ArgumentNullException(nameof(cb));
             _nextFrame.Enqueue(cb);
+        }
+
+        /// <summary>
+        /// 布局后回调（one-shot）。下一次 stage tick 之后 fire（本帧 solve/world 已完成）——
+        /// 刚 Instantiate/Append 的子树在本回调里读 <c>Geometry</c> 已是实测值，无需逐帧
+        /// 自旋等待。回调内改 Style 落 mirror dirty，下帧 flush + solve 生效。
+        /// 时序：Instantiate(任意时点) → 当帧或下帧 tick → 本回调 fire。cb 抛异常被隔离。
+        /// </summary>
+        public void CallAfterLayout(Action cb)
+        {
+            if (cb == null) throw new ArgumentNullException(nameof(cb));
+            _afterLayout.Enqueue(cb);
         }
 
         /// <summary>

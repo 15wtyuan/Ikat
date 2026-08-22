@@ -181,6 +181,24 @@ impl Font {
 ///
 /// v1.6：family_to_id 为每个注册 family 分配稳定 u32 id，供 atlas key 和合成
 /// image_path 用。id 在 register 时分配，不随字体表增删变化。
+/// 缺字诊断日志（tofu 取证）：`FontStack::pick` 全链（主字体 + 回退链）都缺某字时
+/// 记录 (主 family, char)。会话级去重（同 family+char 只记一次）；pending 由宿主
+/// 经 `take_missing_glyph_reports` 取走转引擎日志。tofu 框是开发期故意暴露的信号，
+/// 本日志把「哪个字符、哪个字体族」在 Console 点名，免肉眼猜。
+#[derive(Default)]
+pub struct MissingGlyphLog {
+    pending: Vec<(String, char)>,
+    seen: std::collections::HashSet<(String, char)>,
+}
+
+impl MissingGlyphLog {
+    fn record(&mut self, family: &str, ch: char) {
+        if self.seen.insert((family.to_string(), ch)) {
+            self.pending.push((family.to_string(), ch));
+        }
+    }
+}
+
 pub struct FontTable {
     pub(crate) fonts: HashMap<String, Arc<Font>>,
     pub(crate) default_family: Option<String>,
@@ -190,6 +208,8 @@ pub struct FontTable {
     /// source-agnostic：这里只存 family 名，不问字体来源（bundled / 后端喂的系统字体都一样）。
     /// 由 `set_fallback_families` 单独设，与 `register` 解耦——避免改 register 签名连锁改调用点。
     pub(crate) fallback_families: Vec<String>,
+    /// 缺字诊断（RefCell：measure 闭包持 `&FontTable` 不可变借用，经内部可变性记录）。
+    pub(crate) missing_log: std::cell::RefCell<MissingGlyphLog>,
 }
 
 impl Default for FontTable {
@@ -206,6 +226,7 @@ impl FontTable {
             family_to_id: HashMap::new(),
             next_id: 0,
             fallback_families: Vec::new(),
+            missing_log: std::cell::RefCell::new(MissingGlyphLog::default()),
         }
     }
 
@@ -285,10 +306,12 @@ impl FontTable {
 
     /// 为某主 family 构造 shaping 用的 FontStack（主字体 + 回退链 slice）。
     /// 调用方持 `fonts` 借用期间 stack 有效。
-    pub fn stack_for(&self, family: Option<&str>) -> FontStack<'_> {
+    pub fn stack_for<'a>(&'a self, family: Option<&'a str>) -> FontStack<'a> {
         FontStack {
             primary: self.select(family),
             primary_id: self.font_id(family),
+            primary_family: self.effective_family_name(family),
+            log: Some(&self.missing_log),
             fallbacks: self
                 .fallback_families
                 .iter()
@@ -299,6 +322,36 @@ impl FontTable {
                 })
                 .collect(),
         }
+    }
+
+    /// 主 family 实际生效名：显式命中用之；未命中 / None → default 名。
+    /// select 同款 fallback 语义，仅供诊断日志报「哪个 family 缺字」。
+    fn effective_family_name<'a>(&'a self, family: Option<&'a str>) -> &'a str {
+        match family {
+            Some(f) if self.fonts.contains_key(f) => f,
+            _ => self
+                .default_family
+                .as_deref()
+                .expect("no default font registered"),
+        }
+    }
+
+    /// 取走自上次调用以来新发现的缺字记录（会话级去重：同 family+char 只报一次，
+    /// 不因未及时取而重复刷屏）。每条已格式化为可读诊断行，宿主转引擎日志。
+    pub fn take_missing_glyph_reports(&mut self) -> Vec<String> {
+        self.missing_log
+            .get_mut()
+            .pending
+            .drain(..)
+            .map(|(family, ch)| {
+                format!(
+                    "font-family \"{family}\" has no glyph for '{ch}' (U+{:04X}); \
+fallback chain exhausted, drawn as tofu box. Fix: `loom font add` a font \
+containing it with --fallback, or replace the character.",
+                    ch as u32
+                )
+            })
+            .collect()
     }
 }
 
@@ -312,20 +365,27 @@ impl FontTable {
 pub struct FontStack<'a> {
     pub primary: &'a Font,
     pub primary_id: u32,
+    /// 主 family 实际生效名（缺字诊断用；single() 测试栈为空串）。
+    pub primary_family: &'a str,
+    /// 缺字日志（FontTable 持有；single() 测试栈无）。
+    log: Option<&'a std::cell::RefCell<MissingGlyphLog>>,
     pub fallbacks: Vec<(&'a Font, u32)>,
 }
 
 impl<'a> FontStack<'a> {
-    /// 单字体栈（无回退）。测试 + 未配回退时用。
+    /// 单字体栈（无回退、无诊断）。测试 + 未配回退时用。
     pub fn single(font: &'a Font, id: u32) -> Self {
         FontStack {
             primary: font,
             primary_id: id,
+            primary_family: "",
+            log: None,
             fallbacks: Vec::new(),
         }
     }
 
     /// 选含 ch 的字体：主字体优先，否则遍历回退链首个命中；全无返主字体（画 replacement）。
+    /// 全链缺字时记入缺字日志（tofu 取证：family + char，会话级去重）。
     pub fn pick(&self, ch: char) -> (&'a Font, u32) {
         if self.primary.face.glyph_index(ch).is_some() {
             return (self.primary, self.primary_id);
@@ -334,6 +394,9 @@ impl<'a> FontStack<'a> {
             if f.face.glyph_index(ch).is_some() {
                 return (*f, *id);
             }
+        }
+        if let Some(log) = self.log {
+            log.borrow_mut().record(self.primary_family, ch);
         }
         (self.primary, self.primary_id)
     }
@@ -1235,6 +1298,68 @@ mod tests {
     }
 
     // ── \n 剥离（tofu 修复）：mandatory 段尾 \n 不进 glyph 流 ──
+
+    /// tofu 取证日志：pick 全链缺字记录（family+char）、会话级去重、take 排空。
+    /// 回退链覆盖的字不算缺（不画 tofu）；清空回退后同字才进报告。
+    #[test]
+    fn missing_glyph_pick_records_dedups_and_drains() {
+        let dejavu = format!(
+            "{}/tests/fixtures/DejaVuSans.ttf",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let wqy = format!(
+            "{}/tests/fixtures/wqy-microhei.ttc",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let (Some(dj_bytes), Some(wk_bytes)) =
+            (std::fs::read(&dejavu).ok(), std::fs::read(&wqy).ok())
+        else {
+            return; // fixture 缺则跳过
+        };
+        let mut ft = FontTable::new();
+        ft.register("DejaVu", dj_bytes, true).unwrap();
+        ft.register("WQY", wk_bytes, false).unwrap();
+
+        // 有字 / 回退覆盖：不记录。
+        let stack = ft.stack_for(Some("DejaVu"));
+        stack.pick('a');
+        ft.set_fallback_families(&["WQY".to_string()]);
+        let stack = ft.stack_for(Some("DejaVu"));
+        stack.pick('中'); // DejaVu 缺，WQY 补上 → 无 tofu，不记录
+        assert!(ft.take_missing_glyph_reports().is_empty());
+
+        // 无回退：全链缺 → 记录一次，重复 pick 去重。
+        ft.set_fallback_families(&[]);
+        let stack = ft.stack_for(Some("DejaVu"));
+        stack.pick('中');
+        stack.pick('中');
+        let reports = ft.take_missing_glyph_reports();
+        assert_eq!(reports.len(), 1, "same family+char deduped: {reports:?}");
+        assert!(
+            reports[0].contains("DejaVu"),
+            "names the family: {}",
+            reports[0]
+        );
+        assert!(
+            reports[0].contains("U+4E2D"),
+            "names the codepoint: {}",
+            reports[0]
+        );
+        assert!(
+            ft.take_missing_glyph_reports().is_empty(),
+            "take drains pending"
+        );
+
+        // 未命中 family → 按实际生效（default）名记录。换字避开会话去重（'中' 已报过）。
+        let stack = ft.stack_for(Some("NoSuchFamily"));
+        stack.pick('あ');
+        let reports = ft.take_missing_glyph_reports();
+        assert!(
+            reports[0].contains("DejaVu"),
+            "unknown family reports default: {}",
+            reports[0]
+        );
+    }
 
     #[test]
     fn newline_produces_line_break_not_tofu_glyph() {
@@ -2371,6 +2496,8 @@ mod tests {
         let stack = FontStack {
             primary: &primary,
             primary_id: 0,
+            primary_family: "",
+            log: None,
             fallbacks: vec![(&cjk, 1)],
         };
         let lay = measure_text(

@@ -42,9 +42,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 39; // v39: TweenProp 加 Transform 变体（transition: transform，旧 v38 runtime 读 v39 报 TooNew）
-pub(crate) const MIN_VERSION: u32 = 39;
-pub(crate) const MAX_VERSION: u32 = 39;
+pub const PKG_FORMAT_VERSION: u32 = 40; // v40: ResolvedStyle 加 position_declared（absolute 包含块语义，旧 v39 pkg 加载报 TooOld）
+pub(crate) const MIN_VERSION: u32 = 40;
+pub(crate) const MAX_VERSION: u32 = 40;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────

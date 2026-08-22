@@ -6,7 +6,9 @@
 //! Play 都叠加写同通道且 player 无限累积，最终值取决于 slotmap 槽序——第二次起视觉上
 //! "静默无效"。
 
-use loomgui_core::scene::animation::{play_programmatic, update_all};
+use loomgui_core::scene::animation::{
+    play_programmatic, play_programmatic_with_duration, update_all,
+};
 use loomgui_core::scene::{
     AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, Node, NodeId, NodeKind,
     PlayerPlayState, Scene, TransformAnim,
@@ -227,4 +229,32 @@ fn playing_different_name_same_channel_is_replaced() {
     tick(&mut scene, 0.5);
     let mid = anim_translate_x(&scene, node);
     assert!(mid > 0.0 && mid < 100.0, "接管者须实际推进，mid = {mid}");
+}
+
+/// 显式时长（Play(name, duration) 重载）：0.3s 播完（半途 0.15s 走到一半）；
+/// ≤0 / NaN 按 1s 默认兜底。
+#[test]
+fn explicit_duration_controls_programmatic_playback() {
+    let (mut scene, node) = scene_with_node();
+    scene.keyframes.insert("lunge".into(), lunge());
+
+    let _ = play_programmatic_with_duration(&mut scene, node, "lunge", 0.3).expect("play");
+    assert_eq!(anim_translate_x(&scene, node), 0.0);
+    tick(&mut scene, 0.15); // 0.3s 的正中
+    let mid = anim_translate_x(&scene, node);
+    // cubic-out 半程进度 = 1-(1-0.5)^3 = 0.875。
+    assert!(
+        (mid - 87.5).abs() < 3.0,
+        "halfway of a 0.3s run ≈ 87.5 (cubic-out), got {mid}"
+    );
+    tick(&mut scene, 0.2); // 总计 0.35s > 0.3s → 终态（fill both 保持）
+    assert_eq!(anim_translate_x(&scene, node), 100.0);
+
+    // 非法时长按 1s 默认：0.15s 处仍在半途之前（默认 1s 的 15% ≈ 中段之前）。
+    let (mut scene2, node2) = scene_with_node();
+    scene2.keyframes.insert("lunge".into(), lunge());
+    let _ = play_programmatic_with_duration(&mut scene2, node2, "lunge", 0.0).expect("play");
+    tick(&mut scene2, 0.15);
+    let v = anim_translate_x(&scene2, node2);
+    assert!(v < 50.0, "0-duration falls back to 1s default, got {v}");
 }

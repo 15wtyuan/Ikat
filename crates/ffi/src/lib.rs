@@ -168,7 +168,10 @@ pub extern "C" fn loomgui_stage_free(h: *mut StageHandle) {
 }
 
 /// 装载二进制包（spec §12/§13）。name = 包名（进 packages 字典 key），bytes = .pkg.bin。
-/// 0=ok，-1=err。null 句柄/空指针返回 -1。包是 Rust-internal，C# 只透传 bytes（不解析）。
+/// 0=ok；1=pkg 格式版本过旧（TooOld）；2=过新（TooNew）；-1=其他 err（null/UTF-8/损坏）。
+/// 版本错配时用 `loomgui_stage_last_pkg_load_version` 取 pkg 声明的版本、
+/// `loomgui_pkg_format_version` 取运行时版本，给「Unity 包与 loom.exe 同版本重打」的专属指引。
+/// 包是 Rust-internal，C# 只透传 bytes（不解析）。
 ///
 /// FFI 签名带 name 参数（对齐 `Stage::load_package(name, bytes)`）。
 /// load_package 只进资源池不建 scene——Unity 侧需先 create_root 建 scene 再 instantiate 建内容。
@@ -191,11 +194,38 @@ pub extern "C" fn loomgui_stage_load_package(
             Err(_) => return -1,
         };
         let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len) };
+        sh.stage.last_pkg_load_version = 0;
         match sh.stage.load_package(name, bytes) {
             Ok(()) => 0,
+            Err(loomgui_core::stage::LoadPkgError::TooOld { pkg, .. }) => {
+                sh.stage.last_pkg_load_version = pkg;
+                1
+            }
+            Err(loomgui_core::stage::LoadPkgError::TooNew { pkg, .. }) => {
+                sh.stage.last_pkg_load_version = pkg;
+                2
+            }
             Err(_) => -1,
         }
     })
+}
+
+/// 最近一次 load_package 失败的 pkg 声明格式版本（0=无/非版本错）。
+/// 配合 `loomgui_stage_load_package` 返回码 1/2 使用。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_last_pkg_load_version(h: *const StageHandle) -> u32 {
+    ffi_guard(0, || {
+        if h.is_null() {
+            return 0;
+        }
+        unsafe { (*h).stage.last_pkg_load_version }
+    })
+}
+
+/// 运行时（本 dll）支持的 pkg 格式版本。pkg 错配诊断用。
+#[no_mangle]
+pub extern "C" fn loomgui_pkg_format_version() -> u32 {
+    loomgui_core::asset::PKG_FORMAT_VERSION
 }
 
 /// 卸载包：从 Rust stage 移除模板注册（prefab 删除语义——已实例化活节点不受影响）。
@@ -759,6 +789,35 @@ pub extern "C" fn loomgui_make_test_pkg(
         unsafe {
             *out_len = len;
         }
+        ptr
+    })
+}
+
+/// 取走缺字诊断报告（tofu 取证）：shaping 全链（主字体+回退）缺字记录，每行一条
+/// （family + 字符 + 码位 + 修法）。返回堆分配 UTF-8 buffer（含尾部 NUL），调用方用
+/// `loomgui_bytes_free` 释放；无新记录 → null（*out_len=0）。会话级去重（同 family+char
+/// 只报一次），pending 累积不丢。宿主每帧 tick 后调。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_take_missing_glyphs(
+    h: *mut StageHandle,
+    out_len: *mut usize,
+) -> *mut u8 {
+    ffi_guard(std::ptr::null_mut(), || {
+        if h.is_null() || out_len.is_null() {
+            return std::ptr::null_mut();
+        }
+        let sh = unsafe { &mut *h };
+        let reports = sh.stage.take_missing_glyph_reports();
+        if reports.is_empty() {
+            unsafe { *out_len = 0 };
+            return std::ptr::null_mut();
+        }
+        let mut s = reports.join("\n");
+        s.push('\0');
+        let bytes = s.into_bytes();
+        unsafe { *out_len = bytes.len() };
+        let ptr = bytes.as_ptr() as *mut u8;
+        std::mem::forget(bytes);
         ptr
     })
 }
@@ -1664,6 +1723,46 @@ pub extern "C" fn loomgui_stage_play_animation(
             return INVALID;
         };
         match loomgui_core::scene::animation::play_programmatic(scene, NodeId(node), name) {
+            Some(k) => player_key_as_u64(k),
+            None => INVALID,
+        }
+    })
+}
+
+/// 同 `loomgui_stage_play_animation`，显式指定时长（秒）。duration_s ≤ 0 / NaN 按 1s
+/// 默认。C# `Play(name, durationSeconds)` 重载走此入口——无 `animation:` 声明绑定的
+/// keyframes 无声明层时长，程序化播放节奏由调用方给。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_play_animation_dur(
+    h: *mut StageHandle,
+    node: u32,
+    name: *const u8,
+    name_len: usize,
+    duration_s: f32,
+) -> u64 {
+    ffi_guard(u64::MAX, || {
+        const INVALID: u64 = 0;
+        if h.is_null() {
+            return INVALID;
+        }
+        let sh = unsafe { &mut *h };
+        let name = if name.is_null() || name_len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(name, name_len) }) {
+                Ok(s) => s,
+                Err(_) => return INVALID,
+            }
+        };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return INVALID;
+        };
+        match loomgui_core::scene::animation::play_programmatic_with_duration(
+            scene,
+            NodeId(node),
+            name,
+            duration_s,
+        ) {
             Some(k) => player_key_as_u64(k),
             None => INVALID,
         }

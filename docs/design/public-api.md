@@ -106,6 +106,7 @@ public abstract class Node {
     public IReadOnlyList<Node> Query(string selector);      // ".class" / "tag.class"，文档序
 
     public AnimationHandle Play(string name);
+    public AnimationHandle Play(string name, float durationSeconds); // 无声明 keyframes 默认 1s，此重载覆盖
     public void Focus();
     public void Blur();
 
@@ -137,7 +138,7 @@ public sealed class NodeStyle {
     public Length Left/Top/Right/Bottom { get; set; }
     public PositionMode Position { get; set; }
     public int ZIndex { get; set; }                   // 兄弟层叠序（CSS z-index）：绘制/命中层，不改 flex 排列
-    public LoomColor BackgroundColor/LoomColor { get; set; }
+    public LoomColor BackgroundColor/TextColor { get; set; }   // TextColor = 文字色（CSS color 通道；旧名 LoomColor 已 Obsolete）
     public float Opacity { get; set; }
     public void SetVar(string name, Length/LoomColor/float/string value);
     public void RemoveVar(string name);
@@ -415,7 +416,8 @@ class 触发的动画无句柄，只走 EventBus 全局 `On<T>` 广播；`Play` 
 
 ```csharp
 ui.CallLater(float delay, Action cb);    // one-shot 延迟（秒，帧级粒度；d≤0 视为下一帧）
-ui.CallNextFrame(Action cb);             // one-shot 下一帧
+ui.CallNextFrame(Action cb);             // one-shot 下一帧（帧头 fire，先于 solve——新挂载子树 Geometry 仍全零）
+ui.CallAfterLayout(Action cb);            // one-shot 当帧 solve 之后 fire（刚 Instantiate 的子树 Geometry 已实测可读，免自旋）
 node.OnUpdate(Action<float> cb);         // recurring 每帧（返回 IDisposable；dt = Step 帧时长）
 ```
 
@@ -472,6 +474,7 @@ public sealed class UIContext {
     public T Create<T>() where T : Node;
     public void CallLater(float delay, Action callback);
     public void CallNextFrame(Action callback);
+    public void CallAfterLayout(Action callback);  // tick 后泵（LoomHost.Step 在 stage tick 之后调）
     public bool IsPointerOnUI { get; }
     public Node Pick(LoomVector2 globalPoint);
 }

@@ -111,9 +111,13 @@ public class GameUI : MonoBehaviour
   `BindItem`, visual state via `node.Classes.Add(...)`, show/hide via
   `node.Style.Display = DisplayMode.None` (collapses layout + removes
   hit-testing; `DisplayMode.Block` / `Flex` restores — no need to
-  hand-roll `.hide` classes), animations via `node.Play("name")`,
-  per-node logic via `node.OnUpdate(dt)` and `driver.Context.CallLater` /
-  `CallNextFrame`. Inline style overrides sit on `node.Style.*`.
+  hand-roll `.hide` classes), animations via `node.Play("name")`
+  (no-declaration keyframes play at a fixed 1s; `Play(name, seconds)`
+  overrides), text color inline via `node.Style.TextColor`, per-node
+  logic via `node.OnUpdate(dt)` and `driver.Context.CallLater` /
+  `CallNextFrame` (fires before solve — fresh-subtree Geometry is still
+  zero there; use `CallAfterLayout` to read solved Geometry the same
+  frame). Inline style overrides sit on `node.Style.*`.
 - **Lifecycle.** `_page.Dispose()` recursively destroys the subtree and
   clears event subscriptions. Page-swap pattern: Dispose old →
   Instantiate new → re-wire. Runtime package load/unload:
@@ -184,6 +188,7 @@ Subclass `LoomStageDriver` and override the virtual loading hooks
 | Page blank | artifacts stale or font missing → `loom build`; register a default font |
 | `Get<T>` throws `UIContractException` | id missing/renamed in HTML, or lookup crossing a component boundary → fix the contract (both sides), or go through the host node |
 | Text renders but looks wrong | font fallback missing glyphs → register a `--fallback` font |
+| Tofu boxes (□) in text | the Console logs every missing glyph as `[LoomGUI] missing glyphs (tofu): font-family "X" has no glyph for 'c' (U+....)` — fix by registering a font containing it with `--fallback`, or change the text |
 | Clicks pass through UI to 3D | expected — LoomGUI never blocks input → gate your raycasts on `IsPointerOnUI` |
 | Page looks wrong at runtime | press F8, read the core-vs-mirror dump → if core dump is wrong it's a workspace/layout issue, if only Unity differs it's a backend issue |
 

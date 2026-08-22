@@ -221,8 +221,9 @@ CSS 在围栏中以三个正交维度建模：
 
 **定位**
 
-- `position`（`absolute` / `relative`）
+- `position`（`absolute` / `relative` / `static`；初始值 `static`）
 - `top`, `right`, `bottom`, `left`
+- **absolute 包含块 = 最近 positioned 祖先**（声明了 `relative`/`absolute` 的最近祖先，浏览器语义）；无 positioned 祖先时 = 初始包含块（视口）。已知限制：inset 全 `auto` 的 absolute 保持直接父的静态位置（浏览器 hypothetical-box 语义不做）；overflow 裁剪链仍随 DOM 祖先（含块在 overflow 祖先之上的逃逸裁剪不实现）——游戏 UI 罕见形态
 
 **盒模型**
 

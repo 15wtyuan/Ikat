@@ -78,7 +78,7 @@ namespace LoomGUI.HeadlessTests
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
                 Assert.True(n.Style.BackgroundColor.IsUnset);
-                Assert.True(n.Style.LoomColor.IsUnset);
+                Assert.True(n.Style.TextColor.IsUnset);
                 Assert.Equal(DisplayMode.Unset, n.Style.Display);
                 Assert.Equal(FlexDirection.Unset, n.Style.FlexDirection);
                 Assert.Equal(Overflow.Unset, n.Style.OverflowX);

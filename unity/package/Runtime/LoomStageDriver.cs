@@ -212,6 +212,9 @@ namespace LoomGUI
                 Debug.LogError($"[LoomStageDriver] LoomHost construct failed: {e.Message}");
                 return;
             }
+            // 缺字诊断（tofu 取证）：core 每帧报全链缺字（family + 字符 + 码位 + 修法），
+            // Console 一行点名——tofu 框是开发期故意暴露的信号，本日志把它变成可查的。
+            _host.MissingGlyphReport += msg => Debug.LogWarning($"[LoomGUI] missing glyphs (tofu):\n{msg}");
 
             // 引擎根注入：MirrorPool/NativeHost 镜像 GO 挂此 root（transform）。
             // backend.SetRuntimeRoot 设 backend._renderRoot + _inputCollector；

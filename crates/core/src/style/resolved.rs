@@ -204,6 +204,19 @@ pub enum DisplayMode {
     None = 2,
 }
 
+/// 作者声明的 `position` 值（区别于 taffy 枚举的关键：taffy `Position::Relative` 是
+/// 布局默认值，「声明了 relative」与「从未声明」在 taffy 侧不可区分）。布局层用它在
+/// 建树时识别 positioned 节点——absolute 子项的包含块 = 最近 positioned 祖先
+/// （CSS 浏览器语义；声明 relative/absolute 即成为后代的包含块候选）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum PositionDeclared {
+    #[default]
+    Static = 0,
+    Relative = 1,
+    Absolute = 2,
+}
+
 /// CSS border-radius 单角半径。
 /// (h, v) = (水平, 垂直) 半径，存 CSS 原始值（px/%），渲染期 resolve 成像素。
 /// `/` 省略时 v = h（正圆角）。
@@ -297,6 +310,9 @@ pub enum BorderStyle {
 pub struct ResolvedStyle {
     /// taffy 布局字段（flex/padding/margin/size/min/max/gap/position 等）
     pub taffy_style: TaffyStyle,
+    /// 作者声明的 position（Static=未声明）。与 taffy_style.position 并行设置——
+    /// 见 [`PositionDeclared`]：布局层据此识别 absolute 子项的包含块候选。
+    pub position_declared: PositionDeclared,
     /// CSS display 的 LoomGUI 旁路标记（与 taffy_style.display 解耦）。
     pub display_mode: DisplayMode,
     /// 视觉字段（不进 taffy，渲染层消费）
@@ -446,6 +462,7 @@ impl Default for ResolvedStyle {
         // initial value (Row), same as taffy's own default.
         Self {
             taffy_style: TaffyStyle::DEFAULT,
+            position_declared: PositionDeclared::Static,
             // display fields (display_mode + taffy_style.display) here are Flex
             // (= taffy's own DEFAULT). They do NOT decide a real node's display:
             //   - packed (pkg) nodes: css_resolve bakes the tag's DisplayDefault

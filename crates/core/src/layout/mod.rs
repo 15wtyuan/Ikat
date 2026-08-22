@@ -132,6 +132,9 @@ pub fn solve(
     // **容量而非存活数**：remove_node 后 slotmap idx 不变但存活数减——按 len 分配会越界。
     let mut taffy_ids: Vec<Option<taffy::NodeId>> = vec![None; scene.nodes.capacity() + 1];
 
+    /// 返回 (自身 tid, 冒泡中的 absolute escapee tids)。escapee = 「声明 absolute 且
+    /// 任一 inset 显式」的子项，其 taffy 父不是 scene 父而是最近 positioned 祖先——
+    /// 未遇到 positioned 祖先前随递归向上冒泡，positioned 节点收编（含根兜底）。
     fn build(
         scene: &Scene,
         tree: &mut TaffyTree<MeasureContext>,
@@ -139,7 +142,7 @@ pub fn solve(
         id: NodeId,
         parent_overflow: bool,
         image_sizes: &ImageSizeTable,
-    ) -> taffy::NodeId {
+    ) -> (taffy::NodeId, Vec<taffy::NodeId>) {
         let node = scene.get_live(id, "layout/build");
         let mut style = node.style.taffy_style.clone();
         // overflow != visible → 设 taffy overflow，让 flex automatic min-size=0（CSS flex §4.5）。
@@ -291,15 +294,39 @@ pub fn solve(
         // rich-text-block：inline 子已被 compile_rich_runs 折进 RichText 叶子测，
         // **不递归进 taffy**——它们的 taffy_ids 保持 None，write_back 跳过、layout_rect
         // 保持默认 0（它们渲染进父 mesh，无独立 box；T7 render 消费 text_layouts[父]）。
-        let children_ids: Vec<taffy::NodeId> = if node.rich_text_block {
-            Vec::new()
-        } else {
-            node.children
-                .iter()
-                .filter(|c| !is_whitespace_only_text(scene, **c))
-                .map(|c| build(scene, tree, taffy_ids, *c, self_overflow, image_sizes))
-                .collect()
-        };
+        // absolute 包含块（CSS 浏览器语义）：声明 absolute 且任一 inset 显式的子项，
+        // taffy 父挂最近 positioned 祖先（position_declared != Static）而非 scene 父——
+        // taffy 0.12 原生只按直接父布局 absolute，无「最近 positioned 祖先」概念，这里在
+        // 建树期重挂补齐。inset 全 auto 的 absolute 保持直接父（浏览器 hypothetical-box
+        // 静态位置语义不做，见 fence 文档已知限制）。
+        let positioned =
+            node.style.position_declared != crate::style::resolved::PositionDeclared::Static;
+        let mut children_ids: Vec<taffy::NodeId> = Vec::new();
+        let mut escaped: Vec<taffy::NodeId> = Vec::new();
+        if !node.rich_text_block {
+            for c in node.children.iter() {
+                if is_whitespace_only_text(scene, *c) {
+                    continue;
+                }
+                let (ctid, cesc) = build(scene, tree, taffy_ids, *c, self_overflow, image_sizes);
+                escaped.extend(cesc); // 下层冒上来的，随本层定位性收编或继续上浮
+                let child = scene.get_live(*c, "layout/build");
+                let abs_escapee = child.style.taffy_style.position
+                    == taffy::style::Position::Absolute
+                    && child.style.position_declared
+                        == crate::style::resolved::PositionDeclared::Absolute
+                    && inset_any_explicit(&child.style.taffy_style.inset);
+                if abs_escapee && !positioned {
+                    escaped.push(ctid); // 本层非 positioned：继续向包含块候选上浮
+                } else {
+                    children_ids.push(ctid); // 含「absolute 子的包含块就是本层」的情形
+                }
+            }
+        }
+        if positioned {
+            // 本层是包含块候选：收编全部下浮 escapee，一并挂名下（taffy 按 absolute 通道布局）。
+            children_ids.append(&mut escaped);
+        }
 
         let tid = if let Some(mctx) = ctx {
             // min-width=0 让 flex-shrink 生效：taffy 默认 min-size:auto 会把 measure(None) 的
@@ -318,10 +345,19 @@ pub fn solve(
             tree.new_with_children(style, &children_ids).unwrap()
         };
         taffy_ids[id.index()] = Some(tid);
-        tid
+        (tid, escaped)
     }
 
-    let root_tid = build(
+    /// 任一 inset 边显式（非 auto）——absolute escapee 的判定条件之一。
+    fn inset_any_explicit(
+        inset: &taffy::geometry::Rect<taffy::style::LengthPercentageAuto>,
+    ) -> bool {
+        use taffy::style::LengthPercentageAuto;
+        let auto = LengthPercentageAuto::AUTO;
+        inset.left != auto || inset.right != auto || inset.top != auto || inset.bottom != auto
+    }
+
+    let (root_tid, escaped) = build(
         scene,
         &mut taffy_tree,
         &mut taffy_ids,
@@ -329,6 +365,12 @@ pub fn solve(
         false,
         image_sizes,
     );
+    // 根收编余下 escapee：无任何 positioned 祖先时包含块 = 初始包含块（视口），CSS 语义。
+    if !escaped.is_empty() {
+        let mut kids = taffy_tree.children(root_tid).unwrap_or_default();
+        kids.extend(escaped);
+        taffy_tree.set_children(root_tid, &kids).unwrap();
+    }
 
     // taffy NodeId → scene NodeId 反查，供 measure 闭包按 taffy nid 把 TextLayout
     // 存进 scene 索引的 text_layouts。render 复用，消除 layout/render 双测量不一致。
@@ -596,13 +638,36 @@ pub fn solve(
         )
         .ok();
 
-    // 回写 layout_rect + clip_rect（递归累加父 origin 得绝对坐标）。
+    // taffy 树绝对坐标预计算：absolute escapee 的 taffy 父 ≠ scene 父，layout.location
+    // 相对的是 taffy 父——scene 递归累加父 origin 的旧算法对重挂节点会错位。沿 taffy
+    // 树一次性累加得每节点绝对坐标（非重挂时与 scene 树累加同值，两树同构）。
+    let mut taffy_abs: HashMap<taffy::NodeId, (f32, f32)> = HashMap::new();
+    fn walk_taffy_abs(
+        tree: &TaffyTree<MeasureContext>,
+        tid: taffy::NodeId,
+        origin: (f32, f32),
+        out: &mut HashMap<taffy::NodeId, (f32, f32)>,
+    ) {
+        let Ok(layout) = tree.layout(tid) else {
+            return;
+        };
+        let abs = (origin.0 + layout.location.x, origin.1 + layout.location.y);
+        out.insert(tid, abs);
+        if let Ok(kids) = tree.children(tid) {
+            for c in kids {
+                walk_taffy_abs(tree, c, abs, out);
+            }
+        }
+    }
+    walk_taffy_abs(&taffy_tree, root_tid, (0.0, 0.0), &mut taffy_abs);
+
+    // 回写 layout_rect + clip_rect（绝对坐标取 taffy 树累加值）。
     fn write_back(
         scene: &mut Scene,
         tree: &TaffyTree<MeasureContext>,
         taffy_ids: &[Option<taffy::NodeId>],
+        taffy_abs: &HashMap<taffy::NodeId, (f32, f32)>,
         id: NodeId,
-        parent_origin: (f32, f32),
     ) {
         // 被过滤的节点（纯空白 TextNode）：taffy_ids 槽为 None，layout_rect 保持默认 0。
         // 早返，跳过 solve 结果回写——但递归子节点（无，TextNode 是叶子），安全。
@@ -611,8 +676,10 @@ pub fn solve(
             None => return,
         };
         let layout = tree.layout(tid).unwrap();
-        let x = parent_origin.0 + layout.location.x;
-        let y = parent_origin.1 + layout.location.y;
+        let (x, y) = taffy_abs
+            .get(&tid)
+            .copied()
+            .unwrap_or((layout.location.x, layout.location.y));
         let (w, h) = (layout.size.width, layout.size.height);
         let node = scene.get_live_mut(id, "layout/write_back");
         node.layout_rect = Rect { x, y, w, h };
@@ -630,10 +697,10 @@ pub fn solve(
         };
         let kids = node.children.clone();
         for c in kids {
-            write_back(scene, tree, taffy_ids, c, (x, y));
+            write_back(scene, tree, taffy_ids, taffy_abs, c);
         }
     }
-    write_back(scene, &taffy_tree, &taffy_ids, scene.roots[0], (0.0, 0.0));
+    write_back(scene, &taffy_tree, &taffy_ids, &taffy_abs, scene.roots[0]);
     // layout 阶段 TextLayout 缓存交还 scene，供 render 复用（不重测）。
     scene.text_layouts = text_layouts;
     // measure memo 写回（跨帧持久）。
@@ -719,6 +786,137 @@ mod tests {
             r.w
         );
         assert!((r.h - 50.0).abs() < 0.1, "CSS length 赢：h=50，got {}", r.h);
+    }
+
+    // ── absolute 包含块（CSS 浏览器语义：最近 positioned 祖先）──
+
+    /// 辅助：手搓 .screen > .wrap(relative, margin-left) > .card > btn(absolute) 形态。
+    /// 返回 (scene, btn NodeId)。wrap_off = wrap 相对根的 x 偏移（margin 实现）。
+    fn abs_containing_block_scene(
+        wrap_relative: bool,
+        mid_relative: bool,
+        btn_inset: bool,
+    ) -> (Scene, crate::scene::NodeId) {
+        use crate::style::resolved::PositionDeclared;
+        use taffy::style::LengthPercentageAuto;
+
+        let mut wrap_style = ResolvedStyle::default();
+        wrap_style.taffy_style.size.width = Dimension::length(500.0);
+        wrap_style.taffy_style.size.height = Dimension::length(400.0);
+        wrap_style.taffy_style.margin.left = LengthPercentageAuto::length(100.0);
+        if wrap_relative {
+            wrap_style.position_declared = PositionDeclared::Relative;
+        }
+
+        let mut mid_style = ResolvedStyle::default(); // card：无定位
+        mid_style.taffy_style.size.width = Dimension::length(200.0);
+        mid_style.taffy_style.size.height = Dimension::length(100.0);
+        if mid_relative {
+            mid_style.taffy_style.margin.top = LengthPercentageAuto::length(30.0);
+            mid_style.position_declared = PositionDeclared::Relative;
+        }
+
+        let mut btn_style = ResolvedStyle::default();
+        btn_style.taffy_style.position = taffy::style::Position::Absolute;
+        btn_style.position_declared = PositionDeclared::Absolute;
+        btn_style.taffy_style.size.width = Dimension::length(20.0);
+        btn_style.taffy_style.size.height = Dimension::length(10.0);
+        if btn_inset {
+            btn_style.taffy_style.inset.top = LengthPercentageAuto::length(40.0);
+            btn_style.taffy_style.inset.right = LengthPercentageAuto::length(56.0);
+        }
+
+        let e = |p, kind, st| (p, kind, st, Vec::new(), None, false, None, None, None, None);
+        let entries = [
+            e(None, NodeKind::Container, ResolvedStyle::default()),
+            e(Some(0), NodeKind::Container, wrap_style),
+            e(Some(1), NodeKind::Container, mid_style),
+            e(Some(2), NodeKind::Container, btn_style),
+        ];
+        let scene = Scene::build(&entries);
+        let root = scene.roots[0];
+        let wrap = scene.get(root).unwrap().children[0];
+        let card = scene.get(wrap).unwrap().children[0];
+        let btn = scene.get(card).unwrap().children[0];
+        (scene, btn)
+    }
+
+    /// Tripawd N24 形态：btn 的包含块 = 最近 positioned 祖先 .wrap（非直接父 .card）。
+    /// 浏览器：x = wrap.x + wrap.w - right - btn.w；旧实现（直接父）= card.x + card.w - ...
+    #[test]
+    fn absolute_resolves_against_nearest_positioned_ancestor() {
+        let (mut scene, btn) = abs_containing_block_scene(true, false, true);
+        let fonts = FontTable::new();
+        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+        let r = scene.get(btn).unwrap().layout_rect;
+        let expect_x = 100.0 + 500.0 - 56.0 - 20.0; // wrap 右内缘 - right - 宽
+        assert!(
+            (r.x - expect_x).abs() < 0.5,
+            "包含块 = wrap：x≈{expect_x}（直接父 card 会得 ≈224），got {}",
+            r.x
+        );
+        assert!(
+            (r.y - 40.0).abs() < 0.5,
+            "top 相对 wrap 顶部（wrap 无上偏移），got {}",
+            r.y
+        );
+    }
+
+    /// 中间还有一个 positioned 节点时，最近者胜（mid.margin-top=30 参与坐标）。
+    #[test]
+    fn absolute_nearest_positioned_wins_over_outer_one() {
+        let (mut scene, btn) = abs_containing_block_scene(true, true, true);
+        let fonts = FontTable::new();
+        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+        let r = scene.get(btn).unwrap().layout_rect;
+        // mid 含上边距 30：top 相对 mid（border box 顶）= 30 + 40 = 70。
+        assert!(
+            (r.y - 70.0).abs() < 0.5,
+            "最近 positioned（mid, margin-top 30）赢：y≈70，got {}",
+            r.y
+        );
+    }
+
+    /// 无任何 positioned 祖先 → 初始包含块（视口）：相对根而非中间层。
+    #[test]
+    fn absolute_without_positioned_ancestor_uses_viewport() {
+        let (mut scene, btn) = abs_containing_block_scene(false, false, true);
+        // 场景只设了 top/right：top 相对视口 = 40（wrap/card 偏移不参与）。
+        let fonts = FontTable::new();
+        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+        let r = scene.get(btn).unwrap().layout_rect;
+        assert!(
+            (r.y - 40.0).abs() < 0.5,
+            "无 positioned 祖先 → 视口：y≈40，got {}",
+            r.y
+        );
+        let expect_x = 1920.0 - 56.0 - 20.0; // right 相对视口右缘
+        assert!(
+            (r.x - expect_x).abs() < 0.5,
+            "right 相对视口：x≈{expect_x}，got {}",
+            r.x
+        );
+    }
+
+    /// inset 全 auto 的 absolute 不重挂（保持直接父的静态位置语义，fence 已知限制）。
+    #[test]
+    fn absolute_without_inset_stays_with_direct_parent() {
+        let (mut scene, btn) = abs_containing_block_scene(true, false, false);
+        let fonts = FontTable::new();
+        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+        let r = scene.get(btn).unwrap().layout_rect;
+        let root = scene.roots[0];
+        let wrap = scene.get(root).unwrap().children[0];
+        let card = scene.get(wrap).unwrap().children[0];
+        let card_r = scene.get(card).unwrap().layout_rect;
+        assert!(
+            (r.x - card_r.x).abs() < 0.5 && (r.y - card_r.y).abs() < 0.5,
+            "无 inset absolute 静态位置在直接父 card 内容区起点 ({}, {})，got ({}, {})",
+            card_r.x,
+            card_r.y,
+            r.x,
+            r.y
+        );
     }
 
     /// 无 CSS 尺寸 → 用尺寸表真实像素（40×20）。

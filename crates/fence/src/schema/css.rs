@@ -264,9 +264,9 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
     },
     CssPropSpec {
         name: "position",
-        default: "relative",
+        default: "static",
         inherited: false,
-        parser: CssValueParser::Keyword(&["absolute", "relative"]),
+        parser: CssValueParser::Keyword(&["absolute", "relative", "static"]),
     },
     CssPropSpec {
         name: "top",

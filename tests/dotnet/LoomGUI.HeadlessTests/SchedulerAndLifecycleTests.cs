@@ -65,6 +65,43 @@ namespace LoomGUI.HeadlessTests
             return (stage, ctx, root, inst.Get<Dropdown>("sel"));
         }
 
+        // ── CallAfterLayout（N26：Instantiate 后同帧拿实测几何）─────────────
+
+        /// <summary>
+        /// 新挂载子树：帧头 CallNextFrame 回调先于首次 solve（Geometry 全零——行为契约），
+        /// tick 后 CallAfterLayout 回调读到已解算几何。业务由此免自旋等待。
+        /// </summary>
+        [Fact]
+        public void CallAfterLayoutSeesSolvedGeometrySameFrame()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                RegisterDefaultFont(ctx);
+                uint rootId = CreateRoot(ctx);
+                ctx._rootId = rootId;
+                UIPackage pkg = ctx.LoadPackage("dropdown", FixtureBytes("dropdown.pkg.bin"));
+                Container inst = pkg.Instantiate("dropdown");
+                Native.loomgui_stage_append_child(H(ctx), rootId, inst._id);
+                // 尚未 tick：新子树布局未解算。
+
+                float wAfterLayout = -1f, wNextFrame = -1f;
+                ctx.CallNextFrame(() => wNextFrame = inst.Geometry.WorldRect.Width);
+                ctx.CallAfterLayout(() => wAfterLayout = inst.Geometry.WorldRect.Width);
+
+                // 模拟 LoomHost.Step 序：PumpLogic（帧头）→ flush → tick → PumpAfterLayout。
+                ctx.PumpLogic(0.016f);
+                ctx.FlushPendingWrites();
+                Tick(ctx);
+                ctx.PumpAfterLayout();
+
+                Assert.True(wAfterLayout > 0f,
+                    $"after-layout 回调应读到已解算宽度，got {wAfterLayout}");
+                Assert.Equal(0f, wNextFrame, 3); // 帧头回调先于首次 solve → 全零
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
         // ── OnUpdate ────────────────────────────────────────────────────────
 
         [Fact]

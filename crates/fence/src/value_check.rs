@@ -172,7 +172,7 @@ pub fn transition_warnings(value: &str) -> Vec<String> {
         }
         if prop == "all" {
             out.push(
-                "transition \"all\": only background-color / color / opacity are \
+                "transition \"all\": only background-color / color / opacity / transform are \
                  transitioned in LoomGUI — all other properties (width, transform, \
                  filter, ...) change instantly"
                     .into(),
@@ -180,7 +180,7 @@ pub fn transition_warnings(value: &str) -> Vec<String> {
         } else if !TRANSITION_PROPS.contains(&prop) {
             out.push(format!(
                 "transition property \"{prop}\" has no runtime transition — \
-                 only background-color / color / opacity are animated; \
+                 only background-color / color / opacity / transform are animated; \
                  this property changes instantly"
             ));
         }

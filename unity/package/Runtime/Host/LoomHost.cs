@@ -61,6 +61,13 @@ namespace LoomGUI
         public LoomBackend Backend => _backend;
 
         /// <summary>
+        /// 缺字诊断（tofu 取证）：tick 后有新记录时 fire，参数为多行报告文本
+        /// （每行：字体族 + 字符 + 码位 + 修法）。会话级去重（同字体族+字符只报一次）。
+        /// 引擎无关层不直接打日志——Unity 侧由 Driver 订阅转 Debug.LogWarning。
+        /// </summary>
+        public event Action<string> MissingGlyphReport;
+
+        /// <summary>
         /// 每帧驱动序（main-design §16，严格时序）：
         /// 1. <see cref="LoomBackend.CollectInput"/>（backend 采集引擎输入 → set_input 系 FFI，引擎中立）
         /// 2. flush seam：攒批回写——一次性把帧内标脏的 StyleMirror / NodeTransform flush 到 core
@@ -95,6 +102,22 @@ namespace LoomGUI
             // 3. tick：核心一帧编排（process hit 用上帧 world → rematch → solve → refresh_content →
             //    compute_world_transforms → build RenderNode blob）。
             Native.loomgui_stage_tick(_stage, dt);
+
+            // 3.5 tick 后泵：CallAfterLayout 回调（新挂载子树本帧 solve 完成后 fire，
+            //     Geometry 已可读——对 Instantiate 后的摆位是同帧精确值，无需自旋等待）。
+            //     回调内改 Style 落 mirror dirty、下帧 flush seam 过桥 + solve 生效。
+            _ctx.PumpAfterLayout();
+
+            // 3.6 缺字诊断（tofu 取证）：取走本帧新记录 → 事件（引擎无关层不直接打日志）。
+            nuint mgLen = 0;
+            byte* mgPtr = Native.loomgui_stage_take_missing_glyphs(_stage, &mgLen);
+            if (mgPtr != null && mgLen > 0)
+            {
+                int n = (int)mgLen;
+                if (n > 0 && mgPtr[n - 1] == 0) n--; // 剥尾部 NUL
+                MissingGlyphReport?.Invoke(Encoding.UTF8.GetString(mgPtr, n));
+                Native.loomgui_bytes_free(mgPtr, mgLen);
+            }
 
             // 4. borrow_frame → backend.SyncFrame（backend 不调 borrow FFI，只消费 blob 做镜像渲染）。
             //    ptr 在下帧 tick 前都有效（核心 reset 借出 buffer）；len=0 时 backend.SyncFrame 自检跳过。

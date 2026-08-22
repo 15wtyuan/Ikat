@@ -467,6 +467,18 @@ pub fn register_on_key(scene: &mut Scene, key: PlayerKey, pct: f32) {
 /// 立即算首帧写 NodeAnim（spec §5.2：不等下帧 step b，防 delay 期闪 base）。
 /// 返 PlayerKey；name 未找到 / 节点悬空 → None（调用方转 FFI 无效 key）。
 pub fn play_programmatic(scene: &mut Scene, node: NodeId, name: &str) -> Option<PlayerKey> {
+    play_programmatic_with_duration(scene, node, name, 1.0)
+}
+
+/// 同 [`play_programmatic`]，显式指定时长（秒，覆盖 1s 默认）。C# `Play(name, duration)`
+/// 走此入口——无 `animation:` 声明绑定的 keyframes 没有声明层时长可读，程序化播放的
+/// 节奏由调用方给。duration ≤ 0 按 1s 默认处理（防手滑传 0 瞬完成）。
+pub fn play_programmatic_with_duration(
+    scene: &mut Scene,
+    node: NodeId,
+    name: &str,
+    duration: f32,
+) -> Option<PlayerKey> {
     if !scene.nodes.contains_key(node.to_key()) {
         return None;
     }
@@ -499,7 +511,11 @@ pub fn play_programmatic(scene: &mut Scene, node: NodeId, name: &str) -> Option<
     }
     let spec = AnimationSpec {
         name: name.to_string(),
-        duration: 1.0,
+        duration: if duration.is_finite() && duration > 0.0 {
+            duration
+        } else {
+            1.0
+        },
         delay: 0.0,
         iteration_count: Some(1),
         direction: AnimationDirection::Normal,

@@ -70,13 +70,29 @@ namespace LoomGUI.Bindings
 
         /// <summary>
         ///  装载二进制包（spec §12/§13）。name = 包名（进 packages 字典 key），bytes = .pkg.bin。
-        ///  0=ok，-1=err。null 句柄/空指针返回 -1。包是 Rust-internal，C# 只透传 bytes（不解析）。
+        ///  0=ok；1=pkg 格式版本过旧（TooOld）；2=过新（TooNew）；-1=其他 err（null/UTF-8/损坏）。
+        ///  版本错配时用 `loomgui_stage_last_pkg_load_version` 取 pkg 声明的版本、
+        ///  `loomgui_pkg_format_version` 取运行时版本，给「Unity 包与 loom.exe 同版本重打」的专属指引。
+        ///  包是 Rust-internal，C# 只透传 bytes（不解析）。
         ///
         ///  FFI 签名带 name 参数（对齐 `Stage::load_package(name, bytes)`）。
         ///  load_package 只进资源池不建 scene——Unity 侧需先 create_root 建 scene 再 instantiate 建内容。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_load_package", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_load_package(StageHandle* h, byte* name, nuint name_len, byte* bytes, nuint bytes_len);
+
+        /// <summary>
+        ///  最近一次 load_package 失败的 pkg 声明格式版本（0=无/非版本错）。
+        ///  配合 `loomgui_stage_load_package` 返回码 1/2 使用。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_last_pkg_load_version", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern uint loomgui_stage_last_pkg_load_version(StageHandle* h);
+
+        /// <summary>
+        ///  运行时（本 dll）支持的 pkg 格式版本。pkg 错配诊断用。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_pkg_format_version", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern uint loomgui_pkg_format_version();
 
         /// <summary>
         ///  卸载包：从 Rust stage 移除模板注册（prefab 删除语义——已实例化活节点不受影响）。
@@ -244,6 +260,15 @@ namespace LoomGUI.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_make_test_pkg", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte* loomgui_make_test_pkg(byte* comp, nuint comp_len, nuint* out_len);
+
+        /// <summary>
+        ///  取走缺字诊断报告（tofu 取证）：shaping 全链（主字体+回退）缺字记录，每行一条
+        ///  （family + 字符 + 码位 + 修法）。返回堆分配 UTF-8 buffer（含尾部 NUL），调用方用
+        ///  `loomgui_bytes_free` 释放；无新记录 → null（*out_len=0）。会话级去重（同 family+char
+        ///  只报一次），pending 累积不丢。宿主每帧 tick 后调。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_take_missing_glyphs", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* loomgui_stage_take_missing_glyphs(StageHandle* h, nuint* out_len);
 
         /// <summary>
         ///  释放 loomgui_make_test_pkg 返回的 bytes。
@@ -531,6 +556,14 @@ namespace LoomGUI.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_play_animation", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern ulong loomgui_stage_play_animation(StageHandle* h, uint node, byte* name, nuint name_len);
+
+        /// <summary>
+        ///  同 `loomgui_stage_play_animation`，显式指定时长（秒）。duration_s ≤ 0 / NaN 按 1s
+        ///  默认。C# `Play(name, durationSeconds)` 重载走此入口——无 `animation:` 声明绑定的
+        ///  keyframes 无声明层时长，程序化播放节奏由调用方给。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_play_animation_dur", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong loomgui_stage_play_animation_dur(StageHandle* h, uint node, byte* name, nuint name_len, float duration_s);
 
         /// <summary>
         ///  暂停 player（Playing → Paused，elapsed 冻结位置保持）。key 无效 / 非 Playing → no-op。

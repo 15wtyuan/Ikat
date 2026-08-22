@@ -348,7 +348,7 @@ namespace LoomGUI.HeadlessTests
                 // Set parent Style.LoomColor to blue (0,0,1,1) via inline override.
                 // This must override the CSS class .highlight{color:red} on root
                 // and propagate to child via cascade inheritance.
-                instRoot.Style.LoomColor = new LoomColor(0, 0, 1, 1);
+                instRoot.Style.TextColor = new LoomColor(0, 0, 1, 1);
                 Tick(h, ctx);
 
                 ComputedNodeStyleRepr rootCs = GetComputedStyle(h, instRoot._id);

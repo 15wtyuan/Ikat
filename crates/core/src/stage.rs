@@ -25,6 +25,9 @@ pub struct Stage {
     /// 资源池：pkg_name → Package（多包共存）。load_package 填，instantiate 读。
     /// load_package 不建 scene，只填本字典。
     pub packages: std::collections::HashMap<String, crate::asset::Package>,
+    /// 最近一次 load_package 版本错配时 pkg 声明的格式版本（0=无记录/非版本错）。
+    /// FFI 层写给宿主做「Unity 包与 loom.exe 同版本重打」的专属报错。
+    pub last_pkg_load_version: u32,
     /// 图尺寸表：归一化 path → (w, h) 像素。
     /// 运行时由 `set_image_sizes` 灌入（来自 atlas.json，含真实图尺寸）。
     /// `solve`/`build_render_nodes` 查此表算 Image intrinsic 尺寸（measure 三档）+ 九宫格 UV。
@@ -69,6 +72,29 @@ pub struct Stage {
     pub next_list_ordinal: u32,
 }
 
+/// 加载包失败的结构化错误。版本错配单列——宿主须给「Unity 包与 loom.exe 同版本
+/// 重打」的专属指引，不能与普通损坏混在一条文案里。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoadPkgError {
+    TooOld { pkg: u32, min: u32 },
+    TooNew { pkg: u32, max: u32 },
+    Malformed(String),
+}
+
+impl std::fmt::Display for LoadPkgError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoadPkgError::TooOld { pkg, min } => {
+                write!(f, "package formatVersion {pkg} too old (min {min})")
+            }
+            LoadPkgError::TooNew { pkg, max } => {
+                write!(f, "package formatVersion {pkg} too new (max {max})")
+            }
+            LoadPkgError::Malformed(s) => write!(f, "{s}"),
+        }
+    }
+}
+
 impl Stage {
     pub fn new(root_size: (f32, f32)) -> Result<Self, String> {
         Ok(Stage {
@@ -76,6 +102,7 @@ impl Stage {
             fonts: FontTable::new(),
             root_size,
             packages: std::collections::HashMap::new(),
+            last_pkg_load_version: 0,
             image_sizes: std::collections::HashMap::new(),
             pointer_state: PointerState::new(),
             pending_input: Vec::new(),
@@ -112,6 +139,12 @@ impl Stage {
         self.fonts.set_fallback_families(families);
     }
 
+    /// 取走缺字诊断报告（tofu 取证）：pick 全链缺字的 (family, char)，会话级去重。
+    /// 宿主每帧 tick 后调（隔帧也不丢——pending 累积，去重集会话级持久）。
+    pub fn take_missing_glyph_reports(&mut self) -> Vec<String> {
+        self.fonts.take_missing_glyph_reports()
+    }
+
     /// 加载包进资源池（不碰 scene）。重复 load 同名包 = 替换。多包共存。
     ///
     /// `load_package(name, bytes)` 解析 pkg.bin → Package，存进 `self.packages[name]`。
@@ -120,8 +153,19 @@ impl Stage {
     /// `root_size` 归 Stage（不从包来）；图集归 Unity（核心不知图集）。
     ///
     /// **图尺寸**：由 `set_image_sizes` 在运行时灌入（来自 atlas.json），不再从包 manifest 自建。
-    pub fn load_package(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
-        let mut pkg = crate::asset::read_package(bytes).map_err(|e| e.to_string())?;
+    pub fn load_package(&mut self, name: &str, bytes: &[u8]) -> Result<(), LoadPkgError> {
+        use crate::asset::{PkgError, MAX_VERSION, MIN_VERSION};
+        let mut pkg = crate::asset::read_package(bytes).map_err(|e| match e {
+            PkgError::TooOld(v) => LoadPkgError::TooOld {
+                pkg: v,
+                min: MIN_VERSION,
+            },
+            PkgError::TooNew(v) => LoadPkgError::TooNew {
+                pkg: v,
+                max: MAX_VERSION,
+            },
+            other => LoadPkgError::Malformed(other.to_string()),
+        })?;
         pkg.name = name.to_string(); // read_package 填空串，这里覆盖为真实包名
 
         self.packages.insert(name.to_string(), pkg);
@@ -1121,6 +1165,48 @@ mod image_size_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 20B 头（magic + version + flags + comp_count + str_count）：版本检查先于 body 解析，
+    /// 烂 body 也能测版本错配分支。
+    fn pkg_header_with_version(version: u32) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(&crate::asset::PKG_MAGIC.to_le_bytes());
+        b.extend_from_slice(&version.to_le_bytes());
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b
+    }
+
+    #[test]
+    fn load_package_reports_version_mismatch_structured() {
+        use crate::asset::{MAX_VERSION, MIN_VERSION};
+        let mut s = Stage::new((100.0, 100.0)).unwrap();
+        assert_eq!(
+            s.load_package("old", &pkg_header_with_version(MIN_VERSION - 1)),
+            Err(LoadPkgError::TooOld {
+                pkg: MIN_VERSION - 1,
+                min: MIN_VERSION
+            })
+        );
+        assert_eq!(
+            s.last_pkg_load_version, 0,
+            "core 侧不落 last 版本（FFI 层写）"
+        );
+        assert_eq!(
+            s.load_package("new", &pkg_header_with_version(MAX_VERSION + 1)),
+            Err(LoadPkgError::TooNew {
+                pkg: MAX_VERSION + 1,
+                max: MAX_VERSION
+            })
+        );
+        let mut bad_magic = pkg_header_with_version(MIN_VERSION);
+        bad_magic[0] ^= 0xFF;
+        assert!(matches!(
+            s.load_package("bad", &bad_magic),
+            Err(LoadPkgError::Malformed(_))
+        ));
+    }
 
     #[test]
     fn get_node_kind_returns_builtin_kinds() {

@@ -1617,13 +1617,23 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         }
         "position" => {
             // absolute 围栏内（脱离流）；relative 显式；fixed/sticky 围栏外静默忽略。
+            // position_declared 与 ts.position 并行——布局层识别「声明了 relative」需要
+            // 它（taffy 的 Relative 是默认值，分不清声明与否）。
             match value.trim() {
                 "absolute" => {
                     ts.position = taffy::style::Position::Absolute;
+                    style.position_declared = crate::style::resolved::PositionDeclared::Absolute;
                     true
                 }
                 "relative" => {
                     ts.position = taffy::style::Position::Relative;
+                    style.position_declared = crate::style::resolved::PositionDeclared::Relative;
+                    true
+                }
+                "static" => {
+                    // 显式回退初始值：taffy 侧 Relative 就是 in-flow（其默认），declared 归 Static。
+                    ts.position = taffy::style::Position::Relative;
+                    style.position_declared = crate::style::resolved::PositionDeclared::Static;
                     true
                 }
                 _ => false, // fixed/sticky/其他 → 围栏外

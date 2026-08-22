@@ -5,6 +5,39 @@ All notable changes to `com.loomgui.unity` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.0.8] - 2026-08-22
+
+Tripawd Field Notes 三批（地图交互/演出打磨）回应：absolute 包含块浏览器语义、
+挂载后布局就绪回调、缺字 tofu 取证日志、pkg 版本错配专属报错、演出 API 补口。
+
+### Added
+- **absolute 包含块 = 最近 positioned 祖先（N24，浏览器语义）**：声明
+  `position: absolute` 且任一 inset 显式的元素，包含块取最近声明
+  `relative`/`absolute` 的祖先（无则视口）——此前取直接父级，与浏览器分歧。
+  `position: static` 进入围栏（显式回退初始值；schema 默认值同步修正，
+  CSS 初始值本就是 static 而非 relative）。已知限制：inset 全 auto 的
+  absolute 保持直接父静态位置；overflow 裁剪链仍随 DOM 祖先。pkg 格式
+  v39→v40（旧 runtime 读新包 TooOld，重打包即迁移）。
+- **缺字诊断日志（N25 取证）**：shaping 全链（主字体+回退）缺某字时，
+  Console 点名 `font-family "X" has no glyph for 'c' (U+....)` + 修法
+  （tofu 框本体不变——开发期故意暴露）。会话级去重（同字体族+字符只报
+  一次），`LoomHost.MissingGlyphReport` 事件暴露给引擎层。
+- **`CallAfterLayout(cb)`（N26）**：tick 后 fire 的一次性回调——刚
+  `Instantiate` 的子树在本回调里读 `Geometry` 已是实测值（`CallNextFrame`
+  帧头 fire 先于 solve，新子树首读必全零）。业务免逐帧自旋等待。
+- **`Play(name, durationSeconds)` 重载（N27）**：无 `animation:` 声明绑定的
+  keyframes 无声明层时长，`Play(name)` 固定按 1s 播（无 delay/单次/normal/
+  fill both/cubic-out，已随包文档写明）；重载让程序化演出节奏由调用方给。
+- **pkg 版本错配专属报错**：Unity 包与 loom.exe 只升一侧时，
+  `load_package` 报 `pkg format v38 is older than this runtime's v39 …
+  re-run loom build with the matching loom.exe`——不再淹没在通用 malformed
+  文案里（此前报错完全不提版本，只能靠经验定位）。
+
+### Changed
+- **`NodeStyle.TextColor`（N29）**：文字色内联通道此前叫 `LoomColor`（类型名
+  误入属性名，几乎不可发现），补 `TextColor`（与 `BackgroundColor` 对称），
+  旧名保留为 Obsolete 别名（同一 "color" 通道，零 core 改动）。
+
 ## [0.0.7] - 2026-08-22
 
 Tripawd Field Notes 二批（战斗手感）回应：transition transform 通道、组件死规则
