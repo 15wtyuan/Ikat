@@ -61,6 +61,12 @@ trust the build message.
    unknowable at build time).
 8. `display:grid` does not exist. Values: `block` / `flex` / `none` /
    `inline`.
+8a. Pseudo-classes `:hover` / `:active` / `:focus` / `:disabled` /
+    `:checked` / `:nth-child(...)` work in `<style>` rules and
+    re-evaluate every frame — hover styling needs no runtime class
+    toggling. `*`, `:not()`, pseudo-elements (`::before`), and
+    combinators `>` `+` `~` are build errors; the diagnostic names the
+    offending construct.
 9. `position` accepts `absolute` / `relative` only.
 10. Components are isolated (Shadow-DOM-like): a component's CSS universe
     is its own `<style>`/`<link>`; page rules never reach inside, component

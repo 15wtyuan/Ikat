@@ -5,6 +5,33 @@ All notable changes to `com.loomgui.unity` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.0.7] - 2026-08-22
+
+Tripawd Field Notes 二批（战斗手感）回应：transition transform 通道、组件死规则
+警告、选择器报错细化、随包文档补伪类/显隐清单。
+
+### Added
+- **`transition: transform`（N18）**：transition 白名单扩到四通道
+  （background-color / color / opacity / **transform**）。transform 按整矩阵
+  TRS 分解插值（translate/scale/rotate 分量各自 lerp 后 SRT 合成，与 keyframe
+  语义一致），镜像编码为负 y 缩放，x 轴坍缩退化不产 NaN；中途改向从进行中
+  override 连续重锚（无 snap）。pkg 格式 v38→v39（旧 runtime 读新包显式
+  TooNew，重打包即迁移）。box-shadow transition 仍不在白名单（多阴影列表
+  插值语义复杂，roadmap 登记 defer）。
+- **组件死规则警告 `FenceComponentRuleOutOfScope`（N22）**：组件 `<style>` 纯类
+  规则的类名只出现在页面 host 外区域或其它组件投影内容上 → warning（组件 CSS
+  不穿出 host，规则运行时恒死，浏览器预览却正常）。跨文件证据版——类名在组件
+  模板/本组件投影内可命中、或全库不出现（运行时挂类）则静默，宁漏报不误报。
+
+### Changed
+- **选择器报错点名元凶（N18 连带）**：`unsupported selector` 从笼统整串不支持
+  改为点名具体越界构造——未知伪类（`:not()`）、伪元素（`::before`）、通配
+  `*`、组合子 `>`/`+`/`~`、高阶属性运算符（`^=` 等）各有专属文案。
+- **随包文档**：css-reference 新增 Selectors 小节（伪类支持清单 + 越界构造
+  清单 + transition 值域）；editor skill 临界规则补伪类一行（`:hover` 等每帧
+  求值、无需运行时挂类）；runtime skill 补显隐官方通道
+  （`node.Style.Display = DisplayMode.None`）。
+
 ## [0.0.6] - 2026-08-20
 
 Tripawd dogfood Field Notes（N 系列）回应批：四个运行时 bug 修复、围栏值域门与

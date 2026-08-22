@@ -1574,8 +1574,8 @@ pub extern "C" fn loomgui_stage_tween(
         let sz = loomgui_core::tween::prop_value_size(prop) as usize;
         let st = unsafe { std::slice::from_raw_parts(start, sz) };
         let en = unsafe { std::slice::from_raw_parts(end, sz) };
-        let mut s = [0.0f32; 4];
-        let mut e = [0.0f32; 4];
+        let mut s = [0.0f32; 5];
+        let mut e = [0.0f32; 5];
         s[..sz].copy_from_slice(st);
         e[..sz].copy_from_slice(en);
         sh.stage

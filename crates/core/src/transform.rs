@@ -25,6 +25,29 @@ pub fn from_rotate(rad: f32) -> Affine2 {
     [c, s, -s, c, 0.0, 0.0]
 }
 
+/// TRS 直接合成（与 `T ∘ R ∘ S` 逐矩阵乘等价，省两次 mul）。keyframe compose 与
+/// transition transform 插值共用：先 scale、再 rotate、再 translate（SRT）。
+pub fn from_trs(tx: f32, ty: f32, sx: f32, sy: f32, rot: f32) -> Affine2 {
+    let (s, c) = rot.sin_cos();
+    [c * sx, s * sx, -s * sy, c * sy, tx, ty]
+}
+
+/// 仿射 → TRS 五元组 `[tx, ty, sx, sy, rot]`（`from_trs` 的逆运算）。
+///
+/// 线性部分 L = R(rot)·diag(sx,sy)：sx = |首列| ≥ 0、rot = atan2(b,a)、sy = det/sx
+/// （sy 可为负 = 镜像被编码为负 y 缩放，代数上精确）。围栏 transform 子集
+/// （translate/scale/rotate 复合）的乘积恒可分解；x 轴坍缩（sx≈0，如 scale(0,*)）
+/// 退化返零缩放 + rot=0——插值语义：向坍缩收敛而非产 NaN。
+pub fn decompose_trs(m: &Affine2) -> [f32; 5] {
+    let sx = m[0].hypot(m[1]);
+    if sx < 1e-9 {
+        return [m[4], m[5], 0.0, 0.0, 0.0];
+    }
+    let rot = m[1].atan2(m[0]);
+    let det = m[0] * m[3] - m[1] * m[2];
+    [m[4], m[5], sx, det / sx, rot]
+}
+
 /// 矩阵乘 self ∘ other（先应用 other，再应用 self）。
 /// M = self, N = other → M·N（点先经 N 再经 M）。
 pub fn mul(self_m: &Affine2, other: &Affine2) -> Affine2 {
@@ -242,6 +265,56 @@ mod tests {
             "奇异矩阵逆须有限（降级 IDENTITY），got {inv:?}"
         );
         assert_eq!(inv, IDENTITY, "奇异矩阵逆降级为 IDENTITY");
+    }
+
+    #[test]
+    fn trs_decompose_roundtrip() {
+        // 围栏子集的典型复合：T(30,-5) ∘ R(0.7) ∘ S(2, 0.5)——分解须复原五元组。
+        let m = from_trs(30.0, -5.0, 2.0, 0.5, 0.7);
+        let [tx, ty, sx, sy, rot] = decompose_trs(&m);
+        assert!((tx - 30.0).abs() < 1e-5, "tx {tx}");
+        assert!((ty + 5.0).abs() < 1e-5, "ty {ty}");
+        assert!((sx - 2.0).abs() < 1e-5, "sx {sx}");
+        assert!((sy - 0.5).abs() < 1e-5, "sy {sy}");
+        assert!((rot - 0.7).abs() < 1e-5, "rot {rot}");
+    }
+
+    #[test]
+    fn trs_from_equals_matrix_mul_compose() {
+        // from_trs 与 T∘R∘S 逐矩阵乘恒等（直接合成只是省 mul，不改语义）。
+        let direct = from_trs(3.0, 4.0, 2.0, 0.5, 0.9);
+        let via_mul = from_translate(3.0, 4.0)
+            .mul(from_rotate(0.9))
+            .mul(from_scale(2.0, 0.5));
+        assert_eq!(direct, via_mul);
+    }
+
+    #[test]
+    fn trs_decompose_reflection_via_negative_sy() {
+        // 镜像 scale(-1, 1)：det<0 → 分解为 R(π)·diag(1,-1)（等价编码，sy<0 承载镜像）。
+        let m = from_scale(-1.0, 1.0);
+        let [tx, ty, sx, sy, rot] = decompose_trs(&m);
+        assert!(tx.abs() < 1e-6 && ty.abs() < 1e-6);
+        assert!(
+            (sx - 1.0).abs() < 1e-5 && (sy + 1.0).abs() < 1e-5,
+            "sx {sx} sy {sy}"
+        );
+        assert!((rot - std::f32::consts::PI).abs() < 1e-5, "rot {rot}");
+        // f32 sin/cos(π) 残差 ~1e-7：逐分量 epsilon 比较而非整矩阵 ==。
+        let back = from_trs(tx, ty, sx, sy, rot);
+        assert!(
+            m.iter().zip(back.iter()).all(|(x, y)| (x - y).abs() < 1e-5),
+            "往返复原镜像矩阵: {m:?} vs {back:?}"
+        );
+    }
+
+    #[test]
+    fn trs_decompose_collapsed_x_axis_is_finite() {
+        // scale(0, 2)：x 轴坍缩 → 退化分支（零缩放 + rot=0），不产 NaN。
+        let m = from_scale(0.0, 2.0);
+        let t = decompose_trs(&m);
+        assert!(t.iter().all(|v| v.is_finite()), "全有限，got {t:?}");
+        assert_eq!(t[2], 0.0, "sx 归零");
     }
 
     #[test]

@@ -150,6 +150,22 @@ mod tests {
         );
     }
 
+    /// W3b：transform 在 transition 白名单内（TRS 分解通道）→ 不警告。
+    #[test]
+    fn transition_transform_is_supported() {
+        let out = parse_template(
+            "<style>.a { transition: transform 0.15s ease-out } .a:hover { transform: translateY(-2px) }</style><div class=\"a\">x</div>",
+            "page.html",
+        );
+        assert!(
+            out.diagnostics
+                .iter()
+                .all(|d| d.code != DiagnosticCode::FenceTransitionUnsupportedProp),
+            "transform transition 不应警告: {:?}",
+            out.diagnostics
+        );
+    }
+
     /// W4：rich 子树内 span 声明尺寸 → FenceInlineSizing 警告。
     #[test]
     fn inline_sizing_in_rich_subtree_warns() {

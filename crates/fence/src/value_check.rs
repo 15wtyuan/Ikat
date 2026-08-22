@@ -153,10 +153,10 @@ pub fn display_inline_warning(value: &str) -> Option<&'static str> {
     }
 }
 
-/// `transition` 引擎实际驱动的属性集（core emit_transition_requests 只检测
-/// BgColor/TextColor/Opacity 三通道；transform 需矩阵分解不支持、布局属性走
-/// 每帧离散 solve 无过渡）。
-const TRANSITION_PROPS: &[&str] = &["background-color", "color", "opacity"];
+/// `transition` 引擎实际驱动的属性集（core emit_transition_requests 检测
+/// BgColor/TextColor/Opacity/Transform 四通道——transform 走整矩阵 TRS 分解插值；
+/// 布局属性走每帧离散 solve 无过渡）。
+const TRANSITION_PROPS: &[&str] = &["background-color", "color", "opacity", "transform"];
 
 /// transition 声明的属性域外警告（每条越界 spec 一条）。`all` 单独提示——它对
 /// 支持通道有效，但其余属性（width/transform 等）静默 snap，浏览器先验会翻车。

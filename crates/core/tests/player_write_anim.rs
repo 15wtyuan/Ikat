@@ -241,8 +241,8 @@ fn tick_step_b_animation_overrides_transition_same_channel() {
     stage.tweens.tween(
         node,
         TweenProp::Opacity,
-        [0.3, 0.0, 0.0, 0.0],
-        [0.7, 0.0, 0.0, 0.0],
+        [0.3, 0.0, 0.0, 0.0, 0.0],
+        [0.7, 0.0, 0.0, 0.0, 0.0],
         Ease::Linear,
         0.0,
         0.2,
@@ -271,8 +271,8 @@ fn tick_step_b_animation_overrides_transition_same_channel() {
     stage.tweens.tween(
         node,
         TweenProp::Opacity,
-        [0.3, 0.0, 0.0, 0.0],
-        [0.7, 0.0, 0.0, 0.0],
+        [0.3, 0.0, 0.0, 0.0, 0.0],
+        [0.7, 0.0, 0.0, 0.0, 0.0],
         Ease::Linear,
         0.0,
         0.2,

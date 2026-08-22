@@ -2,7 +2,7 @@
 name = "loomgui_pkg"
 # 与 unity/package/package.json 同轨（release-check 断言）；`loom version` 的 cli/unity
 # 字段都取本值。发版 tag 前必须先 bump 两者 + 补 CHANGELOG。
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 
 [[bin]]

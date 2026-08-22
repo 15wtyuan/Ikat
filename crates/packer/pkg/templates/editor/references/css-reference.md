@@ -52,11 +52,33 @@ Shorthands (expand to the properties above):
   element's **center** (`transform-origin` does not exist); to pivot
   around a non-center point, position the element at the midpoint of the
   desired arc and rotate.
+- `transition`: animates `background-color` / `color` / `opacity` /
+  `transform` (interpolated as a decomposed translate-scale-rotate).
+  Everything else — layout properties (`width`, `margin`, ...),
+  `box-shadow`, `filter` — changes instantly; the build warns per
+  property.
 - `position`: `absolute` / `relative` — `fixed` and `sticky` are build
   errors.
 - `z-index`: integer only, no `auto`.
-- Combinator selectors `>` / `+` / `~` are build errors (descendant
-  combinators — spaces — work).
+
+## Selectors
+
+A selector is a chain of compounds separated by whitespace (descendant
+combinator). Each compound is `tag? (.class | #id | [attr] | :pseudo)*`:
+
+- Pseudo-classes that work: `:hover`, `:active`, `:focus`, `:disabled`,
+  `:checked`, `:nth-child(An+B | odd | even | N)`. They gate on live
+  interaction state and re-evaluate every frame — `:hover` driven
+  styling needs no runtime class toggling.
+- Build errors (the diagnostic names the offending construct):
+  combinators `>` / `+` / `~` (descendant only), the universal selector
+  `*`, unknown pseudo-classes (`:not()`, `:nth-of-type`, ...), and
+  pseudo-elements (`::before`, `::after`, ...).
+- Attribute selectors: `[attr]` and `[attr="value"]` only; higher
+  operators (`^=`, `~=`, `$=`, `*=`, `|=`) are build errors.
+- Do not use `:nth-child` on virtualized lists (`role=list` bound to
+  data): parked slots count as children and skew the index — use
+  `[data-index="N"]` instead.
 
 <!-- fence-sync:css-not-supported-begin -->
 Properties that do NOT exist in the fence (using any of these is a
@@ -87,11 +109,6 @@ Define with `@keyframes <name> { from {...} to {...} 50% {...} }` inside
 component instances merge silently; same name with different content
 warns (host wins) — prefer defining shared animations page-level or in a
 shared external CSS and referencing the name from components.
-
-`:nth-child(An+B | odd | even | N)` selectors work in `<style>` rules —
-handy for staggered entrances. Do not use `:nth-child` on virtualized
-lists (`role=list` bound to data): parked slots count as children and
-skew the index; use `[data-index="N"]` attribute selectors instead.
 
 ## Browser-difference traps (preview honesty)
 

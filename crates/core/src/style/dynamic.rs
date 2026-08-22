@@ -1040,6 +1040,7 @@ fn emit_transition_requests(
     let wants = |p: TweenProp| ts.prop.is_none() || matches!(ts.prop, Some(q) if q == p);
     let anim = scene.anim.get(node); // mid-flight override 作 start（无则 old cascade 值）
                                      // background-color: Option<[f32;4]>（None 视作透明 [0,0,0,0]）
+    let pad5 = |v: [f32; 4]| [v[0], v[1], v[2], v[3], 0.0];
     if wants(TweenProp::BgColor) {
         let a = old.background_color.unwrap_or([0.0; 4]);
         let b = new.background_color.unwrap_or([0.0; 4]);
@@ -1048,8 +1049,8 @@ fn emit_transition_requests(
             scene.pending_transitions.push(TransitionRequest {
                 node,
                 prop: TweenProp::BgColor,
-                start,
-                end: b,
+                start: pad5(start),
+                end: pad5(b),
                 ease: ts.ease,
                 delay: ts.delay,
                 duration: ts.duration,
@@ -1065,28 +1066,50 @@ fn emit_transition_requests(
             scene.pending_transitions.push(TransitionRequest {
                 node,
                 prop: TweenProp::TextColor,
-                start,
-                end: b,
+                start: pad5(start),
+                end: pad5(b),
                 ease: ts.ease,
                 delay: ts.delay,
                 duration: ts.duration,
             });
         }
     }
-    // opacity: f32（标量，pack 进 [f32;4] 首分量）
+    // opacity: f32（标量，pack 进首分量）
     if wants(TweenProp::Opacity) && (old.opacity - new.opacity).abs() > 1e-6 {
         let start = anim.and_then(|x| x.opacity).unwrap_or(old.opacity);
         scene.pending_transitions.push(TransitionRequest {
             node,
             prop: TweenProp::Opacity,
-            start: [start, 0.0, 0.0, 0.0],
-            end: [new.opacity, 0.0, 0.0, 0.0],
+            start: [start, 0.0, 0.0, 0.0, 0.0],
+            end: [new.opacity, 0.0, 0.0, 0.0, 0.0],
             ease: ts.ease,
             delay: ts.delay,
             duration: ts.duration,
         });
     }
-    // translate/scale/rotation 需分解 transform 矩阵——围栏 transition 不支持 transform，此处不做。
+    // transform：整矩阵 TRS 分解 → 单复合通道插值（CSS 对结构不同的 transform 列表
+    // 的 fallback 语义）。围栏子集（translate/scale/rotate 复合）恒可分解；镜像被
+    // 编码为负 sy。start 取 mid-flight override 的分解（连续，无 snap）。
+    if wants(TweenProp::Transform) {
+        let a = &old.transform.matrix;
+        let b = &new.transform.matrix;
+        let changed = (0..6).any(|i| (a[i] - b[i]).abs() > 1e-6);
+        if changed {
+            let start = match anim.and_then(|x| x.transform) {
+                Some(m) => crate::transform::decompose_trs(&m),
+                None => crate::transform::decompose_trs(a),
+            };
+            scene.pending_transitions.push(TransitionRequest {
+                node,
+                prop: TweenProp::Transform,
+                start,
+                end: crate::transform::decompose_trs(b),
+                ease: ts.ease,
+                delay: ts.delay,
+                duration: ts.duration,
+            });
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2101,6 +2124,122 @@ mod tests {
         );
         let r = &s.pending_transitions[0];
         assert!(matches!(r.prop, TweenProp::BgColor));
+    }
+
+    #[test]
+    fn rematch_emits_transform_transition_request() {
+        // .btn:hover 换 transform + transition:transform 声明 → Transform 复合通道请求，
+        // end = 新矩阵的 TRS 分解（translate(10,20)·scale(2,1) → [10,20,2,1,0]）。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        s.get_mut(bid).unwrap().base_style.transition = vec![TransitionSpec {
+            prop: Some(TweenProp::Transform),
+            duration: 0.2,
+            ease: Ease::Linear,
+            delay: 0.0,
+        }];
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::CASCALED);
+        push_global(
+            &mut s,
+            rule(
+                ".btn:hover",
+                "transform",
+                "translate(10px, 20px) scale(2, 1)",
+            ),
+        );
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
+        s.pending_transitions.clear();
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(s.pending_transitions.len(), 1, "transform 变化 → 1 请求");
+        let r = &s.pending_transitions[0];
+        assert!(matches!(r.prop, TweenProp::Transform));
+        let [tx, ty, sx, sy, rot] = r.end;
+        assert!((tx - 10.0).abs() < 1e-5, "tx {tx}");
+        assert!((ty - 20.0).abs() < 1e-5, "ty {ty}");
+        assert!((sx - 2.0).abs() < 1e-5, "sx {sx}");
+        assert!((sy - 1.0).abs() < 1e-5, "sy {sy}");
+        assert!(rot.abs() < 1e-5, "rot {rot}");
+    }
+
+    #[test]
+    fn transform_transition_start_uses_midflight_override() {
+        // mid-flight：anim.transform 已有半程矩阵 → request.start 取其分解（连续无 snap），
+        // 而非旧级联值（identity）。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        s.get_mut(bid).unwrap().base_style.transition = vec![TransitionSpec {
+            prop: Some(TweenProp::Transform),
+            duration: 0.2,
+            ease: Ease::Linear,
+            delay: 0.0,
+        }];
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::CASCALED);
+        // 旧级联：translate(0,0)（identity）；mid-flight override：translate(4, 0)
+        push_global(
+            &mut s,
+            rule(".btn:hover", "transform", "translate(10px, 0px)"),
+        );
+        s.anim.ensure(bid).transform = Some(crate::transform::from_translate(4.0, 0.0));
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
+        s.pending_transitions.clear();
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(s.pending_transitions.len(), 1);
+        let r = &s.pending_transitions[0];
+        assert!(
+            (r.start[0] - 4.0).abs() < 1e-5,
+            "start tx=4（override），got {:?}",
+            r.start
+        );
+        assert!((r.end[0] - 10.0).abs() < 1e-5, "end tx=10");
+    }
+
+    #[test]
+    fn transform_transition_all_spec_covers_channel() {
+        // transition:all（prop=None）也覆盖 transform 通道（CSS all 语义）。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        s.get_mut(bid).unwrap().base_style.transition = vec![TransitionSpec {
+            prop: None,
+            duration: 0.2,
+            ease: Ease::Linear,
+            delay: 0.0,
+        }];
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::CASCALED);
+        push_global(&mut s, rule(".btn:hover", "transform", "rotate(90deg)"));
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
+        s.pending_transitions.clear();
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(s.pending_transitions.len(), 1);
+        let r = &s.pending_transitions[0];
+        assert!(matches!(r.prop, TweenProp::Transform));
+        assert!(
+            (r.end[4] - std::f32::consts::FRAC_PI_2).abs() < 1e-5,
+            "rot {r:?}"
+        );
     }
 
     #[test]

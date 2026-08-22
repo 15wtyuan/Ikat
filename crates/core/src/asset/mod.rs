@@ -2,6 +2,7 @@
 //! Rust-internal（packager 写、runtime 读，C# 不解析）。
 //! 布局锁：同一 fixture 的打包字节哈希有 CI 门（packer `schema_lock.rs`）——
 //! 任何改变字节的布局改动都会翻转哈希，bump 版本时须同步更新登记值。
+//! v39：TweenProp 加 Transform 变体（transition: transform 复合 TRS 通道，bincode 判别值扩展）。
 //! v35：TemplateNode 加 custom_tag 列 + component_scope 位（flags bit 0x04）+ PerComponentScopes
 //!   段（组件展开域锚定规则表；Custom Element 打包期展开产物，见 component-system spec）。
 //! v34：ResolvedStyle.background_gradient Option<Gradient2>→Option<Gradient>（radial + 多 stop + 任意角度，bincode 布局变）。
@@ -41,9 +42,9 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 38; // v38: ResolvedStyle 增加 z_index、inline_declared u32→u64（bincode 布局变化）
-pub(crate) const MIN_VERSION: u32 = 38;
-pub(crate) const MAX_VERSION: u32 = 38;
+pub const PKG_FORMAT_VERSION: u32 = 39; // v39: TweenProp 加 Transform 变体（transition: transform，旧 v38 runtime 读 v39 报 TooNew）
+pub(crate) const MIN_VERSION: u32 = 39;
+pub(crate) const MAX_VERSION: u32 = 39;
 const NULL_IDX: u16 = 0xFFFF;
 
 // ── 多组件包数据结构 ──────────────────────────────────────────────

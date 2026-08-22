@@ -803,8 +803,8 @@ mod tests {
         tweens.tween(
             child,
             TweenProp::Opacity,
-            [0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0],
+            [0.0; 5],
+            [1.0, 0.0, 0.0, 0.0, 0.0],
             Ease::Linear,
             0.0,
             1.0,

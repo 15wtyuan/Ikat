@@ -380,7 +380,10 @@ impl AnimTable {
         use crate::tween::TweenProp;
         match prop {
             TweenProp::Opacity => a.opacity = None,
-            TweenProp::Translate | TweenProp::Scale | TweenProp::Rotation => a.transform = None,
+            TweenProp::Translate
+            | TweenProp::Scale
+            | TweenProp::Rotation
+            | TweenProp::Transform => a.transform = None,
             TweenProp::BgColor => a.bg_color = None,
             TweenProp::TextColor => a.text_color = None,
         }

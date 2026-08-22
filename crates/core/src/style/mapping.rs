@@ -1970,7 +1970,7 @@ pub fn parse_transition(value: &str) -> Vec<crate::style::resolved::TransitionSp
 }
 
 /// 解析单个 transition spec（逗号分隔的一段）。
-/// 空格切 token：prop 关键字（all/opacity/color/background-color）→ TweenProp 映射；
+/// 空格切 token：prop 关键字（all/opacity/color/background-color/transform）→ TweenProp 映射；
 /// time（`<n>s`/`<n>ms`）首遇 = duration、次遇 = delay；其余 = ease 关键字（§8.3 对齐表）。
 /// 缺省补默认（dur=0s, ease=CubicOut=CSS 初始 ease, delay=0s）。空段返回 None。
 fn parse_one_transition(part: &str) -> Option<crate::style::resolved::TransitionSpec> {
@@ -1991,6 +1991,7 @@ fn parse_one_transition(part: &str) -> Option<crate::style::resolved::Transition
             "opacity" => prop = Some(TweenProp::Opacity),
             "color" => prop = Some(TweenProp::TextColor),
             "background-color" => prop = Some(TweenProp::BgColor),
+            "transform" => prop = Some(TweenProp::Transform),
             _ => {
                 if let Some(secs) = parse_time_seconds(t) {
                     // 首遇 = duration，次遇 = delay（CSS 语义；time_count 防 0s duration 被吞）

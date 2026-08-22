@@ -110,6 +110,8 @@ fn pack_components_inner(
     // collect-all：诊断（error + warning）跨组件全量收集，收完才判失败——AI 一轮修全。
     // 失败时 warning 也随 BuildFailure.diagnostics 一并给出。
     let mut diagnostics: Vec<PackDiagnostic> = Vec::new();
+    // 本包页面类名分桶——组件 `<style>` 死规则检查（跨文件证据版）的墙外证据。
+    let mut scope_buckets = loomgui_fence::component_scope_check::ScopeClassBuckets::new();
     for comp in components {
         let Component {
             name,
@@ -117,6 +119,7 @@ fn pack_components_inner(
             html_rel,
         } = comp;
         let parsed = loomgui_fence::parse_template_with_css(src, html_rel, load_css);
+        scope_buckets.add_page_tree(&parsed.tree);
         // 该组件全部围栏诊断先进收集（Error+Warning）。Error 存在则跳过 bridge
         //（坏树不值得展开），但循环继续——后续组件的诊断也要给作者。
         let has_error = parsed
@@ -203,6 +206,27 @@ fn pack_components_inner(
                 format!("duplicate component name `{}` in package", b.name),
             ));
         }
+    }
+    // 组件 `<style>` 纯类规则墙外死代码检查（跨文件证据版）：本包页面树作证据、
+    // workspace 注册表全量组件作被检面。warning 级，随包报告给作者。
+    for (comp_name, def) in registry.iter() {
+        let input = loomgui_fence::component_scope_check::ComponentScopeInput {
+            name: comp_name,
+            html_rel: &def.html_rel,
+            tree: &def.parsed.tree,
+            rules: &def.parsed.dynamic_rules,
+        };
+        let mut fence_diags = Vec::new();
+        loomgui_fence::component_scope_check::warn_component_rules_out_of_scope(
+            &[input],
+            &scope_buckets,
+            &mut fence_diags,
+        );
+        diagnostics.extend(
+            fence_diags
+                .iter()
+                .map(|d| PackDiagnostic::from_fence(d, comp_name, &def.html_rel)),
+        );
     }
     // collect-all 收尾：任一 error → 整体失败（exit 1），诊断全量随失败带出。
     if diagnostics.iter().any(|d| d.severity == Severity::Error) {

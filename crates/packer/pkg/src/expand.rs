@@ -178,6 +178,12 @@ impl ComponentRegistry {
         self.defs.get(tag)
     }
 
+    /// 全部注册组件（名 → 定义）。跨文件检查（组件死规则警告）需要以注册表
+    /// 全量为被检面——页面树证据由调用方逐页聚合。
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &ComponentDef)> {
+        self.defs.iter()
+    }
+
     fn mark_used(&self, tag: &str) {
         self.used.borrow_mut().insert(tag.to_string());
     }
@@ -729,6 +735,40 @@ mod tests {
             registry,
         )
         .expect_err("pack should fail")
+    }
+
+    /// 组件 `<style>` 纯类规则墙外死代码（跨文件证据版）：规则写进组件、元素在
+    /// 页面 host 外 → FenceComponentRuleOutOfScope warning。
+    #[test]
+    fn component_dead_rule_warns_via_page_evidence() {
+        let reg = registry_with(
+            "<style>.tip-stem { width: 10px }</style>\
+             <div class=\"card\"><slot></slot></div>",
+        );
+        let pr = pack_page(&reg, "<div class=\"tip-stem\"></div>");
+        let dead: Vec<_> = pr
+            .warnings
+            .iter()
+            .filter(|w| w.code == "FenceComponentRuleOutOfScope")
+            .collect();
+        assert_eq!(dead.len(), 1, "恰好一条死规则警告: {:?}", pr.warnings);
+        assert!(dead[0].message.contains("tip-stem"));
+        assert_eq!(dead[0].file, "components/game-item-card.html");
+    }
+
+    /// 运行时挂类（类名全库不出现，is-hover 类惯例）→ 静默，不误报。
+    #[test]
+    fn component_runtime_class_rule_silent() {
+        let reg =
+            registry_with("<style>.is-hover { opacity: 0.5 }</style><div class=\"card\"></div>");
+        let pr = pack_page(&reg, "<div class=\"unrelated\"></div>");
+        assert!(
+            pr.warnings
+                .iter()
+                .all(|w| w.code != "FenceComponentRuleOutOfScope"),
+            "无静态墙外证据不断死: {:?}",
+            pr.warnings
+        );
     }
 
     /// 展开 happy path：host（custom_tag + component_scope）+ 组件子树 + 锚定规则 +

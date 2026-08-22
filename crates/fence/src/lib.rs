@@ -1,4 +1,5 @@
 pub mod annotate;
+pub mod component_scope_check;
 pub mod consistency_check;
 pub mod control_css_check;
 pub mod control_structure_check;

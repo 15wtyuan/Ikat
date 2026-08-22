@@ -108,10 +108,12 @@ public class GameUI : MonoBehaviour
 - **Gameplay drives UI** — hold node references and mutate: text via
   `container.TextContent` / `TextNode.Text`, values via `slider.Value` /
   `progressBar.Value`, virtualized lists via `listView.ItemCount` +
-  `BindItem`, visual state via `node.Classes.Add(...)`, animations via
-  `node.Play("name")`, per-node logic via `node.OnUpdate(dt)` and
-  `driver.Context.CallLater` / `CallNextFrame`. Inline style overrides
-  sit on `node.Style.*`.
+  `BindItem`, visual state via `node.Classes.Add(...)`, show/hide via
+  `node.Style.Display = DisplayMode.None` (collapses layout + removes
+  hit-testing; `DisplayMode.Block` / `Flex` restores — no need to
+  hand-roll `.hide` classes), animations via `node.Play("name")`,
+  per-node logic via `node.OnUpdate(dt)` and `driver.Context.CallLater` /
+  `CallNextFrame`. Inline style overrides sit on `node.Style.*`.
 - **Lifecycle.** `_page.Dispose()` recursively destroys the subtree and
   clears event subscriptions. Page-swap pattern: Dispose old →
   Instantiate new → re-wire. Runtime package load/unload:

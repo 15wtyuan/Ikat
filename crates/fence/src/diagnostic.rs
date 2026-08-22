@@ -68,9 +68,9 @@ pub enum DiagnosticCode {
     /// `display: inline` 声明（warning）。围栏没有 inline flow——inline 运行时映射为
     /// flex 容器，与浏览器 inline（收缩宽 + 横排流）语义不同；显式声明多半是先验误用。
     FenceDisplayInline,
-    /// `transition` 声明了运行时不支持的属性（warning）。transition 引擎只覆盖
-    /// background-color / color / opacity 三通道；布局属性（width/transform 等）
-    /// 声明了也不过渡，浏览器先验会翻车。
+    /// `transition` 声明了运行时不支持的属性（warning）。transition 引擎覆盖
+    /// background-color / color / opacity / transform 四通道（transform 按 TRS 分解
+    /// 插值）；布局属性（width 等）声明了也不过渡，浏览器先验会翻车。
     FenceTransitionUnsupportedProp,
     /// 行内文本元素（rich-text-block 归类的 span 等）上声明 width/height 族（warning）。
     /// 该类元素被折进父级 inline flow，无独立盒子——尺寸声明恒无效（与浏览器对
@@ -85,6 +85,11 @@ pub enum DiagnosticCode {
     /// 控件按 value 全权驱动（水平位移 + 垂直居中），运行时逐帧归零其 inset/margin
     /// ——作者的 `top`/`left`/`margin` 定位不生效且叠加会双偏移。尺寸与外观照常。
     FenceSliderThumbPositioned,
+    /// 组件 `<style>` 纯类规则在样式墙外恒无命中（warning）。规则写进组件文件、
+    /// 类名只出现在页面 host 外区域（元素真实存在于页面作用域）——组件 CSS 不穿出
+    /// host，规则运行时恒死；浏览器预览（组件 CSS 全局生效）却正常。跨文件证据版：
+    /// 类名在组件模板/本组件投影内容有命中、或全库不出现（运行时挂类）则静默。
+    FenceComponentRuleOutOfScope,
 }
 
 #[derive(Debug, Clone)]

@@ -15,7 +15,7 @@ use loomgui_pkg::build::{pack_components, Component, PackResult};
 const HTML: &str = include_str!("fixtures/schema-lock.html");
 
 /// 当前布局的登记哈希。改 pkg 布局（有意 bump 版本）时同步更新此值。
-const LOCKED_HASH: u64 = 0xdcc7_31a9_4d73_0975;
+const LOCKED_HASH: u64 = 0x8acb_c285_c6e8_8136;
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;

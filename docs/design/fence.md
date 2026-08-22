@@ -487,9 +487,10 @@ CSS 在围栏中以三个正交维度建模：
 | `FenceUnknownRole` | `role` 属性值不在 role 注册表（`ROLE_TO_SEMANTIC` + `textbox`/`tabpanel`/`dialog` 例外）。拼错防护：未知 role 若静默回退成基础标签类型，元素会跳过全部控件校验（必需子结构、CSS 命中、结构 CSS），构建绿灯但运行时空白——「不静默降级」原则拒绝此类 |
 | `FenceStylesheetNotFound` | `<link rel="stylesheet">` 的外部 CSS 读取失败（href 相对所在 HTML 文件解析，报错带完整路径；静默丢样式是最难排查的降级形态） |
 | `FenceDisplayInline` | **warning**：显式 `display: inline` 声明。围栏没有 inline flow——inline 运行时映射为 flex 容器，与浏览器 inline（收缩宽 + 横排流）语义不同，显式声明多半是先验误用 |
-| `FenceTransitionUnsupportedProp` | **warning**：`transition` 声明了运行时不支持的属性。transition 引擎只驱动 `background-color` / `color` / `opacity` 三通道；布局属性（width/transform 等）声明了也不过渡，浏览器先验会翻车（`transition: all` 同理单独提示） |
+| `FenceTransitionUnsupportedProp` | **warning**：`transition` 声明了运行时不支持的属性。transition 引擎驱动 `background-color` / `color` / `opacity` / `transform` 四通道（transform 按 TRS 分解插值）；布局属性（width 等）声明了也不过渡，浏览器先验会翻车（`transition: all` 同理单独提示） |
 | `FenceInlineSizing` | **warning**：rich-text inline flow 内的行内元素（span 等）声明 `width`/`height` 族。该类元素无独立盒子，尺寸声明恒无效（与浏览器对 inline 元素一致）。可定尺寸路径：flex item div / `<img>` / 显式 `display:flex` |
 | `FencePageRuleProjectedOnly` | **warning**：页面侧纯类规则只可能命中 slot 投射内容。样式墙下页面规则不穿 host 边界，该规则运行时恒为死代码——给投影内容定样式写在组件 `<style>` 里 |
+| `FenceComponentRuleOutOfScope` | **warning**：组件 `<style>` 纯类规则在本组件样式宇宙（模板 + 本组件投影内容）外恒无命中——类名只出现在页面 host 外区域或其它组件的投影内容上（组件 CSS 不穿出 host）。跨文件证据版：类名在宇宙内可命中或全库不出现（运行时 `Classes.Add` 挂类）则静默，宁漏报不误报 |
 | `FenceSliderThumbPositioned` | **warning**：slider 滑块头（`data-slot="thumb"`）上声明非零定位（`top`/`right`/`bottom`/`left`/`margin` 族）。thumb 位移由控件按 value 全权驱动（水平位移 + 垂直居中，运行时逐帧归零其 inset/margin）——作者定位不生效且叠加双偏移（浏览器预览居中、运行时偏移）。标准写法 `left:0; top:0`（零值锚定）与尺寸/外观声明不受影响 |
 
 #### 值域门（打包期 error，双路径统一）

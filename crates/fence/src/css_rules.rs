@@ -56,14 +56,21 @@ pub struct KeyframesRule {
 /// 越界：Child `>`、相邻 `+`/`~`、逗号多选（逗号在 parse_style_block 预切分）→ None。
 /// 注意 `+`/`-` 在 `:nth-child(...)` 括号内合法（An+B），组合子判定按括号深度排除。
 pub fn parse_selector(raw: &str) -> Option<ParsedSelector> {
+    parse_selector_with_reason(raw).ok()
+}
+
+/// [`parse_selector`] 的带原因版：越界时 Err 携带具体构造（报错点名元凶）。
+pub fn parse_selector_with_reason(raw: &str) -> Result<ParsedSelector, String> {
     let raw = raw.trim();
     if raw.is_empty() {
-        return None;
+        return Err("empty selector".to_string());
     }
     // 越界字符快速判定：逗号 / > + ~ 组合子不在本子集（属性选择器 `[...]` 已支持，见
     // parse_compound；`:nth-child(2n+1)` 的 `+` 在括号内合法，按深度排除）。
-    if has_out_of_subset_combinator(raw) {
-        return None;
+    if let Some(ch) = out_of_subset_combinator(raw) {
+        return Err(format!(
+            "combinator \"{ch}\" is outside the fence (only descendant combinators)"
+        ));
     }
 
     let mut specificity_a = 0u32; // id 数
@@ -94,7 +101,7 @@ pub fn parse_selector(raw: &str) -> Option<ParsedSelector> {
     }
 
     for part in parts {
-        let (c, a, b, cc) = parse_compound(part)?;
+        let (c, a, b, cc) = parse_compound_detailed(part)?;
         specificity_a += a;
         specificity_b += b;
         specificity_c += cc;
@@ -105,32 +112,34 @@ pub fn parse_selector(raw: &str) -> Option<ParsedSelector> {
     }
 
     if compounds.is_empty() {
-        return None;
+        return Err("empty selector".to_string());
     }
-    Some(ParsedSelector {
+    Ok(ParsedSelector {
         raw: raw.to_string(),
         compound: compounds,
         specificity: Specificity(specificity_a, specificity_b, specificity_c),
     })
 }
 
-/// 组合子越界扫描：逗号 / `>` / `+` / `~` 在括号外出现即越界。
+/// 组合子越界扫描：括号外出现 `,` / `>` / `+` / `~` 即越界，返回首个越界字符。
 /// `:nth-child(An+B)` 的参数里 `+`/`-` 是合法语法（如 `2n+1`），括号内不判。
-fn has_out_of_subset_combinator(raw: &str) -> bool {
+fn out_of_subset_combinator(raw: &str) -> Option<char> {
     let mut depth: i32 = 0;
     for ch in raw.chars() {
         match ch {
             '(' => depth += 1,
             ')' => depth -= 1,
-            ',' | '>' | '+' | '~' if depth == 0 => return true,
+            ',' | '>' | '+' | '~' if depth == 0 => return Some(ch),
             _ => {}
         }
     }
-    false
+    None
 }
 
-/// 解析单个 compound（无空格的一段）。返 (compound, a, b, c) specificity 贡献。
-fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
+/// [`parse_compound_detailed`] 的文档见上：失败时 Err 携带具体越界构造（供
+/// 「unsupported selector」报错点名元凶——笼统的整串不支持会让 AI 读者
+/// 误判成相邻构造的锅，如把 `:not()` 的错归给同串的 `:hover`）。
+fn parse_compound_detailed(part: &str) -> Result<(Compound, u32, u32, u32), String> {
     let mut c = Compound {
         tag: None,
         classes: Vec::new(),
@@ -152,7 +161,7 @@ fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
         if let Some(r) = rest.strip_prefix('.') {
             let (name, next) = take_ident(r);
             if name.is_empty() {
-                return None;
+                return Err(format!("empty class name in \"{part}\""));
             }
             c.classes.push(name.to_string());
             b += 1;
@@ -160,7 +169,7 @@ fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
         } else if let Some(r) = rest.strip_prefix('#') {
             let (name, next) = take_ident(r);
             if name.is_empty() {
-                return None;
+                return Err(format!("empty id name in \"{part}\""));
             }
             c.id = Some(name.to_string());
             a += 1;
@@ -191,31 +200,56 @@ fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
                 }
                 "nth-child" => {
                     // 参数化伪类：`:nth-child(An+B|odd|even|N)`（spec §8.5）。
-                    // 解析括号内 An+B → NthChildExpr；语法越界（无括号/缺 `)`/坏参数）→ None。
-                    let after = next.strip_prefix('(')?;
-                    let close = after.find(')')?;
-                    let (a, b) = parse_nth_arg(&after[..close])?;
+                    // 解析括号内 An+B → NthChildExpr；语法越界（无括号/缺 `)`/坏参数）→ Err。
+                    let after = next.strip_prefix('(').ok_or_else(|| {
+                        "invalid :nth-child(...) argument (An+B | odd | even | N)".to_string()
+                    })?;
+                    let close = after.find(')').ok_or_else(|| {
+                        "invalid :nth-child(...) argument (An+B | odd | even | N)".to_string()
+                    })?;
+                    let (a, b) = parse_nth_arg(&after[..close]).ok_or_else(|| {
+                        "invalid :nth-child(...) argument (An+B | odd | even | N)".to_string()
+                    })?;
                     c.pseudo_nth_child = Some(NthChildExpr { a, b });
                     rest = &after[close + 1..];
                 }
-                _ => return None, // 未知伪类越界（含 nth-of-type 等）
+                "" => {
+                    return Err(
+                        "pseudo-elements (\"::before\" etc.) are outside the fence".to_string()
+                    )
+                }
+                other => {
+                    return Err(format!(
+                        "pseudo-class \":{other}\" is outside the fence \
+                         (supported: :hover, :active, :focus, :disabled, :checked, :nth-child)"
+                    ))
+                }
             }
             b += 1; // 伪类算 class 级
         } else if let Some(r) = rest.strip_prefix('[') {
             // 属性选择器：[attr] / [attr="val"] / [attr=val]。仅 Eq + Exists；高阶运算符
-            // (^= ~= $= *= |=) 不在围栏子集 → 返 None 让 parse_style_block 报错。
-            let close = r.find(']')?;
+            // (^= ~= $= *= |=) 不在围栏子集 → Err 点名运算符。
+            let close = r
+                .find(']')
+                .ok_or_else(|| "attribute selector is missing \"]\"".to_string())?;
             let inner = r[..close].trim();
             let after = &r[close + 1..];
             let (name, op, value) = match inner.find('=') {
                 Some(eq_pos) => {
                     let name_part = inner[..eq_pos].trim();
-                    // 高阶属性运算符的修饰字符紧贴 = 前 → 围栏外，直接拒绝。
-                    if name_part.ends_with(['~', '^', '$', '*', '|']) {
-                        return None;
+                    // 高阶属性运算符的修饰字符紧贴 = 前 → 围栏外，点名运算符。
+                    if let Some(modifier) = name_part
+                        .chars()
+                        .last()
+                        .filter(|ch| ['~', '^', '$', '*', '|'].contains(ch))
+                    {
+                        return Err(format!(
+                            "attribute operator \"{modifier}=\" is outside the fence \
+                             (only [attr] and [attr=\"value\"])"
+                        ));
                     }
                     if name_part.is_empty() {
-                        return None;
+                        return Err(format!("empty attribute name in \"{part}\""));
                     }
                     let val = inner[eq_pos + 1..]
                         .trim()
@@ -229,7 +263,7 @@ fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
                 }
                 None => {
                     if inner.is_empty() {
-                        return None;
+                        return Err(format!("empty attribute name in \"{part}\""));
                     }
                     (inner.to_ascii_lowercase(), AttrOp::Exists, None)
                 }
@@ -240,11 +274,16 @@ fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
         } else {
             // tag（必须出现在 compound 最前）
             if consumed_tag {
-                return None; // tag 后面跟了非 .#: 的字符 → 非法形态
+                return Err(format!(
+                    "invalid token \"{rest}\" — a compound is tag + classes/ids/pseudos/attrs"
+                ));
+            }
+            if rest.starts_with('*') {
+                return Err("universal selector \"*\" is outside the fence".to_string());
             }
             let (name, next) = take_ident(rest);
             if name.is_empty() {
-                return None;
+                return Err(format!("invalid token \"{rest}\""));
             }
             c.tag = Some(name.to_string());
             cc += 1;
@@ -252,7 +291,7 @@ fn parse_compound(part: &str) -> Option<(Compound, u32, u32, u32)> {
             rest = next;
         }
     }
-    Some((c, a, b, cc))
+    Ok((c, a, b, cc))
 }
 
 /// 解析 `:nth-child(...)` 参数 → (a, b)（spec §8.5）。
@@ -395,14 +434,14 @@ pub fn parse_style_block_named(
             if sel_raw.is_empty() {
                 continue;
             }
-            match parse_selector(sel_raw) {
-                Some(selector) => rules.push(DynamicRule {
+            match parse_selector_with_reason(sel_raw) {
+                Ok(selector) => rules.push(DynamicRule {
                     selector,
                     declarations: declarations.clone(),
                 }),
-                None => diagnostics.push(Diagnostic::error(
+                Err(reason) => diagnostics.push(Diagnostic::error(
                     DiagnosticCode::FenceBadCssValue,
-                    format!("unsupported selector \"{sel_raw}\" in <style>"),
+                    format!("unsupported selector \"{sel_raw}\" in <style>: {reason}"),
                     loc.clone(),
                 )),
             }
@@ -750,6 +789,38 @@ mod tests {
 
     fn spec(raw: &str) -> ParsedSelector {
         parse_selector(raw).unwrap_or_else(|| panic!("parse_selector({raw:?}) 返回 None"))
+    }
+
+    #[test]
+    fn selector_errors_name_the_culprit() {
+        // 报错点名元凶：整串笼统「unsupported selector」会让 AI 读者把
+        // `:not()` 的错归给同串的 `:hover`。
+        let cases: &[(&str, &str)] = &[
+            (".btn:hover:not(.x)", "pseudo-class \":not\""),
+            (".btn::before", "pseudo-elements"),
+            ("*:hover", "universal selector \"*\""),
+            (".a > .b", "combinator \">\""),
+            (".a + .b", "combinator \"+\""),
+            ("[data-x^=\"y\"]", "attribute operator \"^=\""),
+            (".a:nth-child(bad)", ":nth-child"),
+        ];
+        for (raw, expected) in cases {
+            let err = match parse_selector_with_reason(raw) {
+                Err(e) => e,
+                Ok(_) => panic!("{raw:?} 应失败"),
+            };
+            assert!(
+                err.contains(expected),
+                "{raw:?} 报错应点名 {expected:?}，实得 {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn hover_alone_parses() {
+        // 对照：`:hover` 本体在围栏内，与伪元素/未知伪类/通配区分。
+        let s = spec(".btn:hover");
+        assert!(s.compound[0].pseudo_hover);
     }
 
     #[test]

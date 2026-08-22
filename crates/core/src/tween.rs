@@ -14,6 +14,10 @@ pub enum TweenProp {
     Rotation = 3,
     BgColor = 4,
     TextColor = 5,
+    /// CSS `transition: transform` 的复合通道：整矩阵 TRS 分解后单 tween 插值
+    ///（不拆 Translate/Scale/Rotation 三 tween——apply 各臂整矩阵覆写会互踩）。
+    /// 追加到末尾保持既有判别值稳定。
+    Transform = 6,
 }
 
 impl TweenProp {
@@ -26,17 +30,19 @@ impl TweenProp {
             3 => Some(Self::Rotation),
             4 => Some(Self::BgColor),
             5 => Some(Self::TextColor),
+            6 => Some(Self::Transform),
             _ => None,
         }
     }
 }
 
-/// 每个 prop 的 lerp 分量数（start/end [f32;4] 取前 N 个）。
+/// 每个 prop 的 lerp 分量数（start/end [f32;5] 取前 N 个）。
 pub fn prop_value_size(prop: TweenProp) -> u8 {
     match prop {
         TweenProp::Opacity | TweenProp::Rotation => 1,
         TweenProp::Translate | TweenProp::Scale => 2,
         TweenProp::BgColor | TweenProp::TextColor => 4,
+        TweenProp::Transform => 5,
     }
 }
 
@@ -162,8 +168,9 @@ impl Ease {
 pub struct TransitionRequest {
     pub node: crate::scene::node::NodeId,
     pub prop: TweenProp,
-    pub start: [f32; 4],
-    pub end: [f32; 4],
+    /// 通道载荷（前 prop_value_size 个分量有效；Transform = [tx,ty,sx,sy,rot]）。
+    pub start: [f32; 5],
+    pub end: [f32; 5],
     pub ease: Ease,
     pub delay: f32,
     pub duration: f32,
@@ -180,8 +187,8 @@ use crate::transform::{self};
 pub(crate) struct Tween {
     pub(crate) node: NodeId,
     pub(crate) prop: TweenProp,
-    pub(crate) start: [f32; 4],
-    pub(crate) end: [f32; 4],
+    pub(crate) start: [f32; 5],
+    pub(crate) end: [f32; 5],
     ease: Ease,
     delay: f32,
     duration: f32,
@@ -223,8 +230,8 @@ impl TweenManager {
         &mut self,
         node: NodeId,
         prop: TweenProp,
-        start: [f32; 4],
-        end: [f32; 4],
+        start: [f32; 5],
+        end: [f32; 5],
         ease: Ease,
         delay: f32,
         duration: f32,
@@ -302,8 +309,8 @@ fn apply(
     anim: &mut AnimTable,
     node: NodeId,
     prop: TweenProp,
-    start: [f32; 4],
-    end: [f32; 4],
+    start: [f32; 5],
+    end: [f32; 5],
     n: f32,
 ) {
     let a = anim.ensure(node);
@@ -313,6 +320,16 @@ fn apply(
         TweenProp::Translate => a.transform = Some(transform::from_translate(lerp(0), lerp(1))),
         TweenProp::Scale => a.transform = Some(transform::from_scale(lerp(0), lerp(1))),
         TweenProp::Rotation => a.transform = Some(transform::from_rotate(lerp(0))),
+        // TRS 五元组逐分量 lerp 后 SRT 合成（与 keyframe 的 transform 插值同一语义）。
+        TweenProp::Transform => {
+            a.transform = Some(transform::from_trs(
+                lerp(0),
+                lerp(1),
+                lerp(2),
+                lerp(3),
+                lerp(4),
+            ))
+        }
         TweenProp::BgColor => a.bg_color = Some([lerp(0), lerp(1), lerp(2), lerp(3)]),
         TweenProp::TextColor => a.text_color = Some([lerp(0), lerp(1), lerp(2), lerp(3)]),
     }
@@ -330,6 +347,7 @@ mod tests {
         assert_eq!(prop_value_size(TweenProp::Scale), 2);
         assert_eq!(prop_value_size(TweenProp::BgColor), 4);
         assert_eq!(prop_value_size(TweenProp::TextColor), 4);
+        assert_eq!(prop_value_size(TweenProp::Transform), 5);
     }
 
     #[test]
@@ -443,8 +461,8 @@ mod tests {
         mgr.tween(
             nid,
             TweenProp::Opacity,
-            [0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0],
+            [0.0; 5],
+            [1.0, 0.0, 0.0, 0.0, 0.0],
             Ease::Linear,
             0.0,
             1.0,
@@ -467,8 +485,8 @@ mod tests {
         mgr.tween(
             nid,
             TweenProp::Scale,
-            [1.0, 1.0, 0.0, 0.0],
-            [2.0, 3.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0, 0.0, 0.0],
+            [2.0, 3.0, 0.0, 0.0, 0.0],
             Ease::Linear,
             0.0,
             1.0,
@@ -497,14 +515,46 @@ mod tests {
     }
 
     #[test]
+    fn update_transform_composes_srt_midway() {
+        // Transform 通道半程：TRS 逐分量 lerp 后 SRT 合成。
+        // start = T(0,0)·S(1,1)·R(0)（identity），end = T(10,4)·S(2,1)·R(π/2)。
+        // n=0.5 → T(5,2)·S(1.5,1)·R(π/4)：矩阵 = [c·sx, s·sx, -s·sy, c·sy, tx, ty]。
+        let (mut s, nid) = one_node_scene();
+        let mut mgr = TweenManager::new();
+        mgr.tween(
+            nid,
+            TweenProp::Transform,
+            [0.0, 0.0, 1.0, 1.0, 0.0],
+            [10.0, 4.0, 2.0, 1.0, std::f32::consts::FRAC_PI_2],
+            Ease::Linear,
+            0.0,
+            1.0,
+            0,
+        );
+        let mut out = Vec::new();
+        mgr.update(0.5, &mut s, &mut out);
+        let m = s.anim.0.get(&nid).unwrap().transform.unwrap();
+        let (sn, cs) = std::f32::consts::FRAC_PI_4.sin_cos();
+        assert!((m[0] - cs * 1.5).abs() < 1e-5, "a {m:?}");
+        assert!((m[1] - sn * 1.5).abs() < 1e-5, "b {m:?}");
+        assert!((m[2] + sn).abs() < 1e-5, "c {m:?}");
+        assert!((m[3] - cs).abs() < 1e-5, "d {m:?}");
+        assert!(
+            (m[4] - 5.0).abs() < 1e-5 && (m[5] - 2.0).abs() < 1e-5,
+            "t {m:?}"
+        );
+        assert!(out.is_empty(), "未结束");
+    }
+
+    #[test]
     fn update_delay_gates_apply() {
         let (mut s, nid) = one_node_scene();
         let mut mgr = TweenManager::new();
         mgr.tween(
             nid,
             TweenProp::Opacity,
-            [0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0],
+            [0.0; 5],
+            [1.0, 0.0, 0.0, 0.0, 0.0],
             Ease::Linear,
             1.0,
             1.0,
@@ -532,8 +582,8 @@ mod tests {
         mgr.tween(
             nid,
             TweenProp::Opacity,
-            [0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0],
+            [0.0; 5],
+            [1.0, 0.0, 0.0, 0.0, 0.0],
             Ease::Linear,
             0.0,
             1.0,
@@ -561,8 +611,8 @@ mod tests {
         mgr.tween(
             oob,
             TweenProp::Opacity,
-            [0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0],
+            [0.0; 5],
+            [1.0, 0.0, 0.0, 0.0, 0.0],
             Ease::Linear,
             0.0,
             1.0,
@@ -594,8 +644,8 @@ mod tests {
         mgr.tween(
             nid,
             TweenProp::Opacity,
-            [0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0],
+            [0.0; 5],
+            [1.0, 0.0, 0.0, 0.0, 0.0],
             Ease::Linear,
             0.0,
             1.0,
@@ -604,8 +654,8 @@ mod tests {
         mgr.tween(
             nid,
             TweenProp::BgColor,
-            [0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0],
+            [0.0; 5],
+            [1.0, 0.0, 0.0, 0.0, 0.0],
             Ease::Linear,
             0.0,
             1.0,
@@ -614,8 +664,8 @@ mod tests {
         mgr.tween(
             other,
             TweenProp::Opacity,
-            [0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0],
+            [0.0; 5],
+            [1.0, 0.0, 0.0, 0.0, 0.0],
             Ease::Linear,
             0.0,
             1.0,

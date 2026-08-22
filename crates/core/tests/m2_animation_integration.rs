@@ -443,6 +443,35 @@ fn transition_class_change_starts_real_tween_and_reaches_midpoint() {
 }
 
 #[test]
+fn transition_transform_class_change_interpolates_trs() {
+    // transform 通道全链：class 翻转 transform → rematch diff → 复合 tween →
+    // NodeAnim.transform 写入 SRT 合成矩阵（translate + scale 同时插值）。
+    let html = r#"<style>
+        .card { transform:translate(0px,0px) scale(1,1); transition:transform .4s linear; width:20px; height:20px; }
+        .card.lifted { transform:translate(10px,4px) scale(2,1); }
+    </style><div class="card"></div>"#;
+    let (mut stage, card) = stage_from_html(html);
+    tick(&mut stage, 0.0);
+    stage.add_class(card, "lifted").expect("add lifted class");
+    tick(&mut stage, 0.0); // rematch 检测 diff → drain 提交 tween
+    tick(&mut stage, 0.2); // 半程
+    let m = node_anim(&stage, card)
+        .transform
+        .expect("transform override at midpoint");
+    close(m[4], 5.0); // tx: 0→10 的半程
+    close(m[5], 2.0); // ty: 0→4 的半程
+    close(m[0], 1.5); // a = sx（无旋转）: 1→2 的半程
+    close(m[3], 1.0); // d = sy: 恒 1
+    tick(&mut stage, 0.2); // 终值
+    let m = node_anim(&stage, card)
+        .transform
+        .expect("transform override at end");
+    close(m[4], 10.0);
+    close(m[0], 2.0);
+    close(m[3], 1.0);
+}
+
+#[test]
 fn parent_animation_opacity_is_accumulated_into_child_render_node() {
     let html = r#"<style>
         @keyframes fade { from { opacity:0; } to { opacity:1; } }

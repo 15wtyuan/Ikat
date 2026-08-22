@@ -183,6 +183,10 @@
 - 判据：第一个需 layout 动画的页面（如 accordion 展开 / 用 width 而非 scaleX 的进度条）。
 - 来源：`2026-08-04-m2-keyframes-runtime` §1.3、§3.2、§12。
 
+**transition: box-shadow 通道** — transition 已覆盖 background-color / color / opacity / transform（2026-08-22，transform 走整矩阵 TRS 分解插值，pkg v39）；box-shadow 需打通全新动画通道全链（AnimatableProps/NodeAnim 槽位 + render 消费 + FFI 枚举对齐），且多阴影列表插值语义复杂（数量不匹配时浏览器也是离散跳变）。悬浮阴影动效现阶段用 transform+bg_color 近似。
+- 判据：真需要阴影渐变且 transform 近似不够的 UI（如大投影卡片悬浮）。
+- 来源：2026-08-21 Tripawd Field Notes N18（战斗手感批）。
+
 **视觉：渐变剩余形态** — radial + 多 stop + 任意角度已交付（2026-08-14，见里程碑 1 任务 3）。剩余 defer：`conic-gradient` / `repeating-linear/radial-gradient`（围栏打包期拒收，判据：第一个真需要的 UI）；渐变 × 圆角 / 九宫格 / 边框共存（`use_gradient` 门互斥，共存需混合 mesh 或边框独立 draw call，判据：第一个圆角渐变按钮 UI）；`to top right` 角点方向关键字；>8 stops（FFI grad_params 列定长 8 槽）。
 - 判据：上述形态被 showcase / dogfood 逼出时。
 - 来源：`2026-08-14-gradient-radial-multistop-design.md` §2/§10。
