@@ -494,7 +494,42 @@ namespace LoomGUI
             // backend.CollectInput 走 UnityLoomBackend._inputCollector 路径（与 host 引擎无关性兼容）。
             // unscaledDeltaTime：暂停不受影响（与 UI 时间语义一致）。
             _host.Step(Time.unscaledDeltaTime);
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            UpdatePickProbe();
+#endif
         }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        // F9 pick 命中链探针（编辑器/开发构建；LoomDebugProbe.DescribePickChain 本体
+        // 常驻可用——正式构建自定义热键绑它即可）。顶层命中变化才打日志，不逐帧刷屏。
+        bool _pickProbeOn;
+        uint _probeLastHit = 0xFFFF_FFFF;
+
+        void UpdatePickProbe()
+        {
+#if ENABLE_INPUT_SYSTEM
+            var kb = UnityEngine.InputSystem.Keyboard.current;
+            if (kb != null && kb.f9Key.wasPressedThisFrame)
+            {
+                _pickProbeOn = !_pickProbeOn;
+                _probeLastHit = 0xFFFF_FFFF;
+                Debug.LogWarning($"[LoomGUI] pick probe {(_pickProbeOn ? "ON" : "OFF")} (F9)");
+            }
+            if (!_pickProbeOn || _host == null) return;
+            var mouse = UnityEngine.InputSystem.Mouse.current;
+            if (mouse == null) return;
+            var screen = mouse.position.ReadValue();
+            var design = LoomInputCollector.ScreenToDesign(
+                screen, new Vector2Int(Screen.width, Screen.height), _designSize, Screen.safeArea, _safeArea);
+            Node hit = _host.Context.Pick(new LoomVector2(design.x, design.y));
+            uint hitId = hit?._id ?? 0xFFFF_FFFF;
+            if (hitId == _probeLastHit) return;
+            _probeLastHit = hitId;
+            Debug.LogWarning(LoomDebugProbe.DescribePickChain(_host.Context, design.x, design.y));
+#endif
+        }
+#endif
 
         /// <summary>on-screen FPS 读数（_showFps=true 时显示）。1/Time.smoothDeltaTime 平滑帧率。</summary>
         void OnGUI()

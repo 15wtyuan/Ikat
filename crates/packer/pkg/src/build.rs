@@ -138,11 +138,19 @@ fn pack_components_inner(
         // 组件展开 bridge（registry 为空时除页面级 <slot> 报错外与旧 bridge 等价）：
         // 展开 CustomElement host + slot 投影 + 收集展开域锚定规则与组件动画。
         // bridge 错误首错即断（展开期无 collect-all 机制），已收集的诊断随失败带出。
+        // 错误本身必须落进 diagnostics（合成 Error）：analyze 只消费 diagnostics，
+        // message-only 的失败在那里会被丢弃——包静默消失而 build 仍报 OK。
         let out = match bridge_with_components(&parsed, html_rel, registry) {
             Ok(out) => out,
             Err(e) => {
+                diagnostics.push(PackDiagnostic::synthetic_error(
+                    code::PACK_ERROR,
+                    name,
+                    html_rel,
+                    e,
+                ));
                 return Err(BuildFailure::validation(
-                    format!("bridge error in component {name}: {e}"),
+                    format!("bridge error in component {name}"),
                     diagnostics,
                 ));
             }
@@ -461,7 +469,20 @@ pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
                 all_refs.extend(pr.referenced_sprites.iter().cloned());
                 packages.push((pkg.name.clone(), pr));
             }
-            Err(f) => diags.extend(f.diagnostics),
+            Err(f) => {
+                // 防线：只带 message、不带 Error 级诊断的失败若直接 extend 会整体蒸发
+                // ——该包从产物里静默消失而 build/check 仍报成功。任何新错误源漏配
+                // 诊断时这里兜底合成，失败永远可见。
+                if !f.diagnostics.iter().any(|d| d.severity == Severity::Error) {
+                    diags.push(PackDiagnostic::synthetic_error(
+                        code::PACK_ERROR,
+                        &pkg.name,
+                        "",
+                        f.message,
+                    ));
+                }
+                diags.extend(f.diagnostics);
+            }
         }
     }
     // 展开用到的组件的 sprite 引用并入交叉验证（未用组件是设计期存货，缺图不阻断）。
@@ -666,6 +687,125 @@ fn clean_stale_outputs(dir: &Path, exts: &[&str]) -> Result<(), String> {
 mod package_tests {
     use super::*;
     use loomgui_core::scene::NodeKind;
+
+    /// 写一个最小多页 + 组件工作区到临时目录，供 analyze 级 e2e 测试用。
+    fn write_temp_ws(tag: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
+        let tmp = std::env::temp_dir().join(format!("loom_ws_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        for (rel, content) in files {
+            let path = tmp.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, content).unwrap();
+        }
+        tmp
+    }
+
+    const TIP_PANEL_LINES: &str = r#"<div class="tip">
+  <slot name="line0"></slot>
+  <slot name="line1"></slot>
+</div>"#;
+
+    const WS_JSON: &str =
+        r#"{"version":1,"output_dir":"../out","packages":[{"name":"game","dirs":["ui"]}]}"#;
+
+    /// 回归（issue #1 触发 A）：某页投影悬空 slot 名 → analyze 必须失败且错误可见。
+    /// 修前：bridge 错误只带 message，被 analyze 丢弃 → 包静默消失、build 报 OK。
+    #[test]
+    fn analyze_fails_loudly_on_dangling_slot_projection() {
+        let tmp = write_temp_ws(
+            "dangling_slot",
+            &[
+                ("loom.workspace.json", WS_JSON),
+                ("ui/components/tip-panel.html", TIP_PANEL_LINES),
+                (
+                    "ui/battle.html",
+                    r#"<div style="display:flex"><tip-panel><span slot="line0">攻 13</span></tip-panel></div>"#,
+                ),
+                (
+                    "ui/map.html",
+                    // desc 槽已被重构删掉，map 页仍投影 → 悬空 slot 名。
+                    r#"<div style="display:flex"><tip-panel><span slot="desc">旧投影</span></tip-panel></div>"#,
+                ),
+            ],
+        );
+        let err = match analyze(&tmp) {
+            Err(e) => e,
+            Ok(_) => panic!("悬空 slot 必须失败（修前包静默消失、build 报 OK）"),
+        };
+        assert_eq!(err.exit_code, 1, "内容错误 exit 1：{err}");
+        let has = err
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error && d.message.contains("desc"));
+        assert!(
+            has,
+            "错误须以 Error 级诊断暴露（修前 message 被吞、包静默消失）：{err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// 回归（issue #1 触发 B）：投影 light 子 id 与组件模板 id 撞车 → analyze 失败可见。
+    #[test]
+    fn analyze_fails_loudly_on_projection_id_collision() {
+        let tmp = write_temp_ws(
+            "id_collision",
+            &[
+                ("loom.workspace.json", WS_JSON),
+                (
+                    "ui/components/tip-panel.html",
+                    r#"<div class="tip"><slot name="line0"></slot><div id="tip-row-0"></div></div>"#,
+                ),
+                (
+                    "ui/battle.html",
+                    r#"<div style="display:flex"><tip-panel><span slot="line0" id="tip-row-0">撞</span></tip-panel></div>"#,
+                ),
+            ],
+        );
+        let err = match analyze(&tmp) {
+            Err(e) => e,
+            Ok(_) => panic!("展开域 id 撞车必须失败"),
+        };
+        assert_eq!(err.exit_code, 1);
+        let has = err
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error && d.message.contains("tip-row-0"));
+        assert!(has, "撞车错误须以 Error 级诊断暴露：{err:?}");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// pack 层回归：bridge 错误（无效 slot）落进 BuildFailure.diagnostics 而非只在 message。
+    #[test]
+    fn pack_bridge_error_carries_error_diagnostic() {
+        use crate::expand::ComponentRegistry;
+        let (reg, _) = ComponentRegistry::from_sources(&[(
+            "tip-panel".to_string(),
+            TIP_PANEL_LINES.to_string(),
+            "ui/components/tip-panel.html".to_string(),
+        )])
+        .unwrap();
+        let err = pack_components_with_registry(
+            &[Component {
+                name: "page".to_string(),
+                src: r#"<div style="display:flex"><tip-panel><span slot="nope">x</span></tip-panel></div>"#
+                    .to_string(),
+                html_rel: "page.html".to_string(),
+            }],
+            &reg,
+        )
+        .expect_err("无效 slot 应失败");
+        let diag = err
+            .diagnostics
+            .iter()
+            .find(|d| d.severity == Severity::Error && d.code == "PackError")
+            .expect("bridge 错误须是 Error 级 PackError 诊断");
+        assert!(
+            diag.message.contains("nope"),
+            "诊断 message 须含 slot 名：{}",
+            diag.message
+        );
+        assert_eq!(diag.file, "page.html", "诊断指向出错页面文件");
+    }
 
     #[test]
     fn clean_stale_outputs_removes_products_keeps_meta() {

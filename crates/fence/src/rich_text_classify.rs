@@ -21,18 +21,42 @@ use crate::ir::{IrNodeKind, IrTree};
 use crate::schema::tag::SemanticKind;
 use loomgui_core::style::resolved::ResolvedStyle;
 
+/// span（TextElement）子是否声明了显式 `display:flex`（inline style 或静态可判定的
+/// 单 compound class 规则；多 compound 规则保守视为 flex）。
+///
+/// 显式 flex 的 span 在浏览器里外层显示类型是块级（`display:flex` 同时改内外显示
+/// 类型），且运行时它被豁免出 rich 折叠、自身是 flex 容器——它在父容器的分类里
+/// 必须算 **block 子**：若仍按 inline 折叠进父的 rich 流，slot 投影进来的块级内容
+/// 会被整棵折成一行（或被防御性跳过而隐身）。
+fn span_declares_flex(
+    el: &crate::ir::IrElement,
+    single_compound_flex_rules: &[&loomgui_core::style::dynamic::Compound],
+    has_multi_compound_flex_rule: bool,
+) -> bool {
+    has_explicit_display_flex(el)
+        || crate::inline_context_check::statically_declares_display(
+            el,
+            single_compound_flex_rules,
+            has_multi_compound_flex_rule,
+        )
+}
+
 /// 一个直接子在 rich-text 分类里的角色。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ChildRole {
     /// text(非纯空白) / span(TextElement) / img(Image) —— rich-text inline run 候选。
     Inline,
-    /// div / 控件 / template / 自定义元素等 —— 撑满竖排的 block-level。
+    /// div / 控件 / template / 自定义元素 / 显式 flex 的 span —— 撑满竖排的 block-level。
     Block,
     /// 纯空白文本 / 注释 / doctype —— 不参与分类（见模块文档「空白折叠」）。
     Neutral,
 }
 
-fn classify_child(kind: &IrNodeKind) -> ChildRole {
+fn classify_child(
+    kind: &IrNodeKind,
+    single_compound_flex_rules: &[&loomgui_core::style::dynamic::Compound],
+    has_multi_compound_flex_rule: bool,
+) -> ChildRole {
     match kind {
         IrNodeKind::Text(t) => {
             if t.trim().is_empty() {
@@ -41,16 +65,18 @@ fn classify_child(kind: &IrNodeKind) -> ChildRole {
                 ChildRole::Inline
             }
         }
-        IrNodeKind::Element(el) => {
-            if matches!(
-                el.semantic,
-                Some(SemanticKind::TextElement | SemanticKind::Image)
-            ) {
-                ChildRole::Inline
-            } else {
-                ChildRole::Block
+        IrNodeKind::Element(el) => match el.semantic {
+            Some(SemanticKind::Image) => ChildRole::Inline,
+            Some(SemanticKind::TextElement) => {
+                if span_declares_flex(el, single_compound_flex_rules, has_multi_compound_flex_rule)
+                {
+                    ChildRole::Block
+                } else {
+                    ChildRole::Inline
+                }
             }
-        }
+            _ => ChildRole::Block,
+        },
         IrNodeKind::Comment(_) | IrNodeKind::Doctype { .. } => ChildRole::Neutral,
     }
 }
@@ -78,12 +104,7 @@ fn is_block_container(
     // 的默认恰是 Flex（inline→flex hack），会把所有 span 误判成显式 flex。跨宇宙
     // （投影内容对组件 CSS）的 flex 由运行时 rematch 翻转兜底。
     if matches!(el.semantic, Some(SemanticKind::TextElement)) {
-        return !has_explicit_display_flex(el)
-            && !crate::inline_context_check::statically_declares_display(
-                el,
-                single_compound_flex_rules,
-                has_multi_compound_flex_rule,
-            );
+        return !span_declares_flex(el, single_compound_flex_rules, has_multi_compound_flex_rule);
     }
     // CustomElement host：light 子在打包期被投影进组件 slot（component-system spec），
     // host 最终子树来自组件模板——页面文件里的 light 子混排不是 inline-flow 上下文。
@@ -157,10 +178,43 @@ pub fn classify_rich_text(
             continue;
         }
 
+        // 纯 span（无显式 flex 的 TextElement）直接包 <slot>：投影进来的 light 子
+        // 落在 inline 上下文——块级子被折进 rich 流或按 flex-row hack 横排，无法按
+        // 自身 display 参与宿主布局（浏览器里 slotted 节点正常参与布局）。打包期
+        // 报错，逼作者把 slot 放进 div 或给 span 显式 display:flex。
+        if let IrNodeKind::Element(el) = &node.kind {
+            if el.semantic == Some(SemanticKind::TextElement)
+                && node.children.iter().any(|c| {
+                    matches!(
+                        &tree.nodes[c.0].kind,
+                        IrNodeKind::Element(ce) if ce.semantic == Some(SemanticKind::Slot)
+                    )
+                })
+            {
+                diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::FenceSlotInInlineContext,
+                    format!(
+                        "<{}> hosts <slot> without display:flex: slot-projected children \
+                         land in an inline context and cannot participate in host layout \
+                         with their own display (block children fold into one inline line \
+                         or get skipped). Fix: move the slot into a <div>, or declare \
+                         display:flex on the span",
+                        el.tag
+                    ),
+                    line_map.source_location(node.span.start, file.to_string()),
+                ));
+                continue;
+            }
+        }
+
         let mut inline_cnt = 0usize;
         let mut block_cnt = 0usize;
         for child in &node.children {
-            match classify_child(&tree.nodes[child.0].kind) {
+            match classify_child(
+                &tree.nodes[child.0].kind,
+                &single_compound_flex_rules,
+                has_multi_compound_flex_rule,
+            ) {
                 ChildRole::Inline => inline_cnt += 1,
                 ChildRole::Block => block_cnt += 1,
                 ChildRole::Neutral => {}
@@ -344,6 +398,119 @@ mod tests {
                 .all(|d| d.code != DiagnosticCode::FenceMixedInlineBlock),
             "块间装饰空白不应触发 mixed: {:?}",
             out.diagnostics
+        );
+    }
+
+    /// 显式 flex 的 span 在父分类里算 block 子（浏览器 display:flex 外层块级）：
+    /// 父容器不再因此被标 rich-text-block——否则 slot 投影进 span 的块级内容会被
+    /// 整棵折进父的 inline 流（issue #2：tip 行"堆一起"/div 行隐身）。
+    #[test]
+    fn explicit_flex_span_is_block_child() {
+        // 纯 flex-span 子（+装饰空白）→ 父不标 rich、不报 mixed：span 是块级 flex 容器。
+        let out = parse_template(
+            r#"<div>
+    <span style="display:flex;flex-direction:column"><span>a</span></span>
+</div>"#,
+            "t.html",
+        );
+        let root = out.tree.roots[0].0;
+        assert!(
+            !out.rich_text_blocks.contains(&root),
+            "flex-span 是 block 子，父不得标 rich-text-block"
+        );
+        assert!(
+            out.diagnostics
+                .iter()
+                .all(|d| d.code != DiagnosticCode::FenceMixedInlineBlock),
+            "无 inline 子不应报 mixed: {:?}",
+            out.diagnostics
+        );
+
+        // text + flex-span 混排 → 与 div 子同款 mixed error（fail-loud，作者选边）。
+        let out2 = parse_template(
+            r#"<div>名字 <span style="display:flex">a</span></div>"#,
+            "t.html",
+        );
+        let root2 = out2.tree.roots[0].0;
+        assert!(
+            !out2.rich_text_blocks.contains(&root2),
+            "mixed 容器不得标 rich-text-block"
+        );
+        assert!(
+            out2.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::FenceMixedInlineBlock),
+            "text + flex-span 须按 mixed 报错（修前 flex-span 被算 inline、静默折一行）: {:?}",
+            out2.diagnostics
+        );
+
+        // 对照：无 flex 的普通 span 仍是 inline 子（全 inline → rich 标记照旧）。
+        let out3 = parse_template(r#"<div>Hello <span>x</span></div>"#, "t.html");
+        let root3 = out3.tree.roots[0].0;
+        assert!(out3.rich_text_blocks.contains(&root3));
+    }
+
+    /// class 规则声明 flex 的 span 同样算 block 子（与 inline style 同口径）。
+    #[test]
+    fn class_flex_span_is_block_child() {
+        let out = parse_template(
+            r#"<style>.tip-desc { display: flex; flex-direction: column }</style>
+<div>
+    <span class="tip-desc"><span>a</span><span>b</span></span>
+</div>"#,
+            "t.html",
+        );
+        let root = out.tree.roots[0].0;
+        assert!(
+            !out.rich_text_blocks.contains(&root),
+            "class-flex span 是 block 子，父不得标 rich-text-block"
+        );
+        assert!(out
+            .diagnostics
+            .iter()
+            .all(|d| d.code != DiagnosticCode::FenceMixedInlineBlock));
+    }
+
+    /// slot 在纯 span（无显式 flex）内 → FenceSlotInInlineContext error；
+    /// 在显式 flex 的 span 或 div 内 → 静默。
+    #[test]
+    fn slot_in_plain_span_errors() {
+        let bad = parse_template(
+            r#"<div><span class="tip-desc"><slot name="desc"></slot></span></div>"#,
+            "t.html",
+        );
+        assert!(
+            bad.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::FenceSlotInInlineContext),
+            "纯 span 包 slot 须报错（投影块级子无法按自身 display 布局）: {:?}",
+            bad.diagnostics
+        );
+
+        let flex_ok = parse_template(
+            r#"<div><span class="tip-desc" style="display:flex;flex-direction:column"><slot name="desc"></slot></span></div>"#,
+            "t.html",
+        );
+        assert!(
+            flex_ok
+                .diagnostics
+                .iter()
+                .all(|d| d.code != DiagnosticCode::FenceSlotInInlineContext),
+            "显式 flex 的 span 包 slot 合法: {:?}",
+            flex_ok.diagnostics
+        );
+
+        let div_ok = parse_template(
+            r#"<div><div class="tip-desc"><slot name="desc"></slot></div></div>"#,
+            "t.html",
+        );
+        assert!(
+            div_ok
+                .diagnostics
+                .iter()
+                .all(|d| d.code != DiagnosticCode::FenceSlotInInlineContext),
+            "div 包 slot 合法: {:?}",
+            div_ok.diagnostics
         );
     }
 }

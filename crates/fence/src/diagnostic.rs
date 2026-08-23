@@ -31,6 +31,13 @@ pub enum DiagnosticCode {
     /// 一个子 div（让外层变全 block），要么把容器改 display:flex（让所有子变 flex item）。
     /// 详见 fence.md「rich-text-block 分类（阶段 6.4）」。
     FenceMixedInlineBlock,
+    /// `<slot>` 位于无显式 `display:flex` 的 span（TextElement）内。
+    /// 投影进该 slot 的 light 子落在 inline 上下文：块级子被折进 rich inline 流
+    /// （挤成一行/隐身）或按 flex-row hack 横排，无法按自身 display 参与宿主布局
+    /// （浏览器里 slotted 节点在 slot 位置正常参与布局）。slot 须放在 div 或
+    /// 显式 flex 的 span 里。
+    /// 详见 fence.md「rich-text-block 分类（阶段 6.4）」。
+    FenceSlotInInlineContext,
     /// border-width 已声明但 border-style 缺省（CSS initial=none）。
     /// 浏览器按 CSS 规范不画边框，而 LoomGUI 历史实现会画 → 预览 ≠ 运行时。
     /// 详见 fence.md「围栏内一致性 warning」。

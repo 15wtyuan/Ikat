@@ -5,6 +5,37 @@ All notable changes to `com.loomgui.unity` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.0.10] - 2026-08-24
+
+Issue #1/#2/#4 批：打包失败静默弃包、slot 投影行不参与宿主布局、F9 命中链探针。
+
+### Fixed
+- **bridge 错误不再静默吞掉（#1）**：悬空 slot 投影（页面投影 `slot="X"` 而组件
+  模板无此槽）或展开域 id 撞车（投影 light 子 id 与组件模板 id 同名）此前让
+  `loom build` 打印 OK、exit 0，**pkg.bin 悄悄不落盘**（旧文件先被清掉）——CI
+  绿灯之下产物消失。根因：analyze 只消费诊断列表、丢弃只有 message 的 bridge
+  失败。现在错误以 `PackError` Error 级诊断可见（build/check 都 exit 1 并指明
+  出错页面）；失败但无 Error 诊断的路径由 analyze 兜底合成，此类吞错永不复发。
+  OK 行现在带 package 数（`OK: 1 package(s), 2 atlas(es), 2 font(s)`），
+  产物数量对 CI 可见。
+- **slot 投影行按自身 display 参与宿主布局（#2）**：显式 `display:flex` 的
+  span 此前在父容器的 rich-text 分类里被当 inline 子——父容器烙上
+  rich-text-block 标记后，投影进该 span 的行元素整棵被折进一行 inline 流
+  （「攻 13 防 7 堆一起」），div 行更被防御性跳过直接隐身。现在显式 flex 的
+  span 在分类里算 block 子（浏览器 `display:flex` 外层块级）：父容器不再
+  折叠，投影行进 flex 排版各占一行。新错误码 `FenceSlotInInlineContext`：
+  `<slot>` 位于无显式 flex 的 span 内直接报错（inline 上下文里投影块级子
+  无法按自身 display 布局；slot 放进 div 或给 span 显式 flex）。
+
+### Added
+- **F9 命中链调试探针（#4）**：编辑器/开发构建按 F9 开启——指针位置实时
+  Pick，顶层命中变化时 Console 打印命中节点到根的祖先链（每层 HTML id /
+  class / C# 类型 / opacity / touchable / world rect）。「看不见但接鼠标」
+  的演出层偷命中时链顶即凶手（opacity=0 且 touchable=True）。本体
+  `LoomDebugProbe.DescribePickChain(ctx, x, y)` 常驻可用（正式构建自定义
+  热键绑定）。配套：`Node.Id` 从数值占位换成真 HTML id 读取（新增
+  `loomgui_stage_get_node_id_attr` / `loomgui_stage_get_node_classes` FFI）。
+
 ## [0.0.9] - 2026-08-23
 
 ### Fixed
@@ -14,7 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ` 当独立
   词送进字形链——字体 cmap 不映射控制字符 → `.notdef` tofu 框（还占 .notdef
   advance 撑宽行）。战斗 tips「到处 tofu」的悬案即此：tips 是投影内容密集区，
-  每条 tip 的 span 之间都有空白节点。现按浏览器语义折叠：`	`/``/`
+  每条 tip 的 span 之间都有空白节点。现按浏览器语义折叠：`	`/`
+`/`
 `/
   换页与空格同为可折叠空白，纯空白节点折叠成单个空格 token（inline 兄弟间的
   源码换行渲染为一个空格），词内换行同样折叠。0.0.8 的缺字日志正是它点名

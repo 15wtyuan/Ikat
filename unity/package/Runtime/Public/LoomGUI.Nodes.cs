@@ -42,14 +42,19 @@ namespace LoomGUI
             }
         }
 
-        // Ponytail：暂无 FFI 读节点 id 属性（find_node_by_id 是反向：id 字符串 → NodeId）。
-        // 返 numeric NodeId 作调试可读占位；待 get_id_attr FFI 加上后替换为真 id 属性读取。
+        /// <summary>
+        /// HTML id 属性（authoring id：&lt;div id="btn-ok"&gt; → "btn-ok"；未声明 → 空串）。
+        /// 直读 get_node_id_attr FFI（双调法，同 control text 通道）。数值 NodeId 不在公共面
+        /// （作者契约是 authoring id）。
+        /// </summary>
         public string Id
         {
             get
             {
                 ThrowIfDisposed();
-                return _id.ToString();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                return TextControlFFI.ReadText(h, _id,
+                    (hp, buf, cap, len) => Native.loomgui_stage_get_node_id_attr(hp, _id, buf, cap, len));
             }
         }
 

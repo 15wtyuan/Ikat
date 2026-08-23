@@ -406,7 +406,8 @@ fn run_build(root: &std::path::Path, format: Format) -> ExitCode {
                         eprintln!("{line}");
                     }
                     eprintln!(
-                        "OK: {} atlases, {} fonts{}",
+                        "OK: {} package(s), {} atlas(es), {} font(s){}",
+                        report.packages.len(),
                         report.atlases.len(),
                         report.fonts.len(),
                         if report.warnings.is_empty() {

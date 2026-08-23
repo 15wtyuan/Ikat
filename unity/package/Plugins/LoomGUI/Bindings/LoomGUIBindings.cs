@@ -449,6 +449,31 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_get_node_kind(StageHandle* h, uint node_id, byte* @out);
 
         /// <summary>
+        ///  读节点 HTML `id` 属性（authoring id；未声明 → rc=0 + len=0 空串）。
+        ///  return-code + out-param（ptr+len）双调法（同 get_control_text）：buf_cap 足够 →
+        ///  rc=0 写 buf[..*out_len]；不够（含 0 探大小）→ rc=-2 + *out_len=所需；null 句柄 /
+        ///  无 scene / 死节点 → rc=-1。调试探针（pick 命中链）与 authoring id 读取用。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_id_attr", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_node_id_attr(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  读节点 computed opacity（rematch 后 style.opacity，与渲染/命中同源）。
+        ///  调试探针用：「播完即隐形」的演出层偷命中时 opacity=0 但仍接住指针——链顶即凶手。
+        ///  rc：0 = ok 且 *out 已填；1 = null 句柄 / 无 scene / 节点不存在 / out null。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_opacity", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_node_opacity(StageHandle* h, uint node_id, float* @out);
+
+        /// <summary>
+        ///  读节点 class 列表（空格 join；无 class → rc=0 + len=0）。双调法同
+        ///  [`loomgui_stage_get_node_id_attr`]。调试探针用（ClassList 公共面是
+        ///  Contains/Add 族，无全量枚举——本出口补齐只读枚举）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_classes", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_node_classes(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
         ///  读节点 computed style 快照。return code：0 = ok 且 `*out` 填好；非 0 = 失败（节点不存在
         ///  或 `out` = null）。
         /// </summary>

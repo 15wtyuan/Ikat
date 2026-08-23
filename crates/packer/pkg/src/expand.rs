@@ -737,6 +737,18 @@ mod tests {
         .expect_err("pack should fail")
     }
 
+    /// bridge 错误经诊断暴露（message 只带组件名，细节在 Error 级诊断里）。
+    fn err_text(err: &crate::diag::BuildFailure) -> String {
+        err.diagnostics
+            .iter()
+            .map(|d| d.message.as_str())
+            .collect::<Vec<_>>()
+            .join(
+                "
+",
+            )
+    }
+
     /// 组件 `<style>` 纯类规则墙外死代码（跨文件证据版）：规则写进组件、元素在
     /// 页面 host 外 → FenceComponentRuleOutOfScope warning。
     #[test]
@@ -878,10 +890,10 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><ghost-widget></ghost-widget></div>"#,
         );
+        let text = err_text(&err);
         assert!(
-            err.message.contains("UnregisteredCustomElement")
-                && err.message.contains("ghost-widget"),
-            "error should name the tag: {err}"
+            text.contains("UnregisteredCustomElement") && text.contains("ghost-widget"),
+            "error should name the tag: {text}"
         );
     }
 
@@ -893,9 +905,10 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><game-item-card><span slot="nope">x</span></game-item-card></div>"#,
         );
+        let text = err_text(&err);
         assert!(
-            err.message.contains("无效 slot") && err.message.contains("nope"),
-            "got: {err}"
+            text.contains("无效 slot") && text.contains("nope"),
+            "got: {text}"
         );
     }
 
@@ -907,7 +920,7 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><game-item-card><span>游离子</span></game-item-card></div>"#,
         );
-        assert!(err.message.contains("默认"), "got: {err}");
+        assert!(err_text(&err).contains("默认"), "got: {}", err_text(&err));
     }
 
     /// 页面级（非展开上下文）<slot> → 错误。
@@ -918,9 +931,10 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><slot name="x"></slot></div>"#,
         );
+        let text = err_text(&err);
         assert!(
-            err.message.contains("slot") && err.message.contains("组件模板"),
-            "got: {err}"
+            text.contains("slot") && text.contains("组件模板"),
+            "got: {text}"
         );
     }
 
@@ -976,7 +990,7 @@ mod tests {
         ])
         .unwrap();
         let err = pack_page_err(&reg, r#"<div style="display:flex"><comp-a></comp-a></div>"#);
-        assert!(err.message.contains("环"), "got: {err}");
+        assert!(err_text(&err).contains("环"), "got: {}", err_text(&err));
     }
 
     /// 同展开域 id 撞车（light 子 id = 组件模板 id）→ 错误。
@@ -993,9 +1007,10 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><game-item-card><span slot="title" id="shared">撞</span></game-item-card></div>"#,
         );
+        let text = err_text(&err);
         assert!(
-            err.message.contains("撞车") && err.message.contains("shared"),
-            "got: {err}"
+            text.contains("撞车") && text.contains("shared"),
+            "got: {text}"
         );
     }
 
@@ -1184,5 +1199,63 @@ mod tests {
         // 组件内部规则按域包装
         let entries = &scene.dynamic_rules.entries;
         assert!(entries.iter().any(|e| e.scope_root == host));
+    }
+
+    /// E2E（issue #2）：显式 flex 的 span 宿主 + slot 投影行 → 行元素以自身 display
+    /// 参与宿主布局（flex column 下各占一行），不被折进祖先 rich inline 流。
+    /// 修前：外层 div 把 flex-span 当 inline 子标 rich-text-block，投影行整棵折进
+    /// 一行 inline 流（"堆一起"），div 行更被防御性跳过而隐身。
+    #[test]
+    fn slot_rows_in_flex_span_stack_vertically() {
+        let (reg, _) = ComponentRegistry::from_sources(&[(
+            "tip-panel".to_string(),
+            r#"<style>.tip-desc { display: flex; flex-direction: column; gap: 4px }</style>
+<div class="tip">
+  <span class="tip-desc"><slot name="desc"></slot></span>
+</div>"#
+                .to_string(),
+            "components/tip-panel.html".to_string(),
+        )])
+        .unwrap();
+        let pr = pack_page(
+            &reg,
+            r#"<div style="display:flex"><tip-panel><div slot="desc" id="row-atk">攻 13</div><div slot="desc" id="row-def">防 7</div></tip-panel></div>"#,
+        );
+        let mut stage = loomgui_core::stage::Stage::new((1920.0, 1080.0)).unwrap();
+        let font_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../core/tests/fixtures/DejaVuSans.ttf"
+        );
+        stage
+            .register_font("DejaVu", std::fs::read(font_path).unwrap(), true)
+            .unwrap();
+        let root = stage.create_root("div", "").unwrap();
+        stage.load_package("bag", &pr.bytes).unwrap();
+        let inst = stage.instantiate("bag", "page").unwrap();
+        {
+            let scene = stage.scene.as_mut().unwrap();
+            loomgui_core::scene::dynamic::append_child(scene, root, inst).unwrap();
+        }
+        let _frame = stage.tick_and_render();
+        let scene = stage.scene.as_ref().unwrap();
+        // 页面级查找不穿透组件边界（作用域硬墙），从 host 往下查投影行。
+        let page_root = scene.get(root).unwrap().children[0]; // structural root > page root
+        let host = scene.get(page_root).unwrap().children[0]; // page root > host
+        let atk = scene
+            .find_node_by_id_in_subtree(host, "row-atk")
+            .expect("row-atk 在展开域内可查");
+        let def = scene
+            .find_node_by_id_in_subtree(host, "row-def")
+            .expect("row-def");
+        let ra = scene.get(atk).unwrap().layout_rect;
+        let rd = scene.get(def).unwrap().layout_rect;
+        assert!(
+            rd.y > ra.y,
+            "flex column 下两行必须各占一行（修前被折进一行 inline 流）: atk={ra:?} def={rd:?}"
+        );
+        assert!(
+            ra.w > 0.0 && ra.h > 0.0,
+            "行元素必须有实际盒（修前 div 行被 rich 折叠跳过、0x0 隐身）: {ra:?}"
+        );
     }
 }

@@ -392,6 +392,10 @@ CSS 在围栏中以三个正交维度建模：
 
 **inline 级集合**：`IrText`（非纯空白）/ `span`(TextElement) / `img`(Image)。其余元素子（`div`(Container) / 控件 / `template` / 自定义元素）为 block 级。`button` 是控件非 phrasing，**不进 inline 级**。
 
+**显式 flex 的 span 是 block 子**：声明了 `display:flex` 的 `span`（inline style 或静态可判定的 class 规则）在父容器的分类里算 **block 级**——浏览器 `display:flex` 同时改内外显示类型（外层块级），且运行时它被豁免出 rich 折叠、自身是 flex 容器。若仍按 inline 折进父的 rich 流，slot 投影进该 span 的块级内容会被整棵折成一行（或被防御性跳过而隐身）。因此：flex-span + 装饰空白（无其他 inline 子）的父容器不标 rich、不报错；text + flex-span 混排按 mixed 报错（与 div 子同款）。
+
+**slot 不进纯 span**：无显式 `display:flex` 的 span 直接包 `<slot>` → `FenceSlotInInlineContext` error。投影进 slot 的 light 子落在 inline 上下文，块级子无法按自身 display 参与宿主布局（浏览器里 slotted 节点在 slot 位置正常参与布局）。slot 须放在 `div` 或显式 flex 的 span 里。
+
 **空白折叠**：纯空白文本子（缩进/换行，块间装饰空白）视为**中性**——既不算 inline 也不算 block。否则任何缩进的 block 模板都会被误判成 mixed。与浏览器块间空白折叠语义一致。
 
 **display 判定**：复用阶段 6.5 的 parent-display 判定 helper（inline style + tag 默认 + 单 compound 静态可判定选择器——class / id / 静态属性如 `[role="tablist"]`；状态属性选择器（aria-checked 等）与多 compound 后代/子代规则保守放行）——两阶段对「parent 是 block 还是 flex」结论一致，避免 showcase 的 `.row { display:flex }` 等布局被误判。
@@ -480,6 +484,7 @@ CSS 在围栏中以三个正交维度建模：
 | `TokenizerError` | html5gum tokenizer 遇到无法恢复的词法错误 |
 | `FenceInlineElementInBlockContext` | inline 布局 box（button/img）裸放在 block 容器里（非 flex）；LoomGUI 无 flex 之外的 inline flow，撑满竖排会和浏览器不一致 |
 | `FenceMixedInlineBlock` | `display:block` 容器（非 flex）的直接子既有 inline 级（text/span/img）又有 block 级（div/控件/template）；rich-text inline flow 要求全 inline，混合不可定义。详见阶段 6.4 |
+| `FenceSlotInInlineContext` | `<slot>` 位于无显式 `display:flex` 的 span 内。投影进 slot 的 light 子落在 inline 上下文，块级子被折进 rich inline 流（挤成一行/隐身）或按 flex-row hack 横排，无法按自身 display 参与宿主布局；slot 须放在 div 或显式 flex 的 span 里。详见阶段 6.4 |
 | `FenceBorderWithoutStyle` | **warning**：`border-width` 已声明但 `border-style` 缺省（CSS initial=none，浏览器不画边框，LoomGUI 会画）；预览 ≠ 运行时 |
 | `FenceBgImageWithoutSize` | **warning**：`background-image` 已声明但 `background-size` 缺省（CSS 默认 auto=原始尺寸，LoomGUI 默认 stretch=拉伸填满）；预览 ≠ 运行时 |
 | `FenceControlWithoutCss` | role 驱动控件（`progressbar`/`slider`/`switch`/`radio`/`textbox`/`spinbutton`/`combobox`）无任何 `<style>` 规则命中。控件不带 UA 默认样式，无 CSS = 运行时空白；须为控件及其 `data-slot` 子节点提供 CSS（详见阶段 6.7） |

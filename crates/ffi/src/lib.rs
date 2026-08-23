@@ -1423,6 +1423,115 @@ pub extern "C" fn loomgui_stage_get_node_kind(
     })
 }
 
+/// 读节点 HTML `id` 属性（authoring id；未声明 → rc=0 + len=0 空串）。
+/// return-code + out-param（ptr+len）双调法（同 get_control_text）：buf_cap 足够 →
+/// rc=0 写 buf[..*out_len]；不够（含 0 探大小）→ rc=-2 + *out_len=所需；null 句柄 /
+/// 无 scene / 死节点 → rc=-1。调试探针（pick 命中链）与 authoring id 读取用。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_id_attr(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+    buf_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() || out_len.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            unsafe { *out_len = 0 };
+            return -1;
+        };
+        let Some(node) = scene.get(NodeId(node_id)) else {
+            unsafe { *out_len = 0 };
+            return -1;
+        };
+        let value = node.id_attr.as_deref().map(str::as_bytes).unwrap_or(&[]);
+        let needed = value.len();
+        unsafe { *out_len = needed };
+        if needed > buf_cap {
+            return -2;
+        }
+        if needed > 0 {
+            if out.is_null() {
+                return -2;
+            }
+            unsafe { std::ptr::copy_nonoverlapping(value.as_ptr(), out, needed) };
+        }
+        0
+    })
+}
+
+/// 读节点 computed opacity（rematch 后 style.opacity，与渲染/命中同源）。
+/// 调试探针用：「播完即隐形」的演出层偷命中时 opacity=0 但仍接住指针——链顶即凶手。
+/// rc：0 = ok 且 *out 已填；1 = null 句柄 / 无 scene / 节点不存在 / out null。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_opacity(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut f32,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return 1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return 1;
+        };
+        match scene.get(NodeId(node_id)) {
+            Some(n) => {
+                unsafe { *out = n.style.opacity };
+                0
+            }
+            None => 1,
+        }
+    })
+}
+
+/// 读节点 class 列表（空格 join；无 class → rc=0 + len=0）。双调法同
+/// [`loomgui_stage_get_node_id_attr`]。调试探针用（ClassList 公共面是
+/// Contains/Add 族，无全量枚举——本出口补齐只读枚举）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_classes(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+    buf_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() || out_len.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            unsafe { *out_len = 0 };
+            return -1;
+        };
+        let Some(node) = scene.get(NodeId(node_id)) else {
+            unsafe { *out_len = 0 };
+            return -1;
+        };
+        let joined = node.classes.join(" ");
+        let value = joined.as_bytes();
+        let needed = value.len();
+        unsafe { *out_len = needed };
+        if needed > buf_cap {
+            return -2;
+        }
+        if needed > 0 {
+            if out.is_null() {
+                return -2;
+            }
+            unsafe { std::ptr::copy_nonoverlapping(value.as_ptr(), out, needed) };
+        }
+        0
+    })
+}
+
 /// 读节点 computed style 快照。return code：0 = ok 且 `*out` 填好；非 0 = 失败（节点不存在
 /// 或 `out` = null）。
 #[no_mangle]

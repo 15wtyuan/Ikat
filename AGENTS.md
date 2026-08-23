@@ -143,6 +143,8 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 - `dump_mail` — showcase/mail 帧计时 + 阶段拆分（定位低帧热点：solve/render/build 谁独占；验虚拟列表 slot 数不随 ItemCount 涨）
 - `dump_mail_scroll` — 虚拟列表覆盖诊断：set_scroll_pos 驱动 + 量化视口顶部空白 gap_top（定位 active slot 是否覆盖视口顶，漏 flex gap 会留空）
 - `dump_home_anim` — 入场交错动画延迟取证（验 `:nth-child` 步进延迟是否正确，漏 TextNode 计数会全 0）
+- `dump_slot_projection` — slot 投影布局（喂 pkg.bin 路径；验投影行进 taffy 各占一行 vs 被折进祖先 rich inline 流）
+- `dump_pkg_flags` — pkg TemplateNode 全表（验 rich_text_block 打包期烙印 / taffy display / parent 链，分类问题第一步取证）
 
 **跨层特性 PlayMode 报错**先 example 实测 core 状态再改，避免盲改物理掩盖 layout 根因。
 
