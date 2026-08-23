@@ -910,10 +910,29 @@ pub fn measure_rich_text(
                     });
                     continue;
                 }
+                // CSS 空白折叠（white-space:normal）：\t/\r/\n/换页与空格同属可折叠
+                // 空白。此前只按空格分词——标签间空白文本节点（"\n    "）里的换行成为
+                // 独立 word 进字形链，字体 cmap 不映射控制字符 → .notdef tofu 框（且占
+                // .notdef advance 撑宽行）。分词器把全部可折叠空白当切词边界（词内不再
+                // 残留 \n），纯空白 run 折叠成单个空格 token：浏览器把 inline 兄弟间的
+                // 源码换行渲染为一个空格。
+                fn is_fold_ws(c: char) -> bool {
+                    matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{000C}')
+                }
+                if !text.is_empty() && text.chars().all(is_fold_ws) {
+                    let sp_w = stack_str_advance(" ", r.size_px as f32);
+                    tokens.push(Tok {
+                        text: " ",
+                        run_idx: ri,
+                        w: sp_w,
+                        is_break: false,
+                    });
+                    continue;
+                }
                 // 空白分词：按空格切词，词间补空格 token（占 advance；空格无轮廓不画，但占宽 +
                 // 词边界断行）。旧版 split 丢空格 → "a b" 渲染成 "ab" + 断行点错。
                 // HTML 空白折叠：连续空格 → 单空格（split 产空 part 跳过，词间补单空格）。
-                let parts: Vec<&str> = text.split(' ').collect();
+                let parts: Vec<&str> = text.split(is_fold_ws).collect();
                 for (pi, word) in parts.iter().enumerate() {
                     if word.is_empty() {
                         continue;
@@ -1491,6 +1510,65 @@ mod tests {
             1,
             "re-measure at own max-content width must not wrap"
         );
+    }
+
+    /// 标签间空白文本节点（HTML 源码换行+缩进）不再产 tofu：折叠为单空格 token，
+    /// 无 .notdef(gid 0) 字形进渲染。修复前的形态："\n    " run 的换行成为独立
+    /// word token，cmap 无控制字符映射 → gid 0 → tofu 框 + .notdef advance。
+    #[test]
+    fn rich_inter_element_whitespace_collapses_not_tofu() {
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        let mk = |t: &str| crate::text::rich::RichRun {
+            kind: crate::text::rich::RichKind::Text { text: t.into() },
+            color: [1.0; 4],
+            font_id: 0,
+            size_px: 16,
+            weight: Default::default(),
+            style: crate::text::rich::RichStyle::Normal,
+            deco: Default::default(),
+            link_id: None,
+            source: crate::scene::NodeId::INVALID,
+        };
+        // run 形态 = <span>a</span>\n    <span>b</span> 的编译产物。
+        let runs = vec![mk("a"), mk("\n    "), mk("b")];
+        let l = measure_rich_text(&runs, None, 0.0, 0.0, TextAlign::Left, &stack);
+        let glyphs: Vec<u16> = l
+            .lines
+            .iter()
+            .flat_map(|ln| ln.runs.iter())
+            .flat_map(|r| r.glyphs.iter().map(|g| g.glyph_id))
+            .collect();
+        assert!(
+            glyphs.iter().all(|&g| g != 0),
+            "no .notdef glyphs allowed, got {glyphs:?}"
+        );
+        // 单行 a␣b：3 字形（a + 空格 + b），宽度 = 三个 advance 之和。
+        assert_eq!(l.lines.len(), 1);
+        assert_eq!(glyphs.len(), 3, "a + collapsed space + b");
+        let adv = |c: char| {
+            let gid = f.face.glyph_index(c).unwrap();
+            f.face.glyph_hor_advance(gid).unwrap() as f32 / f.face.units_per_em() as f32 * 16.0
+        };
+        assert!(
+            (l.text_width - (adv('a') + adv(' ') + adv('b'))).abs() < 0.05,
+            "width = a + space + b, got {}",
+            l.text_width
+        );
+        // 词内换行（"a\nb" 单 run）同样折叠：不分 tofu、成 a␣b。
+        let runs = vec![mk("a\nb")];
+        let l = measure_rich_text(&runs, None, 0.0, 0.0, TextAlign::Left, &stack);
+        let glyphs: Vec<u16> = l
+            .lines
+            .iter()
+            .flat_map(|ln| ln.runs.iter())
+            .flat_map(|r| r.glyphs.iter().map(|g| g.glyph_id))
+            .collect();
+        assert!(
+            glyphs.iter().all(|&g| g != 0),
+            "in-word \n folded: {glyphs:?}"
+        );
+        assert_eq!(glyphs.len(), 3, "a + space + b");
     }
 
     #[test]

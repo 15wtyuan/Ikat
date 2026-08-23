@@ -5,6 +5,21 @@ All notable changes to `com.loomgui.unity` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.0.9] - 2026-08-23
+
+### Fixed
+- **rich 文本的空白折叠接入 CSS 语义（N25 定案）**：inline 容器里标签间空白
+  文本节点（HTML 源码换行+缩进，如 `</span>
+    <span>`）此前把 `
+` 当独立
+  词送进字形链——字体 cmap 不映射控制字符 → `.notdef` tofu 框（还占 .notdef
+  advance 撑宽行）。战斗 tips「到处 tofu」的悬案即此：tips 是投影内容密集区，
+  每条 tip 的 span 之间都有空白节点。现按浏览器语义折叠：`	`/``/`
+`/
+  换页与空格同为可折叠空白，纯空白节点折叠成单个空格 token（inline 兄弟间的
+  源码换行渲染为一个空格），词内换行同样折叠。0.0.8 的缺字日志正是它点名
+  `U+000A` 定的案——日志保留原样，继续作为 tofu 的第一取证通道。
+
 ## [0.0.8] - 2026-08-22
 
 Tripawd Field Notes 三批（地图交互/演出打磨）回应：absolute 包含块浏览器语义、
