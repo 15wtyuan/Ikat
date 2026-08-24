@@ -132,6 +132,17 @@ namespace LoomGUI.Bindings
         internal static extern byte* loomgui_stage_dump_scene(StageHandle* h, nuint* out_len);
 
         /// <summary>
+        ///  拉取累积的运行时警告（drain：取走后清空，同 take_pending_binds 语义）。多条以 `\n`
+        ///  连接成单个 UTF-8 C 串 + len；宿主 split('\n') 逐条打到引擎日志（Unity Debug.LogWarning）。
+        ///  无警告 → null + len=0（宿主不 log）。警告推送方自带 warn-once 去重（core list.rs），
+        ///  无人调用本函数缓冲也不会无限涨。指针到下次 take 失效。
+        ///
+        ///  **常驻（不 gate）：**运行时诊断出口，`--no-default-features` 构建的 .dll 仍有本函数。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_take_warnings", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* loomgui_stage_take_warnings(StageHandle* h, nuint* out_len);
+
+        /// <summary>
         ///  注入本帧指针事件（扁平 PointerEvent 数组）。tick 前调。
         ///  null/len=0 = 本帧无输入事件（清空 pending_input，hover diff 仍跑——指针位置沿用上帧 last_pos）。
         ///
@@ -326,7 +337,7 @@ namespace LoomGUI.Bindings
         ///  设文本控件的 IME composition（后端读平台 IME compositionString 回灌）。
         ///  text = UTF-8 字节（指针+len），pos = composition 在 value 中的字节偏移。
         ///  非文本控件 / 越界 node → 静默跳过（仍返 0）。null 句柄 → -1。下一帧 measure/render
-        ///  会把 composition 拼进显示文本（下划线由 Task 12 composition 分支画）。
+        ///  会把 composition 拼进显示文本（下划线由 composition 分支画）。
         ///
         ///  **常驻（不 gate）：**IME 是 runtime 稳定入口。
         /// </summary>
@@ -535,7 +546,7 @@ namespace LoomGUI.Bindings
         ///  故本函数 near-no-op。但 hook 必须存在：将来引入全局 texture/font registry（进程级单例缓存）时，
         ///  此处自动成为清理入口，无需再改 C# 接线。
         ///
-        ///  **注意：Font 的 `Box::leak`（`text/layout.rs:76`）是真泄漏**——`bytes.clone()` 后 leak 取
+        ///  **注意：Font 的 `Box::leak`（`text/layout.rs`）是真泄漏**——`bytes.clone()` 后 leak 取
         ///  `'static` 切片喂 ttf-parser Face，原 Vec 虽被 `_bytes` 持有但与 leaked 切片不是同一份，
         ///  Stage drop 时 `_bytes` 释放的是 clone 来源而非 leaked 副本。每次 Stage 创建都 leak 一份字体字节，
         ///  不可由 shutdown 回收（leak 切片无 handle 跟踪）。若未来域重载内存观测触发阈值，
@@ -576,7 +587,7 @@ namespace LoomGUI.Bindings
         ///
         ///  建 **programmatic** player（sync_animation_players 完全跳过，不受 class 声明管）：
         ///  spec 默认 = 1s / 无 delay / 单次迭代 / normal / fill both / cubic-out
-        ///  （C# `Play(name)` 无时长参数，默认由 core `play_programmatic` 定，T13 测试钉死）。
+        ///  （C# `Play(name)` 无时长参数，默认由 core `play_programmatic` 定）。
         ///  立即写首帧（spec §5.2：不等下帧 step b，防 delay 期闪 base）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_play_animation", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -604,7 +615,7 @@ namespace LoomGUI.Bindings
         internal static extern void loomgui_stage_resume_animation(StageHandle* h, ulong key);
 
         /// <summary>
-        ///  停止 player（T6 review Minor 1 钉死：scene 层**终态**，不可恢复，勿当暂停）。
+        ///  停止 player（scene 层**终态**，不可恢复，勿当暂停）。
         ///  只标记 Stopped：下帧 update_all 清本 player 通道 + 从 players 表移除，PlayerKey 失效。
         ///  此后 get_animation_state 恒 255（无效）。key 无效 → no-op。
         /// </summary>
@@ -1198,6 +1209,19 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_list_scroll_to(StageHandle* h, uint node, int index, byte behavior);
 
         /// <summary>
+        ///  命中测试（公共 Pick 的后端）：(x,y) 最上层可 touchable 节点。rc=0 命中（out_node 写
+        ///  NodeId u32）；rc=1 未命中；-1 = null 句柄 / 无 scene / null out。坐标 = design 像素
+        ///  （左上原点，同 process 输入）。core hit_test 走上帧 world_transforms（结构变更帧的
+        ///  新节点本帧未命中，1 帧延迟语义）。scrollbar thumb sentinel id（V/H_THUMB_FLAG 位）
+        ///  decode 回容器 id——公共语义树无 thumb 节点，thumb 命中即容器命中（同
+        ///  apply_wheel_to_hit 口径）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_hit_test", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_hit_test(StageHandle* h, float x, float y, uint* out_node);
+
+        /// <summary>
         ///  Rich-text-block 子节点命中细化（spec §10）。
         ///
         ///  在 [`loomgui_stage_get_node_layout_rect`] / [`loomgui_stage_is_pointer_on_ui`] 已定出命中
@@ -1212,18 +1236,7 @@ namespace LoomGUI.Bindings
         ///
         ///  返 `true` = 命中（`*out_source` 已写）；`false` = 未命中 / null 句柄 / 无 scene /
         ///  `node_id` 非 rich-text-block / 无 layout（`*out_source` 未动）。
-        ///  命中测试（公共 Pick 的后端）：(x,y) 最上层可 touchable 节点。rc=0 命中（out_node 写
-        ///  NodeId u32）；rc=1 未命中；-1 = null 句柄 / 无 scene / null out。坐标 = design 像素
-        ///  （左上原点，同 process 输入）。core hit_test 走上帧 world_transforms（结构变更帧的
-        ///  新节点本帧未命中，1 帧延迟语义）。scrollbar thumb sentinel id（V/H_THUMB_FLAG 位）
-        ///  decode 回容器 id——公共语义树无 thumb 节点，thumb 命中即容器命中（同
-        ///  apply_wheel_to_hit 口径）。
-        ///
-        ///  **常驻（不 gate）。**
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_hit_test", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_hit_test(StageHandle* h, float x, float y, uint* out_node);
-
         [DllImport(__DllName, EntryPoint = "loomgui_hit_test_rich", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         [return: MarshalAs(UnmanagedType.U1)]
         internal static extern bool loomgui_hit_test_rich(StageHandle* h, uint node_id, float x, float y, uint* out_source);
@@ -1254,7 +1267,7 @@ namespace LoomGUI.Bindings
 
     /// <summary>
     ///  FFI 稳定快照（#[repr(C)] POD）。enum→u8（match 稳定化，不靠 enum 隐式 repr），
-    ///  Option&lt;[f32;4]&gt;→present flag + 数组。csbindgen 自动生成 struct C# stub；④ 如需重排字段可扩展或手写覆盖。
+    ///  Option&lt;[f32;4]&gt;→present flag + 数组。csbindgen 自动生成 struct C# stub；如需重排字段可扩展或手写覆盖。
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct ComputedNodeStyleRepr

@@ -5,6 +5,33 @@ All notable changes to `com.loomgui.unity` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+Issue #46/#42 批：box-shadow 层数围栏拦截、无滚动容器列表静默截断。
+
+### Fixed
+- **box-shadow 层数超限打包期报错（#46）**：渲染层合成 node_id 的 high-byte
+  编码容量为 inset 8 层 / outer 4 层，超限层此前无任何拦截——第 9 层 inset
+  的合成 id 撞 outer 编码区（层序错乱）、第 5 层 outer 落识别区外（shadow
+  mask 不传播、C# 解码歧义），全部静默错渲染。现在 `parse_box_shadow` 超限
+  整条拒收，fence 共享值域门（inline + `<style>` 规则双路径，单一真相源 =
+  core 解析器）报 `FenceBadCssValue`；渲染 push 处对运行时 inline override
+  注入的超限层兜底跳过。fence.md 视觉节同步（原「层数校验不在围栏内」注记
+  作废）。
+- **数据驱动 ListView 无滚动容器不再静默截断（#42）**：`ItemCount` 的列表
+  若自身与祖先链都无 `overflow:auto/scroll` 容器，此前拿 (0,0) 假视口恒走
+  冷启动——超过初始 slot 数（5）的列表静默只剩前几项、零诊断。现在退化
+  全量渲染（原 m1-listview spec 语义：宁可全渲染，不可静默截断）+ 一次性
+  运行时警告。附带：ul 被直接父容器 flex 纵向拉伸（`flex-grow>0` 主轴 /
+  `align-items:stretch` 交叉轴默认值）同样钉死高度不能滚，enter 时警告
+  （短列表拉伸无害，warning 不 Err）；自滚模式与无 pane 场景不误报。
+
+### Added
+- **运行时警告通道**：core `Scene::warnings` 缓冲（推送方 warn-once 去重）
+  + FFI `loomgui_stage_take_warnings`（drain 语义，多条 `\n` 连接）+
+  `LoomHost.RuntimeWarning` 事件（引擎无关层不直接打日志）——Unity Driver
+  订阅转 `Debug.LogWarning`，配错一眼可见（此前此类问题零诊断）。
+
 ## [0.0.10] - 2026-08-24
 
 Issue #1/#2/#4 批：打包失败静默弃包、slot 投影行不参与宿主布局、F9 命中链探针。

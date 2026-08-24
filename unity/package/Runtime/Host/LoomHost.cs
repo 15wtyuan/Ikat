@@ -68,6 +68,13 @@ namespace LoomGUI
         public event Action<string> MissingGlyphReport;
 
         /// <summary>
+        /// 运行时警告（每条一 fire）：core 侧 warn-once 诊断（如数据驱动 ListView 无滚动
+        /// 容器退化全量渲染、ul 被父 flex 纵向拉伸不能滚）。引擎无关层不直接打日志——
+        /// Unity 侧由 Driver 订阅转 Debug.LogWarning。
+        /// </summary>
+        public event Action<string> RuntimeWarning;
+
+        /// <summary>
         /// 每帧驱动序（严格时序）：
         /// 1. <see cref="LoomBackend.CollectInput"/>（backend 采集引擎输入 → set_input 系 FFI，引擎中立）
         /// 2. flush seam：攒批回写——一次性把帧内标脏的 StyleMirror / NodeTransform flush 到 core
@@ -117,6 +124,22 @@ namespace LoomGUI
                 if (n > 0 && mgPtr[n - 1] == 0) n--; // 剥尾部 NUL
                 MissingGlyphReport?.Invoke(Encoding.UTF8.GetString(mgPtr, n));
                 Native.loomgui_bytes_free(mgPtr, mgLen);
+            }
+
+            // 3.7 运行时警告 drain（drain 语义，取走即清）：core warn-once 诊断（无滚动容器
+            //     退化全量渲染 / flex 拉伸不能滚等）。多条以 \n 连接，逐条 fire；ptr 由
+            //     StageHandle 拥有（下次 take 覆盖），读完即弃无需 free。
+            nuint warnLen = 0;
+            byte* warnPtr = Native.loomgui_stage_take_warnings(_stage, &warnLen);
+            if (warnPtr != null && warnLen > 0)
+            {
+                int n = (int)warnLen;
+                if (n > 0 && warnPtr[n - 1] == 0) n--; // 剥尾部 NUL
+                string joined = Encoding.UTF8.GetString(warnPtr, n);
+                foreach (string line in joined.Split('\n'))
+                {
+                    if (line.Length > 0) RuntimeWarning?.Invoke(line);
+                }
             }
 
             // 4. borrow_frame → backend.SyncFrame（backend 不调 borrow FFI，只消费 blob 做镜像渲染）。

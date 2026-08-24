@@ -72,8 +72,9 @@ pub extern "C" fn loomgui_version() -> *const u8 {
 /// opaque 句柄：Stage + 缓存的最近一帧 blob（borrow_frame 返回它的指针，下帧 reset）。
 pub struct StageHandle {
     stage: Stage,
-    frame_blob: Vec<u8>, // borrow_frame 返回 &this[..]；tick 时被覆盖。
-    dump_blob: CString,  // dump_scene 缓存（Rust 拥有）
+    frame_blob: Vec<u8>,    // borrow_frame 返回 &this[..]；tick 时被覆盖。
+    dump_blob: CString,     // dump_scene 缓存（Rust 拥有）
+    warnings_blob: CString, // take_warnings 缓存（Rust 拥有）
 }
 
 /// 创建 Stage 句柄（不收字体路径）。字体由 loomgui_stage_register_font 单独注册。
@@ -89,6 +90,7 @@ pub extern "C" fn loomgui_stage_new(w: f32, h: f32) -> *mut StageHandle {
             stage,
             frame_blob: Vec::new(),
             dump_blob: CString::new("").unwrap(),
+            warnings_blob: CString::new("").unwrap(),
         }))
     })
 }
@@ -361,6 +363,39 @@ pub extern "C" fn loomgui_stage_dump_scene(h: *mut StageHandle, out_len: *mut us
             *out_len = bytes.len();
         }
         handle.dump_blob.as_ptr() as *const u8
+    })
+}
+
+/// 拉取累积的运行时警告（drain：取走后清空，同 take_pending_binds 语义）。多条以 `\n`
+/// 连接成单个 UTF-8 C 串 + len；宿主 split('\n') 逐条打到引擎日志（Unity Debug.LogWarning）。
+/// 无警告 → null + len=0（宿主不 log）。警告推送方自带 warn-once 去重（core list.rs），
+/// 无人调用本函数缓冲也不会无限涨。指针到下次 take 失效。
+///
+/// **常驻（不 gate）：**运行时诊断出口，`--no-default-features` 构建的 .dll 仍有本函数。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_take_warnings(
+    h: *mut StageHandle,
+    out_len: *mut usize,
+) -> *const u8 {
+    ffi_guard(std::ptr::null(), || {
+        if h.is_null() || out_len.is_null() {
+            return std::ptr::null();
+        }
+        let handle = unsafe { &mut *h };
+        let warnings = match handle.stage.scene.as_mut() {
+            Some(scene) => std::mem::take(&mut scene.warnings),
+            None => Vec::new(),
+        };
+        if warnings.is_empty() {
+            handle.warnings_blob = CString::new("").unwrap();
+            unsafe { *out_len = 0 };
+            return std::ptr::null();
+        }
+        handle.warnings_blob =
+            CString::new(warnings.join("\n")).unwrap_or_else(|_| CString::new("").unwrap());
+        let bytes = handle.warnings_blob.as_bytes_with_nul();
+        unsafe { *out_len = bytes.len() };
+        handle.warnings_blob.as_ptr() as *const u8
     })
 }
 

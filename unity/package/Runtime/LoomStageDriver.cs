@@ -210,6 +210,9 @@ namespace LoomGUI
             // 缺字诊断（tofu 取证）：core 每帧报全链缺字（family + 字符 + 码位 + 修法），
             // Console 一行点名——tofu 框是开发期故意暴露的信号，本日志把它变成可查的。
             _host.MissingGlyphReport += msg => Debug.LogWarning($"[LoomGUI] missing glyphs (tofu):\n{msg}");
+            // 运行时警告（core warn-once）：数据驱动 ListView 配置类问题（无滚动容器退化
+            // 全量渲染 / ul 被父 flex 拉伸不能滚），静默错渲染不如 Console 一行点名。
+            _host.RuntimeWarning += msg => Debug.LogWarning($"[LoomGUI] {msg}");
 
             // 引擎根注入：MirrorPool/NativeHost 镜像 GO 挂此 root（transform）。
             // backend.SetRuntimeRoot 设 backend._renderRoot + _inputCollector；

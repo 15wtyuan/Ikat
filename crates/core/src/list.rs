@@ -113,6 +113,8 @@ pub struct ListState {
     pub columns: usize,
     /// 行距 = item_h + gap_y（grid 测得 columns 时一并填）。单列不用。
     pub row_pitch: f32,
+    /// warn-once 旗标：无滚动容器退化全量渲染已警告（每列表一次，防每帧刷屏）。
+    pub warned_no_pane: bool,
 }
 
 impl Default for ListState {
@@ -132,6 +134,7 @@ impl Default for ListState {
             grid: false,
             columns: 0,
             row_pitch: 0.0,
+            warned_no_pane: false,
         }
     }
 }
@@ -157,8 +160,8 @@ impl ListTable {
 
 /// 进入数据驱动模式：备份模板（兜底=第一个设计期 li）+ 建 spacer + 清空设计期 li + 建 ListState。
 ///
-/// ul 高度必须 auto（否则虚拟化无法撑出可滚内容）；非 auto → Err。被祖先 flex 拉伸检测复杂，
-/// 这里只检显式 height 非 auto，flex 拉伸留 Unity 真机诊断（可接受：约定 ul 高度 auto）。
+/// ul 高度必须 auto（否则虚拟化无法撑出可滚内容）；非 auto → Err。祖先 flex 纵向拉伸
+/// 同样钉死高度（warning 不 Err——短列表拉伸无害，见 [`ul_flex_stretch_warning`]）。
 pub fn enter_data_driven(
     stage: &mut crate::stage::Stage,
     ul: NodeId,
@@ -166,12 +169,13 @@ pub fn enter_data_driven(
 ) -> Result<(), String> {
     // 短期不可变借：校验 kind + height + 解析模板来源（<template> 子优先，
     // 兜底设计期 li）。不能跨 clone_subtree 持有 scene 借（clone_subtree 也要 &mut stage）。
-    let (blueprint, all_children): (Option<NodeId>, Vec<NodeId>) = {
+    let (blueprint, all_children, stretch_warn): (Option<NodeId>, Vec<NodeId>, Option<String>) = {
         let scene = stage.scene.as_ref().ok_or("no scene")?;
         if scene.get(ul).map(|n| n.kind) != Some(NodeKind::ListView) {
             return Err("enter_data_driven: node is not a ListView".into());
         }
         check_ul_height_auto(scene, ul)?;
+        let stretch_warn = ul_flex_stretch_warning(scene, ul);
         let ul_node = scene.get(ul).unwrap();
         // <template> 子（NodeKind::Template）：要求恰好一个，多个是契约违反。
         let templates: Vec<NodeId> = ul_node
@@ -200,8 +204,14 @@ pub fn enter_data_driven(
                 .copied()
                 .find(|&c| scene.get(c).map(|cn| cn.kind) == Some(NodeKind::ListItem))
         });
-        (blueprint, ul_node.children.clone())
+        (blueprint, ul_node.children.clone(), stretch_warn)
     };
+    // 拉伸警告（一次性，enter 每列表只跑一次）推运行时警告通道。
+    if let Some(msg) = stretch_warn {
+        if let Some(scene) = stage.scene.as_mut() {
+            scene.warnings.push(msg);
+        }
+    }
     // 先 clone 蓝图到游离态（需 &mut stage，此时无 scene 借），再清空 ul 全部设计期子
     // （adopted <template> 子树 + 设计期 li + 标签间空白 TextNode），使 ul 仅剩 spacer+slot。
     let Some(bp) = blueprint else {
@@ -253,6 +263,7 @@ pub fn enter_data_driven(
         grid: false,
         columns: 0,
         row_pitch: 0.0,
+        warned_no_pane: false,
     };
     stage.scene.as_mut().unwrap().lists.0.insert(ul, ls);
     Ok(())
@@ -266,6 +277,59 @@ fn check_ul_height_auto(scene: &Scene, ul: NodeId) -> Result<(), String> {
         return Err("数据驱动 ListView 高度必须为 auto（否则虚拟化无法撑出可滚内容）".into());
     }
     Ok(())
+}
+
+/// ul 被直接父容器 flex 纵向拉伸的检测（显式 height 非 auto 之外的失效同源路径：
+/// ul 高度被钉死 = 视口高 → content_size==viewport 永远不能滚）。只查直接父级——
+/// flex 拉伸只作用于直接子级。拉伸检测：
+/// - 纵向主轴（父 flex column/column-reverse）：ul `flex-grow > 0`；
+/// - 纵向交叉轴（父 flex row/row-reverse）：父 `align-items` 生效值为 stretch
+///   （None = CSS 初始值 stretch）且 ul 未用 `align-self` 覆盖成非 stretch。
+/// 自滚模式（ul 自身带 ScrollPane）不算——拉伸只是定 ul 尺寸，滚动发生在 ul 内部。
+/// 拉伸在视口 ≥ 内容高时无害（短列表常见），故警告级不 Err。
+fn ul_flex_stretch_warning(scene: &Scene, ul: NodeId) -> Option<String> {
+    let ul_node = scene.get(ul)?;
+    if scene.scroll.get(ul).is_some() {
+        return None; // 自滚模式：拉伸无害。
+    }
+    // 无 pane：已退化全量渲染，拉伸无所谓。
+    ancestor_pane(scene, ul)?;
+    let parent = ul_node.parent?;
+    let ps = &scene.get(parent)?.style.taffy_style;
+    if !matches!(ps.display, taffy::Display::Flex) {
+        return None;
+    }
+    let cause = match ps.flex_direction {
+        taffy::FlexDirection::Column | taffy::FlexDirection::ColumnReverse => {
+            if ul_node.style.taffy_style.flex_grow <= 0.0 {
+                return None;
+            }
+            "flex-grow on a flex-column parent"
+        }
+        taffy::FlexDirection::Row | taffy::FlexDirection::RowReverse => {
+            let effective = ps
+                .align_items
+                .map(|a| a.keyword)
+                .unwrap_or(taffy::AlignItemsKeyword::Stretch);
+            if ul_node
+                .style
+                .taffy_style
+                .align_self
+                .map(|a| a.keyword)
+                .unwrap_or(effective)
+                != taffy::AlignItemsKeyword::Stretch
+            {
+                return None;
+            }
+            "align-items:stretch (the default) on a flex-row parent"
+        }
+    };
+    Some(format!(
+        "ListView node {}: its height is stretched by the parent flex container ({cause}) — \
+         a stretched list is pinned to the viewport height and can never scroll. \
+         Fix: height:auto on the list, or align-self:flex-start, or remove the flex-grow",
+        ul.0
+    ))
 }
 
 /// spacer 初始样式：flex-shrink:0（不被压缩）+ height:0 + padding-top:0.01px（阻断 margin collapsing）。
@@ -929,34 +993,41 @@ fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
     ensure_grid_detected(scene, ul);
     // Phase A：单次不可变借完成所有只读计算——可见区（Copy 的 Range）+ spacer 高度 + gap。
     // spacer 高需 heights.sum，故一并在此算出，避免后续跨可变借再 clone heights。
-    let (scroll_y, viewport_h, ul_y) = {
-        let (sy, vh) = ancestor_scroll_viewport(scene, ul);
-        // 自滚模式（ul 自身是 ScrollPane）：top = scroll_pos.y − 0——内容原点即 ul 内容盒，
-        // 不扣 ul 在页面里的偏移。祖先滚动模式：扣 ul 相对 pane 的 layout 偏移。
-        let uy = if scene.scroll.get(ul).is_some() {
-            0.0
-        } else {
-            scene.get(ul).map(|n| n.layout_rect.y).unwrap_or(0.0)
+    let (visible, spacer_head_h, spacer_tail_h, measured) =
+        match ancestor_scroll_viewport(scene, ul) {
+            None => {
+                // 无滚动容器：退化全量渲染（原 m1-listview spec 语义——宁可全渲染，不可静默
+                // 截断）。旧行为返 (0,0) 假视口 → viewport≤0 恒走冷启动 → 超初始 slot 数的
+                // 列表静默只剩前 INITIAL_SLOTS 项。
+                warn_no_pane_once(scene, ul);
+                let count = scene.lists.get(ul)?.item_count;
+                (0..count, 0.0, 0.0, None)
+            }
+            Some((scroll_y, viewport_h)) => {
+                // 自滚模式（ul 自身是 ScrollPane）：top = scroll_pos.y − 0——内容原点即 ul 内容盒，
+                // 不扣 ul 在页面里的偏移。祖先滚动模式：扣 ul 相对 pane 的 layout 偏移。
+                let ul_y = if scene.scroll.get(ul).is_some() {
+                    0.0
+                } else {
+                    scene.get(ul).map(|n| n.layout_rect.y).unwrap_or(0.0)
+                };
+                let ls = scene.lists.get(ul)?;
+                // 网格且未测列数：据已布局 slot[0] + ul 几何测 columns/row_pitch（首帧 solve 后）。
+                let measured = if ls.grid && ls.columns == 0 {
+                    ls.slots
+                        .first()
+                        .map(|s| s.node)
+                        .and_then(|s| measure_grid(scene, ul, s))
+                } else {
+                    None
+                };
+                let (columns, row_pitch) = measured.unwrap_or((ls.columns, ls.row_pitch));
+                let res = compute_visible_spacers(
+                    ls, scene, ul, columns, row_pitch, scroll_y, ul_y, viewport_h,
+                );
+                (res.0, res.1, res.2, measured)
+            }
         };
-        (sy, vh, uy)
-    };
-    let (visible, spacer_head_h, spacer_tail_h, measured) = {
-        let ls = scene.lists.get(ul)?;
-        // 网格且未测列数：据已布局 slot[0] + ul 几何测 columns/row_pitch（首帧 solve 后）。
-        let measured = if ls.grid && ls.columns == 0 {
-            ls.slots
-                .first()
-                .map(|s| s.node)
-                .and_then(|s| measure_grid(scene, ul, s))
-        } else {
-            None
-        };
-        let (columns, row_pitch) = measured.unwrap_or((ls.columns, ls.row_pitch));
-        let res = compute_visible_spacers(
-            ls, scene, ul, columns, row_pitch, scroll_y, ul_y, viewport_h,
-        );
-        (res.0, res.1, res.2, measured)
-    };
     // 测得则回写 ListState（上方块借已释放）。
     if let Some((c, rp)) = measured {
         if let Some(ls) = scene.lists.get_mut(ul) {
@@ -1171,20 +1242,41 @@ fn reorder_active_slots(scene: &mut Scene, ul: NodeId) {
 /// ListView 的滚动视口来源。**自滚优先**：ul 自身带 ScrollPane（`overflow:auto/scroll`
 /// 直接写在列表上）时用它自己的 scroll_pos/viewport——内容坐标原点就是 ul 内容盒，
 /// 无祖先偏移可扣。否则沿祖先链找最近滚动容器（祖先滚动模式，如 mail 页外层列滚动）。
-/// 无任何 ScrollPane → (0,0)（viewport.h=0 触发冷启动 → INITIAL_SLOTS），
-/// 保证无滚动容器的测试也能实例化初始 slot。
-fn ancestor_scroll_viewport(scene: &Scene, node: NodeId) -> (f32, f32) {
+/// Some((sy, vh))：pane 视口（vh 可能 0 = 首帧未测，走冷启动）。None = 无任何
+/// ScrollPane → plan_one 退化全量渲染 + 一次性警告（不再返回 (0,0) 假视口静默截断）。
+fn ancestor_scroll_viewport(scene: &Scene, node: NodeId) -> Option<(f32, f32)> {
     if let Some(st) = scene.scroll.get(node) {
-        return (st.scroll_pos.1, st.viewport_size.1);
+        return Some((st.scroll_pos.1, st.viewport_size.1));
     }
     let mut cur = scene.get(node).and_then(|n| n.parent);
     while let Some(pid) = cur {
         if let Some(st) = scene.scroll.get(pid) {
-            return (st.scroll_pos.1, st.viewport_size.1);
+            return Some((st.scroll_pos.1, st.viewport_size.1));
         }
         cur = scene.get(pid).and_then(|n| n.parent);
     }
-    (0.0, 0.0)
+    None
+}
+
+/// 无滚动容器的 warn-once：推 `Scene::warnings`（宿主每帧 drain 到引擎日志，如 Unity
+/// Debug.LogWarning）。每列表只推一次（warned_no_pane 旗标防每帧刷屏）。
+fn warn_no_pane_once(scene: &mut Scene, ul: NodeId) {
+    let warned = scene
+        .lists
+        .get(ul)
+        .map(|ls| ls.warned_no_pane)
+        .unwrap_or(true);
+    if !warned {
+        if let Some(ls) = scene.lists.get_mut(ul) {
+            ls.warned_no_pane = true;
+        }
+        scene.warnings.push(format!(
+            "ListView node {}: no scrollable ancestor (no overflow:auto/scroll pane) — \
+             virtualization is disabled and every item renders up front; wrap the list in a \
+             scroll pane or set overflow:auto on the list itself",
+            ul.0
+        ));
+    }
 }
 
 /// 滚动容器 NodeId（anchoring 补偿 / scroll_to_item 设滚动用）。**自滚优先**
@@ -1645,9 +1737,16 @@ mod tests {
 
     #[test]
     fn update_visible_instantiates_initial_slots() {
-        let (mut s, ul, _li) = stage_with_ul_li();
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
         crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
         crate::list::set_item_count(&mut s, ul, 1000);
+        // pane 视口未测（首帧 solve 前 viewport.h=0）→ 冷启动只实例化 INITIAL_SLOTS。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let st = scene.scroll.ensure(pane);
+            st.viewport_size = (1000.0, 0.0);
+            st.scroll_pos = (0.0, 0.0);
+        }
         // plan（借 scene）+ execute（借 scene）两阶段，同 tick_and_render 调法。
         let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
         crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
@@ -1657,6 +1756,11 @@ mod tests {
             ul_node.children.len(),
             2 + crate::list::INITIAL_SLOTS,
             "2 spacers + INITIAL_SLOTS slots for cold-start count=1000"
+        );
+        // 有 pane 在场，无「无滚动容器」警告。
+        assert!(
+            scene.warnings.is_empty(),
+            "pane present: no no-pane warning"
         );
         // slot 根打 LOOKUP_SCOPE（不打 SCOPE_ROOT）
         let slot_node = scene.get(ul_node.children[2]).unwrap();
@@ -1670,6 +1774,118 @@ mod tests {
         assert!(
             !slot_node.interaction.flags.contains(NodeFlags::SCOPE_ROOT),
             "slot root must NOT carry SCOPE_ROOT (CSS rules still apply)"
+        );
+    }
+
+    /// 无滚动容器（自身与祖先链都无 ScrollPane）→ 退化全量渲染 + 一次性警告。
+    /// 旧行为：假视口 (0,0) 恒走冷启动 → count > INITIAL_SLOTS 的列表静默只剩前几项。
+    #[test]
+    fn no_pane_degenerates_to_full_render_with_warning() {
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 100);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        {
+            let scene = s.scene.as_ref().unwrap();
+            let ls = scene.lists.get(ul).unwrap();
+            assert_eq!(ls.visible, 0..100, "full render: all items visible");
+            let ul_node = scene.get(ul).unwrap();
+            assert_eq!(
+                ul_node.children.len(),
+                102,
+                "2 spacers + 100 slots (no silent truncation to INITIAL_SLOTS)"
+            );
+        }
+        // 警告一次性：第一帧已推，第二帧 plan 不再重复。
+        assert_eq!(s.scene.as_ref().unwrap().warnings.len(), 1);
+        let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+        crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        assert_eq!(
+            s.scene.as_ref().unwrap().warnings.len(),
+            1,
+            "warning is once-per-list, not per-frame"
+        );
+    }
+
+    /// ul 被直接父容器 flex 纵向拉伸 → enter_data_driven 推一次性警告（拉伸钉死高度 =
+    /// 视口高 → content_size==viewport 不能滚）。warning 级不 Err——短列表拉伸无害。
+    #[test]
+    fn flex_stretched_ul_warns_at_enter() {
+        // 1. pane 默认样式（display:flex row、align_items None = CSS 初始 stretch）：
+        //    ul 直接子被交叉轴纵向拉伸 → 警告。
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        {
+            let scene = s.scene.as_mut().unwrap();
+            scene.scroll.ensure(pane);
+        }
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        let warns = &s.scene.as_ref().unwrap().warnings;
+        assert_eq!(warns.len(), 1, "stretched ul (cross-axis) warns");
+        assert!(warns[0].contains("stretched"), "got: {:?}", warns[0]);
+
+        // 2. 父 align-items:flex-start → 不拉伸 → 无警告。
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        {
+            let scene = s.scene.as_mut().unwrap();
+            scene.get_mut(pane).unwrap().style.taffy_style.align_items =
+                Some(taffy::AlignItems::FLEX_START);
+            scene.scroll.ensure(pane);
+        }
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        assert!(
+            s.scene.as_ref().unwrap().warnings.is_empty(),
+            "align-items:flex-start breaks the stretch"
+        );
+
+        // 3. ul align-self:flex-start 覆盖继承 → 无警告。
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        {
+            let scene = s.scene.as_mut().unwrap();
+            scene.get_mut(ul).unwrap().style.taffy_style.align_self =
+                Some(taffy::AlignSelf::FLEX_START);
+            scene.scroll.ensure(pane);
+        }
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        assert!(
+            s.scene.as_ref().unwrap().warnings.is_empty(),
+            "align-self:flex-start on the list opts out of the stretch"
+        );
+
+        // 4. 纵向主轴：父 flex column + ul flex-grow>0 → 警告。
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let pn = scene.get_mut(pane).unwrap();
+            pn.style.taffy_style.flex_direction = taffy::FlexDirection::Column;
+            scene.get_mut(ul).unwrap().style.taffy_style.flex_grow = 1.0;
+            scene.scroll.ensure(pane);
+        }
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        assert_eq!(
+            s.scene.as_ref().unwrap().warnings.len(),
+            1,
+            "flex-grow on a column parent stretches the list (main axis)"
+        );
+
+        // 5. 自滚模式（ul 自身带 ScrollPane）：拉伸只定 ul 尺寸、滚动发生在内部 → 不警告。
+        let (mut s, ul, _li, _pane) = stage_with_pane_ul_li();
+        {
+            let scene = s.scene.as_mut().unwrap();
+            scene.scroll.ensure(ul);
+        }
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        assert!(
+            s.scene.as_ref().unwrap().warnings.is_empty(),
+            "self-scroll list: stretch is harmless"
+        );
+
+        // 6. 无 pane：拉伸无所谓（已退化全量渲染）→ 不警告（no-pane 警告归 plan_visible）。
+        let (mut s, ul, _li) = stage_with_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        assert!(
+            s.scene.as_ref().unwrap().warnings.is_empty(),
+            "no pane: no stretch warning at enter"
         );
     }
 
@@ -2434,10 +2650,16 @@ mod tests {
     /// bind 过滤规则。
     #[test]
     fn refresh_items_skips_parked_slots() {
-        let (mut s, ul, _li) = stage_with_ul_li();
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
         crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
         crate::list::set_item_count(&mut s, ul, 10);
-        // 冷启动（无滚动祖先 → viewport.h=0）visible=[0,5) → 5 个 slot 绑 items 0..5。
+        // pane 视口未测（viewport.h=0）→ 冷启动 visible=[0,5) → 5 个 slot 绑 items 0..5。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let st = scene.scroll.ensure(pane);
+            st.viewport_size = (1000.0, 0.0);
+            st.scroll_pos = (0.0, 0.0);
+        }
         let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
         crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
         // 删 [3,5)：绑 items 3、4 的 slot 就地 park（item_index 保留 3/4 作复用参考）。

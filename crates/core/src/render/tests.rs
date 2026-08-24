@@ -3578,6 +3578,66 @@ fn box_shadow_multi_layer_css_order() {
     assert!(sk_of(inset_c) > primary_sk, "所有 inset > primary");
 }
 
+/// render 兜底 clamp：style.box_shadow 超过合成 id 编码容量（inset > 8 / outer > 4，
+/// 打包期 fence 已拒收，运行时 inline override 注入可绕过）→ 超限层不产合成节点，
+/// id 全落在识别区内（is_shadow_synth 命中）。
+#[test]
+fn box_shadow_over_limit_layers_clamped() {
+    let mut n = container_node(
+        0,
+        None,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        },
+        Some([1.0, 1.0, 1.0, 1.0]),
+    );
+    let layer = |inset: bool| BoxShadow {
+        ox: 0.0,
+        oy: 0.0,
+        spread: 0.0,
+        blur: 0.0,
+        color: [0.0, 0.0, 0.0, 0.5],
+        inset,
+    };
+    // 10 inset + 6 outer（各超限 2 层）。
+    n.style.box_shadow = std::iter::repeat_n(layer(true), 10)
+        .chain(std::iter::repeat_n(layer(false), 6))
+        .collect();
+    let mut scene = Scene::from_nodes(vec![n], vec![]);
+    let fonts = test_font_table().expect("need test font");
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let back_count = frame
+        .nodes
+        .iter()
+        .filter(|rn| is_back_shadow_synth(rn.node_id))
+        .count();
+    let front_count = frame
+        .nodes
+        .iter()
+        .filter(|rn| is_front_shadow_synth(rn.node_id))
+        .count();
+    assert_eq!(
+        back_count,
+        crate::style::resolved::MAX_OUTER_SHADOW_LAYERS,
+        "outer 层 clamp 到编码容量"
+    );
+    assert_eq!(
+        front_count,
+        crate::style::resolved::MAX_INSET_SHADOW_LAYERS,
+        "inset 层 clamp 到编码容量"
+    );
+}
+
 /// blur>0 outer 阴影 → program=5 + shadow_params 非零（sigma）+ pad quad（顶点数=4）。
 #[test]
 fn box_shadow_blur_uses_sdf_program_and_params() {

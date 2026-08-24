@@ -2010,6 +2010,42 @@ fn box_shadow_illegal_returns_false() {
     assert!(s.box_shadow.is_empty());
 }
 
+// 层数硬限（render 合成 node_id high-byte 编码区：inset 36..=43 / outer 44..=47）。
+// 超限层的合成 id 撞相邻编码区 → 错层序/漏 mask 传播，宁可整条拒收（apply_decl false）。
+fn layers(n: usize, prefix: &str) -> String {
+    std::iter::repeat_n(format!("{prefix} 1px 1px #000"), n)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[test]
+fn box_shadow_layer_cap_rejects_over_limit() {
+    let mut s = ResolvedStyle::default();
+    // 边界内放行：8 inset / 4 outer 各自顶格。
+    assert!(apply_decl(&mut s, "box-shadow", &layers(8, "inset 0")));
+    assert_eq!(s.box_shadow.len(), 8);
+    assert!(apply_decl(&mut s, "box-shadow", &layers(4, "0")));
+    assert_eq!(s.box_shadow.len(), 4);
+    // 超限拒收：第 9 层 inset 的 id 撞 outer 编码区；第 5 层 outer 落识别区外。
+    assert!(
+        !apply_decl(&mut s, "box-shadow", &layers(9, "inset 0")),
+        "9th inset layer overflows the synth-id encoding"
+    );
+    assert!(
+        !apply_decl(&mut s, "box-shadow", &layers(5, "0")),
+        "5th outer layer overflows the synth-id encoding"
+    );
+    // 混合声明：inset/outer 各自计数、不共享额度——总层数超单类上限但两类各自
+    // 限内（6 inset + 3 outer = 9 层 > 8）仍放行。
+    let mixed_ok = format!("{}, {}", layers(6, "inset 0"), layers(3, "0"));
+    assert!(apply_decl(&mut s, "box-shadow", &mixed_ok));
+    assert_eq!(s.box_shadow.len(), 9);
+    // 一类超限即整条拒收，不留半截（拒绝不覆盖既有值）。
+    let mixed_bad = format!("{}, {}", layers(8, "inset 0"), layers(5, "0"));
+    assert!(!apply_decl(&mut s, "box-shadow", &mixed_bad));
+    assert_eq!(s.box_shadow.len(), 9, "rejected decl keeps prior value");
+}
+
 // CSS 级联覆盖：`box-shadow: 0 8px 4px #000; box-shadow: none;` → 后写者胜，清空。
 // apply_decl 的 `Some(_)` 分支显式清 `style.box_shadow = Vec::new()`（而非保留旧值），
 // 否则 `none` 会被静默忽略，导致设计稿里 "先建后删" 的盒阴影残留在渲染中。

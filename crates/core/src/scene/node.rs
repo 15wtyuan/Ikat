@@ -684,6 +684,10 @@ pub struct Scene {
     /// tick 稳定，装 EventRecord 的 24-bit 槽（click_count+pad），C# demux 按索引
     /// 读回字符串。运行时态，不进 pkg。
     pub event_strs: crate::event::EventStrTable,
+    /// 运行时一次性警告（每来源 warn-once，见 list.rs 的 ListState 警告旗标）。
+    /// 供宿主每帧 drain 到自身日志（Unity Debug.LogWarning）；无人 drain 也不无限
+    /// 涨——推送方自带去重。运行时态，不进 pkg。
+    pub warnings: Vec<String>,
 }
 
 impl Scene {

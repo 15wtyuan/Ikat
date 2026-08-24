@@ -34,8 +34,9 @@ const TRANSFORM_FNS: &[&str] = &[
 ];
 
 /// 值域校验：返回 Some(错误消息) = 打包期报 FenceBadCssValue；None = 放行。
-/// prop 未注册返回 None（unknown-prop 门由调用方负责）。仅覆盖宽松吞值通道
-/// （Color/Overflow/Filter/Transform）；Keyword 域走 [`keyword_error`]。
+/// prop 未注册返回 None（unknown-prop 门由调用方负责）。覆盖宽松吞值通道
+/// （Color/Overflow/Filter/Transform）+ BoxShadow 层数硬限（超过合成 node_id
+/// 编码容量的层静默错渲染，委托 core parser 拒收）；Keyword 域走 [`keyword_error`]。
 pub fn value_error(prop: &str, value: &str) -> Option<String> {
     // shorthand 域映射：overflow 简写（Replicate 到 -x/-y）值域与 longhand 同集。
     let parser = find_css_prop(prop).map(|s| &s.parser).or(match prop {
@@ -65,6 +66,19 @@ pub fn value_error(prop: &str, value: &str) -> Option<String> {
                  (explicit clear: rgba(0,0,0,0) or #00000000)"
             });
             Some(msg)
+        }
+        CssValueParser::BoxShadow => {
+            // 委托 core parse_box_shadow（与运行时同一真相源）：任一层语法非法、或层数
+            // 超过合成 node_id 编码硬限（inset ≤ 8 / outer ≤ 4，超限层 id 撞相邻编码区
+            // → 静默错渲染）都返 None——打包期报清，不静默降级。
+            if loomgui_core::style::mapping::parse_box_shadow(value).is_some() {
+                return None;
+            }
+            Some(format!(
+                "value \"{value}\" is not a valid box-shadow for \"{prop}\" \
+                 (layer limits: at most 8 inset and 4 outer layers; \
+                 layers beyond the limits render incorrectly and are rejected)"
+            ))
         }
         CssValueParser::Overflow => {
             // 合法值与 core parse_overflow 同集。`clip` 等浏览器值运行时静默忽略
@@ -241,6 +255,32 @@ mod tests {
         assert!(value_error("filter", "drop-shadow(2px 2px 4px black)").is_some());
         assert!(value_error("filter", "none").is_none());
         assert!(value_error("filter", "grayscale(1) brightness(0.8)").is_none());
+    }
+
+    // box-shadow：语法 + 层数硬限都委托 core parse_box_shadow（运行时同一真相源）。
+    // 层数超合成 node_id 编码容量（inset > 8 / outer > 4）的层静默错渲染 → 打包期拒收。
+    fn shadow_layers(n: usize, prefix: &str) -> String {
+        std::iter::repeat_n(format!("{prefix} 1px 1px #000"), n)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    #[test]
+    fn box_shadow_layer_cap_rejected() {
+        assert!(value_error("box-shadow", "none").is_none());
+        assert!(value_error("box-shadow", "0 8px 26px rgba(95, 180, 212, 0.5)").is_none());
+        assert!(value_error("box-shadow", &shadow_layers(8, "inset 0")).is_none());
+        assert!(value_error("box-shadow", &shadow_layers(4, "0")).is_none());
+        let err = value_error("box-shadow", &shadow_layers(9, "inset 0")).unwrap();
+        assert!(
+            err.contains("8 inset"),
+            "error names the layer limits: {err}"
+        );
+        assert!(value_error("box-shadow", &shadow_layers(5, "0")).is_some());
+        assert!(
+            value_error("box-shadow", "10px").is_some(),
+            "syntax error rejected"
+        );
     }
 
     #[test]

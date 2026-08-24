@@ -415,6 +415,13 @@ pub struct ResolvedStyle {
     pub inline_declared: u64,
 }
 
+/// box-shadow 每类层数硬限。render 合成节点把层类型+层内 idx 编码进 node_id high byte
+/// （inset 36..=43、outer 44..=47，见 render::FRONT/BACK_SHADOW_SYNTH_BYTE），超限层的
+/// id 会撞相邻编码区 → 错层序/漏 mask 传播。parse 层据此拒收超限声明（fence 打包期报错），
+/// render push 兜底跳过超限层（运行时 inline override 注入不经打包期校验）。
+pub const MAX_INSET_SHADOW_LAYERS: usize = 8;
+pub const MAX_OUTER_SHADOW_LAYERS: usize = 4;
+
 /// 单层 CSS box-shadow。多声明逗号分隔各成一层（`ResolvedStyle.box_shadow: Vec`，CSS 源序）。
 /// blur=0 硬边（实心圆角矩形）；blur>0 走 SDF 高斯边（σ=blur/2 运行时算）。inset 画在节点内。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

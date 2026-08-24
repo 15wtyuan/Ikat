@@ -3,7 +3,7 @@ use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
     BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, GradCoord,
     Gradient, GradientStop, OverflowMode, RadialExtent, RadialShape, ResolvedStyle, SliceInsets,
-    TextAlign, TextSecurity, GRADIENT_MAX_STOPS,
+    TextAlign, TextSecurity, GRADIENT_MAX_STOPS, MAX_INSET_SHADOW_LAYERS, MAX_OUTER_SHADOW_LAYERS,
 };
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, LengthPercentage, LengthPercentageAuto};
@@ -2091,7 +2091,10 @@ fn parse_one_text_shadow(spec: &str) -> Option<crate::text::font_effect::FontEff
 /// CSS `box-shadow`：括号深度 0 按逗号切多层，每层走 [`parse_one_box_shadow`]。
 /// `none` / 空 → 空 Vec（合法，表示无阴影）；任一层非法 → None（apply_decl 据此返 false，
 /// fence 委托链自动报 FenceBadCssValue）。括号深度计数保证 `rgba(r,g,b,a)` 内部逗号不分层。
-fn parse_box_shadow(value: &str) -> Option<Vec<BoxShadow>> {
+/// 层数硬限（render 合成 node_id high-byte 编码区大小）：inset ≤ [`MAX_INSET_SHADOW_LAYERS`]、
+/// outer ≤ [`MAX_OUTER_SHADOW_LAYERS`]，任一超限 → None（超限层 id 会撞相邻编码区，静默
+/// 错渲染，宁可整条拒收）。
+pub fn parse_box_shadow(value: &str) -> Option<Vec<BoxShadow>> {
     // CSS keywords are case-insensitive (matches how `inset` is matched below).
     if value.trim().eq_ignore_ascii_case("none") {
         return Some(Vec::new());
@@ -2117,6 +2120,11 @@ fn parse_box_shadow(value: &str) -> Option<Vec<BoxShadow>> {
         // trim() 使纯空白层（如尾随逗号）→ ""，parse_one_box_shadow 返 None → 整体非法。
         let bs = parse_one_box_shadow(layer.trim())?;
         out.push(bs);
+    }
+    if out.iter().filter(|s| s.inset).count() > MAX_INSET_SHADOW_LAYERS
+        || out.iter().filter(|s| !s.inset).count() > MAX_OUTER_SHADOW_LAYERS
+    {
+        return None;
     }
     Some(out)
 }

@@ -2463,8 +2463,15 @@ fn push_container_shadows(
     border_radius: &crate::style::resolved::BorderRadius,
 ) {
     let radii = border_radius.as_corners(rect.w, rect.h);
+    // 超限层兜底跳过：打包期 fence 已拒收，但运行时 inline override 注入的 CSS 不经
+    // 打包期校验——超限层合成 id 会撞相邻编码区（错层序/漏 mask 传播），宁可不画。
     // outer（back）层：CSS 序 push。
-    for (i, sh) in shadows.iter().filter(|s| !s.inset).enumerate() {
+    for (i, sh) in shadows
+        .iter()
+        .filter(|s| !s.inset)
+        .take(crate::style::resolved::MAX_OUTER_SHADOW_LAYERS)
+        .enumerate()
+    {
         let sigma = shadow_sigma(sh.blur);
         let sid = back_shadow_id(node_id, i as u32);
         let (v, uvc, col, idx, params) =
@@ -2504,6 +2511,7 @@ fn push_container_shadows(
         .iter()
         .enumerate()
         .filter(|(_, s)| s.inset)
+        .take(crate::style::resolved::MAX_INSET_SHADOW_LAYERS)
         .collect();
     for &(css_idx, sh) in inset_layers.iter().rev() {
         let sigma = shadow_sigma(sh.blur);
