@@ -14,20 +14,17 @@
 - **Rust 跨引擎共享**：一份核心，多引擎后端（Unity 首发，Godot 等后续）。
 - **围栏验证器**：打包期挡违规语法，设计期即时反馈。
 
-## 快速开始 （todo，已过时，需要修正下）
+## 快速开始
 
 ```bash
-# 核心库
-cargo build -p loomgui_core
-cargo test  -p loomgui_core
+# 全 workspace 构建 + 测试（core / fence / pkg / ffi）
+cargo test
 
-# 打包器：HTML+CSS+资源 → .pkg.bin
-cargo build -p loomgui_pkg
-cargo run   -p loomgui_pkg -- build <workspace-dir>
-
-# FFI（Rust → C# 绑定）
-cargo build -p loomgui_ffi_c
+# 打包器 CLI：校验一个 HTML+CSS 工作区
+cargo run -p loomgui_pkg -- check <workspace-dir>
 ```
+
+Unity 集成见下节。完整工作流（GUI 打包器、FFI .dll 闭环、发版）文档待补——随 v1.0 公共文档波次补齐。
 
 ## 在 Unity 项目中使用
 
@@ -46,15 +43,18 @@ LoomGUI 以 UPM 包发布，通过 git URL 安装。在目标工程的 `Packages
 - [主设计](docs/design/main-design.md) — 总体架构与渲染管线
 - [围栏](docs/design/fence.md) — HTML/CSS 子集权威清单
 - [公共 API](docs/design/public-api.md) — 业务程序员终态契约
+- [C# 投影层](docs/design/projection-layer.md) — 公共 API 的实现机制契约
 
 ## 项目结构
 
 | 目录 | 职责 |
 |---|---|
 | `crates/core/` | Rust 核心（引擎无关） |
-| `crates/packer/pkg/` | 打包器 CLI |
+| `crates/packer/pkg/` | 打包器 CLI（loom） |
+| `crates/packer/gui/` | 打包器 GUI（Tauri） |
 | `crates/ffi/` | C ABI 导出（csbindgen） |
 | `crates/fence/` | 围栏验证 |
+| `crates/xtask/` | 仓库工具（发版校验、绑定同步） |
 | `unity/package/` | Unity UPM 包 |
 | `unity/showcase-unity/` | Unity demo 工程 |
 | `docs/` | 设计文档 |

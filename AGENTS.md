@@ -81,49 +81,22 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 - **前端手写 dist（无 npm 构建）**，靠 `app.withGlobalTauri:true` 注入 `window.__TAURI__`（tauri.conf.json）；缩略图靠 `app.security.assetProtocol` + Cargo `tauri` feature `protocol-asset`。
 
-## 架构（大局——权威契约读 `docs/design/main-design.md`）
+## 架构
 
-### 范式（目标——权威读 main-design.md）
+权威契约全在 `docs/design/`，此处不复述（复述 = 漂移面）：
 
-**分层、单向数据流、引擎对象不进核心：**
-```
-标准 HTML/CSS 子集（设计期 DSL）
-  → 打包器（构建期；schema 驱动围栏验证）
-  → Rust 核心：parse → style(cascade) → scene(类型化 Node 树)
-    → layout(Block/Flex Strategy) → render(Vec<RenderNode>)
-  → FFI（csbindgen：SOA 扁平数组）
-  → Unity 后端（GameObject+MeshRenderer 镜像渲染树；输入采集；资源加载）
-```
-
-**关键边界**：
-- **公共语义层**：类型化 Node 对象树（Node/Container/Button/Slider/...），是游戏业务程序员的唯一 API 表面。NodeId 不出现在公共 API。
-- **内部行为层**：布局策略（Block/Flex）、滚动、文本排版、渲染状态。使用 Strategy/State 模式，不暴露给公共 API。
-- **引擎后端**：输入采集、渲染树→原生镜像、资源加载。不解析 HTML/CSS、不算布局、不生成几何。
-
-**新范式架构不变量**（违反 = 隐 bug）：
-- **标准 HTML 语义决定类型**：节点类型由稳定 HTML 语义签名（base 标签按 tag；控件/列表按 WAI-ARIA `role` + `aria-*`）决定。CSS（class、伪类、computed style）永远不改变 C# 对象类型。
-- **CSS 赋予行为能力，不改变类型**：`display:block/flex/none` 选择内部布局 Strategy；`overflow:auto/scroll` 选择滚动 Strategy。策略切换不重建节点、不丢状态。
-- **组件作用域 ID 查找**：`Get<T>("id")` 在当前组件实例内递归查找，不穿透嵌套组件/List item 边界。同一模板作用域内重复 ID 打包期报错。
-- **transform 是渲染/命中层，不进布局**：改 transform 不触发 solve，只刷新命中几何 + world_matrix。
-- **tick 时序 = 显式依赖拓扑**：`process(hit 用上帧 world) → rematch → solve → refresh_content → compute_world_transforms → build`。rematch 在 solve/compute 前。
-- **所有布局帧末一致**：每帧一次 solve。
-- **单一动画时钟**：`TweenManager::update(dt)` 是唯一时钟。ScrollPane 物理是例外（自维护 tween）。
-- **坐标系**：核心 = 左上原点、y 向下。y-flip 是后端根一次性变换。
-- **NodeFlags 是交互态**（process/rematch only，solve/world/build skip）：被 solve/render 读的字段（如 `rich_text_block`）用独立 `Node` 字段，不进 NodeFlags bit。
-- **公共语义树与内部渲染树可以不同**：文本在公共层是正常 HTML 子树（TextNode/TextElement），内部扁平化为 runs。
-
-### 围栏
-
-面向游戏 UI 的标准 HTML 子集（14 标签 = 8 shell + 6 runtime）。控件与列表无专属标签，作者在 `<div>` 上写 WAI-ARIA `role` 表达（`role=slider`/`role=list`/...），视觉部件用 `data-slot`。围栏外输入打包期报错，不静默降级。单一真相源 = crates/fence/src/schema/ Rust const 表。防漂移门：cargo test -p loomgui_fence（含文档↔schema 交叉校验）。权威文档：docs/design/fence.md。
+- **main-design.md** — 分层与每帧单向数据流、公共/内部/FFI/后端四层边界、架构不变量（语义签名决定类型、CSS 只换 Strategy 不换类型、tick 显式依赖拓扑、每帧一次 solve、单动画时钟、坐标系、公共树≠渲染树）、渲染管线、动画、资源、FFI、每帧管线。**违反不变量 = 隐 bug**。
+- **fence.md** — HTML/CSS 子集权威清单（真相源 = `crates/fence/src/schema/` Rust const 表；改 schema 必同步 fence.md，防漂移门 `cargo test -p loomgui_fence` 含文档↔schema 交叉校验）。
+- **public-api.md** — 公共 API 终态契约；**projection-layer.md** — 公共 API 的 C# 投影实现契约。
 
 ## 在本仓库怎么干活
 
-- **设计文档 vs 踩坑 vs 工作项**：`docs/design/main-design.md`（总体架构与渲染管线）、`docs/design/fence.md`（围栏）、`docs/design/public-api.md`（公共 API 终态契约）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配）。**活工作项 = GitHub issues**——milestone `M2 · Dogfood` / `M3 · 跨引擎与契约消化` / `v1.0 · 发版`（门控序列），label `t1-capability` / `t2-release` / `t3-expand` / `tx-debt`，非契约项带 `deferred`（触发判据在 issue 正文）；排活/查进度用 `gh issue list`，不开新文档清单。`docs/roadmap/` 是归档只读历史（stub 留北极星判据），别拿它干活。
+- **设计文档 vs 踩坑 vs 工作项**：`docs/design/`（架构/围栏/API/投影层，见上节）、`docs/pitfalls.md`（踩坑规则手册 + 依赖 API 适配）。**活工作项 = GitHub issues**——milestone `M2 · Dogfood` / `M3 · 跨引擎与契约消化` / `v1.0 · 发版`（门控序列），label `t1-capability` / `t2-release` / `t3-expand` / `tx-debt`，非契约项带 `deferred`（触发判据在 issue 正文）；排活/查进度用 `gh issue list`，不开新文档清单。`docs/roadmap/` 是归档只读历史（stub 留北极星判据），别拿它干活。
 - **Rust edition 2021**，依赖钉版本：`taffy 0.12`、`ttf-parser 0.20`、`slotmap 1.1`、`csbindgen 1`。CSS 选择器解析器手搓（零新依赖，spike 阶段推翻了"接 cssparser"前提）。
 - `Cargo.lock` 入库（根级，尽管 `.gitignore` 有通用 `Cargo.lock` 行——它是被追踪的）。
 - 设计师工作区是独立磁盘目录（含 `loom.workspace.json`、HTML/CSS 源文件、res 资源、design-systems 组件库）。打包用独立打包器 GUI（Tauri `loomgui_gui`）或 CLI `loom build <workspace>`。运行时引导由 `loom.runtime.json` 统管。
 - 用户只读中文——问答/选项/总结用中文；代码/commit 照旧英文。
-- **代码注释写上线品质**：自包含、精简（说 WHY）、不引用内部编号或暗语、不引用任何文档，如有引用文档必要，直接把文本拷贝上去。坑号只属于 `docs/pitfalls.md`，不进代码。也不要写任何plan、spec的文档编号。
+- **代码注释写上线品质**：自包含、精简（说 WHY）、不引用内部编号或暗语、不引用任何文档，如有引用文档必要，直接把文本拷贝上去。踩坑记录不进代码，也不写任何 plan/spec 的文档编号。
 - **修根因，别贴补偿参数**：去源头修，别在下游加参数补偿。
 - **防文档漂移**：文档写定性不写数字；关键 claim 加可执行测试；改代码后搜 docs/ 是否引用了改动的 struct/函数/列数。
 
@@ -136,7 +109,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 - `dump_scroll` — 滚动（overlap、scroll_pos、content_size）
 - `dump_bg` — 节点 base_style（验是否进 pkg）
 - `dump_nativehost_slot` — NativeHost FFI 查询
-- `spec4b_dump` — Spec-4b 验收用：dump 全节点 layout_rect + img src + text metrics + glyph probe（验 core solve 跟 PlayMode 一致，定位 layout bug 在 core 还是 Unity 后端）
+- `spec4b_dump` — dump 全节点 layout_rect + img src + text metrics + glyph probe（验 core solve 跟 PlayMode 一致，定位 layout bug 在 core 还是 Unity 后端）
 - `dump_shop` — showcase/shop 命中/层叠诊断：dump 全节点 layout_rect/display/touchable + hit_test 探针（定位点击被谁接走、inline vs class cascade 谁赢）
 - `dump_mail` — showcase/mail 帧计时 + 阶段拆分（定位低帧热点：solve/render/build 谁独占；验虚拟列表 slot 数不随 ItemCount 涨）
 - `dump_mail_scroll` — 虚拟列表覆盖诊断：set_scroll_pos 驱动 + 量化视口顶部空白 gap_top（定位 active slot 是否覆盖视口顶，漏 flex gap 会留空）
@@ -148,31 +121,24 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 **core dump 复现 Unity solve**：PlayMode layout/视觉 bug 先编码机用 `spec4b_dump` / 对应 dump_*.rs example 喂同样的 pkg.bin 复现 core solve，定位 bug 在 core（dump 错）还是 Unity 后端（dump 对、渲染错）。core 和 Unity 是同一份 solve 的两面，dump 取证再改，别静态猜反复试。
 
-**Unity 渲染 vs HTML 浏览器颜色对比（Chrome headless 取证）**：颜色「发白/偏亮/偏色」问题不能盲信「渲染对得上 CSS」——CSS 半透明合成在 sRGB 编码空间，Unity Linear 项目在 linear 空间（见坑 197），同一 CSS 算出不同值。取证：Chrome headless 截 HTML（`"/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --disable-gpu --force-color-profile=srgb --force-device-scale-factor=1 --window-size=1920,1080 --screenshot=out.png "file:///abs/path.html"`）→ PowerShell `System.Drawing.Bitmap.GetPixel(x,y)` 读像素 hex → 和 Unity uloop `screenshot --capture-mode rendering` 像素逐字节对比。**控制实验先校准**：截纯色 `#hex` HTML 确认 Chrome 截图对纯色准（暗部可能偏），坐标用 PNG top-left = design 坐标。这是定位「颜色对不上」类问题的铁证方法，比静态猜强。
+**Unity 渲染 vs HTML 浏览器颜色对比（Chrome headless 取证）**：颜色「发白/偏亮/偏色」问题不能盲信「渲染对得上 CSS」——CSS 半透明合成在 sRGB 编码空间，Unity Linear 项目在 linear 空间，同一 CSS 算出不同值。取证：Chrome headless 截 HTML（`"/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --disable-gpu --force-color-profile=srgb --force-device-scale-factor=1 --window-size=1920,1080 --screenshot=out.png "file:///abs/path.html"`）→ PowerShell `System.Drawing.Bitmap.GetPixel(x,y)` 读像素 hex → 和 Unity uloop `screenshot --capture-mode rendering` 像素逐字节对比。**控制实验先校准**：截纯色 `#hex` HTML 确认 Chrome 截图对纯色准（暗部可能偏），坐标用 PNG top-left = design 坐标。这是定位「颜色对不上」类问题的铁证方法，比静态猜强。
 
-**测浏览器 background-size/contain/cover 等“布局/背景”渲染用 playwright（headless --screenshot 不可靠）**：`chrome --headless=new --screenshot` 对 background-image 布局/平铺测量不可靠（抢截、忽略 background-size 假象）。用 `playwright` + `channel="chrome"`（真 Chrome）`page.goto(file://HTML)` + `wait_for_load_state("networkidle")` + 整页或 element 截图，再 PowerShell 扫非背景色像素 bbox。**务必加 `background-repeat:no-repeat`**——CSS 默认 repeat 会把 contain 缩后的图平铺填满盒，测量出“填满”假象（本 session 误判「Chrome 忽略 background-size」很久，实则 repeat 平铺，坑 80）。
+**测浏览器 background-size/contain/cover 等“布局/背景”渲染用 playwright（headless --screenshot 不可靠）**：`chrome --headless=new --screenshot` 对 background-image 布局/平铺测量不可靠（抢截、忽略 background-size 假象）。用 `playwright` + `channel="chrome"`（真 Chrome）`page.goto(file://HTML)` + `wait_for_load_state("networkidle")` + 整页或 element 截图，再 PowerShell 扫非背景色像素 bbox。**务必加 `background-repeat:no-repeat`**——CSS 默认 repeat 会把 contain 缩后的图平铺填满盒，测量出“填满”假象。
 
-**围栏真相源 = `crates/fence/src/schema/` Rust const 表，`docs/design/fence.md` 是人类可读权威副本**：围栏最终形态 = schema 注册表（14 标签 = 8 shell + 6 runtime + role 驱动控件 + CSS 子集 + `@keyframes`/`animation` 终态），fence.md 是它的可读镜像（改 schema 必同步 fence.md，防漂移门 `cargo test -p loomgui_fence` 含「文档↔schema 交叉校验」测试 `doc_schema_sync.rs`）。旧 roadmap 纪元的「终点线2 scope」已全部交付（`:nth-child` / 多 selector / @keyframes runtime）；剩余视觉缺口在 GitHub issues 的 deferred 视觉合集。代码往围栏最终形态靠，围栏外的 showcase bug 跟围栏最终形态。
+**加新控件类型（新 NodeKind/ControlState 变体）必 grep 所有按 kind/变体 dispatch 的点**（render arm、measure_text_controls、on_pointer_down/on_text_pointer_down、cursor blink、FFI setter or-pattern）逐一确认覆盖——各层 dispatch 独立写、独立测，漏一个 = 控件半残/不可见（空 mesh）。且单测验不了 CSS 语义集成（display 子树剪枝、继承传播、多 spec 解析），收尾必跑 showcase PlayMode 逐项过。
 
-**loom.exe 与 GUI exe 的重出条件（已收窄）**：fence/pkg 的 build 语义、scaffold 模板变动走 loom.exe（GUI spawn 子进程，不嵌 GUI 字节）；`Workspace` struct 或 GUI 自身代码变动才要求重出 GUI exe。双 exe 闭环见上方「GUI 打包器 + loom CLI 双 exe 闭环」段。
-
-**SDD per-task review 是代码质量门，不是集成正确性门**：单测验不了 CSS 语义集成（display 子树剪枝、继承传播、多 spec 解析）——SDD 后必跑 showcase PlayMode 逐项过。**跨层缺口 per-task review 必漏**：控件束 P3 加 NumberField 时，enum/FFI/C# 各 task 都绿，但 render/measure/cursor 的 type-dispatch arm 漏了 NumberField → 控件运行时不可见（空 mesh），是 final whole-branch review 才抓到。**教训：加新控件类型（新 NodeKind/ControlState 变体）时，强制 grep 所有按 kind/变体 dispatch 的点**（render arm、measure_text_controls、on_pointer_down/on_text_pointer_down、cursor blink、FFI setter or-pattern）逐一确认覆盖，别只验自己 task 的层——各层 dispatch 独立写、独立测，漏一个 = 控件半残/不可见。
-
-**SDD long-running worktree 要防 main 漂移**：反向 merge（`git merge main` 进 feature 分支解冲突），合超集签名，用对方分支的测试当合并验收标准。
-
-**subagent 撞 API 限流被 kill 不回滚代码**：先 `git status` + `cargo build` + `cargo test` 核实代码完整度，别假设白干。
-
-**SDD 模型选型（本 repo 校准）**：opus 级模型在本 repo 反复撑爆 subagent 输出上限（过度读大文件 list.rs/blob.rs 触发，单次跑 3 次撞墙），改用 deepseek 级跑多数 implementer + 几乎全部 reviewer——速度快且抓到真问题（notify 漏过滤 / DFS root-inclusive 误用 / FFI 文档漂移 / fence 副本漏 cp）。SDD 默认 `DeepSeek/deepseek-v4-pro`（直连；**禁用 netease-codemaker 系列**，见顶部模型禁令）起步，opus 级仅 escalard（撞输出上限就换模型，别硬重试）。
-
-**SDD task 切分别太细（强耦合重构）**：删一个共享字段（如 `ListState.free`）必然牵连所有消费者（plan/execute/notify），“最小 struct only” task 的 bridge 编辑会引入回归（T1 删 free 的 bridge 导致 active slot 乱序，reviewer 抓到）。强耦合重构的 task 边界要么包含被牵连函数，要么预期 bridge 多一轮 fix。
-
-**SDD 工作区隔离（pi harness 适配）**：pi 的 subagent 共享 controller cwd——建独立 worktree 目录会让 subagent 仍在主 checkout 编辑、路径错位（与 harness 对抗，违背 "Never fight the harness"）。用 **feature 分支在主 checkout 隔离**（commit 层面保护 main），不用独立 worktree 目录。用户可能在分支上并行 commit 非 task 工作（如 showcase）→ 每个 task 的 review BASE 必须用 **task commit 的实际 parent**（`git rev-parse <taskhead>^`），而非 dispatch 前记录的 HEAD，否则 review 范围混入用户 commit。
+**subagent 协作（多 agent 分工的教训）**：
+- 模型选型：默认 `DeepSeek/deepseek-v4-pro` 起步；opus 级在本 repo 反复撑爆 subagent 输出上限——撞了就换模型，别硬重试（顶部模型禁令是硬规则）。
+- task 切分别太细：强耦合重构（删共享字段类）的 task 边界要么包含被牵连函数，要么预期 bridge 多一轮 fix。
+- 分支上并行有用户 commit 时，review BASE 用 task commit 的实际 parent（`git rev-parse <taskhead>^`），否则 review 范围混入用户 commit。
+- long-running 分支防 main 漂移：反向 merge（`git merge main` 进 feature 分支），合超集签名，用对方分支的测试当合并验收标准。
+- subagent 被限流 kill 不回滚代码：先 `git status` + `cargo build` + `cargo test` 核实完整度，别假设白干。
 
 **偶现/时序 bug**光读代码定位不了——加诊断 log 运行时取证，别静态猜根因反复改。
 
-**uloop/CLI 驱动 PlayMode 前先 `Application.runInBackground = true`**：编辑器窗口失焦（终端拿焦点）+ Run In Background 关 = 播放器循环整个冻结——帧率 1-2、OnUpdate 时钟不走、frameCount 钉死，像极了性能崩坏/调度器坏了。先排这个再查真性能（ShowcaseRunner 已内置设置；见坑 219 附近 session）。
+**uloop/CLI 驱动 PlayMode 前先 `Application.runInBackground = true`**：编辑器窗口失焦（终端拿焦点）+ Run In Background 关 = 播放器循环整个冻结——帧率 1-2、OnUpdate 时钟不走、frameCount 钉死，像极了性能崩坏/调度器坏了。先排这个再查真性能（ShowcaseRunner 已内置设置）。
 
-**FFI panic 取证用站点标签 + 释放审计，别信 release 行号**：release dll 内联后 panic 行号不可靠。`Scene::get_live`（全库 21 处 live 查取带函数名站点标签，`模块/函数` 格式、勿用行号——行号随编辑漂移会把取证指向错误位置）+ `Scene::free_log`（最近 32 笔释放审计：死 id 距今几笔、走没走漏斗）已常驻——「快照后死亡」类 panic（如 rematch live node）一行日志定位（坑 220）。Rust 压测复现不了时先算量级差（用户几分钟 60fps churn ≈ 上万次 vs 压测几百次）。
+**FFI panic 取证用站点标签 + 释放审计，别信 release 行号**：release dll 内联后 panic 行号不可靠。`Scene::get_live`（全库 21 处 live 查取带函数名站点标签，`模块/函数` 格式、勿用行号——行号随编辑漂移会把取证指向错误位置）+ `Scene::free_log`（最近 32 笔释放审计：死 id 距今几笔、走没走漏斗）已常驻——「快照后死亡」类 panic（如 rematch live node）一行日志定位。Rust 压测复现不了时先算量级差（用户几分钟 60fps churn ≈ 上万次 vs 压测几百次）。
 
 **uloop 取证自相矛盾（截图正常但探针读空 / 同会话数据反复打架）先查编辑器会话状态**：① `tasklist | grep Unity.exe` 数实例——launch 超时会再起一个，命令轮流命中不同实例；② PlayMode 期间触发过编译（domain reload）会把原生 stage 打裂（渲染正常但 DumpScene 全零）——重启编辑器复测再怀疑产品。规矩：**PlayMode 验收期间绝不编译**。另：`File.WriteAllText` 被 uloop 安全策略拦，大 JSON 用 execute-dynamic-code 的 `return` 值带出。
 
@@ -182,22 +148,15 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件。
 
-**C# 投影层 `throw NE()` 是 stub，非真限制**：`LoomGUI.Nodes.cs` 里 get/set 都 `throw NotImplementedException()` 的 API（`Image.Src`/`Touchable`/`Focusable`/`OnUpdate`…）是**未接线 stub**，底层 core + FFI 多半已支持。遇注释/demo 写"运行时不可变 / by-design"先查 `crates/ffi/src/lib.rs` + core 源码确认，别信注释（坑 191：背包图标"不可变"实为 C# 没接 `set_src`，core+FFI+Unity MirrorPool 全通）。判断框架能力看 core+FFI，不看 C# wrapper。
+**C# 投影层 `throw NE()` 是 stub，非真限制**：`LoomGUI.Nodes.cs` 里 get/set 都 `throw NotImplementedException()` 的 API（`Image.Src`/`Touchable`/`Focusable`/`OnUpdate`…）是**未接线 stub**，底层 core + FFI 多半已支持。遇注释/demo 写"运行时不可变 / by-design"先查 `crates/ffi/src/lib.rs` + core 源码确认，别信注释（例：背包图标"不可变"实为 C# 没接 `set_src`，core+FFI+Unity MirrorPool 全通）。判断框架能力看 core+FFI，不看 C# wrapper。
 
 ## API 适配方法论
 
-**plan/草稿的 API 常与 crate 实际不符**——遇编译错按 crate 实际源码调，**勿硬改依赖版本**。具体 crate 差异见 `docs/pitfalls.md` §3。
+- **plan/草稿的 API 常与 crate/Unity 实际不符**——遇编译错按实际源码调，勿硬改依赖版本。Rust crate 差异速查 `docs/pitfalls.md` §1；Unity API 查安装目录 `Editor/Data/Managed/UnityEditor.xml`。
+- **Unity Mono 的 API surface 落后于 .NET**——headless `dotnet test`（net10.0）编过的版本门控 API 在 Unity Mono 可能 CS0117。改 C# 别只跑 headless；优先版本无关写法（指针重解释 `*(uint*)&v`、手动位运算）。
+- **FFI 边界**：C-like enum 必须 `#[repr(uN)]`；ABI struct 永远 `size_of::<T>()` 断言；返字符串一律 ptr+len（不靠 NUL）。
+- **移植 fgui 算法**：带数字后缀的变量名不能望文生义——按源码逐行 trace 验。
 
-**Unity API 同理别信记忆/草稿**——查 Unity 安装目录 `Editor/Data/Managed/UnityEditor.xml`。
+## 踩坑记录
 
-**Unity Mono 运行时 API surface 落后于 .NET / net10.0**——`BitConverter.SingleToUInt32Bits`、新 `Span` API 等版本门控 API，headless `dotnet test`（net10.0）能编过但 Unity Mono 缺 → Unity 编 CS0117。改 C# 别只跑 headless；优先版本无关等价写法（指针重解释 `*(uint*)&v`、手动位运算）。见坑 188。
-
-**FFI 边界 C-like enum 必须 `#[repr(uN)]`**。永远 `size_of::<T>()` 断言 ABI struct 尺寸。
-
-**Rust FFI 返字符串一律 ptr+len**（不靠 NUL）。
-
-**移植 fgui 算法**：带数字后缀的变量名不能望文生义——须读源码表达式确认。算法移植按源码逐行 trace 验。
-
-## 坑索引
-
-完整踩坑记录见 `docs/pitfalls.md`。新踩坑继续编号递增，写法：症状/根因/解决/教训。
+`docs/pitfalls.md` = 精炼规则手册（依赖适配 / 跨层闭环 / Unity 平台 / 动态契约，按主题归位）。新坑只在「可复用规则」级才进；bug 编年史不记——代码 + git history 是载体。

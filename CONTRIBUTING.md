@@ -48,7 +48,7 @@ test:        测试
 
 - 设计契约：[`docs/design/main-design.md`](docs/design/main-design.md)
 - 围栏权威：[`docs/design/fence.md`](docs/design/fence.md)（不一致时 [`fence_contract.rs`](crates/core/tests/fence_contract.rs) 测试赢）
-- 踩坑库：[`docs/pitfalls.md`](docs/pitfalls.md)（开工前查）
+- 踩坑规则手册：[`docs/pitfalls.md`](docs/pitfalls.md)（依赖适配/闭环规则/Unity 平台，开工前查）
 - 路线图：[`docs/roadmap/roadmap.md`](docs/roadmap/roadmap.md)
 
 新功能先在 `docs/superpowers/specs/` 写 spec，讨论定稿后再实现。
