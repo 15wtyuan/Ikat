@@ -144,7 +144,7 @@
 
 框架负责输入导航、`aria-selected`/`aria-checked`/`aria-expanded` 状态同步。打包器验证 role 组合与必需子结构（fence §6.8）+ ARIA 关系。
 
-首个落地的复合控件是 **TabList**（M3，2026-08）。tab 高亮靠 `[aria-selected="true"]` 属性选择器，该属性是双向语义：作者在 HTML 里声明的 `aria-selected="true"` 是**初始选中种子**（打包期派生进 selected_index，多重声明取首个、无则 0），运行时该属性反转为只读合成值（从父 TabList.selected_index 跨节点合成——Tab 无 ControlState，像 OptionItem 从父 Dropdown 派生选中态）。panel 显隐靠 `aria-controls="panelX"` ↔ `id="panelX"` 跨树关联（panel 非 tablist 子节点，`RoleInfo.aria_controls` 存 linkage 字符串，`sync_control_visuals` 每帧用作用域安全查找（组件实例内解析，多实例不串）定位 panel）。激活 panel 当前被强制 `display:block`（覆盖作者初值，含 flex——已知限制）；非激活强制 `display:none`（复用剪枝）。
+首个落地的复合控件是 **TabList**（M3，2026-08）。tab 高亮靠 `[aria-selected="true"]` 属性选择器，该属性是双向语义：作者在 HTML 里声明的 `aria-selected="true"` 是**初始选中种子**（打包期派生进 selected_index，多重声明取首个、无则 0），运行时该属性反转为只读合成值（从父 TabList.selected_index 跨节点合成——Tab 无 ControlState，像 OptionItem 从父 Dropdown 派生选中态）。panel 显隐靠 `aria-controls="panelX"` ↔ `id="panelX"` 跨树关联（panel 非 tablist 子节点，`RoleInfo.aria_controls` 存 linkage 字符串，`sync_control_visuals` 每帧用作用域安全查找（组件实例内解析，多实例不串）定位 panel）。panel 显隐由框架切 display：非激活强制 `display:none`（复用剪枝）；激活回落作者声明的 display 值。
 
 ### 3.5 失败策略
 
@@ -484,8 +484,8 @@ bool hit = ui.IsPointerOnUI;
 - inline 元素（`span`）是语义容器。
 - `div` 建立文本 block。
 - `TextContent` 与 DOM 一样，用纯文本替换当前全部子内容。
-- 失效传播 = 每 solve 重编译 runs + 指纹 memo：内容/样式/量化约束宽进指纹，命中即跳过贵的 shaping——不依赖 dirty 标志跨节点传播。
-- `rich_text_block` 是运行时单向可翻转 flag：打包期烙印；运行时显式 `display:flex`（inline override 或命中动态规则）把 rich 折叠翻回 flex 容器布局；flex→block 不回标。solve 只认 flag（单一真相源）。
+- 修改 inline 子树只使最近文本上下文的测量失效（失效粒度 = 最近 Inline Formatting Context）。
+- `rich_text_block` 是运行时单向可翻转 flag：打包期烙印；运行时显式 `display:flex`（inline override 或命中动态规则）把 rich 折叠翻回 flex 容器布局；flex→block 不回标。
 
 公共语义树与内部布局/渲染树可以不同。
 
@@ -531,7 +531,7 @@ taffy 0.12 同时支持 Flex 和 Block 布局算法。统一走 `compute_layout_
 ### 11.4 响应式与异形屏
 
 - **resize**：屏幕尺寸变 → 根节点 size 变 → 整树 solve。
-- **safe-area**：现状 = 后端根 letterbox（`Screen.safeArea` shrink-to-fit + 输入映射共用同一变换），核心零感知、无 `env()` 支持；insets 注入核心 + CSS `env()` 避让是未来方向。
+- **safe-area**：在后端根解决——`Screen.safeArea` shrink-to-fit letterbox，输入映射共用同一变换；核心不感知 safe-area，无 CSS 级避让机制（不做 `env()`）。
 - **动态内容/数据变化**：改文本/增删子节点 → 置 dirty → 下帧 solve。
 
 ### 11.5 参考分辨率 / DPI 缩放
@@ -710,7 +710,7 @@ c. KeyframePlayer.update(dt)      ← animation 的 transform/opacity/bg_color/t
 
 核心只持 `TexId`（整数）。图集：一张大纹理 + N 个轻量 TextureView（只存 UV）。子 view 首引用连带 root；归零通知后端可卸载。GPU 生命周期全在后端。
 
-「按包释放纹理」架构上不成立：`loom.runtime.json` 的 packages 与 atlases 是 workspace 级平行列表，SpriteResolver 按 (atlasIdx, page) 全局懒缓存、与包注册表解耦（重载同名包不重载纹理），字体是 driver 级注册——`UnloadPackage` 只动模板注册表（上面的归零卸载是核心 TexId 通用模型；Unity 侧实现是全局缓存，实际不卸载）。
+「按包释放纹理」不是本架构的概念：`loom.runtime.json` 的 packages 与 atlases 是 workspace 级平行列表，SpriteResolver 按 (atlasIdx, page) 全局懒缓存、与包注册表解耦（重载同名包不重载纹理），字体是 driver 级注册——`UnloadPackage` 只动模板注册表（上面的归零卸载模型属于核心 TexId 通用层，本架构的 Unity 侧不使用）。
 
 ---
 

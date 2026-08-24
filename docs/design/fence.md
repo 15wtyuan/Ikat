@@ -268,7 +268,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 > **transform 原点**：`transform-origin` 不在围栏——变换只绕元素**几何中心**（默认原点）。绕非中心点旋转（连线、指针）用「中点定位 + 默认中心旋转」换算等价实现。
 
-> **box-shadow 完整语法**：`[inset] <ox> <oy> [blur] [spread] <color>`，逗号分隔多层（括号深度感知切层）；`inset` 位置任意；至少 2 个数值（偏移）；负 blur 静默 clamp 为 0；层叠序按 CSS——先声明的画在最上。fence 对 box-shadow 零自有校验（单一真相源 = core 解析器，解析失败经 `apply_decl` 返 false → `FenceBadCssValue`）。注意：层数受渲染层合成 id 编码硬限（inset/outer 各有上限），超限当前无拦截。
+> **box-shadow 完整语法**：`[inset] <ox> <oy> [blur] [spread] <color>`，逗号分隔多层（括号深度感知切层）；`inset` 位置任意；至少 2 个数值（偏移）；负 blur 静默 clamp 为 0；层叠序按 CSS——先声明的画在最上。fence 对 box-shadow 零自有校验（单一真相源 = core 解析器，解析失败经 `apply_decl` 返 false → `FenceBadCssValue`）。层数受渲染层合成 id 编码硬限（inset/outer 各有上限），层数校验不在围栏内。
 
 **文本**
 
