@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Issue #48/#45/#43/#44/#39 批：TabList 布局覆写、必需子 CSS 校验、Smooth 滚动停错位、span 事件接线。
+
+### Fixed
+- **TabList 激活 panel 不再覆写作者布局（#48）**：激活 panel 此前被统一置
+  inline `display:block`——作者写 `display:flex` 的 tabpanel 被改写，flex 行
+  布局塌成纵向堆叠。现在激活分支清 inline display 回落作者 CSS（非激活保留
+  `display:none` 剪枝），与浏览器 tab 库语义一致（JS 只管 ''/none，激活布局
+  归作者样式表）。panel 显隐所有权归控件——作者不应在 panel 上写 display
+  （showcase settings.html 的 4 处 `style="display:none"` 越权写法已清）。
+- **ScrollToItem(Smooth) 平滑滚动停错位（#43）**：Smooth tween 的目标是一次性
+  heights 快照——变高列表滚动中新可见项陆续测量、overlap 增长，tween 终点
+  停在过期边界。现在 ScrollPane 持 `smooth_scroll_to` 锚，每帧 tick 在高度
+  回填 + content_size 刷新后按最新 heights 重算 tween 终点；用户滚轮/拖拽/
+  松手物理/编程 snap 接管时清锚。
+- **span 级事件接线（#44）**：`hit_test_rich` 全链（core/FFI）此前就绪但零
+  调用——点击 rich-text-block 内 span 命中容器、span 上的订阅永不触发。现在
+  core `hit_subtree` 命中 rich 容器后细化到 run.source（span/TextNode/Image），
+  事件产线天然带 span 目标，全部后端受益（main-design §10.2 事件归属契约
+  兑现）；source 不可触摸/首帧无 layout 回落容器（HTML 语义）。
+
+### Changed
+- **fence 必需子节点 CSS 命中校验（#45）**：控件本体命中只证明作者在样式控件，
+  不证明子部件被样式——thumb 无 background = 可拖不可见的隐形滑块头。现在按
+  6.8 契约表对每个必需子实例查命中（option/listitem 多实例逐个查，template
+  蓝图同查），任一无命中报 `FenceControlChildWithoutCss` error；combobox 补
+  `data-slot=value` 必需子结构（漏写 = 选中值静默无显示）。fence.md §2.3/
+  §6.7/§6.8/§7 同步。
+- **双 CHANGELOG 漂移清理（#39）**：删根目录僵尸 CHANGELOG.md（2026-07-04 后
+  未动、内容与树不符）；AGENTS 发版段指明唯一 CHANGELOG 在
+  `unity/package/CHANGELOG.md`。
+
 Issue #46/#42 批：box-shadow 层数围栏拦截、无滚动容器列表静默截断。
 
 ### Fixed
