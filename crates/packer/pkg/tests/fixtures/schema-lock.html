@@ -49,6 +49,7 @@ div { display: flex; flex-direction: column; }
   <div role="textbox" id="memo" aria-multiline="true" aria-placeholder="备注">多行</div>
   <div class="row" id="row-quality">
     <div role="combobox" id="quality">
+      <div data-slot="value">高</div>
       <div role="listbox">
         <div role="option" value="low" aria-selected="false">低</div>
         <div role="option" value="high" aria-selected="true">高</div>

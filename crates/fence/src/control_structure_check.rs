@@ -13,7 +13,7 @@ use crate::ir::{IrElement, IrNodeKind, IrTree};
 
 /// 必需子节点的判定方式：按 role 或按 data-slot。
 #[derive(Debug, Clone, Copy)]
-enum CheckSpec {
+pub(crate) enum CheckSpec {
     /// 直接子节点带某个 `role` 值。
     Role(&'static str),
     /// 直接子节点带某个 `data-slot` 值。
@@ -25,8 +25,13 @@ enum CheckSpec {
 /// 只列有必需子角色的控件；textbox/spinbutton/switch/radio 无必需子角色，缺席。
 /// `listbox` 在 `ROLE_TO_SEMANTIC` 映射成 Container，但结构契约按 role 字面值
 /// 校验（`<div role="listbox">`），与 SemanticKind 无关。
-const REQUIRED_CHILDREN: &[(&str, &[CheckSpec])] = &[
-    ("combobox", &[CheckSpec::Role("listbox")]),
+/// combobox 的 `data-slot=value` 是选中值显示区——运行时 sync 把选中 option 文本
+/// 写进它内嵌的 TextNode，漏写 = 选中值静默无显示（此前无任何拦截）。
+pub(crate) const REQUIRED_CHILDREN: &[(&str, &[CheckSpec])] = &[
+    (
+        "combobox",
+        &[CheckSpec::Role("listbox"), CheckSpec::Slot("value")],
+    ),
     ("listbox", &[CheckSpec::Role("option")]),
     ("slider", &[CheckSpec::Slot("thumb")]),
     ("progressbar", &[CheckSpec::Slot("fill")]),
@@ -50,50 +55,52 @@ fn node_slot(el: &IrElement) -> Option<&str> {
         .map(|a| a.value.as_str())
 }
 
-/// 直接子节点中是否存在满足 spec 的节点（按 role 或 data-slot 匹配）。
+/// 直接子节点中满足 spec 的全部实例（按 role 或 data-slot 匹配，返回节点 idx 列表）。
 ///
 /// 数据驱动 ListView 把 item 蓝图写在 `<template>` 子节点里（运行时克隆产 slot），
-/// list 节点本身没有直接 `role="listitem"` 子节点。本校验因此把直接 `<template>`
-/// 子节点的首个元素子节点视同直接子节点一并检查（template 蓝图模式），与
+/// list 节点本身没有直接 `role="listitem"` 子节点。本函数把直接 `<template>`
+/// 子节点的首个元素子节点视同直接子节点一并返回（template 蓝图模式），与
 /// list→listitem 契约一致——作者两种写法（直接 listitem / template>listitem）都合法。
-fn has_required_child(tree: &IrTree, parent_idx: usize, spec: CheckSpec) -> bool {
-    let children: Vec<usize> = tree.nodes[parent_idx]
-        .children
-        .iter()
-        .map(|c| c.0)
-        .collect();
-    for child_idx in children {
-        let IrNodeKind::Element(el) = &tree.nodes[child_idx].kind else {
+/// 供两处消费：结构契约（非空即满足）+ CSS 命中校验（每个实例都须被规则命中）。
+pub(crate) fn required_child_instances(
+    tree: &IrTree,
+    parent_idx: usize,
+    spec: CheckSpec,
+) -> Vec<usize> {
+    let mut found = Vec::new();
+    let matches_spec = |el: &IrElement| match spec {
+        CheckSpec::Role(r) => node_role(el) == Some(r),
+        CheckSpec::Slot(s) => node_slot(el) == Some(s),
+    };
+    for &child in &tree.nodes[parent_idx].children {
+        let IrNodeKind::Element(el) = &tree.nodes[child.0].kind else {
             continue;
         };
-        let matched = match spec {
-            CheckSpec::Role(r) => node_role(el) == Some(r),
-            CheckSpec::Slot(s) => node_slot(el) == Some(s),
-        };
-        if matched {
-            return true;
+        if matches_spec(el) {
+            found.push(child.0);
         }
         // template 蓝图模式：直接子是 <template> 时，看其首个元素子节点是否满足 spec
         // （ListView item 蓝图 `role=list > template > role=listitem`）。
         if el.tag == "template" {
-            if let Some(&tpl_child) = tree.nodes[child_idx]
+            if let Some(&tpl_child) = tree.nodes[child.0]
                 .children
                 .iter()
                 .find(|c| matches!(tree.nodes[c.0].kind, IrNodeKind::Element(_)))
             {
                 if let IrNodeKind::Element(tpl_el) = &tree.nodes[tpl_child.0].kind {
-                    let tpl_matched = match spec {
-                        CheckSpec::Role(r) => node_role(tpl_el) == Some(r),
-                        CheckSpec::Slot(s) => node_slot(tpl_el) == Some(s),
-                    };
-                    if tpl_matched {
-                        return true;
+                    if matches_spec(tpl_el) {
+                        found.push(tpl_child.0);
                     }
                 }
             }
         }
     }
-    false
+    found
+}
+
+/// 直接子节点中是否存在满足 spec 的节点（按 role 或 data-slot 匹配）。
+fn has_required_child(tree: &IrTree, parent_idx: usize, spec: CheckSpec) -> bool {
+    !required_child_instances(tree, parent_idx, spec).is_empty()
 }
 
 /// 把 CheckSpec 渲染成教学文案片段（如 `` `role="listbox"` `` 或 `` `data-slot="thumb"` ``）。
@@ -109,8 +116,9 @@ fn spec_label(spec: CheckSpec) -> String {
 fn structure_hint(role: &str) -> Option<&'static str> {
     Some(match role {
         "combobox" => {
-            "a `<div role=\"combobox\">` needs a `role=\"listbox\"` child, \
-             which in turn contains one or more `role=\"option\"` children"
+            "a `<div role=\"combobox\">` needs a `role=\"listbox\"` child (which in turn \
+             contains one or more `role=\"option\"` children) and a `data-slot=\"value\"` \
+             child (the selected-value display area)"
         }
         "listbox" => "a `<div role=\"listbox\">` needs at least one `role=\"option\"` child",
         "slider" => {
@@ -186,18 +194,27 @@ mod tests {
 
     #[test]
     fn combobox_missing_listbox_errors() {
-        // role=combobox 无 role=listbox 子 → error
+        // role=combobox 无 role=listbox 子且无 data-slot=value 子 → 两条 error（各缺一样）
         let diags = struct_diags(r#"<div role="combobox"></div>"#);
+        assert_eq!(diags.len(), 2, "{diags:?}");
+        assert!(diags.iter().any(|d| d.message.contains("listbox")));
+    }
+
+    #[test]
+    fn combobox_missing_value_slot_errors() {
+        // 有 listbox 但缺 data-slot=value（选中值显示区）→ error（此前静默：选中值无显示）
+        let diags = struct_diags(
+            r#"<div role="combobox"><div role="listbox"><div role="option">A</div></div></div>"#,
+        );
         assert_eq!(diags.len(), 1, "{diags:?}");
-        assert!(diags[0].message.contains("combobox"));
-        assert!(diags[0].message.contains("listbox"));
+        assert!(diags[0].message.contains("value"));
     }
 
     #[test]
     fn combobox_with_option_but_no_listbox_errors() {
-        // option 直接挂 combobox（缺 listbox 中间层）→ 打包期报 error，不依赖运行时 reparent 兜底
+        // option 直接挂 combobox（缺 listbox 中间层 + 缺 value）→ 两条 error，不依赖运行时兜底
         let diags = struct_diags(r#"<div role="combobox"><div role="option">A</div></div>"#);
-        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags.len(), 2, "{diags:?}");
     }
 
     #[test]
@@ -250,9 +267,9 @@ mod tests {
 
     #[test]
     fn combobox_with_full_structure_ok() {
-        // 完整结构：combobox > listbox > option → 无 error
+        // 完整结构：combobox > value + listbox > option → 无 error
         let diags = struct_diags(
-            r#"<div role="combobox"><div role="listbox"><div role="option">A</div></div></div>"#,
+            r#"<div role="combobox"><div data-slot="value">A</div><div role="listbox"><div role="option">A</div></div></div>"#,
         );
         assert!(diags.is_empty(), "{diags:?}");
     }

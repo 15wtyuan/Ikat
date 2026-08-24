@@ -10,6 +10,12 @@
 //! 任意 `<style>` 规则的选择器命中它本身（tag / class / id / 后代链落地在该节点）。
 //! 完全无命中 → `FenceControlWithoutCss` error + 教学。
 //!
+//! 必需子节点同样校验（同门扩展）：控件命中只证明作者在样式控件本体，不证明子部件
+//! 被样式——`data-slot=thumb` 无 background = 可拖不可见的隐形滑块头。按 6.8 契约表
+//! （`REQUIRED_CHILDREN` 单一真相源）对每个必需子**实例**查命中，任一无命中 →
+//! `FenceControlChildWithoutCss` error（`option`/`listitem` 多实例逐个查——每个列表行
+//! 都需要样式，存在一个被命中的不算过）。
+//!
 //! 控件一律由 `role` 驱动：`<div role="...">`。教学文案按
 //! **role/slot** 表述（`data-slot="fill"`、`role="listbox"`、`[aria-checked]` 属性
 //! 选择器），不引用任何框架注入的 `.loom-*` 子节点。
@@ -419,7 +425,8 @@ fn fix_hint_for(el: &IrElement) -> String {
     }
 }
 
-/// 检查所有控件节点是否被至少一条 CSS 规则命中。返回诊断（error 列表）。
+/// 检查所有控件节点是否被至少一条 CSS 规则命中；必需子节点（6.8 契约表）的每个
+/// 实例同样须被命中。返回诊断（error 列表）。
 ///
 /// 入参：
 /// - `tree`：IrTree（已过 Annotate，`IrElement.semantic` 已填充）
@@ -455,6 +462,80 @@ pub fn check_control_css(
             ),
             line_map.source_location(node.span.start, file.to_string()),
         ));
+    }
+    diagnostics.extend(check_required_child_css(
+        tree,
+        dynamic_rules,
+        file,
+        line_map,
+    ));
+    diagnostics
+}
+
+/// 必需子节点 CSS 命中校验（6.7 门扩展）：按 6.8 契约表（`REQUIRED_CHILDREN`
+/// 单一真相源）对每个必需子**实例**查命中。
+///
+/// 本体命中（上面的循环）只证明作者在样式控件本体，不证明子部件被样式——
+/// `data-slot=thumb` 无 background = 可拖不可见的隐形滑块头，`role=option` 无 CSS
+/// = 弹层里的隐形行。`option`/`listitem` 多实例逐个查（每个列表行都需要样式，
+/// 存在一个被命中的不算过）；template 蓝图内的 listitem 同样查（蓝图无 CSS，
+/// 克隆体也无）。控件集合 = 契约表全集（含 list/tablist/listbox——比本体命中
+/// 校验的 CONTROL_ROLES 宽：它们本体无自绘样式不查本体，但必需子要查）。
+fn check_required_child_css(
+    tree: &IrTree,
+    dynamic_rules: &[DynamicRule],
+    file: &str,
+    line_map: &LineMap,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for (idx, node) in tree.nodes.iter().enumerate() {
+        let IrNodeKind::Element(el) = &node.kind else {
+            continue;
+        };
+        let Some(role) = node_role(el) else {
+            continue;
+        };
+        let Some((_, specs)) = crate::control_structure_check::REQUIRED_CHILDREN
+            .iter()
+            .find(|(r, _)| *r == role)
+        else {
+            continue;
+        };
+        for &spec in *specs {
+            for child_idx in
+                crate::control_structure_check::required_child_instances(tree, idx, spec)
+            {
+                if any_rule_matches(dynamic_rules, tree, child_idx) {
+                    continue;
+                }
+                let child = &tree.nodes[child_idx];
+                let IrNodeKind::Element(child_el) = &child.kind else {
+                    continue;
+                };
+                let parent_tag = el.tag.as_str();
+                let label = match spec {
+                    crate::control_structure_check::CheckSpec::Role(r) => {
+                        format!("role=\"{r}\"")
+                    }
+                    crate::control_structure_check::CheckSpec::Slot(s) => {
+                        format!("data-slot=\"{s}\"")
+                    }
+                };
+                let child_tag = child_el.tag.as_str();
+                diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::FenceControlChildWithoutCss,
+                    format!(
+                        "LoomGUI <{parent_tag} role=\"{role}\"> has a required \
+                         <{child_tag} {label}> child with no matching CSS rule. \
+                         Control children have NO built-in default style — without CSS \
+                         they render invisible (e.g. a thumb without background is a \
+                         draggable-but-invisible handle). Provide CSS for every \
+                         {label} child. See docs/design/fence.md §6.7."
+                    ),
+                    line_map.source_location(child.span.start, file.to_string()),
+                ));
+            }
+        }
     }
     diagnostics
 }
@@ -660,8 +741,10 @@ mod tests {
         let diags = check(
             r#"<div role="combobox"><div role="listbox"><div role="option">A</div></div></div>"#,
         );
-        assert_eq!(diags.len(), 1);
-        // 文案应引导 role=listbox / role=option + 仍含「NO built-in arrow」教学点
+        // 3 条：本体（FenceControlWithoutCss）+ listbox 子 + option 子（均无 CSS，
+        // 新必需子命中校验）。文案应引导 role=listbox / role=option + 仍含
+        // 「NO built-in arrow」教学点。
+        assert_eq!(diags.len(), 3, "{diags:?}");
         assert!(
             diags[0].message.contains("role=\"listbox\""),
             "{}",
@@ -673,6 +756,8 @@ mod tests {
             diags[0].message
         );
         assert!(!diags[0].message.contains(".loom-"), "{}", diags[0].message);
+        assert_eq!(diags[1].code, DiagnosticCode::FenceControlChildWithoutCss);
+        assert_eq!(diags[2].code, DiagnosticCode::FenceControlChildWithoutCss);
     }
 
     #[test]

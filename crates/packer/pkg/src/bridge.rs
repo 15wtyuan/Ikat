@@ -461,7 +461,7 @@ mod tests {
     #[test]
     fn template_subtree_enters_pkg() {
         let nodes = bridged(
-            r#"<div role="list" data-fill="3"><template><div role="listitem" class="row"><span class="title">x</span></div></template></div>"#,
+            r#"<style>[role="listitem"]{background:#ccc}</style><div role="list" data-fill="3"><template><div role="listitem" class="row"><span class="title">x</span></div></template></div>"#,
         );
         assert!(nodes.iter().any(|n| n.kind == NodeKind::Template));
         assert!(nodes.iter().any(|n| n.kind == NodeKind::ListItem));
@@ -481,7 +481,7 @@ mod tests {
         // role 驱动 ListView：作者写 <div role=list> > template > <div role=listitem>。
         // validate_template_children 按 semantic（ListItem）判定，不挑字面 tag。
         let parsed = loomgui_fence::parse_template(
-            r#"<div role="list" data-fill="3"><template><div role="listitem" class="item"><span>x</span></div></template></div>"#,
+            r#"<style>[role="listitem"]{background:#ccc}</style><div role="list" data-fill="3"><template><div role="listitem" class="item"><span>x</span></div></template></div>"#,
             "test.html",
         );
         assert!(
@@ -584,7 +584,7 @@ mod tests {
         // role 驱动语义分派 + data-slot 标识控件视觉部件：两个属性都须从 HTML 提取进 TemplateNode，
         // 供 runtime RoleTable 查表。验证 bridge 是 HTML→pkg 的唯一入口不丢这两列。
         let nodes = bridged(
-            r#"<style>[role="slider"]{background:#ddd}</style><div role="slider"><div data-slot="thumb"></div></div>"#,
+            r#"<style>[role="slider"]{background:#ddd}[data-slot="thumb"]{background:#444}</style><div role="slider"><div data-slot="thumb"></div></div>"#,
         );
         let root = &nodes[0];
         assert_eq!(root.role.as_deref(), Some("slider"));
@@ -609,7 +609,7 @@ mod tests {
         // TabList：role=tablist 初始 selected_index 从 aria-selected="true" 的 tab 派生；
         // 每个 role=tab 的 aria-controls 提取进 TemplateNode（runtime 据此关联 panel）。
         let nodes = bridged(
-            r#"<style>[role="tab"][aria-selected="true"]{color:#ff0000}</style>
+            r#"<style>[role="tab"]{color:#888}[role="tab"][aria-selected="true"]{color:#ff0000}</style>
             <div>
               <div role="tablist" style="display:flex">
                 <button role="tab" aria-controls="pa" aria-selected="false">A</button>

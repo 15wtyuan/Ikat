@@ -89,7 +89,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 
 | role | SemanticKind | 必需子结构（打包期校验，阶段 6.8） |
 |---|---|---|
-| `combobox` | Dropdown | `role=listbox` 子（内含 `role=option`） |
+| `combobox` | Dropdown | `role=listbox` 子（内含 `role=option`）+ `data-slot=value` 子（选中值显示区） |
 | `listbox` | Container | ≥1 `role=option` 子 |
 | `option` | OptionItem | — |
 | `slider` | Slider | `data-slot=thumb` 子 |
@@ -446,7 +446,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 **根因**：LoomGUI 控件（role 驱动：`progressbar`/`slider`/`switch`/`radio`/`textbox`/`spinbutton`/`combobox`）**不带 UA 默认样式**——core 刻意保持纯净，不开「框架自带样式源」先例。写了控件却没匹配的 CSS 规则 = 运行时渲染空白。浏览器会套自己的 UA 样式表，预览看着正常，打包进 LoomGUI 却空——作者无法从预览察觉。本检查在打包期拦下，明确告诉作者差异。
 
-**规则**：受校验控件（`role` 在控件 role 白名单）若**无任何 `<style>` 规则的选择器命中它本身** → `FenceControlWithoutCss` error，打包失败。tag / class / id / 后代 / 属性选择器落地在该节点都算命中；伪类（`:hover` 等）不门控（带状态规则同样表明作者在样式控件）。**只有完全无命中才报错**。
+**规则**：受校验控件（`role` 在控件 role 白名单）若**无任何 `<style>` 规则的选择器命中它本身** → `FenceControlWithoutCss` error，打包失败。**必需子节点（§6.8 契约表）的每个实例同样须被命中**，任一无命中 → `FenceControlChildWithoutCss` error——本体命中只证明作者在样式控件，不证明子部件被样式（thumb 无 background = 可拖不可见的隐形滑块头）；`option`/`listitem` 多实例逐个查（存在一个被命中的不算过），template 蓝图内的 listitem 同样查。tag / class / id / 后代 / 属性选择器落地在该节点都算命中；伪类（`:hover` 等）不门控（带状态规则同样表明作者在样式控件）。**只有完全无命中才报错**。
 
 **选择器匹配**：复用 stage 4.5 解析出的 `dynamic_rules`，按 tag/class/id/attr 字面对照 IrElement 判定（fence-local，不依赖运行时 Node）。后代选择器沿祖先链逐层尝试（fence 子集只有后代组合空格，拒 `>` `+` `~`）。
 
@@ -468,7 +468,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 **规则**：带必需子角色的控件（见 §2.3 表）若**直接子节点**中缺对应 role / data-slot → `FenceMissingControlChild` error，打包失败。契约：
 
-- `combobox` → 直接子含 `role=listbox`（listbox 再要求含 `role=option`，递归校验）
+- `combobox` → 直接子含 `role=listbox`（listbox 再要求含 `role=option`，递归校验）+ `data-slot=value`（选中值显示区——运行时把选中 option 文本写进它内嵌 TextNode，漏写 = 选中值静默无显示）
 - `listbox` → 直接子含 ≥1 个 `role=option`
 - `slider` → 直接子含 `data-slot=thumb`
 - `progressbar` → 直接子含 `data-slot=fill`
@@ -510,6 +510,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 | `FenceBorderWithoutStyle` | **warning**：`border-width` 已声明但 `border-style` 缺省（CSS initial=none，浏览器不画边框，LoomGUI 会画）；预览 ≠ 运行时 |
 | `FenceBgImageWithoutSize` | **warning**：`background-image` 已声明但 `background-size` 缺省（CSS 默认 auto=原始尺寸，LoomGUI 默认 stretch=拉伸填满）；预览 ≠ 运行时 |
 | `FenceControlWithoutCss` | role 驱动控件（`progressbar`/`slider`/`switch`/`radio`/`textbox`/`spinbutton`/`combobox`）无任何 `<style>` 规则命中。控件不带 UA 默认样式，无 CSS = 运行时空白；须为控件及其 `data-slot` 子节点提供 CSS（详见阶段 6.7） |
+| `FenceControlChildWithoutCss` | 控件的必需子节点（`data-slot=fill`/`thumb`/`value`、`role=listbox`/`option`/`listitem`/`tab`）无任何规则命中——本体命中不证明子部件被样式（隐形滑块头/隐形列表行）。每个实例都查（详见阶段 6.7） |
 | `FenceControlStructureCss` | 控件结构 CSS 契约缺失（当前契约：`combobox` 本体缺 `position:relative`，或其子树内 `role=listbox` 弹层缺 `position:absolute`）。视觉规则命中 ≠ 结构声明齐全，缺锚点/脱流到 PlayMode 才显形；详见阶段 6.7b |
 | `FenceMissingControlChild` | role 驱动控件缺必需子角色/slot（`combobox` 缺 `role=listbox`、`listbox` 缺 `role=option`、`slider` 缺 `data-slot=thumb`、`progressbar` 缺 `data-slot=fill`、`list` 缺 `role=listitem`、`tablist` 缺 `role=tab`）。控件结构由作者写，漏写 = 运行时半残控件；详见阶段 6.8 |
 | `FenceUnknownRole` | `role` 属性值不在 role 注册表（`ROLE_TO_SEMANTIC` + `textbox`/`tabpanel`/`dialog` 例外）。拼错防护：未知 role 若静默回退成基础标签类型，元素会跳过全部控件校验（必需子结构、CSS 命中、结构 CSS），构建绿灯但运行时空白——「不静默降级」原则拒绝此类 |

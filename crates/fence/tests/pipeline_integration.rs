@@ -7,7 +7,7 @@ use loomgui_fence::schema::tag::SemanticKind;
 fn complex_template_parses_clean() {
     // role-driven controls + data-driven list (template blueprint). Controls need
     // a matching CSS rule (no UA defaults), so a `[role]` selector covers them.
-    let html = r#"<style>[role="slider"],[role="list"]{background:#ddd} [data-slot="thumb"]{background:#444}</style><div id="root" class="panel">
+    let html = r#"<style>[role="slider"],[role="list"]{background:#ddd} [data-slot="thumb"]{background:#444} [role="listitem"]{background:#ccc}</style><div id="root" class="panel">
         <div><my-title>Title</my-title>
             <button class="close" style="display:block">X</button>
         </div>

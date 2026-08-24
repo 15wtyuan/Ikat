@@ -45,6 +45,12 @@ pub enum DiagnosticCode {
     /// 控件不带 UA 默认样式（core 保持纯净，不开「框架自带样式源」先例），
     /// 未命中 = 运行时渲染空白。强制作者为控件及其内部 slot 子节点提供 CSS。
     FenceControlWithoutCss,
+    /// 控件的**必需子节点**（`data-slot=fill`/`thumb`/`value`、`role=listbox`/
+    /// `option`/`listitem`/`tab`）无任何 CSS 规则命中。与本体 [`Self::FenceControlWithoutCss`]
+    /// 互补：本体命中只证明作者在样式控件，不证明子部件齐全——thumb 无 background
+    /// = 可拖不可见的隐形滑块头。结构上子节点由 6.8 门保证存在，本门保证它们
+    /// 各自被样式（每个实例都查，非存在即过）。
+    FenceControlChildWithoutCss,
     /// 控件结构 CSS 契约缺失：运行时行为依赖的结构声明（如 combobox 的
     /// `position:relative` 锚点 + listbox `position:absolute` 脱流）未声明。
     /// 与「无命中」互补——命中只证明在样式，不证明结构齐全；缺失症状在

@@ -21,18 +21,19 @@ fn struct_errors(html: &str) -> Vec<String> {
 
 #[test]
 fn combobox_missing_listbox_reports_error() {
+    // 缺 listbox + 缺 value 槽 → 两条 error（value 槽是选中值显示区，6.8 契约）
     let msgs = struct_errors(r#"<div role="combobox"></div>"#);
-    assert_eq!(msgs.len(), 1, "{msgs:?}");
-    let m = &msgs[0];
-    assert!(m.contains("combobox"));
-    assert!(m.contains("listbox"));
+    assert_eq!(msgs.len(), 2, "{msgs:?}");
+    assert!(msgs
+        .iter()
+        .any(|m| m.contains("combobox") && m.contains("listbox")));
 }
 
 #[test]
 fn combobox_with_option_but_no_listbox_reports_error() {
-    // option 直接挂 combobox（缺 listbox 中间层）→ 打包期报 error，不依赖运行时 reparent
+    // option 直接挂 combobox（缺 listbox 中间层 + 缺 value 槽）→ 两条 error
     let msgs = struct_errors(r#"<div role="combobox"><div role="option">A</div></div>"#);
-    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    assert_eq!(msgs.len(), 2, "{msgs:?}");
 }
 
 #[test]
@@ -45,7 +46,7 @@ fn listbox_without_option_reports_error() {
 #[test]
 fn combobox_full_structure_passes() {
     let msgs = struct_errors(
-        r#"<div role="combobox"><div role="listbox"><div role="option">A</div></div></div>"#,
+        r#"<div role="combobox"><div data-slot="value">A</div><div role="listbox"><div role="option">A</div></div></div>"#,
     );
     assert!(msgs.is_empty(), "{msgs:?}");
 }

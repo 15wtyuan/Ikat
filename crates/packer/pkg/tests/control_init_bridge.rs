@@ -17,7 +17,7 @@ use loomgui_pkg::bridge::bridge;
 /// 非围栏校验本身。
 fn run_bridge(html: &str) -> Vec<TemplateNode> {
     let wrapped = format!(
-        r#"<style>[role="progressbar"],[role="slider"],[role="spinbutton"],[role="switch"],[role="radio"],[role="textbox"],[role="combobox"]{{background:#ddd;position:relative}} [role="combobox"] [role="listbox"]{{display:none;position:absolute}}</style>{html}"#
+        r#"<style>[role="progressbar"],[role="slider"],[role="spinbutton"],[role="switch"],[role="radio"],[role="textbox"],[role="combobox"]{{background:#ddd;position:relative}} [role="slider"] [data-slot="thumb"],[role="progressbar"] [data-slot="fill"],[role="combobox"] [data-slot="value"],[role="option"],[role="listitem"],[role="tab"]{{background:#444}} [role="combobox"] [role="listbox"]{{display:none;position:absolute}}</style>{html}"#
     );
     let parsed = loomgui_fence::parse_template(&wrapped, "test.html");
     assert!(
@@ -211,7 +211,7 @@ fn bridge_extracts_dropdown_role_aria_selected_index() {
     // role=combobox > role=listbox > role=option. Options live inside a listbox
     // popup (a structural requirement), so the bridge must walk the subtree, not
     // just direct children. aria-selected="true" on the 3rd option → index 2.
-    let html = r#"<div role="combobox"><div role="listbox"><div role="option">A</div><div role="option">B</div><div role="option" aria-selected="true">C</div></div></div>"#;
+    let html = r#"<div role="combobox"><div data-slot="value">A</div><div role="listbox"><div role="option">A</div><div role="option">B</div><div role="option" aria-selected="true">C</div></div></div>"#;
     let nodes = run_bridge(html);
     let sel = nodes
         .iter()
@@ -229,7 +229,7 @@ fn bridge_extracts_dropdown_role_aria_selected_index() {
 #[test]
 fn bridge_extracts_dropdown_role_no_aria_selected_defaults_zero() {
     // No aria-selected on any option → default first option (index 0).
-    let html = r#"<div role="combobox"><div role="listbox"><div role="option">A</div><div role="option">B</div></div></div>"#;
+    let html = r#"<div role="combobox"><div data-slot="value">A</div><div role="listbox"><div role="option">A</div><div role="option">B</div></div></div>"#;
     let nodes = run_bridge(html);
     let sel = nodes
         .iter()
@@ -248,7 +248,7 @@ fn bridge_extracts_dropdown_role_no_aria_selected_defaults_zero() {
 fn bridge_extracts_dropdown_option_values() {
     // Per-option `value` content attribute, declaration order, absent → None slot
     // (runtime falls back to the option text). Same subtree walk as selected_index.
-    let html = r#"<div role="combobox"><div role="listbox"><div role="option" value="en">English</div><div role="option">中文</div><div role="option" value="ja" aria-selected="true">日本語</div></div></div>"#;
+    let html = r#"<div role="combobox"><div data-slot="value">A</div><div role="listbox"><div role="option" value="en">English</div><div role="option">中文</div><div role="option" value="ja" aria-selected="true">日本語</div></div></div>"#;
     let nodes = run_bridge(html);
     let sel = nodes
         .iter()
@@ -274,7 +274,7 @@ fn bridge_extracts_dropdown_selected_index_ignores_whitespace_text_children() {
     // selected_index 必须是「第几个 option」，而非「children 里的第几个」——否则
     // option_b 会被误算成 index 3（2 个前置空白 Text + option_a 占 child 下标 0..3），
     // 而它实际是第 2 个 option（index 1）。回归 bug：旧实现用 children 的 enumerate 下标。
-    let html = "<div role=\"combobox\"><div role=\"listbox\">\n  <div role=\"option\">A</div>\n  <div role=\"option\" aria-selected=\"true\">B</div>\n</div></div>";
+    let html = "<div role=\"combobox\"><div data-slot=\"value\">B</div><div role=\"listbox\">\n  <div role=\"option\">A</div>\n  <div role=\"option\" aria-selected=\"true\">B</div>\n</div></div>";
     let nodes = run_bridge(html);
     let sel = nodes
         .iter()
