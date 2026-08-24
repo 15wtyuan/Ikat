@@ -98,7 +98,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 - `Cargo.lock` 入库（根级，尽管 `.gitignore` 有通用 `Cargo.lock` 行——它是被追踪的）。
 - 设计师工作区是独立磁盘目录（含 `loom.workspace.json`、HTML/CSS 源文件、res 资源、design-systems 组件库）。打包用独立打包器 GUI（Tauri `loomgui_gui`）或 CLI `loom build <workspace>`。运行时引导由 `loom.runtime.json` 统管。
 - 用户只读中文——问答/选项/总结用中文；代码/commit 照旧英文。
-- **代码注释写上线品质**：自包含、精简（说 WHY）、不引用内部编号或暗语、不引用任何文档，如有引用文档必要，直接把文本拷贝上去。踩坑记录不进代码，也不写任何 plan/spec 的文档编号。
+- **代码注释**：哲学、出处与范例见 `docs/code-comments.md`（Martin/Ousterhout 之争 → 共识公理 → 开源实践谱系 → 本仓库立场）。判据：非显而易见处写、显而易见处让代码自己说话；契约层写足，复述层零容忍。铁律：注释自包含——读者含 AI 代理，引用内部编号/暗语/文档路径即幻觉入口，确有引用必要直接把结论文本拷进来；踩坑编年史不进代码。
 - **修根因，别贴补偿参数**：去源头修，别在下游加参数补偿。
 - **防文档漂移**：文档写定性不写数字；关键 claim 加可执行测试；改代码后搜 docs/ 是否引用了改动的 struct/函数/列数。
 

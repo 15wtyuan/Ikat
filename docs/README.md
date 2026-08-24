@@ -9,6 +9,7 @@
 | [`design/`](design/) | [主设计](design/main-design.md)（项目设计真相源）+ [围栏权威](design/fence.md) | 理解"设计成什么样、怎么实现" |
 | [`roadmap/`](roadmap/) | 北极星判据 + 归档历史（活工作项在 GitHub issues） | 追溯路线决策史 |
 | [`pitfalls.md`](pitfalls.md) | 精炼规则手册：依赖适配 / 跨层闭环 / Unity 平台 / 动态契约（历史 231 条已归档 `archive/`） | 开工前查"坑在哪" |
+| [`code-comments.md`](code-comments.md) | 注释哲学：对立观点、共识公理、开源实践谱系与本仓库立场（出处+范例，非操作步骤） | 写/审注释前 |
 
 ## 入口
 
