@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>tablist projection fixture</title>
 <style>
+      .tab { padding:4px 12px; background:#333; color:#eee; }
   #root { width: 200px; height: 100px; }
   /* 命中选中 tab 的视觉验（aria-selected 由 core T5 从 selected_index 合成到各 tab）。 */
   [role="tab"][aria-selected="true"] { color: #e94560; font-weight: 700; }
@@ -15,8 +16,8 @@
     <!-- role=tablist（div）→ NodeKind::TabList（持 tab 子，ControlState::TabList{selected_index}）。
          打包期 aria-selected="true" 在 t-a 烘焙 selected_index=0（T2-T3）。 -->
     <div role="tablist" id="tl" style="display:flex">
-      <button role="tab" id="t-a" aria-controls="p-a" aria-selected="true">A</button>
-      <button role="tab" id="t-b" aria-controls="p-b" aria-selected="false">B</button>
+      <button role="tab" id="t-a" aria-controls="p-a" aria-selected="true" class="tab">A</button>
+      <button role="tab" id="t-b" aria-controls="p-b" aria-selected="false" class="tab">B</button>
     </div>
     <!-- tabpanel 不分派（围栏：role=tabpanel 走 div → Container），靠 aria-controls 关联 tab。
          panel 显隐由 core sync_control_visuals 按 selected_index 切 display（T4）。 -->

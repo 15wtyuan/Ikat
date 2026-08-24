@@ -5,19 +5,18 @@ namespace LoomGUI.Tests
 {
     public class LoomInputCollectorTests
     {
-        // safe==全屏零回归验。用 aspect-matched rootSize（screen 2:1 ↔ root 2:1）→
-        // sf=1、offX=0、offYTop=sh → 纯 y-flip 恒等映射（screen↔design 仅 y 翻转）。
-        // 即"无刘海"屏语义：render 与 input 都退化为全屏映射。
+        // 全屏零回归验：sf=1、offX=0、offYTopDown=0 → 纯 y-flip 恒等映射
+        // （screen 左下原点 y-up ↔ design 左上原点 y-down，仅 y 翻转）。
+        // 映射三元组由 Driver 从 Rust loomgui_compute_adaptation 注入——适配数学
+        // 的单源在 Rust（core adapt.rs 单测覆盖三模式），这里只验线性映射本体。
         [Test]
         public void ScreenToDesign_MapsCorrectly()
         {
-            // screen (100,50) in 200x100, root 200x100 (aspect-matched) → sf=1 → design (100, 50) y-flip = (100, 50)
-            //   offX=0+(200-200*1)*0.5=0；offYTop=100；dx=(100-0)/1=100；dy=(100-50)/1=50
+            // screen (100,50) in 200x100 → design (100, 100-50-0=50)
             var design = LoomInputCollector.ScreenToDesign(
-                new UnityEngine.Vector2(100f, 50f), new Vector2Int(200, 100), new UnityEngine.Vector2(200f, 100f),
-                new UnityEngine.Rect(0, 0, 200, 100), false);
-            Assert.AreEqual(100f, design.x, 0.01f, "aspect-matched sf=1 → design_x = screen_x");
-            Assert.AreEqual(50f, design.y, 0.01f, "design_y = sh - screen_y（y-flip，sf=1）");
+                new UnityEngine.Vector2(100f, 50f), 1f, 0f, 0f, 100f);
+            Assert.AreEqual(100f, design.x, 0.01f, "sf=1 → design_x = screen_x");
+            Assert.AreEqual(50f, design.y, 0.01f, "design_y = screenH - screen_y（y-flip，sf=1）");
         }
 
         // screen (0, 100) 左上（Unity 左下原点，y=100=顶部）→ design (0, 0)
@@ -26,46 +25,31 @@ namespace LoomGUI.Tests
         public void ScreenToDesign_TopLeftScreen_IsTopLeftDesign()
         {
             var design = LoomInputCollector.ScreenToDesign(
-                new UnityEngine.Vector2(0f, 100f), new Vector2Int(200, 100), new UnityEngine.Vector2(200f, 100f),
-                new UnityEngine.Rect(0, 0, 200, 100), false);
+                new UnityEngine.Vector2(0f, 100f), 1f, 0f, 0f, 100f);
             Assert.AreEqual(0f, design.x, 0.01f);
             Assert.AreEqual(0f, design.y, 0.01f, "screen 顶部 → design y=0（左上原点）");
         }
 
-        // screen 底部（y=0）↦ design 底部（design_y=root_h）—— y-flip 对称验。
+        // screen 底部（y=0）↦ design 底部（design_y=canvas 高）—— y-flip 对称验。
         [Test]
         public void ScreenToDesign_BottomScreen_IsBottomDesign()
         {
             var design = LoomInputCollector.ScreenToDesign(
-                new UnityEngine.Vector2(0f, 0f), new Vector2Int(200, 100), new UnityEngine.Vector2(200f, 100f),
-                new UnityEngine.Rect(0, 0, 200, 100), false);
+                new UnityEngine.Vector2(0f, 0f), 1f, 0f, 0f, 100f);
             Assert.AreEqual(0f, design.x, 0.01f);
-            Assert.AreEqual(100f, design.y, 0.01f, "screen 底部 → design y=root_h");
+            Assert.AreEqual(100f, design.y, 0.01f, "screen 底部 → design y=canvas 高");
         }
 
-        // 刘海屏 round-trip 回归（render 前向 + ScreenToDesign 逆 → 原设计点）。
-        // 用 ComputeRootTransform 同款前向公式把 design 映到 screen，再 ScreenToDesign 映回，
-        // 断言 round-trip 误差 < epsilon——触控↔渲染对齐的根本保证。
-        //
-        // 场景：screenSize=(400,800)、rootSize=(200,400)、safe area=(40,0,320,800)（左侧 40px 刘海）。
-        //   sf = min(320/200, 800/400) = 1.6（width-binding）
-        //   rendered span = 320 × 640；safe 区 320×800 → 水平填满、垂直留白 160（上下各 80）
-        //   offX = 40；offYTop = 800
-        //   前向：screen.x = 40 + dx*1.6；screen.y = 800 - dy*1.6
-        //   逆：  dx = (screen.x - 40)/1.6；dy = (800 - screen.y)/1.6 → 恒等回原 dx,dy ✓
+        // letterbox 偏移 + 缩放 round-trip：三元组含偏移（Letterbox 居中 / Fit 铺满 safe 区
+        // 都编码在 offX/offYTopDown 里）。场景：sf=1.6、offX=40（左侧 40px 刘海）、offYTopDown=80
+        // （垂直 letterbox 上黑边 80）。
+        //   前向（top-down）：screen.x = 40 + dx*1.6；screenTD.y = 80 + dy*1.6
+        //   逆：dx = (screen.x - 40)/1.6；dy = (screenTD.y - 80)/1.6 → 恒等回原 dx,dy ✓
         [Test]
         public void ScreenToDesign_NotchedSafeArea_RoundTrip()
         {
-            var screenSize = new Vector2Int(400, 800);
-            var rootSize = new UnityEngine.Vector2(200f, 400f);
-            var area = new UnityEngine.Rect(40f, 0f, 320f, 800f);   // 左侧 40px 刘海
-            // 与 ComputeRootTransform 同一公式（静态重算，避免依赖 Screen.safeArea）。
-            float dw = rootSize.x, dh = rootSize.y;
-            float sf = Mathf.Min(area.width / dw, area.height / dh);   // = 1.6
-            float offX = area.x + (area.width - dw * sf) * 0.5f;       // = 40
-            float offYTop = area.y + area.height;                      // = 800
+            const float sf = 1.6f, offX = 40f, offYTd = 80f, screenH = 800f;
 
-            // 测多个设计点：四角 + 中心 + 刘海边缘。
             UnityEngine.Vector2[] designPoints = new[]
             {
                 new UnityEngine.Vector2(0f, 0f),       // 左上（span 左上，恰在刘海右沿）
@@ -77,10 +61,11 @@ namespace LoomGUI.Tests
             };
             foreach (var d in designPoints)
             {
-                // 前向：design → screen（ComputeRootTransform 同款）
-                var screen = new UnityEngine.Vector2(offX + d.x * sf, offYTop - d.y * sf);
+                // 前向：design → screen（top-down 公式；Input y-up → top-down = screenH - y）
+                var screenTd = new UnityEngine.Vector2(offX + d.x * sf, offYTd + d.y * sf);
+                var screen = new UnityEngine.Vector2(screenTd.x, screenH - screenTd.y);
                 // 逆：screen → design
-                var back = LoomInputCollector.ScreenToDesign(screen, screenSize, rootSize, area, true);
+                var back = LoomInputCollector.ScreenToDesign(screen, sf, offX, offYTd, screenH);
                 Assert.AreEqual(d.x, back.x, 0.001f, $"round-trip dx 失败（design={d}, screen={screen}）");
                 Assert.AreEqual(d.y, back.y, 0.001f, $"round-trip dy 失败（design={d}, screen={screen}）");
             }

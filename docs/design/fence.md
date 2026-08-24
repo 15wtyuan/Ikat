@@ -223,7 +223,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 **尺寸**
 
-`width`, `height`, `min-width`, `min-height`, `max-width`, `max-height` — 值域 Length / Percent / Auto。
+`width`, `height`, `min-width`, `min-height`, `max-width`, `max-height` — 值域 Length / Percent / Auto / Viewport（`vw`/`vh`/`vmin`/`vmax`，分母 = Stage root_size 画布而非父容器；分辨率适配的重排语言，见 main-design §11.5）。
 
 **布局**
 
@@ -307,6 +307,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 | `Length` | 长度值（px） |
 | `LengthPercent` | 长度或百分比 |
 | `LengthPercentAuto` | 长度、百分比或 auto |
+| `Viewport` | `vw` / `vh` / `vmin` / `vmax`（分母 = 画布对应维；尺寸族 + `flex-basis` + inset 四边 + margin 族收，padding/gap/font-size 等 px-only 通道不收） |
 | `Color` | 颜色值（围栏仅校验属性名，值格式交 core `parse_color`：`#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa` hex、`rgb()`/`rgba()` 函数式） |
 | `Number` | 数字 |
 | `Integer` | 整数 |

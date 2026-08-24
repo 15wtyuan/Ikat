@@ -3,7 +3,8 @@ use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
     BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, GradCoord,
     Gradient, GradientStop, OverflowMode, RadialExtent, RadialShape, ResolvedStyle, SliceInsets,
-    TextAlign, TextSecurity, GRADIENT_MAX_STOPS, MAX_INSET_SHADOW_LAYERS, MAX_OUTER_SHADOW_LAYERS,
+    TextAlign, TextSecurity, ViewportLen, ViewportUnit, GRADIENT_MAX_STOPS,
+    MAX_INSET_SHADOW_LAYERS, MAX_OUTER_SHADOW_LAYERS,
 };
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, LengthPercentage, LengthPercentageAuto};
@@ -52,6 +53,39 @@ pub fn parse_dimension(s: &str) -> Dimension {
     }
 }
 
+/// 视口相对单位（`vw`/`vh`/`vmin`/`vmax`）解析口。仅尺寸族/inset/margin 通道接它；
+/// padding/gap/font-size 等围栏 px-only（CSS_PROPS 值域），不进此路。
+fn try_viewport(s: &str) -> Option<ViewportLen> {
+    let s = s.trim();
+    const SUFFIXES: [(&str, ViewportUnit); 4] = [
+        ("vw", ViewportUnit::Vw),
+        ("vh", ViewportUnit::Vh),
+        ("vmin", ViewportUnit::Vmin),
+        ("vmax", ViewportUnit::Vmax),
+    ];
+    for (suffix, unit) in SUFFIXES {
+        if let Some(num) = s.strip_suffix(suffix) {
+            if let Ok(v) = num.trim().parse::<f32>() {
+                return Some(ViewportLen { value: v, unit });
+            }
+        }
+    }
+    None
+}
+
+/// 尺寸族声明统一入口（width/height/min-*/max-*/flex-basis）：视口单位进
+/// `style.viewport` 平行槽（taffy 落 length(0) 占位，solve 期按 root_size 换算覆写）；
+/// px/%/auto 进 taffy 并清平行槽——CSS 级联后者胜出，px 覆写 vw 后 vw 必须失效。
+fn apply_size_decl(vp: &mut Option<ViewportLen>, ts_slot: &mut Dimension, value: &str) {
+    if let Some(v) = try_viewport(value) {
+        *vp = Some(v);
+        *ts_slot = Dimension::length(0.0);
+    } else {
+        *vp = None;
+        *ts_slot = parse_dimension(value);
+    }
+}
+
 /// 1~4 值展开四向（top right bottom left）
 /// 解析 1~4 值 px（含裸数字）→ [t,r,b,l]。任一 token 非 px（%/em/rem/auto/keyword）→ None。
 /// px-only 属性（padding/border-width/gap）用它：非 px 让 apply_decl 返 false（围栏外静默忽略），
@@ -74,19 +108,24 @@ pub fn parse_four(s: &str) -> Option<[f32; 4]> {
     })
 }
 
-/// margin 围栏 px/%/auto → [t,r,b,l]。任一 token 非 px/%/auto（em/rem/keyword）→ None。
-/// 兑现 fence 承诺：`margin:10%` → Percent，`margin:auto` → Auto（居中），
-/// `margin:0 auto` → top/bottom Length(0)、left/right Auto。
-fn parse_margin_four(s: &str) -> Option<[LengthPercentageAuto; 4]> {
+/// margin 围栏 px/%/auto/视口单位 → ([t,r,b,l] taffy 值, [t,r,b,l] 视口覆盖)。
+/// 任一 token 四者皆非（em/rem/keyword）→ None。兑现 fence 承诺：
+/// `margin:10%` → Percent，`margin:auto` → Auto（居中），`margin:0 auto` →
+/// top/bottom Length(0)、left/right Auto；视口 token 进覆盖槽 + taffy 落 0 占位。
+fn parse_margin_four(s: &str) -> Option<([LengthPercentageAuto; 4], [Option<ViewportLen>; 4])> {
     let parts: Vec<&str> = s.split_whitespace().collect();
-    let p = |i: usize| -> Option<LengthPercentageAuto> {
+    let p = |i: usize| -> Option<(LengthPercentageAuto, Option<ViewportLen>)> {
         let x = parts.get(i)?.trim();
+        if let Some(v) = try_viewport(x) {
+            return Some((LengthPercentageAuto::length(0.0), Some(v)));
+        }
         if x == "auto" {
-            return Some(LengthPercentageAuto::auto());
+            return Some((LengthPercentageAuto::auto(), None));
         }
         if let Some(pct) = x.strip_suffix('%') {
-            return Some(LengthPercentageAuto::percent(
-                pct.parse::<f32>().ok()? / 100.0,
+            return Some((
+                LengthPercentageAuto::percent(pct.parse::<f32>().ok()? / 100.0),
+                None,
             ));
         }
         let px = x
@@ -95,16 +134,31 @@ fn parse_margin_four(s: &str) -> Option<[LengthPercentageAuto; 4]> {
             .trim()
             .parse::<f32>()
             .ok()?;
-        Some(LengthPercentageAuto::length(px))
+        Some((LengthPercentageAuto::length(px), None))
     };
     Some(match parts.len() {
         1 => {
-            let v = p(0)?;
-            [v, v, v, v]
+            let (v, vp) = p(0)?;
+            ([v, v, v, v], [vp, vp, vp, vp])
         }
-        2 => [p(0)?, p(1)?, p(0)?, p(1)?],
-        3 => [p(0)?, p(1)?, p(2)?, p(1)?],
-        _ => [p(0)?, p(1)?, p(2)?, p(3)?],
+        2 => {
+            let (a, va) = p(0)?;
+            let (b, vb) = p(1)?;
+            ([a, b, a, b], [va, vb, va, vb])
+        }
+        3 => {
+            let (a, va) = p(0)?;
+            let (b, vb) = p(1)?;
+            let (c, vc) = p(2)?;
+            ([a, b, c, b], [va, vb, vc, vb])
+        }
+        _ => {
+            let (a, va) = p(0)?;
+            let (b, vb) = p(1)?;
+            let (c, vc) = p(2)?;
+            let (d, vd) = p(3)?;
+            ([a, b, c, d], [va, vb, vc, vd])
+        }
     })
 }
 
@@ -1017,13 +1071,20 @@ fn apply_padding_side(style: &mut ResolvedStyle, side: Side, value: &str) -> boo
     true
 }
 
-/// margin 单边声明：与 apply_padding_side 同构，但走 parse_margin_four（支持 px/%/auto）。
+/// margin 单边声明：与 apply_padding_side 同构，但走 parse_margin_four（支持 px/%/auto/视口单位）。
 /// 只设指定边，其余边保持不动（不重置四边）。
 fn apply_margin_side(style: &mut ResolvedStyle, side: Side, value: &str) -> bool {
-    let [v, _, _, _] = match parse_margin_four(value) {
+    let ([v, _, _, _], [vp, _, _, _]) = match parse_margin_four(value) {
         Some(f) => f,
         None => return false,
     };
+    let idx = match side {
+        Side::Top => 0,
+        Side::Right => 1,
+        Side::Bottom => 2,
+        Side::Left => 3,
+    };
+    style.viewport.margin[idx] = vp;
     let ts = &mut style.taffy_style;
     match side {
         Side::Top => ts.margin.top = v,
@@ -1039,27 +1100,35 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
     let ts = &mut style.taffy_style;
     match prop.trim() {
         "width" => {
-            ts.size.width = parse_dimension(value);
+            apply_size_decl(&mut style.viewport.width, &mut ts.size.width, value);
             true
         }
         "height" => {
-            ts.size.height = parse_dimension(value);
+            apply_size_decl(&mut style.viewport.height, &mut ts.size.height, value);
             true
         }
         "min-width" => {
-            ts.min_size.width = parse_dimension(value);
+            apply_size_decl(&mut style.viewport.min_width, &mut ts.min_size.width, value);
             true
         }
         "min-height" => {
-            ts.min_size.height = parse_dimension(value);
+            apply_size_decl(
+                &mut style.viewport.min_height,
+                &mut ts.min_size.height,
+                value,
+            );
             true
         }
         "max-width" => {
-            ts.max_size.width = parse_dimension(value);
+            apply_size_decl(&mut style.viewport.max_width, &mut ts.max_size.width, value);
             true
         }
         "max-height" => {
-            ts.max_size.height = parse_dimension(value);
+            apply_size_decl(
+                &mut style.viewport.max_height,
+                &mut ts.max_size.height,
+                value,
+            );
             true
         }
         "padding" => {
@@ -1084,10 +1153,11 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         "margin-bottom" => apply_margin_side(style, Side::Bottom, value),
         "margin-left" => apply_margin_side(style, Side::Left, value),
         "margin" => {
-            let [t, r, b, l] = match parse_margin_four(value) {
+            let ([t, r, b, l], vp) = match parse_margin_four(value) {
                 Some(v) => v,
                 None => return false,
             };
+            style.viewport.margin = vp;
             ts.margin = Rect {
                 left: l,
                 right: r,
@@ -1242,7 +1312,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "flex-basis" => {
-            ts.flex_basis = parse_dimension(value);
+            apply_size_decl(&mut style.viewport.flex_basis, &mut ts.flex_basis, value);
             true
         }
         // CSS `flex` shorthand：`<grow> <shrink>? <basis>?`。
@@ -1632,25 +1702,37 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         "top" | "right" | "bottom" | "left" => {
             // inset 四边。px 写 Length；% 按含块解析（绝对定位居中写法 top:50% 等的
             // 浏览器语义，百分比相对 containing block 尺寸，由 taffy solve 兑现）；
-            // auto 保持默认（不写）。三态对齐 fence 广告的 LengthPercentAuto 语法。
-            let lp = if let Some(px) = parse_px(value) {
-                taffy::style::LengthPercentageAuto::length(px)
-            } else if let Some(pct) = value.trim().strip_suffix('%') {
-                match pct.trim().parse::<f32>() {
-                    Ok(v) => taffy::style::LengthPercentageAuto::percent(v / 100.0),
-                    Err(_) => return false,
-                }
-            } else if value.trim() == "auto" {
-                taffy::style::LengthPercentageAuto::auto()
-            } else {
-                return false;
-            };
-            match prop {
-                "top" => ts.inset.top = lp,
-                "right" => ts.inset.right = lp,
-                "bottom" => ts.inset.bottom = lp,
-                "left" => ts.inset.left = lp,
+            // auto 保持默认（不写）。视口单位（bottom:2vh 贴画布底类写法）进平行槽。
+            let idx = match prop.trim() {
+                "top" => 0usize,
+                "right" => 1,
+                "bottom" => 2,
+                "left" => 3,
                 _ => unreachable!(),
+            };
+            let lp = if let Some(v) = try_viewport(value) {
+                style.viewport.inset[idx] = Some(v);
+                taffy::style::LengthPercentageAuto::length(0.0)
+            } else {
+                style.viewport.inset[idx] = None;
+                if let Some(px) = parse_px(value) {
+                    taffy::style::LengthPercentageAuto::length(px)
+                } else if let Some(pct) = value.trim().strip_suffix('%') {
+                    match pct.trim().parse::<f32>() {
+                        Ok(v) => taffy::style::LengthPercentageAuto::percent(v / 100.0),
+                        Err(_) => return false,
+                    }
+                } else if value.trim() == "auto" {
+                    taffy::style::LengthPercentageAuto::auto()
+                } else {
+                    return false;
+                }
+            };
+            match idx {
+                0 => ts.inset.top = lp,
+                1 => ts.inset.right = lp,
+                2 => ts.inset.bottom = lp,
+                _ => ts.inset.left = lp,
             }
             true
         }

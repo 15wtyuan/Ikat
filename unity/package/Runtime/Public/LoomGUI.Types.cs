@@ -138,9 +138,14 @@ namespace LoomGUI
         internal int _newIndex;
         public int OldIndex { get { return _oldIndex; } }
         public int NewIndex { get { return _newIndex; } }
-        public string OldValue { get { throw NE(); } }
-        public string NewValue { get { throw NE(); } }
-        static NotImplementedException NE() => new NotImplementedException();
+        // core 事件流只携新 index（EVT_SELECTION_CHANGED touch_id），无旧值——OldValue 留
+        // null（同 ValueChangedEvent.OldValue=default(T) 家族语义）。NewValue 由 Dropdown 派发
+        // 时经 get_dropdown_selected_value 实取（事件泵出前 core 已应用新 index）；TabList 的
+        // tab 无 value 语义 → null（值面归 NewIndex）。
+        internal string _oldValue;
+        internal string _newValue;
+        public string OldValue { get { return _oldValue; } }
+        public string NewValue { get { return _newValue; } }
     }
 
     /// <summary>

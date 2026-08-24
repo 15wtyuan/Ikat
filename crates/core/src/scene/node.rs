@@ -418,6 +418,10 @@ pub struct EditState {
     pub cursor_visible: bool,
     pub cursor_timer: f32,
     pub ideal_cursor_x: f32, // 上下行 sticky x（TextArea 用）
+    /// 单行文本的水平视口偏移（design px）：内容超宽时 TextField/NumberField 的
+    /// 显示窗口左缘在 layout 空间的位置（0=未滚）。光标跟随滚动（RmlUi MoveToCursor
+    /// 同型算法）由 tick 管线的 sync_edit_view 钳制；渲染/命中按它平移。TextArea 不用（恒 0）。
+    pub view_x: f32,
 }
 
 impl EditState {
@@ -441,6 +445,7 @@ impl EditState {
             cursor_visible: true,
             cursor_timer: 0.0,
             ideal_cursor_x: 0.0,
+            view_x: 0.0,
         }
     }
 

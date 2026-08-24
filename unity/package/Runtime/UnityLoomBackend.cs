@@ -73,7 +73,7 @@ namespace LoomGUI
         public override void CollectInput(IntPtr stage)
         {
             if (stage == IntPtr.Zero || _inputCollector == null) return;
-            _inputCollector.Collect(stage, _inputCollector.DesignSize, _inputCollector.UseSafeArea);
+            _inputCollector.Collect(stage);
             _inputCollector.CollectKeys(stage);
             // CollectComposition 须在 CollectText 前：先设/清 IME 预编辑串，CollectText 再
             // insert 组字完成的结果字符（inputString）。

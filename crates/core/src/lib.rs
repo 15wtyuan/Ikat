@@ -14,6 +14,7 @@
     clippy::doc_lazy_continuation
 )]
 
+pub mod adapt;
 pub mod asset;
 pub mod dump;
 pub mod event;

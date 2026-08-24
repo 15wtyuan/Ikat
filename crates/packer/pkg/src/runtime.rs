@@ -14,6 +14,21 @@ pub struct RuntimeManifest {
     /// 每个对应 <name>.atlas.json + png。
     pub atlases: Vec<String>,
     pub fonts: Vec<RuntimeFont>,
+    /// 设计分辨率（分辨率适配正主，workspace.design 透传）。None = 集成层兜底。
+    /// additive 可选字段——version 不跳（旧读者忽略未知键）。
+    #[serde(default)]
+    pub design: Option<DesignDim>,
+    /// 适配模式 letterbox | fit-width | fit-height（workspace.match_mode 透传）。
+    /// None = letterbox（集成层默认）。
+    #[serde(default)]
+    pub match_mode: Option<String>,
+}
+
+/// 设计分辨率（设计 px）。w/h 须为正有限值（check 校验）。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct DesignDim {
+    pub w: f32,
+    pub h: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

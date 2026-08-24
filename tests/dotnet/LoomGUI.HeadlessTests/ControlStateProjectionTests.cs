@@ -286,6 +286,30 @@ namespace LoomGUI.HeadlessTests
             finally { StageHarness.Destroy(stage); }
         }
 
+        /// <summary>
+        /// Node.Focusable round-trip（原 throw NE，#7 扫尾）：tabindex>=0 的布尔投影。
+        /// false → Tab 链/点击聚焦排除（DOM tabindex=-1），恢复 true 回 0 组。
+        /// </summary>
+        [Fact]
+        public void node_focusable_roundtrip()
+        {
+            var (stage, ctx, root) = LoadControlsFixture();
+            try
+            {
+                var sld = root.Get<Slider>("sld");
+                // fixture 的 slider 由打包期 ARIA 语义补 tabindex=0（控件隐式可聚焦）
+                Assert.True(sld.Focusable, "control default focusable");
+                Assert.False(root.Focusable, "plain div default not focusable (tabindex None)");
+                sld.Focusable = false;
+                Assert.False(sld.Focusable, "set false → tabindex=-1 projection");
+                sld.Focusable = true;
+                Assert.True(sld.Focusable, "set true → tabindex=0 projection");
+                root.Focusable = true;
+                Assert.True(root.Focusable, "div can opt in at runtime");
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
         // ── fixture 加载 helpers（仿 TextFieldProjectionTests / ControlProjectionTests）──
 
         static (IntPtr stage, UIContext ctx, Container root) LoadTextfieldFixture()

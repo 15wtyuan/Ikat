@@ -21,15 +21,36 @@ namespace LoomGUI
     /// 以 <see cref="_productRoot"/> 为基目录。项目继承覆写以换 AssetBundle/Addressables 加载。
     ///
     /// 设计坐标系：origin 左上、y-down（design px，<see cref="_designSize"/>）。根 transform 一次性
-    /// 做 MatchWidthOrHeight shrink-to-fit 缩放 + y-flip（localScale=(sf,-sf,sf)）+ 平移到屏幕左上原点。
+    /// 做适配缩放 + y-flip（localScale=(sf,-sf,sf)）+ 平移到屏幕左上原点。
     /// 此变换由 <see cref="ConfigureTransforms"/> 配置；UI 相机独立于根（不被根的负 scale 影响）。
     /// shader Cull Off 吸收翻转的 winding。
+    ///
+    /// 分辨率适配（三模式，策略数学在 Rust——<c>loomgui_compute_adaptation</c>，Driver 只消费）：
+    /// Letterbox = contain 黑边（root 锁设计分辨率）；FitWidth/FitHeight = 拆黑边重排
+    /// （root 一维锁设计稿、另一维随屏幕，vw/vh/% 跟随画布流动）。设计分辨率与模式的正主是
+    /// workspace（loom.runtime.json 的 design/match_mode 透传）；Inspector 字段是 manifest
+    /// 缺项时的 fallback。渲染/输入共用「contain-of-canvas」投影公式——喂画布尺寸
+    /// （<see cref="_canvas"/>）而非设计分辨率，三模式统一。
     /// </summary>
     [ExecuteAlways]
     public class LoomStageDriver : MonoBehaviour
     {
-        [Tooltip("设计分辨率（design px）。1080x1920 竖屏 / 1920x1080 横屏。")]
+        /// <summary>适配模式（Rust AdaptMode 的 C# 投影，Inspector 可选）。</summary>
+        public enum AdaptMode
+        {
+            /// <summary>contain：完整可见，safe 区内居中，留 letterbox 黑边（默认）。</summary>
+            Letterbox = 0,
+            /// <summary>宽锚：宽 = 设计宽，高重排（竖屏异形高常用）。</summary>
+            FitWidth = 1,
+            /// <summary>高锚：高 = 设计高，宽重排（横屏带鱼屏常用）。</summary>
+            FitHeight = 2,
+        }
+
+        [Tooltip("设计分辨率（design px）。1080x1920 竖屏 / 1920x1080 横屏。runtime.json 带 design 时以 manifest 为准（本字段是 fallback）。")]
         [SerializeField] UnityEngine.Vector2 _designSize = new(1080, 1920);
+
+        [Tooltip("适配模式。Letterbox=contain 黑边；FitWidth/FitHeight=拆黑边重排。runtime.json 带 match_mode 时以 manifest 为准（本字段是 fallback）。")]
+        [SerializeField] AdaptMode _adaptMode = AdaptMode.Letterbox;
 
         [Tooltip("UI 相机（独立 GO，渲染 LoomUILayer）。留空时 Awake 自建。")]
         [SerializeField] Camera _uiCamera;
@@ -50,6 +71,24 @@ namespace LoomGUI
         UnityLoomBackend _backend;
         MaterialManager _mm;
         int _lastScreenW = -1, _lastScreenH = -1;
+        UnityEngine.Rect _lastSafeArea = new(-1, -1, -1, -1);
+
+        /// <summary>
+        /// 当前画布（stage root_size，设计单位）。Letterbox = 设计分辨率；Fit 模式一维锁设计稿、
+        /// 另一维随屏幕（Rust 适配数学算出）。渲染根变换与输入映射都吃它（contain-of-canvas 统一投影）。
+        /// </summary>
+        UnityEngine.Vector2 _canvas = new(1080, 1920);
+
+        /// <summary>生效模式（Awake 从 manifest/Inspector 解析后的 u32 形态）。</summary>
+        uint _modeU32 = LoomGUI.Bindings.LoomAdaptMode.Letterbox;
+
+        /// <summary>生效设计分辨率（manifest 优先，Inspector fallback；Awake 解析一次）。</summary>
+        UnityEngine.Vector2 _designEff = new(1080, 1920);
+
+        /// 适配映射三元组（Rust loomgui_compute_adaptation 结果；渲染根变换与输入映射共用）。
+        float _adaptScale = 1f;
+        float _adaptOffX;
+        float _adaptOffYTopDown;
 
         // UI 节点 + 相机 + NativeHost wrapper 都用此 layer；cullingMask = 1<<6 让 UI 相机只渲 UI。
         const int LoomUILayer = 6;
@@ -171,13 +210,25 @@ namespace LoomGUI
                 if (child.name == "loom_node") DestroyImmediate(child.gameObject);
             }
 
+            // manifest 先读（纯文本 IO，无 Unity 资源依赖）——设计分辨率/适配模式的正主在
+            // workspace（design/match_mode 透传），Inspector 字段是 manifest 缺项时的 fallback。
+            // 解析失败不阻断启动（warning + Inspector 值兜底，行为同旧版）。
+            RuntimeManifest runtime = null;
+            string runtimeJson = LoadTextFile("loom.runtime.json");
+            if (!string.IsNullOrEmpty(runtimeJson))
+            {
+                try { runtime = RuntimeManifest.ParseRuntime(runtimeJson); }
+                catch (Exception e) { Debug.LogWarning($"[LoomStageDriver] Failed to parse loom.runtime.json: {e.Message}"); }
+            }
+            ResolveAdaptation(runtime, applyToStage: false);
+
             // InputCollector 提前 GetComponent：backend.SetRuntimeRoot 需要它（CollectInput 内读）。
-            // 同步注入 DesignSize/UseSafeArea——LoomInputCollector 自带这两个属性，
-            // backend.CollectInput 走 _inputCollector.DesignSize/UseSafeArea 路径（不再依赖 stage 字段）。
+            // 同步注入 DesignSize（= 画布尺寸，三模式统一投影）/UseSafeArea——
+            // LoomInputCollector 自带这两个属性，backend.CollectInput 走同路径（不依赖 stage 字段）。
             if (_inputCollector == null) _inputCollector = GetComponent<LoomInputCollector>();
             if (_inputCollector != null)
             {
-                _inputCollector.DesignSize = _designSize;
+                _inputCollector.DesignSize = _canvas;
                 _inputCollector.UseSafeArea = _safeArea;
             }
 
@@ -194,13 +245,12 @@ namespace LoomGUI
             // LoomHost 构造 loomgui_stage_new → 建 UIContext → 接 backend。
             // loomgui_stage_new 失败时 LoomHost 抛 InvalidOperationException——
             // _host 留 null，LateUpdate/OnDestroy 静默跳过。
-            // 零向量 designSize 退回 (1080,1920)——避免 loomgui_stage_new(0,0) 返 null。
-            float dw = _designSize.x > 0f ? _designSize.x : 1080f;
-            float dh = _designSize.y > 0f ? _designSize.y : 1920f;
+            // stage 建在画布尺寸上（Letterbox = 设计分辨率；Fit 模式一维已随屏幕适配——
+            // ResolveAdaptation 已算好 _canvas）。零向量防御在 Rust 侧（1080×1920 兜底）。
             _backend = new UnityLoomBackend(_mm);
             try
             {
-                _host = new LoomHost(dw, dh, _backend);
+                _host = new LoomHost(_canvas.x, _canvas.y, _backend);
             }
             catch (Exception e)
             {
@@ -221,15 +271,7 @@ namespace LoomGUI
             _backend.SetRuntimeRoot(transform, _inputCollector);
             _backend.NativeHost.Init(transform);
 
-            // 1. Load runtime manifest
-            RuntimeManifest runtime = null;
-            string runtimeJson = LoadTextFile("loom.runtime.json");
-            if (!string.IsNullOrEmpty(runtimeJson))
-            {
-                try { runtime = RuntimeManifest.ParseRuntime(runtimeJson); }
-                catch (Exception e) { Debug.LogWarning($"[LoomStageDriver] Failed to parse loom.runtime.json: {e.Message}"); }
-            }
-
+            // 1. runtime manifest 已在 Awake 头部读取（design/match_mode 解析早于 stage 构造）。
             if (runtime != null)
             {
                 // 2. Load packages（UIContext.LoadPackage typed path）
@@ -474,12 +516,14 @@ namespace LoomGUI
         {
             if (_host == null) return;
 
-            // 屏幕 resize 检测（editor 改 Game 视图尺寸 / player 改窗口）→ 重配根变换 + 相机 orthoSize。
-            if (Screen.width != _lastScreenW || Screen.height != _lastScreenH)
+            // 屏幕 resize / safeArea 变化（editor 改 Game 视图 / player 改窗口 / 旋转）→
+            // 重算适配（Fit 模式画布随屏幕变 → set_root_size 触发下帧重排）+ 重配根变换。
+            if (Screen.width != _lastScreenW || Screen.height != _lastScreenH || Screen.safeArea != _lastSafeArea)
             {
                 _lastScreenW = Screen.width;
                 _lastScreenH = Screen.height;
-                ConfigureTransforms();
+                _lastSafeArea = Screen.safeArea;
+                RecomputeAdaptation();
             }
 
             // host.Step 内含：backend.CollectInput → tick → borrow_frame → backend.SyncFrame
@@ -514,7 +558,7 @@ namespace LoomGUI
             if (mouse == null) return;
             var screen = mouse.position.ReadValue();
             var design = LoomInputCollector.ScreenToDesign(
-                screen, new Vector2Int(Screen.width, Screen.height), _designSize, Screen.safeArea, _safeArea);
+                screen, _adaptScale, _adaptOffX, _adaptOffYTopDown, Screen.height);
             Node hit = _host.Context.Pick(new LoomVector2(design.x, design.y));
             uint hitId = hit?._id ?? 0xFFFF_FFFF;
             if (hitId == _probeLastHit) return;
@@ -579,15 +623,19 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// design→screen 根变换（sf + rootPos）。_safeArea=true 时 shrink-to-fit 到 Screen.safeArea
-        /// 并把设计 span 居中进 safe 区（safe 区外 letterbox，避刘海）；false 时全屏。
-        /// 相机 orthoSize 不变（仍=sh/2 覆盖全屏），root transform 把 design 映射进 safe 区。
-        /// <see cref="LoomInputCollector.ScreenToDesign"/> 用同一公式逐项逆映射，保触摸↔渲染对齐。
+        /// design→screen 根变换，消费 <see cref="RecomputeAdaptation"/> 算好的适配结果
+        /// （sf + top-down 偏移；Letterbox 在 safe 区居中留黑边，Fit 铺满 safe 区——
+        /// 三模式差异全在 Rust 算的偏移里，本函数模式无关）。
+        /// 相机 orthoSize 不变（仍=sh/2 覆盖全屏），root transform 把画布映射进 safe 区。
+        /// <see cref="LoomInputCollector.ScreenToDesign"/> 用同一组 sf/偏移逐项逆映射，保触摸↔渲染对齐。
         /// </summary>
         void ConfigureTransforms()
         {
             float sw = Screen.width, sh = Screen.height;
-            var (sf, rootPos) = ComputeRootTransform();
+            float sf = _adaptScale;
+            // world-root 位置：令画布原点 (0,0) 渲染到 top-down screen(_adaptOffX, _adaptOffYTopDown)。
+            // screen.y 用左下原点（Unity）：y-up 顶边 = sh - offYTopDown → rootPos.y = 顶边 - sh/2。
+            Vector3 rootPos = new Vector3(_adaptOffX - sw * 0.5f, (sh - _adaptOffYTopDown) - sh * 0.5f, 0f);
 
             transform.localScale = new Vector3(sf, -sf, sf);
             transform.localPosition = rootPos;
@@ -608,31 +656,74 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 算 shrink-to-fit 缩放 + 屏幕居中偏移。
-        /// 前向映射（design→screen，组合 root transform + 正交相机）：
-        ///   screen.x = rootPos.x + dx*sf + sw/2     （world.x = rootPos.x + dx*sf；screen.x = world.x + sw/2）
-        ///   screen.y = rootPos.y - dy*sf + sh/2     （world.y = rootPos.y - dy*sf，y-flip；screen.y = world.y + sh/2）
-        /// 令 offX = 设计 span 在屏幕的左边距（screen.x of design(0)），offYTop = span 顶边（screen.y of design(0)）：
-        ///   offX   = area.x + (area.width  - dw*sf) * 0.5   （safe 区水平居中 rendered span dw*sf）
-        ///   offYTop= area.y + area.height                  （Unity screen y 下原点，设计 y 上原点 → span 顶 = safe 区顶）
-        ///   rootPos.x = offX   - sw/2     （令 screen.x of design(0) = offX = rootPos.x + sw/2）
-        ///   rootPos.y = offYTop - sh/2     （令 screen.y of design(0) = offYTop = rootPos.y + sh/2）
+        /// 解析生效设计分辨率/模式（manifest 优先，Inspector fallback）并调 Rust 适配数学
+        /// （loomgui_compute_adaptation，策略单源——未来 Godot 后端复用同一份）算画布 + 映射三元组。
+        /// Awake 首次（stage 未建，只填字段）与运行中 resize 都走这里；画布变化时
+        /// set_root_size（core 下帧按新 root_size 重排，vw/vh/% 跟随）+ 刷新 collector 注入 + 重配根变换。
         /// </summary>
-        (float sf, Vector3 rootPos) ComputeRootTransform()
+        void ResolveAdaptation(RuntimeManifest runtime, bool applyToStage)
         {
-            float sw = Screen.width, sh = Screen.height;
-            UnityEngine.Rect area = _safeArea ? Screen.safeArea : new UnityEngine.Rect(0, 0, sw, sh);
-            // 防御：safeArea 可能零宽高（编辑器未配屏）→ 退回全屏
-            if (area.width <= 0f || area.height <= 0f) area = new UnityEngine.Rect(0, 0, sw, sh);
             float dw = _designSize.x, dh = _designSize.y;
-            // shrink-to-fit：取较小缩放比，保证完整可见 + 留白 letterbox。
-            float sf = Mathf.Min(area.width / dw, area.height / dh);
-            // 把设计的 rendered span（dw*sf × dh*sf）在 safe 区内居中。
-            float offX = area.x + (area.width - dw * sf) * 0.5f;
-            float offYTop = area.y + area.height;
-            // world-root 位置：令 design(0,0) 渲染到 screen(offX, offYTop) [span 左上角，y 已 flip]。
-            Vector3 rootPos = new Vector3(offX - sw * 0.5f, offYTop - sh * 0.5f, 0f);
-            return (sf, rootPos);
+            if (runtime != null && runtime.design != null && runtime.design.w > 0f && runtime.design.h > 0f)
+            {
+                dw = runtime.design.w;
+                dh = runtime.design.h;
+            }
+            else if (dw <= 0f || dh <= 0f)
+            {
+                dw = 1080f; dh = 1920f;   // 零向量防御（与 Rust 侧兜底同值）
+            }
+
+            _modeU32 = (uint)_adaptMode;   // Inspector fallback
+            if (runtime != null && !string.IsNullOrEmpty(runtime.match_mode))
+            {
+                var m = LoomGUI.Bindings.LoomAdaptMode.FromString(runtime.match_mode);
+                if (m.HasValue) _modeU32 = m.Value;
+                else Debug.LogWarning($"[LoomStageDriver] unknown match_mode '{runtime.match_mode}' in loom.runtime.json -> Inspector fallback ({_adaptMode})");
+            }
+            RecomputeAdaptation(dw, dh, applyToStage);
+        }
+
+        /// <summary>用已解析的设计分辨率/模式重算适配（Awake 后的 resize 路径）。</summary>
+        void RecomputeAdaptation()
+        {
+            RecomputeAdaptation(_designEff.x, _designEff.y, true);
+        }
+
+        void RecomputeAdaptation(float dw, float dh, bool applyToStage)
+        {
+            _designEff = new UnityEngine.Vector2(dw, dh);
+            float sw = Screen.width, sh = Screen.height;
+            UnityEngine.Rect a = _safeArea ? Screen.safeArea : new UnityEngine.Rect(0, 0, sw, sh);
+            if (a.width <= 0f || a.height <= 0f) a = new UnityEngine.Rect(0, 0, sw, sh);   // 编辑器未配屏防御
+            // Rust 侧 safe y 是 top-down（Unity safeArea 是左下原点 y-up）：top-down y = sh - (y+h)。
+            Bindings.AdaptResult r;
+            if (Native.loomgui_compute_adaptation(
+                    dw, dh, sw, sh, a.x, sh - (a.y + a.height), a.width, a.height, _modeU32, &r) != 0)
+            {
+                Debug.LogError("[LoomStageDriver] loomgui_compute_adaptation failed -> fallback letterbox @design");
+                r = new Bindings.AdaptResult { scale = Mathf.Min(a.width / dw, a.height / dh), root_w = dw, root_h = dh,
+                    offset_x = a.x + (a.width - dw * Mathf.Min(a.width / dw, a.height / dh)) * 0.5f, offset_y = a.y };
+            }
+            _adaptScale = r.scale;
+            _adaptOffX = r.offset_x;
+            _adaptOffYTopDown = r.offset_y;
+
+            bool canvasChanged = !Mathf.Approximately(_canvas.x, r.root_w) || !Mathf.Approximately(_canvas.y, r.root_h);
+            _canvas = new UnityEngine.Vector2(r.root_w, r.root_h);
+
+            if (_inputCollector != null)
+            {
+                _inputCollector.DesignSize = _canvas;
+                _inputCollector.MapScale = _adaptScale;
+                _inputCollector.MapOffX = _adaptOffX;
+                _inputCollector.MapOffYTopDown = _adaptOffYTopDown;
+            }
+
+            if (applyToStage && canvasChanged && _host != null && !_host.SetRootSize(r.root_w, r.root_h))
+                Debug.LogWarning($"[LoomStageDriver] set_root_size({r.root_w},{r.root_h}) rejected (invalid size?)");
+
+            if (applyToStage) ConfigureTransforms();
         }
     }
 }

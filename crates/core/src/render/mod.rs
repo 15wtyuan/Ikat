@@ -2040,6 +2040,7 @@ fn render_one_node(
             let s = &n.style;
             let stack = fonts.stack_for(s.font_family.as_deref());
             let text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
+
             let off_left =
                 resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
             let off_right =
@@ -2141,6 +2142,9 @@ fn render_one_node(
                 dv
             };
             let s = &n.style;
+            // 单行水平视口（光标跟随滚动）：文字层整体左移 view_x（背景 border 不动）。
+            // TextArea 恒 0。
+            let vx = e.view_x;
             let stack = fonts.stack_for(s.font_family.as_deref());
             let base_text_color = anim.and_then(|a| a.text_color).unwrap_or(s.color);
             // placeholder 用占位色（声明的 placeholder-color，否则文字色折半，对齐浏览器
@@ -2153,6 +2157,10 @@ fn render_one_node(
                 )
             } else {
                 base_text_color
+            };
+            let rect = Rect {
+                x: rect.x - vx,
+                ..*rect
             };
             let off_left =
                 resolve_lp(s.taffy_style.border.left) + resolve_lp(s.taffy_style.padding.left);
@@ -2268,7 +2276,7 @@ fn render_one_node(
                 &layout,
                 atlas,
                 fonts,
-                rect,
+                &rect,
                 &n.style.text_effects,
                 n.style.background_gradient.as_ref(),
                 n.style.background_clip_text,

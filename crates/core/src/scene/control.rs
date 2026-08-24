@@ -25,7 +25,7 @@ use crate::scene::dynamic::{
 use crate::scene::node::{
     Composition, ControlState, EditState, NodeFlags, NodeId, NodeKind, Scene,
 };
-use crate::scene::text_cursor::{hit_byte_offset, line_byte_ranges};
+use crate::scene::text_cursor::{cursor_pixel_x, hit_byte_offset, line_byte_ranges};
 use crate::transform::NodeTransform;
 
 /// Dropdown（role=combobox）的弹出列表容器 role。open Dropdown 的 listbox 子树走浮层渲染
@@ -1260,14 +1260,16 @@ pub fn on_pointer_up(scene: &mut Scene, id: NodeId) -> Vec<EventRecord> {
 ///
 /// 无缓存 TextLayout（首帧尚无 measure）→ no-op。非 TextField/TextArea/NumberField → no-op。
 pub fn on_text_pointer_down(scene: &mut Scene, id: NodeId, local_x: f32, local_y: f32) {
-    let value = match scene.controls.get(id) {
+    let (view_x, value) = match scene.controls.get(id) {
         Some(
             ControlState::TextField(e)
             | ControlState::TextArea(e)
             | ControlState::NumberField { edit: e, .. },
-        ) => e.value.clone(),
+        ) => (e.view_x, e.value.clone()),
         _ => return,
     };
+    // 入参是可视坐标；layout 空间 = 可视 + 视口偏移（光标跟随滚动的命中换算）。
+    let local_x = local_x + view_x;
     // 克隆 TextLayout 解借用冲突：text_layouts 不可变借 + controls 可变写。
     let Some(layout) = scene.text_layouts[id.index()].as_ref().cloned() else {
         return;
@@ -1331,6 +1333,98 @@ pub fn advance_cursor_blink(scene: &mut Scene, dt: f32) {
                 }
             } else {
                 e.cursor_visible = false;
+            }
+        }
+    }
+}
+
+/// 光标视口跟随的边缘余量（design px）：光标贴窗口边时至少露出这个上下文
+/// （近一字符宽），不至于光标压着边框看不见邻字。窄框时收缩防吃掉整个窗口。
+const EDIT_VIEW_MARGIN: f32 = 4.0;
+
+/// 单行文本控件的视口跟随（RmlUi `MoveToCursor` 同型）：内容超宽时钳 `EditState.view_x`
+/// 使光标留在可视窗 `[view_x, view_x + content_w]` 内（留 [`EDIT_VIEW_MARGIN`] 上下文），
+/// 内容不超宽时归零。tick 管线每帧在 `measure_text_controls` 后调（缓存 TextLayout 已新），
+/// 所有光标变更路径（键入 / 方向键 / IME / pointer 点击）统一收口于此，无需各路径自查。
+///
+/// 只动 TextField/NumberField（单行）；TextArea 横向换行不溢出，恒 0。选区拖选跟随
+/// （anchor 侧）待拖选交互落地后一并（#49）。IME composition 时光标锁 composition 起点
+/// （与 `Stage::cursor_rect` 的 cur 同源），组字期间窗口跟随预提交文本起点。
+pub fn sync_edit_view(scene: &mut Scene) {
+    use crate::render::resolve_lp;
+    let ids: Vec<NodeId> = scene.controls.0.keys().copied().collect();
+    for id in ids {
+        // 读阶段：不可变借（controls/nodes/text_layouts 皆为 scene 的不相交字段）在此块
+        // 内终结，产出目标视口；None = 无须变更。
+        let target: Option<f32> = {
+            let e = match scene.controls.get(id) {
+                Some(ControlState::TextField(e))
+                | Some(ControlState::NumberField { edit: e, .. }) => e,
+                Some(ControlState::TextArea(_)) => continue, // 单行专属：TextArea 恒 0
+                _ => continue,
+            };
+            let Some(n) = scene.get(id) else { continue };
+            let Some(layout) = scene.text_layouts[id.index()].as_ref() else {
+                continue; // 首帧未缓存（空 value/placeholder）——无内容可跟随
+            };
+            let content_w = (n.layout_rect.w
+                - resolve_lp(n.style.taffy_style.border.left)
+                - resolve_lp(n.style.taffy_style.padding.left)
+                - resolve_lp(n.style.taffy_style.border.right)
+                - resolve_lp(n.style.taffy_style.padding.right))
+            .max(0.0);
+            if content_w <= 0.0 {
+                continue;
+            }
+            let mask = n.style.text_security.map(mask_char);
+            let (display, comp_range) = display_value_masked(e, mask);
+            if display.is_empty() {
+                // 无内容 → 视口归零（可能已非 0：刚删空）
+                Some(0.0)
+            } else {
+                let ranges = line_byte_ranges(layout, &display);
+                // 滚动上界取 max(行宽, 行末光标 x)：advance 累计与 line.width 有亚像素差，
+                // 只用行宽会把行末光标截在窗外 ~0.3px。
+                let (end_x, _) = cursor_pixel_x(layout, &ranges, display.len());
+                let text_w = layout
+                    .lines
+                    .first()
+                    .map(|l| l.width)
+                    .unwrap_or(0.0)
+                    .max(end_x);
+                let max_vx = (text_w - content_w).max(0.0);
+                if max_vx <= 0.0 {
+                    // 内容不超宽 → 视口归零（可能已非 0：刚删短）
+                    Some(0.0)
+                } else {
+                    let cur = match comp_range {
+                        Some((start, _)) => start,
+                        None => value_to_display_byte(&e.value, &display, e.cursor),
+                    };
+                    let (cx, _li) = cursor_pixel_x(layout, &ranges, cur);
+                    let m = EDIT_VIEW_MARGIN.min(content_w * 0.25);
+                    let mut vx = e.view_x;
+                    if cx < vx + m {
+                        vx = cx - m;
+                    }
+                    if cx > vx + content_w - m {
+                        vx = cx + m - content_w;
+                    }
+                    Some(vx.clamp(0.0, max_vx))
+                }
+            }
+        };
+        // 写阶段：读借已终结，可变借落值。
+        if let Some(vx) = target {
+            if let Some(
+                ControlState::TextField(e)
+                | ControlState::TextArea(e)
+                | ControlState::NumberField { edit: e, .. },
+            ) = scene.controls.get_mut(id)
+            {
+                if e.view_x != vx {
+                    e.view_x = vx;
+                }
             }
         }
     }
@@ -3376,6 +3470,9 @@ mod tests {
             h: 30.0,
         };
 
+        // 单行语义：生产 TextField 的 nowrap 由打包期烙印，手搓场景在此补齐
+        //（不补则 measure 按宽度折行，单行视口/命中测试的前提不成立）。
+        scene.get_mut(id).unwrap().style.white_space_nowrap = true;
         // 手动测文本 + 缓存 TextLayout（on_text_pointer_down 需要已缓存）。
         let style = scene.get(id).unwrap().style.clone();
         let stack = fonts.stack_for(style.font_family.as_deref());
@@ -3399,6 +3496,74 @@ mod tests {
         );
         scene.text_layouts[id.index()] = Some(layout);
         (scene, id)
+    }
+
+    #[test]
+    fn sync_edit_view_follows_cursor_beyond_content() {
+        // 长文本（超 200px 宽）+ 光标在末尾 → 视口右滚，光标 x 落入可视窗
+        // [view_x, view_x + content_w]（留 margin）。
+        let long = "hello world, this is a long line of text";
+        let (mut scene, id) = make_scene_with_textfield(long);
+        sync_edit_view(&mut scene);
+        if let Some(ControlState::TextField(e)) = scene.controls.get(id) {
+            let layout = scene.text_layouts[id.index()].as_ref().unwrap();
+            let ranges = line_byte_ranges(layout, long);
+            let (cx, _) = cursor_pixel_x(layout, &ranges, e.cursor);
+            let content_w = scene.get(id).unwrap().layout_rect.w;
+            let text_w = layout.lines[0].width;
+            assert!(text_w > content_w, "fixture must overflow: text_w={text_w}");
+            assert!(
+                e.view_x > 0.0,
+                "cursor at end must scroll, view_x={}",
+                e.view_x
+            );
+            assert!(
+                cx >= e.view_x && cx <= e.view_x + content_w,
+                "caret x {cx} must stay in view [{}, {}]",
+                e.view_x,
+                e.view_x + content_w
+            );
+            assert!(
+                e.view_x <= text_w - content_w + 0.5,
+                "view_x must clamp to max scroll"
+            );
+        } else {
+            panic!("not TextField");
+        }
+    }
+
+    #[test]
+    fn sync_edit_view_zero_when_content_fits() {
+        // 短文本不溢出 → 视口恒 0。
+        let (mut scene, id) = make_scene_with_textfield("hi");
+        sync_edit_view(&mut scene);
+        if let Some(ControlState::TextField(e)) = scene.controls.get(id) {
+            assert_eq!(e.view_x, 0.0);
+        } else {
+            panic!("not TextField");
+        }
+    }
+
+    #[test]
+    fn sync_edit_view_scrolls_back_to_start() {
+        // 末尾滚过去后光标回行首 → 视口归零（Home/点行首的跟随）。
+        let long = "hello world, this is a long line of text";
+        let (mut scene, id) = make_scene_with_textfield(long);
+        sync_edit_view(&mut scene);
+        let vx_before = match scene.controls.get(id) {
+            Some(ControlState::TextField(e)) => e.view_x,
+            _ => panic!("not TextField"),
+        };
+        assert!(vx_before > 0.0);
+        if let Some(ControlState::TextField(e)) = scene.controls.get_mut(id) {
+            e.cursor = 0;
+        }
+        sync_edit_view(&mut scene);
+        let vx_after = match scene.controls.get(id) {
+            Some(ControlState::TextField(e)) => e.view_x,
+            _ => panic!("not TextField"),
+        };
+        assert_eq!(vx_after, 0.0, "cursor at start must scroll back to 0");
     }
 
     #[test]

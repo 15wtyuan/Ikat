@@ -130,7 +130,13 @@ namespace LoomGUI
             get { ThrowIfDisposed(); return GetNodeTouchable(); }
             set { ThrowIfDisposed(); SetNodeTouchable(value); }
         }
-        public bool Focusable { get { throw NE(); } set { throw NE(); } }   // 运行时改可获焦性（对齐 fgui focusable）
+        // 运行时改可获焦性（对齐 fgui focusable；tabindex>=0 的布尔投影）。set false =
+        // Tab 链/点击聚焦排除，编程 Focus() 仍可用（DOM tabindex=-1 语义）。
+        public bool Focusable
+        {
+            get { ThrowIfDisposed(); return GetNodeFocusable(); }
+            set { ThrowIfDisposed(); SetNodeFocusable(value); }
+        }
 
         // 投影层：lazy 造 ClassList 挂本 Node。同 Style/Transform 模式：同一 Node 多次访问
         // Classes 返同一实例——node.Classes.Add("a") 与 .Contains("a") 必须作用同一 ClassList
@@ -567,6 +573,19 @@ namespace LoomGUI
             byte b = 0;
             int rc = Native.loomgui_stage_get_node_touchable(h, _id, &b);
             if (rc != 0) throw new InvalidOperationException($"get_node_touchable failed (node {_id})");
+            return b != 0;
+        }
+        void SetNodeFocusable(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_set_node_focusable(h, _id, v);
+        }
+        bool GetNodeFocusable()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte b = 0;
+            int rc = Native.loomgui_stage_get_node_focusable(h, _id, &b);
+            if (rc != 0) throw new InvalidOperationException($"get_node_focusable failed (node {_id})");
             return b != 0;
         }
     }
@@ -2287,7 +2306,15 @@ namespace LoomGUI
                 if (_selectionChangedBacking == null)
                     _selectionChangedBacking = new Dictionary<Action<SelectionChangedEvent>, EventRegistration>();
                 if (_selectionChangedBacking.ContainsKey(value)) return;
-                var reg = On<ControlSelectionChangedEvent>(e => value(new SelectionChangedEvent { _oldIndex = -1, _newIndex = e.NewIndex }));
+                // NewValue 派发时实取当前选中值（事件在 core 已应用新 index 后泵出，
+                // get_dropdown_selected_value 读到的就是新选中项）；OldValue 无数据源
+                // （core 事件流只携新 index）→ null，同 ValueChangedEvent.OldValue=default 家族语义。
+                var reg = On<ControlSelectionChangedEvent>(e =>
+                {
+                    string nv = null;
+                    try { nv = SelectedValue; } catch (InvalidOperationException) { }
+                    value(new SelectionChangedEvent { _oldIndex = -1, _newIndex = e.NewIndex, _newValue = nv });
+                });
                 _selectionChangedBacking[value] = reg;
             }
             remove

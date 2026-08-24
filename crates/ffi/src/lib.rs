@@ -95,6 +95,63 @@ pub extern "C" fn loomgui_stage_new(w: f32, h: f32) -> *mut StageHandle {
     })
 }
 
+/// 改画布尺寸（分辨率适配 / 窗口 resize / 横竖屏切换）。solve 每帧跑，改完下帧
+/// 布局即按新 root_size 重排（vw/vh/% 跟随）。返回 0=成功，-1=错误（null 句柄 /
+/// 非有限 / ≤0，失败时保持原值不动）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_root_size(h: *mut StageHandle, w: f32, hgt: f32) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        match sh.stage.set_root_size(w, hgt) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
+}
+
+/// 分辨率适配数学（纯函数，无句柄——引擎集成层每帧/屏幕变化时调）。
+/// mode: 0=letterbox（contain 黑边）/ 1=fit-width（宽锚重排）/ 2=fit-height（高锚重排）。
+/// 结果（#[repr(C)] AdaptResult：scale/root_w/root_h/offset_x/offset_y，5×f32）
+/// 写入 out 指向的缓冲。返回 0=成功，-1=错误（null out / 未知 mode）。
+/// safe 传 (0,0,0,0) 或零宽高矩形 = 全屏（编辑器防御）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_compute_adaptation(
+    design_w: f32,
+    design_h: f32,
+    screen_w: f32,
+    screen_h: f32,
+    safe_x: f32,
+    safe_y: f32,
+    safe_w: f32,
+    safe_h: f32,
+    mode: u32,
+    out: *mut loomgui_core::adapt::AdaptResult,
+) -> i32 {
+    ffi_guard(-1, || {
+        if out.is_null() {
+            return -1;
+        }
+        let Some(mode) = loomgui_core::adapt::AdaptMode::from_u32(mode) else {
+            return -1;
+        };
+        let r = loomgui_core::adapt::compute(
+            (design_w, design_h),
+            (screen_w, screen_h),
+            (safe_x, safe_y, safe_w, safe_h),
+            mode,
+        );
+        unsafe { *out = r };
+        0
+    })
+}
+
 /// 注册字体进 Stage 字体表。family = UTF-8 字符串（指针+len），bytes = ttf/ttc/otf 字节数据。
 /// is_default: 0=否，非 0=是（设定为默认 fallback 字体）。返回 0=成功，-1=错误（null 句柄/非 UTF-8 family/字体解析失败）。
 #[no_mangle]
@@ -562,6 +619,54 @@ pub extern "C" fn loomgui_stage_set_node_touchable(
         }
         let sh = unsafe { &mut *h };
         sh.stage.set_node_touchable(NodeId(node_id), touchable);
+    })
+}
+
+/// 设节点运行时可获焦性（公共 Node.Focusable 后端）。true → tabindex=0（Tab 链 0 组）；
+/// false → tabindex=-1（Tab 链/点击聚焦排除，编程 Focus() 仍可用——DOM 语义）。
+/// null 句柄 / 节点缺失 → no-op。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_set_node_focusable(
+    h: *mut StageHandle,
+    node_id: u32,
+    focusable: bool,
+) {
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage.set_node_focusable(NodeId(node_id), focusable);
+    })
+}
+
+/// 读节点可获焦性（interaction.tabindex >= 0，Tab 链判据同源）。null 句柄 / 无 scene /
+/// 节点缺失 → -1（不与 false 混淆）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_node_focusable(
+    h: *const StageHandle,
+    node_id: u32,
+    out: *mut u8,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.get(NodeId(node_id)) {
+            Some(n) => {
+                unsafe { *out = u8::from(matches!(n.interaction.tabindex, Some(t) if t >= 0)) };
+                0
+            }
+            None => -1,
+        }
     })
 }
 

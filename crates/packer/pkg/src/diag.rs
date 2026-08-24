@@ -27,6 +27,8 @@ pub mod code {
     pub const ATLAS_IMAGE_OVERFLOW: &str = "AtlasImageOverflow";
     /// 打包器通用错误：结构性错误暂无专属码时落此（bridge/子树校验等 String 错误）。
     pub const PACK_ERROR: &str = "PackError";
+    /// workspace 配置值域错误（design 分辨率 / match_mode 枚举）。
+    pub const CONFIG_INVALID: &str = "ConfigInvalid";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

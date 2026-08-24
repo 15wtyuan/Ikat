@@ -142,9 +142,15 @@ pub fn solve(
         id: NodeId,
         parent_overflow: bool,
         image_sizes: &ImageSizeTable,
+        root_size: (f32, f32),
     ) -> (taffy::NodeId, Vec<taffy::NodeId>) {
         let node = scene.get_live(id, "layout/build");
         let mut style = node.style.taffy_style.clone();
+        // 视口相对长度（vw/vh/vmin/vmax）按当帧 root_size 换算覆写（分辨率适配的
+        // 重排语言——root_size 随屏幕/适配模式变，声明 vw 的通道跟画布走）。
+        if !node.style.viewport.is_empty() {
+            node.style.viewport.apply(&mut style, root_size);
+        }
         // overflow != visible → 设 taffy overflow，让 flex automatic min-size=0（CSS flex §4.5）。
         // 不设则 taffy 默认 Visible → min-size=min-content → 容器被 content 撑开（viewport=content）
         // → overlap=0 → scroll 失效。
@@ -308,7 +314,15 @@ pub fn solve(
                 if is_whitespace_only_text(scene, *c) {
                     continue;
                 }
-                let (ctid, cesc) = build(scene, tree, taffy_ids, *c, self_overflow, image_sizes);
+                let (ctid, cesc) = build(
+                    scene,
+                    tree,
+                    taffy_ids,
+                    *c,
+                    self_overflow,
+                    image_sizes,
+                    root_size,
+                );
                 escaped.extend(cesc); // 下层冒上来的，随本层定位性收编或继续上浮
                 let child = scene.get_live(*c, "layout/build");
                 let abs_escapee = child.style.taffy_style.position
@@ -363,6 +377,7 @@ pub fn solve(
         scene.roots[0],
         false,
         image_sizes,
+        root_size,
     );
     // 根收编余下 escapee：无任何 positioned 祖先时包含块 = 初始包含块（视口），CSS 语义。
     if !escaped.is_empty() {
@@ -1529,5 +1544,53 @@ mod tests {
             layout.text_height,
             (layout.text_height / single_line_h).round()
         );
+    }
+
+    /// 视口相对长度端到端：width:50vw 在 root (800,600) solve → 400px；root_size
+    /// 变（分辨率适配 set_root_size / resize）→ 下次 solve 跟随。分辨率适配的重排语言。
+    #[test]
+    fn viewport_width_resolves_against_root_size() {
+        use crate::style::mapping::apply_decl;
+        let mut st = ResolvedStyle::default();
+        assert!(apply_decl(&mut st, "width", "50vw"));
+        assert!(apply_decl(&mut st, "height", "10vh"));
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                st,
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (800.0, 600.0), &HashMap::new());
+        let id = scene.get(scene.roots[0]).unwrap().children[0];
+        let r = &scene.get(id).unwrap().layout_rect;
+        assert!((r.w - 400.0).abs() < 0.1, "50vw @800 -> 400, got {}", r.w);
+        assert!((r.h - 60.0).abs() < 0.1, "10vh @600 -> 60, got {}", r.h);
+        // resize 后重排跟随
+        solve(&mut scene, &fonts, (1000.0, 500.0), &HashMap::new());
+        let r = &scene.get(id).unwrap().layout_rect;
+        assert!((r.w - 500.0).abs() < 0.1, "50vw @1000 -> 500, got {}", r.w);
+        assert!((r.h - 50.0).abs() < 0.1, "10vh @500 -> 50, got {}", r.h);
     }
 }

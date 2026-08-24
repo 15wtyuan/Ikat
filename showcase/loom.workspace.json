@@ -1,6 +1,11 @@
 {
   "version": 1,
   "output_dir": "../unity/showcase-unity/Assets/Bundles",
+  "design": {
+    "w": 1920.0,
+    "h": 1080.0
+  },
+  "match_mode": "letterbox",
   "packages": [
     {
       "name": "showcase",

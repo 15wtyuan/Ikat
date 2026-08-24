@@ -131,6 +131,17 @@ impl Stage {
         self.fonts.register(family, bytes, is_default)
     }
 
+    /// 运行时改画布尺寸（分辨率适配 / 窗口 resize / 横竖屏切换）。solve 每帧跑
+    /// （taffy 树重建），改完下帧布局即按新 root_size 重排——vw/vh 声明与 % 自动跟随。
+    /// 拒绝非有限或 ≤0（保持原值不动，Err 由 FFI 转 -1）。
+    pub fn set_root_size(&mut self, w: f32, h: f32) -> Result<(), String> {
+        if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
+            return Err(format!("set_root_size: invalid size {w}x{h}"));
+        }
+        self.root_size = (w, h);
+        Ok(())
+    }
+
     /// 设全局字体回退链。families 须已 register（未注册的 FontTable 内部跳过）。
     /// 主字体缺字时按序 probe 这些 family，首个含该字的补上（RmlUi fallback 模型）。
     /// 空切片清空回退（退回单字体）。source-agnostic：只收 family 名，后端把系统字体
@@ -231,6 +242,19 @@ impl Stage {
             if let Some(n) = scene.get_mut(node_id) {
                 n.interaction.touchable = touchable;
                 n.base_style.touchable = touchable;
+            }
+        }
+    }
+
+    /// 业务设节点运行时可获焦性（公共 Node.Focusable 后端）。true → tabindex=Some(0)
+    /// （进 Tab 链 0 组，DOM native 序）；false → Some(-1)（Tab 链/点击聚焦排除；编程
+    /// `request_focus` 不查 tabindex，仍可强制聚焦——DOM tabindex=-1 语义）。只写
+    /// interaction：rematch 无 tabindex 通道（规则层不重起源），运行时值不被伪类
+    /// 重匹配冲掉。悬空 NodeId 静默跳过。
+    pub fn set_node_focusable(&mut self, node_id: NodeId, focusable: bool) {
+        if let Some(scene) = self.scene.as_mut() {
+            if let Some(n) = scene.get_mut(node_id) {
+                n.interaction.tabindex = Some(if focusable { 0 } else { -1 });
             }
         }
     }
@@ -493,8 +517,9 @@ impl Stage {
         // 的 wm transform，MirrorPool scale/rotate 进 _ObjectMatrix）。
         let pure = crate::transform::is_pure_translation(&wm);
         let (rx, ry) = if pure { (wm[4], wm[5]) } else { (0.0, 0.0) };
-        // layout 空间 caret 矩形（与 render arm 同公式）。
-        let lx = rx + off_left + cx;
+        // layout 空间 caret 矩形（与 render arm 同公式）。view_x = 单行水平视口
+        // （光标跟随滚动）——IME 候选窗须跟随可视光标而非 layout 光标。
+        let lx = rx + off_left + cx - e.view_x;
         let ly = ry + line.y;
         let lw = 1.0_f32;
         let lh = line.height;
@@ -1108,6 +1133,8 @@ impl Stage {
         // 5.5 measure 文本控件显示文本——需 solve 产出的 layout_rect.w 定 content width,
         //     且须在 render 前完成（光标命中测试/几何依赖 TextLayout 缓存）。
         crate::scene::control::measure_text_controls(scene, &self.fonts);
+        // 5.55 单行文本视口跟随：measure 刷新缓存后、render 前钳 view_x（光标跟随滚动）。
+        crate::scene::control::sync_edit_view(scene);
         // 5.6 ListView 高度回填：solve 后 slot 拿到真实 layout_rect.h，回填 HeightCache。
         //     须在 refresh_content_sizes 前——content_size 用 spacer 高度（由可见区算法算出，
         //     下帧用回填后的精准高度而非 estimate）。

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>dropdown / option projection fixture</title>
 <style>
+      .cbval { padding:2px 6px; color:#333; }
   #root { width: 200px; height: 100px; }
   #sel { background: #ddd; display: block; }
   /* option 默认 display:block（围栏 OptionItem::Block）；命中背景验 layout。
@@ -19,6 +20,7 @@
          结构契约（spec §2.2）：combobox 需 role="listbox" 直接子，listbox 需 role="option" 直接子。
          选中态走 aria-selected="true"（打包期 bake ControlState::Dropdown::selected_index）。 -->
     <div role="combobox" id="sel" style="display:block">
+      <div data-slot="value" class="cbval">Beta</div>
       <div role="listbox">
         <div role="option" id="opt-a" value="alpha-val">Alpha</div>
         <div role="option" id="opt-b" value="beta-val" aria-selected="true">Beta</div>

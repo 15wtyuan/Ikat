@@ -54,6 +54,17 @@ namespace LoomGUI
         /// <summary>业务 API 表面（typed Node 树 + 事件 + LoadPackage）。</summary>
         public UIContext Context => _ctx;
 
+        /// <summary>
+        /// 运行时改画布尺寸（分辨率适配 / 窗口 resize）。core 下帧 solve 按新 root_size
+        /// 重排（vw/vh/% 跟随）。返回 false = 拒绝（非有限/≤0，core 保持原值）。
+        /// 引擎无关适配策略在 Rust（loomgui_compute_adaptation）——本方法只搬运结果。
+        /// </summary>
+        public bool SetRootSize(float w, float h)
+        {
+            if (_stage == null) return false;
+            return Native.loomgui_stage_set_root_size(_stage, w, h) == 0;
+        }
+
         /// <summary>Stage 原始句柄（internal——同程序集 backend / Driver / InputCollector 可见）。</summary>
         internal IntPtr StagePtr => (IntPtr)_stage;
 

@@ -47,6 +47,28 @@ namespace LoomGUI.Bindings
         internal static extern StageHandle* loomgui_stage_new(float w, float h);
 
         /// <summary>
+        ///  改画布尺寸（分辨率适配 / 窗口 resize / 横竖屏切换）。solve 每帧跑，改完下帧
+        ///  布局即按新 root_size 重排（vw/vh/% 跟随）。返回 0=成功，-1=错误（null 句柄 /
+        ///  非有限 / ≤0，失败时保持原值不动）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_root_size", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_root_size(StageHandle* h, float w, float hgt);
+
+        /// <summary>
+        ///  分辨率适配数学（纯函数，无句柄——引擎集成层每帧/屏幕变化时调）。
+        ///  mode: 0=letterbox（contain 黑边）/ 1=fit-width（宽锚重排）/ 2=fit-height（高锚重排）。
+        ///  结果（#[repr(C)] AdaptResult：scale/root_w/root_h/offset_x/offset_y，5×f32）
+        ///  写入 out 指向的缓冲。返回 0=成功，-1=错误（null out / 未知 mode）。
+        ///  safe 传 (0,0,0,0) 或零宽高矩形 = 全屏（编辑器防御）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_compute_adaptation", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_compute_adaptation(float design_w, float design_h, float screen_w, float screen_h, float safe_x, float safe_y, float safe_w, float safe_h, uint mode, AdaptResult* @out);
+
+        /// <summary>
         ///  注册字体进 Stage 字体表。family = UTF-8 字符串（指针+len），bytes = ttf/ttc/otf 字节数据。
         ///  is_default: 0=否，非 0=是（设定为默认 fallback 字体）。返回 0=成功，-1=错误（null 句柄/非 UTF-8 family/字体解析失败）。
         /// </summary>
@@ -203,6 +225,25 @@ namespace LoomGUI.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_node_touchable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void loomgui_stage_set_node_touchable(StageHandle* h, uint node_id, [MarshalAs(UnmanagedType.U1)] bool touchable);
+
+        /// <summary>
+        ///  设节点运行时可获焦性（公共 Node.Focusable 后端）。true → tabindex=0（Tab 链 0 组）；
+        ///  false → tabindex=-1（Tab 链/点击聚焦排除，编程 Focus() 仍可用——DOM 语义）。
+        ///  null 句柄 / 节点缺失 → no-op。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_node_focusable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_set_node_focusable(StageHandle* h, uint node_id, [MarshalAs(UnmanagedType.U1)] bool focusable);
+
+        /// <summary>
+        ///  读节点可获焦性（interaction.tabindex &gt;= 0，Tab 链判据同源）。null 句柄 / 无 scene /
+        ///  节点缺失 → -1（不与 false 混淆）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_focusable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_node_focusable(StageHandle* h, uint node_id, byte* @out);
 
         /// <summary>
         ///  读节点 touchable（interaction.touchable，hit_test 同源）。null 句柄 / 无 scene /

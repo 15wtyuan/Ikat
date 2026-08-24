@@ -217,6 +217,117 @@ pub enum PositionDeclared {
     Absolute = 2,
 }
 
+/// 视口相对单位（`vw`/`vh`/`vmin`/`vmax`）。分母 = Stage root_size（画布），
+/// 区别于 `%`（相对父容器）。solve 时按当帧 root_size 换算成 px 再喂 taffy——
+/// taffy CompactLength 只有 length/percent/auto 三 tag，装不下第四种，故走
+/// 平行字段（同 `position_declared` 先例）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ViewportUnit {
+    Vw,
+    Vh,
+    Vmin,
+    Vmax,
+}
+
+/// 一个视口相对长度，如 `2.5vh`。`value` 为百分数值（2.5vh 存 2.5）。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ViewportLen {
+    pub value: f32,
+    pub unit: ViewportUnit,
+}
+
+impl ViewportLen {
+    /// 按画布尺寸换算成 px：vw/vh 取对应维，vmin/vmax 取两维较小/较大者。
+    pub fn resolve(&self, root: (f32, f32)) -> f32 {
+        let v = self.value / 100.0;
+        match self.unit {
+            ViewportUnit::Vw => v * root.0,
+            ViewportUnit::Vh => v * root.1,
+            ViewportUnit::Vmin => v * root.0.min(root.1),
+            ViewportUnit::Vmax => v * root.0.max(root.1),
+        }
+    }
+}
+
+/// 节点的视口相对长度声明集。全部 `None` = 无视口单位（Default）。
+/// 约束：声明 px/% 会清掉同通道的视口覆盖（CSS 级联后者胜出语义），
+/// 由 `apply_decl` 各臂维护；布局建树时 `apply` 用当帧 root_size 覆写 taffy 副本。
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct ViewportStyle {
+    pub width: Option<ViewportLen>,
+    pub height: Option<ViewportLen>,
+    pub min_width: Option<ViewportLen>,
+    pub min_height: Option<ViewportLen>,
+    pub max_width: Option<ViewportLen>,
+    pub max_height: Option<ViewportLen>,
+    pub flex_basis: Option<ViewportLen>,
+    /// inset 四边 [top, right, bottom, left]
+    pub inset: [Option<ViewportLen>; 4],
+    /// margin 四边 [top, right, bottom, left]
+    pub margin: [Option<ViewportLen>; 4],
+}
+
+impl ViewportStyle {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// 把视口声明按 `root` 换算后覆写到 taffy 副本上（solve 建树期调用；
+    /// 只动有声明的通道，未声明通道保持 taffy 原值）。
+    pub fn apply(&self, style: &mut TaffyStyle, root: (f32, f32)) {
+        let dim =
+            |v: &Option<ViewportLen>| v.map(|v| taffy::style::Dimension::length(v.resolve(root)));
+        if let Some(v) = dim(&self.width) {
+            style.size.width = v;
+        }
+        if let Some(v) = dim(&self.height) {
+            style.size.height = v;
+        }
+        if let Some(v) = dim(&self.min_width) {
+            style.min_size.width = v;
+        }
+        if let Some(v) = dim(&self.min_height) {
+            style.min_size.height = v;
+        }
+        if let Some(v) = dim(&self.max_width) {
+            style.max_size.width = v;
+        }
+        if let Some(v) = dim(&self.max_height) {
+            style.max_size.height = v;
+        }
+        if let Some(v) = dim(&self.flex_basis) {
+            style.flex_basis = v;
+        }
+        let lpa = |v: &Option<ViewportLen>| {
+            v.map(|v| taffy::style::LengthPercentageAuto::length(v.resolve(root)))
+        };
+        if let Some(v) = lpa(&self.inset[0]) {
+            style.inset.top = v;
+        }
+        if let Some(v) = lpa(&self.inset[1]) {
+            style.inset.right = v;
+        }
+        if let Some(v) = lpa(&self.inset[2]) {
+            style.inset.bottom = v;
+        }
+        if let Some(v) = lpa(&self.inset[3]) {
+            style.inset.left = v;
+        }
+        if let Some(v) = lpa(&self.margin[0]) {
+            style.margin.top = v;
+        }
+        if let Some(v) = lpa(&self.margin[1]) {
+            style.margin.right = v;
+        }
+        if let Some(v) = lpa(&self.margin[2]) {
+            style.margin.bottom = v;
+        }
+        if let Some(v) = lpa(&self.margin[3]) {
+            style.margin.left = v;
+        }
+    }
+}
+
 /// CSS border-radius 单角半径。
 /// (h, v) = (水平, 垂直) 半径，存 CSS 原始值（px/%），渲染期 resolve 成像素。
 /// `/` 省略时 v = h（正圆角）。
@@ -313,6 +424,9 @@ pub struct ResolvedStyle {
     /// 作者声明的 position（Static=未声明）。与 taffy_style.position 并行设置——
     /// 见 [`PositionDeclared`]：布局层据此识别 absolute 子项的包含块候选。
     pub position_declared: PositionDeclared,
+    /// 视口相对长度声明（vw/vh/vmin/vmax）。与 taffy_style 并行——taffy 装不下
+    /// 第四种长度 tag，solve 建树期按 root_size 换算覆写（见 [`ViewportStyle`]）。
+    pub viewport: ViewportStyle,
     /// CSS display 的 LoomGUI 旁路标记（与 taffy_style.display 解耦）。
     pub display_mode: DisplayMode,
     /// 视觉字段（不进 taffy，渲染层消费）
@@ -470,6 +584,7 @@ impl Default for ResolvedStyle {
         Self {
             taffy_style: TaffyStyle::DEFAULT,
             position_declared: PositionDeclared::Static,
+            viewport: ViewportStyle::default(),
             // display fields (display_mode + taffy_style.display) here are Flex
             // (= taffy's own DEFAULT). They do NOT decide a real node's display:
             //   - packed (pkg) nodes: css_resolve bakes the tag's DisplayDefault

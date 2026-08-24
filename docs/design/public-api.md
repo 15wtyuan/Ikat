@@ -513,6 +513,21 @@ public sealed class UITemplate {
 - **tick / 输入采集 / 渲染产出**：集成层每帧驱动 tick、采集引擎输入喂入、把渲染树交后端镜像。
 - **纹理注册**：`Image.Src` 是字符串 key（包内 or 运行时注册）。动态纹理的注册（`byte[]→Texture` 解码 + 注册 key）是引擎后端契约（Unity 侧 `SpriteResolver.Register(key, Texture2D)` 一类），用户自己解码塞入。查不到 key = 静默 error 态 + 警告一次，不抛。**每个引擎后端必须提供 runtime key 注册能力。**
 - **原生渲染挂载**：3D 模型/粒子等非 UI 渲染挂载是引擎后端契约（Unity 侧 NativeHost），不进公共 API；集成层自行桥接。
+- **分辨率适配**：策略数学在核心（`loomgui_compute_adaptation` 纯函数：design/screen/safe/mode → scale + root + offset，三模式 `letterbox` / `fit-width` / `fit-height`），集成层只消费——Driver 读 `loom.runtime.json` 的 `design`/`match_mode`（workspace 透传，Inspector 字段是 fallback），屏幕/safe 区变化时调数学 + `LoomHost.SetRootSize` 喂画布（core 下帧重排，`vw/vh` 声明跟随），渲染根变换与输入逆映射共用同一组 scale/offset（不本地重推，防双源漂移）。适配语义详见 main-design §11.5。
+
+### 11.4 变长内容范式（替代预置满额）
+
+战斗飘字、奖励列表、buff 图标行这类**数量运行时才知道**的内容，官方答案不是「页面预置满额节点 + 显隐轮转」（id 契约膨胀、上限靠猜、大量常驻 display:none）——三条路按场景选：
+
+1. **数据驱动 ListView（列表/网格类首选）**：行数 = 数据源条目数，虚拟化自动建删 slot，id 契约零膨胀。列表形态的内容一律先想这条路。
+2. **模板实例化（复合行/弹窗/toast）**：设计期把外观写进包（独立页面或 `<template>`），运行时 `GetTemplate(path).Instantiate()` / `pkg.Instantiate(path)` 克隆 → `AppendChild` 挂树 → 用完 `Dispose`。适合非列表结构的变长内容。
+3. **`Create<T>`（无须设计稿外观的临时结构）**：纯容器包装、动态文本叶子。白名单见 §11.1。
+
+**生命周期语义**：实例 = 模板的独立活副本（`UnloadPackage` 不影响已实例化节点）；`RemoveFromParent` 只摘不删（重挂复用，是手写池化的官方原语）；`Dispose` 真删（连带 tween/定时器清理）。
+
+**create/destroy vs 池化怎么选**：模板实例化是 memcpy + slotmap 分配（无 IO、无解析），中低频（弹窗/toast/飘字，每秒几十个）直接实例化 + Dispose 即可；确证每帧数百级的高频极端才手写池（`RemoveFromParent` 摘下缓存，重挂后改内容，不 Dispose）。先测再池化——池化是优化不是范式。
+
+**id 语义**：运行时创建的子树里，模板内静态 id 每实例一份；跨实例重名由作用域根隔离（`IsScopeRoot`）——从实例根（`Instantiate` 返回值）向下 `Get`，不从全局根跨作用域查。
 
 Unity 集成层的接入手册（LoomStageDriver 挂载、加载钩子覆写、UI↔3D 互通、输入门控）随 loom CLI 的 workspace 脚手架分发：`loomgui-runtime` skill（scaffold 落各工作区会话根的 `.agents/skills/` / `.claude/skills/`；模板源在打包器 crate 的 `templates/runtime/SKILL.md`）。
 

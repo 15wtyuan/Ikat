@@ -11,6 +11,15 @@ pub const WORKSPACE_FILE: &str = "loom.workspace.json";
 pub struct Workspace {
     pub version: u32,
     pub output_dir: String,
+    /// 设计分辨率（设计 px）。缺省 = 集成层自兜底（Unity Driver Inspector 字段）。
+    /// 分辨率适配的正主：设计稿多大是设计师事实，活在工作区（AI 可编辑文本空间），
+    /// 不活在 Unity 场景手填。
+    #[serde(default)]
+    pub design: Option<crate::runtime::DesignDim>,
+    /// 适配模式：letterbox | fit-width | fit-height（分辨率适配，见 main-design §11.5）。
+    /// 缺省 = letterbox（contain，零行为变化）。
+    #[serde(default)]
+    pub match_mode: Option<String>,
     #[serde(default)]
     pub packages: Vec<PackageCfg>,
     #[serde(default)]
@@ -100,6 +109,8 @@ mod tests {
         let ws = Workspace {
             version: 1,
             output_dir: "../dist".into(),
+            design: None,
+            match_mode: None,
             packages: vec![PackageCfg {
                 name: "p".into(),
                 dirs: vec!["ui".into()],

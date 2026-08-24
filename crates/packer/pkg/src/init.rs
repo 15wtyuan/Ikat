@@ -92,6 +92,8 @@ pub fn init(dir: &Path, opts: InitOptions) -> Result<InitOutcome, BuildFailure> 
         &Workspace {
             version: 1,
             output_dir: opts.output_dir.clone(),
+            design: None,
+            match_mode: None,
             packages: Vec::new(),
             atlases: Vec::new(),
             fonts: Vec::new(),

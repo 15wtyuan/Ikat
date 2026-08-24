@@ -410,6 +410,29 @@ pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
     let ws = load_workspace(workspace_root)?;
     let mut diags: Vec<PackDiagnostic> = Vec::new();
 
+    // 分辨率适配配置（design/match_mode，透传 runtime.json 给集成层）：
+    // 值域错误在这里拦——静默落 letterbox 会让作者以为适配生效。
+    if let Some(d) = ws.design {
+        if !d.w.is_finite() || !d.h.is_finite() || d.w <= 0.0 || d.h <= 0.0 {
+            diags.push(PackDiagnostic::synthetic_error(
+                code::CONFIG_INVALID,
+                "design",
+                "loom.workspace.json",
+                format!("design 分辨率须为正有限值，got {}x{}", d.w, d.h),
+            ));
+        }
+    }
+    if let Some(m) = &ws.match_mode {
+        if !matches!(m.as_str(), "letterbox" | "fit-width" | "fit-height") {
+            diags.push(PackDiagnostic::synthetic_error(
+                code::CONFIG_INVALID,
+                "match_mode",
+                "loom.workspace.json",
+                format!("match_mode 须为 letterbox | fit-width | fit-height，got {m}"),
+            ));
+        }
+    }
+
     // 溢出是内容错误（作者须调 max_size / standalone）：收集成诊断，继续后续图集。
     let mut atlases: Vec<(String, crate::atlas::pack::PackedAtlas)> = Vec::new();
     for atlas in &ws.atlases {
@@ -618,6 +641,8 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, BuildFailure> {
         version: 1,
         packages: report.packages.clone(),
         atlases: report.atlases.clone(),
+        design: ws.design,
+        match_mode: ws.match_mode.clone(),
         fonts: ws
             .fonts
             .iter()

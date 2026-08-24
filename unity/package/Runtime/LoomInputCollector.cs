@@ -19,12 +19,19 @@ namespace LoomGUI
     public unsafe class LoomInputCollector : MonoBehaviour
     {
         /// <summary>
-        /// 设计分辨率（design px）+ safe-area 开关：UnityLoomBackend.CollectInput / CollectWheel 读此做
-        /// screen→design 映射（后端分层不再持 LoomStage）。
-        /// 由当前 Driver（LoomStageDriver 或 LoomHost Driver）在 Awake 注入。
+        /// 画布尺寸 + safe-area 开关 + 适配映射三元组（MapScale/MapOffX/MapOffYTopDown）：
+        /// screen→design 映射消费三元组（单源 = Rust loomgui_compute_adaptation，Driver 每次适配
+        /// 重算后注入——三模式 Letterbox/FitWidth/FitHeight 统一，不再本地重推 letterbox 数学）。
+        /// 由当前 Driver（LoomStageDriver 或 LoomHost Driver）在 Awake / resize 时注入。
         /// </summary>
         internal UnityEngine.Vector2 DesignSize { get; set; }
         internal bool UseSafeArea { get; set; }
+        /// 渲染缩放比（design px → screen px）。
+        internal float MapScale { get; set; } = 1f;
+        /// 画布原点 (0,0) 的 top-down 屏幕 x（px）。
+        internal float MapOffX { get; set; }
+        /// 画布顶边的 top-down 屏幕 y（px；letterbox 居中偏移已含）。
+        internal float MapOffYTopDown { get; set; }
 
         /// <summary>
         /// 滚轮手感倍率（默认 1 = 浏览器同档基准）：滚轮 delta 的最终乘数，PlayMode 中
@@ -100,69 +107,40 @@ namespace LoomGUI
         void OnIMEComposition(IMECompositionString composition) => _composition = composition.ToString();
 #endif
 
-        /// screen→design 映射，与 LoomStageDriver.ConfigureTransforms 逐项逆（同一 sf 居中公式）。
-        /// 前向（design→screen，见 Driver 的根变换注释）：
-        ///   screen.x = offX    + dx*sf     其中 offX = area.x + (area.width  - dw*sf)*0.5
-        ///   screen.y = offYTop - dy*sf     其中 offYTop = area.y + area.height
-        /// 逆：
-        ///   dx = (screen.x - offX)    / sf
-        ///   dy = (offYTop - screen.y) / sf
-        /// sf = min(area.w/dw, area.h/dh)【统一缩放，与渲染一致】。
-        /// useSafeArea=false 时 area 退回全屏。
-        public static UnityEngine.Vector2 ScreenToDesign(UnityEngine.Vector2 screen, Vector2Int screenSize, UnityEngine.Vector2 rootSize, UnityEngine.Rect area, bool useSafeArea)
+        /// screen→design 映射，消费 Driver 注入的适配三元组（单源 Rust loomgui_compute_adaptation，
+        /// 三模式统一：Letterbox 居中偏移 / Fit 铺满 safe 区，都编码在 offX/offYTopDown 里）。
+        /// 前向（design→screen，见 Driver 根变换）：
+        ///   screen.x（top-down） = offX + dx*sf
+        ///   screen.y（top-down） = offYTopDown + dy*sf
+        /// 入参 screen.y 是 Unity 左下原点 y-up（Input System mouse/触摸），先翻 top-down 再减偏移：
+        ///   dx = (screen.x - offX) / sf
+        ///   dy = (screenH - screen.y - offYTopDown) / sf
+        public static UnityEngine.Vector2 ScreenToDesign(UnityEngine.Vector2 screen, float sf, float offX, float offYTopDown, float screenH)
         {
-            float sw = screenSize.x > 0 ? screenSize.x : 1;
-            float sh = screenSize.y > 0 ? screenSize.y : 1;
-            UnityEngine.Rect a = useSafeArea ? area : new UnityEngine.Rect(0, 0, sw, sh);
-            // 防御：safeArea 可能零宽高（编辑器未配屏）→ 退回全屏
-            if (a.width <= 0f || a.height <= 0f) a = new UnityEngine.Rect(0, 0, sw, sh);
-            float dw = rootSize.x > 0 ? rootSize.x : 1;
-            float dh = rootSize.y > 0 ? rootSize.y : 1;
-            // 统一 shrink-to-fit 缩放（与 ComputeRootTransform 同一式）。
-            float sf = Mathf.Min(a.width / dw, a.height / dh);
-            sf = sf > 0 ? sf : 1f;   // 除零保护
-            float offX = a.x + (a.width - dw * sf) * 0.5f;
-            float offYTop = a.y + a.height;
-            float dx = (screen.x - offX) / sf;
-            float dy = (offYTop - screen.y) / sf;
+            float s = sf > 0 ? sf : 1f;   // 除零保护
+            float dx = (screen.x - offX) / s;
+            float dy = (screenH - screen.y - offYTopDown) / s;
             return new UnityEngine.Vector2(dx, dy);
         }
 
-        /// design→screen 映射，用于 IME 候选窗定位（compositionCursorPos）。
-        /// 注意：与 ScreenToDesign 逆映射公式不同——compositionCursorPos 的坐标系因平台而异
-        /// （Unity Editor 实测为左上原点 y-down，与 Input.mousePosition 左下原点相反），
-        /// 与 design 同为左上 y-down，故直接线性映射不 y-flip，Y 偏移用 root 居中式
-        /// (offY = area.y + (area.h - dh*sf)*0.5) 而非 ScreenToDesign 的 offYTop。
-        /// ⚠ 若目标 Player 平台 compositionCursorPos 改用左下原点 y-up（与 mousePosition 同），
-        /// 则需改为 offYTop - design.y*sf（加 y-flip）——发布前须在目标 Player 实测确认。
-        public static UnityEngine.Vector2 DesignToScreen(UnityEngine.Vector2 design, Vector2Int screenSize, UnityEngine.Vector2 rootSize, UnityEngine.Rect area, bool useSafeArea)
+        /// design→screen 映射（top-down 输出），用于 IME 候选窗定位（compositionCursorPos）。
+        /// compositionCursorPos 在 Editor 实测为左上原点 y-down（OS 屏幕语义，与 Input.mousePosition
+        /// 左下原点相反），与 design 同为左上 y-down → 直接线性映射不 y-flip。
+        /// ⚠ 若目标 Player 平台 compositionCursorPos 改用左下原点 y-up，则需加 y-flip——
+        /// 发布前须在目标 Player 实测确认。
+        public static UnityEngine.Vector2 DesignToScreen(UnityEngine.Vector2 design, float sf, float offX, float offYTopDown)
         {
-            float sw = screenSize.x > 0 ? screenSize.x : 1;
-            float sh = screenSize.y > 0 ? screenSize.y : 1;
-            UnityEngine.Rect a = useSafeArea ? area : new UnityEngine.Rect(0, 0, sw, sh);
-            if (a.width <= 0f || a.height <= 0f) a = new UnityEngine.Rect(0, 0, sw, sh);
-            float dw = rootSize.x > 0 ? rootSize.x : 1;
-            float dh = rootSize.y > 0 ? rootSize.y : 1;
-            float sf = Mathf.Min(a.width / dw, a.height / dh);
-            sf = sf > 0 ? sf : 1f;
-            float offX = a.x + (a.width - dw * sf) * 0.5f;
-            // compositionCursorPos 在 Editor 中是左上原点 y-down（OS 屏幕语义，与 Input.mousePosition
-            // 左下原点相反——IME 候选窗定位实测：默认 (0,0) 显示在编辑器左上）。design 也是左上
-            // y-down，直接映射不 y-flip。design root 居中在 area：顶部偏移 (area.h - root*sf)/2。
-            float offY = a.y + (a.height - dh * sf) * 0.5f;
-            float screenX = offX + design.x * sf;
-            float screenY = offY + design.y * sf;
-            return new UnityEngine.Vector2(screenX, screenY);
+            float s = sf > 0 ? sf : 1f;
+            return new UnityEngine.Vector2(offX + design.x * s, offYTopDown + design.y * s);
         }
 
         /// 采集本帧指针（鼠标+触摸）→ set_input。鼠标 touch_id=-1（slot0），触摸 touch_id=fingerId（slot1-4）。
         /// 鼠标+触摸可同帧共存（带触摸屏桌面）；EditMode 无 Touchscreen 跳过触摸。
-        public void Collect(System.IntPtr stage, UnityEngine.Vector2 rootSize, bool useSafeArea)
+        public void Collect(System.IntPtr stage)
         {
             if (stage == System.IntPtr.Zero) return;
             var events = new System.Collections.Generic.List<Bindings.PointerEvent>();
-            var screenSize = new Vector2Int(Screen.width, Screen.height);
-            UnityEngine.Rect safeArea = Screen.safeArea;
+            float screenH = Screen.height > 0 ? Screen.height : 1;
 
 #if ENABLE_INPUT_SYSTEM
             if (Mouse.current != null)
@@ -171,7 +149,7 @@ namespace LoomGUI
                 byte kind = 2;
                 if (Mouse.current.leftButton.wasPressedThisFrame) kind = 0;
                 else if (Mouse.current.leftButton.wasReleasedThisFrame) kind = 1;
-                var d = ScreenToDesign(screen, screenSize, rootSize, safeArea, useSafeArea);
+                var d = ScreenToDesign(screen, MapScale, MapOffX, MapOffYTopDown, screenH);
                 events.Add(new Bindings.PointerEvent { kind = kind, button = 0, pad0 = 0, pad1 = 0, touch_id = -1, x = d.x, y = d.y });
             }
             // 触摸（多指）。TouchPhase 在 UnityEngine.InputSystem（非 LowLevel——坑：1.19 包 TouchPhase 不在 LowLevel）。
@@ -187,7 +165,7 @@ namespace LoomGUI
                     else if (phase == UnityEngine.InputSystem.TouchPhase.Ended) kind = 1;
                     else if (phase == UnityEngine.InputSystem.TouchPhase.Canceled) kind = 3;
                     var screen = touch.position.ReadValue();
-                    var d = ScreenToDesign(screen, screenSize, rootSize, safeArea, useSafeArea);
+                    var d = ScreenToDesign(screen, MapScale, MapOffX, MapOffYTopDown, screenH);
                     events.Add(new Bindings.PointerEvent { kind = kind, button = 0, pad0 = 0, pad1 = 0, touch_id = touch.touchId.ReadValue(), x = d.x, y = d.y });
                 }
             }
@@ -197,7 +175,7 @@ namespace LoomGUI
             byte mkind = 2;
             if (Input.GetMouseButtonDown(0)) mkind = 0;
             else if (Input.GetMouseButtonUp(0)) mkind = 1;
-            var md = ScreenToDesign(mscreen, screenSize, rootSize, safeArea, useSafeArea);
+            var md = ScreenToDesign(mscreen, MapScale, MapOffX, MapOffYTopDown, screenH);
             events.Add(new Bindings.PointerEvent { kind = mkind, button = 0, pad0 = 0, pad1 = 0, touch_id = -1, x = md.x, y = md.y });
             foreach (var t in Input.touches)
             {
@@ -206,7 +184,7 @@ namespace LoomGUI
                 if (t.phase == UnityEngine.TouchPhase.Began) kind = 0;
                 else if (t.phase == UnityEngine.TouchPhase.Ended) kind = 1;
                 else if (t.phase == UnityEngine.TouchPhase.Canceled) kind = 3;
-                var d = ScreenToDesign(t.position, screenSize, rootSize, safeArea, useSafeArea);
+                var d = ScreenToDesign(t.position, MapScale, MapOffX, MapOffYTopDown, screenH);
                 events.Add(new Bindings.PointerEvent { kind = kind, button = 0, pad0 = 0, pad1 = 0, touch_id = t.fingerId, x = d.x, y = d.y });
             }
 #endif
@@ -353,11 +331,9 @@ namespace LoomGUI
             Bindings.CursorRectRepr r;
             if (Native.loomgui_stage_get_cursor_rect(h, focused, &r) == 0)
             {
-                var ss = new Vector2Int(Screen.width, Screen.height);
-                UnityEngine.Rect sa = Screen.safeArea;
                 var screenPos = DesignToScreen(
                     new UnityEngine.Vector2(r.x, r.y + r.h),
-                    ss, this.DesignSize, sa, this.UseSafeArea);
+                    MapScale, MapOffX, MapOffYTopDown);
 #if ENABLE_INPUT_SYSTEM
                 kb?.SetIMECursorPosition(screenPos);
 #else
@@ -423,9 +399,7 @@ namespace LoomGUI
             screenPos = Input.mousePosition;
 #endif
 
-            var ss = new Vector2Int(Screen.width, Screen.height);
-            UnityEngine.Rect sa = Screen.safeArea;
-            var pos = ScreenToDesign(screenPos, ss, ctx.DesignSize, sa, ctx.UseSafeArea);
+            var pos = ScreenToDesign(screenPos, MapScale, MapOffX, MapOffYTopDown, Screen.height);
 
             var ev = new Bindings.WheelEvent { x = pos.x, y = pos.y, delta_x = 0f, delta_y = dy };
             // 栈局部值类型直接 & 取址（CS0213：栈上已固定，无需 fixed）。

@@ -2221,3 +2221,101 @@ fn animation_longhand_nameless_spec_skipped_by_player_sync() {
     assert_eq!(named.len(), 1, "只建 name=pop 的 player：{:?}", named.len());
     assert_eq!(named[0].spec.name, "pop");
 }
+
+/// 视口相对单位（vw/vh/vmin/vmax）解析：进 `viewport` 平行槽、taffy 落 length(0)
+/// 占位；后续 px/% 声明清槽——CSS 级联后者胜出，px 覆写 vw 后 vw 必须失效。
+#[test]
+fn viewport_units_parse_into_parallel_slots() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "width", "50vw"));
+    assert_eq!(
+        s.viewport.width,
+        Some(ViewportLen {
+            value: 50.0,
+            unit: ViewportUnit::Vw
+        })
+    );
+    assert_eq!(s.taffy_style.size.width, Dimension::length(0.0));
+    assert!(apply_decl(&mut s, "min-height", "10vmin"));
+    assert_eq!(
+        s.viewport.min_height.map(|v| v.unit),
+        Some(ViewportUnit::Vmin)
+    );
+    assert!(apply_decl(&mut s, "max-width", "2.5vmax"));
+    assert_eq!(s.viewport.max_width.map(|v| v.value), Some(2.5));
+    assert!(apply_decl(&mut s, "top", "5vh"));
+    assert_eq!(
+        s.viewport.inset[0].map(|v| (v.value, v.unit)),
+        Some((5.0, ViewportUnit::Vh))
+    );
+    // 级联清槽：后声明 px → 视口覆盖失效、taffy 拿真值
+    assert!(apply_decl(&mut s, "width", "100px"));
+    assert_eq!(s.viewport.width, None);
+    assert_eq!(s.taffy_style.size.width, Dimension::length(100.0));
+    // 视口单位不是「任意后缀都吃」：无数字前缀 / 未知单位仍走旧路径
+    assert!(apply_decl(&mut s, "height", "auto"));
+    assert_eq!(s.viewport.height, None);
+}
+
+/// margin 混合 token（`2vh auto`）：视口边进覆盖槽 + taffy 落 0，auto 边保持 auto；
+/// 单边 longhand 只动该边视口槽。
+#[test]
+fn viewport_margin_mixed_tokens() {
+    use taffy::style::LengthPercentageAuto;
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "margin", "2vh auto"));
+    let vh2 = || ViewportLen {
+        value: 2.0,
+        unit: ViewportUnit::Vh,
+    };
+    assert_eq!(s.viewport.margin, [Some(vh2()), None, Some(vh2()), None]);
+    assert_eq!(s.taffy_style.margin.top, LengthPercentageAuto::length(0.0));
+    assert_eq!(s.taffy_style.margin.left, LengthPercentageAuto::auto());
+    // 单边声明清该边槽 + 设新槽
+    assert!(apply_decl(&mut s, "margin-left", "1vw"));
+    assert_eq!(s.viewport.margin[3].map(|v| v.unit), Some(ViewportUnit::Vw));
+    assert!(apply_decl(&mut s, "margin-left", "8px"));
+    assert_eq!(s.viewport.margin[3], None);
+    assert_eq!(s.taffy_style.margin.left, LengthPercentageAuto::length(8.0));
+}
+
+/// px-only 通道（padding/gap/font-size，fence 值域 Length=px）不吃视口单位——
+/// 返 false 走围栏诊断，不静默落值。
+#[test]
+fn viewport_px_only_channels_reject() {
+    let mut s = ResolvedStyle::default();
+    assert!(!apply_decl(&mut s, "padding", "10vw"));
+    assert!(!apply_decl(&mut s, "gap", "1vh"));
+    assert!(!apply_decl(&mut s, "padding-top", "3vmin"));
+    // font-size 臂是宽容语义（非法值静默保持原值返 true，与 "1em" 同路径）——
+    // vw 不生效但也不报错；px-only 承诺靠 padding/gap 的硬拒绝兑现。
+    let before = s.font_size;
+    assert!(apply_decl(&mut s, "font-size", "2vw"));
+    assert_eq!(s.font_size, before);
+}
+
+/// 换算数学：vw/vh 按对应维，vmin/vmax 取两维较小/较大者。
+#[test]
+fn viewport_len_resolve_math() {
+    let root = (1080.0, 1920.0);
+    let vw = ViewportLen {
+        value: 50.0,
+        unit: ViewportUnit::Vw,
+    };
+    assert_eq!(vw.resolve(root), 540.0);
+    let vh = ViewportLen {
+        value: 10.0,
+        unit: ViewportUnit::Vh,
+    };
+    assert_eq!(vh.resolve(root), 192.0);
+    let vmin = ViewportLen {
+        value: 10.0,
+        unit: ViewportUnit::Vmin,
+    };
+    assert_eq!(vmin.resolve(root), 108.0);
+    let vmax = ViewportLen {
+        value: 10.0,
+        unit: ViewportUnit::Vmax,
+    };
+    assert_eq!(vmax.resolve(root), 192.0);
+}

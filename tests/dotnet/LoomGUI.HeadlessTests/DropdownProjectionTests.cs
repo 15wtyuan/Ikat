@@ -91,6 +91,32 @@ namespace LoomGUI.HeadlessTests
             finally { StageHarness.Destroy(stage); }
         }
 
+        [Fact]
+        public void dropdown_selection_changed_new_value_reads_current()
+        {
+            // #7 扫尾：NewValue 派发时实取当前选中项的 value（事件泵出前 core 已应用
+            // 新 index——这里 demux 注入 touchId=1 → 选中 opt-b value="beta-val"）；
+            // OldValue 无 core 数据源 → null（ValueChangedEvent.OldValue=default 家族语义）。
+            var (stage, ctx, root) = LoadDropdownFixture();
+            try
+            {
+                var sel = root.Get<Dropdown>("sel");
+                SelectionChangedEvent received = default;
+                sel.SelectionChanged += e => received = e;
+
+                using (var buf = new NativeEventBuffer())
+                {
+                    buf.Add(sel._id, (byte)EventType.SelectionChanged, touchId: 1);
+                    ctx._eventDemuxer.Pump(buf.Ptr, buf.Count);
+                }
+
+                Assert.Equal(1, received.NewIndex);
+                Assert.Equal("beta-val", received.NewValue);
+                Assert.Null(received.OldValue);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
         /// <summary>
         /// Dropdown.SelectionChanged 退订：-= handler 后 demux 不再触发。验 backing-dict remove 路径
         /// （同 Slider.ValueChanged / Button.Clicked）。

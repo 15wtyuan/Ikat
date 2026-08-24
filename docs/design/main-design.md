@@ -534,11 +534,19 @@ taffy 0.12 同时支持 Flex 和 Block 布局算法。统一走 `compute_layout_
 - **safe-area**：在后端根解决——`Screen.safeArea` shrink-to-fit letterbox，输入映射共用同一变换；核心不感知 safe-area，无 CSS 级避让机制（不做 `env()`）。
 - **动态内容/数据变化**：改文本/增删子节点 → 置 dirty → 下帧 solve。
 
-### 11.5 参考分辨率 / DPI 缩放
+### 11.5 分辨率适配（参考分辨率 / 长宽比 / safe-area）
 
-设计稿 1080×1920 在 1440×2560 整体等比放大。引擎集成层（C# Driver）持设计分辨率，据屏幕实际尺寸计算 scale 后设置 `Stage.root_size`，核心按此根尺寸布局。`match_mode`（shrink-to-fit 策略）同样在引擎集成层配置。
+设计稿 1080×1920 在 1440×2560 整体等比放大只是适配的平凡半边（均匀缩放）；**真问题是长宽比不匹配**。模型分三层：
 
-叠加顺序：先参考分辨率整体 scale → 再布局 → 最后 safe-area 避让。
+- **配置正主 = workspace**：`loom.workspace.json` 的 `design {w,h}` + `match_mode` 由打包器透传进 `loom.runtime.json`，引擎集成层（C# Driver）读产物；Inspector 字段是 manifest 缺项时的 fallback。设计分辨率是设计师事实，活在 AI 可编辑的文本空间，不活在 Unity 场景手填。
+- **策略数学 = core**（`loomgui_compute_adaptation` 纯函数，全引擎共享同一份）：三模式枚举——
+  - `letterbox`（默认，contain）：root 锁设计分辨率，取较小缩放比，safe 区内居中留黑边。布局永远按设计稿排，最可预测。
+  - `fit-width` / `fit-height`：拆黑边重排——锁一维锚（宽或高 = 设计稿），另一维 root 直接取屏幕换算值，`Stage.set_root_size` 喂核心下帧重排（flex/% / vw-vh 声明流动）。px 不变形（缩放仍均匀），无黑边无裁切。
+- **重排语言 = 围栏视口单位**：`vw`/`vh`/`vmin`/`vmax`（分母 = root_size 画布，区别于 `%` 相对父容器），进 `ResolvedStyle.viewport` 平行字段（taffy CompactLength 装不下第四种 tag），solve 建树期按当帧 root_size 换算覆写。收哪些通道见 fence.md §5.2（尺寸族 / flex-basis / inset / margin；padding/gap/font-size 保持 px-only）。
+
+Fit 模式下 root 从 safe 矩形起算（内容填满 safe 区、不进刘海）；letterbox 以 safe 矩形为 contain 框。叠加顺序：适配算 scale/root → 布局 → 渲染根变换 + 输入逆映射消费同一组 scale/offset（单源 = core 数学，集成层不自己重推）。
+
+跨引擎契约：模式枚举是 FFI u32 ABI（只增不改）；未来 Godot 后端复用同一 `loomgui_compute_adaptation`，保三引擎适配行为逐像素一致。
 
 ### 11.6 滚动
 

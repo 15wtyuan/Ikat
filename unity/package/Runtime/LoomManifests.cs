@@ -15,6 +15,10 @@ namespace LoomGUI
         public List<string> packages = new List<string>();
         public List<string> atlases = new List<string>();
         public List<RuntimeFont> fonts = new List<RuntimeFont>();
+        /// 设计分辨率（分辨率适配正主，workspace.design 打包透传）。null = 集成层 fallback（Driver Inspector）。
+        public DesignDim design;
+        /// 适配模式 letterbox | fit-width | fit-height（workspace.match_mode 打包透传）。null = letterbox。
+        public string match_mode;
 
         /// <summary>Parse loom.runtime.json content.</summary>
         public static RuntimeManifest ParseRuntime(string json)
@@ -34,6 +38,21 @@ namespace LoomGUI
                         while (!r.TryArrayEnd())
                             m.fonts.Add(RuntimeFont.Read(r));
                         break;
+                    case "design":
+                        r.ExpectObject();
+                        var d = new DesignDim();
+                        while (!r.TryObjectEnd())
+                        {
+                            switch (r.ReadKey())
+                            {
+                                case "w": d.w = r.ReadFloat(); break;
+                                case "h": d.h = r.ReadFloat(); break;
+                                default: r.SkipValue(); break;
+                            }
+                        }
+                        m.design = d;
+                        break;
+                    case "match_mode": m.match_mode = r.ReadString(); break;
                     default: r.SkipValue(); break;
                 }
             }
@@ -42,6 +61,13 @@ namespace LoomGUI
     }
 
     /// <summary>Per-font entry in the runtime manifest.</summary>
+    /// 设计分辨率（w,h，design px）。workspace.design 的 manifest 投影（Rust DesignDim 镜像）。
+    public class DesignDim
+    {
+        public float w;
+        public float h;
+    }
+
     public class RuntimeFont
     {
         public string family;
@@ -292,7 +318,7 @@ namespace LoomGUI
         }
 
         /// <summary>Read a JSON number as float (handles sign, decimal, scientific notation).</summary>
-        private float ReadFloat()
+        public float ReadFloat()
         {
             SkipWS();
             int start = _pos;
