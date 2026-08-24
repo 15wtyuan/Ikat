@@ -163,7 +163,7 @@ impl Ease {
 }
 
 /// transition 请求（rematch 检测 data-page 通道变化时推入 Scene.pending_transitions；
-/// Stage tick drain 后 kill 旧 tween + 提交新 tween）。E 阶段补完整字段。
+/// Stage tick drain 后 kill 旧 tween + 提交新 tween）。
 #[derive(Debug, Clone, Copy)]
 pub struct TransitionRequest {
     pub node: crate::scene::node::NodeId,
@@ -434,8 +434,6 @@ mod tests {
         assert!(v < 0.0, "BackIn 初段须 <0，得 {}", v);
     }
 
-    // ===== TweenManager 测 =====
-
     use crate::input::EVT_TWEEN_COMPLETE;
     use crate::scene::node::{Node, NodeKind, Rect};
 
@@ -502,13 +500,11 @@ mod tests {
             "click_count 复用装 prop"
         );
         assert_eq!(out[0].touch_id, 7, "touch_id 复用装 tag");
-        // 末值 = scale(2,3)
         let m = s.anim.0.get(&nid).unwrap().transform.unwrap();
         assert!(
             (m[0] - 2.0).abs() < 1e-5 && (m[3] - 3.0).abs() < 1e-5,
             "末值 scale(2,3)"
         );
-        // 完成后 tween 移除
         let mut out2 = Vec::new();
         mgr.update(1.0, &mut s, &mut out2);
         assert!(out2.is_empty(), "完成后不再产事件");
@@ -562,7 +558,6 @@ mod tests {
         ); // delay=1
         let mut out = Vec::new();
         mgr.update(0.5, &mut s, &mut out); // elapsed 0.5 < delay 1 → 不写
-                                           // delay 内未 apply → HashMap 无该 node 条目
         assert!(
             !s.anim.0.contains_key(&nid),
             "delay 内不写 override（HashMap 无条目）"
@@ -672,7 +667,6 @@ mod tests {
             0,
         );
         mgr.kill_node(nid);
-        // nid 的全 tween killed；other 的不被误杀
         assert!(
             mgr.tweens.iter().all(|t| t.node != nid || t.killed),
             "kill_node 杀该 node 全 tween"

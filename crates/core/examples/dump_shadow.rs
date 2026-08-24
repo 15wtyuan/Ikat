@@ -80,7 +80,6 @@ fn main() {
     let frame = s.tick_and_render();
     let scene = s.scene.as_ref().unwrap();
 
-    // 找 btn-primary scene 节点 id + box_shadow。
     let btn = scene
         .nodes
         .values()
@@ -107,7 +106,6 @@ fn main() {
     }
     println!();
 
-    // primary 渲染节点 + shadow synth 节点。
     println!("========== btn-primary 渲染节点 ==========");
     let mut primary_rn: Option<&RenderNode> = None;
     for rn in &frame.nodes {

@@ -166,7 +166,7 @@ pub fn solve(
         //
         // rich-text-block 容器：编译 inline 子树成 RichRun，作 RichText 叶子测——inline
         // 子折进父的单段 inline flow（不递归进 taffy）。build 下方 children_ids 对
-        // rich_text_block 返空 Vec 实现「不递归」。design §7。
+        // rich_text_block 返空 Vec 实现「不递归」。
         // display:flex 的策略切换（不折叠）在 rematch 应用 display 声明处翻转本 flag
         //（见 dynamic.rs rematch_pseudo_classes）——build 只认 flag，单一真相源。
         let ctx: Option<MeasureContext> = if node.rich_text_block {
@@ -267,7 +267,7 @@ pub fn solve(
                     })
                 }
                 NodeKind::Image => {
-                    // Look up real intrinsic dims via the node's image src (Spec-2 side table).
+                    // Look up real intrinsic dims via the node's image src (side table).
                     // 借引用查 image_sizes——src 仅用于查表，无需每帧每图节点克隆 String。
                     let src = scene.image_srcs.get(&id).map(String::as_str).unwrap_or("");
                     let s = &node.style.taffy_style;
@@ -293,7 +293,7 @@ pub fn solve(
         //
         // rich-text-block：inline 子已被 compile_rich_runs 折进 RichText 叶子测，
         // **不递归进 taffy**——它们的 taffy_ids 保持 None，write_back 跳过、layout_rect
-        // 保持默认 0（它们渲染进父 mesh，无独立 box；T7 render 消费 text_layouts[父]）。
+        // 保持默认 0（它们渲染进父 mesh，无独立 box；render 消费 text_layouts[父]）。
         // absolute 包含块（CSS 浏览器语义）：声明 absolute 且任一 inset 显式的子项，
         // taffy 父挂最近 positioned 祖先（position_declared != Static）而非 scene 父——
         // taffy 0.12 原生只按直接父布局 absolute，无「最近 positioned 祖先」概念，这里在
@@ -341,7 +341,6 @@ pub fn solve(
             // 叶子：装测量上下文。children 应为空（Text/Image 是叶子）。
             tree.new_leaf_with_context(style, mctx).unwrap()
         } else {
-            // 容器：用 children 建。
             tree.new_with_children(style, &children_ids).unwrap()
         };
         taffy_ids[id.index()] = Some(tid);
@@ -424,7 +423,7 @@ pub fn solve(
                 // 作换行约束；MaxContent/MinContent 保持 None（走 intrinsic 测量）。
                 // Definite(0)（taffy 某些 sizing 轮次会传）与 known=Some(0) 一律视作
                 // 无约束：0 宽盒内浏览器文本横向溢出而非逐字竖排，且首个 Some(0) 测量
-                // 会经 render 槽 Some-优先策略钉死成多行布局（Field Notes N7）。
+                // 会经 render 槽 Some-优先策略钉死成多行布局。
                 let wrap_width = known
                     .width
                     .or(match avail.width {
@@ -448,7 +447,7 @@ pub fn solve(
                         //
                         // 等比分支精确复刻升级前 match 臂 `(None, Dimension::Auto, Dimension::Length(h)) => h*iw/ih`：
                         // 仅 wd==Auto 时按 height 推宽。Percent width（无可解析父）落 intrinsic iw，
-                        // 不混进 height-derive（P1 升级行为中立）。
+                        // 不混进 height-derive。
                         let wd_is_length = wd.tag() == taffy::style::CompactLength::LENGTH_TAG;
                         let hd_is_length = hd.tag() == taffy::style::CompactLength::LENGTH_TAG;
                         let w = if let Some(v) = known.width {
@@ -490,7 +489,7 @@ pub fn solve(
                         // 文字在 content area（wrap 宽 - h_inset）内换行 + 对齐，否则吃到 padding 超框。
                         let mw = wrap_width.map(|w| (w - *h_inset).max(0.0));
                         let sid_opt = taffy_to_scene.get(&nid).copied();
-                        // measure memo（坑 186）：fingerprint 命中 → 复用 TextLayout 跳过 shaping。
+                        // measure memo：fingerprint 命中 → 复用 TextLayout 跳过 shaping。
                         // 两槽：mw=None→intrinsic（max-content），mw=Some→constrained（换行）。
                         // fingerprint 含 content hash → set_text / slot 换内容自动 miss。
                         let fp = crate::text::layout::text_fingerprint(
@@ -574,7 +573,7 @@ pub fn solve(
                         // 同 Text：content area = wrap 宽（border-box）- h_inset。
                         let mw = wrap_width.map(|w| (w - *h_inset).max(0.0));
                         let sid_opt = taffy_to_scene.get(&nid).copied();
-                        // 指纹 memo（坑 186 同源）：runs 每帧现编译（便宜，O(inline 子)），
+                        // 指纹 memo：runs 每帧现编译（便宜，O(inline 子)），
                         // 算指纹命中缓存跳过贵的 measure_rich_text（shaping）。span 换色/换内容
                         // → runs 变 → fp 变 → 自动 miss 重测（不依赖 dirty_text 传播）。
                         // 两槽 intrinsic/constrained（同 Text）：mw=None 走 intrinsic，
@@ -788,8 +787,6 @@ mod tests {
         assert!((r.h - 50.0).abs() < 0.1, "CSS length 赢：h=50，got {}", r.h);
     }
 
-    // ── absolute 包含块（CSS 浏览器语义：最近 positioned 祖先）──
-
     /// 辅助：手搓 .screen > .wrap(relative, margin-left) > .card > btn(absolute) 形态。
     /// 返回 (scene, btn NodeId)。wrap_off = wrap 相对根的 x 偏移（margin 实现）。
     fn abs_containing_block_scene(
@@ -841,7 +838,7 @@ mod tests {
         (scene, btn)
     }
 
-    /// Tripawd N24 形态：btn 的包含块 = 最近 positioned 祖先 .wrap（非直接父 .card）。
+    /// btn 的包含块 = 最近 positioned 祖先 .wrap（非直接父 .card）。
     /// 浏览器：x = wrap.x + wrap.w - right - btn.w；旧实现（直接父）= card.x + card.w - ...
     #[test]
     fn absolute_resolves_against_nearest_positioned_ancestor() {
@@ -1255,7 +1252,7 @@ mod tests {
     ///
     /// 验收：长 ASCII 文本在窄宽（100px）下换行 → text_height / layout_rect.h 反映多行
     /// （远大于单行行高）；inline 子（TextNode）保持默认 layout_rect（无独立 box）。
-    /// T6 solve 折叠的核心契约。
+    /// solve 折叠的核心契约。
     #[test]
     fn rich_text_block_measures_as_leaf_with_wrapping() {
         // root(structural Container) > div(rich_text_block, explicit width 100) > TextNode
@@ -1450,7 +1447,7 @@ mod tests {
         );
     }
 
-    /// Field Notes N7：flex column + align-items:center + 定宽容器内的无宽
+    /// flex column + align-items:center + 定宽容器内的无宽
     /// rich-text-block 文本必须单行横排（浏览器一致先验）。
     ///
     /// 回归动机：测宽链路曾把可用宽度解析成 0 → `measure_text` 以 max_w=0 逐字换行

@@ -362,7 +362,7 @@ fn run_check(root: &std::path::Path, format: Format) -> ExitCode {
                 warnings.extend(pr.warnings.iter().cloned());
             }
             // 工作区生成物 stale（scaffold 版本戳落后于本 CLI）——文档/工具没送到
-            // 会静默过时（Field Notes 教训），check 是唯一必经门，在此提醒刷新。
+            // 会静默过时，check 是唯一必经门，在此提醒刷新。
             if let Some(msg) = loomgui_pkg::scaffold::stale_stamp_warning(&ui) {
                 warnings.push(loomgui_pkg::diag::PackDiagnostic::synthetic_warning(
                     "StaleScaffold",
@@ -397,7 +397,7 @@ fn run_build(root: &std::path::Path, format: Format) -> ExitCode {
         Ok(report) => {
             match format {
                 Format::Human => {
-                    // 围栏一致性 warning（W1/W2）打到 stderr：合法但预览≠运行时的
+                    // 围栏一致性 warning 打到 stderr：合法但预览≠运行时的
                     // 不一致，不阻断打包，但作者须看到以补全声明。
                     for w in &report.warnings {
                         eprintln!("{}", w.render());

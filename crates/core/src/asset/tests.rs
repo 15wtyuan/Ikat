@@ -95,10 +95,9 @@ fn write_read_multi_component_roundtrip() {
 
 #[test]
 fn old_version_pkg_rejected() {
-    // 手构 version < MIN_VERSION 的 header -> read_package 报 TooOld（v19 弃载，MIN=20）
     let mut old = vec![];
     old.extend_from_slice(&PKG_MAGIC.to_le_bytes());
-    old.extend_from_slice(&(MIN_VERSION - 1).to_le_bytes()); // v19 低于 MIN_VERSION=20
+    old.extend_from_slice(&(MIN_VERSION - 1).to_le_bytes());
     assert!(matches!(read_package(&old), Err(PkgError::TooOld(_))));
 }
 
@@ -108,7 +107,7 @@ fn old_version_pkg_rejected() {
 fn v19_pkg_rejected_after_schema_drop() {
     let mut v19 = vec![];
     v19.extend_from_slice(&PKG_MAGIC.to_le_bytes());
-    v19.extend_from_slice(&19u32.to_le_bytes()); // v19 = MIN_VERSION - 1
+    v19.extend_from_slice(&19u32.to_le_bytes());
     let err = read_package(&v19);
     assert!(
         matches!(err, Err(PkgError::TooOld(19))),
@@ -202,7 +201,6 @@ fn all_node_kinds_roundtrip() {
     assert!(matches!(ns[3].kind, NodeKind::TextNode) && ns[3].content.as_deref() == Some("hello"));
 }
 
-// RichText retired in Spec-2 — rich-run pkg round-trip tests removed.
 #[test]
 fn classes_id_attr_draggable_tabindex_roundtrip() {
     let mut root = tn(NodeKind::Container);
@@ -226,9 +224,6 @@ fn classes_id_attr_draggable_tabindex_roundtrip() {
     assert!(ns[1].draggable, "btn draggable=true round-trip");
     assert_eq!(ns[1].tabindex, Some(3));
 }
-
-// Controller schema (ControllerEntry/controllers/data_controller) dropped in v19
-// — data_controller / ControllerSection round-trip tests removed (no longer serialized).
 
 #[test]
 fn style_blob_roundtrips_baked_resolved_style() {
@@ -286,8 +281,6 @@ fn empty_package_roundtrips() {
     assert_eq!(pkg.name, "");
 }
 
-// —— 防御 malformed ComponentTable 测试（review fix）——
-
 /// 辅助：计算 ComponentTable 段在 pkg bytes 中的起始 offset。
 /// 布局：Header(20B) + StringTable(每串 u16 len + bytes)。返回 ComponentTable 首字节 offset。
 fn comp_table_offset(bytes: &[u8]) -> usize {
@@ -318,7 +311,7 @@ fn two_comp_pkg_bytes() -> Vec<u8> {
     write_package(&input)
 }
 
-/// Important 1：malformed ComponentTable 的 root_node_idx/node_count 越界 → Truncated（不 panic）。
+/// malformed ComponentTable 的 root_node_idx/node_count 越界 → Truncated（不 panic）。
 /// 构造 comp_a 声称 root_node_idx=2, node_count=2，全 NodeBlock 有 3 节点 → slice [2..4] end=4 > 3 越界。
 /// （node_count 不改成 10：那样 total_nodes=11 跑 NodeBlock 循环时先 Truncated 在 node 读，
 ///  到不了 comp slice 检查。root=2/count=2 让 total_nodes=3 与实际匹配，专门触发 slice 边界。）
@@ -337,7 +330,7 @@ fn read_rejects_oob_component_slice() {
     );
 }
 
-/// Important 2：malformed NodeBlock 的 parent_idx 全局值 < 组件 base → Truncated（不静默 reparent）。
+/// malformed NodeBlock 的 parent_idx 全局值 < 组件 base → Truncated（不静默 reparent）。
 /// 构造 comp_b（base=2）的 root 节点 parent_idx=0（< 2，跨组件指向 comp_a）→ cross_comp_parent。
 #[test]
 fn read_rejects_cross_component_parent() {
@@ -385,7 +378,7 @@ fn read_rejects_cross_component_parent() {
     );
 }
 
-/// Important 3：两个 ComponentTable 条目指向同一 name_idx（同名组件）→ DupComponent（不静默覆盖）。
+/// 两个 ComponentTable 条目指向同一 name_idx（同名组件）→ DupComponent（不静默覆盖）。
 #[test]
 fn read_rejects_duplicate_component_name() {
     let mut bytes = two_comp_pkg_bytes();
@@ -400,7 +393,7 @@ fn read_rejects_duplicate_component_name() {
     );
 }
 
-/// Important 4：NodeBlock 的 kind_tag 字节不在 `NodeKind::from_u8` 判别值范围（≥21）→ BadKind
+/// NodeBlock 的 kind_tag 字节不在 `NodeKind::from_u8` 判别值范围（≥21）→ BadKind
 /// （不静默塌成 Container）。v17 的 KIND_* 5 常量方案 read 侧用 wildcard fallback 把未知字节
 /// 全塌成 Container（kind collapse）；v18 起 kind_tag = NodeKind 判别值，from_u8 对越界值
 /// 返 None → BadKind。本测试同时正向验证改的是 kind_tag 字节（改成 Button 须读回 Button），
@@ -450,7 +443,7 @@ fn read_rejects_unknown_kind_tag() {
     );
 }
 
-/// Minor 4：write_package 对 nodes[0].parent_idx=Some 的输入触发 debug_assert（spec 约定 nodes[0]=组件根）。
+/// write_package 对 nodes[0].parent_idx=Some 的输入触发 debug_assert（spec 约定 nodes[0]=组件根）。
 /// write 输入由打包器控制，违反即打包器 bug；用 debug_assert（release 无代价）。
 /// 测试用 #[should_panic] 验证 debug 构建下触发。
 #[test]
@@ -625,8 +618,6 @@ fn pkg_v24_rejects_v23() {
     );
 }
 
-// ── v25: TextField/TextArea ──────────────────────────────────────────
-
 /// v25: EditInit 经 bincode serialize/deserialize 往返保真。EditInit 是 TextField 和 TextArea
 /// 共用的载荷结构，锁定其序列化布局稳定性，防后续重构破坏 pkg.bin 兼容。
 #[test]
@@ -668,8 +659,6 @@ fn pkg_v25_rejects_v24() {
         "v24 pkg must be rejected as TooOld after v25 bump, got {err:?}"
     );
 }
-
-// ── v26: Dropdown / NumberField ─────────────────────────────────────
 
 /// v26: ControlInit::Dropdown 经 bincode serialize/deserialize 往返保真。
 /// 锁定序列化布局稳定性，防后续重构破坏 pkg.bin 兼容。
@@ -781,8 +770,6 @@ fn pkg_v27_rejects_v26() {
     );
 }
 
-// ── v29: aria_controls（TabList tab→panel 跨树关联）────────────────
-
 /// v29: role/data-slot/aria_controls 三个 StringTable interning 字符串列经完整 pkg.bin
 /// 路径（write_package → read_package）往返保真。aria_controls 是 TabList 地基：
 /// 打包期提取 HTML aria-controls 属性，runtime instantiate 拷进 RoleInfo.aria_controls，
@@ -845,8 +832,6 @@ fn pkg_v29_rejects_v28() {
         "v28 pkg must be rejected as TooOld after v29 bump, got {err:?}"
     );
 }
-
-// ── v30: keyframes 表 + animation 声明（@keyframes runtime 地基）───────────────
 
 /// v30: keyframes 表（含 hook）+ animation 声明经完整 pkg.bin 路径（write_package →
 /// read_package）往返保真。keyframes 是手动编码段（rule.name / stop.hook 走 StringTable
@@ -918,14 +903,12 @@ fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     };
     let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
     let ct = &pkg.components["c"];
-    // brief 断言：stops[1].hook == Some("done") + animation[0].fill_mode == Both + iteration_count == None
     assert_eq!(ct.keyframes[0].stops[1].hook.as_deref(), Some("done"));
     assert_eq!(
         ct.nodes[0].style.animation[0].fill_mode,
         AnimationFillMode::Both
     );
     assert_eq!(ct.nodes[0].style.animation[0].iteration_count, None);
-    // 全字段保真（KeyframesRule 整体 + AnimationSpec 整体）
     assert_eq!(ct.keyframes[0], kf[0], "keyframes rule full roundtrip");
     assert_eq!(
         ct.nodes[0].style.animation[0], nodes[0].style.animation[0],
@@ -947,8 +930,6 @@ fn pkg_v31_rejects_v30() {
         "v30 pkg must be rejected as TooOld after v31 bump, got {err:?}"
     );
 }
-
-// ── v32: box-shadow Option<BoxShadow>→Vec<BoxShadow> + blur/inset ────────────────
 
 /// v32: ResolvedStyle.box_shadow 改 Vec<BoxShadow> + BoxShadow 加 blur/inset 字段。
 /// bincode 布局随之变（空 Vec 取代 None，元素增两字段）。锁定新布局的 serialize/deserialize
@@ -986,8 +967,6 @@ fn pkg_v32_rejects_v31() {
         "v31 pkg must be rejected as TooOld after v32 bump, got {err:?}"
     );
 }
-
-// ── v33: TemplateNode.rich_text_block flag（rich-text-block 容器根标记）──────────────
 
 /// v33: TemplateNode.rich_text_block 经完整 pkg.bin 路径（write_package → read_package）
 /// 往返保真。flag 打包进 NodeBlock flags 字节（与 draggable 同字节，bit 0x02），故 true
@@ -1035,8 +1014,6 @@ fn pkg_v33_rejects_v32() {
         "v32 pkg must be rejected as TooOld after v33 bump, got {err:?}"
     );
 }
-
-// ── v34: background_gradient → Gradient（radial + 多 stop + 任意角度）──────
 
 /// v34: 新 Gradient 模型（linear 多 stop 任意角度 / radial 显式椭圆 + at 负百分比）经完整
 /// pkg.bin 路径（write_package → read_package）往返保真。style_blob 是整个 ResolvedStyle
@@ -1114,8 +1091,6 @@ fn pkg_v34_rejects_v33() {
     );
 }
 
-// ── v35: custom_tag + component_scope + PerComponentScopes（组件展开域）────────────────
-
 /// v35: 手选 class 选择器（asset 测试无 parse 依赖路径，最小 Compound 构造）。
 fn v35_class_rule(class: &str, prop: &str, val: &str) -> DynamicRule {
     DynamicRule {
@@ -1144,7 +1119,7 @@ fn v35_class_rule(class: &str, prop: &str, val: &str) -> DynamicRule {
 
 /// v35: TemplateNode.custom_tag / component_scope + ComponentTemplate.component_scopes
 /// 经完整 pkg.bin 路径（write_package_with_scopes → read_package）往返保真。
-/// 这是 Custom Element 打包期展开的数据地基（component-system spec §3）。
+/// 这是 Custom Element 打包期展开的数据地基。
 #[test]
 fn pkg_v35_roundtrip_custom_tag_and_scopes() {
     // 组件树：root(0) + host(1, component_scope + custom_tag) + host 内部子(2)

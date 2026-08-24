@@ -102,8 +102,6 @@ fn display_grid_rejected() {
         .any(|d| d.code == DiagnosticCode::FenceBadCssValue));
 }
 
-// ── 渐变值校验（v34：linear 多 stop / 任意角度 / radial）──────────────────
-
 /// `<style>` 规则里的好渐变（多 stop / 任意角度 / radial 全形）零 diagnostic。
 #[test]
 fn style_rule_gradient_subset_parses_clean() {

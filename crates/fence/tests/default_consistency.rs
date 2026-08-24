@@ -41,7 +41,7 @@ use loomgui_fence::schema::css::CSS_PROPS;
 ///   resolved 默认 `None` = 未声明 → 走系统默认 / 经 inherited_set bitmask 继承。
 ///   schema 的 "inherit" 是级联指令，resolved 的 None 是「未设」标记，二者不对应到
 ///   同一 apply 路径——属表示差异（注：若某路径真把 "inherit" 当字面字体名消费会是
-///   bug，但当前无此消费方；见报告顾虑）。
+///   bug，但当前无此消费方）。
 /// - `transition`：schema default `none`，apply 产 1 条惰性 TransitionSpec
 ///   （prop=None/duration=0），resolved 默认是空 Vec。duration=0 的 spec 是行为
 ///   no-op（瞬完），语义等价于「无过渡」。表示差异，非语义漂移。
@@ -77,9 +77,9 @@ const REPRESENTATION_DIFF_PROPS: &[&str] = &[
 ///   - `box-shadow` default `none` 现由 core apply_decl 正确消费（apply=true，
 ///     清空 Vec == resolved 默认），走主断言，不在此列表。
 ///   - `animation`/`resize`：fence 注册并做语法校验。`animation` 已由 apply_decl
-///     "animation" arm 消费（M2：class 规则 → computed style → sync_animation_players，
+///     "animation" arm 消费（class 规则 → computed style → sync_animation_players，
 ///     default `none` → 空 Vec == resolved 默认，走主断言）；`resize` 仍不消费。
-/// - **apply 完整性缺口（独立 bug，非 default 漂移，见报告顾虑）**：default 值本应
+/// - **apply 完整性缺口（独立 bug，非 default 漂移）**：default 值本应
 ///   被 apply 识别却返 false：
 ///   - `background-size`：schema 广告 `stretch` 为合法值，但 apply 仅认 `100%`，
 ///     `stretch` 被静默拒（schema 接受 + core 丢弃的反模式）。

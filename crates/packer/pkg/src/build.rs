@@ -1,7 +1,7 @@
 //! Build orchestration: atlases + fonts + packages (HTML -> .pkg.bin) + runtime manifest -> output_dir.
 //! Single entry point build() called by CLI and GUI.
 //!
-//! R3: HTML -> .pkg.bin 编排已重建（fence parse_template + bridge + write_package）。
+//! HTML -> .pkg.bin 编排：fence parse_template + bridge + write_package。
 //! referenced_sprites 回接 atlas 交叉验证（assign_and_validate，缺失 sprite 非静默）。
 
 use serde::{Deserialize, Serialize};
@@ -28,8 +28,9 @@ pub struct BuildReport {
     pub atlases: Vec<String>,
     pub fonts: Vec<String>,
     pub log: Vec<String>,
-    /// 围栏内一致性 warning（W1/W2）：合法但预览 ≠ 运行时的不一致。不阻断打包，
-    /// 供 CLI 打印 / GUI 呈现提醒作者补全声明。空 = 无 warning。
+    /// 围栏内一致性 warning（如 border-width 无 border-style、bg-image 无 size）：
+    /// 合法但预览 ≠ 运行时的不一致。不阻断打包，供 CLI 打印 / GUI 呈现提醒作者
+    /// 补全声明。空 = 无 warning。
     pub warnings: Vec<PackDiagnostic>,
 }
 
@@ -53,7 +54,8 @@ pub struct PackResult {
     /// 所有组件 img src / background-image 并集，已归一化为 workspace_root 相对路径
     /// （sprite_key 口径），供 atlas 交叉验证。
     pub referenced_sprites: Vec<String>,
-    /// 围栏一致性 warning（W1/W2）：合法但预览≠运行时的不一致，不阻断打包，供 CLI/GUI 呈现。
+    /// 围栏一致性 warning（如 border-width 无 style、bg-image 无 size）：合法但预览≠
+    /// 运行时的不一致，不阻断打包，供 CLI/GUI 呈现。
     pub warnings: Vec<PackDiagnostic>,
 }
 
@@ -180,7 +182,7 @@ fn pack_components_inner(
         }
         // 页面文件 <style> class 规则的 background-image / background url() 归一——runtime
         // rematch 拿 declarations 的原始 url 值调 apply_decl，未归一会让 SpriteResolver miss
-        // （坑 203：标本馆 .bg-cover/.bg-contain 白块——bg-image 在 class 规则里）。inline
+        // （标本馆 .bg-cover/.bg-contain 白块：bg-image 在 class 规则里）。inline
         // bg-image 与展开组件文件的规则已在 walker emit 时按各自 html_rel 归一（expand.rs），
         // refs 收进 out.bg_refs。
         let mut dynamic_rules = DynamicRuleTable {
@@ -345,8 +347,8 @@ pub(crate) fn normalize_bg_ref(html_rel: &str, path: &str, refs: &mut Vec<String
     norm
 }
 
-/// 动态规则表里 background-image / background url() 声明值归一为 sprite_key（坑 203：
-/// class 规则 bg-image 走 dynamic_rules，runtime rematch 用原始值重放，未归一
+/// 动态规则表里 background-image / background url() 声明值归一为 sprite_key（class
+/// 规则 bg-image 走 dynamic_rules，runtime rematch 用原始值重放，未归一
 /// SpriteResolver miss → 白块）。linear-gradient 值无 url()，跳过（与 url 互斥）。
 /// 页面 <style>（build.rs）与展开组件 scope 规则（expand.rs）共用。
 pub(crate) fn normalize_bg_rules(
@@ -408,7 +410,6 @@ pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
     let ws = load_workspace(workspace_root)?;
     let mut diags: Vec<PackDiagnostic> = Vec::new();
 
-    // ---------- Atlases（只算不写）----------
     // 溢出是内容错误（作者须调 max_size / standalone）：收集成诊断，继续后续图集。
     let mut atlases: Vec<(String, crate::atlas::pack::PackedAtlas)> = Vec::new();
     for atlas in &ws.atlases {
@@ -424,7 +425,6 @@ pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
         }
     }
 
-    // ---------- Fonts 存在性（收集化，拷贝在 build 写入段）----------
     for font in &ws.fonts {
         if !workspace_root.join(&font.file).exists() {
             diags.push(PackDiagnostic::synthetic_error(
@@ -439,7 +439,6 @@ pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
         }
     }
 
-    // ---------- Packages（registry + 逐包解析打包）----------
     // Custom Element 注册表：components/ 目录扫描，hyphen 标签打包期展开。
     // 单组件文件错误与 warning 在注册表内 collect-all；包内围栏诊断在
     // pack_components_with_registry 内 collect-all；跨包错误也进收集池（包不产出）。
@@ -488,7 +487,6 @@ pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
     // 展开用到的组件的 sprite 引用并入交叉验证（未用组件是设计期存货，缺图不阻断）。
     all_refs.extend(registry.used_refs());
 
-    // ---------- Cross-validate: HTML refs must all be in some atlas ----------
     // 单向：html 引用的图必须在某 atlas；atlas 未引用的图合法（运行时动态图标）。
     // collect 版：每个违规 key 一条诊断。
     let atlas_refs: Vec<(String, &crate::atlas::AtlasManifest)> = atlases
@@ -568,7 +566,6 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, BuildFailure> {
         warnings: outcome.warnings,
     };
 
-    // ---------- 写图集页 + manifest ----------
     for (name, packed) in &outcome.atlases {
         report.log.push(format!("writing atlas {name}"));
         for (i, page_img) in packed.pages.iter().enumerate() {
@@ -589,7 +586,6 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, BuildFailure> {
             .push(format!("  wrote {} page(s) + manifest", packed.pages.len()));
     }
 
-    // ---------- 拷字体（analyze 已确认存在；io 错误属工具性失败）----------
     for font in &ws.fonts {
         let src = workspace_root.join(&font.file);
         let basename = Path::new(&font.file)
@@ -603,7 +599,6 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, BuildFailure> {
         report.log.push(format!("copied font {}", dst.display()));
     }
 
-    // ---------- 写 ui/*.pkg.bin（bytes 来自 analyze）----------
     for (name, pr) in &outcome.packages {
         let pkg_path = ui_dir.join(format!("{name}.pkg.bin"));
         std::fs::write(&pkg_path, &pr.bytes)
@@ -618,7 +613,6 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, BuildFailure> {
         ));
     }
 
-    // ---------- Runtime manifest ----------
     // runtime.packages = report.packages（依赖上一段先填完——排序契约）。
     let runtime = RuntimeManifest {
         version: 1,
@@ -708,7 +702,7 @@ mod package_tests {
     const WS_JSON: &str =
         r#"{"version":1,"output_dir":"../out","packages":[{"name":"game","dirs":["ui"]}]}"#;
 
-    /// 回归（issue #1 触发 A）：某页投影悬空 slot 名 → analyze 必须失败且错误可见。
+    /// 回归：某页投影悬空 slot 名 → analyze 必须失败且错误可见。
     /// 修前：bridge 错误只带 message，被 analyze 丢弃 → 包静默消失、build 报 OK。
     #[test]
     fn analyze_fails_loudly_on_dangling_slot_projection() {
@@ -744,7 +738,7 @@ mod package_tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    /// 回归（issue #1 触发 B）：投影 light 子 id 与组件模板 id 撞车 → analyze 失败可见。
+    /// 回归：投影 light 子 id 与组件模板 id 撞车 → analyze 失败可见。
     #[test]
     fn analyze_fails_loudly_on_projection_id_collision() {
         let tmp = write_temp_ws(
@@ -834,7 +828,7 @@ mod package_tests {
     fn pack_components_roundtrip_single() {
         // html_rel 放 workspace_root 顶层 → src 原样进 refs（base 为空）。
         // 根 div 设 display:flex：子是 flex item（不走 rich-text inline/block 分类），
-        // 避免 T1 FenceMixedInlineBlock 拒载（div 块子 + img 语义 inline 子 = mixed）。
+        // 避免 FenceMixedInlineBlock 拒载（div 块子 + img 语义 inline 子 = mixed）。
         let comps = vec![Component {
             name: "home".to_string(),
             src:
@@ -1024,9 +1018,9 @@ mod package_tests {
 
     #[test]
     fn pack_components_warning_does_not_block_packaging() {
-        // F1 回归锁：围栏内一致性 warning（W1 border-width 无 style）合法但不阻断打包。
+        // 回归锁：围栏内一致性 warning（border-width 无 style）合法但不阻断打包。
         // build.rs 曾把任何 diagnostic 当 fatal → warning 命中时 pkg 打不出来，违反设计意图。
-        // 构造只产 W1 warning（无 Error）的组件，断言 pack_components 返 Ok。
+        // 构造只产该 warning（无 Error）的组件，断言 pack_components 返 Ok。
         let comps = vec![Component {
             name: "warn".to_string(),
             src: r#"<div style="border-width:2px;border-color:#ff0000"></div>"#.to_string(),
@@ -1056,7 +1050,7 @@ mod package_tests {
 
     #[test]
     fn pack_components_exposes_warnings_in_return_value() {
-        // 回归锁：W1/W2 warning 不阻断打包，但必须对 CLI/GUI 可见。
+        // 回归锁：一致性 warning 不阻断打包，但必须对 CLI/GUI 可见。
         // 修前 pack_components 只查 Error 级 diagnostic，warning 留在局部 parsed.diagnostics
         // 里随循环结束丢弃 → 作者感知不到「预览 ≠ 运行时」的不一致。修后 warning 经
         // PackResult.warnings 暴露 → build() 进 BuildReport.warnings → CLI 打印。
@@ -1101,7 +1095,7 @@ mod package_tests {
     #[test]
     fn normalize_sprite_key_resolves_dotdot_against_html_dir() {
         // HTML 在 showcase/home.html（workspace_root 相对），img src ../res/icons/x.png
-        // → sprite_key res/icons/x.png（atlas sprite_key 是 workspace_root 相对，collect.rs:56）。
+        // → sprite_key res/icons/x.png（atlas sprite_key 是 workspace_root 相对路径）。
         // 这是 showcase 的核心用例：HTML 嵌套在子目录，src 用 ../ 逃到 workspace_root。
         assert_eq!(
             normalize_sprite_key("showcase/home.html", "../res/icons/x.png"),

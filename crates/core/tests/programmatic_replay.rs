@@ -14,7 +14,7 @@ use loomgui_core::scene::{
     PlayerPlayState, Scene, TransformAnim,
 };
 
-/// 2-stop translate-only keyframes（Field Notes N11 形态：keyframes 仅 transform）。
+/// 2-stop translate-only keyframes。
 fn lunge() -> KeyframesRule {
     let stop = |sel, tx| KeyframeStop {
         selector: sel,
@@ -182,7 +182,7 @@ fn disjoint_channel_players_coexist() {
 /// 同通道不同名：后播者取代先播者（不限状态）。修复前缺陷：Completed+fill-both 的
 /// 旧 player 每帧续写末值且 sync 侧永不回收，新旧叠加写同通道，最终值取决于 slotmap
 /// 槽序——旧 player 槽位靠后时新动画每一帧都被末值压掉，视觉上"第二次起不播"
-/// （dogfood 战斗动画 bug 根因，坑 226 修复只覆盖了同名情形）。
+/// （dogfood 战斗动画 bug 根因，旧修复只覆盖了同名情形）。
 #[test]
 fn completed_different_name_does_not_shadow_new_play() {
     let (mut scene, node) = scene_with_node();

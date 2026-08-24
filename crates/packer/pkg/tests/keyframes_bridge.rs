@@ -1,6 +1,6 @@
 //! fence @keyframes → bridge → pkg.bin 往返契约测试（@loom-hook 锚点 + transform TRS 分解）。
 //!
-//! T1 把 `ComponentTemplate.keyframes: Vec<KeyframesRule>`（pkg v30 序列化）落地但 bridge
+//! `ComponentTemplate.keyframes: Vec<KeyframesRule>`（pkg v30 序列化）落地但 bridge 曾
 //! 静默丢弃 keyframes；本测试锁死「不再丢弃」：HTML 里的 @keyframes 必须进 pkg，且
 //! `/* @loom-hook name */` 注释锚点挂在前一个 stop 上、stop 的 transform 按 TRS 分解
 //! （translateY(20px) → translate [0,20]，不做矩阵合并）。
@@ -10,7 +10,7 @@ use loomgui_core::scene::animation::{AnimatableProps, KeyframeStopSelector, Tran
 use loomgui_pkg::build::{pack_components, Component};
 
 /// 单组件 HTML：@keyframes slideIn（from 带 hook 注释 + translateY，to 为终态）
-/// + .card 挂 animation 简写（T2 通路，断言 base_style.animation 与 keyframes 名字连通）。
+/// + .card 挂 animation 简写（断言 base_style.animation 与 keyframes 名字连通）。
 const HTML: &str = r#"<style>
 @keyframes slideIn{from{opacity:0;transform:translateY(20px)}/* @loom-hook start */ to{opacity:1;transform:none}}
 .card{animation:slideIn .4s both}
@@ -71,7 +71,7 @@ fn keyframes_survive_roundtrip_with_hook_and_trs() {
         "transform:none 应为空 TRS 而非 None"
     );
 
-    // ④ animation 简写（T2）与 keyframes 表同名连通。class 规则属于运行时动态级联表，
+    // ④ animation 简写与 keyframes 表同名连通。class 规则属于运行时动态级联表，
     // 因而在 pkg 中检查其声明已被保留；bridge 不把 animation 规则静默丢掉。
     assert!(comp.dynamic_rules.rules.iter().any(|rule| {
         rule.selector.raw == ".card"

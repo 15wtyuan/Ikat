@@ -1,4 +1,4 @@
-//! 诊断 Bug #2（home 渐隐入场只命中几个 + 时序错）：
+//! 诊断（home 渐隐入场只命中几个 + 时序错）：
 //! 实例化 showcase home，dump 每张 nav-card 的 resolved `style.animation` 声明：
 //!   - 每张 card 几条 AnimationSpec（1=级联正确取胜者；2=级联把 base + nth-child 都并进来了）
 //!   - 每条 delay（应为 0.05s 的整数倍 stagger）

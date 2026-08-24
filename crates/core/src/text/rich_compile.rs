@@ -1,6 +1,6 @@
 //! Run 编译器：把 rich-text-block 容器的 inline 子树拍平成 `Vec<RichRun>`。
 //!
-//! rich-text-block（fence 阶段 6.4 标记、`Node.rich_text_block=true` 的容器）在 solve/render
+//! rich-text-block（`Node.rich_text_block=true` 的容器）在 solve/render
 //! 阶段不把 inline 子当独立 box 渲染，而是折进父节点的单段 inline flow。本编译器在
 //! measure 前遍历该容器的直接子（含空白 TextNode —— 与普通 layout/render 的
 //! `is_whitespace_only_text` 过滤互斥：rich-text-block 的 inline 子既不进 taffy 树也不进

@@ -2,7 +2,7 @@
 //!
 //! bridge() 在 IrTree→TemplateNode 翻译时，按 NodeKind 从 HTML 属性提取控件初始值
 //! （value/max/min/step/checked/name/selected），填进 TemplateNode.control_init，使其随
-//! pkg.bin 存活到运行时 instantiate。控件一律 role 驱动（spec §2.2），初始值放在
+//! pkg.bin 存活到运行时 instantiate。控件一律 role 驱动，初始值放在
 //! ARIA（aria-valuenow/aria-checked/...）或 data-*（data-step/data-name）属性里。
 
 use loomgui_core::asset::{ControlInit, TemplateNode};

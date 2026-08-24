@@ -1,5 +1,4 @@
 // LoomGUI Frozen Public API: Value types & enums
-// See docs/design/public-api.md (权威契约) + docs/design/projection-layer.md (投影层机制)
 
 using System;
 
@@ -27,7 +26,6 @@ namespace LoomGUI
         public float Right { get; }
         public float Bottom { get; }
         // 补全 ctor（frozen 仅约束既有成员不删/不改，补构造不算改签名）。
-        // 参数顺序按字段声明序：left, top, right, bottom。
         public Thickness(float left, float top, float right, float bottom)
         {
             Left = left; Top = top; Right = right; Bottom = bottom;
@@ -53,7 +51,7 @@ namespace LoomGUI
     }
 
     // 2D 向量（Position / Scale / Origin / 滚动点等）。值语义：等号按字段比较（struct 默认）。
-    // 业务侧通过 new LoomVector2(x,y) 构造；Zero/One 是常用常量。投影层（C4 NodeTransform）镜像
+    // 业务侧通过 new LoomVector2(x,y) 构造；Zero/One 是常用常量。投影层（NodeTransform）镜像
     // default 与业务语义对齐：Position/Origin 默认 Zero（不位移）、Scale 默认 One（不缩放）。
     public readonly struct LoomVector2
     {
@@ -64,7 +62,7 @@ namespace LoomGUI
         public static LoomVector2 One => new LoomVector2(1f, 1f);   // 不缩放 / 不位移语义哨兵
     }
 
-    // 矩形（x/y/w/h，左上原点 + y 向下，与核心坐标系一致）。projection §2.5：Geometry.LayoutRect/
+    // 矩形（x/y/w/h，左上原点 + y 向下，与核心坐标系一致）。Geometry.LayoutRect/
     // WorldRect 返此。internal ctor 让同 assembly（NodeGeometry）FFI 读后构造；公共 ctor 留给业务
     // 通过 Geometry 拿到后再传 API 的场景（暂时未加——frozen 公共 ctor 暂留 internal，需要时升级 public）。
     public readonly struct LoomRect
@@ -165,10 +163,9 @@ namespace LoomGUI
         }
     }
 
-    // ── 异常类型 ──────────────────────────────────────────────────────
-    // public-api.md §1.4 失败策略：运行时异常体系。UIContractException = 业务侧违反 API 契约（Get<T>
-    // 未命中、Create<T> 非白名单、LoadPackage 同名重复、ListView 静态/数据驱动混用 等；另见 §3.1 Get /
-    // §7 ListView / §11.1 Create<T> / §11.2 LoadPackage 各 API 处的抛出语义）。与 ObjectDisposedException
+    // 失败策略：运行时异常体系。UIContractException = 业务侧违反 API 契约（Get<T>
+    // 未命中、Create<T> 非白名单、LoadPackage 同名重复、ListView 静态/数据驱动混用 等）。
+    // 与 ObjectDisposedException
     // （操作已 Dispose 节点）/ InvalidOperationException （内部不变量违例 / FFI 残错）互补：
     // UIContractException 是「调用方写错了」，InvalidOperationException 是「投影层内部状态异常」。
     public class UIContractException : Exception
@@ -186,11 +183,11 @@ namespace LoomGUI
         public UIPackageException(string message, Exception inner) : base(message, inner) { }
     }
 
-    // UIStyleException = 运行时 CSS 解析失败（public-api §1.4：SetInlineStyle / 动态规则注入等
+    // UIStyleException = 运行时 CSS 解析失败（SetInlineStyle / 动态规则注入等
     // 运行时改 CSS 的路径，值非法或语法错时抛）。与 UIContractException（调用方写错 API 契约）/
     // UIPackageException（包内部错）互补：UIStyleException 专指 CSS 值/规则解析失败。
     // 构造签名对齐 UIContractException（message + message/inner 双参），补无参默认 ctor 兼容
-    // default-activation 抛出场景（public-api §1.4 列四种异常，本类补齐 frozen 异常体系）。
+    // default-activation 抛出场景（异常体系共四种，本类补齐 frozen 异常体系）。
     public class UIStyleException : Exception
     {
         public UIStyleException() { }

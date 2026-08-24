@@ -252,8 +252,6 @@ fn issue3_scroll(scene: &Scene, _s: &Stage) {
     println!();
 }
 
-// ── helpers ──
-
 fn dump_text_node(scene: &Scene, s: &Stage, id: loomgui_core::scene::node::NodeId, indent: &str) {
     let n = match scene.get(id) {
         Some(n) => n,
@@ -272,7 +270,6 @@ fn dump_text_node(scene: &Scene, s: &Stage, id: loomgui_core::scene::node::NodeI
         indent, cls, r.x, r.y, r.w, r.h, st.font_size, st.white_space_nowrap
     );
     println!("{}  content={:?}", indent, content);
-    // 测这个 run 的 intrinsic 宽度
     if !content.is_empty() {
         let m = measure_text(
             &content,

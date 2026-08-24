@@ -60,7 +60,7 @@ pub struct GlyphRun {
     pub font_size: f32,
     /// 字体 id（atlas key + image_path 合成用）。MVP 单字体：所有 run 填
     /// default_font_id，build 期 build_text_mesh 仍按外传 font_id 取 face；
-    /// 此字段为 T5+ per-run 字体（多 family）预留。
+    /// 此字段为 per-run 字体（多 family）预留。
     pub font_id: u32,
     /// per-run 颜色（plain 整段同色；rich 每 run 各自色）。build 期 per-vertex。
     pub color: [f32; 4],
@@ -100,7 +100,7 @@ pub struct RichImagePlacement {
 
 /// 单个 input `RichRun` 在某行的命中矩形（content 相对坐标，与 glyph 同坐标系）。
 ///
-/// 命中测试（spec §10）用它把 rich-text-block 内的点细化到 source inline 节点
+/// 命中测试用它把 rich-text-block 内的点细化到 source inline 节点
 /// （span/TextNode/image）。跨行 run 拆多条 rect（每行一条）；image run 直接用
 /// `RichImagePlacement`。key 粒度 = input `RichRun`（不是渲染层合并后的 `GlyphRun`）——
 /// 同 style 相邻 run 渲染合并进一个 GlyphRun，但命中须保留各 run 独立 source。
@@ -132,9 +132,9 @@ pub struct TextLayout {
     pub run_rects: Vec<RichRunRect>,
 }
 
-/// 封装一个 ttf 字体（进程级单字体，无 fallback）。
+/// 封装一个 ttf 字体。
 ///
-/// Face 借用 `Box::leak` 产出的 `'static` 切片；leak 的内存不释放，进程级单字体可接受。
+/// Face 借用 `Box::leak` 产出的 `'static` 切片；leak 的内存不释放（字体数量有限，可接受）。
 pub struct Font {
     pub face: Face<'static>,
 }
@@ -146,7 +146,6 @@ impl Font {
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, String> {
-        // Face 借用 leaked 切片（进程级单字体，leak 不释放可接受）。
         let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
         let face = Face::parse(leaked, 0).map_err(|e| format!("{:?}", e))?;
         Ok(Font { face })
@@ -179,7 +178,7 @@ impl Font {
 /// Font 仍是 Face<'static>（Box::leak 字节，进程级单字体可接受；多字体数量有限，
 /// leak 不释放可接受，真要回收改 Arc<Vec<u8>> 持字节，YAGNI）。
 ///
-/// v1.6：family_to_id 为每个注册 family 分配稳定 u32 id，供 atlas key 和合成
+/// family_to_id 为每个注册 family 分配稳定 u32 id，供 atlas key 和合成
 /// image_path 用。id 在 register 时分配，不随字体表增删变化。
 /// 缺字诊断日志（tofu 取证）：`FontStack::pick` 全链（主字体 + 回退链）都缺某字时
 /// 记录 (主 family, char)。会话级去重（同 family+char 只记一次）；pending 由宿主
@@ -449,7 +448,7 @@ fn glyph_advance(face: &Face<'_>, gid_opt: Option<ttf_parser::GlyphId>, font_siz
 ///
 /// fingerprint 含 content hash → set_text / slot 换内容自动 miss；style 改、约束宽变（量化桶）
 /// 也 miss。设计为后续增量布局的地基：fingerprint 源可从 content-hash 换成 dirty-version
-/// 而本结构（每节点两槽 + fingerprint 比对）不变（见 docs/pitfalls.md 坑 186）。
+/// 而本结构（每节点两槽 + fingerprint 比对）不变。
 #[derive(Clone, Debug, Default)]
 pub struct TextMeasureCache {
     /// max_width=None 的测量结果 + 其 fingerprint。
@@ -507,7 +506,7 @@ pub fn text_fingerprint(
 ///
 /// `source`（NodeId）必须进 hash：两个不同 span 文本相同也不应共享缓存（命中路由会错），
 /// span 换色/换内容 → runs 变 → fp 变 → 自动 miss 重测。不依赖 dirty_text 传播（现仅标
-/// 文本节点自身，无 "span 改色标父" 路径——指纹 memo 闭环更干净，见 design §9）。
+/// 文本节点自身，无 "span 改色标父" 路径——指纹 memo 闭环更干净）。
 ///
 /// `mw` 同 `text_fingerprint`：None/Some 用 discriminator 区分两槽（intrinsic/constrained），
 /// Some 量化到 0.25px 桶避亚像素抖动 thrash 缓存。
@@ -627,7 +626,7 @@ pub fn measure_text(
         NORMAL_LINE_HEIGHT
     };
 
-    // Line.height：倍数烤进 height（后端不重套，§9.1）。
+    // Line.height：倍数烤进 height（后端不重套）。
     let line_h = font_size * lh;
     // baseline：half-leading 居中。
     let baseline = (line_h + ascent - descent) / 2.0 - descent.abs();
@@ -763,7 +762,7 @@ pub fn measure_text(
     let text_width = lines.iter().map(|(_, w)| *w).fold(0.0f32, f32::max);
     let text_height = lines.len() as f32 * line_h;
 
-    // 生成 glyphs（绝对坐标，§9.2：已累加 advance + 已应用 align 偏移）。
+    // 生成 glyphs（绝对坐标：已累加 advance + 已应用 align 偏移）。
     let mut out_lines = Vec::with_capacity(lines.len());
     for (li, (text, lw)) in lines.iter().enumerate() {
         let line_y = li as f32 * line_h;
@@ -1316,8 +1315,6 @@ mod tests {
         Font::from_path(&p).ok()
     }
 
-    // ── \n 剥离（tofu 修复）：mandatory 段尾 \n 不进 glyph 流 ──
-
     /// tofu 取证日志：pick 全链缺字记录（family+char）、会话级去重、take 排空。
     /// 回退链覆盖的字不算缺（不画 tofu）；清空回退后同字才进报告。
     #[test]
@@ -1812,7 +1809,7 @@ mod tests {
 
     /// 单行短文本 + max_width（容器）→ center/right 在容器内偏移（浏览器语义）。
     /// 修复前 align 基准 = text_width（最宽行 = 单行）→ offset 0 → 单行永远左对齐
-    /// （A6/B8 "text-align:center 却左对齐" 症状）。
+    /// （"text-align:center 却左对齐" 症状）。
     #[test]
     fn measure_text_aligns_single_line_within_container() {
         let font = match test_font() {
@@ -1865,7 +1862,7 @@ mod tests {
 
     /// 锁 kerning 重开：V pen_x = advance(A) + kern(A,V) < advance(A)
     /// （DejaVuSans AV kern ≈ -1.5px @24pt）。光栅化搬核心后 quad 是真实 ttf bbox，
-    /// 可安全 honor kern（spec §9）。
+    /// 可安全 honor kern。
     #[test]
     fn kerning_enabled_av_pen_x_includes_kern() {
         let font = match test_font() {
@@ -1905,7 +1902,7 @@ mod tests {
     }
 
     /// 缺字（DejaVuSans 无 CJK「中」）→ advance 走字体 .notdef(gid0) advance，非 font_size 兜底。
-    /// 核心权威（spec §9）：缺字画 .notdef/tofu，advance 确定性，不再猜 Unity fallback 1em。
+    /// 核心权威：缺字画 .notdef/tofu，advance 确定性，不再猜 Unity fallback 1em。
     #[test]
     fn missing_glyph_uses_notdef_advance() {
         let font = match test_font() {
@@ -2069,7 +2066,6 @@ mod tests {
                 return;
             }
         };
-        // \n 应强制换行。
         let layout = measure_text(
             "aaaa\nbbbb",
             16.0,
@@ -2203,8 +2199,6 @@ mod tests {
         assert!(tall.lines[0].height > normal.lines[0].height);
     }
 
-    // ── FontTable helpers ──
-
     fn font_bytes_dejavu() -> Vec<u8> {
         std::fs::read(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -2218,8 +2212,6 @@ mod tests {
         let f = Font::from_bytes(font_bytes_dejavu()).unwrap();
         f.ascent(16.0)
     }
-
-    // ── FontTable tests ──
 
     #[test]
     fn font_table_select_returns_default_when_no_family() {
@@ -2237,7 +2229,6 @@ mod tests {
         let mut t = FontTable::new();
         t.register("DejaVu", font_bytes_dejavu(), true).unwrap();
         let f = t.select(Some("Nonexistent"));
-        // Falls back to default.
         assert!((f.ascent(16.0) - ascent_dejavu_16()).abs() < 0.01);
     }
 
@@ -2265,8 +2256,6 @@ mod tests {
         let t = FontTable::new();
         t.select(None);
     }
-
-    // ── measure_rich_text tests（v1.7）──
 
     /// 两个不同色的 run 在一行内，各自 GlyphRun 携带自己的色（per-run color）。
     #[test]
@@ -2344,7 +2333,6 @@ mod tests {
             link_id: None,
             source: NodeId(0),
         }];
-        // 窄宽度强制换行（拉丁按词）。
         let lay = measure_rich_text(
             &runs,
             Some(30.0),
@@ -2607,7 +2595,7 @@ mod tests {
     }
 
     /// `run_rects`：单 run 跨行换行 → 拆 ≥2 rect（每行一个），source 全等于输入 run 的
-    /// source，几何 sane（w/h>0、y 落在行顶、y+h ≤ text_height）。见 spec §6/§10。
+    /// source，几何 sane（w/h>0、y 落在行顶、y+h ≤ text_height）。
     #[test]
     fn rich_run_rects_populated_for_wrapped_text() {
         let font = match test_font() {

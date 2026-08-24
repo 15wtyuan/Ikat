@@ -246,7 +246,7 @@ fn multi_animation_creates_one_player_per_declaration() {
     );
 }
 
-/// 测 3（T6 衔接点 1）：同名 Completed player（含 fill none 的结束标记）视为已启动，
+/// 测 3：同名 Completed player（含 fill none 的结束标记）视为已启动，
 /// sync 不重播。
 #[test]
 fn same_name_completed_player_not_replayed() {
@@ -266,7 +266,7 @@ fn same_name_completed_player_not_replayed() {
     );
 }
 
-/// 测 4（T6 衔接点 2）：声明参数变（duration 改）→ kill 旧 + 重跑（elapsed 归零、spec 更新）。
+/// 测 4：声明参数变（duration 改）→ kill 旧 + 重跑（elapsed 归零、spec 更新）。
 #[test]
 fn param_change_restarts_player() {
     let (mut scene, id) = scene_with_node();
@@ -289,7 +289,7 @@ fn param_change_restarts_player() {
     assert_eq!(p.iteration, 0);
 }
 
-/// 测 5（T6 衔接点 4）：programmatic player（node.Play 建，T10）不受 sync 管——
+/// 测 5：programmatic player（node.Play 建）不受 sync 管——
 /// 声明消失不回收，靠 Stop/句柄；声明同名出现也不视为"已启动"。
 #[test]
 fn programmatic_player_not_managed_by_sync() {
@@ -374,7 +374,7 @@ fn opacity_ramp(name: &str, from: f32, to: f32) -> KeyframesRule {
     }
 }
 
-/// 测 8（T7 review Minor 1）：sync 移除其一 player 时，共享通道保留另一 player 的值——
+/// 测 8：sync 移除其一 player 时，共享通道保留另一 player 的值——
 /// 回收掩码 = own ∩ ¬(剩余 player 持有)（dynamic.rs 已实现，本测试锁死防回归）。
 #[test]
 fn sync_remove_keeps_remaining_players_shared_channel_value() {

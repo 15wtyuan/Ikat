@@ -1,7 +1,5 @@
 use loomgui_core::style::resolved::{AnimationSpec, TransitionSpec};
 
-// == CssPropSpec ==
-
 /// Compile-time schema entry for one CSS property.
 ///
 /// Three orthogonal dimensions model CSS in the fence:
@@ -15,8 +13,6 @@ pub struct CssPropSpec {
     pub inherited: bool,
     pub parser: CssValueParser,
 }
-
-// == CssValueParser ==
 
 /// Value parser tag identifying how a CSS value is parsed/validated.
 #[derive(Debug, Clone, PartialEq)]
@@ -47,8 +43,6 @@ pub enum CssValueParser {
     Raw,
 }
 
-// == ShorthandSpec ==
-
 /// Compile-time schema entry for a CSS shorthand.
 #[derive(Debug)]
 pub struct ShorthandSpec {
@@ -66,8 +60,6 @@ pub enum ShorthandKind {
     BorderShorthand,
     BackgroundShorthand,
 }
-
-// == CSS_PROPS registry ==
 
 pub static CSS_PROPS: &[CssPropSpec] = &[
     CssPropSpec {
@@ -535,9 +527,9 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         parser: CssValueParser::Transition,
     },
     // animation: name duration [easing] [iteration-count|infinite] [fill-mode] [direction] [play-state] [delay].
-    // 对齐 public-api.md「动画定义全在 CSS」终态契约。runtime 驱动：class 规则经
-    // apply_decl "animation" arm 进 computed style → sync_animation_players (g') 启停
-    // player（M2 keyframes runtime，spec §5.2）；打包期 inline 走 validate + 同一解析器。
+    // 「动画定义全在 CSS」契约。runtime 驱动：class 规则经
+    // apply_decl "animation" arm 进 computed style → sync_animation_players 启停
+    // player（keyframes runtime）；打包期 inline 走 validate + 同一解析器。
     CssPropSpec {
         name: "animation",
         default: "none",
@@ -717,7 +709,7 @@ fn validate_one_animation_decl(decl: &str) -> bool {
 /// 解析 `animation` 简写值 → AnimationSpec 列表（逗号分隔多声明展开为多条）。
 ///
 /// 委托 core `mapping::parse_animation`——打包期 inline 与运行时 rematch（class 规则走
-/// apply_decl "animation" arm）共用同一解析器，防 spec §8.2/§8.3 语义漂移（transition 侧
+/// apply_decl "animation" arm）共用同一解析器，防语义漂移（transition 侧
 /// 已同模式委托 `parse_transition_value`）。越界输入由 `validate_animation_value` 门拦截，
 /// 此处防御性返回空。
 pub fn parse_animation_value(value: &str) -> Vec<AnimationSpec> {
@@ -727,7 +719,7 @@ pub fn parse_animation_value(value: &str) -> Vec<AnimationSpec> {
 /// 解析 `transition` 简写值 → TransitionSpec 列表（逗号分隔多 spec）。
 ///
 /// 委托 core `mapping::parse_transition`——打包期 inline 与运行时 rematch（`<style>` 规则
-/// 走 apply_decl）共用同一解析器，防 spec §8.3 ease 对齐表漂移（该函数已按 §8.3 对齐）。
+/// 走 apply_decl）共用同一解析器，防 ease 对齐表漂移。
 /// 语义：prop 映射 opacity→Opacity / color→TextColor / background-color→BgColor /
 /// all+缺省→None；首 time=duration、次 time=delay；ease 缺省 = CSS initial ease→CubicOut。
 pub fn parse_transition_value(value: &str) -> Vec<TransitionSpec> {
@@ -830,7 +822,7 @@ mod tests {
 
     #[test]
     fn animation_prop_registered() {
-        // fence 终态契约（public-api.md §9：动画全在 CSS）——schema 注册是前提。
+        // fence 终态契约（动画全在 CSS）——schema 注册是前提。
         let spec = find_css_prop("animation").expect("animation must be in CSS_PROPS");
         assert!(matches!(spec.parser, CssValueParser::Animation));
         assert!(!spec.inherited);

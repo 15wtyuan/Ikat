@@ -5,7 +5,7 @@
 //! / `append_child` / `insert_before` / `remove_child`（摘除不删）/ `set_text` / `set_src`
 //! / `set_inline_override` / `unset_inline_override`（便签层 inline override，rematch 最高优先级）。
 //!
-//! **设计要点**（spec §5.3 + §7 + §8）：
+//! **设计要点**：
 //! - 删节点联动清持久附属 map（anim/scroll remove + tween kill），防悬空 NodeId 残留
 //!   写幽灵槽（HashMap 对任意 NodeId 都能插条目，须显式 remove）。
 //! - 递归删子先 clone children 再递归（避免边迭代边改 slotmap 的借用冲突）。
@@ -80,9 +80,7 @@ pub fn apply_css(style: &mut ResolvedStyle, css: &str) {
 pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, String> {
     let k = kind_from_tag(kind)?;
     let mut base_style = ResolvedStyle::default();
-    // schema display 铺底（block tag→Block，inline tag→Flex）：复刻打包器 css_resolve，
-    // 让运行时动态建的节点默认 display 正确（旧范式 default 是 Flex，div 会误成 Flex）。
-    // 在 apply_css 之前——显式 inline display 声明仍胜出（apply_css 后覆盖）。
+    // 铺底须在 apply_css 之前——显式 display 声明仍胜出（apply_css 后覆盖）。
     let (dm, td) = default_display_for_kind(k);
     base_style.display_mode = dm;
     base_style.taffy_style.display = td;
@@ -97,7 +95,7 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
     };
     let dirty_text = matches!(k, NodeKind::TextNode);
     let node = Node {
-        id: NodeId::INVALID, // 临时，insert 后回填
+        id: NodeId::INVALID,
         parent: None,
         kind: k,
         style: base_style.clone(),
@@ -125,9 +123,7 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
     };
     let key = scene.nodes.insert(node);
     let id = NodeId::from_key(key);
-    scene.nodes.get_mut(key).unwrap().id = id; // 回填
-                                               // per-node side table 联动单一入口（text 两表 resize+清槽 / world 两表清槽 /
-                                               // TextNode/Image seed 空内容串）。
+    scene.nodes.get_mut(key).unwrap().id = id;
     scene.alloc_node_slot(id, k);
     Ok(id)
 }
@@ -136,8 +132,8 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
 pub fn create_root(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, String> {
     let id = create_node(scene, kind, css)?;
     scene.roots.push(id);
-    // 文档根 = 顶层作用域根（main-design §5.4 / public-api §2.3）。全局规则（scope_root=INVALID）
-    // 跨作用域命中；文档根作为外层作用域，其直接子树（未嵌套其他实例根时）归属此作用域。
+    // 文档根 = 顶层作用域根。全局规则（scope_root=INVALID）跨作用域命中；文档根作为
+    // 外层作用域，其直接子树（未嵌套其他实例根时）归属此作用域。
     if let Some(n) = scene.get_mut(id) {
         n.interaction
             .flags
@@ -150,8 +146,7 @@ pub fn create_root(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
 /// 与 `create_node` 同构的节点构造（clip_rect 派生 / dirty_text / slotmap insert / id 回填），
 /// 不涉及 CSS 解析——style 已在 ComponentTemplate.nodes[i].style 烘焙好（打包期产物）。
 /// 直接用传入 style 作 base_style（源）+ style.clone() 作 style 初始（派生，下帧 rematch 从 base 起算）。
-/// classes/id_attr/draggable/tabindex 由调用方在返回 NodeId 后填（与 create_node 一致——
-/// （同 create_node：classes/id_attr 等由调用方在返回 NodeId 后填）。
+/// classes/id_attr/draggable/tabindex 由调用方在返回 NodeId 后填（同 create_node）。
 /// `control_init` 为 `Some` 时按变体映射填 `Scene.controls` side table（Slider 补
 /// 运行时独有 `dragging:false`）；`None` = 非控件节点，不建槽。
 pub fn create_node_from_template(
@@ -170,7 +165,7 @@ pub fn create_node_from_template(
     };
     let dirty_text = matches!(kind, NodeKind::TextNode);
     let node = Node {
-        id: NodeId::INVALID, // 临时，insert 后回填
+        id: NodeId::INVALID,
         parent: None,
         kind,
         style: base_style.clone(),
@@ -198,8 +193,7 @@ pub fn create_node_from_template(
     };
     let key = scene.nodes.insert(node);
     let id = NodeId::from_key(key);
-    scene.nodes.get_mut(key).unwrap().id = id; // 回填
-                                               // per-node side table 联动单一入口（同 create_node）。
+    scene.nodes.get_mut(key).unwrap().id = id;
     scene.alloc_node_slot(id, kind);
     // 控件状态：按 ControlInit 变体映射填 ControlState（Slider 补运行时独有 dragging:false）。
     // 非 control 节点 control_init=None，不建槽（get 返 None，渲染/交互按无控件处理）。
@@ -294,21 +288,17 @@ pub fn create_node_from_template(
 
 /// 递归克隆子树：返回游离新根（parent=None，不挂树，调用方 append_child 挂载）。
 ///
-/// side table 判定（list spec §6）：
+/// side table 判定：
 /// 拷贝：kind/classes/id_attr/custom_tag/base_style/text_contents/image_srcs/roles + 作用域三标记
 ///   （SCOPE_ROOT/LOOKUP_SCOPE/HOST_IN_PARENT_SCOPE，结构语义；交互态位不拷）+ 子树内锚定的
 ///   ScopedRule 重锚到克隆对应节点（组件展开域规则随实例走）。
 ///   roles = RoleTable 条目（role/data-slot 标注），role-driven 控件部件定位 + 语义分派用；
 ///   不克隆则 list item 模板里的 progressbar fill 等部件丢失定位 → 渲染回退默认。
 /// 不拷贝：scroll/anim/tweens/EditState/text_layouts/focused_node/事件订阅（运行时状态——
-/// 克隆是干净模板，由调用方按需重设）。
+///   克隆是干净模板，由调用方按需重设）。
 ///
-/// 控件初值传 None：create_node_from_template 的 control_init 分支建控件视觉子树 + ControlState。
-/// 列表 slot 场景下，控件值由 driver bind 后 `set_control_value` 显式设（slot 复用时 reset）。
-///
-/// **ControlState 克隆是 separate pre-existing gap**：control_init=None 意味着克隆节点不建
-/// 控件槽（scene.controls），控件运行时值（progressbar.value/slider.value 等）不随克隆迁移。
-/// RoleTable 复制只解锁 role/slot 定位路径；完整视觉正确性需后续补 ControlState 克隆/re-init。
+/// 控件走 control_inits 缓存重建全新默认 ControlState（值不随克隆迁移）；列表 slot
+/// 场景下，控件值由 driver bind 后 `set_control_value` 显式设（slot 复用时 reset）。
 pub(crate) fn clone_node_recursive(scene: &mut Scene, src: NodeId) -> NodeId {
     let mut id_map: std::collections::HashMap<NodeId, NodeId> = std::collections::HashMap::new();
     let new_root = clone_node_inner(scene, src, &mut id_map);
@@ -386,11 +376,6 @@ fn clone_node_inner(
     if let Some(sp) = src_path {
         scene.image_srcs.insert(new_id, sp);
     }
-    // role/data-slot：克隆 RoleTable 条目（role-driven 控件部件定位 + 语义分派用）。
-    // 克隆出的子树必须保留 role/slot 标注——否则 list item 模板里的 progressbar fill 等
-    // 部件丢失定位 → 渲染回退默认（fill 撑满 100% 而非按 value 宽）。
-    // ControlState：上方 control_init 缓存已让 create_node_from_template 为克隆控件建
-    // 全新默认态（gap 已补）——不再依赖此处的 role/slot 路径，但二者协同。
     if let Some(info) = role_info {
         scene.roles.insert(new_id, info);
     }
@@ -412,7 +397,7 @@ pub fn append_child(scene: &mut Scene, parent: NodeId, child: NodeId) -> Result<
     {
         let p = scene.get(parent).ok_or("parent not live")?;
         if p.children.contains(&child) {
-            return Ok(()); // 幂等：已挂同一父子对
+            return Ok(());
         }
         if scene.get(child).and_then(|c| c.parent).is_some() {
             return Err("child already has parent（先 remove_child 摘除当前父）".into());
@@ -496,7 +481,7 @@ pub fn set_src(scene: &mut Scene, node: NodeId, src: &str) -> Result<(), String>
 /// 复用 `apply_decl`（apply_css 同路径，不依赖 parse feature）。多次 set 同 prop 累加
 /// （bit 幂等 OR，值覆盖）。
 ///
-/// **bit 检查前置（review I1 修复）：** 不在 `inline_bit` 表的 prop（transform/filter/
+/// **bit 检查前置：** 不在 `inline_bit` 表的 prop（transform/filter/
 /// border/padding-top/flex-grow/background-image/order/pointer-events/aspect-ratio 等
 /// 约 20 个——它们走别的运行时路径或不在 NodeStyle 表面）**完全不写** `inline_override`，
 /// 避免 ghost state（写字段但不置 bit → rematch `apply_inline_override` 不拷该字段 →
@@ -512,8 +497,6 @@ pub fn set_inline_override(scene: &mut Scene, node: NodeId, css: &str) -> Result
         }
         if let Some((prop, val)) = decl.split_once(':') {
             let prop = prop.trim();
-            // bit 检查前置：只对 inline_bit 表内的 prop apply。表外 prop 跳过 apply_decl，
-            // 连字段都不写 inline_override，杜绝 ghost state。
             if let Some(bit) = inline_bit(prop) {
                 if apply_decl(&mut n.inline_override, prop, val.trim()) {
                     n.inline_set.0 |= bit;
@@ -741,8 +724,6 @@ mod tests {
         (scene, root, child, grand)
     }
 
-    // ── Spec-4a A4：get_children / get_child_count（只读子节点遍历）──
-
     #[test]
     fn get_children_returns_node_children() {
         // build_3level: root → child → grand。覆盖中间节点（1 子）/ 叶子（0 子）/ 不存在节点。
@@ -761,11 +742,8 @@ mod tests {
         assert_eq!(get_children(&scene, NodeId(0xFFFF_FFFF)), None);
     }
 
-    // ── Spec-4a A5：add_class / remove_class / has_class（操作 Node.classes）──
-
     #[test]
     fn class_ops_mutate_and_flag_dirty() {
-        // 用现有 build_3level() helper（scene/dynamic.rs tests，root→child→grand）
         let (mut scene, root, _child, _grand) = build_3level();
         add_class(&mut scene, root, "active").unwrap();
         assert!(has_class(&scene, root, "active").unwrap());
@@ -812,7 +790,6 @@ mod tests {
         );
         // 删 child
         remove_node(&mut scene, &mut tweens, child);
-        // 联动清
         assert!(scene.anim.get(child).is_none(), "anim 清");
         assert!(scene.scroll.get(child).is_none(), "scroll 清");
         assert!(
@@ -823,7 +800,6 @@ mod tests {
             scene.get(child).is_none(),
             "slotmap removed（被删 NodeId 失效）"
         );
-        // root 仍在，且 root.children 不含 child
         assert!(scene.get(root).is_some(), "root 未删");
         assert!(
             !scene.get(root).unwrap().children.contains(&child),
@@ -929,14 +905,12 @@ mod tests {
         let (a, b, c) = (kids[0], kids[1], kids[2]);
         let bchild = scene.get(b).unwrap().children[0];
         scene.anim.ensure(bchild).opacity = Some(0.5);
-        // 删 b
         remove_node(&mut scene, &mut tweens, b);
         assert!(scene.get(a).is_some(), "兄弟 a 保留");
         assert!(scene.get(c).is_some(), "兄弟 c 保留");
         assert!(scene.get(b).is_none(), "b 删");
         assert!(scene.get(bchild).is_none(), "bchild 递归删");
         assert!(scene.anim.get(bchild).is_none(), "bchild anim 清");
-        // root.children 不含 b，但含 a/c
         let new_kids = scene.get(root).unwrap().children.clone();
         assert!(!new_kids.contains(&b), "b 从父摘除");
         assert!(
@@ -1074,17 +1048,12 @@ mod tests {
             scene.get(child_id_old).is_none(),
             "被删 NodeId 失效（gen++）"
         );
-        // 新 insert（复用槽位）
         let new_key = scene.nodes.insert(crate::scene::node::Node::default());
         let new_id = crate::scene::node::NodeId::from_key(new_key);
-        // child_id_old 与新 new_id 不同（gen 不同），被删 id 仍 None
         assert!(scene.get(child_id_old).is_none(), "被删 NodeId 仍失效");
         assert!(scene.get(new_id).is_some(), "新 NodeId live");
-        // root 仍在
         assert!(scene.get(root).is_some());
     }
-
-    // ---- 动态建树 API 单元测试（自由函数级，不依赖 Stage） ----
 
     fn empty_scene() -> Scene {
         Scene::default()
@@ -1273,12 +1242,10 @@ mod tests {
                 indeterminate: false,
             }),
         );
-        // side table 填了
         assert!(
             scene.controls.get(id).is_some(),
             "control side table filled"
         );
-        // 不再注入子节点（作者自写结构）
         assert!(
             scene.get(id).unwrap().children.is_empty(),
             "control_init 不再注入子节点（作者自写 role/slot 结构）"
@@ -1497,7 +1464,6 @@ mod tests {
         let mut ids = Vec::new();
         for _ in 0..64 {
             let id = create_node(&mut scene, "div", "").unwrap();
-            // 每个新 NodeId 的 index 应在 parallel arrays 范围内
             assert!(
                 id.index() < scene.text_layouts.len(),
                 "text_layouts must cover node index {} (len {})",
@@ -1536,8 +1502,6 @@ mod tests {
         let cap = scene.nodes.capacity();
         assert!(scene.text_layouts.len() > cap);
     }
-
-    // ── clone_subtree：场景级子树深拷贝（list spec §6 side table 判定）──
 
     #[test]
     fn clone_subtree_copies_structure_text_image_classes() {
@@ -1585,7 +1549,7 @@ mod tests {
 
     #[test]
     fn clone_subtree_skips_runtime_side_tables() {
-        // side table 判定（list spec §6）：运行时状态（scroll/anim/tween/EditState）
+        // side table 判定：运行时状态（scroll/anim/tween/EditState）
         // 不深拷——克隆根是干净模板，调用方按需重设。
         //
         // 非平凡设置：create_root("div","overflow:auto") 只写 CSS，不预填 ScrollTable
@@ -1610,7 +1574,7 @@ mod tests {
 
     #[test]
     fn clone_subtree_propagates_role_table() {
-        // I1 regression：clone_node_recursive 必须复制 RoleTable 条目。list item 模板里的
+        // 回归：clone_node_recursive 必须复制 RoleTable 条目。list item 模板里的
         // role/slot 标注（如 progressbar 的 fill 部件）若不随克隆迁移 → 部件定位失败 →
         // 渲染回退默认（fill 撑满 100% 而非按 value 宽）。复刻 instantiate 从模板填
         // RoleTable 的路径（stage.rs：role/data-slot → RoleTable.insert）。
@@ -1645,10 +1609,8 @@ mod tests {
         // 结构同源：克隆子树的 bar/fill 按 DFS 序定位（root → bar → fill）。
         let cloned_bar = scene.get(cloned).unwrap().children[0];
         let cloned_fill = scene.get(cloned_bar).unwrap().children[0];
-        // role 条目复制到新 NodeId，内容一致。
         let bar_info = scene.roles.get(cloned_bar).expect("克隆节点 role 条目存在");
         assert_eq!(bar_info.role.as_deref(), Some("progressbar"));
-        // data-slot 条目也复制到新 NodeId。
         assert!(
             scene
                 .roles

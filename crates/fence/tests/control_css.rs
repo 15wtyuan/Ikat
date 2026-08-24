@@ -15,8 +15,6 @@ fn has_control_css_diag(result: &loomgui_fence::pipeline::ParsedTemplate, needle
         .any(|d| d.code == DiagnosticCode::FenceControlWithoutCss && d.message.contains(needle))
 }
 
-// ── ProgressBar (role=progressbar) ──
-
 /// 裸 `role=progressbar` 无 CSS → error（控件空白）。
 #[test]
 fn progressbar_without_css_errors() {
@@ -75,8 +73,6 @@ fn progressbar_without_css_message_is_actionable() {
     );
 }
 
-// ── Slider (role=slider) ──
-
 /// 裸 `role=slider` 无 CSS → error。
 #[test]
 fn slider_without_css_errors() {
@@ -100,8 +96,6 @@ fn slider_with_css_passes() {
         result.diagnostics
     );
 }
-
-// ── Toggle (role=switch) ──
 
 /// 裸 `role=switch` 无 CSS → error。
 #[test]
@@ -127,8 +121,6 @@ fn toggle_with_css_passes() {
     );
 }
 
-// ── RadioButton (role=radio) ──
-
 /// 裸 `role=radio` 无 CSS → error。
 #[test]
 fn radio_without_css_errors() {
@@ -152,8 +144,6 @@ fn radio_with_css_passes() {
         result.diagnostics
     );
 }
-
-// ── 选择器形态覆盖 ──
 
 /// 后代选择器命中控件也算（`.bar [role="progressbar"]`）。
 #[test]
@@ -206,8 +196,6 @@ fn pseudo_class_rule_still_counts() {
     );
 }
 
-// ── TextField / TextArea (role=textbox) ──
-//
 // 文本输入控件同样不带 UA 默认样式：浏览器给 textbox 套自带外观
 // （边框/底色/光标），但 LoomGUI core 无 UA 表——打包后运行时空白。
 

@@ -28,8 +28,6 @@ fn make_layout(text: &str, font: &Font) -> TextLayout {
     )
 }
 
-// ─────────────────────────── line_byte_ranges ───────────────────────────
-
 #[test]
 fn line_byte_ranges_single_line_ascii() {
     let font = match test_font() {
@@ -72,16 +70,14 @@ fn line_byte_ranges_multiline_includes_newline_bytes() {
     let ranges = line_byte_ranges(&layout, "ab\ncd");
     // measure_text 把 \n 合进前一行（带 .notdef glyph），故首行含 3 字形（a,b,\n）。
     assert_eq!(ranges.len(), 2, "two lines → 2 ranges");
-    // 首行 start=0, 末行 end=5("ab\ncd" 总 5 byte)
     assert_eq!(ranges[0].0, 0, "first line starts at 0");
     assert_eq!(ranges[1].1, 5, "last line ends at total bytes(5)");
-    // 两行覆盖全部字节
     assert_eq!(ranges[0].1, ranges[1].0, "ranges contiguous");
 }
 
 #[test]
 fn line_byte_ranges_cjk_multi_byte() {
-    // Finding 2: CJK chars (each 3 bytes in UTF-8) exercise len_utf8() path.
+    // CJK chars (each 3 bytes in UTF-8) exercise the len_utf8() path.
     let font = match test_font() {
         Some(f) => f,
         None => {
@@ -93,8 +89,6 @@ fn line_byte_ranges_cjk_multi_byte() {
     let ranges = line_byte_ranges(&layout, "\u{4f60}\u{597d}");
     assert_eq!(ranges, vec![(0, 6)], "2 CJK chars → [(0, 6)]");
 }
-
-// ─────────────────────────── cursor_pixel_x ───────────────────────────
 
 #[test]
 fn cursor_pixel_x_returns_zero_at_byte_offset_zero() {
@@ -157,7 +151,7 @@ fn cursor_pixel_x_end_equals_total_advances() {
 
 #[test]
 fn cursor_pixel_x_multiline_boundary_offset_to_line1() {
-    // Finding 1: offset at first byte of line 1 must resolve to line 1, not line 0.
+    // offset at first byte of line 1 must resolve to line 1, not line 0.
     let font = match test_font() {
         Some(f) => f,
         None => {
@@ -171,10 +165,8 @@ fn cursor_pixel_x_multiline_boundary_offset_to_line1() {
     // offset=3 是 line 1 的首字节 (c)，必须返回 line_index=1。
     let (_x, li) = cursor_pixel_x(&layout, &ranges, 3);
     assert_eq!(li, 1, "offset 3 (first byte of line 1) → line_index 1");
-    // offset=0 → line 0
     let (_, li0) = cursor_pixel_x(&layout, &ranges, 0);
     assert_eq!(li0, 0, "offset 0 → line_index 0");
-    // offset=5 (end) → last line (line 1)
     let (_, li_end) = cursor_pixel_x(&layout, &ranges, 5);
     assert_eq!(li_end, 1, "offset 5 (end-of-text) → last line");
 }
@@ -198,11 +190,9 @@ fn cursor_pixel_x_first_glyph_advance_matches_glyph() {
     );
 }
 
-// ─────────────────────────── hit_byte_offset ───────────────────────────
-
 #[test]
 fn cursor_pixel_x_cjk_mid_char() {
-    // Finding 2: CJK 3-byte chars – offset 3 falls between the two chars.
+    // CJK 3-byte chars – offset 3 falls between the two chars.
     let font = match test_font() {
         Some(f) => f,
         None => {
@@ -277,7 +267,6 @@ fn hit_byte_offset_midpoint_snaps_before_vs_after() {
     let g0 = &layout.lines[0].runs[0].glyphs[0];
     let g1 = &layout.lines[0].runs[0].glyphs[1];
 
-    // Before midpoint of first glyph → offset 0
     let mid_a = g0.advance / 2.0;
     assert_eq!(
         hit_byte_offset(&layout, &ranges, mid_a - 0.1, 0.0),
@@ -291,7 +280,6 @@ fn hit_byte_offset_midpoint_snaps_before_vs_after() {
         "at mid→byte 1"
     );
 
-    // Before midpoint of second glyph → offset 1
     let mid_b = g0.advance + g1.advance / 2.0;
     assert_eq!(
         hit_byte_offset(&layout, &ranges, mid_b - 0.1, 0.0),
@@ -309,17 +297,14 @@ fn hit_byte_offset_y_determines_line() {
             return;
         }
     };
-    // Two-line text with known layout.
     let layout = make_layout("ab\ncd", &font);
     let ranges = line_byte_ranges(&layout, "ab\ncd");
 
-    // y=0 → first line
     assert_eq!(
         hit_byte_offset(&layout, &ranges, -10.0, 0.0),
         0,
         "y=0 → first line"
     );
-    // y = very large → last line (offset 3 = byte after 'c')
     assert_eq!(
         hit_byte_offset(&layout, &ranges, -10.0, 9999.0),
         3,

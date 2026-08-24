@@ -1,4 +1,4 @@
-//! 复现 api-infra #7 验收时的 FFI panic（rematch_pseudo_classes "live node" expect 每帧炸）。
+//! 复现 api-infra 验收时的 FFI panic（rematch_pseudo_classes "live node" expect 每帧炸）。
 //! 完整镜像 driver 行为链：页面实例化 + 数据驱动列表 + 时钟每帧 remove_node/create/set_text
 //! churn（新 TextContent 释放语义）+ 副本包 Load/Instantiate/Unload/重载 + 下拉开关。
 
@@ -39,7 +39,7 @@ fn main() {
     }
     let _ = s.tick_and_render();
 
-    // #6 数据驱动列表（driver WireInfraDrivers 同款）
+    // 数据驱动列表（driver WireInfraDrivers 同款）
     let list_id = s
         .scene
         .as_ref()
@@ -66,7 +66,7 @@ fn main() {
         .find_by_id_attr("infra-frames")
         .expect("frames");
 
-    // #7 副本包 + 2 个微缩窗（driver 同款覆写）
+    // 副本包 + 2 个微缩窗（driver 同款覆写）
     s.load_package("infra-copy", &pkg).expect("load copy");
     let ul_stage = s
         .scene
@@ -115,7 +115,7 @@ fn main() {
             append_child(sc, target, tn).unwrap();
         }
         if f == 60 {
-            // #7 卸载 + 旧句柄实例化应失败 + 重载
+            // 卸载 + 旧句柄实例化应失败 + 重载
             let _ = remove_child(s.scene.as_mut().unwrap(), ul_stage, minis[0]);
             let sc = s.scene.as_mut().unwrap();
             remove_node(sc, &mut Default::default(), minis[0]);

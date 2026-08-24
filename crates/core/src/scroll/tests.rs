@@ -201,7 +201,6 @@ fn viewport_and_overlap_from_geometry() {
     assert!((st.viewport_size.0 - 100.0).abs() < 1e-3);
     assert!((st.viewport_size.1 - 100.0).abs() < 1e-3);
     // overlap = max(content - viewport, 0) = (0, 0) 因 content < viewport 各轴
-    // 注：content=(40,80) < viewport=(100,100) → overlap (0,0)
     assert_eq!(st.overlap, (0.0, 0.0));
 }
 
@@ -368,7 +367,6 @@ fn empty_children_content_is_zero() {
     assert_eq!(st.overlap, (0.0, 0.0));
 }
 
-// ── 物理方法测 ────────────────────────────────────────
 #[test]
 fn drag_follow_one_to_one_within_bounds() {
     let mut st = ScrollPaneState::default();
@@ -525,7 +523,6 @@ fn cubic_out_curve_endpoints() {
     );
 }
 
-// ── content_size 变化补偿（最小） ────────────────────────────────────
 #[test]
 fn content_size_change_clamps_running_tween() {
     // 滚动到 pos=80（overlap=100），tweening≠0；然后 content 缩 → overlap 变 50
@@ -597,7 +594,6 @@ fn content_size_change_in_range_keeps_tween() {
     assert_eq!(st2.tweening[1], 1, "pos 在范围内不打断 tween");
 }
 
-// ── apply_wheel_to_hit ─────────────────────────────────────────────
 #[test]
 fn apply_wheel_to_hit_scrolls_nearest_effective_ancestor() {
     use crate::scene::transform::compute_world_transforms;
@@ -717,7 +713,6 @@ fn apply_wheel_to_hit_on_thumb_decodes_sentinel() {
     );
 }
 
-// ── thumb rect 测 ─────────────────────────────────────────
 #[test]
 fn v_thumb_rect_is_right_edge_with_proportional_size() {
     let mut s = build_scroll_scene();
@@ -827,7 +822,6 @@ fn h_thumb_rect_is_bottom_edge() {
     assert_eq!(r.y, 92.0, "底边: y = lr.y(0) + lr.h(100) - track_h(8)");
 }
 
-// ── 滚动松手物理 ─────────────────────────────────────────────────
 // 越界松手：直接 bounce 回边界，不 inertia。
 // 界内：二次 ratio 削弱低速；inertia target 不 clamp，advance 运行时越界 >20px 截断 + 回弹。
 /// 界内速度刚过阈值：二次 ratio 削弱使 change 极小（≈5px），而非全速冲越界。
@@ -963,8 +957,6 @@ fn in_bounds_low_velocity_stays_put() {
         st.scroll_pos.1
     );
 }
-
-// ── content_size 注入测 ─────────────────────────────
 
 /// 建含单个 scroll 容器的 Stage（无子节点），供 驱动注入测试用。
 /// root 是 overflow_y=Scroll 的 Container，layout_rect (0,0,200,100)。
@@ -1142,7 +1134,6 @@ fn clear_content_size_override_restores_auto() {
     );
 }
 
-// ── Bug 2: refresh_content_sizes clamp when tweening==0 ──────────
 /// idle 容器（tweening=0）viewport 缩导致 scroll_pos 越界：
 /// refresh_content_sizes 应始终 clamp，不只 tweening≠0 时。
 #[test]
@@ -1236,7 +1227,7 @@ fn refresh_clamps_idle_overridden_out_of_range_pos() {
 
 /// anchoring 豁免：pane 是某 anchoring_active ListView 的祖先时，refresh 的 clamp
 /// 分支仍 clamp scroll_pos 但不清 tweening（几何变化源于虚拟化回填，tween 应继续）。
-/// 回归 §5 anchoring-vs-tween 交互——不豁免会让 ScrollToItem(Smooth) 半途静默停住。
+/// 回归 anchoring-vs-tween 交互——不豁免会让 ScrollToItem(Smooth) 半途静默停住。
 #[test]
 fn refresh_clamp_keeps_tween_when_anchoring_active() {
     use crate::list::ListState;

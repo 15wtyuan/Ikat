@@ -12,7 +12,6 @@
   var autoHtmlCache = {};
   var editorInited = false;
 
-  // ── DOM helpers ──
   function el(tag, className, textContent) {
     var e = document.createElement(tag);
     if (className) e.className = className;
@@ -28,7 +27,6 @@
     return inp;
   }
 
-  // ── Native pickers (tauri-plugin-dialog) ──
   function pickDirectory(title) {
     return invoke("plugin:dialog|open", {
       options: { directory: true, multiple: false, title: title || "选择目录" },
@@ -43,7 +41,6 @@
     return invoke("relativize", { root: wsPath, abs: absPath });
   }
 
-  // ── Save ──
   function collectWorkspace() {
     var packages = [];
     (ws.packages || []).forEach(function (pkg, i) {
@@ -106,7 +103,6 @@
     return result;
   }
 
-  // ── Tab switching ──
   function setupTabs() {
     document.querySelectorAll(".tab").forEach(function (tab) {
       tab.addEventListener("click", function () {
@@ -119,12 +115,10 @@
     });
   }
 
-  // ── 1. General section ──
   function renderGeneral() {
     var body = $("section-general-body");
     body.innerHTML = "";
 
-    // 输出目录：[label][input][+拖入][打开]
     var row = el("div", "form-row");
     row.appendChild(el("span", "form-label", "输出目录"));
     var inp = inputEl("text", ws.output_dir || "", "form-input", "例如 ../loomgui_unity/Assets/Bundles");
@@ -146,7 +140,6 @@
     body.appendChild(row);
   }
 
-  // ── 2. Packages section ──
   function renderPackages() {
     var body = $("section-pkg-body");
     body.innerHTML = "";
@@ -155,7 +148,6 @@
     ws.packages.forEach(function (pkg, i) {
       var card = el("div", "config-card");
 
-      // name row: [name][+目录][删除]
       var nameRow = el("div", "form-row");
       nameRow.appendChild(el("span", "form-label", "名称"));
       var nameInp = inputEl("text", pkg.name, "form-input");
@@ -180,7 +172,6 @@
     body.appendChild(dz);
   }
 
-  // ── 3. Atlases section ──
   function renderAtlases() {
     var body = $("section-atlas-body");
     body.innerHTML = "";
@@ -200,7 +191,6 @@
       nameRow.appendChild(makeDeleteButton(i, "atlases", renderAtlases));
       card.appendChild(nameRow);
 
-      // checkboxes
       var checksRow = el("div", "card-checks");
       checksRow.appendChild(makeCheckbox("atlas-standalone-" + i, " 独立单页", !!atlas.standalone, function () { saveIfLoaded(); }));
       card.appendChild(checksRow);
@@ -228,7 +218,6 @@
     body.appendChild(dz);
   }
 
-  // ── 4. Fonts section ──
   function renderFonts() {
     var body = $("section-font-body");
     body.innerHTML = "";
@@ -257,7 +246,6 @@
       famRow.appendChild(makeDeleteButton(i, "fonts", renderFonts));
       card.appendChild(famRow);
 
-      // file row: [file][+拖入][打开]
       var fileRow = el("div", "form-row");
       fileRow.appendChild(el("span", "form-label", "文件"));
       var fileInp = inputEl("text", font.file, "form-input");
@@ -287,7 +275,6 @@
       fileRow.appendChild(openBtn);
       card.appendChild(fileRow);
 
-      // default (radio) + fallback
       var checksRow = el("div", "card-checks");
       var defCb = el("label", "form-check");
       var defInp = inputEl("radio", "", "");
@@ -313,7 +300,6 @@
     body.appendChild(dz);
   }
 
-  // ── Shared card builders ──
   function makeCheckbox(id, label, checked, onChange) {
     var cb = el("label", "form-check");
     var inp = inputEl("checkbox", "", "");
@@ -453,7 +439,6 @@
     return list;
   }
 
-  // ── Auto-scan HTML files ──
   function refreshAutoScans() {
     if (!ws.packages) return;
     ws.packages.forEach(function (pkg) {
@@ -488,7 +473,6 @@
     });
   }
 
-  // ── Drag-drop: Tauri 2 native onDragDropEvent ──
   var currentDropzone = null;
 
   // 用 getBoundingClientRect 命中 dropzone，比 elementFromPoint 可靠（不依赖 z-index/pointer-events）。
@@ -581,7 +565,6 @@
   function basename(rel) { return rel.replace(/^.*[\\/]/, "").replace(/[\\/]$/, ""); }
   function validIdx(collection, idx) { return idx >= 0 && idx < (ws[collection] || []).length; }
 
-  // ── Log modal ──
   function setupLog() {
     $("btn-log").addEventListener("click", function () { $("log-overlay").classList.remove("hidden"); });
     $("btn-log-close").addEventListener("click", function () { $("log-overlay").classList.add("hidden"); });
@@ -590,7 +573,6 @@
     });
   }
 
-  // ── Build ──
   function setupBuild() {
     $("btn-build").addEventListener("click", function () {
       var logDiv = $("build-log");
@@ -627,8 +609,7 @@
     if (report.warnings && report.warnings.length) html += '<span>警告: ' + report.warnings.length + "</span>";
     if (!report.packages || !report.packages.length) html += '<span class="build-err">未发现包</span>';
     html += "</div>";
-    // W1/W2 一致性警告渲染进日志（修前被丢弃——GUI 里从未可见）：
-    // 「合法但预览≠运行时」的不一致，作者须看到以补全声明。
+    // 一致性警告渲染进日志：「合法但预览≠运行时」的不一致，作者须看到以补全声明。
     if (report.warnings && report.warnings.length) {
       report.warnings.forEach(function (w) {
         var loc = (w.file || "?") + ":" + (w.line || 0) + ":" + (w.column || 0);
@@ -659,7 +640,6 @@
     return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
-  // ── Entry point (called from app.js) ──
   function renderMain(_ws, _path) {
     ws = _ws || { version: 1, output_dir: "", packages: [], atlases: [], fonts: [] };
     wsPath = _path;

@@ -41,7 +41,7 @@ fn validate_element(
 ) {
     let tag = element.tag.as_str();
 
-    // 1. Tag name validation -- unknown tag (not in registry, not shell, not custom)
+    // Unknown tag: not in registry, not shell, not custom
     if !is_shell_tag(tag) && find_tag(tag).is_none() && !tag.contains('-') {
         diagnostics.push(Diagnostic::error(
             DiagnosticCode::FenceUnknownTag,
@@ -51,7 +51,6 @@ fn validate_element(
         return;
     }
 
-    // 2. Attribute validation
     let tag_spec = find_tag(tag);
     // Resolved control semantic (tag + role), for semantic-scoped content attrs.
     let role = element
@@ -66,7 +65,6 @@ fn validate_element(
         .is_some_and(|a| a.value == "true");
     let semantic = resolve_semantic(tag, role, aria_multiline);
     for attr in &element.attributes {
-        // Global attrs are always accepted
         if is_global_attr(&attr.name) {
             if attr.name == "style" {
                 validate_inline_style(&attr.value, attr.span, file, line_map, diagnostics);
@@ -86,7 +84,6 @@ fn validate_element(
             continue;
         }
 
-        // Structural attrs -- validate value against domain
         if let Some(spec) = tag_spec.and_then(|ts| find_structural_attr(ts, &attr.name)) {
             validate_attr_value(
                 &attr.name,
@@ -100,7 +97,6 @@ fn validate_element(
             continue;
         }
 
-        // Content attrs -- just check name is in the tag's whitelist
         if let Some(ts) = tag_spec {
             if is_content_attr(ts, &attr.name) {
                 continue;
@@ -115,7 +111,6 @@ fn validate_element(
             }
         }
 
-        // Unknown attribute
         diagnostics.push(Diagnostic::error(
             DiagnosticCode::FenceUnknownAttr,
             format!("attribute \"{}\" is not recognized on <{}>", attr.name, tag),

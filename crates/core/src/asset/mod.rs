@@ -4,7 +4,7 @@
 //! 任何改变字节的布局改动都会翻转哈希，bump 版本时须同步更新登记值。
 //! v39：TweenProp 加 Transform 变体（transition: transform 复合 TRS 通道，bincode 判别值扩展）。
 //! v35：TemplateNode 加 custom_tag 列 + component_scope 位（flags bit 0x04）+ PerComponentScopes
-//!   段（组件展开域锚定规则表；Custom Element 打包期展开产物，见 component-system spec）。
+//!   段（组件展开域锚定规则表；Custom Element 打包期展开产物）。
 //! v34：ResolvedStyle.background_gradient Option<Gradient2>→Option<Gradient>（radial + 多 stop + 任意角度，bincode 布局变）。
 //! v33：TemplateNode flags 字节新增 rich_text_block 位（rich-text-block 容器根标记，bit 0x02）。
 //! v32：ResolvedStyle.box_shadow Option<BoxShadow>→Vec<BoxShadow> + blur/inset 字段（box-shadow 全语义，bincode 布局变）。
@@ -47,8 +47,6 @@ pub(crate) const MIN_VERSION: u32 = 40;
 pub(crate) const MAX_VERSION: u32 = 40;
 const NULL_IDX: u16 = 0xFFFF;
 
-// ── 多组件包数据结构 ──────────────────────────────────────────────
-
 /// 一个已加载的包（资源池条目）。`name` read 时填空串，由 `Stage::load_package(name, ..)` 覆盖。
 #[derive(Debug, Clone)]
 pub struct Package {
@@ -62,12 +60,12 @@ pub struct ComponentTemplate {
     pub name: String,
     pub nodes: Vec<TemplateNode>,
     pub dynamic_rules: DynamicRuleTable,
-    /// @keyframes 规则表（打包期从组件 `<style>` 提取，spec §3.5）。instantiate 时合并进
+    /// @keyframes 规则表（打包期从组件 `<style>` 提取）。instantiate 时合并进
     /// Scene.keyframes 全局表（CSS 全局查找语义）。
     pub keyframes: Vec<KeyframesRule>,
     /// 组件展开域（Custom Element 打包期展开的实例）锚定规则：每实例一条
     /// (锚节点 idx, 组件模板自带动态规则)。instantiate 时按 scope_root=锚节点包装
-    /// （组件内部选择器只在该展开域内匹配，main-design §5.4）。
+    /// （组件内部选择器只在该展开域内匹配）。
     pub component_scopes: Vec<(usize, DynamicRuleTable)>,
 }
 
@@ -152,8 +150,8 @@ pub struct TemplateNode {
     pub aria_controls: Option<String>,
     /// rich-text-block 容器根标记：`display:block` 容器且其直接子全是 inline 级
     /// （text/span/img）。打包期由 fence `rich_text_blocks`（ir_idx 集合）烘入，运行时
-    /// compiler/solve/render 读此 flag 把 inline 子拍平成 RichRun 走 inline flow
-    /// （见 main-design 文本模型）。Text 节点与 block 容器永远 false。
+    /// compiler/solve/render 读此 flag 把 inline 子拍平成 RichRun 走 inline flow。
+    /// Text 节点与 block 容器永远 false。
     pub rich_text_block: bool,
     /// CustomElement 的原始 hyphen 标签名（`<game-item-card>` → "game-item-card"）。
     /// 打包期展开保留字面量（tag 选择器 rematch 匹配 + dump 发射用）。非 CustomElement None。
@@ -279,7 +277,7 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
                 "component `{name}` nodes[0] must be root (parent_idx=None)"
             );
         }
-        // intern 每节点字符串 + 收 (parent_idx 全局化, ...)。spec 约定 nodes[0]=组件根（parent=None）。
+        // intern 每节点字符串 + 收 (parent_idx 全局化, ...)。
         for tn in nodes.iter() {
             // parent_idx 是组件内局部位置；转全局（-1 = 组件根）
             let parent_global: i32 = match tn.parent_idx {
@@ -502,7 +500,6 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         let dynamic_len = r.u32("comp_dynamic_len")?;
         comp_table.push((name_idx, root_node_idx, node_count, dynamic_len));
     }
-    // 总节点数 = 各组件 node_count 之和
     let total_nodes: u32 = comp_table.iter().map(|(_, _, n, _)| *n).sum();
     // NodeBlock → TemplateNode（平铺，parent_idx 存盘是全局位置；读后转回组件内局部）
     let mut all_nodes: Vec<TemplateNode> = Vec::with_capacity(total_nodes as usize);
@@ -720,7 +717,7 @@ fn intern(
     i
 }
 
-/// 手动编码组件 keyframes 表（v30 pkg 格式，spec §4.2）。
+/// 手动编码组件 keyframes 表（v30 pkg 格式）。
 /// 布局：u16 rule_count + 逐 rule { u16 name_idx, u16 stop_count, 逐 stop }。
 /// stop 布局：selector_tag(u8: 0=From/1=To/2=Percent) [+pct(u8)] + 4 个可动画字段
 /// （每字段 flag(u8)+载荷；transform 内部 TRS 三分量各自 flag）+ hook_idx(u16)。

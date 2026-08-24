@@ -25,11 +25,9 @@ pub struct WheelEvent {
 }
 const _: () = {
     assert!(std::mem::size_of::<WheelEvent>() == 16);
-}; // ABI 断言
+};
 
-// ── 物理常量 ─────────────────────────────────────────────
 // 滚动触发阈值（px）：鼠标/触摸移动超此才认拖拽。
-// mouse 8 / touch 20。
 pub const SCROLL_THRESHOLD_MOUSE: f32 = 8.0;
 pub const SCROLL_THRESHOLD_TOUCH: f32 = 20.0;
 /// 惯性减速系数（每 1/60s 速度衰减比）。
@@ -98,7 +96,7 @@ pub struct ScrollPaneState {
 /// transient——不进 pkg（同 `anim` / `world_transforms`）。
 ///
 /// 用 `HashMap<NodeId, ScrollPaneState>` 而非 `Vec<Option<...>>`（按 id.index() 索引），同 AnimTable
-/// （见 node.rs AnimTable doc：slotmap Key 是 unsafe trait + KeyData 64bit 与 NodeId 32bit 不匹配，
+/// （slotmap Key 是 unsafe trait + KeyData 64bit 与 NodeId 32bit 不匹配，
 /// NodeId 不能直接当 SecondaryMap Key）。
 #[derive(Debug, Clone, Default)]
 pub struct ScrollTable(pub std::collections::HashMap<NodeId, ScrollPaneState>);
@@ -343,7 +341,6 @@ impl ScrollPaneState {
             } else {
                 self.overlap.1
             };
-            // 推进
             if ax == 0 {
                 self.tween_time.0 += dt;
             } else {
@@ -403,7 +400,6 @@ impl ScrollPaneState {
                 }
             }
         }
-        // done：两轴 tween_change 都归零
         if self.tween_change.0 == 0.0 && self.tween_change.1 == 0.0 {
             self.scroll_pos.0 = self.scroll_pos.0.clamp(0.0, self.overlap.0);
             self.scroll_pos.1 = self.scroll_pos.1.clamp(0.0, self.overlap.1);

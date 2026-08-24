@@ -65,7 +65,6 @@ pub fn mul(self_m: &Affine2, other: &Affine2) -> Affine2 {
     ]
 }
 
-/// 矩阵 × 点。
 pub fn apply_point(m: &Affine2, x: f32, y: f32) -> (f32, f32) {
     (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
 }
@@ -89,7 +88,6 @@ pub fn inverse(m: &Affine2) -> Affine2 {
     [inv_a, inv_b, inv_c, inv_d, inv_tx, inv_ty]
 }
 
-/// 是否单位矩阵。
 pub fn is_identity(m: &Affine2) -> bool {
     m[0] == 1.0 && m[1] == 0.0 && m[2] == 0.0 && m[3] == 1.0 && m[4] == 0.0 && m[5] == 0.0
 }
@@ -148,7 +146,6 @@ impl NodeTransform {
         let t = from_translate(self.translate[0], self.translate[1]);
         let r = from_rotate(self.rotation);
         let s = from_scale(self.scale[0], self.scale[1]);
-        // TRS 环绕 origin：T(origin) ∘ R ∘ S ∘ T(-origin)（origin=[0,0] 时两侧 T 为 identity，等价于纯 TRS）
         let pivot = from_translate(self.origin[0], self.origin[1]);
         let unpin = from_translate(-self.origin[0], -self.origin[1]);
         mul(&t, &mul(&pivot, &mul(&r, &mul(&s, &unpin))))
@@ -180,10 +177,6 @@ impl Affine2Ext for Affine2 {
         is_pure_translation(&self)
     }
 }
-
-// 测试用：`use super::*` 导入 IDENTITY const + from_* fn + Affine2Ext trait；
-// 测试里直接 `IDENTITY` / `from_translate(...)` / `.mul()` 即可（无 `` 前缀——
-// `Affine2` 是 type alias 不能同名建 mod，故用 free fn + trait）。
 
 #[cfg(test)]
 mod tests {

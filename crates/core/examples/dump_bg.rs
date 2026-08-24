@@ -1,4 +1,4 @@
-//! 诊断 §3.6 bg-image / §3.8 filter / §3.9 nineslice：
+//! 诊断 bg-image / filter / nineslice：
 //! dump rect / program / vcol / uv 区间 / color_matrix / verts，定位偏移、滤镜色差、slice 失真。
 //! pkg.bin 路径（load_package 读 StreamingAssets/showcase.pkg.bin，验打包产物含 atlas UV）。
 use loomgui_core::render::node::NodePayload;

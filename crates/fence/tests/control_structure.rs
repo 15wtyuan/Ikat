@@ -1,6 +1,6 @@
 //! 控件结构契约校验（Stage 6.8，端到端）。
 //!
-//! role 驱动控件自写结构（spec §2.2），作者可能漏写必需子节点。打包期
+//! role 驱动控件自写结构，作者可能漏写必需子节点。打包期
 //! `FenceMissingControlChild` error 严格拦截，不依赖运行时 reparent 兜底。本测试
 //! 覆盖端到端 parse_template：role 驱动控件缺必需子 → error。
 
@@ -18,8 +18,6 @@ fn struct_errors(html: &str) -> Vec<String> {
         .map(|d| d.message.clone())
         .collect()
 }
-
-// ── combobox / listbox ──
 
 #[test]
 fn combobox_missing_listbox_reports_error() {
@@ -52,8 +50,6 @@ fn combobox_full_structure_passes() {
     assert!(msgs.is_empty(), "{msgs:?}");
 }
 
-// ── slider / progressbar (data-slot) ──
-
 #[test]
 fn slider_missing_thumb_reports_error() {
     let msgs = struct_errors(r#"<div role="slider"></div>"#);
@@ -80,8 +76,6 @@ fn progressbar_with_fill_passes() {
     assert!(msgs.is_empty(), "{msgs:?}");
 }
 
-// ── list ──
-
 #[test]
 fn list_missing_listitem_reports_error() {
     let msgs = struct_errors(r#"<div role="list"></div>"#);
@@ -95,8 +89,6 @@ fn list_with_listitem_passes() {
     assert!(msgs.is_empty(), "{msgs:?}");
 }
 
-// ── 无必需子角色的控件（不校验）──
-
 #[test]
 fn controls_without_required_children_not_checked() {
     // textbox / spinbutton / switch / radio：裸节点不报结构 error
@@ -106,18 +98,14 @@ fn controls_without_required_children_not_checked() {
     assert!(msgs.is_empty(), "{msgs:?}");
 }
 
-// ── 必需子必须是直接子 ──
-
 #[test]
 fn required_child_must_be_direct() {
-    // thumb 嵌在 wrapper 里不算直接子（spec §2.2 字面结构）
+    // thumb 嵌在 wrapper 里不算直接子
     let msgs = struct_errors(
         r#"<div role="slider"><div class="wrap"><div data-slot="thumb"></div></div></div>"#,
     );
     assert_eq!(msgs.len(), 1, "{msgs:?}");
 }
-
-// ── 教学文案自包含 ──
 
 #[test]
 fn missing_child_message_is_actionable() {

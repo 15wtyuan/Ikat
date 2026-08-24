@@ -1187,8 +1187,6 @@ fn build_reads_anim_opacity_and_bg_override() {
     }
 }
 
-// ── 合成 scrollbar thumb ─────────────────────────
-
 #[test]
 fn effective_scroll_container_emits_thumb_node() {
     use crate::style::resolved::{OverflowMode, ResolvedStyle};
@@ -1551,13 +1549,11 @@ fn render_long_text_still_wraps_with_layout_reuse() {
     );
 }
 
-// ── rich-text-block render arm（T7）─────────────────────────
-
 /// rich-text-block Container 在 render 期读 `scene.text_layouts[div]` 产文字 mesh：
 /// - 背景 RenderNode（真 div node_id，program=0）；
 /// - 文字 RenderNode（tf_text_synth 合成 id，program=1，含字形顶点）；
-/// - 折叠的 inline TextNode 子**不**单独产 RenderNode（T6 跳过 taffy → layout_rect=0，
-///   T7 跳过 render 子遍历）。
+/// - 折叠的 inline TextNode 子**不**单独产 RenderNode（跳过 taffy → layout_rect=0，
+///   render 期跳过子遍历）。
 #[test]
 fn rich_text_block_renders_text_mesh() {
     let fonts = match test_font_table() {
@@ -1622,7 +1618,7 @@ fn rich_text_block_renders_text_mesh() {
         (200.0, 1000.0),
         &std::collections::HashMap::new(),
     );
-    // T6 契约：text_layouts[div] 已填，inline 子 layout_rect=0。
+    // 契约：text_layouts[div] 已填，inline 子 layout_rect=0。
     assert!(
         scene.text_layouts[div.index()].is_some(),
         "solve 应为 rich-text-block div 填 text_layouts[div]"
@@ -1856,8 +1852,6 @@ fn non_rich_container_renders_text_child_separately() {
     );
 }
 
-// ── change_level 三级测试 ─────────────────────────
-
 #[test]
 fn change_level_skip_header_full() {
     use crate::render::node::ChangeLevel;
@@ -1963,8 +1957,6 @@ fn change_level_reload_all_full() {
         "prev 无本节点 → Full（防错位）"
     );
 }
-
-// ── Container bg-image ────────────────────────────
 
 #[test]
 fn build_container_with_bg_image_carries_path() {
@@ -2156,8 +2148,6 @@ fn build_container_bg_image_coexists_with_bg_color() {
     }
 }
 
-// ── program 号（CSS 合成 bg-image）──────────────
-
 #[test]
 fn build_container_bg_image_hit_sets_program_2() {
     // Container 设 background-image → image_path=Some(url) → program=2（CSS 合成）。
@@ -2311,8 +2301,6 @@ fn build_image_node_keeps_program_0() {
     }
 }
 
-// ── color_filter → program=3 + nine_slice 分流 ──────────
-
 #[test]
 fn build_container_with_filter_sets_program_3() {
     // Container + filter:grayscale(1) → program=3 + color_matrix 灰化矩阵
@@ -2354,7 +2342,7 @@ fn build_container_with_filter_sets_program_3() {
     }
 }
 
-/// Container + bg-image(命中) + filter → program=4（BG_COMPOSITE+COLOR_FILTER 双 keyword，spec §3.2）。
+/// Container + bg-image(命中) + filter → program=4（BG_COMPOSITE+COLOR_FILTER 双 keyword）。
 /// 回归：split program=3 → 3（filter 无 bg-image）/ 4（filter+bg-image 双 keyword）。
 /// program=4 由 MaterialManager.cs 同时 EnableKeyword COLOR_FILTER + BG_COMPOSITE，
 /// 让 shader 走 `tex.rgb*tex.a + vcol.rgb*(1-tex.a)`（CSS 合成）后再跑 COLOR_FILTER 后处理。
@@ -2664,8 +2652,6 @@ fn build_container_no_bg_image_image_path_none() {
     }
 }
 
-// ── border-radius Tests ────────────────────────────
-
 #[test]
 fn container_zero_radius_uses_quad() {
     // 未设 border-radius（默认全 0）→ 走 quad（4 顶点）
@@ -2844,8 +2830,6 @@ fn container_bg_image_with_radius_uses_rounded_rect() {
         _ => panic!("expected Mesh"),
     }
 }
-
-// ── 多页 atlas 跨页拆分 text 子页测试 ───────────────────
 
 /// 回归：text 子页 reuse_key 必须为 0（不继承主节点），防止虚拟列表内多页覆盖。
 /// 构造带 reuse_key=7 的 text 节点，跑 build_render_nodes，验 primary 继承 reuse_key=7、
@@ -3094,7 +3078,6 @@ fn node_index_4096_triggers_sub_page_collision() {
     );
 }
 
-// RichText retired in Spec-2; deferred to compound-bundle text model.
 /// `ensure_solid` 首次调分配 1×1 白像素，二次命中返同 UV（缓存不重复分配）。
 #[test]
 fn ensure_solid_hit_returns_same_uv() {
@@ -3106,8 +3089,6 @@ fn ensure_solid_hit_returns_same_uv() {
     assert_eq!(r1.px_w, 1);
     assert_eq!(r1.px_h, 1);
 }
-
-// ── Image bg-color via BG_COMPOSITE ───────────────────────────────────
 
 /// Image (`<img>`) + bg-color → program 2 (BG_COMPOSITE)，顶点色 = bg-color。
 /// shader source-over：图(tex) over 底色(vcol)，透明像素透出底色（修紫底不显示 bug）。
@@ -3201,8 +3182,6 @@ fn build_image_with_bg_color_and_filter_uses_program_4() {
         _ => panic!("expected Mesh"),
     }
 }
-
-// ── box-shadow 集成测试 ───────────────────────────
 
 /// box-shadow:2px 3px #000000 → 阴影节点 node_id = back_shadow_id(main_id,0)、
 /// sort_key < main sort_key、阴影 verts x 偏移 ox=2、y 偏移 oy=3。
@@ -3315,8 +3294,6 @@ fn box_shadow_emits_node_with_offset_and_sort_key() {
 /// box-shadow 背层节点须继承主节点的 mask_context（clip 上下文）。
 /// 坑：旧实现 push 阴影节点时硬编码 mask_context=0，overflow:auto 容器内的子节点
 /// inset box-shadow 不被裁，溢出到容器外，UI 上表现为「黑底没被裁剪」。
-/// showcase home 的 quick-bar（overflow-x:auto）的 chip 都带 inset box-shadow，
-/// chip 本身被裁但 inset 环没被裁 → 溢出到 bar 外。
 #[test]
 fn box_shadow_back_layer_inherits_clip_mask_context() {
     // 构造：root clip 容器（clip_rect 开 mask_context=1）内一个 chip（带 box-shadow）。
@@ -3390,10 +3367,8 @@ fn box_shadow_back_layer_inherits_clip_mask_context() {
     );
 }
 
-// ── box-shadow 多层 + inset 集成测试（Task 3）───────────────────────────
-
 /// div 带 outer + inset 两层 box-shadow → primary + 1 back-layer + 1 front-layer，
-/// sort_key: back < primary < front（outer 在下、inset 在上）。这是 Task 3 的核心验收。
+/// sort_key: back < primary < front（outer 在下、inset 在上）。
 #[test]
 fn box_shadow_emits_back_and_front_layers() {
     let mut n = container_node(
@@ -3680,8 +3655,6 @@ fn shadow_sigma_is_monotonic_and_floored() {
     );
 }
 
-// ── resolve_slice_percent ───────────────────────────
-
 #[test]
 fn nine_slice_percent_resolves_to_pixels() {
     // slice 25%，src 100×100 → 应 resolve 成 25px，非 0.25px
@@ -3777,8 +3750,6 @@ fn build_container_slice_percent_resolves_in_render() {
     }
 }
 
-// ── gradient text 整体渐变（background-clip:text）──
-
 #[test]
 fn gradient_text_spans_whole_text_not_per_glyph() {
     use crate::render::node::NodePayload;
@@ -3845,8 +3816,6 @@ fn gradient_text_spans_whole_text_not_per_glyph() {
     );
 }
 
-// ── 背景渐变 program=6/7（per-fragment shader 路径）──
-
 /// Container 背景渐变：program=6 + uv=box 局部坐标 + grad_params 已解析 + 顶点色=底色。
 #[test]
 fn background_gradient_emits_program6_local_uv_and_params() {
@@ -3907,7 +3876,7 @@ fn background_gradient_emits_program6_local_uv_and_params() {
         }
         _ => unreachable!(),
     }
-    // grad_params：home 光晕几何（cx=1574.4, cy=-129.6, 1100×560）。
+    // grad_params：光晕几何（cx=1574.4, cy=-129.6, 1100×560）。
     let g = &rn.gradient;
     assert_eq!(g.kind, 1);
     assert!((g.center[0] - 1574.4).abs() < 0.2);
@@ -4287,8 +4256,6 @@ fn border_style_none_renders_no_border_even_with_width_and_color() {
     );
 }
 
-// ── TextField / TextArea / NumberField 渲染 ──
-
 /// 构造一个带控件状态的叶子节点 scene（TextField/TextArea/NumberField）。
 /// node_id=0，layout_rect 200×50，无背景色。
 fn make_scene_with_text_control(kind: NodeKind, state: ControlState) -> (Scene, NodeId) {
@@ -4372,7 +4339,7 @@ fn numberfield_renders_value_text() {
 fn text_control_background_and_text_mesh_have_distinct_node_ids() {
     // 回归：TextField/TextArea/NumberField 的背景框 mesh 与文字 mesh 必须用不同 node_id。
     // 修复前两者共享真 node_id → C# MirrorPool 按 node_id 唯一索引 GO，第二个 mesh 覆盖
-    // 第一个 → 控件渲染残缺/不可见（settings showcase 的 spinbutton “无法渲染” 根因）。
+    // 第一个 → 控件渲染残缺/不可见。
     // 修复后文字 mesh 用合成 node_id（tf_synth_id，high byte=TF_TEXT_SYNTH_BYTE），
     // primary 关联仍 = 真节点 id（text_sub_primary_id 可还原）。
     let (mut scene, id) = make_scene_with_text_control(
@@ -4433,8 +4400,8 @@ fn text_control_background_and_text_mesh_have_distinct_node_ids() {
 fn text_control_text_mesh_sort_key_follows_background_in_multi_node_scene() {
     // 多节点场景回归：NumberField 不是首节点时，文字 mesh（合成 id）sort_key 必须紧跟
     // 背景之后。修复前 assign_sort_keys 不给合成 id 赋值（初始 sk=0），reorder 把它排到
-    // 所有真节点之前 → 文字绘制在背景之下被不透明背景遮挡（settings showcase spinbutton
-    // 文字不可见的多节点根因）。单节点场景 reorder 巧合让文字 sk=1 > 背景 sk=0，掩盖此 bug。
+    // 所有真节点之前 → 文字绘制在背景之下被不透明背景遮挡。单节点场景 reorder 巧合让文字
+    // sk=1 > 背景 sk=0，掩盖此 bug。
     let mut root = Node::default();
     root.kind = NodeKind::Container;
     root.layout_rect = Rect {
@@ -4507,8 +4474,7 @@ fn text_control_text_mesh_sort_key_follows_background_in_multi_node_scene() {
     );
 }
 
-// ── 控件外壳背景渲染（Toggle/RadioButton/Slider/ProgressBar）──
-// 39d0a8d 回归守卫：这四种控件是「空 div」——视觉全靠自身 background（不像 Slider/ProgressBar
+// 回归守卫：这四种控件是「空 div」——视觉全靠自身 background（不像 Slider/ProgressBar
 // 的 data-slot 子节点能兑底，Toggle/RadioButton 连子节点都没有）。修复前它们不在 is_container()
 // 也无专门 render arm，落入 `_ => 空 mesh`，在 Unity PlayMode 完全不渲染/不可交互。
 // 本组测试固化「控件外壳画自身 background」不变量。
@@ -4651,8 +4617,6 @@ fn textarea_renders_value_text() {
     );
 }
 
-// ── Task 12: 光标 / 选区 / composition 渲染 mesh ──
-
 /// 构造一个聚焦的 TextField（focused_node + cursor_visible）。
 /// `value` 非空时 cursor 默认在末尾（from_init）。
 fn make_focused_textfield(value: &str) -> (Scene, NodeId) {
@@ -4705,7 +4669,7 @@ fn unfocused_textfield_no_cursor_quad() {
         NodeKind::TextField,
         ControlState::TextField(EditState::from_init("ab".into(), "".into(), 0, false)),
     );
-    scene.focused_node = None; // 未聚焦
+    scene.focused_node = None;
     let fonts = test_font_table().expect("need test font");
     crate::scene::transform::compute_world_transforms(&mut scene);
     let (frame, _, _) = build_render_nodes(
@@ -4878,7 +4842,7 @@ fn tf_synth_ids_are_distinct() {
 /// 编辑反馈 mesh 的 sort_key 顺序：背景 < 选区 < 文字 < 光标。
 /// 选区先于文字 push（在文字下层，标准编辑器行为）；光标最后 push（最上层）。
 /// 锁定 reorder_for_batching 对合成 id（program=0 mergeable）不 panic 且保序
-/// （坑 139：合成 id + program:0 曾触发 aabb_of 的 scene.get().expect panic；
+/// （合成 id + program:0 曾触发 aabb_of 的 scene.get().expect panic；
 /// aabb_of 已加零面积兜底，此测回归保护）。多节点 reorder（n≥2）才触 aabb_of 路径。
 #[test]
 fn textfield_editing_mesh_sort_key_order() {
@@ -4925,10 +4889,8 @@ fn textfield_editing_mesh_sort_key_order() {
     assert!(text_sk < cur_sk, "光标在文字之上: {text_sk} < {cur_sk}");
 }
 
-// ===== caret-color / selection-background / selection-color render style (Task 15) =====
-//
-// Task 12 用常量缺省色画 caret/selection（caret=text color，selection-bg=蓝半透）。
-// Task 15 让 render arm 读 ResolvedStyle 的 caret_color/selection_background/selection_color
+// 缺省用常量色画 caret/selection（caret=text color，selection-bg=蓝半透）；声明
+// ResolvedStyle 的 caret_color/selection_background/selection_color 时 render arm 读之
 // （None 时回退到同样的常量）。这些测验：声明 style 色后 mesh 颜色 == 声明色。
 
 /// 从一个 RenderNode 的 Mesh payload 取首个顶点色（quad 是 4 同色顶点，首色即代表）。
@@ -4974,7 +4936,7 @@ fn textfield_caret_uses_caret_color_style() {
     );
 }
 
-/// 未声明 caret-color 时光标回退到 text color（Task 12 缺省行为保持）。
+/// 未声明 caret-color 时光标回退到 text color（缺省行为保持）。
 #[test]
 fn textfield_caret_falls_back_to_text_color() {
     let (mut scene, id) = make_focused_textfield("ab");
@@ -5036,7 +4998,7 @@ fn textfield_selection_uses_selection_background_style() {
     );
 }
 
-/// 未声明 selection-background 时选区回退到蓝半透（Task 12 缺省行为保持）。
+/// 未声明 selection-background 时选区回退到蓝半透（缺省行为保持）。
 #[test]
 fn textfield_selection_falls_back_to_default_blue() {
     let (mut scene, id) = make_focused_textfield("hello");
@@ -5066,8 +5028,6 @@ fn textfield_selection_falls_back_to_default_blue() {
         "selection falls back to default blue translucent"
     );
 }
-
-// ===== TextControl caret geometry =====
 
 /// 渲染后取光标 quad 的左边缘 x（纯色 quad，verts 为世界坐标 [x,y] 对；取最小 x）。
 fn caret_left_x(frame: &FrameData, cursor_id: u32) -> Option<f32> {
@@ -5110,8 +5070,6 @@ fn textfield_caret_unaffected_by_display_remap() {
     );
 }
 
-// ── Dropdown 浮层渲染（Task 11：popup 子树跳出正常 DFS，末尾追加，mask=0）──
-//
 // 模式同 scrollbar thumb（render/mod.rs 末尾 append）：open Dropdown 的 .loom-popup
 // 子树不在正常 DFS 渲染（不进 id_to_pos），merge 后末尾追加——sort_key 续 max_sort+1，
 // mask_context=MaskContext(0) 跳出祖先 overflow:hidden clip。
@@ -5486,7 +5444,7 @@ fn popup_sort_key_strictly_above_scrollbar_thumb() {
     };
     // content 尺寸需 > viewport 才 effective：手动设 scroll content_size。
     crate::scroll::refresh_content_sizes(&mut scene);
-    // 强制 content 超高（refresh 可能因单子未溢出而不超——直接写 scroll 表）。gurad：
+    // 强制 content 超高（refresh 可能因单子未溢出而不超——直接写 scroll 表）。
     if let Some(s) = scene.scroll.get_mut(outer_id) {
         s.content_size = (100.0, 300.0);
         s.viewport_size = (100.0, 100.0);
@@ -5536,7 +5494,7 @@ fn open_popup_renders_option_list_via_reparent_path() {
     // 生产路径回归：select 经 create_node_from_template（作者自写结构）+ listbox role 子 +
     // option 在 listbox 内 + sync_control_visuals（open=true 设 listbox 的 display:block）后，
     // render 末尾追加须把 option 文本画进浮层 listbox（mask=0，跳出祖先 overflow:hidden）。这是
-    // Task 11 popup 渲染的真正生产结构证明：option 是 listbox 的子节点（而非 select 的兄弟），
+    // popup 渲染的真正生产结构证明：option 是 listbox 的子节点（而非 select 的兄弟），
     // 否则 listbox 浮层为空、option 被祖先 clip 裁掉。
     use crate::asset::ControlInit;
     use crate::scene::control::ROLE_LISTBOX;

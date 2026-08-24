@@ -1,8 +1,8 @@
-// LoomHost：引擎无关 stage 宿主 + 每帧驱动核心（spec-4b P2.3）。
+// LoomHost：引擎无关 stage 宿主 + 每帧驱动核心。
 //
-// 设计契约（spec §3.1，main-design §16 严格时序）：
-// - 持 stage handle（StageHandle*）+ UIContext（4a 业务表面）+ LoomBackend（Unity/Godot 实现）。
-// - 构造：loomgui_stage_new → UIContext(stage)（复用 4a internal UIContext(IntPtr)）。
+// 设计契约（严格时序）：
+// - 持 stage handle（StageHandle*）+ UIContext（业务表面）+ LoomBackend（Unity/Godot 实现）。
+// - 构造：loomgui_stage_new → UIContext(stage)（复用 internal UIContext(IntPtr)）。
 //   不重新建 EventDemuxer——UIContext 构造时已建并接到自身 _eventBus（单一实例，单一事件入口）。
 // - 每帧 Step(dt)：backend.CollectInput → 逻辑泵（OnUpdate/CallLater/CallNextFrame）→ flush → tick → borrow_frame → backend.SyncFrame → borrow_events → demuxer.Pump。
 //   borrow_frame FFI 在此（backend 只消费 blob，避免二次 borrow）；set_input FFI 由 backend 调（引擎中立）。
@@ -51,7 +51,7 @@ namespace LoomGUI
             _backend = backend ?? throw new ArgumentNullException(nameof(backend));
         }
 
-        /// <summary>业务 API 表面（4a typed Node 树 + 事件 + LoadPackage）。</summary>
+        /// <summary>业务 API 表面（typed Node 树 + 事件 + LoadPackage）。</summary>
         public UIContext Context => _ctx;
 
         /// <summary>Stage 原始句柄（internal——同程序集 backend / Driver / InputCollector 可见）。</summary>
@@ -68,7 +68,7 @@ namespace LoomGUI
         public event Action<string> MissingGlyphReport;
 
         /// <summary>
-        /// 每帧驱动序（main-design §16，严格时序）：
+        /// 每帧驱动序（严格时序）：
         /// 1. <see cref="LoomBackend.CollectInput"/>（backend 采集引擎输入 → set_input 系 FFI，引擎中立）
         /// 2. flush seam：攒批回写——一次性把帧内标脏的 StyleMirror / NodeTransform flush 到 core
         ///    （在 tick 前，保证下帧 solve/compute_world_transforms 拿到最新 inline/transform）
@@ -88,7 +88,7 @@ namespace LoomGUI
             //     帧头 fire——回调内改 Style 走下述 flush seam 过桥，本帧 solve 生效。
             _ctx.PumpLogic(dt);
 
-            // 2. 帧末 flush seam：攒批回写（Task 9）。把帧内标脏的 StyleMirror（set_inline_override）
+            // 2. 帧末 flush seam：攒批回写。把帧内标脏的 StyleMirror（set_inline_override）
             //    + NodeTransform（set_transform）一次性过桥，在 tick 前保证 core 拿到最新 inline/transform。
             //    旧即时版：setter 每次立即过桥（本处空）；攒批版：集中过桥（N setter = 1 次 flush 遍历）。
             _ctx.FlushPendingWrites();
@@ -132,8 +132,6 @@ namespace LoomGUI
             byte* evPtr = Native.loomgui_stage_borrow_events(_stage, &evLen);
             _ctx._eventDemuxer.Pump((IntPtr)evPtr, (int)evLen);
         }
-
-        // ── 资源 FFI（引擎中立，byte[]/描述过桥；搬自 LoomStage.cs:96-121,141-165）──
 
         /// <summary>
         /// 注册字体进 Stage 字体表。bytes 喂 Rust（核心端 ttf-parser 测量 + 自绘字形产 atlas）。
@@ -195,8 +193,6 @@ namespace LoomGUI
                     Marshal.FreeHGlobal(pathPtrs[i]);
             }
         }
-
-        // ── 释放 ──────────────────────────────────────────────────────────────────
 
         /// <summary>
         /// dump 整树 JSON（调 <see cref="Native.loomgui_stage_dump_scene"/>，UTF-8 marshal）。

@@ -269,7 +269,7 @@ fn instantiate_missing_pkg_or_comp_errors() {
 
 #[test]
 fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
-    // 坑102 no-panic 契约：FFI 可达的 instantiate 不能因 corrupt pkg panic。
+    // no-panic 契约：FFI 可达的 instantiate 不能因 corrupt pkg panic。
     // parent_idx 越界前向引用（child 引用不存在的 node 2）违反"parent_idx < i 且 < len"不变量——
     // 当前实现 `id_map[pidx]`（pidx 越界）会 index-out-of-bounds panic，必须改成返 Err。
     // node[0]=root（write_package 的 debug_assert 只查 node[0]，node[1] 的 corrupt parent_idx 透传）。
@@ -339,8 +339,6 @@ fn instantiate_without_scene_errors() {
     assert!(s.instantiate("bag", "comp1").is_err(), "无 scene → Err");
 }
 
-// ── dynamic_rules 作用域隔离测试（Shadow DOM 风格，main-design §5.4）──
-//
 // 背景（坑）：旧实现把模板规则 push 进全局 scene.dynamic_rules 且不清理、去重只比 selector。
 // 导致 home 的 `.root{column}` 残留污染后实例化的 settings 的 `.root{row}`——
 // 两个组件 selector 相同（都 `.root`）但 declaration 不同，被错误去重丢弃，
@@ -630,7 +628,7 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
 #[test]
 fn instantiate_reparents_dropdown_options_into_listbox() {
     // 生产路径回归：模板里作者写 `<div role=combobox><div role=listbox><div role=option>A
-    // </div>...</div></div>`（spec §2.2 结构），经 load_package + instantiate 后，option 须是
+    // </div>...</div></div>`，经 load_package + instantiate 后，option 须是
     // listbox 的直接子（不是 combobox 的直接子）。这是 listbox 浮层能渲染 option 列表的前提
     //（render 末尾追加从 listbox 根 DFS）。core 不再注入结构——作者写的即运行时结构。
     use crate::asset::ControlInit;
@@ -894,7 +892,7 @@ fn make_test_pkg_with_roles() -> Vec<u8> {
 
 /// instantiate 把 TemplateNode.role/data_slot 填进 Scene.roles side table（稀疏）。
 /// role 驱动后续语义分派 + find_child_by_role/slot 查表。data-slot 映射成 slots 的 key
-/// （Pattern A：slots["thumb"]=""，find_child_by_slot 比对 key 是否存在）。
+/// （slots["thumb"]=""，find_child_by_slot 比对 key 是否存在）。
 #[test]
 fn instantiate_fills_roles_side_table_from_template() {
     let mut s = Stage::new_for_test();
@@ -935,7 +933,7 @@ fn remove_node_clears_roles_side_table() {
     assert!(scene.roles.get(thumb).is_none(), "删后 thumb slot 清了");
 }
 
-/// T4：ControlInit::TabList{selected_index} 经 create_node_from_template 映射成
+/// ControlInit::TabList{selected_index} 经 create_node_from_template 映射成
 /// ControlState::TabList{selected_index}（usize，u32→usize 转换）。镜像 Dropdown
 /// 同类映射的测试模式。
 #[test]
@@ -959,9 +957,9 @@ fn instantiate_tablist_control_init_maps_to_state() {
     );
 }
 
-/// T4：instantiate 把 TemplateNode.aria_controls 拷进 RoleInfo.aria_controls（运行时
-/// TabList tab→panel 跨树关联的字符串）。打包期 bridge（T2）尚未填 aria_controls，
-/// 故真实 run 值为 None；本测试手灌 TemplateNode.aria_controls=Some 验 instantiate 拷贝路径。
+/// instantiate 把 TemplateNode.aria_controls 拷进 RoleInfo.aria_controls（运行时
+/// TabList tab→panel 跨树关联的字符串）。本测试手灌 TemplateNode.aria_controls=Some
+/// 验 instantiate 拷贝路径。
 #[test]
 fn instantiate_copies_aria_controls_into_role_info() {
     let nodes = [TemplateNode {
@@ -1000,8 +998,6 @@ fn instantiate_copies_aria_controls_into_role_info() {
     );
 }
 
-// ── 组件展开域（Custom Element 打包期展开，component-system spec）────────────────
-//
 // 树形：root(0, SCOPE_ROOT) + host(1, component_scope + custom_tag + class card-host)
 // + inner(2, class gic-body)。页面规则包装 scope_root=root；展开域规则锚 host。
 
@@ -1358,8 +1354,8 @@ fn unload_package_removes_templates_but_not_instances() {
     assert_ne!(inst, inst2, "reloaded package instantiates fresh nodes");
 }
 
-/// Field Notes N6：组件 `<style>` 规则必须能样式化 slot 投射的 light 子（fence.md
-/// 「投影归属」语义：给投影内容写样式写在组件文件里）。
+/// 组件 `<style>` 规则必须能样式化 slot 投射的 light 子（「投影归属」语义：
+/// 给投影内容写样式写在组件文件里）。
 ///
 /// 复现结构（skill-slot 投影）：host(.slot-cost) ← 投影 .slot-cost-row span ← 空 .qis span。
 /// 打包期投影 span 在页面宇宙被烘 rich_text_block（页面侧分类看不到组件 CSS 的

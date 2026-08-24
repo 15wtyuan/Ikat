@@ -55,7 +55,6 @@ fn main() {
         frame.nodes.len()
     );
 
-    // 每个 node_id 产生的 mesh 数 + 顶点数
     let mut mesh_verts: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
     for rn in &frame.nodes {
         let NodePayload::Mesh { verts, .. } = &rn.payload;
@@ -73,7 +72,6 @@ fn main() {
         let c = n.style.color;
         let mv = mesh_verts.get(&(n.id.0)).copied().unwrap_or(0);
         let flag = if is_target(&id) { "  <<<" } else { "" };
-        // TextNode 额外打印文本内容前 12 字
         let extra = if n.kind == NodeKind::TextNode {
             let t = scene.text_contents.get(&n.id).cloned().unwrap_or_default();
             format!("  text={:?}", t.chars().take(12).collect::<String>())

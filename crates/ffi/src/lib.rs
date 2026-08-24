@@ -739,8 +739,6 @@ pub extern "C" fn loomgui_make_test_pkg(
         if comp_name.is_empty() {
             return std::ptr::null_mut();
         }
-        // Two-node component: root container (no id) with a child container id="badge".
-        // The child id allows tests to verify subtree-scoped id lookup (find_node_by_id_in_subtree).
         let nodes = [
             TemplateNode {
                 kind: NodeKind::Container,
@@ -936,7 +934,7 @@ pub extern "C" fn loomgui_stage_set_text_input(
 /// 设文本控件的 IME composition（后端读平台 IME compositionString 回灌）。
 /// text = UTF-8 字节（指针+len），pos = composition 在 value 中的字节偏移。
 /// 非文本控件 / 越界 node → 静默跳过（仍返 0）。null 句柄 → -1。下一帧 measure/render
-/// 会把 composition 拼进显示文本（下划线由 Task 12 composition 分支画）。
+/// 会把 composition 拼进显示文本（下划线由 composition 分支画）。
 ///
 /// **常驻（不 gate）：**IME 是 runtime 稳定入口。
 #[no_mangle]
@@ -1333,7 +1331,7 @@ pub struct CursorRectRepr {
 }
 
 /// FFI 稳定快照（#[repr(C)] POD）。enum→u8（match 稳定化，不靠 enum 隐式 repr），
-/// Option<[f32;4]>→present flag + 数组。csbindgen 自动生成 struct C# stub；④ 如需重排字段可扩展或手写覆盖。
+/// Option<[f32;4]>→present flag + 数组。csbindgen 自动生成 struct C# stub；如需重排字段可扩展或手写覆盖。
 #[repr(C)]
 #[derive(Default, Copy, Clone, Debug)]
 pub struct ComputedNodeStyleRepr {
@@ -1558,8 +1556,6 @@ pub extern "C" fn loomgui_stage_get_node_computed_style(
     })
 }
 
-// ===== font atlas FFI（v1.6 自绘字体 pull 模型） =====
-
 /// 拉脏页 page_idx 列表（写入 out，返实际数）。null 句柄 / null out → 返 0。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_font_atlas_dirty_pages(
@@ -1597,10 +1593,10 @@ pub extern "C" fn loomgui_stage_font_atlas_page(
         let (mut w, mut hgt) = (0u32, 0u32);
         let needed = sh.stage.font_atlas_page(page, &mut w, &mut hgt, &mut []);
         if buf_len < needed {
-            return needed; // 双调：caller 扩 buf 重调
+            return needed;
         }
         if needed == 0 {
-            return 0; // 空页 / 越界 page
+            return 0;
         }
         // buf_len >= needed > 0：out_buf 必非 null（caller 保证），否则 slice 构造 UB。
         // 安全侧加防御检查。
@@ -1702,15 +1698,13 @@ pub extern "C" fn loomgui_stage_focused_node(h: *const StageHandle) -> u32 {
 /// 故本函数 near-no-op。但 hook 必须存在：将来引入全局 texture/font registry（进程级单例缓存）时，
 /// 此处自动成为清理入口，无需再改 C# 接线。
 ///
-/// **注意：Font 的 `Box::leak`（`text/layout.rs:76`）是真泄漏**——`bytes.clone()` 后 leak 取
+/// **注意：Font 的 `Box::leak`（`text/layout.rs`）是真泄漏**——`bytes.clone()` 后 leak 取
 /// `'static` 切片喂 ttf-parser Face，原 Vec 虽被 `_bytes` 持有但与 leaked 切片不是同一份，
 /// Stage drop 时 `_bytes` 释放的是 clone 来源而非 leaked 副本。每次 Stage 创建都 leak 一份字体字节，
 /// 不可由 shutdown 回收（leak 切片无 handle 跟踪）。若未来域重载内存观测触发阈值，
 /// 再考虑字体缓存化为进程单例。
 #[no_mangle]
 pub extern "C" fn loomgui_shutdown() {}
-
-// ===== tween FFI =====
 
 /// 注册 tween。start/end 指向 ≥value_size 个 f32（value_size 由 prop 隐含）。
 /// null 句柄/null 指针 → no-op。越界 node / duration<=0 由 core update 处理（跳过/立即 complete）。
@@ -1791,9 +1785,7 @@ pub extern "C" fn loomgui_stage_clear_anim_prop(h: *mut StageHandle, node_id: u3
     })
 }
 
-// ===== @keyframes player FFI（M2 spec §7.3：play/pause/resume/stop/time/state/on-key） =====
-//
-// C# `node.Play(name)` → Animation 句柄（T11 投影）。PlayerKey 以 u64 跨 FFI
+// C# `node.Play(name)` → Animation 句柄。PlayerKey 以 u64 跨 FFI
 // （slotmap `KeyData::as_ffi`，player_key_as_u64/from_u64 转换，0 = 恒无效 key）。
 // 句柄控制直接操作 scene.players（既有 `loomgui_node_parent` 同款 scene 直取模式，
 // 控制语义在 core 的 update_all/PlayerPlayState 层，FFI 保持薄包装）。
@@ -1804,7 +1796,7 @@ pub extern "C" fn loomgui_stage_clear_anim_prop(h: *mut StageHandle, node_id: u3
 ///
 /// 建 **programmatic** player（sync_animation_players 完全跳过，不受 class 声明管）：
 /// spec 默认 = 1s / 无 delay / 单次迭代 / normal / fill both / cubic-out
-/// （C# `Play(name)` 无时长参数，默认由 core `play_programmatic` 定，T13 测试钉死）。
+/// （C# `Play(name)` 无时长参数，默认由 core `play_programmatic` 定）。
 /// 立即写首帧（spec §5.2：不等下帧 step b，防 delay 期闪 base）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_play_animation(
@@ -1917,7 +1909,7 @@ pub extern "C" fn loomgui_stage_resume_animation(h: *mut StageHandle, key: u64) 
     })
 }
 
-/// 停止 player（T6 review Minor 1 钉死：scene 层**终态**，不可恢复，勿当暂停）。
+/// 停止 player（scene 层**终态**，不可恢复，勿当暂停）。
 /// 只标记 Stopped：下帧 update_all 清本 player 通道 + 从 players 表移除，PlayerKey 失效。
 /// 此后 get_animation_state 恒 255（无效）。key 无效 → no-op。
 #[no_mangle]
@@ -2016,8 +2008,6 @@ pub extern "C" fn loomgui_stage_animation_on_key(h: *mut StageHandle, key: u64, 
     })
 }
 
-// ===== 动态树 API FFI（§7.2）：create_root/create_node/append_child/insert_before/
-// remove_child/remove_node/set_text/set_src。转调 Stage 方法。
 // 错误语义：create_root/create_node 返 u32 NodeId（0xFFFF_FFFF = 失败）；
 // 其余返 i32（0=ok，-1=err）。null 句柄 → 失败/sentinel（不 panic）。
 
@@ -2040,7 +2030,6 @@ pub extern "C" fn loomgui_stage_create_root(
             return FAIL;
         }
         let sh = unsafe { &mut *h };
-        // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
         let kind = if kind.is_null() || kind_len == 0 {
             ""
         } else {
@@ -2084,7 +2073,6 @@ pub extern "C" fn loomgui_stage_create_node(
             return FAIL;
         }
         let sh = unsafe { &mut *h };
-        // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
         let kind = if kind.is_null() || kind_len == 0 {
             ""
         } else {
@@ -2201,7 +2189,6 @@ pub extern "C" fn loomgui_stage_set_text(
             return -1;
         }
         let sh = unsafe { &mut *h };
-        // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
         let text = if text.is_null() || len == 0 {
             ""
         } else {
@@ -2254,7 +2241,6 @@ pub extern "C" fn loomgui_stage_set_src(
             return -1;
         }
         let sh = unsafe { &mut *h };
-        // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
         let src = if src.is_null() || len == 0 {
             ""
         } else {
@@ -2285,7 +2271,6 @@ pub extern "C" fn loomgui_stage_set_inline_override(
             return -1;
         }
         let sh = unsafe { &mut *h };
-        // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
         let css = if css.is_null() || len == 0 {
             ""
         } else {
@@ -2319,7 +2304,6 @@ pub extern "C" fn loomgui_stage_unset_inline_override(
             return -1;
         }
         let sh = unsafe { &mut *h };
-        // null/零长兜底为空串：slice::from_raw_parts(null, 0) 是 UB，即使 len=0。
         let prop = if prop.is_null() || len == 0 {
             ""
         } else {
@@ -2469,8 +2453,6 @@ pub extern "C" fn loomgui_stage_has_class(
     })
 }
 
-// ===== control state + transform get/set FFI（C# 投影层控件属性回写出口）=====
-//
 // 业务读写 ProgressBar/Slider 的 value/max、Toggle/Radio 的 checked，
 // 以及运行时高频 transform（拖拽 thumb）。所有 getter 走 return-code + out-param
 // （rc=0 严格意味 *out 已填；非 0 = err），避免 enum 判别值 0 与哨兵撞。
@@ -2527,7 +2509,6 @@ pub extern "C" fn loomgui_stage_set_control_value(
                 let (lo, hi) = if min <= max { (min, max) } else { (max, min) };
                 let clamped = value.clamp(lo, hi);
                 let quantized = if step > 0.0 {
-                    // 对齐到最近 step 边界：round((v - min) / step) * step + min
                     ((clamped - lo) / step).round() * step + lo
                 } else {
                     clamped
@@ -3231,8 +3212,7 @@ pub extern "C" fn loomgui_stage_set_control_text(
         if let Some(ControlState::TextField(e) | ControlState::TextArea(e)) =
             scene.controls.get_mut(id)
         {
-            // 直接替换 value + 光标/anchor 移到末尾（编程 setter，不走 insert_text 路径）。
-            // readonly 不拦（编程可写，照 JS .value = ... 语义）。同值仍重置光标但不发事件。
+            // 同值仍重置光标但不发事件。
             if e.value != new_value {
                 e.value = new_value.clone();
                 e.cursor_visible = true;
@@ -3580,8 +3560,6 @@ pub extern "C" fn loomgui_stage_set_transform(
     })
 }
 
-// ===== get_node_disabled / get_control_readonly / blur / Dropdown / NumberField FFI =====
-
 /// 读节点 disabled 伪类态（`NodeFlags::DISABLED`）。null 句柄 / 无 scene / 节点缺失 → 写 0（false）。
 /// 与 `loomgui_stage_set_node_disabled` 对称的读出口（伪类态级联查询用）。
 ///
@@ -3898,7 +3876,6 @@ pub extern "C" fn loomgui_stage_set_number_value(
         } else {
             clamped
         };
-        // 量化可能把值推过 hi，重新 clamp 回区间。
         let quantized = quantized.clamp(lo, hi);
         // 写回：原地改 edit.value（get_mut 保 variant，不重建整个 NumberField）。
         if let Some(ControlState::NumberField { edit, .. }) = scene.controls.get_mut(id) {
@@ -3916,7 +3893,6 @@ fn format_number(v: f32) -> String {
     if v.fract() == 0.0 && v.is_finite() {
         format!("{:.0}", v)
     } else {
-        // 非 整数：用通用格式，strip 尾随 0（如 3.50 → "3.5"）。
         let s = format!("{:.6}", v);
         let trimmed = s.trim_end_matches('0').trim_end_matches('.');
         if trimmed.is_empty() {
@@ -3927,7 +3903,6 @@ fn format_number(v: f32) -> String {
     }
 }
 
-// ── ListView 虚拟化（数据驱动）FFI ────────────────────────────────
 // C# ListView 投影经本组 FFI 驱动 core 虚拟化内核：set_item_count 进数据驱动，
 // take_pending_binds 是关键——C# 每 tick 前调，取新克隆 slot 列表逐条 BindItem。
 // null 句柄 / 无效 node → -1；成功 → 0。
@@ -4025,7 +4000,6 @@ pub extern "C" fn loomgui_list_take_pending_binds(
             if all.len() >= cap {
                 break;
             }
-            // 只取当前剩余容量内的 bind——余条留队列等下帧，避免 cap 溢出时丢 bind。
             let binds = loomgui_core::list::drain_pending_binds_bounded(scene, ul, cap - all.len());
             for (n, idx) in binds {
                 all.push((n.0, idx as i32));

@@ -20,8 +20,8 @@ namespace LoomGUI
     {
         /// <summary>
         /// 设计分辨率（design px）+ safe-area 开关：UnityLoomBackend.CollectInput / CollectWheel 读此做
-        /// screen→design 映射（替代旧 LoomStage.DesignSize/UseSafeArea 路径——P2 后端分层不再持 LoomStage）。
-        /// 由当前 Driver（LoomStageDriver 或 P2.5 LoomHost Driver）在 Awake 注入。
+        /// screen→design 映射（后端分层不再持 LoomStage）。
+        /// 由当前 Driver（LoomStageDriver 或 LoomHost Driver）在 Awake 注入。
         /// </summary>
         internal UnityEngine.Vector2 DesignSize { get; set; }
         internal bool UseSafeArea { get; set; }
@@ -165,7 +165,6 @@ namespace LoomGUI
             UnityEngine.Rect safeArea = Screen.safeArea;
 
 #if ENABLE_INPUT_SYSTEM
-            // 鼠标（主指，touch_id=-1）
             if (Mouse.current != null)
             {
                 var screen = Mouse.current.position.ReadValue();
@@ -186,7 +185,7 @@ namespace LoomGUI
                     byte kind = 2;
                     if (phase == UnityEngine.InputSystem.TouchPhase.Began) kind = 0;
                     else if (phase == UnityEngine.InputSystem.TouchPhase.Ended) kind = 1;
-                    else if (phase == UnityEngine.InputSystem.TouchPhase.Canceled) kind = 3;   // Canceled
+                    else if (phase == UnityEngine.InputSystem.TouchPhase.Canceled) kind = 3;
                     var screen = touch.position.ReadValue();
                     var d = ScreenToDesign(screen, screenSize, rootSize, safeArea, useSafeArea);
                     events.Add(new Bindings.PointerEvent { kind = kind, button = 0, pad0 = 0, pad1 = 0, touch_id = touch.touchId.ReadValue(), x = d.x, y = d.y });
@@ -206,7 +205,7 @@ namespace LoomGUI
                 byte kind = 2;
                 if (t.phase == UnityEngine.TouchPhase.Began) kind = 0;
                 else if (t.phase == UnityEngine.TouchPhase.Ended) kind = 1;
-                else if (t.phase == UnityEngine.TouchPhase.Canceled) kind = 3;   // Canceled
+                else if (t.phase == UnityEngine.TouchPhase.Canceled) kind = 3;
                 var d = ScreenToDesign(t.position, screenSize, rootSize, safeArea, useSafeArea);
                 events.Add(new Bindings.PointerEvent { kind = kind, button = 0, pad0 = 0, pad1 = 0, touch_id = t.fingerId, x = d.x, y = d.y });
             }
@@ -390,10 +389,6 @@ namespace LoomGUI
         /// 新旧输入系统双路径：滚轮用旧 Input.mouseScrollDelta 或新 Mouse.current.scroll。
         /// 归一 delta → ±1/格：旧 Input.mouseScrollDelta 已 ≈ ±1/格；新系统 120 像素/格除 120。
         /// 鼠标不在 UI 上也可滚——hit test 由 Rust 侧做（只在悬停的 scroll 容器响应）。
-        //
-        // 签名说明：旧签名 CollectWheel(LoomStage stage) 在 P2.2 拆为 (stagePtr, ctx)——
-        // UnityLoomBackend 不持 LoomStage（只持 IntPtr stage handle + LoomInputCollector ctx），
-        // DesignSize/UseSafeArea 由 ctx 读（替代 stage.DesignSize/UseSafeArea）。
         public static void CollectWheel(System.IntPtr stagePtr, LoomInputCollector ctx)
         {
             if (ctx == null || stagePtr == System.IntPtr.Zero) return;
@@ -417,7 +412,7 @@ namespace LoomGUI
                 dy = v.y;
             dy *= ctx.WheelScrollSpeed;
 #else
-            dy = Input.mouseScrollDelta.y;  // 旧系统已 ≈ ±1/格
+            dy = Input.mouseScrollDelta.y;
 #endif
             if (Mathf.Approximately(dy, 0f)) return;
 

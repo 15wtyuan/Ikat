@@ -27,7 +27,6 @@ use std::env;
 
 fn main() {
     // 默认 pkg 路径：worktree 根的 showcase.pkg.bin（对齐 PlayMode 从 StreamingAssets 加载）。
-    // 命令行第 1 参覆盖——参考 verify_showcase_pkg.rs 的 arg 取法。
     let pkg_path = env::args().nth(1).unwrap_or_else(|| {
         "unity/showcase-unity/Assets/StreamingAssets/showcase.pkg.bin".to_string()
     });
@@ -67,9 +66,7 @@ fn main() {
     let frame = s.tick_and_render();
     let scene = s.scene.as_ref().expect("scene post-tick");
 
-    // ──────────────────────────────────────────────────────────────────────
     // 1) frame.nodes（blob 通道）—— nh-stage 期望 NOT IN（merge 吞了）
-    // ──────────────────────────────────────────────────────────────────────
     let mut nh_in_frame = false;
     let mut frame_ids: Vec<String> = Vec::new();
     for rn in &frame.nodes {
@@ -90,9 +87,7 @@ fn main() {
     println!("nh-stage IN frame.nodes? -> {nh_in_frame}");
     println!("  期望：false（空 div 无 mesh payload，被 merge_meshes 吞，不进 blob）");
 
-    // ──────────────────────────────────────────────────────────────────────
     // 2) 直查 scene 并行数组（绕 blob——NativeHost FFI 查询通道）
-    // ──────────────────────────────────────────────────────────────────────
     let nh_id = scene
         .find_by_id_attr("nh-stage")
         .expect("nh-stage id_attr not found in scene");
@@ -127,9 +122,6 @@ fn main() {
         );
     }
 
-    // ──────────────────────────────────────────────────────────────────────
-    // 结论
-    // ──────────────────────────────────────────────────────────────────────
     let tx_ty = wm.map(|m| (m[4], m[5]));
     let wm_nonzero = tx_ty
         .map(|(tx, ty)| tx != 0.0 || ty != 0.0)

@@ -47,7 +47,7 @@ pub fn value_error(prop: &str, value: &str) -> Option<String> {
         CssValueParser::Color => {
             // core parse_color 认 #hex / rgb() / rgba()（含全透明 rgba(0,0,0,0)，显式
             // 清色可用）。命名色全通道恒无效；`transparent` 关键字仅 `color` 有 core
-            // 拦截（坑 197 显式透明），其余颜色属性写它 = 静默不覆盖。
+            // 拦截，其余颜色属性写它 = 静默不覆盖。
             let lowered = value.to_ascii_lowercase();
             let ok = loomgui_core::style::mapping::parse_color(value).is_some()
                 || (prop == "color" && lowered == "transparent");
@@ -221,7 +221,7 @@ mod tests {
         assert!(value_error("background-color", "transparent").is_some());
         // rgba 全透明是合法显式清色（core parse_color 认）。
         assert!(value_error("background-color", "rgba(0, 0, 0, 0)").is_none());
-        // color 通道的 transparent 有 core 拦截（坑 197）。
+        // color 通道的 transparent 有 core 拦截。
         assert!(value_error("color", "transparent").is_none());
         assert!(value_error("background-color", "#ff0000").is_none());
         assert!(value_error("background-color", "rgba(160, 58, 42, 0.25)").is_none());

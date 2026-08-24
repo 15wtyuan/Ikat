@@ -35,7 +35,7 @@ fn lookup_scope_flag_exists_distinct_from_scope_root() {
 
 #[test]
 fn find_by_id_attr_global_match_unaffected_by_flag_split() {
-    // 本任务不引入 scoped find（slot 边界由 list.rs 处理），只拆 flag。
+    // 不引入 scoped find（slot 边界由 list.rs 处理），只拆 flag。
     // 锁定：增加 LOOKUP_SCOPE 后全局首匹配不变。
     use crate::scene::dynamic;
     let mut scene = Scene::default();
@@ -74,7 +74,6 @@ fn find_node_by_id_in_subtree_hits_descendant_not_others() {
     dynamic::append_child(&mut scene, parent_b, badge_b).unwrap();
     scene.get_mut(badge_a).unwrap().id_attr = Some("badge".into());
     scene.get_mut(badge_b).unwrap().id_attr = Some("badge".into());
-    // parent_a's subtree find hits its own descendant badge_a
     assert_eq!(
         scene.find_node_by_id_in_subtree(parent_a, "badge"),
         Some(badge_a),
@@ -85,7 +84,6 @@ fn find_node_by_id_in_subtree_hits_descendant_not_others() {
         Some(badge_b),
         "subtree find from parent_b should hit badge_b (descendant)"
     );
-    // self-exclusive: parent_b does not match itself if it had id="badge"
     assert_eq!(
         scene.find_node_by_id_in_subtree(badge_a, "badge"),
         None,
@@ -101,7 +99,7 @@ fn find_node_by_id_in_subtree_returns_none_for_foreign() {
     let child = dynamic::create_node(&mut scene, "div", "").unwrap();
     dynamic::append_child(&mut scene, root, child).unwrap();
     scene.get_mut(child).unwrap().id_attr = Some("badge".into());
-    // root 子树内无 "badge"——badge 是 child 的后代，不在 other_root 子树内
+    // badge 在 root 子树内但不在 other_root（独立根）子树内。
     let other_root = dynamic::create_root(&mut scene, "div", "").unwrap();
     assert_eq!(
         scene.find_node_by_id_in_subtree(other_root, "badge"),
@@ -138,12 +136,11 @@ fn find_node_by_id_in_subtree_n_slots_same_internal_id() {
             "each slot should find its own badge"
         );
     }
-    // badges should not be equal to each other
     assert_ne!(slots[0].1, slots[1].1);
     assert_ne!(slots[1].1, slots[2].1);
 }
 
-/// §3 不变式回归守卫：public 语义树 ≠ internal taffy/render 树。
+/// 不变式回归守卫：public 语义树 ≠ internal taffy/render 树。
 /// rich-text-block 容器的 inline 子（TextNode / span=TextElement）在 solve 期被折出 taffy
 /// （`layout::solve::build` 对 rich_text_block 不递归子进 taffy → 它们 layout_rect 塌成 0），
 /// 但仍留在 Scene 树里——故 `find_node_by_id_in_subtree` 仍能按 id 找到 span，`Get<T>("id")`
@@ -218,7 +215,7 @@ fn rich_text_block_inline_children_remain_in_scene_tree_after_solve() {
         outer_tn_rect
     );
 
-    // §3 不变式：尽管被折出 taffy/render，inline span 仍在 Scene 树里 → find 仍命中。
+    // 不变式：尽管被折出 taffy/render，inline span 仍在 Scene 树里 → find 仍命中。
     assert_eq!(
         scene.find_node_by_id_in_subtree(div, "x"),
         Some(span),
@@ -228,7 +225,6 @@ fn rich_text_block_inline_children_remain_in_scene_tree_after_solve() {
 
 #[test]
 fn node_id_index_and_gen_decode() {
-    // 高 20 bit index + 低 12 bit gen
     let id = NodeId((5 << 12) | 7);
     assert_eq!(id.index(), 5, "index = 高 20 bit");
     assert_eq!(id.gen(), 7, "gen = 低 12 bit");
@@ -280,14 +276,12 @@ fn scene_nodes_is_slotmap_and_get_by_id() {
         ),
     ];
     let mut scene = Scene::build(&entries);
-    // slotmap get by NodeId
     let root_id = scene.roots[0];
     assert!(
         scene.nodes.get(root_id.to_key()).is_some(),
         "live NodeId 可 get（经 to_key）"
     );
     assert!(scene.get(root_id).is_some(), "Scene::get 桥接可用");
-    // get_mut
     if let Some(n) = scene.get_mut(root_id) {
         n.interaction.flags.insert(NodeFlags::DISABLED);
     }
@@ -342,7 +336,6 @@ fn node_id_from_key_to_key_roundtrip() {
     )];
     let scene = Scene::build(&entries);
     let id = scene.roots[0];
-    // to_key 后 slotmap 能查到
     assert!(
         scene.nodes.get(id.to_key()).is_some(),
         "to_key 重构的 key 能查到节点"
@@ -707,9 +700,7 @@ fn anim_scene_one_node() -> (Scene, NodeId) {
 fn animtable_hashmap_get_ensure_clear() {
     let (_sc, id) = anim_scene_one_node();
     let mut t = AnimTable::default();
-    // 未 ensure 的 id → get None
     assert!(t.get(id).is_none(), "未 ensure → get None");
-    // ensure + 写
     t.ensure(id).opacity = Some(0.5);
     assert_eq!(t.get(id).unwrap().opacity, Some(0.5));
     // 全默认的 NodeAnim（ensure 后未写任何通道）→ get 返 None（is_empty 过滤）
@@ -749,7 +740,6 @@ fn animtable_hashmap_get_ensure_clear() {
         t2.get(other).is_none(),
         "ensure 后全 None → is_empty 过滤 → get None"
     );
-    // clear_node
     t.clear_node(id);
     assert!(t.get(id).is_none(), "clear_node 后 get 返 None");
 }
@@ -985,8 +975,6 @@ fn instantiate_no_control_state_for_non_control_node() {
         "非控件节点不应有 controls 槽"
     );
 }
-
-// ── ControlState Dropdown/NumberField variant tests ─────────────────
 
 #[test]
 fn control_state_dropdown_variant() {

@@ -4,7 +4,6 @@
 (function () {
   "use strict";
 
-  // ── Tauri API helpers ──
   var invoke = window.__TAURI__ ? window.__TAURI__.core.invoke : null;
 
   if (!invoke) {
@@ -14,7 +13,6 @@
     return;
   }
 
-  // ── DOM refs ──
   var $ = function (id) { return document.getElementById(id); };
   var startScreen = $("start-screen");
   var mainScreen  = $("main-screen");
@@ -23,7 +21,6 @@
   var btnOpen     = $("btn-open");
   var btnBack     = $("btn-back");
 
-  // ── Native directory picker (tauri-plugin-dialog) ──
   // 走 plugin command（不依赖 npm JS 包）。directory + 单选 → string | null。
   function pickDirectory(title) {
     return invoke("plugin:dialog|open", {
@@ -33,7 +30,6 @@
     });
   }
 
-  // ── Start screen: load recent workspaces ──
   function loadRecent() {
     invoke("recent_workspaces")
       .then(function (paths) {
@@ -59,7 +55,7 @@
 
       var icon = document.createElement("span");
       icon.className = "recent-card-icon";
-      icon.textContent = "📁"; // folder emoji
+      icon.textContent = "📁";
 
       var info = document.createElement("div");
       info.className = "recent-card-info";
@@ -101,7 +97,6 @@
     recentList.innerHTML = '<p class="empty-msg">' + msg + "</p>";
   }
 
-  // ── Workspace actions ──
   var wsRootPath = null;
 
   function openWorkspace(path) {
@@ -130,7 +125,6 @@
       .catch(function () { /* 探测失败静默——更新入口非关键路径 */ });
   }
 
-  // ── Screen transitions ──
   function showStart() {
     startScreen.classList.remove("hidden");
     mainScreen.classList.add("hidden");
@@ -148,7 +142,6 @@
     }
   }
 
-  // ── Event bindings ──
   $("btn-update-ws").addEventListener("click", function () {
     if (!wsRootPath) return;
     var btn = $("btn-update-ws");
@@ -168,7 +161,6 @@
       });
   });
 
-  // ── New-workspace wizard: pick session root → ui dir + agents → full init ──
   // 独立小弹窗（不与 editor.js 的 init-overlay 复用——那个绑定主屏的脚手架更新流程）。
   // 会话根 = agent 会话打开的目录（skills/.loom 落这里）；ui 目录 = UI 工作区
   // （workspace.json 落这里）。默认 ui（根下子目录），可改成 "."（单目录形态）。
@@ -214,7 +206,6 @@
     var errEl = overlay.querySelector("#nw-ui-error");
     var uiRow = overlay.querySelector("#nw-ui-row");
 
-    // 预览 = 会话根 + 输入值（空按默认 "ui"、"." = 根本身），统一本机分隔符。
     function updatePreview() {
       var v = input.value.trim();
       var text = v === "." ? sessionRoot : sessionRoot + sep + (v || "ui").replace(/\//g, sep);
@@ -331,6 +322,5 @@
     showStart();
   });
 
-  // ── Init ──
   loadRecent();
 })();

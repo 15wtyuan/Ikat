@@ -1,4 +1,4 @@
-//! 压测 api-infra #7 的持续掉帧复现：Load/Unload 反复循环 + 时钟 churn，每 60 帧量化
+//! 压测 api-infra 的持续掉帧复现：Load/Unload 反复循环 + 时钟 churn，每 60 帧量化
 //! tick_and_render 耗时（μs）。掉帧 = 单帧耗时随交互次数增长（泄漏/累积）或绝对值异常。
 
 use loomgui_core::list::{enter_data_driven, set_item_count};
@@ -151,7 +151,6 @@ fn main() {
         s.scene.as_ref().unwrap().nodes.len()
     );
 
-    // ── 阶段拆分：逐 pub 阶段计时（render = 整帧 − 其余阶段差值）──
     let n = 30;
     let (mut t_scroll, mut t_list, mut t_rematch, mut t_anim, mut t_ctrl) =
         (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);

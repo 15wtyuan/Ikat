@@ -2,7 +2,7 @@
 //!
 //! 数据流：fence 解析 `@keyframes`/`animation`（pack-time）→ 打包器转成这里的类型
 //! → pkg.bin v30 序列化 → instantiate 时组件 keyframes 合并进 `Scene.keyframes` 全局表
-//! （CSS `@keyframes` 全局语义，spec §3.5）→ KeyframePlayer 按 `AnimationSpec.name` 查表驱动。
+//! （CSS `@keyframes` 全局语义）→ KeyframePlayer 按 `AnimationSpec.name` 查表驱动。
 //!
 //! 类型划分：pkg 层（KeyframesRule 表）+ ResolvedStyle 层（AnimationSpec，在
 //! `style/resolved.rs`，bincode 序列化）+ runtime 层（KeyframePlayer 时间轴推进，本文件）。
@@ -45,7 +45,7 @@ pub struct KeyframeStop {
     pub selector: KeyframeStopSelector,
     /// 该 stop 声明的可动画属性值（fence 解析声明块后提取，缺省字段 = None = 不参与插值）。
     pub props: AnimatableProps,
-    /// `/* @loom-hook name */` 锚点：player 播放到该 stop 时发事件（spec §8.4）。None = 无锚点。
+    /// `/* @loom-hook name */` 锚点：player 播放到该 stop 时发事件。None = 无锚点。
     pub hook: Option<String>,
 }
 
@@ -66,7 +66,7 @@ pub struct AnimatableProps {
 }
 
 /// transform 的 TRS 分解存储（围栏 transform 子集只有 translate/rotate/scale，1:1 无信息
-/// 丢失，spec §3.6）。每帧分量级 lerp 合成矩阵，不做 CSS 矩阵插值。
+/// 丢失）。每帧分量级 lerp 合成矩阵，不做 CSS 矩阵插值。
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct TransformAnim {
     pub translate: Option<[f32; 2]>,
@@ -78,7 +78,7 @@ pub struct TransformAnim {
 /// Scene 级活跃 player 的 slotmap key（u64 稳定句柄 → 未来 C# Animation 句柄）。
 pub type PlayerKey = slotmap::DefaultKey;
 
-/// player 运行状态（spec §5.4 生命周期）。`#[repr(u8)]` 保 FFI/序列化稳定，Default = Playing。
+/// player 运行状态。`#[repr(u8)]` 保 FFI/序列化稳定，Default = Playing。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum PlayerPlayState {
@@ -88,8 +88,8 @@ pub enum PlayerPlayState {
     /// 完成（iteration 跑满 count）。fill forwards/both 持续写末值不回收；
     /// fill none/backwards 由消费方回收回退 base。
     Completed = 2,
-    /// 显式 Stop：scene 层**终态**（T6 review Minor 1 钉死）——update_all 下帧清通道并
-    /// 回收 player，PlayerKey 失效，不可恢复（勿当可恢复暂停）。
+    /// 显式 Stop：scene 层**终态**——update_all 下帧清通道并回收 player，
+    /// PlayerKey 失效，不可恢复（勿当可恢复暂停）。
     Stopped = 3,
 }
 
@@ -113,11 +113,11 @@ pub struct PlayerFrame {
 /// 纯时间轴状态机：不持有场景引用、不写 NodeAnim、不发事件——`advance` 只推进
 /// elapsed/iteration/last_progress 并返回 `PlayerFrame`，副作用由消费方（tick 集成、
 /// 事件层）执行。**elapsed 是唯一时间源头**：iteration/current_time/progress 全从它推导
-/// （spec §5.3 自审修正点，防 direction 用到旧 iteration）。
+/// （防 direction 用到旧 iteration）。
 ///
-/// 字段可见性为 pub（spec §4.2 写 pub(crate)，但 §4.3 的 `Scene.players` 是 pub 字段，
-/// clippy -D warnings 下更私有的类型会报 private_interfaces——取 §4.3 并放宽类型可见性；
-/// 集成测试也需要构造/断言。玩家结构仍是 core 内部实现细节，C# 只见 PlayerKey 句柄）。
+/// 字段可见性为 pub：`Scene.players` 是 pub 字段，clippy -D warnings 下更私有的类型会报
+/// private_interfaces；集成测试也需要构造/断言。玩家结构仍是 core 内部实现细节，C# 只见
+/// PlayerKey 句柄。
 #[derive(Debug, Clone)]
 pub struct KeyframePlayer {
     pub node: NodeId,
@@ -131,7 +131,7 @@ pub struct KeyframePlayer {
     /// 当前（0-based）迭代序号（每帧从 elapsed 推导后回写）。
     pub iteration: u32,
     pub play_state: PlayerPlayState,
-    /// 程序化 player（node.Play 建，T10 设 true）：sync_animation_players 完全跳过
+    /// 程序化 player（node.Play 建）：sync_animation_players 完全跳过
     /// （不受 class 声明管——声明消失不回收、同名不视为已启动），靠 Stop/句柄回收。
     /// class 声明触发的 player = false。
     pub programmatic: bool,
@@ -164,29 +164,28 @@ impl KeyframePlayer {
         }
     }
 
-    /// 推进时间轴一帧（spec §5.3 纯函数：不写 NodeAnim、不 emit 事件）。
+    /// 推进时间轴一帧（纯函数：不写 NodeAnim、不 emit 事件）。
     ///
     /// Paused 跳过推进（elapsed 不变，返回当前时刻帧，幂等）。Stopped 是 scene 层**终态**：
     /// 本函数仅不推进（幂等），消费方 update_all 下帧清通道 + 回收 player——不可恢复，
-    /// 勿当"可恢复暂停"（T6 review Minor 1 钉死）。
+    /// 勿当"可恢复暂停"。
     pub fn advance(&mut self, dt: f32) -> PlayerFrame {
         if matches!(
             self.play_state,
             PlayerPlayState::Paused | PlayerPlayState::Stopped
         ) {
-            // 不推进 elapsed，返回当前时刻的帧（位置不变）。
             return self.compute_frame();
         }
         self.elapsed += dt;
         self.compute_frame()
     }
 
-    /// 从 `self.elapsed` 推导本帧取值 + 状态（spec §5.3 step 3-8），回写
-    /// iteration/last_progress/play_state。Paused 时也走这里（elapsed 不变 → 幂等）。
+    /// 从 `self.elapsed` 推导本帧取值 + 状态，回写 iteration/last_progress/play_state。
+    /// Paused 时也走这里（elapsed 不变 → 幂等）。
     fn compute_frame(&mut self) -> PlayerFrame {
         let was_completed = self.play_state == PlayerPlayState::Completed;
 
-        // 3. delay 阶段：backwards/both fill 显首帧值，否则无 override。
+        // delay 阶段：backwards/both fill 显首帧值，否则无 override。
         if self.elapsed < self.spec.delay {
             self.iteration = 0;
             self.last_progress = 0.0;
@@ -207,7 +206,6 @@ impl KeyframePlayer {
             };
         }
 
-        // 4. iteration / current_time / progress 全从 elapsed 推导（唯一时间源头）。
         let duration = self.spec.duration;
         let (iteration, progress) = if duration > 0.0 {
             let anim_time = self.elapsed - self.spec.delay;
@@ -220,7 +218,7 @@ impl KeyframePlayer {
         let prev_iteration = self.iteration;
         self.iteration = iteration;
 
-        // 5. 完成判定（sticky：fill forwards/both 的 Completed player 持续保持）。
+        // 完成判定（sticky：fill forwards/both 的 Completed player 持续保持）。
         let completed =
             was_completed || matches!(self.spec.iteration_count, Some(n) if iteration >= n);
 
@@ -231,10 +229,9 @@ impl KeyframePlayer {
             None
         };
 
-        // 6. direction 应用到 progress（用本帧当前 iteration，非旧值）。
+        // direction 应用到 progress（用本帧当前 iteration，非旧值）。
         let directed = apply_direction(self.spec.direction, iteration, progress);
 
-        // 7. 采样 + 完成态 fill。
         let (props, sample_progress) = if completed {
             if matches!(
                 self.spec.fill_mode,
@@ -273,7 +270,7 @@ impl KeyframePlayer {
 }
 
 /// direction 应用到 [0,1) progress。iteration 是当前（0-based）迭代序号：
-/// alternate 偶正奇反、alternate-reverse 相反（spec §5.3 step 6）。
+/// alternate 偶正奇反、alternate-reverse 相反。
 fn apply_direction(direction: AnimationDirection, iteration: u32, progress: f32) -> f32 {
     let reverse = match direction {
         AnimationDirection::Normal => false,
@@ -288,7 +285,7 @@ fn apply_direction(direction: AnimationDirection, iteration: u32, progress: f32)
     }
 }
 
-/// 在 keyframes stops 间定位 progress 落点并插值（spec §5.3 step 7）。
+/// 在 keyframes stops 间定位 progress 落点并插值。
 ///
 /// 语义：
 /// - stops 按 selector percent 排序，同 percent 合并（后者胜，CSS 同位置 keyframe 后者优先；
@@ -297,7 +294,7 @@ fn apply_direction(direction: AnimationDirection, iteration: u32, progress: f32)
 ///   恰等于某 stop 位置也取原始值（不经 ease，避免 Step 边界跳变）；
 /// - 段内 per-property lerp：opacity/颜色双端 Some 才插值（单端保持）；transform TRS
 ///   各分量 lerp，缺分量用 identity（translate 0 / scale [1,1] / rotate 0）；
-/// - ease 应用于段内 local_t（整体 AnimationSpec.timing_function，per-stop ease 推 M2.5）。
+/// - ease 应用于段内 local_t（整体 AnimationSpec.timing_function；per-stop ease 暂不支持）。
 fn sample(keyframes: &KeyframesRule, progress: f32, ease: Ease) -> AnimatableProps {
     if keyframes.stops.is_empty() {
         return AnimatableProps::default();
@@ -344,7 +341,7 @@ fn sample(keyframes: &KeyframesRule, progress: f32, ease: Ease) -> AnimatablePro
 
 /// 段内 per-property 插值。opacity/颜色：双端 Some 才插值，单端保持（None = 该通道无
 /// override）；transform：TRS 分量级 lerp，单端缺失分量用 identity（translate 0 /
-/// scale [1,1] / rotate 0，spec §3.6）。
+/// scale [1,1] / rotate 0）。
 fn lerp_props(from: AnimatableProps, to: AnimatableProps, t: f32) -> AnimatableProps {
     AnimatableProps {
         opacity: lerp_opt_hold(from.opacity, to.opacity, t),
@@ -434,7 +431,7 @@ fn lerp_arr4(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
 }
 
 /// PlayerKey → u64（slotmap `KeyData::as_ffi`：`(version << 32) | idx`）。
-/// 事件 payload 编码（拆 2×u32 装 touch_id/x）+ T10 FFI 的 C# ulong 句柄共用。
+/// 事件 payload 编码（拆 2×u32 装 touch_id/x）+ FFI 的 C# ulong 句柄共用。
 pub fn player_key_as_u64(key: PlayerKey) -> u64 {
     slotmap::Key::data(&key).as_ffi()
 }
@@ -445,7 +442,7 @@ pub fn player_key_from_u64(v: u64) -> PlayerKey {
     PlayerKey::from(slotmap::KeyData::from_ffi(v))
 }
 
-/// FFI 注册 OnKey 百分比阈值（spec §7.3 `animation_on_key`）：push 进
+/// FFI 注册 OnKey 百分比阈值（`animation_on_key`）：push 进
 /// `player.on_key_percents`，update_all 每帧检测跨越。同 pct 重复注册去重。
 pub fn register_on_key(scene: &mut Scene, key: PlayerKey, pct: f32) {
     if let Some(p) = scene.players.get_mut(key) {
@@ -455,16 +452,15 @@ pub fn register_on_key(scene: &mut Scene, key: PlayerKey, pct: f32) {
     }
 }
 
-/// 程序化启动 @keyframes player（`node.Play` FFI 用，spec §5.2）。
+/// 程序化启动 @keyframes player（`node.Play` FFI 用）。
 ///
 /// 查 `Scene.keyframes` 全局表（CSS `@keyframes` 全局语义）建 **programmatic** player
 /// （`sync_animation_players` 完全跳过：声明消失不回收、同名不视为已启动；回收靠
 /// Stop/句柄，或下次 Play 的入口接管——同名与同通道旧 player 先回收，见函数体注释）。
-/// C# `Play(name)` 无时长参数 → spec 默认：**1s / 无 delay / 单次迭代 / normal / fill both /
-/// cubic-out**（CSS 默认 ease）。fill both = 播放结束停终态（与 home `animation:fadeIn .4s both`
-/// 同语义）；改默认须同步 T13 C# 测试。
+/// C# `Play(name)` 无时长参数 → 默认：**1s / 无 delay / 单次迭代 / normal / fill both /
+/// cubic-out**（CSS 默认 ease）。fill both = 播放结束停终态；改默认须同步 C# 侧测试。
 ///
-/// 立即算首帧写 NodeAnim（spec §5.2：不等下帧 step b，防 delay 期闪 base）。
+/// 立即算首帧写 NodeAnim（不等下一帧 update_all，防 delay 期闪 base）。
 /// 返 PlayerKey；name 未找到 / 节点悬空 → None（调用方转 FFI 无效 key）。
 pub fn play_programmatic(scene: &mut Scene, node: NodeId, name: &str) -> Option<PlayerKey> {
     play_programmatic_with_duration(scene, node, name, 1.0)
@@ -541,12 +537,12 @@ fn crossed(prev: f32, cur: f32, pct: f32) -> bool {
     (prev < pct && cur >= pct) || (prev > pct && cur <= pct)
 }
 
-/// 每 tick 推进所有活跃 player 并写 NodeAnim（tick step b，spec §5.1）。
+/// 每 tick 推进所有活跃 player 并写 NodeAnim。
 ///
 /// 在 `TweenManager.update` **之后**调用——写入顺序即优先级：animation 同通道覆盖
-/// transition（spec §6.1）。
+/// transition。
 ///
-/// 状态处理（spec §5.4 / §6.3）：
+/// 状态处理：
 /// - Playing/Paused：写本帧帧值（Paused elapsed 不推进，位置保持）；
 /// - Completed + fill forwards/both：每帧续写末值，**不回收**（player 是"动画已结束"的
 ///   标记，sync_animation_players 靠它防止声明仍存在时重启）；
@@ -557,7 +553,7 @@ fn crossed(prev: f32, cur: f32, pct: f32) -> bool {
 /// - Stopped（显式 Stop）：清通道 + 从 players 表移除；
 /// - 悬空 NodeId（节点已删）：同 Stopped 移除（与 tween.rs 同款双保险）。
 ///
-/// 事件（spec §7.1/§7.5，advance 后按 PlayerFrame + player 状态判定，emit 进 `out`）：
+/// 事件（advance 后按 PlayerFrame + player 状态判定，emit 进 `out`）：
 /// - START：首帧 advance 一次（`fired_start` 防重）；
 /// - ITERATION：iteration 边界跨越（`PlayerFrame.iteration_boundary`，报刚结束的 0-based
 ///   迭代序号）。完成帧不发 ITERATION——CSS：最后一次 iteration 结束只发 END
@@ -578,10 +574,10 @@ pub fn update_all(scene: &mut Scene, dt: f32, out: &mut Vec<EventRecord>) {
         return;
     }
     // 完成清通道的掩码要查"同节点其他 player 的推进后状态"（谁本帧完成、谁仍活跃），
-    // 而推进必须按槽序交错写/清（写入顺序即优先级，spec §6.1）——拆两阶段：
+    // 而推进必须按槽序交错写/清（写入顺序即优先级）——拆两阶段：
     // 1) 按槽序推进全部 player，原位写帧、原位清 Stopped/悬空通道，记录 fill-none 完成转变；
     // 2) 全部推进后，按其他 player 的最终状态算清掩码（与 sync 回收侧同款，见 dynamic.rs）；
-    // 3) 回收 Stopped/悬空。全程不 drain/重插 slotmap——PlayerKey 稳定（T9/T10 C# 句柄）。
+    // 3) 回收 Stopped/悬空。全程不 drain/重插 slotmap——PlayerKey 稳定（C# 侧持句柄）。
     let keys: Vec<PlayerKey> = scene.players.keys().collect();
     let mut remove_keys: Vec<PlayerKey> = Vec::new();
     // 本帧 fill-none 完成转变的 player：(node, 自有通道掩码)。
@@ -593,7 +589,6 @@ pub fn update_all(scene: &mut Scene, dt: f32, out: &mut Vec<EventRecord>) {
             continue; // 防御：key 集合快照内理论不可达
         };
         if p.play_state == PlayerPlayState::Stopped || !scene.nodes.contains_key(p.node.to_key()) {
-            // Stopped / 悬空：清本 player 的通道（回退 tween/base）+ 回收。
             clear_owned_channels(&mut scene.anim, p);
             remove_keys.push(k);
             continue;
@@ -605,7 +600,6 @@ pub fn update_all(scene: &mut Scene, dt: f32, out: &mut Vec<EventRecord>) {
         let was_in_delay = p.elapsed < p.spec.delay;
         let frame = p.advance(dt);
 
-        // ── 动画事件 emit（spec §7.1/§7.5）──
         let first_advance = !p.fired_start;
         p.fired_start = true;
         let completion = frame.completed && !was_completed;
@@ -689,7 +683,7 @@ pub fn update_all(scene: &mut Scene, dt: f32, out: &mut Vec<EventRecord>) {
             )
         {
             // fill none/backwards 完成：帧 props 已全 None，清掉本 player 持有的通道，
-            // 下帧起 tween/base 接管（spec §6.3）。player 保留 Completed 态（防 sync 重启）。
+            // 下帧起 tween/base 接管。player 保留 Completed 态（防 sync 重启）。
             // 清动作推迟到全部推进后（掩码须按他人推进后状态算）。
             completions.push((p.node, owned_channels(p)));
         } else if !frame.completed
@@ -698,7 +692,6 @@ pub fn update_all(scene: &mut Scene, dt: f32, out: &mut Vec<EventRecord>) {
                 AnimationFillMode::Forwards | AnimationFillMode::Both
             )
         {
-            // 播放中 / Paused 位置保持 / Completed+forwards 续写末值。
             write_frame(&mut scene.anim, p.node, frame.props);
         }
         // 其余（Completed + fill none 的后续 tick）：惰性，不写不清。
@@ -753,7 +746,7 @@ fn holds_channels(p: &KeyframePlayer) -> bool {
 }
 
 /// 按帧值写 NodeAnim 四通道。通道 None = 本帧无 override（不动该通道）。
-/// `pub(crate)`：sync_animation_players 启动时立即写首帧（spec §5.2 backwards fill）用。
+/// `pub(crate)`：sync_animation_players 启动时立即写首帧（backwards fill）用。
 pub(crate) fn write_frame(anim: &mut AnimTable, node: NodeId, props: AnimatableProps) {
     let a = anim.ensure(node);
     if let Some(v) = props.opacity {

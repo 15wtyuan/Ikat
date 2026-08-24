@@ -56,9 +56,9 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
         ("shadow_params", 24), // v12：box-shadow SDF 参数（[f32;6]，照 color_matrix/effect_block 先例）
         ("grad_params", 208),  // v13：渐变像素参数（GradientParams::SIZE，照 effect_block 先例）
     ];
-    let num_col_offsets = columns.len(); // 23
+    let num_col_offsets = columns.len();
     let header_len = 3 * 4                          // magic, version, node_count
-        + num_col_offsets * 4                       // 列 offset（22）
+        + num_col_offsets * 4                       // 列 offset
         + 2 * 4                                     // mesh_arena off + len
         + 2 * 4                                     // clip_table off + len
         + 2 * 4; // path_table off + len（v7 新增）
@@ -88,7 +88,7 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
     let mut col_kind = Vec::<u8>::new();
     let mut col_mesh_off = Vec::<u8>::new();
     let mut col_mesh_len = Vec::<u8>::new();
-    let mut col_path_idx = Vec::<u8>::new(); // v7：path_idx 列
+    let mut col_path_idx = Vec::<u8>::new();
     let mut col_program = Vec::<u8>::new();
     let mut col_color_matrix = Vec::<u8>::new();
     let mut col_change_level = Vec::<u8>::new();
@@ -138,8 +138,6 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
                 color_matrix,
             } => {
                 col_kind.push(1);
-                // v7：把 image_path intern 进 path string table，写 1-based path_idx。
-                //   None（纯色）→ 0；Some(p) → p 在 path 表里的 1-based 索引。
                 let path_idx = match image_path {
                     Some(p) => intern_path(&mut path_table_buf, &mut path_index, p),
                     None => 0u32,
@@ -226,7 +224,7 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
         col_effect_block.extend_from_slice(&[0u8; EffectBlock::SIZE]);
         col_shadow_params.extend_from_slice(&[0u8; 24]); // v12：[f32;6] 全零
         col_grad_params
-            .extend_from_slice(&[0u8; loomgui_core::render::gradient::GradientParams::SIZE]); // v13
+            .extend_from_slice(&[0u8; loomgui_core::render::gradient::GradientParams::SIZE]);
         parked_count += 1;
     }
     let node_count = n + parked_count;
@@ -247,17 +245,16 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
         ("payload_kind", &col_kind),
         ("mesh_off", &col_mesh_off),
         ("mesh_len", &col_mesh_len),
-        ("path_idx", &col_path_idx), // v7：path 表 1-based 索引
+        ("path_idx", &col_path_idx),
         ("program", &col_program),
         ("color_matrix", &col_color_matrix),
         ("change_level", &col_change_level),
         ("reuse_key", &col_reuse_key),
-        ("effect_block", &col_effect_block), // v11：effect 参数列
-        ("shadow_params", &col_shadow_params), // v12：box-shadow SDF 参数列
-        ("grad_params", &col_grad_params),   // v13：渐变参数列
+        ("effect_block", &col_effect_block),
+        ("shadow_params", &col_shadow_params),
+        ("grad_params", &col_grad_params),
     ];
 
-    // 算各列 offset。
     let mut off = header_len;
     let mut col_offsets: Vec<u32> = Vec::new();
     for (_name, buf) in &col_bufs {
@@ -291,14 +288,13 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
         }
     }
 
-    // v7：path string table arena 紧跟 clip_table 末段（稳定布局，文档化于 §5.2）。
+    // v7：path string table arena 紧跟 clip_table 末段（稳定布局）。
     //   path_count（path_table_buf 首 4B）现已确定——回填实 count；再算 off/len。
     let path_count = path_index.len() as u32;
     path_table_buf[0..4].copy_from_slice(&path_count.to_le_bytes());
     let path_table_off = clip_table_off + clip_table_len;
     let path_table_len = path_table_buf.len() as u32; // 4 + Σ(4 + path_len)；无 path 时 = 4（仅 count=0）
 
-    // 拼装。
     let mut out = Vec::new();
     out.extend_from_slice(&MAGIC.to_le_bytes());
     out.extend_from_slice(&VERSION.to_le_bytes());
@@ -310,15 +306,13 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
     out.extend_from_slice(&mesh_arena_len.to_le_bytes());
     out.extend_from_slice(&clip_table_off.to_le_bytes());
     out.extend_from_slice(&clip_table_len.to_le_bytes());
-    out.extend_from_slice(&path_table_off.to_le_bytes()); // v7：path_table off + len
+    out.extend_from_slice(&path_table_off.to_le_bytes());
     out.extend_from_slice(&path_table_len.to_le_bytes());
     for (_name, buf) in &col_bufs {
         out.extend_from_slice(buf);
     }
     out.extend_from_slice(&mesh_arena);
-    // clip 表：clip_count + entries。
     out.extend_from_slice(&clip_table_buf);
-    // v7：path string table arena（blob 末段）。
     out.extend_from_slice(&path_table_buf);
     out
 }
@@ -335,7 +329,6 @@ fn intern_path(
     if let Some(&idx) = path_index.get(path) {
         return idx;
     }
-    // 新 path：追加 {path_len, path_bytes}，分配下一 1-based idx。
     let idx = (path_index.len() + 1) as u32; // 1-based：首条 path → idx=1
     let bytes = path.as_bytes();
     path_table_buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());

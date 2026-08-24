@@ -11,7 +11,7 @@ namespace LoomGUI.Tests
     /// 事件即炸，EditMode 不派发事件测不到）。本测试让 Dispatch 全路径在 EditMode 跑起来。
     public class EventBusDispatchTests
     {
-        /// 测试用 typed event struct：遵守 D1 契约（IRouteEvent + IRouteEventCore +
+        /// 测试用 typed event struct：遵守事件路由契约（IRouteEvent + IRouteEventCore +
         /// internal static byte EventType）。
         internal struct TestRouteEvent : IRouteEvent, IRouteEventCore
         {

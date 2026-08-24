@@ -137,7 +137,6 @@ fn parse_filter(value: &str) -> Option<[f32; 20]> {
             "contrast" => color_filter::contrast(parse_number(arg).unwrap_or(1.0)),
             "saturate" => color_filter::saturate(parse_number(arg).unwrap_or(1.0)),
             "hue-rotate" => {
-                // 90deg → 90.0
                 let deg = arg
                     .trim_end_matches("deg")
                     .trim()
@@ -189,7 +188,6 @@ fn parse_flex_basis(tok: &str) -> Option<Dimension> {
     if tok == "auto" {
         return Some(Dimension::auto());
     }
-    // length(px) 或 percent(%)：先抽出数值与单位标记。
     let (num, is_px) = tok
         .strip_suffix("px")
         .map(|s| (s.trim(), true))
@@ -392,7 +390,6 @@ pub fn parse_url(value: &str) -> Option<String> {
     if len == 0 {
         return None;
     }
-    // 去首尾配对引号
     let path = if len >= 2
         && ((inner.starts_with('"') && inner.ends_with('"'))
             || (inner.starts_with('\'') && inner.ends_with('\'')))
@@ -606,7 +603,6 @@ fn parse_linear_gradient(inner: &str) -> Option<Gradient> {
     Some(Gradient::Linear { angle_deg, stops })
 }
 
-/// radial 尺寸关键字 → RadialExtent。
 fn radial_size_keyword(tok: &str) -> Option<RadialExtent> {
     match tok {
         "closest-side" => Some(RadialExtent::ClosestSide),
@@ -832,7 +828,6 @@ fn iter_transform_funcs(s: &str) -> Vec<(&str, &str)> {
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        // 跳空白
         while i < bytes.len() && bytes[i].is_ascii_whitespace() {
             i += 1;
         }
@@ -850,7 +845,7 @@ fn iter_transform_funcs(s: &str) -> Vec<(&str, &str)> {
         if i >= bytes.len() || bytes[i] != b'(' {
             break;
         }
-        i += 1; // skip '('
+        i += 1;
         let args_start = i;
         while i < bytes.len() && bytes[i] != b')' {
             i += 1;
@@ -858,7 +853,7 @@ fn iter_transform_funcs(s: &str) -> Vec<(&str, &str)> {
         let args = &s[args_start..i];
         if i < bytes.len() {
             i += 1;
-        } // skip ')'
+        }
         if !name.is_empty() {
             out.push((name, args));
         }
@@ -1226,8 +1221,6 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
         // 覆盖 fence schema 列出的全部合法值（flex-start/center/flex-end/stretch/
         // space-between/space-around/space-evenly）。
         "align-content" => {
-            // cross 轴多行内容对齐。fence schema 列出的合法值全覆盖；未知值返 false
-            // （不静默降级成 FLEX_START，与 flex-wrap 同口径——拼写错误应报错而非吞）。
             ts.align_content = Some(match value.trim() {
                 "flex-start" => taffy::AlignContent::FLEX_START,
                 "center" => taffy::AlignContent::CENTER,
@@ -1368,16 +1361,13 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.color_filter = parse_filter(value);
             true
         }
-        "border-image-slice" => {
-            // 4 值上右下左（CSS 4 值缩写同 margin）；px 存像素，% 存比例（渲染期 resolve 乘源图边）
-            match parse_slice(value) {
-                Some(ins) => {
-                    style.border_image_slice = Some(ins);
-                    true
-                }
-                None => false,
+        "border-image-slice" => match parse_slice(value) {
+            Some(ins) => {
+                style.border_image_slice = Some(ins);
+                true
             }
-        }
+            None => false,
+        },
         "background-color" => {
             style.background_color = parse_color(value);
             true
@@ -1685,8 +1675,8 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "animation" => {
-            // class 规则运行时 rematch 走此 arm（spec §5.2 class 触发）：动态规则的
-            // animation 声明叠加进 computed style.animation，sync_animation_players (g')
+            // class 规则运行时 rematch 走此 arm：动态规则的
+            // animation 声明叠加进 computed style.animation，sync_animation_players
             // 据此启停 player。打包期 inline 走 fence 的 validate + parse（同一 parse_animation）。
             style.animation = parse_animation(value);
             true
@@ -1773,9 +1763,9 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
 ///
 /// 与 `parse_transition` 同构：core 是解析真相源（运行时 rematch 的 apply_decl "animation"
 /// arm 调用），fence 打包期 inline 路径委托本函数（fence `parse_animation_value`），
-/// 防两份解析器漂移（spec §8.2/§8.3 对齐表唯一真相源 = `css_ease_keyword`）。
+/// 防两份解析器漂移（对齐表唯一真相源 = `css_ease_keyword`）。
 ///
-/// 语义：首个 time=duration、次个 time=delay；ease 关键字按 §8.3 对齐表映射
+/// 语义：首个 time=duration、次个 time=delay；ease 关键字按对齐表映射
 /// （`ease`→CubicOut，`ease-in/out/in-out`→Quad*，`step-start/end`→Step）；缺省值 =
 /// CSS initial（direction=normal / fill=none / play-state=running / iteration-count=1 /
 /// timing=ease）。非法段（空 / `none` / 非法 name / 缺 duration）静默丢弃（filter_map）。
@@ -1903,13 +1893,13 @@ fn parse_one_animation(decl: &str) -> Option<crate::style::resolved::AnimationSp
         iteration_count: Some(1), // CSS initial iteration-count = 1（None = infinite）
         direction: AnimationDirection::Normal,
         fill_mode: AnimationFillMode::None,
-        timing_function: crate::tween::Ease::CubicOut, // CSS animation 默认 ease（§8.3）
+        timing_function: crate::tween::Ease::CubicOut, // CSS animation 默认 ease
         play_state: AnimationPlayState::Running,
     };
     let mut time_count = 0;
     for tok in tokens {
         if let Some(secs) = parse_time_seconds(tok) {
-            // 首个 time = duration，次个 time = delay（§8.2）。
+            // 首个 time = duration，次个 time = delay。
             if time_count == 0 {
                 spec.duration = secs;
             } else {
@@ -1974,14 +1964,14 @@ fn is_valid_animation_name(s: &str) -> bool {
 /// 解析。空输入返回空 Vec（未声明 transition）。
 ///
 /// `pub` 供 fence css_resolve 复用（打包期 inline 与运行时 rematch 同一真相源，
-/// 防 spec §8.3 ease 对齐表漂移）。
+/// 防 ease 对齐表漂移）。
 pub fn parse_transition(value: &str) -> Vec<crate::style::resolved::TransitionSpec> {
     value.split(',').filter_map(parse_one_transition).collect()
 }
 
 /// 解析单个 transition spec（逗号分隔的一段）。
 /// 空格切 token：prop 关键字（all/opacity/color/background-color/transform）→ TweenProp 映射；
-/// time（`<n>s`/`<n>ms`）首遇 = duration、次遇 = delay；其余 = ease 关键字（§8.3 对齐表）。
+/// time（`<n>s`/`<n>ms`）首遇 = duration、次遇 = delay；其余 = ease 关键字（对齐表）。
 /// 缺省补默认（dur=0s, ease=CubicOut=CSS 初始 ease, delay=0s）。空段返回 None。
 fn parse_one_transition(part: &str) -> Option<crate::style::resolved::TransitionSpec> {
     use crate::style::resolved::TransitionSpec;
@@ -1993,7 +1983,7 @@ fn parse_one_transition(part: &str) -> Option<crate::style::resolved::Transition
     let mut prop = None;
     let mut duration = 0.0f32;
     let mut delay = 0.0f32;
-    let mut ease = Ease::CubicOut; // CSS transition 默认 timing-function = ease（§8.3）
+    let mut ease = Ease::CubicOut; // CSS transition 默认 timing-function = ease
     let mut time_count = 0;
     for t in tokens {
         match t {
@@ -2034,7 +2024,7 @@ fn parse_time_seconds(tok: &str) -> Option<f32> {
     tok.strip_suffix('s')?.parse::<f32>().ok()
 }
 
-/// CSS timing-function 关键字 → Ease（spec §8.3 对齐表；唯一真相源）。
+/// CSS timing-function 关键字 → Ease（唯一真相源）。
 ///
 /// `pub` 供 fence 委托（transition 侧经 `parse_transition`、animation 侧直接调用），
 /// 打包期与运行时共用一张表，防双份白名单漂移。本表按小写精确匹配；fence animation

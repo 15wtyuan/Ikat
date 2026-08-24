@@ -6,11 +6,9 @@
 //! 类型模型（\ParsedSelector\/\Compound\/\Combinator\/\Specificity\）+ \Declaration\（CSS 声明）+
 //! \compound_matches_node\（运行时 compound 匹配）+ 动态规则匹配全部无条件编译——
 //! bincode 反序列化的 \.pkg.bin\ 就是这些结构，runtime 不再 parse 选择器，直接用反序列化结构。
-//! 字符串 → 这些结构的解析器在 fence crate（\loomgui_fence\）——由 spike（css_rules.rs）落地。
+//! 字符串 → 这些结构的解析器在 fence crate（\loomgui_fence\）。
 
 use serde::{Deserialize, Serialize};
-
-// 运行时选择器类型模型（无条件编译，支持 bincode 反序列化 + rematch）。
 
 /// CSS 声明（prop + value），序列化进 .pkg.bin DynamicRuleSection。
 /// \PartialEq\ 用于 instantiate 伪类去重（同选择器 + 同声明视为重复，跳过）。
@@ -84,16 +82,12 @@ pub struct AttrSelector {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Specificity(pub u32, pub u32, pub u32); // (id 数, class 数, tag 数)
 
-// ── 动态规则表（DynamicRule 持有 ParsedSelector + Declarations，均 bincode 可序列化）──
-
 use crate::scene::control::ROLE_TAB;
 use crate::scene::node::{NodeFlags, NodeId, Scene};
 use crate::style::mapping::apply_decl;
 use crate::style::resolved::{AnimationSpec, DisplayMode, ResolvedStyle, TransitionSpec};
 use std::collections::HashMap;
 
-/// cascade 期 transient：节点显式声明了哪些可继承属性（bitmask）。
-/// 不进 ResolvedStyle（避免改 bincode/pkg 格式），不进 Scene 持久字段。
 use crate::style::resolved::InheritedSet;
 
 const INH_FONT_SIZE: u16 = 1 << 0;
@@ -122,16 +116,13 @@ pub fn inherited_bit(prop: &str) -> Option<u16> {
     }
 }
 
-// ── Spec-4a：inline override（便签层）set-ness 位图 ────────────────────────────
-//
 // InlineSet 与 InheritedSet 同构（newtype 包位图），但语义相反：
 //   - InheritedSet: 打包期 bake 进 base_style.inherited_set，序列化进 pkg.bin
 //   - InlineSet:    运行时 transient，C# Style.X=v 写入，不进 pkg.bin
 // 继承属性 bit 复用 INH_*（同一位空间，不重新编号）；非继承属性用 INLINE_*。
 //
-// **位编号说明（为何从 bit 8 起而不是 bit 9）：** INH_* 实际占用 bits 0-7（8 个继承属性，
-// 不是 9 个）。task spec 草稿的 `INLINE_WIDTH = 1 << 9` 与"前 9 bit"措辞是 off-by-one——
-// 按 INH_* 实际位数，bit 8 是下一个可用位。从 bit 8 起，bits 8-31 共 24 位容纳了 apply_decl
+// **位编号说明：** INH_* 占用 bits 0-7（8 个继承属性），bit 8 是下一个可用位。
+// 从 bit 8 起，bits 8-31 共 24 位容纳了 apply_decl
 // 处理的 24 个非继承属性（width/height/min-*/max-*/padding/margin/
 // border-width/gap/flex-*/display/overflow-x/y/position/left/top/right/bottom/
 // background-color/opacity）。u32 装满后位图升级为 u64：z-index 取 bit 32，
@@ -246,7 +237,7 @@ pub struct DynamicRule {
     pub declarations: Vec<Declaration>,
 }
 
-/// 带作用域的动态规则（scene 运行时态，不进 pkg）。main-design §5.4 Shadow DOM 风格：
+/// 带作用域的动态规则（scene 运行时态，不进 pkg）。Shadow DOM 风格：
 /// 模板实例化时，规则绑定到实例根 NodeId；rematch 只在 scope 内匹配 + 后代选择器不穿透边界。
 /// `scope_root == NodeId::INVALID` = 全局规则（UIContext.StyleSheet 逃生舱），跨作用域命中。
 /// pkg 里的 DynamicRuleTable（无 scope）在 instantiate 时包装成 ScopedRule。
@@ -334,7 +325,6 @@ pub fn compound_matches_node(c: &Compound, node_id: NodeId, scene: &Scene) -> bo
             return false;
         }
     }
-    // :nth-child 结构匹配：节点在父 children 的 1-based index（spec §8.5）。
     if let Some(expr) = &c.pseudo_nth_child {
         if !nth_child_matches(scene, node_id, expr) {
             return false;
@@ -343,7 +333,7 @@ pub fn compound_matches_node(c: &Compound, node_id: NodeId, scene: &Scene) -> bo
     true
 }
 
-/// `:nth-child(An+B)` 匹配（spec §8.5）：节点在父 `children` 的 1-based index `i`，
+/// `:nth-child(An+B)` 匹配：节点在父 `children` 的 1-based index `i`，
 /// `a == 0` 时 `i == b`；否则 `(i - b) % a == 0 && (i - b) / a >= 0`。
 /// 根节点（无父）不匹配任何 :nth-child。
 fn nth_child_matches(scene: &Scene, node_id: NodeId, expr: &NthChildExpr) -> bool {
@@ -476,7 +466,7 @@ fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
             _ => return None,
         };
         // 本 Tab 在父 TabList 的 role=tab 子里的 0 基序号（与 selected_index 同尺度）。
-        // 只数 role=tab 子，忽略非 tab 中间结构（如 label 包裹），保持与 T3 解析一致。
+        // 只数 role=tab 子，忽略非 tab 中间结构（如 label 包裹），保持与解析一致。
         let my_index = scene
             .get(tablist_id)?
             .children
@@ -505,7 +495,6 @@ fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
 /// 状态门：伪类（hovered / active / disabled / focused）。
 /// 通过后调 compound_matches_node 做字面匹配（tag/classes/id_attr + :nth-child 结构位置）。
 fn compound_matches_with_state(c: &Compound, node_id: NodeId, scene: &Scene) -> bool {
-    // 伪类状态门
     let node = scene.get_live(node_id, "dynamic/compound_matches_with_state");
     if c.pseudo_hover && !node.interaction.flags.contains(NodeFlags::HOVERED) {
         return false;
@@ -526,7 +515,7 @@ fn compound_matches_with_state(c: &Compound, node_id: NodeId, scene: &Scene) -> 
 /// 最后一个 compound 必须命中目标 node 本身（含状态门）；前面按 combinator 沿
 /// parent 链找（Child=直接父，Descendant=任一祖先，带回溯）。
 /// 匹配选择器 `sel` 到节点 `node_id`。`scope_bound` = 规则所属作用域根（NodeId::INVALID=全局，无边界）。
-/// 后代/子代选择器沿祖先链匹配时，不穿透 scope_bound（其父在作用域外）——main-design §5.4。
+/// 后代/子代选择器沿祖先链匹配时，不穿透 scope_bound（其父在作用域外）。
 pub fn match_element_with_state(
     sel: &ParsedSelector,
     node_id: NodeId,
@@ -589,7 +578,7 @@ fn match_chain_with_state(
 
 /// 取 `node` 的父，但不超过 `scope_bound`：若 node == scope_bound，其父在作用域外 → None。
 /// `scope_bound == NodeId::INVALID` = 全局规则，无边界 → 直接返父（可能跨作用域）。
-/// 作用域根节点的父在作用域外，后代/子代选择器不应据它匹配（main-design §5.4 不穿透边界）。
+/// 作用域根节点的父在作用域外，后代/子代选择器不应据它匹配（不穿透边界）。
 fn parent_in_scope(scene: &Scene, node: NodeId, scope_bound: NodeId) -> Option<NodeId> {
     if scope_bound != NodeId::INVALID && node == scope_bound {
         return None;
@@ -663,7 +652,7 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
     // 收集所有 NodeId（slotmap 分配，不能手造 NodeId(i)）。
     let node_ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
     // 每节点的所属作用域根（沿父链最近的 SCOPE_ROOT，含自身）。全局规则（scope_root=INVALID）
-    // 跳过此过滤；scoped 规则只匹配 node_scope == rule.scope_root 的节点（main-design §5.4）。
+    // 跳过此过滤；scoped 规则只匹配 node_scope == rule.scope_root 的节点。
     let scope_map = compute_scope_map(scene, &node_ids);
     // set-ness：每节点显式声明了哪些可继承属性。cascade 期收集，继承 pass 消费。
     let mut set_map: HashMap<NodeId, InheritedSet> = HashMap::new();
@@ -678,18 +667,16 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
                 n.interaction.flags.contains(NodeFlags::CASCALED),
             )
         };
-        // 从 base_style 重起
         let mut new_style = scene
             .get_live(node_id, "dynamic/rematch:base_style")
             .base_style
             .clone();
-        // 收集命中规则（按作用域过滤：全局规则 scope_root=INVALID 总匹配；scoped 规则只匹配本作用域节点）
         let node_scope = scope_map.get(&node_id).copied().unwrap_or(NodeId::INVALID);
         let mut matched: Vec<(u32, u32, u32, DynamicRule)> = Vec::new();
         for r in &rules_with_spec {
             let scope_root = r.4;
             if scope_root != NodeId::INVALID && scope_root != node_scope {
-                continue; // scoped 规则不匹配他作用域节点
+                continue;
             }
             if match_element_with_state(&r.3.selector, node_id, scene, scope_root) {
                 matched.push((r.0, r.1, r.2, r.3.clone()));
@@ -734,7 +721,7 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         // inline_override 应用（最高优先级，动态规则之后）。
         // 按 inline_set 把 inline_override 字段拷进 new_style；继承子集 OR 进 set_map，
         // 使 propagate 把含 inline 的父值传给未自设的子、且本节点自身不被父覆盖。
-        // inline_set 默认空 → 对没设 inline 的节点 no-op（Spec-3 probe 不回归）。
+        // inline_set 默认空 → 对没设 inline 的节点 no-op。
         {
             let n_ref = scene.get_live(node_id, "dynamic/rematch:inline_set");
             let inline_set = n_ref.inline_set;
@@ -752,14 +739,11 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
         // transition 声明读自级联结果（new_style）：base/inline 烘焙经
         // base_style.clone 进入，动态 class 规则经 apply_decl 写入——两源统一。
         let transition_decl = new_style.transition.clone();
-        // transition 检测：仅 cascaded_once 后（首次 cascade 即时生效不动画），
-        // 且声明了非零 duration 的 transition 时，比较可动画通道变化推请求。
         for ts in &transition_decl {
             if cascaded_once && ts.duration > 0.0 {
                 emit_transition_requests(scene, node_id, *ts, &old_style, &new_style);
             }
         }
-        // 写 style + 标 cascaded_once
         let node = scene.get_live_mut(node_id, "dynamic/rematch:write");
         node.style = new_style;
         if display_decl_seen && node.style.display_mode == DisplayMode::Flex && node.rich_text_block
@@ -867,7 +851,8 @@ fn propagate_inherited_rec(
             };
         }
         copy_if_unset!(font_size, INH_FONT_SIZE);
-        // ponytail: anim text-color override to children dropped (old propagate_color_inheritance had it); restore in Spec-3 when text anim + inheritance interact.
+        // anim text-color override to children is dropped (the old propagate_color_inheritance
+        // had it); restore when text anim + inheritance interact.
         copy_if_unset!(color, INH_COLOR);
         copy_if_unset!(font_family, INH_FONT_FAMILY);
         copy_if_unset!(font_weight, INH_FONT_WEIGHT);
@@ -875,7 +860,7 @@ fn propagate_inherited_rec(
         copy_if_unset!(line_height, INH_LINE_HEIGHT);
         copy_if_unset!(letter_spacing, INH_LETTER_SPACING);
         copy_if_unset!(white_space_nowrap, INH_WHITE_SPACE_NOWRAP);
-        // ponytail: per-clone，节点多时换就地改 + 父快照
+        // per-clone，节点多时换就地改 + 父快照
         let eff_for_children = new_style.clone();
         scene
             .get_live_mut(id, "dynamic/propagate_inherited:write")
@@ -892,24 +877,24 @@ fn propagate_inherited_rec(
     }
 }
 
-/// 声明式动画启停（tick step g'，spec §5.2 class 触发）。rematch(f) 之后、solve(i) 之前
+/// 声明式动画启停。rematch 之后、solve 之前
 /// 调用：读节点 computed `style.animation`（rematch 已把动态规则的 animation 声明叠加进
-/// style），与节点活跃 player 比对，只增删不推进时间轴（推进是 step b update_all 的事）。
+/// style），与节点活跃 player 比对，只增删不推进时间轴（推进是 update_all 的事）。
 ///
-/// 决策规则（与 T6 `update_all` 的 Completed 保留设计衔接）：
+/// 决策规则（与 `update_all` 的 Completed 保留设计衔接）：
 /// - **声明出现（新 name）** → 建 player：从 `Scene.keyframes` 全局表按 name 拷 KeyframesRule；
-///   fill backwards/both 立即算首帧写 NodeAnim（spec §5.2，防 delay 期闪 base）；
+///   fill backwards/both 立即算首帧写 NodeAnim（防 delay 期闪 base）；
 ///   `animation-play-state: paused` 声明的建 Paused player。未知 name → 跳过（CSS 语义=无动画）。
-/// - **声明消失** → 回收 player（含 fill forwards/both 的 Completed player，spec §6.3）：
+/// - **声明消失** → 回收 player（含 fill forwards/both 的 Completed player）：
 ///   清它持有的通道回 None → tween/base 接管。同节点多 player 共享通道时，只清"移除者持有
 ///   且无剩余 player 持有"的通道（防误清仍在播的动画）。
 /// - **同名参数变**（duration/delay/iteration/fill 等）→ kill 旧 + 建新（合法重播）。
-/// - **同名已存在（含 Completed）** → 不重播（防 fill none 的结束标记被无限重启，T6 衔接点 1）。
-/// - **`programmatic` player**（node.Play 建，T10）→ 完全跳过：不回收、不算已存在
+/// - **同名已存在（含 Completed）** → 不重播（防 fill none 的结束标记被无限重启）。
+/// - **`programmatic` player**（node.Play 建）→ 完全跳过：不回收、不算已存在
 ///   （同名声明出现时另建 class player，二者独立）。
 ///
 /// 多 animation（`animation: a .3s, b .5s`）：每条声明独立建 player；update_all 按插入序
-/// 写，后声明覆盖同通道（spec §6.4）。
+/// 写，后声明覆盖同通道。
 pub fn sync_animation_players(scene: &mut Scene) {
     use crate::scene::animation::{
         clear_channels, owned_channels, write_frame, KeyframePlayer, PlayerKey, PlayerPlayState,
@@ -1018,7 +1003,7 @@ pub fn sync_animation_players(scene: &mut Scene) {
         if spec.play_state == AnimationPlayState::Paused {
             player.play_state = PlayerPlayState::Paused;
         }
-        // 首帧立即写（spec §5.2）：不等下帧 step b，防 delay 期闪 base。
+        // 首帧立即写：不等下帧 update_all，防 delay 期闪 base。
         let first = player.advance(0.0);
         scene.players.insert(player);
         if matches!(
@@ -1169,10 +1154,6 @@ mod tests {
         s.get(s.roots[0]).unwrap().children[0]
     }
 
-    /// Construct a ParsedSelector manually (no parse dependency).
-    /// Supports the subset used in these tests: `.class`, `.class:hover`,
-    /// `.class:active`, `.class:disabled`, `[attr]`, `[attr="val"]`, and
-    /// tag selectors.
     /// Construct a ParsedSelector manually (no parse dependency).
     /// Supports: .class, #id, :hover/:active/:disabled/:focus,
     /// [attr], [attr="val"], tag, and descendant combinator (space).
@@ -1858,8 +1839,6 @@ mod tests {
         assert!(!compound_matches_node(&sel.compound[0], id, &s));
     }
 
-    // ── [aria-*] 合成：值随 ControlState 实时变 ──
-
     #[test]
     fn attr_matches_aria_checked_from_toggle() {
         // Toggle{checked:true} → [aria-checked="true"] 命中；翻成 false → [aria-checked="false"] 命中
@@ -2018,8 +1997,6 @@ mod tests {
         );
     }
 
-    // ── [role=] / [data-slot=]：从 RoleTable 查打包期提取的静态值 ──
-
     #[test]
     fn attr_matches_role_eq_and_exists() {
         let (s, id) = role_scene(Some("switch"), &[]);
@@ -2095,8 +2072,6 @@ mod tests {
             "checked:false → 不再染红"
         );
     }
-
-    // ── transition 请求发射测 ──
 
     #[test]
     fn rematch_emits_transition_request_on_change() {
@@ -2280,8 +2255,6 @@ mod tests {
         );
     }
 
-    // ── Spec-4a A2：inline_override（便签层）应用步 ──
-
     /// 建 root → child（child 为 TextNode，无自身 color 声明）。
     fn build_parent_child() -> (Scene, NodeId, NodeId) {
         let mut root = Node::default();
@@ -2355,7 +2328,7 @@ mod tests {
 
     #[test]
     fn spec3_probe_no_regress_when_no_inline() {
-        // 没设 inline 的节点（inline_set == 0）：rematch 不 panic、行为同 Spec-3。
+        // 没设 inline 的节点（inline_set == 0）：rematch 不 panic。
         let (mut scene, root) = build_simple_tree();
         assert_eq!(scene.get(root).unwrap().inline_set.0, 0);
         rematch_pseudo_classes(&mut scene);
@@ -2500,8 +2473,6 @@ mod tests {
         );
     }
 
-    // ── Spec-4a review I1：unsupported prop 不写 ghost state ──
-
     #[test]
     fn set_inline_override_ignores_unsupported_prop_no_ghost() {
         // transform 不在 inline_bit 表：完全不写 inline_override（无 ghost state）。
@@ -2603,7 +2574,7 @@ mod tests {
         );
     }
 
-    /// CSS 作用域隔离回归测试（main-design §5.4）：页面根(SCOPE_ROOT) → child → 组件实例根(SCOPE_ROOT)
+    /// CSS 作用域隔离回归测试：页面根(SCOPE_ROOT) → child → 组件实例根(SCOPE_ROOT)
     /// → leaf(.leaf)。页面根作用域的 .leaf 规则不应命中实例内部节点——leaf 的 node_scope =
     /// 实例根（沿父链最近的 SCOPE_ROOT）≠ 页面根，scoped 规则被过滤。
     ///
@@ -2673,8 +2644,6 @@ mod tests {
             "页面根作用域的 .leaf 规则不应命中实例内节点（作用域隔离：leaf scope = 实例根 ≠ 页面根）"
         );
     }
-
-    // ── aria-selected 跨节点合成（T5）：Tab 无 ControlState，从父 TabList.selected_index 派生 ──
 
     /// 构造 TabList + N 个 role=tab 子节点的 scene（复刻 TabList 实例化形态）。
     /// 返回 (scene, tablist_id, [tab_id,...])。

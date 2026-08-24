@@ -22,15 +22,11 @@ namespace LoomGUI.Tests
             Assert.IsFalse(look.found, "no atlases → found=false");
         }
 
-        /// <summary>
-        /// Init with null atlases does not crash (defensive).
-        /// </summary>
         [Test]
         public void SpriteResolver_InitNull_DoesNotCrash()
         {
             var resolver = new SpriteResolver();
             resolver.Init(null, null);
-            // no exception = pass
             var look = resolver.GetSprite("icons/skin.png");
             Assert.IsFalse(look.found);
         }

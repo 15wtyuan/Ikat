@@ -1,4 +1,3 @@
-/* ── Reset & base ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
@@ -11,11 +10,9 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Screen visibility ── */
 .screen { display: flex; flex-direction: column; height: 100%; }
 .screen.hidden { display: none; }
 
-/* ── Buttons ── */
 .btn {
   padding: 8px 20px;
   border: 1px solid transparent;
@@ -50,7 +47,6 @@ html, body {
 }
 .btn:disabled:active { transform: none; }
 
-/* ── Start screen ── */
 .start-header {
   text-align: center;
   padding: 48px 24px 16px;
@@ -66,7 +62,6 @@ html, body {
   color: #808090;
 }
 
-/* ── Recent list ── */
 .recent-section {
   flex: 1;
   overflow-y: auto;
@@ -91,7 +86,6 @@ html, body {
   padding: 16px 0;
 }
 
-/* ── Recent card ── */
 .recent-card {
   display: flex;
   align-items: center;
@@ -128,7 +122,7 @@ html, body {
   font-size: 12px;
   color: #606070;
 }
-/* hover 才浮现（visibility 保占位，避免布局跳动）；只删列表记录不删工作区 */
+/* hover 才浮现（visibility 保占位，避免布局跳动） */
 .recent-card-remove {
   margin-left: auto;
   visibility: hidden;
@@ -144,7 +138,6 @@ html, body {
 .recent-card:hover .recent-card-remove { visibility: visible; }
 .recent-card-remove:hover { color: #fc5c7c; }
 
-/* ── Start actions ── */
 .start-actions {
   display: flex;
   justify-content: center;
@@ -153,7 +146,6 @@ html, body {
   border-top: 1px solid #2e2e3e;
 }
 
-/* ── Main screen ── */
 .main-header {
   display: flex;
   align-items: center;
@@ -185,7 +177,6 @@ html, body {
   gap: 10px;
 }
 
-/* ── Form controls ── */
 .form-row {
   display: flex;
   align-items: center;
@@ -218,7 +209,6 @@ html, body {
   min-width: 0;
 }
 
-/* ── Checkbox / radio ── */
 .form-check {
   display: inline-flex;
   align-items: center;
@@ -234,7 +224,6 @@ html, body {
   cursor: pointer;
 }
 
-/* ── Cards ── */
 .config-card {
   background: #262636;
   border: 1px solid #353548;
@@ -246,14 +235,12 @@ html, body {
 }
 .config-card.compact { gap: 4px; }
 
-/* ── Rows of checkboxes ── */
 .card-checks {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
 }
 
-/* ── Tags (dirs, html entries) ── */
 .tag-list {
   display: flex;
   flex-wrap: wrap;
@@ -289,7 +276,6 @@ html, body {
 }
 .tag .tag-remove:hover { color: #fc5c7c; }
 
-/* ── Dropzones ── */
 .dropzone {
   border: 1px dashed #404058;
   border-radius: 8px;
@@ -329,7 +315,6 @@ html, body {
   color: #7c5cfc;
 }
 
-/* ── Small buttons ── */
 .btn-sm {
   padding: 3px 10px;
   font-size: 12px;
@@ -355,7 +340,6 @@ html, body {
   cursor: pointer;
 }
 .btn-link-sm:hover { color: #9a7eff; text-decoration: underline; }
-/* ── Build log ── */
 .build-log {
   font-family: "Cascadia Code", "Fira Code", monospace;
   font-size: 12px;
@@ -386,14 +370,12 @@ html, body {
 .build-summary .build-ok { color: #5cfc7c; }
 .build-summary .build-err { color: #fc5c7c; }
 
-/* ── Auto-scan status ── */
 .auto-scan-status {
   font-size: 12px;
   color: #505068;
   font-style: italic;
 }
 
-/* ── Modal ── */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -419,14 +401,12 @@ html, body {
   margin-bottom: 8px;
 }
 
-/* ── Header actions (日志 + 打包) ── */
 .header-actions {
   display: flex;
   gap: 8px;
   align-items: center;
 }
 
-/* ── Tabs ── */
 .tabs {
   display: flex;
   gap: 4px;
@@ -458,7 +438,6 @@ html, body {
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 
-/* ── Init agent scaffold modal ── */
 .modal-desc {
   font-size: 12px;
   color: #9090a0;
@@ -466,7 +445,6 @@ html, body {
   margin: 4px 0 16px 0;
 }
 
-/* ── New-workspace wizard: session-root banner + UI-dir drop field ── */
 .field-label {
   display: flex;
   align-items: baseline;
@@ -588,7 +566,6 @@ html, body {
   margin-top: 16px;
 }
 
-/* ── Log modal ── */
 .log-modal {
   width: 720px;
   max-width: calc(100vw - 48px);
@@ -611,7 +588,6 @@ html, body {
   max-height: calc(100vh - 220px);
 }
 
-/* ── Atlas 资源目录缩略图 ── */
 .thumb-grid {
   display: flex;
   flex-wrap: wrap;

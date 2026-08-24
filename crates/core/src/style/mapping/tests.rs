@@ -259,7 +259,7 @@ fn color_hex_4_equivalent_to_8() {
 }
 
 // CSS Color Module Level 4：`#rrggbbaa` 8 位 hex（第 7-8 位为 alpha）。
-// StyleMirror（Spec-4a C3）会把 color flush 成此形式，core parse_color 必须收。
+// StyleMirror 会把 color flush 成此形式，core parse_color 必须收。
 #[test]
 fn color_hex_8_opaque_red() {
     // aa=ff → 不透明红（与 6-hex #ff0000 等价）。
@@ -279,7 +279,7 @@ fn color_hex_8_alpha_128_of_255() {
 
 #[test]
 fn color_hex_8_round_trip() {
-    // C3 StyleMirror flush #rrggbbaa → core parse → 值对。
+    // StyleMirror flush #rrggbbaa → core parse → 值对。
     // aa=ff 等价 6-hex a=1.0；aa=00 完全透明。
     let opaque = parse_color("#aabbccff").unwrap();
     assert_eq!(
@@ -1326,8 +1326,6 @@ fn background_shorthand_named_color_rejected() {
     );
 }
 
-// ── -webkit-text-stroke ──
-
 #[test]
 fn text_stroke_single_with_color() {
     // `-webkit-text-stroke: 2px #000000` → 单 Stroke{w:2, color:black}
@@ -1394,8 +1392,6 @@ fn text_stroke_and_shadow_can_coexist() {
         crate::text::font_effect::FontEffect::Stroke { .. }
     ));
 }
-
-// ── font-effect ──
 
 #[test]
 fn font_effect_glow_with_color() {
@@ -1557,8 +1553,6 @@ fn font_effect_bare_number_no_px() {
     }
 }
 
-// ── filter: invert 比例插值（非阈值二分） ──
-
 /// invert(0.3) 应是 30% 反相（矩阵非单位、非全反相），
 /// 而非旧实现的阈值二分（x<0.5 → IDENTITY）。
 #[test]
@@ -1607,8 +1601,6 @@ fn filter_invert_zero_is_identity() {
     // 全阵 = IDENTITY
     assert_eq!(&m, &color_filter::IDENTITY, "invert(0) = IDENTITY");
 }
-
-// ── letter-spacing 拒收 em/rem（围栏 px-only，不静默落零） ──
 
 #[test]
 fn letter_spacing_em_is_rejected() {
@@ -1690,8 +1682,6 @@ fn apply_border_side_longhand_optional_color() {
     assert_eq!(s.border_color, Some([0.5; 4]), "无 color token 不覆盖");
 }
 
-// ── border-style 语义对齐（CSS：不声明 style → None，不画边框） ──
-
 #[test]
 fn apply_border_style_longhand() {
     use crate::style::resolved::BorderStyle;
@@ -1755,7 +1745,7 @@ fn flex_shorthand_three_values() {
 }
 
 // flex shorthand：两值歧义——`flex:1 50%` 第二 token 是 basis（非 shrink）。
-// 旧实现把 50% 当 shrink → parse 失败 unwrap_or(1.0) → basis 静默变 0%。这是 High bug。
+// 旧实现把 50% 当 shrink → parse 失败 unwrap_or(1.0) → basis 静默变 0%。
 #[test]
 fn flex_shorthand_two_values_basis_percent() {
     use taffy::style::Dimension;
@@ -1889,7 +1879,7 @@ fn row_gap_longhand_applies() {
     assert!((resolve_lp_for_test(s.taffy_style.gap.height) - 10.0).abs() < 0.01);
 }
 
-// row-gap/column-gap 必须与 `gap` shorthand 同口径：px 与裸数字都接受（F3 修复）。
+// row-gap/column-gap 必须与 `gap` shorthand 同口径：px 与裸数字都接受。
 // 此前 strip_suffix("px") 拒裸数字——row-gap:0 / column-gap:10 被静默丢弃，
 // 连 schema default `0`（裸数字）都过不了。
 #[test]
@@ -1919,8 +1909,6 @@ fn resolve_lp_for_test(lp: taffy::style::LengthPercentage) -> f32 {
     let cl = lp.into_raw();
     cl.value()
 }
-
-// ===== caret-color / selection-background / selection-color CSS mapping (Task 15) =====
 
 #[test]
 fn caret_color_applies() {

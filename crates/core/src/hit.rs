@@ -27,13 +27,13 @@ fn effective_draw_order(scene: &Scene, parent: NodeId) -> Vec<NodeId> {
             .get_live(c, "hit/effective_draw_order:order")
             .style
             .order
-    }); // 负号=降序
+    });
     kids.sort_by_key(|&c| {
         -scene
             .get_live(c, "hit/effective_draw_order:z")
             .style
             .z_index
-    }); // z 主键=降序
+    });
     kids
 }
 
@@ -56,7 +56,7 @@ pub fn hit_scrollbar_grip(scene: &Scene, point: (f32, f32)) -> Option<(NodeId, u
     None
 }
 
-/// 命中 open Dropdown 的 popup 子树。open popup 浮层渲染在所有正常内容之上（Task 11：
+/// 命中 open Dropdown 的 popup 子树。open popup 浮层渲染在所有正常内容之上（
 /// mask=0、末尾追加 DFS），故命中优先级高于正常内容——在主 roots DFS 前测。
 ///
 /// 与 [`hit_scrollbar_grip`] 的优先级：scrollbar grip 仍先于此（grip 返 sentinel NodeId）。
@@ -95,7 +95,6 @@ fn hit_open_popups(scene: &Scene, point: (f32, f32)) -> Option<NodeId> {
 /// 命中测试。逆等效绘制序遍历，第一个命中即返回（顶层优先）。
 /// scrollbar thumb 最上层，前置 check。
 pub fn hit_test(scene: &Scene, point: (f32, f32)) -> Option<NodeId> {
-    // scrollbar grip 最上层（先于所有 Scene 节点）
     if let Some((container, axis)) = hit_scrollbar_grip(scene, point) {
         let flag = if axis == 0 {
             crate::scroll::V_THUMB_FLAG
@@ -104,12 +103,12 @@ pub fn hit_test(scene: &Scene, point: (f32, f32)) -> Option<NodeId> {
         };
         return Some(NodeId(container.0 | flag));
     }
-    // open popup 浮层（Task 11 渲染在所有正常内容之上）→ 命中优先于正常内容。
+    // open popup 浮层渲染在所有正常内容之上 → 命中优先于正常内容。
     // 顺序在 scrollbar grip 之后（见 [`hit_open_popups`] 文档：grip 须可抓）。
     if let Some(hit) = hit_open_popups(scene, point) {
         return Some(hit);
     }
-    // 从 roots 逐棵 DFS。多个 root 按顺序，后 root 顶层（与渲染序一致）。
+    // 多个 root 按顺序，后 root 顶层（与渲染序一致）。
     for &root in &scene.roots {
         if let Some(hit) = hit_subtree(scene, root, point) {
             return Some(hit);
@@ -139,14 +138,11 @@ fn hit_subtree(scene: &Scene, id: NodeId, point: (f32, f32)) -> Option<NodeId> {
             return None;
         }
     }
-    // 先测子（逆等效绘制序 = 顶层先）
     for &c in &effective_draw_order(scene, id) {
         if let Some(hit) = hit_subtree(scene, c, point) {
             return Some(hit);
         }
     }
-    // 子都不命中 → 自身 fallback：touchable + 点经 world matrix 逆投到本地 box
-    // world_to_local：点经 world matrix 逆投到本地，判本地 box (0,0,w,h)
     if node.interaction.touchable && lx >= 0.0 && lx <= lr.w && ly >= 0.0 && ly <= lr.h {
         return Some(id);
     }
@@ -260,7 +256,7 @@ mod tests {
 
     #[test]
     fn hit_test_clip_survives_ancestor_scroll() {
-        // 嵌套滚动回归（lab §9）：root 是滚动容器（自身 clip=视口），子 inner 是
+        // 嵌套滚动回归：root 是滚动容器（自身 clip=视口），子 inner 是
         // clip 节点（页面绝对坐标 far 处）。root 滚动后，inner 出现在屏幕上——屏幕点
         // 必须命中 inner 子树；旧实现拿屏幕点直接比页面绝对 clip（无滚动补偿）→ 整棵
         // 子树不可命中，滚轮/点击穿透到外层容器。
@@ -295,7 +291,6 @@ mod tests {
         let mut s = Scene::from_nodes(vec![root, inner], vec![(0, 1)]);
         let root_id = s.roots[0];
         let inner_id = s.get_mut(root_id).unwrap().children[0];
-        // root 进入 scroll 表并滚 900。
         s.scroll.ensure(root_id).scroll_pos = (0.0, 900.0);
         compute_world_transforms(&mut s);
         // 屏幕点 (60, 1050)：无滚动时 page=(60,1050) 在 inner 内——root 滚 900 后
@@ -327,8 +322,8 @@ mod tests {
             .unwrap()
             .interaction
             .flags
-            .insert(NodeFlags::DISABLED); // b disabled
-                                          // 点 (75,75) 在 b 内——b 仍命中（disabled 不跳过）
+            .insert(NodeFlags::DISABLED);
+        // 点 (75,75) 在 b 内——b 仍命中（disabled 不跳过）
         assert_eq!(hit_test(&s, (75.0, 75.0)), Some(b));
     }
 
@@ -378,11 +373,8 @@ mod tests {
             w: 10.0,
             h: 10.0,
         };
-        // edges: root→parent, parent→child
         Scene::from_nodes(vec![root, parent, child], vec![(0, 1), (1, 2)])
     }
-
-    // ── hit_scrollbar_grip ─────────────────────────────────
 
     fn scroll_scene_with_thumb() -> Scene {
         use crate::style::resolved::{OverflowMode, ResolvedStyle};
@@ -509,7 +501,6 @@ mod tests {
             raw & crate::scroll::V_THUMB_FLAG != 0,
             "sentinel 含 V_THUMB_FLAG"
         );
-        // 去掉 flag 应得 container id（packed u32）
         assert_eq!(
             raw & !crate::scroll::V_THUMB_FLAG,
             container_id.0,
@@ -517,11 +508,9 @@ mod tests {
         );
     }
 
-    // ── open popup 前置命中（Task 12）─────────────────────────
-
     /// 建 open Dropdown 场景：root > select(Dropdown,open,120x30 @(10,10))，
     /// select 的 listbox(80x60 @(10,40)) 内含两个 option（各 80x20，垂直堆叠）。
-    /// 复刻生产运行时结构（spec §2.2：combobox > [data-slot=value, role=listbox > [option...]]）。
+    /// 复刻生产运行时结构（combobox > [data-slot=value, role=listbox > [option...]]）。
     /// 返回 (select_id, popup_id, opt0_id, opt1_id)。点 opt0 用 (50,50)（opt0 区 40..60）。
     fn open_dropdown_scene() -> (Scene, NodeId, NodeId, NodeId, NodeId) {
         use crate::asset::ControlInit;
@@ -652,13 +641,11 @@ mod tests {
             h: 300.0,
         };
         compute_world_transforms(&mut s);
-        // open → popup 前置赢
         assert_eq!(
             hit_test(&s, (50.0, 50.0)),
             Some(opt0),
             "open 时 popup 前置命中赢过正常顶层内容"
         );
-        // 收起 popup → 正常 DFS，cover（顶层）赢
         if let Some(ControlState::Dropdown { open, .. }) = s.controls.get_mut(select) {
             *open = false;
         }

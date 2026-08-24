@@ -1,8 +1,8 @@
-//! M2 Task 2：fence `animation`/`transition` 简写从「只校验」变成「解析存值」。
+//! fence `animation`/`transition` 简写从「只校验」变成「解析存值」。
 //!
 //! 解析产 `Vec<AnimationSpec>` / `Vec<TransitionSpec>`（core 类型），bake 进
-//! `base_style.animation` / `base_style.transition`。语义对齐 spec §8.2（首个
-//! time=duration、次个=delay）与 §8.3（ease 对齐表，fence 7 关键字 → core Ease）。
+//! `base_style.animation` / `base_style.transition`。语义：首个 time=duration、
+//! 次个=delay；ease 按对齐表映射（fence 7 关键字 → core Ease）。
 
 use loomgui_core::style::resolved::{AnimationDirection, AnimationFillMode, AnimationPlayState};
 use loomgui_core::tween::{Ease, TweenProp};
@@ -10,11 +10,9 @@ use loomgui_fence::css_resolve::resolve_inline_styles;
 use loomgui_fence::schema::css::{parse_animation_value, parse_transition_value};
 use loomgui_fence::tree_builder::parse_html_to_ir;
 
-// ── animation 简写 ────────────────────────────────────────────────────────
-
 #[test]
 fn animation_full_shorthand() {
-    // 测 1：全部子属性 + 顺序无关关键字（CSS 语义：name 必须首位，其余任意序）。
+    // 全部子属性 + 顺序无关关键字（CSS 语义：name 必须首位，其余任意序）。
     let specs = parse_animation_value("fadeIn .4s .1s infinite alternate both ease");
     assert_eq!(specs.len(), 1);
     let s = &specs[0];
@@ -30,7 +28,7 @@ fn animation_full_shorthand() {
 
 #[test]
 fn animation_multi_declaration_comma() {
-    // 测 2：逗号多声明 → 2 个 AnimationSpec。
+    // 逗号多声明 → 2 个 AnimationSpec。
     let specs = parse_animation_value("a .3s, b .5s infinite");
     assert_eq!(specs.len(), 2);
     assert_eq!(specs[0].name, "a");
@@ -47,7 +45,7 @@ fn animation_multi_declaration_comma() {
 
 #[test]
 fn animation_first_time_duration_second_delay() {
-    // §8.2 修 tech-debt：首个 time = duration，次个 time = delay（不再都当匿名 time）。
+    // 首个 time = duration，次个 time = delay（不再都当匿名 time）。
     let s = &parse_animation_value("fadeIn .1s .4s")[0];
     assert!((s.duration - 0.1).abs() < 1e-6, "首个 time 是 duration");
     assert!((s.delay - 0.4).abs() < 1e-6, "次个 time 是 delay");
@@ -55,7 +53,7 @@ fn animation_first_time_duration_second_delay() {
 
 #[test]
 fn animation_ease_keywords_match_spec_83() {
-    // spec §8.3 对齐表：linear / ease / ease-in-out / step-start / step-end。
+    // ease 对齐表：linear / ease / ease-in-out / step-start / step-end。
     let cases = [
         ("linear", Ease::Linear),
         ("ease", Ease::CubicOut),
@@ -109,11 +107,9 @@ fn animation_garbage_is_empty() {
     assert!(parse_animation_value("123 2s").is_empty(), "数字开头 name");
 }
 
-// ── transition 简写 ───────────────────────────────────────────────────────
-
 #[test]
 fn transition_prop_duration_ease_delay() {
-    // 测 3：prop + duration + ease + delay 全解析。
+    // prop + duration + ease + delay 全解析。
     let ts = parse_transition_value("opacity .3s ease .05s");
     assert_eq!(ts.len(), 1);
     assert_eq!(ts[0].prop, Some(TweenProp::Opacity));
@@ -124,7 +120,7 @@ fn transition_prop_duration_ease_delay() {
 
 #[test]
 fn transition_all_is_none_prop() {
-    // 测 4：all → prop=None（任一通道变化触发）。
+    // all → prop=None（任一通道变化触发）。
     let ts = parse_transition_value("all .2s linear");
     assert_eq!(ts.len(), 1);
     assert_eq!(ts[0].prop, None);
@@ -182,8 +178,6 @@ fn transition_garbage_is_noop_spec() {
     assert!((ts[0].duration - 0.3).abs() < 1e-6);
     assert!(parse_transition_value("").is_empty(), "空值 → 空 Vec");
 }
-
-// ── css_resolve 接线（bake 进 base_style）────────────────────────────────
 
 #[test]
 fn inline_animation_bakes_into_base_style() {

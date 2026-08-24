@@ -104,7 +104,7 @@ fn main() {
         let _ = s.tick_and_render();
     }
 
-    // 用户会话上下文：#7 Load ×2（mini 存活、无 display:none 优化——复现时的旧形态）
+    // 用户会话上下文：Load ×2（mini 存活、无 display:none 优化——复现时的旧形态）
     // + .body 滚到 430（下拉在视口内、点选时的真实滚动位）
     s.load_package("infra-copy", &pkg).expect("load copy");
     let ul_stage = s

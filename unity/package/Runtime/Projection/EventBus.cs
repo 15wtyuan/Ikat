@@ -1,9 +1,9 @@
-// EventBus：typed 事件订阅表 + capture/bubble/once 路由（投影层 D2）。
+// EventBus：typed 事件订阅表 + capture/bubble/once 路由。
 //
-// 设计契约（spec §3.4 / public-api §5）：
-// - 订阅表 key = (NodeId, EventType byte, capture flag)——EventType byte 来自 D1 每个 typed
+// 设计契约：
+// - 订阅表 key = (NodeId, EventType byte, capture flag)——EventType byte 来自每个 typed
 //   event struct 的 `internal static byte EventType` 属性（ClickEvent.EventType 等）。
-// - Dispatch<T>（D3 调）走 DOM 3 阶段路由：capture（root→target）→ bubble（target→root），
+// - Dispatch<T>（demux 层调）走 DOM 3 阶段路由：capture（root→target）→ bubble（target→root），
 //   每节点查 capture=true / capture=false 订阅，触发后 once 自动退订。
 // - StopPropagation 经 RouteEventCore._propagationStopped：bubble 循环前 pre-check（capture 止传
 //   则 bubble 全跳）+ 循环内 break（target 止传则止上传）。
@@ -13,7 +13,7 @@
 // - once 只移除自身，不影响同 list 的其它 entry。
 // - EventRegistration.Dispose 调闭包内的 Remove 从 list 移除 entry；list 空则移 key。
 //
-// D3 接线契约：D3 翻译 raw LoomEvent → typed struct（填 _core.Target = registry.GetOrCreate(nodeId)）
+// 接线契约：EventDemuxer 翻译 raw LoomEvent → typed struct（填 _core.Target = registry.GetOrCreate(nodeId)）
 // 后调 Dispatch<T>(targetNodeId, evt)；EventBus 负责 ancestor chain 走 + capture/bubble 路由。
 
 using System;
@@ -26,7 +26,7 @@ namespace LoomGUI
     /// <summary>
     /// 投影层内部：typed 事件订阅 + DOM 3 阶段路由。
     /// <see cref="UIContext"/> 持单实例；<see cref="Node.On{T}"/> 经 <c>_ctx._eventBus.Subscribe</c>
-    /// 录订阅；D3 demux 经 <see cref="Dispatch{T}"/> 触发。
+    /// 录订阅；demux 经 <see cref="Dispatch{T}"/> 触发。
     /// </summary>
     internal sealed unsafe class EventBus
     {
@@ -46,7 +46,7 @@ namespace LoomGUI
         internal EventRegistration Subscribe<T>(uint nodeId, Action<T> handler, bool capture, bool once)
             where T : IRouteEvent
         {
-            // T.EventType 来自 D1 per-struct static 关联（ClickEvent.EventType 等）。泛型无法直接
+            // T.EventType 来自 per-struct static 关联（ClickEvent.EventType 等）。泛型无法直接
             // T.EventType（C# 静态成员不进接口约束，除非用 static abstract），经 EventTypeCache<T>
             // 反射读一次并 cache 到泛型静态字段——后续 Dispatch<T>/Subscribe<T> 零反射开销。
             byte eventType = EventTypeCache<T>.Value;
@@ -65,7 +65,7 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// Dispatch typed event 走 DOM 3 阶段路由。D3 喂已构造好的 evt（_core.Target 由 D3 填）；
+        /// Dispatch typed event 走 DOM 3 阶段路由。demux 喂已构造好的 evt（_core.Target 由 demux 填）；
         /// EventBus 走 ancestor chain + 每节点查订阅表 + 触发 + once 退订。
         ///
         /// 路由算法对齐 <c>tests/dotnet/EventRouter.cs</c>（纯 managed 路由参考实现）：
@@ -73,13 +73,13 @@ namespace LoomGUI
         /// flag 决定是否进 bubble，循环内 stop 即 break。target 节点同时在 capture 末尾和 bubble 开头
         /// 出现，capture-listener 和 bubble-listener 都触发（DOM target 阶段等价）。
         /// </summary>
-        /// <typeparam name="T">typed event struct（D1 的 18 个之一）。</typeparam>
+        /// <typeparam name="T">typed event struct。</typeparam>
         /// <param name="targetNodeId">命中节点 NodeId（dispatch 全程 Target 不变）。</param>
-        /// <param name="evt">typed event——_core.Target 必须已由调用方（D3 / 测试）填。</param>
+        /// <param name="evt">typed event——_core.Target 必须已由调用方（demux / 测试）填。</param>
         internal void Dispatch<T>(uint targetNodeId, T evt) where T : IRouteEvent, IRouteEventCore
         {
-            // D1 契约：每个 typed event struct 持 RouteEventCore _core。RouteEventCore 是
-            // sealed class（D2 修订：struct 版下 Action<T> 按值传 handler，StopPropagation 突变副本
+            // 契约：每个 typed event struct 持 RouteEventCore _core。RouteEventCore 是
+            // sealed class（struct 版下 Action<T> 按值传 handler，StopPropagation 突变副本
             // 不回传路由循环）——_core 字段是引用槽，handler 副本与 Dispatch 局部 evt 共享同一堆实例。
             //
             // evt.Core 经约束泛型调用读共享 core 引用（JIT 直呼 struct 实现，零装箱）——
@@ -148,7 +148,7 @@ namespace LoomGUI
         /// </summary>
         /// <typeparam name="T">typed event struct。</typeparam>
         /// <param name="targetNodeId">事件目标节点 NodeId。</param>
-        /// <param name="evt">typed event——_core.Target 必须已由调用方（D3 / 测试）填。</param>
+        /// <param name="evt">typed event——_core.Target 必须已由调用方（demux / 测试）填。</param>
         internal void DispatchTargetOnly<T>(uint targetNodeId, T evt) where T : IRouteEvent, IRouteEventCore
         {
             RouteEventCore core = evt.Core;
@@ -182,7 +182,7 @@ namespace LoomGUI
             if (!_subs.TryGetValue(key, out var list) || list.Count == 0) return;
 
             // snapshot 防 list mutation（once auto-remove / handler 内 Dispose 改 list）边遍边改。
-            // 测试场景 list 通常 ≤ 几个 entry，ToArray 开销可忽略；热路径优化推后（roadmap D3+ 性能 tuning）。
+            // 测试场景 list 通常 ≤ 几个 entry，ToArray 开销可忽略；热路径优化推后。
             IHandlerEntry[] snapshot = list.ToArray();
             List<IHandlerEntry> toRemove = null;
 
@@ -226,7 +226,6 @@ namespace LoomGUI
             }
         }
 
-        // ── 内部：HandlerEntry 类型化回调 + once flag ─────────────────────
 
         interface IHandlerEntry
         {
@@ -243,8 +242,7 @@ namespace LoomGUI
         /// typed handler + once flag。<see cref="Invoke"/> 转调 <see cref="_handler"/>；
         /// once 触发后由 <see cref="EventBus.InvokeHandlers{T}"/> 收集移除。
         /// <see cref="IsDisposed"/> 标记：EventRegistration.Dispose 经 <see cref="Remove"/>
-        /// 调 <see cref="MarkDisposed"/> 置 true——dispatch 时 snapshot 内的已退订 entry 跳过
-        /// （handler 触发前可能被前面 entry 同步 Dispose——如 handler A 内 Dispose handler B 的 reg）。
+        /// 调 <see cref="MarkDisposed"/> 置 true——dispatch 时 snapshot 内的已退订 entry 跳过。
         /// </summary>
         sealed class HandlerEntry<T> : IHandlerEntry
         {
@@ -263,7 +261,6 @@ namespace LoomGUI
             internal void Invoke(ref T evt) => _handler(evt);
         }
 
-        // ── EventTypeCache<T>：D1 per-struct static `EventType` byte 的反射 cache ──────────
         //
         // 泛型 Subscribe<T>/Dispatch<T> 无法直接 T.EventType（C# 静态成员不进 IRouteEvent 约束）。
         // 用泛型静态类做"per-T 一次性反射 + cache"——CLR 对每个封闭类型（EventTypeCache<ClickEvent> 等）
@@ -275,7 +272,7 @@ namespace LoomGUI
 
             static byte Resolve()
             {
-                // D1 契约：每个 typed event struct 有 internal static byte EventType 属性。
+                // 契约：每个 typed event struct 有 internal static byte EventType 属性。
                 var p = typeof(T).GetProperty(
                     "EventType", BindingFlags.Static | BindingFlags.NonPublic);
                 if (p == null)

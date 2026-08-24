@@ -2,7 +2,7 @@
 //! the current selector/property subset) end-to-end and lock the
 //! HTML -> pkg -> Stage -> layout -> query-exit chain.
 //!
-//! Coverage spans the full cascade surface exposed by the ③ query exits:
+//! Coverage spans the full cascade surface exposed by the query exits:
 //! rect/visible (geometry + display pruning), `get_node_computed_style`
 //! (inheritance, specificity, class matching), and `get_node_kind` (control
 //! kinds do not collapse to Container).
@@ -73,9 +73,8 @@ fn probe_display_none_prunes_hidden() {
 #[test]
 fn probe_full_fence_tag_set_instantiates() {
     // Every representative fence tag (containers, text, controls, list, progress)
-    // must round-trip and lay out without panic. Node-kind fidelity (controls not
-    // collapsing to Container) needs a kind query exit not yet present; this test
-    // only proves the chain does not crash on the full tag set.
+    // must round-trip and lay out without panic; kind fidelity is asserted by
+    // probe_control_kinds_do_not_collapse below.
     let (stage, _) = build_stage(HTML);
     for id in [
         "title",
@@ -135,8 +134,8 @@ fn probe_cascade_inheritance_and_specificity() {
 
 #[test]
 fn probe_control_kinds_do_not_collapse() {
-    // kind 保真（防 §3.3「假绿」）：控件不塌成 Container。get_node_kind 是 ③ 新出口，
-    // smoke 推迟的「kind 保真」断言在此兑现。
+    // kind 保真（防测试假绿）：控件不塌成 Container。get_node_kind 出口兑现
+    // smoke 推迟的「kind 保真」断言。
     let (stage, _) = build_stage(HTML);
     let kind = |id: &str| stage.get_node_kind(stage.find_node_by_id(id).expect(id));
     assert_eq!(kind("vol"), Some(NodeKind::Slider), "vol == Slider");

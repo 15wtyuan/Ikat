@@ -1,4 +1,4 @@
-//! 诊断 Bug #1（mail 滚动 item 消失 + 掉帧，就算不滚动也低帧）：
+//! 诊断（mail 滚动 item 消失 + 掉帧，就算不滚动也低帧）：
 //! 实例化 showcase mail，set ItemCount=100，测 tick 耗时 + 动画 player 数 + slot 结构
 //! （复现 core 侧的 per-frame 开销 + 定位 blank gap）。
 
@@ -40,9 +40,8 @@ fn main() {
         let scene = s.scene.as_mut().unwrap();
         append_child(scene, root_id, inst).expect("append_child");
     }
-    let _ = s.tick_and_render(); // 首帧
+    let _ = s.tick_and_render();
 
-    // 找 mail-list（id="mail-list"），设 ItemCount=100（触发 data-driven 虚拟化）
     let mail_list = s
         .scene
         .as_ref()

@@ -54,7 +54,7 @@ fn draw_state(rn: &RenderNode) -> Option<(Option<String>, u32)> {
     }
 }
 
-/// AABB 是否重叠（交集非零面积）。复用 rect_intersect（batch.rs:23）。
+/// AABB 是否重叠（交集非零面积）。复用 rect_intersect。
 fn aabb_overlap(a: Rect, b: Rect) -> bool {
     let r = rect_intersect(a, b);
     r.w > 0.0 && r.h > 0.0
@@ -261,11 +261,10 @@ pub fn assign_sort_keys(
 /// 前置：`assign_sort_keys` 已赋 mask_context + DFS 序 sort_key + clip 表。
 /// 原地改写 `nodes[*].sort_key` 为重排后序。clips 表由 assign_sort_keys 产，不受影响。
 pub fn reorder_for_batching(scene: &Scene, nodes: &mut [RenderNode]) {
-    // 1. 按 sort_key（DFS 序）排索引。
     let mut order: Vec<usize> = (0..nodes.len()).collect();
     order.sort_by_key(|&i| nodes[i].sort_key);
 
-    // 2. 一遍扫描：识别重排单元（连续 mergeable + 同 mask_context）→ 重排 → 重赋 sort_key。
+    // 一遍扫描：识别重排单元（连续 mergeable + 同 mask_context）→ 重排 → 重赋 sort_key。
     let mut next_key: u32 = 0;
     let mut i = 0;
     while i < order.len() {
@@ -514,8 +513,7 @@ mod tests {
         // scroll 容器（scroll_pos 非零）+ 子 overflow:hidden。
         // 子的 clip rect 必须减祖先 scroll offset（= layout - scroll_pos），与子节点 world_matrix
         // （transform.rs 注入 T(-scroll_pos)）同空间——否则 shader clipPos（world 含 scroll）与
-        // _ClipBox（design 不含 scroll）错位 → scroll 时 CLIPPED 节点 clipPos 超界全裁
-        // （showcase 3.6/3.7 bg-demo/br-demo 内容空根因）。
+        // _ClipBox（design 不含 scroll）错位 → scroll 时 CLIPPED 节点 clipPos 超界全裁。
         let mut root = Node::default();
         root.layout_rect = Rect {
             x: 0.0,
@@ -579,7 +577,6 @@ mod tests {
         );
     }
 
-    // —— 嵌套 clip 交集（rect mask）——
     // DFS 算祖先 clip 链交集，clip 表存 intersected rect（否则 leaf 的 clip rect
     // 只等于最内层 clipper 的 box，外层 disjoint clip 泄漏）。
 
@@ -677,10 +674,6 @@ mod tests {
             "overlapping 交集 = [50,50,50,50]"
         );
     }
-
-    // —— AABB 保序重排（reorder_unit / reorder_for_batching）——
-    // NodePayload / MaskContext / BlendMode / Node / NodeKind / Rect / Scene
-    // 已由上方 use 语句导入；以下测直接使用。
 
     /// 构造 program=0 Mesh RenderNode（给 reorder_unit 直接喂 unit 索引对应的 nodes）。
     /// image_path（None=纯色，Some=图片 path）。
@@ -877,7 +870,7 @@ mod tests {
     fn text_rn(id: usize) -> RenderNode {
         let mut r = placeholder_rn(id);
         r.node_id = id as u32;
-        // v1.6：text 现产 Mesh(program=1, image_path=合成 atlas path)。
+        // text 现产 Mesh(program=1, image_path=合成 atlas path)。
         r.payload = NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
             uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
@@ -924,7 +917,7 @@ mod tests {
             h: 10.0,
         };
         let scene = Scene::from_nodes(vec![root, a, t, b], vec![(0, 1), (0, 2), (0, 3)]);
-        let _text_id = scene.roots[0]; // text node content now lives in scene.text_contents (Spec-2)
+        let _text_id = scene.roots[0]; // text node content now lives in scene.text_contents
         let ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
         // rns 顺 = scene.nodes.values() 顺（root, a, t, b）
         let mut rns: Vec<RenderNode> = vec![

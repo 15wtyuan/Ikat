@@ -1,7 +1,5 @@
 use super::attr::AttrSpec;
 
-// ── Classification enums ────────────────────────────────────────────
-
 /// Where an element can appear in the tree (HTML "categories" collapsed
 /// to the four variants that matter for game UI).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,8 +32,6 @@ pub enum ContentModel {
     Only(&'static [&'static str]),
 }
 
-// ── Display default ─────────────────────────────────────────────────
-
 /// The `display` value applied when the author does not set one in CSS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayDefault {
@@ -44,8 +40,6 @@ pub enum DisplayDefault {
     /// Element is invisible to layout (template, etc.).
     None,
 }
-
-// ── SemanticKind ────────────────────────────────────────────────────
 
 /// Stable semantic type assigned to an element at annotate time.
 /// Determined by tag name + WAI-ARIA `role` (e.g. `<div role="slider">` → Slider),
@@ -78,8 +72,6 @@ pub enum SemanticKind {
     CustomElement,
 }
 
-// ── TagSpec ─────────────────────────────────────────────────────────
-
 /// Compile-time schema entry for one fence tag.
 pub struct TagSpec {
     pub name: &'static str,
@@ -93,8 +85,6 @@ pub struct TagSpec {
     /// Content attributes: passthrough initial values (value, src, alt, -- .
     pub content_attrs: &'static [&'static str],
 }
-
-// ── resolve_semantic ────────────────────────────────────────────────
 
 /// WAI-ARIA `role` → `SemanticKind`.
 ///
@@ -191,8 +181,6 @@ pub fn known_roles_list() -> String {
     roles.join(", ")
 }
 
-// ── Shell tags ──────────────────────────────────────────────────────
-
 /// Document-shell tags recognised by the parser but not part of the
 /// runtime object tree.  They provide structure (html/head/body) or
 /// metadata (title/meta/style/link/script) and are consumed during tree build.
@@ -204,9 +192,7 @@ pub fn is_shell_tag(name: &str) -> bool {
     SHELL_TAGS.contains(&name)
 }
 
-// ── TAGS registry ───────────────────────────────────────────────────
-
-/// All 6 runtime fence tags with full Category × ContentModel mapping.
+/// All runtime fence tags with full Category × ContentModel mapping.
 pub static TAGS: &[TagSpec] = &[
     TagSpec {
         name: "div",
@@ -274,13 +260,9 @@ pub fn find_tag(name: &str) -> Option<&'static TagSpec> {
     TAGS.iter().find(|t| t.name == name)
 }
 
-// ── Tests ───────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // -- resolve_semantic --
 
     #[test]
     fn resolve_semantic_role_driven() {
@@ -344,7 +326,7 @@ mod tests {
 
     #[test]
     fn resolve_semantic_tablist_tab() {
-        // role=tablist/tab → TabList/Tab SemanticKind (WAI-ARIA, M3 TabList).
+        // role=tablist/tab → TabList/Tab SemanticKind (WAI-ARIA, TabList).
         assert_eq!(
             resolve_semantic("div", Some("tablist"), false),
             Some(SemanticKind::TabList)
@@ -375,8 +357,6 @@ mod tests {
             Some(SemanticKind::CustomElement)
         );
     }
-
-    // -- TAGS registry --
 
     #[test]
     fn all_runtime_tags_present() {

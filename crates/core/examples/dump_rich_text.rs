@@ -221,8 +221,6 @@ fn collect_text_rec(scene: &Scene, id: NodeId, out: &mut String) {
     }
 }
 
-// (rich_text_block / classes / id_attr on Node are pub — no extra import needed.)
-
 fn icon_sizes() -> Vec<(String, u32, u32)> {
     let names = [
         "logo",

@@ -71,11 +71,9 @@ fn load_package_builds_blob_from_package() {
     let pkg = make_test_pkg_bytes("comp1");
     let r = loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len());
     assert_eq!(r, 0, "load_package ok");
-    // create_root 建 scene + 挂根 div
     let empty_css = b"";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
     assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
-    // instantiate 组件 → append_child 挂到根
     let comp = loomgui_stage_instantiate(h, b"bag".as_ptr(), 3, b"comp1".as_ptr(), 5);
     assert_ne!(comp, 0xFFFF_FFFF, "instantiate ok");
     assert_eq!(
@@ -83,7 +81,6 @@ fn load_package_builds_blob_from_package() {
         0,
         "append_child ok"
     );
-    // tick → blob
     loomgui_stage_tick(h, 0.0);
     let mut len = 0usize;
     let ptr = loomgui_stage_borrow_frame(h, &mut len);
@@ -108,7 +105,6 @@ fn borrow_frame_never_ticked_returns_null() {
     loomgui_stage_free(h);
 }
 
-// ── NativeHost / 虚拟列表查询通道 FFI 边界安全（no-panic 契约）──────────────
 // characterization 测试：当前实现已正确处理 null/无效输入，测绿锁住防回归
 // （未来若误删 null check → UB/panic，此处兜住）。
 
@@ -292,7 +288,6 @@ fn node_parent_returns_chain_and_sentinel() {
         0,
         "append_child ok"
     );
-    // comp.parent == root；root.parent == sentinel；OOB == sentinel。
     assert_eq!(loomgui_node_parent(h, comp), root, "comp.parent == root");
     assert_eq!(
         loomgui_node_parent(h, root),
@@ -361,7 +356,6 @@ fn find_node_by_id_round_trip() {
     };
     assert_ne!(ok_id, 0xFFFF_FFFF, "find ok 应命中");
     assert_eq!(ok_id, comp, "find ok == comp 根 NodeId");
-    // 无匹配 → sentinel
     let miss = {
         let id = std::ffi::CString::new("nope").unwrap();
         loomgui_stage_find_node_by_id(h, id.as_ptr() as *const u8, id.as_bytes().len())
@@ -565,7 +559,7 @@ fn set_scroll_pos_oob_no_op() {
 }
 
 /// WheelEvent ABI 尺寸 16B（4×f32 紧凑，C# 端同布局）。
-/// compile-time 断言已在 scroll.rs:27-29 锁住；本测为 runtime 可见的检查。
+/// compile-time 断言已在 scroll.rs 锁住；本测为 runtime 可见的检查。
 #[test]
 fn wheel_event_is_16_bytes() {
     assert_eq!(std::mem::size_of::<loomgui_core::scroll::WheelEvent>(), 16);
@@ -581,7 +575,6 @@ fn dynamic_tree_api_ffi_round_trip() {
     let h = stage_new_with_dejavu(200.0, 100.0);
     assert!(!h.is_null());
     let empty = b"";
-    // create_root(div) 建 scene + 根
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty.as_ptr(), 0);
     assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
     // create_node(button/img/span)——孤立节点
@@ -595,7 +588,6 @@ fn dynamic_tree_api_ffi_round_trip() {
     assert_eq!(loomgui_stage_append_child(h, root, btn), 0, "append btn");
     assert_eq!(loomgui_stage_append_child(h, root, img), 0, "append img");
     assert_eq!(loomgui_stage_append_child(h, root, span), 0, "append span");
-    // set_text(span) / set_src(img)
     let txt = b"hello";
     assert_eq!(
         loomgui_stage_set_text(h, span, txt.as_ptr(), txt.len()),
@@ -625,7 +617,6 @@ fn dynamic_tree_api_ffi_round_trip() {
         0,
         "insert img before btn"
     );
-    // remove_child 摘 span
     assert_eq!(loomgui_stage_remove_child(h, root, span), 0, "remove span");
     // remove_node 删根（递归删子）
     assert_eq!(loomgui_stage_remove_node(h, root), 0, "remove_node root");
@@ -677,7 +668,6 @@ fn set_fallback_families_ffi_returns_zero() {
 #[test]
 fn set_image_sizes_ffi_round_trip() {
     let h = stage_new_with_dejavu(200.0, 200.0);
-    // 准备两条路径 + w/h
     let p1 = std::ffi::CString::new("atlas/icon.png").unwrap();
     let p2 = std::ffi::CString::new("atlas/bg.jpg").unwrap();
     let paths: [*const std::os::raw::c_char; 2] = [p1.as_ptr(), p2.as_ptr()];
@@ -711,7 +701,6 @@ fn set_image_sizes_null_handle_no_op() {
         hs.as_ptr(),
         1,
     );
-    // 不 panic 即通过
 }
 
 /// count=0 → no-op（不 panic）。
@@ -719,7 +708,6 @@ fn set_image_sizes_null_handle_no_op() {
 fn set_image_sizes_zero_count_no_op() {
     let h = stage_new_with_dejavu(200.0, 200.0);
     loomgui_stage_set_image_sizes(h, std::ptr::null(), std::ptr::null(), std::ptr::null(), 0);
-    // verify image_sizes 仍为空
     let handle = unsafe { &*h };
     assert!(handle.stage.image_sizes.is_empty());
     loomgui_stage_free(h);
@@ -735,7 +723,6 @@ fn set_image_sizes_null_path_skipped() {
     let hs: [u32; 2] = [20, 64];
     loomgui_stage_set_image_sizes(h, paths.as_ptr(), ws.as_ptr(), hs.as_ptr(), 2);
     let handle = unsafe { &*h };
-    // null entry skipped; second entry landed
     assert_eq!(handle.stage.image_sizes.len(), 1);
     assert_eq!(
         handle.stage.image_sizes.get("atlas/icon.png"),
@@ -761,7 +748,6 @@ fn non_utf8_entry_returns_error() {
         pkg.as_ptr(),
         pkg.len(),
     );
-    // Must return non-zero error (currently returns 0 = success with "").
     assert_ne!(
         r, 0,
         "non-UTF-8 name must return error, not success with empty string"
@@ -783,7 +769,6 @@ fn a6_inline_children_class_smoke() {
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
     assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
 
-    // set_inline_override：合法 CSS → 0
     let css = b"width:100px";
     assert_eq!(
         loomgui_stage_set_inline_override(h, root, css.as_ptr(), css.len()),

@@ -1,7 +1,7 @@
 //! 字形位置查询函数：面向编辑器的 glyph↔byte 偏移转换。
 //!
 //! 纯函数（只读 TextLayout + value string），不涉场景/状态变更。
-//! 由 Task 7（光标命中）、Task 12（光标几何）依赖。
+//! 调用方：光标命中测试（`hit_byte_offset`）与光标几何定位（`cursor_pixel_x`）。
 
 use crate::text::layout::TextLayout;
 

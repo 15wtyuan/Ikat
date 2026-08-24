@@ -2,7 +2,6 @@
 
 use std::path::PathBuf;
 
-/// 仓库根目录。
 pub fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")

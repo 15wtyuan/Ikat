@@ -3,10 +3,10 @@ using System;
 namespace LoomGUI
 {
     /// <summary>
-    /// 引擎后端契约（main-design §17：新后端只需实现「消费 RenderNode + 输入注入 + 资源加载」）。
+    /// 引擎后端契约（新后端只需实现「消费 RenderNode + 输入注入 + 资源加载」）。
     /// 引擎无关抽象基类——零 UnityEngine（放 Runtime/Host/，随 LoomGUI.Runtime asmdef 编译）。
     /// Unity 实现 <see cref="UnityLoomBackend"/>；Godot-C# 未来实现 GodotLoomBackend。
-    /// <see cref="LoomHost"/> 持具体实现并按每帧管线驱动（main-design §16）。
+    /// <see cref="LoomHost"/> 持具体实现并按每帧管线驱动。
     /// </summary>
     public abstract class LoomBackend
     {

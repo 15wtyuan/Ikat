@@ -5,7 +5,7 @@
 //! nth-child(An+B|odd|even|N)）/ 属性选择器（[attr] / [attr="val"]，仅 Exists + Eq）。
 //! 越界（nth-of-type 等、+ ~ 组合子等）返 None，由调用方报错。
 //!
-//! @keyframes at-rule（对齐 public-api.md §9「动画定义全在 CSS」终态）：fence 解析
+//! @keyframes at-rule（「动画定义全在 CSS」终态）：fence 解析
 //! `@keyframes <name> { <stop-selector> { decls } ... }` 产 `KeyframesRule`。stop 声明块内
 //! 或块之间的 `/* @loom-hook name */` 注释解析为锚点（挂在前一个 stop 上，供 player
 //! 播放到该 stop 时发事件）。pkg v30 起 core 有同形类型并序列化进 pkg.bin；fence → core
@@ -20,8 +20,6 @@ use loomgui_core::style::dynamic::{
     AttrOp, AttrSelector, Combinator, Compound, Declaration, DynamicRule, NthChildExpr,
     ParsedSelector, Specificity,
 };
-
-// ── @keyframes 类型（fence-local；pkg.bin 暂不序列化）──────────────────────────
 
 /// `@keyframes` 一条 stop 的选择器位置。CSS 标准：`from`=`0%`，`to`=`100%`。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,12 +192,12 @@ fn parse_compound_detailed(part: &str) -> Result<(Compound, u32, u32, u32), Stri
                     rest = next;
                 }
                 "checked" => {
-                    // core 的 Compound 无 pseudo_checked 字段：checked 是控件态，由控件束处理（Spec-4）。
+                    // core 的 Compound 无 pseudo_checked 字段：checked 是控件态，由控件束处理。
                     // 本轮仅计 specificity（b+=1 在下方统一加），不存状态门。
                     rest = next;
                 }
                 "nth-child" => {
-                    // 参数化伪类：`:nth-child(An+B|odd|even|N)`（spec §8.5）。
+                    // 参数化伪类：`:nth-child(An+B|odd|even|N)`。
                     // 解析括号内 An+B → NthChildExpr；语法越界（无括号/缺 `)`/坏参数）→ Err。
                     let after = next.strip_prefix('(').ok_or_else(|| {
                         "invalid :nth-child(...) argument (An+B | odd | even | N)".to_string()
@@ -294,7 +292,7 @@ fn parse_compound_detailed(part: &str) -> Result<(Compound, u32, u32, u32), Stri
     Ok((c, a, b, cc))
 }
 
-/// 解析 `:nth-child(...)` 参数 → (a, b)（spec §8.5）。
+/// 解析 `:nth-child(...)` 参数 → (a, b)。
 ///
 /// 语法：`odd`=`2n+1`、`even`=`2n`、纯整数 `N`=`0n+N`、`An+B`。
 /// An+B 按正则 `^(\d*)n\s*([+-]\s*\d+)?$` 手搓解析（零正则依赖）：
@@ -373,7 +371,6 @@ pub fn parse_style_block_named(
     let mut diagnostics = Vec::new();
     let mut pos = 0;
     while pos < stripped.len() {
-        // 找下一个 '{'
         let Some(brace_open_rel) = stripped[pos..].find('{') else {
             break;
         };
@@ -383,7 +380,6 @@ pub fn parse_style_block_named(
         let after_open = brace_open + 1;
         let sel_start = pos;
 
-        // At-rule 分支：prelude 以 `@` 开头
         if prelude.starts_with('@') {
             let loc = line_map.source_location(sel_start, source_file.to_string());
             // 找匹配的 `}`（@keyframes 体含嵌套大括号，必须按深度匹配）
@@ -392,7 +388,6 @@ pub fn parse_style_block_named(
             };
             pos = end_pos;
             let at_body = body;
-            // 拆 @keyword + 后续 token（如 `@keyframes charge` → `keyframes` + `charge`）
             let at_kw_str = prelude.trim_start_matches('@').trim_start();
             let (at_name, at_rest) = split_at_keyword(at_kw_str);
             match at_name.as_str() {
@@ -893,11 +888,11 @@ mod tests {
         assert!(parse_selector(":nth-of-type(2)").is_none()); // 其他 nth-* 不在子集
                                                               // 属性选择器越界形态须显式拒（防静默降级：否则坏 selector 会被默默吞，
                                                               // 用户 CSS 静默失效）。仅支持 = / 裸 [attr]；修饰符操作符 / 空名 / 缺 ] 均拒。
-        assert!(parse_selector("[a^=b]").is_none()); // 修饰符操作符 ^= 越界
-        assert!(parse_selector("[a~=b]").is_none()); // 修饰符操作符 ~= 越界
-        assert!(parse_selector("[=x]").is_none()); // 空名（Eq 形）
-        assert!(parse_selector("[]").is_none()); // 空名（Exists 形）
-        assert!(parse_selector("[a=b").is_none()); // 缺闭合 ]
+        assert!(parse_selector("[a^=b]").is_none());
+        assert!(parse_selector("[a~=b]").is_none());
+        assert!(parse_selector("[=x]").is_none());
+        assert!(parse_selector("[]").is_none());
+        assert!(parse_selector("[a=b").is_none());
     }
 
     #[test]
@@ -965,7 +960,7 @@ mod tests {
     #[test]
     fn parse_comma_selector_list_expands_to_shared_declarations() {
         // 逗号 selector list：`a, b, c { decls }` → 3 条 DynamicRule 共享同一声明块。
-        // 用纯 tag 选择器隔离逗号展开机制本身（属性选择器 [type="..."] 是另一个 task）。
+        // 用纯 tag 选择器隔离逗号展开机制本身。
         let (rules, _, diags) = parse_style_block("input, select, textarea { color: #ff0000 }");
         assert!(diags.is_empty(), "{diags:?}");
         assert_eq!(rules.len(), 3, "逗号 list 展开为 3 条规则");
@@ -992,8 +987,6 @@ mod tests {
         assert_eq!(rules[0].declarations[0].prop, "font-family");
         assert_eq!(rules[0].declarations[0].value, "\"微软雅黑\"");
     }
-
-    // ── @keyframes at-rule 解析测 ──
 
     #[test]
     fn parse_style_block_keyframes_from_to() {

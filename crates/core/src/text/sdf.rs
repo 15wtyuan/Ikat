@@ -85,14 +85,12 @@ fn intersec(f: &[f32], r: usize, q: usize) -> f32 {
 
 /// 二维 EDT：先每行 1D，再每列 1D（对行结果）。结果为平方距离。
 fn edt_2d(f: &mut [f32], w: usize, h: usize) {
-    // 行 pass。
     let mut tmp = vec![0.0f32; w];
     for y in 0..h {
         let row = &mut f[y * w..y * w + w];
         edt_1d(row, &mut tmp);
         row.copy_from_slice(&tmp);
     }
-    // 列 pass（对行结果再变换）。
     let mut col_in = vec![0.0f32; h];
     let mut col_out = vec![0.0f32; h];
     for x in 0..w {

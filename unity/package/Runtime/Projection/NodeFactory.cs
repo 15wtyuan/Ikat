@@ -1,6 +1,6 @@
 // NodeFactory：Rust NodeKind(u8) → typed C# Node 子类的唯一入口。
 //
-// 投影层机制（docs/design/projection-layer.md §2.3）：Rust 核心是带 kind 判别的 enum + side
+// 投影层机制：Rust 核心是带 kind 判别的 enum + side
 // table，不做 OOP；C# 投影层用 typed 子类（Container/Button/Slider/...）给业务程序员稳定 API 表面。
 // NodeFactory 据 loomgui_stage_get_node_kind 返的 byte，switch 到对应 C# 子类构造。
 //
@@ -34,7 +34,7 @@ namespace LoomGUI
         {
             StageHandle* h = (StageHandle*)ctx._stage.ToPointer();
 
-            // get_node_kind：return-code + out byte（lib.rs:864）。0=ok 且 *out=u8 判别值；
+            // get_node_kind：return-code + out byte。0=ok 且 *out=u8 判别值；
             // 非 0=节点不 live 或 out null。不用 ->u8 + 0 哨兵是因为 Container=0 会撞「不存在」。
             byte kind = 0xFF;
             int rc = Native.loomgui_stage_get_node_kind(h, id, &kind);
@@ -44,18 +44,15 @@ namespace LoomGUI
 
             return (NodeKind)kind switch
             {
-                // ── 基础容器类（Container 派生）──
                 NodeKind.Container     => new Container(ctx, id),
                 NodeKind.TextElement   => new TextElement(ctx, id),
                 NodeKind.ListItem      => new ListItem(ctx, id),
                 NodeKind.Button        => new Button(ctx, id),
                 NodeKind.ListView      => new ListView(ctx, id),
 
-                // ── 叶子：内容/绘制 ──
                 NodeKind.TextNode      => new TextNode(ctx, id),
                 NodeKind.Image         => new Image(ctx, id),
 
-                // ── 控件（叶子：私有内部结构）──
                 NodeKind.TextField     => new TextField(ctx, id),
                 NodeKind.NumberField   => new NumberField(ctx, id),
                 NodeKind.Slider        => new Slider(ctx, id),
@@ -65,20 +62,17 @@ namespace LoomGUI
                 NodeKind.Dropdown      => new Dropdown(ctx, id),
                 NodeKind.ProgressBar   => new ProgressBar(ctx, id),
 
-                // ── Container 型派生（Rust 侧有专用 NodeKind，C# 有专用子类）──
                 // OptionItem = <option>、Slot = <slot>、CustomElement = 自定义标签。都是容器型节点
                 // （继承 Container），但 NodeFactory 派发到专用子类让业务 Get<OptionItem>() 命中。
                 NodeKind.OptionItem     => new OptionItem(ctx, id),
                 NodeKind.Slot           => new Slot(ctx, id),
                 NodeKind.CustomElement  => new CustomElement(ctx, id),
 
-                // ── 容器型控件（Container 派生，NodeKind 派发到专用子类让 Get<T>() 命中）──
                 // TabList = <div role=tablist>（持 tab 子，selected_index 由打包期 aria-selected 烘焙 +
                 // 运行时 setter 改写）；Tab = <button role=tab>（aria-selected 从父 TabList.selected_index 派生）。
                 NodeKind.TabList        => new TabList(ctx, id),
                 NodeKind.Tab            => new Tab(ctx, id),
 
-                // ── 兜底：围栏闭合理论不达，防 FFI 异常 byte 崩整树。──
                 // Rust 侧 NodeKind #[repr(u8)] 共 21 个判别值（kind_as_u8_is_discriminant 锁：0..17 +
                 // Template=18 + TabList=19 + Tab=20）；其中 Template=18 是合法 byte（ListView 蓝图，
                 // display:none，经 get_node_kind 可返回），但它不进公共类型树，命中本臂回退 Container

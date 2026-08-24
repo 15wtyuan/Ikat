@@ -345,7 +345,7 @@ fn fill_none_completion_only_clears_player_owned_channels() {
     assert!(anim.transform.is_none(), "player 自己的通道已清");
 }
 
-/// 测 4c（T7 review Important）：多 animation 共享通道——fill-none 完成清通道带掩码，
+/// 测 4c：多 animation 共享通道——fill-none 完成清通道带掩码，
 /// 完成帧保留同节点其他活跃 player 本帧已写的值（不闪 base）；独占通道照常回 None。
 #[test]
 fn fill_none_completion_keeps_other_players_shared_channel_value() {

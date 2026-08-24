@@ -22,10 +22,6 @@ fn errors(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
         .collect()
 }
 
-// ---------------------------------------------------------------------------
-// aria-controls / aria-labelledby
-// ---------------------------------------------------------------------------
-
 #[test]
 fn aria_controls_valid_target() {
     let diags =

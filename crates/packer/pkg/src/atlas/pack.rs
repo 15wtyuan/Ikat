@@ -67,7 +67,6 @@ pub fn pack_atlas(atlas: &AtlasCfg, images: &[SourceImage]) -> Result<PackedAtla
         let y0 = alloc.rectangle.min.y + pad;
         blit(&mut pages[page_idx], &img.rgba, x0 as u32, y0 as u32);
 
-        // 归一化 UV。
         let pw = max as f32;
         let ph = max as f32;
         let u0 = x0 as f32 / pw;

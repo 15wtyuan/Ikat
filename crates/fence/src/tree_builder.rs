@@ -30,8 +30,6 @@ pub enum IrToken {
     },
 }
 
-// == html5gum callback ==
-
 struct PendingTag {
     name: String,
     attributes: Vec<IrAttribute>,
@@ -141,8 +139,6 @@ pub fn tokenize(html: &str) -> Vec<IrToken> {
         .flatten()
         .collect()
 }
-
-// == Tree builder ==
 
 /// Stage 1+2 产物：IR 树 + 诊断 + `<style>` 文本（CSS 源）+ `<link
 /// rel="stylesheet">` 声明（href 原始值 + 标签位置，加载归 pipeline——fence 不做 io）。
@@ -516,7 +512,7 @@ mod tests {
             tree.roots
         );
         assert_eq!(tree.element(tree.roots[0]).unwrap().tag, "div");
-        // 元素内空白（div 和 p 之间的换行）仍保留为 Text 子节点——只丢顶层。
+        // 元素内空白仍保留为 Text 子节点——只丢顶层。
         let div = tree.roots[0];
         let has_ws_text_child = tree.nodes[div.0]
             .children

@@ -164,7 +164,6 @@ namespace LoomGUI.Tests
                 Assert.AreEqual(200u, (uint)lastNodeIdField.GetValue(ro),
                     "复用后 LastNodeId 应为 200（更新为新 node_id）");
 
-                // position 应已更新到帧2的坐标 (30,40)
                 Assert.AreEqual(new Vector3(30f, 40f, 0f), go2.transform.localPosition,
                     "帧2 GO position 更新为 (30,40)");
             }

@@ -1,6 +1,6 @@
 //! 控件视觉同步：把 ControlState 映射到**作者写的**子节点 inline style。
 //!
-//! 作者用 WAI-ARIA role + data-slot 自写控件结构（spec §2.2）：
+//! 作者用 WAI-ARIA role + data-slot 自写控件结构：
 //! - ProgressBar（role=progressbar）：含 `data-slot="fill"` 子节点（width:% 由 value 驱动）。
 //! - Slider（role=slider）：含 `data-slot="fill"`（可选视觉填充）+ `data-slot="thumb"`
 //!   （必需，位移走 transform）。fill 与 thumb 是 slider 的兄弟子节点（无 track 中间层）。
@@ -27,9 +27,6 @@ use crate::scene::node::{
 };
 use crate::scene::text_cursor::{hit_byte_offset, line_byte_ranges};
 use crate::transform::NodeTransform;
-
-// WAI-ARIA role + data-slot 标识，替代旧的 `.loom-*` 保留 class。控件结构由作者按 spec §2.2
-// 自写（role 表语义、data-slot 表构造），core 按 role/slot 定位作者子节点。
 
 /// Dropdown（role=combobox）的弹出列表容器 role。open Dropdown 的 listbox 子树走浮层渲染
 /// （render 末尾追加、mask=0 跳出祖先 clip），pub 供 render/hit 层定位 popup 根。
@@ -216,7 +213,7 @@ pub fn find_child_by_slot(scene: &Scene, parent: NodeId, slot: &str) -> Option<N
 
 /// 取 combobox（Dropdown）的第 `n` 个 option 的文本内容。
 ///
-/// option 是作者写的 `role="listbox"` 子节点里的 `role="option"`（spec §2.2 运行时结构
+/// option 是作者写的 `role="listbox"` 子节点里的 `role="option"`（运行时结构
 /// `combobox > [data-slot=value, role=listbox > [role=option...]]`）。先定位 listbox（递归兜底，
 /// 作者可能裹 wrapper），再在其直接子节点里按 `NodeKind::OptionItem` 取第 n 个。文本可能在
 /// option 自身的 `text_contents`（打包期把 content 存进 side table），也可能在后代 TextNode
@@ -241,10 +238,10 @@ pub fn nth_option_text(scene: &Scene, select: NodeId, n: usize) -> Option<String
 }
 
 /// 把 combobox 的 `role="option"`（`NodeKind::OptionItem`）直接子节点 reparent 进它的
-/// `role="listbox"` 子节点（spec §2.2 运行时结构）。
+/// `role="listbox"` 子节点（运行时结构）。
 ///
 /// 必要性：作者正确写法是 `combobox > listbox > option`（option 已在 listbox 内），此时本函数
-/// 为 no-op。但若作者把 option 直接写在 combobox 下（结构契约 Task 6 会报缺 listbox 的 error），
+/// 为 no-op。但若作者把 option 直接写在 combobox 下（打包期结构契约会报缺 listbox 的 error），
 /// reparent 作兜底把它们挪进 listbox，保证浮层渲染（render 末尾追加 DFS 从 listbox 根展开子树）
 /// 能拿到 option 列表——否则 option 留在 combobox 直接子，会被祖先 `overflow:hidden` 裁掉。
 ///
@@ -255,7 +252,7 @@ pub fn reparent_options_into_popup(scene: &mut Scene, select: NodeId) {
     // 先定位 listbox（不可变借），再收集 option（不可变借），最后 detach/attach（可变借）。
     // 三阶段分开避免边迭代 select.children 边 mutate 的借用冲突 + 漏项。
     let Some(popup) = find_child_by_role_recursive(scene, select, ROLE_LISTBOX) else {
-        return; // 无 listbox（作者漏写 / 非 control-init Dropdown）→ 无可 reparent 的目标。
+        return;
     };
     let options: Vec<NodeId> = scene
         .get(select)
@@ -293,8 +290,6 @@ fn collect_subtree_text(scene: &Scene, id: NodeId, buf: &mut String) {
     }
 }
 
-// ── Option/Tab 合成 getter（运行时从父控件状态派生，公共 API 只读面）──
-//
 // option 的 value/selected、tab 的 selected 都不字面存储（HTML 语义：`value` 是
 // 打包期静态配置，selected 是父控件 selected_index + 自身序号的合成值）。这里统一
 // 提供「上溯找父控件 + 按声明序对位」的派生读，供 FFI getter 调用。
@@ -406,8 +401,6 @@ pub fn tab_selected(scene: &Scene, tab: NodeId) -> Option<bool> {
     }
 }
 
-// ── Dropdown 交互辅助（Task 13：点 option 选中 / seek 跳 disabled）─
-//
 // option 的索引语义与 `nth_option_text` 一致：在 popup 的 OptionItem 直接子节点里按声明序
 // 从 0 计数（非 OptionItem 的 popup 子节点不计入，与 selected_index 对齐）。disabled option
 // 占一个索引档位但 seek / 点击不可落地（照 HTML：disabled option 不可交互）。
@@ -492,7 +485,7 @@ pub(crate) fn pos_in_popup(scene: &Scene, select: NodeId, pos: [f32; 2]) -> bool
 }
 
 /// 设 TabList 的 selected_index，并在净变时发 EVT_SELECTION_CHANGED@tablist（payload
-/// touch_id=新 index）。click 命中 tab（T7）与方向键导航（K1）共用——仅当 new_index 与当前
+/// touch_id=新 index）。click 命中 tab 与方向键导航共用——仅当 new_index 与当前
 /// 值不同时发事件，镜像 [`commit_dropdown_selection`] 的「仅净变才发」语义（HTML change 语义：
 /// 点已激活 tab / 方向键移到原位不发 change）。tablist 非 TabList 控件态 → no-op。
 fn set_tablist_selected_index(
@@ -687,7 +680,6 @@ pub(crate) fn on_dropdown_key(
             if n == 0 {
                 return true; // 无 option → 消费但不操作
             }
-            // RmlUi SeekSelection：从 cur±dir 起步，跳 disabled，越界不变。
             let dir: i64 = if forward { 1 } else { -1 };
             let mut i = cur as i64 + dir;
             while i >= 0 && i < n as i64 {
@@ -712,8 +704,6 @@ pub(crate) fn on_dropdown_key(
             true
         }
         KEY_ESCAPE => {
-            // 取消：close_dropdown 回滚 selected_index 到 open_selected_index 快照
-            // 并收起（不发事件——回滚后净变=0；照 RmlUi CancelSelectBox）。
             close_dropdown(scene, select);
             true
         }
@@ -722,7 +712,7 @@ pub(crate) fn on_dropdown_key(
 }
 
 /// 从 start 向上找最近的 `ControlState::TabList` 祖先（含 start 自身）。供键盘路由定位
-/// TabList：T3 决策 Tab 是 focusable 元素（roving-tabindex-lite，活动 tab 持焦点）、
+/// TabList：Tab 是 focusable 元素（roving-tabindex-lite，活动 tab 持焦点）、
 /// TabList 本身不聚焦，故焦点落在 Tab 上时须向上走到 TabList 才能改 selected_index。
 /// 显式限定 TabList 类型（不通用化 find_control_at），避免被其它控件祖先误命中（如包了
 /// TabList 的 Dropdown）。panel 跨树（非 TabList 子，靠 aria-controls 关联）→ 从 panel 内容
@@ -742,7 +732,7 @@ pub(crate) fn find_tablist_ancestor(scene: &Scene, start: Option<NodeId>) -> Opt
 ///
 /// - 方向键按 TabList 的 `flex-direction` 选轴：row/row-reverse → Left/Right，
 ///   column/column-reverse → Up/Down；row-reverse/column-reverse 翻转 delta 符号。
-/// - clamp 到 `[0, tab_count-1]`，**不 wrap**（照 plan K1）。
+/// - clamp 到 `[0, tab_count-1]`，**不 wrap**。
 /// - 改变 selected_index 即发 SelectionChanged（automatic-activation：方向键即时提交，
 ///   与 Dropdown 的 seek 不提交不同——TabList 无展开/提交语义）。
 ///
@@ -765,7 +755,6 @@ pub(crate) fn on_tablist_key(
         }
         None => return false, // 控件不 live → 不路由
     };
-    // 按 flex-direction 选轴 + 方向。row-reverse/column-reverse 翻转 delta 符号。
     let delta: i64 = match (flex_dir, key_code) {
         (taffy::FlexDirection::Row, KEY_LEFT) => -1,
         (taffy::FlexDirection::Row, KEY_RIGHT) => 1,
@@ -788,7 +777,6 @@ pub(crate) fn on_tablist_key(
     if tab_count == 0 {
         return false; // 无 tab → 不消费（让普通 keydown 透传）
     }
-    // clamp 到 [0, tab_count-1]（不 wrap）。
     let new = (current as i64 + delta).max(0).min(tab_count as i64 - 1) as usize;
     set_tablist_selected_index(scene, tablist, new, out);
     true
@@ -797,8 +785,8 @@ pub(crate) fn on_tablist_key(
 /// 在 layout 阶段提前 measure 文本控件的显示文本 TextLayout，写入 `scene.text_layouts`。
 ///
 /// 正常文本节点的 TextLayout 在 render 阶段 lazily 计算（`unwrap_or_else(measure_text)`），
-/// 但文本控件需要在 render 前就拿到 TextLayout：光标命中测试（Task 7）需 glyph 位置、
-/// 光标几何（Task 12）需行高/基线，都依赖已算好的 TextLayout。
+/// 但文本控件需要在 render 前就拿到 TextLayout：光标命中测试需 glyph 位置、
+/// 光标几何需行高/基线，都依赖已算好的 TextLayout。
 ///
 /// 在 solve 后调用——此时 `layout_rect.w` 已就位（content width = rect.w - border - padding），
 /// `ControlState` 已在之前步骤同步（值/placeholder 在 sync_control_visuals 无关——TextField
@@ -807,7 +795,7 @@ pub(crate) fn on_tablist_key(
 /// 写入的 TextLayout 不含 border/padding 偏移——偏移由 render 阶段统一 `bake_content_offset`，
 /// 与正常 TextNode 路径（solve 测原始，render 烤偏移）保持一致。placeholder 场景（value 为空）：
 /// 跳过缓存（continue），render 阶段的 lazy fallback 会用 placeholder 重测。
-/// 布局阶段 measure 只是预热缓存：光标命中/几何 Task 依赖 TextLayout 在 render 前就位。
+/// 布局阶段 measure 只是预热缓存：光标命中/几何依赖 TextLayout 在 render 前就位。
 pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::FontTable) {
     let ids: Vec<NodeId> = scene
         .controls
@@ -875,18 +863,18 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
 /// （> 动态规则 > base_style），与手写 `<div style="width:70%">` 完全等价——故复用
 /// `set_inline_override` 而非另建并行机制。
 ///
-/// 各控件映射（spec §2.2 结构）：
+/// 各控件映射：
 /// - ProgressBar：`value / max` → `data-slot="fill"` 子节点的 `width:%`。
 /// - Slider：`value` → `data-slot="fill"` 的 `width:%`（fill 可选）+ `data-slot="thumb"` 的
 ///   `user_transform.translate` = `(slider_w - thumb_w) × pct`（水平，扣自身宽的可滑动距离）
 ///   + `(slider_h - thumb_h)/2`（垂直居中）。thumb 几何取 slider 自身的 layout_rect（新结构
 ///   无 track 中间层，fill/thumb 是 slider 的兄弟子节点）。渲染/命中层位移，不触发 solve。
-/// - Toggle / Radio：无映射——作者用 `[aria-checked]` 属性选择器表达选中态（Task 4 运行时匹配）。
+/// - Toggle / Radio：无映射——作者用 `[aria-checked]` 属性选择器表达选中态（运行时 rematch 匹配）。
 /// - Dropdown：`open` → `role="listbox"` 的 `display` + 位置 transform；`selected_index` →
 ///   `data-slot="value"` 内嵌 TextNode 的文本。
 ///
 /// 无控件状态（非 control 节点）→ no-op。tick 每帧对所有控件节点调一次（控件稀疏，代价可接受）。
-/// 对找不到子节点的控件（作者漏写某部件）静默跳过——结构契约 Task 6 会在打包期拦下缺夹。
+/// 对找不到子节点的控件（作者漏写某部件）静默跳过——打包期结构契约会拦下缺夹。
 ///
 /// `viewport_h` = stage 视口高（popup 视口感知定位用）。<= 0 = 无视口约束
 /// （headless 测试默认）——popup 恒下方展开（历史行为）。
@@ -906,8 +894,8 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
                 let _ = set_inline_override(scene, fill, &format!("width:{}%", pct * 100.0));
             }
         }
-        // Toggle/Radio：作者用 [aria-checked="true"] 属性选择器表达选中态（spec §2.2），
-        // core 不再 sync check 子节点的 display。运行时 aria-checked 属性匹配见 Task 4。
+        // Toggle/Radio：作者用 [aria-checked="true"] 属性选择器表达选中态，
+        // core 不再 sync check 子节点的 display。
         ControlState::Toggle { .. } | ControlState::Radio { .. } => {}
         ControlState::Slider {
             value, min, max, ..
@@ -917,7 +905,6 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
             } else {
                 0.0
             };
-            // fill 可选视觉填充（width:% 反映 value）。
             if let Some(fill) = find_child_by_slot(scene, id, SLOT_FILL) {
                 let _ = set_inline_override(scene, fill, &format!("width:{}%", pct * 100.0));
             }
@@ -963,7 +950,7 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
             }
         }
         // TextField/TextArea: 光标闪烁 timer 已实现（advance_cursor_blink，stage tick 驱动）；
-        // cursor/selection/composition 的渲染同步（几何计算 + 绘制）仍 pending（Task 12）。
+        // cursor/selection/composition 的渲染同步（几何计算 + 绘制）仍 pending。
         ControlState::TextField(_) | ControlState::TextArea(_) => {}
         ControlState::Dropdown {
             selected_index,
@@ -1042,11 +1029,11 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
         }
         // NumberField: 纯数值输入控件，无视觉子节点 sync（数值约束 clamp + step 量化在 FFI 读写门执行）。
         ControlState::NumberField { .. } => {}
-        // TabList: aria-selected 由 synth_aria_value（T5）合成；panel 显隐据 selected_index
+        // TabList: aria-selected 由 synth_aria_value 合成；panel 显隐据 selected_index
         // + 各 tab 的 RoleInfo.aria_controls（panel id 串）切换——本 arm 实现 panel display。
         // panel 跨树（非 tablist 子，靠 aria-controls + id 关联），区别于 Dropdown listbox
         // （combobox 直接子）。复用 display:none 剪枝：激活 panel "display:block" 覆盖作者
-        // 可能的 display:none（如 settings.html 初始隐藏 panel），非激活 "display:none" 强制隐藏。
+        // 可能的 display:none，非激活 "display:none" 强制隐藏。
         ControlState::TabList { selected_index } => {
             // 按 DOM 序遍历 role=tab 子节点（selected_index 是 tab 的序号）。clone children
             // 释放不可变借，供循环内 set_inline_override 取 &mut scene。
@@ -1063,15 +1050,15 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
                 //（nearest LOOKUP_SCOPE 根内查找，不串全局首匹配）。
                 let Some(panel_id_str) = scene.roles.get(tab).and_then(|r| r.aria_controls.clone())
                 else {
-                    continue; // tab 未写 aria-controls：无 panel 可切（R1 容错）
+                    continue; // tab 未写 aria-controls：无 panel 可切
                 };
                 let Some(panel) = scene.find_node_by_id_in_own_scope(tab, &panel_id_str) else {
-                    continue; // panel id 解析不到（R1 容错；fence 期已校验 idref 存在，运行时动态缺则跳）
+                    continue; // panel id 解析不到（fence 期已校验 idref 存在，运行时动态缺则跳）
                 };
                 let decl = if i == selected_index {
-                    "display:block" // 激活 panel：覆盖作者可能的 display:none
+                    "display:block"
                 } else {
-                    "display:none" // 非激活 panel：强制隐藏
+                    "display:none"
                 };
                 let _ = set_inline_override(scene, panel, decl);
             }
@@ -1083,8 +1070,6 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
 /// 0.7s 对齐常见平台光标闪烁频率（~1.4Hz 全周期，0.7s 半周期 ON/OFF）。
 const CURSOR_BLINK_PERIOD: f32 = 0.7;
 
-// ── 控件指针交互 ──────────────────────────────────────────────────
-//
 // Toggle/Radio 在 pointer-down 翻转/互斥选中；Slider 在 down→move→up 期间拖拽改 value。
 // 这些函数是纯逻辑（读 ControlState + track 几何，写 side table），由 PointerState::process
 // 在 Down/Move/Up 臂调用（命中控件时）。独立于事件仲裁——只改控件状态，不产事件。
@@ -1127,7 +1112,6 @@ pub fn occupies_gesture(scene: &Scene, id: NodeId) -> bool {
 /// disabled 控件不响应（照 HTML：disabled input 不接受点击）。pos 仅 Slider 用。
 pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<EventRecord> {
     let mut out = Vec::new();
-    // disabled 控件不响应交互。
     if scene
         .get(id)
         .is_some_and(|n| n.interaction.flags.contains(NodeFlags::DISABLED))
@@ -1156,7 +1140,6 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
             select_radio(scene, id, name, &mut out);
         }
         ControlState::Slider { .. } => {
-            // 先置 dragging=true，再按 pos 重算 value（track 几何取上一帧 solve）。
             if let Some(ControlState::Slider { dragging, .. }) = scene.controls.get_mut(id) {
                 *dragging = true;
             }
@@ -1200,7 +1183,7 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
                 open_dropdown(scene, id);
             }
         }
-        // TabList（T7）：点 role=tab 子 → 设 selected_index = 该 tab 的序号 + 发
+        // TabList：点 role=tab 子 → 设 selected_index = 该 tab 的序号 + 发
         // SelectionChanged。find_control_at 从命中节点向上找最近 ControlState：Tab 无
         // ControlState、TabList 有 → id 是 TabList，pos 是点击世界坐标。按声明序遍历 role=tab
         // 子，世界 AABB rect-contains 命中第一个含 pos 的 tab（镜像 dropdown_option_at_pos
@@ -1465,12 +1448,9 @@ fn set_slider_value(scene: &mut Scene, id: NodeId, value: f32, out: &mut Vec<Eve
     }
 }
 
-// ── 文本编辑原语（pure functions over EditState） ──────────────────────────────
-//
-// Task 8：编辑内核。insert_text/delete_char/move_cursor/sanitize_value 是 Task 9
-// （textinput channel）与 Task 10（control-key 路由）的底层原语。它们是纯函数——
-// 仅读写 EditState（无 Scene 访问），故可独立单测。读写光标/锚点后由调用方决定是否
-// 同步渲染（Task 12）。
+// 编辑内核原语。insert_text/delete_char/move_cursor/sanitize_value 是 textinput channel
+// 与 control-key 路由的底层原语。它们是纯函数——仅读写 EditState（无 Scene 访问），故可
+// 独立单测。读写光标/锚点后由调用方决定是否同步渲染。
 //
 // 不变量：cursor/anchor 必须永远落在合法 UTF-8 字符边界上（char 起始字节）。CJK 字符
 // 占 3 字节，若停在中间字节则后续 str slice panic。下面三个边界助手保证所有偏移合法。
@@ -1693,11 +1673,9 @@ pub fn line_break(e: &mut EditState, kind: NodeKind, out: &mut Vec<EventRecord>,
     }
 }
 
-// ── IME composition 原语（set/commit） ─────────────────────────────
-//
-// Task 13：IME 渠道。后端读平台 IME 的 compositionString 回灌 core——set_composition 存进
+// IME 渠道。后端读平台 IME 的 compositionString 回灌 core——set_composition 存进
 // EditState.composition，commit_composition 落定进 value。显示侧由 [`display_value`] 把
-// composition 拼进显示文本（measure/render 同源），下划线由 Task 12 的 composition 分支画。
+// composition 拼进显示文本（measure/render 同源），下划线由 render 的 composition 分支画。
 //
 // composition.pos 是基于原始 value 的字节偏移（光标在 value 中的位置）。提交时把光标定位到
 // composition.pos，再 insert_text 落定（insert_text 自带选区删除 + sanitize + max_length
@@ -1744,8 +1722,6 @@ pub fn commit_composition(e: &mut EditState, kind: NodeKind) -> bool {
     insert_text(e, kind, &comp.text)
 }
 
-// ── 剪贴板（host callback 注册模式） ──────────────────────────────
-//
 // core 是 cdylib，不能 extern 调宿主剪贴板（Unity GUIUtility.systemCopyBuffer / Win32
 // clipboard）——宿主符号在 core 链接期不可解析，且 C# 宿主无法提供 linkable C 符号。
 // 故由后端在启动时经 FFI `loomgui_register_clipboard` 注册一对 set/get 函数指针，core
@@ -1953,8 +1929,6 @@ mod tests {
         );
     }
 
-    // ── sync_control_visuals（状态 → 作者子节点 inline style） ──
-    //
     // 控件状态变后由 core 按 role/data-slot 定位作者子节点写 inline style（语义优先级 = HTML
     // inline，最高）。ProgressBar/Slider 写 fill slot 的 width:%、Slider 写 thumb slot 的
     // transform；Dropdown 写 listbox role 的 display + value slot 的文本。Toggle/Radio 不 sync
@@ -2189,13 +2163,11 @@ mod tests {
         assert!(scene.get(id).unwrap().children.is_empty());
     }
 
-    // ── sync_control_visuals：Dropdown（value 文本 + listbox display 切换） ──
-    //
     // combobox 的 selected_index → value slot 显示对应 option 文本；open → listbox role 的
     // display:block/none 切换。option 文本取自 option 子树（自身 text_contents 或后代 TextNode）。
     // value slot 是 Container，文本落在其内嵌 TextNode（作者写 `<div data-slot=value><span/></div>`）。
 
-    /// 建一个带 ControlInit 的 combobox（Dropdown），按 spec §2.2 自写结构：
+    /// 建一个带 ControlInit 的 combobox（Dropdown），按 role/data-slot 结构自写：
     /// `combobox > [data-slot=value > TextNode, role=listbox > [option...]]`。
     /// 模拟作者写 `<div role=combobox><div data-slot=value><span/></div><div role=listbox>
     /// <div role=option>A</div>...</div></div>`。reparent 调用复刻生产 Stage::instantiate
@@ -2482,8 +2454,6 @@ mod tests {
         );
     }
 
-    // ── sync_control_visuals：TabList（panel 显隐随 selected_index 切） ──
-    //
     // TabList 的 panel 跨树（非 tablist 子，靠 tab 的 aria-controls + panel 的 id 关联），
     // 区别于 Dropdown 的 listbox（combobox 直接子）。selected_index=0 → 第 1 个 tab 的 panel
     // display:block，其余 display:none。非激活 panel 即使作者设为可见也被强制 none（display:none
@@ -2561,7 +2531,7 @@ mod tests {
 
     #[test]
     fn tablist_r1_missing_aria_controls_and_missing_panel_skip_cleanly() {
-        // R1 容错：tab 未写 aria-controls（role 在但 aria_controls=None）→ 跳；tab 有 aria-controls
+        // 容错：tab 未写 aria-controls（role 在但 aria_controls=None）→ 跳；tab 有 aria-controls
         // 但 panel id 解析不到（panel 未建）→ 跳。两者均不 panic，且不影响合法 panel 的显隐切换。
         let mut scene = Scene::default();
         let tl = create_node_from_template(
@@ -2586,8 +2556,6 @@ mod tests {
         );
     }
 
-    // ── on_pointer_down：TabList（T7 点击激活 + SelectionChanged） ──
-    //
     // find_control_at 从命中节点向上找最近有 ControlState 的节点：Tab 无 ControlState、
     // TabList 有 → 点 tab 命中的 id 是父 TabList。on_pointer_down 的 TabList 臂收
     // (id=TabList, pos)，须判定 pos 落在哪个 role=tab 子的 layout_rect 内，设其序号为
@@ -2682,8 +2650,6 @@ mod tests {
         );
     }
 
-    // ── reparent_options_into_popup：option 移进 listbox（spec §2.2 兏底）──
-    //
     // 生产路径：Stage::instantiate 建完子树后对每个 Dropdown 调 reparent。作者正确写法是
     // option 已在 listbox 内（本函数 no-op）；这里测「option 直接写在 combobox 下」的兜底移动。
     // direct/popup option children helper + 原语本身 + 顺序保序 + 幂等 + nth_option_text 扫 listbox。
@@ -2825,7 +2791,7 @@ mod tests {
     #[test]
     fn reparent_no_listbox_is_noop() {
         // combobox 无 listbox 子节点（作者漏写）→ 无可 reparent 目标，不 panic、不误移 option。
-        // 结构契约 Task 6 会打包期报 error，但运行时仍须 no-op（不杀进程）。
+        // 打包期结构契约会报 error，但运行时仍须 no-op（不杀进程）。
         let mut scene = Scene::default();
         let sel = create_node_from_template(
             &mut scene,
@@ -2954,8 +2920,6 @@ mod tests {
         assert!(tab_selected(&scene, tl).is_none());
     }
 
-    // ── 控件指针交互（on_pointer_down/move/up） ──
-    //
     // 直接调交互函数验逻辑（隔离 PointerState 仲裁）：Toggle 翻转、Radio 同名组互斥、
     // Slider 拖拽改 value + step 量化。slider 几何手动设（解耦 solve：测试不把 slider 入 roots，
     // solve 不触达，故手动写 layout_rect，同 slider_thumb_positioned_by_transform 模式）。
@@ -3153,8 +3117,6 @@ mod tests {
         );
     }
 
-    // ── 畸形配置 panic 回归（clamp no-panic 不变量）──
-    //
     // ControlInit 的 min/max/value 来自 HTML 属性，无 schema 约束。下游 clamp(min,max) 在
     // min>max 时 debug 断言 abort；FFI 路径 panic = 杀宿主进程。instantiate sanitize +
     // 指针路径守卫保证任何畸形配置都不 panic。这些测试锁住该不变量。
@@ -3265,8 +3227,6 @@ mod tests {
         );
     }
 
-    // ── 控件事件出口（CheckedChanged / ValueChanged / ChangeCommitted） ──
-    //
     // 控件交互产生 EventRecord，随 PointerState::process 的 out 流出。直接调交互函数捕获
     // 返回的 Vec<EventRecord> 验事件载荷（隔离 process 仲裁）。payload 复用 EventRecord
     // 现有字段：Toggle/Radio 的 pad[0]=bool，Slider 的 x=value（ABI 不变）。
@@ -3383,8 +3343,6 @@ mod tests {
         );
     }
 
-    // ── 文本控件 pointer-down 光标命中 ──
-
     /// 建带 TextLayout 缓存的 TextField（解耦 solve：手动测文本 + 设 layout_rect）。
     fn make_scene_with_textfield(text: &str) -> (Scene, NodeId) {
         let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
@@ -3486,7 +3444,6 @@ mod tests {
     #[test]
     fn advance_cursor_blink_flips_visibility() {
         let (mut scene, id) = make_scene_with_textfield("hi");
-        // 聚焦该节点
         scene.focused_node = Some(id);
         // 初始 cursor_visible = true（from_init 设）
         assert!(get_cursor_visible(&scene, id));
@@ -3504,7 +3461,6 @@ mod tests {
     #[test]
     fn advance_cursor_blink_hides_when_not_focused() {
         let (mut scene, id) = make_scene_with_textfield("hi");
-        // 不聚焦（focused_node = None）
         scene.focused_node = None;
         advance_cursor_blink(&mut scene, 1.0);
         // 未聚焦 → cursor_visible 强制 false
@@ -3527,8 +3483,6 @@ mod tests {
         }
     }
 
-    // ── on_pointer_down 世界→内容区坐标转换 ──
-    //
     // on_text_pointer_down 接收的坐标已是 content-area-local（减过 layout_rect.xy +
     // border + padding）。on_pointer_down（公共协调器）负责这层减法。既有 4 个光标测试都
     // 直调 on_text_pointer_down，跳过了减法——此测试锁住 on_pointer_down 的转换链：
@@ -3732,10 +3686,8 @@ mod tests {
         );
     }
 
-    // ── 文本编辑原语（insert/delete/move + UTF-8 边界 + sanitize） ──
-    //
-    // Task 8：纯函数 over EditState（无 Scene 改动）。insert_text/delete_char/move_cursor
-    // 是 Task 9（textinput channel）+ Task 10（control-key 路由）的编辑内核。UTF-8 边界
+    // 纯函数 over EditState（无 Scene 改动）。insert_text/delete_char/move_cursor 是
+    // textinput channel + control-key 路由的编辑内核。UTF-8 边界
     // 保证 cursor/anchor 永远落在 char 起始字节（CJK 3 字节字符不能停在中间字节）。
 
     #[test]
@@ -3812,8 +3764,6 @@ mod tests {
         assert_eq!(e.cursor, 4);
     }
 
-    // ── composition / display_value（Fix 1/3/4） ──
-
     #[test]
     fn display_value_range_normal_field_matches_raw_comp_pos() {
         // display_value 返回的区间 = raw comp.pos..+len（value 原样拼接，无字节布局变换）。
@@ -3834,8 +3784,6 @@ mod tests {
         assert_eq!(display, "ab");
         assert!(range.is_none());
     }
-
-    // ── -webkit-text-security 掩码 ──
 
     #[test]
     fn display_value_masked_replaces_chars_keeps_count() {
@@ -3885,7 +3833,7 @@ mod tests {
 
     #[test]
     fn set_composition_empty_clears_composition() {
-        // Fix 3：空串 = 取消 composition。set_composition("") 应清掉 composition（设 None），
+        // 空串 = 取消 composition：set_composition("") 应清掉 composition（设 None），
         // 而不是存一个零宽空 composition（FFI 文档约定「传空串 = 取消」）。
         let mut e = EditState::from_init("ab".into(), "".into(), 0, false);
         set_composition(&mut e, "ni", 1);
@@ -3897,8 +3845,6 @@ mod tests {
         assert!(range.is_none());
     }
 
-    // ── 剪贴板原语（copy/cut/paste + host callback 注册） ──
-    //
     // core 是 cdylib，不能 extern 调宿主剪贴板（Unity GUIUtility.systemCopyBuffer），故走
     // host callback 注册：测试注册一对 Rust fn（匹配 ClipboardSetFn/GetFn 签名）做内存中
     // round-trip，不依赖真实系统剪贴板。剪贴板测试共享全局 callback 槽 + 全局测试 buffer，

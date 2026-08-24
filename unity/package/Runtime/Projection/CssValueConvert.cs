@@ -5,7 +5,7 @@ namespace LoomGUI
 {
     /// <summary>
     /// 把 typed 值（frozen 值类型 + NodeStyle enum）转成 core apply_decl 能解析的 CSS 串，
-    /// 供 C3 StyleMirror 的 inline-override flush 路径用。返回 null 表示该值是 Unset 哨兵，
+    /// 供 StyleMirror 的 inline-override flush 路径用。返回 null 表示该值是 Unset 哨兵，
     /// 调用方应据此跳过该属性（用 unset_inline_override FFI，不写进 CSS）。
     ///
     /// 输出的 CSS keyword 必须匹配 core `crates/core/src/style/mapping.rs` `apply_decl` 实际接受的字符串，
@@ -16,7 +16,6 @@ namespace LoomGUI
     /// </summary>
     internal static class CssValueConvert
     {
-        // ── typed 重载 ───────────────────────────────────────────────
 
         internal static string ToCss(Length l)
         {
@@ -57,7 +56,6 @@ namespace LoomGUI
         // z-index（层叠序）用裸 int：CSS `<integer>`，无单位、允许负值。
         internal static string ToCss(int i) => i.ToString(CultureInfo.InvariantCulture);
 
-        // ── enum → CSS keyword（每 enum 的 Unset 都返 null：撤销哨兵）────────
 
         internal static string ToCss(DisplayMode v) => v switch
         {
@@ -137,7 +135,6 @@ namespace LoomGUI
             _ => throw BadEnum(v),
         };
 
-        // ── dispatch：供 C3 StyleMirror（属性值是 object 装箱）─────────
 
         internal static string ToCss(object value) => value switch
         {
@@ -157,7 +154,6 @@ namespace LoomGUI
             _                => throw new ArgumentException($"unsupported css value type: {value.GetType()}", nameof(value)),
         };
 
-        // ── helpers ──────────────────────────────────────────────────
 
         private static byte ClampToByte(float f)
         {

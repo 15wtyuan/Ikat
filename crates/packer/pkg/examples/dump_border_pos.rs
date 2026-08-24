@@ -60,7 +60,6 @@ fn main() {
     stage.append_child(root, comp).expect("append_child");
     let frame = stage.tick_and_render();
 
-    // === 1) scene 节点取证：.sec-h 候选（border_color ≈ #3a3f55）===
     println!("=== scene 节点：border_color 接近 #3a3f55（.sec-h 候选）===");
     if let Some(scene) = &stage.scene {
         for n in scene.nodes.values() {
@@ -87,7 +86,6 @@ fn main() {
         println!("  (scene 为空)");
     }
 
-    // === 2) frame mesh：border 候选 + .sec-h 文字 ===
     println!("=== frame 纯色 mesh（border 候选 = 无图且细条；其余纯色背景对照）===");
     for rn in &frame.nodes {
         let NodePayload::Mesh {

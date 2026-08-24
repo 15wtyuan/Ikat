@@ -75,7 +75,7 @@ namespace LoomGUI
         const string CLONE_SUFFIX = " (LoomNH)";
 
         /// 遍历 go 子树 Mesh/SkinnedMesh/Particle Renderer：clone sharedMaterial + 设 URP Transparent
-        /// （坑 129：renderQueue=3000 + _Surface=1 + _SURFACE_TYPE_TRANSPARENT keyword + _ZWrite=0），
+        /// （renderQueue=3000 + _Surface=1 + _SURFACE_TYPE_TRANSPARENT keyword + _ZWrite=0），
         /// 挂回 renderer.material（instance，不污染 sharedMaterial 资产）。clone 的 name 追加 CLONE_SUFFIX。
         /// 幂等：renderer.material 已带后缀则跳过（重复调不叠加 clone）。caller 在 Instantiate 后调一次。
         /// GO 须为 prefab 实例（caller 保证 sharedMaterial 是资产引用，clone 不影响其他实例）。

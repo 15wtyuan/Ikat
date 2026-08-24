@@ -389,7 +389,7 @@ pub fn nine_slice(
     (verts, uvs, colors, indices)
 }
 
-/// 九宫格 + 圆角共存 mesh（spec §3.7，fgui 无现成，LoomGUI 自设计）。
+/// 九宫格 + 圆角共存 mesh（fgui 无现成，LoomGUI 自设计）。
 ///
 /// - radius 全 0 → 退化 nine_slice（方角）。
 /// - 有 radius → 四角圆弧扇（**纯几何圆角，无外角顶点 / 无边三角**，照 rounded_rect 语义：
@@ -553,7 +553,6 @@ pub fn nine_slice_rounded(
         );
     };
 
-    // ---- 四角：四分之一圆弧扇形（纯几何圆角）----
     // 每角三角扇 = center（弧圆心）+ 弧顶点列（start..start+π/2）。**无外角顶点、无边三角**。
     // 弧外 `[0,r]² \ disc` 不发顶点（圆角镂空）。UV 1:1 映射源角像素。
     // corners: (rx, ry, center, start_angle)
@@ -613,7 +612,6 @@ pub fn nine_slice_rounded(
         }
     }
 
-    // ---- 角区 L 形 quad（填角区 [0,slice]² 减 [0,r]² 镂空）----
     // 逐角发角区 L 形 quad：角区 [0,slice]² 内，[0,r]² 子块由弧扇覆盖弧内、弧外镂空；
     // L 形剩余（[r,slice]×[0,slice] ∪ [0,r]×[r,slice]）发 quad，UV 1:1 映射源角像素（不拉伸）。
     // r=0 时无镂空，整个角区 [0,slice]² 当 L 形（2 quad 合并覆盖）。每角用各自 r 精确处理。
@@ -781,7 +779,6 @@ pub fn nine_slice_rounded(
         3,
     );
 
-    // ---- 边带 + 中心 quad ----
     // 上边带：x [cx_l, cx_r], y [rect.y, cy_t] —— 水平拉伸（UV x: tx_l..tx_r, v: ty_t 段 1:1）
     //   但上边带 y 跨 [0, slice_t]，含角弧段 [0,r] 与 L 段 [r,slice]。边带 x 仅 [slice, w-slice]，
     //   不含角区——故 y 全段 [0, slice_t] 都是边带（无角弧，因 x 在中心段）。

@@ -10,7 +10,7 @@
 //! 任意 `<style>` 规则的选择器命中它本身（tag / class / id / 后代链落地在该节点）。
 //! 完全无命中 → `FenceControlWithoutCss` error + 教学。
 //!
-//! 控件一律由 `role` 驱动（spec §2.2）：`<div role="...">`。教学文案按
+//! 控件一律由 `role` 驱动：`<div role="...">`。教学文案按
 //! **role/slot** 表述（`data-slot="fill"`、`role="listbox"`、`[aria-checked]` 属性
 //! 选择器），不引用任何框架注入的 `.loom-*` 子节点。
 //!
@@ -21,7 +21,7 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::ir::{IrElement, IrNodeKind, IrTree};
 use loomgui_core::style::dynamic::{AttrOp, Compound, DynamicRule, ParsedSelector};
 
-/// 触发本校验的控件 role（spec §2.2）。带这些 role 的元素必被检查；`textbox` 同时覆盖
+/// 触发本校验的控件 role。带这些 role 的元素必被检查；`textbox` 同时覆盖
 /// TextField 与 TextArea（后者加 `aria-multiline="true"`）。
 const CONTROL_ROLES: &[&str] = &[
     "combobox",
@@ -41,7 +41,7 @@ fn node_role(el: &IrElement) -> Option<&str> {
         .map(|a| a.value.as_str())
 }
 
-/// 判定元素是否为受校验控件：`role` 在 CONTROL_ROLES 即是（spec §2.2）。
+/// 判定元素是否为受校验控件：`role` 在 CONTROL_ROLES 即是。
 fn is_control(el: &IrElement) -> bool {
     node_role(el).is_some_and(|r| CONTROL_ROLES.contains(&r))
 }
@@ -367,7 +367,7 @@ pub fn check_slider_thumb_positioning(
     diagnostics
 }
 
-/// 控件的可读名称（教学文案用）。按 `role` 取名（spec §2.2）。
+/// 控件的可读名称（教学文案用）。按 `role` 取名。
 fn kind_name_for(el: &IrElement) -> &'static str {
     match node_role(el) {
         Some("combobox") => "dropdown (combobox)",
@@ -381,7 +381,7 @@ fn kind_name_for(el: &IrElement) -> &'static str {
     }
 }
 
-/// 按控件生成「该怎么配 CSS」教学文案（role/slot 表述，spec §2.2）。
+/// 按控件生成「该怎么配 CSS」教学文案（role/slot 表述）。
 fn fix_hint_for(el: &IrElement) -> String {
     let tag = el.tag.as_str();
     match node_role(el) {
@@ -549,7 +549,7 @@ mod tests {
 
     #[test]
     fn structure_contract_missing_both_declarations_errors() {
-        // api-infra 事故形态：视觉规则命中但结构声明全缺 → 两条 error
+        // 视觉规则命中但结构声明全缺 → 两条 error
         //（锚点 + 脱流）。「命中校验」（6.7）对此放行——本检查补位。
         let diags = check_structure(
             "<div><div role=\"combobox\"><div role=\"listbox\">\

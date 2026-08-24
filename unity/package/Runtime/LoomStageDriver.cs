@@ -14,7 +14,7 @@ namespace LoomGUI
     /// Awake 构造两者 + 注入字体/根 transform + 配 UI 相机/根变换；LateUpdate 每帧驱动
     /// <see cref="LoomHost.Step"/>（内含 CollectInput→tick→borrow_frame→SyncFrame→borrow_events→Pump）。
     ///
-    /// 启动流程（v1.8）：读 loom.runtime.json → 加载包 → 加载 atlas.json → set_image_sizes →
+    /// 启动流程：读 loom.runtime.json → 加载包 → 加载 atlas.json → set_image_sizes →
     /// SpriteResolver.Init → 注册字体 → 正常 tick。不再依赖 ScriptableObject 配置（改读 loom.runtime.json）。
     ///
     /// 三个 public virtual 加载钩子（LoadTextFile/LoadBytes/LoadTexture）默认直读文件系统，
@@ -62,17 +62,15 @@ namespace LoomGUI
         public LoomHost Host => _host;
 
         /// <summary>
-        /// 业务 API 表面（4a typed Node 树 + 事件 + LoadPackage）。游戏侧通过此 property 拿
+        /// 业务 API 表面（typed Node 树 + 事件 + LoadPackage）。游戏侧通过此 property 拿
         /// <see cref="UIContext"/> 调 typed API（Create&lt;T&gt;/LoadPackage/Events）。
-        /// 替代旧 <c>LoomStage.Stage</c> 透传 FFI 表面。Awake 失败时为 null。
+        /// Awake 失败时为 null。
         /// </summary>
         public UIContext Context => _host?.Context;
 
         /// <summary>暴露给输入采集等同程序集内部消费者。</summary>
         internal UnityEngine.Vector2 DesignSize => _designSize;
         internal bool UseSafeArea => _safeArea;
-
-        // ===== Virtual loading hooks (override for AB/Addressables) =====
 
         /// <summary>
         /// Load a text file relative to the product root.
@@ -138,8 +136,6 @@ namespace LoomGUI
 #endif
         }
 
-        // ===== Pure logic: merge atlas sprites into (key, width, height) list =====
-
         /// <summary>
         /// Merge all atlas manifests' sprite entries into a deduplicated list of (key, width, height).
         /// Pure function — testable without Unity runtime.
@@ -176,7 +172,7 @@ namespace LoomGUI
             }
 
             // InputCollector 提前 GetComponent：backend.SetRuntimeRoot 需要它（CollectInput 内读）。
-            // 同步注入 DesignSize/UseSafeArea——LoomInputCollector 自 P2.2 起自带这两个属性，
+            // 同步注入 DesignSize/UseSafeArea——LoomInputCollector 自带这两个属性，
             // backend.CollectInput 走 _inputCollector.DesignSize/UseSafeArea 路径（不再依赖 stage 字段）。
             if (_inputCollector == null) _inputCollector = GetComponent<LoomInputCollector>();
             if (_inputCollector != null)
@@ -185,7 +181,7 @@ namespace LoomGUI
                 _inputCollector.UseSafeArea = _safeArea;
             }
 
-            // Unity 特定资源：Shader + MaterialManager（搬自 LoomStage ctor，LoomStage.cs:61-63）。
+            // Unity 特定资源：Shader + MaterialManager。
             var shader = Shader.Find("LoomGUI/Unlit");
             if (shader == null)
             {
@@ -196,10 +192,9 @@ namespace LoomGUI
 
             // 引擎分层：backend（Unity 特定）+ host（引擎无关驱动序）。
             // LoomHost 构造 loomgui_stage_new → 建 UIContext → 接 backend。
-            // loomgui_stage_new 失败时 LoomHost 抛 InvalidOperationException——保留旧 LoomStage
-            // 「LogError + return」语义（_host 留 null，LateUpdate/OnDestroy 静默跳过）。
-            // 零向量 designSize 退回 (1080,1920)——避免 loomgui_stage_new(0,0) 返 null（搬自旧
-            // LoomStage ctor 的 fallback 语义）。
+            // loomgui_stage_new 失败时 LoomHost 抛 InvalidOperationException——
+            // _host 留 null，LateUpdate/OnDestroy 静默跳过。
+            // 零向量 designSize 退回 (1080,1920)——避免 loomgui_stage_new(0,0) 返 null。
             float dw = _designSize.x > 0f ? _designSize.x : 1080f;
             float dh = _designSize.y > 0f ? _designSize.y : 1920f;
             _backend = new UnityLoomBackend(_mm);
@@ -223,7 +218,6 @@ namespace LoomGUI
             _backend.SetRuntimeRoot(transform, _inputCollector);
             _backend.NativeHost.Init(transform);
 
-            // ── Bootstrap from loom.runtime.json ──
             // 1. Load runtime manifest
             RuntimeManifest runtime = null;
             string runtimeJson = LoadTextFile("loom.runtime.json");
@@ -235,7 +229,7 @@ namespace LoomGUI
 
             if (runtime != null)
             {
-                // 2. Load packages（UIContext.LoadPackage 4a typed path，替代旧 stage.LoadPackage FFI 透传）
+                // 2. Load packages（UIContext.LoadPackage typed path）
                 foreach (var pkgName in runtime.packages)
                 {
                     byte[] bytes = LoadPackageBytes(pkgName);
@@ -365,8 +359,6 @@ namespace LoomGUI
             return inst;
         }
 
-        // ===== NativeHost（引擎对象嵌入 UI 层级） =====
-
         /// <summary>
         /// 把外部 GameObject 绑定到 UI 节点（NativeHost）：GO 挂 per-node wrapper，每帧 Sync
         /// 跟随节点的 world transform / 显隐（display:none→SetActive(false)）/ 排序
@@ -388,8 +380,6 @@ namespace LoomGUI
             if (node == null) return;
             _backend?.NativeHost.Unbind(node._id);
         }
-
-        // ===== Font registration (from runtime.json) =====
 
         /// <summary>
         /// Register fonts from the runtime manifest's font list.
@@ -438,7 +428,7 @@ namespace LoomGUI
             // 诊断：按 F8 dump 当前 blob（core 视角）+ MirrorPool（Unity 视角）到 console + 文件。
             // 用法：进 play 导航到出问题的页面，按 F8。在「好」「坏」两种布局各按一次，对比两份 dump。
             // 轮询按 Active Input Handling 分流：InputSystem-only 项目里旧版 Input.GetKeyDown
-            // 每帧抛 InvalidOperationException（Field Notes N3）。
+            // 每帧抛 InvalidOperationException。
 #if ENABLE_INPUT_SYSTEM
             bool f8 = UnityEngine.InputSystem.Keyboard.current != null
                 && UnityEngine.InputSystem.Keyboard.current.f8Key.wasPressedThisFrame;
@@ -560,8 +550,6 @@ namespace LoomGUI
         // global texture/font registry 时此处自动清，无需再改接线。
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics() { Native.loomgui_shutdown(); }
-
-        // ===== 以下三个方法为 Unity 相机/transform 配置（design→screen shrink-to-fit + y-flip），逻辑等价于原 LoomStage 同名方法 =====
 
         /// <summary>
         /// 建/取 UI 相机。独立 GO（非根的子节点）——避免被根的 (sf,-sf,sf) scale 影响。

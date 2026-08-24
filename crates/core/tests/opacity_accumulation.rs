@@ -1,7 +1,7 @@
 //! opacity 父级累积（spec §3.3，CSS opacity 语义：子整体乘父 alpha）。
 //!
 //! build_render_nodes 产出的 RenderNode.alpha 必须是「父累积 × 自身 own」，而非自身 alone：
-//! 父节点动画 opacity（T6 player 写 NodeAnim.opacity，或 CSS style.opacity）时整子树必须跟着
+//! 父节点动画 opacity（player 写 NodeAnim.opacity，或 CSS style.opacity）时整子树必须跟着
 //! 淡——否则父淡出、子仍全亮（pre-existing 行为缺陷，本测试锁定修正）。
 
 use loomgui_core::render::build_render_nodes;
@@ -68,7 +68,7 @@ fn assert_all_alphas(
 
 #[test]
 fn child_accumulates_parent_anim_opacity() {
-    // 父 CSS opacity=1.0，T6 player 写 anim.opacity=0.5（生产路径写法：anim.ensure）；
+    // 父 CSS opacity=1.0，player 写 anim.opacity=0.5（生产路径写法：anim.ensure）；
     // 子 own=1.0 → 累积：父 0.5（1.0×0.5），子 0.5（0.5×1.0）。
     let mut s = Scene::from_nodes(
         vec![

@@ -82,7 +82,7 @@ pub(crate) fn is_shadow_synth(node_id: u32) -> bool {
 /// synth_text_node_id 编码后 high byte = (1000 + idx) & 0xFF = 232..=255，不与跨页子页
 /// （1..=15）或 box-shadow synth（high byte 36..=47）撞——靠 `inline_image_pairs` 显式
 /// 配对传播 sort_key，不凭 high byte 判别。
-#[allow(dead_code)] // RichText retired in Spec-2; kept for compound-bundle text model.
+#[allow(dead_code)] // RichText retired; kept for compound-bundle text model.
 pub(crate) const INLINE_IMG_SYNTH_ID_BASE: u32 = 1000;
 
 /// Font-atlas image_path for a given page index. Consumed verbatim by the
@@ -169,7 +169,7 @@ fn collect_display_none_subtree(scene: &Scene) -> std::collections::HashSet<Node
 
 /// 收集所有 open Dropdown 的 `role="listbox"` 根 NodeId（供末尾浮层追加 DFS 用）。
 ///
-/// 浮层渲染（Task 11，套 scrollbar thumb 末尾追加模式）：open Dropdown 的 `role="listbox"`
+/// 浮层渲染（套 scrollbar thumb 末尾追加模式）：open Dropdown 的 `role="listbox"`
 /// 子树跳出正常 DFS 渲染序——正常 DFS 跳过它（不进 id_to_pos），merge 后末尾追加，
 /// sort_key 续 max_sort+1，mask_context=MaskContext(0) 跳出祖先 overflow:hidden clip
 /// （dropdown 常出现在 scroll 容器/固定高度面板里，展开列表要溢出父边界显示，同 scrollbar
@@ -307,8 +307,8 @@ fn build_container_mesh(
     image_sizes: &ImageSizeTable,
 ) -> RenderNode {
     // background-clip:text：背景裁剪到文字形状。build_text_mesh 已用渐变文字色画字形
-    // （gradient_glyph_colors），这里不能再画背景填充——否则文字下面叠一层渐变色矩形
-    // （标本馆 fx-grad "渐变字" 下层渐变背景根因）。clip_text 时背景色与渐变都抑制。
+    // （gradient_glyph_colors），这里不能再画背景填充——否则文字下面叠一层渐变色矩形。
+    // clip_text 时背景色与渐变都抑制。
     let clip_text = n.style.background_clip_text;
     let color = if clip_text {
         [0.0, 0.0, 0.0, 0.0]
@@ -355,8 +355,8 @@ fn build_container_mesh(
     };
     // background-repeat 平铺：图（background-size 后）小于盒时按 repeat/repeat-x/repeat-y
     // 平铺填满（CSS 默认 repeat）。此前 core 只画单张（等价 no-repeat）→ 与浏览器默认
-    // repeat 分歧（标本馆 bg-contain：HTML 平铺填盒、Unity 单张 80×80）。圆角+repeat 退回
-    // 单张（圆角裁剪+平铺混合 mesh 留待后续；标本用 no-repeat 规避）。
+    // repeat 分歧（HTML 平铺填盒、Unity 单张 80×80）。圆角+repeat 退回
+    // 单张（圆角裁剪+平铺混合 mesh 留待后续）。
     let repeat = n.style.background_repeat;
     let do_tile = has_image
         && !has_slice
@@ -456,12 +456,12 @@ fn build_container_mesh(
             }
         }
     };
-    // 彩色边框激活（v1.8 修 border_color 死字段）。无背景图时把边框环形 mesh
+    // 彩色边框激活。无背景图时把边框环形 mesh
     // 拼进同一 payload：纯色 Container 背景与边框同走 program=0（白 1×1 纹理 ×
     // 顶点色），单 draw call，边框三角序在背景之后——重叠的边框环区边框覆盖背景，
     // 内部仅背景，视觉正确。filter（program=3）也走此路：filter 应作用于整元素含边框。
-    // ponytail: 有背景图（program=2/4）时边框需独立 draw call（边框纯色 vs 背景采样
-    // 图），本 task 不做——留待 border + bg-image 共存场景单独处理。渐变（program=6/7）
+    // 有背景图（program=2/4）时边框需独立 draw call（边框纯色 vs 背景采样
+    // 图），此处不做——留待 border + bg-image 共存场景单独处理。渐变（program=6/7）
     // 同理：GRADIENT 分支的 per-fragment 着色会吃掉边框环的顶点色，共存需边框独立
     // draw call，同 bg-image 一起 defer。
     if !has_image && !use_gradient {
@@ -538,7 +538,7 @@ fn build_container_mesh(
     }
 }
 
-/// 每帧算每节点累积 alpha（CSS opacity 父级累积：子整体乘父 alpha，spec §3.3）。
+/// 每帧算每节点累积 alpha（CSS opacity 父级累积：子整体乘父 alpha）。
 /// 返回 Vec 按 NodeId.index() 索引（1 基，len = capacity+1，idx 0 占位——同 world_transforms；
 /// 容量而非存活数，remove_node 后槽位可复用但 idx 不变）。roots 不可达的游离节点
 /// （父被删的孤儿）兜底 = own alpha（parent_alpha=1.0 的根语义）。
@@ -584,7 +584,6 @@ fn own_opacity(scene: &Scene, n: &crate::scene::node::Node) -> f32 {
         .unwrap_or(n.style.opacity)
 }
 
-/// （slice_px / src_px）。path 缺失或 w/h=0 → 64×64 兜底。
 pub fn build_render_nodes(
     scene: &Scene,
     fonts: &FontTable,
@@ -635,7 +634,7 @@ pub fn build_render_nodes(
             continue;
         }
         // rich-text-block 的 inline 子（TextNode/TextElement/Image，含嵌套 span 子树）在
-        // solve 期已折进父的单段 inline flow（T6），render 画进父 mesh（上方 rich arm）。
+        // solve 期已折进父的单段 inline flow，render 画进父 mesh（上方 rich arm）。
         // 它们 layout_rect=0、独立画=原点垃圾，跳过。
         if is_folded_into_rich_text(scene, n.id) {
             continue;
@@ -668,7 +667,7 @@ pub fn build_render_nodes(
     // 的 sort_key 后移子页个数，保持单调连续。
     propagate_text_sub_page_sort_keys(&mut nodes, &id_to_pos);
     propagate_back_shadow_sort_keys(&mut nodes, &back_layer_pairs);
-    // box-shadow synth 节点继承 primary 的 mask_context（overflow 裁剪传播，spec §4.6）。
+    // box-shadow synth 节点继承 primary 的 mask_context（overflow 裁剪传播）。
     propagate_shadow_mask_context(&mut nodes);
     propagate_inline_image_sort_keys(&mut nodes, &inline_image_pairs);
     batch::reorder_for_batching(scene, &mut nodes);
@@ -806,7 +805,7 @@ fn synth_text_node_id(primary_id: u32, sub_page: u32) -> u32 {
 // TextField 编辑反馈 mesh（光标 / 选区背景 / composition 下划线）的合成 node_id 标签。
 // 这些 mesh 与背景框、文字 mesh 共属同一节点，但必须各有独立 node_id——否则 dirty
 // hash 表（new_hashes，以 node_id 为键）会因键碰撞只保留其一的 hash，导致增量更新
-// 漏检（Task 4 parked 的背景+文字共用 node_id 问题即此机制）。此处用独立合成 id 规避。
+// 漏检。此处用独立合成 id 规避。
 //
 // 这些 mesh 是逐帧重算的动态反馈（光标闪烁、选区随拖拽变），绝不能与静态背景/文字
 // 合批——否则（1）光标闪烁会连累背景每帧重传；（2）cursor 与 composition 变化节奏
@@ -825,10 +824,10 @@ const TF_COMPOSITION_SYNTH_BYTE: u32 = 34;
 /// 两类节点复用：
 /// - 文本控件（TextField/TextArea/NumberField）：先 push 背景框 mesh（真 node_id），
 ///   再 push 文字 mesh；
-/// - rich-text-block 容器（design §8）：先 push 背景 mesh（真 node_id），再 push
+/// - rich-text-block 容器：先 push 背景 mesh（真 node_id），再 push
 ///   多 run 文字 mesh。
 /// 若文字也用真 node_id，则 C# MirrorPool 按 node_id 唯一索引 GO 时第二个 mesh 覆盖
-/// 第一个 → 渲染残缺/不可见（settings showcase 的 spinbutton “无法渲染” 根因）。
+/// 第一个 → 渲染残缺/不可见。
 /// 文字 mesh 改用此合成 id 与背景区分，C# 各自独立 GO；primary 关联仍 = 真节点 id
 ///（text_sub_primary_id 可还原），供 sort_key 传播与调试反查。选 35：与子页 1..=15、
 /// box-shadow synth 区间（36..=47）、retired 232..=255 均不撞（同 32..=34 安全区间）。
@@ -880,7 +879,7 @@ fn shadow_sigma(blur: f32) -> f32 {
 ///
 /// assign_sort_keys 按 scene 树 DFS 赋 mask_context，synth 节点（high-byte 假 id）不在
 /// scene 树 → 默认 0（不裁）。本 post-pass 按 synth node_id 的 low-24 位找 primary，拷其
-/// mask_context，使 shadow 在 overflow 容器内被正确裁剪（spec §4.6：shadow 继承主节点
+/// mask_context，使 shadow 在 overflow 容器内被正确裁剪（shadow 继承主节点
 /// mask_context，outer/inset 同传播）。
 fn propagate_shadow_mask_context(nodes: &mut [RenderNode]) {
     // 无 shadow synth 节点时早退：绝大多数 UI 帧无 box-shadow，避免每帧分配 HashMap。
@@ -1122,7 +1121,7 @@ fn propagate_text_sub_page_sort_keys(
 /// 把 taffy `LengthPercentage` 解析为 px。
 ///
 /// - `Length(v)` → v。
-/// - `Percent(_)` → 0.0。**已知缺口**（记 ledger）：渲染阶段无父 content-box 宽度上下文，
+/// - `Percent(_)` → 0.0。**已知缺口**：渲染阶段无父 content-box 宽度上下文，
 ///   无法解析百分比的 padding/border。`style::mapping::parse_four` 对 padding/border
 ///   只产 `Length`（裸数字/px），故实际不会命中 Percent 分支；若未来 CSS 允许百分比
 ///   padding/border，需在 layout 阶段把解析结果写回 ResolvedStyle。
@@ -1356,7 +1355,7 @@ fn build_text_mesh(
                     }
                 }
             }
-            // 装饰线（v1.8：underline/line-through/overline + solid/dashed/dotted/double + 独立色/粗细）。
+            // 装饰线（underline/line-through/overline + solid/dashed/dotted/double + 独立色/粗细）。
             // 纯色 quad，用 atlas 唯一白像素 × per-vertex color = run 色。
             if run.deco.lines.0 != 0 {
                 if let Some(x0) = run_x_start {
@@ -1760,7 +1759,7 @@ fn push_solid_mesh(
     });
 }
 
-/// 节点是否被折进某个 rich-text-block 祖先的 inline flow（T6 折叠、T7 渲进父 mesh）。
+/// 节点是否被折进某个 rich-text-block 祖先的 inline flow。
 ///
 /// rich-text-block 容器的 inline 子树（TextNode / TextElement(span) / Image，span 可嵌套）
 /// 在 solve 期不进 taffy（layout_rect 保持默认 0），在 render 期不独立画——整段折进父
@@ -1781,7 +1780,7 @@ fn is_folded_into_rich_text(scene: &Scene, mut id: NodeId) -> bool {
 /// 渲染单个 Scene 节点为一个或多个 RenderNode 并推入 `nodes`（共享于主 DFS 与 open popup
 /// 末尾追加 DFS）。
 ///
-/// 复用入口——主 DFS 与 [`build_render_nodes`] 末尾的 popup 浮层追加（Task 11）都走此函数，
+/// 复用入口——主 DFS 与 [`build_render_nodes`] 末尾的 popup 浮层追加都走此函数，
 /// 保证 popup 子树节点与正常节点产出几何一致的 RenderNode（背景/文本/图/边框/box-shadow
 /// 完全同一路径）。两者区别仅在 `register_id_map`：
 /// - 主 DFS（register=true）：登记 `id_to_pos` 供 `assign_sort_keys` / NativeHost FFI 查询；
@@ -1840,7 +1839,7 @@ fn render_one_node(
         // - Dropdown/OptionItem：combobox 外壳 / 选项列表项
         // - Toggle/RadioButton：空 div，勾选样式靠自身 [role]/[aria-checked] 的 background
         // - Slider/ProgressBar：轨道 / 底色（fill/thumb 子节点另自渲染）
-        // pivot 后控件视觉子结构由作者按 role/data-slot 自写（§2.3，core 不注入），
+        // pivot 后控件视觉子结构由作者按 role/data-slot 自写（core 不注入），
         // 这些控件自身必须画 background（否则空 div 形态的 Toggle/Radio 完全不可见）。
         // 文字由各自的 TextNode 子节点画，本臂不叠加文字。
         k if k.is_container()
@@ -1859,7 +1858,7 @@ fn render_one_node(
             // 查询），文字用 TF_TEXT_SYNTH_BYTE 合成 id 区分（C# MirrorPool 按 node_id
             // keying 独立 GO，不与背景互盖）。inline 子不在此递归（render 是平铺遍历），
             // 由主循环 is_folded_into_rich_text 跳过——它们已在 solve 期折进父的单段
-            // inline flow（T6），此处画进父 mesh 即它们的全部视觉。design §8。
+            // inline flow，此处画进父 mesh 即它们的全部视觉。
             if n.rich_text_block {
                 let bg = build_container_mesh(
                     n,
@@ -1878,8 +1877,8 @@ fn render_one_node(
                 if register_id_map {
                     id_to_pos.insert(n.id, nodes.len() - 1);
                 }
-                // 读 solve 期存的 TextLayout（T6 填）；缺则现编译 runs + measure_rich_text
-                // 兜底（post-T6 罕见，同 TextNode arm 的 measure_text 兜底防御）。
+                // 读 solve 期存的 TextLayout；缺则现编译 runs + measure_rich_text
+                // 兜底（罕见，同 TextNode arm 的 measure_text 兜底防御）。
                 let s = &n.style;
                 let stack = fonts.stack_for(s.font_family.as_deref());
                 let off_left =
@@ -2182,10 +2181,9 @@ fn render_one_node(
             if off_left != 0.0 || off_top != 0.0 {
                 bake_content_offset(&mut layout, off_left, off_top);
             }
-            // ── 编辑反馈 mesh：选区背景 / composition 下划线 / 光标 ──
             // 几何用上面烤过 content offset 的 `layout`；坐标与世界文字字形同系
             // （rect.xy + 局部）。各 mesh 用独立合成 node_id，避免与背景/文字 mesh 在
-            // dirty hash 表碰撞（Task 4 parked 的同 id 问题）。
+            // dirty hash 表碰撞。
             //
             // push 顺序 = 绘制层序（sort_key 升序，后绘者在上层）：选区 → 文字 →
             // composition → 光标。选区先于文字 push = 落在文字之下（标准编辑器行为：
@@ -2303,7 +2301,7 @@ fn render_one_node(
                         crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, comp_start);
                     let (xe, lie) =
                         crate::scene::text_cursor::cursor_pixel_x(&layout, &ranges, comp_end);
-                    let ul_color = text_color; // 缺省下划线色 = 文字色（Task 15 可换）
+                    let ul_color = text_color; // 缺省下划线色 = 文字色
                     let mut verts = Vec::new();
                     let mut uvs = Vec::new();
                     let mut colors = Vec::new();

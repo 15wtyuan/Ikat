@@ -1,4 +1,4 @@
-//! Spec-4b P3.4 诊断：编码机复现 Unity PlayMode 的 core solve，定位视觉 bug 根因层。
+//! 诊断：编码机复现 Unity PlayMode 的 core solve，定位视觉 bug 根因层。
 //!
 //! dump 所有节点 layout_rect + img css size + text metrics，对照用户报告的 5 个视觉问题：
 //!   问题1: header 没顶最上面 + 间距拉大（card-1 Unity 报 Y=317，期望 ~118）

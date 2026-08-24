@@ -56,7 +56,6 @@ pub fn dump_scene_json(scene: &Scene) -> String {
         if i > 0 {
             s.push(',');
         }
-        // kind_str 用 String（RichText 需动态格式化 runs 数 + 首段摘要）。
         let (tag, kind_str): (&'static str, String) = match n.kind {
             NodeKind::Container => ("div", "Container".into()),
             NodeKind::TextNode => ("span", "TextNode".into()),
@@ -77,8 +76,6 @@ pub fn dump_scene_json(scene: &Scene) -> String {
             NodeKind::Slot => ("slot", "Slot".into()),
             NodeKind::CustomElement => ("div", "CustomElement".into()),
             NodeKind::Template => ("template", "Template".into()),
-            // role 驱动控件：逆映射 tag 同 kind_tag（TabList→div、Tab→button），
-            // kind_str 用变体名（诊断可读）。
             NodeKind::TabList => ("div", "TabList".into()),
             NodeKind::Tab => ("button", "Tab".into()),
         };
@@ -97,7 +94,6 @@ pub fn dump_scene_json(scene: &Scene) -> String {
             &crate::transform::IDENTITY
         };
         // 诊断：附 anim.transform 是否 Some + opacity 值，定位 tween 是否真写进 anim。
-        // AnimTable.0 是 HashMap<NodeId, NodeAnim>，经 get(NodeId) 读（is_empty 过滤）。
         let (anim_tr, anim_op) = match scene.anim.get(n.id) {
             Some(a) => (a.transform.is_some(), a.opacity),
             None => (false, None),
@@ -108,8 +104,7 @@ pub fn dump_scene_json(scene: &Scene) -> String {
         s.push_str(&format!(
             r#"{{"node_id":{},"parent":{},"tag":"{}","id":"{}","classes":"{}","kind":"{}","layout":{{"x":{},"y":{},"w":{},"h":{}}},"world_matrix":[{},{},{},{},{},{}],"anim_tr":{},"anim_op":{},"visible":{}}}"#,
             n.id.0, n.parent.map(|p| p.0.to_string()).unwrap_or("-1".into()),
-            // CustomElement：tag 用 custom_tag 字面值（rect-diff 与浏览器侧 hyphen 原文配对；
-            // normalize-dump-scene KIND_TAG 同口径），无字面值退逆映射。
+            // CustomElement：tag 用 custom_tag 字面值（rect-diff 与浏览器侧 hyphen 原文配对），无字面值退逆映射。
             match n.kind {
                 NodeKind::CustomElement => {
                     json_escape(n.custom_tag.as_deref().unwrap_or(tag))

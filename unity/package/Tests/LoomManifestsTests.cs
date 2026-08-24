@@ -13,8 +13,6 @@ namespace LoomGUI.Tests
     /// </summary>
     public class LoomManifestsTests
     {
-        // ── RuntimeManifest ──────────────────────────────────────────────────
-
         [Test]
         public void ParseRuntime_Basic()
         {
@@ -112,8 +110,6 @@ namespace LoomGUI.Tests
             Assert.AreEqual(0, m.fonts.Count);
         }
 
-        // ── AtlasManifest ────────────────────────────────────────────────────
-
         [Test]
         public void ParseAtlas_SingleSprite()
         {
@@ -192,7 +188,6 @@ namespace LoomGUI.Tests
         [Test]
         public void ParseAtlas_SpritesKeyWithNestedPath()
         {
-            // sprite keys are workspace-relative paths with slashes.
             var json = @"
 {
     ""pages"": [""ui.png""],
@@ -213,8 +208,6 @@ namespace LoomGUI.Tests
             Assert.AreEqual(100, e.orig[0]);
             Assert.AreEqual(50, e.orig[1]);
         }
-
-        // ── Error cases ──────────────────────────────────────────────────────
 
         [Test]
         public void ParseRuntime_EmptyJson_Throws()

@@ -4,7 +4,7 @@
 //! LoomGUI 运行时只在一种上下文里实现浏览器式 inline flow：**rich-text-block**——
 //! `display:block` 容器且其直接子**全是 inline 级**（text / span(TextElement) / img(Image)）。
 //! 此分类记进 `ParsedTemplate.rich_text_blocks`，packer bridge 据此烘 flag，runtime 把这些
-//! inline 子拍平成 `RichRun` 走 `measure_rich_text`（见 main-design 文本模型）。
+//! inline 子拍平成 `RichRun` 走 `measure_rich_text`。
 //!
 //! 若 block 容器的直接子**既有 inline 级又有 block 级**（如 `<div><span>x</span><div>y</div></div>`），
 //! inline flow 不可定义（一部分要横排流、一部分要撑满竖排，同一 formatting context 无解）→
@@ -106,7 +106,7 @@ fn is_block_container(
     if matches!(el.semantic, Some(SemanticKind::TextElement)) {
         return !span_declares_flex(el, single_compound_flex_rules, has_multi_compound_flex_rule);
     }
-    // CustomElement host：light 子在打包期被投影进组件 slot（component-system spec），
+    // CustomElement host：light 子在打包期被投影进组件 slot，
     // host 最终子树来自组件模板——页面文件里的 light 子混排不是 inline-flow 上下文。
     if matches!(el.semantic, Some(SemanticKind::CustomElement)) {
         return false;
@@ -403,7 +403,7 @@ mod tests {
 
     /// 显式 flex 的 span 在父分类里算 block 子（浏览器 display:flex 外层块级）：
     /// 父容器不再因此被标 rich-text-block——否则 slot 投影进 span 的块级内容会被
-    /// 整棵折进父的 inline 流（issue #2：tip 行"堆一起"/div 行隐身）。
+    /// 整棵折进父的 inline 流（tip 行"堆一起"/div 行隐身）。
     #[test]
     fn explicit_flex_span_is_block_child() {
         // 纯 flex-span 子（+装饰空白）→ 父不标 rich、不报 mixed：span 是块级 flex 容器。

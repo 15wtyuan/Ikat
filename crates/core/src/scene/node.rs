@@ -19,7 +19,7 @@ bitflags::bitflags! {
         const FOCUSED  = 1 << 2;
         const DISABLED = 1 << 3;
         const CASCALED = 1 << 4;
-        /// **仅** CSS scoped 规则隔离（Shadow DOM 风格，main-design §5.4）：模板实例化根 /
+        /// **仅** CSS scoped 规则隔离（Shadow DOM 风格）：模板实例化根 /
         /// 文档根打此位。rematch 的 scope 校验 + 后代选择器边界停止都读此位。与 `Get<T>`
         /// 查找边界无关（改读 `LOOKUP_SCOPE`）。
         const SCOPE_ROOT = 1 << 5;
@@ -48,17 +48,18 @@ pub struct NodeInteraction {
 
 /// 不透明节点句柄。对外 u32（FFI/C# 透明），内部 = 高 20 bit index + 低 12 bit generation。
 /// sentinel 0xFFFF_FFFF = INVALID。index 用于并行数组（anim/scroll/world_transforms）索引，
-/// gen 由 slotmap 校验悬空。详见动态树 spec §3。
+/// gen 由 slotmap 校验悬空。
 ///
-/// **与 slotmap 的衔接**（spec §3.2 实现期校准结果）：
+/// **与 slotmap 的衔接**：
 /// slotmap 1.1.1 的 `new_key_type!` 生成的 Key 内部是 `KeyData { idx: u32, version: NonZeroU32 }`
 /// （两字段均私有，仅 `as_ffi()/from_ffi()` 公开），其完整编码是 64 bit，**无法无损装入 u32**。
-/// 而 FFI/C#/FrameBlob/`.pkg.bin` 全程硬约定 `node_id: u32` + sentinel `0xFFFF_FFFF`（spec §3.3、§7）。
+/// 而 FFI/C#/FrameBlob/`.pkg.bin` 全程硬约定 `node_id: u32` + sentinel `0xFFFF_FFFF`。
 /// 故不采用 `new_key_type!` 重定义 NodeId，而是保留 `NodeId(pub u32)`（应用层句柄），scene.nodes 用
 /// `SlotMap<DefaultKey, Node>`，由 `Scene::key_for(NodeId)` 经 `KeyData::from_ffi` 桥接到 DefaultKey。
 ///
 /// 位宽 20/12：index 20 bit（~100 万节点上限）+ generation 12 bit（4096 代，slotmap version ≤ 4095
-/// 时无损；超过时 `key_for` 重构的 KeyData version 截断 → slotmap.get 安全返 None，符合 spec "4096 代足够"）。
+/// 时无损；超过时 `key_for` 重构的 KeyData version 截断 → slotmap.get 安全返 None，符合
+/// 「4096 代足够」的容量取舍）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub u32);
 
@@ -84,7 +85,7 @@ impl NodeId {
     /// 「幽灵死节点」（节点 id 字段是回卷值，与槽位真实版本不符，get(id) 永久 miss）。
     /// 超限时显式 panic（非 debug_assert——release 也要炸，静默数据腐坏比崩溃更糟）。
     /// 高频改写文本须走 TextNode.Text 就地 set_text（C# TextContent 快路径），
-    /// 勿每帧清子重建烧 generation；根治需 NodeId 拓宽 u64 ABI（roadmap）。
+    /// 勿每帧清子重建烧 generation；根治方向是 NodeId 拓宽 u64 ABI。
     pub fn from_key(k: DefaultKey) -> NodeId {
         let ffi = k.data().as_ffi();
         let idx = (ffi & 0xFFFF_FFFF) as u32;
@@ -503,8 +504,8 @@ pub enum ControlState {
         step: f32,
     },
     /// WAI-ARIA `role="tablist"`。selected_index=当前激活 tab 序号（aria-selected 不存储于
-    /// 各 Tab 子节点，由 synth_aria_value 从父 selected_index 派生，见 T5）。无 value_lock
-    /// （aria-selected 是只读合成，无回写环——区别于 Dropdown）。panel 显隐由 T6 据
+    /// 各 Tab 子节点，由 synth_aria_value 从父 selected_index 派生）。无 value_lock
+    /// （aria-selected 是只读合成，无回写环——区别于 Dropdown）。panel 显隐据
     /// RoleInfo.aria_controls 解析 panel id 后切换，不在此枚举存 panel_ids。
     TabList {
         selected_index: usize,
@@ -560,7 +561,7 @@ pub struct RoleInfo {
     pub slots: std::collections::HashMap<String, String>,
     /// WAI-ARIA `aria-controls`（TabList tab→panel 跨树关联的 panel id 字符串）。
     /// None = 非关联节点。instantiate 从 TemplateNode.aria_controls 拷入；sync_control_visuals
-    /// （T6）据此 find_node_by_id 解析 panel 切换显隐。
+    /// 据此 find_node_by_id 解析 panel 切换显隐。
     pub aria_controls: Option<String>,
 }
 
@@ -618,7 +619,6 @@ pub struct Scene {
     pub free_log: std::collections::VecDeque<(NodeId, u64)>,
     /// 释放单调序号（free_log 配套）。
     pub free_seq: u64,
-    /// 节点存储。Vec<Node> → SlotMap<DefaultKey, Node>（动态树 spec §4.1）。
     /// 应用层用 NodeId(u32) 句柄（FFI/C# 透明），经 `Scene::key_for`/`NodeId::to_key` 桥接到 DefaultKey。
     ///
     /// **节点生命周期与下方全部 per-node side table 的联动收口在
@@ -662,7 +662,7 @@ pub struct Scene {
     /// 重测，短文本因 intrinsic 亚像素超 available 误判换行。故 render 复用 layout 结果，不重测。
     pub text_layouts: Vec<Option<crate::text::layout::TextLayout>>,
     /// 跨帧 measure_text memo（每节点两槽 intrinsic/constrained，带 fingerprint）。
-    /// solve 闭包命中 fingerprint → 复用 TextLayout 跳过 shaping（解坑 186 低帧）。详见
+    /// solve 闭包命中 fingerprint → 复用 TextLayout 跳过 shaping。详见
     /// text::layout::TextMeasureCache。render 不读此（读 text_layouts render 槽）。
     pub text_measure_cache: Vec<Option<crate::text::layout::TextMeasureCache>>,
     /// TextNode content (only TextNode nodes have entries).
@@ -670,18 +670,18 @@ pub struct Scene {
     /// Image src paths (only Image nodes have entries).
     pub image_srcs: std::collections::HashMap<NodeId, String>,
     /// 本帧 transition 请求（rematch 检测 data-page 通道变化时推入；Stage tick drain 后
-    /// kill 旧 tween + 提交新 tween，见 Phase E）。运行时态，不进 pkg。
+    /// kill 旧 tween + 提交新 tween）。运行时态，不进 pkg。
     pub pending_transitions: Vec<crate::tween::TransitionRequest>,
-    /// 全局 @keyframes 查找表（CSS `@keyframes` 全局语义，spec §3.5）。instantiate 时
+    /// 全局 @keyframes 查找表（CSS `@keyframes` 全局语义）。instantiate 时
     /// 组件 keyframes 合并进来（同名后实例化覆盖）；KeyframePlayer 按 `AnimationSpec.name`
     /// 查此表。运行时态，不进 pkg（pkg 按组件存于 ComponentTemplate.keyframes）。
     pub keyframes: std::collections::HashMap<String, crate::scene::animation::KeyframesRule>,
     /// 活跃 @keyframes player（slotmap 稳定 Key = 未来 C# Animation 句柄）。
-    /// 运行时态，不进 pkg。M2.5 池化时再优化（spec §4.3）。
+    /// 运行时态，不进 pkg（池化优化暂缓）。
     pub players:
         SlotMap<crate::scene::animation::PlayerKey, crate::scene::animation::KeyframePlayer>,
-    /// 事件字符串表（动画事件 name/hook_name payload，spec §7.5）。持久 intern：索引跨
-    /// tick 稳定，装 EventRecord 的 24-bit 槽（click_count+pad），C# demux（T11）按索引
+    /// 事件字符串表（动画事件 name/hook_name payload）。持久 intern：索引跨
+    /// tick 稳定，装 EventRecord 的 24-bit 槽（click_count+pad），C# demux 按索引
     /// 读回字符串。运行时态，不进 pkg。
     pub event_strs: crate::event::EventStrTable,
 }
@@ -796,8 +796,8 @@ impl Scene {
         ) in entries.iter()
         {
             let node = Node {
-                id: NodeId::INVALID, // 临时，insert 后回填
-                parent: None,        // 下一轮填
+                id: NodeId::INVALID,
+                parent: None,
                 kind: *kind,
                 style: style.clone(),
                 base_style: style.clone(),
@@ -830,7 +830,7 @@ impl Scene {
             };
             let key = scene.nodes.insert(node);
             let id = NodeId::from_key(key);
-            scene.nodes.get_mut(key).unwrap().id = id; // 回填
+            scene.nodes.get_mut(key).unwrap().id = id;
             scene.alloc_node_slot(id, *kind);
             ids.push(id);
             if let Some(c) = content {
@@ -840,7 +840,7 @@ impl Scene {
                 scene.image_srcs.insert(id, src.clone());
             }
         }
-        // 接 parent/children/roots（用 ids 映射 entries 下标 → NodeId）
+        // 接 parent/children/roots
         for (i, (parent_idx, _, _, _, _, _, _, _, _, _)) in entries.iter().enumerate() {
             match parent_idx {
                 Some(p) => {
@@ -878,7 +878,6 @@ impl Scene {
             scene.nodes.get_mut(ck).unwrap().parent = Some(pid);
             scene.nodes.get_mut(pk).unwrap().children.push(cid);
         }
-        // roots = 无 parent 的（按 ids 插入序）
         for &id in &ids {
             if scene.nodes.get(id.to_key()).unwrap().parent.is_none() {
                 scene.roots.push(id);
@@ -985,9 +984,9 @@ impl Scene {
     /// 一致——在元素上调 query 只查后代不含自身。纯结构遍历，不检查 display:none。
     /// 供 FFI 子树作用域 id 查找，替代"全局首匹配 + 父链后过滤"。
     ///
-    /// **L3 查找边界**：遇 `LOOKUP_SCOPE` 子节点（组件展开域 host / ListView slot 根）
+    /// **查找边界**：遇 `LOOKUP_SCOPE` 子节点（组件展开域 host / ListView slot 根）
     /// 检查其自身 id 后**不再下钻**——嵌套作用域内部 id 只归该作用域自己的 Get 查找
-    /// （main-design §4.3「不穿透嵌套组件边界」）。作用域根自身仍可被外层命中（同
+    /// （不穿透嵌套组件边界）。作用域根自身仍可被外层命中（同
     /// Shadow DOM：host 元素在 light tree，shadow 内部不在）。
     pub fn find_node_by_id_in_subtree(&self, root: NodeId, id: &str) -> Option<NodeId> {
         let node = self.get(root)?;
@@ -997,7 +996,7 @@ impl Scene {
             if n.id_attr.as_deref() == Some(id) {
                 return Some(nid);
             }
-            // L3 边界剪枝：查找边界子节点的内部 id 不可见，跳过其子树。
+            // 查找边界剪枝：边界子节点的内部 id 不可见，跳过其子树。
             if !n.interaction.flags.contains(NodeFlags::LOOKUP_SCOPE) {
                 stack.extend(n.children.iter().rev());
             }
@@ -1135,7 +1134,7 @@ mod repr_tests {
 
     #[test]
     fn tablist_tab_kind_roundtrip_and_container() {
-        // T3：TabList=19、Tab=20 追加到 enum 末尾，判别值稳定（pkg 版本门保跨版本）。
+        // TabList=19、Tab=20 追加到 enum 末尾，判别值稳定（pkg 版本门保跨版本）。
         assert_eq!(NodeKind::TabList as u8, 19);
         assert_eq!(NodeKind::Tab as u8, 20);
         assert_eq!(NodeKind::from_u8(19), Some(NodeKind::TabList));

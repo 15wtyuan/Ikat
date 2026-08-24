@@ -190,7 +190,7 @@ mod tests {
     use super::*;
     use crate::pipeline::parse_template;
 
-    /// tip-stem 场景（Tripawd N22 实录）：规则写进 tip-panel 组件、元素在页面
+    /// tip-stem 场景：规则写进 tip-panel 组件、元素在页面
     /// host 外区域 → 死规则警告。
     #[test]
     fn page_scope_rule_in_component_warns() {

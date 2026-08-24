@@ -75,7 +75,6 @@ fn main() {
             .get(ls.head_spacer)
             .map(|n| n.layout_rect.h)
             .unwrap_or(-1.0);
-        // active slots world Y
         let mut active_ys: Vec<(usize, f32)> = ls
             .slots
             .iter()

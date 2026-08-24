@@ -78,9 +78,6 @@ pub fn check_consistency(
             continue;
         };
 
-        // W1: border-width 有（任一边 > 0）且 border-style == None（CSS initial）。
-        // CSS 规范：border-style:none = 不画边框。浏览器预览看不到边框；LoomGUI 默认实现
-        // 会画 → 预览和运行时行为不一致。提醒作者显式声明 border-style。
         if has_border_width(s) && s.border_style == BorderStyle::None {
             diags.push(Diagnostic::warning(
                 DiagnosticCode::FenceBorderWithoutStyle,
@@ -94,8 +91,6 @@ pub fn check_consistency(
             ));
         }
 
-        // W2: background-image 有但 background-size 缺省。CSS 默认 auto（原始尺寸），
-        // LoomGUI 默认 stretch（拉伸填满）→ 预览和运行时尺寸不同。提醒显式声明 background-size。
         if has_background_image(s) && is_default_bg_size(s) {
             diags.push(Diagnostic::warning(
                 DiagnosticCode::FenceBgImageWithoutSize,
@@ -128,8 +123,6 @@ mod tests {
             .iter()
             .any(|d| d.code == code && d.severity == Severity::Warning)
     }
-
-    // ---- W1: border-width without border-style ----
 
     /// border-width 单独声明（border-style 缺省）→ W1 warning。
     #[test]
@@ -178,8 +171,6 @@ mod tests {
             r.diagnostics
         );
     }
-
-    // ---- W2: background-image without background-size ----
 
     /// background-image 单独声明（background-size 缺省）→ W2 warning。
     #[test]

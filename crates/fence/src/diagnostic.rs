@@ -21,7 +21,6 @@ pub enum DiagnosticCode {
     /// LoomGUI 没有 flex 之外的 inline flow：inline 标签在 block 上下文里被当 block-level
     /// （撑满父宽 + 竖排），和浏览器的 inline 行为（按内容收缩 + 横排流）不一致 → 渲染不可预测。
     /// 强制作者把 inline 元素放进 flex 容器，让布局意图显式。
-    /// 详见 fence.md「inline 元素布局上下文」。
     FenceInlineElementInBlockContext,
     /// block 容器（display:block，非 flex）的直接子既有 inline 级（text/span/img）又有 block 级
     /// （div/控件/template）。
@@ -29,38 +28,33 @@ pub enum DiagnosticCode {
     /// 混入 block 子会让 inline flow 不可定义（一部分要横排流、一部分要撑满竖排，同一 formatting
     /// context 里无解）。属「fail-loud 不静默降级」原则——作者须显式选边：要么 inline 子全裹进
     /// 一个子 div（让外层变全 block），要么把容器改 display:flex（让所有子变 flex item）。
-    /// 详见 fence.md「rich-text-block 分类（阶段 6.4）」。
     FenceMixedInlineBlock,
     /// `<slot>` 位于无显式 `display:flex` 的 span（TextElement）内。
     /// 投影进该 slot 的 light 子落在 inline 上下文：块级子被折进 rich inline 流
     /// （挤成一行/隐身）或按 flex-row hack 横排，无法按自身 display 参与宿主布局
     /// （浏览器里 slotted 节点在 slot 位置正常参与布局）。slot 须放在 div 或
     /// 显式 flex 的 span 里。
-    /// 详见 fence.md「rich-text-block 分类（阶段 6.4）」。
     FenceSlotInInlineContext,
     /// border-width 已声明但 border-style 缺省（CSS initial=none）。
     /// 浏览器按 CSS 规范不画边框，而 LoomGUI 历史实现会画 → 预览 ≠ 运行时。
-    /// 详见 fence.md「围栏内一致性 warning」。
     FenceBorderWithoutStyle,
     /// background-image 已声明但 background-size 缺省。
     /// CSS 默认 `auto`（原始尺寸），LoomGUI 默认 `stretch`（拉伸填满）→ 预览 ≠ 运行时。
-    /// 详见 fence.md「围栏内一致性 warning」。
     FenceBgImageWithoutSize,
     /// LoomGUI 控件（role 驱动：`role="progressbar"`/`role="slider"`/...）无任何 CSS 规则命中。
     /// 控件不带 UA 默认样式（core 保持纯净，不开「框架自带样式源」先例），
     /// 未命中 = 运行时渲染空白。强制作者为控件及其内部 slot 子节点提供 CSS。
-    /// 详见 fence.md「控件 CSS 命中校验」。
     FenceControlWithoutCss,
     /// 控件结构 CSS 契约缺失：运行时行为依赖的结构声明（如 combobox 的
     /// `position:relative` 锚点 + listbox `position:absolute` 脱流）未声明。
     /// 与「无命中」互补——命中只证明在样式，不证明结构齐全；缺失症状在
     /// PlayMode 才可见（弹层撑开容器/定位飞出）。表驱动（control_css_check
-    /// `STRUCTURE_CSS_CONTRACTS`），详见 fence.md「控件 CSS 命中校验」。
+    /// `STRUCTURE_CSS_CONTRACTS`）。
     FenceControlStructureCss,
     /// role 驱动控件缺少 spec §2.2 规定的必需子角色/slot（如 `combobox` 缺
     /// `role=listbox` 子、`slider` 缺 `data-slot=thumb` 子）。旧模式下框架运行时
     /// 注入 `.loom-*` 子节点故结构必然完整；新模式由作者自写结构，可能漏写——
-    /// 打包期严格拦截，不依赖运行时 reparent 兜底。详见 fence.md「控件结构契约」。
+    /// 打包期严格拦截，不依赖运行时 reparent 兜底。
     FenceMissingControlChild,
     /// `role` 属性值不在 role 注册表内（通常是拼错，如 `role="silder"`）。
     /// role 在 LoomGUI 是控件类型系统本身：未知值若静默回退成基础标签类型，

@@ -75,14 +75,12 @@ namespace LoomGUI.Tests
             Assert.That(blob.IsValid, Is.True, "v12 blob IsValid");
             Assert.That(blob.NodeCount, Is.EqualTo(5), "3 active + 2 parked = 5");
 
-            // 前 3 条：Visible=true, Parked=false
             for (int i = 0; i < 3; i++)
             {
                 Assert.That(blob.Visible(i), Is.True,  $"active[{i}].Visible=true");
                 Assert.That(blob.Parked(i),  Is.False, $"active[{i}].Parked=false");
             }
 
-            // 后 2 条：Visible=false, Parked=true
             for (int i = 3; i < 5; i++)
             {
                 Assert.That(blob.Visible(i), Is.False, $"parked[{i}].Visible=false");

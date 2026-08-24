@@ -1,7 +1,7 @@
-//! Custom Element 打包期展开（component-system spec §2）：
+//! Custom Element 打包期展开：
 //!
-//! - **注册表 = Package 注册表**（main-design §7.4「Package 注册表承担 customElements.define()
-//!   的角色」）：每个 package dir 下 `components/` 子目录的 `*.html` 即组件，文件名 = 标签名
+//! - **注册表 = Package 注册表**（「Package 注册表承担 customElements.define() 的角色」）：
+//!   每个 package dir 下 `components/` 子目录的 `*.html` 即组件，文件名 = 标签名
 //!   （必须含连字符）。未注册 hyphen 标签 / 无效 slot / 页面裸 `<slot>` / 展开环 → 打包错误。
 //! - **展开形状**：host 节点 kind=CustomElement（保留 `custom_tag` 字面量 + `component_scope`
 //!   位），组件模板根成为 host 第一个子。host 在页面作用域；内部归展开域（硬墙）。
@@ -10,7 +10,7 @@
 //!   产物中不再有 NodeKind::Slot 节点——slot 是编译期糖。
 //! - **作用域规则**：每展开实例一条 (host idx, 组件动态规则) 锚定记录，随 pkg v35 的
 //!   PerComponentScopes 段走，instantiate 时按 scope_root=host 包装（Shadow DOM 隔离）。
-//! - **投影内容归组件作用域**（spec §2.5 硬墙取舍）：light 子的 CSS/查找/id 都进展开域；
+//! - **投影内容归组件作用域**（硬墙取舍）：light 子的 CSS/查找/id 都进展开域；
 //!   同一展开域内 light 子 id 与组件模板 id 撞车 → 打包错误。
 
 use crate::bridge::{
@@ -269,7 +269,7 @@ struct Walker<'a> {
 }
 
 /// 带组件注册表的 bridge：页面树 + 展开（host/投影/锚定规则）。
-/// 页面级 `<slot>` 在此报错（slot 语义只在组件模板内成立，spec §2.4）。
+/// 页面级 `<slot>` 在此报错（slot 语义只在组件模板内成立）。
 pub fn bridge_with_components(
     parsed: &ParsedTemplate,
     html_rel: &str,
@@ -361,7 +361,7 @@ impl<'a> Walker<'a> {
         host_rel: &str,
         assignment: &mut SlotAssignment,
     ) -> Result<(), String> {
-        // 组件模板根挂 host 下（host 第一个子；spec §2.3 展开形状）。
+        // 组件模板根挂 host 下（host 第一个子）。
         let root = comp.tree.roots[0];
         self.walk_component_node(
             comp,
@@ -534,8 +534,8 @@ impl<'a> Walker<'a> {
         }
 
         // 展开域锚定规则 + 组件动画合并（名字冲突由调用方裁决）。
-        // 组件 <style> 规则里的 bg-image url 按**组件文件** page_rel 归一（坑 203：
-        // class 规则 bg-image 走 dynamic_rules，runtime rematch 用原始值重放）。
+        // 组件 <style> 规则里的 bg-image url 按**组件文件** page_rel 归一（class
+        // 规则 bg-image 走 dynamic_rules，runtime rematch 用原始值重放）。
         let mut comp_rules = def.dynamic_rules.clone();
         crate::build::normalize_bg_rules(&mut comp_rules, page_rel, &mut self.bg_refs);
         self.scopes.push((host_idx, comp_rules));
@@ -577,7 +577,7 @@ impl<'a> Walker<'a> {
             unreachable!("emit_element on non-element");
         };
         let kind = map_semantic(el)?;
-        // id 入活跃展开帧（light 子 × 组件模板撞车检查，spec §2.5）。
+        // id 入活跃展开帧（light 子 × 组件模板撞车检查）。
         if in_scope_frame {
             if let Some(id) = attr(el, "id") {
                 if let Some(frame) = self.id_frames.last_mut() {
@@ -599,7 +599,7 @@ impl<'a> Walker<'a> {
         let mut style = parsed.styles.get(ir_idx).cloned().unwrap_or_default();
         // inline bg-image 按**本文件** html_rel 归一（与 src 同位）——base_style 烘的是
         // 文件相对路径（../res/...），runtime SpriteResolver key 是 workspace 相对
-        // （res/...），未归一会 miss → 白纹理（坑 203）。
+        // （res/...），未归一会 miss → 白纹理。
         if let Some(bg) = style.background_image.take() {
             style.background_image = Some(crate::build::normalize_bg_ref(
                 html_rel,
@@ -1201,7 +1201,7 @@ mod tests {
         assert!(entries.iter().any(|e| e.scope_root == host));
     }
 
-    /// E2E（issue #2）：显式 flex 的 span 宿主 + slot 投影行 → 行元素以自身 display
+    /// E2E：显式 flex 的 span 宿主 + slot 投影行 → 行元素以自身 display
     /// 参与宿主布局（flex column 下各占一行），不被折进祖先 rich inline 流。
     /// 修前：外层 div 把 flex-span 当 inline 子标 rich-text-block，投影行整棵折进
     /// 一行 inline 流（"堆一起"），div 行更被防御性跳过而隐身。

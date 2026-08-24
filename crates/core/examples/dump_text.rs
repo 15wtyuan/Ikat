@@ -9,7 +9,6 @@ use loomgui_core::text::atlas::{GlyphAtlas, GlyphKey};
 use loomgui_core::text::layout::{Font, FontTable};
 
 fn main() {
-    // ── v1.6：GlyphAtlas 独立验证（不依赖 pkg.bin）──
     // 直接用测试字体文件构造 Font，独立 exercise atlas API，确保 atlas 模块自身健康。
     let font_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -123,7 +122,6 @@ fn main() {
 
     println!("─── GlyphAtlas 验证通过 ───\n");
 
-    // ── 原有文本 dump（依赖 pkg.bin）──
     run_text_dump(font_path);
 }
 

@@ -1,4 +1,4 @@
-//! IrTree → core TemplateNode 桥（生产级，替代 fence/tests/cascade_spike.rs 的 throwaway mini-bridge）。
+//! IrTree → core TemplateNode 桥。
 //! fence parse_template 停在 IrTree；本模块是第一处把 IrTree 翻译成 core 打包结构的代码。
 
 use loomgui_core::asset::{ControlInit, EditInit, TemplateNode};
@@ -110,7 +110,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
 
 /// Translate fence-local keyframes into the core/pkg representation. Unsupported declarations
 /// remain intentionally absent from `AnimatableProps`; the fence accepts a broader visual CSS
-/// subset than the M2 animation channels, while malformed supported values are not invented.
+/// subset than the animatable channels, while malformed supported values are not invented.
 pub fn translate_keyframes(fence_kfs: &[FenceKeyframesRule]) -> Vec<KeyframesRule> {
     fence_kfs
         .iter()
@@ -155,7 +155,7 @@ pub fn translate_keyframes(fence_kfs: &[FenceKeyframesRule]) -> Vec<KeyframesRul
         .collect()
 }
 
-/// `<template>` 是 ListView item 蓝图：spec §8 要求根为**恰好一个** ListItem
+/// `<template>` 是 ListView item 蓝图：根必须为**恰好一个** ListItem
 /// 语义节点。作者写 `<div role="listitem">`（WAI-ARIA），经 resolve_semantic 落到
 /// `SemanticKind::ListItem`，故本校验按 **semantic** 判定而非字面 tag。主循环按
 /// IrTree 顺序建节点、不好回溯 template→child 关系，故做成独立前置遍历。零元素
@@ -228,7 +228,7 @@ pub(crate) fn attr(el: &IrElement, name: &str) -> Option<String> {
 
 /// 按 NodeKind 从 HTML 属性提取控件初始值（打包期 bake 进 pkg.bin，instantiate 时读出）。
 ///
-/// 属性源：**ARIA/data-***。控件一律 role 驱动（spec §2.2），`<div role="progressbar"
+/// 属性源：**ARIA/data-***。控件一律 role 驱动，`<div role="progressbar"
 /// aria-valuenow="50">` 把初始值放在 ARIA（`aria-valuenow`、`aria-checked`、…）或
 /// `data-*`（`data-step`、`data-name`）里——围栏禁止 `<div>` 上出现 plain 属性。
 ///
@@ -306,7 +306,7 @@ pub(crate) fn extract_control_init(
         NodeKind::TabList => Some(ControlInit::TabList {
             // 初始选中项 = 首个 aria-selected="true" 的 role=tab 直接子的序号；
             // 无则默认第 0 项（与 Dropdown 默认选项同语义）。多重 aria-selected=true 取首个
-            // （作者失误，运行时不崩；T5 选中态从 selected_index 派生，与 aria-selected 解耦）。
+            // （作者失误，运行时不崩；选中态运行时从 selected_index 派生，与 aria-selected 解耦）。
             selected_index: tab_children(ir_idx, tree)
                 .iter()
                 .position(|t| bool_attr(t, "aria-selected"))
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn template_with_two_listitem_errors() {
-        // spec §8：template 根必须恰好一个 ListItem，两个是契约违反。
+        // template 根必须恰好一个 ListItem，两个是契约违反。
         let parsed = loomgui_fence::parse_template(
             r#"<div role="list"><template><div role="listitem">a</div><div role="listitem">b</div></template></div>"#,
             "test.html",
@@ -524,7 +524,7 @@ mod tests {
     #[test]
     fn div_container_text_img_mapping_and_structure() {
         // 根 div 设 display:flex：子是 flex item（不走 rich-text inline/block 分类），
-        // 避免 T1 FenceMixedInlineBlock 拒载（div 块子 + img 语义 inline 子 = mixed）。
+        // 避免 FenceMixedInlineBlock 拒载（div 块子 + img 语义 inline 子 = mixed）。
         let nodes = bridged(
             r#"<div class="root" id="r" style="display:flex"><div class="t">hi</div><img src="a.png" style="display:block"></div>"#,
         );
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn tablist_aria_controls_and_initial_selected_extracted() {
-        // M3 TabList：role=tablist 初始 selected_index 从 aria-selected="true" 的 tab 派生；
+        // TabList：role=tablist 初始 selected_index 从 aria-selected="true" 的 tab 派生；
         // 每个 role=tab 的 aria-controls 提取进 TemplateNode（runtime 据此关联 panel）。
         let nodes = bridged(
             r#"<style>[role="tab"][aria-selected="true"]{color:#ff0000}</style>

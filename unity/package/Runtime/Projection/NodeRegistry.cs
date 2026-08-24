@@ -1,10 +1,10 @@
 // NodeRegistry：投影层对象身份缓存 + 攒批 dirty 集合。
 //
-// 投影层契约（docs/design/projection-layer.md §2.4）：对同一 Rust NodeId，C# 侧必须返同一
+// 投影层契约：对同一 Rust NodeId，C# 侧必须返同一
 // Node 实例——订阅 / 镜像状态挂在对象上，若每次返不同实例则丢失。强引用 Dictionary<NodeId,Node>
 // 兑现本不变量，且防 GC 回收（订阅委托目标强引用节点，节点再被业务持有很常见）。
 //
-// 攒批 flush（Task 9）：StyleMirror setter / NodeTransform.Store 标脏后把自己注册进本 registry
+// 攒批 flush：StyleMirror setter / NodeTransform.Store 标脏后把自己注册进本 registry
 // 的 dirty 集合；帧末（LoomHost.Step 的 flush seam，或显式 UIContext.FlushPendingWrites）
 // 一次性遍历 dirty 集合调 FlushInline / FlushTransform，清脏 + 清集合。避免每帧扫全部节点找脏。
 //
@@ -54,9 +54,6 @@ namespace LoomGUI
         /// Dispose / 测试用：判断缓存状态而不触发构造。
         /// </summary>
         internal bool TryGet(uint id, out Node node) => _nodes.TryGetValue(id, out node);
-
-        // ── 攒批 dirty 注册（StyleMirror / NodeTransform 标脏时调）──────────
-        // HashSet.Add 自带去重：同节点多次标脏只占一条目。帧末 FlushDirty* 遍历后清集合。
 
         /// <summary>StyleMirror.Set/Unset 标脏时注册——帧末 flush 一次性 FlushInline。</summary>
         internal void MarkStyleDirty(Node n) => _dirtyStyles.Add(n);

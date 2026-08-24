@@ -90,8 +90,8 @@ pub struct Slot {
 ///
 /// - `slots`：已实例化的 slot（克隆出的 li），高水位——只增不减，永不 detach。
 /// - `visible`：上帧算出的可见 item 区间 [start, end)。
-/// - `pending_binds`：本帧新绑定的 (slot_node, item_index)，由 bind 阶段（Task 6）消费。
-/// - `anchoring_active` / `dirty`：anchoring / 静默刷新标记（预留，Task 5+ 用）。
+/// - `pending_binds`：本帧新绑定的 (slot_node, item_index)，由 bind 阶段消费。
+/// - `anchoring_active` / `dirty`：anchoring / 静默刷新标记（预留）。
 #[derive(Debug, Clone)]
 pub struct ListState {
     pub item_count: usize,
@@ -106,7 +106,7 @@ pub struct ListState {
     pub list_ordinal: u32,
     pub anchoring_active: bool,
     pub dirty: bool,
-    /// wrap 网格虚拟化（spec §311）：ul.style 为 flex-row+wrap 时 true，按行虚拟化、行内全量。
+    /// wrap 网格虚拟化：ul.style 为 flex-row+wrap 时 true，按行虚拟化、行内全量。
     /// 单列（含 flex-column、block）为 false，走原有 1D item 路径。
     pub grid: bool,
     /// 网格每行列数（grid=true 时首帧 solve 后测得；0=尚未测，退化为冷启动定数）。
@@ -137,7 +137,7 @@ impl Default for ListState {
 }
 
 /// 每 ListView 节点的虚拟化状态表（`HashMap<NodeId, ListState>`）。运行时态，不进 pkg。
-/// 结构与访问约定同 `ScrollTable`/`AnimTable`（见 node.rs AnimTable doc：NodeId 不能直接当
+/// 结构与访问约定同 `ScrollTable`/`AnimTable`（NodeId 不能直接当
 /// SecondaryMap Key，用 HashMap 便租用 / 零转换）。enter_data_driven 填、remove_node 联动清。
 #[derive(Debug, Clone, Default)]
 pub struct ListTable(pub std::collections::HashMap<NodeId, ListState>);
@@ -158,13 +158,13 @@ impl ListTable {
 /// 进入数据驱动模式：备份模板（兜底=第一个设计期 li）+ 建 spacer + 清空设计期 li + 建 ListState。
 ///
 /// ul 高度必须 auto（否则虚拟化无法撑出可滚内容）；非 auto → Err。被祖先 flex 拉伸检测复杂，
-/// 这里只检显式 height 非 auto，flex 拉伸留 Unity 真机诊断（可接受：spec §4 约定 ul 高度 auto）。
+/// 这里只检显式 height 非 auto，flex 拉伸留 Unity 真机诊断（可接受：约定 ul 高度 auto）。
 pub fn enter_data_driven(
     stage: &mut crate::stage::Stage,
     ul: NodeId,
     list_ordinal: u32,
 ) -> Result<(), String> {
-    // 短期不可变借：校验 kind + height + 解析模板来源（spec §6.3：<template> 子优先，
+    // 短期不可变借：校验 kind + height + 解析模板来源（<template> 子优先，
     // 兜底设计期 li）。不能跨 clone_subtree 持有 scene 借（clone_subtree 也要 &mut stage）。
     let (blueprint, all_children): (Option<NodeId>, Vec<NodeId>) = {
         let scene = stage.scene.as_ref().ok_or("no scene")?;
@@ -173,7 +173,7 @@ pub fn enter_data_driven(
         }
         check_ul_height_auto(scene, ul)?;
         let ul_node = scene.get(ul).unwrap();
-        // <template> 子（NodeKind::Template）：spec §6.3 要求恰好一个，多个是契约违反。
+        // <template> 子（NodeKind::Template）：要求恰好一个，多个是契约违反。
         let templates: Vec<NodeId> = ul_node
             .children
             .iter()
@@ -225,7 +225,7 @@ pub fn enter_data_driven(
         let node = stage.clone_subtree(template_root)?;
         stage.insert_before(ul, node, tail)?;
         let scene = stage.scene.as_mut().ok_or("no scene")?;
-        // LOOKUP_SCOPE（不打 SCOPE_ROOT：spec §6.2，slot 根 CSS 规则仍按页面根 scope 匹配）。
+        // LOOKUP_SCOPE（不打 SCOPE_ROOT：slot 根 CSS 规则仍按页面根 scope 匹配）。
         if let Some(n) = scene.get_mut(node) {
             n.interaction.flags.insert(NodeFlags::LOOKUP_SCOPE);
         }
@@ -302,9 +302,9 @@ pub fn compute_visible_range(
     }
     if viewport_h <= 0.0 {
         return 0..INITIAL_SLOTS.min(item_count);
-    } // 冷启动
-      // 无已测高度（estimate<=0）：无法估算可见项数（每项高度 0 → 累积和永不达阈值 → 误判整列可见）。
-      // 退化为冷启动定数，等首帧 solve + collect_heights 回填真实高度后下帧才走精准路径。
+    }
+    // 无已测高度（estimate<=0）：无法估算可见项数（每项高度 0 → 累积和永不达阈值 → 误判整列可见）。
+    // 退化为冷启动定数，等首帧 solve + collect_heights 回填真实高度后下帧才走精准路径。
     if heights.estimate <= 0.0 {
         return 0..INITIAL_SLOTS.min(item_count);
     }
@@ -336,15 +336,13 @@ pub fn compute_visible_range(
     start..end
 }
 
-// ── 数据驱动模式：可见区计算 + slot 池 + spacer 撑高 ───────────────────────
-
 /// 设 ListView 的项数。重置 HeightCache 容量（保留已测高度）。
 pub fn set_item_count(stage: &mut crate::stage::Stage, ul: NodeId, count: usize) {
     if let Some(scene) = stage.scene.as_mut() {
         if let Some(ls) = scene.lists.get_mut(ul) {
             ls.item_count = count;
             // 保留已测高度：resize 只扩缩 known vec，estimate 不变。
-            // initial_estimate 取当前 estimate（无已测时 0.0，首帧 solve 后 Task 5 补真实模板高）。
+            // initial_estimate 取当前 estimate（无已测时 0.0，首帧 solve 后补真实模板高）。
             ls.heights.resize(count, ls.heights.estimate);
             ls.dirty = true;
         }
@@ -379,7 +377,7 @@ pub fn drain_pending_binds_bounded(
     }
 }
 
-/// 同帧推进虚拟化管线（spec §7）：立即跑一次 plan/execute，让本帧滚动后新进入可见区的
+/// 同帧推进虚拟化管线：立即跑一次 plan/execute，让本帧滚动后新进入可见区的
 /// item 的 slot 同帧克隆，其 bind 入 `pending_binds` 队列等 C# `DrainPendingBinds` 消费。
 ///
 /// **不取队列**——core 无法调业务 BindItem 回调；取队列是 C# `take_pending_binds` 的职责
@@ -396,7 +394,7 @@ pub fn drain_now(stage: &mut crate::stage::Stage, ul: NodeId) {
     execute_visible(scene, ops);
 }
 
-/// 滚动到指定 item（spec §7 ScrollToItem）。越界 index → Err（FFI 转 -1 → C# 抛 UIContractException）。
+/// 滚动到指定 item（ScrollToItem）。越界 index → Err（FFI 转 -1 → C# 抛 UIContractException）。
 ///
 /// 时序：先设祖先 ScrollPane.scroll_pos 到目标偏移，**再** drain_now（plan+execute）——
 /// plan_visible 读 scroll_pos 算可见区，故须先定 scroll_pos 才能让目标 item 的 slot
@@ -413,7 +411,7 @@ pub fn drain_now(stage: &mut crate::stage::Stage, ul: NodeId) {
 /// Instant 路径（behavior==0）同帧 drain_now → 下帧 anchoring 即修正，故正确。
 /// 但 Smooth 路径把 target 喂给 ScrollPane 的 tween 后就不再重算：变高列表滚动过程中
 /// 新可见项陆续测量、overlap 增长，tween 目标却停留在初始 overlap 边界，远距离 Smooth
-/// 滚动会停在偏差位置。spec §5 要求 tween 期间按回填高度重算 target，当前未实现
+/// 滚动会停在偏差位置。要求 tween 期间按回填高度重算 target，当前未实现
 /// （测试仅覆盖 Instant 路径）。
 pub fn scroll_to_item(
     stage: &mut crate::stage::Stage,
@@ -452,12 +450,11 @@ pub fn scroll_to_item(
             st.set_pos((x, target), behavior == 1);
         }
     }
-    // drain_now（plan+execute）让新可见区的 slot 同帧克隆 + binds 入队。
     drain_now(stage, ul);
     Ok(())
 }
 
-/// 插入通知（spec §10 NotifyInserted）：在 `at` 处插入 `count` 项。heights.known 插入
+/// 插入通知（NotifyInserted）：在 `at` 处插入 `count` 项。heights.known 插入
 /// `count` 个 None（新项未测）；item_count += count；slot.item_index >= at 的 +count
 /// （保持物化 slot 与逻辑项的映射）。越界（at > item_count）→ Err。
 /// dirty 置真，让下帧 plan_visible 按新 item_count / 可见区重算 spacer + 复用 slot。
@@ -500,7 +497,7 @@ pub fn notify_inserted(
     Ok(())
 }
 
-/// 删除通知（spec §10 NotifyRemoved）：删 [at, at+count) 项。越界（at+count > item_count）→ Err。
+/// 删除通知（NotifyRemoved）：删 [at, at+count) 项。越界（at+count > item_count）→ Err。
 /// heights.known drain 该区间；item_count -= count；item_index 在 [at,end) 的 slot 就地 park
 /// （留挂 ul + display:none，供下次可见区复用）；item_index > end 的 slot.item_index -= count。
 /// dirty 置真。
@@ -579,7 +576,7 @@ pub fn notify_removed(
     Ok(())
 }
 
-/// 移动通知（spec §10 NotifyMoved）：把 `from` 项搬到 `to` 位置。heights.known 同步搬；
+/// 移动通知（NotifyMoved）：把 `from` 项搬到 `to` 位置。heights.known 同步搬；
 /// slot.item_index 重映射（from 的 → to；from<to 区间内的项后移，from>to 区间内的前移）。
 /// 越界（from/to >= item_count）→ Err。
 pub fn notify_moved(scene: &mut Scene, ul: NodeId, from: usize, to: usize) -> Result<(), String> {
@@ -597,7 +594,6 @@ pub fn notify_moved(scene: &mut Scene, ul: NodeId, from: usize, to: usize) -> Re
     if from == to {
         return Ok(());
     }
-    // heights.known 搬移：remove(from).insert(to)。
     {
         let ls = scene.lists.get_mut(ul).unwrap();
         let v = ls.heights.known.remove(from);
@@ -637,7 +633,7 @@ pub fn notify_moved(scene: &mut Scene, ul: NodeId, from: usize, to: usize) -> Re
     Ok(())
 }
 
-/// 刷新通知（spec §10 RefreshItems）：把 [start, start+count) 内**当前 active**的 slot
+/// 刷新通知（RefreshItems）：把 [start, start+count) 内**当前 active**的 slot
 /// 重新入 pending_binds 队列，让 C# 下帧重新 BindItem（业务数据刷新）。
 /// 区间内无 active slot 的 item（不在可见区）无需刷新——静默跳过（不报错），它们进
 /// 可见区时由 execute 的 unpark 路径重新 bind。越界（start >= item_count）→ Err。
@@ -812,7 +808,7 @@ fn measure_grid(scene: &Scene, ul: NodeId, slot0: NodeId) -> Option<(usize, f32)
     Some((columns, row_pitch))
 }
 
-/// 网格按行可见区 + spacer 高度（spec §311：按行虚拟化、行内全量）。
+/// 网格按行可见区 + spacer 高度（按行虚拟化、行内全量）。
 /// 行 r 占 [r*row_pitch, r*row_pitch+row_h]；BUFFER 行；spacer 高含 gap_y 补偿
 /// （首 slot 行位置 = spacer_h + gap_y，对齐非虚拟基准 r*row_pitch）。
 fn grid_visible_spacers(
@@ -930,7 +926,6 @@ pub fn plan_visible(scene: &mut Scene) -> Vec<PendingOps> {
 }
 
 fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
-    // 网格检测（首帧 solve 后 style 已解析；一次性）。
     ensure_grid_detected(scene, ul);
     // Phase A：单次不可变借完成所有只读计算——可见区（Copy 的 Range）+ spacer 高度 + gap。
     // spacer 高需 heights.sum，故一并在此算出，避免后续跨可变借再 clone heights。
@@ -1058,7 +1053,7 @@ fn execute_one(scene: &mut Scene, op: PendingOps) {
                 // clone_node_recursive 不复制 inline_override / inline_set——grown slot 从模板
                 // 的"干净态"开始，无 display:none 泄漏风险（对比 unpark 路径复用 parked slot 时
                 // 显式 unset_inline_override 清 display 便签）。
-                // 标 LOOKUP_SCOPE（不打 SCOPE_ROOT：spec §6.2，slot 根 CSS 规则仍按页面根 scope 匹配）。
+                // 标 LOOKUP_SCOPE（不打 SCOPE_ROOT：slot 根 CSS 规则仍按页面根 scope 匹配）。
                 if let Some(n) = scene.get_mut(node) {
                     n.interaction.flags.insert(NodeFlags::LOOKUP_SCOPE);
                 }
@@ -1093,7 +1088,6 @@ fn execute_one(scene: &mut Scene, op: PendingOps) {
     // unpark 是就地复用（不搬运节点），被复用的 slot 会停在旧位——故每帧末重排一次，
     // 保证 active slot 按 item_index 升序。
     reorder_active_slots(scene, op.list_ul);
-    // 写 spacer 高度 + 记录本帧 visible。
     let (head, tail) = {
         let ls = scene.lists.get_mut(op.list_ul).unwrap();
         ls.visible = op.new_visible;
@@ -1447,17 +1441,15 @@ mod tests {
     /// 断言所有 slot 都正确接在 ul 树上：每个 slot 的 parent==Some(ul)、且在 ul.children
     /// 中位于 head_spacer 之后 / tail_spacer 之前。**active** slot 须按 item_index 严格递增
     /// （ul.children 顺序即 CSS 流的视觉顺序，复用后不重排会让 slot 渲染错位）；
-    /// parked slot 是 display:none，不占布局，物理位置任意（spec §2.9）。
+    /// parked slot 是 display:none，不占布局，物理位置任意。
     /// 同时检 ul.children 无重复 NodeId。
     fn assert_all_slots_well_parented(scene: &crate::scene::node::Scene, ul: NodeId) {
         let ls = scene.lists.get(ul).expect("list state");
         let head = ls.head_spacer;
         let tail = ls.tail_spacer;
         let ul_node = scene.get(ul).unwrap();
-        // head/tail 始终首尾。
         assert_eq!(ul_node.children.first(), Some(&head), "head spacer first");
         assert_eq!(ul_node.children.last(), Some(&tail), "tail spacer last");
-        // 无重复子。
         let mut seen = std::collections::HashSet::new();
         for &c in &ul_node.children {
             assert!(seen.insert(c), "duplicate child in ul.children");
@@ -1512,7 +1504,7 @@ mod tests {
 
     /// 池化模型起点：`enter_data_driven` 预分配初始 batch —— INITIAL_SLOTS 个 slot 全部
     /// 克隆好并挂在 ul 上（head/tail spacer 之间），初始全 parked（display:none 便签已置）。
-    /// 不再有 free 池（`ListState.free` 已删——本测能编译即证），slot 从生到死不 detach。
+    /// 不再有 free 池，slot 从生到死不 detach。
     ///
     /// display:none 是**便签层**（inline_override + inline_set bit），由下帧 rematch 拷进
     /// node.style 才真正生效；本测无 tick，故验便签位已置而非解析后的 style。
@@ -1573,8 +1565,8 @@ mod tests {
     }
 
     /// 作者写 `<div role=list><template><div role=listitem>…</div></template></div>`：
-    /// packer 把 `<template>` 保留为 NodeKind::Template 子（v27+），其下 ListItem 才是蓝图。
-    /// enter_data_driven 须采用 template 内的 ListItem 作模板源（spec §6.3 step 2）。
+    /// packer 把 `<template>` 保留为 NodeKind::Template 子，其下 ListItem 才是蓝图。
+    /// enter_data_driven 须采用 template 内的 ListItem 作模板源。
     fn stage_with_ul_template_li() -> (crate::stage::Stage, NodeId) {
         use crate::scene::node::{Node, NodeKind};
         let ul = Node {
@@ -1617,7 +1609,7 @@ mod tests {
 
     #[test]
     fn enter_data_driven_rejects_multiple_templates() {
-        // spec §6.3：ul 下恰好一个 <template> 才自动采用；多个是契约违反。
+        // ul 下恰好一个 <template> 才自动采用；多个是契约违反。
         use crate::scene::node::{Node, NodeKind};
         let ul = Node {
             kind: NodeKind::ListView,
@@ -1897,7 +1889,7 @@ mod tests {
 
     /// 回归：parked slot（display:none → layout_rect.h=0）不更新 HeightCache。
     /// parked slot 的 item_index 是 stale 复用参考——若不加跳过，会把 0.0 写成对应
-    /// item 的 known 高度，污染下帧可见区计算（坑 182 侧效应）。
+    /// item 的 known 高度，污染下帧可见区计算。
     #[test]
     fn collect_heights_skips_parked_slots() {
         let (mut s, ul, _li) = stage_with_ul_li();
@@ -2088,8 +2080,6 @@ mod tests {
         );
     }
 
-    // ── Task 7：scroll_to_item / notify_* / refresh_items ──────────────────
-
     /// ScrollToItem：跑一次虚拟化管线（plan+execute）让目标 item 的 slot 同帧物化 +
     /// pending_binds 入队；设祖先 ScrollPane.scroll_pos.y 到 item 偏移（Instant）。
     /// 断言：drain 后目标 slot 在 slots 中（binds 入队）；scroll_pos.y ≈ sum(0..index)。
@@ -2153,7 +2143,6 @@ mod tests {
                 ls.heights.set(i, 10.0);
             }
         }
-        // 在 at=2 插 1 项。
         crate::list::notify_inserted(s.scene.as_mut().unwrap(), ul, 2, 1).unwrap();
         let scene = s.scene.as_ref().unwrap();
         let ls = scene.lists.get(ul).unwrap();
@@ -2201,19 +2190,16 @@ mod tests {
         let ls = scene.lists.get(ul).unwrap();
         assert_eq!(ls.item_count, 3);
         assert_eq!(ls.heights.known.len(), 3);
-        // 高水位不变：slot 永驻 slots vec（parked 只标休眠，不 detach）。
         assert_eq!(
             ls.slots.len(),
             slot_count_before,
             "high-water: slots never shrink; parked slots stay in vec"
         );
-        // 2 个 slot 被 park（原 items 2,3）。
         assert_eq!(
             ls.slots.iter().filter(|s| s.parked).count(),
             2,
             "two slots parked (items 2,3 removed)"
         );
-        // active slot 覆盖 items 0,1,2。
         let mut active_indices: Vec<usize> = ls
             .slots
             .iter()
@@ -2226,7 +2212,6 @@ mod tests {
             vec![0, 1, 2],
             "active slots cover remaining items after shift"
         );
-        // 所有 slot 的 parent 仍是 ul（无 detach）。
         for s in &ls.slots {
             assert_eq!(
                 scene.get(s.node).unwrap().parent,
@@ -2234,7 +2219,6 @@ mod tests {
                 "no detach on remove: every slot still parented to ul"
             );
         }
-        // parked slot 已标 display:none 便签（inline_set 有 INLINE_DISPLAY bit）。
         for s in ls.slots.iter().filter(|s| s.parked) {
             let n = scene.get(s.node).unwrap();
             assert!(
@@ -2313,7 +2297,6 @@ mod tests {
         let scene = s.scene.as_ref().unwrap();
         let ls = scene.lists.get(ul).unwrap();
         assert_eq!(ls.item_count, 3, "item_count reduced by 2");
-        // 所有 slot 的 parent 仍是 ul（无 detach）。
         for s in &ls.slots {
             assert_eq!(
                 scene.get(s.node).unwrap().parent,
@@ -2321,13 +2304,11 @@ mod tests {
                 "no detach on remove: slot still parented to ul"
             );
         }
-        // 有两 slot 被 park（原 items 3,4）。
         assert_eq!(
             ls.slots.iter().filter(|s| s.parked).count(),
             2,
             "two slots parked (items 3,4 removed)"
         );
-        // active slot 覆盖 items 0,1,2。
         let active_indices: Vec<usize> = ls
             .slots
             .iter()
@@ -2337,7 +2318,6 @@ mod tests {
         let mut sorted = active_indices.clone();
         sorted.sort_unstable();
         assert_eq!(sorted, vec![0, 1, 2], "active slots cover remaining items");
-        // 高水位不变：slots.len() == 5。
         let slot_count = ls.slots.len();
         assert_eq!(slot_count, 5, "high-water pool: slots never shrink");
         // 注：此场景无移位（count=5, end=5 全覆盖），故 notify_removed 不生 bind。
@@ -2352,12 +2332,10 @@ mod tests {
         crate::list::set_item_count(&mut s, ul, 5);
         let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
         crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
-        // 在 at=2 插入 2 项。
         crate::list::notify_inserted(s.scene.as_mut().unwrap(), ul, 2, 2).unwrap();
         let scene = s.scene.as_ref().unwrap();
         let ls = scene.lists.get(ul).unwrap();
         assert_eq!(ls.item_count, 7, "item_count grown by 2");
-        // 所有 slot 的 parent 仍是 ul。
         for s in &ls.slots {
             assert_eq!(
                 scene.get(s.node).unwrap().parent,
@@ -2365,7 +2343,6 @@ mod tests {
                 "no detach on insert"
             );
         }
-        // 原 item_index >= 2 的 slot 已移位 +2。排除 parked（无），验 active index 集。
         let indices: Vec<usize> = ls.slots.iter().map(|s| s.item_index).collect();
         let mut sorted = indices.clone();
         sorted.sort_unstable();
@@ -2398,7 +2375,6 @@ mod tests {
         crate::list::notify_moved(s.scene.as_mut().unwrap(), ul, 0, 2).unwrap();
         let binds = crate::list::take_pending_binds(s.scene.as_mut().unwrap(), ul);
         let ls = s.scene.as_ref().unwrap().lists.get(ul).unwrap();
-        // 找到所有 parked slot 的 node。
         let parked_nodes: std::collections::HashSet<NodeId> = ls
             .slots
             .iter()
@@ -2416,7 +2392,6 @@ mod tests {
                 node
             );
         }
-        // 同时验证 active slot 在 to_rebind 中。
         let active_nodes: std::collections::HashSet<NodeId> = ls
             .slots
             .iter()
@@ -2490,7 +2465,7 @@ mod tests {
         );
     }
 
-    /// plan 阶段的池化契约（spec §2.3）：**只标记不搬树**。
+    /// plan 阶段的池化契约：**只标记不搬树**。
     ///
     /// 离开可见区的 slot 就地标 `parked` + 写 display:none 便签，NodeId/parent/reuse_key 全保留
     /// （无 detach、无 remove_child、无 free 池）；留在可见区的 slot 保持 active；可见区内还没
@@ -2619,7 +2594,7 @@ mod tests {
         );
     }
 
-    /// execute 阶段的池化契约（spec §2.4）：**unpark + bind**。
+    /// execute 阶段的池化契约：**unpark + bind**。
     ///
     /// 滚动后 plan 标 park / 收 to_bind，execute 把池里的 parked slot 翻回 active 绑给新 item：
     /// 每个可见 item 恰有一个 active slot 绑它、离开可见区的 slot 留 display:none 便签、
@@ -2709,9 +2684,9 @@ mod tests {
         assert_all_slots_well_parented(scene, ul);
     }
 
-    /// execute 扩容契约（spec §2.2/§2.4）：池里无 parked slot 可复用时克隆模板扩容。
+    /// execute 扩容契约：池里无 parked slot 可复用时克隆模板扩容。
     ///
-    /// 高水位只增不减——扩容后即便滚回去也不缩（无驱逐，约束 e）。新 slot 挂 ul
+    /// 高水位只增不减——扩容后即便滚回去也不缩（无驱逐）。新 slot 挂 ul
     /// （head/tail spacer 之间），parent 与 NodeId 从此永驻。
     #[test]
     fn execute_grows_by_cloning_when_no_parked_slot() {
@@ -2776,7 +2751,7 @@ mod tests {
     }
 
     /// unpark 必须 **清** display 便签（`unset_inline_override`），不能写 `display:block`
-    /// （spec §2.6）——后者会盖掉作者样式（`li { display:flex }` 的 item 会塌成块流）。
+    /// ——后者会盖掉作者样式（`li { display:flex }` 的 item 会塌成块流）。
     ///
     /// 观测点：unpark 后 slot 的 `inline_set` display bit 必须被清零，cascade 回落到
     /// base_style 的真实 display。写 `display:block` 的实现会留着 bit（值 Block），此测红。
@@ -2872,7 +2847,7 @@ mod tests {
         }
     }
 
-    /// reuse_key 出生即定、永不旋转（坑182 子因②根治）。
+    /// reuse_key 出生即定、永不旋转。
     /// slot[0] 的 key 在 enter_data_driven 预分配时设定，经历 park→unpark 往返后不变。
     #[test]
     fn reuse_key_stable_across_scroll_frames() {
@@ -2918,7 +2893,7 @@ mod tests {
         let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
         crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
 
-        // slot[0] 是同一个 NodeId（slots vec 永缩、无移除），其 reuse_key 跨帧不变。
+        // slot[0] 是同一个 NodeId，其 reuse_key 跨帧不变。
         let key_after_scroll = {
             let scene = s.scene.as_ref().unwrap();
             let ls = scene.lists.get(ul).unwrap();
@@ -2929,8 +2904,6 @@ mod tests {
             "reuse_key permanent — never rotated across park/unpark/rebind"
         );
     }
-
-    // ── 保险测试（spec §6.1）──────────────────────────────────────────────
 
     /// taffy Display::None 保险：parked slot 挂 display:none 便签 → rematch 后
     /// style.taffy_style.display == None → solve 跳该节点、布局零尺寸。
@@ -3034,7 +3007,6 @@ mod tests {
             crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
             crate::list::collect_heights(s.scene.as_mut().unwrap());
         }
-        // 每帧后验 spacer 不变量。
         {
             let st = s.scene.as_mut().unwrap().scroll.ensure(pane);
             st.scroll_pos = (0.0, 0.0);
@@ -3060,7 +3032,7 @@ mod tests {
 
     /// tick 时序不变量：tick_and_render 内 solve 在 rematch 之后、每次 tick 都执行。
     ///
-    /// "solve 一次/帧" 是声明式不变量（spec §1.1 / §1.3），无 instrumentation 无法直接
+    /// "solve 一次/帧" 是声明式不变量，无 instrumentation 无法直接
     /// 计数。这里用间接证据链：
     ///   1. tick_and_render 后 active slot 有非零 layout_rect（solve 跑了且产出布局）。
     ///   2. 滚动触发 park/unpark → 再 tick → layout_rect 反映新可见区（solve 对变更响应）。

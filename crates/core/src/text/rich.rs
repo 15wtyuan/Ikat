@@ -1,11 +1,11 @@
-//! 富文本（v1.7）：run 模型 + 子集 markup 解析器 + 简化 inline flow。
+//! 富文本：run 模型 + 子集 markup 解析器 + 简化 inline flow。
 //!
 //! 富文本是一个叶子 NodeKind（非围栏标签），inline flow 封装在其 measure/build 里。
-//! per-run 多色多字号（v1.6 atlas key 已含 font_id/size_px，per-run color 走 per-vertex）。
+//! per-run 多色多字号（atlas key 已含 font_id/size_px，per-run color 走 per-vertex）。
 //! 简化模型：扁平 run 流 + 单遍断行 + max-baseline-per-line（非完整 CSS IFC）。
 //!
-//! Runs 是纯运行时产物：由 inline-flow 编译器（T4）在 solve/measure 阶段从 inline 子树现造，
-//! 不进 pkg.bin（v1.7 RichText 暗号序列化路径已随 Spec-2 退休）。故本模块所有类型不再 Serde。
+//! Runs 是纯运行时产物：由 inline-flow 编译器在 solve/measure 阶段从 inline 子树现造，
+//! 不进 pkg.bin（旧的 RichText 序列化路径已移除）。故本模块所有类型不再 Serde。
 
 use crate::scene::node::NodeId;
 
@@ -69,7 +69,7 @@ pub enum TextDecoStyle {
     Double = 3,
 }
 
-/// 装饰线（v1.8：CSS3 text-decoration shorthand）。
+/// 装饰线（CSS3 text-decoration shorthand）。
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct RichDeco {
     pub lines: TextDecoLines,
@@ -102,7 +102,7 @@ pub struct RichRun {
     /// 属于某超链接（`<a>` 内）；命中查 fragment 矩形时返此 id。None=非链接。
     pub link_id: Option<u32>,
     /// 本 run 编译来源的 inline 节点（TextNode/TextElement/span/...）。
-    /// 命中测试用它把 span/TextNode 级事件路由回原节点（见 main-design 文本模型）。
+    /// 命中测试用它把 span/TextNode 级事件路由回原节点。
     pub source: NodeId,
 }
 

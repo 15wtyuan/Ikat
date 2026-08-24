@@ -105,7 +105,7 @@ pub fn resolve_inline_styles_with_diags(
                     styles[idx].inherited_set.0 |= bit;
                 }
                 // UA 容器居中：button 默认 justify-content + align-items = center（CSS 浏览器 UA
-                // 行为：button content 居中）。Bug B（commit 3916a1c）只修 text-align center（
+                // 行为：button content 居中）。Bug B 只修 text-align center（
                 // text *内部* 居中），但 button 作为 flex 容器在缺省 justify/align=flex-start/stretch
                 // 时，text 子作为 flex item 仍从 padding-left 起——core dump 实证 text.x=266 而非
                 // 居中 268.5。justify-content/align-items 非继承属性 → 无 INH bit，仅本节点生效，
@@ -115,7 +115,6 @@ pub fn resolve_inline_styles_with_diags(
             }
         }
 
-        // Apply inline style declarations
         if let Some(style_attr) = el.attributes.iter().find(|a| a.name == "style") {
             for decl in style_attr.value.split(';') {
                 let decl = decl.trim();
@@ -127,7 +126,6 @@ pub fn resolve_inline_styles_with_diags(
                     None => continue,
                 };
 
-                // Validate property name
                 let is_known = find_css_prop(prop).is_some() || find_shorthand(prop).is_some();
                 if !is_known {
                     let hint = unsupported_hint(prop).unwrap_or(
@@ -159,7 +157,6 @@ pub fn resolve_inline_styles_with_diags(
                     ));
                 }
 
-                // Validate keyword values against schema
                 if let Some(spec) = find_css_prop(prop) {
                     match &spec.parser {
                         CssValueParser::Keyword(allowed) => {
@@ -179,10 +176,10 @@ pub fn resolve_inline_styles_with_diags(
                         }
                         CssValueParser::Animation => {
                             // animation 简写：先校验（捕捉拼写错误），合法则解析存值
-                            // （M2 runtime KeyframePlayer 消费 base_style.animation）。
+                            // （runtime KeyframePlayer 消费 base_style.animation）。
                             // 不调 apply_decl：fence 要先跑 validate 门（apply_decl 宽松解析无诊断），
                             // 解析本身委托 core `parse_animation`（与运行时 rematch 的 apply_decl
-                            // "animation" arm 同一真相源，防 §8.2/§8.3 漂移）。
+                            // "animation" arm 同一真相源）。
                             if !validate_animation_value(value) {
                                 diagnostics.push(Diagnostic::error(
                                     DiagnosticCode::FenceBadCssValue,
@@ -231,7 +228,6 @@ pub fn resolve_inline_styles_with_diags(
                     continue;
                 }
 
-                // Apply using existing apply_decl.
                 // If it returns false, the value failed to parse -- report it.
                 if !apply_decl(&mut styles[idx], prop, value) {
                     diagnostics.push(Diagnostic::error(
@@ -410,7 +406,7 @@ mod tests {
     }
 
     /// Bug 续修：button UA 容器居中（justify-content + align-items = center）。
-    /// Bug B（commit 3916a1c）只修 text-align center（text 内部居中），未修容器居中，
+    /// Bug B 只修 text-align center（text 内部居中），未修容器居中，
     /// text 子作为 flex item 从 padding-left 起——core dump 实证 text.x=266 应 268.5。
     /// 非继承属性 → 无 INH bit，仅本节点生效，但每帧 rematch 从 base_style 重起，稳定。
     #[test]
@@ -464,7 +460,7 @@ mod tests {
     }
 
     /// animation 行内声明：合法值不报诊断（语法校验通过，apply_decl 不存）。
-    /// runtime §4 没实现 → fence 接受语法 + 静默不跑动画。
+    /// runtime 没实现 → fence 接受语法 + 静默不跑动画。
     #[test]
     fn inline_animation_valid_no_diagnostic() {
         let (tree, _) = parse_html_to_ir(r#"<div style="animation:fadeIn .4s both"></div>"#);

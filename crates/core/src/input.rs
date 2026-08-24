@@ -34,7 +34,7 @@ pub enum PointerKind {
 pub struct KeyEvent {
     pub key_code: u32, // LoomKeyCode 枚举值（Unity KeyCode 转 u32；core 不解释语义，只透传 + Tab 判定）
     pub modifiers: u8, // bit0=shift / bit1=ctrl / bit2=alt
-    pub is_down: bool, // true=按下→keydown；false=松开→keyup
+    pub is_down: bool,
     pub pad: [u8; 2],
 }
 
@@ -251,9 +251,9 @@ pub struct PointerState {
 impl Default for PointerState {
     fn default() -> Self {
         let mut slots = Vec::with_capacity(5);
-        slots.push(TouchSlot::new_slot()); // slot 0 = 鼠标主指
+        slots.push(TouchSlot::new_slot());
         for _ in 0..4 {
-            slots.push(TouchSlot::new_slot()); // slot 1..4 = 触摸
+            slots.push(TouchSlot::new_slot());
         }
         Self { slots, time_s: 0.0 }
     }
@@ -329,7 +329,7 @@ fn close_outside_dropdowns(scene: &mut Scene, hit: Option<NodeId>) {
 pub(crate) fn focus_node(scene: &mut Scene, new: Option<NodeId>, out: &mut Vec<EventRecord>) {
     let old = scene.focused_node;
     if old == new {
-        return; // 无变化不发
+        return;
     }
     if let Some(o) = old {
         if let Some(n) = scene.get_mut(o) {
@@ -417,7 +417,6 @@ fn next_focus(chain: &[NodeId], current: Option<NodeId>, backward: bool) -> Opti
             chain[ni]
         }
         None => {
-            // current 不在链 → forward 取链首，backward 取链尾
             if backward {
                 *chain.last().unwrap()
             } else {
@@ -437,14 +436,13 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
     for ke in keys {
         let focused = scene.focused_node;
         if ke.is_down && ke.key_code == KEY_TAB {
-            // Tab 导航
             let chain = build_tab_chain(scene);
             if chain.is_empty() {
                 continue; // 无可聚焦节点 → Tab 无操作（不发 keydown）
             }
             let backward = (ke.modifiers & MOD_SHIFT) != 0;
             let next = next_focus(&chain, focused, backward);
-            focus_node(scene, next, out); // 发 FocusOut(旧)+FocusIn(新)
+            focus_node(scene, next, out);
             continue; // Tab 被消费，不发 keydown
         }
         // 控制键路由：keydown 且 focused 是 TextField/TextArea → 路由到编辑内核。
@@ -530,7 +528,7 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                                 routed = true;
                             }
                             // ctrl+X：剪切（复制 + 删选区）。value 改变时发 ValueChanged
-                            // （照 Task 10/11 编辑原语 change 模式）。readonly 时 delete
+                            // （同其余编辑原语的 change 模式）。readonly 时 delete
                             // 自身 no-op（返 false→不发事件），但复制仍发生（readonly 不阻 copy）。
                             KEY_X if ctrl => {
                                 if crate::scene::control::cut_selection(e, kind.unwrap()) {
@@ -552,7 +550,7 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                     }
                     // Escape 要改 scene.focused_node（focus_node 借 &mut scene），故放在 controls 借释放后。
                     if !routed && ke.key_code == KEY_ESCAPE {
-                        focus_node(scene, None, out); // blur：发 FocusOut
+                        focus_node(scene, None, out);
                         routed = true;
                     }
                     if changed {
@@ -576,7 +574,7 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                     continue; // 路由键被消费，不发 keydown
                 }
                 // TabList 键盘路由（automatic-activation）：焦点在 TabList 子树（Tab 是
-                // focusable per T3，TabList 自身不聚焦）→ 向上找 ControlState::TabList 祖先，
+                // focusable 元素，TabList 自身不聚焦）→ 向上找 ControlState::TabList 祖先，
                 // 方向键按 flex-direction 选轴移动 selected_index（clamp 不 wrap）+ 发
                 // SelectionChanged。互斥于 Dropdown（Dropdown 非 TabList）。
                 //
@@ -612,14 +610,6 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
     }
 }
 
-// ── Task 15：NumberField 字符输入 guard（textinput 通道） ──────────────────────
-//
-// 字符输入（可打印字符）走 textinput 通道（UTF-32 codepoints，后端已 shift-mapped），与
-// keydown 物理键通道互补。原内联于 stage.rs tick step 3.5，现集中到 input.rs，由
-// [`process_text_input`] 统一处理聚焦控件的字符提交。NumberField 在此加 guard——仅接受
-// 数字语法字符（0-9 / '-' / '.' / 'e' / 'E'），非数字字符（字母 a-z 除 e/E、标点等）被逐字符
-// 滤掉。TextField/TextArea 不受影响（仍接受任意字符）。
-//
 // IME：「composition 预编辑期不过滤，commit 时过滤」。composition 走独立渠（set_composition /
 // commit_composition，Stage 层）：set_composition 是 control 层纯函数（不区分控件语义），
 // 不过滤 provisional 串；commit 路径（Stage.commit_composition 的 NumberField 臂）调
@@ -649,8 +639,6 @@ pub fn filter_number_field_text(s: &str) -> String {
 ///
 /// NumberField guard：提交前用 [`filter_number_field_text`] 过滤，仅留数字语法字符；
 /// 全部被滤掉 → 不改值（不发 ValueChanged）。TextField/TextArea 不过滤（接受任意字符）。
-///
-/// 原内联于 stage.rs tick step 3.5（集中到此处以便单测 + 复用 guard）。
 pub(crate) fn process_text_input(
     scene: &mut Scene,
     codepoints: &[u32],
@@ -739,7 +727,6 @@ impl PointerState {
     /// 移除 touch monitor（从所有槽）。用 retain 移除（Vec 无 sentinel 需求，retain 更简且无遍历期偏移）。
     pub fn remove_touch_monitor(&mut self, node: NodeId) {
         for slot in &mut self.slots {
-            // touch_monitors 是 Vec<NodeId>，用 retain 移除（Vec 无 sentinel 需求，retain 更简且无遍历期偏移）
             slot.touch_monitors.retain(|n| *n != node);
         }
     }
@@ -763,22 +750,20 @@ impl PointerState {
     /// 触摸槽在任意事件（Move/Down/Up）分配（触摸可 Move 先于 Down 合成），Up 后释放（slot_idx>0 置 touch_id=-1）。
     fn find_or_alloc_slot(&mut self, ev: &PointerEvent) -> Option<usize> {
         if ev.touch_id == -1 {
-            return Some(0); // 鼠标主指
+            return Some(0);
         }
-        // 找已占触摸槽
         for i in 1..self.slots.len() {
             if self.slots[i].touch_id == ev.touch_id {
                 return Some(i);
             }
         }
-        // 分配首个空闲触摸槽
         for i in 1..self.slots.len() {
             if self.slots[i].touch_id == -1 {
                 self.slots[i].touch_id = ev.touch_id;
                 return Some(i);
             }
         }
-        None // 触摸槽满 → 丢弃
+        None
     }
 
     /// 消费本帧输入 → 产 EventRecord 序列。
@@ -843,7 +828,6 @@ impl PointerState {
             let touch_id = ev.touch_id;
             match ev.kind {
                 PointerKind::Move => {
-                    // 按住中位移>50（per-axis，硬编码，mouse+touch 通用）→ 取消 click + longpress。
                     if slot.is_down {
                         let dx = slot.last_pos.0 - slot.down_pos.0;
                         let dy = slot.last_pos.1 - slot.down_pos.1;
@@ -1018,7 +1002,6 @@ impl PointerState {
                         }
                     }
                     Self::hover_diff_slot(slot, scene, &mut out);
-                    // Move 派发：有 monitor 产 Move@monitor，无 monitor 不产
                     for m in &slot.touch_monitors {
                         out.push(EventRecord {
                             node_id: m.0,
@@ -1058,12 +1041,11 @@ impl PointerState {
                     slot.is_down = true;
                     slot.down_pos = (ev.x, ev.y);
                     slot.down_node = hit;
-                    slot.down_targets = ancestor_chain(scene, hit); // [leaf,…祖先]
-                    slot.click_cancelled = false; // 新按下重置
-                                                  // outside-click close：命中不在任何 open Dropdown 的 select 子树内 → 收起。
-                                                  // 须在 hit/down_targets 计算后、控件 on_pointer_down 前跑（确保状态一致）。
+                    slot.down_targets = ancestor_chain(scene, hit);
+                    slot.click_cancelled = false;
+                    // outside-click close：命中不在任何 open Dropdown 的 select 子树内 → 收起。
+                    // 须在 hit/down_targets 计算后、控件 on_pointer_down 前跑（确保状态一致）。
                     close_outside_dropdowns(scene, hit);
-                    // drag/longpress 初始化
                     slot.down_time = time_s;
                     slot.longpress_fired = false;
                     slot.longpress_cancelled = false;
@@ -1170,7 +1152,6 @@ impl PointerState {
                     if let Some(cid) = slot.control_target {
                         out.extend(crate::scene::control::on_pointer_up(scene, cid));
                     }
-                    // drag 中 Up/Canceled → DragEnd
                     if slot.dragging {
                         if let Some(tgt) = slot.drag_target {
                             out.push(EventRecord {
@@ -1256,7 +1237,6 @@ impl PointerState {
                     slot.drag_testing = false;
                     slot.dragging = false;
                     slot.drag_target = None;
-                    // 清 scroll 仲裁字段
                     slot.scroll_testing = false;
                     slot.scrolling_pane = None;
                     slot.scroll_candidate = None;
@@ -1320,7 +1300,7 @@ impl PointerState {
                 1
             } else {
                 slot.click_count + 1
-            } // 1→2→1 循环
+            }
         } else {
             1
         };

@@ -114,7 +114,6 @@ namespace LoomGUI
                 return new SpriteLookup { found = false };
             }
 
-            // Lazy-load the page texture.
             Texture2D tex = GetOrLoadPage(entry.atlasIdx, entry.page);
             if (tex == null)
             {
@@ -161,8 +160,6 @@ namespace LoomGUI
             _fontPages?.Clear();
             _warned?.Clear();
         }
-
-        // ── impl ──
 
         Texture2D GetOrLoadPage(int atlasIdx, int page)
         {

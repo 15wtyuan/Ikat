@@ -1,14 +1,12 @@
 //! Stage 6.8：控件结构契约校验（必需子角色）。
 //!
 //! 旧模式下框架运行时注入 `.loom-*` 子节点（fill/track/thumb/listbox/...），
-//! 控件结构必然完整，无需校验。role 化重构后（spec §2.2），作者自己写
+//! 控件结构必然完整，无需校验。role 化重构后，作者自己写
 //! `<div role="combobox"><div role="listbox"><div role="option">`——作者可能漏写
 //! 必需子节点。本 pass 在打包期（annotate 之后）严格拦截这种缺陷：缺必需子角色
 //! = `FenceMissingControlChild` error，不依赖运行时 reparent 兜底。
 //!
-//! 契约表见 spec §2.2：combobox→listbox、listbox→option、slider→data-slot=thumb、
-//! progressbar→data-slot=fill、list→listitem。textbox/spinbutton/switch/radio
-//! 无必需子角色（不校验）。校验只看**直接子节点**，与 spec §2.2 结构字面对齐。
+//! 校验只看**直接子节点**。
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::ir::{IrElement, IrNodeKind, IrTree};
@@ -22,7 +20,7 @@ enum CheckSpec {
     Slot(&'static str),
 }
 
-/// 每控件 role 的必需子角色/slot 契约（spec §2.2 权威）。
+/// 每控件 role 的必需子角色/slot 契约。
 ///
 /// 只列有必需子角色的控件；textbox/spinbutton/switch/radio 无必需子角色，缺席。
 /// `listbox` 在 `ROLE_TO_SEMANTIC` 映射成 Container，但结构契约按 role 字面值
@@ -56,7 +54,7 @@ fn node_slot(el: &IrElement) -> Option<&str> {
 ///
 /// 数据驱动 ListView 把 item 蓝图写在 `<template>` 子节点里（运行时克隆产 slot），
 /// list 节点本身没有直接 `role="listitem"` 子节点。本校验因此把直接 `<template>`
-/// 子节点的首个元素子节点视同直接子节点一并检查（template 蓝图模式），与 spec §2.2
+/// 子节点的首个元素子节点视同直接子节点一并检查（template 蓝图模式），与
 /// list→listitem 契约一致——作者两种写法（直接 listitem / template>listitem）都合法。
 fn has_required_child(tree: &IrTree, parent_idx: usize, spec: CheckSpec) -> bool {
     let children: Vec<usize> = tree.nodes[parent_idx]
@@ -107,7 +105,7 @@ fn spec_label(spec: CheckSpec) -> String {
 }
 
 /// 每个 role 的教学文案：作者应写的完整结构（诊断 message 用）。
-/// 与 spec §2.2 表一致——告诉作者「该怎么写」，而非「漏了什么」。
+/// 与契约表一致——告诉作者「该怎么写」，而非「漏了什么」。
 fn structure_hint(role: &str) -> Option<&'static str> {
     Some(match role {
         "combobox" => {
@@ -141,7 +139,6 @@ pub fn check_control_structure(tree: &IrTree, file: &str, line_map: &LineMap) ->
         let IrNodeKind::Element(el) = &node.kind else {
             continue;
         };
-        // 只校验 role 驱动节点（带 role 属性）。
         let Some(role) = node_role(el) else {
             continue;
         };
@@ -233,7 +230,7 @@ mod tests {
 
     #[test]
     fn tablist_without_tab_child_is_error() {
-        // role=tablist 无 role=tab 子 → error（M3 TabList 结构契约）
+        // role=tablist 无 role=tab 子 → error（TabList 结构契约）
         let diags = struct_diags(r#"<div role="tablist"></div>"#);
         assert_eq!(diags.len(), 1, "{diags:?}");
         assert!(diags[0].message.contains("tab"));
@@ -312,7 +309,7 @@ mod tests {
 
     #[test]
     fn required_child_must_be_direct() {
-        // 必需子节点必须是直接子（spec §2.2 字面结构）；嵌套进 wrapper 不算
+        // 必需子节点必须是直接子；嵌套进 wrapper 不算
         let diags = struct_diags(
             r#"<div role="slider"><div class="wrap"><div data-slot="thumb"></div></div></div>"#,
         );

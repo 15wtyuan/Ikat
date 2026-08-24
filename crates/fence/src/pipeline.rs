@@ -18,14 +18,14 @@ pub struct ParsedTemplate {
     pub tree: IrTree,
     pub styles: Vec<ResolvedStyle>,
     pub dynamic_rules: Vec<DynamicRule>,
-    /// @keyframes 规则（对齐 public-api.md「动画全在 CSS」终态契约）。
+    /// @keyframes 规则（「动画全在 CSS」契约）。
     /// pkg v30 起 core 类型已就绪（crate::scene::animation）；packer bridge 负责将
     /// fence declarations 转成 AnimatableProps，并把规则写入 ComponentTemplate.keyframes。
-    /// player 运行时驱动留后续 M2 task。
+    /// player 运行时驱动留后续实现。
     pub keyframes: Vec<KeyframesRule>,
     /// Stage 6.4 产物：rich-text-block 根的 ir_idx 集合（block 容器 + 直接子全 inline 级）。
     /// packer bridge 据此烘 TemplateNode.rich_text_block flag，runtime 把这些 inline 子
-    /// 拍平成 RichRun 走 inline flow（见 main-design 文本模型）。display:flex 容器不在此列
+    /// 拍平成 RichRun 走 inline flow。display:flex 容器不在此列
     /// （其子是 flex item，走 flex 排版）。Stage 6.5 读此集合豁免 img（仍报 button）。
     pub rich_text_blocks: Vec<usize>,
     pub diagnostics: Vec<Diagnostic>,
@@ -270,13 +270,11 @@ fn extract_sprites(tree: &IrTree) -> Vec<String> {
     let mut sprites = Vec::new();
     for node in &tree.nodes {
         if let IrNodeKind::Element(el) = &node.kind {
-            // img src
             if el.tag == "img" {
                 if let Some(src) = el.attributes.iter().find(|a| a.name == "src") {
                     sprites.push(src.value.clone());
                 }
             }
-            // background-image: url(...) in inline style
             if let Some(style) = el.attributes.iter().find(|a| a.name == "style") {
                 for decl in style.value.split(';') {
                     let decl = decl.trim();

@@ -27,7 +27,7 @@ pub fn payload_hash(rn: &RenderNode) -> u64 {
             for &v in color_matrix.iter() {
                 v.to_le_bytes().hash(&mut h);
             }
-            // re-base verts to local before hashing（同 blob.rs:104-111）。
+            // re-base verts to local before hashing。
             // 纯平移节点 bake 了绝对世界坐标进 verts→减法得 local；
             // 非纯平移节点已 box-local（Rect{x:0,y:0}）→不减。
             // 这样位置变只改 world_matrix（进 header_hash），不改 payload_hash→Header。
@@ -133,14 +133,6 @@ mod tests {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // payload_hash 测试（支柱2：几何全量，不采样）
-    // -----------------------------------------------------------------------
-
-    // -----------------------------------------------------------------------
-    // header_hash 测试（支柱2：表头轴，与 payload_hash 正交）
-    // -----------------------------------------------------------------------
-
     #[test]
     fn header_hash_world_matrix_change() {
         let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
@@ -187,10 +179,8 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
     // reuse_key 进 header_hash 回归测试（身份字段进表头 hash，
     // 同 NodeId 换 reuse_key 时 header_hash 应变化触发 Header 级变更）。
-    // -----------------------------------------------------------------------
 
     #[test]
     fn header_hash_includes_reuse_key() {
@@ -219,16 +209,14 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
     // effect 进 header_hash（SDF effect 参数变 = Header 级，只更 MPB uniform，
     // 不重建 mesh）。payload_hash 不采样 effect（effect 非几何）。
-    // -----------------------------------------------------------------------
 
     #[test]
     fn header_hash_includes_effect() {
         let a = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
         let mut b = mesh_rn(Some("a.png"), 1.0, [1.0; 4]);
-        b.effect.outline_width = 2.0; // SDF effect 参数变
+        b.effect.outline_width = 2.0;
         assert_ne!(
             header_hash(&a),
             header_hash(&b),
@@ -248,10 +236,8 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
     // shadow_params 进 header_hash（box-shadow SDF 参数变 = Header 级，只更 MPB uniform，
     // 不重建 mesh）。payload_hash 不采样 shadow_params（shadow 非几何）。
-    // -----------------------------------------------------------------------
 
     #[test]
     fn header_hash_includes_shadow_params() {

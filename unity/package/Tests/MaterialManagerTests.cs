@@ -56,8 +56,8 @@ namespace LoomGUI.Tests
             var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
             var white = Texture2D.whiteTexture;
             var box = new Vector4(-2f, 2f, 0.01f, 0.01f);
-            mm.SetClipBox(3, box);          // dict 先写
-            var m = mm.Get(0, white, 3, false, false);    // 建材质时应读取 dict
+            mm.SetClipBox(3, box);
+            var m = mm.Get(0, white, 3, false, false);
             Assert.AreEqual(box, m.GetVector("_ClipBox"), "首帧：SetClipBox 先于 Get，Get 建材质时带 box");
             Assert.IsTrue(m.IsKeywordEnabled("CLIPPED"));
         }
@@ -69,8 +69,8 @@ namespace LoomGUI.Tests
         {
             var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
             var white = Texture2D.whiteTexture;
-            var mRect = mm.Get(0, white, 5, false, false);   // 直角 clip
-            var mRound = mm.Get(0, white, 5, false, true);   // 圆角 clip
+            var mRect = mm.Get(0, white, 5, false, false);
+            var mRound = mm.Get(0, white, 5, false, true);
             Assert.IsTrue(mRect.IsKeywordEnabled("CLIPPED"), "rounded=false → CLIPPED");
             Assert.IsFalse(mRect.IsKeywordEnabled("CLIPPED_ROUNDED"), "rounded=false 不启 CLIPPED_ROUNDED");
             Assert.IsTrue(mRound.IsKeywordEnabled("CLIPPED_ROUNDED"), "rounded=true → CLIPPED_ROUNDED");

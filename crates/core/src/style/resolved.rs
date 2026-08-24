@@ -192,7 +192,7 @@ impl Gradient {
 /// LoomGUI display 旁路字段（与 taffy_style.display 并行设置）。
 ///
 /// `display_mode` 让内部 Strategy 选择（Block vs Flex scrolling/text alignment
-/// 分支）不依赖 taffy 模式枚举。`taffy_style.display` 同步设置——P1 C2 起 block
+/// 分支）不依赖 taffy 模式枚举。`taffy_style.display` 同步设置——block
 /// 标签和 `display:block` 都走 taffy `Display::Block`（真 CSS 块流，垂直堆叠且
 /// 忽略子元素 flex-grow）。inline 走 Flex Row，none 走 None。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -222,8 +222,8 @@ pub enum PositionDeclared {
 /// `/` 省略时 v = h（正圆角）。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CornerRadius {
-    pub h: LengthPercentage, // 水平半径
-    pub v: LengthPercentage, // 垂直半径
+    pub h: LengthPercentage,
+    pub v: LengthPercentage,
 }
 impl Default for CornerRadius {
     fn default() -> Self {
@@ -346,7 +346,7 @@ pub struct ResolvedStyle {
     /// CSS INHERITED 属性（照 CSS 规范），打包期 bake 进 base_style。
     pub caret_color: Option<[f32; 4]>,
     /// CSS `selection-background`（选中文本的背景色）。None = 缺省回退蓝半透
-    /// `[0,0,1,0.5]`（render arm fallback，Task 12 的常量）。LoomGUI 私有属性
+    /// `[0,0,1,0.5]`（render arm fallback）。LoomGUI 私有属性
     /// （CSS 用 `::selection { background }`，围栏无伪元素选择器，故用平铺 prop）。
     pub selection_background: Option<[f32; 4]>,
     /// CSS `selection-color`（选中文本的文字色）。None = 缺省回退白色（render arm fallback）。
@@ -367,7 +367,7 @@ pub struct ResolvedStyle {
     pub line_height: f32, // 单位倍数（1.5 = 1.5x font-size），0 = normal
     pub letter_spacing: f32,
     pub white_space_nowrap: bool,
-    /// flex 顺序（CSS `order`）。taffy 0.5 Style 无此字段，存在这里由
+    /// flex 顺序（CSS `order`）。taffy Style 无此字段，存在这里由
     /// layout 在 flex 排序前消费。默认 0 = DOM 顺序。
     pub order: i32,
     /// 层叠序（CSS `z-index`）：只改同级兄弟间绘制/命中顺序（z 升序绘制、
@@ -454,8 +454,8 @@ impl Default for ResolvedStyle {
     fn default() -> Self {
         // CSS spec: flex-direction initial value is `row`. taffy Style::DEFAULT
         // is already Row — we used to override to Column for the legacy v1
-        // "div is always a flex container" model, but that was removed (P1 C2:
-        // div is real CSS block flow now). Keeping the Column default broke
+        // "div is always a flex container" model, but that was removed (div
+        // is real CSS block flow now). Keeping the Column default broke
         // containers whose display:flex comes from a <style> class rule (applied
         // at runtime rematch, past stage-4's row-override) — they stacked
         // vertically instead of flowing in a row. Default now matches the CSS

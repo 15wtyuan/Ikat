@@ -1,9 +1,9 @@
-//! 动画事件（spec §7.1 事件流 / §7.5 事件 struct）：事件类型常量 + EventRecord 构造 +
+//! 动画事件：事件类型常量 + EventRecord 构造 +
 //! 事件字符串表。
 //!
 //! 数据流：`update_all`（scene/animation.rs）advance 后检测阈值 → 本模块构造 EventRecord
-//! 推入 `out` → stage tick 汇入 last_events → C# `borrow_events` demux（T11）。START/END/
-//! ITERATION 走 node.EventBus 全局路由，KEY/HOOK 走 player_key 句柄私有路由（spec §7.1）。
+//! 推入 `out` → stage tick 汇入 last_events → C# `borrow_events` demux。START/END/
+//! ITERATION 走 node.EventBus 全局路由，KEY/HOOK 走 player_key 句柄私有路由。
 //!
 //! **payload 编码**（复用 EventRecord 现有字段，参考 EVT_TWEEN_COMPLETE 复用模式，不扩
 //! struct、ABI 安全）：
@@ -21,7 +21,7 @@ use crate::input::EventRecord;
 use crate::scene::animation::{player_key_as_u64, PlayerKey};
 use crate::scene::node::NodeId;
 
-/// 动画启动（player 首次 update；class 触发 + node.Play 都发，spec §7.5）。
+/// 动画启动（player 首次 update；class 触发 + node.Play 都发）。
 /// 值对齐 C# `EventType.AnimationStart`（LoomGUI.EventType.cs，公共 API 冻结值）。
 pub const EVT_ANIMATION_START: u8 = 18;
 /// 迭代结束（每个 iteration 边界；完成帧不发——CSS：最后一次 iteration 结束只发 END，
@@ -31,7 +31,7 @@ pub const EVT_ANIMATION_ITERATION: u8 = 19;
 /// 动画完成（PlayerFrame.completed 转变帧一次；fill forwards/both 持续完成态不重发）。
 /// 值对齐 C# `EventType.AnimationEnd`。
 pub const EVT_ANIMATION_END: u8 = 20;
-/// OnKey 百分比跨越（句柄私有，不广播 EventBus；spec §7.5）。
+/// OnKey 百分比跨越（句柄私有，不广播 EventBus）。
 pub const EVT_ANIMATION_KEY: u8 = 27;
 /// @loom-hook stop 跨越（句柄私有）。
 pub const EVT_ANIMATION_HOOK: u8 = 28;
@@ -45,7 +45,6 @@ pub const EVT_ANIMATION_HOOK: u8 = 28;
 pub struct EventStrTable {
     /// intern 表序 = 索引序（索引即 Vec 下标）。
     strings: Vec<String>,
-    /// 字符串 → 索引（intern 去重）。
     index: std::collections::HashMap<String, u32>,
 }
 

@@ -31,7 +31,7 @@ fn main() {
     s.tick_and_render();
     let scene = s.scene.as_ref().unwrap();
     println!("n_nodes={}", scene.nodes.len());
-    // scroll.0 是 HashMap<NodeId, ScrollPaneState>（T3）；按 NodeId 迭代。
+    // scroll.0 是 HashMap<NodeId, ScrollPaneState>；按 NodeId 迭代。
     for (id, st) in scene.scroll.0.iter() {
         let n = scene.get(*id).expect("live node for scroll slot");
         let id_attr = n.id_attr.clone().unwrap_or_default();

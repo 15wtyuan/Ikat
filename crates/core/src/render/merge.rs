@@ -70,7 +70,6 @@ pub fn merge_meshes(
     control_ids: &std::collections::HashSet<u32>,
     nodes: Vec<RenderNode>,
 ) -> Vec<RenderNode> {
-    // 1. 按 sort_key 排序（重排后序）。
     let mut order: Vec<usize> = (0..nodes.len()).collect();
     order.sort_by_key(|&i| nodes[i].sort_key);
 
@@ -86,7 +85,6 @@ pub fn merge_meshes(
             continue;
         }
         let key = key.unwrap();
-        // 收集连续同 key 的 Mesh。
         // key 含 Option<String>（非 Copy），用 ref 比较避免 move。
         let mut batch_idx: Vec<usize> = vec![idx];
         let mut j = i + 1;
@@ -106,7 +104,6 @@ pub fn merge_meshes(
 
 /// 把一组同 DrawState Mesh 节点拼成单个 merged Mesh payload。
 fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
-    // 锚 node_id = batch 内最小原始 node_id。
     let anchor = batch.iter().map(|&i| nodes[i].node_id).min().unwrap();
     let last = &nodes[*batch.last().unwrap()]; // 取 texture/program/mask_context/sort_key 模板
     let mut verts: Vec<[f32; 2]> = Vec::new();
@@ -294,7 +291,7 @@ mod tests {
 
     #[test]
     fn two_same_atlas_text_nodes_merge() {
-        // v1.6：text 现产 Mesh(program=1)，同 atlas path 允合批。
+        // text 现产 Mesh(program=1)，同 atlas path 允合批。
         // 两 text 节点同 program=1 同 image_path → merge 成 1 个 8-vert Mesh。
         let mut t1 = mesh_node(1, Some("loomgui://font-atlas/p0"), 0, 1.0, 0.0);
         t1.payload = NodePayload::Mesh {

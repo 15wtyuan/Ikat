@@ -42,7 +42,6 @@ fn rec(scene: &Scene, anim: &AnimTable, id: NodeId, parent_world: Affine2, world
         .and_then(|a| a.transform)
         .unwrap_or(node.style.transform.matrix);
     let m = transform::mul(&base_m, &node.user_transform.to_matrix());
-    // local = T(rel) ∘ T(pivot) ∘ m ∘ T(-pivot)（free fn by ref，更显式）
     let local = transform::mul(
         &transform::from_translate(rel.0, rel.1),
         &transform::mul(
@@ -309,7 +308,6 @@ mod tests {
             },
         )]);
         let rid = root_id(&s);
-        // 不设 anim（全 None）
         compute_world_transforms(&mut s);
         let (x, y) = s.world_transforms[rid.index()].apply_point(0.0, 0.0);
         assert!(
@@ -449,7 +447,6 @@ mod tests {
         );
     }
 
-    // --- user_transform（public-api Transform API 的 core 端）---
     // set_user_transform 写 node.user_transform；compute_world_transforms 在世界矩阵累计时并入，
     // **不触发 solve**。供高频拖拽（slider thumb）等运行时定位用。
 

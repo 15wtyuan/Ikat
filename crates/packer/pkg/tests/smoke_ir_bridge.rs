@@ -1,7 +1,7 @@
-//! 终点线 1 smoke：HTML -> pkg.bin -> Stage -> rect/visible 断言（端到端范式验证）。
+//! 端到端 smoke：HTML -> pkg.bin -> Stage -> rect/visible 断言（范式验证）。
 //!
 //! 验"端到端链通 + class 命中（rect）+ display:none 剪枝 + flex 布局"。继承/color/font、
-//! kind 保真、computed style 的完整断言推 ③（spec §10）——本 smoke 用 Stage public API
+//! kind 保真、computed style 的完整断言不在本 smoke 范围——本 smoke 用 Stage public API
 //! （get_node_layout_rect / get_node_visible / find_node_by_id）可达的部分。
 use loomgui_core::scene::NodeId;
 use loomgui_core::stage::Stage;
@@ -10,8 +10,8 @@ use loomgui_pkg::build::{pack_components, Component, PackResult};
 /// Pack HTML -> pkg.bin -> Stage -> instantiate -> 帧推进，返回 Stage + 组件根 NodeId。
 ///
 /// `create_root` 建 scene + stage_root（`Stage::new` 不建 scene，`instantiate` 要求 scene
-/// 已存在——见 stage.rs:573 `ok_or("no scene (create_root first)")`）。`append_child` 把
-/// 组件根挂进 tree，否则 `solve` 只走 `scene.roots[0]`（layout/mod.rs:217），孤立组件不进 layout。
+/// 已存在——`ok_or("no scene (create_root first)")`）。`append_child` 把组件根挂进 tree，
+/// 否则 `solve` 只走 `scene.roots[0]`，孤立组件不进 layout。
 fn build_stage(html: &str) -> (Stage, NodeId) {
     let PackResult { bytes, .. } = pack_components(&[Component {
         name: "c".to_string(),
@@ -21,7 +21,7 @@ fn build_stage(html: &str) -> (Stage, NodeId) {
     .expect("pack_components");
     let mut stage = Stage::new((400.0, 300.0)).expect("Stage::new");
     // Text layout needs a default font at tick time (measure_text panics without one).
-    // Register a default ASCII font; embedded at compile time to stay cwd-independent.
+    // Embedded at compile time to stay cwd-independent.
     stage
         .register_font(
             "DejaVu",

@@ -702,8 +702,6 @@ fn hover_out_of_ui_rollout_whole_chain() {
     );
 }
 
-// ===== 多槽测试 =====
-
 /// 鼠标 touch_id=-1 进 slots[0]，Down/Up/Click 等价单指。
 #[test]
 fn mouse_uses_slot0_touch_id_neg1() {
@@ -1160,8 +1158,6 @@ fn is_pointer_on_ui_any_slot() {
     );
 }
 
-// ===== touch_monitors capture 测 =====
-
 /// Down 后 add_touch_monitor → 后续 Move 产 Move@monitor。
 #[test]
 fn move_with_monitor_dispatches_to_monitor() {
@@ -1331,8 +1327,6 @@ fn remove_touch_monitor_stops_dispatch() {
         "remove 后 Move 不产给该 monitor"
     );
 }
-
-// ===== click_test + per-axis 阈值 + down_targets =====
 
 /// Click 目标 = down_leaf（非当前 hit）。Down@btn 边缘，漂出 btn 到 root（位移≤10），
 /// Up → Click@btn（按下叶），Up 事件@root（当前 hit）。down_targets[0] 优先。
@@ -1536,8 +1530,6 @@ fn down_leaf_destroyed_fallback_to_ancestor() {
         "down_leaf 销毁 → Click@root（祖先兜底）"
     );
 }
-
-// ===== 双击 + Move 取消 =====
 
 /// 双击：两次 Click（time_s 间隔 0.2、同位置、同键）→ 第二次 click_count=2。
 #[test]
@@ -1748,8 +1740,6 @@ fn move_exceeds_50_cancels_click() {
     assert!(out.iter().any(|e| e.event_type == EVT_UP), "Up 仍发");
 }
 
-// ===== Canceled + CancelClick =====
-
 /// Canceled：发 Up、不发 Click。
 #[test]
 fn canceled_emits_up_skips_click() {
@@ -1894,8 +1884,6 @@ fn canceled_resets_click_count() {
     );
 }
 
-// ===== Stationary hover 跟随 =====
-
 /// 静止光标下元素移走 → hover 跟随刷新（无 Move 事件）。
 /// Move@btn → hover btn；scene2 btn 移到 (150,150)，空事件 → re-hit-test (50,50)=root → RollOut(btn)。
 #[test]
@@ -1951,8 +1939,6 @@ fn stationary_cursor_hover_follows_moved_element() {
         "root 已 hovered → 无 RollOver"
     );
 }
-
-// ===== core drag 检测 =====
 
 /// root(0,0,200,200) + draggable btn(0,0,100,100)。
 fn one_draggable_button_scene() -> Scene {
@@ -2390,8 +2376,6 @@ fn canceled_emits_dragend() {
     );
 }
 
-// ===== core longpress 检测 =====
-
 #[test]
 fn longpress_fires_after_1_5s_no_move() {
     // Down@btn → time_s 推进 1.5s（空事件 tick）→ LongPress@btn 一次。
@@ -2574,8 +2558,6 @@ fn longpress_disabled_node_no_fire() {
         "disabled → 不发 LongPress"
     );
 }
-
-// ===== 焦点 + 键盘 =====
 
 /// root + btnA(tabindex=0) + btnB(tabindex=0)，均 @ 各位可区分。
 fn two_focusable_scene() -> Scene {
@@ -3044,8 +3026,6 @@ fn click_disabled_focusable_no_focus() {
     assert_eq!(s.focused_node, None);
 }
 
-// ===== scroll 手势仲裁 =====
-
 /// root(0) + scroll 容器(1) overflow_y=Scroll viewport 100x100 + content 子(2) 40x200（content>viewport y 轴）。
 /// refresh_content_sizes 后容器 1 overlap_y=100，effective_y=true（Scroll 永真），effective_x=false（Visible）。
 fn v_scroll_scene() -> Scene {
@@ -3124,7 +3104,7 @@ fn v_scroll_scene() -> Scene {
         h: 200.0,
     }; // content 40x200 → overlap_y=100
        // 模拟 layout solve 的 clip_rect 填充（overflow!=Visible 节点 build 时 Some(default)，
-       // layout/mod.rs:196 把它填成自身 border 框；测里手填等效值）。
+       // layout solve 把它填成自身 border 框；测里手填等效值）。
     for n in s.nodes.values_mut() {
         if n.clip_rect.is_some() {
             n.clip_rect = Some(n.layout_rect);
@@ -3457,13 +3437,6 @@ fn scroll_up_starts_inertia_and_clears_state() {
 
 #[test]
 fn scroll_start_suppresses_drag() {
-    // 同时 draggable + scroll 容器（叶子 draggable）：scroll 达阈值先于 drag（scroll 8 > drag 2
-    // 但子非 draggable 这里）；此处验 scroll 启动后 drag_target 被清，drag 不启动。
-    // 改 leaf draggable=true 但容器是 scroll：drag_target=leaf（draggable），scroll_candidate=容器。
-    // 阈值赛跑：drag mouse 2 < scroll 8 → drag 先达。本测改验：scroll 先达场景下 drag_target=None。
-    // 构造：draggable=true 的 content 子放在 scroll 容器，先小 Move 触发 scroll（需 scroll 先于 drag
-    // 不可能——drag 阈值更小）。改测：draggable leaf 在 scroll 容器，Move 大位移同时超两者 →
-    // drag 先达（2<8）→ scroll_testing 清。此验互斥另一侧（drag 赢清 scroll）。
     use crate::style::resolved::{OverflowMode, ResolvedStyle};
     let mut scroll_style = ResolvedStyle::default();
     scroll_style.overflow_y = OverflowMode::Scroll;
@@ -3631,8 +3604,6 @@ fn no_scroll_candidate_when_no_effective_ancestor() {
         "无 scroll 容器 → scrolling_pane=None"
     );
 }
-
-// ── scrollbar grip 拖拽 ─────────────────────────────
 
 fn grip_scroll_scene() -> Scene {
     use crate::scene::node::NodeKind;
@@ -3880,7 +3851,6 @@ fn grip_up_clears_state_and_no_inertia() {
             touch_id: -1,
         }],
     );
-    // Move to build some velocity via... actually grip doesn't use drag_follow
     ps.process(
         &mut s,
         &[PointerEvent {
@@ -3935,8 +3905,6 @@ fn grip_no_hit_on_non_thumb_area() {
     );
 }
 
-// ===== 控制键路由（Task 10+11）：keydown → 编辑内核 =====
-//
 // 这些测试直接调 process_keys（隔离 PointerState/Stage）。focused 节点带正确的 NodeKind
 // + 注入 ControlState（TextField/TextArea）。常量 KEY_* / EVT_SUBMITTED 在 input.rs 定义。
 // KeyCode 数值取 Unity KeyCode 枚举（与 unity/package/.../LoomGUI.Types.cs 的 KeyCode enum 对齐——
@@ -4372,11 +4340,8 @@ fn non_text_focused_node_not_routed() {
     );
 }
 
-// ── outside-click close（Task 12）──────────────────────────────
-//
 // open Dropdown：pointer-down 命中不在其 select 子树内 → 收起（open=false）。
 // select 子树 = select 本身 + .loom-value/.loom-popup（含 option）后代。
-// 点击 option（popup 内）不算 outside → 不收起（option 选中由其 click EVT 驱动，另一任务）。
 
 /// 建 open Dropdown 场景：root > select(Dropdown,open,120x30 @(10,10))，
 /// select 的 .loom-popup(80x60 @(10,40)) 内含两个 option。
@@ -4519,9 +4484,8 @@ fn pointer_down_on_option_does_not_close_dropdown() {
             touch_id: -1,
         }],
     );
-    // Task 13：点 option 现在选中 + 收起（不再是 Task 12 的「不收起」占位）。
-    // outside-click 保护仍生微——点 option 不走 close_outside（命中在 popup 子树内），
-    // 收起是 on_pointer_down 的选中提交副作用，不是 outside-close。
+    // 点 option 现在选中 + 收起。outside-click 保护仍生效——点 option 不走 close_outside
+    // （命中在 popup 子树内），收起是 on_pointer_down 的选中提交副作用，不是 outside-close。
     assert!(
         !dropdown_open(&s, select),
         "pointer-down 在 option → 选中 + 收起（Task 13 交互闭环）"
@@ -4532,9 +4496,8 @@ fn pointer_down_on_option_does_not_close_dropdown() {
 
 #[test]
 fn pointer_down_on_select_header_toggles_closed() {
-    // Task 13：open 时点 select header → toggle 收起（不再是 Task 12 的「不收起」占位）。
-    // outside-click 保护仍生微——点 header 不走 close_outside（命中在 select 子树内），
-    // 收起是 on_pointer_down 的 toggle 副作用。
+    // open 时点 select header → toggle 收起。outside-click 保护仍生效——点 header 不走
+    // close_outside（命中在 select 子树内），收起是 on_pointer_down 的 toggle 副作用。
     let (mut s, select, _popup, _opt0, _btn) = open_dropdown_with_outside_button_scene();
     let mut ps = PointerState::new();
     ps.process(
@@ -4602,8 +4565,6 @@ fn pointer_down_outside_closes_only_open_dropdown_not_closed_one() {
     );
 }
 
-// ── Dropdown 交互：click toggle / click option select / 键盘 seek-commit-revert（Task 13）─
-//
 // 交互闭环：点 select header 收起↔展开；点 option 选中+收起+发 SelectionChanged；
 // 键盘 Up/Down seek 跳过 disabled、Enter 提交、Esc 回滚到打开时的选中项。
 // 照 RmlUi WidgetDropDown：SeekSelection 跳 disabled、CancelSelectBox 回滚 open 时刻值。
@@ -4953,7 +4914,6 @@ fn keyboard_ignored_when_dropdown_closed() {
     );
 }
 
-// === 非 commit 收起路径必须回滚 selected_index（cancel 语义一致性回归） ===
 // 契约：Up/Down 只移动高亮不提交、不发 SelectionChanged。所有非提交收起路径
 //（Esc / header-toggle / outside-click）都必须把 selected_index 回滚到展开时刻快照
 //（open_selected_index），否则 host 读到改动却收不到事件（违反 SelectionChanged 事件契约）。
@@ -5083,9 +5043,7 @@ fn enter_after_keyboard_nav_commits() {
     );
 }
 
-// ── TabList 键盘路由（T7：方向键移动 selected_index，K1 clamp 不 wrap） ──
-//
-// 焦点在 TabList 子树（Tab 是 focusable per T3，TabList 本身不聚焦）→ 向上找
+// 焦点在 TabList 子树（Tab 是 focusable 元素，TabList 本身不聚焦）→ 向上找
 // ControlState::TabList 祖先。方向键按 flex-direction 选轴：row→Left/Right、column→
 // Up/Down；row-reverse/column-reverse 翻转 delta 符号。clamp 到 [0, tab_count-1]（不 wrap）。
 // 自动激活：每改 selected_index 即发 SelectionChanged（与 Dropdown 的 seek 不提交不同——
@@ -5157,7 +5115,7 @@ fn tablist_selected(scene: &Scene, tl: NodeId) -> usize {
 
 #[test]
 fn arrow_key_moves_tablist_selected_index() {
-    // TabList(row, selected_index=0) + 3 tabs。焦点在 tab0（T3：Tab 是 focusable 元素）。
+    // TabList(row, selected_index=0) + 3 tabs。焦点在 tab0（Tab 是 focusable 元素）。
     // Right → 1（发 SelectionChanged@tablist touch_id=1）；再 Right → 2；再 Right → clamp 2
     // （不发事件——changed-guard）；Left → 1。
     let (mut s, tl, tabs) = tablist_keyboard_scene(3, 0, taffy::FlexDirection::Row);
@@ -5311,8 +5269,6 @@ fn tablist_column_reverse_inverts_vertical_arrows() {
     );
 }
 
-// ── Task 15：NumberField 字符输入 guard（filter 非数字） ───────────────
-//
 // NumberField 是文本类控件（EditState.value 是数字的字符串形式），但字符输入通道
 // （textinput，UTF-32 codepoints）须过滤非数字字符：仅允许 0-9 / '-' / '.' / 'e' / 'E'。
 // 过滤发生在 commit 路径（process_text_input），不在 IME composition 预编辑期（set_composition
@@ -5493,15 +5449,6 @@ fn number_field_ime_commit_filters_non_numeric() {
         "'+' 被拒（'+' 不是数字语法）"
     );
 }
-
-// ── Task 15 fix：NumberField 接进 keydown 控制键路由（Backspace/Delete/arrows/ctrl+A）
-//
-// process_keys 的 is_text 此前只含 TextField/TextArea，NumberField 聚焦后能收字符
-// （process_text_input 渠）但 Backspace/Delete/方向键/Home/End/ctrl 组合键全透传，
-// 不可纠错。现 is_text 含 NumberField、ControlState 解构臂含 NumberField.edit，
-// 共享同一套 EditState 编辑原语（delete_char/move_cursor 等都 kind 无关，直接生效）。
-// paste 过滤的集成测见 control.rs（`paste_filters_non_numeric_for_number_field`，
-// 复用该模块的剪贴板测试架 CLIP_TEST_LOCK/TEST_CLIP）。
 
 #[test]
 fn number_field_backspace_deletes_char() {

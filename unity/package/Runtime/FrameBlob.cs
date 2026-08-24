@@ -1,5 +1,5 @@
 using System;
-using System.Text;   // Encoding.UTF8 for ReadPath
+using System.Text;
 using UnityEngine;
 
 namespace LoomGUI
@@ -170,7 +170,6 @@ namespace LoomGUI
             Math.Abs(Ma(i) - 1f) < 1e-6f && Math.Abs(Mb(i)) < 1e-6f
             && Math.Abs(Mc(i)) < 1e-6f && Math.Abs(Md(i) - 1f) < 1e-6f;
 
-        // ===== v7 path string table（§5.2）：path_idx 列 1-based 索引此表。
         // layout: path_count:u32 后跟 count × {path_len:u32, path_bytes:u8[path_len]}（length-prefixed UTF-8）。
         // 镜像 Rust blob.rs::read_path / path_count。MirrorPool 读 path_idx → ReadPath(idx) 取 path 串。
         /// path string table 的 path_count（path table 首 4B）。无 image_path scene 恒为 0。

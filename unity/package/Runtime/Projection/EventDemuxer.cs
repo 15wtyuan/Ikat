@@ -1,29 +1,30 @@
-// EventDemuxer：raw LoomEvent stream → typed event struct dispatch（投影层 D3）。
+// EventDemuxer：raw LoomEvent stream → typed event struct dispatch。
 //
-// 设计契约（spec §3.4 task D3）：
+// 设计契约：
 // - Pump(ptr,count) 每 tick 调（LoomHost.Step 内，复用 borrow_events FFI 的同一 buffer）。
 // - 逐条 LoomEvent 翻译为 typed event struct：
 //     * _core.Target = _ctx._registry.GetOrCreate(nodeId)（投影层 Node 身份）。
 //     * 业务字段（Position/ClickCount/TouchId/Key/Modifiers）从 raw EventRecord 填充。
 //       不可从 raw 直接填充的字段（Button/DeltaX/DeltaY/StartPosition/Repeat/
 //       PreviousFocused/NewFocused/Scroll*/AnimationName/PropertyName/IterationCount）
-//       留在 default——后续接线补齐（D3 焦点是 demux 接线 + 路由正确性）。
-// - 调 _ctx._eventBus.Dispatch<T>(targetNodeId, evt) 走 D2 capture/bubble/once 路由。
+//       留在 default——后续接线补齐。
+// - 调 _ctx._eventBus.Dispatch<T>(targetNodeId, evt) 走 EventBus capture/bubble/once 路由。
 //
-// 5 无核心 source struct 处理（D1 EventType 17-21）：
-// - AnimationEnd (20) / TransitionEnd (21)：接 TweenComplete (type=16) 源（v1 旧路径）。
+// 5 无核心 source struct 处理（EventType 17-21）：
+// - AnimationEnd (20) / TransitionEnd (21)：接 TweenComplete (type=16) 源（旧路径）。
 //   core TweenComplete EventRecord 的 click_count=TweenProp(u8)、touch_id=tag(i32)。
 //   TweenComplete 事件同时产 AnimationEndEvent + TransitionEndEvent（按 prop 名称分流推后）。
-// - ScrollChanged (17)：defer（ScrollPane 物理自维护，无 core event source）。
-// - AnimationStart (18) / AnimationIteration (19) / AnimationEnd (20)：M2 真 core 事件源
-//   （crates/core/src/event.rs，T9）——见下方「M2 @keyframes 动画事件」路由。
+// - AnimationStart (18) / AnimationIteration (19) / AnimationEnd (20)：真 core 事件源
+//   （crates/core/src/event.rs）——见下方「@keyframes 动画事件」路由。
 //
-// M2 @keyframes 动画事件（spec §7.1 双路由 / §7.5 payload 编码）：
+// - ScrollChanged (17)：defer（ScrollPane 物理自维护，无 core event source）。
+//
+// @keyframes 动画事件（双路由 + payload 编码）：
 // - START/END/ITERATION（18/19/20）：node.EventBus 广播（On<AnimationXxxEvent>，class 触发
 //   也能订阅）+ 按 playerKey 查 AnimationHandle 实例触发私有回调（onStart/onEnd）。
 // - KEY/HOOK（27/28）：只按 playerKey 查句柄触发 onKey(pct)/onHook(name)，不广播 EventBus
 //   （句柄私有）。
-// - payload 解码（T9 event.rs）：name 表索引装 click_count+pad（24-bit LE）；PlayerKey u64
+// - payload 解码（core event.rs）：name 表索引装 click_count+pad（24-bit LE）；PlayerKey u64
 //   拆 touch_id（低 32）+ x（高 32 f32 bits）；y = 载荷（ITERATION=迭代序号 f32 bits /
 //   KEY=percent / HOOK=hook_name 表索引 f32 bits）。字符串经 EventStrTable 索引读回
 //   （loomgui_stage_get_event_string，双调法）。
@@ -82,7 +83,6 @@ namespace LoomGUI
                 uint nodeId = evt.nodeId;
                 switch (evt.eventType)
                 {
-                    // ── Pointer 类（bubble 事件）─────────────────────────
                     case (byte)EventType.Down:
                         DispatchTyped(nodeId,
                             new PointerDownEvent { _core = NewCore(nodeId),
@@ -119,7 +119,6 @@ namespace LoomGUI
                                 _position = new LoomVector2(evt.x, evt.y), _clickCount = evt.clickCount });
                         break;
 
-                    // ── Drag 类（bubble 事件）────────────────────────────
                     case (byte)EventType.DragStart:
                         DispatchTyped(nodeId,
                             new DragStartEvent { _core = NewCore(nodeId),
@@ -136,7 +135,6 @@ namespace LoomGUI
                                 _position = new LoomVector2(evt.x, evt.y) });
                         break;
 
-                    // ── Keyboard 类（bubble 事件）────────────────────────
                     case (byte)EventType.KeyDown:
                         DispatchTyped(nodeId,
                             new KeyDownEvent { _core = NewCore(nodeId),
@@ -148,7 +146,6 @@ namespace LoomGUI
                                 _key = (LoomKeyCode)evt.touchId, _modifiers = (KeyModifiers)(byte)evt._pad });
                         break;
 
-                    // ── Focus 类（bubble 事件）───────────────────────────
                     case (byte)EventType.FocusIn:
                         DispatchTyped(nodeId,
                             new FocusEvent { _core = NewCore(nodeId) });
@@ -158,11 +155,10 @@ namespace LoomGUI
                             new BlurEvent { _core = NewCore(nodeId) });
                         break;
 
-                    // ── TweenComplete → AnimationEnd + TransitionEnd ─────
                     // core TweenComplete EventRecord：click_count = TweenProp (u8)、
                     // touch_id = tag (i32)。两条 typed struct 各自独立 RouteEventCore——若共享，
                     // AnimationEnd handler 调 StopPropagation 会污染 TransitionEnd 的 bubble。
-                    // （v1 旧路径保留；M2 真 AnimationEnd=20 见下段。）
+                    // （旧路径保留；真 AnimationEnd=20 源见下段。）
                     case (byte)EventType.TweenComplete:
                         {
                             DispatchTyped(nodeId,
@@ -172,8 +168,7 @@ namespace LoomGUI
                         }
                         break;
 
-                    // ── M2 @keyframes 动画事件（spec §7.1 双路由 / §7.5 payload 编码）──────
-                    // 解码（T9 event.rs）：name 表索引 24-bit LE（click_count+pad）；PlayerKey u64
+                    // 解码（core event.rs）：name 表索引 24-bit LE（click_count+pad）；PlayerKey u64
                     // 拆 touch_id（低 32）+ x（高 32 f32 bits）；y = 载荷（ITERATION=迭代序号 /
                     // KEY=percent / HOOK=hook_name 表索引，均 f32 bits）。
                     // START/END/ITERATION：EventBus 广播 + 按 playerKey 查句柄触发私有回调
@@ -207,7 +202,7 @@ namespace LoomGUI
                             _ctx.ResolveAnimation(PlayerKeyOf(evt))?.FireEnd();
                         }
                         break;
-                    // KEY/HOOK：句柄私有（spec §7.5），不广播 EventBus——只按 playerKey 查
+                    // KEY/HOOK：句柄私有，不广播 EventBus——只按 playerKey 查
                     // AnimationHandle 实例触发 onKey(pct)/onHook(name)。回调是 Action（无事件参数），
                     // struct 不在此构造（无消费方；字段供测试/调试直读）。
                     case (byte)EventType.AnimationKey:
@@ -217,8 +212,7 @@ namespace LoomGUI
                         _ctx.ResolveAnimation(PlayerKeyOf(evt))?.FireHook(ReadEventString(HookIndex(evt)));
                         break;
 
-                    // ── 控件交互事件（22+，core EVT_*）──────────────────────
-                    // payload 复用 EventRecord 现有字段（input.rs:80-85）：
+                    // payload 复用 EventRecord 现有字段：
                     //   VALUE_CHANGED(22) / CHANGE_COMMITTED(24)：x 装新 float 值（Slider 拖拽逐值 / 松手终值）。
                     //   CHECKED_CHANGED(23)：pad[0] 装布尔（Toggle 翻转 / Radio 新选中）。
                     // route struct（ControlValueChangedEvent 等）携 raw payload 经 EventBus 路由；控件类的
@@ -243,7 +237,7 @@ namespace LoomGUI
                             new ControlSubmittedEvent { _core = NewCore(nodeId) });
                         break;
                     // Dropdown 选中项变更（core EVT_SELECTION_CHANGED，26）。payload = 新 selected_index
-                    // 装在 EventRecord.touch_id（control.rs:422 commit_dropdown_selection，与 Slider 装新值到 x
+                    // 装在 EventRecord.touch_id（core 侧 commit_dropdown_selection，与 Slider 装新值到 x
                     // 不同——Dropdown 的 index 是整数，复用 touch_id:i32 位，避免浮点往返精度损失）。
                     // Dropdown.SelectionChanged 订阅本 route struct 翻译为公共 SelectionChangedEvent。
                     case (byte)EventType.SelectionChanged:
@@ -251,14 +245,13 @@ namespace LoomGUI
                             new ControlSelectionChangedEvent { _core = NewCore(nodeId), _newIndex = evt.touchId });
                         break;
 
-                    // ── deferred（无 core source）────────────────────────
                     // LongPress (9)：无对应 typed event struct——跳过。
                     //
                     // ScrollChanged (17)：source 待补。ScrollPane 物理自维护 tween，
                     // 无 borrow_scroll_events FFI。后续需加 FFI 或 ScrollPane C# 回调
                     // 主动调 EventBus.Dispatch。
                     //
-                    // AnimationStart/Iteration/End (18/19/20) 的 source 已在 M2 接通
+                    // AnimationStart/Iteration/End (18/19/20) 的 source 已接通
                     // （core event.rs，见上方动画事件路由）——不再 defer。
 
                     default:
@@ -313,7 +306,6 @@ namespace LoomGUI
         /// </summary>
         static uint FloatBitsToUInt(float v) => *(uint*)&v;
 
-        // ── M2 动画事件 payload 解码（T9 event.rs 编码的逆）────────────────
 
         /// <summary>
         /// 解码 PlayerKey u64：touch_id = 低 32 位（core 侧 <c>u32 as i32</c> 往返）、
@@ -329,11 +321,11 @@ namespace LoomGUI
         /// </summary>
         static uint NameIndex(RawEventRecord evt) => evt.clickCount | ((uint)evt._pad << 8);
 
-        /// <summary>HOOK 载荷：hook_name 的表索引（f32 bits，T9 event.rs）。</summary>
+        /// <summary>HOOK 载荷：hook_name 的表索引（f32 bits，core event.rs）。</summary>
         static uint HookIndex(RawEventRecord evt) => FloatBitsToUInt(evt.y);
 
         /// <summary>
-        /// 按表索引读回字符串（spec §7.5 EventStrTable；loomgui_stage_get_event_string
+        /// 按表索引读回字符串（EventStrTable；loomgui_stage_get_event_string
         /// 双调法：探大小 → 扩容 → 真读）。越界/无 scene 返空串（防御——正常路径索引恒由
         /// core intern 产生，越界只可能来自 ABI 漂移）。
         /// </summary>

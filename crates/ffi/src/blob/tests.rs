@@ -407,7 +407,7 @@ fn path_idx_column_round_trips() {
 }
 
 /// program 列（u8，第 19 列，v5）：Mesh program=2（Container+bg-image 合成）/ 纯色 mesh program=0。
-/// round-trip。VERSION=12（v12：22 列，加 shadow_params）。
+/// round-trip。
 #[test]
 fn program_column_round_trips() {
     let blob = build_blob(&frame(&[
@@ -429,7 +429,6 @@ fn program_column_round_trips() {
 fn blob_header_has_text_and_clip_arena_fields() {
     let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
 
-    // magic + version==12。
     assert_eq!(u32::from_le_bytes(blob[0..4].try_into().unwrap()), MAGIC);
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
@@ -496,7 +495,6 @@ fn blob_header_has_text_and_clip_arena_fields() {
     );
 }
 
-/// TestView 解析 v12 blob：22 列 + 两 arena 头（mesh→clip 链）。
 /// clip_count=0 占位验证。
 #[test]
 fn test_view_parses_layout_and_text_placeholders() {
@@ -566,7 +564,6 @@ fn mesh_colors_no_longer_bake_alpha() {
     );
 }
 
-/// mesh 顶点色 = background_color（
 // col_off 索引：0=node_id 1=parent_id 2=visible 3=alpha 4=sort_key
 //              5=mask_context 6=m_a 7=m_b 8=m_c 9=m_d 10=m_tx 11=m_ty
 //              12=payload_kind 13=mesh_off 14=mesh_len
@@ -1054,8 +1051,7 @@ fn merged_mesh_blob_keeps_absolute_verts_and_no_double_alpha() {
         assert!((a - 1.0).abs() < 1e-6, "第一组 colors.a=1.0");
     }
 }
-/// blob world_matrix round-trip——纯平移 + 剪切节点均写入 6 矩阵列，
-/// VERSION=12（v12：22 列，加 shadow_params），blob len > 100。
+/// blob world_matrix round-trip——纯平移 + 剪切节点均写入 6 矩阵列，blob len > 100。
 #[test]
 fn blob_world_matrix_roundtrip() {
     let mk = |wm: transform::Affine2| RenderNode {
@@ -1097,13 +1093,11 @@ fn blob_world_matrix_roundtrip() {
         13,
         "VERSION=13"
     );
-    // 字节数合理（2 节点 × 22 列 + mesh arena + header）
     assert!(blob.len() > 100);
 }
 
 /// 纯色 mesh 节点经 build_blob → payload_kind==1 透传。
-/// C# 侧 MirrorPool.cs:71 `kind!=1&&!=2 continue` 跳过 kind≠1/2；
-/// VERSION=12（v12：22 列，加 shadow_params）。
+/// C# 侧 MirrorPool.cs `kind!=1&&!=2 continue` 跳过 kind≠1/2。
 #[test]
 fn blob_pure_mesh_kind_is_one() {
     let rn = mesh_node(0, None, 0.0, 0.0, 1.0, 1.0);
@@ -1125,7 +1119,7 @@ fn blob_pure_mesh_kind_is_one() {
     );
 }
 
-/// color_matrix 列（[f32;20]，第 18 列 0-indexed）：program=3/4 节点填矩阵，其余全零占位。VERSION=12。
+/// color_matrix 列（[f32;20]，第 18 列 0-indexed）：program=3/4 节点填矩阵，其余全零占位。
 #[test]
 fn blob_color_matrix_column_round_trips() {
     let matrix = [
@@ -1370,7 +1364,6 @@ fn blob_column_lengths_match_node_count_times_stride() {
         col_off[k] =
             u32::from_le_bytes(blob[12 + k * 4..12 + k * 4 + 4].try_into().unwrap()) as usize;
     }
-    // first arena offset（mesh_arena_off）在 12 + 22*4 = 100 处
     let arena_off = u32::from_le_bytes(blob[100..104].try_into().unwrap()) as usize;
 
     for k in 0..22 {

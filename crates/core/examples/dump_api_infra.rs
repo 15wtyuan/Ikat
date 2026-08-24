@@ -43,7 +43,6 @@ fn main() {
     let _ = s.tick_and_render();
     let _ = s.tick_and_render();
 
-    // ── 1) 关键 id 的节点 kind ──
     println!("── 1) 关键节点 kind ──");
     let sc = s.scene.as_ref().unwrap();
     for id_name in [
@@ -71,7 +70,6 @@ fn main() {
         }
     }
 
-    // ── 2) combobox 子树矩形 ──
     println!("\n── 2) infra-dd combobox 子树 ──");
     let dd = sc.find_by_id_attr("infra-dd").expect("infra-dd");
     dump_subtree(sc, dd, 0);
@@ -85,7 +83,7 @@ fn main() {
         hit.map(|h| (h.index(), sc.get(h).unwrap().kind))
     );
 
-    // ── 3) tab 点击模拟（先滚 .body 把 tabs 带进 1080 视口再点）──
+    // 先滚 .body 把 tabs 带进 1080 视口再点
     println!("\n── 3) infra-tabs 点击模拟 ──");
     let tabs_id = sc.find_by_id_attr("infra-tabs").expect("infra-tabs");
     let body_id = {
@@ -173,7 +171,6 @@ fn main() {
         }
     );
 
-    // ── 4) 虚拟列表滚动覆盖 ──
     println!("\n── 4) infra-mt-list 虚拟列表（count=30）──");
     let list_id = s
         .scene
@@ -259,8 +256,8 @@ fn main() {
         println!("    in-viewport slots = {in_view}");
     }
 
-    // ── 5) UnloadPackage 演示复现：副本包连续实例化 3 个微缩窗（driver 同款
-    //    Style 覆写 width/height/overflow），对比第 1 个与后续的子树可见性。 ──
+    // UnloadPackage 演示复现：副本包连续实例化 3 个微缩窗（driver 同款
+    // Style 覆写 width/height/overflow），对比第 1 个与后续的子树可见性。
     println!("\n── 5) 副本包微缩窗 ×3（Load 演示复现）──");
     s.load_package("infra-copy", &pkg).expect("load infra-copy");
     let stage_root = s.create_root("div", "").expect("stage root 2");

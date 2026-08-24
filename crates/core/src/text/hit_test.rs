@@ -1,4 +1,4 @@
-//! Rich-text-block 子节点命中测试（spec §10）。
+//! Rich-text-block 子节点命中测试。
 //!
 //! [`hit_test`]（`crate::hit`）把一个 design 坐标点解析到容器级 `NodeId`。当命中目标是
 //! rich-text-block 容器（其 inline 子树被 solve 折叠进单段 inline flow、render 画进父 mesh，
@@ -6,11 +6,11 @@
 //! 须 firing span 级点击事件。本模块在容器级命中之后做二次细化：给定 rich-text-block 容器
 //! 内的 block-local 点，返回它命中的源 inline 节点（span / TextNode / Image）。
 //!
-//! 几何来源 = solve 期存进 `scene.text_layouts[block]` 的 `TextLayout.run_rects`
-//! （T5 产、T6 存）：每个 `RichRunRect` 是一条 input run 在某行的命中矩形，坐标在布局的
+//! 几何来源 = solve 期存进 `scene.text_layouts[block]` 的 `TextLayout.run_rects`：
+//! 每个 `RichRunRect` 是一条 input run 在某行的命中矩形，坐标在布局的
 //! pen/content-area 空间（content-area 左上原点）。incoming `local_pt` 是 block-local
 //! （border-box 左上原点）——须减去 padding+border 内边距转成 content 坐标，与 render
-//! `bake_content_offset` 把同样的内边距烤进 glyph pen 的变换互逆（spec §10）。
+//! `bake_content_offset` 把同样的内边距烤进 glyph pen 的变换互逆。
 
 use crate::render::resolve_lp;
 use crate::scene::node::{NodeId, Scene};
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(hit_test_rich(&scene, div, (5.0, 5.0)), None);
     }
 
-    /// 坐标换算（spec §10 关键点）：div 有 padding=10 → run_rects 仍在 pen/content 坐标
+    /// 坐标换算（关键点）：div 有 padding=10 → run_rects 仍在 pen/content 坐标
     /// （content 左上原点），block-local 点须减 (10,10) 才命中。验证 padding 区（block-local
     /// < 10）不误命中、content 区（block-local = content + 10）正确命中。
     #[test]

@@ -195,7 +195,7 @@ impl Stage {
             .filter(|(w, h)| *w != 0 && *h != 0)
     }
 
-    /// 批量灌图尺寸（后端读所有 atlas.json 合并后一次性推入；见 spec §6.4）。
+    /// 批量灌图尺寸（后端读所有 atlas.json 合并后一次性推入）。
     /// 覆盖式合并：同 path 后写赢。上万条也是 O(n) HashMap 插入，启动一次调用。
     pub fn set_image_sizes(&mut self, sizes: &[(String, u32, u32)]) {
         for (path, w, h) in sizes {
@@ -270,7 +270,7 @@ impl Stage {
     /// 累积时间（C# 传 Time.unscaledDeltaTime；双击窗口用）。
     pub fn advance_time(&mut self, dt: f32) {
         self.pointer_state.time_s += dt;
-        self.pending_dt = dt; // stash 给 tick_and_render 喂 tweens.update
+        self.pending_dt = dt;
     }
 
     /// 外部取消待 click（照 fgui CancelClick）。FFI cancel_click 转发。
@@ -338,7 +338,6 @@ impl Stage {
         {
             return crate::scene::control::commit_composition(e, kind);
         }
-        // NumberField：commit 阶段过滤（预编辑期 set_composition 不过滤）。
         if let Some(ControlState::NumberField { edit, .. }) = scene.controls.get_mut(node) {
             // 先把 provisional composition.text 滤成数字语法字符，再走原 commit 路径。
             // 全被滤掉 → 空串 → commit_composition 原语 insert_text no-op → 返 false（不改值）。
@@ -488,7 +487,7 @@ impl Stage {
             .get(node.index())
             .copied()
             .unwrap_or(crate::transform::IDENTITY);
-        // 与 render arm 光标（render/mod.rs:1611,2044）同源：纯平移用 wm[4,5] 作 rect 世界原点
+        // 与 render arm 光标（render/mod.rs）同源：纯平移用 wm[4,5] 作 rect 世界原点
         // （layout_rect 已是绝对 design 坐标，再 apply_point 会双重计数 → x 翻倍，IME 候选窗
         // 偏到屏外）；scale/rotate 用局部原点（0,0）后 apply_point 投世界（render arm 走 push
         // 的 wm transform，MirrorPool scale/rotate 进 _ObjectMatrix）。
@@ -592,7 +591,7 @@ impl Stage {
         if let Some(scene) = self.scene.as_ref() {
             match scene.get(node_id) {
                 None => return,
-                Some(n) if n.interaction.flags.contains(NodeFlags::DISABLED) => return, // disabled 拒
+                Some(n) if n.interaction.flags.contains(NodeFlags::DISABLED) => return,
                 _ => {}
             }
         } else {
@@ -645,17 +644,15 @@ impl Stage {
 
     /// 删节点（递归删子 + 联动清 anim/scroll/tween + slotmap remove）。
     /// NodeId 此后失效（gen++）。无 scene / 失效节点 → no-op。
-    /// spec §5.3：删节点联动清持久附属 map，防悬空 NodeId 残留。
+    /// 删节点联动清持久附属 map，防悬空 NodeId 残留。
     pub fn remove_node(&mut self, node: NodeId) {
         if let Some(scene) = self.scene.as_mut() {
             crate::scene::dynamic::remove_node(scene, &mut self.tweens, node);
         }
     }
 
-    // ---- 动态建树 API（转调 scene::dynamic） ----
-
     /// scene 不存在则建空骨架（首次 create_root/create_node 调用时初始化）。
-    /// spec §4.2：scene 初始由 create_root 建（load_package 不建 scene）。
+    /// scene 初始由 create_root 建（load_package 不建 scene）。
     /// 多次调用幂等（已存在 scene → no-op）。`pub(crate)` 供集成测试直接初始化场景
     /// （如黄金等价测试需 instantiate 后把孤立根 push 进 scene.roots，不套额外 stage_root）。
     pub(crate) fn ensure_scene(&mut self) {
@@ -666,7 +663,7 @@ impl Stage {
     }
 
     /// 建根节点：create_node + roots.push(id)。返回新 NodeId。
-    /// scene 不存在则首次调用建空骨架（spec：scene 初始由 create_root 建）。
+    /// scene 不存在则首次调用建空骨架（scene 初始由 create_root 建）。
     pub fn create_root(&mut self, kind: &str, css: &str) -> Result<NodeId, String> {
         self.ensure_scene();
         let scene = self.scene.as_mut().unwrap();
@@ -785,7 +782,6 @@ impl Stage {
 
     /// 从包克隆一个组件进当前 scene，返回组件根 NodeId（孤立，parent=None，调用方 append_child 挂载）。
     ///
-    /// spec §4.2/§4.4：
     /// 1. 查 `packages[pkg].components[component]`，clone 出 ComponentTemplate（避开 packages/scene 双借）。
     /// 2. 遍历 template.nodes，按 parent_idx 序建 live Node（父先建于子），复用节点构造
     ///    （`create_node_from_template`：kind + baked style → base_style/style 初始 + clip_rect +
@@ -794,8 +790,8 @@ impl Stage {
     ///    根（parent_idx=None）不串父，记录返回。
     /// 3. 作用域规则包装：遍历 template.dynamic_rules.rules，每条包装成 ScopedRule
     ///    （scope_root = 实例根），push 进 scene.dynamic_rules.entries。不再按 selector 去重——
-    ///    同模板多实例各带独立 scope_root，rematch 按 scope 隔离匹配（main-design §5.4
-    ///    Shadow DOM 风格：后代选择器不穿透实例边界）。hit_test 返具体 NodeId → 各实例独立 :hover。
+    ///    同模板多实例各带独立 scope_root，rematch 按 scope 隔离匹配
+    ///    （Shadow DOM 风格：后代选择器不穿透实例边界）。hit_test 返具体 NodeId → 各实例独立 :hover。
     /// 4. scene 必须已存在（create_root 建过），否则 Err。
     ///
     /// 多实例独立：同组件多次 instantiate → 各自独立子树（NodeId 不同）+ 各自独立事件/伪类命中。
@@ -815,7 +811,7 @@ impl Stage {
         let mut id_map: Vec<Option<NodeId>> = vec![None; template.nodes.len()];
         let mut root_id: Option<NodeId> = None;
         // Dropdown NodeId 收集：建树循环后 reparent 其 option 子节点进 role=listbox
-        // （spec §2.3 运行时结构；option 是模板里 combobox 的 DOM 子节点，先被挂到 combobox）。
+        // （运行时结构；option 是模板里 combobox 的 DOM 子节点，先被挂到 combobox）。
         let mut dropdown_ids: Vec<NodeId> = Vec::new();
         // no-panic 契约：parent_idx 来自 pkg.bin（运行时读，可能 corrupt），不能信任"父先于子"。
         // pidx >= i 同时覆盖前向引用（父排在子后）与越界（pidx >= len，因 i < len）→ Err，不 panic。
@@ -856,7 +852,7 @@ impl Stage {
                 | NodeKind::Toggle
                 | NodeKind::RadioButton
                 // Tab 镜像 Button：role=tab 隐式可聚焦（WAI-ARIA），补默认 tabindex=0
-                // 让 click-to-focus / 键盘 Tab 链能命中（T7 箭头键导航依赖）。
+                // 让 click-to-focus / 键盘 Tab 链能命中（箭头键导航依赖）。
                 // TabList 是容器（镜像 ListView），自身不聚焦 → 落 _ => None。
                 | NodeKind::Tab => Some(0),
                 _ => None,
@@ -902,14 +898,14 @@ impl Stage {
         let root = root_id.ok_or("component has no root node (parent_idx=None missing)")?;
 
         // Reparent 直接挂在 combobox 下的 option 进其 listbox（作者通常已把 option 放 listbox
-        // 内则 no-op；兜底防错位）。spec §2.2 运行时结构，详见 reparent_options_into_popup doc。
+        // 内则 no-op；兜底防错位）。运行时结构详见 reparent_options_into_popup doc。
         // 在 SCOPE_ROOT / dynamic_rules 装载之前做：reparent 只改 parent 指针 + children 列表，
         // 不影响作用域边界（option 仍在 combobox 实例子树内）。
         for sel in &dropdown_ids {
             crate::scene::control::reparent_options_into_popup(scene, *sel);
         }
 
-        // 实例根 = 作用域根（Shadow DOM 风格，main-design §5.4 / public-api §2.3）。
+        // 实例根 = 作用域根（Shadow DOM 风格）。
         // 该实例的 CSS 规则只在本实例子树内匹配，不泄漏到其他组件实例。
         // SCOPE_ROOT = CSS 作用域隔离；LOOKUP_SCOPE = Get<T> 查找边界（两语义解耦，保现有行为）。
         scene
@@ -953,7 +949,7 @@ impl Stage {
         }
 
         // 组件展开域锚定规则：每展开实例一条 (anchor_idx, 组件模板自带规则)，按
-        // scope_root=锚节点（host）包装——组件内部选择器只在该展开域内匹配（main-design §5.4）。
+        // scope_root=锚节点（host）包装——组件内部选择器只在该展开域内匹配。
         // host 自身因 HOST_IN_PARENT_SCOPE 归外层作用域，组件规则不落在 host 上（同 DOM
         // shadow 规则不样式化 host，:host 才行）。
         for (anchor_idx, rules) in &template.component_scopes {
@@ -974,7 +970,7 @@ impl Stage {
     ///
     /// 深拷贝 kind/classes/id_attr/base_style/文本/img src，返回游离新根（不挂树，调用方负责
     /// append_child 挂载）。虚拟列表 slot 填充路径：clone_subtree(模板根) → 得游离实例 →
-    /// append_child(slot, 实例)。side table 判定见 list spec §6：结构化数据（text/image）拷贝，
+    /// append_child(slot, 实例)。side table 判定：结构化数据（text/image）拷贝，
     /// 运行时状态（scroll/anim/tween/EditState）不拷——克隆是干净模板，由调用方按需重设。
     pub fn clone_subtree(&mut self, src: NodeId) -> Result<NodeId, String> {
         let scene = self.scene.as_mut().ok_or("no scene (create_root first)")?;
@@ -1001,23 +997,23 @@ impl Stage {
         &self.last_events
     }
 
-    /// 每帧管线（支柱1重排——rematch 提到 solve 前，伪类三类全当帧消费）：
+    /// 每帧管线（rematch 提到 solve 前，伪类三类全当帧消费）：
     /// ①tween ②focus_request ③process（仲裁+拖拽写 scroll_pos；hit_test 读上帧 world，1帧延迟已认）
     /// ④scroll update ⑤process_keys ⑥rematch_pseudo_classes（提到 solve 前：改 layout/transform/colors
     /// 三类，本帧 solve+compute 全消费）⑥.5 transition drain（rematch 产请求 → kill 旧 tween + 提交新）
-    /// ⑥.6 sync_animation_players（rematch 后启停 player：class 触发声明式动画，spec §5.2 g'）
+    /// ⑥.6 sync_animation_players（rematch 后启停 player：class 触发声明式动画）
     /// ⑦solve（读 rematch 后 taffy_style）
     /// ⑧refresh_content_sizes ⑨compute_world_transforms（读 rematch 后 transform+scroll_pos）
     /// ⑩build_render_nodes
     ///
     /// **compute_world_transforms 时机**：rematch 之后、render 之前，每帧 1 次。
     /// transform 改由 rematch 写 style.transform → compute 同帧读 → world 含缩放。
-    /// scroll_pos 同帧进 world matrix（spec §9.3）。
+    /// scroll_pos 同帧进 world matrix。
     /// **1 帧延迟语义**：hit_test 用上帧 world_transforms。首帧 world_transforms 为空，
     /// hit_test bounds guard 拦截（越界返 None → 未命中，零回归安全）。仲裁在 Down 未滚动前
     /// 不影响；clip 门控用 viewport 固定主导，不依赖每帧变换精度。
     pub fn tick_and_render(&mut self) -> FrameData {
-        // 坑 102：FFI 入口绝不 panic。scene=None（load 前）早返空帧，不 expect
+        // FFI 入口绝不 panic。scene=None（load 前）早返空帧，不 expect
         // （cdylib .expect 遇 None non-unwinding abort 拖垮宿主进程）。
         let scene = match self.scene.as_mut() {
             Some(s) => s,
@@ -1034,7 +1030,7 @@ impl Stage {
         self.pending_dt = 0.0;
         self.tweens.update(dt, scene, &mut out);
         // player 推进（写 scene.anim）。在 tweens.update **之后** = 写入顺序即优先级：
-        // animation 覆盖 transition 同通道（spec §6.1）。须在 solve/compute_world_transforms 前。
+        // animation 覆盖 transition 同通道。须在 solve/compute_world_transforms 前。
         crate::scene::animation::update_all(scene, dt, &mut out);
         // 光标闪烁 timer（单一动画时钟：与 tweens 同 dt，每帧 tick 推进一步）。
         crate::scene::control::advance_cursor_blink(scene, dt);
@@ -1080,7 +1076,7 @@ impl Stage {
         let reqs: Vec<crate::tween::TransitionRequest> =
             std::mem::take(&mut scene.pending_transitions);
         for r in reqs {
-            self.tweens.kill(r.node, r.prop); // override 保留（mid-flight 值）
+            self.tweens.kill(r.node, r.prop);
             self.tweens.tween(
                 r.node,
                 r.prop,
@@ -1092,10 +1088,10 @@ impl Stage {
                 TRANSITION_TAG,
             );
         }
-        // 4.6 animation 声明同步（spec §5.2 step g'）：rematch 后读 computed style.animation
+        // 4.6 animation 声明同步：rematch 后读 computed style.animation
         //     启停 player。新 player 的 backwards 首帧立即写 NodeAnim，本帧 solve+render 消费；
         //     回收时通道回 None（tween/base 下帧接管）。在 transition drain 之后：两者都只读
-        //     computed style、写各自运行时态，互不干扰（spec §6.5 检测独立）。
+        //     computed style、写各自运行时态，互不干扰（检测独立）。
         sync_animation_players(scene);
         // 4.7 控件状态→视觉同步：ControlState 变化后把 fill width / check display 写进
         //     子节点 inline_override。须在 solve 前（inline 影响布局：fill width 决定 bar 宽度）。
@@ -1249,7 +1245,7 @@ mod tests {
     #[test]
     fn tick_measures_textfield_layout_after_solve() {
         // TextField TextLayout 应在 tick_and_render 的 solve 后即 measure 并缓存，
-        // 而非推迟到 render 阶段 lazily 计算——光标命中（Task 7）和几何（Task 12）
+        // 而非推迟到 render 阶段 lazily 计算——光标命中和几何
         // 在 render 前就需 TextLayout。
         let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
         let mut stage = Stage::new((200.0, 100.0)).unwrap();
@@ -1329,7 +1325,7 @@ mod tests {
 
     #[test]
     fn tick_textarea_and_numberfield_measure_intrinsic_height() {
-        // d455652 回归守卫：measure MeasureContext arm 覆盖 TextField | TextArea | NumberField。
+        // 回归守卫：measure MeasureContext arm 覆盖 TextField | TextArea | NumberField。
         // tick_empty_textfield_measures_placeholder_height 只测 TextField；TextArea/NumberField
         // 的 measure arm 若脱落（退回 padding-only 高度），文字不参与布局，本断言即失败。
         let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");

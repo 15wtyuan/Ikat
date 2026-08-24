@@ -1,6 +1,6 @@
 //! 彩色边框：外轮廓减内轮廓环形三角带。无背景图时拼进 Container/Button 背景同一
 //! Mesh payload（program=0 顶点色，单 draw call），边框三角序在背景之后——重叠的边框
-//! 环区边框覆盖背景，内部仅背景。v1.8 修 border_color 死字段（resolved.rs 存了 render 零引用）。
+//! 环区边框覆盖背景，内部仅背景。
 
 use crate::scene::node::Rect;
 

@@ -80,12 +80,12 @@ namespace LoomGUI.Tests
             atlas1.sprites["res/a.png"] = new SpriteEntry { orig = new[] { 100, 200 } };
 
             var atlas2 = new AtlasManifest();
-            atlas2.sprites["res/a.png"] = new SpriteEntry { orig = new[] { 999, 999 } }; // duplicate — should be ignored
+            atlas2.sprites["res/a.png"] = new SpriteEntry { orig = new[] { 999, 999 } };
             atlas2.sprites["res/b.png"] = new SpriteEntry { orig = new[] { 50, 50 } };
 
             var result = LoomStageDriver.MergeSpriteSizes(new List<AtlasManifest> { atlas1, atlas2 });
             Assert.AreEqual(2, result.Count);
-            Assert.AreEqual(100u, result[0].w); // first wins
+            Assert.AreEqual(100u, result[0].w);
             Assert.AreEqual(50u, result[1].w);
         }
 

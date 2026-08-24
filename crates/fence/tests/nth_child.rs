@@ -1,4 +1,4 @@
-//! `:nth-child(An+B | odd | even | N)` selector 解析（spec §8.5）。
+//! `:nth-child(An+B | odd | even | N)` selector 解析。
 //!
 //! 覆盖：An+B 系数/常数提取、odd/even 简写、纯整数 N、空格容错、specificity
 //! （伪类 = class 级 1 档）、越界形态拒绝、与其他简单选择器组合。
@@ -24,7 +24,7 @@ fn nth_child_an_plus_b_parses_a_and_b() {
 
 #[test]
 fn nth_child_odd_even_n_shorthands() {
-    // odd = 2n+1；even = 2n；纯整数 N = 0n+N（spec §8.5）
+    // odd = 2n+1；even = 2n；纯整数 N = 0n+N
     assert_eq!(nth(":nth-child(odd)"), NthChildExpr { a: 2, b: 1 });
     assert_eq!(nth(":nth-child(even)"), NthChildExpr { a: 2, b: 0 });
     assert_eq!(nth(":nth-child(3)"), NthChildExpr { a: 0, b: 3 });

@@ -64,8 +64,6 @@ fn version_returns_c_string() {
     }
 }
 
-// ===== get_node_kind + get_node_computed_style FFI（③ cascade 对外查询出口） =====
-
 /// get_node_kind FFI round-trip + 哨兵不撞：div → Container(0)；无效 node → rc 非 0。
 /// 关键：return-code 模式（不用 -> u8 + 0 哨兵），否则 Container=0 会与「不存在」撞。
 #[test]
@@ -131,8 +129,6 @@ fn ffi_null_out_is_error() {
     loomgui_stage_free(h);
 }
 
-// ===== null css / null text 防御契约（spec §6.1 deferred ②） =====
-//
 // caller 传 `ptr::null(), 0` 表「空字符串」（C# 默认 string、null 字面）。
 // slice::from_raw_parts(null, 0) 是 UB（即使 len=0），故 FFI 必须 null-safe 兜底为 ""。
 // 跑过即证明 null 被守卫；UB 在 Miri/ASAN 下会 crash，普通 cargo test 通常静默走过。
@@ -187,8 +183,6 @@ fn set_text_null_does_not_ub() {
     );
     loomgui_stage_free(h);
 }
-
-// ===== control value/checked/transform get/set FFI =====
 
 /// ProgressBar set_control_value(90) → get_control_value == 90；超 max 的 150 被 clamp 到 100。
 /// 验 return-code + out-param 模式（避免 Container=0 哨兵撞）。
@@ -429,8 +423,6 @@ fn ffi_set_control_value_slider_quantize_respects_max() {
     loomgui_stage_free(h);
 }
 
-// ===== text input channel (set_text_input -> focused TextField) =====
-
 /// 测试辅助：建根 div + 一个聚焦的 TextField（初始 value），返回 (handle, textfield_node)。
 /// FFI 表面无 control_init setter（打包期产物），故测试侧手工注入 ControlState + 设焦点。
 /// 光标初始在 value 末尾（from_init 默认），便于在末尾追加的断言。
@@ -516,10 +508,8 @@ fn ffi_set_text_input_null_handle_err() {
     assert_eq!(rc, -1, "null handle must return -1");
 }
 
-// ===== IME composition (set_composition / commit_composition / get_cursor_rect) =====
-//
 // IME 渠道：后端读 Input.compositionString 回灌 core，core 把 composition 拼进显示文本
-// （measure + render 同源），提交时落定进 value。下划线由 Task 12 的 composition 分支按
+// （measure + render 同源），提交时落定进 value。下划线由 composition 分支按
 // display 字节区间画（此处验 composition 进了显示文本 + 提交落定 + 光标矩形可读）。
 
 /// 读 TextField 的 cached TextLayout 的 text_width（measure_text_controls 在 solve 后写入）。
@@ -659,8 +649,6 @@ fn composition_ffi_null_handle_err() {
     );
 }
 
-// ===== clipboard (loomgui_register_clipboard + Ctrl+C/X/V routing) =====
-//
 // 剪贴板走 host callback 注册：core 是 cdylib 不能 extern 调宿主，后端注册 set/get 回调。
 // 测试注册一对 Rust fn 做内存 round-trip（不依赖真实系统剪贴板），然后经 set_key_input +
 // tick 驱动 Ctrl+C/X/V，验证 process_keys 路由 + 剪贴板读写 + ValueChanged 事件。
@@ -731,7 +719,6 @@ fn make_stage_with_focused_textfield_selection(
     scene
         .controls
         .ensure(NodeId(tf), ControlState::TextField(e));
-    // process_keys 验 kind——div 节点 kind=Container，手工改成 TextField 让控制键路由生效。
     if let Some(n) = scene.get_mut(NodeId(tf)) {
         n.kind = NodeKind::TextField;
     }
@@ -759,7 +746,6 @@ fn drain_events(h: *const StageHandle) -> Vec<EventRecord> {
     if ptr.is_null() || len == 0 {
         return Vec::new();
     }
-    // len = 事件数（非字节）。直接构造切片。
     let slice = unsafe { std::slice::from_raw_parts(ptr as *const EventRecord, len) };
     slice.to_vec()
 }
@@ -825,7 +811,7 @@ fn ffi_ctrl_v_pastes_and_emits_value_changed() {
     loomgui_stage_free(h);
 }
 
-/// Ctrl+A 全选（Task 10 已有）+ Ctrl+C 复制：验证两步组合工作。
+/// Ctrl+A 全选 + Ctrl+C 复制：验证两步组合工作。
 #[test]
 fn ffi_ctrl_a_then_ctrl_c_copies_all() {
     let _g = ffi_clip_setup();
@@ -867,8 +853,6 @@ fn ffi_clipboard_global_left_registered() {
     loomgui_register_clipboard(Some(ffi_test_set), Some(ffi_test_get));
 }
 
-// ===== control text / selection / placeholder / readonly / maxlength FFI (Task 15) =====
-//
 // 业务侧（C# 投影层）经这些 setter/getter 读写 TextField/TextArea 的 value/selection/
 // placeholder/readonly/maxlength。set_control_text 直接替换 value（不走 insert_text 的
 // cursor 插入路径）+ 光标移到末尾 + 标 dirty；setter-via-FFI 也产 ValueChanged（与
@@ -1098,8 +1082,6 @@ fn ffi_control_text_null_handle_err() {
     );
 }
 
-// ===== TextArea variant 保持回归（Fix Round 1）=====
-//
 // 5 个改写 setter（set_control_text/set_selection/set_control_placeholder/
 // set_control_readonly/set_control_maxlength）原以 `match state { TextField(e)|TextArea(e) =>
 // ..., _ => ...; ControlState::TextField(e) }` 重建——会把 TextArea 节点的 ControlState
@@ -1176,8 +1158,6 @@ fn ffi_set_selection_preserves_textarea_variant() {
     }
     loomgui_stage_free(h);
 }
-
-// ===== get_node_disabled / get_control_readonly / blur / Dropdown / NumberField FFI =====
 
 /// 测试辅助：建根 div 子节点并注入 Dropdown 状态。
 fn make_dropdown_stage(selected: usize, open: bool) -> (*mut StageHandle, u32) {
@@ -1534,11 +1514,6 @@ fn ffi_get_control_min_max_step_number_field() {
     loomgui_stage_free(h);
 }
 
-// （原 ffi_set_control_min_max_step_number_field_unsupported 已删——NumberField bounds
-//  setter 已接通（parse→clamp→量化→re-format），覆盖见 ffi_set_control_bounds_numberfield。）
-
-// ===== @keyframes player FFI（M2 spec §7.3：play/pause/resume/stop/time/state/on-key） =====
-
 /// 测试辅助：建根 div + 往 scene.keyframes 注入 opacity 0→1 两 stop 的 "fadeIn" 规则。
 /// keyframes 表是 runtime 全局表（instantiate 合并产物），测试侧手工注入（同 controls 惯例）。
 fn make_anim_stage() -> (*mut StageHandle, u32) {
@@ -1673,7 +1648,7 @@ fn ffi_set_get_animation_time_roundtrip() {
     loomgui_stage_free(h);
 }
 
-/// stop = scene 层终态（T6 review Minor 1 钉死）：state 立即 255（Stopped 语义等同无效）；
+/// stop = scene 层终态：state 立即 255（Stopped 语义等同无效）；
 /// resume 不可恢复；下帧 update_all 清通道 + 回收 player（players 表空）。
 #[test]
 fn ffi_stop_animation_is_terminal() {
@@ -1794,8 +1769,6 @@ fn ffi_get_event_string_reads_animation_name() {
     assert_eq!(rc, -1, "null out_len");
     loomgui_stage_free(h);
 }
-
-// ── 公共 API FFI 批：NumberField bounds setter / Progress indeterminate / Radio name / hit_test ──
 
 /// 测试辅助：建根 div 后注入 Radio 状态（name = 分组名，打包期 data-name bake）。
 fn make_radio_stage(name: &str) -> (*mut StageHandle, u32) {
@@ -2056,7 +2029,7 @@ fn ffi_node_touchable_roundtrip_and_hit() {
 
 /// get_custom_tag 双调法 round-trip：CustomElement 节点读出 hyphen 标签；buf 不足返 -2 +
 /// 所需长度；非 CustomElement / 越界节点 → -1。custom_tag 由 pkg instantiate 拷入
-/// （编码机侧由打包器组件展开烘入，见 component-system spec）。
+/// （编码机侧由打包器组件展开烘入）。
 #[test]
 fn ffi_get_custom_tag_two_call() {
     let h = stage_new_with_dejavu(200.0, 100.0);
@@ -2097,7 +2070,7 @@ fn ffi_get_custom_tag_two_call() {
 }
 
 /// loomgui_node_is_lookup_scope：实例根 = 查找边界（1）；普通节点 = 0；越界 = -1。
-/// C# Query<T> DFS 剪枝的数据源（L3 查找边界）。
+/// C# Query<T> DFS 剪枝的数据源。
 #[test]
 fn ffi_node_is_lookup_scope() {
     let h = stage_new_with_dejavu(200.0, 100.0);

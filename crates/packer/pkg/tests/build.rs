@@ -39,7 +39,6 @@ fn build_e2e_produces_all_artifacts() {
     // fonts/f.ttf (stub bytes).
     std::fs::write(tmp.join("fonts/f.ttf"), b"fake font data").unwrap();
 
-    // Build.
     let report = build(&tmp).expect("build should succeed");
     assert!(report.atlases.contains(&"ui".to_string()));
     assert!(!report.fonts.is_empty());
@@ -78,7 +77,6 @@ fn build_e2e_produces_all_artifacts() {
     );
     assert!(!rt.fonts.is_empty(), "runtime fonts non-empty");
 
-    // Cleanup.
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
@@ -125,7 +123,8 @@ fn build_fails_when_output_dir_empty() {
 
 /// build() 必须把围栏一致性 warning 收集进 BuildReport.warnings。
 /// 修前 pack_components 丢弃 warning（只查 Error 级），build 也未暴露 → CLI/GUI
-/// 都看不到 W1/W2，机制对作者名存实亡。本测锁住「warning 经 build 进报告」的链路。
+/// 都看不到（border 缺 style / bg-image 缺 size 两类），机制对作者名存实亡。
+/// 本测锁住「warning 经 build 进报告」的链路。
 #[test]
 fn build_propagates_warnings_into_report() {
     let tmp = std::env::temp_dir().join("loom_build_warnings_test");
@@ -184,10 +183,10 @@ fn build_propagates_warnings_into_report() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-/// I-3 coverage: build() packages path (resolve_html_list dir scan + stem() +
+/// Coverage: build() packages path (resolve_html_list dir scan + stem() +
 /// pack_components + ui/<name>.pkg.bin write + runtime.packages fill-back) via its
-/// real entry point. Existing tests all use `"packages": []`, leaving T5 orchestration
-/// untested. This catches a silent regression in resolve_html_list/runtime ordering.
+/// real entry point. Existing tests all use `"packages": []`, leaving that
+/// orchestration untested. This catches a silent regression in resolve_html_list/runtime ordering.
 #[test]
 fn build_e2e_packages_path_writes_pkg_bin_and_fills_runtime() {
     let tmp = std::env::temp_dir().join("loom_build_packages_e2e_test");

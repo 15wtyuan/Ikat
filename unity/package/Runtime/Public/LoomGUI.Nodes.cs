@@ -1,5 +1,4 @@
 // LoomGUI Frozen Public API: Node hierarchy & controls
-// See docs/design/public-api.md (权威契约) + docs/design/projection-layer.md (投影层机制)
 
 using System;
 using System.Collections.Generic;
@@ -10,14 +9,12 @@ using LoomGUI.Bindings;
 
 namespace LoomGUI
 {
-    // ── Node 基础层 ──────────────────────────────────────────────────
     // 三分模型：Style（可写/布局层，下帧 solve）/ Transform（可写/渲染层，不触发 solve）/
     //           Geometry（只读/布局产物，读最近一次 solve 结果，滞后一帧）。
     // Style/Transform 是 class + 内部 owner 引用（投影层：写回经 owner 标脏到 NodeId）；
     // Geometry 是 readonly struct 快照（从每帧 blob 填充）。
     public abstract unsafe class Node
     {
-        // ── 投影层字段（internal）：owner 身份 + 生命周期标志 ─────────────
         // _id = Rust NodeId 的 u32 投影（slotmap key）；所有 FFI 调用经此转回 Rust 节点。
         // _ctx = 持有 stage handle + NodeRegistry 的 UIContext；本 Node 入 _ctx._registry 缓存。
         // _disposed = Dispose 后置 true；后续公共读操作抛 ObjectDisposedException。
@@ -72,8 +69,8 @@ namespace LoomGUI
             }
         }
 
-        // 投影层（C3）：lazy 造 NodeStyle 挂本 Node。同一 Node 多次访问 Style 返同一实例——
-        // projection §2.5：node.Style.Width=X 与 node.Style.Height=Y 必须改同一 StyleMirror。
+        // 投影层：lazy 造 NodeStyle 挂本 Node。同一 Node 多次访问 Style 返同一实例——
+        // node.Style.Width=X 与 node.Style.Height=Y 必须改同一 StyleMirror。
         // 未访问过 = null（不预造，避免给从未读写的节点带镜像开销）。
         internal NodeStyle _style;
 
@@ -91,14 +88,14 @@ namespace LoomGUI
             }
         }
 
-        // 投影层（C4）：lazy 造 NodeTransform 挂本 Node。同 Style 模式：同一 Node 多次访问 Transform
-        // 返同一实例——node.Transform.Position=X 与 .Scale=Y 必须改同一 NodeTransform（projection §2.5）。
+        // 投影层：lazy 造 NodeTransform 挂本 Node。同 Style 模式：同一 Node 多次访问 Transform
+        // 返同一实例——node.Transform.Position=X 与 .Scale=Y 必须改同一 NodeTransform。
         // 未访问过 = null（不预造，避免给从未读写的节点带镜像开销）。
         internal NodeTransform _transform;
 
         /// <summary>
         /// Transform = 渲染层（不触发 solve）。lazy 造稳定单一实例：首次访问构造 + 挂本 Node；
-        /// 后续访问返同一引用。setter 只存镜像、不 flush（set_transform FFI 推后，ponytail 注释见
+        /// 后续访问返同一引用。setter 只存镜像、不 flush（set_transform FFI 推后，注释见
         /// <see cref="NodeTransform"/>）。Dispose 后访问抛 ObjectDisposedException。
         /// </summary>
         public NodeTransform Transform
@@ -135,9 +132,9 @@ namespace LoomGUI
         }
         public bool Focusable { get { throw NE(); } set { throw NE(); } }   // 运行时改可获焦性（对齐 fgui focusable）
 
-        // 投影层（C5）：lazy 造 ClassList 挂本 Node。同 Style/Transform 模式：同一 Node 多次访问
+        // 投影层：lazy 造 ClassList 挂本 Node。同 Style/Transform 模式：同一 Node 多次访问
         // Classes 返同一实例——node.Classes.Add("a") 与 .Contains("a") 必须作用同一 ClassList
-        // （projection §2.5 稳定单一实例）。未访问过 = null（不预造，避免给从未读写 class 的节点带开销）。
+        // （稳定单一实例）。未访问过 = null（不预造，避免给从未读写 class 的节点带开销）。
         internal ClassList _classes;
 
         /// <summary>
@@ -182,7 +179,7 @@ namespace LoomGUI
             // 走 Rust FFI 遍历子树——后代的 C# wrapper 可能尚未 GetOrCreate 过，跳过即可。
             DisposeDescendantsInRegistry(_id);
 
-            // Rust 侧递归清子 + slotmap remove + anim/scroll/tween 联动（lib.rs:1230）。
+            // Rust 侧递归清子 + slotmap remove + anim/scroll/tween 联动。
             // 调用后 NodeId 失效（gen++）；后续该 id 的 FFI 调用是 no-op。
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
             Native.loomgui_stage_remove_node(h, _id);
@@ -199,8 +196,9 @@ namespace LoomGUI
         /// 未命中（无 id / 不在子树 / 类型不符）抛 <see cref="UIContractException"/>。null/empty id 直接抛
         /// （DOM getElementById 习惯：空 id 是调用方写错）。
         ///
-        /// 作用域契约（public-api §3.1）：组件作用域内查找，不穿透嵌套组件边界。
-        /// L3 已完整：core DFS 遇 LOOKUP_SCOPE 子节点（组件展开域 host / List slot 根）
+        /// 作用域契约：组件作用域内查找，不穿透嵌套组件边界。
+        /// 作用域内不穿透组件边界已完整实现：core DFS 遇 LOOKUP_SCOPE 子节点（组件展开域 host /
+        /// List slot 根）
         /// 检查其自身 id 后不再下钻——组件级 Get 不再穿透 list item / 嵌套组件。
         /// 要访问嵌套作用域内部：先 Get 作用域根（host/slot），再在其上 Get。
         /// </summary>
@@ -269,7 +267,7 @@ namespace LoomGUI
         ///
         /// 不支持：复合 selector（"div &gt; .foo" / ".a.b" 多 class）、伪类（":hover"）、
         /// 属性（"[type=text]"）。围栏闭合下 runtime 节点的 type 已固化为 NodeKind，"input" selector
-        /// 只匹配 TextField（默认 type=text），不匹配 Slider/Toggle 等 type 派生——这是 4a 简化，
+        /// 只匹配 TextField（默认 type=text），不匹配 Slider/Toggle 等 type 派生——这是简化取舍，
         /// type-aware selector 推后续（YAGNI：尚无场景驱动）。
         /// </summary>
         public IReadOnlyList<Node> Query(string selector)
@@ -278,7 +276,7 @@ namespace LoomGUI
             var (tag, cls) = ParseSelector(selector);
             // 空 selector（null/empty/whitespace）→ 空结果（不是「匹配全部」）。
             // DOM querySelectorAll("") 抛 SyntaxError；LoomGUI 容错返空（不抛——宽松查询路径）。
-            // "*" 走下面的 path：TagToNodeKind("*")=null → 所有节点 tagOk=false → 空结果（4a 不支持通用选择器）。
+            // "*" 走下面的 path：TagToNodeKind("*")=null → 所有节点 tagOk=false → 空结果（不支持通用选择器）。
             if (tag == null && cls == null) return Array.Empty<Node>();
             var result = new List<Node>();
             DfsPreOrder(n =>
@@ -291,7 +289,7 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 程序化播放 @keyframes 动画（spec §7.3 / public-api §9.1 触发 2）。返 AnimationHandle 句柄。
+        /// 程序化播放 @keyframes 动画。返 AnimationHandle 句柄。
         ///
         /// 建 programmatic player（core <c>play_programmatic</c>，不受 class 声明管）：
         /// 默认 1s / 无 delay / 单次迭代 / normal / fill both / cubic-out，立即写首帧。
@@ -379,8 +377,7 @@ namespace LoomGUI
         /// （DOM target 阶段等价）。<paramref name="once"/>：true → 触发一次后自动退订（防"等一个结束事件"
         /// 泄漏，如等 <see cref="AnimationEndEvent"/> 后 Dispose）。
         ///
-        /// 返 <see cref="EventRegistration"/>——Dispose 退订。订阅随 <see cref="Dispose"/> 自动清理
-        /// （public-api §5.4）。详细路由模型见 public-api §5.2。
+        /// 返 <see cref="EventRegistration"/>——Dispose 退订。订阅随 <see cref="Dispose"/> 自动清理。
         /// </summary>
         public EventRegistration On<T>(Action<T> handler, bool useCapture = false, bool once = false) where T : IRouteEvent
         {
@@ -389,9 +386,8 @@ namespace LoomGUI
             return _ctx._eventBus.Subscribe<T>(_id, handler, useCapture, once);
         }
 
-        // ── helpers ─────────────────────────────────────────────────────
 
-        // node_parent 哨兵：根 / 越界 / 无 scene 均返 0xFFFF_FFFF（lib.rs:429）。
+        // node_parent 哨兵：根 / 越界 / 无 scene 均返 0xFFFF_FFFF。
         internal const uint RootSentinel = 0xFFFF_FFFFu;
 
         /// <summary>
@@ -403,7 +399,6 @@ namespace LoomGUI
             if (_disposed) throw new ObjectDisposedException(GetType().Name);
         }
 
-        // ── scope lookup helpers（Get/TryGet/Query 内部）──────────────────
 
         /// <summary>
         /// 走父链判断 candidateId 是否在 _id 子树内（含直接子 + 任意深度后代；不含 _id 自身）。
@@ -429,8 +424,8 @@ namespace LoomGUI
         /// 不 visit self（与 DOM querySelectorAll 语义一致——element.query 不含 element 自身）。
         /// 非 Container 节点无 Children —— no-op（Query 在叶子节点上返空 list）。
         ///
-        /// L3 查找边界：遇 LOOKUP_SCOPE 子节点（组件展开域 host / ListView slot 根）visit 后
-        /// 不再下钻——Query 与 Get/TryGet 同口径，嵌套作用域内部节点不进结果（main-design §4.3）。
+        /// 查找边界：遇 LOOKUP_SCOPE 子节点（组件展开域 host / ListView slot 根）visit 后
+        /// 不再下钻——Query 与 Get/TryGet 同口径，嵌套作用域内部节点不进结果。
         /// 作用域根自身照常入结果（同 Shadow DOM：host 在 light tree）。
         /// </summary>
         private void DfsPreOrder(Action<Node> visit)
@@ -461,7 +456,7 @@ namespace LoomGUI
         /// <summary>
         /// 解析 CSS-like selector（fence 子集）。支持 ".cls" / "tag" / "tag.cls" 三种形式；
         /// 其它形式（".a.b" / "a &gt; b"）按容错解析：取首个 '.' 切 tag|cls，多 class 取末段为 cls
-        /// （粗糙 4a 简化——复合 selector 不在 4a 范围）。null/空/whitespace → (null,null) 即匹配空集。
+        /// （粗糙简化——复合 selector 不在当前范围）。null/空/whitespace → (null,null) 即匹配空集。
         /// </summary>
         private static (string tag, string cls) ParseSelector(string selector)
         {
@@ -471,7 +466,7 @@ namespace LoomGUI
             if (dot < 0) return (s, null);                      // "tag"
             string tagPart = dot > 0 ? s.Substring(0, dot) : null;
             string clsPart = dot < s.Length - 1 ? s.Substring(dot + 1) : null;
-            // cls 含 '.' 或 tag 时不再细切——4a 把 "tag.a.b" 当作 (tag, "a.b") 永远 miss。
+            // cls 含 '.' 或 tag 时不再细切——本实现把 "tag.a.b" 当作 (tag, "a.b") 永远 miss。
             // 后续升级到真 CSS selector parser 时替换本方法。
             return (tagPart, clsPart);
         }
@@ -496,7 +491,7 @@ namespace LoomGUI
         /// <summary>
         /// 围栏 tag 名 → C# NodeKind 映射（crates/fence/src/schema/tag.rs::resolve_semantic 子集）。
         /// input 无 type 默认 TextField；type=range/checkbox/... 派生 kind 在 parse 期已固化，selector
-        /// 用 "input" 只匹配 TextField（不匹配派生——4a 简化，type-aware selector 推后续）。
+        /// 用 "input" 只匹配 TextField（不匹配派生——简化取舍，type-aware selector 推后续）。
         /// template 不在映射表——parse 期消费、不进 runtime 树，selector "template" 永远空集。
         ///
         /// 已知 core 不一致（span）：本表对齐 parse/pkg 路径（resolve_semantic("span") → TextElement，
@@ -504,7 +499,7 @@ namespace LoomGUI
         /// crates/core/src/scene/dynamic.rs::kind_from_tag("span") → NodeKind::TextNode（byte=1）。因此
         /// 运行时通过 Container.TextContent setter / create_node("span") 产出的 span 携带 kind=TextNode，
         /// `Query("span")` 对该子树会落空（不命中 TextElement）。pkg-loaded 节点不受影响。core 表拓宽
-        /// 到完整映射（或动态 API 改走 resolve_semantic）留作 roadmap 项，本表不改（4a：取 pkg 主路径）。
+        /// 到完整映射（或动态 API 改走 resolve_semantic）留作后续改进项，本表不改（取 pkg 主路径）。
         /// </summary>
         private static NodeKind? TagToNodeKind(string tag) => tag switch
         {
@@ -512,7 +507,7 @@ namespace LoomGUI
             "span" => NodeKind.TextElement,
             "button" => NodeKind.Button,
             "img" => NodeKind.Image,
-            "input" => NodeKind.TextField,       // 默认 type=text；派生 kind 不命中（4a 简化）
+            "input" => NodeKind.TextField,       // 默认 type=text；派生 kind 不命中
             "textarea" => NodeKind.TextArea,
             "select" => NodeKind.Dropdown,
             "option" => NodeKind.OptionItem,
@@ -561,7 +556,6 @@ namespace LoomGUI
 
         static NotImplementedException NE() => new NotImplementedException();
 
-        // ── Touchable FFI 转调（Node 基类，所有子类共享）──────────────────
         void SetNodeTouchable(bool v)
         {
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
@@ -581,11 +575,11 @@ namespace LoomGUI
     // getter 只反映 C# setter 写过的属性；未写过返回 Unset（要 computed 走 Geometry）。
     // setter 写 Unset = 撤销该属性 inline override，回落 CSS。
     //
-    // C3：每个 typed 属性的 setter/getter 走 _mirror（StyleMirror）。CSS prop 名严格对照 core
+    // 每个 typed 属性的 setter/getter 走 _mirror（StyleMirror）。CSS prop 名严格对照 core
     // inline_bit 表（crates/core/src/style/dynamic.rs）+ apply_decl（mapping.rs）——表外的 prop
     // 经 set_inline_override 会被 bit 检查前置静默丢弃（ghost-state 防护），故本类只接
-    // inline_bit 表内 prop（25 个，z-index 在 u64 位图 bit 32）；SetVar / RemoveVar 暂
-    // ponytail defer（core apply_decl 未实现，throw NE + 注释）。
+    // inline_bit 表内 prop（25 个，z-index 在 u64 位图 bit 32）；SetVar / RemoveVar 暂缓
+    // （core apply_decl 未实现，throw NE + 注释）。
     public sealed class NodeStyle
     {
         // 投影层内部：owner Node + mirror。Node.Style lazy 造时传入 this；StyleMirror 持 owner
@@ -594,7 +588,6 @@ namespace LoomGUI
         internal readonly StyleMirror _mirror;
         internal NodeStyle(Node owner) { _owner = owner; _mirror = new StyleMirror(owner); }
 
-        // ── 盒模型（Length：宽高 + min/max + inset 四边）──────────────────
         // Length getter：mirror 无 → Length.Unset()（frozen 约定"未写过返 Unset"）。
         public Length Width
         {
@@ -647,9 +640,8 @@ namespace LoomGUI
             set => _mirror.Set("bottom", value);
         }
 
-        // ── Thickness 盒模型（padding/margin/border-width）──────────────
         // Thickness 无 Unset 哨兵（裸四值 struct）；getter 未写过返 default（全 0）+ 不代表
-        // "显式 0"，仅表示"未写过"。如需判"是否写过"走 Geometry（C4）或自带 IsSet 查询。
+        // "显式 0"，仅表示"未写过"。如需判"是否写过"走 Geometry 或自带 IsSet 查询。
         public Thickness Padding
         {
             get => _mirror.Get<Thickness>("padding") ?? default;
@@ -671,7 +663,6 @@ namespace LoomGUI
             set => _mirror.Set("gap", value);
         }
 
-        // ── flex（enum：getter 未写过返 Unset=0 变体）─────────────────────
         public DisplayMode Display
         {
             get => _mirror.Get<DisplayMode>("display") ?? DisplayMode.Unset;
@@ -698,7 +689,6 @@ namespace LoomGUI
             set => _mirror.Set("align-items", value);
         }
 
-        // ── 溢出 / 定位（enum）──────────────────────────────────────────
         public Overflow OverflowX
         {
             get => _mirror.Get<Overflow>("overflow-x") ?? Overflow.Unset;
@@ -715,7 +705,6 @@ namespace LoomGUI
             set => _mirror.Set("position", value);
         }
 
-        // ── 视觉（LoomColor/float）──────────────────────────────────────────
         public LoomColor BackgroundColor
         {
             get => _mirror.Get<LoomColor>("background-color") ?? LoomColor.Unset;
@@ -735,14 +724,13 @@ namespace LoomGUI
             set => TextColor = value;
         }
         // Opacity 无 Unset 哨兵（裸 float）；getter 未写过返 default（0f）+ 不代表"显式 0"。
-        // 业务语义：CSS opacity 默认 1f，但本 getter 只反映 setter 写过的值（projection §2.3 严格语义）。
+        // 业务语义：CSS opacity 默认 1f，但本 getter 只反映 setter 写过的值（严格语义）。
         public float Opacity
         {
             get => _mirror.Get<float>("opacity") ?? default;
             set => _mirror.Set("opacity", value);
         }
 
-        // ── 层叠序（z-index）：绘制/命中层，不触发 flex 重排 ──────────────
         // CSS `<integer>`（负数合法）。getter 只反映 setter 写过的值（mirror 稀疏语义，
         // 同 Opacity）；未写过返 0 = CSS 初始值。CSS 侧 class 规则的 z-index 经打包期
         // base_style 进核心，与本便签层独立。
@@ -752,7 +740,6 @@ namespace LoomGUI
             set => _mirror.Set("z-index", value);
         }
 
-        // ── ponytail defer：custom-property 通道待加 ──
         // SetVar/RemoveVar（--xxx）：core apply_decl 不处理 CSS 自定义属性。
         // 保留 throw NE 防止静默丢：调用方期望 round-trip，prop-name 不在 inline_bit 表经 set_inline_override
         // 会被 bit 检查前置静默忽略（ghost-state 防护）。补 core 支持后把这些 setter 接 _mirror 即可。
@@ -766,7 +753,7 @@ namespace LoomGUI
 
     // Transform = 渲染层，不触发 solve。回写走独立数值 FFI（set_transform，纯 f32）。
     //
-    // 攒批 flush（Task 9）：setter 存镜像 + 标脏 + 注册到 NodeRegistry dirty 集；帧末
+    // 攒批 flush：setter 存镜像 + 标脏 + 注册到 NodeRegistry dirty 集；帧末
     // （LoomHost.Step flush seam / UIContext.FlushPendingWrites）调 FlushTransform 一次性送
     // set_transform FFI（9-arg：tx,ty,sx,sy,rot,ox,oy）。core compute_world_transforms 并入 local_transform。
     // 整值替换语义（非累加）：每次 flush 送全 4 字段，不需要增量。本类签名零改动——只加帧末 flush。
@@ -796,7 +783,6 @@ namespace LoomGUI
         /// <summary>旋转/缩放原点（local 坐标，px）。setter 存镜像 + 标脏。</summary>
         public LoomVector2 Origin { get => _origin; set => Store(ref _origin, value); }
 
-        // 统一 setter 路径：写镜像 + 标脏 + 注册 dirty 集（帧末集中 flush）。
         void Store<T>(ref T field, T value)
         {
             field = value;
@@ -823,11 +809,11 @@ namespace LoomGUI
 
     // Geometry = 只读快照，直读 FFI layout/world 产物（滞后一帧，同 web reflow）。
     //
-    // C4（直读 FFI）：readonly struct 持 owner 身份（uint _id + UIContext _ctx）；node.Geometry 每次
-    // 返 fresh struct snapshot。projection §2.5 / §2.6 读时序——LayoutRect/WorldRect 反映最近一次
+    // 直读 FFI：readonly struct 持 owner 身份（uint _id + UIContext _ctx）；node.Geometry 每次
+    // 返 fresh struct snapshot。读时序——LayoutRect/WorldRect 反映最近一次
     // solve/compute_world_transforms 结果，本帧写 Style/Transform 下帧才反映（滞后一帧）。
     //
-    // ponytail: blob 缓存推后（projection §5 升级路径给 FrameBlob 加 rect/world 列）。4a 直读 FFI
+    // blob 缓存推后（升级路径：给 FrameBlob 加 rect/world 列）。直读 FFI
     // 简单且正确——单次 layout_rect/world_matrix 读是 6 f32 + 1 dict 查找，热路径（每帧 N 节点读）
     // 暂未达需缓存的规模，YAGNI。
     public readonly unsafe struct NodeGeometry
@@ -869,7 +855,7 @@ namespace LoomGUI
 
         /// <summary>
         /// 本地点 → 世界点（经 world_matrix）。Affine2 列主序：x' = a·x + c·y + tx，y' = b·x + d·y + ty
-        /// （crates/core/src/transform.rs:46 apply_point 公式）。
+        /// （core transform.rs apply_point 公式）。
         /// </summary>
         public LoomVector2 LocalToGlobal(LoomVector2 p)
         {
@@ -879,7 +865,7 @@ namespace LoomGUI
 
         /// <summary>
         /// 世界点 → 本地点（world_matrix 的逆变换）。退化情形（det≈0，如 scale(0)）Rust 侧 inverse
-        /// 返 IDENTITY（transform.rs:55），此处逆变换即原 world_matrix 逆——与 hit_test 一致的兜底。
+        /// 返 IDENTITY（core transform.rs inverse），此处逆变换即原 world_matrix 逆——与 hit_test 一致的兜底。
         /// </summary>
         public LoomVector2 GlobalToLocal(LoomVector2 p)
         {
@@ -905,7 +891,6 @@ namespace LoomGUI
             return TransformAABB(ia, ib, ic, id, itx, ity, r);
         }
 
-        // ── FFI + 矩阵 helpers ─────────────────────────────────────────
         // 与 transform.rs 的 apply_point / inverse 公式一一对应；保留为 private 静态以便 JIT 内联。
         // Rust FFI 的 null/无效节点兜底写 identity（[1,0,0,1,0,0]）——调用方 owner Dispose 后理论
         // 不达（node.Geometry getter 抛 ODE），但兜底保证 struct 不持活节点也能安全读。
@@ -919,7 +904,7 @@ namespace LoomGUI
             a = la; b = lb; c = lc; d = ld; tx = ltx; ty = lty;
         }
 
-        // Affine2 逆：与 transform.rs:52 inverse 同算法（det≈0 退化返 identity）。
+        // Affine2 逆：与 core transform.rs inverse 同算法（det≈0 退化返 identity）。
         static void InverseAffine(float a, float b, float c, float d, float tx, float ty,
                                   out float ia, out float ib, out float ic, out float id,
                                   out float itx, out float ity)
@@ -964,7 +949,6 @@ namespace LoomGUI
         }
     }
 
-    // ── Container 与树操作 ──────────────────────────────────────────
     public unsafe class Container : Node
     {
         internal Container(UIContext ctx, uint id) : base(ctx, id) { }
@@ -989,7 +973,7 @@ namespace LoomGUI
         /// 直系子节点列表（typed）。每次访问 lazy 物化：调 get_children 拿 NodeId 数组 +
         /// 逐个 registry.GetOrCreate 包成 typed Node。不缓存 list 本身——树可变，缓存的 list
         /// 会 stale。但 list 内的 Node 引用稳定：GetOrCreate 走 registry 强引用缓存，同一 NodeId
-        /// 永远返同一实例（订阅 / 镜像挂对象上不丢——projection §2.4）。
+        /// 永远返同一实例（订阅 / 镜像挂对象上不丢）。
         /// </summary>
         public IReadOnlyList<Node> Children
         {
@@ -1132,7 +1116,7 @@ namespace LoomGUI
             if (c is null) throw new ArgumentNullException(nameof(c));
             c.ThrowIfDisposed();
             // 必须先校验 c 是直系子：core remove_child 不校验，会对「别 parent 的子」误设 parent=None
-            // （dynamic.rs:231 retain no-op 但 parent=None 仍执行——bug 兜底在投影层拦）。
+            // （dynamic.rs 的 retain no-op 但 parent=None 仍执行——bug 兜底在投影层拦）。
             if (GetChildIndex(c) < 0)
                 throw new ArgumentException(
                     $"node (id={c._id}) is not a child of container (id={_id})", nameof(c));
@@ -1227,7 +1211,6 @@ namespace LoomGUI
             // upper/lower：先移高位（不影低位索引），再移低位。最后按原索引插回：
             //   upperChild → lower 位（占据 a/b 中较前者的原位）
             //   lowerChild → upper 位（占据 a/b 中较后者的原位）
-            // 验：首末 / 相邻 / 含中位 情形均经 ContainerTreeWriteOpsTests.SwapChildrenSwapsPositions Theory 覆盖。
             int lower = Math.Min(ia, ib), upper = Math.Max(ia, ib);
             Node lowerChild = (ia < ib) ? a : b;   // 占 lower 位的原始节点
             Node upperChild = (ia < ib) ? b : a;   // 占 upper 位的原始节点
@@ -1287,7 +1270,7 @@ namespace LoomGUI
             Native.loomgui_stage_set_scroll_pos(h, _id, p.X, p.Y, (byte)(b == ScrollBehavior.Smooth ? 1 : 0));
         }
         // ScrollChanged source 待补：ScrollPane 物理自维护 tween，无 borrow_scroll_events FFI。
-        // D3 defer——event 签名冻结（PublicApi 编译门已含此字段），add/remove 推后到 source 补齐。
+        // defer——event 签名冻结（PublicApi 编译门已含此字段），add/remove 推后到 source 补齐。
         public event Action<ScrollChangedEvent> Scrolled;
         public UITemplate GetTemplate(string name)
         {
@@ -1332,12 +1315,11 @@ namespace LoomGUI
             return new UITemplate(_ctx, child);
         }
 
-        // ── helpers ─────────────────────────────────────────────────────
 
         /// <summary>
         /// 调 get_children 拿当前直系子 NodeId 数组 + 逐个 registry.GetOrCreate 包成 typed Node。
-        /// FFI 调用模式复用 C1 <see cref="Node.DisposeDescendantsInRegistry"/>：先 get_child_count
-        /// 定 cap，再 get_children 写入 fixed 钉住的 buffer（return-code + out-param，A6 cap 编码）。
+        /// FFI 调用模式复用 <see cref="Node.DisposeDescendantsInRegistry"/>：先 get_child_count
+        /// 定 cap，再 get_children 写入 fixed 钉住的 buffer（return-code + out-param + cap 编码）。
         /// 单线程同步内 count 不会 stale；written 防御性 clamp 兜底 ABI 异常。
         /// </summary>
         private List<Node> MaterializeChildren()
@@ -1360,7 +1342,7 @@ namespace LoomGUI
 
             for (int i = 0; i < written; i++)
             {
-                // registry 缓存命中返同一实例；未命中走 NodeFactory 造 typed 子类（C1）+ 入缓存。
+                // registry 缓存命中返同一实例；未命中走 NodeFactory 造 typed 子类 + 入缓存。
                 list.Add(_ctx._registry.GetOrCreate(buf[i]));
             }
             return list;
@@ -1434,17 +1416,16 @@ namespace LoomGUI
 
     // 注：无 Panel 类型。作用域是运行时标记（IsScopeRoot），非类型；Instantiate 返回模板根真实类型。
 
-    // ── 叶子：内容/绘制 ──
     //
     // TextNode.Text 的读侧是 C# 镜像（_text），不是 core 直读——lib.rs 无 get_text FFI
     // （grep crates/ffi/src/lib.rs 只有 set_text）。setter 同步写穿到 core（set_text 标 dirty_text
     // → 下帧 rematch）+ 缓存到 _text；getter 读 _text。Container.TextContent 读递归子树累加
     // 各 TextNode._text。
     //
-    // ponytail: 真值在 core（text_contents HashMap<NodeId, String>），Instantiate 路径把
+    // 真值在 core（text_contents HashMap<NodeId, String>），Instantiate 路径把
     // pkg 内文本写入 core 但不通知 C# → 这类 TextNode 的 _text 保持 ""。读镜像返 ""
     // 与 core 实际渲染不一致是已知 ghost state；待首个 Instantiate 文本读回场景落地时
-    // 加 get_text FFI（同 C4 set_transform 推后的模式——等真实读回消费者出现再接通，
+    // 加 get_text FFI（同 set_transform 推后的模式——等真实读回消费者出现再接通，
     // 避免空 flush / 无用 FFI）。业务侧文本交互（Create<TextNode>() + 写 Text）当前路径正确。
     public unsafe class TextNode : Node
     {
@@ -1512,7 +1493,6 @@ namespace LoomGUI
         }
     }
 
-    // ── 容器类文本/标签（TextContent 走 Container 继承）──
     public class TextElement : Container
     {
         internal TextElement(UIContext ctx, uint id) : base(ctx, id) { }
@@ -1526,7 +1506,6 @@ namespace LoomGUI
         public int Index => _index;
     }
 
-    // ── 控件（叶子：私有内部结构）──
     public unsafe class Button : Container
     {
         internal Button(UIContext ctx, uint id) : base(ctx, id) { }
@@ -1534,9 +1513,9 @@ namespace LoomGUI
         public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
         void SetNodeDisabled(bool v) { StageHandle* h = (StageHandle*)_ctx._stage.ToPointer(); Native.loomgui_stage_set_node_disabled(h, _id, v); }
         bool GetNodeDisabled() { StageHandle* h = (StageHandle*)_ctx._stage.ToPointer(); byte b = 0; Native.loomgui_stage_get_node_disabled(h, _id, &b); return b != 0; }
-        // 文本走 Container.TextContent（删原 TextContent 特例）
+        // 文本走 Container.TextContent
 
-        // D3 semantic sugar：Action 参数无类型——handler 形参与 ClickEvent 解耦，对齐 UGUI Button.onClick。
+        // semantic sugar：Action 参数无类型——handler 形参与 ClickEvent 解耦，对齐 UGUI Button.onClick。
         // add = On<ClickEvent>(e => value()) 冒泡到自身（button 是 target，bubble 阶段自触）。
         // remove 经 EventRegistration backing 退订（Dictionary<Action,EventRegistration>）。
         [NonSerialized] System.Collections.Generic.Dictionary<Action, EventRegistration> _clickedBacking;
@@ -1779,7 +1758,6 @@ namespace LoomGUI
         }
         static NotImplementedException NE() => new NotImplementedException();
 
-        // ── FFI 转调 ────────────────────────────────────────────────────────
         // FFI 通道收口在 TextControlFFI（四类文本框共享单一真相源：双调法 ReadText + set/get 直转 +
         // rc 升异常）。本类仅薄转调：Handle() 取 stage 句柄，TextControlFFI.X(h, _id, ...) 直转。
         StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
@@ -1850,7 +1828,6 @@ namespace LoomGUI
         }
         static NotImplementedException NE() => new NotImplementedException();
 
-        // ── FFI 转调 ───────────────────────────────────────────────────────────
         // value：NumberField 专用通道（clamp+量化在 core）。float out 经 local + &local（同 GetControlValue）。
         float GetNumberValue()
         {
@@ -1871,7 +1848,7 @@ namespace LoomGUI
         bool GetControlReadonly() => TextControlFFI.GetControlReadonly(Handle(), _id);
         void SetNodeDisabled(bool v) => TextControlFFI.SetNodeDisabled(Handle(), _id, v);
         bool GetNodeDisabled() => TextControlFFI.GetNodeDisabled(Handle(), _id);
-        // min/max/step：复用 Slider 同名 FFI（get_control_min/max/step 已扩到 NumberField，见 c55389d）。
+        // min/max/step：复用 Slider 同名 FFI（get_control_min/max/step 已扩到 NumberField）。
         // float out 经 local + &local（同 GetControlValue 局部取址模式）。rc!=0 升异常不吞。
         float GetControlMin()
         {
@@ -1992,7 +1969,6 @@ namespace LoomGUI
         }
         static NotImplementedException NE() => new NotImplementedException();
 
-        // ── FFI 转调（float out 经 local + &local，同 GetWorldMatrix 模式）──────────
         float GetControlValue()
         {
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
@@ -2097,7 +2073,6 @@ namespace LoomGUI
         }
         static NotImplementedException NE() => new NotImplementedException();
 
-        // ── FFI 转调 ────────────────────────────────────────────────────────
         bool GetControlChecked()
         {
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
@@ -2174,7 +2149,6 @@ namespace LoomGUI
             }
         }
 
-        // ── FFI 转调 ────────────────────────────────────────────────────────
         bool GetControlChecked()
         {
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
@@ -2276,7 +2250,7 @@ namespace LoomGUI
     {
         internal Dropdown(UIContext ctx, uint id) : base(ctx, id) { }
 
-        // SelectedIndex：直转 FFI get/set_dropdown_selected_index（Task 6）。core ControlState::Dropdown
+        // SelectedIndex：直转 FFI get/set_dropdown_selected_index。core ControlState::Dropdown
         // 的 selected_index（打包期 ControlInit::Dropdown.options 由 <option selected> 烘焙初值；运行时
         // 交互 / 本 setter 改写）。FFI 以 uint* 出参，公共签名用 int（index 不会超 int 正区）——边界 cast。
         public int SelectedIndex
@@ -2327,7 +2301,6 @@ namespace LoomGUI
         }
         static NotImplementedException NE() => new NotImplementedException();
 
-        // ── FFI 转调 ────────────────────────────────────────────────────────
         StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
         uint GetDropdownSelectedIndex()
         {
@@ -2394,7 +2367,6 @@ namespace LoomGUI
         // Disabled：伪类源（NodeFlags::DISABLED）。setter 直 FFI；getter 读 node flag（与 Slider 等一致）。
         public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
 
-        // ── FFI 转调（disabled 经通用 node flag 通道；Value/Selected 待 option FFI）──────────
         StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
         void SetNodeDisabled(bool v)
         {
@@ -2423,7 +2395,7 @@ namespace LoomGUI
     // host 节点 kind=CustomElement（保留原始 tag 字面量），组件模板子树挂 host 下，<slot> 投影
     // 在拼接位消费（产物无 Slot 节点）。host 是硬墙作用域——投影内容归组件域（Get/Query 不穿透），
     // host 自身归页面域。组件注册 = 打包器 components/ 目录（Package 注册表承担
-    // customElements.define() 角色，main-design §7.4）。
+    // customElements.define() 角色）。
     public unsafe class CustomElement : Container
     {
         internal CustomElement(UIContext ctx, uint id) : base(ctx, id) { }
@@ -2448,16 +2420,16 @@ namespace LoomGUI
     // TabList = <div role="tablist"> 的 typed 投影（WAI-ARIA tablist 容器，持若干 <button role=tab> 子）。
     // 继承 Container（同 ListView，因持有 tab 子节点——非 Dropdown 那样的叶子控件）。
     //
-    // ControlState::TabList{selected_index}：selected_index 由打包期 aria-selected="true" 烘焙初值
-    // （core T2-T3），运行时交互（click / 方向键）与本 setter 改写（core T5-T6 合成 aria-selected 到各 tab，
-    // T7 触发 SelectionChanged）。SelectionChanged 复用 Dropdown 同源 ControlSelectionChangedEvent +
+    // ControlState::TabList{selected_index}：selected_index 由打包期 aria-selected="true" 烘焙初值，
+    // 运行时交互（click / 方向键）与本 setter 改写（core 合成 aria-selected 到各 tab，
+    // 并触发 SelectionChanged）。SelectionChanged 复用 Dropdown 同源 ControlSelectionChangedEvent +
     // 公共 SelectionChangedEvent（core 侧同一 EVT_SELECTION_CHANGED=26，touch_id=新 index）——零新增
     // event struct / demux arm。
     public unsafe class TabList : Container
     {
         internal TabList(UIContext ctx, uint id) : base(ctx, id) { }
 
-        // SelectedIndex：直转 FFI get/set_tablist_selected_index（Task 8）。uint* 出参，公共签名用 int
+        // SelectedIndex：直转 FFI get/set_tablist_selected_index。uint* 出参，公共签名用 int
         // （index 不会超 int 正区）——边界 cast。rc!=0（节点非 TabList / 不 live）升 InvalidOperationException
         // 不吞（ThrowIfDisposed 后正常路径不该达）。
         public int SelectedIndex
@@ -2494,7 +2466,6 @@ namespace LoomGUI
             }
         }
 
-        // ── FFI 转调 ────────────────────────────────────────────────────────
         StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
         uint GetTabListSelectedIndex()
         {
@@ -2549,7 +2520,6 @@ namespace LoomGUI
         // Disabled：伪类源（NodeFlags::DISABLED）。setter 直 FFI；getter 读 node flag（与 OptionItem 等一致）。
         public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
 
-        // ── FFI 转调（disabled 经通用 node flag 通道；Selected 派生无 FFI）──────────
         StageHandle* Handle() => (StageHandle*)_ctx._stage.ToPointer();
         void SetNodeDisabled(bool v)
         {
@@ -2591,7 +2561,6 @@ namespace LoomGUI
             set { ThrowIfDisposed(); SetControlIndeterminate(value); }
         }
 
-        // ── 演出糖：AnimateValue ─────────────────────────────────────────
         // Value 走 taffy 布局通道每帧离散重算 fill 宽（CSS transition 只覆盖背景/文字/透明
         // 三通道，布局属性无过渡），演出缓动归 C# 投影层。动画期间 _animTarget 缓存目标：
         // Value 读回数据值，插值中间值经 FFI 只喂渲染；直接赋 Value 显式获胜（取消动画）。
@@ -2645,7 +2614,6 @@ namespace LoomGUI
 
         static NotImplementedException NE() => new NotImplementedException();
 
-        // ── FFI 转调 ────────────────────────────────────────────────────────
         bool GetControlIndeterminate()
         {
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
@@ -2693,7 +2661,6 @@ namespace LoomGUI
         }
     }
 
-    // ── ListView ────────────────────────────────────────────────────
     // 虚拟化是运行时实现决策，不进 HTML。首次设 ItemCount/ItemTemplate/BindItem 即数据驱动+清空设计期 li；
     // 静态/数据驱动强制互斥（越界抛 UIContractException）。
     public unsafe class ListView : Container
@@ -2704,7 +2671,7 @@ namespace LoomGUI
         // set 0 时回填 0，保证 getter 与 core item_count 同步。
         int _itemCount;
         // 首次设 ItemCount 标记：首次过桥后调 drain_now 同帧克隆初始 slot + binds 入队，
-        // 再 DrainPendingBinds 绑定（spec §7 同帧 bind，避免首帧模板原样）。后续 set 靠
+        // 再 DrainPendingBinds 绑定（同帧 bind，避免首帧模板原样）。后续 set 靠
         // tick-drain 自然推进，无需重复 drain（hot-path 避免 FFI 开销）。
         bool _firstItemCountSet;
         // BindItem 委托 + ItemTemplate/TemplateSelector（core 不存这二者，纯 C# 业务回调）。
@@ -2735,7 +2702,7 @@ namespace LoomGUI
                 _itemCount = value;
                 _ctx.RegisterListView(this);
                 // 首次进入数据驱动：同帧推进虚拟化管线（plan+execute 克隆初始 slot + binds 入队），
-                // 再 DrainPendingBinds 绑定——避免首帧模板原样（spec §7）。后续 set 靠 tick-drain。
+                // 再 DrainPendingBinds 绑定——避免首帧模板原样。后续 set 靠 tick-drain。
                 if (!_firstItemCountSet)
                 {
                     _firstItemCountSet = true;
@@ -2787,7 +2754,7 @@ namespace LoomGUI
 
         /// <summary>
         /// ListView 虚拟化：Children 不可枚举（拿到的是随滚动变的可见 slot 子集，语义混乱易误用）。
-        /// 操作项用 BindItem/ItemTemplate/ScrollToItem。对齐 public-api 契约（Container.Children 非虚，用 new 隐藏）。
+        /// 操作项用 BindItem/ItemTemplate/ScrollToItem。对齐公共 API 契约（Container.Children 非虚，用 new 隐藏）。
         /// </summary>
         public new IReadOnlyList<Node> Children => throw new UIContractException("ListView 是虚拟化列表，Children 不可枚举——用 BindItem/ItemTemplate/ScrollToItem 操作项。");
 
@@ -2811,7 +2778,7 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 滚动到指定 item（spec §7）。core 先设祖先 ScrollPane.scroll_pos 到目标偏移，再
+        /// 滚动到指定 item。core 先设祖先 ScrollPane.scroll_pos 到目标偏移，再
         /// drain_now 同帧克隆新可见区 slot + binds 入队；随后本方法调 DrainPendingBinds 绑定
         /// ——同帧完成克隆 + bind，避免首帧模板原样。越界 index（负 / ≥ ItemCount）→
         /// UIContractException（调用方写错，非投影层内部错）。Smooth 走 ScrollPane 自维护
@@ -2861,7 +2828,7 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 插入通知（spec §10）：在 <paramref name="i"/> 处插入 <paramref name="c"/> 项。
+        /// 插入通知：在 <paramref name="i"/> 处插入 <paramref name="c"/> 项。
         /// heights 插入 c 个未知项；已物化 slot 的 item_index 后移。i 越界 → UIContractException。
         /// </summary>
         public void NotifyInserted(int i, int c = 1)
@@ -2881,7 +2848,7 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 删除通知（spec §10）：删 [i, i+c)。区间内已物化 slot 就地休眠（parked，留挂列表待复用）；区间后的 slot.item_index 前移。
+        /// 删除通知：删 [i, i+c)。区间内已物化 slot 就地休眠（parked，留挂列表待复用）；区间后的 slot.item_index 前移。
         /// i/c 越界 → UIContractException。同步更新 _itemCount 缓存。
         /// </summary>
         public void NotifyRemoved(int i, int c = 1)
@@ -2899,7 +2866,7 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 移动通知（spec §10）：把 from 项搬到 to 位置。heights 同步搬；slot.item_index 重映射。
+        /// 移动通知：把 from 项搬到 to 位置。heights 同步搬；slot.item_index 重映射。
         /// from/to 越界 → UIContractException。
         /// </summary>
         public void NotifyMoved(int f, int t)
@@ -2919,20 +2886,19 @@ namespace LoomGUI
         static NotImplementedException NE() => new NotImplementedException();
     }
 
-    // ── 动画 ────────────────────────────────────────────────────────
     // AnimationHandle 句柄非长期对象，生命周期 = 那次播放；播放结束句柄失效、hook 自动释放。
     //
-    // 生命周期不变量（spec §7.6 / public-api §9.2）：
+    // 生命周期不变量：
     // - END 事件（demux 触发 onEnd 后）/ Stop()（scene 层终态）→ _disposed=true +
-    //   UIContext 注销注册表条目；此后成员调用全部 no-op（不抛——§7.6「调用 no-op」）。
+    //   UIContext 注销注册表条目；此后成员调用全部 no-op（不抛——契约为「调用 no-op」）。
     // - 循环动画（infinite）句柄存活到 Stop()。
     // - class 触发的动画无句柄，只走 EventBus 广播（On<AnimationEndEvent> 等）。
     //
-    // 回调路由（spec §7.4）：OnStart/OnEnd/OnHook 纯 C#（core 本就 emit 事件，demux 按
+    // 回调路由：OnStart/OnEnd/OnHook 纯 C#（core 本就 emit 事件，demux 按
     // playerKey 查本实例触发）；OnKey 半 FFI（cb 留本类，pct 经 animation_on_key 注册到 core
     // ——core 才知道检测哪些百分比跨越，注册须在 Play 之后、key 有效时）。
     //
-    // 事件载荷解码（T9 event.rs payload 编码）：demux 把 EventRecord 的 touch_id(低 32)/x(高 32)
+    // 事件载荷解码（core event.rs payload 编码）：demux 把 EventRecord 的 touch_id(低 32)/x(高 32)
     // 拼回 PlayerKey u64，按 key 查 UIContext._animations 命中本实例。
     public sealed unsafe class AnimationHandle
     {
@@ -2992,7 +2958,7 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 时间轴位置（elapsed——含 delay 计时的唯一时间源头，spec §5.3）。setter = seek：
+        /// 时间轴位置（elapsed——含 delay 计时的唯一时间源头）。setter = seek：
         /// 下一帧按新位置采样。句柄失效后 get 返 0 / set no-op。
         /// </summary>
         public float Time
@@ -3028,7 +2994,7 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 停止（scene 层终态，不可恢复，勿当暂停——T6 review Minor 1 钉死）。core 下帧
+        /// 停止（scene 层终态，不可恢复，勿当暂停）。core 下帧
         /// 回收 player（不发 END 事件），故本方法同步失效句柄 + 注销注册表。
         /// </summary>
         public void Stop()
@@ -3058,7 +3024,7 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 链式注册百分比跨越回调（spec §7.4 半 FFI：cb 留 C#，pct 注册进 core 检测阈值）。
+        /// 链式注册百分比跨越回调（半 FFI：cb 留 C#，pct 注册进 core 检测阈值）。
         /// 须在 key 有效时调（Play 之后；链式 <c>Play(name).OnKey(.5, cb)</c> 是标准用法）。
         /// 同 pct 重复注册去重（core register_on_key 去重，cb 仍各存各发）。
         /// </summary>
@@ -3075,7 +3041,7 @@ namespace LoomGUI
         }
 
         /// <summary>
-        /// 链式注册 @loom-hook 锚点回调（spec §7.4 纯 C#：core emit HOOK 带 hook_name，
+        /// 链式注册 @loom-hook 锚点回调（纯 C#：core emit HOOK 带 hook_name，
         /// demux 按 name 匹配触发；无需 FFI 注册）。
         /// </summary>
         public AnimationHandle OnHook(string name, Action cb)
@@ -3087,7 +3053,6 @@ namespace LoomGUI
             return this;
         }
 
-        // ── 投影层内部：demux 句柄路由入口（spec §7.1）────────────────────
         // 回调是 Action（无事件参数），触发时只传载荷（pct / hook_name）。
 
         /// <summary>START 事件 → onStart 回调。</summary>
@@ -3098,7 +3063,7 @@ namespace LoomGUI
             for (int i = 0; i < cbs.Length; i++) cbs[i]();
         }
 
-        /// <summary>END 事件 → onEnd 回调 + 句柄失效（§7.6：播放结束句柄失效）。</summary>
+        /// <summary>END 事件 → onEnd 回调 + 句柄失效（播放结束句柄失效）。</summary>
         internal void FireEnd()
         {
             try
@@ -3140,7 +3105,7 @@ namespace LoomGUI
 
         /// <summary>
         /// 标记失效 + 从 UIContext 注册表注销（END / Stop / IsPlaying 检出回收）。
-        /// 幂等。此后成员调用 no-op（§7.6「player 回收 → 句柄失效 → 调用 no-op」）。
+        /// 幂等。此后成员调用 no-op（player 回收 → 句柄失效 → 调用 no-op）。
         ///
         /// 节点已 dispose 时调用也安全：只碰 <c>_node._ctx</c>（readonly，Node ctor 赋，
         /// Dispose 不清）做纯 C# 字典注销，无 FFI 调用——死节点不阻塞清理。
@@ -3153,12 +3118,11 @@ namespace LoomGUI
         }
     }
 
-    // ── 样式辅助 ────────────────────────────────────────────────────
     // ClassList = Node 的 class 集合投影（Add/Remove/Contains/Toggle/Set/Replace）。
     //
-    // 投影层契约（projection §3.2 即时过桥）：class 是低频 UI 事件路径（非每帧热路径），每次操作
+    // 投影层契约（即时过桥）：class 是低频 UI 事件路径（非每帧热路径），每次操作
     // 直 FFI；无镜像需求——class 状态真相在 core，Contains 直查 has_class FFI（不缓存）。Add/Remove
-    // 在 core 标 dirty_mesh（lib.rs:1428/1452）触发下帧 rematch，命中 .foo 规则的节点下帧 cascade
+    // 在 core 标 dirty_mesh 触发下帧 rematch，命中 .foo 规则的节点下帧 cascade
     // 重算 computed_style——本类不参与 tick 时序，调用方自然推进帧。
     public sealed unsafe class ClassList
     {
@@ -3189,7 +3153,6 @@ namespace LoomGUI
         /// <summary>原子语义替换：移除 oldName + 添加 newName。C# 组合（两次 FFI，非真原子）。</summary>
         public void Replace(string oldName, string newName) { _owner.ThrowIfDisposed(); Remove(oldName); Add(newName); }
 
-        // ── FFI 转调（ptr+len，A6 编码）─────────────────────────────────
         // 同 StyleMirror：UTF-8 编码 + fixed 钉住 + ptr+len。
         //
         // disposed 防御：每个公共方法入口调 _owner.ThrowIfDisposed()——覆盖"业务 var cl = node.Classes;
@@ -3199,7 +3162,7 @@ namespace LoomGUI
         // add_class/remove_class 失败静默（rc!=0 仅发生于 null stage / 节点不 live / 非 UTF-8——
         // 前两者 ThrowIfDisposed 已拦，UTF-8 编码不会产非 UTF-8；防御性不抛，与同 assembly 其他
         // FFI 转调一致）。
-        // has_class 返 i32 三态（lib.rs:1481）：1=true / 0=false / -1=err——Contains 把 -1 升级为
+        // has_class 返 i32 三态：1=true / 0=false / -1=err——Contains 把 -1 升级为
         // InvalidOperationException（不静默吞：stale NodeId 是 use-after-dispose 信号，不能当"无此 class"）。
 
         void CallAdd(string name)
@@ -3235,7 +3198,6 @@ namespace LoomGUI
         static NotImplementedException NE() => new NotImplementedException();
     }
 
-    // ── 模板 ────────────────────────────────────────────────────────
     public sealed unsafe class UITemplate
     {
         // 投影层内部字段：持有上下文 + 包名 + 模板路径。
@@ -3245,7 +3207,7 @@ namespace LoomGUI
         internal readonly string _path;
 
         // SceneSubtree 变体标识：非 RootSentinel 时本模板表示「克隆场景内某个子树」
-        // （非包组件）。Task 2 加，供虚拟列表 slot 克隆路径用——
+        // （非包组件）。供虚拟列表 slot 克隆路径用——
         // ListView ItemTemplate 可指向场景内已建子树，Instantiate 走 clone_subtree FFI
         // 而非包组件 instantiate FFI。两种变体共用同一个公共 API 表面（Name/Instantiate）。
         internal readonly uint _srcNodeId = Node.RootSentinel;
@@ -3311,7 +3273,6 @@ namespace LoomGUI
         }
     }
 
-    // ── 顶层上下文 ──────────────────────────────────────────────────
     // UIContext 是「获取而非创建」：无公共构造，由引擎集成层创建/驱动。业务程序员从集成层获取。
     /// OnUpdate 订阅句柄：Dispose 撤销单个订阅（不触其他订阅）。节点 Dispose 时其全部
     /// 订阅由 UIContext 联动清（公共契约：订阅随 Dispose 自动清理，RemoveFromParent 不清理）。
@@ -3337,28 +3298,28 @@ namespace LoomGUI
 
     public sealed unsafe class UIContext
     {
-        // B3：headless harness / 引擎集成层建 UIContext 时持有的 Stage 句柄（raw FFI handle）。
-        // 投影层（C1+）通过它转调 loomgui_stage_* FFI；公共 API 表面看不到本字段。
+        // headless harness / 引擎集成层建 UIContext 时持有的 Stage 句柄（raw FFI handle）。
+        // 投影层通过它转调 loomgui_stage_* FFI；公共 API 表面看不到本字段。
         internal IntPtr _stage;
 
-        // C1：NodeId → typed Node 的强引用身份缓存（投影层 §2.4）。
+        // NodeId → typed Node 的强引用身份缓存。
         // NodeFactory 造节点入缓存；Node.Dispose 时 evict。公共 API 不见本字段。
         internal readonly NodeRegistry _registry;
 
-        // D2：typed 事件订阅表 + capture/bubble/once 路由。Node.On<T> 经此转调 Subscribe<T>；
-        // D3 demux 翻译 raw LoomEvent → typed struct 后调 Dispatch<T>。公共 API 不见本字段。
+        // typed 事件订阅表 + capture/bubble/once 路由。Node.On<T> 经此转调 Subscribe<T>；
+        // EventDemuxer 翻译 raw LoomEvent → typed struct 后调 Dispatch<T>。公共 API 不见本字段。
         internal readonly EventBus _eventBus;
 
-        // D3：raw LoomEvent stream → typed event struct demux。LoomHost.Step 调 Pump 每帧
+        // raw LoomEvent stream → typed event struct demux。LoomHost.Step 调 Pump 每帧
         // 翻译 borrow_events buffer → EventBus.Dispatch。公共 API 不见本字段。
         internal readonly EventDemuxer _eventDemuxer;
 
-        // E1：create_root FFI 返回的根 NodeId。由 harness/集成层调 create_root 后写入本字段；
+        // create_root FFI 返回的根 NodeId。由 harness/集成层调 create_root 后写入本字段；
         // Root getter 据此返回 typed Container。无公共 FFI 直接读 roots[0]——Rust 侧 roots Vec
         // 未暴露 getter，故投影层需自己跟踪。
         internal uint _rootId = Node.RootSentinel;
 
-        // E1：已加载包名集合（load_package 时加入，unload_package 时移除）。
+        // 已加载包名集合（load_package 时加入，unload_package 时移除）。
         // 用于同名重复检测（公共契约：LoadPackage 同名重复抛 UIContractException）。
         internal readonly HashSet<string> _loadedPackages = new HashSet<string>();
 
@@ -3367,17 +3328,16 @@ namespace LoomGUI
         // 所属 ListView 实例、调其 BindItem。公共 API 不见本字段。
         internal readonly Dictionary<uint, ListView> _listViews = new Dictionary<uint, ListView>();
 
-        // M2（T11）：PlayerKey → AnimationHandle 实例注册表（demux 句柄路由查用，spec §7.1/§7.6）。
+        // PlayerKey → AnimationHandle 实例注册表（demux 句柄路由查用）。
         // 强引用：句柄生命周期 = 那次播放（END/Stop 时 AnimationHandle.Invalidate 注销）。
-        // 循环动画存活到 Stop（§7.6）——用户持有句柄期间注册表保留引用，结束自动释放。
+        // 循环动画存活到 Stop——用户持有句柄期间注册表保留引用，结束自动释放。
         // player 被 core 静默回收（节点销毁）的悬挂条目由 IsPlaying 惰性失效清理。
         internal readonly Dictionary<ulong, AnimationHandle> _animations = new Dictionary<ulong, AnimationHandle>();
 
-        // E1：lazy 创建的 StyleSheet 实例。同 Node.Style/Node.Transform 模式——未访问过 = null，
+        // lazy 创建的 StyleSheet 实例。同 Node.Style/Node.Transform 模式——未访问过 = null，
         // 首次访问构造并挂本 context。StyleSheet.Add/Clear 方法体本身仍 throw NE（core 未接通）。
         StyleSheet _styleSheet;
 
-        // ── 逻辑调度（OnUpdate / CallLater / CallNextFrame，投影层内建）──
         // 回调是 C# 闭包，core 的 C ABI 存不了——调度器整体住在投影层，PumpLogic 由
         // LoomHost.Step 帧头泵（CollectInput 后、FlushPendingWrites 前）：回调内改
         // Style/数据经既有 flush seam 过桥，本帧 solve 生效（零延迟语义）。
@@ -3391,7 +3351,7 @@ namespace LoomGUI
         // 先于 solve，新子树首读必全零）。
         internal readonly Queue<Action> _afterLayout = new();
 
-        // B3：headless harness 工厂构造。public API 无构造（业务从集成层拿现成 instance）。
+        // headless harness 工厂构造。public API 无构造（业务从集成层拿现成 instance）。
         // 建 NodeRegistry 持有自身反向引用（registry 转调 FFI 时需 stage handle）。
         // 建 EventBus + EventDemuxer 同持自身反向引用。
         internal UIContext(IntPtr stage)
@@ -3404,8 +3364,8 @@ namespace LoomGUI
 
         /// <summary>
         /// 帧末 flush seam：一次性把所有标脏的 StyleMirror / NodeTransform 回写到 core。
-        /// LoomHost.Step 在 tick 前调（main-design §16 flush→solve 序）；headless 测试在 raw tick 前调。
-        /// 攒批契约（Task 9）：setter 只标脏不立即过桥，本方法集中过桥，避免每 setter 一次 FFI。
+        /// LoomHost.Step 在 tick 前调（flush→solve 序）；headless 测试在 raw tick 前调。
+        /// 攒批契约：setter 只标脏不立即过桥，本方法集中过桥，避免每 setter 一次 FFI。
         /// </summary>
         internal void FlushPendingWrites()
         {
@@ -3413,7 +3373,6 @@ namespace LoomGUI
             _registry.FlushDirtyTransforms();
         }
 
-        // ── 逻辑调度泵 ──────────────────────────────────────────────────
 
         /// <summary>
         /// 帧头逻辑泵：排空上帧入队的 next-frame 回调 → 逐节点 OnUpdate(dt) → 到期 timer。
@@ -3519,7 +3478,6 @@ namespace LoomGUI
         /// <summary>清节点的全部订阅（Node.Dispose 联动调——契约：订阅随 Dispose 自动清理）。</summary>
         internal void RemoveUpdateHooks(uint nodeId) => _updateHooks.Remove(nodeId);
 
-        // ── ListView 虚拟化 tick-drain（Task 5）───────────────────────
         // ListView.ItemCount/BindItem setter 调 RegisterListView 进本表；DrainPendingBinds
         // 在 tick 前（raw tick 前或集成层 Step 开头）调一次：拉 core pending_binds 队列、
         // 按 slot NodeId 反查所属 ListView、构 ListItem 调 BindItem。core 不存业务回调——
@@ -3629,7 +3587,7 @@ namespace LoomGUI
         /// <summary>
         /// 样式逃生舱（动态 CSS 规则注入）。lazy 造单一实例：同一 UIContext 多次访问返同一 StyleSheet。
         /// StyleSheet.Add(string css) 返回 IDisposable 句柄，撤销靠 Dispose（不靠原文匹配）。
-        /// StyleSheet.Add/Clear 方法体当前 throw NE——core 未接通动态 CSS 注入通道（ponytail defer）。
+        /// StyleSheet.Add/Clear 方法体当前 throw NE——core 未接通动态 CSS 注入通道。
         /// </summary>
         public StyleSheet StyleSheet
         {
@@ -3718,7 +3676,7 @@ namespace LoomGUI
         ///
         /// tag 映射（对齐 core dynamic.rs::kind_from_tag）：
         /// Container/AbsolutePanel → "div", TextNode → "span", Image → "img"。
-        /// Button 虽在 kind_from_tag 白名单但 E1 不列入 Create<T>——Button 带内建子树，
+        /// Button 虽在 kind_from_tag 白名单但不列入 Create<T>——Button 带内建子树，
         /// 裸建 produce 无 label 的残缺按钮，Instantiate 是唯一路径。
         /// </summary>
         public T Create<T>() where T : Node
@@ -3812,7 +3770,7 @@ namespace LoomGUI
 
         /// <summary>
         /// 当前是否有指针在 UI 上（命中任意 Touchable 节点）。
-        /// 直透传 loomgui_stage_is_pointer_on_ui FFI（lib.rs:399）。
+        /// 直透传 loomgui_stage_is_pointer_on_ui FFI。
         /// null stage → false（防御性——_stage 不应为 null，但容错不抛）。
         /// </summary>
         public bool IsPointerOnUI

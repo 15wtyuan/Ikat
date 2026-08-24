@@ -1,5 +1,4 @@
 // LoomGUI Frozen Public API: Events
-// See docs/design/public-api.md (权威契约) + docs/design/projection-layer.md (投影层机制)
 //
 // ⚠️ 关键契约——每个 typed event struct 实现 IRouteEvent + IRouteEventCore（暴露 _core 引用）
 // 并声明 internal static byte EventType 属性（订阅表 key，EventTypeCache<T> 反射解析）。
@@ -34,9 +33,9 @@ namespace LoomGUI
     /// 设计：EventBus.Subscribe 在录入订阅表后 new EventRegistration(unsubscribeAction)
     /// 把退订闭包交回调用方；Dispose 调闭包 → EventBus.Remove 从订阅表移 entry。
     /// 幂等：二次 Dispose no-op（<c>_disposed</c> flag 拦）。订阅随 Node.Dispose 自动清理
-    /// （public-api §5.4）—— Node.Dispose 走 evict 路径不调本类 Dispose，但订阅表通过
+    /// —— Node.Dispose 走 evict 路径不调本类 Dispose，但订阅表通过
     /// NodeId 查询命中已 evict 节点是无效订阅；EventBus 不会主动清，由 GC 回收 Node 后
-    /// 弱引用路径清理（roadmap 项，4a 不做：业务侧 Dispose reg 即可）。
+    /// 弱引用路径清理（弱引用清理未实装：业务侧 Dispose reg 即可）。
     /// </summary>
     public sealed class EventRegistration : IDisposable
     {
@@ -60,7 +59,6 @@ namespace LoomGUI
         }
     }
 
-    // Pointer
     public struct PointerDownEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
@@ -74,7 +72,7 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
-        /// <summary>D2 EventBus 订阅表 key（对齐 core <see cref="EventType"/>）。</summary>
+        /// <summary>EventBus 订阅表 key（对齐 core <see cref="EventType"/>）。</summary>
         internal static byte EventType => (byte)LoomEventType.Down;
         public LoomVector2 Position { get { return _position; } }
         public PointerButton Button { get { return _button; } }
@@ -168,7 +166,6 @@ namespace LoomGUI
         public int ClickCount { get { return _clickCount; } }
     }
 
-    // Drag
     public struct DragStartEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
@@ -220,7 +217,6 @@ namespace LoomGUI
         public LoomVector2 Position { get { return _position; } }
     }
 
-    // Keyboard
     public struct KeyDownEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
@@ -257,7 +253,6 @@ namespace LoomGUI
         public KeyModifiers Modifiers { get { return _modifiers; } }
     }
 
-    // Focus
     public struct FocusEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
@@ -288,7 +283,6 @@ namespace LoomGUI
         public Node NewFocused { get { return _newFocused; } }
     }
 
-    // Scroll
     public struct ScrollChangedEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
@@ -303,7 +297,7 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
-        // 无 LoomEvent 源（ScrollPane 物理自维护 tween）——D3 接 ScrollPane 回调。
+        // 无 LoomEvent 源（ScrollPane 物理自维护 tween）——待接 ScrollPane 回调。
         internal static byte EventType => (byte)LoomEventType.ScrollChanged;
         public float ScrollX { get { return _scrollX; } }
         public float ScrollY { get { return _scrollY; } }
@@ -311,8 +305,7 @@ namespace LoomGUI
         public float DeltaY { get { return _deltaScrollY; } }
     }
 
-    // AnimationHandle lifecycle
-    // 18/19/20 = M2 真 core 事件源（crates/core/src/event.rs，T9）：class 触发 + node.Play
+    // 18/19/20 = 真 core 事件源（crates/core/src/event.rs）：class 触发 + node.Play
     // 都发，demux 直读 stream 填 AnimationName（字符串表索引读回）。END 另兼容 v1 的
     // TweenComplete（type=16）→ AnimationEnd 分流（transition 旧路径，既有测试锁定）。
     public struct AnimationStartEvent : IRouteEvent, IRouteEventCore
@@ -326,7 +319,6 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
-        // 无 LoomEvent 源（tween 回调产）——D3 接 TweenManager 回调。
         internal static byte EventType => (byte)LoomEventType.AnimationStart;
         public string AnimationName { get { return _animationName; } }
     }
@@ -342,7 +334,7 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
-        // v1 经 TweenComplete（core 产，prop 名装 click_count）——D3 按 prop 名分流到本类型。
+        // 经 TweenComplete（core 产，prop 名装 click_count）。
         internal static byte EventType => (byte)LoomEventType.AnimationEnd;
         public string AnimationName { get { return _animationName; } }
     }
@@ -359,16 +351,14 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
-        // 无 LoomEvent 源（tween 回调产）——D3 接 TweenManager 回调。
         internal static byte EventType => (byte)LoomEventType.AnimationIteration;
         public string AnimationName { get { return _animationName; } }
         public int IterationCount { get { return _iterationCount; } }
     }
 
-    // ── AnimationHandle 句柄私有事件（spec §7.5）──────────────────────────────
     // OnKey 跨越 / @loom-hook 跨越。不广播 EventBus——demux 按 playerKey 查 AnimationHandle 实例
     // 直接触发 OnKey(pct)/OnHook(name) 回调（回调是 Action，无事件参数）；struct 仅作载荷
-    // 载体（字段供句柄路由读取 / 调试）。同其它 typed event struct 保持 _core 首字段约定。
+    // 载体（字段供句柄路由读取 / 调试）。
     public struct AnimationKeyEvent : IRouteEvent, IRouteEventCore
     {
         internal RouteEventCore _core;
@@ -414,12 +404,11 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
-        // v1 经 TweenComplete（core 产，prop 名装 click_count）——D3 按 prop 名分流到本类型。
+        // 经 TweenComplete（core 产，prop 名装 click_count）。
         internal static byte EventType => (byte)LoomEventType.TransitionEnd;
         public string PropertyName { get { return _propertyName; } }
     }
 
-    // ── 控件交互事件（internal route struct，D3）──────────────────────────
     // ValueChangedEvent<T> 是冻结公共 struct 但不实现 IRouteEvent（泛型 + 无 _core），不能直接走
     // EventBus。这三个 internal route struct 携 raw payload 经 EventBus 路由；控件类（Slider/Toggle/
     // RadioButton）的 ValueChanged/CheckedChanged 事件访问器订阅它们，翻译为公共 ValueChangedEvent<*>。

@@ -17,9 +17,9 @@ use crate::schema::tag::{find_tag, DisplayDefault, SemanticKind};
 use loomgui_core::style::dynamic::{AttrOp, Compound, DynamicRule};
 use loomgui_core::style::resolved::ResolvedStyle;
 
-/// 文本级 inline 语义豁免。这些标签是“文本片段”（span 终态是 TextRun，main-design §10）
-/// 或结构占位（slot）——它们在 block 容器里的“不一致”要等文本模型（roadmap §4 复合束）
-/// 解决，不是靠强制作者声明 flex 能修的。报错只会逼作者把 `<div role="listitem"><span>x</span></div>` 改成怪结构，
+/// 文本级 inline 语义豁免。这些标签是“文本片段”（span 终态是 TextRun）或结构占位（slot）
+/// ——它们在 block 容器里的“不一致”要等文本模型解决，不是靠强制作者声明 flex 能修的。
+/// 报错只会逼作者把 `<div role="listitem"><span>x</span></div>` 改成怪结构，
 /// 无益。只拦布局 box（button/img/...）。
 /// （strong/em/br 已从围栏移除——它们就是 span/\n 的语义糖，不再单独存在。）
 const TEXT_LEVEL_SEMANTICS: &[SemanticKind] = &[SemanticKind::TextElement, SemanticKind::Slot];
@@ -206,7 +206,7 @@ pub fn check_inline_context(
             continue;
         }
 
-        // 文本级语义豁免（span/slot）：它们的行内混排要等文本模型（roadmap §4），
+        // 文本级语义豁免（span/slot）：它们的行内混排要等文本模型，
         // 不是 flex 能修的；报错只会逼怪结构。只拦布局 box。
         if el
             .semantic
@@ -248,9 +248,9 @@ pub fn check_inline_context(
             continue;
         }
 
-        // parent 是 CustomElement host：light 子在打包期被投影进组件 slot
-        // （component-system spec），host 最终子树来自组件模板——页面文件里的
-        // light 子不构成 host 的布局上下文，混排检查对它是误报。
+        // parent 是 CustomElement host：light 子在打包期被投影进组件 slot，
+        // host 最终子树来自组件模板——页面文件里的 light 子不构成 host 的布局上下文，
+        // 混排检查对它是误报。
         if parent_el.semantic == Some(SemanticKind::CustomElement) {
             continue;
         }

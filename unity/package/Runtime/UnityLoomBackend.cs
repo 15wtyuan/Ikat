@@ -1,6 +1,6 @@
 using System;
-using System.Buffers;                // ArrayPool<byte> for _frameBuf（搬自 LoomStage.Tick）
-using System.Collections.Generic;    // List<AtlasManifest> for InitSprites
+using System.Buffers;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using LoomGUI.Bindings;
 using UnityEngine;
@@ -9,7 +9,7 @@ namespace LoomGUI
 {
     /// <summary>
     /// Unity 引擎后端实现：持 MirrorPool / MaterialManager / NativeHostManager / SpriteResolver /
-    /// LoomInputCollector（零改复用，引用从 LoomStage 搬来）。<see cref="LoomHost"/> 通过
+    /// LoomInputCollector。<see cref="LoomHost"/> 通过
     /// <see cref="LoomBackend"/> 契约驱动：每帧先 <see cref="CollectInput"/> 再 <see cref="SyncFrame"/>
     /// （borrow_frame 已由 LoomHost 完成，ptr+len 传入避免二次 borrow）。
     ///
@@ -19,7 +19,7 @@ namespace LoomGUI
     /// 资源回收：本类实现 <see cref="IDisposable"/>——Driver.OnDestroy 调 <see cref="Dispose"/>
     /// 清理 MirrorPool GO / MaterialManager 材质 / NativeHostManager wrapper / SpriteResolver 缓存 /
     /// ArrayPool frame buffer。<see cref="LoomHost.Dispose"/> 只释放 stage 句柄（引擎中立），
-    /// 引擎资源归本类。搬自旧 LoomStage.Dispose（LoomStage.cs:515-529，已删）。
+    /// 引擎资源归本类。
     /// </summary>
     public sealed unsafe class UnityLoomBackend : LoomBackend, IDisposable
     {
@@ -60,14 +60,11 @@ namespace LoomGUI
         /// loadPage=null 则 GetSprite 全 miss（调用方 fallback）。
         ///
         /// Unity 特定资源 IO（Texture2D）——不进 <see cref="LoomHost"/> 引擎无关层。
-        /// 搬自 LoomStage.cs:131-134（_sprites.Init 转调）。
         /// </summary>
         public void InitSprites(List<AtlasManifest> atlases, Func<string, Texture2D> loadPage)
         {
             _sprites?.Init(atlases, loadPage);
         }
-
-        // ── LoomBackend 契约 ──
 
         /// <summary>
         /// 采集 Unity 输入（指针/键盘/滚轮）→ set_input 系 FFI（引擎中立，由 LoomInputCollector 内部调）。
@@ -88,7 +85,6 @@ namespace LoomGUI
         /// <summary>
         /// 消费 borrow_frame blob → ArrayPool 复制 → <see cref="SyncFontAtlas"/>（脏页上传）+
         /// <see cref="MirrorPool.Sync"/>（RenderNode 镜像）+ <see cref="NativeHostManager.Sync"/>（3D 模型绑定）。
-        /// 与 LoomStage.Tick 的 borrow→Sync 段对齐，逻辑零改（_stage 换 h 参数）。
         /// </summary>
         public override void SyncFrame(IntPtr stage, IntPtr framePtr, int frameLen)
         {
@@ -96,7 +92,7 @@ namespace LoomGUI
             if (framePtr == IntPtr.Zero || frameLen <= 0 || _renderRoot == null) return;
             StageHandle* h = (StageHandle*)stage.ToPointer();
 
-            // frame buffer（ArrayPool 复用——搬自 LoomStage.Tick:198-203）。Rent 返 ≥len，只 copy/解析 len 字节。
+            // frame buffer（ArrayPool 复用）。Rent 返 ≥len，只 copy/解析 len 字节。
             if (_frameBuf == null || _frameBuf.Length < frameLen)
             {
                 if (_frameBuf != null) ArrayPool<byte>.Shared.Return(_frameBuf);
@@ -111,8 +107,6 @@ namespace LoomGUI
             _pool.Sync(blob, _renderRoot, _mm, _sprites, Texture2D.whiteTexture);
             _nhm.Sync(h);
         }
-
-        // ── SyncFontAtlas（搬自 LoomStage.SyncFontAtlas，零改；_stage → h 参数）──
 
         /// <summary>
         /// Rust FFI panic 兜底计数轮询。native 侧全部导出包 catch_unwind（panic 穿越 extern "C"
@@ -134,11 +128,11 @@ namespace LoomGUI
         ///
         /// 双调法取页数据：先探 buf_len=0 返所需字节数 → 分配 buf → 再调填 w/h/bytes。
         /// Atlas 页面通常是 512×512=256KB，每页用独立 ArrayPool 缓冲区（不挤 _frameBuf）。
-        /// v1.6 单字体路径固定 f0（默认字体 font_id=0）；多字体 T8 再扩 key。
+        /// 单字体路径固定 f0（默认字体 font_id=0）；多字体再扩 key。
         /// </summary>
         unsafe void SyncFontAtlas(StageHandle* h)
         {
-            // 探脏页（通常 ≤8 页；v1.6 单字体极少超 16）。
+            // 探脏页（通常 ≤8 页；单字体极少超 16）。
             const int MAX_DIRTY = 16;
             uint* dirtyPtr = stackalloc uint[MAX_DIRTY];
             int n = (int)Native.loomgui_stage_font_atlas_dirty_pages(h, dirtyPtr, (nuint)MAX_DIRTY);
@@ -152,7 +146,7 @@ namespace LoomGUI
             for (int i = 0; i < n; i++)
             {
                 uint page = dirtyPtr[i];
-                // 原 LoomStage 代码用 w/h 局部；此处外层参数已名 h（StageHandle*），重名局 page height 为 ph 避冲突。
+                // 此处外层参数已名 h（StageHandle*），重名局 page height 为 ph 避冲突。
                 uint w = 0, ph = 0;
                 // 探所需字节数（buf_len=0, out_buf=null → 返 needed 不写 w/h/pixels）。
                 int needed = (int)Native.loomgui_stage_font_atlas_page(h, page, &w, &ph, null, (nuint)0);
@@ -181,8 +175,6 @@ namespace LoomGUI
             }
             Native.loomgui_stage_font_atlas_clear_dirty(h);
         }
-
-        // ── 诊断（F8 dump）：blob 内容 + MirrorPool 状态 ──
 
         /// <summary>诊断：dump 当前 MirrorPool GO 状态（Unity 渲染视角）。</summary>
         public string DumpMirrorState() => _pool?.DumpState() ?? "(pool null)";
@@ -243,14 +235,12 @@ namespace LoomGUI
             return sb.ToString();
         }
 
-        // ── 释放（搬自 LoomStage.cs:515-529，引擎资源归 backend 自管）──
-
         /// <summary>
         /// 释放 Unity 引擎资源：MirrorPool 镜像 GO + NativeHostManager wrapper + MaterialManager 材质 +
         /// SpriteResolver 缓存 + ArrayPool frame buffer。<see cref="LoomHost"/>.Dispose 不递归——
         /// 引擎资源归本类。Driver.OnDestroy 先 host.Dispose（释放 stage 句柄）再 backend.Dispose。
         /// SpriteResolver 持 lazy-loaded 页 Texture2D 缓存，Clear 清表但不 Dispose 页纹理
-        /// （归 caller / 构建后端拥有其生命周期——同原 LoomStage 语义）。
+        /// （归 caller / 构建后端拥有其生命周期）。
         /// </summary>
         public void Dispose()
         {

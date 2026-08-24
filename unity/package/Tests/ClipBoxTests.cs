@@ -17,7 +17,6 @@ namespace LoomGUI.Tests
             root.localScale = new Vector3(1f, -1f, 1f);   // y-down design → y-up world
             root.position = Vector3.zero;
 
-            // design rect {x=100,y=100,w=200,h=200}
             Vector4 box = ClipMath.ComputeClipBox(
                 root,
                 designX: 100f, designY: 100f, designW: 200f, designH: 200f);

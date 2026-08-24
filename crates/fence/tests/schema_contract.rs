@@ -38,7 +38,7 @@ fn removed_tags_rejected() {
     for removed in [
         // old block/text tags (retired earlier)
         "p", "header", "nav", "ol", "canvas", "strong", "em", "br", "label", "a",
-        // control/list tags retired in favour of `role` (spec §2.2)
+        // control/list tags retired in favour of `role`
         "input", "textarea", "select", "option", "progress", "ul", "li",
     ] {
         assert!(

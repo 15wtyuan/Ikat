@@ -14,8 +14,7 @@ use ab_glyph_rasterizer::{point, Point, Rasterizer};
 use etagere::AtlasAllocator;
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
 
-/// 4096² R8 = 16MB / 页。经验上容 3000-4000 CJK 字形 @48px；后续任务接 multi-page
-/// 溢出策略时仍以此为单页上限。
+/// 4096² R8 = 16MB / 页。经验上容 3000-4000 CJK 字形 @48px；多页溢出以此为单页上限。
 const PAGE_SIZE: i32 = 4096;
 
 /// SDF source 光栅尺寸（design px）。所有 target size 共享一份此尺寸的 SDF，
@@ -269,7 +268,6 @@ impl GlyphAtlas {
 /// 前者画 tofu 框（开发期可见占位），后者返空 bitmap 不渲染——空格被画成方块就是把
 /// 这类无轮廓字形误走 tofu 的 bug。
 fn rasterize_glyph(face: &Face<'_>, gid: u16) -> (Vec<u8>, u32, u32) {
-    // SDF：固定 SOURCE_SIZE 光栅（单一 SDF，所有 target size 共享此源）。
     let size_px = SOURCE_SIZE;
     let units = face.units_per_em();
     if units == 0 || size_px == 0 {
@@ -329,7 +327,6 @@ fn rasterize_glyph(face: &Face<'_>, gid: u16) -> (Vec<u8>, u32, u32) {
         return empty_or_tofu(gid, size_px);
     }
 
-    // hi-res coverage → hi-res 二值 mask（threshold 0.5）→ hi-res signed distance。
     // 距离单位 = hi-px（hi-res 像素）。
     let mut hi_mask = vec![0u8; hi_gw * hi_gh];
     raster.for_each_pixel_2d(|x, y, c| {

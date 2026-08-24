@@ -139,7 +139,6 @@ namespace LoomGUI
         }
     }
 
-    // ── Minimal JSON reader ──────────────────────────────────────────────────
     // The JSON files parsed here are produced by Rust serde_json in a known,
     // stable format. This reader handles the subset we need: objects, arrays,
     // strings, numbers, booleans, null. It is intentionally not a general-purpose
@@ -159,8 +158,6 @@ namespace LoomGUI
             _json = json ?? throw new ArgumentNullException(nameof(json));
             _pos = 0;
         }
-
-        // ── token-level ──
 
         private void SkipWS()
         {
@@ -237,8 +234,6 @@ namespace LoomGUI
             return key;
         }
 
-        // ── values ──
-
         public string ReadString()
         {
             Expect('"');
@@ -262,7 +257,6 @@ namespace LoomGUI
                         case 'r':  sb.Append('\r'); break;
                         case 't':  sb.Append('\t'); break;
                         case 'u':
-                            // \uXXXX — read 4 hex digits, convert to char
                             if (_pos + 4 > _json.Length)
                                 throw Fail("unterminated \\u escape");
                             var hex = _json.Substring(_pos, 4);
@@ -284,7 +278,6 @@ namespace LoomGUI
             throw Fail("unterminated string");
         }
 
-        /// <summary>Read a JSON number as int.</summary>
         public int ReadInt32()
         {
             SkipWS();
@@ -307,7 +300,6 @@ namespace LoomGUI
                 _pos++;
             while (_pos < _json.Length && (char.IsDigit(_json[_pos]) || _json[_pos] == '.'))
                 _pos++;
-            // exponent: e/E + optional sign + digits
             if (_pos < _json.Length && (_json[_pos] == 'e' || _json[_pos] == 'E'))
             {
                 _pos++;
@@ -324,7 +316,6 @@ namespace LoomGUI
                 CultureInfo.InvariantCulture);
         }
 
-        /// <summary>Read 'true' or 'false'.</summary>
         public bool ReadBool()
         {
             SkipWS();
@@ -340,8 +331,6 @@ namespace LoomGUI
             }
             throw Fail("expected true or false");
         }
-
-        // ── arrays ──
 
         public void ReadStringList(List<string> list)
         {
@@ -378,8 +367,6 @@ namespace LoomGUI
             Expect(']');
             return arr;
         }
-
-        // ── skip ──
 
         /// <summary>Skip any JSON value (used for unknown keys).</summary>
         public void SkipValue()

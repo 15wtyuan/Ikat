@@ -1,6 +1,5 @@
 //! xtask: 构建编排工具。
 //! 用法: cargo run -p xtask -- <subcommand>
-//! 当前子命令: sync-bindings
 
 mod bindings;
 mod paths;

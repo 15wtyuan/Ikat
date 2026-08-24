@@ -20,7 +20,6 @@ fn main() {
         eprintln!("usage: dump_switch <page> [page...] [--runs N]");
         std::process::exit(2);
     }
-    // 解析 --runs
     let mut runs: usize = 8;
     let mut seq: Vec<String> = Vec::new();
     let mut i = 0;
