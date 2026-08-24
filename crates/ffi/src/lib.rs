@@ -4127,20 +4127,6 @@ pub extern "C" fn loomgui_list_scroll_to(
     })
 }
 
-/// Rich-text-block 子节点命中细化（spec §10）。
-///
-/// 在 [`loomgui_stage_get_node_layout_rect`] / [`loomgui_stage_is_pointer_on_ui`] 已定出命中
-/// 目标是 rich-text-block 容器之后，用本函数把容器内的点细化到源 inline 节点
-/// （span / TextNode / Image），供后端 firing span 级点击事件。
-///
-/// - `node_id`：rich-text-block 容器（须 `rich_text_block=true`，且 solve 已为其填
-///   `scene.text_layouts[node_id]`）。
-/// - `x`/`y`：相对该容器 border-box 左上的 block-local 点（与 hit_test world_to_local 后
-///   的本地坐标同空间）。
-/// - `out_source`：命中时写 source inline 节点的 NodeId(u32)；未命中不写。null 安全。
-///
-/// 返 `true` = 命中（`*out_source` 已写）；`false` = 未命中 / null 句柄 / 无 scene /
-/// `node_id` 非 rich-text-block / 无 layout（`*out_source` 未动）。
 /// 命中测试（公共 Pick 的后端）：(x,y) 最上层可 touchable 节点。rc=0 命中（out_node 写
 /// NodeId u32）；rc=1 未命中；-1 = null 句柄 / 无 scene / null out。坐标 = design 像素
 /// （左上原点，同 process 输入）。core hit_test 走上帧 world_transforms（结构变更帧的
@@ -4175,6 +4161,20 @@ pub extern "C" fn loomgui_stage_hit_test(
     })
 }
 
+/// Rich-text-block 子节点命中细化（spec §10）。
+///
+/// 在 [`loomgui_stage_get_node_layout_rect`] / [`loomgui_stage_is_pointer_on_ui`] 已定出命中
+/// 目标是 rich-text-block 容器之后，用本函数把容器内的点细化到源 inline 节点
+/// （span / TextNode / Image），供后端 firing span 级点击事件。
+///
+/// - `node_id`：rich-text-block 容器（须 `rich_text_block=true`，且 solve 已为其填
+///   `scene.text_layouts[node_id]`）。
+/// - `x`/`y`：相对该容器 border-box 左上的 block-local 点（与 hit_test world_to_local 后
+///   的本地坐标同空间）。
+/// - `out_source`：命中时写 source inline 节点的 NodeId(u32)；未命中不写。null 安全。
+///
+/// 返 `true` = 命中（`*out_source` 已写）；`false` = 未命中 / null 句柄 / 无 scene /
+/// `node_id` 非 rich-text-block / 无 layout（`*out_source` 未动）。
 #[no_mangle]
 pub extern "C" fn loomgui_hit_test_rich(
     h: *const StageHandle,

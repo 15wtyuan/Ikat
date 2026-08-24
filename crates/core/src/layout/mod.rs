@@ -4,9 +4,9 @@
 //! 测量上下文（Text/Image），solve 后把 taffy 的 `Layout.location`/`size`
 //! 回写进 `Node.layout_rect`/`clip_rect`。
 //!
-//! # taffy 0.5.2 API 边界
+//! # taffy 0.12 API 边界
 //!
-//! taffy 0.5.2 用 trait 对象模式（无 `MeasureFunc` 枚举）：
+//! taffy 0.12 用 trait 对象模式（无 `MeasureFunc` 枚举）：
 //! - `TaffyTree<NodeContext>`：节点上下文是泛型，叶子节点用
 //!   `new_leaf_with_context(style, ctx)` 存一个 owned `NodeContext`。
 //! - 单个 `compute_layout_with_measure(root, avail, FnMut(...))` 闭包负责按
@@ -17,7 +17,7 @@
 //! family 等）已 owned 进 `NodeContext::Text`（不含 Font 实例），font 在闭包内按 family
 //! 查 FontTable 取得。`solve` 签名收 `fonts: &FontTable`（不破下游 stage 契约）。
 //!
-//! taffy 0.5.2 的 `Style` 无 `order`，不做 flex order 排序（render 层按 DOM 顺序 /
+//! taffy 0.12 的 `Style` 无 `order`，不做 flex order 排序（render 层按 DOM 顺序 /
 //! layout 输出的 `Layout.order` 渲染）。
 //!
 //! 核心知图尺寸（打包期 PNG IHDR 静态，Stage 持 path→(w,h) 尺寸表）+ 不知图集
@@ -34,7 +34,7 @@ use taffy::prelude::*;
 /// `solve`/`build_render_nodes` 接 `&HashMap<String, (u32, u32)>` 查 Image intrinsic 尺寸。
 pub type ImageSizeTable = HashMap<String, (u32, u32)>;
 
-/// LoomGUI OverflowMode → taffy Overflow（Auto→Scroll，taffy 0.5 无 Auto）。
+/// LoomGUI OverflowMode → taffy Overflow（Auto→Scroll，taffy 无 Auto 变体）。
 /// Hidden/Scroll 让 taffy flex automatic min-size=0（CSS flex §4.5，taffy style/mod.rs:124）——
 /// 容器不被 content min-content 撑开，content 可溢出 scroll。不设则 taffy 默认 Visible →
 /// 容器被 content 撑开（viewport=content）→ overlap=0 → scroll 失效。
@@ -47,7 +47,6 @@ fn map_overflow(m: OverflowMode) -> taffy::style::Overflow {
     }
 }
 
-/// 叶子节点的测量上下文。Container/Button 无上下文（用 None 叶子或 new_with_children）。
 /// taffy LengthPercentage → f32（固定尺寸节点 Percent 罕见，按 0 处理）。
 fn lp(v: taffy::style::LengthPercentage) -> f32 {
     // taffy 0.12：LengthPercentage 是 pub struct(CompactLength) tagged pointer，
@@ -60,6 +59,7 @@ fn lp(v: taffy::style::LengthPercentage) -> f32 {
     }
 }
 
+/// 叶子节点的测量上下文。Container/Button 无上下文（用 None 叶子或 new_with_children）。
 enum MeasureContext {
     /// Text 叶子：存全部测量参数（content owned）+ 字体度量字段 + 字体族。
     /// font 实例 *不* 进 context——调用方在测量闭包中按 family 查 FontTable 取 Font。

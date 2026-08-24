@@ -596,13 +596,13 @@ fn parse_stop_selector(
     }
 }
 
+const LOOM_HOOK_MARKER_START: char = '\u{1}';
+const LOOM_HOOK_MARKER_END: char = '\u{2}';
+
 /// 剥除 CSS 注释 `/* ... */`。UTF-8 安全：在 `&str` 上用 `find`（ASCII 针的偏移恒为 char 边界）。
 /// 不能逐字节 `u8 as char`——会损坏非 ASCII（CJK font-family、content 文本）。
 /// 合法 `@loom-hook` 注释保留为内部 marker，供 keyframes stop 解析；普通注释照常移除。
 /// marker 在声明/选择器解析前由 `remove_hook_markers` 清掉。
-const LOOM_HOOK_MARKER_START: char = '\u{1}';
-const LOOM_HOOK_MARKER_END: char = '\u{2}';
-
 fn strip_comments(css: &str) -> String {
     let mut out = String::with_capacity(css.len());
     let mut rest = css;

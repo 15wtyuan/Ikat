@@ -28,8 +28,6 @@ fn inset_declares_px_percent_auto() {
     assert!(!apply_decl(&mut s, "top", "1em"));
     assert_eq!(s.taffy_style.inset.top, LengthPercentageAuto::auto());
 }
-/// `width:auto` 必须解析成 `Dimension::auto()`（fit-content），
-/// 不能 fallback 到 `Length(0.0)`（→ img rect=(0,0) 不渲染）。
 #[test]
 fn parse_transform_trs_decomposes_supported_functions() {
     let trs = parse_transform_trs("translate(10px,20px) scale(2,.5) rotate(90deg)")
@@ -50,6 +48,8 @@ fn parse_transform_trs_rejects_non_trs_functions() {
     assert_eq!(parse_transform_trs("matrix(1,0,0,1,0,0)"), None);
 }
 
+/// `width:auto` 必须解析成 `Dimension::auto()`（fit-content），
+/// 不能 fallback 到 `Length(0.0)`（→ img rect=(0,0) 不渲染）。
 #[test]
 fn parse_dimension_auto_is_auto_not_zero() {
     use taffy::style::Dimension;

@@ -1584,7 +1584,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "order" => {
-            // taffy 0.5 Style 无 order 字段；存进 ResolvedStyle.order，
+            // taffy Style 无 order 字段；存进 ResolvedStyle.order，
             // 由 layout 在 flex 排序前消费。非法值降级为 0。
             style.order = value.trim().parse::<i32>().unwrap_or(0);
             true

@@ -330,14 +330,6 @@ fn stem(path: &str) -> String {
         .to_string()
 }
 
-/// 把 img src（相对 HTML 文件）归一化为 sprite_key（相对 workspace_root，正斜杠）。
-/// `html_rel` = HTML 相对 workspace_root（如 `"showcase/home.html"`）；`src` = img src 原值。
-/// 例：`("showcase/home.html", "../res/icons/x.png")` → `"res/icons/x.png"`。
-///
-/// 为什么手写归约而不是用 `PathBuf::canonicalize`：canonicalize 要求路径在磁盘上存在
-/// 且返绝对路径；这里只做纯字符串词法归约（HTML src 可能指向尚未收集的图）。
-/// `Component`-based 归约跨平台（Windows `\` 与 `/` 都正确迭代），输出统一正斜杠
-/// 与 `atlas/collect.rs` 的 sprite_key 口径一致（`replace('\\', "/")`）。
 /// 归一 background-image 路径为 sprite_key 并登记进 refs（atlas 交叉验证）。
 /// inline（base_style 已提取的路径，walker emit 调）与 class 规则（url() 串里
 /// parse_url 出的路径，normalize_bg_rules 调）共用。pub(crate)：expand.rs walker 也调。
@@ -370,6 +362,14 @@ pub(crate) fn normalize_bg_rules(
     }
 }
 
+/// 把 img src（相对 HTML 文件）归一化为 sprite_key（相对 workspace_root，正斜杠）。
+/// `html_rel` = HTML 相对 workspace_root（如 `"showcase/home.html"`）；`src` = img src 原值。
+/// 例：`("showcase/home.html", "../res/icons/x.png")` → `"res/icons/x.png"`。
+///
+/// 为什么手写归约而不是用 `PathBuf::canonicalize`：canonicalize 要求路径在磁盘上存在
+/// 且返绝对路径；这里只做纯字符串词法归约（HTML src 可能指向尚未收集的图）。
+/// `Component`-based 归约跨平台（Windows `\` 与 `/` 都正确迭代），输出统一正斜杠
+/// 与 `atlas/collect.rs` 的 sprite_key 口径一致（`replace('\\', "/")`）。
 pub(crate) fn normalize_sprite_key(html_rel: &str, src: &str) -> String {
     let base = Path::new(html_rel)
         .parent()

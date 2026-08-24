@@ -55,7 +55,9 @@ fn mesh_node_with_path(id: u32, path: Option<&str>) -> RenderNode {
     n
 }
 
-/// 同 mesh_node 但可指定 program（验 program 列 round-trip；坑 79 bg-image 合成）。
+/// 同 mesh_node 但可指定 program（验 program 列 round-trip）。program 是着色契约：
+/// shader 乘法 tint（tex×vcol）在图透明区不透 bg-color，img 与 Container+bg-image
+/// 共用纹理须靠 program 分流（色图共存 = 加法合成 tex.rgb×tex.a + vcol.rgb×(1-tex.a)）。
 fn mesh_node_with_program(id: u32, program: u32) -> RenderNode {
     let mut n = mesh_node(id, None, 0.0, 0.0, 5.0, 5.0);
     let NodePayload::Mesh { program: p, .. } = &mut n.payload;

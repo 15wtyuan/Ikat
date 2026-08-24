@@ -1797,8 +1797,9 @@ mod tests {
         // 的每个 tag 都须在 rematch 命中。这里覆盖曾误退回 "div" 的 ListView/Slot，
         // 以及控件回溯 tag（progress）与基础 tag 作为健全性检查。
         //
-        // 注意 `<template>` 不在此列：它在打包期被消费进 ComponentTemplate，不生成运行时 Node，
-        // 故无对应 NodeKind，不参与 rematch。
+        // 注意 `<template>` 不在此列：ListView 蓝图的 <template> 子树自 pkg v27 起进运行时
+        // （NodeKind::Template，强制 display:none，tag 选择器可命中），不属常规可见 tag，
+        // 此处不重复覆盖。
         // fence tag → NodeKind 真相源：crates/fence/src/schema/tag.rs::resolve_semantic
         let cases: &[(&str, NodeKind)] = &[
             ("ul", NodeKind::ListView),

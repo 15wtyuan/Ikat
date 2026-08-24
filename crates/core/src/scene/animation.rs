@@ -800,9 +800,6 @@ fn stops_channels(stops: &[KeyframeStop]) -> [bool; 4] {
     [opacity, transform, bg, text]
 }
 
-/// 按通道掩码清 NodeAnim（None = 回退 tween/base）。全 false 掩码 no-op；清空后整条
-/// anim 条目移除。`pub(crate)`：sync_animation_players 回收 player 时按"持有 ∩ 无剩余
-/// 持有"掩码调用（多 player 共享通道时只清真正没人写的）。
 /// 重启子树内全部声明式（class 触发）动画：programmatic player（node.Play 句柄持有）
 /// 不受影响。实现 = 按通道回收语义移除既有 player——下一帧 `sync_animation_players`
 /// 依 base_style.animation 声明原样重建（backwards/both 立即写首帧，delay 重新计时）。
@@ -834,6 +831,9 @@ pub fn restart_animations(scene: &mut Scene, root: NodeId) {
     }
 }
 
+/// 按通道掩码清 NodeAnim（None = 回退 tween/base）。全 false 掩码 no-op；清空后整条
+/// anim 条目移除。`pub(crate)`：sync_animation_players 回收 player 时按"持有 ∩ 无剩余
+/// 持有"掩码调用（多 player 共享通道时只清真正没人写的）。
 pub(crate) fn clear_channels(anim: &mut AnimTable, node: NodeId, mask: [bool; 4]) {
     if !mask.iter().any(|&b| b) {
         return;

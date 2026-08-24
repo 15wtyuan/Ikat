@@ -18,6 +18,15 @@ namespace LoomGUI
     }
 
     /// <summary>
+    /// Font-atlas image_path construction. Must match Rust render::font_atlas_path
+    /// (image_path field in blob). Changing the format here requires changing both sides.
+    /// </summary>
+    public static class FontAtlasPath
+    {
+        public static string Format(uint page) => $"loomgui://font-atlas/p{page}";
+    }
+
+    /// <summary>
     /// Sprite key to texture + UV rect resolver.
     /// Consumes self-drawn atlas.png + atlas.json (UV table) from the standalone packer.
     /// Drops Unity SpriteAtlas/Sprite dependency entirely — a cross-engine portability win
@@ -25,18 +34,9 @@ namespace LoomGUI
     ///
     /// All atlases are merged into one global sprite table at Init. Page textures are
     /// lazy-loaded via the loadPage delegate. Font atlas pages are registered separately
-   /// and take priority in GetSprite lookup.
-   /// </summary>
-    /// <summary>
-    /// Font-atlas image_path construction. Must match Rust render::font_atlas_path
-    /// (image_path field in blob). Changing the format here requires changing both sides.
+    /// and take priority in GetSprite lookup.
     /// </summary>
-   public static class FontAtlasPath
-   {
-        public static string Format(uint page) => $"loomgui://font-atlas/p{page}";
-   }
-
-   public sealed class SpriteResolver
+    public sealed class SpriteResolver
     {
         // Merged sprite table: sprite_key → (atlasIdx, page, uvRect, origW, origH).
         Dictionary<string, (int atlasIdx, int page, UnityEngine.Rect uvRect, int origW, int origH)> _sprites;
