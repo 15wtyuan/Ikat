@@ -690,7 +690,7 @@ namespace LoomGUI
             RecomputeAdaptation(_designEff.x, _designEff.y, true);
         }
 
-        void RecomputeAdaptation(float dw, float dh, bool applyToStage)
+        unsafe void RecomputeAdaptation(float dw, float dh, bool applyToStage)
         {
             _designEff = new UnityEngine.Vector2(dw, dh);
             float sw = Screen.width, sh = Screen.height;

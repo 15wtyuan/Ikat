@@ -399,7 +399,7 @@ namespace LoomGUI
             screenPos = Input.mousePosition;
 #endif
 
-            var pos = ScreenToDesign(screenPos, MapScale, MapOffX, MapOffYTopDown, Screen.height);
+            var pos = ScreenToDesign(screenPos, ctx.MapScale, ctx.MapOffX, ctx.MapOffYTopDown, Screen.height);
 
             var ev = new Bindings.WheelEvent { x = pos.x, y = pos.y, delta_x = 0f, delta_y = dy };
             // 栈局部值类型直接 & 取址（CS0213：栈上已固定，无需 fixed）。
