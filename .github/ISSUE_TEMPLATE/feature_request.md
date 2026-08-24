@@ -1,8 +1,8 @@
 ---
 name: 功能建议
 about: 建议新机制 / 围栏属性 / 平台支持
-title: "[feat] "
-labels: enhancement
+title: ""
+labels: 'type: capability'
 ---
 
 ## 想解决什么

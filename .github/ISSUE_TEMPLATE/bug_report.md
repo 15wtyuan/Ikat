@@ -1,8 +1,8 @@
 ---
 name: Bug 报告
 about: 报告渲染/布局/事件/打包等缺陷
-title: "[bug] "
-labels: bug
+title: ""
+labels: 'type: bug'
 ---
 
 ## 症状

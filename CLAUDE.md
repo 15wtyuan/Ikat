@@ -93,7 +93,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 ## 在本仓库怎么干活
 
-- **设计文档 vs 踩坑 vs 工作项**：`docs/design/`（架构/围栏/API/投影层，见上节）、`docs/pitfalls.md`（踩坑规则手册 + 依赖 API 适配）。**活工作项 = GitHub issues**——milestone `M2 · Dogfood` / `M3 · 跨引擎与契约消化` / `v1.0 · 发版`（门控序列），label `t1-capability` / `t2-release` / `t3-expand` / `tx-debt`，非契约项带 `deferred`（触发判据在 issue 正文）；排活/查进度用 `gh issue list`，不开新文档清单。`docs/roadmap/` 是归档只读历史（stub 留北极星判据），别拿它干活。
+- **设计文档 vs 踩坑 vs 工作项**：`docs/design/`（架构/围栏/API/投影层，见上节）、`docs/pitfalls.md`（踩坑规则手册 + 依赖 API 适配）。**活工作项 = GitHub issues**——milestone `M2 · Dogfood` / `M3 · 跨引擎与契约消化` / `v1.0 · 发版`（排期门控序列）；label 三维正交：`type: capability|release|expand|debt|bug`（工作类型，roadmap T1/T2/T3/T× 归宿）× `scope: core|fence|pkg|gui|ffi|unity|docs|meta`（代码落点）× `status: deferred|wontfix`（deferred = 躺 backlog，触发判据在 issue 正文）；类型信息在标签不在标题，issue 标题只写纯描述；排活/查进度用 `gh issue list`，不开新文档清单。`docs/roadmap/` 是归档只读历史（stub 留北极星判据），别拿它干活。
 - **Rust edition 2021**，依赖钉版本：`taffy 0.12`、`ttf-parser 0.20`、`slotmap 1.1`、`csbindgen 1`。CSS 选择器解析器手搓（零新依赖，spike 阶段推翻了"接 cssparser"前提）。
 - `Cargo.lock` 入库（根级，尽管 `.gitignore` 有通用 `Cargo.lock` 行——它是被追踪的）。
 - 设计师工作区是独立磁盘目录（含 `loom.workspace.json`、HTML/CSS 源文件、res 资源、design-systems 组件库）。打包用独立打包器 GUI（Tauri `loomgui_gui`）或 CLI `loom build <workspace>`。运行时引导由 `loom.runtime.json` 统管。

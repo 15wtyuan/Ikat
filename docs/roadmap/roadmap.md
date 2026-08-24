@@ -4,11 +4,12 @@
 >
 > ```bash
 > gh issue list --milestone "M2 · Dogfood"          # 当前里程碑
-> gh issue list --label deferred                    # backlog（非契约，触发判据见 issue 正文）
-> gh issue list --label t1-capability               # 按 track 过滤（t1/t2/t3/tx）
+> gh issue list --label "status: deferred"          # backlog（非契约，触发判据见 issue 正文）
+> gh issue list --label "type: capability"          # 按工作类型过滤
+> gh issue list --label "scope: core"               # 按代码落点过滤
 > ```
 >
-> milestone = `M2 · Dogfood` → `M3 · 跨引擎与契约消化` → `v1.0 · 发版`（门控序列：M 清才进下一个）。label = `t1-capability` / `t2-release` / `t3-expand` / `tx-debt`，非契约项另带 `deferred`。
+> milestone = `M2 · Dogfood` → `M3 · 跨引擎与契约消化` → `v1.0 · 发版`（门控序列：M 清才进下一个）。label 三维：`type: capability|release|expand|debt|bug`（工作类型）× `scope: core|fence|pkg|gui|ffi|unity|docs|meta`（代码落点）× `status: deferred|wontfix`（状态）。类型信息在标签不在标题。
 >
 > 本文件只保留北极星判据——愿景不是任务，文档是它正确的家。历史路线图归档在 [`archive/`](./archive/)：迁移前最后版本 [`roadmap-2026-08.md`](./archive/roadmap-2026-08.md)（含延期项登记表原文）、v1 摸黑 + 三束纪元 [`roadmap_old.md`](./archive/roadmap_old.md)、旧里程碑 [`milestones_old.md`](./archive/milestones_old.md)。踩坑全库见 `docs/pitfalls.md`，活的架构契约在 `docs/design/`。
 
