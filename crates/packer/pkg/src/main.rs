@@ -75,6 +75,11 @@ enum Cmd {
         padding: u32,
         standalone: bool,
     },
+    Design {
+        size: Option<(f32, f32)>,
+        match_mode: Option<String>,
+        clear: bool,
+    },
     /// 刷新 agent 脚手架（已有工作区的安全入口——不碰 workspace.json / .loom / 源文件；
     /// 与 init --force 不同，后者会重写 workspace.json 骨架）。
     Scaffold {
@@ -111,6 +116,7 @@ fn usage() -> ! {
     eprintln!("  {bin} list pkg|atlas|font [--format json]   summary of workspace entities");
     eprintln!("  {bin} show <pkg> [--format json]            package detail (pages + components)");
     eprintln!("  {bin} font add <file> --family <f> [--default] [--fallback]");
+    eprintln!("  {bin} design [WxH] [--match letterbox|fit-width|fit-height] [--clear]");
     eprintln!(
         "  {bin} atlas add <dir> [--name <n>] [--max-size <n>] [--padding <n>] [--standalone]"
     );
@@ -165,6 +171,7 @@ impl<'a> ArgScan<'a> {
                 || a == "--name"
                 || a == "--max-size"
                 || a == "--padding"
+                || a == "--match"
             {
                 self.i += 2;
                 continue;
@@ -259,6 +266,29 @@ fn parse_cmd(args: &[String]) -> Option<Cmd> {
             pkg: scan.positional()?,
             format: parse_format(rest)?,
         }),
+        "design" => {
+            // design [WxH] [--match letterbox|fit-width|fit-height] [--clear]
+            let mut size = None;
+            let mut match_mode = None;
+            let mut clear = false;
+            if let Some(tok) = scan.positional() {
+                size = Some(parse_design_size(&tok)?);
+            }
+            if let Some(m) = scan.flag_value("--match") {
+                match_mode = Some(m);
+            }
+            if scan.has("--clear") {
+                clear = true;
+            }
+            if size.is_none() && match_mode.is_none() && !clear {
+                return None;
+            }
+            Some(Cmd::Design {
+                size,
+                match_mode,
+                clear,
+            })
+        }
         "font" => {
             // font add <file> --family <f> [--default] [--fallback]
             if scan.positional()?.as_str() != "add" {
@@ -337,6 +367,11 @@ fn main() -> ExitCode {
             padding,
             standalone,
         } => run_atlas_add(dir, name, max_size, padding, standalone),
+        Cmd::Design {
+            size,
+            match_mode,
+            clear,
+        } => run_design(size, match_mode, clear),
         Cmd::Scaffold { agents } => run_scaffold(agents),
         Cmd::Version { format } => {
             let v = VersionInfo::current();
@@ -660,6 +695,37 @@ fn run_show(pkg: &str, format: Format) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(f) => failure_exit("show", &f, format),
+    }
+}
+
+/// `1920x1080` / `1920X1080` / `1920*1080` → (w, h)。非此形 → None（当未知子命令/参数走 usage）。
+fn parse_design_size(s: &str) -> Option<(f32, f32)> {
+    let s = s.trim();
+    let (w, h) = s.split_once(['x', 'X', '*'])?;
+    let w: f32 = w.trim().parse().ok()?;
+    let h: f32 = h.trim().parse().ok()?;
+    Some((w, h))
+}
+
+fn run_design(size: Option<(f32, f32)>, match_mode: Option<String>, clear: bool) -> ExitCode {
+    let root = match locate_cwd() {
+        Ok(l) => l.ui,
+        Err(f) => return failure_exit("design", &f, Format::Human),
+    };
+    match loomgui_pkg::workspace_cmd::set_design(&root, size, match_mode, clear) {
+        Ok(echo) => {
+            println!("{}", serde_json::to_string(&echo).unwrap());
+            eprintln!(
+                "design = {}, match_mode = {}; run `loom build` to bake into loom.runtime.json",
+                match echo.design {
+                    Some(d) => format!("{}x{}", d.w as u32, d.h as u32),
+                    None => "(unset)".to_string(),
+                },
+                echo.match_mode.as_deref().unwrap_or("(unset)"),
+            );
+            ExitCode::SUCCESS
+        }
+        Err(f) => failure_exit("design", &f, Format::Human),
     }
 }
 

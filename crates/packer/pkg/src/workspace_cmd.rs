@@ -7,6 +7,7 @@
 
 use crate::build::resolve_html_list;
 use crate::diag::BuildFailure;
+use crate::runtime::DesignDim;
 use crate::workspace::{load_workspace, save_workspace, AtlasCfg, PackageCfg};
 use serde::Serialize;
 use std::path::Path;
@@ -233,6 +234,55 @@ pub fn add_font(
     })
 }
 
+/// `loom design` 回显实体（写命令成功回显实体 JSON 契约）。
+#[derive(serde::Serialize)]
+pub struct DesignEcho {
+    pub design: Option<DesignDim>,
+    pub match_mode: Option<String>,
+}
+
+/// `design [WxH] [--match letterbox|fit-width|fit-height] [--clear]`：设/清设计分辨率
+/// 与适配模式（workspace.design/match_mode——分辨率适配配置正主，`loom build` 透传
+/// runtime.json，引擎集成层消费）。size/mode 只在显式给时动；`--clear` 全清。
+pub fn set_design(
+    root: &Path,
+    size: Option<(f32, f32)>,
+    mode: Option<String>,
+    clear: bool,
+) -> Result<DesignEcho, BuildFailure> {
+    if let Some((w, h)) = size {
+        if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
+            return Err(BuildFailure::config(
+                "design size must be positive finite (e.g. 1920x1080)",
+            ));
+        }
+    }
+    if let Some(m) = &mode {
+        if !matches!(m.as_str(), "letterbox" | "fit-width" | "fit-height") {
+            return Err(BuildFailure::config(
+                "match_mode must be letterbox | fit-width | fit-height",
+            ));
+        }
+    }
+    let mut ws = load_workspace(root)?;
+    if clear {
+        ws.design = None;
+        ws.match_mode = None;
+    } else {
+        if let Some((w, h)) = size {
+            ws.design = Some(DesignDim { w, h });
+        }
+        if let Some(m) = mode {
+            ws.match_mode = Some(m);
+        }
+    }
+    save_workspace(root, &ws)?;
+    Ok(DesignEcho {
+        design: ws.design,
+        match_mode: ws.match_mode,
+    })
+}
+
 /// `atlas add <dir>`：注册 atlases[] 一条。dir 已被其他图集扫描 → 拒绝（会造覆盖冲突）。
 #[allow(clippy::too_many_arguments)]
 pub fn add_atlas(
@@ -365,6 +415,62 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         tmp
+    }
+
+    #[test]
+    fn set_design_writes_and_partial_update_keeps_other_field() {
+        let tmp = tmpdir("design");
+        make_ws(&tmp);
+        // 全量设
+        let echo = set_design(
+            &tmp,
+            Some((1920.0, 1080.0)),
+            Some("fit-width".into()),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            echo.design,
+            Some(DesignDim {
+                w: 1920.0,
+                h: 1080.0
+            })
+        );
+        assert_eq!(echo.match_mode.as_deref(), Some("fit-width"));
+        // 只动 mode：design 保留（部分更新语义）
+        let echo = set_design(&tmp, None, Some("letterbox".into()), false).unwrap();
+        assert_eq!(
+            echo.design,
+            Some(DesignDim {
+                w: 1920.0,
+                h: 1080.0
+            })
+        );
+        assert_eq!(echo.match_mode.as_deref(), Some("letterbox"));
+        // 落盘核对
+        let ws = load_workspace(&tmp).unwrap();
+        assert_eq!(
+            ws.design,
+            Some(DesignDim {
+                w: 1920.0,
+                h: 1080.0
+            })
+        );
+        assert_eq!(ws.match_mode.as_deref(), Some("letterbox"));
+        // clear 全清
+        let echo = set_design(&tmp, None, None, true).unwrap();
+        assert_eq!(echo.design, None);
+        assert_eq!(echo.match_mode, None);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn set_design_rejects_invalid_values() {
+        let tmp = tmpdir("design_bad");
+        make_ws(&tmp);
+        assert!(set_design(&tmp, Some((0.0, 1080.0)), None, false).is_err());
+        assert!(set_design(&tmp, None, Some("expand".into()), false).is_err());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

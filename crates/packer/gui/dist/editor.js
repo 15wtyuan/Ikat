@@ -73,13 +73,20 @@
         fallback: $("font-fallback-" + i) ? $("font-fallback-" + i).checked : false,
       });
     });
-    return {
-      version: ws.version || 1,
-      output_dir: $("ws-output-dir") ? $("ws-output-dir").value.trim() : "",
-      packages: packages,
-      atlases: atlases,
-      fonts: fonts,
-    };
+    // 深拷贝已加载的 ws 再覆盖表单受管字段：未在 GUI 暴露的字段（design/match_mode
+    // 及未来新增）原样透传，防「保存即清空」（design/match 曾被旧表单这样抹掉）。
+    var out = JSON.parse(JSON.stringify(ws));
+    out.version = ws.version || 1;
+    out.output_dir = $("ws-output-dir") ? $("ws-output-dir").value.trim() : "";
+    out.packages = packages;
+    out.atlases = atlases;
+    out.fonts = fonts;
+    var dw = parseFloat(($("ws-design-w") || {}).value);
+    var dh = parseFloat(($("ws-design-h") || {}).value);
+    out.design = isFinite(dw) && isFinite(dh) && dw > 0 && dh > 0 ? { w: dw, h: dh } : null;
+    var mm = ($("ws-match-mode") || {}).value || "";
+    out.match_mode = mm ? mm : null;
+    return out;
   }
   var saveTimer = null;
   function saveIfLoaded() {
@@ -138,6 +145,45 @@
     });
     row.appendChild(openBtn);
     body.appendChild(row);
+
+    // 设计分辨率 + 适配模式（分辨率适配正主；manifest 缺项时引擎侧回退默认）。
+    var dRow = el("div", "form-row");
+    dRow.appendChild(el("span", "form-label", "设计分辨率"));
+    var dwInp = inputEl("text", ws.design ? String(ws.design.w) : "", "form-input", "1920");
+    dwInp.id = "ws-design-w";
+    dwInp.style.maxWidth = "90px";
+    dwInp.addEventListener("input", function () { saveIfLoaded(); });
+    dwInp.addEventListener("keydown", function (e) { if (e.key === "Enter") dwInp.blur(); });
+    dRow.appendChild(dwInp);
+    var xSpan = el("span", "form-label", "×");
+    xSpan.style.minWidth = "auto";
+    dRow.appendChild(xSpan);
+    var dhInp = inputEl("text", ws.design ? String(ws.design.h) : "", "form-input", "1080");
+    dhInp.id = "ws-design-h";
+    dhInp.style.maxWidth = "90px";
+    dhInp.addEventListener("input", function () { saveIfLoaded(); });
+    dhInp.addEventListener("keydown", function (e) { if (e.key === "Enter") dhInp.blur(); });
+    dRow.appendChild(dhInp);
+    body.appendChild(dRow);
+
+    var mRow = el("div", "form-row");
+    mRow.appendChild(el("span", "form-label", "适配模式"));
+    var mSel = el("select", "form-input");
+    mSel.id = "ws-match-mode";
+    [
+      ["", "未设置（引擎默认 letterbox）"],
+      ["letterbox", "letterbox（contain 黑边）"],
+      ["fit-width", "fit-width（宽锚重排）"],
+      ["fit-height", "fit-height（高锚重排）"],
+    ].forEach(function (opt) {
+      var o = el("option", "", opt[1]);
+      o.value = opt[0];
+      if ((ws.match_mode || "") === opt[0]) o.selected = true;
+      mSel.appendChild(o);
+    });
+    mSel.addEventListener("change", function () { saveIfLoaded(); });
+    mRow.appendChild(mSel);
+    body.appendChild(mRow);
   }
 
   function renderPackages() {
