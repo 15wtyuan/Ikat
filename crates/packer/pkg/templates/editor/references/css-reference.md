@@ -4,13 +4,13 @@ Supported properties (complete whitelist; everything else is a build
 error):
 
 <!-- fence-sync:css-supported-begin -->
-- `width` / `height` / `min-width` / `min-height` / `max-width` / `max-height` — px, %, auto
+- `width` / `height` / `min-width` / `min-height` / `max-width` / `max-height` — px, %, auto, viewport units (`vw` / `vh` / `vmin` / `vmax` — resolve against the stage canvas, not the parent; the reflow language for resolution adaptation)
 - `display` — block / flex / none / inline (grid rejected)
 - `flex-direction` / `flex-wrap` / `flex-grow` / `flex-shrink` / `flex-basis`
 - `gap` / `row-gap` / `column-gap`
 - `justify-content` / `align-items` / `align-content` / `align-self`
 - `order` / `aspect-ratio` / `z-index` — integer, no `auto`
-- `position` — absolute / relative / static (initial value `static`); with `top` / `right` / `bottom` / `left` (px / % / auto; `%` resolves against the containing block — browser semantics)
+- `position` — absolute / relative / static (initial value `static`); with `top` / `right` / `bottom` / `left` (px / % / auto / viewport units; `%` resolves against the containing block — browser semantics)
 - **Containing block of an `absolute` element = nearest ancestor with `position: relative` or `absolute`** (browser semantics); if none, the viewport. Known limits: an `absolute` element with all four insets `auto` keeps its direct-parent static position (browser hypothetical-box semantics not implemented); overflow clipping still follows DOM ancestors.
 - `padding-top` / `padding-right` / `padding-bottom` / `padding-left`
 - `margin-top` / `margin-right` / `margin-bottom` / `margin-left`

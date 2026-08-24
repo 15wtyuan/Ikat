@@ -54,6 +54,7 @@ loom list   pkg|atlas|font [--format json]    summary per entity (one line each)
 loom show   <pkg> [--format json]             one package's pages + custom components
 loom font add <file> --family <f> [--default] [--fallback]
 loom atlas add <dir> [--name <n>] [--max-size <n>] [--padding <n>] [--standalone]
+loom design [WxH] [--match letterbox|fit-width|fit-height] [--clear]
 loom scaffold [--agent claude|agents]...      refresh workspace generated artifacts (skills + .loom CLI + version stamp)
 loom version [--format json]
 ```
@@ -168,6 +169,9 @@ Written by the commands above; documented here for reading.
 |---|---|---|
 | `version` | u32 | Config format version (currently `1`) |
 | `output_dir` | string | Path (relative to the output base — see topology) where build artifacts go |
+| `design` | {w, h}? | Design resolution (design px). `loom build` passes it through to `loom.runtime.json`; the engine integration layer consumes it as the source of truth for resolution adaptation. Absent = engine-side fallback (Driver Inspector field) |
+| `match_mode` | string? | Adaptation mode: `letterbox` (contain, pillar/letter bars — default) / `fit-width` / `fit-height` (lock one axis to the design, reflow the other — `vw`/`vh`/`%` flow with the canvas). Absent = `letterbox` |
+
 | `packages` | PackageCfg[] | UI packages to build (one `.pkg.bin` per package) |
 | `atlases` | AtlasCfg[] | Texture atlases to pack from image sources |
 | `fonts` | FontCfg[] | Fonts to include in the runtime bundle |

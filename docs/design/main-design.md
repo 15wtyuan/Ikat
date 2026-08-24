@@ -531,7 +531,7 @@ taffy 0.12 同时支持 Flex 和 Block 布局算法。统一走 `compute_layout_
 ### 11.4 响应式与异形屏
 
 - **resize**：屏幕尺寸变 → 根节点 size 变 → 整树 solve。
-- **safe-area**：在后端根解决——`Screen.safeArea` shrink-to-fit letterbox，输入映射共用同一变换；核心不感知 safe-area，无 CSS 级避让机制（不做 `env()`）。
+- **safe-area**：在后端根解决——`Screen.safeArea` 矩形作适配框（letterbox 在其内 contain 居中；Fit 模式画布从它起算，内容不进刘海），渲染与输入映射消费同一组适配变换（单源 = core 数学）；核心不感知 safe-area，无 CSS 级避让机制（不做 `env()`；变量注入通道是 #11 落地后的演进方向）。
 - **动态内容/数据变化**：改文本/增删子节点 → 置 dirty → 下帧 solve。
 
 ### 11.5 分辨率适配（参考分辨率 / 长宽比 / safe-area）

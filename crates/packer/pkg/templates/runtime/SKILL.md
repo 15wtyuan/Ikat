@@ -42,11 +42,14 @@ with 3D. The design side (HTML/CSS fence authoring) is the
 ## Required workflow
 
 1. **Mount.** Create a GameObject with `LoomStageDriver` +
-   `LoomInputCollector`. Inspector: Design Size = the workspace's
-   authoring resolution (e.g. 1920x1080); UI Camera empty (driver creates
-   `LoomUICamera`) or your own; Safe Area for notch-safe letterboxing.
-   Your main 3D camera renders first; the UI camera after (higher depth,
-   clear flags = Depth only). Layer 6 is reserved by LoomGUI.
+   `LoomInputCollector`. Design resolution and adaptation mode come from
+   `loom.runtime.json` (`design` + `match_mode`, set in the workspace via
+   `loom design`); the Inspector Design Size / Adapt Mode fields are only
+   the fallback when the manifest omits them. UI Camera empty (driver
+   creates `LoomUICamera`) or your own; Safe Area for notch-safe
+   letterboxing. Your main 3D camera renders first; the UI camera after
+   (higher depth, clear flags = Depth only). Layer 6 is reserved by
+   LoomGUI.
 2. **Verify loading.** On startup the driver reads `loom.runtime.json`
    from the product root and loads everything it lists; missing pieces
    log Console warnings naming the file. Product root: Inspector value →
@@ -128,6 +131,30 @@ Full signatures and invariants for everything below (all controls,
 ListView modes, animation hooks, exceptions) are in
 `references/api-reference.md` next to this file — consult it before
 guessing an API name.
+
+## Resolution adaptation
+
+Design resolution and adaptation mode are workspace-level config
+(`loom design 1920x1080 --match fit-width` in the UI workspace; `loom
+build` bakes both into `loom.runtime.json`, the driver reads them at
+startup). Three modes:
+
+- `letterbox` (default) — contain: the canvas stays at the design
+  resolution, uniformly scaled to fit the safe area, centered, with
+  bars. Layout always matches the design draft exactly.
+- `fit-width` / `fit-height` — barless reflow: one axis locks to the
+  design, the other takes the real screen (canvas changes → the core
+  re-lays-out next frame). `px` never distorts (scaling stays uniform);
+  flexible content flows via `%`, `flex` and the `vw`/`vh`/`vmin`/
+  `vmax` units (viewport-relative lengths: `100vw` = canvas width —
+  unlike `%`, they resolve against the canvas, not the parent).
+  Pages written in absolute `px` won't break in fit modes — extra
+  canvas space just stays empty; author flow with the viewport units.
+
+Runtime resolution/rotation changes are handled automatically (the
+driver recomputes on screen or safe-area change and calls
+`LoomHost.SetRootSize`). Safe area: fit modes size the canvas from the
+safe rect (content never flows into a notch); letterbox fits inside it.
 
 ## UI ↔ 3D interop
 

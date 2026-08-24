@@ -424,7 +424,8 @@ these field names (defaults in parentheses):
 
 | Field | Type | Notes |
 |---|---|---|
-| `_designSize` | UnityEngine.Vector2 | authoring resolution; **default (1080,1920) is portrait** — landscape projects must set it explicitly, e.g. (1920,1080) |
+| `_designSize` | UnityEngine.Vector2 | authoring resolution **fallback** — used only when `loom.runtime.json` omits `design` (the workspace is the source of truth; set it there via `loom design`). Default (1080,1920) is portrait |
+| `_adaptMode` | AdaptMode enum | adaptation mode **fallback** (`Letterbox` default / `FitWidth` / `FitHeight`) — used only when the manifest omits `match_mode` |
 | `_safeArea` | bool | notch-safe letterboxing (true) |
 | `_showFps` | bool | FPS overlay (false) |
 | `_uiCamera` | Camera | null = driver creates `LoomUICamera` |
