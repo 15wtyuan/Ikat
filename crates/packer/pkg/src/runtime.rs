@@ -1,4 +1,6 @@
-//! loom.runtime.json：后端自举清单（打包器产，替代 Unity LoomSettings SO）。见 spec §6.1。
+//! loom.runtime.json：后端自举清单（打包器产，替代 Unity LoomSettings SO）。
+//! packages / atlases / fonts 是 workspace 级平行列表——atlas 与字体不隶属任何包，
+//! UnloadPackage 只动模板注册表（见 docs/design/main-design.md §14.5）。
 
 use serde::{Deserialize, Serialize};
 

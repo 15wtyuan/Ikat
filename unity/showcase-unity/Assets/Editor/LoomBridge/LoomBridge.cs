@@ -8,7 +8,6 @@ namespace Showcase.LoomBridge
     /// 编排包内诊断方法（<see cref="LoomHost.DumpSceneJson"/> /
     /// <see cref="LoomStageDriver.DumpMirrorPoolState"/>）。
     /// PlayMode-only（EditMode 无活 LoomStageDriver）。
-    /// 设计见 docs/superpowers/specs/2026-08-08-unity-debug-bridge-design.md。
     /// </summary>
     public static class LoomBridge
     {

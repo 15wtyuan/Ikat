@@ -38,7 +38,7 @@
 
 - **视觉**：~~渐变（现仅 linear 2 色 4 方向）~~ **radial + 多 stop + 任意角度已交付（2026-08-14，program=6/7 per-fragment shader + blob v13 grad_params）**；剩余 defer：conic、repeating-\*、渐变×圆角/边框共存（见延期项表）。`filter: blur()`（需离屏 RT 基建，非小缺口）、`grayed` 渲染（现借 `filter: grayscale(1)`）照旧。
 - ~~**复合 · scope 三件套**~~ **已交付（2026-08-14，组件系统）**：`Get<T>`/`Query` 按 `LOOKUP_SCOPE` 剪枝（不穿透嵌套组件/list item）、per-scope ID 去重（fence per-file + 展开域撞车检查）、Shadow DOM 样式隔离（pkg v35 锚定规则按展开实例包装；host 经 `HOST_IN_PARENT_SCOPE` 归页面域）。
-- ~~**复合 · 组件系统**~~ **已交付（2026-08-14，打包期展开）**：Custom Element 打包期展开（components/ 注册表 = `customElements.define` 角色）+ `<slot>` 投影（拼接位消费，产物无 Slot 节点）+ `CustomElement.Tag` typed 投影。C# 类绑定 / 生命周期回调 defer（见延期表）。spec：`docs/superpowers/specs/2026-08-14-component-system-design.md`。
+- ~~**复合 · 组件系统**~~ **已交付（2026-08-14，打包期展开）**：Custom Element 打包期展开（components/ 注册表 = `customElements.define` 角色）+ `<slot>` 投影（拼接位消费，产物无 Slot 节点）+ `CustomElement.Tag` typed 投影。C# 类绑定 / 生命周期回调 defer（见延期表）。spec：`docs/archive/superpowers-specs-2026-08/2026-08-14-component-system-design.md`。
 - **控件**：Tree（`role=tree`，无）。
 - **动画引擎终态**：池化 Tween + 缓动全集（cubic-bezier / Elastic / Bounce / per-stop timing）+ 链式 builder + layout 动画 prop_type 分层。进入判据：第一个需 layout 动画的页面，或动画并发使单 `Vec<Tween>` 抖动。
 - ~~**文本模型收尾**~~ 已交付（2026-08-12，里程碑 1 任务 1：`compile_rich_runs` Text/Image run + source 事件路由 + 公共树 ID 保留；原 bullet 内容即任务 1 交付物）。
@@ -107,7 +107,7 @@
 > 里程碑 1「Unity 收官」拆成 5 个有依赖序的可执行任务——**五任务全部 done，里程碑 1 完工（2026-08-15/16 真机验收轮收口）**。下一环节 = 里程碑 2（dogfood）。
 
 **任务 1 · 文本模型回归标准子树（inline flow）**【✅ done · 2026-08-12】
-- **落地**：fence 6.4 分类（rich-text-block + mixed 报错 + img 豁免）→ pkg v33 + `Node.rich_text_block` → run 编译器（`compile_rich_runs`）→ solve 折叠（RichText leaf + `rich_text_fingerprint` memo）→ render Container+flag arm（多 run mesh + box-shadow）→ `hit_test_rich` + FFI。详见 spec `docs/superpowers/specs/2026-08-12-text-model-design.md` + plan `docs/superpowers/plans/2026-08-12-text-model.md`（9 task SDD，全部 per-task + final review APPROVED）。
+- **落地**：fence 6.4 分类（rich-text-block + mixed 报错 + img 豁免）→ pkg v33 + `Node.rich_text_block` → run 编译器（`compile_rich_runs`）→ solve 折叠（RichText leaf + `rich_text_fingerprint` memo）→ render Container+flag arm（多 run mesh + box-shadow）→ `hit_test_rich` + FFI。详见 spec `docs/archive/superpowers-specs-2026-08/2026-08-12-text-model-design.md` + plan `docs/superpowers/plans/2026-08-12-text-model.md`（9 task SDD，全部 per-task + final review APPROVED）。
 - **实证**：packer showcase 0 mixed；`dump_rich_text` 实测 mail 正文 7 inline 子→1 行（非竖排），公共树 ID 保留。workspace 1506 测全绿。
 - **门**：✅ 全绿——代码侧 2026-08-12；Unity 视觉 QA（form/mail inline flow + span click）随 2026-08-15/16 真机验收轮过。
 
@@ -118,7 +118,7 @@
 - **进度（2026-08-14，8 页全量）**：全部 8 页 core-dump 路径跑通（报告 `snapshot-2026-08-14-8pages.md`），工具链再净化 5 处（tag 词汇表归一 / preview JS 保留但撤销 data-fill 克隆 / 0×0 不进配对桶 / FOLDED 类别 / preview-base.css 补 workspace 字体）——unpaired 噪声 106→2。**8 页 0 unmatched、无结构性分歧、零疑似 core 布局 bug**；475 残余全归四类（文本测量精度差 / TextElement inline 盒宽语义 / slider thumb transform 发射缺口 / template 枚举差），A 类容差定标与 B 类潜在视觉风险留任务 4 / dogfood 逼出再定。
 
 **任务 3 · 渐变补齐（home radial 光晕 + 多 stop）**【✅ 代码侧 done · 2026-08-14】
-- **落地**：`Gradient` 数据模型（linear 任意角度 + 多 stop ≤8 / radial 全形）替换 `Gradient2`（pkg v34）；渲染统一 program=6/7 per-fragment 渐变 shader（blob v13 grad_params 列 208B；premultiplied 插值 + bg-color 垫底 source-over 合成）；文本渐变 CPU 采样与 shader 同一套 t 数学；fence `<style>` 渐变值探针（坏渐变打包期报）。spec 见 `docs/superpowers/specs/2026-08-14-gradient-radial-multistop-design.md`。
+- **落地**：`Gradient` 数据模型（linear 任意角度 + 多 stop ≤8 / radial 全形）替换 `Gradient2`（pkg v34）；渲染统一 program=6/7 per-fragment 渐变 shader（blob v13 grad_params 列 208B；premultiplied 插值 + bg-color 垫底 source-over 合成）；文本渐变 CPU 采样与 shader 同一套 t 数学；fence `<style>` 渐变值探针（坏渐变打包期报）。spec 见 `docs/archive/superpowers-specs-2026-08/2026-08-14-gradient-radial-multistop-design.md`。
 - **实证**：cargo workspace 1533 测全绿（clippy/fmt 严门过）；dotnet 三套 410 测全绿（fixture 重打 v34 + 顺手修了 test.workspace 撞 fence 6.4 的存量问题）；`dump_page` 渐变参数 dump——lab 页 20 节点（角度归一/多 stop 等分/显式位置/radial 各形）+ home 光晕（c=1574.4,-129.6 / 1100×560 / 0.1→transparent@0.6）全部正确；Chrome 基准截图 3 张入库 `showcase/scripts/gradient-baseline/`。
 - **门**：✅ 全绿——代码侧 2026-08-14；Unity PlayMode 视觉验收（lab 标本矩阵 + home 光晕 + 渐变字，GRADIENT 变体真机首编译）随 2026-08-15/16 真机验收轮过。
 

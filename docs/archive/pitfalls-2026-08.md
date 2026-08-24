@@ -99,7 +99,7 @@
 
 ## 2. 踩坑记录
 
-> **v1.8+ 架构变更（2026-07-10）**：以下坑号涉及的 Unity `SpriteAtlas` / `LoomSettings` / `LoomSettingsWindow` / `LoomAtlasSync` / `SpriteResolver` folder→atlas 路由体系已在 v1.8+ 中被取代——图集改为打包器 `loomgui_pkg` Rust 自绘产出 `atlas.png` + `atlas.json`，工作区改为独立磁盘目录（`loom.workspace.json`），`LoomSettings` ScriptableObject 删除，运行时引导由 `loom.runtime.json` 接管，`SpriteResolver` 改为 `Texture2D` + atlas.json UV 字典直查。受影响的坑号包括但不限于：坑 104（SpriteResolver 缓存 miss）、坑 115（Unity 6 SpriteAtlas V1/V2 五连坑）、坑 120（SpriteAtlas UV remap）、坑 121（AssetPostprocessor CreateAsset）、坑 104 中 `LoomAtlasSync` 的 pack 机制、坑 111 中 `LoomSettingsWindow` CLI 参数。这些仍是真实的踩坑历史（教训不因架构变而失效），但系统组件本身已被取代——遇到相关代码时请参考新架构 spec `docs/superpowers/specs/2026-07-10-standalone-packer-atlas-workspace-design.md`，勿按旧系统修复。
+> **v1.8+ 架构变更（2026-07-10）**：以下坑号涉及的 Unity `SpriteAtlas` / `LoomSettings` / `LoomSettingsWindow` / `LoomAtlasSync` / `SpriteResolver` folder→atlas 路由体系已在 v1.8+ 中被取代——图集改为打包器 `loomgui_pkg` Rust 自绘产出 `atlas.png` + `atlas.json`，工作区改为独立磁盘目录（`loom.workspace.json`），`LoomSettings` ScriptableObject 删除，运行时引导由 `loom.runtime.json` 接管，`SpriteResolver` 改为 `Texture2D` + atlas.json UV 字典直查。受影响的坑号包括但不限于：坑 104（SpriteResolver 缓存 miss）、坑 115（Unity 6 SpriteAtlas V1/V2 五连坑）、坑 120（SpriteAtlas UV remap）、坑 121（AssetPostprocessor CreateAsset）、坑 104 中 `LoomAtlasSync` 的 pack 机制、坑 111 中 `LoomSettingsWindow` CLI 参数。这些仍是真实的踩坑历史（教训不因架构变而失效），但系统组件本身已被取代——遇到相关代码时请参考新架构 spec `docs/archive/superpowers-specs-2026-08/2026-07-10-standalone-packer-atlas-workspace-design.md`，勿按旧系统修复。
 >
 > 坑 63 中 font atlas alpha-mask 的教训对核心自绘字体仍部分适用（atlas 仍是 alpha-mask），但实现路径已变（字体 atlas 由核心 etagere 管理）。
 
@@ -1407,7 +1407,7 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 
 **验收**：稳态滚动零 GO create/destroy（Profiler 证），mail item 不消失、不卡顿。
 
-**设计文档**：`docs/superpowers/specs/2026-08-05-pooled-slot-lifecycle-design.md`；实现 plan：`docs/superpowers/plans/2026-08-05-pooled-slot-lifecycle.md`。
+**设计文档**：`docs/archive/superpowers-specs-2026-08/2026-08-05-pooled-slot-lifecycle-design.md`；实现 plan：`docs/superpowers/plans/2026-08-05-pooled-slot-lifecycle.md`。
 
 ### 坑 183：fence.md 源 vs 随包副本字节漂移（doc_schema_sync 门）
 
@@ -1691,7 +1691,7 @@ v1.4-a 家里机验收 4 bug，外部 AI 出了诊断报告，本会话用「这
 ### 坑 215：推 tag 发版漏 bump package.json + 漏补 CHANGELOG 段落
 
 **症状**：推 v0.0.2/v0.0.3 后 Release workflow 第一步「verify tag matches package version」红（tag=v0.0.3 pkg_version=0.0.1），GitHub Release 不产出。
-**根因**：发版 runbook（`docs/superpowers/specs/2026-08-09-loomgui-release-design.md`「Release 流程」）第 5/6 步（补 CHANGELOG 段落 + bump package.json）被跳过，tag 打在未 bump 的 commit 上。
+**根因**：发版 runbook（`docs/archive/superpowers-specs-2026-08/2026-08-09-loomgui-release-design.md`「Release 流程」）第 5/6 步（补 CHANGELOG 段落 + bump package.json）被跳过，tag 打在未 bump 的 commit 上。
 **解决**：bump version + 回填 CHANGELOG → `cargo run -p xtask -- release-check` 验绿 → commit → `git tag -fa <tag>` 重指 + `git push --force origin <tag>` → workflow 重跑全绿出 Release。
 **教训**：git-URL UPM 安装的版本号解析自 tag 指向 commit 的 package.json——tag 里版本错 = 消费者装到错误版本号（Unity 可拒绝升级），不止 CI 红。打 tag 前必跑 release-check；tag 已推但 Release 未产出时重指 tag 是安全补救。连发多 tag 先 `git diff --stat <t1> <t2> -- unity/package`——包内容相同则旧 tag 不必补发 Release。
 

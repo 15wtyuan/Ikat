@@ -1,5 +1,5 @@
 //! 工作区配置（loom.workspace.json）：AI 直接编辑的真相源。
-//! 全路径相对工作区根 + 正斜杠。见 docs/superpowers/specs/2026-07-10-standalone-packer-atlas-workspace-design.md §4。
+//! 全路径相对工作区根 + 正斜杠。
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;

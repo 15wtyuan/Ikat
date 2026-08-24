@@ -159,8 +159,8 @@ pub fn check_control_structure(tree: &IrTree, file: &str, line_map: &LineMap) ->
                 format!(
                     "LoomGUI control `<{tag} role=\"{role}\">` is missing its required \
                      {label} child element. Controls have NO framework-injected children — \
-                     the author writes the full structure. Expected: {hint}. See \
-                     docs/superpowers/specs/2026-07-30-control-role-refactor-and-fence-tightening-design.md §2.2.",
+                     the author writes the full structure. Expected: {hint}. \
+                     Contract table: docs/design/fence.md §2.3.",
                     tag = el.tag,
                     label = spec_label(*spec),
                 ),

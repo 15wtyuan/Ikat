@@ -80,7 +80,7 @@ M0 验收 ─┤                  │                  ├──► M6 showcase 
 
 > fence DSL 已就绪，只欠 runtime。home 入场动画 = 演示的那一秒，体感回报高，刻意从 roadmap 表"三束后"拉前。
 >
-> **状态：编码端 DONE（2026-08，15 tasks SDD）；Unity PlayMode 验收 defer 家里机**。spec `docs/superpowers/specs/2026-08-04-m2-keyframes-runtime-design.md`、plan `docs/superpowers/plans/2026-08-04-m2-keyframes-runtime.md`。§4 tech-debt「keyframes runtime」+「动画系统终态」条同步更新。动画引擎终态从「悬置」→ **M2.5 立项**（见下）。
+> **状态：编码端 DONE（2026-08，15 tasks SDD）；Unity PlayMode 验收 defer 家里机**。spec `docs/archive/superpowers-specs-2026-08/2026-08-04-m2-keyframes-runtime-design.md`、plan `docs/superpowers/plans/2026-08-04-m2-keyframes-runtime.md`。§4 tech-debt「keyframes runtime」+「动画系统终态」条同步更新。动画引擎终态从「悬置」→ **M2.5 立项**（见下）。
 
 - **进入判据**：M0 绿。fence `@keyframes` at-rule + `animation` 简写 DSL 已完成（commit `e2e2812`）。
 - **退出判据**：
@@ -125,7 +125,7 @@ M0 验收 ─┤                  │                  ├──► M6 showcase 
 
 > settings 页硬卡 TabList。它动 cascade 主路径，独立 spec 干净，别和渲染管线改动混（roadmap 自己也这么定）。
 >
-> **状态：编码端 DONE（2026-08，10 tasks SDD）；Unity PlayMode 验收 defer 家里机**。spec `docs/superpowers/specs/2026-08-04-m3-tablist-design.md`、plan `docs/superpowers/plans/2026-08-04-m3-tablist.md`。§4 tech-debt `[aria-selected]` 条同步标 RESOLVED。
+> **状态：编码端 DONE（2026-08，10 tasks SDD）；Unity PlayMode 验收 defer 家里机**。spec `docs/archive/superpowers-specs-2026-08/2026-08-04-m3-tablist-design.md`、plan `docs/superpowers/plans/2026-08-04-m3-tablist.md`。§4 tech-debt `[aria-selected]` 条同步标 RESOLVED。
 >
 > **实现期发现**：原 exit criteria 的「Node attrs 存储」「attr_matches_node 扩展」「role dispatch」三条前置里，后两条早在控件束 P1-P3 做掉（commit `0a7373d` / `a797840`）；第一条未走通用 attrs 仓库（β），改 α 路线——`RoleInfo.aria_controls` 特定存储。故 M3 真实工作远比原列窄。
 

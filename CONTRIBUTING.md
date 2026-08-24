@@ -47,8 +47,8 @@ test:        测试
 ## 设计文档
 
 - 设计契约：[`docs/design/main-design.md`](docs/design/main-design.md)
-- 围栏权威：[`docs/design/fence.md`](docs/design/fence.md)（不一致时 [`fence_contract.rs`](crates/core/tests/fence_contract.rs) 测试赢）
+- 围栏权威：[`docs/design/fence.md`](docs/design/fence.md)（不一致时 schema 契约测试赢：`cargo test -p loomgui_fence`）
 - 踩坑规则手册：[`docs/pitfalls.md`](docs/pitfalls.md)（依赖适配/闭环规则/Unity 平台，开工前查）
-- 路线图：[`docs/roadmap/roadmap.md`](docs/roadmap/roadmap.md)
+- 活工作项 = GitHub issues（排活/查进度用 `gh issue list`；`docs/roadmap/` 是归档只读历史）
 
-新功能先在 `docs/superpowers/specs/` 写 spec，讨论定稿后再实现。
+新功能先开 GitHub issue 对齐方案（涉及围栏 / 公共 API / 渲染管线的改动，同步更新 `docs/design/` 对应契约文档），讨论定稿后再实现。

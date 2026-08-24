@@ -123,7 +123,7 @@ fn required_child_must_be_direct() {
 fn missing_child_message_is_actionable() {
     let msgs = struct_errors(r#"<div role="combobox"></div>"#);
     let m = &msgs[0];
-    // 必须告诉作者该写什么结构（含 role=listbox + 指向 spec §2.2 契约表）
+    // 必须告诉作者该写什么结构（含 role=listbox + 指向 fence.md §2.3 契约表）
     assert!(m.contains("role=\"listbox\""), "{}", m);
-    assert!(m.contains("§2.2"), "{}", m);
+    assert!(m.contains("fence.md §2.3"), "{}", m);
 }
