@@ -16,6 +16,7 @@
 - **`overflow ≠ Visible` 必须显式设置**：flex 自动 min-size=0 只对非 Visible 生效——不设则容器被 content min-content 撑开，scroll overlap=0 失效。
 - `serde` feature 可整体序列化 `Style`（pkg 格式依赖它）；bincode 编码随 taffy/bincode 版本走——升级依赖必 bump `PKG_FORMAT_VERSION`（见 §2）。
 - **行为怪癖**：① span 显式 flex + padding + 文字子 → flex 容器不做文本测量，宽度退化为 padding 值；② 测量不能只看 `known_dimensions`，须结合 `available_space`（否则定宽容器内文本不换行）；③ 某些 sizing 轮次传 `Definite(0)`——首个 0 宽测量若被当最终结果钉死，文字会竖排。
+- **Block 流不实现 gap**（flex 才读 `row_gap`）——block ul 的 spacer 间无 gap，可见区计算盲扣会让 spacer 偏矮、滚动条失真；flex 容器的 gap 必须计入可见区累积位，漏计 = 视口顶部空白。
 
 ### ttf-parser 0.20（core/src/text）
 - kerning 在 `face.tables().kern.subtables` 遍历（取 horizontal 非状态机子表），`.glyphs_kerning(GlyphId, GlyphId) -> Option<i16>`。
@@ -30,6 +31,7 @@
 - 默认生成 `internal` 类型——跨程序集访问须 `[assembly: InternalsVisibleTo]`。
 - 类型映射：opaque `*mut T` → `T*`（类型化指针非 IntPtr）；`csharp_use_function_pointer(false)` 切 Mono 模式。
 - C# `fixed (T* p = &localVar)` 非法（CS0213 already fixed）——`fixed` 只 pin 托管对象（数组/string），局部变量直接取址。
+- **FFI enum 出口用 return-code + out-param，勿用 0 当「不存在」哨兵**——首变体判别值 = 0（如 NodeKind::Container），会与合法值相撞、无法区分。
 
 ### Unity Input System 1.19（LoomInputCollector.cs）
 - 双路径 `#if ENABLE_INPUT_SYSTEM`（`Mouse.current...` 新 API）/ else 旧 `UnityEngine.Input`；asmdef 引用名是 `Unity.InputSystem`（非 `UnityEngine.InputSystemModule`）。
@@ -40,10 +42,20 @@
 ### unicode-linebreak 0.1（core/src/text）
 - `linebreaks() -> impl Iterator`（非 Vec）；枚举名 `BreakOpportunity`；返回 **byte offset**（非 char index）；在空白**后**断 → 行首无多余空格。
 
+### Tauri 2（packer/gui 前端）
+- `onDragDropEvent` 的 `position` 是物理像素，须除 `devicePixelRatio` 才是 CSS 逻辑坐标；payload 字段名 `type`/`paths`/`position`。
+
 ## 2. 跨层闭环规则
 
 ### pkg 格式 bump 代价链
 改任何进 `.pkg.bin` 的序列化布局（ResolvedStyle、ControlInit、bincode 结构）→ **必 bump `PKG_FORMAT_VERSION`**。bump 的代价链：重打所有 pkg + 重编 .dll + 重出双 exe（loom + GUI）+ **重打全部 headless fixtures**。漏一环就版本错配（stale pkg / loader rc=-1 / 「tag for enum is not valid」），且常在离改动最远的 consumer 测试才炸——文本 merge 干净 + cargo 全绿 ≠ C# 测试绿。
+
+### 机制设计/删除前置检查
+- **设计渲染合成机制前先读对端 shader 能力**：曾设计整套合成 RenderNode 机制，被一次 shader 阅读推翻——对端早已做 source-over 合成。core program 编号 ↔ Unity shader 能力是跨层闭环，先核对两端现状再设计。
+- **删「看似单用途」机制前先 grep 共用者**：曾视作单用途的 flag 实为两条路径共用（div box-shadow 与文字效果层），grep 取证救过一次静默错渲染。
+- **fence 委托 + core 解析永真 = 围栏静默放行破损**：fence 零自有校验、委托 core `apply_decl` 的 CSS 属性，core 解析失败必须返 false，否则 `FenceBadCssValue` 链路整体失效——「fence 放行 + core 渲染坏」可同时成立、打包不报错。
+- **core 反向调宿主服务须启动期注册函数指针对**：core 是 cdylib，不能 extern 调宿主符号（链接期不可解析 + C# 给不出 linkable C 符号）——剪贴板/原生弹窗/系统字体查询都走注册回调模式；内存契约：get 缓冲区宿主持有（活到下次 get），core 立即拷贝、不跨分配器 free。
+- **快照测试锁 glyph 度量必须钉仓库内字体**：不同 OS 默认字体（Win arial vs Linux DejaVu）度量漂移、Linux CI 无 arial——fixtures 字体入库是前提，不是优化。
 
 ## 3. Unity 平台特性
 
@@ -55,9 +67,20 @@
 - **ShaderLab Properties 无 Matrix 类型**；MPB 只覆盖 `UnityPerMaterial` CBUFFER 内字段——per-renderer uniform 必须进 CBUFFER 才能被 MPB 覆盖。
 - **PlayMode 首帧 `Time.unscaledDeltaTime` 可达秒级**（加载延迟）——tween/动画别在 Start 自动播（瞬间 complete 写末值）。
 - **UPM 包内代码引用包资源**用 `Packages/<name>/...` 路径，非 `Assets/...`。
+- **单通道纹理（R8）存非颜色数据**：采样只采 `.r`（D3D 下单通道 GBA 缺省 (0,0,1)，错采 `.a` 恒 1——SDF 文本全画成实心方块）；上传必须 `linear: true`（否则按 sRGB 采样，SDF 距离场全空、字体消失）。
+- **根 y-flip 使 winding 反转**——UI shader 必须 `Cull Off`，漏了 = 背面剔除把整个 UI 吃掉。
+- **Domain Reload 保护**：关闭 Domain Reload 时 C# static 活过 Play、native 句柄已释放 → 野指针 crash。`SubsystemRegistration` hook 必须调 shutdown；将来引入全局 native 态（global texture/font registry）在此自动清。
+- **读渲染 blob 用定长列 + `BitConverter` 直读**——不用 `Marshal.PtrToStructure` 走 marshal 对齐假设；Unity Mono 缺新 .NET API（如 `BitConverter.SingleToUInt32Bits`），用版本无关等价写法。
+- **Material 缓存键不含 shader keyword**——新 keyword 组合必须有独立 key 来源（新 program 号或新 key flag 维度），蹭已有 program/键会命中同一 Material 实例 → keyword 冲突静默错渲染。
+- **fgui 的 mesh 合并实靠 Unity Dynamic Batching**（隐式、与 SRP Batcher 互斥——URP 下不可控）；SRP Batcher 只降 CPU 不降 draw call。要真 N→1 必须自己合并 mesh。
+- **csproj `<Link>` 引用带 UnityEngine/native 依赖的生产源进纯 net10.0 headless 项目编译失败**——`<Link>` 只拷文件不带依赖链；headless 测试用物理拷贝源文件。
+- **C# `using` alias 解不了父命名空间同名类型遮蔽**：子命名空间内的类型名必先命中父级同名类型（如 `LoomGUI.Editor.EventType` 撞 `LoomGUI.EventType`），只能全限定名，alias 无用。
 
 ## 4. 动态契约
 
 - **dirty hash 的「全量」是动态契约**：每给 RenderNode/Line 加视觉字段，必同步检 payload/header hash 是否覆盖新字段——漏一个 = 静默 stale（不崩、只是不更新）。历史上反复漏过（uvs / 圆角顶点 / line-height / reuse_key / baseline）。
 - **查询缓存别缓存 miss**（除非确定源不变）——运行时资源可能后到，缓存 miss 会永久遮蔽后到的正确值。
 - **坐标空间劈叉**：`pos` 是世界坐标、`layout_rect` 是页面内容坐标，祖先滚动下两者劈叉——调试命中/滚动偏移先分清在哪个空间。
+- **keepalive 保留粒度必须对齐后端 GO 持有粒度**：MirrorPool 是扁平池（slot 根按 reuse_key、叶子按 node_id 独立持有）——core 只发 slot 根 keepalive 保不住叶子 GO，stale 销毁→reactivate 重建→churn 复发；keepalive 须发整子树超集。改 blob 契约或池模型任一侧都要重新对齐粒度。
+- **跨树 id 解析必须作用域化**：每新增一种作用域形态（组件实例/List item），全局 `find_by_id_attr` 首匹配就会串实例（组件多实例全部命中第一个）——解析须向上找最近 LOOKUP_SCOPE 根在其子树内做（`find_node_by_id_in_own_scope`）。
+- **`remove_node` 联动清理是动态契约**：删节点须同步清全部持久附属表（anim/scroll/controls/roles/lists/text_contents/image_srcs…）——新增持久附属表必须同步加清理，漏一个 = 悬空引用/残留状态。

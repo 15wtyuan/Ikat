@@ -192,7 +192,7 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
     }
 
     // parked keepalive 段：每个休眠 slot 的渲染子树（根 + 后代）都发一条极简条目
-    // （22 列都填，值极简）。visible 字节双用：bit0=要渲染（0），bit1=parked（1）——
+    // （全列都填，值极简）。visible 字节双用：bit0=要渲染（0），bit1=parked（1）——
     // 零列扩展、零 version bump。slot 根 reuse_key 是出生即定的永久 ordinal；后代
     // reuse_key=0（后端按 node_id 保留）。
     //

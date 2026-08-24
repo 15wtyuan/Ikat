@@ -147,7 +147,7 @@ public sealed class NodeStyle {
 
 **不变量（inline override 层语义）**：
 - Style 是**最高优先级的 inline override 层**，不是 cascade 的读取窗口。
-- getter **只反映 C# setter 写过的属性**；未写过的返回 `Unset` 哨兵（`Length.Unset()` / `LoomColor.Unset` / enum 的 `Unset` 成员）。要 computed 值走 `Geometry`。
+- getter **只反映 C# setter 写过的属性**；未写过的返回 `Unset` 哨兵（`Length.Unset()` / `LoomColor.Unset` / enum 的 `Unset` 成员）。布局产物（rect/matrix）走 `Geometry`；computed 样式值（颜色/字号等）走 computed style 查询接口（FFI 侧已备，C# 公共出口待接线）。
 - setter 写 `Unset` = 撤销该属性的 inline override，回落 CSS cascade。单属性撤销即用 `Style.X = Unset()`，无 `Clear`/`Reset`。
 - `SetVar`/`RemoveVar` 管 CSS 自定义属性 `--*`；`--*` 跨作用域根传递。不提供 `GetVar`（var 不当状态存储读回）。
 - 隐藏节点用 `Display = None`（不占位、不渲染、不命中，等同 fgui `visible=false`）；占位隐藏（保留布局空间）用 `Opacity = 0`。（`Visibility` API 已移除——fence CSS 子集无 `visibility` prop，无后盾；占位隐藏 `opacity:0` 覆盖。）
@@ -270,6 +270,8 @@ public interface IRouteEvent {
 
 指针键用 `PointerButton` 枚举（Left/Right/Middle）。
 
+**路由语义细节**：capture 阶段不检 `StopPropagation`（root→target 全程跑）、bubble 前预检；target 节点在 capture 末尾与 bubble 开头各收一次。`Enter/Leave` 不冒泡——按祖先链 diff 逐节点直派（从父进子父不 Leave，对齐 CSS `:hover` 祖先语义）。`Click` 目标 = down 时的叶子节点（光标阈内漂移仍点中按下叶）；双击无独立事件——`ClickEvent.ClickCount` 在 1↔2 间循环（同位置+同键+时间窗）。`PointerMove` 需先 capture 指针（monitor 机制）才有事件流。
+
 ### 5.4 退订
 
 退订收敛为两类：
@@ -295,7 +297,7 @@ Node node = ui.Pick(globalPoint);   // 命中测试：返回该点最上层可�
 
 ### 6.2 焦点
 
-`Focus()` / `Blur()` / `ui.FocusedNode`。每 UIContext 一个焦点。设计期 `tabindex` 声明可获焦性，运行时用 `Node.Focusable` 改。**不做自动 Tab 链导航**——方向键/手柄导航是逻辑层积木（`On<KeyDown>` + `Focus()`）。
+`Focus()` / `Blur()` / `ui.FocusedNode`。每 UIContext 一个焦点。设计期 `tabindex` 声明可获焦性，运行时用 `Node.Focusable` 改。**Tab/Shift+Tab 自动焦点链导航内置**（tabindex 正整数升序先于 0 组、DOM 序、链尾 wrap；Tab 被导航消费、不发 keydown）——**方向键/手柄导航**才是逻辑层积木（`On<KeyDown>` + `Focus()`）。pointer-down 命中可聚焦节点自动聚焦、点不可聚焦区域清焦点（对齐 DOM 点空白 blur）；编程 `Focus()` 是强制语义（不查 tabindex，仅 disabled 拒）；`FocusIn/FocusOut` 只发焦点节点本身、不沿祖先链。
 
 ---
 
@@ -304,15 +306,16 @@ Node node = ui.Pick(globalPoint);   // 命中测试：返回该点最上层可�
 | HTML（role） | 类型 | 主要 API |
 |---|---|---|
 | button | Button : Container | Disabled, Clicked（文本走 Container.TextContent） |
-| div role=textbox | TextField : Node | Value, Placeholder, Selection, ReadOnly, Disabled, ValueChanged, Submitted |
-| div role=textbox aria-multiline=true | TextArea : Node | Value, Placeholder, Selection, ReadOnly, Disabled, ValueChanged |
+| div role=textbox | TextField : Node | Value, Placeholder, Selection, MaxLength, ReadOnly, Disabled, ValueChanged, Submitted |
+| div role=textbox aria-multiline=true | TextArea : Node | Value, Placeholder, Selection, MaxLength, ReadOnly, Disabled, ValueChanged |
 | div role=spinbutton | NumberField : Node | Value, Min, Max, Step（float）, Disabled, ValueChanged |
 | div role=slider | Slider : Node | Value, Min, Max, Step（float）, Disabled, ValueChanged, ChangeCommitted |
 | div role=switch | Toggle : Node | IsChecked, Disabled, CheckedChanged |
 | div role=radio | RadioButton : Node | IsChecked, Name（只读）, Disabled, CheckedChanged |
-| div role=combobox | Dropdown : Node | SelectedIndex, SelectedValue, Disabled, SelectionChanged |
+| div role=combobox | Dropdown : Node | SelectedIndex, SelectedValue, Disabled, SelectionChanged（open 时方向键移高亮**不提交**、跳过 disabled 项；Enter 与展开时刻快照**净变才发**事件——点已选项不发；Esc/外部点击/header 再点 = 取消回滚、不发事件） |
 | div role=progressbar | ProgressBar : Node | Value, Max（float，0 基底）, IsIndeterminate |
-| div role=tablist | TabList : Container | SelectedIndex, SelectionChanged（方向键/click 切换；panel 靠 `aria-controls` 关联） |
+| div role=option | OptionItem : Container | Value, Selected（只读）, Disabled, Index（只读，父 Dropdown 内序号） |
+| div role=tablist | TabList : Container | SelectedIndex, SelectionChanged（方向键/click 切换；方向轴按 tablist 的 `flex-direction` 选轴、`*-reverse` 翻转方向、clamp 不 wrap；panel 靠 `aria-controls` 关联） |
 | div role=tab | Tab : Container | （`aria-selected` 由父 TabList.SelectedIndex 跨节点合成，非字面存储） |
 
 **不变量**：
@@ -342,7 +345,7 @@ public class ListView : Container {
 }
 ```
 
-**契约**：`role=list → ListView`，`role=listitem → ListItem`。布局走 CSS。虚拟化全内部。
+**契约**：`role=list → ListView`，`role=listitem → ListItem`。布局走 CSS。虚拟化全内部。已知限制：bind 滞后一帧——新进可见区的 item 第一帧显示模板原样/上一复用者内容，快速滚动会出现一帧旧内容（接受的代价）。
 
 **静态 vs 数据驱动（运行时隐式锁定，强制互斥）**：
 - 虚拟化是**运行时实现决策**（程序员按数据规模定），不进 HTML——它不改变渲染结果，不属 AI 可预测性范围。
@@ -500,7 +503,7 @@ public sealed class UITemplate {
 - `LoadPackage`/`Instantiate` 都同步（bytes 由逻辑层异步获取）。
 - 同名重复 `LoadPackage` 抛 `UIContractException`（不静默覆盖）。
 - 加载失败抛 `UIPackageException`。
-- `UnloadPackage` 语义同 Unity prefab：卸载模板/释放包资源，已实例化的活节点是独立副本、不受影响（`UITemplate` = prefab asset，`Instantiate` = instance）。
+- `UnloadPackage` 语义同 Unity prefab：只卸载模板注册表，已实例化的活节点是独立副本、不受影响（`UITemplate` = prefab asset，`Instantiate` = instance）。**不触碰 atlas 纹理与字体**——它们是 workspace 级资源、与包注册表解耦（见 main-design §14.5）。
 
 ### 11.3 边界与入口（引擎集成层职责）
 
@@ -568,7 +571,7 @@ dismissButton.Clicked += () => {
 9. AbsolutePanel：语法糖，子节点自动 absolute。
 10. 动画全 CSS，无命令式 tween；三种触发 + hook 双锚；class 切换下帧 rematch 生效、上帧 computed 做 transition 基线。
 11. 拖拽：注册事件即参与仲裁；drop 靠 `ui.Pick` + 积木。
-12. 焦点：每 UIContext 一个；不做自动 Tab 导航；`Focusable` 运行时可改。
+12. 焦点：每 UIContext 一个；Tab/Shift+Tab 焦点链导航内置，方向键/手柄导航是逻辑层积木；`Focusable` 运行时可改。
 13. 坐标查询走 Geometry。
 14. 引擎中立：tick/输入/渲染/纹理注册/原生渲染挂载归集成层，不进公共 API。
 15. 不提供异步加载、data 挂载点、!important、GetVar、ForceLayout、命令式 tween。

@@ -1040,7 +1040,7 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
                 }
             }
         }
-        // NumberField: 纯数值输入控件，无视觉子节点 sync（数值约束 clamp pending）。
+        // NumberField: 纯数值输入控件，无视觉子节点 sync（数值约束 clamp + step 量化在 FFI 读写门执行）。
         ControlState::NumberField { .. } => {}
         // TabList: aria-selected 由 synth_aria_value（T5）合成；panel 显隐据 selected_index
         // + 各 tab 的 RoleInfo.aria_controls（panel id 串）切换——本 arm 实现 panel display。

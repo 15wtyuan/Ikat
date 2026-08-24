@@ -31,7 +31,7 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 
 ### 1.3 v1 现状（此模型已跑通大半）
 
-- v1 渲染路径已是「真身 Rust + 薄后端 + 每帧一次 SOA blob 过桥」：`stage.Tick(dt)` → `build_blob` → C# `FrameBlob` 读 21 列 SOA → `MirrorPool` 对齐 GameObject。**单向 Rust→C# 成熟**（change_level 三级、reuse_key 复用）。
+- v1 渲染路径已是「真身 Rust + 薄后端 + 每帧一次 SOA blob 过桥」：`stage.Tick(dt)` → `build_blob` → C# `FrameBlob` 读定长列 SOA（列数随格式版本增列，以 `crates/ffi/src/blob.rs` 为准）→ `MirrorPool` 对齐 GameObject。**单向 Rust→C# 成熟**（change_level 三级、reuse_key 复用）。
 - v1 回写走命令式 FFI 透传（结构操作 `AppendChild`/`Instantiate`、资源 `SetSrc`、动画 `Tween`、文本 `SetText`...）；**Style 属性走 inline override 便签层**（`set_inline_override`/`unset_inline_override`，4a 落地），**不走 `set_style`**——`set_style` 写 `base_style` 污染设计期基线，已退役（见 `unity/package/Runtime/Projection/StyleMirror.cs:17`）。
 - **投影层的增量 = 在 v1 命令式 FFI 上加 OOP 封装 + 攒批回写**，不推翻管线。
 
@@ -53,6 +53,7 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 ### 2.3 C# 镜像 = 稀疏 override 层（Q32）
 
 - `NodeStyle` 内部只存 setter 写过的属性（+值），用稀疏 map/bitset 记「哪些被写过」。大多数节点用户没 C# 写过任何属性 → 零缓存，镜像极轻。
+- Rust 侧对应面是数据导向的固定 `ResolvedStyle` + inline_set 位图（纯运行时 transient，不进 pkg.bin——设计期无此概念）；与 C# 稀疏镜像的形态不对称是**有意设计**（两端各自惯用表达）。
 - 读写过的 → 返回缓存值（即时，读到刚写的）。读没写过的 → 返回 `Unset`（Style getter 只反映 inline override，见 public-api §3.1）。要 computed 走 Geometry。
 - 脏集 = 写过且未 flush 的属性。flush 后清脏标记，但**保留值**（inline override 一直生效，下次读还返回它）。
 - `Style.X = Unset()` 撤销 → 从稀疏 map 移除该键 + 标脏，flush 时告诉 Rust 移除该 inline override 回落 CSS。

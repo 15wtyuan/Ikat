@@ -21,6 +21,8 @@
 - 不做 Unity UGUI/UIToolkit 兼容层。
 - 编辑器单独项目，本文只定 DSL 规范、运行时 API 契约与渲染管线。
 
+**对标取舍**（参考实现 FairyGUI/RmlUi/Unity UI Toolkit，镜像在 `temp/`）：不照搬 fgui 的绝对定位中心模型、Gear/Controller DSL、命令式 tween、全局单例与 data 挂载点；不照搬 RmlUi 的低层 DOM 操作感；采用 UI Toolkit 的 Style/Transform/Geometry 三分。
+
 ---
 
 ## 2. 总体架构
@@ -57,6 +59,7 @@
 - **FFI 缝界**：SOA 扁平数组传渲染树 + 事件回传。NodeId 不出现在公共 API。
 - **引擎后端**：输入采集、渲染树→原生对象镜像、资源加载。
 - **不跨越的**：公共层不知道 GameObject/CanvasItem；后端不解析 HTML/CSS、不独立算布局、不生成几何。
+- **fence→core 单向类型归属**：fence 破例单向产 core 的选择器/rule 类型（fence 依赖 core，无适配层），但不产 core 节点树类型——fence 解析停在 IrTree，IrTree→TemplateNode 桥归 packer（fence 保持纯解析器）。
 
 ### 2.3 架构原则
 
@@ -141,7 +144,7 @@
 
 框架负责输入导航、`aria-selected`/`aria-checked`/`aria-expanded` 状态同步。打包器验证 role 组合与必需子结构（fence §6.8）+ ARIA 关系。
 
-首个落地的复合控件是 **TabList**（M3，2026-08）：tab 高亮靠 `[aria-selected="true"]` 属性选择器（aria-selected 不是字面存储，由 `synth_aria_value` 从父 `TabList.selected_index` 跨节点合成——Tab 无 ControlState，像 OptionItem 从父 Dropdown 派生选中态）；panel 显隐靠 `aria-controls="panelX"` ↔ `id="panelX"` 跨树关联（panel 非 tablist 子节点，靠 `RoleInfo.aria_controls` 存 linkage 字符串，`sync_control_visuals` 每帧 `find_by_id_attr` 解析 + `set_inline_override` 切 display 复用 display:none 剪枝）。设计 spec 见 `docs/superpowers/specs/2026-08-04-m3-tablist-design.md`。
+首个落地的复合控件是 **TabList**（M3，2026-08）。tab 高亮靠 `[aria-selected="true"]` 属性选择器，该属性是双向语义：作者在 HTML 里声明的 `aria-selected="true"` 是**初始选中种子**（打包期派生进 selected_index，多重声明取首个、无则 0），运行时该属性反转为只读合成值（从父 TabList.selected_index 跨节点合成——Tab 无 ControlState，像 OptionItem 从父 Dropdown 派生选中态）。panel 显隐靠 `aria-controls="panelX"` ↔ `id="panelX"` 跨树关联（panel 非 tablist 子节点，`RoleInfo.aria_controls` 存 linkage 字符串，`sync_control_visuals` 每帧用作用域安全查找（组件实例内解析，多实例不串）定位 panel）。激活 panel 当前被强制 `display:block`（覆盖作者初值，含 flex——已知限制）；非激活强制 `display:none`（复用剪枝）。
 
 ### 3.5 失败策略
 
@@ -267,7 +270,6 @@ panel.Style.OverflowY = Overflow.Auto;
 - **CSS 规则表进包（不 bake 丢）**：逻辑层运行时大量用 CSS（`Classes.Add/Replace`、`StyleSheet.Add`、class 切换驱动动画），规则表必须活到运行时，否则对设计期未带该 class 的节点 `Classes.Add` 会失效。cascade 引擎是 core 的运行时唯一真相源；fence 只把 `<style>` 解析成规则表。
 - 运行时 rematch 处理伪类 + class + Style override 变化，每帧从 `base_style` 重算基线（`base_style` = 每帧 cascade 基线，非首帧缓存）。
 - 运行时样式 = `base_style + 命中动态规则的合并`。
-- 详见 `docs/roadmap/roadmap.md` §8（cascade 归属决策）与 §2 阶段 S（选择器解析器是净新代码）。
 
 ### 5.4 组件样式边界（Shadow DOM 风格）
 
@@ -275,6 +277,7 @@ panel.Style.OverflowY = Overflow.Auto;
 - 父组件普通选择器不穿透边界。
 - 标准可继承属性和 CSS 自定义属性 `--*` 跨边界传递。
 - 后续可用标准 `part/::part()` 精确开放内部样式。
+- 组件 host 节点打三重标记（CSS 隔离 + 查找边界 + host 归属）：对后代 host 是 CSS 与查找边界；host 本体归外层页面作用域（页面规则可样式化 host、组件内部规则不落 host——同 DOM shadow DOM 不样式化 host，当前无 `:host`）。同模板多实例的 scoped 规则按 scope 各自包装，不按 selector 文本去重（按 selector 去重会误丢不同组件的同名 class 规则）。
 
 ---
 
@@ -298,6 +301,23 @@ panel.Style.OverflowY = Overflow.Auto;
 伪类 `:checked/:disabled/:focus` 匹配实时状态；Toggle/RadioButton 也可用属性选择器 `[aria-checked="true"]` 表达选中态。RadioButton 同 `name`（或 `data-name`）组框架自动互斥（只新选中项触发 `CheckedChanged`）；按 name 聚合的 RadioGroup 是逻辑层积木，作用域边界由 `IsScopeRoot` 标记决定。控件数值（Slider/NumberField/ProgressBar）用 `float`。完整控件契约见 [public-api.md](public-api.md) §7。
 
 `ValueChanged` 表示实时变化；`ChangeCommitted` 表示拖动结束、回车或失焦确认。所有控件仍保留通用路由事件（`node.On<PointerDownEvent>(...)`）。
+
+### 6.1 状态→视觉单向桥
+
+core 读 `ControlState`，按 role/`data-slot` 定位**作者写的**子节点写 inline override——inline 是 HTML 语义最高优先级（> 动态规则 > base_style），作者 CSS 改不了状态驱动的几何：
+
+- Progress/Slider 的 `data-slot=fill`：inline `width:%`。
+- Slider 的 `data-slot=thumb`：inline user_transform 定位（可滑距离 = slider 宽 − thumb 宽，垂直居中；transform 是渲染/命中层，不触发 solve）。
+- Toggle/RadioButton 无几何映射：走 `[aria-checked="true"]` 属性选择器。
+- Dropdown open → `role=listbox` 子树 display；selected → `data-slot=value` 内嵌 TextNode 的文本。
+
+`aria-*` 运行时合成总原则：aria 值不双存（防打包期初始值与运行时实时值双源），运行时从 ControlState 合成；派发提示类 aria 在 fence 阶段用完即弃、不进 pkg；唯一例外 `aria-controls`（不可从状态派生，作为纯数据随模板迁移）。
+
+### 6.2 TextField 编辑内核
+
+编辑状态以 UTF-8 字节偏移表达且恒落字符边界；选区 = `[min(anchor,cursor), max]`。`max_length` 按 UTF-8 字符数计（HTML maxlength 语义）、校验先于变更（超额干净拒绝、不删用户选区）、改小不追溯裁剪已有文本。输入 sanitize 滤控制字符（TextArea 保留 `\n`）。readonly 拦输入/删除/粘贴但不拦复制，编程 setter 仍可写；单行 readonly 框 Enter 仍发 `Submitted`。
+
+掩码显示（`-webkit-text-security`）下显示串与 value 是两个字节空间，光标命中/几何经按字符数换算。IME composition 不另开 buffer：组合串拼进显示串并返回字节区间（下划线/光标几何/候选窗定位的统一真相源），commit 复用 insert 语义（选区删除/sanitize/max_length 一致）；NumberField 预编辑期不过滤、commit 时才过滤。NumberField 的 value 以文本形式存储，输入期只过滤非法字符，数值约束（clamp + step 量化 + 文本回写）在读写门执行；初始值取 `aria-valuenow/valuemin/valuemax` 与 `data-step`。
 
 ---
 
@@ -376,7 +396,10 @@ mails.BindItem = (item, index) => {
 - `TemplateSelector` 是纯 `Func<int, UITemplate>`；用户 `view.GetTemplate("name")` 取 template 后塞 lambda 闭包按 index 选，框架不自动收集。
 - `TemplateSelector` 返回 `UITemplate` 对象，不返回字符串。
 - ListView 按模板分别池化。
-- 虚拟化、可见区、测量补偿、content size 和后端 reuse key 全部是内部实现。
+- 虚拟化、可见区、测量补偿、content size 和后端 reuse key 全部是内部实现。内部不变量：slot 永驻 list 不 detach（park = inline `display:none`；unpark = 清 override，让 cascade 回落作者真实 display）；`notify_*` 一律 park/shift 复用、不重建；`reuse_key` 出生即定永不旋转、场景级命名空间（多 ListView 同页不撞 key）。虚拟化判据（可测）：render node 数与 slot 数不随 `ItemCount` 增长。
+- 滚动来源两模式：list 自身 `overflow:auto`（自滚，用自身 viewport）或祖先滚动容器（扣祖先偏移）。
+- ul 为 flex-row+wrap 时自动按行虚拟化（行内全量、spacer 全宽独占行）。
+- 已知限制：bind 滞后一帧——新进可见区的 item 第一帧显示模板原样/上一复用者内容，快速滚动会出现一帧旧内容（接受此代价）。
 
 刷新 API：`RefreshItem(index)`、`RefreshItems()`、`NotifyInserted/Removed/Moved`。完整契约见 [public-api.md](public-api.md) §8。
 
@@ -406,11 +429,11 @@ node.On<PointerDownEvent>(OnPointerDown);
 
 ### 9.3 命中测试
 
-命中按等效绘制顺序逆序（后画的先命中）。命中几何 = `layout_rect` 经累计 world_matrix（含父链 transform）变换后的 AABB。
+命中按等效绘制顺序逆序（后画的先命中）。命中几何：**点**经 world matrix 逆变换投到节点本地轴对齐 box 判定（transform 生效，旋转节点命中精确，非宽松 AABB）。`pointer-events:none` 跳过自身但继续测子（CSS 语义，不屏蔽子树）。disabled 节点仍参与命中与 hover diff（`:disabled` 需要 hover 反馈），但 Down/Up/Click/drag/longpress 全抑制；命中落在 disabled 子节点时祖先链 active 同步截断。优先级序：scrollbar grip > open dropdown popup > 正常内容。
 
 ### 9.4 拖拽与滚动仲裁
 
-拖拽与滚动通过阈值 + 退让机制仲裁。先达者赢，另一方查全局 `dragging_node`/`scrolling_pane` 主动退让。
+拖拽与滚动通过阈值赛跑仲裁，先达者赢（同指针位互斥清除另一方候选）。轴锁让出：单轴滚动容器遇主轴正交的更大手势时让出，并把候选提升到下一个可滚祖先。scroll 启动即取消待决 click/longpress。
 
 ### 9.5 引擎输入桥
 
@@ -423,6 +446,15 @@ bool hit = ui.IsPointerOnUI;
 ```
 
 极简：核心命中后存当前指针命中的节点，暴露事实查询。不做消费策略/consume 标志/每指针数组。
+
+### 9.7 输入模型语义
+
+- 多指：固定槽位模型——鼠标占主槽常驻，触摸按 fingerId 占槽、超槽丢弃；鼠标与触摸可同帧共存。
+- hover 双语义：`RollOver/RollOut` 事件按单指针进出判定、不冒泡（按祖先链 diff 逐节点直派——从父进子父不 RollOut，对齐 CSS `:hover` 祖先语义）；`:hover` 伪类是全部活跃指针命中链的 union。多指下两者可能不一致。
+- `PointerMove` 是 monitor-gated：仅指针被 capture（touch monitor）后才产生 Move 事件流。
+- capture 阶段不检 `StopPropagation`（root→target 全程跑），bubble 前预检；target 节点在 capture 末尾与 bubble 开头各收一次。
+- keydown 无焦点即丢弃（核心无全局键盘概念）。Tab/Shift+Tab 自动焦点链导航内置（tabindex 正整数升序先于 0 组、DOM 序、链尾 wrap、Tab 被导航消费不发 keydown）；方向键/手柄焦点导航不做——是逻辑层积木。
+- 焦点语义：pointer-down 命中可聚焦节点（tabindex ≥ 0 且非 disabled）自动聚焦；点不可聚焦区域清焦点（对齐 DOM 点空白 blur）；编程 `Focus()` 是强制语义（不查 tabindex，仅 disabled 拒）；`FocusIn/FocusOut` 只发焦点节点本身、不沿祖先链。
 
 ---
 
@@ -442,7 +474,7 @@ bool hit = ui.IsPointerOnUI;
 
 ### 10.2 公共对象树
 
-公共树保留 `TextNode/TextElement/Image` 的 ID、样式和事件。
+公共树保留 `TextNode/TextElement/Image` 的 ID、样式和事件。事件归属：span 内文字命中 span（事件挂 span）；rich-block 直接文本命中 TextNode 自身；Image 命中自身。
 
 ### 10.3 内部文本布局
 
@@ -452,13 +484,16 @@ bool hit = ui.IsPointerOnUI;
 - inline 元素（`span`）是语义容器。
 - `div` 建立文本 block。
 - `TextContent` 与 DOM 一样，用纯文本替换当前全部子内容。
-- 修改 inline 子树只使最近文本上下文失效。
+- 失效传播 = 每 solve 重编译 runs + 指纹 memo：内容/样式/量化约束宽进指纹，命中即跳过贵的 shaping——不依赖 dirty 标志跨节点传播。
+- `rich_text_block` 是运行时单向可翻转 flag：打包期烙印；运行时显式 `display:flex`（inline override 或命中动态规则）把 rich 折叠翻回 flex 容器布局；flex→block 不回标。solve 只认 flag（单一真相源）。
 
 公共语义树与内部布局/渲染树可以不同。
 
 ### 10.4 文本测量
 
-taffy 对"尺寸取决于内容"的节点回调 `MeasureFunc(known_dimensions) -> measured_size`：给定约束宽返回 `(text_width, text_height)`。必须廉价、无副作用（auto-size/shrink 反复调用）。建在核心自绘字体地基上（ttf-parser outline + ab_glyph 光栅 + etagere 图集）。
+taffy 对"尺寸取决于内容"的节点回调 `MeasureFunc(known_dimensions) -> measured_size`：给定约束宽返回 `(text_width, text_height)`。必须廉价、无副作用（auto-size/shrink 反复调用）。
+
+自绘字体地基：ttf-parser 取 outline，光栅成**单通道 SDF** 存 etagere 图集——一份固定源尺寸的 SDF 供所有目标字号共享（字号不进字形缓存键），shader 用屏幕空间导数重建边缘；文字效果（描边/多层阴影/发光/模糊）在同一 fragment pass 按 SDF 参数块合成，无需逐效果重光栅。spread 必须覆盖最大效果宽度，之外距离饱和、效果被硬切。MSDF 不引入：CJK 圆滑曲线用不上锐角修复，且不为此引 C++ 依赖。字体缺字回退：主字体按 fallback 链逐个 probe、首个含该字者补上（行度量走主字体，字形度量走提供方字体）。超长无空格串（URL/数字串）逐字断行，不溢出约束。
 
 ---
 
@@ -496,7 +531,7 @@ taffy 0.12 同时支持 Flex 和 Block 布局算法。统一走 `compute_layout_
 ### 11.4 响应式与异形屏
 
 - **resize**：屏幕尺寸变 → 根节点 size 变 → 整树 solve。
-- **safe-area**：后端把 insets 注入核心；CSS 用百分比 + 环境变量表达避让。
+- **safe-area**：现状 = 后端根 letterbox（`Screen.safeArea` shrink-to-fit + 输入映射共用同一变换），核心零感知、无 `env()` 支持；insets 注入核心 + CSS `env()` 避让是未来方向。
 - **动态内容/数据变化**：改文本/增删子节点 → 置 dirty → 下帧 solve。
 
 ### 11.5 参考分辨率 / DPI 缩放
@@ -517,7 +552,9 @@ taffy 0.12 同时支持 Flex 和 Block 布局算法。统一走 `compute_layout_
 
 **惯性回弹物理**：ScrollPane 自维护可变 target 的 tween，content size 变化时按状态补偿 start、不突变。不走 GTween（content 异步变化时 GTween 的固定 end 会跳变）。tick 分两段：`advance_all`（惯性/回弹物理推进）在 solve 前消费指针输入并推进滚动位置；`refresh_content_sizes`（内容尺寸刷新）在 solve 后、compute_world_transforms 前。
 
-能力：滚动类型、惯性+回弹、滚动条、鼠标滚轮。分页/吸附/下拉刷新后期。
+能力：滚动类型、惯性+回弹、滚动条、鼠标滚轮。分页/吸附/下拉刷新后期。嵌套滚轮透传（内层滚到边界自动交外层）未做。
+
+anchoring 豁免：虚拟列表内容回填引起的几何变化走 clamp 但不清滚动 tween（回填 ≠ 内容突变，惯性应继续）。
 
 ---
 
@@ -531,25 +568,25 @@ taffy 0.12 同时支持 Flex 和 Block 布局算法。统一走 `compute_layout_
 
 ### 12.2 几何生成
 
-非文本几何（图片 quad/形状/九宫格/填充）在 Rust 核心生成（确定性、跨引擎一致）。文本 mesh 同样在核心生成（核心自绘字体，v1.6+）。
+非文本几何（图片 quad/形状/九宫格/填充）在 Rust 核心生成（确定性、跨引擎一致）。文本 mesh 同样在核心生成（核心自绘字体，v1.6+）。九宫格不变量：四角不缩放、四边单轴拉伸、中心双轴；容器边长小于两侧 slice 之和时按比例收缩防角重叠；slice 与圆角共存时四角为圆角扇形。
 
 ### 12.3 DrawState
 
 核心不算材质对象，只算 draw 所需状态：
 - `DrawFlags`(u32)：`Clipped|Grayed` 等。
 - `BlendMode`：Normal 等基础。
-- `ProgramId`：Image/Text/BG_COMPOSITE/ColorFilter 等。
+- `ProgramId` 全集（真相源 = render 代码注释）：0 纯色/图直通；1 文本（SDF）；2 bg-color×图合成（BG_COMPOSITE——bg-color 在图之下，shader 按 source-over 合成，单 quad、无合成 RenderNode）；3 filter；4 filter+bg 合成；5 box-shadow SDF；6/7 渐变 per-fragment（7 = 渐变×filter）。
 - 后端按 `(program+flags+blend+texture+mask_context)` 维护 DrawState 缓存。
 
 ### 12.4 批合（FairyBatching）
 
-两元素能并入同批 ⟺ DrawState 相同（AABB 不相交则可重排聚拢；同 DrawState 相交仍可合）。DFS 遇 `clip_rect` 的 Container 强制其为 BatchingRoot；批合收集不下钻进 root 子树。core 显式合并 mesh → 真 N→1 draw call。
+两元素能并入同批 ⟺ DrawState 相同（AABB 不相交则可重排聚拢；同 DrawState 相交仍可合）。DFS 遇 `clip_rect` 的 Container 强制其为 BatchingRoot；批合收集不下钻进 root 子树。core 显式合并 mesh → 真 N→1 draw call。mesh 合并锚：合并产物的 `node_id` 取 batch 内最小原始 id（后端 GO 复用防抖动）。排除项：控件节点（后端要建交互实体——控件排除点是「加新控件类型」的 dispatch 位置之一）、文本节点、非纯平移 transform、box-shadow 合成层，均不参与重排合并。
 
 ### 12.5 裁剪/遮罩
 
-**rect mask**：核心给 clip_box；后端自选实现。`mask_context` 是批合边界。嵌套 `overflow:hidden`：clip 区域取祖先 clip 链的交集。
+**rect mask**：核心给 clip_box；后端自选实现。`mask_context` 是批合边界。嵌套 `overflow:hidden`：clip 区域取祖先 clip 链的交集。裁剪框是轴对齐的：clipper 自身 `border-radius` 非全零时裁剪框带四角半径（圆角裁子内容），但**祖先链圆角不传播**；transform 旋转不旋转裁剪框（作者可见限制）。soft clip/shape mask 未做（deferred）。
 
-soft clip/shape mask/paintingMode 见 roadmap（机制草稿）。
+**浮层机制**（通用模式，open dropdown 的 `role=listbox` 子树与 scrollbar thumb 共用）：跳出正常 DFS，render 末尾追加独立 DFS、sort_key 续 post-merge 最大值、mask 重赋脱离祖先裁剪链；命中层对应前置。z-index 生效点三处必须同步（render DFS 兄弟迭代 / 浮层末尾追加 / hit 逆等效序），漏一处 = 绘制与命中不一致。
 
 ### 12.6 RenderNode 契约
 
@@ -568,7 +605,8 @@ struct RenderNode {
     change_level: ChangeLevel,        // Skip=0 / Header=1 / Full=2
     reuse_key: u32,                   // MirrorPool GO 复用键
     effect: EffectBlock,              // 文字效果参数（128B 定长）
-    shadow_params: [f32; 6],         // box-shadow SDF 参数（blur 半径/偏移/扩缩/圆角；v12 blob 列）
+    shadow_params: [f32; 6],         // box-shadow SDF 参数（半宽/半高/圆角/σ/inset 标志/填充；偏移烘进几何；v12 blob 列）
+    gradient: GradientParams,         // 渐变参数（v13 blob 列；program 6/7 消费）
     payload: NodePayload,
 }
 
@@ -582,6 +620,8 @@ enum NodePayload {
 
 `ChangeLevel::Skip/Header/Full` 表达本帧变化程度。
 
+合成 `node_id` 命名空间：文本跨页子页、TextField 合成层、box-shadow inset/outer 层各占 id 高位区段，scrollbar thumb 用独立 bit 标志——这是跨层 ABI 契约（MirrorPool 按 id 建 GO、命中按位解码；区段分配真相源 = render 代码注释）。渲染 blob 不是节点状态查询通道：批合会让空/透明节点从 blob 消失，按 id 查状态（world matrix/sort_key/visible）必须走独立 FFI getter。
+
 ---
 
 ## 13. 动画（单时钟）
@@ -590,24 +630,24 @@ enum NodePayload {
 
 ### 13.1 单一时钟
 
-整个核心只有一个动画时钟。每帧 tick step **a** 并列推进两个写入者（`render` 读 `NodeAnim` 时 `anim.unwrap_or(style)` 天然优先于 base style）：
+整个核心只有一个动画时钟。每帧 tick 前段（§16 step b/c）并列推进两个写入者（`render` 读 `NodeAnim` 时 `anim.unwrap_or(style)` 天然优先于 base style）：
 
 ```
-a. TweenManager.update(dt)        ← transition 的 opacity/bg_color/text_color 先写
-   KeyframePlayer.update(dt)      ← animation 的 transform/opacity/bg_color/text_color 后写（同通道覆盖）
+b. TweenManager.update(dt)        ← transition 的 opacity/bg_color/text_color 先写
+c. KeyframePlayer.update(dt)      ← animation 的 transform/opacity/bg_color/text_color 后写（同通道覆盖）
 ```
 
 写入顺序即优先级——天然实现 CSS **animation 优先于 transition**，无需占用标记。ScrollPane 物理是唯一例外（自维护 tween）。
 
 ### 13.2 KeyframePlayer（路线甲：独立 player，不翻译成 Tween 序列）
 
-`@keyframes` 表（组件级打包、Scene 级查找）+ `AnimationSpec`（fence `animation` 简写解析）驱动独立的 `KeyframePlayer`，slotmap 稳定句柄（`PlayerKey: u64`）。player 推进时间轴（delay/iteration/direction/fill/ease + per-segment timing-function + TRS lerp），直接写 `NodeAnim` 的 transform/opacity/bg_color/text_color 四通道，不翻译成 Tween 序列。
+`@keyframes` 表（组件级打包、Scene 级查找）+ `AnimationSpec`（fence `animation` 简写解析）驱动独立的 `KeyframePlayer`，slotmap 稳定句柄（`PlayerKey: u64`）。player 推进时间轴（delay/iteration/direction/fill/ease + per-segment timing-function + TRS lerp），写 `NodeAnim` 的 transform/opacity/bg_color/text_color 四通道，不翻译成 Tween 序列。player 本体是纯时间轴状态机：不持场景引用、不发事件，推进只返回纯数据帧，写 `NodeAnim` 的副作用由 tick 集成层执行；elapsed 是唯一时间源头（iteration/progress 均从它推导）。
 
-**tick step g' `sync_animation_players`**（rematch 后、solve 前）检测 computed `animation` 声明变化启停 class 触发的 player：新增 name → 启 player；消失 → 停；参数变 → 重启。`node.Play("name")`（程序化）走 FFI 立即建 player，不等 rematch。
+**tick step m `sync_animation_players`**（rematch 后、solve 前）检测 computed `animation` 声明变化启停 class 触发的 player：新增 name → 启 player；消失 → 停；参数变 → 重启。`node.Play("name")`（程序化）走 FFI 立即建 player，不等 rematch。
 
-**`Container.RestartAnimations()`（声明式动画运行时重启）**：清子树内全部 class 触发 player（按通道所有权回收，幸存 player 的通道不误清；programmatic player 不动），下一帧 g' 依 `base_style.animation` 声明原样重建（delay 重计、backwards/both 立即写首帧）。与销毁重实例化的差别：节点身份/滚动位置/控件值/事件订阅全保留。
+**`Container.RestartAnimations()`（声明式动画运行时重启）**：清子树内全部 class 触发 player（按通道所有权回收，幸存 player 的通道不误清；programmatic player 不动），下一帧 step m 依 `base_style.animation` 声明原样重建（delay 重计、backwards/both 立即写首帧）。与销毁重实例化的差别：节点身份/滚动位置/控件值/事件订阅全保留。
 
-**写入通道独占**：`transform` 是 player 独占（transition 不支持 transform）；`opacity/bg_color/text_color` player 与 tween 都可能写，player 后写覆盖。
+**写入通道**：transform 走 TRS 分解的单复合通道（transition 与 player 都可写，中途接管以当前值为 start）；`opacity/bg_color/text_color` player 与 tween 都可能写，player 后写覆盖。
 
 **fill-mode 完成态**：`forwards`/`both` → Completed 态不回收，每帧持续写末值（直到声明消失/Stop）；`none`/`backwards`（默认）→ 回收 player，通道回 None，下帧 tween/base 接管。**backwards/both 首帧 backwards fill**：启动时立即算一次首帧值写 NodeAnim，不等下帧 update，避免 delay 期间闪 base。
 
@@ -617,15 +657,15 @@ a. TweenManager.update(dt)        ← transition 的 opacity/bg_color/text_color
 
 **Animation 句柄 L3 全套**（见 [public-api.md](public-api.md) §9）：`Node.Play(name)` 返回 `Animation` 句柄，事件 `AnimationStart`/`End`/`Iteration`/`Key`/`Hook` + `TransitionEnd` 经 `borrow_events` 双路由（全局 `On<T>` + 句柄 `player_key` 私有回调）。
 
-> **M2.5(引擎终态)**:池化 Tween(`TweenManager { active, pool }` 替换单 Vec)+ 缓动全集(cubic-bezier/Elastic/Bounce/Custom + per-stop timing-function 结构化)+ 链式 builder API(替位置参数 `tween()`)+ player 与 Tween 插值原语统一(共享 `TweenValue{x,y,z,w,d}` + `value_size(1..6)`)。当前 TweenManager 是单 `Vec<Tween>` + flat `tween()` + Ease enum 10 keyword 变体（Linear/Quad×3/Cubic×3/Back×3；缺 cubic-bezier/Elastic/Bounce/Custom）+ value_size max=4——够 keyframes 跑，触发判据见 milestones M2.5。
+> **M2.5(引擎终态)**:池化 Tween(`TweenManager { active, pool }` 替换单 `Vec`)+ 缓动全集(cubic-bezier/Elastic/Bounce/Custom + per-stop timing-function 结构化)+ 链式 builder API(替位置参数 `tween()`)+ player 与 Tween 插值原语统一(共享 `TweenValue{x,y,z,w,d}` + `value_size(1..6)`)。当前 TweenManager 是单 `Vec<Tween>` + flat `tween()` + Ease enum keyword 子集（Linear/Quad/Cubic/Back 族 + steps；缺 cubic-bezier/Elastic/Bounce/Custom）+ value_size max=4——够 keyframes 跑，触发判据见 milestones M2.5。
 
 ### 13.3 Transition
 
-纯数据 `items: Vec<TransitionSpec>`。class/typed style 变化在下一帧 tick step **f** rematch 生效后，step **g** transition drain 比较 computed style 变化（基线 = 上帧 computed，不含 NodeAnim），把每个 item 翻译成 Tweener 提交 TweenManager。与控件状态（Toggle 切换、TabList 切换）正交，由状态变化触发。transition 与 animation 检测独立——animation 播放期间 computed style 不变，transition 不误触发。
+纯数据 `items: Vec<TransitionSpec>`。class/typed style 变化在下一帧 tick step **k** rematch 生效后，step **l** transition drain 比较 computed style 变化（基线 = 上帧 computed，不含 NodeAnim），把每个 item 翻译成 Tweener 提交 TweenManager。与控件状态（Toggle 切换、TabList 切换）正交，由状态变化触发。transition 与 animation 检测独立——animation 播放期间 computed style 不变，transition 不误触发。
 
 ### 13.4 opacity 父级累积传播
 
-渲染 DFS 累积：`node_alpha = parent_alpha × own_opacity`（`render/mod.rs::accumulate_alpha`），进子树时把 node_alpha 当作子的 parent_alpha。parent 半透明会按比例衰减子树——与浏览器 opacity 合成语义一致。
+渲染 DFS 累积：`node_alpha = parent_alpha × own_opacity`（`render/mod.rs::accumulate_alpha`），进子树时把 node_alpha 当作子的 parent_alpha。parent 半透明会按比例衰减子树——近似浏览器 opacity（浏览器走隔离合成层，交叠的半透明子元素两种模型呈现略有差异）。
 
 ### 13.5 Timers
 
@@ -642,12 +682,17 @@ a. TweenManager.update(dt)        ← transition 的 opacity/bg_color/text_color
 ### 14.1 双格式
 
 - **编辑期/源**：HTML（结构）+ CSS（样式）+ 资源清单。
-- **发布产物**：编译成**单一二进制 blob**（`.pkg.bin`）+ 图集（`atlas.png` + `atlas.json`）。
-- 运行时**只认二进制**；HTML 解析只在打包器。
+- **发布产物**：编译成**单一二进制 blob**（`.pkg.bin`）+ 图集（`atlas/<name>.png` + `atlas/<name>.atlas.json`，多页 `<name>.<n>.png`）。
+- 运行时**只认二进制产物目录**；HTML 解析只在打包器。产物目录是运行期后端与设计期工具的唯一契约面——后端永远不认识工作区/GUI/CLI。
 
 ### 14.2 图集（Rust 自绘，打包器产出）
 
-打包器 `loomgui_pkg` 自绘产出 `atlas.png` + `atlas.json`。核心只持图片归一化 `sprite_key` + 图片原始像素尺寸。后端 `SpriteResolver` 据 atlas.json 的 UV 字典取子区 UV。
+打包器自绘图集（`atlas/<name>.png` + `atlas/<name>.atlas.json`）。`sprite_key` = 图相对工作区根的路径（正斜杠）——用全路径消除裸文件名跨目录撞车；HTML 里 `src` 相对所在 html 文件解析（浏览器语义），打包期归一。核心只持 sprite_key + 图片原始像素尺寸；后端 `SpriteResolver` 据 atlas.json 的 UV 字典取子区 UV。
+
+- **归属校验**（打包期）：HTML 引用的每张图须恰好归属一个 atlas——缺失报错、跨 atlas 重叠报错；atlas 内未被引用的图合法（运行时 `set_src` 动态图标）。
+- **图尺寸唯一真相源 = atlas.json**：运行时动态图标不写 HTML，pkg manifest 永远缺它们的尺寸——故 manifest 不存尺寸，启动时把全部 atlas.json 尺寸批量灌入核心。交叉验证刻意单向（不反向要求 atlas 图都被 HTML 引用，否则动态图标全判无用）。
+- `border-image-slice` 是 per-element 属性烤进 base_style（同一图不同元素可不同 slice）——图集管 per-image 数据，pkg 管 per-element 数据。
+- `<img>` 内在尺寸三档：CSS 声明 > 图集真实像素 > 默认兜底（无尺寸 img 的布局行为）。
 
 ### 14.3 运行时 Bootstrap
 
@@ -664,6 +709,8 @@ a. TweenManager.update(dt)        ← transition 的 opacity/bg_color/text_color
 ### 14.5 纹理
 
 核心只持 `TexId`（整数）。图集：一张大纹理 + N 个轻量 TextureView（只存 UV）。子 view 首引用连带 root；归零通知后端可卸载。GPU 生命周期全在后端。
+
+「按包释放纹理」架构上不成立：`loom.runtime.json` 的 packages 与 atlases 是 workspace 级平行列表，SpriteResolver 按 (atlasIdx, page) 全局懒缓存、与包注册表解耦（重载同名包不重载纹理），字体是 driver 级注册——`UnloadPackage` 只动模板注册表（上面的归零卸载是核心 TexId 通用模型；Unity 侧实现是全局缓存，实际不卸载）。
 
 ---
 
@@ -690,6 +737,8 @@ a. TweenManager.update(dt)        ← transition 的 opacity/bg_color/text_color
 3. ChangeLevel（Skip/Header/Full）：Skip/Header 不写 arena。
 
 C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse`）做 stale-mark-sweep 镜像同步，O(n) 每帧。
+
+数据形态分工规则：定长 per-node 结构走 SOA 列（如文字效果参数定长块），变长几何走 arena——arena 索引不反映内容变化、哈希跨 arena 会破坏自包含性。控件 FFI 导出全值操作（clone ControlState → 改字段 → 回写）而非结构视图，控件内部结构演进不动 FFI 面。
 
 ### 15.4 渲染对象镜像生命周期
 
@@ -718,7 +767,7 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
      e.  消费 pending_focus_request      ← 编程聚焦/清焦点
      f.  process 指针输入                ← 多槽命中测试（用上帧 world）+ 拖拽/滚动/点击仲裁
      g.  apply_wheel + scroll advance   ← 惯性/回弹物理
-     h.  process_keys                   ← keydown/up（无自动 Tab 导航——方向键/手柄导航是逻辑层积木）
+     h.  process_keys                   ← keydown/up（Tab/Shift+Tab 自动焦点链导航内置；方向键/手柄导航不做——逻辑层积木）
      i.  process_text_input             ← UTF-32 字符通道（IME/可打印字符）
      j.  list plan/execute_visible      ← ListView 虚拟化 slot 换绑（solve 前：新 slot 本帧布局）
      k.  rematch                        ← 伪类 :hover/:active/:focus/:disabled/:checked 重 cascade（class/style 变更下帧生效）
@@ -730,7 +779,7 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
      q.  list collect_heights           ← ListView 高度回填（refresh_content_sizes 前）
      r.  refresh_content_sizes          ← scroll content_size 刷新
      s.  compute_world_transforms       ← DFS 累计 world matrix（含 Transform 渲染偏移，不触发 solve）
-     t.  build_render_nodes             ← 剪 display:none + dirty hash + 批合 + sort_key
+     t.  build_render_nodes             ← 剪 display:none + dirty hash + 批合 + sort_key + 浮层末尾追加
      u.  输出 Vec<RenderNode>（SOA blob）
   4. 后端 borrow_frame → MirrorPool 同步镜像；borrow_events → 事件路由 → 业务回调
 ```

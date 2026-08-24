@@ -32,6 +32,8 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 
 ## 2. 围栏元素
 
+> **标签取舍判据**（历史标签下线决策的通用规则，供未来扩标签时复用）：浏览器有不可样式化原生 UI 的标签（`input`/`select`/`progress`...）→ 砍，改 role 驱动；已被 role 完整取代的纯结构标签（`ul`/`li`/`label`...）→ 砍；保留 = 无 role 等价物（`div`/`span`/`img`/`template`/`slot`）或 CSS 完全可控且 AI 先验极强（`button`）。
+
 ### 2.1 文档壳标签（8 个，不进运行时树）
 
 | 标签 | 用途 |
@@ -63,7 +65,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 下表是完整的运行时标签注册表。控件与列表没有专属标签——作者在 `<div>` 上写 WAI-ARIA `role` 表达（spec §2.2），如 `<div role="slider">`、`<div role="list">`。列含义：
 
 - **SemanticKind**：打包期标注的稳定语义类型（base 标签按 tag、控件/列表按 `role`）。
-- **Display**：不写 CSS `display` 时的默认显示值。**注意：LoomGUI 运行时不实现 CSS inline flow**——`Inline` 标签运行时被当作 block-level flex（撑满父宽、竖向堆叠），与浏览器的横向 inline 行为不同。为防止 AI 先验错误，inline 布局 box（button/img）**必须放进 flex 容器**，不能裸放在 block 容器里，否则打包报错（见阶段 6.5）。文本级 `span`/`slot` 豁免（其行内混排要等文本模型，roadmap §4；但阶段 6.4 的混排检查仍把 slot 按 block 级对待——两次保守判定同因：rich-text 标志打包期烘焙）。
+- **Display**：不写 CSS `display` 时的默认显示值。**注意：LoomGUI 运行时不实现 CSS inline flow**——`Inline` 标签运行时被当作 block-level flex（撑满父宽、竖向堆叠），与浏览器的横向 inline 行为不同。为防止 AI 先验错误，inline 布局 box（button/img）**必须放进 flex 容器**，不能裸放在 block 容器里，否则打包报错（见阶段 6.5）。文本级 `span`/`slot` 豁免（其行内混排走 rich-text 模型；但阶段 6.4 的混排检查仍把 slot 按 block 级对待——两次保守判定同因：rich-text 标志打包期烘焙）。
 - **Category**：HTML 分类简化为四值——Block（块级结构）、Phrasing（行内文本级）、Void（自闭合）、Transparent（透明，继承父级）。
 - **ContentModel**：允许的子内容——None（无子内容）、Text（仅文本）、Phrasing（行内元素+文本）、Flow（任意）、Transparent（继承父级）、Only([...])（仅列出的子标签）。
 
@@ -103,13 +105,19 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `tabpanel` | Container（`div` tag 回退，非 role 分派） | — |
 | `dialog` | Container（`div` tag 回退，非 role 分派——模态弹层容器） | — |
 
-控件初始值放 ARIA（`aria-valuenow`/`aria-checked`/...）或 `data-*`（`data-step`/`data-name`）属性里——围栏禁止 `<div>` 上出现 plain 控件属性。
+控件初始值属性分三类（围栏禁止 `<div>` 上出现 plain 控件属性）：
+
+- **spinbutton**（NumberField）：`aria-valuenow`/`aria-valuemin`/`aria-valuemax` + `data-step`。
+- **textbox/textarea/spinbutton** 共用编辑初始值：`aria-placeholder`（占位文本）、`data-maxlength`、`aria-readonly`；textbox/textarea 的初始**值**来自元素文本内容（ARIA 无 textbox-value 属性）。
+- **radio** 分组用 `data-name`：ARIA 无「radio 组名」属性（标准靠 radiogroup 容器/相邻性表达），用 `data-*` 私有承载；同 `data-name` 自动互斥。
+
+Dropdown 选中值显示：可选 `data-slot=value` 子（内嵌 TextNode）——框架把当前选中项文本写进去；漏写 = 无选中值显示（静默）。Dropdown 无内置箭头（作者自画）。
 
 `switch` / `radio` 无框架槽位（没有 knob slot）：框架只切换 `aria-checked` 状态、不驱动子节点几何——视觉状态全在 CSS 状态选择器（含旋钮位移：`[role="switch"][aria-checked="true"] .knob { transform: translateX(...) }`，rematch 状态变化自动重评）。
 
 ### 2.4 自定义元素
 
-标签名含 `-`（如 `<my-widget>`）识别为 CustomElement（`SemanticKind::CustomElement`），**display 默认 Block（同 div）**——连字符标签不在 TAGS 注册表，须在 css_resolve 显式铺默认，漏铺会落到 taffy Flex Row（模板根无显式宽时被内容收缩，浏览器块级根则撑满）。围栏放行含 hyphen 的标签名通过 Fence Gate；**注册验证在打包器**（R3 已落地）：每个 package dir 下 `components/<tag>.html` 即该标签的注册（Package 注册表承担 `customElements.define()` 角色，main-design §7.4），打包期见 hyphen 标签即查注册表展开（slot 投影 + 展开域锚定规则），未注册 → `UnregisteredCustomElement` 打包错误。`<slot>` 只在组件模板内合法（页面级 `<slot>` 打包错误）；无效 slot（light 子的 `slot` 属性无对应位 / 无默认 slot 却有游离子）同样打包期报错。见 component-system spec `docs/superpowers/specs/2026-08-14-component-system-design.md`。
+标签名含 `-`（如 `<my-widget>`）识别为 CustomElement（`SemanticKind::CustomElement`），**display 默认 Block（同 div）**——连字符标签不在 TAGS 注册表，须在 css_resolve 显式铺默认，漏铺会落到 taffy Flex Row（模板根无显式宽时被内容收缩，浏览器块级根则撑满）。围栏放行含 hyphen 的标签名通过 Fence Gate；**注册验证在打包器**（R3 已落地）：每个 package dir 下 `components/<tag>.html` 即该标签的注册（Package 注册表承担 `customElements.define()` 角色，main-design §7.4），打包期见 hyphen 标签即查注册表展开（slot 投影 + 展开域锚定规则），未注册 → `UnregisteredCustomElement` 打包错误。`<slot>` 只在组件模板内合法（页面级 `<slot>` 打包错误）；无效 slot（light 子的 `slot` 属性无对应位 / 无默认 slot 却有游离子）同样打包期报错。
 
 **组件隔离模型（Shadow DOM 式硬墙，三面同源）**——组件是自包含单元：
 
@@ -117,6 +125,12 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 - **投影归属**：light 子（`<my-widget><span slot="x">…</span></my-widget>` 里的 span）投影进组件后归组件作用域——给投影内容定样式写在组件文件里，或用内容属性（如 img 的 width/height）自带。
 - **校验自包含**：组件文件独立过全围栏校验（注册期）。组件内控件（`role=slider` 等）必须由组件自己的 CSS 命中，页面 CSS 救不了（阶段 6.7 按组件文件自身的规则集跑）。
 - **id 墙**：运行时 `Get<T>("id")` 不穿透组件实例边界（经 host 节点两跳进组件）。
+
+**组件打包错误/警告全集**（packer 侧合成码，独立于 §7 的 fence DiagnosticCode 表）：`UnregisteredCustomElement`（未注册）、`DuplicateComponentName`（注册表重名）、`ComponentNameRequiresHyphen`（注册名无连字符）、`ComponentMultipleRoots`（组件模板必须**单一根元素**，多根报错、不静默产森林）、`ComponentKeyframesNameCollision`、展开环（组件引用成环）、无效 slot / slot 嵌套、同展开域 id 撞车（light 子 id 与组件模板 id 在同一展开作用域内必须唯一；跨实例重复合法）。
+
+**组件 @keyframes 两级裁决**：打包期——同名同内容静默去重（同组件多实例必然同名）；同名异内容宿主胜 + warning。运行时——keyframes 全局按名表，后实例化的组件覆盖同名。
+
+**已知降级**：手工 file:// 双击打开 HTML 不展开组件（展开依赖浏览器预览工具链的脚本注入）——组件页一律走预览工具链看。
 
 ---
 
@@ -167,7 +181,7 @@ Base 标签按 tag 映射；控件/列表按 `role` 映射（`role` 优先于 ta
 
 | 属性 | 用途 |
 |---|---|
-| `id` | 组件作用域内唯一标识（打包期校验唯一性） |
+| `id` | 同展开域内唯一标识（打包期校验；组件多实例之间同 id 合法） |
 | `class` | CSS 类选择器目标 |
 | `style` | 行内 CSS（Fence Gate 校验属性名 + 关键字值） |
 | `slot` | 投影到父组件的具名 slot |
@@ -199,7 +213,7 @@ Base 标签按 tag 映射；控件/列表按 `role` 映射（`role` 优先于 ta
 
 ## 5. CSS 围栏
 
-CSS 在围栏中以三个正交维度建模：
+CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局有三档：**支持**（正常解析进运行时）；**围栏外**（属性名/值不在白名单 → error，诊断附围栏内替代写法引导）；**围栏内但用法致预览 ≠ 运行时**（warning 不阻断，见 §7 warning 清单）。
 
 ### 5.1 属性白名单（CssPropSpec）
 
@@ -235,6 +249,8 @@ CSS 在围栏中以三个正交维度建模：
 
 `border-color`, `border-style`（`none` / `solid` / `dashed` / `dotted` / `double`，默认 `none`）, `border-radius`, `border-image-slice`
 
+> **border 两条运行时限制**：① `border-color` 四边共享单色——同元素四边异色时后写者覆盖、四边全变（静默错渲染，非报错）；② 彩色边框环与 background-image/gradient 互斥——有图/渐变时边框不画（静默）。
+
 **背景**
 
 `background-color`, `background-image`, `background-size`（`cover` / `contain` / `100%` / `stretch`）, `background-repeat`（`repeat` / `no-repeat` / `repeat-x` / `repeat-y`，默认 `repeat`）, `background-clip`, `-webkit-background-clip`
@@ -252,6 +268,8 @@ CSS 在围栏中以三个正交维度建模：
 
 > **transform 原点**：`transform-origin` 不在围栏——变换只绕元素**几何中心**（默认原点）。绕非中心点旋转（连线、指针）用「中点定位 + 默认中心旋转」换算等价实现。
 
+> **box-shadow 完整语法**：`[inset] <ox> <oy> [blur] [spread] <color>`，逗号分隔多层（括号深度感知切层）；`inset` 位置任意；至少 2 个数值（偏移）；负 blur 静默 clamp 为 0；层叠序按 CSS——先声明的画在最上。fence 对 box-shadow 零自有校验（单一真相源 = core 解析器，解析失败经 `apply_decl` 返 false → `FenceBadCssValue`）。注意：层数受渲染层合成 id 编码硬限（inset/outer 各有上限），超限当前无拦截。
+
 **文本**
 
 `color`（继承）, `font-size`（继承）, `font-family`（继承）, `font-weight`（继承）, `text-align`（继承）, `line-height`（继承）, `letter-spacing`（继承）, `white-space`（继承）, `text-shadow`（继承）, `-webkit-text-stroke`（继承）, `font-effect`（继承，LoomGUI 私有扩展）
@@ -265,7 +283,7 @@ CSS 在围栏中以三个正交维度建模：
 
 **动画**
 
-`animation`——`<name> <duration> [easing] [iteration-count|infinite] [fill-mode] [direction] [play-state] [delay]` 简写。对齐 public-api.md「动画定义全在 CSS」终态契约：fence 校验拼写错误并解析存值（逗号多声明 → 多个 `AnimationSpec` bake 进 `base_style.animation`，委托 core `parse_animation` 共用同一解析器防 spec §8.2/§8.3 语义漂移）。8 个长划子属性（`animation-name`/`animation-duration`/`animation-timing-function`/`animation-delay`/`animation-iteration-count`/`animation-direction`/`animation-fill-mode`/`animation-play-state`）已加入——**单值**子集（逗号列表不收，多动画用简写）：写入既有简写 spec 的对应字段，无简写时创建惰性 spec（`animation-name` 到位才启播，CSS「无 name 不播」）；`animation-name: none` 清空；长划在简写后出现则改字段、简写在长划后出现则整体替换；runtime 驱动（@keyframes 表查询 + KeyframePlayer 时间轴）**M2 已交付**（见 main-design §13）。`transition`——`<prop?> <dur> <ease?> <delay?>` 简写，逗号多 spec 解析存值（bake 进 `base_style.transition`，core transition 引擎消费）；ease 关键字按 spec §8.3 对齐（`ease`→CubicOut 等）。
+`animation`——`<name> <duration> [easing] [iteration-count|infinite] [fill-mode] [direction] [play-state] [delay]` 简写。对齐 public-api.md「动画定义全在 CSS」终态契约：fence 校验拼写错误并解析存值（逗号多声明 → 多个 `AnimationSpec` bake 进 `base_style.animation`，委托 core `parse_animation` 共用同一解析器防双源语义漂移）。8 个长划子属性（`animation-name`/`animation-duration`/`animation-timing-function`/`animation-delay`/`animation-iteration-count`/`animation-direction`/`animation-fill-mode`/`animation-play-state`）已加入——**单值**子集（逗号列表不收，多动画用简写）：写入既有简写 spec 的对应字段，无简写时创建惰性 spec（`animation-name` 到位才启播，CSS「无 name 不播」）；`animation-name: none` 清空；长划在简写后出现则改字段、简写在长划后出现则整体替换；runtime 驱动（@keyframes 表查询 + KeyframePlayer 时间轴）**M2 已交付**（见 main-design §13）。`transition`——`<prop?> <dur> <ease?> <delay?>` 简写，逗号多 spec 解析存值（bake 进 `base_style.transition`，core transition 引擎消费）；ease 关键字按 §5.2 对齐表映射。
 
 `@keyframes <name> { <stop> { decls } ... }` at-rule——`<style>` 内定义命名关键帧。stop 选择器子集：`from` / `to` / `<N>%`（0..=100 整数）；逗号多 stop（`0%,100%{...}`）按 CSS 语义展开为多条 stop（共享同声明块）。其他 at-rule（`@media` / `@font-face` 等）不在围栏子集，整块丢弃 + 诊断。
 
@@ -273,7 +291,7 @@ CSS 在围栏中以三个正交维度建模：
 
 **:nth-child(An+B|odd|even|N) 选择器**——参数化伪类，`<style>` 规则选择器接受。括号内 An+B 语法（`2n+1`/`2n`/`odd`/`even`/`<N>`）解析为 `NthChildExpr{a,b}`，命中条件 = 子序号 i 满足 `i = a*k + b`（1-based）。常配合 `animation` 简写实现错峰入场（delay 作简写第 2 个 time token，如 `.nav-card:nth-child(N){animation:fadeIn .4s .05s both}`——错峰单值也可用 `animation-delay` 长划单独声明）。语法越界（无括号/缺 `)`/坏参数）→ 选择器不匹配；组合子 `>` `+` `~` 仍越界（注意 `+`/`-` 在 `:nth-child(...)` 括号内是 An+B 合法语法，不判为组合子）。
 
-> **⚠️ 虚拟化列表禁止 `:nth-child`**：虚拟化 `<ul>`（`role=list`）的 parked slot 留挂 ul 子树（`display:none`），按 CSS 仍计入 child count。`:nth-child` 的序数包含 parked slot → item 序号不可控。用 item-index / `data-*` 属性 + 属性选择器替代（如 `[data-index="0"]`）。详见 pool-slot-lifecycle design §2.9、§5.4。
+> **⚠️ 虚拟化列表禁止 `:nth-child`**：虚拟化 `<ul>`（`role=list`）的 parked slot 留挂 ul 子树（`display:none`），按 CSS 仍计入 child count。`:nth-child` 的序数包含 parked slot → item 序号不可控。用 item-index / `data-*` 属性 + 属性选择器替代（如 `[data-index="0"]`）。
 
 **溢出**
 
@@ -297,8 +315,8 @@ CSS 在围栏中以三个正交维度建模：
 | `Filter` | grayscale / brightness / contrast / saturate / hue-rotate / invert / sepia |
 | `BoxShadow` | `[inset] ox oy [blur] [spread] color`，逗号分隔多层（首层最贴盒子） |
 | `TextShadow` | `ox oy [blur] color` |
-| `Transition` | `property duration easing delay` 简写→`TransitionSpec`（逗号多 spec；ease 按 spec §8.3） |
-| `Animation` | `<name> <duration> [easing/count/fill/direction/play-state/delay]` 简写→`AnimationSpec`（逗号多声明；ease 按 spec §8.3） |
+| `Transition` | `property duration easing delay` 简写→`TransitionSpec`（逗号多 spec；ease 按下面对齐表） |
+| `Animation` | `<name> <duration> [easing/count/fill/direction/play-state/delay]` 简写→`AnimationSpec`（逗号多声明；ease 按下面对齐表） |
 | `BackgroundImage` | `background-image` 值域：`none` / `url()` / `linear-gradient()` / `radial-gradient()`（渐变子集交 core `parse_gradient` 探针） |
 | `TextEffect` | `glow(w color)` / `blur(w)` |
 | `TextStroke` | `width color` |
@@ -309,6 +327,8 @@ CSS 在围栏中以三个正交维度建模：
 | `Raw` | 原样存储，不校验 |
 
 关键字值校验在 `css_resolve` 阶段进行。非关键字值由 `apply_decl` 的值解析逻辑处理，解析失败也产生 `FenceBadCssValue` diagnostic。
+
+**ease 关键字 → core Ease 对齐表**（真相源 = core 的 `css_ease_keyword`，fence/core 共用同一解析器防漂移）：`ease` → CubicOut 近似；`ease-in` / `ease-out` / `ease-in-out` → Quad In / Out / InOut；`step-start` / `step-end` → Step{start}；缺省 timing = `ease`。`cubic-bezier()` / Elastic / Bounce 不收（→ `FenceBadCssValue`）。
 
 ### 5.3 简写展开（ShorthandSpec）
 
@@ -331,7 +351,8 @@ CSS 在围栏中以三个正交维度建模：
 
 ### 阶段 1+2：Tokenize + Tree Build
 
-- html5gum 0.8 WHATWG tokenizer 词法分析。
+- html5gum 0.8 WHATWG tokenizer 词法分析。选型：纯 WHATWG tokenizer（非 tree builder），tree builder 自建、`emit_error` 收集为 Diagnostic 而非静默恢复——html5ever 被否因其静默错误恢复与「不静默降级」原则冲突。
+- **要求显式闭合标签**：不实现 HTML 隐式闭合（浏览器容忍省略 `</p>`/`</li>`），未闭合 → `UnclosedTag`——对带浏览器先验的 AI 作者，显式闭合低摩擦且确定性。
 - 构建中间表示 `IrTree`（元素节点 IrElement / 文本节点 Text / 注释 / Doctype）。
 - 每个 IrNode 携带字节偏移 Span，用于后续 diagnostic 定位。
 - 文档壳标签在此阶段被消费。
@@ -366,6 +387,7 @@ CSS 在围栏中以三个正交维度建模：
 - 解析 `@keyframes` at-rule 为 `KeyframesRule` 表（`from`/`to`/`N%` stop 选择器）。
 - 产出存入 `ParsedTemplate.dynamic_rules` + `ParsedTemplate.keyframes`。
 - 其他 at-rule（`@media` 等）丢弃 + 诊断。
+- **选择器解析器是手搓的**（零选择器依赖）：cssparser 只是分词器——不产选择器 AST、不算 specificity（prelude 只是一串不透明 token），要 AST 须再叠 `selectors`/`scraper`，连带拖进 fence 不需要的 HTML 解析器。spike 实证后放弃接入，手搓直产 core 类型（组合子集：class/tag/id/后代/属性/参数化伪类）。
 
 ### 阶段 5：Structural（跨元素结构校验）
 
@@ -413,7 +435,7 @@ CSS 在围栏中以三个正交维度建模：
 2. 元素显式 `display:block`（有意当块级撑满）。
 
 **豁免**：
-- `span`（TextElement）/`slot`：文本级或结构占位，其行内混排要等文本模型（roadmap §4），不是 flex 能修的。
+- `span`（TextElement）/`slot`：文本级或结构占位，其行内混排走 rich-text 模型，不是 flex 能修的。
 - 元素显式 `display:block`：作者有意当块级（撑满），浏览器也撑满，两边一致。
 - parent 是 flex（inline style / tag 默认 / `<style>` 规则声明 `display:flex`——单 compound 静态可判定选择器：class / id / 静态属性）。
 - **parent 是 rich-text-block**（阶段 6.4 判定）时 `img` 豁免：img 作为 inline run 走 rich-text inline flow，与浏览器一致。`button` 不豁免——button 是控件非 phrasing，不进 inline 级集合。
@@ -530,6 +552,8 @@ CSS 在围栏中以三个正交维度建模：
 
 解析器、打包器、文档、测试不得各维护一份白名单。
 
+**为什么是 Rust const 表而非外部数据文件**（TOML/JSON）：标签清单相对固定；值约束是 Rust 表达式而非纯数据；避免运行时解析 schema 文件、维护文件格式与新增解析依赖。
+
 ### 8.2 防漂移门
 
 ```bash
@@ -549,6 +573,5 @@ cargo test -p loomgui_fence --test pipeline_integration    # 端到端流水线
 |---|---|
 | 设计契约 | `docs/design/main-design.md` §3 |
 | 设计师工作区 AI 规则 | 打包器模板 `editor/references/`（loomgui-editor skill 的渐进披露参考表，scaffold 落各工作区会话根） |
-| 重构路线 | `docs/roadmap/roadmap.md` |
 
-**同步规则**：改 schema 代码 → 检查三处消费者是否需同步。
+**同步规则**：改 schema 代码 → 检查两处消费者是否需同步。

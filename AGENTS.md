@@ -10,7 +10,7 @@
 
 LoomGUI = 跨引擎游戏 UI 框架。标准 HTML/CSS 子集作设计期 DSL，类型化对象树作运行时 API，自绘渲染。核心目的：**AI 驱动的界面拼装**——标准 HTML 作 DSL，让 AI 既能编辑（文本）又能预测渲染结果（AI 对 HTML/CSS 有强先验）。
 
-对标 FairyGUI、RmlUi、Unity UI Toolkit（参考实现在 `temp/FairyGUI-unity/`、`temp/RmlUi/`，只读）。差异化：标准 HTML/CSS（vs fgui 的 `.fui` 二进制 AI 看不懂）、类型化对象树（标准 HTML 元素决定稳定类型）、Rust 跨引擎共享核心、围栏验证器。
+对标 FairyGUI、RmlUi、Unity UI Toolkit（参考实现在 `temp/FairyGUI-unity/`、`temp/RmlUi/`，只读）。差异化：标准 HTML/CSS（vs fgui 的 `.fui` 二进制 AI 看不懂）、类型化对象树（标准 HTML 元素决定稳定类型）、Rust 跨引擎共享核心、围栏验证器。Blitz（`temp/blitz/`）可作**参考源**但不作底层（跨引擎 FFI 立身之本/Stylo 与围栏哲学冲突/无打包期边界/节点模型不兼容/pre-alpha）——按子系统取材：CSS 装饰数学→blitz-paint、文本→Parley 生态、scroll 物理→fgui、布局→RmlUi。
 
 ## 构建 / 测试命令
 
@@ -20,7 +20,9 @@ cargo build -p loomgui_core
 cargo test  -p loomgui_core
 
 # loom CLI（HTML+CSS+资源 → .pkg.bin + 自绘图集 + fonts；二进制名 loom，复用核心 parse 层）
-# 命令面：check / build / init(--ui) / new / list / show / font add / atlas add / scaffold / version；退出码 0/1/2。
+# 命令面：check / build / init(--ui) / new / list / show / font add / atlas add / scaffold / version；退出码 0=干净（warning 不算失败）/ 1=数据性 / 2=工具性。
+# 输出契约：stdout 单 JSON 文档、stderr 进度（clig.dev）；`format_version` 只增不改；写命令成功回显实体 JSON；`list` 摘要级纪律（全量吐会炸 AI 上下文）。
+# watch / mcp 子命令 rejected by design（AI 循环用 check 轮询 + assets/ 是真相源；业界无 watch 先例）。
 # 工作区拓扑：会话根（.loom/ = exe + config.json 双指针 ui_root/unity_root + skills）≠ ui 目录（loom.workspace.json）；
 # 目录解析统一 config 发现（会话根 / ui 本体 / ui 直接子目录均可作参数或 cwd），详见 pkg/src/config.rs。
 cargo build -p loomgui_pkg
@@ -48,7 +50,7 @@ cargo test -p loomgui_fence                              # ← 围栏契约门
 
 **CI 门禁**（`.github/workflows/rust-ci.yml`，push main / PR 触发）：fmt 严（`cargo fmt --all -- --check`）+ clippy 严（`cargo clippy --all-targets -- -D warnings`）+ Win/Ubuntu matrix test + feature-gate check（`--no-default-features --all-targets`）+ Windows `.dll` artifact（release build）。**push 前本地跑 `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`**，否则 CI 红。clippy 各 crate root 有 `#![allow]` 放行可辩护的测试/FFI 模式 lint（`field_reassign_with_default` / `not_unsafe_ptr_arg_deref` / `too_many_arguments` 等，带理由注释），勿误清——新增可辩护模式 lint 在那里加。
 
-**发版（tag 触发 Release workflow）**：硬门：tag 名 == `unity/package/package.json` 的 version，且 CHANGELOG 有对应 `## [<ver>]` 段落——**打 tag 前先 bump + 补段落 + `cargo run -p xtask -- release-check`**。git-URL 装包的版本号解析自 tag 指向 commit 的 package.json，漏 bump = 消费者装错版本号（不止 CI 红）。
+**发版（tag 触发 Release workflow）**：三道硬门：tag 名 == `unity/package/package.json` 的 version，且 == `crates/packer/pkg/Cargo.toml` 的 version（不齐则 `loom version` 撒谎），且 CHANGELOG 有对应 `## [<ver>]` 段落——**打 tag 前先双 bump + 补段落 + `cargo run -p xtask -- release-check`**。git-URL 装包的版本号解析自 tag 指向 commit 的 package.json，漏 bump = 消费者装错版本号（不止 CI 红）。**CI 不编 .dll**——git URL 分布拉的是 tag commit 快照，.dll 必须已在 tag commit 内（Release workflow 只验证+出 artifact；release-check 只查 dll 存在性，字节 staleness 无法校验）。
 
 ### Rust → Unity .dll 闭环（Windows 本机是唯一的编码机）
 
@@ -109,7 +111,6 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 - `dump_scroll` — 滚动（overlap、scroll_pos、content_size）
 - `dump_bg` — 节点 base_style（验是否进 pkg）
 - `dump_nativehost_slot` — NativeHost FFI 查询
-- `spec4b_dump` — dump 全节点 layout_rect + img src + text metrics + glyph probe（验 core solve 跟 PlayMode 一致，定位 layout bug 在 core 还是 Unity 后端）
 - `dump_shop` — showcase/shop 命中/层叠诊断：dump 全节点 layout_rect/display/touchable + hit_test 探针（定位点击被谁接走、inline vs class cascade 谁赢）
 - `dump_mail` — showcase/mail 帧计时 + 阶段拆分（定位低帧热点：solve/render/build 谁独占；验虚拟列表 slot 数不随 ItemCount 涨）
 - `dump_mail_scroll` — 虚拟列表覆盖诊断：set_scroll_pos 驱动 + 量化视口顶部空白 gap_top（定位 active slot 是否覆盖视口顶，漏 flex gap 会留空）
@@ -119,13 +120,17 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 **跨层特性 PlayMode 报错**先 example 实测 core 状态再改，避免盲改物理掩盖 layout 根因。
 
-**core dump 复现 Unity solve**：PlayMode layout/视觉 bug 先编码机用 `spec4b_dump` / 对应 dump_*.rs example 喂同样的 pkg.bin 复现 core solve，定位 bug 在 core（dump 错）还是 Unity 后端（dump 对、渲染错）。core 和 Unity 是同一份 solve 的两面，dump 取证再改，别静态猜反复试。
+**core dump 复现 Unity solve**：PlayMode layout/视觉 bug 先编码机用对应 dump_*.rs example 喂同样的 pkg.bin 复现 core solve，定位 bug 在 core（dump 错）还是 Unity 后端（dump 对、渲染错）。core 和 Unity 是同一份 solve 的两面，dump 取证再改，别静态猜反复试。
+
+**Unity 侧结构化诊断入口**：`LoomHost.DumpSceneJson()`（Runtime 包内 public，未 instantiate 返 `"[]"`）dump 全场景节点树；showcase 工程另有 dev-only 的 `LoomBridge`（PlayMode-only：DumpScene/DumpMirrorPool）。uloop 探针读空先想这两个入口。
+
+**布局差分验收 = rect-diff 工具链**（`showcase/scripts/rect-diff/`）：Chrome DOM rect（browser-rect.mjs）vs core DFS rect（`dump_page --json`）按 id+tag+class 容差比对。要点：semanticTag 归一（browser 按 role 归一，否则桶永远配不上）；loom-preview.js 是 core 行为模拟器**必须保留**（全拦会制造假 diff，如空 textbox 高度）；reset.css/letterbox 系统性偏移先排查是不是假 diff；0×0 盒不进 idless 桶；退出码 0/1/2/3（3=infra 失败≠布局回归）；`--scene` 走 PlayMode 模式。
 
 **Unity 渲染 vs HTML 浏览器颜色对比（Chrome headless 取证）**：颜色「发白/偏亮/偏色」问题不能盲信「渲染对得上 CSS」——CSS 半透明合成在 sRGB 编码空间，Unity Linear 项目在 linear 空间，同一 CSS 算出不同值。取证：Chrome headless 截 HTML（`"/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --disable-gpu --force-color-profile=srgb --force-device-scale-factor=1 --window-size=1920,1080 --screenshot=out.png "file:///abs/path.html"`）→ PowerShell `System.Drawing.Bitmap.GetPixel(x,y)` 读像素 hex → 和 Unity uloop `screenshot --capture-mode rendering` 像素逐字节对比。**控制实验先校准**：截纯色 `#hex` HTML 确认 Chrome 截图对纯色准（暗部可能偏），坐标用 PNG top-left = design 坐标。这是定位「颜色对不上」类问题的铁证方法，比静态猜强。
 
 **测浏览器 background-size/contain/cover 等“布局/背景”渲染用 playwright（headless --screenshot 不可靠）**：`chrome --headless=new --screenshot` 对 background-image 布局/平铺测量不可靠（抢截、忽略 background-size 假象）。用 `playwright` + `channel="chrome"`（真 Chrome）`page.goto(file://HTML)` + `wait_for_load_state("networkidle")` + 整页或 element 截图，再 PowerShell 扫非背景色像素 bbox。**务必加 `background-repeat:no-repeat`**——CSS 默认 repeat 会把 contain 缩后的图平铺填满盒，测量出“填满”假象。
 
-**加新控件类型（新 NodeKind/ControlState 变体）必 grep 所有按 kind/变体 dispatch 的点**（render arm、measure_text_controls、on_pointer_down/on_text_pointer_down、cursor blink、FFI setter or-pattern）逐一确认覆盖——各层 dispatch 独立写、独立测，漏一个 = 控件半残/不可见（空 mesh）。且单测验不了 CSS 语义集成（display 子树剪枝、继承传播、多 spec 解析），收尾必跑 showcase PlayMode 逐项过。
+**加新控件类型（新 NodeKind/ControlState 变体）必 grep 所有按 kind/变体 dispatch 的点**（render arm、measure_text_controls、on_pointer_down/on_text_pointer_down、cursor blink、FFI setter or-pattern、**render 侧 mesh 合并的控件排除 or-pattern**）逐一确认覆盖——各层 dispatch 独立写、独立测，漏一个 = 控件半残/不可见（空 mesh）。且单测验不了 CSS 语义集成（display 子树剪枝、继承传播、多 spec 解析），收尾必跑 showcase PlayMode 逐项过。
 
 **subagent 协作（多 agent 分工的教训）**：
 - 模型选型：默认 `DeepSeek/deepseek-v4-pro` 起步；opus 级在本 repo 反复撑爆 subagent 输出上限——撞了就换模型，别硬重试（顶部模型禁令是硬规则）。

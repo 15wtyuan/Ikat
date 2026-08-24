@@ -24,8 +24,8 @@ bitflags::bitflags! {
         /// 查找边界无关（改读 `LOOKUP_SCOPE`）。
         const SCOPE_ROOT = 1 << 5;
         /// `Get<T>` 查找边界（与 CSS 作用域隔离解耦）：模板实例化根 / 文档根 / ListView slot 根打此位。
-        /// 当前 `find_by_id_attr` 仍全局首匹配；scoped find（在此边界内停止向下穿透嵌套作用域）
-        /// 是未来扩展，slot 根预打此位以备将来。
+        /// 查找用 `find_node_by_id_in_own_scope`：从 root 的直接子开始 DFS、root 自身 id 不参与
+        /// 匹配，且不向下穿透嵌套 LOOKUP_SCOPE（slot 根 / 组件实例各自成域）。
         /// 与 SCOPE_ROOT 独立：slot 根只打此位（CSS 规则仍按页面根 scope 匹配，页面 CSS 对 item 生效）。
         const LOOKUP_SCOPE = 1 << 6;
         /// 组件展开域 host 自身归属外层 CSS 作用域（Shadow DOM host 语义：host 元素在 light
@@ -482,7 +482,7 @@ pub enum ControlState {
     TextField(EditState),
     /// 多行文本输入（TextArea）。EditState 含 value/cursor/anchor 等运行时文字编辑态。
     TextArea(EditState),
-    /// `<select>` 下拉。selected_index=当前选中项（键盘 Up/Down 直接移动它作高亮，不另存高亮态）；
+    /// `role=combobox` 下拉。selected_index=当前选中项（键盘 Up/Down 直接移动它作高亮，不另存高亮态）；
     /// open=popup 是否展开；value_lock 防反馈环；open_selected_index=展开时刻的 selected_index
     /// 快照（Esc 回滚用，仅 open 期间 Some，收起时清 None）。open/open_selected_index 是运行时态，
     /// 不进 pkg（ControlInit::Dropdown 载 selected_index + option_values 静态配置）。
@@ -494,7 +494,7 @@ pub enum ControlState {
         open_selected_index: Option<usize>,
         option_values: Vec<Option<String>>,
     },
-    /// `<input type="number">`。edit 复用 EditState（value 是数字的文本形式）；
+    /// `role=spinbutton`。edit 复用 EditState（value 是数字的文本形式）；
     /// min/max/step 是数值约束，读写门做 clamp + 量化。
     NumberField {
         edit: EditState,

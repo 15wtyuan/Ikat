@@ -18,7 +18,7 @@ use loomgui_core::style::resolved::{DisplayMode, ResolvedStyle, TextAlign};
 /// `<style>` 块（`css_rules`）三处 `FenceUnknownCssProp` 构造点，保证引导文案一致。
 pub(crate) fn unsupported_hint(prop: &str) -> Option<&'static str> {
     Some(match prop {
-        "box-sizing" => "LoomGUI always uses the content-box model (width is the content width; padding and border add to it). This declaration has no effect — remove it.",
+        "box-sizing" => "LoomGUI always uses the border-box model (width already includes padding and border — the engine default). This declaration has no effect — remove it.",
         "visibility" => "LoomGUI has no visibility:hidden. To hide an element use `display:none` (removes layout space) or `opacity:0` (keeps space).",
         "cursor" | "outline" | "user-select" | "text-decoration" | "object-fit" => {
             "not supported by fence — remove this declaration."
@@ -499,8 +499,8 @@ mod tests {
             .find(|d| d.code == DiagnosticCode::FenceUnknownCssProp)
             .expect("should error");
         assert!(
-            d.message.contains("content-box"),
-            "msg should explain LoomGUI uses content-box: {}",
+            d.message.contains("border-box"),
+            "msg should explain LoomGUI uses border-box: {}",
             d.message
         );
         assert!(
