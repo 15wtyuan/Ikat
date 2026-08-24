@@ -1114,6 +1114,9 @@ impl Stage {
         crate::list::collect_heights(scene);
         // 6. content_size 填充（solve 后 content_size/viewport/overlap）
         crate::scroll::refresh_content_sizes(scene);
+        // 6.5 Smooth ScrollToItem 锚重算：回填后的最新高度 + 新 overlap 定 tween 终点
+        //     （须在 refresh_content_sizes 后——clamp 用新 overlap）。
+        crate::list::recompute_smooth_scroll_targets(scene);
         // 7. compute_world_transforms（读 rematch 后 transform + scroll_pos → world）
         crate::scene::transform::compute_world_transforms(scene);
         // 8. 渲染（+ 合成 scrollbar）。传上帧 hash 基线，未变节点 change_level=Skip；

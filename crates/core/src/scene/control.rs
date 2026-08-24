@@ -1032,8 +1032,10 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
         // TabList: aria-selected 由 synth_aria_value 合成；panel 显隐据 selected_index
         // + 各 tab 的 RoleInfo.aria_controls（panel id 串）切换——本 arm 实现 panel display。
         // panel 跨树（非 tablist 子，靠 aria-controls + id 关联），区别于 Dropdown listbox
-        // （combobox 直接子）。复用 display:none 剪枝：激活 panel "display:block" 覆盖作者
-        // 可能的 display:none，非激活 "display:none" 强制隐藏。
+        // （combobox 直接子）。复用 display:none 剪枝：非激活 panel "display:none" 强制隐藏；
+        // 激活 panel unset inline display 回落作者 CSS——显隐所有权归控件，但激活态的
+        // 布局方式（flex/grid/…）归作者，core 不覆写（浏览器 tab 库同语义：JS 只管
+        // ''/none 切换，激活布局由作者样式表决定）。
         ControlState::TabList { selected_index } => {
             // 按 DOM 序遍历 role=tab 子节点（selected_index 是 tab 的序号）。clone children
             // 释放不可变借，供循环内 set_inline_override 取 &mut scene。
@@ -1055,12 +1057,13 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
                 let Some(panel) = scene.find_node_by_id_in_own_scope(tab, &panel_id_str) else {
                     continue; // panel id 解析不到（fence 期已校验 idref 存在，运行时动态缺则跳）
                 };
-                let decl = if i == selected_index {
-                    "display:block"
+                if i == selected_index {
+                    // 激活：清 inline display（此前帧写的 none），回落作者 CSS 的 display
+                    //（未声明则默认 block）。作者 flex/grid 布局不再被覆写。
+                    let _ = unset_inline_override(scene, panel, "display");
                 } else {
-                    "display:none"
-                };
-                let _ = set_inline_override(scene, panel, decl);
+                    let _ = set_inline_override(scene, panel, "display:none");
+                }
             }
         }
     }
@@ -2455,9 +2458,10 @@ mod tests {
     }
 
     // TabList 的 panel 跨树（非 tablist 子，靠 tab 的 aria-controls + panel 的 id 关联），
-    // 区别于 Dropdown 的 listbox（combobox 直接子）。selected_index=0 → 第 1 个 tab 的 panel
-    // display:block，其余 display:none。非激活 panel 即使作者设为可见也被强制 none（display:none
-    // 剪枝同 Dropdown listbox）。改 selected_index 再 sync → 反转。
+    // 区别于 Dropdown 的 listbox（combobox 直接子）。非激活 panel 强制 display:none（剪枝
+    // 同 Dropdown listbox）；激活 panel **不写 display**——清 inline bit 回落作者 CSS
+    //（作者 flex/grid 布局不被覆写；未声明则 base_style 默认）。改 selected_index 再
+    // sync → 反转。
 
     /// 建一个 role=tab 子节点（带 aria-controls 指向 panel id 串），挂到 parent（tablist）。
     /// 复刻 instantiate 从模板填 RoleTable 的路径（作者写 `<div role=tab aria-controls=pa>`）。
@@ -2486,8 +2490,8 @@ mod tests {
 
     #[test]
     fn tablist_panel_display_follows_selected_index() {
-        // selected_index=0 → pa 激活 display:block、pb 非激活 display:none。改 selected_index=1
-        // 再 sync → 反转。panel 跨树（非 tablist 子，靠 aria-controls + id 关联）。
+        // selected_index=0 → pa 激活（display 覆写权交还作者）、pb 非激活 display:none。
+        // 改 selected_index=1 再 sync → 反转。panel 跨树（非 tablist 子，靠 aria-controls + id 关联）。
         let mut scene = Scene::default();
         let tl = create_node_from_template(
             &mut scene,
@@ -2502,9 +2506,9 @@ mod tests {
 
         sync_control_visuals(&mut scene, tl, 0.0);
         assert_eq!(
-            scene.get(pa).unwrap().inline_override.taffy_style.display,
-            taffy::Display::Block,
-            "selected_index=0 → pa 激活 visible"
+            scene.get(pa).unwrap().inline_set.0 & crate::style::dynamic::INLINE_DISPLAY,
+            0,
+            "selected_index=0 → pa 激活：不覆写 display（bit 清，回落作者 CSS）"
         );
         assert_eq!(
             scene.get(pb).unwrap().inline_override.taffy_style.display,
@@ -2512,7 +2516,7 @@ mod tests {
             "selected_index=0 → pb 非激活 hidden"
         );
 
-        // 切到第 2 个 tab，再 sync：显隐反转。
+        // 切到第 2 个 tab，再 sync：显隐反转（pa 被 none 剪枝，pb 的覆写 bit 交还）。
         if let Some(ControlState::TabList { selected_index }) = scene.controls.get_mut(tl) {
             *selected_index = 1;
         }
@@ -2523,9 +2527,9 @@ mod tests {
             "selected_index=1 → pa 非激活 hidden"
         );
         assert_eq!(
-            scene.get(pb).unwrap().inline_override.taffy_style.display,
-            taffy::Display::Block,
-            "selected_index=1 → pb 激活 visible"
+            scene.get(pb).unwrap().inline_set.0 & crate::style::dynamic::INLINE_DISPLAY,
+            0,
+            "selected_index=1 → pb 激活：不覆写 display（bit 清，回落作者 CSS）"
         );
     }
 

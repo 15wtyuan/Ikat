@@ -168,23 +168,34 @@
     });
   }
 
-  function wireTabs() {
-    var tabs = document.querySelectorAll('[role="tab"]');
-    tabs.forEach(function (tab) {
-      tab.addEventListener('click', function () {
-        var list = tab.closest('[role="tablist"]');
-        if (!list) return;
-        list.querySelectorAll('[role="tab"]').forEach(function (t) {
-          t.setAttribute('aria-selected', 'false');
-        });
-        tab.setAttribute('aria-selected', 'true');
-        var target = tab.getAttribute('aria-controls');
+    function wireTabs() {
+      var tabs = document.querySelectorAll('[role="tab"]');
+      // 激活态应用（与 core sync_control_visuals 同语义）：目标 panel 清 inline display
+      // 回落作者 CSS（''——不写死 block，作者 flex/grid 布局不被覆写），其余 'none' 剪枝。
+      // 初始化 + click 共用：HTML 里非激活 panel 不写 style="display:none"（显隐所有权
+      // 归控件，首帧剪枝接管），浏览器侧由本初始化补齐首帧显隐。
+      function applyTabState(activeTab) {
+        var target = activeTab.getAttribute('aria-controls');
         document.querySelectorAll('[role="tabpanel"]').forEach(function (p) {
           p.style.display = (p.id === target) ? '' : 'none';
         });
+      }
+      tabs.forEach(function (tab) {
+        tab.addEventListener('click', function () {
+          var list = tab.closest('[role="tablist"]');
+          if (!list) return;
+          list.querySelectorAll('[role="tab"]').forEach(function (t) {
+            t.setAttribute('aria-selected', 'false');
+          });
+          tab.setAttribute('aria-selected', 'true');
+          applyTabState(tab);
+        });
       });
-    });
-  }
+      // 初始化：按 aria-selected=true 的首个 tab 设一遍 panel 显隐（无则第一个 tab）。
+      var initial = document.querySelector('[role="tab"][aria-selected="true"]')
+        || document.querySelector('[role="tab"]');
+      if (initial) applyTabState(initial);
+    }
 
   function wireDialogs() {
     document.querySelectorAll('[data-open-dialog]').forEach(function (btn) {

@@ -144,6 +144,19 @@ fn hit_subtree(scene: &Scene, id: NodeId, point: (f32, f32)) -> Option<NodeId> {
         }
     }
     if node.interaction.touchable && lx >= 0.0 && lx <= lr.w && ly >= 0.0 && ly <= lr.h {
+        // rich-text-block：命中容器后细化到 inline 流的 source 节点（span / TextNode /
+        // Image）——事件归属契约（公共树保留 span，订阅 span 的 click 命中 span 本身，
+        // 非容器）。坐标同空间（box 判定的 (0,0,w,h) 系；hit_test_rich 自扣
+        // border/padding）。source 不可触摸 / 未细化中（无 text_layout，首帧）→ 回落
+        // 容器（HTML 语义：纯文本段的点击目标也是宿主元素）。
+        if node.rich_text_block {
+            if let Some(src) = crate::text::hit_test::hit_test_rich(scene, id, (lx, ly)) {
+                let src_touchable = scene.get(src).is_some_and(|sn| sn.interaction.touchable);
+                if src_touchable {
+                    return Some(src);
+                }
+            }
+        }
         return Some(id);
     }
     None
@@ -157,6 +170,123 @@ mod tests {
     use crate::style::resolved::LocalTransform;
     use crate::transform;
     use crate::transform::Affine2Ext;
+
+    /// #44：rich-text-block 容器命中细化到 run.source（span 事件归属契约：
+    /// 公共树保留 span，订阅 span 的 click 命中 span 本身，非容器）。
+    /// 命中 span 区域 → span；text_layouts 缺席（首帧）→ 回落容器。
+    #[test]
+    fn hit_test_resolves_rich_block_to_span_source() {
+        use crate::layout::solve;
+        use crate::style::resolved::ResolvedStyle;
+        use crate::text::layout::FontTable;
+        use std::collections::HashMap;
+
+        let font_path = format!(
+            "{}/tests/fixtures/DejaVuSans.ttf",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let Ok(bytes) = std::fs::read(&font_path) else {
+            return; // 字体 fixture 缺席的环境跳过（同 text/hit_test.rs 口径）
+        };
+        let mut ft = FontTable::new();
+        ft.register("default", bytes, true).unwrap();
+
+        let mut root_s = ResolvedStyle::default();
+        root_s.taffy_style.size.width = taffy::style::Dimension::length(200.0);
+        let mut div_s = ResolvedStyle::default();
+        div_s.taffy_style.size.width = taffy::style::Dimension::length(100.0);
+        div_s.font_size = 16.0;
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                root_s,
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                div_s,
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(1),
+                NodeKind::TextNode,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                Some("text ".into()),
+                None,
+            ),
+            (
+                Some(1),
+                NodeKind::TextElement,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(3),
+                NodeKind::TextNode,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                Some("x".into()),
+                None,
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        let div = scene.get(scene.roots[0]).unwrap().children[0];
+        let span = scene.get(div).unwrap().children[1];
+        scene.get_mut(div).unwrap().rich_text_block = true;
+        solve(&mut scene, &ft, (200.0, 1000.0), &HashMap::new());
+        compute_world_transforms(&mut scene);
+
+        // span run 区域中心 → 命中 span（细化生效）。
+        let span_center = {
+            let layout = scene.text_layouts[div.index()]
+                .as_ref()
+                .expect("solve 填 text_layouts");
+            let r = layout.run_rects.iter().find(|r| r.source == span).unwrap();
+            (r.x + r.w / 2.0, r.y + r.h / 2.0)
+        };
+        assert_eq!(
+            hit_test(&scene, span_center),
+            Some(span),
+            "span 区域命中细化到 span source"
+        );
+
+        // text_layouts 缺席（首帧 lazy 前）→ 细化不中，回落容器。
+        scene.text_layouts[div.index()] = None;
+        assert_eq!(
+            hit_test(&scene, span_center),
+            Some(div),
+            "无 layout 时回落容器（HTML 语义：文本段的点击目标是宿主元素）"
+        );
+    }
 
     /// 构造两兄弟子节点的 scene：root + child_a + child_b，都 100x100，
     /// child_a 在 (0,0)，child_b 在 (50,50)（与 a 重叠右下角）。

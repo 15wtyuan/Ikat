@@ -468,15 +468,11 @@ pub fn drain_now(stage: &mut crate::stage::Stage, ul: NodeId) {
 /// behavior：0=Instant（直接 snap+clamp），1=Smooth（走 ScrollPane 自维护的 cubic-out
 /// tween，TweenProp 无 Scroll 变体——滚动容器物理独立于 GTween）。
 ///
-/// 目标偏移 = `heights.sum(0..index)`（未测项用 estimate；下帧 collect_heights 回填后
-/// anchoring 会修正偏差）。`set_pos` 按 overlap clamp——虚拟列表 content_size 由 driver 注入。
-///
-/// TODO(Smooth recompute)：上面算出的 target 是一次性的——基于当前 heights 快照。
-/// Instant 路径（behavior==0）同帧 drain_now → 下帧 anchoring 即修正，故正确。
-/// 但 Smooth 路径把 target 喂给 ScrollPane 的 tween 后就不再重算：变高列表滚动过程中
-/// 新可见项陆续测量、overlap 增长，tween 目标却停留在初始 overlap 边界，远距离 Smooth
-/// 滚动会停在偏差位置。要求 tween 期间按回填高度重算 target，当前未实现
-/// （测试仅覆盖 Instant 路径）。
+/// 目标偏移 = `heights.sum(0..index)`（未测项用 estimate）。Instant 路径同帧 drain_now
+/// → 下帧 anchoring 即修正估计偏差。Smooth 路径的目标不是一次性的：tween 期间新可见
+/// item 陆续测量、overlap 增长，一次性目标会停在过期边界——故设 `smooth_scroll_to`
+/// 锚，每帧 tick 在 collect_heights 回填后由 [`recompute_smooth_scroll_targets`]
+/// 按最新 heights 重算 tween 终点（用户滚轮/拖拽等接管清锚，见 scroll.rs）。
 pub fn scroll_to_item(
     stage: &mut crate::stage::Stage,
     ul: NodeId,
@@ -512,10 +508,46 @@ pub fn scroll_to_item(
         if let Some(st) = scene.scroll.get_mut(pane) {
             let x = st.scroll_pos.0;
             st.set_pos((x, target), behavior == 1);
+            if behavior == 1 {
+                st.smooth_scroll_to = Some((ul, index));
+            }
         }
     }
     drain_now(stage, ul);
     Ok(())
+}
+
+/// Smooth ScrollToItem 的每帧目标重算（tick 在 collect_heights 回填 + refresh_content_sizes
+/// 之后调）：对每个持锚 pane，按最新 `heights.sum(0..index)` 重算 y 轴 tween 终点——
+/// 变高列表滚动中 overlap 增长，一次性目标会停在过期边界（错位）。
+///
+/// 只对 `tweening[1] == 1`（程序滚动 tween 仍在推进）生效；tween 已结束/被接管
+/// （滚轮/拖拽/物理已各自清锚，此处兜底）→ 清锚。change 更新后 advance 的
+/// `start + change * cubic_out(t/dur)` 自动向新终点收敛。
+pub fn recompute_smooth_scroll_targets(scene: &mut Scene) {
+    let anchored: Vec<(NodeId, NodeId, usize)> = scene
+        .scroll
+        .0
+        .iter()
+        .filter_map(|(&pane, st)| st.smooth_scroll_to.map(|(ul, idx)| (pane, ul, idx)))
+        .collect();
+    for (pane, ul, index) in anchored {
+        // 回填后按最新高度重算目标（lists 槽消失 → 清锚防悬空 NodeId 残留）。
+        let Some(target) = scene.lists.get(ul).map(|ls| ls.heights.sum(0..index)) else {
+            if let Some(st) = scene.scroll.get_mut(pane) {
+                st.smooth_scroll_to = None;
+            }
+            continue;
+        };
+        if let Some(st) = scene.scroll.get_mut(pane) {
+            if st.tweening[1] != 1 {
+                st.smooth_scroll_to = None; // tween 已完成/被接管（清锚兜底）
+                continue;
+            }
+            let t = target.clamp(0.0, st.overlap.1);
+            st.tween_change.1 = t - st.tween_start.1;
+        }
+    }
 }
 
 /// 插入通知（NotifyInserted）：在 `at` 处插入 `count` 项。heights.known 插入
@@ -2329,6 +2361,66 @@ mod tests {
         // scroll_pos.y 落到 item 50 的累积偏移 = 50*20 = 1000。
         let scroll_y = scene.scroll.get(pane).unwrap().scroll_pos.1;
         approx_eq(scroll_y, 1000.0);
+    }
+
+    /// #43：Smooth tween 期间高度回填（estimate → 实测更大）→ 锚按最新 heights 重算
+    /// tween 终点；advance 推到底落在修正后的偏移，不停在过期边界。滚轮接管清锚。
+    #[test]
+    fn scroll_to_item_smooth_recomputes_target_on_height_backfill() {
+        let (mut s, ul, _li, pane) = stage_with_pane_ul_li();
+        crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+        crate::list::set_item_count(&mut s, ul, 100);
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..100 {
+                ls.heights.set(i, 20.0);
+            }
+            let st = scene.scroll.ensure(pane);
+            st.viewport_size = (1000.0, 100.0);
+            st.content_size = (1000.0, 4000.0);
+            st.overlap = (0.0, 3900.0);
+            st.scroll_pos = (0.0, 0.0);
+        }
+        // Smooth：目标 = 50*20 = 1000（estimate 快照），锚已设、tweening[1]=1。
+        crate::list::scroll_to_item(&mut s, ul, 50, 1).unwrap();
+        {
+            let st = s.scene.as_ref().unwrap().scroll.get(pane).unwrap();
+            assert_eq!(st.tweening[1], 1, "Smooth 启 tween");
+            assert_eq!(st.smooth_scroll_to, Some((ul, 50)), "锚记录 (ul, index)");
+        }
+        // 模拟滚动中回填：前 60 项实测 30px → sum(0..50) = 1500（目标偏移变了）。
+        {
+            let scene = s.scene.as_mut().unwrap();
+            let ls = scene.lists.get_mut(ul).unwrap();
+            for i in 0..60 {
+                ls.heights.set(i, 30.0);
+            }
+        }
+        // tick 同款重算（collect_heights 后语义）→ tween 终点更新为 1500。
+        crate::list::recompute_smooth_scroll_targets(s.scene.as_mut().unwrap());
+        {
+            let st = s.scene.as_ref().unwrap().scroll.get(pane).unwrap();
+            approx_eq(st.tween_start.1 + st.tween_change.1, 1500.0);
+        }
+        // advance 推到底（dt > duration）→ 落在修正后偏移；tween 完成清锚。
+        let st = s.scene.as_mut().unwrap().scroll.get_mut(pane).unwrap();
+        st.advance(1.0);
+        let st = s.scene.as_ref().unwrap().scroll.get(pane).unwrap();
+        approx_eq(st.scroll_pos.1, 1500.0);
+        assert_eq!(st.tweening[1], 0, "tween 完成");
+        assert_eq!(st.smooth_scroll_to, None, "完成清锚");
+
+        // 再次 Smooth 后滚轮接管 → 锚作废（重算不复活 tween 终点）。
+        crate::list::scroll_to_item(&mut s, ul, 10, 1).unwrap();
+        {
+            let st = s.scene.as_mut().unwrap().scroll.get_mut(pane).unwrap();
+            st.apply_wheel((0.0, -3.0));
+            assert_eq!(st.smooth_scroll_to, None, "滚轮接管清锚");
+        }
+        crate::list::recompute_smooth_scroll_targets(s.scene.as_mut().unwrap());
+        let st = s.scene.as_ref().unwrap().scroll.get(pane).unwrap();
+        assert_eq!(st.smooth_scroll_to, None, "重算不复活已清锚");
     }
 
     /// 越界 index → Err（FFI 转 -1 → C# 抛 UIContractException）。

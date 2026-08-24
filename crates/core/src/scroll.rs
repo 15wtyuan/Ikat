@@ -90,6 +90,12 @@ pub struct ScrollPaneState {
     /// driver 注入 content_size 标记。true 时 refresh_content_sizes 跳过
     /// （不覆盖子节点 AABB）。set_content_size 置 true；clear_content_size_override 置 false。
     pub content_size_overridden: bool,
+    /// Smooth `ScrollToItem` 的 tween 锚：(ListView NodeId, 目标 item index)。
+    /// tween 期间虚拟列表新进可见区的 item 陆续测量、overlap 增长——一次性目标会
+    /// 停在过期边界。持有锚的 pane 每帧（collect_heights 回填后）按最新 heights 重算
+    /// tween 终点。任何非程序滚动接管（滚轮/拖拽/松手物理/snap/公共 set_scroll_pos）
+    /// 清锚。仅 y 轴（ScrollToItem 只滚 y）。
+    pub smooth_scroll_to: Option<(NodeId, usize)>,
 }
 
 /// 每节点滚动状态表（`HashMap<NodeId, ScrollPaneState>`）。仅滚动容器 ensure 后有值。
@@ -179,6 +185,7 @@ impl ScrollPaneState {
             }
         }
         self.tweening = [0, 0]; // 拖拽中无 tween
+        self.smooth_scroll_to = None; // 用户接管滚动 → Smooth ScrollToItem 锚作废
     }
 
     /// Up 后松手物理（启 tween→tweening=2，否则 0）。is_touch 选阈值。
@@ -198,6 +205,7 @@ impl ScrollPaneState {
             INERTIA_THRESH_PC
         };
         self.tweening = [0, 0];
+        self.smooth_scroll_to = None; // 松手物理接管 → 程序滚动锚作废
         for ax in 0..2u8 {
             let v = if ax == 0 {
                 self.velocity.0
@@ -404,6 +412,7 @@ impl ScrollPaneState {
             self.scroll_pos.0 = self.scroll_pos.0.clamp(0.0, self.overlap.0);
             self.scroll_pos.1 = self.scroll_pos.1.clamp(0.0, self.overlap.1);
             self.tweening = [0, 0];
+            self.smooth_scroll_to = None; // tween 全部完成 → 锚使命结束
         }
     }
 
@@ -411,6 +420,7 @@ impl ScrollPaneState {
     /// delta.y > 0 = 上滚（看上方）→ scroll_pos.y 减少。
     /// 仅对 delta≠0 的轴设 tweening[ax]=1。
     pub fn apply_wheel(&mut self, delta: (f32, f32)) {
+        self.smooth_scroll_to = None; // 用户滚轮接管 → 程序滚动锚作废
         for ax in 0..2u8 {
             let d = if ax == 0 { delta.0 } else { delta.1 };
             if d == 0.0 {
@@ -444,7 +454,10 @@ impl ScrollPaneState {
     }
 
     /// 编程滚动。animated=false 直接 snap+clamp+tweening=0；true 启 tweening=1。
+    /// 两者都清 Smooth ScrollToItem 锚——本调用即接管滚动目标；scroll_to_item 在
+    /// 调本函数**之后**按需重设锚。
     pub fn set_pos(&mut self, target: (f32, f32), animated: bool) {
+        self.smooth_scroll_to = None;
         if !animated {
             self.scroll_pos = (
                 target.0.clamp(0.0, self.overlap.0),
