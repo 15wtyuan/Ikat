@@ -7,14 +7,14 @@
 | 目录 | 内容 | 何时读 |
 |---|---|---|
 | [`design/`](design/) | [主设计](design/main-design.md)（项目设计真相源）+ [围栏权威](design/fence.md) | 理解"设计成什么样、怎么实现" |
-| [`roadmap/`](roadmap/) | [路线图](roadmap/roadmap.md)——路线 + 机制草稿 | 理解"做了什么、接下来做什么、defer 了什么" |
+| [`roadmap/`](roadmap/) | 北极星判据 + 归档历史（活工作项在 GitHub issues） | 追溯路线决策史 |
 | [`pitfalls.md`](pitfalls.md) | 踩坑全库 + 依赖 API 适配 | 开工前查"具体怎么干 + 坑在哪" |
 
 ## 入口
 
 - **开发依据**：[`design/main-design.md`](design/main-design.md) —— 项目设计真相源
 - **围栏属性**：[`design/fence.md`](design/fence.md) —— 权威清单（真相源 `crates/fence/src/schema/`）
-- **路线/范围/机制草稿**：[`roadmap/roadmap.md`](roadmap/roadmap.md)
+- **工作项/路线**：GitHub issues（milestone 门控 M2 → M3 → v1.0；label 按 track）；北极星判据见 [`roadmap/roadmap.md`](roadmap/roadmap.md)
 - **踩坑/API 适配**：[`pitfalls.md`](pitfalls.md)
 - **AI 工作约束**：根 [`CLAUDE.md`](../CLAUDE.md)
 
@@ -25,4 +25,4 @@
 - **围栏属性权威 = `fence.md`**（真相源 `crates/fence/src/schema/`）；主设计 §3 只写哲学/原则，不重复属性表。
 - **踩坑 + 依赖 API 适配**进 `pitfalls.md`（编号递增，写法：症状/根因/解决/教训）。
 - **AI 工作约束 + 高价值可复用经验**进根 `CLAUDE.md`（踩坑不进 CLAUDE.md，进 pitfalls.md）。
-- **机制草稿**进 `roadmap/roadmap.md` §7（等实现验证后"毕业"回主文档）。
+- **工作项**进 GitHub issues（2026-08-24 起；`roadmap/` 目录只留北极星判据 stub + 归档历史）。

@@ -272,6 +272,7 @@ v2→v3 加 tex_id 列，某 C# builder 只升 header（14 列）没补 data 列
 **症状**：`span{pointer-events:none}` 写进 CSS，但 `<div>文字</div>` 自动建的 Text 子 `touchable` 仍 true（CSS 没匹配到它）。
 **根因**：`build_scene` 给 Container 裸文本自动建的 Text 子**不是 DOM 元素**——`resolve_styles` 跑在 build_scene 前只算 DOM 元素，自动 Text 子拿不到任何 CSS 规则。只有显式 `<span>` 走 DOM resolve 才吃到 CSS。
 **解决**（defer v1c.x）：修坑 29（hover 祖先链）后影响降级——文字挡命中但父也 hover，故不需 pointer-events 穿透。根治须 build_scene 后给自动 Text 子补 resolve（架构改），或框架默认 Text `touchable=false`。v1c.1 sample 用显式 `<span>` 绕（修坑 29 后已回归裸文本）。
+**2026-08-24 核销**：文本模型重构（2026-08-12，rich-text-block）后裸文本不再作为绕过 cascade 的独立自动子节点——折进父块内部 runs，命中由 `hit_test_rich` 按父块语义接管；显式 `<span>` 照常吃 CSS。defer 项不再需要。
 **教训**：自动建的节点（非 DOM 元素）不消费 StyleSheet——CSS 规则只作用于 parse 期 DOM 元素；给自动子样式化须显式标签或框架默认。
 
 ### 坑 31：brief 测断言过强——`hover_chain_idempotent` assert `out.is_empty()` 但 Move 每次 emit（v1c.2）
@@ -693,6 +694,7 @@ bug1 小拖松手回原位；bug2 快速拖到顶/底"先露空白再突然回�
 **症状**：图片白块。诊断主因是 atlas 空包（folder packable + m_PackedSprites 全空，Unity 6 folder packable 失效），但即使 pack 好，运行时可能仍白。
 **根因**：`SpriteResolver.GetSprite` 缓存 miss（`_cache[path] = found ?? _missingSprite`，line 92-93）——首次查 miss（atlas 未 pack/时机晚）→ null 被永久缓存 → 后续即使 atlas pack 好也不重查（除非 ClearCache）。与 atlas 空包正交，诊断没提。
 **解决**（待定）：miss 不缓存，或 atlas pack/注册变化时 ClearCache。atlas 空包本身是 Unity asset 设置问题（packables 改逐 Sprite + Pack Preview + Include in Build），家里机改 asset 可验主因。
+**2026-08-24 核销**：自绘图集架构（v1.8+）下本坑场景不复存在——`SpriteResolver` 改为 atlas manifest 一次性填充的 UV 直查（manifest 是构建期静态产物），`GetSprite` miss 不写缓存（仅 warn-once 去重），「atlas 后来 pack 好」的时机问题已无。教训保留。
 **教训**：查询缓存别缓存 miss（除非确定源不变）——运行时资源（atlas pack 时机、异步加载）可能后到，缓存 miss 会永久遮蔽。B2 双因：atlas 空包（即时病因，asset 设置）+ 缓存 miss 永久化（潜伏，代码）。
 
 ### v1.4-a 验收诊断方法论（外部 AI 诊断的 3 处误判，本会话 git 历史核实纠正）

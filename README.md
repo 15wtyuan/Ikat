@@ -14,13 +14,7 @@
 - **Rust 跨引擎共享**：一份核心，多引擎后端（Unity 首发，Godot 等后续）。
 - **围栏验证器**：打包期挡违规语法，设计期即时反馈。
 
-## 当前状态
-
-摸黑阶段结束——骨架链（div + 文字 + 图 + flex + cascade）从 HTML 一路通到 Unity 真机渲染。进入三束加宽：控件、复合能力、视觉特效。
-
-详见 [路线图](docs/roadmap/roadmap.md)。
-
-## 快速开始
+## 快速开始 （todo，已过时，需要修正下）
 
 ```bash
 # 核心库
@@ -35,19 +29,17 @@ cargo run   -p loomgui_pkg -- build <workspace-dir>
 cargo build -p loomgui_ffi_c
 ```
 
-Unity 后端：最低支持 Unity 2021.3 LTS（URP 12.1+）。用 Unity 2021.3 ~ Unity 6 打开 `unity/showcase-unity/`（showcase 工程本身锁定 Unity 6.5），PlayMode 加载 `.pkg.bin`。输入系统三种 Active Input Handling 配置（Input Manager / Input System / Both）全支持——键盘、文本、IME（中文输入法组字）双路径采集，开箱即用无需改 Player Settings。
-
-## 在其他 Unity 项目中使用
+## 在 Unity 项目中使用
 
 LoomGUI 以 UPM 包发布，通过 git URL 安装。在目标工程的 `Packages/manifest.json` 加一行：
 
 ```json
-"com.loomgui.unity": "https://github.com/15wtyuan/LoomGUI.git?path=/unity/package#v0.0.1"
+"com.loomgui.unity": "https://github.com/15wtyuan/LoomGUI.git?path=/unity/package#v0.0.10"
 ```
 
-升级：把 `#v0.0.1` 改成目标 tag，或在 Unity 的 Package Manager 窗口选新版本。
+升级：把 `#v0.0.10` 改成目标 tag，或在 Unity 的 Package Manager 窗口选新版本。
 
-> 当前仅 Windows（native dll 仅含 Windows）。发版流程与多平台计划见 [发布设计](docs/superpowers/specs/2026-08-09-loomgui-release-design.md)。
+版本要求：最低支持 Unity 2021.3 LTS（URP 12.1+）。
 
 ## 文档
 

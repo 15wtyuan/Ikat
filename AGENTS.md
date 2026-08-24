@@ -83,8 +83,6 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 ## 架构（大局——权威契约读 `docs/design/main-design.md`）
 
-> **当前状态**：摸黑结束（Spec-4b DONE），进入三束加宽阶段。下方同时列出**新范式（目标）**和**旧范式（v1 残留）**的架构不变量。以新范式为准；触碰尚未重构的旧代码时以旧范式为准。
-
 ### 范式（目标——权威读 main-design.md）
 
 **分层、单向数据流、引擎对象不进核心：**
@@ -120,7 +118,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 ## 在本仓库怎么干活
 
-- **设计文档 vs 踩坑**：`docs/design/main-design.md`（总体架构与渲染管线）、`docs/design/fence.md`（围栏）、`docs/design/public-api.md`（公共 API 终态契约）、`docs/roadmap/roadmap.md`（路线图）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配）。
+- **设计文档 vs 踩坑 vs 工作项**：`docs/design/main-design.md`（总体架构与渲染管线）、`docs/design/fence.md`（围栏）、`docs/design/public-api.md`（公共 API 终态契约）、`docs/pitfalls.md`（踩坑全库 + 依赖 API 适配）。**活工作项 = GitHub issues**——milestone `M2 · Dogfood` / `M3 · 跨引擎与契约消化` / `v1.0 · 发版`（门控序列），label `t1-capability` / `t2-release` / `t3-expand` / `tx-debt`，非契约项带 `deferred`（触发判据在 issue 正文）；排活/查进度用 `gh issue list`，不开新文档清单。`docs/roadmap/` 是归档只读历史（stub 留北极星判据），别拿它干活。
 - **Rust edition 2021**，依赖钉版本：`taffy 0.12`、`ttf-parser 0.20`、`slotmap 1.1`、`csbindgen 1`。CSS 选择器解析器手搓（零新依赖，spike 阶段推翻了"接 cssparser"前提）。
 - `Cargo.lock` 入库（根级，尽管 `.gitignore` 有通用 `Cargo.lock` 行——它是被追踪的）。
 - 设计师工作区是独立磁盘目录（含 `loom.workspace.json`、HTML/CSS 源文件、res 资源、design-systems 组件库）。打包用独立打包器 GUI（Tauri `loomgui_gui`）或 CLI `loom build <workspace>`。运行时引导由 `loom.runtime.json` 统管。
@@ -154,7 +152,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 **测浏览器 background-size/contain/cover 等“布局/背景”渲染用 playwright（headless --screenshot 不可靠）**：`chrome --headless=new --screenshot` 对 background-image 布局/平铺测量不可靠（抢截、忽略 background-size 假象）。用 `playwright` + `channel="chrome"`（真 Chrome）`page.goto(file://HTML)` + `wait_for_load_state("networkidle")` + 整页或 element 截图，再 PowerShell 扫非背景色像素 bbox。**务必加 `background-repeat:no-repeat`**——CSS 默认 repeat 会把 contain 缩后的图平铺填满盒，测量出“填满”假象（本 session 误判「Chrome 忽略 background-size」很久，实则 repeat 平铺，坑 80）。
 
-**围栏真相源 = `crates/fence/src/schema/` Rust const 表，`docs/design/fence.md` 是人类可读权威副本**：围栏最终形态 = schema 注册表（14 标签 = 8 shell + 6 runtime + role 驱动控件 + CSS 子集 + `@keyframes`/`animation` 终态），fence.md 是它的可读镜像（改 schema 必同步 fence.md，防漂移门 `cargo test -p loomgui_fence` 含「文档↔schema 交叉校验」测试 `doc_schema_sync.rs`）。roadmap 决策「终点线2 scope 用哪些」（`:nth-child` / 多 selector / @keyframes runtime 已交付；剩余视觉缺口见 `docs/roadmap/roadmap.md` T1）。代码往围栏最终形态靠，围栏外的 showcase bug 跟围栏最终形态（showcase 整体打包挂留专门 task）。
+**围栏真相源 = `crates/fence/src/schema/` Rust const 表，`docs/design/fence.md` 是人类可读权威副本**：围栏最终形态 = schema 注册表（14 标签 = 8 shell + 6 runtime + role 驱动控件 + CSS 子集 + `@keyframes`/`animation` 终态），fence.md 是它的可读镜像（改 schema 必同步 fence.md，防漂移门 `cargo test -p loomgui_fence` 含「文档↔schema 交叉校验」测试 `doc_schema_sync.rs`）。旧 roadmap 纪元的「终点线2 scope」已全部交付（`:nth-child` / 多 selector / @keyframes runtime）；剩余视觉缺口在 GitHub issues 的 deferred 视觉合集。代码往围栏最终形态靠，围栏外的 showcase bug 跟围栏最终形态。
 
 **loom.exe 与 GUI exe 的重出条件（已收窄）**：fence/pkg 的 build 语义、scaffold 模板变动走 loom.exe（GUI spawn 子进程，不嵌 GUI 字节）；`Workspace` struct 或 GUI 自身代码变动才要求重出 GUI exe。双 exe 闭环见上方「GUI 打包器 + loom CLI 双 exe 闭环」段。
 
