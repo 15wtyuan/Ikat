@@ -140,7 +140,7 @@ pub fn solve(
         tree: &mut TaffyTree<MeasureContext>,
         taffy_ids: &mut Vec<Option<taffy::NodeId>>,
         id: NodeId,
-        parent_overflow: bool,
+        parent_scroll: bool,
         image_sizes: &ImageSizeTable,
         root_size: (f32, f32),
     ) -> (taffy::NodeId, Vec<taffy::NodeId>) {
@@ -158,13 +158,33 @@ pub fn solve(
             x: map_overflow(node.style.overflow_x),
             y: map_overflow(node.style.overflow_y),
         };
-        // overflow 容器的直接子 flex-shrink=0：保持显式尺寸/min-content 溢出（scroll 有效）。
-        // 否则空内容子（如 .filler{height:300} min-content=0）被 shrink 到 viewport → overlap=0 → 不能滚。
-        if parent_overflow {
+        // 滚动容器（Auto/Scroll）的直接子 flex-shrink=0：保持显式尺寸/min-content 溢出
+        // （scroll 有效）。否则空内容子（如 .filler{height:300} min-content=0）被 shrink 到
+        // viewport → overlap=0 → 不能滚。**只限滚动容器**——#64：overflow:hidden 是装饰性
+        // 裁剪不是滚动语义，此前 hidden 也触发本规则 → .screen{hidden} 的弹性子
+        // （min-height:0 链路）被锁死 shrink，viewport 被内容撑爆（浏览器预览却正常）。
+        if parent_scroll {
             style.flex_shrink = 0.0;
         }
-        let self_overflow = node.style.overflow_x != OverflowMode::Visible
-            || node.style.overflow_y != OverflowMode::Visible;
+        let self_scroll = node.style.overflow_x == OverflowMode::Auto
+            || node.style.overflow_x == OverflowMode::Scroll
+            || node.style.overflow_y == OverflowMode::Auto
+            || node.style.overflow_y == OverflowMode::Scroll;
+        // CSS flex §4.5 automatic minimum size 的 specified-size suggestion 近似：
+        // 显式 Length 尺寸的子项，浏览器以声明尺寸为 shrink 地板（76px 顶栏不会被
+        // 溢出行按比例挤扁）；taffy 的 auto-min 走裸 min-content（空容器=0）→ 固定
+        // 尺寸兄弟被挤扁、预览（真浏览器）不缩——#64 弹性视口修开后必现的连带偏差。
+        // 只对 min 仍为 Auto 的通道生效（作者显式 min 声明永远赢）；percent/viewport
+        // 形不碰（viewport 占位 Length(0) 地板=0 无害）。
+        let len_tag = taffy::style::CompactLength::LENGTH_TAG;
+        for (size_slot, min_slot) in [
+            (&style.size.width, &mut style.min_size.width),
+            (&style.size.height, &mut style.min_size.height),
+        ] {
+            if size_slot.tag() == len_tag && min_slot.is_auto() {
+                *min_slot = *size_slot;
+            }
+        }
         // 叶子：Text/Image/文本控件装 MeasureContext。
         // TextField/TextArea/NumberField 是控件叶子（value/placeholder 存 ControlState，
         // 非 text_contents），须装 Text measure——否则 taffy content=0、高度只剩 padding，
@@ -319,7 +339,7 @@ pub fn solve(
                     tree,
                     taffy_ids,
                     *c,
-                    self_overflow,
+                    self_scroll,
                     image_sizes,
                     root_size,
                 );
@@ -1592,6 +1612,125 @@ mod tests {
         let r = &scene.get(id).unwrap().layout_rect;
         assert!((r.w - 500.0).abs() < 0.1, "50vw @1000 -> 500, got {}", r.w);
         assert!((r.h - 50.0).abs() < 0.1, "10vh @500 -> 50, got {}", r.h);
+    }
+
+    /// #64 取证：Tripawd 地图链 .screen{overflow:hidden, flex column} >
+    /// .map-area{flex-grow:1, min-height:0} > .map-scroll{flex-grow:1, min-height:0,
+    /// overflow:auto} > .map-layer{显式 1572px}。期望 map-area/map-scroll 钳在 flex
+    /// 份额（1004），layer 溢出可滚；修前被内容撑到 1572 → viewport==content → 不能滚。
+    #[test]
+    fn flex_min_height_zero_scroll_viewport_64_repro() {
+        let mut screen = ResolvedStyle::default(); // .screen：flex column + overflow:hidden
+        screen.taffy_style.flex_direction = taffy::style::FlexDirection::Column;
+        screen.taffy_style.size.width = Dimension::length(1920.0);
+        screen.taffy_style.size.height = Dimension::length(1080.0);
+        screen.overflow_y = crate::style::resolved::OverflowMode::Hidden;
+
+        let mut topbar = ResolvedStyle::default(); // 76px 顶栏（占位）
+        topbar.taffy_style.size.width = Dimension::length(1920.0);
+        topbar.taffy_style.size.height = Dimension::length(76.0);
+
+        let mut area = ResolvedStyle::default(); // .map-area：grow + min-height:0
+        area.taffy_style.flex_grow = 1.0;
+        area.taffy_style.min_size.height = Dimension::length(0.0);
+
+        let mut scroll = ResolvedStyle::default(); // .map-scroll：grow + min-height:0 + auto
+        scroll.taffy_style.flex_grow = 1.0;
+        scroll.taffy_style.min_size.height = Dimension::length(0.0);
+        scroll.overflow_y = crate::style::resolved::OverflowMode::Auto;
+
+        let mut layer = ResolvedStyle::default(); // .map-layer：显式内容尺寸
+        layer.taffy_style.size.width = Dimension::length(4000.0);
+        layer.taffy_style.size.height = Dimension::length(1572.0);
+
+        let entries = [
+            (None, NodeKind::Container, screen, Vec::new(), None),
+            (Some(0), NodeKind::Container, topbar, Vec::new(), None),
+            (Some(0), NodeKind::Container, area, Vec::new(), None),
+            (Some(2), NodeKind::Container, scroll, Vec::new(), None),
+            (Some(3), NodeKind::Container, layer, Vec::new(), None),
+        ]
+        .map(|(p, k, s, c, i)| (p, k, s, c, i, false, None, None, None, None));
+        let mut scene = Scene::build(&entries);
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+
+        let area_id = scene.get(scene.roots[0]).unwrap().children[1];
+        let scroll_id = scene.get(area_id).unwrap().children[0];
+        let layer_id = scene.get(scroll_id).unwrap().children[0];
+        let ar = scene.get(area_id).unwrap().layout_rect;
+        let sr = scene.get(scroll_id).unwrap().layout_rect;
+        let lr = scene.get(layer_id).unwrap().layout_rect;
+        // 浏览器同构断言（Tripawd issue #64 实测预览值）：
+        // - 顶栏保 76（specified-size 地板），area/scroll 钳在 flex 份额 1004；
+        // - layer 保 1572 溢出（overlap=568 可滚）。修前：area/scroll 被撑到 1572
+        //   （hidden 祖先触发全局 shrink=0）→ viewport==content → 不能滚。
+        assert!(
+            (ar.y - 76.0).abs() < 0.1,
+            "顶栏保 76：area.y=76，got {}",
+            ar.y
+        );
+        assert!(
+            (ar.h - 1004.0).abs() < 0.1,
+            "min-height:0 弹性份额 1004（1080-76），got {}",
+            ar.h
+        );
+        assert!(
+            (sr.h - 1004.0).abs() < 0.1,
+            "滚动视口钳在 1004，got {}",
+            sr.h
+        );
+        assert!(
+            (lr.h - 1572.0).abs() < 0.1,
+            "内容层保显式 1572（shrink=0 于滚动容器），got {}",
+            lr.h
+        );
+        assert!(lr.h > sr.h, "overlap>0 才能滚");
+    }
+
+    /// #64 配套：滚动容器内容地板——显式尺寸子在滚动容器里不被 shrink 压扁
+    /// （原规则的存在理由，收窄到 Auto/Scroll 后仍须成立）。
+    #[test]
+    fn scroll_container_children_keep_explicit_size() {
+        let mut scroll = ResolvedStyle::default(); // 300px 视口 + overflow:auto
+        scroll.taffy_style.flex_direction = taffy::style::FlexDirection::Column;
+        scroll.taffy_style.size.width = Dimension::length(200.0);
+        scroll.taffy_style.size.height = Dimension::length(300.0);
+        scroll.overflow_y = OverflowMode::Auto;
+
+        let mut filler = ResolvedStyle::default(); // .filler{height:300}
+        filler.taffy_style.size.width = Dimension::length(200.0);
+        filler.taffy_style.size.height = Dimension::length(300.0);
+
+        let mut tail = ResolvedStyle::default(); // 再来 200px → 总 500 > 300
+        tail.taffy_style.size.width = Dimension::length(200.0);
+        tail.taffy_style.size.height = Dimension::length(200.0);
+
+        let entries = [
+            (None, NodeKind::Container, scroll, Vec::new(), None),
+            (Some(0), NodeKind::Container, filler, Vec::new(), None),
+            (Some(0), NodeKind::Container, tail, Vec::new(), None),
+        ]
+        .map(|(p, k, s, c, i)| (p, k, s, c, i, false, None, None, None, None));
+        let mut scene = Scene::build(&entries);
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+
+        let fr = scene.get(scene.roots[0]).unwrap().children[0];
+        let fr = scene.get(fr).unwrap().layout_rect;
+        let tr_id = scene.get(scene.roots[0]).unwrap().children[1];
+        let tr2 = scene.get(tr_id).unwrap().layout_rect;
+        assert!(
+            (fr.h - 300.0).abs() < 0.1,
+            "filler 保显式 300 不被压扁，got {}",
+            fr.h
+        );
+        assert!(
+            (tr2.y - 300.0).abs() < 0.1 && (tr2.h - 200.0).abs() < 0.1,
+            "tail 紧随其后 300..500（总高 500 溢出视口），got y={} h={}",
+            tr2.y,
+            tr2.h
+        );
     }
 
     /// #65 回归：Tripawd 事件卡结构（screen flex column > wrap 居中 > 卡 flex column >
