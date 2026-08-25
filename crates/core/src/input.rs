@@ -474,6 +474,15 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                     let shift = ke.modifiers & MOD_SHIFT != 0;
                     let mut routed = false;
                     let mut changed = false;
+                    // TextArea 键盘导航上下文（Up/Down 跨行 + 行级 Home/End 需 layout）。
+                    // 克隆解借用（同 on_text_pointer_down 模式）；无缓存 layout（首帧未
+                    // measure）→ None，导航键退化文档级/no-op。TextField/NumberField 单行
+                    // 无行概念 → 恒 None。
+                    let nav_ctx = if kind == Some(NodeKind::TextArea) {
+                        crate::scene::control::text_nav_context(scene, fid)
+                    } else {
+                        None
+                    };
                     // 单次 controls 可变借跑除 Escape 外的全部路由（这些只动 EditState / 推 out，
                     // 不碰 scene）。Escape 单独处理——它调 focus_node(scene,None) 要 &mut scene，
                     // 与此处 controls 借冲突。
@@ -486,37 +495,102 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                     {
                         match ke.key_code {
                             KEY_BACKSPACE => {
-                                if crate::scene::control::delete_char(e, kind.unwrap(), true) {
+                                let deleted = if ctrl {
+                                    crate::scene::control::delete_word(e, true)
+                                } else {
+                                    crate::scene::control::delete_char(e, kind.unwrap(), true)
+                                };
+                                if deleted {
                                     changed = true;
                                 }
                                 routed = true;
                             }
                             KEY_DELETE => {
-                                if crate::scene::control::delete_char(e, kind.unwrap(), false) {
+                                let deleted = if ctrl {
+                                    crate::scene::control::delete_word(e, false)
+                                } else {
+                                    crate::scene::control::delete_char(e, kind.unwrap(), false)
+                                };
+                                if deleted {
                                     changed = true;
                                 }
                                 routed = true;
                             }
+                            // ctrl+Left/Right 词移动（浏览器惯例）；裸键字符级。
                             KEY_LEFT => {
-                                crate::scene::control::move_cursor(e, kind.unwrap(), false, shift);
+                                if ctrl {
+                                    crate::scene::control::move_word(e, false, shift);
+                                } else {
+                                    crate::scene::control::move_cursor(
+                                        e,
+                                        kind.unwrap(),
+                                        false,
+                                        shift,
+                                    );
+                                }
                                 routed = true;
                             }
                             KEY_RIGHT => {
-                                crate::scene::control::move_cursor(e, kind.unwrap(), true, shift);
+                                if ctrl {
+                                    crate::scene::control::move_word(e, true, shift);
+                                } else {
+                                    crate::scene::control::move_cursor(
+                                        e,
+                                        kind.unwrap(),
+                                        true,
+                                        shift,
+                                    );
+                                }
                                 routed = true;
                             }
+                            // Home/End：TextArea 裸键=行级（视觉行）、ctrl=文档级；
+                            // 单行框行==文档，恒文档级。
                             KEY_HOME => {
-                                e.cursor = 0;
-                                if !shift {
-                                    e.anchor = 0;
+                                match nav_ctx.as_ref() {
+                                    Some(ctx) if !ctrl => {
+                                        crate::scene::control::line_home_end(e, ctx, true, shift);
+                                    }
+                                    _ => {
+                                        e.cursor = 0;
+                                        if !shift {
+                                            e.anchor = 0;
+                                        }
+                                    }
                                 }
                                 routed = true;
                             }
                             KEY_END => {
-                                e.cursor = e.value.len();
-                                if !shift {
-                                    e.anchor = e.cursor;
+                                match nav_ctx.as_ref() {
+                                    Some(ctx) if !ctrl => {
+                                        crate::scene::control::line_home_end(e, ctx, false, shift);
+                                    }
+                                    _ => {
+                                        e.cursor = e.value.len();
+                                        if !shift {
+                                            e.anchor = e.cursor;
+                                        }
+                                    }
                                 }
+                                routed = true;
+                            }
+                            // TextArea 上下行导航（视觉行 + sticky x）。仅 TextArea 消费
+                            // （单行框无行概念，Up/Down 落后面的 TabList 路由照旧）。
+                            KEY_UP if nav_ctx.is_some() => {
+                                crate::scene::control::move_vertical(
+                                    e,
+                                    nav_ctx.as_ref().unwrap(),
+                                    false,
+                                    shift,
+                                );
+                                routed = true;
+                            }
+                            KEY_DOWN if nav_ctx.is_some() => {
+                                crate::scene::control::move_vertical(
+                                    e,
+                                    nav_ctx.as_ref().unwrap(),
+                                    true,
+                                    shift,
+                                );
                                 routed = true;
                             }
                             // ctrl+A 全选（单选一条，避免与「无 ctrl 的 A」冲突——后者透传 keydown）。
@@ -588,12 +662,11 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                 // 方向键按 flex-direction 选轴移动 selected_index（clamp 不 wrap）+ 发
                 // SelectionChanged。互斥于 Dropdown（Dropdown 非 TabList）。
                 //
-                // 与 TextField 的隔离靠 panel 跨树不变量，而非 is_text 消费方向键：单行文本
-                // 编辑器只 match Left/Right 移光标（无 Up/Down arm），故 is_text 不消费
-                // Up/Down。真正保证「焦点在文本控件上时 TabList 路由不误触发」的是：panel
-                // 内容跨树（非 TabList 子，靠 aria-controls 关联）→ 从 panel 内控件向上走
-                // find_tablist_ancestor 返回 None。将来若加 TextArea Up/Down 跨行导航，须在
-                // 文本编辑器路由里先消费 Up/Down（routed=true），否则会落到本路由。
+                // 与 TextField 的隔离靠 panel 跨树不变量，而非 is_text 消费方向键：TextArea
+                // 在文本路由消费 Up/Down（routed=true，见上方 KEY_UP/KEY_DOWN 臂）；单行框
+                // （TextField/NumberField）不消费，Up/Down 落到本路由。真正保证「焦点在文本
+                // 控件上时 TabList 路由不误触发」的是：panel 内容跨树（非 TabList 子，靠
+                // aria-controls 关联）→ 从 panel 内控件向上走 find_tablist_ancestor 返回 None。
                 if ke.is_down {
                     if let Some(tl) = crate::scene::control::find_tablist_ancestor(scene, Some(fid))
                     {
@@ -850,13 +923,15 @@ impl PointerState {
                             slot.longpress_cancelled = true;
                         }
                     }
-                    // 控件 Move：Slider 拖拽中 → 跟随指针更新 value（scroll/drag 已被占据手势抑制）。
+                    // 控件 Move：Slider 拖拽中 → 跟随指针更新 value；文本控件鼠标按住 →
+                    // 拖拽扩展选区（scroll/drag 已被占据手势抑制）。
                     if slot.is_down {
                         if let Some(cid) = slot.control_target {
                             out.extend(crate::scene::control::on_pointer_move(
                                 scene,
                                 cid,
                                 [ev.x, ev.y],
+                                touch_id < 0,
                             ));
                         }
                     }
@@ -1124,10 +1199,11 @@ impl PointerState {
                         slot.scroll_testing = slot.scroll_candidate.is_some();
                     }
                     // 控件交互：命中（含控件 role/data-slot 子树）向上找控件 → on_pointer_down。
-                    // Slider 占据手势：抑制 scroll（拖 thumb 不让祖先滚动）+ 记 control_target。
+                    // Slider 占据手势（拖值）；文本控件仅鼠标占据（拖=选区，触摸让位 pan）：
+                    // 都抑制祖先 scroll + 记 control_target。
                     if let Some(cid) = crate::scene::control::find_control_at(scene, hit) {
                         slot.control_target = Some(cid);
-                        if crate::scene::control::occupies_gesture(scene, cid) {
+                        if crate::scene::control::occupies_gesture(scene, cid, touch_id < 0) {
                             slot.scroll_testing = false;
                             slot.scroll_candidate = None;
                         }

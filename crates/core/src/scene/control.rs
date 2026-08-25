@@ -1107,16 +1107,28 @@ pub fn find_control_at(scene: &Scene, hit: Option<NodeId>) -> Option<NodeId> {
     None
 }
 
-/// Slider 是否占据指针手势（拖拽期间需抑制祖先 scroll）。仅未禁用的 Slider 为真——
+/// Slider 是否占据指针手势（拖拽期间需抑制祖先 scroll）。未禁用 Slider（任何指针）
+/// 与未禁用文本控件（仅鼠标——拖=选区；触摸拖让位视口 pan，浏览器对齐）为真。
 /// Toggle/Radio 点击瞬时完成不占手势；disabled 控件不拦截指针（照 HTML：disabled input
-/// 不接受交互），故 disabled Slider 不抑制祖先 scroll（否则按下后 scroll 仲裁被清却无人处理，
-/// 用户滚不动）。PointerState 据此决定是否抑制 scroll 候选。
-pub fn occupies_gesture(scene: &Scene, id: NodeId) -> bool {
-    let is_slider = matches!(scene.controls.get(id), Some(ControlState::Slider { .. }));
+/// 不接受交互），否则按下后 scroll 仲裁被清却无人处理，用户滚不动。
+/// PointerState 据此决定是否抑制 scroll 候选。
+pub fn occupies_gesture(scene: &Scene, id: NodeId, is_mouse: bool) -> bool {
     let disabled = scene
         .get(id)
         .is_some_and(|n| n.interaction.flags.contains(NodeFlags::DISABLED));
-    is_slider && !disabled
+    if disabled {
+        return false;
+    }
+    let is_slider = matches!(scene.controls.get(id), Some(ControlState::Slider { .. }));
+    let is_text = matches!(
+        scene.controls.get(id),
+        Some(
+            ControlState::TextField(_)
+                | ControlState::TextArea(_)
+                | ControlState::NumberField { .. }
+        )
+    );
+    is_slider || (is_mouse && is_text)
 }
 
 /// 指针按下命中控件 → 更新控件状态。返回产生的事件（空 Vec=未命中/未处理）。
@@ -1231,17 +1243,46 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
 /// 指针移动。仅 Slider 拖拽中（dragging=true）跟随指针重算 value → value 变化时产
 /// EVT_VALUE_CHANGED；其它情况返空。PointerState Move 臂在 control_target 存在时调用
 /// （函数内部自检 dragging，安全）。
-pub fn on_pointer_move(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<EventRecord> {
+/// 指针按住移动（每 Move）：Slider 跟手更新 value；文本控件（TextField/TextArea/
+/// NumberField）拖拽扩展选区——anchor 保持 Down 落点，cursor 跟随命中推进。
+/// `is_mouse` 门控文本臂：触摸拖选让位视口 pan（占据手势侧 occupies_gesture 同判）。
+pub fn on_pointer_move(
+    scene: &mut Scene,
+    id: NodeId,
+    pos: [f32; 2],
+    is_mouse: bool,
+) -> Vec<EventRecord> {
     let mut out = Vec::new();
     let dragging = matches!(
         scene.controls.get(id),
         Some(ControlState::Slider { dragging: true, .. })
     );
-    if !dragging {
+    if dragging {
+        if let Some(v) = slider_pos_to_value(scene, id, pos) {
+            set_slider_value(scene, id, v, &mut out);
+        }
         return out;
     }
-    if let Some(v) = slider_pos_to_value(scene, id, pos) {
-        set_slider_value(scene, id, v, &mut out);
+    let is_text = matches!(
+        scene.controls.get(id),
+        Some(
+            ControlState::TextField(_)
+                | ControlState::TextArea(_)
+                | ControlState::NumberField { .. }
+        )
+    );
+    if is_mouse && is_text {
+        // 世界坐标 → content-area-local（同 on_pointer_down 文本臂的转换链）。
+        if let Some(n) = scene.get(id) {
+            let lr = n.layout_rect;
+            let border_left = crate::render::resolve_lp(n.style.taffy_style.border.left);
+            let padding_left = crate::render::resolve_lp(n.style.taffy_style.padding.left);
+            let border_top = crate::render::resolve_lp(n.style.taffy_style.border.top);
+            let padding_top = crate::render::resolve_lp(n.style.taffy_style.padding.top);
+            let local_x = pos[0] - lr.x - border_left - padding_left;
+            let local_y = pos[1] - lr.y - border_top - padding_top;
+            on_text_pointer_drag(scene, id, local_x, local_y);
+        }
     }
     out
 }
@@ -1280,20 +1321,60 @@ pub fn on_pointer_up(scene: &mut Scene, id: NodeId) -> Vec<EventRecord> {
 ///
 /// 无缓存 TextLayout（首帧尚无 measure）→ no-op。非 TextField/TextArea/NumberField → no-op。
 pub fn on_text_pointer_down(scene: &mut Scene, id: NodeId, local_x: f32, local_y: f32) {
+    let Some(offset) = text_hit_offset(scene, id, local_x, local_y) else {
+        return;
+    };
+    if let Some(
+        ControlState::TextField(e)
+        | ControlState::TextArea(e)
+        | ControlState::NumberField { edit: e, .. },
+    ) = scene.controls.get_mut(id)
+    {
+        e.cursor = offset;
+        e.anchor = offset;
+        e.ideal_cursor_valid = false;
+        e.cursor_visible = true;
+        e.cursor_timer = 0.0;
+    }
+}
+
+/// 文本控件拖拽选区（按住移动）：同 on_text_pointer_down 的命中管线，但 anchor 保持
+/// Down 时的落点不动、只推进 cursor——选区随拖拽扩展（浏览器鼠标拖选语义）。
+/// 调用方负责指针仲裁（on_pointer_move 文本臂，仅鼠标指针）。
+pub fn on_text_pointer_drag(scene: &mut Scene, id: NodeId, local_x: f32, local_y: f32) {
+    let Some(offset) = text_hit_offset(scene, id, local_x, local_y) else {
+        return;
+    };
+    if let Some(
+        ControlState::TextField(e)
+        | ControlState::TextArea(e)
+        | ControlState::NumberField { edit: e, .. },
+    ) = scene.controls.get_mut(id)
+    {
+        e.cursor = offset;
+        e.ideal_cursor_valid = false;
+        e.cursor_visible = true;
+        e.cursor_timer = 0.0;
+    }
+}
+
+/// 文本控件 content-area-local 坐标 → value 字节偏移的共享命中管线（down 定位 / 拖选共用）。
+/// 掩码（layout glyphs 是显示串）与 view_x（光标跟随水平滚动）都在此换算；结果钳到
+/// value.len() + char 边界（placeholder measure 的 layout 可能比 value 长，越界会炸
+/// 后续 insert_str）。无缓存 layout / 非文本控件 → None。
+fn text_hit_offset(scene: &mut Scene, id: NodeId, local_x: f32, local_y: f32) -> Option<usize> {
     let (view_x, value) = match scene.controls.get(id) {
         Some(
             ControlState::TextField(e)
             | ControlState::TextArea(e)
             | ControlState::NumberField { edit: e, .. },
         ) => (e.view_x, e.value.clone()),
-        _ => return,
+        _ => return None,
     };
     // 入参是可视坐标；layout 空间 = 可视 + 视口偏移（光标跟随滚动的命中换算）。
     let local_x = local_x + view_x;
     // 克隆 TextLayout 解借用冲突：text_layouts 不可变借 + controls 可变写。
-    let Some(layout) = scene.text_layouts[id.index()].as_ref().cloned() else {
-        return;
-    };
+    let layout = scene.text_layouts[id.index()].as_ref().cloned()?;
     // 缓存 layout 的 glyphs 是显示串（掩码下 ≠ value 字节）——ranges/hit 都在显示串
     // 字节空间，命中后再换算回 value 字节（e.cursor 是 value 偏移）。
     let display = {
@@ -1307,28 +1388,14 @@ pub fn on_text_pointer_down(scene: &mut Scene, id: NodeId, local_x: f32, local_y
                 | ControlState::TextArea(e)
                 | ControlState::NumberField { edit: e, .. },
             ) => display_value_masked(e, mask).0,
-            _ => return,
+            _ => return None,
         }
     };
     let ranges = line_byte_ranges(&layout, &display);
     let display_off = hit_byte_offset(&layout, &ranges, local_x, local_y);
     // 无掩码/无 composition 时 display == value，换算即恒等。
     let offset = display_to_value_byte(&display, &value, display_off);
-    if let Some(
-        ControlState::TextField(e)
-        | ControlState::TextArea(e)
-        | ControlState::NumberField { edit: e, .. },
-    ) = scene.controls.get_mut(id)
-    {
-        // 钳到 value.len() + char 边界：offset 来自 text_layouts 的 layout，value 空时
-        // layout 基于 placeholder（layout solve 缓存 display 文本），offset 可达 placeholder
-        // 字节数 > value.len()=0 → cursor 越界 → insert_str panic（is_char_boundary 断言失败）。
-        let safe = clamp_boundary(&value, offset);
-        e.cursor = safe;
-        e.anchor = safe;
-        e.cursor_visible = true;
-        e.cursor_timer = 0.0;
-    }
+    Some(clamp_boundary(&value, offset))
 }
 
 /// 推进光标闪烁 timer（每帧由 Stage tick 调用，单一动画时钟不变量）。
@@ -1673,6 +1740,7 @@ pub fn insert_text(e: &mut EditState, kind: NodeKind, text: &str) -> bool {
     e.value.insert_str(e.cursor, &text);
     e.cursor += text.len();
     e.anchor = e.cursor;
+    e.ideal_cursor_valid = false;
     e.cursor_visible = true;
     e.cursor_timer = 0.0;
     true
@@ -1701,6 +1769,7 @@ pub fn delete_char(e: &mut EditState, _kind: NodeKind, backspace: bool) -> bool 
     if e.readonly {
         return false;
     }
+    e.ideal_cursor_valid = false;
     if e.anchor != e.cursor {
         return delete_selection(e);
     }
@@ -1734,6 +1803,177 @@ pub fn move_cursor(e: &mut EditState, _kind: NodeKind, right: bool, select: bool
     if !select {
         e.anchor = nc;
     }
+    e.ideal_cursor_valid = false;
+    e.cursor_visible = true;
+    e.cursor_timer = 0.0;
+}
+
+/// ctrl+Left/Right 词移动（浏览器惯例：forward 跳到词尾后、backward 跳到词首前）。
+/// 词 = 连续 `is_alphanumeric` 段（Unicode：CJK 连续段=一词，跳整段——Chrome 同款）；
+/// 标点/空白是词间分隔，forward 先跳过分隔再消费词，backward 对称。select 同 move_cursor。
+pub fn move_word(e: &mut EditState, right: bool, select: bool) {
+    let nc = if right {
+        next_word_end(&e.value, e.cursor)
+    } else {
+        prev_word_start(&e.value, e.cursor)
+    };
+    e.cursor = nc;
+    if !select {
+        e.anchor = nc;
+    }
+    e.ideal_cursor_valid = false;
+    e.cursor_visible = true;
+    e.cursor_timer = 0.0;
+}
+
+/// forward 词尾：跳过当前词间分隔（非词字符），再消费整段词字符——落点是词尾后。
+fn next_word_end(s: &str, mut pos: usize) -> usize {
+    while pos < s.len() {
+        let ch = s[pos..].chars().next().unwrap();
+        if ch.is_alphanumeric() {
+            break;
+        }
+        pos += ch.len_utf8();
+    }
+    while pos < s.len() {
+        let ch = s[pos..].chars().next().unwrap();
+        if !ch.is_alphanumeric() {
+            break;
+        }
+        pos += ch.len_utf8();
+    }
+    pos
+}
+
+/// backward 词首：跳过身后词间分隔，再消费整段词字符——落点是词首。
+fn prev_word_start(s: &str, mut pos: usize) -> usize {
+    while pos > 0 {
+        let start = prev_char_boundary(s, pos);
+        if s[start..].chars().next().unwrap().is_alphanumeric() {
+            break;
+        }
+        pos = start;
+    }
+    while pos > 0 {
+        let start = prev_char_boundary(s, pos);
+        if !s[start..].chars().next().unwrap().is_alphanumeric() {
+            break;
+        }
+        pos = start;
+    }
+    pos
+}
+
+/// ctrl+Backspace/Delete 词删除（textfield spec §5.3）：删光标到前/后词边界的区间。
+/// 选区非零先删选区（同 delete_char）；到边界无词可删（串首 backspace / 串尾 delete）返 false。
+pub fn delete_word(e: &mut EditState, backspace: bool) -> bool {
+    if e.readonly {
+        return false;
+    }
+    if e.anchor != e.cursor {
+        return delete_selection(e);
+    }
+    let bound = if backspace {
+        prev_word_start(&e.value, e.cursor)
+    } else {
+        next_word_end(&e.value, e.cursor)
+    };
+    if bound == e.cursor {
+        return false;
+    }
+    if backspace {
+        e.value.replace_range(bound..e.cursor, "");
+        e.cursor = bound;
+    } else {
+        e.value.replace_range(e.cursor..bound, "");
+    }
+    e.anchor = e.cursor;
+    e.ideal_cursor_valid = false;
+    true
+}
+
+/// TextArea 上下行导航的布局上下文（process_keys 在 controls 可变借外克隆，解借用冲突）。
+/// display 是掩码后的显示串（无掩码/无 composition 时与 value 相同）——layout glyphs
+/// 按 display 排，一切命中/定位先在 display 字节空间做，再经 value↔display 换算。
+pub struct TextNavCtx {
+    pub layout: crate::text::layout::TextLayout,
+    pub display: String,
+}
+
+/// 收集 TextArea 键盘导航所需上下文。无缓存 layout（首帧未 measure）→ None（调用方 no-op）。
+pub fn text_nav_context(scene: &Scene, id: NodeId) -> Option<TextNavCtx> {
+    let layout = scene.text_layouts[id.index()].as_ref().cloned()?;
+    let mask = scene
+        .get(id)
+        .and_then(|n| n.style.text_security)
+        .map(mask_char);
+    let display = match scene.controls.get(id) {
+        Some(
+            ControlState::TextField(e)
+            | ControlState::TextArea(e)
+            | ControlState::NumberField { edit: e, .. },
+        ) => display_value_masked(e, mask).0,
+        _ => return None,
+    };
+    Some(TextNavCtx { layout, display })
+}
+
+/// TextArea 上下行导航（视觉行 = 布局折行走行，浏览器对齐）。sticky x：ideal 有效则
+/// 复用，无效（一切移动光标的原语都会使其失效）则先从当前光标像素重算再跳——防短行
+/// 中转截断列位。select 同 move_cursor。越顶/底行 no-op（仍重置闪烁 timer 照浏览器）。
+pub fn move_vertical(e: &mut EditState, ctx: &TextNavCtx, down: bool, select: bool) {
+    let ranges = line_byte_ranges(&ctx.layout, &ctx.display);
+    let disp_off = value_to_display_byte(&ctx.display, &e.value, e.cursor);
+    let (cur_x, cur_line) = cursor_pixel_x(&ctx.layout, &ranges, disp_off);
+    if !e.ideal_cursor_valid {
+        e.ideal_cursor_x = cur_x;
+        e.ideal_cursor_valid = true;
+    }
+    let target = if down {
+        (cur_line + 1).min(ctx.layout.lines.len() - 1)
+    } else {
+        cur_line.saturating_sub(1)
+    };
+    if target != cur_line {
+        // 行中点 y 强制命中目标行（hit_byte_offset 的 y 扫描单调，中点必落本行）。
+        let y = ctx.layout.lines[target].y + ctx.layout.lines[target].height * 0.5;
+        let disp_hit = hit_byte_offset(&ctx.layout, &ranges, e.ideal_cursor_x, y);
+        let off = clamp_boundary(
+            &e.value,
+            display_to_value_byte(&ctx.display, &e.value, disp_hit),
+        );
+        e.cursor = off;
+        if !select {
+            e.anchor = off;
+        }
+    }
+    e.cursor_visible = true;
+    e.cursor_timer = 0.0;
+}
+
+/// TextArea 行级 Home/End（裸键=当前视觉行首/尾；ctrl+Home/End 文档级在调用方直写）。
+/// 行尾语义：该行区间含终结 \n 时退一格——光标停在 \n 前（视觉上行尾），与浏览器一致。
+pub fn line_home_end(e: &mut EditState, ctx: &TextNavCtx, home: bool, select: bool) {
+    let ranges = line_byte_ranges(&ctx.layout, &ctx.display);
+    let disp_off = value_to_display_byte(&ctx.display, &e.value, e.cursor);
+    let (_, cur_line) = cursor_pixel_x(&ctx.layout, &ranges, disp_off);
+    let (start, end) = ranges[cur_line];
+    let disp_hit = if home {
+        start
+    } else if end > start && ctx.display.as_bytes().get(end - 1) == Some(&b'\n') {
+        end - 1
+    } else {
+        end
+    };
+    let off = clamp_boundary(
+        &e.value,
+        display_to_value_byte(&ctx.display, &e.value, disp_hit),
+    );
+    e.cursor = off;
+    if !select {
+        e.anchor = off;
+    }
+    e.ideal_cursor_valid = false;
     e.cursor_visible = true;
     e.cursor_timer = 0.0;
 }
@@ -1829,6 +2069,7 @@ pub fn set_composition(e: &mut EditState, text: &str, pos: usize) {
         text: text.to_string(),
         pos: p,
     });
+    e.ideal_cursor_valid = false;
     e.cursor_visible = true;
     e.cursor_timer = 0.0;
 }
@@ -3186,7 +3427,7 @@ mod tests {
         set_slider_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
         // 按下在 track 中间（pos.x=100 → value=50），拖到 75%（pos.x=150 → value=75）
         on_pointer_down(&mut scene, id, [100.0, 10.0]);
-        on_pointer_move(&mut scene, id, [150.0, 10.0]);
+        on_pointer_move(&mut scene, id, [150.0, 10.0], true);
         let v = match scene.controls.get(id) {
             Some(ControlState::Slider { value, .. }) => *value,
             _ => 0.0,
@@ -3251,7 +3492,7 @@ mod tests {
         let mut scene = Scene::default();
         let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
         set_slider_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
-        on_pointer_move(&mut scene, id, [150.0, 10.0]);
+        on_pointer_move(&mut scene, id, [150.0, 10.0], true);
         let v = match scene.controls.get(id) {
             Some(ControlState::Slider { value, .. }) => *value,
             _ => 0.0,
@@ -3310,7 +3551,7 @@ mod tests {
         set_slider_rect(&mut scene, id, 0.0, 0.0, 100.0, 20.0);
         // 不 panic 即过；dragging 仍置（交互被处理）。
         let _ = on_pointer_down(&mut scene, id, [50.0, 10.0]);
-        let _ = on_pointer_move(&mut scene, id, [80.0, 10.0]);
+        let _ = on_pointer_move(&mut scene, id, [80.0, 10.0], true);
         let _ = on_pointer_up(&mut scene, id);
         // sanitize 后 min≤max：min 被 clamp 到 max（0≤0）。
         assert!(
@@ -3371,10 +3612,10 @@ mod tests {
         let toggle = make_toggle(&mut scene, false);
         let radio = make_radio(&mut scene, "g", false);
         let progress = make_progress(&mut scene, 0.0, 100.0);
-        assert!(occupies_gesture(&scene, slider));
-        assert!(!occupies_gesture(&scene, toggle));
-        assert!(!occupies_gesture(&scene, radio));
-        assert!(!occupies_gesture(&scene, progress));
+        assert!(occupies_gesture(&scene, slider, true));
+        assert!(!occupies_gesture(&scene, toggle, true));
+        assert!(!occupies_gesture(&scene, radio, true));
+        assert!(!occupies_gesture(&scene, progress, true));
     }
 
     #[test]
@@ -3383,7 +3624,10 @@ mod tests {
         // 坑：旧实现对所有 Slider 返 true，按下后 scroll 仲裁被清却无人处理 → 用户滚不动。
         let mut scene = Scene::default();
         let slider = make_slider(&mut scene, 0.0, 0.0, 100.0);
-        assert!(occupies_gesture(&scene, slider), "enabled slider 占据手势");
+        assert!(
+            occupies_gesture(&scene, slider, true),
+            "enabled slider 占据手势"
+        );
         scene
             .get_mut(slider)
             .unwrap()
@@ -3391,7 +3635,7 @@ mod tests {
             .flags
             .insert(NodeFlags::DISABLED);
         assert!(
-            !occupies_gesture(&scene, slider),
+            !occupies_gesture(&scene, slider, true),
             "disabled slider 不占据手势（不抑制 scroll）"
         );
     }
@@ -3455,7 +3699,7 @@ mod tests {
         let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
         set_slider_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
         let _ = on_pointer_down(&mut scene, id, [100.0, 10.0]); // value=50，无变化→不发
-        let events = on_pointer_move(&mut scene, id, [150.0, 10.0]); // value→75
+        let events = on_pointer_move(&mut scene, id, [150.0, 10.0], true); // value→75
         let hit = events
             .iter()
             .find(|e| e.event_type == EVT_VALUE_CHANGED && e.node_id == id.0)
@@ -3487,7 +3731,7 @@ mod tests {
         let id = make_slider(&mut scene, 50.0, 0.0, 100.0);
         set_slider_rect(&mut scene, id, 0.0, 0.0, 200.0, 20.0);
         let _ = on_pointer_down(&mut scene, id, [100.0, 10.0]);
-        let _ = on_pointer_move(&mut scene, id, [160.0, 10.0]); // value→80
+        let _ = on_pointer_move(&mut scene, id, [160.0, 10.0], true); // value→80
         let events = on_pointer_up(&mut scene, id);
         let hit = events
             .iter()
@@ -3567,6 +3811,244 @@ mod tests {
         );
         scene.text_layouts[id.index()] = Some(layout);
         (scene, id)
+    }
+
+    /// 建带 TextLayout 缓存的 TextArea（多行：measure 按 `\n` 断行，不 nowrap）。
+    /// 同 make_scene_with_textfield 的解耦手法：手动测文本 + 设 layout_rect。
+    fn make_scene_with_textarea(text: &str) -> (Scene, NodeId) {
+        let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
+        let font_data = std::fs::read(font_path).unwrap();
+        let mut fonts = crate::text::layout::FontTable::new();
+        fonts.register("DejaVu", font_data, true).unwrap();
+
+        let mut scene = Scene::default();
+        let id = create_node_from_template(
+            &mut scene,
+            NodeKind::TextArea,
+            ResolvedStyle::default(),
+            Some(crate::asset::ControlInit::TextArea(
+                crate::asset::EditInit {
+                    value: text.to_string(),
+                    placeholder: String::new(),
+                    max_length: 0,
+                    readonly: false,
+                },
+            )),
+        );
+        scene.get_mut(id).unwrap().layout_rect = Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 200.0,
+            h: 90.0,
+        };
+        let style = scene.get(id).unwrap().style.clone();
+        let stack = fonts.stack_for(style.font_family.as_deref());
+        let layout = crate::text::layout::measure_text(
+            text,
+            style.font_size,
+            style.effective_line_height(),
+            style.letter_spacing,
+            style.text_align,
+            style.white_space_nowrap,
+            Some(200.0),
+            &stack,
+            style.color,
+            crate::text::rich::weight_from_font_weight(style.font_weight),
+        );
+        scene.text_layouts[id.index()] = Some(layout);
+        (scene, id)
+    }
+
+    #[test]
+    fn move_word_browser_semantics() {
+        // forward 跳词尾后、backward 跳词首前（浏览器惯例）；标点是词间分隔。
+        let mut e = EditState::from_init("hello world, again".into(), String::new(), 0, false);
+        e.cursor = 0; // from_init 光标在串尾，词移动从首起测
+        move_word(&mut e, true, false);
+        assert_eq!(e.cursor, 5, "词尾后");
+        move_word(&mut e, true, false);
+        assert_eq!(e.cursor, 11, "跳过空格到下一词尾");
+        move_word(&mut e, true, false);
+        assert_eq!(e.cursor, 18, "跳过逗号+空格到句尾");
+        move_word(&mut e, false, false);
+        assert_eq!(e.cursor, 13, "backward 落词首");
+        move_word(&mut e, false, false);
+        assert_eq!(e.cursor, 6, "上一词首");
+        move_word(&mut e, false, false);
+        assert_eq!(e.cursor, 0, "到串首");
+        move_word(&mut e, false, false);
+        assert_eq!(e.cursor, 0, "越首 no-op");
+
+        // select 扩展：anchor 不动。
+        e.cursor = 0;
+        e.anchor = 0;
+        move_word(&mut e, true, true);
+        assert_eq!((e.anchor, e.cursor), (0, 5));
+
+        // CJK 连续段 = 一词（Chrome 同款：跳整段）。
+        let mut c = EditState::from_init("你好 abc".into(), String::new(), 0, false);
+        c.cursor = 0;
+        move_word(&mut c, true, false);
+        assert_eq!(c.cursor, 6, "「你好」整段 6 字节");
+        move_word(&mut c, true, false);
+        assert_eq!(c.cursor, 10, "跳空格到 abc 尾");
+        move_word(&mut c, false, false);
+        assert_eq!(c.cursor, 7, "abc 词首");
+        move_word(&mut c, false, false);
+        assert_eq!(c.cursor, 0, "回到「你好」段首");
+    }
+
+    #[test]
+    fn delete_word_forward_and_backward() {
+        // ctrl+Backspace 删到前词首（先跳过词间分隔，Chrome 同款）、ctrl+Delete 删到后词尾；
+        // 选区优先；边界外返 false。
+        let mut e = EditState::from_init("hello world, again".into(), String::new(), 0, false);
+        e.cursor = 18; // 串尾
+        assert!(delete_word(&mut e, true), "删 again");
+        assert_eq!(&e.value, "hello world, ");
+        assert_eq!((e.cursor, e.anchor), (13, 13));
+        assert!(delete_word(&mut e, true), "连分隔带词删 world");
+        assert_eq!(&e.value, "hello ");
+        assert_eq!(e.cursor, 6);
+
+        let mut e2 = EditState::from_init("hello world".into(), String::new(), 0, false);
+        e2.cursor = 0;
+        e2.anchor = 0;
+        assert!(delete_word(&mut e2, false), "删 hello");
+        assert_eq!(&e2.value, " world");
+        assert_eq!(e2.cursor, 0);
+        assert!(!delete_word(&mut e2, true), "串首无前词");
+        // 选区优先：非零选区时删选区而非词。
+        e2.cursor = 0;
+        e2.anchor = e2.value.len();
+        assert!(delete_word(&mut e2, true));
+        assert_eq!(&e2.value, "");
+    }
+
+    #[test]
+    fn textarea_vertical_nav_visual_lines_with_sticky_x() {
+        // 3 行：aaaaa / be / aaa。宽行→短行→窄行：sticky x 必须保持宽行的列位，
+        // 无 sticky 时第二次 Down 会从短行行尾的小 x 起跳（阶梯漂移）。
+        let (scene, id) = make_scene_with_textarea("aaaaa\nbe\naaa");
+        let ctx = text_nav_context(&scene, id).expect("layout cached");
+        let mut e = EditState::from_init("aaaaa\nbe\naaa".into(), String::new(), 0, false);
+        e.cursor = 5; // 行 0 尾（aaaaa 后、\n 前）
+
+        move_vertical(&mut e, &ctx, true, false);
+        assert_eq!(e.cursor, 8, "行 1 尾（be 后）；ideal(5×a宽) 超行宽钳到行尾");
+        let ideal_after_first = e.ideal_cursor_x;
+        assert!(ideal_after_first > 0.0);
+
+        move_vertical(&mut e, &ctx, true, false);
+        assert_eq!(e.cursor, 12, "行 2 尾（aaa 后）；sticky x 仍是宽行列位");
+        assert_eq!(
+            e.ideal_cursor_x, ideal_after_first,
+            "连续 Down 复用同一 ideal（阶梯防漂移）"
+        );
+
+        move_vertical(&mut e, &ctx, true, false);
+        assert_eq!(e.cursor, 12, "越底行 no-op");
+
+        move_vertical(&mut e, &ctx, false, false);
+        assert_eq!(e.cursor, 8, "回行 1 尾（sticky 仍宽行）");
+
+        // 字符移动后 ideal 失效：下次垂直导航从当前光标像素重算。Home 到行 1 首
+        //（x=0）→ Down 重算 ideal=0 → 确定性落行 2 首（不依赖字形 advance）。
+        move_cursor(&mut e, NodeKind::TextArea, false, false);
+        assert!(!e.ideal_cursor_valid);
+        line_home_end(&mut e, &ctx, true, false);
+        move_vertical(&mut e, &ctx, true, false);
+        assert_eq!(e.cursor, 9, "ideal 重算为 0 → 行 2 首");
+    }
+
+    #[test]
+    fn textarea_home_end_line_level() {
+        // 行级 Home/End：裸键=当前视觉行首/尾；行尾退到 \n 前（视觉行尾）。
+        let (scene, id) = make_scene_with_textarea("aaaaa\nbe\naaa");
+        let ctx = text_nav_context(&scene, id).expect("layout cached");
+        let mut e = EditState::from_init("aaaaa\nbe\naaa".into(), String::new(), 0, false);
+        e.cursor = 7; // 行 1 中段
+
+        line_home_end(&mut e, &ctx, true, false);
+        assert_eq!((e.cursor, e.anchor), (6, 6), "行 1 首");
+        line_home_end(&mut e, &ctx, false, false);
+        assert_eq!(e.cursor, 8, "行 1 尾（\\n 前，非 9）");
+
+        // select：anchor 保持。
+        e.cursor = 7;
+        e.anchor = 7;
+        line_home_end(&mut e, &ctx, true, true);
+        assert_eq!((e.anchor, e.cursor), (7, 6));
+    }
+
+    #[test]
+    fn text_drag_extends_selection_anchor_kept() {
+        // Down 落行首附近（anchor=cursor=0），拖到远右 → cursor 到串尾、anchor 不动。
+        let (mut scene, id) = make_scene_with_textfield("hello world");
+        on_text_pointer_down(&mut scene, id, 11.0 + 1.0, 10.0 + 1.0);
+        let (a0, c0) = match scene.controls.get(id) {
+            Some(ControlState::TextField(e)) => (e.anchor, e.cursor),
+            _ => panic!("not TextField"),
+        };
+        assert_eq!(a0, c0, "down 折叠");
+        on_text_pointer_drag(&mut scene, id, 11.0 + 190.0, 10.0 + 1.0);
+        if let Some(ControlState::TextField(e)) = scene.controls.get(id) {
+            assert_eq!(e.anchor, a0, "拖拽不动 anchor");
+            assert_eq!(e.cursor, "hello world".len(), "cursor 拖到串尾");
+        } else {
+            panic!("not TextField");
+        }
+    }
+
+    #[test]
+    fn occupies_gesture_text_mouse_only() {
+        // 文本控件仅鼠标占据（拖=选区）；触摸不占（拖让位视口 pan）；disabled 不占。
+        let mut scene = Scene::default();
+        let id = create_node_from_template(
+            &mut scene,
+            NodeKind::TextArea,
+            ResolvedStyle::default(),
+            Some(crate::asset::ControlInit::TextArea(
+                crate::asset::EditInit {
+                    value: String::new(),
+                    placeholder: String::new(),
+                    max_length: 0,
+                    readonly: false,
+                },
+            )),
+        );
+        assert!(occupies_gesture(&scene, id, true), "鼠标拖=选区，占手势");
+        assert!(!occupies_gesture(&scene, id, false), "触摸拖让位 pan，不占");
+        scene
+            .get_mut(id)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::DISABLED);
+        assert!(!occupies_gesture(&scene, id, true), "disabled 不拦截指针");
+    }
+
+    #[test]
+    fn on_pointer_move_text_drag_gated_by_mouse() {
+        // 鼠标：Move 推进选区 cursor；触摸（is_mouse=false）：no-op。
+        let (mut scene, id) = make_scene_with_textfield("hello world");
+        on_pointer_down(&mut scene, id, [11.0, 11.0]);
+        on_pointer_move(&mut scene, id, [200.0, 11.0], false);
+        let after_touch = match scene.controls.get(id) {
+            Some(ControlState::TextField(e)) => e.cursor,
+            _ => panic!("not TextField"),
+        };
+        on_pointer_move(&mut scene, id, [200.0, 11.0], true);
+        if let Some(ControlState::TextField(e)) = scene.controls.get(id) {
+            assert!(
+                e.cursor >= after_touch,
+                "鼠标拖推进 cursor（{after_touch} → {}）",
+                e.cursor
+            );
+            assert_eq!(e.cursor, "hello world".len());
+        } else {
+            panic!("not TextField");
+        }
     }
 
     #[test]
