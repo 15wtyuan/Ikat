@@ -296,6 +296,8 @@ impl TweenManager {
                     touch_id: t.tag as i32, // 复用：调用方 tag
                     x: 0.0,
                     y: 0.0,
+                    dx: 0.0,
+                    dy: 0.0,
                 });
             }
         }

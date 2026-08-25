@@ -145,12 +145,29 @@ namespace LoomGUI
 #if ENABLE_INPUT_SYSTEM
             if (Mouse.current != null)
             {
-                var screen = Mouse.current.position.ReadValue();
-                byte kind = 2;
-                if (Mouse.current.leftButton.wasPressedThisFrame) kind = 0;
-                else if (Mouse.current.leftButton.wasReleasedThisFrame) kind = 1;
+                var m = Mouse.current;
+                var screen = m.position.ReadValue();
+                // button 值域对齐 web MouseEvent.button（0=左/1=中/2=右，PointerButton 枚举）。
+                // 单 slot 模型：鼠标是单一逻辑指针——次键在另一键按住期间的转变降级为
+                // Move（防二次 Down 重置 core 的 down_pos/drag 状态），独立按下的
+                // 右/中键完整走 Down/Up（Button 载荷真值，#63）。
+                byte kind = 2, button = 0;
+                bool leftEdge = m.leftButton.wasPressedThisFrame || m.leftButton.wasReleasedThisFrame;
+                bool rightEdge = m.rightButton.wasPressedThisFrame || m.rightButton.wasReleasedThisFrame;
+                bool midEdge = m.middleButton.wasPressedThisFrame || m.middleButton.wasReleasedThisFrame;
+                if (leftEdge || rightEdge || midEdge)
+                {
+                    byte b = leftEdge ? (byte)0 : rightEdge ? (byte)1 : (byte)2;
+                    bool pressed = b == 0 ? m.leftButton.wasPressedThisFrame
+                        : b == 1 ? m.rightButton.wasPressedThisFrame
+                        : m.middleButton.wasPressedThisFrame;
+                    bool anotherHeld = b == 0 ? false
+                        : b == 1 ? (m.leftButton.isPressed || m.middleButton.isPressed)
+                        : (m.leftButton.isPressed || m.rightButton.isPressed);
+                    if (!anotherHeld) { kind = pressed ? (byte)0 : (byte)1; button = b; }
+                }
                 var d = ScreenToDesign(screen, MapScale, MapOffX, MapOffYTopDown, screenH);
-                events.Add(new Bindings.PointerEvent { kind = kind, button = 0, pad0 = 0, pad1 = 0, touch_id = -1, x = d.x, y = d.y });
+                events.Add(new Bindings.PointerEvent { kind = kind, button = button, pad0 = 0, pad1 = 0, touch_id = -1, x = d.x, y = d.y });
             }
             // 触摸（多指）。TouchPhase 在 UnityEngine.InputSystem（非 LowLevel——坑：1.19 包 TouchPhase 不在 LowLevel）。
             if (Touchscreen.current != null)
@@ -170,13 +187,25 @@ namespace LoomGUI
                 }
             }
 #else
-            // 旧输入系统
+            // 旧输入系统（单 slot 次键降级语义同 Input System 路径，#63）
             var mscreen = Input.mousePosition;
-            byte mkind = 2;
-            if (Input.GetMouseButtonDown(0)) mkind = 0;
-            else if (Input.GetMouseButtonUp(0)) mkind = 1;
+            byte mkind = 2, mbutton = 0;
+            bool mleftEdge = Input.GetMouseButtonDown(0) || Input.GetMouseButtonUp(0);
+            bool mrightEdge = Input.GetMouseButtonDown(1) || Input.GetMouseButtonUp(1);
+            bool mmidEdge = Input.GetMouseButtonDown(2) || Input.GetMouseButtonUp(2);
+            if (mleftEdge || mrightEdge || mmidEdge)
+            {
+                byte b = mleftEdge ? (byte)0 : mrightEdge ? (byte)1 : (byte)2;
+                bool pressed = b == 0 ? Input.GetMouseButtonDown(0)
+                    : b == 1 ? Input.GetMouseButtonDown(1)
+                    : Input.GetMouseButtonDown(2);
+                bool anotherHeld = b == 0 ? false
+                    : b == 1 ? (Input.GetMouseButton(0) || Input.GetMouseButton(2))
+                    : (Input.GetMouseButton(0) || Input.GetMouseButton(1));
+                if (!anotherHeld) { mkind = pressed ? (byte)0 : (byte)1; mbutton = b; }
+            }
             var md = ScreenToDesign(mscreen, MapScale, MapOffX, MapOffYTopDown, screenH);
-            events.Add(new Bindings.PointerEvent { kind = mkind, button = 0, pad0 = 0, pad1 = 0, touch_id = -1, x = md.x, y = md.y });
+            events.Add(new Bindings.PointerEvent { kind = mkind, button = mbutton, pad0 = 0, pad1 = 0, touch_id = -1, x = md.x, y = md.y });
             foreach (var t in Input.touches)
             {
                 if (t.phase == UnityEngine.TouchPhase.Stationary) continue;

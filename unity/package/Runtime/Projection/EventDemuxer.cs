@@ -4,10 +4,11 @@
 // - Pump(ptr,count) 每 tick 调（LoomHost.Step 内，复用 borrow_events FFI 的同一 buffer）。
 // - 逐条 LoomEvent 翻译为 typed event struct：
 //     * _core.Target = _ctx._registry.GetOrCreate(nodeId)（投影层 Node 身份）。
-//     * 业务字段（Position/ClickCount/TouchId/Key/Modifiers）从 raw EventRecord 填充。
-//       不可从 raw 直接填充的字段（Button/DeltaX/DeltaY/StartPosition/Repeat/
-//       PreviousFocused/NewFocused/Scroll*/AnimationName/PropertyName/IterationCount）
-//       留在 default——后续接线补齐。
+//     * 业务字段（Position/ClickCount/TouchId/Key/Modifiers/Button/DeltaX/DeltaY/
+//       StartPosition）从 raw EventRecord 填充（#63 接线：pad[0]=button（Down/Up）、
+//       dx/dy=DragMove 逐 Move 增量、DragStart 的 Position 即 StartPosition）。
+//       仍留 default 的：Repeat/PreviousFocused/NewFocused/Scroll*/AnimationName/
+//       PropertyName/IterationCount（部分走事件专属解码路径，见下方）。
 // - 调 _ctx._eventBus.Dispatch<T>(targetNodeId, evt) 走 EventBus capture/bubble/once 路由。
 //
 // 5 无核心 source struct 处理（EventType 17-21）：
@@ -29,7 +30,7 @@
 //   KEY=percent / HOOK=hook_name 表索引 f32 bits）。字符串经 EventStrTable 索引读回
 //   （loomgui_stage_get_event_string，双调法）。
 //
-// RawEventRecord：读 raw byte* 解包 EventRecord（与 Rust input::EventRecord 布局一致——20 字节）。
+// RawEventRecord：读 raw byte* 解包 EventRecord（与 Rust input::EventRecord 布局一致——28 字节）。
 // 自足 struct，不依赖任何外部 LoomEvent 镜像——headless 测试编译链和 Unity 生产链共用此定义。
 
 using System;
@@ -40,8 +41,9 @@ using LoomGUI.Bindings;
 namespace LoomGUI
 {
     /// <summary>
-    /// Rust <c>loomgui_core::input::EventRecord</c> C# 镜像（20 字节）。
-    /// 字段序：node_id:u32 @0 → event_type:u8 @4 → click_count:u8 @5 → pad [2] → touch_id:i32 @8 → x:f32 @12 → y:f32 @16。
+    /// Rust <c>loomgui_core::input::EventRecord</c> C# 镜像（28 字节）。
+    /// 字段序：node_id:u32 @0 → event_type:u8 @4 → click_count:u8 @5 → pad [2] → touch_id:i32 @8
+    /// → x:f32 @12 → y:f32 @16 → dx:f32 @20 → dy:f32 @24（#63：DragMove 逐 Move 增量）。
     /// 自足 struct（headless 测试编译链用 unsafe 读 byte*，不依赖任何外部的 LoomEvent 镜像）。
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -50,10 +52,12 @@ namespace LoomGUI
         public uint nodeId;
         public byte eventType;
         public byte clickCount;
-        internal ushort _pad;      // pad[2] @6-7（key events 的 modifiers 在 pad[0]；动画事件 name 表索引高 16 位）
+        internal ushort _pad;      // pad[2] @6-7（Down/Up 的 button 在 pad[0]；key events 的 modifiers；动画事件 name 表索引高 16 位——按事件类型复用）
         public int touchId; // -1=鼠标，>=0=触摸；key 复用装 key_code；动画事件 = PlayerKey 低 32 位
         public float x;
         public float y;
+        public float dx;      // #63：DragMove 增量（自上一条 DragMove；其余事件 0）
+        public float dy;
     }
 
     /// <summary>
@@ -86,12 +90,14 @@ namespace LoomGUI
                     case (byte)EventType.Down:
                         DispatchTyped(nodeId,
                             new PointerDownEvent { _core = NewCore(nodeId),
-                                _position = new LoomVector2(evt.x, evt.y), _touchId = evt.touchId });
+                                _position = new LoomVector2(evt.x, evt.y), _touchId = evt.touchId,
+                                _button = ButtonOf(evt) });
                         break;
                     case (byte)EventType.Up:
                         DispatchTyped(nodeId,
                             new PointerUpEvent { _core = NewCore(nodeId),
-                                _position = new LoomVector2(evt.x, evt.y), _touchId = evt.touchId });
+                                _position = new LoomVector2(evt.x, evt.y), _touchId = evt.touchId,
+                                _button = ButtonOf(evt) });
                         break;
                     case (byte)EventType.Move:
                         DispatchTyped(nodeId,
@@ -122,12 +128,16 @@ namespace LoomGUI
                     case (byte)EventType.DragStart:
                         DispatchTyped(nodeId,
                             new DragStartEvent { _core = NewCore(nodeId),
-                                _position = new LoomVector2(evt.x, evt.y) });
+                                _position = new LoomVector2(evt.x, evt.y),
+                                _startPosition = new LoomVector2(evt.x, evt.y) });
                         break;
                     case (byte)EventType.DragMove:
+                        // Delta = 逐 Move 增量（自上一条 DragMove，首条含阈值前行程——
+                        // 累加后元素精确贴指针）。累计偏移用 StartPosition + Position 推导。
                         DispatchTyped(nodeId,
                             new DragMoveEvent { _core = NewCore(nodeId),
-                                _position = new LoomVector2(evt.x, evt.y) });
+                                _position = new LoomVector2(evt.x, evt.y),
+                                _deltaX = evt.dx, _deltaY = evt.dy });
                         break;
                     case (byte)EventType.DragEnd:
                         DispatchTyped(nodeId,
@@ -305,6 +315,14 @@ namespace LoomGUI
         /// 能编过但 Unity 报 CS0117）。类已 unsafe，指针重解释零分配、保留逐 bit 语义。
         /// </summary>
         static uint FloatBitsToUInt(float v) => *(uint*)&v;
+
+        /// <summary>pad[0] → PointerButton（web MouseEvent.button 值域 0/1/2；core 按事件
+        /// 类型复用 pad，Down/Up 通道由 #63 接线装 button，越界值防御性折返 Left）。</summary>
+        static PointerButton ButtonOf(RawEventRecord evt)
+        {
+            uint b = evt._pad & 0xFF;
+            return b <= 2 ? (PointerButton)b : PointerButton.Left;
+        }
 
 
         /// <summary>

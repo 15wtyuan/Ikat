@@ -238,8 +238,8 @@ fn pointer_event_event_record_sizeof() {
     );
     assert_eq!(
         std::mem::size_of::<EventRecord>(),
-        20,
-        "EventRecord 20B（touch_id@8）"
+        28,
+        "EventRecord 28B（dx/dy @20/#63）"
     );
 }
 
@@ -373,27 +373,27 @@ fn version_is_v1e() {
     assert_eq!(s, "v1e");
 }
 
-/// EventRecord 仍 20B（drag/longpress 复用 event_type 空位 6-9）、PointerEvent 16B、Canceled=3。
+/// EventRecord 28B（#63 +dx/dy DragMove 逐 Move 增量）、PointerEvent 16B、Canceled=3。
 #[test]
 fn event_record_and_pointer_event_sizes_unchanged() {
     use loomgui_core::input::{EventRecord, PointerEvent, PointerKind};
     use std::mem::size_of;
     assert_eq!(
         size_of::<EventRecord>(),
-        20,
-        "EventRecord 20B（drag/longpress 复用 event_type）"
+        28,
+        "EventRecord 28B（dx/dy @20/#63）"
     );
     assert_eq!(size_of::<PointerEvent>(), 16, "PointerEvent 16B 不变");
     assert_eq!(PointerKind::Canceled as u8, 3, "Canceled=3");
 }
 
-/// KeyEvent sizeof 8B + EventRecord 仍 20B / PointerEvent 16B。
+/// KeyEvent sizeof 8B + EventRecord 28B / PointerEvent 16B。
 #[test]
 fn key_event_sizeof_and_unchanged() {
     use loomgui_core::input::{EventRecord, KeyEvent, PointerEvent};
     use std::mem::size_of;
     assert_eq!(size_of::<KeyEvent>(), 8, "KeyEvent 8B");
-    assert_eq!(size_of::<EventRecord>(), 20, "EventRecord 20B 不变");
+    assert_eq!(size_of::<EventRecord>(), 28, "EventRecord 28B（#63）");
     assert_eq!(size_of::<PointerEvent>(), 16, "PointerEvent 16B 不变");
 }
 

@@ -31,9 +31,9 @@ namespace LoomGUI.HeadlessTests
         public void EventsGolden_MatchesRawEventRecordBitLayout()
         {
             byte[] bytes = LoadGolden("events.bin");
-            const int REC = 20; // RawEventRecord 20B（下方尺寸锁同断言）
+            const int REC = 28; // RawEventRecord 28B（#63 +dx/dy；下方尺寸锁同断言）
             Assert.True(bytes.Length >= REC && bytes.Length % REC == 0,
-                $"events golden 须为非空 20B 记录数组，实际 {bytes.Length}B");
+                $"events golden 须为非空 28B 记录数组，实际 {bytes.Length}B");
             var recs = MemoryMarshal.Cast<byte, RawEventRecord>(bytes.AsSpan()).ToArray();
             Assert.True(recs.Length >= 2, "Down+Up 应至少产 Up+Click 两条事件");
 
@@ -49,6 +49,12 @@ namespace LoomGUI.HeadlessTests
             }
             // 两条事件命中同一节点（Down/Up 同点）。
             Assert.Equal(recs[0].nodeId, recs[1].nodeId);
+            // 非 DragMove 事件的增量槽恒 0（#63：dx/dy 仅 DragMove 有意义）。
+            for (int i = 0; i < recs.Length; i++)
+            {
+                Assert.Equal(0f, recs[i].dx, 3);
+                Assert.Equal(0f, recs[i].dy, 3);
+            }
         }
 
         /// <summary>
@@ -61,7 +67,7 @@ namespace LoomGUI.HeadlessTests
             Assert.Equal(16, sizeof(PointerEvent)); // kind+button+pad[2]+touch_id+x+y
             Assert.Equal(8, sizeof(KeyEvent));      // key_code+modifiers+is_down+pad[2]
             Assert.Equal(16, sizeof(WheelEvent));   // x+y+delta_x+delta_y
-            Assert.Equal(20, sizeof(RawEventRecord)); // node_id+type+count+pad[2]+touch_id+x+y
+            Assert.Equal(28, sizeof(RawEventRecord)); // node_id+type+count+pad[2]+touch_id+x+y+dx+dy（#63）
         }
     }
 }

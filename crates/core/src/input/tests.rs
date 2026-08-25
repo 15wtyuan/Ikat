@@ -5580,3 +5580,87 @@ fn number_field_ctrl_a_selects_all() {
     assert_eq!(nf_edit(&s, nf).cursor, 3, "ctrl+A cursor 到末尾");
     assert_eq!(nf_edit(&s, nf).value, "123", "全选不改 value");
 }
+
+/// #63：DragMove 逐 Move 增量 + Down/Up 携带 button（pad[0]，web MouseEvent.button 值域）。
+/// 语义锚点：DeltaX/Y = 自上一条 DragMove；首条含阈值前行程（锚 Down 位——累加后元素
+/// 精确贴指针）。累计偏移不该进载荷：StartPosition + Position 可推导。
+#[test]
+fn drag_move_delta_and_button_payload() {
+    let mut s = one_draggable_button_scene();
+    let mut ps = PointerState::new();
+
+    // 右键 Down@50,50 → EVT_DOWN pad[0]=2
+    let out = ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: 50.0,
+            y: 50.0,
+            button: 2,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    let down = out.iter().find(|e| e.event_type == EVT_DOWN).unwrap();
+    assert_eq!(down.pad[0], 2, "Down 载荷带 button（pad[0]）");
+
+    // Move@55,50（dx=5 > 阈值 2）→ DragStart + 首条 DragMove delta=(5,0)（锚 Down 位，
+    // 含阈值前行程）
+    let out = ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Move,
+            x: 55.0,
+            y: 50.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    let dm = out
+        .iter()
+        .find(|e| e.event_type == EVT_DRAG_MOVE)
+        .expect("阈值后同帧应发首条 DragMove");
+    assert!(
+        (dm.dx - 5.0).abs() < 1e-4 && dm.dy.abs() < 1e-4,
+        "首条 DragMove delta 含阈值前行程（锚 Down 位），got ({},{})",
+        dm.dx,
+        dm.dy
+    );
+
+    // Move@58,54 → delta=(3,4)（自上一条 DragMove）
+    let out = ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Move,
+            x: 58.0,
+            y: 54.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    let dm = out.iter().find(|e| e.event_type == EVT_DRAG_MOVE).unwrap();
+    assert!(
+        (dm.dx - 3.0).abs() < 1e-4 && (dm.dy - 4.0).abs() < 1e-4,
+        "逐 Move 增量 = 自上一条 DragMove，got ({},{})",
+        dm.dx,
+        dm.dy
+    );
+
+    // 右键 Up → EVT_UP pad[0]=2 + DragEnd
+    let out = ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Up,
+            x: 58.0,
+            y: 54.0,
+            button: 2,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    let up = out.iter().find(|e| e.event_type == EVT_UP).unwrap();
+    assert_eq!(up.pad[0], 2, "Up 载荷带 button（pad[0]）");
+    assert!(out.iter().any(|e| e.event_type == EVT_DRAG_END));
+}

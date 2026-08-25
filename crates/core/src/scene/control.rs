@@ -510,6 +510,8 @@ fn set_tablist_selected_index(
             touch_id: new_index as i32, // payload = 新 selected_index
             x: 0.0,
             y: 0.0,
+            dx: 0.0,
+            dy: 0.0,
         });
     }
 }
@@ -557,6 +559,8 @@ fn commit_dropdown_selection(
             touch_id: idx as i32, // payload = 新 selected_index
             x: 0.0,
             y: 0.0,
+            dx: 0.0,
+            dy: 0.0,
         });
     }
 }
@@ -1137,6 +1141,8 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
                 touch_id: 0,
                 x: 0.0,
                 y: 0.0,
+                dx: 0.0,
+                dy: 0.0,
             });
         }
         ControlState::Radio { name, .. } => {
@@ -1249,6 +1255,8 @@ pub fn on_pointer_up(scene: &mut Scene, id: NodeId) -> Vec<EventRecord> {
                 touch_id: 0,
                 x: value,
                 y: 0.0,
+                dx: 0.0,
+                dy: 0.0,
             });
         }
     }
@@ -1468,6 +1476,8 @@ fn select_radio(scene: &mut Scene, id: NodeId, name: String, out: &mut Vec<Event
         touch_id: 0,
         x: 0.0,
         y: 0.0,
+        dx: 0.0,
+        dy: 0.0,
     });
 }
 
@@ -1540,6 +1550,8 @@ fn set_slider_value(scene: &mut Scene, id: NodeId, value: f32, out: &mut Vec<Eve
                 touch_id: 0,
                 x: clamped,
                 y: 0.0,
+                dx: 0.0,
+                dy: 0.0,
             });
         }
     }
@@ -1738,6 +1750,8 @@ pub fn emit_value_changed(out: &mut Vec<EventRecord>, node: NodeId) {
         touch_id: 0,
         x: 0.0,
         y: 0.0,
+        dx: 0.0,
+        dy: 0.0,
     });
 }
 
@@ -1765,6 +1779,8 @@ pub fn line_break(e: &mut EditState, kind: NodeKind, out: &mut Vec<EventRecord>,
                 touch_id: 0,
                 x: 0.0,
                 y: 0.0,
+                dx: 0.0,
+                dy: 0.0,
             });
         }
     }

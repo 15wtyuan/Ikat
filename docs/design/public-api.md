@@ -295,6 +295,8 @@ Node node = ui.Pick(globalPoint);   // 命中测试：返回该点最上层可�
 
 注册拖拽事件即参与仲裁，无 `Draggable` 属性。框架管阈值/捕获/仲裁，用户施加 delta。拖放是逻辑层模式，不提供——用 `DragEnd` + `ui.Pick(position)` 找 drop target，drop 逻辑用户自己搭。
 
+`DragMoveEvent.DeltaX/DeltaY` 是**逐 Move 增量**（自上一条 DragMove；首条含阈值前行程——累加后元素精确贴指针）。累计偏移不进载荷：`DragStartEvent.StartPosition` + `DragMoveEvent.Position` 可推导。**路由指引**：视口平移/滚动（大内容小视口）用 `overflow:auto` 滚动容器（拖拽/滚轮/惯性/钳制/点击取消全自带，零拖拽数学）；Drag 事件 API 是对象拖拽（标题栏、拖道具入格）的低层积木。
+
 ### 6.2 焦点
 
 `Focus()` / `Blur()` / `ui.FocusedNode`。每 UIContext 一个焦点。设计期 `tabindex` 声明可获焦性，运行时用 `Node.Focusable` 改。**Tab/Shift+Tab 自动焦点链导航内置**（tabindex 正整数升序先于 0 组、DOM 序、链尾 wrap；Tab 被导航消费、不发 keydown）——**方向键/手柄导航**才是逻辑层积木（`On<KeyDown>` + `Focus()`）。pointer-down 命中可聚焦节点自动聚焦、点不可聚焦区域清焦点（对齐 DOM 点空白 blur）；编程 `Focus()` 是强制语义（不查 tabindex，仅 disabled 拒）；`FocusIn/FocusOut` 只发焦点节点本身、不沿祖先链。
@@ -556,9 +558,11 @@ mask.Style.ZIndex = 0;
 layer.AddChild(mask);
 
 Container titleBar = inventory.Get<Container>("title-bar");
+float panX = 0f, panY = 0f;   // Delta 是逐 Move 增量——消费方自持累计态
 titleBar.On<DragMoveEvent>(e => {
-    inventory.Style.Left = Length.Px(baseLeft + e.DeltaX);
-    inventory.Style.Top = Length.Px(baseTop + e.DeltaY);
+    panX += e.DeltaX; panY += e.DeltaY;
+    inventory.Style.Left = Length.Px(baseLeft + panX);
+    inventory.Style.Top = Length.Px(baseTop + panY);
 });
 
 // 日常开关：隐藏用 Display.None（保留节点+状态+订阅），不销毁

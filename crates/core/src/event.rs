@@ -90,6 +90,8 @@ fn animation_event(
         touch_id: (ffi & 0xFFFF_FFFF) as u32 as i32,
         x: f32::from_bits((ffi >> 32) as u32),
         y: payload,
+        dx: 0.0,
+        dy: 0.0,
     }
 }
 

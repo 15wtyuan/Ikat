@@ -68,8 +68,10 @@ pub const KEY_V: u32 = 118;
 pub const KEY_X: u32 = 120;
 pub const KEY_Z: u32 = 122;
 
-/// 事件输出（FFI 扁平 POD）。event_type: 0=Down,1=Up,2=Move,3=Click,4=RollOver,5=RollOut。
-/// +touch_id:i32 @8。pad[0]→click_count（20B 不变）。
+/// 事件输出（FFI 扁平 POD，28B）。event_type: 0=Down,1=Up,2=Move,3=Click,4=RollOver,5=RollOut。
+/// pad[0] = PointerDown/Up/Click 的按键（web MouseEvent.button 值域：0=左/1=中/2=右；
+/// 其余事件 0）。dx/dy = DragMove 逐 Move 增量（首条含阈值前行程，锚 Down 位），
+/// 其余事件 0——累计偏移消费方用 DragStartEvent.StartPosition + Position 推导。
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct EventRecord {
@@ -80,6 +82,8 @@ pub struct EventRecord {
     pub touch_id: i32,
     pub x: f32,
     pub y: f32,
+    pub dx: f32,
+    pub dy: f32,
 }
 
 pub const EVT_DOWN: u8 = 0;
@@ -205,6 +209,7 @@ pub struct TouchSlot {
     pub grip_dragging: bool,              // scrollbar grip 拖拽中（grip 不启 inertia）
     pub grip_grab_offset: (f32, f32),     // Down 时刻指针相对 thumb 中心的偏移（跟手拖拽不跳）
     pub scroll_down_pos: (f32, f32),      // Down 时刻 pos（scroll 阈值/跟手基准）
+    pub last_drag_emit: (f32, f32),       // 上一条 DragMove 的位置（逐 Move 增量的锚）
 }
 
 impl TouchSlot {
@@ -236,6 +241,7 @@ impl TouchSlot {
             scrolling_pane: None,
             scroll_gesture: 0,
             grip_dragging: false,
+            last_drag_emit: (0.0, 0.0),
             grip_grab_offset: (0.0, 0.0),
             scroll_down_pos: (0.0, 0.0),
         }
@@ -343,6 +349,8 @@ pub(crate) fn focus_node(scene: &mut Scene, new: Option<NodeId>, out: &mut Vec<E
             touch_id: 0,
             x: 0.0,
             y: 0.0,
+            dx: 0.0,
+            dy: 0.0,
         });
     }
     if let Some(n) = new {
@@ -357,6 +365,8 @@ pub(crate) fn focus_node(scene: &mut Scene, new: Option<NodeId>, out: &mut Vec<E
             touch_id: 0,
             x: 0.0,
             y: 0.0,
+            dx: 0.0,
+            dy: 0.0,
         });
     }
     scene.focused_node = new;
@@ -605,6 +615,8 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                 touch_id: ke.key_code as i32, // touch_id 复用装 key_code（u32 bit pattern → i32）
                 x: 0.0,
                 y: 0.0,
+                dx: 0.0,
+                dy: 0.0,
             });
         }
     }
@@ -805,6 +817,8 @@ impl PointerState {
                             touch_id: slot.touch_id,
                             x: slot.last_pos.0,
                             y: slot.last_pos.1,
+                            dx: 0.0,
+                            dy: 0.0,
                         });
                     }
                 }
@@ -918,6 +932,9 @@ impl PointerState {
                                 slot.click_cancelled = true; // drag 必取消 click
                                 slot.scroll_testing = false; // drag 赢 → 清 scroll（互斥）
                                 slot.scroll_candidate = None;
+                                // 增量锚 = Down 位：首条 DragMove 的 delta 含阈值前行程
+                                // （消费方累加后元素精确贴指针，浏览器式追赶）。
+                                slot.last_drag_emit = slot.down_pos;
                                 out.push(EventRecord {
                                     node_id: tgt.0,
                                     event_type: EVT_DRAG_START,
@@ -926,12 +943,15 @@ impl PointerState {
                                     touch_id,
                                     x: ev.x,
                                     y: ev.y,
+                                    dx: 0.0,
+                                    dy: 0.0,
                                 });
                             }
                         }
                     }
                     if slot.dragging {
                         if let Some(tgt) = slot.drag_target {
+                            // 逐 Move 增量 = 本条 DragMove 位 - 上一条 DragMove 位（#63）。
                             out.push(EventRecord {
                                 node_id: tgt.0,
                                 event_type: EVT_DRAG_MOVE,
@@ -940,7 +960,10 @@ impl PointerState {
                                 touch_id,
                                 x: ev.x,
                                 y: ev.y,
+                                dx: slot.last_pos.0 - slot.last_drag_emit.0,
+                                dy: slot.last_pos.1 - slot.last_drag_emit.1,
                             });
+                            slot.last_drag_emit = slot.last_pos;
                         }
                     }
                     // scrolling_pane 已判定 → 跟手 drag_follow（写 scene.scroll）。
@@ -1011,6 +1034,8 @@ impl PointerState {
                             touch_id,
                             x: ev.x,
                             y: ev.y,
+                            dx: 0.0,
+                            dy: 0.0,
                         });
                     }
                 }
@@ -1135,10 +1160,12 @@ impl PointerState {
                                 node_id: n.0,
                                 event_type: EVT_DOWN,
                                 click_count: 0,
-                                pad: [0, 0],
+                                pad: [ev.button, 0],
                                 touch_id,
                                 x: ev.x,
                                 y: ev.y,
+                                dx: 0.0,
+                                dy: 0.0,
                             });
                         }
                     }
@@ -1162,6 +1189,8 @@ impl PointerState {
                                 touch_id,
                                 x: ev.x,
                                 y: ev.y,
+                                dx: 0.0,
+                                dy: 0.0,
                             });
                         }
                     }
@@ -1188,10 +1217,12 @@ impl PointerState {
                                     node_id: n.0,
                                     event_type: EVT_UP,
                                     click_count: 0,
-                                    pad: [0, 0],
+                                    pad: [ev.button, 0],
                                     touch_id,
                                     x: ev.x,
                                     y: ev.y,
+                                    dx: 0.0,
+                                    dy: 0.0,
                                 });
                                 if let Some(target) = Self::click_test(slot, scene, hit) {
                                     if scene.get(target).is_some_and(|node| {
@@ -1202,10 +1233,12 @@ impl PointerState {
                                             node_id: target.0,
                                             event_type: EVT_CLICK,
                                             click_count: count,
-                                            pad: [0, 0],
+                                            pad: [ev.button, 0],
                                             touch_id,
                                             x: ev.x,
                                             y: ev.y,
+                                            dx: 0.0,
+                                            dy: 0.0,
                                         });
                                     }
                                 } else {
@@ -1227,6 +1260,8 @@ impl PointerState {
                                 touch_id,
                                 x: ev.x,
                                 y: ev.y,
+                                dx: 0.0,
+                                dy: 0.0,
                             });
                         }
                     }
@@ -1328,6 +1363,8 @@ impl PointerState {
                     touch_id: slot.touch_id,
                     x: slot.last_pos.0,
                     y: slot.last_pos.1,
+                    dx: 0.0,
+                    dy: 0.0,
                 });
             }
         }
@@ -1341,6 +1378,8 @@ impl PointerState {
                     touch_id: slot.touch_id,
                     x: slot.last_pos.0,
                     y: slot.last_pos.1,
+                    dx: 0.0,
+                    dy: 0.0,
                 });
             }
         }
