@@ -109,6 +109,8 @@ public abstract class Node {
     public AnimationHandle Play(string name, float durationSeconds); // 无声明 keyframes 默认 1s，此重载覆盖
     public void Focus();
     public void Blur();
+    public void SetPointerCapture(int touchId);  // DOM setPointerCapture 平价；Up 自动释放
+    public void CancelClick(int touchId);        // 取消该指针待决 Click（长按后不点击等）
 
     public IDisposable OnUpdate(Action<float> cb);          // 逻辑驱动每帧更新钩子
     public EventRegistration On<T>(Action<T> handler, bool useCapture = false, bool once = false) where T : IRouteEvent;
@@ -263,7 +265,7 @@ public interface IRouteEvent {
 
 | 类别 | 事件 |
 |---|---|
-| 指针 | PointerDown/Up/Move/Enter/Leave, Click |
+| 指针 | PointerDown/Up/Move/Enter/Leave, Click, LongPress |
 | 拖拽 | DragStart/Move/End |
 | 键盘 | KeyDown/Up |
 | 焦点 | Focus/Blur |
@@ -272,7 +274,7 @@ public interface IRouteEvent {
 
 指针键用 `PointerButton` 枚举（Left/Right/Middle）。
 
-**路由语义细节**：capture 阶段不检 `StopPropagation`（root→target 全程跑）、bubble 前预检；target 节点在 capture 末尾与 bubble 开头各收一次。`Enter/Leave` 不冒泡——按祖先链 diff 逐节点直派（从父进子父不 Leave，对齐 CSS `:hover` 祖先语义）。`Click` 目标 = down 时的叶子节点（光标阈内漂移仍点中按下叶）；双击无独立事件——`ClickEvent.ClickCount` 在 1↔2 间循环（同位置+同键+时间窗）。`PointerMove` 需先 capture 指针（monitor 机制）才有事件流。
+**路由语义细节**：capture 阶段不检 `StopPropagation`（root→target 全程跑）、bubble 前预检；target 节点在 capture 末尾与 bubble 开头各收一次。`Enter/Leave` 不冒泡——按祖先链 diff 逐节点直派（从父进子父不 Leave，对齐 CSS `:hover` 祖先语义）。`Click` 目标 = down 时的叶子节点（光标阈内漂移仍点中按下叶）；双击无独立事件——`ClickEvent.ClickCount` 在 1↔2 间循环（同位置+同键+时间窗）。`LongPress` 按住 ≥1.5s 触发、与 `Click` 独立——长按后松手不要点击的业务在 handler 里调 `CancelClick(evt.TouchId)`。`PointerMove` 需先 `SetPointerCapture`（monitor 机制）才有事件流。
 
 ### 5.4 退订
 
