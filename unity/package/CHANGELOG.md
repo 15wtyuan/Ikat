@@ -7,7 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Issue #48/#45/#43/#44/#39 批：TabList 布局覆写、必需子 CSS 校验、Smooth 滚动停错位、span 事件接线。
+## [0.0.11] - 2026-08-25
+
+v0.0.10 后三波累积：#48/#45/#43/#44/#46/#42 修复批、M2 分辨率适配批（#5/#3/#6/#7）、
+狗粮批（#63-#67，Tripawd 实战打出来的五连修）。
+
+### Added
+- **分辨率适配（#5）**：Letterbox/FitWidth/FitHeight 三模式 + `vw/vh/vmin/vmax`
+  视口单位（重排语言，随屏幕/适配模式重排）；`loom design` 命令 + GUI
+  design/match 配置面。
+- **Drag 事件载荷接线（#63）**：`DragMoveEvent.DeltaX/Y` 逐 Move 增量（core 权威，
+  EventRecord 28B）、`DragStartEvent.StartPosition`、`Pointer{Down,Up}Event.Button`
+  （web MouseEvent.button 值域，collector 读真右/中键）。语义定案见 public-api.md。
+- **line-height px 形（#65 修复面）**：围栏拓宽 `<number> | <px> | normal`——
+  px 按本元素字号换算，继承为 px（CSS computed 语义）。
+- **交互原语路由指引（#67）**：视口平移 → `overflow:auto`（手势套件全自带、零
+  拖拽数学）；Drag API → 对象拖拽低层积木。fence.md + editor/runtime skills 落位。
+
+### Fixed
+- **line-height px 形被当 27 倍 → 文本高度爆炸（#65）**：`line-height: 27px` 此前
+  剥掉单位塞进倍数槽——17px 字号单行 459px、卡片溢出屏幕，且 `loom check` 不拦
+  （Number 域不校验）。修后映射双槽 + `effective_line_height()` 换算 + 围栏值域
+  门（em/% 打包期报错）。pkg 格式 v41→v42（旧 pkg 加载报 TooOld，需重打包）。
+- **min-height:0 弹性滚动视口被内容撑爆（#64）**：overflow 容器（含装饰性
+  `hidden`）的直接子此前被强制 `flex-shrink=0`——`.screen{hidden}` 的弹性链被
+  锁死、预览↔运行时不一致。修后 shrink=0 只限真滚动容器（Auto/Scroll），并补
+  CSS §4.5 specified-size 地板（显式尺寸子项不再被溢出行按比例挤扁）。
+- **滚动容器内旋转节点消失（#66）**：非纯平移节点的 Unity renderer.bounds =
+  GO 平移 × 未旋转 mesh ≠ 真实视觉 AABB → SRP 错误剔除。修后 Mesh.bounds 补偿
+  为线性矩阵 × 顶点 AABB；MirrorPool dump 的 meshBounds 与实际一致。
+- Issue #48/#45/#43/#44/#39 批：TabList 布局覆写、必需子 CSS 校验、Smooth
+  滚动停错位、span 事件接线（详见下文）。
 
 ### Fixed
 - **TabList 激活 panel 不再覆写作者布局（#48）**：激活 panel 此前被统一置
