@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Review 批（2026-08-25 代码审查产出）：#66 修复的幂等性雷、文本导航字节映射方向、
+拖选门控、tabpanel 打包期门、投影层三小修。MirrorPool EditMode 测试同步升 v14 blob。
+
+### Fixed
+- **#66 bounds 补偿幂等（blocker）**：MirrorPool 在 FULL 帧缓存 mesh 原始 AABB，
+  Header 帧（滚动中的旋转/缩放节点每帧都是 Header 级）从缓存重算——修前在已补偿值上
+  再乘线性矩阵，scale<1 几何级缩小（#66 消失 bug 慢性复发）、90° 交替轴交换、45° 无界
+  膨胀。新增两帧（FULL→HEADER×2）幂等回归测试（缩放/旋转两场景）。
+- **文本导航字节映射方向**：TextArea 上下行/行级 Home-End 的 value↔display 偏移换算
+  两参传反——掩码/IME 组装态（display 字节布局 ≠ value）错行错列；普通 ASCII 路径两向
+  数值恒等故无感。掩码场景回归测试锁方向。
+- **拖选门控**：disabled 文本框不再响应拖选 Move（与 on_pointer_down/occupies_gesture
+  对齐）；非主键 Down 不激活控件、不武装拖选/Slider 跟随（浏览器对齐——右键按住拖动
+  不扩展选区）。
+- **EventBus once 语义**：once handler 调 StopImmediatePropagation 后仍退订（修前
+  immediate-stop 的 break 在 once 收集之前，下次事件再触发一次）。
+- **MaxLength 负值**：C# setter 拒绝负数（FFI 参数 nuint，直接 cast 会把 -1 回绕成 ≈无限）。
+- **letterbox fallback 数学**：FFI 调用失败的 C# 兜底改与 Rust compute 同式（top-down
+  safe y + rendered span 双轴居中；修前用 Unity 下原点 y 且漏垂直居中项）。
+- **take_warnings 内嵌 NUL**：分条截断而非整串丢弃（任一条警告含 NUL 曾静默吞掉全部）。
+- **MirrorPool EditMode 测试升 v14**：v10/v11 手搓 blob 自 frame blob v14（#26）起被
+  IsValid 拒收、整套必红；升 v14 列型 + node_id/parent_id 8B + ulong 反射键。
+
+### Added
+- **tabpanel 打包期门**：`role="tabpanel"` 手写内联 `display:none` →
+  `FenceTabpanelHiddenByAuthor` error。显隐所有权归 TabList 运行时（激活面板靠 unset
+  inline display 回落作者样式），作者内联 none 烙进 base_style 后 unset 清不掉——激活
+  面板永久隐身的静默坏，存量写法打包期点破。
+- fence.md 补「运行时合成属性不参与打包期 CSS 命中」：只写
+  `[aria-indeterminate="true"] [data-slot=fill]` / `[aria-checked="true"] .knob` 一类
+  态规则会吃 `FenceControlChildWithoutCss` 假错误，子部件须另有命中打包期 HTML 的基础
+  规则。
+
 ## [0.0.12] - 2026-08-25
 
 v0.0.11 后两波：狗粮残留批（#47/#49/#50，公共 API 投影缺口补齐）+ M3 P0 开工批
