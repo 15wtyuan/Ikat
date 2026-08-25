@@ -252,7 +252,9 @@ public interface IRouteEvent {
     Node CurrentTarget { get; }
     bool DefaultPrevented { get; }
     bool PropagationStopped { get; }
+    bool ImmediatePropagationStopped { get; }
     void StopPropagation();
+    void StopImmediatePropagation();   // 同节点剩余 handler 全跳 + 止后续传播（DOM 平价）
     void PreventDefault();
 }
 ```

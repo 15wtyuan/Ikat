@@ -47,9 +47,20 @@ namespace LoomGUI
 
         internal bool _defaultPrevented;
         internal bool _propagationStopped;
+        internal bool _immediateStopped;
 
         /// <summary>止冒泡：<see cref="EventBus"/> 路由循环看到此 flag 后 break / skip bubble。</summary>
         internal void StopPropagation() => _propagationStopped = true;
+
+        /// <summary>立即止播（DOM stopImmediatePropagation）：置位后（1）当前节点剩余
+        /// 同节点 handler 全跳（InvokeHandlers 循环 break）；（2）连带置 _propagationStopped
+        /// ——bubble 循环照 StopPropagation 语义中断。capture 阶段设位与 StopPropagation 同：
+        /// 不截 capture 遍历（本仓 capture 全程跑的既有语义），但同节点剩余 handler 仍跳。</summary>
+        internal void StopImmediatePropagation()
+        {
+            _immediateStopped = true;
+            _propagationStopped = true;
+        }
 
         /// <summary>取消默认行为：语义糖据此 flag 决定是否执行默认动作（接线时定）。</summary>
         internal void PreventDefault() => _defaultPrevented = true;

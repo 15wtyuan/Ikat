@@ -122,6 +122,25 @@ namespace LoomGUI
             }
         }
 
+        /// <summary>
+        /// Computed = 只读 computed style 查询（cascade 解析终值，非 Style 的 inline override
+        /// 写层）。每次访问直读 FFI 不缓存；时效：rematch 后有效、本帧 tick 后反映最新 cascade。
+        /// 背景/边框色缺席时（bg_present=0）对应属性返 null。
+        /// </summary>
+        public NodeComputedStyle Computed
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                ComputedNodeStyleRepr repr;
+                int rc = Native.loomgui_stage_get_node_computed_style(h, _id, &repr);
+                if (rc != 0)
+                    throw new InvalidOperationException($"get_node_computed_style failed (node {_id})");
+                return new NodeComputedStyle(ref repr);
+            }
+        }
+
         // Touchable（CSS `pointer-events` 的运行时面）：false = 本节点不参与命中（子节点
         // 照常——透传语义）。setter 直 FFI（写 interaction + base_style 双处，rematch 存活）；
         // getter 读 interaction.touchable（hit_test 同源）。
@@ -366,6 +385,30 @@ namespace LoomGUI
             Native.loomgui_stage_blur(h);
         }
 
+        /// <summary>
+        /// 捕获指针（DOM element.setPointerCapture 对齐）：本节点加入该指针的 monitor 表，
+        /// 后续 PointerMove 即使移出命中域也直派给本节点，直到指针 Up 自动释放（无显式
+        /// release API——core 在 Up 清 monitor 表）。须在指针 Down 之后调（Down 前槽未分配，
+        /// no-op）——典型用法在 On&lt;PointerDownEvent&gt; handler 里以 evt.TouchId 调。
+        /// </summary>
+        public void SetPointerCapture(int touchId)
+        {
+            ThrowIfDisposed();
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_add_touch_monitor(h, touchId, _id);
+        }
+
+        /// <summary>
+        /// 取消该指针待决的 Click（如长按后松手不要 Click、拖拽开始取消点击）。
+        /// touchId 从对应事件（PointerDown/LongPress/DragStart）的 TouchId 取；鼠标 = -1。
+        /// </summary>
+        public void CancelClick(int touchId)
+        {
+            ThrowIfDisposed();
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.loomgui_stage_cancel_click(h, touchId);
+        }
+
         public IDisposable OnUpdate(Action<float> cb)
         {
             ThrowIfDisposed();
@@ -599,6 +642,81 @@ namespace LoomGUI
     // 经 set_inline_override 会被 bit 检查前置静默丢弃（ghost-state 防护），故本类只接
     // inline_bit 表内 prop（25 个，z-index 在 u64 位图 bit 32）；SetVar / RemoveVar 暂缓
     // （core apply_decl 未实现，throw NE + 注释）。
+    /// <summary>
+    /// 只读 computed style 快照（Node.Computed 每次访问新建）。cascade 解析终值——含
+    /// tag 默认 / class 规则 / inline override 全层叠后的结果；背景/边框色缺席（cascade
+    /// 无该声明）时对应属性返 null。时效：rematch 后有效、本帧 tick 后反映最新 cascade
+    /// （同 web getComputedStyle 的回流后语义）。
+    /// </summary>
+    public readonly unsafe struct NodeComputedStyle
+    {
+        readonly DisplayMode _display;
+        readonly FlexDirection _flexDirection;
+        readonly Overflow _overflowX, _overflowY;
+        readonly LoomColor _color;
+        readonly LoomColor? _background;
+        readonly float _opacity;
+        readonly LoomColor? _border;
+        readonly float _fontSize;
+        readonly int _fontWeight;
+        readonly TextAlign _textAlign;
+        readonly float _lineHeight;
+        readonly float _letterSpacing;
+
+        internal NodeComputedStyle(ref ComputedNodeStyleRepr r)
+        {
+            // FFI 判别值（lib.rs from_computed 显式映射，不依赖 Rust enum repr）：
+            // display Flex=0/Block=1/None=2；flex_dir Row=0/Column=1/RowReverse=2/ColumnReverse=3；
+            // overflow Visible=0/Hidden=1/Scroll=2/Auto=3（C# 侧 Hidden 叫 Clip）；align L/C/R=0/1/2。
+            _display = r.display_mode switch
+            {
+                0 => DisplayMode.Flex, 1 => DisplayMode.Block, _ => DisplayMode.None,
+            };
+            _flexDirection = r.flex_direction switch
+            {
+                0 => FlexDirection.Row, 1 => FlexDirection.Column, 2 => FlexDirection.RowReverse,
+                _ => FlexDirection.ColumnReverse,
+            };
+            _overflowX = MapOverflow(r.overflow_x);
+            _overflowY = MapOverflow(r.overflow_y);
+            _color = new LoomColor(r.color[0], r.color[1], r.color[2], r.color[3]);
+            _background = r.bg_present != 0
+                ? (LoomColor?)new LoomColor(r.background_color[0], r.background_color[1], r.background_color[2], r.background_color[3])
+                : null;
+            _opacity = r.opacity;
+            _border = r.border_present != 0
+                ? (LoomColor?)new LoomColor(r.border_color[0], r.border_color[1], r.border_color[2], r.border_color[3])
+                : null;
+            _fontSize = r.font_size;
+            _fontWeight = r.font_weight;
+            _textAlign = (TextAlign)r.text_align;
+            _lineHeight = r.line_height;
+            _letterSpacing = r.letter_spacing;
+        }
+
+        static Overflow MapOverflow(byte v) => v switch
+        {
+            0 => Overflow.Visible, 1 => Overflow.Clip, 2 => Overflow.Scroll, _ => Overflow.Auto,
+        };
+
+        public DisplayMode Display => _display;
+        public FlexDirection FlexDirection => _flexDirection;
+        public Overflow OverflowX => _overflowX;
+        public Overflow OverflowY => _overflowY;
+        /// <summary>文字色（CSS color 通道；总有值——继承链兜底黑色）。</summary>
+        public LoomColor Color => _color;
+        /// <summary>背景色；cascade 无 background-color 声明时 null。</summary>
+        public LoomColor? Background => _background;
+        public float Opacity => _opacity;
+        /// <summary>边框色；无 border 声明时 null。</summary>
+        public LoomColor? Border => _border;
+        public float FontSize => _fontSize;
+        public int FontWeight => _fontWeight;
+        public TextAlign TextAlign => _textAlign;
+        public float LineHeight => _lineHeight;
+        public float LetterSpacing => _letterSpacing;
+    }
+
     public sealed class NodeStyle
     {
         // 投影层内部：owner Node + mirror。Node.Style lazy 造时传入 this；StyleMirror 持 owner
@@ -1630,6 +1748,22 @@ namespace LoomGUI
             Native.loomgui_stage_set_node_disabled(h, id, v);
         }
 
+        // maxlength：UTF-8 字符上限（0 = 无限）。setter 不追溯裁剪现有 value（HTML maxlength
+        // 语义——只限后续输入/粘贴）；getter 与 set 对称（TextField/TextArea 双变体口径）。
+        internal static void SetControlMaxLength(StageHandle* h, uint id, int v)
+        {
+            int rc = Native.loomgui_stage_set_control_maxlength(h, id, (nuint)v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_maxlength failed (node {id})");
+        }
+
+        internal static int GetControlMaxLength(StageHandle* h, uint id)
+        {
+            nuint v = 0;
+            int rc = Native.loomgui_stage_get_control_maxlength(h, id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_control_maxlength failed (node {id}, non-text?)");
+            return (int)v;
+        }
+
         // get_node_disabled：void + byte* out（与 set 对称的读出口）。null 句柄 / 节点缺失 → 写 0（false），
         // 不报错（与 set 的「悬空 NodeId 静默跳过」语义一致）。所有 Node 子类的 Disabled getter 经此。
         internal static bool GetNodeDisabled(StageHandle* h, uint id)
@@ -1725,6 +1859,13 @@ namespace LoomGUI
         // disabled：伪类源 + active/click 抑制（set_node_disabled）。getter 读 NodeFlags::DISABLED
         // （get_node_disabled，与 set 对称）。
         public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
+        // MaxLength：UTF-8 字符上限（0 = 无限）。setter 不追溯裁剪现有 value（HTML maxlength
+        // 语义——只限后续输入/粘贴）。
+        public int MaxLength
+        {
+            get { ThrowIfDisposed(); return TextControlFFI.GetControlMaxLength(Handle(), _id); }
+            set { ThrowIfDisposed(); TextControlFFI.SetControlMaxLength(Handle(), _id, value); }
+        }
 
         // ValueChanged：文本框值变更（core EVT_VALUE_CHANGED=22）。文本框的 EventRecord 不携值
         // （x=0，与 Slider 的 x=新值 不同）——订阅 ControlValueChangedEvent，在触发时回读当前
@@ -2222,6 +2363,12 @@ namespace LoomGUI
             get { ThrowIfDisposed(); return GetControlReadonly(); }
         }
         public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
+        // MaxLength：UTF-8 字符上限（0 = 无限），不追溯裁剪现有 value（同 TextField）。
+        public int MaxLength
+        {
+            get { ThrowIfDisposed(); return TextControlFFI.GetControlMaxLength(Handle(), _id); }
+            set { ThrowIfDisposed(); TextControlFFI.SetControlMaxLength(Handle(), _id, value); }
+        }
 
         // ValueChanged：值变更（core EVT_VALUE_CHANGED=22，含 Enter 插换行）。订阅
         // ControlValueChangedEvent，在触发时回读当前 value 填 ValueChangedEvent<string>。
@@ -2389,6 +2536,20 @@ namespace LoomGUI
                 if (rc < 0)
                     throw new InvalidOperationException($"is_option_selected failed (node {_id}: not an option / no dropdown ancestor)");
                 return rc == 1;
+            }
+        }
+        /// <summary>本 option 在所属 Dropdown 里的声明序（0 基，与 SelectedIndex / 键盘 seek
+        /// 同口径）。读失败（非 option / 上溯无 Dropdown）抛 InvalidOperationException。</summary>
+        public int Index
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                int idx = Native.loomgui_stage_get_option_index(h, _id);
+                if (idx < 0)
+                    throw new InvalidOperationException($"get_option_index failed (node {_id}: not an option / no dropdown ancestor)");
+                return idx;
             }
         }
         // Disabled：伪类源（NodeFlags::DISABLED）。setter 直 FFI；getter 读 node flag（与 Slider 等一致）。

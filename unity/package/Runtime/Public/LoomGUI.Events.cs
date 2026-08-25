@@ -23,7 +23,9 @@ namespace LoomGUI
         Node CurrentTarget { get; }
         bool DefaultPrevented { get; }
         bool PropagationStopped { get; }
+        bool ImmediatePropagationStopped { get; }
         void StopPropagation();
+        void StopImmediatePropagation();
         void PreventDefault();
     }
 
@@ -72,6 +74,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         /// <summary>EventBus 订阅表 key（对齐 core <see cref="EventType"/>）。</summary>
         internal static byte EventType => (byte)LoomEventType.Down;
         public LoomVector2 Position { get { return _position; } }
@@ -92,6 +96,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.Up;
         public LoomVector2 Position { get { return _position; } }
         public PointerButton Button { get { return _button; } }
@@ -112,6 +118,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.Move;
         public LoomVector2 Position { get { return _position; } }
         public float DeltaX { get { return _deltaX; } }
@@ -130,6 +138,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.RollOver;
         public LoomVector2 Position { get { return _position; } }
     }
@@ -145,8 +155,34 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.RollOut;
         public LoomVector2 Position { get { return _position; } }
+    }
+
+    /// <summary>
+    /// 长按（按住 ≥1.5s，与 Click 独立触发——不互斥）。长按后松手仍会照常发 Click
+    /// （core 语义），不要 Click 的业务在 LongPress handler 里调
+    /// <see cref="Node.CancelClick"/>（touchId 从本事件取）。
+    /// </summary>
+    public struct LongPressEvent : IRouteEvent, IRouteEventCore
+    {
+        internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
+        internal LoomVector2 _position;
+        internal int _touchId;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
+        internal static byte EventType => (byte)LoomEventType.LongPress;
+        public LoomVector2 Position { get { return _position; } }
+        public int TouchId { get { return _touchId; } }
     }
 
     public struct ClickEvent : IRouteEvent, IRouteEventCore
@@ -161,6 +197,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.Click;
         public LoomVector2 Position { get { return _position; } }
         public int ClickCount { get { return _clickCount; } }
@@ -178,6 +216,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.DragStart;
         public LoomVector2 Position { get { return _position; } }
         public LoomVector2 StartPosition { get { return _startPosition; } }
@@ -196,6 +236,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.DragMove;
         public LoomVector2 Position { get { return _position; } }
         public float DeltaX { get { return _deltaX; } }
@@ -213,6 +255,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.DragEnd;
         public LoomVector2 Position { get { return _position; } }
     }
@@ -230,6 +274,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.KeyDown;
         public LoomKeyCode Key { get { return _key; } }
         public KeyModifiers Modifiers { get { return _modifiers; } }
@@ -248,6 +294,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.KeyUp;
         public LoomKeyCode Key { get { return _key; } }
         public KeyModifiers Modifiers { get { return _modifiers; } }
@@ -264,6 +312,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.FocusIn;
         public Node PreviousFocused { get { return _previousFocused; } }
     }
@@ -279,6 +329,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.FocusOut;
         public Node NewFocused { get { return _newFocused; } }
     }
@@ -297,6 +349,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         // 无 LoomEvent 源（ScrollPane 物理自维护 tween）——待接 ScrollPane 回调。
         internal static byte EventType => (byte)LoomEventType.ScrollChanged;
         public float ScrollX { get { return _scrollX; } }
@@ -319,6 +373,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.AnimationStart;
         public string AnimationName { get { return _animationName; } }
     }
@@ -334,6 +390,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         // 经 TweenComplete（core 产，prop 名装 click_count）。
         internal static byte EventType => (byte)LoomEventType.AnimationEnd;
         public string AnimationName { get { return _animationName; } }
@@ -351,6 +409,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.AnimationIteration;
         public string AnimationName { get { return _animationName; } }
         public int IterationCount { get { return _iterationCount; } }
@@ -371,6 +431,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.AnimationKey;
         public string AnimationName { get { return _animationName; } }
         public float Percent { get { return _percent; } }
@@ -388,6 +450,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.AnimationHook;
         public string AnimationName { get { return _animationName; } }
         public string HookName { get { return _hookName; } }
@@ -404,6 +468,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         // 经 TweenComplete（core 产，prop 名装 click_count）。
         internal static byte EventType => (byte)LoomEventType.TransitionEnd;
         public string PropertyName { get { return _propertyName; } }
@@ -428,6 +494,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.ValueChanged;
         internal float Value { get { return _value; } }
     }
@@ -443,6 +511,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.CheckedChanged;
         internal bool Checked { get { return _checked; } }
     }
@@ -458,6 +528,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.ChangeCommitted;
         internal float Value { get { return _value; } }
     }
@@ -476,6 +548,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.Submitted;
     }
 
@@ -494,6 +568,8 @@ namespace LoomGUI
         public bool PropagationStopped => _core._propagationStopped;
         public void StopPropagation() => _core.StopPropagation();
         public void PreventDefault() => _core.PreventDefault();
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
         internal static byte EventType => (byte)LoomEventType.SelectionChanged;
         internal int NewIndex { get { return _newIndex; } }
     }

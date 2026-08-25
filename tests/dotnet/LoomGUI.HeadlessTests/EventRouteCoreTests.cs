@@ -26,7 +26,7 @@ namespace LoomGUI.HeadlessTests
         {
             typeof(PointerDownEvent), typeof(PointerUpEvent), typeof(PointerMoveEvent),
             typeof(PointerEnterEvent), typeof(PointerLeaveEvent),
-            typeof(ClickEvent),
+            typeof(ClickEvent), typeof(LongPressEvent),
             typeof(DragStartEvent), typeof(DragMoveEvent), typeof(DragEndEvent),
             typeof(KeyDownEvent), typeof(KeyUpEvent),
             typeof(FocusEvent), typeof(BlurEvent),
@@ -166,6 +166,8 @@ namespace LoomGUI.HeadlessTests
             yield return new object[] { typeof(PointerEnterEvent),       (byte)EventType.RollOver };
             yield return new object[] { typeof(PointerLeaveEvent),       (byte)EventType.RollOut };
             yield return new object[] { typeof(ClickEvent),              (byte)EventType.Click };
+            // 长按（core 按住 ≥1.5s 发 EVT_LONG_PRESS=9，与 Click 独立）。
+            yield return new object[] { typeof(LongPressEvent),          (byte)EventType.LongPress };
             yield return new object[] { typeof(DragStartEvent),          (byte)EventType.DragStart };
             yield return new object[] { typeof(DragMoveEvent),           (byte)EventType.DragMove };
             yield return new object[] { typeof(DragEndEvent),            (byte)EventType.DragEnd };

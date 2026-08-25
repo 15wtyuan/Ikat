@@ -991,6 +991,15 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_is_option_selected(StageHandle* h, uint node_id);
 
         /// <summary>
+        ///  option 在其所属 Dropdown 的声明序（0 基，与 selected_index / 键盘 seek 同口径）。
+        ///  -1 = 非 option / 上溯无 Dropdown / null 句柄。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_option_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_option_index(StageHandle* h, uint node_id);
+
+        /// <summary>
         ///  tab 是否为所属 TabList 的当前激活项（合成：序号 == 父 selected_index，与
         ///  aria-selected 派生同源）。1=激活，0=未激活，-1=非 tab / 上溯无 TabList / null 句柄。
         ///
@@ -1074,6 +1083,15 @@ namespace LoomGUI.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_maxlength", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_set_control_maxlength(StageHandle* h, uint node_id, nuint max_length);
+
+        /// <summary>
+        ///  读文本控件 max_length（UTF-8 字符上限；0 = 无限）。非文本控件 / null 句柄 → -1
+        ///  （与 set_control_maxlength 对称——同为 TextField/TextArea 双变体口径）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_maxlength", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_maxlength(StageHandle* h, uint node_id, nuint* @out);
 
         /// <summary>
         ///  设节点 user transform（位移/缩放/旋转/原点）。走 `set_user_transform`（dynamic.rs）：

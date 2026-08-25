@@ -85,6 +85,8 @@ namespace LoomGUI
     public enum Overflow { Unset, Visible, Clip, Auto, Scroll }
     public enum PositionMode { Unset, Static, Relative, Absolute }
     public enum ScrollBehavior { Instant, Smooth }   // 方法参数，非 Style 属性，无需 Unset
+    // text-align 的 computed 读值（Style 写层无此 prop——围栏子集 text-align 走 CSS 声明）。
+    public enum TextAlign { Left, Center, Right }
 
     // 指针键：对齐 web MouseEvent.button（0=左/1=中/2=右）但用枚举自解释。
     public enum PointerButton { Left, Middle, Right }

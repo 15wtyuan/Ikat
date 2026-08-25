@@ -255,8 +255,14 @@ namespace LoomGUI
                             new ControlSelectionChangedEvent { _core = NewCore(nodeId), _newIndex = evt.touchId });
                         break;
 
-                    // LongPress (9)：无对应 typed event struct——跳过。
-                    //
+                    // 长按（core 按住 ≥1.5s 发 EVT_LONG_PRESS=9，与 Click 独立——长按后松手
+                    // 是否还 Click 由业务定，配 Node.CancelClick(touchId) 显式取消）。
+                    case (byte)EventType.LongPress:
+                        DispatchTyped(nodeId,
+                            new LongPressEvent { _core = NewCore(nodeId),
+                                _position = new LoomVector2(evt.x, evt.y), _touchId = evt.touchId });
+                        break;
+
                     // ScrollChanged (17)：source 待补。ScrollPane 物理自维护 tween，
                     // 无 borrow_scroll_events FFI。后续需加 FFI 或 ScrollPane C# 回调
                     // 主动调 EventBus.Dispatch。

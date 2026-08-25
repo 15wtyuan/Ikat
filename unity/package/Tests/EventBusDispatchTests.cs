@@ -20,7 +20,9 @@ namespace LoomGUI.Tests
             public Node CurrentTarget => _core.CurrentTarget;
             public bool DefaultPrevented => _core._defaultPrevented;
             public bool PropagationStopped => _core._propagationStopped;
+            public bool ImmediatePropagationStopped => _core._immediateStopped;
             public void StopPropagation() => _core.StopPropagation();
+            public void StopImmediatePropagation() => _core.StopImmediatePropagation();
             public void PreventDefault() => _core.PreventDefault();
             internal static byte EventType => 200;
             RouteEventCore IRouteEventCore.Core => _core;

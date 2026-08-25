@@ -176,7 +176,7 @@ namespace LoomGUI
         /// 触发指定 (nodeId, eventType, capture) 上的全部订阅。snapshot list 防 handler 内 Dispose
         /// 或 once auto-remove 改 list 边遍历边改。once entry 触发后收集 → 循环后统一移除。
         /// </summary>
-        void InvokeHandlers<T>(uint nodeId, byte eventType, bool capture, ref T evt)
+        void InvokeHandlers<T>(uint nodeId, byte eventType, bool capture, ref T evt) where T : IRouteEvent, IRouteEventCore
         {
             var key = (nodeId, eventType, capture);
             if (!_subs.TryGetValue(key, out var list) || list.Count == 0) return;
@@ -194,6 +194,10 @@ namespace LoomGUI
                 if (entry.IsDisposed) continue;
 
                 ((HandlerEntry<T>)entry).Invoke(ref evt);
+
+                // StopImmediatePropagation：当前节点剩余 handler 全跳（DOM 语义——只断本节点
+                // 的 listener 循环；跨节点截断由 _propagationStopped 在 Dispatch 循环承担）。
+                if (evt.Core._immediateStopped) break;
 
                 if (entry.Once)
                 {
