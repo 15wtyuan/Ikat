@@ -1,6 +1,8 @@
 use super::*;
 use crate::test_helpers::stage_new_with_dejavu;
+use loomgui_core::input::EventRecord;
 use loomgui_core::scene::node::{ControlState, EditState, NodeKind};
+use loomgui_core::scene::NodeId;
 use loomgui_core::style::resolved::DisplayMode;
 use std::ffi::CStr;
 
