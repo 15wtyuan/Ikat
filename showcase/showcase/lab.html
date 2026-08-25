@@ -281,7 +281,7 @@
 
       <div class="section">
         <div class="section-title">15 · 交互输入（long-press / cancel-click / pointer capture / 不定态进度条）</div>
-        <div class="section-desc">长按蓝色块 ~0.6s：读数变「长按触发」（LongPressEvent）且松开后不变「click」（CancelClick 砍掉本次）；短按才走 click。按住紫色块拖出元素外：坐标读数持续跟随（SetPointerCapture 重定向 Move，松手自动释放）。不定态进度条无 aria-valuenow（打包期即 indeterminate），fill 滑动动画由态规则驱动——对照组：character 页 determinate 形态（宽度=value）。</div>
+        <div class="section-desc">验收标准逐项：① 左蓝块——短按（不足 0.6 秒）读数变「click」；长按约 0.6 秒变「长按触发」，且松开后读数不得再变（长按的松手被 CancelClick 砍掉，若松手后又变「click」即失败）。② 中紫块——按住不放拖出块外：下方坐标读数应持续跟随鼠标变动（SetPointerCapture 把 Move 路由锁到本节点）；松手读数变「up」。③ 右进度条——蓝色 fill 应持续从左向右循环滑动（加载动画样式；静止不动或不循环即失败）。对照：character 页进度条为确定态（宽度 = 数值比例，不滑动）。</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:24px;flex-wrap:wrap;align-items:flex-start">
           <div style="display:flex;flex-direction:column;gap:6px">
             <span style="color:#9aa0b4;font-size:12px">长按 + CancelClick</span>

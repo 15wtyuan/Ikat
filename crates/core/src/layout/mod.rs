@@ -485,12 +485,20 @@ pub fn solve(
     for &(nid, tid) in cache.ids.iter().flatten() {
         taffy_to_scene.insert(tid, nid);
     }
-    let mut text_layouts: Vec<Option<TextLayout>> = vec![None; scene.nodes.capacity() + 1];
+    // text_layouts 承接上帧（同 measure_cache 的 carry-over 模式）：增量 solve 的稳态帧
+    // taffy 缓存全命中、measure 闭包不跑——若每帧新建全空，render 会退回用整数化
+    // content_w 重测每个文本，短文本因 intrinsic 亚像素超宽误判换行（老病复发：
+    // node.rs text_layouts 字段注释）。未重测节点的布局没变，上帧 TextLayout 仍准确；
+    // 重测节点由闭包按 Some 优先规则覆写。新节点槽位由 alloc_node_slot 清 None，无串染。
+    let mut text_layouts: Vec<Option<TextLayout>> = std::mem::take(&mut scene.text_layouts);
     // measure memo：跨帧 carry-over。mem::take 出 scene（期间 scene.text_measure_cache 空），
     // 闭包用完在末尾写回——与 text_layouts 同模式，避 borrow 冲突（build 已在上方借过 scene）。
     let mut measure_cache: Vec<Option<crate::text::layout::TextMeasureCache>> =
         std::mem::take(&mut scene.text_measure_cache);
     let cap_need = scene.nodes.capacity() + 1;
+    if text_layouts.len() < cap_need {
+        text_layouts.resize(cap_need, None);
+    }
     if measure_cache.len() < cap_need {
         measure_cache.resize(cap_need, None);
     }
@@ -512,6 +520,10 @@ pub fn solve(
 
     // solve：单一 FnMut 闭包按 context 分派。
     // known.width: Option<f32> —— Some=约束宽，None=不限（→ measure_text max_width=None）。
+    // remeasured：本帧被重测过的节点（首测清 text_layouts 槽——恢复「帧内从空填充」
+    // 语义，防 intrinsic-only 重测后残留上帧 constrained 行断；未重测节点保留
+    // carry-over 值，见上方 text_layouts 注释）。
+    let mut remeasured = vec![false; cap_need];
     cache
         .tree
         .compute_layout_with_measure(
@@ -595,6 +607,11 @@ pub fn solve(
                         // 文字在 content area（wrap 宽 - h_inset）内换行 + 对齐，否则吃到 padding 超框。
                         let mw = wrap_width.map(|w| (w - *h_inset).max(0.0));
                         let sid_opt = taffy_to_scene.get(&nid).copied();
+                        if let Some(sid) = sid_opt {
+                            if !std::mem::replace(&mut remeasured[sid.index()], true) {
+                                text_layouts[sid.index()] = None;
+                            }
+                        }
                         // measure memo：fingerprint 命中 → 复用 TextLayout 跳过 shaping。
                         // 两槽：mw=None→intrinsic（max-content），mw=Some→constrained（换行）。
                         // fingerprint 含 content hash → set_text / slot 换内容自动 miss。
@@ -679,6 +696,11 @@ pub fn solve(
                         // 同 Text：content area = wrap 宽（border-box）- h_inset。
                         let mw = wrap_width.map(|w| (w - *h_inset).max(0.0));
                         let sid_opt = taffy_to_scene.get(&nid).copied();
+                        if let Some(sid) = sid_opt {
+                            if !std::mem::replace(&mut remeasured[sid.index()], true) {
+                                text_layouts[sid.index()] = None;
+                            }
+                        }
                         // 指纹 memo：runs 每帧现编译（便宜，O(inline 子)），
                         // 算指纹命中缓存跳过贵的 measure_rich_text（shaping）。span 换色/换内容
                         // → runs 变 → fp 变 → 自动 miss 重测（不依赖 dirty_text 传播）。
@@ -1938,14 +1960,24 @@ mod tests {
         }
     }
 
-    /// 全 live 节点的 (id, layout_rect, clip_rect) 快照，按 id 排序。
-    fn snap(scene: &Scene) -> Vec<(NodeId, Rect, Option<Rect>)> {
+    /// 全 live 节点的 (id, layout_rect, clip_rect, 文本行数) 快照，按 id 排序。
+    /// 行数进快照：rect 相等但行断不同的回归（如 text_layouts 帧契约破环后的
+    /// 亚像素误判换行）只有这个维度能抓。
+    fn snap(scene: &Scene) -> Vec<(NodeId, Rect, Option<Rect>, usize)> {
         let mut v: Vec<_> = scene
             .nodes
             .values()
-            .map(|n| (n.id, n.layout_rect, n.clip_rect))
+            .map(|n| {
+                let lines = scene
+                    .text_layouts
+                    .get(n.id.index())
+                    .and_then(|l| l.as_ref())
+                    .map(|l| l.lines.len())
+                    .unwrap_or(0);
+                (n.id, n.layout_rect, n.clip_rect, lines)
+            })
             .collect();
-        v.sort_by_key(|(id, _, _)| id.0);
+        v.sort_by_key(|(id, _, _, _)| id.0);
         v
     }
 
@@ -2242,5 +2274,44 @@ mod tests {
                 "frame {frame}: incremental solve diverged from full rebuild"
             );
         }
+    }
+
+    /// text_layouts 的跨帧契约（#29 增量 + 换行回归）：稳态帧 taffy 缓存全命中、measure
+    /// 闭包不跑，text_layouts 必须承接上帧——否则 render 退回整数化 content_w 重测，
+    /// 短文本因 intrinsic 亚像素超宽误判换行（「首页/叠/内」末字被挤下行的真机病灶）。
+    #[test]
+    fn steady_frame_preserves_text_layouts_for_render() {
+        let Some(fonts) = font_table() else { return };
+        let entries = [(
+            None,
+            NodeKind::Container,
+            ResolvedStyle::default(),
+            Vec::new(),
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        )];
+        let mut scene = Scene::build(&entries);
+        let root = scene.roots[0];
+        let t = spawn(
+            &mut scene,
+            root,
+            NodeKind::TextNode,
+            Some("短文本宽度贴边".into()),
+        );
+        let sizes = empty_sizes();
+        solve(&mut scene, &fonts, (800.0, 600.0), &sizes);
+        assert!(
+            scene.text_layouts[t.index()].is_some(),
+            "首帧 measure 必跑、render 槽必填"
+        );
+        solve(&mut scene, &fonts, (800.0, 600.0), &sizes); // 稳态帧：零变更
+        assert!(
+            scene.text_layouts[t.index()].is_some(),
+            "稳态帧 taffy 跳过干净子树，text_layouts 必须承接上帧（None = render 退化重测换行）"
+        );
     }
 }

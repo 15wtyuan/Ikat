@@ -710,8 +710,9 @@ public class ShowcaseRunner : MonoBehaviour
             {
                 capTarget.On<PointerDownEvent>(e =>
                 {
-                    capTarget.SetPointerCapture(0);
-                    capRead.TextContent = "down（已 capture）";
+                    // touchId 从事件取（鼠标 = -1，触摸 = fingerId——手写 0 会注册到空槽）。
+                    capTarget.SetPointerCapture(e.TouchId);
+                    capRead.TextContent = "down（已 capture，touchId=" + e.TouchId + "）";
                 });
                 capTarget.On<PointerMoveEvent>(e =>
                 {
