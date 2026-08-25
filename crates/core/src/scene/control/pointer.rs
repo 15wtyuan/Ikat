@@ -192,7 +192,12 @@ pub fn on_pointer_move(
                 | ControlState::NumberField { .. }
         )
     );
-    if is_mouse && is_text {
+    // disabled 门控（同 on_pointer_down / occupies_gesture）：disabled 文本框不接受
+    // 拖选 Move——否则拖过 disabled 框仍推 cursor/anchor/cursor_visible。
+    let disabled = scene
+        .get(id)
+        .is_some_and(|n| n.interaction.flags.contains(NodeFlags::DISABLED));
+    if is_mouse && is_text && !disabled {
         // 世界坐标 → content-area-local（同 on_pointer_down 文本臂的转换链）。
         if let Some(n) = scene.get(id) {
             let lr = n.layout_rect;

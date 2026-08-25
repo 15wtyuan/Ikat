@@ -1775,6 +1775,72 @@ fn textarea_home_end_line_level() {
 }
 
 #[test]
+fn textarea_nav_maps_cursor_through_masked_display() {
+    // 回归（review 抓出）：move_vertical/line_home_end 的 value→display 偏移换算曾把
+    // (value, display) 两参传反。display==value 或同为 ASCII 时两向数值恒等抓不出；
+    // 掩码 display（● 3B/字符）与 ASCII value（1B/字符）字节布局不同才有判别力。
+    // value "ab\ncd"，display "●●\n●●"：正确方向 value 光标 4（'d' 前）→ display
+    // 字符 4（行 1 第 2 个 ●）→ 行 1；交换方向 display[..3] 回退成 1 字符 → value
+    // 字节 1 被当 display 偏移 → 行 0。
+    let (mut scene, id) = make_scene_with_textarea("●●\n●●"); // layout 按 display 形状测
+    scene.get_mut(id).unwrap().style.text_security =
+        Some(crate::style::resolved::TextSecurity::Disc);
+    if let Some(ControlState::TextArea(e)) = scene.controls.get_mut(id) {
+        e.value = "ab\ncd".into();
+        e.cursor = 4; // value 'd' 前（行 1 末段）
+    }
+    let ctx = text_nav_context(&scene, id).expect("layout cached");
+    assert_eq!(ctx.display, "●●\n●●", "display = 掩码串");
+
+    // Home：正确映射 → 行 1 首（display 字节 7）→ value 'c' 前 = 3；
+    // 交换参数 → 行 0 首 → cursor 0（错）。
+    let mut e = EditState::from_init("ab\ncd".into(), String::new(), 0, false);
+    e.cursor = 4;
+    line_home_end(&mut e, &ctx, true, false);
+    assert_eq!(
+        e.cursor, 3,
+        "掩码下 Home 落行 1 首（value↔display 按字符数映射）"
+    );
+
+    // Down：正确映射 → 已在末行 no-op 停 4；交换参数 → 起点误判行 0 → 跳行 1 首 → 3（错）。
+    let mut e2 = EditState::from_init("ab\ncd".into(), String::new(), 0, false);
+    e2.cursor = 4;
+    move_vertical(&mut e2, &ctx, true, false);
+    assert_eq!(
+        e2.cursor, 4,
+        "掩码下末行 Down no-op（行判定用 value 侧位置）"
+    );
+}
+
+#[test]
+fn on_pointer_move_text_drag_gated_by_disabled() {
+    // review 回归：disabled 文本框不接受拖选 Move——on_pointer_down 与 occupies_gesture
+    // 都门控了 disabled，Move 臂曾漏（拖过 disabled 框仍推 cursor/anchor/cursor_visible）。
+    let (mut scene, id) = make_scene_with_textfield("hello world");
+    scene
+        .get_mut(id)
+        .unwrap()
+        .interaction
+        .flags
+        .insert(NodeFlags::DISABLED);
+    if let Some(ControlState::TextField(e)) = scene.controls.get_mut(id) {
+        e.cursor = 0;
+        e.anchor = 0;
+    }
+    let events = on_pointer_move(&mut scene, id, [11.0 + 190.0, 10.0 + 1.0], true);
+    assert!(events.is_empty(), "disabled 文本臂不产事件");
+    if let Some(ControlState::TextField(e)) = scene.controls.get(id) {
+        assert_eq!(
+            (e.cursor, e.anchor),
+            (0, 0),
+            "disabled 拖选不推 cursor/anchor"
+        );
+    } else {
+        panic!("not TextField");
+    }
+}
+
+#[test]
 fn text_drag_extends_selection_anchor_kept() {
     // Down 落行首附近（anchor=cursor=0），拖到远右 → cursor 到串尾、anchor 不动。
     let (mut scene, id) = make_scene_with_textfield("hello world");

@@ -1200,18 +1200,22 @@ impl PointerState {
                     }
                     // 控件交互：命中（含控件 role/data-slot 子树）向上找控件 → on_pointer_down。
                     // Slider 占据手势（拖值）；文本控件仅鼠标占据（拖=选区，触摸让位 pan）：
-                    // 都抑制祖先 scroll + 记 control_target。
-                    if let Some(cid) = crate::scene::control::find_control_at(scene, hit) {
-                        slot.control_target = Some(cid);
-                        if crate::scene::control::occupies_gesture(scene, cid, touch_id < 0) {
-                            slot.scroll_testing = false;
-                            slot.scroll_candidate = None;
+                    // 都抑制祖先 scroll + 记 control_target。仅主键（button==0）武装——
+                    // 非主键 Down 不激活控件、不武装拖选/Slider 跟随（浏览器对齐：
+                    // 右键按下无 click/拖拽语义，否则右键按住拖动会扩展选区）。
+                    if ev.button == 0 {
+                        if let Some(cid) = crate::scene::control::find_control_at(scene, hit) {
+                            slot.control_target = Some(cid);
+                            if crate::scene::control::occupies_gesture(scene, cid, touch_id < 0) {
+                                slot.scroll_testing = false;
+                                slot.scroll_candidate = None;
+                            }
+                            out.extend(crate::scene::control::on_pointer_down(
+                                scene,
+                                cid,
+                                [ev.x, ev.y],
+                            ));
                         }
-                        out.extend(crate::scene::control::on_pointer_down(
-                            scene,
-                            cid,
-                            [ev.x, ev.y],
-                        ));
                     }
                     // click-to-focus（照 DOM mousedown）：pointer-down 命中 tabindex>=0 节点 → 聚焦它；
                     // 命中无可聚焦目标（空白 / disabled / tabindex<0）→ 清焦点（focus→body，输入框 blur）。

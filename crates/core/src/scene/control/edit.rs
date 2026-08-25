@@ -525,7 +525,7 @@ pub fn text_nav_context(scene: &Scene, id: NodeId) -> Option<TextNavCtx> {
 /// 中转截断列位。select 同 move_cursor。越顶/底行 no-op（仍重置闪烁 timer 照浏览器）。
 pub fn move_vertical(e: &mut EditState, ctx: &TextNavCtx, down: bool, select: bool) {
     let ranges = line_byte_ranges(&ctx.layout, &ctx.display);
-    let disp_off = value_to_display_byte(&ctx.display, &e.value, e.cursor);
+    let disp_off = value_to_display_byte(&e.value, &ctx.display, e.cursor);
     let (cur_x, cur_line) = cursor_pixel_x(&ctx.layout, &ranges, disp_off);
     if !e.ideal_cursor_valid {
         e.ideal_cursor_x = cur_x;
@@ -557,7 +557,7 @@ pub fn move_vertical(e: &mut EditState, ctx: &TextNavCtx, down: bool, select: bo
 /// 行尾语义：该行区间含终结 \n 时退一格——光标停在 \n 前（视觉上行尾），与浏览器一致。
 pub fn line_home_end(e: &mut EditState, ctx: &TextNavCtx, home: bool, select: bool) {
     let ranges = line_byte_ranges(&ctx.layout, &ctx.display);
-    let disp_off = value_to_display_byte(&ctx.display, &e.value, e.cursor);
+    let disp_off = value_to_display_byte(&e.value, &ctx.display, e.cursor);
     let (_, cur_line) = cursor_pixel_x(&ctx.layout, &ranges, disp_off);
     let (start, end) = ranges[cur_line];
     let disp_hit = if home {

@@ -169,6 +169,77 @@ fn down_text_child_sets_ancestor_btn_active() {
 }
 
 #[test]
+fn secondary_button_down_does_not_activate_controls() {
+    // review 回归：非主键（button!=0）Down 不激活控件、不武装拖选/Slider 跟随——
+    // 浏览器对齐（右键按下无 click/拖拽语义）。主键照常激活。
+    let mut root = Node::default();
+    root.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 200.0,
+    };
+    let mut tg = Node::default();
+    tg.kind = NodeKind::Toggle;
+    tg.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 30.0,
+    };
+    let mut s = Scene::from_nodes(vec![root, tg], vec![(0, 1)]);
+    let tg_id = s.get(s.roots[0]).unwrap().children[0];
+    s.controls
+        .ensure(tg_id, ControlState::Toggle { checked: false });
+    compute_world_transforms(&mut s);
+    let is_checked = |s: &Scene| {
+        matches!(
+            s.controls.get(tg_id),
+            Some(ControlState::Toggle { checked: true })
+        )
+    };
+
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: 10.0,
+            y: 10.0,
+            button: 2,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert!(!is_checked(&s), "右键 Down 不翻转 toggle");
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Up,
+            x: 10.0,
+            y: 10.0,
+            button: 2,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert!(!is_checked(&s), "右键 Up 也不翻转（click 走主键路径）");
+
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Down,
+            x: 10.0,
+            y: 10.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert!(is_checked(&s), "主键 Down 正常激活");
+}
+
+#[test]
 fn down_up_same_node_within_threshold_emits_click() {
     let mut s = one_button_scene();
     let mut ps = PointerState::new();
