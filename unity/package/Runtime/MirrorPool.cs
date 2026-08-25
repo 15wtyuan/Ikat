@@ -143,6 +143,9 @@ namespace LoomGUI
 
                 UpdateHeader(ro, blob, i, root, mm, kind, look, tex);
                 if (level == 2) UploadMeshOrText(ro, blob, i, look);
+                // #66：非纯平移节点的 Mesh.bounds 补偿须在 upload 之后（RecalculateBounds
+                // 会覆盖），header-only 帧也走到这里（bounds 沿用上帧补偿值亦可重算，幂等）。
+                if (!blob.IsPureTranslation(i)) CompensateMeshBoundsForLinear(ro, blob, i);
             }
 
             // ③ 余 stale 销毁（两个 dict）
@@ -162,8 +165,9 @@ namespace LoomGUI
         {
             // flatten：所有节点挂 root。
             // pure 和非 pure 统一 GO localPosition=(Mtx,Mty)（world translate 进 GO transform）。
-            // 非纯平移的 scale/rotate 进 _ObjectMatrix（无 translate）。这样 renderer.bounds = GO.worldTransform ×
-            // Mesh.bounds 自动 world（culling 正确），不需 mutate Mesh.bounds 做 translate hack。
+            // 非纯平移的 scale/rotate 进 _ObjectMatrix（无 translate）。translate 进 GO
+            // localPosition；但 renderer.bounds = GO 平移 × 未旋转 mesh ≠ 旋转后真实
+            // AABB——剔除补偿见 CompensateMeshBoundsForLinear（#66）。
             ro.Go.transform.SetParent(root, false);
             bool pure = blob.IsPureTranslation(i);
             ro.Go.transform.localPosition = new Vector3(blob.Mtx(i), blob.Mty(i), 0f);
@@ -314,6 +318,37 @@ namespace LoomGUI
             // look.found → RemapMeshUvToSprite 把全图 UV 重映射到 sprite 在 atlas 的子区（用 look.uvRect）。
             if (look.found)
                 RemapMeshUvToSprite(ro, look.uvRect);
+        }
+
+        /// <summary>
+        /// #66：非纯平移节点的剔除 bounds 补偿。rotate/scale 走 _ObjM shader 矩阵、GO 只带
+        /// 平移分量 → Unity renderer.bounds = GO 平移 × 未旋转 mesh，与真实视觉 AABB（线性矩阵
+        /// 旋转后的四边形）中心错位且范围偏小——旋转条横放假 bounds 竖直方向仅 h px，旋转 45°
+        /// 后真实竖直 ≈ w·sinθ → 滚动中真身进视口而假 bounds 在外，被 SRP 错误剔除（滚动容器
+        /// 内旋转连线消失）。补偿：bounds 置「线性矩阵 × 顶点 AABB」的 AABB（仍在 GO 本地系，
+        /// 随 GO 平移）→ 剔除结果 = T × AABB(L·verts) = 真实世界 AABB。z 向原样透传（2D）。
+        /// </summary>
+        static void CompensateMeshBoundsForLinear(RenderObj ro, FrameBlob blob, int i)
+        {
+            Bounds b = ro.Mesh.bounds;
+            Vector3 c = b.center;
+            Vector3 e = b.extents;
+            float ma = blob.Ma(i), mb = blob.Mb(i), mc = blob.Mc(i), md = blob.Md(i);
+            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+            for (int sx = -1; sx <= 1; sx += 2)
+                for (int sy = -1; sy <= 1; sy += 2)
+                {
+                    float x = c.x + sx * e.x, y = c.y + sy * e.y;
+                    float rx = ma * x + mc * y;
+                    float ry = mb * x + md * y;
+                    if (rx < minX) minX = rx;
+                    if (rx > maxX) maxX = rx;
+                    if (ry < minY) minY = ry;
+                    if (ry > maxY) maxY = ry;
+                }
+            ro.Mesh.bounds = new Bounds(
+                new Vector3((minX + maxX) * 0.5f, (minY + maxY) * 0.5f, c.z),
+                new Vector3(maxX - minX, maxY - minY, e.z * 2f));
         }
 
         static RenderObj NewRenderObj(Transform root)
