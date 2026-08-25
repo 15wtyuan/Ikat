@@ -320,7 +320,9 @@ namespace LoomGUI
         /// 类型复用 pad，Down/Up 通道由 #63 接线装 button，越界值防御性折返 Left）。</summary>
         static PointerButton ButtonOf(RawEventRecord evt)
         {
-            uint b = evt._pad & 0xFF;
+            // ushort & int → int（C# 数值提升）：显式转 uint——本地 headless 子集工程不编
+            // 本文件，CI/Unity 编译器才暴露（CS0266）。
+            uint b = (uint)(evt._pad & 0xFF);
             return b <= 2 ? (PointerButton)b : PointerButton.Left;
         }
 
