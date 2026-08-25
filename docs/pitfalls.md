@@ -90,4 +90,5 @@
 - **keepalive 保留粒度必须对齐后端 GO 持有粒度**：MirrorPool 是扁平池（slot 根按 reuse_key、叶子按 node_id 独立持有）——core 只发 slot 根 keepalive 保不住叶子 GO，stale 销毁→reactivate 重建→churn 复发；keepalive 须发整子树超集。改 blob 契约或池模型任一侧都要重新对齐粒度。
 - **跨树 id 解析必须作用域化**：每新增一种作用域形态（组件实例/List item），全局 `find_by_id_attr` 首匹配就会串实例（组件多实例全部命中第一个）——解析须向上找最近 LOOKUP_SCOPE 根在其子树内做（`find_node_by_id_in_own_scope`）。
 - **`remove_node` 联动清理是动态契约**：删节点须同步清全部持久附属表（anim/scroll/controls/roles/lists/text_contents/image_srcs…）——新增持久附属表必须同步加清理，漏一个 = 悬空引用/残留状态。
+- **@keyframes 的 transform 只收 px（TRS 像素模型）——百分比静默不动**：`translateX(-100%)` 等百分比形 parse_transform_trs 走 parse_px 直接 None，fence 不校验 keyframe 值域 → 打包零报错、player 照常 Playing 但每帧 props 全 None，视觉静止。写动画用 px（自身尺寸百分比语义需 layout 参与，框架级支持另立票）。
 - **ABI 位型/字段宽度变更的静默错解码**：位掩码/移位常量（`& 0x6000_0000`、`>> 24`、`0xFFFFFFFF` 哨兵）在位型拓宽后**编译全过但语义死掉**——必须 grep 全部位常量逐个对新位型表重审，不能只跟编译器走；C# 侧同理，csbindgen 不生成 struct stub，手写镜像（repr struct、事件 SOA 偏移、`NativeEventBuffer` 手写偏移）的宽度/布局无编译期保护，字段变宽必须人工重排。另防装箱断言陷阱：`Assert.Equal(42u, ulong值)` 经 object 装箱恒 false 但编译过。
