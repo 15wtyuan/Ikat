@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.12] - 2026-08-25
+
+v0.0.11 后两波：狗粮残留批（#47/#49/#50，公共 API 投影缺口补齐）+ M3 P0 开工批
+（#40/#26/#29/#58，跨引擎预备的还债与性能地基）。
+
+### Added
+- **不定态进度条（#47）**：`aria-indeterminate` 合成属性 + fill 宽度让位——控件
+  状态驱动，零打包配置。
+- **TextField 键盘编辑（#49）**：词级导航/删除（Ctrl+方向/Backspace/Delete）、
+  TextArea 行导航（Home/End/上下 + sticky x）、鼠标拖选路由仲裁。
+- **投影层缺口批（#50，7 项）**：MaxLength 属性接线、`OptionItem.Index`、
+  `Node.Computed`（NodeComputedStyle 只读视图）、`LongPressEvent` 类型化
+  （core 产 EventType 9 但 demux 此前跳过）、`Node.SetPointerCapture`（DOM
+  setPointerCapture 对等，Up 自动释放）、`StopImmediatePropagation` 复活
+  （EventBus 重写时丢）、`Node.CancelClick`（配 LongPress 的长按取消）。
+- **border/背景共存打包 warning（#58）**：彩色边框与 background-image/gradient
+  共存时互斥不画（render 层既有限制）——`loom check`/build 现在当场点破
+  （`BorderBgExclusive`），不再让作者猜。
+- **solve 基准**：首个 criterion bench（`cargo bench -p loomgui_core`，
+  api-infra 形状 ~2400 节点三组对拍）。
+
+### Changed
+- **BREAKING：NodeId ABI u32 → u64（#26）**：位型 = index:32 + generation:24 +
+  tag 字节:8（tag 字节 = 渲染合成 id 命名空间：shadow 层/文本跨页子页/TF 合成层/
+  scrollbar thumb 各占区段）。frame blob VERSION 13→14（node_id/parent_id 列
+  4B→8B）；C# 绑定与 Runtime 全量重生成。包内 .dll/Bindings/Runtime 同 commit
+  配套升级；绕过包直接 P/Invoke 的原生宿主须同步。合成 id 的 4096 节点硬上限与
+  generation 12-bit 回卷上限（4096 代 → 1670 万代/槽）一并消灭。
+- **增量 solve（#29）**：taffy 树跨帧持久 + 期望态 diff（style/measure context
+  值比较短路、结构变更 set_children/remove，taffy 脏传播跳干净子树），替代每帧
+  全量重建。api-infra 形状 release 实测：稳态 3.1ms / 单点变更 2.4ms vs 全重建
+  29.8ms（~9.5×）。正确性由差分守卫测试保障（随机操作序列下增量 vs 全重建逐节点
+  rect 全等）。
+- **上帝文件拆分（#40，纯重构）**：`ffi/lib.rs` 4.4k 行 → 11 模块、
+  `scene/control.rs` 4.8k → 9 文件、`list.rs` 3.5k → 12 文件。对外 API 与
+  FFI 符号面零变化（143 extern 逐名对账）。
+
 ## [0.0.11] - 2026-08-25
 
 v0.0.10 后三波累积：#48/#45/#43/#44/#46/#42 修复批、M2 分辨率适配批（#5/#3/#6/#7）、
